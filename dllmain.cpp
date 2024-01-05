@@ -2426,7 +2426,7 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 		static void* whatever3 = &r1ovtable;
 		static fsptr a;
 		a.ptr1 = whatever3;
-		a.ptr2 = (void*)((uintptr_t)(GetModuleHandleA("filesystem_stdio.dll"))+0xD2078);
+		a.ptr2 = (void*)((uintptr_t)(GetModuleHandleA("filesystem_stdio.dll"))+0xD2078); // note: this should actually point to a reconstructed version of the "simple" IBaseFileSystem vftable (it only has 17 functions and matches 1:1 with portal2 pdb)
 		a.ptr3 = (void*)((uintptr_t)(GetModuleHandleA("filesystem_stdio.dll")) + 0xD2078);;
 		a.ptr4 = (void*)((uintptr_t)(GetModuleHandleA("filesystem_stdio.dll")) + 0xD2078);;
 		a.ptr5 = (void*)((uintptr_t)(GetModuleHandleA("filesystem_stdio.dll")) + 0xD2078);;
