@@ -1628,6 +1628,94 @@ bool CCvar__HasQueuedMaterialThreadConVarSets(void* thisptr)
 void* CCvar__FactoryInternalIterator(void* thisptr) {
 	return reinterpret_cast<void* (*)(void* thisptr)>(oCCvar__FactoryInternalIterator)((void*)cvarinterface);
 }
+
+uintptr_t fsinterfaceoffset;
+uintptr_t oCBaseFileSystem_Read;
+uintptr_t oCBaseFileSystem_Write;
+uintptr_t oCBaseFileSystem_Open;
+uintptr_t oCBaseFileSystem_Close;
+uintptr_t oCBaseFileSystem_Seek;
+uintptr_t oCBaseFileSystem_Tell;
+uintptr_t oCBaseFileSystem_Size;
+uintptr_t oCBaseFileSystem_Size2;
+uintptr_t oCBaseFileSystem_Flush;
+uintptr_t oCBaseFileSystem_Precache;
+uintptr_t oCBaseFileSystem_FileExists;
+uintptr_t oCBaseFileSystem_IsFileWritable;
+uintptr_t oCBaseFileSystem_SetFileWritable;
+uintptr_t oCBaseFileSystem_GetFileTime;
+uintptr_t oCBaseFileSystem_ReadFile;
+uintptr_t oCBaseFileSystem_WriteFile;
+uintptr_t oCBaseFileSystem_UnzipFile;
+__int64 IBaseFileSystem__Read(__int64 thisptr, void* pOutput, __int64 size, __int64 file) {
+	return reinterpret_cast<__int64(*)(__int64, void*, __int64, __int64)>(oCBaseFileSystem_Read)(fsinterfaceoffset, pOutput, size, file);
+}
+
+__int64 IBaseFileSystem__Write(__int64 thisptr, void const* pInput, __int64 size, __int64 file) {
+	return reinterpret_cast<__int64(*)(__int64, void const*, __int64, __int64)>(oCBaseFileSystem_Write)(fsinterfaceoffset, pInput, size, file);
+}
+
+__int64 IBaseFileSystem__Open(__int64 thisptr, const char* pFileName, const char* pOptions, const char* pathID) {
+	return reinterpret_cast<__int64(*)(__int64, const char*, const char*, const char*)>(oCBaseFileSystem_Open)(fsinterfaceoffset, pFileName, pOptions, pathID);
+}
+
+void IBaseFileSystem__Close(__int64 thisptr, __int64 file) {
+	reinterpret_cast<void(*)(__int64, __int64)>(oCBaseFileSystem_Close)(fsinterfaceoffset, file);
+}
+
+void IBaseFileSystem__Seek(__int64 thisptr, __int64 file, __int64 pos, __int64 seekType) {
+	reinterpret_cast<void(*)(__int64, __int64, __int64, __int64)>(oCBaseFileSystem_Seek)(fsinterfaceoffset, file, pos, seekType);
+}
+
+unsigned __int64 IBaseFileSystem__Tell(__int64 thisptr, __int64 file) {
+	return reinterpret_cast<unsigned __int64(*)(__int64, __int64)>(oCBaseFileSystem_Tell)(fsinterfaceoffset, file);
+}
+
+unsigned __int64 IBaseFileSystem__Size(__int64 thisptr, __int64 file) {
+	return reinterpret_cast<unsigned __int64(*)(__int64, __int64)>(oCBaseFileSystem_Size)(fsinterfaceoffset, file);
+}
+
+unsigned __int64 IBaseFileSystem__Size2(__int64 thisptr, const char* pFileName, const char* pPathID) {
+	return reinterpret_cast<unsigned __int64(*)(__int64, const char*, const char*)>(oCBaseFileSystem_Size2)(fsinterfaceoffset, pFileName, pPathID);
+}
+
+void IBaseFileSystem__Flush(__int64 thisptr, __int64 file) {
+	reinterpret_cast<void(*)(__int64, __int64)>(oCBaseFileSystem_Flush)(fsinterfaceoffset, file);
+}
+
+bool IBaseFileSystem__Precache(__int64 thisptr, const char* pFileName, const char* pPathID) {
+	return reinterpret_cast<bool(*)(__int64, const char*, const char*)>(oCBaseFileSystem_Precache)(fsinterfaceoffset, pFileName, pPathID);
+}
+
+bool IBaseFileSystem__FileExists(__int64 thisptr, const char* pFileName, const char* pPathID) {
+	return reinterpret_cast<bool(*)(__int64, const char*, const char*)>(oCBaseFileSystem_FileExists)(fsinterfaceoffset, pFileName, pPathID);
+}
+
+bool IBaseFileSystem__IsFileWritable(__int64 thisptr, char const* pFileName, const char* pPathID) {
+	return reinterpret_cast<bool(*)(__int64, char const*, const char*)>(oCBaseFileSystem_IsFileWritable)(fsinterfaceoffset, pFileName, pPathID);
+}
+
+bool IBaseFileSystem__SetFileWritable(__int64 thisptr, char const* pFileName, bool writable, const char* pPathID) {
+	return reinterpret_cast<bool(*)(__int64, char const*, bool, const char*)>(oCBaseFileSystem_SetFileWritable)(fsinterfaceoffset, pFileName, writable, pPathID);
+}
+
+long IBaseFileSystem__GetFileTime(__int64 thisptr, const char* pFileName, const char* pPathID) {
+	return reinterpret_cast<long(*)(__int64, const char*, const char*)>(oCBaseFileSystem_GetFileTime)(fsinterfaceoffset, pFileName, pPathID);
+}
+
+bool IBaseFileSystem__ReadFile(__int64 thisptr, const char* pFileName, const char* pPath, void* buf, __int64 nMaxBytes, __int64 nStartingByte, void* pfnAlloc = NULL) {
+	return reinterpret_cast<bool(*)(__int64, const char*, const char*, void*, __int64, __int64, void*)>(oCBaseFileSystem_ReadFile)(fsinterfaceoffset, pFileName, pPath, buf, nMaxBytes, nStartingByte, pfnAlloc);
+}
+
+bool IBaseFileSystem__WriteFile(__int64 thisptr, const char* pFileName, const char* pPath, void* buf) {
+	return reinterpret_cast<bool(*)(__int64, const char*, const char*, void*)>(oCBaseFileSystem_WriteFile)(fsinterfaceoffset, pFileName, pPath, buf);
+}
+
+bool IBaseFileSystem__UnzipFile(__int64 thisptr, const char* pFileName, const char* pPath, const char* pDestination) {
+	return reinterpret_cast<bool(*)(__int64, const char*, const char*, const char*)>(oCBaseFileSystem_UnzipFile)(fsinterfaceoffset, pFileName, pPath, pDestination);
+}
+
+
 static HMODULE engineR1O;
 static CreateInterfaceFn R1OCreateInterface;
 void* R1OFactory(const char* pName, int* pReturnCode) {
@@ -2416,6 +2504,43 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 			(uintptr_t)(&sub_180024430),
 			(uintptr_t)(&CFileSystem_Stdio__NullSub4)
 		};
+/*uintptr_t oCBaseFileSystem_Read;
+uintptr_t oCBaseFileSystem_Write;
+uintptr_t oCBaseFileSystem_Open;
+uintptr_t oCBaseFileSystem_Close;
+uintptr_t oCBaseFileSystem_Seek;
+uintptr_t oCBaseFileSystem_Tell;
+uintptr_t oCBaseFileSystem_Size;
+uintptr_t oCBaseFileSystem_Size2;
+uintptr_t oCBaseFileSystem_Flush;
+uintptr_t oCBaseFileSystem_Precache;
+uintptr_t oCBaseFileSystem_FileExists;
+uintptr_t oCBaseFileSystem_IsFileWritable;
+uintptr_t oCBaseFileSystem_SetFileWritable;
+uintptr_t oCBaseFileSystem_GetFileTime;
+uintptr_t oCBaseFileSystem_ReadFile;
+uintptr_t oCBaseFileSystem_WriteFile;
+uintptr_t oCBaseFileSystem_UnzipFile;*/
+		static uintptr_t simplefsvtable[] = {
+			(uintptr_t)(&IBaseFileSystem__Read),
+			(uintptr_t)(&IBaseFileSystem__Write),
+			(uintptr_t)(&IBaseFileSystem__Open),
+			(uintptr_t)(&IBaseFileSystem__Close),
+			(uintptr_t)(&IBaseFileSystem__Seek),
+			(uintptr_t)(&IBaseFileSystem__Tell),
+			(uintptr_t)(&IBaseFileSystem__Size),
+			(uintptr_t)(&IBaseFileSystem__Size2),
+			(uintptr_t)(&IBaseFileSystem__Flush),
+			(uintptr_t)(&IBaseFileSystem__Precache),
+			(uintptr_t)(&IBaseFileSystem__FileExists),
+			(uintptr_t)(&IBaseFileSystem__IsFileWritable),
+			(uintptr_t)(&IBaseFileSystem__SetFileWritable),
+			(uintptr_t)(&IBaseFileSystem__GetFileTime),
+			(uintptr_t)(&IBaseFileSystem__ReadFile),
+			(uintptr_t)(&IBaseFileSystem__WriteFile),
+			(uintptr_t)(&IBaseFileSystem__UnzipFile)
+
+		};
 		struct fsptr {
 			void* ptr1;
 			void* ptr2;
@@ -2424,12 +2549,32 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 			void* ptr5;
 		};
 		static void* whatever3 = &r1ovtable;
+		static void* whatever4 = &simplefsvtable;
 		static fsptr a;
+		fsinterfaceoffset = fsinterface + 8;
+		uintptr_t* origsimplefsvtable = (*(uintptr_t**)fsinterfaceoffset);
+		oCBaseFileSystem_Read = origsimplefsvtable[0];
+		oCBaseFileSystem_Write = origsimplefsvtable[1];
+		oCBaseFileSystem_Open = origsimplefsvtable[2];
+		oCBaseFileSystem_Close = origsimplefsvtable[3];
+		oCBaseFileSystem_Seek = origsimplefsvtable[4];
+		oCBaseFileSystem_Tell = origsimplefsvtable[5];
+		oCBaseFileSystem_Size = origsimplefsvtable[6];
+		oCBaseFileSystem_Size2 = origsimplefsvtable[7];
+		oCBaseFileSystem_Flush = origsimplefsvtable[8];
+		oCBaseFileSystem_Precache = origsimplefsvtable[9];
+		oCBaseFileSystem_FileExists = origsimplefsvtable[10];
+		oCBaseFileSystem_IsFileWritable = origsimplefsvtable[11];
+		oCBaseFileSystem_SetFileWritable = origsimplefsvtable[12];
+		oCBaseFileSystem_GetFileTime = origsimplefsvtable[13];
+		oCBaseFileSystem_ReadFile = origsimplefsvtable[14];
+		oCBaseFileSystem_WriteFile = origsimplefsvtable[15];
+		oCBaseFileSystem_UnzipFile = origsimplefsvtable[16];
 		a.ptr1 = whatever3;
-		a.ptr2 = (void*)((uintptr_t)(GetModuleHandleA("filesystem_stdio.dll"))+0xD2078); // note: this should actually point to a reconstructed version of the "simple" IBaseFileSystem vftable (it only has 17 functions and matches 1:1 with portal2 pdb)
-		a.ptr3 = (void*)((uintptr_t)(GetModuleHandleA("filesystem_stdio.dll")) + 0xD2078);;
-		a.ptr4 = (void*)((uintptr_t)(GetModuleHandleA("filesystem_stdio.dll")) + 0xD2078);;
-		a.ptr5 = (void*)((uintptr_t)(GetModuleHandleA("filesystem_stdio.dll")) + 0xD2078);;
+		a.ptr2 = whatever4;
+		a.ptr3 = whatever4;
+		a.ptr4 = whatever4;
+		a.ptr5 = whatever4;
 		return &a.ptr1;
 	}
 	if (!strcmp(pName, "VModelInfoServer002")) {
