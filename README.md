@@ -33,6 +33,10 @@ more seriously let's take a look at resource modding rn:
 
 this is an attempt to "remaster" r1 and rebalance weapons and add more movement mechanics and recolor maps and stuff and maybe get more players (hey it's no titanfall 3 but most people have never played R1 so this should be new to them)
 
+# whys it called r1delta
+
+cuz the titanfall 1 logo looks like a delta
+
 # when
 
 r1delte release 2021 men🔥🔥🔥🔥🔥
