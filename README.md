@@ -62,7 +62,7 @@ current plan: make the "wrapped" FindVar return a pointer offset by -8 bytes so 
 ## R1Delta - for Titanfall
 
 # Thanks to the following individuals:
-<breathe in> dogecore, kodoque, [redacted], MrSteyk, p0358, chateau, jackw, adderallzx, WellBehavedUser, VITALIZED, quadruple, nephacks, sizzukie, autismgaming, chinaman, Gooseman, invades, rexx, Amos, b!scuit, F1F7Y, BobTheBob9, Osvaldatore, para, CHOCOLATEMAN, modeco80, gogo, foie, Phil, sashie, Coopyy, Gamma, Isla, Enron, doomfish, nanoman2525, hapaxant, mostly fireproof, Tech, rasmus <and relax>
+\<breathe in\> dogecore, kodoque, [redacted], MrSteyk, p0358, chateau, jackw, adderallzx, WellBehavedUser, VITALIZED, quadruple, nephacks, sizzukie, autismgaming, chinaman, Gooseman, invades, rexx, Amos, b!scuit, F1F7Y, BobTheBob9, Osvaldatore, para, CHOCOLATEMAN, modeco80, gogo, foie, Phil, sashie, Coopyy, Gamma, Isla, Enron, doomfish, nanoman2525, hapaxant, mostly fireproof, Tech, rasmus \<and relax\>
 
 ...and all those I forgot.
 
