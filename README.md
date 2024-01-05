@@ -1,4 +1,7 @@
 ![bear](https://github.com/r1delta/r1delta/assets/37985788/41548f20-0878-4e1e-8538-e9be808fc363)
+<DO NOT REMOVE THE BEAR UNTIL WE CAN LOAD A MAP>
+
+![image](https://github.com/r1delta/r1delta/assets/46062054/4ec5bdab-e6a2-4c71-a2c0-3f59c81ac0b3)
 
 # r1delta
 
