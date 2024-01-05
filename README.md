@@ -16,7 +16,7 @@ shit thats broken:
 # dev setup
 
 1. rename "tier0.dll" to "tier0_r1.dll" in bin\x64_retail\
-2. acquire OldTFOScripts.7z from #1
+2. acquire OldTFOScripts.7z from [#1](https://github.com/r1delta/r1delta/issues/1) (you just need bin)
 3. copy "gbclient.dll", "nmcogame64.dll" from there to bin\x64_retail\
 4. copy "tier0_orig.dll", "server.dll", and "engine_r1o.dll" in this repo to bin\x64_retail\ 
 5. build
