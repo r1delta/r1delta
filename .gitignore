@@ -230,7 +230,7 @@ PublishScripts/
 # NuGet Symbol Packages
 *.snupkg
 # The packages folder can be ignored because of Package Restore
-**/[Pp]ackages/*
+#**/[Pp]ackages/*
 # except build/, which is used as an MSBuild target.
 !**/[Pp]ackages/build/
 # Uncomment if necessary however generally it will be regenerated when needed
@@ -432,4 +432,4 @@ FodyWeavers.xsd
 
 !tier0_orig.dll
 !tier0_orig.lib
-!packages/minhook.1.3.3/lib/native/lib/libminhook.lib
+!libminhook.lib
