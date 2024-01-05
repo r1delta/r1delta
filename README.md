@@ -29,7 +29,7 @@ more seriously let's take a look at resource modding rn:
 
 - R2: run by pedophiles
 
-- R5R: i have no issues with amos actually i just dont like playing apex very much
+- R5R: i have no issues with amos actually i just dont like playing apex very much (no offense)
 
 this is an attempt to "remaster" r1 and rebalance weapons and add more movement mechanics and recolor maps and stuff and maybe get more players (hey it's no titanfall 3 but most people have never played R1 so this should be new to them)
 
