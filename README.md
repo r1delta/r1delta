@@ -13,6 +13,30 @@ shit thats broken:
 - concommands
 - scripts
 
+# what
+it's a port of the 2017-04-02 R1O server_local.dll to R1
+
+# where
+
+look behind you
+
+# why
+i hate myself and this is the perfect sisyphean endeavor to make sure i never get anything done
+
+more seriously let's take a look at resource modding rn:
+
+- R1O: will never release (tbf we wont either)
+
+- R2: run by pedophiles
+
+- R5R: i have no issues with amos actually i just dont like playing apex very much
+
+this is an attempt to "remaster" r1 and rebalance weapons and add more movement mechanics and recolor maps and stuff and maybe get more players (hey it's no titanfall 3 but most people have never played R1 so this should be new to them)
+
+# when
+
+r1delte release 2021 men🔥🔥🔥🔥🔥
+
 # dev setup
 
 1. rename "tier0.dll" to "tier0_r1.dll" in bin\x64_retail\
