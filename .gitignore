@@ -431,3 +431,5 @@ FodyWeavers.xsd
 *.sln.iml
 
 !tier0_orig.dll
+!tier0_orig.lib
+!packages/minhook.1.3.3/lib/native/lib/libminhook.lib
