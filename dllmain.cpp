@@ -1,5 +1,4 @@
 // Happiness has to be fought for.
-// Disregard previous slogan, I'm going to kill myself - wndrr
 #include <MinHook.h>
 #include <cstdlib>
 #include <crtdbg.h>	
@@ -45,130 +44,7 @@ public:
 	virtual ~IMemAlloc() {}
 };
 
-//class CStdMemAlloc : public IMemAlloc {
-//public:
-//    void* InternalAlloc(size_t nSize, const char* pFileName, int nLine) override {
-//        return malloc(nSize);
-//    }
-//
-//    void* Alloc(size_t nSize) override {
-//        return malloc(nSize);
-//    }
-//
-//    void* InternalRealloc(void* pMem, size_t nSize, const char* pFileName, int nLine) override {
-//        return realloc(pMem, nSize);
-//    }
-//
-//    void* Realloc(void* pMem, size_t nSize) override {
-//        return realloc(pMem, nSize);
-//    }
-//
-//    void InternalFree(void* pMem, const char* pFileName, int nLine) override {
-//        free(pMem);
-//    }
-//
-//    void Free(void* pMem) override {
-//        free(pMem);
-//    }
-//
-//    void Free2(void* pMem) override {
-//        free(pMem);
-//    }
-//    __int64 Returns0() override {
-//        return 0;
-//    }
-//
-//    __int64 Returns02() override {
-//        return 0;
-//    }
-//    size_t GetSize(void* pMem) override {
-//        // Not implementable with standard C library.
-//        return 0;
-//    }
-//
-//
-//    void* RegionAlloc(int nRegion, size_t nSize, const char* pFileName, int nLine) override {
-//        // This might require a custom implementation
-//        return nullptr;
-//    }
-//
-//    void CompactHeap() override {
-//        // No standard equivalent
-//    }
-//
-//    size_t ComputeMemoryUsedBy(const char* pFileName) override {
-//        // No standard equivalent
-//        return 0;
-//    }
-//
-//    bool CrtIsValidPointer(const void* pMem, unsigned int nSize, int nBlockUse) override {
-//        // Implementation depends on specific runtime checks
-//        return false;
-//    }
-//
-//    bool CrtCheckMemory() override {
-//        // No standard equivalent
-//        return true;
-//    }
-//
-//    void CrtMemCheckpoint(_CrtMemState* pState) override {
-//        // No standard equivalent
-//    }
-//
-//    void DumpStats() override {
-//        // No standard equivalent
-//    }
-//
-//    void DumpStatsFileBase(const char* pPath) override {
-//        // No standard equivalent
-//    }
-//
-//    bool IsDebugHeap() override {
-//        return false; // Standard library does not provide this information
-//    }
-//
-//    void GetActualDbgInfo(const char** ppFileName, int* pLine) override {
-//        // No standard equivalent
-//    }
-//
-//    void RegisterAllocation(const char* pFileName, int nLine, int nSize, int nBlockUse, int nSequence) override {
-//        // No standard equivalent
-//    }
-//
-//    void NumberOfSystemCores() override {
-//        // Requires platform-specific code
-//    }
-//
-//    void SetAllocFailHandler(unsigned int (*pfn)(unsigned int)) override {
-//        // No standard equivalent
-//    }
-//
-//    void MemoryAllocFailed() override {
-//        // No standard equivalent
-//    }
-//
-//    void CompactIncremental() override {
-//        // No standard equivalent
-//    }
-//
-//    void OutOfMemory(unsigned int nSize) override {
-//        // No standard equivalent
-//    }
-//
-//    void* AllocateVirtualMemorySection(unsigned int nSize) override {
-//        // Requires platform-specific implementation
-//        return nullptr;
-//    }
-//
-//    int GetGenericMemoryStats(void** ppMemoryStats) override {
-//        // No standard equivalent
-//        return 0;
-//    }
-//
-//    void InitDebugInfo(void* pMem, const char* pFileName, int nLine) override {
-//        // No standard equivalent
-//    }
-//};
+
 // Global singleton pointer
 IMemAlloc* g_pMemAllocSingleton = nullptr;
 
@@ -2826,7 +2702,7 @@ uintptr_t oCBaseFileSystem_UnzipFile;*/
 		bSetUpR1OEngine = true;
 		engineR1O = LoadLibraryA("engine_r1o.dll");
 		R1OCreateInterface = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(engineR1O, "CreateInterface"));
-		reinterpret_cast<char(__fastcall*)(__int64, CreateInterfaceFn)>((uintptr_t)(engineR1O)+0x1C6B30)(0, R1OFactory);
+		reinterpret_cast<char(__fastcall*)(__int64, CreateInterfaceFn)>((uintptr_t)(engineR1O)+0x1C6B30)(0, R1OFactory); // call is to CDedicatedServerAPI::Connect
 	}
 	else {
 		std::cout << "engine is set up, looking for " << pName << std::endl;
