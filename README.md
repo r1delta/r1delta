@@ -20,7 +20,8 @@ shit thats broken:
 3. copy "gbclient.dll", "nmcogame64.dll" from there to bin\x64_retail\
 4. copy "tier0_orig.dll", "server.dll", and "engine_r1o.dll" in this repo to bin\x64_retail\ 
 5. build
-6. pray
+6. pray (if you're not in the visual studio debug configuration, you need to specify -listenServer as a command line arg to load the listen server)
+(a fork of SpectreLauncher by @barnabwhy has been provided for debugging convenience)
 
 # Credits
 ## R1Delta - for Titanfall
