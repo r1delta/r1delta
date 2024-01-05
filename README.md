@@ -71,6 +71,4 @@ server.dll uses msvc alloc, r1 uses valve memalloc
 
 ...or ignored.
 
-...or lost.
-
 TITANFALL™ is a trademark of Respawn Entertainment, LLC. 
