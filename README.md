@@ -35,7 +35,7 @@ this is an attempt to "remaster" r1 and rebalance weapons and add more movement 
 
 # whys it called r1delta
 
-cuz the titanfall 1 logo looks like a delta
+theres this sonic 2 rom hack i used to play as a kid that was called sonic 2 delta that brought over stuff from sonic 2 beta into sonic 1 and i figure this is roughly equivalent
 
 # when
 
