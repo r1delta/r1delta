@@ -35,7 +35,7 @@ this is an attempt to "remaster" r1 and rebalance weapons and add more movement 
 
 # whys it called r1delta
 
-im a big fan of deltarune
+its called r1delta because the installer will (eventually) use xdelta3 patches to get the r1o files from the r1 versions
 
 # when
 
