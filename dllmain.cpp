@@ -2681,7 +2681,7 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 		bSetUpR1OEngine = true;
 		engineR1O = LoadLibraryA("engine_r1o.dll");
 		R1OCreateInterface = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(engineR1O, "CreateInterface"));
-		reinterpret_cast<char(__fastcall*)(__int64, CreateInterfaceFn)>((uintptr_t)(engineR1O)+0x1C6B30)(0, R1OFactory);
+		reinterpret_cast<char(__fastcall*)(__int64, CreateInterfaceFn)>((uintptr_t)(engineR1O)+0x1C6B30)(0, R1OFactory); // call is to CDedicatedServerAPI::Connect
 	}
 	else {
 		std::cout << "engine is set up, looking for " << pName << std::endl;
