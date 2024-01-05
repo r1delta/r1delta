@@ -1,5 +1,4 @@
 // Happiness has to be fought for.
-// Disregard previous slogan, I'm going to kill myself - wndrr
 #include <MinHook.h>
 #include <cstdlib>
 #include <crtdbg.h>	
