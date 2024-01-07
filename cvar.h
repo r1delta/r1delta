@@ -317,77 +317,38 @@ void CCVar_RegisterConCommand(uintptr_t thisptr, ConCommandBaseR1O* pCommandBase
 
 void CCVar_UnregisterConCommand(uintptr_t thisptr, ConCommandBaseR1O* pCommandBase) {
 	return;
-	//ConCommandBaseR1* r1CommandBase = convertToR1(pCommandBase);
-	//OriginalCCVar_UnregisterConCommand(cvarinterface, r1CommandBase);
-	////delete r1CommandBase;
 }
 
 ConCommandBaseR1O* CCVar_FindCommandBase(uintptr_t thisptr, const char* name) {
-	if (ccBaseMap.find(name) != ccBaseMap.end()) {
-		//delete ccBaseMap[name];
-	}
-	ConCommandBaseR1* r1CommandBase = OriginalCCVar_FindCommandBase(cvarinterface, name);
-	if (!r1CommandBase)
-		return (ConVarR1O*)r1CommandBase;
-	ccBaseMap[name] = convertToR1O(r1CommandBase);
-	return ccBaseMap[name];
+	std::cout << __FUNCTION__ << ": " << name << std::endl;
+	return (ConCommandBaseR1O*)OriginalCCVar_FindCommandBase(cvarinterface, name);
 }
 
 const ConCommandBaseR1O* CCVar_FindCommandBase2(uintptr_t thisptr, const char* name) {
-	// No deletion as it's a const function
-	if (ccBaseMap.find(name) == ccBaseMap.end()) {
-		const ConCommandBaseR1* r1CommandBase = OriginalCCVar_FindCommandBase2(cvarinterface, name);
-		if (!r1CommandBase)
-			return (const ConVarR1O*)r1CommandBase;
-		ccBaseMap[name] = (ConCommandBaseR1O*)convertToR1O(r1CommandBase);
-	}
-	return ccBaseMap[name];
+	std::cout << __FUNCTION__ << ": " << name << std::endl;
+	return (ConCommandBaseR1O*)OriginalCCVar_FindCommandBase2(cvarinterface, name);
 }
 
 ConVarR1O* CCVar_FindVar(uintptr_t thisptr, const char* var_name) {
-	if (ccBaseMap.find(var_name) != ccBaseMap.end()) {
-		//delete ccBaseMap[var_name];
-	}
-	ConVarR1* r1Var = OriginalCCVar_FindVar(cvarinterface, var_name);
-	if (!r1Var)
-		return (ConVarR1O*)r1Var;
-	ccBaseMap[var_name] = convertToR1O(r1Var);
-	return (ConVarR1O*)ccBaseMap[var_name];
+	std::cout << __FUNCTION__ << ": " << var_name << std::endl;
+	return (ConVarR1O*)((uintptr_t)OriginalCCVar_FindVar(cvarinterface, var_name)) + 8;
 }
 
 const ConVarR1O* CCVar_FindVar2(uintptr_t thisptr, const char* var_name) {
-	//// No deletion as it's a const function
-	//if (ccBaseMap.find(var_name) == ccBaseMap.end()) {
-	//	const ConVarR1* r1Var = OriginalCCVar_FindVar2(cvarinterface, var_name);
-	//	if (!r1Var)
-	//		return (const ConVarR1O*)r1Var;
-	//	ccBaseMap[var_name] = (ConCommandBaseR1O*)convertToR1O(r1Var);
-	//}
-	//return (const ConVarR1O*)ccBaseMap[var_name];
-	return NULL;
+	std::cout << __FUNCTION__ << ": " << var_name << std::endl;
+	if (!strcmp(var_name, "sv_cheats") || !strcmp(var_name, "developer"))
+		return (ConVarR1O*)((uintptr_t)OriginalCCVar_FindVar2(cvarinterface, var_name) + 8);
+	return (ConVarR1O*)((uintptr_t)OriginalCCVar_FindVar2(cvarinterface, var_name));
 }
 
 ConCommandR1O* CCVar_FindCommand(uintptr_t thisptr, const char* name) {
-	if (ccBaseMap.find(name) != ccBaseMap.end()) {
-		//delete ccBaseMap[name];
-	}
-	ConCommandR1* r1Command = OriginalCCVar_FindCommand(cvarinterface, name);
-	if (!r1Command)
-		return (ConCommandR1O*)r1Command;
-
-	ccBaseMap[name] = convertToR1O(r1Command);
-	return (ConCommandR1O*)ccBaseMap[name];
+	std::cout << __FUNCTION__ << ": " << name << std::endl;
+	return (ConCommandR1O*)((uintptr_t)OriginalCCVar_FindCommand(cvarinterface, name)) + 8;
 }
 
 const ConCommandR1O* CCVar_FindCommand2(uintptr_t thisptr, const char* name) {
-	// No deletion as it's a const function
-	if (ccBaseMap.find(name) == ccBaseMap.end()) {
-		const ConCommandR1* r1Command = OriginalCCVar_FindCommand2(cvarinterface, name);
-		if (!r1Command)
-			return (const ConCommandR1O*)r1Command;
-		ccBaseMap[name] = (ConCommandBaseR1O*)convertToR1O(r1Command);
-	}
-	return (ConCommandR1O*)ccBaseMap[name];
+	std::cout << __FUNCTION__ << ": " << name << std::endl;
+	return (ConCommandR1O*)((uintptr_t)OriginalCCVar_FindCommand2(cvarinterface, name)) + 8;
 }
 
 void CCVar_CallGlobalChangeCallbacks(uintptr_t thisptr, ConVarR1O* var, const char* pOldString, float flOldValue) {

@@ -2696,17 +2696,9 @@ uintptr_t oCBaseFileSystem_UnzipFile;*/
 		std::cout << "found " << pName << "  in appsystem factory" << std::endl;
 		return result;
 	}
-	static bool bSetUpR1OEngine = false;
-	if (!bSetUpR1OEngine) {
-		std::cout << "engine is not set up, looking for " << pName << std::endl;
-		bSetUpR1OEngine = true;
-		engineR1O = LoadLibraryA("engine_r1o.dll");
-		R1OCreateInterface = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(engineR1O, "CreateInterface"));
-		reinterpret_cast<char(__fastcall*)(__int64, CreateInterfaceFn)>((uintptr_t)(engineR1O)+0x1C6B30)(0, R1OFactory); // call is to CDedicatedServerAPI::Connect
-	}
-	else {
+
 		std::cout << "engine is set up, looking for " << pName << std::endl;
-	}
+	
 	return R1OCreateInterface(pName, pReturnCode);
 }
 
@@ -2714,6 +2706,11 @@ typedef char(__fastcall* CServerGameDLL__DLLInitType)(void* thisptr, CreateInter
 	CreateInterfaceFn physicsFactory, CreateInterfaceFn fileSystemFactory,
 	void* pGlobals);
 CServerGameDLL__DLLInitType CServerGameDLL__DLLInitOriginal;
+class SomeNexonBullshit {
+public:
+	virtual void whatever() = 0;
+	virtual void Init() = 0;
+};
 char __fastcall CServerGameDLL__DLLInit(void* thisptr, CreateInterfaceFn appSystemFactory,
 	CreateInterfaceFn physicsFactory, CreateInterfaceFn fileSystemFactory,
 	void* pGlobals)
@@ -2721,6 +2718,21 @@ char __fastcall CServerGameDLL__DLLInit(void* thisptr, CreateInterfaceFn appSyst
 	oAppSystemFactory = appSystemFactory;
 	oFileSystemFactory = fileSystemFactory;
 	oPhysicsFactory = physicsFactory;
+	engineR1O = LoadLibraryA("engine_r1o.dll");
+	R1OCreateInterface = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(engineR1O, "CreateInterface"));
+	reinterpret_cast<char(__fastcall*)(__int64, CreateInterfaceFn)>((uintptr_t)(engineR1O)+0x1C6B30)(0, R1OFactory); // call is to CDedicatedServerAPI::Connect
+
+	SomeNexonBullshit* tfotableversion = (SomeNexonBullshit*)R1OCreateInterface("TFOTableVersion", 0);
+	SomeNexonBullshit* tfoitems = (SomeNexonBullshit*)R1OCreateInterface("TFOItemSystem", 0);
+	SomeNexonBullshit* tfoinventory = (SomeNexonBullshit*)R1OCreateInterface("TFOInentorySystem", 0);
+	SomeNexonBullshit* tfomsghandler = (SomeNexonBullshit*)R1OCreateInterface("TFOMsgHandler001", 0);
+	SomeNexonBullshit* tfogamemanager = (SomeNexonBullshit*)R1OCreateInterface("TFOGameManager", 0);
+
+	tfotableversion->Init();
+	tfoitems->Init();
+	tfoinventory->Init();
+	tfomsghandler->Init();
+	tfogamemanager->Init();
 	return CServerGameDLL__DLLInitOriginal(thisptr, R1OFactory, R1OFactory, R1OFactory, pGlobals);
 }
 extern "C" __declspec(dllexport) void StackToolsNotify_LoadedLibrary(char* pModuleName)
