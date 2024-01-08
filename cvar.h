@@ -155,23 +155,6 @@ ConCommandBaseR1O* convertToR1OBase(ConCommandBaseR1* commandBase) {
 	return commandBaseR1O;
 }
 
-const ConCommandBaseR1O* convertToR1OBase(const ConCommandBaseR1* commandBase) {
-	if (!commandBase)
-		return NULL;
-	ConCommandBaseR1O* commandBaseR1O = new ConCommandBaseR1O;
-
-	commandBaseR1O->vtable = commandBase->vtable;
-	commandBaseR1O->m_pNext = convertToR1O(commandBase->m_pNext);
-	commandBaseR1O->m_bRegistered = commandBase->m_bRegistered;
-	commandBaseR1O->m_pszName = commandBase->m_pszName;
-	commandBaseR1O->m_pszHelpString = commandBase->m_pszHelpString;
-	commandBaseR1O->m_nFlags = commandBase->m_nFlags;
-	commandBaseR1O->pad = commandBase->pad;
-	commandBaseR1O->unk = nullptr;
-
-	return commandBaseR1O;
-}
-
 
 ConCommandR1O* convertToR1O(ConCommandR1* command) {
 	if (!command)
@@ -196,6 +179,8 @@ ConVarR1O* convertToR1O(ConVarR1* var) {
 	ConVarR1O* varR1O = new ConVarR1O;
 
 	*static_cast<ConCommandBaseR1O*>(varR1O) = *convertToR1OBase(static_cast<ConCommandBaseR1*>(var));
+	varR1O->unk = varR1O->__vftable;
+
 	varR1O->m_pParent = varR1O;//convertToR1O(var->m_pParent);
 	varR1O->m_pszDefaultValue = var->m_pszDefaultValue;
 	varR1O->m_Value = var->m_Value;
@@ -209,28 +194,6 @@ ConVarR1O* convertToR1O(ConVarR1* var) {
 }
 
 
-const ConVarR1O* convertToR1O(const ConVarR1* var) {
-	if (!var)
-		return NULL;
-	ConVarR1O* varR1O = new ConVarR1O;
-	varR1O->vtable = var->vtable;
-	varR1O->m_pNext = convertToR1O(var->m_pNext);
-	varR1O->m_bRegistered = var->m_bRegistered;
-	varR1O->m_pszName = var->m_pszName;
-	varR1O->m_pszHelpString = var->m_pszHelpString;
-	varR1O->m_nFlags = var->m_nFlags;
-	varR1O->unk = nullptr;
-	varR1O->m_pParent = varR1O;
-	varR1O->m_pszDefaultValue = var->m_pszDefaultValue;
-	varR1O->m_Value = var->m_Value;
-	varR1O->m_bHasMin = var->m_bHasMin;
-	varR1O->m_fMinVal = var->m_fMinVal;
-	varR1O->m_bHasMax = var->m_bHasMax;
-	varR1O->m_fMaxVal = var->m_fMaxVal;
-	std::copy(var->pad, var->pad + 32, varR1O->pad);
-
-	return varR1O;
-}
 ConCommandBaseR1* convertToR1(ConCommandBaseR1O* commandBaseR1O) {
 	if (!commandBaseR1O)
 		return NULL;
@@ -305,12 +268,14 @@ ConCommandBaseR1O* convertToR1O(const ConCommandBaseR1* commandBase) {
 
 void CCVar_RegisterConCommand(uintptr_t thisptr, ConCommandBaseR1O* pCommandBase) {
 	return;
-	if (!((ConCommandR1O*)pCommandBase)->unused2) {
+	if (!ConCommandBaseR1OIsCVar(pCommandBase)) {
 		ConCommandBaseR1* r1CommandBase = convertToR1((ConCommandR1O*)pCommandBase);
+		ccBaseMap[r1CommandBase->m_pszName] = pCommandBase;
 		OriginalCCVar_RegisterConCommand(cvarinterface, r1CommandBase);
 	}
 	else {
 		ConCommandBaseR1* r1CommandBase = convertToR1((ConVarR1O*)pCommandBase);
+		ccBaseMap[r1CommandBase->m_pszName] = pCommandBase;
 		OriginalCCVar_RegisterConCommand(cvarinterface, r1CommandBase);
 	}
 }
@@ -331,24 +296,35 @@ const ConCommandBaseR1O* CCVar_FindCommandBase2(uintptr_t thisptr, const char* n
 
 ConVarR1O* CCVar_FindVar(uintptr_t thisptr, const char* var_name) {
 	std::cout << __FUNCTION__ << ": " << var_name << std::endl;
-	return (ConVarR1O*)((uintptr_t)OriginalCCVar_FindVar(cvarinterface, var_name)) + 8;
+	return (ConVarR1O*)((uintptr_t)OriginalCCVar_FindVar(cvarinterface, var_name));
 }
 
 const ConVarR1O* CCVar_FindVar2(uintptr_t thisptr, const char* var_name) {
 	std::cout << __FUNCTION__ << ": " << var_name << std::endl;
-	if (!strcmp(var_name, "sv_cheats") || !strcmp(var_name, "developer"))
+	static int iFlag = 0;
+	static bool bInitDone = false;
+	if (!strcmp(var_name, "developer"))
+		iFlag++;
+	if (!strcmp(var_name, "host_thread_mode"))
+		iFlag = 3;
+	if (iFlag == 2) {
 		return (ConVarR1O*)((uintptr_t)OriginalCCVar_FindVar2(cvarinterface, var_name) + 8);
-	return (ConVarR1O*)((uintptr_t)OriginalCCVar_FindVar2(cvarinterface, var_name));
+	}
+	if (iFlag == 3) {
+		return (ConVarR1O*)((uintptr_t)OriginalCCVar_FindVar2(cvarinterface, var_name) - 8);
+	}
+
+	return (ConVarR1O*)(OriginalCCVar_FindVar2(cvarinterface, var_name));
 }
 
 ConCommandR1O* CCVar_FindCommand(uintptr_t thisptr, const char* name) {
 	std::cout << __FUNCTION__ << ": " << name << std::endl;
-	return (ConCommandR1O*)((uintptr_t)OriginalCCVar_FindCommand(cvarinterface, name)) + 8;
+	return (ConCommandR1O*)((uintptr_t)OriginalCCVar_FindCommand(cvarinterface, name));
 }
 
 const ConCommandR1O* CCVar_FindCommand2(uintptr_t thisptr, const char* name) {
 	std::cout << __FUNCTION__ << ": " << name << std::endl;
-	return (ConCommandR1O*)((uintptr_t)OriginalCCVar_FindCommand2(cvarinterface, name)) + 8;
+	return (ConCommandR1O*)((uintptr_t)OriginalCCVar_FindCommand2(cvarinterface, name));
 }
 
 void CCVar_CallGlobalChangeCallbacks(uintptr_t thisptr, ConVarR1O* var, const char* pOldString, float flOldValue) {

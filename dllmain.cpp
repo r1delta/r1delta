@@ -8,42 +8,21 @@
 #include "pch.h"
 #include <iostream>
 #include "cvar.h"
+#include <winternl.h>  // For UNICODE_STRING.
+
 // Forward declaration of the IMemAlloc interface
 class IMemAlloc {
 public:
-	virtual void* InternalAlloc(size_t nSize, const char* pFileName, int nLine) = 0;
+	virtual void* Alloc_dont(size_t nSize) = 0;
 	virtual void* Alloc(size_t nSize) = 0;
-	virtual void* InternalRealloc(void* pMem, size_t nSize, const char* pFileName, int nLine) = 0;
+	virtual void* Realloc_Dont(void* pMem, size_t nSize) = 0;
 	virtual void* Realloc(void* pMem, size_t nSize) = 0;
-	virtual void InternalFree(void* pMem, const char* pFileName, int nLine) = 0;
+	virtual void Free_Dont(void* pMem) = 0;
 	virtual void Free(void* pMem) = 0;
-	virtual void Free2(void* pMem) = 0;
-	virtual __int64 Returns0() = 0;
-	virtual __int64 Returns02() = 0;
+	virtual void* Expand_NoLongerSupported(void* pMem, size_t nSize) = 0;
+	virtual void* Expand_NoLongerSupported2(void* pMem, size_t nSize) = 0;
 	virtual size_t GetSize(void* pMem) = 0;
-	virtual void* RegionAlloc(int nRegion, size_t nSize, const char* pFileName, int nLine) = 0;
-	virtual void CompactHeap() = 0;
-	virtual size_t ComputeMemoryUsedBy(const char* pFileName) = 0;
-	virtual bool CrtIsValidPointer(const void* pMem, unsigned int nSize, int nBlockUse) = 0;
-	virtual bool CrtCheckMemory() = 0;
-	virtual void CrtMemCheckpoint(void* pState) = 0;
-	virtual void DumpStats() = 0;
-	virtual void DumpStatsFileBase(const char* pPath) = 0;
-	virtual bool IsDebugHeap() = 0;
-	virtual void GetActualDbgInfo(const char** ppFileName, int* pLine) = 0;
-	virtual void RegisterAllocation(const char* pFileName, int nLine, int nSize, int nBlockUse, int nSequence) = 0;
-	virtual void NumberOfSystemCores() = 0;
-	virtual void SetAllocFailHandler(unsigned int (*pfn)(unsigned int)) = 0;
-	virtual void MemoryAllocFailed() = 0;
-	virtual void CompactIncremental() = 0;
-	virtual void OutOfMemory(unsigned int nSize) = 0;
-	virtual void* AllocateVirtualMemorySection(unsigned int nSize) = 0;
-	virtual int GetGenericMemoryStats(void** ppMemoryStats) = 0;
-	virtual void InitDebugInfo(void* pMem, const char* pFileName, int nLine) = 0;
-	// Destructor is virtual if there's a scalar deleting destructor entry
-	virtual ~IMemAlloc() {}
 };
-
 
 // Global singleton pointer
 IMemAlloc* g_pMemAllocSingleton = nullptr;
@@ -74,6 +53,46 @@ extern "C" __declspec(dllexport) IMemAlloc * CreateGlobalMemAlloc() {
 		}
 	}
 	return g_pMemAllocSingleton;
+}
+void* __cdecl hkcalloc_base(size_t Count, size_t Size)
+{
+	size_t const nTotal = Count * Size;
+	void* const pNew = CreateGlobalMemAlloc()->Alloc(nTotal);
+
+	memset(pNew, NULL, nTotal);
+	return pNew;
+}
+void* __cdecl hkmalloc_base(size_t Size)
+{
+	return CreateGlobalMemAlloc()->Alloc(Size);
+
+}
+void* __cdecl hkrealloc_base(void* Block, size_t Size)
+{
+	if (Size) {
+		return CreateGlobalMemAlloc()->Realloc(Block, Size);
+	}
+	else
+	{
+		CreateGlobalMemAlloc()->Free(Block);
+		return nullptr;
+	}
+}
+void __cdecl hkfree_base(void* Block)
+{
+	CreateGlobalMemAlloc()->Free(Block);
+
+}
+void* __cdecl hkrecalloc_base(void* Block, size_t Count, size_t Size)
+{
+	const size_t nTotal = Count * Size;
+	void* const pMemOut = CreateGlobalMemAlloc()->Realloc(Block, nTotal);
+
+	if (!Block)
+		memset(pMemOut, NULL, nTotal);
+
+	return pMemOut;
+
 }
 __declspec(dllexport) void whatever2() { Error(); };
 typedef void* (*CreateInterfaceFn)(const char* pName, int* pReturnCode);
@@ -2687,7 +2706,7 @@ uintptr_t oCBaseFileSystem_UnzipFile;*/
 		static void* whatever6 = &r1ovtable;
 		return &whatever6;
 	}
-	if (!strcmp(pName, "VENGINE_DEDICATEDEXPORTS_API_VERSION003")) {
+	if (!oAppSystemFactory(pName, pReturnCode) && !strcmp(pName, "VENGINE_DEDICATEDEXPORTS_API_VERSION003")) {
 		std::cout << "forging dediexports" << std::endl;
 		return (void*)1;
 	}
@@ -2720,6 +2739,7 @@ char __fastcall CServerGameDLL__DLLInit(void* thisptr, CreateInterfaceFn appSyst
 	oPhysicsFactory = physicsFactory;
 	engineR1O = LoadLibraryA("engine_r1o.dll");
 	R1OCreateInterface = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(engineR1O, "CreateInterface"));
+
 	reinterpret_cast<char(__fastcall*)(__int64, CreateInterfaceFn)>((uintptr_t)(engineR1O)+0x1C6B30)(0, R1OFactory); // call is to CDedicatedServerAPI::Connect
 
 	SomeNexonBullshit* tfotableversion = (SomeNexonBullshit*)R1OCreateInterface("TFOTableVersion", 0);
@@ -2727,24 +2747,98 @@ char __fastcall CServerGameDLL__DLLInit(void* thisptr, CreateInterfaceFn appSyst
 	SomeNexonBullshit* tfoinventory = (SomeNexonBullshit*)R1OCreateInterface("TFOInentorySystem", 0);
 	SomeNexonBullshit* tfomsghandler = (SomeNexonBullshit*)R1OCreateInterface("TFOMsgHandler001", 0);
 	SomeNexonBullshit* tfogamemanager = (SomeNexonBullshit*)R1OCreateInterface("TFOGameManager", 0);
-
+	SomeNexonBullshit* staticclasssystem = (SomeNexonBullshit*)R1OCreateInterface("StaticClassSystem001", 0);
 	tfotableversion->Init();
 	tfoitems->Init();
 	tfoinventory->Init();
 	tfomsghandler->Init();
 	tfogamemanager->Init();
+	staticclasssystem->Init();
 	return CServerGameDLL__DLLInitOriginal(thisptr, R1OFactory, R1OFactory, R1OFactory, pGlobals);
 }
+enum {
+	// The DLL was loaded. The NotificationData parameter points to a
+	// LDR_DLL_LOADED_NOTIFICATION_DATA structure.
+	LDR_DLL_NOTIFICATION_REASON_LOADED = 1,
+	// The DLL was unloaded. The NotificationData parameter points to a
+	// LDR_DLL_UNLOADED_NOTIFICATION_DATA structure.
+	LDR_DLL_NOTIFICATION_REASON_UNLOADED = 2,
+};
+// Structure that is used for module load notifications.
+struct LDR_DLL_LOADED_NOTIFICATION_DATA {
+	// Reserved.
+	ULONG Flags;
+	// The full path name of the DLL module.
+	PCUNICODE_STRING FullDllName;
+	// The base file name of the DLL module.
+	PCUNICODE_STRING BaseDllName;
+	// A pointer to the base address for the DLL in memory.
+	PVOID DllBase;
+	// The size of the DLL image, in bytes.
+	ULONG SizeOfImage;
+};
+using PLDR_DLL_LOADED_NOTIFICATION_DATA = LDR_DLL_LOADED_NOTIFICATION_DATA*;
+// Structure that is used for module unload notifications.
+struct LDR_DLL_UNLOADED_NOTIFICATION_DATA {
+	// Reserved.
+	ULONG Flags;
+	// The full path name of the DLL module.
+	PCUNICODE_STRING FullDllName;
+	// The base file name of the DLL module.
+	PCUNICODE_STRING BaseDllName;
+	// A pointer to the base address for the DLL in memory.
+	PVOID DllBase;
+	// The size of the DLL image, in bytes.
+	ULONG SizeOfImage;
+};
+using PLDR_DLL_UNLOADED_NOTIFICATION_DATA = LDR_DLL_UNLOADED_NOTIFICATION_DATA*;
+// Union that is used for notifications.
+union LDR_DLL_NOTIFICATION_DATA {
+	LDR_DLL_LOADED_NOTIFICATION_DATA Loaded;
+	LDR_DLL_UNLOADED_NOTIFICATION_DATA Unloaded;
+};
+using PLDR_DLL_NOTIFICATION_DATA = LDR_DLL_NOTIFICATION_DATA*;
+// Signature of the notification callback function.
+using PLDR_DLL_NOTIFICATION_FUNCTION =
+VOID(CALLBACK*)(ULONG notification_reason,
+	const LDR_DLL_NOTIFICATION_DATA* notification_data,
+	PVOID context);
+// Signatures of the functions used for registering DLL notification callbacks.
+using LdrRegisterDllNotificationFunc =
+NTSTATUS(NTAPI*)(ULONG flags,
+	PLDR_DLL_NOTIFICATION_FUNCTION notification_function,
+	PVOID context,
+	PVOID* cookie);
+using LdrUnregisterDllNotificationFunc = NTSTATUS(NTAPI*)(PVOID cookie);
+constexpr wchar_t kNtDll[] = L"ntdll.dll";
+constexpr char kLdrRegisterDllNotification[] = "LdrRegisterDllNotification";
+constexpr char kLdrUnregisterDllNotification[] = "LdrUnregisterDllNotification";
+void* dll_notification_cookie_ = nullptr;
+
 extern "C" __declspec(dllexport) void StackToolsNotify_LoadedLibrary(char* pModuleName)
 {
 	std::cout << "loaded " << pModuleName << std::endl;
-	if (std::string(pModuleName).find("server.dll") != std::string::npos) {
+}
+void __stdcall LoaderNotificationCallback(
+	unsigned long notification_reason,
+	const LDR_DLL_NOTIFICATION_DATA* notification_data,
+	void* context) {
+	if (notification_reason != LDR_DLL_NOTIFICATION_REASON_LOADED)
+		return;
+	if (std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length).find(L"server.dll") != std::string::npos) {
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x143A10), &CServerGameDLL__DLLInit, (LPVOID*)&CServerGameDLL__DLLInitOriginal);
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x71E0BC), &hkcalloc_base, NULL);
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x71E99C), &hkmalloc_base, NULL);
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x71E9FC), &hkrealloc_base, NULL);
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x72B480), &hkrecalloc_base, NULL);
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x721000), &hkfree_base, NULL);
+
 		MH_EnableHook(MH_ALL_HOOKS);
 		std::cout << "did hooks" << std::endl;
-	}
 
+	}
 }
+
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 {
 	static bool done = false;
@@ -2753,12 +2847,18 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 		AllocConsole();
 		HANDLE hConsoleStream = ::CreateFileW(L"CONOUT$", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
 		SetStdHandle(STD_OUTPUT_HANDLE, hConsoleStream);
+
 	}
 	switch (fdwReason)
 	{
-	case DLL_PROCESS_ATTACH:
+	case DLL_PROCESS_ATTACH: {
 		MH_Initialize();
-		break;
+		LdrRegisterDllNotificationFunc reg_fn =
+			reinterpret_cast<LdrRegisterDllNotificationFunc>(::GetProcAddress(
+				::GetModuleHandle(kNtDll), kLdrRegisterDllNotification));
+		reg_fn(0, &LoaderNotificationCallback, 0, &dll_notification_cookie_);
+		break; 
+	}
 	case DLL_THREAD_ATTACH:
 		break;
 	case DLL_THREAD_DETACH:
