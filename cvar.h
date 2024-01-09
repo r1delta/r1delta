@@ -179,7 +179,7 @@ ConVarR1O* convertToR1O(ConVarR1* var) {
 	ConVarR1O* varR1O = new ConVarR1O;
 
 	*static_cast<ConCommandBaseR1O*>(varR1O) = *convertToR1OBase(static_cast<ConCommandBaseR1*>(var));
-	varR1O->unk = varR1O->__vftable;
+	//varR1O->unk = varR1O->__vftable;
 
 	varR1O->m_pParent = varR1O;//convertToR1O(var->m_pParent);
 	varR1O->m_pszDefaultValue = var->m_pszDefaultValue;
@@ -188,7 +188,7 @@ ConVarR1O* convertToR1O(ConVarR1* var) {
 	varR1O->m_fMinVal = var->m_fMinVal;
 	varR1O->m_bHasMax = var->m_bHasMax;
 	varR1O->m_fMaxVal = var->m_fMaxVal;
-	std::copy(var->pad, var->pad + 32, varR1O->pad);
+	//std::copy(var->pad, var->pad + 32, varR1O->pad);
 
 	return varR1O;
 }
@@ -198,7 +198,7 @@ ConCommandBaseR1* convertToR1(ConCommandBaseR1O* commandBaseR1O) {
 	if (!commandBaseR1O)
 		return NULL;
 	ConCommandBaseR1* commandBase = new ConCommandBaseR1;
-
+//	static void* vstdlibptr = (void*)(((uintptr_t)GetModuleHandleA("vstdlib.dll")) + 0x0);
 	commandBase->vtable = commandBaseR1O->vtable;
 	commandBase->m_pNext = convertToR1(commandBaseR1O->m_pNext);
 	commandBase->m_bRegistered = commandBaseR1O->m_bRegistered;
@@ -232,6 +232,21 @@ ConVarR1* convertToR1(ConVarR1O* varR1O) {
 	ConVarR1* var = new ConVarR1;
 
 	*static_cast<ConCommandBaseR1*>(var) = *convertToR1(static_cast<ConCommandBaseR1O*>(varR1O));
+	static void* ptr = (void*)((uintptr_t)GetModuleHandleA("vstdlib.dll") + 0x057778);
+	static void* ptr2 = (void*)((uintptr_t)GetModuleHandleA("vstdlib.dll") + 0x057728);
+
+	//char whatever[19 * 8];
+	//char whatever2[8 * 8];
+	//size_t bytes;
+	//static bool bDone = false;
+	//if (!bDone) {
+	//	ReadProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)GetModuleHandleA("vstdlib.dll") + 0x057778), &whatever, 19 * 8, &bytes);
+	//	WriteProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)GetModuleHandleA("server.dll") + 0x9C7680), &whatever, 19 * 8, &bytes);
+	//	ReadProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)GetModuleHandleA("vstdlib.dll") + 0x057778), &whatever2, 8 * 8, &bytes);
+	//	WriteProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)GetModuleHandleA("server.dll") + 0x9C74C0), &whatever2, 8 * 8, &bytes);
+	//}
+	var->vtable = ptr;//varR1O->vtable;
+	var->__vftable = ptr2;
 	var->m_pParent = var; //convertToR1(varR1O->m_pParent);
 	var->m_pszDefaultValue = varR1O->m_pszDefaultValue;
 	var->m_Value = varR1O->m_Value;
@@ -267,7 +282,8 @@ ConCommandBaseR1O* convertToR1O(const ConCommandBaseR1* commandBase) {
 }
 
 void CCVar_RegisterConCommand(uintptr_t thisptr, ConCommandBaseR1O* pCommandBase) {
-	return;
+//	if (!strcmp(pCommandBase->m_pszName, "player_paint_shoot_pos_forward_scale"))
+//		__debugbreak();
 	if (!ConCommandBaseR1OIsCVar(pCommandBase)) {
 		ConCommandBaseR1* r1CommandBase = convertToR1((ConCommandR1O*)pCommandBase);
 		ccBaseMap[r1CommandBase->m_pszName] = pCommandBase;

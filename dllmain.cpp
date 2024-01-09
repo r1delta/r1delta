@@ -9,7 +9,7 @@
 #include <iostream>
 #include "cvar.h"
 #include <winternl.h>  // For UNICODE_STRING.
-
+#include <fstream>
 // Forward declaration of the IMemAlloc interface
 class IMemAlloc {
 public:
@@ -82,6 +82,10 @@ void __cdecl hkfree_base(void* Block)
 {
 	CreateGlobalMemAlloc()->Free(Block);
 
+}
+char* man(char* a) {
+	std::cout << std::string((char*)((((uintptr_t)GetModuleHandleA("launcher_r1o.dll")) + 0xFCDE0)), 4096) << std::endl;
+	return NULL;
 }
 void* __cdecl hkrecalloc_base(void* Block, size_t Count, size_t Size)
 {
@@ -851,8 +855,8 @@ char sub_1800022F0(__int64 a1, __int64 a2, unsigned int a3, __int64 a4) {
 	return reinterpret_cast<char(*)(__int64, __int64, unsigned int, __int64)>(osub_1800022F0)(fsinterface, a2, a3, a4);
 }
 
-__int64 sub_180002330(__int64 a1, __int64 a2, unsigned int a3) {
-	return reinterpret_cast<__int64(*)(__int64, __int64, unsigned int)>(osub_180002330)(fsinterface, a2, a3);
+__int64 sub_180002330(__int64 a1, __int64 a2, int a3) {
+	return reinterpret_cast<__int64(*)(__int64, __int64, int)>(osub_180002330)(fsinterface, a2, a3);
 }
 
 __int64 sub_180009CF0(__int64 a1, __int64 a2) {
@@ -1540,6 +1544,7 @@ uintptr_t oCBaseFileSystem_IsFileWritable;
 uintptr_t oCBaseFileSystem_SetFileWritable;
 uintptr_t oCBaseFileSystem_GetFileTime;
 uintptr_t oCBaseFileSystem_ReadFile;
+uintptr_t fsintfakeptr = 0;
 uintptr_t oCBaseFileSystem_WriteFile;
 uintptr_t oCBaseFileSystem_UnzipFile;
 __int64 IBaseFileSystem__Read(__int64 thisptr, void* pOutput, __int64 size, __int64 file) {
@@ -1612,10 +1617,14 @@ bool IBaseFileSystem__UnzipFile(__int64 thisptr, const char* pFileName, const ch
 
 
 static HMODULE engineR1O;
+static HMODULE launcherR1O;
 static CreateInterfaceFn R1OCreateInterface;
+static CreateInterfaceFn R1OLauncherCreateInterface;
 void* R1OFactory(const char* pName, int* pReturnCode) {
 	std::cout << "looking for " << pName << std::endl;
-
+	if (!strcmp(pName, "VScriptManager009")) {
+		return R1OLauncherCreateInterface(pName, pReturnCode);
+	}
 	if (!strcmp(pName, "VEngineServer022")) {
 		std::cout << "wrapping VEngineServer022" << std::endl;
 
@@ -2470,6 +2479,7 @@ uintptr_t oCBaseFileSystem_UnzipFile;*/
 		a.ptr3 = whatever4;
 		a.ptr4 = whatever4;
 		a.ptr5 = whatever4;
+		fsintfakeptr = (uintptr_t)(&a.ptr1);
 		return &a.ptr1;
 	}
 	if (!strcmp(pName, "VModelInfoServer002")) {
@@ -2738,10 +2748,16 @@ char __fastcall CServerGameDLL__DLLInit(void* thisptr, CreateInterfaceFn appSyst
 	oFileSystemFactory = fileSystemFactory;
 	oPhysicsFactory = physicsFactory;
 	engineR1O = LoadLibraryA("engine_r1o.dll");
+	launcherR1O = LoadLibraryA("launcher_r1o.dll");
 	R1OCreateInterface = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(engineR1O, "CreateInterface"));
+	R1OLauncherCreateInterface = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(launcherR1O, "CreateInterface"));
 
 	reinterpret_cast<char(__fastcall*)(__int64, CreateInterfaceFn)>((uintptr_t)(engineR1O)+0x1C6B30)(0, R1OFactory); // call is to CDedicatedServerAPI::Connect
-
+	void* whatev = R1OFactory;
+	reinterpret_cast<char(__fastcall*)(CreateInterfaceFn*)>((uintptr_t)(launcherR1O)+0x13930)((CreateInterfaceFn*)(&whatev)); // call is to ConnectTier1Interfaces
+	//*(__int64*)((uintptr_t)(GetModuleHandleA("launcher_r1o.dll")) + 0xECBE0) = fsintfakeptr; 
+	*(__int64*)((uintptr_t)(GetModuleHandleA("launcher_r1o.dll")) + 0xF4228) = (__int64)(appSystemFactory("VENGINE_LAUNCHER_API_VERSION004", 0)); 
+	reinterpret_cast<__int64(__fastcall*)(int a1)>(GetProcAddress(GetModuleHandleA("tier0_orig.dll"), "SetTFOFileLogLevel"))(999);
 	SomeNexonBullshit* tfotableversion = (SomeNexonBullshit*)R1OCreateInterface("TFOTableVersion", 0);
 	SomeNexonBullshit* tfoitems = (SomeNexonBullshit*)R1OCreateInterface("TFOItemSystem", 0);
 	SomeNexonBullshit* tfoinventory = (SomeNexonBullshit*)R1OCreateInterface("TFOInentorySystem", 0);
@@ -2754,6 +2770,12 @@ char __fastcall CServerGameDLL__DLLInit(void* thisptr, CreateInterfaceFn appSyst
 	tfomsghandler->Init();
 	tfogamemanager->Init();
 	staticclasssystem->Init();
+	size_t bytes = 0;
+	unsigned char noparray = { 0x90 };
+	WriteProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)(GetModuleHandleA("filesystem_stdio.dll")) + 0x74E26), &noparray, sizeof(noparray), &bytes);
+	WriteProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)(GetModuleHandleA("filesystem_stdio.dll")) + 0x74E27), &noparray, sizeof(noparray), &bytes);
+	WriteProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)(GetModuleHandleA("filesystem_stdio.dll")) + 0x74E28), &noparray, sizeof(noparray), &bytes);
+
 	return CServerGameDLL__DLLInitOriginal(thisptr, R1OFactory, R1OFactory, R1OFactory, pGlobals);
 }
 enum {
@@ -2819,12 +2841,34 @@ extern "C" __declspec(dllexport) void StackToolsNotify_LoadedLibrary(char* pModu
 {
 	std::cout << "loaded " << pModuleName << std::endl;
 }
+__int64 sub_180210000()
+{
+	return (unsigned int)1;
+}
+char __fastcall sub_180217C30(char* a1, __int64 size, _QWORD* a3, __int64 a4)
+{
+	return true;
+}
+const char* scripterr() {
+	return "C:\\users\\wanderer\\scripterror.log";
+}
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
 	const LDR_DLL_NOTIFICATION_DATA* notification_data,
 	void* context) {
 	if (notification_reason != LDR_DLL_NOTIFICATION_REASON_LOADED)
 		return;
+	if (std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length).find(L"launcher_r1o.dll") != std::string::npos) {
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher_r1o.dll") + 0x93C78), &hkcalloc_base, NULL);
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher_r1o.dll") + 0x91620), &hkmalloc_base, NULL);
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher_r1o.dll") + 0x91680), &hkrealloc_base, NULL);
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher_r1o.dll") + 0x9B208), &hkrecalloc_base, NULL);
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher_r1o.dll") + 0x93DC4), &hkfree_base, NULL);
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher_r1o.dll") + 0x79100), &man, NULL);
+		
+		MH_EnableHook(MH_ALL_HOOKS);
+
+	}
 	if (std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length).find(L"server.dll") != std::string::npos) {
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x143A10), &CServerGameDLL__DLLInit, (LPVOID*)&CServerGameDLL__DLLInitOriginal);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x71E0BC), &hkcalloc_base, NULL);
@@ -2832,6 +2876,11 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x71E9FC), &hkrealloc_base, NULL);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x72B480), &hkrecalloc_base, NULL);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x721000), &hkfree_base, NULL);
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("tier0_orig.dll") + 0x5ED0), &scripterr, NULL);
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("tier0_orig.dll") + 0x66B0), &scripterr, NULL);
+		
+		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x210000), &sub_180210000, NULL);
+		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x217C30), &sub_180217C30, NULL);
 
 		MH_EnableHook(MH_ALL_HOOKS);
 		std::cout << "did hooks" << std::endl;
@@ -2841,6 +2890,7 @@ void __stdcall LoaderNotificationCallback(
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 {
+	
 	static bool done = false;
 	if (!done) {
 		done = true;
