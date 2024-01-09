@@ -56,8 +56,6 @@ r1delte release 2021 men🔥🔥🔥🔥🔥
 ConCommandBase has a (totally unused) new member in R1O
 
 current plan: make the "wrapped" FindVar return a pointer offset by -8 bytes so it lines up with R1O's expectations since it probably only cares about the value and maintain our own map of convars and update the R1O convar copy whenever the r1 equivalent copy updates by using a global convar changed callback on FCVAR_GAMEDLL (none of these words are in the bible)
-# the memory allocator
-server.dll uses msvc alloc, r1 uses valve memalloc
 
 # Credits
 ## R1Delta - for Titanfall
