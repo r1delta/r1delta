@@ -127,12 +127,21 @@ ConVarR1* (*OriginalCCVar_FindVar)(uintptr_t thisptr, const char* var_name);
 const ConVarR1* (*OriginalCCVar_FindVar2)(uintptr_t thisptr, const char* var_name);
 ConCommandR1* (*OriginalCCVar_FindCommand)(uintptr_t thisptr, const char* name);
 const ConCommandR1* (*OriginalCCVar_FindCommand2)(uintptr_t thisptr, const char* name);
+void      (*OriginalCCvar__InstallGlobalChangeCallback)(uintptr_t thisptr, void* func);
+void      (*OriginalCCvar__RemoveGlobalChangeCallback)(uintptr_t thisptr, void* func);
 void      (*OriginalCCVar_CallGlobalChangeCallbacks)(uintptr_t thisptr, ConVarR1* var, const char* pOldString, float flOldValue);
 void      (*OriginalCCVar_QueueMaterialThreadSetValue1)(uintptr_t thisptr, ConVarR1* pConVar, const char* pValue);
 void      (*OriginalCCVar_QueueMaterialThreadSetValue2)(uintptr_t thisptr, ConVarR1* pConVar, int nValue);
 void      (*OriginalCCVar_QueueMaterialThreadSetValue3)(uintptr_t thisptr, ConVarR1* pConVar, float flValue);
+struct WVar {
+	ConCommandBaseR1O* r1optr;
+	ConCommandBaseR1* r1ptr;
+	bool is_cvar;
+	bool is_r1o;
+};
 
-std::unordered_map<std::string, ConCommandBaseR1O*> ccBaseMap;
+std::unordered_map<std::string, WVar*> ccBaseMap;
+
 bool ConCommandBaseR1OIsCVar(ConCommandBaseR1O* ptr) {
 	return ((ConCommandR1O*)ptr)->unused2;
 }
@@ -144,7 +153,7 @@ ConCommandBaseR1O* convertToR1OBase(ConCommandBaseR1* commandBase) {
 	ConCommandBaseR1O* commandBaseR1O = new ConCommandBaseR1O;
 
 	commandBaseR1O->vtable = commandBase->vtable;
-	commandBaseR1O->m_pNext = convertToR1O(commandBase->m_pNext);
+	commandBaseR1O->m_pNext = NULL;// convertToR1O(commandBase->m_pNext);
 	commandBaseR1O->m_bRegistered = commandBase->m_bRegistered;
 	commandBaseR1O->m_pszName = commandBase->m_pszName;
 	commandBaseR1O->m_pszHelpString = commandBase->m_pszHelpString;
@@ -160,8 +169,10 @@ ConCommandR1O* convertToR1O(ConCommandR1* command) {
 	if (!command)
 		return NULL;
 	ConCommandR1O* commandR1O = new ConCommandR1O;
+	static void* ptr = (void*)((uintptr_t)GetModuleHandleA("server.dll") + 0x9C75F0);
 
 	*static_cast<ConCommandBaseR1O*>(commandR1O) = *convertToR1OBase(static_cast<ConCommandBaseR1*>(command));
+	commandR1O->vtable = ptr;
 	commandR1O->unused = command->unused;
 	commandR1O->unused2 = command->unused2;
 	commandR1O->m_pCommandCallback = command->m_pCommandCallback;
@@ -180,6 +191,21 @@ ConVarR1O* convertToR1O(ConVarR1* var) {
 
 	*static_cast<ConCommandBaseR1O*>(varR1O) = *convertToR1OBase(static_cast<ConCommandBaseR1*>(var));
 	//varR1O->unk = varR1O->__vftable;
+	static void* ptr = (void*)((uintptr_t)GetModuleHandleA("server.dll") + 0x9C7680);
+	static void* ptr2 = (void*)((uintptr_t)GetModuleHandleA("server.dll") + 0x9C74C0);
+
+	//char whatever[19 * 8];
+	//char whatever2[8 * 8];
+	//size_t bytes;
+	//static bool bDone = false;
+	//if (!bDone) {
+	//	ReadProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)GetModuleHandleA("vstdlib.dll") + 0x057778), &whatever, 19 * 8, &bytes);
+	//	WriteProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)GetModuleHandleA("server.dll") + 0x9C7680), &whatever, 19 * 8, &bytes);
+	//	ReadProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)GetModuleHandleA("vstdlib.dll") + 0x057778), &whatever2, 8 * 8, &bytes);
+	//	WriteProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)GetModuleHandleA("server.dll") + 0x9C74C0), &whatever2, 8 * 8, &bytes);
+	//}
+	varR1O->vtable = ptr;//varR1O->vtable;
+	varR1O->__vftable = ptr2;
 
 	varR1O->m_pParent = varR1O;//convertToR1O(var->m_pParent);
 	varR1O->m_pszDefaultValue = var->m_pszDefaultValue;
@@ -214,8 +240,10 @@ ConCommandR1* convertToR1(ConCommandR1O* commandR1O) {
 	if (!commandR1O)
 		return NULL;
 	ConCommandR1* command = new ConCommandR1;
+	static void* ptr = (void*)((uintptr_t)GetModuleHandleA("vstdlib.dll") + 0x0576A8);
 
 	*static_cast<ConCommandBaseR1*>(command) = *convertToR1(static_cast<ConCommandBaseR1O*>(commandR1O));
+	command->vtable = ptr;
 	command->unused = commandR1O->unused;
 	command->unused2 = commandR1O->unused2;
 	command->m_pCommandCallback = commandR1O->m_pCommandCallback;
@@ -284,14 +312,15 @@ ConCommandBaseR1O* convertToR1O(const ConCommandBaseR1* commandBase) {
 void CCVar_RegisterConCommand(uintptr_t thisptr, ConCommandBaseR1O* pCommandBase) {
 //	if (!strcmp(pCommandBase->m_pszName, "player_paint_shoot_pos_forward_scale"))
 //		__debugbreak();
+	std::cout << __FUNCTION__ << ": " << pCommandBase->m_pszName << std::endl;
 	if (!ConCommandBaseR1OIsCVar(pCommandBase)) {
 		ConCommandBaseR1* r1CommandBase = convertToR1((ConCommandR1O*)pCommandBase);
-		ccBaseMap[r1CommandBase->m_pszName] = pCommandBase;
+		ccBaseMap[r1CommandBase->m_pszName] = new WVar{ pCommandBase, r1CommandBase, false, true };
 		OriginalCCVar_RegisterConCommand(cvarinterface, r1CommandBase);
 	}
 	else {
 		ConCommandBaseR1* r1CommandBase = convertToR1((ConVarR1O*)pCommandBase);
-		ccBaseMap[r1CommandBase->m_pszName] = pCommandBase;
+		ccBaseMap[r1CommandBase->m_pszName] = new WVar{ pCommandBase, r1CommandBase, true, true };
 		OriginalCCVar_RegisterConCommand(cvarinterface, r1CommandBase);
 	}
 }
@@ -315,22 +344,51 @@ ConVarR1O* CCVar_FindVar(uintptr_t thisptr, const char* var_name) {
 	return (ConVarR1O*)((uintptr_t)OriginalCCVar_FindVar(cvarinterface, var_name));
 }
 
+void GlobalChangeCallback(ConVarR1* var, const char* pOldValue) {
+	var = (ConVarR1*)(((uintptr_t)var) - 48);
+	std::cout << __FUNCTION__ << ": " << var->m_pszName << std::endl;
+	auto it = ccBaseMap.find(var->m_pszName);
+	if (it == ccBaseMap.end())
+		return;
+	ConVarR1O* r1ovar = ((ConVarR1O*)it->second->r1optr);
+	r1ovar->m_Value.m_fValue = var->m_Value.m_fValue;
+	r1ovar->m_Value.m_nValue = var->m_Value.m_nValue;
+	r1ovar->m_Value.m_pszString = var->m_Value.m_pszString;
+	r1ovar->m_Value.m_StringLength = var->m_Value.m_StringLength;
+	//	if (it->second->is_r1o)
+	//		r1ovar->m_bHasMax
+	// unimplemented - impl r1o convar change callbacks
+}
 const ConVarR1O* CCVar_FindVar2(uintptr_t thisptr, const char* var_name) {
 	std::cout << __FUNCTION__ << ": " << var_name << std::endl;
-	static int iFlag = 0;
-	static bool bInitDone = false;
-	if (!strcmp(var_name, "developer"))
-		iFlag++;
-	if (!strcmp(var_name, "host_thread_mode"))
-		iFlag = 3;
-	if (iFlag == 2) {
-		return (ConVarR1O*)((uintptr_t)OriginalCCVar_FindVar2(cvarinterface, var_name) + 8);
+	//static int iFlag = 0;
+	//static bool bInitDone = false;
+	//if (!strcmp(var_name, "developer"))
+	//	iFlag++;
+	//if (!strcmp(var_name, "host_thread_mode"))
+	//	iFlag = 3;
+	//if (iFlag == 2) {
+	//	return (ConVarR1O*)((uintptr_t)OriginalCCVar_FindVar2(cvarinterface, var_name) + 8);
+	//}
+	//if (iFlag == 3) {
+	//	return (ConVarR1O*)((uintptr_t)OriginalCCVar_FindVar2(cvarinterface, var_name) - 8);
+	//}
+	if (!strcmp(var_name, "room_type")) // unused but crashes if NULL
+		var_name = "sv_cheats";
+	static bool bDone = false;
+	if (!bDone) {
+		OriginalCCvar__InstallGlobalChangeCallback(cvarinterface, &GlobalChangeCallback);
+		bDone = true;
 	}
-	if (iFlag == 3) {
-		return (ConVarR1O*)((uintptr_t)OriginalCCVar_FindVar2(cvarinterface, var_name) - 8);
-	}
-
-	return (ConVarR1O*)(OriginalCCVar_FindVar2(cvarinterface, var_name));
+	auto it = ccBaseMap.find(var_name);
+	ConVarR1O* r1optr = it == ccBaseMap.end() ? NULL : (ConVarR1O*)it->second->r1optr;
+	if (r1optr)
+		return r1optr;
+	auto ret = (ConVarR1*)(OriginalCCVar_FindVar2(cvarinterface, var_name));
+	if (!ret)
+		return nullptr;
+	ccBaseMap[var_name] = new WVar{ convertToR1O(ret), ret, true, false };
+	return (ConVarR1O*)(ccBaseMap[var_name]->r1optr);
 }
 
 ConCommandR1O* CCVar_FindCommand(uintptr_t thisptr, const char* name) {

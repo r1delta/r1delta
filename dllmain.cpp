@@ -1090,7 +1090,7 @@ __int64 sub_180024250(__int64 a1, __int64 a2) {
 	return reinterpret_cast<__int64(*)(__int64, __int64)>(osub_180024250)(fsinterface, a2);
 }
 
-__int64 sub_180024260(int a1, __int64 a2, __int64 a3, __int64 a4, __int64 a5) {
+__int64 sub_180024260(__int64 a1, __int64 a2, __int64 a3, __int64 a4, __int64 a5) {
 	return reinterpret_cast<__int64(*)(int, __int64, __int64, __int64, __int64)>(osub_180024260)(fsinterface, a2, a3, a4, a5);
 }
 
@@ -1195,7 +1195,7 @@ int* __fastcall CModelInfoServer__GetModel(__int64 a1, int a2) {
 }
 
 int CModelInfoServer__GetModelIndex(__int64 a1, void* a2) {
-	return reinterpret_cast<__int64(*)(__int64, void*)>(oCModelInfoServer__GetModelIndex)((__int64)modelinterface, a2);
+	return reinterpret_cast<int(*)(__int64, void*)>(oCModelInfoServer__GetModelIndex)((__int64)modelinterface, a2);
 }
 
 const char* __fastcall CModelInfo__GetModelName(__int64 a1, __int64 a2) {
@@ -2643,8 +2643,8 @@ uintptr_t oCBaseFileSystem_UnzipFile;*/
 		OriginalCCVar_FindCommand2 = reinterpret_cast<decltype(OriginalCCVar_FindCommand2)>(r1vtable[18]);
 
 		oCCVar__Find = r1vtable[19];
-		//uintptr_t CCvar__InstallGlobalChangeCallback = r1vtable[20];
-		//uintptr_t CCvar__RemoveGlobalChangeCallback = r1vtable[21];
+		OriginalCCvar__InstallGlobalChangeCallback = reinterpret_cast<decltype(OriginalCCvar__InstallGlobalChangeCallback)>(r1vtable[20]);
+		OriginalCCvar__RemoveGlobalChangeCallback = reinterpret_cast<decltype(OriginalCCvar__RemoveGlobalChangeCallback)>(r1vtable[21]);
 		OriginalCCVar_CallGlobalChangeCallbacks = reinterpret_cast<decltype(OriginalCCVar_CallGlobalChangeCallbacks)>(r1vtable[22]);
 		oCCvar__InstallConsoleDisplayFunc = r1vtable[23];
 		oCCvar__RemoveConsoleDisplayFunc = r1vtable[24];
