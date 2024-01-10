@@ -66,3 +66,6 @@ current plan: make the "wrapped" FindVar return a pointer offset by -8 bytes so 
 ...and all those I forgot.
 
 TITANFALL™ is a trademark of Respawn Entertainment, LLC. 
+
+
+<vitalised SMELLS>
