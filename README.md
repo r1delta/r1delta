@@ -56,7 +56,7 @@ r1delte release 2021 men🔥🔥🔥🔥🔥
 
 # dev setup
 
--1. make sure you have titanfall installed to default location (C:\Program Files (x86)\Origin Games\Titanfall) 
+~~-1. make sure you have titanfall installed to default location (C:\Program Files (x86)\Origin Games\Titanfall) 
 0. its hard coded for some reason
 1. rename "tier0.dll" to "tier0_r1.dll" in bin\x64_retail\
 2. acquire OldTFOScripts.7z from [#1](https://github.com/r1delta/r1delta/issues/1) (you just need bin)
@@ -64,7 +64,9 @@ r1delte release 2021 men🔥🔥🔥🔥🔥
 4. copy "tier0_orig.dll", "server.dll", and "engine_r1o.dll" in this repo to bin\x64_retail\ 
 5. build
 6. pray (if you're not in the visual studio debug configuration, you need to specify -listenServer as a command line arg to load the listen server)
-(a fork of SpectreLauncher by @barnabwhy has been provided for debugging convenience)
+(a fork of SpectreLauncher by @barnabwhy has been provided for debugging convenience)~~
+ignore previous directions
+contact wanderer for his bin and "r1delta" folder
 
 # current big issue
 # convars
