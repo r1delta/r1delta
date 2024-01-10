@@ -24,10 +24,10 @@ shit thats broken:
 - sendtables
 - memory allocator
 - convars/concommands
-- scripts ( can theoretically just lift the scripts/vscripts/mp/ folder from this build, its included in OldTFOScripts )
+- scripts ( can theoretically [![Dependencies](https://img.shields.io/badge/dependency-report-blue.svg)](https://azuresdkartifacts.blob.core.windows.net/azure-sdk-for-net/dependencies/dependencies.html) just lift the scripts/vscripts/mp/ folder from this build, its included in OldTFOScripts )
 
 # what
-it's a port of the 2017-04-02 R1O server_local.dll to R1
+it's a port of the 2017-04-02 R1O server_local.dll [![Packages](https://img.shields.io/badge/packages-latest-blue.svg)](https://azure.github.io/azure-sdk/releases/latest/dotnet.html) to R1
 
 # where
 
@@ -40,11 +40,11 @@ more seriously let's take a look at resource modding rn:
 
 - R1O: will never release (tbf we wont either)
 
-- R2: run by pedophiles
+- R2: run by pedo [![Dependencies Graph](https://img.shields.io/badge/dependency-graph-blue.svg)](https://azuresdkartifacts.blob.core.windows.net/azure-sdk-for-net/dependencies/dependencyGraph/dagre.html) philes
 
 - R5R: i have no issues with amos actually i just dont like playing apex very much (no offense)
 
-this is an attempt to "remaster" r1 and rebalance weapons and add more movement mechanics and recolor maps and stuff and maybe get more players (hey it's no titanfall 3 but most people have never played R1 so this should be new to them)
+this is an attempt to "remaster" r1 and rebalance weapons [![Python](https://img.shields.io/pypi/pyversions/azure-cli.svg?maxAge=2592000)](https://pypi.python.org/pypi/azure-cli) and add more movement mechanics and recolor maps and stuff and maybe get more players (hey it's no titanfall 3 but most people have never played R1 so this should be new to them)
 
 # whys it called r1delta
 ![https://gogle.com](https://img.shields.io/badge/optimized_for-Microsoft_Edge-green)
@@ -85,4 +85,6 @@ current plan: make the "wrapped" FindVar return a pointer offset by -8 bytes so 
 TITANFALL™ is a trademark of Respawn Entertainment, LLC. 
 
 
-<vitalised SMELLS>
+[![Build Status](https://dev.azure.com/azure-sdk/public/_apis/build/status/cli/Azure.azure-cli?branchName=dev)](https://dev.azure.com/azure-sdk/public/_build/latest?definitionId=246&branchName=dev)
+[![Slack](https://img.shields.io/badge/Slack-azurecli.slack.com-blue.svg)](https://azurecli.slack.com)
+
