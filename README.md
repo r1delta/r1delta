@@ -52,7 +52,7 @@ its called r1delta because the installer will (eventually) use xdelta3 patches t
 
 # when
 
-r1delte release 2021 men🔥🔥🔥🔥🔥 **NOTE: THIS REFERS TO R1DELTE, NOT R1DELTA.**
+r1delte release 2021 men🔥🔥🔥🔥🔥 **NOTE: THIS REFERS TO R1DELTE, NOT R1DELTA. R1DELTA HAS NO RELEASE DATE DUE TO A RECENT DMCA CLAIM BY APEX LEGENDS LTD**
 
 # dev setup
 
