@@ -47,7 +47,7 @@ more seriously let's take a look at resource modding rn:
 this is an attempt to "remaster" r1 and rebalance weapons and add more movement mechanics and recolor maps and stuff and maybe get more players (hey it's no titanfall 3 but most people have never played R1 so this should be new to them)
 
 # whys it called r1delta
-
+![](https://img.shields.io/badge/optimized_for-Microsoft_Edge-green)
 its called r1delta because the installer will (eventually) use xdelta3 patches to get the r1o files from the r1 versions
 
 # when
