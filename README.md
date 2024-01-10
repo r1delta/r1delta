@@ -65,7 +65,7 @@ this is an attempt to <p align="center">
     <img src="https://img.shields.io/twitter/follow/firezonehq?style=social&logo=twitter" alt="follow on Twitter">
   </a>
 </p>
- "remaster" r1 and rebalance weapons [![Python](https://img.shields.io/pypi/pyversions/azure-cli.svg?maxAge=2592000)](https://pypi.python.org/pypi/azure-cli) and add more movement mechanics and recolor maps and stuff and maybe get more players (hey it's no titanfall 3 but most people have never played R1 so this should be new to them)
+ "remaster" r1 and rebalance weapons ![Python](https://img.shields.io/pypi/pyversions/azure-cli.svg?maxAge=2592000) and add more movement mechanics and recolor maps and stuff and maybe get more players (hey it's no titanfall 3 but most people have never played R1 so this should be new to them)
 
 # whys it called r1delta
 ![https://gogle.com](https://img.shields.io/badge/optimized_for-Microsoft_Edge-green)
