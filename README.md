@@ -23,8 +23,6 @@ it dont work yet
 
 shit thats broken:
 - sendtables
-- memory allocator
-- convars/concommands
 - scripts ( can theoretically [![Dependencies](https://img.shields.io/badge/dependency-report-blue.svg)](https://azuresdkartifacts.blob.core.windows.net/azure-sdk-for-net/dependencies/dependencies.html) just lift the scripts/vscripts/mp/ folder from this build, its included in OldTFOScripts )
 
 # what
@@ -94,10 +92,8 @@ ignore previous directions
 contact wanderer for his bin and "r1delta" folder
 
 # current big issue
-# convars
-ConCommandBase has a (totally unused) new member in R1O
-
-current plan: make the "wrapped" FindVar return a pointer offset by -8 bytes so it lines up with R1O's expectations since it probably only cares about the value and maintain our own map of convars and update the R1O convar copy whenever the r1 equivalent copy updates by using a global convar changed callback on FCVAR_GAMEDLL (none of these words are in the bible)
+# scripts
+AAAAAAAAAAAAAA
 
 # Credits
 ## R1Delta - for Titanfall
