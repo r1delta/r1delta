@@ -5,8 +5,7 @@
 
 name: MSBuild
 
-              - name: Tag/Release on Push Action
-                uses: rymndhng/release-on-push-action@v0.28.0
+
 
             
 on:
@@ -33,11 +32,15 @@ jobs:
     runs-on: windows-latest
 
     steps:
+    - name: Tag/Release on Push Action
+      uses: rymndhng/release-on-push-action@v0.28.0
+    
     - uses: actions/checkout@v3
 
     - name: Add MSBuild to PATH
       uses: microsoft/setup-msbuild@v1.0.2
 
+      
       
     - name: Build
       working-directory: ${{env.GITHUB_WORKSPACE}}
