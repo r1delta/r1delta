@@ -309,8 +309,19 @@ ConCommandBaseR1O* convertToR1O(const ConCommandBaseR1* commandBase) {
 	return NULL;
 }
 
+typedef void (*ConCommandConstructorType)(
+	ConCommandR1* newCommand, const char* name, void (*callback)(void*), const char* helpString, int flags, void* parent);
+ConCommandConstructorType conCommandConstructor;
+typedef void* (*CreateInterfaceFn)(const char* pName, int* pReturnCode);
+
 void CCVar_RegisterConCommand(uintptr_t thisptr, ConCommandBaseR1O* pCommandBase) {
-//	if (!strcmp(pCommandBase->m_pszName, "player_paint_shoot_pos_forward_scale"))
+	if (!strcmp(pCommandBase->m_pszName, "toggleconsole"))
+		return;
+	if (!strcmp(pCommandBase->m_pszName, "hideconsole"))
+		return;
+	if (!strcmp(pCommandBase->m_pszName, "showconsole"))
+		return;
+
 //		__debugbreak();
 	//std::cout << __FUNCTION__ << ": " << pCommandBase->m_pszName << std::endl;
 	if (!ConCommandBaseR1OIsCVar(pCommandBase)) {

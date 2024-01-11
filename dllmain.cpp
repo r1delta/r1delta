@@ -88,9 +88,26 @@ void __cdecl hkfree_base(void* Block)
 	CreateGlobalMemAlloc()->Free(Block);
 
 }
-char* man(char* a) {
-	std::cout << std::string((char*)((((uintptr_t)GetModuleHandleA("launcher_r1o.dll")) + 0xFCDE0)), 4096) << std::endl;
-	return NULL;
+
+void Status_ConMsg(const char* text, ...)
+	// clang-format on
+{
+	char formatted[2048];
+	va_list list;
+
+	va_start(list, text);
+	vsprintf_s(formatted, text, list);
+	va_end(list);
+
+	auto endpos = strlen(formatted);
+	if (formatted[endpos - 1] == '\n')
+		formatted[endpos - 1] = '\0'; // cut off repeated newline
+
+	std::cout << formatted << std::endl;
+}
+const char* man(char* a) {
+	std::cout << (char*)((((uintptr_t)GetModuleHandleA("launcher_r1o.dll")) + 0xFCDE0)) << std::endl;
+	return "whatever";
 }
 
 struct VPKData;
@@ -218,7 +235,6 @@ void* __cdecl hkrecalloc_base(void* Block, size_t Count, size_t Size)
 
 }
 __declspec(dllexport) void whatever2() { Error(); };
-typedef void* (*CreateInterfaceFn)(const char* pName, int* pReturnCode);
 CreateInterfaceFn oAppSystemFactory;
 CreateInterfaceFn oFileSystemFactory;
 CreateInterfaceFn oPhysicsFactory;
@@ -2987,9 +3003,179 @@ extern "C" __declspec(dllexport) void StackToolsNotify_LoadedLibrary(char* pModu
 {
 	std::cout << "loaded " << pModuleName << std::endl;
 }
-__int64 sub_180210000()
+typedef char(*MatchRecvPropsToSendProps_RType)(__int64 a1, __int64 a2, __int64 a3, __int64 a4);
+MatchRecvPropsToSendProps_RType MatchRecvPropsToSendProps_ROriginal;
+__int64 __fastcall sub_1804719D0(unsigned __int8* a1, unsigned __int8* a2)
 {
-	return (unsigned int)1;
+	if (!a2 || !a1 || ((uintptr_t)(a1)) < 0x10 || ((uintptr_t)(a2)) < 0x10)
+		return 0;
+	//std::cout << "a1: " << (char*)a1 << " a2: " << (char*)a2 << std::endl;
+
+	unsigned int v4; // r8d
+	int v5; // r9d
+	unsigned int v7; // ecx
+	int v8; // edx
+
+	while (1)
+	{
+		v4 = *a1;
+		v5 = *a2;
+		if (v4 != v5)
+			break;
+		if (!*a1)
+			return 0i64;
+	LABEL_10:
+		v7 = a1[1];
+		v8 = a2[1];
+		a1 += 2;
+		a2 += 2;
+		if (v7 == v8)
+		{
+			if (!v7)
+				return 0i64;
+		}
+		else
+		{
+			if (!v8)
+				return v7;
+			if (v7 - 65 <= 0x19)
+				v7 += 32;
+			if ((unsigned int)(v8 - 65) <= 0x19)
+				v8 += 32;
+			if (v7 != v8)
+			{
+				v7 -= v8;
+				return v7;
+			}
+		}
+	}
+	if (!*a2)
+		return v4;
+	if (v4 - 65 <= 0x19)
+		v4 += 32;
+	if ((unsigned int)(v5 - 65) <= 0x19)
+		v5 += 32;
+	if (v4 == v5)
+		goto LABEL_10;
+	v4 -= v5;
+	return v4;
+}
+#define BYTEn(x, n)   (*((_BYTE*)&(x)+n))
+#define WORDn(x, n)   (*((_WORD*)&(x)+n))
+#define DWORDn(x, n)  (*((_DWORD*)&(x)+n))
+
+#define LOBYTE(x)  BYTEn(x,LOW_IND(x,_BYTE))
+#define LOWORD(x)  WORDn(x,LOW_IND(x,_WORD))
+#define LODWORD(x) DWORDn(x,LOW_IND(x,_DWORD))
+#define HIBYTE(x)  BYTEn(x,HIGH_IND(x,_BYTE))
+#define HIWORD(x)  WORDn(x,HIGH_IND(x,_WORD))
+#define HIDWORD(x) DWORDn(x,HIGH_IND(x,_DWORD))
+#define BYTE1(x)   BYTEn(x,  1)         // byte 1 (counting from 0)
+
+// #STR: "CompareRecvPropToSendProp: missing a property."
+char __fastcall CompareRecvPropToSendProp(__int64 a1, __int64 a2)
+{
+	int v4; // ecx
+
+	while (1)
+	{
+		if (!a1 || !a2)
+			std::cout << "CompareRecvPropToSendProp: missing a property." << std::endl;
+		v4 = *(_DWORD*)(a1 + 8);
+		if (v4 != *(_DWORD*)(a2 + 16) || *(_BYTE*)(a1 + 20) != (BYTE1(*(_DWORD*)(a2 + 88)) & 1))
+			break;
+		if (v4 != 5)
+			return 1;
+		if (*(_DWORD*)(a1 + 80) != *(_DWORD*)(a2 + 48))
+			break;
+		a1 = *(_QWORD*)(a1 + 32);
+		a2 = *(_QWORD*)(a2 + 32);
+	}
+	return 0;
+}
+
+char __fastcall MatchRecvPropsToSendProps_R(__int64 a1, __int64 a2, __int64 pSendTable, __int64 a4)
+{
+	_QWORD* v5; // rax
+	__int64 v6; // rcx
+	__int64 v7; // rdx
+	int v8; // ecx
+	unsigned __int8* v9; // rcx
+	int v10; // ebx
+	__int64 j; // rdi
+	__int64 RecvProp; // rbp
+	int v14; // [rsp+20h] [rbp-48h]
+	__int64 i; // [rsp+28h] [rbp-40h]
+	unsigned __int8* v16; // [rsp+30h] [rbp-38h]
+	__int64 v17; // [rsp+38h] [rbp-30h]
+	__int64 v18[5]; // [rsp+40h] [rbp-28h] BYREF
+	auto sub_1801D9D00 = (__int64(__fastcall*)(__int64 a1, _QWORD * a2))(((uintptr_t)GetModuleHandleA("engine.dll")) + 0x1D9D00);
+	v5 = (_QWORD*)pSendTable;
+	v14 = 0;
+	if (*(int*)(pSendTable + 8) <= 0)
+		return 1;
+	v6 = 0i64;
+	for (i = 0i64; ; i += 136i64)
+	{
+		NEXTPROP:
+		v7 = v6 + *v5;
+		v17 = v7;
+		v8 = *(_DWORD*)(v7 + 88);
+		if ((v8 & 0x40) == 0 && (v8 & 0x100) == 0)
+		{
+			if (!a4) {
+				std::cout << "MatchRecvPropsToSendProps_R unknown check 1 failed." << std::endl;
+				break;
+			}
+			v9 = *(unsigned __int8**)(v7 + 72);
+			v10 = 0;
+			v16 = v9;
+			if (*(int*)(a4 + 8) <= 0) {
+				std::cout << "MatchRecvPropsToSendProps_R unknown check 2 failed." << std::endl;
+
+				break;
+			}
+			bool bFail = false;
+			for (j = 0i64; ; j += 96i64)
+			{
+
+				RecvProp = j + *(_QWORD*)a4;
+				if (!(unsigned int)sub_1804719D0(*(unsigned __int8**)RecvProp, v9)) {
+					break;
+				}
+				if (++v10 >= *(_DWORD*)(a4 + 8)) {
+					bFail = true;
+					break;
+					//return 0;
+				}
+
+				v9 = v16;
+			}
+			if (!bFail) {
+
+				if (!CompareRecvPropToSendProp(RecvProp, v17)) {
+					std::cout << "MatchRecvPropsToSendProps_R compare failed." << std::endl;
+
+					break;
+				}
+				v18[0] = v17;
+				v18[1] = RecvProp;
+				sub_1801D9D00(a1, v18);
+			}
+			if (*(_DWORD*)(v17 + 16) == 6
+				&& !MatchRecvPropsToSendProps_R(a1, a2, *(_QWORD*)(v17 + 112), *(_QWORD*)(RecvProp + 64)))
+			{
+				std::cout << "MatchRecvPropsToSendProps_R recursive failed." << std::endl;
+				break;
+			}
+		}
+		v6 = i + 136;
+		if (++v14 >= *(_DWORD*)(pSendTable + 8))
+			return 1;
+		v5 = (_QWORD*)pSendTable;
+	}
+	std::cout << "MatchRecvPropsToSendProps_R failed." << std::endl;
+	return 0;
 }
 char __fastcall sub_180217C30(char* a1, __int64 size, _QWORD* a3, __int64 a4)
 {
@@ -3029,13 +3215,24 @@ void __stdcall LoaderNotificationCallback(
 	void* context) {
 	if (notification_reason != LDR_DLL_NOTIFICATION_REASON_LOADED)
 		return;
+	//if (std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length).find(L"client.dll") != std::string::npos) {
+	//	static bool bDone = false;
+	//	if (!bDone) {
+	//		bDone = true;
+	//		CreateInterfaceFn clientcreate = (CreateInterfaceFn)(GetProcAddress(GetModuleHandleA("client.dll"), "CreateInterface"));
+	//		g_SourceGameConsole = (CGameConsole*)clientcreate("GameConsole004", 0);
+	//		ConCommandR1* newCommand = new ConCommandR1;
+	//		conCommandConstructor = (ConCommandConstructorType)(((uintptr_t)GetModuleHandleA("engine.dll")) + 0x4808F0);
+	//		conCommandConstructor(newCommand, "toggleconsole", ConCommand_toggleconsole, "", 0, nullptr);
+	//	}
+	//}
+
 	if (std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length).find(L"launcher_r1o.dll") != std::string::npos) {
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher_r1o.dll") + 0x93C78), &hkcalloc_base, NULL);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher_r1o.dll") + 0x91620), &hkmalloc_base, NULL);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher_r1o.dll") + 0x91680), &hkrealloc_base, NULL);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher_r1o.dll") + 0x9B208), &hkrecalloc_base, NULL);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher_r1o.dll") + 0x93DC4), &hkfree_base, NULL);
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher_r1o.dll") + 0x79100), &man, NULL);
 		
 		MH_EnableHook(MH_ALL_HOOKS);
 
@@ -3047,14 +3244,16 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x71E9FC), &hkrealloc_base, NULL);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x72B480), &hkrecalloc_base, NULL);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x721000), &hkfree_base, NULL);
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("tier0_orig.dll") + 0x5ED0), &scripterr, NULL);
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("tier0_orig.dll") + 0x66B0), &scripterr, NULL);
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x6A420), &ReadFileFromVPKHook, reinterpret_cast<LPVOID*>(&readFileFromVPK));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x9C20), &ReadFromCacheHook, reinterpret_cast<LPVOID*>(&readFromCache));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x15F20), &ReadFileFromFilesystemHook, reinterpret_cast<LPVOID*>(&readFileFromFilesystem));
+		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher_r1o.dll") + 0x79100), &man, NULL);
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("tier0_orig.dll") + 0x5ED0), &man, NULL);
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("tier0_orig.dll") + 0x66B0), &man, NULL);
+		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x6A420), &ReadFileFromVPKHook, reinterpret_cast<LPVOID*>(&readFileFromVPK));
+		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x9C20), &ReadFromCacheHook, reinterpret_cast<LPVOID*>(&readFromCache));
+		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x15F20), &ReadFileFromFilesystemHook, reinterpret_cast<LPVOID*>(&readFileFromFilesystem));
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("vstdlib.dll"), "VStdLib_GetICVarFactory"), &VStdLib_GetICVarFactory, NULL);
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x136860), &Status_ConMsg, NULL);
 
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x210000), &sub_180210000, NULL);
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x1D9E70), &MatchRecvPropsToSendProps_R, reinterpret_cast<LPVOID*>(&MatchRecvPropsToSendProps_ROriginal));
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x217C30), &sub_180217C30, NULL);
 
 		MH_EnableHook(MH_ALL_HOOKS);
