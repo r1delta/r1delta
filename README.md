@@ -82,7 +82,7 @@ r1delte release 2021 men🔥🔥🔥🔥🔥 **NOTE: THIS REFERS TO R1DELTE, NOT
 ~~-1. make sure you have titanfall installed to default location (C:\Program Files (x86)\Origin Games\Titanfall) 
 0. its hard coded for some reason
 1. rename "tier0.dll" to "tier0_r1.dll" in bin\x64_retail\
-2. acquire OldTFOScripts.7z from [#1](https://github.com/r1delta/r1delta/issues/1) (you just need bin)
+2. acquire OldTFOScripts.7z from [Releases](https://github.com/r1delta/r1delta/releases/tag/wires) (you just need bin)
 3. copy "gbclient.dll", "nmcogame64.dll" from there to bin\x64_retail\
 4. copy "tier0_orig.dll", "server.dll", and "engine_r1o.dll" in this repo to bin\x64_retail\ 
 5. build
