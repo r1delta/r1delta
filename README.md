@@ -91,6 +91,40 @@ r1delte release 2021 men🔥🔥🔥🔥🔥 **NOTE: THIS REFERS TO R1DELTE, NOT
 ignore previous directions
 contact wanderer for his bin and "r1delta" folder
 
+# KNOWN ISSUES
+- does not load mp_lobb<
+  ntohing works-awedewif4weikfgerwfgkerfoik
+  erfgko
+  34e5rko
+  izhg k
+  34tg54er
+  ikztg
+  ik5rte
+  izgi
+  zu4659i
+  z6
+  549
+  6z9
+  4596
+  9
+  549
+
+  9
+  9
+  9
+  9
+  9
+  9
+  9
+  9
+  9
+  9
+  9
+  9
+  9
+  9
+  9
+  
 # current big issue
 # scripts
 AAAAAAAAAAAAAA
