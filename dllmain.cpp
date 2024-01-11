@@ -10,6 +10,11 @@
 #include "cvar.h"
 #include <winternl.h>  // For UNICODE_STRING.
 #include <fstream>
+#include <filesystem>
+#include <intrin.h>
+
+#pragma intrinsic(_ReturnAddress)
+
 // Forward declaration of the IMemAlloc interface
 class IMemAlloc {
 public:
@@ -87,6 +92,120 @@ char* man(char* a) {
 	std::cout << std::string((char*)((((uintptr_t)GetModuleHandleA("launcher_r1o.dll")) + 0xFCDE0)), 4096) << std::endl;
 	return NULL;
 }
+
+struct VPKData;
+struct IFileSystem;
+typedef void* FileHandle_t;
+// hook forward declares
+typedef FileHandle_t(*ReadFileFromVPKType)(VPKData* vpkInfo, __int64* b, char* filename);
+ReadFileFromVPKType readFileFromVPK;
+FileHandle_t ReadFileFromVPKHook(VPKData* vpkInfo, __int64* b, char* filename);
+
+typedef bool (*ReadFromCacheType)(IFileSystem* filesystem, char* path, void* result);
+ReadFromCacheType readFromCache;
+bool ReadFromCacheHook(IFileSystem* filesystem, char* path, void* result);
+
+typedef FileHandle_t(*ReadFileFromFilesystemType)(
+	IFileSystem* filesystem, const char* pPath, const char* pOptions, int64_t a4, uint32_t a5);
+ReadFileFromFilesystemType readFileFromFilesystem;
+FileHandle_t ReadFileFromFilesystemHook(IFileSystem* filesystem, const char* pPath, const char* pOptions, int64_t a4, uint32_t a5);
+
+
+bool V_IsAbsolutePath(const char* pStr)
+{
+	if (!(pStr[0] && pStr[1]))
+		return false;
+
+	bool bIsAbsolute = (pStr[0] && pStr[1] == ':') ||
+		((pStr[0] == '/' || pStr[0] == '\\') && (pStr[1] == '/' || pStr[1] == '\\'));
+
+
+	return bIsAbsolute;
+}
+std::string ConvertToWinPath(const std::string & svInput)
+{
+	std::string result = svInput;
+
+	// Flip forward slashes in file path to windows-style backslash
+	for (size_t i = 0; i < result.size(); i++)
+	{
+		if (result[i] == '/')
+		{
+			result[i] = '\\';
+		}
+	}
+	return result;
+}
+BOOL FileExists(LPCSTR szPath)
+{
+	DWORD dwAttrib = GetFileAttributesA(szPath);
+
+	return (dwAttrib != INVALID_FILE_ATTRIBUTES &&
+		!(dwAttrib & FILE_ATTRIBUTE_DIRECTORY));
+}
+bool TryReplaceFile(const char* pszFilePath)
+{
+	//std::cout << "FS: " << pszFilePath << std::endl;
+	std::string svFilePath = ConvertToWinPath(pszFilePath);
+	if (svFilePath.find("\\*\\") != std::string::npos)
+	{
+		// Erase '//*/'.
+		svFilePath.erase(0, 4);
+	}
+
+	if (V_IsAbsolutePath(pszFilePath))
+		return false;
+
+	// TODO: obtain 'mod' SearchPath's instead.
+	svFilePath.insert(0, "platform\\");
+
+	if (::FileExists(svFilePath.c_str()) /*|| ::FileExists(pszFilePath)*/)
+	{
+		return true;
+	}
+
+	return false;
+}
+
+
+FileHandle_t ReadFileFromFilesystemHook(IFileSystem* filesystem, const char* pPath, const char* pOptions, int64_t a4, uint32_t a5)
+{
+	// this isn't super efficient, but it's necessary, since calling addsearchpath in readfilefromvpk doesn't work, possibly refactor later
+	// it also might be possible to hook functions that are called later, idk look into callstack for ReadFileFromVPK
+	if (true)
+		TryReplaceFile((char*)pPath);
+
+	return readFileFromFilesystem(filesystem, pPath, pOptions, a4, a5);
+}
+
+bool ReadFromCacheHook(IFileSystem* filesystem, char* path, void* result)
+{
+	// move this to a convar at some point when we can read them in native
+	//Log::Info("ReadFromCache %s", path);
+
+	if (TryReplaceFile(path))
+		return false;
+
+	return readFromCache(filesystem, path, result);
+}
+
+FileHandle_t ReadFileFromVPKHook(VPKData* vpkInfo, __int64* b, char* filename)
+{
+	// move this to a convar at some point when we can read them in native
+	//Log::Info("ReadFileFromVPK %s %s", filename, vpkInfo->path);
+
+	// there is literally never any reason to compile here, since we'll always compile in ReadFileFromFilesystemHook in the same codepath
+	// this is called
+	if (TryReplaceFile(filename))
+	{
+		*b = -1;
+		return b;
+	}
+
+	return readFileFromVPK(vpkInfo, b, filename);
+}
+
+
 void* __cdecl hkrecalloc_base(void* Block, size_t Count, size_t Size)
 {
 	const size_t nTotal = Count * Size;
@@ -846,9 +965,16 @@ void sub_18000A070(__int64 a1, int a2) {
 	reinterpret_cast<void(*)(__int64, int a2)>(osub_18000A070)(fsinterface, a2);
 }
 
-
 char sub_180009C20(__int64 a1, char* a2, __int64 a3) {
-	return reinterpret_cast<char(*)(__int64, char* a2, __int64 a3)>(osub_180009C20)(fsinterface, a2, a3);
+	// Check if the path starts with "scripts/vscripts"
+	std::string path = a2;
+	if (path.rfind("scripts/vscripts", 0) == 0) {
+		// Replace "scripts/vscripts" with "scripts/vscripts/server"
+		path = "scripts/vscripts/server" + path.substr(16);
+	}
+
+	std::cout << "Server FS: " << path << std::endl;
+	return reinterpret_cast<char(*)(__int64, char*, __int64)>(osub_180009C20)(fsinterface, (char*)(path.c_str()), a3);
 }
 
 char sub_1800022F0(__int64 a1, __int64 a2, unsigned int a3, __int64 a4) {
@@ -1556,7 +1682,16 @@ __int64 IBaseFileSystem__Write(__int64 thisptr, void const* pInput, __int64 size
 }
 
 __int64 IBaseFileSystem__Open(__int64 thisptr, const char* pFileName, const char* pOptions, const char* pathID) {
-	return reinterpret_cast<__int64(*)(__int64, const char*, const char*, const char*)>(oCBaseFileSystem_Open)(fsinterfaceoffset, pFileName, pOptions, pathID);
+	// Check if the path starts with "scripts/vscripts"
+	std::string path = pFileName;
+	if (path.rfind("scripts/vscripts", 0) == 0) {
+		// Replace "scripts/vscripts" with "scripts/vscripts/server"
+		path = "scripts/vscripts/server" + path.substr(16);
+	}
+
+	std::cout << "Server FS: " << path << std::endl;
+
+	return reinterpret_cast<__int64(*)(__int64, const char*, const char*, const char*)>(oCBaseFileSystem_Open)(fsinterfaceoffset, path.c_str(), pOptions, pathID);
 }
 
 void IBaseFileSystem__Close(__int64 thisptr, __int64 file) {
@@ -1604,7 +1739,15 @@ long IBaseFileSystem__GetFileTime(__int64 thisptr, const char* pFileName, const 
 }
 
 bool IBaseFileSystem__ReadFile(__int64 thisptr, const char* pFileName, const char* pPath, void* buf, __int64 nMaxBytes, __int64 nStartingByte, void* pfnAlloc = NULL) {
-	return reinterpret_cast<bool(*)(__int64, const char*, const char*, void*, __int64, __int64, void*)>(oCBaseFileSystem_ReadFile)(fsinterfaceoffset, pFileName, pPath, buf, nMaxBytes, nStartingByte, pfnAlloc);
+	// Check if the path starts with "scripts/vscripts"
+	std::string path = pFileName;
+	if (path.rfind("scripts/vscripts", 0) == 0) {
+		// Replace "scripts/vscripts" with "scripts/vscripts/server"
+		path = "scripts/vscripts/server" + path.substr(16);
+	}
+
+	std::cout << "Server FS: " << path << std::endl;
+	return reinterpret_cast<bool(*)(__int64, const char*, const char*, void*, __int64, __int64, void*)>(oCBaseFileSystem_ReadFile)(fsinterfaceoffset, path.c_str(), pPath, buf, nMaxBytes, nStartingByte, pfnAlloc);
 }
 
 bool IBaseFileSystem__WriteFile(__int64 thisptr, const char* pFileName, const char* pPath, void* buf) {
@@ -2755,6 +2898,9 @@ char __fastcall CServerGameDLL__DLLInit(void* thisptr, CreateInterfaceFn appSyst
 	reinterpret_cast<char(__fastcall*)(__int64, CreateInterfaceFn)>((uintptr_t)(engineR1O)+0x1C6B30)(0, R1OFactory); // call is to CDedicatedServerAPI::Connect
 	void* whatev = R1OFactory;
 	reinterpret_cast<char(__fastcall*)(CreateInterfaceFn*)>((uintptr_t)(launcherR1O)+0x13930)((CreateInterfaceFn*)(&whatev)); // call is to ConnectTier1Interfaces
+	
+	reinterpret_cast<void(__fastcall*)()>((uintptr_t)(engineR1O)+0x2742A0)(); // register engine convars
+	reinterpret_cast<void(__fastcall*)()>((uintptr_t)(launcherR1O)+0x018990)(); // register launcher convars
 	//*(__int64*)((uintptr_t)(GetModuleHandleA("launcher_r1o.dll")) + 0xECBE0) = fsintfakeptr; 
 	*(__int64*)((uintptr_t)(GetModuleHandleA("launcher_r1o.dll")) + 0xF4228) = (__int64)(appSystemFactory("VENGINE_LAUNCHER_API_VERSION004", 0)); 
 	reinterpret_cast<__int64(__fastcall*)(int a1)>(GetProcAddress(GetModuleHandleA("tier0_orig.dll"), "SetTFOFileLogLevel"))(999);
@@ -2850,7 +2996,32 @@ char __fastcall sub_180217C30(char* a1, __int64 size, _QWORD* a3, __int64 a4)
 	return true;
 }
 const char* scripterr() {
-	return "C:\\users\\wanderer\\scripterror.log";
+	return "scripterror.log";
+}
+__forceinline BOOL CheckIfCallingDLLContainsR1o() {
+	// Get the return address of the calling function
+	PVOID retAddress = _ReturnAddress();
+
+	// Get a handle to the module (DLL) based on the return address
+	HMODULE hModule;
+	if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)retAddress, &hModule)) {
+		return FALSE; // Failed to get module handle
+	}
+
+	// Retrieve the module (DLL) name
+	char szModuleName[MAX_PATH];
+	if (GetModuleFileNameA(hModule, szModuleName, MAX_PATH) == 0) {
+		return FALSE; // Failed to get module name
+	}
+
+	// Convert module name to uppercase for case-insensitive comparison
+	_strupr_s(szModuleName, MAX_PATH);
+
+	// Check if "R1O" is in the module name
+	return strstr(szModuleName, "R1O") != NULL;
+}
+__int64 VStdLib_GetICVarFactory() {
+	return CheckIfCallingDLLContainsR1o() ? (__int64)R1OFactory : (__int64)(((uintptr_t)(GetModuleHandleA("vstdlib.dll"))+0x023DD0));
 }
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
@@ -2864,7 +3035,7 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher_r1o.dll") + 0x91680), &hkrealloc_base, NULL);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher_r1o.dll") + 0x9B208), &hkrecalloc_base, NULL);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher_r1o.dll") + 0x93DC4), &hkfree_base, NULL);
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher_r1o.dll") + 0x79100), &man, NULL);
+		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher_r1o.dll") + 0x79100), &man, NULL);
 		
 		MH_EnableHook(MH_ALL_HOOKS);
 
@@ -2876,9 +3047,13 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x71E9FC), &hkrealloc_base, NULL);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x72B480), &hkrecalloc_base, NULL);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x721000), &hkfree_base, NULL);
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("tier0_orig.dll") + 0x5ED0), &scripterr, NULL);
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("tier0_orig.dll") + 0x66B0), &scripterr, NULL);
-		
+		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("tier0_orig.dll") + 0x5ED0), &scripterr, NULL);
+		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("tier0_orig.dll") + 0x66B0), &scripterr, NULL);
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x6A420), &ReadFileFromVPKHook, reinterpret_cast<LPVOID*>(&readFileFromVPK));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x9C20), &ReadFromCacheHook, reinterpret_cast<LPVOID*>(&readFromCache));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x15F20), &ReadFileFromFilesystemHook, reinterpret_cast<LPVOID*>(&readFileFromFilesystem));
+		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("vstdlib.dll"), "VStdLib_GetICVarFactory"), &VStdLib_GetICVarFactory, NULL);
+
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x210000), &sub_180210000, NULL);
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x217C30), &sub_180217C30, NULL);
 

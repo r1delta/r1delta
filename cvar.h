@@ -312,7 +312,7 @@ ConCommandBaseR1O* convertToR1O(const ConCommandBaseR1* commandBase) {
 void CCVar_RegisterConCommand(uintptr_t thisptr, ConCommandBaseR1O* pCommandBase) {
 //	if (!strcmp(pCommandBase->m_pszName, "player_paint_shoot_pos_forward_scale"))
 //		__debugbreak();
-	std::cout << __FUNCTION__ << ": " << pCommandBase->m_pszName << std::endl;
+	//std::cout << __FUNCTION__ << ": " << pCommandBase->m_pszName << std::endl;
 	if (!ConCommandBaseR1OIsCVar(pCommandBase)) {
 		ConCommandBaseR1* r1CommandBase = convertToR1((ConCommandR1O*)pCommandBase);
 		ccBaseMap[r1CommandBase->m_pszName] = new WVar{ pCommandBase, r1CommandBase, false, true };
@@ -351,16 +351,16 @@ void GlobalChangeCallback(ConVarR1* var, const char* pOldValue) {
 	if (it == ccBaseMap.end())
 		return;
 	ConVarR1O* r1ovar = ((ConVarR1O*)it->second->r1optr);
-	r1ovar->m_Value.m_fValue = var->m_Value.m_fValue;
-	r1ovar->m_Value.m_nValue = var->m_Value.m_nValue;
-	r1ovar->m_Value.m_pszString = var->m_Value.m_pszString;
-	r1ovar->m_Value.m_StringLength = var->m_Value.m_StringLength;
+	r1ovar->m_pParent->m_Value.m_fValue = var->m_Value.m_fValue;
+	r1ovar->m_pParent->m_Value.m_nValue = var->m_Value.m_nValue;
+	r1ovar->m_pParent->m_Value.m_pszString = var->m_Value.m_pszString;
+	r1ovar->m_pParent->m_Value.m_StringLength = var->m_Value.m_StringLength;
 	//	if (it->second->is_r1o)
 	//		r1ovar->m_bHasMax
 	// unimplemented - impl r1o convar change callbacks
 }
 const ConVarR1O* CCVar_FindVar2(uintptr_t thisptr, const char* var_name) {
-	std::cout << __FUNCTION__ << ": " << var_name << std::endl;
+	//std::cout << __FUNCTION__ << ": " << var_name << std::endl;
 	//static int iFlag = 0;
 	//static bool bInitDone = false;
 	//if (!strcmp(var_name, "developer"))
@@ -402,9 +402,14 @@ const ConCommandR1O* CCVar_FindCommand2(uintptr_t thisptr, const char* name) {
 }
 
 void CCVar_CallGlobalChangeCallbacks(uintptr_t thisptr, ConVarR1O* var, const char* pOldString, float flOldValue) {
-	//ConVarR1* r1Var = convertToR1WParent(var);
-	//if (!CCVar_FindCommand(cvarinterface, var->m_pszName)) // cus broken
-		return;
+	// if this crashes YOU ARE NOT CALLING CVAR REGISTER FOR A DLL YOU SHOULD BE CALLING CVAR REGISTER FOR
+	ConVarR1* r1var = (ConVarR1*)(ccBaseMap[var->m_pszName]->r1ptr);
+	r1var->m_pParent->m_Value.m_fValue = var->m_Value.m_fValue;
+	r1var->m_pParent->m_Value.m_nValue = var->m_Value.m_nValue;
+	r1var->m_pParent->m_Value.m_pszString = var->m_Value.m_pszString;
+	r1var->m_pParent->m_Value.m_StringLength = var->m_Value.m_StringLength;
+
+	return;
 	//OriginalCCVar_CallGlobalChangeCallbacks(cvarinterface, r1Var, pOldString, flOldValue);
 	////delete r1Var;
 }
