@@ -5,6 +5,10 @@
 
 name: MSBuild
 
+              - name: Tag/Release on Push Action
+                uses: rymndhng/release-on-push-action@v0.28.0
+
+            
 on:
   push:
     branches: [ "main" ]
