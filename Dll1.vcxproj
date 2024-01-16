@@ -146,12 +146,18 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="cvar.h" />
-    <ClInclude Include="defs.h" />
+    <ClInclude Include="filesystem.h" />
     <ClInclude Include="framework.h" />
+    <ClInclude Include="memory.h" />
     <ClInclude Include="tier0_orig.h" />
+    <ClInclude Include="windowsutil.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp" />
+    <ClCompile Include="filesystem.cpp" />
+    <ClCompile Include="load.cpp" />
+    <ClCompile Include="memory.cpp" />
+    <ClCompile Include="windowsutil.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
