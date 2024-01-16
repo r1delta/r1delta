@@ -11,83 +11,21 @@
 #include <fstream>
 #include <filesystem>
 #include <intrin.h>
-#include "defs.h"
+#include "memory.h"
+#include "filesystem.h"
 
 #pragma intrinsic(_ReturnAddress)
 
 // Forward declaration of the IMemAlloc interface
-class IMemAlloc {
-public:
-	virtual void* Alloc_dont(size_t nSize) = 0;
-	virtual void* Alloc(size_t nSize) = 0;
-	virtual void* Realloc_Dont(void* pMem, size_t nSize) = 0;
-	virtual void* Realloc(void* pMem, size_t nSize) = 0;
-	virtual void Free_Dont(void* pMem) = 0;
-	virtual void Free(void* pMem) = 0;
-	virtual void* Expand_NoLongerSupported(void* pMem, size_t nSize) = 0;
-	virtual void* Expand_NoLongerSupported2(void* pMem, size_t nSize) = 0;
-	virtual size_t GetSize(void* pMem) = 0;
-};
+
 
 // Global singleton pointer
-IMemAlloc* g_pMemAllocSingleton = nullptr;
 
 // Typedef for the function signature of CreateGlobalMemAlloc in tier0_r1.dll
-typedef IMemAlloc* (*PFN_CreateGlobalMemAlloc)();
 
 // CreateGlobalMemAlloc function
-extern "C" __declspec(dllexport) IMemAlloc * CreateGlobalMemAlloc() {
-	if (!g_pMemAllocSingleton) {
-		// Load the tier0_r1.dll library
-		HMODULE hModule = LoadLibraryA("tier0_r1.dll");
-		if (hModule != nullptr) {
-			// Get the address of CreateGlobalMemAlloc in the loaded library
-			PFN_CreateGlobalMemAlloc pfnCreateGlobalMemAlloc = (PFN_CreateGlobalMemAlloc)GetProcAddress(hModule, "CreateGlobalMemAlloc");
-			if (pfnCreateGlobalMemAlloc != nullptr) {
-				// Call the function from the DLL and set the singleton
-				g_pMemAllocSingleton = pfnCreateGlobalMemAlloc();
-			}
-			else {
-				// Handle the error if the function is not found
-				// You might want to log an error or perform other error handling here
-			}
-		}
-		else {
-			// Handle the error if the DLL is not loaded
-			// You might want to log an error or perform other error handling here
-		}
-	}
-	return g_pMemAllocSingleton;
-}
-void* __cdecl hkcalloc_base(size_t Count, size_t Size)
-{
-	size_t const nTotal = Count * Size;
-	void* const pNew = CreateGlobalMemAlloc()->Alloc(nTotal);
 
-	memset(pNew, NULL, nTotal);
-	return pNew;
-}
-void* __cdecl hkmalloc_base(size_t Size)
-{
-	return CreateGlobalMemAlloc()->Alloc(Size);
 
-}
-void* __cdecl hkrealloc_base(void* Block, size_t Size)
-{
-	if (Size) {
-		return CreateGlobalMemAlloc()->Realloc(Block, Size);
-	}
-	else
-	{
-		CreateGlobalMemAlloc()->Free(Block);
-		return nullptr;
-	}
-}
-void __cdecl hkfree_base(void* Block)
-{
-	CreateGlobalMemAlloc()->Free(Block);
-
-}
 
 void Status_ConMsg(const char* text, ...)
 	// clang-format on
@@ -110,90 +48,7 @@ const char* man(char* a) {
 	return "whatever";
 }
 
-struct VPKData;
-struct IFileSystem;
-typedef void* FileHandle_t;
-// hook forward declares
-typedef FileHandle_t(*ReadFileFromVPKType)(VPKData* vpkInfo, __int64* b, char* filename);
-ReadFileFromVPKType readFileFromVPK;
-FileHandle_t ReadFileFromVPKHook(VPKData* vpkInfo, __int64* b, char* filename);
 
-typedef bool (*ReadFromCacheType)(IFileSystem* filesystem, char* path, void* result);
-ReadFromCacheType readFromCache;
-bool ReadFromCacheHook(IFileSystem* filesystem, char* path, void* result);
-
-typedef FileHandle_t(*ReadFileFromFilesystemType)(
-	IFileSystem* filesystem, const char* pPath, const char* pOptions, int64_t a4, uint32_t a5);
-ReadFileFromFilesystemType readFileFromFilesystem;
-FileHandle_t ReadFileFromFilesystemHook(IFileSystem* filesystem, const char* pPath, const char* pOptions, int64_t a4, uint32_t a5);
-
-
-bool V_IsAbsolutePath(const char* pStr)
-{
-	if (!(pStr[0] && pStr[1]))
-		return false;
-
-	bool bIsAbsolute = (pStr[0] && pStr[1] == ':') ||
-		((pStr[0] == '/' || pStr[0] == '\\') && (pStr[1] == '/' || pStr[1] == '\\'));
-
-
-	return bIsAbsolute;
-}
-std::string ConvertToWinPath(const std::string & svInput)
-{
-	std::string result = svInput;
-
-	// Flip forward slashes in file path to windows-style backslash
-	for (size_t i = 0; i < result.size(); i++)
-	{
-		if (result[i] == '/')
-		{
-			result[i] = '\\';
-		}
-	}
-	return result;
-}
-BOOL FileExists(LPCSTR szPath)
-{
-	DWORD dwAttrib = GetFileAttributesA(szPath);
-
-	return (dwAttrib != INVALID_FILE_ATTRIBUTES &&
-		!(dwAttrib & FILE_ATTRIBUTE_DIRECTORY));
-}
-bool TryReplaceFile(const char* pszFilePath)
-{
-	//std::cout << "FS: " << pszFilePath << std::endl;
-	std::string svFilePath = ConvertToWinPath(pszFilePath);
-	if (svFilePath.find("\\*\\") != std::string::npos)
-	{
-		// Erase '//*/'.
-		svFilePath.erase(0, 4);
-	}
-
-	if (V_IsAbsolutePath(pszFilePath))
-		return false;
-
-	// TODO: obtain 'mod' SearchPath's instead.
-	svFilePath.insert(0, "platform\\");
-
-	if (::FileExists(svFilePath.c_str()) /*|| ::FileExists(pszFilePath)*/)
-	{
-		return true;
-	}
-
-	return false;
-}
-
-
-FileHandle_t ReadFileFromFilesystemHook(IFileSystem* filesystem, const char* pPath, const char* pOptions, int64_t a4, uint32_t a5)
-{
-	// this isn't super efficient, but it's necessary, since calling addsearchpath in readfilefromvpk doesn't work, possibly refactor later
-	// it also might be possible to hook functions that are called later, idk look into callstack for ReadFileFromVPK
-	if (true)
-		TryReplaceFile((char*)pPath);
-
-	return readFileFromFilesystem(filesystem, pPath, pOptions, a4, a5);
-}
 
 bool ReadFromCacheHook(IFileSystem* filesystem, char* path, void* result)
 {
@@ -222,18 +77,6 @@ FileHandle_t ReadFileFromVPKHook(VPKData* vpkInfo, __int64* b, char* filename)
 	return readFileFromVPK(vpkInfo, b, filename);
 }
 
-
-void* __cdecl hkrecalloc_base(void* Block, size_t Count, size_t Size)
-{
-	const size_t nTotal = Count * Size;
-	void* const pMemOut = CreateGlobalMemAlloc()->Realloc(Block, nTotal);
-
-	if (!Block)
-		memset(pMemOut, NULL, nTotal);
-
-	return pMemOut;
-
-}
 __declspec(dllexport) void whatever2() { Error(); };
 CreateInterfaceFn oAppSystemFactory;
 CreateInterfaceFn oFileSystemFactory;
