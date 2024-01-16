@@ -12,7 +12,7 @@
 #include <fstream>
 #include <filesystem>
 #include <intrin.h>
-
+#include "defs.h"
 
 #pragma intrinsic(_ReturnAddress)
 
@@ -239,72 +239,7 @@ __declspec(dllexport) void whatever2() { Error(); };
 CreateInterfaceFn oAppSystemFactory;
 CreateInterfaceFn oFileSystemFactory;
 CreateInterfaceFn oPhysicsFactory;
-enum InitReturnVal_t
-{
-	INIT_FAILED = 0,
-	INIT_OK,
 
-	INIT_LAST_VAL,
-};
-
-enum AppSystemTier_t
-{
-	APP_SYSTEM_TIER0 = 0,
-	APP_SYSTEM_TIER1,
-	APP_SYSTEM_TIER2,
-	APP_SYSTEM_TIER3,
-
-	APP_SYSTEM_TIER_OTHER,
-};
-class IAppSystem
-{
-public:
-	// Here's where the app systems get to learn about each other 
-	virtual bool Connect(CreateInterfaceFn factory) = 0;
-	virtual void Disconnect() = 0;
-
-	// Here's where systems can access other interfaces implemented by this object
-	// Returns NULL if it doesn't implement the requested interface
-	virtual void* QueryInterface(const char* pInterfaceName) = 0;
-
-	// Init, shutdown
-	virtual InitReturnVal_t Init() = 0;
-	virtual void Shutdown() = 0;
-
-	// Returns all dependent libraries
-	virtual const void* GetDependencies() { return NULL; }
-
-	// Returns the tier
-	virtual AppSystemTier_t GetTier() { return APP_SYSTEM_TIER_OTHER; }
-
-	// Reconnect to a particular interface
-	virtual void Reconnect(CreateInterfaceFn factory, const char* pInterfaceName) {}
-};
-class IEngineAPI : public IAppSystem
-{
-	// Functions
-public:
-	// This function must be called before init
-	virtual bool SetStartupInfo(void* info) = 0;
-
-	// Run the engine
-	virtual int Run() = 0;
-
-	// Sets the engine to run in a particular editor window
-	virtual void SetEngineWindow(void* hWnd) = 0;
-
-	// Sets the engine to run in a particular editor window
-	virtual void PostConsoleCommand(const char* pConsoleCommand) = 0;
-
-	// Are we running the simulation?
-	virtual bool IsRunningSimulation() const = 0;
-
-	// Start/stop running the simulation
-	virtual void ActivateSimulation(bool bActive) = 0;
-
-	// Reset the map we're on
-	virtual void SetMap(const char* pMapName) = 0;
-};
 __int64 NULLNET_Config()
 {
 	return 0;
@@ -417,1363 +352,54 @@ void __fastcall CNetworkStringTableContainer__SetTickCount(__int64 a1, char a2)
 	*(char*)(a1 + 8) = a2;
 }
 
-
-uintptr_t oCBaseFileSystem__Connect;
-uintptr_t oCBaseFileSystem__Disconnect;
-uintptr_t oCFileSystem_Stdio__QueryInterface;
-uintptr_t oCBaseFileSystem__Init;
-uintptr_t oCBaseFileSystem__Shutdown;
-uintptr_t oCBaseFileSystem__GetDependencies;
-uintptr_t oCBaseFileSystem__GetTier;
-uintptr_t oCBaseFileSystem__Reconnect;
-uintptr_t osub_180023F80;
-uintptr_t osub_180023F90;
-uintptr_t oCFileSystem_Stdio__AddSearchPath;
-uintptr_t oCBaseFileSystem__RemoveSearchPath;
-uintptr_t oCBaseFileSystem__RemoveAllSearchPaths;
-uintptr_t oCBaseFileSystem__RemoveSearchPaths;
-uintptr_t oCBaseFileSystem__MarkPathIDByRequestOnly;
-uintptr_t oCBaseFileSystem__RelativePathToFullPath;
-uintptr_t oCBaseFileSystem__GetSearchPath;
-uintptr_t oCBaseFileSystem__AddPackFile;
-uintptr_t oCBaseFileSystem__RemoveFile;
-uintptr_t oCBaseFileSystem__RenameFile;
-uintptr_t oCBaseFileSystem__CreateDirHierarchy;
-uintptr_t oCBaseFileSystem__IsDirectory;
-uintptr_t oCBaseFileSystem__FileTimeToString;
-uintptr_t oCFileSystem_Stdio__SetBufferSize;
-uintptr_t oCFileSystem_Stdio__IsOK;
-uintptr_t oCFileSystem_Stdio__EndOfLine;
-uintptr_t oCFileSystem_Stdio__ReadLine;
-uintptr_t oCBaseFileSystem__FPrintf;
-uintptr_t oCBaseFileSystem__LoadModule;
-uintptr_t oCBaseFileSystem__UnloadModule;
-uintptr_t oCBaseFileSystem__FindFirst;
-uintptr_t oCBaseFileSystem__FindNext;
-uintptr_t oCBaseFileSystem__FindIsDirectory;
-uintptr_t oCBaseFileSystem__FindClose;
-uintptr_t oCBaseFileSystem__FindFirstEx;
-uintptr_t oCBaseFileSystem__FindFileAbsoluteList;
-uintptr_t oCBaseFileSystem__GetLocalPath;
-uintptr_t oCBaseFileSystem__FullPathToRelativePath;
-uintptr_t oCBaseFileSystem__GetCurrentDirectory;
-uintptr_t oCBaseFileSystem__FindOrAddFileName;
-uintptr_t oCBaseFileSystem__String;
-uintptr_t oCBaseFileSystem__AsyncReadMultiple;
-uintptr_t oCBaseFileSystem__AsyncAppend;
-uintptr_t oCBaseFileSystem__AsyncAppendFile;
-uintptr_t oCBaseFileSystem__AsyncFinishAll;
-uintptr_t oCBaseFileSystem__AsyncFinishAllWrites;
-uintptr_t oCBaseFileSystem__AsyncFlush;
-uintptr_t oCBaseFileSystem__AsyncSuspend;
-uintptr_t oCBaseFileSystem__AsyncResume;
-uintptr_t oCBaseFileSystem__AsyncBeginRead;
-uintptr_t oCBaseFileSystem__AsyncEndRead;
-uintptr_t oCBaseFileSystem__AsyncFinish;
-uintptr_t oCBaseFileSystem__AsyncGetResult;
-uintptr_t oCBaseFileSystem__AsyncAbort;
-uintptr_t oCBaseFileSystem__AsyncStatus;
-uintptr_t oCBaseFileSystem__AsyncSetPriority;
-uintptr_t oCBaseFileSystem__AsyncAddRef;
-uintptr_t oCBaseFileSystem__AsyncRelease;
-uintptr_t osub_180024450;
-uintptr_t osub_180024460;
-uintptr_t onullsub_96;
-uintptr_t osub_180024490;
-uintptr_t osub_180024440;
-uintptr_t onullsub_97;
-uintptr_t osub_180009BE0;
-uintptr_t osub_18000F6A0;
-uintptr_t osub_180002CA0;
-uintptr_t osub_180002CB0;
-uintptr_t osub_1800154F0;
-uintptr_t osub_180015550;
-uintptr_t osub_180015420;
-uintptr_t osub_180015480;
-uintptr_t oCBaseFileSystem__RemoveLoggingFunc;
-uintptr_t oCBaseFileSystem__GetFilesystemStatistics;
-uintptr_t oCFileSystem_Stdio__OpenEx;
-uintptr_t osub_18000A5D0;
-uintptr_t osub_1800052A0;
-uintptr_t osub_180002F10;
-uintptr_t osub_18000A690;
-uintptr_t osub_18000A6F0;
-uintptr_t osub_1800057A0;
-uintptr_t osub_180002960;
-uintptr_t osub_180020110;
-uintptr_t osub_180020230;
-uintptr_t osub_180023660;
-uintptr_t osub_1800204A0;
-uintptr_t osub_180002F40;
-uintptr_t osub_180004F00;
-uintptr_t osub_180024020;
-uintptr_t osub_180024AF0;
-uintptr_t osub_180024110;
-uintptr_t osub_180002580;
-uintptr_t osub_180002560;
-uintptr_t osub_18000A070;
-uintptr_t osub_180009E80;
-uintptr_t osub_180009C20;
-uintptr_t osub_1800022F0;
-uintptr_t osub_180002330;
-uintptr_t osub_180009CF0;
-uintptr_t osub_180002340;
-uintptr_t osub_180002320;
-uintptr_t osub_180009E00;
-uintptr_t osub_180009F20;
-uintptr_t osub_180009EA0;
-uintptr_t osub_180009E50;
-uintptr_t osub_180009FC0;
-uintptr_t osub_180004E80;
-uintptr_t osub_18000A000;
-uintptr_t osub_180014350;
-uintptr_t osub_18000F5B0;
-uintptr_t osub_180002590;
-uintptr_t osub_1800025D0;
-uintptr_t osub_1800025E0;
-uintptr_t oCFileSystem_Stdio__LoadVPKForMap;
-uintptr_t oCFileSystem_Stdio__UnkFunc1;
-uintptr_t oCFileSystem_Stdio__WeirdFuncThatJustDerefsRDX;
-uintptr_t oCFileSystem_Stdio__GetPathTime;
-uintptr_t oCFileSystem_Stdio__GetFSConstructedFlag;
-uintptr_t oCFileSystem_Stdio__EnableWhitelistFileTracking;
-uintptr_t osub_18000A750;
-uintptr_t osub_180002B20;
-uintptr_t osub_18001DC30;
-uintptr_t osub_180002B30;
-uintptr_t osub_180002BA0;
-uintptr_t osub_180002BB0;
-uintptr_t osub_180002BC0;
-uintptr_t osub_180002290;
-uintptr_t osub_18001CCD0;
-uintptr_t osub_18001CCE0;
-uintptr_t osub_18001CCF0;
-uintptr_t osub_18001CD00;
-uintptr_t osub_180014520;
-uintptr_t osub_180002650;
-uintptr_t osub_18001CD10;
-uintptr_t osub_180016250;
-uintptr_t osub_18000F0D0;
-uintptr_t osub_1800139F0;
-uintptr_t osub_180016570;
-uintptr_t onullsub_86;
-uintptr_t osub_18000AEC0;
-uintptr_t osub_180003320;
-uintptr_t osub_18000AF50;
-uintptr_t osub_18000AF60;
-uintptr_t osub_180005D00;
-uintptr_t osub_18000AF70;
-uintptr_t osub_18001B130;
-uintptr_t osub_18000AF80;
-uintptr_t osub_1800034D0;
-uintptr_t osub_180017180;
-uintptr_t osub_180003550;
-uintptr_t osub_1800250D0;
-uintptr_t osub_1800241B0;
-uintptr_t osub_1800241C0;
-uintptr_t osub_1800241F0;
-uintptr_t osub_180024240;
-uintptr_t osub_180024250;
-uintptr_t osub_180024260;
-uintptr_t osub_180024300;
-uintptr_t osub_180024310;
-uintptr_t osub_180024320;
-uintptr_t osub_180024340;
-uintptr_t osub_180024350;
-uintptr_t osub_180024360;
-uintptr_t osub_180024390;
-uintptr_t osub_180024370;
-uintptr_t osub_1800243C0;
-uintptr_t osub_1800243F0;
-uintptr_t osub_180024410;
-uintptr_t osub_180024430;
 uintptr_t fsinterface;
-#define _BYTE char
-char CBaseFileSystem__Connect(__int64 a1, __int64 a2) {
-	return reinterpret_cast<char(*)(__int64, __int64)>(oCBaseFileSystem__Connect)(fsinterface, a2);
-}
 
-void CBaseFileSystem__Disconnect(__int64 a1) {
-	reinterpret_cast<void(*)(__int64)>(oCBaseFileSystem__Disconnect)(fsinterface);
-}
 
-__int64 CFileSystem_Stdio__QueryInterface(__int64 a1, _BYTE* a2) {
-	return reinterpret_cast<__int64(*)(__int64, _BYTE*)>(oCFileSystem_Stdio__QueryInterface)(fsinterface, a2);
-}
+//char sub_180009C20(__int64 a1, char* a2, __int64 a3) {
+//	// Check if the path starts with "scripts/vscripts"
+//	std::string path = a2;
+//	if (path.rfind("scripts/vscripts", 0) == 0) {
+//		// Replace "scripts/vscripts" with "scripts/vscripts/server"
+//		path = "scripts/vscripts/server" + path.substr(16);
+//	}
+//
+//	std::cout << "Server FS: " << path << std::endl;
+//	return reinterpret_cast<char(*)(__int64, char*, __int64)>(osub_180009C20)(fsinterface, (char*)(path.c_str()), a3);
+//}
 
-__int64 CBaseFileSystem__Init(__int64 a1) {
-	return reinterpret_cast<__int64(*)(__int64)>(oCBaseFileSystem__Init)(fsinterface);
-}
 
-__int64 CBaseFileSystem__Shutdown(__int64 a1) {
-	return reinterpret_cast<__int64(*)(__int64)>(oCBaseFileSystem__Shutdown)(fsinterface);
-}
-
-__int64 CBaseFileSystem__GetDependencies(__int64 a1) {
-	return reinterpret_cast<__int64(*)(__int64)>(oCBaseFileSystem__GetDependencies)(fsinterface);
-}
-
-__int64 CBaseFileSystem__GetTier(__int64 a1) {
-	return reinterpret_cast<__int64(*)(__int64)>(oCBaseFileSystem__GetTier)(fsinterface);
-}
-
-__int64 CBaseFileSystem__Reconnect(__int64 a1, __int64 a2, __int64 a3) {
-	return reinterpret_cast<__int64(*)(__int64, __int64, __int64)>(oCBaseFileSystem__Reconnect)(fsinterface, a2, a3);
-}
-
-
-__int64 CFileSystem_Stdio__AddSearchPath(__int64 a1, const char* a2, __int64 a3, unsigned int a4) {
-	return reinterpret_cast<__int64(*)(__int64, const char*, __int64, unsigned int)>(oCFileSystem_Stdio__AddSearchPath)(fsinterface, a2, a3, a4);
-}
-
-__int64 CBaseFileSystem__RemoveSearchPath(__int64 a1, const char* a2, __int64 a3) {
-	return reinterpret_cast<__int64(*)(__int64, const char*, __int64)>(oCBaseFileSystem__RemoveSearchPath)(fsinterface, a2, a3);
-}
-
-void CBaseFileSystem__RemoveAllSearchPaths(__int64 a1) {
-	reinterpret_cast<void(*)(__int64)>(oCBaseFileSystem__RemoveAllSearchPaths)(fsinterface);
-}
-
-__int64 CBaseFileSystem__RemoveSearchPaths(__int64 a1, char* a2) {
-	return reinterpret_cast<__int64(*)(__int64, char*)>(oCBaseFileSystem__RemoveSearchPaths)(fsinterface, a2);
-}
-
-__int64 CBaseFileSystem__MarkPathIDByRequestOnly(__int64 a1, __int64 a2, unsigned __int8 a3) {
-	return reinterpret_cast<__int64(*)(__int64, __int64, unsigned __int8)>(oCBaseFileSystem__MarkPathIDByRequestOnly)(fsinterface, a2, a3);
-}
-
-char* CBaseFileSystem__RelativePathToFullPath(__int64 a1, char* a2, __int64 a3, char* a4, size_t Count, int a6, char* a7) {
-	return reinterpret_cast<char* (*)(__int64, char*, __int64, char*, size_t, int, char*)>(oCBaseFileSystem__RelativePathToFullPath)(fsinterface, a2, a3, a4, Count, a6, a7);
-}
-
-__int64 CBaseFileSystem__GetSearchPath(__int64 a1, __int64 a2, char a3, _BYTE* a4, __int64 a5) {
-	return reinterpret_cast<__int64(*)(__int64, __int64, char, _BYTE*, __int64)>(oCBaseFileSystem__GetSearchPath)(fsinterface, a2, a3, a4, a5);
-}
-
-char CBaseFileSystem__AddPackFile(__int64 a1, const char* a2, __int64 a3) {
-	return reinterpret_cast<char(*)(__int64, const char*, __int64)>(oCBaseFileSystem__AddPackFile)(fsinterface, a2, a3);
-}
-
-int* CBaseFileSystem__RemoveFile(__int64 a1, char* a2, __int64 a3) {
-	return reinterpret_cast<int* (*)(__int64, char*, __int64)>(oCBaseFileSystem__RemoveFile)(fsinterface, a2, a3);
-}
-
-bool CBaseFileSystem__RenameFile(__int64 a1, _BYTE* a2, char* a3, const char* a4) {
-	return reinterpret_cast<bool(*)(__int64, _BYTE*, char*, const char*)>(oCBaseFileSystem__RenameFile)(fsinterface, a2, a3, a4);
-}
-
-void CBaseFileSystem__CreateDirHierarchy(__int64 a1, char* a2, char* a3) {
-	reinterpret_cast<void(*)(__int64, char* a2, char* a3)>(oCBaseFileSystem__CreateDirHierarchy)(fsinterface, a2, a3);
-}
-
-bool CBaseFileSystem__IsDirectory(__int64 a1, const char* a2, const char* a3) {
-	return reinterpret_cast<bool(*)(__int64, const char*, const char*)>(oCBaseFileSystem__IsDirectory)(fsinterface, a2, a3);
-}
-
-__int64 CBaseFileSystem__FileTimeToString(__int64 a1, char* a2, signed __int64 a3, int a4) {
-	return reinterpret_cast<__int64(*)(__int64, char*, signed __int64, int)>(oCBaseFileSystem__FileTimeToString)(fsinterface, a2, a3, a4);
-}
-
-__int64 CFileSystem_Stdio__SetBufferSize(__int64 a1, __int64 a2, __int64 a3) {
-	return reinterpret_cast<__int64(*)(__int64, __int64, __int64)>(oCFileSystem_Stdio__SetBufferSize)(fsinterface, a2, a3);
-}
-
-char CFileSystem_Stdio__IsOK(__int64 a1, __int64 a2) {
-	return reinterpret_cast<char(*)(__int64, __int64)>(oCFileSystem_Stdio__IsOK)(fsinterface, a2);
-}
-
-char CFileSystem_Stdio__EndOfLine(__int64 a1, __int64 a2) {
-	return reinterpret_cast<char(*)(__int64, __int64)>(oCFileSystem_Stdio__EndOfLine)(fsinterface, a2);
-}
-
-__int64 CFileSystem_Stdio__ReadLine(__int64 a1, __int64 a2, signed __int64 a3, __int64 a4) {
-	return reinterpret_cast<__int64(*)(__int64, __int64, signed __int64, __int64)>(oCFileSystem_Stdio__ReadLine)(fsinterface, a2, a3, a4);
-}
-
-__int64 CBaseFileSystem__FPrintf(__int64 a1, __int64 a2, const char* a3, ...) {
-	va_list args;
-	va_start(args, a3);
-	__int64 result = reinterpret_cast<__int64(*)(__int64, __int64, const char*, va_list)>(oCBaseFileSystem__FPrintf)(fsinterface, a2, a3, args);
-	va_end(args);
-	return result;
-}
-
-__int64 CBaseFileSystem__LoadModule(__int64 a1, char* a2, const char* a3) {
-	return reinterpret_cast<__int64(*)(__int64, char*, const char*)>(oCBaseFileSystem__LoadModule)(fsinterface, a2, a3);
-}
-
-BOOL CBaseFileSystem__UnloadModule(__int64 a1, HMODULE a2) {
-	return reinterpret_cast<BOOL(*)(__int64, HMODULE)>(oCBaseFileSystem__UnloadModule)(fsinterface, a2);
-}
-
-__int64 CBaseFileSystem__FindFirst(__int64 a1, __int64 a2, __int64 a3) {
-	return reinterpret_cast<__int64(*)(__int64, __int64, __int64)>(oCBaseFileSystem__FindFirst)(fsinterface, a2, a3);
-}
-
-__int64 CBaseFileSystem__FindNext(__int64 a1, unsigned __int16 a2) {
-	return reinterpret_cast<__int64(*)(__int64, unsigned __int16)>(oCBaseFileSystem__FindNext)(fsinterface, a2);
-}
-
-__int64 CBaseFileSystem__FindIsDirectory(__int64 a1, unsigned __int16 a2) {
-	return reinterpret_cast<__int64(*)(__int64, unsigned __int16)>(oCBaseFileSystem__FindIsDirectory)(fsinterface, a2);
-}
-
-char CBaseFileSystem__FindClose(__int64 a1, __int64 a2) {
-	return reinterpret_cast<char(*)(__int64, __int64)>(oCBaseFileSystem__FindClose)(fsinterface, a2);
-}
-
-__int64 CBaseFileSystem__FindFirstEx(__int64 a1, const char* pWildCard, const char* pPathID, int* pHandle) {
-	return reinterpret_cast<__int64(*)(__int64, const char*, const char*, int*)>(oCBaseFileSystem__FindFirstEx)(fsinterface, pWildCard, pPathID, pHandle);
-}
-
-__int64 CBaseFileSystem__FindFileAbsoluteList(__int64 a1, __int64 a2, __int64 a3, __int64 a4) {
-	return reinterpret_cast<__int64(*)(__int64, __int64, __int64, __int64)>(oCBaseFileSystem__FindFileAbsoluteList)(fsinterface, a2, a3, a4);
-}
-
-__int64 CBaseFileSystem__GetLocalPath(__int64 a1, __int64 a2, __int64 a3, __int64 a4) {
-	return reinterpret_cast<__int64(*)(__int64, __int64, __int64, __int64)>(oCBaseFileSystem__GetLocalPath)(fsinterface, a2, a3, a4);
-}
-
-__int64 CBaseFileSystem__FullPathToRelativePath(__int64 a1, __int64 a2, __int64 a3, __int64 a4) {
-	return reinterpret_cast<__int64(*)(__int64, __int64, __int64, __int64)>(oCBaseFileSystem__FullPathToRelativePath)(fsinterface, a2, a3, a4);
-}
-
-char CBaseFileSystem__GetCurrentDirectory(__int64 a1, CHAR* a2, DWORD a3) {
-	return reinterpret_cast<char(*)(__int64, CHAR*, DWORD)>(oCBaseFileSystem__GetCurrentDirectory)(fsinterface, a2, a3);
-}
-
-__int64 CBaseFileSystem__FindOrAddFileName(__int64 a1, const char* pFileName) {
-	return reinterpret_cast<__int64(*)(__int64, const char*)>(oCBaseFileSystem__FindOrAddFileName)(fsinterface, pFileName);
-}
-
-char CBaseFileSystem__String(__int64 a1, __int64 a2, _BYTE* a3, __int64 a4) {
-	return reinterpret_cast<char(*)(__int64, __int64, _BYTE*, __int64)>(oCBaseFileSystem__String)(fsinterface, a2, a3, a4);
-}
-
-__int64 CBaseFileSystem__AsyncReadMultiple(__int64 a1, __int64 a2, __int64 a3, __int64 a4) {
-	return reinterpret_cast<__int64(*)(__int64, __int64, __int64, __int64)>(oCBaseFileSystem__AsyncReadMultiple)(fsinterface, a2, a3, a4);
-}
-
-__int64 CBaseFileSystem__AsyncAppend(__int64 a1,        const char* pFileName,
-	const void* pSrc,
-	int nSrcBytes,
-	BOOL bFreeMemory,
-	__int64 pControl) {
-	return reinterpret_cast<__int64(*)(__int64, const char*, const void*, int, BOOL, __int64)>(oCBaseFileSystem__AsyncAppend)(fsinterface, pFileName, pSrc, nSrcBytes, bFreeMemory, pControl);
-}
-
-__int64 CBaseFileSystem__AsyncAppendFile(__int64 a1, __int64 a2, __int64 a3, __int64* a4) {
-	return reinterpret_cast<__int64(*)(__int64, __int64, __int64, __int64*)>(oCBaseFileSystem__AsyncAppendFile)(fsinterface, a2, a3, a4);
-}
-
-void CBaseFileSystem__AsyncFinishAll(__int64 a1, int a2) {
-	reinterpret_cast<void(*)(__int64, int)>(oCBaseFileSystem__AsyncFinishAll)(fsinterface, a2);
-}
-
-void CBaseFileSystem__AsyncFinishAllWrites(__int64 a1) {
-	reinterpret_cast<void(*)(__int64)>(oCBaseFileSystem__AsyncFinishAllWrites)(fsinterface);
-}
-
-__int64 CBaseFileSystem__AsyncFlush(__int64 a1) {
-	return reinterpret_cast<__int64(*)(__int64)>(oCBaseFileSystem__AsyncFlush)(fsinterface);
-}
-
-char CBaseFileSystem__AsyncSuspend(__int64 a1) {
-	return reinterpret_cast<char(*)(__int64)>(oCBaseFileSystem__AsyncSuspend)(fsinterface);
-}
-
-char CBaseFileSystem__AsyncResume(__int64 a1) {
-	return reinterpret_cast<char(*)(__int64)>(oCBaseFileSystem__AsyncResume)(fsinterface);
-}
-
-__int64 CBaseFileSystem__AsyncBeginRead(__int64 a1, __int64 a2, __int64 a3) {
-	return reinterpret_cast<__int64(*)(__int64, __int64, __int64)>(oCBaseFileSystem__AsyncBeginRead)(fsinterface, a2, a3);
-}
-
-__int64 CBaseFileSystem__AsyncEndRead(__int64 a1, __int64 a2) {
-	return reinterpret_cast<__int64(*)(__int64, __int64)>(oCBaseFileSystem__AsyncEndRead)(fsinterface, a2);
-}
-
-__int64 CBaseFileSystem__AsyncFinish(__int64 a1, __int64 a2, char a3) {
-	return reinterpret_cast<__int64(*)(__int64, __int64, char)>(oCBaseFileSystem__AsyncFinish)(fsinterface, a2, a3);
-}
-
-__int64 CBaseFileSystem__AsyncGetResult(__int64 a1, void* a2, __int64 a3, __int64 a4) {
-	return reinterpret_cast<__int64(*)(__int64, void*, __int64, __int64)>(oCBaseFileSystem__AsyncGetResult)(fsinterface, a2, a3, a4);
-}
-
-__int64 CBaseFileSystem__AsyncAbort(__int64 a1, __int64 a2) {
-	return reinterpret_cast<__int64(*)(__int64, __int64)>(oCBaseFileSystem__AsyncAbort)(fsinterface, a2);
-}
-
-__int64 CBaseFileSystem__AsyncStatus(__int64 a1, __int64 a2) {
-	return reinterpret_cast<__int64(*)(__int64, __int64)>(oCBaseFileSystem__AsyncStatus)(fsinterface, a2);
-}
-
-__int64 CBaseFileSystem__AsyncSetPriority(__int64 a1, __int64 a2, int a3) {
-	return reinterpret_cast<__int64(*)(__int64, __int64, int)>(oCBaseFileSystem__AsyncSetPriority)(fsinterface, a2, a3);
-}
-
-__int64 CBaseFileSystem__AsyncAddRef(__int64 a1, void* a2) {
-	return reinterpret_cast<__int64(*)(__int64, void* a2)>(oCBaseFileSystem__AsyncAddRef)(fsinterface, a2);
-}
-
-__int64 CBaseFileSystem__AsyncRelease(__int64 a1, __int64 a2) {
-	return reinterpret_cast<__int64(*)(__int64, __int64)>(oCBaseFileSystem__AsyncRelease)(fsinterface, a2);
-}
-
-__int64 sub_180024450(__int64 a) {
-	return reinterpret_cast<__int64(*)(__int64)>(osub_180024450)(fsinterface);
-}
-
-char sub_180024460(__int64 a1, __int64 a2, void* a3, _BYTE* a4) {
-	return reinterpret_cast<char(*)(__int64, __int64, void*, _BYTE*)>(osub_180024460)(fsinterface, a2, a3, a4);
-}
-
-void nullsub_96() {
-	
-}
-
-__int64 sub_180024490() {
-	return reinterpret_cast<__int64(*)()>(osub_180024490)();
-}
-
-char sub_180024440() {
-	return reinterpret_cast<char(*)()>(osub_180024440)();
-}
-
-void nullsub_97() {
-}
-
-__int64 sub_180009BE0(__int64 a1) {
-	return reinterpret_cast<__int64(*)(__int64)>(osub_180009BE0)(fsinterface);
-}
-
-void sub_18000F6A0(__int64 a1) {
-	reinterpret_cast<void(*)(__int64)>(osub_18000F6A0)(fsinterface);
-}
-
-void sub_180002CA0(__int64 a1, __int64 a2) {
-	reinterpret_cast<void(*)(__int64, __int64)>(osub_180002CA0)(fsinterface, a2);
-}
-
-void sub_180002CB0(__int64 a1, int a2) {
-	reinterpret_cast<void(*)(__int64, int)>(osub_180002CB0)(fsinterface, a2);
-}
-
-__int64 sub_1800154F0(__int64 a1, __int64 a2) {
-	return reinterpret_cast<__int64(*)(__int64, __int64)>(osub_1800154F0)(fsinterface, a2);
-}
-
-unsigned __int64 sub_180015550(__int64 a1, __int64 a2) {
-	return reinterpret_cast<unsigned __int64(*)(__int64, __int64)>(osub_180015550)(fsinterface, a2);
-}
-
-__int64 sub_180015420(__int64 a1, __int64 a2) {
-	return reinterpret_cast<__int64(*)(__int64, __int64)>(osub_180015420)(fsinterface, a2);
-}
-
-unsigned __int64 sub_180015480(__int64 a1, __int64 a2) {
-	return reinterpret_cast<unsigned __int64(*)(__int64, __int64)>(osub_180015480)(fsinterface, a2);
-}
-
-__int64 CBaseFileSystem__RemoveLoggingFunc(__int64 a1, __int64 a2, __int64 a3) {
-	return reinterpret_cast<__int64(*)(__int64, __int64, __int64)>(oCBaseFileSystem__RemoveLoggingFunc)(fsinterface, a2, a3);
-}
-
-__int64 CBaseFileSystem__GetFilesystemStatistics(__int64 a1) {
-	return reinterpret_cast<__int64(*)(__int64)>(oCBaseFileSystem__GetFilesystemStatistics)(fsinterface);
-}
-
-char* CFileSystem_Stdio__OpenEx(__int64 a1, _BYTE* a2, const char* a3, int a4, const char* a5, __int64 a6) {
-	return reinterpret_cast<char* (*)(__int64, _BYTE*, const char*, int, const char*, __int64)>(oCFileSystem_Stdio__OpenEx)(fsinterface, a2, a3, a4, a5, a6);
-}
-
-__int64 sub_18000A5D0(__int64 a1, __int64 a2, __int64 a3, __int64 a4, __int64 a5) {
-	return reinterpret_cast<__int64(*)(__int64, __int64, __int64, __int64, __int64)>(osub_18000A5D0)(fsinterface, a2, a3, a4, a5);
-}
-
-__int64 __fastcall sub_1800052A0(
-	void* a1,
-	__int64 a2,
-	__int64 a3,
-	void* a4,
-	char a5,
-	char a6,
-	__int64 a7,
-	__int64 a8,
-	__int64(__fastcall* a9)(__int64, __int64)) {
-	return reinterpret_cast<__int64(*)(__int64 a1,
-		__int64 a2,
-		__int64 a3,
-		void* a4,
-		char a5,
-		char a6,
-		__int64 a7,
-		__int64 a8,
-		__int64(__fastcall * a9)(__int64, __int64))>(osub_1800052A0)(fsinterface, a2, a3, a4, a5, a6, a7, a8, a9);
-}
-
-__int64 sub_180002F10(__int64 a1, __int64 a2) {
-	return reinterpret_cast<__int64(*)(__int64, __int64)>(osub_180002F10)(fsinterface, a2);
-}
-
-__int64 sub_18000A690(__int64 a1) {
-	return reinterpret_cast<__int64(*)(__int64)>(osub_18000A690)(fsinterface);
-}
-
-__int64 sub_18000A6F0(__int64 a1) {
-	return reinterpret_cast<__int64(*)(__int64)>(osub_18000A6F0)(fsinterface);
-}
-
-__int64 sub_1800057A0(__int64 a1, __int64 a2, __int64 a3, const char* a4, const char* a5) {
-	return reinterpret_cast<__int64(*)(__int64, __int64, __int64, const char*, const char*)>(osub_1800057A0)(fsinterface, a2, a3, a4, a5);
-}
-
-__int64 sub_180002960(__int64 a1, __int64 a2, __int64 a3, __int64 a4) {
-	return reinterpret_cast<__int64(*)(__int64, __int64, __int64, __int64)>(osub_180002960)(fsinterface, a2, a3, a4);
-}
-
-__int64 sub_180020110(__int64 a1, __int64 a2, __int64 a3, __int64 a4, char a5, char a6, __int64* a7) {
-	return reinterpret_cast<__int64(*)(__int64, __int64, __int64, __int64, char, char, __int64*)>(osub_180020110)(fsinterface, a2, a3, a4, a5, a6, a7);
-}
-
-__int64 sub_180020230(__int64 a1, __int64 a2, __int64 a3, __int64 a4, char a5, char a6, __int64 a7) {
-	return reinterpret_cast<__int64(*)(__int64, __int64, __int64, __int64, char, char, __int64)>(osub_180020230)(fsinterface, a2, a3, a4, a5, a6, a7);
-}
-
-__int64 sub_180023660(__int64 a1, __int64 a2, unsigned int a3, __int64 a4, int a5, __int64 a6) {
-	return reinterpret_cast<__int64(*)(__int64, __int64, unsigned int, __int64, int, __int64)>(osub_180023660)(fsinterface, a2, a3, a4, a5, a6);
-}
-
-__int64 sub_1800204A0(__int64 a1, int a2, unsigned __int8 a3, int a4, __int64 a5, __int64 a6, __int64* a7) {
-	return reinterpret_cast<__int64(*)(__int64, int, unsigned __int8, int, __int64, __int64, __int64*)>(osub_1800204A0)(fsinterface, a2, a3, a4, a5, a6, a7);
-}
-
-char sub_180002F40(__int64 a1, const CHAR* a2, wchar_t* a3, unsigned __int64 a4) {
-	return reinterpret_cast<char(*)(__int64, const CHAR*, wchar_t*, unsigned __int64)>(osub_180002F40)(fsinterface, a2, a3, a4);
-}
-
-bool sub_180004F00(__int64 a1, __int64 a2, __int64 a3, __int64 a4, void* a5) {
-	return reinterpret_cast<bool(*)(__int64, __int64, __int64, __int64, void*)>(osub_180004F00)(fsinterface, a2, a3, a4, a5);
-}
-
-bool sub_180024020(__int64 a1, __int64 a2, unsigned __int64* a3, unsigned __int64* a4, unsigned __int64* a5) {
-	return reinterpret_cast<bool(*)(__int64, __int64, unsigned __int64*, unsigned __int64*, unsigned __int64*)>(osub_180024020)(fsinterface, a2, a3, a4, a5);
-}
-
-void* sub_180024AF0(__int64 a1, __int64 a2, __int64 a3, unsigned __int64 a4) {
-	return reinterpret_cast<void* (*)(__int64, __int64, __int64, unsigned __int64)>(osub_180024AF0)(fsinterface, a2, a3, a4);
-}
-
-void sub_180024110(__int64 a1, void* a2) {
-	reinterpret_cast<void(*)(__int64, void*)>(osub_180024110)(fsinterface, a2);
-}
-
-char sub_180002580(__int64 a1, __int64 a2) {
-	return reinterpret_cast<char(*)(__int64 , __int64)>(osub_180002580)(fsinterface, a2);
-}
-
-char sub_180002560() {
-	return reinterpret_cast<char(*)()>(osub_180002560)();
-}
-
-void sub_18000A070(__int64 a1, int a2) {
-	reinterpret_cast<void(*)(__int64, int a2)>(osub_18000A070)(fsinterface, a2);
-}
-
-char sub_180009C20(__int64 a1, char* a2, __int64 a3) {
-	// Check if the path starts with "scripts/vscripts"
-	std::string path = a2;
-	if (path.rfind("scripts/vscripts", 0) == 0) {
-		// Replace "scripts/vscripts" with "scripts/vscripts/server"
-		path = "scripts/vscripts/server" + path.substr(16);
-	}
-
-	std::cout << "Server FS: " << path << std::endl;
-	return reinterpret_cast<char(*)(__int64, char*, __int64)>(osub_180009C20)(fsinterface, (char*)(path.c_str()), a3);
-}
-
-char sub_1800022F0(__int64 a1, __int64 a2, unsigned int a3, __int64 a4) {
-	return reinterpret_cast<char(*)(__int64, __int64, unsigned int, __int64)>(osub_1800022F0)(fsinterface, a2, a3, a4);
-}
-
-__int64 sub_180002330(__int64 a1, __int64 a2, int a3) {
-	return reinterpret_cast<__int64(*)(__int64, __int64, int)>(osub_180002330)(fsinterface, a2, a3);
-}
-
-__int64 sub_180009CF0(__int64 a1, __int64 a2) {
-	return reinterpret_cast<__int64(*)(__int64, __int64)>(osub_180009CF0)(fsinterface, a2);
-}
-
-void* sub_180002340(__int64 a1, void* a2, int a3) {
-	return reinterpret_cast<void* (*)(__int64, void* a2, int a3)>(osub_180002340)(fsinterface, a2, a3);
-}
-
-char sub_180002320() {
-	return reinterpret_cast<char(*)()>(osub_180002320)();
-}
-
-char sub_180009E00(__int64 a1, int a2, char* a3, unsigned int a4) {
-	return reinterpret_cast<char(*)(__int64, int, char*, unsigned int)>(osub_180009E00)(fsinterface, a2, a3, a4);
-}
-
-__int64 sub_180009F20(__int64 a1, const char* a2) {
-	return reinterpret_cast<__int64(*)(__int64, const char*)>(osub_180009F20)(fsinterface, a2);
-}
-
-__int64 sub_180009EA0(__int64 a1, __int64 a2, __int64 a3, char* a4, unsigned int a5) {
-	return reinterpret_cast<__int64(*)(__int64, __int64, __int64, char*, unsigned int)>(osub_180009EA0)(fsinterface, a2, a3, a4, a5);
-}
-
-__int64 sub_180009E50(__int64 a1, __int64 a2) {
-	return reinterpret_cast<__int64(*)(__int64, __int64)>(osub_180009E50)(fsinterface, a2);
-}
-
-__int64 sub_180009FC0(__int64 a1) {
-	return reinterpret_cast<__int64(*)(__int64)>(osub_180009FC0)(fsinterface);
-}
-
-__int64 sub_180004E80(__int64 a1, const char* a2) {
-	return reinterpret_cast<__int64(*)(__int64, const char*)>(osub_180004E80)(fsinterface, a2);
-}
-
-char* sub_18000A000(__int64 a1, const char* a2) {
-	return reinterpret_cast<char* (*)(__int64, const char*)>(osub_18000A000)(fsinterface, a2);
-}
-
-void sub_180014350(__int64 a1) {
-	reinterpret_cast<void(*)(__int64)>(osub_180014350)(fsinterface);
-}
-
-__int64 sub_18000F5B0(__int64 a1) {
-	return reinterpret_cast<__int64(*)(__int64)>(osub_18000F5B0)(fsinterface);
-}
-
-__int64 sub_180002590(__int64 a1, int a2, int a3, int a4, __int64 a5, __int64 a6, __int64 a7) {
-	return reinterpret_cast<__int64(*)(__int64, int, int, int, __int64, __int64, __int64)>(osub_180002590)(fsinterface, a2, a3, a4, a5, a6, a7);
-}
-
-__int64 sub_1800025D0() {
-	return reinterpret_cast<__int64(*)()>(osub_1800025D0)();
-}
-
-void sub_1800025E0(__int64 a1, __int64 a2, __int64 a3, void* a4) {
-	reinterpret_cast<void(*)(__int64, __int64, __int64, void*)>(osub_1800025E0)(fsinterface, a2, a3, a4);
-}
-
-char CFileSystem_Stdio__LoadVPKForMap(__int64 a1, const char* a2) {
-	return reinterpret_cast<char(*)(__int64, const char*)>(oCFileSystem_Stdio__LoadVPKForMap)(fsinterface, a2);
-}
-
-char CFileSystem_Stdio__UnkFunc1(__int64 a1, const char* a2, __int64 a3, char* a4, __int64 Count) {
-	return reinterpret_cast<char(*)(__int64, const char*, __int64, char*, __int64)>(oCFileSystem_Stdio__UnkFunc1)(fsinterface, a2, a3, a4, Count);
-}
-
-__int64 CFileSystem_Stdio__WeirdFuncThatJustDerefsRDX(__int64 a1, unsigned __int16* a2) {
-	return reinterpret_cast<__int64(*)(__int64, unsigned __int16*)>(oCFileSystem_Stdio__WeirdFuncThatJustDerefsRDX)(fsinterface, a2);
-}
-
-__int64 CFileSystem_Stdio__GetPathTime(__int64 a1, char* a2, __int64 a3) {
-	return reinterpret_cast<__int64(*)(__int64, char*, __int64)>(oCFileSystem_Stdio__GetPathTime)(fsinterface, a2, a3);
-}
-
-__int64 CFileSystem_Stdio__GetFSConstructedFlag() {
-	return reinterpret_cast<__int64(*)()>(oCFileSystem_Stdio__GetFSConstructedFlag)();
-}
-
-__int64 CFileSystem_Stdio__EnableWhitelistFileTracking(__int64 a1, unsigned __int8 a2) {
-	return reinterpret_cast<__int64(*)(__int64, unsigned __int8)>(oCFileSystem_Stdio__EnableWhitelistFileTracking)(fsinterface, a2);
-}
-
-void sub_18000A750(__int64 a1, __int64 a2, __int64 a3, __int64 a4) {
-	reinterpret_cast<void(*)(__int64, __int64, __int64, __int64)>(osub_18000A750)(fsinterface, a2, a3, a4);
-}
-
-__int64 sub_180002B20(__int64 a1) {
-	return reinterpret_cast<__int64(*)(__int64)>(osub_180002B20)(fsinterface);
-}
-
-void sub_18001DC30(__int64 a1, __int64 a2, int a3, int a4) {
-	reinterpret_cast<void(*)(__int64, __int64, int, int)>(osub_18001DC30)(fsinterface, a2, a3, a4);
-}
-
-__int64 sub_180002B30(__int64 a1, __int64 a2, __int64 a3, void* a4) {
-	return reinterpret_cast<__int64(*)(__int64, __int64, __int64, void*)>(osub_180002B30)(fsinterface, a2, a3, a4);
-}
-
-__int64 sub_180002BA0(__int64 a1, __int64 a2, int a3) {
-	return reinterpret_cast<__int64(*)(__int64, __int64 a2, int a3)>(osub_180002BA0)(fsinterface, a2, a3);
-}
-
-__int64 sub_180002BB0(__int64 a1) {
-	return reinterpret_cast<__int64(*)(__int64)>(osub_180002BB0)(fsinterface);
-}
-
-void sub_180002BC0(__int64 a1, int a2) {
-	reinterpret_cast<void(*)(__int64, int)>(osub_180002BC0)(fsinterface, a2);
-}
-
-void sub_180002290(__int64 a1, __int64 a2) {
-	reinterpret_cast<void(*)(__int64, __int64)>(osub_180002290)(fsinterface, a2);
-}
-
-__int64 sub_18001CCD0() {
-	return reinterpret_cast<__int64(*)()>(osub_18001CCD0)();
-}
-
-__int64 sub_18001CCE0() {
-	return reinterpret_cast<__int64(*)()>(osub_18001CCE0)();
-}
-
-__int64 sub_18001CCF0() {
-	return reinterpret_cast<__int64(*)()>(osub_18001CCF0)();
-}
-
-__int64 sub_18001CD00() {
-	return reinterpret_cast<__int64(*)()>(osub_18001CD00)();
-}
-
-__int64 sub_180014520(__int64 a1, char* a2, unsigned __int64 a3) {
-	return reinterpret_cast<__int64(*)(__int64, char*, unsigned __int64)>(osub_180014520)(fsinterface, a2, a3);
-}
-
-__int64 sub_180002650() {
-	return reinterpret_cast<__int64(*)()>(osub_180002650)();
-}
-
-__int64 sub_18001CD10(__int64 a1) {
-	return reinterpret_cast<__int64(*)(__int64)>(osub_18001CD10)(fsinterface);
-}
-
-__int64 sub_180016250(__int64 a1, __int64 a2, __int64 a3) {
-	return reinterpret_cast<__int64(*)(__int64, __int64, __int64)>(osub_180016250)(fsinterface, a2, a3);
-}
-
-void sub_18000F0D0(__int64 a1, char* a2) {
-	reinterpret_cast<void(*)(__int64, char*)>(osub_18000F0D0)(fsinterface, a2);
-}
-
-void sub_1800139F0(__int64 a1, __int64 a2) {
-	reinterpret_cast<void(*)(__int64, __int64)>(osub_1800139F0)(fsinterface, a2);
-}
-
-__int64 sub_180016570(__int64 a1) {
-	return reinterpret_cast<__int64(*)(__int64)>(osub_180016570)(fsinterface);
-}
-
-void nullsub_86() {
-}
-
-char sub_18000AEC0() {
-	return reinterpret_cast<char(*)()>(osub_18000AEC0)();
-}
-
-char sub_180003320() {
-	return reinterpret_cast<char(*)()>(osub_180003320)();
-}
-
-__int64 sub_18000AF50() {
-	return reinterpret_cast<__int64(*)(__int64)>(osub_18000AF50)(fsinterface);
-}
-
-char sub_18000AF60() {
-	return reinterpret_cast<char(*)(__int64)>(osub_18000AF60)(fsinterface);
-}
-
-__int64 sub_180005D00() {
-	return reinterpret_cast<__int64(*)(__int64)>(osub_180005D00)(fsinterface);
-}
-
-char sub_18000AF70() {
-	return reinterpret_cast<char(*)(__int64)>(osub_18000AF70)(fsinterface);
-}
-
-char sub_18001B130() {
-	return reinterpret_cast<char(*)(__int64)>(osub_18001B130)(fsinterface);
-}
-
-char sub_18000AF80(__int64 a1, int a2) {
-	return reinterpret_cast<char(*)(__int64, int)>(osub_18000AF80)(fsinterface, a2);
-}
-
-void sub_1800034D0(__int64 a1, float a2) {
-	reinterpret_cast<void(*)(__int64, float)>(osub_1800034D0)(fsinterface, a2);
-}
-
-char sub_180017180() {
-	return reinterpret_cast<char(*)(__int64)>(osub_180017180)(fsinterface);
-}
-
-__int64 sub_180003550() {
-	return reinterpret_cast<__int64(*)(__int64)>(osub_180003550)(fsinterface);
-}
-
-__int64 sub_1800250D0(__int64 a1, CHAR* a2, char* a3, __int64 a4, __int64 a5, __int64 a6) {
-	return reinterpret_cast<__int64(*)(__int64, CHAR*, char*, __int64, __int64, __int64)>(osub_1800250D0)(fsinterface, a2, a3, a4, a5, a6);
-}
-
-__int64 sub_1800241B0(__int64 a1, __int64 a2, __int64 a3) {
-	return reinterpret_cast<__int64(*)(__int64, __int64, __int64)>(osub_1800241B0)(fsinterface, a2, a3);
-}
-
-__int64 sub_1800241C0(__int64 a1, __int64 a2) {
-	return reinterpret_cast<__int64(*)(__int64, __int64)>(osub_1800241C0)(fsinterface, a2);
-}
-
-__int64 sub_1800241F0(__int64 a1, __int64 a2, __int64 a3, unsigned int a4) {
-	return reinterpret_cast<__int64(*)(__int64, __int64, __int64, unsigned int)>(osub_1800241F0)(fsinterface, a2, a3, a4);
-}
-
-__int64 sub_180024240(__int64 a1, __int64 a2) {
-	return reinterpret_cast<__int64(*)(__int64, __int64)>(osub_180024240)(fsinterface, a2);
-}
-
-__int64 sub_180024250(__int64 a1, __int64 a2) {
-	return reinterpret_cast<__int64(*)(__int64, __int64)>(osub_180024250)(fsinterface, a2);
-}
-
-__int64 sub_180024260(__int64 a1, __int64 a2, __int64 a3, __int64 a4, __int64 a5) {
-	return reinterpret_cast<__int64(*)(int, __int64, __int64, __int64, __int64)>(osub_180024260)(fsinterface, a2, a3, a4, a5);
-}
-
-__int64 sub_180024300(__int64 a1, __int64 a2, __int64 a3, __int64 a4) {
-	return reinterpret_cast<__int64(*)(__int64, __int64, __int64, __int64)>(osub_180024300)(fsinterface, a2, a3, a4);
-}
-
-__int64 sub_180024310(__int64 a1, __int64 a2, unsigned int a3) {
-	return reinterpret_cast<__int64(*)(__int64, __int64, unsigned int)>(osub_180024310)(fsinterface, a2, a3);
-}
-
-__int64 sub_180024320(__int64 a1, __int64 a2, __int64 a3, __int64 a4) {
-	return reinterpret_cast<__int64(*)(__int64, __int64, __int64, __int64)>(osub_180024320)(fsinterface, a2, a3, a4);
-}
-
-__int64 sub_180024340(__int64 a1, __int64 a2) {
-	return reinterpret_cast<__int64(*)(__int64, __int64)>(osub_180024340)(fsinterface, a2);
-}
-
-__int64 sub_180024350(__int64 a1, __int64 a2) {
-	return reinterpret_cast<__int64(*)(__int64, __int64)>(osub_180024350)(fsinterface, a2);
-}
-
-__int64 sub_180024360(__int64 a1, __int64 a2, __int64 a3, __int64 a4) {
-	return reinterpret_cast<__int64(*)(__int64, __int64, __int64, __int64)>(osub_180024360)(fsinterface, a2, a3, a4);
-}
-
-int sub_180024390(__int64 a1, const char* a2, struct _stat64i32* a3) {
-	return reinterpret_cast<int(*)(__int64, const char*, struct _stat64i32*)>(osub_180024390)(fsinterface, a2, a3);
-}
-
-int sub_180024370(__int64 a1, const char* a2, int a3) {
-	return reinterpret_cast<int(*)(__int64, const char*, int)>(osub_180024370)(fsinterface, a2, a3);
-}
-
-HANDLE sub_1800243C0(__int64 a1, const CHAR* a2, void* a3) {
-	return reinterpret_cast<HANDLE(*)(__int64, const CHAR*, void*)>(osub_1800243C0)(fsinterface, a2, a3);
-}
-
-bool sub_1800243F0(__int64 a1, void* a2, struct _WIN32_FIND_DATAA* a3) {
-	return reinterpret_cast<bool(*)(__int64, void*, struct _WIN32_FIND_DATAA*)>(osub_1800243F0)(fsinterface, a2, a3);
-}
-
-bool sub_180024410(__int64 a1, void* a2) {
-	return reinterpret_cast<bool(*)(__int64, void*)>(osub_180024410)(fsinterface, a2);
-}
-
-__int64 sub_180024430(__int64 a1, __int64 a2) {
-	return reinterpret_cast<__int64(*)(__int64, __int64)>(osub_180024430)(fsinterface, a2);
-}
 
 uintptr_t modelinterface;
-uintptr_t oCModelInfo_dtor_0;
-uintptr_t oCModelInfoServer__GetModel;
-uintptr_t oCModelInfoServer__GetModelIndex;
-uintptr_t oCModelInfo__GetModelName;
-uintptr_t oCModelInfo__GetVCollide;
-uintptr_t oCModelInfo__GetVCollideEx;
-uintptr_t oCModelInfo__GetVCollideEx2;
-uintptr_t oCModelInfo__GetModelRenderBounds;
-uintptr_t oCModelInfo__GetModelFrameCount;
-uintptr_t oCModelInfo__GetModelType;
-uintptr_t oCModelInfo__GetModelExtraData;
-uintptr_t oCModelInfo__IsTranslucentTwoPass;
-uintptr_t oCModelInfo__ModelHasMaterialProxy;
-uintptr_t oCModelInfo__IsTranslucent;
-uintptr_t oCModelInfo__NullSub1;
-uintptr_t oCModelInfo__UnkFunc1;
-uintptr_t oCModelInfo__UnkFunc2;
-uintptr_t oCModelInfo__UnkFunc3;
-uintptr_t oCModelInfo__UnkFunc4;
-uintptr_t oCModelInfo__UnkFunc5;
-uintptr_t oCModelInfo__UnkFunc6;
-uintptr_t oCModelInfo__UnkFunc7;
-uintptr_t oCModelInfo__UnkFunc8;
-uintptr_t oCModelInfo__UnkFunc9;
-uintptr_t oCModelInfo__UnkFunc10;
-uintptr_t oCModelInfo__UnkFunc11;
-uintptr_t oCModelInfo__UnkFunc12;
-uintptr_t oCModelInfo__UnkFunc13;
-uintptr_t oCModelInfo__UnkFunc14;
-uintptr_t oCModelInfo__UnkFunc15;
-uintptr_t oCModelInfo__UnkFunc16;
-uintptr_t oCModelInfo__UnkFunc17;
-uintptr_t oCModelInfo__UnkFunc18;
-uintptr_t oCModelInfo__UnkFunc19;
-uintptr_t oCModelInfo__UnkFunc20;
-uintptr_t oCModelInfo__UnkFunc21;
-uintptr_t oCModelInfo__UnkFunc22;
-uintptr_t oCModelInfo__UnkFunc23;
-uintptr_t oCModelInfo__NullSub2;
-uintptr_t oCModelInfo__UnkFunc24;
-uintptr_t oCModelInfo__UnkFunc25;
-#define _QWORD __int64
-#define _DWORD int
-_QWORD* __fastcall CModelInfo_dtor_0(_QWORD* a1, char a2) {
-	return reinterpret_cast<_QWORD * (*)(__int64 a1, char a2)>(oCModelInfo_dtor_0)((__int64)modelinterface, a2);
-}
-
-int* __fastcall CModelInfoServer__GetModel(__int64 a1, int a2) {
-	return reinterpret_cast<int*(*)(__int64, int)>(oCModelInfoServer__GetModel)((__int64)modelinterface, a2);
-}
-
-int CModelInfoServer__GetModelIndex(__int64 a1, void* a2) {
-	return reinterpret_cast<int(*)(__int64, void*)>(oCModelInfoServer__GetModelIndex)((__int64)modelinterface, a2);
-}
-
-const char* __fastcall CModelInfo__GetModelName(__int64 a1, __int64 a2) {
-	return reinterpret_cast<const char* (*)(__int64 a1, __int64 a2)>(oCModelInfo__GetModelName)((__int64)modelinterface, a2);
-}
-
-__int64 __fastcall CModelInfo__GetVCollide(__int64 a1, int a2) {
-	return reinterpret_cast<__int64(*)(__int64 a1, int a2)>(oCModelInfo__GetVCollide)((__int64)modelinterface, a2);
-}
-
-__int64 __fastcall CModelInfo__GetVCollideEx(__int64* a1, __int64 a2) {
-	return reinterpret_cast<__int64(*)(__int64 a1, __int64 a2)>(oCModelInfo__GetVCollideEx)((__int64)modelinterface, a2);
-}
-
-__int64 __fastcall CModelInfo__GetVCollideEx2(__int64 a1, __int64 a2, _DWORD* a3, _DWORD* a4) {
-	return reinterpret_cast<__int64(*)(__int64 a1, __int64 a2, _DWORD * a3, _DWORD * a4)>(oCModelInfo__GetVCollideEx2)((__int64)modelinterface, a2, a3, a4);
-}
-
-__int64 __fastcall CModelInfo__GetModelRenderBounds(__int64 a1, __int64 a2, _DWORD* a3, _DWORD* a4) {
-	return reinterpret_cast<__int64(*)(__int64 a1, __int64 a2, _DWORD * a3, _DWORD * a4)>(oCModelInfo__GetModelRenderBounds)((__int64)modelinterface, a2, a3, a4);
-}
-
-
-__int64 __fastcall CModelInfo__GetModelFrameCount(__int64 a1, __int64 a2) {
-	return reinterpret_cast<__int64(*)(__int64 a1, __int64 a2)>(oCModelInfo__GetModelFrameCount)((__int64)modelinterface, a2);
-}
-
-__int64 __fastcall CModelInfo__GetModelType(__int64 a1, __int64 a2) {
-	return reinterpret_cast<__int64(*)(__int64 a1, __int64 a2)>(oCModelInfo__GetModelType)((__int64)modelinterface, a2);
-}
-
-
-__int64 __fastcall CModelInfo__GetModelExtraData(__int64 a1, __int64 a2) {
-	return reinterpret_cast<__int64(*)(__int64 a1, __int64 a2)>(oCModelInfo__GetModelExtraData)((__int64)modelinterface, a2);
-}
-
-bool __fastcall CModelInfo__IsTranslucentTwoPass(__int64 a1, __int64 a2) {
-	return reinterpret_cast<bool(*)(__int64 a1, __int64 a2)>(oCModelInfo__IsTranslucentTwoPass)((__int64)modelinterface, a2);
-}
-
-bool __fastcall CModelInfo__ModelHasMaterialProxy(__int64 a1, __int64 a2) {
-	return reinterpret_cast<bool(*)(__int64 a1, __int64 a2)>(oCModelInfo__ModelHasMaterialProxy)((__int64)modelinterface, a2);
-}
-
-bool __fastcall CModelInfo__IsTranslucent(__int64 a1, __int64 a2) {
-	return reinterpret_cast<bool(*)(__int64 a1, __int64 a2)>(oCModelInfo__IsTranslucent)((__int64)modelinterface, a2);
-}
-
-void CModelInfo__NullSub1() {
-}
-
-__int64 __fastcall CModelInfo__UnkFunc1(__int64 a1, __int64 a2, unsigned int a3, unsigned int a4) {
-	return reinterpret_cast<__int64(*)(__int64 a1, __int64 a2, unsigned int a3, unsigned int a4)>(oCModelInfo__UnkFunc1)((__int64)modelinterface, a2, a3, a4);
-}
-
-__int64 __fastcall CModelInfo__UnkFunc2(__int64 a1, __int64 a2) {
-	return reinterpret_cast<__int64(*)(__int64 a1, __int64 a2)>(oCModelInfo__UnkFunc2)((__int64)modelinterface, a2);
-}
-
-__int64 __fastcall CModelInfo__UnkFunc3(__int64 a1, __int64 a2, unsigned int a3, __int64 a4) {
-	return reinterpret_cast<__int64(*)(__int64 a1, __int64 a2, unsigned int a3, __int64 a4)>(oCModelInfo__UnkFunc3)((__int64)modelinterface, a2, a3, a4);
-}
-
-bool __fastcall CModelInfo__UnkFunc4(__int64 a1, __int64 a2) {
-	return reinterpret_cast<bool(*)(__int64 a1, __int64 a2)>(oCModelInfo__UnkFunc4)((__int64)modelinterface, a2);
-}
-
-__int64 __fastcall CModelInfo__UnkFunc5(__int64 a1, __int64 a2) {
-	return reinterpret_cast<__int64(*)(__int64 a1, __int64 a2)>(oCModelInfo__UnkFunc5)((__int64)modelinterface, a2);
-}
-
-char __fastcall CModelInfo__UnkFunc6(__int64 a1, __int64 a2, __int64 a3) {
-	return reinterpret_cast<char(*)(__int64 a1, __int64 a2, __int64 a3)>(oCModelInfo__UnkFunc6)((__int64)modelinterface, a2, a3);
-}
-
-float __fastcall CModelInfo__UnkFunc7(__int64 a1, __int64 a2) {
-	return reinterpret_cast<float(*)(__int64 a1, __int64 a2)>(oCModelInfo__UnkFunc7)((__int64)modelinterface, a2);
-}
-
-__int64 CModelInfo__UnkFunc8() {
-	return reinterpret_cast<__int64(*)(__int64)>(oCModelInfo__UnkFunc8)((__int64)modelinterface);
-}
-
-__int64 __fastcall CModelInfo__UnkFunc9(__int64 a1, __int64 a2, __int64* a3, __int64 a4) {
-	return reinterpret_cast<__int64(*)(__int64 a1, __int64 a2, __int64* a3, __int64 a4)>(oCModelInfo__UnkFunc9)((__int64)modelinterface, a2, a3, a4);
-}
-
-__int64 __fastcall CModelInfo__UnkFunc10(__int64 a1, __int64 a2) {
-	return reinterpret_cast<__int64(*)(__int64 a1, __int64 a2)>(oCModelInfo__UnkFunc10)((__int64)modelinterface, a2);
-}
-
-__int64 __fastcall CModelInfo__UnkFunc11(__int64 a1, __int64 a2) {
-	return reinterpret_cast<__int64(*)(__int64 a1, __int64 a2)>(oCModelInfo__UnkFunc11)((__int64)modelinterface, a2);
-}
-
-__int64 __fastcall CModelInfo__UnkFunc12(__int64 a1, __int64 a2) {
-	return reinterpret_cast<__int64(*)(__int64 a1, __int64 a2)>(oCModelInfo__UnkFunc12)((__int64)modelinterface, a2);
-}
-
-__int64 __fastcall CModelInfo__UnkFunc13(__int64 a1, __int64 a2, __int64 a3, int* a4, __int64 a5, int* a6) {
-	return reinterpret_cast<__int64(*)(__int64 a1, __int64 a2, __int64 a3, int* a4, __int64 a5, int* a6)>(oCModelInfo__UnkFunc13)((__int64)modelinterface, a2, a3, a4, a5, a6);
-}
-
-__int64 __fastcall CModelInfo__UnkFunc14(__int64 a1, int a2) {
-	return reinterpret_cast<__int64(*)(__int64 a1, int a2)>(oCModelInfo__UnkFunc14)((__int64)modelinterface, a2);
-}
-
-__int64 __fastcall CModelInfo__UnkFunc15(__int64 a1, __int64 a2) {
-	return reinterpret_cast<__int64(*)(__int64 a1, __int64 a2)>(oCModelInfo__UnkFunc15)((__int64)modelinterface, a2);
-}
-
-__int64 __fastcall CModelInfo__UnkFunc16(__int64 a1, __int64 a2) {
-	return reinterpret_cast<__int64(*)(__int64 a1, __int64 a2)>(oCModelInfo__UnkFunc16)((__int64)modelinterface, a2);
-}
-
-__int64 __fastcall CModelInfo__UnkFunc17(__int64 a1, __int64 a2) {
-	return reinterpret_cast<__int64(*)(__int64 a1, __int64 a2)>(oCModelInfo__UnkFunc17)((__int64)modelinterface, a2);
-}
-
-__int64 __fastcall CModelInfo__UnkFunc18(__int64 a1, __int64 a2) {
-	return reinterpret_cast<__int64(*)(__int64 a1, __int64 a2)>(oCModelInfo__UnkFunc18)((__int64)modelinterface, a2);
-}
-
-__int64 __fastcall CModelInfo__UnkFunc19(__int64 a1, unsigned int a2) {
-	return reinterpret_cast<__int64(*)(__int64 a1, unsigned int a2)>(oCModelInfo__UnkFunc19)((__int64)modelinterface, a2);
-}
-
-char __fastcall CModelInfo__UnkFunc20(__int64 a1, __int64 a2, __int64 a3, __int64 a4, __int64 a5) {
-	return reinterpret_cast<char(*)(__int64 a1, __int64 a2, __int64 a3, __int64 a4, __int64 a5)>(oCModelInfo__UnkFunc20)((__int64)modelinterface, a2, a3, a4, a5);
-}
-
-__int64 __fastcall CModelInfo__UnkFunc21(__int64* a1, __int64 a2) {
-	return reinterpret_cast<__int64(*)(__int64 a1, __int64 a2)>(oCModelInfo__UnkFunc21)((__int64)modelinterface, a2);
-}
-
-__int64 __fastcall CModelInfo__UnkFunc22(__int64 a1, __int64 a2) {
-	return reinterpret_cast<__int64(*)(__int64 a1, __int64 a2)>(oCModelInfo__UnkFunc22)((__int64)modelinterface, a2);
-}
-
-__int64 CModelInfo__UnkFunc23() {
-	return reinterpret_cast<__int64(*)(__int64)>(oCModelInfo__UnkFunc23)((__int64)modelinterface);
-}
-
-void CModelInfo__NullSub2() {
-	reinterpret_cast<void(*)(__int64)>(oCModelInfo__NullSub2)((__int64)modelinterface);
-}
-
-bool __fastcall CModelInfo__UnkFunc24(__int64 a1, __int64 a2) {
-	return reinterpret_cast<bool(*)(__int64 a1, __int64 a2)>(oCModelInfo__UnkFunc24)((__int64)modelinterface, a2);
-}
-
-__int64 __fastcall CModelInfo__UnkFunc25(__int64 a1, __int64 a2) {
-	return reinterpret_cast<__int64(*)(__int64 a1, __int64 a2)>(oCModelInfo__UnkFunc25)((__int64)modelinterface, a2);
-}
 uintptr_t stringtableinterface;
-uintptr_t oCNetworkStringTableContainer_dtor;
-uintptr_t oCNetworkStringTableContainer__CreateStringTable;
-uintptr_t oCNetworkStringTableContainer__RemoveAllTables;
-uintptr_t oCNetworkStringTableContainer__FindTable;
-uintptr_t oCNetworkStringTableContainer__GetTable;
-uintptr_t oCNetworkStringTableContainer__GetNumTables;
-uintptr_t oCNetworkStringTableContainer__SetAllowClientSideAddString;
-uintptr_t oCNetworkStringTableContainer__CreateDictionary;
-void CNetworkStringTableContainer_dtor(__int64 a1, char a2) {
-	reinterpret_cast<void(*)(__int64, char)>(oCNetworkStringTableContainer_dtor)(a1, a2);
-}
-
-__int64 CNetworkStringTableContainer__CreateStringTable(__int64 a1, const char* a2, unsigned int a3, int a4, int a5, int a6) {
-	return reinterpret_cast<__int64(*)(__int64, const char*, unsigned int, int, int, int)>(oCNetworkStringTableContainer__CreateStringTable)(stringtableinterface, a2, a3, a4, a5, a6);
-}
-
-void CNetworkStringTableContainer__RemoveAllTables(__int64 a1) {
-	reinterpret_cast<void(*)(__int64)>(oCNetworkStringTableContainer__RemoveAllTables)(stringtableinterface);
-}
-
-__int64 CNetworkStringTableContainer__FindTable(__int64 a1, unsigned __int8* a2) {
-	return reinterpret_cast<__int64(*)(__int64, unsigned __int8*)>(oCNetworkStringTableContainer__FindTable)(stringtableinterface, a2);
-}
-
-__int64 CNetworkStringTableContainer__GetTable(__int64 a1, int a2) {
-	return reinterpret_cast<__int64(*)(__int64, int)>(oCNetworkStringTableContainer__GetTable)(stringtableinterface, a2);
-}
-
-__int64 CNetworkStringTableContainer__GetNumTables(__int64 a1) {
-	return reinterpret_cast<__int64(*)(__int64)>(oCNetworkStringTableContainer__GetNumTables)(stringtableinterface);
-}
-
-void CNetworkStringTableContainer__SetAllowClientSideAddString(__int64 a1, __int64 a2, char a3) {
-	reinterpret_cast<void(*)(__int64, __int64, char)>(oCNetworkStringTableContainer__SetAllowClientSideAddString)(stringtableinterface, a2, a3);
-}
-
-
-void CNetworkStringTableContainer__CreateDictionary(__int64 a1, __int64 a2) {
-	reinterpret_cast<void(*)(__int64, __int64)>(oCNetworkStringTableContainer__CreateDictionary)(stringtableinterface, a2);
-}
-
-uintptr_t oCCvar__Connect;
-uintptr_t oCCvar__Disconnect;
-uintptr_t oCCvar__QueryInterface;
-uintptr_t oCCVar__Init;
-uintptr_t oCCVar__Shutdown;
-uintptr_t oCCvar__GetDependencies;
-uintptr_t oCCVar__GetTier;
-uintptr_t oCCVar__Reconnect;
-uintptr_t oCCvar__AllocateDLLIdentifier;
-uintptr_t oCCvar__UnregisterConCommands;
-uintptr_t oCCvar__GetCommandLineValue;
-uintptr_t oCCVar__Find;
-uintptr_t oCCvar__InstallConsoleDisplayFunc;
-uintptr_t oCCvar__RemoveConsoleDisplayFunc;
-uintptr_t oCCvar__ConsoleColorPrintf;
-uintptr_t oCCvar__ConsolePrintf;
-uintptr_t oCCvar__ConsoleDPrintf;
-uintptr_t oCCVar__RevertFlaggedConVars;
-uintptr_t oCCvar__InstallCVarQuery;
-uintptr_t oCCvar__SetMaxSplitScreenSlots;
-uintptr_t oCCvar__GetMaxSplitScreenSlots;
-uintptr_t oCCvar__GetConsoleDisplayFuncCount;
-uintptr_t oCCvar__GetConsoleText;
-uintptr_t oCCvar__IsMaterialThreadSetAllowed;
-uintptr_t oCCvar__HasQueuedMaterialThreadConVarSets;
-uintptr_t oCCvar__FactoryInternalIterator;
-char CCvar__Connect(void* thisptr, void* (__cdecl* factory)(const char*, int*))
-{
-	return reinterpret_cast<char(*)(void*, void* (__cdecl*)(const char*, int*))>(oCCvar__Connect)((void*)cvarinterface, factory);
-}
-
-void CCvar__Disconnect(void* thisptr)
-{
-	return reinterpret_cast<void(*)(void*)>(oCCvar__Disconnect)((void*)cvarinterface);
-}
-char* CCvar__QueryInterface(void* thisptr, const char* pInterfaceName)
-{
-	return reinterpret_cast<char*(*)(void*, const char*)>(oCCvar__QueryInterface)((void*)cvarinterface, pInterfaceName);
-}
-int CCvar__Init(void* thisptr) {
-	return 1;
-}
-void CCvar__Shutdown(void* thisptr) {
-	
-}
-__int64 CCvar__GetDependencies()
-{
-	return 0;
-}
-__int64 CCVar__GetTier()
-{
-	return 4;
-}
-void CCvar__Reconnect(void* thisptr, void* factory, const char* pInterfaceName)
-{
-	return reinterpret_cast<void(*)(void*, void*, const char*)>(oCCVar__Reconnect)((void*)cvarinterface, factory, pInterfaceName);
-}
-int CCvar__AllocateDLLIdentifier(void* thisptr)
-{
-	return reinterpret_cast<int (*)(void*)>(oCCvar__AllocateDLLIdentifier)((void*)cvarinterface);
-}
-void CCvar__UnregisterConCommands(void* thisptr, int id)
-{
-	return reinterpret_cast<void (*)(void*, int id)>(oCCvar__UnregisterConCommands)((void*)cvarinterface, id);
-}
-const char* CCvar__GetCommandLineValue(void* thisptr, const char* pVariableName)
-{
-	return reinterpret_cast<const char* (*)(void*, const char*)>(oCCvar__GetCommandLineValue)((void*)cvarinterface, pVariableName);
-}
-void __fastcall CCVar__Find(__int64 a1, __int64 a2, __int64 a3) {
-	return reinterpret_cast<void (*)(void*, __int64 a2, __int64 a3)>(oCCVar__Find)((void*)cvarinterface, a2, a3);
-}
-void CCvar__InstallConsoleDisplayFunc(void* thisptr, void* pDisplayFunc)
-{
-	return reinterpret_cast<void (*)(void*, void*)>(oCCvar__InstallConsoleDisplayFunc)((void*)cvarinterface, pDisplayFunc);
-}
-void CCvar__RemoveConsoleDisplayFunc(void* thisptr, void* pDisplayFunc) {
-	return reinterpret_cast<void (*)(void*, void*)>(oCCvar__RemoveConsoleDisplayFunc)((void*)cvarinterface, pDisplayFunc);
-}
-void CCvar__ConsoleColorPrintf(void* a1, const void* clr, char* pFormat, ...)
-{
-	va_list args;
-	va_start(args, pFormat);
-	reinterpret_cast<void(*)(__int64, const void*, const char*, va_list)>(oCCvar__ConsoleColorPrintf)(fsinterface, clr, pFormat, args);
-	va_end(args);
-}
-void CCvar__ConsolePrintf(void* a1, char* pFormat, ...)
-{
-	va_list args;
-	va_start(args, pFormat);
-	reinterpret_cast<void(*)(__int64, const char*, va_list)>(oCCvar__ConsolePrintf)(fsinterface, pFormat, args);
-	va_end(args);
-}
-void CCvar__ConsoleDPrintf(void* a1, char* pFormat, ...)
-{
-	va_list args;
-	va_start(args, pFormat);
-	reinterpret_cast<void(*)(__int64, const char*, va_list)>(oCCvar__ConsoleDPrintf)(fsinterface, pFormat, args);
-	va_end(args);
-}
-void CCvar__RevertFlaggedConVars(void* thisptr, int nFlag)
-{
-	return reinterpret_cast<void (*)(void* thisptr, int nFlag)>(oCCVar__RevertFlaggedConVars)((void*)cvarinterface, nFlag);
-}
-void CCvar__InstallCVarQuery(void* thisptr, void* pQuery)
-{
-	return reinterpret_cast<void (*)(void* thisptr, void* pQuery)>(oCCvar__InstallCVarQuery)((void*)cvarinterface, pQuery);
-}
-void CCvar__SetMaxSplitScreenSlots(void* thisptr, int nSlots)
-{
-	return reinterpret_cast<void (*)(void* thisptr, int nFlag)>(oCCvar__SetMaxSplitScreenSlots)((void*)cvarinterface, nSlots);
-}
-int CCvar__GetMaxSplitScreenSlots(void* thisptr)
-{
-	return reinterpret_cast<int (*)(void* thisptr)>(oCCvar__GetMaxSplitScreenSlots)((void*)cvarinterface);
-}
-int CCvar_GetConsoleDisplayFuncCount(void* thisptr)
-{
-	return reinterpret_cast<int (*)(void* thisptr)>(oCCvar__GetConsoleDisplayFuncCount)((void*)cvarinterface);
-}
-void CCvar__GetConsoleText(void* thisptr, int nDisplayFuncIndex, char* pchText, unsigned int bufSize)
-{
-	return reinterpret_cast<void (*)(void* thisptr, int nDisplayFuncIndex, char* pchText, unsigned int bufSize)>(oCCvar__GetConsoleText)((void*)cvarinterface, nDisplayFuncIndex, pchText, bufSize);
-}
-bool CCvar__IsMaterialThreadSetAllowed(void* thisptr)
-{
-	return reinterpret_cast<bool (*)(void* thisptr)>(oCCvar__IsMaterialThreadSetAllowed)((void*)cvarinterface);
-}
-bool CCvar__HasQueuedMaterialThreadConVarSets(void* thisptr)
-{
-	return reinterpret_cast<bool (*)(void* thisptr)>(oCCvar__HasQueuedMaterialThreadConVarSets)((void*)cvarinterface);
-}
-void* CCvar__FactoryInternalIterator(void* thisptr) {
-	return reinterpret_cast<void* (*)(void* thisptr)>(oCCvar__FactoryInternalIterator)((void*)cvarinterface);
-}
-
 uintptr_t fsinterfaceoffset;
-uintptr_t oCBaseFileSystem_Read;
-uintptr_t oCBaseFileSystem_Write;
-uintptr_t oCBaseFileSystem_Open;
-uintptr_t oCBaseFileSystem_Close;
-uintptr_t oCBaseFileSystem_Seek;
-uintptr_t oCBaseFileSystem_Tell;
-uintptr_t oCBaseFileSystem_Size;
-uintptr_t oCBaseFileSystem_Size2;
-uintptr_t oCBaseFileSystem_Flush;
-uintptr_t oCBaseFileSystem_Precache;
-uintptr_t oCBaseFileSystem_FileExists;
-uintptr_t oCBaseFileSystem_IsFileWritable;
-uintptr_t oCBaseFileSystem_SetFileWritable;
-uintptr_t oCBaseFileSystem_GetFileTime;
-uintptr_t oCBaseFileSystem_ReadFile;
 uintptr_t fsintfakeptr = 0;
-uintptr_t oCBaseFileSystem_WriteFile;
-uintptr_t oCBaseFileSystem_UnzipFile;
-__int64 IBaseFileSystem__Read(__int64 thisptr, void* pOutput, __int64 size, __int64 file) {
-	return reinterpret_cast<__int64(*)(__int64, void*, __int64, __int64)>(oCBaseFileSystem_Read)(fsinterfaceoffset, pOutput, size, file);
+
+uintptr_t CreateFunction(void* func, void* real) {
+	// allocate executable memory.
+	void* execMem = VirtualAlloc(NULL, 32, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+	if (!execMem) return 0;
+
+	uint8_t* bytes = static_cast<uint8_t*>(execMem);
+
+	// mov rcx, real
+	*bytes++ = 0x48;
+	*bytes++ = 0xB9;
+	*reinterpret_cast<uintptr_t*>(bytes) = (uintptr_t)real;
+	bytes += sizeof(uintptr_t);
+
+	// jmp func (RIP-relative indirect)
+	*bytes++ = 0xFF;
+	*bytes++ = 0x25;
+	*reinterpret_cast<int32_t*>(bytes) = 0; // offset = 0 (next instruction)
+	bytes += sizeof(int32_t);
+
+	*reinterpret_cast<uintptr_t*>(bytes) = (uintptr_t)func;
+	bytes += sizeof(uintptr_t);
+
+	// return the function pointer.
+	return reinterpret_cast<uintptr_t>(execMem);
 }
 
-__int64 IBaseFileSystem__Write(__int64 thisptr, void const* pInput, __int64 size, __int64 file) {
-	return reinterpret_cast<__int64(*)(__int64, void const*, __int64, __int64)>(oCBaseFileSystem_Write)(fsinterfaceoffset, pInput, size, file);
-}
-
-__int64 IBaseFileSystem__Open(__int64 thisptr, const char* pFileName, const char* pOptions, const char* pathID) {
-	// Check if the path starts with "scripts/vscripts"
-	std::string path = pFileName;
-	if (path.rfind("scripts/vscripts", 0) == 0) {
-		// Replace "scripts/vscripts" with "scripts/vscripts/server"
-		path = "scripts/vscripts/server" + path.substr(16);
-	}
-
-	std::cout << "Server FS: " << path << std::endl;
-
-	return reinterpret_cast<__int64(*)(__int64, const char*, const char*, const char*)>(oCBaseFileSystem_Open)(fsinterfaceoffset, path.c_str(), pOptions, pathID);
-}
-
-void IBaseFileSystem__Close(__int64 thisptr, __int64 file) {
-	reinterpret_cast<void(*)(__int64, __int64)>(oCBaseFileSystem_Close)(fsinterfaceoffset, file);
-}
-
-void IBaseFileSystem__Seek(__int64 thisptr, __int64 file, __int64 pos, __int64 seekType) {
-	reinterpret_cast<void(*)(__int64, __int64, __int64, __int64)>(oCBaseFileSystem_Seek)(fsinterfaceoffset, file, pos, seekType);
-}
-
-unsigned __int64 IBaseFileSystem__Tell(__int64 thisptr, __int64 file) {
-	return reinterpret_cast<unsigned __int64(*)(__int64, __int64)>(oCBaseFileSystem_Tell)(fsinterfaceoffset, file);
-}
-
-unsigned __int64 IBaseFileSystem__Size(__int64 thisptr, __int64 file) {
-	return reinterpret_cast<unsigned __int64(*)(__int64, __int64)>(oCBaseFileSystem_Size)(fsinterfaceoffset, file);
-}
-
-unsigned __int64 IBaseFileSystem__Size2(__int64 thisptr, const char* pFileName, const char* pPathID) {
-	return reinterpret_cast<unsigned __int64(*)(__int64, const char*, const char*)>(oCBaseFileSystem_Size2)(fsinterfaceoffset, pFileName, pPathID);
-}
-
-void IBaseFileSystem__Flush(__int64 thisptr, __int64 file) {
-	reinterpret_cast<void(*)(__int64, __int64)>(oCBaseFileSystem_Flush)(fsinterfaceoffset, file);
-}
-
-bool IBaseFileSystem__Precache(__int64 thisptr, const char* pFileName, const char* pPathID) {
-	return reinterpret_cast<bool(*)(__int64, const char*, const char*)>(oCBaseFileSystem_Precache)(fsinterfaceoffset, pFileName, pPathID);
-}
-
-bool IBaseFileSystem__FileExists(__int64 thisptr, const char* pFileName, const char* pPathID) {
-	return reinterpret_cast<bool(*)(__int64, const char*, const char*)>(oCBaseFileSystem_FileExists)(fsinterfaceoffset, pFileName, pPathID);
-}
-
-bool IBaseFileSystem__IsFileWritable(__int64 thisptr, char const* pFileName, const char* pPathID) {
-	return reinterpret_cast<bool(*)(__int64, char const*, const char*)>(oCBaseFileSystem_IsFileWritable)(fsinterfaceoffset, pFileName, pPathID);
-}
-
-bool IBaseFileSystem__SetFileWritable(__int64 thisptr, char const* pFileName, bool writable, const char* pPathID) {
-	return reinterpret_cast<bool(*)(__int64, char const*, bool, const char*)>(oCBaseFileSystem_SetFileWritable)(fsinterfaceoffset, pFileName, writable, pPathID);
-}
-
-long IBaseFileSystem__GetFileTime(__int64 thisptr, const char* pFileName, const char* pPathID) {
-	return reinterpret_cast<long(*)(__int64, const char*, const char*)>(oCBaseFileSystem_GetFileTime)(fsinterfaceoffset, pFileName, pPathID);
-}
-
-bool IBaseFileSystem__ReadFile(__int64 thisptr, const char* pFileName, const char* pPath, void* buf, __int64 nMaxBytes, __int64 nStartingByte, void* pfnAlloc = NULL) {
-	// Check if the path starts with "scripts/vscripts"
-	std::string path = pFileName;
-	if (path.rfind("scripts/vscripts", 0) == 0) {
-		// Replace "scripts/vscripts" with "scripts/vscripts/server"
-		path = "scripts/vscripts/server" + path.substr(16);
-	}
-
-	std::cout << "Server FS: " << path << std::endl;
-	return reinterpret_cast<bool(*)(__int64, const char*, const char*, void*, __int64, __int64, void*)>(oCBaseFileSystem_ReadFile)(fsinterfaceoffset, path.c_str(), pPath, buf, nMaxBytes, nStartingByte, pfnAlloc);
-}
-
-bool IBaseFileSystem__WriteFile(__int64 thisptr, const char* pFileName, const char* pPath, void* buf) {
-	return reinterpret_cast<bool(*)(__int64, const char*, const char*, void*)>(oCBaseFileSystem_WriteFile)(fsinterfaceoffset, pFileName, pPath, buf);
-}
-
-bool IBaseFileSystem__UnzipFile(__int64 thisptr, const char* pFileName, const char* pPath, const char* pDestination) {
-	return reinterpret_cast<bool(*)(__int64, const char*, const char*, const char*)>(oCBaseFileSystem_UnzipFile)(fsinterfaceoffset, pFileName, pPath, pDestination);
-}
 
 __int64 CVEngineServer__FuncThatReturnsFF_Stub()
 {
@@ -2498,385 +1124,390 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 
 		uintptr_t* r1vtable = *(uintptr_t**)oFileSystemFactory(pName, pReturnCode);
 		fsinterface = (uintptr_t)oFileSystemFactory(pName, pReturnCode);
-		oCBaseFileSystem__Connect = r1vtable[0];
-		oCBaseFileSystem__Disconnect = r1vtable[1];
-		oCFileSystem_Stdio__QueryInterface = r1vtable[2];
-		oCBaseFileSystem__Init = r1vtable[3];
-		oCBaseFileSystem__Shutdown = r1vtable[4];
-		oCBaseFileSystem__GetDependencies = r1vtable[5];
-		oCBaseFileSystem__GetTier = r1vtable[6];
-		oCBaseFileSystem__Reconnect = r1vtable[7];
-		osub_180023F80 = r1vtable[8];
-		osub_180023F90 = r1vtable[9];
-		oCFileSystem_Stdio__AddSearchPath = r1vtable[10];
-		oCBaseFileSystem__RemoveSearchPath = r1vtable[11];
-		oCBaseFileSystem__RemoveAllSearchPaths = r1vtable[12];
-		oCBaseFileSystem__RemoveSearchPaths = r1vtable[13];
-		oCBaseFileSystem__MarkPathIDByRequestOnly = r1vtable[14];
-		oCBaseFileSystem__RelativePathToFullPath = r1vtable[15];
-		oCBaseFileSystem__GetSearchPath = r1vtable[16];
-		oCBaseFileSystem__AddPackFile = r1vtable[17];
-		oCBaseFileSystem__RemoveFile = r1vtable[18];
-		oCBaseFileSystem__RenameFile = r1vtable[19];
-		oCBaseFileSystem__CreateDirHierarchy = r1vtable[20];
-		oCBaseFileSystem__IsDirectory = r1vtable[21];
-		oCBaseFileSystem__FileTimeToString = r1vtable[22];
-		oCFileSystem_Stdio__SetBufferSize = r1vtable[23];
-		oCFileSystem_Stdio__IsOK = r1vtable[24];
-		oCFileSystem_Stdio__EndOfLine = r1vtable[25];
-		oCFileSystem_Stdio__ReadLine = r1vtable[26];
-		oCBaseFileSystem__FPrintf = r1vtable[27];
-		oCBaseFileSystem__LoadModule = r1vtable[28];
-		oCBaseFileSystem__UnloadModule = r1vtable[29];
-		oCBaseFileSystem__FindFirst = r1vtable[30];
-		oCBaseFileSystem__FindNext = r1vtable[31];
-		oCBaseFileSystem__FindIsDirectory = r1vtable[32];
-		oCBaseFileSystem__FindClose = r1vtable[33];
-		oCBaseFileSystem__FindFirstEx = r1vtable[34];
-		oCBaseFileSystem__FindFileAbsoluteList = r1vtable[35];
-		oCBaseFileSystem__GetLocalPath = r1vtable[36];
-		oCBaseFileSystem__FullPathToRelativePath = r1vtable[37];
-		oCBaseFileSystem__GetCurrentDirectory = r1vtable[38];
-		oCBaseFileSystem__FindOrAddFileName = r1vtable[39];
-		oCBaseFileSystem__String = r1vtable[40];
-		oCBaseFileSystem__AsyncReadMultiple = r1vtable[41];
-		oCBaseFileSystem__AsyncAppend = r1vtable[42];
-		oCBaseFileSystem__AsyncAppendFile = r1vtable[43];
-		oCBaseFileSystem__AsyncFinishAll = r1vtable[44];
-		oCBaseFileSystem__AsyncFinishAllWrites = r1vtable[45];
-		oCBaseFileSystem__AsyncFlush = r1vtable[46];
-		oCBaseFileSystem__AsyncSuspend = r1vtable[47];
-		oCBaseFileSystem__AsyncResume = r1vtable[48];
-		oCBaseFileSystem__AsyncBeginRead = r1vtable[49];
-		oCBaseFileSystem__AsyncEndRead = r1vtable[50];
-		oCBaseFileSystem__AsyncFinish = r1vtable[51];
-		oCBaseFileSystem__AsyncGetResult = r1vtable[52];
-		oCBaseFileSystem__AsyncAbort = r1vtable[53];
-		oCBaseFileSystem__AsyncStatus = r1vtable[54];
-		oCBaseFileSystem__AsyncSetPriority = r1vtable[55];
-		oCBaseFileSystem__AsyncAddRef = r1vtable[56];
-		oCBaseFileSystem__AsyncRelease = r1vtable[57];
-		osub_180024450 = r1vtable[58];
-		osub_180024460 = r1vtable[59];
-		onullsub_96 = r1vtable[60];
-		osub_180024490 = r1vtable[61];
-		osub_180024440 = r1vtable[62];
-		onullsub_97 = r1vtable[63];
-		osub_180009BE0 = r1vtable[64];
-		osub_18000F6A0 = r1vtable[65];
-		osub_180002CA0 = r1vtable[66];
-		osub_180002CB0 = r1vtable[67];
-		osub_1800154F0 = r1vtable[68];
-		osub_180015550 = r1vtable[69];
-		osub_180015420 = r1vtable[70];
-		osub_180015480 = r1vtable[71];
-		oCBaseFileSystem__RemoveLoggingFunc = r1vtable[72];
-		oCBaseFileSystem__GetFilesystemStatistics = r1vtable[73];
-		oCFileSystem_Stdio__OpenEx = r1vtable[74];
-		osub_18000A5D0 = r1vtable[75];
-		osub_1800052A0 = r1vtable[76];
-		osub_180002F10 = r1vtable[77];
-		osub_18000A690 = r1vtable[78];
-		osub_18000A6F0 = r1vtable[79];
-		osub_1800057A0 = r1vtable[80];
-		osub_180002960 = r1vtable[81];
-		osub_180020110 = r1vtable[82];
-		osub_180020230 = r1vtable[83];
-		osub_180023660 = r1vtable[84];
-		osub_1800204A0 = r1vtable[85];
-		osub_180002F40 = r1vtable[86];
-		osub_180004F00 = r1vtable[87];
-		osub_180024020 = r1vtable[88];
-		osub_180024AF0 = r1vtable[89];
-		osub_180024110 = r1vtable[90];
-		osub_180002580 = r1vtable[91];
-		osub_180002560 = r1vtable[92];
-		osub_18000A070 = r1vtable[93];
-		osub_180009E80 = r1vtable[94];
-		osub_180009C20 = r1vtable[95];
-		osub_1800022F0 = r1vtable[96];
-		osub_180002330 = r1vtable[97];
-		osub_180009CF0 = r1vtable[98];
-		osub_180002340 = r1vtable[99];
-		osub_180002320 = r1vtable[100];
-		osub_180009E00 = r1vtable[101];
-		osub_180009F20 = r1vtable[102];
-		osub_180009EA0 = r1vtable[103];
-		osub_180009E50 = r1vtable[104];
-		osub_180009FC0 = r1vtable[105];
-		osub_180004E80 = r1vtable[106];
-		osub_18000A000 = r1vtable[107];
-		osub_180014350 = r1vtable[108];
-		osub_18000F5B0 = r1vtable[109];
-		osub_180002590 = r1vtable[110];
-		osub_1800025D0 = r1vtable[111];
-		osub_1800025E0 = r1vtable[112];
-		oCFileSystem_Stdio__LoadVPKForMap = r1vtable[113];
-		oCFileSystem_Stdio__UnkFunc1 = r1vtable[114];
-		oCFileSystem_Stdio__WeirdFuncThatJustDerefsRDX = r1vtable[115];
-		oCFileSystem_Stdio__GetPathTime = r1vtable[116];
-		oCFileSystem_Stdio__GetFSConstructedFlag = r1vtable[117];
-		oCFileSystem_Stdio__EnableWhitelistFileTracking = r1vtable[118];
-		osub_18000A750 = r1vtable[119];
-		osub_180002B20 = r1vtable[120];
-		osub_18001DC30 = r1vtable[121];
-		osub_180002B30 = r1vtable[122];
-		osub_180002BA0 = r1vtable[123];
-		osub_180002BB0 = r1vtable[124];
-		osub_180002BC0 = r1vtable[125];
-		osub_180002290 = r1vtable[126];
-		osub_18001CCD0 = r1vtable[127];
-		osub_18001CCE0 = r1vtable[128];
-		osub_18001CCF0 = r1vtable[129];
-		osub_18001CD00 = r1vtable[130];
-		osub_180014520 = r1vtable[131];
-		osub_180002650 = r1vtable[132];
-		osub_18001CD10 = r1vtable[133];
-		osub_180016250 = r1vtable[134];
-		osub_18000F0D0 = r1vtable[135];
-		osub_1800139F0 = r1vtable[136];
-		osub_180016570 = r1vtable[137];
-		onullsub_86 = r1vtable[138];
-		osub_18000AEC0 = r1vtable[139];
-		osub_180003320 = r1vtable[140];
-		osub_18000AF50 = r1vtable[141];
-		osub_18000AF60 = r1vtable[142];
-		osub_180005D00 = r1vtable[143];
-		osub_18000AF70 = r1vtable[144];
-		osub_18001B130 = r1vtable[145];
-		osub_18000AF80 = r1vtable[146];
-		osub_1800034D0 = r1vtable[147];
-		osub_180017180 = r1vtable[148];
-		osub_180003550 = r1vtable[149];
-		osub_1800250D0 = r1vtable[150];
-		osub_1800241B0 = r1vtable[151];
-		osub_1800241C0 = r1vtable[152];
-		osub_1800241F0 = r1vtable[153];
-		osub_180024240 = r1vtable[154];
-		osub_180024250 = r1vtable[155];
-		osub_180024260 = r1vtable[156];
-		osub_180024300 = r1vtable[157];
-		osub_180024310 = r1vtable[158];
-		osub_180024320 = r1vtable[159];
-		osub_180024340 = r1vtable[160];
-		osub_180024350 = r1vtable[161];
-		osub_180024360 = r1vtable[162];
-		osub_180024390 = r1vtable[163];
-		osub_180024370 = r1vtable[164];
-		osub_1800243C0 = r1vtable[165];
-		osub_1800243F0 = r1vtable[166];
-		osub_180024410 = r1vtable[167];
-		osub_180024430 = r1vtable[168];
+		uintptr_t oCBaseFileSystem__Connect = r1vtable[0];
+		uintptr_t oCBaseFileSystem__Disconnect = r1vtable[1];
+		uintptr_t oCFileSystem_Stdio__QueryInterface = r1vtable[2];
+		uintptr_t oCBaseFileSystem__Init = r1vtable[3];
+		uintptr_t oCBaseFileSystem__Shutdown = r1vtable[4];
+		uintptr_t oCBaseFileSystem__GetDependencies = r1vtable[5];
+		uintptr_t oCBaseFileSystem__GetTier = r1vtable[6];
+		uintptr_t oCBaseFileSystem__Reconnect = r1vtable[7];
+		uintptr_t osub_180023F80 = r1vtable[8];
+		uintptr_t osub_180023F90 = r1vtable[9];
+		uintptr_t oCFileSystem_Stdio__AddSearchPath = r1vtable[10];
+		uintptr_t oCBaseFileSystem__RemoveSearchPath = r1vtable[11];
+		uintptr_t oCBaseFileSystem__RemoveAllSearchPaths = r1vtable[12];
+		uintptr_t oCBaseFileSystem__RemoveSearchPaths = r1vtable[13];
+		uintptr_t oCBaseFileSystem__MarkPathIDByRequestOnly = r1vtable[14];
+		uintptr_t oCBaseFileSystem__RelativePathToFullPath = r1vtable[15];
+		uintptr_t oCBaseFileSystem__GetSearchPath = r1vtable[16];
+		uintptr_t oCBaseFileSystem__AddPackFile = r1vtable[17];
+		uintptr_t oCBaseFileSystem__RemoveFile = r1vtable[18];
+		uintptr_t oCBaseFileSystem__RenameFile = r1vtable[19];
+		uintptr_t oCBaseFileSystem__CreateDirHierarchy = r1vtable[20];
+		uintptr_t oCBaseFileSystem__IsDirectory = r1vtable[21];
+		uintptr_t oCBaseFileSystem__FileTimeToString = r1vtable[22];
+		uintptr_t oCFileSystem_Stdio__SetBufferSize = r1vtable[23];
+		uintptr_t oCFileSystem_Stdio__IsOK = r1vtable[24];
+		uintptr_t oCFileSystem_Stdio__EndOfLine = r1vtable[25];
+		uintptr_t oCFileSystem_Stdio__ReadLine = r1vtable[26];
+		uintptr_t oCBaseFileSystem__FPrintf = r1vtable[27];
+		uintptr_t oCBaseFileSystem__LoadModule = r1vtable[28];
+		uintptr_t oCBaseFileSystem__UnloadModule = r1vtable[29];
+		uintptr_t oCBaseFileSystem__FindFirst = r1vtable[30];
+		uintptr_t oCBaseFileSystem__FindNext = r1vtable[31];
+		uintptr_t oCBaseFileSystem__FindIsDirectory = r1vtable[32];
+		uintptr_t oCBaseFileSystem__FindClose = r1vtable[33];
+		uintptr_t oCBaseFileSystem__FindFirstEx = r1vtable[34];
+		uintptr_t oCBaseFileSystem__FindFileAbsoluteList = r1vtable[35];
+		uintptr_t oCBaseFileSystem__GetLocalPath = r1vtable[36];
+		uintptr_t oCBaseFileSystem__FullPathToRelativePath = r1vtable[37];
+		uintptr_t oCBaseFileSystem__GetCurrentDirectory = r1vtable[38];
+		uintptr_t oCBaseFileSystem__FindOrAddFileName = r1vtable[39];
+		uintptr_t oCBaseFileSystem__String = r1vtable[40];
+		uintptr_t oCBaseFileSystem__AsyncReadMultiple = r1vtable[41];
+		uintptr_t oCBaseFileSystem__AsyncAppend = r1vtable[42];
+		uintptr_t oCBaseFileSystem__AsyncAppendFile = r1vtable[43];
+		uintptr_t oCBaseFileSystem__AsyncFinishAll = r1vtable[44];
+		uintptr_t oCBaseFileSystem__AsyncFinishAllWrites = r1vtable[45];
+		uintptr_t oCBaseFileSystem__AsyncFlush = r1vtable[46];
+		uintptr_t oCBaseFileSystem__AsyncSuspend = r1vtable[47];
+		uintptr_t oCBaseFileSystem__AsyncResume = r1vtable[48];
+		uintptr_t oCBaseFileSystem__AsyncBeginRead = r1vtable[49];
+		uintptr_t oCBaseFileSystem__AsyncEndRead = r1vtable[50];
+		uintptr_t oCBaseFileSystem__AsyncFinish = r1vtable[51];
+		uintptr_t oCBaseFileSystem__AsyncGetResult = r1vtable[52];
+		uintptr_t oCBaseFileSystem__AsyncAbort = r1vtable[53];
+		uintptr_t oCBaseFileSystem__AsyncStatus = r1vtable[54];
+		uintptr_t oCBaseFileSystem__AsyncSetPriority = r1vtable[55];
+		uintptr_t oCBaseFileSystem__AsyncAddRef = r1vtable[56];
+		uintptr_t oCBaseFileSystem__AsyncRelease = r1vtable[57];
+		uintptr_t osub_180024450 = r1vtable[58];
+		uintptr_t osub_180024460 = r1vtable[59];
+		uintptr_t onullsub_96 = r1vtable[60];
+		uintptr_t osub_180024490 = r1vtable[61];
+		uintptr_t osub_180024440 = r1vtable[62];
+		uintptr_t onullsub_97 = r1vtable[63];
+		uintptr_t osub_180009BE0 = r1vtable[64];
+		uintptr_t osub_18000F6A0 = r1vtable[65];
+		uintptr_t osub_180002CA0 = r1vtable[66];
+		uintptr_t osub_180002CB0 = r1vtable[67];
+		uintptr_t osub_1800154F0 = r1vtable[68];
+		uintptr_t osub_180015550 = r1vtable[69];
+		uintptr_t osub_180015420 = r1vtable[70];
+		uintptr_t osub_180015480 = r1vtable[71];
+		uintptr_t oCBaseFileSystem__RemoveLoggingFunc = r1vtable[72];
+		uintptr_t oCBaseFileSystem__GetFilesystemStatistics = r1vtable[73];
+		uintptr_t oCFileSystem_Stdio__OpenEx = r1vtable[74];
+		uintptr_t osub_18000A5D0 = r1vtable[75];
+		uintptr_t osub_1800052A0 = r1vtable[76];
+		uintptr_t osub_180002F10 = r1vtable[77];
+		uintptr_t osub_18000A690 = r1vtable[78];
+		uintptr_t osub_18000A6F0 = r1vtable[79];
+		uintptr_t osub_1800057A0 = r1vtable[80];
+		uintptr_t osub_180002960 = r1vtable[81];
+		uintptr_t osub_180020110 = r1vtable[82];
+		uintptr_t osub_180020230 = r1vtable[83];
+		uintptr_t osub_180023660 = r1vtable[84];
+		uintptr_t osub_1800204A0 = r1vtable[85];
+		uintptr_t osub_180002F40 = r1vtable[86];
+		uintptr_t osub_180004F00 = r1vtable[87];
+		uintptr_t osub_180024020 = r1vtable[88];
+		uintptr_t osub_180024AF0 = r1vtable[89];
+		uintptr_t osub_180024110 = r1vtable[90];
+		uintptr_t osub_180002580 = r1vtable[91];
+		uintptr_t osub_180002560 = r1vtable[92];
+		uintptr_t osub_18000A070 = r1vtable[93];
+		uintptr_t osub_180009E80 = r1vtable[94];
+		uintptr_t osub_180009C20 = r1vtable[95];
+		uintptr_t osub_1800022F0 = r1vtable[96];
+		uintptr_t osub_180002330 = r1vtable[97];
+		uintptr_t osub_180009CF0 = r1vtable[98];
+		uintptr_t osub_180002340 = r1vtable[99];
+		uintptr_t osub_180002320 = r1vtable[100];
+		uintptr_t osub_180009E00 = r1vtable[101];
+		uintptr_t osub_180009F20 = r1vtable[102];
+		uintptr_t osub_180009EA0 = r1vtable[103];
+		uintptr_t osub_180009E50 = r1vtable[104];
+		uintptr_t osub_180009FC0 = r1vtable[105];
+		uintptr_t osub_180004E80 = r1vtable[106];
+		uintptr_t osub_18000A000 = r1vtable[107];
+		uintptr_t osub_180014350 = r1vtable[108];
+		uintptr_t osub_18000F5B0 = r1vtable[109];
+		uintptr_t osub_180002590 = r1vtable[110];
+		uintptr_t osub_1800025D0 = r1vtable[111];
+		uintptr_t osub_1800025E0 = r1vtable[112];
+		uintptr_t oCFileSystem_Stdio__LoadVPKForMap = r1vtable[113];
+		uintptr_t oCFileSystem_Stdio__UnkFunc1 = r1vtable[114];
+		uintptr_t oCFileSystem_Stdio__WeirdFuncThatJustDerefsRDX = r1vtable[115];
+		uintptr_t oCFileSystem_Stdio__GetPathTime = r1vtable[116];
+		uintptr_t oCFileSystem_Stdio__GetFSConstructedFlag = r1vtable[117];
+		uintptr_t oCFileSystem_Stdio__EnableWhitelistFileTracking = r1vtable[118];
+		uintptr_t osub_18000A750 = r1vtable[119];
+		uintptr_t osub_180002B20 = r1vtable[120];
+		uintptr_t osub_18001DC30 = r1vtable[121];
+		uintptr_t osub_180002B30 = r1vtable[122];
+		uintptr_t osub_180002BA0 = r1vtable[123];
+		uintptr_t osub_180002BB0 = r1vtable[124];
+		uintptr_t osub_180002BC0 = r1vtable[125];
+		uintptr_t osub_180002290 = r1vtable[126];
+		uintptr_t osub_18001CCD0 = r1vtable[127];
+		uintptr_t osub_18001CCE0 = r1vtable[128];
+		uintptr_t osub_18001CCF0 = r1vtable[129];
+		uintptr_t osub_18001CD00 = r1vtable[130];
+		uintptr_t osub_180014520 = r1vtable[131];
+		uintptr_t osub_180002650 = r1vtable[132];
+		uintptr_t osub_18001CD10 = r1vtable[133];
+		uintptr_t osub_180016250 = r1vtable[134];
+		uintptr_t osub_18000F0D0 = r1vtable[135];
+		uintptr_t osub_1800139F0 = r1vtable[136];
+		uintptr_t osub_180016570 = r1vtable[137];
+		uintptr_t onullsub_86 = r1vtable[138];
+		uintptr_t osub_18000AEC0 = r1vtable[139];
+		uintptr_t osub_180003320 = r1vtable[140];
+		uintptr_t osub_18000AF50 = r1vtable[141];
+		uintptr_t osub_18000AF60 = r1vtable[142];
+		uintptr_t osub_180005D00 = r1vtable[143];
+		uintptr_t osub_18000AF70 = r1vtable[144];
+		uintptr_t osub_18001B130 = r1vtable[145];
+		uintptr_t osub_18000AF80 = r1vtable[146];
+		uintptr_t osub_1800034D0 = r1vtable[147];
+		uintptr_t osub_180017180 = r1vtable[148];
+		uintptr_t osub_180003550 = r1vtable[149];
+		uintptr_t osub_1800250D0 = r1vtable[150];
+		uintptr_t osub_1800241B0 = r1vtable[151];
+		uintptr_t osub_1800241C0 = r1vtable[152];
+		uintptr_t osub_1800241F0 = r1vtable[153];
+		uintptr_t osub_180024240 = r1vtable[154];
+		uintptr_t osub_180024250 = r1vtable[155];
+		uintptr_t osub_180024260 = r1vtable[156];
+		uintptr_t osub_180024300 = r1vtable[157];
+		uintptr_t osub_180024310 = r1vtable[158];
+		uintptr_t osub_180024320 = r1vtable[159];
+		uintptr_t osub_180024340 = r1vtable[160];
+		uintptr_t osub_180024350 = r1vtable[161];
+		uintptr_t osub_180024360 = r1vtable[162];
+		uintptr_t osub_180024390 = r1vtable[163];
+		uintptr_t osub_180024370 = r1vtable[164];
+		uintptr_t osub_1800243C0 = r1vtable[165];
+		uintptr_t osub_1800243F0 = r1vtable[166];
+		uintptr_t osub_180024410 = r1vtable[167];
+		uintptr_t osub_180024430 = r1vtable[168];
 
 		static uintptr_t r1ovtable[] = {
-			(uintptr_t)(&CBaseFileSystem__Connect),
-			(uintptr_t)(&CBaseFileSystem__Disconnect),
-			(uintptr_t)(&CFileSystem_Stdio__QueryInterface),
-			(uintptr_t)(&CBaseFileSystem__Init),
-			(uintptr_t)(&CBaseFileSystem__Shutdown),
-			(uintptr_t)(&CBaseFileSystem__GetDependencies),
-			(uintptr_t)(&CBaseFileSystem__GetTier),
-			(uintptr_t)(&CBaseFileSystem__Reconnect),
-			(uintptr_t)(&CFileSystem_Stdio__NullSub3),
-			(uintptr_t)(&CBaseFileSystem__GetTFOFileSystemThing),
-			(uintptr_t)(&CFileSystem_Stdio__DoTFOFilesystemOp),
-			(uintptr_t)(&CFileSystem_Stdio__NullSub4),
-			(uintptr_t)(&CFileSystem_Stdio__AddSearchPath),
-			(uintptr_t)(&CBaseFileSystem__RemoveSearchPath),
-			(uintptr_t)(&CBaseFileSystem__RemoveAllSearchPaths),
-			(uintptr_t)(&CBaseFileSystem__RemoveSearchPaths),
-			(uintptr_t)(&CBaseFileSystem__MarkPathIDByRequestOnly),
-			(uintptr_t)(&CBaseFileSystem__RelativePathToFullPath),
-			(uintptr_t)(&CBaseFileSystem__GetSearchPath),
-			(uintptr_t)(&CBaseFileSystem__AddPackFile),
-			(uintptr_t)(&CBaseFileSystem__RemoveFile),
-			(uintptr_t)(&CBaseFileSystem__RenameFile),
-			(uintptr_t)(&CBaseFileSystem__CreateDirHierarchy),
-			(uintptr_t)(&CBaseFileSystem__IsDirectory),
-			(uintptr_t)(&CBaseFileSystem__FileTimeToString),
-			(uintptr_t)(&CFileSystem_Stdio__SetBufferSize),
-			(uintptr_t)(&CFileSystem_Stdio__IsOK),
-			(uintptr_t)(&CFileSystem_Stdio__EndOfLine),
-			(uintptr_t)(&CFileSystem_Stdio__ReadLine),
-			(uintptr_t)(&CBaseFileSystem__FPrintf),
-			(uintptr_t)(&CBaseFileSystem__LoadModule),
-			(uintptr_t)(&CBaseFileSystem__UnloadModule),
-			(uintptr_t)(&CBaseFileSystem__FindFirst),
-			(uintptr_t)(&CBaseFileSystem__FindNext),
-			(uintptr_t)(&CBaseFileSystem__FindIsDirectory),
-			(uintptr_t)(&CBaseFileSystem__FindClose),
-			(uintptr_t)(&CBaseFileSystem__FindFirstEx),
-			(uintptr_t)(&CBaseFileSystem__FindFileAbsoluteList),
-			(uintptr_t)(&CBaseFileSystem__GetLocalPath),
-			(uintptr_t)(&CBaseFileSystem__FullPathToRelativePath),
-			(uintptr_t)(&CBaseFileSystem__GetCurrentDirectory),
-			(uintptr_t)(&CBaseFileSystem__FindOrAddFileName),
-			(uintptr_t)(&CBaseFileSystem__String),
-			(uintptr_t)(&CBaseFileSystem__AsyncReadMultiple),
-			(uintptr_t)(&CBaseFileSystem__AsyncAppend),
-			(uintptr_t)(&CBaseFileSystem__AsyncAppendFile),
-			(uintptr_t)(&CBaseFileSystem__AsyncFinishAll),
-			(uintptr_t)(&CBaseFileSystem__AsyncFinishAllWrites),
-			(uintptr_t)(&CBaseFileSystem__AsyncFlush),
-			(uintptr_t)(&CBaseFileSystem__AsyncSuspend),
-			(uintptr_t)(&CBaseFileSystem__AsyncResume),
-			(uintptr_t)(&CBaseFileSystem__AsyncBeginRead),
-			(uintptr_t)(&CBaseFileSystem__AsyncEndRead),
-			(uintptr_t)(&CBaseFileSystem__AsyncFinish),
-			(uintptr_t)(&CBaseFileSystem__AsyncGetResult),
-			(uintptr_t)(&CBaseFileSystem__AsyncAbort),
-			(uintptr_t)(&CBaseFileSystem__AsyncStatus),
-			(uintptr_t)(&CBaseFileSystem__AsyncSetPriority),
-			(uintptr_t)(&CBaseFileSystem__AsyncAddRef),
-			(uintptr_t)(&CBaseFileSystem__AsyncRelease),
-			(uintptr_t)(&sub_180024450),
-			(uintptr_t)(&sub_180024460),
-			(uintptr_t)(&nullsub_96),
-			(uintptr_t)(&sub_180024490),
-			(uintptr_t)(&sub_180024440),
-			(uintptr_t)(&nullsub_97),
-			(uintptr_t)(&sub_180009BE0),
-			(uintptr_t)(&sub_18000F6A0),
-			(uintptr_t)(&sub_180002CA0),
-			(uintptr_t)(&sub_180002CB0),
-			(uintptr_t)(&sub_1800154F0),
-			(uintptr_t)(&sub_180015550),
-			(uintptr_t)(&sub_180015420),
-			(uintptr_t)(&sub_180015480),
-			(uintptr_t)(&CBaseFileSystem__RemoveLoggingFunc),
-			(uintptr_t)(&CBaseFileSystem__GetFilesystemStatistics),
-			(uintptr_t)(&CFileSystem_Stdio__OpenEx),
-			(uintptr_t)(&sub_18000A5D0),
-			(uintptr_t)(&sub_1800052A0),
-			(uintptr_t)(&sub_180002F10),
-			(uintptr_t)(&sub_18000A690),
-			(uintptr_t)(&sub_18000A6F0),
-			(uintptr_t)(&sub_1800057A0),
-			(uintptr_t)(&sub_180002960),
-			(uintptr_t)(&sub_180020110),
-			(uintptr_t)(&sub_180020230),
-			(uintptr_t)(&sub_180023660),
-			(uintptr_t)(&sub_1800204A0),
-			(uintptr_t)(&sub_180002F40),
-			(uintptr_t)(&sub_180004F00),
-			(uintptr_t)(&sub_180024020),
-			(uintptr_t)(&sub_180024AF0),
-			(uintptr_t)(&sub_180024110),
-			(uintptr_t)(&sub_180002580),
-			(uintptr_t)(&sub_180002560),
-			(uintptr_t)(&sub_18000A070),
-			(uintptr_t)(&CFileSystem_Stdio__NullSub4),
-			(uintptr_t)(&sub_180009C20),
-			(uintptr_t)(&sub_1800022F0),
-			(uintptr_t)(&sub_180002330),
-			(uintptr_t)(&sub_180009CF0),
-			(uintptr_t)(&sub_180002340),
-			(uintptr_t)(&sub_180002320),
-			(uintptr_t)(&sub_180009E00),
-			(uintptr_t)(&sub_180009F20),
-			(uintptr_t)(&sub_180009EA0),
-			(uintptr_t)(&sub_180009E50),
-			(uintptr_t)(&sub_180009FC0),
-			(uintptr_t)(&sub_180004E80),
-			(uintptr_t)(&sub_18000A000),
-			(uintptr_t)(&sub_180014350),
-			(uintptr_t)(&sub_18000F5B0),
-			(uintptr_t)(&sub_180002590),
-			(uintptr_t)(&sub_1800025D0),
-			(uintptr_t)(&sub_1800025E0),
-			(uintptr_t)(&CFileSystem_Stdio__LoadVPKForMap),
-			(uintptr_t)(&CFileSystem_Stdio__UnkFunc1),
-			(uintptr_t)(&CFileSystem_Stdio__WeirdFuncThatJustDerefsRDX),
-			(uintptr_t)(&CFileSystem_Stdio__GetPathTime),
-			(uintptr_t)(&CFileSystem_Stdio__GetFSConstructedFlag),
-			(uintptr_t)(&CFileSystem_Stdio__EnableWhitelistFileTracking),
-			(uintptr_t)(&sub_18000A750),
-			(uintptr_t)(&sub_180002B20),
-			(uintptr_t)(&sub_18001DC30),
-			(uintptr_t)(&sub_180002B30),
-			(uintptr_t)(&sub_180002BA0),
-			(uintptr_t)(&sub_180002BB0),
-			(uintptr_t)(&sub_180002BC0),
-			(uintptr_t)(&sub_180002290),
-			(uintptr_t)(&sub_18001CCD0),
-			(uintptr_t)(&sub_18001CCE0),
-			(uintptr_t)(&sub_18001CCF0),
-			(uintptr_t)(&sub_18001CD00),
-			(uintptr_t)(&sub_180014520),
-			(uintptr_t)(&sub_180002650),
-			(uintptr_t)(&sub_18001CD10),
-			(uintptr_t)(&sub_180016250),
-			(uintptr_t)(&sub_18000F0D0),
-			(uintptr_t)(&sub_1800139F0),
-			(uintptr_t)(&sub_180016570),
-			(uintptr_t)(&nullsub_86),
-			(uintptr_t)(&sub_18000AEC0),
-			(uintptr_t)(&sub_180003320),
-			(uintptr_t)(&sub_18000AF50),
-			(uintptr_t)(&sub_18000AF60),
-			(uintptr_t)(&sub_180005D00),
-			(uintptr_t)(&sub_18000AF70),
-			(uintptr_t)(&sub_18001B130),
-			(uintptr_t)(&sub_18000AF80),
-			(uintptr_t)(&sub_1800034D0),
-			(uintptr_t)(&sub_180017180),
-			(uintptr_t)(&sub_180003550),
-			(uintptr_t)(&sub_1800250D0),
-			(uintptr_t)(&sub_1800241B0),
-			(uintptr_t)(&sub_1800241C0),
-			(uintptr_t)(&sub_1800241F0),
-			(uintptr_t)(&sub_180024240),
-			(uintptr_t)(&sub_180024250),
-			(uintptr_t)(&sub_180024260),
-			(uintptr_t)(&sub_180024300),
-			(uintptr_t)(&sub_180024310),
-			(uintptr_t)(&sub_180024320),
-			(uintptr_t)(&sub_180024340),
-			(uintptr_t)(&sub_180024350),
-			(uintptr_t)(&sub_180024360),
-			(uintptr_t)(&sub_180024390),
-			(uintptr_t)(&sub_180024370),
-			(uintptr_t)(&sub_1800243C0),
-			(uintptr_t)(&sub_1800243F0),
-			(uintptr_t)(&sub_180024410),
-			(uintptr_t)(&sub_180024430),
-			(uintptr_t)(&CFileSystem_Stdio__NullSub4)
+			CreateFunction((void*)oCBaseFileSystem__Connect, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__Disconnect, (void*)fsinterface),
+			CreateFunction((void*)oCFileSystem_Stdio__QueryInterface, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__Init, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__Shutdown, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__GetDependencies, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__GetTier, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__Reconnect, (void*)fsinterface),
+			CreateFunction((void*)CFileSystem_Stdio__NullSub3, (void*)fsinterface),
+			CreateFunction((void*)CBaseFileSystem__GetTFOFileSystemThing, (void*)fsinterface),
+			CreateFunction((void*)CFileSystem_Stdio__DoTFOFilesystemOp, (void*)fsinterface),
+			CreateFunction((void*)CFileSystem_Stdio__NullSub4, (void*)fsinterface),
+			CreateFunction((void*)oCFileSystem_Stdio__AddSearchPath, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__RemoveSearchPath, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__RemoveAllSearchPaths, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__RemoveSearchPaths, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__MarkPathIDByRequestOnly, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__RelativePathToFullPath, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__GetSearchPath, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__AddPackFile, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__RemoveFile, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__RenameFile, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__CreateDirHierarchy, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__IsDirectory, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__FileTimeToString, (void*)fsinterface),
+			CreateFunction((void*)oCFileSystem_Stdio__SetBufferSize, (void*)fsinterface),
+			CreateFunction((void*)oCFileSystem_Stdio__IsOK, (void*)fsinterface),
+			CreateFunction((void*)oCFileSystem_Stdio__EndOfLine, (void*)fsinterface),
+			CreateFunction((void*)oCFileSystem_Stdio__ReadLine, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__FPrintf, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__LoadModule, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__UnloadModule, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__FindFirst, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__FindNext, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__FindIsDirectory, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__FindClose, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__FindFirstEx, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__FindFileAbsoluteList, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__GetLocalPath, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__FullPathToRelativePath, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__GetCurrentDirectory, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__FindOrAddFileName, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__String, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__AsyncReadMultiple, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__AsyncAppend, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__AsyncAppendFile, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__AsyncFinishAll, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__AsyncFinishAllWrites, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__AsyncFlush, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__AsyncSuspend, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__AsyncResume, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__AsyncBeginRead, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__AsyncEndRead, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__AsyncFinish, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__AsyncGetResult, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__AsyncAbort, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__AsyncStatus, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__AsyncSetPriority, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__AsyncAddRef, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__AsyncRelease, (void*)fsinterface),
+			CreateFunction((void*)osub_180024450, (void*)fsinterface),
+			CreateFunction((void*)osub_180024460, (void*)fsinterface),
+			CreateFunction((void*)onullsub_96, (void*)fsinterface),
+			CreateFunction((void*)osub_180024490, (void*)fsinterface),
+			CreateFunction((void*)osub_180024440, (void*)fsinterface),
+			CreateFunction((void*)onullsub_97, (void*)fsinterface),
+			CreateFunction((void*)osub_180009BE0, (void*)fsinterface),
+			CreateFunction((void*)osub_18000F6A0, (void*)fsinterface),
+			CreateFunction((void*)osub_180002CA0, (void*)fsinterface),
+			CreateFunction((void*)osub_180002CB0, (void*)fsinterface),
+			CreateFunction((void*)osub_1800154F0, (void*)fsinterface),
+			CreateFunction((void*)osub_180015550, (void*)fsinterface),
+			CreateFunction((void*)osub_180015420, (void*)fsinterface),
+			CreateFunction((void*)osub_180015480, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__RemoveLoggingFunc, (void*)fsinterface),
+			CreateFunction((void*)oCBaseFileSystem__GetFilesystemStatistics, (void*)fsinterface),
+			CreateFunction((void*)oCFileSystem_Stdio__OpenEx, (void*)fsinterface),
+			CreateFunction((void*)osub_18000A5D0, (void*)fsinterface),
+			CreateFunction((void*)osub_1800052A0, (void*)fsinterface),
+			CreateFunction((void*)osub_180002F10, (void*)fsinterface),
+			CreateFunction((void*)osub_18000A690, (void*)fsinterface),
+			CreateFunction((void*)osub_18000A6F0, (void*)fsinterface),
+			CreateFunction((void*)osub_1800057A0, (void*)fsinterface),
+			CreateFunction((void*)osub_180002960, (void*)fsinterface),
+			CreateFunction((void*)osub_180020110, (void*)fsinterface),
+			CreateFunction((void*)osub_180020230, (void*)fsinterface),
+			CreateFunction((void*)osub_180023660, (void*)fsinterface),
+			CreateFunction((void*)osub_1800204A0, (void*)fsinterface),
+			CreateFunction((void*)osub_180002F40, (void*)fsinterface),
+			CreateFunction((void*)osub_180004F00, (void*)fsinterface),
+			CreateFunction((void*)osub_180024020, (void*)fsinterface),
+			CreateFunction((void*)osub_180024AF0, (void*)fsinterface),
+			CreateFunction((void*)osub_180024110, (void*)fsinterface),
+			CreateFunction((void*)osub_180002580, (void*)fsinterface),
+			CreateFunction((void*)osub_180002560, (void*)fsinterface),
+			CreateFunction((void*)osub_18000A070, (void*)fsinterface),
+			CreateFunction((void*)CFileSystem_Stdio__NullSub4, (void*)fsinterface),
+			CreateFunction((void*)osub_180009C20, (void*)fsinterface),
+			CreateFunction((void*)osub_1800022F0, (void*)fsinterface),
+			CreateFunction((void*)osub_180002330, (void*)fsinterface),
+			CreateFunction((void*)osub_180009CF0, (void*)fsinterface),
+			CreateFunction((void*)osub_180002340, (void*)fsinterface),
+			CreateFunction((void*)osub_180002320, (void*)fsinterface),
+			CreateFunction((void*)osub_180009E00, (void*)fsinterface),
+			CreateFunction((void*)osub_180009F20, (void*)fsinterface),
+			CreateFunction((void*)osub_180009EA0, (void*)fsinterface),
+			CreateFunction((void*)osub_180009E50, (void*)fsinterface),
+			CreateFunction((void*)osub_180009FC0, (void*)fsinterface),
+			CreateFunction((void*)osub_180004E80, (void*)fsinterface),
+			CreateFunction((void*)osub_18000A000, (void*)fsinterface),
+			CreateFunction((void*)osub_180014350, (void*)fsinterface),
+			CreateFunction((void*)osub_18000F5B0, (void*)fsinterface),
+			CreateFunction((void*)osub_180002590, (void*)fsinterface),
+			CreateFunction((void*)osub_1800025D0, (void*)fsinterface),
+			CreateFunction((void*)osub_1800025E0, (void*)fsinterface),
+			CreateFunction((void*)oCFileSystem_Stdio__LoadVPKForMap, (void*)fsinterface),
+			CreateFunction((void*)oCFileSystem_Stdio__UnkFunc1, (void*)fsinterface),
+			CreateFunction((void*)oCFileSystem_Stdio__WeirdFuncThatJustDerefsRDX, (void*)fsinterface),
+			CreateFunction((void*)oCFileSystem_Stdio__GetPathTime, (void*)fsinterface),
+			CreateFunction((void*)oCFileSystem_Stdio__GetFSConstructedFlag, (void*)fsinterface),
+			CreateFunction((void*)oCFileSystem_Stdio__EnableWhitelistFileTracking, (void*)fsinterface),
+			CreateFunction((void*)osub_18000A750, (void*)fsinterface),
+			CreateFunction((void*)osub_180002B20, (void*)fsinterface),
+			CreateFunction((void*)osub_18001DC30, (void*)fsinterface),
+			CreateFunction((void*)osub_180002B30, (void*)fsinterface),
+			CreateFunction((void*)osub_180002BA0, (void*)fsinterface),
+			CreateFunction((void*)osub_180002BB0, (void*)fsinterface),
+			CreateFunction((void*)osub_180002BC0, (void*)fsinterface),
+			CreateFunction((void*)osub_180002290, (void*)fsinterface),
+			CreateFunction((void*)osub_18001CCD0, (void*)fsinterface),
+			CreateFunction((void*)osub_18001CCE0, (void*)fsinterface),
+			CreateFunction((void*)osub_18001CCF0, (void*)fsinterface),
+			CreateFunction((void*)osub_18001CD00, (void*)fsinterface),
+			CreateFunction((void*)osub_180014520, (void*)fsinterface),
+			CreateFunction((void*)osub_180002650, (void*)fsinterface),
+			CreateFunction((void*)osub_18001CD10, (void*)fsinterface),
+			CreateFunction((void*)osub_180016250, (void*)fsinterface),
+			CreateFunction((void*)osub_18000F0D0, (void*)fsinterface),
+			CreateFunction((void*)osub_1800139F0, (void*)fsinterface),
+			CreateFunction((void*)osub_180016570, (void*)fsinterface),
+			CreateFunction((void*)onullsub_86, (void*)fsinterface),
+			CreateFunction((void*)osub_18000AEC0, (void*)fsinterface),
+			CreateFunction((void*)osub_180003320, (void*)fsinterface),
+			CreateFunction((void*)osub_18000AF50, (void*)fsinterface),
+			CreateFunction((void*)osub_18000AF60, (void*)fsinterface),
+			CreateFunction((void*)osub_180005D00, (void*)fsinterface),
+			CreateFunction((void*)osub_18000AF70, (void*)fsinterface),
+			CreateFunction((void*)osub_18001B130, (void*)fsinterface),
+			CreateFunction((void*)osub_18000AF80, (void*)fsinterface),
+			CreateFunction((void*)osub_1800034D0, (void*)fsinterface),
+			CreateFunction((void*)osub_180017180, (void*)fsinterface),
+			CreateFunction((void*)osub_180003550, (void*)fsinterface),
+			CreateFunction((void*)osub_1800250D0, (void*)fsinterface),
+			CreateFunction((void*)osub_1800241B0, (void*)fsinterface),
+			CreateFunction((void*)osub_1800241C0, (void*)fsinterface),
+			CreateFunction((void*)osub_1800241F0, (void*)fsinterface),
+			CreateFunction((void*)osub_180024240, (void*)fsinterface),
+			CreateFunction((void*)osub_180024250, (void*)fsinterface),
+			CreateFunction((void*)osub_180024260, (void*)fsinterface),
+			CreateFunction((void*)osub_180024300, (void*)fsinterface),
+			CreateFunction((void*)osub_180024310, (void*)fsinterface),
+			CreateFunction((void*)osub_180024320, (void*)fsinterface),
+			CreateFunction((void*)osub_180024340, (void*)fsinterface),
+			CreateFunction((void*)osub_180024350, (void*)fsinterface),
+			CreateFunction((void*)osub_180024360, (void*)fsinterface),
+			CreateFunction((void*)osub_180024390, (void*)fsinterface),
+			CreateFunction((void*)osub_180024370, (void*)fsinterface),
+			CreateFunction((void*)osub_1800243C0, (void*)fsinterface),
+			CreateFunction((void*)osub_1800243F0, (void*)fsinterface),
+			CreateFunction((void*)osub_180024410, (void*)fsinterface),
+			CreateFunction((void*)osub_180024430, (void*)fsinterface),
+			CreateFunction((void*)CFileSystem_Stdio__NullSub4, r1vtable)
 		};
-/*uintptr_t oCBaseFileSystem_Read;
-uintptr_t oCBaseFileSystem_Write;
-uintptr_t oCBaseFileSystem_Open;
-uintptr_t oCBaseFileSystem_Close;
-uintptr_t oCBaseFileSystem_Seek;
-uintptr_t oCBaseFileSystem_Tell;
-uintptr_t oCBaseFileSystem_Size;
-uintptr_t oCBaseFileSystem_Size2;
-uintptr_t oCBaseFileSystem_Flush;
-uintptr_t oCBaseFileSystem_Precache;
-uintptr_t oCBaseFileSystem_FileExists;
-uintptr_t oCBaseFileSystem_IsFileWritable;
-uintptr_t oCBaseFileSystem_SetFileWritable;
-uintptr_t oCBaseFileSystem_GetFileTime;
-uintptr_t oCBaseFileSystem_ReadFile;
-uintptr_t oCBaseFileSystem_WriteFile;
-uintptr_t oCBaseFileSystem_UnzipFile;*/
+
+		fsinterfaceoffset = fsinterface + 8;
+		uintptr_t* origsimplefsvtable = (*(uintptr_t**)fsinterfaceoffset);
+
+		
+		uintptr_t oCBaseFileSystem_Read = origsimplefsvtable[0];
+		uintptr_t oCBaseFileSystem_Write = origsimplefsvtable[1];
+		uintptr_t oCBaseFileSystem_Open = origsimplefsvtable[2];
+		uintptr_t oCBaseFileSystem_Close = origsimplefsvtable[3];
+		uintptr_t oCBaseFileSystem_Seek = origsimplefsvtable[4];
+		uintptr_t oCBaseFileSystem_Tell = origsimplefsvtable[5];
+		uintptr_t oCBaseFileSystem_Size = origsimplefsvtable[6];
+		uintptr_t oCBaseFileSystem_Size2 = origsimplefsvtable[7];
+		uintptr_t oCBaseFileSystem_Flush = origsimplefsvtable[8];
+		uintptr_t oCBaseFileSystem_Precache = origsimplefsvtable[9];
+		uintptr_t oCBaseFileSystem_FileExists = origsimplefsvtable[10];
+		uintptr_t oCBaseFileSystem_IsFileWritable = origsimplefsvtable[11];
+		uintptr_t oCBaseFileSystem_SetFileWritable = origsimplefsvtable[12];
+		uintptr_t oCBaseFileSystem_GetFileTime = origsimplefsvtable[13];
+		uintptr_t oCBaseFileSystem_ReadFile = origsimplefsvtable[14];
+		uintptr_t oCBaseFileSystem_WriteFile = origsimplefsvtable[15];
+		uintptr_t oCBaseFileSystem_UnzipFile = origsimplefsvtable[16];
 		static uintptr_t simplefsvtable[] = {
-			(uintptr_t)(&IBaseFileSystem__Read),
-			(uintptr_t)(&IBaseFileSystem__Write),
-			(uintptr_t)(&IBaseFileSystem__Open),
-			(uintptr_t)(&IBaseFileSystem__Close),
-			(uintptr_t)(&IBaseFileSystem__Seek),
-			(uintptr_t)(&IBaseFileSystem__Tell),
-			(uintptr_t)(&IBaseFileSystem__Size),
-			(uintptr_t)(&IBaseFileSystem__Size2),
-			(uintptr_t)(&IBaseFileSystem__Flush),
-			(uintptr_t)(&IBaseFileSystem__Precache),
-			(uintptr_t)(&IBaseFileSystem__FileExists),
-			(uintptr_t)(&IBaseFileSystem__IsFileWritable),
-			(uintptr_t)(&IBaseFileSystem__SetFileWritable),
-			(uintptr_t)(&IBaseFileSystem__GetFileTime),
-			(uintptr_t)(&IBaseFileSystem__ReadFile),
-			(uintptr_t)(&IBaseFileSystem__WriteFile),
-			(uintptr_t)(&IBaseFileSystem__UnzipFile)
+			CreateFunction((void*)oCBaseFileSystem_Read, (void*)fsinterfaceoffset),
+			CreateFunction((void*)oCBaseFileSystem_Write, (void*)fsinterfaceoffset),
+			CreateFunction((void*)oCBaseFileSystem_Open, (void*)fsinterfaceoffset),
+			CreateFunction((void*)oCBaseFileSystem_Close, (void*)fsinterfaceoffset),
+			CreateFunction((void*)oCBaseFileSystem_Seek, (void*)fsinterfaceoffset),
+			CreateFunction((void*)oCBaseFileSystem_Tell, (void*)fsinterfaceoffset),
+			CreateFunction((void*)oCBaseFileSystem_Size, (void*)fsinterfaceoffset),
+			CreateFunction((void*)oCBaseFileSystem_Size2, (void*)fsinterfaceoffset),
+			CreateFunction((void*)oCBaseFileSystem_Flush, (void*)fsinterfaceoffset),
+			CreateFunction((void*)oCBaseFileSystem_Precache, (void*)fsinterfaceoffset),
+			CreateFunction((void*)oCBaseFileSystem_FileExists, (void*)fsinterfaceoffset),
+			CreateFunction((void*)oCBaseFileSystem_IsFileWritable, (void*)fsinterfaceoffset),
+			CreateFunction((void*)oCBaseFileSystem_SetFileWritable, (void*)fsinterfaceoffset),
+			CreateFunction((void*)oCBaseFileSystem_GetFileTime, (void*)fsinterfaceoffset),
+			CreateFunction((void*)oCBaseFileSystem_ReadFile, (void*)fsinterfaceoffset),
+			CreateFunction((void*)oCBaseFileSystem_WriteFile, (void*)fsinterfaceoffset),
+			CreateFunction((void*)oCBaseFileSystem_UnzipFile, (void*)fsinterfaceoffset)
 
 		};
 		struct fsptr {
@@ -2889,25 +1520,7 @@ uintptr_t oCBaseFileSystem_UnzipFile;*/
 		static void* whatever3 = &r1ovtable;
 		static void* whatever4 = &simplefsvtable;
 		static fsptr a;
-		fsinterfaceoffset = fsinterface + 8;
-		uintptr_t* origsimplefsvtable = (*(uintptr_t**)fsinterfaceoffset);
-		oCBaseFileSystem_Read = origsimplefsvtable[0];
-		oCBaseFileSystem_Write = origsimplefsvtable[1];
-		oCBaseFileSystem_Open = origsimplefsvtable[2];
-		oCBaseFileSystem_Close = origsimplefsvtable[3];
-		oCBaseFileSystem_Seek = origsimplefsvtable[4];
-		oCBaseFileSystem_Tell = origsimplefsvtable[5];
-		oCBaseFileSystem_Size = origsimplefsvtable[6];
-		oCBaseFileSystem_Size2 = origsimplefsvtable[7];
-		oCBaseFileSystem_Flush = origsimplefsvtable[8];
-		oCBaseFileSystem_Precache = origsimplefsvtable[9];
-		oCBaseFileSystem_FileExists = origsimplefsvtable[10];
-		oCBaseFileSystem_IsFileWritable = origsimplefsvtable[11];
-		oCBaseFileSystem_SetFileWritable = origsimplefsvtable[12];
-		oCBaseFileSystem_GetFileTime = origsimplefsvtable[13];
-		oCBaseFileSystem_ReadFile = origsimplefsvtable[14];
-		oCBaseFileSystem_WriteFile = origsimplefsvtable[15];
-		oCBaseFileSystem_UnzipFile = origsimplefsvtable[16];
+
 		a.ptr1 = whatever3;
 		a.ptr2 = whatever4;
 		a.ptr3 = whatever4;
@@ -2921,98 +1534,98 @@ uintptr_t oCBaseFileSystem_UnzipFile;*/
 		modelinterface = (uintptr_t)oAppSystemFactory(pName, pReturnCode);
 
 		uintptr_t* r1vtable = *(uintptr_t**)oAppSystemFactory(pName, pReturnCode);
-		oCModelInfo_dtor_0 = r1vtable[0];
-		oCModelInfoServer__GetModel = r1vtable[1];
-		oCModelInfoServer__GetModelIndex = r1vtable[2];
-		oCModelInfo__GetModelName = r1vtable[3];
-		oCModelInfo__GetVCollide = r1vtable[4];
-		oCModelInfo__GetVCollideEx = r1vtable[5];
-		oCModelInfo__GetVCollideEx2 = r1vtable[6];
-		oCModelInfo__GetModelRenderBounds = r1vtable[7];
-		oCModelInfo__GetModelFrameCount = r1vtable[8];
-		oCModelInfo__GetModelType = r1vtable[9];
-		oCModelInfo__GetModelExtraData = r1vtable[10];
-		oCModelInfo__IsTranslucentTwoPass = r1vtable[11];
-		oCModelInfo__ModelHasMaterialProxy = r1vtable[12];
-		oCModelInfo__IsTranslucent = r1vtable[13];
-		oCModelInfo__NullSub1 = r1vtable[14];
-		oCModelInfo__UnkFunc1 = r1vtable[15];
-		oCModelInfo__UnkFunc2 = r1vtable[16];
-		oCModelInfo__UnkFunc3 = r1vtable[17];
-		oCModelInfo__UnkFunc4 = r1vtable[18];
-		oCModelInfo__UnkFunc5 = r1vtable[19];
-		oCModelInfo__UnkFunc6 = r1vtable[20];
-		oCModelInfo__UnkFunc7 = r1vtable[21];
-		oCModelInfo__UnkFunc8 = r1vtable[22];
-		oCModelInfo__UnkFunc9 = r1vtable[23];
-		oCModelInfo__UnkFunc10 = r1vtable[24];
-		oCModelInfo__UnkFunc11 = r1vtable[25];
-		oCModelInfo__UnkFunc12 = r1vtable[26];
-		oCModelInfo__UnkFunc13 = r1vtable[27];
-		oCModelInfo__UnkFunc14 = r1vtable[28];
-		oCModelInfo__UnkFunc15 = r1vtable[29];
-		oCModelInfo__UnkFunc16 = r1vtable[30];
-		oCModelInfo__UnkFunc17 = r1vtable[31];
-		oCModelInfo__UnkFunc18 = r1vtable[32];
-		oCModelInfo__UnkFunc19 = r1vtable[33];
-		oCModelInfo__UnkFunc20 = r1vtable[34];
-		oCModelInfo__UnkFunc21 = r1vtable[35];
-		oCModelInfo__UnkFunc22 = r1vtable[36];
-		oCModelInfo__UnkFunc23 = r1vtable[37];
-		oCModelInfo__NullSub2 = r1vtable[38];
-		oCModelInfo__UnkFunc24 = r1vtable[39];
-		oCModelInfo__UnkFunc25 = r1vtable[40];
+		uintptr_t oCModelInfo_dtor_0 = r1vtable[0];
+		uintptr_t oCModelInfoServer__GetModel = r1vtable[1];
+		uintptr_t oCModelInfoServer__GetModelIndex = r1vtable[2];
+		uintptr_t oCModelInfo__GetModelName = r1vtable[3];
+		uintptr_t oCModelInfo__GetVCollide = r1vtable[4];
+		uintptr_t oCModelInfo__GetVCollideEx = r1vtable[5];
+		uintptr_t oCModelInfo__GetVCollideEx2 = r1vtable[6];
+		uintptr_t oCModelInfo__GetModelRenderBounds = r1vtable[7];
+		uintptr_t oCModelInfo__GetModelFrameCount = r1vtable[8];
+		uintptr_t oCModelInfo__GetModelType = r1vtable[9];
+		uintptr_t oCModelInfo__GetModelExtraData = r1vtable[10];
+		uintptr_t oCModelInfo__IsTranslucentTwoPass = r1vtable[11];
+		uintptr_t oCModelInfo__ModelHasMaterialProxy = r1vtable[12];
+		uintptr_t oCModelInfo__IsTranslucent = r1vtable[13];
+		uintptr_t oCModelInfo__NullSub1 = r1vtable[14];
+		uintptr_t oCModelInfo__UnkFunc1 = r1vtable[15];
+		uintptr_t oCModelInfo__UnkFunc2 = r1vtable[16];
+		uintptr_t oCModelInfo__UnkFunc3 = r1vtable[17];
+		uintptr_t oCModelInfo__UnkFunc4 = r1vtable[18];
+		uintptr_t oCModelInfo__UnkFunc5 = r1vtable[19];
+		uintptr_t oCModelInfo__UnkFunc6 = r1vtable[20];
+		uintptr_t oCModelInfo__UnkFunc7 = r1vtable[21];
+		uintptr_t oCModelInfo__UnkFunc8 = r1vtable[22];
+		uintptr_t oCModelInfo__UnkFunc9 = r1vtable[23];
+		uintptr_t oCModelInfo__UnkFunc10 = r1vtable[24];
+		uintptr_t oCModelInfo__UnkFunc11 = r1vtable[25];
+		uintptr_t oCModelInfo__UnkFunc12 = r1vtable[26];
+		uintptr_t oCModelInfo__UnkFunc13 = r1vtable[27];
+		uintptr_t oCModelInfo__UnkFunc14 = r1vtable[28];
+		uintptr_t oCModelInfo__UnkFunc15 = r1vtable[29];
+		uintptr_t oCModelInfo__UnkFunc16 = r1vtable[30];
+		uintptr_t oCModelInfo__UnkFunc17 = r1vtable[31];
+		uintptr_t oCModelInfo__UnkFunc18 = r1vtable[32];
+		uintptr_t oCModelInfo__UnkFunc19 = r1vtable[33];
+		uintptr_t oCModelInfo__UnkFunc20 = r1vtable[34];
+		uintptr_t oCModelInfo__UnkFunc21 = r1vtable[35];
+		uintptr_t oCModelInfo__UnkFunc22 = r1vtable[36];
+		uintptr_t oCModelInfo__UnkFunc23 = r1vtable[37];
+		uintptr_t oCModelInfo__NullSub2 = r1vtable[38];
+		uintptr_t oCModelInfo__UnkFunc24 = r1vtable[39];
+		uintptr_t oCModelInfo__UnkFunc25 = r1vtable[40];
 		static uintptr_t r1ovtable[] = {
-			(uintptr_t)(&CModelInfo_dtor_0),
-			(uintptr_t)(&CModelInfoServer__GetModel),
-			(uintptr_t)(&CModelInfoServer__GetModelIndex),
-			(uintptr_t)(&CModelInfo__GetModelName),
-			(uintptr_t)(&CModelInfo__GetVCollide),
-			(uintptr_t)(&CModelInfo__GetVCollideEx),
-			(uintptr_t)(&CModelInfo__GetVCollideEx2),
-			(uintptr_t)(&CModelInfo__GetModelRenderBounds),
-			(uintptr_t)(&CModelInfo__UnkSetFlag),
-			(uintptr_t)(&CModelInfo__UnkClearFlag),
-			(uintptr_t)(&CModelInfo__GetFlag),
-			(uintptr_t)(&CModelInfo__UnkTFOVoid),
-			(uintptr_t)(&CModelInfo__UnkTFOVoid2),
-			(uintptr_t)(&CModelInfo__ShouldRet0),
-			(uintptr_t)(&CModelInfo__UnkTFOVoid3),
-			(uintptr_t)(&CModelInfo__ClientFullyConnected),
-			(uintptr_t)(&CModelInfo__GetModelFrameCount),
-			(uintptr_t)(&CModelInfo__GetModelType),
-			(uintptr_t)(&CModelInfo__UnkTFOShouldRet0_2),
-			(uintptr_t)(&CModelInfo__GetModelExtraData),
-			(uintptr_t)(&CModelInfo__IsTranslucentTwoPass),
-			(uintptr_t)(&CModelInfo__ModelHasMaterialProxy),
-			(uintptr_t)(&CModelInfo__IsTranslucent),
-			(uintptr_t)(&CModelInfo__NullSub1),
-			(uintptr_t)(&CModelInfo__UnkFunc1),
-			(uintptr_t)(&CModelInfo__UnkFunc2),
-			(uintptr_t)(&CModelInfo__UnkFunc3),
-			(uintptr_t)(&CModelInfo__UnkFunc4),
-			(uintptr_t)(&CModelInfo__UnkFunc5),
-			(uintptr_t)(&CModelInfo__UnkFunc6),
-			(uintptr_t)(&CModelInfo__UnkFunc7),
-			(uintptr_t)(&CModelInfo__UnkFunc8),
-			(uintptr_t)(&CModelInfo__UnkFunc9),
-			(uintptr_t)(&CModelInfo__UnkFunc10),
-			(uintptr_t)(&CModelInfo__UnkFunc11),
-			(uintptr_t)(&CModelInfo__UnkFunc12),
-			(uintptr_t)(&CModelInfo__UnkFunc13),
-			(uintptr_t)(&CModelInfo__UnkFunc14),
-			(uintptr_t)(&CModelInfo__UnkFunc15),
-			(uintptr_t)(&CModelInfo__UnkFunc16),
-			(uintptr_t)(&CModelInfo__UnkFunc17),
-			(uintptr_t)(&CModelInfo__UnkFunc18),
-			(uintptr_t)(&CModelInfo__UnkFunc19),
-			(uintptr_t)(&CModelInfo__UnkFunc20),
-			(uintptr_t)(&CModelInfo__UnkFunc21),
-			(uintptr_t)(&CModelInfo__UnkFunc22),
-			(uintptr_t)(&CModelInfo__UnkFunc23),
-			(uintptr_t)(&CModelInfo__NullSub2),
-			(uintptr_t)(&CModelInfo__UnkFunc24),
-			(uintptr_t)(&CModelInfo__UnkFunc25)
+			CreateFunction((void*)oCModelInfo_dtor_0, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfoServer__GetModel, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfoServer__GetModelIndex, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__GetModelName, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__GetVCollide, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__GetVCollideEx, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__GetVCollideEx2, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__GetModelRenderBounds, (void*)modelinterface),
+			CreateFunction(CModelInfo__UnkSetFlag, (void*)modelinterface),
+			CreateFunction(CModelInfo__UnkClearFlag, (void*)modelinterface),
+			CreateFunction(CModelInfo__GetFlag, (void*)modelinterface),
+			CreateFunction(CModelInfo__UnkTFOVoid, (void*)modelinterface),
+			CreateFunction(CModelInfo__UnkTFOVoid2, (void*)modelinterface),
+			CreateFunction(CModelInfo__ShouldRet0, (void*)modelinterface),
+			CreateFunction(CModelInfo__UnkTFOVoid3, (void*)modelinterface),
+			CreateFunction(CModelInfo__ClientFullyConnected, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__GetModelFrameCount, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__GetModelType, (void*)modelinterface),
+			CreateFunction(CModelInfo__UnkTFOShouldRet0_2, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__GetModelExtraData, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__IsTranslucentTwoPass, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__ModelHasMaterialProxy, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__IsTranslucent, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__NullSub1, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__UnkFunc1, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__UnkFunc2, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__UnkFunc3, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__UnkFunc4, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__UnkFunc5, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__UnkFunc6, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__UnkFunc7, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__UnkFunc8, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__UnkFunc9, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__UnkFunc10, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__UnkFunc11, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__UnkFunc12, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__UnkFunc13, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__UnkFunc14, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__UnkFunc15, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__UnkFunc16, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__UnkFunc17, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__UnkFunc18, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__UnkFunc19, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__UnkFunc20, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__UnkFunc21, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__UnkFunc22, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__UnkFunc23, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__NullSub2, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__UnkFunc24, (void*)modelinterface),
+			CreateFunction((void*)oCModelInfo__UnkFunc25, (void*)modelinterface)
 		};
 		static void* whatever4 = &r1ovtable;
 		return &whatever4;
@@ -3020,49 +1633,49 @@ uintptr_t oCBaseFileSystem_UnzipFile;*/
 	if (!strcmp(pName, "VEngineServerStringTable001")) {
 		std::cout << "wrapping VEngineServerStringTable001" << std::endl;
 		stringtableinterface = (uintptr_t)oAppSystemFactory(pName, pReturnCode);
-		uintptr_t* r1vtable = *(uintptr_t**)oAppSystemFactory(pName, pReturnCode);
+		static uintptr_t* r1vtable = *(uintptr_t**)oAppSystemFactory(pName, pReturnCode);
 		
-		oCNetworkStringTableContainer_dtor = r1vtable[0];
-		oCNetworkStringTableContainer__CreateStringTable = r1vtable[1];
-		oCNetworkStringTableContainer__RemoveAllTables = r1vtable[2];
-		oCNetworkStringTableContainer__FindTable = r1vtable[3];
-		oCNetworkStringTableContainer__GetTable = r1vtable[4];
-		oCNetworkStringTableContainer__GetNumTables = r1vtable[5];
-		oCNetworkStringTableContainer__SetAllowClientSideAddString = r1vtable[6];
-		oCNetworkStringTableContainer__CreateDictionary = r1vtable[7];
+		uintptr_t oCNetworkStringTableContainer_dtor = r1vtable[0];
+		uintptr_t oCNetworkStringTableContainer__CreateStringTable = r1vtable[1];
+		uintptr_t oCNetworkStringTableContainer__RemoveAllTables = r1vtable[2];
+		uintptr_t oCNetworkStringTableContainer__FindTable = r1vtable[3];
+		uintptr_t oCNetworkStringTableContainer__GetTable = r1vtable[4];
+		uintptr_t oCNetworkStringTableContainer__GetNumTables = r1vtable[5];
+		uintptr_t oCNetworkStringTableContainer__SetAllowClientSideAddString = r1vtable[6];
+		uintptr_t oCNetworkStringTableContainer__CreateDictionary = r1vtable[7];
 		static uintptr_t r1ovtable[] = {
-			(uintptr_t)(&CNetworkStringTableContainer_dtor),
-			(uintptr_t)(&CNetworkStringTableContainer__CreateStringTable),
-			(uintptr_t)(&CNetworkStringTableContainer__RemoveAllTables),
-			(uintptr_t)(&CNetworkStringTableContainer__FindTable),
-			(uintptr_t)(&CNetworkStringTableContainer__GetTable),
-			(uintptr_t)(&CNetworkStringTableContainer__GetNumTables),
-			(uintptr_t)(&CNetworkStringTableContainer__SetAllowClientSideAddString),
-			(uintptr_t)(&CNetworkStringTableContainer__SetTickCount),
-			(uintptr_t)(&CNetworkStringTableContainer__CreateDictionary)
+			CreateFunction((void*)oCNetworkStringTableContainer_dtor, (void*)stringtableinterface),
+			CreateFunction((void*)oCNetworkStringTableContainer__CreateStringTable, (void*)stringtableinterface),
+			CreateFunction((void*)oCNetworkStringTableContainer__RemoveAllTables, (void*)stringtableinterface),
+			CreateFunction((void*)oCNetworkStringTableContainer__FindTable, (void*)stringtableinterface),
+			CreateFunction((void*)oCNetworkStringTableContainer__GetTable, (void*)stringtableinterface),
+			CreateFunction((void*)oCNetworkStringTableContainer__GetNumTables, (void*)stringtableinterface),
+			CreateFunction((void*)oCNetworkStringTableContainer__SetAllowClientSideAddString, (void*)stringtableinterface),
+			CreateFunction(CNetworkStringTableContainer__SetTickCount, (void*)stringtableinterface),
+			CreateFunction((void*)oCNetworkStringTableContainer__CreateDictionary, (void*)stringtableinterface)
 		};
 		static void* whatever5 = &r1ovtable;
 		return &whatever5;
 	}
 	if (!strcmp(pName, "VEngineCvar007")) {
 		std::cout << "wrapping VEngineCvar007" << std::endl;
-
-		uintptr_t* r1vtable = *(uintptr_t**)oAppSystemFactory(pName, pReturnCode);
+		static uintptr_t* original_this = *(uintptr_t**)oAppSystemFactory(pName, pReturnCode);
+		static uintptr_t* r1vtable = *(uintptr_t**)oAppSystemFactory(pName, pReturnCode);
 		cvarinterface = (uintptr_t)oAppSystemFactory(pName, pReturnCode);
 
-		oCCvar__Connect = r1vtable[0];
-		oCCvar__Disconnect = r1vtable[1];
-		oCCvar__QueryInterface = r1vtable[2];
-		oCCVar__Init = r1vtable[3];
-		oCCVar__Shutdown = r1vtable[4];
-		oCCvar__GetDependencies = r1vtable[5];
-		oCCVar__GetTier = r1vtable[6];
-		oCCVar__Reconnect = r1vtable[7];
-		oCCvar__AllocateDLLIdentifier = r1vtable[8];
+		uintptr_t oCCvar__Connect = r1vtable[0];
+		uintptr_t oCCvar__Disconnect = r1vtable[1];
+		uintptr_t oCCvar__QueryInterface = r1vtable[2];
+		uintptr_t oCCVar__Init = r1vtable[3];
+		uintptr_t oCCVar__Shutdown = r1vtable[4];
+		uintptr_t oCCvar__GetDependencies = r1vtable[5];
+		uintptr_t oCCVar__GetTier = r1vtable[6];
+		uintptr_t oCCVar__Reconnect = r1vtable[7];
+		uintptr_t oCCvar__AllocateDLLIdentifier = r1vtable[8];
 		OriginalCCVar_RegisterConCommand = reinterpret_cast<decltype(OriginalCCVar_RegisterConCommand)>(r1vtable[9]);
 		OriginalCCVar_UnregisterConCommand = reinterpret_cast<decltype(OriginalCCVar_UnregisterConCommand)>(r1vtable[10]);
-		oCCvar__UnregisterConCommands = r1vtable[11];
-		oCCvar__GetCommandLineValue = r1vtable[12];
+		uintptr_t oCCvar__UnregisterConCommands = r1vtable[11];
+		uintptr_t oCCvar__GetCommandLineValue = r1vtable[12];
 		//uintptr_t CCvar__FindCommandBase = r1vtable[13];
 		//uintptr_t CCvar__FindCommandBase2 = r1vtable[14];
 		//uintptr_t CCvar__FindVar = r1vtable[15];
@@ -3076,74 +1689,74 @@ uintptr_t oCBaseFileSystem_UnzipFile;*/
 		OriginalCCVar_FindCommand = reinterpret_cast<decltype(OriginalCCVar_FindCommand)>(r1vtable[17]);
 		OriginalCCVar_FindCommand2 = reinterpret_cast<decltype(OriginalCCVar_FindCommand2)>(r1vtable[18]);
 
-		oCCVar__Find = r1vtable[19];
+		uintptr_t oCCVar__Find = r1vtable[19];
 		OriginalCCvar__InstallGlobalChangeCallback = reinterpret_cast<decltype(OriginalCCvar__InstallGlobalChangeCallback)>(r1vtable[20]);
 		OriginalCCvar__RemoveGlobalChangeCallback = reinterpret_cast<decltype(OriginalCCvar__RemoveGlobalChangeCallback)>(r1vtable[21]);
 		OriginalCCVar_CallGlobalChangeCallbacks = reinterpret_cast<decltype(OriginalCCVar_CallGlobalChangeCallbacks)>(r1vtable[22]);
-		oCCvar__InstallConsoleDisplayFunc = r1vtable[23];
-		oCCvar__RemoveConsoleDisplayFunc = r1vtable[24];
-		oCCvar__ConsoleColorPrintf = r1vtable[25];
-		oCCvar__ConsolePrintf = r1vtable[26];
-		oCCvar__ConsoleDPrintf = r1vtable[27];
-		oCCVar__RevertFlaggedConVars = r1vtable[28];
-		oCCvar__InstallCVarQuery = r1vtable[29];
-		oCCvar__SetMaxSplitScreenSlots = r1vtable[30];
-		oCCvar__GetMaxSplitScreenSlots = r1vtable[31];
-		oCCvar__GetConsoleDisplayFuncCount = r1vtable[32];
-		oCCvar__GetConsoleText = r1vtable[33];
-		oCCvar__IsMaterialThreadSetAllowed = r1vtable[34];
+		uintptr_t oCCvar__InstallConsoleDisplayFunc = r1vtable[23];
+		uintptr_t oCCvar__RemoveConsoleDisplayFunc = r1vtable[24];
+		uintptr_t oCCvar__ConsoleColorPrintf = r1vtable[25];
+		uintptr_t oCCvar__ConsolePrintf = r1vtable[26];
+		uintptr_t oCCvar__ConsoleDPrintf = r1vtable[27];
+		uintptr_t oCCVar__RevertFlaggedConVars = r1vtable[28];
+		uintptr_t oCCvar__InstallCVarQuery = r1vtable[29];
+		uintptr_t oCCvar__SetMaxSplitScreenSlots = r1vtable[30];
+		uintptr_t oCCvar__GetMaxSplitScreenSlots = r1vtable[31];
+		uintptr_t oCCvar__GetConsoleDisplayFuncCount = r1vtable[32];
+		uintptr_t oCCvar__GetConsoleText = r1vtable[33];
+		uintptr_t oCCvar__IsMaterialThreadSetAllowed = r1vtable[34];
 		OriginalCCVar_QueueMaterialThreadSetValue1 = reinterpret_cast<decltype(OriginalCCVar_QueueMaterialThreadSetValue1)>(r1vtable[35]);
 		OriginalCCVar_QueueMaterialThreadSetValue2 = reinterpret_cast<decltype(OriginalCCVar_QueueMaterialThreadSetValue2)>(r1vtable[36]);
 		OriginalCCVar_QueueMaterialThreadSetValue3 = reinterpret_cast<decltype(OriginalCCVar_QueueMaterialThreadSetValue3)>(r1vtable[37]);
-		oCCvar__HasQueuedMaterialThreadConVarSets = r1vtable[38];
+		uintptr_t oCCvar__HasQueuedMaterialThreadConVarSets = r1vtable[38];
 		//uintptr_t CCvar__ProcessQueuedMaterialThreadConVarSets = r1vtable[39];
-		oCCvar__FactoryInternalIterator = r1vtable[40];
+		uintptr_t oCCvar__FactoryInternalIterator = r1vtable[40];
 
 
 		static uintptr_t r1ovtable[] = {
-			(uintptr_t)(&CCvar__Connect),
-			(uintptr_t)(&CCvar__Disconnect),
-			(uintptr_t)(&CCvar__QueryInterface),
-			(uintptr_t)(&CCvar__Init),
-			(uintptr_t)(&CCvar__Shutdown),
-			(uintptr_t)(&CCvar__GetDependencies),
-			(uintptr_t)(&CCVar__GetTier),
-			(uintptr_t)(&CCvar__Reconnect),
-			(uintptr_t)(&CCvar__AllocateDLLIdentifier),
-			(uintptr_t)(&CCVar__SetSomeFlag_Corrupt),
-			(uintptr_t)(&CCVar__GetSomeFlag),
-			(uintptr_t)(&CCVar_RegisterConCommand),
-			(uintptr_t)(&CCVar_UnregisterConCommand),
-			(uintptr_t)(&CCvar__UnregisterConCommands),
-			(uintptr_t)(&CCvar__GetCommandLineValue),
-			(uintptr_t)(&CCVar_FindCommandBase),
-			(uintptr_t)(&CCVar_FindCommandBase2),
-			(uintptr_t)(&CCVar_FindVar),
-			(uintptr_t)(&CCVar_FindVar2),
-			(uintptr_t)(&CCVar_FindCommand),
-			(uintptr_t)(&CCVar_FindCommand2),
-			(uintptr_t)(&CCVar__Find),
-			(uintptr_t)(&CCvar__InstallGlobalChangeCallback),
-			(uintptr_t)(&CCvar__RemoveGlobalChangeCallback),
-			(uintptr_t)(&CCVar_CallGlobalChangeCallbacks),
-			(uintptr_t)(&CCvar__InstallConsoleDisplayFunc),
-			(uintptr_t)(&CCvar__RemoveConsoleDisplayFunc),
-			(uintptr_t)(&CCvar__ConsoleColorPrintf),
-			(uintptr_t)(&CCvar__ConsolePrintf),
-			(uintptr_t)(&CCvar__ConsoleDPrintf),
-			(uintptr_t)(&CCvar__RevertFlaggedConVars),
-			(uintptr_t)(&CCvar__InstallCVarQuery),
-			(uintptr_t)(&CCvar__SetMaxSplitScreenSlots),
-			(uintptr_t)(&CCvar__GetMaxSplitScreenSlots),
-			(uintptr_t)(&CCvar_GetConsoleDisplayFuncCount),
-			(uintptr_t)(&CCvar__GetConsoleText),
-			(uintptr_t)(&CCvar__IsMaterialThreadSetAllowed),
-			(uintptr_t)(&CCVar_QueueMaterialThreadSetValue1),
-			(uintptr_t)(&CCVar_QueueMaterialThreadSetValue2),
-			(uintptr_t)(&CCVar_QueueMaterialThreadSetValue3),
-			(uintptr_t)(&CCvar__HasQueuedMaterialThreadConVarSets),
-			(uintptr_t)(&CCvar__ProcessQueuedMaterialThreadConVarSets),
-			(uintptr_t)(&CCvar__FactoryInternalIterator)
+			CreateFunction((void*)oCCvar__Connect, (void*)cvarinterface),
+			CreateFunction((void*)oCCvar__Disconnect, (void*)cvarinterface),
+			CreateFunction((void*)oCCvar__QueryInterface, (void*)cvarinterface),
+			CreateFunction((void*)oCCVar__Init, (void*)cvarinterface),
+			CreateFunction((void*)oCCVar__Shutdown, (void*)cvarinterface),
+			CreateFunction((void*)oCCvar__GetDependencies, (void*)cvarinterface),
+			CreateFunction((void*)oCCVar__GetTier, (void*)cvarinterface),
+			CreateFunction((void*)oCCVar__Reconnect, (void*)cvarinterface),
+			CreateFunction((void*)oCCvar__AllocateDLLIdentifier, (void*)cvarinterface),
+			CreateFunction(CCVar__SetSomeFlag_Corrupt, (void*)cvarinterface),
+			CreateFunction(CCVar__GetSomeFlag, (void*)cvarinterface),
+			CreateFunction(CCVar_RegisterConCommand, (void*)cvarinterface),
+			CreateFunction(CCVar_UnregisterConCommand, (void*)cvarinterface),
+			CreateFunction((void*)oCCvar__UnregisterConCommands, (void*)cvarinterface),
+			CreateFunction((void*)oCCvar__GetCommandLineValue, (void*)cvarinterface),
+			CreateFunction(CCVar_FindCommandBase, (void*)cvarinterface),
+			CreateFunction(CCVar_FindCommandBase2, (void*)cvarinterface),
+			CreateFunction(CCVar_FindVar, (void*)cvarinterface),
+			CreateFunction(CCVar_FindVar2, (void*)cvarinterface),
+			CreateFunction(CCVar_FindCommand, (void*)cvarinterface),
+			CreateFunction(CCVar_FindCommand2, (void*)cvarinterface),
+			CreateFunction((void*)oCCVar__Find, (void*)cvarinterface),
+			CreateFunction(CCvar__InstallGlobalChangeCallback, (void*)cvarinterface),
+			CreateFunction(CCvar__RemoveGlobalChangeCallback, (void*)cvarinterface),
+			CreateFunction(CCVar_CallGlobalChangeCallbacks, (void*)cvarinterface),
+			CreateFunction((void*)oCCvar__InstallConsoleDisplayFunc, (void*)cvarinterface),
+			CreateFunction((void*)oCCvar__RemoveConsoleDisplayFunc, (void*)cvarinterface),
+			CreateFunction((void*)oCCvar__ConsoleColorPrintf, (void*)cvarinterface),
+			CreateFunction((void*)oCCvar__ConsolePrintf, (void*)cvarinterface),
+			CreateFunction((void*)oCCvar__ConsoleDPrintf, (void*)cvarinterface),
+			CreateFunction((void*)oCCVar__RevertFlaggedConVars, (void*)cvarinterface),
+			CreateFunction((void*)oCCvar__InstallCVarQuery, (void*)cvarinterface),
+			CreateFunction((void*)oCCvar__SetMaxSplitScreenSlots, (void*)cvarinterface),
+			CreateFunction((void*)oCCvar__GetMaxSplitScreenSlots, (void*)cvarinterface),
+			CreateFunction((void*)oCCvar__GetConsoleDisplayFuncCount, (void*)cvarinterface),
+			CreateFunction((void*)oCCvar__GetConsoleText, (void*)cvarinterface),
+			CreateFunction((void*)oCCvar__IsMaterialThreadSetAllowed, (void*)cvarinterface),
+			CreateFunction(CCVar_QueueMaterialThreadSetValue1, (void*)cvarinterface),
+			CreateFunction(CCVar_QueueMaterialThreadSetValue2, (void*)cvarinterface),
+			CreateFunction(CCVar_QueueMaterialThreadSetValue3, (void*)cvarinterface),
+			CreateFunction((void*)oCCvar__HasQueuedMaterialThreadConVarSets, (void*)cvarinterface),
+			CreateFunction(CCvar__ProcessQueuedMaterialThreadConVarSets, (void*)cvarinterface),
+			CreateFunction((void*)oCCvar__FactoryInternalIterator, r1vtable)
 
 
 		};
@@ -3208,10 +1821,10 @@ char __fastcall CServerGameDLL__DLLInit(void* thisptr, CreateInterfaceFn appSyst
 	tfogamemanager->Init();
 	staticclasssystem->Init();
 	size_t bytes = 0;
-	unsigned char noparray = { 0x90 };
-	WriteProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)(GetModuleHandleA("filesystem_stdio.dll")) + 0x74E26), &noparray, sizeof(noparray), &bytes);
-	WriteProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)(GetModuleHandleA("filesystem_stdio.dll")) + 0x74E27), &noparray, sizeof(noparray), &bytes);
-	WriteProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)(GetModuleHandleA("filesystem_stdio.dll")) + 0x74E28), &noparray, sizeof(noparray), &bytes);
+	//unsigned char noparray = { 0x90 };
+	//WriteProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)(GetModuleHandleA("filesystem_stdio.dll")) + 0x74E26), &noparray, sizeof(noparray), &bytes);
+	//WriteProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)(GetModuleHandleA("filesystem_stdio.dll")) + 0x74E27), &noparray, sizeof(noparray), &bytes);
+	//WriteProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)(GetModuleHandleA("filesystem_stdio.dll")) + 0x74E28), &noparray, sizeof(noparray), &bytes);
 
 	return CServerGameDLL__DLLInitOriginal(thisptr, R1OFactory, R1OFactory, R1OFactory, pGlobals);
 }
@@ -3335,17 +1948,6 @@ __int64 __fastcall sub_1804719D0(const char* a1, const char* a2)
 	v4 -= v5;
 	return v4;
 }
-#define BYTEn(x, n)   (*((_BYTE*)&(x)+n))
-#define WORDn(x, n)   (*((_WORD*)&(x)+n))
-#define DWORDn(x, n)  (*((_DWORD*)&(x)+n))
-
-#define LOBYTE(x)  BYTEn(x,LOW_IND(x,_BYTE))
-#define LOWORD(x)  WORDn(x,LOW_IND(x,_WORD))
-#define LODWORD(x) DWORDn(x,LOW_IND(x,_DWORD))
-#define HIBYTE(x)  BYTEn(x,HIGH_IND(x,_BYTE))
-#define HIWORD(x)  WORDn(x,HIGH_IND(x,_WORD))
-#define HIDWORD(x) DWORDn(x,HIGH_IND(x,_DWORD))
-#define BYTE1(x)   BYTEn(x,  1)         // byte 1 (counting from 0)
 
 // #STR: "CompareRecvPropToSendProp: missing a property."
 char __fastcall CompareRecvPropToSendProp(__int64 a1, __int64 a2)
@@ -3427,7 +2029,7 @@ char __fastcall MatchRecvPropsToSendProps_R(__int64 a1, __int64 a2, __int64 pSen
 					break;
 				v18[0] = v17;
 				v18[1] = RecvProp;
-				sub_1801D9D00(a1, v18);
+				sub_1801D9D00(a1, (uint64*)v18);
 			}
 			else {
 				std::cout << "Missing RecvProp for " << *(const char**)(v7 + 72) << std::endl;

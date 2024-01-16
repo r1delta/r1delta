@@ -347,7 +347,7 @@ void CCVar_RegisterConCommand(uintptr_t thisptr, ConCommandBaseR1O* pCommandBase
 }
 
 void CCVar_UnregisterConCommand(uintptr_t thisptr, ConCommandBaseR1O* pCommandBase) {
-	return;
+	return OriginalCCVar_UnregisterConCommand(cvarinterface, (ConCommandR1*)pCommandBase);
 }
 
 ConCommandBaseR1O* CCVar_FindCommandBase(uintptr_t thisptr, const char* name) {
