@@ -5,6 +5,14 @@
 [![Open Issues](https://img.shields.io/github/issues-raw/zhangjiequan/AssetStudio?style=flat-square)](https://github.com/zhangjiequan/AssetStudio/issues)
 ![Contributors](https://img.shields.io/github/contributors/zhangjiequan/AssetStudio?style=flat-square)
 ![Contributions Welcome](https://img.shields.io/badge/contributions-welcome-brightgreen?style=flat-square)
+[![brettops tool](https://img.shields.io/badge/brettops-tool-209cdf?labelColor=162d50)](https://brettops.io)
+[![pipeline status](https://img.shields.io/gitlab/pipeline-status/brettops/tools/badgie?branch=main)](https://gitlab.com/brettops/tools/badgie/-/commits/main)
+[![coverage report](https://img.shields.io/gitlab/pipeline-coverage/brettops/tools/badgie?branch=main)](https://gitlab.com/brettops/tools/badgie/-/commits/main)
+[![latest release](https://img.shields.io/gitlab/v/release/brettops/tools/badgie)](https://gitlab.com/brettops/tools/badgie/-/releases)
+[![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/pre-commit/pre-commit)
+[![code style: black](https://img.shields.io/badge/code_style-black-000000.svg)](https://github.com/psf/black)
+[![code style: prettier](https://img.shields.io/badge/code_style-prettier-ff69b4.svg)](https://github.com/prettier/prettier)
+
 
 [![](https://img.shields.io/github/downloads/zhangjiequan/AssetStudio/total?style=flat-square)](https://github.com/zhangjiequan/AssetStudio/releases)
 [![](https://img.shields.io/github/downloads/zhangjiequan/AssetStudio/latest/total?style=flat-square)](https://github.com/zhangjiequan/AssetStudio/releases/latest)
