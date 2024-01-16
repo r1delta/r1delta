@@ -13,7 +13,7 @@
 #include <intrin.h>
 #include "memory.h"
 #include "filesystem.h"
-
+#include "defs.h"
 #pragma intrinsic(_ReturnAddress)
 
 // Forward declaration of the IMemAlloc interface
