@@ -1,7 +1,25 @@
 ![bear](https://github.com/r1delta/r1delta/assets/37985788/41548f20-0878-4e1e-8538-e9be808fc363)
 <DO NOT REMOVE THE BEAR UNTIL WE CAN LOAD A MAP>
 # R1DELTA [![deploy status](https://github.com/Orange-OpenSource/hurl/workflows/test/badge.svg)](https://github.com/Orange-OpenSource/hurl/actions) [![coverage](https://Orange-OpenSource.github.io/hurl/coverage/badges/flat.svg)](https://Orange-OpenSource.github.io/hurl/coverage) [![Crates.io](https://img.shields.io/crates/v/hurl.svg)](https://crates.io/crates/hurl) [![documentation](https://img.shields.io/badge/-documentation-ff0288)](https://hurl.dev)
+![Last Commit](https://img.shields.io/github/last-commit/zhangjiequan/AssetStudio?style=flat-square)
+[![Open Issues](https://img.shields.io/github/issues-raw/zhangjiequan/AssetStudio?style=flat-square)](https://github.com/zhangjiequan/AssetStudio/issues)
+![Contributors](https://img.shields.io/github/contributors/zhangjiequan/AssetStudio?style=flat-square)
+![Contributions Welcome](https://img.shields.io/badge/contributions-welcome-brightgreen?style=flat-square)
 
+[![](https://img.shields.io/github/downloads/zhangjiequan/AssetStudio/total?style=flat-square)](https://github.com/zhangjiequan/AssetStudio/releases)
+[![](https://img.shields.io/github/downloads/zhangjiequan/AssetStudio/latest/total?style=flat-square)](https://github.com/zhangjiequan/AssetStudio/releases/latest)
+[![](https://img.shields.io/github/v/release/zhangjiequan/AssetStudio?style=flat-square)](https://github.com/zhangjiequan/AssetStudio/releases/latest)
+
+[![GitHub watchers](https://img.shields.io/github/watchers/zhangjiequan/AssetStudio?style=flat-square)](https://github.com/zhangjiequan/AssetStudio/watchers)
+[![GitHub forks](https://img.shields.io/github/forks/zhangjiequan/AssetStudio?style=flat-square)](https://gitpop2.vercel.app/zhangjiequan/AssetStudio)
+[![GitHub stars](https://img.shields.io/github/stars/zhangjiequan/AssetStudio?style=flat-square)](https://github.com/zhangjiequan/AssetStudio/stargazers)
+
+![Platform](https://img.shields.io/badge/platform-windows-lightgrey?style=flat-square)
+[![License](https://img.shields.io/github/license/zhangjiequan/AssetStudio?style=flat-square)](./LICENSE)
+
+[![Github CI Status](https://github.com/zhangjiequan/AssetStudio/actions/workflows/build.yml/badge.svg)](https://github.com/zhangjiequan/AssetStudio/actions)
+
+![Custom](https://img.shields.io/badge/zhangjiequan-Jackie@Baioo-green)
 ![image](https://github.com/r1delta/r1delta/assets/46062054/4ec5bdab-e6a2-4c71-a2c0-3f59c81ac0b3)
 [![Build Status](https://dev.azure.com/ms/winget-cli/_apis/build/status/microsoft.winget-cli?branchName=master)](https://dev.azure.com/ms/winget-cli/_build/latest?definitionId=344&branchName=master)
 ![Open Source at Microsoft](https://github.com/microsoft/.github/blob/main/images/open-at-microsoft.png) 

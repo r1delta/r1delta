@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <intrin.h>
 
+
 #pragma intrinsic(_ReturnAddress)
 
 // Forward declaration of the IMemAlloc interface
@@ -1774,7 +1775,10 @@ bool IBaseFileSystem__UnzipFile(__int64 thisptr, const char* pFileName, const ch
 	return reinterpret_cast<bool(*)(__int64, const char*, const char*, const char*)>(oCBaseFileSystem_UnzipFile)(fsinterfaceoffset, pFileName, pPath, pDestination);
 }
 
-
+__int64 CVEngineServer__FuncThatReturnsFF_Stub()
+{
+	return 0xFFFFFFFFi64;
+}
 static HMODULE engineR1O;
 static HMODULE launcherR1O;
 static CreateInterfaceFn R1OCreateInterface;
@@ -1788,6 +1792,198 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 		std::cout << "wrapping VEngineServer022" << std::endl;
 
 		uintptr_t* r1vtable = *(uintptr_t**)oAppSystemFactory(pName, pReturnCode);
+#ifdef DEDICATED
+		uintptr_t CVEngineServer__ChangeLevel = r1vtable[0];
+		uintptr_t CVEngineServer__IsMapValid = r1vtable[1];
+		uintptr_t CVEngineServer__GetMapCRC = r1vtable[2];
+		uintptr_t CVEngineServer__IsDedicatedServer = r1vtable[3];
+		uintptr_t CVEngineServer__IsInEditMode = r1vtable[4];
+		uintptr_t CVEngineServer__GetLaunchOptions = r1vtable[5];
+		uintptr_t CVEngineServer__PrecacheModel = r1vtable[6];
+		uintptr_t CVEngineServer__PrecacheDecal = r1vtable[7];
+		uintptr_t CVEngineServer__PrecacheGeneric = r1vtable[8];
+		uintptr_t CVEngineServer__IsModelPrecached = r1vtable[9];
+		uintptr_t CVEngineServer__IsDecalPrecached = r1vtable[10];
+		uintptr_t CVEngineServer__IsGenericPrecached = r1vtable[11];
+		uintptr_t CVEngineServer__IsSimulating = r1vtable[12];
+		uintptr_t CVEngineServer__GetPlayerUserId = r1vtable[13];
+		uintptr_t CVEngineServer__GetPlayerNetworkIDString = r1vtable[14];
+		uintptr_t CVEngineServer__IsUserIDInUse = r1vtable[15];
+		uintptr_t CVEngineServer__GetLoadingProgressForUserID = r1vtable[16];
+		uintptr_t CVEngineServer__GetEntityCount = r1vtable[17];
+		uintptr_t CVEngineServer__GetPlayerNetInfo = r1vtable[18];
+		uintptr_t CVEngineServer__IsClientValid = r1vtable[19];
+		uintptr_t CVEngineServer__PlayerChangesTeams = r1vtable[20];
+		uintptr_t CVEngineServer__CreateEdict = r1vtable[21];
+		uintptr_t CVEngineServer__RemoveEdict = r1vtable[22];
+		uintptr_t CVEngineServer__PvAllocEntPrivateData = r1vtable[23];
+		uintptr_t CVEngineServer__FreeEntPrivateData = r1vtable[24];
+		uintptr_t CVEngineServer__SaveAllocMemory = r1vtable[25];
+		uintptr_t CVEngineServer__SaveFreeMemory = r1vtable[26];
+		uintptr_t CVEngineServer__FadeClientVolume = r1vtable[27];
+		uintptr_t CVEngineServer__ServerCommand = r1vtable[28];
+		uintptr_t CVEngineServer__CBuf_Execute = r1vtable[29];
+		uintptr_t CVEngineServer__ClientCommand = r1vtable[30];
+		uintptr_t CVEngineServer__LightStyle = r1vtable[31];
+		uintptr_t CVEngineServer__StaticDecal = r1vtable[32];
+		uintptr_t CVEngineServer__EntityMessageBeginEx = r1vtable[33];
+		uintptr_t CVEngineServer__EntityMessageBegin = r1vtable[34];
+		uintptr_t CVEngineServer__UserMessageBegin = r1vtable[35];
+		uintptr_t CVEngineServer__MessageEnd = r1vtable[36];
+		uintptr_t CVEngineServer__ClientPrintf = r1vtable[37];
+		uintptr_t CVEngineServer__Con_NPrintf = r1vtable[38];
+		uintptr_t CVEngineServer__Con_NXPrintf = r1vtable[39];
+		uintptr_t CVEngineServer__UnkFunc1 = r1vtable[40];
+		uintptr_t CVEngineServer__NumForEdictinfo = r1vtable[41];
+		uintptr_t CVEngineServer__UnkFunc2 = r1vtable[42];
+		uintptr_t CVEngineServer__CrosshairAngle = r1vtable[43];
+		uintptr_t CVEngineServer__GetGameDir = r1vtable[44];
+		uintptr_t CVEngineServer__CompareFileTime = r1vtable[45];
+		uintptr_t CVEngineServer__LockNetworkStringTables = r1vtable[46];
+		uintptr_t CVEngineServer__CreateFakeClient = r1vtable[47];
+		uintptr_t CVEngineServer__GetClientConVarValue = r1vtable[48];
+		uintptr_t CVEngineServer__ReplayReady = r1vtable[49];
+		uintptr_t CVEngineServer__GetReplayFrame = r1vtable[50];
+		uintptr_t CVEngineServer__UnkFunc4 = r1vtable[51];
+		uintptr_t CVEngineServer__UnkFunc5 = r1vtable[52];
+		uintptr_t CVEngineServer__UnkFunc6 = r1vtable[53];
+		uintptr_t CVEngineServer__UnkFunc7 = r1vtable[54];
+		uintptr_t CEngineClient__ParseFile = r1vtable[55];
+		uintptr_t CEngineClient__CopyLocalFile = r1vtable[56];
+		uintptr_t CVEngineServer__PlaybackTempEntity = r1vtable[57];
+		uintptr_t CVEngineServer__UnkFunc9 = r1vtable[58];
+		uintptr_t CVEngineServer__LoadGameState = r1vtable[59];
+		uintptr_t CVEngineServer__LoadAdjacentEnts = r1vtable[60];
+		uintptr_t CVEngineServer__ClearSaveDir = r1vtable[61];
+		uintptr_t CVEngineServer__GetMapEntitiesString = r1vtable[62];
+		uintptr_t CVEngineServer__GetPlaylistCount = r1vtable[63];
+		uintptr_t CVEngineServer__GetUnknownPlaylistKV = r1vtable[64];
+		uintptr_t CVEngineServer__GetPlaylistValPossible = r1vtable[65];
+		uintptr_t CVEngineServer__GetPlaylistValPossibleAlt = r1vtable[66];
+		uintptr_t CVEngineServer__GetUnknownPlaylistKV2 = r1vtable[67];
+		uintptr_t CVEngineServer__GetUnknownPlaylistKV3 = r1vtable[68];
+		uintptr_t CVEngineServer__UnknownMapSetup = r1vtable[69];
+		uintptr_t CVEngineServer__UnknownMapSetup2 = r1vtable[70];
+		uintptr_t CVEngineServer__UnknownMapSetup3 = r1vtable[71];
+		uintptr_t CVEngineServer__UnknownMapSetup4 = r1vtable[72];
+		uintptr_t CVEngineServer__UnknownMapSetup3_2 = r1vtable[73];
+		uintptr_t CVEngineServer__UnknownGamemodeSetup2 = r1vtable[74];
+		uintptr_t CVEngineServer__IsMatchmakingDedi = r1vtable[75];
+		uintptr_t CVEngineServer__UnusedTimeFunc = r1vtable[76];
+		uintptr_t CVEngineServer__UnkFunc11 = r1vtable[77];
+		uintptr_t CVEngineServer__UnusedTimeFunc_2 = r1vtable[78];
+		uintptr_t CVEngineServer__IsClientSearching = r1vtable[79];
+		
+
+		uintptr_t CVEngineServer__IsPrivateMatch = r1vtable[80];
+		//uintptr_t CVEngineServer__IsCoop = r1vtable[80];
+		uintptr_t CVEngineServer__TextMessageGet = r1vtable[81];
+		uintptr_t CVEngineServer__UnkFunc12 = r1vtable[82];
+		uintptr_t CVEngineServer__LogPrint = r1vtable[83];
+		uintptr_t CVEngineServer__IsLogEnabled = r1vtable[84];
+		uintptr_t CVEngineServer__IsWorldBrushValid = r1vtable[85];
+		uintptr_t CVEngineServer__SolidMoved = r1vtable[86];
+		uintptr_t CVEngineServer__TriggerMoved = r1vtable[87];
+		uintptr_t CVEngineServer__CreateSpatialPartition = r1vtable[88];
+		uintptr_t CVEngineServer__DestroySpatialPartition = r1vtable[89];
+		uintptr_t CVEngineServer__UnkFunc13 = r1vtable[90];
+		uintptr_t CVEngineServer__IsPaused = r1vtable[91];
+		uintptr_t CVEngineServer__UnkFunc14 = r1vtable[92];
+		uintptr_t CVEngineServer__UnkFunc15 = r1vtable[93];
+		uintptr_t CVEngineServer__UnkFunc16 = r1vtable[94];
+		uintptr_t CVEngineServer__UnkFunc17 = r1vtable[95];
+		uintptr_t CVEngineServer__UnkFunc18 = r1vtable[96];
+		uintptr_t CVEngineServer__UnkFunc19 = r1vtable[97];
+		uintptr_t CVEngineServer__UnkFunc20 = r1vtable[98];
+		uintptr_t CVEngineServer__UnkFunc21 = r1vtable[99];
+		uintptr_t CVEngineServer__UnkFunc22 = r1vtable[100];
+		uintptr_t CVEngineServer__UnkFunc23 = r1vtable[101];
+		uintptr_t CVEngineServer__UnkFunc24 = r1vtable[102];
+		uintptr_t CVEngineServer__UnkFunc25 = r1vtable[103];
+		uintptr_t CVEngineServer__UnkFunc26 = r1vtable[104];
+		uintptr_t CVEngineServer__UnkFunc27 = r1vtable[105];
+		uintptr_t CVEngineServer__UnkFunc28 = r1vtable[106];
+		uintptr_t CVEngineServer__UnkFunc29 = r1vtable[107];
+		uintptr_t CVEngineServer__UnkFunc30 = r1vtable[108];
+		uintptr_t CVEngineServer__UnkFunc31 = r1vtable[109];
+		uintptr_t CVEngineServer__UnkFunc32 = r1vtable[110];
+		uintptr_t CVEngineServer__UnkFunc33 = r1vtable[111];
+		uintptr_t CVEngineServer__InsertServerCommand = r1vtable[113];
+		uintptr_t CVEngineServer__UnkFunc35 = r1vtable[114];
+		uintptr_t CVEngineServer__UnkFunc36 = r1vtable[115];
+		uintptr_t CVEngineServer__UnkFunc37 = r1vtable[116];
+		uintptr_t CVEngineServer__UnkFunc38 = r1vtable[117];
+		uintptr_t CVEngineServer__UnkFunc39 = r1vtable[118];
+		uintptr_t CVEngineServer__UnkFunc40 = r1vtable[119];
+		uintptr_t CVEngineServer__UnkFunc41 = r1vtable[120];
+		uintptr_t CVEngineServer__UnkFunc42 = r1vtable[121];
+		uintptr_t CVEngineServer__UnkFunc43 = r1vtable[122];
+		uintptr_t CVEngineServer__UnkFunc44 = r1vtable[123];
+		uintptr_t CVEngineServer__AllocLevelStaticData = r1vtable[124];
+		uintptr_t CVEngineServer__UnkFunc45 = r1vtable[125];
+		uintptr_t CVEngineServer__UnkFunc46 = r1vtable[126];
+		uintptr_t CVEngineServer__UnkFunc47 = r1vtable[127];
+		uintptr_t CVEngineServer__Pause = r1vtable[128];
+		uintptr_t CVEngineServer__UnkFunc48 = r1vtable[129];
+		uintptr_t CVEngineServer__UnkFunc49 = r1vtable[130];
+		uintptr_t CVEngineServer__UnkFunc50 = r1vtable[131];
+		uintptr_t CVEngineServer__NullSub1 = r1vtable[132];
+		uintptr_t CVEngineServer__UnkFunc51 = r1vtable[133];
+		uintptr_t CVEngineServer__UnkFunc52 = r1vtable[134];
+		uintptr_t CVEngineServer__MarkTeamsAsBalanced_On = r1vtable[135];
+		uintptr_t CVEngineServer__MarkTeamsAsBalanced_Off = r1vtable[136];
+		uintptr_t CVEngineServer__UnkFunc54 = r1vtable[137];
+		uintptr_t CVEngineServer__UnkFunc55 = r1vtable[138];
+		uintptr_t CVEngineServer__UnkFunc56 = r1vtable[139];
+		uintptr_t CVEngineServer__UnkFunc57 = r1vtable[140];
+		uintptr_t CVEngineServer__UnkFunc58 = r1vtable[141];
+		uintptr_t CVEngineServer__UnkFunc59 = r1vtable[142];
+		uintptr_t CVEngineServer__UnkFunc60 = r1vtable[143];
+		uintptr_t CVEngineServer__UnkFunc61 = r1vtable[144];
+		uintptr_t CVEngineServer__UnkFunc62 = r1vtable[145];
+		uintptr_t CVEngineServer__UnkFunc = r1vtable[146];
+		uintptr_t CVEngineServer__UnkFunc63 = r1vtable[147];
+		uintptr_t CVEngineServer__UnkFunc64 = r1vtable[148];
+		uintptr_t CVEngineServer__GetClientXUID = r1vtable[149];
+		uintptr_t CVEngineServer__IsActiveApp = r1vtable[150];
+		uintptr_t CVEngineServer__UnkFunc70 = r1vtable[151];
+		uintptr_t CVEngineServer__Bandwidth_WriteBandwidthStatsToFile = r1vtable[152];
+		uintptr_t CVEngineServer__UnkFunc71 = r1vtable[153];
+		uintptr_t CVEngineServer__IsCheckpointMapLoad = r1vtable[154];
+		uintptr_t CVEngineServer__IsDurangoDedi = r1vtable[155];
+		uintptr_t CVEngineServer__UnkFunc53 = r1vtable[156];
+		uintptr_t sub_18006E790 = r1vtable[157];
+		uintptr_t sub_18006ECB0 = r1vtable[158];
+		uintptr_t nullsub_285 = r1vtable[159];
+		uintptr_t sub_18006ED00 = r1vtable[160];
+		uintptr_t sub_18006ED90 = r1vtable[161];
+		uintptr_t sub_18006EDA0 = r1vtable[162];
+		uintptr_t sub_18006ED10 = r1vtable[163];
+		uintptr_t sub_18006ED20 = r1vtable[164];
+		uintptr_t sub_18006ED30 = r1vtable[165];
+		uintptr_t sub_18006ED50 = r1vtable[166];
+		uintptr_t sub_18006ED60 = r1vtable[167];
+		uintptr_t sub_18006ED70 = r1vtable[168];
+		uintptr_t sub_18006EDB0 = r1vtable[169];
+		uintptr_t sub_18006EDC0 = r1vtable[170];
+		uintptr_t sub_18006EDD0 = r1vtable[171];
+		uintptr_t sub_18006EDE0 = r1vtable[172];
+		uintptr_t sub_18006EDF0 = r1vtable[173];
+		uintptr_t sub_18006EE00 = r1vtable[174];
+		uintptr_t sub_18006EE10 = r1vtable[175];
+		uintptr_t sub_18006EE20 = r1vtable[176];
+		uintptr_t sub_18006EE30 = r1vtable[177];
+		uintptr_t sub_18006EE40 = r1vtable[178];
+		uintptr_t sub_18006EE50 = r1vtable[179];
+		uintptr_t sub_18006EE60 = r1vtable[180];
+		uintptr_t sub_18006EE80 = r1vtable[181];
+		uintptr_t sub_18006EE90 = r1vtable[182];
+		uintptr_t sub_18006EEA0 = r1vtable[183];
+		uintptr_t sub_18006EEB0 = r1vtable[184];
+		uintptr_t sub_18006E750 = r1vtable[185];
+		uintptr_t CVEngineServer__UnkFunc77 = r1vtable[186];
+
+#else
 		uintptr_t CVEngineServer__ChangeLevel = r1vtable[0];
 		uintptr_t CVEngineServer__IsMapValid = r1vtable[1];
 		uintptr_t CVEngineServer__GetMapCRC = r1vtable[2];
@@ -2010,7 +2206,8 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 		uintptr_t CVEngineServer__UnkFunc80 = r1vtable[219];
 		uintptr_t CVEngineServer__UnkFunc81 = r1vtable[220];
 		uintptr_t CVEngineServer__UnkFunc82 = r1vtable[221];
-		static uintptr_t r1ovtable[] = { 
+#endif
+		static uintptr_t r1ovtable[] = {
 			CVEngineServer__NullSub1,
 			CVEngineServer__ChangeLevel,
 			CVEngineServer__IsMapValid,
@@ -2038,7 +2235,11 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 			CVEngineServer__GetPlayerNetInfo,
 			CVEngineServer__IsClientValid,
 			CVEngineServer__PlayerChangesTeams,
+#ifdef DEDICATED
+			CVEngineServer__NullSub1,
+#else
 			CVEngineServer__RequestClientScreenshot,
+#endif
 			CVEngineServer__CreateEdict,
 			CVEngineServer__RemoveEdict,
 			CVEngineServer__PvAllocEntPrivateData,
@@ -2061,7 +2262,11 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 			CVEngineServer__UnkFunc1,
 			CVEngineServer__NumForEdictinfo,
 			CVEngineServer__UnkFunc2,
+#ifdef DEDICATED
+			CVEngineServer__NullSub1,
+#else
 			CVEngineServer__UnkFunc3,
+#endif
 			CVEngineServer__CrosshairAngle,
 			CVEngineServer__GetGameDir,
 			CVEngineServer__CompareFileTime,
@@ -2074,7 +2279,11 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 			CVEngineServer__UnkFunc5,
 			CVEngineServer__UnkFunc6,
 			CVEngineServer__UnkFunc7,
+#ifdef DEDICATED
+			CVEngineServer__NullSub1,
+#else
 			CVEngineServer__UnkFunc8,
+#endif
 			CEngineClient__ParseFile,
 			CEngineClient__CopyLocalFile,
 			CVEngineServer__PlaybackTempEntity,
@@ -2087,25 +2296,45 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 			CVEngineServer__GetUnknownPlaylistKV,
 			CVEngineServer__GetPlaylistValPossible,
 			CVEngineServer__GetPlaylistValPossibleAlt,
+#ifdef DEDICATED
+			CVEngineServer__NullSub1,
+			CVEngineServer__NullSub1,
+			CVEngineServer__NullSub1,
+#else
 			CVEngineServer__AddPlaylistOverride,
 			CVEngineServer__MarkPlaylistReadyForOverride,
 			CVEngineServer__UnknownPlaylistSetup,
+#endif
+
 			CVEngineServer__GetUnknownPlaylistKV2,
 			CVEngineServer__GetUnknownPlaylistKV3,
+#ifdef DEDICATED
+			CVEngineServer__NullSub1,
+#else
 			CVEngineServer__GetUnknownPlaylistKV4,
+#endif
 			CVEngineServer__UnknownMapSetup,
 			CVEngineServer__UnknownMapSetup2,
 			CVEngineServer__UnknownMapSetup3,
 			CVEngineServer__UnknownMapSetup4,
+#ifdef DEDICATED
+			CVEngineServer__NullSub1,
+#else
 			CVEngineServer__UnknownGamemodeSetup,
+#endif
 			CVEngineServer__UnknownGamemodeSetup2,
 			CVEngineServer__IsMatchmakingDedi,
 			CVEngineServer__UnusedTimeFunc,
 			CVEngineServer__IsClientSearching,
 			CVEngineServer__UnkFunc11,
 			CVEngineServer__IsPrivateMatch,
+#ifdef DEDICATED
+			CVEngineServer__NullSub1,
+			CVEngineServer__NullSub1,
+#else
 			CVEngineServer__IsCoop,
 			CVEngineServer__GetSkillFlag_Unused,
+#endif
 			CVEngineServer__TextMessageGet,
 			CVEngineServer__UnkFunc12,
 			CVEngineServer__LogPrint,
@@ -2137,7 +2366,11 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 			CVEngineServer__UnkFunc31,
 			CVEngineServer__UnkFunc32,
 			CVEngineServer__UnkFunc33,
+#ifdef DEDICATED
+			CVEngineServer__NullSub1,
+#else
 			CVEngineServer__UnkFunc34,
+#endif
 			CVEngineServer__InsertServerCommand,
 			CVEngineServer__UnkFunc35,
 			CVEngineServer__UnkFunc36,
@@ -2173,6 +2406,29 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 			CVEngineServer__UnkFunc61,
 			CVEngineServer__UnkFunc62,
 			CVEngineServer__UnkFunc63,
+#ifdef DEDICATED
+			CVEngineServer__NullSub1,
+			CVEngineServer__UnkFunc64,
+			CVEngineServer__NullSub1,
+			CVEngineServer__NullSub1,
+			CVEngineServer__NullSub1,
+			CVEngineServer__NullSub1,
+			CVEngineServer__NullSub1,
+			CVEngineServer__NullSub1,
+			CVEngineServer__NullSub1,
+			(uintptr_t)(&CVEngineServer__FuncThatReturnsFF_Stub),
+			(uintptr_t)(&CVEngineServer__FuncThatReturnsFF_Stub),
+			(uintptr_t)(&CVEngineServer__FuncThatReturnsFF_Stub),
+			(uintptr_t)(&CVEngineServer__FuncThatReturnsFF_Stub),
+			(uintptr_t)(&CVEngineServer__FuncThatReturnsFF_Stub),
+			(uintptr_t)(&CVEngineServer__FuncThatReturnsFF_Stub),
+			(uintptr_t)(&CVEngineServer__FuncThatReturnsFF_Stub),
+			(uintptr_t)(&CVEngineServer__FuncThatReturnsFF_Stub),
+			(uintptr_t)(&CVEngineServer__FuncThatReturnsFF_Stub),
+			(uintptr_t)(&CVEngineServer__FuncThatReturnsFF_Stub),
+			(uintptr_t)(&CVEngineServer__FuncThatReturnsFF_Stub),
+			(uintptr_t)(&CVEngineServer__FuncThatReturnsFF_Stub),
+#else
 			CVEngineServer__NullSub2,
 			CVEngineServer__UnkFunc64,
 			CVEngineServer__NullSub3,
@@ -2194,12 +2450,29 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 			CVEngineServer__FuncThatReturnsFF_3,
 			CVEngineServer__FuncThatReturnsFF_2,
 			CVEngineServer__FuncThatReturnsFF_1,
+#endif
 			CVEngineServer__GetClientXUID,
 			CVEngineServer__IsActiveApp,
 			CVEngineServer__UnkFunc70,
 			CVEngineServer__Bandwidth_WriteBandwidthStatsToFile,
 			CVEngineServer__UnkFunc71,
 			CVEngineServer__IsCheckpointMapLoad,
+#ifdef DEDICATED
+			CVEngineServer__NullSub1,
+			CVEngineServer__NullSub1,
+			CVEngineServer__NullSub1,
+			CVEngineServer__NullSub1,
+			CVEngineServer__NullSub1,
+			CVEngineServer__NullSub1,
+			CVEngineServer__NullSub1,
+			CVEngineServer__NullSub1,
+			CVEngineServer__UnkFunc77,
+			CVEngineServer__NullSub1,
+			CVEngineServer__NullSub1,
+			CVEngineServer__NullSub1,
+			CVEngineServer__NullSub1,
+			CVEngineServer__NullSub1
+#else
 			CVEngineServer__UnkFunc72,
 			CVEngineServer__UnkFunc73,
 			CVEngineServer__UnkFunc74,
@@ -2214,7 +2487,9 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 			CVEngineServer__UnkFunc80,
 			CVEngineServer__UnkFunc81,
 			CVEngineServer__UnkFunc82
+#endif
 		};
+
 		static void* whatever2 = &r1ovtable;
 		return &whatever2;
 	}
@@ -3129,7 +3404,7 @@ char __fastcall MatchRecvPropsToSendProps_R(__int64 a1, __int64 a2, __int64 pSen
 	__int64 v7; // rdx
 	unsigned __int8* v9; // rcx
 
-	auto sub_1801D9D00 = (__int64(__fastcall*)(__int64 a1, _QWORD * a2))(((uintptr_t)GetModuleHandleA("engine.dll")) + 0x1D9D00);
+	auto sub_1801D9D00 = (__int64(__fastcall*)(__int64 a1, _QWORD * a2))(((uintptr_t)GetModuleHandleA(ENGINE_DLL)) + 0x1D9D00);
 	v5 = (_QWORD*)pSendTable;
 	v5 = (_QWORD*)pSendTable;
 	v14 = 0;
@@ -3261,7 +3536,7 @@ void __stdcall LoaderNotificationCallback(
 	//		CreateInterfaceFn clientcreate = (CreateInterfaceFn)(GetProcAddress(GetModuleHandleA("client.dll"), "CreateInterface"));
 	//		g_SourceGameConsole = (CGameConsole*)clientcreate("GameConsole004", 0);
 	//		ConCommandR1* newCommand = new ConCommandR1;
-	//		conCommandConstructor = (ConCommandConstructorType)(((uintptr_t)GetModuleHandleA("engine.dll")) + 0x4808F0);
+	//		conCommandConstructor = (ConCommandConstructorType)(((uintptr_t)GetModuleHandleA(ENGINE_DLL)) + 0x4808F0);
 	//		conCommandConstructor(newCommand, "toggleconsole", ConCommand_toggleconsole, "", 0, nullptr);
 	//	}
 	//}
@@ -3276,35 +3551,37 @@ void __stdcall LoaderNotificationCallback(
 		MH_EnableHook(MH_ALL_HOOKS);
 
 	}
-	if (std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length).find(L"server.dll") != std::string::npos) {
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x143A10), &CServerGameDLL__DLLInit, (LPVOID*)&CServerGameDLL__DLLInitOriginal);
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x71E0BC), &hkcalloc_base, NULL);
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x71E99C), &hkmalloc_base, NULL);
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x71E9FC), &hkrealloc_base, NULL);
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x72B480), &hkrecalloc_base, NULL);
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x721000), &hkfree_base, NULL);
+	if (std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length).find(SERVER_DLLWIDE) != std::string::npos) {
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(SERVER_DLL) + 0x143A10), &CServerGameDLL__DLLInit, (LPVOID*)&CServerGameDLL__DLLInitOriginal);
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(SERVER_DLL) + 0x71E0BC), &hkcalloc_base, NULL);
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(SERVER_DLL) + 0x71E99C), &hkmalloc_base, NULL);
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(SERVER_DLL) + 0x71E9FC), &hkrealloc_base, NULL);
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(SERVER_DLL) + 0x72B480), &hkrecalloc_base, NULL);
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(SERVER_DLL) + 0x721000), &hkfree_base, NULL);
 
 
 
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x1FBAE0), &SendPropBool, reinterpret_cast<LPVOID*>(&SendPropBoolOriginal));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x0F3CA0), &SendPropInt, reinterpret_cast<LPVOID*>(&SendPropIntOriginal));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x0F3590), &SendPropVector, reinterpret_cast<LPVOID*>(&SendPropVectorOriginal));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x1FBCE0), &SendPropUnknown, reinterpret_cast<LPVOID*>(&SendPropUnknownOriginal));
+		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(SERVER_DLL) + 0x1FBAE0), &SendPropBool, reinterpret_cast<LPVOID*>(&SendPropBoolOriginal));
+		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(SERVER_DLL) + 0x0F3CA0), &SendPropInt, reinterpret_cast<LPVOID*>(&SendPropIntOriginal));
+		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(SERVER_DLL) + 0x0F3590), &SendPropVector, reinterpret_cast<LPVOID*>(&SendPropVectorOriginal));
+		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(SERVER_DLL) + 0x1FBCE0), &SendPropUnknown, reinterpret_cast<LPVOID*>(&SendPropUnknownOriginal));
 
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher_r1o.dll") + 0x79100), &man, NULL);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("tier0_orig.dll") + 0x5ED0), &man, NULL);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("tier0_orig.dll") + 0x66B0), &man, NULL);
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x6A420), &ReadFileFromVPKHook, reinterpret_cast<LPVOID*>(&readFileFromVPK));
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x9C20), &ReadFromCacheHook, reinterpret_cast<LPVOID*>(&readFromCache));
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x15F20), &ReadFileFromFilesystemHook, reinterpret_cast<LPVOID*>(&readFileFromFilesystem));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x6A420), &ReadFileFromVPKHook, reinterpret_cast<LPVOID*>(&readFileFromVPK));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x9C20), &ReadFromCacheHook, reinterpret_cast<LPVOID*>(&readFromCache));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x15F20), &ReadFileFromFilesystemHook, reinterpret_cast<LPVOID*>(&readFileFromFilesystem));
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("vstdlib.dll"), "VStdLib_GetICVarFactory"), &VStdLib_GetICVarFactory, NULL);
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x136860), &Status_ConMsg, NULL);
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x1BF500), &Status_ConMsg, NULL);
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x1C79A0), &sub_1801C79A0, reinterpret_cast<LPVOID*>(&sub_1801C79A0Original));
+#ifndef DEDICATED
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x136860), &Status_ConMsg, NULL);
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x1BF500), &Status_ConMsg, NULL);
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x1C79A0), &sub_1801C79A0, reinterpret_cast<LPVOID*>(&sub_1801C79A0Original));
 		
 
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x1D9E70), &MatchRecvPropsToSendProps_R, reinterpret_cast<LPVOID*>(&MatchRecvPropsToSendProps_ROriginal));
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x217C30), &sub_180217C30, NULL);
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x1D9E70), &MatchRecvPropsToSendProps_R, reinterpret_cast<LPVOID*>(&MatchRecvPropsToSendProps_ROriginal));
+#endif
+		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x217C30), &sub_180217C30, NULL);
 
 		MH_EnableHook(MH_ALL_HOOKS);
 		std::cout << "did hooks" << std::endl;
@@ -3314,7 +3591,7 @@ void __stdcall LoaderNotificationCallback(
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 {
-	
+#ifndef DEDICATED
 	static bool done = false;
 	if (!done) {
 		done = true;
@@ -3323,6 +3600,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 		SetStdHandle(STD_OUTPUT_HANDLE, hConsoleStream);
 
 	}
+#endif
 	switch (fdwReason)
 	{
 	case DLL_PROCESS_ATTACH: {
