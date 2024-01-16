@@ -16,9 +16,8 @@ public:
 };
 
 typedef IMemAlloc* (*PFN_CreateGlobalMemAlloc)();
-IMemAlloc* g_pMemAllocSingleton;
 
-IMemAlloc* CreateGlobalMemAlloc();
+
 
 void* __cdecl hkcalloc_base(size_t Count, size_t Size);
 void* __cdecl hkmalloc_base(size_t Size);

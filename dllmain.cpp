@@ -49,34 +49,6 @@ const char* man(char* a) {
 }
 
 
-
-bool ReadFromCacheHook(IFileSystem* filesystem, char* path, void* result)
-{
-	// move this to a convar at some point when we can read them in native
-	//Log::Info("ReadFromCache %s", path);
-
-	if (TryReplaceFile(path))
-		return false;
-
-	return readFromCache(filesystem, path, result);
-}
-
-FileHandle_t ReadFileFromVPKHook(VPKData* vpkInfo, __int64* b, char* filename)
-{
-	// move this to a convar at some point when we can read them in native
-	//Log::Info("ReadFileFromVPK %s %s", filename, vpkInfo->path);
-
-	// there is literally never any reason to compile here, since we'll always compile in ReadFileFromFilesystemHook in the same codepath
-	// this is called
-	if (TryReplaceFile(filename))
-	{
-		*b = -1;
-		return b;
-	}
-
-	return readFileFromVPK(vpkInfo, b, filename);
-}
-
 __declspec(dllexport) void whatever2() { Error(); };
 CreateInterfaceFn oAppSystemFactory;
 CreateInterfaceFn oFileSystemFactory;
