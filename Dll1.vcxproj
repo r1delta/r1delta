@@ -150,6 +150,7 @@
     <ClInclude Include="factory.h" />
     <ClInclude Include="filesystem.h" />
     <ClInclude Include="framework.h" />
+    <ClInclude Include="load.h" />
     <ClInclude Include="memory.h" />
     <ClInclude Include="tier0_orig.h" />
     <ClInclude Include="windowsutil.h" />

@@ -16,67 +16,9 @@
 #include "defs.h"
 #include "factory.h"
 #include "core.h"
+#include "load.h"
 #pragma intrinsic(_ReturnAddress)
 
-
-enum {
-	// The DLL was loaded. The NotificationData parameter points to a
-	// LDR_DLL_LOADED_NOTIFICATION_DATA structure.
-	LDR_DLL_NOTIFICATION_REASON_LOADED = 1,
-	// The DLL was unloaded. The NotificationData parameter points to a
-	// LDR_DLL_UNLOADED_NOTIFICATION_DATA structure.
-	LDR_DLL_NOTIFICATION_REASON_UNLOADED = 2,
-};
-// Structure that is used for module load notifications.
-struct LDR_DLL_LOADED_NOTIFICATION_DATA {
-	// Reserved.
-	ULONG Flags;
-	// The full path name of the DLL module.
-	PCUNICODE_STRING FullDllName;
-	// The base file name of the DLL module.
-	PCUNICODE_STRING BaseDllName;
-	// A pointer to the base address for the DLL in memory.
-	PVOID DllBase;
-	// The size of the DLL image, in bytes.
-	ULONG SizeOfImage;
-};
-using PLDR_DLL_LOADED_NOTIFICATION_DATA = LDR_DLL_LOADED_NOTIFICATION_DATA*;
-// Structure that is used for module unload notifications.
-struct LDR_DLL_UNLOADED_NOTIFICATION_DATA {
-	// Reserved.
-	ULONG Flags;
-	// The full path name of the DLL module.
-	PCUNICODE_STRING FullDllName;
-	// The base file name of the DLL module.
-	PCUNICODE_STRING BaseDllName;
-	// A pointer to the base address for the DLL in memory.
-	PVOID DllBase;
-	// The size of the DLL image, in bytes.
-	ULONG SizeOfImage;
-};
-using PLDR_DLL_UNLOADED_NOTIFICATION_DATA = LDR_DLL_UNLOADED_NOTIFICATION_DATA*;
-// Union that is used for notifications.
-union LDR_DLL_NOTIFICATION_DATA {
-	LDR_DLL_LOADED_NOTIFICATION_DATA Loaded;
-	LDR_DLL_UNLOADED_NOTIFICATION_DATA Unloaded;
-};
-using PLDR_DLL_NOTIFICATION_DATA = LDR_DLL_NOTIFICATION_DATA*;
-// Signature of the notification callback function.
-using PLDR_DLL_NOTIFICATION_FUNCTION =
-VOID(CALLBACK*)(ULONG notification_reason,
-	const LDR_DLL_NOTIFICATION_DATA* notification_data,
-	PVOID context);
-// Signatures of the functions used for registering DLL notification callbacks.
-using LdrRegisterDllNotificationFunc =
-NTSTATUS(NTAPI*)(ULONG flags,
-	PLDR_DLL_NOTIFICATION_FUNCTION notification_function,
-	PVOID context,
-	PVOID* cookie);
-using LdrUnregisterDllNotificationFunc = NTSTATUS(NTAPI*)(PVOID cookie);
-constexpr wchar_t kNtDll[] = L"ntdll.dll";
-constexpr char kLdrRegisterDllNotification[] = "LdrRegisterDllNotification";
-constexpr char kLdrUnregisterDllNotification[] = "LdrUnregisterDllNotification";
-void* dll_notification_cookie_ = nullptr;
 
 void Status_ConMsg(const char* text, ...)
 	// clang-format on
