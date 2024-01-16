@@ -1790,6 +1790,9 @@ char __fastcall CServerGameDLL__DLLInit(void* thisptr, CreateInterfaceFn appSyst
 	CreateInterfaceFn physicsFactory, CreateInterfaceFn fileSystemFactory,
 	void* pGlobals)
 {
+#ifdef DEDICATED
+	pGlobals = (void*)((uintptr_t)pGlobals - 8); // Don't ask. If you DO ask, you will die a violent, painful death - wndrr
+#endif
 	oAppSystemFactory = appSystemFactory;
 	oFileSystemFactory = fileSystemFactory;
 	oPhysicsFactory = physicsFactory;
@@ -2123,7 +2126,16 @@ __int64 __fastcall SendPropUnknown(__int64 a1, const char* pVarName, int a3, int
 		return (__int64)(SendPropIntOriginal((__int64)a1, (char*)"should_never_see_this", 0, 4, -1, 0, 0i64, 128));
 	return SendPropUnknownOriginal(a1, pVarName, a3, a4, a5);
 }
+typedef char(__fastcall* ParsePDATAType)(int a1, int a2, const char* a3, const char* a4);
+ParsePDATAType ParsePDATAOriginal;
 
+char __fastcall ParsePDATA(int a1, int a2, const char* a3, const char* a4)
+{
+	return true;
+	static char* newbuf = (char*)malloc(0x65536);
+	a3 = newbuf;
+	return ParsePDATAOriginal(a1, a2, a3, a4);
+}
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
 	const LDR_DLL_NOTIFICATION_DATA* notification_data,
@@ -2170,6 +2182,9 @@ void __stdcall LoaderNotificationCallback(
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher_r1o.dll") + 0x79100), &man, NULL);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("tier0_orig.dll") + 0x5ED0), &man, NULL);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("tier0_orig.dll") + 0x66B0), &man, NULL);
+#ifdef DEDICATED
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x1693D0), &ParsePDATA, reinterpret_cast<LPVOID*>(&ParsePDATAOriginal));
+#endif
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x6A420), &ReadFileFromVPKHook, reinterpret_cast<LPVOID*>(&readFileFromVPK));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x9C20), &ReadFromCacheHook, reinterpret_cast<LPVOID*>(&readFromCache));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x15F20), &ReadFileFromFilesystemHook, reinterpret_cast<LPVOID*>(&readFileFromFilesystem));
