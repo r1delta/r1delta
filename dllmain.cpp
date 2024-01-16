@@ -5,7 +5,6 @@
 #include <new>
 #include "windows.h"
 #include "tier0_orig.h"
-#include "pch.h"
 #include <iostream>
 #include "cvar.h"
 #include <winternl.h>  // For UNICODE_STRING.
