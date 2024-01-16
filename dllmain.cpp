@@ -92,18 +92,6 @@ void __stdcall LoaderNotificationCallback(
 	void* context) {
 	if (notification_reason != LDR_DLL_NOTIFICATION_REASON_LOADED)
 		return;
-	//if (std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length).find(L"client.dll") != std::string::npos) {
-	//	static bool bDone = false;
-	//	if (!bDone) {
-	//		bDone = true;
-	//		CreateInterfaceFn clientcreate = (CreateInterfaceFn)(GetProcAddress(GetModuleHandleA("client.dll"), "CreateInterface"));
-	//		g_SourceGameConsole = (CGameConsole*)clientcreate("GameConsole004", 0);
-	//		ConCommandR1* newCommand = new ConCommandR1;
-	//		conCommandConstructor = (ConCommandConstructorType)(((uintptr_t)GetModuleHandleA(ENGINE_DLL)) + 0x4808F0);
-	//		conCommandConstructor(newCommand, "toggleconsole", ConCommand_toggleconsole, "", 0, nullptr);
-	//	}
-	//}
-
 	if (std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length).find(L"launcher_r1o.dll") != std::string::npos) {
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher_r1o.dll") + 0x93C78), &hkcalloc_base, NULL);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher_r1o.dll") + 0x91620), &hkmalloc_base, NULL);
@@ -129,7 +117,6 @@ void __stdcall LoaderNotificationCallback(
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(SERVER_DLL) + 0x0F3590), &SendPropVector, reinterpret_cast<LPVOID*>(&SendPropVectorOriginal));
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(SERVER_DLL) + 0x1FBCE0), &SendPropUnknown, reinterpret_cast<LPVOID*>(&SendPropUnknownOriginal));
 
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher_r1o.dll") + 0x79100), &man, NULL);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("tier0_orig.dll") + 0x5ED0), &man, NULL);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("tier0_orig.dll") + 0x66B0), &man, NULL);
 #ifdef DEDICATED
