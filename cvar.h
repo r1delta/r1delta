@@ -1,5 +1,5 @@
 #include <unordered_map>
-//#define DEDICATED
+#define DEDICATED
 #ifdef DEDICATED
 #define SERVER_DLL "server_ds.dll"
 #define SERVER_DLLWIDE L"server_ds.dll"
