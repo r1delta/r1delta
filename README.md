@@ -65,7 +65,7 @@ more seriously let's take a look at resource modding rn:
 
 - R1O: will never release (tbf we wont either)
 
-- R2: run by pedo [![Dependencies Graph](https://img.shields.io/badge/dependency-graph-blue.svg)](https://azuresdkartifacts.blob.core.windows.net/azure-sdk-for-net/dependencies/dependencyGraph/dagre.html) philes
+- R2: run by REDACTED
 
 - R5R: i have no issues with amos actually i just dont like playing apex very much (no offense)
 
