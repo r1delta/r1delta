@@ -131,27 +131,53 @@ void __fastcall CNetworkStringTableContainer__SetTickCount(__int64 a1, char a2)
 {
 	*(char*)(a1 + 8) = a2;
 }
+uintptr_t oCBaseFileSystem_Open;
+uintptr_t fsinterfaceoffset;
+
+__int64 IBaseFileSystem__Open(__int64 thisptr, const char* pFileName, const char* pOptions, const char* pathID) {
+	// Check if the path starts with "scripts/vscripts"
+	std::string path = pFileName;
+	if (path.rfind("scripts/vscripts", 0) == 0) {
+		// Replace "scripts/vscripts" with "scripts/vscripts/server"
+		path = "scripts/vscripts/server" + path.substr(16);
+	}
+
+	std::cout << "Server FS: " << path << std::endl;
+
+	return reinterpret_cast<__int64(*)(__int64, const char*, const char*, const char*)>(oCBaseFileSystem_Open)(fsinterfaceoffset, path.c_str(), pOptions, pathID);
+}
 
 uintptr_t fsinterface;
+uintptr_t osub_180009C20;
+uintptr_t oCBaseFileSystem_ReadFile;
+bool IBaseFileSystem__ReadFile(__int64 thisptr, const char* pFileName, const char* pPath, void* buf, __int64 nMaxBytes, __int64 nStartingByte, void* pfnAlloc = NULL) {
+	// Check if the path starts with "scripts/vscripts"
+	std::string path = pFileName;
+	if (path.rfind("scripts/vscripts", 0) == 0) {
+		// Replace "scripts/vscripts" with "scripts/vscripts/server"
+		path = "scripts/vscripts/server" + path.substr(16);
+	}
 
+	std::cout << "Server FS: " << path << std::endl;
+	return reinterpret_cast<bool(*)(__int64, const char*, const char*, void*, __int64, __int64, void*)>(oCBaseFileSystem_ReadFile)(fsinterfaceoffset, path.c_str(), pPath, buf, nMaxBytes, nStartingByte, pfnAlloc);
+}
 
-//char sub_180009C20(__int64 a1, char* a2, __int64 a3) {
-//	// Check if the path starts with "scripts/vscripts"
-//	std::string path = a2;
-//	if (path.rfind("scripts/vscripts", 0) == 0) {
-//		// Replace "scripts/vscripts" with "scripts/vscripts/server"
-//		path = "scripts/vscripts/server" + path.substr(16);
-//	}
-//
-//	std::cout << "Server FS: " << path << std::endl;
-//	return reinterpret_cast<char(*)(__int64, char*, __int64)>(osub_180009C20)(fsinterface, (char*)(path.c_str()), a3);
-//}
+char sub_180009C20(__int64 a1, char* a2, __int64 a3) {
+	// Check if the path starts with "scripts/vscripts"
+	std::string path = a2;
+	if (path.rfind("scripts/vscripts", 0) == 0) {
+		// Replace "scripts/vscripts" with "scripts/vscripts/server"
+		path = "scripts/vscripts/server" + path.substr(16);
+	}
+
+	std::cout << "Server FS: " << path << std::endl;
+	return reinterpret_cast<char(*)(__int64, char*, __int64)>(osub_180009C20)(fsinterface, (char*)(path.c_str()), a3);
+}
 
 
 
 uintptr_t modelinterface;
 uintptr_t stringtableinterface;
-uintptr_t fsinterfaceoffset;
 uintptr_t fsintfakeptr = 0;
 
 uintptr_t CreateFunction(void* func, void* real) {
@@ -999,7 +1025,7 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 		uintptr_t osub_180002560 = r1vtable[92];
 		uintptr_t osub_18000A070 = r1vtable[93];
 		uintptr_t osub_180009E80 = r1vtable[94];
-		uintptr_t osub_180009C20 = r1vtable[95];
+		osub_180009C20 = r1vtable[95];
 		uintptr_t osub_1800022F0 = r1vtable[96];
 		uintptr_t osub_180002330 = r1vtable[97];
 		uintptr_t osub_180009CF0 = r1vtable[98];
@@ -1172,7 +1198,7 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 			CreateFunction((void*)osub_180002560, (void*)fsinterface),
 			CreateFunction((void*)osub_18000A070, (void*)fsinterface),
 			CreateFunction((void*)CFileSystem_Stdio__NullSub4, (void*)fsinterface),
-			CreateFunction((void*)osub_180009C20, (void*)fsinterface),
+			CreateFunction((void*)sub_180009C20, (void*)fsinterface),
 			CreateFunction((void*)osub_1800022F0, (void*)fsinterface),
 			CreateFunction((void*)osub_180002330, (void*)fsinterface),
 			CreateFunction((void*)osub_180009CF0, (void*)fsinterface),
@@ -1255,7 +1281,7 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 
 		uintptr_t oCBaseFileSystem_Read = origsimplefsvtable[0];
 		uintptr_t oCBaseFileSystem_Write = origsimplefsvtable[1];
-		uintptr_t oCBaseFileSystem_Open = origsimplefsvtable[2];
+		oCBaseFileSystem_Open = origsimplefsvtable[2];
 		uintptr_t oCBaseFileSystem_Close = origsimplefsvtable[3];
 		uintptr_t oCBaseFileSystem_Seek = origsimplefsvtable[4];
 		uintptr_t oCBaseFileSystem_Tell = origsimplefsvtable[5];
@@ -1267,13 +1293,13 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 		uintptr_t oCBaseFileSystem_IsFileWritable = origsimplefsvtable[11];
 		uintptr_t oCBaseFileSystem_SetFileWritable = origsimplefsvtable[12];
 		uintptr_t oCBaseFileSystem_GetFileTime = origsimplefsvtable[13];
-		uintptr_t oCBaseFileSystem_ReadFile = origsimplefsvtable[14];
+		oCBaseFileSystem_ReadFile = origsimplefsvtable[14];
 		uintptr_t oCBaseFileSystem_WriteFile = origsimplefsvtable[15];
 		uintptr_t oCBaseFileSystem_UnzipFile = origsimplefsvtable[16];
 		static uintptr_t simplefsvtable[] = {
 			CreateFunction((void*)oCBaseFileSystem_Read, (void*)fsinterfaceoffset),
 			CreateFunction((void*)oCBaseFileSystem_Write, (void*)fsinterfaceoffset),
-			CreateFunction((void*)oCBaseFileSystem_Open, (void*)fsinterfaceoffset),
+			CreateFunction((void*)IBaseFileSystem__Open, (void*)fsinterfaceoffset),
 			CreateFunction((void*)oCBaseFileSystem_Close, (void*)fsinterfaceoffset),
 			CreateFunction((void*)oCBaseFileSystem_Seek, (void*)fsinterfaceoffset),
 			CreateFunction((void*)oCBaseFileSystem_Tell, (void*)fsinterfaceoffset),
@@ -1285,7 +1311,7 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 			CreateFunction((void*)oCBaseFileSystem_IsFileWritable, (void*)fsinterfaceoffset),
 			CreateFunction((void*)oCBaseFileSystem_SetFileWritable, (void*)fsinterfaceoffset),
 			CreateFunction((void*)oCBaseFileSystem_GetFileTime, (void*)fsinterfaceoffset),
-			CreateFunction((void*)oCBaseFileSystem_ReadFile, (void*)fsinterfaceoffset),
+			CreateFunction((void*)IBaseFileSystem__ReadFile, (void*)fsinterfaceoffset),
 			CreateFunction((void*)oCBaseFileSystem_WriteFile, (void*)fsinterfaceoffset),
 			CreateFunction((void*)oCBaseFileSystem_UnzipFile, (void*)fsinterfaceoffset)
 
