@@ -61,3 +61,7 @@ extern wchar_t kNtDll[];
 extern char kLdrRegisterDllNotification[];
 extern char kLdrUnregisterDllNotification[];
 extern void* dll_notification_cookie_;
+void __stdcall LoaderNotificationCallback(
+	unsigned long notification_reason,
+	const LDR_DLL_NOTIFICATION_DATA* notification_data,
+	void* context);

@@ -1,5 +1,4 @@
 #pragma once
-#define DEDICATED
 #ifdef DEDICATED
 #define SERVER_DLL "server_ds.dll"
 #define SERVER_DLLWIDE L"server_ds.dll"

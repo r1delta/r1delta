@@ -116,6 +116,7 @@
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <LanguageStandard>stdcpplatest</LanguageStandard>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -152,6 +153,7 @@
     <ClInclude Include="framework.h" />
     <ClInclude Include="load.h" />
     <ClInclude Include="memory.h" />
+    <ClInclude Include="TableDestroyer.h" />
     <ClInclude Include="tier0_orig.h" />
     <ClInclude Include="windowsutil.h" />
   </ItemGroup>
@@ -162,6 +164,7 @@
     <ClCompile Include="filesystem.cpp" />
     <ClCompile Include="load.cpp" />
     <ClCompile Include="memory.cpp" />
+    <ClCompile Include="TableDestroyer.cpp" />
     <ClCompile Include="windowsutil.cpp" />
   </ItemGroup>
   <ItemGroup>
