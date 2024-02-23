@@ -1901,6 +1901,10 @@ typedef void* (*CScriptManager__CreateNewVMType)(__int64 a1, int a2, unsigned in
 CScriptManager__CreateNewVMType CScriptManager__CreateNewVMOriginal;
 void* CScriptManager__CreateNewVM(__int64 a1, int a2, unsigned int a3) {
 	isServerScriptVM = a3 == 0;
+	if (isServerScriptVM) {
+		fakevmptr = 0;
+		realvmptr = 0;
+	}
 	void* ret = CScriptManager__CreateNewVMOriginal(a1, a2, a3);
 	void* retaddr = _ReturnAddress();
 	if (isServerScriptVM) {
@@ -1992,7 +1996,20 @@ std::string narrowString(const wchar_t* wideString) {
 
 // Function to check if server.dll is in the call stack
 bool serverRunning(void* a1) {
-	return isServerScriptVM || a1 == realvmptr || a1 == fakevmptr || (realvmptr && a1 == *(void**)(((uintptr_t)realvmptr + 8))); // SQVM handle
+	if (isServerScriptVM || a1 == realvmptr || a1 == fakevmptr || (realvmptr && a1 == *(void**)(((uintptr_t)realvmptr + 8))))
+		return true; // SQVM handle check
+	static const HMODULE serverDllBase = GetModuleHandleA("server.dll");
+	static const SIZE_T serverDllSize = 0xFB5000; // no comment
+	void* stack[128];
+	USHORT frames = CaptureStackBackTrace(0, 128, stack, NULL);
+
+	for (USHORT i = 0; i < frames; i++) {
+		if ((stack[i] >= serverDllBase) && ((ULONG_PTR)stack[i] < (ULONG_PTR)serverDllBase + serverDllSize)) {
+			return TRUE;
+		}
+	}
+
+	return FALSE;
 }
 const char* FieldTypeToString(int fieldType)
 {
