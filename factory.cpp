@@ -153,7 +153,7 @@ __int64 IBaseFileSystem__Open(__int64 thisptr, const char* pFileName, const char
 
 	//std::cout << "Server FS: " << path << std::endl;
 
-	return reinterpret_cast<__int64(*)(__int64, const char*, const char*, const char*)>(oCBaseFileSystem_Open)(fsinterfaceoffset, path.c_str(), pOptions, pathID);
+	return reinterpret_cast<__int64(*)(__int64, const char*, const char*, const char*)>(oCBaseFileSystem_Open)(fsinterfaceoffset, pFileName, pOptions, pathID);
 }
 
 uintptr_t osub_180009C20;
@@ -167,7 +167,7 @@ bool IBaseFileSystem__ReadFile(__int64 thisptr, const char* pFileName, const cha
 	//}
 
 	//std::cout << "Server FS: " << path << std::endl;
-	return reinterpret_cast<bool(*)(__int64, const char*, const char*, void*, __int64, __int64, void*)>(oCBaseFileSystem_ReadFile)(fsinterfaceoffset, path.c_str(), pPath, buf, nMaxBytes, nStartingByte, pfnAlloc);
+	return reinterpret_cast<bool(*)(__int64, const char*, const char*, void*, __int64, __int64, void*)>(oCBaseFileSystem_ReadFile)(fsinterfaceoffset, pPath, pPath, buf, nMaxBytes, nStartingByte, pfnAlloc);
 }
 
 char sub_180009C20(__int64 a1, char* a2, __int64 a3) {
@@ -179,7 +179,7 @@ char sub_180009C20(__int64 a1, char* a2, __int64 a3) {
 	//}
 
 	//std::cout << "Server FS: " << path << std::endl;
-	return reinterpret_cast<char(*)(__int64, char*, __int64)>(osub_180009C20)(fsinterface, (char*)(path.c_str()), a3);
+	return reinterpret_cast<char(*)(__int64, char*, __int64)>(osub_180009C20)(fsinterface, a2, a3);
 }
 
 
@@ -1818,6 +1818,8 @@ char __fastcall sub_180217C30(char* a1, __int64 size, _QWORD* a3, __int64 a4)
 const char* scripterr() {
 	return "scripterror.log";
 }
+bool isServerScriptVM = false;
+
 __forceinline BOOL CheckIfCallingDLLContainsR1o() {
 	// Get the return address of the calling function
 	PVOID retAddress = _ReturnAddress();
@@ -1897,13 +1899,11 @@ void* fakevmptr;
 void* realvmptr = 0;
 typedef void* (*CScriptManager__CreateNewVMType)(__int64 a1, int a2, unsigned int a3);
 CScriptManager__CreateNewVMType CScriptManager__CreateNewVMOriginal;
-bool isServerScriptVM = false;
 void* CScriptManager__CreateNewVM(__int64 a1, int a2, unsigned int a3) {
-	isServerScriptVM = IsReturnAddressInServerDll(_ReturnAddress());
+	isServerScriptVM = a3 == 0;
 	void* ret = CScriptManager__CreateNewVMOriginal(a1, a2, a3);
 	void* retaddr = _ReturnAddress();
-	if (IsReturnAddressInServerDll(_ReturnAddress())) {
-		isServerScriptVM = true;
+	if (isServerScriptVM) {
 		std::cout << "created Server SCRIPT VM" << std::endl;
 		realvmptr = ret;
 		fakevmptr = CreateNewVTable(ret);
@@ -1989,39 +1989,10 @@ std::string narrowString(const wchar_t* wideString) {
 	WideCharToMultiByte(CP_ACP, 0, wideString, -1, &ret[0], len, nullptr, nullptr);
 	return ret;
 }
-bool isServerCodeRunningExternal = false;
-__declspec(dllexport) void SetIsRunningServerCode(bool whatever) {
-	isServerCodeRunningExternal = whatever;
-}
+
 // Function to check if server.dll is in the call stack
-bool serverRunning() {
-	if (isServerCodeRunningExternal)
-		return isServerCodeRunningExternal;
-	// Buffer to store stack addresses
-	void* stack[128];
-	// Capture the backtrace
-	USHORT frames = CaptureStackBackTrace(0, 128, stack, NULL);
-
-	// Iterate over captured stack frames
-	for (USHORT i = 0; i < frames; ++i) {
-		HMODULE module = NULL;
-		// Check if this address is within a module
-		if (GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-			(LPCTSTR)stack[i], &module)) {
-			wchar_t modulePath[MAX_PATH];
-			// Get the module's file name
-			if (GetModuleFileName(module, modulePath, MAX_PATH)) {
-				std::string fileName = narrowString(modulePath);
-				// Check if the file name contains "server.dll"
-				if (fileName.find("server.dll") != std::string::npos) {
-					return true; // server.dll is in the call stack
-				}
-			}
-		}
-	}
-
-	// server.dll not found in the call stack
-	return false;
+bool serverRunning(void* a1) {
+	return isServerScriptVM || a1 == realvmptr || a1 == fakevmptr || (realvmptr && a1 == *(void**)(((uintptr_t)realvmptr + 8))); // SQVM handle
 }
 const char* FieldTypeToString(int fieldType)
 {
@@ -2034,7 +2005,7 @@ const char* FieldTypeToString(int fieldType)
 		{6, "bool"}, {8, "char"}, {32, "string"}, {33, "handle"}
 	};
 
-	const auto& typeMap = serverRunning() ? typeMapServerRunning : typeMapServerNotRunning;
+	const auto& typeMap = serverRunning(NULL) ? typeMapServerRunning : typeMapServerNotRunning;
 	auto it = typeMap.find(fieldType);
 	if (it != typeMap.end()) {
 		return it->second;
@@ -2060,7 +2031,7 @@ CSquirrelVM__TranslateCallType CSquirrelVM__TranslateCallOriginal;
 
 void __fastcall CSquirrelVM__RegisterFunctionGuts(__int64* a1, __int64 a2, const char** a3) {
 	std::cout << "RegisterFunctionGuts called, server: " << (serverRunning ? "TRUE" : "FALSE") << std::endl;
-	if (serverRunning() && (*(_DWORD*)(a2 + 112) & 2) == 0) { // Check if server is running
+	if (serverRunning(a1) && (*(_DWORD*)(a2 + 112) & 2) == 0) { // Check if server is running
 		int argCount = *(_DWORD*)(a2 + 88); // Get the argument count
 		_DWORD* args = *(_DWORD**)(a2 + 64); // Get the pointer to arguments
 
@@ -2074,7 +2045,7 @@ void __fastcall CSquirrelVM__RegisterFunctionGuts(__int64* a1, __int64 a2, const
 	CSquirrelVM__RegisterFunctionGutsOriginal(a1, a2, a3);
 }
 void __fastcall CSquirrelVM__TranslateCall(__int64* a1) {
-	if (!serverRunning()) {
+	if (!serverRunning(a1)) {
 		CSquirrelVM__TranslateCallOriginal(a1);
 		return;
 	}
@@ -2094,7 +2065,7 @@ void __fastcall CSquirrelVM__TranslateCall(__int64* a1) {
 
 __int64 __fastcall CSquirrelVM__PushVariant(__int64* a1, ScriptVariant_t* a2)
 {
-	if (serverRunning())
+	if (serverRunning(a1))
 		ConvertScriptVariant(a2, R1O_TO_R1);
 	return CSquirrelVM__PushVariantOriginal(a1, a2);
 }
@@ -2102,26 +2073,26 @@ __int64 __fastcall CSquirrelVM__PushVariant(__int64* a1, ScriptVariant_t* a2)
 char __fastcall CSquirrelVM__ConvertToVariant(__int64* a1, __int64 a2, ScriptVariant_t* a3)
 {
 	bool ret = CSquirrelVM__ConvertToVariantOriginal(a1, a2, a3);
-	if (serverRunning())
+	if (serverRunning(a1))
 		ConvertScriptVariant(a3, R1_TO_R1O);
 	return ret;
 }
 __int64 __fastcall CSquirrelVM__ReleaseValue(__int64* a1, ScriptVariant_t* a2)
 {
-	if (serverRunning())
+	if (serverRunning(a1))
 		ConvertScriptVariant(a2, R1O_TO_R1);
 	return CSquirrelVM__ReleaseValueOriginal(a1, a2);
 }
 bool __fastcall CSquirrelVM__SetValue(__int64* a1, void* a2, unsigned int a3, ScriptVariant_t* a4)
 {
-	if (serverRunning())
+	if (serverRunning(a1))
 		ConvertScriptVariant(a4, R1O_TO_R1);
 	return CSquirrelVM__SetValueOriginal(a1, a2, a3, a4);
 }
 
 bool __fastcall CSquirrelVM__SetValueEx(__int64* a1, __int64 a2, const char* a3, ScriptVariant_t* a4)
 {
-	if (serverRunning())
+	if (serverRunning(a1))
 		ConvertScriptVariant(a4, R1O_TO_R1);
 	return CSquirrelVM__SetValueExOriginal(a1, a2, a3, a4);
 
@@ -2134,7 +2105,12 @@ __declspec(dllexport) void** GetServerVMPtr() {
 }
 void __fastcall sub_1800015F0(void* a1, void* vmptr)
 {
-	if (serverRunning())
+	if (serverRunning(a1) || serverRunning(vmptr) || serverRunning(*(void**)vmptr) || serverRunning(*(void**)a1)) {
 		vmptr = realvmptr;
+		std::cout << "set vm ptr" << std::endl;
+	}
+	else {
+		std::cout << "did NOT set vm ptr" << std::endl;
+	}
 	return sub_1800015F0Original(a1, vmptr);
 }
