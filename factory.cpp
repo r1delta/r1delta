@@ -1906,9 +1906,8 @@ void* CScriptManager__CreateNewVM(__int64 a1, int a2, unsigned int a3) {
 		realvmptr = 0;
 	}
 	void* ret = CScriptManager__CreateNewVMOriginal(a1, a2, a3);
-	void* retaddr = _ReturnAddress();
 	if (isServerScriptVM) {
-		std::cout << "created Server SCRIPT VM" << std::endl;
+		//std::cout << "created Server SCRIPT VM" << std::endl;
 		realvmptr = ret;
 		fakevmptr = CreateNewVTable(ret);
 		isServerScriptVM = false;
@@ -1924,7 +1923,7 @@ CScriptVM__GetUnknownVMPtrType CScriptVM__GetUnknownVMPtrOriginal;
 void* CScriptVM__GetUnknownVMPtr()
 {
 	if (IsReturnAddressInServerDll(_ReturnAddress())) {
-		std::cout << "returning addr to Server SCRIPT VM" << std::endl;
+		///std::cout << "returning addr to Server SCRIPT VM" << std::endl;
 		return &fakevmptr;
 	}
 	return CScriptVM__GetUnknownVMPtrOriginal();
@@ -1940,8 +1939,8 @@ enum SVFlags_t
 	SV_FREE = 0x01,
 	SV_IHAVENOFUCKINGCLUE = 0x02,
 	// Start from the most significant bit for the new flags
-	SV_CONVERTED_TO_R1 = 0x8000,
-	SV_CONVERTED_TO_R1O = 0x4000,
+	SV_CONVERTED_TO_R1 = 0x1000,
+	SV_CONVERTED_TO_R1O = 0x2000,
 };
 
 struct __declspec(align(8)) ScriptVariant_t
@@ -1967,8 +1966,15 @@ typedef enum {
 } ConversionDirection;
 
 void ConvertScriptVariant(ScriptVariant_t* variant, ConversionDirection direction) {
-	// Check if either conversion flag is set, exit if true
-	if (variant->m_flags & (SV_CONVERTED_TO_R1 | SV_CONVERTED_TO_R1O)) {
+	// Check if attempting to convert in the opposite direction of a previous conversion
+	if ((direction == R1_TO_R1O && (variant->m_flags & SV_CONVERTED_TO_R1)) ||
+		(direction == R1O_TO_R1 && (variant->m_flags & SV_CONVERTED_TO_R1O))) {
+		// Clear the opposite flag
+		variant->m_flags &= ~(direction == R1_TO_R1O ? SV_CONVERTED_TO_R1 : SV_CONVERTED_TO_R1O);
+	}
+	else if ((direction == R1_TO_R1O && (variant->m_flags & SV_CONVERTED_TO_R1O)) ||
+		(direction == R1O_TO_R1 && (variant->m_flags & SV_CONVERTED_TO_R1))) {
+		// If already converted in this direction, exit to prevent double conversion
 		return;
 	}
 
@@ -1976,13 +1982,16 @@ void ConvertScriptVariant(ScriptVariant_t* variant, ConversionDirection directio
 		if (direction == R1_TO_R1O) {
 			variant->m_type += 1;
 			variant->m_flags |= SV_CONVERTED_TO_R1O; // Set the flag for R1 to R1O conversion
+			//std::cout << "ConvertScriptVariant: converted variant " << static_cast<void*>(variant) << " to SV_CONVERTED_TO_R1O" << std::endl;
 		}
 		else {
 			variant->m_type -= 1;
 			variant->m_flags |= SV_CONVERTED_TO_R1; // Set the flag for R1O to R1 conversion
+			//std::cout << "ConvertScriptVariant: converted variant " << static_cast<void*>(variant) << " to SV_CONVERTED_TO_R1" << std::endl;
 		}
 	}
 }
+
 
 
 // Utility function to convert wide string to narrow string
@@ -2011,6 +2020,7 @@ bool serverRunning(void* a1) {
 
 	return FALSE;
 }
+
 const char* FieldTypeToString(int fieldType)
 {
 	static const std::map<int, const char*> typeMapServerRunning = {
@@ -2047,7 +2057,7 @@ typedef __int64 (*CSquirrelVM__TranslateCallType)(__int64* a1);
 CSquirrelVM__TranslateCallType CSquirrelVM__TranslateCallOriginal;
 
 void __fastcall CSquirrelVM__RegisterFunctionGuts(__int64* a1, __int64 a2, const char** a3) {
-	std::cout << "RegisterFunctionGuts called, server: " << (serverRunning ? "TRUE" : "FALSE") << std::endl;
+	//std::cout << "RegisterFunctionGuts called, server: " << (serverRunning ? "TRUE" : "FALSE") << std::endl;
 	if (serverRunning(a1) && (*(_DWORD*)(a2 + 112) & 2) == 0) { // Check if server is running
 		int argCount = *(_DWORD*)(a2 + 88); // Get the argument count
 		_DWORD* args = *(_DWORD**)(a2 + 64); // Get the pointer to arguments
@@ -2055,7 +2065,7 @@ void __fastcall CSquirrelVM__RegisterFunctionGuts(__int64* a1, __int64 a2, const
 		for (int i = 0; i < argCount; ++i) {
 			if (args[i] > 5) {
 				args[i] -= 1; // Subtract 1 from argument values above 5
-				std::cout << "subtracted 1" << std::endl;
+				//std::cout << "subtracted 1" << std::endl;
 			}
 		}
 	}
@@ -2063,6 +2073,7 @@ void __fastcall CSquirrelVM__RegisterFunctionGuts(__int64* a1, __int64 a2, const
 }
 void __fastcall CSquirrelVM__TranslateCall(__int64* a1) {
 	if (!serverRunning(a1)) {
+		//std::cout << __FUNCTION__ ": did not translate call" << std::endl;
 		CSquirrelVM__TranslateCallOriginal(a1);
 		return;
 	}
@@ -2073,6 +2084,7 @@ void __fastcall CSquirrelVM__TranslateCall(__int64* a1) {
 	char data1[] = { 0x00, 0x07, 0x01, 0x07, 0x02, 0x07, 0x03, 0x07, 0x04, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x05, 0x06 };
 	WriteProcessMemory(GetCurrentProcess(), (LPVOID)address1, &value1, 1, NULL);
 	WriteProcessMemory(GetCurrentProcess(), (LPVOID)address2, data1, sizeof(data1), NULL);
+	//std::cout << __FUNCTION__ ": translated call" << std::endl;
 	CSquirrelVM__TranslateCallOriginal(a1);
 	char value2 = 0x20;
 	char data2[] = { 0x00, 0x07, 0x01, 0x07, 0x02, 0x03, 0x07, 0x04, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x05, 0x06 };
@@ -2082,8 +2094,13 @@ void __fastcall CSquirrelVM__TranslateCall(__int64* a1) {
 
 __int64 __fastcall CSquirrelVM__PushVariant(__int64* a1, ScriptVariant_t* a2)
 {
-	if (serverRunning(a1))
+	if (serverRunning(a1)) {
 		ConvertScriptVariant(a2, R1O_TO_R1);
+		//std::cout << __FUNCTION__ ": converted variant" << std::endl;
+	}
+	else {
+		//std::cout << __FUNCTION__ ": did not convert variant" << std::endl;
+	}
 	return CSquirrelVM__PushVariantOriginal(a1, a2);
 }
 
@@ -2124,10 +2141,10 @@ void __fastcall sub_1800015F0(void* a1, void* vmptr)
 {
 	if (serverRunning(a1) || serverRunning(vmptr) || serverRunning(*(void**)vmptr) || serverRunning(*(void**)a1)) {
 		vmptr = realvmptr;
-		std::cout << "set vm ptr" << std::endl;
+		//std::cout << "set vm ptr" << std::endl;
 	}
 	else {
-		std::cout << "did NOT set vm ptr" << std::endl;
+		//std::cout << "did NOT set vm ptr" << std::endl;
 	}
 	return sub_1800015F0Original(a1, vmptr);
 }
