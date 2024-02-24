@@ -2047,7 +2047,6 @@ typedef bool (*CSquirrelVM__SetValueExType)(__int64* a1, __int64 a2, const char*
 CSquirrelVM__SetValueExType CSquirrelVM__SetValueExOriginal;
 typedef __int64 (*CSquirrelVM__TranslateCallType)(__int64* a1);
 CSquirrelVM__TranslateCallType CSquirrelVM__TranslateCallOriginal;
-std::set<void*> funcptrs;
 bool IsPointerFromServerDll(void* pointer) {
 	// Get the base address of "server.dll"
 	HMODULE hModule = GetModuleHandleA("server.dll");
@@ -2075,7 +2074,7 @@ void __fastcall CSquirrelVM__RegisterFunctionGuts(__int64* a1, __int64 a2, const
 		_DWORD* args = *(_DWORD**)(a2 + 64); // Get the pointer to arguments
 		*(_DWORD*)(a2 + 112) |= 16;
 		for (int i = 0; i < argCount; ++i) {
-			if (args[i] > 5 && !funcptrs.contains(&args[i])) {
+			if (args[i] > 5) {
 				args[i] -= 1; // Subtract 1 from argument values above 5
 				//std::cout << "subtracted 1" << std::endl;
 			}
