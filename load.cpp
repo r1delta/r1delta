@@ -45,38 +45,6 @@ void Status_ConMsg(const char* text, ...)
 
 __declspec(dllexport) void whatever2() { Error(); };
 
-typedef __int64 (*SendPropBoolType)(__int64 result, char* pVarName, int offset, int sizeofVar, int a5);
-SendPropBoolType SendPropBoolOriginal;
-typedef __int64(__fastcall* SendPropIntType)(__int64 a1, char* pVarName, int a3, int a4, int a5, int a6, __int64(__fastcall* a7)(), char a8);
-SendPropIntType SendPropIntOriginal;
-
-__int64 __fastcall SendPropBool(__int64 a1, char* pVarName, int a3, int a4, int a5) {
-	if (!strcmp(pVarName, "m_bDoubleJump") || !strcmp(pVarName, "m_hasHacking") || !strcmp(pVarName, "m_titanBuildStarted") || !strcmp(pVarName, "m_titanDeployed") || !strcmp(pVarName, "m_titanReady"))
-		return (__int64)(SendPropIntOriginal((__int64)a1, (char*)"should_never_see_this", 0, 4, -1, 0, 0i64, 128));
-	return SendPropBoolOriginal(a1, pVarName, a3, a4, a5);
-}
-
-__int64 __fastcall SendPropInt(__int64 a1, char* pVarName, int a3, int a4, int a5, int a6, __int64(__fastcall* a7)(), char a8) {
-	if (!strcmp(pVarName, "m_bFireZooming") || !strcmp(pVarName, "m_bWallRun") || !strcmp(pVarName, "m_level") || !strcmp(pVarName, "m_liveryCode") || !strcmp(pVarName, "m_tierLevel"))
-		return (__int64)(SendPropIntOriginal((__int64)a1, (char*)"should_never_see_this", 0, 4, -1, 0, 0i64, 128));
-	return SendPropIntOriginal(a1, pVarName, a3, a4, a5, a6, a7, a8);
-}
-typedef __int64(__fastcall* SendPropVectorType)(__int64 a1, char* pVarName, int a3, __int64 a4, int a5, int a6, float a7, float a8, __int64 a9, char a10);
-SendPropVectorType SendPropVectorOriginal;
-
-__int64 __fastcall SendPropVector(__int64 a1, char* pVarName, int a3, __int64 a4, int a5, int a6, float a7, float a8, __int64 a9, char a10) {
-	if (!strcmp(pVarName, "m_liveryColor0") || !strcmp(pVarName, "m_liveryColor1") || !strcmp(pVarName, "m_liveryColor2"))
-		return (__int64)(SendPropIntOriginal((__int64)a1, (char*)"should_never_see_this", 0, 4, -1, 0, 0i64, 128));
-	return SendPropVectorOriginal(a1, pVarName, a3, a4, a5, a6, a7, a8, a9, a10);
-}
-typedef __int64(__fastcall* SendPropUnknownType)(__int64 a1, const char* pVarName, int a3, int a4, int a5);
-SendPropUnknownType SendPropUnknownOriginal;
-
-__int64 __fastcall SendPropUnknown(__int64 a1, const char* pVarName, int a3, int a4, int a5) {
-	if (!strcmp(pVarName, "m_titanRespawnTime"))
-		return (__int64)(SendPropIntOriginal((__int64)a1, (char*)"should_never_see_this", 0, 4, -1, 0, 0i64, 128));
-	return SendPropUnknownOriginal(a1, pVarName, a3, a4, a5);
-}
 typedef char(__fastcall* ParsePDATAType)(int a1, int a2, const char* a3, const char* a4);
 ParsePDATAType ParsePDATAOriginal;
 
@@ -127,7 +95,7 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher.dll") + 0x1210), &CScriptManager__CreateNewVM, reinterpret_cast<LPVOID*>(&CScriptManager__CreateNewVMOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher.dll") + 0x1630), &CScriptVM__GetUnknownVMPtr, reinterpret_cast<LPVOID*>(&CScriptVM__GetUnknownVMPtrOriginal));
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher.dll") + 0x8AB0), &sub_180008AB0, reinterpret_cast<LPVOID*>(&sub_180008AB0Original));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher.dll") + 0x15F0), &sub_1800015F0, reinterpret_cast<LPVOID*>(&sub_1800015F0Original));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher.dll") + 0x15F0), &CScriptManager__DestroyVM, reinterpret_cast<LPVOID*>(&CScriptManager__DestroyVMOriginal));
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher.dll") + 0xBE60), &sub_18000BE60, reinterpret_cast<LPVOID*>(NULL));
 
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher.dll") + 0xCDB0), &CSquirrelVM__RegisterFunctionGuts, reinterpret_cast<LPVOID*>(&CSquirrelVM__RegisterFunctionGutsOriginal));

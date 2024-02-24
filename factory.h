@@ -27,9 +27,9 @@ void* CScriptVM__GetUnknownVMPtr();
 typedef __int64 (*sub_180008AB0Type)(__int64 a1, void* a2, unsigned int* a3, unsigned int a4, __int64 a5, int* a6);
 extern sub_180008AB0Type sub_180008AB0Original;
 __int64 __fastcall sub_180008AB0(__int64 a1, void* a2, unsigned int* a3, unsigned int a4, __int64 a5, int* a6);
-typedef void (*sub_1800015F0Type)(void* a1, void* vmptr);
-extern sub_1800015F0Type sub_1800015F0Original;
-void __fastcall sub_1800015F0(void* a1, void* vmptr);
+typedef void (*CScriptManager__DestroyVMType)(void* a1, void* vmptr);
+extern CScriptManager__DestroyVMType CScriptManager__DestroyVMOriginal;
+void __fastcall CScriptManager__DestroyVM(void* a1, void* vmptr);
 
 struct ScriptVariant_t;
 typedef void (*CSquirrelVM__RegisterFunctionGutsType)(__int64* a1, __int64 a2, const char** a3);

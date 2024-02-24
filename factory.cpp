@@ -1994,18 +1994,10 @@ void ConvertScriptVariant(ScriptVariant_t* variant, ConversionDirection directio
 
 
 
-// Utility function to convert wide string to narrow string
-std::string narrowString(const wchar_t* wideString) {
-	if (!wideString) return "";
-	int len = WideCharToMultiByte(CP_ACP, 0, wideString, -1, nullptr, 0, nullptr, nullptr);
-	std::string ret(len, 0);
-	WideCharToMultiByte(CP_ACP, 0, wideString, -1, &ret[0], len, nullptr, nullptr);
-	return ret;
-}
-
 // Function to check if server.dll is in the call stack
 bool serverRunning(void* a1) {
-	if (isServerScriptVM || a1 == realvmptr || a1 == fakevmptr || (realvmptr && a1 == *(void**)(((uintptr_t)realvmptr + 8))))
+	//return isServerScriptVM || a1 == realvmptr || a1 == fakevmptr || (realvmptr && a1 == *(void**)(((uintptr_t)realvmptr + 8)));
+	if (isServerScriptVM)
 		return true; // SQVM handle check
 	static const HMODULE serverDllBase = GetModuleHandleA("server.dll");
 	static const SIZE_T serverDllSize = 0xFB5000; // no comment
@@ -2055,20 +2047,56 @@ typedef bool (*CSquirrelVM__SetValueExType)(__int64* a1, __int64 a2, const char*
 CSquirrelVM__SetValueExType CSquirrelVM__SetValueExOriginal;
 typedef __int64 (*CSquirrelVM__TranslateCallType)(__int64* a1);
 CSquirrelVM__TranslateCallType CSquirrelVM__TranslateCallOriginal;
+std::set<void*> funcptrs;
+bool IsPointerFromServerDll(void* pointer) {
+	// Get the base address of "server.dll"
+	HMODULE hModule = GetModuleHandleA("server.dll");
+	if (!hModule) {
+		std::cerr << "Failed to get handle of server.dll\n";
+		return false;
+	}
 
+	// Convert the HMODULE to a pointer for comparison
+	uintptr_t baseAddress = reinterpret_cast<uintptr_t>(hModule);
+	uintptr_t ptrAddress = reinterpret_cast<uintptr_t>(pointer);
+
+	// Size of "server.dll" is 0xFB5000
+	const uintptr_t moduleSize = 0xFB5000;
+
+	// Check if the pointer is within the range of "server.dll"
+	return ptrAddress >= baseAddress && ptrAddress < (baseAddress + moduleSize);
+}
+bool hasRegisteredServerFuncs = false;
 void __fastcall CSquirrelVM__RegisterFunctionGuts(__int64* a1, __int64 a2, const char** a3) {
 	//std::cout << "RegisterFunctionGuts called, server: " << (serverRunning ? "TRUE" : "FALSE") << std::endl;
-	if (serverRunning(a1) && (*(_DWORD*)(a2 + 112) & 2) == 0) { // Check if server is running
+		
+	if (serverRunning(a1) && (*(_DWORD*)(a2 + 112) & 2) == 0 && (*(_DWORD*)(a2 + 112) & 16) == 0) { // Check if server is running
 		int argCount = *(_DWORD*)(a2 + 88); // Get the argument count
 		_DWORD* args = *(_DWORD**)(a2 + 64); // Get the pointer to arguments
-
+		*(_DWORD*)(a2 + 112) |= 16;
 		for (int i = 0; i < argCount; ++i) {
-			if (args[i] > 5) {
+			if (args[i] > 5 && !funcptrs.contains(&args[i])) {
 				args[i] -= 1; // Subtract 1 from argument values above 5
 				//std::cout << "subtracted 1" << std::endl;
 			}
 		}
 	}
+	/*
+		LPCVOID baseAddressDll = (LPCVOID)GetModuleHandleA("launcher.dll");
+	LPCVOID address1 = (LPCVOID)((uintptr_t)(baseAddressDll)+0xCE27);
+	LPCVOID address2 = (LPCVOID)((uintptr_t)(baseAddressDll)+0xD3C0);
+	char value1 = 0x22;
+	char data1[] = { 0x00, 0x05, 0x01, 0x05, 0x00, 0x05, 0x02, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x03, 0x04, 0x04 };
+	WriteProcessMemory(GetCurrentProcess(), (LPVOID)address1, &value1, 1, NULL);
+	WriteProcessMemory(GetCurrentProcess(), (LPVOID)address2, data1, sizeof(data1), NULL);
+	//std::cout << __FUNCTION__ ": translated call" << std::endl;
+	CSquirrelVM__RegisterFunctionGutsOriginal(a1, a2, a3);
+	char value2 = 0x21;
+	char data2[] = { 0x00, 0x05, 0x01, 0x05, 0x00, 0x02, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x03, 0x04, 0x04 };
+	WriteProcessMemory(GetCurrentProcess(), (LPVOID)address1, &value2, 1, NULL);
+	WriteProcessMemory(GetCurrentProcess(), (LPVOID)address2, data2, sizeof(data2), NULL);
+	*/
+	//
 	CSquirrelVM__RegisterFunctionGutsOriginal(a1, a2, a3);
 }
 void __fastcall CSquirrelVM__TranslateCall(__int64* a1) {
@@ -2131,20 +2159,25 @@ bool __fastcall CSquirrelVM__SetValueEx(__int64* a1, __int64 a2, const char* a3,
 	return CSquirrelVM__SetValueExOriginal(a1, a2, a3, a4);
 
 }
-typedef void (*sub_1800015F0Type)(void* a1, void* vmptr);
-sub_1800015F0Type sub_1800015F0Original;
+typedef void (*CScriptManager__DestroyVMType)(void* a1, void* vmptr);
+CScriptManager__DestroyVMType CScriptManager__DestroyVMOriginal;
 
 __declspec(dllexport) void** GetServerVMPtr() {
 	return &realvmptr;
 }
-void __fastcall sub_1800015F0(void* a1, void* vmptr)
+void __fastcall CScriptManager__DestroyVM(void* a1, void* vmptr)
 {
-	if (serverRunning(a1) || serverRunning(vmptr) || serverRunning(*(void**)vmptr) || serverRunning(*(void**)a1)) {
+	//if (serverRunning(a1) || serverRunning(vmptr) || serverRunning(*(void**)vmptr) || serverRunning(*(void**)a1)) {
+	//	vmptr = realvmptr;
+	//	//std::cout << "set vm ptr" << std::endl;
+	//}
+	//else {
+	//	//std::cout << "did NOT set vm ptr" << std::endl;
+	//}
+	if (*((void**)vmptr) == fakevmptr) {
 		vmptr = realvmptr;
-		//std::cout << "set vm ptr" << std::endl;
+		free(fakevmptr);
+		hasRegisteredServerFuncs = true;
 	}
-	else {
-		//std::cout << "did NOT set vm ptr" << std::endl;
-	}
-	return sub_1800015F0Original(a1, vmptr);
+	return CScriptManager__DestroyVMOriginal(a1, vmptr);
 }
