@@ -1304,7 +1304,7 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 		static uintptr_t simplefsvtable[] = {
 			CreateFunction((void*)oCBaseFileSystem_Read, (void*)fsinterfaceoffset),
 			CreateFunction((void*)oCBaseFileSystem_Write, (void*)fsinterfaceoffset),
-			CreateFunction((void*)IBaseFileSystem__Open, (void*)fsinterfaceoffset),
+			CreateFunction((void*)oCBaseFileSystem_Open, (void*)fsinterfaceoffset),
 			CreateFunction((void*)oCBaseFileSystem_Close, (void*)fsinterfaceoffset),
 			CreateFunction((void*)oCBaseFileSystem_Seek, (void*)fsinterfaceoffset),
 			CreateFunction((void*)oCBaseFileSystem_Tell, (void*)fsinterfaceoffset),
@@ -1316,7 +1316,7 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 			CreateFunction((void*)oCBaseFileSystem_IsFileWritable, (void*)fsinterfaceoffset),
 			CreateFunction((void*)oCBaseFileSystem_SetFileWritable, (void*)fsinterfaceoffset),
 			CreateFunction((void*)oCBaseFileSystem_GetFileTime, (void*)fsinterfaceoffset),
-			CreateFunction((void*)IBaseFileSystem__ReadFile, (void*)fsinterfaceoffset),
+			CreateFunction((void*)oCBaseFileSystem_ReadFile, (void*)fsinterfaceoffset),
 			CreateFunction((void*)oCBaseFileSystem_WriteFile, (void*)fsinterfaceoffset),
 			CreateFunction((void*)oCBaseFileSystem_UnzipFile, (void*)fsinterfaceoffset)
 
