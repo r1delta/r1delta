@@ -45,9 +45,9 @@ void DestroySendProp(SendProp* sendTablePtr, int* sendTableLengthPtr, const char
 			--(*sendTableLengthPtr); // Decrement the length of sendTable.
 
 			// Update offsets for remaining SendProps.
-			for (int j = i; j < *sendTableLengthPtr; ++j) {
-				sendTablePtr[j].offset -= sizeToDelete;
-			}
+			//for (int j = i; j < *sendTableLengthPtr; ++j) {
+			//	sendTablePtr[j].offset -= sizeToDelete;
+			//}
 
 			std::cout << propname << " obliterated." << std::endl;
 
