@@ -1625,12 +1625,6 @@ char __fastcall CServerGameDLL__DLLInit(void* thisptr, CreateInterfaceFn appSyst
 	tfomsghandler->Init();
 	tfogamemanager->Init();
 	staticclasssystem->Init();
-	size_t bytes = 0;
-	unsigned char noparray = { 0x90 };
-	WriteProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)(GetModuleHandleA("filesystem_stdio.dll")) + 0x74E26), &noparray, sizeof(noparray), &bytes);
-	WriteProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)(GetModuleHandleA("filesystem_stdio.dll")) + 0x74E27), &noparray, sizeof(noparray), &bytes);
-	WriteProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)(GetModuleHandleA("filesystem_stdio.dll")) + 0x74E28), &noparray, sizeof(noparray), &bytes);
-
 	return CServerGameDLL__DLLInitOriginal(thisptr, R1OFactory, R1OFactory, R1OFactory, pGlobals);
 }
 

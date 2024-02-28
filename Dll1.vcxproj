@@ -153,7 +153,12 @@
     <ClInclude Include="framework.h" />
     <ClInclude Include="load.h" />
     <ClInclude Include="memory.h" />
+    <ClInclude Include="patcher.h" />
     <ClInclude Include="TableDestroyer.h" />
+    <ClInclude Include="thirdparty\silver-bun\memaddr.h" />
+    <ClInclude Include="thirdparty\silver-bun\module.h" />
+    <ClInclude Include="thirdparty\silver-bun\tebpeb64.h" />
+    <ClInclude Include="thirdparty\silver-bun\utils.h" />
     <ClInclude Include="tier0_orig.h" />
     <ClInclude Include="windowsutil.h" />
   </ItemGroup>
@@ -164,7 +169,11 @@
     <ClCompile Include="filesystem.cpp" />
     <ClCompile Include="load.cpp" />
     <ClCompile Include="memory.cpp" />
+    <ClCompile Include="patcher.cpp" />
     <ClCompile Include="TableDestroyer.cpp" />
+    <ClCompile Include="thirdparty\silver-bun\memaddr.cpp" />
+    <ClCompile Include="thirdparty\silver-bun\module.cpp" />
+    <ClCompile Include="thirdparty\silver-bun\utils.cpp" />
     <ClCompile Include="windowsutil.cpp" />
   </ItemGroup>
   <ItemGroup>

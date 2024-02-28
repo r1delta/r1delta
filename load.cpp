@@ -16,6 +16,7 @@
 #include "factory.h"
 #include "core.h"
 #include "load.h"
+#include "patcher.h"
 #include "MinHook.h"
 #pragma intrinsic(_ReturnAddress)
 
@@ -238,13 +239,15 @@ const char* sub_18021FE50(__int64 thisptr, const datamap_t* pCurrentMap, const t
 }
 
 
+
+
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
 	const LDR_DLL_NOTIFICATION_DATA* notification_data,
 	void* context) {
 	if (notification_reason != LDR_DLL_NOTIFICATION_REASON_LOADED)
 		return;
-
+	doBinaryPatchForFile(notification_data->Loaded);
 	if (std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length).find(SERVER_DLLWIDE) != std::string::npos) {
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(SERVER_DLL) + 0x143A10), &CServerGameDLL__DLLInit, (LPVOID*)&CServerGameDLL__DLLInitOriginal);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(SERVER_DLL) + 0x71E0BC), &hkcalloc_base, NULL);
@@ -287,7 +290,7 @@ void __stdcall LoaderNotificationCallback(
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x1C79A0), &sub_1801C79A0, reinterpret_cast<LPVOID*>(&sub_1801C79A0Original));
 		//
 		//
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x1D9E70), &MatchRecvPropsToSendProps_R, reinterpret_cast<LPVOID*>(NULL));
+		//diMH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x1D9E70), &MatchRecvPropsToSendProps_R, reinterpret_cast<LPVOID*>(NULL));
 #endif
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x217C30), &sub_180217C30, NULL);
 		// Cast the function pointer to the function at 0x4E80

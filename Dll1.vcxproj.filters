@@ -45,6 +45,21 @@
     <ClInclude Include="TableDestroyer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="thirdparty\silver-bun\memaddr.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="thirdparty\silver-bun\module.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="thirdparty\silver-bun\tebpeb64.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="thirdparty\silver-bun\utils.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="patcher.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">
@@ -69,6 +84,18 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="TableDestroyer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="patcher.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="thirdparty\silver-bun\module.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="thirdparty\silver-bun\utils.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="thirdparty\silver-bun\memaddr.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
