@@ -73,7 +73,169 @@ void AddSearchPathHook(IFileSystem* fileSystem, const char* pPath, const char* p
 	// Call the original function
 	addSearchPathOriginal(fileSystem, pPath, pathID, addType);
 }
+signed __int64 __fastcall sub_1806580E0(char* a1, signed __int64 a2, const char* a3, va_list a4)
+{
+	signed __int64 result; // rax
 
+	if (a2 <= 0)
+		return 0i64;
+	result = vsnprintf(a1, a2, a3, a4);
+	if ((int)result < 0i64 || (int)result >= a2)
+	{
+		result = a2 - 1;
+		a1[a2 - 1] = 0;
+	}
+	return result;
+}
+long long* __fastcall unkfunc(long long* a1)
+{
+	*a1 = 0i64;
+	a1[1] = 0i64;
+	a1[2] = 0i64;
+	a1[3] = 0i64;
+	return a1;
+}
+
+enum
+{
+	TD_OFFSET_NORMAL = 0,
+	TD_OFFSET_PACKED = 1,
+
+	// Must be last
+	TD_OFFSET_COUNT,
+};
+typedef enum _fieldtypes
+{
+	FIELD_VOID = 0, // No type or value
+	FIELD_FLOAT, // Any floating point value
+	FIELD_STRING, // A string ID (return from ALLOC_STRING)
+	FIELD_VECTOR, // Any vector, QAngle, or AngularImpulse
+	FIELD_QUATERNION, // A quaternion
+	FIELD_INTEGER, // Any integer or enum
+	FIELD_BOOLEAN, // boolean, implemented as an int, I may use this as a hint for compression
+	FIELD_SHORT, // 2 byte integer
+	FIELD_CHARACTER, // a byte
+	FIELD_COLOR32, // 8-bit per channel r,g,b,a (32bit color)
+	FIELD_EMBEDDED, // an embedded object with a datadesc, recursively traverse and embedded class/structure based on an additional
+	// typedescription
+	FIELD_CUSTOM, // special type that contains function pointers to it's read/write/parse functions
+
+	FIELD_CLASSPTR, // CBaseEntity *
+	FIELD_EHANDLE, // Entity handle
+	FIELD_EDICT, // edict_t *
+
+	FIELD_POSITION_VECTOR, // A world coordinate (these are fixed up across level transitions automagically)
+	FIELD_TIME, // a floating point time (these are fixed up automatically too!)
+	FIELD_TICK, // an integer tick count( fixed up similarly to time)
+	FIELD_MODELNAME, // Engine string that is a model name (needs precache)
+	FIELD_SOUNDNAME, // Engine string that is a sound name (needs precache)
+
+	FIELD_INPUT, // a list of inputed data fields (all derived from CMultiInputVar)
+	FIELD_FUNCTION, // A class function pointer (Think, Use, etc)
+
+	FIELD_VMATRIX, // a vmatrix (output coords are NOT worldspace)
+
+	// NOTE: Use float arrays for local transformations that don't need to be fixed up.
+	FIELD_VMATRIX_WORLDSPACE, // A VMatrix that maps some local space to world space (translation is fixed up on level transitions)
+	FIELD_MATRIX3X4_WORLDSPACE, // matrix3x4_t that maps some local space to world space (translation is fixed up on level transitions)
+
+	FIELD_INTERVAL, // a start and range floating point interval ( e.g., 3.2->3.6 == 3.2 and 0.4 )
+	FIELD_MODELINDEX, // a model index
+	FIELD_MATERIALINDEX, // a material index (using the material precache string table)
+
+	FIELD_VECTOR2D, // 2 floats
+
+	FIELD_TYPECOUNT, // MUST BE LAST
+} fieldtype_t;
+struct typedescription_t;
+struct datamap_t
+{
+	typedescription_t* dataDesc;
+	int dataNumFields;
+	char const* dataClassName;
+	datamap_t* baseMap;
+
+	bool chains_validated;
+	// Have the "packed" offsets been computed
+	bool packed_offsets_computed;
+	int packed_size;
+};
+struct typedescription_t
+{
+	fieldtype_t fieldType;
+	const char* fieldName;
+	int fieldOffset[TD_OFFSET_COUNT]; // 0 == normal, 1 == packed offset
+	unsigned short fieldSize;
+	short flags;
+	// the name of the variable in the map/fgd data, or the name of the action
+	const char* externalName;
+	// pointer to the function set for save/restoring of custom data types
+	void* pSaveRestoreOps;
+	// for associating function with string names
+	void* inputFunc;
+	// For embedding additional datatables inside this one
+	datamap_t* td;
+
+	// Stores the actual member variable size in bytes
+	int fieldSizeInBytes;
+
+	// FTYPEDESC_OVERRIDE point to first baseclass instance if chains_validated has occurred
+	struct typedescription_t* override_field;
+
+	// Used to track exclusion of baseclass fields
+	int override_count;
+
+	// Tolerance for field errors for float fields
+	float fieldTolerance;
+};
+// write access to const memory has been detected, the output may be wrong!
+// write access to const memory has been detected, the output may be wrong!
+const char* sub_18021FE50(__int64 thisptr, const datamap_t* pCurrentMap, const typedescription_t* pField, const char* fmt, ...)
+{
+	++* (DWORD*)(thisptr + 32);
+	const char* fieldname = "empty";
+	const char* classname = "empty";
+	int flags = 0;
+
+	if (pField)
+	{
+		flags = pField->flags;
+		fieldname = pField->fieldName ? pField->fieldName : "NULL";
+		classname = pCurrentMap->dataClassName;
+	}
+
+	va_list argptr;
+	char data[4096];
+	int len;
+	va_start(argptr, fmt);
+	len = sub_1806580E0(data, sizeof(data), fmt, argptr);
+	va_end(argptr);
+	data[strcspn(data, "\n")] = 0;
+
+	int v6 = 0; // edi
+	__int64 v7 = 0; // rbx
+	bool bUseLongName = true;
+	std::string longName;
+	if (*(int*)(thisptr + 80) > 0)
+	{
+		do
+		{
+			const char* result = *(const char**)(v7 + *(unsigned __int64*)(thisptr + 56));
+			if (result)
+			{
+				const char* v8 = (const char*)*((unsigned __int64*)result + 1);
+				const char* v9 = "NULL";
+				if (v8)
+					v9 = v8;
+				longName += v9;
+				longName += "/";
+			}
+		} while (v6 < *(DWORD*)(thisptr + 80));
+	}
+
+	printf("%2d (%d)%s%s::%s - %s\n", *(DWORD*)(thisptr + 32), *(DWORD*)(thisptr + 36), longName.c_str(), classname, fieldname, data);
+	return 0;
+}
 
 
 void __stdcall LoaderNotificationCallback(
@@ -133,4 +295,9 @@ void __stdcall LoaderNotificationCallback(
 		std::cout << "did hooks" << std::endl;
 
 	}
+	if (std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length).find(L"client.dll") != std::string::npos) {
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("client.dll") + 0x21FE50), &sub_18021FE50, reinterpret_cast<LPVOID*>(NULL));
+		MH_EnableHook(MH_ALL_HOOKS);
+	}
+
 }

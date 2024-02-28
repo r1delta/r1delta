@@ -1,7 +1,6 @@
 #include "memory.h"
 
-extern IMemAlloc* g_pMemAllocSingleton = nullptr;
-
+IMemAlloc* g_pMemAllocSingleton;
 extern "C" __declspec(dllexport) IMemAlloc * CreateGlobalMemAlloc() {
 	if (!g_pMemAllocSingleton) {
 		// Load the tier0_r1.dll library

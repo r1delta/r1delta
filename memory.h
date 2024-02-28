@@ -24,3 +24,5 @@ void* __cdecl hkmalloc_base(size_t Size);
 void* __cdecl hkrealloc_base(void* Block, size_t Size);
 void __cdecl hkfree_base(void* Block);
 void* __cdecl hkrecalloc_base(void* Block, size_t Count, size_t Size);
+extern IMemAlloc* g_pMemAllocSingleton;
+extern "C" __declspec(dllexport) IMemAlloc * CreateGlobalMemAlloc();
