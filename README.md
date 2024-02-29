@@ -111,7 +111,8 @@ r1delte release 2021 men🔥🔥🔥🔥🔥 **NOTE: THIS REFERS TO R1DELTE, NOT
 4. copy "tier0.dll" in there to "tier0_orig.dll" in bin\x64_retail, "engine.dll" to "engine_r1o.dll", and "server_local.dll" to "server.dll" (finally)
 5. build this and DeltaSpectre, copy Spectre.dll and SpectreLauncher.dll next to Titanfall.exe
 6. get mods and put in r1spectre\mods from DeltaMods on this repo
-7. pray (SpectreLauncher -listenServer +automantle_anim 0)
+7. copy r1delta.patch next to titanfall.exe
+8. pray (SpectreLauncher -listenServer +automantle_anim 0)
 
 # KNOWN ISSUES
 - does not load mp_lobb<
