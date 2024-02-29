@@ -1,124 +1,75 @@
->engine.dll
-.text:0x23216,75 18 48 8D 15 19 22 5D,EB 18 48 8D 15 19 22 5D
-.rdata:0x634ba0,"There was ","%s\x00re was "
->engine_ds.dll
-.text:0x24019,98 02,A8 02
-.text:0x24134,18 02,28 02
-.text:0x27be8,48 02,58 02
-.text:0x27c18,40 02,50 02
-.text:0x27c4d,08 01,10 01
-.text:0x27ce6,58 04,68 04
-.text:0x28087,98 01,A0 01
-.text:0x2809e,A8 01,B0 01
-.text:0x29762,98 02,A8 02
-.text:0x2981b,40 04,50 04
-.text:0x2e413,98 02,A8 02
-.text:0x3114a,70 03,80 03
-.text:0x32fbd,40 04,50 04
-.text:0x33101,D0 02,E0 02
-.text:0x33164,D0 02,E0 02
-.text:0x331a4,D0 02,E0 02
-.text:0x35a1b,68 02,78 02
-.text:0x36b5c,98 02,A8 02
-.text:0x37627,B0 03,C0 03
-.text:0x37652,B8 03,C8 03
-.text:0x5d927,C8 03,D8 03
-.text:0x79367,98 02,A8 02
-.text:0x7d3f1,98 02,A8 02
-.text:0x95d73,60 02,70 02
-.text:0x9fb90,B8 01,C8 01
-.text:0xa12c2,B8 01,C8 01
-.text:0xa211d,70 03,80 03
-.text:0xb71c9,70 03,80 03
-.text:0xdd889,70 03,80 03
-.text:0xddc8e,70 03,80 03
-.text:0xde1e5,70 03,80 03
-.text:0xde20b,98 03,A8 03
-.text:0xdec34,70 03,80 03
-.text:0xdf151,70 03,80 03
-.text:0xdf794,70 03,80 03
-.text:0xdf807,98 03,A8 03
-.text:0x169ef3,58,D0
-.text:0x16a143,58,D0
-.text:0x16a23f,58,D0
-.text:0x16e7eb,68 02,78 02
->engine_r1o.dll
-.text:0x1c6ba0,E8 AB 18 F1 FF 84 C0 74 1D 48,90 90 90 90 90 90 90 90 90 48
-.text:0x1c6c00,48 8B 01 48 8D 15 EE 77 4F 00 FF 50 40,90 90 90 90 90 90 90 90 90 90 90 90 90
-.rdata:0x558629,"\x00\x00\x00\x00","_imc"
->filesystem_stdio.dll
-.text:0x1b448,74 65 4C 8D 05 1F 53 0B,90 90 4C 8D 05 1F 53 0B
-.text:0x74E26,FF 50 58,90 90 90
-.rdata:0xd0774,"client_%s.bsp.pak000%s\x00\x00\x00\x00\x00\x00-s","englishclient_%s.bsp.pak000%s\x00"
->launcher.dll
-.text:0xd550b,02,00
->server.dll
-.text:0x2ea44,02,00
-.text:0x528a4,02,00
-.text:0x8ce4b,D0 01,88 01
-.text:0x8ceba,D0 01,88 01
-.text:0x8cf59,D8 01,90 01
-.text:0x8cf8d,D8 01,90 01
-.text:0x143e9e,0F 84 FD FB FF FF 48 8B 0D 95,90 90 90 90 90 90 48 8B 0D 95
-.text:0x1c1a84,48 8B 0D 7D B5 A7 00 48 8B 01 FF 50 50,90 90 90 90 90 90 90 90 90 90 90 90 90
-.text:0x20fda2,C8 01,80 01
-.text:0x2a09a2,48 8B 0D 9F C7 99 00 48 8B 01 FF 50,90 90 90 90 90 90 90 48 8B 01 EB 42
-.text:0x364c7d,7D 12 B8 01,90 90 B8 09
-.text:0x3e26fd,B8 01,B0 01
-.text:0x5509f5,75 0A 48 8B D3 E8 91 DB C0 FF,90 90 48 8B D3 E8 91 DB C0 FF
-.text:0x5a73ff,48 8B 0D 8A 9C 68,EB 2C 0D 8A 9C 68
-.text:0x5a77ab,48 8B 05 8E 99 68,EB 31 05 8E 99 68
-.text:0x657b15,03,02
-.text:0x6679ea,B0 03,A8 02
-.text:0x667a8f,03,02
-.rdata:0x7bfea8,"LocalServerGameTag","ServerGameTags001\x00"
-.rdata:0x807338,40 79 14 80 01,60 79 14 80 01
-.rdata:0x807340,50 79 14 80 01,40 7C 14 80 01
-.rdata:0x807348,60 79 14 80 01,B0 68 14 80 01
-.rdata:0x807350,40 7C 14 80 01,A0 42 14 80 01
-.rdata:0x807358,B0 68 14 80 01,A0 7D 14 80 01
-.rdata:0x807360,A0 42 14 80 01,80 85 14 80 01
-.rdata:0x807368,A0 7D 14 80 01,90 85 14 80 01
-.rdata:0x807370,80 85 14 80 01,70 85 14 80 01
-.rdata:0x807378,90 85 14 80 01,10 53 14 80 01
-.rdata:0x807380,70 85 14 80 01,A0 53 14 80 01
-.rdata:0x807388,10 53 14 80 01,30 54 14 80 01
-.rdata:0x807390,A0 53 14 80 01,C0 54 14 80 01
-.rdata:0x807398,30 54 14 80 01,E0 55 14 80 01
-.rdata:0x8073a1,54 14 80 01,56 14 80 01
-.rdata:0x8073a8,E0 55 14 80 01,60 57 14 80 01
-.rdata:0x8073b0,C0 56 14 80 01,70 58 14 80 01
-.rdata:0x8073b8,60 57 14 80 01,B0 58 14 80 01
-.rdata:0x8073c0,70 58 14 80 01,F0 58 14 80 01
-.rdata:0x8073c8,B0 58 14 80 01,00 59 14 80 01
-.rdata:0x8073d0,F0 58 14 80 01,E0 57 14 80 01
-.rdata:0x8073d8,00 59 14 80 01,20 58 14 80 01
-.rdata:0x8073e0,E0 57 14 80 01,F0 57 14 80 01
-.rdata:0x8073e8,20 58 14 80 01,50 59 14 80 01
-.rdata:0x8073f0,F0 57 14 80 01,80 59 14 80 01
-.rdata:0x8073f8,50 59 14 80 01,30 5D 14 80 01
-.rdata:0x807400,80 59 14 80 01,E0 59 14 80 01
-.rdata:0x807408,30 5D 14 80 01,90 60 14 80 01
-.rdata:0x807410,E0 59 14 80 01,10 59 14 80 01
-.rdata:0x807418,90 60 14 80 01,20 59 14 80 01
-.rdata:0x807420,10 59 14 80 01,90 61 14 80 01
-.rdata:0x807428,20 59 14 80 01,90 79 14 80 01
-.rdata:0x807430,90 61 14 80 01,50 7A 14 80 01
-.rdata:0x807438,90 79 14 80 01,60 7A 14 80 01
-.rdata:0x807440,50 7A 14 80 01,70 7A 14 80 01
-.rdata:0x807448,60 7A 14 80 01,80 7A 14 80 01
-.rdata:0x807450,70 7A 14 80 01,D0 85 14 80 01
-.rdata:0x807458,80 7A 14 80 01,30 87 14 80 01
-.rdata:0x807460,D0 85 14 80 01,90 7A 14 80 01
-.rdata:0x807468,30 87 14 80 01,A0 61 14 80 01
-.rdata:0x807470,90 7A 14 80 01,C0 61 14 80 01
-.rdata:0x807478,A0 61 14 80 01,40 79 14 80 01
-.rdata:0x807480,C0 61 14 80 01,50 79 14 80 01
-.rdata:0x8077e0,"LocalServerGameDL","ServerGameDLL005\x00"
-.rdata:0x8082a0,"LocalServerGameEnt","ServerGameEnts002\x00"
-.rdata:0x8085e8,"LocalServerGameClient","ServerGameClients004\x00"
-.rdata:0x8474f0,"prop_bigbr","noop_bigbr"
-.rdata:0x847508,"prop_exfil","noop_exfil"
-.rdata:0x847520,"prop_spawn","noop_spawn"
-.rdata:0x847530,"prop_rush_","noop_rush_"
-.rdata:0x847558,"prop_contr","noop_contr"
+engine.dll,text,0x23216,75 18 48 8D 15 19 22 5D,EB 18 48 8D 15 19 22 5D
+engine.dll,rdata,0x634ba0,"There was ","%s\x00re was "
+engine_ds.dll,text,0x24019,98 02,A8 02
+engine_ds.dll,text,0x24134,18 02,28 02
+engine_ds.dll,text,0x27be8,48 02,58 02
+engine_ds.dll,text,0x27c18,40 02,50 02
+engine_ds.dll,text,0x27c4d,08 01,10 01
+engine_ds.dll,text,0x27ce6,58 04,68 04
+engine_ds.dll,text,0x28087,98 01,A0 01
+engine_ds.dll,text,0x2809e,A8 01,B0 01
+engine_ds.dll,text,0x29762,98 02,A8 02
+engine_ds.dll,text,0x2981b,40 04,50 04
+engine_ds.dll,text,0x2e413,98 02,A8 02
+engine_ds.dll,text,0x3114a,70 03,80 03
+engine_ds.dll,text,0x32fbd,40 04,50 04
+engine_ds.dll,text,0x33101,D0 02,E0 02
+engine_ds.dll,text,0x33164,D0 02,E0 02
+engine_ds.dll,text,0x331a4,D0 02,E0 02
+engine_ds.dll,text,0x35a1b,68 02,78 02
+engine_ds.dll,text,0x36b5c,98 02,A8 02
+engine_ds.dll,text,0x37627,B0 03,C0 03
+engine_ds.dll,text,0x37652,B8 03,C8 03
+engine_ds.dll,text,0x5d927,C8 03,D8 03
+engine_ds.dll,text,0x79367,98 02,A8 02
+engine_ds.dll,text,0x7d3f1,98 02,A8 02
+engine_ds.dll,text,0x95d73,60 02,70 02
+engine_ds.dll,text,0x9fb90,B8 01,C8 01
+engine_ds.dll,text,0xa12c2,B8 01,C8 01
+engine_ds.dll,text,0xa211d,70 03,80 03
+engine_ds.dll,text,0xb71c9,70 03,80 03
+engine_ds.dll,text,0xdd889,70 03,80 03
+engine_ds.dll,text,0xddc8e,70 03,80 03
+engine_ds.dll,text,0xde1e5,70 03,80 03
+engine_ds.dll,text,0xde20b,98 03,A8 03
+engine_ds.dll,text,0xdec34,70 03,80 03
+engine_ds.dll,text,0xdf151,70 03,80 03
+engine_ds.dll,text,0xdf794,70 03,80 03
+engine_ds.dll,text,0xdf807,98 03,A8 03
+engine_ds.dll,text,0x169ef3,58,D0
+engine_ds.dll,text,0x16a143,58,D0
+engine_ds.dll,text,0x16a23f,58,D0
+engine_ds.dll,text,0x16e7eb,68 02,78 02
+engine_r1o.dll,text,0x1c6ba0,E8 AB 18 F1 FF 84 C0 74 1D 48,90 90 90 90 90 90 90 90 90 48
+engine_r1o.dll,text,0x1c6c00,48 8B 01 48 8D 15 EE 77 4F 00 FF 50 40,90 90 90 90 90 90 90 90 90 90 90 90 90
+engine_r1o.dll,rdata,0x558629,"\x00\x00\x00\x00","_imc"
+filesystem_stdio.dll,text,0x1b448,74 65 4C 8D 05 1F 53 0B,90 90 4C 8D 05 1F 53 0B
+filesystem_stdio.dll,rdata,0xd0774,"client_%s.bsp.pak000%s\x00\x00\x00\x00\x00\x00-s","englishclient_%s.bsp.pak000%s\x00"
+launcher.dll,text,0xd550b,02,00
+server.dll,text,0x2ea44,02,00
+server.dll,text,0x528a4,02,00
+server.dll,text,0x8ce4b,D0 01,88 01
+server.dll,text,0x8ceba,D0 01,88 01
+server.dll,text,0x8cf59,D8 01,90 01
+server.dll,text,0x8cf8d,D8 01,90 01
+server.dll,text,0x143e9e,0F 84 FD FB FF FF 48 8B 0D 95,90 90 90 90 90 90 48 8B 0D 95
+server.dll,text,0x1c1a84,48 8B 0D 7D B5 A7 00 48 8B 01 FF 50 50,90 90 90 90 90 90 90 90 90 90 90 90 90
+server.dll,text,0x20fda2,C8 01,80 01
+server.dll,text,0x2a09a2,48 8B 0D 9F C7 99 00 48 8B 01 FF 50,90 90 90 90 90 90 90 48 8B 01 EB 42
+server.dll,text,0x364c7d,7D 12 B8 01,90 90 B8 09
+server.dll,text,0x3e26fd,B8 01,B0 01
+server.dll,text,0x5509f5,75 0A 48 8B D3 E8 91 DB C0 FF,90 90 48 8B D3 E8 91 DB C0 FF
+server.dll,text,0x5a73ff,48 8B 0D 8A 9C 68,EB 2C 0D 8A 9C 68
+server.dll,text,0x5a77ab,48 8B 05 8E 99 68,EB 31 05 8E 99 68
+server.dll,text,0x657b15,03,02
+server.dll,text,0x6679ea,B0 03,A8 02
+server.dll,text,0x667a8f,03,02
+server.dll,rdata,0x7bfea8,"LocalServerGameTag","ServerGameTags001\x00"
+server.dll,rdata,0x8077e0,"LocalServerGameDL","ServerGameDLL005\x00"
+server.dll,rdata,0x8082a0,"LocalServerGameEnt","ServerGameEnts002\x00"
+server.dll,rdata,0x8085e8,"LocalServerGameClient","ServerGameClients004\x00"
+server.dll,rdata,0x8474f0,"prop_bigbr","noop_bigbr"
+server.dll,rdata,0x847508,"prop_exfil","noop_exfil"
+server.dll,rdata,0x847520,"prop_spawn","noop_spawn"
+server.dll,rdata,0x847530,"prop_rush_","noop_rush_"
+server.dll,rdata,0x847558,"prop_contr","noop_contr"

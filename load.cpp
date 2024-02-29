@@ -238,6 +238,36 @@ const char* sub_18021FE50(__int64 thisptr, const datamap_t* pCurrentMap, const t
 	return 0;
 }
 
+BOOL RemoveItemsFromVTable(uintptr_t vTableAddr, size_t indexStart, size_t itemCount) {
+	if (vTableAddr == 0) return FALSE;
+
+	uintptr_t* vTable = reinterpret_cast<uintptr_t*>(vTableAddr);
+	size_t vTableSize = 77;
+
+	if (indexStart + itemCount > vTableSize) return FALSE;
+
+	size_t elementsToShift = vTableSize - (indexStart + itemCount);
+
+	DWORD oldProtect;
+	if (!VirtualProtect(reinterpret_cast<LPVOID>(vTableAddr), vTableSize * sizeof(uintptr_t), PAGE_EXECUTE_READWRITE, &oldProtect)) {
+		std::cerr << "Failed to change memory protection." << std::endl;
+		return FALSE;
+	}
+
+	for (size_t i = 0; i < elementsToShift; ++i) {
+		vTable[indexStart + i] = vTable[indexStart + itemCount + i];
+	}
+
+	memset(&vTable[vTableSize - itemCount], 0, itemCount * sizeof(uintptr_t));
+
+	// Restore the original memory protection
+	if (!VirtualProtect(reinterpret_cast<LPVOID>(vTableAddr), vTableSize * sizeof(uintptr_t), oldProtect, &oldProtect)) {
+		std::cerr << "Failed to restore memory protection." << std::endl;
+		return FALSE;
+	}
+
+	return TRUE;
+}
 
 
 
@@ -249,6 +279,8 @@ void __stdcall LoaderNotificationCallback(
 		return;
 	doBinaryPatchForFile(notification_data->Loaded);
 	if (std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length).find(SERVER_DLLWIDE) != std::string::npos) {
+		uintptr_t vTableAddr = reinterpret_cast<uintptr_t>(GetModuleHandleA("server.dll")) + 0x807220;
+		RemoveItemsFromVTable(vTableAddr, 35, 2);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(SERVER_DLL) + 0x143A10), &CServerGameDLL__DLLInit, (LPVOID*)&CServerGameDLL__DLLInitOriginal);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(SERVER_DLL) + 0x71E0BC), &hkcalloc_base, NULL);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(SERVER_DLL) + 0x71E99C), &hkmalloc_base, NULL);
@@ -259,10 +291,7 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher.dll") + 0x6A60), &CScriptVM__ctor, reinterpret_cast<LPVOID*>(&CScriptVM__ctororiginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher.dll") + 0x1210), &CScriptManager__CreateNewVM, reinterpret_cast<LPVOID*>(&CScriptManager__CreateNewVMOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher.dll") + 0x1630), &CScriptVM__GetUnknownVMPtr, reinterpret_cast<LPVOID*>(&CScriptVM__GetUnknownVMPtrOriginal));
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher.dll") + 0x8AB0), &sub_180008AB0, reinterpret_cast<LPVOID*>(&sub_180008AB0Original));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher.dll") + 0x15F0), &CScriptManager__DestroyVM, reinterpret_cast<LPVOID*>(&CScriptManager__DestroyVMOriginal));
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher.dll") + 0xBE60), &sub_18000BE60, reinterpret_cast<LPVOID*>(NULL));
-
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher.dll") + 0xCDB0), &CSquirrelVM__RegisterFunctionGuts, reinterpret_cast<LPVOID*>(&CSquirrelVM__RegisterFunctionGutsOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher.dll") + 0xD650), &CSquirrelVM__PushVariant, reinterpret_cast<LPVOID*>(&CSquirrelVM__PushVariantOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher.dll") + 0xD7B0), &CSquirrelVM__ConvertToVariant, reinterpret_cast<LPVOID*>(&CSquirrelVM__ConvertToVariantOriginal));
@@ -271,11 +300,6 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher.dll") + 0x9C40), &CSquirrelVM__SetValueEx, reinterpret_cast<LPVOID*>(&CSquirrelVM__SetValueExOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher.dll") + 0xBE60), &CSquirrelVM__TranslateCall, reinterpret_cast<LPVOID*>(&CSquirrelVM__TranslateCallOriginal));
 		
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(SERVER_DLL) + 0x1FBAE0), &SendPropBool, reinterpret_cast<LPVOID*>(&SendPropBoolOriginal));
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(SERVER_DLL) + 0x0F3CA0), &SendPropInt, reinterpret_cast<LPVOID*>(&SendPropIntOriginal));
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(SERVER_DLL) + 0x0F3590), &SendPropVector, reinterpret_cast<LPVOID*>(&SendPropVectorOriginal));
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(SERVER_DLL) + 0x1FBCE0), &SendPropUnknown, reinterpret_cast<LPVOID*>(&SendPropUnknownOriginal));
-
 #ifdef DEDICATED
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x1693D0), &ParsePDATA, reinterpret_cast<LPVOID*>(&ParsePDATAOriginal));
 #endif
