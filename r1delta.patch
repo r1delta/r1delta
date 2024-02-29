@@ -1,3 +1,4 @@
+; dedi patches (still need to go through these)
 engine_ds.dll,text,0x24019,98 02,A8 02
 engine_ds.dll,text,0x24134,18 02,28 02
 engine_ds.dll,text,0x27be8,48 02,58 02
@@ -38,11 +39,17 @@ engine_ds.dll,text,0x169ef3,58,D0
 engine_ds.dll,text,0x16a143,58,D0
 engine_ds.dll,text,0x16a23f,58,D0
 engine_ds.dll,text,0x16e7eb,68 02,78 02
+; NOP out Shader_Connect call for R1O engine parasite in CDedicatedServerAPI::Connect (no universe in which we're giving it matsystem)
 engine_r1o.dll,text,0x1c6ba0,E8 AB 18 F1 FF 84 C0 74 1D 48,90 90 90 90 90 90 90 90 90 48
+; NOP out ConnectMDLCacheNotify for R1O engine parasite in CDedicatedServerAPI::Connect (it overrides the engine.dll one)
 engine_r1o.dll,text,0x1c6c00,48 8B 01 48 8D 15 EE 77 4F 00 FF 50 40,90 90 90 90 90 90 90 90 90 90 90 90 90
+; make it so "IMC" bodymodel is "bodymodel_imc" in .set file in CStaticClassSystem instead of just "bodymodel" (debatably correct)
 engine_r1o.dll,rdata,0x558629,"\x00\x00\x00\x00","_imc"
+; nop out some seemingly-unused callback causing calls to garbage callback func ptr
 filesystem_stdio.dll,text,0x1b448,74 65 4C 8D 05 1F 53 0B,90 90 4C 8D 05 1F 53 0B
+; fix typo causing shared client VPK to not work properly
 filesystem_stdio.dll,rdata,0xd0774,"client_%s.bsp.pak000%s\x00\x00\x00\x00\x00\x00-s","englishclient_%s.bsp.pak000%s\x00"
+; unhide fatal_script_errors
 launcher.dll,text,0xd550b,02,00
 server.dll,text,0x2ea44,02,00
 server.dll,text,0x528a4,02,00
@@ -53,30 +60,37 @@ server.dll,text,0x8cf8d,D8 01,90 01
 server.dll,text,0x143e9e,0F 84 FD FB FF FF 48 8B 0D 95,90 90 90 90 90 90 48 8B 0D 95
 server.dll,text,0x1c1a84,48 8B 0D 7D B5 A7 00 48 8B 01 FF 50 50,90 90 90 90 90 90 90 90 90 90 90 90 90
 server.dll,text,0x20fda2,C8 01,80 01
+; nop out weird matsystem call and fix another in CWorld::Spawn
 server.dll,text,0x2a09a2,48 8B 0D 9F C7 99 00 48 8B 01 FF 50,90 90 90 90 90 90 90 48 8B 01 EB 42
+; force load navmeshes (doesnt work l0l)
 server.dll,text,0x364c7d,7D 12 B8 01,90 90 B8 09
+; fix modelinfo interface offset change causing breakable glass crash
 server.dll,text,0x3e26fd,B8 01,B0 01
+; prevent "#KICKED_FOR_UNINITIALIZED_PLAYER" Nexon bullshit kick
 server.dll,text,0x5509f5,75 0A 48 8B D3 E8 91 DB C0 FF,90 90 48 8B D3 E8 91 DB C0 FF
+; patch out TFOMsgHandler calls in script funcs
 server.dll,text,0x5a73ff,48 8B 0D 8A 9C 68,EB 2C 0D 8A 9C 68
 server.dll,text,0x5a77ab,48 8B 05 8E 99 68,EB 31 05 8E 99 68
-server.dll,text,0x657b15,03,02
+; fix CMaterialSystem references
 server.dll,text,0x6679ea,B0 03,A8 02
 server.dll,text,0x667a8f,03,02
+server.dll,text,0x657b15,03,02
+; rename server_local.dll interfaces to server.dll
 server.dll,rdata,0x7bfea8,"LocalServerGameTag","ServerGameTags001\x00"
 server.dll,rdata,0x8077e0,"LocalServerGameDL","ServerGameDLL005\x00"
 server.dll,rdata,0x8082a0,"LocalServerGameEnt","ServerGameEnts002\x00"
 server.dll,rdata,0x8085e8,"LocalServerGameClient","ServerGameClients004\x00"
-;server.dll,rdata,0x8474f0,"prop_bigbr","noop_bigbr"
-;server.dll,rdata,0x847508,"prop_exfil","noop_exfil"
-;server.dll,rdata,0x847520,"prop_spawn","noop_spawn"
-;server.dll,rdata,0x847530,"prop_rush_","noop_rush_"
-;server.dll,rdata,0x847558,"prop_contr","noop_contr"
+; delete prop_bigbrother_panel entity factory and serverclass
 server.dll,text,0x1DC260,48,C3
-server.dll,text,0x18880,40,C3
-server.dll,text,0x1DC480,48,C3
-server.dll,text,0x1DC370,48,C3
-server.dll,text,0x1DC590,48,C3
 server.dll,text,0x18D80,4C,C3
+; delete prop_exfil_panel entity factory (it uses prop_dynamic serverclass)
+server.dll,text,0x18880,40,C3
+; delete prop_spawn_item entity factory and serverclass
+server.dll,text,0x1DC480,48,C3
 server.dll,text,0x18CF0,4C,C3
+; delete prop_rush_panel entity factory and serverclass
+server.dll,text,0x1DC370,48,C3
 server.dll,text,0x18B50,4C,C3
+; delete prop_control_panel entity factory and serverclass
+server.dll,text,0x1DC590,48,C3
 server.dll,text,0x18C20,4C,C3
