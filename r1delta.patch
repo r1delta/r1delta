@@ -1,5 +1,3 @@
-engine.dll,text,0x23216,75 18 48 8D 15 19 22 5D,EB 18 48 8D 15 19 22 5D
-engine.dll,rdata,0x634ba0,"There was ","%s\x00re was "
 engine_ds.dll,text,0x24019,98 02,A8 02
 engine_ds.dll,text,0x24134,18 02,28 02
 engine_ds.dll,text,0x27be8,48 02,58 02
@@ -68,8 +66,17 @@ server.dll,rdata,0x7bfea8,"LocalServerGameTag","ServerGameTags001\x00"
 server.dll,rdata,0x8077e0,"LocalServerGameDL","ServerGameDLL005\x00"
 server.dll,rdata,0x8082a0,"LocalServerGameEnt","ServerGameEnts002\x00"
 server.dll,rdata,0x8085e8,"LocalServerGameClient","ServerGameClients004\x00"
-server.dll,rdata,0x8474f0,"prop_bigbr","noop_bigbr"
-server.dll,rdata,0x847508,"prop_exfil","noop_exfil"
-server.dll,rdata,0x847520,"prop_spawn","noop_spawn"
-server.dll,rdata,0x847530,"prop_rush_","noop_rush_"
-server.dll,rdata,0x847558,"prop_contr","noop_contr"
+;server.dll,rdata,0x8474f0,"prop_bigbr","noop_bigbr"
+;server.dll,rdata,0x847508,"prop_exfil","noop_exfil"
+;server.dll,rdata,0x847520,"prop_spawn","noop_spawn"
+;server.dll,rdata,0x847530,"prop_rush_","noop_rush_"
+;server.dll,rdata,0x847558,"prop_contr","noop_contr"
+server.dll,text,0x1DC260,48,C3
+server.dll,text,0x18880,40,C3
+server.dll,text,0x1DC480,48,C3
+server.dll,text,0x1DC370,48,C3
+server.dll,text,0x1DC590,48,C3
+server.dll,text,0x18D80,4C,C3
+server.dll,text,0x18CF0,4C,C3
+server.dll,text,0x18B50,4C,C3
+server.dll,text,0x18C20,4C,C3
