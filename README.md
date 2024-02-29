@@ -105,17 +105,13 @@ r1delte release 2021 men🔥🔥🔥🔥🔥 **NOTE: THIS REFERS TO R1DELTE, NOT
 
 # dev setup
 
-~~-1. make sure you have titanfall installed to default location (C:\Program Files (x86)\Origin Games\Titanfall) 
-0. its hard coded for some reason
 1. rename "tier0.dll" to "tier0_r1.dll" in bin\x64_retail\
 2. acquire OldTFOScripts.7z from [Releases](https://github.com/r1delta/r1delta/releases/tag/wires) (you just need bin)
 3. copy "gbclient.dll", "nmcogame64.dll" from there to bin\x64_retail\
-4. copy "tier0_orig.dll", "server.dll", and "engine_r1o.dll" in this repo to bin\x64_retail\ 
-5. build
-6. pray (if you're not in the visual studio debug configuration, you need to specify -listenServer as a command line arg to load the listen server)
-(a fork of SpectreLauncher by @barnabwhy has been provided for debugging convenience)~~
-ignore previous directions
-contact wanderer for his bin and "r1delta" folder
+4. copy "tier0.dll" in there to "tier0_orig.dll" in bin\x64_retail, "engine.dll" to "engine_r1o.dll", and "server_local.dll" to "server.dll" (finally)
+5. build this and DeltaSpectre, copy Spectre.dll and SpectreLauncher.dll next to Titanfall.exe
+6. get mods and put in r1spectre\mods from DeltaMods on this repo
+7. pray (SpectreLauncher -listenServer +automantle_anim 0)
 
 # KNOWN ISSUES
 - does not load mp_lobb<
