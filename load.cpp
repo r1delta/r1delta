@@ -62,13 +62,19 @@ AddSearchPathType addSearchPathOriginal;
 typedef __int64(__fastcall* AddMapVPKFileFunc)(IFileSystem* fileSystem, const char* pPath);
 void AddSearchPathHook(IFileSystem* fileSystem, const char* pPath, const char* pathID, unsigned int addType)
 {
-	static AddMapVPKFileFunc addMapVPKFile = (AddMapVPKFileFunc)((((uintptr_t)GetModuleHandleA("filesystem_stdio.dll"))) + 0x4E80);
+	//static AddMapVPKFileFunc addMapVPKFile = (AddMapVPKFileFunc)((((uintptr_t)GetModuleHandleA("filesystem_stdio.dll"))) + 0x4E80);
+	
+	// this function is used in debugprecachevpk concommand
+	// alternatively, real game has that in call stack when I bp the above funciton
+	using debug_precache_t = void(__fastcall*)(const char*, unsigned int, char);
+	static auto debug_precache = debug_precache_t(uintptr_t(GetModuleHandleA("engine.dll")) + 0x19FB30);
 	if (pPath != NULL && strstr(pPath, "common") == NULL && strstr(pPath, "lobby") == NULL) {
 		if (strncmp(pPath, "maps/", 5) == 0)
 		{
 			char newPath[256];
 			_snprintf_s(newPath, sizeof(newPath), "vpk/client_%s", pPath + 5);
-			addMapVPKFile(fileSystem, newPath);
+			//addMapVPKFile(fileSystem, newPath);
+			debug_precache(newPath, 2, 0);
 		}
 	}
 
