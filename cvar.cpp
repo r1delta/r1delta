@@ -273,7 +273,7 @@ const ConVarR1O* CCVar_FindVar2(uintptr_t thisptr, const char* var_name) {
 	//	return (ConVarR1O*)((uintptr_t)OriginalCCVar_FindVar2(cvarinterface, var_name) - 8);
 	//}
 	if (!strcmp(var_name, "room_type")) // unused but crashes if NULL
-		var_name = "sv_cheats";
+		var_name = "portal_funnel_debug";
 	static bool bDone = false;
 	if (!bDone) {
 		OriginalCCvar__InstallGlobalChangeCallback(cvarinterface, &GlobalChangeCallback);
