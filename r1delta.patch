@@ -46,7 +46,7 @@ engine_r1o.dll,text,0x1c6c00,48 8B 01 48 8D 15 EE 77 4F 00 FF 50 40,90 90 90 90 
 ; make it so "IMC" bodymodel is "bodymodel_imc" in .set file in CStaticClassSystem instead of just "bodymodel" (debatably correct)
 engine_r1o.dll,rdata,0x558629,"\x00\x00\x00\x00","_imc"
 ; nop out some seemingly-unused callback causing calls to garbage callback func ptr
-filesystem_stdio.dll,text,0x1b448,74 65 4C 8D 05 1F 53 0B,90 90 4C 8D 05 1F 53 0B
+; filesystem_stdio.dll,text,0x1b448,74 65 4C 8D 05 1F 53 0B,90 90 4C 8D 05 1F 53 0B
 ; fix typo causing shared client VPK to not work properly
 filesystem_stdio.dll,rdata,0xd0774,"client_%s.bsp.pak000%s\x00\x00\x00\x00\x00\x00-s","englishclient_%s.bsp.pak000%s\x00"
 ; unhide fatal_script_errors
@@ -103,3 +103,7 @@ server.dll,text,0x18C20,4C,C3
 server.dll,rdata,0x86BAF0,"titan_atlas_tier0","titan_atlas\x00"
 ; fuck off client.dll CRC
 engine.dll,data,0x55B6F,75,EB
+; precache hell...
+engine.dll,rdata,0x62BDE0,"%sserver_%s%s","%sclient_%s%s\x00"
+engine.dll,rdata,0x62BDB8,"vpk/server_","vpk/client_\x00"
+engine.dll,data,0x136EA3,0F 84 A0 00 00 00,EB 13
