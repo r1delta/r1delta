@@ -7,24 +7,14 @@ ServerClassInitFunc ServerClassInit_DT_LocalOriginal;
 ServerClassInitFunc ServerClassInit_DT_TitanSoulOriginal;
 void DestroySendProp(SendProp* sendTablePtr, int* sendTableLengthPtr, const char* propname) {
 	for (int i = 0; i < *sendTableLengthPtr; ++i) {
+		std::cout << "SendProp name: " << sendTablePtr[i].name << std::endl;
 		if (strcmp(sendTablePtr[i].name, propname) == 0) {
-			// Calculate size of the SendProp to be deleted.
-			int sizeToDelete = 0;
-			if (i < *sendTableLengthPtr - 1) { // Ensure there's a next SendProp to calculate size.
-				sizeToDelete = sendTablePtr[i + 1].offset - sendTablePtr[i].offset;
-			}
-
-			size_t bytesToMove = (*sendTableLengthPtr - i - 1) * sizeof(SendProp);
+			size_t bytesToMove = (*sendTableLengthPtr - i) * sizeof(SendProp);
 			if (bytesToMove > 0) {
-				memcpy(&sendTablePtr[i], &sendTablePtr[i + 1], bytesToMove);
+				memmove(&sendTablePtr[i], &sendTablePtr[i + 1], bytesToMove);
 			}
 
-			--(*sendTableLengthPtr); // Decrement the length of sendTable.
-
-			// Update offsets for remaining SendProps.
-			//for (int j = i; j < *sendTableLengthPtr; ++j) {
-			//	sendTablePtr[j].offset -= sizeToDelete;
-			//}
+			--(*sendTableLengthPtr);
 
 			std::cout << propname << " obliterated." << std::endl;
 
