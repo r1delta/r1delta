@@ -1631,9 +1631,9 @@ char __fastcall CServerGameDLL__DLLInit(void* thisptr, CreateInterfaceFn appSyst
 extern "C" __declspec(dllexport) void StackToolsNotify_LoadedLibrary(char* pModuleName)
 {
 	std::cout << "loaded " << pModuleName << std::endl;
-	if (std::string(pModuleName).find("server.dll") != std::string::npos) {
-		SmashSendTables();
-	}
+	//if (std::string(pModuleName).find("server.dll") != std::string::npos) {
+	//	SmashSendTables();
+	//}
 }
 typedef char(*MatchRecvPropsToSendProps_RType)(__int64 a1, __int64 a2, __int64 a3, __int64 a4);
 MatchRecvPropsToSendProps_RType MatchRecvPropsToSendProps_ROriginal;
