@@ -1608,6 +1608,11 @@ char __fastcall CServerGameDLL__DLLInit(void* thisptr, CreateInterfaceFn appSyst
 	engineR1O = LoadLibraryA("engine_r1o.dll");
 	R1OCreateInterface = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(engineR1O, "CreateInterface"));
 
+	extern void* SetPreCache_o;
+	__int64 __fastcall SetPreCache(__int64 a1, __int64 a2, char a3);
+	MH_CreateHook(LPVOID(uintptr_t(engineR1O) + 0xF5790), &SetPreCache, &SetPreCache_o);
+	MH_EnableHook(MH_ALL_HOOKS);
+
 	reinterpret_cast<char(__fastcall*)(__int64, CreateInterfaceFn)>((uintptr_t)(engineR1O)+0x1C6B30)(0, R1OFactory); // call is to CDedicatedServerAPI::Connect
 	void* whatev = R1OFactory;
 	reinterpret_cast<void(__fastcall*)()>((uintptr_t)(engineR1O)+0x2742A0)(); // register engine convars

@@ -9,6 +9,7 @@
 #include <winternl.h>  // For UNICODE_STRING.
 #include <fstream>
 #include <filesystem>
+#include <array>
 #include <intrin.h>
 #include "memory.h"
 #include "filesystem.h"
@@ -20,7 +21,6 @@
 #include "MinHook.h"
 #include "TableDestroyer.h"
 #pragma intrinsic(_ReturnAddress)
-
 
 wchar_t kNtDll[] = L"ntdll.dll";
 char kLdrRegisterDllNotification[] = "LdrRegisterDllNotification";
@@ -318,6 +318,229 @@ __int64 __fastcall sub_629740(__int64 a1, const char* a2, int a3) {
 	return sub_629740Original(a1, a2, a3);
 }
 
+// TODO(mrsteyk): REMOVE
+void* CVEngineServer_PrecacheModel_o = nullptr;
+uintptr_t CVEngineServer_PrecacheModel(uintptr_t a1, const char* a2, char a3) {
+	auto ret = reinterpret_cast<decltype(&CVEngineServer_PrecacheModel)>(CVEngineServer_PrecacheModel_o)(a1, a2, a3);
+
+	// ты хуесос полнейший, вондерер, где логгер сука нормальный
+	//printf("[STK] CVEngineServer_PrecacheModel('%s', %d) = %p\n", a2, +a3, LPVOID(a1));
+	std::cout << "[STK] CVEngineServer_PrecacheModel('" << a2 << "', " << +a3 << ") = " << LPVOID(a1) << std::endl;
+
+	return ret;
+}
+
+void __fastcall cl_DumpPrecacheStats(__int64 CClientState, const char* name) {
+	/*
+	freopen("CONIN$", "r", stdin);
+	freopen("CONOUT$", "w", stdout);
+	freopen("CONOUT$", "w", stderr);
+	*/
+	auto outhandle = CreateFileW(L"CONOUT$", GENERIC_WRITE, FILE_SHARE_WRITE, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+
+	if (!name || !name[0]) {
+		//std::cout << "Can only dump stats when active in a level" << std::endl;
+		const char error[] = "Can only dump stats when active in a level\r\n";
+		WriteFile(outhandle, error, sizeof(error) - 1, 0, 0);
+		return;
+	}
+
+	uintptr_t items = 0;
+
+	if (!strcmp(name, "modelprecache")) {
+		items = CClientState + 0x19EF8;
+	}
+	else if (!strcmp(name, "genericprecache")) {
+		items = CClientState + 0x1DEF8;
+	}
+	else if (!strcmp(name, "decalprecache")) {
+		items = CClientState + 0x1FEF8;
+	}
+
+	using GetStringTable_t = uintptr_t(__fastcall*)(uintptr_t, const char*);
+	static auto GetStringTable = GetStringTable_t(uintptr_t(GetModuleHandleA("engine.dll")) + 0x22B60);
+	auto table = GetStringTable(CClientState, name);
+
+	if (!items || !table) {
+		//std::cout << "!items || !table" << std::endl;
+		const char error[] = "!items || !table\r\n";
+		WriteFile(outhandle, error, sizeof(error) - 1, 0, 0);
+		return;
+	}
+
+	auto count = (*(int64_t(__fastcall**)(uintptr_t))(*(uintptr_t*)table + 24i64))(table);
+
+	//std::cout << std::endl << "Precache table " << name << ":  " << count << " out of UNK slots used" << std::endl;
+	char buf[1024];
+	auto towrite = sprintf_s(buf, "Precache table %s:  %d out of UNK slots used\n", name, int(count));
+	WriteFile(outhandle, buf, towrite, 0, 0);
+
+	for (int i = 0; i < count; i++) {
+		auto slot = items + (i * 16);
+
+		auto name = (*(const char* (__fastcall**)(__int64, _QWORD))(*(_QWORD*)table + 72i64))(table, i);
+
+		using CL_GetPrecacheUserData_t = uintptr_t(__fastcall*)(uintptr_t, uintptr_t);
+		auto CL_GetPrecacheUserData = CL_GetPrecacheUserData_t(uintptr_t(GetModuleHandleA("engine.dll")) + 0x558C0);
+
+		auto p = CL_GetPrecacheUserData(table, i);
+
+		auto refcount = (*(uint32_t*)slot) >> 3;
+
+		if (!name || !p) {
+			continue;
+		}
+
+		//Status_ConMsg("%03i:  %s (%s):   ", i, name, "");
+		/*
+		if (i < 10) {
+			std::cout << "00";
+		}
+		else if (i < 100) {
+			std::cout << "0";
+		}
+		std::cout << i << ":  " << name << " ():    ";
+		*/
+		towrite = sprintf_s(buf, "%03i:  %s (%s):   ", i, name, "");
+		WriteFile(outhandle, buf, towrite, 0, 0);
+		if (refcount == 0) {
+			//std::cout << "never used" << std::endl;
+			const char msg[] = "never used\r\n";
+			WriteFile(outhandle, msg, sizeof(msg) - 1, 0, 0);
+		}
+		else {
+			//std::cout << refcount << " refs," << std::endl;
+			towrite = sprintf_s(buf, "%i refcounts\r\n", refcount);
+			WriteFile(outhandle, buf, towrite, 0, 0);
+		}
+	}
+
+	FlushFileBuffers(outhandle);
+}
+
+struct string_nodebug {
+	union {
+		char inl[16]{ 0 };
+		const char* ptr;
+	};
+	// ?????
+	//uint32_t size = 0;
+	//uint32_t capacity = 0;
+	size_t size = 0;
+	size_t big_size = 0;
+};
+static_assert(sizeof(string_nodebug) == 4*8, "AAA");
+std::array<string_nodebug[2], 100> g_militia_bodies;
+
+void* SetPreCache_o = nullptr;
+__int64 __fastcall SetPreCache(__int64 a1, __int64 a2, char a3) {
+	auto ret = reinterpret_cast<decltype(&SetPreCache)>(SetPreCache_o)(a1, a2, a3);
+
+	using sub_1800F5680_t = char(__fastcall*)(const char* a1, __int64 a2, void* a3, void* a4);
+	static auto sub_1800F5680 = sub_1800F5680_t(uintptr_t(GetModuleHandleA("engine_r1o.dll")) + 0xF5680);
+
+	static auto array_start = uintptr_t(GetModuleHandleA("engine_r1o.dll")) + 0x2555C00;
+
+	auto idx = (a1 - array_start) / 10064;
+	// assert that no mod and no more than 100...
+	auto elem = &g_militia_bodies[idx];
+	auto militia_exists = sub_1800F5680("bodymodel_militia", a2, &elem[0]->ptr, &elem[0]->big_size);
+
+	if (!*(_QWORD*)(a1 + 488))
+		sub_1800F5680("armsmodel_imc", a2, PVOID(a1 + 472), PVOID(a1 + 488));
+
+	auto armsmodel_militia_exists = sub_1800F5680("armsmodel_militia", a2, &elem[1]->ptr, &elem[1]->big_size);
+
+	return ret;
+}
+
+void CHL2_Player_Precache(uintptr_t a1, uintptr_t a2) {
+	static auto server_mod = uintptr_t(GetModuleHandleA("server.dll"));
+	static auto byte_180C318A6 = (uint8_t*)(server_mod + 0xC318A6);
+
+	if (*byte_180C318A6) {
+		using sub_1804FE8B0_t = uintptr_t(__fastcall*)(uintptr_t, uintptr_t);
+		auto sub_1804FE8B0 = sub_1804FE8B0_t(server_mod + 0x4FE8B0);
+
+		static auto EffectDispatch_ptr = (uintptr_t*)(server_mod + 0xC310C8);
+		auto EffectDispatch = *EffectDispatch_ptr;
+
+		sub_1804FE8B0(a1, a2);
+
+		(*(void(__fastcall**)(__int64, __int64, const char*, __int64, _QWORD))(*(_QWORD*)EffectDispatch + 64i64))(
+			EffectDispatch,
+			1,
+			"waterripple",
+			0xFFFFFFFFi64,
+			0i64);
+		(*(void(__fastcall**)(__int64, __int64, const char*, __int64, _QWORD))(*(_QWORD*)EffectDispatch + 64i64))(
+			EffectDispatch,
+			1,
+			"watersplash",
+			0xFFFFFFFFi64,
+			0i64);
+
+		static auto StaticClassSystem001_ptr = (uintptr_t*)(server_mod + 0xC31000);
+		auto StaticClassSystem001 = *StaticClassSystem001_ptr;
+		for (size_t i = 0; i < 100; i++) {
+			auto v5 = (*(__int64(__fastcall**)(__int64, _QWORD))(*(_QWORD*)StaticClassSystem001 + 24i64))(StaticClassSystem001, i);
+			auto elem = g_militia_bodies[i];
+
+			// if (*(_QWORD*)(v5 + 448))
+			{
+				using PrecacheModel_t = uintptr_t(__fastcall*)(const void*);
+				static auto PrecacheModel = PrecacheModel_t(server_mod + 0x3B6A40);
+
+				for (size_t i_ = 0; i_ < 16; i_++) {
+					// IMC
+					if (*(_QWORD*)(v5 + 448))
+					{
+						auto v7 = (_BYTE*)(v5 + 432);
+						if (*(_QWORD*)(v5 + 456) >= 0x10ui64)
+							v7 = *(_BYTE**)v7;
+						PrecacheModel(v7);
+					}
+
+					// MCOR
+					if (elem[0].size)
+					{
+						const char* v7 = elem[0].inl;
+						if (elem[0].big_size >= 0x10)
+							v7 = elem[0].ptr;
+						PrecacheModel(v7);
+					}
+
+					// armsmodel IMC
+					if (*(_QWORD*)(v5 + 488))
+					{
+						auto v8 = (_BYTE*)(v5 + 472);
+						if (*(_QWORD*)(v5 + 496) >= 0x10ui64)
+							v8 = *(_BYTE**)v8;
+						PrecacheModel(v8);
+					}
+
+					// armsmodel MCOR
+					if (elem[1].size)
+					{
+						const char* v7 = elem[1].inl;
+						if (elem[1].big_size >= 0x10)
+							v7 = elem[1].ptr;
+						PrecacheModel(v7);
+					}
+				}
+
+				// cockpitmodel
+				if (*(_QWORD*)(v5 + 528))
+				{
+					auto v9 = (_BYTE*)(v5 + 512);
+					if (*(_QWORD*)(v5 + 536) >= 0x10ui64)
+						v9 = *(_BYTE**)v9;
+					PrecacheModel(v9);
+				}
+			}
+		}
+	}
+}
 
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
@@ -371,6 +594,27 @@ void __stdcall LoaderNotificationCallback(
 #endif
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x217C30), &sub_180217C30, NULL);
 		// Cast the function pointer to the function at 0x4E80
+
+		// TODO(mrsteyk): REMOVE
+		{
+			auto engine_mod = GetModuleHandleA("engine.dll");
+			auto CVEngineServer_PrecacheModel_ptr = uintptr_t(engine_mod) + 0x0FC4D0;
+			MH_CreateHook(LPVOID(CVEngineServer_PrecacheModel_ptr), &CVEngineServer_PrecacheModel, &CVEngineServer_PrecacheModel_o);
+		}
+
+		// Fix precache start
+		{
+			LoadLibraryA("engine_r1o.dll");
+			auto r1oe_mod = uintptr_t(GetModuleHandleA("engine_r1o.dll"));
+			auto server_mod = uintptr_t(GetModuleHandleA("server.dll"));
+			// Cache bodymodel_militia to our own array...
+			//MH_CreateHook(LPVOID(r1oe_mod + 0xF5790), &SetPreCache, &SetPreCache_o);
+			// Rebuild CHL2_Player's precache to take our stuff into account
+			MH_CreateHook(LPVOID(server_mod + 0x41E070), &CHL2_Player_Precache, 0);
+		}
+
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x72360), &cl_DumpPrecacheStats, NULL);
+
 		MH_EnableHook(MH_ALL_HOOKS);
 		std::cout << "did hooks" << std::endl;
 
