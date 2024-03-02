@@ -245,7 +245,7 @@ ConVarR1O* CCVar_FindVar(uintptr_t thisptr, const char* var_name) {
 
 void GlobalChangeCallback(ConVarR1* var, const char* pOldValue) {
 	var = (ConVarR1*)(((uintptr_t)var) - 48);
-	std::cout << __FUNCTION__ << ": " << var->m_pszName << std::endl;
+	std::cout << __FUNCTION__ << ": " << var->m_pszName << ": " << var->m_Value.m_pszString << std::endl;
 	auto it = ccBaseMap.find(var->m_pszName);
 	if (it == ccBaseMap.end())
 		return;

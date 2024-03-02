@@ -275,7 +275,48 @@ BOOL RemoveItemsFromVTable(uintptr_t vTableAddr, size_t indexStart, size_t itemC
 
 	return TRUE;
 }
+struct SavedCall {
+	__int64 a1;
+	std::string a2;
+	int a3;
+};
 
+std::vector<SavedCall> savedCalls;
+
+bool shouldSave(const char* a2) {
+	const char* commandsToSave[] = {
+		"InitHUD",
+		"FullyConnected",
+		"MatchIsOver",
+		"ChangeTitanBuildPoint",
+		"ChangeCurrentTitanBuildPoint",
+		"TutorialStatus",
+		"ChangeCurrentTitanOID"
+	};
+	for (auto& command : commandsToSave) {
+		if (strcmp(a2, command) == 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
+typedef __int64 (*sub_629740Type)(__int64 a1, const char* a2, int a3);
+sub_629740Type sub_629740Original;
+
+__int64 __fastcall sub_629740(__int64 a1, const char* a2, int a3) {
+	if (shouldSave(a2)) {
+		savedCalls.push_back({ a1, a2, a3 });
+		return -1;
+	}
+	else if (strcmp(a2, "RemoteWeaponReload") == 0) {
+		for (auto& call : savedCalls) {
+			sub_629740Original(call.a1, call.a2.c_str(), call.a3);
+		}
+		savedCalls.clear(); // Clear after processing
+	}
+	return sub_629740Original(a1, a2, a3);
+}
 
 
 void __stdcall LoaderNotificationCallback(
@@ -306,11 +347,11 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher.dll") + 0xA1F0), &CSquirrelVM__SetValue, reinterpret_cast<LPVOID*>(&CSquirrelVM__SetValueOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher.dll") + 0x9C40), &CSquirrelVM__SetValueEx, reinterpret_cast<LPVOID*>(&CSquirrelVM__SetValueExOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher.dll") + 0xBE60), &CSquirrelVM__TranslateCall, reinterpret_cast<LPVOID*>(&CSquirrelVM__TranslateCallOriginal));
-		
 
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x507560), &ServerClassInit_DT_BasePlayer, reinterpret_cast<LPVOID*>(&ServerClassInit_DT_BasePlayerOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x51DFE0), &ServerClassInit_DT_Local, reinterpret_cast<LPVOID*>(&ServerClassInit_DT_LocalOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x593270), &ServerClassInit_DT_TitanSoul, reinterpret_cast<LPVOID*>(&ServerClassInit_DT_TitanSoulOriginal));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x629740), &sub_629740, reinterpret_cast<LPVOID*>(&sub_629740Original));
 
 #ifdef DEDICATED
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x1693D0), &ParsePDATA, reinterpret_cast<LPVOID*>(&ParsePDATAOriginal));
