@@ -68,7 +68,7 @@ server.dll,text,0x1c1a84,48 8B 0D 7D B5 A7 00 48 8B 01 FF 50 50,90 90 90 90 90 9
 ; nop out weird matsystem call and fix another in CWorld::Spawn
 server.dll,text,0x2a09a2,48 8B 0D 9F C7 99 00 48 8B 01 FF 50,90 90 90 90 90 90 90 48 8B 01 EB 42
 ; force load navmeshes (doesnt work l0l)
-;server.dll,text,0x364c7d,7D 12 B8 01,90 90 B8 09
+server.dll,text,0x364c7d,7D 12 B8 01,90 90 B8 09
 ; fix modelinfo interface offset change causing breakable glass crash
 server.dll,text,0x3e26fd,B8 01,B0 01
 ; prevent "#KICKED_FOR_UNINITIALIZED_PLAYER" Nexon bullshit kick
