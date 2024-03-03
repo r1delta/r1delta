@@ -107,3 +107,54 @@ engine.dll,data,0x55B6F,75,EB
 engine.dll,rdata,0x62BDE0,"%sserver_%s%s","%sclient_%s%s\x00"
 engine.dll,rdata,0x62BDB8,"vpk/server_","vpk/client_\x00"
 engine.dll,data,0x136EA3,0F 84 A0 00 00 00,EB 13
+; server.dll sendprop HELL
+server.dll,data,0x3a1f29,80,40
+server.dll,data,0x3a207d,80,40
+server.dll,data,0x3a2183,80,40
+server.dll,data,0x3a1f78,80,C0
+server.dll,data,0x3a1fc8,80,C0
+; change map size to 16384
+server.dll,text,0x91E46,C7 44 24 20 00 00 00 C7,C7 44 24 20 00 00 80 C6
+server.dll,text,0x91E68,C7 44 24 24 00 00 00 C7,C7 44 24 24 00 00 80 C6
+server.dll,text,0x91E8A,C7 44 24 28 00 00 00 C7,C7 44 24 28 00 00 80 C6
+server.dll,text,0x15611F,C7 01 00 00 00 C7,C7 01 00 00 80 C6
+server.dll,text,0x16DCAA,C7 45 D0 00 00 00 C7,C7 45 D0 00 00 80 C6
+server.dll,text,0x16DCC9,C7 45 D4 00 00 00 C7,C7 45 D4 00 00 80 C6
+server.dll,text,0x16DCE8,C7 45 D8 00 00 00 C7,C7 45 D8 00 00 80 C6
+server.dll,text,0x4DF454,C7 45 98 00 00 00 C7,C7 45 98 00 00 80 C6
+server.dll,rdata,0x9EA9D8,00 00 00 C7,00 00 80 C6
+server.dll,text,0x264130,C7 45 B0 FB FF FF C6,C7 45 B0 FB FF 7F C6
+server.dll,text,0x26413A,C7 45 B4 FB FF FF C6,C7 45 B4 FB FF 7F C6
+server.dll,text,0x264145,C7 45 B8 FB FF FF C6,C7 45 B8 FB FF 7F C6
+server.dll,rdata,0x9EA9D4,FB FF FF C6,FB FF 7F C6
+server.dll,text,0x91E37,C7 44 24 20 FB FF FF 46,C7 44 24 20 FB FF 7F 46
+server.dll,text,0x91E59,C7 44 24 24 FB FF FF 46,C7 44 24 24 FB FF 7F 46
+server.dll,text,0x91E7B,C7 44 24 28 FB FF FF 46,C7 44 24 28 FB FF 7F 46
+server.dll,text,0x16DC9C,C7 45 D0 FB FF FF 46,C7 45 D0 FB FF 7F 46
+server.dll,text,0x16DCBB,C7 45 D4 FB FF FF 46,C7 45 D4 FB FF 7F 46
+server.dll,text,0x16DCDA,C7 45 D8 FB FF FF 46,C7 45 D8 FB FF 7F 46
+server.dll,text,0x264150,C7 45 C0 FB FF FF 46,C7 45 C0 FB FF 7F 46
+server.dll,text,0x264157,C7 45 C4 FB FF FF 46,C7 45 C4 FB FF 7F 46
+server.dll,text,0x26415E,C7 45 C8 FB FF FF 46,C7 45 C8 FB FF 7F 46
+server.dll,rdata,0x9EA770,FB FF FF 46,FB FF 7F 46
+server.dll,text,0x15616F,C7 01 00 00 00 47,C7 01 00 00 80 46
+server.dll,text,0x42F1AC,C7 44 24 40 00 00 00 47,C7 44 24 40 00 00 80 46
+server.dll,text,0x42F3F3,C7 44 24 40 00 00 00 47,C7 44 24 40 00 00 80 46
+server.dll,text,0x42F5F2,C7 44 24 40 00 00 00 47,C7 44 24 40 00 00 80 46
+server.dll,text,0x430436,C7 44 24 60 00 00 00 47,C7 44 24 60 00 00 80 46
+server.dll,text,0x4305C0,C7 44 24 60 00 00 00 47,C7 44 24 60 00 00 80 46
+server.dll,text,0x430848,C7 44 24 60 00 00 00 47,C7 44 24 60 00 00 80 46
+;this does something important for the above
+server.dll,rdata,0x9EA774,00 00 00 47,00 00 80 46
+server.dll,text,0x3BB469,B8 00 80 00 00,B8 00 40 00 00 
+server.dll,text,0x3BB4D5,B8 00 80 00 00,B8 00 40 00 00
+server.dll,text,0x3BB546,B8 00 80 00 00,B8 00 40 00 00 
+server.dll,text,0x3BC382,B8 00 80 00 00,B8 00 40 00 00
+server.dll,text,0x3BC3BB,B8 00 80 00 00,B8 00 40 00 00
+server.dll,text,0x3BC3FA,B8 00 80 00 00,B8 00 40 00 00
+; these should not be changed, they're part of CBaseEntity::DrawDebugTextOverlays (disregard this note they need to be changed anyway)
+server.dll,text,0x3a50fe,80,40 
+server.dll,text,0x3a514e,80,40
+server.dll,text,0x3a519e,80,40 
+; Allow multiple accounts
+engine.dll,text,0xCE180,74,EB

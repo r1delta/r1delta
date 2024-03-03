@@ -377,5 +377,6 @@ template<class T, class U> int8 __CFADD__(T x, U y)
 #define snprintf _snprintf
 #define vsnprintf _vsnprintf
 #endif
+inline int32 abs32(int32 x) { return x >= 0 ? x : -x; }
 
 #endif // HEXRAYS_DEFS_H

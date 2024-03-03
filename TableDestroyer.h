@@ -27,8 +27,17 @@ static_assert(sizeof(SendProp) == 0x88);
 typedef void(*ServerClassInitFunc)();
 extern ServerClassInitFunc ServerClassInit_DT_BasePlayerOriginal;
 extern ServerClassInitFunc ServerClassInit_DT_LocalOriginal;
+extern ServerClassInitFunc ServerClassInit_DT_LocalPlayerExclusiveOriginal;
 extern ServerClassInitFunc ServerClassInit_DT_TitanSoulOriginal;
 
 void ServerClassInit_DT_BasePlayer();
 void ServerClassInit_DT_Local();
+void ServerClassInit_DT_LocalPlayerExclusive();
 void ServerClassInit_DT_TitanSoul();
+
+__int64 __fastcall CBaseEntity__SendProxy_CellOrigin(__int64 a1, _DWORD* a2, __int64 a3, float* a4);
+__int64 __fastcall CBaseEntity__SendProxy_CellOriginXY(__int64 a1, _DWORD* a2, __int64 a3, float* a4);
+__int64 __fastcall CBaseEntity__SendProxy_CellOriginZ(__int64 a1, __int64 a2, __int64 a3,  float* a4);
+__int64 __fastcall sub_3A1E00(__int64 a1, __int64 a2, unsigned int* a3, _DWORD* a4);
+__int64 __fastcall sub_3A1E40(__int64 a1, __int64 a2, unsigned int* a3, _DWORD* a4);
+__int64 __fastcall sub_3A1E80(__int64 a1, __int64 a2, unsigned int* a3, _DWORD* a4);
