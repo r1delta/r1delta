@@ -1,19 +1,19 @@
 // Happiness has to be fought for.
 #include <MinHook.h>
 #include "load.h"
-
+#include "core.h"
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 {
-#ifndef DEDICATED
+
 	static bool done = false;
-	if (!done) {
+	if (!done && !IsDedicatedServer()) {
 		done = true;
 		AllocConsole();
 		HANDLE hConsoleStream = ::CreateFileW(L"CONOUT$", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
 		SetStdHandle(STD_OUTPUT_HANDLE, hConsoleStream);
 
 	}
-#endif
+
 	switch (fdwReason)
 	{
 	case DLL_PROCESS_ATTACH: {

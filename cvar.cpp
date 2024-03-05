@@ -58,7 +58,7 @@ ConCommandR1O* convertToR1O(ConCommandR1* command) {
 	if (!command)
 		return NULL;
 	ConCommandR1O* commandR1O = new ConCommandR1O;
-	static void* ptr = (void*)((uintptr_t)GetModuleHandleA(SERVER_DLL) + 0x9C75F0);
+	static void* ptr = (void*)((uintptr_t)GetModuleHandleA("server.dll") + 0x9C75F0);
 
 	*static_cast<ConCommandBaseR1O*>(commandR1O) = *convertToR1OBase(static_cast<ConCommandBaseR1*>(command));
 	commandR1O->vtable = ptr;
@@ -80,8 +80,8 @@ ConVarR1O* convertToR1O(ConVarR1* var) {
 
 	*static_cast<ConCommandBaseR1O*>(varR1O) = *convertToR1OBase(static_cast<ConCommandBaseR1*>(var));
 	//varR1O->unk = varR1O->__vftable;
-	static void* ptr = (void*)((uintptr_t)GetModuleHandleA(SERVER_DLL) + 0x9C7680);
-	static void* ptr2 = (void*)((uintptr_t)GetModuleHandleA(SERVER_DLL) + 0x9C74C0);
+	static void* ptr = (void*)((uintptr_t)GetModuleHandleA("server.dll") + 0x9C7680);
+	static void* ptr2 = (void*)((uintptr_t)GetModuleHandleA("server.dll") + 0x9C74C0);
 
 	//char whatever[19 * 8];
 	//char whatever2[8 * 8];
@@ -89,9 +89,9 @@ ConVarR1O* convertToR1O(ConVarR1* var) {
 	//static bool bDone = false;
 	//if (!bDone) {
 	//	ReadProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)GetModuleHandleA("vstdlib.dll") + 0x057778), &whatever, 19 * 8, &bytes);
-	//	WriteProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)GetModuleHandleA(SERVER_DLL) + 0x9C7680), &whatever, 19 * 8, &bytes);
+	//	WriteProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)GetModuleHandleA("server.dll") + 0x9C7680), &whatever, 19 * 8, &bytes);
 	//	ReadProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)GetModuleHandleA("vstdlib.dll") + 0x057778), &whatever2, 8 * 8, &bytes);
-	//	WriteProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)GetModuleHandleA(SERVER_DLL) + 0x9C74C0), &whatever2, 8 * 8, &bytes);
+	//	WriteProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)GetModuleHandleA("server.dll") + 0x9C74C0), &whatever2, 8 * 8, &bytes);
 	//}
 	varR1O->vtable = ptr;//varR1O->vtable;
 	varR1O->__vftable = ptr2;
@@ -158,9 +158,9 @@ ConVarR1* convertToR1(ConVarR1O* varR1O) {
 	//static bool bDone = false;
 	//if (!bDone) {
 	//	ReadProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)GetModuleHandleA("vstdlib.dll") + 0x057778), &whatever, 19 * 8, &bytes);
-	//	WriteProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)GetModuleHandleA(SERVER_DLL) + 0x9C7680), &whatever, 19 * 8, &bytes);
+	//	WriteProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)GetModuleHandleA("server.dll") + 0x9C7680), &whatever, 19 * 8, &bytes);
 	//	ReadProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)GetModuleHandleA("vstdlib.dll") + 0x057778), &whatever2, 8 * 8, &bytes);
-	//	WriteProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)GetModuleHandleA(SERVER_DLL) + 0x9C74C0), &whatever2, 8 * 8, &bytes);
+	//	WriteProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)GetModuleHandleA("server.dll") + 0x9C74C0), &whatever2, 8 * 8, &bytes);
 	//}
 	var->vtable = ptr;//varR1O->vtable;
 	var->__vftable = ptr2;

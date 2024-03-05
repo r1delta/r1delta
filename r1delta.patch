@@ -161,3 +161,5 @@ engine.dll,text,0xCE180,74,EB
 ; I LOVE LEFT 4 DEAD 2
 client.dll,text,0x39B053,48,90 90 90 90 90 90 90 90 90 90 90 90 90
 client.dll,text,0x3d3bc0,48,90 90 90 90 90 90 90 90 90 90 90 90 90
+; fix server_ds rename
+engine_ds.dll,rdata,0x4288B8,"server_ds.dll","server.dll\x00"
