@@ -163,3 +163,55 @@ client.dll,text,0x39B053,48,90 90 90 90 90 90 90 90 90 90 90 90 90
 client.dll,text,0x3d3bc0,48,90 90 90 90 90 90 90 90 90 90 90 90 90
 ; fix server_ds rename
 engine_ds.dll,rdata,0x4288B8,"server_ds.dll","server.dll\x00"
+; fix dedi netproto
+; engine.dll,text,0x1E90E0:0C,F6 - these must be done only on dedicated!
+; engine.dll,text,0x1E90F2:10,FA - these must be done only on dedicated!
+engine_ds.dll,text,0x406EB,75,EB
+engine_ds.dll,text,0x442B5,FF,90
+engine_ds.dll,text,0x442B7,A0,90
+engine_ds.dll,text,0x442B8,01,90
+engine_ds.dll,text,0x442B9,00,90
+engine_ds.dll,text,0x442BA,00,90
+engine_ds.dll,text,0x44421,0F,90
+engine_ds.dll,text,0x44422,8F,90
+engine_ds.dll,text,0x44423,5C,90
+engine_ds.dll,text,0x44424,FF,90
+engine_ds.dll,text,0x44425,FF,90
+engine_ds.dll,text,0x44426,FF,90
+engine_ds.dll,text,0x72BA0,C2,E9
+engine_ds.dll,text,0x72BA1,00,EB
+engine_ds.dll,text,0x72BA2,00,75
+engine_ds.dll,text,0x72BA3,CC,07
+engine_ds.dll,text,0x72BA4,CC,00
+engine_ds.dll,text,0xA30A0,48,E9
+engine_ds.dll,text,0xA30A1,89,EB
+engine_ds.dll,text,0xA30A2,54,70
+engine_ds.dll,text,0xA30A3,24,04
+engine_ds.dll,text,0xA30A4,10,00
+; somewhat rebuild ain generation
+server.dll,text,0x369635,4D,E9
+server.dll,text,0x369636,8B,21
+server.dll,text,0x369637,CA,07
+server.dll,text,0x369638,4C,00
+server.dll,text,0x369639,8B,00
+server.dll,text,0x36963A,1D,90
+server.dll,text,0x36963B,91,90
+server.dll,text,0x36963C,80,90
+server.dll,text,0x36963D,9D,90
+server.dll,text,0x36963E,00,90
+server.dll,text,0x3698AE,4C,90
+server.dll,text,0x3698AF,8B,90
+server.dll,text,0x3698B0,44,90
+server.dll,text,0x3698B1,D0,90
+server.dll,text,0x3698B2,08,90
+server.dll,text,0x3698B3,B8,90
+server.dll,text,0x3698B4,01,90
+server.dll,text,0x3698B5,00,90
+server.dll,text,0x3698B6,00,90
+server.dll,text,0x3698B7,00,90
+server.dll,text,0x3698B8,D3,90
+server.dll,text,0x3698B9,E0,90
+server.dll,text,0x3698BA,43,90
+server.dll,text,0x3698BB,09,90
+server.dll,text,0x3698BC,04,90
+server.dll,text,0x3698BD,88,90
