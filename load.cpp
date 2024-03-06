@@ -620,7 +620,7 @@ CNetChan__ProcessHeaderType CNetChan__ProcessHeaderOriginal;
 char __fastcall CNetChan__ProcessHeader(__int64 a1, netpacket_s* a2)
 {
 	//a2->message.ReadOneBit();
-	return ((CNetChan__ProcessHeaderType)(engineNonDedi+0x1E8710)) (a1 + 16, a2);
+	return ((CNetChan__ProcessHeaderType)(engineNonDedi+0x1E73C0)) (a1 + 16, a2);
 }
 bool ReadConnectPacket2015AndWriteConnectPacket2014(BFRead& msg, BFWrite& buffer)
 {
@@ -761,7 +761,7 @@ void __stdcall LoaderNotificationCallback(
 		if (IsDedicatedServer()) {
 			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x1693D0), &ParsePDATA, reinterpret_cast<LPVOID*>(&ParsePDATAOriginal));
 			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x433C0), &ProcessConnectionlessPacket, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginal));
-			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x0139940), &CNetChan__ProcessHeader, reinterpret_cast<LPVOID*>(&CNetChan__ProcessHeaderOriginal));
+			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x138780), &CNetChan__ProcessHeader, reinterpret_cast<LPVOID*>(&CNetChan__ProcessHeaderOriginal));
 			
 		}
 		//if (IsDedicatedServer()) // NOTE
