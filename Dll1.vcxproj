@@ -146,6 +146,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="bitbuf.h" />
     <ClInclude Include="core.h" />
     <ClInclude Include="cvar.h" />
     <ClInclude Include="factory.h" />

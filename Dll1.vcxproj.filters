@@ -60,6 +60,9 @@
     <ClInclude Include="patcher.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="bitbuf.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">

@@ -20,6 +20,8 @@
 #include "patcher.h"
 #include "MinHook.h"
 #include "TableDestroyer.h"
+#include "bitbuf.h"
+#include "in6addr.h"
 #pragma intrinsic(_ReturnAddress)
 
 wchar_t kNtDll[] = L"ntdll.dll";
@@ -562,6 +564,164 @@ char __fastcall DataTable_SetupReceiveTableFromSendTable(__int64 a1, __int64 a2)
 	isProcessingSendTables = false;
 	return ret;
 }
+
+enum class netadrtype_t
+{
+	NA_NULL = 0,
+	NA_LOOPBACK,
+	NA_IP,
+};
+
+class CNetAdr
+{
+public:
+	CNetAdr(void) { Clear(); }
+	CNetAdr(const char* pch) { SetFromString(pch); }
+	void	Clear(void);
+
+	inline void	SetPort(uint16_t newport) { port = newport; }
+	inline void	SetType(netadrtype_t newtype) { type = newtype; }
+
+	bool	SetFromSockadr(struct sockaddr_storage* s);
+	bool	SetFromString(const char* pch, bool bUseDNS = false);
+
+	inline netadrtype_t	GetType(void) const { return type; }
+	inline uint16_t		GetPort(void) const { return port; }
+
+	bool		CompareAdr(const CNetAdr& other) const;
+	inline bool	ComparePort(const CNetAdr& other) const { return port == other.port; }
+	inline bool	IsLoopback(void) const { return type == netadrtype_t::NA_LOOPBACK; } // true if engine loopback buffers are used.
+
+	const char* ToString(bool onlyBase = false) const;
+	void		ToString(char* pchBuffer, size_t unBufferSize, bool onlyBase = false) const;
+	void		ToSockadr(struct sockaddr_storage* s) const;
+
+private:
+	netadrtype_t type;
+	IN6_ADDR adr;
+	uint16_t port;
+	bool field_16;
+	bool reliable;
+};
+typedef struct netpacket_s
+{
+	CNetAdr from;
+	int source;
+	double received;
+	uint8_t* pData;
+	BFRead message;
+	int size;
+	int wiresize;
+	char stream;
+	netpacket_s* pNext;
+} netpacket_t;
+typedef char(__fastcall* CNetChan__ProcessHeaderType)(__int64, netpacket_s*);
+CNetChan__ProcessHeaderType CNetChan__ProcessHeaderOriginal;
+char __fastcall CNetChan__ProcessHeader(__int64 a1, netpacket_s* a2)
+{
+	//a2->message.ReadOneBit();
+	return ((CNetChan__ProcessHeaderType)(engineNonDedi+0x1E8710)) (a1 + 16, a2);
+}
+bool ReadConnectPacket2015AndWriteConnectPacket2014(BFRead& msg, BFWrite& buffer)
+{
+	char type = msg.ReadByte();
+	if (type != 'A')
+	{
+		return false;
+	}
+
+	//buffer.WriteLong(-1);
+	buffer.WriteByte('A');
+
+	int version = msg.ReadLong();
+	if (version != 1040)
+	{
+		return false;
+	}
+	buffer.WriteLong(1036); // 2014 version
+
+	buffer.WriteLong(msg.ReadLong()); // hostVersion
+	buffer.WriteLong(msg.ReadLong()); // challengeNr
+	buffer.WriteLong(msg.ReadLong()); // unknown 
+	buffer.WriteLong(msg.ReadLong()); // unknown1
+	msg.ReadLongLong(); // skip platformUserId
+
+	char tempStr[256];
+	msg.ReadString(tempStr, sizeof(tempStr));
+	buffer.WriteString(tempStr); // name
+
+	msg.ReadString(tempStr, sizeof(tempStr));
+	buffer.WriteString(tempStr); // password
+
+	msg.ReadString(tempStr, sizeof(tempStr));
+	buffer.WriteString(tempStr); // unknown2
+
+	int unknownCount = msg.ReadByte();
+	buffer.WriteByte(unknownCount);
+	for (int i = 0; i < unknownCount; i++)
+	{
+		buffer.WriteLongLong(msg.ReadLongLong()); // unknown3
+	}
+
+	msg.ReadString(tempStr, sizeof(tempStr));
+	buffer.WriteString(tempStr); // serverFilter
+
+	msg.ReadLong(); // skip playlistVersionNumber
+	msg.ReadLong(); // skip persistenceVersionNumber
+	msg.ReadLongLong(); // skip persistenceHash
+
+	int numberOfPlayers = msg.ReadByte();
+	buffer.WriteByte(numberOfPlayers);
+	for (int i = 0; i < numberOfPlayers; i++)
+	{
+		// Read SplitPlayerConnect from 2015 packet
+		int type = msg.ReadUBitLong(6);
+		int count = msg.ReadByte();
+
+		// Write SplitPlayerConnect to 2014 packet
+		buffer.WriteUBitLong(type, 6);
+		buffer.WriteByte(count);
+
+		for (int j = 0; j < count; j++)
+		{
+			msg.ReadString(tempStr, sizeof(tempStr));
+			buffer.WriteString(tempStr); // key
+
+			msg.ReadString(tempStr, sizeof(tempStr));
+			buffer.WriteString(tempStr); // value
+		}
+	}
+
+	buffer.WriteByte(msg.ReadByte()); // lowViolence 
+
+	//if (msg.ReadByte() != 1)
+	//{
+	//	return false;
+	//}
+	buffer.WriteByte(1);
+
+	return !buffer.IsOverflowed();
+}
+
+typedef char (*ProcessConnectionlessPacketType)(unsigned int* a1, netpacket_s* a2);
+ProcessConnectionlessPacketType ProcessConnectionlessPacketOriginal;
+char __fastcall ProcessConnectionlessPacket(unsigned int* a1, netpacket_s* a2)
+{
+	char buffer[1200];
+	BFWrite writer(reinterpret_cast<uptr>(buffer), sizeof(buffer));
+
+	if (((char*)a2->pData + 4)[0] == 'A' && ReadConnectPacket2015AndWriteConnectPacket2014(a2->message, writer))
+	{
+		//a2->message.Seek(0);
+		BFRead converted(reinterpret_cast<uptr>(buffer), writer.GetNumBytesWritten());
+		a2->message = converted;
+		return ProcessConnectionlessPacketOriginal(a1, a2);
+	}
+	else
+	{
+		return ProcessConnectionlessPacketOriginal(a1, a2);
+	}
+}
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
 	const LDR_DLL_NOTIFICATION_DATA* notification_data,
@@ -598,8 +758,12 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x3A2020), &CBaseEntity__SendProxy_CellOriginXY, reinterpret_cast<LPVOID*>(NULL));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x3A2130), &CBaseEntity__SendProxy_CellOriginZ, reinterpret_cast<LPVOID*>(NULL));
 
-		if (IsDedicatedServer())
+		if (IsDedicatedServer()) {
 			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x1693D0), &ParsePDATA, reinterpret_cast<LPVOID*>(&ParsePDATAOriginal));
+			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x433C0), &ProcessConnectionlessPacket, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginal));
+			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x0139940), &CNetChan__ProcessHeader, reinterpret_cast<LPVOID*>(&CNetChan__ProcessHeaderOriginal));
+			
+		}
 		//if (IsDedicatedServer()) // NOTE
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x6A420), &ReadFileFromVPKHook, reinterpret_cast<LPVOID*>(&readFileFromVPK));
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x9C20), &ReadFromCacheHook, reinterpret_cast<LPVOID*>(&readFromCache));

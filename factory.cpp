@@ -220,6 +220,7 @@ __int64 CVEngineServer__FuncThatReturnsFF_Stub()
 	return 0xFFFFFFFFi64;
 }
 static HMODULE engineR1O;
+uintptr_t engineNonDedi;
 
 static CreateInterfaceFn R1OCreateInterface;
 
@@ -2967,8 +2968,71 @@ public:
 	virtual void whatever() = 0;
 	virtual void Init() = 0;
 };
+uintptr_t engineDS;
+typedef char (*CNetChan__MergeSplitUserBuffersType)(__int64 a1, int a2, __int64 a3);
+char __fastcall CNetChan__MergeSplitUserBuffers(__int64 a1, int a2, __int64 a3)
+{
+	return ((CNetChan__MergeSplitUserBuffersType)(engineDS + 0x138FC0))(a1 + 16, a2, a3);
+}
+typedef char (*CNetChan__CreateFragmentsFromBufferType)(__int64 a1, char* a2, int a3);
+char __fastcall CNetChan__CreateFragmentsFromBuffer(__int64 a1, char* a2, int a3)
+{
+	return ((CNetChan__CreateFragmentsFromBufferType)(engineDS + 0x138270))(a1 + 16, a2, a3);
+}
+typedef char (*CNetChan__SendSubchannelDataType)(__int64 a1, void* a2);
+char __fastcall CNetChan__SendSubchannelData(__int64 a1, void* a2)
+{
+	return ((CNetChan__SendSubchannelDataType)(engineDS + 0x1350B0))(a1 + 16, a2);
+}
+typedef bool (*IsXLPSecureType)();
+bool IsXLSPSecure()
+{
+	return ((IsXLPSecureType)(engineDS + 0x13C8E0))();
+}
+typedef bool (*ShouldSendAsyncType)();
+bool ShouldSendAsync()
+{
+	return ((ShouldSendAsyncType)(engineDS + 0x13DA60))();
+}
+typedef __int64 (*CNetChan__PostSendDatagramType)(__int64 a1, int a2, int a3);
+CNetChan__PostSendDatagramType CNetChan__PostSendDatagramOriginal;
+__int64 __fastcall CNetChan__PostSendDatagram(__int64 a1, int a2, int a3) {
+	return ((CNetChan__PostSendDatagramType)(engineDS + 0x1340D0))(a1 + 16, a2, a3);
+}
+typedef __int64 (*NET_SendPacketType)(
+	__int64 a1,
+	int a2,
+	void* a3,
+	_DWORD* a4,
+	unsigned int a5,
+	__int64 a6,
+	char a7,
+	int a8,
+	char a9,
+	__int64 a10,
+	char a11);
+NET_SendPacketType NET_SendPacketOriginal;
+__int64 __fastcall NET_SendPacket(
+	__int64 a1,
+	int a2,
+	void* a3,
+	_DWORD* a4,
+	unsigned int a5,
+	__int64 a6,
+	char a7,
+	int a8,
+	char a9,
+	__int64 a10,
+	char a11)
+{
+	return ((NET_SendPacketType)(engineDS + 0x1442d0))(a1 + 16, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11);
+}
+typedef __int64 (*SendDatagram2014Type)(__int64 a1, __int64 a2);
 
-
+__int64 __fastcall SendDatagram2014(__int64 a1, __int64 a2)
+{
+	return ((SendDatagram2014Type)(engineNonDedi + 0x1e8f50))(a1 - 16, a2);
+}
 char __fastcall CServerGameDLL__DLLInit(void* thisptr, CreateInterfaceFn appSystemFactory,
 	CreateInterfaceFn physicsFactory, CreateInterfaceFn fileSystemFactory,
 	CGlobalVarsServer2015* pGlobals)
@@ -2983,7 +3047,22 @@ char __fastcall CServerGameDLL__DLLInit(void* thisptr, CreateInterfaceFn appSyst
 	oPhysicsFactory = physicsFactory;
 	engineR1O = LoadLibraryA("engine_r1o.dll");
 	R1OCreateInterface = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(engineR1O, "CreateInterface"));
+	if (IsDedicatedServer()) {
+		engineNonDedi = (uintptr_t)LoadLibraryA("engine.dll");
+		engineDS = (uintptr_t)GetModuleHandleA("engine_ds.dll");
+		MH_CreateHook(LPVOID(engineNonDedi + 0x1E7D90), LPVOID(CNetChan__MergeSplitUserBuffers), NULL);
+		MH_CreateHook(LPVOID(engineNonDedi + 0x1E6B20), LPVOID(CNetChan__CreateFragmentsFromBuffer), NULL);
+		MH_CreateHook(LPVOID(engineNonDedi + 0x1E3920), LPVOID(CNetChan__SendSubchannelData), NULL);
+		MH_CreateHook(LPVOID(engineNonDedi + 0x1EC670), LPVOID(IsXLSPSecure), NULL);
+		MH_CreateHook(LPVOID(engineNonDedi + 0x1ED7B0), LPVOID(ShouldSendAsync), NULL);
+		MH_CreateHook(LPVOID(engineNonDedi + 0x1E2930), LPVOID(CNetChan__PostSendDatagram), NULL);
+		MH_CreateHook(LPVOID(engineNonDedi + 0x1F4130), LPVOID(NET_SendPacket), NULL);
+		MH_CreateHook(LPVOID(engineDS + 0x13a170), LPVOID(SendDatagram2014), NULL);
 
+		MH_EnableHook(MH_ALL_HOOKS);
+		//reinterpret_cast<char(__fastcall*)(__int64, CreateInterfaceFn)>((uintptr_t)(engineNonDedi)+0x01A04A0)(0, appSystemFactory); // connect nondedi engine
+		//reinterpret_cast<void(__fastcall*)(int, void*)>((uintptr_t)(engineNonDedi)+0x47F580)(0, 0); // register nondedi engine cvars
+	}
 	extern void* SetPreCache_o;
 	__int64 __fastcall SetPreCache(__int64 a1, __int64 a2, char a3);
 	MH_CreateHook(LPVOID(uintptr_t(engineR1O) + 0xF5790), &SetPreCache, &SetPreCache_o);
