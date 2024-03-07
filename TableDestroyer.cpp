@@ -91,7 +91,7 @@ void ServerClassInit_DT_BasePlayer() {
 
 	DestroySendProp(DT_Local, DT_LocalLen, "m_titanRespawnTime");
 	RenameSendProp(DT_BasePlayer, DT_BasePlayerLen, "m_titanRespawnTime", "m_nextTitanRespawnAvailable");
-	FindSendProp(DT_BasePlayer, *DT_BasePlayerLen, "m_nextTitanRespawnAvailable")->offset += FindSendProp(DT_LocalPlayerExclusive, *DT_BasePlayerLen, "m_Local")->offset;
+	FindSendProp(DT_BasePlayer, *DT_BasePlayerLen, "m_nextTitanRespawnAvailable")->offset += FindSendProp(DT_LocalPlayerExclusive, *DT_LocalPlayerExclusiveLen, "m_Local")->offset;
 }
 
 void ServerClassInit_DT_Local() {
