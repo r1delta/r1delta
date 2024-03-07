@@ -24,26 +24,48 @@ void DestroySendProp(SendProp* sendTablePtr, int* sendTableLengthPtr, const char
 	}
 	std::cout << "its fucked man" << std::endl;
 	DebugBreak();
-	std::cout <<  (char*)0 << "lol" << std::endl;
+	std::cout << (char*)0 << "lol" << std::endl;
 }
+void RenameSendProp(SendProp* sendTablePtr, int* sendTableLengthPtr, const char* currentName, const char* newName) {
+	for (int i = 0; i < *sendTableLengthPtr; ++i) {
+		if (strcmp(sendTablePtr[i].name, currentName) == 0) {
+			sendTablePtr[i].name = (char*)newName;
+			std::cout << "SendProp renamed from " << currentName << " to " << newName << std::endl;
+			return;
+		}
+	}
 
+	std::cout << "SendProp not found: " << currentName << std::endl;
+}
+void MoveSendProp(SendProp* sourceTablePtr, int* sourceTableLengthPtr, const char* sourcePropName,
+	SendProp* destTablePtr, int* destTableLengthPtr, const char* destPropName) {
+	// Find the source send prop
+	for (int i = 0; i < *sourceTableLengthPtr; ++i) {
+		if (strcmp(sourceTablePtr[i].name, sourcePropName) == 0) {
+			// Find the destination send prop
+			for (int j = 0; j < *destTableLengthPtr; ++j) {
+				if (strcmp(destTablePtr[j].name, destPropName) == 0) {
+					// Move the source send prop over the destination send prop
+					memcpy((void*)(&destTablePtr[j]), (void*)(&sourceTablePtr[i]), sizeof(SendProp));
+
+					std::cout << sourcePropName << " moved over " << destPropName << std::endl;
+					return;
+				}
+			}
+
+			std::cout << "Destination send prop not found: " << destPropName << std::endl;
+			return;
+		}
+	}
+
+	std::cout << "Source send prop not found: " << sourcePropName << std::endl;
+}
 void ServerClassInit_DT_BasePlayer() {
 	ServerClassInit_DT_BasePlayerOriginal();
-
+	ServerClassInit_DT_LocalOriginal();
 	void* serverPtr = (void*)GetModuleHandleA("server.dll");
 	SendProp* DT_BasePlayer = (SendProp*)(((uintptr_t)serverPtr) + 0xE9A800);
 	int* DT_BasePlayerLen = (int*)(((uintptr_t)serverPtr) + 0xE04768);
-
-	DestroySendProp(DT_BasePlayer, DT_BasePlayerLen, "m_bWallRun");
-	DestroySendProp(DT_BasePlayer, DT_BasePlayerLen, "m_bDoubleJump");
-	DestroySendProp(DT_BasePlayer, DT_BasePlayerLen, "m_hasHacking");
-	DestroySendProp(DT_BasePlayer, DT_BasePlayerLen, "m_level");
-}
-
-void ServerClassInit_DT_Local() {
-	ServerClassInit_DT_LocalOriginal();
-
-	void* serverPtr = (void*)GetModuleHandleA("server.dll");
 	SendProp* DT_Local = (SendProp*)(((uintptr_t)serverPtr) + 0xE9E340);
 	int* DT_LocalLen = (int*)(((uintptr_t)serverPtr) + 0xE04B48);
 
@@ -51,6 +73,22 @@ void ServerClassInit_DT_Local() {
 	DestroySendProp(DT_Local, DT_LocalLen, "m_titanBuildStarted");
 	DestroySendProp(DT_Local, DT_LocalLen, "m_titanDeployed");
 	DestroySendProp(DT_Local, DT_LocalLen, "m_titanReady");
+	DestroySendProp(DT_BasePlayer, DT_BasePlayerLen, "m_bWallRun");
+	DestroySendProp(DT_BasePlayer, DT_BasePlayerLen, "m_bDoubleJump");
+	DestroySendProp(DT_BasePlayer, DT_BasePlayerLen, "m_hasHacking");
+
+	MoveSendProp(DT_Local, DT_LocalLen, "m_titanRespawnTime",
+		DT_BasePlayer, DT_BasePlayerLen, "m_level");
+
+	DestroySendProp(DT_Local, DT_LocalLen, "m_titanRespawnTime");
+	RenameSendProp(DT_BasePlayer, DT_BasePlayerLen, "m_titanRespawnTime", "m_nextTitanRespawnAvailable");
+}
+
+void ServerClassInit_DT_Local() {
+	//ServerClassInit_DT_LocalOriginal();
+
+
+	//DestroySendProp(DT_Local, DT_LocalLen, "m_titanRespawnTime");
 }
 void ServerClassInit_DT_LocalPlayerExclusive() {
 	ServerClassInit_DT_LocalPlayerExclusiveOriginal();
@@ -94,7 +132,7 @@ __int64 __fastcall CBaseEntity__SendProxy_CellOrigin(__int64 a1, _DWORD* a2, __i
 	int cell[6]; // [rsp+20h] [rbp-18h] BYREF
 	float* pStruct; // [rsp+48h] [rbp+10h] BYREF
 	void* serverPtr = (void*)GetModuleHandleA("server.dll");
-	auto CBaseEntity__UseStepSimulationNetworkOrigin = reinterpret_cast<char(__fastcall*)(__int64 a1, float** a2, int * a3)>((uintptr_t)(serverPtr)+0x3BC740);
+	auto CBaseEntity__UseStepSimulationNetworkOrigin = reinterpret_cast<char(__fastcall*)(__int64 a1, float** a2, int* a3)>((uintptr_t)(serverPtr)+0x3BC740);
 
 	if (CBaseEntity__UseStepSimulationNetworkOrigin((__int64)a2, &pStruct, cell))
 	{
