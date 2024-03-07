@@ -29,6 +29,7 @@ void DestroySendProp(SendProp* sendTablePtr, int* sendTableLengthPtr, const char
 
 void ServerClassInit_DT_BasePlayer() {
 	ServerClassInit_DT_BasePlayerOriginal();
+
 	void* serverPtr = (void*)GetModuleHandleA("server.dll");
 	SendProp* DT_BasePlayer = (SendProp*)(((uintptr_t)serverPtr) + 0xE9A800);
 	int* DT_BasePlayerLen = (int*)(((uintptr_t)serverPtr) + 0xE04768);
@@ -38,8 +39,10 @@ void ServerClassInit_DT_BasePlayer() {
 	DestroySendProp(DT_BasePlayer, DT_BasePlayerLen, "m_hasHacking");
 	DestroySendProp(DT_BasePlayer, DT_BasePlayerLen, "m_level");
 }
+
 void ServerClassInit_DT_Local() {
 	ServerClassInit_DT_LocalOriginal();
+
 	void* serverPtr = (void*)GetModuleHandleA("server.dll");
 	SendProp* DT_Local = (SendProp*)(((uintptr_t)serverPtr) + 0xE9E340);
 	int* DT_LocalLen = (int*)(((uintptr_t)serverPtr) + 0xE04B48);
@@ -48,7 +51,6 @@ void ServerClassInit_DT_Local() {
 	DestroySendProp(DT_Local, DT_LocalLen, "m_titanBuildStarted");
 	DestroySendProp(DT_Local, DT_LocalLen, "m_titanDeployed");
 	DestroySendProp(DT_Local, DT_LocalLen, "m_titanReady");
-	DestroySendProp(DT_Local, DT_LocalLen, "m_titanRespawnTime");
 }
 void ServerClassInit_DT_LocalPlayerExclusive() {
 	ServerClassInit_DT_LocalPlayerExclusiveOriginal();

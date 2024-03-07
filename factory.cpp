@@ -3042,6 +3042,24 @@ char __fastcall CServerGameDLL__DLLInit(void* thisptr, CreateInterfaceFn appSyst
 		pGlobals->nTimestampNetworkingBase = 100;
 		pGlobals->nTimestampRandomizeWindow = 32;
 	}
+	void* serverPtr = (void*)GetModuleHandleA("server.dll");
+	SendProp* DT_BasePlayer = (SendProp*)(((uintptr_t)serverPtr) + 0xE9A800);
+	int* DT_BasePlayerLen = (int*)(((uintptr_t)serverPtr) + 0xE04768);
+
+	// Move m_titanRespawnTime from DT_Local to the end of DT_BasePlayer and rename it
+	SendProp* DT_Local = (SendProp*)(((uintptr_t)serverPtr) + 0xE9E340);
+	int* DT_LocalLen = (int*)(((uintptr_t)serverPtr) + 0xE04B48);
+
+	for (int i = 0; i < *DT_LocalLen; ++i) {
+		if (strcmp(DT_Local[i].name, "m_titanRespawnTime") == 0) {
+			DT_BasePlayer[*DT_BasePlayerLen] = DT_Local[i];
+			DT_BasePlayer[*DT_BasePlayerLen].name = "m_nextTitanRespawnAvailable";
+			++(*DT_BasePlayerLen);
+
+			DestroySendProp(DT_Local, DT_LocalLen, "m_titanRespawnTime");
+			break;
+		}
+	}
 	oAppSystemFactory = appSystemFactory;
 	oFileSystemFactory = fileSystemFactory;
 	oPhysicsFactory = physicsFactory;

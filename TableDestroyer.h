@@ -11,7 +11,7 @@ struct __declspec(align(4)) SendProp
 	_DWORD dword34;
 	_QWORD qword38;
 	_QWORD qword40;
-	char* name;
+	const char* name;
 	_DWORD dword50;
 	_BYTE byte54;
 	__declspec(align(4)) _DWORD dword58;
@@ -41,3 +41,4 @@ __int64 __fastcall CBaseEntity__SendProxy_CellOriginZ(__int64 a1, __int64 a2, __
 __int64 __fastcall sub_3A1E00(__int64 a1, __int64 a2, unsigned int* a3, _DWORD* a4);
 __int64 __fastcall sub_3A1E40(__int64 a1, __int64 a2, unsigned int* a3, _DWORD* a4);
 __int64 __fastcall sub_3A1E80(__int64 a1, __int64 a2, unsigned int* a3, _DWORD* a4);
+void DestroySendProp(SendProp* sendTablePtr, int* sendTableLengthPtr, const char* propname);
