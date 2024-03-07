@@ -3654,6 +3654,8 @@ void __fastcall CScriptManager__DestroyVM(void* a1, void* vmptr)
 	if (*((void**)vmptr) == fakevmptr) {
 		vmptr = realvmptr;
 		free(fakevmptr);
+		realvmptr = 0;
+		fakevmptr = 0;
 		hasRegisteredServerFuncs = true;
 	}
 	return CScriptManager__DestroyVMOriginal(a1, vmptr);
