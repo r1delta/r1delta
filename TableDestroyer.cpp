@@ -76,7 +76,8 @@ void ServerClassInit_DT_BasePlayer() {
 	int* DT_BasePlayerLen = (int*)(((uintptr_t)serverPtr) + 0xE04768);
 	SendProp* DT_Local = (SendProp*)(((uintptr_t)serverPtr) + 0xE9E340);
 	int* DT_LocalLen = (int*)(((uintptr_t)serverPtr) + 0xE04B48);
-
+	SendProp* DT_LocalPlayerExclusive = (SendProp*)(((uintptr_t)serverPtr) + 0xE982C0);
+	int* DT_LocalPlayerExclusiveLen = (int*)(((uintptr_t)serverPtr) + 0xE04878);
 	DestroySendProp(DT_Local, DT_LocalLen, "m_bFireZooming");
 	DestroySendProp(DT_Local, DT_LocalLen, "m_titanBuildStarted");
 	DestroySendProp(DT_Local, DT_LocalLen, "m_titanDeployed");
@@ -90,7 +91,7 @@ void ServerClassInit_DT_BasePlayer() {
 
 	DestroySendProp(DT_Local, DT_LocalLen, "m_titanRespawnTime");
 	RenameSendProp(DT_BasePlayer, DT_BasePlayerLen, "m_titanRespawnTime", "m_nextTitanRespawnAvailable");
-	FindSendProp(DT_BasePlayer, *DT_BasePlayerLen, "m_nextTitanRespawnAvailable")->offset = 4436;
+	FindSendProp(DT_BasePlayer, *DT_BasePlayerLen, "m_nextTitanRespawnAvailable")->offset += FindSendProp(DT_LocalPlayerExclusive, *DT_BasePlayerLen, "m_Local")->offset;
 }
 
 void ServerClassInit_DT_Local() {
