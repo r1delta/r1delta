@@ -37,6 +37,14 @@ void RenameSendProp(SendProp* sendTablePtr, int* sendTableLengthPtr, const char*
 
 	std::cout << "SendProp not found: " << currentName << std::endl;
 }
+SendProp* FindSendProp(SendProp* sendTablePtr, int sendTableLength, const char* propName) {
+	for (int i = 0; i < sendTableLength; ++i) {
+		if (strcmp(sendTablePtr[i].name, propName) == 0) {
+			return &sendTablePtr[i];
+		}
+	}
+	return nullptr;
+}
 void MoveSendProp(SendProp* sourceTablePtr, int* sourceTableLengthPtr, const char* sourcePropName,
 	SendProp* destTablePtr, int* destTableLengthPtr, const char* destPropName) {
 	// Find the source send prop
@@ -82,6 +90,7 @@ void ServerClassInit_DT_BasePlayer() {
 
 	DestroySendProp(DT_Local, DT_LocalLen, "m_titanRespawnTime");
 	RenameSendProp(DT_BasePlayer, DT_BasePlayerLen, "m_titanRespawnTime", "m_nextTitanRespawnAvailable");
+	FindSendProp(DT_BasePlayer, *DT_BasePlayerLen, "m_nextTitanRespawnAvailable")->offset = 4436;
 }
 
 void ServerClassInit_DT_Local() {
