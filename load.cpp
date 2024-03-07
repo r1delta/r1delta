@@ -748,7 +748,7 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x71E9FC), &hkrealloc_base, NULL);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x72B480), &hkrecalloc_base, NULL);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x721000), &hkfree_base, NULL);
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x364D00), &CAI_NetworkManager__LoadNavMesh, reinterpret_cast<LPVOID*>(&CAI_NetworkManager__LoadNavMeshOriginal));
+		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x364D00), &CAI_NetworkManager__LoadNavMesh, reinterpret_cast<LPVOID*>(&CAI_NetworkManager__LoadNavMeshOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(VSCRIPT_DLL) + (IsDedicatedServer() ? 0x6A80 : 0x6A60)), &CScriptVM__ctor, reinterpret_cast<LPVOID*>(&CScriptVM__ctororiginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(VSCRIPT_DLL) + (IsDedicatedServer() ? 0x1210 : 0x1210)), &CScriptManager__CreateNewVM, reinterpret_cast<LPVOID*>(&CScriptManager__CreateNewVMOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(VSCRIPT_DLL) + (IsDedicatedServer() ? 0x1640 : 0x1630)), &CScriptVM__GetUnknownVMPtr, reinterpret_cast<LPVOID*>(&CScriptVM__GetUnknownVMPtrOriginal));
