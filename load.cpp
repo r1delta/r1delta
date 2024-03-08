@@ -754,7 +754,7 @@ __forceinline BOOL CheckIfCallingDLLContainsR1o2()
 			std::transform(moduleNameStr.begin(), moduleNameStr.end(), moduleNameStr.begin(),
 				[](unsigned char c) { return std::tolower(c); });
 
-			if (moduleNameStr.find("r1o") != std::string::npos || moduleNameStr.find("vphysics") != std::string::npos)
+			if (moduleNameStr.find("r1o") != std::string::npos)
 			{
 				return TRUE;
 			}
