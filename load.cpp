@@ -22,6 +22,7 @@
 #include "TableDestroyer.h"
 #include "bitbuf.h"
 #include "in6addr.h"
+#include <DbgHelp.h>
 #pragma intrinsic(_ReturnAddress)
 
 wchar_t kNtDll[] = L"ntdll.dll";
@@ -732,6 +733,52 @@ void __fastcall CAI_NetworkManager__LoadNavMesh(__int64 a1, __int64 a2, const ch
 	((CAI_NetworkManager__BuildStubType)(((uintptr_t)(GetModuleHandleA("server.dll"))) + 0x3664C0))(a1);
 	((CAI_NetworkManager__BuildStubType)(((uintptr_t)(GetModuleHandleA("server.dll"))) + 0x3645f0))(a1);
 }
+__forceinline BOOL CheckIfCallingDLLContainsR1o2()
+{
+	const int MAX_FRAMES = 62;
+	void* frames[MAX_FRAMES];
+	DWORD capturedFrames = CaptureStackBackTrace(0, MAX_FRAMES, frames, NULL);
+
+	for (DWORD i = 0; i < capturedFrames; ++i)
+	{
+		HMODULE hModule = NULL;
+		GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+			static_cast<LPCTSTR>(frames[i]), &hModule);
+
+		if (hModule != NULL)
+		{
+			char moduleName[MAX_PATH];
+			GetModuleFileNameA(hModule, moduleName, sizeof(moduleName));
+
+			std::string moduleNameStr(moduleName);
+			std::transform(moduleNameStr.begin(), moduleNameStr.end(), moduleNameStr.begin(),
+				[](unsigned char c) { return std::tolower(c); });
+
+			if (moduleNameStr.find("r1o") != std::string::npos || moduleNameStr.find("vphysics") != std::string::npos)
+			{
+				return TRUE;
+			}
+	}
+}
+
+	return FALSE;
+}
+typedef void* (*AppSystemCreateInterfaceFnType)(const char* pName, int* pReturnCode);
+AppSystemCreateInterfaceFnType AppSystemCreateInterfaceFnOriginal;
+void* __fastcall AppSystemCreateInterfaceFn(const char* pName, int* pReturnCode)
+{
+	oAppSystemFactory = AppSystemCreateInterfaceFnOriginal;
+	oFileSystemFactory = AppSystemCreateInterfaceFnOriginal;
+	oPhysicsFactory = AppSystemCreateInterfaceFnOriginal;
+
+	engineR1O = LoadLibraryA("engine_r1o.dll");
+	R1OCreateInterface = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(engineR1O, "CreateInterface"));
+
+	if (CheckIfCallingDLLContainsR1o2())
+		return R1OFactory(pName, pReturnCode);
+	else
+		return AppSystemCreateInterfaceFnOriginal(pName, pReturnCode);
+}
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
 	const LDR_DLL_NOTIFICATION_DATA* notification_data,
@@ -739,6 +786,11 @@ void __stdcall LoaderNotificationCallback(
 	if (notification_reason != LDR_DLL_NOTIFICATION_REASON_LOADED)
 		return;
 	doBinaryPatchForFile(notification_data->Loaded);
+	if (std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length).find(L"launcher.dll") != std::string::npos) {
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher.dll") + 0x74510), &AppSystemCreateInterfaceFn, (LPVOID*)&AppSystemCreateInterfaceFnOriginal);
+		MH_EnableHook(MH_ALL_HOOKS);
+
+	}
 	if (std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length).find(L"server.dll") != std::string::npos) {
 		uintptr_t vTableAddr = reinterpret_cast<uintptr_t>(GetModuleHandleA("server.dll")) + 0x807220;
 		RemoveItemsFromVTable(vTableAddr, 35, 2);

@@ -86,3 +86,10 @@ char __fastcall CSquirrelVM__ConvertToVariant(__int64* a1, __int64 a2, ScriptVar
 __int64 __fastcall CSquirrelVM__ReleaseValue(__int64* a1, ScriptVariant_t* a2);
 bool __fastcall CSquirrelVM__SetValue(__int64* a1, void* a2, unsigned int a3, ScriptVariant_t* a4);
 bool __fastcall CSquirrelVM__SetValueEx(__int64* a1, __int64 a2, const char* a3, ScriptVariant_t* a4);
+void* R1OFactory(const char* pName, int* pReturnCode);
+extern CreateInterfaceFn oAppSystemFactory;
+extern CreateInterfaceFn oFileSystemFactory;
+extern CreateInterfaceFn oPhysicsFactory;
+
+extern HMODULE engineR1O;
+extern CreateInterfaceFn R1OCreateInterface;
