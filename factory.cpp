@@ -3570,27 +3570,31 @@ void __fastcall CSquirrelVM__RegisterFunctionGuts(__int64* a1, __int64 a2, const
 }
 void __fastcall CSquirrelVM__TranslateCall(__int64* a1) {
 	static LPCVOID baseAddressDll = (LPCVOID)GetModuleHandleA(VSCRIPT_DLL);
-	static LPCVOID address1 = (LPCVOID)((uintptr_t)(baseAddressDll)+ (IsDedicatedServer() ? 0xc3cf : 0xC3AF));
-	static LPCVOID address2 = (LPCVOID)((uintptr_t)(baseAddressDll)+ (IsDedicatedServer() ? 0xc7e4 : 0xC7C4));
+	static LPVOID address1 = (LPVOID)((uintptr_t)(baseAddressDll)+(IsDedicatedServer() ? 0xc3cf : 0xC3AF));
+	static LPVOID address2 = (LPVOID)((uintptr_t)(baseAddressDll)+(IsDedicatedServer() ? 0xc7e4 : 0xC7C4));
+
 	char value1 = 0x21;
 	char data1[] = { 0x00, 0x07, 0x01, 0x07, 0x02, 0x07, 0x03, 0x07, 0x04, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x05, 0x06 };
-
 	char value2 = 0x20;
 	char data2[] = { 0x00, 0x07, 0x01, 0x07, 0x02, 0x03, 0x07, 0x04, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x05, 0x06 };
 
+	DWORD oldProtect;
+	VirtualProtect(address1, 1, PAGE_EXECUTE_READWRITE, &oldProtect);
+	VirtualProtect(address2, sizeof(data1), PAGE_EXECUTE_READWRITE, &oldProtect);
+
 	if (!serverRunning(a1)) {
-		WriteProcessMemory(GetCurrentProcess(), (LPVOID)address1, &value2, 1, NULL);
-		WriteProcessMemory(GetCurrentProcess(), (LPVOID)address2, data2, sizeof(data2), NULL);
-		FlushInstructionCache(GetCurrentProcess(), (LPCVOID)address1, 1);
-		FlushInstructionCache(GetCurrentProcess(), (LPCVOID)address2, sizeof(data1));
+		*(char*)address1 = value2;
+		memcpy(address2, data2, sizeof(data2));
+		FlushInstructionCache(GetCurrentProcess(), address1, 1);
+		FlushInstructionCache(GetCurrentProcess(), address2, sizeof(data1));
 		CSquirrelVM__TranslateCallOriginal(a1);
 		return;
 	}
-	WriteProcessMemory(GetCurrentProcess(), (LPVOID)address1, &value1, 1, NULL);
-	WriteProcessMemory(GetCurrentProcess(), (LPVOID)address2, data1, sizeof(data1), NULL);
-	FlushInstructionCache(GetCurrentProcess(), (LPCVOID)address1, 1);
-	FlushInstructionCache(GetCurrentProcess(), (LPCVOID)address2, sizeof(data1));
-	//std::cout << __FUNCTION__ ": translated call" << std::endl;
+
+	*(char*)address1 = value1;
+	memcpy(address2, data1, sizeof(data1));
+	FlushInstructionCache(GetCurrentProcess(), address1, 1);
+	FlushInstructionCache(GetCurrentProcess(), address2, sizeof(data1));
 	CSquirrelVM__TranslateCallOriginal(a1);
 
 }
