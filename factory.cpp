@@ -3465,7 +3465,7 @@ void ConvertScriptVariant(ScriptVariant_t* variant, ConversionDirection directio
 
 
 // Function to check if server.dll is in the call stack
-bool serverRunning(void* a1) {
+__forceinline bool serverRunning(void* a1) {
 	//return isServerScriptVM || a1 == realvmptr || a1 == fakevmptr || (realvmptr && a1 == *(void**)(((uintptr_t)realvmptr + 8)));
 	if (isServerScriptVM || a1 == realvmptr || a1 == fakevmptr || (realvmptr && a1 == *(void**)(((uintptr_t)realvmptr + 8))))
 		return true; // SQVM handle check
@@ -3519,7 +3519,7 @@ typedef __int64 (*CSquirrelVM__TranslateCallType)(__int64* a1);
 CSquirrelVM__TranslateCallType CSquirrelVM__TranslateCallOriginal;
 bool IsPointerFromServerDll(void* pointer) {
 	// Get the base address of "server.dll"
-	HMODULE hModule = GetModuleHandleA("server.dll");
+	static HMODULE hModule = GetModuleHandleA("server.dll");
 	if (!hModule) {
 		std::cerr << "Failed to get handle of server.dll\n";
 		return false;

@@ -1,5 +1,5 @@
 #pragma once
-struct __declspec(align(4)) SendProp
+struct __declspec(align(8)) SendProp
 {
 	_QWORD qword0;
 	_QWORD qword8;
