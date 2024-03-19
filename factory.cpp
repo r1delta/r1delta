@@ -3066,20 +3066,21 @@ char __fastcall CServerGameDLL__DLLInit(void* thisptr, CreateInterfaceFn appSyst
 	engineR1O = LoadLibraryA("engine_r1o.dll");
 	R1OCreateInterface = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(engineR1O, "CreateInterface"));
 	if (IsDedicatedServer()) {
-		engineNonDedi = (uintptr_t)LoadLibraryA("engine.dll");
+		if (!engineNonDedi && !(uintptr_t)(GetModuleHandleA("engine.dll")))
+			engineNonDedi = (uintptr_t)LoadLibraryA("engine.dll");
 		engineDS = (uintptr_t)GetModuleHandleA("engine_ds.dll");
-		MH_CreateHook(LPVOID(engineNonDedi + 0x1E7D90), LPVOID(CNetChan__MergeSplitUserBuffers), NULL);
-		MH_CreateHook(LPVOID(engineNonDedi + 0x1E6B20), LPVOID(CNetChan__CreateFragmentsFromBuffer), NULL);
-		MH_CreateHook(LPVOID(engineNonDedi + 0x1E3920), LPVOID(CNetChan__SendSubchannelData), NULL);
-		MH_CreateHook(LPVOID(engineNonDedi + 0x1EC670), LPVOID(IsXLSPSecure), NULL);
-		MH_CreateHook(LPVOID(engineNonDedi + 0x1ED7B0), LPVOID(ShouldSendAsync), NULL);
-		MH_CreateHook(LPVOID(engineNonDedi + 0x1E2930), LPVOID(CNetChan__PostSendDatagram), NULL);
-		MH_CreateHook(LPVOID(engineNonDedi + 0x1F4130), LPVOID(NET_SendPacket), NULL);
-		MH_CreateHook(LPVOID(engineDS + 0x13a170), LPVOID(SendDatagram2014), NULL);
-
-		MH_EnableHook(MH_ALL_HOOKS);
-		//reinterpret_cast<char(__fastcall*)(__int64, CreateInterfaceFn)>((uintptr_t)(engineNonDedi)+0x01A04A0)(0, appSystemFactory); // connect nondedi engine
-		//reinterpret_cast<void(__fastcall*)(int, void*)>((uintptr_t)(engineNonDedi)+0x47F580)(0, 0); // register nondedi engine cvars
+		//MH_CreateHook(LPVOID(engineNonDedi + 0x1E7D90), LPVOID(CNetChan__MergeSplitUserBuffers), NULL);
+		//MH_CreateHook(LPVOID(engineNonDedi + 0x1E6B20), LPVOID(CNetChan__CreateFragmentsFromBuffer), NULL);
+		//MH_CreateHook(LPVOID(engineNonDedi + 0x1E3920), LPVOID(CNetChan__SendSubchannelData), NULL);
+		//MH_CreateHook(LPVOID(engineNonDedi + 0x1EC670), LPVOID(IsXLSPSecure), NULL);
+		//MH_CreateHook(LPVOID(engineNonDedi + 0x1ED7B0), LPVOID(ShouldSendAsync), NULL);
+		//MH_CreateHook(LPVOID(engineNonDedi + 0x1E2930), LPVOID(CNetChan__PostSendDatagram), NULL);
+		//MH_CreateHook(LPVOID(engineNonDedi + 0x1F4130), LPVOID(NET_SendPacket), NULL);
+		//MH_CreateHook(LPVOID(engineDS + 0x13a170), LPVOID(SendDatagram2014), NULL);
+		//
+		//MH_EnableHook(MH_ALL_HOOKS);
+		reinterpret_cast<char(__fastcall*)(__int64, CreateInterfaceFn)>((uintptr_t)(engineNonDedi)+0x01A04A0)(0, appSystemFactory); // connect nondedi engine
+		reinterpret_cast<void(__fastcall*)(int, void*)>((uintptr_t)(engineNonDedi)+0x47F580)(0, 0); // register nondedi engine cvars
 	}
 	extern void* SetPreCache_o;
 	__int64 __fastcall SetPreCache(__int64 a1, __int64 a2, char a3);

@@ -27,6 +27,8 @@ struct PatchInstruction {
     long long offset; // For 64-bit compatibility
     std::vector<unsigned char> originalBytes;
     std::vector<unsigned char> newBytes;
+    int lineNumber;
+    std::string fileName;
 };
 
 // Helper function to convert hex string to bytes
@@ -69,12 +71,15 @@ std::vector<PatchInstruction> ParsePatchFile(const std::string& filePath) {
     std::vector<PatchInstruction> instructions;
     std::ifstream file(filePath);
     std::string line;
+    int lineNumber = 0;
+
     if (!file.is_open()) {
         std::cerr << "Failed to open file: " << filePath << std::endl;
         return instructions; // Return empty vector on file open failure
     }
 
     while (getline(file, line)) {
+        ++lineNumber;
         // Ignore empty lines or comments
         if (line.empty() || line[0] == ';') continue;
 
@@ -105,7 +110,8 @@ std::vector<PatchInstruction> ParsePatchFile(const std::string& filePath) {
         else {
             instruction.newBytes = hexStringToBytes(newBytesStr);
         }
-
+        instruction.lineNumber = lineNumber; // Set the line number in the instruction
+        instruction.fileName = filePath;
         instructions.push_back(instruction);
     }
 
@@ -129,29 +135,29 @@ std::string UnicodeToString(PCUNICODE_STRING unicodeString) {
 bool ApplyPatch(const PatchInstruction& instruction, CModule& targetModule) {
     CModule::ModuleSections_t modSection = targetModule.GetSectionByName(instruction.sectionName.c_str());
     if (!modSection.IsSectionValid()) {
-        MessageBoxA(nullptr, "Invalid section name", "Patcher Error", MB_OK);
+        std::string errorMsg = "Invalid section name\nFile: " + instruction.fileName + "\nLine: " + std::to_string(instruction.lineNumber);
+        MessageBoxA(nullptr, errorMsg.c_str(), "Patcher Error", MB_OK);
         return false;
     }
 
     uintptr_t base = targetModule.GetModuleBase();
     CMemory sectionMemory(base);
 
-    // Offset within the section
     sectionMemory.OffsetSelf(instruction.offset);
 
-    // Check if the original bytes match
     for (size_t i = 0; i < instruction.originalBytes.size(); ++i) {
         if (*(sectionMemory.CCast<unsigned char*>() + i) != instruction.originalBytes[i]) {
-            MessageBoxA(nullptr, "Original bytes do not match", "Patcher Error", MB_OK);
+            std::string errorMsg = "Original bytes do not match\nFile: " + instruction.fileName + "\nLine: " + std::to_string(instruction.lineNumber);
+            MessageBoxA(nullptr, errorMsg.c_str(), "Patcher Error", MB_OK);
             return false;
         }
     }
 
-    // Apply the new bytes
     sectionMemory.Patch(instruction.newBytes);
 
     return true;
 }
+
 
 void doBinaryPatchForFile(LDR_DLL_LOADED_NOTIFICATION_DATA data) {
     // Initialize the target module with the base DLL name
@@ -163,12 +169,19 @@ void doBinaryPatchForFile(LDR_DLL_LOADED_NOTIFICATION_DATA data) {
     targetModule.LoadSections();
 
     // Parse the patch file and get patch instructions
-    static std::vector<PatchInstruction> patchInstructions = ParsePatchFile("r1delta.patch");
+    std::vector<PatchInstruction> patchInstructions = ParsePatchFile("r1delta.patch");
+
+    // If it's a dedicated server, also load and apply instructions from "r1delta_ds.patch"
+    if (IsDedicatedServer()) {
+        std::vector<PatchInstruction> dedicatedServerPatchInstructions = ParsePatchFile("r1delta_ds.patch");
+        patchInstructions.insert(patchInstructions.end(), dedicatedServerPatchInstructions.begin(), dedicatedServerPatchInstructions.end());
+    }
 
     for (const auto& instruction : patchInstructions) {
         if (instruction.moduleName == moduleName) {
             ApplyPatch(instruction, targetModule);
         }
     }
+
     std::cout << "Completed patching for " << moduleName << std::endl;
 }

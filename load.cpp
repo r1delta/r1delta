@@ -68,6 +68,8 @@ void AddSearchPathHook(IFileSystem* fileSystem, const char* pPath, const char* p
 	
 	// this function is used in debugprecachevpk concommand
 	// alternatively, real game has that in call stack when I bp the above funciton
+	if (!engineNonDedi && !(uintptr_t)(GetModuleHandleA("engine.dll")))
+		engineNonDedi = (uintptr_t)LoadLibraryA("engine.dll");
 	using debug_precache_t = void(__fastcall*)(const char*, unsigned int, char);
 	static auto debug_precache = debug_precache_t(uintptr_t(GetModuleHandleA("engine.dll")) + 0x19FB30);
 	if (pPath != NULL && strstr(pPath, "common") == NULL && strstr(pPath, "lobby") == NULL) {
@@ -338,6 +340,8 @@ void __fastcall cl_DumpPrecacheStats(__int64 CClientState, const char* name) {
 	freopen("CONOUT$", "w", stdout);
 	freopen("CONOUT$", "w", stderr);
 	*/
+	if (!engineNonDedi && !(uintptr_t)(GetModuleHandleA("engine.dll")))
+		engineNonDedi = (uintptr_t)LoadLibraryA("engine.dll");
 	auto outhandle = CreateFileW(L"CONOUT$", GENERIC_WRITE, FILE_SHARE_WRITE, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
 
 	if (!name || !name[0]) {
@@ -741,6 +745,9 @@ void __stdcall LoaderNotificationCallback(
 		return;
 	doBinaryPatchForFile(notification_data->Loaded);
 	if (std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length).find(L"server.dll") != std::string::npos) {
+		if (!engineNonDedi && !(uintptr_t)(GetModuleHandleA("engine.dll")))
+			engineNonDedi = (uintptr_t)LoadLibraryA("engine.dll");
+
 		uintptr_t vTableAddr = reinterpret_cast<uintptr_t>(GetModuleHandleA("server.dll")) + 0x807220;
 		RemoveItemsFromVTable(vTableAddr, 35, 2);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x143A10), &CServerGameDLL__DLLInit, (LPVOID*)&CServerGameDLL__DLLInitOriginal);
@@ -773,7 +780,7 @@ void __stdcall LoaderNotificationCallback(
 		if (IsDedicatedServer()) {
 			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x1693D0), &ParsePDATA, reinterpret_cast<LPVOID*>(&ParsePDATAOriginal));
 			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x433C0), &ProcessConnectionlessPacket, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginal));
-			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x138780), &CNetChan__ProcessHeader, reinterpret_cast<LPVOID*>(&CNetChan__ProcessHeaderOriginal));
+			//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x138780), &CNetChan__ProcessHeader, reinterpret_cast<LPVOID*>(&CNetChan__ProcessHeaderOriginal));
 			
 		}
 		//if (IsDedicatedServer()) // NOTE
@@ -813,7 +820,6 @@ void __stdcall LoaderNotificationCallback(
 			// Rebuild CHL2_Player's precache to take our stuff into account
 			MH_CreateHook(LPVOID(server_mod + 0x41E070), &CHL2_Player_Precache, 0);
 		}
-
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x72360), &cl_DumpPrecacheStats, NULL);
 
 		MH_EnableHook(MH_ALL_HOOKS);
@@ -872,6 +878,9 @@ void __stdcall LoaderNotificationCallback(
 
 			FlushInstructionCache(GetCurrentProcess(), address, sizeof(uintptr_t));
 		}
+
+		if (!engineNonDedi && !(uintptr_t)(GetModuleHandleA("engine.dll")))
+			engineNonDedi = (uintptr_t)LoadLibraryA("engine.dll");
 	}
 
 	if (std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length).find(L"client.dll") != std::string::npos) {

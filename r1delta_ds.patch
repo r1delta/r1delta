@@ -1,0 +1,4 @@
+engine.dll,text,0xA3DE0,40,C3
+engine.dll,text,0xAD6B0,48,C3
+; unhide sv_shutdown for testing
+engine_ds.dll,text,0x3F5459,C7 44 24 20 00 40,C7 44 24 20 00 00
