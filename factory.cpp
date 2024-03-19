@@ -219,10 +219,10 @@ __int64 CVEngineServer__FuncThatReturnsFF_Stub()
 {
 	return 0xFFFFFFFFi64;
 }
+static HMODULE engineR1O;
 uintptr_t engineNonDedi;
-HMODULE engineR1O;
 
-CreateInterfaceFn R1OCreateInterface;
+static CreateInterfaceFn R1OCreateInterface;
 
 void* R1OFactory(const char* pName, int* pReturnCode) {
 	std::cout << "looking for " << pName << std::endl;
@@ -3063,6 +3063,8 @@ char __fastcall CServerGameDLL__DLLInit(void* thisptr, CreateInterfaceFn appSyst
 	oAppSystemFactory = appSystemFactory;
 	oFileSystemFactory = fileSystemFactory;
 	oPhysicsFactory = physicsFactory;
+	engineR1O = LoadLibraryA("engine_r1o.dll");
+	R1OCreateInterface = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(engineR1O, "CreateInterface"));
 	if (IsDedicatedServer()) {
 		engineNonDedi = (uintptr_t)LoadLibraryA("engine.dll");
 		engineDS = (uintptr_t)GetModuleHandleA("engine_ds.dll");
@@ -3310,7 +3312,7 @@ __forceinline BOOL CheckIfCallingDLLContainsR1o() {
 	_strupr_s(szModuleName, MAX_PATH);
 
 	// Check if "R1O" is in the module name
-	return strstr(szModuleName, "R1O") != NULL || strstr(szModuleName, "VPHYSICS") != NULL;
+	return strstr(szModuleName, "R1O") != NULL;
 }
 __int64 VStdLib_GetICVarFactory() {
 	return CheckIfCallingDLLContainsR1o() ? (__int64)R1OFactory : (__int64)(((uintptr_t)(GetModuleHandleA("vstdlib.dll")) + 0x023DD0));
