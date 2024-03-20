@@ -54,7 +54,6 @@ extern CScriptVM__ctortype CScriptVM__ctororiginal;
 __int64 __fastcall CScriptVM__ctor(void* thisptr);
 typedef void* (*CScriptVM__GetUnknownVMPtrType)();
 extern CScriptVM__GetUnknownVMPtrType CScriptVM__GetUnknownVMPtrOriginal;
-extern uintptr_t engineNonDedi;
 void* CScriptVM__GetUnknownVMPtr();
 
 typedef __int64 (*sub_180008AB0Type)(__int64 a1, void* a2, unsigned int* a3, unsigned int a4, __int64 a5, int* a6);

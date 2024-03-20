@@ -2,3 +2,14 @@ engine.dll,text,0xA3DE0,40,C3
 engine.dll,text,0xAD6B0,48,C3
 ; unhide sv_shutdown for testing
 engine_ds.dll,text,0x3F5459,C7 44 24 20 00 40,C7 44 24 20 00 00
+; no crasher 4 u
+engine_ds.dll,text,0x48030,48,C3
+; fix crossplay shit
+engine_ds.dll,text,0x44418,0F,90
+engine_ds.dll,text,0x44419,84,90
+engine_ds.dll,text,0x4441A,65,90
+engine_ds.dll,text,0x4441B,FF,90
+engine_ds.dll,text,0x4441C,FF,90
+engine_ds.dll,text,0x4441D,FF,90
+; fix netchan offset
+engine_ds.dll,text,0x3b95d,FF 90 88 01 00 00,FF 90 B8 01 00 00

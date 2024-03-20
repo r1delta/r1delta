@@ -22,6 +22,7 @@
 #include "TableDestroyer.h"
 #include "bitbuf.h"
 #include "in6addr.h"
+#include "thirdparty/silver-bun/module.h"
 #pragma intrinsic(_ReturnAddress)
 
 wchar_t kNtDll[] = L"ntdll.dll";
@@ -68,8 +69,6 @@ void AddSearchPathHook(IFileSystem* fileSystem, const char* pPath, const char* p
 	
 	// this function is used in debugprecachevpk concommand
 	// alternatively, real game has that in call stack when I bp the above funciton
-	if (!engineNonDedi && !(uintptr_t)(GetModuleHandleA("engine.dll")))
-		engineNonDedi = (uintptr_t)LoadLibraryA("engine.dll");
 	using debug_precache_t = void(__fastcall*)(const char*, unsigned int, char);
 	static auto debug_precache = debug_precache_t(uintptr_t(GetModuleHandleA("engine.dll")) + 0x19FB30);
 	if (pPath != NULL && strstr(pPath, "common") == NULL && strstr(pPath, "lobby") == NULL) {
@@ -340,8 +339,6 @@ void __fastcall cl_DumpPrecacheStats(__int64 CClientState, const char* name) {
 	freopen("CONOUT$", "w", stdout);
 	freopen("CONOUT$", "w", stderr);
 	*/
-	if (!engineNonDedi && !(uintptr_t)(GetModuleHandleA("engine.dll")))
-		engineNonDedi = (uintptr_t)LoadLibraryA("engine.dll");
 	auto outhandle = CreateFileW(L"CONOUT$", GENERIC_WRITE, FILE_SHARE_WRITE, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
 
 	if (!name || !name[0]) {
@@ -619,19 +616,12 @@ typedef struct netpacket_s
 	char stream;
 	netpacket_s* pNext;
 } netpacket_t;
-typedef char(__fastcall* CNetChan__ProcessHeaderType)(__int64, netpacket_s*);
-CNetChan__ProcessHeaderType CNetChan__ProcessHeaderOriginal;
-char __fastcall CNetChan__ProcessHeader(__int64 a1, netpacket_s* a2)
-{
-	//a2->message.ReadOneBit();
-	return ((CNetChan__ProcessHeaderType)(engineNonDedi+0x1E73C0)) (a1 + 16, a2);
-}
 bool ReadConnectPacket2015AndWriteConnectPacket2014(BFRead& msg, BFWrite& buffer)
 {
 	char type = msg.ReadByte();
 	if (type != 'A')
 	{
-		return false;
+		return -1;
 	}
 
 	//buffer.WriteLong(-1);
@@ -640,12 +630,13 @@ bool ReadConnectPacket2015AndWriteConnectPacket2014(BFRead& msg, BFWrite& buffer
 	int version = msg.ReadLong();
 	if (version != 1040)
 	{
-		return false;
+		return -1;
 	}
 	buffer.WriteLong(1036); // 2014 version
 
 	buffer.WriteLong(msg.ReadLong()); // hostVersion
-	buffer.WriteLong(msg.ReadLong()); // challengeNr
+	int32_t lastChallenge = msg.ReadLong();
+	buffer.WriteLong(lastChallenge); // challengeNr
 	buffer.WriteLong(msg.ReadLong()); // unknown 
 	buffer.WriteLong(msg.ReadLong()); // unknown1
 	msg.ReadLongLong(); // skip platformUserId
@@ -704,19 +695,22 @@ bool ReadConnectPacket2015AndWriteConnectPacket2014(BFRead& msg, BFWrite& buffer
 	//}
 	buffer.WriteByte(1);
 
-	return !buffer.IsOverflowed();
+	return !buffer.IsOverflowed() ? lastChallenge : -1;
 }
 
 typedef char (*ProcessConnectionlessPacketType)(unsigned int* a1, netpacket_s* a2);
 ProcessConnectionlessPacketType ProcessConnectionlessPacketOriginal;
+double lastReceived = 0.f;
 char __fastcall ProcessConnectionlessPacket(unsigned int* a1, netpacket_s* a2)
 {
-	char buffer[1200];
+	char buffer[1200] = { 0 };
 	BFWrite writer(reinterpret_cast<uptr>(buffer), sizeof(buffer));
 
-	if (((char*)a2->pData + 4)[0] == 'A' && ReadConnectPacket2015AndWriteConnectPacket2014(a2->message, writer))
+	if (((char*)a2->pData + 4)[0] == 'A' && ReadConnectPacket2015AndWriteConnectPacket2014(a2->message, writer) != -1)
 	{
-		//a2->message.Seek(0);
+		if (lastReceived == a2->received)
+			return false;
+		lastReceived = a2->received;
 		BFRead converted(reinterpret_cast<uptr>(buffer), writer.GetNumBytesWritten());
 		a2->message = converted;
 		return ProcessConnectionlessPacketOriginal(a1, a2);
@@ -737,6 +731,110 @@ void __fastcall CAI_NetworkManager__LoadNavMesh(__int64 a1, __int64 a2, const ch
 	((CAI_NetworkManager__BuildStubType)(((uintptr_t)(GetModuleHandleA("server.dll"))) + 0x3645f0))(a1);
 }
 
+std::vector<std::string> netMessages = {
+	"Base_CmdKeyValues",
+	"CLC_BaselineAck",
+	"CLC_ClientInfo",
+	"CLC_ClientSayText",
+	"CLC_ClientTick",
+	"CLC_CmdKeyValues",
+	"CLC_DurangoVoiceData",
+	"CLC_FileCRCCheck",
+	"CLC_ListenEvents",
+	"CLC_LoadingProgress",
+	"CLC_Move",
+	"CLC_PersistenceClientToken",
+	"CLC_PersistenceRequestSave",
+	"CLC_RespondCvarValue",
+	"CLC_SaveReplay",
+	"CLC_SplitPlayerConnect",
+	"CLC_VoiceData",
+	"CNetMessage",
+	"NET_SetConVar",
+	"NET_SignonState",
+	"NET_SplitScreenUser",
+	"NET_StringCmd",
+	"SVC_BSPDecal",
+	"SVC_ClassInfo",
+	"SVC_CmdKeyValues",
+	"SVC_CreateStringTable",
+	"SVC_CrosshairAngle",
+	"SVC_DurangoVoiceData",
+	"SVC_EntityMessage",
+	"SVC_FixAngle",
+	"SVC_GameEvent",
+	"SVC_GameEventList",
+	"SVC_GetCvarValue",
+	"SVC_Menu",
+	"SVC_PersistenceBaseline",
+	"SVC_PersistenceDefFile",
+	"SVC_PersistenceNotifySaved",
+	"SVC_PersistenceUpdateVar",
+	"SVC_PlaylistChange",
+	"SVC_Playlists",
+	"SVC_Print",
+	"SVC_SendTable",
+	"SVC_ServerInfo",
+	"SVC_ServerTick",
+	"SVC_SetPause",
+	"SVC_SetTeam",
+	"SVC_Snapshot",
+	"SVC_Sounds",
+	"SVC_SplitScreen",
+	"SVC_TempEntities",
+	"SVC_UpdateStringTable",
+	"SVC_UserMessage",
+	"SVC_VoiceData"
+};
+typedef __int64(*Host_InitDedicatedType)(__int64 a1, __int64 a2, __int64 a3);
+Host_InitDedicatedType Host_InitDedicatedOriginal;
+__int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
+{
+	CModule engine("engine.dll", (uintptr_t)LoadLibraryA("engine.dll"));
+	CModule engineDS("engine_ds.dll");
+
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13CA10), LPVOID(engine.GetModuleBase() + 0x1EC7B0), NULL); // NET_BufferToBufferCompress
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13DD90), LPVOID(engine.GetModuleBase() + 0x1EDB40), NULL); // NET_BufferToBufferDecompress
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x144C60), LPVOID(engine.GetModuleBase() + 0x1F4AC0), NULL); // NET_ClearQueuedPacketsForChannel
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x141D60), LPVOID(engine.GetModuleBase() + 0x1F1B10), NULL); // NET_CreateNetChannel
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13F7A0), LPVOID(engine.GetModuleBase() + 0x1EF550), NULL); // NET_GetUDPPort
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x145440), LPVOID(engine.GetModuleBase() + 0x1F5220), NULL); // NET_Init
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13C9D0), LPVOID(engine.GetModuleBase() + 0x1EC770), NULL); // NET_InitPostFork
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13C8D0), LPVOID(engine.GetModuleBase() + 0x1EC660), NULL); // NET_IsDedicated
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13C8C0), LPVOID(engine.GetModuleBase() + 0x1EC650), NULL); // NET_IsMultiplayer
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13F7D0), LPVOID(engine.GetModuleBase() + 0x1EF580), NULL); // NET_ListenSocket
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x144960), LPVOID(engine.GetModuleBase() + 0x1F47C0), NULL); // NET_OutOfBandPrintf
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x142ED0), LPVOID(engine.GetModuleBase() + 0x1F2CF0), NULL); // NET_ProcessSocket
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x1458A0), LPVOID(engine.GetModuleBase() + 0x1F5650), NULL); // NET_RemoveNetChannel
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x143390), LPVOID(engine.GetModuleBase() + 0x1F31B0), NULL); // NET_RunFrame
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x1442D0), LPVOID(engine.GetModuleBase() + 0x1F4130), NULL); // NET_SendPacket
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x144D10), LPVOID(engine.GetModuleBase() + 0x1F4B70), NULL); // NET_SendQueuedPackets
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x1453D0), LPVOID(engine.GetModuleBase() + 0x1F51B0), NULL); // NET_SetMultiplayer
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x1434C0), LPVOID(engine.GetModuleBase() + 0x1F32E0), NULL); // NET_Shutdown
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13FAB0), LPVOID(engine.GetModuleBase() + 0x1EF860), NULL); // NET_SleepUntilMessages
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13C3E0), LPVOID(engine.GetModuleBase() + 0x1EC1B0), NULL); // NET_StringToAdr
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13C100), LPVOID(engine.GetModuleBase() + 0x1EBED0), NULL); // NET_StringToSockaddr
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x146D50), LPVOID(engine.GetModuleBase() + 0x1F6B90), NULL); // INetMessage__WriteToBuffer
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13B000), LPVOID(engine.GetModuleBase() + 0x1E9EA0), NULL); // CNetChan__CNetChan__dtor
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x017940), LPVOID(engine.GetModuleBase() + 0x028BC0), NULL); // CLC_SplitPlayerConnect__dtor
+	for (const auto& msg : netMessages) {
+		std::string mangledName = ".?AV" + msg + "@@";
+		LPVOID dsVtable = engineDS.GetVirtualMethodTable(mangledName.c_str());
+		LPVOID vtable = engine.GetVirtualMethodTable(mangledName.c_str());
+
+		if (dsVtable && vtable) {
+			for (int i = 0; i < 14; ++i) {
+				LPVOID pTarget = static_cast<LPVOID*>(dsVtable)[i];
+				LPVOID pDetour = static_cast<LPVOID*>(vtable)[i];
+				MH_CreateHook(pTarget, pDetour, NULL);
+			}
+		}
+	}
+	MH_EnableHook(MH_ALL_HOOKS);
+	reinterpret_cast<char(__fastcall*)(__int64, CreateInterfaceFn)>((uintptr_t)(engine.GetModuleBase())+0x01A04A0)(0, (CreateInterfaceFn)(engineDS.GetModuleBase() + 0xE9000)); // connect nondedi engine
+	reinterpret_cast<void(__fastcall*)(int, void*)>((uintptr_t)(engine.GetModuleBase())+0x47F580)(0, 0); // register nondedi engine cvars
+	return Host_InitDedicatedOriginal(a1, a2, a3);
+}
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
 	const LDR_DLL_NOTIFICATION_DATA* notification_data,
@@ -745,9 +843,6 @@ void __stdcall LoaderNotificationCallback(
 		return;
 	doBinaryPatchForFile(notification_data->Loaded);
 	if (std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length).find(L"server.dll") != std::string::npos) {
-		if (!engineNonDedi && !(uintptr_t)(GetModuleHandleA("engine.dll")))
-			engineNonDedi = (uintptr_t)LoadLibraryA("engine.dll");
-
 		uintptr_t vTableAddr = reinterpret_cast<uintptr_t>(GetModuleHandleA("server.dll")) + 0x807220;
 		RemoveItemsFromVTable(vTableAddr, 35, 2);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x143A10), &CServerGameDLL__DLLInit, (LPVOID*)&CServerGameDLL__DLLInitOriginal);
@@ -777,16 +872,6 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x3A2020), &CBaseEntity__SendProxy_CellOriginXY, reinterpret_cast<LPVOID*>(NULL));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x3A2130), &CBaseEntity__SendProxy_CellOriginZ, reinterpret_cast<LPVOID*>(NULL));
 
-		if (IsDedicatedServer()) {
-			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x1693D0), &ParsePDATA, reinterpret_cast<LPVOID*>(&ParsePDATAOriginal));
-			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x433C0), &ProcessConnectionlessPacket, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginal));
-			//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x138780), &CNetChan__ProcessHeader, reinterpret_cast<LPVOID*>(&CNetChan__ProcessHeaderOriginal));
-			
-		}
-		//if (IsDedicatedServer()) // NOTE
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x6A420), &ReadFileFromVPKHook, reinterpret_cast<LPVOID*>(&readFileFromVPK));
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x9C20), &ReadFromCacheHook, reinterpret_cast<LPVOID*>(&readFromCache));
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x15F20), &ReadFileFromFilesystemHook, reinterpret_cast<LPVOID*>(&readFileFromFilesystem));
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("vstdlib.dll"), "VStdLib_GetICVarFactory"), &VStdLib_GetICVarFactory, NULL);
 		if (!IsDedicatedServer()) {
 			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x136860), &Status_ConMsg, NULL);
@@ -821,7 +906,11 @@ void __stdcall LoaderNotificationCallback(
 			MH_CreateHook(LPVOID(server_mod + 0x41E070), &CHL2_Player_Precache, 0);
 		}
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x72360), &cl_DumpPrecacheStats, NULL);
-
+		if (IsDedicatedServer()) {
+			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x6A420), &ReadFileFromVPKHook, reinterpret_cast<LPVOID*>(&readFileFromVPK));
+			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x9C20), &ReadFromCacheHook, reinterpret_cast<LPVOID*>(&readFromCache));
+			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x15F20), &ReadFileFromFilesystemHook, reinterpret_cast<LPVOID*>(&readFileFromFilesystem));
+		}
 		MH_EnableHook(MH_ALL_HOOKS);
 		std::cout << "did hooks" << std::endl;
 
@@ -879,8 +968,12 @@ void __stdcall LoaderNotificationCallback(
 			FlushInstructionCache(GetCurrentProcess(), address, sizeof(uintptr_t));
 		}
 
-		if (!engineNonDedi && !(uintptr_t)(GetModuleHandleA("engine.dll")))
-			engineNonDedi = (uintptr_t)LoadLibraryA("engine.dll");
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x1693D0), &ParsePDATA, reinterpret_cast<LPVOID*>(&ParsePDATAOriginal));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x433C0), &ProcessConnectionlessPacket, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginal));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0xA1B90), &Host_InitDedicated, reinterpret_cast<LPVOID*>(&Host_InitDedicatedOriginal));
+
+		MH_EnableHook(MH_ALL_HOOKS);
+
 	}
 
 	if (std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length).find(L"client.dll") != std::string::npos) {
