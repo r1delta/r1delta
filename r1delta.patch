@@ -229,3 +229,5 @@ engine_ds.dll,data,0x54299C,64,64 20 64 20 64 20 00 00 00 00 00 00 00 00 00 00 0
 engine_ds.dll,text,0x4383A,74 2F,EB 2F
 ; not invited :(
 engine_ds.dll,text,0x43E69,0F 8E 56 01 00 00,90 90 90 90 90 90
+; fix damage codecallback
+server.dll,text,0x5A6FE0,0F 83 EA 6E BB FF,E9 EB 6E BB FF 90
