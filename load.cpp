@@ -327,8 +327,9 @@ uintptr_t CVEngineServer_PrecacheModel(uintptr_t a1, const char* a2, char a3) {
 	auto ret = reinterpret_cast<decltype(&CVEngineServer_PrecacheModel)>(CVEngineServer_PrecacheModel_o)(a1, a2, a3);
 
 	// ты хуесос полнейший, вондерер, где логгер сука нормальный
+	// this print is so aids
 	//printf("[STK] CVEngineServer_PrecacheModel('%s', %d) = %p\n", a2, +a3, LPVOID(a1));
-	std::cout << "[STK] CVEngineServer_PrecacheModel('" << a2 << "', " << +a3 << ") = " << LPVOID(a1) << std::endl;
+	//std::cout << "[STK] CVEngineServer_PrecacheModel('" << a2 << "', " << +a3 << ") = " << LPVOID(a1) << std::endl;
 
 	return ret;
 }
