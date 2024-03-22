@@ -88,3 +88,6 @@ bool __fastcall CSquirrelVM__SetValueEx(__int64* a1, __int64 a2, const char* a3,
 extern CreateInterfaceFn oAppSystemFactory;
 extern CreateInterfaceFn oFileSystemFactory;
 extern CreateInterfaceFn oPhysicsFactory;
+typedef void* (*NET_CreateNetChannelType)(int a1, _DWORD* a2, const char* a3, __int64 a4, char a5, char a6);
+extern NET_CreateNetChannelType NET_CreateNetChannelOriginal;
+void* __fastcall NET_CreateNetChannel(int a1, _DWORD* a2, const char* a3, __int64 a4, char a5, char a6);

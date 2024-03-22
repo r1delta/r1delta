@@ -13,3 +13,16 @@ engine_ds.dll,text,0x4441C,FF,90
 engine_ds.dll,text,0x4441D,FF,90
 ; fix netchan offset
 engine_ds.dll,text,0x3b95d,FF 90 88 01 00 00,FF 90 B8 01 00 00
+; fix signonstate offsets
+engine.dll,text,202EDC,93 88 00 00 00,53 68 90 90 90
+engine.dll,text,202EEA,BB 88,7B 68
+engine.dll,text,202EED,00 00 00,90 90 90
+engine.dll,text,202F07,83 88 00 00 00,43 68 90 90 90
+engine.dll,text,202F0F,70,50
+engine.dll,text,202F1B,B4,94
+engine.dll,text,202F29,93 90 00 00 00,53 70 90 90 90
+engine.dll,text,202F38,B0,90
+engine.dll,text,202F47,BC,9C
+engine.dll,text,202F55,B8,98
+; don't send pdata message (it's not bz2'd and it's fucked anyway)
+engine_ds.dll,text,4AFBC,49 8B CC 4C 89 B4 24 70 19 00 00,E9 7E 00 00 00 90 90 90 90 90 90

@@ -792,11 +792,11 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 {
 	CModule engine("engine.dll", (uintptr_t)LoadLibraryA("engine.dll"));
 	CModule engineDS("engine_ds.dll");
-
+	NET_CreateNetChannelOriginal = NET_CreateNetChannelType(engine.GetModuleBase() + 0x1F1B10);
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13CA10), LPVOID(engine.GetModuleBase() + 0x1EC7B0), NULL); // NET_BufferToBufferCompress
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13DD90), LPVOID(engine.GetModuleBase() + 0x1EDB40), NULL); // NET_BufferToBufferDecompress
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x144C60), LPVOID(engine.GetModuleBase() + 0x1F4AC0), NULL); // NET_ClearQueuedPacketsForChannel
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x141D60), LPVOID(engine.GetModuleBase() + 0x1F1B10), NULL); // NET_CreateNetChannel
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x141D60), &NET_CreateNetChannel, NULL); // NET_CreateNetChannel LPVOID(engine.GetModuleBase() + 0x1F1B10)
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13F7A0), LPVOID(engine.GetModuleBase() + 0x1EF550), NULL); // NET_GetUDPPort
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x145440), LPVOID(engine.GetModuleBase() + 0x1F5220), NULL); // NET_Init
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13C9D0), LPVOID(engine.GetModuleBase() + 0x1EC770), NULL); // NET_InitPostFork

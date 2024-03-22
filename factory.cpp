@@ -3583,3 +3583,187 @@ void __fastcall CScriptManager__DestroyVM(void* a1, void* vmptr)
 	}
 	return CScriptManager__DestroyVMOriginal(a1, vmptr);
 }
+void* CreateNewNetCHANVTable(void* thisptr) {
+	uintptr_t* originalvtable = *(uintptr_t**)thisptr;
+	int index = 0;
+	uintptr_t CNetChan__GetName = originalvtable[index++];
+	uintptr_t CNetChan__GetAddress = originalvtable[index++];
+	uintptr_t CNetChan__GetTime = originalvtable[index++];
+	uintptr_t CNetChan__GetTimeConnected = originalvtable[index++];
+	uintptr_t CNetChan__GetBufferSize = originalvtable[index++];
+	uintptr_t CNetChan__GetDataRate = originalvtable[index++];
+	uintptr_t CNetChan__IsLoopback = originalvtable[index++];
+	uintptr_t CNetChan__IsTimingOut = originalvtable[index++];
+	uintptr_t CNetChan__IsPlayback = originalvtable[index++];
+	uintptr_t CNetChan__GetLatency = originalvtable[index++];
+	uintptr_t CNetChan__GetAvgLatency = originalvtable[index++];
+	uintptr_t CNetChan__GetAvgLoss = originalvtable[index++];
+	uintptr_t CNetChan__GetAvgChoke = originalvtable[index++];
+	uintptr_t CNetChan__GetAvgData = originalvtable[index++];
+	uintptr_t CNetChan__GetAvgPackets = originalvtable[index++];
+	uintptr_t CNetChan__GetTotalData = originalvtable[index++];
+	uintptr_t CNetChan__GetTotalPackets = originalvtable[index++];
+	uintptr_t CNetChan__GetSequenceNr = originalvtable[index++];
+	uintptr_t CNetChan__IsValidPacket = originalvtable[index++];
+	uintptr_t CNetChan__GetPacketTime = originalvtable[index++];
+	uintptr_t CNetChan__GetPacketBytes = originalvtable[index++];
+	uintptr_t CNetChan__GetStreamProgress = originalvtable[index++];
+	uintptr_t CNetCHan__GetTimeSinceLastReceived = originalvtable[index++];
+	uintptr_t CNetChan__GetPacketResponseLatency = originalvtable[index++];
+	uintptr_t CNetChan__GetRemoteFramerate = originalvtable[index++];
+	uintptr_t CNetChan__GetTimeoutSeconds = originalvtable[index++];
+	uintptr_t CNetCHan____DESTROY = originalvtable[index++];
+	uintptr_t CNetChan__SetDataRate = originalvtable[index++];
+	uintptr_t CNetChan__RegisterMessage = originalvtable[index++];
+	uintptr_t CNetCHan__StartStreaming = originalvtable[index++];
+	uintptr_t CNetChan__ResetStreaming = originalvtable[index++];
+	uintptr_t CNetChan__SetTimeout = originalvtable[index++];
+	uintptr_t CNetChan__SetDemoRecorder = originalvtable[index++];
+	uintptr_t CNetChan__SetChallengeNr = originalvtable[index++];
+	uintptr_t CNetChan__Reset = originalvtable[index++];
+	uintptr_t CNetChan__Clear = originalvtable[index++];
+	uintptr_t CNetChan__Shutdown = originalvtable[index++];
+	uintptr_t CNetChan__ProcessPlayback = originalvtable[index++];
+	uintptr_t CNetChan__ProcessStream = originalvtable[index++];
+	uintptr_t CNetChan__ProcessPacket = originalvtable[index++];
+	uintptr_t CNetChan____Unk1 = originalvtable[index++];
+	uintptr_t CNetChan__SendNetMsg = originalvtable[index++];
+	uintptr_t CNetChan__SendData = originalvtable[index++];
+	uintptr_t CNetChan__SendFile = originalvtable[index++];
+	uintptr_t CNetChan__DenyFile = originalvtable[index++];
+	uintptr_t CNetChan__RequestFile_OLD = originalvtable[index++];
+	uintptr_t CNetChan__SetChoked = originalvtable[index++];
+	uintptr_t CNetChan____Unk2 = originalvtable[index++];
+	uintptr_t CNetChan____Unk3 = originalvtable[index++];
+	uintptr_t CNetChan____Unk4 = originalvtable[index++];
+	uintptr_t CNetChan____Unk5 = originalvtable[index++];
+	uintptr_t CNetChan____Unk6 = originalvtable[index++];
+	uintptr_t CNetChan__SendDatagram = originalvtable[index++];
+	uintptr_t CNetChan__PostSendDatagram = originalvtable[index++];
+	uintptr_t CNetChan__Transmit = originalvtable[index++];
+	uintptr_t CNetChan__GetRemoteAddress = originalvtable[index++];
+	uintptr_t CNetChan__GetMsgHandler = originalvtable[index++];
+	uintptr_t CNetChan__GetDropNumber = originalvtable[index++];
+	uintptr_t CNetChan__GetSocket = originalvtable[index++];
+	uintptr_t CNetChan__GetChallengeNr = originalvtable[index++];
+	uintptr_t CNetChan__GetSequenceData = originalvtable[index++];
+	uintptr_t CNetChan__SetSequenceData = originalvtable[index++];
+	uintptr_t CNetChan__UpdateMessageStats = originalvtable[index++];
+	uintptr_t CNetChan__CanPacket = originalvtable[index++];
+	uintptr_t CNetChan__IsOverflowed = originalvtable[index++];
+	uintptr_t CNetChan__IsTimedOut = originalvtable[index++];
+	uintptr_t CNetChan__HasPendingReliableData = originalvtable[index++];
+	uintptr_t CNetChan__SetFileTransmissionMode = originalvtable[index++];
+	uintptr_t CNetChan__SetCompressionMode = originalvtable[index++];
+	uintptr_t CNetChan__RequestFile = originalvtable[index++];
+	uintptr_t CNetChan__SetMaxBufferSize = originalvtable[index++];
+	uintptr_t CNetChan__IsNull = originalvtable[index++];
+	uintptr_t CNetChan__GetNumBitsWritten = originalvtable[index++];
+	uintptr_t sub_1801E1F60 = originalvtable[index++];
+	uintptr_t CNetChan__SetInterpolationAmount = originalvtable[index++];
+	uintptr_t CNetChan____UnkGet = originalvtable[index++];
+	uintptr_t CNetChan__SetActiveChannel = originalvtable[index++];
+	uintptr_t CNetChan__AttachSplitPlayer = originalvtable[index++];
+	uintptr_t CNetChan__DetachSplitPlayer = originalvtable[index++];
+	uintptr_t CNetChan____WhateverFunc = originalvtable[index++];
+	uintptr_t CNetChan__GetStreamByIndex = originalvtable[index++];
+	uintptr_t CNetChan____SetUnknownString = originalvtable[index++];
+	uintptr_t CNetChan____UnkEndKill = originalvtable[index++];
+	uintptr_t enginedstable[] = {
+		CreateFunction((void*)CNetChan__GetName, thisptr),
+		CreateFunction((void*)CNetChan__GetAddress, thisptr),
+		CreateFunction((void*)CNetChan__GetTime, thisptr),
+		CreateFunction((void*)CNetChan__GetTimeConnected, thisptr),
+		CreateFunction((void*)CNetChan__GetBufferSize, thisptr),
+		CreateFunction((void*)CNetChan__GetDataRate, thisptr),
+		CreateFunction((void*)CNetChan__IsLoopback, thisptr),
+		CreateFunction((void*)CNetChan__IsTimingOut, thisptr),
+		CreateFunction((void*)CNetChan__IsPlayback, thisptr),
+		CreateFunction((void*)CNetChan__GetLatency, thisptr),
+		CreateFunction((void*)CNetChan__GetAvgLatency, thisptr),
+		CreateFunction((void*)CNetChan__GetAvgLoss, thisptr),
+		CreateFunction((void*)CNetChan__GetAvgChoke, thisptr),
+		CreateFunction((void*)CNetChan__GetAvgData, thisptr),
+		CreateFunction((void*)CNetChan__GetAvgPackets, thisptr),
+		CreateFunction((void*)CNetChan__GetTotalData, thisptr),
+		CreateFunction((void*)CNetChan__GetTotalPackets, thisptr),
+		CreateFunction((void*)CNetChan__GetSequenceNr, thisptr),
+		CreateFunction((void*)CNetChan__IsValidPacket, thisptr),
+		CreateFunction((void*)CNetChan__GetPacketTime, thisptr),
+		CreateFunction((void*)CNetChan__GetPacketBytes, thisptr),
+		CreateFunction((void*)CNetChan__GetStreamProgress, thisptr),
+		CreateFunction((void*)CNetCHan__GetTimeSinceLastReceived, thisptr),
+		CreateFunction((void*)CNetChan__GetPacketResponseLatency, thisptr),
+		CreateFunction((void*)CNetChan__GetRemoteFramerate, thisptr),
+		CreateFunction((void*)CNetChan__GetTimeoutSeconds, thisptr),
+		CreateFunction((void*)CNetCHan____DESTROY, thisptr),
+		CreateFunction((void*)CNetChan__SetDataRate, thisptr),
+		CreateFunction((void*)CNetChan__RegisterMessage, thisptr),
+		CreateFunction((void*)CNetCHan__StartStreaming, thisptr),
+		CreateFunction((void*)CNetChan__ResetStreaming, thisptr),
+		CreateFunction((void*)CNetChan__SetTimeout, thisptr),
+		CreateFunction((void*)CNetChan__SetDemoRecorder, thisptr),
+		CreateFunction((void*)CNetChan__SetChallengeNr, thisptr),
+		CreateFunction((void*)CNetChan__Reset, thisptr),
+		CreateFunction((void*)CNetChan__Clear, thisptr),
+		CreateFunction((void*)CNetChan__Shutdown, thisptr),
+		CreateFunction((void*)CFileSystem_Stdio__NullSub3, thisptr),
+		CreateFunction((void*)CNetChan__ProcessStream, thisptr),
+		CreateFunction((void*)CNetChan__ProcessPacket, thisptr),
+		CreateFunction((void*)CNetChan__SendNetMsg, thisptr),
+		CreateFunction((void*)CNetChan__SendData, thisptr),
+		CreateFunction((void*)CNetChan__SendFile, thisptr),
+		CreateFunction((void*)CNetChan__DenyFile, thisptr),
+		CreateFunction((void*)CNetChan__RequestFile_OLD, thisptr),
+		CreateFunction((void*)CNetChan__SetChoked, thisptr),
+		CreateFunction((void*)CNetChan__SendDatagram, thisptr),
+		CreateFunction((void*)CNetChan__PostSendDatagram, thisptr),
+		CreateFunction((void*)CNetChan__Transmit, thisptr),
+		CreateFunction((void*)CNetChan__GetRemoteAddress, thisptr),
+		CreateFunction((void*)CNetChan__GetMsgHandler, thisptr),
+		CreateFunction((void*)CNetChan__GetDropNumber, thisptr),
+		CreateFunction((void*)CNetChan__GetSocket, thisptr),
+		CreateFunction((void*)CNetChan__GetChallengeNr, thisptr),
+		CreateFunction((void*)CNetChan__GetSequenceData, thisptr),
+		CreateFunction((void*)CNetChan__SetSequenceData, thisptr),
+		CreateFunction((void*)CNetChan__UpdateMessageStats, thisptr),
+		CreateFunction((void*)CNetChan__CanPacket, thisptr),
+		CreateFunction((void*)CNetChan__IsOverflowed, thisptr),
+		CreateFunction((void*)CNetChan__IsTimedOut, thisptr),
+		CreateFunction((void*)CNetChan__HasPendingReliableData, thisptr),
+		CreateFunction((void*)CNetChan__SetFileTransmissionMode, thisptr),
+		CreateFunction((void*)CNetChan__SetCompressionMode, thisptr),
+		CreateFunction((void*)CNetChan__RequestFile, thisptr),
+		CreateFunction((void*)CNetChan__SetMaxBufferSize, thisptr),
+		CreateFunction((void*)CNetChan__IsNull, thisptr),
+		CreateFunction((void*)CNetChan__GetNumBitsWritten, thisptr),
+		CreateFunction((void*)sub_1801E1F60, thisptr),
+		CreateFunction((void*)CNetChan__SetInterpolationAmount, thisptr),
+		CreateFunction((void*)CNetChan____UnkGet, thisptr),
+		CreateFunction((void*)CNetChan__SetActiveChannel, thisptr),
+		CreateFunction((void*)CNetChan__AttachSplitPlayer, thisptr),
+		CreateFunction((void*)CNetChan__DetachSplitPlayer, thisptr),
+		CreateFunction((void*)CNetChan____WhateverFunc, thisptr),
+		CreateFunction((void*)CNetChan__GetStreamByIndex, thisptr),
+		CreateFunction((void*)CNetChan____SetUnknownString, thisptr)
+	};
+	void* newVTable = malloc(sizeof(enginedstable));
+	memcpy(newVTable, enginedstable, sizeof(enginedstable));
+	// Allocate memory for the proxy object
+	void** proxyObject = (void**)malloc(sizeof(void*)); // Assuming only vtable pointer needs to be allocated
+	if (!proxyObject) {
+		free(newVTable);
+		return NULL;
+	}
+
+	// Set the proxy object's vtable pointer to the new vtable
+	*proxyObject = newVTable;
+
+	return proxyObject;
+}
+
+NET_CreateNetChannelType NET_CreateNetChannelOriginal;
+void* __fastcall NET_CreateNetChannel(int a1, _DWORD* a2, const char* a3, __int64 a4, char a5, char a6)
+{
+	return CreateNewNetCHANVTable(NET_CreateNetChannelOriginal(a1, a2, a3, a4, a5, a6));
+}

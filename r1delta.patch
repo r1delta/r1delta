@@ -231,3 +231,10 @@ engine_ds.dll,text,0x4383A,74 2F,EB 2F
 engine_ds.dll,text,0x43E69,0F 8E 56 01 00 00,90 90 90 90 90 90
 ; fix damage codecallback
 server.dll,text,0x5A6FE0,0F 83 EA 6E BB FF,E9 EB 6E BB FF 90
+; fix stupid gamedir check shit on client (needs proper server fix!)
+; this happens because server randomly decides gamedir is "r1_dlc1"
+engine.dll,text,11639F,0F 84 8C,E9 8D 00
+engine.dll,text,1163A4,00,90
+; remove server/client CRC on sound scripts (doesn't exist on dedi)
+; again, clientside patch, server fix is probably needed
+engine.dll,text,7698C,75,EB
