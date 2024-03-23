@@ -886,6 +886,7 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x146D50), LPVOID(engine.GetModuleBase() + 0x1F6B90), NULL); // INetMessage__WriteToBuffer
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13B000), LPVOID(engine.GetModuleBase() + 0x1E9EA0), NULL); // CNetChan__CNetChan__dtor
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x017940), LPVOID(engine.GetModuleBase() + 0x028BC0), NULL); // CLC_SplitPlayerConnect__dtor
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x12F140), LPVOID(engine.GetModuleBase() + 0x1DC830), NULL); // SendTable_WriteInfos
 	for (const auto& msg : netMessages) {
 		std::string mangledName = ".?AV" + msg + "@@";
 		LPVOID dsVtable = engineDS.GetVirtualMethodTable(mangledName.c_str());
