@@ -11,8 +11,6 @@ engine_ds.dll,text,0x4441A,65,90
 engine_ds.dll,text,0x4441B,FF,90
 engine_ds.dll,text,0x4441C,FF,90
 engine_ds.dll,text,0x4441D,FF,90
-; fix netchan offset
-engine_ds.dll,text,0x3b95d,FF 90 88 01 00 00,FF 90 B8 01 00 00
 ; fix signonstate offsets
 engine.dll,text,202EDC,93 88 00 00 00,53 68 90 90 90
 engine.dll,text,202EEA,BB 88,7B 68
@@ -28,3 +26,6 @@ engine.dll,text,202F55,B8,98
 engine_ds.dll,text,4AFBC,49 8B CC 4C 89 B4 24 70 19 00 00,E9 7E 00 00 00 90 90 90 90 90 90
 ; remove isacheater check
 engine_ds.dll,text,457F5,75,EB
+; remove ~cnetmessage calls in shutdown until we know what's going on
+engine.dll,text,1E510E,74,EB
+; (this does not appear to solve the problem)

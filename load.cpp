@@ -46,8 +46,36 @@ void Status_ConMsg(const char* text, ...)
 
 	std::cout << formatted << std::endl;
 }
+signed __int64 __fastcall sub_1804735A0(char* a1, signed __int64 a2, const char* a3, va_list a4)
+{
+	signed __int64 result; // rax
 
+	if (a2 <= 0)
+		return 0i64;
+	result = vsnprintf(a1, a2, a3, a4);
+	if ((int)result < 0i64 || (int)result >= a2)
+	{
+		result = a2 - 1;
+		a1[a2 - 1] = 0;
+	}
+	std::cout << a1 << std::endl;
+	return result;
+}
+void sub_180473550(char* a1, signed __int64 a2, const char* a3, ...)
+{
+	int v5; // eax
+	va_list ArgList; // [rsp+58h] [rbp+20h] BYREF
 
+	va_start(ArgList, a3);
+	if (a2 > 0)
+	{
+		v5 = vsnprintf(a1, a2, a3, ArgList);
+		if (v5 < 0i64 || v5 >= a2)
+			a1[a2 - 1] = 0;
+	}
+	std::cout << a1 << std::endl;
+
+}
 __declspec(dllexport) void whatever2() { Error(); };
 
 typedef char(__fastcall* ParsePDATAType)(int a1, int a2, const char* a3, const char* a4);
@@ -913,7 +941,12 @@ void __stdcall LoaderNotificationCallback(
 		if (!IsDedicatedServer()) {
 			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x136860), &Status_ConMsg, NULL);
 			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x1BF500), &Status_ConMsg, NULL);
-			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x1168B0), &COM_StringCopy, reinterpret_cast<LPVOID*>(&COM_StringCopyOriginal));
+			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x4735A0), &sub_1804735A0, NULL);
+			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x8E6D0), &Status_ConMsg, NULL);
+			
+			//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x473550), &sub_180473550, NULL);
+
+			//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x1168B0), &COM_StringCopy, reinterpret_cast<LPVOID*>(&COM_StringCopyOriginal));
 			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x1C79A0), &DataTable_SetupReceiveTableFromSendTable, reinterpret_cast<LPVOID*>(&DataTable_SetupReceiveTableFromSendTableOriginal));
 		}
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x196A0), &AddSearchPathHook, reinterpret_cast<LPVOID*>(&addSearchPathOriginal));
