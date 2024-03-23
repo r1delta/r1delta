@@ -815,6 +815,44 @@ std::vector<std::string> netMessages = {
 	"SVC_UserMessage",
 	"SVC_VoiceData"
 };
+
+// Original function pointer type
+typedef __int64(*NET_OutOfBandPrintf_t)(int, void*, const char*, ...);
+NET_OutOfBandPrintf_t Original_NET_OutOfBandPrintf = NULL;
+typedef __int64 (*NET_SendPacketType)(
+	__int64 a1,
+	int a2,
+	void* a3,
+	_DWORD* a4,
+	int a5,
+	__int64 a6,
+	char a7,
+	int a8,
+	char a9,
+	__int64 a10,
+	char a11);
+NET_SendPacketType NET_SendPacketOriginal;
+// Detour function
+__int64 Detour_NET_OutOfBandPrintf(int sock, void* adr, const char* fmt, ...) {
+	if (strcmp(fmt, "%c00000000000000") == 0) {
+		static const char** gamemode = reinterpret_cast<const char** >((uintptr_t)(GetModuleHandleA("server.dll")) + 0xB68520);
+		static const char* mapname = reinterpret_cast<const char*>((uintptr_t)(GetModuleHandleA("engine_ds.dll")) + 0x1C89A84);
+		//MessageBoxA(NULL, *gamemode, mapname, 16);
+		char msg[1200] = { 0 };
+		BFWrite startup((uintptr_t)msg, 1200);
+		startup.WriteLong(0xFFFFFFFFi64);
+		startup.WriteByte(0x4Au);
+		startup.WriteString(mapname);
+		startup.WriteString(*gamemode);
+		return NET_SendPacketOriginal(0, sock, adr, (uint32*)(startup.GetBasePointer()), startup.GetNumBytesWritten(), 0i64, 0, 0, 0, 0i64, 1);
+	}
+
+	va_list args;
+	va_start(args, fmt);
+	__int64 result = Original_NET_OutOfBandPrintf(sock, adr, fmt, args);
+	va_end(args);
+	return result;
+}
 typedef __int64(*Host_InitDedicatedType)(__int64 a1, __int64 a2, __int64 a3);
 Host_InitDedicatedType Host_InitDedicatedOriginal;
 __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
@@ -832,10 +870,12 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13C8D0), LPVOID(engine.GetModuleBase() + 0x1EC660), NULL); // NET_IsDedicated
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13C8C0), LPVOID(engine.GetModuleBase() + 0x1EC650), NULL); // NET_IsMultiplayer
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13F7D0), LPVOID(engine.GetModuleBase() + 0x1EF580), NULL); // NET_ListenSocket
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x144960), LPVOID(engine.GetModuleBase() + 0x1F47C0), NULL); // NET_OutOfBandPrintf
+	Original_NET_OutOfBandPrintf = NET_OutOfBandPrintf_t(engine.GetModuleBase() + 0x1F47C0);
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x144960), LPVOID(Detour_NET_OutOfBandPrintf), NULL); // NET_OutOfBandPrintf
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x142ED0), LPVOID(engine.GetModuleBase() + 0x1F2CF0), NULL); // NET_ProcessSocket
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x1458A0), LPVOID(engine.GetModuleBase() + 0x1F5650), NULL); // NET_RemoveNetChannel
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x143390), LPVOID(engine.GetModuleBase() + 0x1F31B0), NULL); // NET_RunFrame
+	NET_SendPacketOriginal = NET_SendPacketType(engine.GetModuleBase() + 0x1F4130);
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x1442D0), LPVOID(engine.GetModuleBase() + 0x1F4130), NULL); // NET_SendPacket
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x144D10), LPVOID(engine.GetModuleBase() + 0x1F4B70), NULL); // NET_SendQueuedPackets
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x1453D0), LPVOID(engine.GetModuleBase() + 0x1F51B0), NULL); // NET_SetMultiplayer
