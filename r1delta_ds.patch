@@ -27,5 +27,9 @@ engine_ds.dll,text,4AFBC,49 8B CC 4C 89 B4 24 70 19 00 00,E9 7E 00 00 00 90 90 9
 ; remove isacheater check
 engine_ds.dll,text,457F5,75,EB
 ; remove ~cnetmessage calls in shutdown until we know what's going on
-engine.dll,text,1E510E,74,EB
-; (this does not appear to solve the problem)
+; engine.dll,text,1E510E,74,EB
+; no devhttp
+engine_ds.dll,text,16A4E0,48 89 5C,B0 01 C3
+; skip signonstate 5 (unused)
+engine_ds.dll,text,4ACE6,05,06
+
