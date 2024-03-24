@@ -12,7 +12,8 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 			AllocConsole();
 		HANDLE hConsoleStream = ::CreateFileW(L"CONOUT$", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
 		SetStdHandle(STD_OUTPUT_HANDLE, hConsoleStream);
-		
+
+		VirtualAlloc((void*)0xFFEEFFEE, 1, MEM_RESERVE, PAGE_NOACCESS);
 	}
 	LoadLibraryA("TextShaping.dll"); // fix "Patcher Error" dialogs having no text
 	switch (fdwReason)

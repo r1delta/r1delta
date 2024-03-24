@@ -855,6 +855,42 @@ __int64 Detour_NET_OutOfBandPrintf(int sock, void* adr, const char* fmt, ...) {
 }
 typedef __int64(*Host_InitDedicatedType)(__int64 a1, __int64 a2, __int64 a3);
 Host_InitDedicatedType Host_InitDedicatedOriginal;
+typedef __int64 (*SendTable_CalcDeltaType)(
+	__int64 a1,
+	__int64 a2,
+	__int64 a3,
+	__int64 a4,
+	int a5,
+	__int64 a6,
+	int a7,
+	int a8,
+	int a9);
+SendTable_CalcDeltaType SendTable_CalcDeltaOriginal;
+typedef __int64 (*SV_PackEntityType)(unsigned int a1, __int64 a2, __int64 a3, __int64 a4);
+SV_PackEntityType SV_PackEntityOriginal;
+__int64 __fastcall SV_PackEntity(unsigned int a1, __int64 a2, __int64 a3, __int64 a4)
+{
+	static uintptr_t engine = uintptr_t(GetModuleHandleA("engine.dll"));
+	static uintptr_t engine_ds = uintptr_t(GetModuleHandleA("engine_ds.dll"));
+
+	memcpy((void*)(engine + 0x2E9253C), (void*)(engine_ds + 0x200D00C), 8192);
+	return SV_PackEntityOriginal(a1, a2, a3, a4);
+}
+__int64 SendTable_CalcDelta(
+	__int64 a1,
+	__int64 a2,
+	__int64 a3,
+	__int64 a4,
+	int a5,
+	__int64 a6,
+	int a7,
+	int a8,
+	int a9)
+{
+	a7 = 600;
+	a8 = 600;
+	return SendTable_CalcDeltaOriginal(a1, a2, a3, a4, a5, a6, a7, a8, a9);
+}
 __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 {
 	CModule engine("engine.dll", (uintptr_t)LoadLibraryA("engine.dll"));
@@ -887,6 +923,14 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13B000), LPVOID(engine.GetModuleBase() + 0x1E9EA0), NULL); // CNetChan__CNetChan__dtor
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x017940), LPVOID(engine.GetModuleBase() + 0x028BC0), NULL); // CLC_SplitPlayerConnect__dtor
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x12F140), LPVOID(engine.GetModuleBase() + 0x1DC830), NULL); // SendTable_WriteInfos
+	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x12FE80), LPVOID(engine.GetModuleBase() + 0x1DD560), NULL); // SendTable_Encode
+	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x130790), &SendTable_CalcDelta, reinterpret_cast<LPVOID*>(NULL));
+	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x116A70), LPVOID(engine.GetModuleBase() + 0x1C3C90), NULL); // CSendTablePrecalc::SetupFlatPropertyArray
+	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x62610), &SV_PackEntity, NULL); // 
+	//MH_CreateHook(LPVOID(engine.GetModuleBase() + 0xF12B0), LPVOID(engineDS.GetModuleBase() + 0x62100), NULL); // SV_EnsureInstanceBaseline football
+	SV_PackEntityOriginal = SV_PackEntityType(engine.GetModuleBase() + 0xF1930);
+
+	SendTable_CalcDeltaOriginal = SendTable_CalcDeltaType(engine.GetModuleBase() + 0x1DDE70);
 	for (const auto& msg : netMessages) {
 		std::string mangledName = ".?AV" + msg + "@@";
 		LPVOID dsVtable = engineDS.GetVirtualMethodTable(mangledName.c_str());
@@ -941,6 +985,7 @@ char __fastcall CBaseClient__ProcessClientInfo(__int64 a1, __int64 a2)
 		(*(void(__fastcall**)(__int64))(*(_QWORD*)(a1 - 8) + 96i64))(a1 - 8);
 	return 1;
 }
+
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
 	const LDR_DLL_NOTIFICATION_DATA* notification_data,
@@ -984,6 +1029,7 @@ void __stdcall LoaderNotificationCallback(
 			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x1BF500), &Status_ConMsg, NULL);
 			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x4735A0), &sub_1804735A0, NULL);
 			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x8E6D0), &Status_ConMsg, NULL);
+			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x22610), &Status_ConMsg, NULL);
 			
 			//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x473550), &sub_180473550, NULL);
 
@@ -1083,7 +1129,7 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x433C0), &ProcessConnectionlessPacket, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0xA1B90), &Host_InitDedicated, reinterpret_cast<LPVOID*>(&Host_InitDedicatedOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x45C00), &CBaseClient__ProcessClientInfo, reinterpret_cast<LPVOID*>(NULL));
-		
+
 
 		MH_EnableHook(MH_ALL_HOOKS);
 
