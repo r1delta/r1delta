@@ -985,7 +985,19 @@ char __fastcall CBaseClient__ProcessClientInfo(__int64 a1, __int64 a2)
 		(*(void(__fastcall**)(__int64))(*(_QWORD*)(a1 - 8) + 96i64))(a1 - 8);
 	return 1;
 }
+typedef void (*COM_InitType)();
+COM_InitType COM_InitOriginal;
+typedef void (*SaveRestore_InitType)(__int64);
+SaveRestore_InitType SaveRestore_Init;
 
+
+void COM_Init()
+{
+	COM_InitOriginal();
+	// SaveRestore__Init();
+	SaveRestore_Init = SaveRestore_InitType(uintptr_t(GetModuleHandleA("engine.dll")) + 0x1410E0);
+	SaveRestore_Init(uintptr_t(GetModuleHandleA("engine.dll")) + 0x2EC8590);
+}
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
 	const LDR_DLL_NOTIFICATION_DATA* notification_data,
@@ -1030,7 +1042,8 @@ void __stdcall LoaderNotificationCallback(
 			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x4735A0), &sub_1804735A0, NULL);
 			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x8E6D0), &Status_ConMsg, NULL);
 			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x22610), &Status_ConMsg, NULL);
-			
+			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x1170A0), &COM_Init, reinterpret_cast<LPVOID*>(&COM_InitOriginal));
+
 			//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x473550), &sub_180473550, NULL);
 
 			//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x1168B0), &COM_StringCopy, reinterpret_cast<LPVOID*>(&COM_StringCopyOriginal));

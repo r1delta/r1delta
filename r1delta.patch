@@ -238,3 +238,9 @@ engine.dll,text,1163A4,00,90
 ; remove server/client CRC on sound scripts (doesn't exist on dedi)
 ; again, clientside patch, server fix is probably needed
 engine.dll,text,7698C,75,EB
+; fix saverestore
+engine.dll,text,0x141100,74,EB
+server.dll,text,0x144B50,32 C0,B0 01
+engine.dll,text,0x5DB9F9,41 B9 02 00 00 00,41 B9 00 00 00 00 
+server.dll,text,0x1EF026,20,FF
+client.dll,text,0x2571C5,B8 00 00 20 00,B8 00 00 FF 00
