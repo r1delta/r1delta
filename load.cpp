@@ -866,15 +866,15 @@ typedef __int64 (*SendTable_CalcDeltaType)(
 	int a8,
 	int a9);
 SendTable_CalcDeltaType SendTable_CalcDeltaOriginal;
-typedef __int64 (*SV_PackEntityType)(unsigned int a1, __int64 a2, __int64 a3, __int64 a4);
-SV_PackEntityType SV_PackEntityOriginal;
-__int64 __fastcall SV_PackEntity(unsigned int a1, __int64 a2, __int64 a3, __int64 a4)
+typedef __int64 (*CBaseServer__WriteDeltaEntitiesType)(__int64 a1, _DWORD* a2, __int64 a3, __int64 a4, __int64 a5, int a6, unsigned int a7);
+CBaseServer__WriteDeltaEntitiesType CBaseServer__WriteDeltaEntitiesOriginal;
+__int64 __fastcall CBaseServer__WriteDeltaEntities(__int64 a1, _DWORD* a2, __int64 a3, __int64 a4, __int64 a5, int a6, unsigned int a7)
 {
 	static uintptr_t engine = uintptr_t(GetModuleHandleA("engine.dll"));
 	static uintptr_t engine_ds = uintptr_t(GetModuleHandleA("engine_ds.dll"));
 
 	memcpy((void*)(engine + 0x2E9253C), (void*)(engine_ds + 0x200D00C), 8192);
-	return SV_PackEntityOriginal(a1, a2, a3, a4);
+	return CBaseServer__WriteDeltaEntitiesOriginal(a1, a2, a3, a4, a5, a6, a7);
 }
 __int64 SendTable_CalcDelta(
 	__int64 a1,
@@ -923,14 +923,18 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13B000), LPVOID(engine.GetModuleBase() + 0x1E9EA0), NULL); // CNetChan__CNetChan__dtor
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x017940), LPVOID(engine.GetModuleBase() + 0x028BC0), NULL); // CLC_SplitPlayerConnect__dtor
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x12F140), LPVOID(engine.GetModuleBase() + 0x1DC830), NULL); // SendTable_WriteInfos
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x12FE80), LPVOID(engine.GetModuleBase() + 0x1DD560), NULL); // SendTable_Encode
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x12FE80), LPVOID(engine.GetModuleBase() + 0x1DD560), NULL); // SendTable_Encode
 	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x130790), &SendTable_CalcDelta, reinterpret_cast<LPVOID*>(NULL));
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x116A70), LPVOID(engine.GetModuleBase() + 0x1C3C90), NULL); // CSendTablePrecalc::SetupFlatPropertyArray
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x62610), &SV_PackEntity, NULL); // 
-	//MH_CreateHook(LPVOID(engine.GetModuleBase() + 0xF12B0), LPVOID(engineDS.GetModuleBase() + 0x62100), NULL); // SV_EnsureInstanceBaseline football
-	SV_PackEntityOriginal = SV_PackEntityType(engine.GetModuleBase() + 0xF1930);
+	MH_CreateHook(LPVOID(engine.GetModuleBase() + 0x1DDE70), &SendTable_CalcDelta, reinterpret_cast<LPVOID*>(&SendTable_CalcDeltaOriginal));
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x116A70), LPVOID(engine.GetModuleBase() + 0x1C3C90), NULL); // CSendTablePrecalc::SetupFlatPropertyArray
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x50870), &CBaseServer__WriteDeltaEntities, NULL); // 
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x12F900), LPVOID(engine.GetModuleBase() + 0x01DCFE0), NULL); // SendTable_CullPropsFromProxies
+	MH_CreateHook(LPVOID(engine.GetModuleBase() + 0xF12B0), LPVOID(engineDS.GetModuleBase() + 0x62100), NULL); // SV_EnsureInstanceBaseline football
+	MH_CreateHook(LPVOID(engine.GetModuleBase() + 0xCCAE0), LPVOID(engineDS.GetModuleBase() + 0x3D160), NULL);
+	
+	CBaseServer__WriteDeltaEntitiesOriginal = CBaseServer__WriteDeltaEntitiesType(engine.GetModuleBase() + 0xDF020);
 
-	SendTable_CalcDeltaOriginal = SendTable_CalcDeltaType(engine.GetModuleBase() + 0x1DDE70);
+	//SendTable_CalcDeltaOriginal = SendTable_CalcDeltaType(engine.GetModuleBase() + 0x1DDE70);
 	for (const auto& msg : netMessages) {
 		std::string mangledName = ".?AV" + msg + "@@";
 		LPVOID dsVtable = engineDS.GetVirtualMethodTable(mangledName.c_str());
