@@ -935,37 +935,41 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x12F140), LPVOID(engine.GetModuleBase() + 0x1DC830), NULL); // SendTable_WriteInfos
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x12FE80), LPVOID(engine.GetModuleBase() + 0x1DD560), NULL); // SendTable_Encode
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x130790), &SendTable_CalcDelta, reinterpret_cast<LPVOID*>(NULL));
-	//MH_CreateHook(LPVOID(engine.GetModuleBase() + 0x1DDE70), &SendTable_CalcDelta, reinterpret_cast<LPVOID*>(&SendTable_CalcDeltaOriginal));
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x116A70), LPVOID(engine.GetModuleBase() + 0x1C3C90), NULL); // CSendTablePrecalc::SetupFlatPropertyArray
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x50870), &CBaseServer__WriteDeltaEntities, NULL); // 
+	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x50870), &CBaseServer__WriteDeltaEntities, NULL); // 
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x12F900), LPVOID(engine.GetModuleBase() + 0x01DCFE0), NULL); // SendTable_CullPropsFromProxies
 	MH_CreateHook(LPVOID(engine.GetModuleBase() + 0xF12B0), LPVOID(engineDS.GetModuleBase() + 0x62100), NULL); // SV_EnsureInstanceBaseline football
 	MH_CreateHook(LPVOID(engine.GetModuleBase() + 0xCCAE0), LPVOID(engineDS.GetModuleBase() + 0x3D160), NULL);
 	
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x116580), LPVOID(engine.GetModuleBase() + 0x1C37A0), NULL); // ???
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x12F3A0), LPVOID(engine.GetModuleBase() + 0x1DCA80), NULL); // ???
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x123240), LPVOID(engine.GetModuleBase() + 0x1D04E0), NULL); // ???
+	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x116580), LPVOID(engine.GetModuleBase() + 0x1C37A0), NULL); // ???
+	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x12F3A0), LPVOID(engine.GetModuleBase() + 0x1DCA80), NULL); // ???
+	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x123240), LPVOID(engine.GetModuleBase() + 0x1D04E0), NULL); // ???
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x130240), LPVOID(engine.GetModuleBase() + 0x1DD920), NULL); // SendTable_WritePropList
+
+	//MH_CreateHook(LPVOID(engine.GetModuleBase() + 0x1DDE70), &SendTable_CalcDelta, reinterpret_cast<LPVOID*>(&SendTable_CalcDeltaOriginal));
+
 
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x000000000571B0), LPVOID(engine.GetModuleBase() + 0x000000000E58B0), NULL); // CFrameSnapshotManager__BuildSnapshotList
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x00000000057D30), LPVOID(engine.GetModuleBase() + 0x000000000E6430), NULL); // CFrameSnapshotManager__CreatePackedEntity
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x000000000553B0), LPVOID(engine.GetModuleBase() + 0x000000000E3B00), NULL); // CFrameSnapshotManager__GetPreviouslySentPacket
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x000000000584E0), LPVOID(engine.GetModuleBase() + 0x000000000E6BE0), NULL); // CFrameSnapshot__ChangeLevel
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x00000000057630), LPVOID(engine.GetModuleBase() + 0x000000000E5D30), NULL); // CFrameSnapshot__UnkFunc1
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x000000000586A0), LPVOID(engine.GetModuleBase() + 0x000000000E6DA0), NULL); // CFrameSnapshot__UnkFunc10
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x00000000055340), LPVOID(engine.GetModuleBase() + 0x000000000E3A90), NULL); // CFrameSnapshot__UnkFunc11
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x00000000057100), LPVOID(engine.GetModuleBase() + 0x000000000E5800), NULL); // CFrameSnapshot__UnkFunc13
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x000000003FFD90), LPVOID(engine.GetModuleBase() + 0x000001805E78F0), NULL); // CFrameSnapshot__UnkFunc14
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x00000000058530), LPVOID(engine.GetModuleBase() + 0x000000000E6C30), NULL); // CFrameSnapshot__UnkFunc3
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x00000000057A50), LPVOID(engine.GetModuleBase() + 0x000000000E6150), NULL); // CFrameSnapshot__UnkFunc4
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x000000000586A0), LPVOID(engine.GetModuleBase() + 0x000000000E6DA0), NULL); // CFrameSnapshotManager::TakeTickSnapshot
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x00000000055340), LPVOID(engine.GetModuleBase() + 0x000000000E3A90), NULL); // CFrameSnapshotManager::UsePreviouslySentPacket
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x00000000057100), LPVOID(engine.GetModuleBase() + 0x000000000E5800), NULL); // CFrameSnapshotManager::AddExplicitDelete
+	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x000000003FFD90), LPVOID(engine.GetModuleBase() + 0x000001805E78F0), NULL); // dynamic_atexit_destructor_for__g_FrameSnapshotManager__
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x00000000058530), LPVOID(engine.GetModuleBase() + 0x000000000E6C30), NULL); // CFrameSnapshotManager::CreateEmptySnapshot
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x00000000057A50), LPVOID(engine.GetModuleBase() + 0x000000000E6150), NULL); // CFrameSnapshotManager::RemoveEntityReference
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x000000000552C0), LPVOID(engine.GetModuleBase() + 0x000000000E3A10), NULL); // CFrameSnapshot__UnkFunc5
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x000000000553E0), LPVOID(engine.GetModuleBase() + 0x000000000E3B30), NULL); // CFrameSnapshot__UnkFunc6
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x000000000552D0), LPVOID(engine.GetModuleBase() + 0x000000000E3A20), NULL); // CFrameSnapshot__UnkFunc7
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x000000000552D0), LPVOID(engine.GetModuleBase() + 0x000000000E3A20), NULL); // CFrameSnapshotManager::ShouldForceRepack
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x00000000058900), LPVOID(engine.GetModuleBase() + 0x000000000E7000), NULL); // CFrameSnapshot__dtor
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x00000000058360), LPVOID(engine.GetModuleBase() + 0x000000000E6A60), NULL); // CFrameSnapshot__UnkFunc8NotVCall
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x00000000058360), LPVOID(engine.GetModuleBase() + 0x000000000E6A60), NULL); // CFrameSnapshot::ReleaseReference
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x548A0), LPVOID(engine.GetModuleBase() + 0xE30F0), NULL); // CFrameSnapshot::ReleaseReference
+	
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x000000000583C0), LPVOID(engine.GetModuleBase() + 0x000000000E6AC0), NULL); // CFrameSnapshot__UnkFunc9NotVcall
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x0000000003C540), LPVOID(engine.GetModuleBase() + 0x000000000CBFD0), NULL); // j_CFrameSnapshot__UnkFunc8NotVCall
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x62610), LPVOID(engine.GetModuleBase() + 0xF1930), NULL); // j_CFrameSnapshot__UnkFunc8NotVCall
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x62610), LPVOID(engine.GetModuleBase() + 0xF1930), NULL); // SV_PackEntity
 	*(uintptr_t*)(engineDS.GetModuleBase() + 0x5426C0) = *(uintptr_t*)(engine.GetModuleBase() + 0x7BBEA8); // set engineds framesnapshotmanager to engine one
 	//*(uintptr_t*)(engine.GetModuleBase() + 0x7BBEA8)*(uintptr_t*)(engineDS.GetModuleBase() + 0x5426C0) =
 	CBaseServer__WriteDeltaEntitiesOriginal = CBaseServer__WriteDeltaEntitiesType(engine.GetModuleBase() + 0xDF020);
