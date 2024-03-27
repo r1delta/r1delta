@@ -881,7 +881,7 @@ __int64 __fastcall CBaseServer__WriteDeltaEntities(__int64 a1, _DWORD* a2, __int
 	static uintptr_t engine = uintptr_t(GetModuleHandleA("engine.dll"));
 	static uintptr_t engine_ds = uintptr_t(GetModuleHandleA("engine_ds.dll"));
 
-	memcpy((void*)(engine + 0x2E9253C), (void*)(engine_ds + 0x200D00C), 8192);
+	memcpy((void*)(engine + 0x2E9253C), (void*)(engine_ds + 0x200D00C), static_cast<size_t>(static_cast<size_t>(0x2E9BA40) - static_cast<size_t>(0x2E9253C))); // prevent overflow
 	return CBaseServer__WriteDeltaEntitiesOriginal(a1, a2, a3, a4, a5, a6, a7);
 }
 __int64 SendTable_CalcDelta(
