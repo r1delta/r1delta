@@ -244,3 +244,9 @@ server.dll,text,0x144B50,32 C0,B0 01
 engine.dll,text,0x5DB9F9,41 B9 02 00 00 00,41 B9 00 00 00 00 
 server.dll,text,0x1EF026,20,FF
 client.dll,text,0x2571C5,B8 00 00 20 00,B8 00 00 FF 00
+; make persistence always ready
+engine.dll,text,0x210060,48 83 EC 28,B0 01 C3
+; fix fs crash???
+filesystem_stdio.dll,text,0x74E1E,74 1A,EB 1A
+; fix fps drop :)
+vguimatsurface.dll,text,0x181574,"60.","2e1\x00"
