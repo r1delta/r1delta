@@ -613,6 +613,38 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 			//sub_18006EEB0 = r1vtable[184];
 			//sub_18006E750 = r1vtable[185];
 			CVEngineServer__UnkFunc77 = r1vtable[186];
+			// dedi nullsubs
+			CVEngineServer__RequestClientScreenshot = r1vtable[132];
+			CVEngineServer__UnkFunc3 = r1vtable[132];
+			CVEngineServer__UnkFunc8 = r1vtable[132];
+			CVEngineServer__AddPlaylistOverride = r1vtable[132];
+			CVEngineServer__MarkPlaylistReadyForOverride = r1vtable[132];
+			CVEngineServer__UnknownPlaylistSetup = r1vtable[132];
+			CVEngineServer__UnknownGamemodeSetup = r1vtable[132];
+			CVEngineServer__IsCoop = r1vtable[132];
+			CVEngineServer__GetSkillFlag_Unused = r1vtable[132];
+			CVEngineServer__UnkFunc34 = r1vtable[132];
+			CVEngineServer__NullSub2 = r1vtable[132];
+			CVEngineServer__NullSub3 = r1vtable[132];
+			CVEngineServer__NullSub4 = r1vtable[132];
+			CVEngineServer__FuncThatReturnsFF_12 = r1vtable[132];
+			CVEngineServer__FuncThatReturnsFF_11 = r1vtable[132];
+			CVEngineServer__FuncThatReturnsFF_10 = r1vtable[132];
+			CVEngineServer__FuncThatReturnsFF_9 = r1vtable[132];
+			CVEngineServer__FuncThatReturnsFF_8 = r1vtable[132];
+			CVEngineServer__FuncThatReturnsFF_7 = r1vtable[132];
+			CVEngineServer__FuncThatReturnsFF_6 = r1vtable[132];
+			CVEngineServer__FuncThatReturnsFF_5 = r1vtable[132];
+			CVEngineServer__FuncThatReturnsFF_4 = r1vtable[132];
+			CVEngineServer__FuncThatReturnsFF_3 = r1vtable[132];
+			CVEngineServer__FuncThatReturnsFF_2 = r1vtable[132];
+			CVEngineServer__FuncThatReturnsFF_1 = r1vtable[132];
+			CVEngineServer__NullSub5 = r1vtable[132];
+			CVEngineServer__NullSub6 = r1vtable[132];
+			CVEngineServer__UpdateClientHashtag = r1vtable[132];
+			CVEngineServer__UnkFunc80 = r1vtable[132];
+			CVEngineServer__UnkFunc81 = r1vtable[132];
+			CVEngineServer__UnkFunc82 = r1vtable[132];
 		}
 		else {
 			CVEngineServer__ChangeLevel = r1vtable[0];
