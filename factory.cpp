@@ -480,8 +480,8 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 			CVEngineServer__GetReplayFrame = r1vtable[50];
 			CVEngineServer__UnkFunc4 = r1vtable[51];
 			CVEngineServer__UnkFunc5 = r1vtable[52];
-			CVEngineServer__UnkFunc6 = r1vtable[53];
-			CVEngineServer__UnkFunc7 = r1vtable[54];
+			CVEngineServer__UnkFunc7 = r1vtable[53];
+			CVEngineServer__UnkFunc8 = r1vtable[54];
 			CEngineClient__ParseFile = r1vtable[55];
 			CEngineClient__CopyLocalFile = r1vtable[56];
 			CVEngineServer__PlaybackTempEntity = r1vtable[57];
@@ -616,7 +616,7 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 			// dedi nullsubs
 			CVEngineServer__RequestClientScreenshot = r1vtable[132];
 			CVEngineServer__UnkFunc3 = r1vtable[132];
-			CVEngineServer__UnkFunc8 = r1vtable[132];
+			CVEngineServer__UnkFunc6 = r1vtable[132];
 			CVEngineServer__AddPlaylistOverride = r1vtable[132];
 			CVEngineServer__MarkPlaylistReadyForOverride = r1vtable[132];
 			CVEngineServer__UnknownPlaylistSetup = r1vtable[132];
