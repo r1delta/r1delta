@@ -960,8 +960,8 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x000000003FFD90), LPVOID(engine.GetModuleBase() + 0x000001805E78F0), NULL); // dynamic_atexit_destructor_for__g_FrameSnapshotManager__
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x00000000058530), LPVOID(engine.GetModuleBase() + 0x000000000E6C30), NULL); // CFrameSnapshotManager::CreateEmptySnapshot
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x00000000057A50), LPVOID(engine.GetModuleBase() + 0x000000000E6150), NULL); // CFrameSnapshotManager::RemoveEntityReference
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x000000000552C0), LPVOID(engine.GetModuleBase() + 0x000000000E3A10), NULL); // CFrameSnapshot__UnkFunc5
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x000000000553E0), LPVOID(engine.GetModuleBase() + 0x000000000E3B30), NULL); // CFrameSnapshot__UnkFunc6
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x000000000552C0), LPVOID(engine.GetModuleBase() + 0x000000000E3A10), NULL); // CFrameSnapshotManager::AddEntityReference
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x000000000553E0), LPVOID(engine.GetModuleBase() + 0x000000000E3B30), NULL); // CFrameSnapshotManager::GetPackedEntity
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x000000000552D0), LPVOID(engine.GetModuleBase() + 0x000000000E3A20), NULL); // CFrameSnapshotManager::ShouldForceRepack
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x00000000058900), LPVOID(engine.GetModuleBase() + 0x000000000E7000), NULL); // CFrameSnapshot__dtor
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x00000000058360), LPVOID(engine.GetModuleBase() + 0x000000000E6A60), NULL); // CFrameSnapshot::ReleaseReference
@@ -970,7 +970,7 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x000000000583C0), LPVOID(engine.GetModuleBase() + 0x000000000E6AC0), NULL); // CFrameSnapshot__UnkFunc9NotVcall
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x0000000003C540), LPVOID(engine.GetModuleBase() + 0x000000000CBFD0), NULL); // j_CFrameSnapshot__UnkFunc8NotVCall
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x62610), LPVOID(engine.GetModuleBase() + 0xF1930), NULL); // SV_PackEntity
-	*(uintptr_t*)(engineDS.GetModuleBase() + 0x5426C0) = *(uintptr_t*)(engine.GetModuleBase() + 0x7BBEA8); // set engineds framesnapshotmanager to engine one
+	*(uintptr_t*)(engineDS.GetModuleBase() + 0x5426C0) = *(uintptr_t*)(engine.GetModuleBase() + 0x7BBEA8); // set engineds framesnapshotmanager vtable(?) to engine one
 	//*(uintptr_t*)(engine.GetModuleBase() + 0x7BBEA8)*(uintptr_t*)(engineDS.GetModuleBase() + 0x5426C0) =
 	CBaseServer__WriteDeltaEntitiesOriginal = CBaseServer__WriteDeltaEntitiesType(engine.GetModuleBase() + 0xDF020);
 
