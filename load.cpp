@@ -882,6 +882,7 @@ __int64 __fastcall CBaseServer__WriteDeltaEntities(__int64 a1, _DWORD* a2, __int
 	static uintptr_t engine_ds = uintptr_t(GetModuleHandleA("engine_ds.dll"));
 
 	memcpy((void*)(engine + 0x2E9253C), (void*)(engine_ds + 0x200D00C), static_cast<size_t>(static_cast<size_t>(0x2E9BA40) - static_cast<size_t>(0x2E9253C))); // prevent overflow
+	memcpy((void*)(engine + 0x2965048), (void*)(engine_ds + 0x1C836A8), 32);
 	return CBaseServer__WriteDeltaEntitiesOriginal(a1, a2, a3, a4, a5, a6, a7);
 }
 __int64 SendTable_CalcDelta(
@@ -939,6 +940,8 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x50870), &CBaseServer__WriteDeltaEntities, NULL); // 
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x12F900), LPVOID(engine.GetModuleBase() + 0x01DCFE0), NULL); // SendTable_CullPropsFromProxies
 	MH_CreateHook(LPVOID(engine.GetModuleBase() + 0xF12B0), LPVOID(engineDS.GetModuleBase() + 0x62100), NULL); // SV_EnsureInstanceBaseline football
+	//MH_CreateHook(LPVOID(engine.GetModuleBase() + 0xDDF00), LPVOID(engineDS.GetModuleBase() + 0x4F710), NULL);
+
 	MH_CreateHook(LPVOID(engine.GetModuleBase() + 0xCCAE0), LPVOID(engineDS.GetModuleBase() + 0x3D160), NULL);
 	MH_CreateHook(LPVOID(engine.GetModuleBase() + 0x161050), LPVOID(engineDS.GetModuleBase() + 0xBA290), NULL); // CBaseEdict::GetChangeAccessor
 	
