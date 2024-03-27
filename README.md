@@ -166,3 +166,18 @@ TITANFALL™ is a trademark of Respawn Entertainment, LLC.
 [![Build Status](https://dev.azure.com/azure-sdk/public/_apis/build/status/cli/Azure.azure-cli?branchName=dev)](https://dev.azure.com/azure-sdk/public/_build/latest?definitionId=246&branchName=dev)
 [![Slack](https://img.shields.io/badge/Slack-azurecli.slack.com-blue.svg)](https://azurecli.slack.com)
 
+
+
+
+
+
+
+
+
+
+
+
+the vitalfish
+![image](https://github.com/r1delta/r1delta/assets/39478251/50434595-7ac5-45fe-a10a-3aa57f9815d0)
+
+
