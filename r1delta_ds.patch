@@ -33,4 +33,16 @@ engine_ds.dll,text,16A4E0,48 89 5C,B0 01 C3
 ; skip signonstate 5 (unused)
 engine_ds.dll,text,4ACE6,05,06
 ; end my suffering
-engine.dll,text,0xF1C8D,48 89 B0 F8 04 00,48 89 B0 68 04 00
+;engine.dll,text,0xF1C8D,48 89 B0 F8 04 00,48 89 B0 68 04 00
+;engine.dll,text,0xF1B42,44 8B 83 00 05 00,44 8B 83 70 04 00
+;engine.dll,text,0xF1B49,48 8B 93 F0 04 00,48 8B 93 60 04 00
+;engine.dll,text,0xF1BDB,48 8B 8B F8 04 00,48 8B 8B 68 04 00
+;engine.dll,text,0xF1BED,48 8B B3 F8 04 00 00 33 C0 48 89 83 F8 04 00 00,48 8B B3 68 04 00 00 33 C0 48 89 83 68 04 00 00
+; fix sendtable flags
+engine_ds.dll,text,0x116BF7,F7 40 58 80 80 02 00,F7 40 58 80 00 05 00
+engine_ds.dll,text,0x13006D,F7 40 58 80 80 02 00,F7 40 58 80 00 05 00
+engine_ds.dll,text,0x130590,F7 43 58 00 00 04 00,F7 43 58 00 00 08 00
+engine_ds.dll,text,0x130988,F7 41 58 00 00 01 00,F7 41 58 00 00 02 00
+engine_ds.dll,text,0x130A93,F7 40 58 00 80 00 00,F7 40 58 00 00 01 00
+; fix svc_snapshot message id
+engine_ds.dll,text,0x50A09,B9 21 00 00 00,B9 24 00 00 00
