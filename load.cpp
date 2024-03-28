@@ -969,9 +969,9 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 	MH_CreateHook(LPVOID(engine.GetModuleBase() + 0x15D4C0), LPVOID(engineDS.GetModuleBase() + 0xB7E20), NULL); // PackedEntity__AllocAndCopyPadded
 	MH_CreateHook(LPVOID(engine.GetModuleBase() + 0x15D5C0), LPVOID(engineDS.GetModuleBase() + 0xB7F20), NULL); // PackedEntity__UnkReFunc
 	MH_CreateHook(LPVOID(engine.GetModuleBase() + 0x15DD10), LPVOID(engineDS.GetModuleBase() + 0xB8680), NULL); // PackedEntity::SetRecipients
-	MH_CreateHook(LPVOID(engine.GetModuleBase() + 0x1DDE70), LPVOID(engineDS.GetModuleBase() + 0x130790), NULL);
-	MH_CreateHook(LPVOID(engine.GetModuleBase() + 0x15D950), LPVOID(engineDS.GetModuleBase() + 0xB82B0), NULL);
-	MH_CreateHook(LPVOID(engine.GetModuleBase() + 0xF1260), LPVOID(engineDS.GetModuleBase() + 0x620B0), NULL);
+	MH_CreateHook(LPVOID(engine.GetModuleBase() + 0x1DDE70), LPVOID(engineDS.GetModuleBase() + 0x130790), NULL); // SendTable_CalcDelta
+	MH_CreateHook(LPVOID(engine.GetModuleBase() + 0x15D950), LPVOID(engineDS.GetModuleBase() + 0xB82B0), NULL); // PackedEntity::CompareRecipients
+	MH_CreateHook(LPVOID(engine.GetModuleBase() + 0xF1260), LPVOID(engineDS.GetModuleBase() + 0x620B0), NULL); // unknown edict change func
 
 	
 	//memcpy((void*)(engineDS.GetModuleBase() + 0x550760), (void*)(engine.GetModuleBase() + 0x7CB3F0), (0x550968 - 0x550760));
