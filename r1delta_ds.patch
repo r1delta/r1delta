@@ -32,4 +32,5 @@ engine_ds.dll,text,457F5,75,EB
 engine_ds.dll,text,16A4E0,48 89 5C,B0 01 C3
 ; skip signonstate 5 (unused)
 engine_ds.dll,text,4ACE6,05,06
-
+; end my suffering
+engine.dll,text,0xF1C8D,48 89 B0 F8 04 00,48 89 B0 68 04 00
