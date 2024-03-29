@@ -220,7 +220,10 @@ engine_ds.dll,rdata,0x422980,"vpk/server_","vpk/client_\x00"
 engine_ds.dll,rdata,0x4229A8,"%sserver_%s%s","%sclient_%s%s\x00"
 filesystem_stdio.dll,rdata,0xD07A8,"vpk/server_%s.bsp.pak000%s","vpk/client_%s.bsp.pak000%s"
 ; whoops:tm:
-engine_ds.dll,data,0x111290,48,C3
+;engine_ds.dll,data,0x111290,48,C3
+engine_ds.dll,data,0x42DAF0,"a","no.invalid\x00"
+engine_ds.dll,data,0x1111BB,0F 84 1F FF FF FF,90 90 90 90 90 90
+engine_ds.dll,data,0x11125F,0F 84 7B FE FF FF,E9 7C FE FF FF
 ; whoops:tm: 2
 engine_ds.dll,data,0xECD0,40,C3
 ; unfuck dedi static mem
