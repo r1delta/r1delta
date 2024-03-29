@@ -924,6 +924,16 @@ bool __fastcall SendTable_Encode(
 {
 	return SendTable_EncodeOriginal(a1, a2, a3, a4, pRecipients, 0, a7, a8);
 }
+typedef __int64 (*bf_write__WriteUBitLongType)(BFWrite* a1, unsigned int a2, signed int a3);
+bf_write__WriteUBitLongType bf_write__WriteUBitLongOriginal;
+__int64 __fastcall bf_write__WriteUBitLong(BFWrite* a1, unsigned int a2, signed int a3)
+{
+	static uintptr_t engineDS = uintptr_t(GetModuleHandleA("engine_ds.dll"));
+	auto ret = bf_write__WriteUBitLongOriginal(a1, a2, a3);
+	if (uintptr_t(_ReturnAddress()) == (engineDS+0x51018) || uintptr_t(_ReturnAddress()) == (engineDS + 0x5101D))
+		bf_write__WriteUBitLongOriginal(a1, 0, 14);
+	return ret;
+}
 __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 {
 	CModule engine("engine.dll", (uintptr_t)LoadLibraryA("engine.dll"));
@@ -972,6 +982,8 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13B000), LPVOID(engine.GetModuleBase() + 0x1E9EA0), NULL); // CNetChan__CNetChan__dtor
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x017940), LPVOID(engine.GetModuleBase() + 0x028BC0), NULL); // CLC_SplitPlayerConnect__dtor
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x12F140), LPVOID(engine.GetModuleBase() + 0x1DC830), NULL); // SendTable_WriteInfos
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x71C0), &bf_write__WriteUBitLong, reinterpret_cast<LPVOID*>(&bf_write__WriteUBitLongOriginal)); // bf_write__WriteUBitLong
+	
 	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x62610), LPVOID(engine.GetModuleBase() + 0xF1930), NULL); // SV_PackEntity
 	//MH_CreateHook(LPVOID(engine.GetModuleBase() + 0xE3A90), LPVOID(CreateFunction((void*)(engineDS.GetModuleBase() + 0x55340), (void*)(engineDS.GetModuleBase() + 0x1C76250))), NULL); // CFrameSnapshotManager::UsePreviouslySentPacket
 	//MH_CreateHook(LPVOID(engine.GetModuleBase() + 0xE3B00), LPVOID(CreateFunction((void*)(engineDS.GetModuleBase() + 0x553B0), (void*)(engineDS.GetModuleBase() + 0x1C76250))), NULL); // CFrameSnapshotManager::GetPreviouslySentPacket

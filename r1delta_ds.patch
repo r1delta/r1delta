@@ -46,3 +46,5 @@ engine_ds.dll,text,0x130988,F7 41 58 00 00 01 00,F7 41 58 00 00 02 00
 engine_ds.dll,text,0x130A93,F7 40 58 00 80 00 00,F7 40 58 00 00 01 00
 ; fix svc_snapshot message id
 engine_ds.dll,text,0x50A09,B9 21 00 00 00,B9 24 00 00 00
+; fix CServerGameDLL::OnReceiveSayTextMessage offset
+engine_ds.dll,text,0x4BBBC,48 8B 86 30 02 00,48 8B 86 38 02 00
