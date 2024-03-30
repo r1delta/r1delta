@@ -15,9 +15,9 @@ extern ReadFromCacheType readFromCache;
 bool ReadFromCacheHook(IFileSystem* filesystem, char* path, void* result);
 
 typedef FileHandle_t(*ReadFileFromFilesystemType)(
-	IFileSystem* filesystem, const char* pPath, const char* pOptions, int64_t a4, uint32_t a5);
+	IFileSystem* filesystem, const char* pPath, const char* pOptions, int64_t a4, uint32_t a5, void* a6);
 extern ReadFileFromFilesystemType readFileFromFilesystem;
-FileHandle_t ReadFileFromFilesystemHook(IFileSystem* filesystem, const char* pPath, const char* pOptions, int64_t a4, uint32_t a5);
+FileHandle_t ReadFileFromFilesystemHook(IFileSystem* filesystem, const char* pPath, const char* pOptions, int64_t a4, uint32_t a5, void* a6);
 
 bool V_IsAbsolutePath(const char* pStr);
 bool TryReplaceFile(const char* pszFilePath);

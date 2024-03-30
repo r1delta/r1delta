@@ -378,7 +378,7 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 		uintptr_t CVEngineServer__UnkFunc54;
 		uintptr_t CVEngineServer__UnkFunc55;
 		uintptr_t CVEngineServer__UnkFunc56;
-		uintptr_t CVEngineServer__UnkFunc57;
+		uintptr_t CVEngineServer__DisconnectClient;
 		uintptr_t CVEngineServer__UnkFunc58;
 		uintptr_t CVEngineServer__UnkFunc59;
 		uintptr_t CVEngineServer__UnkFunc60;
@@ -565,8 +565,8 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 			CVEngineServer__MarkTeamsAsBalanced_Off = r1vtable[136];
 			CVEngineServer__UnkFunc54 = r1vtable[137];
 			CVEngineServer__UnkFunc55 = r1vtable[138];
-			CVEngineServer__UnkFunc56 = r1vtable[139];
-			CVEngineServer__UnkFunc57 = r1vtable[140];
+			CVEngineServer__UnkFunc56 = r1vtable[138];
+			CVEngineServer__DisconnectClient = r1vtable[139];
 			CVEngineServer__UnkFunc58 = r1vtable[141];
 			CVEngineServer__UnkFunc59 = r1vtable[142];
 			CVEngineServer__UnkFunc60 = r1vtable[143];
@@ -809,7 +809,7 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 			CVEngineServer__UnkFunc54 = r1vtable[146];
 			CVEngineServer__UnkFunc55 = r1vtable[147];
 			CVEngineServer__UnkFunc56 = r1vtable[148];
-			CVEngineServer__UnkFunc57 = r1vtable[149];
+			CVEngineServer__DisconnectClient = r1vtable[149];
 			CVEngineServer__UnkFunc58 = r1vtable[150];
 			CVEngineServer__UnkFunc59 = r1vtable[151];
 			CVEngineServer__UnkFunc60 = r1vtable[152];
@@ -1039,7 +1039,7 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 			CreateFunction(((void*)CVEngineServer__UnkFunc54), (void*)engineinterface),
 			CreateFunction(((void*)CVEngineServer__UnkFunc55), (void*)engineinterface),
 			CreateFunction(((void*)CVEngineServer__UnkFunc56), (void*)engineinterface),
-			CreateFunction(((void*)CVEngineServer__UnkFunc57), (void*)engineinterface),
+			CreateFunction(((void*)CVEngineServer__DisconnectClient), (void*)engineinterface),
 			CreateFunction(((void*)CVEngineServer__UnkFunc58), (void*)engineinterface),
 			CreateFunction(((void*)CVEngineServer__UnkFunc59), (void*)engineinterface),
 			CreateFunction(((void*)CVEngineServer__UnkFunc60), (void*)engineinterface),

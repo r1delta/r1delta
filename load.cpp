@@ -77,15 +77,38 @@ void sub_180473550(char* a1, signed __int64 a2, const char* a3, ...)
 
 }
 __declspec(dllexport) void whatever2() { Error(); };
+typedef void (*CUtlBuffer__SetExternalBufferType)(__int64 a1, __int64 a2, __int64 a3, __int64 a4, char a5);
+CUtlBuffer__SetExternalBufferType CUtlBuffer__SetExternalBufferOriginal;
+char* textbuf = 0;
+__int64 pdefsize = 0;
+void __fastcall CUtlBuffer__SetExternalBuffer(__int64 a1, __int64 a2, __int64 a3, __int64 a4, char a5)
+{
+	static uintptr_t engineDS = uintptr_t(GetModuleHandleA("engine_ds.dll"));
+	if (uintptr_t(_ReturnAddress()) == (engineDS + 0x169F03)) {
+		if (!textbuf)
+			textbuf = (char*)malloc(0x50238);
+		a2 = (__int64)(textbuf);
+		a3 = 0x50238;
+	}
+	return CUtlBuffer__SetExternalBufferOriginal(a1, a2, a3, a4, a5);
+}
+__int64 __fastcall sub_160130(__int64* a1, __int64* a2)
+{
+	__int64 result; // rax
 
-typedef char(__fastcall* ParsePDATAType)(int a1, int a2, const char* a3, const char* a4);
+	*a1 = (__int64)textbuf;
+	result = pdefsize;
+	*a2 = pdefsize;
+	return result;
+}
+
+typedef char(__fastcall* ParsePDATAType)(__int64 a1, __int64 a2, __int64 a3, const char* a4);
 ParsePDATAType ParsePDATAOriginal;
 
-char __fastcall ParsePDATA(int a1, int a2, const char* a3, const char* a4)
+char __fastcall ParsePDEF(__int64 a1, __int64 a2, __int64 a3, const char* a4)
 {
-	return true;
-	static char* newbuf = (char*)malloc(0x65536);
-	a3 = newbuf;
+	a1 = (__int64)(textbuf);
+	pdefsize = a2;
 	return ParsePDATAOriginal(a1, a2, a3, a4);
 }
 typedef void (*AddSearchPathType)(IFileSystem* fileSystem, const char* pPath, const char* pathID, unsigned int addType);
@@ -1199,11 +1222,6 @@ void __stdcall LoaderNotificationCallback(
 			MH_CreateHook(LPVOID(server_mod + 0x41E070), &CHL2_Player_Precache, 0);
 		}
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x72360), &cl_DumpPrecacheStats, NULL);
-		if (IsDedicatedServer()) {
-			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x6A420), &ReadFileFromVPKHook, reinterpret_cast<LPVOID*>(&readFileFromVPK));
-			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x9C20), &ReadFromCacheHook, reinterpret_cast<LPVOID*>(&readFromCache));
-			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x15F20), &ReadFileFromFilesystemHook, reinterpret_cast<LPVOID*>(&readFileFromFilesystem));
-		}
 		MH_EnableHook(MH_ALL_HOOKS);
 		std::cout << "did hooks" << std::endl;
 
@@ -1244,6 +1262,9 @@ void __stdcall LoaderNotificationCallback(
 			0x61c86
 		};
 		HMODULE hModule = GetModuleHandleA("engine_ds.dll");
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("dedicated.dll") + 0x1752B0), &ReadFileFromVPKHook, reinterpret_cast<LPVOID*>(&readFileFromVPK));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("dedicated.dll") + 0x750F0), &ReadFromCacheHook, reinterpret_cast<LPVOID*>(&readFromCache));
+		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("dedicated.dll") + 0x84720), &ReadFileFromFilesystemHook, reinterpret_cast<LPVOID*>(&readFileFromFilesystem));
 
 		for (auto offset : offsets) {
 			int* address = reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(hModule) + offset);
@@ -1261,7 +1282,10 @@ void __stdcall LoaderNotificationCallback(
 			FlushInstructionCache(GetCurrentProcess(), address, sizeof(uintptr_t));
 		}
 
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x1693D0), &ParsePDATA, reinterpret_cast<LPVOID*>(&ParsePDATAOriginal));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x1693D0), &ParsePDEF, reinterpret_cast<LPVOID*>(&ParsePDATAOriginal));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x3259C0), &CUtlBuffer__SetExternalBuffer, reinterpret_cast<LPVOID*>(&CUtlBuffer__SetExternalBufferOriginal));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x160130), &sub_160130, reinterpret_cast<LPVOID*>(NULL));
+
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x433C0), &ProcessConnectionlessPacket, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0xA1B90), &Host_InitDedicated, reinterpret_cast<LPVOID*>(&Host_InitDedicatedOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x45C00), &CBaseClient__ProcessClientInfo, reinterpret_cast<LPVOID*>(NULL));

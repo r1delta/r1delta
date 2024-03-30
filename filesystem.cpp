@@ -69,12 +69,12 @@ FileHandle_t ReadFileFromVPKHook(VPKData* vpkInfo, __int64* b, char* filename)
 	return readFileFromVPK(vpkInfo, b, filename);
 }
 
-FileHandle_t ReadFileFromFilesystemHook(IFileSystem* filesystem, const char* pPath, const char* pOptions, int64_t a4, uint32_t a5)
+FileHandle_t ReadFileFromFilesystemHook(IFileSystem* filesystem, const char* pPath, const char* pOptions, int64_t a4, uint32_t a5, void* a6)
 {
 	// this isn't super efficient, but it's necessary, since calling addsearchpath in readfilefromvpk doesn't work, possibly refactor later
 	// it also might be possible to hook functions that are called later, idk look into callstack for ReadFileFromVPK
-	if (true)
-		TryReplaceFile((char*)pPath);
+	//if (true)
+	//	TryReplaceFile((char*)pPath);
 
-	return readFileFromFilesystem(filesystem, pPath, pOptions, a4, a5);
+	return readFileFromFilesystem(filesystem, pPath, pOptions, a4, a5, a6);
 }

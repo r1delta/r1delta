@@ -48,3 +48,10 @@ engine_ds.dll,text,0x130A93,F7 40 58 00 80 00 00,F7 40 58 00 00 01 00
 engine_ds.dll,text,0x50A09,B9 21 00 00 00,B9 24 00 00 00
 ; fix CServerGameDLL::OnReceiveSayTextMessage offset
 engine_ds.dll,text,0x4BBBC,48 8B 86 30 02 00,48 8B 86 38 02 00
+; no dedi search
+engine_ds.dll,text,0xA210,48,C3
+; no dedi telemetry
+engine_ds.dll,text,0xA0863,0F 86 A4 08 00 00,E9 A5 08 00 00
+; don't send sendtables (they're fucked)
+; engine_ds.dll,text,0x4D5F6,75 6F,90 90
+; it turns out the sendtables are not the problem somehow
