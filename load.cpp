@@ -107,9 +107,15 @@ ParsePDATAType ParsePDATAOriginal;
 
 char __fastcall ParsePDEF(__int64 a1, __int64 a2, __int64 a3, const char* a4)
 {
+	char v10[53264];
+	static auto whatthefuck = (__int64 (*)(__int64 a1, int* a2, __int64 a3, int a4, unsigned int a5, unsigned int a6, unsigned int a7))(uintptr_t(GetModuleHandleA("engine.dll")) + 0x42A450);
 	a1 = (__int64)(textbuf);
 	pdefsize = a2;
-	return ParsePDATAOriginal(a1, a2, a3, a4);
+	auto ret = ParsePDATAOriginal(a1, a2, a3, a4);
+	int whatever = a2;
+	memcpy(v10, (void*)a1, sizeof(v10));
+	int v4 = whatthefuck(a1, &whatever, (__int64)v10, a2, 1u, 0, 0);
+	return ret;
 }
 typedef void (*AddSearchPathType)(IFileSystem* fileSystem, const char* pPath, const char* pathID, unsigned int addType);
 AddSearchPathType addSearchPathOriginal;
@@ -1135,8 +1141,16 @@ typedef void (*COM_InitType)();
 COM_InitType COM_InitOriginal;
 typedef void (*SaveRestore_InitType)(__int64);
 SaveRestore_InitType SaveRestore_Init;
-
-
+void* pdataempty = 0;
+typedef __int64 (*sub_14EF30Type)(__int64 a1, __int64 a2, int a3);
+sub_14EF30Type sub_14EF30Original;
+__int64 __fastcall sub_14EF30(__int64 a1, __int64 a2, int a3)
+{
+	if (!pdataempty) {
+		pdataempty = calloc(0x8800, 1);
+	}
+	return sub_14EF30Original(a1, (__int64)pdataempty, 0x8800);
+}
 void COM_Init()
 {
 	COM_InitOriginal();
@@ -1289,7 +1303,8 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x433C0), &ProcessConnectionlessPacket, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0xA1B90), &Host_InitDedicated, reinterpret_cast<LPVOID*>(&Host_InitDedicatedOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x45C00), &CBaseClient__ProcessClientInfo, reinterpret_cast<LPVOID*>(NULL));
-
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x14EF30), &sub_14EF30, reinterpret_cast<LPVOID*>(&sub_14EF30Original));
+			
 
 		MH_EnableHook(MH_ALL_HOOKS);
 
