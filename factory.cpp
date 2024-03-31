@@ -20,6 +20,7 @@
 #include <string.h>
 #include <set>
 #include <map>
+#include "thirdparty/silver-bun/module.h"
 
 #pragma comment(lib, "Dbghelp.lib")
 
@@ -2376,187 +2377,185 @@ void __fastcall CScriptManager__DestroyVM(void* a1, void* vmptr)
 	}
 	return CScriptManager__DestroyVMOriginal(a1, vmptr);
 }
-void* CreateNewNetCHANVTable(void* thisptr) {
-	uintptr_t* originalvtable = *(uintptr_t**)thisptr;
-	int index = 0;
-	uintptr_t CNetChan__GetName = originalvtable[index++];
-	uintptr_t CNetChan__GetAddress = originalvtable[index++];
-	uintptr_t CNetChan__GetTime = originalvtable[index++];
-	uintptr_t CNetChan__GetTimeConnected = originalvtable[index++];
-	uintptr_t CNetChan__GetBufferSize = originalvtable[index++];
-	uintptr_t CNetChan__GetDataRate = originalvtable[index++];
-	uintptr_t CNetChan__IsLoopback = originalvtable[index++];
-	uintptr_t CNetChan__IsTimingOut = originalvtable[index++];
-	uintptr_t CNetChan__IsPlayback = originalvtable[index++];
-	uintptr_t CNetChan__GetLatency = originalvtable[index++];
-	uintptr_t CNetChan__GetAvgLatency = originalvtable[index++];
-	uintptr_t CNetChan__GetAvgLoss = originalvtable[index++];
-	uintptr_t CNetChan__GetAvgChoke = originalvtable[index++];
-	uintptr_t CNetChan__GetAvgData = originalvtable[index++];
-	uintptr_t CNetChan__GetAvgPackets = originalvtable[index++];
-	uintptr_t CNetChan__GetTotalData = originalvtable[index++];
-	uintptr_t CNetChan__GetTotalPackets = originalvtable[index++];
-	uintptr_t CNetChan__GetSequenceNr = originalvtable[index++];
-	uintptr_t CNetChan__IsValidPacket = originalvtable[index++];
-	uintptr_t CNetChan__GetPacketTime = originalvtable[index++];
-	uintptr_t CNetChan__GetPacketBytes = originalvtable[index++];
-	uintptr_t CNetChan__GetStreamProgress = originalvtable[index++];
-	uintptr_t CNetCHan__GetTimeSinceLastReceived = originalvtable[index++];
-	uintptr_t CNetChan__GetPacketResponseLatency = originalvtable[index++];
-	uintptr_t CNetChan__GetRemoteFramerate = originalvtable[index++];
-	uintptr_t CNetChan__GetTimeoutSeconds = originalvtable[index++];
-	uintptr_t CNetCHan____DESTROY = originalvtable[index++];
-	uintptr_t CNetChan__SetDataRate = originalvtable[index++];
-	uintptr_t CNetChan__RegisterMessage = originalvtable[index++];
-	uintptr_t CNetCHan__StartStreaming = originalvtable[index++];
-	uintptr_t CNetChan__ResetStreaming = originalvtable[index++];
-	uintptr_t CNetChan__SetTimeout = originalvtable[index++];
-	uintptr_t CNetChan__SetDemoRecorder = originalvtable[index++];
-	uintptr_t CNetChan__SetChallengeNr = originalvtable[index++];
-	uintptr_t CNetChan__Reset = originalvtable[index++];
-	uintptr_t CNetChan__Clear = originalvtable[index++];
-	uintptr_t CNetChan__Shutdown = originalvtable[index++];
-	uintptr_t CNetChan__ProcessPlayback = originalvtable[index++];
-	uintptr_t CNetChan__ProcessStream = originalvtable[index++];
-	uintptr_t CNetChan__ProcessPacket = originalvtable[index++];
-	uintptr_t CNetChan____Unk1 = originalvtable[index++];
-	uintptr_t CNetChan__SendNetMsg = originalvtable[index++];
-	uintptr_t CNetChan__SendData = originalvtable[index++];
-	uintptr_t CNetChan__SendFile = originalvtable[index++];
-	uintptr_t CNetChan__DenyFile = originalvtable[index++];
-	uintptr_t CNetChan__RequestFile_OLD = originalvtable[index++];
-	uintptr_t CNetChan__SetChoked = originalvtable[index++];
-	uintptr_t CNetChan____Unk2 = originalvtable[index++];
-	uintptr_t CNetChan____Unk3 = originalvtable[index++];
-	uintptr_t CNetChan____Unk4 = originalvtable[index++];
-	uintptr_t CNetChan____Unk5 = originalvtable[index++];
-	uintptr_t CNetChan____Unk6 = originalvtable[index++];
-	uintptr_t CNetChan__SendDatagram = originalvtable[index++];
-	uintptr_t CNetChan__PostSendDatagram = originalvtable[index++];
-	uintptr_t CNetChan__Transmit = originalvtable[index++];
-	uintptr_t CNetChan__GetRemoteAddress = originalvtable[index++];
-	uintptr_t CNetChan__GetMsgHandler = originalvtable[index++];
-	uintptr_t CNetChan__GetDropNumber = originalvtable[index++];
-	uintptr_t CNetChan__GetSocket = originalvtable[index++];
-	uintptr_t CNetChan__GetChallengeNr = originalvtable[index++];
-	uintptr_t CNetChan__GetSequenceData = originalvtable[index++];
-	uintptr_t CNetChan__SetSequenceData = originalvtable[index++];
-	uintptr_t CNetChan__UpdateMessageStats = originalvtable[index++];
-	uintptr_t CNetChan__CanPacket = originalvtable[index++];
-	uintptr_t CNetChan__IsOverflowed = originalvtable[index++];
-	uintptr_t CNetChan__IsTimedOut = originalvtable[index++];
-	uintptr_t CNetChan__HasPendingReliableData = originalvtable[index++];
-	uintptr_t CNetChan__SetFileTransmissionMode = originalvtable[index++];
-	uintptr_t CNetChan__SetCompressionMode = originalvtable[index++];
-	uintptr_t CNetChan__RequestFile = originalvtable[index++];
-	uintptr_t CNetChan__SetMaxBufferSize = originalvtable[index++];
-	uintptr_t CNetChan__IsNull = originalvtable[index++];
-	uintptr_t CNetChan__GetNumBitsWritten = originalvtable[index++];
-	uintptr_t sub_1801E1F60 = originalvtable[index++];
-	uintptr_t CNetChan__SetInterpolationAmount = originalvtable[index++];
-	uintptr_t CNetChan____UnkGet = originalvtable[index++];
-	uintptr_t CNetChan__SetActiveChannel = originalvtable[index++];
-	uintptr_t CNetChan__AttachSplitPlayer = originalvtable[index++];
-	uintptr_t CNetChan__DetachSplitPlayer = originalvtable[index++];
-	uintptr_t CNetChan____WhateverFunc = originalvtable[index++];
-	uintptr_t CNetChan__GetStreamByIndex = originalvtable[index++];
-	uintptr_t CNetChan____SetUnknownString = originalvtable[index++];
-	uintptr_t CNetChan____UnkEndKill = originalvtable[index++];
-	uintptr_t enginedstable[] = {
-		CreateFunction((void*)CNetChan__GetName, thisptr),
-		CreateFunction((void*)CNetChan__GetAddress, thisptr),
-		CreateFunction((void*)CNetChan__GetTime, thisptr),
-		CreateFunction((void*)CNetChan__GetTimeConnected, thisptr),
-		CreateFunction((void*)CNetChan__GetBufferSize, thisptr),
-		CreateFunction((void*)CNetChan__GetDataRate, thisptr),
-		CreateFunction((void*)CNetChan__IsLoopback, thisptr),
-		CreateFunction((void*)CNetChan__IsTimingOut, thisptr),
-		CreateFunction((void*)CNetChan__IsPlayback, thisptr),
-		CreateFunction((void*)CNetChan__GetLatency, thisptr),
-		CreateFunction((void*)CNetChan__GetAvgLatency, thisptr),
-		CreateFunction((void*)CNetChan__GetAvgLoss, thisptr),
-		CreateFunction((void*)CNetChan__GetAvgChoke, thisptr),
-		CreateFunction((void*)CNetChan__GetAvgData, thisptr),
-		CreateFunction((void*)CNetChan__GetAvgPackets, thisptr),
-		CreateFunction((void*)CNetChan__GetTotalData, thisptr),
-		CreateFunction((void*)CNetChan__GetTotalPackets, thisptr),
-		CreateFunction((void*)CNetChan__GetSequenceNr, thisptr),
-		CreateFunction((void*)CNetChan__IsValidPacket, thisptr),
-		CreateFunction((void*)CNetChan__GetPacketTime, thisptr),
-		CreateFunction((void*)CNetChan__GetPacketBytes, thisptr),
-		CreateFunction((void*)CNetChan__GetStreamProgress, thisptr),
-		CreateFunction((void*)CNetCHan__GetTimeSinceLastReceived, thisptr),
-		CreateFunction((void*)CNetChan__GetPacketResponseLatency, thisptr),
-		CreateFunction((void*)CNetChan__GetRemoteFramerate, thisptr),
-		CreateFunction((void*)CNetChan__GetTimeoutSeconds, thisptr),
-		CreateFunction((void*)CNetCHan____DESTROY, thisptr),
-		CreateFunction((void*)CNetChan__SetDataRate, thisptr),
-		CreateFunction((void*)CNetChan__RegisterMessage, thisptr),
-		CreateFunction((void*)CNetCHan__StartStreaming, thisptr),
-		CreateFunction((void*)CNetChan__ResetStreaming, thisptr),
-		CreateFunction((void*)CNetChan__SetTimeout, thisptr),
-		CreateFunction((void*)CNetChan__SetDemoRecorder, thisptr),
-		CreateFunction((void*)CNetChan__SetChallengeNr, thisptr),
-		CreateFunction((void*)CNetChan__Reset, thisptr),
-		CreateFunction((void*)CNetChan__Clear, thisptr),
-		CreateFunction((void*)CNetChan__Shutdown, thisptr),
-		CreateFunction((void*)CFileSystem_Stdio__NullSub3, thisptr),
-		CreateFunction((void*)CNetChan__ProcessStream, thisptr),
-		CreateFunction((void*)CNetChan__ProcessPacket, thisptr),
-		CreateFunction((void*)CNetChan__SendNetMsg, thisptr),
-		CreateFunction((void*)CNetChan__SendData, thisptr),
-		CreateFunction((void*)CNetChan__SendFile, thisptr),
-		CreateFunction((void*)CNetChan__DenyFile, thisptr),
-		CreateFunction((void*)CNetChan__RequestFile_OLD, thisptr),
-		CreateFunction((void*)CNetChan__SetChoked, thisptr),
-		CreateFunction((void*)CNetChan__SendDatagram, thisptr),
-		CreateFunction((void*)CNetChan__PostSendDatagram, thisptr),
-		CreateFunction((void*)CNetChan__Transmit, thisptr),
-		CreateFunction((void*)CNetChan__GetRemoteAddress, thisptr),
-		CreateFunction((void*)CNetChan__GetMsgHandler, thisptr),
-		CreateFunction((void*)CNetChan__GetDropNumber, thisptr),
-		CreateFunction((void*)CNetChan__GetSocket, thisptr),
-		CreateFunction((void*)CNetChan__GetChallengeNr, thisptr),
-		CreateFunction((void*)CNetChan__GetSequenceData, thisptr),
-		CreateFunction((void*)CNetChan__SetSequenceData, thisptr),
-		CreateFunction((void*)CNetChan__UpdateMessageStats, thisptr),
-		CreateFunction((void*)CNetChan__CanPacket, thisptr),
-		CreateFunction((void*)CNetChan__IsOverflowed, thisptr),
-		CreateFunction((void*)CNetChan__IsTimedOut, thisptr),
-		CreateFunction((void*)CNetChan__HasPendingReliableData, thisptr),
-		CreateFunction((void*)CNetChan__SetFileTransmissionMode, thisptr),
-		CreateFunction((void*)CNetChan__SetCompressionMode, thisptr),
-		CreateFunction((void*)CNetChan__RequestFile, thisptr),
-		CreateFunction((void*)CNetChan__SetMaxBufferSize, thisptr),
-		CreateFunction((void*)CNetChan__IsNull, thisptr),
-		CreateFunction((void*)CNetChan__GetNumBitsWritten, thisptr),
-		CreateFunction((void*)sub_1801E1F60, thisptr),
-		CreateFunction((void*)CNetChan__SetInterpolationAmount, thisptr),
-		CreateFunction((void*)CNetChan____UnkGet, thisptr),
-		CreateFunction((void*)CNetChan__SetActiveChannel, thisptr),
-		CreateFunction((void*)CNetChan__AttachSplitPlayer, thisptr),
-		CreateFunction((void*)CNetChan__DetachSplitPlayer, thisptr),
-		CreateFunction((void*)CNetChan____WhateverFunc, thisptr),
-		CreateFunction((void*)CNetChan__GetStreamByIndex, thisptr),
-		CreateFunction((void*)CNetChan____SetUnknownString, thisptr)
-	};
-	void* newVTable = malloc(sizeof(enginedstable));
-	memcpy(newVTable, enginedstable, sizeof(enginedstable));
-	// Allocate memory for the proxy object
-	void** proxyObject = (void**)malloc(sizeof(void*)); // Assuming only vtable pointer needs to be allocated
-	if (!proxyObject) {
-		free(newVTable);
-		return NULL;
-	}
+uintptr_t CreateTrampolineFunction(void* vftable, uintptr_t engineDsStart, uintptr_t engineDsEnd, int original_offset, int new_offset) {
+	void* execMem = VirtualAlloc(NULL, 128, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+	if (!execMem) return 0;
 
-	// Set the proxy object's vtable pointer to the new vtable
-	*proxyObject = newVTable;
+	uint8_t* bytes = static_cast<uint8_t*>(execMem);
 
-	return proxyObject;
+	// Load the return address into rax
+	*bytes++ = 0x48; *bytes++ = 0x8B; *bytes++ = 0x04; *bytes++ = 0x24; // mov rax, [rsp]
+
+	// Move engineDsStart to r10 for comparison
+	*bytes++ = 0x49; *bytes++ = 0xBA; // mov r10, engineDsStart
+	*(uintptr_t*)bytes = engineDsStart;
+	bytes += sizeof(uintptr_t);
+
+	// cmp rax, r10
+	*bytes++ = 0x4C; *bytes++ = 0x39; *bytes++ = 0xD0;
+
+	// jb originalFunction (Offset will be filled later)
+	*bytes++ = 0x0F; *bytes++ = 0x82;
+	int32_t* jbOffsetLoc = reinterpret_cast<int32_t*>(bytes);
+	bytes += sizeof(int32_t);
+
+	// Move engineDsEnd to r10 for comparison
+	*bytes++ = 0x49; *bytes++ = 0xBA; // mov r10, engineDsEnd
+	*(uintptr_t*)bytes = engineDsEnd;
+	bytes += sizeof(uintptr_t);
+
+	// cmp rax, r10
+	*bytes++ = 0x4C; *bytes++ = 0x39; *bytes++ = 0xD0;
+
+	// ja originalFunction (Offset will be filled later)
+	*bytes++ = 0x0F; *bytes++ = 0x87;
+	int32_t* jaOffsetLoc = reinterpret_cast<int32_t*>(bytes);
+	bytes += sizeof(int32_t);
+
+	// Redirect to new function
+	uintptr_t newFunctionAddress = ((uintptr_t*)vftable)[new_offset];
+	*bytes++ = 0x48; *bytes++ = 0xB8; // mov rax, newFunctionAddress
+	*(uintptr_t*)bytes = newFunctionAddress;
+	bytes += sizeof(uintptr_t);
+	*bytes++ = 0xFF; *bytes++ = 0xE0; // jmp rax
+
+	uintptr_t originalFunctionLoc = reinterpret_cast<uintptr_t>(bytes);
+
+	// Fill in the offsets for jb and ja
+	*jbOffsetLoc = static_cast<int32_t>(originalFunctionLoc - (reinterpret_cast<uintptr_t>(jbOffsetLoc) + sizeof(int32_t)));
+	*jaOffsetLoc = static_cast<int32_t>(originalFunctionLoc - (reinterpret_cast<uintptr_t>(jaOffsetLoc) + sizeof(int32_t)));
+
+	// Original function pointer
+	uintptr_t originalFunctionAddress = ((uintptr_t*)vftable)[original_offset];
+
+	// mov rax, originalFunctionAddress
+	*bytes++ = 0x48; *bytes++ = 0xB8;
+	*(uintptr_t*)bytes = originalFunctionAddress;
+	bytes += sizeof(uintptr_t);
+
+	// jmp rax
+	*bytes++ = 0xFF; *bytes++ = 0xE0;
+
+	return reinterpret_cast<uintptr_t>(execMem);
 }
 
+const int indexMapping[] = {
+		0,  // CNetChan__GetName (original index 0, new index 0)
+		1,  // CNetChan__GetAddress (original index 1, new index 1)
+		2,  // CNetChan__GetTime (original index 2, new index 2)
+		3,  // CNetChan__GetTimeConnected (original index 3, new index 3)
+		4,  // CNetChan__GetBufferSize (original index 4, new index 4)
+		5,  // CNetChan__GetDataRate (original index 5, new index 5)
+		6,  // CNetChan__IsLoopback (original index 6, new index 6)
+		7,  // CNetChan__IsTimingOut (original index 7, new index 7)
+		8,  // CNetChan__IsPlayback (original index 8, new index 8)
+		9,  // CNetChan__GetLatency (original index 9, new index 9)
+		10,  // CNetChan__GetAvgLatency (original index 10, new index 10)
+		11,  // CNetChan__GetAvgLoss (original index 11, new index 11)
+		12,  // CNetChan__GetAvgChoke (original index 12, new index 12)
+		13,  // CNetChan__GetAvgData (original index 13, new index 13)
+		14,  // CNetChan__GetAvgPackets (original index 14, new index 14)
+		15,  // CNetChan__GetTotalData (original index 15, new index 15)
+		16,  // CNetChan__GetTotalPackets (original index 16, new index 16)
+		17,  // CNetChan__GetSequenceNr (original index 17, new index 17)
+		18,  // CNetChan__IsValidPacket (original index 18, new index 18)
+		19,  // CNetChan__GetPacketTime (original index 19, new index 19)
+		20,  // CNetChan__GetPacketBytes (original index 20, new index 20)
+		21,  // CNetChan__GetStreamProgress (original index 21, new index 21)
+		22,  // CNetCHan__GetTimeSinceLastReceived (original index 22, new index 22)
+		23,  // CNetChan__GetPacketResponseLatency (original index 23, new index 23)
+		24,  // CNetChan__GetRemoteFramerate (original index 24, new index 24)
+		25,  // CNetChan__GetTimeoutSeconds (original index 25, new index 25)
+		26,  // CNetCHan____DESTROY (original index 26, new index 26)
+		27,  // CNetChan__SetDataRate (original index 27, new index 27)
+		28,  // CNetChan__RegisterMessage (original index 28, new index 28)
+		29,  // CNetCHan__StartStreaming (original index 29, new index 29)
+		30,  // CNetChan__ResetStreaming (original index 30, new index 30)
+		31,  // CNetChan__SetTimeout (original index 31, new index 31)
+		32,  // CNetChan__SetDemoRecorder (original index 32, new index 32)
+		33,  // CNetChan__SetChallengeNr (original index 33, new index 33)
+		34,  // CNetChan__Reset (original index 34, new index 34)
+		35,  // CNetChan__Clear (original index 35, new index 35)
+		36,  // CNetChan__Shutdown (original index 36, new index 36)
+		45,  // CNetChan__RequestFile_OLD (original index 37, new index 45)
+		38,  // CNetChan__ProcessStream (original index 38, new index 38)
+		39,  // CNetChan__ProcessPacket (original index 39, new index 39)
+		41,  // CNetChan__SendNetMsg (original index 40, new index 41)
+		42,  // CNetChan__SendData (original index 41, new index 42)
+		43,  // CNetChan__SendFile (original index 42, new index 43)
+		44,  // CNetChan__DenyFile (original index 43, new index 44)
+		45,  // CNetChan__RequestFile_OLD (original index 44, new index 45)
+		46,  // CNetChan__SetChoked (original index 45, new index 46)
+		52,  // CNetChan__SendDatagram (original index 46, new index 52)
+		53,  // CNetChan__PostSendDatagram (original index 47, new index 53)
+		54,  // CNetChan__Transmit (original index 48, new index 54)
+		55,  // CNetChan__GetRemoteAddress (original index 49, new index 55)
+		56,  // CNetChan__GetMsgHandler (original index 50, new index 56)
+		57,  // CNetChan__GetDropNumber (original index 51, new index 57)
+		58,  // CNetChan__GetSocket (original index 52, new index 58)
+		59,  // CNetChan__GetChallengeNr (original index 53, new index 59)
+		60,  // CNetChan__GetSequenceData (original index 54, new index 60)
+		61,  // CNetChan__SetSequenceData (original index 55, new index 61)
+		62,  // CNetChan__UpdateMessageStats (original index 56, new index 62)
+		63,  // CNetChan__CanPacket (original index 57, new index 63)
+		64,  // CNetChan__IsOverflowed (original index 58, new index 64)
+		65,  // CNetChan__IsTimedOut (original index 59, new index 65)
+		66,  // CNetChan__HasPendingReliableData (original index 60, new index 66)
+		67,  // CNetChan__SetFileTransmissionMode (original index 61, new index 67)
+		68,  // CNetChan__SetCompressionMode (original index 62, new index 68)
+		69,  // CNetChan__RequestFile (original index 63, new index 69)
+		70,  // CNetChan__SetMaxBufferSize (original index 64, new index 70)
+		71,  // CNetChan__IsNull (original index 65, new index 71)
+		72,  // CNetChan__GetNumBitsWritten (original index 66, new index 72)
+		73,  // sub_1801E1F60 (original index 67, new index 73)
+		74,  // CNetChan__SetInterpolationAmount (original index 68, new index 74)
+		75,  // CNetChan____UnkGet (original index 69, new index 75)
+		76,  // CNetChan__SetActiveChannel (original index 70, new index 76)
+		77,  // CNetChan__AttachSplitPlayer (original index 71, new index 77)
+		78,  // CNetChan__DetachSplitPlayer (original index 72, new index 78)
+		79,  // CNetChan____WhateverFunc (original index 73, new index 79)
+		80,  // CNetChan__GetStreamByIndex (original index 74, new index 80)
+		81,  // CNetChan____SetUnknownString (original index 75, new index 81)
+};
+
+void* modifiedNetCHANVTable = nullptr;
+
+void InitializeModifiedNetCHANVTable(void* netChan) {	
+    if (modifiedNetCHANVTable == nullptr) {
+		CModule engineDS("engine_ds.dll");
+		auto start = engineDS.GetModuleBase();
+		auto end = start+ engineDS.GetModuleSize();
+        // Get the original vtable from the provided CNetChan object
+        uintptr_t* originalVTable = *(uintptr_t**)netChan;
+
+        size_t vtableSize = 83 * sizeof(uintptr_t);  // Adjust the size according to the number of virtual functions
+
+        // Allocate memory for the modified vtable and the flag
+        modifiedNetCHANVTable = malloc(vtableSize);
+
+		if (modifiedNetCHANVTable) {
+            // Copy the original vtable to the modified vtable
+            memcpy(modifiedNetCHANVTable, originalVTable, vtableSize);
+
+            // Create trampolines for each remapped virtual function and update the modified vtable
+            for (int i = 0; i < sizeof(indexMapping) / sizeof(indexMapping[0]); i++) {
+                int originalIndex = i;
+                int newIndex = indexMapping[i];
+                if (originalIndex != newIndex) {
+					((uintptr_t*)modifiedNetCHANVTable)[originalIndex] = CreateTrampolineFunction(originalVTable, start, end, originalIndex, newIndex); // originalIndex will be jumped to if from engine.dll, newIndex otherwise
+                }
+            }
+        }
+    }
+}
+
+using NET_CreateNetChannelType = void* (__fastcall*)(int a1, unsigned int* a2, const char* a3, __int64 a4, char a5, char a6);
 NET_CreateNetChannelType NET_CreateNetChannelOriginal;
-void* __fastcall NET_CreateNetChannel(int a1, _DWORD* a2, const char* a3, __int64 a4, char a5, char a6)
+
+void* __fastcall NET_CreateNetChannel(int a1, unsigned int* a2, const char* a3, __int64 a4, char a5, char a6)
 {
-	return CreateNewNetCHANVTable(NET_CreateNetChannelOriginal(a1, a2, a3, a4, a5, a6));
+    void* netChan = NET_CreateNetChannelOriginal(a1, a2, a3, a4, a5, a6);
+    InitializeModifiedNetCHANVTable(netChan);
+    *(uintptr_t**)netChan = static_cast<uintptr_t*>(modifiedNetCHANVTable);
+    return netChan;
 }

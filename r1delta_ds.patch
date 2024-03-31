@@ -55,3 +55,7 @@ engine_ds.dll,text,0xA0863,0F 86 A4 08 00 00,E9 A5 08 00 00
 ; don't send sendtables (they're fucked)
 ; engine_ds.dll,text,0x4D5F6,75 6F,90 90
 ; it turns out the sendtables are not the problem somehow
+; remove rtdynamiccast on netchan
+engine.dll,text,0x1f3be5,4C 8D 0D AC FE 5D 00,48 89 C8 EB 18 90 90
+; don't send RemoteBulletFired message on dedi (it's broken and idk why)
+server.dll,text,0x5F9690,48,C3
