@@ -1,44 +1,3 @@
-; dedi patches (still need to go through these)
-engine_ds.dll,text,0x24019,98 02,A8 02
-engine_ds.dll,text,0x24134,18 02,28 02
-engine_ds.dll,text,0x27be8,48 02,58 02
-engine_ds.dll,text,0x27c18,40 02,50 02
-engine_ds.dll,text,0x27c4d,08 01,10 01
-engine_ds.dll,text,0x27ce6,58 04,68 04
-engine_ds.dll,text,0x28087,98 01,A0 01
-engine_ds.dll,text,0x2809e,A8 01,B0 01
-engine_ds.dll,text,0x29762,98 02,A8 02
-engine_ds.dll,text,0x2981b,40 04,50 04
-engine_ds.dll,text,0x2e413,98 02,A8 02
-engine_ds.dll,text,0x3114a,70 03,80 03
-engine_ds.dll,text,0x32fbd,40 04,50 04
-engine_ds.dll,text,0x33101,D0 02,E0 02
-engine_ds.dll,text,0x33164,D0 02,E0 02
-engine_ds.dll,text,0x331a4,D0 02,E0 02
-engine_ds.dll,text,0x35a1b,68 02,78 02
-engine_ds.dll,text,0x36b5c,98 02,A8 02
-engine_ds.dll,text,0x37627,B0 03,C0 03
-engine_ds.dll,text,0x37652,B8 03,C8 03
-engine_ds.dll,text,0x5d927,C8 03,D8 03
-engine_ds.dll,text,0x79367,98 02,A8 02
-engine_ds.dll,text,0x7d3f1,98 02,A8 02
-engine_ds.dll,text,0x95d73,60 02,70 02
-engine_ds.dll,text,0x9fb90,B8 01,C8 01
-engine_ds.dll,text,0xa12c2,B8 01,C8 01
-engine_ds.dll,text,0xa211d,70 03,80 03
-engine_ds.dll,text,0xb71c9,70 03,80 03
-engine_ds.dll,text,0xdd889,70 03,80 03
-engine_ds.dll,text,0xddc8e,70 03,80 03
-engine_ds.dll,text,0xde1e5,70 03,80 03
-engine_ds.dll,text,0xde20b,98 03,A8 03
-engine_ds.dll,text,0xdec34,70 03,80 03
-engine_ds.dll,text,0xdf151,70 03,80 03
-engine_ds.dll,text,0xdf794,70 03,80 03
-engine_ds.dll,text,0xdf807,98 03,A8 03
-engine_ds.dll,text,0x169ef3,58,D0
-engine_ds.dll,text,0x16a143,58,D0
-engine_ds.dll,text,0x16a23f,58,D0
-engine_ds.dll,text,0x16e7eb,68 02,78 02
 ; NOP out Shader_Connect call for R1O engine parasite in CDedicatedServerAPI::Connect (no universe in which we're giving it matsystem)
 engine_r1o.dll,text,0x1c6ba0,E8 AB 18 F1 FF 84 C0 74 1D 48,90 90 90 90 90 90 90 90 90 48
 ; NOP out ConnectMDLCacheNotify for R1O engine parasite in CDedicatedServerAPI::Connect (it overrides the engine.dll one)
@@ -161,33 +120,6 @@ engine.dll,text,0xCE180,74,EB
 ; I LOVE LEFT 4 DEAD 2
 client.dll,text,0x39B053,48,90 90 90 90 90 90 90 90 90 90 90 90 90
 client.dll,text,0x3d3bc0,48,90 90 90 90 90 90 90 90 90 90 90 90 90
-; fix server_ds rename
-engine_ds.dll,rdata,0x4288B8,"server_ds.dll","server.dll\x00"
-; fix dedi netproto
-; engine.dll,text,0x1E90E0:0C,F6 - these must be done only on dedicated!
-; engine.dll,text,0x1E90F2:10,FA - these must be done only on dedicated!
-engine_ds.dll,text,0x406EB,75,EB
-engine_ds.dll,text,0x442B5,FF,90
-engine_ds.dll,text,0x442B7,A0,90
-engine_ds.dll,text,0x442B8,01,90
-engine_ds.dll,text,0x442B9,00,90
-engine_ds.dll,text,0x442BA,00,90
-engine_ds.dll,text,0x44421,0F,90
-engine_ds.dll,text,0x44422,8F,90
-engine_ds.dll,text,0x44423,5C,90
-engine_ds.dll,text,0x44424,FF,90
-engine_ds.dll,text,0x44425,FF,90
-engine_ds.dll,text,0x44426,FF,90
-engine_ds.dll,text,0x72BA0,C2,E9
-engine_ds.dll,text,0x72BA1,00,EB
-engine_ds.dll,text,0x72BA2,00,75
-engine_ds.dll,text,0x72BA3,CC,07
-engine_ds.dll,text,0x72BA4,CC,00
-engine_ds.dll,text,0xA30A0,48,E9
-engine_ds.dll,text,0xA30A1,89,EB
-engine_ds.dll,text,0xA30A2,54,70
-engine_ds.dll,text,0xA30A3,24,04
-engine_ds.dll,text,0xA30A4,10,00
 ; somewhat rebuild ain generation
 server.dll,text,0x369635,4D,E9
 server.dll,text,0x369636,8B,21
@@ -216,8 +148,6 @@ server.dll,text,0x3698BB,09,90
 server.dll,text,0x3698BC,04,90
 server.dll,text,0x3698BD,88,90
 engine.dll,text,0x59e4b,40 32 F6,40 B6 01
-engine_ds.dll,rdata,0x422980,"vpk/server_","vpk/client_\x00"
-engine_ds.dll,rdata,0x4229A8,"%sserver_%s%s","%sclient_%s%s\x00"
 filesystem_stdio.dll,rdata,0xD07A8,"vpk/server_%s.bsp.pak000%s","vpk/client_%s.bsp.pak000%s"
 ; whoops:tm:
 ;engine_ds.dll,data,0x111290,48,C3
