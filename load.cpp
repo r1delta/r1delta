@@ -23,6 +23,9 @@
 #include "bitbuf.h"
 #include "in6addr.h"
 #include "thirdparty/silver-bun/module.h"
+#include <fcntl.h>
+#include <io.h>
+#include <streambuf>
 #pragma intrinsic(_ReturnAddress)
 
 wchar_t kNtDll[] = L"ntdll.dll";
@@ -963,6 +966,29 @@ __int64 __fastcall bf_write__WriteUBitLong(BFWrite* a1, unsigned int a2, signed 
 		bf_write__WriteUBitLongOriginal(a1, 0, 14);
 	return ret;
 }
+using sub_EA0D0_t = void(__fastcall*)(const char*, ...);
+
+class CustomBuffer : public std::streambuf {
+protected:
+	int overflow(int c) override {
+		if (c != EOF) {
+			static auto engine_mod = uintptr_t(GetModuleHandleA("engine_ds.dll"));
+			static auto sub_EA0D0 = sub_EA0D0_t(engine_mod + 0xEA0D0);
+
+			char buf[] = { static_cast<char>(c), '\0' };
+			sub_EA0D0("%s", buf);
+		}
+		return c;
+	}
+
+	std::streamsize xsputn(const char* s, std::streamsize n) override {
+		static auto engine_mod = uintptr_t(GetModuleHandleA("engine_ds.dll"));
+		static auto sub_EA0D0 = sub_EA0D0_t(engine_mod + 0xEA0D0);
+
+		sub_EA0D0("%s", std::string(s, n).c_str());
+		return n;
+	}
+};
 __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 {
 	CModule engine("engine.dll", (uintptr_t)LoadLibraryA("engine.dll"));
@@ -1142,14 +1168,63 @@ COM_InitType COM_InitOriginal;
 typedef void (*SaveRestore_InitType)(__int64);
 SaveRestore_InitType SaveRestore_Init;
 void* pdataempty = 0;
-typedef __int64 (*sub_14EF30Type)(__int64 a1, __int64 a2, int a3);
-sub_14EF30Type sub_14EF30Original;
-__int64 __fastcall sub_14EF30(__int64 a1, __int64 a2, int a3)
+
+// Function pointer types
+using sub_1601A0_t = __int64(__fastcall*)(__int64);
+using sub_14EF30_t = void(__fastcall*)(__int64, __int64, DWORD);
+using sub_45420_t = void(__fastcall*)(__int64, int);
+using sub_4AAD0_t = void(__fastcall*)(__int64);
+using sub_16B0F0_t = char(__fastcall*)(__int64);
+
+char __fastcall sub_4C460(__int64 a1)
 {
+	char result; // al
+	__int64 v3; // rax
+	const char* v4; // rax
+	__int64 v5; // r9
+	char v6; // [rsp+20h] [rbp-3048h]
+	char v7[34872]; // [rsp+30h] [rbp-3038h] BYREF
 	if (!pdataempty) {
-		pdataempty = calloc(0x8800, 1);
+		pdataempty = calloc(34872, 1);
 	}
-	return sub_14EF30Original(a1, (__int64)pdataempty, 0x8800);
+	// Set up function pointers
+	static auto engine_mod = uintptr_t(GetModuleHandleA("engine_ds.dll"));
+	static auto enginenotdedi_mod = uintptr_t(GetModuleHandleA("engine.dll"));
+	static auto sub_1601A0 = sub_1601A0_t(engine_mod + 0x1601A0);
+	static auto sub_14EF30 = sub_14EF30_t(enginenotdedi_mod + 0x1FEDB0);
+	static auto sub_EA0D0 = sub_EA0D0_t(engine_mod + 0xEA0D0);
+	static auto sub_45420 = sub_45420_t(engine_mod + 0x45420);
+	static auto sub_4AAD0 = sub_4AAD0_t(engine_mod + 0x4AAD0);
+	static auto qword_2097510 = (QWORD*)(engine_mod + 0x2097510);
+	static auto sub_16B0F0 = sub_16B0F0_t(engine_mod + 0x16B0F0);
+	sub_16B0F0(a1);
+	if (true)
+	{
+		v3 = (__int64)pdataempty;
+		sub_14EF30((__int64)v7, v3, 0);
+		v4 = (const char*)(*(__int64(__fastcall**)(__int64))(*(_QWORD*)(a1 + 8) + 136i64))(a1 + 8);
+		sub_EA0D0("Sending persistence baseline to %s\n", v4);
+		v5 = 1;
+		v6 = 0;
+		(*(void(__fastcall**)(__int64, char*, _QWORD, __int64, char))(*(_QWORD*)(a1 + 8) + 224i64))(
+			a1 + 8,
+			v7,
+			0i64,
+			v5,
+			v6);
+		sub_45420(a1, 6);
+		sub_4AAD0(a1);
+		if (qword_2097510)
+			*(_BYTE*)((*(int(__fastcall**)(__int64))(*(_QWORD*)(a1 + 8) + 112i64))(a1 + 8) + qword_2097510 + 4032) = 0;
+		return 1;
+	}
+
+	return result;
+}
+__int64 __fastcall sub_14E980(__int64 a1, __int64 a2, __int64 a3, int a4)
+{
+	static auto ConstructPersistenceCachedDefFileMsg = (__int64 (*)(__int64 a1, int a2))(uintptr_t(GetModuleHandleA("engine.dll")) + 0x1FE890);
+	return ConstructPersistenceCachedDefFileMsg(a1, 0);
 }
 void COM_Init()
 {
@@ -1158,6 +1233,7 @@ void COM_Init()
 	SaveRestore_Init = SaveRestore_InitType(uintptr_t(GetModuleHandleA("engine.dll")) + 0x1410E0);
 	SaveRestore_Init(uintptr_t(GetModuleHandleA("engine.dll")) + 0x2EC8590);
 }
+
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
 	const LDR_DLL_NOTIFICATION_DATA* notification_data,
@@ -1303,8 +1379,14 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x433C0), &ProcessConnectionlessPacket, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0xA1B90), &Host_InitDedicated, reinterpret_cast<LPVOID*>(&Host_InitDedicatedOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x45C00), &CBaseClient__ProcessClientInfo, reinterpret_cast<LPVOID*>(NULL));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x14EF30), &sub_14EF30, reinterpret_cast<LPVOID*>(&sub_14EF30Original));
-			
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x4C460), &sub_4C460, reinterpret_cast<LPVOID*>(NULL));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x14E980), &sub_14E980, reinterpret_cast<LPVOID*>(NULL));
+		
+		static CustomBuffer customBuffer;
+		std::cout.rdbuf(&customBuffer);
+
+
+
 
 		MH_EnableHook(MH_ALL_HOOKS);
 

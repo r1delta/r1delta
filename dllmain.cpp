@@ -15,6 +15,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 
 		VirtualAlloc((void*)0xFFEEFFEE, 1, MEM_RESERVE, PAGE_NOACCESS);
 	}
+	LoadLibraryW(L"OnDemandConnRouteHelper"); // stop fucking reloading this thing
 	LoadLibraryA("TextShaping.dll"); // fix "Patcher Error" dialogs having no text
 	switch (fdwReason)
 	{
