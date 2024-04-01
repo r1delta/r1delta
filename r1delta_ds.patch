@@ -31,7 +31,7 @@ engine_ds.dll,text,457F5,75,EB
 ; no devhttp
 engine_ds.dll,text,16A51F,74 75,90 90
 ; skip signonstate 5 (unused)
-engine_ds.dll,text,4ACE6,05,06
+;engine_ds.dll,text,4ACE6,05,06
 ; end my suffering
 ;engine.dll,text,0xF1C8D,48 89 B0 F8 04 00,48 89 B0 68 04 00
 ;engine.dll,text,0xF1B42,44 8B 83 00 05 00,44 8B 83 70 04 00
@@ -60,4 +60,6 @@ engine.dll,text,0x1f3be5,4C 8D 0D AC FE 5D 00,48 89 C8 EB 18 90 90
 ; don't send RemoteBulletFired message on dedi (it's broken and idk why)
 server.dll,text,0x5F9690,48,C3
 ; always send persistent data baseline
-engine_ds.dll,text,0x4C479,75,EB
+; engine_ds.dll,text,0x4C479,75,EB
+; no timestamps in dedi printf
+engine_ds.dll,text,4286D8,5B 25 2E 33 66,00
