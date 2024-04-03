@@ -1,4 +1,5 @@
 #include "filesystem.h"
+#include <iostream>
 ReadFileFromFilesystemType readFileFromFilesystem;
 ReadFromCacheType readFromCache;
 ReadFileFromVPKType readFileFromVPK;
@@ -14,32 +15,58 @@ bool V_IsAbsolutePath(const char* pStr)
 
 	return bIsAbsolute;
 }
-
 bool TryReplaceFile(const char* pszFilePath)
 {
-	//std::cout << "FS: " << pszFilePath << std::endl;
-	std::string svFilePath = ConvertToWinPath(pszFilePath);
-	if (svFilePath.find("\\*\\") != std::string::npos)
-	{
-		// Erase '//*/'.
-		svFilePath.erase(0, 4);
-	}
+    std::string svFilePath = ConvertToWinPath(pszFilePath);
 
-	if (V_IsAbsolutePath(pszFilePath))
-		return false;
+    if (svFilePath.find("\\\\*\\\\") != std::string::npos)
+    {
+        // Erase '//*/'.
+        svFilePath.erase(0, 4);
+    }
 
-	// TODO: obtain 'mod' SearchPath's instead.
-	svFilePath.insert(0, "platform\\");
+    if (V_IsAbsolutePath(pszFilePath)) {
+        std::cout << "FS: absolute path: " << pszFilePath << std::endl;
+        return false;
+    }
 
-	if (::FileExists(svFilePath.c_str()) /*|| ::FileExists(pszFilePath)*/)
-	{
-		return true;
-	}
+    // Search for the file in "r1delta\\addons\\" subfolders
+    // This does not account for user-disabled mods but shhh
+    std::string addonsPath = "r1delta\\addons\\";
+    WIN32_FIND_DATAA findData;
+    HANDLE hFind = FindFirstFileA((addonsPath + "*").c_str(), &findData);
 
-	return false;
+    if (hFind != INVALID_HANDLE_VALUE)
+    {
+        do
+        {
+            if ((findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
+                strcmp(findData.cFileName, ".") != 0 &&
+                strcmp(findData.cFileName, "..") != 0)
+            {
+                std::string subfolderPath = addonsPath + findData.cFileName + "\\" + svFilePath;
+                if (::FileExists(subfolderPath.c_str()))
+                {
+                    FindClose(hFind);
+                    std::cout << "FS: found in r1delta ADDONS: " << pszFilePath << std::endl;
+                    return true;
+                }
+            }
+        } while (FindNextFileA(hFind, &findData));
+
+        FindClose(hFind);
+    }
+
+    // Check if the file exists in the "r1" directory
+    std::string r1Path = "r1delta\\" + svFilePath;
+    if (::FileExists(r1Path.c_str()))
+    {
+        std::cout << "FS: found in r1delta GAMEDIR: " << pszFilePath << std::endl;
+        return true;
+    }
+    std::cout << "FS: not found: " << pszFilePath << std::endl;
+    return false;
 }
-
-
 
 
 bool ReadFromCacheHook(IFileSystem* filesystem, char* path, void* result)
