@@ -187,3 +187,14 @@ filesystem_stdio.dll,text,0x74E1E,74 1A,EB 1A
 vguimatsurface.dll,text,0x181574,"60.","2e1\x00"
 ; unhide net_blockmsg
 engine.dll,text,0x5E1CB0,41 B9 00 40 00 00,41 B9 00 00 00 00
+; fix addon system
+; move VPK path to head
+engine.dll,text,0x127EE6,C7 44 24 20 01 00,C7 44 24 20 00 00
+; move fs path to head
+engine.dll,text,0x127EFD,41 B9 01 00 00 00,41 B9 00 00 00 00
+; fix fs "dlc" crap
+filesystem_stdio.dll,text,0xD0728,"portal2","r1\x00"
+; use r1 fs gameinfo (instead of the one in VPK)
+engine.dll,text,0x629A30,"GameInfo.txt","..\r1delta\GameInfo.txt\x00"
+; remove TFOData CSV parser
+engine_r1o.dll,text,0x28E4D0,48,C3
