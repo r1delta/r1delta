@@ -26,7 +26,7 @@ bool TryReplaceFile(const char* pszFilePath)
     }
 
     if (V_IsAbsolutePath(pszFilePath)) {
-        std::cout << "FS: absolute path: " << pszFilePath << std::endl;
+        //std::cout << "FS: absolute path: " << pszFilePath << std::endl;
         return false;
     }
 
@@ -48,7 +48,7 @@ bool TryReplaceFile(const char* pszFilePath)
                 if (::FileExists(subfolderPath.c_str()))
                 {
                     FindClose(hFind);
-                    std::cout << "FS: found in r1delta ADDONS: " << pszFilePath << std::endl;
+                    ///std::cout << "FS: found in r1delta ADDONS: " << pszFilePath << std::endl;
                     return true;
                 }
             }
@@ -61,10 +61,10 @@ bool TryReplaceFile(const char* pszFilePath)
     std::string r1Path = "r1delta\\" + svFilePath;
     if (::FileExists(r1Path.c_str()))
     {
-        std::cout << "FS: found in r1delta GAMEDIR: " << pszFilePath << std::endl;
+        //std::cout << "FS: found in r1delta GAMEDIR: " << pszFilePath << std::endl;
         return true;
     }
-    std::cout << "FS: not found: " << pszFilePath << std::endl;
+   //std::cout << "FS: not found: " << pszFilePath << std::endl;
     return false;
 }
 
