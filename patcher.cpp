@@ -169,11 +169,11 @@ void doBinaryPatchForFile(LDR_DLL_LOADED_NOTIFICATION_DATA data) {
     targetModule.LoadSections();
 
     // Parse the patch file and get patch instructions
-    std::vector<PatchInstruction> patchInstructions = ParsePatchFile("r1delta.patch");
+    std::vector<PatchInstruction> patchInstructions = ParsePatchFile("r1delta/r1delta.wpatch");
 
     // If it's a dedicated server, also load and apply instructions from "r1delta_ds.patch"
     if (IsDedicatedServer()) {
-        std::vector<PatchInstruction> dedicatedServerPatchInstructions = ParsePatchFile("r1delta_ds.patch");
+        std::vector<PatchInstruction> dedicatedServerPatchInstructions = ParsePatchFile("r1delta/r1delta_ds.wpatch");
         patchInstructions.insert(patchInstructions.end(), dedicatedServerPatchInstructions.begin(), dedicatedServerPatchInstructions.end());
     }
 
