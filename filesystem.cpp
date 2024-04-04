@@ -63,7 +63,7 @@ bool TryReplaceFile(const char* pszFilePath) {
     }
 
     // Search for the file in "r1delta\\addons\\" subfolders
-    std::string addonsPath = "r1delta\\addons\\";
+    static std::string addonsPath = "r1delta\\addons\\";
 
     // Check if the "addons" folder exists in the cache
     if (!folderExists(addonsPath)) {
