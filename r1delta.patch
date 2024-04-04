@@ -184,7 +184,7 @@ client.dll,text,0x2571C5,B8 00 00 20 00,B8 00 00 FF 00
 ; fix fs crash???
 filesystem_stdio.dll,text,0x74E1E,74 1A,EB 1A
 ; fix fps drop :)
-vguimatsurface.dll,text,0x181574,"60.","2e1\x00"
+vguimatsurface.dll,text,0x181574,"60.","175\x00"
 ; unhide net_blockmsg
 engine.dll,text,0x5E1CB0,41 B9 00 40 00 00,41 B9 00 00 00 00
 ; fix addon system
