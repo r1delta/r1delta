@@ -41,6 +41,15 @@ bool TryReplaceFile(const char* pszFilePath) {
         // Erase '//*/'.
         svFilePath.erase(0, 4);
     }
+    auto check = pszFilePath;
+    while (*check) {
+        if (*check < ' ')
+            return false;
+        if (*check > 128)
+            return false;
+        check++;
+    }
+
 
     // Check if the file exists in the cache
     auto fileIt = fileCache.find(svFilePath);
