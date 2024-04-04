@@ -7,6 +7,7 @@ namespace fs = std::filesystem;
 
 std::unordered_map<std::string, bool> fileCache;
 std::unordered_map<std::string, bool> folderCache;
+std::list<std::string> addonsFoldersCache;
 
 ReadFileFromFilesystemType readFileFromFilesystem;
 ReadFromCacheType readFromCache;
@@ -23,18 +24,43 @@ bool V_IsAbsolutePath(const char* pStr)
 
 	return bIsAbsolute;
 }
-bool folderExists(const std::string& folderPath) {
+
+bool folderExistsCheckCache(const std::string& folderPath) {
     auto it = folderCache.find(folderPath);
     if (it != folderCache.end()) {
         return it->second;
     }
+    else {
+        bool exists = fs::exists(folderPath);
+        folderCache[folderPath] = exists;
+        return exists;
+    }
+}
+bool fileExistsCheckCache(const std::string& filePath) {
+    auto it = fileCache.find(filePath);
+    if (it != fileCache.end()) {
+        return it->second;
+    }
 
-    bool exists = fs::exists(fs::path(folderPath)) && fs::is_directory(fs::path(folderPath));
-    folderCache[folderPath] = exists;
+    // Check if every parent directory exists
+    std::filesystem::path path(filePath);
+    std::filesystem::path parentPath;
+    for (const auto& element : path) {
+        parentPath /= element;
+        if (!folderExistsCheckCache(parentPath.string())) {
+            fileCache[filePath] = false;
+            return false;
+        }
+    }
+
+    // Check if the file exists
+    bool exists = std::filesystem::exists(filePath);
+    fileCache[filePath] = exists;
     return exists;
 }
 
 bool TryReplaceFile(const char* pszFilePath) {
+
     std::string svFilePath = ConvertToWinPath(pszFilePath);
 
     if (svFilePath.find("\\\\*\\\\") != std::string::npos) {
@@ -49,64 +75,23 @@ bool TryReplaceFile(const char* pszFilePath) {
             return false;
         check++;
     }
-
-
-    // Check if the file exists in the cache
-    auto fileIt = fileCache.find(svFilePath);
-    if (fileIt != fileCache.end()) {
-        return fileIt->second;
-    }
-
     if (V_IsAbsolutePath(pszFilePath)) {
         fileCache[svFilePath] = false;
         return false;
     }
-
-    // Search for the file in "r1delta\\addons\\" subfolders
-    static std::string addonsPath = "r1delta\\addons\\";
-
-    // Check if the "addons" folder exists in the cache
-    if (!folderExists(addonsPath)) {
-        fileCache[svFilePath] = false;
-        return false;
-    }
-
-    WIN32_FIND_DATAA findData;
-    HANDLE hFind = FindFirstFileA((addonsPath + "*").c_str(), &findData);
-
-    if (hFind != INVALID_HANDLE_VALUE) {
-        do {
-            if ((findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
-                strcmp(findData.cFileName, ".") != 0 &&
-                strcmp(findData.cFileName, "..") != 0) {
-
-                std::string subfolderPath = addonsPath + findData.cFileName + "\\" + svFilePath;
-
-                // Check if the subfolder exists in the cache
-                std::string folderPath = addonsPath + findData.cFileName;
-                if (!folderExists(folderPath)) {
-                    continue;
-                }
-
-                if (::FileExists(subfolderPath.c_str())) {
-                    FindClose(hFind);
-                    fileCache[svFilePath] = true;
-                    return true;
-                }
-            }
-        } while (FindNextFileA(hFind, &findData));
-        FindClose(hFind);
-    }
-
-    // Check if the file exists in the "r1" directory
-    std::string r1Path = "r1delta\\" + svFilePath;
-
-    if (::FileExists(r1Path.c_str())) {
-        fileCache[svFilePath] = true;
+    std::string folderPath = "r1delta";
+    std::string filePath = folderPath + "/" + svFilePath;
+    if (fileExistsCheckCache(filePath)) {
         return true;
     }
+    // Check for addons/*/ folder
+    for (const auto& addonPath : addonsFoldersCache) {
+        std::string addonFilePath = addonPath + "/" + svFilePath;
+        if (fileExistsCheckCache(addonFilePath)) {
+            return true;
+        }
+    }
 
-    fileCache[svFilePath] = false;
     return false;
 }
 
@@ -151,6 +136,12 @@ FileHandle_t ReadFileFromFilesystemHook(IFileSystem* filesystem, const char* pPa
 void clearFileCache() {
     fileCache.clear();
     folderCache.clear();
+    addonsFoldersCache.clear();
+    for (const auto& entry : std::filesystem::directory_iterator("r1delta/addons")) {
+        if (entry.is_directory()) {
+            addonsFoldersCache.push_back(entry.path().string());
+        }
+    }
 }
 FileSystem_UpdateAddonSearchPathsType FileSystem_UpdateAddonSearchPathsTypeOriginal;
 __int64 __fastcall FileSystem_UpdateAddonSearchPaths(void* a1)
