@@ -1263,7 +1263,7 @@ CLC_Move__ReadFromBufferType CLC_Move__ReadFromBufferOriginal;
 bool __fastcall CLC_Move__ReadFromBuffer(CLC_Move* thisptr, bf_read& buffer)
 {
 	if (buffer.ReadLongLong() != 0xd0032147bf50a000) {
-		buffer.SeekRelative(2 * (sizeof(long) << 3));
+		buffer.SeekRelative(-2 * (sizeof(long) << 3));
 		return CLC_Move__ReadFromBufferOriginal(thisptr, buffer);
 	}
 	thisptr->m_nNewCommands = buffer.ReadUBitLong(7);
