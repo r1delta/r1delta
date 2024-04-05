@@ -679,13 +679,13 @@ typedef struct netpacket_s
 	int source;
 	double received;
 	uint8_t* pData;
-	BFRead message;
+	bf_read message;
 	int size;
 	int wiresize;
 	char stream;
 	netpacket_s* pNext;
 } netpacket_t;
-bool ReadConnectPacket2015AndWriteConnectPacket2014(BFRead& msg, BFWrite& buffer)
+bool ReadConnectPacket2015AndWriteConnectPacket2014(bf_read& msg, bf_write& buffer)
 {
 	char type = msg.ReadByte();
 	if (type != 'A')
@@ -773,14 +773,14 @@ double lastReceived = 0.f;
 char __fastcall ProcessConnectionlessPacket(unsigned int* a1, netpacket_s* a2)
 {
 	char buffer[1200] = { 0 };
-	BFWrite writer(reinterpret_cast<uptr>(buffer), sizeof(buffer));
+	bf_write writer(reinterpret_cast<char*>(buffer), sizeof(buffer));
 
 	if (((char*)a2->pData + 4)[0] == 'A' && ReadConnectPacket2015AndWriteConnectPacket2014(a2->message, writer) != -1)
 	{
 		if (lastReceived == a2->received)
 			return false;
 		lastReceived = a2->received;
-		BFRead converted(reinterpret_cast<uptr>(buffer), writer.GetNumBytesWritten());
+		bf_read converted(reinterpret_cast<char*>(buffer), writer.GetNumBytesWritten());
 		a2->message = converted;
 		return ProcessConnectionlessPacketOriginal(a1, a2);
 	}
@@ -879,7 +879,7 @@ __int64 Detour_NET_OutOfBandPrintf(int sock, void* adr, const char* fmt, ...) {
 		static const char* mapname = reinterpret_cast<const char*>((uintptr_t)(GetModuleHandleA("engine_ds.dll")) + 0x1C89A84);
 		//MessageBoxA(NULL, *gamemode, mapname, 16);
 		char msg[1200] = { 0 };
-		BFWrite startup((uintptr_t)msg, 1200);
+		bf_write startup(msg, 1200);
 		startup.WriteLong(0xFFFFFFFFi64);
 		startup.WriteByte(0x4Au);
 		startup.WriteString(mapname);
@@ -956,9 +956,9 @@ bool __fastcall SendTable_Encode(
 {
 	return SendTable_EncodeOriginal(a1, a2, a3, a4, pRecipients, 0, a7, a8);
 }
-typedef __int64 (*bf_write__WriteUBitLongType)(BFWrite* a1, unsigned int a2, signed int a3);
+typedef __int64 (*bf_write__WriteUBitLongType)(bf_write* a1, unsigned int a2, signed int a3);
 bf_write__WriteUBitLongType bf_write__WriteUBitLongOriginal;
-__int64 __fastcall bf_write__WriteUBitLong(BFWrite* a1, unsigned int a2, signed int a3)
+__int64 __fastcall bf_write__WriteUBitLong(bf_write* a1, unsigned int a2, signed int a3)
 {
 	static uintptr_t engineDS = uintptr_t(GetModuleHandleA("engine_ds.dll"));
 	auto ret = bf_write__WriteUBitLongOriginal(a1, a2, a3);
@@ -1246,6 +1246,44 @@ void CL_Retry_f() {
 		return CL_Retry_fOriginal();
 	}
 }
+struct CLC_Move
+{
+	bool m_bReliable;
+	void* m_NetChannel;
+	void* unk;
+	void* m_pMessageHandler;
+	int m_nBackupCommands;
+	int m_nNewCommands;
+	int m_nLength;
+	bf_read m_DataIn;
+	bf_write m_DataOut;
+};
+typedef bool (*CLC_Move__ReadFromBufferType)(CLC_Move* thisptr, bf_read& buffer);
+CLC_Move__ReadFromBufferType CLC_Move__ReadFromBufferOriginal;
+bool __fastcall CLC_Move__ReadFromBuffer(CLC_Move* thisptr, bf_read& buffer)
+{
+	if (buffer.ReadLongLong() != 0xd0032147bf50a000) {
+		buffer.SeekRelative(2 * (sizeof(long) << 3));
+		return CLC_Move__ReadFromBufferOriginal(thisptr, buffer);
+	}
+	thisptr->m_nNewCommands = buffer.ReadUBitLong(7);
+	thisptr->m_nBackupCommands = buffer.ReadUBitLong(4);
+	thisptr->m_nLength = buffer.ReadWord();
+	thisptr->m_DataIn = buffer;
+	return buffer.SeekRelative(thisptr->m_nLength);
+}
+
+bool __fastcall CLC_Move__WriteToBuffer(CLC_Move* thisptr, bf_write& buffer)
+{
+	thisptr->m_nLength = thisptr->m_DataOut.GetNumBitsWritten();
+	buffer.WriteLongLong(0xd0032147bf50a000);
+	buffer.WriteUBitLong(thisptr->m_nNewCommands, 7);
+	buffer.WriteUBitLong(thisptr->m_nBackupCommands, 4);
+	buffer.WriteWord(thisptr->m_nLength);
+	return buffer.WriteBits(thisptr->m_DataOut.GetData(), thisptr->m_nLength);
+}
+
+
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
 	const LDR_DLL_NOTIFICATION_DATA* notification_data,
@@ -1284,6 +1322,8 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x3A2130), &CBaseEntity__SendProxy_CellOriginZ, reinterpret_cast<LPVOID*>(NULL));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x6A420), &ReadFileFromVPKHook, reinterpret_cast<LPVOID*>(&readFileFromVPK));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x9C20), &ReadFromCacheHook, reinterpret_cast<LPVOID*>(&readFromCache));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x1FDA50), &CLC_Move__ReadFromBuffer, reinterpret_cast<LPVOID*>(&CLC_Move__ReadFromBufferOriginal));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x1F6F10), &CLC_Move__WriteToBuffer, reinterpret_cast<LPVOID*>(NULL));
 
 
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("vstdlib.dll"), "VStdLib_GetICVarFactory"), &VStdLib_GetICVarFactory, NULL);

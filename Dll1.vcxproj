@@ -156,6 +156,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="bitbuf.h" />
+    <ClInclude Include="coordsize.h" />
     <ClInclude Include="core.h" />
     <ClInclude Include="cvar.h" />
     <ClInclude Include="factory.h" />
@@ -164,21 +165,25 @@
     <ClInclude Include="load.h" />
     <ClInclude Include="memory.h" />
     <ClInclude Include="patcher.h" />
+    <ClInclude Include="platform.h" />
     <ClInclude Include="TableDestroyer.h" />
     <ClInclude Include="thirdparty\silver-bun\memaddr.h" />
     <ClInclude Include="thirdparty\silver-bun\module.h" />
     <ClInclude Include="thirdparty\silver-bun\tebpeb64.h" />
     <ClInclude Include="thirdparty\silver-bun\utils.h" />
     <ClInclude Include="tier0_orig.h" />
+    <ClInclude Include="vector.h" />
     <ClInclude Include="windowsutil.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="bitbuf.cpp" />
     <ClCompile Include="cvar.cpp" />
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="factory.cpp" />
     <ClCompile Include="filesystem.cpp" />
     <ClCompile Include="load.cpp" />
     <ClCompile Include="memory.cpp" />
+    <ClCompile Include="newbitbuf.cpp" />
     <ClCompile Include="patcher.cpp" />
     <ClCompile Include="TableDestroyer.cpp" />
     <ClCompile Include="thirdparty\silver-bun\memaddr.cpp" />
