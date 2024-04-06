@@ -1264,7 +1264,9 @@ bool __fastcall CLC_Move__ReadFromBuffer(CLC_Move* thisptr, bf_read& buffer)
 {
 	int bak = buffer.GetNumBitsRead();
 	if (buffer.ReadLongLong() != 0xd0032147bf50a000) {
+		buffer.m_bOverflow = false;
 		buffer.Seek(bak);
+		buffer.m_bOverflow = false;
 		return CLC_Move__ReadFromBufferOriginal(thisptr, buffer);
 	}
 	thisptr->m_nNewCommands = buffer.ReadUBitLong(7);
@@ -1283,7 +1285,16 @@ bool __fastcall CLC_Move__WriteToBuffer(CLC_Move* thisptr, bf_write& buffer)
 	buffer.WriteWord(thisptr->m_nLength);
 	return buffer.WriteBits(thisptr->m_DataOut.GetData(), thisptr->m_nLength);
 }
+typedef __int64 (*CBaseServer__FillServerInfoType)(__int64 a1, __int64 a2);
+CBaseServer__FillServerInfoType CBaseServer__FillServerInfoOriginal;
+__int64 __fastcall CBaseServer__FillServerInfo(__int64 a1, __int64 a2)
+{
+	static const char* real_gamedir = "r1_dlc1";
+	auto ret = CBaseServer__FillServerInfoOriginal(a1, a2);
 
+	*(const char**)(a2 + 72) = real_gamedir;
+	return ret;
+}
 
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
@@ -1325,6 +1336,7 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x9C20), &ReadFromCacheHook, reinterpret_cast<LPVOID*>(&readFromCache));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x1FDA50), &CLC_Move__ReadFromBuffer, reinterpret_cast<LPVOID*>(&CLC_Move__ReadFromBufferOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x1F6F10), &CLC_Move__WriteToBuffer, reinterpret_cast<LPVOID*>(NULL));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0xCA730), &CBaseServer__FillServerInfo, reinterpret_cast<LPVOID*>(&CBaseServer__FillServerInfoOriginal));
 
 
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("vstdlib.dll"), "VStdLib_GetICVarFactory"), &VStdLib_GetICVarFactory, NULL);
