@@ -24,3 +24,4 @@ bool TryReplaceFile(const char* pszFilePath);
 typedef __int64 (*FileSystem_UpdateAddonSearchPathsType)(void* a1);
 extern FileSystem_UpdateAddonSearchPathsType FileSystem_UpdateAddonSearchPathsTypeOriginal;
 __int64 __fastcall FileSystem_UpdateAddonSearchPaths(void* a1);
+void StartFileCacheThread();

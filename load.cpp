@@ -1320,7 +1320,7 @@ typedef void (*IVP_Environment__set_delta_PSI_timeType)(void* thisptr, float psi
 IVP_Environment__set_delta_PSI_timeType IVP_Environment__set_delta_PSI_timeOriginal;
 void __fastcall IVP_Environment__set_delta_PSI_time(void* thisptr, float psi_time)
 {
-	IVP_Environment__set_delta_PSI_timeOriginal(thisptr, 0.0111111111111111f);
+	IVP_Environment__set_delta_PSI_timeOriginal(thisptr, psi_time/3.f);
 }
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,

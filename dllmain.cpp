@@ -2,6 +2,7 @@
 #include <MinHook.h>
 #include "load.h"
 #include "core.h"
+#include "filesystem.h"
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 {
 
@@ -22,6 +23,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 	{
 	case DLL_PROCESS_ATTACH: {
 		MH_Initialize();
+		StartFileCacheThread();
 		LdrRegisterDllNotificationFunc reg_fn =
 			reinterpret_cast<LdrRegisterDllNotificationFunc>(::GetProcAddress(
 				::GetModuleHandle(kNtDll), kLdrRegisterDllNotification));
