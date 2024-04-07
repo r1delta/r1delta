@@ -1295,7 +1295,33 @@ __int64 __fastcall CBaseServer__FillServerInfo(__int64 a1, __int64 a2)
 	*(const char**)(a2 + 72) = real_gamedir;
 	return ret;
 }
+struct physics_performanceparams_t
+{
+	int maxCollisionsPerObjectPerTimestep;
+	int maxCollisionChecksPerTimestep;
+	float maxVelocity;
+	float maxAngularVelocity;
+	float lookAheadTimeObjectsVsWorld;
+	float lookAheadTimeObjectsVsObject;
+	float minFrictionMass;
+	float maxFrictionMass;
+};
+typedef __int64 (*sub_1800257E0Type)(void* a1, physics_performanceparams_t* a2);
+sub_1800257E0Type sub_1800257E0Original;
 
+__int64 __fastcall sub_1800257E0(void* a1, physics_performanceparams_t* a2)
+{
+	a2->maxCollisionsPerObjectPerTimestep = 0xa;
+	a2->maxCollisionChecksPerTimestep = 0x000004b0;
+
+	return sub_1800257E0Original(a1, a2);
+}
+typedef void (*IVP_Environment__set_delta_PSI_timeType)(void* thisptr, float psi_time);
+IVP_Environment__set_delta_PSI_timeType IVP_Environment__set_delta_PSI_timeOriginal;
+void __fastcall IVP_Environment__set_delta_PSI_time(void* thisptr, float psi_time)
+{
+	IVP_Environment__set_delta_PSI_timeOriginal(thisptr, 0.00833333335f);
+}
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
 	const LDR_DLL_NOTIFICATION_DATA* notification_data,
@@ -1337,6 +1363,8 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x1FDA50), &CLC_Move__ReadFromBuffer, reinterpret_cast<LPVOID*>(&CLC_Move__ReadFromBufferOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x1F6F10), &CLC_Move__WriteToBuffer, reinterpret_cast<LPVOID*>(NULL));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0xCA730), &CBaseServer__FillServerInfo, reinterpret_cast<LPVOID*>(&CBaseServer__FillServerInfoOriginal));
+		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x257E0), &sub_1800257E0, reinterpret_cast<LPVOID*>(&sub_1800257E0Original));
+		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0xE77F0), &IVP_Environment__set_delta_PSI_time, reinterpret_cast<LPVOID*>(&IVP_Environment__set_delta_PSI_timeOriginal));
 
 
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("vstdlib.dll"), "VStdLib_GetICVarFactory"), &VStdLib_GetICVarFactory, NULL);
@@ -1451,14 +1479,17 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x45C00), &CBaseClient__ProcessClientInfo, reinterpret_cast<LPVOID*>(NULL));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x4C460), &sub_4C460, reinterpret_cast<LPVOID*>(NULL));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x14E980), &sub_14E980, reinterpret_cast<LPVOID*>(NULL));
-		
+		uintptr_t tier0_base = reinterpret_cast<uintptr_t>(GetModuleHandleA("tier0_r1.dll"));
+
+		//MH_CreateHook(reinterpret_cast<LPVOID>(tier0_base + 0xC490), &HookedAlloc, reinterpret_cast<void**>(&g_originalAlloc));
+		//MH_CreateHook(reinterpret_cast<LPVOID>(tier0_base + 0xC600), &HookedFree, reinterpret_cast<void**>(&g_originalFree));
+		//MH_CreateHook(reinterpret_cast<LPVOID>(tier0_base + 0xDDE0), &HookedRealloc, reinterpret_cast<void**>(&g_originalRealloc));
+		//MH_CreateHook(reinterpret_cast<LPVOID>(tier0_base + 0xB350), &HookedGetSize, reinterpret_cast<void**>(&g_originalGetSize));
+		//MH_CreateHook(reinterpret_cast<LPVOID>(tier0_base + 0xC930), &HookedRegionAlloc, reinterpret_cast<void**>(&g_originalRegionAlloc));
+		//
+		MH_EnableHook(MH_ALL_HOOKS);
 		static CustomBuffer customBuffer;
 		std::cout.rdbuf(&customBuffer);
-
-
-
-
-		MH_EnableHook(MH_ALL_HOOKS);
 
 	}
 

@@ -37,25 +37,25 @@ bool folderExistsCheckCache(const std::string& folderPath) {
     }
 }
 bool fileExistsCheckCache(const std::string& filePath) {
-    auto it = fileCache.find(filePath);
-    if (it != fileCache.end()) {
-        return it->second;
-    }
+    //auto it = fileCache.find(filePath);
+    //if (it != fileCache.end()) {
+    //    return it->second;
+    //}
 
     // Check if every parent directory exists
-    std::filesystem::path path(filePath);
-    std::filesystem::path parentPath;
-    for (const auto& element : path) {
-        parentPath /= element;
-        if (!folderExistsCheckCache(parentPath.string())) {
-            fileCache[filePath] = false;
-            return false;
-        }
-    }
+   // std::filesystem::path path(filePath);
+   // std::filesystem::path parentPath;
+   // for (const auto& element : path) {
+   //     parentPath /= element;
+   //     if (!folderExistsCheckCache(parentPath.string())) {
+   //         fileCache[filePath] = false;
+   //         return false;
+   //     }
+   // }
 
     // Check if the file exists
     bool exists = std::filesystem::exists(filePath);
-    fileCache[filePath] = exists;
+    //fileCache[filePath] = exists;
     return exists;
 }
 

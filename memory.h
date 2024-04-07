@@ -1,6 +1,9 @@
 #pragma once
 
 #include "framework.h"
+#include <concurrent_unordered_map.h>
+#include <MinHook.h>
+
 
 class IMemAlloc {
 public:
@@ -26,3 +29,23 @@ void __cdecl hkfree_base(void* Block);
 void* __cdecl hkrecalloc_base(void* Block, size_t Count, size_t Size);
 extern IMemAlloc* g_pMemAllocSingleton;
 extern "C" __declspec(dllexport) IMemAlloc * CreateGlobalMemAlloc();
+
+// Original function pointers
+typedef void* (*AllocFn)(void*, size_t);
+typedef void (*FreeFn)(void*, void*);
+typedef void* (*ReallocFn)(void*,void*, size_t);
+typedef size_t(*GetSizeFn)(void*,void*);
+typedef void* (*RegionAllocFn)(void*, int, size_t);
+
+extern AllocFn g_originalAlloc;
+extern FreeFn g_originalFree;
+extern ReallocFn g_originalRealloc;
+extern GetSizeFn g_originalGetSize;
+extern RegionAllocFn g_originalRegionAlloc;
+
+// Hooked function declarations
+void* HookedAlloc(void* thisptr, size_t size);
+void HookedFree(void* thisptr, void* ptr);
+void* HookedRealloc(void* thisptr, void* ptr, size_t size);
+size_t HookedGetSize(void* thisptr, void* ptr);
+void* HookedRegionAlloc(void* thisptr, int region, size_t size);
