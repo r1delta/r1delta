@@ -1038,7 +1038,7 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x017940), LPVOID(engine.GetModuleBase() + 0x028BC0), NULL); // CLC_SplitPlayerConnect__dtor
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x12F140), LPVOID(engine.GetModuleBase() + 0x1DC830), NULL); // SendTable_WriteInfos
 	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x71C0), &bf_write__WriteUBitLong, reinterpret_cast<LPVOID*>(&bf_write__WriteUBitLongOriginal)); // bf_write__WriteUBitLong
-	
+	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x497F0), LPVOID(engine.GetModuleBase() + 0xD8420), NULL); // CBaseClient::ConnectionStart
 	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x62610), LPVOID(engine.GetModuleBase() + 0xF1930), NULL); // SV_PackEntity
 	//MH_CreateHook(LPVOID(engine.GetModuleBase() + 0xE3A90), LPVOID(CreateFunction((void*)(engineDS.GetModuleBase() + 0x55340), (void*)(engineDS.GetModuleBase() + 0x1C76250))), NULL); // CFrameSnapshotManager::UsePreviouslySentPacket
 	//MH_CreateHook(LPVOID(engine.GetModuleBase() + 0xE3B00), LPVOID(CreateFunction((void*)(engineDS.GetModuleBase() + 0x553B0), (void*)(engineDS.GetModuleBase() + 0x1C76250))), NULL); // CFrameSnapshotManager::GetPreviouslySentPacket
