@@ -1320,7 +1320,7 @@ typedef void (*IVP_Environment__set_delta_PSI_timeType)(void* thisptr, float psi
 IVP_Environment__set_delta_PSI_timeType IVP_Environment__set_delta_PSI_timeOriginal;
 void __fastcall IVP_Environment__set_delta_PSI_time(void* thisptr, float psi_time)
 {
-	IVP_Environment__set_delta_PSI_timeOriginal(thisptr, 0.00833333335f);
+	IVP_Environment__set_delta_PSI_timeOriginal(thisptr, 0.0111111111111111f);
 }
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
@@ -1364,7 +1364,7 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x1F6F10), &CLC_Move__WriteToBuffer, reinterpret_cast<LPVOID*>(NULL));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0xCA730), &CBaseServer__FillServerInfo, reinterpret_cast<LPVOID*>(&CBaseServer__FillServerInfoOriginal));
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x257E0), &sub_1800257E0, reinterpret_cast<LPVOID*>(&sub_1800257E0Original));
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0xE77F0), &IVP_Environment__set_delta_PSI_time, reinterpret_cast<LPVOID*>(&IVP_Environment__set_delta_PSI_timeOriginal));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0xE77F0), &IVP_Environment__set_delta_PSI_time, reinterpret_cast<LPVOID*>(&IVP_Environment__set_delta_PSI_timeOriginal));
 
 
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("vstdlib.dll"), "VStdLib_GetICVarFactory"), &VStdLib_GetICVarFactory, NULL);
@@ -1488,8 +1488,8 @@ void __stdcall LoaderNotificationCallback(
 		//MH_CreateHook(reinterpret_cast<LPVOID>(tier0_base + 0xC930), &HookedRegionAlloc, reinterpret_cast<void**>(&g_originalRegionAlloc));
 		//
 		MH_EnableHook(MH_ALL_HOOKS);
-		static CustomBuffer customBuffer;
-		std::cout.rdbuf(&customBuffer);
+		//static CustomBuffer customBuffer;
+		//std::cout.rdbuf(&customBuffer);
 
 	}
 
