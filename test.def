@@ -373,3 +373,6 @@ vtune=tier0_orig.vtune @371
 CreateGlobalMemAlloc @372
 g_pMemAllocSingleton @373 DATA
 GetServerVMPtr @374
+?JT_WaitForJobAndOnlyHelpWithJobTypes@@YAXW4JobID_t@@_K1@Z = JT_WaitForJobAndOnlyHelpWithJobTypes @375
+?JT_AddCallArray@@YA?AW4JobID_t@@W4JobCallPriority_e@@W41@P6AX_K@Z222@Z = JT_AddCallArray @376
+CoreMsgV=tier0_orig.Msg @377
