@@ -1330,7 +1330,7 @@ void __fastcall sub_180031610(__int64 a1, float a2) {
 __int64 __fastcall CBaseEntity__VPhysicsInitNormal(void* a1, unsigned int a2, unsigned int a3, char a4, __int64 a5)
 {
 	static auto CBaseEntity__SetMoveType = reinterpret_cast<void(*)(void* a1, __int64 a2, __int64 a3)>(uintptr_t(GetModuleHandleA("server.dll")) + 0x3B3200);
-	CBaseEntity__SetMoveType(a1, 5, 1);
+	CBaseEntity__SetMoveType(a1, 5, 0); // 1 is normal (MOVECOLLIDE_FLY_BOUNCE), 0 is funny mode (MOVECOLLIDE_DEFAULT)
 	return NULL;
 }
 void __stdcall LoaderNotificationCallback(
