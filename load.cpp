@@ -1320,217 +1320,12 @@ typedef void (*IVP_Environment__set_delta_PSI_timeType)(void* thisptr, float psi
 IVP_Environment__set_delta_PSI_timeType IVP_Environment__set_delta_PSI_timeOriginal;
 void __fastcall IVP_Environment__set_delta_PSI_time(void* thisptr, float psi_time)
 {
-	IVP_Environment__set_delta_PSI_timeOriginal(thisptr, psi_time / 2.f);
+	IVP_Environment__set_delta_PSI_timeOriginal(thisptr, 0.015151516f);
 }
 typedef void (*sub_180031610Type)(__int64 a1, float a2);
 sub_180031610Type sub_180031610Original;
 void __fastcall sub_180031610(__int64 a1, float a2) {
 	sub_180031610Original(a1, a2);
-}
-
-__int64 __fastcall VPhysCollInterface()
-{
-	if (true) {
-		static uintptr_t* fns = (uintptr_t*)(uintptr_t(GetModuleHandleA("vphysics.dll")) + 0x197270);
-		static uintptr_t thisptr = uintptr_t(GetModuleHandleA("vphysics.dll")) + 0x1C9F80;
-		static uintptr_t CPhysCollision__UnkFunc0 = fns[0];
-		static uintptr_t CPhysCollision__UnkFunc1 = fns[1];
-		static uintptr_t CPhysCollision__UnkFunc2 = fns[2];
-		static uintptr_t CPhysCollision__UnkFunc3 = fns[3];
-		static uintptr_t CPhysCollision__UnkFunc4 = fns[4];
-		static uintptr_t CPhysCollision__UnkFunc5 = fns[5];
-		static uintptr_t CPhysCollision__UnkFunc6 = fns[6];
-		static uintptr_t CPhysCollision__UnkFunc7 = fns[7];
-		static uintptr_t CPhysCollision__UnkFunc8 = fns[8];
-		static uintptr_t CPhysCollision__UnkFunc9 = fns[9];
-		static uintptr_t CPhysCollision__UnkFunc10 = fns[10];
-		static uintptr_t CPhysCollision__UnkFunc11 = fns[11];
-		static uintptr_t CPhysCollision__UnkFunc12 = fns[12];
-		static uintptr_t CPhysCollision__UnkFunc13 = fns[13];
-		static uintptr_t CPhysCollision__UnkFunc14 = fns[14];
-		static uintptr_t CPhysCollision__UnkFunc15 = fns[15];
-		static uintptr_t CPhysCollision__UnkFunc16 = fns[16];
-		static uintptr_t CPhysCollision__UnkFunc17 = fns[17];
-		static uintptr_t CPhysCollision__UnkFunc18 = fns[18];
-		static uintptr_t CPhysCollision__UnkFunc19 = fns[19];
-		static uintptr_t CPhysCollision__UnkFunc20 = fns[20];
-		static uintptr_t CPhysCollision__UnkFunc21 = fns[21];
-		static uintptr_t CPhysCollision__UnkFunc22 = fns[22];
-		static uintptr_t CPhysCollision__UnkFunc23 = fns[23];
-		static uintptr_t CPhysCollision__UnkFunc24 = fns[24];
-		static uintptr_t CPhysCollision__UnkFunc25 = fns[25];
-		static uintptr_t CPhysCollision__UnkFunc26 = fns[26];
-		static uintptr_t CPhysCollision__UnkFunc27 = fns[27];
-		static uintptr_t CPhysCollision__UnkFunc28 = fns[28];
-		static uintptr_t CPhysCollision__UnkFunc29 = fns[29];
-		static uintptr_t CPhysCollision__UnkFunc30 = fns[30];
-		static uintptr_t CPhysCollision__UnkFunc31 = fns[31];
-		static uintptr_t CPhysCollision__UnkFunc32 = fns[32];
-		static uintptr_t CPhysCollision__UnkFunc33 = fns[33];
-		static uintptr_t CPhysCollision__UnkFunc34 = fns[34];
-		static uintptr_t CPhysCollision__UnkFunc35 = fns[35];
-		static uintptr_t CPhysCollision__UnkFunc36 = fns[36];
-		static uintptr_t CPhysCollision__UnkFunc37 = fns[37];
-		static uintptr_t CPhysCollision__UnkFunc38 = fns[38];
-		static uintptr_t CPhysCollision__UnkFunc39 = fns[39];
-		static uintptr_t CPhysCollision__UnkFunc40 = fns[40];
-		static uintptr_t CPhysCollision__UnkFunc41 = fns[41];
-		static uintptr_t CPhysCollision__UnkFunc42 = fns[42];
-		static uintptr_t CPhysCollision__UnkFunc43 = fns[43];
-		static uintptr_t CPhysCollision__UnkFunc44 = fns[44];
-		static uintptr_t CPhysCollision__UnkFunc45 = fns[45];
-		static uintptr_t CPhysCollision__UnkFunc46 = fns[46];
-		static uintptr_t CPhysCollision__UnkFunc47 = fns[47];
-		static uintptr_t CPhysCollision__UnkFunc48 = fns[48];
-		static uintptr_t CPhysCollision__UnkFunc49 = fns[49];
-		static uintptr_t CPhysCollision__UnkFunc50 = fns[50];
-		static uintptr_t CPhysCollision__UnkFunc51 = fns[51];
-		static uintptr_t CPhysCollision__UnkFunc52 = fns[52];
-		static uintptr_t CPhysCollision__UnkFunc53 = fns[53];
-		static uintptr_t CPhysCollision__UnkFunc54 = fns[54];
-		static uintptr_t CPhysCollision__UnkFunc55 = fns[55];
-		static uintptr_t CPhysCollision__UnkFunc56 = fns[56];
-		static uintptr_t CPhysCollision__UnkFunc57 = fns[57];
-		static uintptr_t CPhysCollision__UnkFunc58 = fns[58];
-		static uintptr_t CPhysCollision__UnkFunc59 = fns[59];
-		static uintptr_t CPhysCollision__UnkFunc60 = fns[60];
-		static uintptr_t CPhysCollision__UnkFunc61 = fns[61];
-		static uintptr_t CPhysCollision__UnkFunc62 = fns[62];
-		static uintptr_t CPhysCollision__UnkFunc63 = fns[63];
-		static uintptr_t CPhysCollision__UnkFunc64 = fns[64];
-		static uintptr_t faketable[] = {
-			CreateFunction((void*)(CPhysCollision__UnkFunc0), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc1), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc2), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc3), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc4), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc5), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc6), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc7), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc8), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc9), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc10), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc11), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc12), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc13), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc14), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc15), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc16), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc17), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc18), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc19), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc20), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc21), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc22), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc23), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc24), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc25), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc26), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc27), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc28), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc29), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc30), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc31), (void*)(thisptr)),
-			//CreateFunction((void*)(CPhysCollision__UnkFunc32), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc35), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc33), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc34), (void*)(thisptr)),
-			
-			CreateFunction((void*)(CPhysCollision__UnkFunc36), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc37), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc38), (void*)(thisptr)),
-			//CreateFunction((void*)(CPhysCollision__UnkFunc39), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc40), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc41), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc42), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc43), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc44), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc45), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc46), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc47), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc48), (void*)(thisptr)),
-			//CreateFunction((void*)(CPhysCollision__UnkFunc49), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc50), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc51), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc52), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc53), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc54), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc55), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc56), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc57), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc58), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc59), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc60), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc61), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc62), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc63), (void*)(thisptr)),
-			CreateFunction((void*)(CPhysCollision__UnkFunc64), (void*)(thisptr))
-		};
-		//uintptr_t faketable[65] = { 0 };
-		static void* whatever2 = (void*)faketable;
-		static auto whatever3 = (__int64)&whatever2;
-		//static auto whatever4 = (__int64)&whatever3;
-		return whatever3;
-	}
-}
-
-__int64 __fastcall VPhysMainInterface()
-{
-	if (true) {
-		static uintptr_t* fns = (uintptr_t*)(uintptr_t(GetModuleHandleA("vphysics.dll")) + 0x196DB0);
-		static uintptr_t thisptr = uintptr_t(GetModuleHandleA("vphysics.dll")) + 0x1C9EF0;
-		static uintptr_t CVPhys__UnkFunc0 = fns[0];
-		static uintptr_t CVPhys__UnkFunc1 = fns[1];
-		static uintptr_t CVPhys__UnkFunc2 = fns[2];
-		static uintptr_t CVPhys__UnkFunc3 = fns[3];
-		static uintptr_t CVPhys__UnkFunc4 = fns[4];
-		static uintptr_t CVPhys__UnkFunc5 = fns[5];
-		static uintptr_t CVPhys__UnkFunc6 = fns[6];
-		static uintptr_t CVPhys__UnkFunc7 = fns[7];
-		static uintptr_t CVPhys__UnkFunc8 = fns[8];
-		static uintptr_t CVPhys__UnkFunc9 = fns[9];
-		static uintptr_t CVPhys__UnkFunc10 = fns[10];
-		static uintptr_t CVPhys__UnkFunc11 = fns[11];
-		static uintptr_t CVPhys__UnkFunc12 = fns[12];
-		static uintptr_t CVPhys__UnkFunc13 = fns[13];
-		static uintptr_t CVPhys__UnkFunc14 = fns[14];
-		static uintptr_t CVPhys__UnkFunc15 = fns[15];
-		static uintptr_t faketable[] = {
-			CreateFunction((void*)(CVPhys__UnkFunc1), (void*)(thisptr)),
-			CreateFunction((void*)(CVPhys__UnkFunc2), (void*)(thisptr)),
-			CreateFunction((void*)(CVPhys__UnkFunc3), (void*)(thisptr)),
-			CreateFunction((void*)(CVPhys__UnkFunc4), (void*)(thisptr)),
-			CreateFunction((void*)(CVPhys__UnkFunc5), (void*)(thisptr)),
-			CreateFunction((void*)(CVPhys__UnkFunc6), (void*)(thisptr)),
-			CreateFunction((void*)(CVPhys__UnkFunc6), (void*)(thisptr)),
-			CreateFunction((void*)(CVPhys__UnkFunc7), (void*)(thisptr)),
-			CreateFunction((void*)(CVPhys__UnkFunc8), (void*)(thisptr)),
-			CreateFunction((void*)(CVPhys__UnkFunc9), (void*)(thisptr)),
-			CreateFunction((void*)(CVPhys__UnkFunc10), (void*)(thisptr)),
-			CreateFunction((void*)(CVPhys__UnkFunc11), (void*)(thisptr)),
-			CreateFunction((void*)(CVPhys__UnkFunc12), (void*)(thisptr)),
-			CreateFunction((void*)(CVPhys__UnkFunc13), (void*)(thisptr)),
-			CreateFunction((void*)(CVPhys__UnkFunc14), (void*)(thisptr)),
-			CreateFunction((void*)(CVPhys__UnkFunc15), (void*)(thisptr))
-		};
-		//uintptr_t faketable[65] = { 0 };
-		static void* whatever2 = (void*)faketable;
-		static auto whatever3 = (__int64)&whatever2;
-		//static auto whatever4 = (__int64)&whatever3;
-		return whatever3;
-	}
-}
-
-typedef _QWORD* (*VPhysInterfaceRegType)(_QWORD* a1, __int64 a2, __int64 a3);
-VPhysInterfaceRegType VPhysInterfaceRegOrig;
-_QWORD* __fastcall VPhysInterfaceReg(_QWORD* a1, __int64 a2, __int64 a3) {
-	if (!strcmp((const char*)(a3), "VPhysicsCollision007")) {
-		a2 = (__int64)(VPhysCollInterface);
-	}
-	else if (!strcmp((const char*)(a3), "VPhysics031")) {
-		a2 = (__int64)(VPhysMainInterface);
-	}
-	return VPhysInterfaceRegOrig(a1, a2, a3);
 }
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
@@ -1539,10 +1334,6 @@ void __stdcall LoaderNotificationCallback(
 	if (notification_reason != LDR_DLL_NOTIFICATION_REASON_LOADED)
 		return;
 	doBinaryPatchForFile(notification_data->Loaded);
-	if (std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length).find(L"vphysics.dll") != std::string::npos) {
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x0141090), &VPhysInterfaceReg, reinterpret_cast<LPVOID*>(&VPhysInterfaceRegOrig));
-		MH_EnableHook(MH_ALL_HOOKS);
-	}
 	if (std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length).find(L"server.dll") != std::string::npos) {
 		uintptr_t vTableAddr = reinterpret_cast<uintptr_t>(GetModuleHandleA("server.dll")) + 0x807220;
 		RemoveItemsFromVTable(vTableAddr, 35, 2);
@@ -1580,7 +1371,6 @@ void __stdcall LoaderNotificationCallback(
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x257E0), &sub_1800257E0, reinterpret_cast<LPVOID*>(&sub_1800257E0Original));
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0xE77F0), &IVP_Environment__set_delta_PSI_time, reinterpret_cast<LPVOID*>(&IVP_Environment__set_delta_PSI_timeOriginal));
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x31610), &sub_180031610, reinterpret_cast<LPVOID*>(&sub_180031610Original));
-		
 		
 
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("vstdlib.dll"), "VStdLib_GetICVarFactory"), &VStdLib_GetICVarFactory, NULL);
@@ -1714,41 +1504,4 @@ void __stdcall LoaderNotificationCallback(
 		MH_EnableHook(MH_ALL_HOOKS);
 	}
 
-}
-// Fake enums
-enum JobCallPriority_e { JOB_CALL_PRIORITY_LOW, JOB_CALL_PRIORITY_NORMAL, JOB_CALL_PRIORITY_HIGH };
-enum JobID_t { JOB_ID_INVALID = 0 };
-
-typedef JobID_t(__cdecl* JT_AddCallArray_t)(JobCallPriority_e, JobID_t, void(__cdecl*)(uint64_t), uint64_t, uint64_t, uint64_t);
-static JT_AddCallArray_t JT_AddCallArray_Orig = nullptr;
-
-typedef void(__cdecl* JT_WaitForJobAndOnlyHelpWithJobTypes_t)(JobID_t, uint64_t, uint64_t);
-static JT_WaitForJobAndOnlyHelpWithJobTypes_t JT_WaitForJobAndOnlyHelpWithJobTypes_Orig = nullptr;
-
-typedef int64_t(__fastcall* WT_ParallelProcess_t)(uint64_t, uint64_t, uint64_t, uint64_t);
-static WT_ParallelProcess_t WT_ParallelProcess = nullptr;
-
-extern "C" void __cdecl JT_WaitForJobAndOnlyHelpWithJobTypes(JobID_t job, uint64_t a2, uint64_t a3)
-{
-}
-
-extern "C" JobID_t __cdecl JT_AddCallArray(JobCallPriority_e priority, JobID_t dependsOn, void(__cdecl * func)(uint64_t), uint64_t a4, uint64_t count, uint64_t a6)
-{
-	if (WT_ParallelProcess == nullptr)
-	{
-		HMODULE tier0Module = GetModuleHandleA("tier0.dll");
-		if (tier0Module != nullptr)
-		{
-			WT_ParallelProcess = reinterpret_cast<WT_ParallelProcess_t>(GetProcAddress(tier0Module, "WT_ParallelProcess"));
-		}
-	}
-
-	if (WT_ParallelProcess != nullptr)
-	{
-		// Call WT_ParallelProcess with the provided function and count
-		WT_ParallelProcess(count, reinterpret_cast<uint64_t>(func), 0, 0);
-	}
-
-	// Return a dummy job handle (e.g., 1)
-	return static_cast<JobID_t>(1);
 }
