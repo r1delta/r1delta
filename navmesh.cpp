@@ -384,6 +384,7 @@ static uintptr_t rettorebuild;
 static uintptr_t rettofree;
 static uintptr_t rettofree2;
 static uintptr_t rettoalloc;
+static uintptr_t rettoallocbullshit;
 static __int64 arrayptr1;
 static __int64 arrayptr2;
 static CAI_NetworkBuilder__InitZonesType CAI_NetworkBuilder__InitZones;
@@ -412,24 +413,62 @@ void sub_364140(int node1, int node2, const char* pszFormat, ...)
 
 	va_end(args);
 }
-
+typedef void (*sub_36BC30Type)(__int64* a1);
+typedef __int64 (*sub_36C150Type)(__int64 a1, int a2, int a3);
+sub_36BC30Type sub_36BC30Original;
+sub_36C150Type sub_36C150Original;
+void sub_36BC30(__int64* a1) // free
+{
+	uintptr_t retaddr = uintptr_t(_ReturnAddress());
+	if (retaddr == rettofree || retaddr == rettofree2) {
+		sub_36BC30Original((__int64*)arrayptr1);
+		sub_36BC30Original((__int64*)arrayptr2);
+	}
+	return sub_36BC30Original(a1);
+}
+__int64 sub_36C150(__int64 a1, int a2, int a3) // CUtlVector<CVarBitVec,CUtlMemory<CVarBitVec,int>>::InsertMultipleBefore, not sure if this is needed?
+{
+	uintptr_t retaddr = uintptr_t(_ReturnAddress());
+	if (retaddr == rettoalloc) {
+		sub_36C150Original(arrayptr1, a2, a3);
+		sub_36C150Original(arrayptr2, a2, a3);
+	}
+	return sub_36C150Original(a1, a2, a3);
+}
+static __int64 lastnum = 0;
+typedef void (*unkallocfunctype)(__int64 a1, int a2, char a3);
+unkallocfunctype unkallocfuncoriginal;
+void unkallocfunc(__int64 a1, int a2, char a3) // CVarBitVecBase<unsigned short>::Resize
+{
+	uintptr_t retaddr = uintptr_t(_ReturnAddress());
+	if (retaddr == rettoallocbullshit) {
+		if (!lastnum)
+			lastnum = a1;
+		if (a1 < lastnum) {
+			lastnum = a1;
+		}
+		unkallocfuncoriginal((*(__int64*)(arrayptr1)) + (a1 - lastnum), a2, a3);
+		unkallocfuncoriginal((*(__int64*)(arrayptr2)) + (a1 - lastnum), a2, a3);
+	}
+	return unkallocfuncoriginal(a1, a2, a3);
+}
 void __fastcall CAI_NetworkManager__DelayedInit(__int64 a1) {
-
 	static bool* CAI_NetworkManager__gm_fNetworksLoaded = (bool*)(uintptr_t(GetModuleHandleA("server.dll")) + 0xC318A0);
 	static auto CAI_NetworkBuilder__Rebuild = (void(*)(__int64 a1, CAI_Network* a2))(uintptr_t(GetModuleHandleA("server.dll")) + 0x3682A0);
 
 	static bool allocated = false;
 	if (!allocated) {
 		allocated = true;
-		//allocbuffer(0xD41730);
-		//allocbuffer(0xD41710);
-		//allocbuffer(0xD416F0);
-		//allocbuffer(0xD416D0);
-		//allocbuffer(0xD41AD0);
+		allocbuffer(0xD41730);
+		allocbuffer(0xD41710);
+		allocbuffer(0xD416F0);
+		allocbuffer(0xD416D0);
+		allocbuffer(0xD41AD0);
 		rettorebuild = uintptr_t(GetModuleHandleA("server.dll")) + 0x368594;
 		rettofree = uintptr_t(GetModuleHandleA("server.dll")) + 0x368469;
 		rettofree2 = uintptr_t(GetModuleHandleA("server.dll")) + 0x3685A0;
 		rettoalloc = uintptr_t(GetModuleHandleA("server.dll")) + 0x36847E;
+		rettoallocbullshit = uintptr_t(GetModuleHandleA("server.dll")) + 0x3684A4;
 		CAI_NetworkBuilder__InitZones = CAI_NetworkBuilder__InitZonesType(uintptr_t(GetModuleHandleA("server.dll")) + 0x0367EE0);
 		arrayptr1 = (__int64)(uintptr_t(GetModuleHandleA("server.dll")) + 0xD416F0);
 		arrayptr2 = (__int64)(uintptr_t(GetModuleHandleA("server.dll")) + 0xD41710);
@@ -437,6 +476,7 @@ void __fastcall CAI_NetworkManager__DelayedInit(__int64 a1) {
 	auto network = reinterpret_cast<CAI_Network * >(((_QWORD*)(a1))[200]);
 	g_pGlobals = (CGlobalVarsServer2015*)(uintptr_t(GetModuleHandleA("server.dll")) + 0xC310C0);
 	CAI_NetworkBuilder__Rebuild(a1, network);
+	//CAI_NetworkBuilder__InitZones();
 	//DumpAINInfo(network);
 	return CAI_NetworkManager__DelayedInitOriginal(a1);
 }
