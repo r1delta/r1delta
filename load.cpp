@@ -26,6 +26,7 @@
 #include <fcntl.h>
 #include <io.h>
 #include <streambuf>
+#include "navmesh.h"
 #pragma intrinsic(_ReturnAddress)
 
 wchar_t kNtDll[] = L"ntdll.dll";
@@ -1330,7 +1331,7 @@ void __fastcall sub_180031610(__int64 a1, float a2) {
 __int64 __fastcall CBaseEntity__VPhysicsInitNormal(void* a1, unsigned int a2, unsigned int a3, char a4, __int64 a5)
 {
 	static auto CBaseEntity__SetMoveType = reinterpret_cast<void(*)(void* a1, __int64 a2, __int64 a3)>(uintptr_t(GetModuleHandleA("server.dll")) + 0x3B3200);
-	CBaseEntity__SetMoveType(a1, 5, 0); // 1 is normal (MOVECOLLIDE_FLY_BOUNCE), 0 is funny mode (MOVECOLLIDE_DEFAULT)
+	CBaseEntity__SetMoveType(a1, 5, 1); // 1 is normal (MOVECOLLIDE_FLY_BOUNCE), 0 is funny mode (MOVECOLLIDE_DEFAULT)
 	return NULL;
 }
 void __stdcall LoaderNotificationCallback(
@@ -1375,6 +1376,11 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x1FDA50), &CLC_Move__ReadFromBuffer, reinterpret_cast<LPVOID*>(&CLC_Move__ReadFromBufferOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x1F6F10), &CLC_Move__WriteToBuffer, reinterpret_cast<LPVOID*>(NULL));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0xCA730), &CBaseServer__FillServerInfo, reinterpret_cast<LPVOID*>(&CBaseServer__FillServerInfoOriginal));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x3664C0), &CAI_NetworkManager__DelayedInit, reinterpret_cast<LPVOID*>(&CAI_NetworkManager__DelayedInitOriginal));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x36BC30), &sub_36BC30, reinterpret_cast<LPVOID*>(&sub_36BC30Original));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x36C150), &sub_36C150, reinterpret_cast<LPVOID*>(&sub_36C150Original));
+		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x364140), &sub_364140, reinterpret_cast<LPVOID*>(NULL));
+		
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x257E0), &sub_1800257E0, reinterpret_cast<LPVOID*>(&sub_1800257E0Original));
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0xE77F0), &IVP_Environment__set_delta_PSI_time, reinterpret_cast<LPVOID*>(&IVP_Environment__set_delta_PSI_timeOriginal));
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x31610), &sub_180031610, reinterpret_cast<LPVOID*>(&sub_180031610Original));

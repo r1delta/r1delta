@@ -72,6 +72,9 @@
     <ClInclude Include="coordsize.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="navmesh.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">
@@ -114,6 +117,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="newbitbuf.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="navmesh.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

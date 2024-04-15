@@ -164,6 +164,7 @@
     <ClInclude Include="framework.h" />
     <ClInclude Include="load.h" />
     <ClInclude Include="memory.h" />
+    <ClInclude Include="navmesh.h" />
     <ClInclude Include="patcher.h" />
     <ClInclude Include="platform.h" />
     <ClInclude Include="TableDestroyer.h" />
@@ -183,6 +184,7 @@
     <ClCompile Include="filesystem.cpp" />
     <ClCompile Include="load.cpp" />
     <ClCompile Include="memory.cpp" />
+    <ClCompile Include="navmesh.cpp" />
     <ClCompile Include="newbitbuf.cpp" />
     <ClCompile Include="patcher.cpp" />
     <ClCompile Include="TableDestroyer.cpp" />
