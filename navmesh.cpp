@@ -31,10 +31,11 @@
 CAI_NetworkManager__DelayedInitType CAI_NetworkManager__DelayedInitOriginal;
 CAI_NetworkManager__FixupHintsType CAI_NetworkManager__FixupHintsOriginal;
 
-const int AINET_VERSION_NUMBER = 52;
+const int AINET_VERSION_NUMBER = 54;
 const int AINET_SCRIPT_VERSION_NUMBER = 21;
 const int PLACEHOLDER_CRC = 0;
 const int MAX_HULLS = 5;
+
 
 #pragma pack(push, 1)
 struct CAI_NodeLink
@@ -49,15 +50,6 @@ struct CAI_NodeLink
 };
 #pragma pack(pop)
 
-#pragma pack(push, 1)
-struct CAI_NodeLinkDisk
-{
-	short srcId;
-	short destId;
-	char unk0;
-	bool hulls[MAX_HULLS];
-};
-#pragma pack(pop)
 
 #pragma pack(push, 1)
 struct CAI_Node
@@ -66,17 +58,17 @@ struct CAI_Node
 	float x;
 	float y;
 	float z;
-	float hulls[MAX_HULLS];
+	float hulls[5];
 	float yaw;
 
 	int unk0; // always 2 in buildainfile, maps directly to unk0 in disk struct
 	int unk1; // maps directly to unk1 in disk struct
-	int unk2[MAX_HULLS]; // maps directly to unk2 in disk struct, despite being ints rather than shorts
+	int unk2[5]; // maps directly to unk2 in disk struct, despite being ints rather than shorts
 
 	// view server.dll+393672 for context and death wish
-	char unk3[MAX_HULLS]; // hell on earth, should map to unk3 on disk
+	char unk3[5]; // hell on earth, should map to unk3 on disk
 	char pad[3]; // aligns next bytes
-	float unk4[MAX_HULLS]; // i have no fucking clue, calculated using some kind of demon hell function float magic
+	float unk4[5]; // i have no fucking clue, calculated using some kind of demon hell function float magic
 
 	CAI_NodeLink** links;
 	char unk5[16];
@@ -98,16 +90,41 @@ struct CAI_NodeDisk
 	float y;
 	float z;
 	float yaw;
-	float hulls[MAX_HULLS];
+	float hulls[5];
 
 	char unk0;
 	int unk1;
-	short unk2[MAX_HULLS];
-	char unk3[MAX_HULLS];
+	short unk2[5];
+	char unk3[5];
 	short unk4;
 	short unk5;
 	char unk6[8];
 }; // total size of 68 bytes
+#pragma pack(pop)
+
+
+#pragma pack(push, 1)
+struct CAI_NodeLinkDisk
+{
+	short srcId;
+	short destId;
+	char unk0;
+	bool hulls[5];
+};
+#pragma pack(pop)
+#pragma pack(push, 1)
+struct CAI_Network
+{
+	char unk0[8];
+	int linkcount;
+	char unk1[84];
+	int zonecount;
+	char padidkanymoreman[16];
+	int unk5;
+	int nodecount;
+	int unk5_fake;
+	CAI_Node** nodes;
+};
 #pragma pack(pop)
 
 #pragma pack(push, 1)
@@ -155,53 +172,11 @@ struct UnkLinkStruct1
 int* pUnkLinkStruct1Count;
 UnkLinkStruct1*** pppUnkStruct1s;
 
-#pragma pack(push, 1)
-struct CAI_ScriptNode
-{
-	float x;
-	float y;
-	float z;
-	uint64_t scriptdata;
-};
-#pragma pack(pop)
-
-#pragma pack(push, 1)
-struct CAI_Network
-{
-	// +0
-	char unk0[8];
-	// +8
-	int linkcount; // this is uninitialised and never set on ain build, fun!
-	// +12
-	char unk1[124];
-	// +136
-	int zonecount;
-	// +140
-	char unk2[16];
-	// +156
-	int unk5; // unk8 on disk
-	// +160
-	char unk6[4];
-	// +164
-	int hintcount;
-	// +168
-	short hints[2000]; // these probably aren't actually hints, but there's 1 of them per hint so idk
-	// +4168
-	//int scriptnodecount;
-	//// +4172
-	//CAI_ScriptNode scriptnodes[4000];
-	// +84172
-	int nodecount;
-	// +84176
-	CAI_Node** nodes;
-};
-#pragma pack(pop)
-
-CGlobalVarsServer2015* g_pGlobals;
+CGlobalVarsServer2015** g_pGlobals;
 void DumpAINInfo(CAI_Network* aiNetwork)
 {
 	std::filesystem::path writePath("r1delta/maps/graphs");
-	writePath /= (char*)g_pGlobals->mapname_pszValue;
+	writePath /= (char*)(*g_pGlobals)->mapname_pszValue;
 	writePath += ".ain";
 
 	// dump from memory
@@ -216,7 +191,7 @@ void DumpAINInfo(CAI_Network* aiNetwork)
 	//spdlog::info("writing ainet version: {}", AINET_VERSION_NUMBER);
 	writeStream.write((char*)&AINET_VERSION_NUMBER, sizeof(int));
 
-	int mapVersion = g_pGlobals->mapversion;
+	int mapVersion = (*g_pGlobals)->mapversion;
 	//spdlog::info("writing map version: {}", mapVersion);
 	writeStream.write((char*)&mapVersion, sizeof(int));
 	//spdlog::info("writing placeholder crc: {}", PLACEHOLDER_CRC);
@@ -472,11 +447,25 @@ void __fastcall CAI_NetworkManager__DelayedInit(__int64 a1) {
 		CAI_NetworkBuilder__InitZones = CAI_NetworkBuilder__InitZonesType(uintptr_t(GetModuleHandleA("server.dll")) + 0x0367EE0);
 		arrayptr1 = (__int64)(uintptr_t(GetModuleHandleA("server.dll")) + 0xD416F0);
 		arrayptr2 = (__int64)(uintptr_t(GetModuleHandleA("server.dll")) + 0xD41710);
+
+		pUnkStruct0Count = (int*)(uintptr_t(GetModuleHandleA("server.dll")) + 0xD41AE8);
+		pppUnkNodeStruct0s = (UnkNodeStruct0***)(uintptr_t(GetModuleHandleA("server.dll")) + 0xD41AD0);
+		pUnkLinkStruct1Count = (int*)(uintptr_t(GetModuleHandleA("server.dll")) + 0x0D41AB8);
+		pppUnkStruct1s = (UnkLinkStruct1***)(uintptr_t(GetModuleHandleA("server.dll")) + 0xD41AA0);
+
 	}
 	auto network = reinterpret_cast<CAI_Network * >(((_QWORD*)(a1))[200]);
-	g_pGlobals = (CGlobalVarsServer2015*)(uintptr_t(GetModuleHandleA("server.dll")) + 0xC310C0);
+	g_pGlobals = (CGlobalVarsServer2015**)(uintptr_t(GetModuleHandleA("server.dll")) + 0xC310C0);
+	std::filesystem::path writePath("r1delta/maps/graphs");
+	writePath /= (char*)(*g_pGlobals)->mapname_pszValue;
+	writePath += ".ain";
+	if (std::filesystem::exists(writePath)) 
+		return CAI_NetworkManager__DelayedInitOriginal(a1);
 	CAI_NetworkBuilder__Rebuild(a1, network);
-	//CAI_NetworkBuilder__InitZones();
-	//DumpAINInfo(network);
+	DumpAINInfo(network);
+	static uintptr_t engine = uintptr_t(GetModuleHandleA("engine.dll"));
+	typedef void (*Cbuf_AddTextType)(int a1, const char* a2, unsigned int a3);
+	static Cbuf_AddTextType Cbuf_AddText = (Cbuf_AddTextType)(engine + 0x102D50);
+	Cbuf_AddText(0, "reload\n", 0);
 	return CAI_NetworkManager__DelayedInitOriginal(a1);
 }
