@@ -412,26 +412,7 @@ void sub_364140(int node1, int node2, const char* pszFormat, ...)
 
 	va_end(args);
 }
-typedef void (*sub_36BC30Type)(__int64* a1);
-typedef __int64 (*sub_36C150Type)(__int64 a1, int a2, int a3);
-sub_36BC30Type sub_36BC30Original;
-sub_36C150Type sub_36C150Original;
-void sub_36BC30(__int64* a1) // free
-{
-	if (uintptr_t(_ReturnAddress()) == rettoalloc) {
-		sub_36BC30Original((__int64*)arrayptr1);
-		sub_36BC30Original((__int64*)arrayptr2);
-	}
-	return sub_36BC30Original(a1);
-}
-__int64 sub_36C150(__int64 a1, int a2, int a3) // alloc
-{
-	if (uintptr_t(_ReturnAddress()) == rettoalloc) {
-		sub_36C150Original(arrayptr1, a2, a3);
-		sub_36C150Original(arrayptr2, a2, a3);
-	}
-	return sub_36C150Original(a1, a2, a3);
-}
+
 void __fastcall CAI_NetworkManager__DelayedInit(__int64 a1) {
 
 	static bool* CAI_NetworkManager__gm_fNetworksLoaded = (bool*)(uintptr_t(GetModuleHandleA("server.dll")) + 0xC318A0);
@@ -440,11 +421,11 @@ void __fastcall CAI_NetworkManager__DelayedInit(__int64 a1) {
 	static bool allocated = false;
 	if (!allocated) {
 		allocated = true;
-		allocbuffer(0xD41730);
-		allocbuffer(0xD41710);
-		allocbuffer(0xD416F0);
-		allocbuffer(0xD416D0);
-		allocbuffer(0xD41AD0);
+		//allocbuffer(0xD41730);
+		//allocbuffer(0xD41710);
+		//allocbuffer(0xD416F0);
+		//allocbuffer(0xD416D0);
+		//allocbuffer(0xD41AD0);
 		rettorebuild = uintptr_t(GetModuleHandleA("server.dll")) + 0x368594;
 		rettofree = uintptr_t(GetModuleHandleA("server.dll")) + 0x368469;
 		rettofree2 = uintptr_t(GetModuleHandleA("server.dll")) + 0x3685A0;
@@ -456,7 +437,6 @@ void __fastcall CAI_NetworkManager__DelayedInit(__int64 a1) {
 	auto network = reinterpret_cast<CAI_Network * >(((_QWORD*)(a1))[200]);
 	g_pGlobals = (CGlobalVarsServer2015*)(uintptr_t(GetModuleHandleA("server.dll")) + 0xC310C0);
 	CAI_NetworkBuilder__Rebuild(a1, network);
-	//CAI_NetworkBuilder__InitZones();
 	//DumpAINInfo(network);
 	return CAI_NetworkManager__DelayedInitOriginal(a1);
 }
