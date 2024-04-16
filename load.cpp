@@ -1329,11 +1329,36 @@ sub_180031610Type sub_180031610Original;
 void __fastcall sub_180031610(__int64 a1, float a2) {
 	sub_180031610Original(a1, a2);
 }
+typedef __int64 (*CBaseEntity__VPhysicsInitNormalType)(void* a1, unsigned int a2, unsigned int a3, char a4, __int64 a5);
+CBaseEntity__VPhysicsInitNormalType CBaseEntity__VPhysicsInitNormalOriginal;
 __int64 __fastcall CBaseEntity__VPhysicsInitNormal(void* a1, unsigned int a2, unsigned int a3, char a4, __int64 a5)
 {
+	static uintptr_t serverbase = uintptr_t(GetModuleHandleA("server.dll"));
+	if (uintptr_t(_ReturnAddress()) == (serverbase + 0xb63fd)) {
+		return CBaseEntity__VPhysicsInitNormalOriginal(a1, a2, a3, a4, a5);
+	}
 	static auto CBaseEntity__SetMoveType = reinterpret_cast<void(*)(void* a1, __int64 a2, __int64 a3)>(uintptr_t(GetModuleHandleA("server.dll")) + 0x3B3200);
-	CBaseEntity__SetMoveType(a1, 5, 1); // 1 is normal (MOVECOLLIDE_FLY_BOUNCE), 0 is funny mode (MOVECOLLIDE_DEFAULT)
-	return NULL;
+	CBaseEntity__SetMoveType(a1, 5, 3); // 1 is normal (MOVECOLLIDE_FLY_BOUNCE), 0 is funny mode (MOVECOLLIDE_DEFAULT)
+	
+	std::cout << " rva: " << std::hex << uintptr_t(_ReturnAddress()) - serverbase << std::endl;
+
+	return 0;
+}
+typedef void* (*CEntityFactoryDictionary__CreateType)(void* thisptr, const char* pClassName);
+CEntityFactoryDictionary__CreateType CEntityFactoryDictionary__CreateOriginal;
+void* CEntityFactoryDictionary__Create(void* thisptr, const char* pClassName) {
+	static uintptr_t mapload = uintptr_t(GetModuleHandleA("server.dll")) + 0x1432a2;
+	static uintptr_t serverbase = uintptr_t(GetModuleHandleA("server.dll"));
+
+	bool override2 = false;
+	if (strstr(pClassName, "prop_physics") != NULL) {// && uintptr_t(_ReturnAddress()) != mapload) {
+		if (uintptr_t(_ReturnAddress()) == mapload)
+			return 0;
+		pClassName = "prop_dynamic_override";
+		override2 = true;
+	}
+	//std::cout << "spawned: " << pClassName << " override: " << (override2 ? "true" : "false") << " retaddr: " << ((uintptr_t(_ReturnAddress()) == mapload) ? "true" : "false") << " rva: " << uintptr_t(_ReturnAddress()) - serverbase << std::endl;
+	return CEntityFactoryDictionary__CreateOriginal(thisptr, pClassName);
 }
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
@@ -1371,7 +1396,7 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x3A1EC0), &CBaseEntity__SendProxy_CellOrigin, reinterpret_cast<LPVOID*>(NULL));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x3A2020), &CBaseEntity__SendProxy_CellOriginXY, reinterpret_cast<LPVOID*>(NULL));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x3A2130), &CBaseEntity__SendProxy_CellOriginZ, reinterpret_cast<LPVOID*>(NULL));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x3C8B70), &CBaseEntity__VPhysicsInitNormal, reinterpret_cast<LPVOID*>(NULL));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x3C8B70), &CBaseEntity__VPhysicsInitNormal, reinterpret_cast<LPVOID*>(&CBaseEntity__VPhysicsInitNormalOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x6A420), &ReadFileFromVPKHook, reinterpret_cast<LPVOID*>(&readFileFromVPK));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x9C20), &ReadFromCacheHook, reinterpret_cast<LPVOID*>(&readFromCache));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x1FDA50), &CLC_Move__ReadFromBuffer, reinterpret_cast<LPVOID*>(&CLC_Move__ReadFromBufferOriginal));
@@ -1382,7 +1407,8 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x36C150), &sub_36C150, reinterpret_cast<LPVOID*>(&sub_36C150Original));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x3669C0), &CAI_NetworkManager__FixupHints, reinterpret_cast<LPVOID*>(&CAI_NetworkManager__FixupHintsOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x31CE90), &unkallocfunc, reinterpret_cast<LPVOID*>(&unkallocfuncoriginal));
-		
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x25A8E0), &CEntityFactoryDictionary__Create, reinterpret_cast<LPVOID*>(&CEntityFactoryDictionary__CreateOriginal));
+
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x364140), &sub_364140, reinterpret_cast<LPVOID*>(NULL));
 		
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x257E0), &sub_1800257E0, reinterpret_cast<LPVOID*>(&sub_1800257E0Original));

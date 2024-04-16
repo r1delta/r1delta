@@ -291,34 +291,54 @@ void DumpAINInfo(CAI_Network* aiNetwork)
 
 	// unknown struct that's seemingly node-related
 	//s//pdlog::info("writing {} unknown node structs at {:x}", *pUnkStruct0Count, writeStream.tellp());
+	bool hack = false;
+	if (*pUnkStruct0Count == 0) {
+		(*pUnkStruct0Count)++;
+		hack = true;
+	}
 	writeStream.write((char*)pUnkStruct0Count, sizeof(*pUnkStruct0Count));
-	for (int i = 0; i < *pUnkStruct0Count; i++)
+
+	if (hack)
 	{
-		//spdlog::info("writing unknown node struct {} at {:x}", i, writeStream.tellp());
-		UnkNodeStruct0* nodeStruct = (*pppUnkNodeStruct0s)[i];
-
-		writeStream.write((char*)&nodeStruct->index, sizeof(nodeStruct->index));
-		writeStream.write((char*)&nodeStruct->unk1, sizeof(nodeStruct->unk1));
-
-		writeStream.write((char*)&nodeStruct->x, sizeof(nodeStruct->x));
-		writeStream.write((char*)&nodeStruct->y, sizeof(nodeStruct->y));
-		writeStream.write((char*)&nodeStruct->z, sizeof(nodeStruct->z));
-
-		writeStream.write((char*)&nodeStruct->unkcount0, sizeof(nodeStruct->unkcount0));
-		for (int j = 0; j < nodeStruct->unkcount0; j++)
+		UnkNodeStruct0 zeroStruct = {};
+		writeStream.write((char*)&zeroStruct.index, sizeof(zeroStruct.index));
+		writeStream.write((char*)&zeroStruct.unk1, sizeof(zeroStruct.unk1));
+		writeStream.write((char*)&zeroStruct.x, sizeof(zeroStruct.x));
+		writeStream.write((char*)&zeroStruct.y, sizeof(zeroStruct.y));
+		writeStream.write((char*)&zeroStruct.z, sizeof(zeroStruct.z));
+		writeStream.write((char*)&zeroStruct.unkcount0, sizeof(zeroStruct.unkcount0));
+		writeStream.write((char*)&zeroStruct.unkcount1, sizeof(zeroStruct.unkcount1));
+		writeStream.write((char*)&zeroStruct.unk5, sizeof(zeroStruct.unk5));
+	}
+	else {
+		for (int i = 0; i < *pUnkStruct0Count; i++)
 		{
-			short unk2Short = (short)nodeStruct->unk2[j];
-			writeStream.write((char*)&unk2Short, sizeof(unk2Short));
-		}
+			//spdlog::info("writing unknown node struct {} at {:x}", i, writeStream.tellp());
+			UnkNodeStruct0* nodeStruct = (*pppUnkNodeStruct0s)[i];
 
-		writeStream.write((char*)&nodeStruct->unkcount1, sizeof(nodeStruct->unkcount1));
-		for (int j = 0; j < nodeStruct->unkcount1; j++)
-		{
-			short unk3Short = (short)nodeStruct->unk3[j];
-			writeStream.write((char*)&unk3Short, sizeof(unk3Short));
-		}
+			writeStream.write((char*)&nodeStruct->index, sizeof(nodeStruct->index));
+			writeStream.write((char*)&nodeStruct->unk1, sizeof(nodeStruct->unk1));
 
-		writeStream.write((char*)&nodeStruct->unk5, sizeof(nodeStruct->unk5));
+			writeStream.write((char*)&nodeStruct->x, sizeof(nodeStruct->x));
+			writeStream.write((char*)&nodeStruct->y, sizeof(nodeStruct->y));
+			writeStream.write((char*)&nodeStruct->z, sizeof(nodeStruct->z));
+
+			writeStream.write((char*)&nodeStruct->unkcount0, sizeof(nodeStruct->unkcount0));
+			for (int j = 0; j < nodeStruct->unkcount0; j++)
+			{
+				short unk2Short = (short)nodeStruct->unk2[j];
+				writeStream.write((char*)&unk2Short, sizeof(unk2Short));
+			}
+
+			writeStream.write((char*)&nodeStruct->unkcount1, sizeof(nodeStruct->unkcount1));
+			for (int j = 0; j < nodeStruct->unkcount1; j++)
+			{
+				short unk3Short = (short)nodeStruct->unk3[j];
+				writeStream.write((char*)&unk3Short, sizeof(unk3Short));
+			}
+
+			writeStream.write((char*)&nodeStruct->unk5, sizeof(nodeStruct->unk5));
+		}
 	}
 
 	// unknown struct that's seemingly link-related
@@ -331,7 +351,7 @@ void DumpAINInfo(CAI_Network* aiNetwork)
 		writeStream.write((char*)(*pppUnkStruct1s)[i], sizeof(*(*pppUnkStruct1s)[i]));
 	}
 
-	// some weird int idk what this is used for
+	// some weird int idk what this is used for (this is the script version)
 	writeStream.write((char*)&aiNetwork->unk5, sizeof(aiNetwork->unk5));
 
 	// tf2-exclusive stuff past this point, i.e. ain v57 only
@@ -354,7 +374,7 @@ void DumpAINInfo(CAI_Network* aiNetwork)
 
 	writeStream.close();
 }
-typedef void (*CAI_NetworkBuilder__InitZonesType)();
+typedef void (*CAI_DynamicLink__InitDynamicLinksType)();
 static uintptr_t rettorebuild;
 static uintptr_t rettofree;
 static uintptr_t rettofree2;
@@ -362,14 +382,60 @@ static uintptr_t rettoalloc;
 static uintptr_t rettoallocbullshit;
 static __int64 arrayptr1;
 static __int64 arrayptr2;
-static CAI_NetworkBuilder__InitZonesType CAI_NetworkBuilder__InitZones;
+static CAI_DynamicLink__InitDynamicLinksType CAI_DynamicLink__InitDynamicLinks;
+static CAI_DynamicLink__InitDynamicLinksType CAI_NetworkBuilder__InitZones;
+//void __fastcall TraverseExNodes(__int64 a1, CAI_Network* a2)
+//{
+//	__int64 nodecount; // r13
+//	CAI_Node** nodes; // r15
+//	__int64 i; // rbp
+//	CAI_Node* v6; // rdi
+//	unsigned int unk1; // eax
+//	signed int v8; // esi
+//	__int64 v9; // r14
+//	CAI_NodeLink* v10; // rbx
+//	int srcId; // ecx
+//	unsigned int* v12; // r8
+//
+//	nodecount = a2->nodecount;
+//	nodes = a2->nodes;
+//	for (i = 0i64; i < nodecount; ++i)
+//	{
+//		v6 = nodes[i];
+//		unk1 = v6->unk1;
+//		if ((unk1 & 0x2000000) != 0 && (unk1 & 0x4000000) == 0)
+//		{
+//			v6->unk1 |= 0x4000000u;
+//			v8 = 0;
+//			if (v6->linkcount > 0)
+//			{
+//				v9 = 0i64;
+//				do
+//				{
+//					v10 = v6->links[v9];
+//					if (!sub_35FBB0((__int64)v10, 0) && (v10->hulls[0] & 0xBF) != 0)
+//					{
+//						srcId = v10->srcId;
+//						if (v6->index == srcId)
+//							srcId = v10->destId;
+//						v12 = (unsigned int*)nodes[(__int16)srcId];
+//						if ((v12[11] & 0x4000000) == 0)
+//							sub_38D3C0(a1, (__int64)nodes, v12);
+//					}
+//					++v8;
+//					++v9;
+//				} while (v8 < v6->linkcount);
+//			}
+//		}
+//	}
+//}
 
 void CAI_NetworkManager__FixupHints() {
 	if (uintptr_t(_ReturnAddress()) == rettorebuild) {
 		CAI_NetworkBuilder__InitZones();
+		CAI_DynamicLink__InitDynamicLinks();
 	}
-
-	return CAI_NetworkManager__FixupHintsOriginal();
+	CAI_NetworkManager__FixupHintsOriginal();	
 }
 void allocbuffer(uintptr_t ptr) {
 	auto nonexistentbuffer = (void**)(uintptr_t(GetModuleHandleA("server.dll")) + ptr);
@@ -444,7 +510,9 @@ void __fastcall CAI_NetworkManager__DelayedInit(__int64 a1) {
 		rettofree2 = uintptr_t(GetModuleHandleA("server.dll")) + 0x3685A0;
 		rettoalloc = uintptr_t(GetModuleHandleA("server.dll")) + 0x36847E;
 		rettoallocbullshit = uintptr_t(GetModuleHandleA("server.dll")) + 0x3684A4;
-		CAI_NetworkBuilder__InitZones = CAI_NetworkBuilder__InitZonesType(uintptr_t(GetModuleHandleA("server.dll")) + 0x0367EE0);
+		CAI_DynamicLink__InitDynamicLinks = CAI_DynamicLink__InitDynamicLinksType(uintptr_t(GetModuleHandleA("server.dll")) + 0x0337E80);
+		CAI_NetworkBuilder__InitZones = CAI_DynamicLink__InitDynamicLinksType(uintptr_t(GetModuleHandleA("server.dll")) + 0x367EE0);
+		
 		arrayptr1 = (__int64)(uintptr_t(GetModuleHandleA("server.dll")) + 0xD416F0);
 		arrayptr2 = (__int64)(uintptr_t(GetModuleHandleA("server.dll")) + 0xD41710);
 
