@@ -107,7 +107,7 @@ public:
             cacheCondition.notify_all();
 
             std::unique_lock<std::mutex> lock(cacheMutex);
-            cacheCondition.wait_for(lock, std::chrono::milliseconds(500), [this]() { return manualRescanRequested.load(); });
+            cacheCondition.wait_for(lock, std::chrono::milliseconds(5000), [this]() { return manualRescanRequested.load(); });
 
             if (manualRescanRequested.load()) {
                 manualRescanRequested.store(false);

@@ -121,35 +121,6 @@ char __fastcall ParsePDEF(__int64 a1, __int64 a2, __int64 a3, const char* a4)
 	int v4 = whatthefuck(a1, &whatever, (__int64)v10, a2, 1u, 0, 0);
 	return ret;
 }
-typedef void (*AddSearchPathType)(IFileSystem* fileSystem, const char* pPath, const char* pathID, unsigned int addType);
-AddSearchPathType addSearchPathOriginal;
-typedef __int64(__fastcall* AddMapVPKFileFunc)(IFileSystem* fileSystem, const char* pPath);
-typedef void(__fastcall* WT_WaitAllAsyncCalls_ThisIsABadIdeaLongTerm_t)(int a1);
-void WaitAllThreads() {
-	static WT_WaitAllAsyncCalls_ThisIsABadIdeaLongTerm_t WT_WaitAllAsyncCalls_ThisIsABadIdeaLongTerm = (WT_WaitAllAsyncCalls_ThisIsABadIdeaLongTerm_t)GetProcAddress(GetModuleHandleA("vstdlib.dll"), "WT_WaitAllAsyncCalls_ThisIsABadIdeaLongTerm");
-	WT_WaitAllAsyncCalls_ThisIsABadIdeaLongTerm(0);
-}
-void AddSearchPathHook(IFileSystem* fileSystem, const char* pPath, const char* pathID, unsigned int addType)
-{
-	//static AddMapVPKFileFunc addMapVPKFile = (AddMapVPKFileFunc)((((uintptr_t)GetModuleHandleA("filesystem_stdio.dll"))) + 0x4E80);
-
-	// this function is used in debugprecachevpk concommand
-	// alternatively, real game has that in call stack when I bp the above funciton
-	using debug_precache_t = void(__fastcall*)(const char*, unsigned int, char);
-	static auto debug_precache = debug_precache_t(uintptr_t(GetModuleHandleA("engine.dll")) + 0x19FB30);
-	if (pPath != NULL && strstr(pPath, "common") == NULL && strstr(pPath, "lobby") == NULL) {
-		if (strncmp(pPath, "maps/", 5) == 0)
-		{
-			char newPath[256];
-			_snprintf_s(newPath, sizeof(newPath), "vpk/client_%s", pPath + 5);
-			//addMapVPKFile(fileSystem, newPath);
-			debug_precache(newPath, 2, 0);
-		}
-	}
-
-	// Call the original function
-	addSearchPathOriginal(fileSystem, pPath, pathID, addType);
-}
 signed __int64 __fastcall sub_1806580E0(char* a1, signed __int64 a2, const char* a3, va_list a4)
 {
 	signed __int64 result; // rax
@@ -390,7 +361,6 @@ __int64 __fastcall sub_629740(__int64 a1, const char* a2, int a3) {
 // TODO(mrsteyk): REMOVE
 void* CVEngineServer_PrecacheModel_o = nullptr;
 uintptr_t CVEngineServer_PrecacheModel(uintptr_t a1, const char* a2, char a3) {
-	WaitAllThreads();
 	auto ret = reinterpret_cast<decltype(&CVEngineServer_PrecacheModel)>(CVEngineServer_PrecacheModel_o)(a1, a2, a3);
 
 	// ты хуесос полнейший, вондерер, где логгер сука нормальный
@@ -502,7 +472,15 @@ struct string_nodebug {
 };
 static_assert(sizeof(string_nodebug) == 4*8, "AAA");
 std::array<string_nodebug[2], 100> g_militia_bodies;
-
+// #STR: "%sserver_%s%s", "-sharedservervpk"
+typedef __int64 (*sub_136E70Type)(char* pPath);
+sub_136E70Type sub_136E70Original;
+__int64 __fastcall sub_136E70(char* pPath)
+{
+	auto ret = sub_136E70Original(pPath);
+	reinterpret_cast<__int64(*)()>(uintptr_t(GetModuleHandleA("engine.dll")) + 0x19D730)();
+	return ret;	
+}
 void* SetPreCache_o = nullptr;
 __int64 __fastcall SetPreCache(__int64 a1, __int64 a2, char a3) {
 	auto ret = reinterpret_cast<decltype(&SetPreCache)>(SetPreCache_o)(a1, a2, a3);
@@ -530,7 +508,6 @@ void CHL2_Player_Precache(uintptr_t a1, uintptr_t a2) {
 	static auto byte_180C318A6 = (uint8_t*)(server_mod + 0xC318A6);
 
 	if (*byte_180C318A6) {
-		WaitAllThreads();
 
 		using sub_1804FE8B0_t = uintptr_t(__fastcall*)(uintptr_t, uintptr_t);
 		auto sub_1804FE8B0 = sub_1804FE8B0_t(server_mod + 0x4FE8B0);
@@ -565,7 +542,6 @@ void CHL2_Player_Precache(uintptr_t a1, uintptr_t a2) {
 				static auto PrecacheModel = PrecacheModel_t(server_mod + 0x3B6A40);
 
 				for (size_t i_ = 0; i_ < 16; i_++) {
-					WaitAllThreads();
 					// IMC
 					if (*(_QWORD*)(v5 + 448))
 					{
@@ -1334,16 +1310,39 @@ CBaseEntity__VPhysicsInitNormalType CBaseEntity__VPhysicsInitNormalOriginal;
 __int64 __fastcall CBaseEntity__VPhysicsInitNormal(void* a1, unsigned int a2, unsigned int a3, char a4, __int64 a5)
 {
 	static uintptr_t serverbase = uintptr_t(GetModuleHandleA("server.dll"));
-	if (uintptr_t(_ReturnAddress()) == (serverbase + 0xb63fd)) {
-		return CBaseEntity__VPhysicsInitNormalOriginal(a1, a2, a3, a4, a5);
-	}
 	static auto CBaseEntity__SetMoveType = reinterpret_cast<void(*)(void* a1, __int64 a2, __int64 a3)>(uintptr_t(GetModuleHandleA("server.dll")) + 0x3B3200);
-	CBaseEntity__SetMoveType(a1, 5, 3); // 1 is normal (MOVECOLLIDE_FLY_BOUNCE), 0 is funny mode (MOVECOLLIDE_DEFAULT)
+
+
+	if (uintptr_t(_ReturnAddress()) == (serverbase + 0xb63fd)) {
+		//CBaseEntity__SetMoveType(a1, 5, 3); // 1 is normal (MOVECOLLIDE_FLY_BOUNCE), 0 is funny mode (MOVECOLLIDE_DEFAULT)
+		return 0;
+		//return CBaseEntity__VPhysicsInitNormalOriginal(a1, a2, a3, a4, a5);
+	}
 	
 	std::cout << " rva: " << std::hex << uintptr_t(_ReturnAddress()) - serverbase << std::endl;
 
 	return 0;
 }
+
+typedef __int64 (*CBaseEntity__VPhysicsInitNormalClientType)(void* a1, unsigned int a2, unsigned int a3, char a4, __int64 a5);
+CBaseEntity__VPhysicsInitNormalClientType CBaseEntity__VPhysicsInitNormalClientOriginal;
+__int64 __fastcall CBaseEntity__VPhysicsInitNormalClient(void* a1, unsigned int a2, unsigned int a3, char a4, __int64 a5)
+{
+	static uintptr_t serverbase = uintptr_t(GetModuleHandleA("client.dll"));
+	static auto CBaseEntity__SetMoveType = reinterpret_cast<void(*)(void* a1, __int64 a2, __int64 a3)>(uintptr_t(GetModuleHandleA("server.dll")) + 0x3B3200);
+
+
+	if (uintptr_t(_ReturnAddress()) == (serverbase + 0xb63fd)) {
+		//CBaseEntity__SetMoveType(a1, 5, 3); // 1 is normal (MOVECOLLIDE_FLY_BOUNCE), 0 is funny mode (MOVECOLLIDE_DEFAULT)
+		return 0;
+		//return CBaseEntity__VPhysicsInitNormalOriginal(a1, a2, a3, a4, a5);
+	}
+
+	std::cout << " rva: " << std::hex << uintptr_t(_ReturnAddress()) - serverbase << std::endl;
+
+	return 0;
+}
+
 typedef void* (*CEntityFactoryDictionary__CreateType)(void* thisptr, const char* pClassName);
 CEntityFactoryDictionary__CreateType CEntityFactoryDictionary__CreateOriginal;
 void* CEntityFactoryDictionary__Create(void* thisptr, const char* pClassName) {
@@ -1360,6 +1359,219 @@ void* CEntityFactoryDictionary__Create(void* thisptr, const char* pClassName) {
 	//std::cout << "spawned: " << pClassName << " override: " << (override2 ? "true" : "false") << " retaddr: " << ((uintptr_t(_ReturnAddress()) == mapload) ? "true" : "false") << " rva: " << uintptr_t(_ReturnAddress()) - serverbase << std::endl;
 	return CEntityFactoryDictionary__CreateOriginal(thisptr, pClassName);
 }
+typedef char (*CEngineVGui__InitType)(__int64 a1);
+CEngineVGui__InitType CEngineVGui__InitOriginal;
+class EditablePanel
+{
+public:
+	virtual ~EditablePanel() = 0;
+	unsigned char unknown[0x2A8];
+};
+
+struct SourceColor
+{
+	unsigned char R;
+	unsigned char G;
+	unsigned char B;
+	unsigned char A;
+
+	SourceColor(unsigned char r, unsigned char g, unsigned char b, unsigned char a)
+	{
+		R = r;
+		G = g;
+		B = b;
+		A = a;
+	}
+
+	SourceColor()
+	{
+		R = 0;
+		G = 0;
+		B = 0;
+		A = 0;
+	}
+};
+
+class IConsoleDisplayFunc
+{
+public:
+	virtual void ColorPrint(const SourceColor& clr, const char* pMessage) = 0;
+	virtual void Print(const char* pMessage) = 0;
+	virtual void DPrint(const char* pMessage) = 0;
+};
+
+class CConsolePanel : public EditablePanel, public IConsoleDisplayFunc
+{
+
+};
+class CConsoleDialog
+{
+public:
+	struct VTable
+	{
+		//void* unknown[298];
+		void* unknown[294];
+		void(*OnCommandSubmitted)(CConsoleDialog* consoleDialog, const char* pCommand);
+	};
+
+	VTable* m_vtable;
+	//unsigned char unknown[0x398];
+	unsigned char unknown[0x390];
+	CConsolePanel* m_pConsolePanel;
+};
+class CGameConsole
+{
+public:
+	virtual ~CGameConsole() = 0;
+
+	// activates the console, makes it visible and brings it to the foreground
+	virtual void Activate() = 0;
+
+	virtual void Initialize() = 0;
+
+	// hides the console
+	virtual void Hide() = 0;
+
+	// clears the console
+	virtual void Clear() = 0;
+
+	// return true if the console has focus
+	virtual bool IsConsoleVisible() = 0;
+
+	virtual void SetParent(int parent) = 0;
+
+	bool m_bInitialized;
+	CConsoleDialog* m_pConsole;
+};
+CGameConsole** staticGameConsole;
+
+// From Source SDK
+class ConCommandBase;
+class IConCommandBaseAccessor
+{
+public:
+	// Flags is a combination of FCVAR flags in cvar.h.
+	// hOut is filled in with a handle to the variable.
+	virtual bool RegisterConCommandBase(ConCommandBase* pVar) = 0;
+};
+
+class CCommand
+{
+public:
+	CCommand() = delete;
+
+	int64_t ArgC() const;
+	const char** ArgV() const;
+	const char* ArgS() const; // All args that occur after the 0th arg, in string form
+	const char* GetCommandString() const; // The entire command in string form, including the 0th arg
+	const char* operator[](int nIndex) const; // Gets at arguments
+	const char* Arg(int nIndex) const; // Gets at arguments
+
+	static int MaxCommandLength();
+
+private:
+	enum
+	{
+		COMMAND_MAX_ARGC = 64,
+		COMMAND_MAX_LENGTH = 512,
+	};
+
+	int64_t m_nArgc;
+	int64_t m_nArgv0Size;
+	char m_pArgSBuffer[COMMAND_MAX_LENGTH];
+	char m_pArgvBuffer[COMMAND_MAX_LENGTH];
+	const char* m_ppArgv[COMMAND_MAX_ARGC];
+};
+
+void ToggleConsoleCommand(const CCommand& args)
+{
+	if (!(*staticGameConsole)->m_bInitialized)
+	{
+		return;
+	}
+
+	if (!(*staticGameConsole)->IsConsoleVisible())
+	{
+		//typedef void (*Cbuf_AddTextType)(int a1, const char* a2, unsigned int a3);
+		//static Cbuf_AddTextType Cbuf_AddText = (Cbuf_AddTextType)(uintptr_t(GetModuleHandleA("engine.dll")) + 0x102D50);
+		//Cbuf_AddText(0, "gameui_activate\n");
+		(*staticGameConsole)->Activate();
+	}
+	else
+	{
+		(*staticGameConsole)->Hide();
+	}
+}
+
+char CEngineVGui__Init(__int64 a1)
+{
+	staticGameConsole = (CGameConsole**)(uintptr_t(GetModuleHandleA("engine.dll")) + 0x316AC48);
+	*staticGameConsole = (CGameConsole*)(reinterpret_cast<CreateInterfaceFn>(GetProcAddress(GetModuleHandleA("client.dll"), "CreateInterface"))("GameConsole004", 0));
+
+	return CEngineVGui__InitOriginal(a1);
+}
+typedef void (*ConCommandConstructorType)(
+	ConCommandR1* newCommand, const char* name, void (*callback)(const CCommand&), const char* helpString, int flags, void* parent);
+ConCommandConstructorType conCommandConstructor;
+LDR_DLL_LOADED_NOTIFICATION_DATA* GetModuleNotificationData(const wchar_t* moduleName)
+{
+	HMODULE hMods[1024];
+	DWORD cbNeeded;
+	MODULEINFO modInfo;
+
+	if (EnumProcessModules(GetCurrentProcess(), hMods, sizeof(hMods), &cbNeeded))
+	{
+		for (DWORD i = 0; i < (cbNeeded / sizeof(HMODULE)); i++)
+		{
+			wchar_t szModName[MAX_PATH];
+			if (GetModuleFileNameEx(GetCurrentProcess(), hMods[i], szModName, sizeof(szModName) / sizeof(wchar_t)))
+			{
+				if (wcsstr(szModName, moduleName) != 0)
+				{
+					if (GetModuleInformation(GetCurrentProcess(), hMods[i], &modInfo, sizeof(modInfo)))
+					{
+						LDR_DLL_LOADED_NOTIFICATION_DATA* notificationData = new LDR_DLL_LOADED_NOTIFICATION_DATA();
+						notificationData->Flags = 0;
+
+						UNICODE_STRING* fullDllName = new UNICODE_STRING();
+						fullDllName->Buffer = new wchar_t[MAX_PATH];
+						wcscpy_s(fullDllName->Buffer, MAX_PATH, szModName);
+						fullDllName->Length = (USHORT)wcslen(szModName) * sizeof(wchar_t);
+						fullDllName->MaximumLength = MAX_PATH * sizeof(wchar_t);
+						notificationData->FullDllName = fullDllName;
+
+						UNICODE_STRING* baseDllName = new UNICODE_STRING();
+						baseDllName->Buffer = new wchar_t[MAX_PATH];
+						_wsplitpath_s(szModName, NULL, 0, NULL, 0, baseDllName->Buffer, MAX_PATH, NULL, 0);
+						baseDllName->Length = (USHORT)wcslen(baseDllName->Buffer) * sizeof(wchar_t);
+						baseDllName->MaximumLength = MAX_PATH * sizeof(wchar_t);
+						notificationData->BaseDllName = baseDllName;
+
+						notificationData->DllBase = modInfo.lpBaseOfDll;
+						notificationData->SizeOfImage = modInfo.SizeOfImage;
+						return notificationData;
+					}
+				}
+			}
+		}
+	}
+
+	return nullptr;
+}
+typedef char (*CEngineVGui__HideGameUIType)(__int64 a1);
+CEngineVGui__HideGameUIType CEngineVGui__HideGameUIOriginal;
+static bool recurse = false;
+char __fastcall CEngineVGui__HideGameUI(__int64 a1)
+{
+	bool ret = CEngineVGui__HideGameUIOriginal(a1);
+	if (ret && staticGameConsole && *staticGameConsole && !recurse) {
+		recurse = true;
+		(*staticGameConsole)->Hide();
+	}
+	recurse = false;
+	return ret;
+}
+
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
 	const LDR_DLL_NOTIFICATION_DATA* notification_data,
@@ -1368,6 +1580,7 @@ void __stdcall LoaderNotificationCallback(
 		return;
 	doBinaryPatchForFile(notification_data->Loaded);
 	if (std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length).find(L"server.dll") != std::string::npos) {
+		doBinaryPatchForFile(*GetModuleNotificationData(L"vstdlib"));
 		uintptr_t vTableAddr = reinterpret_cast<uintptr_t>(GetModuleHandleA("server.dll")) + 0x807220;
 		RemoveItemsFromVTable(vTableAddr, 35, 2);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x143A10), &CServerGameDLL__DLLInit, (LPVOID*)&CServerGameDLL__DLLInitOriginal);
@@ -1408,7 +1621,13 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x3669C0), &CAI_NetworkManager__FixupHints, reinterpret_cast<LPVOID*>(&CAI_NetworkManager__FixupHintsOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x31CE90), &unkallocfunc, reinterpret_cast<LPVOID*>(&unkallocfuncoriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x25A8E0), &CEntityFactoryDictionary__Create, reinterpret_cast<LPVOID*>(&CEntityFactoryDictionary__CreateOriginal));
-
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x363A50), &sub_363A50, reinterpret_cast<LPVOID*>(&sub_363A50Original));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x21F9C0), &CEngineVGui__Init, reinterpret_cast<LPVOID*>(&CEngineVGui__InitOriginal));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x21EB70), &CEngineVGui__HideGameUI, reinterpret_cast<LPVOID*>(&CEngineVGui__HideGameUIOriginal));
+		
+		ConCommandR1* toggleconsole = new ConCommandR1;
+		conCommandConstructor = (ConCommandConstructorType)(uintptr_t(GetModuleHandleA("engine.dll")) + 0x4808F0);
+		conCommandConstructor(toggleconsole, "toggleconsole", ToggleConsoleCommand, "Toggles the console", (1 << 17), nullptr);
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x364140), &sub_364140, reinterpret_cast<LPVOID*>(NULL));
 		
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x257E0), &sub_1800257E0, reinterpret_cast<LPVOID*>(&sub_1800257E0Original));
@@ -1432,7 +1651,7 @@ void __stdcall LoaderNotificationCallback(
 			//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x1168B0), &COM_StringCopy, reinterpret_cast<LPVOID*>(&COM_StringCopyOriginal));
 			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x1C79A0), &DataTable_SetupReceiveTableFromSendTable, reinterpret_cast<LPVOID*>(&DataTable_SetupReceiveTableFromSendTableOriginal));
 		}
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x196A0), &AddSearchPathHook, reinterpret_cast<LPVOID*>(&addSearchPathOriginal));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x136E70), &sub_136E70, reinterpret_cast<LPVOID*>(&sub_136E70Original));
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x1C79A0), &sub_1801C79A0, reinterpret_cast<LPVOID*>(&sub_1801C79A0Original));
 		//
 		//
