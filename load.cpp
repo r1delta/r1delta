@@ -1306,39 +1306,25 @@ void __fastcall sub_180031610(__int64 a1, float a2) {
 	sub_180031610Original(a1, a2);
 }
 typedef __int64 (*CBaseEntity__VPhysicsInitNormalType)(void* a1, unsigned int a2, unsigned int a3, char a4, __int64 a5);
+__int64 __fastcall C_BaseEntity__VPhysicsInitNormal(_QWORD* a1, unsigned int a2, unsigned int a3, char a4, __int64 a5)
+{
+	static auto CBaseEntity__SetMoveType = reinterpret_cast<void(*)(void* a1, __int64 a2, __int64 a3)>(uintptr_t(GetModuleHandleA("client.dll")) + 0x02F5B30);
+	CBaseEntity__SetMoveType(a1, 5, 3);
+	return 0;
+}
 CBaseEntity__VPhysicsInitNormalType CBaseEntity__VPhysicsInitNormalOriginal;
 __int64 __fastcall CBaseEntity__VPhysicsInitNormal(void* a1, unsigned int a2, unsigned int a3, char a4, __int64 a5)
 {
 	static uintptr_t serverbase = uintptr_t(GetModuleHandleA("server.dll"));
 	static auto CBaseEntity__SetMoveType = reinterpret_cast<void(*)(void* a1, __int64 a2, __int64 a3)>(uintptr_t(GetModuleHandleA("server.dll")) + 0x3B3200);
 
-
-	if (uintptr_t(_ReturnAddress()) == (serverbase + 0xb63fd)) {
-		//CBaseEntity__SetMoveType(a1, 5, 3); // 1 is normal (MOVECOLLIDE_FLY_BOUNCE), 0 is funny mode (MOVECOLLIDE_DEFAULT)
-		return 0;
-		//return CBaseEntity__VPhysicsInitNormalOriginal(a1, a2, a3, a4, a5);
-	}
 	
-	std::cout << " rva: " << std::hex << uintptr_t(_ReturnAddress()) - serverbase << std::endl;
-
-	return 0;
-}
-
-typedef __int64 (*CBaseEntity__VPhysicsInitNormalClientType)(void* a1, unsigned int a2, unsigned int a3, char a4, __int64 a5);
-CBaseEntity__VPhysicsInitNormalClientType CBaseEntity__VPhysicsInitNormalClientOriginal;
-__int64 __fastcall CBaseEntity__VPhysicsInitNormalClient(void* a1, unsigned int a2, unsigned int a3, char a4, __int64 a5)
-{
-	static uintptr_t serverbase = uintptr_t(GetModuleHandleA("client.dll"));
-	static auto CBaseEntity__SetMoveType = reinterpret_cast<void(*)(void* a1, __int64 a2, __int64 a3)>(uintptr_t(GetModuleHandleA("server.dll")) + 0x3B3200);
-
-
 	if (uintptr_t(_ReturnAddress()) == (serverbase + 0xb63fd)) {
-		//CBaseEntity__SetMoveType(a1, 5, 3); // 1 is normal (MOVECOLLIDE_FLY_BOUNCE), 0 is funny mode (MOVECOLLIDE_DEFAULT)
-		return 0;
-		//return CBaseEntity__VPhysicsInitNormalOriginal(a1, a2, a3, a4, a5);
+		
+		return CBaseEntity__VPhysicsInitNormalOriginal(a1, a2, a3, a4, a5);
 	}
-
-	std::cout << " rva: " << std::hex << uintptr_t(_ReturnAddress()) - serverbase << std::endl;
+	CBaseEntity__SetMoveType(a1, 5, 3);
+	//std::cout << " rva: " << std::hex << uintptr_t(_ReturnAddress()) - serverbase << std::endl;
 
 	return 0;
 }
@@ -1763,6 +1749,7 @@ void __stdcall LoaderNotificationCallback(
 
 	if (std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length).find(L"client.dll") != std::string::npos) {
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("client.dll") + 0x21FE50), &sub_18021FE50, reinterpret_cast<LPVOID*>(NULL));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("client.dll") + 0x029840), &C_BaseEntity__VPhysicsInitNormal, reinterpret_cast<LPVOID*>(NULL));
 		MH_EnableHook(MH_ALL_HOOKS);
 	}
 
