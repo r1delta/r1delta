@@ -9,6 +9,9 @@
 #include <thread>
 #include <chrono>
 #include <Windows.h>
+#include <intrin.h>
+
+#pragma intrinsic(_ReturnAddress)
 
 namespace fs = std::filesystem;
 
@@ -175,10 +178,6 @@ FileHandle_t ReadFileFromVPKHook(VPKData* vpkInfo, __int64* b, char* filename) {
     return readFileFromVPK(vpkInfo, b, filename);
 }
 
-FileHandle_t ReadFileFromFilesystemHook(IFileSystem* filesystem, const char* pPath, const char* pOptions, int64_t a4, uint32_t a5, void* a6) {
-    return readFileFromFilesystem(filesystem, pPath, pOptions, a4, a5, a6);
-}
-
 std::atomic_flag threadStarted = ATOMIC_FLAG_INIT;
 
 void StartFileCacheThread() {
@@ -188,8 +187,54 @@ void StartFileCacheThread() {
 }
 
 FileSystem_UpdateAddonSearchPathsType FileSystem_UpdateAddonSearchPathsTypeOriginal;
-
+bool done = false;
 __int64 __fastcall FileSystem_UpdateAddonSearchPaths(void* a1) {
     fileCache.RequestManualRescan();
     return FileSystem_UpdateAddonSearchPathsTypeOriginal(a1);
+}
+
+
+void replace_underscore(char* str) {
+    char* pos = strstr(str, "_dir");
+    if (pos) *pos = '\0';
+}
+IFileSystem* fsInterface;
+const char* lastZipPackFilePath = "";
+typedef char (*CZipPackFile__PrepareType)(__int64* a1, unsigned __int64 a2, __int64 a3);
+CZipPackFile__PrepareType CZipPackFile__PrepareOriginal;
+char __fastcall CZipPackFile__Prepare(__int64* a1, unsigned __int64 a2, __int64 a3) {
+    static void* rettozipsearchpath = (void*)(uintptr_t(GetModuleHandleA("filesystem_stdio.dll")) + 0x17A43);
+    auto ret = CZipPackFile__PrepareOriginal(a1, a2, a3);
+    if (_ReturnAddress() == rettozipsearchpath) {
+        reinterpret_cast<__int64(*)(__int64 a1, const char* a2)>(uintptr_t(GetModuleHandleA("filesystem_stdio.dll")) + 0x51880)((uintptr_t(a1) + 72), lastZipPackFilePath);
+    }
+    return ret;
+}
+typedef void (*CBaseFileSystem__CSearchPath__SetPathType)(void* thisptr, __int16* id);
+CBaseFileSystem__CSearchPath__SetPathType CBaseFileSystem__CSearchPath__SetPathOriginal;
+void __fastcall CBaseFileSystem__CSearchPath__SetPath(void* thisptr, __int16* id) 
+{
+    CBaseFileSystem__CSearchPath__SetPathOriginal(thisptr, id);
+    static void* rettozipsearchpath = (void*)(uintptr_t(GetModuleHandleA("filesystem_stdio.dll")) + 0x017AFC);
+    static auto CBaseFileSystem__FindOrAddPathIDInfo = reinterpret_cast<void* (*)(IFileSystem * fileSystem, __int16* id, int byRequestOnly)>(uintptr_t(GetModuleHandleA("filesystem_stdio.dll")) + 0x155C0);
+    if (_ReturnAddress() == rettozipsearchpath) {
+        *(__int64*)(uintptr_t(thisptr)+8) = __int64(CBaseFileSystem__FindOrAddPathIDInfo(fsInterface, id, -1));
+        //*(__int64*)(uintptr_t(thisptr) + 32) = 0x13371337;
+    }
+}
+typedef __int64 (*AddVPKFileType)(IFileSystem* fileSystem, char* a2, char** a3, char a4, int a5, char a6);
+AddVPKFileType AddVPKFileOriginal;
+__int64 __fastcall AddVPKFile(IFileSystem* fileSystem, char* a2, char** a3, char a4, int a5, char a6)
+{
+    replace_underscore(a2);
+    //fsInterface = fileSystem;
+    //static void* rettoaddonsystem = (void*)(uintptr_t(GetModuleHandleA("engine.dll")) + 0x127EF4);
+    //static auto AddPackFile = reinterpret_cast<bool (*)(IFileSystem * fileSystem, const char* pPath, const char* pathID)>(uintptr_t(GetModuleHandleA("filesystem_stdio.dll")) + 0x18030);
+    //
+    //if (_ReturnAddress() == rettoaddonsystem) {
+    //    lastZipPackFilePath = a2;
+    //    return AddPackFile(fileSystem, a2, "GAME");
+    //}
+
+    return AddVPKFileOriginal(fileSystem, a2, a3, a4, a5, a6);
 }
