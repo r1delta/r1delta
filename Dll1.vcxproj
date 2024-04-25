@@ -72,7 +72,7 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <OutDir>C:\Program Files (x86)\Origin Games\Titanfall\bin\x64_retail</OutDir>
+    <OutDir>C:\Program Files\EA Games\Titanfall\bin\x64_retail</OutDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>C:\Program Files (x86)\Origin Games\Titanfall\bin\x64_retail</OutDir>
@@ -173,8 +173,8 @@
     <ClInclude Include="thirdparty\silver-bun\tebpeb64.h" />
     <ClInclude Include="thirdparty\silver-bun\utils.h" />
     <ClInclude Include="tier0_orig.h" />
+    <ClInclude Include="utils.h" />
     <ClInclude Include="vector.h" />
-    <ClInclude Include="windowsutil.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="bitbuf.cpp" />
@@ -191,7 +191,7 @@
     <ClCompile Include="thirdparty\silver-bun\memaddr.cpp" />
     <ClCompile Include="thirdparty\silver-bun\module.cpp" />
     <ClCompile Include="thirdparty\silver-bun\utils.cpp" />
-    <ClCompile Include="windowsutil.cpp" />
+    <ClCompile Include="utils.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

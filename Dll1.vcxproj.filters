@@ -13,6 +13,12 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="Header Files\silver-bun">
+      <UniqueIdentifier>{dd6e7a2c-0f58-45a0-80d6-b260cf32801f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\silver-bun">
+      <UniqueIdentifier>{63fbf397-6c9c-458a-9251-9f8d802facc2}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="framework.h">
@@ -36,26 +42,11 @@
     <ClInclude Include="memory.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="windowsutil.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="load.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="TableDestroyer.h">
       <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="thirdparty\silver-bun\memaddr.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="thirdparty\silver-bun\module.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="thirdparty\silver-bun\tebpeb64.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="thirdparty\silver-bun\utils.h">
-      <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="patcher.h">
       <Filter>Header Files</Filter>
@@ -73,6 +64,21 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="navmesh.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="thirdparty\silver-bun\utils.h">
+      <Filter>Header Files\silver-bun</Filter>
+    </ClInclude>
+    <ClInclude Include="thirdparty\silver-bun\tebpeb64.h">
+      <Filter>Header Files\silver-bun</Filter>
+    </ClInclude>
+    <ClInclude Include="thirdparty\silver-bun\memaddr.h">
+      <Filter>Header Files\silver-bun</Filter>
+    </ClInclude>
+    <ClInclude Include="thirdparty\silver-bun\module.h">
+      <Filter>Header Files\silver-bun</Filter>
+    </ClInclude>
+    <ClInclude Include="utils.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
@@ -95,22 +101,10 @@
     <ClCompile Include="memory.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="windowsutil.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="TableDestroyer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="patcher.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="thirdparty\silver-bun\module.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="thirdparty\silver-bun\utils.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="thirdparty\silver-bun\memaddr.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="bitbuf.cpp">
@@ -120,6 +114,18 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="navmesh.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="thirdparty\silver-bun\memaddr.cpp">
+      <Filter>Source Files\silver-bun</Filter>
+    </ClCompile>
+    <ClCompile Include="thirdparty\silver-bun\module.cpp">
+      <Filter>Source Files\silver-bun</Filter>
+    </ClCompile>
+    <ClCompile Include="thirdparty\silver-bun\utils.cpp">
+      <Filter>Source Files\silver-bun</Filter>
+    </ClCompile>
+    <ClCompile Include="utils.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

@@ -1,6 +1,6 @@
 #pragma once
  
-#include "windowsutil.h"
+#include "utils.h"
 
 struct VPKData;
 struct IFileSystem;
@@ -15,9 +15,9 @@ extern ReadFromCacheType readFromCache;
 bool ReadFromCacheHook(IFileSystem* filesystem, char* path, void* result);
 
 typedef FileHandle_t(*ReadFileFromFilesystemType)(
-	IFileSystem* filesystem, const char* pPath, const char* pOptions, int64_t a4, uint32_t a5, void* a6);
+	IFileSystem* filesystem, const char* pPath, const char* pOptions, __int64 a4, unsigned __int32 a5, void* a6);
 extern ReadFileFromFilesystemType readFileFromFilesystem;
-FileHandle_t ReadFileFromFilesystemHook(IFileSystem* filesystem, const char* pPath, const char* pOptions, int64_t a4, uint32_t a5, void* a6);
+FileHandle_t ReadFileFromFilesystemHook(IFileSystem* filesystem, const char* pPath, const char* pOptions, __int64 a4, unsigned __int32 a5, void* a6);
 
 bool V_IsAbsolutePath(const char* pStr);
 bool TryReplaceFile(const char* pszFilePath);
