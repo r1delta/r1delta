@@ -1595,9 +1595,8 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x3A1EC0), &CBaseEntity__SendProxy_CellOrigin, reinterpret_cast<LPVOID*>(NULL));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x3A2020), &CBaseEntity__SendProxy_CellOriginXY, reinterpret_cast<LPVOID*>(NULL));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x3A2130), &CBaseEntity__SendProxy_CellOriginZ, reinterpret_cast<LPVOID*>(NULL));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x3C8B70), &CBaseEntity__VPhysicsInitNormal, reinterpret_cast<LPVOID*>(&CBaseEntity__VPhysicsInitNormalOriginal));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x6A420), &ReadFileFromVPKHook, reinterpret_cast<LPVOID*>(&readFileFromVPK));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x9C20), &ReadFromCacheHook, reinterpret_cast<LPVOID*>(&readFromCache));
+		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x3C8B70), &CBaseEntity__VPhysicsInitNormal, reinterpret_cast<LPVOID*>(&CBaseEntity__VPhysicsInitNormalOriginal));
+
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x1FDA50), &CLC_Move__ReadFromBuffer, reinterpret_cast<LPVOID*>(&CLC_Move__ReadFromBufferOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x1F6F10), &CLC_Move__WriteToBuffer, reinterpret_cast<LPVOID*>(NULL));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0xCA730), &CBaseServer__FillServerInfo, reinterpret_cast<LPVOID*>(&CBaseServer__FillServerInfoOriginal));
@@ -1629,7 +1628,6 @@ void __stdcall LoaderNotificationCallback(
 			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x8E6D0), &Status_ConMsg, NULL);
 			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x22610), &Status_ConMsg, NULL);
 			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x1170A0), &COM_Init, reinterpret_cast<LPVOID*>(&COM_InitOriginal));
-			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x127C70), &FileSystem_UpdateAddonSearchPaths, reinterpret_cast<LPVOID*>(&FileSystem_UpdateAddonSearchPathsTypeOriginal));
 			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x55C00), &CL_Retry_f, reinterpret_cast<LPVOID*>(&CL_Retry_fOriginal));
 
 			//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x473550), &sub_180473550, NULL);
@@ -1704,8 +1702,6 @@ void __stdcall LoaderNotificationCallback(
 			0x61c86
 		};
 		HMODULE hModule = GetModuleHandleA("engine_ds.dll");
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("dedicated.dll") + 0x1752B0), &ReadFileFromVPKHook, reinterpret_cast<LPVOID*>(&readFileFromVPK));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("dedicated.dll") + 0x750F0), &ReadFromCacheHook, reinterpret_cast<LPVOID*>(&readFromCache));
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("dedicated.dll") + 0x84720), &ReadFileFromFilesystemHook, reinterpret_cast<LPVOID*>(&readFileFromFilesystem));
 
 		for (auto offset : offsets) {
@@ -1727,6 +1723,8 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x1693D0), &ParsePDEF, reinterpret_cast<LPVOID*>(&ParsePDATAOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x3259C0), &CUtlBuffer__SetExternalBuffer, reinterpret_cast<LPVOID*>(&CUtlBuffer__SetExternalBufferOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x160130), &sub_160130, reinterpret_cast<LPVOID*>(NULL));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("dedicated.dll") + 0x1752B0), &ReadFileFromVPKHook, reinterpret_cast<LPVOID*>(&readFileFromVPK));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("dedicated.dll") + 0x750F0), &ReadFromCacheHook, reinterpret_cast<LPVOID*>(&readFromCache));
 
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x433C0), &ProcessConnectionlessPacket, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0xA1B90), &Host_InitDedicated, reinterpret_cast<LPVOID*>(&Host_InitDedicatedOriginal));
@@ -1746,10 +1744,20 @@ void __stdcall LoaderNotificationCallback(
 		//std::cout.rdbuf(&customBuffer);
 
 	}
-
+	if (std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length).find(L"engine.dll") != std::string::npos) {
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x127C70), &FileSystem_UpdateAddonSearchPaths, reinterpret_cast<LPVOID*>(&FileSystem_UpdateAddonSearchPathsTypeOriginal));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x6A420), &ReadFileFromVPKHook, reinterpret_cast<LPVOID*>(&readFileFromVPK));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x9C20), &ReadFromCacheHook, reinterpret_cast<LPVOID*>(&readFromCache));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x16250), &AddVPKFile, reinterpret_cast<LPVOID*>(&AddVPKFileOriginal));
+		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x4BC0), &CBaseFileSystem__CSearchPath__SetPath, reinterpret_cast<LPVOID*>(&CBaseFileSystem__CSearchPath__SetPathOriginal));
+		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x13D60), &CZipPackFile__Prepare, reinterpret_cast<LPVOID*>(&CZipPackFile__PrepareOriginal));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x9AB70), &fs_sprintf_hook, reinterpret_cast<LPVOID*>(NULL));
+		
+		
+	}
 	if (std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length).find(L"client.dll") != std::string::npos) {
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("client.dll") + 0x21FE50), &sub_18021FE50, reinterpret_cast<LPVOID*>(NULL));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("client.dll") + 0x029840), &C_BaseEntity__VPhysicsInitNormal, reinterpret_cast<LPVOID*>(NULL));
+		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("client.dll") + 0x029840), &C_BaseEntity__VPhysicsInitNormal, reinterpret_cast<LPVOID*>(NULL));
 		MH_EnableHook(MH_ALL_HOOKS);
 	}
 
