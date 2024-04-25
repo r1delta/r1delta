@@ -222,6 +222,31 @@ void __fastcall CBaseFileSystem__CSearchPath__SetPath(void* thisptr, __int16* id
         //*(__int64*)(uintptr_t(thisptr) + 32) = 0x13371337;
     }
 }
+int fs_sprintf_hook(char* Buffer, const char* Format, ...) {
+    static void* rettocheckformorefiles = (void*)(uintptr_t(GetModuleHandleA("filesystem_stdio.dll")) + 0x6D6CB);
+    va_list args;
+    va_start(args, Format);
+
+
+    if (strcmp(Format, "%s_%03d.vpk") == 0) {
+        const char* a1 = va_arg(args, const char*);
+        if (strstr(a1, "singlechunk") != nullptr) {
+            va_end(args);
+            if (rettocheckformorefiles == _ReturnAddress()) {
+                Buffer[0] = 0;
+                return 0;// sprintf(Buffer, "%s", "DOESNOTEXIST.vpk");
+            }
+            return sprintf(Buffer, "%s_dir.vpk", a1);
+        }
+        va_end(args);
+        va_start(args, Format);
+    }
+
+    int result = vsprintf(Buffer, Format, args);
+    va_end(args);
+    return result;
+}
+
 typedef __int64 (*AddVPKFileType)(IFileSystem* fileSystem, char* a2, char** a3, char a4, int a5, char a6);
 AddVPKFileType AddVPKFileOriginal;
 __int64 __fastcall AddVPKFile(IFileSystem* fileSystem, char* a2, char** a3, char a4, int a5, char a6)

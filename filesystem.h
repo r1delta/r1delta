@@ -34,4 +34,4 @@ void __fastcall CBaseFileSystem__CSearchPath__SetPath(void* thisptr, __int16* id
 typedef char (*CZipPackFile__PrepareType)(__int64* a1, unsigned __int64 a2, __int64 a3);
 extern CZipPackFile__PrepareType CZipPackFile__PrepareOriginal;
 char __fastcall CZipPackFile__Prepare(__int64* a1, unsigned __int64 a2, __int64 a3);
-
+int fs_sprintf_hook(char* Buffer, const char* Format, ...);
