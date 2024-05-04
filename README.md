@@ -121,7 +121,17 @@ With the wisdom of an alchemist transmuting base metals into gold, traverse the 
 Venture forth into the crucible of file manipulation, where bits and bytes swirl like ephemeral phantasms in the ethereal winds of creation. With the dexterity of a sorcerer weaving spells of old, duplicate the venerable "tier0.dll" and bestow upon its progeny the august appellation "tier0_orig.dll". Simultaneously, perform a ceremonial renaming of the "engine.dll" to "engine_r1o.dll", and the "server_local.dll" to "server.dll", invoking the ancient rites of compatibility and harmony that have guided developers through the ages.
 
 ## Step 5: Crafting DeltaSpectre from the Aether
-Harness the arcane energies of your development environment, channeling the raw essence of creation into the crucible of compilation and linking. Through the incantations of compilers and the summoning of linker daemons, forge forth the formidable artifacts known as "Spectre.dll" and "SpectreLauncher.dll". These twin manifestations of your craftsmanship shall stand as sentinels, guarding the gates of Titanfall.exe against the encroaching shadows of entropy and obsolescence.
+In this mystical step, you are required to not only harness the arcane energies of your development environment but also venture into realms beyond the conventional. As you embark on this journey, channel the raw essence of creation, akin to a master alchemist transmuting base elements into pure gold. However, the path to crafting DeltaSpectre is not straightforward; it requires traversing the boundaries of reality into the ethereal plane where DeltaSpectre resides.
+
+To begin this arcane endeavor, you must first construct an Aether Portal, a gateway to the otherworldly dimension where DeltaSpectre's essence resides. Gather 14 glowstone blocks, glowing with the luminescence of distant stars, and a single bucket of water. Arrange these materials with utmost precision and care, following the ancient blueprints passed down through generations.
+
+With the Aether Portal constructed, the gateway to the otherworld beckons. Step through the shimmering threshold, crossing the boundary between the known and the unknown. Here, amidst the swirling mists of the Aether, the essence of DeltaSpectre awaits, shimmering with potential and possibility.
+
+In this realm, the laws of physics bend to your will, and the incantations of compilers take on a transcendent quality. With the wisdom of ages guiding your hand, commence the ritual of compilation and linking. Through the incantations of compilers and the summoning of linker daemons, forge forth the formidable artifacts known as "Spectre.dll" and "SpectreLauncher.dll".
+
+These twin manifestations of your craftsmanship shall transcend the confines of mortal code, standing as sentinels at the gates of Titanfall.exe. They shall guard against the encroaching shadows of entropy and obsolescence, wielding the power of the Aether to uphold the integrity and stability of your creation.
+
+Thus, with the Aether as your ally and DeltaSpectre as your guide, you shall emerge victorious, having crafted a masterpiece worthy of legend and lore.
 
 ## Step 6: Integrating Esoteric Mods into the Fabric of Reality
 Embark upon a pilgrimage to the hallowed halls of the DeltaMods repository, where the whispers of innovation echo through the digital ether. Here, amidst the cacophony of creativity, procure the sacred tomes of modification that shall imbue your creation with new life and vitality. With the reverence of a scholar handling ancient scrolls, deposit these esoteric artifacts within the sanctum of the "r1spectre\mods" directory, where they shall commune with the very essence of the game itself, reshaping its digital landscape in their image.
