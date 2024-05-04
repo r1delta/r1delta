@@ -108,14 +108,31 @@ r1delte release 2021 men🔥🔥🔥🔥🔥 **NOTE: THIS REFERS TO R1DELTE, NOT
 
 # dev setup
 
-1. rename "tier0.dll" to "tier0_r1.dll" in bin\x64_retail\
-2. acquire OldTFOScripts.7z from [Releases](https://github.com/r1delta/r1delta/releases/tag/wires) (you just need bin)
-3. copy "gbclient.dll", "nmcogame64.dll" from there to bin\x64_retail\
-4. copy "tier0.dll" in there to "tier0_orig.dll" in bin\x64_retail, "engine.dll" to "engine_r1o.dll", and "server_local.dll" to "server.dll" (finally)
-5. build this and DeltaSpectre, copy Spectre.dll and SpectreLauncher.dll next to Titanfall.exe
-6. get mods and put in r1spectre\mods from DeltaMods on this repo
-7. copy r1delta.patch next to titanfall.exe
-8. pray (SpectreLauncher -listenServer +automantle_anim 0)
+## Step 1: Renaming the "tier0.dll" File to "tier0_r1.dll"
+Begin your journey into the digital realm by venturing forth into the labyrinthine directory structure of your project, akin to a courageous explorer traversing the tangled undergrowth of an ancient forest. Your destination: the sanctified bin\x64_retail\ directory, a bastion of digital artifacts and mystical incantations. Here, concealed within the recesses of the filesystem, lies the venerable artifact known as "tier0.dll". With measured deliberation, like a sage preparing for a sacred ritual, navigate to this holy relic and invoke the sacred command "Rename". In the hallowed text box that appears, inscribe the new moniker "tier0_r1.dll" with the solemnity befitting a decree from the celestial heavens.
+
+## Step 2: Procuring the OldTFOScripts Archive from the GitHub Repository
+Embark upon a quest of epic proportions into the ethereal realm of GitHub, a digital pantheon where repositories stand as monuments to the collective wisdom of humanity. With the fervor of a seeker of ancient knowledge, navigate through the labyrinthine corridors of the r1delta/r1delta repository until you uncover the cryptic chamber labeled "Releases". Herein lies the elusive artifact known as "OldTFOScripts.7z", a treasure trove of arcane scripts and esoteric incantations. With bated breath, download this enigmatic archive, its pixels brimming with the potential for enlightenment and revelation.
+
+## Step 3: Transferring the Sacred DLL Relics to their Rightful Abode
+With the wisdom of an alchemist transmuting base metals into gold, traverse the mystical landscape of the extracted "OldTFOScripts" directory. Here, amidst the binary runes and digital sigils, lie two sacred artifacts: "gbclient.dll" and "nmcogame64.dll". With a sense of reverence befitting a custodian of ancient artifacts, cradle these digital relics in your virtual arms and embark upon a pilgrimage back to the sacred sanctuary of your project's bin\x64_retail\ directory. With the precision of a master craftsman, deposit these hallowed artifacts within this consecrated repository, where they shall await their divine calling.
+
+## Step 4: Engaging in the Alchemical Art of File Manipulation
+Venture forth into the crucible of file manipulation, where bits and bytes swirl like ephemeral phantasms in the ethereal winds of creation. With the dexterity of a sorcerer weaving spells of old, duplicate the venerable "tier0.dll" and bestow upon its progeny the august appellation "tier0_orig.dll". Simultaneously, perform a ceremonial renaming of the "engine.dll" to "engine_r1o.dll", and the "server_local.dll" to "server.dll", invoking the ancient rites of compatibility and harmony that have guided developers through the ages.
+
+## Step 5: Crafting DeltaSpectre from the Aether
+Harness the arcane energies of your development environment, channeling the raw essence of creation into the crucible of compilation and linking. Through the incantations of compilers and the summoning of linker daemons, forge forth the formidable artifacts known as "Spectre.dll" and "SpectreLauncher.dll". These twin manifestations of your craftsmanship shall stand as sentinels, guarding the gates of Titanfall.exe against the encroaching shadows of entropy and obsolescence.
+
+## Step 6: Integrating Esoteric Mods into the Fabric of Reality
+Embark upon a pilgrimage to the hallowed halls of the DeltaMods repository, where the whispers of innovation echo through the digital ether. Here, amidst the cacophony of creativity, procure the sacred tomes of modification that shall imbue your creation with new life and vitality. With the reverence of a scholar handling ancient scrolls, deposit these esoteric artifacts within the sanctum of the "r1spectre\mods" directory, where they shall commune with the very essence of the game itself, reshaping its digital landscape in their image.
+
+## Step 7: Applying the Celestial Patch to Unravel the Mysteries of Code
+With the gravity of a celestial body exerting its influence upon the fabric of spacetime, inscribe the cryptic glyphs of the "r1delta.patch" file adjacent to the holy sigil of "titanfall.exe". This patch, infused with the distilled wisdom of generations past, shall weave the threads of fate, binding together the disparate elements of your creation into a harmonious whole. Through its arcane incantations, the mysteries of code shall be unraveled, revealing hidden truths and unlocking untold potential.
+
+## Step 8: Invocation and Supplication to the Digital Gods
+As the final incantation of this arcane ritual, invoke the SpectreLauncher with the command-line invocation: "-listenServer +automantle_anim 0". Yet, before pressing enter, let your gaze linger upon the flickering screen, a silent prayer upon your lips. For in this moment, as code merges with reality and digital constructs dance upon the canvas of existence, the fate of your creation hangs in the balance. May the digital gods smile upon your endeavors, and may your code be blessed with stability, efficiency, and boundless creativity.
+
+
 
 # KNOWN ISSUES
 - does not load mp_lobb<
