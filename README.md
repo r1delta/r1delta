@@ -2,7 +2,7 @@
 ![standard](https://github.com/r1delta/r1delta/assets/37985788/9408f4ac-dfab-4bd6-9995-d2d7a196501b)
 
 
-<DO NOT REMOVE THE BEAR UNTIL WE'VE RELEASED>
+<DO NOT REMOVE THE BEARs UNTIL WE'VE RELEASED>
 ![bear](https://github.com/r1delta/r1delta/assets/37985788/41548f20-0878-4e1e-8538-e9be808fc363)
 ![bear](https://github.com/r1delta/r1delta/assets/37985788/41548f20-0878-4e1e-8538-e9be808fc363)
 ![bear](https://github.com/r1delta/r1delta/assets/37985788/41548f20-0878-4e1e-8538-e9be808fc363)
