@@ -1,3 +1,5 @@
+![image](https://github.com/r1delta/r1delta/assets/39478251/f2262167-e1c3-44d2-b298-a833a2baceec)
+
 ![bear](https://github.com/r1delta/r1delta/assets/37985788/41548f20-0878-4e1e-8538-e9be808fc363)
 <DO NOT REMOVE THE BEAR UNTIL WE CAN LOAD A MAP>
 # R1DELTA [![deploy status](https://github.com/Orange-OpenSource/hurl/workflows/test/badge.svg)](https://github.com/Orange-OpenSource/hurl/actions) [![coverage](https://Orange-OpenSource.github.io/hurl/coverage/badges/flat.svg)](https://Orange-OpenSource.github.io/hurl/coverage) [![Crates.io](https://img.shields.io/crates/v/hurl.svg)](https://crates.io/crates/hurl) [![documentation](https://img.shields.io/badge/-documentation-ff0288)](https://hurl.dev)
