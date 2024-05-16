@@ -51,8 +51,7 @@
 #include "core.h"
 #include "load.h"
 #include "MinHook.h"
-#include "thirdparty/silver-bun/memaddr.h"
-#include "thirdparty/silver-bun/module.h"
+#include "thirdparty/silver-bun/silver-bun.h"
 #pragma intrinsic(_ReturnAddress)
 
 struct PatchInstruction {
@@ -167,8 +166,8 @@ std::string UnicodeToString(PCUNICODE_STRING unicodeString) {
 }
 
 bool ApplyPatch(const PatchInstruction& instruction, CModule& targetModule) {
-    CModule::ModuleSections_t modSection = targetModule.GetSectionByName(instruction.sectionName.c_str());
-    if (!modSection.IsSectionValid()) {
+    CModule::ModuleSections_t* modSection = targetModule.GetSectionByName(instruction.sectionName.c_str());
+    if (!modSection->IsSectionValid()) {
         std::string errorMsg = "Invalid section name\nFile: " + instruction.fileName + "\nLine: " + std::to_string(instruction.lineNumber);
         MessageBoxA(nullptr, errorMsg.c_str(), "Patcher Error", MB_OK);
         return false;
@@ -180,7 +179,7 @@ bool ApplyPatch(const PatchInstruction& instruction, CModule& targetModule) {
     sectionMemory.OffsetSelf(instruction.offset);
 
     for (size_t i = 0; i < instruction.originalBytes.size(); ++i) {
-        if (*(sectionMemory.CCast<unsigned char*>() + i) != instruction.originalBytes[i]) {
+        if (*(sectionMemory.RCast<unsigned char*>() + i) != instruction.originalBytes[i]) {
             std::string errorMsg = "Original bytes do not match\nFile: " + instruction.fileName + "\nLine: " + std::to_string(instruction.lineNumber);
             MessageBoxA(nullptr, errorMsg.c_str(), "Patcher Error", MB_OK);
             return false;
@@ -199,8 +198,6 @@ void doBinaryPatchForFile(LDR_DLL_LOADED_NOTIFICATION_DATA data) {
     std::cout << "Started patching for " << moduleName << std::endl;
 
     CModule targetModule(moduleName.c_str());
-    targetModule.Init(); // Ensure module is initialized and sections are loaded
-    targetModule.LoadSections();
 
     // Parse the patch file and get patch instructions
     std::vector<PatchInstruction> patchInstructions = ParsePatchFile("r1delta/r1delta.wpatch");

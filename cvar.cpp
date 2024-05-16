@@ -47,6 +47,7 @@
 #include "memory.h"
 #include "filesystem.h"
 #include "defs.h"
+#include "factory.h"
 void      (*OriginalCCVar_RegisterConCommand)(uintptr_t thisptr, ConCommandBaseR1* pCommandBase);
 void      (*OriginalCCVar_UnregisterConCommand)(uintptr_t thisptr, ConCommandBaseR1* pCommandBase);
 ConCommandBaseR1* (*OriginalCCVar_FindCommandBase)(uintptr_t thisptr, const char* name);
@@ -232,10 +233,6 @@ ConCommandBaseR1O* convertToR1O(const ConCommandBaseR1* commandBase) {
 	return NULL;
 }
 
-typedef void (*ConCommandConstructorType)(
-	ConCommandR1* newCommand, const char* name, void (*callback)(void*), const char* helpString, int flags, void* parent);
-ConCommandConstructorType conCommandConstructor;
-
 void CCVar_RegisterConCommand(uintptr_t thisptr, ConCommandBaseR1O* pCommandBase) {
 	if (!strcmp(pCommandBase->m_pszName, "toggleconsole"))
 		return;
@@ -382,4 +379,71 @@ void __fastcall CCvar__RemoveGlobalChangeCallback( // cus broken
 __int64 __fastcall CCvar__ProcessQueuedMaterialThreadConVarSets(__int64 a1)
 {
 	return 0; // cus broken
+}
+typedef char (*CEngineVGui__InitType)(__int64 a1);
+CEngineVGui__InitType CEngineVGui__InitOriginal;
+char CEngineVGui__Init(__int64 a1)
+{
+	staticGameConsole = (CGameConsole**)(uintptr_t(GetModuleHandleA("engine.dll")) + 0x316AC48);
+	*staticGameConsole = (CGameConsole*)(reinterpret_cast<CreateInterfaceFn>(GetProcAddress(GetModuleHandleA("client.dll"), "CreateInterface"))("GameConsole004", 0));
+
+	return CEngineVGui__InitOriginal(a1);
+}
+
+typedef char (*CEngineVGui__HideGameUIType)(__int64 a1);
+CEngineVGui__HideGameUIType CEngineVGui__HideGameUIOriginal;
+CGameConsole** staticGameConsole;
+static bool recurse = false;
+char __fastcall CEngineVGui__HideGameUI(__int64 a1)
+{
+	bool ret = CEngineVGui__HideGameUIOriginal(a1);
+	if (ret && staticGameConsole && *staticGameConsole && !recurse) {
+		recurse = true;
+		(*staticGameConsole)->Hide();
+	}
+	recurse = false;
+	return ret;
+}
+
+void Con_ColorPrintf(const SourceColor* clr, char* fmt, ...)
+{
+	if (!staticGameConsole) return;
+	if (!*staticGameConsole) return;
+	if (!((*staticGameConsole)->m_pConsole)) return;
+	if (!((*staticGameConsole)->m_pConsole->m_pConsolePanel)) return;
+
+	// Create a buffer for the formatted message
+	char pMessage[1024];
+
+	// Initialize variable argument list
+	va_list args;
+	va_start(args, fmt);
+
+	// Format the message
+	vsnprintf(pMessage, sizeof(pMessage), fmt, args);
+
+	// Clean up the variable argument list
+	va_end(args);
+
+	// Print the message with color
+	(*staticGameConsole)->m_pConsole->m_pConsolePanel->ColorPrint(*clr, pMessage);
+}
+void ToggleConsoleCommand(const CCommand& args)
+{
+	if (!(*staticGameConsole)->m_bInitialized)
+	{
+		return;
+	}
+
+	if (!(*staticGameConsole)->IsConsoleVisible())
+	{
+		//typedef void (*Cbuf_AddTextType)(int a1, const char* a2, unsigned int a3);
+		//static Cbuf_AddTextType Cbuf_AddText = (Cbuf_AddTextType)(uintptr_t(GetModuleHandleA("engine.dll")) + 0x102D50);
+		//Cbuf_AddText(0, "gameui_activate\n");
+		(*staticGameConsole)->Activate();
+	}
+	else
+	{
+		(*staticGameConsole)->Hide();
+	}
 }

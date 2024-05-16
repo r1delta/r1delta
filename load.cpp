@@ -56,11 +56,14 @@
 #include "TableDestroyer.h"
 #include "bitbuf.h"
 #include "in6addr.h"
-#include "thirdparty/silver-bun/module.h"
+#include "thirdparty/silver-bun/silver-bun.h"
 #include <fcntl.h>
 #include <io.h>
 #include <streambuf>
 #include "navmesh.h"
+#include <psapi.h>
+#include "logging.h"
+#include "squirrel.h"
 #pragma intrinsic(_ReturnAddress)
 
 wchar_t kNtDll[] = L"ntdll.dll";
@@ -82,7 +85,7 @@ void Status_ConMsg(const char* text, ...)
 	if (formatted[endpos - 1] == '\n')
 		formatted[endpos - 1] = '\0'; // cut off repeated newline
 
-	std::cout << formatted << std::endl;
+	Msg("%s\n", formatted);
 }
 signed __int64 __fastcall sub_1804735A0(char* a1, signed __int64 a2, const char* a3, va_list a4)
 {
@@ -374,7 +377,6 @@ bool shouldSave(const char* a2) {
 	}
 	return false;
 }
-
 typedef __int64 (*sub_629740Type)(__int64 a1, const char* a2, int a3);
 sub_629740Type sub_629740Original;
 
@@ -1379,160 +1381,16 @@ void* CEntityFactoryDictionary__Create(void* thisptr, const char* pClassName) {
 	//std::cout << "spawned: " << pClassName << " override: " << (override2 ? "true" : "false") << " retaddr: " << ((uintptr_t(_ReturnAddress()) == mapload) ? "true" : "false") << " rva: " << uintptr_t(_ReturnAddress()) - serverbase << std::endl;
 	return CEntityFactoryDictionary__CreateOriginal(thisptr, pClassName);
 }
-typedef char (*CEngineVGui__InitType)(__int64 a1);
-CEngineVGui__InitType CEngineVGui__InitOriginal;
-class EditablePanel
-{
-public:
-	virtual ~EditablePanel() = 0;
-	unsigned char unknown[0x2A8];
-};
 
-struct SourceColor
-{
-	unsigned char R;
-	unsigned char G;
-	unsigned char B;
-	unsigned char A;
-
-	SourceColor(unsigned char r, unsigned char g, unsigned char b, unsigned char a)
-	{
-		R = r;
-		G = g;
-		B = b;
-		A = a;
-	}
-
-	SourceColor()
-	{
-		R = 0;
-		G = 0;
-		B = 0;
-		A = 0;
-	}
-};
-
-class IConsoleDisplayFunc
-{
-public:
-	virtual void ColorPrint(const SourceColor& clr, const char* pMessage) = 0;
-	virtual void Print(const char* pMessage) = 0;
-	virtual void DPrint(const char* pMessage) = 0;
-};
-
-class CConsolePanel : public EditablePanel, public IConsoleDisplayFunc
-{
-
-};
-class CConsoleDialog
-{
-public:
-	struct VTable
-	{
-		//void* unknown[298];
-		void* unknown[294];
-		void(*OnCommandSubmitted)(CConsoleDialog* consoleDialog, const char* pCommand);
-	};
-
-	VTable* m_vtable;
-	//unsigned char unknown[0x398];
-	unsigned char unknown[0x390];
-	CConsolePanel* m_pConsolePanel;
-};
-class CGameConsole
-{
-public:
-	virtual ~CGameConsole() = 0;
-
-	// activates the console, makes it visible and brings it to the foreground
-	virtual void Activate() = 0;
-
-	virtual void Initialize() = 0;
-
-	// hides the console
-	virtual void Hide() = 0;
-
-	// clears the console
-	virtual void Clear() = 0;
-
-	// return true if the console has focus
-	virtual bool IsConsoleVisible() = 0;
-
-	virtual void SetParent(int parent) = 0;
-
-	bool m_bInitialized;
-	CConsoleDialog* m_pConsole;
-};
-CGameConsole** staticGameConsole;
-
-// From Source SDK
-class ConCommandBase;
-class IConCommandBaseAccessor
-{
-public:
-	// Flags is a combination of FCVAR flags in cvar.h.
-	// hOut is filled in with a handle to the variable.
-	virtual bool RegisterConCommandBase(ConCommandBase* pVar) = 0;
-};
-
-class CCommand
-{
-public:
-	CCommand() = delete;
-
-	int64_t ArgC() const;
-	const char** ArgV() const;
-	const char* ArgS() const; // All args that occur after the 0th arg, in string form
-	const char* GetCommandString() const; // The entire command in string form, including the 0th arg
-	const char* operator[](int nIndex) const; // Gets at arguments
-	const char* Arg(int nIndex) const; // Gets at arguments
-
-	static int MaxCommandLength();
-
-private:
-	enum
-	{
-		COMMAND_MAX_ARGC = 64,
-		COMMAND_MAX_LENGTH = 512,
-	};
-
-	int64_t m_nArgc;
-	int64_t m_nArgv0Size;
-	char m_pArgSBuffer[COMMAND_MAX_LENGTH];
-	char m_pArgvBuffer[COMMAND_MAX_LENGTH];
-	const char* m_ppArgv[COMMAND_MAX_ARGC];
-};
-
-void ToggleConsoleCommand(const CCommand& args)
-{
-	if (!(*staticGameConsole)->m_bInitialized)
-	{
-		return;
-	}
-
-	if (!(*staticGameConsole)->IsConsoleVisible())
-	{
-		//typedef void (*Cbuf_AddTextType)(int a1, const char* a2, unsigned int a3);
-		//static Cbuf_AddTextType Cbuf_AddText = (Cbuf_AddTextType)(uintptr_t(GetModuleHandleA("engine.dll")) + 0x102D50);
-		//Cbuf_AddText(0, "gameui_activate\n");
-		(*staticGameConsole)->Activate();
-	}
-	else
-	{
-		(*staticGameConsole)->Hide();
-	}
-}
-
-char CEngineVGui__Init(__int64 a1)
-{
-	staticGameConsole = (CGameConsole**)(uintptr_t(GetModuleHandleA("engine.dll")) + 0x316AC48);
-	*staticGameConsole = (CGameConsole*)(reinterpret_cast<CreateInterfaceFn>(GetProcAddress(GetModuleHandleA("client.dll"), "CreateInterface"))("GameConsole004", 0));
-
-	return CEngineVGui__InitOriginal(a1);
-}
 typedef void (*ConCommandConstructorType)(
 	ConCommandR1* newCommand, const char* name, void (*callback)(const CCommand&), const char* helpString, int flags, void* parent);
-ConCommandConstructorType conCommandConstructor;
+
+void RegisterConCommand(const char* commandName, void (*callback)(const CCommand&), const char* helpString, int flags) {
+	static ConCommandConstructorType conCommandConstructor = (ConCommandConstructorType)(uintptr_t(GetModuleHandleA("engine.dll")) + 0x4808F0);
+	ConCommandR1* newCommand = new ConCommandR1;
+	
+	conCommandConstructor(newCommand, commandName, callback, helpString, flags, nullptr);
+}
 LDR_DLL_LOADED_NOTIFICATION_DATA* GetModuleNotificationData(const wchar_t* moduleName)
 {
 	HMODULE hMods[1024];
@@ -1578,20 +1436,51 @@ LDR_DLL_LOADED_NOTIFICATION_DATA* GetModuleNotificationData(const wchar_t* modul
 
 	return nullptr;
 }
-typedef char (*CEngineVGui__HideGameUIType)(__int64 a1);
-CEngineVGui__HideGameUIType CEngineVGui__HideGameUIOriginal;
-static bool recurse = false;
-char __fastcall CEngineVGui__HideGameUI(__int64 a1)
+
+
+bool __fastcall SVC_Print_Process_Hook(__int64 a1) 
 {
-	bool ret = CEngineVGui__HideGameUIOriginal(a1);
-	if (ret && staticGameConsole && *staticGameConsole && !recurse) {
-		recurse = true;
-		(*staticGameConsole)->Hide();
-	}
-	recurse = false;
-	return ret;
+	char* text = *(char**)(a1 + 0x20);
+
+	auto endpos = strlen(text);
+	if (text[endpos - 1] == '\n')
+		text[endpos - 1] = '\0'; // cut off repeated newline
+
+	Msg("%s\n", text);
+	return true;
 }
 
+enum class TextMsgPrintType_t
+{
+	HUD_PRINTNOTIFY = 1,
+	HUD_PRINTCONSOLE,
+	HUD_PRINTTALK,
+	HUD_PRINTCENTER
+};
+typedef void (*sub_18027F2C0Type)(__int64 a1, const char* a2, __int64 a3);
+sub_18027F2C0Type sub_18027F2C0Original;
+
+void TextMsg(bf_read* msg)
+{
+	TextMsgPrintType_t msg_dest = (TextMsgPrintType_t)msg->ReadByte();
+
+	char text[256];
+	msg->ReadString(text, sizeof(text));
+
+	if (msg_dest == TextMsgPrintType_t::HUD_PRINTCONSOLE) {
+		auto endpos = strlen(text);
+		if (text[endpos - 1] == '\n')
+			text[endpos - 1] = '\0'; // cut off repeated newline
+
+		Msg("%s\n", text);
+	}
+}
+void sub_18027F2C0(__int64 a1, const char* a2, __int64 a3)
+{
+	if (!strcmp(a2, "SayText"))
+		sub_18027F2C0Original(a1, "TextMsg", (__int64)TextMsg);
+	sub_18027F2C0Original(a1, a2, a3);
+}
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
 	const LDR_DLL_NOTIFICATION_DATA* notification_data,
@@ -1644,9 +1533,15 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x21F9C0), &CEngineVGui__Init, reinterpret_cast<LPVOID*>(&CEngineVGui__InitOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x21EB70), &CEngineVGui__HideGameUI, reinterpret_cast<LPVOID*>(&CEngineVGui__HideGameUIOriginal));
 		
-		ConCommandR1* toggleconsole = new ConCommandR1;
-		conCommandConstructor = (ConCommandConstructorType)(uintptr_t(GetModuleHandleA("engine.dll")) + 0x4808F0);
-		conCommandConstructor(toggleconsole, "toggleconsole", ToggleConsoleCommand, "Toggles the console", (1 << 17), nullptr);
+		
+		RegisterConCommand("toggleconsole", ToggleConsoleCommand, "Toggles the console", (1 << 17));
+
+
+		RegisterConCommand("script", script_cmd, "Execute Squirrel code in server context", FCVAR_GAMEDLL);
+		RegisterConCommand("script_client", script_client_cmd, "Execute Squirrel code in client context", FCVAR_NONE);
+		RegisterConCommand("script_ui", script_ui_cmd, "Execute Squirrel code in UI context", FCVAR_NONE);
+
+
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x364140), &sub_364140, reinterpret_cast<LPVOID*>(NULL));
 		
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x257E0), &sub_1800257E0, reinterpret_cast<LPVOID*>(&sub_1800257E0Original));
@@ -1663,11 +1558,16 @@ void __stdcall LoaderNotificationCallback(
 			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x22610), &Status_ConMsg, NULL);
 			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x1170A0), &COM_Init, reinterpret_cast<LPVOID*>(&COM_InitOriginal));
 			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x55C00), &CL_Retry_f, reinterpret_cast<LPVOID*>(&CL_Retry_fOriginal));
+			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x8EAF0), &Con_ColorPrintf, NULL);
+			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher.dll") + 0xB640), &CSquirrelVM__PrintFunc1, NULL);
+			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher.dll") + 0xB6F0), &CSquirrelVM__PrintFunc2, NULL);
+			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher.dll") + 0xB7A0), &CSquirrelVM__PrintFunc3, NULL);
+			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x23E20), &SVC_Print_Process_Hook, NULL);
 
 			//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x473550), &sub_180473550, NULL);
 
 			//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x1168B0), &COM_StringCopy, reinterpret_cast<LPVOID*>(&COM_StringCopyOriginal));
-			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x1C79A0), &DataTable_SetupReceiveTableFromSendTable, reinterpret_cast<LPVOID*>(&DataTable_SetupReceiveTableFromSendTableOriginal));
+			//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x1C79A0), &DataTable_SetupReceiveTableFromSendTable, reinterpret_cast<LPVOID*>(&DataTable_SetupReceiveTableFromSendTableOriginal));
 		}
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x136E70), &sub_136E70, reinterpret_cast<LPVOID*>(&sub_136E70Original));
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x1C79A0), &sub_1801C79A0, reinterpret_cast<LPVOID*>(&sub_1801C79A0Original));
@@ -1792,6 +1692,8 @@ void __stdcall LoaderNotificationCallback(
 	if (std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length).find(L"client.dll") != std::string::npos) {
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("client.dll") + 0x21FE50), &sub_18021FE50, reinterpret_cast<LPVOID*>(NULL));
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("client.dll") + 0x029840), &C_BaseEntity__VPhysicsInitNormal, reinterpret_cast<LPVOID*>(NULL));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("client.dll") + 0x27F2C0), &sub_18027F2C0, reinterpret_cast<LPVOID*>(&sub_18027F2C0Original));
+
 		MH_EnableHook(MH_ALL_HOOKS);
 	}
 

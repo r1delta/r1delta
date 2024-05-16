@@ -44,7 +44,7 @@
 #include <chrono>
 #include <Windows.h>
 #include <intrin.h>
-
+#include "logging.h"
 #pragma intrinsic(_ReturnAddress)
 
 namespace fs = std::filesystem;

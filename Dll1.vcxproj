@@ -163,13 +163,16 @@
     <ClInclude Include="filesystem.h" />
     <ClInclude Include="framework.h" />
     <ClInclude Include="load.h" />
+    <ClInclude Include="logging.h" />
     <ClInclude Include="memory.h" />
     <ClInclude Include="navmesh.h" />
     <ClInclude Include="patcher.h" />
     <ClInclude Include="platform.h" />
+    <ClInclude Include="squirrel.h" />
     <ClInclude Include="TableDestroyer.h" />
     <ClInclude Include="thirdparty\silver-bun\memaddr.h" />
     <ClInclude Include="thirdparty\silver-bun\module.h" />
+    <ClInclude Include="thirdparty\silver-bun\silver-bun.h" />
     <ClInclude Include="thirdparty\silver-bun\tebpeb64.h" />
     <ClInclude Include="thirdparty\silver-bun\utils.h" />
     <ClInclude Include="tier0_orig.h" />
@@ -183,14 +186,13 @@
     <ClCompile Include="factory.cpp" />
     <ClCompile Include="filesystem.cpp" />
     <ClCompile Include="load.cpp" />
+    <ClCompile Include="logging.cpp" />
     <ClCompile Include="memory.cpp" />
     <ClCompile Include="navmesh.cpp" />
     <ClCompile Include="newbitbuf.cpp" />
     <ClCompile Include="patcher.cpp" />
+    <ClCompile Include="squirrel.cpp" />
     <ClCompile Include="TableDestroyer.cpp" />
-    <ClCompile Include="thirdparty\silver-bun\memaddr.cpp" />
-    <ClCompile Include="thirdparty\silver-bun\module.cpp" />
-    <ClCompile Include="thirdparty\silver-bun\utils.cpp" />
     <ClCompile Include="utils.cpp" />
   </ItemGroup>
   <ItemGroup>

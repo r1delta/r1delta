@@ -81,6 +81,15 @@
     <ClInclude Include="utils.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="thirdparty\silver-bun\silver-bun.h">
+      <Filter>Source Files\silver-bun</Filter>
+    </ClInclude>
+    <ClInclude Include="logging.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="squirrel.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">
@@ -116,16 +125,13 @@
     <ClCompile Include="navmesh.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="thirdparty\silver-bun\memaddr.cpp">
-      <Filter>Source Files\silver-bun</Filter>
-    </ClCompile>
-    <ClCompile Include="thirdparty\silver-bun\module.cpp">
-      <Filter>Source Files\silver-bun</Filter>
-    </ClCompile>
-    <ClCompile Include="thirdparty\silver-bun\utils.cpp">
-      <Filter>Source Files\silver-bun</Filter>
-    </ClCompile>
     <ClCompile Include="utils.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="squirrel.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="logging.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
