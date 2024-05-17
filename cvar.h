@@ -35,6 +35,7 @@
 #pragma once
 #include <unordered_map>
 #include "core.h"
+#include <string>
 
 //-----------------------------------------------------------------------------
 // ConVar flags
@@ -338,14 +339,12 @@ public:
 	CConsoleDialog* m_pConsole;
 };
 
-// From Source SDK
-class ConCommandBase;
 class IConCommandBaseAccessor
 {
 public:
 	// Flags is a combination of FCVAR flags in cvar.h.
 	// hOut is filled in with a handle to the variable.
-	virtual bool RegisterConCommandBase(ConCommandBase* pVar) = 0;
+	virtual bool RegisterConCommandBase(ConCommandBaseR1* pVar) = 0;
 };
 
 class CCommand

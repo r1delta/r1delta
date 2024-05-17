@@ -48,6 +48,7 @@
 #include "filesystem.h"
 #include "defs.h"
 #include "factory.h"
+#include "logging.h"
 void      (*OriginalCCVar_RegisterConCommand)(uintptr_t thisptr, ConCommandBaseR1* pCommandBase);
 void      (*OriginalCCVar_UnregisterConCommand)(uintptr_t thisptr, ConCommandBaseR1* pCommandBase);
 ConCommandBaseR1* (*OriginalCCVar_FindCommandBase)(uintptr_t thisptr, const char* name);
@@ -276,7 +277,8 @@ ConVarR1O* CCVar_FindVar(uintptr_t thisptr, const char* var_name) {
 
 void GlobalChangeCallback(ConVarR1* var, const char* pOldValue) {
 	var = (ConVarR1*)(((uintptr_t)var) - 48);
-	std::cout << __FUNCTION__ << ": " << var->m_pszName << ": " << var->m_Value.m_pszString << std::endl;
+	if (ConVar_PrintDescriptionOriginal)
+		ConVar_PrintDescription(var);
 	auto it = ccBaseMap.find(var->m_pszName);
 	if (it == ccBaseMap.end())
 		return;
