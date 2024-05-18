@@ -36,6 +36,12 @@
  
 #include "utils.h"
 
+#include <iostream>
+#include <string>
+#include <mutex>
+#include <filesystem>
+#include <unordered_set>
+
 struct VPKData;
 struct IFileSystem;
 typedef void* FileHandle_t;
@@ -67,5 +73,32 @@ extern CBaseFileSystem__CSearchPath__SetPathType CBaseFileSystem__CSearchPath__S
 void __fastcall CBaseFileSystem__CSearchPath__SetPath(void* thisptr, __int16* id);
 typedef char (*CZipPackFile__PrepareType)(__int64* a1, unsigned __int64 a2, __int64 a3);
 extern CZipPackFile__PrepareType CZipPackFile__PrepareOriginal;
-char __fastcall CZipPackFile__Prepare(__int64* a1, unsigned __int64 a2, __int64 a3);
+char CZipPackFile__Prepare(__int64* a1, unsigned __int64 a2, __int64 a3);
 int fs_sprintf_hook(char* Buffer, const char* Format, ...);
+
+class FileCache {
+private:
+    std::unordered_set<std::size_t> cache;
+    std::unordered_set<std::string> addonsFolderCache;
+    std::mutex cacheMutex;
+    std::atomic<bool> initialized{ false };
+    std::atomic<bool> manualRescanRequested{ false };
+    std::condition_variable cacheCondition;
+
+public:
+    bool FileExists(const std::string& filePath);
+    bool TryReplaceFile(const char* pszFilePath);
+    void UpdateCache();
+
+    void RequestManualRescan() {
+        manualRescanRequested.store(true);
+        cacheCondition.notify_all();
+    }
+
+private:
+    std::size_t HashFilePath(const std::string& filePath) {
+        return std::hash<std::string>{}(filePath);
+    }
+
+    void ScanDirectory(const std::filesystem::path& directory, std::unordered_set<std::size_t>& cache, std::unordered_set<std::string>* addonsFolderCache = nullptr);
+};
