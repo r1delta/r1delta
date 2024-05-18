@@ -159,6 +159,7 @@
     <ClInclude Include="coordsize.h" />
     <ClInclude Include="core.h" />
     <ClInclude Include="cvar.h" />
+    <ClInclude Include="dedicated.h" />
     <ClInclude Include="factory.h" />
     <ClInclude Include="filesystem.h" />
     <ClInclude Include="framework.h" />
@@ -186,6 +187,7 @@
   <ItemGroup>
     <ClCompile Include="bitbuf.cpp" />
     <ClCompile Include="cvar.cpp" />
+    <ClCompile Include="dedicated.cpp" />
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="factory.cpp" />
     <ClCompile Include="filesystem.cpp" />

@@ -102,6 +102,9 @@
     <ClInclude Include="sendmoveclampfix.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="dedicated.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">
@@ -150,6 +153,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="sendmoveclampfix.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="dedicated.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
