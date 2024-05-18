@@ -34,6 +34,11 @@
 
 #pragma once
 
+const int AINET_VERSION_NUMBER = 54;
+const int AINET_SCRIPT_VERSION_NUMBER = 21;
+const int PLACEHOLDER_CRC = 0;
+const int MAX_HULLS = 5;
+
 #pragma pack(push, 1)
 struct CAI_NodeLink
 {

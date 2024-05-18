@@ -65,11 +65,6 @@
 CAI_NetworkManager__DelayedInitType CAI_NetworkManager__DelayedInitOriginal;
 CAI_NetworkManager__FixupHintsType CAI_NetworkManager__FixupHintsOriginal;
 
-const int AINET_VERSION_NUMBER = 54;
-const int AINET_SCRIPT_VERSION_NUMBER = 21;
-const int PLACEHOLDER_CRC = 0;
-const int MAX_HULLS = 5;
-
 int* pUnkLinkStruct1Count;
 UnkLinkStruct1*** pppUnkStruct1s;
 
