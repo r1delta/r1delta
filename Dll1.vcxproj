@@ -157,6 +157,7 @@
   <ItemGroup>
     <ClInclude Include="beardbgon.h" />
     <ClInclude Include="bitbuf.h" />
+    <ClInclude Include="client.h" />
     <ClInclude Include="coordsize.h" />
     <ClInclude Include="core.h" />
     <ClInclude Include="cvar.h" />
@@ -187,6 +188,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="bitbuf.cpp" />
+    <ClCompile Include="client.cpp" />
     <ClCompile Include="cvar.cpp" />
     <ClCompile Include="dedicated.cpp" />
     <ClCompile Include="dllmain.cpp" />

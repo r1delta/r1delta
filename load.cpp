@@ -68,6 +68,7 @@
 #include "netadr.h"
 #include "sendmoveclampfix.h"
 #include "dedicated.h"
+#include "client.h"
 #pragma intrinsic(_ReturnAddress)
 
 wchar_t kNtDll[] = L"ntdll.dll";
@@ -91,9 +92,10 @@ void Status_ConMsg(const char* text, ...)
 
 	Msg("%s\n", formatted);
 }
-bool recursive2 = false;
+
 signed __int64 __fastcall sub_1804735A0(char* a1, signed __int64 a2, const char* a3, va_list a4)
 {
+	static bool recursive2 = false;
 	signed __int64 result; // rax
 
 	if (a2 <= 0)
@@ -1027,16 +1029,7 @@ void __stdcall LoaderNotificationCallback(
 		
 	}
 	if (std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length).find(L"client.dll") != std::string::npos) {
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("client.dll") + 0x21FE50), &PredictionErrorFn, reinterpret_cast<LPVOID*>(NULL));
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("client.dll") + 0x029840), &C_BaseEntity__VPhysicsInitNormal, reinterpret_cast<LPVOID*>(NULL));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("client.dll") + 0x27F2C0), &sub_18027F2C0, reinterpret_cast<LPVOID*>(&sub_18027F2C0Original));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x56A450), &vsnprintf_l_hk, NULL);
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("client.dll") + 0x744864), &vsnprintf_l_hk, NULL);
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x102D50), &Cbuf_AddText, reinterpret_cast<LPVOID*>(&Cbuf_AddTextOriginal));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x4801B0), &ConVar_PrintDescription, reinterpret_cast<LPVOID*>(&ConVar_PrintDescriptionOriginal));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x4722E0), &sub_1804722E0, 0);
-		
-		MH_EnableHook(MH_ALL_HOOKS);
+		InitClient();
 	}
 
 }

@@ -36,38 +36,6 @@ bool __fastcall SVC_Print_Process_Hook(__int64 a1)
 	return true;
 }
 
-enum class TextMsgPrintType_t
-{
-	HUD_PRINTNOTIFY = 1,
-	HUD_PRINTCONSOLE,
-	HUD_PRINTTALK,
-	HUD_PRINTCENTER
-};
-typedef void (*sub_18027F2C0Type)(__int64 a1, const char* a2, __int64 a3);
-sub_18027F2C0Type sub_18027F2C0Original;
-
-void TextMsg(bf_read* msg)
-{
-	TextMsgPrintType_t msg_dest = (TextMsgPrintType_t)msg->ReadByte();
-
-	char text[256];
-	msg->ReadString(text, sizeof(text));
-
-	if (msg_dest == TextMsgPrintType_t::HUD_PRINTCONSOLE) {
-		auto endpos = strlen(text);
-		if (text[endpos - 1] == '\n')
-			text[endpos - 1] = '\0'; // cut off repeated newline
-
-		Msg("%s\n", text);
-	}
-}
-void sub_18027F2C0(__int64 a1, const char* a2, __int64 a3)
-{
-	if (!strcmp(a2, "SayText"))
-		sub_18027F2C0Original(a1, "TextMsg", (__int64)TextMsg);
-	sub_18027F2C0Original(a1, a2, a3);
-}
-
 bool recursive = false;
 
 bool is_interesting_format(const char* format) {
