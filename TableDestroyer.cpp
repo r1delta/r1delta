@@ -36,10 +36,12 @@
 #include <iostream>
 #include "defs.h"
 #include "TableDestroyer.h"
+
 ServerClassInitFunc ServerClassInit_DT_BasePlayerOriginal;
 ServerClassInitFunc ServerClassInit_DT_LocalOriginal;
 ServerClassInitFunc ServerClassInit_DT_LocalPlayerExclusiveOriginal;
 ServerClassInitFunc ServerClassInit_DT_TitanSoulOriginal;
+
 void DestroySendProp(SendProp* sendTablePtr, int* sendTableLengthPtr, const char* propname) {
 	for (int i = 0; i < *sendTableLengthPtr; ++i) {
 		//std::cout << "SendProp name: " << sendTablePtr[i].name << std::endl;
@@ -60,6 +62,7 @@ void DestroySendProp(SendProp* sendTablePtr, int* sendTableLengthPtr, const char
 	DebugBreak();
 	std::cout << (char*)0 << "lol" << std::endl;
 }
+
 void RenameSendProp(SendProp* sendTablePtr, int* sendTableLengthPtr, const char* currentName, const char* newName) {
 	for (int i = 0; i < *sendTableLengthPtr; ++i) {
 		if (strcmp(sendTablePtr[i].name, currentName) == 0) {
@@ -71,6 +74,7 @@ void RenameSendProp(SendProp* sendTablePtr, int* sendTableLengthPtr, const char*
 
 	std::cout << "SendProp not found: " << currentName << std::endl;
 }
+
 SendProp* FindSendProp(SendProp* sendTablePtr, int sendTableLength, const char* propName) {
 	for (int i = 0; i < sendTableLength; ++i) {
 		if (strcmp(sendTablePtr[i].name, propName) == 0) {
@@ -79,6 +83,7 @@ SendProp* FindSendProp(SendProp* sendTablePtr, int sendTableLength, const char* 
 	}
 	return nullptr;
 }
+
 void MoveSendProp(SendProp* sourceTablePtr, int* sourceTableLengthPtr, const char* sourcePropName,
 	SendProp* destTablePtr, int* destTableLengthPtr, const char* destPropName) {
 	// Find the source send prop
@@ -102,6 +107,7 @@ void MoveSendProp(SendProp* sourceTablePtr, int* sourceTableLengthPtr, const cha
 
 	std::cout << "Source send prop not found: " << sourcePropName << std::endl;
 }
+
 void ServerClassInit_DT_BasePlayer() {
 	ServerClassInit_DT_BasePlayerOriginal();
 	ServerClassInit_DT_LocalOriginal();
@@ -134,6 +140,7 @@ void ServerClassInit_DT_Local() {
 
 	//DestroySendProp(DT_Local, DT_LocalLen, "m_titanRespawnTime");
 }
+
 void ServerClassInit_DT_LocalPlayerExclusive() {
 	ServerClassInit_DT_LocalPlayerExclusiveOriginal();
 	void* serverPtr = (void*)GetModuleHandleA("server.dll");
@@ -142,6 +149,7 @@ void ServerClassInit_DT_LocalPlayerExclusive() {
 
 	//DestroySendProp(DT_LocalPlayerExclusive, DT_LocalPlayerExclusiveLen, "m_wallDangleDisableWeapon");
 }
+
 void ServerClassInit_DT_TitanSoul() {
 	ServerClassInit_DT_TitanSoulOriginal();
 	void* serverPtr = (void*)GetModuleHandleA("server.dll");
@@ -155,6 +163,7 @@ void ServerClassInit_DT_TitanSoul() {
 	// these are at the end so theres nothing after them
 	*DT_TitanSoulLen -= 5;
 }
+
 __int64 __fastcall CBaseEntity__SendProxy_CellOrigin(__int64 a1, _DWORD* a2, __int64 a3, float* a4)
 {
 	int m_Value; // eax
@@ -227,6 +236,7 @@ __int64 __fastcall CBaseEntity__SendProxy_CellOrigin(__int64 a1, _DWORD* a2, __i
 		a4[2] = 0.0;
 	return result;
 }
+
 __int64 __fastcall CBaseEntity__SendProxy_CellOriginXY(__int64 a1, _DWORD* a2, __int64 a3, float* a4)
 {
 	int v6; // eax
@@ -281,6 +291,7 @@ __int64 __fastcall CBaseEntity__SendProxy_CellOriginXY(__int64 a1, _DWORD* a2, _
 		a4[1] = 0.0;
 	return result;
 }
+
 __int64 __fastcall CBaseEntity__SendProxy_CellOriginZ(__int64 a1, __int64 a2, __int64 a3, float* a4)
 {
 	int v6; // eax
@@ -334,6 +345,7 @@ __int64 __fastcall sub_3A1E00(__int64 a1, __int64 a2, unsigned int* a3, _DWORD* 
 	*a4 = result;
 	return result;
 }
+
 __int64 __fastcall sub_3A1E40(__int64 a1, __int64 a2, unsigned int* a3, _DWORD* a4)
 {
 	bool v6; // zf
@@ -350,6 +362,7 @@ __int64 __fastcall sub_3A1E40(__int64 a1, __int64 a2, unsigned int* a3, _DWORD* 
 	*a4 = result;
 	return result;
 }
+
 __int64 __fastcall sub_3A1E80(__int64 a1, __int64 a2, unsigned int* a3, _DWORD* a4)
 {
 	bool v6; // zf

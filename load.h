@@ -36,6 +36,8 @@
 #include "windows.h"
 #include <winternl.h>  // For UNICODE_STRING.
 #include "core.h"
+#include "physics.h"
+
 enum {
 	// The DLL was loaded. The NotificationData parameter points to a
 	// LDR_DLL_LOADED_NOTIFICATION_DATA structure.

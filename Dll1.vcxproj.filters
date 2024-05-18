@@ -90,6 +90,18 @@
     <ClInclude Include="squirrel.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="physics.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="predictionerror.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="netadr.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="sendmoveclampfix.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">
@@ -132,6 +144,12 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="logging.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="predictionerror.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="sendmoveclampfix.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

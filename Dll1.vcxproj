@@ -166,8 +166,12 @@
     <ClInclude Include="logging.h" />
     <ClInclude Include="memory.h" />
     <ClInclude Include="navmesh.h" />
+    <ClInclude Include="netadr.h" />
     <ClInclude Include="patcher.h" />
+    <ClInclude Include="physics.h" />
     <ClInclude Include="platform.h" />
+    <ClInclude Include="predictionerror.h" />
+    <ClInclude Include="sendmoveclampfix.h" />
     <ClInclude Include="squirrel.h" />
     <ClInclude Include="TableDestroyer.h" />
     <ClInclude Include="thirdparty\silver-bun\memaddr.h" />
@@ -191,6 +195,8 @@
     <ClCompile Include="navmesh.cpp" />
     <ClCompile Include="newbitbuf.cpp" />
     <ClCompile Include="patcher.cpp" />
+    <ClCompile Include="predictionerror.cpp" />
+    <ClCompile Include="sendmoveclampfix.cpp" />
     <ClCompile Include="squirrel.cpp" />
     <ClCompile Include="TableDestroyer.cpp" />
     <ClCompile Include="utils.cpp" />

@@ -64,6 +64,9 @@
 #include <psapi.h>
 #include "logging.h"
 #include "squirrel.h"
+#include "predictionerror.h"
+#include "netadr.h"
+#include "sendmoveclampfix.h"
 #pragma intrinsic(_ReturnAddress)
 
 wchar_t kNtDll[] = L"ntdll.dll";
@@ -163,20 +166,7 @@ char __fastcall ParsePDEF(__int64 a1, __int64 a2, __int64 a3, const char* a4)
 	int v4 = whatthefuck(a1, &whatever, (__int64)v10, a2, 1u, 0, 0);
 	return ret;
 }
-signed __int64 __fastcall sub_1806580E0(char* a1, signed __int64 a2, const char* a3, va_list a4)
-{
-	signed __int64 result; // rax
 
-	if (a2 <= 0)
-		return 0i64;
-	result = vsnprintf(a1, a2, a3, a4);
-	if ((int)result < 0i64 || (int)result >= a2)
-	{
-		result = a2 - 1;
-		a1[a2 - 1] = 0;
-	}
-	return result;
-}
 long long* __fastcall unkfunc(long long* a1)
 {
 	*a1 = 0i64;
@@ -184,147 +174,6 @@ long long* __fastcall unkfunc(long long* a1)
 	a1[2] = 0i64;
 	a1[3] = 0i64;
 	return a1;
-}
-
-enum
-{
-	TD_OFFSET_NORMAL = 0,
-	TD_OFFSET_PACKED = 1,
-
-	// Must be last
-	TD_OFFSET_COUNT,
-};
-typedef enum _fieldtypes
-{
-	FIELD_VOID = 0, // No type or value
-	FIELD_FLOAT, // Any floating point value
-	FIELD_STRING, // A string ID (return from ALLOC_STRING)
-	FIELD_VECTOR, // Any vector, QAngle, or AngularImpulse
-	FIELD_QUATERNION, // A quaternion
-	FIELD_INTEGER, // Any integer or enum
-	FIELD_BOOLEAN, // boolean, implemented as an int, I may use this as a hint for compression
-	FIELD_SHORT, // 2 byte integer
-	FIELD_CHARACTER, // a byte
-	FIELD_COLOR32, // 8-bit per channel r,g,b,a (32bit color)
-	FIELD_EMBEDDED, // an embedded object with a datadesc, recursively traverse and embedded class/structure based on an additional
-	// typedescription
-	FIELD_CUSTOM, // special type that contains function pointers to it's read/write/parse functions
-
-	FIELD_CLASSPTR, // CBaseEntity *
-	FIELD_EHANDLE, // Entity handle
-	FIELD_EDICT, // edict_t *
-
-	FIELD_POSITION_VECTOR, // A world coordinate (these are fixed up across level transitions automagically)
-	FIELD_TIME, // a floating point time (these are fixed up automatically too!)
-	FIELD_TICK, // an integer tick count( fixed up similarly to time)
-	FIELD_MODELNAME, // Engine string that is a model name (needs precache)
-	FIELD_SOUNDNAME, // Engine string that is a sound name (needs precache)
-
-	FIELD_INPUT, // a list of inputed data fields (all derived from CMultiInputVar)
-	FIELD_FUNCTION, // A class function pointer (Think, Use, etc)
-
-	FIELD_VMATRIX, // a vmatrix (output coords are NOT worldspace)
-
-	// NOTE: Use float arrays for local transformations that don't need to be fixed up.
-	FIELD_VMATRIX_WORLDSPACE, // A VMatrix that maps some local space to world space (translation is fixed up on level transitions)
-	FIELD_MATRIX3X4_WORLDSPACE, // matrix3x4_t that maps some local space to world space (translation is fixed up on level transitions)
-
-	FIELD_INTERVAL, // a start and range floating point interval ( e.g., 3.2->3.6 == 3.2 and 0.4 )
-	FIELD_MODELINDEX, // a model index
-	FIELD_MATERIALINDEX, // a material index (using the material precache string table)
-
-	FIELD_VECTOR2D, // 2 floats
-
-	FIELD_TYPECOUNT, // MUST BE LAST
-} fieldtype_t;
-struct typedescription_t;
-struct datamap_t
-{
-	typedescription_t* dataDesc;
-	int dataNumFields;
-	char const* dataClassName;
-	datamap_t* baseMap;
-
-	bool chains_validated;
-	// Have the "packed" offsets been computed
-	bool packed_offsets_computed;
-	int packed_size;
-};
-struct typedescription_t
-{
-	fieldtype_t fieldType;
-	const char* fieldName;
-	int fieldOffset[TD_OFFSET_COUNT]; // 0 == normal, 1 == packed offset
-	unsigned short fieldSize;
-	short flags;
-	// the name of the variable in the map/fgd data, or the name of the action
-	const char* externalName;
-	// pointer to the function set for save/restoring of custom data types
-	void* pSaveRestoreOps;
-	// for associating function with string names
-	void* inputFunc;
-	// For embedding additional datatables inside this one
-	datamap_t* td;
-
-	// Stores the actual member variable size in bytes
-	int fieldSizeInBytes;
-
-	// FTYPEDESC_OVERRIDE point to first baseclass instance if chains_validated has occurred
-	struct typedescription_t* override_field;
-
-	// Used to track exclusion of baseclass fields
-	int override_count;
-
-	// Tolerance for field errors for float fields
-	float fieldTolerance;
-};
-// write access to const memory has been detected, the output may be wrong!
-// write access to const memory has been detected, the output may be wrong!
-const char* sub_18021FE50(__int64 thisptr, const datamap_t* pCurrentMap, const typedescription_t* pField, const char* fmt, ...)
-{
-	++* (DWORD*)(thisptr + 32);
-	const char* fieldname = "empty";
-	const char* classname = "empty";
-	int flags = 0;
-
-	if (pField)
-	{
-		flags = pField->flags;
-		fieldname = pField->fieldName ? pField->fieldName : "NULL";
-		classname = pCurrentMap->dataClassName;
-	}
-
-	va_list argptr;
-	char data[4096];
-	int len;
-	va_start(argptr, fmt);
-	len = sub_1806580E0(data, sizeof(data), fmt, argptr);
-	va_end(argptr);
-	data[strcspn(data, "\n")] = 0;
-
-	int v6 = 0; // edi
-	__int64 v7 = 0; // rbx
-	bool bUseLongName = true;
-	std::string longName;
-	if (*(int*)(thisptr + 80) > 0)
-	{
-		do
-		{
-			const char* result = *(const char**)(v7 + *(unsigned __int64*)(thisptr + 56));
-			if (result)
-			{
-				const char* v8 = (const char*)*((unsigned __int64*)result + 1);
-				const char* v9 = "NULL";
-				if (v8)
-					v9 = v8;
-				longName += v9;
-				longName += "/";
-			}
-		} while (v6 < *(DWORD*)(thisptr + 80));
-	}
-
-	printf("%2d (%d)%s%s::%s - %s\n", *(DWORD*)(thisptr + 32), *(DWORD*)(thisptr + 36), longName.c_str(), classname, fieldname, data);
-	return 0;
 }
 
 BOOL RemoveItemsFromVTable(uintptr_t vTableAddr, size_t indexStart, size_t itemCount) {
@@ -654,56 +503,6 @@ char __fastcall DataTable_SetupReceiveTableFromSendTable(__int64 a1, __int64 a2)
 	return ret;
 }
 
-enum class netadrtype_t
-{
-	NA_NULL = 0,
-	NA_LOOPBACK,
-	NA_IP,
-};
-
-class CNetAdr
-{
-public:
-	CNetAdr(void) { Clear(); }
-	CNetAdr(const char* pch) { SetFromString(pch); }
-	void	Clear(void);
-
-	inline void	SetPort(uint16_t newport) { port = newport; }
-	inline void	SetType(netadrtype_t newtype) { type = newtype; }
-
-	bool	SetFromSockadr(struct sockaddr_storage* s);
-	bool	SetFromString(const char* pch, bool bUseDNS = false);
-
-	inline netadrtype_t	GetType(void) const { return type; }
-	inline uint16_t		GetPort(void) const { return port; }
-
-	bool		CompareAdr(const CNetAdr& other) const;
-	inline bool	ComparePort(const CNetAdr& other) const { return port == other.port; }
-	inline bool	IsLoopback(void) const { return type == netadrtype_t::NA_LOOPBACK; } // true if engine loopback buffers are used.
-
-	const char* ToString(bool onlyBase = false) const;
-	void		ToString(char* pchBuffer, size_t unBufferSize, bool onlyBase = false) const;
-	void		ToSockadr(struct sockaddr_storage* s) const;
-
-private:
-	netadrtype_t type;
-	IN6_ADDR adr;
-	uint16_t port;
-	bool field_16;
-	bool reliable;
-};
-typedef struct netpacket_s
-{
-	CNetAdr from;
-	int source;
-	double received;
-	uint8_t* pData;
-	bf_read message;
-	int size;
-	int wiresize;
-	char stream;
-	netpacket_s* pNext;
-} netpacket_t;
 bool ReadConnectPacket2015AndWriteConnectPacket2014(bf_read& msg, bf_write& buffer)
 {
 	char type = msg.ReadByte();
@@ -987,27 +786,6 @@ __int64 __fastcall bf_write__WriteUBitLong(bf_write* a1, unsigned int a2, signed
 }
 using sub_EA0D0_t = void(__fastcall*)(const char*, ...);
 
-class CustomBuffer : public std::streambuf {
-protected:
-	int overflow(int c) override {
-		if (c != EOF) {
-			static auto engine_mod = uintptr_t(GetModuleHandleA("engine_ds.dll"));
-			static auto sub_EA0D0 = sub_EA0D0_t(engine_mod + 0xEA0D0);
-
-			char buf[] = { static_cast<char>(c), '\0' };
-			sub_EA0D0("%s", buf);
-		}
-		return c;
-	}
-
-	std::streamsize xsputn(const char* s, std::streamsize n) override {
-		static auto engine_mod = uintptr_t(GetModuleHandleA("engine_ds.dll"));
-		static auto sub_EA0D0 = sub_EA0D0_t(engine_mod + 0xEA0D0);
-
-		sub_EA0D0("%s", std::string(s, n).c_str());
-		return n;
-	}
-};
 __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 {
 	CModule engine("engine.dll", (uintptr_t)LoadLibraryA("engine.dll"));
@@ -1265,45 +1043,7 @@ void CL_Retry_f() {
 		return CL_Retry_fOriginal();
 	}
 }
-struct CLC_Move
-{
-	bool m_bReliable;
-	void* m_NetChannel;
-	void* unk;
-	void* m_pMessageHandler;
-	int m_nBackupCommands;
-	int m_nNewCommands;
-	int m_nLength;
-	bf_read m_DataIn;
-	bf_write m_DataOut;
-};
-typedef bool (*CLC_Move__ReadFromBufferType)(CLC_Move* thisptr, bf_read& buffer);
-CLC_Move__ReadFromBufferType CLC_Move__ReadFromBufferOriginal;
-bool __fastcall CLC_Move__ReadFromBuffer(CLC_Move* thisptr, bf_read& buffer)
-{
-	int bak = buffer.GetNumBitsRead();
-	if (buffer.ReadLongLong() != 0xd0032147bf50a000) {
-		buffer.m_bOverflow = false;
-		buffer.Seek(bak);
-		buffer.m_bOverflow = false;
-		return CLC_Move__ReadFromBufferOriginal(thisptr, buffer);
-	}
-	thisptr->m_nNewCommands = buffer.ReadUBitLong(7);
-	thisptr->m_nBackupCommands = buffer.ReadUBitLong(4);
-	thisptr->m_nLength = buffer.ReadWord();
-	thisptr->m_DataIn = buffer;
-	return buffer.SeekRelative(thisptr->m_nLength);
-}
 
-bool __fastcall CLC_Move__WriteToBuffer(CLC_Move* thisptr, bf_write& buffer)
-{
-	thisptr->m_nLength = thisptr->m_DataOut.GetNumBitsWritten();
-	buffer.WriteLongLong(0xd0032147bf50a000);
-	buffer.WriteUBitLong(thisptr->m_nNewCommands, 7);
-	buffer.WriteUBitLong(thisptr->m_nBackupCommands, 4);
-	buffer.WriteWord(thisptr->m_nLength);
-	return buffer.WriteBits(thisptr->m_DataOut.GetData(), thisptr->m_nLength);
-}
 typedef __int64 (*CBaseServer__FillServerInfoType)(__int64 a1, __int64 a2);
 CBaseServer__FillServerInfoType CBaseServer__FillServerInfoOriginal;
 __int64 __fastcall CBaseServer__FillServerInfo(__int64 a1, __int64 a2)
@@ -1651,7 +1391,7 @@ void __stdcall LoaderNotificationCallback(
 		
 	}
 	if (std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length).find(L"client.dll") != std::string::npos) {
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("client.dll") + 0x21FE50), &sub_18021FE50, reinterpret_cast<LPVOID*>(NULL));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("client.dll") + 0x21FE50), &PredictionErrorFn, reinterpret_cast<LPVOID*>(NULL));
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("client.dll") + 0x029840), &C_BaseEntity__VPhysicsInitNormal, reinterpret_cast<LPVOID*>(NULL));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("client.dll") + 0x27F2C0), &sub_18027F2C0, reinterpret_cast<LPVOID*>(&sub_18027F2C0Original));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x56A450), &vsnprintf_l_hk, NULL);
