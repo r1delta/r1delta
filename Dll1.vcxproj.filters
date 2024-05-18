@@ -105,6 +105,9 @@
     <ClInclude Include="dedicated.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="beardbgon.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">

@@ -570,101 +570,7 @@ void __fastcall CAI_NetworkManager__LoadNavMesh(__int64 a1, __int64 a2, const ch
 	((CAI_NetworkManager__BuildStubType)(((uintptr_t)(GetModuleHandleA("server.dll"))) + 0x3645f0))(a1);
 }
 
-std::vector<std::string> netMessages = {
-	"Base_CmdKeyValues",
-	"CLC_BaselineAck",
-	"CLC_ClientInfo",
-	"CLC_ClientSayText",
-	"CLC_ClientTick",
-	"CLC_CmdKeyValues",
-	"CLC_DurangoVoiceData",
-	"CLC_FileCRCCheck",
-	"CLC_ListenEvents",
-	"CLC_LoadingProgress",
-	"CLC_Move",
-	"CLC_PersistenceClientToken",
-	"CLC_PersistenceRequestSave",
-	"CLC_RespondCvarValue",
-	"CLC_SaveReplay",
-	"CLC_SplitPlayerConnect",
-	"CLC_VoiceData",
-	"CNetMessage",
-	"NET_SetConVar",
-	"NET_SignonState",
-	"NET_SplitScreenUser",
-	"NET_StringCmd",
-	"SVC_BSPDecal",
-	"SVC_ClassInfo",
-	"SVC_CmdKeyValues",
-	"SVC_CreateStringTable",
-	"SVC_CrosshairAngle",
-	"SVC_DurangoVoiceData",
-	"SVC_EntityMessage",
-	"SVC_FixAngle",
-	"SVC_GameEvent",
-	"SVC_GameEventList",
-	"SVC_GetCvarValue",
-	"SVC_Menu",
-	"SVC_PersistenceBaseline",
-	"SVC_PersistenceDefFile",
-	"SVC_PersistenceNotifySaved",
-	"SVC_PersistenceUpdateVar",
-	"SVC_PlaylistChange",
-	"SVC_Playlists",
-	"SVC_Print",
-	"SVC_SendTable",
-	"SVC_ServerInfo",
-	"SVC_ServerTick",
-	"SVC_SetPause",
-	"SVC_SetTeam",
-	"SVC_Snapshot",
-	"SVC_Sounds",
-	"SVC_SplitScreen",
-	"SVC_TempEntities",
-	"SVC_UpdateStringTable",
-	"SVC_UserMessage",
-	"SVC_VoiceData"
-};
 
-// Original function pointer type
-typedef __int64(*NET_OutOfBandPrintf_t)(int, void*, const char*, ...);
-NET_OutOfBandPrintf_t Original_NET_OutOfBandPrintf = NULL;
-typedef __int64 (*NET_SendPacketType)(
-	__int64 a1,
-	int a2,
-	void* a3,
-	_DWORD* a4,
-	int a5,
-	__int64 a6,
-	char a7,
-	int a8,
-	char a9,
-	__int64 a10,
-	char a11);
-NET_SendPacketType NET_SendPacketOriginal;
-// Detour function
-__int64 Detour_NET_OutOfBandPrintf(int sock, void* adr, const char* fmt, ...) {
-	if (strcmp(fmt, "%c00000000000000") == 0) {
-		static const char** gamemode = reinterpret_cast<const char** >((uintptr_t)(GetModuleHandleA("server.dll")) + 0xB68520);
-		static const char* mapname = reinterpret_cast<const char*>((uintptr_t)(GetModuleHandleA("engine_ds.dll")) + 0x1C89A84);
-		//MessageBoxA(NULL, *gamemode, mapname, 16);
-		char msg[1200] = { 0 };
-		bf_write startup(msg, 1200);
-		startup.WriteLong(0xFFFFFFFFi64);
-		startup.WriteByte(0x4Au);
-		startup.WriteString(mapname);
-		startup.WriteString(*gamemode);
-		return NET_SendPacketOriginal(0, sock, adr, (uint32*)(startup.GetBasePointer()), startup.GetNumBytesWritten(), 0i64, 0, 0, 0, 0i64, 1);
-	}
-
-	va_list args;
-	va_start(args, fmt);
-	__int64 result = Original_NET_OutOfBandPrintf(sock, adr, fmt, args);
-	va_end(args);
-	return result;
-}
-typedef __int64(*Host_InitDedicatedType)(__int64 a1, __int64 a2, __int64 a3);
-Host_InitDedicatedType Host_InitDedicatedOriginal;
 typedef __int64 (*SendTable_CalcDeltaType)(
 	__int64 a1,
 	__int64 a2,
@@ -726,156 +632,7 @@ bool __fastcall SendTable_Encode(
 {
 	return SendTable_EncodeOriginal(a1, a2, a3, a4, pRecipients, 0, a7, a8);
 }
-typedef __int64 (*bf_write__WriteUBitLongType)(bf_write* a1, unsigned int a2, signed int a3);
-bf_write__WriteUBitLongType bf_write__WriteUBitLongOriginal;
-__int64 __fastcall bf_write__WriteUBitLong(bf_write* a1, unsigned int a2, signed int a3)
-{
-	static uintptr_t engineDS = uintptr_t(GetModuleHandleA("engine_ds.dll"));
-	auto ret = bf_write__WriteUBitLongOriginal(a1, a2, a3);
-	if (uintptr_t(_ReturnAddress()) == (engineDS+0x51018) || uintptr_t(_ReturnAddress()) == (engineDS + 0x5101D))
-		bf_write__WriteUBitLongOriginal(a1, 0, 14);
-	return ret;
-}
-using sub_EA0D0_t = void(__fastcall*)(const char*, ...);
 
-__int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
-{
-	CModule engine("engine.dll", (uintptr_t)LoadLibraryA("engine.dll"));
-	CModule engineDS("engine_ds.dll");
-	//int i = 1;
-	//while (true)
-	//{
-	//	CMemory engineDSPattern = engineDS.FindPatternSIMD(((uint8_t*)"\xF7\xCC\x58\xCC\xCC\xCC\x00"), "x?x???x", nullptr, i);
-	//	if (!engineDSPattern)
-	//		break;
-	//	CMemory enginePattern = engine.FindPatternSIMD(((uint8_t*)"\xF7\xCC\x58\xCC\xCC\xCC\x00"), "x?x???x", nullptr, i - 1);
-	//	std::vector<uint8_t> patchBytes;
-	//	for (size_t j = 0; j < 7; ++j)
-	//	{
-	//		patchBytes.push_back(enginePattern.GetValue<uint8_t>());
-	//		enginePattern.OffsetSelf(1);
-	//	}
-	//	engineDSPattern.Patch(patchBytes);
-	//	i++;
-	//}
-	NET_CreateNetChannelOriginal = NET_CreateNetChannelType(engine.GetModuleBase() + 0x1F1B10);
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13CA10), LPVOID(engine.GetModuleBase() + 0x1EC7B0), NULL); // NET_BufferToBufferCompress
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13DD90), LPVOID(engine.GetModuleBase() + 0x1EDB40), NULL); // NET_BufferToBufferDecompress
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x144C60), LPVOID(engine.GetModuleBase() + 0x1F4AC0), NULL); // NET_ClearQueuedPacketsForChannel
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x141D60), &NET_CreateNetChannel, NULL); // NET_CreateNetChannel LPVOID(engine.GetModuleBase() + 0x1F1B10)
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13F7A0), LPVOID(engine.GetModuleBase() + 0x1EF550), NULL); // NET_GetUDPPort
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x145440), LPVOID(engine.GetModuleBase() + 0x1F5220), NULL); // NET_Init
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13C9D0), LPVOID(engine.GetModuleBase() + 0x1EC770), NULL); // NET_InitPostFork
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13C8D0), LPVOID(engine.GetModuleBase() + 0x1EC660), NULL); // NET_IsDedicated
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13C8C0), LPVOID(engine.GetModuleBase() + 0x1EC650), NULL); // NET_IsMultiplayer
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13F7D0), LPVOID(engine.GetModuleBase() + 0x1EF580), NULL); // NET_ListenSocket
-	Original_NET_OutOfBandPrintf = NET_OutOfBandPrintf_t(engine.GetModuleBase() + 0x1F47C0);
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x144960), LPVOID(Detour_NET_OutOfBandPrintf), NULL); // NET_OutOfBandPrintf
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x142ED0), LPVOID(engine.GetModuleBase() + 0x1F2CF0), NULL); // NET_ProcessSocket
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x1458A0), LPVOID(engine.GetModuleBase() + 0x1F5650), NULL); // NET_RemoveNetChannel
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x143390), LPVOID(engine.GetModuleBase() + 0x1F31B0), NULL); // NET_RunFrame
-	NET_SendPacketOriginal = NET_SendPacketType(engine.GetModuleBase() + 0x1F4130);
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x1442D0), LPVOID(engine.GetModuleBase() + 0x1F4130), NULL); // NET_SendPacket
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x144D10), LPVOID(engine.GetModuleBase() + 0x1F4B70), NULL); // NET_SendQueuedPackets
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x1453D0), LPVOID(engine.GetModuleBase() + 0x1F51B0), NULL); // NET_SetMultiplayer
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x1434C0), LPVOID(engine.GetModuleBase() + 0x1F32E0), NULL); // NET_Shutdown
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13FAB0), LPVOID(engine.GetModuleBase() + 0x1EF860), NULL); // NET_SleepUntilMessages
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13C3E0), LPVOID(engine.GetModuleBase() + 0x1EC1B0), NULL); // NET_StringToAdr
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13C100), LPVOID(engine.GetModuleBase() + 0x1EBED0), NULL); // NET_StringToSockaddr
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x146D50), LPVOID(engine.GetModuleBase() + 0x1F6B90), NULL); // INetMessage__WriteToBuffer
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13B000), LPVOID(engine.GetModuleBase() + 0x1E9EA0), NULL); // CNetChan__CNetChan__dtor
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x017940), LPVOID(engine.GetModuleBase() + 0x028BC0), NULL); // CLC_SplitPlayerConnect__dtor
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x12F140), LPVOID(engine.GetModuleBase() + 0x1DC830), NULL); // SendTable_WriteInfos
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x71C0), &bf_write__WriteUBitLong, reinterpret_cast<LPVOID*>(&bf_write__WriteUBitLongOriginal)); // bf_write__WriteUBitLong
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x497F0), LPVOID(engine.GetModuleBase() + 0xD8420), NULL); // CBaseClient::ConnectionStart
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x62610), LPVOID(engine.GetModuleBase() + 0xF1930), NULL); // SV_PackEntity
-	//MH_CreateHook(LPVOID(engine.GetModuleBase() + 0xE3A90), LPVOID(CreateFunction((void*)(engineDS.GetModuleBase() + 0x55340), (void*)(engineDS.GetModuleBase() + 0x1C76250))), NULL); // CFrameSnapshotManager::UsePreviouslySentPacket
-	//MH_CreateHook(LPVOID(engine.GetModuleBase() + 0xE3B00), LPVOID(CreateFunction((void*)(engineDS.GetModuleBase() + 0x553B0), (void*)(engineDS.GetModuleBase() + 0x1C76250))), NULL); // CFrameSnapshotManager::GetPreviouslySentPacket
-	//MH_CreateHook(LPVOID(engine.GetModuleBase() + 0xE6430), LPVOID(CreateFunction((void*)(engineDS.GetModuleBase() + 0x57D30), (void*)(engineDS.GetModuleBase() + 0x1C76250))), NULL); // CFrameSnapshotManager::CreatePackedEntity
-	//MH_CreateHook(LPVOID(engine.GetModuleBase() + 0x161050), LPVOID(engineDS.GetModuleBase() + 0xBA290), NULL); // CBaseEdict::GetChangeAccessor
-	//MH_CreateHook(LPVOID(engine.GetModuleBase() + 0x484850), LPVOID(engineDS.GetModuleBase() + 0x322930), NULL); // SV_PackEntity->writeBuf allocator
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x12FE80), LPVOID(engine.GetModuleBase() + 0x1DD560),  NULL); // SendTable_Encode
-	//MH_CreateHook(LPVOID(engine.GetModuleBase() + 0xF12B0), LPVOID(engineDS.GetModuleBase() + 0x62100), NULL); // SV_EnsureInstanceBaseline football
-	//MH_CreateHook(LPVOID(engine.GetModuleBase() + 0x101190), LPVOID(engineDS.GetModuleBase() + 0x714C0), NULL); // CChangeFrameList::ctor
-	//MH_CreateHook(LPVOID(engine.GetModuleBase() + 0x15D5F0), LPVOID(engineDS.GetModuleBase() + 0xB7F50), NULL); // PackedEntity__SetServerAndClientClass
-	//MH_CreateHook(LPVOID(engine.GetModuleBase() + 0x15D4C0), LPVOID(engineDS.GetModuleBase() + 0xB7E20), NULL); // PackedEntity__AllocAndCopyPadded
-	//MH_CreateHook(LPVOID(engine.GetModuleBase() + 0x15D5C0), LPVOID(engineDS.GetModuleBase() + 0xB7F20), NULL); // PackedEntity__UnkReFunc
-	//MH_CreateHook(LPVOID(engine.GetModuleBase() + 0x15DD10), LPVOID(engineDS.GetModuleBase() + 0xB8680), NULL); // PackedEntity::SetRecipients
-	//MH_CreateHook(LPVOID(engine.GetModuleBase() + 0x1DDE70), LPVOID(engineDS.GetModuleBase() + 0x130790), NULL); // SendTable_CalcDelta
-	//MH_CreateHook(LPVOID(engine.GetModuleBase() + 0x15D950), LPVOID(engineDS.GetModuleBase() + 0xB82B0), NULL); // PackedEntity::CompareRecipients
-	//MH_CreateHook(LPVOID(engine.GetModuleBase() + 0xF1260), LPVOID(engineDS.GetModuleBase() + 0x620B0), NULL); // unknown edict change func
-
-	
-	//memcpy((void*)(engineDS.GetModuleBase() + 0x550760), (void*)(engine.GetModuleBase() + 0x7CB3F0), (0x550968 - 0x550760));
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x12FE80), &SendTable_Encode, reinterpret_cast<LPVOID*>(&SendTable_EncodeOriginal)); // SendTable_Encode
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x12FE80), LPVOID(engine.GetModuleBase() + 0x1DD560), NULL); // SendTable_Encode
-	//MH_CreateHook(LPVOID(engine.GetModuleBase() + 0x1DDE70), LPVOID(engineDS.GetModuleBase() + 0x130790), reinterpret_cast<LPVOID*>(NULL));
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x116A70), LPVOID(engine.GetModuleBase() + 0x1C3C90), NULL); // CSendTablePrecalc::SetupFlatPropertyArray
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x50870), &CBaseServer__WriteDeltaEntities, NULL); // 
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x12F900), LPVOID(engine.GetModuleBase() + 0x01DCFE0), NULL); // SendTable_CullPropsFromProxies
-	
-	////MH_CreateHook(LPVOID(engine.GetModuleBase() + 0xDDF00), LPVOID(engineDS.GetModuleBase() + 0x4F710), NULL);
-	//
-	//MH_CreateHook(LPVOID(engine.GetModuleBase() + 0xCCAE0), LPVOID(engineDS.GetModuleBase() + 0x3D160), NULL);
-	//MH_CreateHook(LPVOID(engine.GetModuleBase() + 0x161050), LPVOID(engineDS.GetModuleBase() + 0xBA290), NULL); // CBaseEdict::GetChangeAccessor
-	//
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x116580), LPVOID(engine.GetModuleBase() + 0x1C37A0), NULL); // ???
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x12F3A0), LPVOID(engine.GetModuleBase() + 0x1DCA80), NULL); // ???
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x123240), LPVOID(engine.GetModuleBase() + 0x1D04E0), NULL); // ???
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x130240), LPVOID(engine.GetModuleBase() + 0x1DD920), NULL); // SendTable_WritePropList
-	//
-	
-	//
-	//
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x000000000571B0), LPVOID(CreateFunction((void*)(engine.GetModuleBase() + 0x000000000E58B0), (void*)(engine.GetModuleBase() + 0x7BBEA8))), NULL); // CFrameSnapshotManager::BuildSnapshotList
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x00000000057D30), LPVOID(CreateFunction((void*)(engine.GetModuleBase() + 0x000000000E6430), (void*)(engine.GetModuleBase() + 0x7BBEA8))), NULL); // CFrameSnapshotManager::CreatePackedEntity
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x00000000057D30), LPVOID((void*)(engine.GetModuleBase() + 0x000000000E6430)), NULL);
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x4FB10), LPVOID((void*)(engine.GetModuleBase() + 0xDE310)), NULL);
-	//
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x000000000553B0), LPVOID(CreateFunction((void*)(engine.GetModuleBase() + 0x000000000E3B00), (void*)(engine.GetModuleBase() + 0x7BBEA8))), NULL); // CFrameSnapshotManager::GetPreviouslySentPacket
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x000000000584E0), LPVOID(CreateFunction((void*)(engine.GetModuleBase() + 0x000000000E6BE0), (void*)(engine.GetModuleBase() + 0x7BBEA8))), NULL); // CFrameSnapshotManager::ChangeLevel
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x00000000057630), LPVOID(CreateFunction((void*)(engine.GetModuleBase() + 0x000000000E5D30), (void*)(engine.GetModuleBase() + 0x7BBEA8))), NULL); // CFrameSnapshotManager::UnkFunc1
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x000000000586A0), LPVOID(CreateFunction((void*)(engine.GetModuleBase() + 0x000000000E6DA0), (void*)(engine.GetModuleBase() + 0x7BBEA8))), NULL); // CFrameSnapshotManager::TakeTickSnapshot
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x00000000055340), LPVOID(CreateFunction((void*)(engine.GetModuleBase() + 0x000000000E3A90), (void*)(engine.GetModuleBase() + 0x7BBEA8))), NULL); // CFrameSnapshotManager::UsePreviouslySentPacket
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x00000000057100), LPVOID(CreateFunction((void*)(engine.GetModuleBase() + 0x000000000E5800), (void*)(engine.GetModuleBase() + 0x7BBEA8))), NULL); // CFrameSnapshotManager::AddExplicitDelete
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x00000000058530), LPVOID(CreateFunction((void*)(engine.GetModuleBase() + 0x000000000E6C30), (void*)(engine.GetModuleBase() + 0x7BBEA8))), NULL); // CFrameSnapshotManager::CreateEmptySnapshot
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x00000000057A50), LPVOID(CreateFunction((void*)(engine.GetModuleBase() + 0x000000000E6150), (void*)(engine.GetModuleBase() + 0x7BBEA8))), NULL); // CFrameSnapshotManager::RemoveEntityReference
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x000000000552C0), LPVOID(CreateFunction((void*)(engine.GetModuleBase() + 0x000000000E3A10), (void*)(engine.GetModuleBase() + 0x7BBEA8))), NULL); // CFrameSnapshotManager::AddEntityReference
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x000000000553E0), LPVOID(CreateFunction((void*)(engine.GetModuleBase() + 0x000000000E3B30), (void*)(engine.GetModuleBase() + 0x7BBEA8))), NULL); // CFrameSnapshotManager::GetPackedEntity
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x000000000552D0), LPVOID(CreateFunction((void*)(engine.GetModuleBase() + 0x000000000E3A20), (void*)(engine.GetModuleBase() + 0x7BBEA8))), NULL); // CFrameSnapshotManager::ShouldForceRepack
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x00000000058900), LPVOID(CreateFunction((void*)(engine.GetModuleBase() + 0x000000000E7000), (void*)(engine.GetModuleBase() + 0x7BBEA8))), NULL); // CFrameSnapshotManager::dtor
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x00000000058360), LPVOID(CreateFunction((void*)(engine.GetModuleBase() + 0x000000000E6A60), (void*)(engine.GetModuleBase() + 0x7BBEA8))), NULL); // CFrameSnapshotManager::ReleaseReference
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x000000000548A0), LPVOID(CreateFunction((void*)(engine.GetModuleBase() + 0x000000000E30F0), (void*)(engine.GetModuleBase() + 0x7BBEA8))), NULL); // CFrameSnapshotManager::ReleaseReference
-	//
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x000000000583C0), LPVOID(engine.GetModuleBase() + 0x000000000E6AC0), NULL); // CFrameSnapshotManager__UnkFunc9NotVcall
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x0000000003C540), LPVOID(engine.GetModuleBase() + 0x000000000CBFD0), NULL); // j_CFrameSnapshotManager__UnkFunc8NotVCall
-	
-	//MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x130DF0), LPVOID(engine.GetModuleBase() + 0x1DE4D0), NULL); // SendTable_WriteAllDeltaProps
-	////MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x130DF0), LPVOID(engine.GetModuleBase() + 0x1DE4D0), NULL); // SendTable_WriteAllDeltaProps
-	//
-	//*(uintptr_t*)(engineDS.GetModuleBase() + 0x5426C0) = *(uintptr_t*)(engine.GetModuleBase() + 0x7BBEA8); // set engineds framesnapshotmanager vtable(?) to engine one
-	////*(uintptr_t*)(engine.GetModuleBase() + 0x7BBEA8)*(uintptr_t*)(engineDS.GetModuleBase() + 0x5426C0) =
-	//CBaseServer__WriteDeltaEntitiesOriginal = CBaseServer__WriteDeltaEntitiesType(engine.GetModuleBase() + 0xDF020);
-
-	//SendTable_CalcDeltaOriginal = SendTable_CalcDeltaType(engine.GetModuleBase() + 0x1DDE70);
-	for (const auto& msg : netMessages) {
-		std::string mangledName = ".?AV" + msg + "@@";
-		LPVOID dsVtable = engineDS.GetVirtualMethodTable(mangledName.c_str());
-		LPVOID vtable = engine.GetVirtualMethodTable(mangledName.c_str());
-
-		if (dsVtable && vtable) {
-			for (int i = 0; i < 14; ++i) {
-				LPVOID pTarget = static_cast<LPVOID*>(dsVtable)[i];
-				LPVOID pDetour = static_cast<LPVOID*>(vtable)[i];
-				MH_CreateHook(pTarget, pDetour, NULL);
-			}
-		}
-	}
-	MH_EnableHook(MH_ALL_HOOKS);
-	reinterpret_cast<char(__fastcall*)(__int64, CreateInterfaceFn)>((uintptr_t)(engine.GetModuleBase())+0x01A04A0)(0, (CreateInterfaceFn)(engineDS.GetModuleBase() + 0xE9000)); // connect nondedi engine
-	reinterpret_cast<void(__fastcall*)(int, void*)>((uintptr_t)(engine.GetModuleBase())+0x47F580)(0, 0); // register nondedi engine cvars
-	return Host_InitDedicatedOriginal(a1, a2, a3);
-}
 char* __fastcall sub_311910(char* a1, const char* a2, signed __int64 a3)
 {
 	char* result; // rax
@@ -941,7 +698,6 @@ char __fastcall sub_4C460(__int64 a1)
 	static auto enginenotdedi_mod = uintptr_t(GetModuleHandleA("engine.dll"));
 	static auto sub_1601A0 = sub_1601A0_t(engine_mod + 0x1601A0);
 	static auto sub_14EF30 = sub_14EF30_t(enginenotdedi_mod + 0x1FEDB0);
-	static auto sub_EA0D0 = sub_EA0D0_t(engine_mod + 0xEA0D0);
 	static auto sub_45420 = sub_45420_t(engine_mod + 0x45420);
 	static auto sub_4AAD0 = sub_4AAD0_t(engine_mod + 0x4AAD0);
 	static auto qword_2097510 = (QWORD*)(engine_mod + 0x2097510);
@@ -952,7 +708,7 @@ char __fastcall sub_4C460(__int64 a1)
 		v3 = (__int64)pdataempty;
 		sub_14EF30((__int64)v7, v3, 0);
 		v4 = (const char*)(*(__int64(__fastcall**)(__int64))(*(_QWORD*)(a1 + 8) + 136i64))(a1 + 8);
-		sub_EA0D0("Sending persistence baseline to %s\n", v4);
+		Msg("Sending persistence baseline to %s\n", v4);
 		v5 = 1;
 		v6 = 0;
 		(*(void(__fastcall**)(__int64, char*, _QWORD, __int64, char))(*(_QWORD*)(a1 + 8) + 224i64))(
@@ -1088,6 +844,7 @@ void RegisterConCommand(const char* commandName, void (*callback)(const CCommand
 	
 	conCommandConstructor(newCommand, commandName, callback, helpString, flags, nullptr);
 }
+
 LDR_DLL_LOADED_NOTIFICATION_DATA* GetModuleNotificationData(const wchar_t* moduleName)
 {
 	HMODULE hMods[1024];
