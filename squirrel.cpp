@@ -120,36 +120,6 @@ __int64 __fastcall CScriptVM__ctor(void* thisptr) {
 	//	realvmptr = thisptr;
 	return ret;
 }
-enum SVFlags_t
-{
-	SV_FREE = 0x01,
-	SV_IHAVENOFUCKINGCLUE = 0x02,
-	// Start from the most significant bit for the new flags
-	SV_CONVERTED_TO_R1 = 0x1000,
-	SV_CONVERTED_TO_R1O = 0x2000,
-};
-
-struct __declspec(align(8)) ScriptVariant_t
-{
-	union
-	{
-		int             m_int;
-		float           m_float;
-		const char* m_pszString;
-		const float* m_pVector;
-		char            m_char;
-		bool            m_bool;
-		void* m_hScript;
-	};
-
-	int16               m_type;
-	int16               m_flags;
-};
-
-typedef enum {
-	R1_TO_R1O,
-	R1O_TO_R1
-} ConversionDirection;
 
 void ConvertScriptVariant(ScriptVariant_t* variant, ConversionDirection direction) {
 	// Check if attempting to convert in the opposite direction of a previous conversion

@@ -323,3 +323,34 @@ void CSquirrelVM__PrintFunc3(void* m_hVM, const char* s, ...);
 void script_cmd(const CCommand& args);
 void script_client_cmd(const CCommand& args);
 void script_ui_cmd(const CCommand& args);
+
+enum SVFlags_t
+{
+	SV_FREE = 0x01,
+	SV_IHAVENOFUCKINGCLUE = 0x02,
+	// Start from the most significant bit for the new flags
+	SV_CONVERTED_TO_R1 = 0x1000,
+	SV_CONVERTED_TO_R1O = 0x2000,
+};
+
+struct __declspec(align(8)) ScriptVariant_t
+{
+	union
+	{
+		int             m_int;
+		float           m_float;
+		const char* m_pszString;
+		const float* m_pVector;
+		char            m_char;
+		bool            m_bool;
+		void* m_hScript;
+	};
+
+	int16               m_type;
+	int16               m_flags;
+};
+
+typedef enum {
+	R1_TO_R1O,
+	R1O_TO_R1
+} ConversionDirection;
