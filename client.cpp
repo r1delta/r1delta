@@ -20,6 +20,18 @@ void TextMsg(bf_read* msg)
 	}
 }
 
+void DoFOVPatches()
+{
+	void* ptr1 = (void*)((uintptr_t)GetModuleHandleA("engine.dll") + 0x31A1BE0 + 108);
+	*((float*)ptr1) = 3.85f;
+
+	void* ptr2 = (void*)((uintptr_t)GetModuleHandleA("client.dll") + 0x38774C0 + 108);
+	*((float*)ptr2) = 3.85f;
+
+	void* ptr3 = (void*)((uintptr_t)GetModuleHandleA("materialsystem_dx11.dll") + 0x3B9560 + 108);
+	*((float*)ptr3) = 3.85f;
+}
+
 void sub_18027F2C0(__int64 a1, const char* a2, __int64 a3)
 {
 	if (!strcmp(a2, "SayText"))
@@ -27,6 +39,8 @@ void sub_18027F2C0(__int64 a1, const char* a2, __int64 a3)
 		// raise fov to how bme does it
 		auto var = (ConVarR1*)(OriginalCCVar_FindVar2(cvarinterface, "cl_fovScale"));
 		var->m_fMaxVal = 2.5f;
+
+		DoFOVPatches();
 
 		sub_18027F2C0Original(a1, "TextMsg", (__int64)TextMsg);
 	}
