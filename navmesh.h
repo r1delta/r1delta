@@ -161,9 +161,6 @@ struct UnkNodeStruct0
 };
 #pragma pack(pop)
 
-int* pUnkStruct0Count;
-UnkNodeStruct0*** pppUnkNodeStruct0s;
-
 #pragma pack(push, 1)
 struct UnkLinkStruct1
 {

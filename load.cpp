@@ -572,7 +572,6 @@ void __fastcall CAI_NetworkManager__LoadNavMesh(__int64 a1, __int64 a2, const ch
 	((CAI_NetworkManager__BuildStubType)(((uintptr_t)(GetModuleHandleA("server.dll"))) + 0x3645f0))(a1);
 }
 
-
 typedef __int64 (*SendTable_CalcDeltaType)(
 	__int64 a1,
 	__int64 a2,

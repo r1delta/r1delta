@@ -67,6 +67,8 @@ CAI_NetworkManager__FixupHintsType CAI_NetworkManager__FixupHintsOriginal;
 
 int* pUnkLinkStruct1Count;
 UnkLinkStruct1*** pppUnkStruct1s;
+int* pUnkStruct0Count;
+UnkNodeStruct0*** pppUnkNodeStruct0s;
 
 CGlobalVarsServer2015** g_pGlobals;
 bool __fastcall sub_35FBB0(CAI_NodeLink* a1, char a2)
