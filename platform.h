@@ -1829,41 +1829,24 @@ inline uint64 Plat_Rdtsc()
 // Processor Information:
 struct CPUInformation
 {
-	int	 m_Size;		// Size of this structure, for forward compatability.
-
-	uint8 m_nLogicalProcessors;		// Number op logical processors.
-	uint8 m_nPhysicalProcessors;	// Number of physical processors
-
-	bool m_bRDTSC : 1,	// Is RDTSC supported?
-		m_bCMOV : 1,  // Is CMOV supported?
-		m_bFCMOV : 1,  // Is FCMOV supported?
-		m_bSSE : 1,	// Is SSE supported?
-		m_bSSE2 : 1,	// Is SSE2 Supported?
-		m_b3DNow : 1,	// Is 3DNow! Supported?
-		m_bMMX : 1,	// Is MMX supported?
-		m_bHT : 1;	// Is HyperThreading supported?
-
-
-	bool m_bSSE3 : 1,
-		m_bSSSE3 : 1,
-		m_bSSE4a : 1,
-		m_bSSE41 : 1,
-		m_bSSE42 : 1,
-		m_bAVX : 1;  // Is AVX supported?
-
-	int64 m_Speed;						// In cycles per second.
-
-	//tchar* m_szProcessorID;				// Processor vendor Identification.
-	//tchar* m_szProcessorBrand;			// Processor brand string, if available
-
-	uint32 m_nModel;
-	uint32 m_nFeatures[3];
-	uint32 m_nL1CacheSizeKb;
-	uint32 m_nL1CacheDesc;
-	uint32 m_nL2CacheSizeKb;
-	uint32 m_nL2CacheDesc;
-	uint32 m_nL3CacheSizeKb;
-	uint32 m_nL3CacheDesc;
+	int m_Size;
+	__int8 m_bRDTSC : 1;
+	__int8 m_bCMOV : 1;
+	__int8 m_bFCMOV : 1;
+	__int8 m_bSSE : 1;
+	__int8 m_bSSE2 : 1;
+	__int8 m_b3DNow : 1;
+	__int8 m_bMMX : 1;
+	__int8 m_bHT : 1;
+	unsigned __int8 m_nLogicalProcessors;
+	unsigned __int8 m_nPhysicalProcessors;
+	__int8 m_bSSE3 : 1;
+	__int8 m_bSSSE3 : 1;
+	__int8 m_bSSE4a : 1;
+	__int8 m_bSSE41 : 1;
+	__int8 m_bSSE42 : 1;
+	__int64 m_Speed;
+	char* m_szProcessorID;
 
 	CPUInformation() : m_Size(0) {}
 };

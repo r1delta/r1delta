@@ -34,6 +34,17 @@ void sub_18027F2C0(__int64 a1, const char* a2, __int64 a3)
 	sub_18027F2C0Original(a1, a2, a3);
 }
 
+decltype(&GetCPUInformation) GetCPUInformationOriginal;
+
+const CPUInformation& GetCPUInformationDet()
+{
+	CPUInformation result = GetCPUInformationOriginal();
+
+	if (result.m_nLogicalProcessors >= 16)
+		result.m_nLogicalProcessors = 15;
+
+	return GetCPUInformationOriginal();
+}
 
 void InitClient()
 {
@@ -45,6 +56,7 @@ void InitClient()
 	MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x102D50), &Cbuf_AddText, reinterpret_cast<LPVOID*>(&Cbuf_AddTextOriginal));
 	MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x4801B0), &ConVar_PrintDescription, reinterpret_cast<LPVOID*>(&ConVar_PrintDescriptionOriginal));
 	MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x4722E0), &sub_1804722E0, 0);
+	MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("tier0.dll"), "GetCPUInformation"), &GetCPUInformationDet, reinterpret_cast<LPVOID*>(&GetCPUInformationOriginal));
 
 	MH_EnableHook(MH_ALL_HOOKS);
 }
