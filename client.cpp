@@ -40,10 +40,13 @@ const CPUInformation& GetCPUInformationDet()
 {
 	CPUInformation result = GetCPUInformationOriginal();
 
-	if (result.m_nLogicalProcessors >= 16)
-		result.m_nLogicalProcessors = 15;
+	if (result.m_nLogicalProcessors >= 20)
+		result.m_nLogicalProcessors = 19;
 
-	return GetCPUInformationOriginal();
+	if (result.m_nPhysicalProcessors >= 16)
+		result.m_nPhysicalProcessors = 15;
+
+	return result;
 }
 
 void InitClient()
@@ -57,7 +60,7 @@ void InitClient()
 	MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x102D50), &Cbuf_AddText, reinterpret_cast<LPVOID*>(&Cbuf_AddTextOriginal));
 	MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x4801B0), &ConVar_PrintDescription, reinterpret_cast<LPVOID*>(&ConVar_PrintDescriptionOriginal));
 	MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x4722E0), &sub_1804722E0, 0);
-	MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("tier0.dll"), "GetCPUInformation"), &GetCPUInformationDet, reinterpret_cast<LPVOID*>(&GetCPUInformationOriginal));
+	//MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("tier0.dll"), "GetCPUInformation"), &GetCPUInformationDet, reinterpret_cast<LPVOID*>(&GetCPUInformationOriginal));
 
 	MH_EnableHook(MH_ALL_HOOKS);
 }
