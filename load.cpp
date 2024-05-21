@@ -948,9 +948,9 @@ void __stdcall LoaderNotificationCallback(
 		RegisterConCommand("toggleconsole", ToggleConsoleCommand, "Toggles the console", (1 << 17));
 
 
-		RegisterConCommand("script", script_cmd, "Execute Squirrel code in server context", FCVAR_GAMEDLL);
-		RegisterConCommand("script_client", script_client_cmd, "Execute Squirrel code in client context", FCVAR_NONE);
-		RegisterConCommand("script_ui", script_ui_cmd, "Execute Squirrel code in UI context", FCVAR_NONE);
+		RegisterConCommand("script", script_cmd, "Execute Squirrel code in server context", FCVAR_GAMEDLL|FCVAR_CHEAT);
+		RegisterConCommand("script_client", script_client_cmd, "Execute Squirrel code in client context", FCVAR_NONE|FCVAR_CHEAT);
+		RegisterConCommand("script_ui", script_ui_cmd, "Execute Squirrel code in UI context", FCVAR_NONE|FCVAR_CHEAT);
 
 
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x364140), &sub_364140, reinterpret_cast<LPVOID*>(NULL));
