@@ -95,7 +95,6 @@ If you decided to download the minimal .zip file instead of the full one, follow
 - [@r3muxd](https://github.com/r3muxd)
 - [@VITALISED](https://github.com/VITALISED)
 - [@mrsteyk](https://github.com/mrsteyk)
-- [@nephacks](https://github.com/nephacks)
 - [@PANCHO7532](https://github.com/PANCHO7532)
 
 (list to be expanded in the future as we speak)
