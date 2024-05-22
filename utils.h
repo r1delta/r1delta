@@ -35,8 +35,6 @@
 #pragma once
 
 #include "framework.h"
+#include <stdint.h>
 
-namespace R1Delta
-{
-
-}
+uintptr_t CreateFunction(void* func, void* real);

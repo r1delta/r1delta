@@ -75,7 +75,7 @@
     <OutDir>C:\Program Files\EA Games\Titanfall\bin\x64_retail</OutDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <OutDir>C:\Program Files (x86)\Origin Games\Titanfall\bin\x64_retail</OutDir>
+    <OutDir>C:\Program Files\EA Games\Titanfall\bin\x64_retail</OutDir>
     <IntDir>$(ProjectDir)$(Platform)\$(Configuration)\</IntDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
@@ -162,6 +162,7 @@
     <ClInclude Include="core.h" />
     <ClInclude Include="cvar.h" />
     <ClInclude Include="dedicated.h" />
+    <ClInclude Include="engine.h" />
     <ClInclude Include="factory.h" />
     <ClInclude Include="filesystem.h" />
     <ClInclude Include="framework.h" />
@@ -192,6 +193,7 @@
     <ClCompile Include="cvar.cpp" />
     <ClCompile Include="dedicated.cpp" />
     <ClCompile Include="dllmain.cpp" />
+    <ClCompile Include="engine.cpp" />
     <ClCompile Include="factory.cpp" />
     <ClCompile Include="filesystem.cpp" />
     <ClCompile Include="load.cpp" />

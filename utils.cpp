@@ -31,3 +31,31 @@
 // =====---------------------------------------------=++++******************************####%
 // ======------------------==------------------------==+++***************************######%%
 // =========-----===--------==------------------------==++********#*#####**#######*########%%
+
+#include "utils.h"
+
+uintptr_t CreateFunction(void* func, void* real) {
+	// allocate executable memory.
+	void* execMem = VirtualAlloc(NULL, 32, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+	if (!execMem) return 0;
+
+	uint8_t* bytes = static_cast<uint8_t*>(execMem);
+
+	// mov rcx, real
+	*bytes++ = 0x48;
+	*bytes++ = 0xB9;
+	*reinterpret_cast<uintptr_t*>(bytes) = (uintptr_t)real;
+	bytes += sizeof(uintptr_t);
+
+	// jmp func (RIP-relative indirect)
+	*bytes++ = 0xFF;
+	*bytes++ = 0x25;
+	*reinterpret_cast<int32_t*>(bytes) = 0; // offset = 0 (next instruction)
+	bytes += sizeof(int32_t);
+
+	*reinterpret_cast<uintptr_t*>(bytes) = (uintptr_t)func;
+	bytes += sizeof(uintptr_t);
+
+	// return the function pointer.
+	return reinterpret_cast<uintptr_t>(execMem);
+}
