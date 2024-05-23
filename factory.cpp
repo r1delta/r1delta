@@ -63,26 +63,7 @@ CServerGameDLL__DLLInitType CServerGameDLL__DLLInitOriginal;
 CreateInterfaceFn oAppSystemFactory;
 CreateInterfaceFn oFileSystemFactory;
 CreateInterfaceFn oPhysicsFactory;
-uintptr_t fsinterface;
-uintptr_t engineinterface;
 
-
-char CFileSystem_Stdio__NullSub3()
-{
-	return 0;
-}
-__int64 CFileSystem_Stdio__NullSub4()
-{
-	return 0i64;
-}
-__int64 CBaseFileSystem__GetTFOFileSystemThing()
-{
-	return 0;
-}
-__int64 __fastcall CFileSystem_Stdio__DoTFOFilesystemOp(__int64 a1, char* a2, rsize_t a3)
-{
-	return false;
-}
 void __fastcall CModelInfo__UnkTFOVoid(__int64 a1, int* a2, __int64 a3)
 {
 
@@ -130,53 +111,11 @@ __int64 CModelInfo__GetFlag()
 {
 	return (unsigned __int8)byte_1824D16C0;
 }
-void __fastcall CNetworkStringTableContainer__SetTickCount(__int64 a1, char a2)
+
+void CNetworkStringTableContainer__SetTickCount(__int64 a1, char a2)
 {
 	*(char*)(a1 + 8) = a2;
 }
-uintptr_t oCBaseFileSystem_Open;
-uintptr_t fsinterfaceoffset;
-
-__int64 IBaseFileSystem__Open(__int64 thisptr, const char* pFileName, const char* pOptions, const char* pathID) {
-	// Check if the path starts with "scripts/vscripts"
-	//std::string path = pFileName;
-	//if (path.rfind("scripts/vscripts", 0) == 0) {
-	//	// Replace "scripts/vscripts" with "scripts/vscripts/server"
-	//	path = "scripts/vscripts/server" + path.substr(16);
-	//}
-
-	//std::cout << "Server FS: " << path << std::endl;
-
-	return reinterpret_cast<__int64(*)(__int64, const char*, const char*, const char*)>(oCBaseFileSystem_Open)(fsinterfaceoffset, pFileName, pOptions, pathID);
-}
-
-uintptr_t osub_180009C20;
-uintptr_t oCBaseFileSystem_ReadFile;
-bool IBaseFileSystem__ReadFile(__int64 thisptr, const char* pFileName, const char* pPath, void* buf, __int64 nMaxBytes, __int64 nStartingByte, void* pfnAlloc = NULL) {
-	// Check if the path starts with "scripts/vscripts"
-	///std::string path = pFileName;
-	//if (path.rfind("scripts/vscripts", 0) == 0) {
-	//	// Replace "scripts/vscripts" with "scripts/vscripts/server"
-	//	path = "scripts/vscripts/server" + path.substr(16);
-	//}
-
-	//std::cout << "Server FS: " << path << std::endl;
-	return reinterpret_cast<bool(*)(__int64, const char*, const char*, void*, __int64, __int64, void*)>(oCBaseFileSystem_ReadFile)(fsinterfaceoffset, pPath, pPath, buf, nMaxBytes, nStartingByte, pfnAlloc);
-}
-
-char sub_180009C20(__int64 a1, char* a2, __int64 a3) {
-	// Check if the path starts with "scripts/vscripts"
-	//std::string path = a2;
-	//if (path.rfind("scripts/vscripts", 0) == 0) {
-	//	// Replace "scripts/vscripts" with "scripts/vscripts/server"
-	//	path = "scripts/vscripts/server" + path.substr(16);
-	//}
-
-	//std::cout << "Server FS: " << path << std::endl;
-	return reinterpret_cast<char(*)(__int64, char*, __int64)>(osub_180009C20)(fsinterface, a2, a3);
-}
-
-
 
 uintptr_t modelinterface;
 uintptr_t stringtableinterface;
@@ -187,12 +126,13 @@ static CreateInterfaceFn R1OCreateInterface;
 
 void* R1OFactory(const char* pName, int* pReturnCode) {
 	std::cout << "looking for " << pName << std::endl;
+
 	if (!strcmp(pName, "VEngineServer022")) {
 		std::cout << "wrapping VEngineServer022" << std::endl;
 
 		uintptr_t* r1vtable = *(uintptr_t**)oAppSystemFactory(pName, pReturnCode);
 		g_CVEngineServerInterface = (uintptr_t)oFileSystemFactory(pName, pReturnCode);
-		g_CVEngineServer = CVEngineServer(r1vtable);
+		g_CVEngineServer = new CVEngineServer(r1vtable);
 
 		static void* whatever2 = &g_r1oCVEngineServerInterface;
 		return &whatever2;
@@ -201,393 +141,14 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 		std::cout << "wrapping VFileSystem017" << std::endl;
 
 		uintptr_t* r1vtable = *(uintptr_t**)oFileSystemFactory(pName, pReturnCode);
-		fsinterface = (uintptr_t)oFileSystemFactory(pName, pReturnCode);
-		uintptr_t oCBaseFileSystem__Connect = r1vtable[0];
-		uintptr_t oCBaseFileSystem__Disconnect = r1vtable[1];
-		uintptr_t oCFileSystem_Stdio__QueryInterface = r1vtable[2];
-		uintptr_t oCBaseFileSystem__Init = r1vtable[3];
-		uintptr_t oCBaseFileSystem__Shutdown = r1vtable[4];
-		uintptr_t oCBaseFileSystem__GetDependencies = r1vtable[5];
-		uintptr_t oCBaseFileSystem__GetTier = r1vtable[6];
-		uintptr_t oCBaseFileSystem__Reconnect = r1vtable[7];
-		uintptr_t osub_180023F80 = r1vtable[8];
-		uintptr_t osub_180023F90 = r1vtable[9];
-		uintptr_t oCFileSystem_Stdio__AddSearchPath = r1vtable[10];
-		uintptr_t oCBaseFileSystem__RemoveSearchPath = r1vtable[11];
-		uintptr_t oCBaseFileSystem__RemoveAllSearchPaths = r1vtable[12];
-		uintptr_t oCBaseFileSystem__RemoveSearchPaths = r1vtable[13];
-		uintptr_t oCBaseFileSystem__MarkPathIDByRequestOnly = r1vtable[14];
-		uintptr_t oCBaseFileSystem__RelativePathToFullPath = r1vtable[15];
-		uintptr_t oCBaseFileSystem__GetSearchPath = r1vtable[16];
-		uintptr_t oCBaseFileSystem__AddPackFile = r1vtable[17];
-		uintptr_t oCBaseFileSystem__RemoveFile = r1vtable[18];
-		uintptr_t oCBaseFileSystem__RenameFile = r1vtable[19];
-		uintptr_t oCBaseFileSystem__CreateDirHierarchy = r1vtable[20];
-		uintptr_t oCBaseFileSystem__IsDirectory = r1vtable[21];
-		uintptr_t oCBaseFileSystem__FileTimeToString = r1vtable[22];
-		uintptr_t oCFileSystem_Stdio__SetBufferSize = r1vtable[23];
-		uintptr_t oCFileSystem_Stdio__IsOK = r1vtable[24];
-		uintptr_t oCFileSystem_Stdio__EndOfLine = r1vtable[25];
-		uintptr_t oCFileSystem_Stdio__ReadLine = r1vtable[26];
-		uintptr_t oCBaseFileSystem__FPrintf = r1vtable[27];
-		uintptr_t oCBaseFileSystem__LoadModule = r1vtable[28];
-		uintptr_t oCBaseFileSystem__UnloadModule = r1vtable[29];
-		uintptr_t oCBaseFileSystem__FindFirst = r1vtable[30];
-		uintptr_t oCBaseFileSystem__FindNext = r1vtable[31];
-		uintptr_t oCBaseFileSystem__FindIsDirectory = r1vtable[32];
-		uintptr_t oCBaseFileSystem__FindClose = r1vtable[33];
-		uintptr_t oCBaseFileSystem__FindFirstEx = r1vtable[34];
-		uintptr_t oCBaseFileSystem__FindFileAbsoluteList = r1vtable[35];
-		uintptr_t oCBaseFileSystem__GetLocalPath = r1vtable[36];
-		uintptr_t oCBaseFileSystem__FullPathToRelativePath = r1vtable[37];
-		uintptr_t oCBaseFileSystem__GetCurrentDirectory = r1vtable[38];
-		uintptr_t oCBaseFileSystem__FindOrAddFileName = r1vtable[39];
-		uintptr_t oCBaseFileSystem__String = r1vtable[40];
-		uintptr_t oCBaseFileSystem__AsyncReadMultiple = r1vtable[41];
-		uintptr_t oCBaseFileSystem__AsyncAppend = r1vtable[42];
-		uintptr_t oCBaseFileSystem__AsyncAppendFile = r1vtable[43];
-		uintptr_t oCBaseFileSystem__AsyncFinishAll = r1vtable[44];
-		uintptr_t oCBaseFileSystem__AsyncFinishAllWrites = r1vtable[45];
-		uintptr_t oCBaseFileSystem__AsyncFlush = r1vtable[46];
-		uintptr_t oCBaseFileSystem__AsyncSuspend = r1vtable[47];
-		uintptr_t oCBaseFileSystem__AsyncResume = r1vtable[48];
-		uintptr_t oCBaseFileSystem__AsyncBeginRead = r1vtable[49];
-		uintptr_t oCBaseFileSystem__AsyncEndRead = r1vtable[50];
-		uintptr_t oCBaseFileSystem__AsyncFinish = r1vtable[51];
-		uintptr_t oCBaseFileSystem__AsyncGetResult = r1vtable[52];
-		uintptr_t oCBaseFileSystem__AsyncAbort = r1vtable[53];
-		uintptr_t oCBaseFileSystem__AsyncStatus = r1vtable[54];
-		uintptr_t oCBaseFileSystem__AsyncSetPriority = r1vtable[55];
-		uintptr_t oCBaseFileSystem__AsyncAddRef = r1vtable[56];
-		uintptr_t oCBaseFileSystem__AsyncRelease = r1vtable[57];
-		uintptr_t osub_180024450 = r1vtable[58];
-		uintptr_t osub_180024460 = r1vtable[59];
-		uintptr_t onullsub_96 = r1vtable[60];
-		uintptr_t osub_180024490 = r1vtable[61];
-		uintptr_t osub_180024440 = r1vtable[62];
-		uintptr_t onullsub_97 = r1vtable[63];
-		uintptr_t osub_180009BE0 = r1vtable[64];
-		uintptr_t osub_18000F6A0 = r1vtable[65];
-		uintptr_t osub_180002CA0 = r1vtable[66];
-		uintptr_t osub_180002CB0 = r1vtable[67];
-		uintptr_t osub_1800154F0 = r1vtable[68];
-		uintptr_t osub_180015550 = r1vtable[69];
-		uintptr_t osub_180015420 = r1vtable[70];
-		uintptr_t osub_180015480 = r1vtable[71];
-		uintptr_t oCBaseFileSystem__RemoveLoggingFunc = r1vtable[72];
-		uintptr_t oCBaseFileSystem__GetFilesystemStatistics = r1vtable[73];
-		uintptr_t oCFileSystem_Stdio__OpenEx = r1vtable[74];
-		uintptr_t osub_18000A5D0 = r1vtable[75];
-		uintptr_t osub_1800052A0 = r1vtable[76];
-		uintptr_t osub_180002F10 = r1vtable[77];
-		uintptr_t osub_18000A690 = r1vtable[78];
-		uintptr_t osub_18000A6F0 = r1vtable[79];
-		uintptr_t osub_1800057A0 = r1vtable[80];
-		uintptr_t osub_180002960 = r1vtable[81];
-		uintptr_t osub_180020110 = r1vtable[82];
-		uintptr_t osub_180020230 = r1vtable[83];
-		uintptr_t osub_180023660 = r1vtable[84];
-		uintptr_t osub_1800204A0 = r1vtable[85];
-		uintptr_t osub_180002F40 = r1vtable[86];
-		uintptr_t osub_180004F00 = r1vtable[87];
-		uintptr_t osub_180024020 = r1vtable[88];
-		uintptr_t osub_180024AF0 = r1vtable[89];
-		uintptr_t osub_180024110 = r1vtable[90];
-		uintptr_t osub_180002580 = r1vtable[91];
-		uintptr_t osub_180002560 = r1vtable[92];
-		uintptr_t osub_18000A070 = r1vtable[93];
-		uintptr_t osub_180009E80 = r1vtable[94];
-		osub_180009C20 = r1vtable[95];
-		uintptr_t osub_1800022F0 = r1vtable[96];
-		uintptr_t osub_180002330 = r1vtable[97];
-		uintptr_t osub_180009CF0 = r1vtable[98];
-		uintptr_t osub_180002340 = r1vtable[99];
-		uintptr_t osub_180002320 = r1vtable[100];
-		uintptr_t osub_180009E00 = r1vtable[101];
-		uintptr_t osub_180009F20 = r1vtable[102];
-		uintptr_t osub_180009EA0 = r1vtable[103];
-		uintptr_t osub_180009E50 = r1vtable[104];
-		uintptr_t osub_180009FC0 = r1vtable[105];
-		uintptr_t osub_180004E80 = r1vtable[106];
-		uintptr_t osub_18000A000 = r1vtable[107];
-		uintptr_t osub_180014350 = r1vtable[108];
-		uintptr_t osub_18000F5B0 = r1vtable[109];
-		uintptr_t osub_180002590 = r1vtable[110];
-		uintptr_t osub_1800025D0 = r1vtable[111];
-		uintptr_t osub_1800025E0 = r1vtable[112];
-		uintptr_t oCFileSystem_Stdio__LoadVPKForMap = r1vtable[113];
-		uintptr_t oCFileSystem_Stdio__UnkFunc1 = r1vtable[114];
-		uintptr_t oCFileSystem_Stdio__WeirdFuncThatJustDerefsRDX = r1vtable[115];
-		uintptr_t oCFileSystem_Stdio__GetPathTime = r1vtable[116];
-		uintptr_t oCFileSystem_Stdio__GetFSConstructedFlag = r1vtable[117];
-		uintptr_t oCFileSystem_Stdio__EnableWhitelistFileTracking = r1vtable[118];
-		uintptr_t osub_18000A750 = r1vtable[119];
-		uintptr_t osub_180002B20 = r1vtable[120];
-		uintptr_t osub_18001DC30 = r1vtable[121];
-		uintptr_t osub_180002B30 = r1vtable[122];
-		uintptr_t osub_180002BA0 = r1vtable[123];
-		uintptr_t osub_180002BB0 = r1vtable[124];
-		uintptr_t osub_180002BC0 = r1vtable[125];
-		uintptr_t osub_180002290 = r1vtable[126];
-		uintptr_t osub_18001CCD0 = r1vtable[127];
-		uintptr_t osub_18001CCE0 = r1vtable[128];
-		uintptr_t osub_18001CCF0 = r1vtable[129];
-		uintptr_t osub_18001CD00 = r1vtable[130];
-		uintptr_t osub_180014520 = r1vtable[131];
-		uintptr_t osub_180002650 = r1vtable[132];
-		uintptr_t osub_18001CD10 = r1vtable[133];
-		uintptr_t osub_180016250 = r1vtable[134];
-		uintptr_t osub_18000F0D0 = r1vtable[135];
-		uintptr_t osub_1800139F0 = r1vtable[136];
-		uintptr_t osub_180016570 = r1vtable[137];
-		uintptr_t onullsub_86 = r1vtable[138];
-		uintptr_t osub_18000AEC0 = r1vtable[139];
-		uintptr_t osub_180003320 = r1vtable[140];
-		uintptr_t osub_18000AF50 = r1vtable[141];
-		uintptr_t osub_18000AF60 = r1vtable[142];
-		uintptr_t osub_180005D00 = r1vtable[143];
-		uintptr_t osub_18000AF70 = r1vtable[144];
-		uintptr_t osub_18001B130 = r1vtable[145];
-		uintptr_t osub_18000AF80 = r1vtable[146];
-		uintptr_t osub_1800034D0 = r1vtable[147];
-		uintptr_t osub_180017180 = r1vtable[148];
-		uintptr_t osub_180003550 = r1vtable[149];
-		uintptr_t osub_1800250D0 = r1vtable[150];
-		uintptr_t osub_1800241B0 = r1vtable[151];
-		uintptr_t osub_1800241C0 = r1vtable[152];
-		uintptr_t osub_1800241F0 = r1vtable[153];
-		uintptr_t osub_180024240 = r1vtable[154];
-		uintptr_t osub_180024250 = r1vtable[155];
-		uintptr_t osub_180024260 = r1vtable[156];
-		uintptr_t osub_180024300 = r1vtable[157];
-		uintptr_t osub_180024310 = r1vtable[158];
-		uintptr_t osub_180024320 = r1vtable[159];
-		uintptr_t osub_180024340 = r1vtable[160];
-		uintptr_t osub_180024350 = r1vtable[161];
-		uintptr_t osub_180024360 = r1vtable[162];
-		uintptr_t osub_180024390 = r1vtable[163];
-		uintptr_t osub_180024370 = r1vtable[164];
-		uintptr_t osub_1800243C0 = r1vtable[165];
-		uintptr_t osub_1800243F0 = r1vtable[166];
-		uintptr_t osub_180024410 = r1vtable[167];
-		uintptr_t osub_180024430 = r1vtable[168];
+		g_CVFileSystemInterface = (uintptr_t)oFileSystemFactory(pName, pReturnCode);
 
-		static uintptr_t r1ovtable[] = {
-			CreateFunction((void*)oCBaseFileSystem__Connect, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__Disconnect, (void*)fsinterface),
-			CreateFunction((void*)oCFileSystem_Stdio__QueryInterface, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__Init, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__Shutdown, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__GetDependencies, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__GetTier, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__Reconnect, (void*)fsinterface),
-			CreateFunction((void*)CFileSystem_Stdio__NullSub3, (void*)fsinterface),
-			CreateFunction((void*)CBaseFileSystem__GetTFOFileSystemThing, (void*)fsinterface),
-			CreateFunction((void*)CFileSystem_Stdio__DoTFOFilesystemOp, (void*)fsinterface),
-			CreateFunction((void*)CFileSystem_Stdio__NullSub4, (void*)fsinterface),
-			CreateFunction((void*)oCFileSystem_Stdio__AddSearchPath, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__RemoveSearchPath, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__RemoveAllSearchPaths, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__RemoveSearchPaths, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__MarkPathIDByRequestOnly, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__RelativePathToFullPath, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__GetSearchPath, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__AddPackFile, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__RemoveFile, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__RenameFile, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__CreateDirHierarchy, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__IsDirectory, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__FileTimeToString, (void*)fsinterface),
-			CreateFunction((void*)oCFileSystem_Stdio__SetBufferSize, (void*)fsinterface),
-			CreateFunction((void*)oCFileSystem_Stdio__IsOK, (void*)fsinterface),
-			CreateFunction((void*)oCFileSystem_Stdio__EndOfLine, (void*)fsinterface),
-			CreateFunction((void*)oCFileSystem_Stdio__ReadLine, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__FPrintf, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__LoadModule, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__UnloadModule, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__FindFirst, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__FindNext, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__FindIsDirectory, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__FindClose, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__FindFirstEx, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__FindFileAbsoluteList, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__GetLocalPath, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__FullPathToRelativePath, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__GetCurrentDirectory, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__FindOrAddFileName, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__String, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__AsyncReadMultiple, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__AsyncAppend, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__AsyncAppendFile, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__AsyncFinishAll, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__AsyncFinishAllWrites, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__AsyncFlush, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__AsyncSuspend, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__AsyncResume, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__AsyncBeginRead, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__AsyncEndRead, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__AsyncFinish, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__AsyncGetResult, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__AsyncAbort, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__AsyncStatus, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__AsyncSetPriority, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__AsyncAddRef, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__AsyncRelease, (void*)fsinterface),
-			CreateFunction((void*)osub_180024450, (void*)fsinterface),
-			CreateFunction((void*)osub_180024460, (void*)fsinterface),
-			CreateFunction((void*)onullsub_96, (void*)fsinterface),
-			CreateFunction((void*)osub_180024490, (void*)fsinterface),
-			CreateFunction((void*)osub_180024440, (void*)fsinterface),
-			CreateFunction((void*)onullsub_97, (void*)fsinterface),
-			CreateFunction((void*)osub_180009BE0, (void*)fsinterface),
-			CreateFunction((void*)osub_18000F6A0, (void*)fsinterface),
-			CreateFunction((void*)osub_180002CA0, (void*)fsinterface),
-			CreateFunction((void*)osub_180002CB0, (void*)fsinterface),
-			CreateFunction((void*)osub_1800154F0, (void*)fsinterface),
-			CreateFunction((void*)osub_180015550, (void*)fsinterface),
-			CreateFunction((void*)osub_180015420, (void*)fsinterface),
-			CreateFunction((void*)osub_180015480, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__RemoveLoggingFunc, (void*)fsinterface),
-			CreateFunction((void*)oCBaseFileSystem__GetFilesystemStatistics, (void*)fsinterface),
-			CreateFunction((void*)oCFileSystem_Stdio__OpenEx, (void*)fsinterface),
-			CreateFunction((void*)osub_18000A5D0, (void*)fsinterface),
-			CreateFunction((void*)osub_1800052A0, (void*)fsinterface),
-			CreateFunction((void*)osub_180002F10, (void*)fsinterface),
-			CreateFunction((void*)osub_18000A690, (void*)fsinterface),
-			CreateFunction((void*)osub_18000A6F0, (void*)fsinterface),
-			CreateFunction((void*)osub_1800057A0, (void*)fsinterface),
-			CreateFunction((void*)osub_180002960, (void*)fsinterface),
-			CreateFunction((void*)osub_180020110, (void*)fsinterface),
-			CreateFunction((void*)osub_180020230, (void*)fsinterface),
-			CreateFunction((void*)osub_180023660, (void*)fsinterface),
-			CreateFunction((void*)osub_1800204A0, (void*)fsinterface),
-			CreateFunction((void*)osub_180002F40, (void*)fsinterface),
-			CreateFunction((void*)osub_180004F00, (void*)fsinterface),
-			CreateFunction((void*)osub_180024020, (void*)fsinterface),
-			CreateFunction((void*)osub_180024AF0, (void*)fsinterface),
-			CreateFunction((void*)osub_180024110, (void*)fsinterface),
-			CreateFunction((void*)osub_180002580, (void*)fsinterface),
-			CreateFunction((void*)osub_180002560, (void*)fsinterface),
-			CreateFunction((void*)osub_18000A070, (void*)fsinterface),
-			CreateFunction((void*)CFileSystem_Stdio__NullSub4, (void*)fsinterface),
-			CreateFunction((void*)sub_180009C20, (void*)fsinterface),
-			CreateFunction((void*)osub_1800022F0, (void*)fsinterface),
-			CreateFunction((void*)osub_180002330, (void*)fsinterface),
-			CreateFunction((void*)osub_180009CF0, (void*)fsinterface),
-			CreateFunction((void*)osub_180002340, (void*)fsinterface),
-			CreateFunction((void*)osub_180002320, (void*)fsinterface),
-			CreateFunction((void*)osub_180009E00, (void*)fsinterface),
-			CreateFunction((void*)osub_180009F20, (void*)fsinterface),
-			CreateFunction((void*)osub_180009EA0, (void*)fsinterface),
-			CreateFunction((void*)osub_180009E50, (void*)fsinterface),
-			CreateFunction((void*)osub_180009FC0, (void*)fsinterface),
-			CreateFunction((void*)osub_180004E80, (void*)fsinterface),
-			CreateFunction((void*)osub_18000A000, (void*)fsinterface),
-			CreateFunction((void*)osub_180014350, (void*)fsinterface),
-			CreateFunction((void*)osub_18000F5B0, (void*)fsinterface),
-			CreateFunction((void*)osub_180002590, (void*)fsinterface),
-			CreateFunction((void*)osub_1800025D0, (void*)fsinterface),
-			CreateFunction((void*)osub_1800025E0, (void*)fsinterface),
-			CreateFunction((void*)oCFileSystem_Stdio__LoadVPKForMap, (void*)fsinterface),
-			CreateFunction((void*)oCFileSystem_Stdio__UnkFunc1, (void*)fsinterface),
-			CreateFunction((void*)oCFileSystem_Stdio__WeirdFuncThatJustDerefsRDX, (void*)fsinterface),
-			CreateFunction((void*)oCFileSystem_Stdio__GetPathTime, (void*)fsinterface),
-			CreateFunction((void*)oCFileSystem_Stdio__GetFSConstructedFlag, (void*)fsinterface),
-			CreateFunction((void*)oCFileSystem_Stdio__EnableWhitelistFileTracking, (void*)fsinterface),
-			CreateFunction((void*)osub_18000A750, (void*)fsinterface),
-			CreateFunction((void*)osub_180002B20, (void*)fsinterface),
-			CreateFunction((void*)osub_18001DC30, (void*)fsinterface),
-			CreateFunction((void*)osub_180002B30, (void*)fsinterface),
-			CreateFunction((void*)osub_180002BA0, (void*)fsinterface),
-			CreateFunction((void*)osub_180002BB0, (void*)fsinterface),
-			CreateFunction((void*)osub_180002BC0, (void*)fsinterface),
-			CreateFunction((void*)osub_180002290, (void*)fsinterface),
-			CreateFunction((void*)osub_18001CCD0, (void*)fsinterface),
-			CreateFunction((void*)osub_18001CCE0, (void*)fsinterface),
-			CreateFunction((void*)osub_18001CCF0, (void*)fsinterface),
-			CreateFunction((void*)osub_18001CD00, (void*)fsinterface),
-			CreateFunction((void*)osub_180014520, (void*)fsinterface),
-			CreateFunction((void*)osub_180002650, (void*)fsinterface),
-			CreateFunction((void*)osub_18001CD10, (void*)fsinterface),
-			CreateFunction((void*)osub_180016250, (void*)fsinterface),
-			CreateFunction((void*)osub_18000F0D0, (void*)fsinterface),
-			CreateFunction((void*)osub_1800139F0, (void*)fsinterface),
-			CreateFunction((void*)osub_180016570, (void*)fsinterface),
-			CreateFunction((void*)onullsub_86, (void*)fsinterface),
-			CreateFunction((void*)osub_18000AEC0, (void*)fsinterface),
-			CreateFunction((void*)osub_180003320, (void*)fsinterface),
-			CreateFunction((void*)osub_18000AF50, (void*)fsinterface),
-			CreateFunction((void*)osub_18000AF60, (void*)fsinterface),
-			CreateFunction((void*)osub_180005D00, (void*)fsinterface),
-			CreateFunction((void*)osub_18000AF70, (void*)fsinterface),
-			CreateFunction((void*)osub_18001B130, (void*)fsinterface),
-			CreateFunction((void*)osub_18000AF80, (void*)fsinterface),
-			CreateFunction((void*)osub_1800034D0, (void*)fsinterface),
-			CreateFunction((void*)osub_180017180, (void*)fsinterface),
-			CreateFunction((void*)osub_180003550, (void*)fsinterface),
-			CreateFunction((void*)osub_1800250D0, (void*)fsinterface),
-			CreateFunction((void*)osub_1800241B0, (void*)fsinterface),
-			CreateFunction((void*)osub_1800241C0, (void*)fsinterface),
-			CreateFunction((void*)osub_1800241F0, (void*)fsinterface),
-			CreateFunction((void*)osub_180024240, (void*)fsinterface),
-			CreateFunction((void*)osub_180024250, (void*)fsinterface),
-			CreateFunction((void*)osub_180024260, (void*)fsinterface),
-			CreateFunction((void*)osub_180024300, (void*)fsinterface),
-			CreateFunction((void*)osub_180024310, (void*)fsinterface),
-			CreateFunction((void*)osub_180024320, (void*)fsinterface),
-			CreateFunction((void*)osub_180024340, (void*)fsinterface),
-			CreateFunction((void*)osub_180024350, (void*)fsinterface),
-			CreateFunction((void*)osub_180024360, (void*)fsinterface),
-			CreateFunction((void*)osub_180024390, (void*)fsinterface),
-			CreateFunction((void*)osub_180024370, (void*)fsinterface),
-			CreateFunction((void*)osub_1800243C0, (void*)fsinterface),
-			CreateFunction((void*)osub_1800243F0, (void*)fsinterface),
-			CreateFunction((void*)osub_180024410, (void*)fsinterface),
-			CreateFunction((void*)osub_180024430, (void*)fsinterface),
-			CreateFunction((void*)CFileSystem_Stdio__NullSub4, r1vtable)
-		};
+		g_CVFileSystem = new CVFileSystem(r1vtable);
 
-		fsinterfaceoffset = fsinterface + 8;
-		uintptr_t* origsimplefsvtable = (*(uintptr_t**)fsinterfaceoffset);
+		g_CBaseFileSystemInterface = reinterpret_cast<IFileSystem*>(g_CVFileSystemInterface + 8);
 
+		g_CBaseFileSystem = new CBaseFileSystem((*(uintptr_t**)g_CVFileSystemInterface));
 
-		uintptr_t oCBaseFileSystem_Read = origsimplefsvtable[0];
-		uintptr_t oCBaseFileSystem_Write = origsimplefsvtable[1];
-		oCBaseFileSystem_Open = origsimplefsvtable[2];
-		uintptr_t oCBaseFileSystem_Close = origsimplefsvtable[3];
-		uintptr_t oCBaseFileSystem_Seek = origsimplefsvtable[4];
-		uintptr_t oCBaseFileSystem_Tell = origsimplefsvtable[5];
-		uintptr_t oCBaseFileSystem_Size = origsimplefsvtable[6];
-		uintptr_t oCBaseFileSystem_Size2 = origsimplefsvtable[7];
-		uintptr_t oCBaseFileSystem_Flush = origsimplefsvtable[8];
-		uintptr_t oCBaseFileSystem_Precache = origsimplefsvtable[9];
-		uintptr_t oCBaseFileSystem_FileExists = origsimplefsvtable[10];
-		uintptr_t oCBaseFileSystem_IsFileWritable = origsimplefsvtable[11];
-		uintptr_t oCBaseFileSystem_SetFileWritable = origsimplefsvtable[12];
-		uintptr_t oCBaseFileSystem_GetFileTime = origsimplefsvtable[13];
-		oCBaseFileSystem_ReadFile = origsimplefsvtable[14];
-		uintptr_t oCBaseFileSystem_WriteFile = origsimplefsvtable[15];
-		uintptr_t oCBaseFileSystem_UnzipFile = origsimplefsvtable[16];
-		static uintptr_t simplefsvtable[] = {
-			CreateFunction((void*)oCBaseFileSystem_Read, (void*)fsinterfaceoffset),
-			CreateFunction((void*)oCBaseFileSystem_Write, (void*)fsinterfaceoffset),
-			CreateFunction((void*)oCBaseFileSystem_Open, (void*)fsinterfaceoffset),
-			CreateFunction((void*)oCBaseFileSystem_Close, (void*)fsinterfaceoffset),
-			CreateFunction((void*)oCBaseFileSystem_Seek, (void*)fsinterfaceoffset),
-			CreateFunction((void*)oCBaseFileSystem_Tell, (void*)fsinterfaceoffset),
-			CreateFunction((void*)oCBaseFileSystem_Size, (void*)fsinterfaceoffset),
-			CreateFunction((void*)oCBaseFileSystem_Size2, (void*)fsinterfaceoffset),
-			CreateFunction((void*)oCBaseFileSystem_Flush, (void*)fsinterfaceoffset),
-			CreateFunction((void*)oCBaseFileSystem_Precache, (void*)fsinterfaceoffset),
-			CreateFunction((void*)oCBaseFileSystem_FileExists, (void*)fsinterfaceoffset),
-			CreateFunction((void*)oCBaseFileSystem_IsFileWritable, (void*)fsinterfaceoffset),
-			CreateFunction((void*)oCBaseFileSystem_SetFileWritable, (void*)fsinterfaceoffset),
-			CreateFunction((void*)oCBaseFileSystem_GetFileTime, (void*)fsinterfaceoffset),
-			CreateFunction((void*)oCBaseFileSystem_ReadFile, (void*)fsinterfaceoffset),
-			CreateFunction((void*)oCBaseFileSystem_WriteFile, (void*)fsinterfaceoffset),
-			CreateFunction((void*)oCBaseFileSystem_UnzipFile, (void*)fsinterfaceoffset)
-
-		};
 		struct fsptr {
 			void* ptr1;
 			void* ptr2;
@@ -595,8 +156,8 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 			void* ptr4;
 			void* ptr5;
 		};
-		static void* whatever3 = &r1ovtable;
-		static void* whatever4 = &simplefsvtable;
+		static void* whatever3 = &g_r1oCVFileSystemInterface;
+		static void* whatever4 = &g_r1oCBaseFileSystemInterface;
 		static fsptr a;
 
 		a.ptr1 = whatever3;

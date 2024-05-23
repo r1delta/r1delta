@@ -164,6 +164,7 @@
     <ClInclude Include="dedicated.h" />
     <ClInclude Include="engine.h" />
     <ClInclude Include="factory.h" />
+    <ClInclude Include="filecache.h" />
     <ClInclude Include="filesystem.h" />
     <ClInclude Include="framework.h" />
     <ClInclude Include="load.h" />
@@ -195,6 +196,7 @@
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="engine.cpp" />
     <ClCompile Include="factory.cpp" />
+    <ClCompile Include="filecache.cpp" />
     <ClCompile Include="filesystem.cpp" />
     <ClCompile Include="load.cpp" />
     <ClCompile Include="logging.cpp" />

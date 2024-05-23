@@ -35,6 +35,7 @@
 #pragma once
  
 #include "utils.h"
+#include "filecache.h"
 
 #include <iostream>
 #include <string>
@@ -42,8 +43,17 @@
 #include <filesystem>
 #include <unordered_set>
 
-struct VPKData;
+class CVFileSystem;
+class CBaseFileSystem;
 struct IFileSystem;
+extern CVFileSystem* g_CVFileSystem;
+extern CBaseFileSystem* g_CBaseFileSystem;
+extern uintptr_t g_CVFileSystemInterface;
+extern IFileSystem* g_CBaseFileSystemInterface;
+extern uintptr_t g_r1oCVFileSystemInterface[173];
+extern uintptr_t g_r1oCBaseFileSystemInterface[17];
+
+struct VPKData;
 typedef void* FileHandle_t;
 // hook forward declares
 typedef FileHandle_t(*ReadFileFromVPKType)(VPKData* vpkInfo, __int64* b, char* filename);
@@ -76,29 +86,206 @@ extern CZipPackFile__PrepareType CZipPackFile__PrepareOriginal;
 char CZipPackFile__Prepare(__int64* a1, unsigned __int64 a2, __int64 a3);
 int fs_sprintf_hook(char* Buffer, const char* Format, ...);
 
-class FileCache {
-private:
-    std::unordered_set<std::size_t> cache;
-    std::unordered_set<std::string> addonsFolderCache;
-    std::mutex cacheMutex;
-    std::atomic<bool> initialized{ false };
-    std::atomic<bool> manualRescanRequested{ false };
-    std::condition_variable cacheCondition;
-
+class CBaseFileSystem
+{
 public:
-    bool FileExists(const std::string& filePath);
-    bool TryReplaceFile(const char* pszFilePath);
-    void UpdateCache();
+	CBaseFileSystem() = default;
+	CBaseFileSystem(uintptr_t* r1vtable);
+	void CreateR1OVTable(uintptr_t* r1vtable);
 
-    void RequestManualRescan() {
-        manualRescanRequested.store(true);
-        cacheCondition.notify_all();
-    }
+	uintptr_t Read;
+	uintptr_t Write;
+	uintptr_t Open; // note
+	uintptr_t Close;
+	uintptr_t Seek;
+	uintptr_t Tell;
+	uintptr_t Size;
+	uintptr_t Size2;
+	uintptr_t Flush;
+	uintptr_t Precache;
+	uintptr_t FileExists;
+	uintptr_t IsFileWritable;
+	uintptr_t SetFileWritable;
+	uintptr_t GetFileTime;
+	uintptr_t ReadFile; // note
+	uintptr_t WriteFile;
+	uintptr_t UnzipFile;
+};
 
-private:
-    std::size_t HashFilePath(const std::string& filePath) {
-        return std::hash<std::string>{}(filePath);
-    }
+class CVFileSystem
+{
+public:
+	CVFileSystem() = default;
+	CVFileSystem(uintptr_t* r1vtable);
+	void CreateR1OVTable(uintptr_t* r1vtable);
 
-    void ScanDirectory(const std::filesystem::path& directory, std::unordered_set<std::size_t>& cache, std::unordered_set<std::string>* addonsFolderCache = nullptr);
+	uintptr_t Connect;
+	uintptr_t Disconnect;
+	uintptr_t QueryInterface;
+	uintptr_t Init;
+	uintptr_t Shutdown;
+	uintptr_t GetDependencies;
+	uintptr_t GetTier;
+	uintptr_t Reconnect;
+	uintptr_t sub_180023F80;
+	uintptr_t sub_180023F90;
+	uintptr_t AddSearchPath;
+	uintptr_t RemoveSearchPath;
+	uintptr_t RemoveAllSearchPaths;
+	uintptr_t RemoveSearchPaths;
+	uintptr_t MarkPathIDByRequestOnly;
+	uintptr_t RelativePathToFullPath;
+	uintptr_t GetSearchPath;
+	uintptr_t AddPackFile;
+	uintptr_t RemoveFile;
+	uintptr_t RenameFile;
+	uintptr_t CreateDirHierarchy;
+	uintptr_t IsDirectory;
+	uintptr_t FileTimeToString;
+	uintptr_t SetBufferSize;
+	uintptr_t IsOK;
+	uintptr_t EndOfLine;
+	uintptr_t ReadLine;
+	uintptr_t FPrintf;
+	uintptr_t LoadModule;
+	uintptr_t UnloadModule;
+	uintptr_t FindFirst;
+	uintptr_t FindNext;
+	uintptr_t FindIsDirectory;
+	uintptr_t FindClose;
+	uintptr_t FindFirstEx;
+	uintptr_t FindFileAbsoluteList;
+	uintptr_t GetLocalPath;
+	uintptr_t FullPathToRelativePath;
+	uintptr_t GetCurrentDirectory_;
+	uintptr_t FindOrAddFileName;
+	uintptr_t String;
+	uintptr_t AsyncReadMultiple;
+	uintptr_t AsyncAppend;
+	uintptr_t AsyncAppendFile;
+	uintptr_t AsyncFinishAll;
+	uintptr_t AsyncFinishAllWrites;
+	uintptr_t AsyncFlush;
+	uintptr_t AsyncSuspend;
+	uintptr_t AsyncResume;
+	uintptr_t AsyncBeginRead;
+	uintptr_t AsyncEndRead;
+	uintptr_t AsyncFinish;
+	uintptr_t AsyncGetResult;
+	uintptr_t AsyncAbort;
+	uintptr_t AsyncStatus;
+	uintptr_t AsyncSetPriority;
+	uintptr_t AsyncAddRef;
+	uintptr_t AsyncRelease;
+	uintptr_t sub_180024450;
+	uintptr_t sub_180024460;
+	uintptr_t nullsub_96;
+	uintptr_t sub_180024490;
+	uintptr_t sub_180024440;
+	uintptr_t nullsub_97;
+	uintptr_t sub_180009BE0;
+	uintptr_t sub_18000F6A0;
+	uintptr_t sub_180002CA0;
+	uintptr_t sub_180002CB0;
+	uintptr_t sub_1800154F0;
+	uintptr_t sub_180015550;
+	uintptr_t sub_180015420;
+	uintptr_t sub_180015480;
+	uintptr_t RemoveLoggingFunc;
+	uintptr_t GetFilesystemStatistics;
+	uintptr_t OpenEx;
+	uintptr_t sub_18000A5D0;
+	uintptr_t sub_1800052A0;
+	uintptr_t sub_180002F10;
+	uintptr_t sub_18000A690;
+	uintptr_t sub_18000A6F0;
+	uintptr_t sub_1800057A0;
+	uintptr_t sub_180002960;
+	uintptr_t sub_180020110;
+	uintptr_t sub_180020230;
+	uintptr_t sub_180023660;
+	uintptr_t sub_1800204A0;
+	uintptr_t sub_180002F40;
+	uintptr_t sub_180004F00;
+	uintptr_t sub_180024020;
+	uintptr_t sub_180024AF0;
+	uintptr_t sub_180024110;
+	uintptr_t sub_180002580;
+	uintptr_t sub_180002560;
+	uintptr_t sub_18000A070;
+	uintptr_t sub_180009E80;
+	uintptr_t sub_180009C20; // note
+	uintptr_t sub_1800022F0;
+	uintptr_t sub_180002330;
+	uintptr_t sub_180009CF0;
+	uintptr_t sub_180002340;
+	uintptr_t sub_180002320;
+	uintptr_t sub_180009E00;
+	uintptr_t sub_180009F20;
+	uintptr_t sub_180009EA0;
+	uintptr_t sub_180009E50;
+	uintptr_t sub_180009FC0;
+	uintptr_t sub_180004E80;
+	uintptr_t sub_18000A000;
+	uintptr_t sub_180014350;
+	uintptr_t sub_18000F5B0;
+	uintptr_t sub_180002590;
+	uintptr_t sub_1800025D0;
+	uintptr_t sub_1800025E0;
+	uintptr_t LoadVPKForMap;
+	uintptr_t UnkFunc1;
+	uintptr_t WeirdFuncThatJustDerefsRDX;
+	uintptr_t GetPathTime;
+	uintptr_t GetFSConstructedFlag;
+	uintptr_t EnableWhitelistFileTracking;
+	uintptr_t sub_18000A750;
+	uintptr_t sub_180002B20;
+	uintptr_t sub_18001DC30;
+	uintptr_t sub_180002B30;
+	uintptr_t sub_180002BA0;
+	uintptr_t sub_180002BB0;
+	uintptr_t sub_180002BC0;
+	uintptr_t sub_180002290;
+	uintptr_t sub_18001CCD0;
+	uintptr_t sub_18001CCE0;
+	uintptr_t sub_18001CCF0;
+	uintptr_t sub_18001CD00;
+	uintptr_t sub_180014520;
+	uintptr_t sub_180002650;
+	uintptr_t sub_18001CD10;
+	uintptr_t sub_180016250;
+	uintptr_t sub_18000F0D0;
+	uintptr_t sub_1800139F0;
+	uintptr_t sub_180016570;
+	uintptr_t nullsub_86;
+	uintptr_t sub_18000AEC0;
+	uintptr_t sub_180003320;
+	uintptr_t sub_18000AF50;
+	uintptr_t sub_18000AF60;
+	uintptr_t sub_180005D00;
+	uintptr_t sub_18000AF70;
+	uintptr_t sub_18001B130;
+	uintptr_t sub_18000AF80;
+	uintptr_t sub_1800034D0;
+	uintptr_t sub_180017180;
+	uintptr_t sub_180003550;
+	uintptr_t sub_1800250D0;
+	uintptr_t sub_1800241B0;
+	uintptr_t sub_1800241C0;
+	uintptr_t sub_1800241F0;
+	uintptr_t sub_180024240;
+	uintptr_t sub_180024250;
+	uintptr_t sub_180024260;
+	uintptr_t sub_180024300;
+	uintptr_t sub_180024310;
+	uintptr_t sub_180024320;
+	uintptr_t sub_180024340;
+	uintptr_t sub_180024350;
+	uintptr_t sub_180024360;
+	uintptr_t sub_180024390;
+	uintptr_t sub_180024370;
+	uintptr_t sub_1800243C0;
+	uintptr_t sub_1800243F0;
+	uintptr_t sub_180024410;
+	uintptr_t sub_180024430;
 };
