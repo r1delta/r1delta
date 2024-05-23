@@ -47,6 +47,16 @@ char* (*CVEngineServer__GetLocalNETGetPacket_TFO(
 	return NULLNET_GetPacket;
 }
 
+CVEngineServer::CVEngineServer(uintptr_t* r1vtable)
+{
+	if (::IsDedicatedServer())
+		__InitDedi(r1vtable);
+	else
+		__InitNormal(r1vtable);
+
+	CreateR1OVTable();
+}
+
 void CVEngineServer::CreateR1OVTable()
 {
 	g_r1oCVEngineServerInterface[0] = CreateFunction(((void*)CVEngineServer::NullSub1), (void*)g_CVEngineServerInterface);
@@ -253,14 +263,3 @@ void CVEngineServer::CreateR1OVTable()
 	g_r1oCVEngineServerInterface[201] = CreateFunction(((void*)CVEngineServer::UnkFunc82), (void*)g_CVEngineServerInterface);
 	g_r1oCVEngineServerInterface[202] = CreateFunction(((void*)CVEngineServer::UnkFunc81), (void*)g_CVEngineServerInterface);
 }
-
-CVEngineServer::CVEngineServer(uintptr_t* r1vtable)
-{
-	if (::IsDedicatedServer())
-		__InitDedi(r1vtable);
-	else
-		__InitNormal(r1vtable);
-
-	CreateR1OVTable();
-}
-

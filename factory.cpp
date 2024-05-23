@@ -55,6 +55,7 @@
 #include <set>
 #include <map>
 #include "engine.h"
+#include "model_info.h"
 #include "thirdparty/silver-bun/silver-bun.h"
 
 #pragma comment(lib, "Dbghelp.lib")
@@ -64,57 +65,19 @@ CreateInterfaceFn oAppSystemFactory;
 CreateInterfaceFn oFileSystemFactory;
 CreateInterfaceFn oPhysicsFactory;
 
-void __fastcall CModelInfo__UnkTFOVoid(__int64 a1, int* a2, __int64 a3)
-{
-
-}
-void __fastcall CModelInfo__UnkTFOVoid2(__int64 a1, __int64 a2)
-{
-}
-void __fastcall CModelInfo__UnkTFOVoid3(__int64 a1, __int64 a2, unsigned __int64 a3)
-{
-	return;
-}
-void __fastcall CCVar__SetSomeFlag_Corrupt(__int64 a1, __int64 a2)
-{
-	return;
-}
-__int64 __fastcall CCVar__GetSomeFlag(__int64 thisptr)
-{
-	return 0;
-}
-char __fastcall CModelInfo__UnkTFOShouldRet0_2(__int64 a1, __int64 a2)
-{
-	if (a2)
-		return *(char*)(a2 + 264) & 1;
-	else
-		return 0;
-}
-__int64 CModelInfo__ShouldRet0()
-{
-	return 0;
-}
-bool CModelInfo__ClientFullyConnected()
-{
-	return false;
-}
-bool byte_1824D16C0 = false;
-void CModelInfo__UnkSetFlag()
-{
-	byte_1824D16C0 = 1;
-}
-void CModelInfo__UnkClearFlag()
-{
-	byte_1824D16C0 = 0;
-}
-__int64 CModelInfo__GetFlag()
-{
-	return (unsigned __int8)byte_1824D16C0;
-}
-
 void CNetworkStringTableContainer__SetTickCount(__int64 a1, char a2)
 {
 	*(char*)(a1 + 8) = a2;
+}
+
+void CCVar__SetSomeFlag_Corrupt(int64_t a1, int64_t a2)
+{
+	return;
+}
+
+int64_t CCVar__GetSomeFlag(int64_t thisptr)
+{
+	return 0;
 }
 
 uintptr_t modelinterface;
@@ -169,103 +132,12 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 	}
 	if (!strcmp(pName, "VModelInfoServer002")) {
 		std::cout << "wrapping VModelInfoServer002" << std::endl;
-		modelinterface = (uintptr_t)oAppSystemFactory(pName, pReturnCode);
-
+		g_CVModelInfoServerInterface = (uintptr_t)oAppSystemFactory(pName, pReturnCode);
 		uintptr_t* r1vtable = *(uintptr_t**)oAppSystemFactory(pName, pReturnCode);
-		uintptr_t oCModelInfo_dtor_0 = r1vtable[0];
-		uintptr_t oCModelInfoServer__GetModel = r1vtable[1];
-		uintptr_t oCModelInfoServer__GetModelIndex = r1vtable[2];
-		uintptr_t oCModelInfo__GetModelName = r1vtable[3];
-		uintptr_t oCModelInfo__GetVCollide = r1vtable[4];
-		uintptr_t oCModelInfo__GetVCollideEx = r1vtable[5];
-		uintptr_t oCModelInfo__GetVCollideEx2 = r1vtable[6];
-		uintptr_t oCModelInfo__GetModelRenderBounds = r1vtable[7];
-		uintptr_t oCModelInfo__GetModelFrameCount = r1vtable[8];
-		uintptr_t oCModelInfo__GetModelType = r1vtable[9];
-		uintptr_t oCModelInfo__GetModelExtraData = r1vtable[10];
-		uintptr_t oCModelInfo__IsTranslucentTwoPass = r1vtable[11];
-		uintptr_t oCModelInfo__ModelHasMaterialProxy = r1vtable[12];
-		uintptr_t oCModelInfo__IsTranslucent = r1vtable[13];
-		uintptr_t oCModelInfo__NullSub1 = r1vtable[14];
-		uintptr_t oCModelInfo__UnkFunc1 = r1vtable[15];
-		uintptr_t oCModelInfo__UnkFunc2 = r1vtable[16];
-		uintptr_t oCModelInfo__UnkFunc3 = r1vtable[17];
-		uintptr_t oCModelInfo__UnkFunc4 = r1vtable[18];
-		uintptr_t oCModelInfo__UnkFunc5 = r1vtable[19];
-		uintptr_t oCModelInfo__UnkFunc6 = r1vtable[20];
-		uintptr_t oCModelInfo__UnkFunc7 = r1vtable[21];
-		uintptr_t oCModelInfo__UnkFunc8 = r1vtable[22];
-		uintptr_t oCModelInfo__UnkFunc9 = r1vtable[23];
-		uintptr_t oCModelInfo__UnkFunc10 = r1vtable[24];
-		uintptr_t oCModelInfo__UnkFunc11 = r1vtable[25];
-		uintptr_t oCModelInfo__UnkFunc12 = r1vtable[26];
-		uintptr_t oCModelInfo__UnkFunc13 = r1vtable[27];
-		uintptr_t oCModelInfo__UnkFunc14 = r1vtable[28];
-		uintptr_t oCModelInfo__UnkFunc15 = r1vtable[29];
-		uintptr_t oCModelInfo__UnkFunc16 = r1vtable[30];
-		uintptr_t oCModelInfo__UnkFunc17 = r1vtable[31];
-		uintptr_t oCModelInfo__UnkFunc18 = r1vtable[32];
-		uintptr_t oCModelInfo__UnkFunc19 = r1vtable[33];
-		uintptr_t oCModelInfo__UnkFunc20 = r1vtable[34];
-		uintptr_t oCModelInfo__UnkFunc21 = r1vtable[35];
-		uintptr_t oCModelInfo__UnkFunc22 = r1vtable[36];
-		uintptr_t oCModelInfo__UnkFunc23 = r1vtable[37];
-		uintptr_t oCModelInfo__NullSub2 = r1vtable[38];
-		uintptr_t oCModelInfo__UnkFunc24 = r1vtable[39];
-		uintptr_t oCModelInfo__UnkFunc25 = r1vtable[40];
-		static uintptr_t r1ovtable[] = {
-			CreateFunction((void*)oCModelInfo_dtor_0, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfoServer__GetModel, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfoServer__GetModelIndex, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__GetModelName, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__GetVCollide, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__GetVCollideEx, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__GetVCollideEx2, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__GetModelRenderBounds, (void*)modelinterface),
-			CreateFunction(CModelInfo__UnkSetFlag, (void*)modelinterface),
-			CreateFunction(CModelInfo__UnkClearFlag, (void*)modelinterface),
-			CreateFunction(CModelInfo__GetFlag, (void*)modelinterface),
-			CreateFunction(CModelInfo__UnkTFOVoid, (void*)modelinterface),
-			CreateFunction(CModelInfo__UnkTFOVoid2, (void*)modelinterface),
-			CreateFunction(CModelInfo__ShouldRet0, (void*)modelinterface),
-			CreateFunction(CModelInfo__UnkTFOVoid3, (void*)modelinterface),
-			CreateFunction(CModelInfo__ClientFullyConnected, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__GetModelFrameCount, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__GetModelType, (void*)modelinterface),
-			CreateFunction(CModelInfo__UnkTFOShouldRet0_2, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__GetModelExtraData, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__IsTranslucentTwoPass, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__ModelHasMaterialProxy, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__IsTranslucent, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__NullSub1, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__UnkFunc1, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__UnkFunc2, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__UnkFunc3, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__UnkFunc4, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__UnkFunc5, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__UnkFunc6, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__UnkFunc7, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__UnkFunc8, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__UnkFunc9, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__UnkFunc10, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__UnkFunc11, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__UnkFunc12, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__UnkFunc13, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__UnkFunc14, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__UnkFunc15, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__UnkFunc16, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__UnkFunc17, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__UnkFunc18, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__UnkFunc19, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__UnkFunc20, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__UnkFunc21, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__UnkFunc22, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__UnkFunc23, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__NullSub2, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__UnkFunc24, (void*)modelinterface),
-			CreateFunction((void*)oCModelInfo__UnkFunc25, (void*)modelinterface)
-		};
-		static void* whatever4 = &r1ovtable;
+
+		g_CVModelInfoServer = new CVModelInfoServer(r1vtable);
+
+		static void* whatever4 = &g_r1oCVModelInfoServerInterface;
 		return &whatever4;
 	}
 	if (!strcmp(pName, "VEngineServerStringTable001")) {

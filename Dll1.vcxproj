@@ -170,6 +170,7 @@
     <ClInclude Include="load.h" />
     <ClInclude Include="logging.h" />
     <ClInclude Include="memory.h" />
+    <ClInclude Include="model_info.h" />
     <ClInclude Include="navmesh.h" />
     <ClInclude Include="netadr.h" />
     <ClInclude Include="patcher.h" />
@@ -201,6 +202,7 @@
     <ClCompile Include="load.cpp" />
     <ClCompile Include="logging.cpp" />
     <ClCompile Include="memory.cpp" />
+    <ClCompile Include="model_info.cpp" />
     <ClCompile Include="navmesh.cpp" />
     <ClCompile Include="newbitbuf.cpp" />
     <ClCompile Include="patcher.cpp" />
