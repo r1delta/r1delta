@@ -128,8 +128,8 @@ void __fastcall CBaseFileSystem__CSearchPath__SetPath(void* thisptr, __int16* id
     static void* rettozipsearchpath = (void*)(uintptr_t(GetModuleHandleA("filesystem_stdio.dll")) + 0x017AFC);
     static auto CBaseFileSystem__FindOrAddPathIDInfo = reinterpret_cast<void* (*)(IFileSystem * fileSystem, __int16* id, int byRequestOnly)>(uintptr_t(GetModuleHandleA("filesystem_stdio.dll")) + 0x155C0);
     if (_ReturnAddress() == rettozipsearchpath) {
-        *(__int64*)(uintptr_t(thisptr)+8) = __int64(CBaseFileSystem__FindOrAddPathIDInfo(g_CVFileSystemInterface, id, -1));
-        //*(__int64*)(uintptr_t(thisptr) + 32) = 0x13371337;
+		*(__int64*)(uintptr_t(thisptr) + 8) = __int64(CBaseFileSystem__FindOrAddPathIDInfo((IFileSystem*)g_CVFileSystemInterface, id, -1));
+		//*(__int64*)(uintptr_t(thisptr) + 32) = 0x13371337;
     }
 }
 int fs_sprintf_hook(char* Buffer, const char* Format, ...) {
@@ -572,6 +572,8 @@ CBaseFileSystem::CBaseFileSystem(uintptr_t* r1vtable)
 	ReadFile = r1vtable[14];
 	WriteFile = r1vtable[15];
 	UnzipFile = r1vtable[16];
+
+	CreateR1OVTable(r1vtable);
 }
 
 void CBaseFileSystem::CreateR1OVTable(uintptr_t* r1vtable)

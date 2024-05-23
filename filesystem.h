@@ -49,9 +49,9 @@ struct IFileSystem;
 extern CVFileSystem* g_CVFileSystem;
 extern CBaseFileSystem* g_CBaseFileSystem;
 extern uintptr_t g_CVFileSystemInterface;
-extern IFileSystem* g_CBaseFileSystemInterface;
 extern uintptr_t g_r1oCVFileSystemInterface[173];
 extern uintptr_t g_r1oCBaseFileSystemInterface[17];
+extern IFileSystem* g_CBaseFileSystemInterface;
 
 struct VPKData;
 typedef void* FileHandle_t;

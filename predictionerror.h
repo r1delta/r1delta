@@ -3,6 +3,7 @@
 #include "core.h"
 #include "platform.h"
 #include <iostream>
+#include "logging.h"
 
 struct typedescription_t;
 

@@ -59,6 +59,6 @@ const char* PredictionErrorFn(__int64 thisptr, const datamap_t* pCurrentMap, con
 		} while (v6 < *(DWORD*)(thisptr + 80));
 	}
 
-	printf("%2d (%d)%s%s::%s - %s\n", *(DWORD*)(thisptr + 32), *(DWORD*)(thisptr + 36), longName.c_str(), classname, fieldname, data);
+	Msg("%2d (%d)%s%s::%s - %s\n", *(DWORD*)(thisptr + 32), *(DWORD*)(thisptr + 36), longName.c_str(), classname, fieldname, data);
 	return 0;
 }

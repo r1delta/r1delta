@@ -143,11 +143,10 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 		uintptr_t* r1vtable = *(uintptr_t**)oFileSystemFactory(pName, pReturnCode);
 		g_CVFileSystemInterface = (uintptr_t)oFileSystemFactory(pName, pReturnCode);
 
-		g_CVFileSystem = new CVFileSystem(r1vtable);
+		g_CBaseFileSystemInterface = (IFileSystem*)(((uintptr_t)oFileSystemFactory(pName, pReturnCode)) + 8);
+		g_CVFileSystem = new CVFileSystem((*(uintptr_t**)(g_CVFileSystemInterface)));
 
-		g_CBaseFileSystemInterface = reinterpret_cast<IFileSystem*>(g_CVFileSystemInterface + 8);
-
-		g_CBaseFileSystem = new CBaseFileSystem((*(uintptr_t**)g_CVFileSystemInterface));
+		g_CBaseFileSystem = new CBaseFileSystem((*(uintptr_t**)(g_CVFileSystemInterface + 8)));
 
 		struct fsptr {
 			void* ptr1;
