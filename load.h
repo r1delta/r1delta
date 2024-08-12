@@ -101,3 +101,6 @@ void __stdcall LoaderNotificationCallback(
 	const LDR_DLL_NOTIFICATION_DATA* notification_data,
 	void* context);
 
+
+LDR_DLL_LOADED_NOTIFICATION_DATA* GetModuleNotificationData(const wchar_t* moduleName);
+void FreeModuleNotificationData(LDR_DLL_LOADED_NOTIFICATION_DATA*);

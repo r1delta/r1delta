@@ -876,6 +876,7 @@ LDR_DLL_LOADED_NOTIFICATION_DATA* GetModuleNotificationData(const wchar_t* modul
 						UNICODE_STRING* baseDllName = new UNICODE_STRING();
 						baseDllName->Buffer = new wchar_t[MAX_PATH];
 						_wsplitpath_s(szModName, NULL, 0, NULL, 0, baseDllName->Buffer, MAX_PATH, NULL, 0);
+						lstrcatW(baseDllName->Buffer, L".dll");
 						baseDllName->Length = (USHORT)wcslen(baseDllName->Buffer) * sizeof(wchar_t);
 						baseDllName->MaximumLength = MAX_PATH * sizeof(wchar_t);
 						notificationData->BaseDllName = baseDllName;
@@ -892,6 +893,14 @@ LDR_DLL_LOADED_NOTIFICATION_DATA* GetModuleNotificationData(const wchar_t* modul
 	return nullptr;
 }
 
+void FreeModuleNotificationData(LDR_DLL_LOADED_NOTIFICATION_DATA* data) {
+	delete[] data->BaseDllName->Buffer;
+	delete data->BaseDllName;
+	delete[] data->FullDllName->Buffer;
+	delete data->FullDllName;
+	delete data;
+}
+
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
 	const LDR_DLL_NOTIFICATION_DATA* notification_data,
@@ -900,7 +909,11 @@ void __stdcall LoaderNotificationCallback(
 		return;
 	doBinaryPatchForFile(notification_data->Loaded);
 	if (std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length).find(L"server.dll") != std::string::npos) {
-		doBinaryPatchForFile(*GetModuleNotificationData(L"vstdlib"));
+		
+		//doBinaryPatchForFile(*GetModuleNotificationData(L"vstdlib"));
+		LDR_DLL_LOADED_NOTIFICATION_DATA* ndata = GetModuleNotificationData(L"vstdlib");
+		doBinaryPatchForFile(*ndata);
+		FreeModuleNotificationData(ndata);
 		uintptr_t vTableAddr = reinterpret_cast<uintptr_t>(GetModuleHandleA("server.dll")) + 0x807220;
 		RemoveItemsFromVTable(vTableAddr, 35, 2);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x143A10), &CServerGameDLL__DLLInit, (LPVOID*)&CServerGameDLL__DLLInitOriginal);

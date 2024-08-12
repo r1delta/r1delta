@@ -38,6 +38,7 @@
 #include <MinHook.h>
 #include "load.h"
 #include "core.h"
+#include "patcher.h"
 #include "filesystem.h"
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
@@ -65,6 +66,9 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 			reinterpret_cast<LdrRegisterDllNotificationFunc>(::GetProcAddress(
 				::GetModuleHandle(kNtDll), kLdrRegisterDllNotification));
 		reg_fn(0, &LoaderNotificationCallback, 0, &dll_notification_cookie_);
+		LDR_DLL_LOADED_NOTIFICATION_DATA* ndata = GetModuleNotificationData(L"launcher.dll");
+		doBinaryPatchForFile(*ndata);
+		FreeModuleNotificationData(ndata);
 		break; 
 	}
 	case DLL_THREAD_ATTACH:
