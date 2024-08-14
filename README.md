@@ -11,19 +11,10 @@ By reading beyond this disclaimer you hereby accept this and lose any right of c
 - Windows 10 (preferably)
 - A copy of Titanfall (it doesn't matter if its not the Deluxe Edition, the only thing you need is Titanfall installed.)
 - If you have BME installed (Black Market Edition, a mod for Titanfall 1), uninstall it or back up the `bin` folder for your game, **BME IS INCOMPATIBLE WITH R1DELTA AND WILL BREAK YOUR INSTALL**
-- The files `GBClient.dll`, `nmcogame64.dll`, `engine.dll`, `server_local.dll` and `tier0.dll` downloaded from [here](https://archive.org/download/titanfall-online_202201) by clicking "View Contents" on the .rar file (this is not necessary if you're downloading the full .zip from the Releases section and not the minimal one), you can verify the hashes below if you want to make sure you're downloading the right ones.
-- The file `engine_ds.dll` downloaded from [here](https://archive.org/download/titanfall-beta) by clicking "View Contents" on the .rar file, this is for the dedicated server, you can verify the hashes for this file below if you want to verify you're downloading the right ones.
-- Read the rest of system requirements for Titanfall by clicking [here](https://www.ea.com/games/titanfall/titanfall)
-
-## File hashes for Titanfall Online files (SHA256)
-- `GBClient.dll` - 426e1811fb9b8dfefaed33b946448d5d8d3dc667401caf34b30350794fd319dd
-- `nmcogame64.dll` - f0f0a4efeb78f77e39f88616dd666997b85140cf1ea7d3c2a834b425852a6989
-- `tier0.dll` - 957cc35d0f9444dcb29b8a993de2a0da50fc555d8f0eb3e51f0d41747171c818
-- `engine.dll` - 7d85f8201f2a951a35ddb57dc8162169a1b3fa730b7a94b0caec002dcc569999
-- `server_local.dll` - 50faad928e0715a51ad624d0a3eb8f00f7ffad9e66258dc95c960f9d11ff41e4
-## File hashes for Titanfall Beta files (SHA256)
-- `engine_ds.dll` - bc27e3ef243e87bfcf9a0b4d4059ff9dcaeec4a7bc1dcd653255a0b9ad34699a
-
+- The files `GBClient.dll`, `nmcogame64.dll`, `engine.dll`, `server_local.dll` and `tier0.dll` downloaded from [here](https://github.com/r1delta/r1delta/files/13839300/Bin_2.zip).
+- The file `engine_ds.dll` downloaded from [here](https://github.com/user-attachments/files/16607639/engine_ds.zip).
+- Read the rest of system requirements for Titanfall by clicking [here](https://www.ea.com/games/titanfall/titanfall).
+- 
 # Instructions
 Currently there are two ways of getting R1Delta:
 
