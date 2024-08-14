@@ -32,6 +32,228 @@
 #include <map>
 #pragma intrinsic(_ReturnAddress)
 
+class ScriptFunctionRegistry {
+public:
+	static ScriptFunctionRegistry& getInstance() {
+		static ScriptFunctionRegistry instance;
+		return instance;
+	}
+
+	void addFunction(std::unique_ptr<SQFuncRegistration> func) {
+		m_functions.push_back(std::move(func));
+	}
+
+	void registerFunctions(void* vmPtr, ScriptContext context) {
+		for (const auto& func : m_functions) {
+			if (func->GetContext() & context) {
+				typedef int64_t(*AddSquirrelRegType)(void*, SQFuncRegistrationInternal*);
+
+				static AddSquirrelRegType AddSquirrelReg = reinterpret_cast<AddSquirrelRegType>(((uintptr_t)(GetModuleHandleA("launcher.dll"))) + 0x8E50);
+
+
+				int64_t result = AddSquirrelReg(vmPtr, func->GetInternalReg());
+				if (result != 0) {
+					// Handle error
+					Warning("Failed to register function: %s\n", func->GetName().c_str());
+				}
+			}
+		}
+	}
+
+private:
+	ScriptFunctionRegistry() = default;
+	std::vector<std::unique_ptr<SQFuncRegistration>> m_functions;
+};
+
+#define REGISTER_SCRIPT_FUNCTION(context, name, func, typeMask, paramsCheck, returnType, argNames, helpText) \
+    ScriptFunctionRegistry::getInstance().addFunction(std::make_unique<SQFuncRegistration>( \
+        static_cast<ScriptContext>(context), name, func, typeMask, paramsCheck, returnType, argNames, helpText \
+    ))
+typedef SQRESULT(*sq_compile_t)(HSQUIRRELVM, SQLEXREADFUNC, SQUserPointer, const SQChar*, SQBool);
+typedef SQRESULT(*sq_compilebuffer_t)(HSQUIRRELVM, const SQChar*, SQInteger, const SQChar*, SQBool);
+typedef __int64(__fastcall* base_getroottable_t)(HSQUIRRELVM);
+typedef SQRESULT(*sq_call_t)(HSQUIRRELVM, SQInteger, SQBool, SQBool);
+typedef SQRESULT(*sq_newslot_t)(HSQUIRRELVM, SQInteger, SQBool);
+typedef void (*SQVM_Pop_t)(HSQUIRRELVM, SQInteger);
+typedef void (*sq_push_t)(HSQUIRRELVM, SQInteger);
+typedef void (*SQVM_Raise_Error_t)(HSQUIRRELVM, const SQChar*, ...);
+typedef SQChar* (__fastcall* IdType2Name_t)(SQObjectType);
+typedef SQRESULT(*sq_getstring_t)(HSQUIRRELVM, SQInteger, const SQChar**);
+typedef SQRESULT(*sq_getinteger_t)(R1SquirrelVM*, HSQUIRRELVM, SQInteger, SQInteger*);
+typedef SQRESULT(*sq_getfloat_t)(R1SquirrelVM*, HSQUIRRELVM, SQInteger, SQFloat*);
+typedef SQRESULT(*sq_getbool_t)(R1SquirrelVM*, HSQUIRRELVM, SQInteger, SQBool*);
+typedef void (*sq_pushnull_t)(HSQUIRRELVM);
+typedef void (*sq_pushstring_t)(HSQUIRRELVM, const SQChar*, SQInteger);
+typedef void (*sq_pushinteger_t)(R1SquirrelVM*, HSQUIRRELVM, SQInteger);
+typedef void (*sq_pushfloat_t)(R1SquirrelVM*, HSQUIRRELVM, SQFloat);
+typedef void (*sq_pushbool_t)(R1SquirrelVM*, HSQUIRRELVM, SQBool);
+typedef void (*sq_tostring_t)(HSQUIRRELVM, SQInteger);
+typedef SQInteger(*sq_getsize_t)(R1SquirrelVM*, HSQUIRRELVM, SQInteger);
+typedef SQObjectType(*sq_gettype_t)(HSQUIRRELVM, SQInteger);
+typedef SQRESULT(*sq_getstackobj_t)(R1SquirrelVM*, HSQUIRRELVM, SQInteger, SQObject*);
+typedef SQRESULT(*sq_get_t)(HSQUIRRELVM, SQInteger);
+typedef SQRESULT(*sq_get_noerr_t)(HSQUIRRELVM, SQInteger);
+typedef SQInteger(*sq_gettop_t)(R1SquirrelVM*, HSQUIRRELVM);
+typedef void (*sq_newtable_t)(HSQUIRRELVM);
+typedef SQRESULT(*sq_next_t)(HSQUIRRELVM, SQInteger);
+typedef SQRESULT(*sq_getinstanceup_t)(HSQUIRRELVM, SQInteger, SQUserPointer*, SQUserPointer);
+typedef void (*sq_newarray_t)(HSQUIRRELVM, SQInteger);
+typedef SQRESULT(*sq_arrayappend_t)(HSQUIRRELVM, SQInteger);
+typedef bool (*RunCallback_t)(R1SquirrelVM*, const char*);
+typedef __int64 (*CSquirrelVM__RegisterGlobalConstantInt_t)(R1SquirrelVM*, const char*, signed int);
+typedef void* (*CSquirrelVM__GetEntityFromInstance_t)(R1SquirrelVM*, SQObject*, char**);
+typedef char** (*sq_GetEntityConstant_CBaseEntity_t)();
+typedef int64_t(*AddSquirrelReg_t)(R1SquirrelVM*, SQFuncRegistrationInternal*);
+
+// Global variables for all the functions
+sq_compile_t sq_compile;
+sq_compilebuffer_t sq_compilebuffer;
+base_getroottable_t base_getroottable;
+sq_call_t sq_call;
+sq_newslot_t sq_newslot;
+SQVM_Pop_t SQVM_Pop;
+sq_push_t sq_push;
+SQVM_Raise_Error_t SQVM_Raise_Error;
+IdType2Name_t IdType2Name;
+sq_getstring_t sq_getstring;
+sq_getinteger_t sq_getinteger;
+sq_getfloat_t sq_getfloat;
+sq_getbool_t sq_getbool;
+sq_pushnull_t sq_pushnull;
+sq_pushstring_t sq_pushstring;
+sq_pushinteger_t sq_pushinteger;
+sq_pushfloat_t sq_pushfloat;
+sq_pushbool_t sq_pushbool;
+sq_tostring_t sq_tostring;
+sq_getsize_t sq_getsize;
+sq_gettype_t sq_gettype;
+sq_getstackobj_t sq_getstackobj;
+sq_get_t sq_get;
+sq_get_noerr_t sq_get_noerr;
+sq_gettop_t sq_gettop;
+sq_newtable_t sq_newtable;
+sq_next_t sq_next;
+sq_getinstanceup_t sq_getinstanceup;
+sq_newarray_t sq_newarray;
+sq_arrayappend_t sq_arrayappend;
+RunCallback_t RunCallback;
+CSquirrelVM__RegisterGlobalConstantInt_t CSquirrelVM__RegisterGlobalConstantInt;
+CSquirrelVM__GetEntityFromInstance_t CSquirrelVM__GetEntityFromInstance;
+sq_GetEntityConstant_CBaseEntity_t sq_GetEntityConstant_CBaseEntity;
+AddSquirrelReg_t AddSquirrelReg;
+
+SQInteger ExampleFunction(HSQUIRRELVM v) {
+	// Get the number of parameters
+	SQInteger nargs = sq_gettop(0, v);
+
+	// Check if we have the correct number of parameters
+//	if (nargs != 3) {
+//		return sq_throwerror(v, "Expected 2 parameters");
+//	}
+
+	// Retrieve the parameters
+	const SQChar* str;
+	SQInteger n;
+	SQFloat f;
+
+	// Get the first parameter (index 1 is the first parameter, 0 is the 'this' pointer)
+	if (SQ_FAILED(sq_getstring(v, 2, &str))) {
+		return 0;
+		//return sq_throwerror(v, "Parameter 1 must be a string");
+	}
+
+	// Get the second parameter
+	if (SQ_FAILED(sq_getinteger(0, v, 3, &n))) {
+		return 0;
+		//return sq_throwerror(v, "Parameter 2 must be an integer");
+	}
+
+	// Get the third parameter
+	//if (SQ_FAILED(sq_getfloat(0, v, 4, &f))) {
+	//	return 0;
+	//	//return sq_throwerror(v, "Parameter 3 must be a float");
+	//}
+
+	// Perform some operations
+	std::string result = str;
+	for (int i = 0; i < n; ++i) {
+		result += "!";
+	}
+	float calculatedValue = std::sin(n) * n;
+
+	// Create a table to return multiple values
+	sq_newtable(v);
+
+	// Push the modified string
+	sq_pushstring(v, result.c_str(), -1);
+	sq_pushstring(v, "modifiedString", -1);
+	sq_newslot(v, -3, SQFalse);
+
+	// Push the calculated value
+	sq_pushfloat(0, v, calculatedValue);
+	sq_pushstring(v, "calculatedValue", -1);
+	sq_newslot(v, -3, SQFalse);
+
+	// The table is now on top of the stack and will be returned
+	return 1; // Return 1 to indicate that we're returning one value (the table)
+}
+// Function to initialize all SQVM functions
+bool GetSQVMFuncs() {
+	static bool initialized = false;
+	if (initialized) return true;
+
+	HMODULE launcherModule = GetModuleHandleA("launcher.dll");
+	if (!launcherModule) return false;
+
+	uintptr_t baseAddress = reinterpret_cast<uintptr_t>(launcherModule);
+
+	sq_compile = reinterpret_cast<sq_compile_t>(baseAddress + 0x14970);
+	sq_compilebuffer = reinterpret_cast<sq_compilebuffer_t>(baseAddress + 0x1A5E0);
+	base_getroottable = reinterpret_cast<base_getroottable_t>(baseAddress + 0x56440);
+	sq_call = reinterpret_cast<sq_call_t>(baseAddress + 0x18C40);
+	sq_newslot = reinterpret_cast<sq_newslot_t>(baseAddress + 0x17260);
+	SQVM_Pop = reinterpret_cast<SQVM_Pop_t>(baseAddress + 0x2BC60);
+	sq_push = reinterpret_cast<sq_push_t>(baseAddress + 0x165E0);
+	SQVM_Raise_Error = reinterpret_cast<SQVM_Raise_Error_t>(baseAddress + 0x411B0);
+	IdType2Name = reinterpret_cast<IdType2Name_t>(baseAddress + 0x3C660);
+	sq_getstring = reinterpret_cast<sq_getstring_t>(baseAddress + 0x16880);
+	sq_getinteger = reinterpret_cast<sq_getinteger_t>(baseAddress + 0xE740);
+	sq_getfloat = reinterpret_cast<sq_getfloat_t>(baseAddress + 0xE6F0);
+	sq_getbool = reinterpret_cast<sq_getbool_t>(baseAddress + 0xE6B0);
+	sq_pushnull = reinterpret_cast<sq_pushnull_t>(baseAddress + 0x14BD0);
+	sq_pushstring = reinterpret_cast<sq_pushstring_t>(baseAddress + 0x14C30);
+	sq_pushinteger = reinterpret_cast<sq_pushinteger_t>(baseAddress + 0xEA10);
+	sq_pushfloat = reinterpret_cast<sq_pushfloat_t>(baseAddress + 0xE9B0);
+	sq_pushbool = reinterpret_cast<sq_pushbool_t>(baseAddress + 0xE930);
+	sq_tostring = reinterpret_cast<sq_tostring_t>(baseAddress + 0x16690);
+	sq_getsize = reinterpret_cast<sq_getsize_t>(baseAddress + 0xE790);
+	sq_gettype = reinterpret_cast<sq_gettype_t>(baseAddress + 0x16660);
+	sq_getstackobj = reinterpret_cast<sq_getstackobj_t>(baseAddress + 0xE7F0);
+	sq_get = reinterpret_cast<sq_get_t>(baseAddress + 0x17F10);
+	sq_get_noerr = reinterpret_cast<sq_get_noerr_t>(baseAddress + 0x18150);
+	sq_gettop = reinterpret_cast<sq_gettop_t>(baseAddress + 0xE830);
+	sq_newtable = reinterpret_cast<sq_newtable_t>(baseAddress + 0x14F30);
+	sq_next = reinterpret_cast<sq_next_t>(baseAddress + 0x1A1B0);
+	sq_getinstanceup = reinterpret_cast<sq_getinstanceup_t>(baseAddress + 0x6750);
+	sq_newarray = reinterpret_cast<sq_newarray_t>(baseAddress + 0x14FB0);
+	sq_arrayappend = reinterpret_cast<sq_arrayappend_t>(baseAddress + 0x152A0);
+	RunCallback = reinterpret_cast<RunCallback_t>(baseAddress + 0x89A0);
+	CSquirrelVM__RegisterGlobalConstantInt = reinterpret_cast<CSquirrelVM__RegisterGlobalConstantInt_t>(baseAddress + 0xA680);
+	CSquirrelVM__GetEntityFromInstance = reinterpret_cast<CSquirrelVM__GetEntityFromInstance_t>(baseAddress + 0x9930);
+	AddSquirrelReg = reinterpret_cast<AddSquirrelReg_t>(baseAddress + 0x8E50);
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER | SCRIPT_CONTEXT_CLIENT | SCRIPT_CONTEXT_UI, // Available in all contexts
+		"ExampleFunction",
+		ExampleFunction,
+		".sif", // String, Integer, Float
+		3,      // Expects 3 parameters
+		"t",    // Returns a table
+		"str, count, value",
+		"Modifies a string, repeats '!' based on count, and calculates sin(value) * count"
+	);
+	initialized = true;
+	return true;
+}
 
 
 typedef __int64 (*CScriptVM__ctortype)(void* thisptr);
@@ -74,28 +296,66 @@ void* CreateNewVTable(void* thisptr) {
 	// Update the vtable pointer of the CScriptVM object to the new vtable.
 	return newVTable;
 }
+
+
 void* fakevmptr;
 void* realvmptr = 0;
 typedef void* (*CScriptManager__CreateNewVMType)(__int64 a1, int a2, unsigned int a3);
 CScriptManager__CreateNewVMType CScriptManager__CreateNewVMOriginal;
 bool isServerScriptVM = false;
+
 void* CScriptManager__CreateNewVM(__int64 a1, int a2, unsigned int a3) {
-	isServerScriptVM = a3 == 0;
-	if (isServerScriptVM) {
+	// Call the original function to maintain existing functionality
+	void* vmPtr = CScriptManager__CreateNewVMOriginal(a1, a2, a3);
+
+	// Check if VM creation was successful
+	if (vmPtr == nullptr) {
+		// Handle error: VM creation failed
+		return nullptr;
+	}
+
+	// Determine the script context
+	ScriptContext context;
+	switch (a3) {
+	case 0:
+		context = SCRIPT_CONTEXT_SERVER;
+		break;
+	case 1:
+		context = SCRIPT_CONTEXT_CLIENT;
+		break;
+	case 2:
+		context = SCRIPT_CONTEXT_UI;
+		break;
+	default:
+		// Handle unknown context
+		return vmPtr;
+	}
+	GetSQVMFuncs();
+
+	// Register our custom functions for the appropriate context
+	if (AddSquirrelReg != nullptr) {
+		ScriptFunctionRegistry::getInstance().registerFunctions(vmPtr, context);
+	}
+	else {
+		// Handle error: AddSquirrelReg function not found
+		// You might want to log this error
+	}
+
+	// Original functionality for server VM
+	if (context == SCRIPT_CONTEXT_SERVER) {
 		fakevmptr = 0;
 		realvmptr = 0;
-	}
-	void* ret = CScriptManager__CreateNewVMOriginal(a1, a2, a3);
-	if (isServerScriptVM) {
-		//std::cout << "created Server SCRIPT VM" << std::endl;
-		realvmptr = ret;
-		fakevmptr = CreateNewVTable(ret);
-		isServerScriptVM = false;
+
+		realvmptr = vmPtr;
+		fakevmptr = CreateNewVTable(vmPtr);
+
+		// Return the fake VM pointer for server context
 		return &fakevmptr;
 	}
-	isServerScriptVM = false;
-	return ret;
+
+	return vmPtr;
 }
+
 
 typedef void* (*CScriptVM__GetUnknownVMPtrType)();
 CScriptVM__GetUnknownVMPtrType CScriptVM__GetUnknownVMPtrOriginal;
@@ -422,10 +682,10 @@ void script_ui_cmd(const CCommand& args)
 	run_script(args, GetUIVMPtr);
 }
 
-__int64 __fastcall sq_throwerrorhook(__int64 a1, const char* a2)
-{
-	return 0;
-	//if (a2)
-	//	Warning("sq_throwerror: %s\n", a2);
-	//return sq_throwerror(a1, a2);
-}
+//__int64 __fastcall sq_throwerrorhook(__int64 a1, const char* a2)
+//{
+//	return 0;
+//	//if (a2)
+//	//	Warning("sq_throwerror: %s\n", a2);
+//	//return sq_throwerror(a1, a2);
+//}

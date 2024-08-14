@@ -220,7 +220,16 @@ struct SQFuncRegistrationInternal {
 	}
 };
 
-__int64 __fastcall SQFuncBindingFn(__int64(__fastcall* a1)(_QWORD), __int64 a2, _QWORD* a3, __int64 a4, __int64 a5);
+
+inline __int64 __fastcall SQFuncBindingFn(__int64(__fastcall* a1)(_QWORD), __int64 a2, _QWORD* a3, __int64 a4, __int64 a5)
+{
+	__int64 result; // rax
+
+	result = ((__int64(__fastcall*)(_QWORD, __int64))a1)(*a3, a2);
+	*(unsigned __int16*)(a5 + 8) = 5;
+	*(_DWORD*)a5 = result;
+	return result;
+}
 
 class SQFuncRegistration
 {
