@@ -120,6 +120,12 @@
     <ClInclude Include="model_info.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="keyvalues.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="color.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">
@@ -183,6 +189,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="model_info.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="keyvalues.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

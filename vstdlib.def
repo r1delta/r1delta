@@ -1,0 +1,5 @@
+LIBRARY vstdlib.dll
+   EXPORTS
+     V_UTF8ToUnicode
+     V_UnicodeToUTF8
+     KeyValuesSystem

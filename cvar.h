@@ -36,6 +36,7 @@
 #include <unordered_map>
 #include "core.h"
 #include <string>
+#include "color.h"
 
 //-----------------------------------------------------------------------------
 // ConVar flags
@@ -263,29 +264,6 @@ public:
 	unsigned char unknown[0x2A8];
 };
 
-struct SourceColor
-{
-	unsigned char R;
-	unsigned char G;
-	unsigned char B;
-	unsigned char A;
-
-	SourceColor(unsigned char r, unsigned char g, unsigned char b, unsigned char a)
-	{
-		R = r;
-		G = g;
-		B = b;
-		A = a;
-	}
-
-	SourceColor()
-	{
-		R = 0;
-		G = 0;
-		B = 0;
-		A = 0;
-	}
-};
 
 class IConsoleDisplayFunc
 {
