@@ -208,6 +208,11 @@ void doBinaryPatchForFile(LDR_DLL_LOADED_NOTIFICATION_DATA data) {
         patchInstructions.insert(patchInstructions.end(), dedicatedServerPatchInstructions.begin(), dedicatedServerPatchInstructions.end());
     }
 
+    if (IsNoOrigin()) {
+        std::vector<PatchInstruction> noOriginPatchInstructions = ParsePatchFile("r1delta/r1delta_noorigin.wpatch");
+        patchInstructions.insert(patchInstructions.end(), noOriginPatchInstructions.begin(), noOriginPatchInstructions.end());
+    }
+
     for (const auto& instruction : patchInstructions) {
         if (instruction.moduleName == moduleName) {
             ApplyPatch(instruction, targetModule);

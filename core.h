@@ -34,6 +34,7 @@
 
 #pragma once
 #include <windows.h>
+#include <string>
 
 static inline bool IsDedicatedServer(void) {
     static int cached_result = -1; // Initially unset
@@ -58,5 +59,11 @@ static inline bool IsDedicatedServer(void) {
     }
     return cached_result == 1 ? true : false;
 }
+
+__forceinline bool IsNoOrigin() {
+    std::wstring cmdLine = GetCommandLineW();
+    return cmdLine.find(L"-noorigin") != std::wstring::npos;
+}
+
 #define ENGINE_DLL (IsDedicatedServer() ? "engine_ds.dll" : "engine.dll")
 #define VSCRIPT_DLL (IsDedicatedServer() ? "dedicated.dll" : "launcher.dll")
