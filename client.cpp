@@ -4,9 +4,6 @@
 typedef void (*sub_18027F2C0Type)(__int64 a1, const char* a2, __int64 a3);
 sub_18027F2C0Type sub_18027F2C0Original;
 
-typedef __int64 (*client_origin_enabled_funcType)();
-client_origin_enabled_funcType client_origin_enabled_func;
-
 void TextMsg(bf_read* msg)
 {
 	TextMsgPrintType_t msg_dest = (TextMsgPrintType_t)msg->ReadByte();
@@ -32,12 +29,6 @@ void sub_18027F2C0(__int64 a1, const char* a2, __int64 a3)
 		var->m_fMaxVal = 2.5f;
 
 		sub_18027F2C0Original(a1, "TextMsg", (__int64)TextMsg);
-
-		if (!client_origin_enabled_func())
-		{
-			auto var = (ConVarR1*)(OriginalCCVar_FindVar2(cvarinterface, "platform_user_id"));
-			var->m_Value.m_nValue = rand();
-		}
 	}
 
 	sub_18027F2C0Original(a1, a2, a3);
@@ -60,7 +51,6 @@ const CPUInformation* GetCPUInformationDet()
 
 void InitClient()
 {
-	client_origin_enabled_func = (client_origin_enabled_funcType)((uintptr_t)GetModuleHandleA("client.dll") + 0x44A030);
 	MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("client.dll") + 0x21FE50), &PredictionErrorFn, reinterpret_cast<LPVOID*>(NULL));
 	//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("client.dll") + 0x029840), &C_BaseEntity__VPhysicsInitNormal, reinterpret_cast<LPVOID*>(NULL));
 	MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("client.dll") + 0x27F2C0), &sub_18027F2C0, reinterpret_cast<LPVOID*>(&sub_18027F2C0Original));
