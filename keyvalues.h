@@ -2,8 +2,6 @@
 #include "color.h"
 #include <stdint.h>
 #include "bitbuf.h"
-#include <mutex>
-#include <unordered_set>
 #define KEYVALUES_TOKEN_SIZE	(1024 * 32)
 enum KeyValuesTypes_t : char
 {
@@ -27,36 +25,6 @@ enum MergeKeyValuesOp_t
 	MERGE_KV_UPDATE, // update values are copied into storage, adding new keys to storage or updating existing ones
 	MERGE_KV_DELETE, // update values specify keys that get deleted from storage
 	MERGE_KV_BORROW, // update values only update existing keys in storage, keys in update that do not exist in storage are discarded
-};
-class KeyValues;
-class KeyValuesTracker {
-private:
-	std::unordered_set<KeyValues*> internalAllocations;
-	std::mutex mutex;
-
-	KeyValuesTracker() = default;
-
-public:
-	static KeyValuesTracker& getInstance() {
-		static KeyValuesTracker instance;
-		return instance;
-	}
-
-	KeyValues* trackAllocation(KeyValues* kv) {
-		std::lock_guard<std::mutex> lock(mutex);
-		internalAllocations.insert(kv);
-		return kv;
-	}
-
-	bool isInternalAllocation(KeyValues* kv) {
-		std::lock_guard<std::mutex> lock(mutex);
-		return internalAllocations.find(kv) != internalAllocations.end();
-	}
-
-	void untrackAllocation(KeyValues* kv) {
-		std::lock_guard<std::mutex> lock(mutex);
-		internalAllocations.erase(kv);
-	}
 };
 
 //-----------------------------------------------------------------------------
@@ -110,9 +78,6 @@ public:
 	bool ContainsSubKey(KeyValues* pSubKey);
 	void SwapSubKey(KeyValues* pExistingSubkey, KeyValues* pNewSubKey);
 	void ElideSubKey(KeyValues* pSubKey);
-	static KeyValuesTracker& getTracker() {
-		return KeyValuesTracker::getInstance();
-	}
 
 	// Data access
 	bool IsEmpty(const char* pszKeyName);
@@ -173,13 +138,3 @@ public:
 	KeyValues* m_pSub; // 0x0038
 	KeyValues* m_pChain; // 0x0040
 };
-
-struct Base_CmdKeyValues
-{
-	char gap0[24];
-	KeyValues* m_pKeyValues;
-};
-
-bool Base_CmdKeyValues__WriteToBuffer(Base_CmdKeyValues* thisptr, bf_write& buffer);
-bool Base_CmdKeyValues__ReadFromBuffer(Base_CmdKeyValues* thisptr, bf_read& buffer);
-void __fastcall Base_CmdKeyValues__dtor(Base_CmdKeyValues* thisptr);

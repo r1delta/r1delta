@@ -2,8 +2,6 @@
 #include <windows.h>
 #include "bitbuf.h"
 #include "logging.h"
-#include "tier0_orig.h"
-#include "keyvalues.h"
 #define assert_msg(...) (0)
 #define assert(...) (0)
 #define Assert(...) (0)
@@ -137,13 +135,6 @@ KeyValues::KeyValues(const char* pszSetName, const char* pszFirstKey, int iFirst
 KeyValues::~KeyValues(void)
 {
 	RemoveEverything();
-	if (getTracker().isInternalAllocation(this)) {
-		getTracker().untrackAllocation(this);
-	}
-	else {
-		// This is NOT the only place where this is deleted
-		Error("Attempting to delete a KeyValues object not allocated by us! You're going to crash lol");
-	}
 }
 
 //-----------------------------------------------------------------------------
@@ -151,7 +142,6 @@ KeyValues::~KeyValues(void)
 //-----------------------------------------------------------------------------
 void KeyValues::Init(void)
 {
-	getTracker().trackAllocation(this);
 	m_iKeyName = 0;
 	m_iKeyNameCaseSensitive1 = 0;
 	m_iKeyNameCaseSensitive2 = 0;
@@ -184,13 +174,7 @@ void KeyValues::Clear(void)
 //-----------------------------------------------------------------------------
 void KeyValues::DeleteThis(void)
 {
-	if (getTracker().isInternalAllocation(this)) {
-		delete this;
-	}
-	else {
-		// This is NOT the only place where this is deleted
-		Warning("Attempting to delete a KeyValues object not allocated by us! You're going to crash lol");
-	}
+	delete this;
 }
 
 //-----------------------------------------------------------------------------
@@ -1479,7 +1463,11 @@ bool KeyValues::ReadAsBinary(bf_read& buffer)
 
 	return true;
 }
-
+struct Base_CmdKeyValues
+{
+	BYTE gap0[24];
+	KeyValues* m_pKeyValues;
+};
 bool Base_CmdKeyValues__WriteToBuffer(Base_CmdKeyValues* thisptr, bf_write& buffer)
 {
 	if (!thisptr->m_pKeyValues)
@@ -1546,15 +1534,4 @@ bool Base_CmdKeyValues__ReadFromBuffer(Base_CmdKeyValues* thisptr, bf_read& buff
 	}
 
 	return !buffer.IsOverflowed();
-}
-typedef void (*Base_CmdKeyValues__dtor_type)(Base_CmdKeyValues* thisptr);
-Base_CmdKeyValues__dtor_type Base_CmdKeyValues__dtor_original;
-void __fastcall Base_CmdKeyValues__dtor(Base_CmdKeyValues* thisptr)
-{
-	if (thisptr->m_pKeyValues && KeyValues::getTracker().isInternalAllocation(thisptr->m_pKeyValues)) { 
-		// if we let the game free our keyval memory it will explode (valve comments imply this isn't the case but I'm not taking the chance)
-		delete thisptr->m_pKeyValues;
-		thisptr->m_pKeyValues = 0;
-	};
-	Base_CmdKeyValues__dtor_original(thisptr);
 }
