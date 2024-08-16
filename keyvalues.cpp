@@ -19,24 +19,18 @@ typedef int HKeySymbol;
 		x2 = (uint16_t)((x3) >> 8);                                                                                                        \
 	} while (0)
 
-struct CKeyValuesSystem
-{
+class CKeyValuesSystem {
 public:
-	struct /*VFT*/ CKeyValuesSystem_vtbl // sizeof=0x28, from portal2 pdb
-	{
-		void(__thiscall* RegisterSizeofKeyValues)(struct CKeyValuesSystem* thisptr, int);
-		void* (__thiscall* AllocKeyValuesMemory)(struct CKeyValuesSystem* thisptr, int);
-		void(__thiscall* FreeKeyValuesMemory)(struct CKeyValuesSystem* thisptr, void*);
-		int(__thiscall* GetSymbolForString)(struct CKeyValuesSystem* thisptr, const char*, bool);
-		const char* (__thiscall* GetStringForSymbol)(struct CKeyValuesSystem* thisptr, int);
-		void(__thiscall* AddKeyValuesToMemoryLeakList)(struct CKeyValuesSystem* thisptr, void*, int);
-		void(__thiscall* RemoveKeyValuesFromMemoryLeakList)(struct CKeyValuesSystem* thisptr, void*);
-		void(__thiscall* SetKeyValuesExpressionSymbol)(struct CKeyValuesSystem* thisptr, const char*, bool);
-		bool(__thiscall* GetKeyValuesExpressionSymbol)(struct CKeyValuesSystem* thisptr, const char*);
-		int(__thiscall* GetSymbolForStringCaseSensitive)(struct CKeyValuesSystem* thisptr, HKeySymbol& hCaseInsensitiveSymbol, const char* name, bool bCreate) = 0;
-	};
-
-	const CKeyValuesSystem_vtbl* m_pVtable;
+	virtual void(__thiscall RegisterSizeofKeyValues)(int);
+	virtual void* (__thiscall AllocKeyValuesMemory)(int);
+	virtual void(__thiscall FreeKeyValuesMemory)(void*);
+	virtual int(__thiscall GetSymbolForString)(const char*, bool);
+	virtual const char* (__thiscall GetStringForSymbol)(int);
+	virtual void(__thiscall AddKeyValuesToMemoryLeakList)(void*, int);
+	virtual void(__thiscall RemoveKeyValuesFromMemoryLeakList)(void*);
+	virtual void(__thiscall SetKeyValuesExpressionSymbol)(const char*, bool);
+	virtual bool(__thiscall GetKeyValuesExpressionSymbol)(const char*);
+	virtual int(__thiscall GetSymbolForStringCaseSensitive)(HKeySymbol& hCaseInsensitiveSymbol, const char* name, bool bCreate) = 0;
 };
 
 extern "C" {
@@ -228,7 +222,7 @@ KeyValues* KeyValues::FindKey(const char* pszKeyName, bool bCreate)
 		pSubStr = nullptr;
 	}
 
-	HKeySymbol iSearchStr = KeyValuesSystem()->m_pVtable->GetSymbolForString(KeyValuesSystem(), pSearchStr, bCreate);
+	HKeySymbol iSearchStr = KeyValuesSystem()->GetSymbolForString(pSearchStr, bCreate);
 	if (iSearchStr == INVALID_KEY_SYMBOL)
 	{
 		// not found, couldn't possibly be in key value list
@@ -594,8 +588,8 @@ KeyValues* KeyValues::GetNextKey() const
 //-----------------------------------------------------------------------------
 const char* KeyValues::GetName(void) const
 {
-	return KeyValuesSystem()->m_pVtable->GetStringForSymbol(
-		KeyValuesSystem(), MAKE_3_BYTES_FROM_1_AND_2(m_iKeyNameCaseSensitive1, m_iKeyNameCaseSensitive2));
+	return KeyValuesSystem()->GetStringForSymbol(
+		MAKE_3_BYTES_FROM_1_AND_2(m_iKeyNameCaseSensitive1, m_iKeyNameCaseSensitive2));
 }
 
 //-----------------------------------------------------------------------------
@@ -984,7 +978,7 @@ void KeyValues::SetName(const char* pszSetName)
 {
 	HKeySymbol hCaseSensitiveKeyName = INVALID_KEY_SYMBOL, hCaseInsensitiveKeyName = INVALID_KEY_SYMBOL;
 	hCaseSensitiveKeyName =
-		KeyValuesSystem()->m_pVtable->GetSymbolForStringCaseSensitive(KeyValuesSystem(), hCaseInsensitiveKeyName, pszSetName, false);
+		KeyValuesSystem()->GetSymbolForStringCaseSensitive(hCaseInsensitiveKeyName, pszSetName, false);
 
 	m_iKeyName = hCaseInsensitiveKeyName;
 	SPLIT_3_BYTES_INTO_1_AND_2(m_iKeyNameCaseSensitive1, m_iKeyNameCaseSensitive2, hCaseSensitiveKeyName);
@@ -1463,75 +1457,24 @@ bool KeyValues::ReadAsBinary(bf_read& buffer)
 
 	return true;
 }
-struct Base_CmdKeyValues
+
+void* KeyValues::operator new(size_t iAllocSize)
 {
-	BYTE gap0[24];
-	KeyValues* m_pKeyValues;
-};
-bool Base_CmdKeyValues__WriteToBuffer(Base_CmdKeyValues* thisptr, bf_write& buffer)
-{
-	if (!thisptr->m_pKeyValues)
-		return false;
-
-	// Save the position where we'll write the size later
-	int sizeBitPosition = buffer.GetNumBitsWritten();
-
-	// Reserve space for the size (32 bits)
-	buffer.WriteUBitLong(0, 32);
-
-	// Remember the starting position of the KeyValues data
-	int startDataBitPosition = buffer.GetNumBitsWritten();
-
-	// Write the KeyValues data directly to the buffer
-	if (!thisptr->m_pKeyValues->WriteAsBinary(buffer))
-	{
-		return false;
-	}
-
-	// Calculate the number of bits written
-	int endDataBitPosition = buffer.GetNumBitsWritten();
-	int numBits = endDataBitPosition - startDataBitPosition;
-
-	// Go back and write the actual size in bits
-	int currentPosition = buffer.GetNumBitsWritten();
-	buffer.SeekToBit(sizeBitPosition);
-	buffer.WriteUBitLong(numBits, 32);
-
-	// Seek back to the end
-	buffer.SeekToBit(currentPosition);
-
-	return !buffer.IsOverflowed();
+	return KeyValuesSystem()->AllocKeyValuesMemory(iAllocSize);
 }
 
-bool Base_CmdKeyValues__ReadFromBuffer(Base_CmdKeyValues* thisptr, bf_read& buffer)
+void* KeyValues::operator new(size_t iAllocSize, int nBlockUse, const char* pFileName, int nLine)
 {
-	if (!thisptr->m_pKeyValues)
-		thisptr->m_pKeyValues = new KeyValues("");
+	void* p = KeyValuesSystem()->AllocKeyValuesMemory(iAllocSize);
+	return p;
+}
 
-	thisptr->m_pKeyValues->Clear();
+void KeyValues::operator delete(void* pMem)
+{
+	KeyValuesSystem()->FreeKeyValuesMemory((KeyValues*)pMem);
+}
 
-	// Read the size in bits
-	int numBits = buffer.ReadUBitLong(32);
-	if (numBits == 0 || numBits > buffer.GetNumBitsLeft() || numBits > (64 * 8 * 1024)) {
-		Warning("Base_CmdKeyValues read failed! Size was %i numBits (check sending and receiving code for mismatches)!", numBits);
-		return false;
-	}
-
-	// Remember the current position
-	int startPosition = buffer.GetNumBitsRead();
-
-	// Read the KeyValues data
-	if (!thisptr->m_pKeyValues->ReadAsBinary(buffer))
-	{
-		return false;
-	}
-
-	// Ensure we've read exactly the number of bits we expected
-	int bitsRead = buffer.GetNumBitsRead() - startPosition;
-	if (bitsRead != numBits)
-	{
-		return false;
-	}
-
-	return !buffer.IsOverflowed();
+void KeyValues::operator delete(void* pMem, int nBlockUse, const char* pFileName, int nLine)
+{
+	KeyValuesSystem()->FreeKeyValuesMemory((KeyValues*)pMem);
 }

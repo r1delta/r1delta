@@ -117,6 +117,11 @@ public:
 	bool ReadAsBinary(bf_read& buffer);
 
 	bool WriteAsBinary(bf_write& buffer);
+	// Memory allocation (optimized)
+	void* operator new(size_t iAllocSize);
+	void* operator new(size_t iAllocSize, int nBlockUse, const char* pFileName, int nLine);
+	void operator delete(void* pMem);
+	void operator delete(void* pMem, int nBlockUse, const char* pFileName, int nLine);
 
 public:
 	uint32_t m_iKeyName : 24; // 0x0000
