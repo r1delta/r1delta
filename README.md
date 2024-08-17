@@ -93,7 +93,7 @@ If you aren't using Origin, you'll also want to download the `Titanfall.exe` pro
 - [@VITALISED](https://github.com/VITALISED)
 - [@mrsteyk](https://github.com/mrsteyk)
 - [@PANCHO7532](https://github.com/PANCHO7532)
-- [@quadruple]([https://github.com/](https://github.com/quad-damage)
+- [@quadruple](https://github.com/quad-damage)
 - [@mv](https://github.com/mvoolt)
 - [@bt](https://github.com/caatge)
 - [@dogecore](https://github.com/HappyDOGE)
