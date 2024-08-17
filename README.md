@@ -18,7 +18,9 @@ By reading beyond this disclaimer you hereby accept this and lose any right of c
 # Instructions
 It's recommended if you don't know what you're doing to use the [R1Delta Installer](https://github.com/r1delta/r1delta_installer/releases).
 
-You can install the project yourself, by [compiling the code](https://github.com/r1delta/r1delta/tree/main#installing-r1delta-by-compiling-the-code) or [downloading from releases](https://github.com/r1delta/r1delta/tree/main#installing-r1delta-via-releases)
+You can install the project yourself by [compiling the code](https://github.com/r1delta/r1delta/tree/main#installing-r1delta-by-compiling-the-code) or [downloading from releases](https://github.com/r1delta/r1delta/tree/main#installing-r1delta-via-releases).
+
+If you're having issues please open an issue or join the [discord](https://discord.gg/zbFCcSM5t7)
 
 # Installing R1Delta via Releases
 You can find the latest release of R1Delta by clicking [here](https://github.com/r1delta/r1delta/releases/). You need to download `r1delta_full-build.zip`, everything you need is already packed into the .zip file for your comfort.
