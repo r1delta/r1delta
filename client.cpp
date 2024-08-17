@@ -1,3 +1,6 @@
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
 #include "client.h"
 
 
@@ -49,6 +52,19 @@ const CPUInformation* GetCPUInformationDet()
 	return result;
 }
 
+typedef int (WSAAPI* GetAddrInfoFn)(PCSTR, PCSTR, const ADDRINFOA*, PADDRINFOA*);
+GetAddrInfoFn originalGetAddrInfo = nullptr;
+
+int WSAAPI hookedGetAddrInfo(PCSTR pNodeName, PCSTR pServiceName, const ADDRINFOA* pHints, PADDRINFOA* ppResult) {
+	std::string nodeNameString(pNodeName);
+	if (std::strncmp(nodeNameString.c_str() + nodeNameString.length() - 11, "respawn.com", 11) == 0 
+		|| strcmp(pNodeName, "r1-pc-int.s3.amazonaws.com") == 0
+		|| strcmp(pNodeName, "r1-pc.s3.amazonaws.com") == 0)
+		return WSAHOST_NOT_FOUND; // block respawn servers to prevent accidentally DoSing
+
+	return originalGetAddrInfo(pNodeName, pServiceName, pHints, ppResult);
+}
+
 void InitClient()
 {
 	MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("client.dll") + 0x21FE50), &PredictionErrorFn, reinterpret_cast<LPVOID*>(NULL));
@@ -60,6 +76,8 @@ void InitClient()
 	MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x4801B0), &ConVar_PrintDescription, reinterpret_cast<LPVOID*>(&ConVar_PrintDescriptionOriginal));
 	MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x4722E0), &sub_1804722E0, 0);
 	MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("tier0.dll"), "GetCPUInformation"), &GetCPUInformationDet, reinterpret_cast<LPVOID*>(&GetCPUInformationOriginal));
+	if (IsNoOrigin())
+		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("ws2_32.dll"), "getaddrinfo"), &hookedGetAddrInfo, reinterpret_cast<LPVOID*>(&originalGetAddrInfo));
 
 	MH_EnableHook(MH_ALL_HOOKS);
 }
