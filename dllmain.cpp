@@ -40,20 +40,20 @@
 #include "core.h"
 #include "patcher.h"
 #include "filesystem.h"
+#include "logging.h"
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 {
 
-	static bool done = false;
-	if (!done) {
-		done = true;
-		if (!IsDedicatedServer())
-			AllocConsole();
-		HANDLE hConsoleStream = ::CreateFileW(L"CONOUT$", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-		SetStdHandle(STD_OUTPUT_HANDLE, hConsoleStream);
-
-		VirtualAlloc((void*)0xFFEEFFEE, 1, MEM_RESERVE, PAGE_NOACCESS);
+	if (!IsDedicatedServer() && !IsNoConsole())
+	{
+		AllocConsole();
+		SetConsoleTitleA("R1Delta");
+		freopen("CONOUT$", "wt", stdout);
 	}
+
+	VirtualAlloc((void*)0xFFEEFFEE, 1, MEM_RESERVE, PAGE_NOACCESS);
+	
 	LoadLibraryW(L"OnDemandConnRouteHelper"); // stop fucking reloading this thing
 	LoadLibraryA("TextShaping.dll"); // fix "Patcher Error" dialogs having no text
 	SetDllDirectory(L"r1delta\\bin\\x64_delta");
@@ -61,6 +61,8 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 	{
 	case DLL_PROCESS_ATTACH: {
 		MH_Initialize();
+		if(!IsNoConsole())
+			InitLoggingHooks();
 		StartFileCacheThread();
 		LdrRegisterDllNotificationFunc reg_fn =
 			reinterpret_cast<LdrRegisterDllNotificationFunc>(::GetProcAddress(

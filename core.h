@@ -65,5 +65,10 @@ __forceinline bool IsNoOrigin() {
     return cmdLine.find(L"-noorigin") != std::wstring::npos;
 }
 
+__forceinline bool IsNoConsole() {
+    std::wstring cmdLine = GetCommandLineW();
+    return cmdLine.find(L"-noconsole") != std::wstring::npos;
+}
+
 #define ENGINE_DLL (IsDedicatedServer() ? "engine_ds.dll" : "engine.dll")
 #define VSCRIPT_DLL (IsDedicatedServer() ? "dedicated.dll" : "launcher.dll")

@@ -10,6 +10,7 @@ extern void (*DevWarning)(int level, const char* pMsg, ...);
 extern void (*ConColorMsg)(const Color& clr, const char* pMsg, ...);
 extern void (*ConDMsg)(const char* pMsg, ...);
 extern void (*COM_TimestampedLog)(const char* fmt, ...);
+void InitLoggingHooks();
 typedef void (*ConVar_PrintDescriptionType)(const ConCommandBaseR1* pVar);
 extern ConVar_PrintDescriptionType ConVar_PrintDescriptionOriginal;
 void ConVar_PrintDescription(const ConCommandBaseR1* pVar);
