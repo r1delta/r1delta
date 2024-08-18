@@ -14,16 +14,20 @@ By reading beyond this disclaimer you hereby accept this and lose any right of c
 - The files `GBClient.dll`, `nmcogame64.dll`, `engine.dll`, `server_local.dll` and `tier0.dll` downloaded from [here](https://github.com/r1delta/r1delta/files/13839300/Bin_2.zip).
 - The file `engine_ds.dll` downloaded from [here](https://github.com/user-attachments/files/16607639/engine_ds.zip).
 - Read the rest of system requirements for Titanfall by clicking [here](https://www.ea.com/games/titanfall/titanfall).
-- 
-# Instructions
-Currently there are two ways of getting R1Delta:
 
-Via [releases](#installing-r1delta-via-releases) or by [compiling the code](#installing-r1delta-by-compiling-the-code)
+# Instructions
+It's recommended if you don't know what you're doing to use the [R1Delta Installer](https://github.com/r1delta/r1delta_installer/releases).
+
+You can install the project yourself by [compiling the code](https://github.com/r1delta/r1delta/tree/main#installing-r1delta-by-compiling-the-code) or [downloading from releases](https://github.com/r1delta/r1delta/tree/main#installing-r1delta-via-releases).
+
+If you're having issues please open an issue or join the [discord](https://discord.gg/zbFCcSM5t7)
 
 # Installing R1Delta via Releases
 You can find the latest release of R1Delta by clicking [here](https://github.com/r1delta/r1delta/releases/). You need to download `r1delta_full-build.zip`, everything you need is already packed into the .zip file for your comfort.
 
 You are also provided with the `r1delta_minimal-build.zip` if you don't want 3rd party .dlls included (you'll need to apply these manually later on.), in such case, click [here](#instructions-for-the-minimal-zip-release) for the instructions.
+
+If you aren't using Origin, you'll also want to download the `Titanfall.exe` provided and replace the one in your Titanfall installation with it and then run the game with the launch arguments `-noorigin`.
 
 Once you downloaded the .zip file, follow these instructions:
 1) Locate your Titanfall installation directory, this is usually one of the following paths:
@@ -78,6 +82,8 @@ If you decided to download the minimal .zip file instead of the full one, follow
 13) Add `-game r1delta -listenserver -multiple +fatal_script_errors 0` as launch parameters in your Origin/EA App/Steam client.
 14) Success!
 
+If you aren't using Origin, you'll also want to download the `Titanfall.exe` provided in the releases, just drag and replace the one inside your Titanfall installation and run it with the launch arguments `-noorigin`.
+
 # Additional Resources:
 - Download DLC Maps from here if you don't have the Deluxe Edition: [https://archive.org/details/r1titanfall_org](https://archive.org/details/r1titanfall_org) the DLC maps are the .zip files that weigh ~1.5GB
 - Download the ported Titanfall Online maps ready to be used on Titanfall 1 with R1Delta (M.I.A, Nest and Box) from here: [https://icedrive.net/s/Sbt9huiYFCbtykiBVzVtzu6Twi6C](https://icedrive.net/s/Sbt9huiYFCbtykiBVzVtzu6Twi6C)
@@ -87,6 +93,10 @@ If you decided to download the minimal .zip file instead of the full one, follow
 - [@VITALISED](https://github.com/VITALISED)
 - [@mrsteyk](https://github.com/mrsteyk)
 - [@PANCHO7532](https://github.com/PANCHO7532)
+- [@quadruple](https://github.com/quad-damage)
+- [@mv](https://github.com/mvoolt)
+- [@bt](https://github.com/caatge)
+- [@dogecore](https://github.com/HappyDOGE)
 
 (list to be expanded in the future as we speak)
 # Bear
