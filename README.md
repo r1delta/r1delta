@@ -27,7 +27,7 @@ You can find the latest release of R1Delta by clicking [here](https://github.com
 
 You are also provided with the `r1delta_minimal-build.zip` if you don't want 3rd party .dlls included (you'll need to apply these manually later on.), in such case, click [here](#instructions-for-the-minimal-zip-release) for the instructions.
 
-If you aren't using Origin, you'll also want to download the `Titanfall.exe` provided and replace the one in your Titanfall installation with it.
+If you aren't using Origin, you'll also want to download the `Titanfall.exe` provided and replace the one in your Titanfall installation with it and then run the game with the launch arguments `-noorigin`.
 
 Once you downloaded the .zip file, follow these instructions:
 1) Locate your Titanfall installation directory, this is usually one of the following paths:
@@ -82,7 +82,7 @@ If you decided to download the minimal .zip file instead of the full one, follow
 13) Add `-game r1delta -listenserver -multiple +fatal_script_errors 0` as launch parameters in your Origin/EA App/Steam client.
 14) Success!
 
-If you aren't using Origin, you'll also want to download the `Titanfall.exe` provided in the releases, just drag and replace the one inside your Titanfall installation.
+If you aren't using Origin, you'll also want to download the `Titanfall.exe` provided in the releases, just drag and replace the one inside your Titanfall installation and run it with the launch arguments `-noorigin`.
 
 # Additional Resources:
 - Download DLC Maps from here if you don't have the Deluxe Edition: [https://archive.org/details/r1titanfall_org](https://archive.org/details/r1titanfall_org) the DLC maps are the .zip files that weigh ~1.5GB
