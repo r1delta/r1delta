@@ -47,15 +47,8 @@ public:
 		for (const auto& func : m_functions) {
 			if (func->GetContext() & context) {
 				typedef int64_t(*AddSquirrelRegType)(void*, SQFuncRegistrationInternal*);
-
 				static AddSquirrelRegType AddSquirrelReg = reinterpret_cast<AddSquirrelRegType>(((uintptr_t)(GetModuleHandleA("launcher.dll"))) + 0x8E50);
-
-
-				int64_t result = AddSquirrelReg(vmPtr, func->GetInternalReg());
-				if (result != 0) {
-					// Handle error
-					Warning("Failed to register function: %s\n", func->GetName().c_str());
-				}
+				AddSquirrelReg(vmPtr, func->GetInternalReg());
 			}
 		}
 	}
