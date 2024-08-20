@@ -251,7 +251,7 @@ void ConVar_PrintDescription(const ConCommandBaseR1* pVar)
 decltype(Msg) MsgOriginal = NULL;
 void MsgHook(const char* pMsg, ...)
 {
-	char buf[2048];
+	char buf[950];
 	va_list args;
 	va_start(args, pMsg);
 	vprintf(pMsg, args);
@@ -263,7 +263,7 @@ void MsgHook(const char* pMsg, ...)
 decltype(Warning) WarningOriginal = NULL;
 void WarningHook(const char* pMsg, ...)
 {
-	char buf[2048];
+	char buf[950];
 	va_list args;
 	va_start(args, pMsg);
 	vprintf(pMsg, args);
@@ -275,7 +275,7 @@ void WarningHook(const char* pMsg, ...)
 decltype(Warning_SpewCallStack) Warning_SpewCallStackOriginal = NULL;
 void Warning_SpewCallStackHook(int iMaxCallStackLength, const char* pMsg, ...)
 {
-	char buf[2048];
+	char buf[950];
 	va_list args;
 	va_start(args, pMsg);
 	vprintf(pMsg, args);
@@ -287,7 +287,7 @@ void Warning_SpewCallStackHook(int iMaxCallStackLength, const char* pMsg, ...)
 decltype(DevMsg) DevMsgOriginal = NULL;
 void DevMsgHook(int level, const char* pMsg, ...)
 {
-	char buf[2048];
+	char buf[950];
 	va_list args;
 	va_start(args, pMsg);
 	vprintf(pMsg, args);
@@ -299,7 +299,7 @@ void DevMsgHook(int level, const char* pMsg, ...)
 decltype(DevWarning) DevWarningOriginal = NULL;
 void DevWarningHook(int level, const char* pMsg, ...)
 {
-	char buf[2048];
+	char buf[950];
 	va_list args;
 	va_start(args, pMsg);
 	vprintf(pMsg, args);
@@ -311,7 +311,7 @@ void DevWarningHook(int level, const char* pMsg, ...)
 decltype(ConColorMsg) ConColorMsgOriginal = NULL;
 void ConColorMsgHook(const Color& clr, const char* pMsg, ...)
 {
-	char buf[2048];
+	char buf[950];
 	va_list args;
 	va_start(args, pMsg);
 	vprintf(pMsg, args);
@@ -323,7 +323,7 @@ void ConColorMsgHook(const Color& clr, const char* pMsg, ...)
 decltype(ConDMsg) ConDMsgOriginal = NULL;
 void ConDMsgHook(const char* pMsg, ...)
 {
-	char buf[2048];
+	char buf[950];
 	va_list args;
 	va_start(args, pMsg);
 	vprintf(pMsg, args);
@@ -335,7 +335,7 @@ void ConDMsgHook(const char* pMsg, ...)
 decltype(COM_TimestampedLog) COM_TimestampedLogOriginal = NULL;
 void COM_TimestampedLogHook(const char* pMsg, ...)
 {
-	char buf[2048];
+	char buf[950];
 	va_list args;
 	va_start(args, pMsg);
 	vprintf(pMsg, args);
