@@ -68,10 +68,6 @@ const CPUInformation* GetCPUInformationDet()
 	return result;
 }
 
-void* WT_Init_original;
-void WT_Init_hook() {
-}
-
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 {
 
