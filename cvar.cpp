@@ -235,11 +235,11 @@ ConCommandBaseR1O* convertToR1O(const ConCommandBaseR1* commandBase) {
 }
 
 void CCVar_RegisterConCommand(uintptr_t thisptr, ConCommandBaseR1O* pCommandBase) {
-	if (!strcmp(pCommandBase->m_pszName, "toggleconsole"))
+	if (!strcmp_static(pCommandBase->m_pszName, "toggleconsole"))
 		return;
-	if (!strcmp(pCommandBase->m_pszName, "hideconsole"))
+	if (!strcmp_static(pCommandBase->m_pszName, "hideconsole"))
 		return;
-	if (!strcmp(pCommandBase->m_pszName, "showconsole"))
+	if (!strcmp_static(pCommandBase->m_pszName, "showconsole"))
 		return;
 
 	//		__debugbreak();
@@ -295,9 +295,9 @@ const ConVarR1O* CCVar_FindVar2(uintptr_t thisptr, const char* var_name) {
 	//std::cout << __FUNCTION__ << ": " << var_name << std::endl;
 	//static int iFlag = 0;
 	//static bool bInitDone = false;
-	//if (!strcmp(var_name, "developer"))
+	//if (!strcmp_static(var_name, "developer"))
 	//	iFlag++;
-	//if (!strcmp(var_name, "host_thread_mode"))
+	//if (!strcmp_static(var_name, "host_thread_mode"))
 	//	iFlag = 3;
 	//if (iFlag == 2) {
 	//	return (ConVarR1O*)((uintptr_t)OriginalCCVar_FindVar2(cvarinterface, var_name) + 8);
@@ -305,7 +305,7 @@ const ConVarR1O* CCVar_FindVar2(uintptr_t thisptr, const char* var_name) {
 	//if (iFlag == 3) {
 	//	return (ConVarR1O*)((uintptr_t)OriginalCCVar_FindVar2(cvarinterface, var_name) - 8);
 	//}
-	if (!strcmp(var_name, "room_type")) // unused but crashes if NULL
+	if (!strcmp_static(var_name, "room_type")) // unused but crashes if NULL
 		var_name = "portal_funnel_debug";
 	static bool bDone = false;
 	if (!bDone) {

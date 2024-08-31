@@ -193,7 +193,7 @@ __int64 __fastcall sub_629740(__int64 a1, const char* a2, int a3) {
 		savedCalls.push_back({ a1, a2, a3 });
 		return -1;
 	}
-	else if (strcmp(a2, "RemoteWeaponReload") == 0) {
+	else if (strcmp_static(a2, "RemoteWeaponReload") == 0) {
 		for (auto& call : savedCalls) {
 			sub_629740Original(call.a1, call.a2.c_str(), call.a3);
 		}
@@ -232,13 +232,13 @@ void __fastcall cl_DumpPrecacheStats(__int64 CClientState, const char* name) {
 
 	uintptr_t items = 0;
 
-	if (!strcmp(name, "modelprecache")) {
+	if (!strcmp_static(name, "modelprecache")) {
 		items = CClientState + 0x19EF8;
 	}
-	else if (!strcmp(name, "genericprecache")) {
+	else if (!strcmp_static(name, "genericprecache")) {
 		items = CClientState + 0x1DEF8;
 	}
-	else if (!strcmp(name, "decalprecache")) {
+	else if (!strcmp_static(name, "decalprecache")) {
 		items = CClientState + 0x1FEF8;
 	}
 

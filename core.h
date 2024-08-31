@@ -36,6 +36,10 @@
 #include <windows.h>
 #include <string>
 
+// NOTE(mrsteyk): because we know the size beforehand we just memcmp including null terminator
+#define strcmp_static(P, S) memcmp((P), (S), sizeof(S))
+#define string_equal_size(P, L, S) ((L + 1) == sizeof(S) && strcmp_static(P, S) == 0)
+
 static inline bool IsDedicatedServer(void) {
     static int cached_result = -1; // Initially unset
     if (cached_result == -1) {
