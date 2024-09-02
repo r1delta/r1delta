@@ -19,6 +19,12 @@
     <Filter Include="Source Files\silver-bun">
       <UniqueIdentifier>{63fbf397-6c9c-458a-9251-9f8d802facc2}</UniqueIdentifier>
     </Filter>
+    <Filter Include="3rd Party">
+      <UniqueIdentifier>{7118953e-fe40-446a-b35b-5d417b6e18ab}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="3rd Party\zstd">
+      <UniqueIdentifier>{e774be19-0d2b-469c-9983-43af2ea5f1d2}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Source Files\sdk">
       <UniqueIdentifier>{3da493e0-1d34-408e-b11e-bfcb5a2a6579}</UniqueIdentifier>
     </Filter>
@@ -249,6 +255,9 @@
     <ClInclude Include="vsdk\public\math_pfns.h">
       <Filter>Source Files\sdk</Filter>
     </ClInclude>
+    <ClInclude Include="thirdparty\zstd-1.5.6\zstd.h">
+      <Filter>3rd Party\zstd</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">
@@ -343,6 +352,9 @@
     </ClCompile>
     <ClCompile Include="vsdk\tier0\dbg.cpp">
       <Filter>Source Files\sdk</Filter>
+    </ClCompile>
+    <ClCompile Include="thirdparty\zstd-1.5.6\zstd.c">
+      <Filter>3rd Party\zstd</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

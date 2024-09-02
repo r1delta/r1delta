@@ -201,6 +201,7 @@
     <ClInclude Include="thirdparty\silver-bun\silver-bun.h" />
     <ClInclude Include="thirdparty\silver-bun\tebpeb64.h" />
     <ClInclude Include="thirdparty\silver-bun\utils.h" />
+    <ClInclude Include="thirdparty\zstd-1.5.6\zstd.h" />
     <ClInclude Include="tier0_orig.h" />
     <ClInclude Include="utils.h" />
     <ClInclude Include="vector.h" />
@@ -268,6 +269,7 @@
     <ClCompile Include="sendmoveclampfix.cpp" />
     <ClCompile Include="squirrel.cpp" />
     <ClCompile Include="TableDestroyer.cpp" />
+    <ClCompile Include="thirdparty\zstd-1.5.6\zstd.c" />
     <ClCompile Include="utils.cpp" />
     <!-- Add the following includes from the first version -->
     <ClCompile Include="vsdk\tier0\dbg.cpp" />
