@@ -126,7 +126,7 @@ typedef __int64 (*NET_SendPacketType)(
 NET_SendPacketType NET_SendPacketOriginal;
 
 __int64 Detour_NET_OutOfBandPrintf(int sock, void* adr, const char* fmt, ...) {
-	if (strcmp(fmt, "%c00000000000000") == 0) {
+	if (strcmp_static(fmt, "%c00000000000000") == 0) {
 		static const char** gamemode = reinterpret_cast<const char**>((uintptr_t)(GetModuleHandleA("server.dll")) + 0xB68520);
 		static const char* mapname = reinterpret_cast<const char*>((uintptr_t)(GetModuleHandleA("engine_ds.dll")) + 0x1C89A84);
 		//MessageBoxA(NULL, *gamemode, mapname, 16);

@@ -138,7 +138,7 @@ int fs_sprintf_hook(char* Buffer, const char* Format, ...) {
     va_start(args, Format);
 
 
-    if (strcmp(Format, "%s_%03d.vpk") == 0) {
+    if (strcmp_static(Format, "%s_%03d.vpk") == 0) {
         const char* a1 = va_arg(args, const char*);
         if (strstr(a1, "singlechunk") != nullptr) {
             va_end(args);

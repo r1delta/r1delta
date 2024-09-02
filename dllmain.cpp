@@ -41,6 +41,32 @@
 #include "patcher.h"
 #include "filesystem.h"
 #include "logging.h"
+#include <tier0/platform.h>
+
+
+CPUInformation* (__fastcall* GetCPUInformationOriginal)();
+
+const CPUInformation* GetCPUInformationDet()
+{
+	CPUInformation* result = GetCPUInformationOriginal();
+
+	// NOTE(mrsteyk): blame wanderer for SINGLEPLAYER SUPPORT WOWOWOWOWOW SO USEFUL
+	// NOTE(mrsteyk): <=20 global thread pool "IOJob" for filesystem_stdio.dll
+	//                 5 WT simple threads in vstdlib.dll WT_Init (25)
+	//                 1 thread in filesystem_stdio.dll (26) ???
+	//                 1 "RenderThread" simple thread in materialsystem_dx11.dll (27)
+	//                 3 thread pool "GlobPool" in engine.dll due to g_pThreadPool->[4]() (30)
+	//                 1 thread pool "SaveJob"? in engine.dll due to SaveRestore_Init (31)
+	//                 1 simple thread in engine.dll due to QueuedPacketThread (32) (it disappeared?)
+	//                 CRASH
+
+	// NOTE(mrsteyk): Some threads want logical core count, wanderer want's singleplayer
+	if (result->m_nLogicalProcessors >= 20) {
+		result->m_nLogicalProcessors = 19;
+	}
+
+	return result;
+}
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 {
@@ -61,6 +87,9 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 	{
 	case DLL_PROCESS_ATTACH: {
 		MH_Initialize();
+		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("tier0.dll"), "GetCPUInformation"), &GetCPUInformationDet, reinterpret_cast<LPVOID*>(&GetCPUInformationOriginal));
+		MH_EnableHook(MH_ALL_HOOKS);
+
 		if(!IsNoConsole())
 			InitLoggingHooks();
 		StartFileCacheThread();

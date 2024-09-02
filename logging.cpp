@@ -102,7 +102,7 @@ Cbuf_AddTextType Cbuf_AddTextOriginal;
 
 void Cbuf_AddText(int a1, const char* a2, unsigned int a3) {
 	bool shouldLog = true;
-	if (a2 == nullptr || *a2 == '\0' || strcmp(a2, "\n") == 0) {
+	if (a2 == nullptr || *a2 == '\0' || strcmp_static(a2, "\n") == 0) {
 		shouldLog = false;
 	}
 	static uintptr_t returnToKeyInput = uintptr_t(GetModuleHandleA("engine.dll")) + 0x14E668;

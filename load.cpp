@@ -69,6 +69,7 @@
 #include "sendmoveclampfix.h"
 #include "dedicated.h"
 #include "client.h"
+#include "compression.h"
 #pragma intrinsic(_ReturnAddress)
 
 wchar_t kNtDll[] = L"ntdll.dll";
@@ -193,7 +194,7 @@ __int64 __fastcall sub_629740(__int64 a1, const char* a2, int a3) {
 		savedCalls.push_back({ a1, a2, a3 });
 		return -1;
 	}
-	else if (strcmp(a2, "RemoteWeaponReload") == 0) {
+	else if (strcmp_static(a2, "RemoteWeaponReload") == 0) {
 		for (auto& call : savedCalls) {
 			sub_629740Original(call.a1, call.a2.c_str(), call.a3);
 		}
@@ -232,13 +233,13 @@ void __fastcall cl_DumpPrecacheStats(__int64 CClientState, const char* name) {
 
 	uintptr_t items = 0;
 
-	if (!strcmp(name, "modelprecache")) {
+	if (!strcmp_static(name, "modelprecache")) {
 		items = CClientState + 0x19EF8;
 	}
-	else if (!strcmp(name, "genericprecache")) {
+	else if (!strcmp_static(name, "genericprecache")) {
 		items = CClientState + 0x1DEF8;
 	}
-	else if (!strcmp(name, "decalprecache")) {
+	else if (!strcmp_static(name, "decalprecache")) {
 		items = CClientState + 0x1FEF8;
 	}
 
@@ -908,7 +909,13 @@ void __stdcall LoaderNotificationCallback(
 	if (notification_reason != LDR_DLL_NOTIFICATION_REASON_LOADED)
 		return;
 	doBinaryPatchForFile(notification_data->Loaded);
-	if (std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length).find(L"server.dll") != std::string::npos) {
+
+	auto module_name = std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length);
+
+	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"filesystem_stdio.dll") == 0) {
+		InitCompressionHooks();
+	}
+	if (module_name.find(L"server.dll") != std::string::npos) {
 		
 		//doBinaryPatchForFile(*GetModuleNotificationData(L"vstdlib"));
 		LDR_DLL_LOADED_NOTIFICATION_DATA* ndata = GetModuleNotificationData(L"vstdlib");
@@ -1025,11 +1032,11 @@ void __stdcall LoaderNotificationCallback(
 
 	}
 
-	if (IsDedicatedServer() && (std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length).find(L"engine_ds.dll") != std::string::npos)) {
+	if (IsDedicatedServer() && (module_name.find(L"engine_ds.dll") != std::string::npos)) {
 		InitDedicated();
 	}
 
-	if (std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length).find(L"engine.dll") != std::string::npos) {
+	if (module_name.find(L"engine.dll") != std::string::npos) {
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x127C70), &FileSystem_UpdateAddonSearchPaths, reinterpret_cast<LPVOID*>(&FileSystem_UpdateAddonSearchPathsTypeOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x6A420), &ReadFileFromVPKHook, reinterpret_cast<LPVOID*>(&readFileFromVPK));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x9C20), &ReadFromCacheHook, reinterpret_cast<LPVOID*>(&readFromCache));
@@ -1037,10 +1044,8 @@ void __stdcall LoaderNotificationCallback(
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x4BC0), &CBaseFileSystem__CSearchPath__SetPath, reinterpret_cast<LPVOID*>(&CBaseFileSystem__CSearchPath__SetPathOriginal));
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x13D60), &CZipPackFile__Prepare, reinterpret_cast<LPVOID*>(&CZipPackFile__PrepareOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x9AB70), &fs_sprintf_hook, reinterpret_cast<LPVOID*>(NULL));
-		
-		
 	}
-	if (std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length).find(L"client.dll") != std::string::npos) {
+	if (module_name.find(L"client.dll") != std::string::npos) {
 		InitClient();
 	}
 

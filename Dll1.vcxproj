@@ -1,5 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <OutDir>C:\Program Files\EA Games\Titanfall\bin\x64_retail</OutDir>
+    <IncludePath>$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <OutDir>C:\Program Files\EA Games\Titanfall\bin\x64_retail</OutDir>
+    <IntDir>$(ProjectDir)$(Platform)\$(Configuration)\</IntDir>
+    <IncludePath>$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+  </PropertyGroup>
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
       <Configuration>Debug</Configuration>
@@ -156,11 +166,13 @@
       <ModuleDefinitionFile>test.def</ModuleDefinitionFile>
     </Link>
   </ItemDefinitionGroup>
+
   <ItemGroup>
     <ClInclude Include="beardbgon.h" />
     <ClInclude Include="bitbuf.h" />
     <ClInclude Include="client.h" />
     <ClInclude Include="color.h" />
+    <ClInclude Include="compression.h" />
     <ClInclude Include="coordsize.h" />
     <ClInclude Include="core.h" />
     <ClInclude Include="cvar.h" />
@@ -179,6 +191,7 @@
     <ClInclude Include="netadr.h" />
     <ClInclude Include="patcher.h" />
     <ClInclude Include="physics.h" />
+    <ClInclude Include="platform.h" />
     <ClInclude Include="predictionerror.h" />
     <ClInclude Include="sendmoveclampfix.h" />
     <ClInclude Include="squirrel.h" />
@@ -191,6 +204,7 @@
     <ClInclude Include="tier0_orig.h" />
     <ClInclude Include="utils.h" />
     <ClInclude Include="vector.h" />
+    <!-- Add the following includes from the first version -->
     <ClInclude Include="vsdk\public\bitvec.h" />
     <ClInclude Include="vsdk\public\math_pfns.h" />
     <ClInclude Include="vsdk\public\minbase\minbase_annotations.h" />
@@ -234,6 +248,7 @@
   <ItemGroup>
     <ClCompile Include="bitbuf.cpp" />
     <ClCompile Include="client.cpp" />
+    <ClCompile Include="compression.cpp" />
     <ClCompile Include="cvar.cpp" />
     <ClCompile Include="dedicated.cpp" />
     <ClCompile Include="dllmain.cpp" />
@@ -254,6 +269,7 @@
     <ClCompile Include="squirrel.cpp" />
     <ClCompile Include="TableDestroyer.cpp" />
     <ClCompile Include="utils.cpp" />
+    <!-- Add the following includes from the first version -->
     <ClCompile Include="vsdk\tier0\dbg.cpp" />
     <ClCompile Include="vsdk\tier0\platformtime.cpp" />
     <ClCompile Include="vsdk\tier0\valve_tracelogging.cpp" />

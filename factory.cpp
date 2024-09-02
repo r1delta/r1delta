@@ -90,7 +90,7 @@ static CreateInterfaceFn R1OCreateInterface;
 void* R1OFactory(const char* pName, int* pReturnCode) {
 	std::cout << "looking for " << pName << std::endl;
 
-	if (!strcmp(pName, "VEngineServer022")) {
+	if (!strcmp_static(pName, "VEngineServer022")) {
 		std::cout << "wrapping VEngineServer022" << std::endl;
 
 		uintptr_t* r1vtable = *(uintptr_t**)oAppSystemFactory(pName, pReturnCode);
@@ -100,7 +100,7 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 		static void* whatever2 = &g_r1oCVEngineServerInterface;
 		return &whatever2;
 	}
-	if (!strcmp(pName, "VFileSystem017")) {
+	if (!strcmp_static(pName, "VFileSystem017")) {
 		std::cout << "wrapping VFileSystem017" << std::endl;
 
 		uintptr_t* r1vtable = *(uintptr_t**)oFileSystemFactory(pName, pReturnCode);
@@ -130,7 +130,7 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 		fsintfakeptr = (uintptr_t)(&a.ptr1);
 		return &a.ptr1;
 	}
-	if (!strcmp(pName, "VModelInfoServer002")) {
+	if (!strcmp_static(pName, "VModelInfoServer002")) {
 		std::cout << "wrapping VModelInfoServer002" << std::endl;
 		g_CVModelInfoServerInterface = (uintptr_t)oAppSystemFactory(pName, pReturnCode);
 		uintptr_t* r1vtable = *(uintptr_t**)oAppSystemFactory(pName, pReturnCode);
@@ -140,7 +140,7 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 		static void* whatever4 = &g_r1oCVModelInfoServerInterface;
 		return &whatever4;
 	}
-	if (!strcmp(pName, "VEngineServerStringTable001")) {
+	if (!strcmp_static(pName, "VEngineServerStringTable001")) {
 		std::cout << "wrapping VEngineServerStringTable001" << std::endl;
 		stringtableinterface = (uintptr_t)oAppSystemFactory(pName, pReturnCode);
 		static uintptr_t* r1vtable = *(uintptr_t**)oAppSystemFactory(pName, pReturnCode);
@@ -167,7 +167,7 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 		static void* whatever5 = &r1ovtable;
 		return &whatever5;
 	}
-	if (!strcmp(pName, "VEngineCvar007")) {
+	if (!strcmp_static(pName, "VEngineCvar007")) {
 		std::cout << "wrapping VEngineCvar007" << std::endl;
 		static uintptr_t* original_this = *(uintptr_t**)oAppSystemFactory(pName, pReturnCode);
 		static uintptr_t* r1vtable = *(uintptr_t**)oAppSystemFactory(pName, pReturnCode);
@@ -273,7 +273,7 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 		static void* whatever6 = &r1ovtable;
 		return &whatever6;
 	}
-	if (!oAppSystemFactory(pName, pReturnCode) && !strcmp(pName, "VENGINE_DEDICATEDEXPORTS_API_VERSION003")) {
+	if (!oAppSystemFactory(pName, pReturnCode) && !strcmp_static(pName, "VENGINE_DEDICATEDEXPORTS_API_VERSION003")) {
 		std::cout << "forging dediexports" << std::endl;
 		return (void*)1;
 	}
@@ -315,7 +315,7 @@ char __fastcall CServerGameDLL__DLLInit(void* thisptr, CreateInterfaceFn appSyst
 	int* DT_LocalLen = (int*)(((uintptr_t)serverPtr) + 0xE04B48);
 
 	for (int i = 0; i < *DT_LocalLen; ++i) {
-		if (strcmp(DT_Local[i].name, "m_titanRespawnTime") == 0) {
+		if (strcmp_static(DT_Local[i].name, "m_titanRespawnTime") == 0) {
 			DT_BasePlayer[*DT_BasePlayerLen] = DT_Local[i];
 			DT_BasePlayer[*DT_BasePlayerLen].name = "m_nextTitanRespawnAvailable";
 			++(*DT_BasePlayerLen);
@@ -525,7 +525,9 @@ typedef char(*sub_1801C79A0Type)(__int64 a1, __int64 a2);
 sub_1801C79A0Type sub_1801C79A0Original;
 char __fastcall sub_1801C79A0(__int64 a1, __int64 a2)
 {
-	if (!strcmp(*(const char**)(a1 + 16), "DT_BigBrotherPanelEntity") || !strcmp(*(const char**)(a1 + 16), "DT_ControlPanelEntity") || !strcmp(*(const char**)(a1 + 16), "DT_RushPointEntity") || !strcmp(*(const char**)(a1 + 16), "DT_SpawnItemEntity")) {
+	auto dtname = *(const char**)(a1 + 16);
+	auto dtname_len = strlen(dtname);
+	if (string_equal_size(dtname, dtname_len, "DT_BigBrotherPanelEntity") || string_equal_size(dtname, dtname_len, *(const char**)(a1 + 16), "DT_ControlPanelEntity") || string_equal_size(dtname, dtname_len, *(const char**)(a1 + 16), "DT_RushPointEntity") || string_equal_size(dtname, dtname_len, "DT_SpawnItemEntity")) {
 		std::cout << "blocking st " << *(const char**)(a1 + 16) << std::endl;
 		return false;
 	}
