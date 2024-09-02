@@ -364,61 +364,6 @@ extern "C" __declspec(dllexport) void StackToolsNotify_LoadedLibrary(char* pModu
 }
 typedef char(*MatchRecvPropsToSendProps_RType)(__int64 a1, __int64 a2, __int64 a3, __int64 a4);
 MatchRecvPropsToSendProps_RType MatchRecvPropsToSendProps_ROriginal;
-__int64 __fastcall sub_1804719D0(const char* a1, const char* a2)
-{
-	if (!a2 || !a1)
-		return 0;
-	//std::cout << "a1: " << (char*)a1 << " a2: " << (char*)a2 << std::endl;
-
-	unsigned int v4; // r8d
-	int v5; // r9d
-	unsigned int v7; // ecx
-	int v8; // edx
-
-	while (1)
-	{
-		v4 = *a1;
-		v5 = *a2;
-		if (v4 != v5)
-			break;
-		if (!*a1)
-			return 0i64;
-	LABEL_10:
-		v7 = a1[1];
-		v8 = a2[1];
-		a1 += 2;
-		a2 += 2;
-		if (v7 == v8)
-		{
-			if (!v7)
-				return 0i64;
-		}
-		else
-		{
-			if (!v8)
-				return v7;
-			if (v7 - 65 <= 0x19)
-				v7 += 32;
-			if ((unsigned int)(v8 - 65) <= 0x19)
-				v8 += 32;
-			if (v7 != v8)
-			{
-				v7 -= v8;
-				return v7;
-			}
-		}
-	}
-	if (!*a2)
-		return v4;
-	if (v4 - 65 <= 0x19)
-		v4 += 32;
-	if ((unsigned int)(v5 - 65) <= 0x19)
-		v5 += 32;
-	if (v4 == v5)
-		goto LABEL_10;
-	v4 -= v5;
-	return v4;
-}
 
 // #STR: "CompareRecvPropToSendProp: missing a property."
 char __fastcall CompareRecvPropToSendProp(__int64 a1, __int64 a2)
@@ -456,7 +401,7 @@ __int64 FindRecvProp(__int64 a4, const char* v9)
 	for (j = 0i64; ; j += 96i64)
 	{
 		RecvProp = j + *(_QWORD*)a4;
-		if (!(unsigned int)sub_1804719D0(*(const char**)RecvProp, v9))
+		if (_stricmp(*(const char**)RecvProp, v9) == 0)
 			break;
 		if (++v10 >= *(_DWORD*)(a4 + 8))
 			return 0;
