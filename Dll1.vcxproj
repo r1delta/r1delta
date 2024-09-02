@@ -159,6 +159,7 @@
     <ClInclude Include="bitbuf.h" />
     <ClInclude Include="client.h" />
     <ClInclude Include="color.h" />
+    <ClInclude Include="compression.h" />
     <ClInclude Include="coordsize.h" />
     <ClInclude Include="core.h" />
     <ClInclude Include="cvar.h" />
@@ -194,6 +195,7 @@
   <ItemGroup>
     <ClCompile Include="bitbuf.cpp" />
     <ClCompile Include="client.cpp" />
+    <ClCompile Include="compression.cpp" />
     <ClCompile Include="cvar.cpp" />
     <ClCompile Include="dedicated.cpp" />
     <ClCompile Include="dllmain.cpp" />
