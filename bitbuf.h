@@ -16,18 +16,13 @@
 #pragma once
 #endif
 
-#include "platform.h"
-
-#ifdef _WIN32
-#define OUT_Z_CAP(x) _Out_z_cap_(x)
-#else
-#define OUT_Z_CAP(x)
-#endif
+#include "tier0/platform.h"
 
 #ifndef MIN
 #define MIN( a, b ) ( ( ( a ) < ( b ) ) ? ( a ) : ( b ) )
 #endif
-
+#pragma warning(push)
+#pragma warning (disable: 4267)
 //-----------------------------------------------------------------------------
 // You can define a handler function that will be called in case of 
 // out-of-range values and overruns here.
@@ -1631,7 +1626,7 @@ public:
 
 
 WRAP_READ(CBitRead);
-
+#pragma warning( pop ) 
 #endif
 
 

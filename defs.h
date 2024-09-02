@@ -39,7 +39,7 @@ typedef unsigned char uchar;
 typedef unsigned short ushort;
 typedef unsigned long ulong;
 
-typedef          char   int8;
+//typedef          char   int8;
 typedef   signed char   sint8;
 typedef unsigned char   uint8;
 typedef          short  int16;
@@ -65,7 +65,7 @@ typedef ull             uint64;
 // Non-standard boolean types. They are used when the decompiler can not use
 // the standard "bool" type because of the size mistmatch but the possible
 // values are only 0 and 1. See also 'BOOL' type below.
-typedef int8 _BOOL1;
+//typedef int8 _BOOL1;
 typedef int16 _BOOL2;
 typedef int32 _BOOL4;
 
@@ -217,7 +217,7 @@ inline void* qmemcpy(void* dst, const void* src, size_t cnt)
 }
 
 // Generate a reference to pair of operands
-template<class T>  int16 __PAIR__(int8  high, T low) { return (((int16)high) << sizeof(high) * 8) | uint8(low); }
+//template<class T>  int16 __PAIR__(int8  high, T low) { return (((int16)high) << sizeof(high) * 8) | uint8(low); }
 template<class T>  int32 __PAIR__(int16 high, T low) { return (((int32)high) << sizeof(high) * 8) | uint16(low); }
 template<class T>  int64 __PAIR__(int32 high, T low) { return (((int64)high) << sizeof(high) * 8) | uint32(low); }
 template<class T> uint16 __PAIR__(uint8  high, T low) { return (((uint16)high) << sizeof(high) * 8) | uint8(low); }
@@ -258,91 +258,91 @@ inline uint32 __ROR4__(uint32 value, int count) { return __ROL__((uint32)value, 
 inline uint64 __ROR8__(uint64 value, int count) { return __ROL__((uint64)value, -count); }
 
 // carry flag of left shift
-template<class T> int8 __MKCSHL__(T value, uint count)
-{
-    const uint nbits = sizeof(T) * 8;
-    count %= nbits;
-
-    return (value >> (nbits - count)) & 1;
-}
-
-// carry flag of right shift
-template<class T> int8 __MKCSHR__(T value, uint count)
-{
-    return (value >> (count - 1)) & 1;
-}
-
-// sign flag
-template<class T> int8 __SETS__(T x)
-{
-    if (sizeof(T) == 1)
-        return int8(x) < 0;
-    if (sizeof(T) == 2)
-        return int16(x) < 0;
-    if (sizeof(T) == 4)
-        return int32(x) < 0;
-    return int64(x) < 0;
-}
-
-// overflow flag of subtraction (x-y)
-template<class T, class U> int8 __OFSUB__(T x, U y)
-{
-    if (sizeof(T) < sizeof(U))
-    {
-        U x2 = x;
-        int8 sx = __SETS__(x2);
-        return (sx ^ __SETS__(y)) & (sx ^ __SETS__(x2 - y));
-    }
-    else
-    {
-        T y2 = y;
-        int8 sx = __SETS__(x);
-        return (sx ^ __SETS__(y2)) & (sx ^ __SETS__(x - y2));
-    }
-}
-
-// overflow flag of addition (x+y)
-template<class T, class U> int8 __OFADD__(T x, U y)
-{
-    if (sizeof(T) < sizeof(U))
-    {
-        U x2 = x;
-        int8 sx = __SETS__(x2);
-        return ((1 ^ sx) ^ __SETS__(y)) & (sx ^ __SETS__(x2 + y));
-    }
-    else
-    {
-        T y2 = y;
-        int8 sx = __SETS__(x);
-        return ((1 ^ sx) ^ __SETS__(y2)) & (sx ^ __SETS__(x + y2));
-    }
-}
-
-// carry flag of subtraction (x-y)
-template<class T, class U> int8 __CFSUB__(T x, U y)
-{
-    int size = sizeof(T) > sizeof(U) ? sizeof(T) : sizeof(U);
-    if (size == 1)
-        return uint8(x) < uint8(y);
-    if (size == 2)
-        return uint16(x) < uint16(y);
-    if (size == 4)
-        return uint32(x) < uint32(y);
-    return uint64(x) < uint64(y);
-}
-
-// carry flag of addition (x+y)
-template<class T, class U> int8 __CFADD__(T x, U y)
-{
-    int size = sizeof(T) > sizeof(U) ? sizeof(T) : sizeof(U);
-    if (size == 1)
-        return uint8(x) > uint8(x + y);
-    if (size == 2)
-        return uint16(x) > uint16(x + y);
-    if (size == 4)
-        return uint32(x) > uint32(x + y);
-    return uint64(x) > uint64(x + y);
-}
+//template<class T> int8 __MKCSHL__(T value, uint count)
+//{
+//    const uint nbits = sizeof(T) * 8;
+//    count %= nbits;
+//
+//    return (value >> (nbits - count)) & 1;
+//}
+//
+//// carry flag of right shift
+//template<class T> int8 __MKCSHR__(T value, uint count)
+//{
+//    return (value >> (count - 1)) & 1;
+//}
+//
+//// sign flag
+//template<class T> int8 __SETS__(T x)
+//{
+//    if (sizeof(T) == 1)
+//        return int8(x) < 0;
+//    if (sizeof(T) == 2)
+//        return int16(x) < 0;
+//    if (sizeof(T) == 4)
+//        return int32(x) < 0;
+//    return int64(x) < 0;
+//}
+//
+//// overflow flag of subtraction (x-y)
+//template<class T, class U> int8 __OFSUB__(T x, U y)
+//{
+//    if (sizeof(T) < sizeof(U))
+//    {
+//        U x2 = x;
+//        int8 sx = __SETS__(x2);
+//        return (sx ^ __SETS__(y)) & (sx ^ __SETS__(x2 - y));
+//    }
+//    else
+//    {
+//        T y2 = y;
+//        int8 sx = __SETS__(x);
+//        return (sx ^ __SETS__(y2)) & (sx ^ __SETS__(x - y2));
+//    }
+//}
+//
+//// overflow flag of addition (x+y)
+//template<class T, class U> int8 __OFADD__(T x, U y)
+//{
+//    if (sizeof(T) < sizeof(U))
+//    {
+//        U x2 = x;
+//        int8 sx = __SETS__(x2);
+//        return ((1 ^ sx) ^ __SETS__(y)) & (sx ^ __SETS__(x2 + y));
+//    }
+//    else
+//    {
+//        T y2 = y;
+//        int8 sx = __SETS__(x);
+//        return ((1 ^ sx) ^ __SETS__(y2)) & (sx ^ __SETS__(x + y2));
+//    }
+//}
+//
+//// carry flag of subtraction (x-y)
+//template<class T, class U> int8 __CFSUB__(T x, U y)
+//{
+//    int size = sizeof(T) > sizeof(U) ? sizeof(T) : sizeof(U);
+//    if (size == 1)
+//        return uint8(x) < uint8(y);
+//    if (size == 2)
+//        return uint16(x) < uint16(y);
+//    if (size == 4)
+//        return uint32(x) < uint32(y);
+//    return uint64(x) < uint64(y);
+//}
+//
+//// carry flag of addition (x+y)
+//template<class T, class U> int8 __CFADD__(T x, U y)
+//{
+//    int size = sizeof(T) > sizeof(U) ? sizeof(T) : sizeof(U);
+//    if (size == 1)
+//        return uint8(x) > uint8(x + y);
+//    if (size == 2)
+//        return uint16(x) > uint16(x + y);
+//    if (size == 4)
+//        return uint32(x) > uint32(x + y);
+//    return uint64(x) > uint64(x + y);
+//}
 
 #else
 // The following definition is not quite correct because it always returns

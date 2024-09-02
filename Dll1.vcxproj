@@ -73,10 +73,12 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>C:\Program Files\EA Games\Titanfall\bin\x64_retail</OutDir>
+    <IncludePath>$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>C:\Program Files\EA Games\Titanfall\bin\x64_retail</OutDir>
     <IntDir>$(ProjectDir)$(Platform)\$(Configuration)\</IntDir>
+    <IncludePath>$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -177,7 +179,6 @@
     <ClInclude Include="netadr.h" />
     <ClInclude Include="patcher.h" />
     <ClInclude Include="physics.h" />
-    <ClInclude Include="platform.h" />
     <ClInclude Include="predictionerror.h" />
     <ClInclude Include="sendmoveclampfix.h" />
     <ClInclude Include="squirrel.h" />
@@ -190,6 +191,45 @@
     <ClInclude Include="tier0_orig.h" />
     <ClInclude Include="utils.h" />
     <ClInclude Include="vector.h" />
+    <ClInclude Include="vsdk\public\bitvec.h" />
+    <ClInclude Include="vsdk\public\math_pfns.h" />
+    <ClInclude Include="vsdk\public\minbase\minbase_annotations.h" />
+    <ClInclude Include="vsdk\public\minbase\minbase_decls.h" />
+    <ClInclude Include="vsdk\public\minbase\minbase_endian.h" />
+    <ClInclude Include="vsdk\public\minbase\minbase_identify.h" />
+    <ClInclude Include="vsdk\public\minbase\minbase_limits.h" />
+    <ClInclude Include="vsdk\public\minbase\minbase_macros.h" />
+    <ClInclude Include="vsdk\public\minbase\minbase_securezeromemory_impl.h" />
+    <ClInclude Include="vsdk\public\minbase\minbase_types.h" />
+    <ClInclude Include="vsdk\public\minbase\minbase_warnings.h" />
+    <ClInclude Include="vsdk\public\tier0\basetypes.h" />
+    <ClInclude Include="vsdk\public\tier0\dbg.h" />
+    <ClInclude Include="vsdk\public\tier0\memdbgoff.h" />
+    <ClInclude Include="vsdk\public\tier0\memdbgon.h" />
+    <ClInclude Include="vsdk\public\tier0\platform.h" />
+    <ClInclude Include="vsdk\public\tier0\platformtime.h" />
+    <ClInclude Include="vsdk\public\tier0\platform_sockets.h" />
+    <ClInclude Include="vsdk\public\tier0\t0constants.h" />
+    <ClInclude Include="vsdk\public\tier0\valve_off.h" />
+    <ClInclude Include="vsdk\public\tier0\valve_on.h" />
+    <ClInclude Include="vsdk\public\tier0\valve_tracelogging.h" />
+    <ClInclude Include="vsdk\public\tier0\vprof.h" />
+    <ClInclude Include="vsdk\public\tier0\wchartypes.h" />
+    <ClInclude Include="vsdk\public\tier1\fmtstr.h" />
+    <ClInclude Include="vsdk\public\tier1\netadr.h" />
+    <ClInclude Include="vsdk\public\tier1\utlbuffer.h" />
+    <ClInclude Include="vsdk\public\tier1\utlhashmap.h" />
+    <ClInclude Include="vsdk\public\tier1\utliterator.h" />
+    <ClInclude Include="vsdk\public\tier1\utllinkedlist.h" />
+    <ClInclude Include="vsdk\public\tier1\utlmemory.h" />
+    <ClInclude Include="vsdk\public\tier1\utlpriorityqueue.h" />
+    <ClInclude Include="vsdk\public\tier1\utlvector.h" />
+    <ClInclude Include="vsdk\public\vector.h" />
+    <ClInclude Include="vsdk\public\vector2d.h" />
+    <ClInclude Include="vsdk\public\vstdlib\random.h" />
+    <ClInclude Include="vsdk\public\vstdlib\strtools.h" />
+    <ClInclude Include="vsdk\public\winlite.h" />
+    <ClInclude Include="vsdk\tier1\ipv6text.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="bitbuf.cpp" />
@@ -214,6 +254,14 @@
     <ClCompile Include="squirrel.cpp" />
     <ClCompile Include="TableDestroyer.cpp" />
     <ClCompile Include="utils.cpp" />
+    <ClCompile Include="vsdk\tier0\dbg.cpp" />
+    <ClCompile Include="vsdk\tier0\platformtime.cpp" />
+    <ClCompile Include="vsdk\tier0\valve_tracelogging.cpp" />
+    <ClCompile Include="vsdk\tier1\ipv6text.c" />
+    <ClCompile Include="vsdk\tier1\netadr.cpp" />
+    <ClCompile Include="vsdk\tier1\utlbuffer.cpp" />
+    <ClCompile Include="vsdk\tier1\utlmemory.cpp" />
+    <ClCompile Include="vsdk\vstdlib\strtools.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

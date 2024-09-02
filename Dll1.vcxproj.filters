@@ -19,6 +19,9 @@
     <Filter Include="Source Files\silver-bun">
       <UniqueIdentifier>{63fbf397-6c9c-458a-9251-9f8d802facc2}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\sdk">
+      <UniqueIdentifier>{3da493e0-1d34-408e-b11e-bfcb5a2a6579}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="framework.h">
@@ -55,9 +58,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="bitbuf.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="platform.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="coordsize.h">
@@ -126,6 +126,123 @@
     <ClInclude Include="color.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="vsdk\public\winlite.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\tier0\wchartypes.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\tier0\vprof.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\tier0\valve_tracelogging.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\tier0\valve_on.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\tier0\valve_off.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\tier1\utlvector.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\tier1\utlpriorityqueue.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\tier1\utlmemory.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\tier1\utllinkedlist.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\tier1\utliterator.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\tier1\utlhashmap.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\tier1\utlbuffer.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\tier0\t0constants.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\vstdlib\strtools.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\vstdlib\random.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\tier0\platformtime.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\tier0\platform_sockets.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\tier0\platform.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\tier1\netadr.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\minbase\minbase_warnings.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\minbase\minbase_types.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\minbase\minbase_securezeromemory_impl.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\minbase\minbase_macros.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\minbase\minbase_limits.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\minbase\minbase_identify.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\minbase\minbase_endian.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\minbase\minbase_decls.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\minbase\minbase_annotations.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\tier0\memdbgon.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\tier0\memdbgoff.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\tier1\ipv6text.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\tier1\fmtstr.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\tier0\dbg.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\tier0\basetypes.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\bitvec.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\vector.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\vector2d.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\math_pfns.h">
+      <Filter>Source Files\sdk</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">
@@ -193,6 +310,30 @@
     </ClCompile>
     <ClCompile Include="keyvalues.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="vsdk\tier0\valve_tracelogging.cpp">
+      <Filter>Source Files\sdk</Filter>
+    </ClCompile>
+    <ClCompile Include="vsdk\tier1\utlmemory.cpp">
+      <Filter>Source Files\sdk</Filter>
+    </ClCompile>
+    <ClCompile Include="vsdk\tier1\utlbuffer.cpp">
+      <Filter>Source Files\sdk</Filter>
+    </ClCompile>
+    <ClCompile Include="vsdk\vstdlib\strtools.cpp">
+      <Filter>Source Files\sdk</Filter>
+    </ClCompile>
+    <ClCompile Include="vsdk\tier0\platformtime.cpp">
+      <Filter>Source Files\sdk</Filter>
+    </ClCompile>
+    <ClCompile Include="vsdk\tier1\netadr.cpp">
+      <Filter>Source Files\sdk</Filter>
+    </ClCompile>
+    <ClCompile Include="vsdk\tier1\ipv6text.c">
+      <Filter>Source Files\sdk</Filter>
+    </ClCompile>
+    <ClCompile Include="vsdk\tier0\dbg.cpp">
+      <Filter>Source Files\sdk</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

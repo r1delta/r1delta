@@ -227,7 +227,7 @@ inline __int64 __fastcall SQFuncBindingFn(__int64(__fastcall* a1)(_QWORD), __int
 
 	result = ((__int64(__fastcall*)(_QWORD, __int64))a1)(*a3, a2);
 	*(unsigned __int16*)(a5 + 8) = 5;
-	*(_DWORD*)a5 = result;
+	a5 = result;
 	return result;
 }
 

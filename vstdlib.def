@@ -3,3 +3,4 @@ LIBRARY vstdlib.dll
      V_UTF8ToUnicode
      V_UnicodeToUTF8
      KeyValuesSystem
+	 RandomFloat

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "core.h"
-#include "platform.h"
+#include "tier0/platform.h"
 #include <iostream>
 #include "logging.h"
 
