@@ -274,10 +274,12 @@ std::string SafeFormat(const char* format, va_list args) {
         return "Error formatting string";
     }
 
-    std::unique_ptr<char[]> buf(new char[size + 1]);
-    vsnprintf(buf.get(), size + 1, format, args);
+	std::string ret;
+	ret.reserve(size + 1);
+	ret.resize(size);
+    vsnprintf(ret.data(), size + 1, format, args);
 
-    return std::string(buf.get(), buf.get() + size);
+	return ret;
 }
 
 void MsgHook(const char* pMsg, ...) {
