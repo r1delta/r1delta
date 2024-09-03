@@ -290,7 +290,7 @@ void MsgHook(const char* pMsg, ...) {
 
     printf("%s", formatted.c_str());
     if (MsgOriginal) {
-        MsgOriginal(formatted.c_str());
+        MsgOriginal("%s", formatted.c_str());
     }
 }
 
@@ -302,7 +302,7 @@ void WarningHook(const char* pMsg, ...) {
 
     printf("%s", formatted.c_str());
     if (WarningOriginal) {
-        WarningOriginal(formatted.c_str());
+        WarningOriginal("%s", formatted.c_str());
     }
 }
 
@@ -314,7 +314,7 @@ void Warning_SpewCallStackHook(int iMaxCallStackLength, const char* pMsg, ...) {
 
     printf("%s", formatted.c_str());
     if (Warning_SpewCallStackOriginal) {
-        Warning_SpewCallStackOriginal(iMaxCallStackLength, formatted.c_str());
+        Warning_SpewCallStackOriginal(iMaxCallStackLength, "%s", formatted.c_str());
     }
 }
 
@@ -326,7 +326,7 @@ void DevMsgHook(int level, const char* pMsg, ...) {
 
     printf("%s", formatted.c_str());
     if (DevMsgOriginal) {
-        DevMsgOriginal(level, formatted.c_str());
+        DevMsgOriginal(level, "%s", formatted.c_str());
     }
 }
 
@@ -338,7 +338,7 @@ void DevWarningHook(int level, const char* pMsg, ...) {
 
     printf("%s", formatted.c_str());
     if (DevWarningOriginal) {
-        DevWarningOriginal(level, formatted.c_str());
+        DevWarningOriginal(level, "%s", formatted.c_str());
     }
 }
 
@@ -350,7 +350,7 @@ void ConColorMsgHook(const Color& clr, const char* pMsg, ...) {
 
     printf("%s", formatted.c_str());
     if (ConColorMsgOriginal) {
-        ConColorMsgOriginal(clr, formatted.c_str());
+        ConColorMsgOriginal(clr, "%s", formatted.c_str());
     }
 }
 
@@ -362,7 +362,7 @@ void ConDMsgHook(const char* pMsg, ...) {
 
     printf("%s", formatted.c_str());
     if (ConDMsgOriginal) {
-        ConDMsgOriginal(formatted.c_str());
+        ConDMsgOriginal("%s", formatted.c_str());
     }
 }
 
@@ -374,7 +374,7 @@ void COM_TimestampedLogHook(const char* pMsg, ...) {
 
     printf("%s", formatted.c_str());
     if (COM_TimestampedLogOriginal) {
-        COM_TimestampedLogOriginal(formatted.c_str());
+        COM_TimestampedLogOriginal("%s", formatted.c_str());
     }
 }
 
