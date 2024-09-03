@@ -969,9 +969,11 @@ void __stdcall LoaderNotificationCallback(
 
 
 		RegisterConCommand("script", script_cmd, "Execute Squirrel code in server context", FCVAR_GAMEDLL|FCVAR_CHEAT);
-		RegisterConCommand("script_client", script_client_cmd, "Execute Squirrel code in client context", FCVAR_NONE|FCVAR_CHEAT);
-		RegisterConCommand("script_ui", script_ui_cmd, "Execute Squirrel code in UI context", FCVAR_NONE|FCVAR_CHEAT);
-
+		if (!IsDedicatedServer()) {
+			RegisterConCommand("script_client", script_client_cmd, "Execute Squirrel code in client context", FCVAR_NONE | FCVAR_CHEAT);
+			RegisterConCommand("script_ui", script_ui_cmd, "Execute Squirrel code in UI context", FCVAR_NONE | FCVAR_CHEAT);
+			RegisterConCommand("persist", setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
+		}
 
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x364140), &sub_364140, reinterpret_cast<LPVOID*>(NULL));
 		

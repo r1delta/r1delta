@@ -95,7 +95,7 @@
 #define FCVAR_ACCESSIBLE_FROM_THREADS	(1<<25)	// used as a debugging tool necessary to check material system thread convars
 // #define FCVAR_AVAILABLE			(1<<26)
 // #define FCVAR_AVAILABLE			(1<<27)
-// #define FCVAR_AVAILABLE			(1<<31)
+#define FCVAR_PERSIST ( (1<<31) | FCVAR_ARCHIVE | FCVAR_USERINFO | FCVAR_PRINTABLEONLY )
 
 #define FCVAR_MATERIAL_THREAD_MASK ( FCVAR_RELOAD_MATERIALS | FCVAR_RELOAD_TEXTURES | FCVAR_MATERIAL_SYSTEM_THREAD )	
 
@@ -338,13 +338,13 @@ public:
 	const char* Arg(int nIndex) const; // Gets at arguments
 
 	static int MaxCommandLength();
-
-private:
 	enum
 	{
 		COMMAND_MAX_ARGC = 64,
 		COMMAND_MAX_LENGTH = 512,
 	};
+private:
+
 
 	int64_t m_nArgc;
 	int64_t m_nArgv0Size;
@@ -395,3 +395,4 @@ void Con_ColorPrintf(const SourceColor* clr, char* fmt, ...);
 typedef char (*CEngineVGui__InitType)(__int64 a1);
 extern CEngineVGui__InitType CEngineVGui__InitOriginal;
 char CEngineVGui__Init(__int64 a1);
+void setinfopersist_cmd(const CCommand& args);
