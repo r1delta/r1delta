@@ -38,7 +38,7 @@ struct CBaseClient;
 extern CBaseClient* g_pClientArray;
 
 extern SQInteger Script_ClientGetPersistentData(HSQUIRRELVM v, __int64 a2, __int64 a3);
-SQInteger Script_ClientGetPersistentData(HSQUIRRELVM v, __int64 a2, __int64 a3);
+SQInteger Script_ClientGetPersistentData(HSQUIRRELVM v);
 SQInteger Script_ClientGetPersistentDataAsInt(HSQUIRRELVM v);
 SQInteger Script_ServerGetUserInfoKVString(HSQUIRRELVM v);
 SQInteger Script_ServerSetUserInfoKVString(HSQUIRRELVM v);

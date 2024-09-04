@@ -1,4 +1,8 @@
-﻿#include "bitbuf.h"
+﻿#include <string>
+#include <vector>
+#include <cstring>
+#include <algorithm>
+#include "bitbuf.h"
 #include "thirdparty/silver-bun/silver-bun.h"
 #include "cvar.h"
 #include "persistentdata.h"
@@ -6,290 +10,218 @@
 #include "squirrel.h"
 #include "keyvalues.h"
 #include "factory.h"
+
+// Constants
+constexpr size_t MAX_KEY_LENGTH = 254;
+constexpr size_t MAX_VALUE_LENGTH = 254;
+constexpr const char* INVALID_CHARS = "{}()':;\"\n";
+
+// Utility functions
 bool IsValidUserInfoKey(const char* key) {
-	if (!key)
-		return false;
+    if (!key) return false;
 
-	bool isValidKey = true;
-	size_t length = 0;
-	const size_t MAX_LENGTH = 254; // 509 - 1 for null terminator
-
-	for (const char* c = key; *c != '\0'; ++c) {
-		if (length >= MAX_LENGTH) {
-			isValidKey = false;
-			break;
-		}
-
-		if (!(*c >= 'A' && *c <= 'Z') &&
-			!(*c >= 'a' && *c <= 'z') &&
-			!(*c >= '0' && *c <= '9') &&
-			*c != '_') {
-			isValidKey = false;
-			break;
-		}
-
-		++length;
-	}
-
-	return isValidKey;
+    return std::strlen(key) <= MAX_KEY_LENGTH &&
+        std::all_of(key, key + std::strlen(key), [](char c) {
+        return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+            (c >= '0' && c <= '9') || c == '_';
+            });
 }
 
 bool IsValidUserInfoValue(const char* value) {
-	if (!value)
-		return false;
+    if (!value) return false;
 
-	bool isValidValue = true;
-	size_t length = 0;
-	const size_t MAX_LENGTH = 254; // 509 - 1 for null terminator
-	const char* blacklist = "{}()':;\"\n";
-
-	for (const char* c = value; *c != '\0'; ++c) {
-		if (length >= MAX_LENGTH) {
-			isValidValue = false;
-			break;
-		}
-
-		for (const char* b = blacklist; *b != '\0'; ++b) {
-			if (*c == *b) {
-				isValidValue = false;
-				break;
-			}
-		}
-
-		if (!isValidValue) {
-			break;
-		}
-
-		++length;
-	}
-
-	return isValidValue;
-}
-void setinfopersist_cmd(const CCommand& args)
-{
-	static CModule engine("engine.dll");
-	static auto setinfo_cmd = CMemory(engine.GetModuleBase()).OffsetSelf(0x5B520).RCast<decltype(&setinfopersist_cmd)>();
-	static auto setinfo_cmd_flags = CMemory(engine.GetModuleBase()).OffsetSelf(0x05B5FF).RCast<int*>();
-	static auto ccommand_constructor = CMemory(engine.GetModuleBase()).OffsetSelf(0x4806F0).RCast<void(*)(CCommand * thisptr, int nArgC, const char** ppArgV)>();
-	static bool bUnprotectedFlags = false;
-	if (!bUnprotectedFlags) {
-		bUnprotectedFlags = true;
-		DWORD out;
-		VirtualProtect(setinfo_cmd_flags, sizeof(int), PAGE_EXECUTE_READWRITE, &out);
-	}
-	*setinfo_cmd_flags = FCVAR_PERSIST_MASK;
-	if (args.ArgC() >= 3) {
-		if (!IsValidUserInfoKey(args.Arg(1))) {
-			Warning("Invalid user info key %s. Only alphanumeric characters and underscores are allowed.\n", args.Arg(1));
-			return;
-		}
-		if (!IsValidUserInfoValue(args.Arg(2))) {
-			Warning("Invalid user info value %s. Only uh... I forget the rules in code, help!.\n", args.Arg(1));
-			return;
-		}
-		const char* newArgv[CCommand::COMMAND_MAX_ARGC];
-		newArgv[0] = args.Arg(0);
-		char modifiedKey[CCommand::COMMAND_MAX_LENGTH];
-		snprintf(modifiedKey, sizeof(modifiedKey), PERSIST_COMMAND" %s", args.Arg(1));
-		newArgv[1] = modifiedKey;
-		for (int i = 2; i < args.ArgC(); ++i) {
-			newArgv[i] = args.Arg(i);
-		}
-		void* pMemory = malloc(sizeof(CCommand));
-		if (pMemory) {
-			ccommand_constructor(static_cast<CCommand*>(pMemory), args.ArgC(), newArgv);
-			setinfo_cmd(*static_cast<CCommand*>(pMemory));
-			free(pMemory);
-		}
-		else {
-			Msg("Failed to allocate memory for CCommand\n");
-			setinfo_cmd(args);
-		}
-	}
-	else if (args.ArgC() == 2) {
-		auto result = OriginalCCVar_FindVar(cvarinterface, args.GetCommandString());
-		if (result)
-			ConVar_PrintDescription(result);
-	}
-	else {
-		setinfo_cmd(args);
-	}
-	*setinfo_cmd_flags = FCVAR_USERINFO;
-}
-__int64 CConVar__GetSplitScreenPlayerSlot(char* fakethisptr)
-{
-	ConVarR1* thisptr = (ConVarR1*)(fakethisptr - 48); // man
-	if ((thisptr->m_nFlags & FCVAR_PERSIST))
-		return -1; // :)
-	return 0LL;
+    return std::strlen(value) <= MAX_VALUE_LENGTH &&
+        std::none_of(value, value + std::strlen(value), [](char c) {
+        return std::strchr(INVALID_CHARS, c) != nullptr;
+            });
 }
 
-NET_SetConVar__ReadFromBufferType NET_SetConVar__ReadFromBufferOriginal;
+// Command handling
+void setinfopersist_cmd(const CCommand& args) {
+    static CModule engine("engine.dll");
+    static auto setinfo_cmd = CMemory(engine.GetModuleBase()).OffsetSelf(0x5B520).RCast<decltype(&setinfopersist_cmd)>();
+    static auto setinfo_cmd_flags = CMemory(engine.GetModuleBase()).OffsetSelf(0x05B5FF).RCast<int*>();
+    static auto ccommand_constructor = CMemory(engine.GetModuleBase()).OffsetSelf(0x4806F0).RCast<void(*)(CCommand * thisptr, int nArgC, const char** ppArgV)>();
 
-bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer)
-{
-	uint32_t numvars;
-	uint8_t byteCount = buffer.ReadByte();
+    static bool bUnprotectedFlags = false;
+    if (!bUnprotectedFlags) {
+        bUnprotectedFlags = true;
+        DWORD out;
+        VirtualProtect(setinfo_cmd_flags, sizeof(int), PAGE_EXECUTE_READWRITE, &out);
+    }
 
-	if (byteCount == static_cast<uint8_t>(-1))
-	{
-		// New format: read UBitVar
-		numvars = buffer.ReadUBitVar();
-	}
-	else
-	{
-		// Old format: byte count is the number of vars
-		numvars = byteCount;
-	}
+    *setinfo_cmd_flags = FCVAR_PERSIST_MASK;
 
-	thisptr->m_ConVars.RemoveAll();
-	for (uint32_t i = 0; i < numvars; i++)
-	{
-		NetMessageCvar_t var;
-		buffer.ReadString(var.name, sizeof(var.name));
-		buffer.ReadString(var.value, sizeof(var.value));
-		thisptr->m_ConVars.AddToTail(var);
-	}
-	return !buffer.IsOverflowed();
+    if (args.ArgC() >= 3) {
+        if (!IsValidUserInfoKey(args.Arg(1))) {
+            Warning("Invalid user info key %s. Only alphanumeric characters and underscores are allowed.\n", args.Arg(1));
+            return;
+        }
+        if (!IsValidUserInfoValue(args.Arg(2))) {
+            Warning("Invalid user info value %s. Only certain characters are allowed.\n", args.Arg(2));
+            return;
+        }
+
+        std::vector<const char*> newArgv(args.ArgC());
+        newArgv[0] = args.Arg(0);
+
+        char modifiedKey[CCommand::COMMAND_MAX_LENGTH];
+        snprintf(modifiedKey, sizeof(modifiedKey), "%s %s", PERSIST_COMMAND, args.Arg(1));
+        newArgv[1] = modifiedKey;
+
+        std::copy(args.ArgV() + 2, args.ArgV() + args.ArgC(), newArgv.begin() + 2);
+
+        // Allocate memory for CCommand on the stack
+        char commandMemory[sizeof(CCommand)];
+        CCommand* pCommand = reinterpret_cast<CCommand*>(commandMemory);
+
+        // Construct the CCommand object using placement new
+        ccommand_constructor(pCommand, args.ArgC(), newArgv.data());
+
+        // Use the constructed CCommand object
+        setinfo_cmd(*pCommand);
+
+        // Manually call the destructor
+        pCommand->~CCommand();
+    }
+    else if (args.ArgC() == 2) {
+        auto result = OriginalCCVar_FindVar(cvarinterface, args.GetCommandString());
+        if (result)
+            ConVar_PrintDescription(result);
+    }
+    else {
+        setinfo_cmd(args);
+    }
+
+    *setinfo_cmd_flags = FCVAR_USERINFO;
 }
 
-bool NET_SetConVar__WriteToBuffer(NET_SetConVar* thisptr, bf_write& buffer)
-{
-	uint32_t numvars = thisptr->m_ConVars.Count();
-
-	if (numvars < 255)
-	{
-		// Old format: just write the byte
-		buffer.WriteByte(numvars);
-	}
-	else
-	{
-		// New format: write -1 byte, then UBitVar
-		buffer.WriteByte(static_cast<uint8_t>(-1));
-		buffer.WriteUBitVar(numvars);
-	}
-
-	for (uint32_t i = 0; i < numvars; i++)
-	{
-		NetMessageCvar_t* var = &thisptr->m_ConVars[i];
-		buffer.WriteString(var->name);
-		buffer.WriteString(var->value);
-	}
-	return !buffer.IsOverflowed();
+// ConVar handling
+__int64 CConVar__GetSplitScreenPlayerSlot(char* fakethisptr) {
+    ConVarR1* thisptr = reinterpret_cast<ConVarR1*>(fakethisptr - 48);
+    return (thisptr->m_nFlags & FCVAR_PERSIST) ? -1 : 0;
 }
 
+// Network message handling
+bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
+    uint32_t numvars;
+    uint8_t byteCount = buffer.ReadByte();
+
+    if (byteCount == static_cast<uint8_t>(-1)) {
+        numvars = buffer.ReadUBitVar();
+    }
+    else {
+        numvars = byteCount;
+    }
+
+    thisptr->m_ConVars.RemoveAll();
+    for (uint32_t i = 0; i < numvars; i++) {
+        NetMessageCvar_t var;
+        buffer.ReadString(var.name, sizeof(var.name));
+        buffer.ReadString(var.value, sizeof(var.value));
+        thisptr->m_ConVars.AddToTail(var);
+    }
+    return !buffer.IsOverflowed();
+}
+
+bool NET_SetConVar__WriteToBuffer(NET_SetConVar* thisptr, bf_write& buffer) {
+    uint32_t numvars = thisptr->m_ConVars.Count();
+
+    if (numvars < 255) {
+        buffer.WriteByte(numvars);
+    }
+    else {
+        buffer.WriteByte(static_cast<uint8_t>(-1));
+        buffer.WriteUBitVar(numvars);
+    }
+
+    for (uint32_t i = 0; i < numvars; i++) {
+        NetMessageCvar_t* var = &thisptr->m_ConVars[i];
+        buffer.WriteString(var->name);
+        buffer.WriteString(var->value);
+    }
+    return !buffer.IsOverflowed();
+}
+
+// Squirrel VM functions
+SQInteger Script_ClientGetPersistentData(HSQUIRRELVM v) {
+    if (sq_gettop(nullptr, v) != 2) {
+        return sq_throwerror(v, "Expected 1 parameter");
+    }
+
+    const SQChar* str;
+    if (SQ_FAILED(sq_getstring(v, 2, &str))) {
+        return sq_throwerror(v, "Parameter 1 must be a string");
+    }
+
+    std::string varName = std::string(PERSIST_COMMAND) + " " + str;
+    auto var = OriginalCCVar_FindVar(cvarinterface, varName.c_str());
+
+    if (!var) {
+        Warning("Couldn't find persistent variable %s; defaulting to empty\n", str);
+        sq_pushstring(v, "", 0);
+    }
+    else {
+        sq_pushstring(v, var->m_Value.m_pszString, var->m_Value.m_StringLength);
+    }
+
+    return 1;
+}
 struct CBaseClient
 {
-	_BYTE gap0[1040];
-	KeyValues* m_ConVars;
+    _BYTE gap0[1040];
+    KeyValues* m_ConVars;
 };
 CBaseClient* g_pClientArray;
 
-SQInteger Script_ClientGetPersistentData(HSQUIRRELVM v, __int64 a2, __int64 a3) {
-	//sq_pushstring(v, "TEST", -1);
-	//return -1;
-	SQInteger nargs = sq_gettop(0, v);
+SQInteger Script_ServerGetUserInfoKVString(HSQUIRRELVM v) {
+    const void* pPlayer = sq_getentity(v, 2);
+    if (!pPlayer) {
+        return sq_throwerror(v, "player is null");
+    }
 
-	if (nargs != 2) {
-		return sq_throwerror(v, "Expected 1 parameter");
-	}
+    const char* pKey, * pDefaultValue;
+    sq_getstring(v, 3, &pKey);
+    sq_getstring(v, 4, &pDefaultValue);
 
-	const SQChar* str;
-	if (SQ_FAILED(sq_getstring(v, 2, &str))) {
-		return sq_throwerror(v, "Parameter 1 must be a string");
-	}
+    if (!IsValidUserInfoKey(pKey) || !IsValidUserInfoValue(pDefaultValue)) {
+        return sq_throwerror(v, "Invalid user info key or value.");
+    }
 
-	auto var = OriginalCCVar_FindVar(cvarinterface, (std::string(PERSIST_COMMAND" ") + std::string(str)).c_str());
-	auto value = "0";
-	auto valueLen = strlen(value);
-	if (!var) {
-		Warning("Couldn't find persistent variable %s; defaulting to empty\n", str);
-	}
-	else {
-		value = var->m_Value.m_pszString;
-		valueLen = var->m_Value.m_StringLength;
-	}
-	sq_pushstring(v, value, valueLen);
-	return 1;
-}
-SQInteger Script_ClientGetPersistentDataAsInt(HSQUIRRELVM v) {
-	SQInteger nargs = sq_gettop(0, v);
+    auto v2 = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(pPlayer) + 64);
+    auto index = ((v2 - reinterpret_cast<__int64>(pGlobalVarsServer->pEdicts)) / 56) - 1;
 
-	if (nargs != 2) {
-		return sq_throwerror(v, "Expected 1 parameter");
-	}
+    if (!g_pClientArray[index].m_ConVars) {
+        return sq_throwerror(v, "Client has NULL m_ConVars.");
+    }
 
-	const SQChar* str;
-	if (SQ_FAILED(sq_getstring(v, 2, &str))) {
-		return sq_throwerror(v, "Parameter 1 must be a string");
-	}
-
-	auto var = OriginalCCVar_FindVar(cvarinterface, (std::string("__ ") + std::string(str)).c_str());
-	auto value = 0;
-	if (!var) {
-		Warning("Couldn't find persistent variable %s; defaulting to 0", str);
-	}
-	else {
-		value = var->m_Value.m_nValue;
-	}
-	sq_pushinteger(nullptr, v, value);
-	return 1;
+    const char* pResult = g_pClientArray[index].m_ConVars->GetString(pKey, pDefaultValue);
+    sq_pushstring(v, pResult, -1);
+    return 1;
 }
 
+SQInteger Script_ServerSetUserInfoKVString(HSQUIRRELVM v) {
+    const void* pPlayer = sq_getentity(v, 2);
+    if (!pPlayer) {
+        return sq_throwerror(v, "player is null");
+    }
 
-SQInteger Script_ServerGetUserInfoKVString(HSQUIRRELVM v)
-{
-	const void* pPlayer = sq_getentity(v, 2);
-	if (!pPlayer)
-	{
-		sq_throwerror(v, "player is null");
-		return -1;
-	}
+    const char* pKey, * pValue;
+    sq_getstring(v, 3, &pKey);
+    sq_getstring(v, 4, &pValue);
 
-	const char* pKey, * pDefaultValue;
-	sq_getstring(v, 3, &pKey);
-	sq_getstring(v, 4, &pDefaultValue);
-	if (!IsValidUserInfoValue(pKey) || !IsValidUserInfoValue(pDefaultValue)) {
-		sq_throwerror(v, "Invalid user info key or value.");
-		return -1;
-	}
+    if (!IsValidUserInfoKey(pKey) || !IsValidUserInfoValue(pValue)) {
+        return sq_throwerror(v, "Invalid user info key or value.");
+    }
 
-	auto v2 = *(__int64*)(((__int64)pPlayer + 64));
-	auto index = ((v2 - (__int64)(pGlobalVarsServer->pEdicts)) / 56) - 1;
-	if (!g_pClientArray[index].m_ConVars) {
-		sq_throwerror(v, "Client has NULL m_ConVars.");
-		return -1;
-	}
-	const char* pResult = g_pClientArray[index].m_ConVars->GetString(pKey, pDefaultValue); // (◣_◢)
-	sq_pushstring(v, pResult, -1);
-	return 1;
-}
+    auto v2 = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(pPlayer) + 64);
+    auto index = ((v2 - reinterpret_cast<__int64>(pGlobalVarsServer->pEdicts)) / 56) - 1;
 
+    if (!g_pClientArray[index].m_ConVars) {
+        return sq_throwerror(v, "Client has NULL m_ConVars.");
+    }
 
-SQInteger Script_ServerSetUserInfoKVString(HSQUIRRELVM v)
-{
-	const void* pPlayer = sq_getentity(v, 2);
-	if (!pPlayer)
-	{
-		sq_throwerror(v, "player is null");
-		return -1;
-	}
-
-	const char* pKey, * pValue;
-	sq_getstring(v, 3, &pKey);
-	sq_getstring(v, 4, &pValue);
-	if (!IsValidUserInfoValue(pKey) || !IsValidUserInfoValue(pValue)) {
-		sq_throwerror(v, "Invalid user info key or value.");
-		return -1;
-	}
-
-	auto v2 = *(__int64*)(((__int64)pPlayer + 64));
-	auto index = ((v2 - (__int64)(pGlobalVarsServer->pEdicts)) / 56) - 1;
-	if (!g_pClientArray[index].m_ConVars) {
-		sq_throwerror(v, "Client has NULL m_ConVars.");
-		return -1;
-	}
-	g_pClientArray[index].m_ConVars->SetString(pKey, pValue); // (◣_◢)
-	sq_pushstring(v, pValue, -1);
-	return 1;
+    g_pClientArray[index].m_ConVars->SetString(pKey, pValue);
+    sq_pushstring(v, pValue, -1);
+    return 1;
 }
