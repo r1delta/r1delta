@@ -9,8 +9,17 @@
 bool IsValidUserInfoKey(const char* key) {
 	if (!key)
 		return false;
+
 	bool isValidKey = true;
+	size_t length = 0;
+	const size_t MAX_LENGTH = 508; // 509 - 1 for null terminator
+
 	for (const char* c = key; *c != '\0'; ++c) {
+		if (length >= MAX_LENGTH) {
+			isValidKey = false;
+			break;
+		}
+
 		if (!(*c >= 'A' && *c <= 'Z') &&
 			!(*c >= 'a' && *c <= 'z') &&
 			!(*c >= '0' && *c <= '9') &&
@@ -18,25 +27,40 @@ bool IsValidUserInfoKey(const char* key) {
 			isValidKey = false;
 			break;
 		}
+
+		++length;
 	}
+
 	return isValidKey;
 }
+
 bool IsValidUserInfoValue(const char* value) {
 	if (!value)
 		return false;
+
 	bool isValidValue = true;
+	size_t length = 0;
+	const size_t MAX_LENGTH = 508; // 509 - 1 for null terminator
 	const char* blacklist = "{}()':;\"\n";
 
 	for (const char* c = value; *c != '\0'; ++c) {
+		if (length >= MAX_LENGTH) {
+			isValidValue = false;
+			break;
+		}
+
 		for (const char* b = blacklist; *b != '\0'; ++b) {
 			if (*c == *b) {
 				isValidValue = false;
 				break;
 			}
 		}
+
 		if (!isValidValue) {
 			break;
 		}
+
+		++length;
 	}
 
 	return isValidValue;
