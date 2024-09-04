@@ -136,8 +136,39 @@ CSquirrelVM__RegisterGlobalConstantInt_t CSquirrelVM__RegisterGlobalConstantInt;
 CSquirrelVM__GetEntityFromInstance_t CSquirrelVM__GetEntityFromInstance;
 sq_GetEntityConstant_CBaseEntity_t sq_GetEntityConstant_CBaseEntity;
 AddSquirrelReg_t AddSquirrelReg;
+//
+//const char* __fastcall Script_GetConVarString(const char* a1, __int64 a2, __int64 a3)
+//{
+//	_BYTE v5[8]; // [rsp+20h] [rbp-18h] BYREF
+//	__int64 v6; // [rsp+28h] [rbp-10h]
+//
+//	LOBYTE(a3) = 1;
+//	sub_180665BA0(v5, a1, a3);
+//	if ((unsigned __int8)sub_180664D70(v5))
+//		return *(const char**)(v6 + 72);
+//	sub_1802C4FE0("ConVar %s is not valid", a1);
+//	return Locale;
+//}
+SQInteger SquirrelNativeFunctionTest(HSQUIRRELVM v, __int64 a2, __int64 a3)
+{
+	const SQChar* str;
+	sq_getstring(v, 2, &str);
+	SQInteger integer;
+	sq_getinteger(nullptr, v, 3, &integer);
+	SQFloat fl;
+	sq_getfloat(nullptr, v, 4, &fl);
+	SQBool bo;
+	sq_getbool(nullptr, v, 5, &bo);
 
-SQInteger Script_ClientGetPersistentData(HSQUIRRELVM v) {
+	Msg("[sq] SquirrelNativeFunctionTest native: %s %i %f %d", str, integer, fl, bo);
+
+	sq_pushstring(v, "from native", -1);
+	return 1;
+}
+
+SQInteger Script_ClientGetPersistentData(HSQUIRRELVM v, __int64 a2, __int64 a3) {
+	//sq_pushstring(v, "TEST", -1);
+	//return -1;
 	SQInteger nargs = sq_gettop(0, v);
 
 	if (nargs != 2) {
@@ -233,10 +264,10 @@ bool GetSQVMFuncs() {
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_CLIENT | SCRIPT_CONTEXT_UI, // Available in client script contexts
 		"GetPersistentVar",
-		Script_ClientGetPersistentData,
+		(SQFUNCTION)Script_ClientGetPersistentData,
 		".s", // String
 		2,      // Expects 1 parameters
-		"s",    // Returns a string
+		"string",    // Returns a string
 		"str",
 		"Get a persistent data value"
 	);
@@ -246,10 +277,13 @@ bool GetSQVMFuncs() {
 		Script_ClientGetPersistentDataAsInt,
 		".s", // String
 		2,      // Expects 1 parameter
-		"i",    // Returns an int (idk if i is the right char for this lmao)
+		"int",    // Returns an int (idk if i is the right char for this lmao)
 		"str",
 		"Get a persistent data value as an integer I guess I don't know why you wouldn't just do this yourself"
 	);
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_CLIENT | SCRIPT_CONTEXT_UI, // Available in client script contexts
+		"SquirrelNativeFunctionTest", (SQFUNCTION)SquirrelNativeFunctionTest, ".sifb", 0, "string", "string text, int a2, float a3, bool a4", "Test registering and calling native function in Squirrel.");
 	initialized = true;
 	return true;
 }

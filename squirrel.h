@@ -200,7 +200,7 @@ struct SQFuncRegistrationInternal {
 	// nparamscheck 0 = don't check params, number = check for exact number of params, -number = check for at least abs(number) params
 	// . = any; o = null (?); i = integer; f = float; n = integer or float; s = string; t = table; a = array; u = userdata; c = closure/nativeclosure; g = generator; p = userpointer; v = thread; x = class instance; y = class; b = bool
 	// at least those are supported for sure: nxbs. (number, instance, boolean, string, any)
-	// [untested] #define SQ_MATCHTYPEMASKSTRING (-99999) = If SQ_MATCHTYPEMASKSTRING is passed instead of the number of parameters, the function will automatically extrapolate the number of parameters to check from the typemask(eg. if the typemask is �.sn� is like passing 3).
+	// [untested] #define SQ_MATCHTYPEMASKSTRING (-99999) = If SQ_MATCHTYPEMASKSTRING is passed instead of the number of parameters, the function will automatically extrapolate the number of parameters to check from the typemask(eg. if the typemask is ".sn" is like passing 3).
 	const char* szTypeMask; //0x0018 can be: .s, .ss., .., ..  
 	__int64 nparamscheck_probably; //0x0020 can be: 2, -3, 2, 0  
 
@@ -220,17 +220,25 @@ struct SQFuncRegistrationInternal {
 	}
 };
 
-
-inline __int64 __fastcall SQFuncBindingFn(__int64(__fastcall* a1)(_QWORD), __int64 a2, _QWORD* a3, __int64 a4, __int64 a5)
+inline const char* empty_str = "";
+inline __int64 __fastcall SQFuncBindingFn(
+	__int64(__fastcall* a1)(const char*),
+	__int64 a2,
+	const char** a3,
+	__int64 a4,
+	__int64 a5)
 {
+	const char* v6; // rcx
 	__int64 result; // rax
 
-	result = ((__int64(__fastcall*)(_QWORD, __int64))a1)(*a3, a2);
-	*(unsigned __int16*)(a5 + 8) = 5;
-	a5 = result;
+	v6 = empty_str;
+	if (*a3)
+		v6 = *a3;
+	result = a1(v6);
+	*(_WORD*)(a5 + 8) = 32;
+	*(_QWORD*)a5 = result;
 	return result;
 }
-
 class SQFuncRegistration
 {
 public:
@@ -286,6 +294,7 @@ private:
 	std::string m_argNames;
 	SQFuncRegistrationInternal m_internalReg;
 };
+
 
 typedef void* (*CScriptManager__CreateNewVMType)(__int64 a1, int a2, unsigned int a3);
 extern CScriptManager__CreateNewVMType CScriptManager__CreateNewVMOriginal;
