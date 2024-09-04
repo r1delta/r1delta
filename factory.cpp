@@ -296,11 +296,12 @@ public:
 	virtual void whatever() = 0;
 	virtual void Init() = 0;
 };
-
+CGlobalVarsServer2015* pGlobalVarsServer;
 char __fastcall CServerGameDLL__DLLInit(void* thisptr, CreateInterfaceFn appSystemFactory,
 	CreateInterfaceFn physicsFactory, CreateInterfaceFn fileSystemFactory,
 	CGlobalVarsServer2015* pGlobals)
 {
+	pGlobalVarsServer = pGlobals;
 	if (IsDedicatedServer()) {
 		pGlobals = (CGlobalVarsServer2015*)((uintptr_t)pGlobals - 4); // Don't ask. If you DO ask, you will die a violent, painful death - wndrr
 		pGlobals->nTimestampNetworkingBase = 100;

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "load.h"
 #include <cstdlib>
@@ -30,6 +30,8 @@
 #include <streambuf>
 #include "logging.h"
 #include <map>
+#include "keyvalues.h"
+#include "persistentdata.h"
 #pragma intrinsic(_ReturnAddress)
 
 class ScriptFunctionRegistry {
@@ -45,7 +47,7 @@ public:
 
 	void registerFunctions(void* vmPtr, ScriptContext context) {
 		for (const auto& func : m_functions) {
-			if (func->GetContext() & context) {
+			if (func->GetContext() == context) {
 				typedef int64_t(*AddSquirrelRegType)(void*, SQFuncRegistrationInternal*);
 				static AddSquirrelRegType AddSquirrelReg = reinterpret_cast<AddSquirrelRegType>(((uintptr_t)(GetModuleHandleA("launcher.dll"))) + 0x8E50);
 				AddSquirrelReg(vmPtr, func->GetInternalReg());
@@ -134,7 +136,7 @@ sq_throwerror_t sq_throwerror;
 RunCallback_t RunCallback;
 CSquirrelVM__RegisterGlobalConstantInt_t CSquirrelVM__RegisterGlobalConstantInt;
 CSquirrelVM__GetEntityFromInstance_t CSquirrelVM__GetEntityFromInstance;
-sq_GetEntityConstant_CBaseEntity_t sq_GetEntityConstant_CBaseEntity;
+sq_GetEntityConstant_CBaseEntity_t sq_GetEntityConstant_CBaseEntity; // CLIENT
 AddSquirrelReg_t AddSquirrelReg;
 //
 //const char* __fastcall Script_GetConVarString(const char* a1, __int64 a2, __int64 a3)
@@ -180,9 +182,9 @@ SQInteger Script_ClientGetPersistentData(HSQUIRRELVM v, __int64 a2, __int64 a3) 
 		return sq_throwerror(v, "Parameter 1 must be a string");
 	}
 
-	auto var = OriginalCCVar_FindVar(cvarinterface, (std::string("__ ") + std::string(str)).c_str());
-	auto value = "\x00";
-	auto valueLen = 0;
+	auto var = OriginalCCVar_FindVar(cvarinterface, (std::string(PERSIST_COMMAND" ") + std::string(str)).c_str());
+	auto value = "0";
+	auto valueLen = strlen(value);
 	if (!var) {
 		Warning("Couldn't find persistent variable %s; defaulting to empty\n", str);
 	}
@@ -216,11 +218,121 @@ SQInteger Script_ClientGetPersistentDataAsInt(HSQUIRRELVM v) {
 	sq_pushinteger(nullptr, v, value);
 	return 1;
 }
+struct CBaseClient
+{
+	_BYTE gap0[1040];
+	KeyValues* m_ConVars;
+};
+CBaseClient* g_pClientArray;
+void* __fastcall CSquirrelVM__GetEntityFromInstance_Rebuild(__int64 a2, __int64 a3)
+{
+	__int64 result; // rax
+	__int64 v4; // rax
+	__int64 v5; // rcx
+	__int64 v6; // rax
+	unsigned __int64 v7; // rax
+
+	if (!a2)
+	{
+		return 0LL;
+	}
+	if (*(_DWORD*)a2 != 0xA008000)
+		return 0LL;
+	v4 = *(_QWORD*)(a2 + 8);
+	v5 = *(_QWORD*)(v4 + 64);
+	if (!v5)
+		return 0LL;
+	v6 = *(_QWORD*)(v4 + 56);
+	if (a3)
+	{
+		v7 = *(_QWORD*)(v6 + 128);
+		if (v7 != a3)
+		{
+			if (v7 < 2)
+				return 0LL;
+			result = *(_QWORD*)(v7 + 24);
+			if (!result)
+				return 0LL;
+			while (result != a3)
+			{
+				result = *(_QWORD*)(result + 24);
+				if (!result)
+					return (void*)result;
+			}
+		}
+	}
+	return (void*)(*(_QWORD*)v5);
+}
+
+void* sq_getentity(HSQUIRRELVM v, SQInteger iStackPos)
+{
+	SQObject obj;
+	sq_getstackobj(nullptr, v, iStackPos, &obj);
+	static auto constant = ((uintptr_t)(GetModuleHandleA("server.dll")) + 0xD42040);
+	return CSquirrelVM__GetEntityFromInstance_Rebuild((__int64)(&obj), (__int64)((char**)constant));
+}
+SQInteger Script_ServerGetUserInfoKVString(HSQUIRRELVM v)
+{
+	const void* pPlayer = sq_getentity(v, 2);
+	if (!pPlayer)
+	{
+		sq_throwerror(v, "player is null");
+		return -1;
+	}
+	
+	const char* pKey, *pDefaultValue;
+	sq_getstring(v, 3, &pKey);
+	sq_getstring(v, 4, &pDefaultValue);
+	if (!IsValidUserInfoValue(pKey) || !IsValidUserInfoValue(pDefaultValue)) {
+		sq_throwerror(v, "Invalid user info key or value.");
+		return -1;
+	}
+
+	auto v2 = *(__int64*)(((__int64)pPlayer +64));
+	auto index = ((v2 - (__int64)(pGlobalVarsServer->pEdicts)) / 56) - 1;
+	if (!g_pClientArray[index].m_ConVars) {
+		sq_throwerror(v, "Client has NULL m_ConVars.");
+		return -1;
+	}
+	const char* pResult = g_pClientArray[index].m_ConVars->GetString(pKey, pDefaultValue); // (◣_◢)
+	sq_pushstring(v, pResult, -1);
+	return 1;
+}
+
+
+SQInteger Script_ServerSetUserInfoKVString(HSQUIRRELVM v)
+{
+	const void* pPlayer = sq_getentity(v, 2);
+	if (!pPlayer)
+	{
+		sq_throwerror(v, "player is null");
+		return -1;
+	}
+
+	const char* pKey, * pValue;
+	sq_getstring(v, 3, &pKey);
+	sq_getstring(v, 4, &pValue);
+	if (!IsValidUserInfoValue(pKey) || !IsValidUserInfoValue(pValue)) {
+		sq_throwerror(v, "Invalid user info key or value.");
+		return -1;
+	}
+
+	auto v2 = *(__int64*)(((__int64)pPlayer + 64));
+	auto index = ((v2 - (__int64)(pGlobalVarsServer->pEdicts)) / 56) - 1;
+	if (!g_pClientArray[index].m_ConVars) {
+		sq_throwerror(v, "Client has NULL m_ConVars.");
+		return -1;
+	}
+	g_pClientArray[index].m_ConVars->SetString(pKey, pValue); // (◣_◢)
+	sq_pushstring(v, pValue, -1);
+	return 1;
+}
+
 // Function to initialize all SQVM functions
 bool GetSQVMFuncs() {
 	static bool initialized = false;
 	if (initialized) return true;
-
+	g_pClientArray = CMemory(CModule("engine.dll").GetModuleBase()).OffsetSelf(0x2966340).RCast<CBaseClient*>(); // TODO: dedicated
 	HMODULE launcherModule = GetModuleHandleA("launcher.dll");
 	if (!launcherModule) return false;
 
@@ -260,9 +372,10 @@ bool GetSQVMFuncs() {
 	RunCallback = reinterpret_cast<RunCallback_t>(baseAddress + 0x89A0);
 	CSquirrelVM__RegisterGlobalConstantInt = reinterpret_cast<CSquirrelVM__RegisterGlobalConstantInt_t>(baseAddress + 0xA680);
 	CSquirrelVM__GetEntityFromInstance = reinterpret_cast<CSquirrelVM__GetEntityFromInstance_t>(baseAddress + 0x9930);
+	sq_GetEntityConstant_CBaseEntity = reinterpret_cast<sq_GetEntityConstant_CBaseEntity_t>((uintptr_t)GetModuleHandleA("client.dll") + 0x2EF850);
 	AddSquirrelReg = reinterpret_cast<AddSquirrelReg_t>(baseAddress + 0x8E50);
 	REGISTER_SCRIPT_FUNCTION(
-		SCRIPT_CONTEXT_CLIENT | SCRIPT_CONTEXT_UI, // Available in client script contexts
+		SCRIPT_CONTEXT_CLIENT,
 		"GetPersistentVar",
 		(SQFUNCTION)Script_ClientGetPersistentData,
 		".s", // String
@@ -272,17 +385,47 @@ bool GetSQVMFuncs() {
 		"Get a persistent data value"
 	);
 	REGISTER_SCRIPT_FUNCTION(
-		SCRIPT_CONTEXT_CLIENT | SCRIPT_CONTEXT_UI, // Available in client script contexts
-		"GetPersistentVarAsInt",
-		Script_ClientGetPersistentDataAsInt,
+		SCRIPT_CONTEXT_UI,
+		"GetPersistentVar",
+		(SQFUNCTION)Script_ClientGetPersistentData,
 		".s", // String
-		2,      // Expects 1 parameter
-		"int",    // Returns an int (idk if i is the right char for this lmao)
+		2,      // Expects 1 parameters
+		"string",    // Returns a string
 		"str",
-		"Get a persistent data value as an integer I guess I don't know why you wouldn't just do this yourself"
+		"Get a persistent data value"
+	);
+	//REGISTER_SCRIPT_FUNCTION(
+	//	SCRIPT_CONTEXT_CLIENT | SCRIPT_CONTEXT_UI, // Available in client script contexts
+	//	"GetPersistentVarAsInt",
+	//	Script_ClientGetPersistentDataAsInt,
+	//	".s", // String
+	//	2,      // Expects 1 parameter
+	//	"int",    // Returns an int (idk if i is the right char for this lmao)
+	//	"str",
+	//	"Get a persistent data value as an integer I guess I don't know why you wouldn't just do this yourself"
+	//);
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER, // Available in client script contexts
+		"GetUserInfoVarForClient",
+		Script_ServerGetUserInfoKVString,
+		"..ss", // String
+		4,      // Expects 3 parameters
+		"string",    // Returns an int (idk if i is the right char for this lmao)
+		"str",
+		"Get a persistent userinfo value"
 	);
 	REGISTER_SCRIPT_FUNCTION(
-		SCRIPT_CONTEXT_CLIENT | SCRIPT_CONTEXT_UI, // Available in client script contexts
+		SCRIPT_CONTEXT_SERVER, // Available in client script contexts
+		"SetUserInfoVarForClient",
+		Script_ServerSetUserInfoKVString,
+		"..ss", // String
+		4,      // Expects 3 parameters
+		"string",    // Returns an int (idk if i is the right char for this lmao)
+		"str",
+		"Set a persistent userinfo value (this does NOT replicate you will need to send the replication command)"
+	);
+	REGISTER_SCRIPT_FUNCTION(
+		1 << SCRIPT_CONTEXT_CLIENT | 1 << SCRIPT_CONTEXT_UI, // Available in client script contexts
 		"SquirrelNativeFunctionTest", (SQFUNCTION)SquirrelNativeFunctionTest, ".sifb", 0, "string", "string text, int a2, float a3, bool a4", "Test registering and calling native function in Squirrel.");
 	initialized = true;
 	return true;

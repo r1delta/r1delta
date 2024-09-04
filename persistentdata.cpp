@@ -3,6 +3,41 @@
 #include "cvar.h"
 #include "persistentdata.h"
 #include "logging.h"
+bool IsValidUserInfoKey(const char* key) {
+	if (!key)
+		return false;
+	bool isValidKey = true;
+	for (const char* c = key; *c != '\0'; ++c) {
+		if (!(*c >= 'A' && *c <= 'Z') &&
+			!(*c >= 'a' && *c <= 'z') &&
+			!(*c >= '0' && *c <= '9') &&
+			*c != '_') {
+			isValidKey = false;
+			break;
+		}
+	}
+	return isValidKey;
+}
+bool IsValidUserInfoValue(const char* value) {
+	if (!value)
+		return false;
+	bool isValidValue = true;
+	const char* blacklist = "{}()':;\"\n";
+
+	for (const char* c = value; *c != '\0'; ++c) {
+		for (const char* b = blacklist; *b != '\0'; ++b) {
+			if (*c == *b) {
+				isValidValue = false;
+				break;
+			}
+		}
+		if (!isValidValue) {
+			break;
+		}
+	}
+
+	return isValidValue;
+}
 void setinfopersist_cmd(const CCommand& args)
 {
 	static CModule engine("engine.dll");
@@ -17,25 +52,18 @@ void setinfopersist_cmd(const CCommand& args)
 	}
 	*setinfo_cmd_flags = FCVAR_PERSIST_MASK;
 	if (args.ArgC() >= 3) {
-		const char* key = args.Arg(1);
-		bool isValidKey = true;
-		for (const char* c = key; *c != '\0'; ++c) {
-			if (!(*c >= 'A' && *c <= 'Z') &&
-				!(*c >= 'a' && *c <= 'z') &&
-				!(*c >= '0' && *c <= '9') &&
-				*c != '_') {
-				isValidKey = false;
-				break;
-			}
+		if (!IsValidUserInfoKey(args.Arg(1))) {
+			Warning("Invalid user info key %s. Only alphanumeric characters and underscores are allowed.\n", args.Arg(1));
+			return;
 		}
-		if (!isValidKey) {
-			Warning("Invalid key %s. Only alphanumeric characters and underscores are allowed.\n", args.Arg(1));
+		if (!IsValidUserInfoValue(args.Arg(2))) {
+			Warning("Invalid user info value %s. Only uh... I forget the rules in code, help!.\n", args.Arg(1));
 			return;
 		}
 		const char* newArgv[CCommand::COMMAND_MAX_ARGC];
 		newArgv[0] = args.Arg(0);
 		char modifiedKey[CCommand::COMMAND_MAX_LENGTH];
-		snprintf(modifiedKey, sizeof(modifiedKey), PERSIST_COMMAND" %s", key);
+		snprintf(modifiedKey, sizeof(modifiedKey), PERSIST_COMMAND" %s", args.Arg(1));
 		newArgv[1] = modifiedKey;
 		for (int i = 2; i < args.ArgC(); ++i) {
 			newArgv[i] = args.Arg(i);

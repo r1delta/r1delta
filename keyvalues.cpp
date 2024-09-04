@@ -1007,9 +1007,9 @@ void KeyValues::SetPtr(const char* pszKeyName, void* pValue)
 void KeyValues::SetStringValue(char const* pszValue)
 {
 	// delete the old value
-	delete[] m_sValue;
+	KeyValuesSystem()->FreeKeyValuesMemory(m_sValue);
 	// make sure we're not storing the WSTRING  - as we're converting over to STRING
-	delete[] m_wsValue;
+	KeyValuesSystem()->FreeKeyValuesMemory(m_wsValue);
 	m_wsValue = nullptr;
 
 	if (!pszValue)
@@ -1020,7 +1020,7 @@ void KeyValues::SetStringValue(char const* pszValue)
 
 	// allocate memory for the new value and copy it in
 	size_t len = strlen(pszValue);
-	m_sValue = new char[len + 1];
+	m_sValue = (char*)(KeyValuesSystem()->AllocKeyValuesMemory(len + 1));
 	memcpy(m_sValue, pszValue, len + 1);
 
 	m_iDataType = TYPE_STRING;

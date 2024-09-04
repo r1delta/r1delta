@@ -30,3 +30,6 @@ bool __fastcall NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& b
 bool __fastcall NET_SetConVar__WriteToBuffer(NET_SetConVar* thisptr, bf_write& buffer);
 __int64 CConVar__GetSplitScreenPlayerSlot(char* thisptr);
 void setinfopersist_cmd(const CCommand& args);
+
+bool IsValidUserInfoKey(const char* key);
+bool IsValidUserInfoValue(const char* key);
