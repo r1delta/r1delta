@@ -12,7 +12,7 @@ bool IsValidUserInfoKey(const char* key) {
 
 	bool isValidKey = true;
 	size_t length = 0;
-	const size_t MAX_LENGTH = 508; // 509 - 1 for null terminator
+	const size_t MAX_LENGTH = 254; // 509 - 1 for null terminator
 
 	for (const char* c = key; *c != '\0'; ++c) {
 		if (length >= MAX_LENGTH) {
@@ -40,7 +40,7 @@ bool IsValidUserInfoValue(const char* value) {
 
 	bool isValidValue = true;
 	size_t length = 0;
-	const size_t MAX_LENGTH = 508; // 509 - 1 for null terminator
+	const size_t MAX_LENGTH = 254; // 509 - 1 for null terminator
 	const char* blacklist = "{}()':;\"\n";
 
 	for (const char* c = value; *c != '\0'; ++c) {
