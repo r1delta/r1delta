@@ -14,6 +14,7 @@
 // Constants
 constexpr size_t MAX_LENGTH = 254;
 constexpr const char* INVALID_CHARS = "{}()':;\"\n";
+bool g_bNoSendConVar = false;
 
 // Utility functions
 bool IsValidUserInfo(const char* value) {
@@ -47,24 +48,34 @@ void setinfopersist_cmd(const CCommand& args) {
             return;
         }
 
-        std::vector<const char*> newArgv(args.ArgC());
+        // Check for "nosend" argument
+        bool noSend = (args.ArgC() >= 4 && strcmp(args.Arg(3), "nosend") == 0);
+
+        std::vector<const char*> newArgv(noSend ? args.ArgC() - 1 : args.ArgC());
         newArgv[0] = args.Arg(0);
 
         char modifiedKey[CCommand::COMMAND_MAX_LENGTH];
         snprintf(modifiedKey, sizeof(modifiedKey), "%s %s", PERSIST_COMMAND, args.Arg(1));
         newArgv[1] = modifiedKey;
 
-        std::copy(args.ArgV() + 2, args.ArgV() + args.ArgC(), newArgv.begin() + 2);
+        // Copy arguments, skipping "nosend" if present
+        std::copy(args.ArgV() + 2, args.ArgV() + (noSend ? args.ArgC() - 1 : args.ArgC()), newArgv.begin() + 2);
 
         // Allocate memory for CCommand on the stack
         char commandMemory[sizeof(CCommand)];
         CCommand* pCommand = reinterpret_cast<CCommand*>(commandMemory);
 
         // Construct the CCommand object using placement new
-        ccommand_constructor(pCommand, args.ArgC(), newArgv.data());
+        ccommand_constructor(pCommand, noSend ? args.ArgC() - 1 : args.ArgC(), newArgv.data());
+
+        // Set the global variable
+        g_bNoSendConVar = noSend;
 
         // Use the constructed CCommand object
         setinfo_cmd(*pCommand);
+
+        // Reset the global variable
+        g_bNoSendConVar = false;
 
         // Manually call the destructor
         pCommand->~CCommand();
@@ -110,6 +121,12 @@ bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 }
 
 bool NET_SetConVar__WriteToBuffer(NET_SetConVar* thisptr, bf_write& buffer) {
+    if (g_bNoSendConVar) {
+        // Write 0 ConVars
+        buffer.WriteByte(0);
+        return !buffer.IsOverflowed();
+    }
+
     uint32_t numvars = thisptr->m_ConVars.Count();
 
     if (numvars < 255) {
