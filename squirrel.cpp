@@ -168,62 +168,6 @@ SQInteger SquirrelNativeFunctionTest(HSQUIRRELVM v, __int64 a2, __int64 a3)
 	return 1;
 }
 
-SQInteger Script_ClientGetPersistentData(HSQUIRRELVM v, __int64 a2, __int64 a3) {
-	//sq_pushstring(v, "TEST", -1);
-	//return -1;
-	SQInteger nargs = sq_gettop(0, v);
-
-	if (nargs != 2) {
-		return sq_throwerror(v, "Expected 1 parameter");
-	}
-
-	const SQChar* str;
-	if (SQ_FAILED(sq_getstring(v, 2, &str))) {
-		return sq_throwerror(v, "Parameter 1 must be a string");
-	}
-
-	auto var = OriginalCCVar_FindVar(cvarinterface, (std::string(PERSIST_COMMAND" ") + std::string(str)).c_str());
-	auto value = "0";
-	auto valueLen = strlen(value);
-	if (!var) {
-		Warning("Couldn't find persistent variable %s; defaulting to empty\n", str);
-	}
-	else {
-		value = var->m_Value.m_pszString;
-		valueLen = var->m_Value.m_StringLength;
-	}
-	sq_pushstring(v, value, valueLen);
-	return 1;
-}
-SQInteger Script_ClientGetPersistentDataAsInt(HSQUIRRELVM v) {
-	SQInteger nargs = sq_gettop(0, v);
-
-	if (nargs != 2) {
-		return sq_throwerror(v, "Expected 1 parameter");
-	}
-
-	const SQChar* str;
-	if (SQ_FAILED(sq_getstring(v, 2, &str))) {
-		return sq_throwerror(v, "Parameter 1 must be a string");
-	}
-
-	auto var = OriginalCCVar_FindVar(cvarinterface, (std::string("__ ") + std::string(str)).c_str());
-	auto value = 0;
-	if (!var) {
-		Warning("Couldn't find persistent variable %s; defaulting to 0", str);
-	}
-	else {
-		value = var->m_Value.m_nValue;
-	}
-	sq_pushinteger(nullptr, v, value);
-	return 1;
-}
-struct CBaseClient
-{
-	_BYTE gap0[1040];
-	KeyValues* m_ConVars;
-};
-CBaseClient* g_pClientArray;
 void* __fastcall CSquirrelVM__GetEntityFromInstance_Rebuild(__int64 a2, __int64 a3)
 {
 	__int64 result; // rax
@@ -271,62 +215,7 @@ void* sq_getentity(HSQUIRRELVM v, SQInteger iStackPos)
 	static auto constant = ((uintptr_t)(GetModuleHandleA("server.dll")) + 0xD42040);
 	return CSquirrelVM__GetEntityFromInstance_Rebuild((__int64)(&obj), (__int64)((char**)constant));
 }
-SQInteger Script_ServerGetUserInfoKVString(HSQUIRRELVM v)
-{
-	const void* pPlayer = sq_getentity(v, 2);
-	if (!pPlayer)
-	{
-		sq_throwerror(v, "player is null");
-		return -1;
-	}
-	
-	const char* pKey, *pDefaultValue;
-	sq_getstring(v, 3, &pKey);
-	sq_getstring(v, 4, &pDefaultValue);
-	if (!IsValidUserInfoValue(pKey) || !IsValidUserInfoValue(pDefaultValue)) {
-		sq_throwerror(v, "Invalid user info key or value.");
-		return -1;
-	}
 
-	auto v2 = *(__int64*)(((__int64)pPlayer +64));
-	auto index = ((v2 - (__int64)(pGlobalVarsServer->pEdicts)) / 56) - 1;
-	if (!g_pClientArray[index].m_ConVars) {
-		sq_throwerror(v, "Client has NULL m_ConVars.");
-		return -1;
-	}
-	const char* pResult = g_pClientArray[index].m_ConVars->GetString(pKey, pDefaultValue); // (◣_◢)
-	sq_pushstring(v, pResult, -1);
-	return 1;
-}
-
-
-SQInteger Script_ServerSetUserInfoKVString(HSQUIRRELVM v)
-{
-	const void* pPlayer = sq_getentity(v, 2);
-	if (!pPlayer)
-	{
-		sq_throwerror(v, "player is null");
-		return -1;
-	}
-
-	const char* pKey, * pValue;
-	sq_getstring(v, 3, &pKey);
-	sq_getstring(v, 4, &pValue);
-	if (!IsValidUserInfoValue(pKey) || !IsValidUserInfoValue(pValue)) {
-		sq_throwerror(v, "Invalid user info key or value.");
-		return -1;
-	}
-
-	auto v2 = *(__int64*)(((__int64)pPlayer + 64));
-	auto index = ((v2 - (__int64)(pGlobalVarsServer->pEdicts)) / 56) - 1;
-	if (!g_pClientArray[index].m_ConVars) {
-		sq_throwerror(v, "Client has NULL m_ConVars.");
-		return -1;
-	}
-	g_pClientArray[index].m_ConVars->SetString(pKey, pValue); // (◣_◢)
-	sq_pushstring(v, pValue, -1);
-	return 1;
-}
 
 // Function to initialize all SQVM functions
 bool GetSQVMFuncs() {
