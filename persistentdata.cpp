@@ -13,7 +13,7 @@
 
 // Constants
 constexpr size_t MAX_LENGTH = 254;
-constexpr const char* INVALID_CHARS = "{}()':;\"\n";
+constexpr const char* INVALID_CHARS = "{}()':;`\"\n";
 bool g_bNoSendConVar = false;
 
 // Utility functions
@@ -45,6 +45,10 @@ void setinfopersist_cmd(const CCommand& args) {
     if (args.ArgC() >= 3) {
         if (!IsValidUserInfo(args.Arg(1))) {
             Warning("Invalid user info key %s. Only certain characters are allowed.\n", args.Arg(1));
+            return;
+        }
+        if (!IsValidUserInfo(args.Arg(2))) {
+            Warning("Invalid user info value %s. Only certain characters are allowed.\n", args.Arg(1));
             return;
         }
 
