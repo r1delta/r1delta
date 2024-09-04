@@ -15,7 +15,7 @@ void setinfopersist_cmd(const CCommand& args)
 		DWORD out;
 		VirtualProtect(setinfo_cmd_flags, sizeof(int), PAGE_EXECUTE_READWRITE, &out);
 	}
-	*setinfo_cmd_flags = FCVAR_PERSIST;
+	*setinfo_cmd_flags = FCVAR_PERSIST_MASK;
 	if (args.ArgC() >= 3) {
 		const char* key = args.Arg(1);
 		bool isValidKey = true;
@@ -64,7 +64,7 @@ void setinfopersist_cmd(const CCommand& args)
 __int64 CConVar__GetSplitScreenPlayerSlot(char* fakethisptr)
 {
 	ConVarR1* thisptr = (ConVarR1*)(fakethisptr - 48); // man
-	if ((thisptr->m_nFlags & FCVAR_PERSIST) == FCVAR_PERSIST)
+	if ((thisptr->m_nFlags & FCVAR_PERSIST))
 		return -1; // :)
 	return 0LL;
 }

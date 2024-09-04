@@ -17,6 +17,7 @@
 #include "tier0/dbg.h"
 #include <string.h>
 #include "tier0/platform.h"
+#include "../memory.h"
 
 //#include "vsdk/public/tier0/memalloc.h"
 //#include "vsdk/mathlib/mathlib.h"
@@ -158,8 +159,8 @@ protected:
 	};
 
 	T* m_pMemory;
-	int m_nAllocationCount;
-	int m_nGrowSize;
+	std::make_signed_t<std::size_t> m_nAllocationCount;
+	std::make_signed_t<std::size_t> m_nGrowSize;
 };
 
 
@@ -421,7 +422,7 @@ void CUtlMemory<T, I>::ConvertToGrowableMemory(int nGrowSize)
 		UTLMEMORY_TRACK_ALLOC();
 		MEM_ALLOC_CREDIT_CLASS();
 
-		int nNumBytes = m_nAllocationCount * sizeof(T);
+		std::make_signed_t<std::size_t> nNumBytes = m_nAllocationCount * sizeof(T);
 		T* pMemory = (T*)malloc(nNumBytes);
 		memcpy(pMemory, m_pMemory, nNumBytes);
 		m_pMemory = pMemory;
@@ -689,13 +690,13 @@ void CUtlMemory<T, I>::Grow(int num)
 	if (m_pMemory)
 	{
 		MEM_ALLOC_CREDIT_CLASS();
-		m_pMemory = (T*)realloc(m_pMemory, m_nAllocationCount * sizeof(T));
+		m_pMemory = (T*)CreateGlobalMemAlloc()->Realloc(m_pMemory, m_nAllocationCount * sizeof(T));
 		//Assert(m_pMemory);
 	}
 	else
 	{
 		MEM_ALLOC_CREDIT_CLASS();
-		m_pMemory = (T*)malloc(m_nAllocationCount * sizeof(T));
+		m_pMemory = (T*)CreateGlobalMemAlloc()->Alloc(m_nAllocationCount * sizeof(T));
 		//Assert(m_pMemory);
 	}
 }
@@ -747,7 +748,7 @@ void CUtlMemory<T, I>::Purge()
 		if (m_pMemory)
 		{
 			UTLMEMORY_TRACK_FREE();
-			free((void*)m_pMemory);
+			CreateGlobalMemAlloc()->Free((void*)m_pMemory);
 			m_pMemory = 0;
 		}
 		m_nAllocationCount = 0;
@@ -801,7 +802,7 @@ void CUtlMemory<T, I>::Purge(int numElements)
 
 	// Allocation count > 0, shrink it down.
 	MEM_ALLOC_CREDIT_CLASS();
-	m_pMemory = (T*)realloc(m_pMemory, m_nAllocationCount * sizeof(T));
+	m_pMemory = (T*)CreateGlobalMemAlloc()->Realloc(m_pMemory, m_nAllocationCount * sizeof(T));
 }
 
 //-----------------------------------------------------------------------------

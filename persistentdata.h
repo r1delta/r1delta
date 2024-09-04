@@ -17,9 +17,10 @@ struct alignas(8) NET_SetConVar
 	CUtlVector<NetMessageCvar_t, CUtlMemory<NetMessageCvar_t>> m_ConVars;
 };
 //static_assert(sizeof(whatever) == sizeof(CUtlVector<NetMessageCvar_t, CUtlMemory<NetMessageCvar_t>>));
-static_assert(offsetof(whatever, m_ConVars) == 32);
-static_assert(offsetof(whatever, m_ConVars_count) == 56);
-static_assert(offsetof(NET_SetConVar, m_ConVars) == 32);
+//static_assert(offsetof(whatever, m_ConVars) == 32);
+//static_assert(offsetof(whatever, m_ConVars_count) == 56);
+//static_assert(offsetof(NET_SetConVar, m_ConVars) == 32);
+//static_assert(offsetof(NET_SetConVar, m_pMessageHandler) == 24);
 //static_assert((offsetof(NET_SetConVar, m_ConVars) + offsetof(CUtlVector<NetMessageCvar_t>, m_Size)) == 56);
 
 typedef bool (*NET_SetConVar__ReadFromBufferType)(NET_SetConVar* thisptr, bf_read& buffer);

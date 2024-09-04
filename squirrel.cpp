@@ -92,6 +92,7 @@ typedef SQRESULT(*sq_next_t)(HSQUIRRELVM, SQInteger);
 typedef SQRESULT(*sq_getinstanceup_t)(HSQUIRRELVM, SQInteger, SQUserPointer*, SQUserPointer);
 typedef void (*sq_newarray_t)(HSQUIRRELVM, SQInteger);
 typedef SQRESULT(*sq_arrayappend_t)(HSQUIRRELVM, SQInteger);
+typedef SQRESULT(*sq_throwerror_t)(HSQUIRRELVM, const char *err);
 typedef bool (*RunCallback_t)(R1SquirrelVM*, const char*);
 typedef __int64 (*CSquirrelVM__RegisterGlobalConstantInt_t)(R1SquirrelVM*, const char*, signed int);
 typedef void* (*CSquirrelVM__GetEntityFromInstance_t)(R1SquirrelVM*, SQObject*, char**);
@@ -129,66 +130,60 @@ sq_next_t sq_next;
 sq_getinstanceup_t sq_getinstanceup;
 sq_newarray_t sq_newarray;
 sq_arrayappend_t sq_arrayappend;
+sq_throwerror_t sq_throwerror;
 RunCallback_t RunCallback;
 CSquirrelVM__RegisterGlobalConstantInt_t CSquirrelVM__RegisterGlobalConstantInt;
 CSquirrelVM__GetEntityFromInstance_t CSquirrelVM__GetEntityFromInstance;
 sq_GetEntityConstant_CBaseEntity_t sq_GetEntityConstant_CBaseEntity;
 AddSquirrelReg_t AddSquirrelReg;
 
-SQInteger ExampleFunction(HSQUIRRELVM v) {
-	// Get the number of parameters
+SQInteger Script_ClientGetPersistentData(HSQUIRRELVM v) {
 	SQInteger nargs = sq_gettop(0, v);
 
-	// Check if we have the correct number of parameters
-//	if (nargs != 3) {
-//		return sq_throwerror(v, "Expected 2 parameters");
-//	}
+	if (nargs != 2) {
+		return sq_throwerror(v, "Expected 1 parameter");
+	}
 
-	// Retrieve the parameters
 	const SQChar* str;
-	SQInteger n;
-	SQFloat f;
-
-	// Get the first parameter (index 1 is the first parameter, 0 is the 'this' pointer)
 	if (SQ_FAILED(sq_getstring(v, 2, &str))) {
-		return 0;
-		//return sq_throwerror(v, "Parameter 1 must be a string");
+		return sq_throwerror(v, "Parameter 1 must be a string");
 	}
 
-	// Get the second parameter
-	if (SQ_FAILED(sq_getinteger(0, v, 3, &n))) {
-		return 0;
-		//return sq_throwerror(v, "Parameter 2 must be an integer");
+	auto var = OriginalCCVar_FindVar(cvarinterface, (std::string("__ ") + std::string(str)).c_str());
+	auto value = "\x00";
+	auto valueLen = 0;
+	if (!var) {
+		Warning("Couldn't find persistent variable %s; defaulting to empty\n", str);
+	}
+	else {
+		value = var->m_Value.m_pszString;
+		valueLen = var->m_Value.m_StringLength;
+	}
+	sq_pushstring(v, value, valueLen);
+	return 1;
+}
+SQInteger Script_ClientGetPersistentDataAsInt(HSQUIRRELVM v) {
+	SQInteger nargs = sq_gettop(0, v);
+
+	if (nargs != 2) {
+		return sq_throwerror(v, "Expected 1 parameter");
 	}
 
-	// Get the third parameter
-	//if (SQ_FAILED(sq_getfloat(0, v, 4, &f))) {
-	//	return 0;
-	//	//return sq_throwerror(v, "Parameter 3 must be a float");
-	//}
-
-	// Perform some operations
-	std::string result = str;
-	for (int i = 0; i < n; ++i) {
-		result += "!";
+	const SQChar* str;
+	if (SQ_FAILED(sq_getstring(v, 2, &str))) {
+		return sq_throwerror(v, "Parameter 1 must be a string");
 	}
-	float calculatedValue = std::sin(n) * n;
 
-	// Create a table to return multiple values
-	sq_newtable(v);
-
-	// Push the modified string
-	sq_pushstring(v, result.c_str(), -1);
-	sq_pushstring(v, "modifiedString", -1);
-	sq_newslot(v, -3, SQFalse);
-
-	// Push the calculated value
-	sq_pushfloat(0, v, calculatedValue);
-	sq_pushstring(v, "calculatedValue", -1);
-	sq_newslot(v, -3, SQFalse);
-
-	// The table is now on top of the stack and will be returned
-	return 1; // Return 1 to indicate that we're returning one value (the table)
+	auto var = OriginalCCVar_FindVar(cvarinterface, (std::string("__ ") + std::string(str)).c_str());
+	auto value = 0;
+	if (!var) {
+		Warning("Couldn't find persistent variable %s; defaulting to 0", str);
+	}
+	else {
+		value = var->m_Value.m_nValue;
+	}
+	sq_pushinteger(nullptr, v, value);
+	return 1;
 }
 // Function to initialize all SQVM functions
 bool GetSQVMFuncs() {
@@ -230,19 +225,30 @@ bool GetSQVMFuncs() {
 	sq_getinstanceup = reinterpret_cast<sq_getinstanceup_t>(baseAddress + 0x6750);
 	sq_newarray = reinterpret_cast<sq_newarray_t>(baseAddress + 0x14FB0);
 	sq_arrayappend = reinterpret_cast<sq_arrayappend_t>(baseAddress + 0x152A0);
+	sq_throwerror = reinterpret_cast<sq_throwerror_t>(baseAddress + 0x18930);
 	RunCallback = reinterpret_cast<RunCallback_t>(baseAddress + 0x89A0);
 	CSquirrelVM__RegisterGlobalConstantInt = reinterpret_cast<CSquirrelVM__RegisterGlobalConstantInt_t>(baseAddress + 0xA680);
 	CSquirrelVM__GetEntityFromInstance = reinterpret_cast<CSquirrelVM__GetEntityFromInstance_t>(baseAddress + 0x9930);
 	AddSquirrelReg = reinterpret_cast<AddSquirrelReg_t>(baseAddress + 0x8E50);
 	REGISTER_SCRIPT_FUNCTION(
-		SCRIPT_CONTEXT_SERVER | SCRIPT_CONTEXT_CLIENT | SCRIPT_CONTEXT_UI, // Available in all contexts
-		"ExampleFunction",
-		ExampleFunction,
-		".sif", // String, Integer, Float
-		3,      // Expects 3 parameters
-		"t",    // Returns a table
-		"str, count, value",
-		"Modifies a string, repeats '!' based on count, and calculates sin(value) * count"
+		SCRIPT_CONTEXT_CLIENT | SCRIPT_CONTEXT_UI, // Available in client script contexts
+		"GetPersistentVar",
+		Script_ClientGetPersistentData,
+		".s", // String
+		2,      // Expects 1 parameters
+		"s",    // Returns a string
+		"str",
+		"Get a persistent data value"
+	);
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_CLIENT | SCRIPT_CONTEXT_UI, // Available in client script contexts
+		"GetPersistentVarAsInt",
+		Script_ClientGetPersistentDataAsInt,
+		".s", // String
+		2,      // Expects 1 parameter
+		"i",    // Returns an int (idk if i is the right char for this lmao)
+		"str",
+		"Get a persistent data value as an integer I guess I don't know why you wouldn't just do this yourself"
 	);
 	initialized = true;
 	return true;
