@@ -61,9 +61,10 @@ void setinfopersist_cmd(const CCommand& args)
 	}
 	*setinfo_cmd_flags = FCVAR_USERINFO;
 }
-__int64 CConVar__GetSplitScreenPlayerSlot(ConVarR1* thisptr)
+__int64 CConVar__GetSplitScreenPlayerSlot(char* fakethisptr)
 {
-	if (thisptr->m_nFlags & FCVAR_PERSIST)
+	ConVarR1* thisptr = (ConVarR1*)(fakethisptr - 48); // man
+	if ((thisptr->m_nFlags & FCVAR_PERSIST) == FCVAR_PERSIST)
 		return -1; // :)
 	return 0LL;
 }
