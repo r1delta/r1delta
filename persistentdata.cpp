@@ -17,17 +17,7 @@ constexpr size_t MAX_VALUE_LENGTH = 254;
 constexpr const char* INVALID_CHARS = "{}()':;\"\n";
 
 // Utility functions
-bool IsValidUserInfoKey(const char* key) {
-    if (!key) return false;
-
-    return std::strlen(key) <= MAX_KEY_LENGTH &&
-        std::all_of(key, key + std::strlen(key), [](char c) {
-        return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-            (c >= '0' && c <= '9') || c == '_';
-            });
-}
-
-bool IsValidUserInfoValue(const char* value) {
+bool IsValidUserInfo(const char* value) {
     if (!value) return false;
 
     return std::strlen(value) <= MAX_VALUE_LENGTH &&
@@ -53,12 +43,8 @@ void setinfopersist_cmd(const CCommand& args) {
     *setinfo_cmd_flags = FCVAR_PERSIST_MASK;
 
     if (args.ArgC() >= 3) {
-        if (!IsValidUserInfoKey(args.Arg(1))) {
-            Warning("Invalid user info key %s. Only alphanumeric characters and underscores are allowed.\n", args.Arg(1));
-            return;
-        }
-        if (!IsValidUserInfoValue(args.Arg(2))) {
-            Warning("Invalid user info value %s. Only certain characters are allowed.\n", args.Arg(2));
+        if (!IsValidUserInfo(args.Arg(1))) {
+            Warning("Invalid user info key %s. Only certain characters are allowed.\n", args.Arg(1));
             return;
         }
 
@@ -184,8 +170,8 @@ SQInteger Script_ServerGetUserInfoKVString(HSQUIRRELVM v) {
     sq_getstring(v, 3, &pKey);
     sq_getstring(v, 4, &pDefaultValue);
 
-    if (!IsValidUserInfoKey(pKey) || !IsValidUserInfoValue(pDefaultValue)) {
-        return sq_throwerror(v, "Invalid user info key or value.");
+    if (!IsValidUserInfo(pKey) || !IsValidUserInfo(pDefaultValue)) {
+        return sq_throwerror(v, "Invalid user info key or default value.");
     }
 
     auto v2 = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(pPlayer) + 64);
@@ -210,7 +196,7 @@ SQInteger Script_ServerSetUserInfoKVString(HSQUIRRELVM v) {
     sq_getstring(v, 3, &pKey);
     sq_getstring(v, 4, &pValue);
 
-    if (!IsValidUserInfoKey(pKey) || !IsValidUserInfoValue(pValue)) {
+    if (!IsValidUserInfo(pKey) || !IsValidUserInfo(pValue)) {
         return sq_throwerror(v, "Invalid user info key or value.");
     }
 
