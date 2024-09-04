@@ -300,11 +300,10 @@ void CUtlBuffer::SetExternalBuffer( void* pMemory, int nSize, int nInitialPut, i
 //-----------------------------------------------------------------------------
 // Purpose: Attaches to an external buffer as read only. Will purge any existing buffer data
 //-----------------------------------------------------------------------------
-void CUtlBuffer::SetReadOnlyBuffer( void *pMemory, int nSize )
+void CUtlBuffer::SetReadOnlyBuffer(void* pMemory, int nSize)
 {
 	Purge();
-
-	m_Memory.SetExternalBuffer( pMemory, nSize );
+	m_Memory.SetExternalBuffer(static_cast<uint8*>(pMemory), nSize);
 	m_Get = 0;
 	m_Put = nSize;
 	m_nTab = 0;
@@ -1595,6 +1594,7 @@ bool CUtlBuffer::ConvertCRLF( CUtlBuffer &outBuf )
 
 	return true;
 }
+
 
 
 //-----------------------------------------------------------------------------

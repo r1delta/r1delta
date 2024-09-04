@@ -70,6 +70,8 @@
 #include "dedicated.h"
 #include "client.h"
 #include "compression.h"
+#include "cvar.h"
+#include "persistentdata.h"
 #pragma intrinsic(_ReturnAddress)
 
 wchar_t kNtDll[] = L"ntdll.dll";
@@ -953,6 +955,11 @@ void __stdcall LoaderNotificationCallback(
 
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x1FDA50), &CLC_Move__ReadFromBuffer, reinterpret_cast<LPVOID*>(&CLC_Move__ReadFromBufferOriginal));
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x1F6F10), &CLC_Move__WriteToBuffer, reinterpret_cast<LPVOID*>(NULL));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x1FDA50), &CLC_Move__ReadFromBuffer, NULL);
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x1F6F10), &CLC_Move__WriteToBuffer, NULL);
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x203C20), &NET_SetConVar__ReadFromBuffer, NULL);
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x202F80), &NET_SetConVar__WriteToBuffer, NULL);
+		
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0xCA730), &CBaseServer__FillServerInfo, reinterpret_cast<LPVOID*>(&CBaseServer__FillServerInfoOriginal));
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x3667D0), &CAI_NetworkManager__DelayedInit, reinterpret_cast<LPVOID*>(&CAI_NetworkManager__DelayedInitOriginal));
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x36BC30), &sub_36BC30, reinterpret_cast<LPVOID*>(&sub_36BC30Original));
@@ -972,7 +979,7 @@ void __stdcall LoaderNotificationCallback(
 		if (!IsDedicatedServer()) {
 			RegisterConCommand("script_client", script_client_cmd, "Execute Squirrel code in client context", FCVAR_NONE | FCVAR_CHEAT);
 			RegisterConCommand("script_ui", script_ui_cmd, "Execute Squirrel code in UI context", FCVAR_NONE | FCVAR_CHEAT);
-			RegisterConCommand("persist", setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
+			RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
 		}
 
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x364140), &sub_364140, reinterpret_cast<LPVOID*>(NULL));

@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>C:\Program Files\EA Games\Titanfall\bin\x64_retail</OutDir>
     <IncludePath>$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
@@ -166,7 +165,6 @@
       <ModuleDefinitionFile>test.def</ModuleDefinitionFile>
     </Link>
   </ItemDefinitionGroup>
-
   <ItemGroup>
     <ClInclude Include="beardbgon.h" />
     <ClInclude Include="bitbuf.h" />
@@ -190,6 +188,7 @@
     <ClInclude Include="navmesh.h" />
     <ClInclude Include="netadr.h" />
     <ClInclude Include="patcher.h" />
+    <ClInclude Include="persistentdata.h" />
     <ClInclude Include="physics.h" />
     <ClInclude Include="platform.h" />
     <ClInclude Include="predictionerror.h" />
@@ -265,6 +264,7 @@
     <ClCompile Include="navmesh.cpp" />
     <ClCompile Include="newbitbuf.cpp" />
     <ClCompile Include="patcher.cpp" />
+    <ClCompile Include="persistentdata.cpp" />
     <ClCompile Include="predictionerror.cpp" />
     <ClCompile Include="sendmoveclampfix.cpp" />
     <ClCompile Include="squirrel.cpp" />
@@ -278,7 +278,6 @@
     <ClCompile Include="vsdk\tier1\ipv6text.c" />
     <ClCompile Include="vsdk\tier1\netadr.cpp" />
     <ClCompile Include="vsdk\tier1\utlbuffer.cpp" />
-    <ClCompile Include="vsdk\tier1\utlmemory.cpp" />
     <ClCompile Include="vsdk\vstdlib\strtools.cpp" />
   </ItemGroup>
   <ItemGroup>

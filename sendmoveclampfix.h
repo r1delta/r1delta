@@ -2,12 +2,12 @@
 
 #include "bitbuf.h"
 
-struct CLC_Move
+struct alignas(8) CLC_Move
 {
+	void* vtable;
 	bool m_bReliable;
 	void* m_NetChannel;
 	void* unk;
-	void* m_pMessageHandler;
 	int m_nBackupCommands;
 	int m_nNewCommands;
 	int m_nLength;

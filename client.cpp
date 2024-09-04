@@ -2,6 +2,7 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include "client.h"
+#include "persistentdata.h"
 
 
 typedef void (*sub_18027F2C0Type)(__int64 a1, const char* a2, void* a3);
@@ -62,6 +63,7 @@ void InitClient()
 	MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("client.dll") + 0x744864), &vsnprintf_l_hk, NULL);
 	MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x102D50), &Cbuf_AddText, reinterpret_cast<LPVOID*>(&Cbuf_AddTextOriginal));
 	MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x4801B0), &ConVar_PrintDescription, reinterpret_cast<LPVOID*>(&ConVar_PrintDescriptionOriginal));
+	MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x47FB00), &CConVar__GetSplitScreenPlayerSlot, NULL);
 	MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x4722E0), &sub_1804722E0, 0);
 	if (IsNoOrigin())
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("ws2_32.dll"), "getaddrinfo"), &hookedGetAddrInfo, reinterpret_cast<LPVOID*>(&originalGetAddrInfo));

@@ -21,10 +21,10 @@
 
 #include <minbase/minbase_identify.h>
 #include <minbase/minbase_annotations.h>
-
+#include "public/tier1/utlmemory.h"
 BEGIN_TIER1_NAMESPACE
 
-template< class T > class CUtlMemory;
+//template< class T > class CUtlMemory;
 template< class T, class A > class CUtlVector;
 template < typename K, typename T, typename I, typename L > class CUtlMap;
 class CUtlBuffer;
@@ -94,7 +94,7 @@ inline bool V_isspace(char c) { return isspace((unsigned char)c) != 0; }
 // Split the specified string on the specified separator.
 // Returns a list of strings separated by pSeparator.
 // You are responsible for freeing the contents of outStrings (call outStrings.PurgeAndDeleteElements).
-extern void V_AllocAndSplitString( const char *pString, const char *pSeparator, CUtlVector<char*, CUtlMemory<char*> > &outStrings, bool bIncludeEmptyStrings = false );
+//extern void V_AllocAndSplitString( const char *pString, const char *pSeparator, CUtlVector<char*, CUtlMemory<char*> > &outStrings, bool bIncludeEmptyStrings = false );
 
 // Strips trailing *ASCII* whitespace characters.  (Any
 // character that returns true for V_isspace returns true.)  Doesn't
