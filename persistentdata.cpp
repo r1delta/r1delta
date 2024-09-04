@@ -12,15 +12,14 @@
 #include "factory.h"
 
 // Constants
-constexpr size_t MAX_KEY_LENGTH = 254;
-constexpr size_t MAX_VALUE_LENGTH = 254;
+constexpr size_t MAX_LENGTH = 254;
 constexpr const char* INVALID_CHARS = "{}()':;\"\n";
 
 // Utility functions
 bool IsValidUserInfo(const char* value) {
     if (!value) return false;
 
-    return std::strlen(value) <= MAX_VALUE_LENGTH &&
+    return std::strlen(value) <= MAX_LENGTH &&
         std::none_of(value, value + std::strlen(value), [](char c) {
         return std::strchr(INVALID_CHARS, c) != nullptr;
             });
