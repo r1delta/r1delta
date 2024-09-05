@@ -180,7 +180,7 @@ struct CBaseClient
 };
 CBaseClient* g_pClientArray;
 
-SQInteger Script_ServerGetUserInfoKVString(HSQUIRRELVM v) {
+SQInteger Script_ServerGetPersistentUserDataKVString(HSQUIRRELVM v) {
     const void* pPlayer = sq_getentity(v, 2);
     if (!pPlayer) {
         return sq_throwerror(v, "player is null");
@@ -194,8 +194,8 @@ SQInteger Script_ServerGetUserInfoKVString(HSQUIRRELVM v) {
         return sq_throwerror(v, "Invalid user info key or default value.");
     }
 
-    auto v2 = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(pPlayer) + 64);
-    auto index = ((v2 - reinterpret_cast<__int64>(pGlobalVarsServer->pEdicts)) / 56) - 1;
+    auto edict = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(pPlayer) + 64);
+    auto index = ((edict - reinterpret_cast<__int64>(pGlobalVarsServer->pEdicts)) / 56) - 1;
 
     if (!g_pClientArray[index].m_ConVars) {
         return sq_throwerror(v, "Client has NULL m_ConVars.");
@@ -206,7 +206,8 @@ SQInteger Script_ServerGetUserInfoKVString(HSQUIRRELVM v) {
     return 1;
 }
 
-SQInteger Script_ServerSetUserInfoKVString(HSQUIRRELVM v) {
+SQInteger Script_ServerSetPersistentUserDataKVString(HSQUIRRELVM v) {
+    static auto CVEngineServer_ClientCommand = CMemory(CModule("engine.dll").GetModuleBase()).OffsetSelf(0xFE7F0).RCast<void (*)(__int64 a1, __int64 a2, const char* a3, ...)>();
     const void* pPlayer = sq_getentity(v, 2);
     if (!pPlayer) {
         return sq_throwerror(v, "player is null");
@@ -220,14 +221,16 @@ SQInteger Script_ServerSetUserInfoKVString(HSQUIRRELVM v) {
         return sq_throwerror(v, "Invalid user info key or value.");
     }
 
-    auto v2 = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(pPlayer) + 64);
-    auto index = ((v2 - reinterpret_cast<__int64>(pGlobalVarsServer->pEdicts)) / 56) - 1;
+    auto edict = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(pPlayer) + 64);
+
+    auto index = ((edict - reinterpret_cast<__int64>(pGlobalVarsServer->pEdicts)) / 56) - 1;
 
     if (!g_pClientArray[index].m_ConVars) {
         return sq_throwerror(v, "Client has NULL m_ConVars.");
     }
-
+    CVEngineServer_ClientCommand(0, edict, PERSIST_COMMAND" %s %s noupdate", pKey, pValue);
     g_pClientArray[index].m_ConVars->SetString(pKey, pValue);
+
     sq_pushstring(v, pValue, -1);
     return 1;
 }

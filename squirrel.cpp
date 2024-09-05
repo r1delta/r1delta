@@ -295,8 +295,8 @@ bool GetSQVMFuncs() {
 	//);
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_SERVER, // Available in client script contexts
-		"GetUserInfoVarForClient",
-		Script_ServerGetUserInfoKVString,
+		"GetPersistentStringForClient",
+		Script_ServerGetPersistentUserDataKVString,
 		"..ss", // String
 		4,      // Expects 3 parameters
 		"string",    // Returns an int (idk if i is the right char for this lmao)
@@ -305,8 +305,8 @@ bool GetSQVMFuncs() {
 	);
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_SERVER, // Available in client script contexts
-		"SetUserInfoVarForClient",
-		Script_ServerSetUserInfoKVString,
+		"SetPersistentStringForClient",
+		Script_ServerSetPersistentUserDataKVString,
 		"..ss", // String
 		4,      // Expects 3 parameters
 		"string",    // Returns an int (idk if i is the right char for this lmao)
