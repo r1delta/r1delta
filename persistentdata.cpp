@@ -148,8 +148,8 @@ __int64 CConVar__GetSplitScreenPlayerSlot(char* fakethisptr) {
 	return (thisptr->m_nFlags & FCVAR_PERSIST) ? -1 : 0;
 }
 
-// Global map to store the set of unique convar names per netchannel
-std::unordered_map<void*, std::unordered_set<std::string>> g_netChannelUniqueConvars;
+// Global map to store the set of unique convar name hashes per netchannel
+std::unordered_map<void*, std::unordered_set<size_t>> g_netChannelUniqueConvarHashes;
 
 bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 	uint32_t numvars;
@@ -162,8 +162,8 @@ bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 		numvars = byteCount;
 	}
 
-	// Get the current netchannel's unique convar set
-	auto& channelUniqueConvars = g_netChannelUniqueConvars[thisptr->m_NetChannel];
+	// Get the current netchannel's unique convar hash set
+	auto& uniqueConvarHashes = g_netChannelUniqueConvarHashes[thisptr->m_NetChannel];
 
 	thisptr->m_ConVars.RemoveAll();
 	for (uint32_t i = 0; i < numvars; i++) {
@@ -171,15 +171,18 @@ bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 		buffer.ReadString(var.name, sizeof(var.name));
 		buffer.ReadString(var.value, sizeof(var.value));
 
-		// Check if this is a new unique convar name
-		if (channelUniqueConvars.find(var.name) == channelUniqueConvars.end()) {
+		// Hash the convar name
+		size_t nameHash = std::hash<std::string>{}(var.name);
+
+		// Check if this is a new unique convar name hash
+		if (uniqueConvarHashes.find(nameHash) == uniqueConvarHashes.end()) {
 			// Check if adding this new unique convar would exceed the limit
-			if (channelUniqueConvars.size() >= 32767) {
+			if (uniqueConvarHashes.size() >= 32767) {
 				// Limit exceeded, stop processing and return false
 				return false;
 			}
-			// Add the new unique convar name to the set
-			channelUniqueConvars.insert(var.name);
+			// Add the new unique convar name hash to the set
+			uniqueConvarHashes.insert(nameHash);
 		}
 
 		thisptr->m_ConVars.AddToTail(var);
