@@ -144,6 +144,12 @@ __int64 CConVar__GetSplitScreenPlayerSlot(char* fakethisptr) {
 }
 
 // Network message handling
+#include <unordered_map>
+#include <cstdint>
+
+// Global map to store the count of unique convar names per netchannel
+std::unordered_map<void*, std::unordered_map<std::string, uint16_t>> g_netChannelConvarCounts;
+
 bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
     uint32_t numvars;
     uint8_t byteCount = buffer.ReadByte();
@@ -155,13 +161,29 @@ bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
         numvars = byteCount;
     }
 
+    // Get the current netchannel's convar count map
+    auto& channelConvarCounts = g_netChannelConvarCounts[thisptr->m_NetChannel];
+
     thisptr->m_ConVars.RemoveAll();
     for (uint32_t i = 0; i < numvars; i++) {
         NetMessageCvar_t var;
         buffer.ReadString(var.name, sizeof(var.name));
         buffer.ReadString(var.value, sizeof(var.value));
+
+        // Check if adding this convar would exceed the limit
+        if (channelConvarCounts[var.name] == 0) {
+            if (channelConvarCounts.size() >= 32767) {
+                // Limit exceeded, stop processing and return false
+                return false;
+            }
+        }
+
+        // Increment the count for this convar name
+        channelConvarCounts[var.name]++;
+
         thisptr->m_ConVars.AddToTail(var);
     }
+
     return !buffer.IsOverflowed();
 }
 
