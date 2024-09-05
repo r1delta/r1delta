@@ -207,7 +207,7 @@ SQInteger Script_ClientGetPersistentData(HSQUIRRELVM v) {
     auto hashedKey = hashUserInfoKey(key);
     std::string varName = std::string(PERSIST_COMMAND) + " " + hashedKey;
 
-    if (!IsValidUserInfo(varName.c_str()) || !IsValidUserInfo(defaultValue)) {
+    if (!IsValidUserInfo(key) || !IsValidUserInfo(varName.c_str()) || !IsValidUserInfo(defaultValue)) {
         return sq_throwerror(v, "Invalid user info key or default value.");
     }
     
@@ -247,7 +247,7 @@ SQInteger Script_ServerGetPersistentUserDataKVString(HSQUIRRELVM v) {
     std::string modifiedKey = PERSIST_COMMAND" ";
     modifiedKey += hashedKey;
 
-    if (!IsValidUserInfo(modifiedKey.c_str()) || !IsValidUserInfo(pDefaultValue)) {
+    if (!IsValidUserInfo(pKey) || !IsValidUserInfo(modifiedKey.c_str()) || !IsValidUserInfo(pDefaultValue)) {
         return sq_throwerror(v, "Invalid user info key or default value.");
     }
 
@@ -285,7 +285,7 @@ SQInteger Script_ServerSetPersistentUserDataKVString(HSQUIRRELVM v) {
     std::string modifiedKey = PERSIST_COMMAND" ";
     modifiedKey += hashedKey;
 
-    if (!IsValidUserInfo(modifiedKey.c_str()) || !IsValidUserInfo(pValue)) {
+    if (!IsValidUserInfo(pKey) || !IsValidUserInfo(modifiedKey.c_str()) || !IsValidUserInfo(pValue)) {
         return sq_throwerror(v, "Invalid user info key or value.");
     }
 
