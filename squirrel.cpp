@@ -264,8 +264,8 @@ bool GetSQVMFuncs() {
 		SCRIPT_CONTEXT_CLIENT,
 		"GetPersistentString",
 		(SQFUNCTION)Script_ClientGetPersistentData,
-		".s", // String
-		2,      // Expects 1 parameters
+		".ss", // String
+		2,      // Expects 2 parameters
 		"string",    // Returns a string
 		"str",
 		"Get a persistent data value"
@@ -274,8 +274,8 @@ bool GetSQVMFuncs() {
 		SCRIPT_CONTEXT_UI,
 		"GetPersistentString",
 		(SQFUNCTION)Script_ClientGetPersistentData,
-		".s", // String
-		2,      // Expects 1 parameters
+		".ss", // String
+		3,      // Expects 2 parameters
 		"string",    // Returns a string
 		"str",
 		"Get a persistent data value"

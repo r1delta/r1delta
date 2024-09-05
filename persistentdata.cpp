@@ -151,21 +151,28 @@ bool NET_SetConVar__WriteToBuffer(NET_SetConVar* thisptr, bf_write& buffer) {
 
 // Squirrel VM functions
 SQInteger Script_ClientGetPersistentData(HSQUIRRELVM v) {
-    if (sq_gettop(nullptr, v) != 2) {
+    if (sq_gettop(nullptr, v) != 3) {
         return sq_throwerror(v, "Expected 1 parameter");
     }
 
-    const SQChar* str;
-    if (SQ_FAILED(sq_getstring(v, 2, &str))) {
+    const SQChar* key;
+    if (SQ_FAILED(sq_getstring(v, 2, &key))) {
         return sq_throwerror(v, "Parameter 1 must be a string");
     }
+    const SQChar* defaultValue;
+    if (SQ_FAILED(sq_getstring(v, 3, &defaultValue))) {
+        return sq_throwerror(v, "Parameter 2 must be a string");
+    }
+    std::string varName = std::string(PERSIST_COMMAND) + " " + key;
 
-    std::string varName = std::string(PERSIST_COMMAND) + " " + str;
+    if (!IsValidUserInfo(varName.c_str()) || !IsValidUserInfo(defaultValue)) {
+        return sq_throwerror(v, "Invalid user info key or default value.");
+    }
     auto var = OriginalCCVar_FindVar(cvarinterface, varName.c_str());
 
     if (!var) {
-        Warning("Couldn't find persistent variable %s; defaulting to empty\n", str);
-        sq_pushstring(v, "", 0);
+        //Warning("Couldn't find persistent variable %s; defaulting to empty\n", str);
+        sq_pushstring(v, defaultValue, -1);
     }
     else {
         sq_pushstring(v, var->m_Value.m_pszString, var->m_Value.m_StringLength);
