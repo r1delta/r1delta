@@ -30,7 +30,28 @@ bool IsValidUserInfo(const char* value) {
 		return std::strchr(INVALID_CHARS, c) != nullptr;
 			});
 }
+// Helper function to check if a value is valid according to PackValue/UnpackValue rules
+bool IsValidPackedValue(const char* value) {
+    if (!value || value[0] == '\0' || value[1] == '\0') return false;
 
+    char typeCode = value[0];
+    const char* data = value + 1;
+
+    switch (typeCode) {
+        case 'i': // Integer
+            return data[strspn(data, "-0123456789")] == '\0';
+        case 'f': // Float
+            return data[strspn(data, "-0123456789.")] == '\0' && strchr(data, '.') != nullptr;
+        case 'b': // Boolean
+            return (strcmp(data, "0") == 0 || strcmp(data, "1") == 0);
+        case 's': // String
+            return true; // All strings are valid
+        case 'x': // Invalid/Nothing
+            return data[0] == '\0';
+        default:
+            return false;
+    }
+}
 std::string hashUserInfoKey(const std::string& key) {
 #ifdef HASH_USERINFO_KEYS
 	// Hash the key
@@ -85,6 +106,10 @@ void setinfopersist_cmd(const CCommand& args) {
 			Warning("Invalid user info value %s. Only certain characters are allowed.\n", args.Arg(1));
 			return;
 		}
+		if (!IsValidPackedValue(args.Arg(2))) {
+            		Warning("Invalid packed value %s. Value does not conform to PackValue/UnpackValue rules.\n", args.Arg(2));
+        		return;
+        	}
 
 		// Check for "nosend" argument, or if the convar does not exist
 		bool noSend = (args.ArgC() >= 4 && strcmp(args.Arg(3), "nosend") == 0);
@@ -171,7 +196,13 @@ bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 		NetMessageCvar_t var;
 		buffer.ReadString(var.name, sizeof(var.name));
 		buffer.ReadString(var.value, sizeof(var.value));
-
+		// Check if the var name begins with an underscore
+        	if (var.name[0] == '_') {
+            		if (!IsValidPackedValue(var.value)) {
+                		Warning("Invalid packed value for ConVar %s. Value does not conform to PackValue/UnpackValue rules.\n", var.name);
+                		return false;
+            		}
+        	}
 		// Hash the convar name
 		size_t nameHash = std::hash<std::string>{}(var.name);
 
@@ -326,7 +357,9 @@ SQInteger Script_ServerSetPersistentUserDataKVString(HSQUIRRELVM v) {
 	if (!IsValidUserInfo(pKey) || !IsValidUserInfo(modifiedKey.c_str()) || !IsValidUserInfo(pValue)) {
 		return sq_throwerror(v, "Invalid user info key or value.");
 	}
-
+    	if (!IsValidPackedValue(pValue)) {
+        	return sq_throwerror(v, "Invalid packed value. Value does not conform to PackValue/UnpackValue rules.");
+    	}
 	auto edict = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(pPlayer) + 64);
 
 	auto index = ((edict - reinterpret_cast<__int64>(pGlobalVarsServer->pEdicts)) / 56) - 1;
