@@ -10,7 +10,7 @@
 #include "squirrel.h"
 #include "keyvalues.h"
 #include "factory.h"
-
+#define HASH_USERINFO_KEYS
 // Constants
 constexpr size_t MAX_LENGTH = 254;
 constexpr const char* INVALID_CHARS = "{}()':;`\"\n";
@@ -24,6 +24,35 @@ bool IsValidUserInfo(const char* value) {
         std::none_of(value, value + std::strlen(value), [](char c) {
         return std::strchr(INVALID_CHARS, c) != nullptr;
             });
+}
+
+std::string hashUserInfoKey(const std::string& key) {
+#ifdef HASH_USERINFO_KEYS
+    // Hash the key
+    std::size_t hash = std::hash<std::string>{}(key);
+
+    // Convert to base36
+    const char base36Chars[] = "0123456789abcdefghijklmnopqrstuvwxyz";
+    std::string result;
+
+    do {
+        result.push_back(base36Chars[hash % 36]);
+        hash /= 36;
+    } while (hash > 0);
+
+    // Reverse the string to get the correct order
+    std::reverse(result.begin(), result.end());
+
+    // Truncate to maximum allowed length if necessary
+    constexpr size_t MAX_KEY_LENGTH = 254 - sizeof(PERSIST_COMMAND);
+    if (result.length() > MAX_KEY_LENGTH) {
+        result = result.substr(0, MAX_KEY_LENGTH);
+    }
+
+    return result;
+#else
+    return key;
+#endif
 }
 
 // Command handling
@@ -57,9 +86,10 @@ void setinfopersist_cmd(const CCommand& args) {
 
         std::vector<const char*> newArgv(noSend ? args.ArgC() - 1 : args.ArgC());
         newArgv[0] = args.Arg(0);
+        std::string hashedKey = hashUserInfoKey(args.Arg(1));
 
         char modifiedKey[CCommand::COMMAND_MAX_LENGTH];
-        snprintf(modifiedKey, sizeof(modifiedKey), "%s %s", PERSIST_COMMAND, args.Arg(1));
+        snprintf(modifiedKey, sizeof(modifiedKey), "%s %s", PERSIST_COMMAND, hashedKey.c_str());
         newArgv[1] = modifiedKey;
 
         // Copy arguments, skipping "nosend" if present
@@ -196,9 +226,9 @@ SQInteger Script_ServerGetPersistentUserDataKVString(HSQUIRRELVM v) {
     const char* pKey, * pDefaultValue;
     sq_getstring(v, 3, &pKey);
     sq_getstring(v, 4, &pDefaultValue);
+    std::string hashedKey = hashUserInfoKey(pKey);
     std::string modifiedKey = PERSIST_COMMAND" ";
-    modifiedKey += pKey;
-
+    modifiedKey += hashedKey;
 
     if (!IsValidUserInfo(modifiedKey.c_str()) || !IsValidUserInfo(pDefaultValue)) {
         return sq_throwerror(v, "Invalid user info key or default value.");
@@ -226,8 +256,9 @@ SQInteger Script_ServerSetPersistentUserDataKVString(HSQUIRRELVM v) {
     const char* pKey, * pValue;
     sq_getstring(v, 3, &pKey);
     sq_getstring(v, 4, &pValue);
+    std::string hashedKey = hashUserInfoKey(pKey);
     std::string modifiedKey = PERSIST_COMMAND" ";
-    modifiedKey += pKey;
+    modifiedKey += hashedKey;
 
     if (!IsValidUserInfo(modifiedKey.c_str()) || !IsValidUserInfo(pValue)) {
         return sq_throwerror(v, "Invalid user info key or value.");
@@ -240,7 +271,7 @@ SQInteger Script_ServerSetPersistentUserDataKVString(HSQUIRRELVM v) {
     if (!g_pClientArray[index].m_ConVars) {
         return sq_throwerror(v, "Client has NULL m_ConVars.");
     }
-    CVEngineServer_ClientCommand(0, edict, PERSIST_COMMAND" \"%s\" \"%s\" nosend", pKey, pValue);
+    CVEngineServer_ClientCommand(0, edict, PERSIST_COMMAND" \"%s\" \"%s\" nosend", hashedKey, pValue);
     g_pClientArray[index].m_ConVars->SetString(modifiedKey.c_str(), pValue);
 
     sq_pushstring(v, pValue, -1);
