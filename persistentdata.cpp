@@ -118,6 +118,15 @@ void setinfopersist_cmd(const CCommand& args) {
         auto result = OriginalCCVar_FindVar(cvarinterface, args.GetCommandString());
         if (result)
             ConVar_PrintDescription(result);
+        else {
+            std::string hashedKey = hashUserInfoKey(args.Arg(1));
+
+            char modifiedKey[CCommand::COMMAND_MAX_LENGTH];
+            snprintf(modifiedKey, sizeof(modifiedKey), "%s %s", PERSIST_COMMAND, hashedKey.c_str());
+            auto hVar = OriginalCCVar_FindVar(cvarinterface, modifiedKey);
+            if (hVar)
+                ConVar_PrintDescription(hVar);
+        }
     }
     else {
         setinfo_cmd(args);
