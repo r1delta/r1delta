@@ -86,10 +86,9 @@ void setinfopersist_cmd(const CCommand& args) {
 
         std::vector<const char*> newArgv(noSend ? args.ArgC() - 1 : args.ArgC());
         newArgv[0] = args.Arg(0);
-        std::string hashedKey = hashUserInfoKey(args.Arg(1));
 
         char modifiedKey[CCommand::COMMAND_MAX_LENGTH];
-        snprintf(modifiedKey, sizeof(modifiedKey), "%s %s", PERSIST_COMMAND, hashedKey.c_str());
+        snprintf(modifiedKey, sizeof(modifiedKey), "%s %s", PERSIST_COMMAND, args.Arg(1));
         newArgv[1] = modifiedKey;
 
         // Copy arguments, skipping "nosend" if present
