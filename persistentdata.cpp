@@ -10,7 +10,7 @@
 #include "squirrel.h"
 #include "keyvalues.h"
 #include "factory.h"
-//#define HASH_USERINFO_KEYS
+#define HASH_USERINFO_KEYS
 // Constants
 constexpr size_t MAX_LENGTH = 254;
 constexpr const char* INVALID_CHARS = "{}()':;`\"\n";
