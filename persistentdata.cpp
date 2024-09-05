@@ -199,9 +199,19 @@ bool NET_SetConVar__WriteToBuffer(NET_SetConVar* thisptr, bf_write& buffer) {
 		buffer.WriteByte(0);
 		return !buffer.IsOverflowed();
 	}
+	if (!IsDedicatedServer()) {
+		auto var = OriginalCCVar_FindVar(cvarinterface, "net_secure");
+		bool bVanilla = var->m_Value.m_nValue == 1;
+		if (bVanilla) {
+			for (int i = thisptr->m_ConVars.Count() - 1; i >= 0; --i) {
+				if (thisptr->m_ConVars[i].name[0] == '_') {
+					thisptr->m_ConVars.Remove(i);
+				}
+			}
+		}
+	}
 
 	uint32_t numvars = thisptr->m_ConVars.Count();
-
 	if (numvars < 255) {
 		buffer.WriteByte(numvars);
 	}
