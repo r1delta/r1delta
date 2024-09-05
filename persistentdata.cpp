@@ -89,7 +89,8 @@ void setinfopersist_cmd(const CCommand& args) {
 		// Check for "nosend" argument, or if the convar does not exist
 		bool noSend = (args.ArgC() >= 4 && strcmp(args.Arg(3), "nosend") == 0);
 		bool shouldHash = !noSend && (OriginalCCVar_FindVar(cvarinterface, (std::string(PERSIST_COMMAND" ") + hashUserInfoKey(args.Arg(1))).c_str()) == nullptr);
-
+		if (args.ArgC() >= 4 && strcmp(args.Arg(3), "forcehash") == 0)
+			shouldHash = true;
 		std::vector<const char*> newArgv(noSend ? args.ArgC() - 1 : args.ArgC());
 		newArgv[0] = args.Arg(0);
 		char modifiedKey[CCommand::COMMAND_MAX_LENGTH];
