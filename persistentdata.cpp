@@ -179,6 +179,7 @@ bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 			// Check if adding this new unique convar would exceed the limit
 			if (uniqueConvarHashes.size() >= 32767) {
 				// Limit exceeded, stop processing and return false
+				Warning("%s", "Client exceeded 32767 userinfo ConVar key limit");
 				return false;
 			}
 			// Add the new unique convar name hash to the set
