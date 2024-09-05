@@ -81,14 +81,14 @@ void setinfopersist_cmd(const CCommand& args) {
             return;
         }
 
-        // Check for "nosend" argument
+        // Check for "nosend" argument, or if the convar does not exist
         bool noSend = (args.ArgC() >= 4 && strcmp(args.Arg(3), "nosend") == 0);
+        bool shouldHash = !noSend && (OriginalCCVar_FindVar(cvarinterface, (std::string(PERSIST_COMMAND" ") + hashUserInfoKey(args.Arg(1))).c_str()) == nullptr);
 
         std::vector<const char*> newArgv(noSend ? args.ArgC() - 1 : args.ArgC());
         newArgv[0] = args.Arg(0);
-
         char modifiedKey[CCommand::COMMAND_MAX_LENGTH];
-        snprintf(modifiedKey, sizeof(modifiedKey), "%s %s", PERSIST_COMMAND, args.Arg(1));
+        snprintf(modifiedKey, sizeof(modifiedKey), "%s %s", PERSIST_COMMAND, shouldHash ? hashUserInfoKey(args.Arg(1)).c_str() : args.Arg(1));
         newArgv[1] = modifiedKey;
 
         // Copy arguments, skipping "nosend" if present
@@ -103,7 +103,10 @@ void setinfopersist_cmd(const CCommand& args) {
 
         // Set the global variable
         g_bNoSendConVar = noSend;
-
+        if (shouldHash)
+            Msg("Setting persistent value: key=%s, hashedKey=%s, value=%s, hashed=true\n", args.Arg(1), hashUserInfoKey(args.Arg(1)).c_str(), args.Arg(2));
+        else
+            Msg("Setting persistent value: key=%s, value=%s, hashed=false\n", args.Arg(1), args.Arg(2));
         // Use the constructed CCommand object
         setinfo_cmd(*pCommand);
 
@@ -113,20 +116,20 @@ void setinfopersist_cmd(const CCommand& args) {
         // Manually call the destructor
         pCommand->~CCommand();
     }
-    else if (args.ArgC() == 2) {
-        auto result = OriginalCCVar_FindVar(cvarinterface, args.GetCommandString());
-        if (result)
-            ConVar_PrintDescription(result);
-        else {
-            std::string hashedKey = hashUserInfoKey(args.Arg(1));
+	else if (args.ArgC() == 2) {
+		std::string hashedKey = hashUserInfoKey(args.Arg(1));
 
-            char modifiedKey[CCommand::COMMAND_MAX_LENGTH];
-            snprintf(modifiedKey, sizeof(modifiedKey), "%s %s", PERSIST_COMMAND, hashedKey.c_str());
-            auto hVar = OriginalCCVar_FindVar(cvarinterface, modifiedKey);
-            if (hVar)
-                ConVar_PrintDescription(hVar);
-        }
-    }
+		char modifiedKey[CCommand::COMMAND_MAX_LENGTH];
+		snprintf(modifiedKey, sizeof(modifiedKey), "%s %s", PERSIST_COMMAND, hashedKey.c_str());
+		auto hVar = OriginalCCVar_FindVar(cvarinterface, modifiedKey);
+		if (hVar)
+			ConVar_PrintDescription(hVar);
+		else {
+			auto result = OriginalCCVar_FindVar(cvarinterface, args.GetCommandString());
+			if (result)
+				ConVar_PrintDescription(result);
+		}
+	}
     else {
         setinfo_cmd(args);
     }
@@ -190,7 +193,7 @@ bool NET_SetConVar__WriteToBuffer(NET_SetConVar* thisptr, bf_write& buffer) {
 // Squirrel VM functions
 SQInteger Script_ClientGetPersistentData(HSQUIRRELVM v) {
     if (sq_gettop(nullptr, v) != 3) {
-        return sq_throwerror(v, "Expected 1 parameter");
+        return sq_throwerror(v, "Expected 2 parameters");
     }
 
     const SQChar* key;
@@ -201,18 +204,24 @@ SQInteger Script_ClientGetPersistentData(HSQUIRRELVM v) {
     if (SQ_FAILED(sq_getstring(v, 3, &defaultValue))) {
         return sq_throwerror(v, "Parameter 2 must be a string");
     }
-    std::string varName = std::string(PERSIST_COMMAND) + " " + key;
+    auto hashedKey = hashUserInfoKey(key);
+    std::string varName = std::string(PERSIST_COMMAND) + " " + hashedKey;
 
     if (!IsValidUserInfo(varName.c_str()) || !IsValidUserInfo(defaultValue)) {
         return sq_throwerror(v, "Invalid user info key or default value.");
     }
+    
     auto var = OriginalCCVar_FindVar(cvarinterface, varName.c_str());
 
     if (!var) {
-        //Warning("Couldn't find persistent variable %s; defaulting to empty\n", str);
+        //Warning("Client couldn't find persistent value: key=%s, hashedKey=%s, hashed=%s\n",
+        //    key, hashedKey.c_str(), "true");
+
         sq_pushstring(v, defaultValue, -1);
     }
     else {
+        //Msg("Client accessing persistent value: key=%s, hashedKey=%s, value=%s, hashed=%s\n",
+        //    key, hashedKey.c_str(), var->m_Value.m_pszString, "true");
         sq_pushstring(v, var->m_Value.m_pszString, var->m_Value.m_StringLength);
     }
 
@@ -245,11 +254,19 @@ SQInteger Script_ServerGetPersistentUserDataKVString(HSQUIRRELVM v) {
     auto edict = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(pPlayer) + 64);
     auto index = ((edict - reinterpret_cast<__int64>(pGlobalVarsServer->pEdicts)) / 56) - 1;
 
-    if (!g_pClientArray[index].m_ConVars) {
-        return sq_throwerror(v, "Client has NULL m_ConVars.");
+    if (!g_pClientArray[index].m_ConVars || index == 18) {
+        //return sq_throwerror(v, "Client has NULL m_ConVars.");
+        Msg("REPLAY on server tried to access persistent value: key=%s, hashedKey=%s, hashed=%s\n",
+            pKey, hashedKey.c_str(), "true");
+
+        sq_pushstring(v, "0", -1); // I HATE REPLAY
+        return 1;
     }
 
     const char* pResult = g_pClientArray[index].m_ConVars->GetString(modifiedKey.c_str(), pDefaultValue);
+    Msg("Server accessing persistent value: key=%s, hashedKey=%s, value=%s, hashed=%s\n",
+        pKey, hashedKey.c_str(), pResult, "true");
+
     sq_pushstring(v, pResult, -1);
     return 1;
 }
@@ -276,11 +293,16 @@ SQInteger Script_ServerSetPersistentUserDataKVString(HSQUIRRELVM v) {
 
     auto index = ((edict - reinterpret_cast<__int64>(pGlobalVarsServer->pEdicts)) / 56) - 1;
 
-    if (!g_pClientArray[index].m_ConVars) {
-        return sq_throwerror(v, "Client has NULL m_ConVars.");
+    if (g_pClientArray[index].m_ConVars || index != 18) {
+        //return sq_throwerror(v, "Client has NULL m_ConVars.");
+        CVEngineServer_ClientCommand(0, edict, PERSIST_COMMAND" \"%s\" \"%s\" nosend", hashedKey.c_str(), pValue);
+        g_pClientArray[index].m_ConVars->SetString(modifiedKey.c_str(), pValue);
+        Msg("Server setting persistent value: key=%s, value=%s, hashed=%s\n",
+            pKey, pValue, "true");
     }
-    CVEngineServer_ClientCommand(0, edict, PERSIST_COMMAND" \"%s\" \"%s\" nosend", hashedKey, pValue);
-    g_pClientArray[index].m_ConVars->SetString(modifiedKey.c_str(), pValue);
+    Msg("Trying to set persistent value on REPLAY on server: key=%s, hashedKey=%s, value=%s, hashed=%s\n",
+        pKey, hashedKey.c_str(), pValue, "true");
+
 
     sq_pushstring(v, pValue, -1);
     return 1;

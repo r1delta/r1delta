@@ -265,7 +265,7 @@ bool GetSQVMFuncs() {
 		"GetPersistentString",
 		(SQFUNCTION)Script_ClientGetPersistentData,
 		".ss", // String
-		2,      // Expects 2 parameters
+		3,      // Expects 2 parameters
 		"string",    // Returns a string
 		"str",
 		"Get a persistent data value"
