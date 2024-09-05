@@ -60,10 +60,7 @@ private:
 	std::vector<std::unique_ptr<SQFuncRegistration>> m_functions;
 };
 
-#define REGISTER_SCRIPT_FUNCTION(context, name, func, typeMask, paramsCheck, returnType, argNames, helpText) \
-    ScriptFunctionRegistry::getInstance().addFunction(std::make_unique<SQFuncRegistration>( \
-        static_cast<ScriptContext>(context), name, func, typeMask, paramsCheck, returnType, argNames, helpText \
-    ))
+
 typedef SQRESULT(*sq_compile_t)(HSQUIRRELVM, SQLEXREADFUNC, SQUserPointer, const SQChar*, SQBool);
 typedef SQRESULT(*sq_compilebuffer_t)(HSQUIRRELVM, const SQChar*, SQInteger, const SQChar*, SQBool);
 typedef __int64(__fastcall* base_getroottable_t)(HSQUIRRELVM);
@@ -265,7 +262,7 @@ bool GetSQVMFuncs() {
 	AddSquirrelReg = reinterpret_cast<AddSquirrelReg_t>(baseAddress + 0x8E50);
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_CLIENT,
-		"GetPersistentVar",
+		"GetPersistentString",
 		(SQFUNCTION)Script_ClientGetPersistentData,
 		".s", // String
 		2,      // Expects 1 parameters
@@ -275,7 +272,7 @@ bool GetSQVMFuncs() {
 	);
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_UI,
-		"GetPersistentVar",
+		"GetPersistentString",
 		(SQFUNCTION)Script_ClientGetPersistentData,
 		".s", // String
 		2,      // Expects 1 parameters

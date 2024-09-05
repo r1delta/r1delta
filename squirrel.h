@@ -448,3 +448,8 @@ extern CSquirrelVM__GetEntityFromInstance_t CSquirrelVM__GetEntityFromInstance;
 extern sq_GetEntityConstant_CBaseEntity_t sq_GetEntityConstant_CBaseEntity; // CLIENT
 extern AddSquirrelReg_t AddSquirrelReg;
 extern void* sq_getentity(HSQUIRRELVM v, SQInteger iStackPos);
+
+#define REGISTER_SCRIPT_FUNCTION(context, name, func, typeMask, paramsCheck, returnType, argNames, helpText) \
+    ScriptFunctionRegistry::getInstance().addFunction(std::make_unique<SQFuncRegistration>( \
+        static_cast<ScriptContext>(context), name, func, typeMask, paramsCheck, returnType, argNames, helpText \
+    ))

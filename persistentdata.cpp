@@ -189,8 +189,11 @@ SQInteger Script_ServerGetPersistentUserDataKVString(HSQUIRRELVM v) {
     const char* pKey, * pDefaultValue;
     sq_getstring(v, 3, &pKey);
     sq_getstring(v, 4, &pDefaultValue);
+    std::string modifiedKey = PERSIST_COMMAND" ";
+    modifiedKey += pKey;
 
-    if (!IsValidUserInfo(pKey) || !IsValidUserInfo(pDefaultValue)) {
+
+    if (!IsValidUserInfo(modifiedKey.c_str()) || !IsValidUserInfo(pDefaultValue)) {
         return sq_throwerror(v, "Invalid user info key or default value.");
     }
 
@@ -201,7 +204,7 @@ SQInteger Script_ServerGetPersistentUserDataKVString(HSQUIRRELVM v) {
         return sq_throwerror(v, "Client has NULL m_ConVars.");
     }
 
-    const char* pResult = g_pClientArray[index].m_ConVars->GetString(pKey, pDefaultValue);
+    const char* pResult = g_pClientArray[index].m_ConVars->GetString(modifiedKey.c_str(), pDefaultValue);
     sq_pushstring(v, pResult, -1);
     return 1;
 }
@@ -216,8 +219,10 @@ SQInteger Script_ServerSetPersistentUserDataKVString(HSQUIRRELVM v) {
     const char* pKey, * pValue;
     sq_getstring(v, 3, &pKey);
     sq_getstring(v, 4, &pValue);
+    std::string modifiedKey = PERSIST_COMMAND" ";
+    modifiedKey += pKey;
 
-    if (!IsValidUserInfo(pKey) || !IsValidUserInfo(pValue)) {
+    if (!IsValidUserInfo(modifiedKey.c_str()) || !IsValidUserInfo(pValue)) {
         return sq_throwerror(v, "Invalid user info key or value.");
     }
 
@@ -228,8 +233,8 @@ SQInteger Script_ServerSetPersistentUserDataKVString(HSQUIRRELVM v) {
     if (!g_pClientArray[index].m_ConVars) {
         return sq_throwerror(v, "Client has NULL m_ConVars.");
     }
-    CVEngineServer_ClientCommand(0, edict, PERSIST_COMMAND" %s %s noupdate", pKey, pValue);
-    g_pClientArray[index].m_ConVars->SetString(pKey, pValue);
+    CVEngineServer_ClientCommand(0, edict, PERSIST_COMMAND" \"%s\" \"%s\" nosend", pKey, pValue);
+    g_pClientArray[index].m_ConVars->SetString(modifiedKey.c_str(), pValue);
 
     sq_pushstring(v, pValue, -1);
     return 1;
