@@ -258,7 +258,7 @@ SQInteger Script_ClientGetPersistentData(HSQUIRRELVM v) {
 	else {
 		//Msg("Client accessing persistent value: key=%s, hashedKey=%s, value=%s, hashed=%s\n",
 		//    key, hashedKey.c_str(), var->m_Value.m_pszString, "true");
-		sq_pushstring(v, var->m_Value.m_pszString, var->m_Value.m_StringLength);
+		sq_pushstring(v, var->m_Value.m_pszString, -1);
 	}
 
 	return 1;
