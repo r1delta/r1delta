@@ -172,17 +172,24 @@ struct SavedCall {
 std::vector<SavedCall> savedCalls;
 
 bool shouldSave(const char* a2) {
-	const char* commandsToSave[] = {
-		"InitHUD",
-		"FullyConnected",
-		"MatchIsOver",
-		"ChangeTitanBuildPoint",
-		"ChangeCurrentTitanBuildPoint",
-		"TutorialStatus",
-		"ChangeCurrentTitanOID"
+	// TODO(mrsteyk): move this out of here...
+	struct str8 {
+		char* p;
+		size_t l;
 	};
+#define str8_lit_(S) { (char*)S, sizeof(S) - 1 }
+	const str8 commandsToSave[] = {
+		str8_lit_("InitHUD"),
+		str8_lit_("FullyConnected"),
+		str8_lit_("MatchIsOver"),
+		str8_lit_("ChangeTitanBuildPoint"),
+		str8_lit_("ChangeCurrentTitanBuildPoint"),
+		str8_lit_("TutorialStatus"),
+		str8_lit_("ChangeCurrentTitanOID")
+	};
+#undef str8_lit_
 	for (auto& command : commandsToSave) {
-		if (strcmp(a2, command) == 0) {
+		if (memcmp(a2, command.p, command.l + 1) == 0) {
 			return true;
 		}
 	}
@@ -203,19 +210,6 @@ __int64 __fastcall sub_629740(__int64 a1, const char* a2, int a3) {
 		savedCalls.clear(); // Clear after processing
 	}
 	return sub_629740Original(a1, a2, a3);
-}
-
-// TODO(mrsteyk): REMOVE
-void* CVEngineServer_PrecacheModel_o = nullptr;
-uintptr_t CVEngineServer_PrecacheModel(uintptr_t a1, const char* a2, char a3) {
-	auto ret = reinterpret_cast<decltype(&CVEngineServer_PrecacheModel)>(CVEngineServer_PrecacheModel_o)(a1, a2, a3);
-
-	// ты хуесос полнейший, вондерер, где логгер сука нормальный
-	// this print is so aids
-	//printf("[STK] CVEngineServer_PrecacheModel('%s', %d) = %p\n", a2, +a3, LPVOID(a1));
-	//std::cout << "[STK] CVEngineServer_PrecacheModel('" << a2 << "', " << +a3 << ") = " << LPVOID(a1) << std::endl;
-
-	return ret;
 }
 
 void __fastcall cl_DumpPrecacheStats(__int64 CClientState, const char* name) {
@@ -933,19 +927,17 @@ void __stdcall LoaderNotificationCallback(
 		return;
 	doBinaryPatchForFile(notification_data->Loaded);
 
-	auto module_name = std::wstring((wchar_t*)notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length);
-
 	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"filesystem_stdio.dll") == 0) {
 		InitCompressionHooks();
 	}
-	if (module_name.find(L"engine.dll") != std::string::npos) {
+	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"engine.dll") == 0) {
 		if (!IsDedicatedServer()) {
 			RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
 			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x1305E0), &ExecuteConfigFile, NULL);
 
 		}
 	}
-	if (module_name.find(L"server.dll") != std::string::npos) {
+	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"server.dll") == 0) {
 		
 		//doBinaryPatchForFile(*GetModuleNotificationData(L"vstdlib"));
 		LDR_DLL_LOADED_NOTIFICATION_DATA* ndata = GetModuleNotificationData(L"vstdlib");
@@ -1045,14 +1037,6 @@ void __stdcall LoaderNotificationCallback(
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x217C30), &sub_180217C30, NULL);
 		// Cast the function pointer to the function at 0x4E80
 
-		// TODO(mrsteyk): REMOVE
-		if (!IsDedicatedServer())
-		{
-			auto engine_mod = GetModuleHandleA("engine.dll");
-			auto CVEngineServer_PrecacheModel_ptr = uintptr_t(engine_mod) + 0x0FC4D0;
-			MH_CreateHook(LPVOID(CVEngineServer_PrecacheModel_ptr), &CVEngineServer_PrecacheModel, &CVEngineServer_PrecacheModel_o);
-		}
-
 		// Fix precache start
 		{
 			LoadLibraryA("engine_r1o.dll");
@@ -1069,11 +1053,11 @@ void __stdcall LoaderNotificationCallback(
 
 	}
 
-	if (IsDedicatedServer() && (module_name.find(L"engine_ds.dll") != std::string::npos)) {
+	if (IsDedicatedServer() && (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"engine_ds.dll") == 0)) {
 		InitDedicated();
 	}
 
-	if (module_name.find(L"engine.dll") != std::string::npos) {
+	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"engine.dll") == 0) {
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x127C70), &FileSystem_UpdateAddonSearchPaths, reinterpret_cast<LPVOID*>(&FileSystem_UpdateAddonSearchPathsTypeOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x6A420), &ReadFileFromVPKHook, reinterpret_cast<LPVOID*>(&readFileFromVPK));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x9C20), &ReadFromCacheHook, reinterpret_cast<LPVOID*>(&readFromCache));
@@ -1082,7 +1066,7 @@ void __stdcall LoaderNotificationCallback(
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x13D60), &CZipPackFile__Prepare, reinterpret_cast<LPVOID*>(&CZipPackFile__PrepareOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x9AB70), &fs_sprintf_hook, reinterpret_cast<LPVOID*>(NULL));
 	}
-	if (module_name.find(L"client.dll") != std::string::npos) {
+	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"client.dll") == 0) {
 		InitClient();
 	}
 

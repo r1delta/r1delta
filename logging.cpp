@@ -116,13 +116,8 @@ void Cbuf_AddText(int a1, const char* a2, unsigned int a3) {
 	size_t len = strlen(a2);
 	if (shouldLog) {
 		if (len > 0 && (a2[len - 1] == '\n' || a2[len - 1] == '\r')) {
-			char* trimmed = (char*)malloc(len);
-			if (trimmed) {
-				strncpy(trimmed, a2, len - 1);
-				trimmed[len - 1] = '\0';
-				Msg("] %s\n", trimmed);
-				free(trimmed);
-			}
+			// what's the point if you can just msg without the newline at the end???
+			Msg("] %.*s\n", (int)(len - 1), a2);
 		}
 		else {
 			Msg("] %s\n", a2);

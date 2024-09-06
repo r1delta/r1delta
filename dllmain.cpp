@@ -90,6 +90,8 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("tier0.dll"), "GetCPUInformation"), &GetCPUInformationDet, reinterpret_cast<LPVOID*>(&GetCPUInformationOriginal));
 		MH_EnableHook(MH_ALL_HOOKS);
 
+		initialisePatchInstructions();
+
 		if(!IsNoConsole())
 			InitLoggingHooks();
 		StartFileCacheThread();

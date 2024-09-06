@@ -165,15 +165,35 @@ std::string UnicodeToString(PCUNICODE_STRING unicodeString) {
     return strTo;
 }
 
-bool ApplyPatch(const PatchInstruction& instruction, CModule& targetModule) {
-    CModule::ModuleSections_t* modSection = targetModule.GetSectionByName(instruction.sectionName.c_str());
-    if (!modSection->IsSectionValid()) {
-        std::string errorMsg = "Invalid section name\nFile: " + instruction.fileName + "\nLine: " + std::to_string(instruction.lineNumber);
+bool ApplyPatch(const PatchInstruction& instruction, void* targetModuleBase) {
+    // NOTE(mrsteyk): CModule was being constructed every single fucking time anyway
+    auto mz = (PIMAGE_DOS_HEADER)targetModuleBase;
+    auto pe = (PIMAGE_NT_HEADERS64)((uint8_t*)targetModuleBase + mz->e_lfanew);
+    auto sections_num = pe->FileHeader.NumberOfSections;
+    auto sections = IMAGE_FIRST_SECTION(pe);
+
+    int section_valid = 0;
+    auto mod_section_name = instruction.sectionName.c_str();
+    auto mod_section_len = instruction.sectionName.length() + 1;
+
+    if (mod_section_len <= 8) {
+        for (size_t i = 0; i < sections_num; i++) {
+            auto e = sections + i;
+            if (!memcmp(e->Name, mod_section_name, mod_section_len)) {
+                section_valid = 1;
+                break;
+            }
+        }
+    }
+
+    // why the fuck do you even check a section if all you fucking do is use RVA from imagebase???
+    if (!section_valid) {
+        std::string errorMsg = "Invalid section name `" + instruction.sectionName + "`\nFile: " + instruction.fileName + "\nLine: " + std::to_string(instruction.lineNumber);
         MessageBoxA(nullptr, errorMsg.c_str(), "Patcher Error", MB_OK);
         return false;
     }
 
-    uintptr_t base = targetModule.GetModuleBase();
+    uintptr_t base = (uintptr_t)targetModuleBase;
     CMemory sectionMemory(base);
 
     sectionMemory.OffsetSelf(instruction.offset);
@@ -191,16 +211,12 @@ bool ApplyPatch(const PatchInstruction& instruction, CModule& targetModule) {
     return true;
 }
 
+std::vector<PatchInstruction> patchInstructions;
 
-void doBinaryPatchForFile(LDR_DLL_LOADED_NOTIFICATION_DATA data) {
-    // Initialize the target module with the base DLL name
-    std::string moduleName = UnicodeToString(data.BaseDllName);
-    std::cout << "Started patching for " << moduleName << std::endl;
-
-    CModule targetModule(moduleName.c_str());
-
+void
+initialisePatchInstructions() {
     // Parse the patch file and get patch instructions
-    std::vector<PatchInstruction> patchInstructions = ParsePatchFile("r1delta/r1delta.wpatch");
+    patchInstructions = ParsePatchFile("r1delta/r1delta.wpatch");
 
     // If it's a dedicated server, also load and apply instructions from "r1delta_ds.patch"
     if (IsDedicatedServer()) {
@@ -212,12 +228,33 @@ void doBinaryPatchForFile(LDR_DLL_LOADED_NOTIFICATION_DATA data) {
         std::vector<PatchInstruction> noOriginPatchInstructions = ParsePatchFile("r1delta/r1delta_noorigin.wpatch");
         patchInstructions.insert(patchInstructions.end(), noOriginPatchInstructions.begin(), noOriginPatchInstructions.end());
     }
+}
+
+static inline int
+instruction_compare_module_name(const PatchInstruction& ins, const PCUNICODE_STRING basename) {
+    // NOTE(mrsteyk): this works on the assumption that all modules are non extended ASCII.
+    
+    auto len = ins.moduleName.length();
+    if ((basename->Length / sizeof(basename->Buffer[0])) != len)
+        return 0;
+
+    auto p = basename->Buffer;
+    for (size_t i = 0; i < len; i++) {
+        if (p[i] != ins.moduleName[i])
+            return 0;
+    }
+
+    return 1;
+}
+
+void doBinaryPatchForFile(LDR_DLL_LOADED_NOTIFICATION_DATA data) {
+    //std::cout << "Started patching for " << moduleName << std::endl;
 
     for (const auto& instruction : patchInstructions) {
-        if (instruction.moduleName == moduleName) {
-            ApplyPatch(instruction, targetModule);
+        if (instruction_compare_module_name(instruction, data.BaseDllName)) {
+            ApplyPatch(instruction, data.DllBase);
         }
     }
 
-    std::cout << "Completed patching for " << moduleName << std::endl;
+    //std::cout << "Completed patching for " << moduleName << std::endl;
 }

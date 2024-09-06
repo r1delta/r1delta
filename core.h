@@ -65,13 +65,13 @@ static inline bool IsDedicatedServer(void) {
 }
 
 __forceinline bool IsNoOrigin() {
-    std::wstring cmdLine = GetCommandLineW();
-    return cmdLine.find(L"-noorigin") != std::wstring::npos;
+    const wchar_t* cmdLine = GetCommandLineW();
+    return wcsstr(cmdLine, L"-noorigin");
 }
 
 __forceinline bool IsNoConsole() {
-    std::wstring cmdLine = GetCommandLineW();
-    return cmdLine.find(L"-noconsole") != std::wstring::npos;
+    const wchar_t* cmdLine = GetCommandLineW();
+    return wcsstr(cmdLine, L"-noconsole");
 }
 
 #define ENGINE_DLL (IsDedicatedServer() ? "engine_ds.dll" : "engine.dll")
