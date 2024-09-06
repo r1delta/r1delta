@@ -938,6 +938,13 @@ void __stdcall LoaderNotificationCallback(
 	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"filesystem_stdio.dll") == 0) {
 		InitCompressionHooks();
 	}
+	if (module_name.find(L"engine.dll") != std::string::npos) {
+		if (!IsDedicatedServer()) {
+			RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
+			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x1305E0), &ExecuteConfigFile, NULL);
+
+		}
+	}
 	if (module_name.find(L"server.dll") != std::string::npos) {
 		
 		//doBinaryPatchForFile(*GetModuleNotificationData(L"vstdlib"));
@@ -1000,7 +1007,6 @@ void __stdcall LoaderNotificationCallback(
 		if (!IsDedicatedServer()) {
 			RegisterConCommand("script_client", script_client_cmd, "Execute Squirrel code in client context", FCVAR_NONE);
 			RegisterConCommand("script_ui", script_ui_cmd, "Execute Squirrel code in UI context", FCVAR_NONE);
-			RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
 		}
 
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x364140), &sub_364140, reinterpret_cast<LPVOID*>(NULL));

@@ -258,6 +258,9 @@
     <ClInclude Include="thirdparty\zstd-1.5.6\zstd.h">
       <Filter>3rd Party\zstd</Filter>
     </ClInclude>
+    <ClInclude Include="persistentdata.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">
@@ -332,9 +335,6 @@
     <ClCompile Include="vsdk\tier0\valve_tracelogging.cpp">
       <Filter>Source Files\sdk</Filter>
     </ClCompile>
-    <ClCompile Include="vsdk\tier1\utlmemory.cpp">
-      <Filter>Source Files\sdk</Filter>
-    </ClCompile>
     <ClCompile Include="vsdk\tier1\utlbuffer.cpp">
       <Filter>Source Files\sdk</Filter>
     </ClCompile>
@@ -355,6 +355,9 @@
     </ClCompile>
     <ClCompile Include="thirdparty\zstd-1.5.6\zstd.c">
       <Filter>3rd Party\zstd</Filter>
+    </ClCompile>
+    <ClCompile Include="persistentdata.cpp">
+      <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

@@ -44,3 +44,4 @@ SQInteger Script_ServerSetPersistentUserDataKVString(HSQUIRRELVM v);
 typedef char (*CBaseClientState__InternalProcessStringCmdType)(void* thisptr, void* msg, bool bIsHLTV);
 extern CBaseClientState__InternalProcessStringCmdType CBaseClientState__InternalProcessStringCmdOriginal;
 char CBaseClientState__InternalProcessStringCmd(void* thisptr, void* msg, bool bIsHLTV);
+char ExecuteConfigFile(int configType);

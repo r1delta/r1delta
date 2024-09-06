@@ -14,6 +14,10 @@
 #include <unordered_map>
 #include <cstdint>
 #include <unordered_set>
+#include <shlobj.h>
+#include <filesystem>
+#include <iostream>
+#include <fstream>
 
 //#define HASH_USERINFO_KEYS
 // Constants
@@ -352,4 +356,90 @@ char CBaseClientState__InternalProcessStringCmd(void* thisptr, void* msg, bool b
 	char ret = CBaseClientState__InternalProcessStringCmdOriginal(thisptr, msg, bIsHLTV);
 	Cbuf_Execute(); // fix cbuf overflow on too many stringcmds
 	return ret;
+}
+char __fastcall GetConfigPath(char* outPath, size_t outPathSize, int configType)
+{
+	CHAR folderPath[MAX_PATH];
+
+	// Get the user's Documents folder path
+	if (SHGetFolderPathA(NULL, CSIDL_PERSONAL, NULL, 0, folderPath) < 0)
+	{
+		return 0;
+	}
+
+	// Determine the subfolder based on configType
+	const char* subFolder = (configType == 1) ? "/profile" : "/local";
+
+	// Construct the base path
+	char tempPath[512];
+	snprintf(tempPath, sizeof(tempPath), "%s%s%s", folderPath, "/Respawn/Titanfall", subFolder);
+
+	if (strlen(tempPath) >= 511)
+	{
+		return 0;
+	}
+
+	// Determine the config file name based on configType
+	const char* configFile;
+	switch (configType)
+	{
+	case 0:
+		configFile = "settings.cfg";
+		break;
+	case 1:
+		configFile = "profile.cfg";
+		break;
+	case 2:
+		configFile = "videoconfig.txt";
+		break;
+	default:
+		configFile = "error.cfg";
+		break;
+	}
+
+	// Construct the final path
+	snprintf(outPath, outPathSize, "%s/%s", tempPath, configFile);
+
+	return 1;
+}
+
+
+char ExecuteConfigFile(int configType) {
+	constexpr size_t MAX_PATH_LENGTH = 1024;
+	constexpr size_t MAX_BUFFER_SIZE = 1024 * 1024; // 1 MB
+
+	char pathBuffer[MAX_PATH_LENGTH];
+	if (!GetConfigPath(pathBuffer, MAX_PATH_LENGTH, configType)) {
+		return 0; // Failed to get config path
+	}
+
+	std::filesystem::path configPath(pathBuffer);
+
+	if (!std::filesystem::exists(configPath)) {
+		return 0; // Config file doesn't exist
+	}
+
+	uintmax_t fileSize = std::filesystem::file_size(configPath);
+	if (fileSize == 0 || fileSize > MAX_BUFFER_SIZE) {
+		return 0; // File is empty or too large
+	}
+
+	char* buffer = static_cast<char*>(malloc(fileSize + 1)); // +1 for null terminator
+	if (!buffer) {
+		return 0; // Memory allocation failed
+	}
+	static auto Exec_CmdGuts = CMemory(CModule("engine.dll").GetModuleBase()).OffsetSelf(0x01059A0).RCast<void* (*)(const char* commands, char bUseExecuteCommand)>();
+
+	std::ifstream file(configPath, std::ios::binary);
+	if (!file.read(buffer, fileSize)) {
+		free(buffer);
+		return 0; // Failed to read file
+	}
+
+	buffer[fileSize] = '\0'; // Null terminate the buffer
+
+	Exec_CmdGuts(buffer, 1);
+
+	free(buffer);
+	return 1; // Success
 }
