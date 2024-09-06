@@ -267,7 +267,9 @@ struct CBaseClient
 {
 	_BYTE gap0[1040];
 	KeyValues* m_ConVars;
+	char pad[284392];
 };
+static_assert(sizeof(CBaseClient) == 285440);
 CBaseClient* g_pClientArray;
 
 SQInteger Script_ServerGetPersistentUserDataKVString(HSQUIRRELVM v) {
@@ -295,7 +297,7 @@ SQInteger Script_ServerGetPersistentUserDataKVString(HSQUIRRELVM v) {
 		//Msg("REPLAY on server tried to access persistent value: key=%s, hashedKey=%s, hashed=%s\n",
 		//	pKey, hashedKey.c_str(), "true");
 
-		sq_pushstring(v, "0", -1); // I HATE REPLAY
+		sq_pushstring(v, pDefaultValue, -1); // I HATE REPLAY
 		return 1;
 	}
 
