@@ -30,28 +30,6 @@ bool IsValidUserInfo(const char* value) {
 		return std::strchr(INVALID_CHARS, c) != nullptr;
 			});
 }
-// Helper function to check if a value is valid according to PackValue/UnpackValue rules
-bool IsValidPackedValue(const char* value) {
-    if (!value || value[0] == '\0' || value[1] == '\0') return false;
-
-    char typeCode = value[0];
-    const char* data = value + 1;
-
-    switch (typeCode) {
-        case 'i': // Integer
-            return data[strspn(data, "-0123456789")] == '\0';
-        case 'f': // Float
-            return data[strspn(data, "-0123456789.")] == '\0' && strchr(data, '.') != nullptr;
-        case 'b': // Boolean
-            return (strcmp(data, "0") == 0 || strcmp(data, "1") == 0);
-        case 's': // String
-            return true; // All strings are valid
-        case 'x': // Invalid/Nothing
-            return data[0] == '\0';
-        default:
-            return false;
-    }
-}
 std::string hashUserInfoKey(const std::string& key) {
 #ifdef HASH_USERINFO_KEYS
 	// Hash the key
@@ -106,10 +84,6 @@ void setinfopersist_cmd(const CCommand& args) {
 			Warning("Invalid user info value %s. Only certain characters are allowed.\n", args.Arg(1));
 			return;
 		}
-		if (!IsValidPackedValue(args.Arg(2))) {
-            		Warning("Invalid packed value %s. Value does not conform to PackValue/UnpackValue rules.\n", args.Arg(2));
-        		return;
-        	}
 
 		// Check for "nosend" argument, or if the convar does not exist
 		bool noSend = (args.ArgC() >= 4 && strcmp(args.Arg(3), "nosend") == 0);
@@ -134,10 +108,10 @@ void setinfopersist_cmd(const CCommand& args) {
 
 		// Set the global variable
 		g_bNoSendConVar = noSend;
-		if (shouldHash)
-			Msg("Setting persistent value: key=%s, hashedKey=%s, value=%s, hashed=true\n", args.Arg(1), hashUserInfoKey(args.Arg(1)).c_str(), args.Arg(2));
-		else
-			Msg("Setting persistent value: key=%s, value=%s, hashed=false\n", args.Arg(1), args.Arg(2));
+		//if (shouldHash)
+		//	Msg("Setting persistent value: key=%s, hashedKey=%s, value=%s, hashed=true\n", args.Arg(1), hashUserInfoKey(args.Arg(1)).c_str(), args.Arg(2));
+		//else
+		//	Msg("Setting persistent value: key=%s, value=%s, hashed=false\n", args.Arg(1), args.Arg(2));
 		// Use the constructed CCommand object
 		setinfo_cmd(*pCommand);
 
@@ -196,13 +170,6 @@ bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 		NetMessageCvar_t var;
 		buffer.ReadString(var.name, sizeof(var.name));
 		buffer.ReadString(var.value, sizeof(var.value));
-		// Check if the var name begins with an underscore
-        	if (var.name[0] == '_') {
-            		if (!IsValidPackedValue(var.value)) {
-                		Warning("Invalid packed value for ConVar %s. Value does not conform to PackValue/UnpackValue rules.\n", var.name);
-                		return false;
-            		}
-        	}
 		// Hash the convar name
 		size_t nameHash = std::hash<std::string>{}(var.name);
 
@@ -325,16 +292,16 @@ SQInteger Script_ServerGetPersistentUserDataKVString(HSQUIRRELVM v) {
 
 	if (!g_pClientArray[index].m_ConVars || index == 18) {
 		//return sq_throwerror(v, "Client has NULL m_ConVars.");
-		Msg("REPLAY on server tried to access persistent value: key=%s, hashedKey=%s, hashed=%s\n",
-			pKey, hashedKey.c_str(), "true");
+		//Msg("REPLAY on server tried to access persistent value: key=%s, hashedKey=%s, hashed=%s\n",
+		//	pKey, hashedKey.c_str(), "true");
 
 		sq_pushstring(v, "0", -1); // I HATE REPLAY
 		return 1;
 	}
 
 	const char* pResult = g_pClientArray[index].m_ConVars->GetString(modifiedKey.c_str(), pDefaultValue);
-	Msg("Server accessing persistent value: key=%s, hashedKey=%s, value=%s, hashed=%s\n",
-		pKey, hashedKey.c_str(), pResult, "true");
+	//Msg("Server accessing persistent value: key=%s, hashedKey=%s, value=%s, hashed=%s\n",
+	//	pKey, hashedKey.c_str(), pResult, "true");
 
 	sq_pushstring(v, pResult, -1);
 	return 1;
@@ -357,23 +324,21 @@ SQInteger Script_ServerSetPersistentUserDataKVString(HSQUIRRELVM v) {
 	if (!IsValidUserInfo(pKey) || !IsValidUserInfo(modifiedKey.c_str()) || !IsValidUserInfo(pValue)) {
 		return sq_throwerror(v, "Invalid user info key or value.");
 	}
-    	if (!IsValidPackedValue(pValue)) {
-        	return sq_throwerror(v, "Invalid packed value. Value does not conform to PackValue/UnpackValue rules.");
-    	}
 	auto edict = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(pPlayer) + 64);
 
 	auto index = ((edict - reinterpret_cast<__int64>(pGlobalVarsServer->pEdicts)) / 56) - 1;
 
-	if (g_pClientArray[index].m_ConVars || index != 18) {
+	if (!(!g_pClientArray[index].m_ConVars || index == 18)) {
 		//return sq_throwerror(v, "Client has NULL m_ConVars.");
 		CVEngineServer_ClientCommand(0, edict, PERSIST_COMMAND" \"%s\" \"%s\" nosend", hashedKey.c_str(), pValue);
 		g_pClientArray[index].m_ConVars->SetString(modifiedKey.c_str(), pValue);
-		Msg("Server setting persistent value: key=%s, value=%s, hashed=%s\n",
-			pKey, pValue, "true");
+		//Msg("Server setting persistent value: key=%s, value=%s, hashed=%s\n",
+		//	pKey, pValue, "true");
 	}
-	Msg("Trying to set persistent value on REPLAY on server: key=%s, hashedKey=%s, value=%s, hashed=%s\n",
-		pKey, hashedKey.c_str(), pValue, "true");
-
+	else {
+		//Msg("Trying to set persistent value on REPLAY on server: key=%s, hashedKey=%s, value=%s, hashed=%s\n",
+		//	pKey, hashedKey.c_str(), pValue, "true");
+	}
 
 	sq_pushstring(v, pValue, -1);
 	return 1;
