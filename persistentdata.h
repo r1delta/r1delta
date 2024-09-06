@@ -41,3 +41,6 @@ SQInteger Script_ClientGetPersistentData(HSQUIRRELVM v);
 SQInteger Script_ClientGetPersistentDataAsInt(HSQUIRRELVM v);
 SQInteger Script_ServerGetPersistentUserDataKVString(HSQUIRRELVM v);
 SQInteger Script_ServerSetPersistentUserDataKVString(HSQUIRRELVM v);
+typedef char (*CBaseClientState__InternalProcessStringCmdType)(void* thisptr, void* msg, bool bIsHLTV);
+extern CBaseClientState__InternalProcessStringCmdType CBaseClientState__InternalProcessStringCmdOriginal;
+char CBaseClientState__InternalProcessStringCmd(void* thisptr, void* msg, bool bIsHLTV);

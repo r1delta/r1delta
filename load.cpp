@@ -376,17 +376,38 @@ void CHL2_Player_Precache(uintptr_t a1, uintptr_t a2) {
 			"watersplash",
 			0xFFFFFFFFi64,
 			0i64);
-
+		
 		static auto StaticClassSystem001_ptr = (uintptr_t*)(server_mod + 0xC31000);
 		auto StaticClassSystem001 = *StaticClassSystem001_ptr;
+		using PrecacheModel_t = uintptr_t(__fastcall*)(const void*);
+		static auto PrecacheModel = PrecacheModel_t(server_mod + 0x3B6A40);
+		PrecacheModel("models/weapons/arms/atlaspov.mdl");
+		PrecacheModel("models/weapons/arms/atlaspov_cockpit2.mdl");
+		PrecacheModel("models/weapons/arms/human_pov_cockpit.mdl");
+		PrecacheModel("models/weapons/arms/ogrepov.mdl");
+		PrecacheModel("models/weapons/arms/ogrepov_cockpit.mdl");
+		PrecacheModel("models/weapons/arms/petepov_workspace.mdl");
+		PrecacheModel("models/weapons/arms/pov_imc_pilot_male_br.mdl");
+		PrecacheModel("models/weapons/arms/pov_imc_pilot_male_cq.mdl");
+		PrecacheModel("models/weapons/arms/pov_imc_pilot_male_dm.mdl");
+		PrecacheModel("models/weapons/arms/pov_imc_spectre.mdl");
+		PrecacheModel("models/weapons/arms/pov_male_anims.mdl");
+		PrecacheModel("models/weapons/arms/pov_mcor_pilot_male_br.mdl");
+		PrecacheModel("models/weapons/arms/pov_mcor_pilot_male_cq.mdl");
+		PrecacheModel("models/weapons/arms/pov_mcor_pilot_male_dm.mdl");
+		PrecacheModel("models/weapons/arms/pov_mcor_spectre_assault.mdl");
+		PrecacheModel("models/weapons/arms/pov_pete_core.mdl");
+		PrecacheModel("models/weapons/arms/pov_pilot_female_br.mdl");
+		PrecacheModel("models/weapons/arms/pov_pilot_female_cq.mdl");
+		PrecacheModel("models/weapons/arms/pov_pilot_female_dm.mdl");
+		PrecacheModel("models/weapons/arms/stryderpov.mdl");
+		PrecacheModel("models/weapons/arms/stryderpov_cockpit.mdl");
 		for (size_t i = 0; i < 100; i++) {
 			auto v5 = (*(__int64(__fastcall**)(__int64, _QWORD))(*(_QWORD*)StaticClassSystem001 + 24i64))(StaticClassSystem001, i);
 			auto elem = g_militia_bodies[i];
 
 			// if (*(_QWORD*)(v5 + 448))
 			{
-				using PrecacheModel_t = uintptr_t(__fastcall*)(const void*);
-				static auto PrecacheModel = PrecacheModel_t(server_mod + 0x3B6A40);
 
 				for (size_t i_ = 0; i_ < 16; i_++) {
 					// IMC
@@ -1003,7 +1024,8 @@ void __stdcall LoaderNotificationCallback(
 			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher.dll") + 0xB6F0), &CSquirrelVM__PrintFunc2, NULL);
 			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher.dll") + 0xB7A0), &CSquirrelVM__PrintFunc3, NULL);
 			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x23E20), &SVC_Print_Process_Hook, NULL);
-
+			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x22DD0), &CBaseClientState__InternalProcessStringCmd, reinterpret_cast<LPVOID*>(&CBaseClientState__InternalProcessStringCmdOriginal));
+			
 			//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x473550), &sub_180473550, NULL);
 
 			//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x1168B0), &COM_StringCopy, reinterpret_cast<LPVOID*>(&COM_StringCopyOriginal));

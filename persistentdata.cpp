@@ -343,3 +343,11 @@ SQInteger Script_ServerSetPersistentUserDataKVString(HSQUIRRELVM v) {
 	sq_pushstring(v, pValue, -1);
 	return 1;
 }
+typedef char (*CBaseClientState__InternalProcessStringCmdType)(void* thisptr, void* msg, bool bIsHLTV);
+CBaseClientState__InternalProcessStringCmdType CBaseClientState__InternalProcessStringCmdOriginal;
+char CBaseClientState__InternalProcessStringCmd(void* thisptr, void* msg, bool bIsHLTV) {
+	static auto Cbuf_Execute = CMemory(CModule("engine.dll").GetModuleBase()).OffsetSelf(0x1057C0).RCast<void(*)()>();
+	char ret = CBaseClientState__InternalProcessStringCmdOriginal(thisptr, msg, bIsHLTV);
+	Cbuf_Execute(); // fix cbuf overflow on too many stringcmds
+	return ret;
+}

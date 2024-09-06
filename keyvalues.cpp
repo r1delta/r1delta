@@ -28,6 +28,7 @@ public:
 	virtual const char* (__thiscall GetStringForSymbol)(int);
 	virtual void(__thiscall AddKeyValuesToMemoryLeakList)(void*, int);
 	virtual void(__thiscall RemoveKeyValuesFromMemoryLeakList)(void*);
+	virtual void* UnusedNullFuncMaybe(void) { return nullptr; }
 	virtual void(__thiscall SetKeyValuesExpressionSymbol)(const char*, bool);
 	virtual bool(__thiscall GetKeyValuesExpressionSymbol)(const char*);
 	virtual int(__thiscall GetSymbolForStringCaseSensitive)(HKeySymbol& hCaseInsensitiveSymbol, const char* name, bool bCreate) = 0;
@@ -978,7 +979,7 @@ void KeyValues::SetName(const char* pszSetName)
 {
 	HKeySymbol hCaseSensitiveKeyName = INVALID_KEY_SYMBOL, hCaseInsensitiveKeyName = INVALID_KEY_SYMBOL;
 	hCaseSensitiveKeyName =
-		KeyValuesSystem()->GetSymbolForStringCaseSensitive(hCaseInsensitiveKeyName, pszSetName, false);
+		KeyValuesSystem()->GetSymbolForStringCaseSensitive(hCaseInsensitiveKeyName, pszSetName, true);
 
 	m_iKeyName = hCaseInsensitiveKeyName;
 	SPLIT_3_BYTES_INTO_1_AND_2(m_iKeyNameCaseSensitive1, m_iKeyNameCaseSensitive2, hCaseSensitiveKeyName);
