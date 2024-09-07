@@ -74,9 +74,6 @@
 #include "persistentdata.h"
 #pragma intrinsic(_ReturnAddress)
 
-wchar_t kNtDll[] = L"ntdll.dll";
-char kLdrRegisterDllNotification[] = "LdrRegisterDllNotification";
-char kLdrUnregisterDllNotification[] = "LdrUnregisterDllNotification";
 void* dll_notification_cookie_;
 
 void Status_ConMsg(const char* text, ...)

@@ -92,9 +92,6 @@ NTSTATUS(NTAPI*)(ULONG flags,
 	PVOID context,
 	PVOID* cookie);
 using LdrUnregisterDllNotificationFunc = NTSTATUS(NTAPI*)(PVOID cookie);
-extern wchar_t kNtDll[];
-extern char kLdrRegisterDllNotification[];
-extern char kLdrUnregisterDllNotification[];
 extern void* dll_notification_cookie_;
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,

@@ -97,7 +97,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 		StartFileCacheThread();
 		LdrRegisterDllNotificationFunc reg_fn =
 			reinterpret_cast<LdrRegisterDllNotificationFunc>(::GetProcAddress(
-				::GetModuleHandle(kNtDll), kLdrRegisterDllNotification));
+				::GetModuleHandleW(L"ntdll.dll"), "LdrRegisterDllNotification"));
 		reg_fn(0, &LoaderNotificationCallback, 0, &dll_notification_cookie_);
 		LDR_DLL_LOADED_NOTIFICATION_DATA* ndata = GetModuleNotificationData(L"launcher.dll");
 		doBinaryPatchForFile(*ndata);
