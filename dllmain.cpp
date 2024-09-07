@@ -70,22 +70,22 @@ const CPUInformation* GetCPUInformationDet()
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 {
-
-	if (!IsDedicatedServer() && !IsNoConsole())
-	{
-		AllocConsole();
-		SetConsoleTitleA("R1Delta");
-		freopen("CONOUT$", "wt", stdout);
-	}
-
-	VirtualAlloc((void*)0xFFEEFFEE, 1, MEM_RESERVE, PAGE_NOACCESS);
-	
-	LoadLibraryW(L"OnDemandConnRouteHelper"); // stop fucking reloading this thing
-	LoadLibraryA("TextShaping.dll"); // fix "Patcher Error" dialogs having no text
-	SetDllDirectory(L"r1delta\\bin\\x64_delta");
 	switch (fdwReason)
 	{
 	case DLL_PROCESS_ATTACH: {
+		if (!IsDedicatedServer() && !IsNoConsole())
+		{
+			AllocConsole();
+			SetConsoleTitleA("R1Delta");
+			freopen("CONOUT$", "wt", stdout);
+		}
+
+		VirtualAlloc((void*)0xFFEEFFEE, 1, MEM_RESERVE, PAGE_NOACCESS);
+
+		LoadLibraryW(L"OnDemandConnRouteHelper"); // stop fucking reloading this thing
+		LoadLibraryA("TextShaping.dll"); // fix "Patcher Error" dialogs having no text
+		SetDllDirectory(L"r1delta\\bin\\x64_delta");
+
 		MH_Initialize();
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("tier0.dll"), "GetCPUInformation"), &GetCPUInformationDet, reinterpret_cast<LPVOID*>(&GetCPUInformationOriginal));
 		MH_EnableHook(MH_ALL_HOOKS);
