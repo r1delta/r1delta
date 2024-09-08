@@ -175,24 +175,24 @@ float __fastcall sub_3997D0(CAI_Node* a1, int a2, unsigned __int8 a3)
 }
 float* __fastcall sub_35E370(int a1)
 {
-	static void* unk_B4BE78 = (void*)(uintptr_t(GetModuleHandleA("server.dll")) + 0xB41BBC);
+	void* unk_B4BE78 = (void*)(G_server + 0xB41BBC);
 	return (float*)&unk_B4BE78 + 64 * (__int64)a1;
 }
 float* __fastcall sub_35E390(int a1)
 {
-	static void* unk_B4BE6C = (void*)(uintptr_t(GetModuleHandleA("server.dll")) + 0xB41BB0);
+	void* unk_B4BE6C = (void*)(G_server + 0xB41BB0);
 	return (float*)&unk_B4BE6C + 64 * (__int64)a1;
 }
 float __fastcall sub_35E240(int a1)
 {
-	static void* off_B4BE60 = (void*)(uintptr_t(GetModuleHandleA("server.dll")) + 0xB41BA8);
+	void* off_B4BE60 = (void*)(G_server + 0xB41BA8);
 	return *(float*)&(&off_B4BE60)[8 * (__int64)a1 + 4] - *((float*)&off_B4BE60 + 16 * (__int64)a1 + 5);
 }
 
 int sub_390AE0(CAI_Network* network)
 {
-	static float dword_1061618 = sqrtf(1.1754944e-38);
-	static auto UTIL_TraceLine = reinterpret_cast<void** (*)(Vector3f* a1, Vector3f* a2, __int64 a3, __int64 a4, int a5, char* a6)>(uintptr_t(GetModuleHandleA("server.dll")) + 0x263AF0);
+	static const float dword_1061618 = sqrtf(1.1754944e-38);
+	auto UTIL_TraceLine = reinterpret_cast<void** (*)(Vector3f* a1, Vector3f* a2, __int64 a3, __int64 a4, int a5, char* a6)>(G_server + 0x263AF0);
 
 	CAI_Node** nodes = network->nodes;
 	int nodecount = network->nodecount;
@@ -507,7 +507,7 @@ void CAI_NetworkManager__FixupHints() {
 	CAI_NetworkManager__FixupHintsOriginal();	
 }
 void allocbuffer(uintptr_t ptr) {
-	auto nonexistentbuffer = (void**)(uintptr_t(GetModuleHandleA("server.dll")) + ptr);
+	auto nonexistentbuffer = (void**)(G_server + ptr);
 	if (*nonexistentbuffer)
 		return;
 	*nonexistentbuffer = CreateGlobalMemAlloc()->Alloc(65536 * 8);
@@ -593,8 +593,9 @@ unsigned __int8 __fastcall sub_363A50(__int64 a1, int a2, int a3, int a4)
 	return _bittest((const LONG*)(&v11), v10 & 0x1F);
 }
 void __fastcall CAI_NetworkManager__DelayedInit(__int64 a1) {
-	static bool* CAI_NetworkManager__gm_fNetworksLoaded = (bool*)(uintptr_t(GetModuleHandleA("server.dll")) + 0xC318A0);
-	static auto CAI_NetworkBuilder__Rebuild = (void(*)(__int64 a1, CAI_Network* a2))(uintptr_t(GetModuleHandleA("server.dll")) + 0x3682A0);
+	auto server = G_server;
+	bool* CAI_NetworkManager__gm_fNetworksLoaded = (bool*)(server + 0xC318A0);
+	auto CAI_NetworkBuilder__Rebuild = (void(*)(__int64 a1, CAI_Network* a2))(server + 0x3682A0);
 
 	static bool allocated = false;
 	if (!allocated) {
@@ -604,25 +605,25 @@ void __fastcall CAI_NetworkManager__DelayedInit(__int64 a1) {
 		allocbuffer(0xD416F0);
 		allocbuffer(0xD416D0);
 		allocbuffer(0xD41AD0);
-		rettorebuild = uintptr_t(GetModuleHandleA("server.dll")) + 0x368594;
-		rettofree = uintptr_t(GetModuleHandleA("server.dll")) + 0x368469;
-		rettofree2 = uintptr_t(GetModuleHandleA("server.dll")) + 0x3685A0;
-		rettoalloc = uintptr_t(GetModuleHandleA("server.dll")) + 0x36847E;
-		rettoallocbullshit = uintptr_t(GetModuleHandleA("server.dll")) + 0x3684A4;
-		CAI_DynamicLink__InitDynamicLinks = CAI_DynamicLink__InitDynamicLinksType(uintptr_t(GetModuleHandleA("server.dll")) + 0x0337E80);
-		CAI_NetworkBuilder__InitZones = CAI_DynamicLink__InitDynamicLinksType(uintptr_t(GetModuleHandleA("server.dll")) + 0x367EE0);
+		rettorebuild = server + 0x368594;
+		rettofree = server + 0x368469;
+		rettofree2 = server + 0x3685A0;
+		rettoalloc = server + 0x36847E;
+		rettoallocbullshit = server + 0x3684A4;
+		CAI_DynamicLink__InitDynamicLinks = CAI_DynamicLink__InitDynamicLinksType(server + 0x0337E80);
+		CAI_NetworkBuilder__InitZones = CAI_DynamicLink__InitDynamicLinksType(server + 0x367EE0);
 		
-		arrayptr1 = (__int64)(uintptr_t(GetModuleHandleA("server.dll")) + 0xD416F0);
-		arrayptr2 = (__int64)(uintptr_t(GetModuleHandleA("server.dll")) + 0xD41710);
+		arrayptr1 = (__int64)(server + 0xD416F0);
+		arrayptr2 = (__int64)(server + 0xD41710);
 
-		pUnkStruct0Count = (int*)(uintptr_t(GetModuleHandleA("server.dll")) + 0xD41AE8);
-		pppUnkNodeStruct0s = (UnkNodeStruct0***)(uintptr_t(GetModuleHandleA("server.dll")) + 0xD41AD0);
-		pUnkLinkStruct1Count = (int*)(uintptr_t(GetModuleHandleA("server.dll")) + 0x0D41AB8);
-		pppUnkStruct1s = (UnkLinkStruct1***)(uintptr_t(GetModuleHandleA("server.dll")) + 0xD41AA0);
+		pUnkStruct0Count = (int*)(server + 0xD41AE8);
+		pppUnkNodeStruct0s = (UnkNodeStruct0***)(server + 0xD41AD0);
+		pUnkLinkStruct1Count = (int*)(server + 0x0D41AB8);
+		pppUnkStruct1s = (UnkLinkStruct1***)(server + 0xD41AA0);
 
 	}
 	network = reinterpret_cast<CAI_Network * >(((_QWORD*)(a1))[200]);
-	g_pGlobals = (CGlobalVarsServer2015**)(uintptr_t(GetModuleHandleA("server.dll")) + 0xC310C0);
+	g_pGlobals = (CGlobalVarsServer2015**)(server + 0xC310C0);
 	std::filesystem::path writePath("r1delta/maps/graphs");
 	writePath /= (char*)(*g_pGlobals)->mapname_pszValue;
 	writePath += ".ain";
@@ -630,9 +631,9 @@ void __fastcall CAI_NetworkManager__DelayedInit(__int64 a1) {
 		return CAI_NetworkManager__DelayedInitOriginal(a1);
 	CAI_NetworkBuilder__Rebuild(a1, network);
 	DumpAINInfo(network);
-	static uintptr_t engine = uintptr_t(GetModuleHandleA("engine.dll"));
+	uintptr_t engine = G_engine;
 	typedef void (*Cbuf_AddTextType)(int a1, const char* a2, unsigned int a3);
-	static Cbuf_AddTextType Cbuf_AddText = (Cbuf_AddTextType)(engine + 0x102D50);
+	Cbuf_AddTextType Cbuf_AddText = (Cbuf_AddTextType)(engine + 0x102D50);
 	Cbuf_AddText(0, "reload\n", 0);
 	return CAI_NetworkManager__DelayedInitOriginal(a1);
 }

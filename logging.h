@@ -2,14 +2,14 @@
 #include <stdarg.h>
 #include "cvar.h"
 
-extern void (*Msg)(const char* pMsg, ...);
-extern void (*Warning)(const char* pMsg, ...);
-extern void (*Warning_SpewCallStack)(int iMaxCallStackLength, const char* pMsg, ...);
-extern void (*DevMsg)(int level, const char* pMsg, ...);
-extern void (*DevWarning)(int level, const char* pMsg, ...);
-extern void (*ConColorMsg)(const Color& clr, const char* pMsg, ...);
-extern void (*ConDMsg)(const char* pMsg, ...);
-extern void (*COM_TimestampedLog)(const char* fmt, ...);
+extern "C" __declspec(dllimport) void Msg(const char* _Printf_format_string_ pMsg, ...);
+extern "C" __declspec(dllimport) void Warning(const char* _Printf_format_string_ pMsg, ...);
+extern "C" __declspec(dllimport) void Warning_SpewCallStack(int iMaxCallStackLength, const char* _Printf_format_string_ pMsg, ...);
+extern "C" __declspec(dllimport) void DevMsg(int level, const char* _Printf_format_string_ pMsg, ...);
+extern "C" __declspec(dllimport) void DevWarning(int level, const char* _Printf_format_string_ pMsg, ...);
+extern "C" __declspec(dllimport) void ConColorMsg(const Color& clr, const char* _Printf_format_string_ pMsg, ...);
+extern "C" __declspec(dllimport) void ConDMsg(const char* _Printf_format_string_ pMsg, ...);
+extern "C" __declspec(dllimport) void COM_TimestampedLog(const char* _Printf_format_string_ fmt, ...);
 void InitLoggingHooks();
 typedef void (*ConVar_PrintDescriptionType)(const ConCommandBaseR1* pVar);
 extern ConVar_PrintDescriptionType ConVar_PrintDescriptionOriginal;

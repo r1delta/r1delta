@@ -236,7 +236,7 @@ void __fastcall cl_DumpPrecacheStats(__int64 CClientState, const char* name) {
 	}
 
 	using GetStringTable_t = uintptr_t(__fastcall*)(uintptr_t, const char*);
-	static auto GetStringTable = GetStringTable_t(uintptr_t(GetModuleHandleA("engine.dll")) + 0x22B60);
+	auto GetStringTable = GetStringTable_t(G_engine + 0x22B60);
 	auto table = GetStringTable(CClientState, name);
 
 	if (!items || !table) {
@@ -253,13 +253,13 @@ void __fastcall cl_DumpPrecacheStats(__int64 CClientState, const char* name) {
 	auto towrite = sprintf_s(buf, "Precache table %s:  %d out of UNK slots used\n", name, int(count));
 	WriteFile(outhandle, buf, towrite, 0, 0);
 
+	using CL_GetPrecacheUserData_t = uintptr_t(__fastcall*)(uintptr_t, uintptr_t);
+	auto CL_GetPrecacheUserData = CL_GetPrecacheUserData_t(G_engine + 0x558C0);
+
 	for (int i = 0; i < count; i++) {
 		auto slot = items + (i * 16);
 
 		auto name = (*(const char* (__fastcall**)(__int64, _QWORD))(*(_QWORD*)table + 72i64))(table, i);
-
-		using CL_GetPrecacheUserData_t = uintptr_t(__fastcall*)(uintptr_t, uintptr_t);
-		auto CL_GetPrecacheUserData = CL_GetPrecacheUserData_t(uintptr_t(GetModuleHandleA("engine.dll")) + 0x558C0);
 
 		auto p = CL_GetPrecacheUserData(table, i);
 
@@ -315,7 +315,7 @@ sub_136E70Type sub_136E70Original;
 __int64 __fastcall sub_136E70(char* pPath)
 {
 	auto ret = sub_136E70Original(pPath);
-	reinterpret_cast<__int64(*)()>(uintptr_t(GetModuleHandleA("engine.dll")) + 0x19D730)();
+	reinterpret_cast<__int64(*)()>(G_engine + 0x19D730)();
 	return ret;	
 }
 void* SetPreCache_o = nullptr;
@@ -341,15 +341,15 @@ __int64 __fastcall SetPreCache(__int64 a1, __int64 a2, char a3) {
 }
 
 void CHL2_Player_Precache(uintptr_t a1, uintptr_t a2) {
-	static auto server_mod = uintptr_t(GetModuleHandleA("server.dll"));
-	static auto byte_180C318A6 = (uint8_t*)(server_mod + 0xC318A6);
+	auto server_mod = G_server;
+	auto byte_180C318A6 = (uint8_t*)(server_mod + 0xC318A6);
 
 	if (*byte_180C318A6) {
 
 		using sub_1804FE8B0_t = uintptr_t(__fastcall*)(uintptr_t, uintptr_t);
 		auto sub_1804FE8B0 = sub_1804FE8B0_t(server_mod + 0x4FE8B0);
 
-		static auto EffectDispatch_ptr = (uintptr_t*)(server_mod + 0xC310C8);
+		auto EffectDispatch_ptr = (uintptr_t*)(server_mod + 0xC310C8);
 		auto EffectDispatch = *EffectDispatch_ptr;
 
 		sub_1804FE8B0(a1, a2);
@@ -367,10 +367,10 @@ void CHL2_Player_Precache(uintptr_t a1, uintptr_t a2) {
 			0xFFFFFFFFi64,
 			0i64);
 		
-		static auto StaticClassSystem001_ptr = (uintptr_t*)(server_mod + 0xC31000);
+		auto StaticClassSystem001_ptr = (uintptr_t*)(server_mod + 0xC31000);
 		auto StaticClassSystem001 = *StaticClassSystem001_ptr;
 		using PrecacheModel_t = uintptr_t(__fastcall*)(const void*);
-		static auto PrecacheModel = PrecacheModel_t(server_mod + 0x3B6A40);
+		auto PrecacheModel = PrecacheModel_t(server_mod + 0x3B6A40);
 		PrecacheModel("models/weapons/arms/atlaspov.mdl");
 		PrecacheModel("models/weapons/arms/atlaspov_cockpit2.mdl");
 		PrecacheModel("models/weapons/arms/human_pov_cockpit.mdl");
@@ -581,9 +581,10 @@ CAI_NetworkManager__LoadNavMeshType CAI_NetworkManager__LoadNavMeshOriginal;
 void __fastcall CAI_NetworkManager__LoadNavMesh(__int64 a1, __int64 a2, const char* a3)
 {
 	CAI_NetworkManager__LoadNavMeshOriginal(a1, a2, a3);
-	*(int*)((uintptr_t)(GetModuleHandleA("server.dll")) + 0xC317F0) &= ~1;
-	((CAI_NetworkManager__BuildStubType)(((uintptr_t)(GetModuleHandleA("server.dll"))) + 0x3664C0))(a1);
-	((CAI_NetworkManager__BuildStubType)(((uintptr_t)(GetModuleHandleA("server.dll"))) + 0x3645f0))(a1);
+	auto server = G_server;
+	*(int*)(server + 0xC317F0) &= ~1;
+	((CAI_NetworkManager__BuildStubType)(server + 0x3664C0))(a1);
+	((CAI_NetworkManager__BuildStubType)(server + 0x3645f0))(a1);
 }
 
 typedef __int64 (*SendTable_CalcDeltaType)(
@@ -601,8 +602,8 @@ typedef __int64 (*CBaseServer__WriteDeltaEntitiesType)(__int64 a1, _DWORD* a2, _
 CBaseServer__WriteDeltaEntitiesType CBaseServer__WriteDeltaEntitiesOriginal;
 __int64 __fastcall CBaseServer__WriteDeltaEntities(__int64 a1, _DWORD* a2, __int64 a3, __int64 a4, __int64 a5, int a6, unsigned int a7)
 {
-	static uintptr_t engine = uintptr_t(GetModuleHandleA("engine.dll"));
-	static uintptr_t engine_ds = uintptr_t(GetModuleHandleA("engine_ds.dll"));
+	uintptr_t engine = G_engine;
+	uintptr_t engine_ds = G_engine_ds;
 	*(int*)(engine + 0x2966168) = 2; // force active
 	memcpy((void*)(engine + 0x2E9253C), (void*)(engine_ds + 0x200D00C), static_cast<size_t>(static_cast<size_t>(0x2E9BA40) - static_cast<size_t>(0x2E9253C))); // prevent overflow
 	memcpy((void*)(engine + 0x2965048), (void*)(engine_ds + 0x1C836A8), 32);
@@ -709,14 +710,14 @@ char __fastcall sub_4C460(__int64 a1)
 		pdataempty = calloc(34872, 1);
 	}
 	// Set up function pointers
-	static auto engine_mod = uintptr_t(GetModuleHandleA("engine_ds.dll"));
-	static auto enginenotdedi_mod = uintptr_t(GetModuleHandleA("engine.dll"));
-	static auto sub_1601A0 = sub_1601A0_t(engine_mod + 0x1601A0);
-	static auto sub_14EF30 = sub_14EF30_t(enginenotdedi_mod + 0x1FEDB0);
-	static auto sub_45420 = sub_45420_t(engine_mod + 0x45420);
-	static auto sub_4AAD0 = sub_4AAD0_t(engine_mod + 0x4AAD0);
-	static auto qword_2097510 = (QWORD*)(engine_mod + 0x2097510);
-	static auto sub_16B0F0 = sub_16B0F0_t(engine_mod + 0x16B0F0);
+	auto engine_mod = G_engine_ds;
+	auto enginenotdedi_mod = G_engine;
+	auto sub_1601A0 = sub_1601A0_t(engine_mod + 0x1601A0);
+	auto sub_14EF30 = sub_14EF30_t(enginenotdedi_mod + 0x1FEDB0);
+	auto sub_45420 = sub_45420_t(engine_mod + 0x45420);
+	auto sub_4AAD0 = sub_4AAD0_t(engine_mod + 0x4AAD0);
+	auto qword_2097510 = (QWORD*)(engine_mod + 0x2097510);
+	auto sub_16B0F0 = sub_16B0F0_t(engine_mod + 0x16B0F0);
 	sub_16B0F0(a1);
 	if (true)
 	{
@@ -743,22 +744,22 @@ char __fastcall sub_4C460(__int64 a1)
 }
 __int64 __fastcall sub_14E980(__int64 a1, __int64 a2, __int64 a3, int a4)
 {
-	static auto ConstructPersistenceCachedDefFileMsg = (__int64 (*)(__int64 a1, int a2))(uintptr_t(GetModuleHandleA("engine.dll")) + 0x1FE890);
+	auto ConstructPersistenceCachedDefFileMsg = (__int64 (*)(__int64 a1, int a2))(G_engine + 0x1FE890);
 	return ConstructPersistenceCachedDefFileMsg(a1, 0);
 }
 void COM_Init()
 {
 	COM_InitOriginal();
 	// SaveRestore__Init();
-	SaveRestore_Init = SaveRestore_InitType(uintptr_t(GetModuleHandleA("engine.dll")) + 0x1410E0);
-	SaveRestore_Init(uintptr_t(GetModuleHandleA("engine.dll")) + 0x2EC8590);
+	SaveRestore_Init = SaveRestore_InitType(G_engine + 0x1410E0);
+	SaveRestore_Init(G_engine + 0x2EC8590);
 }
 typedef void (*CL_Retry_fType)();
 CL_Retry_fType CL_Retry_fOriginal;
 void CL_Retry_f() {
-	static uintptr_t engine = uintptr_t(GetModuleHandleA("engine.dll"));
+	uintptr_t engine = G_engine;
 	typedef void (*Cbuf_AddTextType)(int a1, const char* a2, unsigned int a3);
-	static Cbuf_AddTextType Cbuf_AddText = (Cbuf_AddTextType)(engine + 0x102D50);
+	Cbuf_AddTextType Cbuf_AddText = (Cbuf_AddTextType)(engine + 0x102D50);
 	if (*(int*)(engine + 0x2966168) == 2) {
 		Cbuf_AddText(0, "connect localhost\n", 0);
 	}
@@ -812,15 +813,15 @@ void __fastcall sub_180031610(__int64 a1, float a2) {
 typedef __int64 (*CBaseEntity__VPhysicsInitNormalType)(void* a1, unsigned int a2, unsigned int a3, char a4, __int64 a5);
 __int64 __fastcall C_BaseEntity__VPhysicsInitNormal(_QWORD* a1, unsigned int a2, unsigned int a3, char a4, __int64 a5)
 {
-	static auto CBaseEntity__SetMoveType = reinterpret_cast<void(*)(void* a1, __int64 a2, __int64 a3)>(uintptr_t(GetModuleHandleA("client.dll")) + 0x02F5B30);
+	auto CBaseEntity__SetMoveType = reinterpret_cast<void(*)(void* a1, __int64 a2, __int64 a3)>(G_client + 0x02F5B30);
 	CBaseEntity__SetMoveType(a1, 5, 3);
 	return 0;
 }
 CBaseEntity__VPhysicsInitNormalType CBaseEntity__VPhysicsInitNormalOriginal;
 __int64 __fastcall CBaseEntity__VPhysicsInitNormal(void* a1, unsigned int a2, unsigned int a3, char a4, __int64 a5)
 {
-	static uintptr_t serverbase = uintptr_t(GetModuleHandleA("server.dll"));
-	static auto CBaseEntity__SetMoveType = reinterpret_cast<void(*)(void* a1, __int64 a2, __int64 a3)>(uintptr_t(GetModuleHandleA("server.dll")) + 0x3B3200);
+	uintptr_t serverbase = G_server;
+	auto CBaseEntity__SetMoveType = reinterpret_cast<void(*)(void* a1, __int64 a2, __int64 a3)>(serverbase + 0x3B3200);
 
 	
 	if (uintptr_t(_ReturnAddress()) == (serverbase + 0xb63fd)) {
@@ -836,8 +837,9 @@ __int64 __fastcall CBaseEntity__VPhysicsInitNormal(void* a1, unsigned int a2, un
 typedef void* (*CEntityFactoryDictionary__CreateType)(void* thisptr, const char* pClassName);
 CEntityFactoryDictionary__CreateType CEntityFactoryDictionary__CreateOriginal;
 void* CEntityFactoryDictionary__Create(void* thisptr, const char* pClassName) {
-	static uintptr_t mapload = uintptr_t(GetModuleHandleA("server.dll")) + 0x1432a2;
-	static uintptr_t serverbase = uintptr_t(GetModuleHandleA("server.dll"));
+	auto server = G_server;
+	uintptr_t mapload = server + 0x1432a2;
+	uintptr_t serverbase = server;
 
 	bool override2 = false;
 	if (strstr(pClassName, "prop_physics") != NULL) {// && uintptr_t(_ReturnAddress()) != mapload) {
@@ -854,7 +856,7 @@ typedef void (*ConCommandConstructorType)(
 	ConCommandR1* newCommand, const char* name, void (*callback)(const CCommand&), const char* helpString, int flags, void* parent);
 
 void RegisterConCommand(const char* commandName, void (*callback)(const CCommand&), const char* helpString, int flags) {
-	static ConCommandConstructorType conCommandConstructor = (ConCommandConstructorType)(uintptr_t(GetModuleHandleA("engine.dll")) + 0x4808F0);
+	ConCommandConstructorType conCommandConstructor = (ConCommandConstructorType)(G_engine + 0x4808F0);
 	ConCommandR1* newCommand = new ConCommandR1;
 	
 	conCommandConstructor(newCommand, commandName, callback, helpString, flags, nullptr);
@@ -916,9 +918,12 @@ void FreeModuleNotificationData(LDR_DLL_LOADED_NOTIFICATION_DATA* data) {
 }
 
 uintptr_t G_launcher;
+uintptr_t G_vscript;
 uintptr_t G_filesystem_stdio;
+uintptr_t G_server;
 uintptr_t G_engine;
 uintptr_t G_engine_ds;
+uintptr_t G_client;
 
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
@@ -935,12 +940,14 @@ void __stdcall LoaderNotificationCallback(
 	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"server.dll") == 0) {
 		
 		auto server_base = (uintptr_t)notification_data->Loaded.DllBase;
+		G_server = server_base;
 		auto engine_base = G_engine;
-		auto vscript_base = (uintptr_t)GetModuleHandleA(VSCRIPT_DLL);
+		auto vscript_base = G_vscript;
 
-		auto engine_base_spec = ENGINE_DLL_BASE;
+		auto dedi = G_is_dedi;
 
-		//doBinaryPatchForFile(*GetModuleNotificationData(L"vstdlib"));
+		auto engine_base_spec = ENGINE_DLL_BASE_(dedi);
+
 		LDR_DLL_LOADED_NOTIFICATION_DATA* ndata = GetModuleNotificationData(L"vstdlib");
 		doBinaryPatchForFile(*ndata);
 		FreeModuleNotificationData(ndata);
@@ -953,17 +960,17 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)(server_base + 0x72B480), &hkrecalloc_base, NULL);
 		MH_CreateHook((LPVOID)(server_base + 0x721000), &hkfree_base, NULL);
 		//MH_CreateHook((LPVOID)(server_base + 0x364D00), &CAI_NetworkManager__LoadNavMesh, reinterpret_cast<LPVOID*>(&CAI_NetworkManager__LoadNavMeshOriginal));
-		MH_CreateHook((LPVOID)(vscript_base + (IsDedicatedServer() ? 0x6A80 : 0x6A60)), &CScriptVM__ctor, reinterpret_cast<LPVOID*>(&CScriptVM__ctororiginal));
-		MH_CreateHook((LPVOID)(vscript_base + (IsDedicatedServer() ? 0x1210 : 0x1210)), &CScriptManager__CreateNewVM, reinterpret_cast<LPVOID*>(&CScriptManager__CreateNewVMOriginal));
-		MH_CreateHook((LPVOID)(vscript_base + (IsDedicatedServer() ? 0x1640 : 0x1630)), &CScriptVM__GetUnknownVMPtr, reinterpret_cast<LPVOID*>(&CScriptVM__GetUnknownVMPtrOriginal));
-		MH_CreateHook((LPVOID)(vscript_base + (IsDedicatedServer() ? 0x1600 : 0x15F0)), &CScriptManager__DestroyVM, reinterpret_cast<LPVOID*>(&CScriptManager__DestroyVMOriginal));
-		MH_CreateHook((LPVOID)(vscript_base + (IsDedicatedServer() ? 0xCDD0 : 0xCDB0)), &CSquirrelVM__RegisterFunctionGuts, reinterpret_cast<LPVOID*>(&CSquirrelVM__RegisterFunctionGutsOriginal));
-		MH_CreateHook((LPVOID)(vscript_base + (IsDedicatedServer() ? 0xD670 : 0xD650)), &CSquirrelVM__PushVariant, reinterpret_cast<LPVOID*>(&CSquirrelVM__PushVariantOriginal));
-		MH_CreateHook((LPVOID)(vscript_base + (IsDedicatedServer() ? 0xD7D0 : 0xD7B0)), &CSquirrelVM__ConvertToVariant, reinterpret_cast<LPVOID*>(&CSquirrelVM__ConvertToVariantOriginal));
-		MH_CreateHook((LPVOID)(vscript_base + (IsDedicatedServer() ? 0xB130 : 0xB110)), &CSquirrelVM__ReleaseValue, reinterpret_cast<LPVOID*>(&CSquirrelVM__ReleaseValueOriginal));
-		MH_CreateHook((LPVOID)(vscript_base + (IsDedicatedServer() ? 0xA210 : 0xA1F0)), &CSquirrelVM__SetValue, reinterpret_cast<LPVOID*>(&CSquirrelVM__SetValueOriginal));
-		MH_CreateHook((LPVOID)(vscript_base + (IsDedicatedServer() ? 0x9C60 : 0x9C40)), &CSquirrelVM__SetValueEx, reinterpret_cast<LPVOID*>(&CSquirrelVM__SetValueExOriginal));
-		MH_CreateHook((LPVOID)(vscript_base + (IsDedicatedServer() ? 0xBE80 : 0xBE60)), &CSquirrelVM__TranslateCall, reinterpret_cast<LPVOID*>(&CSquirrelVM__TranslateCallOriginal));
+		MH_CreateHook((LPVOID)(vscript_base + (dedi ? 0x6A80 : 0x6A60)), &CScriptVM__ctor, reinterpret_cast<LPVOID*>(&CScriptVM__ctororiginal));
+		MH_CreateHook((LPVOID)(vscript_base + (dedi ? 0x1210 : 0x1210)), &CScriptManager__CreateNewVM, reinterpret_cast<LPVOID*>(&CScriptManager__CreateNewVMOriginal));
+		MH_CreateHook((LPVOID)(vscript_base + (dedi ? 0x1640 : 0x1630)), &CScriptVM__GetUnknownVMPtr, reinterpret_cast<LPVOID*>(&CScriptVM__GetUnknownVMPtrOriginal));
+		MH_CreateHook((LPVOID)(vscript_base + (dedi ? 0x1600 : 0x15F0)), &CScriptManager__DestroyVM, reinterpret_cast<LPVOID*>(&CScriptManager__DestroyVMOriginal));
+		MH_CreateHook((LPVOID)(vscript_base + (dedi ? 0xCDD0 : 0xCDB0)), &CSquirrelVM__RegisterFunctionGuts, reinterpret_cast<LPVOID*>(&CSquirrelVM__RegisterFunctionGutsOriginal));
+		MH_CreateHook((LPVOID)(vscript_base + (dedi ? 0xD670 : 0xD650)), &CSquirrelVM__PushVariant, reinterpret_cast<LPVOID*>(&CSquirrelVM__PushVariantOriginal));
+		MH_CreateHook((LPVOID)(vscript_base + (dedi ? 0xD7D0 : 0xD7B0)), &CSquirrelVM__ConvertToVariant, reinterpret_cast<LPVOID*>(&CSquirrelVM__ConvertToVariantOriginal));
+		MH_CreateHook((LPVOID)(vscript_base + (dedi ? 0xB130 : 0xB110)), &CSquirrelVM__ReleaseValue, reinterpret_cast<LPVOID*>(&CSquirrelVM__ReleaseValueOriginal));
+		MH_CreateHook((LPVOID)(vscript_base + (dedi ? 0xA210 : 0xA1F0)), &CSquirrelVM__SetValue, reinterpret_cast<LPVOID*>(&CSquirrelVM__SetValueOriginal));
+		MH_CreateHook((LPVOID)(vscript_base + (dedi ? 0x9C60 : 0x9C40)), &CSquirrelVM__SetValueEx, reinterpret_cast<LPVOID*>(&CSquirrelVM__SetValueExOriginal));
+		MH_CreateHook((LPVOID)(vscript_base + (dedi ? 0xBE80 : 0xBE60)), &CSquirrelVM__TranslateCall, reinterpret_cast<LPVOID*>(&CSquirrelVM__TranslateCallOriginal));
 		MH_CreateHook((LPVOID)(server_base + 0x507560), &ServerClassInit_DT_BasePlayer, reinterpret_cast<LPVOID*>(&ServerClassInit_DT_BasePlayerOriginal));
 		MH_CreateHook((LPVOID)(server_base + 0x51DFE0), &ServerClassInit_DT_Local, reinterpret_cast<LPVOID*>(&ServerClassInit_DT_LocalOriginal));
 		MH_CreateHook((LPVOID)(server_base + 0x5064F0), &ServerClassInit_DT_LocalPlayerExclusive, reinterpret_cast<LPVOID*>(&ServerClassInit_DT_LocalPlayerExclusiveOriginal));
@@ -1011,6 +1018,8 @@ void __stdcall LoaderNotificationCallback(
 
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("vstdlib.dll"), "VStdLib_GetICVarFactory"), &VStdLib_GetICVarFactory, NULL);
 		if (!IsDedicatedServer()) {
+			auto launcher = G_launcher;
+
 			MH_CreateHook((LPVOID)(engine_base_spec + 0x136860), &Status_ConMsg, NULL);
 			MH_CreateHook((LPVOID)(engine_base_spec + 0x1BF500), &Status_ConMsg, NULL);
 			MH_CreateHook((LPVOID)(engine_base_spec + 0x4735A0), &sub_1804735A0, NULL);
@@ -1019,9 +1028,9 @@ void __stdcall LoaderNotificationCallback(
 			MH_CreateHook((LPVOID)(engine_base_spec + 0x1170A0), &COM_Init, reinterpret_cast<LPVOID*>(&COM_InitOriginal));
 			MH_CreateHook((LPVOID)(engine_base_spec + 0x55C00), &CL_Retry_f, reinterpret_cast<LPVOID*>(&CL_Retry_fOriginal));
 			MH_CreateHook((LPVOID)(engine_base_spec + 0x8EAF0), &Con_ColorPrintf, NULL);
-			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher.dll") + 0xB640), &CSquirrelVM__PrintFunc1, NULL);
-			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher.dll") + 0xB6F0), &CSquirrelVM__PrintFunc2, NULL);
-			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher.dll") + 0xB7A0), &CSquirrelVM__PrintFunc3, NULL);
+			MH_CreateHook((LPVOID)(G_launcher + 0xB640), &CSquirrelVM__PrintFunc1, NULL);
+			MH_CreateHook((LPVOID)(launcher + 0xB6F0), &CSquirrelVM__PrintFunc2, NULL);
+			MH_CreateHook((LPVOID)(launcher + 0xB7A0), &CSquirrelVM__PrintFunc3, NULL);
 			MH_CreateHook((LPVOID)(engine_base + 0x23E20), &SVC_Print_Process_Hook, NULL);
 			MH_CreateHook((LPVOID)(engine_base + 0x22DD0), &CBaseClientState__InternalProcessStringCmd, reinterpret_cast<LPVOID*>(&CBaseClientState__InternalProcessStringCmdOriginal));
 			
@@ -1039,11 +1048,9 @@ void __stdcall LoaderNotificationCallback(
 		// Cast the function pointer to the function at 0x4E80
 
 		// Fix precache start
-		{
-			auto server_mod = uintptr_t(GetModuleHandleA("server.dll"));
-			// Rebuild CHL2_Player's precache to take our stuff into account
-			MH_CreateHook(LPVOID(server_mod + 0x41E070), &CHL2_Player_Precache, 0);
-		}
+		// Rebuild CHL2_Player's precache to take our stuff into account
+		MH_CreateHook(LPVOID(server_base + 0x41E070), &CHL2_Player_Precache, 0);
+		
 		MH_CreateHook((LPVOID)(engine_base + 0x72360), &cl_DumpPrecacheStats, NULL);
 		MH_EnableHook(MH_ALL_HOOKS);
 		std::cout << "did hooks" << std::endl;
@@ -1055,6 +1062,11 @@ void __stdcall LoaderNotificationCallback(
 		if (IsDedicatedServer()) {
 			InitDedicated();
 		}
+	}
+
+	if (IsDedicatedServer() && strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"dedicated.dll") == 0)
+	{
+		G_vscript = (uintptr_t)notification_data->Loaded.DllBase;
 	}
 
 	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"engine.dll") == 0) {
@@ -1077,6 +1089,7 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)(filesystem_stdio + 0x9AB70), &fs_sprintf_hook, reinterpret_cast<LPVOID*>(NULL));
 	}
 	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"client.dll") == 0) {
+		G_client = (uintptr_t)notification_data->Loaded.DllBase;
 		InitClient();
 	}
 

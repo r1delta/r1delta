@@ -68,6 +68,8 @@ const CPUInformation* GetCPUInformationDet()
 	return result;
 }
 
+int G_is_dedi;
+
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 {
 	switch (fdwReason)
@@ -81,6 +83,26 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 		}
 
 		VirtualAlloc((void*)0xFFEEFFEE, 1, MEM_RESERVE, PAGE_NOACCESS);
+
+		{
+			char path[MAX_PATH];
+			if (GetModuleFileNameA(NULL, path, MAX_PATH)) {
+				// Extract the executable name from the path
+				char* exeName = strrchr(path, '\\') ? strrchr(path, '\\') + 1 : path;
+
+				// Compare the executable name with "r1ds.exe"
+				if (_stricmp(exeName, "r1ds.exe") == 0) {
+					G_is_dedi = 1;
+				}
+				else {
+					G_is_dedi = 0;
+				}
+			}
+			else {
+				// If GetModuleFileNameA fails, assume it's not a dedicated server.
+				G_is_dedi = 0;
+			}
+		}
 
 		LoadLibraryW(L"OnDemandConnRouteHelper"); // stop fucking reloading this thing
 		LoadLibraryA("TextShaping.dll"); // fix "Patcher Error" dialogs having no text
@@ -108,6 +130,9 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 		reg_fn(0, &LoaderNotificationCallback, 0, &dll_notification_cookie_);
 		
 		G_launcher = (uintptr_t)GetModuleHandleW(L"launcher.dll");
+		if (!G_is_dedi) {
+			G_vscript = G_launcher;
+		}
 		LDR_DLL_LOADED_NOTIFICATION_DATA* ndata = GetModuleNotificationData(L"launcher.dll");
 		doBinaryPatchForFile(*ndata);
 		FreeModuleNotificationData(ndata);

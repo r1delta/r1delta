@@ -31,6 +31,7 @@
 #include <map>
 #include "keyvalues.h"
 #include "persistentdata.h"
+#include "load.h"
 #pragma intrinsic(_ReturnAddress)
 
 class ScriptFunctionRegistry {
@@ -45,10 +46,11 @@ public:
 	}
 
 	void registerFunctions(void* vmPtr, ScriptContext context) {
+		typedef int64_t(*AddSquirrelRegType)(void*, SQFuncRegistrationInternal*);
+		AddSquirrelRegType AddSquirrelReg = reinterpret_cast<AddSquirrelRegType>(G_launcher + 0x8E50);
+
 		for (const auto& func : m_functions) {
 			if (func->GetContext() == context) {
-				typedef int64_t(*AddSquirrelRegType)(void*, SQFuncRegistrationInternal*);
-				static AddSquirrelRegType AddSquirrelReg = reinterpret_cast<AddSquirrelRegType>(((uintptr_t)(GetModuleHandleA("launcher.dll"))) + 0x8E50);
 				AddSquirrelReg(vmPtr, func->GetInternalReg());
 			}
 		}
@@ -208,7 +210,7 @@ void* sq_getentity(HSQUIRRELVM v, SQInteger iStackPos)
 {
 	SQObject obj;
 	sq_getstackobj(nullptr, v, iStackPos, &obj);
-	static auto constant = ((uintptr_t)(GetModuleHandleA("server.dll")) + 0xD42040);
+	auto constant = (G_server + 0xD42040);
 	return CSquirrelVM__GetEntityFromInstance_Rebuild((__int64)(&obj), (__int64)((char**)constant));
 }
 
@@ -219,10 +221,12 @@ bool GetSQVMFuncs() {
 	if (initialized) return true;
 	auto engine = G_engine;
 	g_pClientArray = (CBaseClient*)(engine + 0x2966340); // TODO(wanderer?): dedicated
-	HMODULE launcherModule = GetModuleHandleA("launcher.dll");
-	if (!launcherModule) return false;
 
-	uintptr_t baseAddress = reinterpret_cast<uintptr_t>(launcherModule);
+#if defined(_DEBUG)
+	if (!G_launcher) MessageBoxW(0, L"G_launcher is null in GetSQVMFuncs", L"ASSERT!!!", MB_ICONERROR | MB_OK);
+#endif
+
+	uintptr_t baseAddress = G_launcher;
 
 	sq_compile = reinterpret_cast<sq_compile_t>(baseAddress + 0x14970);
 	sq_compilebuffer = reinterpret_cast<sq_compilebuffer_t>(baseAddress + 0x1A5E0);
@@ -258,7 +262,7 @@ bool GetSQVMFuncs() {
 	RunCallback = reinterpret_cast<RunCallback_t>(baseAddress + 0x89A0);
 	CSquirrelVM__RegisterGlobalConstantInt = reinterpret_cast<CSquirrelVM__RegisterGlobalConstantInt_t>(baseAddress + 0xA680);
 	CSquirrelVM__GetEntityFromInstance = reinterpret_cast<CSquirrelVM__GetEntityFromInstance_t>(baseAddress + 0x9930);
-	sq_GetEntityConstant_CBaseEntity = reinterpret_cast<sq_GetEntityConstant_CBaseEntity_t>((uintptr_t)GetModuleHandleA("client.dll") + 0x2EF850);
+	sq_GetEntityConstant_CBaseEntity = reinterpret_cast<sq_GetEntityConstant_CBaseEntity_t>(G_client + 0x2EF850);
 	AddSquirrelReg = reinterpret_cast<AddSquirrelReg_t>(baseAddress + 0x8E50);
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_CLIENT,
@@ -424,7 +428,7 @@ CScriptVM__GetUnknownVMPtrType CScriptVM__GetUnknownVMPtrOriginal;
 BOOL IsReturnAddressInServerDll(void* returnAddress) {
 	HMODULE module2;
 	BOOL check1 = GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCTSTR)returnAddress, &module2);
-	BOOL check2 = module2 == GetModuleHandle(TEXT("server.dll"));
+	BOOL check2 = module2 == (HMODULE)G_server;
 	return check1 && check2;
 }
 
@@ -473,12 +477,13 @@ void ConvertScriptVariant(ScriptVariant_t* variant, ConversionDirection directio
 
 
 // Function to check if server.dll is in the call stack
+// TODO(mrsteyk): performance
 __forceinline bool serverRunning(void* a1) {
 	//return isServerScriptVM || a1 == realvmptr || a1 == fakevmptr || (realvmptr && a1 == *(void**)(((uintptr_t)realvmptr + 8)));
 	if (isServerScriptVM || a1 == realvmptr || a1 == fakevmptr || (realvmptr && a1 == *(void**)(((uintptr_t)realvmptr + 8))))
 		return true; // SQVM handle check
-	static const HMODULE serverDllBase = GetModuleHandleA("server.dll");
-	static const SIZE_T serverDllSize = 0xFB5000; // no comment
+	const HMODULE serverDllBase = (HMODULE)G_server;
+	const SIZE_T serverDllSize = 0xFB5000; // no comment
 	void* stack[128];
 	USHORT frames = CaptureStackBackTrace(0, 128, stack, NULL);
 
@@ -527,7 +532,7 @@ typedef __int64 (*CSquirrelVM__TranslateCallType)(__int64* a1);
 CSquirrelVM__TranslateCallType CSquirrelVM__TranslateCallOriginal;
 bool IsPointerFromServerDll(void* pointer) {
 	// Get the base address of "server.dll"
-	static HMODULE hModule = GetModuleHandleA("server.dll");
+	HMODULE hModule = (HMODULE)G_server;
 	if (!hModule) {
 		std::cerr << "Failed to get handle of server.dll\n";
 		return false;
@@ -559,7 +564,7 @@ void __fastcall CSquirrelVM__RegisterFunctionGuts(__int64* a1, __int64 a2, const
 		}
 	}
 	/*
-		LPCVOID baseAddressDll = (LPCVOID)GetModuleHandleA(VSCRIPT_DLL);
+	LPCVOID baseAddressDll = (LPCVOID)G_vscript;
 	LPCVOID address1 = (LPCVOID)((uintptr_t)(baseAddressDll)+0xCE27);
 	LPCVOID address2 = (LPCVOID)((uintptr_t)(baseAddressDll)+0xD3C0);
 	char value1 = 0x22;
@@ -577,9 +582,9 @@ void __fastcall CSquirrelVM__RegisterFunctionGuts(__int64* a1, __int64 a2, const
 	CSquirrelVM__RegisterFunctionGutsOriginal(a1, a2, a3);
 }
 void __fastcall CSquirrelVM__TranslateCall(__int64* a1) {
-	static LPCVOID baseAddressDll = (LPCVOID)GetModuleHandleA(VSCRIPT_DLL);
-	static LPVOID address1 = (LPVOID)((uintptr_t)(baseAddressDll)+(IsDedicatedServer() ? 0xc3cf : 0xC3AF));
-	static LPVOID address2 = (LPVOID)((uintptr_t)(baseAddressDll)+(IsDedicatedServer() ? 0xc7e4 : 0xC7C4));
+	auto vscript = G_vscript;
+	LPVOID address1 = (LPVOID)(vscript + (IsDedicatedServer() ? 0xc3cf : 0xC3AF));
+	LPVOID address2 = (LPVOID)(vscript + (IsDedicatedServer() ? 0xc7e4 : 0xC7C4));
 
 	char value1 = 0x21;
 	char data1[] = { 0x00, 0x07, 0x01, 0x07, 0x02, 0x07, 0x03, 0x07, 0x04, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x05, 0x06 };
@@ -699,10 +704,10 @@ void CSquirrelVM__PrintFunc3(void* m_hVM, const char* s, ...)
 }
 
 R1SquirrelVM* GetClientVMPtr() {
-	return *(R1SquirrelVM**)(uintptr_t(GetModuleHandleA("client.dll")) + 0x16BBE78);
+	return *(R1SquirrelVM**)(G_client + 0x16BBE78);
 }
 R1SquirrelVM* GetUIVMPtr() {
-	return *(R1SquirrelVM**)(uintptr_t(GetModuleHandleA("client.dll")) + 0x16C1FA8);
+	return *(R1SquirrelVM**)(G_client + 0x16C1FA8);
 }
 using SQCompileBufferFn = SQRESULT(*)(HSQUIRRELVM, const SQChar*, SQInteger, const SQChar*, SQBool);
 using BaseGetRootTableFn = __int64(*)(HSQUIRRELVM);
@@ -710,9 +715,10 @@ using SQCallFn = SQRESULT(*)(HSQUIRRELVM, SQInteger, SQBool, SQBool);
 
 void run_script(const CCommand& args, R1SquirrelVM* (*GetVMPtr)())
 {
-	static SQCompileBufferFn sq_compilebuffer = reinterpret_cast<SQCompileBufferFn>(uintptr_t(GetModuleHandleA("launcher.dll")) + 0x1A5E0);
-	static BaseGetRootTableFn base_getroottable = reinterpret_cast<BaseGetRootTableFn>(uintptr_t(GetModuleHandleA("launcher.dll")) + 0x56440);
-	static SQCallFn sq_call = reinterpret_cast<SQCallFn>(uintptr_t(GetModuleHandleA("launcher.dll")) + 0x18C40);
+	auto launcher = G_launcher;
+	SQCompileBufferFn sq_compilebuffer = reinterpret_cast<SQCompileBufferFn>(launcher + 0x1A5E0);
+	BaseGetRootTableFn base_getroottable = reinterpret_cast<BaseGetRootTableFn>(launcher + 0x56440);
+	SQCallFn sq_call = reinterpret_cast<SQCallFn>(launcher + 0x18C40);
 
 	std::string code = args.ArgS();
 	R1SquirrelVM* vm = GetVMPtr();

@@ -4,6 +4,8 @@
 #include <MinHook.h>
 #include "thirdparty/zstd-1.5.6/zstd.h"
 
+extern uintptr_t G_filesystem_stdio;
+
 // R1DELTA
 constexpr uint64_t R1D_marker = 18388560042537298;
 constexpr uint32_t R1D_marker_32 = 'R1D';
@@ -60,7 +62,7 @@ __int64 r1dc_decompress(void* p, void* pIn_buf, size_t* pIn_buf_size, void* pOut
 }
 
 void InitCompressionHooks() {
-	auto fs = (uintptr_t)GetModuleHandleA("filesystem_stdio.dll");
+	auto fs = G_filesystem_stdio;
 	MH_CreateHook(LPVOID(fs + 0x75380), r1dc_init, &lzham_decompressor_init);
 	MH_CreateHook(LPVOID(fs + 0x75390), r1dc_reinit, &lzham_decompressor_reinit);
 	MH_CreateHook(LPVOID(fs + 0x753A0), r1dc_deinit, &lzham_decompressor_deinit);

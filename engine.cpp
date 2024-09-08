@@ -1,6 +1,6 @@
 #include "engine.h"
 
-CVEngineServer* g_CVEngineServer;
+CVEngineServer* g_CVEngineServer = 0;
 uintptr_t g_CVEngineServerInterface;
 uintptr_t g_r1oCVEngineServerInterface[203];
 
@@ -49,7 +49,7 @@ char* (*CVEngineServer__GetLocalNETGetPacket_TFO(
 
 CVEngineServer::CVEngineServer(uintptr_t* r1vtable)
 {
-	if (::IsDedicatedServer())
+	if (IsDedicatedServer())
 		__InitDedi(r1vtable);
 	else
 		__InitNormal(r1vtable);

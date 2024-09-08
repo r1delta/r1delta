@@ -5,6 +5,7 @@
 #include <intrin.h>
 #include <MinHook.h>
 #include <memory>
+#include "load.h"
 #pragma intrinsic(_ReturnAddress)
 typedef void (*MsgFn)(const char*, ...);
 typedef void (*WarningFn)(const char*, ...);
@@ -15,16 +16,25 @@ typedef void (*ConColorMsgFn)(const Color&, const char*, ...);
 typedef void (*ConDMsgFn)(const char*, ...);
 typedef void (*COMTimestampedLogFn)(const char*, ...);
 
-MsgFn Msg = (MsgFn)GetProcAddress(GetModuleHandleA("tier0.dll"), "Msg");
-WarningFn Warning = (WarningFn)GetProcAddress(GetModuleHandleA("tier0.dll"), "Warning");
+//MsgFn Msg = (MsgFn)GetProcAddress(GetModuleHandleA("tier0.dll"), "Msg");
+//WarningFn Warning = (WarningFn)GetProcAddress(GetModuleHandleA("tier0.dll"), "Warning");
+#if 0
 WarningSpewCallStackFn Warning_SpewCallStack = (WarningSpewCallStackFn)GetProcAddress(GetModuleHandleA("tier0.dll"), "Warning_SpewCallStack");
 DevMsgFn DevMsg = (DevMsgFn)GetProcAddress(GetModuleHandleA("tier0.dll"), "DevMsg");
 DevWarningFn DevWarning = (DevWarningFn)GetProcAddress(GetModuleHandleA("tier0.dll"), "DevWarning");
 ConColorMsgFn ConColorMsg = (ConColorMsgFn)GetProcAddress(GetModuleHandleA("tier0.dll"), "ConColorMsg");
 ConDMsgFn ConDMsg = (ConDMsgFn)GetProcAddress(GetModuleHandleA("tier0.dll"), "ConDMsg");
 COMTimestampedLogFn COM_TimestampedLog = (COMTimestampedLogFn)GetProcAddress(GetModuleHandleA("tier0.dll"), "COM_TimestampedLog");
-
-
+#else
+#if 0
+extern "C" __declspec(dllimport) WarningSpewCallStackFn Warning_SpewCallStack;
+extern "C" __declspec(dllimport) DevMsgFn DevMsg;
+extern "C" __declspec(dllimport) DevWarningFn DevWarning;
+extern "C" __declspec(dllimport) ConColorMsgFn ConColorMsg;
+extern "C" __declspec(dllimport) ConDMsgFn ConDMsg;
+extern "C" __declspec(dllimport) COMTimestampedLogFn COM_TimestampedLog;
+#endif
+#endif
 
 bool __fastcall SVC_Print_Process_Hook(__int64 a1)
 {
@@ -106,9 +116,10 @@ void Cbuf_AddText(int a1, const char* a2, unsigned int a3) {
 	if (a2 == nullptr || *a2 == '\0' || strcmp_static(a2, "\n") == 0) {
 		shouldLog = false;
 	}
-	static uintptr_t returnToKeyInput = uintptr_t(GetModuleHandleA("engine.dll")) + 0x14E668;
-	static uintptr_t returnToKeyInput2 = uintptr_t(GetModuleHandleA("engine.dll")) + 0x14E5FB;
-	static uintptr_t returnToKeyInput3 = uintptr_t(GetModuleHandleA("engine.dll")) + 0x352AB;
+	auto engine = G_engine;
+	uintptr_t returnToKeyInput = engine + 0x14E668;
+	uintptr_t returnToKeyInput2 = engine + 0x14E5FB;
+	uintptr_t returnToKeyInput3 = engine + 0x352AB;
 	uintptr_t returnAddress = (uintptr_t)(_ReturnAddress());
 	if ((returnAddress == returnToKeyInput) || (returnAddress == returnToKeyInput2) || (returnAddress == returnToKeyInput3)) {
 		shouldLog = false;
@@ -246,14 +257,14 @@ void ConVar_PrintDescription(const ConCommandBaseR1* pVar)
 
 
 // Function pointer declarations using decltype
-decltype(Msg) MsgOriginal = nullptr;
-decltype(Warning) WarningOriginal = nullptr;
-decltype(Warning_SpewCallStack) Warning_SpewCallStackOriginal = nullptr;
-decltype(DevMsg) DevMsgOriginal = nullptr;
-decltype(DevWarning) DevWarningOriginal = nullptr;
-decltype(ConColorMsg) ConColorMsgOriginal = nullptr;
-decltype(ConDMsg) ConDMsgOriginal = nullptr;
-decltype(COM_TimestampedLog) COM_TimestampedLogOriginal = nullptr;
+decltype(&Msg) MsgOriginal = nullptr;
+decltype(&Warning) WarningOriginal = nullptr;
+decltype(&Warning_SpewCallStack) Warning_SpewCallStackOriginal = nullptr;
+decltype(&DevMsg) DevMsgOriginal = nullptr;
+decltype(&DevWarning) DevWarningOriginal = nullptr;
+decltype(&ConColorMsg) ConColorMsgOriginal = nullptr;
+decltype(&ConDMsg) ConDMsgOriginal = nullptr;
+decltype(&COM_TimestampedLog) COM_TimestampedLogOriginal = nullptr;
 
 
 
@@ -376,14 +387,15 @@ void COM_TimestampedLogHook(const char* pMsg, ...) {
 
 void InitLoggingHooks()
 {
-	MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("tier0.dll"), "Msg"), &MsgHook, reinterpret_cast<LPVOID*>(&MsgOriginal));
-	MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("tier0.dll"), "Warning"), &WarningHook, reinterpret_cast<LPVOID*>(&WarningOriginal));
-	MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("tier0.dll"), "Warning_SpewCallStack"), &Warning_SpewCallStackHook, reinterpret_cast<LPVOID*>(&Warning_SpewCallStackOriginal));
-	MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("tier0.dll"), "DevMsg"), &DevMsgHook, reinterpret_cast<LPVOID*>(&DevMsgOriginal));
-	MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("tier0.dll"), "DevWarning"), &DevWarningHook, reinterpret_cast<LPVOID*>(&DevWarningOriginal));
-	MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("tier0.dll"), "ConColorMsg"), &ConColorMsgHook, reinterpret_cast<LPVOID*>(&ConColorMsgOriginal));
-	MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("tier0.dll"), "ConDMsgHook"), &ConDMsgHook, reinterpret_cast<LPVOID*>(&ConDMsgOriginal));
-	MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("tier0.dll"), "COM_TimestampedLog"), &COM_TimestampedLogHook, reinterpret_cast<LPVOID*>(&COM_TimestampedLogOriginal));
+	auto tier0 = GetModuleHandleA("tier0.dll");
+	MH_CreateHook((LPVOID)GetProcAddress(tier0, "Msg"), &MsgHook, reinterpret_cast<LPVOID*>(&MsgOriginal));
+	MH_CreateHook((LPVOID)GetProcAddress(tier0, "Warning"), &WarningHook, reinterpret_cast<LPVOID*>(&WarningOriginal));
+	MH_CreateHook((LPVOID)GetProcAddress(tier0, "Warning_SpewCallStack"), &Warning_SpewCallStackHook, reinterpret_cast<LPVOID*>(&Warning_SpewCallStackOriginal));
+	MH_CreateHook((LPVOID)GetProcAddress(tier0, "DevMsg"), &DevMsgHook, reinterpret_cast<LPVOID*>(&DevMsgOriginal));
+	MH_CreateHook((LPVOID)GetProcAddress(tier0, "DevWarning"), &DevWarningHook, reinterpret_cast<LPVOID*>(&DevWarningOriginal));
+	MH_CreateHook((LPVOID)GetProcAddress(tier0, "ConColorMsg"), &ConColorMsgHook, reinterpret_cast<LPVOID*>(&ConColorMsgOriginal));
+	MH_CreateHook((LPVOID)GetProcAddress(tier0, "ConDMsgHook"), &ConDMsgHook, reinterpret_cast<LPVOID*>(&ConDMsgOriginal));
+	MH_CreateHook((LPVOID)GetProcAddress(tier0, "COM_TimestampedLog"), &COM_TimestampedLogHook, reinterpret_cast<LPVOID*>(&COM_TimestampedLogOriginal));
 
 	MH_EnableHook(MH_ALL_HOOKS);
 }

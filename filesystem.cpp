@@ -45,6 +45,7 @@
 #include <Windows.h>
 #include <intrin.h>
 #include "logging.h"
+#include "load.h"
 #pragma intrinsic(_ReturnAddress)
 
 namespace fs = std::filesystem;
@@ -112,10 +113,11 @@ const char* lastZipPackFilePath = "";
 typedef char (*CZipPackFile__PrepareType)(__int64* a1, unsigned __int64 a2, __int64 a3);
 CZipPackFile__PrepareType CZipPackFile__PrepareOriginal;
 char __fastcall CZipPackFile__Prepare(__int64* a1, unsigned __int64 a2, __int64 a3) {
-    static void* rettozipsearchpath = (void*)(uintptr_t(GetModuleHandleA("filesystem_stdio.dll")) + 0x17A43);
+	auto filesystem_stdio = G_filesystem_stdio;
+    void* rettozipsearchpath = (void*)(filesystem_stdio + 0x17A43);
     auto ret = CZipPackFile__PrepareOriginal(a1, a2, a3);
     if (_ReturnAddress() == rettozipsearchpath) {
-        reinterpret_cast<__int64(*)(__int64 a1, const char* a2)>(uintptr_t(GetModuleHandleA("filesystem_stdio.dll")) + 0x51880)((uintptr_t(a1) + 72), lastZipPackFilePath);
+        reinterpret_cast<__int64(*)(__int64 a1, const char* a2)>(filesystem_stdio + 0x51880)((uintptr_t(a1) + 72), lastZipPackFilePath);
     }
     return ret;
 }
@@ -125,15 +127,15 @@ CBaseFileSystem__CSearchPath__SetPathType CBaseFileSystem__CSearchPath__SetPathO
 void __fastcall CBaseFileSystem__CSearchPath__SetPath(void* thisptr, __int16* id) 
 {
     CBaseFileSystem__CSearchPath__SetPathOriginal(thisptr, id);
-    static void* rettozipsearchpath = (void*)(uintptr_t(GetModuleHandleA("filesystem_stdio.dll")) + 0x017AFC);
-    static auto CBaseFileSystem__FindOrAddPathIDInfo = reinterpret_cast<void* (*)(IFileSystem * fileSystem, __int16* id, int byRequestOnly)>(uintptr_t(GetModuleHandleA("filesystem_stdio.dll")) + 0x155C0);
+	auto filesystem_stdio = G_filesystem_stdio;
+	void* rettozipsearchpath = (void*)(filesystem_stdio + 0x017AFC);
+    auto CBaseFileSystem__FindOrAddPathIDInfo = reinterpret_cast<void* (*)(IFileSystem * fileSystem, __int16* id, int byRequestOnly)>(filesystem_stdio + 0x155C0);
     if (_ReturnAddress() == rettozipsearchpath) {
 		*(__int64*)(uintptr_t(thisptr) + 8) = __int64(CBaseFileSystem__FindOrAddPathIDInfo((IFileSystem*)g_CVFileSystemInterface, id, -1));
 		//*(__int64*)(uintptr_t(thisptr) + 32) = 0x13371337;
     }
 }
 int fs_sprintf_hook(char* Buffer, const char* Format, ...) {
-    static void* rettocheckformorefiles = (void*)(uintptr_t(GetModuleHandleA("filesystem_stdio.dll")) + 0x6D6CB);
     va_list args;
     va_start(args, Format);
 
@@ -142,6 +144,8 @@ int fs_sprintf_hook(char* Buffer, const char* Format, ...) {
         const char* a1 = va_arg(args, const char*);
         if (strstr(a1, "singlechunk") != nullptr) {
             va_end(args);
+
+			void* rettocheckformorefiles = (void*)(G_filesystem_stdio + 0x6D6CB);
             if (rettocheckformorefiles == _ReturnAddress()) {
                 Buffer[0] = 0;
                 return 0;// sprintf(Buffer, "%s", "DOESNOTEXIST.vpk");
@@ -163,8 +167,8 @@ __int64 __fastcall AddVPKFile(IFileSystem* fileSystem, char* a2, char** a3, char
 {
     replace_underscore(a2);
     //g_CVFileSystemInterface = fileSystem;
-    //static void* rettoaddonsystem = (void*)(uintptr_t(GetModuleHandleA("engine.dll")) + 0x127EF4);
-    //static auto AddPackFile = reinterpret_cast<bool (*)(IFileSystem * fileSystem, const char* pPath, const char* pathID)>(uintptr_t(GetModuleHandleA("filesystem_stdio.dll")) + 0x18030);
+    //void* rettoaddonsystem = (void*)(G_engine + 0x127EF4);
+    //auto AddPackFile = reinterpret_cast<bool (*)(IFileSystem * fileSystem, const char* pPath, const char* pathID)>(G_filesystem_stdio + 0x18030);
     //
     //if (_ReturnAddress() == rettoaddonsystem) {
     //    lastZipPackFilePath = a2;

@@ -217,7 +217,7 @@ char* textbuf = 0;
 __int64 pdefsize = 0;
 void __fastcall CUtlBuffer__SetExternalBuffer(__int64 a1, __int64 a2, __int64 a3, __int64 a4, char a5)
 {
-	static uintptr_t engineDS = uintptr_t(GetModuleHandleA("engine_ds.dll"));
+	uintptr_t engineDS = G_engine_ds;
 	if (uintptr_t(_ReturnAddress()) == (engineDS + 0x169F03)) {
 		if (!textbuf)
 			textbuf = (char*)malloc(0x50238);
@@ -251,7 +251,7 @@ ParsePDATAType ParsePDATAOriginal;
 char __fastcall ParsePDEF(__int64 a1, __int64 a2, __int64 a3, const char* a4)
 {
 	char v10[53264];
-	static auto whatthefuck = (__int64 (*)(__int64 a1, int* a2, __int64 a3, int a4, unsigned int a5, unsigned int a6, unsigned int a7))(uintptr_t(GetModuleHandleA("engine.dll")) + 0x42A450);
+	auto whatthefuck = (__int64 (*)(__int64 a1, int* a2, __int64 a3, int a4, unsigned int a5, unsigned int a6, unsigned int a7))(G_engine + 0x42A450);
 	a1 = (__int64)(textbuf);
 	pdefsize = a2;
 	auto ret = ParsePDATAOriginal(a1, a2, a3, a4);
@@ -279,8 +279,8 @@ NET_SendPacketType NET_SendPacketOriginal;
 
 __int64 Detour_NET_OutOfBandPrintf(int sock, void* adr, const char* fmt, ...) {
 	if (strcmp_static(fmt, "%c00000000000000") == 0) {
-		static const char** gamemode = reinterpret_cast<const char**>((uintptr_t)(GetModuleHandleA("server.dll")) + 0xB68520);
-		static const char* mapname = reinterpret_cast<const char*>((uintptr_t)(GetModuleHandleA("engine_ds.dll")) + 0x1C89A84);
+		const char** gamemode = reinterpret_cast<const char**>(G_server + 0xB68520);
+		const char* mapname = reinterpret_cast<const char*>(G_engine_ds + 0x1C89A84);
 		//MessageBoxA(NULL, *gamemode, mapname, 16);
 		char msg[1200] = { 0 };
 		bf_write startup(msg, 1200);
@@ -302,7 +302,7 @@ typedef __int64 (*bf_write__WriteUBitLongType)(bf_write* a1, unsigned int a2, si
 bf_write__WriteUBitLongType bf_write__WriteUBitLongOriginal;
 __int64 __fastcall bf_write__WriteUBitLong(bf_write* a1, unsigned int a2, signed int a3)
 {
-	static uintptr_t engineDS = uintptr_t(GetModuleHandleA("engine_ds.dll"));
+	uintptr_t engineDS = G_engine_ds;
 	auto ret = bf_write__WriteUBitLongOriginal(a1, a2, a3);
 	if (uintptr_t(_ReturnAddress()) == (engineDS + 0x51018) || uintptr_t(_ReturnAddress()) == (engineDS + 0x5101D))
 		bf_write__WriteUBitLongOriginal(a1, 0, 14);
@@ -428,10 +428,10 @@ void InitDedicated()
 		0x61c86
 	};
 
-	HMODULE hModule = GetModuleHandleA("engine_ds.dll");
+	auto engine_ds = G_engine_ds;
 
 	for (auto offset : offsets) {
-		int* address = reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(hModule) + offset);
+		int* address = reinterpret_cast<int*>(engine_ds + offset);
 
 		DWORD oldProtect;
 		if (!VirtualProtect(address, sizeof(uintptr_t), PAGE_EXECUTE_READWRITE, &oldProtect)) {
@@ -446,12 +446,10 @@ void InitDedicated()
 		FlushInstructionCache(GetCurrentProcess(), address, sizeof(uintptr_t));
 	}
 
-	MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x1693D0), &ParsePDEF, reinterpret_cast<LPVOID*>(&ParsePDATAOriginal));
-	MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x3259C0), &CUtlBuffer__SetExternalBuffer, reinterpret_cast<LPVOID*>(&CUtlBuffer__SetExternalBufferOriginal));
-	MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x160130), &sub_160130, reinterpret_cast<LPVOID*>(NULL));
-	MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0xA1B90), &Host_InitDedicated, reinterpret_cast<LPVOID*>(&Host_InitDedicatedOriginal));
-	uintptr_t tier0_base = reinterpret_cast<uintptr_t>(GetModuleHandleA("tier0_r1.dll"));
-
+	MH_CreateHook((LPVOID)(engine_ds + 0x1693D0), &ParsePDEF, reinterpret_cast<LPVOID*>(&ParsePDATAOriginal));
+	MH_CreateHook((LPVOID)(engine_ds + 0x3259C0), &CUtlBuffer__SetExternalBuffer, reinterpret_cast<LPVOID*>(&CUtlBuffer__SetExternalBufferOriginal));
+	MH_CreateHook((LPVOID)(engine_ds + 0x160130), &sub_160130, reinterpret_cast<LPVOID*>(NULL));
+	MH_CreateHook((LPVOID)(engine_ds + 0xA1B90), &Host_InitDedicated, reinterpret_cast<LPVOID*>(&Host_InitDedicatedOriginal));
 
 	MH_EnableHook(MH_ALL_HOOKS);
 }

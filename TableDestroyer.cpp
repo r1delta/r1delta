@@ -38,6 +38,7 @@
 #include <iostream>
 #include "defs.h"
 #include "TableDestroyer.h"
+#include "load.h"
 
 ServerClassInitFunc ServerClassInit_DT_BasePlayerOriginal;
 ServerClassInitFunc ServerClassInit_DT_LocalOriginal;
@@ -113,7 +114,7 @@ void MoveSendProp(SendProp* sourceTablePtr, int* sourceTableLengthPtr, const cha
 void ServerClassInit_DT_BasePlayer() {
 	ServerClassInit_DT_BasePlayerOriginal();
 	ServerClassInit_DT_LocalOriginal();
-	void* serverPtr = (void*)GetModuleHandleA("server.dll");
+	void* serverPtr = (void*)G_server;
 	SendProp* DT_BasePlayer = (SendProp*)(((uintptr_t)serverPtr) + 0xE9A800);
 	int* DT_BasePlayerLen = (int*)(((uintptr_t)serverPtr) + 0xE04768);
 	SendProp* DT_Local = (SendProp*)(((uintptr_t)serverPtr) + 0xE9E340);
@@ -145,7 +146,7 @@ void ServerClassInit_DT_Local() {
 
 void ServerClassInit_DT_LocalPlayerExclusive() {
 	ServerClassInit_DT_LocalPlayerExclusiveOriginal();
-	void* serverPtr = (void*)GetModuleHandleA("server.dll");
+	void* serverPtr = (void*)G_server;
 	SendProp* DT_LocalPlayerExclusive = (SendProp*)(((uintptr_t)serverPtr) + 0xE982C0);
 	int* DT_LocalPlayerExclusiveLen = (int*)(((uintptr_t)serverPtr) + 0xE04878);
 
@@ -154,7 +155,7 @@ void ServerClassInit_DT_LocalPlayerExclusive() {
 
 void ServerClassInit_DT_TitanSoul() {
 	ServerClassInit_DT_TitanSoulOriginal();
-	void* serverPtr = (void*)GetModuleHandleA("server.dll");
+	void* serverPtr = (void*)G_server;
 	SendProp* DT_TitanSoul = (SendProp*)(((uintptr_t)serverPtr) + 0xEAB6C0);
 	int* DT_TitanSoulLen = (int*)(((uintptr_t)serverPtr) + 0xE08D28);
 	//DestroySendProp(DT_TitanSoul, DT_TitanSoulLen, "m_liveryCode");
@@ -186,7 +187,7 @@ __int64 __fastcall CBaseEntity__SendProxy_CellOrigin(__int64 a1, _DWORD* a2, __i
 	float v21; // xmm1_4
 	int cell[6]; // [rsp+20h] [rbp-18h] BYREF
 	float* pStruct; // [rsp+48h] [rbp+10h] BYREF
-	void* serverPtr = (void*)GetModuleHandleA("server.dll");
+	void* serverPtr = (void*)G_server;
 	auto CBaseEntity__UseStepSimulationNetworkOrigin = reinterpret_cast<char(__fastcall*)(__int64 a1, float** a2, int* a3)>((uintptr_t)(serverPtr)+0x3BC740);
 
 	if (CBaseEntity__UseStepSimulationNetworkOrigin((__int64)a2, &pStruct, cell))
@@ -254,7 +255,7 @@ __int64 __fastcall CBaseEntity__SendProxy_CellOriginXY(__int64 a1, _DWORD* a2, _
 	float v16; // xmm1_4
 	int v17[6]; // [rsp+20h] [rbp-18h] BYREF
 	float* v18; // [rsp+48h] [rbp+10h] BYREF
-	void* serverPtr = (void*)GetModuleHandleA("server.dll");
+	void* serverPtr = (void*)G_server;
 	auto CBaseEntity__UseStepSimulationNetworkOrigin = reinterpret_cast<char(__fastcall*)(__int64 a1, float** a2, int* a3)>((uintptr_t)(serverPtr)+0x3BC740);
 
 	if (CBaseEntity__UseStepSimulationNetworkOrigin((__int64)a2, &v18, v17))
@@ -304,7 +305,7 @@ __int64 __fastcall CBaseEntity__SendProxy_CellOriginZ(__int64 a1, __int64 a2, __
 	float v11; // xmm1_4
 	_DWORD v12[6]; // [rsp+20h] [rbp-18h] BYREF
 	__int64 v13; // [rsp+48h] [rbp+10h] BYREF
-	void* serverPtr = (void*)GetModuleHandleA("server.dll");
+	void* serverPtr = (void*)G_server;
 	auto CBaseEntity__UseStepSimulationNetworkOrigin = reinterpret_cast<char(__fastcall*)(__int64 a1, float** a2, int* a3)>((uintptr_t)(serverPtr)+0x3BC740);
 
 	if (CBaseEntity__UseStepSimulationNetworkOrigin(a2, (float**)(&v13), (int*)v12))
@@ -337,7 +338,7 @@ __int64 __fastcall sub_3A1E00(__int64 a1, __int64 a2, unsigned int* a3, _DWORD* 
 	__int64 result; // rax
 	unsigned int v8[6]; // [rsp+20h] [rbp-18h] BYREF
 	__int64 v9; // [rsp+48h] [rbp+10h] BYREF
-	void* serverPtr = (void*)GetModuleHandleA("server.dll");
+	void* serverPtr = (void*)G_server;
 	auto CBaseEntity__UseStepSimulationNetworkOrigin = reinterpret_cast<char(__fastcall*)(__int64 a1, float** a2, int* a3)>((uintptr_t)(serverPtr)+0x3BC740);
 
 	v6 = CBaseEntity__UseStepSimulationNetworkOrigin(a2, (float**)(&v9), (int*)v8) == 0;
@@ -354,7 +355,7 @@ __int64 __fastcall sub_3A1E40(__int64 a1, __int64 a2, unsigned int* a3, _DWORD* 
 	__int64 result; // rax
 	_DWORD v8[6]; // [rsp+20h] [rbp-18h] BYREF
 	__int64 v9; // [rsp+48h] [rbp+10h] BYREF
-	void* serverPtr = (void*)GetModuleHandleA("server.dll");
+	void* serverPtr = (void*)G_server;
 	auto CBaseEntity__UseStepSimulationNetworkOrigin = reinterpret_cast<char(__fastcall*)(__int64 a1, float** a2, int* a3)>((uintptr_t)(serverPtr)+0x3BC740);
 
 	v6 = CBaseEntity__UseStepSimulationNetworkOrigin(a2, (float**)(&v9), (int*)v8) == 0;
@@ -371,7 +372,7 @@ __int64 __fastcall sub_3A1E80(__int64 a1, __int64 a2, unsigned int* a3, _DWORD* 
 	__int64 result; // rax
 	_DWORD v8[6]; // [rsp+20h] [rbp-18h] BYREF
 	__int64 v9; // [rsp+48h] [rbp+10h] BYREF
-	void* serverPtr = (void*)GetModuleHandleA("server.dll");
+	void* serverPtr = (void*)G_server;
 	auto CBaseEntity__UseStepSimulationNetworkOrigin = reinterpret_cast<char(__fastcall*)(__int64 a1, float** a2, int* a3)>((uintptr_t)(serverPtr)+0x3BC740);
 
 	v6 = CBaseEntity__UseStepSimulationNetworkOrigin(a2, (float**)(&v9), (int*)v8) == 0;

@@ -85,8 +85,8 @@ uintptr_t modelinterface;
 uintptr_t stringtableinterface;
 uintptr_t fsintfakeptr = 0;
 
-static HMODULE engineR1O;
-static CreateInterfaceFn R1OCreateInterface;
+HMODULE engineR1O;
+CreateInterfaceFn R1OCreateInterface;
 
 void* R1OFactory(const char* pName, int* pReturnCode) {
 	std::cout << "looking for " << pName << std::endl;
@@ -96,9 +96,12 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 
 		uintptr_t* r1vtable = *(uintptr_t**)oAppSystemFactory(pName, pReturnCode);
 		g_CVEngineServerInterface = (uintptr_t)oFileSystemFactory(pName, pReturnCode);
-		g_CVEngineServer = new CVEngineServer(r1vtable);
+		if (!g_CVEngineServer)
+		{
+			g_CVEngineServer = new CVEngineServer(r1vtable);
+		}
 
-		static void* whatever2 = &g_r1oCVEngineServerInterface;
+		static void* whatever2 = &g_r1oCVEngineServerInterface; // double ref return
 		return &whatever2;
 	}
 	if (!strcmp_static(pName, "VFileSystem017")) {
@@ -119,9 +122,9 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 			void* ptr4;
 			void* ptr5;
 		};
-		static void* whatever3 = &g_r1oCVFileSystemInterface;
-		static void* whatever4 = &g_r1oCBaseFileSystemInterface;
-		static fsptr a;
+		void* whatever3 = &g_r1oCVFileSystemInterface;
+		void* whatever4 = &g_r1oCBaseFileSystemInterface;
+		static fsptr a; // ref return;
 
 		a.ptr1 = whatever3;
 		a.ptr2 = whatever4;
@@ -138,13 +141,13 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 
 		g_CVModelInfoServer = new CVModelInfoServer(r1vtable);
 
-		static void* whatever4 = &g_r1oCVModelInfoServerInterface;
+		static void* whatever4 = &g_r1oCVModelInfoServerInterface; // double ref return
 		return &whatever4;
 	}
 	if (!strcmp_static(pName, "VEngineServerStringTable001")) {
 		std::cout << "wrapping VEngineServerStringTable001" << std::endl;
 		stringtableinterface = (uintptr_t)oAppSystemFactory(pName, pReturnCode);
-		static uintptr_t* r1vtable = *(uintptr_t**)oAppSystemFactory(pName, pReturnCode);
+		uintptr_t* r1vtable = *(uintptr_t**)stringtableinterface;
 
 		uintptr_t oCNetworkStringTableContainer_dtor = r1vtable[0];
 		uintptr_t oCNetworkStringTableContainer__CreateStringTable = r1vtable[1];
@@ -165,14 +168,13 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 			CreateFunction(CNetworkStringTableContainer__SetTickCount, (void*)stringtableinterface),
 			CreateFunction((void*)oCNetworkStringTableContainer__CreateDictionary, (void*)stringtableinterface)
 		};
-		static void* whatever5 = &r1ovtable;
+		static void* whatever5 = &r1ovtable; // double ref return
 		return &whatever5;
 	}
 	if (!strcmp_static(pName, "VEngineCvar007")) {
 		std::cout << "wrapping VEngineCvar007" << std::endl;
-		static uintptr_t* original_this = *(uintptr_t**)oAppSystemFactory(pName, pReturnCode);
-		static uintptr_t* r1vtable = *(uintptr_t**)oAppSystemFactory(pName, pReturnCode);
 		cvarinterface = (uintptr_t)oAppSystemFactory(pName, pReturnCode);
+		uintptr_t* r1vtable = *(uintptr_t**)cvarinterface;
 
 		uintptr_t oCCvar__Connect = r1vtable[0];
 		uintptr_t oCCvar__Disconnect = r1vtable[1];
@@ -271,14 +273,14 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 
 
 		};
-		static void* whatever6 = &r1ovtable;
+		static void* whatever6 = &r1ovtable; // double ref return
 		return &whatever6;
 	}
-	if (!oAppSystemFactory(pName, pReturnCode) && !strcmp_static(pName, "VENGINE_DEDICATEDEXPORTS_API_VERSION003")) {
+	auto result = oAppSystemFactory(pName, pReturnCode);
+	if (!result && !strcmp_static(pName, "VENGINE_DEDICATEDEXPORTS_API_VERSION003")) {
 		std::cout << "forging dediexports" << std::endl;
 		return (void*)1;
 	}
-	void* result = oAppSystemFactory(pName, pReturnCode);
 	if (result) {
 		std::cout << "found " << pName << "  in appsystem factory" << std::endl;
 		return result;
@@ -308,7 +310,7 @@ char __fastcall CServerGameDLL__DLLInit(void* thisptr, CreateInterfaceFn appSyst
 		pGlobals->nTimestampNetworkingBase = 100;
 		pGlobals->nTimestampRandomizeWindow = 32;
 	}
-	void* serverPtr = (void*)GetModuleHandleA("server.dll");
+	void* serverPtr = (void*)G_server;
 	SendProp* DT_BasePlayer = (SendProp*)(((uintptr_t)serverPtr) + 0xE9A800);
 	int* DT_BasePlayerLen = (int*)(((uintptr_t)serverPtr) + 0xE04768);
 
@@ -359,10 +361,7 @@ char __fastcall CServerGameDLL__DLLInit(void* thisptr, CreateInterfaceFn appSyst
 
 extern "C" __declspec(dllexport) void StackToolsNotify_LoadedLibrary(char* pModuleName)
 {
-	std::cout << "loaded " << pModuleName << std::endl;
-	//if (std::string(pModuleName).find("server.dll") != std::string::npos) {
-	//	SmashSendTables();
-	//}
+	printf("loaded %s\n", pModuleName);
 }
 typedef char(*MatchRecvPropsToSendProps_RType)(__int64 a1, __int64 a2, __int64 a3, __int64 a4);
 MatchRecvPropsToSendProps_RType MatchRecvPropsToSendProps_ROriginal;
@@ -424,7 +423,7 @@ char __fastcall MatchRecvPropsToSendProps_R(__int64 a1, __int64 a2, __int64 pSen
 	__int64 v7; // rdx
 	unsigned __int8* v9; // rcx
 
-	auto sub_1801D9D00 = (__int64(__fastcall*)(__int64 a1, _QWORD * a2))(((uintptr_t)GetModuleHandleA(ENGINE_DLL)) + 0x1D9D00);
+	auto sub_1801D9D00 = (__int64(__fastcall*)(__int64 a1, _QWORD * a2))(ENGINE_DLL_BASE + 0x1D9D00);
 	v5 = (_QWORD*)pSendTable;
 	v5 = (_QWORD*)pSendTable;
 	v14 = 0;

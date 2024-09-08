@@ -67,9 +67,9 @@ std::string hashUserInfoKey(const std::string& key) {
 // Command handling
 void setinfopersist_cmd(const CCommand& args) {
 	auto engine = G_engine;
-	static auto setinfo_cmd = decltype(&setinfopersist_cmd)(engine + 0x5B520);
-	static auto setinfo_cmd_flags = (int*)(engine + 0x05B5FF);
-	static void(*ccommand_constructor)(CCommand * thisptr, int nArgC, const char** ppArgV) = decltype(ccommand_constructor)(engine + 0x4806F0);
+	auto setinfo_cmd = decltype(&setinfopersist_cmd)(engine + 0x5B520);
+	auto setinfo_cmd_flags = (int*)(engine + 0x05B5FF);
+	void(*ccommand_constructor)(CCommand * thisptr, int nArgC, const char** ppArgV) = decltype(ccommand_constructor)(engine + 0x4806F0);
 
 	static bool bUnprotectedFlags = false;
 	if (!bUnprotectedFlags) {
@@ -356,7 +356,7 @@ typedef char (*CBaseClientState__InternalProcessStringCmdType)(void* thisptr, vo
 CBaseClientState__InternalProcessStringCmdType CBaseClientState__InternalProcessStringCmdOriginal;
 char CBaseClientState__InternalProcessStringCmd(void* thisptr, void* msg, bool bIsHLTV) {
 	auto engine = G_engine;
-	static void(*Cbuf_Execute)() = decltype(Cbuf_Execute)(engine + 0x1057C0);
+	void(*Cbuf_Execute)() = decltype(Cbuf_Execute)(engine + 0x1057C0);
 	char ret = CBaseClientState__InternalProcessStringCmdOriginal(thisptr, msg, bIsHLTV);
 	Cbuf_Execute(); // fix cbuf overflow on too many stringcmds
 	return ret;
@@ -376,9 +376,9 @@ char __fastcall GetConfigPath(char* outPath, size_t outPathSize, int configType)
 
 	// Construct the base path
 	char tempPath[512];
-	snprintf(tempPath, sizeof(tempPath), "%s%s%s", folderPath, "/Respawn/Titanfall", subFolder);
+	auto size = snprintf(tempPath, sizeof(tempPath), "%s%s%s", folderPath, "/Respawn/Titanfall", subFolder);
 
-	if (strlen(tempPath) >= 511)
+	if (size >= 511)
 	{
 		return 0;
 	}
