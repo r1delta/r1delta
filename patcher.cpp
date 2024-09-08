@@ -51,7 +51,6 @@
 #include "core.h"
 #include "load.h"
 #include "MinHook.h"
-#include "thirdparty/silver-bun/silver-bun.h"
 #pragma intrinsic(_ReturnAddress)
 
 struct PatchInstruction {
@@ -165,6 +164,18 @@ std::string UnicodeToString(PCUNICODE_STRING unicodeString) {
     return strTo;
 }
 
+static void
+Patch(void* addr, const std::vector<uint8_t>& bytes) {
+    // TODO(mrsteyk): check for errors!
+
+    DWORD old;
+    VirtualProtect(addr, bytes.size(), PAGE_EXECUTE_READWRITE, &old);
+
+    memcpy(addr, bytes.data(), bytes.size());
+
+    VirtualProtect(addr, bytes.size(), old, &old);
+}
+
 bool ApplyPatch(const PatchInstruction& instruction, void* targetModuleBase) {
     // NOTE(mrsteyk): CModule was being constructed every single fucking time anyway
     auto mz = (PIMAGE_DOS_HEADER)targetModuleBase;
@@ -194,19 +205,20 @@ bool ApplyPatch(const PatchInstruction& instruction, void* targetModuleBase) {
     }
 
     uintptr_t base = (uintptr_t)targetModuleBase;
-    CMemory sectionMemory(base);
+    //CMemory sectionMemory(base);
 
-    sectionMemory.OffsetSelf(instruction.offset);
+    //sectionMemory.OffsetSelf(instruction.offset);
+    auto sectionMemory = (uint8_t*)base + instruction.offset;
 
     for (size_t i = 0; i < instruction.originalBytes.size(); ++i) {
-        if (*(sectionMemory.RCast<unsigned char*>() + i) != instruction.originalBytes[i]) {
+        if (sectionMemory[i] != instruction.originalBytes[i]) {
             std::string errorMsg = "Original bytes do not match\nFile: " + instruction.fileName + "\nLine: " + std::to_string(instruction.lineNumber);
             MessageBoxA(nullptr, errorMsg.c_str(), "Patcher Error", MB_OK);
             return false;
         }
     }
 
-    sectionMemory.Patch(instruction.newBytes);
+    Patch(sectionMemory, instruction.newBytes);
 
     return true;
 }

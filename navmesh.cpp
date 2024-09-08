@@ -56,7 +56,6 @@
 #include "TableDestroyer.h"
 #include "bitbuf.h"
 #include "in6addr.h"
-#include "thirdparty/silver-bun/silver-bun.h"
 #include <fcntl.h>
 #include <io.h>
 #include <streambuf>

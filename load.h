@@ -98,6 +98,10 @@ void __stdcall LoaderNotificationCallback(
 	const LDR_DLL_NOTIFICATION_DATA* notification_data,
 	void* context);
 
+extern uintptr_t G_launcher;
+extern uintptr_t G_filesystem_stdio;
+extern uintptr_t G_engine;
+extern uintptr_t G_engine_ds;
 
 LDR_DLL_LOADED_NOTIFICATION_DATA* GetModuleNotificationData(const wchar_t* moduleName);
 void FreeModuleNotificationData(LDR_DLL_LOADED_NOTIFICATION_DATA*);

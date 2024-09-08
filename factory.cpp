@@ -56,7 +56,8 @@
 #include <map>
 #include "engine.h"
 #include "model_info.h"
-#include "thirdparty/silver-bun/silver-bun.h"
+//#include "thirdparty/silver-bun/silver-bun.h"
+#include "load.h"
 
 #pragma comment(lib, "Dbghelp.lib")
 
@@ -660,9 +661,16 @@ void* modifiedNetCHANVTable = nullptr;
 
 void InitializeModifiedNetCHANVTable(void* netChan) {	
     if (modifiedNetCHANVTable == nullptr) {
-		CModule engineDS("engine_ds.dll");
-		auto start = engineDS.GetModuleBase();
-		auto end = start+ engineDS.GetModuleSize();
+		//CModule engineDS("engine_ds.dll");
+		auto engineDS = G_engine_ds;
+		uintptr_t engineDS_size = 0;
+		{
+			auto mz = (PIMAGE_DOS_HEADER)engineDS;
+			auto pe = (PIMAGE_NT_HEADERS64)((uint8_t*)mz + mz->e_lfanew);
+			engineDS_size = pe->OptionalHeader.SizeOfImage;
+		}
+		auto start = engineDS;
+		auto end = start + engineDS_size;
         // Get the original vtable from the provided CNetChan object
         uintptr_t* originalVTable = *(uintptr_t**)netChan;
 

@@ -195,11 +195,6 @@
     <ClInclude Include="sendmoveclampfix.h" />
     <ClInclude Include="squirrel.h" />
     <ClInclude Include="TableDestroyer.h" />
-    <ClInclude Include="thirdparty\silver-bun\memaddr.h" />
-    <ClInclude Include="thirdparty\silver-bun\module.h" />
-    <ClInclude Include="thirdparty\silver-bun\silver-bun.h" />
-    <ClInclude Include="thirdparty\silver-bun\tebpeb64.h" />
-    <ClInclude Include="thirdparty\silver-bun\utils.h" />
     <ClInclude Include="thirdparty\zstd-1.5.6\zstd.h" />
     <ClInclude Include="tier0_orig.h" />
     <ClInclude Include="utils.h" />

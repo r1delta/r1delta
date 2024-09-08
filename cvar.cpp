@@ -49,7 +49,6 @@
 #include "defs.h"
 #include "factory.h"
 #include "logging.h"
-#include "thirdparty/silver-bun/silver-bun.h"
 void      (*OriginalCCVar_RegisterConCommand)(uintptr_t thisptr, ConCommandBaseR1* pCommandBase);
 void      (*OriginalCCVar_UnregisterConCommand)(uintptr_t thisptr, ConCommandBaseR1* pCommandBase);
 ConCommandBaseR1* (*OriginalCCVar_FindCommandBase)(uintptr_t thisptr, const char* name);

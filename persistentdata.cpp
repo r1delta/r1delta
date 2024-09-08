@@ -3,7 +3,6 @@
 #include <cstring>
 #include <algorithm>
 #include "bitbuf.h"
-#include "thirdparty/silver-bun/silver-bun.h"
 #include "cvar.h"
 #include "persistentdata.h"
 #include "logging.h"
@@ -18,6 +17,8 @@
 #include <filesystem>
 #include <iostream>
 #include <fstream>
+
+#include "load.h"
 
 //#define HASH_USERINFO_KEYS
 // Constants
@@ -65,10 +66,10 @@ std::string hashUserInfoKey(const std::string& key) {
 
 // Command handling
 void setinfopersist_cmd(const CCommand& args) {
-	static CModule engine("engine.dll");
-	static auto setinfo_cmd = CMemory(engine.GetModuleBase()).OffsetSelf(0x5B520).RCast<decltype(&setinfopersist_cmd)>();
-	static auto setinfo_cmd_flags = CMemory(engine.GetModuleBase()).OffsetSelf(0x05B5FF).RCast<int*>();
-	static auto ccommand_constructor = CMemory(engine.GetModuleBase()).OffsetSelf(0x4806F0).RCast<void(*)(CCommand * thisptr, int nArgC, const char** ppArgV)>();
+	auto engine = G_engine;
+	static auto setinfo_cmd = decltype(&setinfopersist_cmd)(engine + 0x5B520);
+	static auto setinfo_cmd_flags = (int*)(engine + 0x05B5FF);
+	static void(*ccommand_constructor)(CCommand * thisptr, int nArgC, const char** ppArgV) = decltype(ccommand_constructor)(engine + 0x4806F0);
 
 	static bool bUnprotectedFlags = false;
 	if (!bUnprotectedFlags) {
@@ -314,7 +315,9 @@ SQInteger Script_ServerGetPersistentUserDataKVString(HSQUIRRELVM v) {
 }
 
 SQInteger Script_ServerSetPersistentUserDataKVString(HSQUIRRELVM v) {
-	static auto CVEngineServer_ClientCommand = CMemory(CModule("engine.dll").GetModuleBase()).OffsetSelf(0xFE7F0).RCast<void (*)(__int64 a1, __int64 a2, const char* a3, ...)>();
+	auto engine = G_engine;
+	void (*CVEngineServer_ClientCommand)(__int64 a1, __int64 a2, const char* a3, ...) = decltype(CVEngineServer_ClientCommand)(engine + 0xFE7F0);
+
 	const void* pPlayer = sq_getentity(v, 2);
 	if (!pPlayer) {
 		return sq_throwerror(v, "player is null");
@@ -352,7 +355,8 @@ SQInteger Script_ServerSetPersistentUserDataKVString(HSQUIRRELVM v) {
 typedef char (*CBaseClientState__InternalProcessStringCmdType)(void* thisptr, void* msg, bool bIsHLTV);
 CBaseClientState__InternalProcessStringCmdType CBaseClientState__InternalProcessStringCmdOriginal;
 char CBaseClientState__InternalProcessStringCmd(void* thisptr, void* msg, bool bIsHLTV) {
-	static auto Cbuf_Execute = CMemory(CModule("engine.dll").GetModuleBase()).OffsetSelf(0x1057C0).RCast<void(*)()>();
+	auto engine = G_engine;
+	static void(*Cbuf_Execute)() = decltype(Cbuf_Execute)(engine + 0x1057C0);
 	char ret = CBaseClientState__InternalProcessStringCmdOriginal(thisptr, msg, bIsHLTV);
 	Cbuf_Execute(); // fix cbuf overflow on too many stringcmds
 	return ret;
@@ -428,7 +432,8 @@ char ExecuteConfigFile(int configType) {
 	if (!buffer) {
 		return 0; // Memory allocation failed
 	}
-	static auto Exec_CmdGuts = CMemory(CModule("engine.dll").GetModuleBase()).OffsetSelf(0x01059A0).RCast<void* (*)(const char* commands, char bUseExecuteCommand)>();
+	auto engine = G_engine;
+	void* (*Exec_CmdGuts)(const char* commands, char bUseExecuteCommand) = decltype(Exec_CmdGuts)(engine + 0x01059A0);
 
 	std::ifstream file(configPath, std::ios::binary);
 	if (!file.read(buffer, fileSize)) {

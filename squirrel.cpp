@@ -24,7 +24,6 @@
 #include "TableDestroyer.h"
 #include "bitbuf.h"
 #include "in6addr.h"
-#include "thirdparty/silver-bun/silver-bun.h"
 #include <fcntl.h>
 #include <io.h>
 #include <streambuf>
@@ -218,7 +217,8 @@ void* sq_getentity(HSQUIRRELVM v, SQInteger iStackPos)
 bool GetSQVMFuncs() {
 	static bool initialized = false;
 	if (initialized) return true;
-	g_pClientArray = CMemory(CModule("engine.dll").GetModuleBase()).OffsetSelf(0x2966340).RCast<CBaseClient*>(); // TODO: dedicated
+	auto engine = G_engine;
+	g_pClientArray = (CBaseClient*)(engine + 0x2966340); // TODO(wanderer?): dedicated
 	HMODULE launcherModule = GetModuleHandleA("launcher.dll");
 	if (!launcherModule) return false;
 

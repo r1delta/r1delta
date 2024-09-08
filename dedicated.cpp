@@ -1,63 +1,215 @@
 #include "dedicated.h"
 #include <intrin.h>
 
+#include "load.h"
+
 #pragma intrinsic(_ReturnAddress)
 
- std::vector<std::string> netMessages = {
-	"Base_CmdKeyValues",
-	"CLC_BaselineAck",
-	"CLC_ClientInfo",
-	"CLC_ClientSayText",
-	"CLC_ClientTick",
-	"CLC_CmdKeyValues",
-	"CLC_DurangoVoiceData",
-	"CLC_FileCRCCheck",
-	"CLC_ListenEvents",
-	"CLC_LoadingProgress",
-	"CLC_Move",
-	"CLC_PersistenceClientToken",
-	"CLC_PersistenceRequestSave",
-	"CLC_RespondCvarValue",
-	"CLC_SaveReplay",
-	"CLC_SplitPlayerConnect",
-	"CLC_VoiceData",
-	"CNetMessage",
-	"NET_SetConVar",
-	"NET_SignonState",
-	"NET_SplitScreenUser",
-	"NET_StringCmd",
-	"SVC_BSPDecal",
-	"SVC_ClassInfo",
-	"SVC_CmdKeyValues",
-	"SVC_CreateStringTable",
-	"SVC_CrosshairAngle",
-	"SVC_DurangoVoiceData",
-	"SVC_EntityMessage",
-	"SVC_FixAngle",
-	"SVC_GameEvent",
-	"SVC_GameEventList",
-	"SVC_GetCvarValue",
-	"SVC_Menu",
-	"SVC_PersistenceBaseline",
-	"SVC_PersistenceDefFile",
-	"SVC_PersistenceNotifySaved",
-	"SVC_PersistenceUpdateVar",
-	"SVC_PlaylistChange",
-	"SVC_Playlists",
-	"SVC_Print",
-	"SVC_SendTable",
-	"SVC_ServerInfo",
-	"SVC_ServerTick",
-	"SVC_SetPause",
-	"SVC_SetTeam",
-	"SVC_Snapshot",
-	"SVC_Sounds",
-	"SVC_SplitScreen",
-	"SVC_TempEntities",
-	"SVC_UpdateStringTable",
-	"SVC_UserMessage",
-	"SVC_VoiceData"
+#define VTABLE_UPDATE_FORCE 1
+
+struct vtableRef2Engines {
+#if defined(_DEBUG)
+	const char* name;
+#endif
+	uintptr_t offset_engine;
+	uintptr_t offset_engine_ds;
 };
+
+#if defined(_DEBUG)
+#define VTABLEREF2ENGINES(N, E, EDS) { (N), (E), (EDS) }
+
+// NOTE(mrsteyk): this is intentionally slow to make you aware of what you are doing.
+//                you must atone for your sins.
+static uintptr_t
+FindVTable(uintptr_t base, const char* name)
+{
+	auto mz = (PIMAGE_DOS_HEADER)base;
+	auto pe = (PIMAGE_NT_HEADERS64)((uint8_t*)base + mz->e_lfanew);
+	auto sections_num = pe->FileHeader.NumberOfSections;
+	auto sections = IMAGE_FIRST_SECTION(pe);
+
+	uintptr_t data_start = 0;
+	uintptr_t data_end = 0;
+	uintptr_t rdata_start = 0;
+	uintptr_t rdata_end = 0;
+
+	for (size_t i = 0; i < sections_num; i++)
+	{
+		auto section = sections + i;
+		if (strcmp_static(section->Name, ".data") == 0)
+		{
+			data_start = base + section->VirtualAddress;
+			data_end = data_start + section->Misc.VirtualSize;
+		}
+		else if (strcmp_static(section->Name, ".rdata") == 0)
+		{
+			rdata_start = base + section->VirtualAddress;
+			rdata_end = rdata_start + section->Misc.VirtualSize;
+		}
+
+		if (data_start && data_end && rdata_start && rdata_end)
+		{
+			break;
+		}
+	}
+
+	if (data_start && data_end && rdata_start && rdata_end)
+	{
+		auto name_len = strlen(name);
+		uint32_t name_rva = 0;
+
+		// NOTE(mrsteyk): strings are usually 16 byte aligned, but this is a part of a struct with 8 align.
+		for (size_t pos = data_start; pos < data_end; pos += 8)
+		{
+			// ".?AV" name "@@";
+			if (memcmp((void*)pos, ".?AV", 4))
+				continue;
+			if (memcmp((void*)(pos + 4), name, name_len))
+				continue;
+			if (memcmp((void*)(pos + 4 + name_len), "@@", 3))
+				continue;
+
+			name_rva = (pos - 0x10) - base;
+			break;
+		}
+
+		if (name_rva) {
+			for (size_t pos = rdata_start; pos < rdata_end; pos += 4)
+			{
+				if (*(uint32_t*)pos == name_rva)
+				{
+					if (*(uint32_t*)(pos - 0x8) == 0 && *(uint32_t*)(pos - 0xC) == 1)
+					{
+						uintptr_t rtti_ref = pos - 0xC;
+						for (size_t posr = rdata_start; posr < rdata_end; posr += 8)
+						{
+							if (*(uintptr_t*)posr == rtti_ref)
+							{
+								return (posr + 8) - base;
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return 0;
+}
+
+static int
+FindVTables(uintptr_t engine, uintptr_t engine_ds, vtableRef2Engines* ref) {
+	int result = 1;
+
+	auto name = ref->name;
+	ref->offset_engine = FindVTable(engine, name);
+	ref->offset_engine_ds = FindVTable(engine_ds, name);
+
+	if (!ref->offset_engine || !ref->offset_engine_ds) {
+		result = 0;
+	}
+
+	return result;
+}
+
+#else
+#define VTABLEREF2ENGINES(N, E, EDS) { (E), (EDS) }
+#endif
+
+#if !defined(_DEBUG)
+const
+#endif
+vtableRef2Engines netMessages[] = {
+	VTABLEREF2ENGINES("Base_CmdKeyValues", 0x63E5D8, 0x4324B8),
+	VTABLEREF2ENGINES("CLC_BaselineAck", 0x607898, 0x4162C8),
+	VTABLEREF2ENGINES("CLC_ClientInfo", 0x60FD48, 0x4164E8),
+	VTABLEREF2ENGINES("CLC_ClientSayText", 0x5F9B38, 0x416738),
+	VTABLEREF2ENGINES("CLC_ClientTick", 0x608668, 0x416088),
+	VTABLEREF2ENGINES("CLC_CmdKeyValues", 0x63EAF8, 0x4329E8),
+	VTABLEREF2ENGINES("CLC_DurangoVoiceData", 0x621258, 0x416238),
+	VTABLEREF2ENGINES("CLC_FileCRCCheck", 0x60FF58, 0x416578),
+	VTABLEREF2ENGINES("CLC_ListenEvents", 0x5F6E48, 0x40F758),
+	VTABLEREF2ENGINES("CLC_LoadingProgress", 0x60FDD8, 0x416608),
+	VTABLEREF2ENGINES("CLC_Move", 0x6086F8, 0x416118),
+	VTABLEREF2ENGINES("CLC_PersistenceClientToken", 0x621378, 0x4163E8),
+	VTABLEREF2ENGINES("CLC_PersistenceRequestSave", 0x60FE68, 0x416698),
+	VTABLEREF2ENGINES("CLC_RespondCvarValue", 0x5F6928, 0x40F0F8),
+	VTABLEREF2ENGINES("CLC_SaveReplay", 0x6212E8, 0x416358),
+	VTABLEREF2ENGINES("CLC_SplitPlayerConnect", 0x5F6DB8, 0x40F6C8),
+	VTABLEREF2ENGINES("CLC_VoiceData", 0x6211C8, 0x4161A8),
+	VTABLEREF2ENGINES("CNetMessage", 0x5F35F8, 0x40AA58),
+	VTABLEREF2ENGINES("NET_SetConVar", 0x5F6C98, 0x40F5A8),
+	VTABLEREF2ENGINES("NET_SignonState", 0x5F6ED8, 0x40F7E8),
+	VTABLEREF2ENGINES("NET_SplitScreenUser", 0x63ED38, 0x432CD8),
+	VTABLEREF2ENGINES("NET_StringCmd", 0x5F55F8, 0x40B648),
+	VTABLEREF2ENGINES("SVC_BSPDecal", 0x5F6508, 0x40EC48),
+	VTABLEREF2ENGINES("SVC_ClassInfo", 0x5F6D28, 0x40F638),
+	VTABLEREF2ENGINES("SVC_CmdKeyValues", 0x63EB88, 0x432A78),
+	VTABLEREF2ENGINES("SVC_CreateStringTable", 0x63EDC8, 0x432D68),
+	VTABLEREF2ENGINES("SVC_CrosshairAngle", 0x5F5F38, 0x40E728),
+	VTABLEREF2ENGINES("SVC_DurangoVoiceData", 0x5F5E18, 0x40E608),
+	VTABLEREF2ENGINES("SVC_EntityMessage", 0x5F5FC8, 0x40E7B8),
+	VTABLEREF2ENGINES("SVC_FixAngle", 0x5F5EA8, 0x40E698),
+	VTABLEREF2ENGINES("SVC_GameEvent", 0x5F6598, 0x40ECD8),
+	VTABLEREF2ENGINES("SVC_GameEventList", 0x5F66B8, 0x40EDF8),
+	VTABLEREF2ENGINES("SVC_GetCvarValue", 0x5F6748, 0x40EE88),
+	VTABLEREF2ENGINES("SVC_Menu", 0x5F60E8, 0x40E8D8),
+	VTABLEREF2ENGINES("SVC_PersistenceBaseline", 0x5F58D8, 0x40E288),
+	VTABLEREF2ENGINES("SVC_PersistenceDefFile", 0x5F57A8, 0x40E1F8),
+	VTABLEREF2ENGINES("SVC_PersistenceNotifySaved", 0x5F5A08, 0x40E3B8),
+	VTABLEREF2ENGINES("SVC_PersistenceUpdateVar", 0x5F5968, 0x40E318),
+	VTABLEREF2ENGINES("SVC_PlaylistChange", 0x63EC18, 0x432B08),
+	VTABLEREF2ENGINES("SVC_Playlists", 0x5F5CF8, 0x40E4E8),
+	VTABLEREF2ENGINES("SVC_Print", 0x5F5718, 0x40E168),
+	VTABLEREF2ENGINES("SVC_SendTable", 0x5F63E8, 0x40EB28),
+	VTABLEREF2ENGINES("SVC_ServerInfo", 0x5F6358, 0x40EA98),
+	VTABLEREF2ENGINES("SVC_ServerTick", 0x5F5688, 0x40E0D8),
+	VTABLEREF2ENGINES("SVC_SetPause", 0x5F5C68, 0x40E458),
+	VTABLEREF2ENGINES("SVC_SetTeam", 0x63ECA8, 0x432B98),
+	VTABLEREF2ENGINES("SVC_Snapshot", 0x5F6628, 0x40ED68),
+	VTABLEREF2ENGINES("SVC_Sounds", 0x5F36C8, 0x40AB28),
+	VTABLEREF2ENGINES("SVC_SplitScreen", 0x5F67D8, 0x40EF18),
+	VTABLEREF2ENGINES("SVC_TempEntities", 0x5F6058, 0x40E848),
+	VTABLEREF2ENGINES("SVC_UpdateStringTable", 0x5F6478, 0x40EBB8),
+	VTABLEREF2ENGINES("SVC_UserMessage", 0x5F6BD8, 0x40F518),
+	VTABLEREF2ENGINES("SVC_VoiceData", 0x5F5D88, 0x40E578),
+};
+
+#if defined(_DEBUG)
+void
+InitDedicatedVtables() {
+	uintptr_t engine = (uintptr_t)LoadLibraryW(L"engine.dll");
+	uintptr_t engineDS = (uintptr_t)LoadLibraryW(L"engine_ds.dll");
+
+	OutputDebugStringA("vtableRef2Engines netMessages[] = {\n");
+
+	for (size_t i = 0; i < (sizeof(netMessages) / sizeof(netMessages[0])); i++) {
+		auto msg = &netMessages[i];
+		static char buf[512];
+		if (FindVTables(engine, engineDS, msg)) {
+			sprintf_s(buf, "    VTABLEREF2ENGINES(\"%s\", 0x%04llX, 0x%04llX),\n", msg->name, msg->offset_engine, msg->offset_engine_ds);
+			OutputDebugStringA(buf);
+		}
+		else {
+			sprintf_s(buf, "    VTABLEREF2ENGINES(\"%s\", 0x%04llX, 0x%04llX), // !!! ERROR !!!\n", msg->name, msg->offset_engine, msg->offset_engine_ds);
+			OutputDebugStringA(buf);
+		}
+
+		auto dsVtable = engineDS + msg->offset_engine_ds;
+		auto vtable = engine + msg->offset_engine;
+
+		if (dsVtable && vtable) {
+			for (int i = 0; i < 14; ++i) {
+				LPVOID pTarget = ((LPVOID*)dsVtable)[i];
+				LPVOID pDetour = ((LPVOID*)vtable)[i];
+				MH_CreateHook(pTarget, pDetour, NULL);
+			}
+		}
+	}
+
+	OutputDebugStringA("};\n");
+}
+#endif
 
 typedef void (*CUtlBuffer__SetExternalBufferType)(__int64 a1, __int64 a2, __int64 a3, __int64 a4, char a5);
 CUtlBuffer__SetExternalBufferType CUtlBuffer__SetExternalBufferOriginal;
@@ -162,56 +314,81 @@ typedef __int64(*Host_InitDedicatedType)(__int64 a1, __int64 a2, __int64 a3);
 Host_InitDedicatedType Host_InitDedicatedOriginal;
 __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 {
-	CModule engine("engine.dll", (uintptr_t)LoadLibraryA("engine.dll"));
-	CModule engineDS("engine_ds.dll");
+	//CModule engine("engine.dll", (uintptr_t)LoadLibraryA("engine.dll"));
+	//CModule engineDS("engine_ds.dll");
+	uintptr_t engine = (uintptr_t)LoadLibraryW(L"engine.dll");
+	uintptr_t engineDS = G_engine_ds;
 
-	NET_CreateNetChannelOriginal = NET_CreateNetChannelType(engine.GetModuleBase() + 0x1F1B10);
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13CA10), LPVOID(engine.GetModuleBase() + 0x1EC7B0), NULL); // NET_BufferToBufferCompress
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13DD90), LPVOID(engine.GetModuleBase() + 0x1EDB40), NULL); // NET_BufferToBufferDecompress
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x144C60), LPVOID(engine.GetModuleBase() + 0x1F4AC0), NULL); // NET_ClearQueuedPacketsForChannel
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x141D60), &NET_CreateNetChannel, NULL); // NET_CreateNetChannel LPVOID(engine.GetModuleBase() + 0x1F1B10)
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13F7A0), LPVOID(engine.GetModuleBase() + 0x1EF550), NULL); // NET_GetUDPPort
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x145440), LPVOID(engine.GetModuleBase() + 0x1F5220), NULL); // NET_Init
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13C9D0), LPVOID(engine.GetModuleBase() + 0x1EC770), NULL); // NET_InitPostFork
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13C8D0), LPVOID(engine.GetModuleBase() + 0x1EC660), NULL); // NET_IsDedicated
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13C8C0), LPVOID(engine.GetModuleBase() + 0x1EC650), NULL); // NET_IsMultiplayer
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13F7D0), LPVOID(engine.GetModuleBase() + 0x1EF580), NULL); // NET_ListenSocket
-	Original_NET_OutOfBandPrintf = NET_OutOfBandPrintf_t(engine.GetModuleBase() + 0x1F47C0);
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x144960), LPVOID(Detour_NET_OutOfBandPrintf), NULL); // NET_OutOfBandPrintf
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x142ED0), LPVOID(engine.GetModuleBase() + 0x1F2CF0), NULL); // NET_ProcessSocket
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x1458A0), LPVOID(engine.GetModuleBase() + 0x1F5650), NULL); // NET_RemoveNetChannel
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x143390), LPVOID(engine.GetModuleBase() + 0x1F31B0), NULL); // NET_RunFrame
-	NET_SendPacketOriginal = NET_SendPacketType(engine.GetModuleBase() + 0x1F4130);
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x1442D0), LPVOID(engine.GetModuleBase() + 0x1F4130), NULL); // NET_SendPacket
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x144D10), LPVOID(engine.GetModuleBase() + 0x1F4B70), NULL); // NET_SendQueuedPackets
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x1453D0), LPVOID(engine.GetModuleBase() + 0x1F51B0), NULL); // NET_SetMultiplayer
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x1434C0), LPVOID(engine.GetModuleBase() + 0x1F32E0), NULL); // NET_Shutdown
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13FAB0), LPVOID(engine.GetModuleBase() + 0x1EF860), NULL); // NET_SleepUntilMessages
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13C3E0), LPVOID(engine.GetModuleBase() + 0x1EC1B0), NULL); // NET_StringToAdr
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13C100), LPVOID(engine.GetModuleBase() + 0x1EBED0), NULL); // NET_StringToSockaddr
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x146D50), LPVOID(engine.GetModuleBase() + 0x1F6B90), NULL); // INetMessage__WriteToBuffer
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x13B000), LPVOID(engine.GetModuleBase() + 0x1E9EA0), NULL); // CNetChan__CNetChan__dtor
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x017940), LPVOID(engine.GetModuleBase() + 0x028BC0), NULL); // CLC_SplitPlayerConnect__dtor
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x12F140), LPVOID(engine.GetModuleBase() + 0x1DC830), NULL); // SendTable_WriteInfos
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x71C0), &bf_write__WriteUBitLong, reinterpret_cast<LPVOID*>(&bf_write__WriteUBitLongOriginal)); // bf_write__WriteUBitLong
-	MH_CreateHook(LPVOID(engineDS.GetModuleBase() + 0x497F0), LPVOID(engine.GetModuleBase() + 0xD8420), NULL); // CBaseClient::ConnectionStart
+	NET_CreateNetChannelOriginal = NET_CreateNetChannelType(engine + 0x1F1B10);
+	MH_CreateHook(LPVOID(engineDS + 0x13CA10), LPVOID(engine + 0x1EC7B0), NULL); // NET_BufferToBufferCompress
+	MH_CreateHook(LPVOID(engineDS + 0x13DD90), LPVOID(engine + 0x1EDB40), NULL); // NET_BufferToBufferDecompress
+	MH_CreateHook(LPVOID(engineDS + 0x144C60), LPVOID(engine + 0x1F4AC0), NULL); // NET_ClearQueuedPacketsForChannel
+	MH_CreateHook(LPVOID(engineDS + 0x141D60), &NET_CreateNetChannel, NULL); // NET_CreateNetChannel LPVOID(engine + 0x1F1B10)
+	MH_CreateHook(LPVOID(engineDS + 0x13F7A0), LPVOID(engine + 0x1EF550), NULL); // NET_GetUDPPort
+	MH_CreateHook(LPVOID(engineDS + 0x145440), LPVOID(engine + 0x1F5220), NULL); // NET_Init
+	MH_CreateHook(LPVOID(engineDS + 0x13C9D0), LPVOID(engine + 0x1EC770), NULL); // NET_InitPostFork
+	MH_CreateHook(LPVOID(engineDS + 0x13C8D0), LPVOID(engine + 0x1EC660), NULL); // NET_IsDedicated
+	MH_CreateHook(LPVOID(engineDS + 0x13C8C0), LPVOID(engine + 0x1EC650), NULL); // NET_IsMultiplayer
+	MH_CreateHook(LPVOID(engineDS + 0x13F7D0), LPVOID(engine + 0x1EF580), NULL); // NET_ListenSocket
+	Original_NET_OutOfBandPrintf = NET_OutOfBandPrintf_t(engine + 0x1F47C0);
+	MH_CreateHook(LPVOID(engineDS + 0x144960), LPVOID(Detour_NET_OutOfBandPrintf), NULL); // NET_OutOfBandPrintf
+	MH_CreateHook(LPVOID(engineDS + 0x142ED0), LPVOID(engine + 0x1F2CF0), NULL); // NET_ProcessSocket
+	MH_CreateHook(LPVOID(engineDS + 0x1458A0), LPVOID(engine + 0x1F5650), NULL); // NET_RemoveNetChannel
+	MH_CreateHook(LPVOID(engineDS + 0x143390), LPVOID(engine + 0x1F31B0), NULL); // NET_RunFrame
+	NET_SendPacketOriginal = NET_SendPacketType(engine + 0x1F4130);
+	MH_CreateHook(LPVOID(engineDS + 0x1442D0), LPVOID(engine + 0x1F4130), NULL); // NET_SendPacket
+	MH_CreateHook(LPVOID(engineDS + 0x144D10), LPVOID(engine + 0x1F4B70), NULL); // NET_SendQueuedPackets
+	MH_CreateHook(LPVOID(engineDS + 0x1453D0), LPVOID(engine + 0x1F51B0), NULL); // NET_SetMultiplayer
+	MH_CreateHook(LPVOID(engineDS + 0x1434C0), LPVOID(engine + 0x1F32E0), NULL); // NET_Shutdown
+	MH_CreateHook(LPVOID(engineDS + 0x13FAB0), LPVOID(engine + 0x1EF860), NULL); // NET_SleepUntilMessages
+	MH_CreateHook(LPVOID(engineDS + 0x13C3E0), LPVOID(engine + 0x1EC1B0), NULL); // NET_StringToAdr
+	MH_CreateHook(LPVOID(engineDS + 0x13C100), LPVOID(engine + 0x1EBED0), NULL); // NET_StringToSockaddr
+	MH_CreateHook(LPVOID(engineDS + 0x146D50), LPVOID(engine + 0x1F6B90), NULL); // INetMessage__WriteToBuffer
+	MH_CreateHook(LPVOID(engineDS + 0x13B000), LPVOID(engine + 0x1E9EA0), NULL); // CNetChan__CNetChan__dtor
+	MH_CreateHook(LPVOID(engineDS + 0x017940), LPVOID(engine + 0x028BC0), NULL); // CLC_SplitPlayerConnect__dtor
+	MH_CreateHook(LPVOID(engineDS + 0x12F140), LPVOID(engine + 0x1DC830), NULL); // SendTable_WriteInfos
+	MH_CreateHook(LPVOID(engineDS + 0x71C0), &bf_write__WriteUBitLong, reinterpret_cast<LPVOID*>(&bf_write__WriteUBitLongOriginal)); // bf_write__WriteUBitLong
+	MH_CreateHook(LPVOID(engineDS + 0x497F0), LPVOID(engine + 0xD8420), NULL); // CBaseClient::ConnectionStart
 
-	for (const auto& msg : netMessages) {
-		std::string mangledName = ".?AV" + msg + "@@";
-		LPVOID dsVtable = engineDS.GetVirtualMethodTable(mangledName.c_str());
-		LPVOID vtable = engine.GetVirtualMethodTable(mangledName.c_str());
+#if defined(_DEBUG) && VTABLE_UPDATE_FORCE
+	OutputDebugStringA("const vtableRef2Engines netMessages[] = {\n");
+#endif
+
+	for (size_t i = 0; i < (sizeof(netMessages) / sizeof(netMessages[0])); i++) {
+		auto msg = &netMessages[i];
+#if defined(_DEBUG)
+		if (VTABLE_UPDATE_FORCE || !msg->offset_engine || !msg->offset_engine_ds) {
+			static char buf[512];
+			if (FindVTables(engine, engineDS, msg)) {
+				sprintf_s(buf, "    VTABLEREF2ENGINES(\"%s\", 0x%04llX, 0x%04llX),\n", msg->name, msg->offset_engine, msg->offset_engine_ds);
+				OutputDebugStringA(buf);
+			}
+			else {
+				sprintf_s(buf, "    VTABLEREF2ENGINES(\"%s\", 0x%04llX, 0x%04llX), // !!! ERROR !!!\n", msg->name, msg->offset_engine, msg->offset_engine_ds);
+				OutputDebugStringA(buf);
+			}
+		}
+#endif
+
+		auto dsVtable = engineDS + msg->offset_engine_ds;
+		auto vtable = engine + msg->offset_engine;
 
 		if (dsVtable && vtable) {
 			for (int i = 0; i < 14; ++i) {
-				LPVOID pTarget = static_cast<LPVOID*>(dsVtable)[i];
-				LPVOID pDetour = static_cast<LPVOID*>(vtable)[i];
+				LPVOID pTarget = ((LPVOID*)dsVtable)[i];
+				LPVOID pDetour = ((LPVOID*)vtable)[i];
 				MH_CreateHook(pTarget, pDetour, NULL);
 			}
 		}
 	}
+
+#if defined(_DEBUG) && VTABLE_UPDATE_FORCE
+	OutputDebugStringA("};\n");
+#endif
+
 	MH_EnableHook(MH_ALL_HOOKS);
-	reinterpret_cast<char(__fastcall*)(__int64, CreateInterfaceFn)>((uintptr_t)(engine.GetModuleBase()) + 0x01A04A0)(0, (CreateInterfaceFn)(engineDS.GetModuleBase() + 0xE9000)); // connect nondedi engine
-	reinterpret_cast<void(__fastcall*)(int, void*)>((uintptr_t)(engine.GetModuleBase()) + 0x47F580)(0, 0); // register nondedi engine cvars
+	reinterpret_cast<char(__fastcall*)(__int64, CreateInterfaceFn)>((uintptr_t)(engine) + 0x01A04A0)(0, (CreateInterfaceFn)(engineDS + 0xE9000)); // connect nondedi engine
+	reinterpret_cast<void(__fastcall*)(int, void*)>((uintptr_t)(engine) + 0x47F580)(0, 0); // register nondedi engine cvars
 	return Host_InitDedicatedOriginal(a1, a2, a3);
 }
 

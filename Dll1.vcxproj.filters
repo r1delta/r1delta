@@ -13,12 +13,6 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
-    <Filter Include="Header Files\silver-bun">
-      <UniqueIdentifier>{dd6e7a2c-0f58-45a0-80d6-b260cf32801f}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Source Files\silver-bun">
-      <UniqueIdentifier>{63fbf397-6c9c-458a-9251-9f8d802facc2}</UniqueIdentifier>
-    </Filter>
     <Filter Include="3rd Party">
       <UniqueIdentifier>{7118953e-fe40-446a-b35b-5d417b6e18ab}</UniqueIdentifier>
     </Filter>
@@ -75,23 +69,8 @@
     <ClInclude Include="navmesh.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="thirdparty\silver-bun\utils.h">
-      <Filter>Header Files\silver-bun</Filter>
-    </ClInclude>
-    <ClInclude Include="thirdparty\silver-bun\tebpeb64.h">
-      <Filter>Header Files\silver-bun</Filter>
-    </ClInclude>
-    <ClInclude Include="thirdparty\silver-bun\memaddr.h">
-      <Filter>Header Files\silver-bun</Filter>
-    </ClInclude>
-    <ClInclude Include="thirdparty\silver-bun\module.h">
-      <Filter>Header Files\silver-bun</Filter>
-    </ClInclude>
     <ClInclude Include="utils.h">
       <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="thirdparty\silver-bun\silver-bun.h">
-      <Filter>Source Files\silver-bun</Filter>
     </ClInclude>
     <ClInclude Include="logging.h">
       <Filter>Header Files</Filter>

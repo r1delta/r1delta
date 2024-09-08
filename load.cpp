@@ -56,7 +56,6 @@
 #include "TableDestroyer.h"
 #include "bitbuf.h"
 #include "in6addr.h"
-#include "thirdparty/silver-bun/silver-bun.h"
 #include <fcntl.h>
 #include <io.h>
 #include <streambuf>
@@ -916,6 +915,11 @@ void FreeModuleNotificationData(LDR_DLL_LOADED_NOTIFICATION_DATA* data) {
 	delete data;
 }
 
+uintptr_t G_launcher;
+uintptr_t G_filesystem_stdio;
+uintptr_t G_engine;
+uintptr_t G_engine_ds;
+
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
 	const LDR_DLL_NOTIFICATION_DATA* notification_data,
@@ -925,68 +929,68 @@ void __stdcall LoaderNotificationCallback(
 	doBinaryPatchForFile(notification_data->Loaded);
 
 	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"filesystem_stdio.dll") == 0) {
+		G_filesystem_stdio = (uintptr_t)notification_data->Loaded.DllBase;
 		InitCompressionHooks();
-	}
-	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"engine.dll") == 0) {
-		if (!IsDedicatedServer()) {
-			RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
-			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x1305E0), &ExecuteConfigFile, NULL);
-
-		}
 	}
 	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"server.dll") == 0) {
 		
+		auto server_base = (uintptr_t)notification_data->Loaded.DllBase;
+		auto engine_base = G_engine;
+		auto vscript_base = (uintptr_t)GetModuleHandleA(VSCRIPT_DLL);
+
+		auto engine_base_spec = ENGINE_DLL_BASE;
+
 		//doBinaryPatchForFile(*GetModuleNotificationData(L"vstdlib"));
 		LDR_DLL_LOADED_NOTIFICATION_DATA* ndata = GetModuleNotificationData(L"vstdlib");
 		doBinaryPatchForFile(*ndata);
 		FreeModuleNotificationData(ndata);
-		uintptr_t vTableAddr = reinterpret_cast<uintptr_t>(GetModuleHandleA("server.dll")) + 0x807220;
+		uintptr_t vTableAddr = server_base + 0x807220;
 		RemoveItemsFromVTable(vTableAddr, 35, 2);
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x143A10), &CServerGameDLL__DLLInit, (LPVOID*)&CServerGameDLL__DLLInitOriginal);
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x71E0BC), &hkcalloc_base, NULL);
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x71E99C), &hkmalloc_base, NULL);
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x71E9FC), &hkrealloc_base, NULL);
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x72B480), &hkrecalloc_base, NULL);
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x721000), &hkfree_base, NULL);
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x364D00), &CAI_NetworkManager__LoadNavMesh, reinterpret_cast<LPVOID*>(&CAI_NetworkManager__LoadNavMeshOriginal));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(VSCRIPT_DLL) + (IsDedicatedServer() ? 0x6A80 : 0x6A60)), &CScriptVM__ctor, reinterpret_cast<LPVOID*>(&CScriptVM__ctororiginal));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(VSCRIPT_DLL) + (IsDedicatedServer() ? 0x1210 : 0x1210)), &CScriptManager__CreateNewVM, reinterpret_cast<LPVOID*>(&CScriptManager__CreateNewVMOriginal));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(VSCRIPT_DLL) + (IsDedicatedServer() ? 0x1640 : 0x1630)), &CScriptVM__GetUnknownVMPtr, reinterpret_cast<LPVOID*>(&CScriptVM__GetUnknownVMPtrOriginal));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(VSCRIPT_DLL) + (IsDedicatedServer() ? 0x1600 : 0x15F0)), &CScriptManager__DestroyVM, reinterpret_cast<LPVOID*>(&CScriptManager__DestroyVMOriginal));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(VSCRIPT_DLL) + (IsDedicatedServer() ? 0xCDD0 : 0xCDB0)), &CSquirrelVM__RegisterFunctionGuts, reinterpret_cast<LPVOID*>(&CSquirrelVM__RegisterFunctionGutsOriginal));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(VSCRIPT_DLL) + (IsDedicatedServer() ? 0xD670 : 0xD650)), &CSquirrelVM__PushVariant, reinterpret_cast<LPVOID*>(&CSquirrelVM__PushVariantOriginal));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(VSCRIPT_DLL) + (IsDedicatedServer() ? 0xD7D0 : 0xD7B0)), &CSquirrelVM__ConvertToVariant, reinterpret_cast<LPVOID*>(&CSquirrelVM__ConvertToVariantOriginal));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(VSCRIPT_DLL) + (IsDedicatedServer() ? 0xB130 : 0xB110)), &CSquirrelVM__ReleaseValue, reinterpret_cast<LPVOID*>(&CSquirrelVM__ReleaseValueOriginal));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(VSCRIPT_DLL) + (IsDedicatedServer() ? 0xA210 : 0xA1F0)), &CSquirrelVM__SetValue, reinterpret_cast<LPVOID*>(&CSquirrelVM__SetValueOriginal));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(VSCRIPT_DLL) + (IsDedicatedServer() ? 0x9C60 : 0x9C40)), &CSquirrelVM__SetValueEx, reinterpret_cast<LPVOID*>(&CSquirrelVM__SetValueExOriginal));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(VSCRIPT_DLL) + (IsDedicatedServer() ? 0xBE80 : 0xBE60)), &CSquirrelVM__TranslateCall, reinterpret_cast<LPVOID*>(&CSquirrelVM__TranslateCallOriginal));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x507560), &ServerClassInit_DT_BasePlayer, reinterpret_cast<LPVOID*>(&ServerClassInit_DT_BasePlayerOriginal));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x51DFE0), &ServerClassInit_DT_Local, reinterpret_cast<LPVOID*>(&ServerClassInit_DT_LocalOriginal));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x5064F0), &ServerClassInit_DT_LocalPlayerExclusive, reinterpret_cast<LPVOID*>(&ServerClassInit_DT_LocalPlayerExclusiveOriginal));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x593270), &ServerClassInit_DT_TitanSoul, reinterpret_cast<LPVOID*>(&ServerClassInit_DT_TitanSoulOriginal));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x629740), &sub_629740, reinterpret_cast<LPVOID*>(&sub_629740Original));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x3A1EC0), &CBaseEntity__SendProxy_CellOrigin, reinterpret_cast<LPVOID*>(NULL));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x3A2020), &CBaseEntity__SendProxy_CellOriginXY, reinterpret_cast<LPVOID*>(NULL));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x3A2130), &CBaseEntity__SendProxy_CellOriginZ, reinterpret_cast<LPVOID*>(NULL));
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x3C8B70), &CBaseEntity__VPhysicsInitNormal, reinterpret_cast<LPVOID*>(&CBaseEntity__VPhysicsInitNormalOriginal));
+		MH_CreateHook((LPVOID)(server_base + 0x143A10), &CServerGameDLL__DLLInit, (LPVOID*)&CServerGameDLL__DLLInitOriginal);
+		MH_CreateHook((LPVOID)(server_base + 0x71E0BC), &hkcalloc_base, NULL);
+		MH_CreateHook((LPVOID)(server_base + 0x71E99C), &hkmalloc_base, NULL);
+		MH_CreateHook((LPVOID)(server_base + 0x71E9FC), &hkrealloc_base, NULL);
+		MH_CreateHook((LPVOID)(server_base + 0x72B480), &hkrecalloc_base, NULL);
+		MH_CreateHook((LPVOID)(server_base + 0x721000), &hkfree_base, NULL);
+		//MH_CreateHook((LPVOID)(server_base + 0x364D00), &CAI_NetworkManager__LoadNavMesh, reinterpret_cast<LPVOID*>(&CAI_NetworkManager__LoadNavMeshOriginal));
+		MH_CreateHook((LPVOID)(vscript_base + (IsDedicatedServer() ? 0x6A80 : 0x6A60)), &CScriptVM__ctor, reinterpret_cast<LPVOID*>(&CScriptVM__ctororiginal));
+		MH_CreateHook((LPVOID)(vscript_base + (IsDedicatedServer() ? 0x1210 : 0x1210)), &CScriptManager__CreateNewVM, reinterpret_cast<LPVOID*>(&CScriptManager__CreateNewVMOriginal));
+		MH_CreateHook((LPVOID)(vscript_base + (IsDedicatedServer() ? 0x1640 : 0x1630)), &CScriptVM__GetUnknownVMPtr, reinterpret_cast<LPVOID*>(&CScriptVM__GetUnknownVMPtrOriginal));
+		MH_CreateHook((LPVOID)(vscript_base + (IsDedicatedServer() ? 0x1600 : 0x15F0)), &CScriptManager__DestroyVM, reinterpret_cast<LPVOID*>(&CScriptManager__DestroyVMOriginal));
+		MH_CreateHook((LPVOID)(vscript_base + (IsDedicatedServer() ? 0xCDD0 : 0xCDB0)), &CSquirrelVM__RegisterFunctionGuts, reinterpret_cast<LPVOID*>(&CSquirrelVM__RegisterFunctionGutsOriginal));
+		MH_CreateHook((LPVOID)(vscript_base + (IsDedicatedServer() ? 0xD670 : 0xD650)), &CSquirrelVM__PushVariant, reinterpret_cast<LPVOID*>(&CSquirrelVM__PushVariantOriginal));
+		MH_CreateHook((LPVOID)(vscript_base + (IsDedicatedServer() ? 0xD7D0 : 0xD7B0)), &CSquirrelVM__ConvertToVariant, reinterpret_cast<LPVOID*>(&CSquirrelVM__ConvertToVariantOriginal));
+		MH_CreateHook((LPVOID)(vscript_base + (IsDedicatedServer() ? 0xB130 : 0xB110)), &CSquirrelVM__ReleaseValue, reinterpret_cast<LPVOID*>(&CSquirrelVM__ReleaseValueOriginal));
+		MH_CreateHook((LPVOID)(vscript_base + (IsDedicatedServer() ? 0xA210 : 0xA1F0)), &CSquirrelVM__SetValue, reinterpret_cast<LPVOID*>(&CSquirrelVM__SetValueOriginal));
+		MH_CreateHook((LPVOID)(vscript_base + (IsDedicatedServer() ? 0x9C60 : 0x9C40)), &CSquirrelVM__SetValueEx, reinterpret_cast<LPVOID*>(&CSquirrelVM__SetValueExOriginal));
+		MH_CreateHook((LPVOID)(vscript_base + (IsDedicatedServer() ? 0xBE80 : 0xBE60)), &CSquirrelVM__TranslateCall, reinterpret_cast<LPVOID*>(&CSquirrelVM__TranslateCallOriginal));
+		MH_CreateHook((LPVOID)(server_base + 0x507560), &ServerClassInit_DT_BasePlayer, reinterpret_cast<LPVOID*>(&ServerClassInit_DT_BasePlayerOriginal));
+		MH_CreateHook((LPVOID)(server_base + 0x51DFE0), &ServerClassInit_DT_Local, reinterpret_cast<LPVOID*>(&ServerClassInit_DT_LocalOriginal));
+		MH_CreateHook((LPVOID)(server_base + 0x5064F0), &ServerClassInit_DT_LocalPlayerExclusive, reinterpret_cast<LPVOID*>(&ServerClassInit_DT_LocalPlayerExclusiveOriginal));
+		MH_CreateHook((LPVOID)(server_base + 0x593270), &ServerClassInit_DT_TitanSoul, reinterpret_cast<LPVOID*>(&ServerClassInit_DT_TitanSoulOriginal));
+		MH_CreateHook((LPVOID)(server_base + 0x629740), &sub_629740, reinterpret_cast<LPVOID*>(&sub_629740Original));
+		MH_CreateHook((LPVOID)(server_base + 0x3A1EC0), &CBaseEntity__SendProxy_CellOrigin, reinterpret_cast<LPVOID*>(NULL));
+		MH_CreateHook((LPVOID)(server_base + 0x3A2020), &CBaseEntity__SendProxy_CellOriginXY, reinterpret_cast<LPVOID*>(NULL));
+		MH_CreateHook((LPVOID)(server_base + 0x3A2130), &CBaseEntity__SendProxy_CellOriginZ, reinterpret_cast<LPVOID*>(NULL));
+		//MH_CreateHook((LPVOID)(server_base + 0x3C8B70), &CBaseEntity__VPhysicsInitNormal, reinterpret_cast<LPVOID*>(&CBaseEntity__VPhysicsInitNormalOriginal));
 
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x1FDA50), &CLC_Move__ReadFromBuffer, reinterpret_cast<LPVOID*>(&CLC_Move__ReadFromBufferOriginal));
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x1F6F10), &CLC_Move__WriteToBuffer, reinterpret_cast<LPVOID*>(NULL));
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x1FDA50), &CLC_Move__ReadFromBuffer, NULL);
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x1F6F10), &CLC_Move__WriteToBuffer, NULL);
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x203C20), &NET_SetConVar__ReadFromBuffer, NULL);
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x202F80), &NET_SetConVar__WriteToBuffer, NULL);
+		//MH_CreateHook((LPVOID)(engine_base + 0x1FDA50), &CLC_Move__ReadFromBuffer, reinterpret_cast<LPVOID*>(&CLC_Move__ReadFromBufferOriginal));
+		//MH_CreateHook((LPVOID)(engine_base + 0x1F6F10), &CLC_Move__WriteToBuffer, reinterpret_cast<LPVOID*>(NULL));
+		//MH_CreateHook((LPVOID)(engine_base + 0x1FDA50), &CLC_Move__ReadFromBuffer, NULL);
+		//MH_CreateHook((LPVOID)(engine_base + 0x1F6F10), &CLC_Move__WriteToBuffer, NULL);
+		MH_CreateHook((LPVOID)(engine_base + 0x203C20), &NET_SetConVar__ReadFromBuffer, NULL);
+		MH_CreateHook((LPVOID)(engine_base + 0x202F80), &NET_SetConVar__WriteToBuffer, NULL);
 		
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0xCA730), &CBaseServer__FillServerInfo, reinterpret_cast<LPVOID*>(&CBaseServer__FillServerInfoOriginal));
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x3667D0), &CAI_NetworkManager__DelayedInit, reinterpret_cast<LPVOID*>(&CAI_NetworkManager__DelayedInitOriginal));
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x36BC30), &sub_36BC30, reinterpret_cast<LPVOID*>(&sub_36BC30Original));
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x36C150), &sub_36C150, reinterpret_cast<LPVOID*>(&sub_36C150Original));
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x3669C0), &CAI_NetworkManager__FixupHints, reinterpret_cast<LPVOID*>(&CAI_NetworkManager__FixupHintsOriginal));
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x31CE90), &unkallocfunc, reinterpret_cast<LPVOID*>(&unkallocfuncoriginal));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x25A8E0), &CEntityFactoryDictionary__Create, reinterpret_cast<LPVOID*>(&CEntityFactoryDictionary__CreateOriginal));
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x363A50), &sub_363A50, reinterpret_cast<LPVOID*>(&sub_363A50Original));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x21F9C0), &CEngineVGui__Init, reinterpret_cast<LPVOID*>(&CEngineVGui__InitOriginal));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x21EB70), &CEngineVGui__HideGameUI, reinterpret_cast<LPVOID*>(&CEngineVGui__HideGameUIOriginal));
+		MH_CreateHook((LPVOID)(engine_base + 0xCA730), &CBaseServer__FillServerInfo, reinterpret_cast<LPVOID*>(&CBaseServer__FillServerInfoOriginal));
+		//MH_CreateHook((LPVOID)(server_base + 0x3667D0), &CAI_NetworkManager__DelayedInit, reinterpret_cast<LPVOID*>(&CAI_NetworkManager__DelayedInitOriginal));
+		//MH_CreateHook((LPVOID)(server_base + 0x36BC30), &sub_36BC30, reinterpret_cast<LPVOID*>(&sub_36BC30Original));
+		//MH_CreateHook((LPVOID)(server_base + 0x36C150), &sub_36C150, reinterpret_cast<LPVOID*>(&sub_36C150Original));
+		//MH_CreateHook((LPVOID)(server_base + 0x3669C0), &CAI_NetworkManager__FixupHints, reinterpret_cast<LPVOID*>(&CAI_NetworkManager__FixupHintsOriginal));
+		//MH_CreateHook((LPVOID)(server_base + 0x31CE90), &unkallocfunc, reinterpret_cast<LPVOID*>(&unkallocfuncoriginal));
+		MH_CreateHook((LPVOID)(server_base + 0x25A8E0), &CEntityFactoryDictionary__Create, reinterpret_cast<LPVOID*>(&CEntityFactoryDictionary__CreateOriginal));
+		//MH_CreateHook((LPVOID)(server_base + 0x363A50), &sub_363A50, reinterpret_cast<LPVOID*>(&sub_363A50Original));
+		MH_CreateHook((LPVOID)(engine_base + 0x21F9C0), &CEngineVGui__Init, reinterpret_cast<LPVOID*>(&CEngineVGui__InitOriginal));
+		MH_CreateHook((LPVOID)(engine_base + 0x21EB70), &CEngineVGui__HideGameUI, reinterpret_cast<LPVOID*>(&CEngineVGui__HideGameUIOriginal));
 		
 		
 		RegisterConCommand("toggleconsole", ToggleConsoleCommand, "Toggles the console", (1 << 17));
@@ -998,7 +1002,7 @@ void __stdcall LoaderNotificationCallback(
 			RegisterConCommand("script_ui", script_ui_cmd, "Execute Squirrel code in UI context", FCVAR_NONE);
 		}
 
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("server.dll") + 0x364140), &sub_364140, reinterpret_cast<LPVOID*>(NULL));
+		//MH_CreateHook((LPVOID)(server_base + 0x364140), &sub_364140, reinterpret_cast<LPVOID*>(NULL));
 		
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x257E0), &sub_1800257E0, reinterpret_cast<LPVOID*>(&sub_1800257E0Original));
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0xE77F0), &IVP_Environment__set_delta_PSI_time, reinterpret_cast<LPVOID*>(&IVP_Environment__set_delta_PSI_timeOriginal));
@@ -1007,61 +1011,70 @@ void __stdcall LoaderNotificationCallback(
 
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("vstdlib.dll"), "VStdLib_GetICVarFactory"), &VStdLib_GetICVarFactory, NULL);
 		if (!IsDedicatedServer()) {
-			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x136860), &Status_ConMsg, NULL);
-			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x1BF500), &Status_ConMsg, NULL);
-			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x4735A0), &sub_1804735A0, NULL);
-			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x8E6D0), &Status_ConMsg, NULL);
-			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x22610), &Status_ConMsg, NULL);
-			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x1170A0), &COM_Init, reinterpret_cast<LPVOID*>(&COM_InitOriginal));
-			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x55C00), &CL_Retry_f, reinterpret_cast<LPVOID*>(&CL_Retry_fOriginal));
-			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x8EAF0), &Con_ColorPrintf, NULL);
+			MH_CreateHook((LPVOID)(engine_base_spec + 0x136860), &Status_ConMsg, NULL);
+			MH_CreateHook((LPVOID)(engine_base_spec + 0x1BF500), &Status_ConMsg, NULL);
+			MH_CreateHook((LPVOID)(engine_base_spec + 0x4735A0), &sub_1804735A0, NULL);
+			MH_CreateHook((LPVOID)(engine_base_spec + 0x8E6D0), &Status_ConMsg, NULL);
+			MH_CreateHook((LPVOID)(engine_base_spec + 0x22610), &Status_ConMsg, NULL);
+			MH_CreateHook((LPVOID)(engine_base_spec + 0x1170A0), &COM_Init, reinterpret_cast<LPVOID*>(&COM_InitOriginal));
+			MH_CreateHook((LPVOID)(engine_base_spec + 0x55C00), &CL_Retry_f, reinterpret_cast<LPVOID*>(&CL_Retry_fOriginal));
+			MH_CreateHook((LPVOID)(engine_base_spec + 0x8EAF0), &Con_ColorPrintf, NULL);
 			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher.dll") + 0xB640), &CSquirrelVM__PrintFunc1, NULL);
 			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher.dll") + 0xB6F0), &CSquirrelVM__PrintFunc2, NULL);
 			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("launcher.dll") + 0xB7A0), &CSquirrelVM__PrintFunc3, NULL);
-			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x23E20), &SVC_Print_Process_Hook, NULL);
-			MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x22DD0), &CBaseClientState__InternalProcessStringCmd, reinterpret_cast<LPVOID*>(&CBaseClientState__InternalProcessStringCmdOriginal));
+			MH_CreateHook((LPVOID)(engine_base + 0x23E20), &SVC_Print_Process_Hook, NULL);
+			MH_CreateHook((LPVOID)(engine_base + 0x22DD0), &CBaseClientState__InternalProcessStringCmd, reinterpret_cast<LPVOID*>(&CBaseClientState__InternalProcessStringCmdOriginal));
 			
-			//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x473550), &sub_180473550, NULL);
+			//MH_CreateHook((LPVOID)(engine_base_spec + 0x473550), &sub_180473550, NULL);
 
-			//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x1168B0), &COM_StringCopy, reinterpret_cast<LPVOID*>(&COM_StringCopyOriginal));
-			//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x1C79A0), &DataTable_SetupReceiveTableFromSendTable, reinterpret_cast<LPVOID*>(&DataTable_SetupReceiveTableFromSendTableOriginal));
+			//MH_CreateHook((LPVOID)(engine_base_spec + 0x1168B0), &COM_StringCopy, reinterpret_cast<LPVOID*>(&COM_StringCopyOriginal));
+			//MH_CreateHook((LPVOID)(engine_base_spec + 0x1C79A0), &DataTable_SetupReceiveTableFromSendTable, reinterpret_cast<LPVOID*>(&DataTable_SetupReceiveTableFromSendTableOriginal));
 		}
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x136E70), &sub_136E70, reinterpret_cast<LPVOID*>(&sub_136E70Original));
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x1C79A0), &sub_1801C79A0, reinterpret_cast<LPVOID*>(&sub_1801C79A0Original));
+		MH_CreateHook((LPVOID)(engine_base + 0x136E70), &sub_136E70, reinterpret_cast<LPVOID*>(&sub_136E70Original));
+		//MH_CreateHook((LPVOID)(engine_base_spec + 0x1C79A0), &sub_1801C79A0, reinterpret_cast<LPVOID*>(&sub_1801C79A0Original));
 		//
 		//
-		//diMH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x1D9E70), &MatchRecvPropsToSendProps_R, reinterpret_cast<LPVOID*>(NULL));
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x217C30), &sub_180217C30, NULL);
+		//diMH_CreateHook((LPVOID)(engine_base_spec + 0x1D9E70), &MatchRecvPropsToSendProps_R, reinterpret_cast<LPVOID*>(NULL));
+		//MH_CreateHook((LPVOID)(engine_base_spec + 0x217C30), &sub_180217C30, NULL);
 		// Cast the function pointer to the function at 0x4E80
 
 		// Fix precache start
 		{
-			LoadLibraryA("engine_r1o.dll");
-			auto r1oe_mod = uintptr_t(GetModuleHandleA("engine_r1o.dll"));
 			auto server_mod = uintptr_t(GetModuleHandleA("server.dll"));
-			// Cache bodymodel_militia to our own array...
-			//MH_CreateHook(LPVOID(r1oe_mod + 0xF5790), &SetPreCache, &SetPreCache_o);
 			// Rebuild CHL2_Player's precache to take our stuff into account
 			MH_CreateHook(LPVOID(server_mod + 0x41E070), &CHL2_Player_Precache, 0);
 		}
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x72360), &cl_DumpPrecacheStats, NULL);
+		MH_CreateHook((LPVOID)(engine_base + 0x72360), &cl_DumpPrecacheStats, NULL);
 		MH_EnableHook(MH_ALL_HOOKS);
 		std::cout << "did hooks" << std::endl;
-
 	}
 
-	if (IsDedicatedServer() && (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"engine_ds.dll") == 0)) {
-		InitDedicated();
+	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"engine_ds.dll") == 0) {
+		G_engine_ds = (uintptr_t)notification_data->Loaded.DllBase;
+		
+		if (IsDedicatedServer()) {
+			InitDedicated();
+		}
 	}
 
 	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"engine.dll") == 0) {
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA(ENGINE_DLL) + 0x127C70), &FileSystem_UpdateAddonSearchPaths, reinterpret_cast<LPVOID*>(&FileSystem_UpdateAddonSearchPathsTypeOriginal));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x6A420), &ReadFileFromVPKHook, reinterpret_cast<LPVOID*>(&readFileFromVPK));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x9C20), &ReadFromCacheHook, reinterpret_cast<LPVOID*>(&readFromCache));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x16250), &AddVPKFile, reinterpret_cast<LPVOID*>(&AddVPKFileOriginal));
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x4BC0), &CBaseFileSystem__CSearchPath__SetPath, reinterpret_cast<LPVOID*>(&CBaseFileSystem__CSearchPath__SetPathOriginal));
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x13D60), &CZipPackFile__Prepare, reinterpret_cast<LPVOID*>(&CZipPackFile__PrepareOriginal));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("filesystem_stdio.dll") + 0x9AB70), &fs_sprintf_hook, reinterpret_cast<LPVOID*>(NULL));
+		G_engine = (uintptr_t)notification_data->Loaded.DllBase;
+		if (!IsDedicatedServer()) {
+			RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
+			MH_CreateHook((LPVOID)(G_engine + 0x1305E0), &ExecuteConfigFile, NULL);
+
+		}
+
+		auto engine_base_spec = ENGINE_DLL_BASE;
+		auto filesystem_stdio = G_filesystem_stdio;
+
+		MH_CreateHook((LPVOID)(engine_base_spec + 0x127C70), &FileSystem_UpdateAddonSearchPaths, reinterpret_cast<LPVOID*>(&FileSystem_UpdateAddonSearchPathsTypeOriginal));
+		MH_CreateHook((LPVOID)(filesystem_stdio + 0x6A420), &ReadFileFromVPKHook, reinterpret_cast<LPVOID*>(&readFileFromVPK));
+		MH_CreateHook((LPVOID)(filesystem_stdio + 0x9C20), &ReadFromCacheHook, reinterpret_cast<LPVOID*>(&readFromCache));
+		MH_CreateHook((LPVOID)(filesystem_stdio + 0x16250), &AddVPKFile, reinterpret_cast<LPVOID*>(&AddVPKFileOriginal));
+		//MH_CreateHook((LPVOID)(filesystem_stdio + 0x4BC0), &CBaseFileSystem__CSearchPath__SetPath, reinterpret_cast<LPVOID*>(&CBaseFileSystem__CSearchPath__SetPathOriginal));
+		//MH_CreateHook((LPVOID)(filesystem_stdio + 0x13D60), &CZipPackFile__Prepare, reinterpret_cast<LPVOID*>(&CZipPackFile__PrepareOriginal));
+		MH_CreateHook((LPVOID)(filesystem_stdio + 0x9AB70), &fs_sprintf_hook, reinterpret_cast<LPVOID*>(NULL));
 	}
 	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"client.dll") == 0) {
 		InitClient();

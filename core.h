@@ -75,4 +75,5 @@ __forceinline bool IsNoConsole() {
 }
 
 #define ENGINE_DLL (IsDedicatedServer() ? "engine_ds.dll" : "engine.dll")
+#define ENGINE_DLL_BASE (IsDedicatedServer() ? G_engine_ds : G_engine)
 #define VSCRIPT_DLL (IsDedicatedServer() ? "dedicated.dll" : "launcher.dll")

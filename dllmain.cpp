@@ -76,7 +76,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 		if (!IsDedicatedServer() && !IsNoConsole())
 		{
 			AllocConsole();
-			SetConsoleTitleA("R1Delta");
+			SetConsoleTitleW(L"R1Delta");
 			freopen("CONOUT$", "wt", stdout);
 		}
 
@@ -92,13 +92,22 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 
 		initialisePatchInstructions();
 
+#if 0
+		extern void InitDedicatedVtables();
+		InitDedicatedVtables();
+#endif
+
 		if(!IsNoConsole())
 			InitLoggingHooks();
 		StartFileCacheThread();
+
+		// Chromium
 		LdrRegisterDllNotificationFunc reg_fn =
 			reinterpret_cast<LdrRegisterDllNotificationFunc>(::GetProcAddress(
 				::GetModuleHandleW(L"ntdll.dll"), "LdrRegisterDllNotification"));
 		reg_fn(0, &LoaderNotificationCallback, 0, &dll_notification_cookie_);
+		
+		G_launcher = (uintptr_t)GetModuleHandleW(L"launcher.dll");
 		LDR_DLL_LOADED_NOTIFICATION_DATA* ndata = GetModuleNotificationData(L"launcher.dll");
 		doBinaryPatchForFile(*ndata);
 		FreeModuleNotificationData(ndata);
