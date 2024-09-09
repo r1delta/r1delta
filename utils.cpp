@@ -34,12 +34,36 @@
 
 #include "utils.h"
 
+constexpr size_t EXEC_MEM_SIZE = 32 * 1152;
+static_assert(EXEC_MEM_SIZE % 4096 == 0, "EXEC_MEM_SIZE is not page granular");
+void* execMem = 0;
+uint8_t* execCursor;
+
+void UpdateRWXFunction(void* rwxfunc, void* real) {
+	if (rwxfunc < execMem || rwxfunc >= execCursor)
+		return;
+
+	*(void**)((uint8_t*)rwxfunc + 2) = real;
+}
+
 uintptr_t CreateFunction(void* func, void* real) {
-	// allocate executable memory.
-	void* execMem = VirtualAlloc(NULL, 32, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+	if (!execMem) {
+		// allocate executable memory.
+		// NOTE(mrsteyk): this only allocates in page granularity.
+		execMem = VirtualAlloc(NULL, EXEC_MEM_SIZE, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+		execCursor = (uint8_t*)execMem;
+	}
 	if (!execMem) return 0;
 
-	uint8_t* bytes = static_cast<uint8_t*>(execMem);
+	uintptr_t ret = (uintptr_t)InterlockedAdd64((volatile LONG64*)&execCursor, 32);
+	uint8_t* bytes = (uint8_t*)ret;
+
+	if (bytes >= ((uint8_t*)execMem + EXEC_MEM_SIZE)) {
+#if defined(_DEBUG)
+		__debugbreak();
+#endif
+		return 0;
+	}
 
 	// mov rcx, real
 	*bytes++ = 0x48;
@@ -57,5 +81,5 @@ uintptr_t CreateFunction(void* func, void* real) {
 	bytes += sizeof(uintptr_t);
 
 	// return the function pointer.
-	return reinterpret_cast<uintptr_t>(execMem);
+	return ret;
 }

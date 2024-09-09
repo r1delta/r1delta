@@ -336,13 +336,15 @@ char __fastcall CScriptVM__GetTFOFlag(__int64 a1)
 // Prototype for the function to update the vtable pointer of a CScriptVM object.
 void SetNewVTable(void* thisptr, uintptr_t* newVTable);
 
+constexpr size_t SQUIRREL_VM_VMT_SIZE = 122;
+
 // Implementation for creating a new vtable and inserting functions.
 void* CreateNewVTable(void* thisptr) {
 	// Original vtable can be obtained by dereferencing the this pointer.
 	uintptr_t* originalVTable = *(uintptr_t**)thisptr;
 
 	// Allocate memory for the new vtable with 122 entries (original 120 + 2 new).
-	uintptr_t* newVTable = new uintptr_t[122];
+	uintptr_t* newVTable = new uintptr_t[SQUIRREL_VM_VMT_SIZE];
 
 	// Copy the original vtable entries into the new vtable.
 	for (int i = 0; i < 120; ++i) {
@@ -364,6 +366,7 @@ void* CreateNewVTable(void* thisptr) {
 }
 
 
+void* lastvmptr = 0;
 void* fakevmptr;
 void* realvmptr = 0;
 typedef void* (*CScriptManager__CreateNewVMType)(__int64 a1, int a2, unsigned int a3);
@@ -409,11 +412,17 @@ void* CScriptManager__CreateNewVM(__int64 a1, int a2, unsigned int a3) {
 
 	// Original functionality for server VM
 	if (context == SCRIPT_CONTEXT_SERVER) {
-		fakevmptr = 0;
-		realvmptr = 0;
-
 		realvmptr = vmPtr;
-		fakevmptr = CreateNewVTable(vmPtr);
+		if (!lastvmptr) {
+			fakevmptr = CreateNewVTable(vmPtr);
+			lastvmptr = vmPtr;
+		}
+		else if(vmPtr != lastvmptr) {
+			lastvmptr = vmPtr;
+			for (size_t i = 0; i < SQUIRREL_VM_VMT_SIZE; i++) {
+				UpdateRWXFunction(((void**)fakevmptr)[i], vmPtr);
+			}
+		}
 
 		// Return the fake VM pointer for server context
 		return &fakevmptr;
@@ -668,9 +677,7 @@ void __fastcall CScriptManager__DestroyVM(void* a1, void* vmptr)
 	//}
 	if (*((void**)vmptr) == fakevmptr) {
 		vmptr = realvmptr;
-		free(fakevmptr);
 		realvmptr = 0;
-		fakevmptr = 0;
 		hasRegisteredServerFuncs = true;
 	}
 	return CScriptManager__DestroyVMOriginal(a1, vmptr);
