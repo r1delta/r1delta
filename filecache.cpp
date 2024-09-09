@@ -5,7 +5,7 @@ bool FileCache::FileExists(const std::string& filePath) {
     std::size_t hashedPath = HashFilePath(filePath);
     std::unique_lock<std::mutex> lock(cacheMutex);
     cacheCondition.wait(lock, [this]() { return initialized.load(); });
-    return cache.count(hashedPath) > 0;
+    return cache.contains(hashedPath);
 }
 
 bool FileCache::TryReplaceFile(const char* pszFilePath) {
@@ -82,7 +82,8 @@ void FileCache::UpdateCache() {
         cacheCondition.notify_all();
 
         std::unique_lock<std::mutex> lock(cacheMutex);
-        cacheCondition.wait_for(lock, std::chrono::milliseconds(5000), [this]() { return manualRescanRequested.load(); });
+        // NOTE(mrsteyk): we wait forever, and even then every single write to atomic is paired with cv.notify_all, so why is atomic checked?
+        cacheCondition.wait(lock);
 
         if (manualRescanRequested.load()) {
             manualRescanRequested.store(false);

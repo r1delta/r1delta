@@ -62,10 +62,12 @@ __int64 r1dc_decompress(void* p, void* pIn_buf, size_t* pIn_buf_size, void* pOut
 }
 
 void InitCompressionHooks() {
+#if R1DC_USE_ZS1
 	auto fs = G_filesystem_stdio;
 	MH_CreateHook(LPVOID(fs + 0x75380), r1dc_init, &lzham_decompressor_init);
 	MH_CreateHook(LPVOID(fs + 0x75390), r1dc_reinit, &lzham_decompressor_reinit);
 	MH_CreateHook(LPVOID(fs + 0x753A0), r1dc_deinit, &lzham_decompressor_deinit);
 	MH_CreateHook(LPVOID(fs + 0x753B0), r1dc_decompress, &lzham_decompressor_decompress);
 	MH_EnableHook(MH_ALL_HOOKS);
+#endif
 }
