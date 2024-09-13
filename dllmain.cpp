@@ -72,6 +72,16 @@ int G_is_dedi;
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 {
+	// make sure we're game and not tools
+	char path[MAX_PATH];
+	if (GetModuleFileNameA(NULL, path, MAX_PATH)) {
+		char* exeName = strrchr(path, '\\') ? strrchr(path, '\\') + 1 : path;
+		if (_stricmp(exeName, "r1ds.exe") != 0 && 
+			_stricmp(exeName, "titanfall.exe") != 0 && 
+			_stricmp(exeName, "r1delta.exe") != 0) { // TODO
+			return TRUE; 
+		}
+	}
 	switch (fdwReason)
 	{
 	case DLL_PROCESS_ATTACH: {
