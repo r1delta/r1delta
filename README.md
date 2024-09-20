@@ -113,7 +113,7 @@ R1Delta incorporates code from several open-source projects. We are grateful to 
 - **[TsudaKageyu/minhook](https://github.com/TsudaKageyu/minhook)**: BSD 2-Clause License
 - **[Mauler125/r5sdk](https://github.com/Mauler125/r5sdk)**: Source 1 SDK License
 - **[IcePixelx/silver-bun](https://github.com/IcePixelx/silver-bun)**: TODO
-
+- **[snake-biscuits/bsp_regen](https://github.com/snake-biscuits/bsp_regen)**: GPLv3 License
 
 R1Delta itself is licensed under the GNU General Public License v3.0 (GPLv3). For full license texts and additional legal notices, please refer to the LICENSE file and thirdpartylegalnotices.txt in this repository.
 
