@@ -1,0 +1,130 @@
+The R1Delta project utilizes third-party code for various functions. In accordance with the respective licenses of these open-source projects, we provide the following legal notices and attributions:
+
+Source SDK:
+R1Delta uses portions of the Source SDK. The full license text for the Source SDK is as follows:
+               SOURCE 1 SDK LICENSE
+
+Source SDK Copyright(c) Valve Corp.  
+
+THIS DOCUMENT DESCRIBES A CONTRACT BETWEEN YOU AND VALVE 
+CORPORATION ("Valve").  PLEASE READ IT BEFORE DOWNLOADING OR USING 
+THE SOURCE ENGINE SDK ("SDK"). BY DOWNLOADING AND/OR USING THE 
+SOURCE ENGINE SDK YOU ACCEPT THIS LICENSE. IF YOU DO NOT AGREE TO 
+THE TERMS OF THIS LICENSE PLEASE DON’T DOWNLOAD OR USE THE SDK.  
+
+  You may, free of charge, download and use the SDK to develop a modified Valve game 
+running on the Source engine.  You may distribute your modified Valve game in source and 
+object code form, but only for free. Terms of use for Valve games are found in the Steam 
+Subscriber Agreement located here: http://store.steampowered.com/subscriber_agreement/ 
+
+  You may copy, modify, and distribute the SDK and any modifications you make to the 
+SDK in source and object code form, but only for free.  Any distribution of this SDK must 
+include this LICENSE file and thirdpartylegalnotices.txt.  
+ 
+  Any distribution of the SDK or a substantial portion of the SDK must include the above 
+copyright notice and the following: 
+
+    DISCLAIMER OF WARRANTIES.  THE SOURCE SDK AND ANY 
+    OTHER MATERIAL DOWNLOADED BY LICENSEE IS PROVIDED 
+    "AS IS".  VALVE AND ITS SUPPLIERS DISCLAIM ALL 
+    WARRANTIES WITH RESPECT TO THE SDK, EITHER EXPRESS 
+    OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, IMPLIED 
+    WARRANTIES OF MERCHANTABILITY, NON-INFRINGEMENT, 
+    TITLE AND FITNESS FOR A PARTICULAR PURPOSE.  
+
+    LIMITATION OF LIABILITY.  IN NO EVENT SHALL VALVE OR 
+    ITS SUPPLIERS BE LIABLE FOR ANY SPECIAL, INCIDENTAL, 
+    INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER 
+    (INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF 
+    BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF 
+    BUSINESS INFORMATION, OR ANY OTHER PECUNIARY LOSS) 
+    ARISING OUT OF THE USE OF OR INABILITY TO USE THE 
+    ENGINE AND/OR THE SDK, EVEN IF VALVE HAS BEEN 
+    ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.  
+ 
+       
+If you would like to use the SDK for a commercial purpose, please contact Valve at 
+sourceengine@valvesoftware.com.
+
+MinHook:
+﻿MinHook - The Minimalistic API Hooking Library for x64/x86
+Copyright (C) 2009-2017 Tsuda Kageyu.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+
+ 1. Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+ 2. Redistributions in binary form must reproduce the above copyright
+    notice, this list of conditions and the following disclaimer in the
+    documentation and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER
+OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+================================================================================
+Portions of this software are Copyright (c) 2008-2009, Vyacheslav Patkov.
+================================================================================
+Hacker Disassembler Engine 32 C
+Copyright (c) 2008-2009, Vyacheslav Patkov.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+
+ 1. Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+ 2. Redistributions in binary form must reproduce the above copyright
+    notice, this list of conditions and the following disclaimer in the
+    documentation and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE REGENTS OR
+CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+-------------------------------------------------------------------------------
+Hacker Disassembler Engine 64 C
+Copyright (c) 2008-2009, Vyacheslav Patkov.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+
+ 1. Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+ 2. Redistributions in binary form must reproduce the above copyright
+    notice, this list of conditions and the following disclaimer in the
+    documentation and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE REGENTS OR
+CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.

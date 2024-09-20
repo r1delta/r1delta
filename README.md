@@ -109,6 +109,8 @@ R1Delta incorporates code from several open-source projects. We are grateful to 
 - **[R2Northstar/NorthstarLauncher](https://github.com/R2Northstar/NorthstarLauncher)**: MIT License
 - **[ValveSoftware/source-sdk-2013](https://github.com/ValveSoftware/source-sdk-2013)**: Source 1 SDK License
 - **[p0358/black_market_edition](https://github.com/p0358/black_market_edition)**: LGPL v2.1 License
+- **[facebook/zstd](https://github.com/facebook/zstd)**: Dual-licensed under BSD and GPLv2
+- **[TsudaKageyu/minhook](https://github.com/TsudaKageyu/minhook)**: BSD 2-Clause License
 
 R1Delta itself is licensed under the GNU General Public License v3.0 (GPLv3). For full license texts and additional legal notices, please refer to the LICENSE file and thirdpartylegalnotices.txt in this repository.
 
