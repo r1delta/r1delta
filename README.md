@@ -99,5 +99,18 @@ If you aren't using Origin, you'll also want to download the `Titanfall.exe` pro
 - [@dogecore](https://github.com/HappyDOGE)
 
 (list to be expanded in the future as we speak)
+
+## Third-Party Code Attribution
+
+R1Delta incorporates code from several open-source projects. We are grateful to the developers of these projects for their contributions to the open-source community.
+
+- **[R1Spectre/Spectre](https://github.com/R1Spectre/Spectre)**: GPLv3 License
+- **[ValveSoftware/GameNetworkingSockets](https://github.com/ValveSoftware/GameNetworkingSockets)**: BSD 3-Clause License
+- **[R2Northstar/NorthstarLauncher](https://github.com/R2Northstar/NorthstarLauncher)**: MIT License
+- **[ValveSoftware/source-sdk-2013](https://github.com/ValveSoftware/source-sdk-2013)**: Source 1 SDK License
+- **[p0358/black_market_edition](https://github.com/p0358/black_market_edition)**: LGPL v2.1 License
+
+R1Delta itself is licensed under the GNU General Public License v3.0 (GPLv3). For full license texts and additional legal notices, please refer to the LICENSE file and thirdpartylegalnotices.txt in this repository.
+
 # Bear
 ![bear](https://github.com/r1delta/r1delta/assets/37985788/41548f20-0878-4e1e-8538-e9be808fc363)
