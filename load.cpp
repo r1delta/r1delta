@@ -1001,7 +1001,7 @@ void __stdcall LoaderNotificationCallback(
 		
 		
 		RegisterConCommand("toggleconsole", ToggleConsoleCommand, "Toggles the console", (1 << 17));
-
+		RegisterConCommand("updatescriptdata", updatescriptdata_cmd, "Dumps the script data in the AI node graph to disk", FCVAR_GAMEDLL);
 
 		RegisterConCommand("script", script_cmd, "Execute Squirrel code in server context", FCVAR_GAMEDLL|FCVAR_CHEAT);
 		if (!IsDedicatedServer()) {

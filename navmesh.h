@@ -85,7 +85,7 @@ struct CAI_Node
 	char unk7[16]; // padding until next bit
 	short unk8; // should match up to unk5 on disk
 	char unk9[8]; // padding until next bit
-	char unk10[8]; // should match up to unk6 on disk
+	char scriptdata[8]; // should match up to unk6 on disk
 };
 #pragma pack(pop)
 
@@ -192,3 +192,4 @@ __int64 sub_36C150(__int64 a1, int a2, int a3);
 typedef void (*unkallocfunctype)(__int64 a1, int a2, char a3);
 extern unkallocfunctype unkallocfuncoriginal;
 void unkallocfunc(__int64 a1, int a2, char a3);
+void updatescriptdata_cmd(const CCommand& args);

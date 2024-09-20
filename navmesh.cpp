@@ -60,6 +60,7 @@
 #include <io.h>
 #include <streambuf>
 #include "navmesh.h"
+#include "logging.h"
 #pragma intrinsic(_ReturnAddress)
 CAI_NetworkManager__DelayedInitType CAI_NetworkManager__DelayedInitOriginal;
 CAI_NetworkManager__FixupHintsType CAI_NetworkManager__FixupHintsOriginal;
@@ -69,7 +70,6 @@ UnkLinkStruct1*** pppUnkStruct1s;
 int* pUnkStruct0Count;
 UnkNodeStruct0*** pppUnkNodeStruct0s;
 
-CGlobalVarsServer2015** g_pGlobals;
 bool __fastcall sub_35FBB0(CAI_NodeLink* a1, char a2)
 {
 	return (a1->unk1 & (unsigned __int8)(1 << a2)) != 0;
@@ -305,7 +305,7 @@ int sub_390AE0(CAI_Network* network)
 void DumpAINInfo(CAI_Network* aiNetwork)
 {
 	std::filesystem::path writePath("r1delta/maps/graphs");
-	writePath /= (char*)(*g_pGlobals)->mapname_pszValue;
+	writePath /= (char*)(pGlobalVarsServer)->mapname_pszValue;
 	writePath += ".ain";
 
 	// dump from memory
@@ -320,7 +320,7 @@ void DumpAINInfo(CAI_Network* aiNetwork)
 	//spdlog::info("writing ainet version: {}", AINET_VERSION_NUMBER);
 	writeStream.write((char*)&AINET_VERSION_NUMBER, sizeof(int));
 
-	int mapVersion = (*g_pGlobals)->mapversion;
+	int mapVersion = (pGlobalVarsServer)->mapversion;
 	//spdlog::info("writing map version: {}", mapVersion);
 	writeStream.write((char*)&mapVersion, sizeof(int));
 	//spdlog::info("writing placeholder crc: {}", PLACEHOLDER_CRC);
@@ -354,7 +354,7 @@ void DumpAINInfo(CAI_Network* aiNetwork)
 		diskNode.unk4 = 1;
 		diskNode.unk5 =
 			-1; // aiNetwork->nodes[i]->unk8; // this field is wrong, however, it's always -1 in vanilla navmeshes anyway, so no biggie
-		memcpy(diskNode.unk6, aiNetwork->nodes[i]->unk10, sizeof(diskNode.unk6));
+		memcpy(diskNode.unk6, aiNetwork->nodes[i]->scriptdata, sizeof(diskNode.unk6));
 
 		//spdlog::info("writing node {} from {} to {:x}", aiNetwork->nodes[i]->index, (void*)aiNetwork->nodes[i], writeStream.tellp());
 		writeStream.write((char*)&diskNode, sizeof(CAI_NodeDisk));
@@ -623,17 +623,124 @@ void __fastcall CAI_NetworkManager__DelayedInit(__int64 a1) {
 
 	}
 	network = reinterpret_cast<CAI_Network * >(((_QWORD*)(a1))[200]);
-	g_pGlobals = (CGlobalVarsServer2015**)(server + 0xC310C0);
 	std::filesystem::path writePath("r1delta/maps/graphs");
-	writePath /= (char*)(*g_pGlobals)->mapname_pszValue;
+	writePath /= (char*)(pGlobalVarsServer)->mapname_pszValue;
 	writePath += ".ain";
-	if (std::filesystem::exists(writePath)) 
-		return CAI_NetworkManager__DelayedInitOriginal(a1);
+	//if (std::filesystem::exists(writePath)) 
+		//return CAI_NetworkManager__DelayedInitOriginal(a1);
+	
+	//DumpAINInfo(network);
+	//uintptr_t engine = G_engine;
+	//typedef void (*Cbuf_AddTextType)(int a1, const char* a2, unsigned int a3);
+	//Cbuf_AddTextType Cbuf_AddText = (Cbuf_AddTextType)(engine + 0x102D50);
+	//Cbuf_AddText(0, "reload\n", 0);
+	CAI_NetworkManager__DelayedInitOriginal(a1);
 	CAI_NetworkBuilder__Rebuild(a1, network);
-	DumpAINInfo(network);
-	uintptr_t engine = G_engine;
-	typedef void (*Cbuf_AddTextType)(int a1, const char* a2, unsigned int a3);
-	Cbuf_AddTextType Cbuf_AddText = (Cbuf_AddTextType)(engine + 0x102D50);
+}
+bool ReadIntAtPosition(std::fstream& file, std::streampos pos, int& value)
+{
+	file.seekg(pos);
+	if (!file.read(reinterpret_cast<char*>(&value), sizeof(int)))
+	{
+		return false;
+	}
+	return true;
+}
+
+// Function to write scriptdata to a specific position in the file
+bool WriteScriptDataAtPosition(std::fstream& file, std::streampos pos, const char* data, size_t size)
+{
+	file.seekp(pos);
+	if (!file.write(data, size))
+	{
+		return false;
+	}
+	return true;
+}
+
+// The console command implementation
+void updatescriptdata_cmd(const CCommand& args)
+{
+	// Validate global pointers
+	if (!pGlobalVarsServer)
+	{
+		Warning("Error: Global variables not initialized.\n");
+		return;
+	}
+	CAI_Network* pAiNetwork = *reinterpret_cast<CAI_Network**>(G_server + 0xC31888);
+	if (!pAiNetwork)
+	{
+		Warning("Error: AI Network not initialized.\n");
+		return;
+	}
+	if (!pAiNetwork->nodes)
+	{
+		Warning("Error: AI Nodes not initialized.\n");
+		return;
+	}
+
+	// Construct the current AIN file path
+	std::filesystem::path currentAINPath("r1delta/maps/graphs");
+	const char* mapName = static_cast<const char*>((pGlobalVarsServer)->mapname_pszValue);
+	if (!mapName)
+	{
+		Warning("Error: Map name is null.\n");
+		return;
+	}
+	currentAINPath /= mapName;
+	currentAINPath += ".ain";
+
+	// Open the AIN file in binary read/write mode
+	std::fstream ainFile(currentAINPath, std::ios::in | std::ios::out | std::ios::binary);
+	if (!ainFile.is_open())
+	{
+		Warning("Error: Failed to open AIN file at %s\n", currentAINPath.string().c_str());
+		return;
+	}
+
+	// Read nodecount from the file at offset 0xC
+	int fileNodeCount = 0;
+	if (!ReadIntAtPosition(ainFile, 0xC, fileNodeCount))
+	{
+		Warning("Error: Failed to read node count from AIN file.\n");
+		ainFile.close();
+		return;
+	}
+
+	// Compare with in-memory node count
+	if (fileNodeCount != pAiNetwork->nodecount)
+	{
+		Warning("Warning: Node count in file (%d) does not match in-memory node count (%d). Operation cancelled.\n",
+			fileNodeCount, pAiNetwork->nodecount);
+		ainFile.close();
+		return;
+	}
+
+	// Iterate through each node and write scriptdata
+	for (int nodeIndex = 0; nodeIndex < pAiNetwork->nodecount; ++nodeIndex)
+	{
+		CAI_Node* node = pAiNetwork->nodes[nodeIndex];
+		if (!node)
+		{
+			Warning("Warning: Node at index %d is null. Skipping.\n", nodeIndex);
+			continue;
+		}
+
+		// Calculate the position to write scriptdata
+		// scriptdata is at (0x4C + 0x44 * nodeIndex)
+		std::streampos scriptDataPos = 0x4C + static_cast<std::streampos>(0x44) * nodeIndex;
+
+		// Write the scriptdata to the file
+		if (!WriteScriptDataAtPosition(ainFile, scriptDataPos, node->scriptdata, sizeof(node->scriptdata)))
+		{
+			Warning("Error: Failed to write scriptdata for node %d.\n", nodeIndex);
+			// Depending on requirements, you might want to continue or abort
+			// Here, we'll continue
+			continue;
+		}
+	}
+
+	ainFile.close();
+	Msg("Successfully updated scriptdata for all AI nodes in %s, reloading map\n", currentAINPath.string().c_str());
 	Cbuf_AddText(0, "reload\n", 0);
-	return CAI_NetworkManager__DelayedInitOriginal(a1);
 }
