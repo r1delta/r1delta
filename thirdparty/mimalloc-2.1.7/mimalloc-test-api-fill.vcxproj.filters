@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="C:\Users\r3muxd\r1delta\thirdparty\mimalloc-2.1.7\test\test-api-fill.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\r3muxd\r1delta\thirdparty\mimalloc-2.1.7\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{12D63084-AAD0-3BE7-B3B5-229A236AF814}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

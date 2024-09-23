@@ -1,0 +1,10 @@
+C:/Users/r3muxd/r1delta/thirdparty/mimalloc-2.1.7/CMakeFiles/mimalloc.dir
+C:/Users/r3muxd/r1delta/thirdparty/mimalloc-2.1.7/CMakeFiles/mimalloc-static.dir
+C:/Users/r3muxd/r1delta/thirdparty/mimalloc-2.1.7/CMakeFiles/mimalloc-obj.dir
+C:/Users/r3muxd/r1delta/thirdparty/mimalloc-2.1.7/CMakeFiles/mimalloc-test-api.dir
+C:/Users/r3muxd/r1delta/thirdparty/mimalloc-2.1.7/CMakeFiles/mimalloc-test-api-fill.dir
+C:/Users/r3muxd/r1delta/thirdparty/mimalloc-2.1.7/CMakeFiles/mimalloc-test-stress.dir
+C:/Users/r3muxd/r1delta/thirdparty/mimalloc-2.1.7/CMakeFiles/RUN_TESTS.dir
+C:/Users/r3muxd/r1delta/thirdparty/mimalloc-2.1.7/CMakeFiles/INSTALL.dir
+C:/Users/r3muxd/r1delta/thirdparty/mimalloc-2.1.7/CMakeFiles/ALL_BUILD.dir
+C:/Users/r3muxd/r1delta/thirdparty/mimalloc-2.1.7/CMakeFiles/ZERO_CHECK.dir

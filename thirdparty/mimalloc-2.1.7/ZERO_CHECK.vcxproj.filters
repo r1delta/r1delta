@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\r3muxd\r1delta\thirdparty\mimalloc-2.1.7\CMakeFiles\be46bf5976c9277cf93a49f02bb7f6ca\generate.stamp.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{460F84CB-73E1-3463-A3E5-5B05C096FF98}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

@@ -45,24 +45,7 @@
 IMemAlloc* g_pMemAllocSingleton;
 extern "C" __declspec(dllexport) IMemAlloc * CreateGlobalMemAlloc() {
 	if (!g_pMemAllocSingleton) {
-		// Load the tier0_r1.dll library
-		HMODULE hModule = LoadLibraryA("tier0_r1.dll");
-		if (hModule != nullptr) {
-			// Get the address of CreateGlobalMemAlloc in the loaded library
-			PFN_CreateGlobalMemAlloc pfnCreateGlobalMemAlloc = (PFN_CreateGlobalMemAlloc)GetProcAddress(hModule, "CreateGlobalMemAlloc");
-			if (pfnCreateGlobalMemAlloc != nullptr) {
-				// Call the function from the DLL and set the singleton
-				g_pMemAllocSingleton = pfnCreateGlobalMemAlloc();
-			}
-			else {
-				// Handle the error if the function is not found
-				// You might want to log an error or perform other error handling here
-			}
-		}
-		else {
-			// Handle the error if the DLL is not loaded
-			// You might want to log an error or perform other error handling here
-		}
+        g_pMemAllocSingleton = new CMimMemAlloc();
 	}
 	return g_pMemAllocSingleton;
 }
