@@ -289,3 +289,9 @@ public:
 	uintptr_t sub_180024410;
 	uintptr_t sub_180024430;
 };
+extern void (*oReconcileAddonListFile)(IFileSystem* pFileSystem, const char* pModPath);
+extern const char* (*oCBaseFileSystem__FindFirst)(CBaseFileSystem* thisptr, __int64 a2, __int64 a3);
+extern const char* (*oCBaseFileSystem__FindNext)(CBaseFileSystem* thisptr, unsigned __int16 a2); 
+const char* CBaseFileSystem__FindFirst(CBaseFileSystem* thisptr, __int64 a2, __int64 a3);
+const char* CBaseFileSystem__FindNext(CBaseFileSystem* thisptr, unsigned __int16 a2);
+void ReconcileAddonListFile(IFileSystem* pFileSystem, const char* pModPath);

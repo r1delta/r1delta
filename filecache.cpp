@@ -68,7 +68,7 @@ void FileCache::UpdateCache() {
     while (true) {
         std::unordered_set<std::size_t> newCache;
         std::unordered_set<std::string> newAddonsFolderCache;
-
+        std::filesystem::create_directories("r1delta/addons");
         ScanDirectory("r1delta", newCache);
         ScanDirectory("r1delta/addons", newCache, &newAddonsFolderCache);
 

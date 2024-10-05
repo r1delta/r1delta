@@ -201,6 +201,75 @@ int64_t CFileSystem_Stdio__DoTFOFilesystemOp(__int64 a1, char* a2, rsize_t a3)
 {
 	return false;
 }
+//////////////////////////////////////////////////////////
+// The following patch addresses a use-after-free (UAF)
+// vulnerability in the ReconcileAddonListFile function, 
+// which interacts with the filesystem to build a list of
+// addon directories.
+//
+// In the original implementation, pFileName is retrieved 
+// using pFileSystem->FindFirst() and pFileSystem->FindNext(), 
+// which return a pointer to memory that gets overwritten 
+// by subsequent calls to FindFirst() as part of the internal 
+// file system iteration mechanism. This memory is then used 
+// to store directory names in a CUtlVector<CUtlString>, 
+// even though the memory it points to has been freed.
+//
+// The behavior persists due to luck under the default Valve 
+// allocator, which doesn’t always immediately overwrite freed 
+// memory. The issue is exposed with the new memory allocator, 
+// which overwrites freed memory with 0xDF in debug builds, 
+// triggering crashes when the stale pFileName pointer is accessed.
+//
+// To fix this, we hook into CBaseFileSystem::Find{First,Next}Helper(),
+// duplicating the returned pFileName when inside ReconcileAddonListFile.
+// We store the duplicated strings in a vector for later cleanup,
+// ensuring the directory names stored in CUtlVector<CUtlString> remain
+// valid even after the internal file system buffer is freed.
+//
+// The duplicated strings are explicitly freed at the end 
+// of ReconcileAddonListFile to avoid memory leaks.
+//
+//////////////////////////////////////////////////////////
+void (*oReconcileAddonListFile)(IFileSystem* pFileSystem, const char* pModPath);
+const char* (*oCBaseFileSystem__FindFirst)(CBaseFileSystem* thisptr, __int64 a2, __int64 a3);
+const char* (*oCBaseFileSystem__FindNext)(CBaseFileSystem* thisptr, unsigned __int16 a2);
+bool g_bIsInReconcileAddonListFile;
+std::vector<const char*> g_pFileSystemStringsToCleanup = { 0 };
+const char* CBaseFileSystem__FindFirst(CBaseFileSystem* thisptr, __int64 a2, __int64 a3)
+{
+	const char* oret = oCBaseFileSystem__FindFirst(thisptr, a2, a3);
+	if (g_bIsInReconcileAddonListFile && oret) {
+		const char* trueret = _strdup(oret);
+		g_pFileSystemStringsToCleanup.push_back(trueret);
+		return trueret;
+	}
+	return oret;
+}
+const char* CBaseFileSystem__FindNext(CBaseFileSystem* thisptr, unsigned __int16 a2)
+{
+	const char* oret = oCBaseFileSystem__FindNext(thisptr, a2);
+	if (g_bIsInReconcileAddonListFile && oret) {
+		const char* trueret = _strdup(oret);
+		g_pFileSystemStringsToCleanup.push_back(trueret);
+		return trueret;
+	}
+	return oret;
+}
+
+void ReconcileAddonListFile(IFileSystem* pFileSystem, const char* pModPath)
+{
+	g_bIsInReconcileAddonListFile = true;
+
+	oReconcileAddonListFile(pFileSystem, pModPath);
+
+	g_bIsInReconcileAddonListFile = false;
+
+	for (const char* ptr : g_pFileSystemStringsToCleanup)
+		free((void*)ptr);
+
+	g_pFileSystemStringsToCleanup.clear();
+}
 
 CVFileSystem::CVFileSystem(uintptr_t* r1vtable)
 {

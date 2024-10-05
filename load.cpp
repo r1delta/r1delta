@@ -71,6 +71,7 @@
 #include "compression.h"
 #include "cvar.h"
 #include "persistentdata.h"
+#include "weaponxdebug.h"
 #pragma intrinsic(_ReturnAddress)
 
 void* dll_notification_cookie_;
@@ -938,7 +939,8 @@ void __stdcall LoaderNotificationCallback(
 		}
 
 		//MH_CreateHook((LPVOID)(server_base + 0x364140), &sub_364140, reinterpret_cast<LPVOID*>(NULL));
-		
+		MH_CreateHook((LPVOID)(server_base + 0xED7A0), &WeaponXRegisterServer, reinterpret_cast<LPVOID*>(&oWeaponXRegisterServer));
+
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x257E0), &sub_1800257E0, reinterpret_cast<LPVOID*>(&sub_1800257E0Original));
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0xE77F0), &IVP_Environment__set_delta_PSI_time, reinterpret_cast<LPVOID*>(&IVP_Environment__set_delta_PSI_timeOriginal));
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x31610), &sub_180031610, reinterpret_cast<LPVOID*>(&sub_180031610Original));
@@ -1015,6 +1017,11 @@ void __stdcall LoaderNotificationCallback(
 		//MH_CreateHook((LPVOID)(filesystem_stdio + 0x4BC0), &CBaseFileSystem__CSearchPath__SetPath, reinterpret_cast<LPVOID*>(&CBaseFileSystem__CSearchPath__SetPathOriginal));
 		//MH_CreateHook((LPVOID)(filesystem_stdio + 0x13D60), &CZipPackFile__Prepare, reinterpret_cast<LPVOID*>(&CZipPackFile__PrepareOriginal));
 		MH_CreateHook((LPVOID)(filesystem_stdio + 0x9AB70), &fs_sprintf_hook, reinterpret_cast<LPVOID*>(NULL));
+		MH_CreateHook((LPVOID)(filesystem_stdio + 0x02C30), &CBaseFileSystem__FindFirst, reinterpret_cast<LPVOID*>(&oCBaseFileSystem__FindFirst));
+		MH_CreateHook((LPVOID)(filesystem_stdio + 0x1C4A0), &CBaseFileSystem__FindNext, reinterpret_cast<LPVOID*>(&oCBaseFileSystem__FindNext));
+		MH_CreateHook((LPVOID)(engine_base_spec + 0x1272B0), &ReconcileAddonListFile, reinterpret_cast<LPVOID*>(&oReconcileAddonListFile));
+		MH_EnableHook(MH_ALL_HOOKS);
+
 	}
 	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"client.dll") == 0) {
 		G_client = (uintptr_t)notification_data->Loaded.DllBase;

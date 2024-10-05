@@ -4,7 +4,7 @@
 #include "client.h"
 #include "persistentdata.h"
 #include "load.h"
-
+#include "weaponxdebug.h"
 typedef void (*sub_18027F2C0Type)(__int64 a1, const char* a2, void* a3);
 sub_18027F2C0Type sub_18027F2C0Original;
 
@@ -28,9 +28,9 @@ void sub_18027F2C0(__int64 a1, const char* a2, void* a3)
 {
 	if (!strcmp_static(a2, "SayText"))
 	{
-		// raise fov to how bme does it
-		auto var = (ConVarR1*)(OriginalCCVar_FindVar2(cvarinterface, "cl_fovScale"));
-		var->m_fMaxVal = 2.5f;
+		//// raise fov to how bme does it
+		//auto var = (ConVarR1*)(OriginalCCVar_FindVar2(cvarinterface, "cl_fovScale"));
+		//var->m_fMaxVal = 2.5f;
 
 		sub_18027F2C0Original(a1, "TextMsg", TextMsg);
 	}
@@ -67,6 +67,8 @@ void InitClient()
 	MH_CreateHook((LPVOID)(engine + 0x4801B0), &ConVar_PrintDescription, reinterpret_cast<LPVOID*>(&ConVar_PrintDescriptionOriginal));
 	MH_CreateHook((LPVOID)(engine + 0x47FB00), &CConVar__GetSplitScreenPlayerSlot, NULL);
 	MH_CreateHook((LPVOID)(engine + 0x4722E0), &sub_1804722E0, 0);
+	MH_CreateHook((LPVOID)(client + 0x4A6150), &WeaponXRegisterClient, reinterpret_cast<LPVOID*>(&oWeaponXRegisterClient));
+
 	if (IsNoOrigin())
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("ws2_32.dll"), "getaddrinfo"), &hookedGetAddrInfo, reinterpret_cast<LPVOID*>(&originalGetAddrInfo));
 

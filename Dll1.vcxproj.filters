@@ -240,6 +240,9 @@
     <ClInclude Include="persistentdata.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="weaponxdebug.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">
@@ -336,6 +339,9 @@
       <Filter>3rd Party\zstd</Filter>
     </ClCompile>
     <ClCompile Include="persistentdata.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="weaponxdebug.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
