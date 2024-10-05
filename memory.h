@@ -430,10 +430,3 @@ extern FreeFn g_originalFree;
 extern ReallocFn g_originalRealloc;
 extern GetSizeFn g_originalGetSize;
 extern RegionAllocFn g_originalRegionAlloc;
-
-// Hooked function declarations
-void* HookedAlloc(void* thisptr, size_t size);
-void HookedFree(void* thisptr, void* ptr);
-void* HookedRealloc(void* thisptr, void* ptr, size_t size);
-size_t HookedGetSize(void* thisptr, void* ptr);
-void* HookedRegionAlloc(void* thisptr, int region, size_t size);

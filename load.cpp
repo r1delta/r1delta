@@ -778,79 +778,7 @@ __int64 __fastcall CBaseServer__FillServerInfo(__int64 a1, __int64 a2)
 	*(const char**)(a2 + 72) = real_gamedir;
 	return ret;
 }
-struct physics_performanceparams_t
-{
-	int maxCollisionsPerObjectPerTimestep;
-	int maxCollisionChecksPerTimestep;
-	float maxVelocity;
-	float maxAngularVelocity;
-	float lookAheadTimeObjectsVsWorld;
-	float lookAheadTimeObjectsVsObject;
-	float minFrictionMass;
-	float maxFrictionMass;
-};
-typedef __int64 (*sub_1800257E0Type)(void* a1, physics_performanceparams_t* a2);
-sub_1800257E0Type sub_1800257E0Original;
 
-__int64 __fastcall sub_1800257E0(void* a1, physics_performanceparams_t* a2)
-{
-	a2->maxCollisionsPerObjectPerTimestep = 0xa;
-	a2->maxCollisionChecksPerTimestep = 0x000004b0;
-
-	return sub_1800257E0Original(a1, a2);
-}
-typedef void (*IVP_Environment__set_delta_PSI_timeType)(void* thisptr, float psi_time);
-IVP_Environment__set_delta_PSI_timeType IVP_Environment__set_delta_PSI_timeOriginal;
-void __fastcall IVP_Environment__set_delta_PSI_time(void* thisptr, float psi_time)
-{
-	IVP_Environment__set_delta_PSI_timeOriginal(thisptr, 0.015151516f);
-}
-typedef void (*sub_180031610Type)(__int64 a1, float a2);
-sub_180031610Type sub_180031610Original;
-void __fastcall sub_180031610(__int64 a1, float a2) {
-	sub_180031610Original(a1, a2);
-}
-typedef __int64 (*CBaseEntity__VPhysicsInitNormalType)(void* a1, unsigned int a2, unsigned int a3, char a4, __int64 a5);
-__int64 __fastcall C_BaseEntity__VPhysicsInitNormal(_QWORD* a1, unsigned int a2, unsigned int a3, char a4, __int64 a5)
-{
-	auto CBaseEntity__SetMoveType = reinterpret_cast<void(*)(void* a1, __int64 a2, __int64 a3)>(G_client + 0x02F5B30);
-	CBaseEntity__SetMoveType(a1, 5, 3);
-	return 0;
-}
-CBaseEntity__VPhysicsInitNormalType CBaseEntity__VPhysicsInitNormalOriginal;
-__int64 __fastcall CBaseEntity__VPhysicsInitNormal(void* a1, unsigned int a2, unsigned int a3, char a4, __int64 a5)
-{
-	uintptr_t serverbase = G_server;
-	auto CBaseEntity__SetMoveType = reinterpret_cast<void(*)(void* a1, __int64 a2, __int64 a3)>(serverbase + 0x3B3200);
-
-	
-	if (uintptr_t(_ReturnAddress()) == (serverbase + 0xb63fd)) {
-		
-		return CBaseEntity__VPhysicsInitNormalOriginal(a1, a2, a3, a4, a5);
-	}
-	CBaseEntity__SetMoveType(a1, 5, 3);
-	//std::cout << " rva: " << std::hex << uintptr_t(_ReturnAddress()) - serverbase << std::endl;
-
-	return 0;
-}
-
-typedef void* (*CEntityFactoryDictionary__CreateType)(void* thisptr, const char* pClassName);
-CEntityFactoryDictionary__CreateType CEntityFactoryDictionary__CreateOriginal;
-void* CEntityFactoryDictionary__Create(void* thisptr, const char* pClassName) {
-	auto server = G_server;
-	uintptr_t mapload = server + 0x1432a2;
-	uintptr_t serverbase = server;
-
-	bool override2 = false;
-	if (strstr(pClassName, "prop_physics") != NULL) {// && uintptr_t(_ReturnAddress()) != mapload) {
-		if (uintptr_t(_ReturnAddress()) == mapload)
-			return 0;
-		pClassName = "prop_dynamic_override";
-		override2 = true;
-	}
-	//std::cout << "spawned: " << pClassName << " override: " << (override2 ? "true" : "false") << " retaddr: " << ((uintptr_t(_ReturnAddress()) == mapload) ? "true" : "false") << " rva: " << uintptr_t(_ReturnAddress()) - serverbase << std::endl;
-	return CEntityFactoryDictionary__CreateOriginal(thisptr, pClassName);
-}
 
 typedef void (*ConCommandConstructorType)(
 	ConCommandR1* newCommand, const char* name, void (*callback)(const CCommand&), const char* helpString, int flags, void* parent);
@@ -994,7 +922,7 @@ void __stdcall LoaderNotificationCallback(
 		//MH_CreateHook((LPVOID)(server_base + 0x36C150), &sub_36C150, reinterpret_cast<LPVOID*>(&sub_36C150Original));
 		//MH_CreateHook((LPVOID)(server_base + 0x3669C0), &CAI_NetworkManager__FixupHints, reinterpret_cast<LPVOID*>(&CAI_NetworkManager__FixupHintsOriginal));
 		//MH_CreateHook((LPVOID)(server_base + 0x31CE90), &unkallocfunc, reinterpret_cast<LPVOID*>(&unkallocfuncoriginal));
-		MH_CreateHook((LPVOID)(server_base + 0x25A8E0), &CEntityFactoryDictionary__Create, reinterpret_cast<LPVOID*>(&CEntityFactoryDictionary__CreateOriginal));
+		//MH_CreateHook((LPVOID)(server_base + 0x25A8E0), &CEntityFactoryDictionary__Create, reinterpret_cast<LPVOID*>(&CEntityFactoryDictionary__CreateOriginal));
 		//MH_CreateHook((LPVOID)(server_base + 0x363A50), &sub_363A50, reinterpret_cast<LPVOID*>(&sub_363A50Original));
 		MH_CreateHook((LPVOID)(engine_base + 0x21F9C0), &CEngineVGui__Init, reinterpret_cast<LPVOID*>(&CEngineVGui__InitOriginal));
 		MH_CreateHook((LPVOID)(engine_base + 0x21EB70), &CEngineVGui__HideGameUI, reinterpret_cast<LPVOID*>(&CEngineVGui__HideGameUIOriginal));
