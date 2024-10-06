@@ -854,6 +854,72 @@ uintptr_t G_engine;
 uintptr_t G_engine_ds;
 uintptr_t G_client;
 
+class CPluginBotManager
+{
+public:
+	virtual void* GetBotController(uint16_t* pEdict);
+	virtual __int64 CreateBot(const char* botname);
+};
+bool isCreatingBot = false;
+int botTeamIndex = 0;
+__int64 (*oCPortal_Player__ChangeTeam)(__int64 thisptr, unsigned int index);
+__int64 __fastcall CPortal_Player__ChangeTeam(__int64 thisptr, unsigned int index)
+{
+	if (isCreatingBot)
+		index = botTeamIndex;
+	return oCPortal_Player__ChangeTeam(thisptr, index);
+}
+void AddBotConCommand(const CCommand& args)
+{
+	if (args.ArgC() != 3)
+	{
+		Warning("Usage: addbot <botname> <team index>\n");
+		return;
+	}
+
+	const char* botName = args.Arg(1);
+	botTeamIndex = std::stoi(args.Arg(2));
+
+	HMODULE serverModule = GetModuleHandleA("server.dll");
+	if (!serverModule)
+	{
+		Warning("Failed to get handle for server.dll\n");
+		return;
+	}
+
+	typedef CPluginBotManager* (*CreateInterfaceFn)(const char* name, int* returnCode);
+	CreateInterfaceFn CreateInterface = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(serverModule, "CreateInterface"));
+	if (!CreateInterface)
+	{
+		Warning("Failed to get CreateInterface function from server.dll\n");
+		return;
+	}
+
+	int returnCode = 0;
+	CPluginBotManager* pBotManager = CreateInterface("BotManager001", &returnCode);
+	if (!pBotManager)
+	{
+		Warning("Failed to retrieve BotManager001 interface\n");
+		return;
+	}
+	isCreatingBot = true;
+	__int64 pBot = pBotManager->CreateBot(botName);
+	isCreatingBot = false;
+
+	if (!pBot)
+	{
+		Warning("Failed to create bot with name: %s\n", botName);
+		return;
+	}
+	typedef void (*ClientFullyConnectedFn)(__int64 thisptr, __int64 entity);
+
+	ClientFullyConnectedFn CServerGameClients_ClientFullyConnected = (ClientFullyConnectedFn)(G_server + 0x1499E0);
+
+	CServerGameClients_ClientFullyConnected(0, pBot);
+
+	Msg("Bot '%s' has been successfully created.\n", botName);
+}
+
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
 	const LDR_DLL_NOTIFICATION_DATA* notification_data,
@@ -931,6 +997,7 @@ void __stdcall LoaderNotificationCallback(
 		
 		RegisterConCommand("toggleconsole", ToggleConsoleCommand, "Toggles the console", (1 << 17));
 		RegisterConCommand("updatescriptdata", updatescriptdata_cmd, "Dumps the script data in the AI node graph to disk", FCVAR_GAMEDLL);
+		RegisterConCommand("bot", AddBotConCommand, "Adds a bot.", FCVAR_GAMEDLL | FCVAR_CHEAT);
 
 		RegisterConCommand("script", script_cmd, "Execute Squirrel code in server context", FCVAR_GAMEDLL|FCVAR_CHEAT);
 		if (!IsDedicatedServer()) {
@@ -944,7 +1011,8 @@ void __stdcall LoaderNotificationCallback(
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x257E0), &sub_1800257E0, reinterpret_cast<LPVOID*>(&sub_1800257E0Original));
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0xE77F0), &IVP_Environment__set_delta_PSI_time, reinterpret_cast<LPVOID*>(&IVP_Environment__set_delta_PSI_timeOriginal));
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x31610), &sub_180031610, reinterpret_cast<LPVOID*>(&sub_180031610Original));
-		
+		MH_CreateHook((LPVOID)(server_base + 0x554660), &CPortal_Player__ChangeTeam, reinterpret_cast<LPVOID*>(&oCPortal_Player__ChangeTeam));
+
 
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("vstdlib.dll"), "VStdLib_GetICVarFactory"), &VStdLib_GetICVarFactory, NULL);
 		if (!IsDedicatedServer()) {

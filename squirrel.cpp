@@ -489,20 +489,28 @@ void ConvertScriptVariant(ScriptVariant_t* variant, ConversionDirection directio
 // TODO(mrsteyk): performance
 __forceinline bool serverRunning(void* a1) {
 	//return isServerScriptVM || a1 == realvmptr || a1 == fakevmptr || (realvmptr && a1 == *(void**)(((uintptr_t)realvmptr + 8)));
-	if (isServerScriptVM || a1 == realvmptr || a1 == fakevmptr || (realvmptr && a1 == *(void**)(((uintptr_t)realvmptr + 8))))
-		return true; // SQVM handle check
+	//if (isServerScriptVM || a1 == realvmptr || a1 == fakevmptr || (realvmptr && a1 == *(void**)(((uintptr_t)realvmptr + 8))))
+	//	return true; // SQVM handle check
 	const HMODULE serverDllBase = (HMODULE)G_server;
-	const SIZE_T serverDllSize = 0xFB5000; // no comment
+	const ULONG_PTR serverDllEnd = (ULONG_PTR)serverDllBase + 0xFB5000; // Ideally, calculate this dynamically
+
+	// Check immediate caller first
+	void* immediateReturnAddress = _ReturnAddress();
+	if ((immediateReturnAddress >= serverDllBase) && ((ULONG_PTR)immediateReturnAddress < serverDllEnd)) {
+		return true;
+	}
+
+	// If immediate caller check fails, do full stack walk
 	void* stack[128];
-	USHORT frames = CaptureStackBackTrace(0, 128, stack, NULL);
+	USHORT frames = CaptureStackBackTrace(1, 128, stack, NULL); // Start from 1 to skip this function
 
 	for (USHORT i = 0; i < frames; i++) {
-		if ((stack[i] >= serverDllBase) && ((ULONG_PTR)stack[i] < (ULONG_PTR)serverDllBase + serverDllSize)) {
-			return TRUE;
+		if ((stack[i] >= serverDllBase) && ((ULONG_PTR)stack[i] < serverDllEnd)) {
+			return true;
 		}
 	}
 
-	return FALSE;
+	return false;
 }
 
 const char* FieldTypeToString(int fieldType)

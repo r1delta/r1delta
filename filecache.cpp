@@ -1,61 +1,50 @@
 #include "filecache.h"
 #include "filesystem.h"
+#include <shared_mutex>
 
 bool FileCache::FileExists(const std::string& filePath) {
-    std::size_t hashedPath = HashFilePath(filePath);
-    std::unique_lock<std::mutex> lock(cacheMutex);
-    cacheCondition.wait(lock, [this]() { return initialized.load(); });
+    std::size_t hashedPath = fnv1a_hash(filePath);
+
+    // Wait for initialization using a shared lock
+    {
+        std::shared_lock<std::shared_mutex> sharedLock(cacheMutex);
+        cacheCondition.wait(sharedLock, [this]() { return initialized.load(std::memory_order_acquire); });
+    }
+
+    // Use a shared lock for reading from the cache
+    std::shared_lock<std::shared_mutex> sharedLock(cacheMutex);
     return cache.contains(hashedPath);
 }
-
 bool FileCache::TryReplaceFile(const char* pszFilePath) {
-    std::string modifiedFilePath;
-    modifiedFilePath.reserve(strlen(pszFilePath));
-
-    // Copy pszFilePath to modifiedFilePath while replacing '/' with '\\'
-    for (const char* p = pszFilePath; *p; ++p) {
-        if (*p == '/') {
-            modifiedFilePath.push_back('\\');
-        }
-        else {
-            modifiedFilePath.push_back(*p);
-        }
-    }
-
-    std::string_view svFilePath(modifiedFilePath);
-
-    if (svFilePath.find("\\*\\") != std::string_view::npos)
-    {
-        // Erase '//*/'.
-        svFilePath.remove_prefix(4);
-    }
-
-    auto check = pszFilePath;
-    while (*check) {
-        if (*check < ' ' || *check > 128)
-            return false;
-        check++;
-    }
+    std::string_view svFilePath(pszFilePath);
 
     if (V_IsAbsolutePath(pszFilePath)) {
         return false;
     }
 
-    std::size_t hashedFilePath = HashFilePath("r1delta\\" + std::string(svFilePath));
-
-    {
-        std::lock_guard<std::mutex> lock(cacheMutex);
-        if (cache.count(hashedFilePath) > 0) {
-            return true;
-        }
+    // Remove "/*/" prefix if present
+    if (svFilePath.starts_with("/*/")) {
+        svFilePath.remove_prefix(3);
     }
 
-    std::size_t hashedAddonFilePath;
+    // Replace '/' with '\\'
+    std::string normalizedPath(svFilePath);
+    std::replace(normalizedPath.begin(), normalizedPath.end(), '/', '\\');
+
+    // Single cache lookup
+    std::vector<std::string_view> paths_to_check = { "r1delta\\" };
     {
-        std::lock_guard<std::mutex> lock(cacheMutex);
-        for (const auto& addonPath : addonsFolderCache) {
-            hashedAddonFilePath = HashFilePath(std::filesystem::path(addonPath).string() + "\\" + std::string(svFilePath));
-            if (cache.count(hashedAddonFilePath) > 0) {
+        std::shared_lock<std::shared_mutex> lock(cacheMutex); // Use shared lock for reading
+        paths_to_check.insert(paths_to_check.end(), addonsFolderCache.begin(), addonsFolderCache.end());
+    }
+
+    for (const auto& prefix : paths_to_check) {
+        std::string fullPath = std::string(prefix) + normalizedPath;
+        std::size_t hashedPath = fnv1a_hash(fullPath);
+
+        {
+            std::shared_lock<std::shared_mutex> lock(cacheMutex); // Use shared lock for reading
+            if (cache.count(hashedPath) > 0) {
                 return true;
             }
         }
@@ -64,30 +53,31 @@ bool FileCache::TryReplaceFile(const char* pszFilePath) {
     return false;
 }
 
+
 void FileCache::UpdateCache() {
     while (true) {
         std::unordered_set<std::size_t> newCache;
         std::unordered_set<std::string> newAddonsFolderCache;
+
         std::filesystem::create_directories("r1delta/addons");
         ScanDirectory("r1delta", newCache);
         ScanDirectory("r1delta/addons", newCache, &newAddonsFolderCache);
 
         {
-            std::lock_guard<std::mutex> lock(cacheMutex);
+            std::unique_lock<std::shared_mutex> lock(cacheMutex);
             cache = std::move(newCache);
             addonsFolderCache = std::move(newAddonsFolderCache);
         }
 
-        initialized.store(true);
+        initialized.store(true, std::memory_order_release);
         cacheCondition.notify_all();
 
-        std::unique_lock<std::mutex> lock(cacheMutex);
-        // NOTE(mrsteyk): we wait forever, and even then every single write to atomic is paired with cv.notify_all, so why is atomic checked?
-        cacheCondition.wait(lock);
+        std::unique_lock<std::shared_mutex> lock(cacheMutex);
+        cacheCondition.wait(lock, [this]() {
+            return manualRescanRequested.load(std::memory_order_acquire);
+            });
 
-        if (manualRescanRequested.load()) {
-            manualRescanRequested.store(false);
-        }
+        manualRescanRequested.store(false, std::memory_order_release);
     }
 }
 
@@ -95,7 +85,7 @@ void FileCache::ScanDirectory(const std::filesystem::path& directory, std::unord
     try {
         for (const auto& entry : std::filesystem::directory_iterator(directory)) {
             if (entry.is_regular_file()) {
-                std::size_t hashedPath = HashFilePath(entry.path().string());
+                std::size_t hashedPath = fnv1a_hash(entry.path().string());
                 cache.insert(hashedPath);
             }
             else if (entry.is_directory()) {

@@ -79,14 +79,14 @@
     <TargetName>mimalloc-static</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <OutDir>$(SolutionDir)..\..\out\msvc-$(Platform)\$(Configuration)\</OutDir>
-    <IntDir>$(SolutionDir)..\..\out\msvc-$(Platform)\$(ProjectName)\$(Configuration)\</IntDir>
+    <OutDir>$(SolutionDir)thirdparty\mimalloc-2.1.7\$(Configuration)</OutDir>
+    <IntDir>$(SolutionDir)thirdparty\mimalloc-2.1.7\$(Configuration)</IntDir>
     <TargetExt>.lib</TargetExt>
     <TargetName>mimalloc-static</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <OutDir>$(SolutionDir)..\..\out\msvc-$(Platform)\$(Configuration)\</OutDir>
-    <IntDir>$(SolutionDir)..\..\out\msvc-$(Platform)\$(ProjectName)\$(Configuration)\</IntDir>
+    <OutDir>$(SolutionDir)thirdparty\mimalloc-2.1.7\$(Configuration)</OutDir>
+    <IntDir>$(SolutionDir)thirdparty\mimalloc-2.1.7\$(Configuration)</IntDir>
     <TargetExt>.lib</TargetExt>
     <TargetName>mimalloc-static</TargetName>
   </PropertyGroup>
