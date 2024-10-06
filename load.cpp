@@ -869,16 +869,43 @@ __int64 __fastcall CPortal_Player__ChangeTeam(__int64 thisptr, unsigned int inde
 		index = botTeamIndex;
 	return oCPortal_Player__ChangeTeam(thisptr, index);
 }
-void AddBotConCommand(const CCommand& args)
+void AddBotDummyConCommand(const CCommand& args)
 {
+	// Expected usage: bot_dummy -team <team index>
 	if (args.ArgC() != 3)
 	{
-		Warning("Usage: addbot <botname> <team index>\n");
+		Warning("Usage: bot_dummy -team <team index>\n");
 		return;
 	}
 
-	const char* botName = args.Arg(1);
-	botTeamIndex = std::stoi(args.Arg(2));
+	// Check for the '-team' flag
+	if (strcmp(args.Arg(1), "-team") != 0)
+	{
+		Warning("Usage: bot_dummy -team <team index>\n");
+		return;
+	}
+
+	// Parse the team index
+	int teamIndex = 0;
+	try
+	{
+		teamIndex = std::stoi(args.Arg(2));
+	}
+	catch (const std::invalid_argument&)
+	{
+		Warning("Invalid team index: %s\n", args.Arg(2));
+		return;
+	}
+	catch (const std::out_of_range&)
+	{
+		Warning("Team index out of range: %s\n", args.Arg(2));
+		return;
+	}
+
+	botTeamIndex = teamIndex;
+
+	// Use a default bot name for dummy bots
+	const char* dummyBotName = "DummyBot";
 
 	HMODULE serverModule = GetModuleHandleA("server.dll");
 	if (!serverModule)
@@ -902,23 +929,26 @@ void AddBotConCommand(const CCommand& args)
 		Warning("Failed to retrieve BotManager001 interface\n");
 		return;
 	}
+
 	isCreatingBot = true;
-	__int64 pBot = pBotManager->CreateBot(botName);
+	__int64 pBot = pBotManager->CreateBot(dummyBotName);
 	isCreatingBot = false;
 
 	if (!pBot)
 	{
-		Warning("Failed to create bot with name: %s\n", botName);
+		Warning("Failed to create dummy bot with name: %s\n", dummyBotName);
 		return;
 	}
+
 	typedef void (*ClientFullyConnectedFn)(__int64 thisptr, __int64 entity);
 
 	ClientFullyConnectedFn CServerGameClients_ClientFullyConnected = (ClientFullyConnectedFn)(G_server + 0x1499E0);
 
 	CServerGameClients_ClientFullyConnected(0, pBot);
 
-	Msg("Bot '%s' has been successfully created.\n", botName);
+	Msg("Dummy bot '%s' has been successfully created and assigned to team %d.\n", dummyBotName, teamIndex);
 }
+
 
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
@@ -997,7 +1027,7 @@ void __stdcall LoaderNotificationCallback(
 		
 		RegisterConCommand("toggleconsole", ToggleConsoleCommand, "Toggles the console", (1 << 17));
 		RegisterConCommand("updatescriptdata", updatescriptdata_cmd, "Dumps the script data in the AI node graph to disk", FCVAR_GAMEDLL);
-		RegisterConCommand("bot", AddBotConCommand, "Adds a bot.", FCVAR_GAMEDLL | FCVAR_CHEAT);
+		RegisterConCommand("bot_dummy", AddBotDummyConCommand, "Adds a bot.", FCVAR_GAMEDLL | FCVAR_CHEAT);
 
 		RegisterConCommand("script", script_cmd, "Execute Squirrel code in server context", FCVAR_GAMEDLL|FCVAR_CHEAT);
 		if (!IsDedicatedServer()) {
