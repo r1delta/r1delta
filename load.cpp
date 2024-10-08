@@ -948,8 +948,78 @@ void AddBotDummyConCommand(const CCommand& args)
 
 	Msg("Dummy bot '%s' has been successfully created and assigned to team %d.\n", dummyBotName, teamIndex);
 }
+struct /*VFT*/ INetMessage
+{
+	virtual (~INetMessage)();
+	virtual void(SetNetChannel)(void*);
+	virtual void(SetReliable)(bool);
+	virtual bool(Process)();
+	virtual bool(ReadFromBuffer)(bf_read*);
+	virtual bool(WriteToBuffer)(bf_write*);
+	virtual bool(IsUnreliable)();
+	virtual bool(IsReliable)();
+	virtual int(GetType)();
+	virtual int(GetGroup)();
+	virtual const char* (GetName)();
+	virtual void* (GetNetChannel)();
+	virtual const char* (ToString)();
+	virtual unsigned int(GetSize)();
+};
+bool (*oSVC_UserMessage__Process)(INetMessage* thisptr);
+bool (*oSVC_UserMessage__ReadFromBuffer)(INetMessage* thisptr, __int64 target);
+bool (*oSVC_UserMessage__WriteToBuffer)(INetMessage* thisptr, __int64 target);
+// Enum for message types
+enum MessageType {
+	Processed,
+	Read,
+	Written
+};
 
+// Static array to keep track of counts
+static std::array<uint64_t, 3> messageCounts = { 0, 0, 0 };
+static std::chrono::steady_clock::time_point lastResetTime = std::chrono::steady_clock::now();
 
+// Helper function to reset counts every second
+void ResetCountsIfNecessary() {
+	auto now = std::chrono::steady_clock::now();
+	if (now - lastResetTime >= std::chrono::seconds(1)) {
+		messageCounts.fill(0);
+		lastResetTime = now;
+	}
+}
+
+bool SVC_UserMessage__Process(INetMessage* thisptr)
+{
+	ResetCountsIfNecessary();
+	auto ret = oSVC_UserMessage__Process(thisptr);
+	if (!ret)
+		Warning("%s failed! %s", __FUNCTION__, thisptr->ToString());
+	messageCounts[Processed]++;
+	Msg("Processing %s (Processed: %llu, Read: %llu, Written: %llu)\n", thisptr->ToString(), messageCounts[Processed], messageCounts[Read], messageCounts[Written]);
+	return ret;
+}
+
+bool SVC_UserMessage__ReadFromBuffer(INetMessage* thisptr, __int64 target)
+{
+	ResetCountsIfNecessary();
+	auto ret = oSVC_UserMessage__ReadFromBuffer(thisptr, target);
+	if (!ret)
+		Warning("%s failed!", __FUNCTION__);
+	messageCounts[Read]++;
+	Msg("Reading %s on %p (Processed: %llu, Read: %llu, Written: %llu)\n", thisptr->ToString(), target, messageCounts[Processed], messageCounts[Read], messageCounts[Written]);
+	return ret;
+}
+
+bool SVC_UserMessage__WriteToBuffer(INetMessage* thisptr, __int64 target)
+{
+	ResetCountsIfNecessary();
+	auto ret = oSVC_UserMessage__WriteToBuffer(thisptr, target);
+	if (!ret)
+		Warning("%s failed!", __FUNCTION__);
+	messageCounts[Written]++;
+	Msg("Writing %s on %p (Processed: %llu, Read: %llu, Written: %llu)\n", thisptr->ToString(), target, messageCounts[Processed], messageCounts[Read], messageCounts[Written]);
+	return ret;
+}
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
 	const LDR_DLL_NOTIFICATION_DATA* notification_data,
@@ -1006,8 +1076,8 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)(server_base + 0x3A2130), &CBaseEntity__SendProxy_CellOriginZ, reinterpret_cast<LPVOID*>(NULL));
 		//MH_CreateHook((LPVOID)(server_base + 0x3C8B70), &CBaseEntity__VPhysicsInitNormal, reinterpret_cast<LPVOID*>(&CBaseEntity__VPhysicsInitNormalOriginal));
 
-		//MH_CreateHook((LPVOID)(engine_base + 0x1FDA50), &CLC_Move__ReadFromBuffer, reinterpret_cast<LPVOID*>(&CLC_Move__ReadFromBufferOriginal));
-		//MH_CreateHook((LPVOID)(engine_base + 0x1F6F10), &CLC_Move__WriteToBuffer, reinterpret_cast<LPVOID*>(NULL));
+		MH_CreateHook((LPVOID)(engine_base + 0x1FDA50), &CLC_Move__ReadFromBuffer, reinterpret_cast<LPVOID*>(&CLC_Move__ReadFromBufferOriginal));
+		MH_CreateHook((LPVOID)(engine_base + 0x1F6F10), &CLC_Move__WriteToBuffer, reinterpret_cast<LPVOID*>(&CLC_Move__WriteToBufferOriginal));
 		//MH_CreateHook((LPVOID)(engine_base + 0x1FDA50), &CLC_Move__ReadFromBuffer, NULL);
 		//MH_CreateHook((LPVOID)(engine_base + 0x1F6F10), &CLC_Move__WriteToBuffer, NULL);
 		MH_CreateHook((LPVOID)(engine_base + 0x203C20), &NET_SetConVar__ReadFromBuffer, NULL);
@@ -1042,6 +1112,9 @@ void __stdcall LoaderNotificationCallback(
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0xE77F0), &IVP_Environment__set_delta_PSI_time, reinterpret_cast<LPVOID*>(&IVP_Environment__set_delta_PSI_timeOriginal));
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x31610), &sub_180031610, reinterpret_cast<LPVOID*>(&sub_180031610Original));
 		MH_CreateHook((LPVOID)(server_base + 0x554660), &CPortal_Player__ChangeTeam, reinterpret_cast<LPVOID*>(&oCPortal_Player__ChangeTeam));
+		MH_CreateHook((LPVOID)(engine_base + 0x0284C0), &SVC_UserMessage__Process, reinterpret_cast<LPVOID*>(&oSVC_UserMessage__Process));
+		MH_CreateHook((LPVOID)(engine_base + 0x1FFA20), &SVC_UserMessage__ReadFromBuffer, reinterpret_cast<LPVOID*>(&oSVC_UserMessage__ReadFromBuffer));
+		MH_CreateHook((LPVOID)(engine_base + 0x1FBF70), &SVC_UserMessage__WriteToBuffer, reinterpret_cast<LPVOID*>(&oSVC_UserMessage__WriteToBuffer));
 
 
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("vstdlib.dll"), "VStdLib_GetICVarFactory"), &VStdLib_GetICVarFactory, NULL);

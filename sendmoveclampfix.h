@@ -17,6 +17,8 @@ struct alignas(8) CLC_Move
 
 typedef bool (*CLC_Move__ReadFromBufferType)(CLC_Move* thisptr, bf_read& buffer);
 extern CLC_Move__ReadFromBufferType CLC_Move__ReadFromBufferOriginal;
+typedef bool (*CLC_Move__WriteToBufferType)(CLC_Move* thisptr, bf_write& buffer);
+extern CLC_Move__WriteToBufferType CLC_Move__WriteToBufferOriginal;
 
 bool __fastcall CLC_Move__ReadFromBuffer(CLC_Move* thisptr, bf_read& buffer);
 bool __fastcall CLC_Move__WriteToBuffer(CLC_Move* thisptr, bf_write& buffer);

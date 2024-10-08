@@ -601,22 +601,23 @@ void __fastcall CSquirrelVM__TranslateCall(__int64* a1) {
 	char data2[] = { 0x00, 0x07, 0x01, 0x07, 0x02, 0x03, 0x07, 0x04, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x05, 0x06 };
 
 	DWORD oldProtect;
-	VirtualProtect(address1, 1, PAGE_EXECUTE_READWRITE, &oldProtect);
-	VirtualProtect(address2, sizeof(data1), PAGE_EXECUTE_READWRITE, &oldProtect);
+	static bool done = false;
+	if (!done) {
+		done = true;
+		VirtualProtect(address1, 1, PAGE_EXECUTE_READWRITE, &oldProtect);
+		VirtualProtect(address2, sizeof(data1), PAGE_EXECUTE_READWRITE, &oldProtect);
+	}
+
 
 	if (!serverRunning(a1)) {
 		*(char*)address1 = value2;
 		memcpy(address2, data2, sizeof(data2));
-		FlushInstructionCache(GetCurrentProcess(), address1, 1);
-		FlushInstructionCache(GetCurrentProcess(), address2, sizeof(data1));
 		CSquirrelVM__TranslateCallOriginal(a1);
 		return;
 	}
 
 	*(char*)address1 = value1;
 	memcpy(address2, data1, sizeof(data1));
-	FlushInstructionCache(GetCurrentProcess(), address1, 1);
-	FlushInstructionCache(GetCurrentProcess(), address2, sizeof(data1));
 	CSquirrelVM__TranslateCallOriginal(a1);
 
 }
