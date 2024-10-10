@@ -52,46 +52,39 @@ extern "C" __declspec(dllexport) IMemAlloc * CreateGlobalMemAlloc() {
 
 void* __cdecl hkcalloc_base(size_t Count, size_t Size)
 {
-	size_t const nTotal = Count * Size;
-	void* const pNew = CreateGlobalMemAlloc()->Alloc(nTotal);
-
-	memset(pNew, NULL, nTotal);
-	return pNew;
+    size_t nTotal = Count * Size;
+    if (nTotal == 0) nTotal = 1;
+    void* const pNew = CreateGlobalMemAlloc()->Alloc_Aligned(nTotal, alignof(std::max_align_t));
+    if (pNew) {
+        memset(pNew, 0, nTotal);
+    }
+    return pNew;
 }
+
 void* __cdecl hkmalloc_base(size_t Size)
 {
-	return CreateGlobalMemAlloc()->Alloc(Size);
-
+    if (Size == 0) Size = 1;
+    return CreateGlobalMemAlloc()->Alloc_Aligned(Size, alignof(std::max_align_t));
 }
 
 void* __cdecl hkrealloc_base(void* Block, size_t Size)
 {
-	if (Size) {
-		return CreateGlobalMemAlloc()->Realloc(Block, Size);
-	}
-	else
-	{
-		CreateGlobalMemAlloc()->Free(Block);
-		return nullptr;
-	}
+    return CreateGlobalMemAlloc()->Realloc_Aligned(Block, Size, alignof(std::max_align_t));
 }
 
 void __cdecl hkfree_base(void* Block)
 {
-	CreateGlobalMemAlloc()->Free(Block);
-
+    CreateGlobalMemAlloc()->Free_Aligned(Block, alignof(std::max_align_t));
 }
 
 void* __cdecl hkrecalloc_base(void* Block, size_t Count, size_t Size)
 {
-	const size_t nTotal = Count * Size;
-	void* const pMemOut = CreateGlobalMemAlloc()->Realloc(Block, nTotal);
-
-	if (!Block)
-		memset(pMemOut, NULL, nTotal);
-
-	return pMemOut;
-
+    size_t const nTotal = Count * Size;
+    void* const pMemOut = CreateGlobalMemAlloc()->Realloc_Aligned(Block, nTotal, alignof(std::max_align_t));
+    if (pMemOut && !Block) {
+        memset(pMemOut, 0, nTotal);
+    }
+    return pMemOut;
 }
 
 typedef void* (*AllocFn)(void*, size_t);

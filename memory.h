@@ -38,7 +38,8 @@
 #include <concurrent_unordered_map.h>
 #include <MinHook.h>
 #include "thirdparty/mimalloc-2.1.7/include/mimalloc.h"
-
+#include <Windows.h>
+#include <Psapi.h>
 typedef size_t(*MemAllocFailHandler_t)(size_t); // should return 0, first argument is size of failed allocation
 // mem stats are SBH_cur, SBH_max, MBH_cur, MBH_max, LBH_cur, LBH_max, LBH_arena, LBH_free, mspace_cur, mspace_max, mspace_size, sys_heap, VMM_reserved, VMM_reserved_max, VMM_committed, VMM_committed_max, MemStacks, phys_total, phys_free, phys_free_min
 // sbh = small block heap (if applicable)
@@ -137,13 +138,16 @@ public:
 	virtual int GetGenericMemoryStats(GenericMemoryStat_t** ppMemoryStats) = 0;
 
 	virtual ~IMemAlloc() { };
+    virtual void* Alloc_Aligned(size_t nSize, size_t alignment) = 0;
+    virtual void* Realloc_Aligned(void* pMem, size_t nSize, size_t alignment) = 0;
+    virtual void Free_Aligned(void* pMem, size_t alignment) = 0;
 };
 class CMimMemAlloc : public IMemAlloc {
 public:
     CMimMemAlloc() : m_pfnAllocFailHandler(nullptr), m_nFailedAllocationSize(0) {}
-
-    // Release versions
     void* Alloc(size_t nSize) override {
+        CheckVPhysics();
+
         void* p = mi_malloc(nSize);
         if (!p) {
             m_nFailedAllocationSize = nSize;
@@ -157,8 +161,16 @@ public:
                 }
             }
         }
+
+        void* returnAddress = _ReturnAddress();
+        if (m_vphysicsStart && returnAddress >= m_vphysicsStart && returnAddress < m_vphysicsEnd) {
+            memset(p, 0xFE, nSize);
+        }
+
         return p;
     }
+
+
 
     void* Realloc(void* pMem, size_t nSize) override {
         void* p = mi_realloc(pMem, nSize);
@@ -400,10 +412,70 @@ public:
     }
 
     ~CMimMemAlloc() override {}
+    void* Alloc_Aligned(size_t nSize, size_t alignment) override {
+        if (nSize == 0) nSize = 1;
+        void* p = mi_malloc_aligned(nSize, alignment);
+        if (!p) {
+            m_nFailedAllocationSize = nSize;
+            if (m_pfnAllocFailHandler) {
+                size_t result = m_pfnAllocFailHandler(nSize);
+                if (result == 0) {
+                    p = mi_malloc_aligned(nSize, alignment);
+                    if (!p) {
+                        m_nFailedAllocationSize = nSize;
+                    }
+                }
+            }
+        }
+        memset(p, 0xFE, nSize);
+        return p;
+    }
 
+    void* Realloc_Aligned(void* pMem, size_t nSize, size_t alignment) override {
+        if (nSize == 0) {
+            Free_Aligned(pMem, alignment);
+            return nullptr;
+        }
+        void* p = mi_realloc_aligned(pMem, nSize, alignment);
+        if (!p) {
+            m_nFailedAllocationSize = nSize;
+            if (m_pfnAllocFailHandler) {
+                size_t result = m_pfnAllocFailHandler(nSize);
+                if (result == 0) {
+                    p = mi_realloc_aligned(pMem, nSize, alignment);
+                    if (!p) {
+                        m_nFailedAllocationSize = nSize;
+                    }
+                }
+            }
+        }
+        return p;
+    }
+
+    void Free_Aligned(void* pMem, size_t alignment) override {
+        mi_free_aligned(pMem, alignment);
+    }
+
+    void CheckVPhysics() {
+        if (!m_vphysicsChecked) {
+            HMODULE hModule = GetModuleHandleA("vphysics.dll");
+            if (hModule) {
+                MODULEINFO modInfo;
+                if (GetModuleInformation(GetCurrentProcess(), hModule, &modInfo, sizeof(MODULEINFO))) {
+                    m_vphysicsStart = modInfo.lpBaseOfDll;
+                    m_vphysicsEnd = (char*)m_vphysicsStart + modInfo.SizeOfImage;
+                }
+            }
+            m_vphysicsChecked = true;
+        }
+    }
 private:
     MemAllocFailHandler_t m_pfnAllocFailHandler;
     size_t m_nFailedAllocationSize;
+private:
+    void* m_vphysicsStart = nullptr;
+    void* m_vphysicsEnd = nullptr;
+    bool m_vphysicsChecked = false;
 };
 
 typedef IMemAlloc* (*PFN_CreateGlobalMemAlloc)();
