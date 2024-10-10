@@ -5,6 +5,7 @@
 #include "persistentdata.h"
 #include "load.h"
 #include "weaponxdebug.h"
+
 typedef void (*sub_18027F2C0Type)(__int64 a1, const char* a2, void* a3);
 sub_18027F2C0Type sub_18027F2C0Original;
 
@@ -54,6 +55,12 @@ int WSAAPI hookedGetAddrInfo(PCSTR pNodeName, PCSTR pServiceName, const ADDRINFO
 	return originalGetAddrInfo(pNodeName, pServiceName, pHints, ppResult);
 }
 
+bool (*oCPortalPlayer__CreateMove)(__int64 a1, float a2, __int64 a3, char a4);
+bool CPortalPlayer__CreateMove(__int64 a1, float a2, __int64 a3, char a4) {
+	static auto ref = OriginalCCVar_FindVar(cvarinterface, "host_timescale");
+	a2 *= ref->m_Value.m_fValue;
+	return oCPortalPlayer__CreateMove(a1, a2, a3, a4);
+}
 void InitClient()
 {
 	auto client = G_client;
@@ -67,7 +74,9 @@ void InitClient()
 	MH_CreateHook((LPVOID)(engine + 0x4801B0), &ConVar_PrintDescription, reinterpret_cast<LPVOID*>(&ConVar_PrintDescriptionOriginal));
 	MH_CreateHook((LPVOID)(engine + 0x47FB00), &CConVar__GetSplitScreenPlayerSlot, NULL);
 	MH_CreateHook((LPVOID)(engine + 0x4722E0), &sub_1804722E0, 0);
+
 	MH_CreateHook((LPVOID)(client + 0x4A6150), &WeaponXRegisterClient, reinterpret_cast<LPVOID*>(&oWeaponXRegisterClient));
+	MH_CreateHook((LPVOID)(client + 0x959F0), &CPortalPlayer__CreateMove, reinterpret_cast<LPVOID*>(&oCPortalPlayer__CreateMove));
 
 	if (IsNoOrigin())
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("ws2_32.dll"), "getaddrinfo"), &hookedGetAddrInfo, reinterpret_cast<LPVOID*>(&originalGetAddrInfo));
