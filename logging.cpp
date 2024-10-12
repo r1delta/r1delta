@@ -264,126 +264,128 @@ decltype(&DevWarning) DevWarningOriginal = nullptr;
 decltype(&ConColorMsg) ConColorMsgOriginal = nullptr;
 decltype(&ConDMsg) ConDMsgOriginal = nullptr;
 decltype(&COM_TimestampedLog) COM_TimestampedLogOriginal = nullptr;
+char* SafeFormat(const char* format, va_list args) {
+	va_list args_copy;
+	va_copy(args_copy, args);
+	int size = vsnprintf(NULL, 0, format, args_copy);
+	va_end(args_copy);
 
+	if (size < 0) {
+		return strdup("Error formatting string");
+	}
 
+	char* ret = (char*)malloc(size + 1);
+	if (ret == NULL) {
+		return strdup("Memory allocation error");
+	}
 
-// Helper function to safely format strings
-std::string SafeFormat(const char* format, va_list args) {
-    va_list args_copy;
-    va_copy(args_copy, args);
-
-    int size = vsnprintf(nullptr, 0, format, args_copy);
-    va_end(args_copy);
-
-    if (size < 0) {
-        return "Error formatting string";
-    }
-
-	std::string ret;
-	ret.reserve(size + 1);
-	ret.resize(size);
-    vsnprintf(ret.data(), size + 1, format, args);
-
+	vsnprintf(ret, size + 1, format, args);
 	return ret;
 }
 
 void MsgHook(const char* pMsg, ...) {
-    va_list args;
-    va_start(args, pMsg);
-    std::string formatted = SafeFormat(pMsg, args);
-    va_end(args);
+	va_list args;
+	va_start(args, pMsg);
+	char* formatted = SafeFormat(pMsg, args);
+	va_end(args);
 
-    printf("%s", formatted.c_str());
-    if (MsgOriginal) {
-        MsgOriginal("%s", formatted.c_str());
-    }
+	printf("%s", formatted);
+	if (MsgOriginal) {
+		MsgOriginal("%s", formatted);
+	}
+	free(formatted);
 }
 
 void WarningHook(const char* pMsg, ...) {
-    va_list args;
-    va_start(args, pMsg);
-    std::string formatted = SafeFormat(pMsg, args);
-    va_end(args);
+	va_list args;
+	va_start(args, pMsg);
+	char* formatted = SafeFormat(pMsg, args);
+	va_end(args);
 
-    printf("%s", formatted.c_str());
-    if (WarningOriginal) {
-        WarningOriginal("%s", formatted.c_str());
-    }
+	printf("%s", formatted);
+	if (WarningOriginal) {
+		WarningOriginal("%s", formatted);
+	}
+	free(formatted);
 }
 
 void Warning_SpewCallStackHook(int iMaxCallStackLength, const char* pMsg, ...) {
-    va_list args;
-    va_start(args, pMsg);
-    std::string formatted = SafeFormat(pMsg, args);
-    va_end(args);
+	va_list args;
+	va_start(args, pMsg);
+	char* formatted = SafeFormat(pMsg, args);
+	va_end(args);
 
-    printf("%s", formatted.c_str());
-    if (Warning_SpewCallStackOriginal) {
-        Warning_SpewCallStackOriginal(iMaxCallStackLength, "%s", formatted.c_str());
-    }
+	printf("%s", formatted);
+	if (Warning_SpewCallStackOriginal) {
+		Warning_SpewCallStackOriginal(iMaxCallStackLength, "%s", formatted);
+	}
+	free(formatted);
 }
 
 void DevMsgHook(int level, const char* pMsg, ...) {
-    va_list args;
-    va_start(args, pMsg);
-    std::string formatted = SafeFormat(pMsg, args);
-    va_end(args);
+	va_list args;
+	va_start(args, pMsg);
+	char* formatted = SafeFormat(pMsg, args);
+	va_end(args);
 
-    printf("%s", formatted.c_str());
-    if (DevMsgOriginal) {
-        DevMsgOriginal(level, "%s", formatted.c_str());
-    }
+	printf("%s", formatted);
+	if (DevMsgOriginal) {
+		DevMsgOriginal(level, "%s", formatted);
+	}
+	free(formatted);
 }
 
 void DevWarningHook(int level, const char* pMsg, ...) {
-    va_list args;
-    va_start(args, pMsg);
-    std::string formatted = SafeFormat(pMsg, args);
-    va_end(args);
+	va_list args;
+	va_start(args, pMsg);
+	char* formatted = SafeFormat(pMsg, args);
+	va_end(args);
 
-    printf("%s", formatted.c_str());
-    if (DevWarningOriginal) {
-        DevWarningOriginal(level, "%s", formatted.c_str());
-    }
+	printf("%s", formatted);
+	if (DevWarningOriginal) {
+		DevWarningOriginal(level, "%s", formatted);
+	}
+	free(formatted);
 }
 
-void ConColorMsgHook(const Color& clr, const char* pMsg, ...) {
-    va_list args;
-    va_start(args, pMsg);
-    std::string formatted = SafeFormat(pMsg, args);
-    va_end(args);
+void ConColorMsgHook(const Color* clr, const char* pMsg, ...) {
+	va_list args;
+	va_start(args, pMsg);
+	char* formatted = SafeFormat(pMsg, args);
+	va_end(args);
 
-    printf("%s", formatted.c_str());
-    if (ConColorMsgOriginal) {
-        ConColorMsgOriginal(clr, "%s", formatted.c_str());
-    }
+	printf("%s", formatted);
+	if (ConColorMsgOriginal) {
+		ConColorMsgOriginal(*clr, "%s", formatted);
+	}
+	free(formatted);
 }
 
 void ConDMsgHook(const char* pMsg, ...) {
-    va_list args;
-    va_start(args, pMsg);
-    std::string formatted = SafeFormat(pMsg, args);
-    va_end(args);
+	va_list args;
+	va_start(args, pMsg);
+	char* formatted = SafeFormat(pMsg, args);
+	va_end(args);
 
-    printf("%s", formatted.c_str());
-    if (ConDMsgOriginal) {
-        ConDMsgOriginal("%s", formatted.c_str());
-    }
+	printf("%s", formatted);
+	if (ConDMsgOriginal) {
+		ConDMsgOriginal("%s", formatted);
+	}
+	free(formatted);
 }
 
 void COM_TimestampedLogHook(const char* pMsg, ...) {
-    va_list args;
-    va_start(args, pMsg);
-    std::string formatted = SafeFormat(pMsg, args);
-    va_end(args);
+	va_list args;
+	va_start(args, pMsg);
+	char* formatted = SafeFormat(pMsg, args);
+	va_end(args);
 
-    printf("%s", formatted.c_str());
-    if (COM_TimestampedLogOriginal) {
-        COM_TimestampedLogOriginal("%s", formatted.c_str());
-    }
+	printf("%s", formatted);
+	if (COM_TimestampedLogOriginal) {
+		COM_TimestampedLogOriginal("%s", formatted);
+	}
+	free(formatted);
 }
-
-
 void InitLoggingHooks()
 {
 	auto tier0 = GetModuleHandleA("tier0.dll");

@@ -205,10 +205,7 @@ ConCommandBaseR1O* convertToR1O(ConCommandBaseR1* commandBase) {
 	}
 
 	// Handle m_pNext
-	if (result) {
-		result->m_pNext = convertToR1O(commandBase->m_pNext);
-	}
-
+	result->m_pNext = 0;
 	return result;
 }
 
@@ -224,10 +221,7 @@ ConCommandBaseR1* convertToR1(ConCommandBaseR1O* commandBaseR1O) {
 		result = (ConCommandBaseR1*)convertCommandToR1((ConCommandR1O*)commandBaseR1O);
 	}
 
-	// Handle m_pNext
-	if (result) {
-		result->m_pNext = convertToR1(commandBaseR1O->m_pNext);
-	}
+	result->m_pNext = 0;
 
 	return result;
 }
