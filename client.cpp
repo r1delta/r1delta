@@ -61,6 +61,13 @@ bool CPortalPlayer__CreateMove(__int64 a1, float a2, __int64 a3, char a4) {
 	a2 *= ref->m_Value.m_fValue;
 	return oCPortalPlayer__CreateMove(a1, a2, a3, a4);
 }
+__int64 (*osub_18008E820)(__int64 a1, unsigned int a2);
+__int64 __fastcall sub_18008E820(__int64 a1, unsigned int a2)
+{
+	if (a1)
+		return osub_18008E820(a1, a2);
+	return 0;
+}
 void InitClient()
 {
 	auto client = G_client;
@@ -77,6 +84,7 @@ void InitClient()
 
 	MH_CreateHook((LPVOID)(client + 0x4A6150), &WeaponXRegisterClient, reinterpret_cast<LPVOID*>(&oWeaponXRegisterClient));
 	MH_CreateHook((LPVOID)(client + 0x959F0), &CPortalPlayer__CreateMove, reinterpret_cast<LPVOID*>(&oCPortalPlayer__CreateMove));
+	MH_CreateHook((LPVOID)(client + 0x8E820), &sub_18008E820, reinterpret_cast<LPVOID*>(&osub_18008E820));
 
 	if (IsNoOrigin())
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("ws2_32.dll"), "getaddrinfo"), &hookedGetAddrInfo, reinterpret_cast<LPVOID*>(&originalGetAddrInfo));

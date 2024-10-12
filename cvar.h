@@ -37,7 +37,7 @@
 #include "core.h"
 #include <string>
 #include "color.h"
-
+#include "vsdk/public/tier1/utlvector.h"
 //-----------------------------------------------------------------------------
 // ConVar flags
 //-----------------------------------------------------------------------------
@@ -139,7 +139,7 @@ struct CVValue_t
   float m_fValue;
   int m_nValue;
 };
-
+typedef void (*FnChangeCallback_t)(void* var, const char* pOldValue, float flOldValue);
 /* 258 */
 struct ConVarR1 : ConCommandBaseR1, IConVar
 {
@@ -150,8 +150,10 @@ struct ConVarR1 : ConCommandBaseR1, IConVar
   float m_fMinVal;
   bool m_bHasMax;
   float m_fMaxVal;
-  char pad[32];
+  CUtlVector< FnChangeCallback_t > m_fnChangeCallbacks;
 };
+struct ConVarR1O;
+
 struct ConVarR1O : ConCommandBaseR1O, IConVar
 {
   ConVarR1O *m_pParent;
@@ -161,7 +163,7 @@ struct ConVarR1O : ConCommandBaseR1O, IConVar
   float m_fMinVal;
   bool m_bHasMax;
   float m_fMaxVal;
-  char pad[32];
+  CUtlVector< FnChangeCallback_t > m_fnChangeCallbacks;
 };
 /* 264 */
 typedef void (__stdcall *FnCommandCallback_t)(const void *command);

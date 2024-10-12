@@ -155,7 +155,7 @@ char* __fastcall sub_1804722E0(char* Destination, const char* a2, unsigned __int
 	result = strncat(Destination, a2, v7);
 	result[a3 - 1] = 0;
 	if (isPrintingCVarDesc)
-		outstr = Destination;
+		outstr = _strdup(Destination);
 	return result;
 }
 typedef void (*ConVar_PrintDescriptionType)(const ConCommandBaseR1* pVar);
@@ -241,18 +241,17 @@ void ConVar_PrintDescription(const ConCommandBaseR1* pVar)
 	//ConVar_AppendFlags(pVar, outstr, sizeof(outstr));
 	isPrintingCVarDesc = true;
 	ConVar_PrintDescriptionOriginal(pVar);
-	char* outstr2 = _strdup(outstr);
 	isPrintingCVarDesc = false;
 	const char* pStr = pVar->m_pszHelpString;
 	if (pStr && *pStr)
 	{
-		Msg("%-80s - %.80s\n", outstr2, pStr);
+		Msg("%-80s - %.80s\n", outstr, pStr);
 	}
 	else
 	{
-		Msg("%-80s\n", outstr2);
+		Msg("%-80s\n", outstr);
 	}
-	free(outstr2);
+	free((void*)outstr);
 }
 
 

@@ -364,7 +364,8 @@ public:
     }
 
     void CompactIncremental() override {
-        mi_collect(false);
+        //mi_collect(false);
+        // not needed on mimalloc, causes hitches
     }
 
     void OutOfMemory(size_t nBytesAttempted = 0) override {
