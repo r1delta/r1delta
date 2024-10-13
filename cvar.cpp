@@ -282,8 +282,8 @@ void GlobalChangeCallback(ConVarR1* var, const char* pOldValue) {
 	if (ConVar_PrintDescriptionOriginal)
 		ConVar_PrintDescription(var);
 	if (!strcmp(var->m_pszName, "sv_portal_players")) {
-		var->m_Value.m_fValue = 1.0f;
-		var->m_Value.m_nValue = 1;
+		var->m_Value.m_fValue = 18.0f;
+		var->m_Value.m_nValue = 18;
 	}
 
 	auto it = ccBaseMap.find(var->m_pszName);
