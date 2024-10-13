@@ -219,51 +219,53 @@ void* sq_getentity(HSQUIRRELVM v, SQInteger iStackPos)
 bool GetSQVMFuncs() {
 	static bool initialized = false;
 	if (initialized) return true;
-	auto engine = G_engine;
+	auto engine = IsDedicatedServer() ? G_engine_ds : G_engine;
 	g_pClientArray = (CBaseClient*)(engine + 0x2966340); // TODO(wanderer?): dedicated
+	g_pClientArrayDS = (CBaseClientDS*)(engine + 0x1C89C48); // TODO(wanderer?): dedicated
 
 #if defined(_DEBUG)
 	if (!G_launcher) MessageBoxW(0, L"G_launcher is null in GetSQVMFuncs", L"ASSERT!!!", MB_ICONERROR | MB_OK);
 #endif
 
-	uintptr_t baseAddress = G_launcher;
+	uintptr_t baseAddress = G_vscript;
 
-	sq_compile = reinterpret_cast<sq_compile_t>(baseAddress + 0x14970);
-	sq_compilebuffer = reinterpret_cast<sq_compilebuffer_t>(baseAddress + 0x1A5E0);
-	base_getroottable = reinterpret_cast<base_getroottable_t>(baseAddress + 0x56440);
-	sq_call = reinterpret_cast<sq_call_t>(baseAddress + 0x18C40);
-	sq_newslot = reinterpret_cast<sq_newslot_t>(baseAddress + 0x17260);
-	SQVM_Pop = reinterpret_cast<SQVM_Pop_t>(baseAddress + 0x2BC60);
-	sq_push = reinterpret_cast<sq_push_t>(baseAddress + 0x165E0);
-	SQVM_Raise_Error = reinterpret_cast<SQVM_Raise_Error_t>(baseAddress + 0x411B0);
-	IdType2Name = reinterpret_cast<IdType2Name_t>(baseAddress + 0x3C660);
-	sq_getstring = reinterpret_cast<sq_getstring_t>(baseAddress + 0x16880);
-	sq_getinteger = reinterpret_cast<sq_getinteger_t>(baseAddress + 0xE740);
-	sq_getfloat = reinterpret_cast<sq_getfloat_t>(baseAddress + 0xE6F0);
-	sq_getbool = reinterpret_cast<sq_getbool_t>(baseAddress + 0xE6B0);
-	sq_pushnull = reinterpret_cast<sq_pushnull_t>(baseAddress + 0x14BD0);
-	sq_pushstring = reinterpret_cast<sq_pushstring_t>(baseAddress + 0x14C30);
-	sq_pushinteger = reinterpret_cast<sq_pushinteger_t>(baseAddress + 0xEA10);
-	sq_pushfloat = reinterpret_cast<sq_pushfloat_t>(baseAddress + 0xE9B0);
-	sq_pushbool = reinterpret_cast<sq_pushbool_t>(baseAddress + 0xE930);
-	sq_tostring = reinterpret_cast<sq_tostring_t>(baseAddress + 0x16690);
-	sq_getsize = reinterpret_cast<sq_getsize_t>(baseAddress + 0xE790);
-	sq_gettype = reinterpret_cast<sq_gettype_t>(baseAddress + 0x16660);
-	sq_getstackobj = reinterpret_cast<sq_getstackobj_t>(baseAddress + 0xE7F0);
-	sq_get = reinterpret_cast<sq_get_t>(baseAddress + 0x17F10);
-	sq_get_noerr = reinterpret_cast<sq_get_noerr_t>(baseAddress + 0x18150);
-	sq_gettop = reinterpret_cast<sq_gettop_t>(baseAddress + 0xE830);
-	sq_newtable = reinterpret_cast<sq_newtable_t>(baseAddress + 0x14F30);
-	sq_next = reinterpret_cast<sq_next_t>(baseAddress + 0x1A1B0);
-	sq_getinstanceup = reinterpret_cast<sq_getinstanceup_t>(baseAddress + 0x6750);
-	sq_newarray = reinterpret_cast<sq_newarray_t>(baseAddress + 0x14FB0);
-	sq_arrayappend = reinterpret_cast<sq_arrayappend_t>(baseAddress + 0x152A0);
-	sq_throwerror = reinterpret_cast<sq_throwerror_t>(baseAddress + 0x18930);
-	RunCallback = reinterpret_cast<RunCallback_t>(baseAddress + 0x89A0);
-	CSquirrelVM__RegisterGlobalConstantInt = reinterpret_cast<CSquirrelVM__RegisterGlobalConstantInt_t>(baseAddress + 0xA680);
-	CSquirrelVM__GetEntityFromInstance = reinterpret_cast<CSquirrelVM__GetEntityFromInstance_t>(baseAddress + 0x9930);
+	sq_compile = reinterpret_cast<sq_compile_t>(baseAddress + (IsDedicatedServer() ? 0x14A50 : 0x14970));
+	sq_compilebuffer = reinterpret_cast<sq_compilebuffer_t>(baseAddress + (IsDedicatedServer() ? 0x1A6C0 : 0x1A5E0));
+	base_getroottable = reinterpret_cast<base_getroottable_t>(baseAddress + (IsDedicatedServer() ? 0x56520 : 0x56440));
+	sq_call = reinterpret_cast<sq_call_t>(baseAddress + (IsDedicatedServer() ? 0x18D20 : 0x18C40));
+	sq_newslot = reinterpret_cast<sq_newslot_t>(baseAddress + (IsDedicatedServer() ? 0x17340 : 0x17260));
+	SQVM_Pop = reinterpret_cast<SQVM_Pop_t>(baseAddress + (IsDedicatedServer() ? 0x2BD40 : 0x2BC60));
+	sq_push = reinterpret_cast<sq_push_t>(baseAddress + (IsDedicatedServer() ? 0x166C0 : 0x165E0));
+	SQVM_Raise_Error = reinterpret_cast<SQVM_Raise_Error_t>(baseAddress + (IsDedicatedServer() ? 0x41290 : 0x411B0));
+	IdType2Name = reinterpret_cast<IdType2Name_t>(baseAddress + (IsDedicatedServer() ? 0x3C740 : 0x3C660));
+	sq_getstring = reinterpret_cast<sq_getstring_t>(baseAddress + (IsDedicatedServer() ? 0x16960 : 0x16880));
+	sq_getinteger = reinterpret_cast<sq_getinteger_t>(baseAddress + (IsDedicatedServer() ? 0xE760 : 0xE740));
+	sq_getfloat = reinterpret_cast<sq_getfloat_t>(baseAddress + (IsDedicatedServer() ? 0xE710 : 0xE6F0));
+	sq_getbool = reinterpret_cast<sq_getbool_t>(baseAddress + (IsDedicatedServer() ? 0xE6D0 : 0xE6B0));
+	sq_pushnull = reinterpret_cast<sq_pushnull_t>(baseAddress + (IsDedicatedServer() ? 0x14CB0 : 0x14BD0));
+	sq_pushstring = reinterpret_cast<sq_pushstring_t>(baseAddress + (IsDedicatedServer() ? 0x14D10 : 0x14C30));
+	sq_pushinteger = reinterpret_cast<sq_pushinteger_t>(baseAddress + (IsDedicatedServer() ? 0xEA30 : 0xEA10));
+	sq_pushfloat = reinterpret_cast<sq_pushfloat_t>(baseAddress + (IsDedicatedServer() ? 0xE9D0 : 0xE9B0));
+	sq_pushbool = reinterpret_cast<sq_pushbool_t>(baseAddress + (IsDedicatedServer() ? 0xE950 : 0xE930));
+	sq_tostring = reinterpret_cast<sq_tostring_t>(baseAddress + (IsDedicatedServer() ? 0x16770 : 0x16690));
+	sq_getsize = reinterpret_cast<sq_getsize_t>(baseAddress + (IsDedicatedServer() ? 0xE7B0 : 0xE790));
+	sq_gettype = reinterpret_cast<sq_gettype_t>(baseAddress + (IsDedicatedServer() ? 0x16740 : 0x16660));
+	sq_getstackobj = reinterpret_cast<sq_getstackobj_t>(baseAddress + (IsDedicatedServer() ? 0xE810 : 0xE7F0));
+	sq_get = reinterpret_cast<sq_get_t>(baseAddress + (IsDedicatedServer() ? 0x18230 : 0x17F10));
+	sq_get_noerr = reinterpret_cast<sq_get_noerr_t>(baseAddress + (IsDedicatedServer() ? 0x17FF0 : 0x18150));
+	sq_gettop = reinterpret_cast<sq_gettop_t>(baseAddress + (IsDedicatedServer() ? 0xE850 : 0xE830));
+	sq_newtable = reinterpret_cast<sq_newtable_t>(baseAddress + (IsDedicatedServer() ? 0x15010 : 0x14F30));
+	sq_next = reinterpret_cast<sq_next_t>(baseAddress + (IsDedicatedServer() ? 0x1A290 : 0x1A1B0));
+	sq_getinstanceup = reinterpret_cast<sq_getinstanceup_t>(baseAddress + (IsDedicatedServer() ? 0x6770 : 0x6750));
+	sq_newarray = reinterpret_cast<sq_newarray_t>(baseAddress + (IsDedicatedServer() ? 0x15090 : 0x14FB0));
+	sq_arrayappend = reinterpret_cast<sq_arrayappend_t>(baseAddress + (IsDedicatedServer() ? 0x15380 : 0x152A0));
+	sq_throwerror = reinterpret_cast<sq_throwerror_t>(baseAddress + (IsDedicatedServer() ? 0x18A10 : 0x18930));
+	RunCallback = reinterpret_cast<RunCallback_t>(baseAddress + (IsDedicatedServer() ? 0x89C0 : 0x89A0));
+	CSquirrelVM__RegisterGlobalConstantInt = reinterpret_cast<CSquirrelVM__RegisterGlobalConstantInt_t>(baseAddress + (IsDedicatedServer() ? 0xA6A0 : 0xA680));
+	CSquirrelVM__GetEntityFromInstance = reinterpret_cast<CSquirrelVM__GetEntityFromInstance_t>(baseAddress + (IsDedicatedServer() ? 0x9950 : 0x9930));
+	AddSquirrelReg = reinterpret_cast<AddSquirrelReg_t>(baseAddress + (IsDedicatedServer() ? 0x8E70 : 0x8E50));
 	sq_GetEntityConstant_CBaseEntity = reinterpret_cast<sq_GetEntityConstant_CBaseEntity_t>(G_client + 0x2EF850);
-	AddSquirrelReg = reinterpret_cast<AddSquirrelReg_t>(baseAddress + 0x8E50);
+
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_CLIENT,
 		"GetPersistentString",

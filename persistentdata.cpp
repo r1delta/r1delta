@@ -275,8 +275,21 @@ struct CBaseClient
 	char pad[284392];
 };
 static_assert(sizeof(CBaseClient) == 285440);
+struct CBaseClientDS
+{
+	_BYTE gap0[920];
+	KeyValues* m_ConVars;
+	char pad[215712];
+};
+static_assert(sizeof(CBaseClientDS) == 216640);
 CBaseClient* g_pClientArray;
-
+CBaseClientDS* g_pClientArrayDS;
+KeyValues* GetClientConVarsKV(short index) {
+	if (IsDedicatedServer())
+		return g_pClientArrayDS[index].m_ConVars;
+	else
+		return g_pClientArray[index].m_ConVars;
+}
 SQInteger Script_ServerGetPersistentUserDataKVString(HSQUIRRELVM v) {
 	const void* pPlayer = sq_getentity(v, 2);
 	if (!pPlayer) {
@@ -297,7 +310,7 @@ SQInteger Script_ServerGetPersistentUserDataKVString(HSQUIRRELVM v) {
 	auto edict = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(pPlayer) + 64);
 	auto index = ((edict - reinterpret_cast<__int64>(pGlobalVarsServer->pEdicts)) / 56) - 1;
 
-	if (!g_pClientArray[index].m_ConVars || index == 18) {
+	if (!GetClientConVarsKV(index) || index == 18) {
 		//return sq_throwerror(v, "Client has NULL m_ConVars.");
 		//Msg("REPLAY on server tried to access persistent value: key=%s, hashedKey=%s, hashed=%s\n",
 		//	pKey, hashedKey.c_str(), "true");
@@ -306,7 +319,7 @@ SQInteger Script_ServerGetPersistentUserDataKVString(HSQUIRRELVM v) {
 		return 1;
 	}
 
-	const char* pResult = g_pClientArray[index].m_ConVars->GetString(modifiedKey.c_str(), pDefaultValue);
+	const char* pResult = GetClientConVarsKV(index)->GetString(modifiedKey.c_str(), pDefaultValue);
 	//Msg("Server accessing persistent value: key=%s, hashedKey=%s, value=%s, hashed=%s\n",
 	//	pKey, hashedKey.c_str(), pResult, "true");
 
@@ -337,10 +350,10 @@ SQInteger Script_ServerSetPersistentUserDataKVString(HSQUIRRELVM v) {
 
 	auto index = ((edict - reinterpret_cast<__int64>(pGlobalVarsServer->pEdicts)) / 56) - 1;
 
-	if (!(!g_pClientArray[index].m_ConVars || index == 18)) {
+	if (!(!GetClientConVarsKV(index) || index == 18)) {
 		//return sq_throwerror(v, "Client has NULL m_ConVars.");
 		CVEngineServer_ClientCommand(0, edict, PERSIST_COMMAND" \"%s\" \"%s\" nosend", hashedKey.c_str(), pValue);
-		g_pClientArray[index].m_ConVars->SetString(modifiedKey.c_str(), pValue);
+		GetClientConVarsKV(index)->SetString(modifiedKey.c_str(), pValue);
 		//Msg("Server setting persistent value: key=%s, value=%s, hashed=%s\n",
 		//	pKey, pValue, "true");
 	}

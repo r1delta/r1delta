@@ -1172,21 +1172,19 @@ void __stdcall LoaderNotificationCallback(
 
 	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"engine.dll") == 0) {
 		G_engine = (uintptr_t)notification_data->Loaded.DllBase;
+		RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
 		if (!IsDedicatedServer()) {
-			RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
 			MH_CreateHook((LPVOID)(G_engine + 0x1305E0), &ExecuteConfigFile, NULL);
 
 		}
 
 		auto engine_base_spec = ENGINE_DLL_BASE;
-		auto filesystem_stdio = G_filesystem_stdio;
+		auto filesystem_stdio = IsDedicatedServer() ? G_vscript : G_filesystem_stdio;
 
 		MH_CreateHook((LPVOID)(engine_base_spec + 0x127C70), &FileSystem_UpdateAddonSearchPaths, reinterpret_cast<LPVOID*>(&FileSystem_UpdateAddonSearchPathsTypeOriginal));
 		MH_CreateHook((LPVOID)(filesystem_stdio + 0x6A420), &ReadFileFromVPKHook, reinterpret_cast<LPVOID*>(&readFileFromVPK));
 		MH_CreateHook((LPVOID)(filesystem_stdio + 0x9C20), &ReadFromCacheHook, reinterpret_cast<LPVOID*>(&readFromCache));
 		MH_CreateHook((LPVOID)(filesystem_stdio + 0x16250), &AddVPKFile, reinterpret_cast<LPVOID*>(&AddVPKFileOriginal));
-		//MH_CreateHook((LPVOID)(filesystem_stdio + 0x4BC0), &CBaseFileSystem__CSearchPath__SetPath, reinterpret_cast<LPVOID*>(&CBaseFileSystem__CSearchPath__SetPathOriginal));
-		//MH_CreateHook((LPVOID)(filesystem_stdio + 0x13D60), &CZipPackFile__Prepare, reinterpret_cast<LPVOID*>(&CZipPackFile__PrepareOriginal));
 		MH_CreateHook((LPVOID)(filesystem_stdio + 0x9AB70), &fs_sprintf_hook, reinterpret_cast<LPVOID*>(NULL));
 		MH_CreateHook((LPVOID)(filesystem_stdio + 0x02C30), &CBaseFileSystem__FindFirst, reinterpret_cast<LPVOID*>(&oCBaseFileSystem__FindFirst));
 		MH_CreateHook((LPVOID)(filesystem_stdio + 0x1C4A0), &CBaseFileSystem__FindNext, reinterpret_cast<LPVOID*>(&oCBaseFileSystem__FindNext));

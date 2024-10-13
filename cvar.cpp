@@ -71,159 +71,160 @@ std::unordered_map<std::string, WVar*> ccBaseMap;
 bool ConCommandBaseR1OIsCVar(ConCommandBaseR1O* ptr) {
 	return !!((ConCommandR1O*)ptr)->unused2;
 }
-ConCommandBaseR1O* convertBaseToR1O(ConCommandBaseR1* commandBase) {
+ConCommandBaseR1O* convertToR1O(const ConCommandBaseR1* commandBase);
+ConCommandBaseR1O* convertToR1O(ConCommandBaseR1* commandBase);
+ConCommandBaseR1O* convertToR1OBase(ConCommandBaseR1* commandBase) {
 	if (!commandBase)
-		return nullptr;
-
+		return NULL;
 	ConCommandBaseR1O* commandBaseR1O = new ConCommandBaseR1O;
 
-	// Copy everything except the last field (unk)
-	std::memcpy(commandBaseR1O, commandBase, sizeof(ConCommandBaseR1));
-
-	// Set unk to nullptr
+	commandBaseR1O->vtable = commandBase->vtable;
+	commandBaseR1O->m_pNext = NULL;// convertToR1O(commandBase->m_pNext);
+	commandBaseR1O->m_bRegistered = commandBase->m_bRegistered;
+	commandBaseR1O->m_pszName = commandBase->m_pszName;
+	commandBaseR1O->m_pszHelpString = commandBase->m_pszHelpString;
+	commandBaseR1O->m_nFlags = commandBase->m_nFlags;
+	commandBaseR1O->pad = commandBase->pad;
 	commandBaseR1O->unk = nullptr;
-
-	// Handle m_pNext separately
-	commandBaseR1O->m_pNext = nullptr;  // We'll handle this in the main conversion functions
 
 	return commandBaseR1O;
 }
 
-ConCommandR1O* convertCommandToR1O(ConCommandR1* command) {
+
+ConCommandR1O* convertToR1O(ConCommandR1* command) {
 	if (!command)
-		return nullptr;
-
+		return NULL;
 	ConCommandR1O* commandR1O = new ConCommandR1O;
-
-	// Copy the base class
-	std::memcpy(static_cast<ConCommandBaseR1O*>(commandR1O), convertBaseToR1O(static_cast<ConCommandBaseR1*>(command)), sizeof(ConCommandBaseR1O));
-
-	// Copy the rest of the fields
-	std::memcpy(&commandR1O->unused, &command->unused, sizeof(ConCommandR1O) - sizeof(ConCommandBaseR1O));
-
-	// Set vtable
 	void* ptr = (void*)(G_server + 0x9C75F0);
+
+	*static_cast<ConCommandBaseR1O*>(commandR1O) = *convertToR1OBase(static_cast<ConCommandBaseR1*>(command));
 	commandR1O->vtable = ptr;
+	commandR1O->unused = command->unused;
+	commandR1O->unused2 = command->unused2;
+	commandR1O->m_pCommandCallback = command->m_pCommandCallback;
+	commandR1O->m_pCompletionCallback = command->m_pCompletionCallback;
+	commandR1O->m_nCallbackFlags = command->m_nCallbackFlags;
+	commandR1O->pad = command->pad;
+	std::copy(commandR1O->pad_0054, commandR1O->pad_0054 + 7, command->pad_0054);
 
 	return commandR1O;
 }
 
-ConVarR1O* convertVarToR1O(ConVarR1* var) {
+ConVarR1O* convertToR1O(ConVarR1* var) {
 	if (!var)
-		return nullptr;
-
+		return NULL;
 	ConVarR1O* varR1O = new ConVarR1O;
 
-	// Copy the base class
-	std::memcpy(static_cast<ConCommandBaseR1O*>(varR1O), convertBaseToR1O(static_cast<ConCommandBaseR1*>(var)), sizeof(ConCommandBaseR1O));
-
-	// Copy the rest of the fields
-	std::memcpy(&varR1O->m_pParent, &var->m_pParent, sizeof(ConVarR1O) - sizeof(ConCommandBaseR1O));
-
-	// Set vtables
+	*static_cast<ConCommandBaseR1O*>(varR1O) = *convertToR1OBase(static_cast<ConCommandBaseR1*>(var));
+	//varR1O->unk = varR1O->__vftable;
 	auto server = G_server;
 	void* ptr = (void*)(server + 0x9C7680);
 	void* ptr2 = (void*)(server + 0x9C74C0);
-	varR1O->vtable = ptr;
+
+	//char whatever[19 * 8];
+	//char whatever2[8 * 8];
+	//size_t bytes;
+	//static bool bDone = false;
+	//if (!bDone) {
+	//	ReadProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)GetModuleHandleA("vstdlib.dll") + 0x057778), &whatever, 19 * 8, &bytes);
+	//	WriteProcessMemory(GetCurrentProcess(), (void*)(server + 0x9C7680), &whatever, 19 * 8, &bytes);
+	//	ReadProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)GetModuleHandleA("vstdlib.dll") + 0x057778), &whatever2, 8 * 8, &bytes);
+	//	WriteProcessMemory(GetCurrentProcess(), (void*)(server + 0x9C74C0), &whatever2, 8 * 8, &bytes);
+	//}
+	varR1O->vtable = ptr;//varR1O->vtable;
 	varR1O->__vftable = ptr2;
 
-	// Handle m_pParent separately
-	varR1O->m_pParent = varR1O; // Self-reference, as in the original code
+	varR1O->m_pParent = varR1O;//convertToR1O(var->m_pParent);
+	varR1O->m_pszDefaultValue = var->m_pszDefaultValue;
+	varR1O->m_Value = var->m_Value;
+	varR1O->m_bHasMin = var->m_bHasMin;
+	varR1O->m_fMinVal = var->m_fMinVal;
+	varR1O->m_bHasMax = var->m_bHasMax;
+	varR1O->m_fMaxVal = var->m_fMaxVal;
+	varR1O->m_fnChangeCallbacks = var->m_fnChangeCallbacks;
+	//std::copy(var->pad, var->pad + 32, varR1O->pad);
 
 	return varR1O;
 }
 
-ConCommandBaseR1* convertBaseToR1(ConCommandBaseR1O* commandBaseR1O) {
+
+ConCommandBaseR1* convertToR1(ConCommandBaseR1O* commandBaseR1O) {
 	if (!commandBaseR1O)
-		return nullptr;
-
+		return NULL;
 	ConCommandBaseR1* commandBase = new ConCommandBaseR1;
-
-	// Copy everything except the last field (unk)
-	std::memcpy(commandBase, commandBaseR1O, sizeof(ConCommandBaseR1));
-
-	// Handle m_pNext separately
-	commandBase->m_pNext = nullptr;  // We'll handle this in the main conversion functions
+	//	static void* vstdlibptr = (void*)(((uintptr_t)GetModuleHandleA("vstdlib.dll")) + 0x0);
+	commandBase->vtable = commandBaseR1O->vtable;
+	commandBase->m_pNext = convertToR1(commandBaseR1O->m_pNext);
+	commandBase->m_bRegistered = commandBaseR1O->m_bRegistered;
+	commandBase->m_pszName = commandBaseR1O->m_pszName;
+	commandBase->m_pszHelpString = commandBaseR1O->m_pszHelpString;
+	commandBase->m_nFlags = commandBaseR1O->m_nFlags;
+	commandBase->pad = commandBaseR1O->pad;
 
 	return commandBase;
 }
 
-ConCommandR1* convertCommandToR1(ConCommandR1O* commandR1O) {
+ConCommandR1* convertToR1(ConCommandR1O* commandR1O) {
 	if (!commandR1O)
-		return nullptr;
-
+		return NULL;
 	ConCommandR1* command = new ConCommandR1;
-
-	// Copy the base class
-	std::memcpy(static_cast<ConCommandBaseR1*>(command), convertBaseToR1(static_cast<ConCommandBaseR1O*>(commandR1O)), sizeof(ConCommandBaseR1));
-
-	// Copy the rest of the fields
-	std::memcpy(&command->unused, &commandR1O->unused, sizeof(ConCommandR1) - sizeof(ConCommandBaseR1));
-
-	// Set vtable
 	static void* ptr = (void*)((uintptr_t)GetModuleHandleA("vstdlib.dll") + 0x0576A8);
-	command->vtable = ptr;
 
+	*static_cast<ConCommandBaseR1*>(command) = *convertToR1(static_cast<ConCommandBaseR1O*>(commandR1O));
+	command->vtable = ptr;
+	command->unused = commandR1O->unused;
+	command->unused2 = commandR1O->unused2;
+	command->m_pCommandCallback = commandR1O->m_pCommandCallback;
+	command->m_pCompletionCallback = commandR1O->m_pCompletionCallback;
+	command->m_nCallbackFlags = commandR1O->m_nCallbackFlags;
+	command->pad = commandR1O->pad;
+	std::copy(commandR1O->pad_0054, commandR1O->pad_0054 + 7, command->pad_0054);
 	return command;
 }
 
-ConVarR1* convertVarToR1(ConVarR1O* varR1O) {
+ConVarR1* convertToR1(ConVarR1O* varR1O) {
 	if (!varR1O)
-		return nullptr;
-
+		return NULL;
 	ConVarR1* var = new ConVarR1;
 
-	// Copy the base class
-	std::memcpy(static_cast<ConCommandBaseR1*>(var), convertBaseToR1(static_cast<ConCommandBaseR1O*>(varR1O)), sizeof(ConCommandBaseR1));
-
-	// Copy the rest of the fields
-	std::memcpy(&var->m_pParent, &varR1O->m_pParent, sizeof(ConVarR1) - sizeof(ConCommandBaseR1));
-
-	// Set vtables
+	*static_cast<ConCommandBaseR1*>(var) = *convertToR1(static_cast<ConCommandBaseR1O*>(varR1O));
 	static void* ptr = (void*)((uintptr_t)GetModuleHandleA("vstdlib.dll") + 0x057778);
 	static void* ptr2 = (void*)((uintptr_t)GetModuleHandleA("vstdlib.dll") + 0x057728);
-	var->vtable = ptr;
-	var->__vftable = ptr2;
 
-	// Handle m_pParent separately
-	var->m_pParent = var; // Self-reference, as in the original code
+	//char whatever[19 * 8];
+	//char whatever2[8 * 8];
+	//size_t bytes;
+	//static bool bDone = false;
+	//if (!bDone) {
+	//	ReadProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)GetModuleHandleA("vstdlib.dll") + 0x057778), &whatever, 19 * 8, &bytes);
+	//	WriteProcessMemory(GetCurrentProcess(), (void*)(G_server + 0x9C7680), &whatever, 19 * 8, &bytes);
+	//	ReadProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)GetModuleHandleA("vstdlib.dll") + 0x057778), &whatever2, 8 * 8, &bytes);
+	//	WriteProcessMemory(GetCurrentProcess(), (void*)(G_server + 0x9C74C0), &whatever2, 8 * 8, &bytes);
+	//}
+	var->vtable = ptr;//varR1O->vtable;
+	var->__vftable = ptr2;
+	var->m_pParent = var; //convertToR1(varR1O->m_pParent);
+	var->m_pszDefaultValue = varR1O->m_pszDefaultValue;
+	var->m_Value = varR1O->m_Value;
+	var->m_bHasMin = varR1O->m_bHasMin;
+	var->m_fMinVal = varR1O->m_fMinVal;
+	var->m_bHasMax = varR1O->m_bHasMax;
+	var->m_fMaxVal = varR1O->m_fMaxVal;
+	var->m_fnChangeCallbacks = varR1O->m_fnChangeCallbacks;
+	//std::copy(varR1O->pad, varR1O->pad + 32, var->pad);
 
 	return var;
 }
-
-// Main conversion functions
 ConCommandBaseR1O* convertToR1O(ConCommandBaseR1* commandBase) {
 	if (!commandBase)
-		return nullptr;
-
-	ConCommandBaseR1O* result;
+		return NULL;
 	if (ConCommandBaseR1OIsCVar((ConCommandBaseR1O*)commandBase)) {
-		result = (ConCommandBaseR1O*)convertVarToR1O((ConVarR1*)commandBase);
+		return convertToR1O((ConCommandR1*)commandBase);
 	}
 	else {
-		result = (ConCommandBaseR1O*)convertCommandToR1O((ConCommandR1*)commandBase);
+		return convertToR1O((ConVarR1*)commandBase);
 	}
-
-	// Handle m_pNext
-	result->m_pNext = 0;
-	return result;
-}
-
-ConCommandBaseR1* convertToR1(ConCommandBaseR1O* commandBaseR1O) {
-	if (!commandBaseR1O)
-		return nullptr;
-
-	ConCommandBaseR1* result;
-	if (ConCommandBaseR1OIsCVar(commandBaseR1O)) {
-		result = (ConCommandBaseR1*)convertVarToR1((ConVarR1O*)commandBaseR1O);
-	}
-	else {
-		result = (ConCommandBaseR1*)convertCommandToR1((ConCommandR1O*)commandBaseR1O);
-	}
-
-	result->m_pNext = 0;
-
-	return result;
+	return NULL;
 }
 void CCVar_RegisterConCommand(uintptr_t thisptr, ConCommandBaseR1O* pCommandBase) {
 	if (!strcmp_static(pCommandBase->m_pszName, "toggleconsole"))
@@ -284,7 +285,7 @@ void GlobalChangeCallback(ConVarR1* var, const char* pOldValue) {
 		var->m_Value.m_fValue = 1.0f;
 		var->m_Value.m_nValue = 1;
 	}
-		
+
 	auto it = ccBaseMap.find(var->m_pszName);
 	if (it == ccBaseMap.end())
 		return;
@@ -343,7 +344,6 @@ const ConCommandR1O* CCVar_FindCommand2(uintptr_t thisptr, const char* name) {
 	std::cout << __FUNCTION__ << ": " << name << std::endl;
 	return (ConCommandR1O*)((uintptr_t)OriginalCCVar_FindCommand2(cvarinterface, name));
 }
-
 void CCVar_CallGlobalChangeCallbacks(uintptr_t thisptr, ConVarR1O* var, const char* pOldString, float flOldValue) {
 	// if this crashes YOU ARE NOT CALLING CVAR REGISTER FOR A DLL YOU SHOULD BE CALLING CVAR REGISTER FOR
 	ConVarR1* r1var = (ConVarR1*)(ccBaseMap[var->m_pszName]->r1ptr);

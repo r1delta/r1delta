@@ -108,33 +108,6 @@ void replace_underscore(char* str) {
     char* pos = strstr(str, "_dir");
     if (pos) *pos = '\0';
 }
-
-const char* lastZipPackFilePath = "";
-typedef char (*CZipPackFile__PrepareType)(__int64* a1, unsigned __int64 a2, __int64 a3);
-CZipPackFile__PrepareType CZipPackFile__PrepareOriginal;
-char __fastcall CZipPackFile__Prepare(__int64* a1, unsigned __int64 a2, __int64 a3) {
-	auto filesystem_stdio = G_filesystem_stdio;
-    void* rettozipsearchpath = (void*)(filesystem_stdio + 0x17A43);
-    auto ret = CZipPackFile__PrepareOriginal(a1, a2, a3);
-    if (_ReturnAddress() == rettozipsearchpath) {
-        reinterpret_cast<__int64(*)(__int64 a1, const char* a2)>(filesystem_stdio + 0x51880)((uintptr_t(a1) + 72), lastZipPackFilePath);
-    }
-    return ret;
-}
-
-typedef void (*CBaseFileSystem__CSearchPath__SetPathType)(void* thisptr, __int16* id);
-CBaseFileSystem__CSearchPath__SetPathType CBaseFileSystem__CSearchPath__SetPathOriginal;
-void __fastcall CBaseFileSystem__CSearchPath__SetPath(void* thisptr, __int16* id) 
-{
-    CBaseFileSystem__CSearchPath__SetPathOriginal(thisptr, id);
-	auto filesystem_stdio = G_filesystem_stdio;
-	void* rettozipsearchpath = (void*)(filesystem_stdio + 0x017AFC);
-    auto CBaseFileSystem__FindOrAddPathIDInfo = reinterpret_cast<void* (*)(IFileSystem * fileSystem, __int16* id, int byRequestOnly)>(filesystem_stdio + 0x155C0);
-    if (_ReturnAddress() == rettozipsearchpath) {
-		*(__int64*)(uintptr_t(thisptr) + 8) = __int64(CBaseFileSystem__FindOrAddPathIDInfo((IFileSystem*)g_CVFileSystemInterface, id, -1));
-		//*(__int64*)(uintptr_t(thisptr) + 32) = 0x13371337;
-    }
-}
 int fs_sprintf_hook(char* Buffer, const char* Format, ...) {
     va_list args;
     va_start(args, Format);

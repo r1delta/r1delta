@@ -126,11 +126,10 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 
 		initialisePatchInstructions();
 
-#if 0
-		extern void InitDedicatedVtables();
-		InitDedicatedVtables();
-#endif
-
+		if (IsDedicatedServer()) {
+			extern void InitDedicatedVtables();
+			InitDedicatedVtables();
+		}
 		if(!IsNoConsole())
 			InitLoggingHooks();
 		StartFileCacheThread();

@@ -4,6 +4,7 @@
 #include "vsdk/public/tier1/utlmemory.h"
 #include "cvar.h"
 #include "squirrel.h"
+
 struct NetMessageCvar_t // sizeof=0x208
 {
 	char name[260];
@@ -35,6 +36,8 @@ void setinfopersist_cmd(const CCommand& args);
 bool IsValidUserInfo(const char* value);
 struct CBaseClient;
 extern CBaseClient* g_pClientArray;
+struct CBaseClientDS;
+extern CBaseClientDS* g_pClientArrayDS;
 
 extern SQInteger Script_ClientGetPersistentData(HSQUIRRELVM v, __int64 a2, __int64 a3);
 SQInteger Script_ClientGetPersistentData(HSQUIRRELVM v);
