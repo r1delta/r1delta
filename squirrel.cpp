@@ -220,11 +220,11 @@ bool GetSQVMFuncs() {
 	static bool initialized = false;
 	if (initialized) return true;
 	auto engine = IsDedicatedServer() ? G_engine_ds : G_engine;
-	g_pClientArray = (CBaseClient*)(engine + 0x2966340); // TODO(wanderer?): dedicated
-	g_pClientArrayDS = (CBaseClientDS*)(engine + 0x1C89C48); // TODO(wanderer?): dedicated
+	g_pClientArray = (CBaseClient*)(engine + 0x2966340);
+	g_pClientArrayDS = (CBaseClientDS*)(engine + 0x1C89C48);
 
 #if defined(_DEBUG)
-	if (!G_launcher) MessageBoxW(0, L"G_launcher is null in GetSQVMFuncs", L"ASSERT!!!", MB_ICONERROR | MB_OK);
+	if (!G_vscript) MessageBoxW(0, L"G_launcher is null in GetSQVMFuncs", L"ASSERT!!!", MB_ICONERROR | MB_OK);
 #endif
 
 	uintptr_t baseAddress = G_vscript;
