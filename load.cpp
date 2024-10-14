@@ -995,6 +995,8 @@ void InitAddons() {
 	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x1A1514 : 0x9AB70)), &fs_sprintf_hook, reinterpret_cast<LPVOID*>(NULL));
 	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x6EE10 : 0x02C30)), &CBaseFileSystem__FindFirst, reinterpret_cast<LPVOID*>(&oCBaseFileSystem__FindFirst));
 	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x86E00 : 0x1C4A0)), &CBaseFileSystem__FindNext, reinterpret_cast<LPVOID*>(&oCBaseFileSystem__FindNext));
+	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x7F180 : 0x14780)), &HookedHandleOpenRegularFile, reinterpret_cast<LPVOID*>(&HandleOpenRegularFileOriginal));
+	
 	MH_EnableHook(MH_ALL_HOOKS);
 }
 void __stdcall LoaderNotificationCallback(

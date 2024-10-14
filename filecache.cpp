@@ -17,19 +17,13 @@ bool FileCache::FileExists(const std::string& filePath) {
 }
 bool FileCache::TryReplaceFile(const char* pszFilePath) {
     std::string_view svFilePath(pszFilePath);
-
     if (V_IsAbsolutePath(pszFilePath)) {
         return false;
     }
-
     // Remove "/*/" prefix if present
     if (svFilePath.starts_with("/*/")) {
         svFilePath.remove_prefix(3);
     }
-
-    // Replace '/' with '\\'
-    std::string normalizedPath(svFilePath);
-    std::replace(normalizedPath.begin(), normalizedPath.end(), '/', '\\');
 
     // Single cache lookup
     std::vector<std::string_view> paths_to_check = { "r1delta\\" };
@@ -39,9 +33,16 @@ bool FileCache::TryReplaceFile(const char* pszFilePath) {
     }
 
     for (const auto& prefix : paths_to_check) {
-        std::string fullPath = std::string(prefix) + normalizedPath;
-        std::size_t hashedPath = fnv1a_hash(fullPath);
+        std::string fullPath;
+        fullPath.reserve(prefix.size() + svFilePath.size());
+        fullPath.append(prefix);
 
+        // Inline normalization (replace '/' with '\\')
+        for (char c : svFilePath) {
+            fullPath.push_back(c == '/' ? '\\' : c);
+        }
+
+        std::size_t hashedPath = fnv1a_hash(fullPath);
         {
             std::shared_lock<std::shared_mutex> lock(cacheMutex); // Use shared lock for reading
             if (cache.count(hashedPath) > 0) {
@@ -49,7 +50,6 @@ bool FileCache::TryReplaceFile(const char* pszFilePath) {
             }
         }
     }
-
     return false;
 }
 

@@ -46,6 +46,8 @@
 #include <intrin.h>
 #include "logging.h"
 #include "load.h"
+#include <shared_mutex>
+#include <string_view>
 #pragma intrinsic(_ReturnAddress)
 
 namespace fs = std::filesystem;
@@ -96,11 +98,71 @@ void StartFileCacheThread() {
         std::thread([]() { fileCache.UpdateCache(); }).detach();
     }
 }
+class FastFileSystemHook {
+private:
+	struct TrieNode {
+		std::unordered_map<std::string, std::unique_ptr<TrieNode>> children;
+		bool exists = false;
+		bool checked = false;
+	};
+	static TrieNode root;
+	static std::shared_mutex cacheMutex;
+	static bool checkAndCachePath(const char* fullPath) {
+		TrieNode* node = &root;
+		std::string currentPath;
+		const char* part = fullPath;
+		while (*part) {
+			while (*part && *part != '\\' && *part != '/') {
+				currentPath += *part++;
+			}
+			if (*part) part++; // Skip the separator
+			auto& child = node->children[currentPath];
+			if (!child) {
+				child = std::make_unique<TrieNode>();
+			}
+			node = child.get();
+			if (!node->checked) {
+				DWORD attributes = GetFileAttributesA(currentPath.c_str());
+				node->exists = (attributes != INVALID_FILE_ATTRIBUTES);
+				node->checked = true;
+			}
+			if (!node->exists) {
+				return false;
+			}
+			currentPath += '\\';
+		}
+		return true;
+	}
+public:
+	static bool shouldFailRead(const char* path) {
+		std::shared_lock<std::shared_mutex> lock(cacheMutex);
+		return !checkAndCachePath(path);
+	}
+	static void resetNonexistentCache() {
+		std::unique_lock<std::shared_mutex> writeLock(cacheMutex);
+		root = TrieNode();
+	}
+};
+
+FastFileSystemHook::TrieNode FastFileSystemHook::root;
+std::shared_mutex FastFileSystemHook::cacheMutex;
+
+__int64(*HandleOpenRegularFileOriginal)(__int64 a1, __int64 a2, char a3);
+
+// The hook function remains largely the same
+int64_t __fastcall HookedHandleOpenRegularFile(int64_t a1, int64_t a2, char a3) {
+	const char* path = reinterpret_cast<const char*>(a2 + 63);
+	if (FastFileSystemHook::shouldFailRead(path)) {
+		return 0;
+	}
+	return HandleOpenRegularFileOriginal(a1, a2, a3);
+}
 
 FileSystem_UpdateAddonSearchPathsType FileSystem_UpdateAddonSearchPathsTypeOriginal;
 bool done = false;
 __int64 __fastcall FileSystem_UpdateAddonSearchPaths(void* a1) {
     fileCache.RequestManualRescan();
+	FastFileSystemHook::resetNonexistentCache();
     return FileSystem_UpdateAddonSearchPathsTypeOriginal(a1);
 }
 
