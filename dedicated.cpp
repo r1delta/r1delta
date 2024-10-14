@@ -8,6 +8,7 @@
 
 #define VTABLE_UPDATE_FORCE 1
 
+#if defined(_DEBUG)
 
 // NOTE(mrsteyk): this is intentionally slow to make you aware of what you are doing.
 //                you must atone for your sins.
@@ -104,7 +105,6 @@ FindVTables(uintptr_t engine, uintptr_t engine_ds, vtableRef2Engines* ref) {
 }
 
 
-#if defined(_DEBUG)
 void
 InitDedicatedVtables() {
 	uintptr_t engine = (uintptr_t)LoadLibraryW(L"engine.dll");

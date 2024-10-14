@@ -2,6 +2,7 @@
 #include "dedicated.h"
 #include "logging.h"
 #include "load.h"
+#ifdef _DEBUG
 // Function pointer types for the hooked functions
 typedef bool (*ReadFromBufferFn)(void*, bf_read*);
 typedef bool (*WriteToBufferFn)(void*, bf_write*);
@@ -106,3 +107,4 @@ bool InitNetChanWarningHooks() {
 
     return true;
 }
+#endif
