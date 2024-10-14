@@ -764,14 +764,13 @@ void CL_Retry_f() {
 	}
 }
 
-typedef __int64 (*CBaseServer__FillServerInfoType)(__int64 a1, __int64 a2);
-CBaseServer__FillServerInfoType CBaseServer__FillServerInfoOriginal;
-__int64 __fastcall CBaseServer__FillServerInfo(__int64 a1, __int64 a2)
+typedef char (*SVC_ServerInfo__WriteToBufferType)(__int64 a1, __int64 a2);
+SVC_ServerInfo__WriteToBufferType SVC_ServerInfo__WriteToBufferOriginal;
+char __fastcall SVC_ServerInfo__WriteToBuffer(__int64 a1, __int64 a2)
 {
 	static const char* real_gamedir = "r1_dlc1";
-	auto ret = CBaseServer__FillServerInfoOriginal(a1, a2);
-
-	*(const char**)(a2 + 72) = real_gamedir;
+	*(const char**)(a1 + 72) = real_gamedir;
+	auto ret = SVC_ServerInfo__WriteToBufferOriginal(a1, a2);
 	return ret;
 }
 
@@ -1015,6 +1014,24 @@ bool SVC_UserMessage__WriteToBuffer(INetMessage* thisptr, __int64 target)
 	Msg("Writing %s on %p (Processed: %llu, Read: %llu, Written: %llu)\n", thisptr->ToString(), target, messageCounts[Processed], messageCounts[Read], messageCounts[Written]);
 	return ret;
 }
+
+void InitAddons() {
+	static bool done = false;
+	if (done) return;
+	done = true;
+	auto engine_base_spec = ENGINE_DLL_BASE;
+	auto filesystem_stdio = IsDedicatedServer() ? G_vscript : G_filesystem_stdio;
+
+	MH_CreateHook((LPVOID)(engine_base_spec + (IsDedicatedServer() ? 0x95AA0 : 0x127C70)), &FileSystem_UpdateAddonSearchPaths, reinterpret_cast<LPVOID*>(&FileSystem_UpdateAddonSearchPathsTypeOriginal));
+	MH_CreateHook((LPVOID)(engine_base_spec + (IsDedicatedServer() ? 0x950E0 : 0x1272B0)), &ReconcileAddonListFile, reinterpret_cast<LPVOID*>(&oReconcileAddonListFile));
+	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x1752B0 : 0x6A420)), &ReadFileFromVPKHook, reinterpret_cast<LPVOID*>(&readFileFromVPK));
+	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x750F0 : 0x9C20)), &ReadFromCacheHook, reinterpret_cast<LPVOID*>(&readFromCache));
+	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x80BB0 : 0x16250)), &AddVPKFile, reinterpret_cast<LPVOID*>(&AddVPKFileOriginal));
+	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x1A1514 : 0x9AB70)), &fs_sprintf_hook, reinterpret_cast<LPVOID*>(NULL));
+	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x6EE10 : 0x02C30)), &CBaseFileSystem__FindFirst, reinterpret_cast<LPVOID*>(&oCBaseFileSystem__FindFirst));
+	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x86E00 : 0x1C4A0)), &CBaseFileSystem__FindNext, reinterpret_cast<LPVOID*>(&oCBaseFileSystem__FindNext));
+	MH_EnableHook(MH_ALL_HOOKS);
+}
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
 	const LDR_DLL_NOTIFICATION_DATA* notification_data,
@@ -1078,7 +1095,7 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)(engine_base + 0x203C20), &NET_SetConVar__ReadFromBuffer, NULL);
 		MH_CreateHook((LPVOID)(engine_base + 0x202F80), &NET_SetConVar__WriteToBuffer, NULL);
 		
-		MH_CreateHook((LPVOID)(engine_base + 0xCA730), &CBaseServer__FillServerInfo, reinterpret_cast<LPVOID*>(&CBaseServer__FillServerInfoOriginal));
+		MH_CreateHook((LPVOID)(engine_base + 0x1FE3F0), &SVC_ServerInfo__WriteToBuffer, reinterpret_cast<LPVOID*>(&SVC_ServerInfo__WriteToBufferOriginal));
 		//MH_CreateHook((LPVOID)(server_base + 0x3667D0), &CAI_NetworkManager__DelayedInit, reinterpret_cast<LPVOID*>(&CAI_NetworkManager__DelayedInitOriginal));
 		//MH_CreateHook((LPVOID)(server_base + 0x36BC30), &sub_36BC30, reinterpret_cast<LPVOID*>(&sub_36BC30Original));
 		//MH_CreateHook((LPVOID)(server_base + 0x36C150), &sub_36C150, reinterpret_cast<LPVOID*>(&sub_36C150Original));
@@ -1086,11 +1103,11 @@ void __stdcall LoaderNotificationCallback(
 		//MH_CreateHook((LPVOID)(server_base + 0x31CE90), &unkallocfunc, reinterpret_cast<LPVOID*>(&unkallocfuncoriginal));
 		//MH_CreateHook((LPVOID)(server_base + 0x25A8E0), &CEntityFactoryDictionary__Create, reinterpret_cast<LPVOID*>(&CEntityFactoryDictionary__CreateOriginal));
 		//MH_CreateHook((LPVOID)(server_base + 0x363A50), &sub_363A50, reinterpret_cast<LPVOID*>(&sub_363A50Original));
-		MH_CreateHook((LPVOID)(engine_base + 0x21F9C0), &CEngineVGui__Init, reinterpret_cast<LPVOID*>(&CEngineVGui__InitOriginal));
-		MH_CreateHook((LPVOID)(engine_base + 0x21EB70), &CEngineVGui__HideGameUI, reinterpret_cast<LPVOID*>(&CEngineVGui__HideGameUIOriginal));
-		
-		
-		RegisterConCommand("toggleconsole", ToggleConsoleCommand, "Toggles the console", (1 << 17));
+		if (!IsDedicatedServer()) {
+			MH_CreateHook((LPVOID)(engine_base + 0x21F9C0), &CEngineVGui__Init, reinterpret_cast<LPVOID*>(&CEngineVGui__InitOriginal));
+			MH_CreateHook((LPVOID)(engine_base + 0x21EB70), &CEngineVGui__HideGameUI, reinterpret_cast<LPVOID*>(&CEngineVGui__HideGameUIOriginal));
+			RegisterConCommand("toggleconsole", ToggleConsoleCommand, "Toggles the console", (1 << 17));
+		}
 		RegisterConCommand("updatescriptdata", updatescriptdata_cmd, "Dumps the script data in the AI node graph to disk", FCVAR_GAMEDLL);
 		RegisterConCommand("bot_dummy", AddBotDummyConCommand, "Adds a bot.", FCVAR_GAMEDLL | FCVAR_CHEAT);
 
@@ -1128,7 +1145,9 @@ void __stdcall LoaderNotificationCallback(
 			MH_CreateHook((LPVOID)(launcher + 0xB7A0), &CSquirrelVM__PrintFunc3, NULL);
 			MH_CreateHook((LPVOID)(engine_base + 0x23E20), &SVC_Print_Process_Hook, NULL);
 			MH_CreateHook((LPVOID)(engine_base + 0x22DD0), &CBaseClientState__InternalProcessStringCmd, reinterpret_cast<LPVOID*>(&CBaseClientState__InternalProcessStringCmdOriginal));
-			
+			MH_CreateHook((LPVOID)(engine_base + 0x136E70), &sub_136E70, reinterpret_cast<LPVOID*>(&sub_136E70Original)); // fixes some vpk issue
+			MH_CreateHook((LPVOID)(engine_base + 0x72360), &cl_DumpPrecacheStats, NULL);
+
 			//MH_CreateHook((LPVOID)(engine_base_spec + 0x473550), &sub_180473550, NULL);
 
 			//MH_CreateHook((LPVOID)(engine_base_spec + 0x1168B0), &COM_StringCopy, reinterpret_cast<LPVOID*>(&COM_StringCopyOriginal));
@@ -1136,7 +1155,6 @@ void __stdcall LoaderNotificationCallback(
 		}
 		MH_CreateHook((LPVOID)(G_vscript + (IsDedicatedServer() ? 0x0B660 : 0xB640)), &CSquirrelVM__PrintFunc1, NULL);
 
-		MH_CreateHook((LPVOID)(engine_base + 0x136E70), &sub_136E70, reinterpret_cast<LPVOID*>(&sub_136E70Original));
 		//MH_CreateHook((LPVOID)(engine_base_spec + 0x1C79A0), &sub_1801C79A0, reinterpret_cast<LPVOID*>(&sub_1801C79A0Original));
 		//
 		//
@@ -1148,17 +1166,14 @@ void __stdcall LoaderNotificationCallback(
 		// Rebuild CHL2_Player's precache to take our stuff into account
 		MH_CreateHook(LPVOID(server_base + 0x41E070), &CHL2_Player_Precache, 0);
 		
-		MH_CreateHook((LPVOID)(engine_base + 0x72360), &cl_DumpPrecacheStats, NULL);
 		MH_EnableHook(MH_ALL_HOOKS);
 		std::cout << "did hooks" << std::endl;
 	}
 
 	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"engine_ds.dll") == 0) {
 		G_engine_ds = (uintptr_t)notification_data->Loaded.DllBase;
-		
-		if (IsDedicatedServer()) {
-			InitDedicated();
-		}
+		InitAddons();
+		InitDedicated();		
 	}
 
 	if (IsDedicatedServer() && strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"dedicated.dll") == 0)
@@ -1172,20 +1187,7 @@ void __stdcall LoaderNotificationCallback(
 			MH_CreateHook((LPVOID)(G_engine + 0x1305E0), &ExecuteConfigFile, NULL);
 			RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
 		}
-
-		auto engine_base_spec = ENGINE_DLL_BASE;
-		auto filesystem_stdio = IsDedicatedServer() ? G_vscript : G_filesystem_stdio;
-
-		MH_CreateHook((LPVOID)(engine_base_spec + 0x127C70), &FileSystem_UpdateAddonSearchPaths, reinterpret_cast<LPVOID*>(&FileSystem_UpdateAddonSearchPathsTypeOriginal));
-		MH_CreateHook((LPVOID)(filesystem_stdio + 0x6A420), &ReadFileFromVPKHook, reinterpret_cast<LPVOID*>(&readFileFromVPK));
-		MH_CreateHook((LPVOID)(filesystem_stdio + 0x9C20), &ReadFromCacheHook, reinterpret_cast<LPVOID*>(&readFromCache));
-		MH_CreateHook((LPVOID)(filesystem_stdio + 0x16250), &AddVPKFile, reinterpret_cast<LPVOID*>(&AddVPKFileOriginal));
-		MH_CreateHook((LPVOID)(filesystem_stdio + 0x9AB70), &fs_sprintf_hook, reinterpret_cast<LPVOID*>(NULL));
-		MH_CreateHook((LPVOID)(filesystem_stdio + 0x02C30), &CBaseFileSystem__FindFirst, reinterpret_cast<LPVOID*>(&oCBaseFileSystem__FindFirst));
-		MH_CreateHook((LPVOID)(filesystem_stdio + 0x1C4A0), &CBaseFileSystem__FindNext, reinterpret_cast<LPVOID*>(&oCBaseFileSystem__FindNext));
-		MH_CreateHook((LPVOID)(engine_base_spec + 0x1272B0), &ReconcileAddonListFile, reinterpret_cast<LPVOID*>(&oReconcileAddonListFile));
-		MH_EnableHook(MH_ALL_HOOKS);
-
+		InitAddons();
 	}
 	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"client.dll") == 0) {
 		G_client = (uintptr_t)notification_data->Loaded.DllBase;
