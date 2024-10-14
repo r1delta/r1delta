@@ -726,9 +726,9 @@ using SQCallFn = SQRESULT(*)(HSQUIRRELVM, SQInteger, SQBool, SQBool);
 void run_script(const CCommand& args, R1SquirrelVM* (*GetVMPtr)())
 {
 	auto launcher = G_launcher;
-	SQCompileBufferFn sq_compilebuffer = reinterpret_cast<SQCompileBufferFn>(launcher + 0x1A5E0);
-	BaseGetRootTableFn base_getroottable = reinterpret_cast<BaseGetRootTableFn>(launcher + 0x56440);
-	SQCallFn sq_call = reinterpret_cast<SQCallFn>(launcher + 0x18C40);
+	SQCompileBufferFn sq_compilebuffer = reinterpret_cast<SQCompileBufferFn>(launcher + (IsDedicatedServer() ? 0x1A6C0 : 0x1A5E0));
+	BaseGetRootTableFn base_getroottable = reinterpret_cast<BaseGetRootTableFn>(launcher + (IsDedicatedServer() ? 0x56520 : 0x56440));
+	SQCallFn sq_call = reinterpret_cast<SQCallFn>(launcher + (IsDedicatedServer() ? 0x18D20 : 0x18C40));
 
 	std::string code = args.ArgS();
 	R1SquirrelVM* vm = GetVMPtr();
