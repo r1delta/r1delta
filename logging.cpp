@@ -124,6 +124,8 @@ void Cbuf_AddText(int a1, const char* a2, unsigned int a3) {
 	if ((returnAddress == returnToKeyInput) || (returnAddress == returnToKeyInput2) || (returnAddress == returnToKeyInput3)) {
 		shouldLog = false;
 	}
+	if (!strcmp(a2, "startupmenu")) // if someone can send commands into this buffer they can do far worse at that stage than disconnecting the client
+		Cbuf_AddTextOriginal(a1, "net_secure 0\neverything_unlocked 1\n", a3);
 	size_t len = strlen(a2);
 	if (shouldLog) {
 		if (len > 0 && (a2[len - 1] == '\n' || a2[len - 1] == '\r')) {
