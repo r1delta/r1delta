@@ -47,7 +47,7 @@ public:
 
 	void registerFunctions(void* vmPtr, ScriptContext context) {
 		typedef int64_t(*AddSquirrelRegType)(void*, SQFuncRegistrationInternal*);
-		AddSquirrelRegType AddSquirrelReg = reinterpret_cast<AddSquirrelRegType>(G_launcher + 0x8E50);
+		AddSquirrelRegType AddSquirrelReg = reinterpret_cast<AddSquirrelRegType>(G_vscript + (IsDedicatedServer() ? 0x8E70 : 0x8E50));
 
 		for (const auto& func : m_functions) {
 			if (func->GetContext() == context) {

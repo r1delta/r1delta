@@ -211,55 +211,6 @@ InitDedicatedVtables() {
 }
 #endif
 
-typedef void (*CUtlBuffer__SetExternalBufferType)(__int64 a1, __int64 a2, __int64 a3, __int64 a4, char a5);
-CUtlBuffer__SetExternalBufferType CUtlBuffer__SetExternalBufferOriginal;
-char* textbuf = 0;
-__int64 pdefsize = 0;
-void __fastcall CUtlBuffer__SetExternalBuffer(__int64 a1, __int64 a2, __int64 a3, __int64 a4, char a5)
-{
-	uintptr_t engineDS = G_engine_ds;
-	if (uintptr_t(_ReturnAddress()) == (engineDS + 0x169F03)) {
-		if (!textbuf)
-			textbuf = (char*)malloc(0x50238);
-		a2 = (__int64)(textbuf);
-		a3 = 0x50238;
-	}
-	return CUtlBuffer__SetExternalBufferOriginal(a1, a2, a3, a4, a5);
-}
-
-__int64 __fastcall sub_160130(__int64* a1, __int64* a2)
-{
-	__int64 result; // rax
-
-	*a1 = (__int64)textbuf;
-	result = pdefsize;
-	*a2 = pdefsize;
-	return result;
-}
-
-long long* __fastcall unkfunc(long long* a1)
-{
-	*a1 = 0i64;
-	a1[1] = 0i64;
-	a1[2] = 0i64;
-	a1[3] = 0i64;
-	return a1;
-}
-
-typedef char(__fastcall* ParsePDATAType)(__int64 a1, __int64 a2, __int64 a3, const char* a4);
-ParsePDATAType ParsePDATAOriginal;
-char __fastcall ParsePDEF(__int64 a1, __int64 a2, __int64 a3, const char* a4)
-{
-	char v10[53264];
-	auto whatthefuck = (__int64 (*)(__int64 a1, int* a2, __int64 a3, int a4, unsigned int a5, unsigned int a6, unsigned int a7))(G_engine + 0x42A450);
-	a1 = (__int64)(textbuf);
-	pdefsize = a2;
-	auto ret = ParsePDATAOriginal(a1, a2, a3, a4);
-	int whatever = a2;
-	memcpy(v10, (void*)a1, sizeof(v10));
-	int v4 = whatthefuck(a1, &whatever, (__int64)v10, a2, 1u, 0, 0);
-	return ret;
-}
 
 typedef __int64(*NET_OutOfBandPrintf_t)(int, void*, const char*, ...);
 NET_OutOfBandPrintf_t Original_NET_OutOfBandPrintf = NULL;
@@ -445,10 +396,6 @@ void InitDedicated()
 
 		FlushInstructionCache(GetCurrentProcess(), address, sizeof(uintptr_t));
 	}
-
-	MH_CreateHook((LPVOID)(engine_ds + 0x1693D0), &ParsePDEF, reinterpret_cast<LPVOID*>(&ParsePDATAOriginal));
-	MH_CreateHook((LPVOID)(engine_ds + 0x3259C0), &CUtlBuffer__SetExternalBuffer, reinterpret_cast<LPVOID*>(&CUtlBuffer__SetExternalBufferOriginal));
-	MH_CreateHook((LPVOID)(engine_ds + 0x160130), &sub_160130, reinterpret_cast<LPVOID*>(NULL));
 	MH_CreateHook((LPVOID)(engine_ds + 0xA1B90), &Host_InitDedicated, reinterpret_cast<LPVOID*>(&Host_InitDedicatedOriginal));
 
 	MH_EnableHook(MH_ALL_HOOKS);

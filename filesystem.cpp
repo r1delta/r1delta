@@ -118,7 +118,7 @@ int fs_sprintf_hook(char* Buffer, const char* Format, ...) {
         if (strstr(a1, "singlechunk") != nullptr) {
             va_end(args);
 
-			void* rettocheckformorefiles = (void*)(G_filesystem_stdio + 0x6D6CB);
+			void* rettocheckformorefiles = (void*)(G_filesystem_stdio + IsDedicatedServer() ? 0x1783EB : 0x6D6CB);
             if (rettocheckformorefiles == _ReturnAddress()) {
                 Buffer[0] = 0;
                 return 0;// sprintf(Buffer, "%s", "DOESNOTEXIST.vpk");

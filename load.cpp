@@ -743,11 +743,6 @@ char __fastcall sub_4C460(__int64 a1)
 
 	return result;
 }
-__int64 __fastcall sub_14E980(__int64 a1, __int64 a2, __int64 a3, int a4)
-{
-	auto ConstructPersistenceCachedDefFileMsg = (__int64 (*)(__int64 a1, int a2))(G_engine + 0x1FE890);
-	return ConstructPersistenceCachedDefFileMsg(a1, 0);
-}
 void COM_Init()
 {
 	COM_InitOriginal();
@@ -785,7 +780,7 @@ typedef void (*ConCommandConstructorType)(
 	ConCommandR1* newCommand, const char* name, void (*callback)(const CCommand&), const char* helpString, int flags, void* parent);
 
 void RegisterConCommand(const char* commandName, void (*callback)(const CCommand&), const char* helpString, int flags) {
-	ConCommandConstructorType conCommandConstructor = (ConCommandConstructorType)(G_engine + 0x4808F0);
+	ConCommandConstructorType conCommandConstructor = (ConCommandConstructorType)(IsDedicatedServer() ? (G_engine_ds + 0x31F260) : (G_engine + 0x4808F0));
 	ConCommandR1* newCommand = new ConCommandR1;
 	
 	conCommandConstructor(newCommand, commandName, callback, helpString, flags, nullptr);
@@ -1129,7 +1124,6 @@ void __stdcall LoaderNotificationCallback(
 			MH_CreateHook((LPVOID)(engine_base_spec + 0x1170A0), &COM_Init, reinterpret_cast<LPVOID*>(&COM_InitOriginal));
 			MH_CreateHook((LPVOID)(engine_base_spec + 0x55C00), &CL_Retry_f, reinterpret_cast<LPVOID*>(&CL_Retry_fOriginal));
 			MH_CreateHook((LPVOID)(engine_base_spec + 0x8EAF0), &Con_ColorPrintf, NULL);
-			MH_CreateHook((LPVOID)(G_launcher + 0xB640), &CSquirrelVM__PrintFunc1, NULL);
 			MH_CreateHook((LPVOID)(launcher + 0xB6F0), &CSquirrelVM__PrintFunc2, NULL);
 			MH_CreateHook((LPVOID)(launcher + 0xB7A0), &CSquirrelVM__PrintFunc3, NULL);
 			MH_CreateHook((LPVOID)(engine_base + 0x23E20), &SVC_Print_Process_Hook, NULL);
@@ -1140,6 +1134,8 @@ void __stdcall LoaderNotificationCallback(
 			//MH_CreateHook((LPVOID)(engine_base_spec + 0x1168B0), &COM_StringCopy, reinterpret_cast<LPVOID*>(&COM_StringCopyOriginal));
 			//MH_CreateHook((LPVOID)(engine_base_spec + 0x1C79A0), &DataTable_SetupReceiveTableFromSendTable, reinterpret_cast<LPVOID*>(&DataTable_SetupReceiveTableFromSendTableOriginal));
 		}
+		MH_CreateHook((LPVOID)(G_vscript + (IsDedicatedServer() ? 0x0B660 : 0xB640)), &CSquirrelVM__PrintFunc1, NULL);
+
 		MH_CreateHook((LPVOID)(engine_base + 0x136E70), &sub_136E70, reinterpret_cast<LPVOID*>(&sub_136E70Original));
 		//MH_CreateHook((LPVOID)(engine_base_spec + 0x1C79A0), &sub_1801C79A0, reinterpret_cast<LPVOID*>(&sub_1801C79A0Original));
 		//
@@ -1172,10 +1168,9 @@ void __stdcall LoaderNotificationCallback(
 
 	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"engine.dll") == 0) {
 		G_engine = (uintptr_t)notification_data->Loaded.DllBase;
-		RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
 		if (!IsDedicatedServer()) {
 			MH_CreateHook((LPVOID)(G_engine + 0x1305E0), &ExecuteConfigFile, NULL);
-
+			RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
 		}
 
 		auto engine_base_spec = ENGINE_DLL_BASE;
