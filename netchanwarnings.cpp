@@ -11,46 +11,59 @@ typedef bool (*ProcessFn)(void*);
 ReadFromBufferFn original_ReadFromBuffer[sizeof(netMessages) / sizeof(netMessages[0])];
 WriteToBufferFn original_WriteToBuffer[sizeof(netMessages) / sizeof(netMessages[0])];
 ProcessFn original_Process[sizeof(netMessages) / sizeof(netMessages[0])];
-
-// Hook functions
-bool HookReadFromBuffer(void* thisPtr, bf_read* buffer) {
+// Helper function to get the index of the netMessage
+int GetNetMessageIndex(void* thisPtr) {
     for (size_t i = 0; i < sizeof(netMessages) / sizeof(netMessages[0]); i++) {
-        if (original_ReadFromBuffer[i] == (ReadFromBufferFn)((*(void***)thisPtr)[4])) {
-            bool result = original_ReadFromBuffer[i](thisPtr, buffer);
-            if (!result) {
-                Warning("ReadFromBuffer failed for %s\n", netMessages[i].name);
-            }
-            return result;
+        void* vtable = nullptr;
+        if (G_engine && netMessages[i].offset_engine != 0) {
+            vtable = (void*)((uintptr_t)G_engine + netMessages[i].offset_engine);
         }
+        else if (G_engine_ds && netMessages[i].offset_engine_ds != 0) {
+            vtable = (void*)((uintptr_t)G_engine_ds + netMessages[i].offset_engine_ds);
+        }
+        if (vtable == *(void**)thisPtr) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+bool HookReadFromBuffer(void* thisPtr, bf_read* buffer) {
+    int index = GetNetMessageIndex(thisPtr);
+    if (index != -1) {
+        bool result = original_ReadFromBuffer[index](thisPtr, buffer);
+        if (!result) {
+            Warning("ReadFromBuffer failed for %s\n", netMessages[index].name);
+        }
+        return result;
     }
     return false;
 }
 
 bool HookWriteToBuffer(void* thisPtr, bf_write* buffer) {
-    for (size_t i = 0; i < sizeof(netMessages) / sizeof(netMessages[0]); i++) {
-        if (original_WriteToBuffer[i] == (WriteToBufferFn)((*(void***)thisPtr)[5])) {
-            bool result = original_WriteToBuffer[i](thisPtr, buffer);
-            if (!result) {
-                Warning("WriteToBuffer failed for %s\n", netMessages[i].name);
-            }
-            return result;
+    int index = GetNetMessageIndex(thisPtr);
+    if (index != -1) {
+        bool result = original_WriteToBuffer[index](thisPtr, buffer);
+        if (!result) {
+            Warning("WriteToBuffer failed for %s\n", netMessages[index].name);
         }
+        return result;
     }
     return false;
 }
 
 bool HookProcess(void* thisPtr) {
-    for (size_t i = 0; i < sizeof(netMessages) / sizeof(netMessages[0]); i++) {
-        if (original_Process[i] == (ProcessFn)((*(void***)thisPtr)[3])) {
-            bool result = original_Process[i](thisPtr);
-            if (!result) {
-                Warning("Process failed for %s\n", netMessages[i].name);
-            }
-            return result;
+    int index = GetNetMessageIndex(thisPtr);
+    if (index != -1) {
+        bool result = original_Process[index](thisPtr);
+        if (!result) {
+            Warning("Process failed for %s\n", netMessages[index].name);
         }
+        return result;
     }
     return false;
 }
+
 
 bool InitNetChanWarningHooks() {
     for (size_t i = 0; i < sizeof(netMessages) / sizeof(netMessages[0]); i++) {
@@ -81,8 +94,8 @@ bool InitNetChanWarningHooks() {
                 vft[3] = (void*)HookProcess;
 
                 // Restore the original protection
-                //DWORD temp;
-                //VirtualProtect(vft, sizeof(void*) * 6, oldProtect, &temp);
+                DWORD temp;
+                VirtualProtect(vft, sizeof(void*) * 6, oldProtect, &temp);
             }
             else {
                 Warning("Failed to change memory protection for vtable of %s\n", netMessages[i].name);
