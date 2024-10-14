@@ -5,7 +5,7 @@
 #include <crtdbg.h>	
 #include <new>
 #include "windows.h"
-#include "tier0_orig.h"
+
 #include <iostream>
 #include "cvar.h"
 #include <winternl.h>  // For UNICODE_STRING.

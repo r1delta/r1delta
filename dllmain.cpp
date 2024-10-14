@@ -126,11 +126,8 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 
 		initialisePatchInstructions();
 
-		if (IsDedicatedServer()) {
-			extern void InitDedicatedVtables();
-			InitDedicatedVtables();
-		}
-		if(!IsNoConsole())
+
+		if(!IsNoConsole() && !IsDedicatedServer())
 			InitLoggingHooks();
 		StartFileCacheThread();
 
@@ -139,7 +136,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 			reinterpret_cast<LdrRegisterDllNotificationFunc>(::GetProcAddress(
 				::GetModuleHandleW(L"ntdll.dll"), "LdrRegisterDllNotification"));
 		reg_fn(0, &LoaderNotificationCallback, 0, &dll_notification_cookie_);
-		
+
 		if (!G_is_dedi) {
 			G_launcher = (uintptr_t)GetModuleHandleW(L"launcher.dll");
 			G_vscript = G_launcher;
@@ -147,6 +144,14 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 			doBinaryPatchForFile(*ndata);
 			FreeModuleNotificationData(ndata);
 		}
+		else {
+			G_launcher = (uintptr_t)GetModuleHandleW(L"dedicated.dll");
+			G_vscript = G_launcher;
+			LDR_DLL_LOADED_NOTIFICATION_DATA* ndata = GetModuleNotificationData(L"dedicated.dll");
+			doBinaryPatchForFile(*ndata);
+			FreeModuleNotificationData(ndata);
+		}
+
 		break; 
 	}
 	case DLL_THREAD_ATTACH:

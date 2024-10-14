@@ -97,7 +97,7 @@ int __cdecl vsnprintf_l_hk(
 			return -1;
 		}
 
-		if (!recursive && is_interesting_format(Format)) {
+		if (!recursive && is_interesting_format(Format) && strlen(Buffer) < 512) {
 			recursive = true;
 			Msg("%s\n", Buffer);
 			recursive = false;
@@ -244,6 +244,12 @@ void ConVar_PrintDescription(const ConCommandBaseR1* pVar)
 	isPrintingCVarDesc = true;
 	ConVar_PrintDescriptionOriginal(pVar);
 	isPrintingCVarDesc = false;
+	//static char* lastCVarName = 0;
+	//if (lastCVarName && !strcmp(pVar->m_pszName, lastCVarName))
+	//	return;
+	//if (lastCVarName)
+	//	free(lastCVarName);
+	//lastCVarName = _strdup(pVar->m_pszName);
 	const char* pStr = pVar->m_pszHelpString;
 	if (pStr && *pStr)
 	{
@@ -290,7 +296,7 @@ void MsgHook(const char* pMsg, ...) {
 	va_start(args, pMsg);
 	char* formatted = SafeFormat(pMsg, args);
 	va_end(args);
-
+	if (!IsDedicatedServer())
 	printf("%s", formatted);
 	if (MsgOriginal) {
 		MsgOriginal("%s", formatted);

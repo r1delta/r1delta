@@ -1,22 +1,13 @@
 #include "dedicated.h"
 #include <intrin.h>
-
+#include "logging.h"
 #include "load.h"
-
+#include "dedicated.h"
+#include "netchanwarnings.h"
 #pragma intrinsic(_ReturnAddress)
 
 #define VTABLE_UPDATE_FORCE 1
 
-struct vtableRef2Engines {
-#if defined(_DEBUG)
-	const char* name;
-#endif
-	uintptr_t offset_engine;
-	uintptr_t offset_engine_ds;
-};
-
-#if defined(_DEBUG)
-#define VTABLEREF2ENGINES(N, E, EDS) { (N), (E), (EDS) }
 
 // NOTE(mrsteyk): this is intentionally slow to make you aware of what you are doing.
 //                you must atone for your sins.
@@ -112,68 +103,6 @@ FindVTables(uintptr_t engine, uintptr_t engine_ds, vtableRef2Engines* ref) {
 	return result;
 }
 
-#else
-#define VTABLEREF2ENGINES(N, E, EDS) { (E), (EDS) }
-#endif
-
-#if !defined(_DEBUG)
-const
-#endif
-vtableRef2Engines netMessages[] = {
-	VTABLEREF2ENGINES("Base_CmdKeyValues", 0x63E5D8, 0x4324B8),
-	VTABLEREF2ENGINES("CLC_BaselineAck", 0x607898, 0x4162C8),
-	VTABLEREF2ENGINES("CLC_ClientInfo", 0x60FD48, 0x4164E8),
-	VTABLEREF2ENGINES("CLC_ClientSayText", 0x5F9B38, 0x416738),
-	VTABLEREF2ENGINES("CLC_ClientTick", 0x608668, 0x416088),
-	VTABLEREF2ENGINES("CLC_CmdKeyValues", 0x63EAF8, 0x4329E8),
-	VTABLEREF2ENGINES("CLC_DurangoVoiceData", 0x621258, 0x416238),
-	VTABLEREF2ENGINES("CLC_FileCRCCheck", 0x60FF58, 0x416578),
-	VTABLEREF2ENGINES("CLC_ListenEvents", 0x5F6E48, 0x40F758),
-	VTABLEREF2ENGINES("CLC_LoadingProgress", 0x60FDD8, 0x416608),
-	VTABLEREF2ENGINES("CLC_Move", 0x6086F8, 0x416118),
-	VTABLEREF2ENGINES("CLC_PersistenceClientToken", 0x621378, 0x4163E8),
-	VTABLEREF2ENGINES("CLC_PersistenceRequestSave", 0x60FE68, 0x416698),
-	VTABLEREF2ENGINES("CLC_RespondCvarValue", 0x5F6928, 0x40F0F8),
-	VTABLEREF2ENGINES("CLC_SaveReplay", 0x6212E8, 0x416358),
-	VTABLEREF2ENGINES("CLC_SplitPlayerConnect", 0x5F6DB8, 0x40F6C8),
-	VTABLEREF2ENGINES("CLC_VoiceData", 0x6211C8, 0x4161A8),
-	VTABLEREF2ENGINES("CNetMessage", 0x5F35F8, 0x40AA58),
-	VTABLEREF2ENGINES("NET_SetConVar", 0x5F6C98, 0x40F5A8),
-	VTABLEREF2ENGINES("NET_SignonState", 0x5F6ED8, 0x40F7E8),
-	VTABLEREF2ENGINES("NET_SplitScreenUser", 0x63ED38, 0x432CD8),
-	VTABLEREF2ENGINES("NET_StringCmd", 0x5F55F8, 0x40B648),
-	VTABLEREF2ENGINES("SVC_BSPDecal", 0x5F6508, 0x40EC48),
-	VTABLEREF2ENGINES("SVC_ClassInfo", 0x5F6D28, 0x40F638),
-	VTABLEREF2ENGINES("SVC_CmdKeyValues", 0x63EB88, 0x432A78),
-	VTABLEREF2ENGINES("SVC_CreateStringTable", 0x63EDC8, 0x432D68),
-	VTABLEREF2ENGINES("SVC_CrosshairAngle", 0x5F5F38, 0x40E728),
-	VTABLEREF2ENGINES("SVC_DurangoVoiceData", 0x5F5E18, 0x40E608),
-	VTABLEREF2ENGINES("SVC_EntityMessage", 0x5F5FC8, 0x40E7B8),
-	VTABLEREF2ENGINES("SVC_FixAngle", 0x5F5EA8, 0x40E698),
-	VTABLEREF2ENGINES("SVC_GameEvent", 0x5F6598, 0x40ECD8),
-	VTABLEREF2ENGINES("SVC_GameEventList", 0x5F66B8, 0x40EDF8),
-	VTABLEREF2ENGINES("SVC_GetCvarValue", 0x5F6748, 0x40EE88),
-	VTABLEREF2ENGINES("SVC_Menu", 0x5F60E8, 0x40E8D8),
-	VTABLEREF2ENGINES("SVC_PersistenceBaseline", 0x5F58D8, 0x40E288),
-	VTABLEREF2ENGINES("SVC_PersistenceDefFile", 0x5F57A8, 0x40E1F8),
-	VTABLEREF2ENGINES("SVC_PersistenceNotifySaved", 0x5F5A08, 0x40E3B8),
-	VTABLEREF2ENGINES("SVC_PersistenceUpdateVar", 0x5F5968, 0x40E318),
-	VTABLEREF2ENGINES("SVC_PlaylistChange", 0x63EC18, 0x432B08),
-	VTABLEREF2ENGINES("SVC_Playlists", 0x5F5CF8, 0x40E4E8),
-	VTABLEREF2ENGINES("SVC_Print", 0x5F5718, 0x40E168),
-	VTABLEREF2ENGINES("SVC_SendTable", 0x5F63E8, 0x40EB28),
-	VTABLEREF2ENGINES("SVC_ServerInfo", 0x5F6358, 0x40EA98),
-	VTABLEREF2ENGINES("SVC_ServerTick", 0x5F5688, 0x40E0D8),
-	VTABLEREF2ENGINES("SVC_SetPause", 0x5F5C68, 0x40E458),
-	VTABLEREF2ENGINES("SVC_SetTeam", 0x63ECA8, 0x432B98),
-	VTABLEREF2ENGINES("SVC_Snapshot", 0x5F6628, 0x40ED68),
-	VTABLEREF2ENGINES("SVC_Sounds", 0x5F36C8, 0x40AB28),
-	VTABLEREF2ENGINES("SVC_SplitScreen", 0x5F67D8, 0x40EF18),
-	VTABLEREF2ENGINES("SVC_TempEntities", 0x5F6058, 0x40E848),
-	VTABLEREF2ENGINES("SVC_UpdateStringTable", 0x5F6478, 0x40EBB8),
-	VTABLEREF2ENGINES("SVC_UserMessage", 0x5F6BD8, 0x40F518),
-	VTABLEREF2ENGINES("SVC_VoiceData", 0x5F5D88, 0x40E578),
-};
 
 #if defined(_DEBUG)
 void
@@ -267,7 +196,9 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 {
 	//CModule engine("engine.dll", (uintptr_t)LoadLibraryA("engine.dll"));
 	//CModule engineDS("engine_ds.dll");
-	uintptr_t engine = (uintptr_t)LoadLibraryW(L"engine.dll");
+	//InitDedicatedVtables();
+	uintptr_t engine = (uintptr_t)LoadLibraryA("engine.dll");
+	G_engine = engine;
 	uintptr_t engineDS = G_engine_ds;
 
 	NET_CreateNetChannelOriginal = NET_CreateNetChannelType(engine + 0x1F1B10);
@@ -340,6 +271,10 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 	MH_EnableHook(MH_ALL_HOOKS);
 	reinterpret_cast<char(__fastcall*)(__int64, CreateInterfaceFn)>((uintptr_t)(engine) + 0x01A04A0)(0, (CreateInterfaceFn)(engineDS + 0xE9000)); // connect nondedi engine
 	reinterpret_cast<void(__fastcall*)(int, void*)>((uintptr_t)(engine) + 0x47F580)(0, 0); // register nondedi engine cvars
+#ifdef _DEBUG
+	if (!InitNetChanWarningHooks())
+		MessageBoxA(NULL, "Failed to initialize warning hooks", "ERROR", 16);
+#endif
 	return Host_InitDedicatedOriginal(a1, a2, a3);
 }
 
@@ -397,6 +332,8 @@ void InitDedicated()
 		FlushInstructionCache(GetCurrentProcess(), address, sizeof(uintptr_t));
 	}
 	MH_CreateHook((LPVOID)(engine_ds + 0xA1B90), &Host_InitDedicated, reinterpret_cast<LPVOID*>(&Host_InitDedicatedOriginal));
-
+	MH_CreateHook((LPVOID)(engine_ds + 0x31EB20), &ConVar_PrintDescription, reinterpret_cast<LPVOID*>(&ConVar_PrintDescriptionOriginal));
+	MH_CreateHook((LPVOID)(engine_ds + 0x310780), &sub_1804722E0, 0);
+	//MH_CreateHook((LPVOID)(engine_ds + 0x360230), &vsnprintf_l_hk, NULL);
 	MH_EnableHook(MH_ALL_HOOKS);
 }

@@ -5,6 +5,7 @@
 #include "persistentdata.h"
 #include "load.h"
 #include "weaponxdebug.h"
+#include "netchanwarnings.h"
 
 typedef void (*sub_18027F2C0Type)(__int64 a1, const char* a2, void* a3);
 sub_18027F2C0Type sub_18027F2C0Original;
@@ -82,12 +83,16 @@ void InitClient()
 	MH_CreateHook((LPVOID)(engine + 0x47FB00), &CConVar__GetSplitScreenPlayerSlot, NULL);
 	MH_CreateHook((LPVOID)(engine + 0x4722E0), &sub_1804722E0, 0);
 
-	MH_CreateHook((LPVOID)(client + 0x4A6150), &WeaponXRegisterClient, reinterpret_cast<LPVOID*>(&oWeaponXRegisterClient));
+	//MH_CreateHook((LPVOID)(client + 0x4A6150), &WeaponXRegisterClient, reinterpret_cast<LPVOID*>(&oWeaponXRegisterClient));
 	MH_CreateHook((LPVOID)(client + 0x959F0), &CPortalPlayer__CreateMove, reinterpret_cast<LPVOID*>(&oCPortalPlayer__CreateMove));
 	MH_CreateHook((LPVOID)(client + 0x8E820), &sub_18008E820, reinterpret_cast<LPVOID*>(&osub_18008E820));
 
 	if (IsNoOrigin())
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("ws2_32.dll"), "getaddrinfo"), &hookedGetAddrInfo, reinterpret_cast<LPVOID*>(&originalGetAddrInfo));
 
+#ifdef _DEBUG
+	//if (!InitNetChanWarningHooks())
+	//	MessageBoxA(NULL, "Failed to initialize warning hooks", "ERROR", 16);
+#endif
 	MH_EnableHook(MH_ALL_HOOKS);
 }

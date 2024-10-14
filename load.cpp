@@ -37,7 +37,7 @@
 #include <crtdbg.h>	
 #include <new>
 #include "windows.h"
-#include "tier0_orig.h"
+
 #include <iostream>
 #include "cvar.h"
 #include <winternl.h>  // For UNICODE_STRING.
@@ -72,6 +72,7 @@
 #include "cvar.h"
 #include "persistentdata.h"
 #include "weaponxdebug.h"
+#include "netchanwarnings.h"
 #pragma intrinsic(_ReturnAddress)
 
 void* dll_notification_cookie_;
@@ -128,7 +129,6 @@ void sub_180473550(char* a1, signed __int64 a2, const char* a3, ...)
 	std::cout << a1 << std::endl;
 
 }
-__declspec(dllexport) void whatever2() { Error(); };
 
 BOOL RemoveItemsFromVTable(uintptr_t vTableAddr, size_t indexStart, size_t itemCount) {
 	if (vTableAddr == 0) return FALSE;
@@ -1021,7 +1021,6 @@ void InitAddons() {
 	done = true;
 	auto engine_base_spec = ENGINE_DLL_BASE;
 	auto filesystem_stdio = IsDedicatedServer() ? G_vscript : G_filesystem_stdio;
-
 	MH_CreateHook((LPVOID)(engine_base_spec + (IsDedicatedServer() ? 0x95AA0 : 0x127C70)), &FileSystem_UpdateAddonSearchPaths, reinterpret_cast<LPVOID*>(&FileSystem_UpdateAddonSearchPathsTypeOriginal));
 	MH_CreateHook((LPVOID)(engine_base_spec + (IsDedicatedServer() ? 0x950E0 : 0x1272B0)), &ReconcileAddonListFile, reinterpret_cast<LPVOID*>(&oReconcileAddonListFile));
 	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x1752B0 : 0x6A420)), &ReadFileFromVPKHook, reinterpret_cast<LPVOID*>(&readFileFromVPK));
@@ -1118,7 +1117,7 @@ void __stdcall LoaderNotificationCallback(
 		}
 
 		//MH_CreateHook((LPVOID)(server_base + 0x364140), &sub_364140, reinterpret_cast<LPVOID*>(NULL));
-		MH_CreateHook((LPVOID)(server_base + 0xED7A0), &WeaponXRegisterServer, reinterpret_cast<LPVOID*>(&oWeaponXRegisterServer));
+		//MH_CreateHook((LPVOID)(server_base + 0xED7A0), &WeaponXRegisterServer, reinterpret_cast<LPVOID*>(&oWeaponXRegisterServer));
 
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x257E0), &sub_1800257E0, reinterpret_cast<LPVOID*>(&sub_1800257E0Original));
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0xE77F0), &IVP_Environment__set_delta_PSI_time, reinterpret_cast<LPVOID*>(&IVP_Environment__set_delta_PSI_timeOriginal));
@@ -1172,22 +1171,21 @@ void __stdcall LoaderNotificationCallback(
 
 	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"engine_ds.dll") == 0) {
 		G_engine_ds = (uintptr_t)notification_data->Loaded.DllBase;
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x433C0), &ProcessConnectionlessPacket, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginal));
 		InitAddons();
 		InitDedicated();		
+		
 	}
 
-	if (IsDedicatedServer() && strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"dedicated.dll") == 0)
-	{
-		G_vscript = (uintptr_t)notification_data->Loaded.DllBase;
-	}
+	
 
 	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"engine.dll") == 0) {
 		G_engine = (uintptr_t)notification_data->Loaded.DllBase;
 		if (!IsDedicatedServer()) {
 			MH_CreateHook((LPVOID)(G_engine + 0x1305E0), &ExecuteConfigFile, NULL);
 			RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
+			InitAddons();
 		}
-		InitAddons();
 	}
 	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"client.dll") == 0) {
 		G_client = (uintptr_t)notification_data->Loaded.DllBase;

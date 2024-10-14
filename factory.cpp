@@ -37,7 +37,7 @@
 #include <crtdbg.h>	
 #include <new>
 #include "windows.h"
-#include "tier0_orig.h"
+
 #include <iostream>
 #include "cvar.h"
 #include <winternl.h>  // For UNICODE_STRING.
@@ -473,7 +473,7 @@ char __fastcall sub_1801C79A0(__int64 a1, __int64 a2)
 {
 	auto dtname = *(const char**)(a1 + 16);
 	auto dtname_len = strlen(dtname);
-	if (string_equal_size(dtname, dtname_len, "DT_BigBrotherPanelEntity") || string_equal_size(dtname, dtname_len, *(const char**)(a1 + 16), "DT_ControlPanelEntity") || string_equal_size(dtname, dtname_len, *(const char**)(a1 + 16), "DT_RushPointEntity") || string_equal_size(dtname, dtname_len, "DT_SpawnItemEntity")) {
+	if (string_equal_size(dtname, dtname_len, "DT_BigBrotherPanelEntity") || string_equal_size(dtname, dtname_len, "DT_ControlPanelEntity") || string_equal_size(dtname, dtname_len, "DT_RushPointEntity") || string_equal_size(dtname, dtname_len, "DT_SpawnItemEntity")) {
 		std::cout << "blocking st " << *(const char**)(a1 + 16) << std::endl;
 		return false;
 	}

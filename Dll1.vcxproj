@@ -192,6 +192,7 @@
     <ClInclude Include="model_info.h" />
     <ClInclude Include="navmesh.h" />
     <ClInclude Include="netadr.h" />
+    <ClInclude Include="netchanwarnings.h" />
     <ClInclude Include="patcher.h" />
     <ClInclude Include="persistentdata.h" />
     <ClInclude Include="physics.h" />
@@ -201,7 +202,6 @@
     <ClInclude Include="squirrel.h" />
     <ClInclude Include="TableDestroyer.h" />
     <ClInclude Include="thirdparty\zstd-1.5.6\zstd.h" />
-    <ClInclude Include="tier0_orig.h" />
     <ClInclude Include="utils.h" />
     <ClInclude Include="vector.h" />
     <!-- Add the following includes from the first version -->
@@ -263,6 +263,7 @@
     <ClCompile Include="memory.cpp" />
     <ClCompile Include="model_info.cpp" />
     <ClCompile Include="navmesh.cpp" />
+    <ClCompile Include="netchanwarnings.cpp" />
     <ClCompile Include="newbitbuf.cpp" />
     <ClCompile Include="patcher.cpp" />
     <ClCompile Include="persistentdata.cpp" />
