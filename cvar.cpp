@@ -351,7 +351,7 @@ void CCVar_CallGlobalChangeCallbacks(uintptr_t thisptr, ConVarR1O* var, const ch
 	r1var->m_pParent->m_Value.m_nValue = var->m_Value.m_nValue;
 	r1var->m_pParent->m_Value.m_pszString = var->m_Value.m_pszString;
 	r1var->m_pParent->m_Value.m_StringLength = var->m_Value.m_StringLength;
-	OriginalCCVar_CallGlobalChangeCallbacks(cvarinterface, r1var, pOldString, flOldValue);
+	//OriginalCCVar_CallGlobalChangeCallbacks(cvarinterface, r1var, pOldString, flOldValue);
 	////delete r1Var;
 }
 
