@@ -296,7 +296,8 @@ void GlobalChangeCallback(ConVarR1* var, const char* pOldValue) {
 	r1ovar->m_pParent->m_Value.m_StringLength = var->m_Value.m_StringLength;
 	for (int i = 0; i < r1ovar->m_pParent->m_fnChangeCallbacks.Count(); ++i)
 	{
-		r1ovar->m_pParent->m_fnChangeCallbacks[i](r1ovar, pOldValue, atof(pOldValue));
+		if (r1ovar->m_pParent->m_fnChangeCallbacks[i])
+			r1ovar->m_pParent->m_fnChangeCallbacks[i](r1ovar, pOldValue, atof(pOldValue));
 	}
 
 	//	if (it->second->is_r1o)

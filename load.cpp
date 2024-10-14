@@ -650,42 +650,8 @@ bool __fastcall SendTable_Encode(
 	return SendTable_EncodeOriginal(a1, a2, a3, a4, pRecipients, 0, a7, a8);
 }
 
-char* __fastcall sub_311910(char* a1, const char* a2, signed __int64 a3)
-{
-	char* result; // rax
 
-	result = strncpy(a1, a2, a3);
-	if (a3 > 0)
-		a1[a3 - 1] = 0;
-	return result;
-}
 
-char __fastcall CBaseClient__ProcessClientInfo(__int64 a1, __int64 a2)
-{
-	char v4; // al
-	int v5; // eax
-	int v6; // eax
-	int v7; // eax
-
-	*(_DWORD*)(a1 + 940) = *(_DWORD*)(a2 + 32);
-	v4 = *(_BYTE*)(a2 + 44);
-	*(_DWORD*)(a1 + 976) = 0;
-	*(_BYTE*)(a1 + 928) = v4;
-	sub_311910((char*)(a1 + 648), (const char*)(a2 + 52), 256i64);
-	*(_QWORD*)(a1 + 944) = *(unsigned int*)(a2 + 308);
-	v5 = *(_DWORD*)(a2 + 312);
-	*(_DWORD*)(a1 + 956) = 0;
-	*(_DWORD*)(a1 + 952) = v5;
-	v6 = *(_DWORD*)(a2 + 316);
-	*(_DWORD*)(a1 + 964) = 0;
-	*(_DWORD*)(a1 + 960) = v6;
-	v7 = *(_DWORD*)(a2 + 320);
-	*(_DWORD*)(a1 + 972) = 0;
-	*(_DWORD*)(a1 + 968) = v7;
-	if (*(_DWORD*)(a2 + 40) != (*(unsigned int(__fastcall**)(_QWORD))(**(_QWORD**)(a1 + 920) + 120i64))(*(_QWORD*)(a1 + 920)))
-		(*(void(__fastcall**)(__int64))(*(_QWORD*)(a1 - 8) + 96i64))(a1 - 8);
-	return 1;
-}
 typedef void (*COM_InitType)();
 COM_InitType COM_InitOriginal;
 typedef void (*SaveRestore_InitType)(__int64);
@@ -1047,7 +1013,6 @@ void __stdcall LoaderNotificationCallback(
 		
 		auto server_base = (uintptr_t)notification_data->Loaded.DllBase;
 		G_server = server_base;
-		auto engine_base = G_engine;
 		auto vscript_base = G_vscript;
 
 		auto dedi = G_is_dedi;
@@ -1087,14 +1052,6 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)(server_base + 0x3A2130), &CBaseEntity__SendProxy_CellOriginZ, reinterpret_cast<LPVOID*>(NULL));
 		//MH_CreateHook((LPVOID)(server_base + 0x3C8B70), &CBaseEntity__VPhysicsInitNormal, reinterpret_cast<LPVOID*>(&CBaseEntity__VPhysicsInitNormalOriginal));
 
-		MH_CreateHook((LPVOID)(engine_base + 0x1FDA50), &CLC_Move__ReadFromBuffer, reinterpret_cast<LPVOID*>(&CLC_Move__ReadFromBufferOriginal));
-		MH_CreateHook((LPVOID)(engine_base + 0x1F6F10), &CLC_Move__WriteToBuffer, reinterpret_cast<LPVOID*>(&CLC_Move__WriteToBufferOriginal));
-		//MH_CreateHook((LPVOID)(engine_base + 0x1FDA50), &CLC_Move__ReadFromBuffer, NULL);
-		//MH_CreateHook((LPVOID)(engine_base + 0x1F6F10), &CLC_Move__WriteToBuffer, NULL);
-		MH_CreateHook((LPVOID)(engine_base + 0x203C20), &NET_SetConVar__ReadFromBuffer, NULL);
-		MH_CreateHook((LPVOID)(engine_base + 0x202F80), &NET_SetConVar__WriteToBuffer, NULL);
-		
-		MH_CreateHook((LPVOID)(engine_base + 0x1FE3F0), &SVC_ServerInfo__WriteToBuffer, reinterpret_cast<LPVOID*>(&SVC_ServerInfo__WriteToBufferOriginal));
 		//MH_CreateHook((LPVOID)(server_base + 0x3667D0), &CAI_NetworkManager__DelayedInit, reinterpret_cast<LPVOID*>(&CAI_NetworkManager__DelayedInitOriginal));
 		//MH_CreateHook((LPVOID)(server_base + 0x36BC30), &sub_36BC30, reinterpret_cast<LPVOID*>(&sub_36BC30Original));
 		//MH_CreateHook((LPVOID)(server_base + 0x36C150), &sub_36C150, reinterpret_cast<LPVOID*>(&sub_36C150Original));
@@ -1102,6 +1059,8 @@ void __stdcall LoaderNotificationCallback(
 		//MH_CreateHook((LPVOID)(server_base + 0x31CE90), &unkallocfunc, reinterpret_cast<LPVOID*>(&unkallocfuncoriginal));
 		//MH_CreateHook((LPVOID)(server_base + 0x25A8E0), &CEntityFactoryDictionary__Create, reinterpret_cast<LPVOID*>(&CEntityFactoryDictionary__CreateOriginal));
 		//MH_CreateHook((LPVOID)(server_base + 0x363A50), &sub_363A50, reinterpret_cast<LPVOID*>(&sub_363A50Original));
+		auto engine_base = G_engine;
+
 		if (!IsDedicatedServer()) {
 			MH_CreateHook((LPVOID)(engine_base + 0x21F9C0), &CEngineVGui__Init, reinterpret_cast<LPVOID*>(&CEngineVGui__InitOriginal));
 			MH_CreateHook((LPVOID)(engine_base + 0x21EB70), &CEngineVGui__HideGameUI, reinterpret_cast<LPVOID*>(&CEngineVGui__HideGameUIOriginal));
@@ -1181,6 +1140,13 @@ void __stdcall LoaderNotificationCallback(
 
 	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"engine.dll") == 0) {
 		G_engine = (uintptr_t)notification_data->Loaded.DllBase;
+		auto engine_base = G_engine;
+		MH_CreateHook((LPVOID)(engine_base + 0x1FDA50), &CLC_Move__ReadFromBuffer, reinterpret_cast<LPVOID*>(&CLC_Move__ReadFromBufferOriginal));
+		MH_CreateHook((LPVOID)(engine_base + 0x1F6F10), &CLC_Move__WriteToBuffer, reinterpret_cast<LPVOID*>(&CLC_Move__WriteToBufferOriginal));
+		MH_CreateHook((LPVOID)(engine_base + 0x203C20), &NET_SetConVar__ReadFromBuffer, NULL);
+		MH_CreateHook((LPVOID)(engine_base + 0x202F80), &NET_SetConVar__WriteToBuffer, NULL);
+		MH_CreateHook((LPVOID)(engine_base + 0x1FE3F0), &SVC_ServerInfo__WriteToBuffer, reinterpret_cast<LPVOID*>(&SVC_ServerInfo__WriteToBufferOriginal));
+
 		if (!IsDedicatedServer()) {
 			MH_CreateHook((LPVOID)(G_engine + 0x1305E0), &ExecuteConfigFile, NULL);
 			RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);

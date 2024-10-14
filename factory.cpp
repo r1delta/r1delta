@@ -304,12 +304,12 @@ char __fastcall CServerGameDLL__DLLInit(void* thisptr, CreateInterfaceFn appSyst
 	CreateInterfaceFn physicsFactory, CreateInterfaceFn fileSystemFactory,
 	CGlobalVarsServer2015* pGlobals)
 {
-	pGlobalVarsServer = pGlobals;
 	if (IsDedicatedServer()) {
 		pGlobals = (CGlobalVarsServer2015*)((uintptr_t)pGlobals - 4); // Don't ask. If you DO ask, you will die a violent, painful death - wndrr
 		pGlobals->nTimestampNetworkingBase = 100;
 		pGlobals->nTimestampRandomizeWindow = 32;
 	}
+	pGlobalVarsServer = pGlobals;
 	void* serverPtr = (void*)G_server;
 	SendProp* DT_BasePlayer = (SendProp*)(((uintptr_t)serverPtr) + 0xE9A800);
 	int* DT_BasePlayerLen = (int*)(((uintptr_t)serverPtr) + 0xE04768);

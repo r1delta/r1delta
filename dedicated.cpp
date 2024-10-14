@@ -198,7 +198,6 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 	//CModule engineDS("engine_ds.dll");
 	//InitDedicatedVtables();
 	uintptr_t engine = (uintptr_t)LoadLibraryA("engine.dll");
-	G_engine = engine;
 	uintptr_t engineDS = G_engine_ds;
 
 	NET_CreateNetChannelOriginal = NET_CreateNetChannelType(engine + 0x1F1B10);
@@ -277,7 +276,41 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 #endif
 	return Host_InitDedicatedOriginal(a1, a2, a3);
 }
+char* __fastcall sub_311910(char* a1, const char* a2, signed __int64 a3)
+{
+	char* result; // rax
 
+	result = strncpy(a1, a2, a3);
+	if (a3 > 0)
+		a1[a3 - 1] = 0;
+	return result;
+}
+char __fastcall CBaseClient__ProcessClientInfo(__int64 a1, __int64 a2)
+{
+	char v4; // al
+	int v5; // eax
+	int v6; // eax
+	int v7; // eax
+
+	*(_DWORD*)(a1 + 940) = *(_DWORD*)(a2 + 32);
+	v4 = *(_BYTE*)(a2 + 44);
+	*(_DWORD*)(a1 + 976) = 0;
+	*(_BYTE*)(a1 + 928) = v4;
+	sub_311910((char*)(a1 + 648), (const char*)(a2 + 52), 256i64);
+	*(_QWORD*)(a1 + 944) = *(unsigned int*)(a2 + 308);
+	v5 = *(_DWORD*)(a2 + 312);
+	*(_DWORD*)(a1 + 956) = 0;
+	*(_DWORD*)(a1 + 952) = v5;
+	v6 = *(_DWORD*)(a2 + 316);
+	*(_DWORD*)(a1 + 964) = 0;
+	*(_DWORD*)(a1 + 960) = v6;
+	v7 = *(_DWORD*)(a2 + 320);
+	*(_DWORD*)(a1 + 972) = 0;
+	*(_DWORD*)(a1 + 968) = v7;
+	if (*(_DWORD*)(a2 + 40) != (*(unsigned int(__fastcall**)(_QWORD))(**(_QWORD**)(a1 + 920) + 120i64))(*(_QWORD*)(a1 + 920)))
+		(*(void(__fastcall**)(__int64))(*(_QWORD*)(a1 - 8) + 96i64))(a1 - 8);
+	return 1;
+}
 void InitDedicated()
 {
 	uintptr_t offsets[] = {
@@ -334,6 +367,8 @@ void InitDedicated()
 	MH_CreateHook((LPVOID)(engine_ds + 0xA1B90), &Host_InitDedicated, reinterpret_cast<LPVOID*>(&Host_InitDedicatedOriginal));
 	MH_CreateHook((LPVOID)(engine_ds + 0x31EB20), &ConVar_PrintDescription, reinterpret_cast<LPVOID*>(&ConVar_PrintDescriptionOriginal));
 	MH_CreateHook((LPVOID)(engine_ds + 0x310780), &sub_1804722E0, 0);
+	MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x45C00), &CBaseClient__ProcessClientInfo, reinterpret_cast<LPVOID*>(NULL));
+
 	//MH_CreateHook((LPVOID)(engine_ds + 0x360230), &vsnprintf_l_hk, NULL);
 	MH_EnableHook(MH_ALL_HOOKS);
 }
