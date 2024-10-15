@@ -4,7 +4,7 @@
 
 extern "C" __declspec(dllimport) void Msg(const char* _Printf_format_string_ pMsg, ...);
 extern "C" __declspec(dllimport) void Warning(const char* _Printf_format_string_ pMsg, ...);
-extern "C" __declspec(dllimport) void Error(const char* _Printf_format_string_ pMsg, ...);
+extern "C" __declspec(dllexport) void Error(const char* _Printf_format_string_ pMsg, ...);
 extern "C" __declspec(dllimport) void Warning_SpewCallStack(int iMaxCallStackLength, const char* _Printf_format_string_ pMsg, ...);
 extern "C" __declspec(dllimport) void DevMsg(int level, const char* _Printf_format_string_ pMsg, ...);
 extern "C" __declspec(dllimport) void DevWarning(int level, const char* _Printf_format_string_ pMsg, ...);

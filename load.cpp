@@ -197,14 +197,14 @@ sub_629740Type sub_629740Original;
 
 __int64 __fastcall sub_629740(__int64 a1, const char* a2, int a3) {
 	if (shouldSave(a2)) {
-		savedCalls.push_back({ a1, a2, a3 });
+		//savedCalls.push_back({ a1, a2, a3 });
 		return -1;
 	}
 	else if (strcmp_static(a2, "RemoteWeaponReload") == 0) {
-		for (auto& call : savedCalls) {
-			sub_629740Original(call.a1, call.a2.c_str(), call.a3);
-		}
-		savedCalls.clear(); // Clear after processing
+		//for (auto& call : savedCalls) {
+		//	sub_629740Original(call.a1, call.a2.c_str(), call.a3);
+		//}
+		//savedCalls.clear(); // Clear after processing
 	}
 	return sub_629740Original(a1, a2, a3);
 }

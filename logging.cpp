@@ -394,6 +394,20 @@ void COM_TimestampedLogHook(const char* pMsg, ...) {
 	}
 	free(formatted);
 }
+extern "C" __declspec(dllexport) void Error(const char* pMsg, ...) {
+	if (strcmp(pMsg, "UserMessageBegin:  Unregistered message '%s'\n") == 0 ||
+		strcmp(pMsg, "MESSAGE_END called with no active message\n") == 0) {
+		return;
+	}
+
+	va_list args;
+	va_start(args, pMsg);
+	std::string formatted = SafeFormat(pMsg, args);
+	va_end(args);
+
+	reinterpret_cast<WarningFn>(GetProcAddress(GetModuleHandleA("tier0_orig.dll"), "Error"))("%s", formatted.c_str());
+}
+
 void InitLoggingHooks()
 {
 	auto tier0 = GetModuleHandleA("tier0.dll");
