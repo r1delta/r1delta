@@ -184,8 +184,11 @@ __int64 __fastcall bf_write__WriteUBitLong(bf_write* a1, unsigned int a2, signed
 {
 	uintptr_t engineDS = G_engine_ds;
 	auto ret = bf_write__WriteUBitLongOriginal(a1, a2, a3);
-	if (uintptr_t(_ReturnAddress()) == (engineDS + 0x51018) || uintptr_t(_ReturnAddress()) == (engineDS + 0x5101D))
-		bf_write__WriteUBitLongOriginal(a1, 0, 14);
+	if (uintptr_t(_ReturnAddress()) == (engineDS + 0x51018) || uintptr_t(_ReturnAddress()) == (engineDS + 0x5101D)) {
+		a1->WriteOneBit(0);
+		a1->WriteOneBit(0);
+		a1->WriteUBitLong(0, 12);
+	}
 	return ret;
 }
 
@@ -266,7 +269,11 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 #if defined(_DEBUG) && VTABLE_UPDATE_FORCE
 	OutputDebugStringA("};\n");
 #endif
-
+	// copy sendtable funcs
+	DWORD oldProtect;
+	VirtualProtect((LPVOID)(G_engine_ds + 0x550760), 173 * sizeof(uintptr_t), PAGE_READWRITE, &oldProtect);
+	memcpy((void*)(G_engine_ds + 0x550760), (void*)(G_engine + 0x7CB3F0), 173 * sizeof(uintptr_t));
+	VirtualProtect((LPVOID)(G_engine_ds + 0x550760), 173 * sizeof(uintptr_t), oldProtect, &oldProtect);
 	MH_EnableHook(MH_ALL_HOOKS);
 	reinterpret_cast<char(__fastcall*)(__int64, CreateInterfaceFn)>((uintptr_t)(engine) + 0x01A04A0)(0, (CreateInterfaceFn)(engineDS + 0xE9000)); // connect nondedi engine
 	reinterpret_cast<void(__fastcall*)(int, void*)>((uintptr_t)(engine) + 0x47F580)(0, 0); // register nondedi engine cvars

@@ -1127,7 +1127,7 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook(LPVOID(server_base + 0x41E070), &CHL2_Player_Precache, 0);
 		
 		MH_EnableHook(MH_ALL_HOOKS);
-		std::cout << "did hooks" << std::endl;
+		//std::cout << "did hooks" << std::endl;
 	}
 
 	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"engine_ds.dll") == 0) {

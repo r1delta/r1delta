@@ -135,6 +135,11 @@ private:
 	}
 public:
 	static bool shouldFailRead(const char* path) {
+		int dot_count = 0;
+		while (*path && dot_count <= 2)
+			if (*path++ == '.') dot_count++;
+		if (dot_count > 2) return false;
+
 		std::shared_lock<std::shared_mutex> lock(cacheMutex);
 		return !checkAndCachePath(path);
 	}
