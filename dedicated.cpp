@@ -432,9 +432,8 @@ void InitDedicated()
 	MH_CreateHook((LPVOID)(engine_ds + 0x31EB20), &ConVar_PrintDescription, reinterpret_cast<LPVOID*>(&ConVar_PrintDescriptionOriginal));
 	MH_CreateHook((LPVOID)(engine_ds + 0x310780), &sub_1804722E0, 0);
 	MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x45C00), &CBaseClient__ProcessClientInfo, reinterpret_cast<LPVOID*>(NULL));
-	//MH_CreateHook((LPVOID)(engine_ds + 0x756E0), &Cbuf_Execute, reinterpret_cast<LPVOID*>(&oCbuf_Execute));
-	//MH_CreateHook((LPVOID)(engine_ds + 0xEF480), &CEngine__FilterTime, reinterpret_cast<LPVOID*>(NULL));
-	// above causes hitreg issues!
+	MH_CreateHook((LPVOID)(engine_ds + 0x756E0), &Cbuf_Execute, reinterpret_cast<LPVOID*>(&oCbuf_Execute));
+	MH_CreateHook((LPVOID)(engine_ds + 0xEF480), &CEngine__FilterTime, reinterpret_cast<LPVOID*>(NULL));
 	MH_CreateHook((LPVOID)(engine_ds + 0x318D60), &KeyValues__SetString__Dedi, reinterpret_cast<LPVOID*>(&oKeyValues__SetString__Dedi));
 	MH_CreateHook((LPVOID)(engine_ds + 0x496F0), CBaseClient__SendNetMsg, reinterpret_cast<LPVOID*>(&oCBaseClient__SendNetMsg));
 	MH_CreateHook((LPVOID)(G_engine_ds + 0x4C860), CGameClient__SendNetMsg, reinterpret_cast<LPVOID*>(&oCGameClient__SendNetMsg));
