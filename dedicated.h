@@ -76,5 +76,3 @@ inline vtableRef2Engines netMessages[] = {
 	VTABLEREF2ENGINES("SVC_VoiceData", 0x5F5D88, 0x40E578),
 };
 void InitDedicated();
-extern bool (*oCRecipientFilter__GetRecipientIndexReplayOnly)(__int64 a1, int a2);
-bool CRecipientFilter__GetRecipientIndexReplayOnly(__int64 a1, int a2);

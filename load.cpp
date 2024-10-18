@@ -908,7 +908,23 @@ void AddBotDummyConCommand(const CCommand& args)
 
 	Msg("Dummy bot '%s' has been successfully created and assigned to team %d.\n", dummyBotName, teamIndex);
 }
-
+struct /*VFT*/ INetMessage
+{
+	virtual (~INetMessage)();
+	virtual void(SetNetChannel)(void*);
+	virtual void(SetReliable)(bool);
+	virtual bool(Process)();
+	virtual bool(ReadFromBuffer)(bf_read*);
+	virtual bool(WriteToBuffer)(bf_write*);
+	virtual bool(IsUnreliable)();
+	virtual bool(IsReliable)();
+	virtual int(GetType)();
+	virtual int(GetGroup)();
+	virtual const char* (GetName)();
+	virtual void* (GetNetChannel)();
+	virtual const char* (ToString)();
+	virtual unsigned int(GetSize)();
+};
 bool (*oSVC_UserMessage__Process)(INetMessage* thisptr);
 bool (*oSVC_UserMessage__ReadFromBuffer)(INetMessage* thisptr, __int64 target);
 bool (*oSVC_UserMessage__WriteToBuffer)(INetMessage* thisptr, __int64 target);
@@ -1152,9 +1168,7 @@ void __stdcall LoaderNotificationCallback(
 		// Fix precache start
 		// Rebuild CHL2_Player's precache to take our stuff into account
 		MH_CreateHook(LPVOID(server_base + 0x41E070), &CHL2_Player_Precache, 0);
-		if (IsDedicatedServer()) {
-			MH_CreateHook(LPVOID(server_base + 0x1E79C0), CRecipientFilter__GetRecipientIndexReplayOnly, reinterpret_cast<LPVOID*>(&oCRecipientFilter__GetRecipientIndexReplayOnly));
-		}
+		
 		MH_EnableHook(MH_ALL_HOOKS);
 		//std::cout << "did hooks" << std::endl;
 	}
