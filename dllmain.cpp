@@ -86,6 +86,24 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 	switch (fdwReason)
 	{
 	case DLL_PROCESS_ATTACH: {
+		int argc;
+		LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+
+		if (argv) {
+			bool foundR1Delta = false;
+			for (int i = 1; i < argc; i++) {
+				if (wcscmp(argv[i], L"-game") == 0 && i + 1 < argc && wcscmp(argv[i + 1], L"r1delta") == 0) {
+					foundR1Delta = true;
+					break;
+				}
+			}
+
+			LocalFree(argv);
+
+			if (!foundR1Delta) {
+				return TRUE;
+			}
+		}
 		if (!IsDedicatedServer() && !IsNoConsole())
 		{
 			AllocConsole();
