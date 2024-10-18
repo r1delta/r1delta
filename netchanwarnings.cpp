@@ -32,16 +32,8 @@ ProcessFn original_Process[sizeof(netMessages) / sizeof(netMessages[0])];
 // Helper function to get the index of the netMessage
 int GetNetMessageIndex(INetMessage* thisPtr) {
     for (size_t i = 0; i < sizeof(netMessages) / sizeof(netMessages[0]); i++) {
-        void* vtable = nullptr;
-        if (G_engine && netMessages[i].offset_engine != 0) {
-            vtable = (void*)((uintptr_t)G_engine + netMessages[i].offset_engine);
-        }
-        else if (G_engine_ds && netMessages[i].offset_engine_ds != 0) {
-            vtable = (void*)((uintptr_t)G_engine_ds + netMessages[i].offset_engine_ds);
-        }
-        if (vtable == *(void**)thisPtr) {
+        if (!_stricmp(thisPtr->GetName(), netMessages[i].name))
             return i;
-        }
     }
     Warning(__FUNCTION__ ": unknown NetMessage %s!", thisPtr->GetName());
     return -1;
@@ -107,32 +99,12 @@ bool InitNetChanWarningHooks() {
 
         if (vtable) {
             void** vft = (void**)vtable;
-
-            DWORD oldProtect;
-            if (VirtualProtect(vft, sizeof(void*) * 6, PAGE_READWRITE, &oldProtect)) {
-                // Hook ReadFromBuffer
-                original_ReadFromBuffer[i] = (ReadFromBufferFn)vft[4];
-                vft[4] = (void*)HookReadFromBuffer;
-
-                // Hook WriteToBuffer
-                original_WriteToBuffer[i] = (WriteToBufferFn)vft[5];
-                vft[5] = (void*)HookWriteToBuffer;
-
-                // Hook Process
-                original_Process[i] = (ProcessFn)vft[3];
-                vft[3] = (void*)HookProcess;
-
-                // Restore the original protection
-                DWORD temp;
-                VirtualProtect(vft, sizeof(void*) * 6, oldProtect, &temp);
-            }
-            else {
-                Warning("Failed to change memory protection for vtable of %s\n", netMessages[i].name);
-                return false;
-            }
+            MH_CreateHook((ReadFromBufferFn)vft[4], (void*)HookReadFromBuffer, reinterpret_cast<LPVOID*>(&original_ReadFromBuffer[i]));
+            MH_CreateHook((WriteToBufferFn)vft[5], (void*)HookWriteToBuffer, reinterpret_cast<LPVOID*>(&original_WriteToBuffer[i]));
+            MH_CreateHook((ProcessFn)vft[3], (void*)HookProcess, reinterpret_cast<LPVOID*>(&original_Process[i]));
         }
     }
-
+    MH_EnableHook(MH_ALL_HOOKS);
     return true;
 }
 #endif
