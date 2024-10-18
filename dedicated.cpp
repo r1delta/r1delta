@@ -318,6 +318,35 @@ char __fastcall CBaseClient__ProcessClientInfo(__int64 a1, __int64 a2)
 		(*(void(__fastcall**)(__int64))(*(_QWORD*)(a1 - 8) + 96i64))(a1 - 8);
 	return 1;
 }
+static float		host_nexttick = 0;		// next server tick in this many ms
+static float* host_state_interval_per_tick;
+static float* host_remainder;
+static void (*oCbuf_Execute)(void);
+static void Cbuf_Execute() {
+	static uintptr_t ret_from_host_runframe = G_engine_ds + 0xA181E;
+	if (uintptr_t(_ReturnAddress()) == ret_from_host_runframe) {
+		if (!host_state_interval_per_tick)
+			host_state_interval_per_tick = (float*)(G_engine_ds + 0x547300);
+		if (!host_remainder)
+			host_remainder = (float*)(G_engine_ds + 0x20408C0);
+		host_nexttick = *host_state_interval_per_tick - *host_remainder;
+	}
+	oCbuf_Execute();
+}
+static bool CEngine__FilterTime(void* thisptr, float dt, float* flMinFrameTime)
+{
+	*flMinFrameTime = host_nexttick;
+	return (dt >= host_nexttick);
+}
+void* (*oKeyValues__SetString__Dedi)(__int64 a1, char* a2, const char* a3);
+void* KeyValues__SetString__Dedi(__int64 a1, char* a2, const char* a3)
+{
+	static auto target = G_engine_ds + 0xC36AD;
+	if (uintptr_t(_ReturnAddress()) == target)
+		a3 = "30"; // force replay updaterate to 60
+	return oKeyValues__SetString__Dedi(a1, a2, a3);
+}
+
 void InitDedicated()
 {
 	uintptr_t offsets[] = {
@@ -375,6 +404,9 @@ void InitDedicated()
 	MH_CreateHook((LPVOID)(engine_ds + 0x31EB20), &ConVar_PrintDescription, reinterpret_cast<LPVOID*>(&ConVar_PrintDescriptionOriginal));
 	MH_CreateHook((LPVOID)(engine_ds + 0x310780), &sub_1804722E0, 0);
 	MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x45C00), &CBaseClient__ProcessClientInfo, reinterpret_cast<LPVOID*>(NULL));
+	MH_CreateHook((LPVOID)(engine_ds + 0x756E0), &Cbuf_Execute, reinterpret_cast<LPVOID*>(&oCbuf_Execute));
+	MH_CreateHook((LPVOID)(engine_ds + 0xEF480), &CEngine__FilterTime, reinterpret_cast<LPVOID*>(NULL));
+	MH_CreateHook((LPVOID)(engine_ds + 0x318D60), &KeyValues__SetString__Dedi, reinterpret_cast<LPVOID*>(&oKeyValues__SetString__Dedi));
 
 	//MH_CreateHook((LPVOID)(engine_ds + 0x360230), &vsnprintf_l_hk, NULL);
 	MH_EnableHook(MH_ALL_HOOKS);

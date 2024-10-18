@@ -110,8 +110,12 @@ int __cdecl vsnprintf_l_hk(
 }
 typedef void (*Cbuf_AddTextType)(int a1, const char* a2, unsigned int a3);
 Cbuf_AddTextType Cbuf_AddTextOriginal;
-
+static bool bDone = false;
 void Cbuf_AddText(int a1, const char* a2, unsigned int a3) {
+	if (!bDone) {
+		bDone = true;
+		OriginalCCVar_FindVar(cvarinterface, "cl_updaterate")->m_nFlags &= ~(FCVAR_HIDDEN | FCVAR_DEVELOPMENTONLY);
+	}
 	bool shouldLog = true;
 	if (a2 == nullptr || *a2 == '\0' || strcmp_static(a2, "\n") == 0) {
 		shouldLog = false;

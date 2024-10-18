@@ -69,6 +69,42 @@ __int64 __fastcall sub_18008E820(__int64 a1, unsigned int a2)
 		return osub_18008E820(a1, a2);
 	return 0;
 }
+void* (*oKeyValues__SetString__Client)(__int64 a1, char* a2, const char* a3);
+void* KeyValues__SetString__Client(__int64 a1, char* a2, const char* a3)
+{
+	static auto target = G_engine + 0x16FABA;
+	if (uintptr_t(_ReturnAddress()) == target)
+		a3 = "30";
+	return oKeyValues__SetString__Client(a1, a2, a3);
+}
+__int64 (*oSharedVehicleViewSmoothing)(
+	__int64 a1,
+	float* a2,
+	float* a3,
+	char a4,
+	char a5,
+	int a6,
+	unsigned int* a7,
+	float* a8,
+	char a9);
+__int64 SharedVehicleViewSmoothing(
+	__int64 a1,
+	float* a2,
+	float* a3,
+	char a4,
+	char a5,
+	int a6,
+	unsigned int* a7,
+	float* a8,
+	char a9)
+{
+	if (a1 == 0)
+	{
+		static auto getlocalplayer = reinterpret_cast<__int64 (*)(int a1)>(G_client + 0x7B120);
+		a1 = getlocalplayer(-1);
+	}
+	return oSharedVehicleViewSmoothing(a1, a2, a3, a4, a5, a6, a7, a8, a9);
+}
 void InitClient()
 {
 	auto client = G_client;
@@ -76,8 +112,8 @@ void InitClient()
 	MH_CreateHook((LPVOID)(client + 0x21FE50), &PredictionErrorFn, reinterpret_cast<LPVOID*>(NULL));
 	//MH_CreateHook((LPVOID)(client + 0x029840), &C_BaseEntity__VPhysicsInitNormal, reinterpret_cast<LPVOID*>(NULL));
 	MH_CreateHook((LPVOID)(client + 0x27F2C0), &sub_18027F2C0, reinterpret_cast<LPVOID*>(&sub_18027F2C0Original));
-	MH_CreateHook((LPVOID)(engine + 0x56A450), &vsnprintf_l_hk, NULL);
-	MH_CreateHook((LPVOID)(client + 0x744864), &vsnprintf_l_hk, NULL);
+	//MH_CreateHook((LPVOID)(engine + 0x56A450), &vsnprintf_l_hk, NULL);
+	//MH_CreateHook((LPVOID)(client + 0x744864), &vsnprintf_l_hk, NULL);
 	MH_CreateHook((LPVOID)(engine + 0x102D50), &Cbuf_AddText, reinterpret_cast<LPVOID*>(&Cbuf_AddTextOriginal));
 	MH_CreateHook((LPVOID)(engine + 0x4801B0), &ConVar_PrintDescription, reinterpret_cast<LPVOID*>(&ConVar_PrintDescriptionOriginal));
 	MH_CreateHook((LPVOID)(engine + 0x47FB00), &CConVar__GetSplitScreenPlayerSlot, NULL);
@@ -86,6 +122,8 @@ void InitClient()
 	//MH_CreateHook((LPVOID)(client + 0x4A6150), &WeaponXRegisterClient, reinterpret_cast<LPVOID*>(&oWeaponXRegisterClient));
 	MH_CreateHook((LPVOID)(client + 0x959F0), &CPortalPlayer__CreateMove, reinterpret_cast<LPVOID*>(&oCPortalPlayer__CreateMove));
 	MH_CreateHook((LPVOID)(client + 0x8E820), &sub_18008E820, reinterpret_cast<LPVOID*>(&osub_18008E820));
+	MH_CreateHook((LPVOID)(engine + 0x47A410), &KeyValues__SetString__Client, reinterpret_cast<LPVOID*>(&oKeyValues__SetString__Client));
+	MH_CreateHook((LPVOID)(client + 0x286F50), &SharedVehicleViewSmoothing, reinterpret_cast<LPVOID*>(&oSharedVehicleViewSmoothing));
 
 	if (IsNoOrigin())
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("ws2_32.dll"), "getaddrinfo"), &hookedGetAddrInfo, reinterpret_cast<LPVOID*>(&originalGetAddrInfo));
