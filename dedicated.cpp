@@ -346,7 +346,35 @@ void* KeyValues__SetString__Dedi(__int64 a1, char* a2, const char* a3)
 		a3 = "30"; // force replay updaterate to 60
 	return oKeyValues__SetString__Dedi(a1, a2, a3);
 }
+bool g_bShouldSendNextNetMsg = true;
+bool g_bShouldSendBaseNetMsg = true;
+bool (*oCRecipientFilter__GetRecipientIndexReplayOnly)(__int64 a1, int a2);
+bool CRecipientFilter__GetRecipientIndexReplayOnly(__int64 a1, int a2) {
+	auto ret = oCRecipientFilter__GetRecipientIndexReplayOnly(a1, a2);
+	g_bShouldSendNextNetMsg = !ret;
+	return ret;
+}
+char (*oCGameClient__SendNetMsg)(float* a1, INetMessage* a2, unsigned __int8 a3, unsigned __int8 a4, unsigned __int8 a5);
+char CGameClient__SendNetMsg(float* a1, INetMessage* a2, unsigned __int8 a3, unsigned __int8 a4, unsigned __int8 a5) {
+	if (!g_bShouldSendNextNetMsg)
+		g_bShouldSendBaseNetMsg = false;
+	g_bShouldSendNextNetMsg = true;
+	auto ret = oCGameClient__SendNetMsg(a1, a2, a3, a4, a5);
+	g_bShouldSendBaseNetMsg = true;
+	return ret;
+}
 
+char (*oCBaseClient__SendNetMsg)(__int64 a1, INetMessage* a2, unsigned __int8 a3, unsigned __int8 a4);
+char CBaseClient__SendNetMsg(__int64 a1, INetMessage* a2, unsigned __int8 a3, unsigned __int8 a4) {
+	if (!g_bShouldSendBaseNetMsg) {
+		//Warning("Blocked message %s!\n", a2->ToString());
+		g_bShouldSendBaseNetMsg = true;
+		return true;
+	}
+	g_bShouldSendBaseNetMsg = true;
+	auto ret = oCBaseClient__SendNetMsg(a1, a2, a3, a4);
+	return ret;
+}
 void InitDedicated()
 {
 	uintptr_t offsets[] = {
@@ -407,7 +435,8 @@ void InitDedicated()
 	MH_CreateHook((LPVOID)(engine_ds + 0x756E0), &Cbuf_Execute, reinterpret_cast<LPVOID*>(&oCbuf_Execute));
 	MH_CreateHook((LPVOID)(engine_ds + 0xEF480), &CEngine__FilterTime, reinterpret_cast<LPVOID*>(NULL));
 	MH_CreateHook((LPVOID)(engine_ds + 0x318D60), &KeyValues__SetString__Dedi, reinterpret_cast<LPVOID*>(&oKeyValues__SetString__Dedi));
-
+	MH_CreateHook((LPVOID)(engine_ds + 0x496F0), CBaseClient__SendNetMsg, reinterpret_cast<LPVOID*>(&oCBaseClient__SendNetMsg));
+	MH_CreateHook((LPVOID)(G_engine_ds + 0x4C860), CGameClient__SendNetMsg, reinterpret_cast<LPVOID*>(&oCGameClient__SendNetMsg));
 	//MH_CreateHook((LPVOID)(engine_ds + 0x360230), &vsnprintf_l_hk, NULL);
 	MH_EnableHook(MH_ALL_HOOKS);
 }
