@@ -46,8 +46,10 @@ bool HookReadFromBuffer(INetMessage* thisPtr, bf_read* buffer) {
         if (!result) {
             Warning("ReadFromBuffer failed for %s\n", netMessages[index].name);
         }
+#ifdef ENABLE_ANNOYING_NETMESSAGE_SPAM
         if (index != 18 && index != 10 && index != 4 && index != 46 && index != 38)
             Msg("%s: %s to %p\n", __FUNCTION__, thisPtr->ToString(), thisPtr->GetNetChannel());
+#endif
 
         return result;
 
@@ -63,8 +65,10 @@ bool HookWriteToBuffer(INetMessage* thisPtr, bf_write* buffer) {
         if (!result) {
             Warning("WriteToBuffer failed for %s\n", netMessages[index].name);
         }
+#ifdef ENABLE_ANNOYING_NETMESSAGE_SPAM
         if (index != 18 && index != 10 && index != 4 && index != 46 && index != 38)
             Msg("%s: %s to %p\n", __FUNCTION__, thisPtr->ToString(), thisPtr->GetNetChannel());
+#endif
         return result;
     }
 
@@ -78,8 +82,10 @@ bool HookProcess(INetMessage* thisPtr) {
         if (!result) {
             Warning("Process failed for %s\n", netMessages[index].name);
         }
+#ifdef ENABLE_ANNOYING_NETMESSAGE_SPAM
         if (index != 18 && index != 10 && index != 4 && index != 46 && index != 38)
             Msg("%s: %s to %p\n", __FUNCTION__, thisPtr->ToString(), thisPtr->GetNetChannel());
+#endif
         return result;
     }
     return false;
