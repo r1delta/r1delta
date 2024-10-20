@@ -335,8 +335,8 @@ void UpdateAddons(HSQUIRRELVM v, SQInteger index, SQBool enabled) {
 	for (KeyValues* subkey = kv->GetFirstValue(); subkey; subkey = subkey->GetNextValue(), ++i) {
 		const char* name = subkey->GetName();
 		bool value = subkey->GetInt(NULL, 0) != 0;
-		sq_getinteger(vm, v, i  + 1, &index);
-		sq_getbool(vm, v, i + 2, &enabled);
+		sq_getinteger(vm, v, i + 2 , &index);
+		sq_getbool(vm, v, i + 3, &enabled);
 		std::cout << "Name: " << name << " Value: " << value << " i: " << i << " Index: " << index << std::endl;
 		if (i == index) {
 			subkey->SetInt(NULL, enabled);
