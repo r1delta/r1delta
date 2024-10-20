@@ -309,7 +309,7 @@ int GetModPath(HSQUIRRELVM v) {
 	return 1;
 }
 
-void UpdateAddons(HSQUIRRELVM v, SQInteger index, SQBool enabled) {
+int UpdateAddons(HSQUIRRELVM v, SQInteger index, SQBool enabled) {
 	auto func_addr = g_CVFileSystem->GetSearchPath;
 	auto kv_load_file = G_client + 0x65F980;
 	auto kv_write_file = G_client + 0x65DB30;
@@ -345,8 +345,10 @@ void UpdateAddons(HSQUIRRELVM v, SQInteger index, SQBool enabled) {
 		}
 		// find the index of the addon
 	}
+	sq_pushinteger(vm, v, 1);
 	kv_write_file_addr(kv, base_file_system, szAddOnListPath);
 	// Save the keyvalues to the file
+	return 1;
 }
 
 int GetMods(HSQUIRRELVM v) {
@@ -504,8 +506,8 @@ bool GetSQVMFuncs() {
 		(SQFUNCTION)UpdateAddons,
 		".ib", // String
 		3,      // Expects 2 parameters
-		"void",    // Returns a string
-		"void",
+		"int",    // Returns a string
+		"int index,bool enabled",
 		"Updates the selected addons"
 	);
 
