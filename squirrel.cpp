@@ -214,6 +214,207 @@ void* sq_getentity(HSQUIRRELVM v, SQInteger iStackPos)
 	return CSquirrelVM__GetEntityFromInstance_Rebuild((__int64)(&obj), (__int64)((char**)constant));
 }
 
+template <typename Return, typename ... Arguments>
+constexpr Return Call(void* vmt, const std::uint32_t index, Arguments ... args) noexcept
+{
+	using Function = Return(__thiscall*)(void*, decltype(args)...);
+	return (*static_cast<Function**>(vmt))[index](vmt, args...);
+}
+
+struct AddonInfo {
+	const char* name;
+	const char* author;
+	const char* version;
+	const char* description;
+	const char* enabled;
+};
+
+int GetModPath(HSQUIRRELVM v) {
+	auto func_addr = g_CVFileSystem->GetSearchPath;
+	auto kv_load_file = G_client + 0x65F980;
+	void* file_system = *(void**)(G_client + 0x380E678);
+	auto base_file_system = (uintptr_t)file_system + 0x8;
+	printf("GetSearchPath: %p\n", file_system);
+	auto kv_load_file_addr = (int(__fastcall*)(KeyValues*, int64,char*, const char*,int))kv_load_file;
+	auto load_addon_info_addr = G_client + 0x65F980;
+	auto load_addon_info_file = (int(__fastcall*)(void*, KeyValues*, const char*, bool))load_addon_info_addr;
+
+	auto func = (int(__fastcall*)(void*, const char*, int64, char*,int64))func_addr;
+	char szModPath[260];
+	char szAddOnListPath[260];
+	char szAddonDirName[60];
+	printf("Mod Path: %s\n", szModPath);
+	auto ret = func(file_system, "MOD", 0, szModPath, 260);
+
+	printf("Mod Path: %s\n", szModPath);
+
+	//V_snprintf(szAddOnListPath, 260, "%s%s", szModPath, "addonlist.txt");
+	snprintf(szAddOnListPath, 260, "%s%s", szModPath, "addonlist.txt");
+
+	KeyValues* kv = new KeyValues("AddonList");
+
+	printf("AddonList Path: %s\n", szAddOnListPath);
+	char addoninfoFilename[260];
+
+	
+	kv_load_file_addr(kv, base_file_system, szAddOnListPath, nullptr, 0);
+
+	sq_newarray(v,0);
+
+	for (KeyValues* subkey = kv->GetFirstValue(); subkey; subkey = subkey->GetNextValue()) {
+		const char* name = subkey->GetName();
+		V_strncpy(szAddonDirName, name, 60);
+		printf("Addon: %s\n", szAddonDirName);
+		V_snprintf(addoninfoFilename, 260i64, "%s%s%c%s%c%s", szModPath, "addons", 92, szAddonDirName, 92, "addoninfo.txt");
+
+		KeyValues* addoninfo = new KeyValues("AddonInfo");
+		kv_load_file_addr(addoninfo, base_file_system, addoninfoFilename, nullptr, 0);
+
+		auto author = addoninfo->GetWString("addonauthor");
+		auto addon_name = addoninfo->GetWString("addontitle");
+		auto version = addoninfo->GetWString("addonversion");
+		auto description = addoninfo->GetWString("addondescription");
+
+		char* author_str = new char[260];
+		char* addon_name_str = new char[260];
+		char* description_str = new char[260];
+		char* version_str = new char[260];
+
+		wcstombs(addon_name_str, addon_name, 260);
+		wcstombs(author_str, author, 260);
+		wcstombs(description_str, description, 260);
+		wcstombs(version_str, version, 260);
+		sq_newtable(v);
+
+		sq_pushstring(v, "name", -1);
+		sq_pushstring(v, name, -1);
+
+		sq_newslot(v, -3, 0);
+
+		sq_pushstring(v, "author", -1);
+		sq_pushstring(v, author_str, strlen(author_str));
+
+		sq_newslot(v, -3, 0);
+
+		sq_pushstring(v, "version", -1);
+		sq_pushstring(v, version_str,strlen(version_str));
+
+		sq_newslot(v, -3, 0);
+
+		sq_pushstring(v, "description", -1);
+		sq_pushstring(v, description_str,strlen(description_str));
+
+		sq_arrayappend(v, -2);
+	}
+	return 1;
+}
+
+int UpdateAddons(HSQUIRRELVM v, SQInteger index, SQBool enabled) {
+	auto func_addr = g_CVFileSystem->GetSearchPath;
+	auto kv_load_file = G_client + 0x65F980;
+	auto kv_write_file = G_client + 0x65DB30;
+	void* file_system = *(void**)(G_client + 0x380E678);
+	auto base_file_system = (uintptr_t)file_system + 0x8;
+	auto kv_load_file_addr = (int(__fastcall*)(KeyValues*, int64, char*, const char*, int))kv_load_file;
+	auto kv_write_file_addr = (int(__fastcall*)(KeyValues*, int64, char*))kv_write_file;
+	auto load_addon_info_addr = G_client + 0x65F980;
+	auto load_addon_info_file = (int(__fastcall*)(void*, KeyValues*, const char*, bool))load_addon_info_addr;
+	auto func = (int(__fastcall*)(void*, const char*, int64, char*, int64))func_addr;
+	char szModPath[260];
+	char szAddOnListPath[260];
+	char szAddonDirName[60];
+	printf("Mod Path: %s\n", szModPath);
+	auto ret = func(file_system, "MOD", 0, szModPath, 260);
+	snprintf(szAddOnListPath, 260, "%s%s", szModPath, "addonlist.txt");
+	KeyValues* kv = new KeyValues("AddonList");
+	printf("AddonList Path: %s\n", szAddOnListPath);
+	kv_load_file_addr(kv, base_file_system, szAddOnListPath, nullptr, 0);
+	auto vm = GetServerVMPtr();
+	std::cout << kv->GetString() << std::endl;
+	int i = 0; // Declare the iterator before the loop
+	for (KeyValues* subkey = kv->GetFirstValue(); subkey; subkey = subkey->GetNextValue(), ++i) {
+		const char* name = subkey->GetName();
+		bool value = subkey->GetInt(NULL, 0) != 0;
+		sq_getinteger(vm, v, i + 2 , &index);
+		sq_getbool(vm, v, i + 3, &enabled);
+		std::cout << "Name: " << name << " Value: " << value << " i: " << i << " Index: " << index << std::endl;
+		if (i == index) {
+			subkey->SetInt(NULL, enabled);
+			std::cout << "Updated: " << name << " to " << enabled << std::endl;
+			break;
+		}
+		// find the index of the addon
+	}
+	sq_pushinteger(vm, v, 1);
+	kv_write_file_addr(kv, base_file_system, szAddOnListPath);
+	// Save the keyvalues to the file
+	return 1;
+}
+
+int GetMods(HSQUIRRELVM v) {
+	auto func_addr = g_CVFileSystem->GetSearchPath;
+	auto kv_load_file = G_client + 0x65F980;
+	void* file_system = *(void**)(G_client + 0x380E678);
+	auto base_file_system = (uintptr_t)file_system + 0x8;
+	printf("GetSearchPath: %p\n", file_system);
+	auto kv_load_file_addr = (int(__fastcall*)(KeyValues*, int64, char*, const char*, int))kv_load_file;
+	auto load_addon_info_addr = G_client + 0x65F980;
+	auto load_addon_info_file = (int(__fastcall*)(void*, KeyValues*, const char*, bool))load_addon_info_addr;
+	auto func = (int(__fastcall*)(void*, const char*, int64, char*, int64))func_addr;
+	char szModPath[260];
+	char szAddOnListPath[260];
+	char szAddonDirName[60];
+	printf("Mod Path: %s\n", szModPath);
+	auto vm = GetServerVMPtr();
+	auto ret = func(file_system, "MOD", 0, szModPath, 260);
+	printf("Mod Path: %s\n", szModPath);
+	snprintf(szAddOnListPath, 260, "%s%s", szModPath, "addonlist.txt");
+	KeyValues* kv = new KeyValues("AddonList");
+	printf("AddonList Path: %s\n", szAddOnListPath);
+	char addoninfoFilename[260];
+	kv_load_file_addr(kv, base_file_system, szAddOnListPath, nullptr, 0);
+	sq_newarray(v, 0);
+	for (KeyValues* subkey = kv->GetFirstValue(); subkey; subkey = subkey->GetNextValue()) {
+		const char* name = subkey->GetName();
+		
+		V_strncpy(szAddonDirName, name, 60);
+		printf("Addon: %s\n", szAddonDirName);
+		snprintf(addoninfoFilename, 260, "%s%s%c%s%c%s", szModPath, "addons", '\\', szAddonDirName, '\\', "addoninfo.txt");
+		KeyValues* addoninfo = new KeyValues("AddonInfo");
+		kv_load_file_addr(addoninfo, base_file_system, addoninfoFilename, nullptr, 0);
+		bool enabled = subkey->GetInt(NULL, 0) != 0;
+		auto author = addoninfo->GetWString("addonauthor");
+		auto addon_name = addoninfo->GetWString("addontitle");
+		auto version = addoninfo->GetWString("addonversion");
+		auto description = addoninfo->GetWString("addondescription");
+		char author_str[260];
+		char addon_name_str[260];
+		char description_str[260];
+		char version_str[260];
+		wcstombs(addon_name_str, addon_name, 260);
+		wcstombs(author_str, author, 260);
+		wcstombs(description_str, description, 260);
+		wcstombs(version_str, version, 260);
+		sq_newtable(v);
+		sq_pushstring(v, "name", -1);
+		sq_pushstring(v, name, -1);
+		sq_newslot(v, -3, 0);
+		sq_pushstring(v, "author", -1);
+		sq_pushstring(v, author_str, strlen(author_str));
+		sq_newslot(v, -3, 0);
+		sq_pushstring(v, "version", -1);
+		sq_pushstring(v, version_str, strlen(version_str));
+		sq_newslot(v, -3, 0);
+		sq_pushstring(v, "description", -1);
+		sq_pushstring(v, description_str, strlen(description_str));
+		sq_newslot(v, -3, 0);
+		sq_pushstring(v, "enabled", -1);
+		sq_pushbool(vm,v, enabled);
+		sq_newslot(v, -3, 0);
+		sq_arrayappend(v, -2);
+	}
+	return 1;
+}
 
 // Function to initialize all SQVM functions
 bool GetSQVMFuncs() {
@@ -276,6 +477,18 @@ bool GetSQVMFuncs() {
 		"str",
 		"Get a persistent data value"
 	);
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_UI,
+		"GetModPath",
+		(SQFUNCTION)GetMods,
+		".ss", // String
+		1,      // Expects 2 parameters
+		"string",    // Returns a string
+		"str",
+		"Get a persistent data value"
+	);
+
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_UI,
 		"GetPersistentString",
@@ -286,6 +499,18 @@ bool GetSQVMFuncs() {
 		"str",
 		"Get a persistent data value"
 	);
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_UI,
+		"UpdateAddons",
+		(SQFUNCTION)UpdateAddons,
+		".ib", // String
+		3,      // Expects 2 parameters
+		"int",    // Returns a string
+		"int index,bool enabled",
+		"Updates the selected addons"
+	);
+
 	//REGISTER_SCRIPT_FUNCTION(
 	//	SCRIPT_CONTEXT_CLIENT | SCRIPT_CONTEXT_UI, // Available in client script contexts
 	//	"GetPersistentVarAsInt",

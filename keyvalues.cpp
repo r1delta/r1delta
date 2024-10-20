@@ -600,7 +600,7 @@ const char* KeyValues::GetName(void) const
 //			nDefaultValue -
 // Output : int
 //-----------------------------------------------------------------------------
-int KeyValues::GetInt(const char* pszKeyName, int iDefaultValue)
+int KeyValues::GetInt(const char* pszKeyName = NULL, int iDefaultValue = 0)
 {
 	KeyValues* pKey = FindKey(pszKeyName, false);
 	if (pKey)
