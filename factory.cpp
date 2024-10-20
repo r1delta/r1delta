@@ -89,10 +89,10 @@ HMODULE engineR1O;
 CreateInterfaceFn R1OCreateInterface;
 
 void* R1OFactory(const char* pName, int* pReturnCode) {
-	std::cout << "looking for " << pName << std::endl;
+//	std::cout << "looking for " << pName << std::endl;
 
 	if (!strcmp_static(pName, "VEngineServer022")) {
-		std::cout << "wrapping VEngineServer022" << std::endl;
+		//std::cout << "wrapping VEngineServer022" << std::endl;
 
 		uintptr_t* r1vtable = *(uintptr_t**)oAppSystemFactory(pName, pReturnCode);
 		g_CVEngineServerInterface = (uintptr_t)oFileSystemFactory(pName, pReturnCode);
@@ -105,7 +105,7 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 		return &whatever2;
 	}
 	if (!strcmp_static(pName, "VFileSystem017")) {
-		std::cout << "wrapping VFileSystem017" << std::endl;
+	//	std::cout << "wrapping VFileSystem017" << std::endl;
 
 		uintptr_t* r1vtable = *(uintptr_t**)oFileSystemFactory(pName, pReturnCode);
 		g_CVFileSystemInterface = (uintptr_t)oFileSystemFactory(pName, pReturnCode);
@@ -135,7 +135,7 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 		return &a.ptr1;
 	}
 	if (!strcmp_static(pName, "VModelInfoServer002")) {
-		std::cout << "wrapping VModelInfoServer002" << std::endl;
+		//std::cout << "wrapping VModelInfoServer002" << std::endl;
 		g_CVModelInfoServerInterface = (uintptr_t)oAppSystemFactory(pName, pReturnCode);
 		uintptr_t* r1vtable = *(uintptr_t**)oAppSystemFactory(pName, pReturnCode);
 
@@ -145,7 +145,7 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 		return &whatever4;
 	}
 	if (!strcmp_static(pName, "VEngineServerStringTable001")) {
-		std::cout << "wrapping VEngineServerStringTable001" << std::endl;
+		//std::cout << "wrapping VEngineServerStringTable001" << std::endl;
 		stringtableinterface = (uintptr_t)oAppSystemFactory(pName, pReturnCode);
 		uintptr_t* r1vtable = *(uintptr_t**)stringtableinterface;
 
@@ -172,7 +172,7 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 		return &whatever5;
 	}
 	if (!strcmp_static(pName, "VEngineCvar007")) {
-		std::cout << "wrapping VEngineCvar007" << std::endl;
+		//std::cout << "wrapping VEngineCvar007" << std::endl;
 		cvarinterface = (uintptr_t)oAppSystemFactory(pName, pReturnCode);
 		uintptr_t* r1vtable = *(uintptr_t**)cvarinterface;
 
@@ -278,15 +278,15 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 	}
 	auto result = oAppSystemFactory(pName, pReturnCode);
 	if (!result && !strcmp_static(pName, "VENGINE_DEDICATEDEXPORTS_API_VERSION003")) {
-		std::cout << "forging dediexports" << std::endl;
+		//std::cout << "forging dediexports" << std::endl;
 		return (void*)1;
 	}
 	if (result) {
-		std::cout << "found " << pName << "  in appsystem factory" << std::endl;
+		//std::cout << "found " << pName << "  in appsystem factory" << std::endl;
 		return result;
 	}
 
-	std::cout << "engine is set up, looking for " << pName << std::endl;
+	//std::cout << "engine is set up, looking for " << pName << std::endl;
 
 	return R1OCreateInterface(pName, pReturnCode);
 }
@@ -361,7 +361,7 @@ char __fastcall CServerGameDLL__DLLInit(void* thisptr, CreateInterfaceFn appSyst
 
 extern "C" __declspec(dllexport) void StackToolsNotify_LoadedLibrary(char* pModuleName)
 {
-	printf("loaded %s\n", pModuleName);
+	//printf("loaded %s\n", pModuleName);
 }
 typedef char(*MatchRecvPropsToSendProps_RType)(__int64 a1, __int64 a2, __int64 a3, __int64 a4);
 MatchRecvPropsToSendProps_RType MatchRecvPropsToSendProps_ROriginal;

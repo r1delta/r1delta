@@ -197,14 +197,14 @@ sub_629740Type sub_629740Original;
 
 __int64 __fastcall sub_629740(__int64 a1, const char* a2, int a3) {
 	if (shouldSave(a2)) {
-		savedCalls.push_back({ a1, a2, a3 });
+		//savedCalls.push_back({ a1, a2, a3 });
 		return -1;
 	}
 	else if (strcmp_static(a2, "RemoteWeaponReload") == 0) {
-		for (auto& call : savedCalls) {
-			sub_629740Original(call.a1, call.a2.c_str(), call.a3);
-		}
-		savedCalls.clear(); // Clear after processing
+		//for (auto& call : savedCalls) {
+		//	sub_629740Original(call.a1, call.a2.c_str(), call.a3);
+		//}
+		//savedCalls.clear(); // Clear after processing
 	}
 	return sub_629740Original(a1, a2, a3);
 }
@@ -999,6 +999,46 @@ void InitAddons() {
 	
 	MH_EnableHook(MH_ALL_HOOKS);
 }
+std::unordered_map<std::string, std::string> g_LastEntCreateKeyValues;
+void (*oCC_Ent_Create)(const CCommand* args);
+bool g_bIsEntCreateCommand = false;
+
+void CC_Ent_Create(const CCommand* args)
+{
+	g_LastEntCreateKeyValues.clear();
+
+	int numPairs = (args->ArgC() - 2) / 2;
+	g_LastEntCreateKeyValues.reserve(numPairs);
+
+	for (int i = 2; i + 1 < args->ArgC(); i += 2)
+	{
+		const char* const pKeyName = (*args)[i];
+		const char* const pValue = (*args)[i + 1];
+
+		if (pKeyName && pValue) {
+			g_LastEntCreateKeyValues[pKeyName] = pValue;
+		}
+	}
+
+	g_bIsEntCreateCommand = true;
+	oCC_Ent_Create(args);
+	g_bIsEntCreateCommand = false;
+
+	g_LastEntCreateKeyValues.clear();
+}
+__int64 (*oDispatchSpawn)(__int64 a1, char a2);
+__int64 __fastcall DispatchSpawn(__int64 a1, char a2) {
+	static auto target = G_server + 0x3BE267;
+	if (uintptr_t(_ReturnAddress()) == target && g_bIsEntCreateCommand) {
+		auto entityVtable = *(_QWORD*)a1;
+		auto setKeyValueFunction = (void(__fastcall**)(__int64, const char*, const char*))(entityVtable + 288LL);
+
+		for (const auto& pair : g_LastEntCreateKeyValues) {
+			(*setKeyValueFunction)(a1, pair.first.c_str(), pair.second.c_str());
+		}
+	}
+	return oDispatchSpawn(a1, a2);
+}
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
 	const LDR_DLL_NOTIFICATION_DATA* notification_data,
@@ -1062,6 +1102,9 @@ void __stdcall LoaderNotificationCallback(
 		//MH_CreateHook((LPVOID)(server_base + 0x25A8E0), &CEntityFactoryDictionary__Create, reinterpret_cast<LPVOID*>(&CEntityFactoryDictionary__CreateOriginal));
 		//MH_CreateHook((LPVOID)(server_base + 0x363A50), &sub_363A50, reinterpret_cast<LPVOID*>(&sub_363A50Original));
 		auto engine_base = G_engine;
+		MH_CreateHook((LPVOID)(server_base + 0x3A2130), &CBaseEntity__SendProxy_CellOriginZ, reinterpret_cast<LPVOID*>(NULL));
+		MH_CreateHook((LPVOID)(server_base + 0x3BE1A0), &CC_Ent_Create, reinterpret_cast<LPVOID*>(&oCC_Ent_Create));
+		MH_CreateHook((LPVOID)(server_base + 0x25E340), &DispatchSpawn, reinterpret_cast<LPVOID*>(&oDispatchSpawn));
 
 		if (!IsDedicatedServer()) {
 			MH_CreateHook((LPVOID)(engine_base + 0x21F9C0), &CEngineVGui__Init, reinterpret_cast<LPVOID*>(&CEngineVGui__InitOriginal));
@@ -1127,7 +1170,7 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook(LPVOID(server_base + 0x41E070), &CHL2_Player_Precache, 0);
 		
 		MH_EnableHook(MH_ALL_HOOKS);
-		std::cout << "did hooks" << std::endl;
+		//std::cout << "did hooks" << std::endl;
 	}
 
 	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"engine_ds.dll") == 0) {

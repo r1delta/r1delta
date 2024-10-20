@@ -253,17 +253,17 @@ void CCVar_UnregisterConCommand(uintptr_t thisptr, ConCommandBaseR1O* pCommandBa
 }
 
 ConCommandBaseR1O* CCVar_FindCommandBase(uintptr_t thisptr, const char* name) {
-	std::cout << __FUNCTION__ << ": " << name << std::endl;
+	//std::cout << __FUNCTION__ << ": " << name << std::endl;
 	return (ConCommandBaseR1O*)OriginalCCVar_FindCommandBase(cvarinterface, name);
 }
 
 const ConCommandBaseR1O* CCVar_FindCommandBase2(uintptr_t thisptr, const char* name) {
-	std::cout << __FUNCTION__ << ": " << name << std::endl;
+	//std::cout << __FUNCTION__ << ": " << name << std::endl;
 	return (ConCommandBaseR1O*)OriginalCCVar_FindCommandBase2(cvarinterface, name);
 }
 
 ConVarR1O* CCVar_FindVar(uintptr_t thisptr, const char* var_name) {
-	std::cout << __FUNCTION__ << ": " << var_name << std::endl;
+	//std::cout << __FUNCTION__ << ": " << var_name << std::endl;
 	auto it = ccBaseMap.find(var_name);
 	ConVarR1O* r1optr = it == ccBaseMap.end() ? NULL : (ConVarR1O*)it->second->r1optr;
 	if (r1optr)
@@ -337,12 +337,12 @@ const ConVarR1O* CCVar_FindVar2(uintptr_t thisptr, const char* var_name) {
 }
 
 ConCommandR1O* CCVar_FindCommand(uintptr_t thisptr, const char* name) {
-	std::cout << __FUNCTION__ << ": " << name << std::endl;
+	//std::cout << __FUNCTION__ << ": " << name << std::endl;
 	return (ConCommandR1O*)((uintptr_t)OriginalCCVar_FindCommand(cvarinterface, name));
 }
 
 const ConCommandR1O* CCVar_FindCommand2(uintptr_t thisptr, const char* name) {
-	std::cout << __FUNCTION__ << ": " << name << std::endl;
+	//std::cout << __FUNCTION__ << ": " << name << std::endl;
 	return (ConCommandR1O*)((uintptr_t)OriginalCCVar_FindCommand2(cvarinterface, name));
 }
 void CCVar_CallGlobalChangeCallbacks(uintptr_t thisptr, ConVarR1O* var, const char* pOldString, float flOldValue) {

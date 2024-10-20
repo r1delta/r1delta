@@ -56,26 +56,26 @@ void DestroySendProp(SendProp* sendTablePtr, int* sendTableLengthPtr, const char
 			//if (std::string(sendTablePtr[i].name) != std::string("m_wallDangleDisableWeapon"))
 			--(*sendTableLengthPtr);
 
-			std::cout << propname << " obliterated." << std::endl;
+			//std::cout << propname << " obliterated." << std::endl;
 
 			return;
 		}
 	}
-	std::cout << "its fucked man" << std::endl;
+	//std::cout << "its fucked man" << std::endl;
 	DebugBreak();
-	std::cout << (char*)0 << "lol" << std::endl;
+	//std::cout << (char*)0 << "lol" << std::endl;
 }
 
 void RenameSendProp(SendProp* sendTablePtr, int* sendTableLengthPtr, const char* currentName, const char* newName) {
 	for (int i = 0; i < *sendTableLengthPtr; ++i) {
 		if (strcmp(sendTablePtr[i].name, currentName) == 0) {
 			sendTablePtr[i].name = (char*)newName;
-			std::cout << "SendProp renamed from " << currentName << " to " << newName << std::endl;
+			//std::cout << "SendProp renamed from " << currentName << " to " << newName << std::endl;
 			return;
 		}
 	}
 
-	std::cout << "SendProp not found: " << currentName << std::endl;
+	//std::cout << "SendProp not found: " << currentName << std::endl;
 }
 
 SendProp* FindSendProp(SendProp* sendTablePtr, int sendTableLength, const char* propName) {
@@ -98,17 +98,17 @@ void MoveSendProp(SendProp* sourceTablePtr, int* sourceTableLengthPtr, const cha
 					// Move the source send prop over the destination send prop
 					memcpy((void*)(&destTablePtr[j]), (void*)(&sourceTablePtr[i]), sizeof(SendProp));
 
-					std::cout << sourcePropName << " moved over " << destPropName << std::endl;
+				//	std::cout << sourcePropName << " moved over " << destPropName << std::endl;
 					return;
 				}
 			}
 
-			std::cout << "Destination send prop not found: " << destPropName << std::endl;
+			//std::cout << "Destination send prop not found: " << destPropName << std::endl;
 			return;
 		}
 	}
 
-	std::cout << "Source send prop not found: " << sourcePropName << std::endl;
+	//std::cout << "Source send prop not found: " << sourcePropName << std::endl;
 }
 
 void ServerClassInit_DT_BasePlayer() {

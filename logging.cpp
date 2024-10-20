@@ -110,8 +110,12 @@ int __cdecl vsnprintf_l_hk(
 }
 typedef void (*Cbuf_AddTextType)(int a1, const char* a2, unsigned int a3);
 Cbuf_AddTextType Cbuf_AddTextOriginal;
-
+static bool bDone = false;
 void Cbuf_AddText(int a1, const char* a2, unsigned int a3) {
+	if (!bDone) {
+		bDone = true;
+		OriginalCCVar_FindVar(cvarinterface, "cl_updaterate")->m_nFlags &= ~(FCVAR_HIDDEN | FCVAR_DEVELOPMENTONLY);
+	}
 	bool shouldLog = true;
 	if (a2 == nullptr || *a2 == '\0' || strcmp_static(a2, "\n") == 0) {
 		shouldLog = false;
@@ -394,6 +398,20 @@ void COM_TimestampedLogHook(const char* pMsg, ...) {
 	}
 	free(formatted);
 }
+extern "C" __declspec(dllexport) void Error(const char* pMsg, ...) {
+	if (strcmp(pMsg, "UserMessageBegin:  Unregistered message '%s'\n") == 0 ||
+		strcmp(pMsg, "MESSAGE_END called with no active message\n") == 0) {
+		return;
+	}
+
+	va_list args;
+	va_start(args, pMsg);
+	std::string formatted = SafeFormat(pMsg, args);
+	va_end(args);
+
+	reinterpret_cast<WarningFn>(GetProcAddress(GetModuleHandleA("tier0_orig.dll"), "Error"))("%s", formatted.c_str());
+}
+
 void InitLoggingHooks()
 {
 	auto tier0 = GetModuleHandleA("tier0.dll");

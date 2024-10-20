@@ -328,9 +328,11 @@ SQInteger Script_ServerGetPersistentUserDataKVString(HSQUIRRELVM v) {
 }
 
 SQInteger Script_ServerSetPersistentUserDataKVString(HSQUIRRELVM v) {
-	auto engine = G_engine;
-	void (*CVEngineServer_ClientCommand)(__int64 a1, __int64 a2, const char* a3, ...) = decltype(CVEngineServer_ClientCommand)(engine + 0xFE7F0);
-
+	static void (*CVEngineServer_ClientCommand)(__int64 a1, __int64 a2, const char* a3, ...) = 0;
+	if (!CVEngineServer_ClientCommand && !IsDedicatedServer())
+		CVEngineServer_ClientCommand = decltype(CVEngineServer_ClientCommand)(G_engine + 0xFE7F0);
+	else if (!CVEngineServer_ClientCommand)
+		CVEngineServer_ClientCommand = decltype(CVEngineServer_ClientCommand)(G_engine_ds + 0x6F030);
 	const void* pPlayer = sq_getentity(v, 2);
 	if (!pPlayer) {
 		return sq_throwerror(v, "player is null");

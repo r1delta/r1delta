@@ -184,8 +184,11 @@ __int64 __fastcall bf_write__WriteUBitLong(bf_write* a1, unsigned int a2, signed
 {
 	uintptr_t engineDS = G_engine_ds;
 	auto ret = bf_write__WriteUBitLongOriginal(a1, a2, a3);
-	if (uintptr_t(_ReturnAddress()) == (engineDS + 0x51018) || uintptr_t(_ReturnAddress()) == (engineDS + 0x5101D))
-		bf_write__WriteUBitLongOriginal(a1, 0, 14);
+	if (uintptr_t(_ReturnAddress()) == (engineDS + 0x51018) || uintptr_t(_ReturnAddress()) == (engineDS + 0x5101D)) {
+		a1->WriteOneBit(0);
+		a1->WriteOneBit(0);
+		a1->WriteUBitLong(0, 12);
+	}
 	return ret;
 }
 
@@ -266,7 +269,11 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 #if defined(_DEBUG) && VTABLE_UPDATE_FORCE
 	OutputDebugStringA("};\n");
 #endif
-
+	// copy sendtable funcs
+	DWORD oldProtect;
+	VirtualProtect((LPVOID)(G_engine_ds + 0x550760), 173 * sizeof(uintptr_t), PAGE_READWRITE, &oldProtect);
+	memcpy((void*)(G_engine_ds + 0x550760), (void*)(G_engine + 0x7CB3F0), 173 * sizeof(uintptr_t));
+	VirtualProtect((LPVOID)(G_engine_ds + 0x550760), 173 * sizeof(uintptr_t), oldProtect, &oldProtect);
 	MH_EnableHook(MH_ALL_HOOKS);
 	reinterpret_cast<char(__fastcall*)(__int64, CreateInterfaceFn)>((uintptr_t)(engine) + 0x01A04A0)(0, (CreateInterfaceFn)(engineDS + 0xE9000)); // connect nondedi engine
 	reinterpret_cast<void(__fastcall*)(int, void*)>((uintptr_t)(engine) + 0x47F580)(0, 0); // register nondedi engine cvars
@@ -311,6 +318,35 @@ char __fastcall CBaseClient__ProcessClientInfo(__int64 a1, __int64 a2)
 		(*(void(__fastcall**)(__int64))(*(_QWORD*)(a1 - 8) + 96i64))(a1 - 8);
 	return 1;
 }
+static float		host_nexttick = 0;		// next server tick in this many ms
+static float* host_state_interval_per_tick;
+static float* host_remainder;
+static void (*oCbuf_Execute)(void);
+static void Cbuf_Execute() {
+	static uintptr_t ret_from_host_runframe = G_engine_ds + 0xA181E;
+	if (uintptr_t(_ReturnAddress()) == ret_from_host_runframe) {
+		if (!host_state_interval_per_tick)
+			host_state_interval_per_tick = (float*)(G_engine_ds + 0x547300);
+		if (!host_remainder)
+			host_remainder = (float*)(G_engine_ds + 0x20408C0);
+		host_nexttick = *host_state_interval_per_tick - *host_remainder;
+	}
+	oCbuf_Execute();
+}
+static bool CEngine__FilterTime(void* thisptr, float dt, float* flMinFrameTime)
+{
+	*flMinFrameTime = host_nexttick;
+	return (dt >= host_nexttick);
+}
+void* (*oKeyValues__SetString__Dedi)(__int64 a1, char* a2, const char* a3);
+void* KeyValues__SetString__Dedi(__int64 a1, char* a2, const char* a3)
+{
+	static auto target = G_engine_ds + 0xC36AD;
+	if (uintptr_t(_ReturnAddress()) == target)
+		a3 = "30"; // force replay updaterate to 60
+	return oKeyValues__SetString__Dedi(a1, a2, a3);
+}
+
 void InitDedicated()
 {
 	uintptr_t offsets[] = {
@@ -368,6 +404,9 @@ void InitDedicated()
 	MH_CreateHook((LPVOID)(engine_ds + 0x31EB20), &ConVar_PrintDescription, reinterpret_cast<LPVOID*>(&ConVar_PrintDescriptionOriginal));
 	MH_CreateHook((LPVOID)(engine_ds + 0x310780), &sub_1804722E0, 0);
 	MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x45C00), &CBaseClient__ProcessClientInfo, reinterpret_cast<LPVOID*>(NULL));
+	MH_CreateHook((LPVOID)(engine_ds + 0x756E0), &Cbuf_Execute, reinterpret_cast<LPVOID*>(&oCbuf_Execute));
+	MH_CreateHook((LPVOID)(engine_ds + 0xEF480), &CEngine__FilterTime, reinterpret_cast<LPVOID*>(NULL));
+	MH_CreateHook((LPVOID)(engine_ds + 0x318D60), &KeyValues__SetString__Dedi, reinterpret_cast<LPVOID*>(&oKeyValues__SetString__Dedi));
 
 	//MH_CreateHook((LPVOID)(engine_ds + 0x360230), &vsnprintf_l_hk, NULL);
 	MH_EnableHook(MH_ALL_HOOKS);
