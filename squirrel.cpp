@@ -243,7 +243,7 @@ int GetModPath(HSQUIRRELVM v) {
 	char szModPath[260];
 	char szAddOnListPath[260];
 	char szAddonDirName[60];
-	printf("Mod Path: %s\n", szModPath);
+	// printf("Mod Path: %s\n", szModPath);
 	auto ret = func(file_system, "MOD", 0, szModPath, 260);
 
 	printf("Mod Path: %s\n", szModPath);
