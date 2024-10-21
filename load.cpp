@@ -1039,6 +1039,33 @@ __int64 __fastcall DispatchSpawn(__int64 a1, char a2) {
 	}
 	return oDispatchSpawn(a1, a2);
 }
+__int64 (*oCBaseEntity__VPhysicsInitNormal)(void* a1, unsigned int a2, unsigned int a3, char a4, __int64 a5);
+void (*oCBaseEntity__SetMoveType)(void* a1, __int64 a2, __int64 a3);
+
+__int64 CBaseEntity__VPhysicsInitNormal(void* a1, unsigned int a2, unsigned int a3, char a4, __int64 a5)
+{
+	if (uintptr_t(_ReturnAddress()) == (G_server + 0xB63FD))
+		return 0;
+	else
+		return oCBaseEntity__VPhysicsInitNormal(a1, a2, a3, a4, a5);
+}
+void CBaseEntity__SetMoveType(void* a1, __int64 a2, __int64 a3)
+{
+	if (uintptr_t(_ReturnAddress()) == (G_server + 0xB64EC))
+	{
+		a2 = 5;
+		a3 = 1;
+	}
+	return oCBaseEntity__SetMoveType(a1, a2, a3);
+}
+typedef void* (*CEntityFactoryDictionary__CreateType)(void* thisptr, const char* pClassName);
+CEntityFactoryDictionary__CreateType CEntityFactoryDictionary__CreateOriginal;
+void* CEntityFactoryDictionary__Create(void* thisptr, const char* pClassName) {
+	if (strstr(pClassName, "prop_physics") != NULL) {// && uintptr_t(_ReturnAddress()) != mapload) {
+		pClassName = "prop_dynamic_override";
+	}
+	return CEntityFactoryDictionary__CreateOriginal(thisptr, pClassName);
+}
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
 	const LDR_DLL_NOTIFICATION_DATA* notification_data,
@@ -1092,7 +1119,9 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)(server_base + 0x3A1EC0), &CBaseEntity__SendProxy_CellOrigin, reinterpret_cast<LPVOID*>(NULL));
 		MH_CreateHook((LPVOID)(server_base + 0x3A2020), &CBaseEntity__SendProxy_CellOriginXY, reinterpret_cast<LPVOID*>(NULL));
 		MH_CreateHook((LPVOID)(server_base + 0x3A2130), &CBaseEntity__SendProxy_CellOriginZ, reinterpret_cast<LPVOID*>(NULL));
-		//MH_CreateHook((LPVOID)(server_base + 0x3C8B70), &CBaseEntity__VPhysicsInitNormal, reinterpret_cast<LPVOID*>(&CBaseEntity__VPhysicsInitNormalOriginal));
+		MH_CreateHook((LPVOID)(server_base + 0x3C8B70), &CBaseEntity__VPhysicsInitNormal, reinterpret_cast<LPVOID*>(&oCBaseEntity__VPhysicsInitNormal));
+		MH_CreateHook((LPVOID)(server_base + 0x3B3200), &CBaseEntity__SetMoveType, reinterpret_cast<LPVOID*>(&oCBaseEntity__SetMoveType));
+		//MH_CreateHook((LPVOID)(server_base + 0x25A8E0), &CEntityFactoryDictionary__Create, reinterpret_cast<LPVOID*>(&CEntityFactoryDictionary__CreateOriginal));
 
 		//MH_CreateHook((LPVOID)(server_base + 0x3667D0), &CAI_NetworkManager__DelayedInit, reinterpret_cast<LPVOID*>(&CAI_NetworkManager__DelayedInitOriginal));
 		//MH_CreateHook((LPVOID)(server_base + 0x36BC30), &sub_36BC30, reinterpret_cast<LPVOID*>(&sub_36BC30Original));
@@ -1102,7 +1131,6 @@ void __stdcall LoaderNotificationCallback(
 		//MH_CreateHook((LPVOID)(server_base + 0x25A8E0), &CEntityFactoryDictionary__Create, reinterpret_cast<LPVOID*>(&CEntityFactoryDictionary__CreateOriginal));
 		//MH_CreateHook((LPVOID)(server_base + 0x363A50), &sub_363A50, reinterpret_cast<LPVOID*>(&sub_363A50Original));
 		auto engine_base = G_engine;
-		MH_CreateHook((LPVOID)(server_base + 0x3A2130), &CBaseEntity__SendProxy_CellOriginZ, reinterpret_cast<LPVOID*>(NULL));
 		MH_CreateHook((LPVOID)(server_base + 0x3BE1A0), &CC_Ent_Create, reinterpret_cast<LPVOID*>(&oCC_Ent_Create));
 		MH_CreateHook((LPVOID)(server_base + 0x25E340), &DispatchSpawn, reinterpret_cast<LPVOID*>(&oDispatchSpawn));
 
