@@ -323,7 +323,6 @@ int UpdateAddons(HSQUIRRELVM v, SQInteger index, SQBool enabled) {
 	char szModPath[260];
 	char szAddOnListPath[260];
 	char szAddonDirName[60];
-	printf("Mod Path: %s\n", szModPath);
 	auto ret = func(file_system, "MOD", 0, szModPath, 260);
 	snprintf(szAddOnListPath, 260, "%s%s", szModPath, "addonlist.txt");
 	KeyValues* kv = new KeyValues("AddonList");
@@ -337,7 +336,6 @@ int UpdateAddons(HSQUIRRELVM v, SQInteger index, SQBool enabled) {
 		bool value = subkey->GetInt(NULL, 0) != 0;
 		sq_getinteger(vm, v, i + 2 , &index);
 		sq_getbool(vm, v, i + 3, &enabled);
-		std::cout << "Name: " << name << " Value: " << value << " i: " << i << " Index: " << index << std::endl;
 		if (i == index) {
 			subkey->SetInt(NULL, enabled);
 			std::cout << "Updated: " << name << " to " << enabled << std::endl;
@@ -356,7 +354,6 @@ int GetMods(HSQUIRRELVM v) {
 	auto kv_load_file = G_client + 0x65F980;
 	void* file_system = *(void**)(G_client + 0x380E678);
 	auto base_file_system = (uintptr_t)file_system + 0x8;
-	printf("GetSearchPath: %p\n", file_system);
 	auto kv_load_file_addr = (int(__fastcall*)(KeyValues*, int64, char*, const char*, int))kv_load_file;
 	auto load_addon_info_addr = G_client + 0x65F980;
 	auto get_addon_image_addr = G_client + 0x3DAB30;
@@ -366,7 +363,6 @@ int GetMods(HSQUIRRELVM v) {
 	char szModPath[260];
 	char szAddOnListPath[260];
 	char szAddonDirName[60];
-	printf("Mod Path: %s\n", szModPath);
 	auto vm = GetServerVMPtr();
 	auto ret = func(file_system, "MOD", 0, szModPath, 260);
 	printf("Mod Path: %s\n", szModPath);
@@ -381,8 +377,6 @@ int GetMods(HSQUIRRELVM v) {
 		V_strncpy(szAddonDirName, name, 60);
 		char image[260];
 		get_addon_image(nullptr, name, image, 260, false);
-		printf("Addon: %s\n", szAddonDirName);
-		printf("Image: %s\n", image);
 		snprintf(addoninfoFilename, 260, "%s%s%c%s%c%s", szModPath, "addons", '\\', szAddonDirName, '\\', "addoninfo.txt");
 		KeyValues* addoninfo = new KeyValues("AddonInfo");
 		kv_load_file_addr(addoninfo, base_file_system, addoninfoFilename, nullptr, 0);
