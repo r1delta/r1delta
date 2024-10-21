@@ -8,7 +8,7 @@ By reading beyond this disclaimer you hereby accept this and lose any right of c
 
 # Requirements
 - A computer that runs
-- Windows 10 (preferably)
+- Windows 10/11 (preferably)
 - A copy of Titanfall (it doesn't matter if its not the Deluxe Edition, the only thing you need is Titanfall installed.)
 - If you have BME installed (Black Market Edition, a mod for Titanfall 1), uninstall it or back up the `bin` folder for your game, **BME IS INCOMPATIBLE WITH R1DELTA AND WILL BREAK YOUR INSTALL**
 - The files `GBClient.dll`, `nmcogame64.dll`, `engine.dll`, `server_local.dll` and `tier0.dll` downloaded from [here](https://github.com/r1delta/r1delta/files/13839300/Bin_2.zip).
@@ -97,8 +97,7 @@ If you aren't using Origin, you'll also want to download the `Titanfall.exe` pro
 - [@mv](https://github.com/mvoolt)
 - [@bt](https://github.com/caatge)
 - [@dogecore](https://github.com/HappyDOGE)
-
-(list to be expanded in the future as we speak)
+- [@Allusive](https://github.com/AllusiveWheat)
 
 ## Third-Party Code Attribution
 
