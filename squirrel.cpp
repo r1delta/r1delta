@@ -326,7 +326,6 @@ int UpdateAddons(HSQUIRRELVM v, SQInteger index, SQBool enabled) {
 	auto ret = func(file_system, "MOD", 0, szModPath, 260);
 	snprintf(szAddOnListPath, 260, "%s%s", szModPath, "addonlist.txt");
 	KeyValues* kv = new KeyValues("AddonList");
-	printf("AddonList Path: %s\n", szAddOnListPath);
 	kv_load_file_addr(kv, base_file_system, szAddOnListPath, nullptr, 0);
 	auto vm = GetServerVMPtr();
 	std::cout << kv->GetString() << std::endl;
@@ -365,7 +364,6 @@ int GetMods(HSQUIRRELVM v) {
 	char szAddonDirName[60];
 	auto vm = GetServerVMPtr();
 	auto ret = func(file_system, "MOD", 0, szModPath, 260);
-	printf("Mod Path: %s\n", szModPath);
 	snprintf(szAddOnListPath, 260, "%s%s", szModPath, "addonlist.txt");
 	KeyValues* kv = new KeyValues("AddonList");
 	printf("AddonList Path: %s\n", szAddOnListPath);
