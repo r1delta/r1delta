@@ -359,7 +359,9 @@ int GetMods(HSQUIRRELVM v) {
 	printf("GetSearchPath: %p\n", file_system);
 	auto kv_load_file_addr = (int(__fastcall*)(KeyValues*, int64, char*, const char*, int))kv_load_file;
 	auto load_addon_info_addr = G_client + 0x65F980;
+	auto get_addon_image_addr = G_client + 0x3DAB30;
 	auto load_addon_info_file = (int(__fastcall*)(void*, KeyValues*, const char*, bool))load_addon_info_addr;
+	auto get_addon_image = (int(__fastcall*)(void*, const char*, char*, int,bool))get_addon_image_addr;
 	auto func = (int(__fastcall*)(void*, const char*, int64, char*, int64))func_addr;
 	char szModPath[260];
 	char szAddOnListPath[260];
@@ -376,9 +378,11 @@ int GetMods(HSQUIRRELVM v) {
 	sq_newarray(v, 0);
 	for (KeyValues* subkey = kv->GetFirstValue(); subkey; subkey = subkey->GetNextValue()) {
 		const char* name = subkey->GetName();
-		
 		V_strncpy(szAddonDirName, name, 60);
+		char image[260];
+		get_addon_image(nullptr, name, image, 260, false);
 		printf("Addon: %s\n", szAddonDirName);
+		printf("Image: %s\n", image);
 		snprintf(addoninfoFilename, 260, "%s%s%c%s%c%s", szModPath, "addons", '\\', szAddonDirName, '\\', "addoninfo.txt");
 		KeyValues* addoninfo = new KeyValues("AddonInfo");
 		kv_load_file_addr(addoninfo, base_file_system, addoninfoFilename, nullptr, 0);
@@ -409,7 +413,10 @@ int GetMods(HSQUIRRELVM v) {
 		sq_pushstring(v, description_str, strlen(description_str));
 		sq_newslot(v, -3, 0);
 		sq_pushstring(v, "enabled", -1);
-		sq_pushbool(vm,v, enabled);
+		sq_pushbool(vm, v, enabled);
+		sq_newslot(v, -3, 0);
+		sq_pushstring(v, "image", -1);
+		sq_pushstring(v, image, strlen(image));
 		sq_newslot(v, -3, 0);
 		sq_arrayappend(v, -2);
 	}
