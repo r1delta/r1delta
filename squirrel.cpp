@@ -126,6 +126,7 @@ sq_get_t sq_get;
 sq_get_noerr_t sq_get_noerr;
 sq_gettop_t sq_gettop;
 sq_newtable_t sq_newtable;
+sq_get_table_t sq_gettable;
 sq_next_t sq_next;
 sq_getinstanceup_t sq_getinstanceup;
 sq_newarray_t sq_newarray;
@@ -229,86 +230,6 @@ struct AddonInfo {
 	const char* enabled;
 };
 
-int GetModPath(HSQUIRRELVM v) {
-	auto func_addr = g_CVFileSystem->GetSearchPath;
-	auto kv_load_file = G_client + 0x65F980;
-	void* file_system = *(void**)(G_client + 0x380E678);
-	auto base_file_system = (uintptr_t)file_system + 0x8;
-	printf("GetSearchPath: %p\n", file_system);
-	auto kv_load_file_addr = (int(__fastcall*)(KeyValues*, int64,char*, const char*,int))kv_load_file;
-	auto load_addon_info_addr = G_client + 0x65F980;
-	auto load_addon_info_file = (int(__fastcall*)(void*, KeyValues*, const char*, bool))load_addon_info_addr;
-
-	auto func = (int(__fastcall*)(void*, const char*, int64, char*,int64))func_addr;
-	char szModPath[260];
-	char szAddOnListPath[260];
-	char szAddonDirName[60];
-	// printf("Mod Path: %s\n", szModPath);
-	auto ret = func(file_system, "MOD", 0, szModPath, 260);
-
-	printf("Mod Path: %s\n", szModPath);
-
-	//V_snprintf(szAddOnListPath, 260, "%s%s", szModPath, "addonlist.txt");
-	snprintf(szAddOnListPath, 260, "%s%s", szModPath, "addonlist.txt");
-
-	KeyValues* kv = new KeyValues("AddonList");
-
-	printf("AddonList Path: %s\n", szAddOnListPath);
-	char addoninfoFilename[260];
-
-	
-	kv_load_file_addr(kv, base_file_system, szAddOnListPath, nullptr, 0);
-
-	sq_newarray(v,0);
-
-	for (KeyValues* subkey = kv->GetFirstValue(); subkey; subkey = subkey->GetNextValue()) {
-		const char* name = subkey->GetName();
-		V_strncpy(szAddonDirName, name, 60);
-		printf("Addon: %s\n", szAddonDirName);
-		V_snprintf(addoninfoFilename, 260i64, "%s%s%c%s%c%s", szModPath, "addons", 92, szAddonDirName, 92, "addoninfo.txt");
-
-		KeyValues* addoninfo = new KeyValues("AddonInfo");
-		kv_load_file_addr(addoninfo, base_file_system, addoninfoFilename, nullptr, 0);
-
-		auto author = addoninfo->GetWString("addonauthor");
-		auto addon_name = addoninfo->GetWString("addontitle");
-		auto version = addoninfo->GetWString("addonversion");
-		auto description = addoninfo->GetWString("addondescription");
-
-		char* author_str = new char[260];
-		char* addon_name_str = new char[260];
-		char* description_str = new char[260];
-		char* version_str = new char[260];
-
-		wcstombs(addon_name_str, addon_name, 260);
-		wcstombs(author_str, author, 260);
-		wcstombs(description_str, description, 260);
-		wcstombs(version_str, version, 260);
-		sq_newtable(v);
-
-		sq_pushstring(v, "name", -1);
-		sq_pushstring(v, name, -1);
-
-		sq_newslot(v, -3, 0);
-
-		sq_pushstring(v, "author", -1);
-		sq_pushstring(v, author_str, strlen(author_str));
-
-		sq_newslot(v, -3, 0);
-
-		sq_pushstring(v, "version", -1);
-		sq_pushstring(v, version_str,strlen(version_str));
-
-		sq_newslot(v, -3, 0);
-
-		sq_pushstring(v, "description", -1);
-		sq_pushstring(v, description_str,strlen(description_str));
-
-		sq_arrayappend(v, -2);
-	}
-	return 1;
-}
-
 int UpdateAddons(HSQUIRRELVM v, SQInteger index, SQBool enabled) {
 	auto func_addr = g_CVFileSystem->GetSearchPath;
 	auto kv_load_file = G_client + 0x65F980;
@@ -373,6 +294,7 @@ int GetMods(HSQUIRRELVM v) {
 	for (KeyValues* subkey = kv->GetFirstValue(); subkey; subkey = subkey->GetNextValue()) {
 		const char* name = subkey->GetName();
 		V_strncpy(szAddonDirName, name, 60);
+		printf("Addon: %s\n", szAddonDirName);
 		char image[260];
 		get_addon_image(nullptr, name, image, 260, false);
 		snprintf(addoninfoFilename, 260, "%s%s%c%s%c%s", szModPath, "addons", '\\', szAddonDirName, '\\', "addoninfo.txt");
@@ -415,6 +337,91 @@ int GetMods(HSQUIRRELVM v) {
 	return 1;
 }
 
+std::string EnumToString(SQObjectType type) {
+	switch (type) {
+	case OT_NULL: return "OT_NULL";
+	case OT_INTEGER: return "OT_INTEGER";
+	case OT_FLOAT: return "OT_FLOAT";
+	case OT_BOOL: return "OT_BOOL";
+	case OT_STRING: return "OT_STRING";
+	case OT_TABLE: return "OT_TABLE";
+	case OT_ARRAY: return "OT_ARRAY";
+	case OT_USERDATA: return "OT_USERDATA";
+	case OT_CLOSURE: return "OT_CLOSURE";
+	case OT_NATIVECLOSURE: return "OT_NATIVECLOSURE";
+	case OT_GENERATOR: return "OT_GENERATOR";
+	case OT_USERPOINTER: return "OT_USERPOINTER";
+	case OT_THREAD: return "OT_THREAD";
+	case OT_FUNCPROTO: return "OT_FUNCPROTO";
+	case OT_CLASS: return "OT_CLASS";
+	case OT_INSTANCE: return "OT_INSTANCE";
+	case OT_WEAKREF: return "OT_WEAKREF";
+	default: return "Unknown";
+	}
+}
+
+void GetServerHeartbeat(HSQUIRRELVM v) {
+	
+	printf("GetServerHeartbeat");
+	SQObject obj;
+	sq_getstackobj(nullptr, v, 2, &obj);
+
+	auto table = obj._unVal.pTable;
+
+	for(int i = 0; i < table->_numOfNodes; i++) {
+		printf("i: %d\n", i);
+		auto node = &table->_nodes[i];
+		auto key = node->key._unVal.pString->_val;
+		auto val = node->val._unVal.pString->_val;
+		printf("Key Type: %s\n", EnumToString(node->key._type).c_str());
+		printf("Val Type: %s\n", EnumToString(node->val._type).c_str());
+		if(node->key._type == OT_STRING) {
+			printf("Key: %s\n", key);
+		}
+		if(node->val._type == OT_STRING) {
+			printf("Val: %s\n", val);
+		}
+		if (node->val._type == OT_ARRAY) {
+			printf("Array\n");
+			auto arr = node->val._unVal.pArray;
+			for (int j = 0; j < arr->_usedSlots; j++) {
+				SQObject* node = &arr->_values[i];
+				printf("j: %d\n", j);
+				auto key = node->_type;
+				printf("Array Type: %s\n", EnumToString(node->_type).c_str());
+
+				if(node->_type == OT_STRING) {
+					printf("Val: %s\n", node->_unVal.pString->_val);
+				}
+				if(node->_type == OT_INTEGER) {
+					printf("Val: %d\n", node->_unVal.nInteger);
+				}
+				if(node->_type == OT_FLOAT) {
+					printf("Val: %f\n", node->_unVal.fFloat);
+				}
+				if (node->_type == OT_TABLE) {
+					auto table_nest = node->_unVal.pTable;
+					for (int i = 0; i < table_nest->size; i++) {
+						auto node = &table_nest->_nodes[i];
+						auto key = node->key._unVal.pString->_val;
+						auto val = node->val._unVal.pString->_val;
+						if (node->key._type == OT_STRING) {
+							printf("Key: %s\n", key);
+						}
+						if (node->val._type == OT_STRING) {
+							printf("Val: %s\n", val);
+						}
+					}
+				}
+			}
+		}
+	}
+	
+
+	
+	//SendDataToCppServer
+}
+
 // Function to initialize all SQVM functions
 bool GetSQVMFuncs() {
 	static bool initialized = false;
@@ -455,6 +462,8 @@ bool GetSQVMFuncs() {
 	sq_get_noerr = reinterpret_cast<sq_get_noerr_t>(baseAddress + (IsDedicatedServer() ? 0x17FF0 : 0x18150));
 	sq_gettop = reinterpret_cast<sq_gettop_t>(baseAddress + (IsDedicatedServer() ? 0xE850 : 0xE830));
 	sq_newtable = reinterpret_cast<sq_newtable_t>(baseAddress + (IsDedicatedServer() ? 0x15010 : 0x14F30));
+	//0x26550
+	sq_gettable = reinterpret_cast<sq_get_table_t>(baseAddress + (IsDedicatedServer() ? 0x0 : 0xAFE0));
 	sq_next = reinterpret_cast<sq_next_t>(baseAddress + (IsDedicatedServer() ? 0x1A290 : 0x1A1B0));
 	sq_getinstanceup = reinterpret_cast<sq_getinstanceup_t>(baseAddress + (IsDedicatedServer() ? 0x6770 : 0x6750));
 	sq_newarray = reinterpret_cast<sq_newarray_t>(baseAddress + (IsDedicatedServer() ? 0x15090 : 0x14FB0));
@@ -520,6 +529,18 @@ bool GetSQVMFuncs() {
 	//	"str",
 	//	"Get a persistent data value as an integer I guess I don't know why you wouldn't just do this yourself"
 	//);
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER,
+		"SendDataToCppServer",
+		(SQFUNCTION)GetServerHeartbeat,
+		".t",
+		2,
+		"void",
+		"str",
+		"Send data to the cpp server"
+	);
+
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_SERVER, // Available in client script contexts
 		"GetPersistentStringForClient",
@@ -541,8 +562,11 @@ bool GetSQVMFuncs() {
 		"Set a persistent userinfo value (this does NOT replicate you will need to send the replication command)"
 	);
 	REGISTER_SCRIPT_FUNCTION(
-		1 << SCRIPT_CONTEXT_CLIENT | 1 << SCRIPT_CONTEXT_UI, // Available in client script contexts
+		SCRIPT_CONTEXT_UI, // Available in client script contexts
 		"SquirrelNativeFunctionTest", (SQFUNCTION)SquirrelNativeFunctionTest, ".sifb", 0, "string", "string text, int a2, float a3, bool a4", "Test registering and calling native function in Squirrel.");
+
+
+
 	initialized = true;
 	return true;
 }
