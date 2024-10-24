@@ -356,13 +356,13 @@ std::string EnumToString(SQObjectType type) {
 	case OT_CLASS: return "OT_CLASS";
 	case OT_INSTANCE: return "OT_INSTANCE";
 	case OT_WEAKREF: return "OT_WEAKREF";
-	default: return "Unknown";
+	default: return std::to_string(type);
 	}
 }
 
 void GetServerHeartbeat(HSQUIRRELVM v) {
 	
-	printf("GetServerHeartbeat");
+	printf("GetServerHeartbeat\n");
 	SQObject obj;
 	sq_getstackobj(nullptr, v, 2, &obj);
 
@@ -385,23 +385,17 @@ void GetServerHeartbeat(HSQUIRRELVM v) {
 			printf("Array\n");
 			auto arr = node->val._unVal.pArray;
 			for (int j = 0; j < arr->_usedSlots; j++) {
-				SQObject* node = &arr->_values[i];
+				SQObject arr_node = arr->_values[j];
 				printf("j: %d\n", j);
-				auto key = node->_type;
-				printf("Array Type: %s\n", EnumToString(node->_type).c_str());
+				printf("Array Type: %s\n", EnumToString(arr_node._type).c_str());
 
-				if(node->_type == OT_STRING) {
-					printf("Val: %s\n", node->_unVal.pString->_val);
+				if(arr_node._type == OT_STRING) {
+					printf("Val: %s\n", arr_node._unVal.pString->_val);
 				}
-				if(node->_type == OT_INTEGER) {
-					printf("Val: %d\n", node->_unVal.nInteger);
-				}
-				if(node->_type == OT_FLOAT) {
-					printf("Val: %f\n", node->_unVal.fFloat);
-				}
-				if (node->_type == OT_TABLE) {
-					auto table_nest = node->_unVal.pTable;
-					for (int i = 0; i < table_nest->size; i++) {
+			
+				if (arr_node._type == OT_TABLE) {
+					auto table_nest = arr_node._unVal.pTable;
+					for (int i = 0; i < table_nest->_numOfNodes; i++) {
 						auto node = &table_nest->_nodes[i];
 						auto key = node->key._unVal.pString->_val;
 						auto val = node->val._unVal.pString->_val;
@@ -410,6 +404,12 @@ void GetServerHeartbeat(HSQUIRRELVM v) {
 						}
 						if (node->val._type == OT_STRING) {
 							printf("Val: %s\n", val);
+						}
+						if (node->val._type == OT_INTEGER) {
+							printf("Val: %d\n", node->val._unVal.nInteger);
+						}
+						if (node->val._type == OT_FLOAT) {
+							printf("Val: %f\n", node->val._unVal.fFloat);
 						}
 					}
 				}
@@ -463,7 +463,6 @@ bool GetSQVMFuncs() {
 	sq_gettop = reinterpret_cast<sq_gettop_t>(baseAddress + (IsDedicatedServer() ? 0xE850 : 0xE830));
 	sq_newtable = reinterpret_cast<sq_newtable_t>(baseAddress + (IsDedicatedServer() ? 0x15010 : 0x14F30));
 	//0x26550
-	sq_gettable = reinterpret_cast<sq_get_table_t>(baseAddress + (IsDedicatedServer() ? 0x0 : 0xAFE0));
 	sq_next = reinterpret_cast<sq_next_t>(baseAddress + (IsDedicatedServer() ? 0x1A290 : 0x1A1B0));
 	sq_getinstanceup = reinterpret_cast<sq_getinstanceup_t>(baseAddress + (IsDedicatedServer() ? 0x6770 : 0x6750));
 	sq_newarray = reinterpret_cast<sq_newarray_t>(baseAddress + (IsDedicatedServer() ? 0x15090 : 0x14FB0));
