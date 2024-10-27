@@ -138,7 +138,7 @@ typedef struct tagSQObject
 typedef tagSQObject SQObject;
 
 // TODO: do we need this? if not, delet
-/*struct SQRefCounted
+struct SQRefCounted
 {
 	SQRefCounted() { _uiRef = 0; _weakref = NULL; }
 	virtual ~SQRefCounted();
@@ -147,11 +147,56 @@ typedef tagSQObject SQObject;
 	struct SQWeakRef* _weakref;
 	virtual void Release() = 0;
 };
+
+struct alignas(8) SQString : public SQRefCounted
+{
+	int64 pad;
+	int64 pad2;
+	int length; //28
+	char _hash[12]; 
+	char _val[1];
+};
+
 struct SQWeakRef : SQRefCounted
 {
 	void Release();
 	SQObject _obj;
-};*/
+};
+
+struct SQCollectable : public SQRefCounted
+{
+	SQCollectable* _next;
+	SQCollectable* _prev;
+	SQSharedState* _sharedstate;
+};
+
+struct SQDelegable : public SQCollectable
+{
+	SQTable* _delegate;
+};
+
+struct alignas(8) SQTable : public SQDelegable
+{
+	struct _HashNode
+	{
+		SQObject val;
+		SQObject key;
+		_HashNode* next;
+	};
+	int64* pad;
+	_HashNode* _nodes;
+	int _numOfNodes;
+	int size;
+	int field_48;
+	int _usedNodes;
+};
+
+struct SQArray : public SQCollectable
+{
+	SQObject* _values;
+	int _usedSlots;
+	int _allocated;
+};
 
 ////
 
@@ -399,6 +444,7 @@ typedef SQRESULT(*sq_get_t)(HSQUIRRELVM, SQInteger);
 typedef SQRESULT(*sq_get_noerr_t)(HSQUIRRELVM, SQInteger);
 typedef SQInteger(*sq_gettop_t)(R1SquirrelVM*, HSQUIRRELVM);
 typedef void (*sq_newtable_t)(HSQUIRRELVM);
+typedef SQRESULT (*sq_get_table_t)(HSQUIRRELVM, SQInteger,SQTable*);
 typedef SQRESULT(*sq_next_t)(HSQUIRRELVM, SQInteger);
 typedef SQRESULT(*sq_getinstanceup_t)(HSQUIRRELVM, SQInteger, SQUserPointer*, SQUserPointer);
 typedef void (*sq_newarray_t)(HSQUIRRELVM, SQInteger);

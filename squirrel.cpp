@@ -126,6 +126,7 @@ sq_get_t sq_get;
 sq_get_noerr_t sq_get_noerr;
 sq_gettop_t sq_gettop;
 sq_newtable_t sq_newtable;
+sq_get_table_t sq_gettable;
 sq_next_t sq_next;
 sq_getinstanceup_t sq_getinstanceup;
 sq_newarray_t sq_newarray;
@@ -229,86 +230,6 @@ struct AddonInfo {
 	const char* enabled;
 };
 
-int GetModPath(HSQUIRRELVM v) {
-	auto func_addr = g_CVFileSystem->GetSearchPath;
-	auto kv_load_file = G_client + 0x65F980;
-	void* file_system = *(void**)(G_client + 0x380E678);
-	auto base_file_system = (uintptr_t)file_system + 0x8;
-	printf("GetSearchPath: %p\n", file_system);
-	auto kv_load_file_addr = (int(__fastcall*)(KeyValues*, int64,char*, const char*,int))kv_load_file;
-	auto load_addon_info_addr = G_client + 0x65F980;
-	auto load_addon_info_file = (int(__fastcall*)(void*, KeyValues*, const char*, bool))load_addon_info_addr;
-
-	auto func = (int(__fastcall*)(void*, const char*, int64, char*,int64))func_addr;
-	char szModPath[260];
-	char szAddOnListPath[260];
-	char szAddonDirName[60];
-	// printf("Mod Path: %s\n", szModPath);
-	auto ret = func(file_system, "MOD", 0, szModPath, 260);
-
-	printf("Mod Path: %s\n", szModPath);
-
-	//V_snprintf(szAddOnListPath, 260, "%s%s", szModPath, "addonlist.txt");
-	snprintf(szAddOnListPath, 260, "%s%s", szModPath, "addonlist.txt");
-
-	KeyValues* kv = new KeyValues("AddonList");
-
-	printf("AddonList Path: %s\n", szAddOnListPath);
-	char addoninfoFilename[260];
-
-	
-	kv_load_file_addr(kv, base_file_system, szAddOnListPath, nullptr, 0);
-
-	sq_newarray(v,0);
-
-	for (KeyValues* subkey = kv->GetFirstValue(); subkey; subkey = subkey->GetNextValue()) {
-		const char* name = subkey->GetName();
-		V_strncpy(szAddonDirName, name, 60);
-		printf("Addon: %s\n", szAddonDirName);
-		V_snprintf(addoninfoFilename, 260i64, "%s%s%c%s%c%s", szModPath, "addons", 92, szAddonDirName, 92, "addoninfo.txt");
-
-		KeyValues* addoninfo = new KeyValues("AddonInfo");
-		kv_load_file_addr(addoninfo, base_file_system, addoninfoFilename, nullptr, 0);
-
-		auto author = addoninfo->GetWString("addonauthor");
-		auto addon_name = addoninfo->GetWString("addontitle");
-		auto version = addoninfo->GetWString("addonversion");
-		auto description = addoninfo->GetWString("addondescription");
-
-		char* author_str = new char[260];
-		char* addon_name_str = new char[260];
-		char* description_str = new char[260];
-		char* version_str = new char[260];
-
-		wcstombs(addon_name_str, addon_name, 260);
-		wcstombs(author_str, author, 260);
-		wcstombs(description_str, description, 260);
-		wcstombs(version_str, version, 260);
-		sq_newtable(v);
-
-		sq_pushstring(v, "name", -1);
-		sq_pushstring(v, name, -1);
-
-		sq_newslot(v, -3, 0);
-
-		sq_pushstring(v, "author", -1);
-		sq_pushstring(v, author_str, strlen(author_str));
-
-		sq_newslot(v, -3, 0);
-
-		sq_pushstring(v, "version", -1);
-		sq_pushstring(v, version_str,strlen(version_str));
-
-		sq_newslot(v, -3, 0);
-
-		sq_pushstring(v, "description", -1);
-		sq_pushstring(v, description_str,strlen(description_str));
-
-		sq_arrayappend(v, -2);
-	}
-	return 1;
-}
-
 int UpdateAddons(HSQUIRRELVM v, SQInteger index, SQBool enabled) {
 	auto func_addr = g_CVFileSystem->GetSearchPath;
 	auto kv_load_file = G_client + 0x65F980;
@@ -350,18 +271,28 @@ int UpdateAddons(HSQUIRRELVM v, SQInteger index, SQBool enabled) {
 
 int GetMods(HSQUIRRELVM v) {
 	auto func_addr = g_CVFileSystem->GetSearchPath;
+	auto remove_file_addr = g_CVFileSystem->RemoveFile;
 	auto kv_load_file = G_client + 0x65F980;
 	void* file_system = *(void**)(G_client + 0x380E678);
 	auto base_file_system = (uintptr_t)file_system + 0x8;
 	auto kv_load_file_addr = (int(__fastcall*)(KeyValues*, int64, char*, const char*, int))kv_load_file;
-	auto load_addon_info_addr = G_client + 0x65F980;
+	auto load_addon_info_addr = G_client + 0x3D82F0;
 	auto get_addon_image_addr = G_client + 0x3DAB30;
-	auto load_addon_info_file = (int(__fastcall*)(void*, KeyValues*, const char*, bool))load_addon_info_addr;
+	auto load_addon_info_file = (int(__fastcall*)(void*, KeyValues**, const char*, bool))load_addon_info_addr;
 	auto get_addon_image = (int(__fastcall*)(void*, const char*, char*, int,bool))get_addon_image_addr;
 	auto func = (int(__fastcall*)(void*, const char*, int64, char*, int64))func_addr;
+	auto remove_file = (int(__fastcall*)(void*, char*, int))remove_file_addr;
+	auto extract_addon_info_addr = G_client + 0x3D9910;
+	auto extract_addon_info = (int(__fastcall*)(void*, char*))extract_addon_info_addr;
+	auto strip_extention_addr = G_client + 0x658700;
+	auto strip_extention = (int(__fastcall*)(const char*,char*,int))strip_extention_addr;
+	auto create_vpk_addr = G_client + 0x511E30;
+	auto create_vpk = (int(__fastcall*)(char*,char*, void*,int,int,int))create_vpk_addr;
+	auto vpk_open_file_addr = G_client + 0x50C250;
+	auto vpk_open_file = (int(__fastcall*)(char*, int*, const char*))vpk_open_file_addr;
 	char szModPath[260];
 	char szAddOnListPath[260];
-	char szAddonDirName[60];
+	char szAddonDirName[64];
 	auto vm = GetServerVMPtr();
 	auto ret = func(file_system, "MOD", 0, szModPath, 260);
 	snprintf(szAddOnListPath, 260, "%s%s", szModPath, "addonlist.txt");
@@ -370,49 +301,162 @@ int GetMods(HSQUIRRELVM v) {
 	char addoninfoFilename[260];
 	kv_load_file_addr(kv, base_file_system, szAddOnListPath, nullptr, 0);
 	sq_newarray(v, 0);
+	bool bIsVPK = false;
 	for (KeyValues* subkey = kv->GetFirstValue(); subkey; subkey = subkey->GetNextValue()) {
 		const char* name = subkey->GetName();
-		V_strncpy(szAddonDirName, name, 60);
-		char image[260];
-		get_addon_image(nullptr, name, image, 260, false);
-		snprintf(addoninfoFilename, 260, "%s%s%c%s%c%s", szModPath, "addons", '\\', szAddonDirName, '\\', "addoninfo.txt");
-		KeyValues* addoninfo = new KeyValues("AddonInfo");
-		kv_load_file_addr(addoninfo, base_file_system, addoninfoFilename, nullptr, 0);
-		bool enabled = subkey->GetInt(NULL, 0) != 0;
-		auto author = addoninfo->GetWString("addonauthor");
-		auto addon_name = addoninfo->GetWString("addontitle");
-		auto version = addoninfo->GetWString("addonversion");
-		auto description = addoninfo->GetWString("addondescription");
-		char author_str[260];
-		char addon_name_str[260];
-		char description_str[260];
-		char version_str[260];
-		wcstombs(addon_name_str, addon_name, 260);
-		wcstombs(author_str, author, 260);
-		wcstombs(description_str, description, 260);
-		wcstombs(version_str, version, 260);
-		sq_newtable(v);
-		sq_pushstring(v, "name", -1);
-		sq_pushstring(v, name, -1);
-		sq_newslot(v, -3, 0);
-		sq_pushstring(v, "author", -1);
-		sq_pushstring(v, author_str, strlen(author_str));
-		sq_newslot(v, -3, 0);
-		sq_pushstring(v, "version", -1);
-		sq_pushstring(v, version_str, strlen(version_str));
-		sq_newslot(v, -3, 0);
-		sq_pushstring(v, "description", -1);
-		sq_pushstring(v, description_str, strlen(description_str));
-		sq_newslot(v, -3, 0);
-		sq_pushstring(v, "enabled", -1);
-		sq_pushbool(vm, v, enabled);
-		sq_newslot(v, -3, 0);
-		sq_pushstring(v, "image", -1);
-		sq_pushstring(v, image, strlen(image));
-		sq_newslot(v, -3, 0);
-		sq_arrayappend(v, -2);
+		if (V_stristr(name, ".vpk"))
+		{
+			const char* firstValue = subkey->GetName();
+			strip_extention(firstValue, szAddonDirName, 60);
+			extract_addon_info(nullptr, szAddonDirName);
+			bIsVPK = 1;
+		}
+		else
+		{
+			bIsVPK = 0;
+			V_strncpy(szAddonDirName, name, 60);
+		}
+		printf("Addon: %s\n", szAddonDirName);
+		if (load_addon_info_file(nullptr, &kv, name, bIsVPK)) {
+			char image[260];
+			printf("Addon After load: %s\n", szAddonDirName);
+			get_addon_image(nullptr, name, image, 260, bIsVPK);
+			snprintf(addoninfoFilename, 260, "%s%s%c%s%c%s", szModPath, "addons", '\\', szAddonDirName, '\\', "addoninfo.txt");
+			KeyValues* addoninfo = new KeyValues("AddonInfo");
+			kv_load_file_addr(addoninfo, base_file_system, addoninfoFilename, nullptr, 0);
+			bool enabled = subkey->GetInt(NULL, 0) != 0;
+			auto author = addoninfo->GetWString("addonauthor");
+			auto addon_name = addoninfo->GetWString("addontitle");
+			auto version = addoninfo->GetWString("addonversion");
+			auto description = addoninfo->GetWString("addondescription");
+			char author_str[260];
+			char addon_name_str[260];
+			char description_str[260];
+			char version_str[260];
+			wcstombs(addon_name_str, addon_name, 260);
+			wcstombs(author_str, author, 260);
+			wcstombs(description_str, description, 260);
+			wcstombs(version_str, version, 260);
+			sq_newtable(v);
+			sq_pushstring(v, "name", -1);
+			sq_pushstring(v, name, -1);
+			sq_newslot(v, -3, 0);
+			sq_pushstring(v, "author", -1);
+			sq_pushstring(v, author_str, strlen(author_str));
+			sq_newslot(v, -3, 0);
+			sq_pushstring(v, "version", -1);
+			sq_pushstring(v, version_str, strlen(version_str));
+			sq_newslot(v, -3, 0);
+			sq_pushstring(v, "description", -1);
+			sq_pushstring(v, description_str, strlen(description_str));
+			sq_newslot(v, -3, 0);
+			sq_pushstring(v, "enabled", -1);
+			sq_pushbool(vm, v, enabled);
+			sq_newslot(v, -3, 0);
+			sq_pushstring(v, "image", -1);
+			sq_pushstring(v, image, strlen(image));
+			sq_newslot(v, -3, 0);
+			sq_arrayappend(v, -2);
+			if (bIsVPK) {
+				char* pSemi = strrchr(szModPath, ';');
+				if (pSemi)
+					V_strncpy(szModPath, pSemi + 1, 260);
+				char tempFilename[260];
+				snprintf(tempFilename, 260, "%s%s%c%s", szModPath, "addons", 92, "addoninfo.txt");
+				// remove file
+				remove_file(file_system, tempFilename, 0);
+				snprintf(tempFilename, 260, "%s%s%c%s", szModPath, "addons", 92, "addonimage.jpg");
+				// remove file
+				remove_file(file_system, tempFilename, 0);
+			}
+		}
 	}
 	return 1;
+}
+
+std::string EnumToString(SQObjectType type) {
+	switch (type) {
+	case OT_NULL: return "OT_NULL";
+	case OT_INTEGER: return "OT_INTEGER";
+	case OT_FLOAT: return "OT_FLOAT";
+	case OT_BOOL: return "OT_BOOL";
+	case OT_STRING: return "OT_STRING";
+	case OT_TABLE: return "OT_TABLE";
+	case OT_ARRAY: return "OT_ARRAY";
+	case OT_USERDATA: return "OT_USERDATA";
+	case OT_CLOSURE: return "OT_CLOSURE";
+	case OT_NATIVECLOSURE: return "OT_NATIVECLOSURE";
+	case OT_GENERATOR: return "OT_GENERATOR";
+	case OT_USERPOINTER: return "OT_USERPOINTER";
+	case OT_THREAD: return "OT_THREAD";
+	case OT_FUNCPROTO: return "OT_FUNCPROTO";
+	case OT_CLASS: return "OT_CLASS";
+	case OT_INSTANCE: return "OT_INSTANCE";
+	case OT_WEAKREF: return "OT_WEAKREF";
+	default: return std::to_string(type);
+	}
+}
+
+void GetServerHeartbeat(HSQUIRRELVM v) {
+	
+	printf("GetServerHeartbeat\n");
+	SQObject obj;
+	sq_getstackobj(nullptr, v, 2, &obj);
+
+	auto table = obj._unVal.pTable;
+
+	for(int i = 0; i < table->_numOfNodes; i++) {
+		printf("i: %d\n", i);
+		auto node = &table->_nodes[i];
+		auto key = node->key._unVal.pString->_val;
+		auto val = node->val._unVal.pString->_val;
+		printf("Key Type: %s\n", EnumToString(node->key._type).c_str());
+		printf("Val Type: %s\n", EnumToString(node->val._type).c_str());
+		if(node->key._type == OT_STRING) {
+			printf("Key: %s\n", key);
+		}
+		if(node->val._type == OT_STRING) {
+			printf("Val: %s\n", val);
+		}
+		if (node->val._type == OT_ARRAY) {
+			printf("Array\n");
+			auto arr = node->val._unVal.pArray;
+			for (int j = 0; j < arr->_usedSlots; j++) {
+				SQObject arr_node = arr->_values[j];
+				printf("j: %d\n", j);
+				printf("Array Type: %s\n", EnumToString(arr_node._type).c_str());
+
+				if(arr_node._type == OT_STRING) {
+					printf("Val: %s\n", arr_node._unVal.pString->_val);
+				}
+			
+				if (arr_node._type == OT_TABLE) {
+					auto table_nest = arr_node._unVal.pTable;
+					for (int i = 0; i < table_nest->_numOfNodes; i++) {
+						auto node = &table_nest->_nodes[i];
+						auto key = node->key._unVal.pString->_val;
+						auto val = node->val._unVal.pString->_val;
+						if (node->key._type == OT_STRING) {
+							printf("Key: %s\n", key);
+						}
+						if (node->val._type == OT_STRING) {
+							printf("Val: %s\n", val);
+						}
+						if (node->val._type == OT_INTEGER) {
+							printf("Val: %d\n", node->val._unVal.nInteger);
+						}
+						if (node->val._type == OT_FLOAT) {
+							printf("Val: %f\n", node->val._unVal.fFloat);
+						}
+					}
+				}
+			}
+		}
+	}
+	
+
+	
+	//SendDataToCppServer
 }
 
 // Function to initialize all SQVM functions
@@ -455,6 +499,7 @@ bool GetSQVMFuncs() {
 	sq_get_noerr = reinterpret_cast<sq_get_noerr_t>(baseAddress + (IsDedicatedServer() ? 0x17FF0 : 0x18150));
 	sq_gettop = reinterpret_cast<sq_gettop_t>(baseAddress + (IsDedicatedServer() ? 0xE850 : 0xE830));
 	sq_newtable = reinterpret_cast<sq_newtable_t>(baseAddress + (IsDedicatedServer() ? 0x15010 : 0x14F30));
+	//0x26550
 	sq_next = reinterpret_cast<sq_next_t>(baseAddress + (IsDedicatedServer() ? 0x1A290 : 0x1A1B0));
 	sq_getinstanceup = reinterpret_cast<sq_getinstanceup_t>(baseAddress + (IsDedicatedServer() ? 0x6770 : 0x6750));
 	sq_newarray = reinterpret_cast<sq_newarray_t>(baseAddress + (IsDedicatedServer() ? 0x15090 : 0x14FB0));
@@ -520,6 +565,18 @@ bool GetSQVMFuncs() {
 	//	"str",
 	//	"Get a persistent data value as an integer I guess I don't know why you wouldn't just do this yourself"
 	//);
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER,
+		"SendDataToCppServer",
+		(SQFUNCTION)GetServerHeartbeat,
+		".t",
+		2,
+		"void",
+		"str",
+		"Send data to the cpp server"
+	);
+
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_SERVER, // Available in client script contexts
 		"GetPersistentStringForClient",
@@ -541,8 +598,11 @@ bool GetSQVMFuncs() {
 		"Set a persistent userinfo value (this does NOT replicate you will need to send the replication command)"
 	);
 	REGISTER_SCRIPT_FUNCTION(
-		1 << SCRIPT_CONTEXT_CLIENT | 1 << SCRIPT_CONTEXT_UI, // Available in client script contexts
+		SCRIPT_CONTEXT_UI, // Available in client script contexts
 		"SquirrelNativeFunctionTest", (SQFUNCTION)SquirrelNativeFunctionTest, ".sifb", 0, "string", "string text, int a2, float a3, bool a4", "Test registering and calling native function in Squirrel.");
+
+
+
 	initialized = true;
 	return true;
 }
