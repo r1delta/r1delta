@@ -925,61 +925,6 @@ struct /*VFT*/ INetMessage
 	virtual const char* (ToString)();
 	virtual unsigned int(GetSize)();
 };
-bool (*oSVC_UserMessage__Process)(INetMessage* thisptr);
-bool (*oSVC_UserMessage__ReadFromBuffer)(INetMessage* thisptr, __int64 target);
-bool (*oSVC_UserMessage__WriteToBuffer)(INetMessage* thisptr, __int64 target);
-// Enum for message types
-enum MessageType {
-	Processed,
-	Read,
-	Written
-};
-
-// Static array to keep track of counts
-static std::array<uint64_t, 3> messageCounts = { 0, 0, 0 };
-static std::chrono::steady_clock::time_point lastResetTime = std::chrono::steady_clock::now();
-
-// Helper function to reset counts every second
-void ResetCountsIfNecessary() {
-	auto now = std::chrono::steady_clock::now();
-	if (now - lastResetTime >= std::chrono::seconds(1)) {
-		messageCounts.fill(0);
-		lastResetTime = now;
-	}
-}
-
-bool SVC_UserMessage__Process(INetMessage* thisptr)
-{
-	ResetCountsIfNecessary();
-	auto ret = oSVC_UserMessage__Process(thisptr);
-	if (!ret)
-		Warning("%s failed! %s", __FUNCTION__, thisptr->ToString());
-	messageCounts[Processed]++;
-	Msg("Processing %s (Processed: %llu, Read: %llu, Written: %llu)\n", thisptr->ToString(), messageCounts[Processed], messageCounts[Read], messageCounts[Written]);
-	return ret;
-}
-
-bool SVC_UserMessage__ReadFromBuffer(INetMessage* thisptr, __int64 target)
-{
-	ResetCountsIfNecessary();
-	auto ret = oSVC_UserMessage__ReadFromBuffer(thisptr, target);
-	if (!ret)
-		Warning("%s failed!", __FUNCTION__);
-	messageCounts[Read]++;
-	Msg("Reading %s on %p (Processed: %llu, Read: %llu, Written: %llu)\n", thisptr->ToString(), target, messageCounts[Processed], messageCounts[Read], messageCounts[Written]);
-	return ret;
-}
-
-bool SVC_UserMessage__WriteToBuffer(INetMessage* thisptr, __int64 target)
-{
-	ResetCountsIfNecessary();
-	auto ret = oSVC_UserMessage__WriteToBuffer(thisptr, target);
-	if (!ret)
-		Warning("%s failed!", __FUNCTION__);
-	messageCounts[Written]++;
-	Msg("Writing %s on %p (Processed: %llu, Read: %llu, Written: %llu)\n", thisptr->ToString(), target, messageCounts[Processed], messageCounts[Read], messageCounts[Written]);
-	return ret;
-}
 
 void InitAddons() {
 	static bool done = false;
@@ -1158,6 +1103,9 @@ void __stdcall LoaderNotificationCallback(
 		//MH_CreateHook((LPVOID)(engine_base + 0x0284C0), &SVC_UserMessage__Process, reinterpret_cast<LPVOID*>(&oSVC_UserMessage__Process));
 		//MH_CreateHook((LPVOID)(engine_base + 0x1FFA20), &SVC_UserMessage__ReadFromBuffer, reinterpret_cast<LPVOID*>(&oSVC_UserMessage__ReadFromBuffer));
 		//MH_CreateHook((LPVOID)(engine_base + 0x1FBF70), &SVC_UserMessage__WriteToBuffer, reinterpret_cast<LPVOID*>(&oSVC_UserMessage__WriteToBuffer));
+
+		MH_CreateHook((LPVOID)(server_base + 0x5FC370), &mp_weapon_wingman_ctor_hk, reinterpret_cast<LPVOID*>(&mp_weapon_wingman_ctor_orig));
+		MH_CreateHook((LPVOID)(server_base + 0x605570), &mp_weapon_wingman_dtor_hk, reinterpret_cast<LPVOID*>(&mp_weapon_wingman_dtor_orig));
 
 
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("vstdlib.dll"), "VStdLib_GetICVarFactory"), &VStdLib_GetICVarFactory, NULL);
