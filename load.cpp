@@ -1104,8 +1104,8 @@ void __stdcall LoaderNotificationCallback(
 		//MH_CreateHook((LPVOID)(engine_base + 0x1FFA20), &SVC_UserMessage__ReadFromBuffer, reinterpret_cast<LPVOID*>(&oSVC_UserMessage__ReadFromBuffer));
 		//MH_CreateHook((LPVOID)(engine_base + 0x1FBF70), &SVC_UserMessage__WriteToBuffer, reinterpret_cast<LPVOID*>(&oSVC_UserMessage__WriteToBuffer));
 
-		MH_CreateHook((LPVOID)(server_base + 0x5FC370), &mp_weapon_wingman_ctor_hk, reinterpret_cast<LPVOID*>(&mp_weapon_wingman_ctor_orig));
-		MH_CreateHook((LPVOID)(server_base + 0x605570), &mp_weapon_wingman_dtor_hk, reinterpret_cast<LPVOID*>(&mp_weapon_wingman_dtor_orig));
+		//MH_CreateHook((LPVOID)(server_base + 0x5FC370), &mp_weapon_wingman_ctor_hk, reinterpret_cast<LPVOID*>(&mp_weapon_wingman_ctor_orig));
+		//MH_CreateHook((LPVOID)(server_base + 0x605570), &mp_weapon_wingman_dtor_hk, reinterpret_cast<LPVOID*>(&mp_weapon_wingman_dtor_orig));
 
 
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("vstdlib.dll"), "VStdLib_GetICVarFactory"), &VStdLib_GetICVarFactory, NULL);
