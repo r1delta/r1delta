@@ -458,6 +458,100 @@ std::string generate_uuid() {
 	return ss.str();
 }
 
+
+static size_t WriteCallback(void* contents, size_t size, size_t nmemb, std::string* userData) {
+	size_t totalSize = size * nmemb;
+	userData->append((char*)contents, totalSize);
+	return totalSize;
+}
+
+
+void DecodeJsonTable(HSQUIRRELVM v, nlohmann::json json);
+void DecodeJsonArray(HSQUIRRELVM v, nlohmann::json json);
+
+void DecodeJsonTable(HSQUIRRELVM v, nlohmann::json json) {
+	sq_newtable(v);
+	for (auto& [key, value] : json.items()) {
+		if (value.is_string()) {
+			sq_pushstring(v, key.c_str(), -1);
+			sq_pushstring(v, value.get<std::string>().c_str(), -1);
+			sq_newslot(v, -3, 0);
+		}
+		if (value.is_number_integer()) {
+			sq_pushstring(v, key.c_str(), -1);
+			sq_pushinteger(nullptr, v, value.get<int>());
+			sq_newslot(v, -3, 0);
+		}
+		if (value.is_number_float()) {
+			sq_pushstring(v, key.c_str(), -1);
+			sq_pushfloat(nullptr, v, value.get<float>());
+			sq_newslot(v, -3, 0);
+		}
+		if (value.is_object()) {
+			sq_pushstring(v, key.c_str(), -1);
+			DecodeJsonTable(v, value);
+			sq_newslot(v, -3, 0);
+		}
+		if (value.is_array()) {
+			sq_pushstring(v, key.c_str(), -1);
+			DecodeJsonArray(v, value);
+			sq_newslot(v, -3, 0);
+		}
+	}
+}
+
+
+void DecodeJsonArray(HSQUIRRELVM v, nlohmann::json json) {
+	sq_newarray(v, 0);
+	for (auto& val : json) {
+		if (val.is_string()) {
+			sq_pushstring(v, val.get<std::string>().c_str(), -1);
+		}
+		if (val.is_number_integer()) {
+			sq_pushinteger(nullptr, v, val.get<int>());
+		}
+		if (val.is_number_float()) {
+			sq_pushfloat(nullptr, v, val.get<float>());
+		}
+		if (val.is_object()) {
+			DecodeJsonTable(v, val);
+		}
+		if (val.is_array()) {
+			DecodeJsonArray(v, val);
+		}
+		sq_arrayappend(v, -2);
+	}
+}
+
+
+void GetServerList(HSQUIRRELVM v) {
+	nlohmann::json json;
+	std::string readBuffer;
+	CURL* curl = curl_easy_init();
+	curl_easy_setopt(curl, CURLOPT_URL, "http://localhost:3000/server/");
+	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "GET");
+	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
+	CURLcode res = curl_easy_perform(curl);
+
+	if (res != CURLE_OK) {
+		fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+	}
+	else {
+		json = nlohmann::json::parse(readBuffer);
+		std::cout << json.dump(4) << std::endl;
+	}
+
+	
+	DecodeJsonArray(v, json);
+
+	curl_easy_cleanup(curl);
+
+
+}
+
+
 void GetServerHeartbeat(HSQUIRRELVM v) {
 
 	printf("GetServerHeartbeat\n");
@@ -644,6 +738,18 @@ bool GetSQVMFuncs() {
 		"int index,bool enabled",
 		"Updates the selected addons"
 	);
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_UI,
+		"GetServerList",
+		(SQFUNCTION)GetServerList,
+		".ib", // String
+		1,      // Expects 2 parameters
+		"void",    // Returns a string
+		"str",
+		"Gets server list"
+	);
+
 
 	//REGISTER_SCRIPT_FUNCTION(
 	//	SCRIPT_CONTEXT_CLIENT | SCRIPT_CONTEXT_UI, // Available in client script contexts
