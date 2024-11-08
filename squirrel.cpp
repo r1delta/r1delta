@@ -5,9 +5,11 @@
 #include <crtdbg.h>	
 #include <new>
 #include "windows.h"
-
+#include <nlohmann/json.hpp>
 #include <iostream>
 #include "cvar.h"
+#include <random>
+
 #include <winternl.h>  // For UNICODE_STRING.
 #include <fstream>
 #include <filesystem>
@@ -32,6 +34,11 @@
 #include "keyvalues.h"
 #include "persistentdata.h"
 #include "load.h"
+#define CURL_STATICLIB
+#include <curl/curl.h>
+#include <random>
+#pragma comment(lib, "libcurl.lib")
+
 #pragma intrinsic(_ReturnAddress)
 
 class ScriptFunctionRegistry {
@@ -268,6 +275,7 @@ int UpdateAddons(HSQUIRRELVM v, SQInteger index, SQBool enabled) {
 	// Save the keyvalues to the file
 	return 1;
 }
+CURL* curl;
 
 int GetMods(HSQUIRRELVM v) {
 	auto func_addr = g_CVFileSystem->GetSearchPath;
@@ -287,7 +295,7 @@ int GetMods(HSQUIRRELVM v) {
 	auto strip_extention_addr = G_client + 0x658700;
 	auto strip_extention = (int(__fastcall*)(const char*,char*,int))strip_extention_addr;
 	auto create_vpk_addr = G_client + 0x511E30;
-	auto create_vpk = (int(__fastcall*)(char*,char*, void*,int,int,int))create_vpk_addr;
+	auto create_vpk = (int(__fastcall*)(char*,char*, void*,int,int,int64))create_vpk_addr;
 	auto vpk_open_file_addr = G_client + 0x50C250;
 	auto vpk_open_file = (int(__fastcall*)(char*, int*, const char*))vpk_open_file_addr;
 	char szModPath[260];
@@ -302,6 +310,13 @@ int GetMods(HSQUIRRELVM v) {
 	kv_load_file_addr(kv, base_file_system, szAddOnListPath, nullptr, 0);
 	sq_newarray(v, 0);
 	bool bIsVPK = false;
+
+	static bool init = false;
+	if (!init) {
+		curl = curl_easy_init();
+		init = true;
+	}
+
 	for (KeyValues* subkey = kv->GetFirstValue(); subkey; subkey = subkey->GetNextValue()) {
 		const char* name = subkey->GetName();
 		if (V_stristr(name, ".vpk"))
@@ -310,6 +325,17 @@ int GetMods(HSQUIRRELVM v) {
 			strip_extention(firstValue, szAddonDirName, 60);
 			extract_addon_info(nullptr, szAddonDirName);
 			bIsVPK = 1;
+			char szAddonVPKFullPath[260];
+			char szAddonInfoFullPath[260];
+			char vpk_file[33680];
+			snprintf(szAddonVPKFullPath, 260, "%s%s%c%s.vpk", szModPath, "addons", '\\', szAddonDirName);
+			create_vpk(vpk_file, szAddonDirName, file_system, 0, 1, 0);
+			snprintf(szAddonInfoFullPath, 260, "%s%s%c%s", szModPath, "addons", '\\', "addoninfo.txt");
+			int result;
+			vpk_open_file(vpk_file, &result, "addoninfo.txt");
+			if (result != -1) {
+				std::printf("Addon: %s\n", szAddonDirName);
+			}
 		}
 		else
 		{
@@ -374,6 +400,7 @@ int GetMods(HSQUIRRELVM v) {
 	return 1;
 }
 
+
 std::string EnumToString(SQObjectType type) {
 	switch (type) {
 	case OT_NULL: return "OT_NULL";
@@ -397,67 +424,130 @@ std::string EnumToString(SQObjectType type) {
 	}
 }
 
+
+std::string generate_uuid() {
+	std::random_device rd;
+	std::mt19937 gen(rd());
+	std::uniform_int_distribution<int> dist(0, 15);
+	std::uniform_int_distribution<int> dist2(8, 11);
+
+	std::stringstream ss;
+	ss << std::hex << std::setfill('0');
+
+	for (int i = 0; i < 8; i++) {
+		ss << dist(gen);
+	}
+	ss << "-";
+	for (int i = 0; i < 4; i++) {
+		ss << dist(gen);
+	}
+	ss << "-4"; // The 13th character is '4' to specify the UUID version
+	for (int i = 0; i < 3; i++) {
+		ss << dist(gen);
+	}
+	ss << "-";
+	ss << dist2(gen); // The 17th character is between 8 and 11 to meet the UUID variant requirement
+	for (int i = 0; i < 3; i++) {
+		ss << dist(gen);
+	}
+	ss << "-";
+	for (int i = 0; i < 12; i++) {
+		ss << dist(gen);
+	}
+
+	return ss.str();
+}
+
 void GetServerHeartbeat(HSQUIRRELVM v) {
-	
+
 	printf("GetServerHeartbeat\n");
 	SQObject obj;
 	sq_getstackobj(nullptr, v, 2, &obj);
 
+	static std::string id = generate_uuid();
+	
 	auto table = obj._unVal.pTable;
-
-	for(int i = 0; i < table->_numOfNodes; i++) {
+	nlohmann::json json;
+	json["type"] = "heartbeat";
+	json["id"] = id;
+	for (int i = 0; i < table->_numOfNodes; i++) {
 		printf("i: %d\n", i);
 		auto node = &table->_nodes[i];
 		auto key = node->key._unVal.pString->_val;
 		auto val = node->val._unVal.pString->_val;
-		printf("Key Type: %s\n", EnumToString(node->key._type).c_str());
-		printf("Val Type: %s\n", EnumToString(node->val._type).c_str());
-		if(node->key._type == OT_STRING) {
-			printf("Key: %s\n", key);
-		}
-		if(node->val._type == OT_STRING) {
+		curl_easy_setopt(curl, CURLOPT_URL, "http://localhost:3000/server/heartbeat");
+		if (node->val._type == OT_STRING) {
 			printf("Val: %s\n", val);
+			json[key] = val;
 		}
 		if (node->val._type == OT_ARRAY) {
-			printf("Array\n");
+
 			auto arr = node->val._unVal.pArray;
+			// array of objects
+			nlohmann::json array = nlohmann::json::array();
 			for (int j = 0; j < arr->_usedSlots; j++) {
 				SQObject arr_node = arr->_values[j];
-				printf("j: %d\n", j);
-				printf("Array Type: %s\n", EnumToString(arr_node._type).c_str());
-
-				if(arr_node._type == OT_STRING) {
+				if (arr_node._type == OT_STRING) {
 					printf("Val: %s\n", arr_node._unVal.pString->_val);
+					json[key] = arr_node._unVal.pString->_val;
 				}
-			
 				if (arr_node._type == OT_TABLE) {
 					auto table_nest = arr_node._unVal.pTable;
+					auto json_nest = nlohmann::json();
 					for (int i = 0; i < table_nest->_numOfNodes; i++) {
 						auto node = &table_nest->_nodes[i];
 						auto key = node->key._unVal.pString->_val;
 						auto val = node->val._unVal.pString->_val;
-						if (node->key._type == OT_STRING) {
-							printf("Key: %s\n", key);
-						}
+
 						if (node->val._type == OT_STRING) {
-							printf("Val: %s\n", val);
+							json_nest[key] = val;
 						}
 						if (node->val._type == OT_INTEGER) {
-							printf("Val: %d\n", node->val._unVal.nInteger);
+							json_nest[key] = node->val._unVal.nInteger;
 						}
 						if (node->val._type == OT_FLOAT) {
-							printf("Val: %f\n", node->val._unVal.fFloat);
+							json_nest[key] = node->val._unVal.fFloat;
 						}
 					}
+					array.push_back(json_nest);
 				}
 			}
+	
+			json[key] = array;
 		}
-	}
-	
 
-	
+	}
+	// Initialize CURL for sending the JSON data
+	CURL* curl = curl_easy_init();
+	if (curl) {
+
+		struct curl_slist* headers = nullptr;
+		headers = curl_slist_append(headers, "Accept: application/json");
+		headers = curl_slist_append(headers, "Content-Type: application/json");
+		headers = curl_slist_append(headers, "charset: utf-8");
+
+		curl_easy_setopt(curl, CURLOPT_URL, "http://localhost:3000/server/heartbeat");
+		auto json_data_str = json.dump();
+		curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, strlen(json_data_str.c_str()));
+		curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_data_str.c_str());
+		curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+		curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "POST");
+		std::cout << "Sending data to server: " << json_data_str << std::endl;
+		// Perform the request
+		CURLcode res = curl_easy_perform(curl);
+		if (res != CURLE_OK) {
+			fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+		}
+
+		// Cleanup CURL
+		curl_slist_free_all(headers);
+		curl_easy_cleanup(curl);
+	}
+
+
 	//SendDataToCppServer
 }
+
 
 // Function to initialize all SQVM functions
 bool GetSQVMFuncs() {
