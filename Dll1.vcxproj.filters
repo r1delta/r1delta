@@ -22,6 +22,9 @@
     <Filter Include="Source Files\sdk">
       <UniqueIdentifier>{3da493e0-1d34-408e-b11e-bfcb5a2a6579}</UniqueIdentifier>
     </Filter>
+    <Filter Include="3rd Party\nlohmann">
+      <UniqueIdentifier>{d733a0ec-6a08-4454-bed7-aaa45a5a0a33}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="framework.h">
@@ -242,6 +245,12 @@
     </ClInclude>
     <ClInclude Include="netchanwarnings.h">
       <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="thirdparty\nlohmann\json.hpp">
+      <Filter>3rd Party\nlohmann</Filter>
+    </ClInclude>
+    <ClInclude Include="thirdparty\nlohmann\json_fwd.hpp">
+      <Filter>3rd Party\nlohmann</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

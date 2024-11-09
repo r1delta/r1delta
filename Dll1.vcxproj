@@ -81,18 +81,18 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <OutDir>C:\Program Files\EA Games\Titanfall\bin\x64_retail</OutDir>
-    <IncludePath>$(ProjectDir)thirdparty\mimalloc-2.1.7\include;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+    <OutDir>X:\Games\EA\Titanfall\bin\x64_retail</OutDir>
+    <IncludePath>$(ProjectDir)thirdparty\nlohmann;$(ProjectDir)thirdparty\mimalloc-2.1.7\include;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
     <LibraryPath>$(SolutionDir)thirdparty\mimalloc-2.1.7\$(Configuration);$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <OutDir>C:\Program Files\EA Games\Titanfall\bin\x64_retail</OutDir>
+    <OutDir>X:\Games\EA\Titanfall\bin\x64_retail</OutDir>
     <IntDir>$(ProjectDir)$(Platform)\$(Configuration)\</IntDir>
-    <IncludePath>$(ProjectDir)thirdparty\mimalloc-2.1.7\include;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+    <IncludePath>$(ProjectDir)thirdparty\nlohmann;$(ProjectDir)thirdparty\mimalloc-2.1.7\include;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
     <LibraryPath>$(SolutionDir)thirdparty\mimalloc-2.1.7\$(Configuration);$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Label="Vcpkg">
-    <VcpkgEnabled>false</VcpkgEnabled>
+    <VcpkgEnabled>true</VcpkgEnabled>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -203,6 +203,8 @@
     <ClInclude Include="sendmoveclampfix.h" />
     <ClInclude Include="squirrel.h" />
     <ClInclude Include="TableDestroyer.h" />
+    <ClInclude Include="thirdparty\nlohmann\json.hpp" />
+    <ClInclude Include="thirdparty\nlohmann\json_fwd.hpp" />
     <ClInclude Include="thirdparty\zstd-1.5.6\zstd.h" />
     <ClInclude Include="utils.h" />
     <ClInclude Include="vector.h" />
