@@ -44,7 +44,7 @@
 #include <tier0/platform.h>
 #include "thirdparty/mimalloc-2.1.7/include/mimalloc-new-delete.h"
 
-
+typedef const char* (__cdecl* wine_get_version_func)();
 CPUInformation* (__fastcall* GetCPUInformationOriginal)();
 
 const CPUInformation* GetCPUInformationDet()
@@ -158,9 +158,15 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 		if (!G_is_dedi) {
 			G_launcher = (uintptr_t)GetModuleHandleW(L"launcher.dll");
 			G_vscript = G_launcher;
-			LDR_DLL_LOADED_NOTIFICATION_DATA* ndata = GetModuleNotificationData(L"launcher.dll");
-			doBinaryPatchForFile(*ndata);
-			FreeModuleNotificationData(ndata);
+
+			HMODULE hNTDLL = GetModuleHandleA("ntdll.dll");
+			auto wine_get_version = (wine_get_version_func)GetProcAddress(hNTDLL, "wine_get_version");
+			if (!wine_get_version)
+			{
+				LDR_DLL_LOADED_NOTIFICATION_DATA* ndata = GetModuleNotificationData(L"launcher.dll");
+				doBinaryPatchForFile(*ndata);
+				FreeModuleNotificationData(ndata);
+			}
 		}
 		else {
 			G_launcher = (uintptr_t)GetModuleHandleW(L"dedicated.dll");
