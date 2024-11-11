@@ -34,10 +34,15 @@
 #include "keyvalues.h"
 #include "persistentdata.h"
 #include "load.h"
+#ifdef USE_CURL
 #define CURL_STATICLIB
 #include <curl/curl.h>
-#include <random>
 #pragma comment(lib, "libcurl.lib")
+#endif // USE_CURL
+
+
+#include <random>
+
 
 #pragma intrinsic(_ReturnAddress)
 
@@ -275,7 +280,6 @@ int UpdateAddons(HSQUIRRELVM v, SQInteger index, SQBool enabled) {
 	// Save the keyvalues to the file
 	return 1;
 }
-CURL* curl;
 
 int GetMods(HSQUIRRELVM v) {
 	auto func_addr = g_CVFileSystem->GetSearchPath;
@@ -310,12 +314,6 @@ int GetMods(HSQUIRRELVM v) {
 	kv_load_file_addr(kv, base_file_system, szAddOnListPath, nullptr, 0);
 	sq_newarray(v, 0);
 	bool bIsVPK = false;
-
-	static bool init = false;
-	if (!init) {
-		curl = curl_easy_init();
-		init = true;
-	}
 
 	for (KeyValues* subkey = kv->GetFirstValue(); subkey; subkey = subkey->GetNextValue()) {
 		const char* name = subkey->GetName();
@@ -525,6 +523,7 @@ void DecodeJsonArray(HSQUIRRELVM v, nlohmann::json json) {
 
 
 void GetServerList(HSQUIRRELVM v) {
+#ifdef USE_CURL
 	nlohmann::json json;
 	std::string readBuffer;
 	CURL* curl = curl_easy_init();
@@ -547,6 +546,9 @@ void GetServerList(HSQUIRRELVM v) {
 	DecodeJsonArray(v, json);
 
 	curl_easy_cleanup(curl);
+#endif // USE_CURL
+
+	
 
 
 }
@@ -569,7 +571,6 @@ void GetServerHeartbeat(HSQUIRRELVM v) {
 		auto node = &table->_nodes[i];
 		auto key = node->key._unVal.pString->_val;
 		auto val = node->val._unVal.pString->_val;
-		curl_easy_setopt(curl, CURLOPT_URL, "http://localhost:3000/server/heartbeat");
 		if (node->val._type == OT_STRING) {
 			printf("Val: %s\n", val);
 			json[key] = val;
@@ -611,7 +612,7 @@ void GetServerHeartbeat(HSQUIRRELVM v) {
 		}
 
 	}
-	// Initialize CURL for sending the JSON data
+#ifdef USE_CURL
 	CURL* curl = curl_easy_init();
 	if (curl) {
 
@@ -638,7 +639,7 @@ void GetServerHeartbeat(HSQUIRRELVM v) {
 		curl_easy_cleanup(curl);
 	}
 
-
+#endif // USE_CURL
 	//SendDataToCppServer
 }
 
@@ -739,16 +740,16 @@ bool GetSQVMFuncs() {
 		"Updates the selected addons"
 	);
 
-	REGISTER_SCRIPT_FUNCTION(
-		SCRIPT_CONTEXT_UI,
-		"GetServerList",
-		(SQFUNCTION)GetServerList,
-		".ib", // String
-		1,      // Expects 2 parameters
-		"void",    // Returns a string
-		"str",
-		"Gets server list"
-	);
+	//REGISTER_SCRIPT_FUNCTION(
+	//	SCRIPT_CONTEXT_UI,
+	//	"GetServerList",
+	//	(SQFUNCTION)GetServerList,
+	//	".ib", // String
+	//	1,      // Expects 2 parameters
+	//	"void",    // Returns a string
+	//	"str",
+	//	"Gets server list"
+	//);
 
 
 	//REGISTER_SCRIPT_FUNCTION(
