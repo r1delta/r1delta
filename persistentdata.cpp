@@ -333,8 +333,6 @@ void Script_GenChanged_Rebuild(void* pPlayer) {
 
 	auto netValue = *reinterpret_cast<int*>(reinterpret_cast<__int64>(pPlayer) + 0x183C);
 
-	Warning("GenChanged_Rebuild: %d %d\n", var, netValue);
-
 	if (var == 0)
 		return;
 
@@ -343,8 +341,6 @@ void Script_GenChanged_Rebuild(void* pPlayer) {
 
 	*reinterpret_cast<int*>(reinterpret_cast<__int64>(pPlayer) + 0x183C) = var;
 	auto netValueAfter = *reinterpret_cast<int*>(reinterpret_cast<__int64>(pPlayer) + 0x183C);
-
-	Warning("GenChanged_Rebuild: %d %d\n", var, netValueAfter);
 
 }
 
