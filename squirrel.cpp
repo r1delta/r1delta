@@ -179,6 +179,64 @@ SQInteger SquirrelNativeFunctionTest(HSQUIRRELVM v, __int64 a2, __int64 a3)
 	return 1;
 }
 
+typedef void (*CPlayer__Script_XP_Changed)(__int64 at);
+CPlayer__Script_XP_Changed CPlayer__Script_XP_ChangedOrig;
+
+void __fastcall CPlayer__Script_XP_ChangedHook(__int64 a1) {
+	Msg("CPlayer__Script_XP_ChangedHook %x\n",a1);
+	CPlayer__Script_XP_ChangedOrig(a1);
+}
+
+typedef void (*CPlayer__Script_XP_Changed)(__int64 at);
+CPlayer__Script_XP_Changed CPlayer__Script_Gen_Changed_Orig;
+
+void __fastcall CPlayer__Script_Gen_Changed(__int64 a1) {
+	Msg("Gen Changed Hook\n");
+	CPlayer__Script_Gen_Changed_Orig(a1);
+}
+
+
+typedef __int64 (*CPlayer__SetXP)(__int64 a1,int a2);
+
+CPlayer__SetXP CPlayer__SetXPRebuildOrig;
+void __fastcall CPlayer__SetXPRebuild(__int64 a1, int a2) {
+	//Msg("CPlayer__SetXPRebuild\n");
+	*(int*)(a1 + 0x1834) = a2;
+	return;
+}
+
+typedef __int64 (*CPlayer__SetGen)(__int64 a1, int a2);
+
+CPlayer__SetGen CPlayer__SetGenOrig;
+
+void __fastcall CPlayer__SetGenHook(__int64 a1, int a2) {
+	Msg("CPlayer__SetGenHook %d\n", a2);
+	*(int*)(a1 + 0x183C) = a2;
+}
+
+typedef __int64 (*CPlayer__GetGen)(__int64 a1);
+
+CPlayer__GetGen CPlayer__GetGenOrig;
+
+int __fastcall CPlayer__GetGenHook(__int64 a1) {
+	
+	int gen = CPlayer__GetGenOrig(a1);
+	Msg("CPlayer__GetGenHook %d\n", gen);
+	return gen;
+}
+
+void __fastcall SetGen(__int64 a1, int a2) {
+	if(a2 < 0) {
+		*(int*)(a1 + 0x183C) = 0;
+	}
+	else if (a2 > 9) {
+		*(int*)(a1 + 0x183C) = 9;
+	}
+	else {
+		*(int*)(a1 + 0x183C) = a2;
+	}
+}
+
 void* __fastcall CSquirrelVM__GetEntityFromInstance_Rebuild(__int64 a2, __int64 a3)
 {
 	__int64 result; // rax
@@ -243,6 +301,14 @@ struct AddonInfo {
 };
 
 int UpdateAddons(HSQUIRRELVM v, SQInteger index, SQBool enabled) {
+	const char* str = "thread void function() { wait 1 while(true) {  wait 1 } }";
+	auto result = sq_compilebuffer(v, str, strlen(str), "console", SQTrue);
+	if (result != -1)
+	{	
+		base_getroottable(v);
+		SQRESULT callResult = sq_call(v, 1,false,true);
+		Msg("Call Result: %d\n", callResult);
+	}
 	auto func_addr = g_CVFileSystem->GetSearchPath;
 	auto kv_load_file = G_client + 0x65F980;
 	auto kv_write_file = G_client + 0x65DB30;
@@ -282,6 +348,9 @@ int UpdateAddons(HSQUIRRELVM v, SQInteger index, SQBool enabled) {
 }
 
 int GetMods(HSQUIRRELVM v) {
+
+	sq_compilebuffer(v, "printt(\"Hello, World!\")", -1, "test", SQTrue);
+
 	auto func_addr = g_CVFileSystem->GetSearchPath;
 	auto remove_file_addr = g_CVFileSystem->RemoveFile;
 	auto kv_load_file = G_client + 0x65F980;
@@ -554,6 +623,33 @@ void GetServerList(HSQUIRRELVM v) {
 }
 
 
+void AddXp(HSQUIRRELVM v) {
+
+	auto r1sqvm = GetServerVMPtr();
+	SQInteger xp;
+	sq_getinteger(r1sqvm, v, 1, &xp);
+	auto player = sq_getentity(v, 2);
+
+	if (player) {
+		auto player_ptr = reinterpret_cast<__int64>(player);
+		CPlayer__SetXPRebuild(player_ptr, xp);
+	}
+}
+
+
+
+void SetGenSQ(HSQUIRRELVM v) {
+	auto r1sqvm = GetServerVMPtr();
+	SQInteger gen;
+	sq_getinteger(r1sqvm, v, 1, &gen);
+	auto player = sq_getentity(v, 2);
+
+	if (player) {
+		auto player_ptr = reinterpret_cast<__int64>(player);
+		SetGen(player_ptr, gen);
+	}
+}
+
 void GetServerHeartbeat(HSQUIRRELVM v) {
 
 	printf("GetServerHeartbeat\n");
@@ -657,7 +753,21 @@ bool GetSQVMFuncs() {
 #endif
 
 	uintptr_t baseAddress = G_vscript;
-
+	if (G_server) {
+		if (MH_CreateHook(reinterpret_cast<void*>(G_server + 0x0050EA30), &CPlayer__SetXPRebuild, reinterpret_cast<void**>(&CPlayer__SetXPRebuildOrig)) != MH_OK) {
+			Msg("Failed to hook CPlayer__SetXPRebuild\n");
+		}
+		if (MH_CreateHook(reinterpret_cast<void*>(G_server + 0x4E2F40), &CPlayer__GetGenHook, reinterpret_cast<void**>(&CPlayer__GetGenOrig)) != MH_OK) {
+			Msg("Failed to hook CPlayer__GetGenHook\n");
+		}
+		if (MH_CreateHook(reinterpret_cast<void*>(G_server + 0x50E740), &Script_XPChanged_Rebuild, reinterpret_cast<void**>(&CPlayer__Script_XP_ChangedOrig)) != MH_OK) {
+			Msg("Failed to hook CPlayer__Script_XP_ChangedHook\n");
+		}
+		if (MH_CreateHook(reinterpret_cast<void*>(G_server + 0x50E7A0), &Script_GenChanged_Rebuild, reinterpret_cast<void**>(&CPlayer__Script_Gen_Changed_Orig)) != MH_OK) {
+			Msg("Failed to hook CPlayer__Script_XP_ChangedHook\n");
+		}
+		MH_EnableHook(MH_ALL_HOOKS);
+	}
 	sq_compile = reinterpret_cast<sq_compile_t>(baseAddress + (IsDedicatedServer() ? 0x14A50 : 0x14970));
 	sq_compilebuffer = reinterpret_cast<sq_compilebuffer_t>(baseAddress + (IsDedicatedServer() ? 0x1A6C0 : 0x1A5E0));
 	base_getroottable = reinterpret_cast<base_getroottable_t>(baseAddress + (IsDedicatedServer() ? 0x56520 : 0x56440));
@@ -730,6 +840,31 @@ bool GetSQVMFuncs() {
 	);
 
 	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER,
+		"XPChanged",
+		(SQFUNCTION)Script_XPChanged_Rebuild,
+		"", // String
+		2,      // Expects 2 parameters
+		"void",    // Returns a string
+		"",
+		"Updates xp value from persistent vars"
+	);
+
+
+	//REGISTER_SCRIPT_FUNCTION(
+	//	SCRIPT_CONTEXT_SERVER,
+	//	"GenChanged",
+	//	(SQFUNCTION)Script_GenChanged_Rebuild,
+	//	"I", // String
+	//	3,      // Expects 2 parameters
+	//	"void",    // Returns a string
+	//	"",
+	//	"Updates gen value from persistent vars"
+	//);
+
+
+
+	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_UI,
 		"UpdateAddons",
 		(SQFUNCTION)UpdateAddons,
@@ -772,6 +907,28 @@ bool GetSQVMFuncs() {
 		"void",
 		"str",
 		"Send data to the cpp server"
+	);
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER,
+		"AddXpServer",
+		(SQFUNCTION)AddXp,
+		".Ii",
+		3,
+		"void",
+		"int",
+		"Add XP"
+	);
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER,
+		"SetGen",
+		(SQFUNCTION)SetGenSQ,
+		".Ii",
+		3,
+		"void",
+		"int",
+		"Set player gen"
 	);
 
 	REGISTER_SCRIPT_FUNCTION(

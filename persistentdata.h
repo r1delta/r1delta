@@ -38,8 +38,11 @@ struct CBaseClient;
 extern CBaseClient* g_pClientArray;
 struct CBaseClientDS;
 extern CBaseClientDS* g_pClientArrayDS;
+extern void Script_XPChanged_Rebuild(void* pPlayer);
+extern void Script_GenChanged_Rebuild(void* pPlayer);
 
 extern SQInteger Script_ClientGetPersistentData(HSQUIRRELVM v, __int64 a2, __int64 a3);
+
 SQInteger Script_ClientGetPersistentData(HSQUIRRELVM v);
 SQInteger Script_ClientGetPersistentDataAsInt(HSQUIRRELVM v);
 SQInteger Script_ServerGetPersistentUserDataKVString(HSQUIRRELVM v);

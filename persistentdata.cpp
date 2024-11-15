@@ -284,12 +284,72 @@ struct CBaseClientDS
 static_assert(sizeof(CBaseClientDS) == 216640);
 CBaseClient* g_pClientArray;
 CBaseClientDS* g_pClientArrayDS;
+
+
+
+
 KeyValues* GetClientConVarsKV(short index) {
 	if (IsDedicatedServer())
 		return g_pClientArrayDS[index].m_ConVars;
 	else
 		return g_pClientArray[index].m_ConVars;
 }
+
+void Script_XPChanged_Rebuild(void* pPlayer) {
+
+	
+	auto edict = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(pPlayer) + 64);
+	auto index = ((edict - reinterpret_cast<__int64>(pGlobalVarsServer->pEdicts)) / 56) - 1;
+
+	auto vars = GetClientConVarsKV(index);
+
+	if (!vars) {
+		return;
+	}
+
+	auto var = vars->GetInt("__ xp",0);
+	auto netValue = *reinterpret_cast<int*>(reinterpret_cast<__int64>(pPlayer) + 0x1834);
+	if (var == 0)
+		return;
+
+	if (var == netValue)
+		return;
+
+	*reinterpret_cast<int*>(reinterpret_cast<__int64>(pPlayer) + 0x1834) = var;
+}
+
+
+void Script_GenChanged_Rebuild(void* pPlayer) {
+	auto edict = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(pPlayer) + 64);
+	auto index = ((edict - reinterpret_cast<__int64>(pGlobalVarsServer->pEdicts)) / 56) - 1;
+
+	auto vars = GetClientConVarsKV(index);
+
+	if (!vars) {
+		return;
+	}
+
+	auto var = vars->GetInt("__ gen", 0);
+
+	auto netValue = *reinterpret_cast<int*>(reinterpret_cast<__int64>(pPlayer) + 0x183C);
+
+	Warning("GenChanged_Rebuild: %d %d\n", var, netValue);
+
+	if (var == 0)
+		return;
+
+	if (var == netValue)
+		return;
+
+	*reinterpret_cast<int*>(reinterpret_cast<__int64>(pPlayer) + 0x183C) = var;
+	auto netValueAfter = *reinterpret_cast<int*>(reinterpret_cast<__int64>(pPlayer) + 0x183C);
+
+	Warning("GenChanged_Rebuild: %d %d\n", var, netValueAfter);
+
+}
+
+
+
 SQInteger Script_ServerGetPersistentUserDataKVString(HSQUIRRELVM v) {
 	const void* pPlayer = sq_getentity(v, 2);
 	if (!pPlayer) {
