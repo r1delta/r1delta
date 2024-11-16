@@ -163,6 +163,8 @@ __int64 Detour_NET_OutOfBandPrintf(int sock, void* adr, const char* fmt, ...) {
 		const char* mapname = reinterpret_cast<const char*>(G_engine_ds + 0x1C89A84);
 		//MessageBoxA(NULL, *gamemode, mapname, 16);
 		char msg[1200] = { 0 };
+		//Msg("Gamemode %s\n", *gamemode);
+		//Msg("Mapname %s\n", mapname);
 		bf_write startup(msg, 1200);
 		startup.WriteLong(0xFFFFFFFFi64);
 		startup.WriteByte(0x4Au);
