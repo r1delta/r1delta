@@ -736,8 +736,22 @@ char __fastcall SVC_ServerInfo__WriteToBuffer(__int64 a1, __int64 a2)
 {
 	static const char* real_gamedir = "r1_dlc1";
 	*(const char**)(a1 + 72) = real_gamedir;
+	if (IsDedicatedServer()) {
+		const char** gamemode = reinterpret_cast<const char**>(G_server + 0xB68520);
+		*(const char**)(a1 + 88) = *gamemode;
+	}
 	auto ret = SVC_ServerInfo__WriteToBufferOriginal(a1, a2);
 	return ret;
+}
+
+typedef char (*SVC_ServerInfo__WriteToBufferType)(__int64 a1, __int64 a2);
+SVC_ServerInfo__WriteToBufferType SVC_ServerInfo__ReadToBufferOriginal;
+
+char __fastcall SVC_ServerInfo__ReadToBuffer(__int64 a1, __int64 a2)
+{
+	auto ret = SVC_ServerInfo__ReadToBufferOriginal(a1, a2);
+	return ret;
+	//return false;
 }
 
 
@@ -1167,7 +1181,6 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)(engine_base + 0x203C20), &NET_SetConVar__ReadFromBuffer, NULL);
 		MH_CreateHook((LPVOID)(engine_base + 0x202F80), &NET_SetConVar__WriteToBuffer, NULL);
 		MH_CreateHook((LPVOID)(engine_base + 0x1FE3F0), &SVC_ServerInfo__WriteToBuffer, reinterpret_cast<LPVOID*>(&SVC_ServerInfo__WriteToBufferOriginal));
-
 		if (!IsDedicatedServer()) {
 			MH_CreateHook((LPVOID)(G_engine + 0x1305E0), &ExecuteConfigFile, NULL);
 			RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
