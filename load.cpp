@@ -744,17 +744,6 @@ char __fastcall SVC_ServerInfo__WriteToBuffer(__int64 a1, __int64 a2)
 	return ret;
 }
 
-typedef char (*SVC_ServerInfo__WriteToBufferType)(__int64 a1, __int64 a2);
-SVC_ServerInfo__WriteToBufferType SVC_ServerInfo__ReadToBufferOriginal;
-
-char __fastcall SVC_ServerInfo__ReadToBuffer(__int64 a1, __int64 a2)
-{
-	auto ret = SVC_ServerInfo__ReadToBufferOriginal(a1, a2);
-	return ret;
-	//return false;
-}
-
-
 typedef void (*ConCommandConstructorType)(
 	ConCommandR1* newCommand, const char* name, void (*callback)(const CCommand&), const char* helpString, int flags, void* parent);
 
