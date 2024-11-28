@@ -9,6 +9,11 @@ int64_t FuncThatReturnsFF_Stub()
 	return 0xFFFFFFFFi64;
 }
 
+bool FuncThatReturnsBool_Stub()
+{
+	return false;
+}
+
 int64_t NULLNET_Config()
 {
 	return 0;

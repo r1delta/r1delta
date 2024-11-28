@@ -214,16 +214,6 @@ void __fastcall CPlayer__SetGenHook(__int64 a1, int a2) {
 	*(int*)(a1 + 0x183C) = a2;
 }
 
-typedef __int64 (*CPlayer__GetGen)(__int64 a1);
-
-CPlayer__GetGen CPlayer__GetGenOrig;
-
-int __fastcall CPlayer__GetGenHook(__int64 a1) {
-	
-	int gen = CPlayer__GetGenOrig(a1);
-	Msg("CPlayer__GetGenHook %d\n", gen);
-	return gen;
-}
 
 void __fastcall SetGen(__int64 a1, int a2) {
 	if(a2 < 0) {
@@ -592,8 +582,13 @@ void DecodeJsonArray(HSQUIRRELVM v, nlohmann::json json) {
 
 
 void GetServerList(HSQUIRRELVM v) {
+	static bool timeout = false;
 #ifdef USE_CURL
+	if(timeout == true) {
+		return;
+	}
 	nlohmann::json json;
+
 	std::string readBuffer;
 	CURL* curl = curl_easy_init();
 	curl_easy_setopt(curl, CURLOPT_URL, "http://localhost:3000/server/");
@@ -609,6 +604,10 @@ void GetServerList(HSQUIRRELVM v) {
 	else {
 		json = nlohmann::json::parse(readBuffer);
 		std::cout << json.dump(4) << std::endl;
+	}
+
+	if(res == CURLE_COULDNT_RESOLVE_HOST) {
+		timeout = true;
 	}
 
 	
@@ -652,7 +651,6 @@ void SetGenSQ(HSQUIRRELVM v) {
 
 void GetServerHeartbeat(HSQUIRRELVM v) {
 
-	printf("GetServerHeartbeat\n");
 	SQObject obj;
 	sq_getstackobj(nullptr, v, 2, &obj);
 
@@ -663,12 +661,10 @@ void GetServerHeartbeat(HSQUIRRELVM v) {
 	json["type"] = "heartbeat";
 	json["id"] = id;
 	for (int i = 0; i < table->_numOfNodes; i++) {
-		printf("i: %d\n", i);
 		auto node = &table->_nodes[i];
 		auto key = node->key._unVal.pString->_val;
 		auto val = node->val._unVal.pString->_val;
 		if (node->val._type == OT_STRING) {
-			printf("Val: %s\n", val);
 			json[key] = val;
 		}
 		if (node->val._type == OT_ARRAY) {
@@ -679,7 +675,6 @@ void GetServerHeartbeat(HSQUIRRELVM v) {
 			for (int j = 0; j < arr->_usedSlots; j++) {
 				SQObject arr_node = arr->_values[j];
 				if (arr_node._type == OT_STRING) {
-					printf("Val: %s\n", arr_node._unVal.pString->_val);
 					json[key] = arr_node._unVal.pString->_val;
 				}
 				if (arr_node._type == OT_TABLE) {
@@ -708,6 +703,13 @@ void GetServerHeartbeat(HSQUIRRELVM v) {
 		}
 
 	}
+
+	bool is_dedi = IsDedicatedServer();
+	json["dedicated"] = is_dedi;
+
+	auto str = json.dump();
+	std::cout << str << std::endl;
+
 #ifdef USE_CURL
 	CURL* curl = curl_easy_init();
 	if (curl) {
@@ -756,9 +758,6 @@ bool GetSQVMFuncs() {
 	if (G_server) {
 		if (MH_CreateHook(reinterpret_cast<void*>(G_server + 0x0050EA30), &CPlayer__SetXPRebuild, reinterpret_cast<void**>(&CPlayer__SetXPRebuildOrig)) != MH_OK) {
 			Msg("Failed to hook CPlayer__SetXPRebuild\n");
-		}
-		if (MH_CreateHook(reinterpret_cast<void*>(G_server + 0x4E2F40), &CPlayer__GetGenHook, reinterpret_cast<void**>(&CPlayer__GetGenOrig)) != MH_OK) {
-			Msg("Failed to hook CPlayer__GetGenHook\n");
 		}
 		if (MH_CreateHook(reinterpret_cast<void*>(G_server + 0x50E740), &Script_XPChanged_Rebuild, reinterpret_cast<void**>(&CPlayer__Script_XP_ChangedOrig)) != MH_OK) {
 			Msg("Failed to hook CPlayer__Script_XP_ChangedHook\n");

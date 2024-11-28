@@ -11,6 +11,7 @@ extern uintptr_t g_CVEngineServerInterface;
 extern uintptr_t g_r1oCVEngineServerInterface[203];
 
 int64_t FuncThatReturnsFF_Stub();
+bool FuncThatReturnsBool_Stub();
 
 class CVEngineServer
 {
@@ -287,7 +288,7 @@ private:
 		GetUnknownPlaylistKV = r1vtable[64];
 		GetPlaylistValPossible = r1vtable[65];
 		GetPlaylistValPossibleAlt = r1vtable[66];
-		GetUnknownPlaylistKV2 = r1vtable[67];
+		GetUnknownPlaylistKV2 = r1vtable[67]; // Matchmaking_MayProceedToGame
 		GetUnknownPlaylistKV3 = r1vtable[68];
 		UnknownMapSetup = r1vtable[69];
 		UnknownMapSetup2 = r1vtable[70];
@@ -380,7 +381,7 @@ private:
 		//sub_18006ECB0 = r1vtable[158];
 		//nullsub_285 = r1vtable[159];
 		//sub_18006ED00 = r1vtable[160];
-		//sub_18006ED90 = r1vtable[161];
+		UnkFunc66 = r1vtable[161];
 		//sub_18006EDA0 = r1vtable[162];
 		//sub_18006ED10 = r1vtable[163];
 		//sub_18006ED20 = r1vtable[164];
@@ -415,14 +416,13 @@ private:
 		UnknownPlaylistSetup = r1vtable[132];
 		GetUnknownPlaylistKV4 = r1vtable[132];
 		UnknownGamemodeSetup = r1vtable[132];
-		IsCoop = r1vtable[132];
+		IsCoop =uintptr_t(&FuncThatReturnsBool_Stub);
 		GetSkillFlag_Unused = r1vtable[132];
 		UnkFunc34 = r1vtable[132];
 		NullSub2 = r1vtable[132];
 		NullSub3 = r1vtable[132];
 		NullSub4 = r1vtable[132];
 		UnkFunc65 = r1vtable[132];
-		UnkFunc66 = r1vtable[132];
 		UnkFunc67 = r1vtable[132];
 		UnkFunc68 = r1vtable[132];
 		UnkFunc69 = r1vtable[132];
