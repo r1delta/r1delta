@@ -279,6 +279,10 @@ void GlobalChangeCallback(ConVarR1* var, const char* pOldValue) {
 	if (recursive)
 		return;
 	var = (ConVarR1*)(((uintptr_t)var) - 48);
+
+	if (!strcmp(var->m_pszName, "physics_scaled_mem"))
+		return;
+
 	if (ConVar_PrintDescriptionOriginal)
 		ConVar_PrintDescription(var);
 	if (!strcmp(var->m_pszName, "sv_portal_players")) {
