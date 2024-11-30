@@ -754,6 +754,15 @@ void RegisterConCommand(const char* commandName, void (*callback)(const CCommand
 	conCommandConstructor(newCommand, commandName, callback, helpString, flags, nullptr);
 }
 
+void RegisterConVar(const char* name, const char* value, int flags, const char* helpString) {
+	typedef void (*ConVarConstructorType)(ConVarR1* newVar, const char* name, const char* value, int flags, const char* helpString);
+	ConVarConstructorType conVarConstructor = (ConVarConstructorType)(IsDedicatedServer() ? (G_engine_ds + 0x320460) : (G_engine + 0x481AF0));
+	ConVarR1* newVar = new ConVarR1;
+
+
+	conVarConstructor(newVar, name, value, flags, helpString);
+}
+
 LDR_DLL_LOADED_NOTIFICATION_DATA* GetModuleNotificationData(const wchar_t* moduleName)
 {
 	HMODULE hMods[1024];
@@ -1089,7 +1098,7 @@ void __stdcall LoaderNotificationCallback(
 		}
 		RegisterConCommand("updatescriptdata", updatescriptdata_cmd, "Dumps the script data in the AI node graph to disk", FCVAR_GAMEDLL);
 		RegisterConCommand("bot_dummy", AddBotDummyConCommand, "Adds a bot.", FCVAR_GAMEDLL | FCVAR_CHEAT);
-
+		RegisterConVar("r1d_ms", "localhost:3000", FCVAR_CLIENTDLL, "Url for r1d masterserver");
 		RegisterConCommand("script", script_cmd, "Execute Squirrel code in server context", FCVAR_GAMEDLL|FCVAR_CHEAT);
 		if (!IsDedicatedServer()) {
 			RegisterConCommand("script_client", script_client_cmd, "Execute Squirrel code in client context", FCVAR_NONE);
