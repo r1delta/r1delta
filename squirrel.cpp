@@ -34,12 +34,13 @@
 #include "keyvalues.h"
 #include "persistentdata.h"
 #include "load.h"
+
+
 #ifdef USE_CURL
 #define CURL_STATICLIB
 #include <curl/curl.h>
 #pragma comment(lib, "libcurl.lib")
 #endif // USE_CURL
-
 
 #include <random>
 
@@ -288,6 +289,14 @@ struct AddonInfo {
 	const char* version;
 	const char* description;
 	const char* enabled;
+};
+
+struct MasterServer {
+	const char* id;
+};
+
+MasterServer masterServer = {
+	"master"
 };
 
 int UpdateAddons(HSQUIRRELVM v, SQInteger index, SQBool enabled) {
@@ -582,16 +591,47 @@ void DecodeJsonArray(HSQUIRRELVM v, nlohmann::json json) {
 
 
 void GetServerList(HSQUIRRELVM v) {
-	static bool timeout = false;
-#ifdef USE_CURL
-	if(timeout == true) {
+	static bool timeout = true;
+	static auto empty_json = nlohmann::json::array();
+
+	// make a empty server object
+	static auto object = nlohmann::json::object();
+	object["game_mode"] = "tdm";
+	object["map_name"] = "mp_lobby";
+	object["players"] = nlohmann::json::array();
+	object["max_players"] = 0;
+	object["port"] = 0;
+	object["ip"] = "";
+	object["type"] = "heartbeat";
+	object["id"] = masterServer.id;
+	object["host_name"] = "No servers found";
+
+	empty_json.emplace_back(object);
+
+	if (timeout) {
+		timeout = false;
+		std::cout << empty_json.dump(4) << std::endl;
+		DecodeJsonArray(v, empty_json);
 		return;
 	}
-	nlohmann::json json;
+
+#ifndef USE_CURL
+	timeout = true;
+#endif // !USE_CURL
+
+
+
+#ifdef USE_CURL
 
 	std::string readBuffer;
 	CURL* curl = curl_easy_init();
-	curl_easy_setopt(curl, CURLOPT_URL, "http://localhost:3000/server/");
+	auto ms_url = CCVar_FindVar(cvarinterface, "r1d_ms");
+
+	const char* base_url = ms_url->m_Value.m_pszString;
+
+	auto fstr = std::format("http://{}/server/", base_url);
+
+	curl_easy_setopt(curl, CURLOPT_URL, fstr.c_str());
 	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "GET");
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
 
@@ -601,19 +641,21 @@ void GetServerList(HSQUIRRELVM v) {
 	if (res != CURLE_OK) {
 		fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
 	}
-	else {
-		json = nlohmann::json::parse(readBuffer);
-		std::cout << json.dump(4) << std::endl;
-	}
 
-	if(res == CURLE_COULDNT_RESOLVE_HOST) {
+	if (res == CURLE_COULDNT_RESOLVE_HOST) {
 		timeout = true;
 	}
+	timeout = false;
 
-	
-	DecodeJsonArray(v, json);
+	json = nlohmann::json::parse(readBuffer);
+
+	std::cout << json.dump(4) << std::endl;
 
 	curl_easy_cleanup(curl);
+
+	DecodeJsonArray(v, json);
+	
+
 #endif // USE_CURL
 
 	
@@ -660,12 +702,19 @@ void GetServerHeartbeat(HSQUIRRELVM v) {
 	nlohmann::json json;
 	json["type"] = "heartbeat";
 	json["id"] = id;
+	masterServer = { id.c_str() };
 	for (int i = 0; i < table->_numOfNodes; i++) {
 		auto node = &table->_nodes[i];
 		auto key = node->key._unVal.pString->_val;
 		auto val = node->val._unVal.pString->_val;
 		if (node->val._type == OT_STRING) {
 			json[key] = val;
+		}
+		if (node->val._type == OT_INTEGER) {
+			json[key] = node->val._unVal.nInteger;
+		}
+		if (node->val._type == OT_FLOAT) {
+			json[key] = node->val._unVal.fFloat;
 		}
 		if (node->val._type == OT_ARRAY) {
 
@@ -711,35 +760,86 @@ void GetServerHeartbeat(HSQUIRRELVM v) {
 	std::cout << str << std::endl;
 
 #ifdef USE_CURL
-	CURL* curl = curl_easy_init();
-	if (curl) {
+		std::thread requestThread(
+			[json]
+			{
+				auto ms_url = CCVar_FindVar(cvarinterface, "r1d_ms");
 
-		struct curl_slist* headers = nullptr;
-		headers = curl_slist_append(headers, "Accept: application/json");
-		headers = curl_slist_append(headers, "Content-Type: application/json");
-		headers = curl_slist_append(headers, "charset: utf-8");
+				const char* base_url = ms_url->m_Value.m_pszString;
 
-		curl_easy_setopt(curl, CURLOPT_URL, "http://localhost:3000/server/heartbeat");
-		auto json_data_str = json.dump();
-		curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, strlen(json_data_str.c_str()));
-		curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_data_str.c_str());
-		curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-		curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "POST");
-		std::cout << "Sending data to server: " << json_data_str << std::endl;
-		// Perform the request
-		CURLcode res = curl_easy_perform(curl);
-		if (res != CURLE_OK) {
-			fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
-		}
+				auto fstr = std::format("http://{}/server/heartbeat", base_url);
 
-		// Cleanup CURL
-		curl_slist_free_all(headers);
-		curl_easy_cleanup(curl);
-	}
+				CURL* curl = curl_easy_init();
+				struct curl_slist* headers = nullptr;
+				headers = curl_slist_append(headers, "Accept: application/json");
+				headers = curl_slist_append(headers, "Content-Type: application/json");
+				headers = curl_slist_append(headers, "charset: utf-8");
+				curl_easy_setopt(curl, CURLOPT_URL, fstr.c_str());
+				auto json_data_str = json.dump();
+				curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, strlen(json_data_str.c_str()));
+				curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_data_str.c_str());
+				curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+				curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "POST");
+				CURLcode res = curl_easy_perform(curl);
+				if (res != CURLE_OK) {
+					fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+				}
+				curl_slist_free_all(headers);
+				curl_easy_cleanup(curl);
+			}
+			);
+		requestThread.detach();
 
 #endif // USE_CURL
 	//SendDataToCppServer
 }
+
+typedef void(__fastcall* pCHostState__State_GameShutdown_t)(void* thisptr);
+
+pCHostState__State_GameShutdown_t oGameShutDown;
+
+
+void Hk_CHostState__State_GameShutdown(void* thisptr) {
+	// Your custom behavior
+	printf("Game shutdown state called.\n");
+
+
+#ifdef USE_CURL
+	std::thread requestThread(
+		[]
+		{
+			CURL* curl = curl_easy_init();
+			struct curl_slist* headers = nullptr;
+			headers = curl_slist_append(headers, "Accept: application/json");
+			headers = curl_slist_append(headers, "charset: utf-8");
+			std::string url;
+
+			auto ms_url = CCVar_FindVar(cvarinterface, "r1d_ms");
+
+			const char* base_url = ms_url->m_Value.m_pszString;
+			url = std::format("http://{}/server/remove/?id={}", base_url,masterServer.id);
+			curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+			curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+			std::string readBuffer;
+			curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
+			curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+			curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
+			CURLcode res = curl_easy_perform(curl);
+			if (res != CURLE_OK) {
+				fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+			}
+			curl_slist_free_all(headers);
+			curl_easy_cleanup(curl);
+		}
+	);
+	requestThread.detach();
+
+#endif // USE_CURL
+
+	// Call original function
+	oGameShutDown(thisptr);
+}
+
 
 
 // Function to initialize all SQVM functions
@@ -753,6 +853,10 @@ bool GetSQVMFuncs() {
 #if defined(_DEBUG)
 	if (!G_vscript) MessageBoxW(0, L"G_launcher is null in GetSQVMFuncs", L"ASSERT!!!", MB_ICONERROR | MB_OK);
 #endif
+
+	if (MH_CreateHook(reinterpret_cast<void*>((engine + (IsDedicatedServer() ? 0xAA4A0 : 0x14BB10))), &Hk_CHostState__State_GameShutdown, reinterpret_cast<void**>(&oGameShutDown)) != MH_OK) {
+			Msg("Failed to hook CHostState__State_GameShutdown\n");
+	}
 
 	uintptr_t baseAddress = G_vscript;
 	if (G_server) {
@@ -874,16 +978,16 @@ bool GetSQVMFuncs() {
 		"Updates the selected addons"
 	);
 
-	//REGISTER_SCRIPT_FUNCTION(
-	//	SCRIPT_CONTEXT_UI,
-	//	"GetServerList",
-	//	(SQFUNCTION)GetServerList,
-	//	".ib", // String
-	//	1,      // Expects 2 parameters
-	//	"void",    // Returns a string
-	//	"str",
-	//	"Gets server list"
-	//);
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_UI,
+		"GetServerList",
+		(SQFUNCTION)GetServerList,
+		".ib", // String
+		1,      // Expects 2 parameters
+		"void",    // Returns a string
+		"str",
+		"Gets server list"
+	);
 
 
 	//REGISTER_SCRIPT_FUNCTION(
