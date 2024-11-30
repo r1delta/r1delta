@@ -280,8 +280,16 @@ void GlobalChangeCallback(ConVarR1* var, const char* pOldValue) {
 		return;
 	var = (ConVarR1*)(((uintptr_t)var) - 48);
 
+	static uintptr_t physics_scaled_mem_val = 0;
 	if (!strcmp(var->m_pszName, "physics_scaled_mem"))
+	{
+		physics_scaled_mem_val = (uintptr_t)var;
+	}
+	uintptr_t current = (uintptr_t)var;
+	if (current && current == physics_scaled_mem_val) {
 		return;
+	}
+	
 
 	if (ConVar_PrintDescriptionOriginal)
 		ConVar_PrintDescription(var);
