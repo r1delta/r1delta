@@ -70,7 +70,7 @@ void RenameSendProp(SendProp* sendTablePtr, int* sendTableLengthPtr, const char*
 	for (int i = 0; i < *sendTableLengthPtr; ++i) {
 		if (strcmp(sendTablePtr[i].name, currentName) == 0) {
 			sendTablePtr[i].name = (char*)newName;
-			//std::cout << "SendProp renamed from " << currentName << " to " << newName << std::endl;
+			std::cout << "SendProp renamed from " << currentName << " to " << newName << std::endl;
 			return;
 		}
 	}
@@ -127,6 +127,7 @@ void ServerClassInit_DT_BasePlayer() {
 	DestroySendProp(DT_Local, DT_LocalLen, "m_titanReady");
 	DestroySendProp(DT_BasePlayer, DT_BasePlayerLen, "m_bWallRun");
 	DestroySendProp(DT_BasePlayer, DT_BasePlayerLen, "m_bDoubleJump");
+	RenameSendProp(DT_BasePlayer, DT_BasePlayerLen, "m_ladderSurfaceProps", "m_activeBurnCardIndex");
 	DestroySendProp(DT_BasePlayer, DT_BasePlayerLen, "m_hasHacking");
 
 	MoveSendProp(DT_Local, DT_LocalLen, "m_titanRespawnTime",
@@ -151,6 +152,14 @@ void ServerClassInit_DT_LocalPlayerExclusive() {
 	int* DT_LocalPlayerExclusiveLen = (int*)(((uintptr_t)serverPtr) + 0xE04878);
 
 	//DestroySendProp(DT_LocalPlayerExclusive, DT_LocalPlayerExclusiveLen, "m_wallDangleDisableWeapon");
+}
+
+typedef __int64(__fastcall* ServerClassRegisterFunc)(__int64, char*, __int64);
+ServerClassRegisterFunc ServerClassRegisterOriginal;
+
+__int64 __fastcall ServerClassRegister_7F7E0(__int64 a1, char* a2, __int64 a3) {
+
+	return ServerClassRegisterOriginal(a1, a2, a3);
 }
 
 void ServerClassInit_DT_TitanSoul() {

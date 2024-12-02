@@ -226,6 +226,8 @@ ConCommandBaseR1O* convertToR1O(ConCommandBaseR1* commandBase) {
 	}
 	return NULL;
 }
+
+
 void CCVar_RegisterConCommand(uintptr_t thisptr, ConCommandBaseR1O* pCommandBase) {
 	if (!strcmp_static(pCommandBase->m_pszName, "toggleconsole"))
 		return;

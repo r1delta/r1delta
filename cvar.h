@@ -400,3 +400,4 @@ void Con_ColorPrintf(const SourceColor* clr, char* fmt, ...);
 typedef char (*CEngineVGui__InitType)(__int64 a1);
 extern CEngineVGui__InitType CEngineVGui__InitOriginal;
 char CEngineVGui__Init(__int64 a1);
+

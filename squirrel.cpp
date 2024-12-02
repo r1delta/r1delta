@@ -841,6 +841,40 @@ void Hk_CHostState__State_GameShutdown(void* thisptr) {
 }
 
 
+SQInteger Script_Server_SetActiveBurnCardIndex(HSQUIRRELVM v) {
+	const void* player = sq_getentity(v, 2);
+	if (!player) {
+		return sq_throwerror(v, "player is null");
+	}
+	auto r1_vm = GetServerVMPtr();
+	SQInteger index;
+	sq_getinteger(r1_vm, v, 1, &index);
+
+	if (player) {
+		auto player_ptr = reinterpret_cast<__int64>(player);
+		*(int*)(player_ptr + 0x1A14) = index;
+	}
+
+	return 1;
+}
+
+SQInteger Script_Server_GetActiveBurnCardIndex(HSQUIRRELVM v) {
+	const void* player = sq_getentity(v, 2);
+	if (!player) {
+		return sq_throwerror(v, "player is null");
+	}
+	auto r1_vm = GetServerVMPtr();
+	auto player_ptr = reinterpret_cast<__int64>(player);
+	int value = *(int*)(player_ptr + 0x1A14);
+
+	Msg("GetActiveBurnCardIndex: %d\n", value);
+	
+	sq_pushinteger(r1_vm, v, value);
+
+	return 1;
+}
+
+
 
 // Function to initialize all SQVM functions
 bool GetSQVMFuncs() {
@@ -1044,6 +1078,29 @@ bool GetSQVMFuncs() {
 		"str",
 		"Get a persistent userinfo value"
 	);
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER, // Available in client script contexts
+		"SetActiveBurnCardIndexForPlayer",
+		Script_Server_SetActiveBurnCardIndex,
+		".Ii", // String
+		3,      // Expects 2 parameters
+		"void",    // Returns an int (idk if i is the right char for this lmao)
+		"str",
+		"Get a persistent userinfo value"
+	);
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER, // Available in client script contexts
+		"GetActiveBurnCardIndex",
+		Script_Server_GetActiveBurnCardIndex,
+		".I", // String
+		2,      // Expects 2 parameters
+		"int",    // Returns an int (idk if i is the right char for this lmao)
+		"str",
+		"Get a persistent userinfo value"
+	);
+
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_SERVER, // Available in client script contexts
 		"SetPersistentStringForClient",

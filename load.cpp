@@ -1015,12 +1015,41 @@ void CBaseEntity__SetMoveType(void* a1, __int64 a2, __int64 a3)
 	}
 	return oCBaseEntity__SetMoveType(a1, a2, a3);
 }
+
+__int64 (*ServerClassRegister_7F7E0)(__int64 a1, char* a2, __int64 a3);
+
+__int64 __fastcall HookedServerClassRegister(__int64 a1, char* a2, __int64 a3) {
+	static __int64 originalPointerValue = 0;  // Stores where qword_C4A8D0 points to
+	static __int64 originalA3 = 0;           // Stores original a3 value
+
+	// Check if it's CDynamicProp
+	if (strcmp(a2, "CDynamicProp") == 0) {
+		// Store the dereferenced value and original pointer
+		originalPointerValue = *(__int64*)a3;
+		originalA3 = a3;
+	}
+	// Check if it's CControlPanelProp
+	else if (strcmp(a2, "CControlPanelProp") == 0) {
+		// Redirect the pointer
+		*(__int64*)a3 = originalPointerValue;
+		a3 = originalA3;
+	}
+
+	// Call original function
+	return ServerClassRegister_7F7E0(a1, a2, a3);
+}
+
+
+
 typedef void* (*CEntityFactoryDictionary__CreateType)(void* thisptr, const char* pClassName);
 CEntityFactoryDictionary__CreateType CEntityFactoryDictionary__CreateOriginal;
 void* CEntityFactoryDictionary__Create(void* thisptr, const char* pClassName) {
 	if (strstr(pClassName, "prop_physics") != NULL) {// && uintptr_t(_ReturnAddress()) != mapload) {
 		pClassName = "prop_dynamic_override";
 	}
+	/*if(strstr(pClassName, "prop_control_panel") != NULL) {
+		pClassName = "prop_dynamic";
+	}*/
 	return CEntityFactoryDictionary__CreateOriginal(thisptr, pClassName);
 }
 void __stdcall LoaderNotificationCallback(
@@ -1078,6 +1107,7 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)(server_base + 0x3A2130), &CBaseEntity__SendProxy_CellOriginZ, reinterpret_cast<LPVOID*>(NULL));
 		MH_CreateHook((LPVOID)(server_base + 0x3C8B70), &CBaseEntity__VPhysicsInitNormal, reinterpret_cast<LPVOID*>(&oCBaseEntity__VPhysicsInitNormal));
 		MH_CreateHook((LPVOID)(server_base + 0x3B3200), &CBaseEntity__SetMoveType, reinterpret_cast<LPVOID*>(&oCBaseEntity__SetMoveType));
+		MH_CreateHook((LPVOID)(server_base + 0x7F7E0), &HookedServerClassRegister, reinterpret_cast<LPVOID*>(&ServerClassRegister_7F7E0));
 		//MH_CreateHook((LPVOID)(server_base + 0x25A8E0), &CEntityFactoryDictionary__Create, reinterpret_cast<LPVOID*>(&CEntityFactoryDictionary__CreateOriginal));
 
 		//MH_CreateHook((LPVOID)(server_base + 0x3667D0), &CAI_NetworkManager__DelayedInit, reinterpret_cast<LPVOID*>(&CAI_NetworkManager__DelayedInitOriginal));
@@ -1090,6 +1120,7 @@ void __stdcall LoaderNotificationCallback(
 		auto engine_base = G_engine;
 		MH_CreateHook((LPVOID)(server_base + 0x3BE1A0), &CC_Ent_Create, reinterpret_cast<LPVOID*>(&oCC_Ent_Create));
 		MH_CreateHook((LPVOID)(server_base + 0x25E340), &DispatchSpawn, reinterpret_cast<LPVOID*>(&oDispatchSpawn));
+
 
 		if (!IsDedicatedServer()) {
 			MH_CreateHook((LPVOID)(engine_base + 0x21F9C0), &CEngineVGui__Init, reinterpret_cast<LPVOID*>(&CEngineVGui__InitOriginal));
