@@ -5,7 +5,7 @@
 #include <crtdbg.h>	
 #include <new>
 #include "windows.h"
-#include <nlohmann/json.hpp>
+#include "thirdparty/nlohmann/json.hpp"
 #include <iostream>
 #include "cvar.h"
 #include <random>
@@ -1290,10 +1290,17 @@ __forceinline bool serverRunning(void* a1) {
 	//return isServerScriptVM || a1 == realvmptr || a1 == fakevmptr || (realvmptr && a1 == *(void**)(((uintptr_t)realvmptr + 8)));
 	if (isServerScriptVM || a1 == realvmptr || a1 == fakevmptr || (realvmptr && a1 == *(void**)(((uintptr_t)realvmptr + 8))))
 		return true; // SQVM handle check
+
+	// NOTE(mrsteyk): Server VM exists? If no, we can't be running server.
+	if (!realvmptr)
+		return false;
+
 	const HMODULE serverDllBase = (HMODULE)G_server;
 	const SIZE_T serverDllSize = 0xFB5000; // no comment
-	void* stack[128];
-	USHORT frames = CaptureStackBackTrace(0, 128, stack, NULL);
+	constexpr size_t stack_size = 72;
+	void* stack[stack_size];
+
+	USHORT frames = CaptureStackBackTrace(0, stack_size, stack, NULL);
 
 	for (USHORT i = 0; i < frames; i++) {
 		if ((stack[i] >= serverDllBase) && ((ULONG_PTR)stack[i] < (ULONG_PTR)serverDllBase + serverDllSize)) {
