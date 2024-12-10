@@ -154,14 +154,6 @@ void ServerClassInit_DT_LocalPlayerExclusive() {
 	//DestroySendProp(DT_LocalPlayerExclusive, DT_LocalPlayerExclusiveLen, "m_wallDangleDisableWeapon");
 }
 
-typedef __int64(__fastcall* ServerClassRegisterFunc)(__int64, char*, __int64);
-ServerClassRegisterFunc ServerClassRegisterOriginal;
-
-__int64 __fastcall ServerClassRegister_7F7E0(__int64 a1, char* a2, __int64 a3) {
-
-	return ServerClassRegisterOriginal(a1, a2, a3);
-}
-
 void ServerClassInit_DT_TitanSoul() {
 	ServerClassInit_DT_TitanSoulOriginal();
 	void* serverPtr = (void*)G_server;
