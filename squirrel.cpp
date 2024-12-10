@@ -593,21 +593,22 @@ void DecodeJsonArray(HSQUIRRELVM v, nlohmann::json json) {
 void GetServerList(HSQUIRRELVM v) {
 	static bool timeout = true;
 	static auto empty_json = nlohmann::json::array();
-
 	// make a empty server object
-	static auto object = nlohmann::json::object();
-	object["game_mode"] = "tdm";
-	object["map_name"] = "mp_lobby";
-	object["players"] = nlohmann::json::array();
-	object["max_players"] = 0;
-	object["port"] = 0;
-	object["ip"] = "";
-	object["type"] = "heartbeat";
-	object["id"] = masterServer.id;
-	object["host_name"] = "No servers found";
-
-	empty_json.emplace_back(object);
-
+	static bool runonce = [&]() {
+		nlohmann::json object = nlohmann::json::object();
+		object["game_mode"] = "tdm";
+		object["map_name"] = "mp_lobby";
+		object["players"] = nlohmann::json::array();
+		object["max_players"] = 0;
+		object["port"] = 0;
+		object["ip"] = "";
+		object["type"] = "heartbeat";
+		object["id"] = masterServer.id;
+		object["host_name"] = "No servers found";
+		empty_json.emplace_back(object);
+		return true;
+	}();
+	
 	if (timeout) {
 		timeout = false;
 		std::cout << empty_json.dump(4) << std::endl;
@@ -848,7 +849,7 @@ SQInteger Script_Server_SetActiveBurnCardIndex(HSQUIRRELVM v) {
 	}
 	auto r1_vm = GetServerVMPtr();
 	SQInteger index;
-	sq_getinteger(r1_vm, v, 1, &index);
+	sq_getinteger(r1_vm, v, -1, &index);
 
 	if (player) {
 		auto player_ptr = reinterpret_cast<__int64>(player);
@@ -866,8 +867,6 @@ SQInteger Script_Server_GetActiveBurnCardIndex(HSQUIRRELVM v) {
 	auto r1_vm = GetServerVMPtr();
 	auto player_ptr = reinterpret_cast<__int64>(player);
 	int value = *(int*)(player_ptr + 0x1A14);
-
-	Msg("GetActiveBurnCardIndex: %d\n", value);
 	
 	sq_pushinteger(r1_vm, v, value);
 
