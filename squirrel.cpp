@@ -590,7 +590,7 @@ void DecodeJsonArray(HSQUIRRELVM v, nlohmann::json json) {
 }
 
 
-void GetServerList(HSQUIRRELVM v) {
+SQInteger GetServerList(HSQUIRRELVM v) {
 	static bool timeout = true;
 	static auto empty_json = nlohmann::json::array();
 	// make a empty server object
@@ -613,7 +613,7 @@ void GetServerList(HSQUIRRELVM v) {
 		timeout = false;
 		std::cout << empty_json.dump(4) << std::endl;
 		DecodeJsonArray(v, empty_json);
-		return;
+		return 1;
 	}
 
 #ifndef USE_CURL
@@ -659,9 +659,7 @@ void GetServerList(HSQUIRRELVM v) {
 
 #endif // USE_CURL
 
-	
-
-
+	return 1;
 }
 
 
