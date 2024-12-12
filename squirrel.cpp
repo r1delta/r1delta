@@ -610,12 +610,6 @@ SQInteger GetServerList(HSQUIRRELVM v) {
 		return true;
 	}();
 	
-	if (timeout) {
-		timeout = false;
-		std::cout << empty_json.dump(4) << std::endl;
-		DecodeJsonArray(v, empty_json);
-		return 1;
-	}
 
 #ifndef USE_CURL
 	timeout = true;
@@ -625,38 +619,43 @@ SQInteger GetServerList(HSQUIRRELVM v) {
 
 #ifdef USE_CURL
 
-	std::string readBuffer;
-	CURL* curl = curl_easy_init();
-	auto ms_url = CCVar_FindVar(cvarinterface, "r1d_ms");
+	auto request_thread = [&]()
+		{
+			std::string readBuffer;
+			CURL* curl = curl_easy_init();
+			auto ms_url = CCVar_FindVar(cvarinterface, "r1d_ms");
 
-	const char* base_url = ms_url->m_Value.m_pszString;
+			const char* base_url = ms_url->m_Value.m_pszString;
 
-	auto fstr = std::format("http://{}/server/", base_url);
+			auto fstr = std::format("http://{}/server/", base_url);
 
-	curl_easy_setopt(curl, CURLOPT_URL, fstr.c_str());
-	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "GET");
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
-	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, TRUE);
-	curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 3L);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
-	CURLcode res = curl_easy_perform(curl);
+			curl_easy_setopt(curl, CURLOPT_URL, fstr.c_str());
+			curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "GET");
+			curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+			curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, TRUE);
+			curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 3L);
+			curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
+			CURLcode res = curl_easy_perform(curl);
 
-	if (res != CURLE_OK) {
-		fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
-	}
+			if (res != CURLE_OK) {
+				fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+			}
 
-	if (res == CURLE_COULDNT_RESOLVE_HOST) {
-		timeout = true;
-	}
-	timeout = false;
+			if (res == CURLE_COULDNT_RESOLVE_HOST) {
+				timeout = true;
+			}
+			timeout = false;
 
-	auto json = nlohmann::json::parse(readBuffer);
+			auto json = nlohmann::json::parse(readBuffer);
 
-	std::cout << json.dump(4) << std::endl;
+			std::cout << json.dump(4) << std::endl;
 
-	curl_easy_cleanup(curl);
+			curl_easy_cleanup(curl);
 
-	DecodeJsonArray(v, json);
+			DecodeJsonArray(v, json);
+		};
+
+	std::thread(request_thread).join();
 	
 
 #endif // USE_CURL
