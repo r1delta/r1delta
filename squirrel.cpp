@@ -569,6 +569,10 @@ void DecodeJsonTable(HSQUIRRELVM v, nlohmann::json json) {
 
 
 void DecodeJsonArray(HSQUIRRELVM v, nlohmann::json json) {
+	// really fucking hacky
+	if (v->_sharedstate->_printfunc == NULL)
+		return;
+
 	sq_newarray(v, 0);
 	for (auto& val : json) {
 		if (val.is_string()) {
@@ -619,8 +623,12 @@ SQInteger GetServerList(HSQUIRRELVM v) {
 
 #ifdef USE_CURL
 
+	static bool searchRunning = false;
+
 	auto request_thread = [&]()
 		{
+			searchRunning = true;
+
 			std::string readBuffer;
 			CURL* curl = curl_easy_init();
 			auto ms_url = CCVar_FindVar(cvarinterface, "r1d_ms");
@@ -648,14 +656,18 @@ SQInteger GetServerList(HSQUIRRELVM v) {
 
 			auto json = nlohmann::json::parse(readBuffer);
 
-			std::cout << json.dump(4) << std::endl;
+			std::printf("Request JSON: ");
+			std::printf(json.dump(4).append("\n").c_str());
 
 			curl_easy_cleanup(curl);
 
 			DecodeJsonArray(v, json);
+
+			searchRunning = false;
 		};
 
-	std::thread(request_thread).join();
+	if(!searchRunning)
+		std::thread(request_thread).detach();
 	
 
 #endif // USE_CURL
