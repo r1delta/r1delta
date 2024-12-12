@@ -610,12 +610,6 @@ SQInteger GetServerList(HSQUIRRELVM v) {
 		return true;
 	}();
 	
-	if (timeout) {
-		timeout = false;
-		std::cout << empty_json.dump(4) << std::endl;
-		DecodeJsonArray(v, empty_json);
-		return 1;
-	}
 
 #ifndef USE_CURL
 	timeout = true;
@@ -625,38 +619,51 @@ SQInteger GetServerList(HSQUIRRELVM v) {
 
 #ifdef USE_CURL
 
-	std::string readBuffer;
-	CURL* curl = curl_easy_init();
-	auto ms_url = CCVar_FindVar(cvarinterface, "r1d_ms");
+	static bool searchRunning = false;
 
-	const char* base_url = ms_url->m_Value.m_pszString;
+	auto request_thread = [&]()
+		{
+			searchRunning = true;
 
-	auto fstr = std::format("http://{}/server/", base_url);
+			std::string readBuffer;
+			CURL* curl = curl_easy_init();
+			auto ms_url = CCVar_FindVar(cvarinterface, "r1d_ms");
 
-	curl_easy_setopt(curl, CURLOPT_URL, fstr.c_str());
-	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "GET");
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
-	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, TRUE);
-	curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 3L);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
-	CURLcode res = curl_easy_perform(curl);
+			const char* base_url = ms_url->m_Value.m_pszString;
 
-	if (res != CURLE_OK) {
-		fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
-	}
+			auto fstr = std::format("http://{}/server/", base_url);
 
-	if (res == CURLE_COULDNT_RESOLVE_HOST) {
-		timeout = true;
-	}
-	timeout = false;
+			curl_easy_setopt(curl, CURLOPT_URL, fstr.c_str());
+			curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "GET");
+			curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+			curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, TRUE);
+			curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 3L);
+			curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
+			CURLcode res = curl_easy_perform(curl);
 
-	auto json = nlohmann::json::parse(readBuffer);
+			if (res != CURLE_OK) {
+				fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+			}
 
-	std::cout << json.dump(4) << std::endl;
+			if (res == CURLE_COULDNT_RESOLVE_HOST) {
+				timeout = true;
+			}
+			timeout = false;
 
-	curl_easy_cleanup(curl);
+			auto json = nlohmann::json::parse(readBuffer);
 
-	DecodeJsonArray(v, json);
+			std::printf("Request JSON: ");
+			std::printf(json.dump(4).append("\n").c_str());
+
+			curl_easy_cleanup(curl);
+
+			DecodeJsonArray(v, json);
+
+			searchRunning = false;
+		};
+
+	if(!searchRunning)
+		std::thread(request_thread).detach();
 	
 
 #endif // USE_CURL
