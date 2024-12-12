@@ -569,10 +569,6 @@ void DecodeJsonTable(HSQUIRRELVM v, nlohmann::json json) {
 
 
 void DecodeJsonArray(HSQUIRRELVM v, nlohmann::json json) {
-	// really fucking hacky
-	if (v->_sharedstate->_printfunc == NULL)
-		return;
-
 	sq_newarray(v, 0);
 	for (auto& val : json) {
 		if (val.is_string()) {
