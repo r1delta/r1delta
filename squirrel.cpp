@@ -35,6 +35,7 @@
 #include "persistentdata.h"
 #include "load.h"
 
+#define USE_CURL
 
 #ifdef USE_CURL
 #define CURL_STATICLIB
@@ -635,7 +636,8 @@ SQInteger GetServerList(HSQUIRRELVM v) {
 	curl_easy_setopt(curl, CURLOPT_URL, fstr.c_str());
 	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "GET");
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
-
+	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, TRUE);
+	curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 3L);
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
 	CURLcode res = curl_easy_perform(curl);
 
@@ -648,7 +650,7 @@ SQInteger GetServerList(HSQUIRRELVM v) {
 	}
 	timeout = false;
 
-	json = nlohmann::json::parse(readBuffer);
+	auto json = nlohmann::json::parse(readBuffer);
 
 	std::cout << json.dump(4) << std::endl;
 
@@ -767,7 +769,9 @@ void GetServerHeartbeat(HSQUIRRELVM v) {
 				const char* base_url = ms_url->m_Value.m_pszString;
 
 				auto fstr = std::format("http://{}/server/heartbeat", base_url);
-
+				std::cout << fstr << std::endl;
+				auto str = json.dump();
+				std::cout << str << std::endl;
 				CURL* curl = curl_easy_init();
 				struct curl_slist* headers = nullptr;
 				headers = curl_slist_append(headers, "Accept: application/json");
@@ -779,6 +783,8 @@ void GetServerHeartbeat(HSQUIRRELVM v) {
 				curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_data_str.c_str());
 				curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 				curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "POST");
+				curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, TRUE);
+				curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 3L);
 				CURLcode res = curl_easy_perform(curl);
 				if (res != CURLE_OK) {
 					fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
@@ -822,6 +828,7 @@ void Hk_CHostState__State_GameShutdown(void* thisptr) {
 			std::string readBuffer;
 			curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
 			curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+			curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, TRUE);
 			curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
 			CURLcode res = curl_easy_perform(curl);
 			if (res != CURLE_OK) {

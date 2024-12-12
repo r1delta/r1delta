@@ -1129,7 +1129,7 @@ void __stdcall LoaderNotificationCallback(
 		}
 		RegisterConCommand("updatescriptdata", updatescriptdata_cmd, "Dumps the script data in the AI node graph to disk", FCVAR_CHEAT);
 		RegisterConCommand("bot_dummy", AddBotDummyConCommand, "Adds a bot.", FCVAR_GAMEDLL | FCVAR_CHEAT);
-		RegisterConVar("r1d_ms", "localhost:3000", FCVAR_CLIENTDLL, "Url for r1d masterserver");
+		RegisterConVar("r1d_ms", "ms.r1delta.net", FCVAR_CLIENTDLL, "Url for r1d masterserver");
 		RegisterConCommand("script", script_cmd, "Execute Squirrel code in server context", FCVAR_GAMEDLL|FCVAR_CHEAT);
 		if (!IsDedicatedServer()) {
 			RegisterConCommand("script_client", script_client_cmd, "Execute Squirrel code in client context", FCVAR_NONE);
