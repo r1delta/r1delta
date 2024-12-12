@@ -938,6 +938,17 @@ struct /*VFT*/ INetMessage
 	virtual unsigned int(GetSize)();
 };
 
+//0x4E2F30
+
+typedef int (*CPlayer_GetLevel_t)(__int64 thisptr);
+int __fastcall CPlayer_GetLevel(__int64 thisptr)
+{
+	int xp = *(int*)(thisptr + 0x1834);
+	typedef int (*GetLevelFromXP_t)(int xp);
+	GetLevelFromXP_t GetLevelFromXP = (GetLevelFromXP_t)(G_server + 0x28E740);
+	return GetLevelFromXP(xp);
+}
+
 void InitAddons() {
 	static bool done = false;
 	if (done) return;
@@ -1107,6 +1118,7 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)(server_base + 0x3A2130), &CBaseEntity__SendProxy_CellOriginZ, reinterpret_cast<LPVOID*>(NULL));
 		MH_CreateHook((LPVOID)(server_base + 0x3C8B70), &CBaseEntity__VPhysicsInitNormal, reinterpret_cast<LPVOID*>(&oCBaseEntity__VPhysicsInitNormal));
 		MH_CreateHook((LPVOID)(server_base + 0x3B3200), &CBaseEntity__SetMoveType, reinterpret_cast<LPVOID*>(&oCBaseEntity__SetMoveType));
+		MH_CreateHook((LPVOID)(server_base + 0x4E2F30), &CPlayer_GetLevel, reinterpret_cast<LPVOID*>(NULL));
 		//MH_CreateHook((LPVOID)(server_base + 0x7F7E0), &HookedServerClassRegister, reinterpret_cast<LPVOID*>(&ServerClassRegister_7F7E0));
 		//MH_CreateHook((LPVOID)(server_base + 0x25A8E0), &CEntityFactoryDictionary__Create, reinterpret_cast<LPVOID*>(&CEntityFactoryDictionary__CreateOriginal));
 
