@@ -234,9 +234,6 @@
     <ClInclude Include="vsdk\public\math_pfns.h">
       <Filter>Source Files\sdk</Filter>
     </ClInclude>
-    <ClInclude Include="thirdparty\zstd-1.5.6\zstd.h">
-      <Filter>3rd Party\zstd</Filter>
-    </ClInclude>
     <ClInclude Include="persistentdata.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -251,6 +248,12 @@
     </ClInclude>
     <ClInclude Include="thirdparty\nlohmann\json_fwd.hpp">
       <Filter>3rd Party\nlohmann</Filter>
+    </ClInclude>
+    <ClInclude Include="masterserver.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="thirdparty\zstd\zstd.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -344,9 +347,6 @@
     <ClCompile Include="vsdk\tier0\dbg.cpp">
       <Filter>Source Files\sdk</Filter>
     </ClCompile>
-    <ClCompile Include="thirdparty\zstd-1.5.6\zstd.c">
-      <Filter>3rd Party\zstd</Filter>
-    </ClCompile>
     <ClCompile Include="persistentdata.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -354,6 +354,12 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="netchanwarnings.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="masterserver.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="thirdparty\zstd\zstd.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

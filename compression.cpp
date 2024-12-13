@@ -2,7 +2,7 @@
 #include <cstdint>
 
 #include <MinHook.h>
-#include "thirdparty/zstd-1.5.6/zstd.h"
+#include "thirdparty/zstd/zstd.h"
 
 extern uintptr_t G_filesystem_stdio;
 

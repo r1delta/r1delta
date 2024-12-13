@@ -5,7 +5,6 @@
 #include <crtdbg.h>	
 #include <new>
 #include "windows.h"
-#include "thirdparty/nlohmann/json.hpp"
 #include <iostream>
 #include "cvar.h"
 #include <random>
@@ -35,7 +34,6 @@
 #include "persistentdata.h"
 #include "load.h"
 
-#define USE_CURL
 
 #ifdef USE_CURL
 #define CURL_STATICLIB
@@ -44,6 +42,7 @@
 #endif // USE_CURL
 
 #include <random>
+#include "masterserver.h"
 
 
 #pragma intrinsic(_ReturnAddress)
@@ -292,13 +291,7 @@ struct AddonInfo {
 	const char* enabled;
 };
 
-struct MasterServer {
-	const char* id;
-};
 
-MasterServer masterServer = {
-	"master"
-};
 
 int UpdateAddons(HSQUIRRELVM v, SQInteger index, SQBool enabled) {
 	const char* str = "thread void function() { wait 1 while(true) {  wait 1 } }";
@@ -468,208 +461,7 @@ int GetMods(HSQUIRRELVM v) {
 }
 
 
-std::string EnumToString(SQObjectType type) {
-	switch (type) {
-	case OT_NULL: return "OT_NULL";
-	case OT_INTEGER: return "OT_INTEGER";
-	case OT_FLOAT: return "OT_FLOAT";
-	case OT_BOOL: return "OT_BOOL";
-	case OT_STRING: return "OT_STRING";
-	case OT_TABLE: return "OT_TABLE";
-	case OT_ARRAY: return "OT_ARRAY";
-	case OT_USERDATA: return "OT_USERDATA";
-	case OT_CLOSURE: return "OT_CLOSURE";
-	case OT_NATIVECLOSURE: return "OT_NATIVECLOSURE";
-	case OT_GENERATOR: return "OT_GENERATOR";
-	case OT_USERPOINTER: return "OT_USERPOINTER";
-	case OT_THREAD: return "OT_THREAD";
-	case OT_FUNCPROTO: return "OT_FUNCPROTO";
-	case OT_CLASS: return "OT_CLASS";
-	case OT_INSTANCE: return "OT_INSTANCE";
-	case OT_WEAKREF: return "OT_WEAKREF";
-	default: return std::to_string(type);
-	}
-}
 
-
-std::string generate_uuid() {
-	std::random_device rd;
-	std::mt19937 gen(rd());
-	std::uniform_int_distribution<int> dist(0, 15);
-	std::uniform_int_distribution<int> dist2(8, 11);
-
-	std::stringstream ss;
-	ss << std::hex << std::setfill('0');
-
-	for (int i = 0; i < 8; i++) {
-		ss << dist(gen);
-	}
-	ss << "-";
-	for (int i = 0; i < 4; i++) {
-		ss << dist(gen);
-	}
-	ss << "-4"; // The 13th character is '4' to specify the UUID version
-	for (int i = 0; i < 3; i++) {
-		ss << dist(gen);
-	}
-	ss << "-";
-	ss << dist2(gen); // The 17th character is between 8 and 11 to meet the UUID variant requirement
-	for (int i = 0; i < 3; i++) {
-		ss << dist(gen);
-	}
-	ss << "-";
-	for (int i = 0; i < 12; i++) {
-		ss << dist(gen);
-	}
-
-	return ss.str();
-}
-
-
-static size_t WriteCallback(void* contents, size_t size, size_t nmemb, std::string* userData) {
-	size_t totalSize = size * nmemb;
-	userData->append((char*)contents, totalSize);
-	return totalSize;
-}
-
-
-void DecodeJsonTable(HSQUIRRELVM v, nlohmann::json json);
-void DecodeJsonArray(HSQUIRRELVM v, nlohmann::json json);
-
-void DecodeJsonTable(HSQUIRRELVM v, nlohmann::json json) {
-	sq_newtable(v);
-	for (auto& [key, value] : json.items()) {
-		if (value.is_string()) {
-			sq_pushstring(v, key.c_str(), -1);
-			sq_pushstring(v, value.get<std::string>().c_str(), -1);
-			sq_newslot(v, -3, 0);
-		}
-		if (value.is_number_integer()) {
-			sq_pushstring(v, key.c_str(), -1);
-			sq_pushinteger(nullptr, v, value.get<int>());
-			sq_newslot(v, -3, 0);
-		}
-		if (value.is_number_float()) {
-			sq_pushstring(v, key.c_str(), -1);
-			sq_pushfloat(nullptr, v, value.get<float>());
-			sq_newslot(v, -3, 0);
-		}
-		if (value.is_object()) {
-			sq_pushstring(v, key.c_str(), -1);
-			DecodeJsonTable(v, value);
-			sq_newslot(v, -3, 0);
-		}
-		if (value.is_array()) {
-			sq_pushstring(v, key.c_str(), -1);
-			DecodeJsonArray(v, value);
-			sq_newslot(v, -3, 0);
-		}
-	}
-}
-
-
-void DecodeJsonArray(HSQUIRRELVM v, nlohmann::json json) {
-	sq_newarray(v, 0);
-	for (auto& val : json) {
-		if (val.is_string()) {
-			sq_pushstring(v, val.get<std::string>().c_str(), -1);
-		}
-		if (val.is_number_integer()) {
-			sq_pushinteger(nullptr, v, val.get<int>());
-		}
-		if (val.is_number_float()) {
-			sq_pushfloat(nullptr, v, val.get<float>());
-		}
-		if (val.is_object()) {
-			DecodeJsonTable(v, val);
-		}
-		if (val.is_array()) {
-			DecodeJsonArray(v, val);
-		}
-		sq_arrayappend(v, -2);
-	}
-}
-
-
-SQInteger GetServerList(HSQUIRRELVM v) {
-	static bool timeout = true;
-	static auto empty_json = nlohmann::json::array();
-	// make a empty server object
-	static bool runonce = [&]() {
-		nlohmann::json object = nlohmann::json::object();
-		object["game_mode"] = "tdm";
-		object["map_name"] = "mp_lobby";
-		object["players"] = nlohmann::json::array();
-		object["max_players"] = 0;
-		object["port"] = 0;
-		object["ip"] = "";
-		object["type"] = "heartbeat";
-		object["id"] = masterServer.id;
-		object["host_name"] = "No servers found";
-		empty_json.emplace_back(object);
-		return true;
-	}();
-	
-
-#ifndef USE_CURL
-	timeout = true;
-#endif // !USE_CURL
-
-
-
-#ifdef USE_CURL
-
-	static bool searchRunning = false;
-
-	auto request_thread = [&]()
-		{
-			searchRunning = true;
-
-			std::string readBuffer;
-			CURL* curl = curl_easy_init();
-			auto ms_url = CCVar_FindVar(cvarinterface, "r1d_ms");
-
-			const char* base_url = ms_url->m_Value.m_pszString;
-
-			auto fstr = std::format("http://{}/server/", base_url);
-
-			curl_easy_setopt(curl, CURLOPT_URL, fstr.c_str());
-			curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "GET");
-			curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
-			curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, TRUE);
-			curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 3L);
-			curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
-			CURLcode res = curl_easy_perform(curl);
-
-			if (res != CURLE_OK) {
-				fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
-			}
-
-			if (res == CURLE_COULDNT_RESOLVE_HOST) {
-				timeout = true;
-			}
-			timeout = false;
-
-			auto json = nlohmann::json::parse(readBuffer);
-
-			std::printf("Request JSON: ");
-			std::printf(json.dump(4).append("\n").c_str());
-
-			curl_easy_cleanup(curl);
-
-			DecodeJsonArray(v, json);
-
-			searchRunning = false;
-		};
-
-	if(!searchRunning)
-		std::thread(request_thread).detach();
-	
-
-#endif // USE_CURL
-
-	return 1;
-}
 
 
 void AddXp(HSQUIRRELVM v) {
@@ -698,161 +490,6 @@ void SetGenSQ(HSQUIRRELVM v) {
 		SetGen(player_ptr, gen);
 	}
 }
-
-void GetServerHeartbeat(HSQUIRRELVM v) {
-
-	SQObject obj;
-	sq_getstackobj(nullptr, v, 2, &obj);
-
-	static std::string id = generate_uuid();
-	
-	auto table = obj._unVal.pTable;
-	nlohmann::json json;
-	json["type"] = "heartbeat";
-	json["id"] = id;
-	masterServer = { id.c_str() };
-	for (int i = 0; i < table->_numOfNodes; i++) {
-		auto node = &table->_nodes[i];
-		auto key = node->key._unVal.pString->_val;
-		auto val = node->val._unVal.pString->_val;
-		if (node->val._type == OT_STRING) {
-			json[key] = val;
-		}
-		if (node->val._type == OT_INTEGER) {
-			json[key] = node->val._unVal.nInteger;
-		}
-		if (node->val._type == OT_FLOAT) {
-			json[key] = node->val._unVal.fFloat;
-		}
-		if (node->val._type == OT_ARRAY) {
-
-			auto arr = node->val._unVal.pArray;
-			// array of objects
-			nlohmann::json array = nlohmann::json::array();
-			for (int j = 0; j < arr->_usedSlots; j++) {
-				SQObject arr_node = arr->_values[j];
-				if (arr_node._type == OT_STRING) {
-					json[key] = arr_node._unVal.pString->_val;
-				}
-				if (arr_node._type == OT_TABLE) {
-					auto table_nest = arr_node._unVal.pTable;
-					auto json_nest = nlohmann::json();
-					for (int i = 0; i < table_nest->_numOfNodes; i++) {
-						auto node = &table_nest->_nodes[i];
-						auto key = node->key._unVal.pString->_val;
-						auto val = node->val._unVal.pString->_val;
-
-						if (node->val._type == OT_STRING) {
-							json_nest[key] = val;
-						}
-						if (node->val._type == OT_INTEGER) {
-							json_nest[key] = node->val._unVal.nInteger;
-						}
-						if (node->val._type == OT_FLOAT) {
-							json_nest[key] = node->val._unVal.fFloat;
-						}
-					}
-					array.push_back(json_nest);
-				}
-			}
-	
-			json[key] = array;
-		}
-
-	}
-
-	bool is_dedi = IsDedicatedServer();
-	json["dedicated"] = is_dedi;
-
-	auto str = json.dump();
-	std::cout << str << std::endl;
-
-#ifdef USE_CURL
-		std::thread requestThread(
-			[json]
-			{
-				auto ms_url = CCVar_FindVar(cvarinterface, "r1d_ms");
-
-				const char* base_url = ms_url->m_Value.m_pszString;
-
-				auto fstr = std::format("http://{}/server/heartbeat", base_url);
-				std::cout << fstr << std::endl;
-				auto str = json.dump();
-				std::cout << str << std::endl;
-				CURL* curl = curl_easy_init();
-				struct curl_slist* headers = nullptr;
-				headers = curl_slist_append(headers, "Accept: application/json");
-				headers = curl_slist_append(headers, "Content-Type: application/json");
-				headers = curl_slist_append(headers, "charset: utf-8");
-				curl_easy_setopt(curl, CURLOPT_URL, fstr.c_str());
-				auto json_data_str = json.dump();
-				curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, strlen(json_data_str.c_str()));
-				curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_data_str.c_str());
-				curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-				curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "POST");
-				curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, TRUE);
-				curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 3L);
-				CURLcode res = curl_easy_perform(curl);
-				if (res != CURLE_OK) {
-					fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
-				}
-				curl_slist_free_all(headers);
-				curl_easy_cleanup(curl);
-			}
-			);
-		requestThread.detach();
-
-#endif // USE_CURL
-	//SendDataToCppServer
-}
-
-typedef void(__fastcall* pCHostState__State_GameShutdown_t)(void* thisptr);
-
-pCHostState__State_GameShutdown_t oGameShutDown;
-
-
-void Hk_CHostState__State_GameShutdown(void* thisptr) {
-	// Your custom behavior
-	printf("Game shutdown state called.\n");
-
-
-#ifdef USE_CURL
-	std::thread requestThread(
-		[]
-		{
-			CURL* curl = curl_easy_init();
-			struct curl_slist* headers = nullptr;
-			headers = curl_slist_append(headers, "Accept: application/json");
-			headers = curl_slist_append(headers, "charset: utf-8");
-			std::string url;
-
-			auto ms_url = CCVar_FindVar(cvarinterface, "r1d_ms");
-
-			const char* base_url = ms_url->m_Value.m_pszString;
-			url = std::format("http://{}/server/remove/?id={}", base_url,masterServer.id);
-			curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-			curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-			std::string readBuffer;
-			curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
-			curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
-			curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, TRUE);
-			curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
-			CURLcode res = curl_easy_perform(curl);
-			if (res != CURLE_OK) {
-				fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
-			}
-			curl_slist_free_all(headers);
-			curl_easy_cleanup(curl);
-		}
-	);
-	requestThread.detach();
-
-#endif // USE_CURL
-
-	// Call original function
-	oGameShutDown(thisptr);
-}
-
 
 SQInteger Script_Server_SetActiveBurnCardIndex(HSQUIRRELVM v) {
 	const void* player = sq_getentity(v, 2);
@@ -1033,18 +670,6 @@ bool GetSQVMFuncs() {
 		"str",
 		"Gets server list"
 	);
-
-
-	//REGISTER_SCRIPT_FUNCTION(
-	//	SCRIPT_CONTEXT_CLIENT | SCRIPT_CONTEXT_UI, // Available in client script contexts
-	//	"GetPersistentVarAsInt",
-	//	Script_ClientGetPersistentDataAsInt,
-	//	".s", // String
-	//	2,      // Expects 1 parameter
-	//	"int",    // Returns an int (idk if i is the right char for this lmao)
-	//	"str",
-	//	"Get a persistent data value as an integer I guess I don't know why you wouldn't just do this yourself"
-	//);
 
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_SERVER,

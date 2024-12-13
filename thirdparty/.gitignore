@@ -1,0 +1,15 @@
+# Backup directory
+backup/
+
+# Build artifacts
+*.o
+*.obj
+*.lib
+*.dll
+*.so
+*.dylib
+
+# IDE files
+.vs/
+*.user
+*.suo

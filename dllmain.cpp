@@ -42,7 +42,7 @@
 #include "filesystem.h"
 #include "logging.h"
 #include <tier0/platform.h>
-#include "thirdparty/mimalloc-2.1.7/include/mimalloc-new-delete.h"
+#include "thirdparty/mimalloc//include/mimalloc-new-delete.h"
 
 typedef const char* (__cdecl* wine_get_version_func)();
 CPUInformation* (__fastcall* GetCPUInformationOriginal)();

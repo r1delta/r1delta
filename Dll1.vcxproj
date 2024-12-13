@@ -1,13 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <OutDir>C:\Program Files\EA Games\Titanfall\bin\x64_retail</OutDir>
-    <IncludePath>$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+    <OutDir>X:\Games\EA\Titanfall\bin\x64_retail</OutDir>
+    <IncludePath>$(ProjectDir)thirdparty\minhook\include;$(ProjectDir)thirdparty\mimalloc\include;$(ProjectDir)thirdparty\zstd;$(ProjectDir)thirdparty\capnproto;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+    <LibraryPath>$(ProjectDir)thirdparty\minhook\lib;$(SolutionDir)thirdparty\mimalloc\$(Configuration);$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <OutDir>C:\Program Files\EA Games\Titanfall\bin\x64_retail</OutDir>
+    <OutDir>X:\Games\EA\Titanfall\bin\x64_retail</OutDir>
     <IntDir>$(ProjectDir)$(Platform)\$(Configuration)\</IntDir>
-    <IncludePath>$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+    <IncludePath>$(ProjectDir)thirdparty\minhook\include;$(ProjectDir)thirdparty\mimalloc\include;$(ProjectDir)thirdparty\zstd;$(ProjectDir)thirdparty\capnproto;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+    <LibraryPath>$(ProjectDir)thirdparty\minhook\lib;$(SolutionDir)thirdparty\mimalloc\$(Configuration);$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -32,7 +34,7 @@
     <Keyword>Win32Proj</Keyword>
     <ProjectGuid>{ff6a4de4-e3d3-4f2b-8640-0a4815865fbe}</ProjectGuid>
     <RootNamespace>Dll1</RootNamespace>
-    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.19041.0</WindowsTargetPlatformVersion>
     <ProjectName>tier0</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -52,13 +54,13 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
@@ -82,14 +84,14 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>X:\Games\EA\Titanfall\bin\x64_retail</OutDir>
-    <IncludePath>$(ProjectDir)thirdparty\nlohmann;$(ProjectDir)thirdparty\mimalloc-2.1.7\include;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
-    <LibraryPath>$(SolutionDir)thirdparty\mimalloc-2.1.7\$(Configuration);$(LibraryPath)</LibraryPath>
+    <IncludePath>$(ProjectDir)thirdparty\capnp\include;$(ProjectDir)thirdparty\minhook\include;$(ProjectDir)thirdparty\mimalloc\include;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+    <LibraryPath>$(ProjectDir)thirdparty\capnp\lib\$(Configuration);$(ProjectDir)thirdparty\minhook\lib;$(SolutionDir)thirdparty\mimalloc\$(Configuration);$(VC_LibraryPath_X64);$(WindowsSDK_LibraryPath_x64);$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>X:\Games\EA\Titanfall\bin\x64_retail</OutDir>
     <IntDir>$(ProjectDir)$(Platform)\$(Configuration)\</IntDir>
-    <IncludePath>$(ProjectDir)thirdparty\nlohmann;$(ProjectDir)thirdparty\mimalloc-2.1.7\include;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
-    <LibraryPath>$(SolutionDir)thirdparty\mimalloc-2.1.7\$(Configuration);$(LibraryPath)</LibraryPath>
+    <IncludePath>$(ProjectDir)thirdparty\capnp\include;$(ProjectDir)thirdparty\minhook\include;$(ProjectDir)thirdparty\mimalloc\include;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+    <LibraryPath>$(ProjectDir)thirdparty\capnp\lib\$(Configuration);$(ProjectDir)thirdparty\minhook\lib;$(SolutionDir)thirdparty\mimalloc\$(Configuration);$(VC_LibraryPath_X64);$(WindowsSDK_LibraryPath_x64);$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Label="Vcpkg">
     <VcpkgEnabled>true</VcpkgEnabled>
@@ -143,7 +145,7 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>Shell32.lib;vstdlib.lib;tier0_orig.lib;$(CoreLibraryDependencies);%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>winhttp.lib;Shell32.lib;capnp.lib;kj.lib;mimalloc-static.lib;vstdlib.lib;tier0_orig.lib;libminhook.lib;$(CoreLibraryDependencies);%(AdditionalDependencies)</AdditionalDependencies>
       <ModuleDefinitionFile>test.def</ModuleDefinitionFile>
     </Link>
   </ItemDefinitionGroup>
@@ -168,7 +170,7 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>Shell32.lib;vstdlib.lib;tier0_orig.lib;$(CoreLibraryDependencies);%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>winhttp.lib;Shell32.lib;capnp.lib;kj.lib;mimalloc-static.lib;vstdlib.lib;tier0_orig.lib;libminhook.lib;$(CoreLibraryDependencies);%(AdditionalDependencies)</AdditionalDependencies>
       <ModuleDefinitionFile>test.def</ModuleDefinitionFile>
     </Link>
   </ItemDefinitionGroup>
@@ -190,6 +192,7 @@
     <ClInclude Include="keyvalues.h" />
     <ClInclude Include="load.h" />
     <ClInclude Include="logging.h" />
+    <ClInclude Include="masterserver.h" />
     <ClInclude Include="memory.h" />
     <ClInclude Include="model_info.h" />
     <ClInclude Include="navmesh.h" />
@@ -205,7 +208,7 @@
     <ClInclude Include="TableDestroyer.h" />
     <ClInclude Include="thirdparty\nlohmann\json.hpp" />
     <ClInclude Include="thirdparty\nlohmann\json_fwd.hpp" />
-    <ClInclude Include="thirdparty\zstd-1.5.6\zstd.h" />
+    <ClInclude Include="thirdparty\zstd\zstd.h" />
     <ClInclude Include="utils.h" />
     <ClInclude Include="vector.h" />
     <!-- Add the following includes from the first version -->
@@ -264,6 +267,7 @@
     <ClCompile Include="keyvalues.cpp" />
     <ClCompile Include="load.cpp" />
     <ClCompile Include="logging.cpp" />
+    <ClCompile Include="masterserver.cpp" />
     <ClCompile Include="memory.cpp" />
     <ClCompile Include="model_info.cpp" />
     <ClCompile Include="navmesh.cpp" />
@@ -275,7 +279,7 @@
     <ClCompile Include="sendmoveclampfix.cpp" />
     <ClCompile Include="squirrel.cpp" />
     <ClCompile Include="TableDestroyer.cpp" />
-    <ClCompile Include="thirdparty\zstd-1.5.6\zstd.c" />
+    <ClCompile Include="thirdparty\zstd\zstd.c" />
     <ClCompile Include="utils.cpp" />
     <!-- Add the following includes from the first version -->
     <ClCompile Include="vsdk\tier0\dbg.cpp" />
@@ -290,19 +294,23 @@
   <ItemGroup>
     <None Include="packages.config" />
   </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="thirdparty\mimalloc-2.1.7\ide\vs2022\mimalloc.vcxproj">
-      <Project>{abb5eae7-b3e6-432e-b636-333449892ea6}</Project>
-    </ProjectReference>
-  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
-    <Import Project="packages\minhook.1.3.3\build\native\minhook.targets" Condition="Exists('packages\minhook.1.3.3\build\native\minhook.targets')" />
   </ImportGroup>
-  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
-    <PropertyGroup>
-      <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
-    </PropertyGroup>
-    <Error Condition="!Exists('packages\minhook.1.3.3\build\native\minhook.targets')" Text="$([System.String]::Format('$(ErrorText)', 'packages\minhook.1.3.3\build\native\minhook.targets'))" />
-  </Target>
+  <PropertyGroup>
+    <CapnpCompiler>$(ProjectDir)thirdparty\capnp\bin\capnp.exe</CapnpCompiler>
+    <CapnpGenDir>$(ProjectDir)src\generated</CapnpGenDir>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <PreBuildEvent>
+      <Command>
+      if not exist "$(CapnpGenDir)" mkdir "$(CapnpGenDir)"
+      cd "$(ProjectDir)"
+      thirdparty\capnp\bin\capnp.exe compile -I. --output="$(ProjectDir)thirdparty\capnp\bin\capnpc-c++.exe" server.capnp
+    </Command>
+      <Message>Generating Cap'n Proto headers...</Message>
+      <Inputs>$(ProjectDir)server.capnp</Inputs>
+      <Outputs>$(CapnpGenDir)\server.capnp.h</Outputs>
+    </PreBuildEvent>
+  </ItemDefinitionGroup>
 </Project>
