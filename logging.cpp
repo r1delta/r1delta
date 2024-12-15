@@ -6,6 +6,7 @@
 #include <MinHook.h>
 #include <memory>
 #include "load.h"
+#include "persistentdata.h"
 #pragma intrinsic(_ReturnAddress)
 typedef void (*MsgFn)(const char*, ...);
 typedef void (*WarningFn)(const char*, ...);
@@ -77,37 +78,37 @@ bool is_interesting_format(const char* format) {
 }
 
 
-int __cdecl vsnprintf_l_hk(
-	char* const Buffer,
-	const size_t BufferCount,
-	const char* const Format,
-	const _locale_t Locale,
-	va_list ArgList)
-{
-	int result;
-
-	if (Format && (!BufferCount || Buffer)) {
-		// Use vsnprintf to format the string
-		result = vsnprintf(Buffer, BufferCount, Format, ArgList);
-
-		if (result < 0 || result >= (int)BufferCount) {
-			if (BufferCount > 0) {
-				Buffer[BufferCount - 1] = '\0';  // Ensure null termination
-			}
-			return -1;
-		}
-
-		if (!recursive && is_interesting_format(Format) && strlen(Buffer) < 512) {
-			recursive = true;
-			Msg("%s\n", Buffer);
-			recursive = false;
-		}
-		return result;
-	}
-	else {
-		return -1;
-	}
-}
+//int __cdecl vsnprintf_l_hk(
+//	char* const Buffer,
+//	const size_t BufferCount,
+//	const char* const Format,
+//	const _locale_t Locale,
+//	va_list ArgList)
+//{
+//	int result;
+//
+//	if (Format && (!BufferCount || Buffer)) {
+//		// Use vsnprintf to format the string
+//		result = vsnprintf(Buffer, BufferCount, Format, ArgList);
+//
+//		if (result < 0 || result >= (int)BufferCount) {
+//			if (BufferCount > 0) {
+//				Buffer[BufferCount - 1] = '\0';  // Ensure null termination
+//			}
+//			return -1;
+//		}
+//
+//		if (!recursive && is_interesting_format(Format) && strlen(Buffer) < 512) {
+//			recursive = true;
+//			Msg("%s\n", Buffer);
+//			recursive = false;
+//		}
+//		return result;
+//	}
+//	else {
+//		return -1;
+//	}
+//}
 typedef void (*Cbuf_AddTextType)(int a1, const char* a2, unsigned int a3);
 Cbuf_AddTextType Cbuf_AddTextOriginal;
 static bool bDone = false;
@@ -116,10 +117,11 @@ void Cbuf_AddText(int a1, const char* a2, unsigned int a3) {
 		bDone = true;
 		OriginalCCVar_FindVar(cvarinterface, "cl_updaterate")->m_nFlags &= ~(FCVAR_HIDDEN | FCVAR_DEVELOPMENTONLY);
 	}
-	bool shouldLog = true;
-	if (a2 == nullptr || *a2 == '\0' || strcmp_static(a2, "\n") == 0) {
-		shouldLog = false;
-	}
+	PData_OnConsoleCommand(a2);
+	//bool shouldLog = true;
+	//if (a2 == nullptr || *a2 == '\0' || strcmp_static(a2, "\n") == 0) {
+		bool shouldLog = false;
+	//}
 	auto engine = G_engine;
 	uintptr_t returnToKeyInput = engine + 0x14E668;
 	uintptr_t returnToKeyInput2 = engine + 0x14E5FB;
