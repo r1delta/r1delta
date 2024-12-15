@@ -1119,34 +1119,77 @@ void __fastcall CScriptManager__DestroyVM(void* a1, void* vmptr)
 	}
 	return CScriptManager__DestroyVMOriginal(a1, vmptr);
 }
+// Track incomplete lines for each VM type
+static bool g_serverLineIncomplete = false;
+static bool g_clientLineIncomplete = false;
+static bool g_uiLineIncomplete = false;
+
 void CSquirrelVM__PrintFunc1(void* m_hVM, const char* s, ...)
 {
-	char string[2048]; // [esp+0h] [ebp-800h] BYREF
-	va_list params; // [esp+810h] [ebp+10h] BYREF
+	char string[2048];
+	va_list params;
 
 	va_start(params, s);
 	vsnprintf(string, 2048, s, params);
-	Msg("[SERVER SCRIPT] %s", string);
+
+	// Check if string ends with newline
+	size_t len = strlen(string);
+	bool endsWithNewline = (len > 0 && string[len - 1] == '\n');
+
+	if (!g_serverLineIncomplete) {
+		Msg("[SERVER SCRIPT] %s", string);
+	}
+	else {
+		Msg("%s", string);
+	}
+
+	g_serverLineIncomplete = !endsWithNewline;
+	va_end(params);
 }
+
 void CSquirrelVM__PrintFunc2(void* m_hVM, const char* s, ...)
 {
-	char string[2048]; // [esp+0h] [ebp-800h] BYREF
-	va_list params; // [esp+810h] [ebp+10h] BYREF
+	char string[2048];
+	va_list params;
 
 	va_start(params, s);
 	vsnprintf(string, 2048, s, params);
-	Msg("[CLIENT SCRIPT] %s", string);
+
+	size_t len = strlen(string);
+	bool endsWithNewline = (len > 0 && string[len - 1] == '\n');
+
+	if (!g_clientLineIncomplete) {
+		Msg("[CLIENT SCRIPT] %s", string);
+	}
+	else {
+		Msg("%s", string);
+	}
+
+	g_clientLineIncomplete = !endsWithNewline;
+	va_end(params);
 }
+
 void CSquirrelVM__PrintFunc3(void* m_hVM, const char* s, ...)
 {
-	char string[2048]; // [esp+0h] [ebp-800h] BYREF
-	va_list params; // [esp+810h] [ebp+10h] BYREF
+	char string[2048];
+	va_list params;
 
 	va_start(params, s);
 	vsnprintf(string, 2048, s, params);
-	Msg("[UI SCRIPT] %s", string);
-}
 
+	size_t len = strlen(string);
+	bool endsWithNewline = (len > 0 && string[len - 1] == '\n');
+
+	if (!g_uiLineIncomplete) {
+		Msg("[UI SCRIPT] %s", string);
+	}
+	else {
+		Msg("%s", string);
+	}
+
+	g_uiLineIncomplete = !endsWithNewline;
+	va_end(params);
+}
 R1SquirrelVM* GetClientVMPtr() {
 	return *(R1SquirrelVM**)(G_client + 0x16BBE78);
 }

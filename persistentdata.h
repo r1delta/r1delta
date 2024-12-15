@@ -51,3 +51,4 @@ typedef char (*CBaseClientState__InternalProcessStringCmdType)(void* thisptr, vo
 extern CBaseClientState__InternalProcessStringCmdType CBaseClientState__InternalProcessStringCmdOriginal;
 char CBaseClientState__InternalProcessStringCmd(void* thisptr, void* msg, bool bIsHLTV);
 char ExecuteConfigFile(int configType);
+void PData_OnConsoleCommand(const char* str);
