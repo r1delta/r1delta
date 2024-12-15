@@ -34,13 +34,6 @@
 #include "persistentdata.h"
 #include "load.h"
 
-
-#ifdef USE_CURL
-#define CURL_STATICLIB
-#include <curl/curl.h>
-#pragma comment(lib, "libcurl.lib")
-#endif // USE_CURL
-
 #include <random>
 #include "masterserver.h"
 
