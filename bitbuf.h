@@ -1167,6 +1167,13 @@ public:
 	// reads a varint encoded integer
 	uint32			ReadVarInt32();
 	uint64			ReadVarInt64();
+	int ReadBitsClamped_ptr(void* pOutData, size_t outSizeBytes, size_t nBits);
+
+	template <typename T, size_t N>
+	int ReadBitsClamped(T(&pOut)[N], size_t nBits) {
+		return ReadBitsClamped_ptr(pOut, N * sizeof(T), nBits);
+	}
+
 	int32			ReadSignedVarInt32() { return bitbuf::ZigZagDecode32(ReadVarInt32()); }
 	int64			ReadSignedVarInt64() { return bitbuf::ZigZagDecode64(ReadVarInt64()); }
 };
@@ -1620,6 +1627,8 @@ public:
 	}
 
 	DELEGATE1(int, ReadSBitLong, int);
+
+	int ReadBitsClamped_ptr(void* pOutData, size_t outSizeBytes, size_t nBits);
 
 };
 #endif

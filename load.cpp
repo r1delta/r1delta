@@ -34,7 +34,7 @@
 
 #include "load.h"
 #include <cstdlib>
-#include <crtdbg.h>	
+#include <crtdbg.h>
 #include <new>
 #include "windows.h"
 
@@ -73,9 +73,14 @@
 #include "persistentdata.h"
 #include "weaponxdebug.h"
 #include "netchanwarnings.h"
+#include "engine.h"
+#include "voice.h"
+
 #pragma intrinsic(_ReturnAddress)
 
 void* dll_notification_cookie_;
+int* g_nServerThread;
+IBaseClientDLL* g_ClientDLL = nullptr;
 
 void Status_ConMsg(const char* text, ...)
 // clang-format off
@@ -94,16 +99,14 @@ void Status_ConMsg(const char* text, ...)
 	Msg("%s\n", formatted);
 }
 
-signed __int64 __fastcall sub_1804735A0(char* a1, signed __int64 a2, const char* a3, va_list a4)
-{
+signed __int64 __fastcall sub_1804735A0(char* a1, signed __int64 a2, const char* a3, va_list a4) {
 	static bool recursive2 = false;
 	signed __int64 result; // rax
 
 	if (a2 <= 0)
 		return 0i64;
 	result = vsnprintf(a1, a2, a3, a4);
-	if ((int)result < 0i64 || (int)result >= a2)
-	{
+	if ((int)result < 0i64 || (int)result >= a2) {
 		result = a2 - 1;
 		a1[a2 - 1] = 0;
 	}
@@ -114,20 +117,17 @@ signed __int64 __fastcall sub_1804735A0(char* a1, signed __int64 a2, const char*
 	}
 	return result;
 }
-void sub_180473550(char* a1, signed __int64 a2, const char* a3, ...)
-{
+void sub_180473550(char* a1, signed __int64 a2, const char* a3, ...) {
 	int v5; // eax
 	va_list ArgList; // [rsp+58h] [rbp+20h] BYREF
 
 	va_start(ArgList, a3);
-	if (a2 > 0)
-	{
+	if (a2 > 0) {
 		v5 = vsnprintf(a1, a2, a3, ArgList);
 		if (v5 < 0i64 || v5 >= a2)
 			a1[a2 - 1] = 0;
 	}
 	std::cout << a1 << std::endl;
-
 }
 
 BOOL RemoveItemsFromVTable(uintptr_t vTableAddr, size_t indexStart, size_t itemCount) {
@@ -192,6 +192,7 @@ bool shouldSave(const char* a2) {
 	}
 	return false;
 }
+
 typedef __int64 (*sub_629740Type)(__int64 a1, const char* a2, int a3);
 sub_629740Type sub_629740Original;
 
@@ -299,7 +300,7 @@ void __fastcall cl_DumpPrecacheStats(__int64 CClientState, const char* name) {
 
 struct string_nodebug {
 	union {
-		char inl[16]{ 0 };
+		char inl[16]{0};
 		const char* ptr;
 	};
 	// ?????
@@ -308,16 +309,15 @@ struct string_nodebug {
 	size_t size = 0;
 	size_t big_size = 0;
 };
-static_assert(sizeof(string_nodebug) == 4*8, "AAA");
+static_assert(sizeof(string_nodebug) == 4 * 8, "AAA");
 std::array<string_nodebug[2], 100> g_militia_bodies;
 // #STR: "%sserver_%s%s", "-sharedservervpk"
 typedef __int64 (*sub_136E70Type)(char* pPath);
 sub_136E70Type sub_136E70Original;
-__int64 __fastcall sub_136E70(char* pPath)
-{
+__int64 __fastcall sub_136E70(char* pPath) {
 	auto ret = sub_136E70Original(pPath);
 	reinterpret_cast<__int64(*)()>(G_engine + 0x19D730)();
-	return ret;	
+	return ret;
 }
 void* SetPreCache_o = nullptr;
 __int64 __fastcall SetPreCache(__int64 a1, __int64 a2, char a3) {
@@ -346,7 +346,6 @@ void CHL2_Player_Precache(uintptr_t a1, uintptr_t a2) {
 	auto byte_180C318A6 = (uint8_t*)(server_mod + 0xC318A6);
 
 	if (*byte_180C318A6) {
-
 		using sub_1804FE8B0_t = uintptr_t(__fastcall*)(uintptr_t, uintptr_t);
 		auto sub_1804FE8B0 = sub_1804FE8B0_t(server_mod + 0x4FE8B0);
 
@@ -367,11 +366,13 @@ void CHL2_Player_Precache(uintptr_t a1, uintptr_t a2) {
 			"watersplash",
 			0xFFFFFFFFi64,
 			0i64);
-		
+
 		auto StaticClassSystem001_ptr = (uintptr_t*)(server_mod + 0xC31000);
 		auto StaticClassSystem001 = *StaticClassSystem001_ptr;
+
 		using PrecacheModel_t = uintptr_t(__fastcall*)(const void*);
 		auto PrecacheModel = PrecacheModel_t(server_mod + 0x3B6A40);
+
 		PrecacheModel("models/weapons/arms/atlaspov.mdl");
 		PrecacheModel("models/weapons/arms/atlaspov_cockpit2.mdl");
 		PrecacheModel("models/weapons/arms/human_pov_cockpit.mdl");
@@ -393,17 +394,16 @@ void CHL2_Player_Precache(uintptr_t a1, uintptr_t a2) {
 		PrecacheModel("models/weapons/arms/pov_pilot_female_dm.mdl");
 		PrecacheModel("models/weapons/arms/stryderpov.mdl");
 		PrecacheModel("models/weapons/arms/stryderpov_cockpit.mdl");
+
 		for (size_t i = 0; i < 100; i++) {
 			auto v5 = (*(__int64(__fastcall**)(__int64, _QWORD))(*(_QWORD*)StaticClassSystem001 + 24i64))(StaticClassSystem001, i);
 			auto elem = g_militia_bodies[i];
 
 			// if (*(_QWORD*)(v5 + 448))
 			{
-
 				for (size_t i_ = 0; i_ < 16; i_++) {
 					// IMC
-					if (*(_QWORD*)(v5 + 448))
-					{
+					if (*(_QWORD*)(v5 + 448)) {
 						auto v7 = (_BYTE*)(v5 + 432);
 						if (*(_QWORD*)(v5 + 456) >= 0x10ui64)
 							v7 = *(_BYTE**)v7;
@@ -411,8 +411,7 @@ void CHL2_Player_Precache(uintptr_t a1, uintptr_t a2) {
 					}
 
 					// MCOR
-					if (elem[0].size)
-					{
+					if (elem[0].size) {
 						const char* v7 = elem[0].inl;
 						if (elem[0].big_size >= 0x10)
 							v7 = elem[0].ptr;
@@ -420,8 +419,7 @@ void CHL2_Player_Precache(uintptr_t a1, uintptr_t a2) {
 					}
 
 					// armsmodel IMC
-					if (*(_QWORD*)(v5 + 488))
-					{
+					if (*(_QWORD*)(v5 + 488)) {
 						auto v8 = (_BYTE*)(v5 + 472);
 						if (*(_QWORD*)(v5 + 496) >= 0x10ui64)
 							v8 = *(_BYTE**)v8;
@@ -429,8 +427,7 @@ void CHL2_Player_Precache(uintptr_t a1, uintptr_t a2) {
 					}
 
 					// armsmodel MCOR
-					if (elem[1].size)
-					{
+					if (elem[1].size) {
 						const char* v7 = elem[1].inl;
 						if (elem[1].big_size >= 0x10)
 							v7 = elem[1].ptr;
@@ -439,8 +436,7 @@ void CHL2_Player_Precache(uintptr_t a1, uintptr_t a2) {
 				}
 
 				// cockpitmodel
-				if (*(_QWORD*)(v5 + 528))
-				{
+				if (*(_QWORD*)(v5 + 528)) {
 					auto v9 = (_BYTE*)(v5 + 512);
 					if (*(_QWORD*)(v5 + 536) >= 0x10ui64)
 						v9 = *(_BYTE**)v9;
@@ -450,11 +446,11 @@ void CHL2_Player_Precache(uintptr_t a1, uintptr_t a2) {
 		}
 	}
 }
+
 bool isProcessingSendTables = false;
 typedef char* (__cdecl* COM_StringCopyType)(char* in);
 COM_StringCopyType COM_StringCopyOriginal;
-char* __cdecl COM_StringCopy(char* in)
-{
+char* __cdecl COM_StringCopy(char* in) {
 	if (isProcessingSendTables) {
 		std::ofstream file("test.txt", std::ios::app);
 		file << in << "\n";
@@ -462,21 +458,19 @@ char* __cdecl COM_StringCopy(char* in)
 	}
 	return COM_StringCopyOriginal(in);
 }
+
 typedef char(__fastcall* DataTable_SetupReceiveTableFromSendTableType)(__int64, __int64);
 DataTable_SetupReceiveTableFromSendTableType DataTable_SetupReceiveTableFromSendTableOriginal;
-char __fastcall DataTable_SetupReceiveTableFromSendTable(__int64 a1, __int64 a2)
-{
+char __fastcall DataTable_SetupReceiveTableFromSendTable(__int64 a1, __int64 a2) {
 	isProcessingSendTables = true;
 	char ret = DataTable_SetupReceiveTableFromSendTableOriginal(a1, a2);
 	isProcessingSendTables = false;
 	return ret;
 }
 
-bool ReadConnectPacket2015AndWriteConnectPacket2014(bf_read& msg, bf_write& buffer)
-{
+bool ReadConnectPacket2015AndWriteConnectPacket2014(bf_read& msg, bf_write& buffer) {
 	char type = msg.ReadByte();
-	if (type != 'A')
-	{
+	if (type != 'A') {
 		return -1;
 	}
 
@@ -484,8 +478,7 @@ bool ReadConnectPacket2015AndWriteConnectPacket2014(bf_read& msg, bf_write& buff
 	buffer.WriteByte('A');
 
 	int version = msg.ReadLong();
-	if (version != 1040)
-	{
+	if (version != 1040) {
 		return -1;
 	}
 	buffer.WriteLong(1036); // 2014 version
@@ -493,7 +486,7 @@ bool ReadConnectPacket2015AndWriteConnectPacket2014(bf_read& msg, bf_write& buff
 	buffer.WriteLong(msg.ReadLong()); // hostVersion
 	int32_t lastChallenge = msg.ReadLong();
 	buffer.WriteLong(lastChallenge); // challengeNr
-	buffer.WriteLong(msg.ReadLong()); // unknown 
+	buffer.WriteLong(msg.ReadLong()); // unknown
 	buffer.WriteLong(msg.ReadLong()); // unknown1
 	msg.ReadLongLong(); // skip platformUserId
 
@@ -509,8 +502,7 @@ bool ReadConnectPacket2015AndWriteConnectPacket2014(bf_read& msg, bf_write& buff
 
 	int unknownCount = msg.ReadByte();
 	buffer.WriteByte(unknownCount);
-	for (int i = 0; i < unknownCount; i++)
-	{
+	for (int i = 0; i < unknownCount; i++) {
 		buffer.WriteLongLong(msg.ReadLongLong()); // unknown3
 	}
 
@@ -523,8 +515,7 @@ bool ReadConnectPacket2015AndWriteConnectPacket2014(bf_read& msg, bf_write& buff
 
 	int numberOfPlayers = msg.ReadByte();
 	buffer.WriteByte(numberOfPlayers);
-	for (int i = 0; i < numberOfPlayers; i++)
-	{
+	for (int i = 0; i < numberOfPlayers; i++) {
 		// Read SplitPlayerConnect from 2015 packet
 		int type = msg.ReadUBitLong(6);
 		int count = msg.ReadByte();
@@ -533,8 +524,7 @@ bool ReadConnectPacket2015AndWriteConnectPacket2014(bf_read& msg, bf_write& buff
 		buffer.WriteUBitLong(type, 6);
 		buffer.WriteByte(count);
 
-		for (int j = 0; j < count; j++)
-		{
+		for (int j = 0; j < count; j++) {
 			msg.ReadString(tempStr, sizeof(tempStr));
 			buffer.WriteString(tempStr); // key
 
@@ -543,7 +533,7 @@ bool ReadConnectPacket2015AndWriteConnectPacket2014(bf_read& msg, bf_write& buff
 		}
 	}
 
-	buffer.WriteByte(msg.ReadByte()); // lowViolence 
+	buffer.WriteByte(msg.ReadByte()); // lowViolence
 
 	//if (msg.ReadByte() != 1)
 	//{
@@ -557,13 +547,11 @@ bool ReadConnectPacket2015AndWriteConnectPacket2014(bf_read& msg, bf_write& buff
 typedef char (*ProcessConnectionlessPacketType)(unsigned int* a1, netpacket_s* a2);
 ProcessConnectionlessPacketType ProcessConnectionlessPacketOriginal;
 double lastReceived = 0.f;
-char __fastcall ProcessConnectionlessPacket(unsigned int* a1, netpacket_s* a2)
-{
-	char buffer[1200] = { 0 };
+char __fastcall ProcessConnectionlessPacket(unsigned int* a1, netpacket_s* a2) {
+	char buffer[1200] = {0};
 	bf_write writer(reinterpret_cast<char*>(buffer), sizeof(buffer));
 
-	if (((char*)a2->pData + 4)[0] == 'A' && ReadConnectPacket2015AndWriteConnectPacket2014(a2->message, writer) != -1)
-	{
+	if (((char*)a2->pData + 4)[0] == 'A' && ReadConnectPacket2015AndWriteConnectPacket2014(a2->message, writer) != -1) {
 		if (lastReceived == a2->received)
 			return false;
 		lastReceived = a2->received;
@@ -571,16 +559,14 @@ char __fastcall ProcessConnectionlessPacket(unsigned int* a1, netpacket_s* a2)
 		a2->message = converted;
 		return ProcessConnectionlessPacketOriginal(a1, a2);
 	}
-	else
-	{
+	else {
 		return ProcessConnectionlessPacketOriginal(a1, a2);
 	}
 }
 typedef void (*CAI_NetworkManager__BuildStubType)(__int64 a1);
 typedef void (*CAI_NetworkManager__LoadNavMeshType)(__int64 a1, __int64 a2, const char* a3);
 CAI_NetworkManager__LoadNavMeshType CAI_NetworkManager__LoadNavMeshOriginal;
-void __fastcall CAI_NetworkManager__LoadNavMesh(__int64 a1, __int64 a2, const char* a3)
-{
+void __fastcall CAI_NetworkManager__LoadNavMesh(__int64 a1, __int64 a2, const char* a3) {
 	CAI_NetworkManager__LoadNavMeshOriginal(a1, a2, a3);
 	auto server = G_server;
 	*(int*)(server + 0xC317F0) &= ~1;
@@ -601,8 +587,7 @@ typedef __int64 (*SendTable_CalcDeltaType)(
 SendTable_CalcDeltaType SendTable_CalcDeltaOriginal;
 typedef __int64 (*CBaseServer__WriteDeltaEntitiesType)(__int64 a1, _DWORD* a2, __int64 a3, __int64 a4, __int64 a5, int a6, unsigned int a7);
 CBaseServer__WriteDeltaEntitiesType CBaseServer__WriteDeltaEntitiesOriginal;
-__int64 __fastcall CBaseServer__WriteDeltaEntities(__int64 a1, _DWORD* a2, __int64 a3, __int64 a4, __int64 a5, int a6, unsigned int a7)
-{
+__int64 __fastcall CBaseServer__WriteDeltaEntities(__int64 a1, _DWORD* a2, __int64 a3, __int64 a4, __int64 a5, int a6, unsigned int a7) {
 	uintptr_t engine = G_engine;
 	uintptr_t engine_ds = G_engine_ds;
 	*(int*)(engine + 0x2966168) = 2; // force active
@@ -619,8 +604,7 @@ __int64 SendTable_CalcDelta(
 	__int64 a6,
 	int a7,
 	int a8,
-	int a9)
-{
+	int a9) {
 	if (a7 < 600)
 		a7 = 600;
 	if (a8 < 600)
@@ -645,12 +629,9 @@ bool __fastcall SendTable_Encode(
 	__int64 pRecipients,
 	char a6,
 	__int64 a7,
-	__int64 a8)
-{
+	__int64 a8) {
 	return SendTable_EncodeOriginal(a1, a2, a3, a4, pRecipients, 0, a7, a8);
 }
-
-
 
 typedef void (*COM_InitType)();
 COM_InitType COM_InitOriginal;
@@ -665,8 +646,7 @@ using sub_45420_t = void(__fastcall*)(__int64, int);
 using sub_4AAD0_t = void(__fastcall*)(__int64);
 using sub_16B0F0_t = char(__fastcall*)(__int64);
 
-char __fastcall sub_4C460(__int64 a1)
-{
+char __fastcall sub_4C460(__int64 a1) {
 	char result; // al
 	__int64 v3; // rax
 	const char* v4; // rax
@@ -686,8 +666,7 @@ char __fastcall sub_4C460(__int64 a1)
 	auto qword_2097510 = (QWORD*)(engine_mod + 0x2097510);
 	auto sub_16B0F0 = sub_16B0F0_t(engine_mod + 0x16B0F0);
 	sub_16B0F0(a1);
-	if (true)
-	{
+	if (true) {
 		v3 = (__int64)pdataempty;
 		sub_14EF30((__int64)v7, v3, 0);
 		v4 = (const char*)(*(__int64(__fastcall**)(__int64))(*(_QWORD*)(a1 + 8) + 136i64))(a1 + 8);
@@ -709,8 +688,7 @@ char __fastcall sub_4C460(__int64 a1)
 
 	return result;
 }
-void COM_Init()
-{
+void COM_Init() {
 	COM_InitOriginal();
 	// SaveRestore__Init();
 	SaveRestore_Init = SaveRestore_InitType(G_engine + 0x1410E0);
@@ -732,8 +710,7 @@ void CL_Retry_f() {
 
 typedef char (*SVC_ServerInfo__WriteToBufferType)(__int64 a1, __int64 a2);
 SVC_ServerInfo__WriteToBufferType SVC_ServerInfo__WriteToBufferOriginal;
-char __fastcall SVC_ServerInfo__WriteToBuffer(__int64 a1, __int64 a2)
-{
+char __fastcall SVC_ServerInfo__WriteToBuffer(__int64 a1, __int64 a2) {
 	static const char* real_gamedir = "r1_dlc1";
 	*(const char**)(a1 + 72) = real_gamedir;
 	if (IsDedicatedServer()) {
@@ -750,7 +727,7 @@ typedef void (*ConCommandConstructorType)(
 void RegisterConCommand(const char* commandName, void (*callback)(const CCommand&), const char* helpString, int flags) {
 	ConCommandConstructorType conCommandConstructor = (ConCommandConstructorType)(IsDedicatedServer() ? (G_engine_ds + 0x31F260) : (G_engine + 0x4808F0));
 	ConCommandR1* newCommand = new ConCommandR1;
-	
+
 	conCommandConstructor(newCommand, commandName, callback, helpString, flags, nullptr);
 }
 
@@ -759,27 +736,20 @@ void RegisterConVar(const char* name, const char* value, int flags, const char* 
 	ConVarConstructorType conVarConstructor = (ConVarConstructorType)(IsDedicatedServer() ? (G_engine_ds + 0x320460) : (G_engine + 0x481AF0));
 	ConVarR1* newVar = new ConVarR1;
 
-
 	conVarConstructor(newVar, name, value, flags, helpString);
 }
 
-LDR_DLL_LOADED_NOTIFICATION_DATA* GetModuleNotificationData(const wchar_t* moduleName)
-{
+LDR_DLL_LOADED_NOTIFICATION_DATA* GetModuleNotificationData(const wchar_t* moduleName) {
 	HMODULE hMods[1024];
 	DWORD cbNeeded;
 	MODULEINFO modInfo;
 
-	if (EnumProcessModules(GetCurrentProcess(), hMods, sizeof(hMods), &cbNeeded))
-	{
-		for (DWORD i = 0; i < (cbNeeded / sizeof(HMODULE)); i++)
-		{
+	if (EnumProcessModules(GetCurrentProcess(), hMods, sizeof(hMods), &cbNeeded)) {
+		for (DWORD i = 0; i < (cbNeeded / sizeof(HMODULE)); i++) {
 			wchar_t szModName[MAX_PATH];
-			if (GetModuleFileNameEx(GetCurrentProcess(), hMods[i], szModName, sizeof(szModName) / sizeof(wchar_t)))
-			{
-				if (wcsstr(szModName, moduleName) != 0)
-				{
-					if (GetModuleInformation(GetCurrentProcess(), hMods[i], &modInfo, sizeof(modInfo)))
-					{
+			if (GetModuleFileNameEx(GetCurrentProcess(), hMods[i], szModName, sizeof(szModName) / sizeof(wchar_t))) {
+				if (wcsstr(szModName, moduleName) != 0) {
+					if (GetModuleInformation(GetCurrentProcess(), hMods[i], &modInfo, sizeof(modInfo))) {
 						LDR_DLL_LOADED_NOTIFICATION_DATA* notificationData = new LDR_DLL_LOADED_NOTIFICATION_DATA();
 						notificationData->Flags = 0;
 
@@ -826,50 +796,46 @@ uintptr_t G_engine;
 uintptr_t G_engine_ds;
 uintptr_t G_client;
 
-class CPluginBotManager
-{
+class CPluginBotManager {
 public:
 	virtual void* GetBotController(uint16_t* pEdict);
 	virtual __int64 CreateBot(const char* botname);
 };
+
 bool isCreatingBot = false;
 int botTeamIndex = 0;
+
 __int64 (*oCPortal_Player__ChangeTeam)(__int64 thisptr, unsigned int index);
-__int64 __fastcall CPortal_Player__ChangeTeam(__int64 thisptr, unsigned int index)
-{
+
+__int64 __fastcall CPortal_Player__ChangeTeam(__int64 thisptr, unsigned int index) {
 	if (isCreatingBot)
 		index = botTeamIndex;
 	return oCPortal_Player__ChangeTeam(thisptr, index);
 }
-void AddBotDummyConCommand(const CCommand& args)
-{
+
+void AddBotDummyConCommand(const CCommand& args) {
 	// Expected usage: bot_dummy -team <team index>
-	if (args.ArgC() != 3)
-	{
+	if (args.ArgC() != 3) {
 		Warning("Usage: bot_dummy -team <team index>\n");
 		return;
 	}
 
 	// Check for the '-team' flag
-	if (strcmp(args.Arg(1), "-team") != 0)
-	{
+	if (strcmp(args.Arg(1), "-team") != 0) {
 		Warning("Usage: bot_dummy -team <team index>\n");
 		return;
 	}
 
 	// Parse the team index
 	int teamIndex = 0;
-	try
-	{
+	try {
 		teamIndex = std::stoi(args.Arg(2));
 	}
-	catch (const std::invalid_argument&)
-	{
+	catch (const std::invalid_argument&) {
 		Warning("Invalid team index: %s\n", args.Arg(2));
 		return;
 	}
-	catch (const std::out_of_range&)
-	{
+	catch (const std::out_of_range&) {
 		Warning("Team index out of range: %s\n", args.Arg(2));
 		return;
 	}
@@ -880,24 +846,21 @@ void AddBotDummyConCommand(const CCommand& args)
 	const char* dummyBotName = "DummyBot";
 
 	HMODULE serverModule = GetModuleHandleA("server.dll");
-	if (!serverModule)
-	{
+	if (!serverModule) {
 		Warning("Failed to get handle for server.dll\n");
 		return;
 	}
 
 	typedef CPluginBotManager* (*CreateInterfaceFn)(const char* name, int* returnCode);
 	CreateInterfaceFn CreateInterface = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(serverModule, "CreateInterface"));
-	if (!CreateInterface)
-	{
+	if (!CreateInterface) {
 		Warning("Failed to get CreateInterface function from server.dll\n");
 		return;
 	}
 
 	int returnCode = 0;
 	CPluginBotManager* pBotManager = CreateInterface("BotManager001", &returnCode);
-	if (!pBotManager)
-	{
+	if (!pBotManager) {
 		Warning("Failed to retrieve BotManager001 interface\n");
 		return;
 	}
@@ -906,8 +869,7 @@ void AddBotDummyConCommand(const CCommand& args)
 	__int64 pBot = pBotManager->CreateBot(dummyBotName);
 	isCreatingBot = false;
 
-	if (!pBot)
-	{
+	if (!pBot) {
 		Warning("Failed to create dummy bot with name: %s\n", dummyBotName);
 		return;
 	}
@@ -920,23 +882,6 @@ void AddBotDummyConCommand(const CCommand& args)
 
 	Msg("Dummy bot '%s' has been successfully created and assigned to team %d.\n", dummyBotName, teamIndex);
 }
-struct /*VFT*/ INetMessage
-{
-	virtual (~INetMessage)();
-	virtual void(SetNetChannel)(void*);
-	virtual void(SetReliable)(bool);
-	virtual bool(Process)();
-	virtual bool(ReadFromBuffer)(bf_read*);
-	virtual bool(WriteToBuffer)(bf_write*);
-	virtual bool(IsUnreliable)();
-	virtual bool(IsReliable)();
-	virtual int(GetType)();
-	virtual int(GetGroup)();
-	virtual const char* (GetName)();
-	virtual void* (GetNetChannel)();
-	virtual const char* (ToString)();
-	virtual unsigned int(GetSize)();
-};
 
 //0x4E2F30
 
@@ -964,22 +909,21 @@ void InitAddons() {
 	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x6EE10 : 0x02C30)), &CBaseFileSystem__FindFirst, reinterpret_cast<LPVOID*>(&oCBaseFileSystem__FindFirst));
 	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x86E00 : 0x1C4A0)), &CBaseFileSystem__FindNext, reinterpret_cast<LPVOID*>(&oCBaseFileSystem__FindNext));
 	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x7F180 : 0x14780)), &HookedHandleOpenRegularFile, reinterpret_cast<LPVOID*>(&HandleOpenRegularFileOriginal));
-	
+
 	MH_EnableHook(MH_ALL_HOOKS);
 }
+
 std::unordered_map<std::string, std::string> g_LastEntCreateKeyValues;
 void (*oCC_Ent_Create)(const CCommand* args);
 bool g_bIsEntCreateCommand = false;
 
-void CC_Ent_Create(const CCommand* args)
-{
+void CC_Ent_Create(const CCommand* args) {
 	g_LastEntCreateKeyValues.clear();
 
 	int numPairs = (args->ArgC() - 2) / 2;
 	g_LastEntCreateKeyValues.reserve(numPairs);
 
-	for (int i = 2; i + 1 < args->ArgC(); i += 2)
-	{
+	for (int i = 2; i + 1 < args->ArgC(); i += 2) {
 		const char* const pKeyName = (*args)[i];
 		const char* const pValue = (*args)[i + 1];
 
@@ -994,7 +938,9 @@ void CC_Ent_Create(const CCommand* args)
 
 	g_LastEntCreateKeyValues.clear();
 }
+
 __int64 (*oDispatchSpawn)(__int64 a1, char a2);
+
 __int64 __fastcall DispatchSpawn(__int64 a1, char a2) {
 	static auto target = G_server + 0x3BE267;
 	if (uintptr_t(_ReturnAddress()) == target && g_bIsEntCreateCommand) {
@@ -1007,20 +953,18 @@ __int64 __fastcall DispatchSpawn(__int64 a1, char a2) {
 	}
 	return oDispatchSpawn(a1, a2);
 }
+
 __int64 (*oCBaseEntity__VPhysicsInitNormal)(void* a1, unsigned int a2, unsigned int a3, char a4, __int64 a5);
 void (*oCBaseEntity__SetMoveType)(void* a1, __int64 a2, __int64 a3);
 
-__int64 CBaseEntity__VPhysicsInitNormal(void* a1, unsigned int a2, unsigned int a3, char a4, __int64 a5)
-{
+__int64 CBaseEntity__VPhysicsInitNormal(void* a1, unsigned int a2, unsigned int a3, char a4, __int64 a5) {
 	if (uintptr_t(_ReturnAddress()) == (G_server + 0xB63FD))
 		return 0;
 	else
 		return oCBaseEntity__VPhysicsInitNormal(a1, a2, a3, a4, a5);
 }
-void CBaseEntity__SetMoveType(void* a1, __int64 a2, __int64 a3)
-{
-	if (uintptr_t(_ReturnAddress()) == (G_server + 0xB64EC))
-	{
+void CBaseEntity__SetMoveType(void* a1, __int64 a2, __int64 a3) {
+	if (uintptr_t(_ReturnAddress()) == (G_server + 0xB64EC)) {
 		a2 = 5;
 		a3 = 1;
 	}
@@ -1050,8 +994,6 @@ __int64 __fastcall HookedServerClassRegister(__int64 a1, char* a2, __int64 a3) {
 	return ServerClassRegister_7F7E0(a1, a2, a3);
 }
 
-
-
 typedef void* (*CEntityFactoryDictionary__CreateType)(void* thisptr, const char* pClassName);
 CEntityFactoryDictionary__CreateType CEntityFactoryDictionary__CreateOriginal;
 void* CEntityFactoryDictionary__Create(void* thisptr, const char* pClassName) {
@@ -1063,20 +1005,192 @@ void* CEntityFactoryDictionary__Create(void* thisptr, const char* pClassName) {
 	}*/
 	return CEntityFactoryDictionary__CreateOriginal(thisptr, pClassName);
 }
+
+void(__fastcall* oCNetChan__ProcessPacket)(CNetChan*, netpacket_s*, bool);
+bool(__fastcall* oCNetChan___ProcessMessages)(CNetChan*, bf_read*);
+
+float m_flLastProcessingTime = 0.0f;
+float m_flFinalProcessingTime = 0.0f;
+bool m_bProcessingMessages = false;
+bool m_bShouldSkip = false;
+
+bool __fastcall CNetChan___ProcessMessages(CNetChan* thisptr, bf_read* buf) {
+	m_bShouldSkip = false;
+
+	if (!thisptr || !IsInServerThread() || !buf || (m_nSignonState <= SIGNONSTATE_CONNECTED && m_nSignonState != SIGNONSTATE_FULL))
+		return oCNetChan___ProcessMessages(thisptr, buf);
+
+	if (buf->GetNumBitsRead() < 6 || buf->IsOverflowed()) {
+		m_bShouldSkip = true; // idfk tbh just move this to whenever a net message processes.
+		return oCNetChan___ProcessMessages(thisptr, buf);
+	}
+
+	static auto net_chan_limit_msec_ptr = (ConVarR1*)OriginalCCVar_FindVar2(cvarinterface, "net_chan_limit_msec");
+	auto net_chan_limit_msec = net_chan_limit_msec_ptr->m_Value.m_fValue;
+
+	if (net_chan_limit_msec == 0.0f)
+		return oCNetChan___ProcessMessages(thisptr, buf);
+
+	float flStartTime = Plat_FloatTime();
+
+	if ((flStartTime - m_flLastProcessingTime) > 1.0f) {
+		m_flLastProcessingTime = flStartTime;
+		m_flFinalProcessingTime = 0.0f;
+	}
+
+	BeginProfiling(flStartTime);
+
+	const auto original = oCNetChan___ProcessMessages(thisptr, buf);
+
+	m_flFinalProcessingTime = EndProfiling(flStartTime);
+	m_bProcessingMessages = thisptr->m_bProcessingMessages;
+
+	bool bIsProcessingTimeReached = unsigned(1000.0f * m_flFinalProcessingTime) << 31; // some tf2 bs idek
+
+	const auto pMessageHandler = *reinterpret_cast<INetChannelHandler**>(reinterpret_cast<uintptr_t>(thisptr) + 0x3ED0);
+
+	if (pMessageHandler && bIsProcessingTimeReached && m_flFinalProcessingTime >= net_chan_limit_msec) {
+#ifdef _DEBUG
+		Msg("CNetChan::_ProcessMessages: Max processing time reached for client \"%s\" (%.2fms)\n", thisptr->GetName(), m_flFinalProcessingTime);
+#endif
+		pMessageHandler->ConnectionCrashed("Max processing time reached.");
+		return false;
+	}
+
+	if (thisptr->m_bStopProcessing)
+		m_bProcessingMessages = thisptr->m_bStopProcessing;
+
+	return original;
+}
+
+void __fastcall CNetChan__ProcessPacket(CNetChan* thisptr, netpacket_s* packet, bool bHasHeader) {
+	if (!thisptr || !IsInServerThread() || m_bShouldSkip || (m_nSignonState <= SIGNONSTATE_CONNECTED && m_nSignonState != SIGNONSTATE_FULL))
+		return oCNetChan__ProcessPacket(thisptr, packet, bHasHeader);
+
+	bool bReceivingPacket = *(bool*)((uintptr_t)thisptr + 0x3F80) && !*(int*)((uintptr_t)thisptr + 0xD8);
+
+	if (!bReceivingPacket)
+		return oCNetChan__ProcessPacket(thisptr, packet, bHasHeader);
+
+	static auto net_chan_limit_msec_ptr = (ConVarR1*)OriginalCCVar_FindVar2(cvarinterface, "net_chan_limit_msec");
+	auto net_chan_limit_msec = net_chan_limit_msec_ptr->m_Value.m_fValue;
+
+	if (net_chan_limit_msec == 0.0f && !m_bProcessingMessages)
+		return oCNetChan__ProcessPacket(thisptr, packet, bHasHeader);
+
+	float flStartTime = Plat_FloatTime();
+
+	if ((flStartTime - m_flLastProcessingTime) > 1.0f) {
+		m_flLastProcessingTime = flStartTime;
+		m_flFinalProcessingTime = 0.0f;
+	}
+
+	BeginProfiling(flStartTime);
+
+	oCNetChan__ProcessPacket(thisptr, packet, bHasHeader);
+
+	const auto pMessageHandler = *reinterpret_cast<INetChannelHandler**>(reinterpret_cast<uintptr_t>(thisptr) + 0x3ED0);
+
+	m_flFinalProcessingTime = EndProfiling(flStartTime);
+
+	bool bIsProcessingTimeReached = unsigned(1000.0f * m_flFinalProcessingTime) << 31;
+
+	if (pMessageHandler && bIsProcessingTimeReached && m_flFinalProcessingTime >= net_chan_limit_msec) {
+#ifdef _DEBUG
+		Msg("CNetChan::ProcessPacket: Max processing time reached for client \"%s\" (%.2fms)\n", thisptr->GetName(), m_flFinalProcessingTime);
+#endif
+		pMessageHandler->ConnectionCrashed("Max processing time reached.");
+	}
+}
+
+bool(__fastcall* oCGameClient__ProcessVoiceData)(void*, CLC_VoiceData*);
+
+bool __fastcall CGameClient__ProcessVoiceData(void* thisptr, CLC_VoiceData* msg) {
+	char voiceDataBuffer[4096];
+
+	void* thisptr_shifted = reinterpret_cast<uintptr_t>(thisptr) == 16 ? nullptr : reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(thisptr) - 8);
+	int bitsRead = msg->m_DataIn.ReadBitsClamped(voiceDataBuffer, msg->m_nLength);
+
+	if (msg->m_DataIn.IsOverflowed())
+		return false;
+
+	auto SV_BroadcastVoiceData = reinterpret_cast<void(__cdecl*)(void*, int, char*, uint64)>(G_engine + 0xEE4D0);
+
+	if (thisptr_shifted)
+		SV_BroadcastVoiceData(thisptr_shifted, Bits2Bytes(bitsRead), voiceDataBuffer, *reinterpret_cast<uint64*>(reinterpret_cast<uintptr_t>(msg) + 0x88));
+
+	return true;
+}
+
+#define MAX_USER_MSG_DATA 255
+#define MAX_ENTITY_MSG_DATA 255
+
+bool(__fastcall* oCClientState__ProcessUserMessage)(void*, SVC_UserMessage*);
+
+bool __fastcall CClientState__ProcessUserMessage(void* thisptr, SVC_UserMessage* msg) {
+	ALIGN4 byte userdata[MAX_USER_MSG_DATA] = {0};
+
+	bf_read userMsg("UserMessage(read)", userdata, sizeof(userdata));
+
+	int bitsRead = msg->m_DataIn.ReadBitsClamped(userdata, msg->m_nLength);
+	userMsg.StartReading(userdata, Bits2Bytes(bitsRead));
+
+	if (!g_ClientDLL->DispatchUserMessage(msg->m_nMsgType, &userMsg)) {
+		Msg("Couldn't dispatch user message (%i)\n", msg->m_nMsgType);
+
+		return false;
+	}
+
+	return true;
+}
+
+bool(__fastcall* oCClientState__ProcessVoiceData)(void*, SVC_VoiceMessage*);
+
+bool __fastcall CClientState__ProcessVoiceData(void* thisptr, SVC_VoiceMessage* msg) {
+	//char chReceived[4104];
+
+	//unsigned int dwLength = msg->m_nLength;
+
+	//if (dwLength >= 0x1000)
+	//	dwLength = 4096;
+
+	//int bitsRead = msg->m_DataIn.ReadBitsClamped(chReceived, msg->m_nLength);
+
+	//if (msg->m_bFromClient)
+	//	return false;
+
+	//int iEntity = (msg->m_bFromClient + 1);
+	//int nChannel = Voice_GetChannel(iEntity);
+
+	//if (nChannel != -1)
+	//	return Voice_AddIncomingData(nChannel, chReceived, *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(thisptr) + 0x84), true);
+
+	//nChannel = Voice_AssignChannel(iEntity, false);
+
+	//if (nChannel != -1)
+	//	return Voice_AddIncomingData(nChannel, chReceived, *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(thisptr) + 0x84), true);
+
+	//return nChannel;
+
+	// awesome.
+	return oCClientState__ProcessVoiceData(thisptr, msg);
+}
+
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
 	const LDR_DLL_NOTIFICATION_DATA* notification_data,
 	void* context) {
 	if (notification_reason != LDR_DLL_NOTIFICATION_REASON_LOADED)
 		return;
+
 	doBinaryPatchForFile(notification_data->Loaded);
 
 	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"filesystem_stdio.dll") == 0) {
 		G_filesystem_stdio = (uintptr_t)notification_data->Loaded.DllBase;
 		InitCompressionHooks();
 	}
+
 	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"server.dll") == 0) {
-		
 		auto server_base = (uintptr_t)notification_data->Loaded.DllBase;
 		G_server = server_base;
 		auto vscript_base = G_vscript;
@@ -1118,6 +1232,8 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)(server_base + 0x3A2130), &CBaseEntity__SendProxy_CellOriginZ, reinterpret_cast<LPVOID*>(NULL));
 		MH_CreateHook((LPVOID)(server_base + 0x3C8B70), &CBaseEntity__VPhysicsInitNormal, reinterpret_cast<LPVOID*>(&oCBaseEntity__VPhysicsInitNormal));
 		MH_CreateHook((LPVOID)(server_base + 0x3B3200), &CBaseEntity__SetMoveType, reinterpret_cast<LPVOID*>(&oCBaseEntity__SetMoveType));
+		MH_CreateHook((LPVOID)(server_base + 0x7F7E0), &HookedServerClassRegister, reinterpret_cast<LPVOID*>(&ServerClassRegister_7F7E0));
+
 		MH_CreateHook((LPVOID)(server_base + 0x4E2F30), &CPlayer_GetLevel, reinterpret_cast<LPVOID*>(NULL));
 		//MH_CreateHook((LPVOID)(server_base + 0x7F7E0), &HookedServerClassRegister, reinterpret_cast<LPVOID*>(&ServerClassRegister_7F7E0));
 		//MH_CreateHook((LPVOID)(server_base + 0x25A8E0), &CEntityFactoryDictionary__Create, reinterpret_cast<LPVOID*>(&CEntityFactoryDictionary__CreateOriginal));
@@ -1132,17 +1248,24 @@ void __stdcall LoaderNotificationCallback(
 		auto engine_base = G_engine;
 		MH_CreateHook((LPVOID)(server_base + 0x3BE1A0), &CC_Ent_Create, reinterpret_cast<LPVOID*>(&oCC_Ent_Create));
 		MH_CreateHook((LPVOID)(server_base + 0x25E340), &DispatchSpawn, reinterpret_cast<LPVOID*>(&oDispatchSpawn));
-
+		MH_CreateHook((LPVOID)(engine_base + 0xD4E30), &CBaseClient__ProcessSignonState, reinterpret_cast<LPVOID*>(&oCBaseClient__ProcessSignonState));
 
 		if (!IsDedicatedServer()) {
 			MH_CreateHook((LPVOID)(engine_base + 0x21F9C0), &CEngineVGui__Init, reinterpret_cast<LPVOID*>(&CEngineVGui__InitOriginal));
 			MH_CreateHook((LPVOID)(engine_base + 0x21EB70), &CEngineVGui__HideGameUI, reinterpret_cast<LPVOID*>(&CEngineVGui__HideGameUIOriginal));
 			RegisterConCommand("toggleconsole", ToggleConsoleCommand, "Toggles the console", (1 << 17));
 		}
+
+		RegisterConCommand("updatescriptdata", updatescriptdata_cmd, "Dumps the script data in the AI node graph to disk", FCVAR_GAMEDLL);
+		RegisterConCommand("bot_dummy", AddBotDummyConCommand, "Adds a bot.", FCVAR_GAMEDLL | FCVAR_CHEAT);
+		RegisterConVar("r1d_ms", "localhost:3000", FCVAR_CLIENTDLL, "Url for r1d masterserver");
+		RegisterConVar("net_chan_limit_msec", "225", FCVAR_GAMEDLL | FCVAR_CHEAT, "Netchannel processing is limited to so many milliseconds, abort connection if exceeding budget");
+		RegisterConCommand("script", script_cmd, "Execute Squirrel code in server context", FCVAR_GAMEDLL | FCVAR_CHEAT);
+
 		RegisterConCommand("updatescriptdata", updatescriptdata_cmd, "Dumps the script data in the AI node graph to disk", FCVAR_CHEAT);
 		RegisterConCommand("bot_dummy", AddBotDummyConCommand, "Adds a bot.", FCVAR_GAMEDLL | FCVAR_CHEAT);
 		RegisterConVar("r1d_ms", "ms.r1delta.net", FCVAR_CLIENTDLL, "Url for r1d masterserver");
-		RegisterConCommand("script", script_cmd, "Execute Squirrel code in server context", FCVAR_GAMEDLL|FCVAR_CHEAT);
+		RegisterConCommand("script", script_cmd, "Execute Squirrel code in server context", FCVAR_GAMEDLL | FCVAR_CHEAT);
 		if (!IsDedicatedServer()) {
 			RegisterConCommand("script_client", script_client_cmd, "Execute Squirrel code in client context", FCVAR_NONE);
 			RegisterConCommand("script_ui", script_ui_cmd, "Execute Squirrel code in UI context", FCVAR_NONE);
@@ -1161,7 +1284,6 @@ void __stdcall LoaderNotificationCallback(
 
 		//MH_CreateHook((LPVOID)(server_base + 0x5FC370), &mp_weapon_wingman_ctor_hk, reinterpret_cast<LPVOID*>(&mp_weapon_wingman_ctor_orig));
 		//MH_CreateHook((LPVOID)(server_base + 0x605570), &mp_weapon_wingman_dtor_hk, reinterpret_cast<LPVOID*>(&mp_weapon_wingman_dtor_orig));
-
 
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("vstdlib.dll"), "VStdLib_GetICVarFactory"), &VStdLib_GetICVarFactory, NULL);
 		if (!IsDedicatedServer()) {
@@ -1199,7 +1321,7 @@ void __stdcall LoaderNotificationCallback(
 		// Fix precache start
 		// Rebuild CHL2_Player's precache to take our stuff into account
 		MH_CreateHook(LPVOID(server_base + 0x41E070), &CHL2_Player_Precache, 0);
-		
+
 		MH_EnableHook(MH_ALL_HOOKS);
 		//std::cout << "did hooks" << std::endl;
 	}
@@ -1208,29 +1330,38 @@ void __stdcall LoaderNotificationCallback(
 		G_engine_ds = (uintptr_t)notification_data->Loaded.DllBase;
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x433C0), &ProcessConnectionlessPacket, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginal));
 		InitAddons();
-		InitDedicated();		
-		
+		InitDedicated();
 	}
-
-	
 
 	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"engine.dll") == 0) {
 		G_engine = (uintptr_t)notification_data->Loaded.DllBase;
 		auto engine_base = G_engine;
+
+		g_nServerThread = (int*)engine_base + 0x7BF1F8;
+
 		MH_CreateHook((LPVOID)(engine_base + 0x1FDA50), &CLC_Move__ReadFromBuffer, reinterpret_cast<LPVOID*>(&CLC_Move__ReadFromBufferOriginal));
 		MH_CreateHook((LPVOID)(engine_base + 0x1F6F10), &CLC_Move__WriteToBuffer, reinterpret_cast<LPVOID*>(&CLC_Move__WriteToBufferOriginal));
 		MH_CreateHook((LPVOID)(engine_base + 0x203C20), &NET_SetConVar__ReadFromBuffer, NULL);
 		MH_CreateHook((LPVOID)(engine_base + 0x202F80), &NET_SetConVar__WriteToBuffer, NULL);
 		MH_CreateHook((LPVOID)(engine_base + 0x1FE3F0), &SVC_ServerInfo__WriteToBuffer, reinterpret_cast<LPVOID*>(&SVC_ServerInfo__WriteToBufferOriginal));
+		MH_CreateHook((LPVOID)(engine_base + 0x1E96E0), &CNetChan__ProcessPacket, reinterpret_cast<LPVOID*>(&oCNetChan__ProcessPacket));
+		MH_CreateHook((LPVOID)(engine_base + 0x1E51D0), &CNetChan___ProcessMessages, reinterpret_cast<LPVOID*>(&oCNetChan___ProcessMessages));
+		MH_CreateHook((LPVOID)(engine_base + 0xDA330), &CGameClient__ProcessVoiceData, reinterpret_cast<LPVOID*>(&oCGameClient__ProcessVoiceData));
+		MH_CreateHook((LPVOID)(engine_base + 0x17D400), &CClientState__ProcessUserMessage, reinterpret_cast<LPVOID*>(&oCClientState__ProcessUserMessage));
+		MH_CreateHook((LPVOID)(engine_base + 0x17D600), &CClientState__ProcessVoiceData, reinterpret_cast<LPVOID*>(&oCClientState__ProcessVoiceData));
+
 		if (!IsDedicatedServer()) {
 			MH_CreateHook((LPVOID)(G_engine + 0x1305E0), &ExecuteConfigFile, NULL);
+			// RegisterConVar("r1d_ms", "localhost:3000", FCVAR_CLIENTDLL, "Url for r1d masterserver");
+			// @hypnotic: whoops do not put that thing here causes stack overflow :steamhappy
 			RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
 			InitAddons();
 		}
 	}
+
 	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"client.dll") == 0) {
 		G_client = (uintptr_t)notification_data->Loaded.DllBase;
+
 		InitClient();
 	}
-
 }

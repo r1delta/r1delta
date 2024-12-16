@@ -33,6 +33,7 @@
 // =========-----===--------==------------------------==++********#*#####**#######*########%%
 
 #include "utils.h"
+#include <tier0/platformtime.h>
 
 constexpr size_t EXEC_MEM_SIZE = 32 * 1152;
 static_assert(EXEC_MEM_SIZE % 4096 == 0, "EXEC_MEM_SIZE is not page granular");
@@ -44,6 +45,18 @@ void UpdateRWXFunction(void* rwxfunc, void* real) {
 		return;
 
 	*(void**)((uint8_t*)rwxfunc + 2) = real;
+}
+
+void BeginProfiling(float& currentTime) {
+	const float time = Plat_USTime();
+
+	currentTime = time;
+}
+
+float EndProfiling(const float& currentTime) {
+	const float time = Plat_USTime();
+
+	return (time * 1000.f) - (currentTime * 1000.0f);
 }
 
 uintptr_t CreateFunction(void* func, void* real) {

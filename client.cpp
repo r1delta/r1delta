@@ -6,6 +6,7 @@
 #include "load.h"
 #include "weaponxdebug.h"
 #include "netchanwarnings.h"
+#include "factory.h"
 
 typedef void (*sub_18027F2C0Type)(__int64 a1, const char* a2, void* a3);
 sub_18027F2C0Type sub_18027F2C0Original;
@@ -60,6 +61,7 @@ bool (*oCPortalPlayer__CreateMove)(__int64 a1, float a2, __int64 a3, char a4);
 bool CPortalPlayer__CreateMove(__int64 a1, float a2, __int64 a3, char a4) {
 	static auto ref = OriginalCCVar_FindVar(cvarinterface, "host_timescale");
 	a2 *= ref->m_Value.m_fValue;
+
 	return oCPortalPlayer__CreateMove(a1, a2, a3, a4);
 }
 __int64 (*osub_18008E820)(__int64 a1, unsigned int a2);
@@ -77,6 +79,7 @@ void* KeyValues__SetString__Client(__int64 a1, char* a2, const char* a3)
 		a3 = "30";
 	return oKeyValues__SetString__Client(a1, a2, a3);
 }
+
 __int64 (*oSharedVehicleViewSmoothing)(
 	__int64 a1,
 	float* a2,
@@ -87,6 +90,7 @@ __int64 (*oSharedVehicleViewSmoothing)(
 	unsigned int* a7,
 	float* a8,
 	char a9);
+
 __int64 SharedVehicleViewSmoothing(
 	__int64 a1,
 	float* a2,
@@ -109,6 +113,9 @@ void InitClient()
 {
 	auto client = G_client;
 	auto engine = G_engine;
+
+	g_ClientDLL = (IBaseClientDLL*)client + 0xAEA760;
+
 	MH_CreateHook((LPVOID)(client + 0x21FE50), &PredictionErrorFn, reinterpret_cast<LPVOID*>(NULL));
 	//MH_CreateHook((LPVOID)(client + 0x029840), &C_BaseEntity__VPhysicsInitNormal, reinterpret_cast<LPVOID*>(NULL));
 	MH_CreateHook((LPVOID)(client + 0x27F2C0), &sub_18027F2C0, reinterpret_cast<LPVOID*>(&sub_18027F2C0Original));

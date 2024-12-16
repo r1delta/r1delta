@@ -35,7 +35,21 @@
 #pragma once
 
 #include "framework.h"
-#include <stdint.h>
+#include <stdint.h>]
+
+struct ProfilerData_t {
+	float time_msecs;
+	float msec_delta;
+};
+
+// bored... (l8tr move to cnetchan or somewhere else if u wanna log net stats or maybe we reimplement cvar???)
+extern void BeginProfiling(float& currentTime);
+extern float EndProfiling(const float& currentTime);
+
+template <typename ReturnType, typename ...Args>
+inline ReturnType CallVFunc(int index, void* thisPtr, Args... args) {
+	return (*reinterpret_cast<ReturnType(__fastcall***)(void*, Args...)>(thisPtr))[index](thisPtr, args...);
+}
 
 void UpdateRWXFunction(void* rwxfunc, void* real);
 uintptr_t CreateFunction(void* func, void* real);

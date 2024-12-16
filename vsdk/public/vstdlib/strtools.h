@@ -26,7 +26,6 @@ BEGIN_TIER1_NAMESPACE
 
 //template< class T > class CUtlMemory;
 template< class T, class A > class CUtlVector;
-template < typename K, typename T, typename I, typename L > class CUtlMap;
 class CUtlBuffer;
 
 END_TIER1_NAMESPACE

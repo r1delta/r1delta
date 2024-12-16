@@ -249,6 +249,25 @@
     <ClInclude Include="thirdparty\nlohmann\json_fwd.hpp">
       <Filter>3rd Party\nlohmann</Filter>
     </ClInclude>
+    <ClInclude Include="vsdk\public\tier1\utlstring.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\tier1\utldict.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\tier1\utlrbtree.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\tier1\utlfixedmemory.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\tier1\utlblockmemory.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\tier1\utlmap.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="voice.h">
     <ClInclude Include="masterserver.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -356,6 +375,7 @@
     <ClCompile Include="netchanwarnings.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="voice.cpp">
     <ClCompile Include="masterserver.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

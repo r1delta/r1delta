@@ -83,6 +83,9 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <OutDir>E:\Downloads\r1titanfall_org\bin\x64_retail</OutDir>
+    <IncludePath>$(ProjectDir)thirdparty\nlohmann;$(ProjectDir)thirdparty\mimalloc-2.1.7\include;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+    <LibraryPath>$(SolutionDir)thirdparty\mimalloc-2.1.7\$(Configuration);$(LibraryPath)</LibraryPath>
     <OutDir>X:\Games\EA\Titanfall\bin\x64_retail</OutDir>
     <IncludePath>$(ProjectDir)thirdparty\capnp\include;$(ProjectDir)thirdparty\minhook\include;$(ProjectDir)thirdparty\mimalloc\include;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
     <LibraryPath>$(ProjectDir)thirdparty\capnp\lib\$(Configuration);$(ProjectDir)thirdparty\minhook\lib;$(SolutionDir)thirdparty\mimalloc\$(Configuration);$(VC_LibraryPath_X64);$(WindowsSDK_LibraryPath_x64);$(LibraryPath)</LibraryPath>
@@ -132,7 +135,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <WarningLevel>Level3</WarningLevel>
+      <WarningLevel>Level4</WarningLevel>
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;_DEBUG;DLL1_EXPORTS;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
@@ -145,6 +148,7 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
+      <AdditionalDependencies>Shell32.lib;vstdlib.lib;tier0_orig.lib;ws2_32.lib;$(CoreLibraryDependencies);%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalDependencies>winhttp.lib;Shell32.lib;capnp.lib;kj.lib;mimalloc-static.lib;vstdlib.lib;tier0_orig.lib;libminhook.lib;$(CoreLibraryDependencies);%(AdditionalDependencies)</AdditionalDependencies>
       <ModuleDefinitionFile>test.def</ModuleDefinitionFile>
     </Link>
@@ -211,6 +215,7 @@
     <ClInclude Include="thirdparty\zstd\zstd.h" />
     <ClInclude Include="utils.h" />
     <ClInclude Include="vector.h" />
+    <ClInclude Include="voice.h" />
     <!-- Add the following includes from the first version -->
     <ClInclude Include="vsdk\public\bitvec.h" />
     <ClInclude Include="vsdk\public\math_pfns.h" />
@@ -238,12 +243,18 @@
     <ClInclude Include="vsdk\public\tier0\wchartypes.h" />
     <ClInclude Include="vsdk\public\tier1\fmtstr.h" />
     <ClInclude Include="vsdk\public\tier1\netadr.h" />
+    <ClInclude Include="vsdk\public\tier1\utlblockmemory.h" />
     <ClInclude Include="vsdk\public\tier1\utlbuffer.h" />
+    <ClInclude Include="vsdk\public\tier1\utldict.h" />
+    <ClInclude Include="vsdk\public\tier1\utlfixedmemory.h" />
     <ClInclude Include="vsdk\public\tier1\utlhashmap.h" />
     <ClInclude Include="vsdk\public\tier1\utliterator.h" />
     <ClInclude Include="vsdk\public\tier1\utllinkedlist.h" />
+    <ClInclude Include="vsdk\public\tier1\utlmap.h" />
     <ClInclude Include="vsdk\public\tier1\utlmemory.h" />
     <ClInclude Include="vsdk\public\tier1\utlpriorityqueue.h" />
+    <ClInclude Include="vsdk\public\tier1\utlrbtree.h" />
+    <ClInclude Include="vsdk\public\tier1\utlstring.h" />
     <ClInclude Include="vsdk\public\tier1\utlvector.h" />
     <ClInclude Include="vsdk\public\vector.h" />
     <ClInclude Include="vsdk\public\vector2d.h" />
@@ -281,6 +292,7 @@
     <ClCompile Include="TableDestroyer.cpp" />
     <ClCompile Include="thirdparty\zstd\zstd.c" />
     <ClCompile Include="utils.cpp" />
+    <ClCompile Include="voice.cpp" />
     <!-- Add the following includes from the first version -->
     <ClCompile Include="vsdk\tier0\dbg.cpp" />
     <ClCompile Include="vsdk\tier0\platformtime.cpp" />

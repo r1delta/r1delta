@@ -5,6 +5,7 @@
 #include <crtdbg.h>	
 #include <new>
 #include "windows.h"
+#include <json.hpp>
 #include <iostream>
 #include "cvar.h"
 #include <random>
@@ -33,6 +34,14 @@
 #include "keyvalues.h"
 #include "persistentdata.h"
 #include "load.h"
+
+//#define USE_CURL
+
+#ifdef USE_CURL
+#define CURL_STATICLIB
+#include <curl/curl.h>
+#pragma comment(lib, "libcurl.lib")
+#endif // USE_CURL
 
 #include <random>
 #include "masterserver.h"

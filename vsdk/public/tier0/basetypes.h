@@ -20,6 +20,7 @@ typedef unsigned char byte;
 typedef unsigned short word;
 typedef float vec_t;
 
+#define ALIGN4_POST DECL_ALIGN(4)
 #define FLOAT32_NAN_BITS     (uint32)0x7FC00000	// not a number!
 #define FLOAT32_NAN          BitsToFloat( FLOAT32_NAN_BITS )
 #define DECL_ALIGN(x)			__declspec( align( x ) )

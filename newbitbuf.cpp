@@ -11,6 +11,7 @@
 #include "coordsize.h"
 #include <cmath>
 #include "stdio.h"
+#include "logging.h"
 
 void CBitWrite::StartWriting(void* pData, int nBytes, int iStartBit, int nBits)
 {
@@ -565,6 +566,26 @@ uint64 CBitRead::ReadVarInt64()
 	} while (b & 0x80);
 
 	return result;
+}
+
+int CBitRead::ReadBitsClamped_ptr(void* pOutData, size_t outSizeBytes, size_t nBits) {
+	size_t outSizeBits = outSizeBytes * 8;
+	size_t readSizeBits = nBits;
+
+	int skippedBits = 0;
+
+	if (readSizeBits > outSizeBits) {
+#ifdef _DEBUG
+		Msg("Oversized network packet received, and clamped.");
+#endif
+		readSizeBits = outSizeBits;
+		skippedBits = (int)(nBits - outSizeBits);
+	}
+
+	ReadBits(pOutData, readSizeBits);
+	SeekRelative(skippedBits);
+
+	return (int)readSizeBits;
 }
 
 void CBitRead::ReadBits(void* pOutData, int nBits)

@@ -37,6 +37,9 @@
 #include <winternl.h>  // For UNICODE_STRING.
 #include "core.h"
 #include "physics.h"
+#include "vsdk/public/tier1/utlmap.h"
+
+extern IBaseClientDLL* g_ClientDLL;
 
 enum {
 	// The DLL was loaded. The NotificationData parameter points to a
@@ -98,6 +101,7 @@ void __stdcall LoaderNotificationCallback(
 	const LDR_DLL_NOTIFICATION_DATA* notification_data,
 	void* context);
 
+extern int* g_nServerThread;
 extern uintptr_t G_launcher;
 extern uintptr_t G_vscript;
 extern uintptr_t G_filesystem_stdio;
@@ -105,6 +109,10 @@ extern uintptr_t G_server;
 extern uintptr_t G_engine;
 extern uintptr_t G_engine_ds;
 extern uintptr_t G_client;
+
+inline bool IsInServerThread() {
+	return GetCurrentThreadId() == *g_nServerThread;
+}
 
 LDR_DLL_LOADED_NOTIFICATION_DATA* GetModuleNotificationData(const wchar_t* moduleName);
 void FreeModuleNotificationData(LDR_DLL_LOADED_NOTIFICATION_DATA*);

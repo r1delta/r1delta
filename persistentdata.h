@@ -10,6 +10,7 @@ struct NetMessageCvar_t // sizeof=0x208
 	char name[260];
     char value[260];
 };
+
 struct alignas(8) NET_SetConVar
 {
 	void* vtable;
@@ -27,7 +28,10 @@ struct alignas(8) NET_SetConVar
 
 typedef bool (*NET_SetConVar__ReadFromBufferType)(NET_SetConVar* thisptr, bf_read& buffer);
 extern NET_SetConVar__ReadFromBufferType NET_SetConVar__ReadFromBufferOriginal;
+extern int m_nSignonState;
+extern bool (*__fastcall oCBaseClient__ProcessSignonState)(void* thisptr, void* msg);
 
+bool __fastcall CBaseClient__ProcessSignonState(void* thisptr, void* msg);
 bool __fastcall NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer);
 bool __fastcall NET_SetConVar__WriteToBuffer(NET_SetConVar* thisptr, bf_write& buffer);
 __int64 CConVar__GetSplitScreenPlayerSlot(char* thisptr);

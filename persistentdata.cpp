@@ -32,6 +32,7 @@
 
 //#define HASH_USERINFO_KEYS
 // Constants
+int m_nSignonState = 0;
 constexpr size_t MAX_LENGTH = 254;
 constexpr const char* INVALID_CHARS = "{}()':;`\"\n";
 bool g_bNoSendConVar = false;
@@ -701,15 +702,13 @@ SQInteger Script_ClientGetPersistentData(HSQUIRRELVM v) {
 
 	return 1;
 }
-struct CBaseClient
-{
+struct CBaseClient {
 	_BYTE gap0[1040];
 	KeyValues* m_ConVars;
 	char pad[284392];
 };
 static_assert(sizeof(CBaseClient) == 285440);
-struct CBaseClientDS
-{
+struct CBaseClientDS {
 	_BYTE gap0[920];
 	KeyValues* m_ConVars;
 	char pad[215712];
@@ -717,9 +716,6 @@ struct CBaseClientDS
 static_assert(sizeof(CBaseClientDS) == 216640);
 CBaseClient* g_pClientArray;
 CBaseClientDS* g_pClientArrayDS;
-
-
-
 
 KeyValues* GetClientConVarsKV(short index) {
 	if (IsDedicatedServer())
@@ -729,8 +725,6 @@ KeyValues* GetClientConVarsKV(short index) {
 }
 
 void Script_XPChanged_Rebuild(void* pPlayer) {
-
-	
 	auto edict = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(pPlayer) + 64);
 	auto index = ((edict - reinterpret_cast<__int64>(pGlobalVarsServer->pEdicts)) / 56) - 1;
 
@@ -740,7 +734,7 @@ void Script_XPChanged_Rebuild(void* pPlayer) {
 		return;
 	}
 
-	auto var = vars->GetInt("__ xp",0);
+	auto var = vars->GetInt("__ xp", 0);
 	auto netValue = *reinterpret_cast<int*>(reinterpret_cast<__int64>(pPlayer) + 0x1834);
 	if (var == 0)
 		return;
@@ -750,7 +744,6 @@ void Script_XPChanged_Rebuild(void* pPlayer) {
 
 	*reinterpret_cast<int*>(reinterpret_cast<__int64>(pPlayer) + 0x1834) = var;
 }
-
 
 void Script_GenChanged_Rebuild(void* pPlayer) {
 	auto edict = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(pPlayer) + 64);
@@ -774,10 +767,7 @@ void Script_GenChanged_Rebuild(void* pPlayer) {
 
 	*reinterpret_cast<int*>(reinterpret_cast<__int64>(pPlayer) + 0x183C) = var;
 	auto netValueAfter = *reinterpret_cast<int*>(reinterpret_cast<__int64>(pPlayer) + 0x183C);
-
 }
-
-
 
 SQInteger Script_ServerGetPersistentUserDataKVString(HSQUIRRELVM v) {
 	const void* pPlayer = sq_getentity(v, 2);
@@ -856,8 +846,11 @@ SQInteger Script_ServerSetPersistentUserDataKVString(HSQUIRRELVM v) {
 	sq_pushstring(v, pValue, -1);
 	return 1;
 }
+
 typedef char (*CBaseClientState__InternalProcessStringCmdType)(void* thisptr, void* msg, bool bIsHLTV);
+
 CBaseClientState__InternalProcessStringCmdType CBaseClientState__InternalProcessStringCmdOriginal;
+
 char CBaseClientState__InternalProcessStringCmd(void* thisptr, void* msg, bool bIsHLTV) {
 	auto engine = G_engine;
 	void(*Cbuf_Execute)() = decltype(Cbuf_Execute)(engine + 0x1057C0);
@@ -865,13 +858,20 @@ char CBaseClientState__InternalProcessStringCmd(void* thisptr, void* msg, bool b
 	Cbuf_Execute(); // fix cbuf overflow on too many stringcmds
 	return ret;
 }
-char __fastcall GetConfigPath(char* outPath, size_t outPathSize, int configType)
-{
+
+bool (*__fastcall oCBaseClient__ProcessSignonState)(void* thisptr, void* msg);
+
+bool __fastcall CBaseClient__ProcessSignonState(void* thisptr, void* msg) {
+	m_nSignonState = *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(msg) + 0x20);
+
+	return oCBaseClient__ProcessSignonState(thisptr, msg);
+}
+
+char __fastcall GetConfigPath(char* outPath, size_t outPathSize, int configType) {
 	CHAR folderPath[MAX_PATH];
 
 	// Get the user's Documents folder path
-	if (SHGetFolderPathA(NULL, CSIDL_PERSONAL, NULL, 0, folderPath) < 0)
-	{
+	if (SHGetFolderPathA(NULL, CSIDL_PERSONAL, NULL, 0, folderPath) < 0) {
 		return 0;
 	}
 
@@ -882,15 +882,13 @@ char __fastcall GetConfigPath(char* outPath, size_t outPathSize, int configType)
 	char tempPath[512];
 	auto size = snprintf(tempPath, sizeof(tempPath), "%s%s%s", folderPath, "/Respawn/Titanfall", subFolder);
 
-	if (size >= 511)
-	{
+	if (size >= 511) {
 		return 0;
 	}
 
 	// Determine the config file name based on configType
 	const char* configFile;
-	switch (configType)
-	{
+	switch (configType) {
 	case 0:
 		configFile = "settings.cfg";
 		break;

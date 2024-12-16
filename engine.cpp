@@ -1,4 +1,5 @@
 #include "engine.h"
+#include "load.h"
 
 CVEngineServer* g_CVEngineServer = 0;
 uintptr_t g_CVEngineServerInterface;
@@ -12,6 +13,15 @@ int64_t FuncThatReturnsFF_Stub()
 bool FuncThatReturnsBool_Stub()
 {
 	return false;
+}
+
+void Host_Error(const char* error, ...) {
+	char string[1024];
+	va_list params;
+
+	va_start(params, error);
+	((void(__cdecl*)(const char*, ...))(G_engine + 0x130510))(error, params);
+	va_end(error);
 }
 
 int64_t NULLNET_Config()
