@@ -34,7 +34,7 @@
     <Keyword>Win32Proj</Keyword>
     <ProjectGuid>{ff6a4de4-e3d3-4f2b-8640-0a4815865fbe}</ProjectGuid>
     <RootNamespace>Dll1</RootNamespace>
-    <WindowsTargetPlatformVersion>10.0.19041.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
     <ProjectName>tier0</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -54,13 +54,13 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v142</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v142</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
@@ -86,7 +86,7 @@
     <OutDir>E:\Downloads\r1titanfall_org\bin\x64_retail</OutDir>
     <IncludePath>$(ProjectDir)thirdparty\nlohmann;$(ProjectDir)thirdparty\mimalloc-2.1.7\include;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
     <LibraryPath>$(SolutionDir)thirdparty\mimalloc-2.1.7\$(Configuration);$(LibraryPath)</LibraryPath>
-    <OutDir>X:\Games\EA\Titanfall\bin\x64_retail</OutDir>
+    <OutDir>E:\Downloads\r1titanfall_org\bin\x64_retail</OutDir>
     <IncludePath>$(ProjectDir)thirdparty\capnp\include;$(ProjectDir)thirdparty\minhook\include;$(ProjectDir)thirdparty\mimalloc\include;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
     <LibraryPath>$(ProjectDir)thirdparty\capnp\lib\$(Configuration);$(ProjectDir)thirdparty\minhook\lib;$(SolutionDir)thirdparty\mimalloc\$(Configuration);$(VC_LibraryPath_X64);$(WindowsSDK_LibraryPath_x64);$(LibraryPath)</LibraryPath>
   </PropertyGroup>

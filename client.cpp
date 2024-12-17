@@ -11,8 +11,7 @@
 typedef void (*sub_18027F2C0Type)(__int64 a1, const char* a2, void* a3);
 sub_18027F2C0Type sub_18027F2C0Original;
 
-void TextMsg(bf_read* msg)
-{
+void TextMsg(bf_read* msg) {
 	TextMsgPrintType_t msg_dest = (TextMsgPrintType_t)msg->ReadByte();
 
 	char text[256];
@@ -27,10 +26,8 @@ void TextMsg(bf_read* msg)
 	}
 }
 
-void sub_18027F2C0(__int64 a1, const char* a2, void* a3)
-{
-	if (!strcmp_static(a2, "SayText"))
-	{
+void sub_18027F2C0(__int64 a1, const char* a2, void* a3) {
+	if (!strcmp_static(a2, "SayText")) {
 		//// raise fov to how bme does it
 		//auto var = (ConVarR1*)(OriginalCCVar_FindVar2(cvarinterface, "cl_fovScale"));
 		//var->m_fMaxVal = 2.5f;
@@ -65,15 +62,13 @@ bool CPortalPlayer__CreateMove(__int64 a1, float a2, __int64 a3, char a4) {
 	return oCPortalPlayer__CreateMove(a1, a2, a3, a4);
 }
 __int64 (*osub_18008E820)(__int64 a1, unsigned int a2);
-__int64 __fastcall sub_18008E820(__int64 a1, unsigned int a2)
-{
+__int64 __fastcall sub_18008E820(__int64 a1, unsigned int a2) {
 	if (a1)
 		return osub_18008E820(a1, a2);
 	return 0;
 }
 void* (*oKeyValues__SetString__Client)(__int64 a1, char* a2, const char* a3);
-void* KeyValues__SetString__Client(__int64 a1, char* a2, const char* a3)
-{
+void* KeyValues__SetString__Client(__int64 a1, char* a2, const char* a3) {
 	static auto target = G_engine + 0x16FABA;
 	if (uintptr_t(_ReturnAddress()) == target)
 		a3 = "30";
@@ -100,17 +95,14 @@ __int64 SharedVehicleViewSmoothing(
 	int a6,
 	unsigned int* a7,
 	float* a8,
-	char a9)
-{
-	if (a1 == 0)
-	{
+	char a9) {
+	if (a1 == 0) {
 		static auto getlocalplayer = reinterpret_cast<__int64 (*)(int a1)>(G_client + 0x7B120);
 		a1 = getlocalplayer(-1);
 	}
 	return oSharedVehicleViewSmoothing(a1, a2, a3, a4, a5, a6, a7, a8, a9);
 }
-void InitClient()
-{
+void InitClient() {
 	auto client = G_client;
 	auto engine = G_engine;
 

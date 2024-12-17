@@ -34,7 +34,7 @@
 
 #include <MinHook.h>
 #include <cstdlib>
-#include <crtdbg.h>	
+#include <crtdbg.h>
 #include <new>
 #include "windows.h"
 
@@ -66,18 +66,15 @@ CreateInterfaceFn oAppSystemFactory;
 CreateInterfaceFn oFileSystemFactory;
 CreateInterfaceFn oPhysicsFactory;
 
-void CNetworkStringTableContainer__SetTickCount(__int64 a1, char a2)
-{
+void CNetworkStringTableContainer__SetTickCount(__int64 a1, char a2) {
 	*(char*)(a1 + 8) = a2;
 }
 
-void CCVar__SetSomeFlag_Corrupt(int64_t a1, int64_t a2)
-{
+void CCVar__SetSomeFlag_Corrupt(int64_t a1, int64_t a2) {
 	return;
 }
 
-int64_t CCVar__GetSomeFlag(int64_t thisptr)
-{
+int64_t CCVar__GetSomeFlag(int64_t thisptr) {
 	return 0;
 }
 
@@ -89,15 +86,14 @@ HMODULE engineR1O;
 CreateInterfaceFn R1OCreateInterface;
 
 void* R1OFactory(const char* pName, int* pReturnCode) {
-//	std::cout << "looking for " << pName << std::endl;
+	//	std::cout << "looking for " << pName << std::endl;
 
 	if (!strcmp_static(pName, "VEngineServer022")) {
 		//std::cout << "wrapping VEngineServer022" << std::endl;
 
 		uintptr_t* r1vtable = *(uintptr_t**)oAppSystemFactory(pName, pReturnCode);
 		g_CVEngineServerInterface = (uintptr_t)oFileSystemFactory(pName, pReturnCode);
-		if (!g_CVEngineServer)
-		{
+		if (!g_CVEngineServer) {
 			g_CVEngineServer = new CVEngineServer(r1vtable);
 		}
 
@@ -105,7 +101,7 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 		return &whatever2;
 	}
 	if (!strcmp_static(pName, "VFileSystem017")) {
-	//	std::cout << "wrapping VFileSystem017" << std::endl;
+		//	std::cout << "wrapping VFileSystem017" << std::endl;
 
 		uintptr_t* r1vtable = *(uintptr_t**)oFileSystemFactory(pName, pReturnCode);
 		g_CVFileSystemInterface = (uintptr_t)oFileSystemFactory(pName, pReturnCode);
@@ -225,7 +221,6 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 		//uintptr_t CCvar__ProcessQueuedMaterialThreadConVarSets = r1vtable[39];
 		uintptr_t oCCvar__FactoryInternalIterator = r1vtable[40];
 
-
 		static uintptr_t r1ovtable[] = {
 			CreateFunction((void*)oCCvar__Connect, (void*)cvarinterface),
 			CreateFunction((void*)oCCvar__Disconnect, (void*)cvarinterface),
@@ -270,8 +265,6 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 			CreateFunction((void*)oCCvar__HasQueuedMaterialThreadConVarSets, (void*)cvarinterface),
 			CreateFunction(CCvar__ProcessQueuedMaterialThreadConVarSets, (void*)cvarinterface),
 			CreateFunction((void*)oCCvar__FactoryInternalIterator, r1vtable)
-
-
 		};
 		static void* whatever6 = &r1ovtable; // double ref return
 		return &whatever6;
@@ -291,9 +284,6 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 	return R1OCreateInterface(pName, pReturnCode);
 }
 
-
-
-
 class SomeNexonBullshit {
 public:
 	virtual void whatever() = 0;
@@ -302,8 +292,7 @@ public:
 CGlobalVarsServer2015* pGlobalVarsServer;
 char __fastcall CServerGameDLL__DLLInit(void* thisptr, CreateInterfaceFn appSystemFactory,
 	CreateInterfaceFn physicsFactory, CreateInterfaceFn fileSystemFactory,
-	CGlobalVarsServer2015* pGlobals)
-{
+	CGlobalVarsServer2015* pGlobals) {
 	if (IsDedicatedServer()) {
 		pGlobals = (CGlobalVarsServer2015*)((uintptr_t)pGlobals - 4); // Don't ask. If you DO ask, you will die a violent, painful death - wndrr
 		pGlobals->nTimestampNetworkingBase = 100;
@@ -342,7 +331,7 @@ char __fastcall CServerGameDLL__DLLInit(void* thisptr, CreateInterfaceFn appSyst
 	reinterpret_cast<char(__fastcall*)(__int64, CreateInterfaceFn)>((uintptr_t)(engineR1O)+0x1C6B30)(0, fnptr); // call is to CDedicatedServerAPI::Connect
 	void* whatev = fnptr;
 	//reinterpret_cast<void(__fastcall*)()>((uintptr_t)(engineR1O)+0x2742A0)(); // register engine convars
-	//*(__int64*)((uintptr_t)(GetModuleHandleA("launcher_r1o.dll")) + 0xECBE0) = fsintfakeptr; 
+	//*(__int64*)((uintptr_t)(GetModuleHandleA("launcher_r1o.dll")) + 0xECBE0) = fsintfakeptr;
 	reinterpret_cast<__int64(__fastcall*)(int a1)>(GetProcAddress(GetModuleHandleA("tier0_orig.dll"), "SetTFOFileLogLevel"))(999);
 	SomeNexonBullshit* tfotableversion = (SomeNexonBullshit*)R1OCreateInterface("TFOTableVersion", 0);
 	SomeNexonBullshit* tfoitems = (SomeNexonBullshit*)R1OCreateInterface("TFOItemSystem", 0);
@@ -359,20 +348,17 @@ char __fastcall CServerGameDLL__DLLInit(void* thisptr, CreateInterfaceFn appSyst
 	return CServerGameDLL__DLLInitOriginal(thisptr, fnptr, fnptr, fnptr, pGlobals);
 }
 
-extern "C" __declspec(dllexport) void StackToolsNotify_LoadedLibrary(char* pModuleName)
-{
+extern "C" __declspec(dllexport) void StackToolsNotify_LoadedLibrary(char* pModuleName) {
 	//printf("loaded %s\n", pModuleName);
 }
 typedef char(*MatchRecvPropsToSendProps_RType)(__int64 a1, __int64 a2, __int64 a3, __int64 a4);
 MatchRecvPropsToSendProps_RType MatchRecvPropsToSendProps_ROriginal;
 
 // #STR: "CompareRecvPropToSendProp: missing a property."
-char __fastcall CompareRecvPropToSendProp(__int64 a1, __int64 a2)
-{
+char __fastcall CompareRecvPropToSendProp(__int64 a1, __int64 a2) {
 	int v4; // ecx
 
-	while (1)
-	{
+	while (1) {
 		if (!a1 || !a2)
 			std::cout << "CompareRecvPropToSendProp: missing a property." << std::endl;
 		v4 = *(_DWORD*)(a1 + 8);
@@ -387,8 +373,7 @@ char __fastcall CompareRecvPropToSendProp(__int64 a1, __int64 a2)
 	}
 	return 0;
 }
-__int64 FindRecvProp(__int64 a4, const char* v9)
-{
+__int64 FindRecvProp(__int64 a4, const char* v9) {
 	const char* v16 = 0; // [rsp+30h] [rbp-38h]
 
 	__int64 RecvProp = 0; // rbp
@@ -399,8 +384,7 @@ __int64 FindRecvProp(__int64 a4, const char* v9)
 	v16 = v9;
 	if (*(int*)(a4 + 8) <= 0)
 		return 0;
-	for (j = 0i64; ; j += 96i64)
-	{
+	for (j = 0i64; ; j += 96i64) {
 		RecvProp = j + *(_QWORD*)a4;
 		if (_stricmp(*(const char**)RecvProp, v9) == 0)
 			break;
@@ -410,8 +394,7 @@ __int64 FindRecvProp(__int64 a4, const char* v9)
 	}
 	return RecvProp;
 }
-char __fastcall MatchRecvPropsToSendProps_R(__int64 a1, __int64 a2, __int64 pSendTable, __int64 a4)
-{
+char __fastcall MatchRecvPropsToSendProps_R(__int64 a1, __int64 a2, __int64 pSendTable, __int64 a4) {
 	_QWORD* v5; // rax
 	__int64 v6; // rcx
 	int v8; // ecx
@@ -430,13 +413,11 @@ char __fastcall MatchRecvPropsToSendProps_R(__int64 a1, __int64 a2, __int64 pSen
 	if (*(int*)(pSendTable + 8) <= 0)
 		return 1;
 	v6 = 0i64;
-	for (i = 0i64; ; i += 136i64)
-	{
+	for (i = 0i64; ; i += 136i64) {
 		v7 = v6 + *v5;
 		v17 = v7;
 		v8 = *(_DWORD*)(v7 + 88);
-		if ((v8 & 0x40) == 0 && (v8 & 0x100) == 0)
-		{
+		if ((v8 & 0x40) == 0 && (v8 & 0x100) == 0) {
 			if (!a4)
 				break;
 
@@ -453,8 +434,7 @@ char __fastcall MatchRecvPropsToSendProps_R(__int64 a1, __int64 a2, __int64 pSen
 				MessageBoxA(NULL, *(const char**)(v7 + 72), "SendProp Error", 16);
 			}
 			if (*(_DWORD*)(v17 + 16) == 6
-				&& !MatchRecvPropsToSendProps_R(a1, a2, *(_QWORD*)(v17 + 112), *(_QWORD*)(RecvProp + 64)))
-			{
+				&& !MatchRecvPropsToSendProps_R(a1, a2, *(_QWORD*)(v17 + 112), *(_QWORD*)(RecvProp + 64))) {
 				break;
 			}
 		}
@@ -466,11 +446,9 @@ char __fastcall MatchRecvPropsToSendProps_R(__int64 a1, __int64 a2, __int64 pSen
 	return 0;
 }
 
-
 typedef char(*sub_1801C79A0Type)(__int64 a1, __int64 a2);
 sub_1801C79A0Type sub_1801C79A0Original;
-char __fastcall sub_1801C79A0(__int64 a1, __int64 a2)
-{
+char __fastcall sub_1801C79A0(__int64 a1, __int64 a2) {
 	auto dtname = *(const char**)(a1 + 16);
 	auto dtname_len = strlen(dtname);
 	if (string_equal_size(dtname, dtname_len, "DT_BigBrotherPanelEntity") || string_equal_size(dtname, dtname_len, "DT_ControlPanelEntity") || string_equal_size(dtname, dtname_len, "DT_RushPointEntity") || string_equal_size(dtname, dtname_len, "DT_SpawnItemEntity")) {
@@ -480,8 +458,7 @@ char __fastcall sub_1801C79A0(__int64 a1, __int64 a2)
 	return sub_1801C79A0Original(a1, a2);
 }
 
-char __fastcall sub_180217C30(char* a1, __int64 size, _QWORD* a3, __int64 a4)
-{
+char __fastcall sub_180217C30(char* a1, __int64 size, _QWORD* a3, __int64 a4) {
 	return true;
 }
 const char* scripterr() {
@@ -513,7 +490,6 @@ __forceinline BOOL CheckIfCallingDLLContainsR1o() {
 __int64 VStdLib_GetICVarFactory() {
 	return CheckIfCallingDLLContainsR1o() ? (__int64)R1OFactory : (__int64)(((uintptr_t)(GetModuleHandleA("vstdlib.dll")) + 0x023DD0));
 }
-
 
 uintptr_t CreateTrampolineFunction(void* vftable, uintptr_t engineDsStart, uintptr_t engineDsEnd, int original_offset, int new_offset) {
 	void* execMem = VirtualAlloc(NULL, 128, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
@@ -658,8 +634,8 @@ const int indexMapping[] = {
 
 void* modifiedNetCHANVTable = nullptr;
 
-void InitializeModifiedNetCHANVTable(void* netChan) {	
-    if (modifiedNetCHANVTable == nullptr) {
+void InitializeModifiedNetCHANVTable(void* netChan) {
+	if (modifiedNetCHANVTable == nullptr) {
 		//CModule engineDS("engine_ds.dll");
 		auto engineDS = G_engine_ds;
 		uintptr_t engineDS_size = 0;
@@ -670,37 +646,36 @@ void InitializeModifiedNetCHANVTable(void* netChan) {
 		}
 		auto start = engineDS;
 		auto end = start + engineDS_size;
-        // Get the original vtable from the provided CNetChan object
-        uintptr_t* originalVTable = *(uintptr_t**)netChan;
+		// Get the original vtable from the provided CNetChan object
+		uintptr_t* originalVTable = *(uintptr_t**)netChan;
 
-        size_t vtableSize = 83 * sizeof(uintptr_t);  // Adjust the size according to the number of virtual functions
+		size_t vtableSize = 83 * sizeof(uintptr_t);  // Adjust the size according to the number of virtual functions
 
-        // Allocate memory for the modified vtable and the flag
-        modifiedNetCHANVTable = malloc(vtableSize);
+		// Allocate memory for the modified vtable and the flag
+		modifiedNetCHANVTable = malloc(vtableSize);
 
 		if (modifiedNetCHANVTable) {
-            // Copy the original vtable to the modified vtable
-            memcpy(modifiedNetCHANVTable, originalVTable, vtableSize);
+			// Copy the original vtable to the modified vtable
+			memcpy(modifiedNetCHANVTable, originalVTable, vtableSize);
 
-            // Create trampolines for each remapped virtual function and update the modified vtable
-            for (int i = 0; i < sizeof(indexMapping) / sizeof(indexMapping[0]); i++) {
-                int originalIndex = i;
-                int newIndex = indexMapping[i];
-                if (originalIndex != newIndex) {
+			// Create trampolines for each remapped virtual function and update the modified vtable
+			for (int i = 0; i < sizeof(indexMapping) / sizeof(indexMapping[0]); i++) {
+				int originalIndex = i;
+				int newIndex = indexMapping[i];
+				if (originalIndex != newIndex) {
 					((uintptr_t*)modifiedNetCHANVTable)[originalIndex] = CreateTrampolineFunction(originalVTable, start, end, originalIndex, newIndex); // originalIndex will be jumped to if from engine.dll, newIndex otherwise
-                }
-            }
-        }
-    }
+				}
+			}
+		}
+	}
 }
 
 using NET_CreateNetChannelType = void* (__fastcall*)(int a1, unsigned int* a2, const char* a3, __int64 a4, char a5, char a6);
 NET_CreateNetChannelType NET_CreateNetChannelOriginal;
 
-void* __fastcall NET_CreateNetChannel(int a1, unsigned int* a2, const char* a3, __int64 a4, char a5, char a6)
-{
-    void* netChan = NET_CreateNetChannelOriginal(a1, a2, a3, a4, a5, a6);
-    InitializeModifiedNetCHANVTable(netChan);
-    *(uintptr_t**)netChan = static_cast<uintptr_t*>(modifiedNetCHANVTable);
-    return netChan;
+void* __fastcall NET_CreateNetChannel(int a1, unsigned int* a2, const char* a3, __int64 a4, char a5, char a6) {
+	void* netChan = NET_CreateNetChannelOriginal(a1, a2, a3, a4, a5, a6);
+	InitializeModifiedNetCHANVTable(netChan);
+	*(uintptr_t**)netChan = static_cast<uintptr_t*>(modifiedNetCHANVTable);
+	return netChan;
 }

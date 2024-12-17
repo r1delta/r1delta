@@ -2,7 +2,7 @@
 
 #include "load.h"
 #include <cstdlib>
-#include <crtdbg.h>	
+#include <crtdbg.h>
 #include <new>
 #include "windows.h"
 #include <iostream>
@@ -45,7 +45,6 @@
 #include <random>
 #include "masterserver.h"
 
-
 #pragma intrinsic(_ReturnAddress)
 
 class ScriptFunctionRegistry {
@@ -74,7 +73,6 @@ private:
 	ScriptFunctionRegistry() = default;
 	std::vector<std::unique_ptr<SQFuncRegistration>> m_functions;
 };
-
 
 typedef SQRESULT(*sq_compile_t)(HSQUIRRELVM, SQLEXREADFUNC, SQUserPointer, const SQChar*, SQBool);
 typedef SQRESULT(*sq_compilebuffer_t)(HSQUIRRELVM, const SQChar*, SQInteger, const SQChar*, SQBool);
@@ -106,7 +104,7 @@ typedef SQRESULT(*sq_next_t)(HSQUIRRELVM, SQInteger);
 typedef SQRESULT(*sq_getinstanceup_t)(HSQUIRRELVM, SQInteger, SQUserPointer*, SQUserPointer);
 typedef void (*sq_newarray_t)(HSQUIRRELVM, SQInteger);
 typedef SQRESULT(*sq_arrayappend_t)(HSQUIRRELVM, SQInteger);
-typedef SQRESULT(*sq_throwerror_t)(HSQUIRRELVM, const char *err);
+typedef SQRESULT(*sq_throwerror_t)(HSQUIRRELVM, const char* err);
 typedef bool (*RunCallback_t)(R1SquirrelVM*, const char*);
 typedef __int64 (*CSquirrelVM__RegisterGlobalConstantInt_t)(R1SquirrelVM*, const char*, signed int);
 typedef void* (*CSquirrelVM__GetEntityFromInstance_t)(R1SquirrelVM*, SQObject*, char**);
@@ -164,8 +162,7 @@ AddSquirrelReg_t AddSquirrelReg;
 //	sub_1802C4FE0("ConVar %s is not valid", a1);
 //	return Locale;
 //}
-SQInteger SquirrelNativeFunctionTest(HSQUIRRELVM v, __int64 a2, __int64 a3)
-{
+SQInteger SquirrelNativeFunctionTest(HSQUIRRELVM v, __int64 a2, __int64 a3) {
 	const SQChar* str;
 	sq_getstring(v, 2, &str);
 	SQInteger integer;
@@ -185,7 +182,7 @@ typedef void (*CPlayer__Script_XP_Changed)(__int64 at);
 CPlayer__Script_XP_Changed CPlayer__Script_XP_ChangedOrig;
 
 void __fastcall CPlayer__Script_XP_ChangedHook(__int64 a1) {
-	Msg("CPlayer__Script_XP_ChangedHook %x\n",a1);
+	Msg("CPlayer__Script_XP_ChangedHook %x\n", a1);
 	CPlayer__Script_XP_ChangedOrig(a1);
 }
 
@@ -197,8 +194,7 @@ void __fastcall CPlayer__Script_Gen_Changed(__int64 a1) {
 	CPlayer__Script_Gen_Changed_Orig(a1);
 }
 
-
-typedef __int64 (*CPlayer__SetXP)(__int64 a1,int a2);
+typedef __int64 (*CPlayer__SetXP)(__int64 a1, int a2);
 
 CPlayer__SetXP CPlayer__SetXPRebuildOrig;
 void __fastcall CPlayer__SetXPRebuild(__int64 a1, int a2) {
@@ -216,9 +212,8 @@ void __fastcall CPlayer__SetGenHook(__int64 a1, int a2) {
 	*(int*)(a1 + 0x183C) = a2;
 }
 
-
 void __fastcall SetGen(__int64 a1, int a2) {
-	if(a2 < 0) {
+	if (a2 < 0) {
 		*(int*)(a1 + 0x183C) = 0;
 	}
 	else if (a2 > 9) {
@@ -229,16 +224,14 @@ void __fastcall SetGen(__int64 a1, int a2) {
 	}
 }
 
-void* __fastcall CSquirrelVM__GetEntityFromInstance_Rebuild(__int64 a2, __int64 a3)
-{
+void* __fastcall CSquirrelVM__GetEntityFromInstance_Rebuild(__int64 a2, __int64 a3) {
 	__int64 result; // rax
 	__int64 v4; // rax
 	__int64 v5; // rcx
 	__int64 v6; // rax
 	unsigned __int64 v7; // rax
 
-	if (!a2)
-	{
+	if (!a2) {
 		return 0LL;
 	}
 	if (*(_DWORD*)a2 != 0xA008000)
@@ -248,18 +241,15 @@ void* __fastcall CSquirrelVM__GetEntityFromInstance_Rebuild(__int64 a2, __int64 
 	if (!v5)
 		return 0LL;
 	v6 = *(_QWORD*)(v4 + 56);
-	if (a3)
-	{
+	if (a3) {
 		v7 = *(_QWORD*)(v6 + 128);
-		if (v7 != a3)
-		{
+		if (v7 != a3) {
 			if (v7 < 2)
 				return 0LL;
 			result = *(_QWORD*)(v7 + 24);
 			if (!result)
 				return 0LL;
-			while (result != a3)
-			{
+			while (result != a3) {
 				result = *(_QWORD*)(result + 24);
 				if (!result)
 					return (void*)result;
@@ -269,8 +259,7 @@ void* __fastcall CSquirrelVM__GetEntityFromInstance_Rebuild(__int64 a2, __int64 
 	return (void*)(*(_QWORD*)v5);
 }
 
-void* sq_getentity(HSQUIRRELVM v, SQInteger iStackPos)
-{
+void* sq_getentity(HSQUIRRELVM v, SQInteger iStackPos) {
 	SQObject obj;
 	sq_getstackobj(nullptr, v, iStackPos, &obj);
 	auto constant = (G_server + 0xD42040);
@@ -278,8 +267,7 @@ void* sq_getentity(HSQUIRRELVM v, SQInteger iStackPos)
 }
 
 template <typename Return, typename ... Arguments>
-constexpr Return Call(void* vmt, const std::uint32_t index, Arguments ... args) noexcept
-{
+constexpr Return Call(void* vmt, const std::uint32_t index, Arguments ... args) noexcept {
 	using Function = Return(__thiscall*)(void*, decltype(args)...);
 	return (*static_cast<Function**>(vmt))[index](vmt, args...);
 }
@@ -292,15 +280,12 @@ struct AddonInfo {
 	const char* enabled;
 };
 
-
-
 int UpdateAddons(HSQUIRRELVM v, SQInteger index, SQBool enabled) {
 	const char* str = "thread void function() { wait 1 while(true) {  wait 1 } }";
 	auto result = sq_compilebuffer(v, str, strlen(str), "console", SQTrue);
-	if (result != -1)
-	{	
+	if (result != -1) {
 		base_getroottable(v);
-		SQRESULT callResult = sq_call(v, 1,false,true);
+		SQRESULT callResult = sq_call(v, 1, false, true);
 		Msg("Call Result: %d\n", callResult);
 	}
 	auto func_addr = g_CVFileSystem->GetSearchPath;
@@ -326,7 +311,7 @@ int UpdateAddons(HSQUIRRELVM v, SQInteger index, SQBool enabled) {
 	for (KeyValues* subkey = kv->GetFirstValue(); subkey; subkey = subkey->GetNextValue(), ++i) {
 		const char* name = subkey->GetName();
 		bool value = subkey->GetInt(NULL, 0) != 0;
-		sq_getinteger(vm, v, i + 2 , &index);
+		sq_getinteger(vm, v, i + 2, &index);
 		sq_getbool(vm, v, i + 3, &enabled);
 		if (i == index) {
 			subkey->SetInt(NULL, enabled);
@@ -342,7 +327,6 @@ int UpdateAddons(HSQUIRRELVM v, SQInteger index, SQBool enabled) {
 }
 
 int GetMods(HSQUIRRELVM v) {
-
 	sq_compilebuffer(v, "printt(\"Hello, World!\")", -1, "test", SQTrue);
 
 	auto func_addr = g_CVFileSystem->GetSearchPath;
@@ -354,15 +338,15 @@ int GetMods(HSQUIRRELVM v) {
 	auto load_addon_info_addr = G_client + 0x3D82F0;
 	auto get_addon_image_addr = G_client + 0x3DAB30;
 	auto load_addon_info_file = (int(__fastcall*)(void*, KeyValues**, const char*, bool))load_addon_info_addr;
-	auto get_addon_image = (int(__fastcall*)(void*, const char*, char*, int,bool))get_addon_image_addr;
+	auto get_addon_image = (int(__fastcall*)(void*, const char*, char*, int, bool))get_addon_image_addr;
 	auto func = (int(__fastcall*)(void*, const char*, int64, char*, int64))func_addr;
 	auto remove_file = (int(__fastcall*)(void*, char*, int))remove_file_addr;
 	auto extract_addon_info_addr = G_client + 0x3D9910;
 	auto extract_addon_info = (int(__fastcall*)(void*, char*))extract_addon_info_addr;
 	auto strip_extention_addr = G_client + 0x658700;
-	auto strip_extention = (int(__fastcall*)(const char*,char*,int))strip_extention_addr;
+	auto strip_extention = (int(__fastcall*)(const char*, char*, int))strip_extention_addr;
 	auto create_vpk_addr = G_client + 0x511E30;
-	auto create_vpk = (int(__fastcall*)(char*,char*, void*,int,int,int64))create_vpk_addr;
+	auto create_vpk = (int(__fastcall*)(char*, char*, void*, int, int, int64))create_vpk_addr;
 	auto vpk_open_file_addr = G_client + 0x50C250;
 	auto vpk_open_file = (int(__fastcall*)(char*, int*, const char*))vpk_open_file_addr;
 	char szModPath[260];
@@ -380,8 +364,7 @@ int GetMods(HSQUIRRELVM v) {
 
 	for (KeyValues* subkey = kv->GetFirstValue(); subkey; subkey = subkey->GetNextValue()) {
 		const char* name = subkey->GetName();
-		if (V_stristr(name, ".vpk"))
-		{
+		if (V_stristr(name, ".vpk")) {
 			const char* firstValue = subkey->GetName();
 			strip_extention(firstValue, szAddonDirName, 60);
 			extract_addon_info(nullptr, szAddonDirName);
@@ -398,8 +381,7 @@ int GetMods(HSQUIRRELVM v) {
 				std::printf("Addon: %s\n", szAddonDirName);
 			}
 		}
-		else
-		{
+		else {
 			bIsVPK = 0;
 			V_strncpy(szAddonDirName, name, 60);
 		}
@@ -461,12 +443,7 @@ int GetMods(HSQUIRRELVM v) {
 	return 1;
 }
 
-
-
-
-
 void AddXp(HSQUIRRELVM v) {
-
 	auto r1sqvm = GetServerVMPtr();
 	SQInteger xp;
 	sq_getinteger(r1sqvm, v, 1, &xp);
@@ -477,8 +454,6 @@ void AddXp(HSQUIRRELVM v) {
 		CPlayer__SetXPRebuild(player_ptr, xp);
 	}
 }
-
-
 
 void SetGenSQ(HSQUIRRELVM v) {
 	auto r1sqvm = GetServerVMPtr();
@@ -517,13 +492,11 @@ SQInteger Script_Server_GetActiveBurnCardIndex(HSQUIRRELVM v) {
 	auto r1_vm = GetServerVMPtr();
 	auto player_ptr = reinterpret_cast<__int64>(player);
 	int value = *(int*)(player_ptr + 0x1A14);
-	
+
 	sq_pushinteger(r1_vm, v, value);
 
 	return 1;
 }
-
-
 
 // Function to initialize all SQVM functions
 bool GetSQVMFuncs() {
@@ -538,7 +511,7 @@ bool GetSQVMFuncs() {
 #endif
 
 	if (MH_CreateHook(reinterpret_cast<void*>((engine + (IsDedicatedServer() ? 0xAA4A0 : 0x14BB10))), &Hk_CHostState__State_GameShutdown, reinterpret_cast<void**>(&oGameShutDown)) != MH_OK) {
-			Msg("Failed to hook CHostState__State_GameShutdown\n");
+		Msg("Failed to hook CHostState__State_GameShutdown\n");
 	}
 
 	uintptr_t baseAddress = G_vscript;
@@ -636,7 +609,6 @@ bool GetSQVMFuncs() {
 		"Updates xp value from persistent vars"
 	);
 
-
 	//REGISTER_SCRIPT_FUNCTION(
 	//	SCRIPT_CONTEXT_SERVER,
 	//	"GenChanged",
@@ -647,8 +619,6 @@ bool GetSQVMFuncs() {
 	//	"",
 	//	"Updates gen value from persistent vars"
 	//);
-
-
 
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_UI,
@@ -752,22 +722,17 @@ bool GetSQVMFuncs() {
 		SCRIPT_CONTEXT_UI, // Available in client script contexts
 		"SquirrelNativeFunctionTest", (SQFUNCTION)SquirrelNativeFunctionTest, ".sifb", 0, "string", "string text, int a2, float a3, bool a4", "Test registering and calling native function in Squirrel.");
 
-
-
 	initialized = true;
 	return true;
 }
 
-
 typedef __int64 (*CScriptVM__ctortype)(void* thisptr);
 CScriptVM__ctortype CScriptVM__ctororiginal;
 bool scriptflag = false;
-void __fastcall CScriptVM__SetTFOFlag(__int64 a1, char a2)
-{
+void __fastcall CScriptVM__SetTFOFlag(__int64 a1, char a2) {
 	scriptflag = a2;
 }
-char __fastcall CScriptVM__GetTFOFlag(__int64 a1)
-{
+char __fastcall CScriptVM__GetTFOFlag(__int64 a1) {
 	return scriptflag;
 }
 // Prototype for the function to update the vtable pointer of a CScriptVM object.
@@ -801,7 +766,6 @@ void* CreateNewVTable(void* thisptr) {
 	// Update the vtable pointer of the CScriptVM object to the new vtable.
 	return newVTable;
 }
-
 
 void* lastvmptr = 0;
 void* fakevmptr;
@@ -854,7 +818,7 @@ void* CScriptManager__CreateNewVM(__int64 a1, int a2, unsigned int a3) {
 			fakevmptr = CreateNewVTable(vmPtr);
 			lastvmptr = vmPtr;
 		}
-		else if(vmPtr != lastvmptr) {
+		else if (vmPtr != lastvmptr) {
 			lastvmptr = vmPtr;
 			for (size_t i = 0; i < SQUIRREL_VM_VMT_SIZE; i++) {
 				UpdateRWXFunction(((void**)fakevmptr)[i], vmPtr);
@@ -868,7 +832,6 @@ void* CScriptManager__CreateNewVM(__int64 a1, int a2, unsigned int a3) {
 	return vmPtr;
 }
 
-
 typedef void* (*CScriptVM__GetUnknownVMPtrType)();
 CScriptVM__GetUnknownVMPtrType CScriptVM__GetUnknownVMPtrOriginal;
 BOOL IsReturnAddressInServerDll(void* returnAddress) {
@@ -878,8 +841,7 @@ BOOL IsReturnAddressInServerDll(void* returnAddress) {
 	return check1 && check2;
 }
 
-void* CScriptVM__GetUnknownVMPtr()
-{
+void* CScriptVM__GetUnknownVMPtr() {
 	if (IsReturnAddressInServerDll(_ReturnAddress())) {
 		///std::cout << "returning addr to Server SCRIPT VM" << std::endl;
 		return &fakevmptr;
@@ -920,8 +882,6 @@ void ConvertScriptVariant(ScriptVariant_t* variant, ConversionDirection directio
 	}
 }
 
-
-
 // Function to check if server.dll is in the call stack
 // TODO(mrsteyk): performance
 __forceinline bool serverRunning(void* a1) {
@@ -949,8 +909,7 @@ __forceinline bool serverRunning(void* a1) {
 	return FALSE;
 }
 
-const char* FieldTypeToString(int fieldType)
-{
+const char* FieldTypeToString(int fieldType) {
 	static const std::map<int, const char*> typeMapServerRunning = {
 		{0, "void"}, {1, "float"}, {3, "Vector"}, {5, "int"},
 		{7, "bool"}, {9, "char"}, {33, "string"}, {34, "handle"}
@@ -1004,7 +963,7 @@ bool IsPointerFromServerDll(void* pointer) {
 bool hasRegisteredServerFuncs = false;
 void __fastcall CSquirrelVM__RegisterFunctionGuts(__int64* a1, __int64 a2, const char** a3) {
 	//std::cout << "RegisterFunctionGuts called, server: " << (serverRunning ? "TRUE" : "FALSE") << std::endl;
-		
+
 	if (serverRunning(a1) && (*(_DWORD*)(a2 + 112) & 2) == 0 && (*(_DWORD*)(a2 + 112) & 16) == 0) { // Check if server is running
 		int argCount = *(_DWORD*)(a2 + 88); // Get the argument count
 		_DWORD* args = *(_DWORD**)(a2 + 64); // Get the pointer to arguments
@@ -1040,9 +999,9 @@ void __fastcall CSquirrelVM__TranslateCall(__int64* a1) {
 	LPVOID address2 = (LPVOID)(vscript + (IsDedicatedServer() ? 0xc7e4 : 0xC7C4));
 
 	char value1 = 0x21;
-	char data1[] = { 0x00, 0x07, 0x01, 0x07, 0x02, 0x07, 0x03, 0x07, 0x04, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x05, 0x06 };
+	char data1[] = {0x00, 0x07, 0x01, 0x07, 0x02, 0x07, 0x03, 0x07, 0x04, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x05, 0x06};
 	char value2 = 0x20;
-	char data2[] = { 0x00, 0x07, 0x01, 0x07, 0x02, 0x03, 0x07, 0x04, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x05, 0x06 };
+	char data2[] = {0x00, 0x07, 0x01, 0x07, 0x02, 0x03, 0x07, 0x04, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x05, 0x06};
 
 	DWORD oldProtect;
 	static bool done = false;
@@ -1051,7 +1010,6 @@ void __fastcall CSquirrelVM__TranslateCall(__int64* a1) {
 		VirtualProtect(address1, 1, PAGE_EXECUTE_READWRITE, &oldProtect);
 		VirtualProtect(address2, sizeof(data1), PAGE_EXECUTE_READWRITE, &oldProtect);
 	}
-
 
 	if (!serverRunning(a1)) {
 		*(char*)address1 = value2;
@@ -1063,11 +1021,9 @@ void __fastcall CSquirrelVM__TranslateCall(__int64* a1) {
 	*(char*)address1 = value1;
 	memcpy(address2, data1, sizeof(data1));
 	CSquirrelVM__TranslateCallOriginal(a1);
-
 }
 
-__int64 __fastcall CSquirrelVM__PushVariant(__int64* a1, ScriptVariant_t* a2)
-{
+__int64 __fastcall CSquirrelVM__PushVariant(__int64* a1, ScriptVariant_t* a2) {
 	if (serverRunning(a1)) {
 		ConvertScriptVariant(a2, R1O_TO_R1);
 		//std::cout << __FUNCTION__ ": converted variant" << std::endl;
@@ -1078,32 +1034,27 @@ __int64 __fastcall CSquirrelVM__PushVariant(__int64* a1, ScriptVariant_t* a2)
 	return CSquirrelVM__PushVariantOriginal(a1, a2);
 }
 
-char __fastcall CSquirrelVM__ConvertToVariant(__int64* a1, __int64 a2, ScriptVariant_t* a3)
-{
+char __fastcall CSquirrelVM__ConvertToVariant(__int64* a1, __int64 a2, ScriptVariant_t* a3) {
 	bool ret = CSquirrelVM__ConvertToVariantOriginal(a1, a2, a3);
 	if (serverRunning(a1))
 		ConvertScriptVariant(a3, R1_TO_R1O);
 	return ret;
 }
-__int64 __fastcall CSquirrelVM__ReleaseValue(__int64* a1, ScriptVariant_t* a2)
-{
+__int64 __fastcall CSquirrelVM__ReleaseValue(__int64* a1, ScriptVariant_t* a2) {
 	if (serverRunning(a1))
 		ConvertScriptVariant(a2, R1O_TO_R1);
 	return CSquirrelVM__ReleaseValueOriginal(a1, a2);
 }
-bool __fastcall CSquirrelVM__SetValue(__int64* a1, void* a2, unsigned int a3, ScriptVariant_t* a4)
-{
+bool __fastcall CSquirrelVM__SetValue(__int64* a1, void* a2, unsigned int a3, ScriptVariant_t* a4) {
 	if (serverRunning(a1))
 		ConvertScriptVariant(a4, R1O_TO_R1);
 	return CSquirrelVM__SetValueOriginal(a1, a2, a3, a4);
 }
 
-bool __fastcall CSquirrelVM__SetValueEx(__int64* a1, __int64 a2, const char* a3, ScriptVariant_t* a4)
-{
+bool __fastcall CSquirrelVM__SetValueEx(__int64* a1, __int64 a2, const char* a3, ScriptVariant_t* a4) {
 	if (serverRunning(a1))
 		ConvertScriptVariant(a4, R1O_TO_R1);
 	return CSquirrelVM__SetValueExOriginal(a1, a2, a3, a4);
-
 }
 typedef void (*CScriptManager__DestroyVMType)(void* a1, void* vmptr);
 CScriptManager__DestroyVMType CScriptManager__DestroyVMOriginal;
@@ -1111,8 +1062,7 @@ CScriptManager__DestroyVMType CScriptManager__DestroyVMOriginal;
 __declspec(dllexport) R1SquirrelVM* GetServerVMPtr() {
 	return (R1SquirrelVM*)(realvmptr);
 }
-void __fastcall CScriptManager__DestroyVM(void* a1, void* vmptr)
-{
+void __fastcall CScriptManager__DestroyVM(void* a1, void* vmptr) {
 	//if (serverRunning(a1) || serverRunning(vmptr) || serverRunning(*(void**)vmptr) || serverRunning(*(void**)a1)) {
 	//	vmptr = realvmptr;
 	//	//std::cout << "set vm ptr" << std::endl;
@@ -1132,8 +1082,7 @@ static bool g_serverLineIncomplete = false;
 static bool g_clientLineIncomplete = false;
 static bool g_uiLineIncomplete = false;
 
-void CSquirrelVM__PrintFunc1(void* m_hVM, const char* s, ...)
-{
+void CSquirrelVM__PrintFunc1(void* m_hVM, const char* s, ...) {
 	char string[2048];
 	va_list params;
 
@@ -1155,8 +1104,7 @@ void CSquirrelVM__PrintFunc1(void* m_hVM, const char* s, ...)
 	va_end(params);
 }
 
-void CSquirrelVM__PrintFunc2(void* m_hVM, const char* s, ...)
-{
+void CSquirrelVM__PrintFunc2(void* m_hVM, const char* s, ...) {
 	char string[2048];
 	va_list params;
 
@@ -1177,8 +1125,7 @@ void CSquirrelVM__PrintFunc2(void* m_hVM, const char* s, ...)
 	va_end(params);
 }
 
-void CSquirrelVM__PrintFunc3(void* m_hVM, const char* s, ...)
-{
+void CSquirrelVM__PrintFunc3(void* m_hVM, const char* s, ...) {
 	char string[2048];
 	va_list params;
 
@@ -1208,8 +1155,7 @@ using SQCompileBufferFn = SQRESULT(*)(HSQUIRRELVM, const SQChar*, SQInteger, con
 using BaseGetRootTableFn = __int64(*)(HSQUIRRELVM);
 using SQCallFn = SQRESULT(*)(HSQUIRRELVM, SQInteger, SQBool, SQBool);
 
-void run_script(const CCommand& args, R1SquirrelVM* (*GetVMPtr)())
-{
+void run_script(const CCommand& args, R1SquirrelVM* (*GetVMPtr)()) {
 	auto launcher = G_launcher;
 	SQCompileBufferFn sq_compilebuffer = reinterpret_cast<SQCompileBufferFn>(launcher + (IsDedicatedServer() ? 0x1A6C0 : 0x1A5E0));
 	BaseGetRootTableFn base_getroottable = reinterpret_cast<BaseGetRootTableFn>(launcher + (IsDedicatedServer() ? 0x56520 : 0x56440));
@@ -1223,25 +1169,21 @@ void run_script(const CCommand& args, R1SquirrelVM* (*GetVMPtr)())
 	}
 
 	SQRESULT compileRes = sq_compilebuffer(vm->sqvm, code.c_str(), static_cast<SQInteger>(code.length()), "console", 1);
-	if (SQ_SUCCEEDED(compileRes))
-	{
+	if (SQ_SUCCEEDED(compileRes)) {
 		base_getroottable(vm->sqvm);
 		SQRESULT callRes = sq_call(vm->sqvm, 1, SQFalse, SQFalse);
 	}
 }
 
-void script_cmd(const CCommand& args)
-{
+void script_cmd(const CCommand& args) {
 	run_script(args, GetServerVMPtr);
 }
 
-void script_client_cmd(const CCommand& args)
-{
+void script_client_cmd(const CCommand& args) {
 	run_script(args, GetClientVMPtr);
 }
 
-void script_ui_cmd(const CCommand& args)
-{
+void script_ui_cmd(const CCommand& args) {
 	run_script(args, GetUIVMPtr);
 }
 

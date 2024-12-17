@@ -4,7 +4,7 @@
 #pragma comment(lib, "winhttp.lib")
 #include "load.h"
 #include <cstdlib>
-#include <crtdbg.h>	
+#include <crtdbg.h>
 #include <new>
 #include "windows.h"
 #include <iostream>
@@ -36,7 +36,6 @@
 #include "persistentdata.h"
 #include "load.h"
 
-
 #include <random>
 #include "masterserver.h"
 #include <winhttp.h>
@@ -46,7 +45,6 @@
 #include <string>
 #include <vector>
 #include <sstream>
-
 
 // Helper function to convert wide string to string
 std::string WideToString(const std::wstring& wide) {
@@ -84,12 +82,10 @@ public:
 		if (hSession) WinHttpCloseHandle(hSession);
 	}
 	std::wstring ResolveHostToIPv4(const std::wstring& host) {
-
 		ADDRINFOW hints = {};
 		hints.ai_family = AF_INET; // Only IPv4
 		hints.ai_socktype = SOCK_STREAM;
 		hints.ai_protocol = IPPROTO_TCP;
-
 
 		ADDRINFOW* result = nullptr;
 		int status = GetAddrInfoW(host.c_str(), nullptr, &hints, &result);
@@ -118,7 +114,6 @@ public:
 		return ipv4_address;
 	}
 
-
 	std::vector<uint8_t> SendRequest(const std::wstring& host, const std::wstring& path,
 		const std::vector<uint8_t>& data, bool isPost = true) {
 		if (!hSession) return {};
@@ -133,14 +128,12 @@ public:
 			return {};
 		}
 
-
 		hConnect = WinHttpConnect(hSession, ipv4_host.c_str(), INTERNET_DEFAULT_HTTP_PORT, 0);
 		if (!hConnect) {
 			DWORD error = GetLastError();
 			Warning("WinHttpConnect failed with error %lu\n", error);
 			return {};
 		}
-
 
 		const wchar_t* verb = isPost ? L"POST" : L"GET";
 		hRequest = WinHttpOpenRequest(hConnect, verb, path.c_str(),
@@ -167,7 +160,6 @@ public:
 				Warning("WinHttpSendRequest (POST) failed with error %lu\n", error);
 				return {};
 			}
-
 		}
 		else {
 			BOOL result = WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS,
@@ -203,7 +195,6 @@ public:
 
 		return response;
 	}
-
 };
 
 std::string generate_uuid() {
@@ -252,28 +243,28 @@ void GetServerHeartbeat(HSQUIRRELVM v) {
 	for (int i = 0; i < table->_numOfNodes; i++) {
 		auto node = &table->_nodes[i];
 		if (node->key._type != OT_STRING) {
-	//		Warning("GetServerHeartbeat: Skipping non-string key at index %d, type: %d\n", i, node->key._type);
+			//		Warning("GetServerHeartbeat: Skipping non-string key at index %d, type: %d\n", i, node->key._type);
 			continue;
 		}
 
 		auto key = node->key._unVal.pString->_val;
-	//	Warning("GetServerHeartbeat:   Processing key: '%s', type: %d at index %d\n", key, node->val._type, i);
+		//	Warning("GetServerHeartbeat:   Processing key: '%s', type: %d at index %d\n", key, node->val._type, i);
 
-		// Handle different value types
+			// Handle different value types
 		switch (node->val._type) {
 		case OT_STRING: {
 			auto str = reinterpret_cast<SQString*>(node->val._unVal.pRefCounted);
 			if (strcmp(key, "host_name") == 0) {
 				heartbeat.setHostname(str->_val);
-			//	Warning("GetServerHeartbeat:     Set host_name: '%s'\n", str->_val);
+				//	Warning("GetServerHeartbeat:     Set host_name: '%s'\n", str->_val);
 			}
 			else if (strcmp(key, "map_name") == 0) {
 				heartbeat.setMapName(str->_val);
-			//	Warning("GetServerHeartbeat:     Set map_name: '%s'\n", str->_val);
+				//	Warning("GetServerHeartbeat:     Set map_name: '%s'\n", str->_val);
 			}
 			else if (strcmp(key, "game_mode") == 0) {
 				heartbeat.setGameMode(str->_val);
-			//	Warning("GetServerHeartbeat:     Set game_mode: '%s'\n", str->_val);
+				//	Warning("GetServerHeartbeat:     Set game_mode: '%s'\n", str->_val);
 			}
 			break;
 		}
@@ -281,7 +272,7 @@ void GetServerHeartbeat(HSQUIRRELVM v) {
 		case OT_INTEGER:
 			if (strcmp(key, "max_players") == 0) {
 				heartbeat.setMaxPlayers(node->val._unVal.nInteger);
-			//	Warning("GetServerHeartbeat:     Set max_players: %d\n", node->val._unVal.nInteger);
+				//	Warning("GetServerHeartbeat:     Set max_players: %d\n", node->val._unVal.nInteger);
 			}
 			else if (strcmp(key, "port") == 0) {
 				heartbeat.setPort(node->val._unVal.nInteger);
@@ -293,7 +284,7 @@ void GetServerHeartbeat(HSQUIRRELVM v) {
 			if (strcmp(key, "players") == 0) {
 				auto arr = node->val._unVal.pArray;
 				if (!arr) {
-				//	Warning("GetServerHeartbeat: Players array is null\n");
+					//	Warning("GetServerHeartbeat: Players array is null\n");
 					continue;
 				}
 				//Warning("GetServerHeartbeat: Processing players array with %d slots\n", arr->_usedSlots);
@@ -307,11 +298,11 @@ void GetServerHeartbeat(HSQUIRRELVM v) {
 
 					auto playerTable = arr->_values[j]._unVal.pTable;
 					if (!playerTable) {
-				//		Warning("GetServerHeartbeat: Player table at index %d is null\n", j);
+						//		Warning("GetServerHeartbeat: Player table at index %d is null\n", j);
 						continue;
 					}
 					auto player = players[j];
-				//	Warning("GetServerHeartbeat: Processing player table at index %d\n", j);
+					//	Warning("GetServerHeartbeat: Processing player table at index %d\n", j);
 
 					for (int k = 0; k < playerTable->_numOfNodes; k++) {
 						auto pnode = &playerTable->_nodes[k];
@@ -372,7 +363,7 @@ void GetServerHeartbeat(HSQUIRRELVM v) {
 		if (!response.empty() && response.size() > 2) {
 			Warning("GetServerHeartbeat: MS reports: %s\n", reinterpret_cast<char*>(response.data()));
 		}
-	}).detach();
+		}).detach();
 }
 SQInteger GetServerList(HSQUIRRELVM v) {
 	try {
@@ -503,7 +494,6 @@ void Hk_CHostState__State_GameShutdown(void* thisptr) {
 	static auto host_map_cvar = CCVar_FindVar(cvarinterface, "host_map");
 	if (strlen(host_map_cvar->m_Value.m_pszString) > 2) {
 		std::thread([]() {
-
 			int port = hostport_cvar->m_Value.m_nValue;
 			WinHttpClient client;
 			auto ms_url = CCVar_FindVar(cvarinterface, "r1d_ms");
@@ -515,5 +505,5 @@ void Hk_CHostState__State_GameShutdown(void* thisptr) {
 			Cbuf_AddTextOriginal(0, "host_map \"\"\n", 0);
 	}
 
-		oGameShutDown(thisptr);
+	oGameShutDown(thisptr);
 }

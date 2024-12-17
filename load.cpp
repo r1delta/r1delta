@@ -1176,41 +1176,41 @@ bool __fastcall CClientState__ProcessVoiceData(void* thisptr, SVC_VoiceMessage* 
 //          nSize    -
 //-----------------------------------------------------------------------------
 void __fastcall CNetChan__FlowNewPacket(CNetChan* pChan, int flow, int outSeqNr, int inSeqNr, int nChoked, int nDropped, int nSize) {
-	double netTime; // xmm4_8 (was double)
-	int v8; // r13d
-	int v9; // r14d
-	int v12; // r12d
-	int currentindex; // eax
-	int nextIndex; // r15d
-	int v17; // r8d
-	int v18; // ebp
-	unsigned int v19; // eax
-	int v20; // r9 (was char)
-	int v21; // r8d
-	__int64 v22; // r14
-	float time; // xmm0_4
-	__int64 v24; // rdx
-	__int64 v25; // rcx
-	__int64 v26; // rdx
-	__int64 v27; // rcx
-	__int64 v28; // rdx
-	__int64 v29; // rcx
-	int v30; // edx
-	int v31; // r8 (was char)
-	float v32; // xmm0_4
-	__int64 v33; // r9
-	__int64 v34; // rax
-	__int64 v35; // rdx
-	int v36; // r8d
-	float v37; // xmm3_4
-	__int64 result; // rax
-	float v39; // xmm1_4
-	float v40; // xmm0_4
-	float v41; // xmm1_4
-	netframe_header_t* v42; // rdx
-	float v43; // xmm0_4
-	float v44; // xmm2_4
-	float v45; // xmm0_4
+	double netTime;
+	int v8;
+	int v9;
+	int v12;
+	int currentindex;
+	int nextIndex;
+	int v17;
+	int v18;
+	unsigned int v19;
+	int v20;
+	int v21;
+	__int64 v22;
+	float time;
+	__int64 v24;
+	__int64 v25;
+	__int64 v26;
+	__int64 v27;
+	__int64 v28;
+	__int64 v29;
+	int v30;
+	int v31;
+	float v32;
+	__int64 v33;
+	__int64 v34;
+	__int64 v35;
+	int v36;
+	float v37;
+	__int64 result;
+	float v39;
+	float v40;
+	float v41;
+	netframe_header_t* v42;
+	float v43;
+	float v44;
+	float v45;
 
 	netTime = *reinterpret_cast<double*>(G_engine + 0x30EF1C0);
 	v8 = flow;
@@ -1307,8 +1307,6 @@ void __fastcall CNetChan__FlowNewPacket(CNetChan* pChan, int flow, int outSeqNr,
 							pFrameHeader->choked = 1;
 					}
 
-					// Incremented by four since this loop does four frames
-					// per iteration.
 					numPacketFrames += 4;
 					v21 -= 4;
 					v20 += 4;
@@ -1319,9 +1317,6 @@ void __fastcall CNetChan__FlowNewPacket(CNetChan* pChan, int flow, int outSeqNr,
 				v9 = inSeqNr;
 			}
 
-			// Check if we did not reach NET_FRAMES_BACKUP, else we will
-			// execute the 129'th iteration as well. Also check if the next
-			// index doesn't exceed the outSeqNr.
 			if (numPacketFrames < NET_FRAMES_BACKUP && nextIndex <= v12) {
 				v30 = v12 - nextIndex;
 				v31 = nextIndex;
@@ -1400,7 +1395,6 @@ void __fastcall CNetChan__FlowNewPacket(CNetChan* pChan, int flow, int outSeqNr,
 		pFlow->maxlatency = v41;
 	}
 }
-
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
 	const LDR_DLL_NOTIFICATION_DATA* notification_data,
