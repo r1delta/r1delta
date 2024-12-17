@@ -75,6 +75,14 @@
 #include "netchanwarnings.h"
 #pragma intrinsic(_ReturnAddress)
 
+
+
+extern "C"
+{
+	uintptr_t CNetChan__ProcessSubChannelData_ret0 = 0;
+	uintptr_t CNetChan__ProcessSubChannelData_Asm_continue = 0;
+	extern uintptr_t CNetChan__ProcessSubChannelData_AsmConductBufferSizeCheck;
+}
 void* dll_notification_cookie_;
 
 void Status_ConMsg(const char* text, ...)
@@ -1286,6 +1294,33 @@ void __stdcall LoaderNotificationCallback(
 			RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
 			InitAddons();
 		}
+
+
+		// Fix stack smash in CNetChan::ProcessSubChannelData
+		CNetChan__ProcessSubChannelData_Asm_continue = (uintptr_t)(engine_base + 0x1E8DDA);
+		CNetChan__ProcessSubChannelData_ret0 = (uintptr_t)(engine_base + 0x1E8F26);
+		void* allign = (void*)(engine_base + 0x1EA961);
+
+
+		auto* jmp_pos = (void*)(((uintptr_t)GetModuleHandle(L"engine.dll")) + 0x1E8DD5); // `call nullsub_87` offset
+		// 0xE9, 0x87, 0x1B, 0x00, 0x00 // jmp 0x1b8c (algn_1801EA961)  (0x1EA961 - 0x1E8DD5)
+		DWORD old_protect;
+		VirtualProtect(jmp_pos, 5, PAGE_EXECUTE_READWRITE, &old_protect);
+		*((unsigned char*)jmp_pos) = 0xE9;
+		*(unsigned char*)((uint64_t)jmp_pos + 1) = 0x87;
+		*(unsigned char*)((uint64_t)jmp_pos + 2) = 0x1B;
+		*(unsigned char*)((uint64_t)jmp_pos + 3) = 0x00;
+		*(unsigned char*)((uint64_t)jmp_pos + 4) = 0x00;
+		VirtualProtect(jmp_pos, 5, old_protect, &old_protect);
+
+		*((unsigned char*)allign) = 0xFF;
+		*(unsigned char*)((uint64_t)allign + 1) = 0x25;
+		*(unsigned char*)((uint64_t)allign + 2) = 0x00;
+		*(unsigned char*)((uint64_t)allign + 3) = 0x00;
+		*(unsigned char*)((uint64_t)allign + 4) = 0x00;
+		*(unsigned char*)((uint64_t)allign + 5) = 0x00;
+		*(uintptr_t**)((uint64_t)allign + 6) = &CNetChan__ProcessSubChannelData_AsmConductBufferSizeCheck;
+
 	}
 	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"client.dll") == 0) {
 		G_client = (uintptr_t)notification_data->Loaded.DllBase;
