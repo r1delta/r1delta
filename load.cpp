@@ -1034,6 +1034,55 @@ __int64 __fastcall HookedServerClassRegister(__int64 a1, char* a2, __int64 a3) {
 	return ServerClassRegister_7F7E0(a1, a2, a3);
 }
 
+typedef void (*CBaseClientSetNameType)(__int64 thisptr, const char* name);
+CBaseClientSetNameType CBaseClientSetNameOriginal;
+
+void __fastcall HookedCBaseClientSetName(__int64 thisptr,  const char* name)
+{
+	/*
+	* Restrict client names to printable ASCII characters.
+Enforce a maximum length of 32 characters.
+	*/
+
+	const char* nameBuffer = name;
+
+	// Check if the name is too long
+	if (strlen(name) > 32)
+	{
+		// Truncate the name
+		char truncatedName[256];
+		strncpy_s(truncatedName, name, 32);
+		truncatedName[32] = '\0';
+
+		nameBuffer = truncatedName;
+	}
+
+	// Check if the name contains any non-printable ASCII characters
+	for (size_t i = 0; i < strlen(name); i++)
+	{
+		if (name[i] < 32 || name[i] > 126)
+		{
+			// Remove the non-printable character
+			char printableName[256];
+			size_t j = 0;
+			for (size_t i = 0; i < strlen(name); i++)
+			{
+				if (name[i] >= 32 && name[i] <= 126)
+				{
+					printableName[j] = name[i];
+					j++;
+				}
+			}
+			printableName[j] = '\0';
+			nameBuffer = printableName;
+			break;
+		}
+	}
+
+	Msg("Updated client name: %s to: %s\n", name,nameBuffer);
+	CBaseClientSetNameOriginal(thisptr, nameBuffer);
+}
+
 
 
 typedef void* (*CEntityFactoryDictionary__CreateType)(void* thisptr, const char* pClassName);
@@ -1204,6 +1253,16 @@ void __stdcall LoaderNotificationCallback(
 		if (!IsDedicatedServer()) {
 			RegisterConCommand("script_client", script_client_cmd, "Execute Squirrel code in client context", FCVAR_NONE);
 			RegisterConCommand("script_ui", script_ui_cmd, "Execute Squirrel code in UI context", FCVAR_NONE);
+		}
+
+		//0x0000415198 on dedicated
+		// 0x0620818 on client
+
+		if (IsDedicatedServer()) {
+			MH_CreateHook((LPVOID)(G_engine_ds + 0x45530), &HookedCBaseClientSetName, reinterpret_cast<LPVOID*>(&CBaseClientSetNameOriginal));
+		}
+		else {
+			MH_CreateHook((LPVOID)(G_engine + 0xD4840), &HookedCBaseClientSetName, reinterpret_cast<LPVOID*>(&CBaseClientSetNameOriginal));
 		}
 
 		//MH_CreateHook((LPVOID)(server_base + 0x364140), &sub_364140, reinterpret_cast<LPVOID*>(NULL));
