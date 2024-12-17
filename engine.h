@@ -20,6 +20,58 @@ int64_t FuncThatReturnsFF_Stub();
 bool FuncThatReturnsBool_Stub();
 void Host_Error(const char* error, ...);
 
+
+#define FLOW_OUTGOING	0		
+#define FLOW_INCOMING	1
+#define MAX_FLOWS		2		// in & out
+
+
+// How fast to converge flow estimates
+#define FLOW_AVG ( 3.0 / 4.0 )
+ // Don't compute more often than this
+#define FLOW_INTERVAL 0.25
+
+
+#define NET_FRAMES_BACKUP	64		// must be power of 2
+#define NET_FRAMES_MASK		(NET_FRAMES_BACKUP-1)
+#define MAX_SUBCHANNELS		8		// we have 8 alternative send&wait bits
+
+#define SUBCHANNEL_FREE		0	// subchannel is free to use
+#define SUBCHANNEL_TOSEND	1	// subchannel has data, but not send yet
+#define SUBCHANNEL_WAITING	2   // sbuchannel sent data, waiting for ACK
+#define SUBCHANNEL_DIRTY	3	// subchannel is marked as dirty during changelevel
+
+typedef struct netframe_header_s {
+	float time;
+	int size;
+	short choked;
+	bool valid;
+	float latency;
+} netframe_header_t;
+
+typedef struct netframe_s {
+	int dropped;
+	float avg_latency;
+} netframe_t;
+
+typedef struct netflow_s {
+	float nextcompute;
+	float avgbytespersec;
+	float avgpacketspersec;
+	float avgloss;
+	float avgchoke;
+	float avglatency;
+	float latency;
+	float maxlatency;
+	int64_t totalpackets;
+	int64_t totalbytes;
+	int64_t totalupdates;
+	int currentindex;
+	netframe_header_t frame_headers[NET_FRAMES_BACKUP];
+	netframe_t frames[NET_FRAMES_BACKUP];
+	netframe_t* current_frame;
+} netflow_t;
+
 class CNetChan {
 public:
 	virtual const char* GetName(void) = 0;
@@ -46,37 +98,6 @@ public:
 		int sendSeqNr;
 		int state;
 		int index;
-	};
-
-	struct netframe_header_s {
-		float time;
-		int size;
-		__int16 choked;
-		bool valid;
-		float latency;
-	};
-
-	struct __declspec(align(4)) netframe_s {
-		int dropped;
-		float avg_latency;
-		float m_flInterpolationAmount;
-		unsigned __int16 msggroups[15];
-	};
-
-	struct netflow_t {
-		float nextcompute;
-		float avgbytespersec;
-		float avgpacketspersec;
-		float avgloss;
-		float avgchoke;
-		float avglatency;
-		float latency;
-		int totalpackets;
-		int totalbytes;
-		int currentindex;
-		netframe_header_s frame_headers[128];
-		netframe_s frames[128];
-		netframe_s* currentframe;
 	};
 
 	bool m_bProcessingMessages;
@@ -115,7 +136,7 @@ public:
 	int m_StreamReceived;
 	char m_SteamFile[260];
 	CUtlMemory<unsigned char, int> m_StreamData;
-	CNetChan::netflow_t m_DataFlow[2];
+	netflow_t m_DataFlow[2];
 	int m_MsgStats[15];
 	int m_PacketDrop;
 	char m_Name[32];
