@@ -566,7 +566,7 @@ bool ReadConnectPacket2015AndWriteConnectPacket2014(bf_read& msg, bf_write& buff
 typedef char (*ProcessConnectionlessPacketType)(unsigned int* a1, netpacket_s* a2);
 ProcessConnectionlessPacketType ProcessConnectionlessPacketOriginal;
 double lastReceived = 0.f;
-char __fastcall ProcessConnectionlessPacket(unsigned int* a1, netpacket_s* a2)
+char __fastcall ProcessConnectionlessPacketDedi(unsigned int* a1, netpacket_s* a2)
 {
 	char buffer[1200] = { 0 };
 	bf_write writer(reinterpret_cast<char*>(buffer), sizeof(buffer));
@@ -585,6 +585,26 @@ char __fastcall ProcessConnectionlessPacket(unsigned int* a1, netpacket_s* a2)
 		return ProcessConnectionlessPacketOriginal(a1, a2);
 	}
 }
+
+ProcessConnectionlessPacketType ProcessConnectionlessPacketOriginalClient;
+
+
+char __fastcall ProcessConnectionlessPacketClient(unsigned int* a1, netpacket_s* a2)
+{
+	static auto sv_limit_quires = CCVar_FindVar(cvarinterface,"sv_limit_queries");
+	static auto& sv_limit_queries_var = sv_limit_quires->m_Value.m_nValue;
+	if (sv_limit_queries_var == 1 && a2->pData[4] == 'N') {
+		sv_limit_queries_var = 0;
+	}
+	else if(sv_limit_queries_var == 0 && a2->pData[4] != 'N') {
+		sv_limit_queries_var = 1;
+	}
+	return ProcessConnectionlessPacketOriginalClient(a1, a2);
+}
+
+
+
+
 typedef void (*CAI_NetworkManager__BuildStubType)(__int64 a1);
 typedef void (*CAI_NetworkManager__LoadNavMeshType)(__int64 a1, __int64 a2, const char* a3);
 CAI_NetworkManager__LoadNavMeshType CAI_NetworkManager__LoadNavMeshOriginal;
@@ -1331,10 +1351,9 @@ void __stdcall LoaderNotificationCallback(
 
 	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"engine_ds.dll") == 0) {
 		G_engine_ds = (uintptr_t)notification_data->Loaded.DllBase;
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x433C0), &ProcessConnectionlessPacket, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginal));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x433C0), &ProcessConnectionlessPacketDedi, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginal));
 		InitAddons();
 		InitDedicated();		
-		
 	}
 
 	
@@ -1347,37 +1366,39 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)(engine_base + 0x203C20), &NET_SetConVar__ReadFromBuffer, NULL);
 		MH_CreateHook((LPVOID)(engine_base + 0x202F80), &NET_SetConVar__WriteToBuffer, NULL);
 		MH_CreateHook((LPVOID)(engine_base + 0x1FE3F0), &SVC_ServerInfo__WriteToBuffer, reinterpret_cast<LPVOID*>(&SVC_ServerInfo__WriteToBufferOriginal));
+		MH_CreateHook((LPVOID)(engine_base + 0x0D2490), &ProcessConnectionlessPacketClient, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginalClient));
 		if (!IsDedicatedServer()) {
 			MH_CreateHook((LPVOID)(G_engine + 0x1305E0), &ExecuteConfigFile, NULL);
 			RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
 			InitAddons();
+			
 		}
 
 
-		// Fix stack smash in CNetChan::ProcessSubChannelData
-		CNetChan__ProcessSubChannelData_Asm_continue = (uintptr_t)(engine_base + 0x1E8DDA);
-		CNetChan__ProcessSubChannelData_ret0 = (uintptr_t)(engine_base + 0x1E8F26);
-		void* allign = (void*)(engine_base + 0x1EA961);
+		//// Fix stack smash in CNetChan::ProcessSubChannelData
+		//CNetChan__ProcessSubChannelData_Asm_continue = (uintptr_t)(engine_base + 0x1E8DDA);
+		//CNetChan__ProcessSubChannelData_ret0 = (uintptr_t)(engine_base + 0x1E8F26);
+		//void* allign = (void*)(engine_base + 0x1EA961);
 
 
-		auto* jmp_pos = (void*)(((uintptr_t)GetModuleHandle(L"engine.dll")) + 0x1E8DD5); // `call nullsub_87` offset
-		// 0xE9, 0x87, 0x1B, 0x00, 0x00 // jmp 0x1b8c (algn_1801EA961)  (0x1EA961 - 0x1E8DD5)
-		DWORD old_protect;
-		VirtualProtect(jmp_pos, 5, PAGE_EXECUTE_READWRITE, &old_protect);
-		*((unsigned char*)jmp_pos) = 0xE9;
-		*(unsigned char*)((uint64_t)jmp_pos + 1) = 0x87;
-		*(unsigned char*)((uint64_t)jmp_pos + 2) = 0x1B;
-		*(unsigned char*)((uint64_t)jmp_pos + 3) = 0x00;
-		*(unsigned char*)((uint64_t)jmp_pos + 4) = 0x00;
-		VirtualProtect(jmp_pos, 5, old_protect, &old_protect);
+		//auto* jmp_pos = (void*)(((uintptr_t)GetModuleHandle(L"engine.dll")) + 0x1E8DD5); // `call nullsub_87` offset
+		//// 0xE9, 0x87, 0x1B, 0x00, 0x00 // jmp 0x1b8c (algn_1801EA961)  (0x1EA961 - 0x1E8DD5)
+		//DWORD old_protect;
+		//VirtualProtect(jmp_pos, 5, PAGE_EXECUTE_READWRITE, &old_protect);
+		//*((unsigned char*)jmp_pos) = 0xE9;
+		//*(unsigned char*)((uint64_t)jmp_pos + 1) = 0x87;
+		//*(unsigned char*)((uint64_t)jmp_pos + 2) = 0x1B;
+		//*(unsigned char*)((uint64_t)jmp_pos + 3) = 0x00;
+		//*(unsigned char*)((uint64_t)jmp_pos + 4) = 0x00;
+		//VirtualProtect(jmp_pos, 5, old_protect, &old_protect);
 
-		*((unsigned char*)allign) = 0xFF;
-		*(unsigned char*)((uint64_t)allign + 1) = 0x25;
-		*(unsigned char*)((uint64_t)allign + 2) = 0x00;
-		*(unsigned char*)((uint64_t)allign + 3) = 0x00;
-		*(unsigned char*)((uint64_t)allign + 4) = 0x00;
-		*(unsigned char*)((uint64_t)allign + 5) = 0x00;
-		*(uintptr_t**)((uint64_t)allign + 6) = &CNetChan__ProcessSubChannelData_AsmConductBufferSizeCheck;
+		//*((unsigned char*)allign) = 0xFF;
+		//*(unsigned char*)((uint64_t)allign + 1) = 0x25;
+		//*(unsigned char*)((uint64_t)allign + 2) = 0x00;
+		//*(unsigned char*)((uint64_t)allign + 3) = 0x00;
+		//*(unsigned char*)((uint64_t)allign + 4) = 0x00;
+		//*(unsigned char*)((uint64_t)allign + 5) = 0x00;
+		//*(uintptr_t**)((uint64_t)allign + 6) = &CNetChan__ProcessSubChannelData_AsmConductBufferSizeCheck;
 
 	}
 	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"client.dll") == 0) {
