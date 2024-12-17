@@ -49,7 +49,7 @@ bool __fastcall SVC_Print_Process_Hook(__int64 a1)
 	return true;
 }
 
-bool recursive = false;
+bool logging_recursive = false;
 
 bool is_interesting_format(const char* format) {
 	bool has_space = false;
@@ -98,10 +98,10 @@ bool is_interesting_format(const char* format) {
 //			return -1;
 //		}
 //
-//		if (!recursive && is_interesting_format(Format) && strlen(Buffer) < 512) {
-//			recursive = true;
+//		if (!logging_recursive && is_interesting_format(Format) && strlen(Buffer) < 512) {
+//			logging_recursive = true;
 //			Msg("%s\n", Buffer);
-//			recursive = false;
+//			logging_recursive = false;
 //		}
 //		return result;
 //	}

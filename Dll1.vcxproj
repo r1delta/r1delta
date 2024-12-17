@@ -298,6 +298,9 @@
   <ItemGroup>
     <MASM Include="NetChanFixes.asm" />
   </ItemGroup>
+  <ItemGroup>
+    <Natvis Include="base.natvis" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
     <Import Project="$(VCTargetsPath)\BuildCustomizations\masm.targets" />

@@ -1392,13 +1392,15 @@ void __stdcall LoaderNotificationCallback(
 		//*(unsigned char*)((uint64_t)jmp_pos + 4) = 0x00;
 		//VirtualProtect(jmp_pos, 5, old_protect, &old_protect);
 
-		//*((unsigned char*)allign) = 0xFF;
-		//*(unsigned char*)((uint64_t)allign + 1) = 0x25;
-		//*(unsigned char*)((uint64_t)allign + 2) = 0x00;
-		//*(unsigned char*)((uint64_t)allign + 3) = 0x00;
-		//*(unsigned char*)((uint64_t)allign + 4) = 0x00;
-		//*(unsigned char*)((uint64_t)allign + 5) = 0x00;
-		//*(uintptr_t**)((uint64_t)allign + 6) = &CNetChan__ProcessSubChannelData_AsmConductBufferSizeCheck;
+		VirtualProtect(allign, 6, PAGE_EXECUTE_READWRITE, &old_protect);
+		*((unsigned char*)allign) = 0xFF;
+		*(unsigned char*)((uint64_t)allign + 1) = 0x25;
+		*(unsigned char*)((uint64_t)allign + 2) = 0x00;
+		*(unsigned char*)((uint64_t)allign + 3) = 0x00;
+		*(unsigned char*)((uint64_t)allign + 4) = 0x00;
+		*(unsigned char*)((uint64_t)allign + 5) = 0x00;
+		*(uintptr_t**)((uint64_t)allign + 6) = &CNetChan__ProcessSubChannelData_AsmConductBufferSizeCheck;
+		VirtualProtect(allign, 6, old_protect, &old_protect);
 
 	}
 	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"client.dll") == 0) {

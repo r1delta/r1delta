@@ -109,7 +109,7 @@ inline void Destruct( T* pMemory )
 {
 	pMemory->~T();
 
-#ifdef _DEBUG
+#if BUILD_DEBUG
 	memset( (void*)pMemory, 0xDD, sizeof(T) );
 #endif
 }

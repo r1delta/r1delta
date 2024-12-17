@@ -123,7 +123,7 @@ public:
 // DbgAssert is an assert that is only compiled into _DEBUG builds.
 // DbgVerify will always evaluate the expression.  In a _DEBUG build,
 // it will also Assert that the expression is true.
-#if defined(_DEBUG) && defined( DBGFLAG_ASSERT )
+#if BUILD_DEBUG && defined( DBGFLAG_ASSERT )
 	#define DbgAssert( _exp )			Assert( _exp )
 	#define DbgAssertMsg( _exp, ... )	AssertMsg( _exp, __VA_ARGS__ )
 	#define DbgVerify( _exp )			Assert( _exp )

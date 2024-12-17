@@ -32,6 +32,7 @@
 // ======------------------==------------------------==+++***************************######%%
 // =========-----===--------==------------------------==++********#*#####**#######*########%%
 
+#include "core.h"
 #include "utils.h"
 
 constexpr size_t EXEC_MEM_SIZE = 32 * 1152;
@@ -59,7 +60,7 @@ uintptr_t CreateFunction(void* func, void* real) {
 	uint8_t* bytes = (uint8_t*)ret;
 
 	if (bytes >= ((uint8_t*)execMem + EXEC_MEM_SIZE)) {
-#if defined(_DEBUG)
+#if BUILD_DEBUG
 		__debugbreak();
 #endif
 		return 0;
