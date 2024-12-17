@@ -4,15 +4,14 @@
 #include "vsdk/public/tier1/utlmemory.h"
 #include "cvar.h"
 #include "squirrel.h"
-
+#include "netchanwarnings.h"
 struct NetMessageCvar_t // sizeof=0x208
 {
 	char name[260];
     char value[260];
 };
-struct alignas(8) NET_SetConVar
+struct alignas(8) NET_SetConVar : INetMessage
 {
-	void* vtable;
 	bool m_bReliable;
 	void* m_NetChannel;
 	void* m_pMessageHandler;
