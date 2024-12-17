@@ -54,7 +54,7 @@
 // Purpose: String formatter with specified size
 //
 
-#ifdef _DEBUG
+#if BUILD_DEBUG
 #define QUIET_TRUNCATION false
 #else
 #define QUIET_TRUNCATION true		// Force quiet for release builds

@@ -52,7 +52,7 @@
 #include <malloc.h>
 
 inline void* MemAlloc_AllocAligned(size_t nSize, size_t alignment) {
-#ifdef _DEBUG
+#if BUILD_DEBUG
 	return _aligned_malloc_dbg(nSize, alignment, __FILE__, __LINE__);
 #else
 	return _aligned_malloc(nSize, alignment);
@@ -64,7 +64,7 @@ inline void* MemAlloc_AllocAlignedFileLine(size_t nSize, size_t alignment, const
 }
 
 inline void MemAlloc_FreeAligned(void* p) {
-#ifdef _DEBUG
+#if BUILD_DEBUG
 	_aligned_free_dbg(p);
 #else
 	_aligned_free(p);
@@ -658,7 +658,7 @@ float RandomVectorInUnitCircle( Vector2D *pVector );
 //-----------------------------------------------------------------------------
 inline Vector::Vector(void)									
 { 
-#ifdef _DEBUG
+#if BUILD_DEBUG
 #ifdef VECTOR_PARANOIA
 	// Initialize to NAN to catch errors
 	x = y = z = VEC_T_NAN;
@@ -1751,7 +1751,7 @@ public:
 	inline Quaternion(void)	{ 
 	
 	// Initialize to NAN to catch errors
-#ifdef _DEBUG
+#if BUILD_DEBUG
 #ifdef VECTOR_PARANOIA
 		x = y = z = w = VEC_T_NAN;
 #endif
@@ -2170,7 +2170,7 @@ inline void VectorMA( const QAngle &start, float scale, const QAngle &direction,
 //-----------------------------------------------------------------------------
 inline QAngle::QAngle(void)									
 { 
-#ifdef _DEBUG
+#if BUILD_DEBUG
 #ifdef VECTOR_PARANOIA
 	// Initialize to NAN to catch errors
 	x = y = z = VEC_T_NAN;

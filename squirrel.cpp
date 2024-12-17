@@ -506,7 +506,7 @@ bool GetSQVMFuncs() {
 	g_pClientArray = (CBaseClient*)(engine + 0x2966340);
 	g_pClientArrayDS = (CBaseClientDS*)(engine + 0x1C89C48);
 
-#if defined(_DEBUG)
+#if BUILD_DEBUG
 	if (!G_vscript) MessageBoxW(0, L"G_launcher is null in GetSQVMFuncs", L"ASSERT!!!", MB_ICONERROR | MB_OK);
 #endif
 

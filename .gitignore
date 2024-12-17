@@ -434,3 +434,4 @@ FodyWeavers.xsd
 !tier0_orig.lib
 !libminhook.lib
 !vstdlib.lib
+build/

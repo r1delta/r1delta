@@ -32,6 +32,7 @@
 // ======------------------==------------------------==+++***************************######%%
 // =========-----===--------==------------------------==++********#*#####**#######*########%%
 
+#include "core.h"
 #include "utils.h"
 #include <tier0/platformtime.h>
 
@@ -72,7 +73,7 @@ uintptr_t CreateFunction(void* func, void* real) {
 	uint8_t* bytes = (uint8_t*)ret;
 
 	if (bytes >= ((uint8_t*)execMem + EXEC_MEM_SIZE)) {
-#if defined(_DEBUG)
+#if BUILD_DEBUG
 		__debugbreak();
 #endif
 		return 0;

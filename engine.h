@@ -8,17 +8,34 @@
 #include "vsdk/public/tier1/utlmemory.h"
 #include "vsdk/public/tier1/utlvector.h"
 #include <tier1/utlstring.h>
+#include "netchanwarnings.h"
 
 class CVEngineServer;
 class INetMessage;
 
-extern CVEngineServer* g_CVEngineServer;
-extern uintptr_t g_CVEngineServerInterface;
-extern uintptr_t g_r1oCVEngineServerInterface[203];
+struct subChannel_s {
+	int startFragment[2];
+	int numFragments[2];
+	int sendSeqNr;
+	int state;
+	int index;
+};
 
-int64_t FuncThatReturnsFF_Stub();
-bool FuncThatReturnsBool_Stub();
-void Host_Error(const char* error, ...);
+struct dataFragments_s {
+	void* file;
+	char filename[260];
+	char* buffer;
+	unsigned int bytes;
+	unsigned int bits;
+	unsigned int transferID;
+	bool isCompressed;
+	unsigned int nUncompressedSize;
+	bool asTCP;
+	bool isReplayDemo;
+	int numFragments;
+	int ackedFragments;
+	int pendingFragments;
+};
 
 #define FLOW_OUTGOING	0
 #define FLOW_INCOMING	1
@@ -30,7 +47,6 @@ void Host_Error(const char* error, ...);
 #define NET_FRAMES_BACKUP	64		// must be power of 2
 #define NET_FRAMES_MASK		(NET_FRAMES_BACKUP-1)
 #define MAX_SUBCHANNELS		8		// we have 8 alternative send&wait bits
-
 #define SUBCHANNEL_FREE		0	// subchannel is free to use
 #define SUBCHANNEL_TOSEND	1	// subchannel has data, but not send yet
 #define SUBCHANNEL_WAITING	2   // sbuchannel sent data, waiting for ACK
@@ -67,6 +83,65 @@ typedef struct netflow_s {
 	netframe_t* current_frame;
 } netflow_t;
 
+class __declspec(align(8)) CNetChan {
+public:
+	void* __vftable;
+	bool m_bProcessingMessages;
+	bool m_bShouldDelete;
+	bool m_bStopProcessing;
+	int m_nOutSequenceNr;
+	int m_nInSequenceNr;
+	int m_nOutSequenceNrAck;
+	int m_nOutReliableState;
+	int m_nInReliableState;
+	int m_nChokedPackets;
+	bool m_bConnectionComplete_OrPreSignon;
+	CBitWrite m_StreamReliable;
+	char pad2[18];
+	CBitWrite m_StreamVoice;
+	char pad3[18];
+	int m_Socket;
+	int m_StreamSocket;
+	unsigned int m_MaxReliablePayloadSize;
+	CNetAdr remote_address;
+	float last_received;
+	long double connect_time;
+	int m_Rate;
+	long double m_fClearTime;
+	char pad4[64];
+	dataFragments_s m_ReceiveList[2];
+	subChannel_s m_SubChannels[8];
+	unsigned int m_FileRequestCounter;
+	bool m_bFileBackgroundTranmission;
+	bool m_bUseCompression;
+	bool m_StreamActive;
+	int m_SteamType;
+	int m_StreamSeqNr;
+	int m_StreamLength;
+	int m_StreamReceived;
+	char m_SteamFile[260];
+	char pad5[32];
+	netflow_s m_DataFlow[2];
+	int m_MsgStats[15];
+	int m_PacketDrop;
+	char m_Name[32];
+	char pad6[12];
+
+public:
+	const char* GetName() {
+		return CallVFunc< const char* >(0, this);
+	}
+};
+//static_assert(offsetof(CNetChan, m_nChokedPackets) == 24);
+//static_assert(offsetof(CNetChan, m_bConnectionComplete_OrPreSignon) == 1240);
+extern CVEngineServer* g_CVEngineServer;
+extern uintptr_t g_CVEngineServerInterface;
+extern uintptr_t g_r1oCVEngineServerInterface[203];
+
+int64_t FuncThatReturnsFF_Stub();
+bool FuncThatReturnsBool_Stub();
+void Host_Error(const char* error, ...);
+
 class INetChannelHandler {
 public:
 	virtual void padlololol() = 0;
@@ -79,38 +154,6 @@ public:
 	virtual void FileReceived(const char*, unsigned int, bool);
 	virtual void FileDenied(const char*, unsigned int, bool);
 	virtual void FileSent(const char*, unsigned int, bool);
-};
-
-class INetMessage {
-public:
-	virtual (~INetMessage)();
-	virtual void(SetNetChannel)(void*);
-	virtual void(SetReliable)(bool);
-	virtual bool(Process)();
-	virtual bool(ReadFromBuffer)(bf_read*);
-	virtual bool(WriteToBuffer)(bf_write*);
-	virtual bool(IsUnreliable)();
-	virtual bool(IsReliable)();
-	virtual int(GetType)();
-	virtual int(GetGroup)();
-	virtual const char* (GetName)();
-	virtual void* (GetNetChannel)();
-	virtual const char* (ToString)();
-	virtual unsigned int(GetSize)();
-};
-
-class CNetMessage : INetMessage {
-public:
-	virtual void	SetNetChannel(CNetChan* netchan) { m_NetChannel = netchan; }
-	virtual void	SetReliable(bool state) { m_bReliable = state; }
-	virtual bool	IsReliable(void) const { return m_bReliable; }
-	virtual int		GetGroup(void) const { return m_nGroup; }
-	virtual CNetChan* GetNetChannel(void) const { return m_NetChannel; }
-
-	int m_nGroup;
-	bool m_bReliable;
-	CNetChan* m_NetChannel;
-	INetChannelHandler* m_pMessageHandler;
 };
 
 #define Bits2Bytes(b) ((b+7)>>3)

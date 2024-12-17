@@ -16,6 +16,16 @@
 #pragma once
 #endif
 
+#if !defined(BUILD_DEBUG)
+# if defined(NDEBUG)
+#  define BUILD_DEBUG 0
+# elif defined(_DEBUG)
+#  define BUILD_DEBUG 1
+# else
+#  pragma error Could not determine BUILD_DEBUG value
+# endif
+#endif
+
 #include "tier0/platform.h"
 
 #ifndef MIN
@@ -44,7 +54,7 @@ typedef enum
 typedef void (*BitBufErrorHandler)(BitBufErrorType errorType, const char* pDebugName);
 
 
-#if defined( _DEBUG )
+#if BUILD_DEBUG
 extern void InternalBitBufErrorHandler(BitBufErrorType errorType, const char* pDebugName);
 #define CallErrorHandler( errorType, pDebugName ) InternalBitBufErrorHandler( errorType, pDebugName );
 #else
@@ -368,7 +378,7 @@ inline void	bf_write::WriteOneBitAt(int iBit, int nValue)
 
 inline void bf_write::WriteUBitLong(unsigned int curData, int numbits, bool bCheckRange)
 {
-#ifdef _DEBUG
+#if BUILD_DEBUG
 	// Make sure it doesn't overflow.
 	if (bCheckRange && numbits < 32)
 	{
@@ -994,7 +1004,7 @@ void CBitWrite::WriteOneBit(int nValue)
 FORCEINLINE void CBitWrite::WriteUBitLong(unsigned int nData, int nNumBits, bool bCheckRange)
 {
 
-#ifdef _DEBUG
+#ifdef BUILD_DEBUG
 	// Make sure it doesn't overflow.
 	if (bCheckRange && nNumBits < 32)
 	{

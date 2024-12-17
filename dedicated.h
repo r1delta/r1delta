@@ -5,19 +5,19 @@
 #include "factory.h"
 #include "bitbuf.h"
 struct vtableRef2Engines {
-#if defined(_DEBUG)
+#if defined(BUILD_DEBUG)
 	const char* name;
 #endif
 	uintptr_t offset_engine;
 	uintptr_t offset_engine_ds;
 };
-#if defined(_DEBUG)
+#if defined(BUILD_DEBUG)
 #define VTABLEREF2ENGINES(N, E, EDS) { (N), (E), (EDS) }
 #else
 #define VTABLEREF2ENGINES(N, E, EDS) { (E), (EDS) }
 #endif
 
-#if !defined(_DEBUG)
+#if !defined(BUILD_DEBUG)
 const
 #endif
 inline vtableRef2Engines netMessages[] = {

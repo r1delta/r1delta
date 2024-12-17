@@ -196,7 +196,7 @@ void bf_write::WriteSBitLong(int data, int numbits)
 	// (Some old code writes direct integers right into the buffer).
 	if (data < 0)
 	{
-#ifdef _DEBUG
+#if BUILD_DEBUG
 		if (numbits < 32)
 		{
 			// Make sure it doesn't overflow.

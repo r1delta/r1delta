@@ -1,15 +1,24 @@
 #pragma once
+#include "engine.h"
 bool InitNetChanWarningHooks();
 
-enum SIGNONSTATE : int {
-	SIGNONSTATE_NONE = 0, // no state yet; about to connect.
-	SIGNONSTATE_CHALLENGE = 1, // client challenging server; all OOB packets.
-	SIGNONSTATE_CONNECTED = 2, // client is connected to server; netchans ready.
-	SIGNONSTATE_NEW = 3, // just got serverinfo and string tables.
-	SIGNONSTATE_PRESPAWN = 4, // received signon buffers.
-	SIGNONSTATE_GETTING_DATA = 5, // getting persistence data.
-	SIGNONSTATE_SPAWN = 6, // ready to receive entity packets.
-	SIGNONSTATE_FIRST_SNAP = 7, // received baseline snapshot.
-	SIGNONSTATE_FULL = 8, // we are fully connected; first non-delta packet received.
-	SIGNONSTATE_CHANGELEVEL = 9, // server is changing level; please wait.
+class CNetChan;
+
+struct /*VFT*/ INetMessage {
+	virtual (~INetMessage)();
+	virtual void(SetNetChannel)(void*);
+	virtual void(SetReliable)(bool);
+	virtual bool(Process)();
+	virtual bool(ReadFromBuffer)(bf_read*);
+	virtual bool(WriteToBuffer)(bf_write*);
+	virtual bool(IsUnreliable)();
+	virtual bool(IsReliable)();
+	virtual int(GetType)();
+	virtual int(GetGroup)();
+	virtual const char* (GetName)();
+	virtual CNetChan* (GetNetChannel)();
+	virtual const char* (ToString)();
+	virtual unsigned int(GetSize)();
 };
+
+bool InitNetChanWarningHooks();

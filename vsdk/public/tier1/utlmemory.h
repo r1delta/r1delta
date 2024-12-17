@@ -325,7 +325,7 @@ CUtlMemory<T, I>::~CUtlMemory()
 {
 	Purge();
 
-#ifdef _DEBUG
+#if BUILD_DEBUG
 	m_pMemory = reinterpret_cast<T*>(0xFEFEBAADFEFEBAAD);
 	m_nAllocationCount = 0x7BADF00D;
 #endif

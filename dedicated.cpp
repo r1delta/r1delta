@@ -1,3 +1,4 @@
+#include "core.h"
 #include "dedicated.h"
 #include <intrin.h>
 #include "logging.h"
@@ -8,7 +9,7 @@
 
 #define VTABLE_UPDATE_FORCE 1
 
-#if defined(_DEBUG)
+#if BUILD_DEBUG
 
 // NOTE(mrsteyk): this is intentionally slow to make you aware of what you are doing.
 //                you must atone for your sins.
@@ -247,13 +248,13 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 
 
 
-#if defined(_DEBUG) && VTABLE_UPDATE_FORCE
+#if BUILD_DEBUG && VTABLE_UPDATE_FORCE
 	OutputDebugStringA("const vtableRef2Engines netMessages[] = {\n");
 #endif
 
 	for (size_t i = 0; i < (sizeof(netMessages) / sizeof(netMessages[0])); i++) {
 		auto msg = &netMessages[i];
-#if defined(_DEBUG)
+#if BUILD_DEBUG
 		if (VTABLE_UPDATE_FORCE || !msg->offset_engine || !msg->offset_engine_ds) {
 			static char buf[512];
 			if (FindVTables(engine, engineDS, msg)) {
@@ -279,7 +280,7 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 		}
 	}
 
-#if defined(_DEBUG) && VTABLE_UPDATE_FORCE
+#if BUILD_DEBUG && VTABLE_UPDATE_FORCE
 	OutputDebugStringA("};\n");
 #endif
 	// copy sendtable funcs
@@ -290,7 +291,7 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 	MH_EnableHook(MH_ALL_HOOKS);
 	reinterpret_cast<char(__fastcall*)(__int64, CreateInterfaceFn)>((uintptr_t)(engine) + 0x01A04A0)(0, (CreateInterfaceFn)(engineDS + 0xE9000)); // connect nondedi engine
 	reinterpret_cast<void(__fastcall*)(int, void*)>((uintptr_t)(engine) + 0x47F580)(0, 0); // register nondedi engine cvars
-#ifdef _DEBUG
+#if BUILD_DEBUG
 	if (!InitNetChanWarningHooks())
 		MessageBoxA(NULL, "Failed to initialize warning hooks", "ERROR", 16);
 #endif

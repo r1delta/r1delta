@@ -106,9 +106,17 @@
 	#define IsRetail() false
 #endif
 
+#if !defined(BUILD_DEBUG)
+# if defined(NDEBUG)
+#  define BUILD_DEBUG 0
+# elif defined(_DEBUG)
+#  define BUILD_DEBUG 1
+# else
+#  pragma error Could not determine BUILD_DEBUG value
+# endif
+#endif
 
-
-#ifdef _DEBUG
+#if BUILD_DEBUG
 	#define IsRelease() false
 	#define IsDebug() true
 #else

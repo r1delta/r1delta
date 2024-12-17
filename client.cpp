@@ -1,6 +1,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+#include "core.h"
 #include "client.h"
 #include "persistentdata.h"
 #include "load.h"
@@ -127,7 +128,7 @@ void InitClient() {
 	if (IsNoOrigin())
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("ws2_32.dll"), "getaddrinfo"), &hookedGetAddrInfo, reinterpret_cast<LPVOID*>(&originalGetAddrInfo));
 
-#ifdef _DEBUG
+#if BUILD_DEBUG
 	if (!InitNetChanWarningHooks())
 		MessageBoxA(NULL, "Failed to initialize warning hooks", "ERROR", 16);
 #endif

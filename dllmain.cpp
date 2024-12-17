@@ -47,6 +47,8 @@
 typedef const char* (__cdecl* wine_get_version_func)();
 CPUInformation* (__fastcall* GetCPUInformationOriginal)();
 
+
+
 const CPUInformation* GetCPUInformationDet()
 {
 	CPUInformation* result = GetCPUInformationOriginal();
@@ -174,6 +176,8 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 			doBinaryPatchForFile(*ndata);
 			FreeModuleNotificationData(ndata);
 		}
+
+	
 
 		break; 
 	}
