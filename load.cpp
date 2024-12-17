@@ -73,6 +73,7 @@
 #include "persistentdata.h"
 #include "weaponxdebug.h"
 #include "netchanwarnings.h"
+#include "engine.h"
 #pragma intrinsic(_ReturnAddress)
 
 void* dll_notification_cookie_;
@@ -920,23 +921,6 @@ void AddBotDummyConCommand(const CCommand& args)
 
 	Msg("Dummy bot '%s' has been successfully created and assigned to team %d.\n", dummyBotName, teamIndex);
 }
-struct /*VFT*/ INetMessage
-{
-	virtual (~INetMessage)();
-	virtual void(SetNetChannel)(void*);
-	virtual void(SetReliable)(bool);
-	virtual bool(Process)();
-	virtual bool(ReadFromBuffer)(bf_read*);
-	virtual bool(WriteToBuffer)(bf_write*);
-	virtual bool(IsUnreliable)();
-	virtual bool(IsReliable)();
-	virtual int(GetType)();
-	virtual int(GetGroup)();
-	virtual const char* (GetName)();
-	virtual void* (GetNetChannel)();
-	virtual const char* (ToString)();
-	virtual unsigned int(GetSize)();
-};
 
 //0x4E2F30
 
@@ -1062,6 +1046,80 @@ void* CEntityFactoryDictionary__Create(void* thisptr, const char* pClassName) {
 		pClassName = "prop_dynamic";
 	}*/
 	return CEntityFactoryDictionary__CreateOriginal(thisptr, pClassName);
+}
+
+/**
+ * Validates and processes the sign-on state from a network buffer.
+ *
+ * This function prevents exploitation of duplicate SIGNONSTATE_FULL messages
+ * that could be used maliciously. If the file background transmission is already
+ * active and we receive another SIGNONSTATE_FULL, the message is rejected.
+ *
+ * @param thisptr Pointer to the NET_SignOnState object
+ * @param buffer Network buffer containing the sign-on state
+ * @return bool Returns false if message is potentially malicious, true otherwise
+ */
+enum SIGNONSTATE : int {
+	SIGNONSTATE_NONE = 0, // no state yet; about to connect.
+	SIGNONSTATE_CHALLENGE = 1, // client challenging server; all OOB packets.
+	SIGNONSTATE_CONNECTED = 2, // client is connected to server; netchans ready.
+	SIGNONSTATE_NEW = 3, // just got serverinfo and string tables.
+	SIGNONSTATE_PRESPAWN = 4, // received signon buffers.
+	SIGNONSTATE_GETTING_DATA = 5, // getting persistence data.
+	SIGNONSTATE_SPAWN = 6, // ready to receive entity packets.
+	SIGNONSTATE_FIRST_SNAP = 7, // received baseline snapshot.
+	SIGNONSTATE_FULL = 8, // we are fully connected; first non-delta packet received.
+	SIGNONSTATE_CHANGELEVEL = 9, // server is changing level; please wait.
+};
+struct alignas(8) NET_SignOnState : INetMessage
+{
+	bool m_bReliable;
+	void* m_NetChannel;
+	void* m_pMessageHandler;
+	SIGNONSTATE m_nSignonState;
+	int m_nSpawnCount;
+	int m_numServerPlayers;
+};
+static_assert(offsetof(NET_SignOnState, m_nSignonState) == 32);
+bool (*oNET_SignOnState__ReadFromBuffer)(NET_SignOnState* thisptr, bf_read& buffer);
+bool NET_SignOnState__ReadFromBuffer(NET_SignOnState* thisptr, bf_read& buffer)
+{
+	// Process the original buffer read
+	oNET_SignOnState__ReadFromBuffer(thisptr, buffer);
+
+	// Reject duplicate SIGNONSTATE_FULL messages when file transmission is active
+	if (thisptr->GetNetChannel()->m_bConnectionComplete_OrPreSignon && thisptr->m_nSignonState == SIGNONSTATE_FULL) {
+		Warning("NET_SignOnState::ReadFromBuffer: blocked attempt at re-ACKing SIGNONSTATE_FULL\n");
+		return false;
+	}
+
+	return true;
+}
+struct alignas(8) NET_StringCmd : INetMessage
+{
+	bool m_bReliable;
+	void* m_NetChannel;
+	void* m_pMessageHandler;
+	char* m_szCommand; // should be const but we need to modify [0]
+	char m_szCommandBuffer[1024];
+};
+static_assert(offsetof(NET_SignOnState, m_nSignonState) == 32);
+bool (*oNET_StringCmd__ReadFromBuffer)(NET_StringCmd* thisptr, bf_read& buffer);
+bool NET_StringCmd__ReadFromBuffer(NET_StringCmd* thisptr, bf_read& buffer)
+{
+	// Process the original buffer read
+	oNET_StringCmd__ReadFromBuffer(thisptr, buffer);
+
+	// Get the network channel and check if file transmission is active
+	if (!thisptr->GetNetChannel()->m_bConnectionComplete_OrPreSignon) {
+		Warning("NET_StringCmd::ReadFromBuffer: blocked stringcmd from inactive client\n");
+		if (thisptr->m_szCommand)
+			thisptr->m_szCommand[0] = 0;
+		thisptr->m_szCommandBuffer[0] = 0;
+		return true;
+	}
+
+	return true;
 }
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,

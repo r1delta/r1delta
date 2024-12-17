@@ -5,7 +5,24 @@
 #include "utils.h"
 
 class CVEngineServer;
-
+class CNetChan {
+public:
+	bool m_bProcessingMessages;
+	bool m_bShouldDelete;
+	bool m_bStopProcessing;
+	int m_nOutSequenceNr;
+	int m_nInSequenceNr;
+	int m_nOutSequenceNrAck;
+	int m_nOutReliableState;
+	int m_nInReliableState;
+	int m_nChokedPackets;
+	char pad[1212];
+	// this->m_bFileBackgroundTranmission, always true on client, set to false on SIGNONSTATE_CONNECTED client ack on server
+	// IMPORTANT NOTICE: this is "true" if SIGNONSTATE_CONNECTED has not been ACK'd yet
+	bool m_bConnectionComplete_OrPreSignon; 
+};
+static_assert(offsetof(CNetChan, m_nChokedPackets) == 24);
+static_assert(offsetof(CNetChan, m_bConnectionComplete_OrPreSignon) == 1240);
 extern CVEngineServer* g_CVEngineServer;
 extern uintptr_t g_CVEngineServerInterface;
 extern uintptr_t g_r1oCVEngineServerInterface[203];
