@@ -62,8 +62,7 @@ if "%release%"=="1"   set compile=%compile_release%
 
 if not exist build mkdir build
 
-:: TODO(mrsteyk): amalgamation doesn't play nice because files are not namespaced at all.
-set tier0_sources=..\bitbuf.cpp ..\client.cpp ..\compression.cpp ..\cvar.cpp ..\dedicated.cpp ..\dllmain.cpp ..\engine.cpp ..\factory.cpp ..\filecache.cpp ..\filesystem.cpp ..\keyvalues.cpp ..\load.cpp ..\logging.cpp ..\masterserver.cpp ..\memory.cpp ..\model_info.cpp ..\navmesh.cpp ..\netchanwarnings.cpp ..\newbitbuf.cpp ..\patcher.cpp ..\persistentdata.cpp ..\predictionerror.cpp ..\sendmoveclampfix.cpp ..\squirrel.cpp ..\TableDestroyer.cpp ..\thirdparty\zstd\zstd.c ..\utils.cpp ..\vsdk\tier0\dbg.cpp ..\vsdk\tier0\platformtime.cpp ..\vsdk\tier0\valve_tracelogging.cpp ..\vsdk\tier1\ipv6text.c ..\vsdk\tier1\netadr.cpp ..\vsdk\tier1\utlbuffer.cpp ..\vsdk\vstdlib\strtools.cpp
+set tier0_sources=..\tier0_amal.cc
 
 set mimalloc_sources=..\mimalloc_amal.cc
 
@@ -73,7 +72,7 @@ pushd build
 ml64.exe /c /nologo /Zi /Fo"NetChanFixes.obj" /Fl"" /W3 /errorReport:prompt /Ta..\NetChanFixes.asm
 :: TODO(mrsteyk): crucify wanderer and Allusive for adding capnp this way.
 ::                FIX FIX FIX.
-if "%tier0%"=="1"    set built=1 && %compile% %tier0_sources% %mimalloc_sources% %compile_link% NetChanFixes.obj Advapi32.lib Shell32.lib User32.lib Ole32.lib ..\vstdlib.lib ..\tier0_orig.lib ..\packages\minhook.1.3.3\lib\native\lib\libMinHook-x64-v141-mt.lib ..\thirdparty\capnp\lib\Release\capnp.lib ..\thirdparty\capnp\lib\Release\kj.lib %link_dll% /DEF:..\test.def %out%tier0.dll || exit /b 1
+if "%tier0%"=="1"    set built=1 && %compile% %tier0_sources% %mimalloc_sources% %compile_link% NetChanFixes.obj Advapi32.lib Shell32.lib User32.lib Ole32.lib ..\vstdlib.lib ..\tier0_orig.lib ..\packages\minhook.1.3.3\lib\native\lib\libMinHook-x64-v141-mt.lib %link_dll% /DEF:..\test.def %out%tier0.dll || exit /b 1
 :: if "%launcher%"=="1" set built=1 && %compile% ..\launcher\launcher_main.cc %compile_link% %out%r1delta.exe || exit /b 1
 popd
 

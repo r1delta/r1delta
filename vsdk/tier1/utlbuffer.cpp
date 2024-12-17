@@ -239,7 +239,7 @@ CUtlBuffer::CUtlBuffer( const void *pBuffer, int nSize, int nFlags ) :
 //-----------------------------------------------------------------------------
 void CUtlBuffer::SetBufferType( bool bIsText, bool bContainsCRLF )
 {
-#ifdef _DEBUG
+#if BUILD_DEBUG
 	if ( IsText() )
 	{
 		if ( bIsText )

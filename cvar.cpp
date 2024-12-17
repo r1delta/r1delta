@@ -276,9 +276,9 @@ ConVarR1O* CCVar_FindVar(uintptr_t thisptr, const char* var_name) {
 	ccBaseMap[var_name] = new WVar{ convertToR1O(ret), ret, true, false };
 	return (ConVarR1O*)(ccBaseMap[var_name]->r1optr);
 }
-static bool recursive = false;
+static bool cvar_recursive = false;
 void GlobalChangeCallback(ConVarR1* var, const char* pOldValue) {
-	if (recursive)
+	if (cvar_recursive)
 		return;
 	var = (ConVarR1*)(((uintptr_t)var) - 48);
 
