@@ -1376,21 +1376,21 @@ void __stdcall LoaderNotificationCallback(
 
 
 		//// Fix stack smash in CNetChan::ProcessSubChannelData
-		//CNetChan__ProcessSubChannelData_Asm_continue = (uintptr_t)(engine_base + 0x1E8DDA);
-		//CNetChan__ProcessSubChannelData_ret0 = (uintptr_t)(engine_base + 0x1E8F26);
-		//void* allign = (void*)(engine_base + 0x1EA961);
+		CNetChan__ProcessSubChannelData_Asm_continue = (uintptr_t)(engine_base + 0x1E8DDA);
+		CNetChan__ProcessSubChannelData_ret0 = (uintptr_t)(engine_base + 0x1E8F26);
+		void* allign = (void*)(engine_base + 0x1EA961);
 
 
-		//auto* jmp_pos = (void*)(((uintptr_t)GetModuleHandle(L"engine.dll")) + 0x1E8DD5); // `call nullsub_87` offset
-		//// 0xE9, 0x87, 0x1B, 0x00, 0x00 // jmp 0x1b8c (algn_1801EA961)  (0x1EA961 - 0x1E8DD5)
-		//DWORD old_protect;
-		//VirtualProtect(jmp_pos, 5, PAGE_EXECUTE_READWRITE, &old_protect);
-		//*((unsigned char*)jmp_pos) = 0xE9;
-		//*(unsigned char*)((uint64_t)jmp_pos + 1) = 0x87;
-		//*(unsigned char*)((uint64_t)jmp_pos + 2) = 0x1B;
-		//*(unsigned char*)((uint64_t)jmp_pos + 3) = 0x00;
-		//*(unsigned char*)((uint64_t)jmp_pos + 4) = 0x00;
-		//VirtualProtect(jmp_pos, 5, old_protect, &old_protect);
+		auto* jmp_pos = (void*)(((uintptr_t)GetModuleHandle(L"engine.dll")) + 0x1E8DD5); // `call nullsub_87` offset
+		// 0xE9, 0x87, 0x1B, 0x00, 0x00 // jmp 0x1b8c (algn_1801EA961)  (0x1EA961 - 0x1E8DD5)
+		DWORD old_protect;
+		VirtualProtect(jmp_pos, 5, PAGE_EXECUTE_READWRITE, &old_protect);
+		*((unsigned char*)jmp_pos) = 0xE9;
+		*(unsigned char*)((uint64_t)jmp_pos + 1) = 0x87;
+		*(unsigned char*)((uint64_t)jmp_pos + 2) = 0x1B;
+		*(unsigned char*)((uint64_t)jmp_pos + 3) = 0x00;
+		*(unsigned char*)((uint64_t)jmp_pos + 4) = 0x00;
+		VirtualProtect(jmp_pos, 5, old_protect, &old_protect);
 
 		VirtualProtect(allign, 6, PAGE_EXECUTE_READWRITE, &old_protect);
 		*((unsigned char*)allign) = 0xFF;
