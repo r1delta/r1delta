@@ -20,18 +20,13 @@ int64_t FuncThatReturnsFF_Stub();
 bool FuncThatReturnsBool_Stub();
 void Host_Error(const char* error, ...);
 
-
-#define FLOW_OUTGOING	0		
+#define FLOW_OUTGOING	0
 #define FLOW_INCOMING	1
 #define MAX_FLOWS		2		// in & out
 
-
 // How fast to converge flow estimates
 #define FLOW_AVG ( 3.0 / 4.0 )
- // Don't compute more often than this
 #define FLOW_INTERVAL 0.25
-
-
 #define NET_FRAMES_BACKUP	64		// must be power of 2
 #define NET_FRAMES_MASK		(NET_FRAMES_BACKUP-1)
 #define MAX_SUBCHANNELS		8		// we have 8 alternative send&wait bits
@@ -71,88 +66,6 @@ typedef struct netflow_s {
 	netframe_t frames[NET_FRAMES_BACKUP];
 	netframe_t* current_frame;
 } netflow_t;
-
-class CNetChan {
-public:
-	virtual const char* GetName(void) = 0;
-
-	struct dataFragments_s {
-		void* file;
-		char filename[260];
-		char* buffer;
-		unsigned int bytes;
-		unsigned int bits;
-		unsigned int transferID;
-		bool isCompressed;
-		unsigned int nUncompressedSize;
-		bool asTCP;
-		bool isReplayDemo;
-		int numFragments;
-		int ackedFragments;
-		int pendingFragments;
-	};
-
-	struct subChannel_s {
-		int startFraggment[2];
-		int numFragments[2];
-		int sendSeqNr;
-		int state;
-		int index;
-	};
-
-	bool m_bProcessingMessages;
-	bool m_bShouldDelete;
-	bool m_bStopProcessing;
-	int m_nOutSequenceNr;
-	int m_nInSequenceNr;
-	int m_nOutSequenceNrAck;
-	int m_nOutReliableState;
-	int m_nInReliableState;
-	int m_nChokedPackets;
-	CBitWrite m_StreamReliable;
-	CUtlMemory<unsigned char, int> m_ReliableDataBuffer;
-	CBitWrite m_StreamUnreliable;
-	CUtlMemory<unsigned char, int> m_UnreliableDataBuffer;
-	CBitWrite m_StreamVoice;
-	CUtlMemory<unsigned char, int> m_VoiceDataBuffer;
-	int m_Socket;
-	int m_StreamSocket;
-	unsigned int m_MaxReliablePayloadSize;
-	CNetAdr remote_address;
-	float last_received;
-	long double connect_time;
-	int m_Rate;
-	long double m_fClearTime;
-	CUtlVector<CNetChan::dataFragments_s*, CUtlMemory<CNetChan::dataFragments_s*, int> > m_WaitingList[2];
-	CNetChan::dataFragments_s m_ReceiveList[2];
-	CNetChan::subChannel_s m_SubChannels[8];
-	unsigned int m_FileRequestCounter;
-	bool m_bFileBackgroundTranmission;
-	bool m_bUseCompression;
-	bool m_StreamActive;
-	int m_SteamType;
-	int m_StreamSeqNr;
-	int m_StreamLength;
-	int m_StreamReceived;
-	char m_SteamFile[260];
-	CUtlMemory<unsigned char, int> m_StreamData;
-	netflow_t m_DataFlow[2];
-	int m_MsgStats[15];
-	int m_PacketDrop;
-	char m_Name[32];
-	unsigned int m_ChallengeNr;
-	float m_Timeout;
-	void* m_MessageHandler;
-	CUtlVector<INetMessage*, CUtlMemory<INetMessage*, int> > m_NetMessages;
-	void* m_DemoRecorder;
-	int m_nQueuedPackets;
-	float m_flInterpolationAmount;
-	float m_flRemoteFrameTime;
-	float m_flRemoteFrameTimeStdDeviation;
-	int m_nMaxRoutablePayloadSize;
-	int m_nSplitPacketSequence;
-	CNetChan* m_pActiveChannel;
-};
 
 class INetChannelHandler {
 public:
