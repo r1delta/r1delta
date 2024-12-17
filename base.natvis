@@ -1,3 +1,69 @@
 <?xml version="1.0" encoding="utf-8"?>
 <AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
+	<Type Name="ConVarR1">
+		<DisplayString Condition="!m_bRegistered">{{ UNREGISTERED {m_pszName,s} = {m_Value.m_pszString} (def. {m_pszDefaultValue,s}) }}</DisplayString>
+		<DisplayString>{{ {m_pszName,s} = {m_Value.m_pszString,s} (def. {m_pszDefaultValue,s}) }}</DisplayString>
+		<Expand>
+			<Item Name="name">m_pszName,s</Item>
+			<Item Name="value">m_Value.m_pszString,s</Item>
+			<Item Name="default">m_pszDefaultValue,s</Item>
+			<Item Name="min" Condition="m_bHasMin">m_fMinVal</Item>
+			<Item Name="max" Condition="m_bHasMax">m_fMaxVal</Item>
+			<Item Name="help">m_pszHelpString,s</Item>
+			<Item Name="persist">!!(m_nFlags&amp;(1&lt;&lt;31))</Item>
+			<Item Name="cheat">!!(m_nFlags&amp;(1&lt;&lt;14))</Item>
+			<Item Name="gamedll">!!(m_nFlags&amp;(1&lt;&lt;2))</Item>
+			<Item Name="clientdll">!!(m_nFlags&amp;(1&lt;&lt;3))</Item>
+			<Item Name="archive">!!(m_nFlags&amp;(1&lt;&lt;7))</Item>
+			<Item Name="userinfo">!!(m_nFlags&amp;(1&lt;&lt;9))</Item>
+		</Expand>
+	</Type>
+	<Type Name="ConVarR1O">
+		<DisplayString Condition="!m_bRegistered">{{ UNREGISTERED {m_pszName,s} = {m_Value.m_pszString,s} (def. {m_pszDefaultValue,s}) }}</DisplayString>
+		<DisplayString>{{ {m_pszName} = {m_Value.m_pszString,s} (def. {m_pszDefaultValue,s}) }}</DisplayString>
+		<Expand>
+			<Item Name="name">m_pszName,s</Item>
+			<Item Name="value">m_Value.m_pszString,s</Item>
+			<Item Name="default">m_pszDefaultValue,s</Item>
+			<Item Name="min" Condition="m_bHasMin">m_fMinVal</Item>
+			<Item Name="max" Condition="m_bHasMax">m_fMaxVal</Item>
+			<Item Name="help">m_pszHelpString,s</Item>
+			<Item Name="persist">!!(m_nFlags&amp;(1&lt;&lt;31))</Item>
+			<Item Name="cheat">!!(m_nFlags&amp;(1&lt;&lt;14))</Item>
+			<Item Name="gamedll">!!(m_nFlags&amp;(1&lt;&lt;2))</Item>
+			<Item Name="clientdll">!!(m_nFlags&amp;(1&lt;&lt;3))</Item>
+			<Item Name="archive">!!(m_nFlags&amp;(1&lt;&lt;7))</Item>
+			<Item Name="userinfo">!!(m_nFlags&amp;(1&lt;&lt;9))</Item>
+		</Expand>
+	</Type>
+
+	<Type Name="ConCommandR1">
+		<DisplayString Condition="!m_bRegistered">{{ UNREGISTERED {m_pszName,s} @ {m_pCommandCallback} }}</DisplayString>
+		<DisplayString>{{ {m_pszName,s} @ {m_pCommandCallback} }}</DisplayString>
+		<Expand>
+			<Item Name="name">m_pszName,s</Item>
+			<Item Name="help">m_pszHelpString,s</Item>
+			<Item Name="callback">m_pCommandCallback</Item>
+			<Item Name="completion_callback">m_pCompletionCallback</Item>
+			<Item Name="flags">m_nCallbackFlags</Item>
+			<Item Name="cheat">!!(m_nFlags&amp;(1&lt;&lt;14))</Item>
+			<Item Name="gamedll">!!(m_nFlags&amp;(1&lt;&lt;2))</Item>
+			<Item Name="clientdll">!!(m_nFlags&amp;(1&lt;&lt;3))</Item>
+		</Expand>
+	</Type>
+	<Type Name="ConCommandR1O">
+		<DisplayString Condition="!m_bRegistered">{{ UNREGISTERED {m_pszName} @ {m_pCommandCallback} }}</DisplayString>
+		<DisplayString>{{ {m_pszName} @ {m_pCommandCallback} }}</DisplayString>
+		<Expand>
+			<Item Name="name">m_pszName</Item>
+			<Item Name="help">m_pszHelpString</Item>
+			<Item Name="callback">m_pCommandCallback</Item>
+			<Item Name="completion_callback">m_pCompletionCallback</Item>
+			<Item Name="flags">m_nCallbackFlags</Item>
+			<Item Name="flags">m_nCallbackFlags</Item>
+			<Item Name="cheat">!!(m_nFlags&amp;(1&lt;&lt;14))</Item>
+			<Item Name="gamedll">!!(m_nFlags&amp;(1&lt;&lt;2))</Item>
+			<Item Name="clientdll">!!(m_nFlags&amp;(1&lt;&lt;3))</Item>
+		</Expand>
+	</Type>
 </AutoVisualizer>
