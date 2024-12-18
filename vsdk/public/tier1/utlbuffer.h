@@ -96,6 +96,11 @@ CUtlCharConversion *GetNoEscCharConversion();
 #define SetUtlBufferOverflowFuncs( _get, _put )	\
 	SetOverflowFuncs( static_cast <UtlBufferOverflowFunc_t>( _get ), static_cast <UtlBufferOverflowFunc_t>( _put ) )
 
+struct characterset_t {
+	char set[256];
+};
+
+#define IN_CHARACTERSET( SetBuffer, character )		((SetBuffer).set[ (unsigned char) (character) ])
 
 //-----------------------------------------------------------------------------
 // Command parsing..
@@ -236,6 +241,8 @@ public:
 	// String test is case-insensitive.
 	bool			GetToken( const char *pToken );
 
+	int ParseToken(characterset_t* pBreaks, char* pTokenBuf, int nMaxLen, bool bParseComments);
+
 	// Write stuff in
 	// Binary mode: it'll just write the bits directly in, and strings will be
 	//		written with a null terminating character
@@ -347,7 +354,7 @@ protected:
 	bool OnPutOverflow( int nSize );
 	bool OnGetOverflow( int nSize );
 
-protected:
+public:
 	// Checks if a get/put is ok
 	bool CheckPut( int size );
 	bool CheckGet( int size );

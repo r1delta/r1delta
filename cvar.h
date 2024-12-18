@@ -348,14 +348,15 @@ public:
 		COMMAND_MAX_ARGC = 64,
 		COMMAND_MAX_LENGTH = 512,
 	};
-private:
+public:
 
 
-	int64_t m_nArgc;
-	int64_t m_nArgv0Size;
-	char m_pArgSBuffer[COMMAND_MAX_LENGTH];
-	char m_pArgvBuffer[COMMAND_MAX_LENGTH];
-	const char* m_ppArgv[COMMAND_MAX_ARGC];
+	char pad[8];
+	int m_nArgc;
+	int m_nArgv0Size;
+	char m_pArgSBuffer[512];
+	char m_pArgvBuffer[512];
+	const char* m_ppArgv[64];
 };
 
 inline int CCommand::MaxCommandLength()

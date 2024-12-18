@@ -136,7 +136,7 @@ public:
 	// Set the size by which the memory grows
 	void SetGrowSize(int size);
 
-protected:
+public:
 	void ValidateGrowSize()
 	{
 #ifdef _X360

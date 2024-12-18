@@ -37,6 +37,7 @@
     <ClCompile Include="vsdk\tier1\utlbuffer.cpp" />
     <ClCompile Include="vsdk\vstdlib\strtools.cpp" />
     <ClCompile Include="weaponxdebug.cpp" />
+    <ClCompile Include="cmd.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="beardbgon.h" />
@@ -122,13 +123,15 @@
     <ClInclude Include="vsdk\public\winlite.h" />
     <ClInclude Include="vsdk\tier1\ipv6text.h" />
     <ClInclude Include="weaponxdebug.h" />
+    <ClInclude Include="cmd.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
-    <MASM Include="NetChanFixes.asm">
-      <Filter>Source Files</Filter>
-    </MASM>
+    <Natvis Include="base.natvis" />
+  </ItemGroup>
+  <ItemGroup>
+    <MASM Include="NetChanFixes.asm" />
   </ItemGroup>
 </Project>

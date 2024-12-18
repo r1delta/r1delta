@@ -1142,6 +1142,80 @@ bool CUtlBuffer::GetToken( const char *pToken )
 	return false;
 }
 
+int CUtlBuffer::ParseToken(characterset_t* pBreaks, char* pTokenBuf, int nMaxLen, bool bParseComments) {
+	Assert(nMaxLen > 0);
+	pTokenBuf[0] = 0;
+
+	// skip whitespace + comments
+	while (true) {
+		if (!IsValid())
+			return -1;
+		EatWhiteSpace();
+		if (bParseComments) {
+			if (!EatCPPComment())
+				break;
+		}
+		else {
+			break;
+		}
+	}
+
+	char c = GetChar();
+
+	// End of buffer
+	if (c == 0)
+		return -1;
+
+	// handle quoted strings specially
+	if (c == '\"') {
+		int nLen = 0;
+		while (IsValid()) {
+			c = GetChar();
+			if (c == '\"' || !c) {
+				pTokenBuf[nLen] = 0;
+				return nLen;
+			}
+			pTokenBuf[nLen] = c;
+			if (++nLen == nMaxLen) {
+				pTokenBuf[nLen - 1] = 0;
+				return nMaxLen;
+			}
+		}
+
+		// In this case, we hit the end of the buffer before hitting the end qoute
+		pTokenBuf[nLen] = 0;
+		return nLen;
+	}
+
+	// parse single characters
+	if (IN_CHARACTERSET(*pBreaks, c)) {
+		pTokenBuf[0] = c;
+		pTokenBuf[1] = 0;
+		return 1;
+	}
+
+	// parse a regular word
+	int nLen = 0;
+	while (true) {
+		pTokenBuf[nLen] = c;
+		if (++nLen == nMaxLen) {
+			pTokenBuf[nLen - 1] = 0;
+			return nMaxLen;
+		}
+		c = GetChar();
+		if (!IsValid())
+			break;
+
+		if (IN_CHARACTERSET(*pBreaks, c) || c == '\"' || c <= ' ') // vulnerability is c <= ' '
+		{
+			SeekGet(SEEK_CURRENT, -1);
+			break;
+		}
+	}
+
+	pTokenBuf[nLen] = 0;
+	return nLen;
+}
 
 //-----------------------------------------------------------------------------
 // (For text buffers only)

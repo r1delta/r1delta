@@ -183,6 +183,7 @@
     <ClInclude Include="beardbgon.h" />
     <ClInclude Include="bitbuf.h" />
     <ClInclude Include="client.h" />
+    <ClInclude Include="cmd.h" />
     <ClInclude Include="color.h" />
     <ClInclude Include="compression.h" />
     <ClInclude Include="coordsize.h" />
@@ -268,6 +269,7 @@
   <ItemGroup>
     <ClCompile Include="bitbuf.cpp" />
     <ClCompile Include="client.cpp" />
+    <ClCompile Include="cmd.cpp" />
     <ClCompile Include="compression.cpp" />
     <ClCompile Include="cvar.cpp" />
     <ClCompile Include="dedicated.cpp" />

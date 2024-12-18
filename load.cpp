@@ -75,10 +75,9 @@
 #include "netchanwarnings.h"
 #include "engine.h"
 #include "voice.h"
+#include <tier1/utlbuffer.h>
 
 #pragma intrinsic(_ReturnAddress)
-
-
 
 extern "C"
 {
@@ -177,7 +176,7 @@ struct SavedCall {
 std::vector<SavedCall> savedCalls;
 
 bool shouldSave(const char* a2) {
-	// TODO(mrsteyk): move this out of here...
+	// TODO(mrsteyk): move thisptr out of here...
 	struct str8 {
 		char* p;
 		size_t l;
@@ -556,9 +555,8 @@ typedef char (*ProcessConnectionlessPacketType)(unsigned int* a1, netpacket_s* a
 ProcessConnectionlessPacketType ProcessConnectionlessPacketOriginal;
 double lastReceived = 0.f;
 
-char __fastcall ProcessConnectionlessPacketDedi(unsigned int* a1, netpacket_s* a2)
-{
-	char buffer[1200] = { 0 };
+char __fastcall ProcessConnectionlessPacketDedi(unsigned int* a1, netpacket_s* a2) {
+	char buffer[1200] = {0};
 	bf_write writer(reinterpret_cast<char*>(buffer), sizeof(buffer));
 
 	if (((char*)a2->pData + 4)[0] == 'A' && ReadConnectPacket2015AndWriteConnectPacket2014(a2->message, writer) != -1) {
@@ -576,22 +574,17 @@ char __fastcall ProcessConnectionlessPacketDedi(unsigned int* a1, netpacket_s* a
 
 ProcessConnectionlessPacketType ProcessConnectionlessPacketOriginalClient;
 
-
-char __fastcall ProcessConnectionlessPacketClient(unsigned int* a1, netpacket_s* a2)
-{
-	static auto sv_limit_quires = CCVar_FindVar(cvarinterface,"sv_limit_queries");
+char __fastcall ProcessConnectionlessPacketClient(unsigned int* a1, netpacket_s* a2) {
+	static auto sv_limit_quires = CCVar_FindVar(cvarinterface, "sv_limit_queries");
 	static auto& sv_limit_queries_var = sv_limit_quires->m_Value.m_nValue;
 	if (sv_limit_queries_var == 1 && a2->pData[4] == 'N') {
 		sv_limit_queries_var = 0;
 	}
-	else if(sv_limit_queries_var == 0 && a2->pData[4] != 'N') {
+	else if (sv_limit_queries_var == 0 && a2->pData[4] != 'N') {
 		sv_limit_queries_var = 1;
 	}
 	return ProcessConnectionlessPacketOriginalClient(a1, a2);
 }
-
-
-
 
 typedef void (*CAI_NetworkManager__BuildStubType)(__int64 a1);
 typedef void (*CAI_NetworkManager__LoadNavMeshType)(__int64 a1, __int64 a2, const char* a3);
@@ -835,12 +828,12 @@ public:
 bool isCreatingBot = false;
 int botTeamIndex = 0;
 
-__int64 (*oCPortal_Player__ChangeTeam)(__int64 thisptr, unsigned int index);
+__int64 (*oCPortal_Player__ChangeTeam)(__int64 thisptrptr, unsigned int index);
 
-__int64 __fastcall CPortal_Player__ChangeTeam(__int64 thisptr, unsigned int index) {
+__int64 __fastcall CPortal_Player__ChangeTeam(__int64 thisptrptr, unsigned int index) {
 	if (isCreatingBot)
 		index = botTeamIndex;
-	return oCPortal_Player__ChangeTeam(thisptr, index);
+	return oCPortal_Player__ChangeTeam(thisptrptr, index);
 }
 
 void AddBotDummyConCommand(const CCommand& args) {
@@ -904,7 +897,7 @@ void AddBotDummyConCommand(const CCommand& args) {
 		return;
 	}
 
-	typedef void (*ClientFullyConnectedFn)(__int64 thisptr, __int64 entity);
+	typedef void (*ClientFullyConnectedFn)(__int64 thisptrptr, __int64 entity);
 
 	ClientFullyConnectedFn CServerGameClients_ClientFullyConnected = (ClientFullyConnectedFn)(G_server + 0x1499E0);
 
@@ -915,9 +908,9 @@ void AddBotDummyConCommand(const CCommand& args) {
 
 //0x4E2F30
 
-typedef int (*CPlayer_GetLevel_t)(__int64 thisptr);
-int __fastcall CPlayer_GetLevel(__int64 thisptr) {
-	int xp = *(int*)(thisptr + 0x1834);
+typedef int (*CPlayer_GetLevel_t)(__int64 thisptrptr);
+int __fastcall CPlayer_GetLevel(__int64 thisptrptr) {
+	int xp = *(int*)(thisptrptr + 0x1834);
 	typedef int (*GetLevelFromXP_t)(int xp);
 	GetLevelFromXP_t GetLevelFromXP = (GetLevelFromXP_t)(G_server + 0x28E740);
 	return GetLevelFromXP(xp);
@@ -1023,11 +1016,10 @@ __int64 __fastcall HookedServerClassRegister(__int64 a1, char* a2, __int64 a3) {
 	return ServerClassRegister_7F7E0(a1, a2, a3);
 }
 
-typedef void (*CBaseClientSetNameType)(__int64 thisptr, const char* name);
+typedef void (*CBaseClientSetNameType)(__int64 thisptrptr, const char* name);
 CBaseClientSetNameType CBaseClientSetNameOriginal;
 
-void __fastcall HookedCBaseClientSetName(__int64 thisptr,  const char* name)
-{
+void __fastcall HookedCBaseClientSetName(__int64 thisptrptr, const char* name) {
 	/*
 	* Restrict client names to printable ASCII characters.
 Enforce a maximum length of 32 characters.
@@ -1036,8 +1028,7 @@ Enforce a maximum length of 32 characters.
 	const char* nameBuffer = name;
 
 	// Check if the name is too long
-	if (strlen(name) > 32)
-	{
+	if (strlen(name) > 32) {
 		// Truncate the name
 		char truncatedName[256];
 		strncpy_s(truncatedName, name, 32);
@@ -1047,17 +1038,13 @@ Enforce a maximum length of 32 characters.
 	}
 
 	// Check if the name contains any non-printable ASCII characters
-	for (size_t i = 0; i < strlen(name); i++)
-	{
-		if (name[i] < 32 || name[i] > 126)
-		{
+	for (size_t i = 0; i < strlen(name); i++) {
+		if (name[i] < 32 || name[i] > 126) {
 			// Remove the non-printable character
 			char printableName[256];
 			size_t j = 0;
-			for (size_t i = 0; i < strlen(name); i++)
-			{
-				if (name[i] >= 32 && name[i] <= 126)
-				{
+			for (size_t i = 0; i < strlen(name); i++) {
+				if (name[i] >= 32 && name[i] <= 126) {
 					printableName[j] = name[i];
 					j++;
 				}
@@ -1068,22 +1055,20 @@ Enforce a maximum length of 32 characters.
 		}
 	}
 
-	Msg("Updated client name: %s to: %s\n", name,nameBuffer);
-	CBaseClientSetNameOriginal(thisptr, nameBuffer);
+	Msg("Updated client name: %s to: %s\n", name, nameBuffer);
+	CBaseClientSetNameOriginal(thisptrptr, nameBuffer);
 }
 
-
-
-typedef void* (*CEntityFactoryDictionary__CreateType)(void* thisptr, const char* pClassName);
+typedef void* (*CEntityFactoryDictionary__CreateType)(void* thisptrptr, const char* pClassName);
 CEntityFactoryDictionary__CreateType CEntityFactoryDictionary__CreateOriginal;
-void* CEntityFactoryDictionary__Create(void* thisptr, const char* pClassName) {
+void* CEntityFactoryDictionary__Create(void* thisptrptr, const char* pClassName) {
 	if (strstr(pClassName, "prop_physics") != NULL) {// && uintptr_t(_ReturnAddress()) != mapload) {
 		pClassName = "prop_dynamic_override";
 	}
 	/*if(strstr(pClassName, "prop_control_panel") != NULL) {
 		pClassName = "prop_dynamic";
 	}*/
-	return CEntityFactoryDictionary__CreateOriginal(thisptr, pClassName);
+	return CEntityFactoryDictionary__CreateOriginal(thisptrptr, pClassName);
 }
 
 void(__fastcall* oCNetChan__ProcessPacket)(CNetChan*, netpacket_s*, bool);
@@ -1092,18 +1077,18 @@ bool(__fastcall* oCNetChan___ProcessMessages)(CNetChan*, bf_read*);
 float m_flLastProcessingTime = 0.0f;
 float m_flFinalProcessingTime = 0.0f;
 
-bool __fastcall CNetChan___ProcessMessages(CNetChan* thisptr, bf_read* buf) {
-	if (!thisptr || !IsInServerThread() || !buf)
-		return oCNetChan___ProcessMessages(thisptr, buf);
+bool __fastcall CNetChan___ProcessMessages(CNetChan* thisptrptr, bf_read* buf) {
+	if (!thisptrptr || !IsInServerThread() || !buf)
+		return oCNetChan___ProcessMessages(thisptrptr, buf);
 
-	if (buf->GetNumBitsRead() < 6 || buf->IsOverflowed()) // idfk tbh just move this to whenever a net message processes.
-		return oCNetChan___ProcessMessages(thisptr, buf);
+	if (buf->GetNumBitsRead() < 6 || buf->IsOverflowed()) // idfk tbh just move thisptr to whenever a net message processes.
+		return oCNetChan___ProcessMessages(thisptrptr, buf);
 
 	static auto net_chan_limit_msec_ptr = (ConVarR1*)OriginalCCVar_FindVar2(cvarinterface, "net_chan_limit_msec");
 	auto net_chan_limit_msec = net_chan_limit_msec_ptr->m_Value.m_fValue;
 
 	if (net_chan_limit_msec == 0.0f)
-		return oCNetChan___ProcessMessages(thisptr, buf);
+		return oCNetChan___ProcessMessages(thisptrptr, buf);
 
 	float flStartTime = Plat_FloatTime();
 
@@ -1114,17 +1099,17 @@ bool __fastcall CNetChan___ProcessMessages(CNetChan* thisptr, bf_read* buf) {
 
 	BeginProfiling(flStartTime);
 
-	const auto original = oCNetChan___ProcessMessages(thisptr, buf);
+	const auto original = oCNetChan___ProcessMessages(thisptrptr, buf);
 
 	m_flFinalProcessingTime = EndProfiling(flStartTime);
 
-	bool bIsProcessingTimeReached = unsigned(1000.0f * m_flFinalProcessingTime) << 31; // some tf2 bs idek
+	bool bIsProcessingTimeReached = (m_flFinalProcessingTime >= 0.001f);
 
-	const auto pMessageHandler = *reinterpret_cast<INetChannelHandler**>(reinterpret_cast<uintptr_t>(thisptr) + 0x3ED0);
+	const auto pMessageHandler = *reinterpret_cast<INetChannelHandler**>(reinterpret_cast<uintptr_t>(thisptrptr) + 0x3ED0);
 
 	if (pMessageHandler && bIsProcessingTimeReached && m_flFinalProcessingTime >= net_chan_limit_msec) {
 #ifdef _DEBUG
-		Msg("CNetChan::_ProcessMessages: Max processing time reached for client \"%s\" (%.2fms)\n", thisptr->GetName(), m_flFinalProcessingTime);
+		Msg("CNetChan::_ProcessMessages: Max processing time reached for client \"%s\" (%.2fms)\n", thisptrptr->GetName(), m_flFinalProcessingTime);
 #endif
 		pMessageHandler->ConnectionCrashed("Max processing time reached.");
 		return false;
@@ -1133,20 +1118,20 @@ bool __fastcall CNetChan___ProcessMessages(CNetChan* thisptr, bf_read* buf) {
 	return original;
 }
 
-void __fastcall CNetChan__ProcessPacket(CNetChan* thisptr, netpacket_s* packet, bool bHasHeader) {
-	if (!thisptr || !IsInServerThread())
-		return oCNetChan__ProcessPacket(thisptr, packet, bHasHeader);
+void __fastcall CNetChan__ProcessPacket(CNetChan* thisptrptr, netpacket_s* packet, bool bHasHeader) {
+	if (!thisptrptr || !IsInServerThread())
+		return oCNetChan__ProcessPacket(thisptrptr, packet, bHasHeader);
 
-	bool bReceivingPacket = *(bool*)((uintptr_t)thisptr + 0x3F80) && !*(int*)((uintptr_t)thisptr + 0xD8);
+	bool bReceivingPacket = *(bool*)((uintptr_t)thisptrptr + 0x3F80) && !*(int*)((uintptr_t)thisptrptr + 0xD8);
 
 	if (!bReceivingPacket)
-		return oCNetChan__ProcessPacket(thisptr, packet, bHasHeader);
+		return oCNetChan__ProcessPacket(thisptrptr, packet, bHasHeader);
 
 	static auto net_chan_limit_msec_ptr = (ConVarR1*)OriginalCCVar_FindVar2(cvarinterface, "net_chan_limit_msec");
 	auto net_chan_limit_msec = net_chan_limit_msec_ptr->m_Value.m_fValue;
 
 	if (net_chan_limit_msec == 0.0f)
-		return oCNetChan__ProcessPacket(thisptr, packet, bHasHeader);
+		return oCNetChan__ProcessPacket(thisptrptr, packet, bHasHeader);
 
 	float flStartTime = Plat_FloatTime();
 
@@ -1157,9 +1142,9 @@ void __fastcall CNetChan__ProcessPacket(CNetChan* thisptr, netpacket_s* packet, 
 
 	BeginProfiling(flStartTime);
 
-	oCNetChan__ProcessPacket(thisptr, packet, bHasHeader);
+	oCNetChan__ProcessPacket(thisptrptr, packet, bHasHeader);
 
-	const auto pMessageHandler = *reinterpret_cast<INetChannelHandler**>(reinterpret_cast<uintptr_t>(thisptr) + 0x3ED0);
+	const auto pMessageHandler = *reinterpret_cast<INetChannelHandler**>(reinterpret_cast<uintptr_t>(thisptrptr) + 0x3ED0);
 
 	m_flFinalProcessingTime = EndProfiling(flStartTime);
 
@@ -1167,7 +1152,7 @@ void __fastcall CNetChan__ProcessPacket(CNetChan* thisptr, netpacket_s* packet, 
 
 	if (pMessageHandler && bIsProcessingTimeReached && m_flFinalProcessingTime >= net_chan_limit_msec) {
 #ifdef _DEBUG
-		Msg("CNetChan::ProcessPacket: Max processing time reached for client \"%s\" (%.2fms)\n", thisptr->GetName(), m_flFinalProcessingTime);
+		Msg("CNetChan::ProcessPacket: Max processing time reached for client \"%s\" (%.2fms)\n", thisptrptr->GetName(), m_flFinalProcessingTime);
 #endif
 		pMessageHandler->ConnectionCrashed("Max processing time reached.");
 	}
@@ -1175,10 +1160,10 @@ void __fastcall CNetChan__ProcessPacket(CNetChan* thisptr, netpacket_s* packet, 
 
 bool(__fastcall* oCGameClient__ProcessVoiceData)(void*, CLC_VoiceData*);
 
-bool __fastcall CGameClient__ProcessVoiceData(void* thisptr, CLC_VoiceData* msg) {
+bool __fastcall CGameClient__ProcessVoiceData(void* thisptrptr, CLC_VoiceData* msg) {
 	char voiceDataBuffer[4096];
 
-	void* thisptr_shifted = reinterpret_cast<uintptr_t>(thisptr) == 16 ? nullptr : reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(thisptr) - 8);
+	void* thisptrptr_shifted = reinterpret_cast<uintptr_t>(thisptrptr) == 16 ? nullptr : reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(thisptrptr) - 8);
 	int bitsRead = msg->m_DataIn.ReadBitsClamped(voiceDataBuffer, msg->m_nLength);
 
 	if (msg->m_DataIn.IsOverflowed())
@@ -1186,8 +1171,8 @@ bool __fastcall CGameClient__ProcessVoiceData(void* thisptr, CLC_VoiceData* msg)
 
 	auto SV_BroadcastVoiceData = reinterpret_cast<void(__cdecl*)(void*, int, char*, uint64)>(G_engine + 0xEE4D0);
 
-	if (thisptr_shifted)
-		SV_BroadcastVoiceData(thisptr_shifted, Bits2Bytes(bitsRead), voiceDataBuffer, *reinterpret_cast<uint64*>(reinterpret_cast<uintptr_t>(msg) + 0x88));
+	if (thisptrptr_shifted)
+		SV_BroadcastVoiceData(thisptrptr_shifted, Bits2Bytes(bitsRead), voiceDataBuffer, *reinterpret_cast<uint64*>(reinterpret_cast<uintptr_t>(msg) + 0x88));
 
 	return true;
 }
@@ -1197,7 +1182,7 @@ bool __fastcall CGameClient__ProcessVoiceData(void* thisptr, CLC_VoiceData* msg)
 
 bool(__fastcall* oCClientState__ProcessUserMessage)(void*, SVC_UserMessage*);
 
-bool __fastcall CClientState__ProcessUserMessage(void* thisptr, SVC_UserMessage* msg) {
+bool __fastcall CClientState__ProcessUserMessage(void* thisptrptr, SVC_UserMessage* msg) {
 	ALIGN4 byte userdata[MAX_USER_MSG_DATA] = {0};
 
 	bf_read userMsg("UserMessage(read)", userdata, sizeof(userdata));
@@ -1219,11 +1204,11 @@ bool __fastcall CClientState__ProcessUserMessage(void* thisptr, SVC_UserMessage*
 /**
  * Validates and processes the sign-on state from a network buffer.
  *
- * This function prevents exploitation of duplicate SIGNONSTATE_FULL messages
+ * thisptr function prevents exploitation of duplicate SIGNONSTATE_FULL messages
  * that could be used maliciously. If the file background transmission is already
  * active and we receive another SIGNONSTATE_FULL, the message is rejected.
  *
- * @param thisptr Pointer to the NET_SignOnState object
+ * @param thisptrptr Pointer to the NET_SignOnState object
  * @param buffer Network buffer containing the sign-on state
  * @return bool Returns false if message is potentially malicious, true otherwise
  */
@@ -1240,8 +1225,7 @@ enum SIGNONSTATE : int {
 	SIGNONSTATE_CHANGELEVEL = 9, // server is changing level; please wait.
 };
 
-struct alignas(8) NET_SignOnState : INetMessage
-{
+struct alignas(8) NET_SignOnState : INetMessage {
 	bool m_bReliable;
 	void* m_NetChannel;
 	void* m_pMessageHandler;
@@ -1251,15 +1235,14 @@ struct alignas(8) NET_SignOnState : INetMessage
 };
 
 static_assert(offsetof(NET_SignOnState, m_nSignonState) == 32);
-bool (*oNET_SignOnState__ReadFromBuffer)(NET_SignOnState* thisptr, bf_read& buffer);
+bool (*oNET_SignOnState__ReadFromBuffer)(NET_SignOnState* thisptrptr, bf_read& buffer);
 
-bool NET_SignOnState__ReadFromBuffer(NET_SignOnState* thisptr, bf_read& buffer)
-{
+bool NET_SignOnState__ReadFromBuffer(NET_SignOnState* thisptrptr, bf_read& buffer) {
 	// Process the original buffer read
-	oNET_SignOnState__ReadFromBuffer(thisptr, buffer);
+	oNET_SignOnState__ReadFromBuffer(thisptrptr, buffer);
 
 	// Reject duplicate SIGNONSTATE_FULL messages when file transmission is active
-	if (thisptr->GetNetChannel()->m_bConnectionComplete_OrPreSignon && thisptr->m_nSignonState == SIGNONSTATE_FULL) {
+	if (thisptrptr->GetNetChannel()->m_bConnectionComplete_OrPreSignon && thisptrptr->m_nSignonState == SIGNONSTATE_FULL) {
 		Warning("NET_SignOnState::ReadFromBuffer: blocked attempt at re-ACKing SIGNONSTATE_FULL\n");
 		return false;
 	}
@@ -1269,7 +1252,7 @@ bool NET_SignOnState__ReadFromBuffer(NET_SignOnState* thisptr, bf_read& buffer)
 
 bool(__fastcall* oCClientState__ProcessVoiceData)(void*, SVC_VoiceMessage*);
 
-bool __fastcall CClientState__ProcessVoiceData(void* thisptr, SVC_VoiceMessage* msg) {
+bool __fastcall CClientState__ProcessVoiceData(void* thisptrptr, SVC_VoiceMessage* msg) {
 	//char chReceived[4104];
 
 	//unsigned int dwLength = msg->m_nLength;
@@ -1286,17 +1269,37 @@ bool __fastcall CClientState__ProcessVoiceData(void* thisptr, SVC_VoiceMessage* 
 	//int nChannel = Voice_GetChannel(iEntity);
 
 	//if (nChannel != -1)
-	//	return Voice_AddIncomingData(nChannel, chReceived, *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(thisptr) + 0x84), true);
+	//	return Voice_AddIncomingData(nChannel, chReceived, *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(thisptrptr) + 0x84), true);
 
 	//nChannel = Voice_AssignChannel(iEntity, false);
 
 	//if (nChannel != -1)
-	//	return Voice_AddIncomingData(nChannel, chReceived, *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(thisptr) + 0x84), true);
+	//	return Voice_AddIncomingData(nChannel, chReceived, *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(thisptrptr) + 0x84), true);
 
 	//return nChannel;
 
 	// awesome.
-	return oCClientState__ProcessVoiceData(thisptr, msg);
+	return oCClientState__ProcessVoiceData(thisptrptr, msg);
+}
+
+bool __fastcall CBaseClientState__ProcessSplitScreenUser(void* thisptrptr, SVC_SplitScreen* msg) {
+	static auto splitscreen = (ISplitScreen*)G_engine + 0x797060;
+
+	if (msg->m_nSlot < 0 || msg->m_nSlot > 1) {
+#ifdef _DEBUG
+		Warning("CBaseClientState::ProcessSplitScreenUser: failed to process \"(msg->m_nSlot < 0 || msg->m_nSlot > 1)\".\n");
+#endif
+		return false;
+	}
+
+	if (splitscreen->RemoveSplitScreenPlayer(msg->m_Type))
+		splitscreen->AddSplitScreenPlayer(msg->m_Type);
+
+	return true;
+}
+
+bool __fastcall CBaseClient__IsSplitScreenUser(void* thisptrptr) {
+	return false;
 }
 
 //-----------------------------------------------------------------------------
@@ -1359,8 +1362,8 @@ void __fastcall CNetChan__FlowNewPacket(CNetChan* pChan, int flow, int outSeqNr,
 	if (outSeqNr > currentindex) {
 		nextIndex = currentindex + 1;
 		if (currentindex + 1 <= outSeqNr) {
-			// This variable makes sure the loops below do not execute more
-			// than NET_FRAMES_BACKUP times. This has to be done as the
+			// thisptr variable makes sure the loops below do not execute more
+			// than NET_FRAMES_BACKUP times. thisptr has to be done as the
 			// headers and frame arrays in the netflow_t structure is as
 			// large as NET_FRAMES_BACKUP. Any execution past it is futile
 			// and only wastes CPU time. Sending an outSeqNr that is higher
@@ -1530,8 +1533,7 @@ void __fastcall CNetChan__FlowNewPacket(CNetChan* pChan, int flow, int outSeqNr,
 	}
 }
 
-struct alignas(8) NET_StringCmd : INetMessage
-{
+struct alignas(8) NET_StringCmd : INetMessage {
 	bool m_bReliable;
 	void* m_NetChannel;
 	void* m_pMessageHandler;
@@ -1540,23 +1542,25 @@ struct alignas(8) NET_StringCmd : INetMessage
 };
 
 static_assert(offsetof(NET_SignOnState, m_nSignonState) == 32);
-bool (*oNET_StringCmd__ReadFromBuffer)(NET_StringCmd* thisptr, bf_read& buffer);
-bool NET_StringCmd__ReadFromBuffer(NET_StringCmd* thisptr, bf_read& buffer)
-{
+
+bool (*oNET_StringCmd__ReadFromBuffer)(NET_StringCmd* thisptrptr, bf_read& buffer);
+
+bool NET_StringCmd__ReadFromBuffer(NET_StringCmd* thisptrptr, bf_read& buffer) {
 	// Process the original buffer read
-	oNET_StringCmd__ReadFromBuffer(thisptr, buffer);
+	oNET_StringCmd__ReadFromBuffer(thisptrptr, buffer);
 
 	// Get the network channel and check if file transmission is active
-	if (!thisptr->GetNetChannel()->m_bConnectionComplete_OrPreSignon) {
+	if (!thisptrptr->GetNetChannel()->m_bConnectionComplete_OrPreSignon) {
 		Warning("NET_StringCmd::ReadFromBuffer: blocked stringcmd from inactive client\n");
-		if (thisptr->m_szCommand)
-			thisptr->m_szCommand[0] = 0;
-		thisptr->m_szCommandBuffer[0] = 0;
+		if (thisptrptr->m_szCommand)
+			thisptrptr->m_szCommand[0] = 0;
+		thisptrptr->m_szCommandBuffer[0] = 0;
 		return true;
 	}
 
 	return true;
 }
+
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
 	const LDR_DLL_NOTIFICATION_DATA* notification_data,
@@ -1614,7 +1618,6 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)(server_base + 0x3C8B70), &CBaseEntity__VPhysicsInitNormal, reinterpret_cast<LPVOID*>(&oCBaseEntity__VPhysicsInitNormal));
 		MH_CreateHook((LPVOID)(server_base + 0x3B3200), &CBaseEntity__SetMoveType, reinterpret_cast<LPVOID*>(&oCBaseEntity__SetMoveType));
 		MH_CreateHook((LPVOID)(server_base + 0x7F7E0), &HookedServerClassRegister, reinterpret_cast<LPVOID*>(&ServerClassRegister_7F7E0));
-
 		MH_CreateHook((LPVOID)(server_base + 0x4E2F30), &CPlayer_GetLevel, reinterpret_cast<LPVOID*>(NULL));
 		//MH_CreateHook((LPVOID)(server_base + 0x7F7E0), &HookedServerClassRegister, reinterpret_cast<LPVOID*>(&ServerClassRegister_7F7E0));
 		//MH_CreateHook((LPVOID)(server_base + 0x25A8E0), &CEntityFactoryDictionary__Create, reinterpret_cast<LPVOID*>(&CEntityFactoryDictionary__CreateOriginal));
@@ -1627,9 +1630,11 @@ void __stdcall LoaderNotificationCallback(
 		//MH_CreateHook((LPVOID)(server_base + 0x25A8E0), &CEntityFactoryDictionary__Create, reinterpret_cast<LPVOID*>(&CEntityFactoryDictionary__CreateOriginal));
 		//MH_CreateHook((LPVOID)(server_base + 0x363A50), &sub_363A50, reinterpret_cast<LPVOID*>(&sub_363A50Original));
 		auto engine_base = G_engine;
+
 		MH_CreateHook((LPVOID)(server_base + 0x3BE1A0), &CC_Ent_Create, reinterpret_cast<LPVOID*>(&oCC_Ent_Create));
 		MH_CreateHook((LPVOID)(server_base + 0x25E340), &DispatchSpawn, reinterpret_cast<LPVOID*>(&oDispatchSpawn));
 		MH_CreateHook((LPVOID)(engine_base + 0xD4E30), &CBaseClient__ProcessSignonState, reinterpret_cast<LPVOID*>(&oCBaseClient__ProcessSignonState));
+		MH_CreateHook((LPVOID)(engine_base + 0xD1EC0), &CBaseClient__IsSplitScreenUser, reinterpret_cast<LPVOID*>(NULL));
 
 		RegisterConVar("net_chan_limit_msec", "225", FCVAR_GAMEDLL | FCVAR_CHEAT, "Netchannel processing is limited to so many milliseconds, abort connection if exceeding budget");
 
@@ -1674,6 +1679,7 @@ void __stdcall LoaderNotificationCallback(
 		//MH_CreateHook((LPVOID)(server_base + 0x605570), &mp_weapon_wingman_dtor_hk, reinterpret_cast<LPVOID*>(&mp_weapon_wingman_dtor_orig));
 
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("vstdlib.dll"), "VStdLib_GetICVarFactory"), &VStdLib_GetICVarFactory, NULL);
+
 		if (!IsDedicatedServer()) {
 			auto launcher = G_launcher;
 
@@ -1697,6 +1703,7 @@ void __stdcall LoaderNotificationCallback(
 			//MH_CreateHook((LPVOID)(engine_base_spec + 0x1168B0), &COM_StringCopy, reinterpret_cast<LPVOID*>(&COM_StringCopyOriginal));
 			//MH_CreateHook((LPVOID)(engine_base_spec + 0x1C79A0), &DataTable_SetupReceiveTableFromSendTable, reinterpret_cast<LPVOID*>(&DataTable_SetupReceiveTableFromSendTableOriginal));
 		}
+
 		MH_CreateHook((LPVOID)(G_vscript + (IsDedicatedServer() ? 0x0B660 : 0xB640)), &CSquirrelVM__PrintFunc1, NULL);
 
 		//MH_CreateHook((LPVOID)(engine_base_spec + 0x1C79A0), &sub_1801C79A0, reinterpret_cast<LPVOID*>(&sub_1801C79A0Original));
@@ -1716,14 +1723,16 @@ void __stdcall LoaderNotificationCallback(
 
 	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"engine_ds.dll") == 0) {
 		G_engine_ds = (uintptr_t)notification_data->Loaded.DllBase;
+
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x433C0), &ProcessConnectionlessPacketDedi, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginal));
 		InitAddons();
 		InitDedicated();
-		InitDedicated();		
+		InitDedicated();
 	}
 
 	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"engine.dll") == 0) {
 		G_engine = (uintptr_t)notification_data->Loaded.DllBase;
+		
 		auto engine_base = G_engine;
 
 		g_nServerThread = (int*)engine_base + 0x7BF1F8;
@@ -1739,6 +1748,7 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)(engine_base + 0x17D400), &CClientState__ProcessUserMessage, reinterpret_cast<LPVOID*>(&oCClientState__ProcessUserMessage));
 		MH_CreateHook((LPVOID)(engine_base + 0x17D600), &CClientState__ProcessVoiceData, reinterpret_cast<LPVOID*>(&oCClientState__ProcessVoiceData));
 		MH_CreateHook((LPVOID)(engine_base + 0x1E0C80), &CNetChan__FlowNewPacket, NULL);
+		MH_CreateHook((LPVOID)(engine_base + 0x237F0), &CBaseClientState__ProcessSplitScreenUser, NULL);
 
 		MH_CreateHook((LPVOID)(engine_base + 0x0D2490), &ProcessConnectionlessPacketClient, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginalClient));
 		if (!IsDedicatedServer()) {
@@ -1747,15 +1757,12 @@ void __stdcall LoaderNotificationCallback(
 			// @hypnotic: whoops do not put that thing here causes stack overflow :steamhappy
 			RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
 			InitAddons();
-			
 		}
-
 
 		//// Fix stack smash in CNetChan::ProcessSubChannelData
 		CNetChan__ProcessSubChannelData_Asm_continue = (uintptr_t)(engine_base + 0x1E8DDA);
 		CNetChan__ProcessSubChannelData_ret0 = (uintptr_t)(engine_base + 0x1E8F26);
 		void* allign = (void*)(engine_base + 0x1EA961);
-
 
 		auto* jmp_pos = (void*)(((uintptr_t)GetModuleHandle(L"engine.dll")) + 0x1E8DD5); // `call nullsub_87` offset
 		// 0xE9, 0x87, 0x1B, 0x00, 0x00 // jmp 0x1b8c (algn_1801EA961)  (0x1EA961 - 0x1E8DD5)
@@ -1777,7 +1784,6 @@ void __stdcall LoaderNotificationCallback(
 		*(unsigned char*)((uint64_t)allign + 5) = 0x00;
 		*(uintptr_t**)((uint64_t)allign + 6) = &CNetChan__ProcessSubChannelData_AsmConductBufferSizeCheck;
 		VirtualProtect(allign, 6, old_protect, &old_protect);
-
 	}
 
 	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"client.dll") == 0) {

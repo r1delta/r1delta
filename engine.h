@@ -188,6 +188,32 @@ struct SVC_VoiceMessage {
 	bool m_bFromClient;
 };
 
+struct __declspec(align(8)) SVC_SplitScreen {
+	enum ESplitScreenMessageType : int {
+		MSG_ADDUSER = 0x0,
+		MSG_REMOVEUSER = 0x1,
+		MSG_TYPE_BITS = 0x1,
+	};
+
+	void* _vftable;
+	char pad[16];
+	void* m_pMessageHandler;
+	int m_Type;
+	int m_nSlot;
+	int m_nPlayerIndex;
+};
+
+class ISplitScreen {
+public:
+	bool RemoveSplitScreenPlayer(int type) {
+		return CallVFunc<bool>(7, this, type);
+	}
+
+	bool AddSplitScreenPlayer(int type) {
+		return CallVFunc<bool>(6, this, type);
+	}
+};
+
 class CVEngineServer {
 public:
 	CVEngineServer() = default;
