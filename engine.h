@@ -203,6 +203,36 @@ struct __declspec(align(8)) SVC_SplitScreen {
 	int m_nPlayerIndex;
 };
 
+struct CPostDataUpdateCall {
+	int m_iEnt;
+	int m_UpdateType;
+};
+
+struct CEntityInfo {
+	void* __vftable;
+	void* m_pFrom;
+	void* m_pTo;
+	char pad[0x4];
+	bool m_bAsDelta;
+	int m_UpdateType;
+	int m_nOldEntity;
+	int m_nNewEntity;
+	int m_nHeaderBase;
+	int m_nHeaderCount;
+};
+
+struct CEntityReadInfo : CEntityInfo {
+	CBitRead* m_pBuf;
+	int m_UpdateFlags;
+	bool m_bIsEntity;
+	int m_nBaseline;
+	bool m_bUpdateBaselines;
+	int m_nLocalPlayerBits;
+	int m_nOtherPlayerBits;
+	CPostDataUpdateCall m_PostDataUpdateCalls[2048];
+	int m_nPostDataUpdateCalls;
+};
+
 class ISplitScreen {
 public:
 	bool RemoveSplitScreenPlayer(int type) {
