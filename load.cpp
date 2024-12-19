@@ -1204,8 +1204,12 @@ bool __fastcall CClientState__ProcessUserMessage(void* thisptr, SVC_UserMessage*
 bool(__fastcall* oCNetChan__ProcessControlMessage)(CNetChan*, int, CBitRead*);
 
 bool __fastcall CNetChan__ProcessControlMessage(CNetChan* thisptr, int cmd, CBitRead* buf) {
-	if (cmd <= net_File)
-		return false;
+	if (buf) {
+		unsigned char _cmd = buf->ReadUBitLong(6);
+
+		if (_cmd >= net_File)
+			return false;
+	}
 
 	return oCNetChan__ProcessControlMessage(thisptr, cmd, buf);
 }
