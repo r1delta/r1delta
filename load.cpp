@@ -1277,8 +1277,6 @@ bool __fastcall CClientState__ProcessVoiceData(void* thisptr, SVC_VoiceMessage* 
 	//	return Voice_AddIncomingData(nChannel, chReceived, *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(thisptr) + 0x84), true);
 
 	//return nChannel;
-
-	// awesome.
 	return oCClientState__ProcessVoiceData(thisptr, msg);
 }
 
@@ -1294,6 +1292,10 @@ void CL_CopyExistingEntity(CEntityReadInfo& u) {
 	}
 
 	return oCL_CopyExistingEntity(u);
+}
+
+bool __fastcall CBaseClientState__ProcessGetCvarValue(void* thisptr, void* msg) {
+	return true;
 }
 
 bool __fastcall CBaseClientState__ProcessSplitScreenUser(void* thisptr, SVC_SplitScreen* msg) {
@@ -1746,12 +1748,13 @@ void __stdcall LoaderNotificationCallback(
 
 	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"engine.dll") == 0) {
 		G_engine = (uintptr_t)notification_data->Loaded.DllBase;
-		
+
 		auto engine_base = G_engine;
 
 		g_nServerThread = (int*)engine_base + 0x7BF1F8;
 
-		MH_CreateHook((LPVOID)(engine_base + 0x536F0), CL_CopyExistingEntity, reinterpret_cast<LPVOID*>(&oCL_CopyExistingEntity));
+		MH_CreateHook((LPVOID)(engine_base + 0x27EA0), &CBaseClientState__ProcessGetCvarValue, NULL);
+		MH_CreateHook((LPVOID)(engine_base + 0x536F0), &CL_CopyExistingEntity, reinterpret_cast<LPVOID*>(&oCL_CopyExistingEntity));
 		MH_CreateHook((LPVOID)(engine_base + 0x1FDA50), &CLC_Move__ReadFromBuffer, reinterpret_cast<LPVOID*>(&CLC_Move__ReadFromBufferOriginal));
 		MH_CreateHook((LPVOID)(engine_base + 0x1F6F10), &CLC_Move__WriteToBuffer, reinterpret_cast<LPVOID*>(&CLC_Move__WriteToBufferOriginal));
 		MH_CreateHook((LPVOID)(engine_base + 0x203C20), &NET_SetConVar__ReadFromBuffer, NULL);
