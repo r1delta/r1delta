@@ -828,12 +828,12 @@ public:
 bool isCreatingBot = false;
 int botTeamIndex = 0;
 
-__int64 (*oCPortal_Player__ChangeTeam)(__int64 thisptrptr, unsigned int index);
+__int64 (*oCPortal_Player__ChangeTeam)(__int64 thisptr, unsigned int index);
 
-__int64 __fastcall CPortal_Player__ChangeTeam(__int64 thisptrptr, unsigned int index) {
+__int64 __fastcall CPortal_Player__ChangeTeam(__int64 thisptr, unsigned int index) {
 	if (isCreatingBot)
 		index = botTeamIndex;
-	return oCPortal_Player__ChangeTeam(thisptrptr, index);
+	return oCPortal_Player__ChangeTeam(thisptr, index);
 }
 
 void AddBotDummyConCommand(const CCommand& args) {
@@ -897,7 +897,7 @@ void AddBotDummyConCommand(const CCommand& args) {
 		return;
 	}
 
-	typedef void (*ClientFullyConnectedFn)(__int64 thisptrptr, __int64 entity);
+	typedef void (*ClientFullyConnectedFn)(__int64 thisptr, __int64 entity);
 
 	ClientFullyConnectedFn CServerGameClients_ClientFullyConnected = (ClientFullyConnectedFn)(G_server + 0x1499E0);
 
@@ -908,9 +908,9 @@ void AddBotDummyConCommand(const CCommand& args) {
 
 //0x4E2F30
 
-typedef int (*CPlayer_GetLevel_t)(__int64 thisptrptr);
-int __fastcall CPlayer_GetLevel(__int64 thisptrptr) {
-	int xp = *(int*)(thisptrptr + 0x1834);
+typedef int (*CPlayer_GetLevel_t)(__int64 thisptr);
+int __fastcall CPlayer_GetLevel(__int64 thisptr) {
+	int xp = *(int*)(thisptr + 0x1834);
 	typedef int (*GetLevelFromXP_t)(int xp);
 	GetLevelFromXP_t GetLevelFromXP = (GetLevelFromXP_t)(G_server + 0x28E740);
 	return GetLevelFromXP(xp);
@@ -1016,10 +1016,10 @@ __int64 __fastcall HookedServerClassRegister(__int64 a1, char* a2, __int64 a3) {
 	return ServerClassRegister_7F7E0(a1, a2, a3);
 }
 
-typedef void (*CBaseClientSetNameType)(__int64 thisptrptr, const char* name);
+typedef void (*CBaseClientSetNameType)(__int64 thisptr, const char* name);
 CBaseClientSetNameType CBaseClientSetNameOriginal;
 
-void __fastcall HookedCBaseClientSetName(__int64 thisptrptr, const char* name) {
+void __fastcall HookedCBaseClientSetName(__int64 thisptr, const char* name) {
 	/*
 	* Restrict client names to printable ASCII characters.
 Enforce a maximum length of 32 characters.
@@ -1056,19 +1056,19 @@ Enforce a maximum length of 32 characters.
 	}
 
 	Msg("Updated client name: %s to: %s\n", name, nameBuffer);
-	CBaseClientSetNameOriginal(thisptrptr, nameBuffer);
+	CBaseClientSetNameOriginal(thisptr, nameBuffer);
 }
 
-typedef void* (*CEntityFactoryDictionary__CreateType)(void* thisptrptr, const char* pClassName);
+typedef void* (*CEntityFactoryDictionary__CreateType)(void* thisptr, const char* pClassName);
 CEntityFactoryDictionary__CreateType CEntityFactoryDictionary__CreateOriginal;
-void* CEntityFactoryDictionary__Create(void* thisptrptr, const char* pClassName) {
+void* CEntityFactoryDictionary__Create(void* thisptr, const char* pClassName) {
 	if (strstr(pClassName, "prop_physics") != NULL) {// && uintptr_t(_ReturnAddress()) != mapload) {
 		pClassName = "prop_dynamic_override";
 	}
 	/*if(strstr(pClassName, "prop_control_panel") != NULL) {
 		pClassName = "prop_dynamic";
 	}*/
-	return CEntityFactoryDictionary__CreateOriginal(thisptrptr, pClassName);
+	return CEntityFactoryDictionary__CreateOriginal(thisptr, pClassName);
 }
 
 void(__fastcall* oCNetChan__ProcessPacket)(CNetChan*, netpacket_s*, bool);
@@ -1077,18 +1077,18 @@ bool(__fastcall* oCNetChan___ProcessMessages)(CNetChan*, bf_read*);
 float m_flLastProcessingTime = 0.0f;
 float m_flFinalProcessingTime = 0.0f;
 
-bool __fastcall CNetChan___ProcessMessages(CNetChan* thisptrptr, bf_read* buf) {
-	if (!thisptrptr || !IsInServerThread() || !buf)
-		return oCNetChan___ProcessMessages(thisptrptr, buf);
+bool __fastcall CNetChan___ProcessMessages(CNetChan* thisptr, bf_read* buf) {
+	if (!thisptr || !IsInServerThread() || !buf)
+		return oCNetChan___ProcessMessages(thisptr, buf);
 
 	if (buf->GetNumBitsRead() < 6 || buf->IsOverflowed()) // idfk tbh just move thisptr to whenever a net message processes.
-		return oCNetChan___ProcessMessages(thisptrptr, buf);
+		return oCNetChan___ProcessMessages(thisptr, buf);
 
 	static auto net_chan_limit_msec_ptr = (ConVarR1*)OriginalCCVar_FindVar2(cvarinterface, "net_chan_limit_msec");
 	auto net_chan_limit_msec = net_chan_limit_msec_ptr->m_Value.m_fValue;
 
 	if (net_chan_limit_msec == 0.0f)
-		return oCNetChan___ProcessMessages(thisptrptr, buf);
+		return oCNetChan___ProcessMessages(thisptr, buf);
 
 	float flStartTime = Plat_FloatTime();
 
@@ -1099,17 +1099,17 @@ bool __fastcall CNetChan___ProcessMessages(CNetChan* thisptrptr, bf_read* buf) {
 
 	BeginProfiling(flStartTime);
 
-	const auto original = oCNetChan___ProcessMessages(thisptrptr, buf);
+	const auto original = oCNetChan___ProcessMessages(thisptr, buf);
 
 	m_flFinalProcessingTime = EndProfiling(flStartTime);
 
 	bool bIsProcessingTimeReached = (m_flFinalProcessingTime >= 0.001f);
 
-	const auto pMessageHandler = *reinterpret_cast<INetChannelHandler**>(reinterpret_cast<uintptr_t>(thisptrptr) + 0x3ED0);
+	const auto pMessageHandler = *reinterpret_cast<INetChannelHandler**>(reinterpret_cast<uintptr_t>(thisptr) + 0x3ED0);
 
 	if (pMessageHandler && bIsProcessingTimeReached && m_flFinalProcessingTime >= net_chan_limit_msec) {
 #ifdef _DEBUG
-		Msg("CNetChan::_ProcessMessages: Max processing time reached for client \"%s\" (%.2fms)\n", thisptrptr->GetName(), m_flFinalProcessingTime);
+		Msg("CNetChan::_ProcessMessages: Max processing time reached for client \"%s\" (%.2fms)\n", thisptr->GetName(), m_flFinalProcessingTime);
 #endif
 		pMessageHandler->ConnectionCrashed("Max processing time reached.");
 		return false;
@@ -1118,20 +1118,20 @@ bool __fastcall CNetChan___ProcessMessages(CNetChan* thisptrptr, bf_read* buf) {
 	return original;
 }
 
-void __fastcall CNetChan__ProcessPacket(CNetChan* thisptrptr, netpacket_s* packet, bool bHasHeader) {
-	if (!thisptrptr || !IsInServerThread())
-		return oCNetChan__ProcessPacket(thisptrptr, packet, bHasHeader);
+void __fastcall CNetChan__ProcessPacket(CNetChan* thisptr, netpacket_s* packet, bool bHasHeader) {
+	if (!thisptr || !IsInServerThread())
+		return oCNetChan__ProcessPacket(thisptr, packet, bHasHeader);
 
-	bool bReceivingPacket = *(bool*)((uintptr_t)thisptrptr + 0x3F80) && !*(int*)((uintptr_t)thisptrptr + 0xD8);
+	bool bReceivingPacket = *(bool*)((uintptr_t)thisptr + 0x3F80) && !*(int*)((uintptr_t)thisptr + 0xD8);
 
 	if (!bReceivingPacket)
-		return oCNetChan__ProcessPacket(thisptrptr, packet, bHasHeader);
+		return oCNetChan__ProcessPacket(thisptr, packet, bHasHeader);
 
 	static auto net_chan_limit_msec_ptr = (ConVarR1*)OriginalCCVar_FindVar2(cvarinterface, "net_chan_limit_msec");
 	auto net_chan_limit_msec = net_chan_limit_msec_ptr->m_Value.m_fValue;
 
 	if (net_chan_limit_msec == 0.0f)
-		return oCNetChan__ProcessPacket(thisptrptr, packet, bHasHeader);
+		return oCNetChan__ProcessPacket(thisptr, packet, bHasHeader);
 
 	float flStartTime = Plat_FloatTime();
 
@@ -1142,9 +1142,9 @@ void __fastcall CNetChan__ProcessPacket(CNetChan* thisptrptr, netpacket_s* packe
 
 	BeginProfiling(flStartTime);
 
-	oCNetChan__ProcessPacket(thisptrptr, packet, bHasHeader);
+	oCNetChan__ProcessPacket(thisptr, packet, bHasHeader);
 
-	const auto pMessageHandler = *reinterpret_cast<INetChannelHandler**>(reinterpret_cast<uintptr_t>(thisptrptr) + 0x3ED0);
+	const auto pMessageHandler = *reinterpret_cast<INetChannelHandler**>(reinterpret_cast<uintptr_t>(thisptr) + 0x3ED0);
 
 	m_flFinalProcessingTime = EndProfiling(flStartTime);
 
@@ -1152,7 +1152,7 @@ void __fastcall CNetChan__ProcessPacket(CNetChan* thisptrptr, netpacket_s* packe
 
 	if (pMessageHandler && bIsProcessingTimeReached && m_flFinalProcessingTime >= net_chan_limit_msec) {
 #ifdef _DEBUG
-		Msg("CNetChan::ProcessPacket: Max processing time reached for client \"%s\" (%.2fms)\n", thisptrptr->GetName(), m_flFinalProcessingTime);
+		Msg("CNetChan::ProcessPacket: Max processing time reached for client \"%s\" (%.2fms)\n", thisptr->GetName(), m_flFinalProcessingTime);
 #endif
 		pMessageHandler->ConnectionCrashed("Max processing time reached.");
 	}
@@ -1160,10 +1160,10 @@ void __fastcall CNetChan__ProcessPacket(CNetChan* thisptrptr, netpacket_s* packe
 
 bool(__fastcall* oCGameClient__ProcessVoiceData)(void*, CLC_VoiceData*);
 
-bool __fastcall CGameClient__ProcessVoiceData(void* thisptrptr, CLC_VoiceData* msg) {
+bool __fastcall CGameClient__ProcessVoiceData(void* thisptr, CLC_VoiceData* msg) {
 	char voiceDataBuffer[4096];
 
-	void* thisptrptr_shifted = reinterpret_cast<uintptr_t>(thisptrptr) == 16 ? nullptr : reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(thisptrptr) - 8);
+	void* thisptr_shifted = reinterpret_cast<uintptr_t>(thisptr) == 16 ? nullptr : reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(thisptr) - 8);
 	int bitsRead = msg->m_DataIn.ReadBitsClamped(voiceDataBuffer, msg->m_nLength);
 
 	if (msg->m_DataIn.IsOverflowed())
@@ -1171,8 +1171,8 @@ bool __fastcall CGameClient__ProcessVoiceData(void* thisptrptr, CLC_VoiceData* m
 
 	auto SV_BroadcastVoiceData = reinterpret_cast<void(__cdecl*)(void*, int, char*, uint64)>(G_engine + 0xEE4D0);
 
-	if (thisptrptr_shifted)
-		SV_BroadcastVoiceData(thisptrptr_shifted, Bits2Bytes(bitsRead), voiceDataBuffer, *reinterpret_cast<uint64*>(reinterpret_cast<uintptr_t>(msg) + 0x88));
+	if (thisptr_shifted)
+		SV_BroadcastVoiceData(thisptr_shifted, Bits2Bytes(bitsRead), voiceDataBuffer, *reinterpret_cast<uint64*>(reinterpret_cast<uintptr_t>(msg) + 0x88));
 
 	return true;
 }
@@ -1182,7 +1182,7 @@ bool __fastcall CGameClient__ProcessVoiceData(void* thisptrptr, CLC_VoiceData* m
 
 bool(__fastcall* oCClientState__ProcessUserMessage)(void*, SVC_UserMessage*);
 
-bool __fastcall CClientState__ProcessUserMessage(void* thisptrptr, SVC_UserMessage* msg) {
+bool __fastcall CClientState__ProcessUserMessage(void* thisptr, SVC_UserMessage* msg) {
 	ALIGN4 byte userdata[MAX_USER_MSG_DATA] = {0};
 
 	bf_read userMsg("UserMessage(read)", userdata, sizeof(userdata));
@@ -1208,7 +1208,7 @@ bool __fastcall CClientState__ProcessUserMessage(void* thisptrptr, SVC_UserMessa
  * that could be used maliciously. If the file background transmission is already
  * active and we receive another SIGNONSTATE_FULL, the message is rejected.
  *
- * @param thisptrptr Pointer to the NET_SignOnState object
+ * @param thisptr Pointer to the NET_SignOnState object
  * @param buffer Network buffer containing the sign-on state
  * @return bool Returns false if message is potentially malicious, true otherwise
  */
@@ -1235,14 +1235,14 @@ struct alignas(8) NET_SignOnState : INetMessage {
 };
 
 static_assert(offsetof(NET_SignOnState, m_nSignonState) == 32);
-bool (*oNET_SignOnState__ReadFromBuffer)(NET_SignOnState* thisptrptr, bf_read& buffer);
+bool (*oNET_SignOnState__ReadFromBuffer)(NET_SignOnState* thisptr, bf_read& buffer);
 
-bool NET_SignOnState__ReadFromBuffer(NET_SignOnState* thisptrptr, bf_read& buffer) {
+bool NET_SignOnState__ReadFromBuffer(NET_SignOnState* thisptr, bf_read& buffer) {
 	// Process the original buffer read
-	oNET_SignOnState__ReadFromBuffer(thisptrptr, buffer);
+	oNET_SignOnState__ReadFromBuffer(thisptr, buffer);
 
 	// Reject duplicate SIGNONSTATE_FULL messages when file transmission is active
-	if (thisptrptr->GetNetChannel()->m_bConnectionComplete_OrPreSignon && thisptrptr->m_nSignonState == SIGNONSTATE_FULL) {
+	if (thisptr->GetNetChannel()->m_bConnectionComplete_OrPreSignon && thisptr->m_nSignonState == SIGNONSTATE_FULL) {
 		Warning("NET_SignOnState::ReadFromBuffer: blocked attempt at re-ACKing SIGNONSTATE_FULL\n");
 		return false;
 	}
@@ -1252,7 +1252,7 @@ bool NET_SignOnState__ReadFromBuffer(NET_SignOnState* thisptrptr, bf_read& buffe
 
 bool(__fastcall* oCClientState__ProcessVoiceData)(void*, SVC_VoiceMessage*);
 
-bool __fastcall CClientState__ProcessVoiceData(void* thisptrptr, SVC_VoiceMessage* msg) {
+bool __fastcall CClientState__ProcessVoiceData(void* thisptr, SVC_VoiceMessage* msg) {
 	//char chReceived[4104];
 
 	//unsigned int dwLength = msg->m_nLength;
@@ -1269,17 +1269,17 @@ bool __fastcall CClientState__ProcessVoiceData(void* thisptrptr, SVC_VoiceMessag
 	//int nChannel = Voice_GetChannel(iEntity);
 
 	//if (nChannel != -1)
-	//	return Voice_AddIncomingData(nChannel, chReceived, *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(thisptrptr) + 0x84), true);
+	//	return Voice_AddIncomingData(nChannel, chReceived, *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(thisptr) + 0x84), true);
 
 	//nChannel = Voice_AssignChannel(iEntity, false);
 
 	//if (nChannel != -1)
-	//	return Voice_AddIncomingData(nChannel, chReceived, *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(thisptrptr) + 0x84), true);
+	//	return Voice_AddIncomingData(nChannel, chReceived, *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(thisptr) + 0x84), true);
 
 	//return nChannel;
 
 	// awesome.
-	return oCClientState__ProcessVoiceData(thisptrptr, msg);
+	return oCClientState__ProcessVoiceData(thisptr, msg);
 }
 
 void(__cdecl* oCL_CopyExistingEntity)(CEntityReadInfo&);
@@ -1296,7 +1296,7 @@ void CL_CopyExistingEntity(CEntityReadInfo& u) {
 	return oCL_CopyExistingEntity(u);
 }
 
-bool __fastcall CBaseClientState__ProcessSplitScreenUser(void* thisptrptr, SVC_SplitScreen* msg) {
+bool __fastcall CBaseClientState__ProcessSplitScreenUser(void* thisptr, SVC_SplitScreen* msg) {
 	static auto splitscreen = (ISplitScreen*)G_engine + 0x797060;
 
 	if (msg->m_nSlot < 0 || msg->m_nSlot > 1) {
@@ -1312,7 +1312,7 @@ bool __fastcall CBaseClientState__ProcessSplitScreenUser(void* thisptrptr, SVC_S
 	return true;
 }
 
-bool __fastcall CBaseClient__IsSplitScreenUser(void* thisptrptr) {
+bool __fastcall CBaseClient__IsSplitScreenUser(void* thisptr) {
 	return false;
 }
 
@@ -1557,18 +1557,18 @@ struct alignas(8) NET_StringCmd : INetMessage {
 
 static_assert(offsetof(NET_SignOnState, m_nSignonState) == 32);
 
-bool (*oNET_StringCmd__ReadFromBuffer)(NET_StringCmd* thisptrptr, bf_read& buffer);
+bool (*oNET_StringCmd__ReadFromBuffer)(NET_StringCmd* thisptr, bf_read& buffer);
 
-bool NET_StringCmd__ReadFromBuffer(NET_StringCmd* thisptrptr, bf_read& buffer) {
+bool NET_StringCmd__ReadFromBuffer(NET_StringCmd* thisptr, bf_read& buffer) {
 	// Process the original buffer read
-	oNET_StringCmd__ReadFromBuffer(thisptrptr, buffer);
+	oNET_StringCmd__ReadFromBuffer(thisptr, buffer);
 
 	// Get the network channel and check if file transmission is active
-	if (!thisptrptr->GetNetChannel()->m_bConnectionComplete_OrPreSignon) {
+	if (!thisptr->GetNetChannel()->m_bConnectionComplete_OrPreSignon) {
 		Warning("NET_StringCmd::ReadFromBuffer: blocked stringcmd from inactive client\n");
-		if (thisptrptr->m_szCommand)
-			thisptrptr->m_szCommand[0] = 0;
-		thisptrptr->m_szCommandBuffer[0] = 0;
+		if (thisptr->m_szCommand)
+			thisptr->m_szCommand[0] = 0;
+		thisptr->m_szCommandBuffer[0] = 0;
 		return true;
 	}
 
@@ -1746,7 +1746,7 @@ void __stdcall LoaderNotificationCallback(
 
 	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"engine.dll") == 0) {
 		G_engine = (uintptr_t)notification_data->Loaded.DllBase;
-
+		
 		auto engine_base = G_engine;
 
 		g_nServerThread = (int*)engine_base + 0x7BF1F8;
