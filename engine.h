@@ -158,6 +158,15 @@ public:
 
 #define Bits2Bytes(b) ((b+7)>>3)
 
+// shared commands used by all streams, handled by stream layer, TODO
+#define	net_NOP 		0			// nop command used for padding
+#define net_Disconnect	1			// disconnect, last message in connection
+#define net_File		2			// file transmission message request/deny
+#define net_Tick		3			// send last world tick
+#define net_StringCmd	4			// a string command
+#define net_SetConVar	5			// sends one/multiple convar settings
+#define	net_SignonState	6			// signals current signon state
+
 struct CLC_VoiceData {
 	char gap0[24];
 	void* m_pMessageHandler;

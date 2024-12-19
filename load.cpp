@@ -1201,6 +1201,15 @@ bool __fastcall CClientState__ProcessUserMessage(void* thisptr, SVC_UserMessage*
 	return res;
 }
 
+bool(__fastcall* oCNetChan__ProcessControlMessage)(CNetChan*, int, CBitRead*);
+
+bool __fastcall CNetChan__ProcessControlMessage(CNetChan* thisptr, int cmd, CBitRead* buf) {
+	if (cmd <= net_File)
+		return false;
+
+	return oCNetChan__ProcessControlMessage(thisptr, cmd, buf);
+}
+
 /**
  * Validates and processes the sign-on state from a network buffer.
  *
@@ -1753,6 +1762,7 @@ void __stdcall LoaderNotificationCallback(
 
 		g_nServerThread = (int*)engine_base + 0x7BF1F8;
 
+		MH_CreateHook((LPVOID)(engine_base + 0x1E1230), &CNetChan__ProcessControlMessage, reinterpret_cast<LPVOID*>(&oCNetChan__ProcessControlMessage));
 		MH_CreateHook((LPVOID)(engine_base + 0x27EA0), &CBaseClientState__ProcessGetCvarValue, NULL);
 		MH_CreateHook((LPVOID)(engine_base + 0x536F0), &CL_CopyExistingEntity, reinterpret_cast<LPVOID*>(&oCL_CopyExistingEntity));
 		MH_CreateHook((LPVOID)(engine_base + 0x1FDA50), &CLC_Move__ReadFromBuffer, reinterpret_cast<LPVOID*>(&CLC_Move__ReadFromBufferOriginal));
