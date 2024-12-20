@@ -50,6 +50,15 @@
 #define strcmp_static(P, S) memcmp((P), (S), sizeof(S))
 #define string_equal_size(P, L, S) ((L + 1) == sizeof(S) && strcmp_static(P, S) == 0)
 
+#define IsPow2(a) ((a) && ((((a)-1) & (a)) == 0))
+#define AlignPow2(p, a) (((p)+(a)-1)&(~((a)-1)))
+#if BUILD_DEBUG
+// NOTE(mrsteyk): force semicolon at the end
+#define Assert(e) do { if (!(e)) __debugbreak(); } while(0)
+#else
+#define Assert(e) (e)
+#endif
+
 extern int G_is_dedi;
 
 #define IsDedicatedServer() (G_is_dedi)

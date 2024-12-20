@@ -799,7 +799,7 @@ SQInteger Script_ServerGetPersistentUserDataKVString(HSQUIRRELVM v) {
 	auto edict = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(pPlayer) + 64);
 	auto index = ((edict - reinterpret_cast<__int64>(pGlobalVarsServer->pEdicts)) / 56) - 1;
 
-	if (!GetClientConVarsKV(index) || index == 18) {
+	if (index == 18 || !GetClientConVarsKV(index)) {
 		//return sq_throwerror(v, "Client has NULL m_ConVars.");
 		//Msg("REPLAY on server tried to access persistent value: key=%s, hashedKey=%s, hashed=%s\n",
 		//	pKey, hashedKey.c_str(), "true");
