@@ -179,8 +179,9 @@ public:
 		}
 	}
 
+	// NOTE(mrsteyk): Whoever decided to always return IPv6 not supported is an idiot.
 	U8Array SendRequest(Arena* perm, const S16 host, const wchar_t* path,
-		const U8Array data, bool isPost = true, bool ipv4_force = false)
+		const U8Array data, bool isPost = true, bool ipv4_force = true)
 	{
 		if (!hSession) return {0, 0};
 
