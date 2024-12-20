@@ -29,6 +29,7 @@
 #include <iostream>
 #include <regex>
 #include "load.h"
+#include "tctx.hh"
 
 //#define HASH_USERINFO_KEYS
 // Constants
@@ -1027,7 +1028,10 @@ char ExecuteConfigFile(int configType) {
 		return 0; // File is empty or too large
 	}
 
-	char* buffer = static_cast<char*>(malloc(fileSize + 1)); // +1 for null terminator
+	auto arena = tctx.get_arena_for_scratch();
+	auto temp = TempArena(arena);
+
+	char* buffer = static_cast<char*>(arena_push(arena, fileSize + 1)); // +1 for null terminator
 	if (!buffer) {
 		return 0; // Memory allocation failed
 	}
@@ -1036,7 +1040,6 @@ char ExecuteConfigFile(int configType) {
 
 	std::ifstream file(configPath, std::ios::binary);
 	if (!file.read(buffer, fileSize)) {
-		free(buffer);
 		return 0; // Failed to read file
 	}
 
@@ -1044,7 +1047,6 @@ char ExecuteConfigFile(int configType) {
 	g_bRecursive = true;
 	Exec_CmdGuts(buffer, 1);
 	g_bRecursive = false;
-	free(buffer);
 	return 1; // Success
 }
 
