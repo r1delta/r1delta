@@ -21,7 +21,6 @@
 #include "defs.h"
 #include "factory.h"
 #include "core.h"
-#include "load.h"
 #include "patcher.h"
 #include "MinHook.h"
 #include "TableDestroyer.h"
@@ -34,10 +33,8 @@
 #include <map>
 #include "keyvalues.h"
 #include "persistentdata.h"
-#include "load.h"
 
 
-#include <random>
 #include "masterserver.h"
 #include <winhttp.h>
 #include <capnp/message.h>
@@ -49,20 +46,20 @@
 
 
 // Helper function to convert wide string to string
-std::string WideToString(const std::wstring& wide) {
+std::string WideToString(const std::wstring_view& wide) {
 	if (wide.empty()) return std::string();
-	int size = WideCharToMultiByte(CP_UTF8, 0, &wide[0], (int)wide.size(), nullptr, 0, nullptr, nullptr);
+	int size = WideCharToMultiByte(CP_UTF8, 0, wide.data(), (int)wide.size(), nullptr, 0, nullptr, nullptr);
 	std::string ret(size, 0);
-	WideCharToMultiByte(CP_UTF8, 0, &wide[0], (int)wide.size(), &ret[0], size, nullptr, nullptr);
+	WideCharToMultiByte(CP_UTF8, 0, wide.data(), (int)wide.size(), &ret[0], size, nullptr, nullptr);
 	return ret;
 }
 
 // Helper function to convert string to wide string
-std::wstring StringToWide(const std::string& str) {
+std::wstring StringToWide(const std::string_view& str) {
 	if (str.empty()) return std::wstring();
-	int size = MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), nullptr, 0);
+	int size = MultiByteToWideChar(CP_UTF8, 0, str.data(), (int)str.size(), nullptr, 0);
 	std::wstring ret(size, 0);
-	MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), &ret[0], size);
+	MultiByteToWideChar(CP_UTF8, 0, str.data(), (int)str.size(), &ret[0], size);
 	return ret;
 }
 
@@ -71,11 +68,20 @@ private:
 	HINTERNET hSession = nullptr;
 	HINTERNET hConnect = nullptr;
 	HINTERNET hRequest = nullptr;
+	size_t ipv4_addr_hash = 0;
+	size_t ipv4_addr_hash_len = 0;
+	wchar_t ipv4_addr[INET_ADDRSTRLEN]{ 0 };
 
 public:
 	WinHttpClient() {
 		hSession = WinHttpOpen(L"R1Delta", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
 			WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+		DWORD set = WINHTTP_DECOMPRESSION_FLAG_ALL;
+		WinHttpSetOption(hSession, WINHTTP_OPTION_DECOMPRESSION, &set, sizeof(set));
+#if 0
+		set = WINHTTP_PROTOCOL_FLAG_HTTP2 | WINHTTP_PROTOCOL_FLAG_HTTP3;
+		WinHttpSetOption(hSession, WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL, &set, sizeof(set));
+#endif
 	}
 
 	~WinHttpClient() {
@@ -83,7 +89,7 @@ public:
 		if (hConnect) WinHttpCloseHandle(hConnect);
 		if (hSession) WinHttpCloseHandle(hSession);
 	}
-	std::wstring ResolveHostToIPv4(const std::wstring& host) {
+	void ResolveHostToIPv4(const std::wstring& host) {
 
 		ADDRINFOW hints = {};
 		hints.ai_family = AF_INET; // Only IPv4
@@ -97,50 +103,62 @@ public:
 			Warning("getaddrinfo failed with error: %d\n", status);
 		}
 
-		std::wstring ipv4_address;
 		if (result != nullptr) {
 			for (ADDRINFOW* ptr = result; ptr != nullptr; ptr = ptr->ai_next) {
 				if (ptr->ai_family == AF_INET) {
 					sockaddr_in* ipv4 = reinterpret_cast<sockaddr_in*>(ptr->ai_addr);
 					wchar_t ipstr[INET_ADDRSTRLEN];
+					static_assert(sizeof(ipstr) == sizeof(ipv4_addr));
 					InetNtopW(AF_INET, &(ipv4->sin_addr), ipstr, INET_ADDRSTRLEN);
-					ipv4_address = ipstr;
+					memcpy(ipv4_addr, ipstr, sizeof(ipv4_addr));
 					break;
 				}
 			}
 			FreeAddrInfoW(result);
 		}
 
-		if (ipv4_address.empty()) {
+		if (!ipv4_addr[0]) {
 			Warning("No IPv4 address found for the host\n", status);
 		}
-
-		return ipv4_address;
 	}
 
 
 	std::vector<uint8_t> SendRequest(const std::wstring& host, const std::wstring& path,
-		const std::vector<uint8_t>& data, bool isPost = true) {
+		const std::vector<uint8_t>& data, bool isPost = true, bool ipv4_force = false) {
 		if (!hSession) return {};
 
-		std::wstring ipv4_host;
+		// NOTE(mrsteyk): please don't do this every single fucking time, thanks.
+		// TODO(mrsteyk): cvar change callback to rebind this class to a different host?
+		if (ipv4_force) {
+			size_t ahash = 0;
+			size_t asize = host.size();
+			// NOTE(mrsteyk): !ipv4_addr[0] check does nothing useful, other fields will not match as well if that's the case. 
+			if (ipv4_addr_hash_len != asize || ipv4_addr_hash != (ahash = std::hash<std::wstring>()(host))) {
+				try {
+					ResolveHostToIPv4(host);
+					if (ipv4_addr[0])
+					{
+						ipv4_addr_hash_len = asize;
+						ipv4_addr_hash = ahash ? ahash : std::hash<std::wstring>()(host);
+					}
+				}
+				catch (std::runtime_error& e) {
+					Warning("Error during host resolution: %s\n", e.what());
+					return {};
+				}
+			}
 
-		try {
-			ipv4_host = ResolveHostToIPv4(host);
+			hConnect = WinHttpConnect(hSession, ipv4_addr, INTERNET_DEFAULT_HTTP_PORT, 0);
 		}
-		catch (std::runtime_error& e) {
-			Warning("Error during host resolution: %s\n", e.what());
-			return {};
+		else {
+			hConnect = WinHttpConnect(hSession, host.c_str(), INTERNET_DEFAULT_HTTP_PORT, 0);
 		}
 
-
-		hConnect = WinHttpConnect(hSession, ipv4_host.c_str(), INTERNET_DEFAULT_HTTP_PORT, 0);
 		if (!hConnect) {
 			DWORD error = GetLastError();
 			Warning("WinHttpConnect failed with error %lu\n", error);
 			return {};
 		}
-
 
 		const wchar_t* verb = isPost ? L"POST" : L"GET";
 		hRequest = WinHttpOpenRequest(hConnect, verb, path.c_str(),
@@ -153,7 +171,7 @@ public:
 		}
 		// Add the Host header here
 		std::wstring hostHeader = L"Host: " + host;
-		WinHttpAddRequestHeaders(hRequest, hostHeader.c_str(), -1, WINHTTP_ADDREQ_FLAG_ADD);
+		WinHttpAddRequestHeaders(hRequest, hostHeader.c_str(), hostHeader.size(), WINHTTP_ADDREQ_FLAG_ADD);
 
 		// Set request header for Cap'n Proto content
 		WinHttpAddRequestHeaders(hRequest, L"Content-Type: application/x-capnproto",
@@ -188,6 +206,7 @@ public:
 		std::vector<uint8_t> response;
 		DWORD bytesAvailable;
 		while (WinHttpQueryDataAvailable(hRequest, &bytesAvailable) && bytesAvailable > 0) {
+			// TODO(mrsteyk): rewrite this.
 			std::vector<uint8_t> buffer(bytesAvailable, 0);
 			DWORD bytesRead;
 			if (WinHttpReadData(hRequest, buffer.data(), bytesAvailable, &bytesRead)) {
@@ -206,6 +225,7 @@ public:
 
 };
 
+#if 0
 std::string generate_uuid() {
 	GUID guid;
 	CoCreateGuid(&guid);
@@ -213,11 +233,12 @@ std::string generate_uuid() {
 	wchar_t guidString[39];
 	StringFromGUID2(guid, guidString, sizeof(guidString) / sizeof(wchar_t));
 
-	std::wstring wide(guidString);
+	std::wstring_view wide(guidString);
 	std::string result = WideToString(wide);
 	result = result.substr(1, result.size() - 2); // Remove braces
 	return result;
 }
+#endif
 
 void GetServerHeartbeat(HSQUIRRELVM v) {
 	SQObject obj;
@@ -263,15 +284,15 @@ void GetServerHeartbeat(HSQUIRRELVM v) {
 		switch (node->val._type) {
 		case OT_STRING: {
 			auto str = reinterpret_cast<SQString*>(node->val._unVal.pRefCounted);
-			if (strcmp(key, "host_name") == 0) {
+			if (strcmp_static(key, "host_name") == 0) {
 				heartbeat.setHostname(str->_val);
 			//	Warning("GetServerHeartbeat:     Set host_name: '%s'\n", str->_val);
 			}
-			else if (strcmp(key, "map_name") == 0) {
+			else if (strcmp_static(key, "map_name") == 0) {
 				heartbeat.setMapName(str->_val);
 			//	Warning("GetServerHeartbeat:     Set map_name: '%s'\n", str->_val);
 			}
-			else if (strcmp(key, "game_mode") == 0) {
+			else if (strcmp_static(key, "game_mode") == 0) {
 				heartbeat.setGameMode(str->_val);
 			//	Warning("GetServerHeartbeat:     Set game_mode: '%s'\n", str->_val);
 			}
@@ -279,18 +300,18 @@ void GetServerHeartbeat(HSQUIRRELVM v) {
 		}
 
 		case OT_INTEGER:
-			if (strcmp(key, "max_players") == 0) {
+			if (strcmp_static(key, "max_players") == 0) {
 				heartbeat.setMaxPlayers(node->val._unVal.nInteger);
 			//	Warning("GetServerHeartbeat:     Set max_players: %d\n", node->val._unVal.nInteger);
 			}
-			else if (strcmp(key, "port") == 0) {
+			else if (strcmp_static(key, "port") == 0) {
 				heartbeat.setPort(node->val._unVal.nInteger);
 				//Warning("GetServerHeartbeat:     Set port: %d\n", node->val._unVal.nInteger);
 			}
 			break;
 
 		case OT_ARRAY:
-			if (strcmp(key, "players") == 0) {
+			if (strcmp_static(key, "players") == 0) {
 				auto arr = node->val._unVal.pArray;
 				if (!arr) {
 				//	Warning("GetServerHeartbeat: Players array is null\n");
@@ -325,22 +346,22 @@ void GetServerHeartbeat(HSQUIRRELVM v) {
 						switch (pnode->val._type) {
 						case OT_STRING: {
 							auto str = reinterpret_cast<SQString*>(pnode->val._unVal.pRefCounted);
-							if (strcmp(pkey, "name") == 0) {
+							if (strcmp_static(pkey, "name") == 0) {
 								player.setName(str->_val);
 								//Warning("GetServerHeartbeat:     Set player name: '%s'\n", str->_val);
 							}
 							break;
 						}
 						case OT_INTEGER:
-							if (strcmp(pkey, "gen") == 0) {
+							if (strcmp_static(pkey, "gen") == 0) {
 								player.setGen(pnode->val._unVal.nInteger);
 								//Warning("GetServerHeartbeat:     Set player gen: %d\n", pnode->val._unVal.nInteger);
 							}
-							else if (strcmp(pkey, "lvl") == 0) {
+							else if (strcmp_static(pkey, "lvl") == 0) {
 								player.setLvl(pnode->val._unVal.nInteger);
 								//Warning("GetServerHeartbeat:     Set player lvl: %d\n", pnode->val._unVal.nInteger);
 							}
-							else if (strcmp(pkey, "team") == 0) {
+							else if (strcmp_static(pkey, "team") == 0) {
 								player.setTeam(pnode->val._unVal.nInteger);
 								//Warning("GetServerHeartbeat:     Set player team: %d\n", pnode->val._unVal.nInteger);
 							}
@@ -362,13 +383,14 @@ void GetServerHeartbeat(HSQUIRRELVM v) {
 	std::vector<uint8_t> data(reinterpret_cast<uint8_t*>(serialized.begin()),
 		reinterpret_cast<uint8_t*>(serialized.end()));
 
+	// TODO(mrsteyk): worker thread with ring buffer.
 	// Send using WinHTTP
 	std::thread([data = std::move(data)]() {
 		WinHttpClient client;
 		auto ms_url = CCVar_FindVar(cvarinterface, "r1d_ms");
 		std::wstring host = StringToWide(ms_url->m_Value.m_pszString);
 
-		auto response = client.SendRequest(host, L"/server/heartbeat", data, true);
+		auto response = client.SendRequest(host, L"/server/heartbeat", data, true, true);
 		if (!response.empty() && response.size() > 2) {
 			Warning("GetServerHeartbeat: MS reports: %s\n", reinterpret_cast<char*>(response.data()));
 		}
@@ -510,7 +532,7 @@ void Hk_CHostState__State_GameShutdown(void* thisptr) {
 			std::wstring host = StringToWide(ms_url->m_Value.m_pszString);
 			std::wstring path = L"/server/delete?port=" + std::to_wstring(port);
 
-			client.SendRequest(host, path, {}, true);
+			client.SendRequest(host, path, {}, true, true);
 			}).detach();
 			Cbuf_AddTextOriginal(0, "host_map \"\"\n", 0);
 	}
