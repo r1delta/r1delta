@@ -180,7 +180,7 @@ public:
 	}
 
 	U8Array SendRequest(Arena* perm, const S16 host, const wchar_t* path,
-		const std::vector<uint8_t>& data, bool isPost = true, bool ipv4_force = false)
+		const U8Array data, bool isPost = true, bool ipv4_force = false)
 	{
 		if (!hSession) return {0, 0};
 
@@ -245,9 +245,9 @@ public:
 		WinHttpAddRequestHeaders(hRequest, L"Content-Type: application/x-capnproto",
 			-1, WINHTTP_ADDREQ_FLAG_ADD);
 
-		if (isPost && !data.empty()) {
+		if (isPost && data.size) {
 			BOOL result = WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-				(LPVOID)data.data(), (DWORD)data.size(), (DWORD)data.size(), 0);
+				(LPVOID)data.ptr, (DWORD)data.size, (DWORD)data.size, 0);
 			if (!result) {
 				DWORD error = GetLastError();
 				Warning("WinHttpSendRequest (POST) failed with error %lu\n", error);
@@ -461,24 +461,30 @@ void GetServerHeartbeat(HSQUIRRELVM v) {
 
 	// Serialize the message
 	kj::Array<capnp::word> serialized = messageToFlatArray(message);
-	std::vector<uint8_t> data(reinterpret_cast<uint8_t*>(serialized.begin()),
-		reinterpret_cast<uint8_t*>(serialized.end()));
+	//std::vector<uint8_t> data(reinterpret_cast<uint8_t*>(serialized.begin()),
+	//	reinterpret_cast<uint8_t*>(serialized.end()));
+
+	auto bytes = serialized.asBytes();
+	auto ssize = bytes.size();
+	//auto asize = AlignPow2(ssize + ARENA_DEFAULT_RESERVE, ARENA_DEFAULT_COMMIT);
+	Arena* thread_arena = arena_alloc();
+	U8Array data;
+	data.ptr = (uint8_t*)arena_push(thread_arena, bytes.size());
+	data.size = bytes.size();
 
 	// TODO(mrsteyk): worker thread with ring buffer.
 	// Send using WinHTTP
-	std::thread([data = std::move(data)]() {
-		auto arena = tctx.get_arena_for_scratch();
-		auto temp = TempArena(arena);
-
+	std::thread([thread_arena, data]() {
 		WinHttpClient client;
 		auto ms_url = CCVar_FindVar(cvarinterface, "r1d_ms");
-		//std::wstring host = StringToWide(ms_url->m_Value.m_pszString);
-		auto host = StringToWideArena(arena, ms_url->m_Value.m_pszString);
+		auto host = StringToWideArena(thread_arena, ms_url->m_Value.m_pszString);
 
-		auto response = client.SendRequest(arena, host, L"/server/heartbeat", data, true, true);
+		auto response = client.SendRequest(thread_arena, host, L"/server/heartbeat", data, true, true);
 		if (!response.empty() && response.size > 2) {
 			Warning("GetServerHeartbeat: MS reports: %s\n", reinterpret_cast<char*>(response.ptr));
 		}
+
+		arena_release(thread_arena);
 	}).detach();
 }
 SQInteger GetServerList(HSQUIRRELVM v) {
