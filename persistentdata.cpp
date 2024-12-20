@@ -114,6 +114,16 @@ std::string hashUserInfoKey(const std::string& key) {
 #endif
 }
 
+const char* hashUserInfoKeyArena(Arena* arena, const char* key)
+{
+#ifdef HASH_USERINFO_KEYS
+# error NOT IMPLEMENTED
+#else
+	// TODO(mrsteyk): maybe don't strdup?
+	return arena_strdup(arena, key);
+#endif
+}
+
 
 // ConVar handling
 __int64 CConVar__GetSplitScreenPlayerSlot(char* fakethisptr) {
@@ -934,6 +944,9 @@ void setinfopersist_cmd(const CCommand& args) {
 
 	*setinfo_cmd_flags = FCVAR_PERSIST_MASK;
 
+	auto arena = tctx.get_arena_for_scratch();
+	auto temp = TempArena(arena);
+
 	if (args.ArgC() >= 3) {
 		if (!IsValidUserInfo(args.Arg(1))) {
 			Warning("Invalid user info key %s. Only certain characters are allowed.\n", args.Arg(1));
@@ -949,9 +962,15 @@ void setinfopersist_cmd(const CCommand& args) {
 		}
 
 		// Check current value before setting
-		std::string hashedKey = hashUserInfoKey(args.Arg(1));
-		std::string fullVarName = std::string(PERSIST_COMMAND) + " " + hashedKey;
-		auto existingVar = OriginalCCVar_FindVar(cvarinterface, fullVarName.c_str());
+		const char* hashedKey = hashUserInfoKeyArena(arena, args.Arg(1));
+		auto hashedKey_len = strlen(hashedKey);
+		// NOTE(mrsteyk): null terminator included by sizeof
+		size_t fullVarName_size = sizeof(PERSIST_COMMAND) + 1 + hashedKey_len;
+		auto fullVarName = (char*)arena_push(arena, fullVarName_size);
+		memcpy(fullVarName, PERSIST_COMMAND" ", sizeof(PERSIST_COMMAND));
+		memcpy(fullVarName + sizeof(PERSIST_COMMAND), hashedKey, hashedKey_len);
+		fullVarName[fullVarName_size] = 0;
+		auto existingVar = OriginalCCVar_FindVar(cvarinterface, fullVarName);
 		bool valueChanged = true;  // Default to true if var doesn't exist
 
 		if (existingVar) {
@@ -964,17 +983,18 @@ void setinfopersist_cmd(const CCommand& args) {
 		if (args.ArgC() >= 4 && strcmp_static(args.Arg(3), "forcehash") == 0)
 			noSend = shouldHash = true;
 
-		std::vector<const char*> newArgv(noSend ? args.ArgC() - 1 : args.ArgC());
+		size_t newArgv_size = noSend ? args.ArgC() - 1 : args.ArgC();
+		auto newArgv = (const char**)arena_push(arena, sizeof(const char*) * newArgv_size);
 		newArgv[0] = args.Arg(0);
 		char modifiedKey[CCommand::COMMAND_MAX_LENGTH];
 		snprintf(modifiedKey, sizeof(modifiedKey), "%s %s", PERSIST_COMMAND, shouldHash ? hashUserInfoKey(args.Arg(1)).c_str() : args.Arg(1));
 		newArgv[1] = modifiedKey;
 
-		std::copy(args.ArgV() + 2, args.ArgV() + (noSend ? args.ArgC() - 1 : args.ArgC()), newArgv.begin() + 2);
+		std::copy(args.ArgV() + 2, args.ArgV() + newArgv_size, newArgv + 2);
 
 		char commandMemory[sizeof(CCommand)];
 		CCommand* pCommand = reinterpret_cast<CCommand*>(commandMemory);
-		ccommand_constructor(pCommand, noSend ? args.ArgC() - 1 : args.ArgC(), newArgv.data());
+		ccommand_constructor(pCommand, newArgv_size, newArgv);
 
 		g_bNoSendConVar = noSend;
 		setinfo_cmd(*pCommand);
@@ -989,9 +1009,9 @@ void setinfopersist_cmd(const CCommand& args) {
 		pCommand->~CCommand();
 	}
 	else if (args.ArgC() == 2) {
-		std::string hashedKey = hashUserInfoKey(args.Arg(1));
+		auto hashedKey = hashUserInfoKeyArena(arena, args.Arg(1));
 		char modifiedKey[CCommand::COMMAND_MAX_LENGTH];
-		snprintf(modifiedKey, sizeof(modifiedKey), "%s %s", PERSIST_COMMAND, hashedKey.c_str());
+		snprintf(modifiedKey, sizeof(modifiedKey), "%s %s", PERSIST_COMMAND, hashedKey);
 		auto hVar = OriginalCCVar_FindVar(cvarinterface, modifiedKey);
 		if (hVar)
 			ConVar_PrintDescription(hVar);
