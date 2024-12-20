@@ -109,6 +109,16 @@ uint64_t HashS16(S16 s)
 	return ret;
 }
 
+struct U8Array
+{
+	uint8_t* ptr;
+	size_t size;
+
+	bool empty() {
+		return !size;
+	}
+};
+
 class WinHttpClient {
 private:
 	HINTERNET hSession = nullptr;
@@ -169,12 +179,12 @@ public:
 		}
 	}
 
-	std::vector<uint8_t> SendRequest(const S16 host, const wchar_t* path,
+	U8Array SendRequest(Arena* perm, const S16 host, const wchar_t* path,
 		const std::vector<uint8_t>& data, bool isPost = true, bool ipv4_force = false)
 	{
-		if (!hSession) return {};
+		if (!hSession) return {0, 0};
 
-		auto arena = tctx.get_arena_for_scratch();
+		auto arena = tctx.get_arena_for_scratch(&perm, 1);
 		auto temp = TempArena(arena);
 
 		// NOTE(mrsteyk): please don't do this every single fucking time, thanks.
@@ -261,14 +271,26 @@ public:
 			return {};
 		}
 
-		std::vector<uint8_t> response;
+		//std::vector<uint8_t> response;
+		size_t response_capacity = (16 << 10);
+		U8Array response;
+		response.ptr = (uint8_t*)arena_push(perm, response_capacity);
+		response.size = 0;
 		DWORD bytesAvailable;
 		while (WinHttpQueryDataAvailable(hRequest, &bytesAvailable) && bytesAvailable > 0) {
 			// TODO(mrsteyk): rewrite this.
-			std::vector<uint8_t> buffer(bytesAvailable, 0);
+			//std::vector<uint8_t> buffer(bytesAvailable, 0);
+			if ((response.size + bytesAvailable + 1) > response_capacity)
+			{
+				arena_pop_by(perm, response_capacity);
+				response_capacity *= 2;
+				auto new_buffer = (uint8_t*)arena_push(perm, response_capacity);
+				Assert(response.ptr == new_buffer);
+			}
 			DWORD bytesRead;
-			if (WinHttpReadData(hRequest, buffer.data(), bytesAvailable, &bytesRead)) {
-				response.insert(response.end(), buffer.begin(), buffer.begin() + bytesRead);
+			if (WinHttpReadData(hRequest, response.ptr + response.size, bytesAvailable, &bytesRead)) {
+				//response.insert(response.end(), buffer.begin(), buffer.begin() + bytesRead);
+				response.size += bytesRead;
 			}
 			else {
 				DWORD error = GetLastError();
@@ -276,7 +298,8 @@ public:
 				return {};
 			}
 		}
-		response.push_back(0);
+		//response.push_back(0);
+		response.ptr[response.size] = 0;
 
 		return response;
 	}
@@ -452,9 +475,9 @@ void GetServerHeartbeat(HSQUIRRELVM v) {
 		//std::wstring host = StringToWide(ms_url->m_Value.m_pszString);
 		auto host = StringToWideArena(arena, ms_url->m_Value.m_pszString);
 
-		auto response = client.SendRequest(host, L"/server/heartbeat", data, true, true);
-		if (!response.empty() && response.size() > 2) {
-			Warning("GetServerHeartbeat: MS reports: %s\n", reinterpret_cast<char*>(response.data()));
+		auto response = client.SendRequest(arena, host, L"/server/heartbeat", data, true, true);
+		if (!response.empty() && response.size > 2) {
+			Warning("GetServerHeartbeat: MS reports: %s\n", reinterpret_cast<char*>(response.ptr));
 		}
 	}).detach();
 }
@@ -467,13 +490,13 @@ SQInteger GetServerList(HSQUIRRELVM v) {
 		auto ms_url = CCVar_FindVar(cvarinterface, "r1d_ms");
 		auto host = StringToWideArena(arena, ms_url->m_Value.m_pszString);
 
-		auto response = client.SendRequest(host, L"/server/", {}, false);
+		auto response = client.SendRequest(arena, host, L"/server/", {}, false);
 
 		if (!response.empty()) {
 			try {
 				kj::ArrayPtr<const capnp::word> words(
-					reinterpret_cast<const capnp::word*>(response.data()),
-					response.size() / sizeof(capnp::word));
+					reinterpret_cast<const capnp::word*>(response.ptr),
+					response.size / sizeof(capnp::word));
 
 				capnp::FlatArrayMessageReader reader(words);
 				auto serverList = reader.getRoot<ServerList>();
@@ -604,7 +627,7 @@ void Hk_CHostState__State_GameShutdown(void* thisptr) {
 			auto path = (wchar_t*)arena_push(arena, (path_size + 1) * sizeof(wchar_t));
 			R1DAssert(swprintf(path, path_size, L"/server/delete?port=%d", port) != -1);
 
-			client.SendRequest(host, path, {}, true, true);
+			client.SendRequest(arena, host, path, {}, true, true);
 			}).detach();
 			Cbuf_AddTextOriginal(0, "host_map \"\"\n", 0);
 	}
