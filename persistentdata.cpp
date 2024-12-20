@@ -958,9 +958,9 @@ void setinfopersist_cmd(const CCommand& args) {
 		}
 
 		// Check for "nosend" argument, or if the convar does not exist
-		bool noSend = (args.ArgC() >= 4 && strcmp(args.Arg(3), "nosend") == 0);
+		bool noSend = (args.ArgC() >= 4 && strcmp_static(args.Arg(3), "nosend") == 0);
 		bool shouldHash = !noSend && (existingVar == nullptr);
-		if (args.ArgC() >= 4 && strcmp(args.Arg(3), "forcehash") == 0)
+		if (args.ArgC() >= 4 && strcmp_static(args.Arg(3), "forcehash") == 0)
 			noSend = shouldHash = true;
 
 		std::vector<const char*> newArgv(noSend ? args.ArgC() - 1 : args.ArgC());

@@ -880,7 +880,7 @@ void AddBotDummyConCommand(const CCommand& args)
 	}
 
 	// Check for the '-team' flag
-	if (strcmp(args.Arg(1), "-team") != 0)
+	if (strcmp_static(args.Arg(1), "-team") != 0)
 	{
 		Warning("Usage: bot_dummy -team <team index>\n");
 		return;
@@ -1046,13 +1046,13 @@ __int64 __fastcall HookedServerClassRegister(__int64 a1, char* a2, __int64 a3) {
 	static __int64 originalA3 = 0;           // Stores original a3 value
 
 	// Check if it's CDynamicProp
-	if (strcmp(a2, "CDynamicProp") == 0) {
+	if (strcmp_static(a2, "CDynamicProp") == 0) {
 		// Store the dereferenced value and original pointer
 		originalPointerValue = *(__int64*)a3;
 		originalA3 = a3;
 	}
 	// Check if it's CControlPanelProp
-	else if (strcmp(a2, "CControlPanelProp") == 0) {
+	else if (strcmp_static(a2, "CControlPanelProp") == 0) {
 		// Redirect the pointer
 		*(__int64*)a3 = originalPointerValue;
 		a3 = originalA3;

@@ -130,7 +130,7 @@ void Cbuf_AddText(int a1, const char* a2, unsigned int a3) {
 	if ((returnAddress == returnToKeyInput) || (returnAddress == returnToKeyInput2) || (returnAddress == returnToKeyInput3)) {
 		shouldLog = false;
 	}
-	if (!strcmp(a2, "startupmenu")) // if someone can send commands into this buffer they can do far worse at that stage than disconnecting the client
+	if (!strcmp_static(a2, "startupmenu")) // if someone can send commands into this buffer they can do far worse at that stage than disconnecting the client
 		Cbuf_AddTextOriginal(a1, "net_secure 0\neverything_unlocked 1\n", a3);
 	size_t len = strlen(a2);
 	if (shouldLog) {
@@ -401,8 +401,8 @@ void COM_TimestampedLogHook(const char* pMsg, ...) {
 	free(formatted);
 }
 extern "C" __declspec(dllexport) void Error(const char* pMsg, ...) {
-	if (strcmp(pMsg, "UserMessageBegin:  Unregistered message '%s'\n") == 0 ||
-		strcmp(pMsg, "MESSAGE_END called with no active message\n") == 0) {
+	if (strcmp_static(pMsg, "UserMessageBegin:  Unregistered message '%s'\n") == 0 ||
+		strcmp_static(pMsg, "MESSAGE_END called with no active message\n") == 0) {
 		return;
 	}
 
