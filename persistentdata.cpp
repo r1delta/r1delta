@@ -173,8 +173,8 @@ private:
 	std::unordered_map<std::string, std::map<std::string, int>, HashStrings> enums;
 
 	// Helper functions
-	bool isValidEnumValue(const std::string& enumName, const std::string& value) const;
-	std::optional<SchemaType> getKeyType(const std::string& key) const;
+	bool isValidEnumValue(const std::string& enumName, const std::string_view& value) const;
+	std::optional<SchemaType> getKeyType(const std::string_view& key) const;
 	bool validateArrayAccess(const std::string& arrayName, const std::string& index) const;
 	std::vector<std::string> splitKey(const std::string& key) const;
 };
@@ -197,7 +197,7 @@ private:
 		std::string::const_iterator searchStart(code.cbegin());
 
 		while (std::regex_search(searchStart, code.cend(), matches, arrayPattern)) {
-			std::string arrayName = matches[1];
+			const std::string& arrayName = matches[1];
 
 			// Check if size is enum name or number
 			if (matches[2].matched) {
@@ -220,8 +220,8 @@ private:
 		std::string::const_iterator searchStart(code.cbegin());
 
 		while (std::regex_search(searchStart, code.cend(), blockMatches, enumBlockPattern)) {
-			std::string enumName = blockMatches[1];
-			std::string enumBody = blockMatches[2];
+			const std::string& enumName = blockMatches[1];
+			const std::string& enumBody = blockMatches[2];
 
 			// Parse enum values
 			std::regex valuePattern(R"foo((?:\["([^"]+)"\]|(\w+))\s*=\s*(\d+))foo");
@@ -232,7 +232,7 @@ private:
 			while (std::regex_search(valueStart, enumBody.cend(), valueMatches, valuePattern)) {
 				// If group 1 matched, it was a ["name"] format
 				// If group 2 matched, it was a bare identifier
-				std::string enumValue = valueMatches[1].matched ? valueMatches[1].str() : valueMatches[2].str();
+				const std::string& enumValue = valueMatches[1].matched ? valueMatches[1].str() : valueMatches[2].str();
 				enumValues[enumValue] = std::stoi(valueMatches[3]);
 				valueStart = valueMatches.suffix().first;
 			}
@@ -250,8 +250,8 @@ private:
 		searchStart = code.cbegin();
 
 		while (std::regex_search(searchStart, code.cend(), addEnumMatches, addEnumPattern)) {
-			std::string enumName = addEnumMatches[1];
-			std::string enumRef = addEnumMatches[2];
+			const std::string& enumName = addEnumMatches[1];
+			const std::string& enumRef = addEnumMatches[2];
 
 			// Copy enum definition if it exists
 			auto it = validator.enums.find(enumRef);
@@ -269,8 +269,8 @@ private:
 		std::string::const_iterator searchStart(code.cbegin());
 
 		while (std::regex_search(searchStart, code.cend(), matches, keyPattern)) {
-			std::string keyName = matches[1];
-			std::string typeName = matches[2];
+			const std::string& keyName = matches[1];
+			const std::string& typeName = matches[2];
 
 			// Convert type string to SchemaType
 			SchemaType type;
@@ -397,6 +397,7 @@ bool PDataValidator::isValid(const std::string& key, const std::string& value) c
 
 	case SchemaType::Type::Float:
 		try {
+			// TODO(mrsteyk): why the fuck it doesn't accept string_view...
 			std::stof(value);
 			return true;
 		}
@@ -413,32 +414,41 @@ bool PDataValidator::isValid(const std::string& key, const std::string& value) c
 
 	return false;
 }
-bool PDataValidator::isValidEnumValue(const std::string& enumName, const std::string& value) const {
+bool PDataValidator::isValidEnumValue(const std::string& enumName, const std::string_view& value) const {
 	auto enumIt = enums.find(enumName);
 	if (enumIt == enums.end()) return false;
 
 	// Special case for pdata_null which is valid for any enum
 	if (value == "pdata_null") return true;
 
-	// Convert value to lowercase for case-insensitive comparison
-	std::string lowerValue;
-	lowerValue.reserve(value.length());
-	for (char c : value) {
-		lowerValue += std::tolower(c);
-	}
+	// NOTE(mrsteyk): you already have everything you would ever want to do lowercase comparison without allocating...
+	//                it's not THAT expensive to always convert to lowercase you know. Feel free to prove me wrong.
+	auto vl = value.length();
 
-	for (const auto& [enumValue, _] : enumIt->second) {
-		std::string lowerEnumValue;
-		lowerEnumValue.reserve(enumValue.length());
-		for (char c : enumValue) {
-			lowerEnumValue += std::tolower(c);
+	for (const auto& [ev, _] : enumIt->second) {
+		auto evl = ev.length();
+		if (evl != vl) continue;
+
+		bool equal = true;
+		for (size_t i = 0; i < vl; ++i)
+		{
+			if (std::tolower(value[i]) != std::tolower(ev[i]))
+			{
+				equal = false;
+				break;
+			}
 		}
-		if (lowerEnumValue == lowerValue) return true;
+		if (!equal)
+		{
+			continue;
+		}
+
+		return true;
 	}
 
 	return false;
 }
-std::optional<SchemaType> PDataValidator::getKeyType(const std::string& key) const {
+std::optional<SchemaType> PDataValidator::getKeyType(const std::string_view& key) const {
 	// Strip out array indices to get base key format
 	std::string baseKey;
 	size_t pos = 0;
@@ -486,6 +496,7 @@ bool PDataValidator::validateArrayAccess(const std::string& arrayName,
 
 	// Otherwise it's a fixed size array
 	try {
+		// TODO(mrsteyk): why the fuck it doesn't accept string_view.
 		int idx = std::stoi(index);
 		return idx >= 0 && idx < std::get<int>(arrayDef.size);
 	}
@@ -496,6 +507,8 @@ bool PDataValidator::validateArrayAccess(const std::string& arrayName,
 
 std::vector<std::string> PDataValidator::splitKey(const std::string& key) const {
 	std::vector<std::string> result;
+	// TODO(mrsteyk): why the fuck it doesn't like string_view...
+	//                just rewrite this function, it's fucking moronic to use getline for this wtf.
 	std::stringstream ss(key);
 	std::string item;
 
@@ -689,14 +702,23 @@ SQInteger Script_ClientGetPersistentData(HSQUIRRELVM v) {
 	if (SQ_FAILED(sq_getstring(v, 3, &defaultValue))) {
 		return sq_throwerror(v, "Parameter 2 must be a string");
 	}
-	auto hashedKey = hashUserInfoKey(key);
-	std::string varName = std::string(PERSIST_COMMAND) + " " + hashedKey;
 
-	if (!IsValidUserInfo(key) || !IsValidUserInfo(varName.c_str()) || !IsValidUserInfo(defaultValue)) {
+	auto arena = tctx.get_arena_for_scratch();
+	auto temp = TempArena(arena);
+
+	auto hashedKey = hashUserInfoKeyArena(arena, key);
+	auto hashedKey_len = strlen(hashedKey);
+	size_t varName_size = hashedKey_len + sizeof(PERSIST_COMMAND) + 1;
+	auto varName = (char*)arena_push(arena, varName_size);
+	memcpy(varName, PERSIST_COMMAND" ", sizeof(PERSIST_COMMAND));
+	memcpy(varName + sizeof(PERSIST_COMMAND), hashedKey, hashedKey_len);
+	varName[varName_size] = 0;
+
+	if (!IsValidUserInfo(key) || !IsValidUserInfo(varName) || !IsValidUserInfo(defaultValue)) {
 		return sq_throwerror(v, "Invalid user info key or default value.");
 	}
 
-	auto var = OriginalCCVar_FindVar(cvarinterface, varName.c_str());
+	auto var = OriginalCCVar_FindVar(cvarinterface, varName);
 
 	if (!var) {
 		//Warning("Client couldn't find persistent value: key=%s, hashedKey=%s, hashed=%s\n",
@@ -796,14 +818,21 @@ SQInteger Script_ServerGetPersistentUserDataKVString(HSQUIRRELVM v) {
 		return sq_throwerror(v, "player is null");
 	}
 
+	auto arena = tctx.get_arena_for_scratch();
+	auto temp = TempArena(arena);
+
 	const char* pKey, * pDefaultValue;
 	sq_getstring(v, 3, &pKey);
 	sq_getstring(v, 4, &pDefaultValue);
-	std::string hashedKey = hashUserInfoKey(pKey);
-	std::string modifiedKey = PERSIST_COMMAND" ";
-	modifiedKey += hashedKey;
+	auto hashedKey = hashUserInfoKeyArena(arena, pKey);
+	auto hashedKey_len = strlen(hashedKey);
+	size_t modifiedKey_size = hashedKey_len + sizeof(PERSIST_COMMAND) + 1;
+	auto modifiedKey = (char*)arena_push(arena, modifiedKey_size);
+	memcpy(modifiedKey, PERSIST_COMMAND" ", sizeof(PERSIST_COMMAND));
+	memcpy(modifiedKey + sizeof(PERSIST_COMMAND), hashedKey, hashedKey_len);
+	modifiedKey[modifiedKey_size] = 0;
 
-	if (!IsValidUserInfo(pKey) || !IsValidUserInfo(modifiedKey.c_str()) || !IsValidUserInfo(pDefaultValue)) {
+	if (!IsValidUserInfo(pKey) || !IsValidUserInfo(modifiedKey) || !IsValidUserInfo(pDefaultValue)) {
 		return sq_throwerror(v, "Invalid user info key or default value.");
 	}
 
@@ -819,7 +848,7 @@ SQInteger Script_ServerGetPersistentUserDataKVString(HSQUIRRELVM v) {
 		return 1;
 	}
 
-	const char* pResult = GetClientConVarsKV(index)->GetString(modifiedKey.c_str(), pDefaultValue);
+	const char* pResult = GetClientConVarsKV(index)->GetString(modifiedKey, pDefaultValue);
 	//Msg("Server accessing persistent value: key=%s, hashedKey=%s, value=%s, hashed=%s\n",
 	//	pKey, hashedKey.c_str(), pResult, "true");
 
@@ -838,14 +867,21 @@ SQInteger Script_ServerSetPersistentUserDataKVString(HSQUIRRELVM v) {
 		return sq_throwerror(v, "player is null");
 	}
 
+	auto arena = tctx.get_arena_for_scratch();
+	auto temp = TempArena(arena);
+
 	const char* pKey, * pValue;
 	sq_getstring(v, 3, &pKey);
 	sq_getstring(v, 4, &pValue);
-	std::string hashedKey = hashUserInfoKey(pKey);
-	std::string modifiedKey = PERSIST_COMMAND" ";
-	modifiedKey += hashedKey;
+	auto hashedKey = hashUserInfoKeyArena(arena, pKey);
+	auto hashedKey_len = strlen(hashedKey);
+	size_t modifiedKey_size = hashedKey_len + sizeof(PERSIST_COMMAND) + 1;
+	auto modifiedKey = (char*)arena_push(arena, modifiedKey_size);
+	memcpy(modifiedKey, PERSIST_COMMAND" ", sizeof(PERSIST_COMMAND));
+	memcpy(modifiedKey + sizeof(PERSIST_COMMAND), hashedKey, hashedKey_len);
+	modifiedKey[modifiedKey_size] = 0;
 
-	if (!IsValidUserInfo(pKey) || !IsValidUserInfo(modifiedKey.c_str()) || !IsValidUserInfo(pValue)) {
+	if (!IsValidUserInfo(pKey) || !IsValidUserInfo(modifiedKey) || !IsValidUserInfo(pValue)) {
 		return sq_throwerror(v, "Invalid user info key or value.");
 	}
 	auto edict = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(pPlayer) + 64);
@@ -854,8 +890,8 @@ SQInteger Script_ServerSetPersistentUserDataKVString(HSQUIRRELVM v) {
 
 	if (!(!GetClientConVarsKV(index) || index == 18)) {
 		//return sq_throwerror(v, "Client has NULL m_ConVars.");
-		CVEngineServer_ClientCommand(0, edict, PERSIST_COMMAND" \"%s\" \"%s\" nosend", hashedKey.c_str(), pValue);
-		GetClientConVarsKV(index)->SetString(modifiedKey.c_str(), pValue);
+		CVEngineServer_ClientCommand(0, edict, PERSIST_COMMAND" \"%s\" \"%s\" nosend", hashedKey, pValue);
+		GetClientConVarsKV(index)->SetString(modifiedKey, pValue);
 		//Msg("Server setting persistent value: key=%s, value=%s, hashed=%s\n",
 		//	pKey, pValue, "true");
 	}

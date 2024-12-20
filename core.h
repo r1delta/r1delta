@@ -94,3 +94,24 @@ struct HashStrings
         return ht{}(s);
     }
 };
+
+#if 0
+// TODO(mrsteyk): I hate C++. This didn't work.
+struct EqualToStdString
+{
+    using is_transparent = void;
+
+    auto operator()(const std::string& a, const char*& ptr) const noexcept
+    {
+        return a._Equal(ptr);
+    }
+    auto operator()(const std::string& a, const std::string_view& sv) const noexcept
+    {
+        return a == sv;
+    }
+    auto operator()(const std::string& a, const std::string& s) const noexcept
+    {
+        return a == s;
+    }
+};
+#endif
