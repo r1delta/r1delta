@@ -41,5 +41,6 @@ Arena* TCtx::get_arena_for_scratch(Arena** conflict, size_t conflict_size)
 		}
 	}
 
+	R1DAssert(!"Unreachable");
 	return nullptr;
 }

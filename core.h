@@ -54,9 +54,9 @@
 #define AlignPow2(p, a) (((p)+(a)-1)&(~((a)-1)))
 #if BUILD_DEBUG
 // NOTE(mrsteyk): force semicolon at the end
-#define Assert(e) do { if (!(e)) __debugbreak(); } while(0)
+#define R1DAssert(e) do { if (!(e)) __debugbreak(); } while(0)
 #else
-#define Assert(e) (e)
+#define R1DAssert(e) (e)
 #endif
 
 extern int G_is_dedi;

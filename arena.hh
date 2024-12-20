@@ -83,3 +83,18 @@ static char* arena_strdup(Arena* arena, const char* s, size_t len = -1)
 
     return ret;
 }
+
+// NOTE(mrsteyk): Returns a null-terminated string to be safe.
+static wchar_t* arena_wstrdup(Arena* arena, const wchar_t* s, size_t len = -1)
+{
+    if (len == size_t(-1))
+    {
+        len = wcslen(s);
+    }
+
+    auto ret = (wchar_t*)arena_push(arena, (len + 1) * sizeof(wchar_t));
+    memcpy(ret, s, len * sizeof(wchar_t));
+    ret[len] = 0;
+
+    return ret;
+}

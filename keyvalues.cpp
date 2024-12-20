@@ -2,9 +2,10 @@
 #include <windows.h>
 #include "bitbuf.h"
 #include "logging.h"
-#define assert_msg(...) (0)
-#define assert(...) (0)
-#define Assert(...) (0)
+#define KV_ASSERT 0
+//#define assert_msg(...) (0)
+//#define assert(...) (0)
+//#define Assert(...) (0)
 // implementation of the ConVar class
 // heavily based on https://github.com/Mauler125/r5sdk/blob/master/r5dev/vpc/keyvalues.cpp
 
@@ -209,7 +210,9 @@ void KeyValues::RemoveEverything(void)
 //-----------------------------------------------------------------------------
 KeyValues* KeyValues::FindKey(const char* pszKeyName, bool bCreate)
 {
+#if KV_ASSERT
 	assert_msg(this, "Member function called on NULL KeyValues");
+#endif
 
 	if (!pszKeyName || !*pszKeyName)
 		return this;
@@ -306,8 +309,10 @@ KeyValues* KeyValues::FindLastSubKey(void) const
 void KeyValues::AddSubKey(KeyValues* pSubkey)
 {
 	// Make sure the subkey isn't a child of some other keyvalues
+#if KV_ASSERT
 	assert(pSubkey != nullptr);
 	assert(pSubkey->m_pPeer == nullptr);
+#endif
 
 	// add into subkey list
 	if (m_pSub == nullptr)
@@ -367,7 +372,9 @@ void KeyValues::RemoveSubKey(KeyValues* pSubKey)
 void KeyValues::InsertSubKey(int nIndex, KeyValues* pSubKey)
 {
 	// Sub key must be valid and not part of another chain
+#if KV_ASSERT
 	assert(pSubKey && pSubKey->m_pPeer == nullptr);
+#endif
 
 	if (nIndex == 0)
 	{
@@ -389,7 +396,9 @@ void KeyValues::InsertSubKey(int nIndex, KeyValues* pSubKey)
 			}
 		}
 		// Index is out of range if we get here
+#if KV_ASSERT
 		assert(0);
+#endif
 		return;
 	}
 }
@@ -418,10 +427,12 @@ bool KeyValues::ContainsSubKey(KeyValues* pSubKey)
 //-----------------------------------------------------------------------------
 void KeyValues::SwapSubKey(KeyValues* pExistingSubkey, KeyValues* pNewSubKey)
 {
+#if KV_ASSERT
 	assert(pExistingSubkey != nullptr && pNewSubKey != nullptr);
 
 	// Make sure the new sub key isn't a child of some other keyvalues
 	assert(pNewSubKey->m_pPeer == nullptr);
+#endif
 
 	// Check the list pointer
 	if (m_pSub == pExistingSubkey)
@@ -447,7 +458,9 @@ void KeyValues::SwapSubKey(KeyValues* pExistingSubkey, KeyValues* pNewSubKey)
 			kv = kv->m_pPeer;
 		}
 		// Existing sub key should always be found, otherwise it's a bug in the calling code.
+#if KV_ASSERT
 		assert(kv->m_pPeer != nullptr);
+#endif
 	}
 }
 
@@ -489,7 +502,9 @@ void KeyValues::ElideSubKey(KeyValues* pSubKey)
 		}
 	}
 	// Key not found; that's caller error.
+#if KV_ASSERT
 	assert(0);
+#endif
 }
 
 //-----------------------------------------------------------------------------
@@ -515,7 +530,9 @@ bool KeyValues::IsEmpty(const char* pszKeyName)
 //-----------------------------------------------------------------------------
 KeyValues* KeyValues::GetFirstTrueSubKey(void) const
 {
+#if KV_ASSERT
 	assert_msg(this, "Member function called on NULL KeyValues");
+#endif
 	KeyValues* pRet = m_pSub;
 	while (pRet && pRet->m_iDataType != TYPE_NONE)
 		pRet = pRet->m_pPeer;
@@ -529,7 +546,9 @@ KeyValues* KeyValues::GetFirstTrueSubKey(void) const
 //-----------------------------------------------------------------------------
 KeyValues* KeyValues::GetNextTrueSubKey(void) const
 {
+#if KV_ASSERT
 	assert_msg(this, "Member function called on NULL KeyValues");
+#endif
 	KeyValues* pRet = m_pPeer;
 	while (pRet && pRet->m_iDataType != TYPE_NONE)
 		pRet = pRet->m_pPeer;
@@ -543,7 +562,9 @@ KeyValues* KeyValues::GetNextTrueSubKey(void) const
 //-----------------------------------------------------------------------------
 KeyValues* KeyValues::GetFirstValue(void) const
 {
+#if KV_ASSERT
 	assert_msg(this, "Member function called on NULL KeyValues");
+#endif
 	KeyValues* pRet = m_pSub;
 	while (pRet && pRet->m_iDataType == TYPE_NONE)
 		pRet = pRet->m_pPeer;
@@ -557,7 +578,9 @@ KeyValues* KeyValues::GetFirstValue(void) const
 //-----------------------------------------------------------------------------
 KeyValues* KeyValues::GetNextValue(void) const
 {
+#if KV_ASSERT
 	assert_msg(this, "Member function called on NULL KeyValues");
+#endif
 	KeyValues* pRet = m_pPeer;
 	while (pRet && pRet->m_iDataType == TYPE_NONE)
 		pRet = pRet->m_pPeer;
@@ -570,7 +593,9 @@ KeyValues* KeyValues::GetNextValue(void) const
 //-----------------------------------------------------------------------------
 KeyValues* KeyValues::GetFirstSubKey() const
 {
+#if KV_ASSERT
 	assert_msg(this, "Member function called on NULL KeyValues");
+#endif
 	return m_pSub;
 }
 
@@ -579,7 +604,9 @@ KeyValues* KeyValues::GetFirstSubKey() const
 //-----------------------------------------------------------------------------
 KeyValues* KeyValues::GetNextKey() const
 {
+#if KV_ASSERT
 	assert_msg(this, "Member function called on NULL KeyValues");
+#endif
 	return m_pPeer;
 }
 
@@ -615,7 +642,9 @@ int KeyValues::GetInt(const char* pszKeyName = NULL, int iDefaultValue = 0)
 			return static_cast<int>(pKey->m_flValue);
 		case TYPE_UINT64:
 			// can't convert, since it would lose data
+#if KV_ASSERT
 			assert(0);
+#endif
 			return 0;
 		case TYPE_INT:
 		case TYPE_PTR:
@@ -1168,7 +1197,9 @@ void KeyValues::RecursiveCopyKeyValues(KeyValues& src)
 		default:
 		{
 			// do nothing . .what the heck is this?
+#if KV_ASSERT
 			assert(0);
+#endif
 		}
 		break;
 		}
@@ -1245,7 +1276,9 @@ KeyValues* KeyValues::MakeCopy(void) const
 		if (m_sValue)
 		{
 			size_t len = strlen(m_sValue);
+#if KV_ASSERT
 			assert(!pNewKeyValue->m_sValue);
+#endif
 			pNewKeyValue->m_sValue = new char[len + 1];
 			memcpy(pNewKeyValue->m_sValue, m_sValue, len + 1);
 		}
@@ -1327,7 +1360,9 @@ bool KeyValues::WriteAsBinary(bf_write& buffer)
 		break;
 		case TYPE_WSTRING:
 		{
+#if KV_ASSERT
 			Assert(!"TYPE_WSTRING");
+#endif
 		}
 		break;
 		case TYPE_INT:
@@ -1408,7 +1443,9 @@ bool KeyValues::ReadAsBinary(bf_read& buffer)
 		break;
 		case TYPE_WSTRING:
 		{
+#if KV_ASSERT
 			Assert(!"TYPE_WSTRING");
+#endif
 		}
 		break;
 		case TYPE_INT:

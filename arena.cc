@@ -5,8 +5,8 @@
 Arena*
 arena_alloc(uint64_t reserve_, uint64_t commit_, uint64_t flags_)
 {
-    Assert(IsPow2(reserve_));
-    Assert(IsPow2(commit_));
+    R1DAssert(IsPow2(reserve_));
+    R1DAssert(IsPow2(commit_));
 
     uint64_t reserve = AlignPow2(reserve_, 4096);
     uint64_t commit = AlignPow2(commit_, 4096);
@@ -22,7 +22,7 @@ arena_alloc(uint64_t reserve_, uint64_t commit_, uint64_t flags_)
 #endif
     }
 
-    Assert(VirtualAlloc(arena, commit, MEM_COMMIT, PAGE_READWRITE) != 0);
+    R1DAssert(VirtualAlloc(arena, commit, MEM_COMMIT, PAGE_READWRITE) != 0);
 
     arena->current = arena;
     arena->prev = 0;
@@ -91,7 +91,7 @@ arena_push(Arena* arena, uint64_t size, uint64_t align)
         }
 
         uint64_t c_cmt = current->cmt;
-        Assert(VirtualAlloc((uint8_t*)current + c_cmt, cmt_new - c_cmt, MEM_COMMIT, PAGE_READWRITE));
+        R1DAssert(VirtualAlloc((uint8_t*)current + c_cmt, cmt_new - c_cmt, MEM_COMMIT, PAGE_READWRITE));
         current->cmt = cmt_new;
     }
 
@@ -102,7 +102,7 @@ arena_push(Arena* arena, uint64_t size, uint64_t align)
         ret = (uint8_t*)current + pos_align;
     }
 
-    Assert(ret);
+    R1DAssert(ret);
 
     return ret;
 }
@@ -143,6 +143,12 @@ arena_pop_by(Arena* arena, uint64_t amount)
     if (pos > amount) {
         arena_pop_to(arena, pos - amount);
     }
+}
+
+void
+arena_clear(Arena* arena)
+{
+    arena_pop_to(arena, ARENA_HEADER_SIZE);
 }
 
 //- mrsteyk: TempArena

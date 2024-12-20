@@ -33,6 +33,7 @@
 #include <map>
 #include "keyvalues.h"
 #include "persistentdata.h"
+#include "tctx.hh"
 
 
 #include "masterserver.h"
@@ -45,6 +46,7 @@
 #include <sstream>
 
 
+#if 0
 // Helper function to convert wide string to string
 std::string WideToString(const std::wstring_view& wide) {
 	if (wide.empty()) return std::string();
@@ -60,6 +62,50 @@ std::wstring StringToWide(const std::string_view& str) {
 	int size = MultiByteToWideChar(CP_UTF8, 0, str.data(), (int)str.size(), nullptr, 0);
 	std::wstring ret(size, 0);
 	MultiByteToWideChar(CP_UTF8, 0, str.data(), (int)str.size(), &ret[0], size);
+	return ret;
+}
+#endif
+
+// Helper function to convert wide string to string
+// NOTE(mrsteyk): null terminated
+char* WideToStringArena(Arena* arena, const std::wstring_view& wide) {
+	if (wide.empty()) return arena_strdup(arena, "", 0);
+	int size = WideCharToMultiByte(CP_UTF8, 0, wide.data(), (int)wide.size(), nullptr, 0, nullptr, nullptr);
+	auto ret = (char*)arena_push(arena, size + 1);
+	WideCharToMultiByte(CP_UTF8, 0, wide.data(), (int)wide.size(), ret, size, nullptr, nullptr);
+	ret[size] = 0;
+	return ret;
+}
+
+struct S16
+{
+	wchar_t* ptr;
+	size_t size;
+};
+
+// Helper function to convert string to wide string
+// NOTE(mrsteyk): null terminated
+S16 StringToWideArena(Arena* arena, const std::string_view& str) {
+	if (str.empty()) return { arena_wstrdup(arena, L"", 0), 0 };
+	int size = MultiByteToWideChar(CP_UTF8, 0, str.data(), (int)str.size(), nullptr, 0);
+	auto ret = (wchar_t*)arena_push(arena, (size + 1) * sizeof(wchar_t));
+	MultiByteToWideChar(CP_UTF8, 0, str.data(), (int)str.size(), ret, size);
+	ret[size] = 0;
+	return { ret, (size_t)size };
+}
+
+uint64_t HashS16(S16 s)
+{
+	constexpr uint64_t prime = 1111111111111111111;
+	constexpr uint64_t offset = 0x100;
+
+	auto ret = offset;
+	for (size_t i = 0; i < s.size; ++i)
+	{
+		ret ^= s.ptr[i];
+		ret *= prime;
+	}
+
 	return ret;
 }
 
@@ -89,7 +135,8 @@ public:
 		if (hConnect) WinHttpCloseHandle(hConnect);
 		if (hSession) WinHttpCloseHandle(hSession);
 	}
-	void ResolveHostToIPv4(const std::wstring& host) {
+
+	void ResolveHostToIPv4(const wchar_t* host) {
 
 		ADDRINFOW hints = {};
 		hints.ai_family = AF_INET; // Only IPv4
@@ -98,7 +145,7 @@ public:
 
 
 		ADDRINFOW* result = nullptr;
-		int status = GetAddrInfoW(host.c_str(), nullptr, &hints, &result);
+		int status = GetAddrInfoW(host, nullptr, &hints, &result);
 		if (status != 0) {
 			Warning("getaddrinfo failed with error: %d\n", status);
 		}
@@ -122,24 +169,27 @@ public:
 		}
 	}
 
-
-	std::vector<uint8_t> SendRequest(const std::wstring& host, const std::wstring& path,
-		const std::vector<uint8_t>& data, bool isPost = true, bool ipv4_force = false) {
+	std::vector<uint8_t> SendRequest(const S16 host, const wchar_t* path,
+		const std::vector<uint8_t>& data, bool isPost = true, bool ipv4_force = false)
+	{
 		if (!hSession) return {};
+
+		auto arena = tctx.get_arena_for_scratch();
+		auto temp = TempArena(arena);
 
 		// NOTE(mrsteyk): please don't do this every single fucking time, thanks.
 		// TODO(mrsteyk): cvar change callback to rebind this class to a different host?
 		if (ipv4_force) {
 			size_t ahash = 0;
-			size_t asize = host.size();
+			size_t asize = host.size;
 			// NOTE(mrsteyk): !ipv4_addr[0] check does nothing useful, other fields will not match as well if that's the case. 
-			if (ipv4_addr_hash_len != asize || ipv4_addr_hash != (ahash = std::hash<std::wstring>()(host))) {
+			if (ipv4_addr_hash_len != asize || ipv4_addr_hash != (ahash = HashS16(host))) {
 				try {
-					ResolveHostToIPv4(host);
+					ResolveHostToIPv4(host.ptr);
 					if (ipv4_addr[0])
 					{
 						ipv4_addr_hash_len = asize;
-						ipv4_addr_hash = ahash ? ahash : std::hash<std::wstring>()(host);
+						ipv4_addr_hash = ahash ? ahash : HashS16(host);
 					}
 				}
 				catch (std::runtime_error& e) {
@@ -151,7 +201,8 @@ public:
 			hConnect = WinHttpConnect(hSession, ipv4_addr, INTERNET_DEFAULT_HTTP_PORT, 0);
 		}
 		else {
-			hConnect = WinHttpConnect(hSession, host.c_str(), INTERNET_DEFAULT_HTTP_PORT, 0);
+			hConnect = WinHttpConnect(hSession, host.ptr, INTERNET_DEFAULT_HTTP_PORT, 0);
+
 		}
 
 		if (!hConnect) {
@@ -161,7 +212,7 @@ public:
 		}
 
 		const wchar_t* verb = isPost ? L"POST" : L"GET";
-		hRequest = WinHttpOpenRequest(hConnect, verb, path.c_str(),
+		hRequest = WinHttpOpenRequest(hConnect, verb, path,
 			nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, 0);
 
 		if (!hRequest) {
@@ -170,8 +221,15 @@ public:
 			return {};
 		}
 		// Add the Host header here
-		std::wstring hostHeader = L"Host: " + host;
-		WinHttpAddRequestHeaders(hRequest, hostHeader.c_str(), hostHeader.size(), WINHTTP_ADDREQ_FLAG_ADD);
+		const wchar_t host_header_prefix[] = L"Host: ";
+		constexpr size_t host_header_prefix_characters = sizeof(host_header_prefix) / sizeof(host_header_prefix[0]) - 1;
+		
+		size_t host_header_size = host_header_prefix_characters + host.size;
+		auto hostHeader = (wchar_t*)arena_push(arena, (host_header_size + 1) * sizeof(host_header_prefix[0]));
+		memcpy(hostHeader, host_header_prefix, host_header_prefix_characters * sizeof(hostHeader[0]));
+		memcpy(hostHeader + host_header_prefix_characters, host.ptr, host.size * sizeof(hostHeader[0]));
+		hostHeader[host_header_size] = 0;
+		WinHttpAddRequestHeaders(hRequest, hostHeader, (DWORD)host_header_size, WINHTTP_ADDREQ_FLAG_ADD);
 
 		// Set request header for Cap'n Proto content
 		WinHttpAddRequestHeaders(hRequest, L"Content-Type: application/x-capnproto",
@@ -179,7 +237,7 @@ public:
 
 		if (isPost && !data.empty()) {
 			BOOL result = WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-				(LPVOID)data.data(), data.size(), data.size(), 0);
+				(LPVOID)data.data(), (DWORD)data.size(), (DWORD)data.size(), 0);
 			if (!result) {
 				DWORD error = GetLastError();
 				Warning("WinHttpSendRequest (POST) failed with error %lu\n", error);
@@ -386,9 +444,13 @@ void GetServerHeartbeat(HSQUIRRELVM v) {
 	// TODO(mrsteyk): worker thread with ring buffer.
 	// Send using WinHTTP
 	std::thread([data = std::move(data)]() {
+		auto arena = tctx.get_arena_for_scratch();
+		auto temp = TempArena(arena);
+
 		WinHttpClient client;
 		auto ms_url = CCVar_FindVar(cvarinterface, "r1d_ms");
-		std::wstring host = StringToWide(ms_url->m_Value.m_pszString);
+		//std::wstring host = StringToWide(ms_url->m_Value.m_pszString);
+		auto host = StringToWideArena(arena, ms_url->m_Value.m_pszString);
 
 		auto response = client.SendRequest(host, L"/server/heartbeat", data, true, true);
 		if (!response.empty() && response.size() > 2) {
@@ -397,10 +459,13 @@ void GetServerHeartbeat(HSQUIRRELVM v) {
 	}).detach();
 }
 SQInteger GetServerList(HSQUIRRELVM v) {
+	auto arena = tctx.get_arena_for_scratch();
+	auto temp = TempArena(arena);
+
 	try {
 		WinHttpClient client;
 		auto ms_url = CCVar_FindVar(cvarinterface, "r1d_ms");
-		std::wstring host = StringToWide(ms_url->m_Value.m_pszString);
+		auto host = StringToWideArena(arena, ms_url->m_Value.m_pszString);
 
 		auto response = client.SendRequest(host, L"/server/", {}, false);
 
@@ -474,12 +539,12 @@ SQInteger GetServerList(HSQUIRRELVM v) {
 
 				return 1;
 			}
-			catch (const kj::Exception& e) {
+			catch (const kj::Exception&) {
 				// Cap'n Proto parsing error - fall through to create fake server
 			}
 		}
 	}
-	catch (const std::exception& e) {
+	catch (const std::exception&) {
 		// Network error or other exception - fall through to create fake server
 	}
 
@@ -525,12 +590,19 @@ void Hk_CHostState__State_GameShutdown(void* thisptr) {
 	static auto host_map_cvar = CCVar_FindVar(cvarinterface, "host_map");
 	if (strlen(host_map_cvar->m_Value.m_pszString) > 2) {
 		std::thread([]() {
+			auto arena = tctx.get_arena_for_scratch();
+			auto temp = TempArena(arena);
 
 			int port = hostport_cvar->m_Value.m_nValue;
 			WinHttpClient client;
 			auto ms_url = CCVar_FindVar(cvarinterface, "r1d_ms");
-			std::wstring host = StringToWide(ms_url->m_Value.m_pszString);
-			std::wstring path = L"/server/delete?port=" + std::to_wstring(port);
+			auto host = StringToWideArena(arena, ms_url->m_Value.m_pszString);
+			const wchar_t path_prefix[] = L"/server/delete?port=";
+			constexpr size_t path_prefix_size = sizeof(path_prefix)/sizeof(path_prefix[0]) - 1;
+
+			size_t path_size = path_prefix_size + 11;
+			auto path = (wchar_t*)arena_push(arena, (path_size + 1) * sizeof(wchar_t));
+			R1DAssert(swprintf(path, path_size, L"/server/delete?port=%d", port) != -1);
 
 			client.SendRequest(host, path, {}, true, true);
 			}).detach();
