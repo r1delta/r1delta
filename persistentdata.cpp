@@ -157,9 +157,9 @@ private:
 	friend class SchemaParser;
 
 	// Schema storage
-	std::unordered_map<std::string, SchemaType> keys;
-	std::unordered_map<std::string, ArrayDef> arrays;
-	std::unordered_map<std::string, std::map<std::string, int>> enums;
+	std::unordered_map<std::string, SchemaType, HashStrings> keys;
+	std::unordered_map<std::string, ArrayDef, HashStrings> arrays;
+	std::unordered_map<std::string, std::map<std::string, int>, HashStrings> enums;
 
 	// Helper functions
 	bool isValidEnumValue(const std::string& enumName, const std::string& value) const;

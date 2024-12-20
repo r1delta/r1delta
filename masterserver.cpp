@@ -470,23 +470,24 @@ void GetServerHeartbeat(HSQUIRRELVM v) {
 	//auto asize = AlignPow2(ssize + ARENA_DEFAULT_RESERVE, ARENA_DEFAULT_COMMIT);
 	Arena* thread_arena = arena_alloc();
 	U8Array data;
-	data.ptr = (uint8_t*)arena_push(thread_arena, bytes.size());
-	data.size = bytes.size();
+	data.ptr = (uint8_t*)arena_push(thread_arena, ssize);
+	data.size = ssize;
+	memcpy(data.ptr, bytes.begin(), ssize);
 
 	// TODO(mrsteyk): worker thread with ring buffer.
 	// Send using WinHTTP
-	std::thread([thread_arena, data]() {
+	std::thread([](Arena* thread_arena, U8Array sdata) {
 		WinHttpClient client;
 		auto ms_url = CCVar_FindVar(cvarinterface, "r1d_ms");
 		auto host = StringToWideArena(thread_arena, ms_url->m_Value.m_pszString);
 
-		auto response = client.SendRequest(thread_arena, host, L"/server/heartbeat", data, true, true);
+		auto response = client.SendRequest(thread_arena, host, L"/server/heartbeat", sdata, true, true);
 		if (!response.empty() && response.size > 2) {
 			Warning("GetServerHeartbeat: MS reports: %s\n", reinterpret_cast<char*>(response.ptr));
 		}
 
 		arena_release(thread_arena);
-	}).detach();
+	}, thread_arena, data).detach();
 }
 SQInteger GetServerList(HSQUIRRELVM v) {
 	auto arena = tctx.get_arena_for_scratch();

@@ -75,3 +75,22 @@ __forceinline bool IsNoConsole() {
 
 #define ENGINE_DLL_BASE (G_is_dedi ? G_engine_ds : G_engine)
 #define ENGINE_DLL_BASE_(dedi) ((dedi) ? G_engine_ds : G_engine)
+
+struct HashStrings
+{
+    using ht = std::hash<std::string_view>;
+    using is_transparent = void;
+
+    auto operator()(const char* ptr) const noexcept
+    {
+        return ht{}(ptr);
+    }
+    auto operator()(const std::string_view& sv) const noexcept
+    {
+        return ht{}(sv);
+    }
+    auto operator()(const std::string& s) const noexcept
+    {
+        return ht{}(s);
+    }
+};

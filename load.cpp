@@ -979,7 +979,7 @@ void InitAddons() {
 	
 	MH_EnableHook(MH_ALL_HOOKS);
 }
-std::unordered_map<std::string, std::string> g_LastEntCreateKeyValues;
+std::unordered_map<std::string, std::string, HashStrings> g_LastEntCreateKeyValues;
 void (*oCC_Ent_Create)(const CCommand* args);
 bool g_bIsEntCreateCommand = false;
 

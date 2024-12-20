@@ -244,7 +244,7 @@ extern void      (*OriginalCCVar_CallGlobalChangeCallbacks)(uintptr_t thisptr, C
 extern void      (*OriginalCCVar_QueueMaterialThreadSetValue1)(uintptr_t thisptr, ConVarR1* pConVar, const char* pValue);
 extern void      (*OriginalCCVar_QueueMaterialThreadSetValue2)(uintptr_t thisptr, ConVarR1* pConVar, int nValue);
 extern void      (*OriginalCCVar_QueueMaterialThreadSetValue3)(uintptr_t thisptr, ConVarR1* pConVar, float flValue);
-extern std::unordered_map<std::string, WVar*> ccBaseMap;
+extern std::unordered_map<std::string, WVar*, HashStrings> ccBaseMap;
 
 void CCVar_RegisterConCommand(uintptr_t thisptr, ConCommandBaseR1O* pCommandBase);
 void CCVar_UnregisterConCommand(uintptr_t thisptr, ConCommandBaseR1O* pCommandBase);
