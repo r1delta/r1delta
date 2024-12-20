@@ -98,6 +98,7 @@ arena_push(Arena* arena, uint64_t size, uint64_t align)
     void* ret = 0;
     if (current->cmt >= pos_post)
     {
+        current->pos = pos_post;
         ret = (uint8_t*)current + pos_align;
     }
 
