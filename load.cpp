@@ -1381,7 +1381,7 @@ void __stdcall LoaderNotificationCallback(
 		void* allign = (void*)(engine_base + 0x1EA961);
 
 
-		auto* jmp_pos = (void*)(((uintptr_t)GetModuleHandle(L"engine.dll")) + 0x1E8DD5); // `call nullsub_87` offset
+		auto* jmp_pos = (void*)(engine_base + 0x1E8DD5); // `call nullsub_87` offset
 		// 0xE9, 0x87, 0x1B, 0x00, 0x00 // jmp 0x1b8c (algn_1801EA961)  (0x1EA961 - 0x1E8DD5)
 		DWORD old_protect;
 		VirtualProtect(jmp_pos, 5, PAGE_EXECUTE_READWRITE, &old_protect);

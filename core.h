@@ -42,7 +42,7 @@
 # elif defined(_DEBUG)
 #  define BUILD_DEBUG 1
 # else
-#  pragma error Could not determine BUILD_DEBUG value
+#  error Could not determine BUILD_DEBUG value
 # endif
 #endif
 
