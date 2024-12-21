@@ -176,6 +176,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="arena.hh" />
     <ClInclude Include="beardbgon.h" />
     <ClInclude Include="bitbuf.h" />
     <ClInclude Include="client.h" />
@@ -207,6 +208,7 @@
     <ClInclude Include="sendmoveclampfix.h" />
     <ClInclude Include="squirrel.h" />
     <ClInclude Include="TableDestroyer.h" />
+    <ClInclude Include="tctx.hh" />
     <ClInclude Include="thirdparty\nlohmann\json.hpp" />
     <ClInclude Include="thirdparty\nlohmann\json_fwd.hpp" />
     <ClInclude Include="thirdparty\zstd\zstd.h" />
@@ -255,6 +257,7 @@
     <ClInclude Include="weaponxdebug.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="arena.cc" />
     <ClCompile Include="bitbuf.cpp" />
     <ClCompile Include="client.cpp" />
     <ClCompile Include="compression.cpp" />
@@ -280,6 +283,7 @@
     <ClCompile Include="sendmoveclampfix.cpp" />
     <ClCompile Include="squirrel.cpp" />
     <ClCompile Include="TableDestroyer.cpp" />
+    <ClCompile Include="tctx.cpp" />
     <ClCompile Include="thirdparty\zstd\zstd.c" />
     <ClCompile Include="utils.cpp" />
     <!-- Add the following includes from the first version -->
