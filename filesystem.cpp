@@ -101,7 +101,7 @@ void StartFileCacheThread() {
 class FastFileSystemHook {
 private:
 	struct TrieNode {
-		std::unordered_map<std::string, std::unique_ptr<TrieNode>> children;
+		std::unordered_map<std::string, std::unique_ptr<TrieNode>, HashStrings> children;
 		bool exists = false;
 		bool checked = false;
 	};
@@ -256,7 +256,7 @@ int64_t CFileSystem_Stdio__DoTFOFilesystemOp(__int64 a1, char* a2, rsize_t a3)
 // even though the memory it points to has been freed.
 //
 // The behavior persists due to luck under the default Valve 
-// allocator, which doesn’t always immediately overwrite freed 
+// allocator, which doesnï¿½t always immediately overwrite freed 
 // memory. The issue is exposed with the new memory allocator, 
 // which overwrites freed memory with 0xDF in debug builds, 
 // triggering crashes when the stale pFileName pointer is accessed.

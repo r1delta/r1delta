@@ -255,6 +255,12 @@
     <ClInclude Include="thirdparty\zstd\zstd.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="arena.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="tctx.hh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">
@@ -362,6 +368,12 @@
     <ClCompile Include="thirdparty\zstd\zstd.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="arena.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="tctx.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
@@ -370,5 +382,8 @@
     <MASM Include="NetChanFixes.asm">
       <Filter>Source Files</Filter>
     </MASM>
+  </ItemGroup>
+  <ItemGroup>
+    <Natvis Include="base.natvis" />
   </ItemGroup>
 </Project>

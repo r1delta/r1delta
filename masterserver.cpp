@@ -21,7 +21,6 @@
 #include "defs.h"
 #include "factory.h"
 #include "core.h"
-#include "load.h"
 #include "patcher.h"
 #include "MinHook.h"
 #include "TableDestroyer.h"
@@ -34,10 +33,9 @@
 #include <map>
 #include "keyvalues.h"
 #include "persistentdata.h"
-#include "load.h"
+#include "tctx.hh"
 
 
-#include <random>
 #include "masterserver.h"
 #include <winhttp.h>
 #include <capnp/message.h>
@@ -48,34 +46,98 @@
 #include <sstream>
 
 
+#if 0
 // Helper function to convert wide string to string
-std::string WideToString(const std::wstring& wide) {
+std::string WideToString(const std::wstring_view& wide) {
 	if (wide.empty()) return std::string();
-	int size = WideCharToMultiByte(CP_UTF8, 0, &wide[0], (int)wide.size(), nullptr, 0, nullptr, nullptr);
+	int size = WideCharToMultiByte(CP_UTF8, 0, wide.data(), (int)wide.size(), nullptr, 0, nullptr, nullptr);
 	std::string ret(size, 0);
-	WideCharToMultiByte(CP_UTF8, 0, &wide[0], (int)wide.size(), &ret[0], size, nullptr, nullptr);
+	WideCharToMultiByte(CP_UTF8, 0, wide.data(), (int)wide.size(), &ret[0], size, nullptr, nullptr);
 	return ret;
 }
 
 // Helper function to convert string to wide string
-std::wstring StringToWide(const std::string& str) {
+std::wstring StringToWide(const std::string_view& str) {
 	if (str.empty()) return std::wstring();
-	int size = MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), nullptr, 0);
+	int size = MultiByteToWideChar(CP_UTF8, 0, str.data(), (int)str.size(), nullptr, 0);
 	std::wstring ret(size, 0);
-	MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), &ret[0], size);
+	MultiByteToWideChar(CP_UTF8, 0, str.data(), (int)str.size(), &ret[0], size);
 	return ret;
 }
+#endif
+
+// Helper function to convert wide string to string
+// NOTE(mrsteyk): null terminated
+char* WideToStringArena(Arena* arena, const std::wstring_view& wide) {
+	if (wide.empty()) return arena_strdup(arena, "", 0);
+	int size = WideCharToMultiByte(CP_UTF8, 0, wide.data(), (int)wide.size(), nullptr, 0, nullptr, nullptr);
+	auto ret = (char*)arena_push(arena, size + 1);
+	WideCharToMultiByte(CP_UTF8, 0, wide.data(), (int)wide.size(), ret, size, nullptr, nullptr);
+	ret[size] = 0;
+	return ret;
+}
+
+struct S16
+{
+	wchar_t* ptr;
+	size_t size;
+};
+
+// Helper function to convert string to wide string
+// NOTE(mrsteyk): null terminated
+S16 StringToWideArena(Arena* arena, const std::string_view& str) {
+	if (str.empty()) return { arena_wstrdup(arena, L"", 0), 0 };
+	int size = MultiByteToWideChar(CP_UTF8, 0, str.data(), (int)str.size(), nullptr, 0);
+	auto ret = (wchar_t*)arena_push(arena, (size + 1) * sizeof(wchar_t));
+	MultiByteToWideChar(CP_UTF8, 0, str.data(), (int)str.size(), ret, size);
+	ret[size] = 0;
+	return { ret, (size_t)size };
+}
+
+uint64_t HashS16(S16 s)
+{
+	constexpr uint64_t prime = 1111111111111111111;
+	constexpr uint64_t offset = 0x100;
+
+	auto ret = offset;
+	for (size_t i = 0; i < s.size; ++i)
+	{
+		ret ^= s.ptr[i];
+		ret *= prime;
+	}
+
+	return ret;
+}
+
+struct U8Array
+{
+	uint8_t* ptr;
+	size_t size;
+
+	bool empty() {
+		return !size;
+	}
+};
 
 class WinHttpClient {
 private:
 	HINTERNET hSession = nullptr;
 	HINTERNET hConnect = nullptr;
 	HINTERNET hRequest = nullptr;
+	size_t ipv4_addr_hash = 0;
+	size_t ipv4_addr_hash_len = 0;
+	wchar_t ipv4_addr[INET_ADDRSTRLEN]{ 0 };
 
 public:
 	WinHttpClient() {
 		hSession = WinHttpOpen(L"R1Delta", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
 			WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+		DWORD set = WINHTTP_DECOMPRESSION_FLAG_ALL;
+		WinHttpSetOption(hSession, WINHTTP_OPTION_DECOMPRESSION, &set, sizeof(set));
+#if 0
+		set = WINHTTP_PROTOCOL_FLAG_HTTP2 | WINHTTP_PROTOCOL_FLAG_HTTP3;
+		WinHttpSetOption(hSession, WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL, &set, sizeof(set));
+#endif
 	}
 
 	~WinHttpClient() {
@@ -83,7 +145,8 @@ public:
 		if (hConnect) WinHttpCloseHandle(hConnect);
 		if (hSession) WinHttpCloseHandle(hSession);
 	}
-	std::wstring ResolveHostToIPv4(const std::wstring& host) {
+
+	void ResolveHostToIPv4(const wchar_t* host) {
 
 		ADDRINFOW hints = {};
 		hints.ai_family = AF_INET; // Only IPv4
@@ -92,58 +155,75 @@ public:
 
 
 		ADDRINFOW* result = nullptr;
-		int status = GetAddrInfoW(host.c_str(), nullptr, &hints, &result);
+		int status = GetAddrInfoW(host, nullptr, &hints, &result);
 		if (status != 0) {
 			Warning("getaddrinfo failed with error: %d\n", status);
 		}
 
-		std::wstring ipv4_address;
 		if (result != nullptr) {
 			for (ADDRINFOW* ptr = result; ptr != nullptr; ptr = ptr->ai_next) {
 				if (ptr->ai_family == AF_INET) {
 					sockaddr_in* ipv4 = reinterpret_cast<sockaddr_in*>(ptr->ai_addr);
 					wchar_t ipstr[INET_ADDRSTRLEN];
+					static_assert(sizeof(ipstr) == sizeof(ipv4_addr));
 					InetNtopW(AF_INET, &(ipv4->sin_addr), ipstr, INET_ADDRSTRLEN);
-					ipv4_address = ipstr;
+					memcpy(ipv4_addr, ipstr, sizeof(ipv4_addr));
 					break;
 				}
 			}
 			FreeAddrInfoW(result);
 		}
 
-		if (ipv4_address.empty()) {
+		if (!ipv4_addr[0]) {
 			Warning("No IPv4 address found for the host\n", status);
 		}
-
-		return ipv4_address;
 	}
 
+	// NOTE(mrsteyk): Whoever decided to always return IPv6 not supported is an idiot.
+	U8Array SendRequest(Arena* perm, const S16 host, const wchar_t* path,
+		const U8Array data, bool isPost = true, bool ipv4_force = true)
+	{
+		if (!hSession) return {0, 0};
 
-	std::vector<uint8_t> SendRequest(const std::wstring& host, const std::wstring& path,
-		const std::vector<uint8_t>& data, bool isPost = true) {
-		if (!hSession) return {};
+		auto arena = tctx.get_arena_for_scratch(&perm, 1);
+		auto temp = TempArena(arena);
 
-		std::wstring ipv4_host;
+		// NOTE(mrsteyk): please don't do this every single fucking time, thanks.
+		// TODO(mrsteyk): cvar change callback to rebind this class to a different host?
+		if (ipv4_force) {
+			size_t ahash = 0;
+			size_t asize = host.size;
+			// NOTE(mrsteyk): !ipv4_addr[0] check does nothing useful, other fields will not match as well if that's the case. 
+			if (ipv4_addr_hash_len != asize || ipv4_addr_hash != (ahash = HashS16(host))) {
+				try {
+					ResolveHostToIPv4(host.ptr);
+					if (ipv4_addr[0])
+					{
+						ipv4_addr_hash_len = asize;
+						ipv4_addr_hash = ahash ? ahash : HashS16(host);
+					}
+				}
+				catch (std::runtime_error& e) {
+					Warning("Error during host resolution: %s\n", e.what());
+					return {};
+				}
+			}
 
-		try {
-			ipv4_host = ResolveHostToIPv4(host);
+			hConnect = WinHttpConnect(hSession, ipv4_addr, INTERNET_DEFAULT_HTTP_PORT, 0);
 		}
-		catch (std::runtime_error& e) {
-			Warning("Error during host resolution: %s\n", e.what());
-			return {};
+		else {
+			hConnect = WinHttpConnect(hSession, host.ptr, INTERNET_DEFAULT_HTTP_PORT, 0);
+
 		}
 
-
-		hConnect = WinHttpConnect(hSession, ipv4_host.c_str(), INTERNET_DEFAULT_HTTP_PORT, 0);
 		if (!hConnect) {
 			DWORD error = GetLastError();
 			Warning("WinHttpConnect failed with error %lu\n", error);
 			return {};
 		}
 
-
 		const wchar_t* verb = isPost ? L"POST" : L"GET";
-		hRequest = WinHttpOpenRequest(hConnect, verb, path.c_str(),
+		hRequest = WinHttpOpenRequest(hConnect, verb, path,
 			nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, 0);
 
 		if (!hRequest) {
@@ -152,16 +232,23 @@ public:
 			return {};
 		}
 		// Add the Host header here
-		std::wstring hostHeader = L"Host: " + host;
-		WinHttpAddRequestHeaders(hRequest, hostHeader.c_str(), -1, WINHTTP_ADDREQ_FLAG_ADD);
+		const wchar_t host_header_prefix[] = L"Host: ";
+		constexpr size_t host_header_prefix_characters = sizeof(host_header_prefix) / sizeof(host_header_prefix[0]) - 1;
+		
+		size_t host_header_size = host_header_prefix_characters + host.size;
+		auto hostHeader = (wchar_t*)arena_push(arena, (host_header_size + 1) * sizeof(host_header_prefix[0]));
+		memcpy(hostHeader, host_header_prefix, host_header_prefix_characters * sizeof(hostHeader[0]));
+		memcpy(hostHeader + host_header_prefix_characters, host.ptr, host.size * sizeof(hostHeader[0]));
+		hostHeader[host_header_size] = 0;
+		WinHttpAddRequestHeaders(hRequest, hostHeader, (DWORD)host_header_size, WINHTTP_ADDREQ_FLAG_ADD);
 
 		// Set request header for Cap'n Proto content
 		WinHttpAddRequestHeaders(hRequest, L"Content-Type: application/x-capnproto",
 			-1, WINHTTP_ADDREQ_FLAG_ADD);
 
-		if (isPost && !data.empty()) {
+		if (isPost && data.size) {
 			BOOL result = WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-				(LPVOID)data.data(), data.size(), data.size(), 0);
+				(LPVOID)data.ptr, (DWORD)data.size, (DWORD)data.size, 0);
 			if (!result) {
 				DWORD error = GetLastError();
 				Warning("WinHttpSendRequest (POST) failed with error %lu\n", error);
@@ -185,13 +272,26 @@ public:
 			return {};
 		}
 
-		std::vector<uint8_t> response;
+		//std::vector<uint8_t> response;
+		size_t response_capacity = (16 << 10);
+		U8Array response;
+		response.ptr = (uint8_t*)arena_push(perm, response_capacity);
+		response.size = 0;
 		DWORD bytesAvailable;
 		while (WinHttpQueryDataAvailable(hRequest, &bytesAvailable) && bytesAvailable > 0) {
-			std::vector<uint8_t> buffer(bytesAvailable, 0);
+			// TODO(mrsteyk): rewrite this.
+			//std::vector<uint8_t> buffer(bytesAvailable, 0);
+			if ((response.size + bytesAvailable + 1) > response_capacity)
+			{
+				arena_pop_by(perm, response_capacity);
+				response_capacity *= 2;
+				auto new_buffer = (uint8_t*)arena_push(perm, response_capacity);
+				Assert(response.ptr == new_buffer);
+			}
 			DWORD bytesRead;
-			if (WinHttpReadData(hRequest, buffer.data(), bytesAvailable, &bytesRead)) {
-				response.insert(response.end(), buffer.begin(), buffer.begin() + bytesRead);
+			if (WinHttpReadData(hRequest, response.ptr + response.size, bytesAvailable, &bytesRead)) {
+				//response.insert(response.end(), buffer.begin(), buffer.begin() + bytesRead);
+				response.size += bytesRead;
 			}
 			else {
 				DWORD error = GetLastError();
@@ -199,13 +299,15 @@ public:
 				return {};
 			}
 		}
-		response.push_back(0);
+		//response.push_back(0);
+		response.ptr[response.size] = 0;
 
 		return response;
 	}
 
 };
 
+#if 0
 std::string generate_uuid() {
 	GUID guid;
 	CoCreateGuid(&guid);
@@ -213,11 +315,12 @@ std::string generate_uuid() {
 	wchar_t guidString[39];
 	StringFromGUID2(guid, guidString, sizeof(guidString) / sizeof(wchar_t));
 
-	std::wstring wide(guidString);
+	std::wstring_view wide(guidString);
 	std::string result = WideToString(wide);
 	result = result.substr(1, result.size() - 2); // Remove braces
 	return result;
 }
+#endif
 
 void GetServerHeartbeat(HSQUIRRELVM v) {
 	SQObject obj;
@@ -263,15 +366,15 @@ void GetServerHeartbeat(HSQUIRRELVM v) {
 		switch (node->val._type) {
 		case OT_STRING: {
 			auto str = reinterpret_cast<SQString*>(node->val._unVal.pRefCounted);
-			if (strcmp(key, "host_name") == 0) {
+			if (strcmp_static(key, "host_name") == 0) {
 				heartbeat.setHostname(str->_val);
 			//	Warning("GetServerHeartbeat:     Set host_name: '%s'\n", str->_val);
 			}
-			else if (strcmp(key, "map_name") == 0) {
+			else if (strcmp_static(key, "map_name") == 0) {
 				heartbeat.setMapName(str->_val);
 			//	Warning("GetServerHeartbeat:     Set map_name: '%s'\n", str->_val);
 			}
-			else if (strcmp(key, "game_mode") == 0) {
+			else if (strcmp_static(key, "game_mode") == 0) {
 				heartbeat.setGameMode(str->_val);
 			//	Warning("GetServerHeartbeat:     Set game_mode: '%s'\n", str->_val);
 			}
@@ -279,18 +382,18 @@ void GetServerHeartbeat(HSQUIRRELVM v) {
 		}
 
 		case OT_INTEGER:
-			if (strcmp(key, "max_players") == 0) {
+			if (strcmp_static(key, "max_players") == 0) {
 				heartbeat.setMaxPlayers(node->val._unVal.nInteger);
 			//	Warning("GetServerHeartbeat:     Set max_players: %d\n", node->val._unVal.nInteger);
 			}
-			else if (strcmp(key, "port") == 0) {
+			else if (strcmp_static(key, "port") == 0) {
 				heartbeat.setPort(node->val._unVal.nInteger);
 				//Warning("GetServerHeartbeat:     Set port: %d\n", node->val._unVal.nInteger);
 			}
 			break;
 
 		case OT_ARRAY:
-			if (strcmp(key, "players") == 0) {
+			if (strcmp_static(key, "players") == 0) {
 				auto arr = node->val._unVal.pArray;
 				if (!arr) {
 				//	Warning("GetServerHeartbeat: Players array is null\n");
@@ -325,22 +428,22 @@ void GetServerHeartbeat(HSQUIRRELVM v) {
 						switch (pnode->val._type) {
 						case OT_STRING: {
 							auto str = reinterpret_cast<SQString*>(pnode->val._unVal.pRefCounted);
-							if (strcmp(pkey, "name") == 0) {
+							if (strcmp_static(pkey, "name") == 0) {
 								player.setName(str->_val);
 								//Warning("GetServerHeartbeat:     Set player name: '%s'\n", str->_val);
 							}
 							break;
 						}
 						case OT_INTEGER:
-							if (strcmp(pkey, "gen") == 0) {
+							if (strcmp_static(pkey, "gen") == 0) {
 								player.setGen(pnode->val._unVal.nInteger);
 								//Warning("GetServerHeartbeat:     Set player gen: %d\n", pnode->val._unVal.nInteger);
 							}
-							else if (strcmp(pkey, "lvl") == 0) {
+							else if (strcmp_static(pkey, "lvl") == 0) {
 								player.setLvl(pnode->val._unVal.nInteger);
 								//Warning("GetServerHeartbeat:     Set player lvl: %d\n", pnode->val._unVal.nInteger);
 							}
-							else if (strcmp(pkey, "team") == 0) {
+							else if (strcmp_static(pkey, "team") == 0) {
 								player.setTeam(pnode->val._unVal.nInteger);
 								//Warning("GetServerHeartbeat:     Set player team: %d\n", pnode->val._unVal.nInteger);
 							}
@@ -359,34 +462,49 @@ void GetServerHeartbeat(HSQUIRRELVM v) {
 
 	// Serialize the message
 	kj::Array<capnp::word> serialized = messageToFlatArray(message);
-	std::vector<uint8_t> data(reinterpret_cast<uint8_t*>(serialized.begin()),
-		reinterpret_cast<uint8_t*>(serialized.end()));
+	//std::vector<uint8_t> data(reinterpret_cast<uint8_t*>(serialized.begin()),
+	//	reinterpret_cast<uint8_t*>(serialized.end()));
 
+	auto bytes = serialized.asBytes();
+	auto ssize = bytes.size();
+	//auto asize = AlignPow2(ssize + ARENA_DEFAULT_RESERVE, ARENA_DEFAULT_COMMIT);
+	Arena* thread_arena = arena_alloc();
+	U8Array data;
+	data.ptr = (uint8_t*)arena_push(thread_arena, ssize);
+	data.size = ssize;
+	memcpy(data.ptr, bytes.begin(), ssize);
+
+	// TODO(mrsteyk): worker thread with ring buffer.
 	// Send using WinHTTP
-	std::thread([data = std::move(data)]() {
+	std::thread([](Arena* thread_arena, U8Array sdata) {
 		WinHttpClient client;
 		auto ms_url = CCVar_FindVar(cvarinterface, "r1d_ms");
-		std::wstring host = StringToWide(ms_url->m_Value.m_pszString);
+		auto host = StringToWideArena(thread_arena, ms_url->m_Value.m_pszString);
 
-		auto response = client.SendRequest(host, L"/server/heartbeat", data, true);
-		if (!response.empty() && response.size() > 2) {
-			Warning("GetServerHeartbeat: MS reports: %s\n", reinterpret_cast<char*>(response.data()));
+		auto response = client.SendRequest(thread_arena, host, L"/server/heartbeat", sdata, true, true);
+		if (!response.empty() && response.size > 2) {
+			Warning("GetServerHeartbeat: MS reports: %s\n", reinterpret_cast<char*>(response.ptr));
 		}
-	}).detach();
+
+		arena_release(thread_arena);
+	}, thread_arena, data).detach();
 }
 SQInteger GetServerList(HSQUIRRELVM v) {
+	auto arena = tctx.get_arena_for_scratch();
+	auto temp = TempArena(arena);
+
 	try {
 		WinHttpClient client;
 		auto ms_url = CCVar_FindVar(cvarinterface, "r1d_ms");
-		std::wstring host = StringToWide(ms_url->m_Value.m_pszString);
+		auto host = StringToWideArena(arena, ms_url->m_Value.m_pszString);
 
-		auto response = client.SendRequest(host, L"/server/", {}, false);
+		auto response = client.SendRequest(arena, host, L"/server/", {}, false);
 
 		if (!response.empty()) {
 			try {
 				kj::ArrayPtr<const capnp::word> words(
-					reinterpret_cast<const capnp::word*>(response.data()),
-					response.size() / sizeof(capnp::word));
+					reinterpret_cast<const capnp::word*>(response.ptr),
+					response.size / sizeof(capnp::word));
 
 				capnp::FlatArrayMessageReader reader(words);
 				auto serverList = reader.getRoot<ServerList>();
@@ -452,12 +570,12 @@ SQInteger GetServerList(HSQUIRRELVM v) {
 
 				return 1;
 			}
-			catch (const kj::Exception& e) {
+			catch (const kj::Exception&) {
 				// Cap'n Proto parsing error - fall through to create fake server
 			}
 		}
 	}
-	catch (const std::exception& e) {
+	catch (const std::exception&) {
 		// Network error or other exception - fall through to create fake server
 	}
 
@@ -503,14 +621,21 @@ void Hk_CHostState__State_GameShutdown(void* thisptr) {
 	static auto host_map_cvar = CCVar_FindVar(cvarinterface, "host_map");
 	if (strlen(host_map_cvar->m_Value.m_pszString) > 2) {
 		std::thread([]() {
+			auto arena = tctx.get_arena_for_scratch();
+			auto temp = TempArena(arena);
 
 			int port = hostport_cvar->m_Value.m_nValue;
 			WinHttpClient client;
 			auto ms_url = CCVar_FindVar(cvarinterface, "r1d_ms");
-			std::wstring host = StringToWide(ms_url->m_Value.m_pszString);
-			std::wstring path = L"/server/delete?port=" + std::to_wstring(port);
+			auto host = StringToWideArena(arena, ms_url->m_Value.m_pszString);
+			const wchar_t path_prefix[] = L"/server/delete?port=";
+			constexpr size_t path_prefix_size = sizeof(path_prefix)/sizeof(path_prefix[0]) - 1;
 
-			client.SendRequest(host, path, {}, true);
+			size_t path_size = path_prefix_size + 11;
+			auto path = (wchar_t*)arena_push(arena, (path_size + 1) * sizeof(wchar_t));
+			R1DAssert(swprintf(path, path_size, L"/server/delete?port=%d", port) != -1);
+
+			client.SendRequest(arena, host, path, {}, true, true);
 			}).detach();
 			Cbuf_AddTextOriginal(0, "host_map \"\"\n", 0);
 	}

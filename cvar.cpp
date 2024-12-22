@@ -65,7 +65,7 @@ void      (*OriginalCCVar_QueueMaterialThreadSetValue1)(uintptr_t thisptr, ConVa
 void      (*OriginalCCVar_QueueMaterialThreadSetValue2)(uintptr_t thisptr, ConVarR1* pConVar, int nValue);
 void      (*OriginalCCVar_QueueMaterialThreadSetValue3)(uintptr_t thisptr, ConVarR1* pConVar, float flValue);
 uintptr_t cvarinterface;
-std::unordered_map<std::string, WVar*> ccBaseMap;
+std::unordered_map<std::string, WVar*, HashStrings> ccBaseMap;
 
 
 bool ConCommandBaseR1OIsCVar(ConCommandBaseR1O* ptr) {
@@ -294,7 +294,7 @@ void GlobalChangeCallback(ConVarR1* var, const char* pOldValue) {
 
 	//if (ConVar_PrintDescriptionOriginal)
 	//	ConVar_PrintDescription(var);
-	if (!strcmp(var->m_pszName, "sv_portal_players")) {
+	if (!strcmp_static(var->m_pszName, "sv_portal_players")) {
 		var->m_Value.m_fValue = 18.0f;
 		var->m_Value.m_nValue = 18;
 	}

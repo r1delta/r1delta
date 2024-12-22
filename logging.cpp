@@ -7,6 +7,7 @@
 #include <memory>
 #include "load.h"
 #include "persistentdata.h"
+#include "tctx.hh"
 #pragma intrinsic(_ReturnAddress)
 typedef void (*MsgFn)(const char*, ...);
 typedef void (*WarningFn)(const char*, ...);
@@ -130,7 +131,7 @@ void Cbuf_AddText(int a1, const char* a2, unsigned int a3) {
 	if ((returnAddress == returnToKeyInput) || (returnAddress == returnToKeyInput2) || (returnAddress == returnToKeyInput3)) {
 		shouldLog = false;
 	}
-	if (!strcmp(a2, "startupmenu")) // if someone can send commands into this buffer they can do far worse at that stage than disconnecting the client
+	if (!strcmp_static(a2, "startupmenu")) // if someone can send commands into this buffer they can do far worse at that stage than disconnecting the client
 		Cbuf_AddTextOriginal(a1, "net_secure 0\neverything_unlocked 1\n", a3);
 	size_t len = strlen(a2);
 	if (shouldLog) {
@@ -297,121 +298,171 @@ char* SafeFormat(const char* format, va_list args) {
 	return ret;
 }
 
+char* SafeFormatArena(Arena* arena, const char* format, va_list args) {
+	va_list args_copy;
+	va_copy(args_copy, args);
+	int size = vsnprintf(NULL, 0, format, args_copy);
+	va_end(args_copy);
+
+	if (size < 0) {
+		return arena_strdup(arena, "Error formatting string");
+	}
+
+	size_t str_size = size_t(size) + 1;
+	char* ret = (char*)memset(arena_push(arena, str_size), 0, str_size);
+	// TODO(mrsteyk): idk why this check is here with strdup usage...
+	//                handle more gracefully.
+	if (ret == NULL) {
+		return arena_strdup(arena, "Memory allocation error");
+	}
+
+	vsnprintf(ret, str_size, format, args);
+	return ret;
+}
+
 void MsgHook(const char* pMsg, ...) {
+	auto arena = tctx.get_arena_for_scratch();
+	auto temp = TempArena(arena);
+	
 	va_list args;
 	va_start(args, pMsg);
-	char* formatted = SafeFormat(pMsg, args);
+	char* formatted = SafeFormatArena(arena, pMsg, args);
 	va_end(args);
-	if (!IsDedicatedServer())
-	printf("%s", formatted);
+	
+	if (!IsDedicatedServer()) printf("%s", formatted);
 	if (MsgOriginal) {
 		MsgOriginal("%s", formatted);
 	}
-	free(formatted);
 }
 
 void WarningHook(const char* pMsg, ...) {
+	auto arena = tctx.get_arena_for_scratch();
+	auto temp = TempArena(arena);
+
 	va_list args;
 	va_start(args, pMsg);
-	char* formatted = SafeFormat(pMsg, args);
+	char* formatted = SafeFormatArena(arena, pMsg, args);
 	va_end(args);
 
 	printf("%s", formatted);
 	if (WarningOriginal) {
 		WarningOriginal("%s", formatted);
 	}
-	free(formatted);
 }
 
 void Warning_SpewCallStackHook(int iMaxCallStackLength, const char* pMsg, ...) {
+	auto arena = tctx.get_arena_for_scratch();
+	auto temp = TempArena(arena);
+
 	va_list args;
 	va_start(args, pMsg);
-	char* formatted = SafeFormat(pMsg, args);
+	char* formatted = SafeFormatArena(arena, pMsg, args);
 	va_end(args);
 
 	printf("%s", formatted);
 	if (Warning_SpewCallStackOriginal) {
 		Warning_SpewCallStackOriginal(iMaxCallStackLength, "%s", formatted);
 	}
-	free(formatted);
 }
 
 void DevMsgHook(int level, const char* pMsg, ...) {
+	auto arena = tctx.get_arena_for_scratch();
+	auto temp = TempArena(arena);
+
 	va_list args;
 	va_start(args, pMsg);
-	char* formatted = SafeFormat(pMsg, args);
+	char* formatted = SafeFormatArena(arena, pMsg, args);
 	va_end(args);
 
 	printf("%s", formatted);
 	if (DevMsgOriginal) {
 		DevMsgOriginal(level, "%s", formatted);
 	}
-	free(formatted);
 }
 
 void DevWarningHook(int level, const char* pMsg, ...) {
+	auto arena = tctx.get_arena_for_scratch();
+	auto temp = TempArena(arena);
+
 	va_list args;
 	va_start(args, pMsg);
-	char* formatted = SafeFormat(pMsg, args);
+	char* formatted = SafeFormatArena(arena, pMsg, args);
 	va_end(args);
 
 	printf("%s", formatted);
 	if (DevWarningOriginal) {
 		DevWarningOriginal(level, "%s", formatted);
 	}
-	free(formatted);
 }
 
 void ConColorMsgHook(const Color* clr, const char* pMsg, ...) {
+	auto arena = tctx.get_arena_for_scratch();
+	auto temp = TempArena(arena);
+
 	va_list args;
 	va_start(args, pMsg);
-	char* formatted = SafeFormat(pMsg, args);
+	char* formatted = SafeFormatArena(arena, pMsg, args);
 	va_end(args);
 
 	printf("%s", formatted);
 	if (ConColorMsgOriginal) {
 		ConColorMsgOriginal(*clr, "%s", formatted);
 	}
-	free(formatted);
 }
 
 void ConDMsgHook(const char* pMsg, ...) {
+	auto arena = tctx.get_arena_for_scratch();
+	auto temp = TempArena(arena);
+
 	va_list args;
 	va_start(args, pMsg);
-	char* formatted = SafeFormat(pMsg, args);
+	char* formatted = SafeFormatArena(arena, pMsg, args);
 	va_end(args);
 
 	printf("%s", formatted);
 	if (ConDMsgOriginal) {
 		ConDMsgOriginal("%s", formatted);
 	}
-	free(formatted);
 }
 
 void COM_TimestampedLogHook(const char* pMsg, ...) {
+	auto arena = tctx.get_arena_for_scratch();
+	auto temp = TempArena(arena);
+
 	va_list args;
 	va_start(args, pMsg);
-	char* formatted = SafeFormat(pMsg, args);
+	char* formatted = SafeFormatArena(arena, pMsg, args);
 	va_end(args);
 
 	printf("%s", formatted);
 	if (COM_TimestampedLogOriginal) {
 		COM_TimestampedLogOriginal("%s", formatted);
 	}
-	free(formatted);
 }
 extern "C" __declspec(dllexport) void Error(const char* pMsg, ...) {
-	if (strcmp(pMsg, "UserMessageBegin:  Unregistered message '%s'\n") == 0 ||
-		strcmp(pMsg, "MESSAGE_END called with no active message\n") == 0) {
+	if (strcmp_static(pMsg, "UserMessageBegin:  Unregistered message '%s'\n") == 0 ||
+		strcmp_static(pMsg, "MESSAGE_END called with no active message\n") == 0) {
 		return;
 	}
 
+#if 0
 	va_list args;
 	va_start(args, pMsg);
 	std::string formatted = SafeFormat(pMsg, args);
 	va_end(args);
 
 	reinterpret_cast<WarningFn>(GetProcAddress(GetModuleHandleA("tier0_orig.dll"), "Error"))("%s", formatted.c_str());
+#else
+	auto arena = tctx.get_arena_for_scratch();
+	auto temp = TempArena(arena);
+
+	va_list args;
+	va_start(args, pMsg);
+	char* formatted = SafeFormatArena(arena, pMsg, args);
+	va_end(args);
+
+	reinterpret_cast<WarningFn>(GetProcAddress(GetModuleHandleA("tier0_orig.dll"), "Error"))("%s", formatted);
+#endif
 }
 
 void InitLoggingHooks()
