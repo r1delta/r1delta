@@ -39,3 +39,8 @@
 
 void UpdateRWXFunction(void* rwxfunc, void* real);
 uintptr_t CreateFunction(void* func, void* real);
+
+template <typename ReturnType, typename ...Args>
+inline ReturnType CallVFunc(int index, void* thisPtr, Args... args) {
+	return (*reinterpret_cast<ReturnType(__fastcall***)(void*, Args...)>(thisPtr))[index](thisPtr, args...);
+}

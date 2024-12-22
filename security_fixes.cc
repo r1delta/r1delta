@@ -5,7 +5,7 @@
 #include "logging.h"
 #include "load.h"
 
-//ConVarR1* cvar_net_chan_limit_msec = nullptr;
+ConVarR1* cvar_net_chan_limit_msec = nullptr;
 
 //-
 
@@ -33,8 +33,8 @@ bool __fastcall CNetChan___ProcessMessages(CNetChan* thisptr, bf_read* buf) {
 	if (buf->GetNumBitsRead() < 6 || buf->IsOverflowed()) // idfk tbh just move this to whenever a net message processes.
 		return oCNetChan___ProcessMessages(thisptr, buf);
 
-	static auto net_chan_limit_msec_ptr = OriginalCCVar_FindVar2(cvarinterface, "net_chan_limit_msec");
-	auto net_chan_limit_msec = net_chan_limit_msec_ptr->m_Value.m_fValue;
+	//static auto net_chan_limit_msec_ptr = OriginalCCVar_FindVar2(cvarinterface, "net_chan_limit_msec");
+	auto net_chan_limit_msec = cvar_net_chan_limit_msec->m_Value.m_fValue;
 
 	if (net_chan_limit_msec == 0.0f)
 		return oCNetChan___ProcessMessages(thisptr, buf);
@@ -66,7 +66,7 @@ bool __fastcall CNetChan___ProcessMessages(CNetChan* thisptr, bf_read* buf) {
 
 	if (pMessageHandler && bIsProcessingTimeReached && time_msec >= net_chan_limit_msec) {
 		// TODO(mrsteyk): move that name thing out.
-#ifdef _DEBUG
+#ifdef BUILD_DEBUG
 		Msg("R1Delta: CNetChan::_ProcessMessages: Max processing time reached for client \"%s\" (%dms)\n", (const char*)(uintptr_t(thisptr) + 0x3EA8), time_msec);
 #endif
 		pMessageHandler->ConnectionCrashed("Max processing time reached");
@@ -85,8 +85,8 @@ void __fastcall CNetChan__ProcessPacket(CNetChan* thisptr, netpacket_s* packet, 
 	if (!bReceivingPacket)
 		return oCNetChan__ProcessPacket(thisptr, packet, bHasHeader);
 
-	static auto net_chan_limit_msec_ptr = OriginalCCVar_FindVar2(cvarinterface, "net_chan_limit_msec");
-	auto net_chan_limit_msec = net_chan_limit_msec_ptr->m_Value.m_fValue;
+	//static auto net_chan_limit_msec_ptr = OriginalCCVar_FindVar2(cvarinterface, "net_chan_limit_msec");
+	auto net_chan_limit_msec = cvar_net_chan_limit_msec->m_Value.m_fValue;
 
 	if (net_chan_limit_msec == 0.0f)
 		return oCNetChan__ProcessPacket(thisptr, packet, bHasHeader);
@@ -116,7 +116,7 @@ void __fastcall CNetChan__ProcessPacket(CNetChan* thisptr, netpacket_s* packet, 
 
 	if (pMessageHandler && bIsProcessingTimeReached && time_msec >= net_chan_limit_msec) {
 		// TODO(mrsteyk): move that name thing out.
-#ifdef _DEBUG
+#ifdef BUILD_DEBUG
 		Msg("CNetChan::ProcessPacket: Max processing time reached for client \"%s\" (%dms)\n", (const char*)(uintptr_t(thisptr) + 0x3EA8), time_msec);
 #endif
 		pMessageHandler->ConnectionCrashed("Max processing time reached");
@@ -155,7 +155,13 @@ bool __fastcall CGameClient__ProcessVoiceData(void* thisptr, CLC_VoiceData* msg)
 
 //-
 
-#if 0
+class IBaseClientDLL {
+public:
+	bool DispatchUserMessage(int msg_type, bf_read* msg_data) {
+		return CallVFunc<bool>(43, this, msg_type, msg_data);
+	}
+};
+
 #define MAX_USER_MSG_DATA 255
 
 struct SVC_UserMessage {
@@ -177,7 +183,8 @@ bool __fastcall CClientState__ProcessUserMessage(void* thisptr, SVC_UserMessage*
 	int bitsRead = msg->m_DataIn.ReadBitsClamped(userdata, msg->m_nLength);
 	userMsg.StartReading(userdata, (bitsRead + 7) / 8);
 
-	const auto& res = g_ClientDLL->DispatchUserMessage(msg->m_nMsgType, &userMsg);
+	static auto g_ClientDLL = (IBaseClientDLL*)(G_client + 0xAEA760);
+	const auto res = g_ClientDLL->DispatchUserMessage(msg->m_nMsgType, &userMsg);
 
 	if (!res) {
 		Msg("Couldn't dispatch user message (%i)\n", msg->m_nMsgType);
@@ -187,7 +194,6 @@ bool __fastcall CClientState__ProcessUserMessage(void* thisptr, SVC_UserMessage*
 
 	return res;
 }
-#endif
 
 //-
 
@@ -208,37 +214,56 @@ bool __fastcall CNetChan__ProcessControlMessage(CNetChan* thisptr, int cmd, CBit
 
 //-
 
-#if 0
+struct SVC_VoiceMessage {
+	unsigned char gap0[32];
+	unsigned int unk0;
+	int m_nLength;
+	uint64 qword28;
+	CBitRead m_DataIn;
+	CBitWrite m_DataOut;
+	bool m_bFromClient;
+};
+
+int Voice_GetChannel(int nEntity) {
+	return reinterpret_cast<int(*)(int)>(G_engine + 0x178F0)(nEntity);
+}
+
+int Voice_AssignChannel(int nEntity, bool bProximity) {
+	return reinterpret_cast<int(*)(int, bool)>(G_engine + 0x177C0)(nEntity, bProximity);
+}
+
+int Voice_AddIncomingData(int nChannel, const char* pchData, int iSequenceNumber, bool bIsCompressed) {
+	return reinterpret_cast<int(*)(int, const char*, int, bool)>(G_engine + 0x17A80)(nChannel, pchData, iSequenceNumber, bIsCompressed);
+}
+
 bool(__fastcall* oCClientState__ProcessVoiceData)(void*, SVC_VoiceMessage*);
 
 bool __fastcall CClientState__ProcessVoiceData(void* thisptr, SVC_VoiceMessage* msg) {
-	//char chReceived[4104];
+	char chReceived[4104];
 
-	//unsigned int dwLength = msg->m_nLength;
+	unsigned int dwLength = msg->m_nLength;
 
-	//if (dwLength >= 0x1000)
-	//	dwLength = 4096;
+	if (dwLength >= 0x1000)
+		dwLength = 4096;
 
-	//int bitsRead = msg->m_DataIn.ReadBitsClamped(chReceived, msg->m_nLength);
+	int bitsRead = msg->m_DataIn.ReadBitsClamped(chReceived, msg->m_nLength);
 
-	//if (msg->m_bFromClient)
-	//	return false;
+	if (!msg->m_bFromClient)
+		return false;
 
-	//int iEntity = (msg->m_bFromClient + 1);
-	//int nChannel = Voice_GetChannel(iEntity);
+	int iEntity = (msg->m_bFromClient + 1);
+	int nChannel = Voice_GetChannel(iEntity);
 
-	//if (nChannel != -1)
-	//	return Voice_AddIncomingData(nChannel, chReceived, *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(thisptr) + 0x84), true);
+	if (nChannel != -1)
+		return Voice_AddIncomingData(nChannel, chReceived, *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(thisptr) + 0x84), true);
 
-	//nChannel = Voice_AssignChannel(iEntity, false);
+	nChannel = Voice_AssignChannel(iEntity, false);
 
-	//if (nChannel != -1)
-	//	return Voice_AddIncomingData(nChannel, chReceived, *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(thisptr) + 0x84), true);
+	if (nChannel != -1)
+		return Voice_AddIncomingData(nChannel, chReceived, *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(thisptr) + 0x84), true);
 
-	//return nChannel;
-	return oCClientState__ProcessVoiceData(thisptr, msg);
+	return nChannel;
 }
-#endif
 
 //-
 
@@ -294,7 +319,6 @@ bool __fastcall CBaseClientState__ProcessGetCvarValue(void* thisptr, void* msg) 
 
 //-
 
-#if 0
 struct __declspec(align(8)) SVC_SplitScreen {
 	enum ESplitScreenMessageType : int {
 		MSG_ADDUSER = 0x0,
@@ -338,7 +362,6 @@ bool __fastcall CBaseClientState__ProcessSplitScreenUser(void* thisptr, SVC_Spli
 
 	return true;
 }
-#endif
 
 bool __fastcall CBaseClient__IsSplitScreenUser(void* thisptr) {
 	return false;
@@ -347,15 +370,16 @@ bool __fastcall CBaseClient__IsSplitScreenUser(void* thisptr) {
 //-
 
 void
+security_fixes_init()
+{
+	ConVarR1* RegisterConVar(const char* name, const char* value, int flags, const char* helpString);
+	cvar_net_chan_limit_msec = RegisterConVar("net_chan_limit_msec", "225", FCVAR_GAMEDLL | FCVAR_CHEAT, "Netchannel processing is limited to so many milliseconds, abort connection if exceeding budget");
+	R1DAssert(cvar_net_chan_limit_msec);
+}
+
+void
 security_fixes_engine(uintptr_t engine_base)
 {
-	void RegisterConVar(const char* name, const char* value, int flags, const char* helpString);
-	//RegisterConVar("net_chan_limit_msec", "225", FCVAR_GAMEDLL | FCVAR_CHEAT, "Netchannel processing is limited to so many milliseconds, abort connection if exceeding budget");
-
-	// TODO(mrsteyk): why is there const qualifier in the first place?
-	//cvar_net_chan_limit_msec = (ConVarR1*)OriginalCCVar_FindVar2(cvarinterface, "net_chan_limit_msec");
-	//R1DAssert(cvar_net_chan_limit_msec);
-
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E1230), &CNetChan__ProcessControlMessage, reinterpret_cast<LPVOID*>(&oCNetChan__ProcessControlMessage)) == MH_OK);
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x27EA0), &CBaseClientState__ProcessGetCvarValue, NULL) == MH_OK);
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x536F0), &CL_CopyExistingEntity, reinterpret_cast<LPVOID*>(&oCL_CopyExistingEntity)) == MH_OK);
@@ -363,12 +387,10 @@ security_fixes_engine(uintptr_t engine_base)
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E96E0), &CNetChan__ProcessPacket, reinterpret_cast<LPVOID*>(&oCNetChan__ProcessPacket)) == MH_OK);
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E51D0), &CNetChan___ProcessMessages, reinterpret_cast<LPVOID*>(&oCNetChan___ProcessMessages)) == MH_OK);
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0xDA330), &CGameClient__ProcessVoiceData, reinterpret_cast<LPVOID*>(&oCGameClient__ProcessVoiceData)) == MH_OK);
-#if 0
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x17D400), &CClientState__ProcessUserMessage, reinterpret_cast<LPVOID*>(&oCClientState__ProcessUserMessage)) == MH_OK);
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x17D600), &CClientState__ProcessVoiceData, reinterpret_cast<LPVOID*>(&oCClientState__ProcessVoiceData)) == MH_OK);
-	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E0C80), &CNetChan__FlowNewPacket, NULL) == MH_OK);
+	// R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E0C80), &CNetChan__FlowNewPacket, NULL) == MH_OK); TODO(dogecore): ip bans
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x237F0), &CBaseClientState__ProcessSplitScreenUser, NULL) == MH_OK);
-#endif
 }
 
 void

@@ -482,7 +482,7 @@ char __fastcall DataTable_SetupReceiveTableFromSendTable(__int64 a1, __int64 a2)
 	return ret;
 }
 
-bool ReadConnectPacket2015AndWriteConnectPacket2014(bf_read& msg, bf_write& buffer)
+int32_t ReadConnectPacket2015AndWriteConnectPacket2014(bf_read& msg, bf_write& buffer)
 {
 	char type = msg.ReadByte();
 	if (type != 'A')
@@ -777,20 +777,24 @@ char __fastcall SVC_ServerInfo__WriteToBuffer(__int64 a1, __int64 a2)
 typedef void (*ConCommandConstructorType)(
 	ConCommandR1* newCommand, const char* name, void (*callback)(const CCommand&), const char* helpString, int flags, void* parent);
 
-void RegisterConCommand(const char* commandName, void (*callback)(const CCommand&), const char* helpString, int flags) {
+ConCommandR1* RegisterConCommand(const char* commandName, void (*callback)(const CCommand&), const char* helpString, int flags) {
 	ConCommandConstructorType conCommandConstructor = (ConCommandConstructorType)(IsDedicatedServer() ? (G_engine_ds + 0x31F260) : (G_engine + 0x4808F0));
 	ConCommandR1* newCommand = new ConCommandR1;
 	
 	conCommandConstructor(newCommand, commandName, callback, helpString, flags, nullptr);
+
+	return newCommand;
 }
 
-void RegisterConVar(const char* name, const char* value, int flags, const char* helpString) {
+ConVarR1* RegisterConVar(const char* name, const char* value, int flags, const char* helpString) {
 	typedef void (*ConVarConstructorType)(ConVarR1* newVar, const char* name, const char* value, int flags, const char* helpString);
 	ConVarConstructorType conVarConstructor = (ConVarConstructorType)(IsDedicatedServer() ? (G_engine_ds + 0x320460) : (G_engine + 0x481AF0));
 	ConVarR1* newVar = new ConVarR1;
 
 
 	conVarConstructor(newVar, name, value, flags, helpString);
+
+	return newVar;
 }
 
 LDR_DLL_LOADED_NOTIFICATION_DATA* GetModuleNotificationData(const wchar_t* moduleName)
@@ -1074,9 +1078,10 @@ Enforce a maximum length of 32 characters.
 	*/
 
 	const char* nameBuffer = name;
+	size_t nameSize = strlen(name);
 
 	// Check if the name is too long
-	if (strlen(name) > 32)
+	if (nameSize > 32)
 	{
 		// Truncate the name
 		char truncatedName[256];
@@ -1084,17 +1089,18 @@ Enforce a maximum length of 32 characters.
 		truncatedName[32] = '\0';
 
 		nameBuffer = truncatedName;
+		nameSize = 32;
 	}
 
 	// Check if the name contains any non-printable ASCII characters
-	for (size_t i = 0; i < strlen(name); i++)
+	for (size_t i = 0; i < nameSize; i++)
 	{
 		if (name[i] < 32 || name[i] > 126)
 		{
 			// Remove the non-printable character
 			char printableName[256];
 			size_t j = 0;
-			for (size_t i = 0; i < strlen(name); i++)
+			for (size_t i = 0; i < nameSize; i++)
 			{
 				if (name[i] >= 32 && name[i] <= 126)
 				{
@@ -1391,6 +1397,8 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	//std::cout << "did hooks" << std::endl;
 }
 
+static bool should_init_security_fixes = false;
+
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
 	const LDR_DLL_NOTIFICATION_DATA* notification_data,
@@ -1399,33 +1407,34 @@ void __stdcall LoaderNotificationCallback(
 		return;
 	doBinaryPatchForFile(notification_data->Loaded);
 
-	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"filesystem_stdio.dll") == 0) {
+	auto name = notification_data->Loaded.BaseDllName->Buffer;
+
+	if (strcmp_static(name, L"filesystem_stdio.dll") == 0) {
 		G_filesystem_stdio = (uintptr_t)notification_data->Loaded.DllBase;
 		InitCompressionHooks();
 	}
-	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"server.dll") == 0) {
-		do_server(notification_data);
 
-		// TODO(mrsteyk): move this shit out...
-		RegisterConVar("net_chan_limit_msec", "225", FCVAR_GAMEDLL | FCVAR_CHEAT, "Netchannel processing is limited to so many milliseconds, abort connection if exceeding budget");
+	if (strcmp_static(name, L"engine.dll") == 0) {
+		do_engine(notification_data);
+		should_init_security_fixes = true;
 	}
-
-	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"engine_ds.dll") == 0) {
+	if (strcmp_static(name, L"engine_ds.dll") == 0) {
 		G_engine_ds = (uintptr_t)notification_data->Loaded.DllBase;
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x433C0), &ProcessConnectionlessPacketDedi, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginal));
 		InitAddons();
-		InitDedicated();		
+		InitDedicated();
 	}
 
-	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"engine.dll") == 0) {
-		do_engine(notification_data);
-	}
-	if (strcmp_static(notification_data->Loaded.BaseDllName->Buffer, L"client.dll") == 0) {
+	bool is_client = !strcmp_static(name, L"client.dll");
+	bool is_server = !strcmp_static(name, L"server.dll");
+
+	if (is_client) {
 		G_client = (uintptr_t)notification_data->Loaded.DllBase;
 		InitClient();
-
-		// TODO(mrsteyk): move this shit out...
-		RegisterConVar("net_chan_limit_msec", "225", FCVAR_GAMEDLL | FCVAR_CHEAT, "Netchannel processing is limited to so many milliseconds, abort connection if exceeding budget");
 	}
-
+	if (is_server) do_server(notification_data);
+	if (should_init_security_fixes && (is_client || is_server)) {
+		security_fixes_init();
+		should_init_security_fixes = false;
+	}
 }
