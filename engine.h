@@ -30,6 +30,8 @@ extern uintptr_t g_r1oCVEngineServerInterface[203];
 int64_t FuncThatReturnsFF_Stub();
 bool FuncThatReturnsBool_Stub();
 
+void Host_Error(const char* error, ...);
+
 class CVEngineServer
 {
 public:

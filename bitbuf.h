@@ -1155,6 +1155,13 @@ public:
 	FORCEINLINE float ReadFloat(void);
 	void ReadBits(void* pOut, int nBits);
 
+	int ReadBitsClamped_ptr(void* pOutData, size_t outSizeBytes, size_t nBits);
+
+	template <typename T, size_t N>
+	FORCEINLINE int ReadBitsClamped(T(&pOut)[N], size_t nBits) {
+		return ReadBitsClamped_ptr(pOut, N * sizeof(T), nBits);
+	}
+
 	// Returns false if bufLen isn't large enough to hold the
 	// string in the buffer.
 	//

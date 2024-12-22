@@ -59,6 +59,8 @@
 #define R1DAssert(e) (e)
 #endif
 
+extern uint64_t g_PerformanceFrequency;
+
 extern int G_is_dedi;
 
 #define IsDedicatedServer() (G_is_dedi)
