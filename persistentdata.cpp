@@ -849,12 +849,16 @@ SQInteger Script_ServerGetPersistentUserDataKVString(HSQUIRRELVM v) {
 		return sq_throwerror(v, "player is null");
 	}
 
-	auto arena = tctx.get_arena_for_scratch();
-	auto temp = TempArena(arena);
-
 	const char* pKey, * pDefaultValue;
 	sq_getstring(v, 3, &pKey);
 	sq_getstring(v, 4, &pDefaultValue);
+	if (!IsValidUserInfo(pKey) || !IsValidUserInfo(pDefaultValue)) {
+		return sq_throwerror(v, "Invalid user info key or default value.");
+	}
+
+	auto arena = tctx.get_arena_for_scratch();
+	auto temp = TempArena(arena);
+
 	auto hashedKey = hashUserInfoKeyArena(arena, pKey);
 	auto hashedKey_len = strlen(hashedKey);
 	size_t modifiedKey_size = hashedKey_len + sizeof(PERSIST_COMMAND) + 1;
@@ -862,9 +866,7 @@ SQInteger Script_ServerGetPersistentUserDataKVString(HSQUIRRELVM v) {
 	memcpy(modifiedKey, PERSIST_COMMAND" ", sizeof(PERSIST_COMMAND));
 	memcpy(modifiedKey + sizeof(PERSIST_COMMAND), hashedKey, hashedKey_len);
 
-	if (!IsValidUserInfo(pKey) || !IsValidUserInfo(modifiedKey) || !IsValidUserInfo(pDefaultValue)) {
-		return sq_throwerror(v, "Invalid user info key or default value.");
-	}
+	R1DAssert(IsValidUserInfo(modifiedKey));
 
 	auto edict = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(pPlayer) + 64);
 	auto index = ((edict - reinterpret_cast<__int64>(pGlobalVarsServer->pEdicts)) / 56) - 1;
@@ -903,6 +905,10 @@ SQInteger Script_ServerSetPersistentUserDataKVString(HSQUIRRELVM v) {
 	const char* pKey, * pValue;
 	sq_getstring(v, 3, &pKey);
 	sq_getstring(v, 4, &pValue);
+	if (!IsValidUserInfo(pKey) || !IsValidUserInfo(pValue)) {
+		return sq_throwerror(v, "Invalid user info key or value.");
+	}
+	
 	auto hashedKey = hashUserInfoKeyArena(arena, pKey);
 	auto hashedKey_len = strlen(hashedKey);
 	size_t modifiedKey_size = hashedKey_len + sizeof(PERSIST_COMMAND) + 1;
@@ -910,9 +916,8 @@ SQInteger Script_ServerSetPersistentUserDataKVString(HSQUIRRELVM v) {
 	memcpy(modifiedKey, PERSIST_COMMAND" ", sizeof(PERSIST_COMMAND));
 	memcpy(modifiedKey + sizeof(PERSIST_COMMAND), hashedKey, hashedKey_len);
 
-	if (!IsValidUserInfo(pKey) || !IsValidUserInfo(modifiedKey) || !IsValidUserInfo(pValue)) {
-		return sq_throwerror(v, "Invalid user info key or value.");
-	}
+	R1DAssert(IsValidUserInfo(modifiedKey));
+
 	auto edict = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(pPlayer) + 64);
 
 	auto index = ((edict - reinterpret_cast<__int64>(pGlobalVarsServer->pEdicts)) / 56) - 1;
