@@ -64,7 +64,7 @@ bool __fastcall CNetChan___ProcessMessages(CNetChan* thisptr, bf_read* buf) {
 
 	const auto pMessageHandler = *reinterpret_cast<INetChannelHandler**>(reinterpret_cast<uintptr_t>(thisptr) + 0x3ED0);
 
-	if (pMessageHandler && bIsProcessingTimeReached && time_msec >= net_chan_limit_msec) {
+	if (pMessageHandler && bIsProcessingTimeReached && time_msec >= net_chan_limit_msec && *(uint8_t*)(((uintptr_t)thisptr) + 216) > 0) {
 		// TODO(mrsteyk): move that name thing out.
 #ifdef BUILD_DEBUG
 		Msg("R1Delta: CNetChan::_ProcessMessages: Max processing time reached for client \"%s\" (%dms)\n", (const char*)(uintptr_t(thisptr) + 0x3EA8), time_msec);
@@ -114,7 +114,7 @@ void __fastcall CNetChan__ProcessPacket(CNetChan* thisptr, netpacket_s* packet, 
 
 	bool bIsProcessingTimeReached = (time_msec >= 1);
 
-	if (pMessageHandler && bIsProcessingTimeReached && time_msec >= net_chan_limit_msec) {
+	if (pMessageHandler && bIsProcessingTimeReached && time_msec >= net_chan_limit_msec && *(uint8_t*)(((uintptr_t)thisptr) + 216) > 0) {
 		// TODO(mrsteyk): move that name thing out.
 #ifdef BUILD_DEBUG
 		Msg("CNetChan::ProcessPacket: Max processing time reached for client \"%s\" (%dms)\n", (const char*)(uintptr_t(thisptr) + 0x3EA8), time_msec);
