@@ -289,14 +289,15 @@ struct AddonInfo {
 
 
 int UpdateAddons(HSQUIRRELVM v, SQInteger index, SQBool enabled) {
-	const char* str = "thread void function() { wait 1 while(true) {  wait 1 } }";
-	auto result = sq_compilebuffer(v, str, strlen(str), "console", SQTrue);
-	if (result != -1)
-	{	
-		base_getroottable(v);
-		SQRESULT callResult = sq_call(v, 1,false,true);
-		Msg("Call Result: %d\n", callResult);
-	}
+	//const char* str = "thread void function() { wait 1 while(true) {  wait 1 } }"; 
+	//auto result = sq_compilebuffer(v, str, strlen(str), "console", SQTrue);
+	//if (result != -1)
+	//{	
+	//	base_getroottable(v);
+	//	SQRESULT callResult = sq_call(v, 1,false,true);
+	//	Msg("Call Result: %d\n", callResult);
+	//	return 1;
+	//}
 	auto func_addr = g_CVFileSystem->GetSearchPath;
 	auto kv_load_file = G_client + 0x65F980;
 	auto kv_write_file = G_client + 0x65DB30;
