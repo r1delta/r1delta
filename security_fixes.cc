@@ -612,6 +612,44 @@ void CNetChan___FlowNewPacket(CNetChan* pChan, int flow, int outSeqNr, int inSeq
 
 //-
 
+int* net_error = nullptr;
+
+void NET_ClearLastError()
+{
+	*net_error = 0;
+}
+
+bool(*__fastcall oNET_ReceiveDatagram)(const int sock, netpacket_t* packet, bool encrypted);
+
+bool __fastcall NET_ReceiveDatagram(const int sock, netpacket_t* packet, bool encrypted)
+{
+	// Failsafe: never call recvfrom more than a fixed number of times per frame.
+	// We don't like the potential for infinite loops. Yes this means that 66000
+	// invalid packets per frame will effectively DOS the server, but at that point
+	// you're basically flooding the network and you need to solve this at a higher
+	// firewall or router level instead which is beyond the scope of our netcode.
+	// --henryg 10/12/2011
+	for (int i = 1000; i > 0; --i)
+	{
+		// Attempt to receive a valid packet.
+		NET_ClearLastError();
+		if (oNET_ReceiveDatagram(sock, packet, encrypted))
+		{
+			// Received a valid packet.
+			return true;
+		}
+		// NET_ReceiveDatagram calls Net_GetLastError() in case of socket errors
+		// or a would-have-blocked-because-there-is-no-data-to-read condition.
+		if (*net_error)
+		{
+			break;
+		}
+	}
+	return false;
+}
+
+//-
+
 void
 security_fixes_init()
 {
@@ -633,8 +671,11 @@ security_fixes_engine(uintptr_t engine_base)
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x17D400), &CClientState__ProcessUserMessage, reinterpret_cast<LPVOID*>(&oCClientState__ProcessUserMessage)) == MH_OK);
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x17D600), &CClientState__ProcessVoiceData, reinterpret_cast<LPVOID*>(&oCClientState__ProcessVoiceData)) == MH_OK);
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E0C80), &CNetChan___FlowNewPacket, NULL) == MH_OK);
+    R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1F23C0), &NET_ReceiveDatagram, reinterpret_cast<LPVOID*>(&oNET_ReceiveDatagram)) == MH_OK);
 	// TODO(dogecore): ip bans
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x237F0), &CBaseClientState__ProcessSplitScreenUser, NULL) == MH_OK);
+
+	net_error = (int*)(G_engine + 0x30EF1D0);
 }
 
 void
