@@ -1,5 +1,6 @@
 #if !BUILD_DEBUG
 # define NDEBUG
+# include "thirdparty\mimalloc\include\mimalloc.h"
 # include "thirdparty\mimalloc\include\mimalloc\types.h"
 # undef NDEBUG
 #endif

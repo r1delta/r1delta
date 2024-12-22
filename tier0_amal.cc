@@ -13,7 +13,8 @@
 #endif
 #endif
 
-#pragma comment(lib, "Shell32")
+#pragma comment(lib, "Advapi32.lib")
+#pragma comment(lib, "Ole32.lib")
 #pragma comment(lib, "vstdlib")
 #pragma comment(lib, "tier0_orig")
 
@@ -25,6 +26,12 @@
 #include <string>
 #include <string_view>
 #include <filesystem>
+
+#include <winsock2.h>
+
+#include "core.h"
+#include "arena.hh"
+#include "tctx.hh"
 
 /*
 #include "beardbgon.h"
@@ -65,13 +72,13 @@
 #include "weaponxdebug.h"
 */
 
-//~ mrsteyk: C files
+//~ mrsteyk: C++ files
+#include "arena.cc"
+#include "tctx.cpp"
+
 #include "bitbuf.cpp"
-#include "client.cpp"
 #include "compression.cpp"
-#include "cvar.cpp"
 #include "dedicated.cpp"
-#include "dllmain.cpp"
 #include "engine.cpp"
 #include "factory.cpp"
 #include "filecache.cpp"
@@ -85,14 +92,22 @@
 #include "netchanwarnings.cpp"
 #include "newbitbuf.cpp"
 #include "patcher.cpp"
-#include "persistentdata.cpp"
 #include "predictionerror.cpp"
 #include "sendmoveclampfix.cpp"
 #include "squirrel.cpp"
 #include "TableDestroyer.cpp"
 #include "utils.cpp"
 
+//#include "security_fixes.cc"
+
+#include "cvar.cpp"
+#include "client.cpp"
+#include "persistentdata.cpp"
+#include "dllmain.cpp"
+
+#define ARRAYSIZE(A) RTL_NUMBER_OF_V2(A)
 #include "keyvalues.cpp" // Includes vsdk
+#undef ARRAYSIZE
 
 // Add the following includes from the first version
 #include "vsdk\tier0\dbg.cpp"
@@ -102,6 +117,7 @@
 #include "vsdk\tier1\netadr.cpp"
 #include "vsdk\tier1\utlbuffer.cpp"
 #include "vsdk\vstdlib\strtools.cpp"
+#undef ARRAYSIZE
 
 //- mrsteyk: third party
 #if BUILD_DEBUG

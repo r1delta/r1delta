@@ -77,7 +77,7 @@ char* WideToStringArena(Arena* arena, const std::wstring_view& wide) {
 	return ret;
 }
 
-struct S16
+struct String16
 {
 	wchar_t* ptr;
 	size_t size;
@@ -85,7 +85,7 @@ struct S16
 
 // Helper function to convert string to wide string
 // NOTE(mrsteyk): null terminated
-S16 StringToWideArena(Arena* arena, const std::string_view& str) {
+String16 StringToWideArena(Arena* arena, const std::string_view& str) {
 	if (str.empty()) return { arena_wstrdup(arena, L"", 0), 0 };
 	int size = MultiByteToWideChar(CP_UTF8, 0, str.data(), (int)str.size(), nullptr, 0);
 	auto ret = (wchar_t*)arena_push(arena, (size + 1) * sizeof(wchar_t));
@@ -94,7 +94,7 @@ S16 StringToWideArena(Arena* arena, const std::string_view& str) {
 	return { ret, (size_t)size };
 }
 
-uint64_t HashS16(S16 s)
+uint64_t HashS16(String16 s)
 {
 	constexpr uint64_t prime = 1111111111111111111;
 	constexpr uint64_t offset = 0x100;
@@ -180,7 +180,7 @@ public:
 	}
 
 	// NOTE(mrsteyk): Whoever decided to always return IPv6 not supported is an idiot.
-	U8Array SendRequest(Arena* perm, const S16 host, const wchar_t* path,
+	U8Array SendRequest(Arena* perm, const String16 host, const wchar_t* path,
 		const U8Array data, bool isPost = true, bool ipv4_force = true)
 	{
 		if (!hSession) return {0, 0};
@@ -385,10 +385,6 @@ void GetServerHeartbeat(HSQUIRRELVM v) {
 			if (strcmp_static(key, "max_players") == 0) {
 				heartbeat.setMaxPlayers(node->val._unVal.nInteger);
 			//	Warning("GetServerHeartbeat:     Set max_players: %d\n", node->val._unVal.nInteger);
-			}
-			else if (strcmp_static(key, "port") == 0) {
-				heartbeat.setPort(node->val._unVal.nInteger);
-				//Warning("GetServerHeartbeat:     Set port: %d\n", node->val._unVal.nInteger);
 			}
 			break;
 
