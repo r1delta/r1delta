@@ -32,7 +32,7 @@ bool __fastcall NET_SetConVar__WriteToBuffer(NET_SetConVar* thisptr, bf_write& b
 __int64 CConVar__GetSplitScreenPlayerSlot(char* thisptr);
 void setinfopersist_cmd(const CCommand& args);
 
-bool IsValidUserInfo(const char* value);
+bool IsValidUserInfo(const char* value, int length = -1);
 struct CBaseClient;
 extern CBaseClient* g_pClientArray;
 struct CBaseClientDS;

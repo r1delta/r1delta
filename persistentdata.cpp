@@ -37,11 +37,12 @@ constexpr size_t MAX_LENGTH = 254;
 constexpr const char* INVALID_CHARS = "{}()':;`\"\n";
 bool g_bNoSendConVar = false;
 
+// TODO(mrsteyk): this shit must be checked in validator too, no?
 // Utility functions
-bool IsValidUserInfo(const char* value) {
+bool IsValidUserInfo(const char* value, int length) {
 	if (!value || !*value) return false; // Null or empty check
 
-	size_t len = strlen(value);
+	size_t len = (length == -1) ? strlen(value) : length;
 	if (len > MAX_LENGTH) return false;
 
 	// For values: Only allow 0-9, -, ., and a-zA-Z for pdata_null
@@ -119,8 +120,18 @@ const char* hashUserInfoKeyArena(Arena* arena, const char* key)
 #ifdef HASH_USERINFO_KEYS
 # error NOT IMPLEMENTED
 #else
-	// TODO(mrsteyk): maybe don't strdup?
-	return arena_strdup(arena, key);
+	// NOTE(mrsteyk): guarantee key length validity.
+	constexpr size_t MAX_LENGTH_DUP = MAX_LENGTH - sizeof(PERSIST_COMMAND);
+	auto len = strlen(key);
+	if (len > MAX_LENGTH_DUP)
+	{
+		R1DAssert(!"Bad stuff happened!");
+		len = MAX_LENGTH_DUP;
+	}
+
+	auto ret = (char*)arena_push(arena, len + 1);
+	memcpy(ret, key, len);
+	return ret;
 #endif
 }
 
@@ -576,7 +587,7 @@ public:
 		if (!s_validator) {
 			Error("PData validator failed to initialize");
 		}
-
+		
 		return s_validator->isValid(key, value);
 	}
 };
@@ -720,6 +731,10 @@ SQInteger Script_ClientGetPersistentData(HSQUIRRELVM v) {
 		return sq_throwerror(v, "Parameter 2 must be a string");
 	}
 
+	if (!IsValidUserInfo(key) || !IsValidUserInfo(defaultValue)) {
+		return sq_throwerror(v, "Invalid user info key or default value.");
+	}
+
 	auto arena = tctx.get_arena_for_scratch();
 	auto temp = TempArena(arena);
 
@@ -729,10 +744,10 @@ SQInteger Script_ClientGetPersistentData(HSQUIRRELVM v) {
 	auto varName = (char*)arena_push(arena, varName_size);
 	memcpy(varName, PERSIST_COMMAND" ", sizeof(PERSIST_COMMAND));
 	memcpy(varName + sizeof(PERSIST_COMMAND), hashedKey, hashedKey_len);
-
-	if (!IsValidUserInfo(key) || !IsValidUserInfo(varName) || !IsValidUserInfo(defaultValue)) {
-		return sq_throwerror(v, "Invalid user info key or default value.");
-	}
+	
+	// NOTE(mrsteyk): hashed key can't be invalid, that must be a guarantee of hashUserInfoKey(Arena) given a valid key.
+	//                -1 cuz null terminator.
+	R1DAssert(IsValidUserInfo(varName, varName_size - 1));
 
 	auto var = OriginalCCVar_FindVar(cvarinterface, varName);
 
