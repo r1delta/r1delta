@@ -141,16 +141,25 @@ struct SchemaType {
 		Int,
 		Float,
 		String,
-		Enum
+		Enum,
+
+		COUNT,
+		INVALID = COUNT,
 	};
 
 	Type type;
 	std::string enumName; // Only valid if type == Enum
 
 	bool operator==(const SchemaType& other) const {
+		if (type == Type::INVALID || other.type == Type::INVALID) return false;
 		if (type != other.type) return false;
 		if (type == Type::Enum) return enumName == other.enumName;
 		return true;
+	}
+
+	bool valid() const
+	{
+		return type < Type::COUNT;
 	}
 };
 
@@ -162,21 +171,23 @@ struct ArrayDef {
 class PDataValidator {
 public:
 	// Main validation function
-	bool isValid(const std::string& key, const std::string& value) const;
+	bool isValid(const std::string_view& key, const std::string_view& value) const;
 
 private:
 	friend class SchemaParser;
 
 	// Schema storage
-	std::unordered_map<std::string, SchemaType, HashStrings> keys;
-	std::unordered_map<std::string, ArrayDef, HashStrings> arrays;
-	std::unordered_map<std::string, std::map<std::string, int>, HashStrings> enums;
+	std::unordered_map<std::string, SchemaType, HashStrings, std::equal_to<>> keys;
+	std::unordered_map<std::string, ArrayDef, HashStrings, std::equal_to<>> arrays;
+	std::unordered_map<std::string, std::map<std::string, int, std::less<>>, HashStrings, std::equal_to<>> enums;
 
 	// Helper functions
-	bool isValidEnumValue(const std::string& enumName, const std::string_view& value) const;
-	std::optional<SchemaType> getKeyType(const std::string_view& key) const;
-	bool validateArrayAccess(const std::string& arrayName, const std::string& index) const;
-	std::vector<std::string> splitKey(const std::string& key) const;
+	bool isValidEnumValue(const std::string_view& enumName, const std::string_view& value) const;
+	SchemaType getKeyType(const std::string_view& key) const;
+	bool validateArrayAccess(const std::string_view& arrayName, const std::string_view& index) const;
+#if 0
+	std::vector<std::string> splitKey(const std::string_view& key) const;
+#endif
 };
 
 
@@ -228,7 +239,7 @@ private:
 			std::smatch valueMatches;
 			std::string::const_iterator valueStart(enumBody.cbegin());
 
-			std::map<std::string, int> enumValues;
+			std::map<std::string, int, std::less<>> enumValues;
 			while (std::regex_search(valueStart, enumBody.cend(), valueMatches, valuePattern)) {
 				// If group 1 matched, it was a ["name"] format
 				// If group 2 matched, it was a bare identifier
@@ -341,41 +352,39 @@ private:
 
 // Implementation
 
-bool PDataValidator::isValid(const std::string& key, const std::string& value) const {
-	// Split the key into parts (handling array indexing)
-	auto parts = splitKey(key);
-	if (parts.empty()) return false;
+bool PDataValidator::isValid(const std::string_view& key, const std::string_view& value) const {
 
-	std::string currentKey;
-	for (size_t i = 0; i < parts.size(); i++) {
-		if (i > 0) currentKey += ".";
+	size_t key_size = key.size();
 
-		// Handle array indexing
-		size_t bracketPos = parts[i].find('[');
-		if (bracketPos != std::string::npos) {
-			std::string arrayName = parts[i].substr(0, bracketPos);
-			currentKey += arrayName;
+	int check_for_array = 0;
+	//size_t parts_count = 1;
+	for (size_t i = 0; i < key_size; ++i) {
+		//if (key[i] == '.') parts_count++;
+		if (key[i] == '[') check_for_array = 1;
+	}
 
-			// Extract index
-			size_t closeBracket = parts[i].find(']', bracketPos);
-			if (closeBracket == std::string::npos) return false;
+	if (check_for_array)
+	{
+		size_t offset = 0;
+		size_t pos;
+		while ((pos = key.find('[', offset)) != key.npos)
+		{
+			size_t end_pos = key.find(']', pos);
+			if (end_pos == key.npos) return false;
+			
+			auto index = key.substr(pos + 1, end_pos - pos - 1);
+			if (!validateArrayAccess(key.substr(0, pos), index)) return false;
 
-			std::string index = parts[i].substr(bracketPos + 1, closeBracket - bracketPos - 1);
-			if (!validateArrayAccess(currentKey, index)) return false;
-
-			currentKey += "[" + index + "]";
-		}
-		else {
-			currentKey += parts[i];
+			offset = end_pos + 1;
 		}
 	}
 
 	// Get the type for this key
-	auto type = getKeyType(currentKey);
-	if (!type) return false;
+	auto type = getKeyType(key);
+	if (!type.valid()) return false;
 
 	// Validate value against type
-	switch (type->type) {
+	switch (type.type) {
 	case SchemaType::Type::Bool:
 		return value == "0" || value == "1" ||
 			value == "true" || value == "false";
@@ -395,26 +404,23 @@ bool PDataValidator::isValid(const std::string& key, const std::string& value) c
 		return true;
 	}
 
-	case SchemaType::Type::Float:
-		try {
-			// TODO(mrsteyk): why the fuck it doesn't accept string_view...
-			std::stof(value);
-			return true;
-		}
-		catch (...) {
-			return false;
-		}
+	case SchemaType::Type::Float: {
+		float val;
+		auto res = std::from_chars(value.data(), value.data() + value.size(), val);
+		if (res.ec == std::errc::invalid_argument || res.ec == std::errc::result_out_of_range) return false;
+		return true;
+	}
 
 	case SchemaType::Type::String:
 		return true; // All strings are valid
 
 	case SchemaType::Type::Enum:
-		return isValidEnumValue(type->enumName, value);
+		return isValidEnumValue(type.enumName, value);
 	}
 
 	return false;
 }
-bool PDataValidator::isValidEnumValue(const std::string& enumName, const std::string_view& value) const {
+bool PDataValidator::isValidEnumValue(const std::string_view& enumName, const std::string_view& value) const {
 	auto enumIt = enums.find(enumName);
 	if (enumIt == enums.end()) return false;
 
@@ -448,7 +454,7 @@ bool PDataValidator::isValidEnumValue(const std::string& enumName, const std::st
 
 	return false;
 }
-std::optional<SchemaType> PDataValidator::getKeyType(const std::string_view& key) const {
+SchemaType PDataValidator::getKeyType(const std::string_view& key) const {
 	// Strip out array indices to get base key format
 	std::string baseKey;
 	size_t pos = 0;
@@ -466,7 +472,7 @@ std::optional<SchemaType> PDataValidator::getKeyType(const std::string_view& key
 
 		// Skip to after closing bracket
 		size_t bracketEnd = key.find(']', bracketStart);
-		if (bracketEnd == std::string::npos) return std::nullopt; // Malformed
+		if (bracketEnd == std::string::npos) return SchemaType{ .type = SchemaType::Type::INVALID }; // Malformed
 
 		pos = bracketEnd + 1;
 
@@ -478,11 +484,11 @@ std::optional<SchemaType> PDataValidator::getKeyType(const std::string_view& key
 
 	auto it = keys.find(baseKey);
 	if (it != keys.end()) return it->second;
-	return std::nullopt;
+	return SchemaType{ .type = SchemaType::Type::INVALID };
 }
 
-bool PDataValidator::validateArrayAccess(const std::string& arrayName,
-	const std::string& index) const {
+bool PDataValidator::validateArrayAccess(const std::string_view& arrayName,
+	const std::string_view& index) const {
 	auto it = arrays.find(arrayName);
 	if (it == arrays.end()) return false;
 
@@ -495,29 +501,40 @@ bool PDataValidator::validateArrayAccess(const std::string& arrayName,
 	}
 
 	// Otherwise it's a fixed size array
-	try {
-		// TODO(mrsteyk): why the fuck it doesn't accept string_view.
-		int idx = std::stoi(index);
-		return idx >= 0 && idx < std::get<int>(arrayDef.size);
-	}
-	catch (...) {
-		return false;
-	}
+	int idx;
+	auto res = std::from_chars(index.data(), index.data() + index.size(), idx);
+	if (res.ec == std::errc::invalid_argument || res.ec == std::errc::result_out_of_range) return false;
+	return idx >= 0 && idx < std::get<int>(arrayDef.size);
 }
 
+#if 0
 std::vector<std::string> PDataValidator::splitKey(const std::string& key) const {
-	std::vector<std::string> result;
-	// TODO(mrsteyk): why the fuck it doesn't like string_view...
-	//                just rewrite this function, it's fucking moronic to use getline for this wtf.
-	std::stringstream ss(key);
-	std::string item;
+	const auto key_size = key.size();
 
-	while (std::getline(ss, item, '.')) {
-		result.push_back(item);
+	size_t counter = 1;
+	for (size_t i = 0; i < key_size; ++i) if (key[i] == '.') counter++;
+	std::vector<std::string> result;
+	result.reserve(counter);
+		
+	size_t i = 0;
+	while (i < key_size)
+	{
+		size_t j = i;
+		while (j < key_size && key[j] != '.')
+		{
+			++j;
+		}
+		if (j != i)
+		{
+			auto v = key.substr(i, j - i);
+			result.push_back(v);
+		}
+		i = j + 1;
 	}
 
-	return result;
+	return std::move(result);
 }
+#endif
 
 std::string readFile(const std::string& filename) {
 	std::ifstream file(filename);
