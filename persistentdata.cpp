@@ -597,7 +597,7 @@ bool NET_SetConVar__WriteToBuffer(NET_SetConVar* thisptr, bf_write& buffer) {
 		NetMessageCvar_t* var = &thisptr->m_ConVars[i];
 
 		// Check if this is a persistent data convar
-		if (strncmp(var->name, "__ ", 3) == 0) {
+		if (strncmp(var->name, PERSIST_COMMAND" ", 3) == 0) {
 			// Create a modified name without the prefix
 			char modifiedName[sizeof(var->name)];
 			// Set high bit on first character to mark it as persistent data
@@ -668,7 +668,7 @@ bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 				continue;
 			}
 
-			if (!SafePrefixConVarName(var.name, sizeof(var.name), "__ ")) {
+			if (!SafePrefixConVarName(var.name, sizeof(var.name), PERSIST_COMMAND" ")) {
 				Warning("Failed to prefix persistent data convar\n");
 				continue;
 			}
@@ -712,7 +712,7 @@ SQInteger Script_ClientGetPersistentData(HSQUIRRELVM v) {
 	auto varName = (char*)arena_push(arena, varName_size);
 	memcpy(varName, PERSIST_COMMAND" ", sizeof(PERSIST_COMMAND));
 	memcpy(varName + sizeof(PERSIST_COMMAND), hashedKey, hashedKey_len);
-	varName[varName_size] = 0;
+	varName[varName_size-1] = 0;
 
 	if (!IsValidUserInfo(key) || !IsValidUserInfo(varName) || !IsValidUserInfo(defaultValue)) {
 		return sq_throwerror(v, "Invalid user info key or default value.");
@@ -773,7 +773,7 @@ void Script_XPChanged_Rebuild(void* pPlayer) {
 		return;
 	}
 
-	auto var = vars->GetInt("__ xp",0);
+	auto var = vars->GetInt(PERSIST_COMMAND" xp",0);
 	auto netValue = *reinterpret_cast<int*>(reinterpret_cast<__int64>(pPlayer) + 0x1834);
 	if (var == 0)
 		return;
@@ -795,7 +795,7 @@ void Script_GenChanged_Rebuild(void* pPlayer) {
 		return;
 	}
 
-	auto var = vars->GetInt("__ gen", 0);
+	auto var = vars->GetInt(PERSIST_COMMAND" gen", 0);
 
 	auto netValue = *reinterpret_cast<int*>(reinterpret_cast<__int64>(pPlayer) + 0x183C);
 
@@ -830,7 +830,7 @@ SQInteger Script_ServerGetPersistentUserDataKVString(HSQUIRRELVM v) {
 	auto modifiedKey = (char*)arena_push(arena, modifiedKey_size);
 	memcpy(modifiedKey, PERSIST_COMMAND" ", sizeof(PERSIST_COMMAND));
 	memcpy(modifiedKey + sizeof(PERSIST_COMMAND), hashedKey, hashedKey_len);
-	modifiedKey[modifiedKey_size] = 0;
+	modifiedKey[modifiedKey_size-1] = 0;
 
 	if (!IsValidUserInfo(pKey) || !IsValidUserInfo(modifiedKey) || !IsValidUserInfo(pDefaultValue)) {
 		return sq_throwerror(v, "Invalid user info key or default value.");
@@ -879,7 +879,7 @@ SQInteger Script_ServerSetPersistentUserDataKVString(HSQUIRRELVM v) {
 	auto modifiedKey = (char*)arena_push(arena, modifiedKey_size);
 	memcpy(modifiedKey, PERSIST_COMMAND" ", sizeof(PERSIST_COMMAND));
 	memcpy(modifiedKey + sizeof(PERSIST_COMMAND), hashedKey, hashedKey_len);
-	modifiedKey[modifiedKey_size] = 0;
+	modifiedKey[modifiedKey_size-1] = 0;
 
 	if (!IsValidUserInfo(pKey) || !IsValidUserInfo(modifiedKey) || !IsValidUserInfo(pValue)) {
 		return sq_throwerror(v, "Invalid user info key or value.");
@@ -1005,7 +1005,7 @@ void setinfopersist_cmd(const CCommand& args) {
 		auto fullVarName = (char*)arena_push(arena, fullVarName_size);
 		memcpy(fullVarName, PERSIST_COMMAND" ", sizeof(PERSIST_COMMAND));
 		memcpy(fullVarName + sizeof(PERSIST_COMMAND), hashedKey, hashedKey_len);
-		fullVarName[fullVarName_size] = 0;
+		fullVarName[fullVarName_size-1] = 0;
 		auto existingVar = OriginalCCVar_FindVar(cvarinterface, fullVarName);
 		bool valueChanged = true;  // Default to true if var doesn't exist
 
