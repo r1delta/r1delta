@@ -54,7 +54,7 @@ arena_release(Arena* arena)
 //- mrsteyk: memory allocation and deallocation
 
 void*
-arena_push(Arena* arena, uint64_t size, uint64_t align)
+arena_push_nz(Arena* arena, uint64_t size, uint64_t align)
 {
     Arena* current = arena->current;
     uint64_t pos_align = AlignPow2(current->pos, align);

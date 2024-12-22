@@ -712,7 +712,6 @@ SQInteger Script_ClientGetPersistentData(HSQUIRRELVM v) {
 	auto varName = (char*)arena_push(arena, varName_size);
 	memcpy(varName, PERSIST_COMMAND" ", sizeof(PERSIST_COMMAND));
 	memcpy(varName + sizeof(PERSIST_COMMAND), hashedKey, hashedKey_len);
-	varName[varName_size-1] = 0;
 
 	if (!IsValidUserInfo(key) || !IsValidUserInfo(varName) || !IsValidUserInfo(defaultValue)) {
 		return sq_throwerror(v, "Invalid user info key or default value.");
@@ -830,7 +829,6 @@ SQInteger Script_ServerGetPersistentUserDataKVString(HSQUIRRELVM v) {
 	auto modifiedKey = (char*)arena_push(arena, modifiedKey_size);
 	memcpy(modifiedKey, PERSIST_COMMAND" ", sizeof(PERSIST_COMMAND));
 	memcpy(modifiedKey + sizeof(PERSIST_COMMAND), hashedKey, hashedKey_len);
-	modifiedKey[modifiedKey_size-1] = 0;
 
 	if (!IsValidUserInfo(pKey) || !IsValidUserInfo(modifiedKey) || !IsValidUserInfo(pDefaultValue)) {
 		return sq_throwerror(v, "Invalid user info key or default value.");
@@ -879,7 +877,6 @@ SQInteger Script_ServerSetPersistentUserDataKVString(HSQUIRRELVM v) {
 	auto modifiedKey = (char*)arena_push(arena, modifiedKey_size);
 	memcpy(modifiedKey, PERSIST_COMMAND" ", sizeof(PERSIST_COMMAND));
 	memcpy(modifiedKey + sizeof(PERSIST_COMMAND), hashedKey, hashedKey_len);
-	modifiedKey[modifiedKey_size-1] = 0;
 
 	if (!IsValidUserInfo(pKey) || !IsValidUserInfo(modifiedKey) || !IsValidUserInfo(pValue)) {
 		return sq_throwerror(v, "Invalid user info key or value.");
@@ -1005,7 +1002,6 @@ void setinfopersist_cmd(const CCommand& args) {
 		auto fullVarName = (char*)arena_push(arena, fullVarName_size);
 		memcpy(fullVarName, PERSIST_COMMAND" ", sizeof(PERSIST_COMMAND));
 		memcpy(fullVarName + sizeof(PERSIST_COMMAND), hashedKey, hashedKey_len);
-		fullVarName[fullVarName_size-1] = 0;
 		auto existingVar = OriginalCCVar_FindVar(cvarinterface, fullVarName);
 		bool valueChanged = true;  // Default to true if var doesn't exist
 
@@ -1087,6 +1083,7 @@ char ExecuteConfigFile(int configType) {
 	auto arena = tctx.get_arena_for_scratch();
 	auto temp = TempArena(arena);
 
+	// NOTE(mrsteyk): buffer is already ZeroMemory'd
 	char* buffer = static_cast<char*>(arena_push(arena, fileSize + 1)); // +1 for null terminator
 	if (!buffer) {
 		return 0; // Memory allocation failed
@@ -1099,7 +1096,6 @@ char ExecuteConfigFile(int configType) {
 		return 0; // Failed to read file
 	}
 
-	buffer[fileSize] = '\0'; // Null terminate the buffer
 	g_bRecursive = true;
 	Exec_CmdGuts(buffer, 1);
 	g_bRecursive = false;

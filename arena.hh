@@ -60,7 +60,9 @@ Arena* arena_alloc(uint64_t reserve_ = ARENA_DEFAULT_RESERVE, uint64_t commit_ =
 //#define arena_alloc(...) arena_alloc_(&(ArenaParams){.reserve = ARENA_DEFAULT_RESERVE, .commit = ARENA_DEFAULT_COMMIT, .flags = ARENA_DEFAULT_FLAGS, __VA_ARGS__})
 void arena_release(Arena* arena);
 
-void* arena_push(Arena* arena, uint64_t size, uint64_t align = 16);
+void* arena_push_nz(Arena* arena, uint64_t size, uint64_t align = 16);
+static void*
+arena_push(Arena* arena, uint64_t size, uint64_t align = 16) { return memset(arena_push_nz(arena, size, align), 0, size); }
 // Get full arena-chain position.
 uint64_t arena_get_pos(Arena* arena);
 void     arena_pop_to(Arena* arena, uint64_t pop_pos);
