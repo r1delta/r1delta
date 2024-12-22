@@ -190,6 +190,8 @@ void __fastcall CPlayer__Script_Gen_Changed(__int64 a1) {
 }
 
 
+R1SquirrelVM* GetUIVMPtr();
+
 typedef __int64 (*CPlayer__SetXP)(__int64 a1,int a2);
 
 CPlayer__SetXP CPlayer__SetXPRebuildOrig;
@@ -515,7 +517,20 @@ SQInteger Script_Server_GetActiveBurnCardIndex(HSQUIRRELVM v) {
 	return 1;
 }
 
+SQInteger SetupScoreboardHeader(HSQUIRRELVM v) {
+	auto r1_vm = GetUIVMPtr();
+	SQObject vgui;
+	sq_getstackobj(r1_vm, v, 2,&vgui);
+	//v2 = (*(__int64(__fastcall**)(_QWORD))(**(_QWORD**)(a1 + 40) + 1552i64))(*(_QWORD*)(a1 + 40));
 
+	__int64 raw = reinterpret_cast<__int64>(vgui._unVal.pInstance);
+	// Correcting vgui_ptr calculation using raw as a1
+	//auto vgui_ptr = (*(__int64(__fastcall**)(__int64))(**(__int64**)(raw + 40) + 1552i64))(*(__int64*)(raw + 40));
+		// call first vgui function
+	//reinterpret_cast<void(__fastcall*)(__int64)>(vgui_ptr + 0x8)(vgui_ptr);
+	//Msg("VGUI PTR: %x\n", vgui_ptr);
+	return 1;
+}
 
 // Function to initialize all SQVM functions
 bool GetSQVMFuncs() {
@@ -650,6 +665,17 @@ bool GetSQVMFuncs() {
 		3,      // Expects 2 parameters
 		"int",    // Returns a string
 		"int index,bool enabled",
+		"Updates the selected addons"
+	);
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_UI,
+		"SetupScoreboardHeader",
+		(SQFUNCTION)SetupScoreboardHeader,
+		".I", // String
+		2,      // Expects 2 parameters
+		"void",    // Returns a string
+		"void",
 		"Updates the selected addons"
 	);
 
