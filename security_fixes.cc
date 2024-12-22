@@ -214,15 +214,15 @@ bool __fastcall CNetChan__ProcessControlMessage(CNetChan* thisptr, int cmd, CBit
 
 //-
 
-struct SVC_VoiceMessage {
+struct SVC_VoiceData {
 	unsigned char gap0[32];
-	unsigned int unk0;
+	unsigned int m_nFromClient;
 	int m_nLength;
-	uint64 qword28;
+	uint64 m_nXUID;
 	CBitRead m_DataIn;
 	CBitWrite m_DataOut;
-	bool m_bFromClient;
 };
+static_assert(offsetof(SVC_VoiceData, m_DataOut) == 0x70);
 
 int Voice_GetChannel(int nEntity) {
 	return reinterpret_cast<int(*)(int)>(G_engine + 0x178F0)(nEntity);
@@ -232,13 +232,15 @@ int Voice_AssignChannel(int nEntity, bool bProximity) {
 	return reinterpret_cast<int(*)(int, bool)>(G_engine + 0x177C0)(nEntity, bProximity);
 }
 
-int Voice_AddIncomingData(int nChannel, const char* pchData, int iSequenceNumber, bool bIsCompressed) {
-	return reinterpret_cast<int(*)(int, const char*, int, bool)>(G_engine + 0x17A80)(nChannel, pchData, iSequenceNumber, bIsCompressed);
+int Voice_AddIncomingData(int iEntity, int nChannel, const char* pchData, int nDataSize, int iSequenceNumber, bool bIsCompressed) {
+	return reinterpret_cast<int(*)(int, int, const char*, int, int, bool)>(G_engine + 0x17A80)(iEntity, nChannel, pchData, nDataSize, iSequenceNumber, bIsCompressed);
 }
 
-bool(__fastcall* oCClientState__ProcessVoiceData)(void*, SVC_VoiceMessage*);
+#define VOICE_CHANNEL_ERROR -1
 
-bool __fastcall CClientState__ProcessVoiceData(void* thisptr, SVC_VoiceMessage* msg) {
+bool(__fastcall* oCClientState__ProcessVoiceData)(void*, SVC_VoiceData*);
+
+bool __fastcall CClientState__ProcessVoiceData(void* thisptr, SVC_VoiceData* msg) {
 	char chReceived[4104];
 
 	unsigned int dwLength = msg->m_nLength;
@@ -247,22 +249,27 @@ bool __fastcall CClientState__ProcessVoiceData(void* thisptr, SVC_VoiceMessage* 
 		dwLength = 4096;
 
 	int bitsRead = msg->m_DataIn.ReadBitsClamped(chReceived, msg->m_nLength);
+	if (bitsRead == 0 || msg->m_DataIn.IsOverflowed())
+		return true;
 
-	if (!msg->m_bFromClient)
-		return false;
+	static auto voice_enable = OriginalCCVar_FindVar2(cvarinterface, "voice_enable");
+	if (!voice_enable->m_Value.m_nValue)
+		return true;
 
-	int iEntity = (msg->m_bFromClient + 1);
+	int iEntity = msg->m_nFromClient;
+
 	int nChannel = Voice_GetChannel(iEntity);
+	if (nChannel == VOICE_CHANNEL_ERROR)
+	{
+		nChannel = Voice_AssignChannel(iEntity, false);
+		if (nChannel == VOICE_CHANNEL_ERROR)
+		{
+			Warning("ProcessVoiceData: Voice_AssignChannel failed for client %d!\n", iEntity);
+			return true;
+		}
+	}
 
-	if (nChannel != -1)
-		return Voice_AddIncomingData(nChannel, chReceived, *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(thisptr) + 0x84), true);
-
-	nChannel = Voice_AssignChannel(iEntity, false);
-
-	if (nChannel != -1)
-		return Voice_AddIncomingData(nChannel, chReceived, *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(thisptr) + 0x84), true);
-
-	return nChannel;
+	return Voice_AddIncomingData(iEntity, nChannel, chReceived, msg->m_nLength, 0, 1);
 }
 
 //-
