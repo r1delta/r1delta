@@ -4,6 +4,78 @@
 #include "core.h"
 #include "utils.h"
 
+class INetMessage;
+
+struct subChannel_s {
+	int startFragment[2];
+	int numFragments[2];
+	int sendSeqNr;
+	int state;
+	int index;
+};
+
+struct dataFragments_s {
+	void* file;
+	char filename[260];
+	char* buffer;
+	unsigned int bytes;
+	unsigned int bits;
+	unsigned int transferID;
+	bool isCompressed;
+	unsigned int nUncompressedSize;
+	bool asTCP;
+	bool isReplayDemo;
+	int numFragments;
+	int ackedFragments;
+	int pendingFragments;
+};
+
+#define FLOW_OUTGOING	0
+#define FLOW_INCOMING	1
+#define MAX_FLOWS		2		// in & out
+
+// How fast to converge flow estimates
+#define FLOW_AVG ( 3.0 / 4.0 )
+#define FLOW_INTERVAL 0.25
+#define NET_FRAMES_BACKUP	64		// must be power of 2
+#define NET_FRAMES_MASK		(NET_FRAMES_BACKUP-1)
+#define MAX_SUBCHANNELS		8		// we have 8 alternative send&wait bits
+#define SUBCHANNEL_FREE		0	// subchannel is free to use
+#define SUBCHANNEL_TOSEND	1	// subchannel has data, but not send yet
+#define SUBCHANNEL_WAITING	2   // sbuchannel sent data, waiting for ACK
+#define SUBCHANNEL_DIRTY	3	// subchannel is marked as dirty during changelevel
+
+typedef struct netframe_header_s {
+	float time;
+	int size;
+	short choked;
+	bool valid;
+	float latency;
+} netframe_header_t;
+
+typedef struct netframe_s {
+	int dropped;
+	float avg_latency;
+} netframe_t;
+
+typedef struct netflow_s {
+	float nextcompute;
+	float avgbytespersec;
+	float avgpacketspersec;
+	float avgloss;
+	float avgchoke;
+	float avglatency;
+	float latency;
+	float maxlatency;
+	int64_t totalpackets;
+	int64_t totalbytes;
+	int64_t totalupdates;
+	int currentindex;
+	netframe_header_t frame_headers[NET_FRAMES_BACKUP];
+	netframe_t frames[NET_FRAMES_BACKUP];
+	netframe_t* current_frame;
+} netflow_t;
+
 class CVEngineServer;
 class CNetChan {
 public:
@@ -19,10 +91,13 @@ public:
 	char pad[1212];
 	// this->m_bFileBackgroundTranmission, always true on client, set to false on SIGNONSTATE_CONNECTED client ack on server
 	// IMPORTANT NOTICE: this is "true" if SIGNONSTATE_CONNECTED has not been ACK'd yet
-	bool m_bConnectionComplete_OrPreSignon; 
+	bool m_bConnectionComplete_OrPreSignon;
+	char pad2[300];
+	netflow_t m_DataFlow[MAX_FLOWS];
 };
 static_assert(offsetof(CNetChan, m_nChokedPackets) == 24);
 static_assert(offsetof(CNetChan, m_bConnectionComplete_OrPreSignon) == 1240);
+static_assert(offsetof(CNetChan, m_DataFlow) == 1544);
 extern CVEngineServer* g_CVEngineServer;
 extern uintptr_t g_CVEngineServerInterface;
 extern uintptr_t g_r1oCVEngineServerInterface[203];
