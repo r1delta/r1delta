@@ -484,6 +484,8 @@ SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
 
 		arena_release(thread_arena);
 	}, thread_arena, data).detach();
+
+	return 1;
 }
 SQInteger GetServerList(HSQUIRRELVM v) {
 	auto arena = tctx.get_arena_for_scratch();
