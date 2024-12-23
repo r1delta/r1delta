@@ -322,28 +322,28 @@ std::string generate_uuid() {
 }
 #endif
 
-void GetServerHeartbeat(HSQUIRRELVM v) {
+SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
 	SQObject obj;
 	SQInteger top = sq_gettop(nullptr, v);
 	//Warning("GetServerHeartbeat: Stack top: %d\n", top);
 	if (top < 2) {
 		Warning("GetServerHeartbeat: Stack has less than 2 elements\n");
-		return;
+		return 1;
 	}
 	if (SQ_FAILED(sq_getstackobj(nullptr, v, 2, &obj))) {
 		Warning("GetServerHeartbeat: Failed to get stack object at position 2\n");
-		return;
+		return 1;
 	}
 
 	if (obj._type != OT_TABLE) {
 		Warning("GetServerHeartbeat: Object at stack position 2 is not a table, but type %d\n", obj._type);
-		return;
+		return 1;
 	}
 
 	auto table = obj._unVal.pTable;
 	if (!table) {
 		Warning("GetServerHeartbeat: Table is null\n");
-		return;
+		return 1;
 	}
 
 	//Warning("GetServerHeartbeat: Processing server heartbeat table. Table size: %d, numNodes: %d\n", table->size, table->_numOfNodes);
