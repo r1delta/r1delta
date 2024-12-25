@@ -71,6 +71,7 @@ const CPUInformation* GetCPUInformationDet()
 	return result;
 }
 
+uint64_t g_PerformanceFrequency;
 int G_is_dedi;
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
@@ -112,6 +113,10 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 			SetConsoleTitleW(L"R1Delta");
 			freopen("CONOUT$", "wt", stdout);
 		}
+
+		LARGE_INTEGER freq;
+		QueryPerformanceFrequency(&freq);
+		g_PerformanceFrequency = freq.QuadPart;
 
 		VirtualAlloc((void*)0xFFEEFFEE, 1, MEM_RESERVE, PAGE_NOACCESS);
 

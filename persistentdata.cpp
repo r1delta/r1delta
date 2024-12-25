@@ -937,9 +937,43 @@ SQInteger Script_ServerSetPersistentUserDataKVString(HSQUIRRELVM v) {
 	sq_pushstring(v, pValue, -1);
 	return 1;
 }
+
+bool IsValidServerCommand(const char* cmd)
+{
+	bool in_string = false;
+	size_t cmdlen = strlen(cmd);
+	for (size_t i = 0; i < cmdlen; i++)
+	{
+		if (i+1 < cmdlen && cmd[i] == '\\' && cmd[i + 1] == '"') {
+			i++;
+			continue;
+		};
+
+		if (cmd[i] == '"') in_string = !in_string;
+		if ((cmd[i] == ';' || cmd[i] == '\n') && !in_string)
+			return false;
+	}
+
+	return
+		!memcmp(cmd, PERSIST_COMMAND, sizeof(PERSIST_COMMAND) - 1) // Persistent data set
+		|| !strcmp_static(cmd + 1, "remote_view"); // [-+]remote_view
+}
+
 typedef char (*CBaseClientState__InternalProcessStringCmdType)(void* thisptr, void* msg, bool bIsHLTV);
 CBaseClientState__InternalProcessStringCmdType CBaseClientState__InternalProcessStringCmdOriginal;
 char CBaseClientState__InternalProcessStringCmd(void* thisptr, void* msg, bool bIsHLTV) {
+	const char* cmd = *(const char**)((uintptr_t)msg + 32);
+	if (!IsValidServerCommand(cmd))
+	{
+		// Not a valid command, send back to server.
+
+		static uintptr_t clientstate = (uintptr_t)(G_engine + 0x797070);
+		static void(__fastcall * oClState_SendStringCmd)(uintptr_t, const char*) = (decltype(oClState_SendStringCmd))(G_engine + 0x25590);
+		oClState_SendStringCmd(clientstate, cmd);
+		
+		return true;
+	}
+
 	auto engine = G_engine;
 	void(*Cbuf_Execute)() = decltype(Cbuf_Execute)(engine + 0x1057C0);
 	char ret = CBaseClientState__InternalProcessStringCmdOriginal(thisptr, msg, bIsHLTV);
