@@ -1219,6 +1219,9 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook((LPVOID)(engine_base + 0x0D2490), &ProcessConnectionlessPacketClient, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginalClient));
 	if (!IsDedicatedServer()) {
 		MH_CreateHook((LPVOID)(G_engine + 0x1305E0), &ExecuteConfigFile, NULL);
+		MH_CreateHook((LPVOID)(engine_base + 0x21F9C0), &CEngineVGui__Init, reinterpret_cast<LPVOID*>(&CEngineVGui__InitOriginal));
+		MH_CreateHook((LPVOID)(engine_base + 0x21EB70), &CEngineVGui__HideGameUI, reinterpret_cast<LPVOID*>(&CEngineVGui__HideGameUIOriginal));
+		RegisterConCommand("toggleconsole", ToggleConsoleCommand, "Toggles the console", (1 << 17));
 		RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
 		InitAddons();
 
@@ -1315,11 +1318,6 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook((LPVOID)(server_base + 0x3BE1A0), &CC_Ent_Create, reinterpret_cast<LPVOID*>(&oCC_Ent_Create));
 	MH_CreateHook((LPVOID)(server_base + 0x25E340), &DispatchSpawn, reinterpret_cast<LPVOID*>(&oDispatchSpawn));
 
-	if (!IsDedicatedServer()) {
-		MH_CreateHook((LPVOID)(engine_base + 0x21F9C0), &CEngineVGui__Init, reinterpret_cast<LPVOID*>(&CEngineVGui__InitOriginal));
-		MH_CreateHook((LPVOID)(engine_base + 0x21EB70), &CEngineVGui__HideGameUI, reinterpret_cast<LPVOID*>(&CEngineVGui__HideGameUIOriginal));
-		RegisterConCommand("toggleconsole", ToggleConsoleCommand, "Toggles the console", (1 << 17));
-	}
 	RegisterConCommand("updatescriptdata", updatescriptdata_cmd, "Dumps the script data in the AI node graph to disk", FCVAR_CHEAT);
 	RegisterConCommand("bot_dummy", AddBotDummyConCommand, "Adds a bot.", FCVAR_GAMEDLL | FCVAR_CHEAT);
 	RegisterConVar("r1d_ms", "ms.r1delta.net", FCVAR_CLIENTDLL, "Url for r1d masterserver");
