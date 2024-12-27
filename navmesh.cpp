@@ -61,6 +61,8 @@
 #include <streambuf>
 #include "navmesh.h"
 #include "logging.h"
+#include <bitvec.h>
+#include "vsdk/public/tier1/utlvector.h"
 #pragma intrinsic(_ReturnAddress)
 CAI_NetworkManager__DelayedInitType CAI_NetworkManager__DelayedInitOriginal;
 CAI_NetworkManager__FixupHintsType CAI_NetworkManager__FixupHintsOriginal;
@@ -743,4 +745,637 @@ void updatescriptdata_cmd(const CCommand& args)
 	ainFile.close();
 	Msg("Successfully updated scriptdata for all AI nodes in %s, reloading map\n", currentAINPath.string().c_str());
 	Cbuf_AddText(0, "reload\n", 0);
+}
+// A manager holding a pointer to CAI_Network, presumably
+class CAI_NetworkManager
+{
+	// ...
+};
+
+// Forward declarations to get global pointers (addresses from your notes)
+using FnGetAINetworkManager = CAI_NetworkManager * (*)();
+void verifyain_cmd(const CCommand& args)
+{
+	// 1) Get the manager:
+	static FnGetAINetworkManager s_GetAINetworkManager =
+		reinterpret_cast<FnGetAINetworkManager>(G_server + 0x36B220);
+
+	CAI_NetworkManager* pManager = s_GetAINetworkManager();
+	if (!pManager)
+	{
+		Warning("verifyain: Failed to get AI Network Manager.\n");
+		return;
+	}
+
+	// 2) Get the CAI_Network pointer from memory:
+	CAI_Network* pNetwork = *reinterpret_cast<CAI_Network**>(G_server + 0xC31888);
+	if (!pNetwork || !pNetwork->nodes)
+	{
+		Warning("verifyain: No valid CAI_Network.\n");
+		return;
+	}
+
+	// 3) Build path to .ain file
+	std::filesystem::path ainPath("r1delta/maps/graphs");
+	const char* mapName = static_cast<const char*>((pGlobalVarsServer)->mapname_pszValue);
+	if (!mapName || !*mapName)
+	{
+		Warning("verifyain: No current map name.\n");
+		return;
+	}
+	ainPath /= mapName;
+	ainPath += ".ain";
+
+	// 4) Open for read (binary)
+	std::fstream ainFile(ainPath, std::ios::in | std::ios::binary);
+	if (!ainFile.is_open())
+	{
+		Warning("verifyain: Could not open '%s' for reading.\n", ainPath.string().c_str());
+		return;
+	}
+
+	// 5) Check that the nodecount in the file matches in memory
+	int fileNodeCount = 0;
+	ainFile.seekg(0xC, std::ios::beg);
+	if (!ainFile.read(reinterpret_cast<char*>(&fileNodeCount), sizeof(fileNodeCount)))
+	{
+		Warning("verifyain: Failed to read nodecount.\n");
+		ainFile.close();
+		return;
+	}
+
+	if (fileNodeCount != pNetwork->nodecount)
+	{
+		Warning("verifyain: nodecount mismatch: file=%d, mem=%d.\n", fileNodeCount, pNetwork->nodecount);
+		// We still can proceed to see how off it is, but let's bail for now:
+		ainFile.close();
+		return;
+	}
+
+	// We'll gather the nodes from disk:
+	std::vector<CAI_NodeDisk> diskNodes(fileNodeCount);
+
+	// The node array starts at offset 0x10
+	ainFile.seekg(0x10, std::ios::beg);
+	const std::streamsize nodeSize = sizeof(CAI_NodeDisk);
+	if (!ainFile.read(reinterpret_cast<char*>(diskNodes.data()), fileNodeCount * nodeSize))
+	{
+		Warning("verifyain: Failed to read node array.\n");
+		ainFile.close();
+		return;
+	}
+
+	// Compare each node:
+	int nodeMismatchCount = 0;
+	for (int i = 0; i < fileNodeCount; ++i)
+	{
+		CAI_NodeDisk& dn = diskNodes[i];
+		CAI_Node* pm = pNetwork->nodes[i];
+		if (!pm)
+		{
+			Warning("verifyain: node %d in memory is NULL.\n", i);
+			continue;
+		}
+
+		// Let's do a few checks:
+		// 1) Position, ignoring small floating error:
+		float dx = std::fabs(dn.x - pm->position.x);
+		float dy = std::fabs(dn.y - pm->position.y);
+		float dz = std::fabs(dn.z - pm->position.z);
+		if (dx > 0.01f || dy > 0.01f || dz > 0.01f)
+		{
+			Warning("verifyain: node %d pos mismatch: disk=(%.2f,%.2f,%.2f) mem=(%.2f,%.2f,%.2f)\n",
+				i, dn.x, dn.y, dn.z, pm->position.x, pm->position.y, pm->position.z);
+			nodeMismatchCount++;
+		}
+
+		// 2) Yaw:
+		if (std::fabs(dn.yaw - pm->yaw) > 0.01f)
+		{
+			Warning("verifyain: node %d yaw mismatch: disk=%.2f mem=%.2f\n", i, dn.yaw, pm->yaw);
+			nodeMismatchCount++;
+		}
+
+		// 3) hull offsets:
+		for (int h = 0; h < 5; h++)
+		{
+			float dval = std::fabs(dn.hulls[h] - pm->hulls[h]);
+			if (dval > 0.01f)
+			{
+				Warning("verifyain: node %d hull[%d] mismatch: disk=%.2f mem=%.2f\n", i, h, dn.hulls[h], pm->hulls[h]);
+				nodeMismatchCount++;
+			}
+		}
+
+		// 4) flags:
+		if (dn.unk1 != pm->flags)
+		{
+			Warning("verifyain: node %d flags mismatch: disk=%d mem=%d\n", i, dn.unk1, pm->flags);
+			nodeMismatchCount++;
+		}
+
+		// 5) unk0 value:
+		if (dn.unk0 != (char)pm->unk0)
+		{
+			Warning("verifyain: node %d unk0 mismatch: disk=%d mem=%d\n", i, (int)dn.unk0, pm->unk0);
+			nodeMismatchCount++;
+		}
+
+		// 6) unk2 array (comparing shorts to ints):
+		for (int j = 0; j < 5; j++)
+		{
+			if (dn.unk2[j] != (short)pm->unk2[j])
+			{
+				Warning("verifyain: node %d unk2[%d] mismatch: disk=%d mem=%d\n",
+					i, j, (int)dn.unk2[j], pm->unk2[j]);
+				nodeMismatchCount++;
+			}
+		}
+
+		// 7) unk3 array:
+		for (int j = 0; j < 5; j++)
+		{
+			if (dn.unk3[j] != pm->unk3[j])
+			{
+				Warning("verifyain: node %d unk3[%d] mismatch: disk=%d mem=%d\n",
+					i, j, (int)dn.unk3[j], (int)pm->unk3[j]);
+				nodeMismatchCount++;
+			}
+		}
+
+		// 8) unk4 value:
+		if (dn.unk4 != pm->unk6)
+		{
+			Warning("verifyain: node %d unk4 mismatch: disk=%d mem=%d\n", i, dn.unk4, pm->unk6);
+			nodeMismatchCount++;
+		}
+
+		// 9) unk5 value:
+		if (dn.unk5 != pm->unk8 && !(dn.unk5 == -1 && pm->unk8 == 0))
+		{
+			Warning("verifyain: node %d unk5 mismatch: disk=%d mem=%d\n", i, dn.unk5, pm->unk8);
+			nodeMismatchCount++;
+		}
+
+		// 10) scriptdata (8 bytes):
+		if (memcmp(dn.unk6, pm->scriptdata, 8) != 0)
+		{
+			Warning("verifyain: node %d scriptdata mismatch.\n", i);
+			nodeMismatchCount++;
+		}
+	}
+	// After writing nodes, set read pointer to match where we'd be after reading them
+	ainFile.seekg(0x10 + (pNetwork->nodecount * sizeof(CAI_NodeDisk)), std::ios::beg);
+
+	// Read linkCount after the node block
+	int fileLinkCount = 0;
+	if (!ainFile.read(reinterpret_cast<char*>(&fileLinkCount), sizeof(fileLinkCount)))
+	{
+		Warning("verifyain: Could not read linkcount.\n");
+		ainFile.close();
+		return;
+	}
+
+	// Read the link array
+	const std::streamsize linkDiskSize = sizeof(CAI_NodeLinkDisk);
+	std::vector<CAI_NodeLinkDisk> diskLinks(fileLinkCount);
+	if (!ainFile.read(reinterpret_cast<char*>(diskLinks.data()), fileLinkCount * linkDiskSize))
+	{
+		Warning("verifyain: Could not read link array.\n");
+		ainFile.close();
+		return;
+	}
+	ainFile.close();
+
+	// Compare linkcount
+	if (fileLinkCount != pNetwork->linkcount)
+	{
+		Warning("verifyain: linkcount mismatch: file=%d mem=%d.\n", fileLinkCount, pNetwork->linkcount);
+	}
+
+	// Compare links using naive matching
+	int linkMismatchCount = 0;
+	for (int i = 0; i < fileLinkCount; ++i)
+	{
+		CAI_NodeLinkDisk& dl = diskLinks[i];
+		bool foundMatch = false;
+
+		// Search memory for a link with (srcId,destId) or (destId,srcId)
+		for (int n = 0; n < pNetwork->nodecount && !foundMatch; ++n)
+		{
+			CAI_Node* pn = pNetwork->nodes[n];
+			if (!pn)
+				continue;
+
+			for (int ln = 0; ln < pn->linkcount && !foundMatch; ln++)
+			{
+				CAI_NodeLink* memLink = pn->links[ln];
+				if (!memLink)
+					continue;
+
+				bool samePair =
+					(memLink->srcId == dl.srcId && memLink->destId == dl.destId) ||
+					(memLink->srcId == dl.destId && memLink->destId == dl.srcId);
+
+				if (samePair)
+				{
+					// Check the hull bits for mismatch
+					for (int h = 0; h < 5; h++)
+					{
+						if (dl.hulls[h] != memLink->hulls[h])
+						{
+							Warning("verifyain: link mismatch (src=%d dest=%d) hull[%d] disk=%d mem=%d\n",
+								dl.srcId, dl.destId, h, (int)dl.hulls[h], (int)memLink->hulls[h]);
+							linkMismatchCount++;
+						}
+					}
+					// Check the link info byte
+					if (dl.unk0 != memLink->unk1)
+					{
+						Warning("verifyain: link mismatch (src=%d dest=%d) linkinfo disk=%d mem=%d\n",
+							dl.srcId, dl.destId, dl.unk0, memLink->unk1);
+						linkMismatchCount++;
+					}
+
+					foundMatch = true;
+				}
+			}
+		}
+
+		if (!foundMatch)
+		{
+			Warning("verifyain: disk link (src=%d dest=%d) not found in memory.\n",
+				dl.srcId, dl.destId);
+			linkMismatchCount++;
+		}
+	}
+
+	Msg("verifyain: Done.\n");
+	Msg("verifyain: Node mismatches: %d, link mismatches: %d.\n", nodeMismatchCount, linkMismatchCount);
+	if (nodeMismatchCount == 0 && linkMismatchCount == 0)
+	{
+		Msg("verifyain: Everything matches perfectly.\n");
+	}
+}
+
+
+static bool WriteBytesAtPosition(std::fstream& file, std::streampos pos, const char* data, size_t size)
+{
+	file.seekp(pos);
+	if (!file.write(data, size))
+		return false;
+	return true;
+}
+
+using ResetBitVecFunc = void(*)(void* table);  // sub_18036BC30
+using ResizeFunc = void(*)(void* table, unsigned int param1, unsigned int numNodes);  // sub_18036C150
+using BitVecResizeFunc = void(*)(unsigned __int16* table, unsigned int size, int param);  // CVarBitVecBase<unsigned short>::Resize
+
+struct CVarBitVec2 {
+	uint16_t size;
+	uint16_t numInts;
+	uint32_t inlineData;
+	void* pData;
+};
+
+// CUtlMemory<CVarBitVec>
+struct CVarBitVecMemory2 {
+	CVarBitVec2* m_pMemory;
+	int m_nAllocationCount;
+	int m_nGrowSize;
+};
+
+// CUtlVector<CVarBitVec, CUtlMemory<CVarBitVec>>
+struct NeighborsTable {
+	CVarBitVecMemory2 m_Memory;
+	int m_Size;
+};
+void (*original_init_table)(void* table, unsigned int param1, unsigned int numNodes);
+void __fastcall InitTableHook(void* table, unsigned int param1, unsigned int numNodes) {
+	static bool initialized = false;
+
+	// Call original for passed table
+	original_init_table(table, param1, numNodes);
+
+	// Only initialize others if this is the main table in Rebuild
+	if (!initialized && (uintptr_t)_ReturnAddress() == (G_server + 0x36847E)) {
+		// Initialize each vector properly
+		NeighborsTable* tables[] = {
+			(NeighborsTable*)(G_server + 0xD416D0),
+			(NeighborsTable*)(G_server + 0xD416F0),
+			(NeighborsTable*)(G_server + 0xD41710)
+		};
+
+		for (auto neighborTable : tables) {
+			// Initialize memory for vector
+			neighborTable->m_Memory.m_pMemory = (CVarBitVec2*)malloc(numNodes * sizeof(CVarBitVec2));
+			neighborTable->m_Memory.m_nAllocationCount = numNodes;
+			neighborTable->m_Memory.m_nGrowSize = 0;
+			neighborTable->m_Size = numNodes;
+
+			// Initialize each bit vector
+			for (unsigned int i = 0; i < numNodes; i++) {
+				auto& bitVec = neighborTable->m_Memory.m_pMemory[i];
+				bitVec.size = 0;
+				bitVec.numInts = 0;
+				bitVec.inlineData = 0;
+				bitVec.pData = nullptr;
+
+				// Initialize bit vector through original function
+				original_init_table(&bitVec, param1, numNodes);
+			}
+		}
+
+		initialized = true;
+	}
+}
+void updateain_cmd(const CCommand& args)
+{
+	using FnGetAINetworkManager = CAI_NetworkManager * (*)();
+	using FnStartRebuild = void(__fastcall*)(CAI_NetworkManager*);
+
+
+	static FnStartRebuild s_StartRebuild =
+		reinterpret_cast<FnStartRebuild>(G_server + 0x3645F0);
+
+	// 1) Grab manager
+	CAI_NetworkManager* pManager = *(CAI_NetworkManager**)(G_server + 0x0C31898);
+	if (!pManager)
+	{
+		Warning("updateain: Failed to get AI Network Manager.\n");
+		return;
+	}
+	//PatchNodeTableRefs();
+	// 2) Call ::StartRebuild
+	s_StartRebuild(pManager);
+
+	// 3) Get network pointer
+	CAI_Network* pNetwork = *reinterpret_cast<CAI_Network**>(G_server + 0xC31888);
+	if (!pNetwork || !pNetwork->nodes)
+	{
+		Warning("updateain: No valid AI network/nodes present.\n");
+		return;
+	}
+
+	// 4) Build path
+	std::filesystem::path ainPath("r1delta/maps/graphs");
+	const char* mapName = static_cast<const char*>((pGlobalVarsServer)->mapname_pszValue);
+	if (!mapName || !*mapName)
+	{
+		Warning("updateain: Current map name is invalid.\n");
+		return;
+	}
+	ainPath /= mapName;
+	ainPath += ".ain";
+
+	std::fstream ainFile(ainPath, std::ios::in | std::ios::out | std::ios::binary);
+	if (!ainFile.is_open())
+	{
+		Warning("updateain: Failed to open '%s' for read/write.\n", ainPath.string().c_str());
+		return;
+	}
+
+	// 5) Read and verify nodecount
+	int fileNodeCount = 0;
+	ainFile.seekg(0xC, std::ios::beg);
+	if (!ainFile.read(reinterpret_cast<char*>(&fileNodeCount), sizeof(fileNodeCount)))
+	{
+		Warning("updateain: Failed to read nodecount.\n");
+		ainFile.close();
+		return;
+	}
+
+	if (fileNodeCount != pNetwork->nodecount)
+	{
+		Warning("updateain: File nodecount %d != memory nodecount %d. Cancelling.\n",
+			fileNodeCount, pNetwork->nodecount);
+		ainFile.close();
+		return;
+	}
+
+	// 6) Write nodes
+	ainFile.seekp(0x10, std::ios::beg);  // Node array starts at 0x10
+	const std::streamsize nodeDiskSize = sizeof(CAI_NodeDisk);
+	for (int i = 0; i < pNetwork->nodecount; ++i)
+	{
+		// Read existing node from disk
+		CAI_NodeDisk oldDisk;
+		std::streampos nodePos = ainFile.tellp();
+		ainFile.seekg(nodePos);
+		if (!ainFile.read(reinterpret_cast<char*>(&oldDisk), nodeDiskSize))
+		{
+			Warning("updateain: Failed reading existing node %d\n", i);
+			continue;
+		}
+		ainFile.seekp(nodePos);
+
+		CAI_Node* pMemNode = pNetwork->nodes[i];
+		CAI_NodeDisk newDisk{};
+
+		// Position
+		newDisk.x = pMemNode->position.x;
+		newDisk.y = pMemNode->position.y;
+		newDisk.z = pMemNode->position.z;
+		if (std::abs(newDisk.x - oldDisk.x) > 0.01f ||
+			std::abs(newDisk.y - oldDisk.y) > 0.01f ||
+			std::abs(newDisk.z - oldDisk.z) > 0.01f)
+		{
+			Msg("Node %d: Changing pos from (%.2f,%.2f,%.2f) to (%.2f,%.2f,%.2f)\n",
+				i, oldDisk.x, oldDisk.y, oldDisk.z, newDisk.x, newDisk.y, newDisk.z);
+		}
+
+		// Yaw
+		newDisk.yaw = pMemNode->yaw;
+		if (std::abs(newDisk.yaw - oldDisk.yaw) > 0.01f)
+		{
+			Msg("Node %d: Changing yaw from %.2f to %.2f\n", i, oldDisk.yaw, newDisk.yaw);
+		}
+
+		// Hull offsets
+		memcpy(newDisk.hulls, pMemNode->hulls, sizeof(newDisk.hulls));
+		for (int h = 0; h < 5; h++)
+		{
+			if (std::abs(newDisk.hulls[h] - oldDisk.hulls[h]) > 0.01f)
+			{
+				Msg("Node %d: Changing hull[%d] from %.2f to %.2f\n",
+					i, h, oldDisk.hulls[h], newDisk.hulls[h]);
+			}
+		}
+
+		// unk0
+		newDisk.unk0 = static_cast<char>(pMemNode->unk0);
+		if (newDisk.unk0 != oldDisk.unk0)
+		{
+			Msg("Node %d: Changing unk0 from %d to %d\n",
+				i, (int)oldDisk.unk0, (int)newDisk.unk0);
+		}
+
+		// unk1 (flags)
+		newDisk.unk1 = pMemNode->flags;
+		if (newDisk.unk1 != oldDisk.unk1)
+		{
+			Msg("Node %d: Changing flags(unk1) from %d to %d\n",
+				i, oldDisk.unk1, newDisk.unk1);
+		}
+
+		// unk2 array
+		for (int j = 0; j < 5; j++)
+		{
+			newDisk.unk2[j] = static_cast<short>(pMemNode->unk2[j]);
+			if (newDisk.unk2[j] != oldDisk.unk2[j])
+			{
+				Msg("Node %d: Changing unk2[%d] from %d to %d\n",
+					i, j, oldDisk.unk2[j], newDisk.unk2[j]);
+			}
+		}
+
+		// unk3 array
+		memcpy(newDisk.unk3, pMemNode->unk3, sizeof(newDisk.unk3));
+		for (int j = 0; j < 5; j++)
+		{
+			if (newDisk.unk3[j] != oldDisk.unk3[j])
+			{
+				Msg("Node %d: Changing unk3[%d] from %d to %d\n",
+					i, j, (int)oldDisk.unk3[j], (int)newDisk.unk3[j]);
+			}
+		}
+
+		// unk4 (from unk6)
+		newDisk.unk4 = pMemNode->unk6;
+		if (newDisk.unk4 != oldDisk.unk4)
+		{
+			Msg("Node %d: Changing unk4 from %d to %d\n",
+				i, oldDisk.unk4, newDisk.unk4);
+		}
+
+		// unk5 (from unk8)
+		newDisk.unk5 = (pMemNode->unk8 == 0) ? -1 : pMemNode->unk8;
+		if (newDisk.unk5 != oldDisk.unk5)
+		{
+			Msg("Node %d: Changing unk5 from %d to %d (memory unk8=%d)\n",
+				i, oldDisk.unk5, newDisk.unk5, pMemNode->unk8);
+		}
+
+		// scriptdata (unk6)
+		memcpy(newDisk.unk6, pMemNode->scriptdata, sizeof(newDisk.unk6));
+		if (memcmp(newDisk.unk6, oldDisk.unk6, sizeof(newDisk.unk6)) != 0)
+		{
+			Msg("Node %d: Changing scriptdata\n", i);
+		}
+
+		if (!ainFile.write(reinterpret_cast<const char*>(&newDisk), nodeDiskSize))
+		{
+			Warning("updateain: Failed writing node %d\n", i);
+		}
+	}
+
+
+	// Explicitly position read pointer after the node block
+	std::streamoff nodeBlockSize = static_cast<std::streamoff>(pNetwork->nodecount) * nodeDiskSize;
+	Msg("updateain: Node block size: 0x%llX\n", static_cast<unsigned long long>(nodeBlockSize));
+	Msg("updateain: Read position before explicit seekg call: 0x%llX\n", static_cast<unsigned long long>(ainFile.tellg()));
+	ainFile.seekg(0x10 + nodeBlockSize, std::ios::beg);
+	Msg("updateain: Read position after explicit seekg call: 0x%llX\n", static_cast<unsigned long long>(ainFile.tellg()));
+
+	// 7) Read original link count
+	int fileLinkCount = 0;
+	if (!ainFile.read(reinterpret_cast<char*>(&fileLinkCount), sizeof(fileLinkCount)))
+	{
+		Warning("updateain: Could not read linkcount.\n");
+		ainFile.close();
+		return;
+	}
+	Msg("updateain: Read position after linkcount: 0x%llX\n", static_cast<unsigned long long>(ainFile.tellg()));
+	if (fileLinkCount != pNetwork->linkcount)
+	{
+		Warning("updateain: File linkcount %d != memory linkcount %d. Possibly mismatched.\n",
+			fileLinkCount, pNetwork->linkcount);
+	}
+
+	// Read existing link array
+	const std::streamsize linkDiskSize = sizeof(CAI_NodeLinkDisk);
+	std::vector<CAI_NodeLinkDisk> fileLinks(fileLinkCount);
+	if (!ainFile.read(reinterpret_cast<char*>(fileLinks.data()), fileLinkCount * linkDiskSize))
+	{
+		Warning("updateain: Could not read link array.\n");
+		ainFile.close();
+		return;
+	}
+
+	// Seek back to start of link array for writing
+	ainFile.seekp(-static_cast<std::streamoff>(fileLinkCount * linkDiskSize), std::ios::cur);
+
+	// Update and write each link
+	int memLinksWritten = 0;
+	for (int iLink = 0; iLink < fileLinkCount; ++iLink)
+	{
+		CAI_NodeLinkDisk& oldLink = fileLinks[iLink];
+		CAI_NodeLinkDisk updatedLink = oldLink;
+
+		bool foundMatch = false;
+		for (int n = 0; n < pNetwork->nodecount && !foundMatch; ++n)
+		{
+			CAI_Node* pNode = pNetwork->nodes[n];
+			if (!pNode) continue;
+
+			for (int ln = 0; ln < pNode->linkcount && !foundMatch; ++ln)
+			{
+				CAI_NodeLink* pMemLink = pNode->links[ln];
+				if (!pMemLink)
+					continue;
+
+				if ((pMemLink->srcId == oldLink.srcId && pMemLink->destId == oldLink.destId) ||
+					(pMemLink->srcId == oldLink.destId && pMemLink->destId == oldLink.srcId))
+				{
+					updatedLink.srcId = pMemLink->srcId;
+					updatedLink.destId = pMemLink->destId;
+					updatedLink.unk0 = pMemLink->unk1;
+					memcpy(updatedLink.hulls, pMemLink->hulls, sizeof(updatedLink.hulls));
+					foundMatch = true;
+
+					// Log changes
+					if (updatedLink.srcId != oldLink.srcId || updatedLink.destId != oldLink.destId)
+					{
+						Msg("Link %d: Changing src/dest from %d/%d to %d/%d\n",
+							iLink, oldLink.srcId, oldLink.destId, updatedLink.srcId, updatedLink.destId);
+					}
+
+					if (updatedLink.unk0 != oldLink.unk0)
+					{
+						Msg("Link %d: Changing unk0 from %d to %d\n",
+							iLink, (int)oldLink.unk0, (int)updatedLink.unk0);
+					}
+
+					for (int h = 0; h < 5; h++)
+					{
+						if (updatedLink.hulls[h] != oldLink.hulls[h])
+						{
+							Msg("Link %d: Changing hull[%d] from %d to %d\n",
+								iLink, h, (int)oldLink.hulls[h], (int)updatedLink.hulls[h]);
+						}
+					}
+				}
+			}
+		}
+
+		if (!foundMatch)
+		{
+			Msg("Link %d: Could not find matching memory link for disk link (src=%d dest=%d)\n",
+				iLink, oldLink.srcId, oldLink.destId);
+		}
+
+		if (!ainFile.write(reinterpret_cast<const char*>(&updatedLink), linkDiskSize))
+		{
+			Warning("updateain: Failed writing link %d\n", iLink);
+		}
+		else
+		{
+			++memLinksWritten;
+		}
+	}
+
+	ainFile.close();
+
+	Msg("updateain: Overwrote %d nodes & %d links in '%s'.\n",
+		pNetwork->nodecount, memLinksWritten, ainPath.string().c_str());
 }

@@ -13,7 +13,7 @@
 #include <limits.h>
 #include "tier0/dbg.h"
 #include "tier0/basetypes.h"
-
+#define Plat_FastMemset memset
 
 class CBitVecAccessor
 {
