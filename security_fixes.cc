@@ -677,7 +677,7 @@ security_fixes_engine(uintptr_t engine_base)
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0xDA330), &CGameClient__ProcessVoiceData, reinterpret_cast<LPVOID*>(&oCGameClient__ProcessVoiceData)) == MH_OK);
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x17D400), &CClientState__ProcessUserMessage, reinterpret_cast<LPVOID*>(&oCClientState__ProcessUserMessage)) == MH_OK);
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x17D600), &CClientState__ProcessVoiceData, reinterpret_cast<LPVOID*>(&oCClientState__ProcessVoiceData)) == MH_OK);
-	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E0C80), &CNetChan___FlowNewPacket, NULL) == MH_OK);
+	//R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E0C80), &CNetChan___FlowNewPacket, NULL) == MH_OK); // my fucking god STOP PASTING SHIT FROM APEX
     R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1F23C0), &NET_ReceiveDatagram, reinterpret_cast<LPVOID*>(&oNET_ReceiveDatagram)) == MH_OK);
 	// TODO(dogecore): ip bans
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x237F0), &CBaseClientState__ProcessSplitScreenUser, NULL) == MH_OK);
