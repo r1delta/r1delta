@@ -195,6 +195,6 @@ void unkallocfunc(__int64 a1, int a2, char a3);
 void updatescriptdata_cmd(const CCommand& args);
 void verifyain_cmd(const CCommand& args);
 void updateain_cmd(const CCommand& args);
-extern void (*original_init_table)(void* table, unsigned int param1, unsigned int numNodes);
+extern void (*original_init_table)(void* table, void* b, void* c);
 
-void __fastcall InitTableHook(void* table, unsigned int param1, unsigned int numNodes);
+void __fastcall InitTableHook(void* table, void* b, void* c);

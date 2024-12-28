@@ -911,7 +911,7 @@ void verifyain_cmd(const CCommand& args)
 		}
 
 		// 9) unk5 value:
-		if (dn.unk5 != pm->unk8 && !(dn.unk5 == -1 && pm->unk8 == 0))
+		if (dn.unk5 != pm->unk9[0])
 		{
 			Warning("verifyain: node %d unk5 mismatch: disk=%d mem=%d\n", i, dn.unk5, pm->unk8);
 			nodeMismatchCount++;
@@ -1050,44 +1050,31 @@ struct NeighborsTable {
 	CVarBitVecMemory2 m_Memory;
 	int m_Size;
 };
-void (*original_init_table)(void* table, unsigned int param1, unsigned int numNodes);
-void __fastcall InitTableHook(void* table, unsigned int param1, unsigned int numNodes) {
+
+void (*original_init_table)(void* table, void* b, void * c);
+void __fastcall InitTableHook(void* table, void* b, void* c) {
 	static bool initialized = false;
-
-	// Call original for passed table
-	original_init_table(table, param1, numNodes);
-
 	// Only initialize others if this is the main table in Rebuild
-	if (!initialized && (uintptr_t)_ReturnAddress() == (G_server + 0x36847E)) {
 		// Initialize each vector properly
-		NeighborsTable* tables[] = {
-			(NeighborsTable*)(G_server + 0xD416D0),
-			(NeighborsTable*)(G_server + 0xD416F0),
-			(NeighborsTable*)(G_server + 0xD41710)
+		void* dstTables[] = {
+			(void*)(G_server + 0xD416D0),
+			(void*)(G_server + 0xD416F0),
+			(void*)(G_server + 0xD41710)
 		};
+		// Each table is 0x20 bytes based on the SDK struct sizes
+		const size_t tableSize = 0x20;
+		void* srcTable = (void*)(G_server + 0xD41730);
 
-		for (auto neighborTable : tables) {
-			// Initialize memory for vector
-			neighborTable->m_Memory.m_pMemory = (CVarBitVec2*)malloc(numNodes * sizeof(CVarBitVec2));
-			neighborTable->m_Memory.m_nAllocationCount = numNodes;
-			neighborTable->m_Memory.m_nGrowSize = 0;
-			neighborTable->m_Size = numNodes;
-
-			// Initialize each bit vector
-			for (unsigned int i = 0; i < numNodes; i++) {
-				auto& bitVec = neighborTable->m_Memory.m_pMemory[i];
-				bitVec.size = 0;
-				bitVec.numInts = 0;
-				bitVec.inlineData = 0;
-				bitVec.pData = nullptr;
-
-				// Initialize bit vector through original function
-				original_init_table(&bitVec, param1, numNodes);
-			}
+		for (auto dstTable : dstTables) {
+			memcpy(dstTable, srcTable, tableSize);
 		}
 
-		initialized = true;
-	}
+
+
+
+	// Call original for passed table
+	original_init_table(table, b, c);
+
 }
 void updateain_cmd(const CCommand& args)
 {
@@ -1249,11 +1236,11 @@ void updateain_cmd(const CCommand& args)
 		}
 
 		// unk5 (from unk8)
-		newDisk.unk5 = (pMemNode->unk8 == 0) ? -1 : pMemNode->unk8;
+		newDisk.unk5 = (unsigned char)(pMemNode->unk9[0]) == 0xFF ? -1 : (uint8_t)((pMemNode->unk9[0]));
 		if (newDisk.unk5 != oldDisk.unk5)
 		{
-			Msg("Node %d: Changing unk5 from %d to %d (memory unk8=%d)\n",
-				i, oldDisk.unk5, newDisk.unk5, pMemNode->unk8);
+			Msg("Node %d: Changing unk5 disk: %d mem: %d\n",
+				i, oldDisk.unk5, newDisk.unk5);
 		}
 
 		// scriptdata (unk6)
@@ -1290,6 +1277,8 @@ void updateain_cmd(const CCommand& args)
 	{
 		Warning("updateain: File linkcount %d != memory linkcount %d. Possibly mismatched.\n",
 			fileLinkCount, pNetwork->linkcount);
+		ainFile.close();
+		return;
 	}
 
 	// Read existing link array
