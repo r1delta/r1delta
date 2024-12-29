@@ -635,7 +635,8 @@ void Hk_CHostState__State_GameShutdown(void* thisptr) {
 
 			client.SendRequest(arena, host, path, {}, true, true);
 			}).detach();
-			Cbuf_AddTextOriginal(0, "host_map \"\"\n", 0);
+			host_map_cvar->m_Value.m_StringLength = 0;
+			
 	}
 
 		oGameShutDown(thisptr);

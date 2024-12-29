@@ -1281,6 +1281,12 @@ bool HandleSquirrelClientCommand(__int64 player, __int64 args) {
 
 	return false;
 }
+__int64 __fastcall CServerGameDLL_DLLShutdown(__int64 a1, void*** a2, __int64 a3)
+{
+	Msg("Shutting down\n");
+	TerminateProcess(GetCurrentProcess(), 0); // GAME OVER YEAHHHHHH
+	return 0;
+}
 static FORCEINLINE void
 do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 {
@@ -1329,6 +1335,8 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook((LPVOID)(server_base + 0x3C8B70), &CBaseEntity__VPhysicsInitNormal, reinterpret_cast<LPVOID*>(&oCBaseEntity__VPhysicsInitNormal));
 	MH_CreateHook((LPVOID)(server_base + 0x3B3200), &CBaseEntity__SetMoveType, reinterpret_cast<LPVOID*>(&oCBaseEntity__SetMoveType));
 	MH_CreateHook((LPVOID)(server_base + 0x4E2F30), &CPlayer_GetLevel, reinterpret_cast<LPVOID*>(NULL));
+	MH_CreateHook((LPVOID)(server_base + 0x1442D0), &CServerGameDLL_DLLShutdown, reinterpret_cast<LPVOID*>(NULL));
+	
 	//MH_CreateHook((LPVOID)(server_base + 0x7F7E0), &HookedServerClassRegister, reinterpret_cast<LPVOID*>(&ServerClassRegister_7F7E0));
 	//MH_CreateHook((LPVOID)(server_base + 0x25A8E0), &CEntityFactoryDictionary__Create, reinterpret_cast<LPVOID*>(&CEntityFactoryDictionary__CreateOriginal));
 
