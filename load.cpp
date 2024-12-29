@@ -1258,7 +1258,29 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	*(uintptr_t**)((uint64_t)allign + 6) = &CNetChan__ProcessSubChannelData_AsmConductBufferSizeCheck;
 	VirtualProtect(allign, 6, old_protect, &old_protect);
 }
+__forceinline void DebugConnectMsg(int node1, int node2, const char* pszFormat, ...)
+{
+	// Stack-allocated buffer for the complete format string
+	char finalFormat[512];  // Adjust size as needed
+	snprintf(finalFormat, sizeof(finalFormat), "node 1: %%d node 2: %%d: %s", pszFormat);
 
+	va_list args;
+	va_start(args, pszFormat);
+	Msg(finalFormat, node1, node2, args);
+	va_end(args);
+}
+bool (*oHandleSquirrelClientCommand)(__int64 player, __int64 args);
+bool HandleSquirrelClientCommand(__int64 player, __int64 args) {
+	static auto HandlePlayerClientCommand = reinterpret_cast<decltype(oHandleSquirrelClientCommand)>(G_server + 0x5014F0);
+	static auto g_pVoiceManager = G_server + 0xB3B8B0;
+	static auto HandleVoiceClientCommand = reinterpret_cast<bool (*)(__int64 voice, __int64 player, __int64 args)>(G_server + 0x275C20);
+
+	if (oHandleSquirrelClientCommand(player, args)) return true;
+	if (HandlePlayerClientCommand(player, args)) return true;
+	if (HandleVoiceClientCommand(g_pVoiceManager, player, args)) return true;
+
+	return false;
+}
 static FORCEINLINE void
 do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 {
@@ -1318,7 +1340,10 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook((LPVOID)(server_base + 0x3BE1A0), &CC_Ent_Create, reinterpret_cast<LPVOID*>(&oCC_Ent_Create));
 	MH_CreateHook((LPVOID)(server_base + 0x25E340), &DispatchSpawn, reinterpret_cast<LPVOID*>(&oDispatchSpawn));
 	MH_CreateHook((LPVOID)(server_base + 0x369E00), &InitTableHook, reinterpret_cast<LPVOID*>(&original_init_table));
-
+	MH_CreateHook((LPVOID)(server_base + 0x2820A0), &HandleSquirrelClientCommand, reinterpret_cast<LPVOID*>(&oHandleSquirrelClientCommand));
+	
+	//MH_CreateHook((LPVOID)(server_base + 0x364140), &DebugConnectMsg, reinterpret_cast<LPVOID*>(0));
+	
 	RegisterConCommand("updatescriptdata", updatescriptdata_cmd, "Dumps the script data in the AI node graph to disk", FCVAR_CHEAT);
 	RegisterConCommand("verifyain", verifyain_cmd, "Reads the .ain file from disk, compares its nodes & links to in-memory data, logs differences.", FCVAR_CHEAT);
 	RegisterConCommand("updateain", updateain_cmd, "Calls StartRebuild, then overwrites node/link data in the .ain file.", FCVAR_CHEAT);

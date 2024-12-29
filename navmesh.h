@@ -88,7 +88,7 @@ struct CAI_Node
 	char scriptdata[8]; // should match up to unk6 on disk
 };
 #pragma pack(pop)
-
+static_assert(offsetof(CAI_Node, scriptdata) == 156);
 // the way CAI_Nodes are represented in on-disk ain files
 #pragma pack(push, 1)
 struct CAI_NodeDisk

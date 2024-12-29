@@ -909,9 +909,10 @@ void verifyain_cmd(const CCommand& args)
 			Warning("verifyain: node %d unk4 mismatch: disk=%d mem=%d\n", i, dn.unk4, pm->unk6);
 			nodeMismatchCount++;
 		}
+		auto memunk5 = (unsigned char)(pm->unk9[0]) == 0xFF ? -1 : (uint8_t)((pm->unk9[0]));
 
 		// 9) unk5 value:
-		if (dn.unk5 != pm->unk9[0])
+		if (dn.unk5 != memunk5)
 		{
 			Warning("verifyain: node %d unk5 mismatch: disk=%d mem=%d\n", i, dn.unk5, pm->unk8);
 			nodeMismatchCount++;
@@ -1114,257 +1115,307 @@ void updateain_cmd(const CCommand& args)
 	}
 	ainPath /= mapName;
 	ainPath += ".ain";
-
-	std::fstream ainFile(ainPath, std::ios::in | std::ios::out | std::ios::binary);
-	if (!ainFile.is_open())
-	{
-		Warning("updateain: Failed to open '%s' for read/write.\n", ainPath.string().c_str());
-		return;
-	}
-
-	// 5) Read and verify nodecount
-	int fileNodeCount = 0;
-	ainFile.seekg(0xC, std::ios::beg);
-	if (!ainFile.read(reinterpret_cast<char*>(&fileNodeCount), sizeof(fileNodeCount)))
-	{
-		Warning("updateain: Failed to read nodecount.\n");
-		ainFile.close();
-		return;
-	}
-
-	if (fileNodeCount != pNetwork->nodecount)
-	{
-		Warning("updateain: File nodecount %d != memory nodecount %d. Cancelling.\n",
-			fileNodeCount, pNetwork->nodecount);
-		ainFile.close();
-		return;
-	}
-
-	// 6) Write nodes
-	ainFile.seekp(0x10, std::ios::beg);  // Node array starts at 0x10
-	const std::streamsize nodeDiskSize = sizeof(CAI_NodeDisk);
-	for (int i = 0; i < pNetwork->nodecount; ++i)
-	{
-		// Read existing node from disk
-		CAI_NodeDisk oldDisk;
-		std::streampos nodePos = ainFile.tellp();
-		ainFile.seekg(nodePos);
-		if (!ainFile.read(reinterpret_cast<char*>(&oldDisk), nodeDiskSize))
-		{
-			Warning("updateain: Failed reading existing node %d\n", i);
-			continue;
-		}
-		ainFile.seekp(nodePos);
-
-		CAI_Node* pMemNode = pNetwork->nodes[i];
-		CAI_NodeDisk newDisk{};
-
-		// Position
-		newDisk.x = pMemNode->position.x;
-		newDisk.y = pMemNode->position.y;
-		newDisk.z = pMemNode->position.z;
-		if (std::abs(newDisk.x - oldDisk.x) > 0.01f ||
-			std::abs(newDisk.y - oldDisk.y) > 0.01f ||
-			std::abs(newDisk.z - oldDisk.z) > 0.01f)
-		{
-			Msg("Node %d: Changing pos from (%.2f,%.2f,%.2f) to (%.2f,%.2f,%.2f)\n",
-				i, oldDisk.x, oldDisk.y, oldDisk.z, newDisk.x, newDisk.y, newDisk.z);
-		}
-
-		// Yaw
-		newDisk.yaw = pMemNode->yaw;
-		if (std::abs(newDisk.yaw - oldDisk.yaw) > 0.01f)
-		{
-			Msg("Node %d: Changing yaw from %.2f to %.2f\n", i, oldDisk.yaw, newDisk.yaw);
-		}
-
-		// Hull offsets
-		memcpy(newDisk.hulls, pMemNode->hulls, sizeof(newDisk.hulls));
-		for (int h = 0; h < 5; h++)
-		{
-			if (std::abs(newDisk.hulls[h] - oldDisk.hulls[h]) > 0.01f)
-			{
-				Msg("Node %d: Changing hull[%d] from %.2f to %.2f\n",
-					i, h, oldDisk.hulls[h], newDisk.hulls[h]);
-			}
-		}
-
-		// unk0
-		newDisk.unk0 = static_cast<char>(pMemNode->unk0);
-		if (newDisk.unk0 != oldDisk.unk0)
-		{
-			Msg("Node %d: Changing unk0 from %d to %d\n",
-				i, (int)oldDisk.unk0, (int)newDisk.unk0);
-		}
-
-		// unk1 (flags)
-		newDisk.unk1 = pMemNode->flags;
-		if (newDisk.unk1 != oldDisk.unk1)
-		{
-			Msg("Node %d: Changing flags(unk1) from %d to %d\n",
-				i, oldDisk.unk1, newDisk.unk1);
-		}
-
-		// unk2 array
-		for (int j = 0; j < 5; j++)
-		{
-			newDisk.unk2[j] = static_cast<short>(pMemNode->unk2[j]);
-			if (newDisk.unk2[j] != oldDisk.unk2[j])
-			{
-				Msg("Node %d: Changing unk2[%d] from %d to %d\n",
-					i, j, oldDisk.unk2[j], newDisk.unk2[j]);
-			}
-		}
-
-		// unk3 array
-		memcpy(newDisk.unk3, pMemNode->unk3, sizeof(newDisk.unk3));
-		for (int j = 0; j < 5; j++)
-		{
-			if (newDisk.unk3[j] != oldDisk.unk3[j])
-			{
-				Msg("Node %d: Changing unk3[%d] from %d to %d\n",
-					i, j, (int)oldDisk.unk3[j], (int)newDisk.unk3[j]);
-			}
-		}
-
-		// unk4 (from unk6)
-		newDisk.unk4 = pMemNode->unk6;
-		if (newDisk.unk4 != oldDisk.unk4)
-		{
-			Msg("Node %d: Changing unk4 from %d to %d\n",
-				i, oldDisk.unk4, newDisk.unk4);
-		}
-
-		// unk5 (from unk8)
-		newDisk.unk5 = (unsigned char)(pMemNode->unk9[0]) == 0xFF ? -1 : (uint8_t)((pMemNode->unk9[0]));
-		if (newDisk.unk5 != oldDisk.unk5)
-		{
-			Msg("Node %d: Changing unk5 disk: %d mem: %d\n",
-				i, oldDisk.unk5, newDisk.unk5);
-		}
-
-		// scriptdata (unk6)
-		memcpy(newDisk.unk6, pMemNode->scriptdata, sizeof(newDisk.unk6));
-		if (memcmp(newDisk.unk6, oldDisk.unk6, sizeof(newDisk.unk6)) != 0)
-		{
-			Msg("Node %d: Changing scriptdata\n", i);
-		}
-
-		if (!ainFile.write(reinterpret_cast<const char*>(&newDisk), nodeDiskSize))
-		{
-			Warning("updateain: Failed writing node %d\n", i);
-		}
-	}
-
-
-	// Explicitly position read pointer after the node block
-	std::streamoff nodeBlockSize = static_cast<std::streamoff>(pNetwork->nodecount) * nodeDiskSize;
-	Msg("updateain: Node block size: 0x%llX\n", static_cast<unsigned long long>(nodeBlockSize));
-	Msg("updateain: Read position before explicit seekg call: 0x%llX\n", static_cast<unsigned long long>(ainFile.tellg()));
-	ainFile.seekg(0x10 + nodeBlockSize, std::ios::beg);
-	Msg("updateain: Read position after explicit seekg call: 0x%llX\n", static_cast<unsigned long long>(ainFile.tellg()));
-
-	// 7) Read original link count
-	int fileLinkCount = 0;
-	if (!ainFile.read(reinterpret_cast<char*>(&fileLinkCount), sizeof(fileLinkCount)))
-	{
-		Warning("updateain: Could not read linkcount.\n");
-		ainFile.close();
-		return;
-	}
-	Msg("updateain: Read position after linkcount: 0x%llX\n", static_cast<unsigned long long>(ainFile.tellg()));
-	if (fileLinkCount != pNetwork->linkcount)
-	{
-		Warning("updateain: File linkcount %d != memory linkcount %d. Possibly mismatched.\n",
-			fileLinkCount, pNetwork->linkcount);
-		ainFile.close();
-		return;
-	}
-
-	// Read existing link array
-	const std::streamsize linkDiskSize = sizeof(CAI_NodeLinkDisk);
-	std::vector<CAI_NodeLinkDisk> fileLinks(fileLinkCount);
-	if (!ainFile.read(reinterpret_cast<char*>(fileLinks.data()), fileLinkCount * linkDiskSize))
-	{
-		Warning("updateain: Could not read link array.\n");
-		ainFile.close();
-		return;
-	}
-
-	// Seek back to start of link array for writing
-	ainFile.seekp(-static_cast<std::streamoff>(fileLinkCount * linkDiskSize), std::ios::cur);
-
-	// Update and write each link
 	int memLinksWritten = 0;
-	for (int iLink = 0; iLink < fileLinkCount; ++iLink)
+
 	{
-		CAI_NodeLinkDisk& oldLink = fileLinks[iLink];
-		CAI_NodeLinkDisk updatedLink = oldLink;
-
-		bool foundMatch = false;
-		for (int n = 0; n < pNetwork->nodecount && !foundMatch; ++n)
+		std::fstream ainFile(ainPath, std::ios::in | std::ios::out | std::ios::binary);
+		if (!ainFile.is_open())
 		{
-			CAI_Node* pNode = pNetwork->nodes[n];
-			if (!pNode) continue;
+			Warning("updateain: Failed to open '%s' for read/write.\n", ainPath.string().c_str());
+			return;
+		}
 
-			for (int ln = 0; ln < pNode->linkcount && !foundMatch; ++ln)
+		// 5) Read and verify nodecount
+		int fileNodeCount = 0;
+		ainFile.seekg(0xC, std::ios::beg);
+		if (!ainFile.read(reinterpret_cast<char*>(&fileNodeCount), sizeof(fileNodeCount)))
+		{
+			Warning("updateain: Failed to read nodecount.\n");
+			ainFile.close();
+			return;
+		}
+
+		if (fileNodeCount != pNetwork->nodecount)
+		{
+			Warning("updateain: File nodecount %d != memory nodecount %d. Cancelling.\n",
+				fileNodeCount, pNetwork->nodecount);
+			ainFile.close();
+			return;
+		}
+
+		// 6) Write nodes
+		ainFile.seekp(0x10, std::ios::beg);  // Node array starts at 0x10
+		const std::streamsize nodeDiskSize = sizeof(CAI_NodeDisk);
+		for (int i = 0; i < pNetwork->nodecount; ++i)
+		{
+			// Read existing node from disk
+			CAI_NodeDisk oldDisk;
+			std::streampos nodePos = ainFile.tellp();
+			ainFile.seekg(nodePos);
+			if (!ainFile.read(reinterpret_cast<char*>(&oldDisk), nodeDiskSize))
 			{
-				CAI_NodeLink* pMemLink = pNode->links[ln];
-				if (!pMemLink)
-					continue;
+				Warning("updateain: Failed reading existing node %d\n", i);
+				continue;
+			}
+			ainFile.seekp(nodePos);
 
-				if ((pMemLink->srcId == oldLink.srcId && pMemLink->destId == oldLink.destId) ||
-					(pMemLink->srcId == oldLink.destId && pMemLink->destId == oldLink.srcId))
+			CAI_Node* pMemNode = pNetwork->nodes[i];
+			CAI_NodeDisk newDisk{};
+
+			// Position
+			newDisk.x = pMemNode->position.x;
+			newDisk.y = pMemNode->position.y;
+			newDisk.z = pMemNode->position.z;
+			if (std::abs(newDisk.x - oldDisk.x) > 0.01f ||
+				std::abs(newDisk.y - oldDisk.y) > 0.01f ||
+				std::abs(newDisk.z - oldDisk.z) > 0.01f)
+			{
+				Msg("Node %d: Changing pos from (%.2f,%.2f,%.2f) to (%.2f,%.2f,%.2f)\n",
+					i, oldDisk.x, oldDisk.y, oldDisk.z, newDisk.x, newDisk.y, newDisk.z);
+			}
+
+			// Yaw
+			newDisk.yaw = pMemNode->yaw;
+			if (std::abs(newDisk.yaw - oldDisk.yaw) > 0.01f)
+			{
+				Msg("Node %d: Changing yaw from %.2f to %.2f\n", i, oldDisk.yaw, newDisk.yaw);
+			}
+
+			// Hull offsets
+			memcpy(newDisk.hulls, pMemNode->hulls, sizeof(newDisk.hulls));
+			for (int h = 0; h < 5; h++)
+			{
+				if (std::abs(newDisk.hulls[h] - oldDisk.hulls[h]) > 0.01f)
 				{
-					updatedLink.srcId = pMemLink->srcId;
-					updatedLink.destId = pMemLink->destId;
-					updatedLink.unk0 = pMemLink->unk1;
-					memcpy(updatedLink.hulls, pMemLink->hulls, sizeof(updatedLink.hulls));
-					foundMatch = true;
+					Msg("Node %d: Changing hull[%d] from %.2f to %.2f\n",
+						i, h, oldDisk.hulls[h], newDisk.hulls[h]);
+				}
+			}
 
-					// Log changes
-					if (updatedLink.srcId != oldLink.srcId || updatedLink.destId != oldLink.destId)
-					{
-						Msg("Link %d: Changing src/dest from %d/%d to %d/%d\n",
-							iLink, oldLink.srcId, oldLink.destId, updatedLink.srcId, updatedLink.destId);
-					}
+			// unk0
+			newDisk.unk0 = static_cast<char>(pMemNode->unk0);
+			if (newDisk.unk0 != oldDisk.unk0)
+			{
+				Msg("Node %d: Changing unk0 from %d to %d\n",
+					i, (int)oldDisk.unk0, (int)newDisk.unk0);
+			}
 
-					if (updatedLink.unk0 != oldLink.unk0)
-					{
-						Msg("Link %d: Changing unk0 from %d to %d\n",
-							iLink, (int)oldLink.unk0, (int)updatedLink.unk0);
-					}
+			// unk1 (flags)
+			newDisk.unk1 = pMemNode->flags;
+			if (newDisk.unk1 != oldDisk.unk1)
+			{
+				Msg("Node %d: Changing flags(unk1) from %d to %d\n",
+					i, oldDisk.unk1, newDisk.unk1);
+			}
 
-					for (int h = 0; h < 5; h++)
+			// unk2 array
+			for (int j = 0; j < 5; j++)
+			{
+				newDisk.unk2[j] = static_cast<short>(pMemNode->unk2[j]);
+				if (newDisk.unk2[j] != oldDisk.unk2[j])
+				{
+					Msg("Node %d: Changing unk2[%d] from %d to %d\n",
+						i, j, oldDisk.unk2[j], newDisk.unk2[j]);
+				}
+			}
+
+			// unk3 array
+			memcpy(newDisk.unk3, pMemNode->unk3, sizeof(newDisk.unk3));
+			for (int j = 0; j < 5; j++)
+			{
+				if (newDisk.unk3[j] != oldDisk.unk3[j])
+				{
+					Msg("Node %d: Changing unk3[%d] from %d to %d\n",
+						i, j, (int)oldDisk.unk3[j], (int)newDisk.unk3[j]);
+				}
+			}
+
+			// unk4 (from unk6)
+			newDisk.unk4 = pMemNode->unk6;
+			if (newDisk.unk4 != oldDisk.unk4)
+			{
+				Msg("Node %d: Changing unk4 from %d to %d\n",
+					i, oldDisk.unk4, newDisk.unk4);
+			}
+
+			// unk5 (from unk8)
+			newDisk.unk5 = (unsigned char)(pMemNode->unk9[0]) == 0xFF ? -1 : (uint8_t)((pMemNode->unk9[0]));
+			if (newDisk.unk5 != oldDisk.unk5)
+			{
+				Msg("Node %d: Changing unk5 disk: %d mem: %d\n",
+					i, oldDisk.unk5, newDisk.unk5);
+			}
+
+			// scriptdata (unk6)
+			memset(pMemNode->scriptdata, 0, sizeof(pMemNode->scriptdata));
+			memcpy(newDisk.unk6, pMemNode->scriptdata, sizeof(newDisk.unk6));
+			if (memcmp(newDisk.unk6, oldDisk.unk6, sizeof(newDisk.unk6)) != 0)
+			{
+				Msg("Node %d: Changing scriptdata\n", i);
+			}
+
+			if (!ainFile.write(reinterpret_cast<const char*>(&newDisk), nodeDiskSize))
+			{
+				Warning("updateain: Failed writing node %d\n", i);
+			}
+		}
+
+
+		// Explicitly position read pointer after the node block
+		std::streamoff nodeBlockSize = static_cast<std::streamoff>(pNetwork->nodecount) * nodeDiskSize;
+		Msg("updateain: Node block size: 0x%llX\n", static_cast<unsigned long long>(nodeBlockSize));
+		Msg("updateain: Read position before explicit seekg call: 0x%llX\n", static_cast<unsigned long long>(ainFile.tellg()));
+		ainFile.seekg(0x10 + nodeBlockSize, std::ios::beg);
+		Msg("updateain: Read position after explicit seekg call: 0x%llX\n", static_cast<unsigned long long>(ainFile.tellg()));
+
+		// 7) Read original link count
+		int fileLinkCount = 0;
+		if (!ainFile.read(reinterpret_cast<char*>(&fileLinkCount), sizeof(fileLinkCount)))
+		{
+			Warning("updateain: Could not read linkcount.\n");
+			ainFile.close();
+			return;
+		}
+		Msg("updateain: Read position after linkcount: 0x%llX\n", static_cast<unsigned long long>(ainFile.tellg()));
+		if (fileLinkCount != pNetwork->linkcount)
+		{
+			Warning("updateain: File linkcount %d != memory linkcount %d. Possibly mismatched.\n",
+				fileLinkCount, pNetwork->linkcount);
+			ainFile.close();
+			return;
+		}
+
+		// Read existing link array
+		const std::streamsize linkDiskSize = sizeof(CAI_NodeLinkDisk);
+		std::vector<CAI_NodeLinkDisk> fileLinks(fileLinkCount);
+		if (!ainFile.read(reinterpret_cast<char*>(fileLinks.data()), fileLinkCount * linkDiskSize))
+		{
+			Warning("updateain: Could not read link array.\n");
+			ainFile.close();
+			return;
+		}
+
+		// Seek back to start of link array for writing
+		ainFile.seekp(-static_cast<std::streamoff>(fileLinkCount * linkDiskSize), std::ios::cur);
+
+		// Update and write each link
+		for (int iLink = 0; iLink < fileLinkCount; ++iLink)
+		{
+			CAI_NodeLinkDisk& oldLink = fileLinks[iLink];
+			CAI_NodeLinkDisk updatedLink = oldLink;
+
+			bool foundMatch = false;
+			for (int n = 0; n < pNetwork->nodecount && !foundMatch; ++n)
+			{
+				CAI_Node* pNode = pNetwork->nodes[n];
+				if (!pNode) continue;
+
+				for (int ln = 0; ln < pNode->linkcount && !foundMatch; ++ln)
+				{
+					CAI_NodeLink* pMemLink = pNode->links[ln];
+					if (!pMemLink)
+						continue;
+
+					if ((pMemLink->srcId == oldLink.srcId && pMemLink->destId == oldLink.destId) ||
+						(pMemLink->srcId == oldLink.destId && pMemLink->destId == oldLink.srcId))
 					{
-						if (updatedLink.hulls[h] != oldLink.hulls[h])
+						updatedLink.srcId = pMemLink->srcId;
+						updatedLink.destId = pMemLink->destId;
+						updatedLink.unk0 = pMemLink->unk1;
+						memcpy(updatedLink.hulls, pMemLink->hulls, sizeof(updatedLink.hulls));
+						foundMatch = true;
+
+						// Log changes
+						if (updatedLink.srcId != oldLink.srcId || updatedLink.destId != oldLink.destId)
 						{
-							Msg("Link %d: Changing hull[%d] from %d to %d\n",
-								iLink, h, (int)oldLink.hulls[h], (int)updatedLink.hulls[h]);
+							Msg("Link %d: Changing src/dest from %d/%d to %d/%d\n",
+								iLink, oldLink.srcId, oldLink.destId, updatedLink.srcId, updatedLink.destId);
+						}
+
+						if (updatedLink.unk0 != oldLink.unk0)
+						{
+							Msg("Link %d: Changing unk0 from %d to %d\n",
+								iLink, (int)oldLink.unk0, (int)updatedLink.unk0);
+						}
+
+						for (int h = 0; h < 5; h++)
+						{
+							if (updatedLink.hulls[h] != oldLink.hulls[h])
+							{
+								Msg("Link %d: Changing hull[%d] from %d to %d\n",
+									iLink, h, (int)oldLink.hulls[h], (int)updatedLink.hulls[h]);
+							}
 						}
 					}
 				}
 			}
+
+			if (!foundMatch)
+			{
+				Msg("Link %d: Could not find matching memory link for disk link (src=%d dest=%d)\n",
+					iLink, oldLink.srcId, oldLink.destId);
+			}
+
+			if (!ainFile.write(reinterpret_cast<const char*>(&updatedLink), linkDiskSize))
+			{
+				Warning("updateain: Failed writing link %d\n", iLink);
+			}
+			else
+			{
+				++memLinksWritten;
+			}
 		}
 
-		if (!foundMatch)
-		{
-			Msg("Link %d: Could not find matching memory link for disk link (src=%d dest=%d)\n",
-				iLink, oldLink.srcId, oldLink.destId);
-		}
-
-		if (!ainFile.write(reinterpret_cast<const char*>(&updatedLink), linkDiskSize))
-		{
-			Warning("updateain: Failed writing link %d\n", iLink);
-		}
-		else
-		{
-			++memLinksWritten;
-		}
+		ainFile.close();
 	}
+	// Second pass - zero out scriptdata
+	{
+		std::fstream ainFile(ainPath, std::ios::in | std::ios::out | std::ios::binary);
+		if (!ainFile.is_open())
+		{
+			Warning("updateain: Failed to reopen file for scriptdata zeroing.\n");
+			return;
+		}
 
-	ainFile.close();
+		// Read nodecount from the file at offset 0xC
+		int fileNodeCount = 0;
+		ainFile.seekg(0xC);
+		if (!ainFile.read(reinterpret_cast<char*>(&fileNodeCount), sizeof(int)))
+		{
+			Warning("updateain: Failed to read node count for scriptdata zeroing.\n");
+			ainFile.close();
+			return;
+		}
 
+		// Compare with in-memory node count
+		if (fileNodeCount != pNetwork->nodecount)
+		{
+			Warning("updateain: Node count mismatch during scriptdata zeroing.\n");
+			ainFile.close();
+			return;
+		}
+
+		// Zero buffer for scriptdata
+		char zeroBuffer[8] = { 0 };  // scriptdata is 8 bytes
+
+		// Iterate through each node and write zeroed scriptdata
+		for (int nodeIndex = 0; nodeIndex < fileNodeCount; ++nodeIndex)
+		{
+			// Calculate the position to write scriptdata
+			// scriptdata is at offset 0x4C + (0x44 * nodeIndex)
+			std::streampos scriptDataPos = 0x4C + static_cast<std::streampos>(0x44) * nodeIndex;
+
+			// Write zeros to the scriptdata position
+			ainFile.seekp(scriptDataPos);
+			if (!ainFile.write(zeroBuffer, sizeof(zeroBuffer)))
+			{
+				Warning("updateain: Failed to zero scriptdata for node %d.\n", nodeIndex);
+				continue;
+			}
+		}
+
+		ainFile.close();
+	}
 	Msg("updateain: Overwrote %d nodes & %d links in '%s'.\n",
 		pNetwork->nodecount, memLinksWritten, ainPath.string().c_str());
 }
