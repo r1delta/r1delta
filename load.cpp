@@ -1296,7 +1296,10 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	doBinaryPatchForFile(*ndata);
 	FreeModuleNotificationData(ndata);
 	uintptr_t vTableAddr = server_base + 0x807220;
+
 	RemoveItemsFromVTable(vTableAddr, 35, 2);
+	if (IsDedicatedServer())
+		RemoveItemsFromVTable(vTableAddr, 61, 1);
 	MH_CreateHook((LPVOID)(server_base + 0x143A10), &CServerGameDLL__DLLInit, (LPVOID*)&CServerGameDLL__DLLInitOriginal);
 	MH_CreateHook((LPVOID)(server_base + 0x71E0BC), &hkcalloc_base, NULL);
 	MH_CreateHook((LPVOID)(server_base + 0x71E99C), &hkmalloc_base, NULL);
@@ -1446,7 +1449,7 @@ void __stdcall LoaderNotificationCallback(
 	}
 	if (strcmp_static(name, L"engine_ds.dll") == 0) {
 		G_engine_ds = (uintptr_t)notification_data->Loaded.DllBase;
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x433C0), &ProcessConnectionlessPacketDedi, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginal));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x433C0), &ProcessConnectionlessPacketDedi, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginal));
 		InitAddons();
 		InitDedicated();
 		constexpr auto a = (1 << 2);

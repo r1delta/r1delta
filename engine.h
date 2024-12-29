@@ -509,7 +509,7 @@ private:
 		MarkPlaylistReadyForOverride = r1vtable[132];
 		UnknownPlaylistSetup = r1vtable[132];
 		GetUnknownPlaylistKV4 = r1vtable[132];
-		UnknownGamemodeSetup = r1vtable[132];
+		UnknownGamemodeSetup = r1vtable[73];
 		IsCoop =uintptr_t(&FuncThatReturnsBool_Stub);
 		GetSkillFlag_Unused = r1vtable[132];
 		UnkFunc34 = r1vtable[132];
