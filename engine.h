@@ -391,8 +391,8 @@ private:
 		//CVEngineServer__UnknownMapSetup3_2 = r1vtable[73];
 		UnknownGamemodeSetup2 = r1vtable[74];
 		IsMatchmakingDedi = r1vtable[75];
-		UnusedTimeFunc = r1vtable[76];
 		UnkFunc11 = r1vtable[77];
+		UnusedTimeFunc = r1vtable[78];
 		//CVEngineServer__UnusedTimeFunc_2 = r1vtable[78];
 		IsClientSearching = r1vtable[79];
 		IsPrivateMatch = r1vtable[80];
