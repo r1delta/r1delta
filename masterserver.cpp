@@ -636,6 +636,7 @@ void Hk_CHostState__State_GameShutdown(void* thisptr) {
 			client.SendRequest(arena, host, path, {}, true, true);
 			}).detach();
 			host_map_cvar->m_Value.m_StringLength = 0;
+			host_map_cvar->m_Value.m_pszString[0] = '\0';
 			
 	}
 
