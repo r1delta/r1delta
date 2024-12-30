@@ -289,7 +289,6 @@
     <ClCompile Include="squirrel.cpp" />
     <ClCompile Include="TableDestroyer.cpp" />
     <ClCompile Include="tctx.cpp" />
-    <ClCompile Include="thirdparty\zstd\zstd.c" />
     <ClCompile Include="utils.cpp" />
     <!-- Add the following includes from the first version -->
     <ClCompile Include="vsdk\tier0\dbg.cpp" />

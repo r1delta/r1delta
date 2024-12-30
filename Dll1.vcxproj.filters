@@ -368,9 +368,6 @@
     <ClCompile Include="masterserver.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="thirdparty\zstd\zstd.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="arena.cc">
       <Filter>Source Files</Filter>
     </ClCompile>

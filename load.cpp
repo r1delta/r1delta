@@ -1287,6 +1287,37 @@ __int64 __fastcall CServerGameDLL_DLLShutdown(__int64 a1, void*** a2, __int64 a3
 	TerminateProcess(GetCurrentProcess(), 0); // GAME OVER YEAHHHHHH
 	return 0;
 }
+__int64 (*oCDynamicProp__Spawn)(__int64 a1);
+__int64 CDynamicProp__Spawn(__int64 a1)
+{
+	static auto sub_1803A2EB0 = reinterpret_cast<char(*)(const char* a1, char* a2)>(G_server + 0x3A2EB0);
+	static auto sub_1803A3EA0 = reinterpret_cast<void(*)(__int64 a1, const char* a2)>(G_server + 0x3A3EA0);
+	if (a1)
+	{
+		char* v2 = *(char**)(a1 + 128);
+		if (sub_1803A2EB0("prop_control_panel", v2))
+			sub_1803A3EA0(a1, "prop_dynamic");
+	}
+	return oCDynamicProp__Spawn(a1);
+}
+__int64 (*odynamic_initializer_for__prop_dynamic__)();
+__int64 dynamic_initializer_for__prop_dynamic__() {
+	// Call original initializer
+	__int64 ret = odynamic_initializer_for__prop_dynamic__();
+
+	// Get function pointer from offset
+	using ServerFunc = __int64(*)();
+	ServerFunc serverFunction = reinterpret_cast<ServerFunc>(G_server + 0x25A6C0);
+	__int64 v0 = serverFunction();
+
+	// Cast and call final function
+	using FinalFunc = __int64(__fastcall*)(__int64*, void***, const char*);
+	FinalFunc finalFunction = **reinterpret_cast<FinalFunc**>(v0);
+
+	return finalFunction(reinterpret_cast<__int64*>(v0),
+		reinterpret_cast<void***>(G_server + 0xB2F278),
+		"prop_control_panel");
+}
 static FORCEINLINE void
 do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 {
@@ -1336,7 +1367,9 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook((LPVOID)(server_base + 0x3B3200), &CBaseEntity__SetMoveType, reinterpret_cast<LPVOID*>(&oCBaseEntity__SetMoveType));
 	MH_CreateHook((LPVOID)(server_base + 0x4E2F30), &CPlayer_GetLevel, reinterpret_cast<LPVOID*>(NULL));
 	MH_CreateHook((LPVOID)(server_base + 0x1442D0), &CServerGameDLL_DLLShutdown, reinterpret_cast<LPVOID*>(NULL));
-	
+	MH_CreateHook((LPVOID)(server_base + 0x1CA390), &CDynamicProp__Spawn, reinterpret_cast<LPVOID*>(&oCDynamicProp__Spawn));
+	MH_CreateHook((LPVOID)(server_base + 0x18760), &dynamic_initializer_for__prop_dynamic__, reinterpret_cast<LPVOID*>(&odynamic_initializer_for__prop_dynamic__));
+
 	//MH_CreateHook((LPVOID)(server_base + 0x7F7E0), &HookedServerClassRegister, reinterpret_cast<LPVOID*>(&ServerClassRegister_7F7E0));
 	//MH_CreateHook((LPVOID)(server_base + 0x25A8E0), &CEntityFactoryDictionary__Create, reinterpret_cast<LPVOID*>(&CEntityFactoryDictionary__CreateOriginal));
 
