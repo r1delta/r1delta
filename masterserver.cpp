@@ -479,7 +479,10 @@ SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
 
 		auto response = client.SendRequest(thread_arena, host, L"/server/heartbeat", sdata, true, true);
 		if (!response.empty() && response.size > 2) {
+		#ifdef DEBUG
 			Warning("GetServerHeartbeat: MS reports: %s\n", reinterpret_cast<char*>(response.ptr));
+		#endif // DEBUG
+
 		}
 
 		arena_release(thread_arena);
