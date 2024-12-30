@@ -1287,19 +1287,7 @@ __int64 __fastcall CServerGameDLL_DLLShutdown(__int64 a1, void*** a2, __int64 a3
 	TerminateProcess(GetCurrentProcess(), 0); // GAME OVER YEAHHHHHH
 	return 0;
 }
-__int64 (*oCDynamicProp__Spawn)(__int64 a1);
-__int64 CDynamicProp__Spawn(__int64 a1)
-{
-	static auto sub_1803A2EB0 = reinterpret_cast<char(*)(const char* a1, char* a2)>(G_server + 0x3A2EB0);
-	static auto sub_1803A3EA0 = reinterpret_cast<void(*)(__int64 a1, const char* a2)>(G_server + 0x3A3EA0);
-	if (a1)
-	{
-		char* v2 = *(char**)(a1 + 128);
-		if (sub_1803A2EB0("prop_control_panel", v2))
-			sub_1803A3EA0(a1, "prop_dynamic");
-	}
-	return oCDynamicProp__Spawn(a1);
-}
+
 __int64 (*odynamic_initializer_for__prop_dynamic__)();
 __int64 dynamic_initializer_for__prop_dynamic__() {
 	// Call original initializer
@@ -1367,7 +1355,8 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook((LPVOID)(server_base + 0x3B3200), &CBaseEntity__SetMoveType, reinterpret_cast<LPVOID*>(&oCBaseEntity__SetMoveType));
 	MH_CreateHook((LPVOID)(server_base + 0x4E2F30), &CPlayer_GetLevel, reinterpret_cast<LPVOID*>(NULL));
 	MH_CreateHook((LPVOID)(server_base + 0x1442D0), &CServerGameDLL_DLLShutdown, reinterpret_cast<LPVOID*>(NULL));
-	MH_CreateHook((LPVOID)(server_base + 0x1CA390), &CDynamicProp__Spawn, reinterpret_cast<LPVOID*>(&oCDynamicProp__Spawn));
+	
+	
 	MH_CreateHook((LPVOID)(server_base + 0x18760), &dynamic_initializer_for__prop_dynamic__, reinterpret_cast<LPVOID*>(&odynamic_initializer_for__prop_dynamic__));
 
 	//MH_CreateHook((LPVOID)(server_base + 0x7F7E0), &HookedServerClassRegister, reinterpret_cast<LPVOID*>(&ServerClassRegister_7F7E0));
