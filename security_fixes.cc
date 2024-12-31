@@ -4,6 +4,7 @@
 
 #include "logging.h"
 #include "load.h"
+#include "factory.h"
 
 ConVarR1* cvar_net_chan_limit_msec = nullptr;
 
@@ -673,7 +674,8 @@ bool __fastcall NET_ReceiveDatagram(const int sock, netpacket_t* packet, bool en
 	return false;
 }
 
-//-
+
+
 
 void
 security_fixes_init()
@@ -704,11 +706,13 @@ security_fixes_engine(uintptr_t engine_base)
 }
 
 void
-security_fixes_server(uintptr_t engine_base)
+security_fixes_server(uintptr_t engine_base, uintptr_t server_base)
 {
 	//MH_CreateHook((LPVOID)(engine_base + 0xD4E30), &CBaseClient__ProcessSignonState, reinterpret_cast<LPVOID*>(&oCBaseClient__ProcessSignonState));
 	MH_CreateHook((LPVOID)(engine_base + 0xD1EC0), &CBaseClient__IsSplitScreenUser, reinterpret_cast<LPVOID*>(NULL));
 	if (!IsDedicatedServer())
 		MH_CreateHook((LPVOID)(engine_base + 0xcb6f0), &SV_BroadcastMessageWithFilterLISTEN, reinterpret_cast<LPVOID*>(&oSV_BroadcastMessageWithFilterLISTEN));
+	// make listen server host party lead
+	MH_CreateHook((LPVOID)(server_base + 0x510010), (LPVOID)(server_base + 0x25BD30), reinterpret_cast<LPVOID*>(NULL));
 	
 }

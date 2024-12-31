@@ -1451,7 +1451,7 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	// Rebuild CHL2_Player's precache to take our stuff into account
 	MH_CreateHook(LPVOID(server_base + 0x41E070), &CHL2_Player_Precache, 0);
 
-	security_fixes_server(engine_base);
+	security_fixes_server(engine_base, server_base);
 
 	R1DAssert(MH_EnableHook(MH_ALL_HOOKS) == MH_OK);
 	//std::cout << "did hooks" << std::endl;
