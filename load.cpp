@@ -1308,10 +1308,10 @@ __int64 dynamic_initializer_for__prop_dynamic__() {
 }
 // Global variables to track state
 static int g_consecutive_packets = 0;
-static const int PACKET_THRESHOLD = 30;
+static const int PACKET_THRESHOLD = 500;
 static const int PACKET_SIZE = 16;
-__int64 (*oCNetChan__SendDatagramLISTEN_Part2)(__int64 thisptr, unsigned int SendToResult, int length);
-__int64 CNetChan__SendDatagramLISTEN_Part2_Hook(__int64 thisptr, unsigned int SendToResult, int length) {
+__int64 (*oCNetChan__SendDatagramLISTEN_Part2)(__int64 thisptr, unsigned int length, int SendToResult);
+__int64 CNetChan__SendDatagramLISTEN_Part2_Hook(__int64 thisptr, unsigned int length, int SendToResult) {
 	// Get original function pointer
 	static auto original_fn = oCNetChan__SendDatagramLISTEN_Part2;
 
@@ -1329,6 +1329,7 @@ __int64 CNetChan__SendDatagramLISTEN_Part2_Hook(__int64 thisptr, unsigned int Se
 	// Check packet threshold
 	if (g_consecutive_packets > PACKET_THRESHOLD) {
 		should_retry = true;
+		Warning("Circuit breaker tripped!");
 	}
 
 
@@ -1346,7 +1347,7 @@ __int64 CNetChan__SendDatagramLISTEN_Part2_Hook(__int64 thisptr, unsigned int Se
 	}
 
 	// Call original function
-	return original_fn(thisptr, SendToResult, length);
+	return original_fn(thisptr, length, SendToResult);
 }
 
 static FORCEINLINE void
