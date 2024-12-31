@@ -72,7 +72,7 @@ __forceinline bool IsNoOrigin() {
 
 __forceinline bool IsNoConsole() {
     const wchar_t* cmdLine = GetCommandLineW();
-    return !!wcsstr(cmdLine, L"-noconsole");
+    return !wcsstr(cmdLine, L"-console");
 }
 
 #define ENGINE_DLL_BASE (G_is_dedi ? G_engine_ds : G_engine)

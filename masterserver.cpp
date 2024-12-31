@@ -479,16 +479,23 @@ SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
 
 		auto response = client.SendRequest(thread_arena, host, L"/server/heartbeat", sdata, true, true);
 		if (!response.empty() && response.size > 2) {
-		#ifdef DEBUG
-			Warning("GetServerHeartbeat: MS reports: %s\n", reinterpret_cast<char*>(response.ptr));
-		#endif // DEBUG
 			static bool shown = false;
-			if (!strcmp_static(response.ptr, "Challenge response failed") && !IsDedicatedServer() && !shown) {
+			bool isFailedResponse = !strcmp_static(response.ptr, "Challenge response failed");
+
+			if (isFailedResponse && !shown) {
 				shown = true;
-				int hostport = OriginalCCVar_FindVar2(cvarinterface, "hostport")->m_Value.m_nValue;
-				char cmd[64];
-				snprintf(cmd, sizeof(cmd), "script_ui ShowPortForwardWarning(%d)\n", hostport);
-				Cbuf_AddText(0, cmd, 0);
+				if (!IsDedicatedServer()) {
+					int hostport = OriginalCCVar_FindVar2(cvarinterface, "hostport")->m_Value.m_nValue;
+					char cmd[64];
+					snprintf(cmd, sizeof(cmd), "script_ui ShowPortForwardWarning(%d)\n", hostport);
+					Cbuf_AddText(0, cmd, 0);
+				}
+				else {
+					Warning("GetServerHeartbeat: MS reports: %s\n", reinterpret_cast<char*>(response.ptr));
+				}
+			}
+			else if (!isFailedResponse) {
+				Warning("GetServerHeartbeat: MS reports: %s\n", reinterpret_cast<char*>(response.ptr));
 			}
 
 		}

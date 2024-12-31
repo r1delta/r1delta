@@ -113,6 +113,9 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 			SetConsoleTitleW(L"R1Delta");
 			freopen("CONOUT$", "wt", stdout);
 		}
+		else if (!IsDedicatedServer()) {
+			FreeConsole();
+		}
 
 		LARGE_INTEGER freq;
 		QueryPerformanceFrequency(&freq);

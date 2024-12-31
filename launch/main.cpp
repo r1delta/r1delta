@@ -316,11 +316,11 @@ void SetMitigationPolicies()
 //int main(int argc, char* argv[])
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine, int nCmdShow)
 {
-	AllocConsole();
-	SetConsoleTitle(TEXT("R1Delta Launcher"));
-	FILE *pCout, *pCerr;
-	freopen_s(&pCout, "conout$", "w", stdout);
-	freopen_s(&pCerr, "conout$", "w", stderr);
+	//AllocConsole();
+	//SetConsoleTitle(TEXT("R1Delta Launcher"));
+	//FILE *pCout, *pCerr;
+	//freopen_s(&pCout, "conout$", "w", stdout);
+	//freopen_s(&pCerr, "conout$", "w", stderr);
 
 	if (!GetExePathWide(exePath, sizeof(exePath)))
 	{
