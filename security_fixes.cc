@@ -25,8 +25,26 @@ public:
 
 void(__fastcall* oCNetChan__ProcessPacket)(CNetChan*, netpacket_s*, bool);
 bool(__fastcall* oCNetChan___ProcessMessages)(CNetChan*, bf_read*);
-
+bool g_bInProcessMessageClient = false;
+class ProcessMessageScope {
+public:
+	ProcessMessageScope() { g_bInProcessMessageClient = true; }
+	~ProcessMessageScope() { g_bInProcessMessageClient = false; }
+};
+char (*oSV_BroadcastMessageWithFilterLISTEN)(__int64 a1, __int64 a2, __int64 a3);
+char SV_BroadcastMessageWithFilterLISTEN(__int64 a1, __int64 a2, __int64 a3) {
+	if (g_bInProcessMessageClient) {
+		Warning("Recursive message broadcast detected.\n");
+		return true;
+	}
+	return oSV_BroadcastMessageWithFilterLISTEN(a1, a2, a3);
+}
 bool __fastcall CNetChan___ProcessMessages(CNetChan* thisptr, bf_read* buf) {
+	std::unique_ptr<ProcessMessageScope> scope;
+	if ((*(uint8_t*)(((uintptr_t)thisptr) + 216) <= 0)) {
+		scope = std::make_unique<ProcessMessageScope>();
+	}
+
 	if (!thisptr || !buf)
 		return oCNetChan___ProcessMessages(thisptr, buf);
 
@@ -690,4 +708,7 @@ security_fixes_server(uintptr_t engine_base)
 {
 	//MH_CreateHook((LPVOID)(engine_base + 0xD4E30), &CBaseClient__ProcessSignonState, reinterpret_cast<LPVOID*>(&oCBaseClient__ProcessSignonState));
 	MH_CreateHook((LPVOID)(engine_base + 0xD1EC0), &CBaseClient__IsSplitScreenUser, reinterpret_cast<LPVOID*>(NULL));
+	if (!IsDedicatedServer())
+		MH_CreateHook((LPVOID)(engine_base + 0xcb6f0), &SV_BroadcastMessageWithFilterLISTEN, reinterpret_cast<LPVOID*>(&oSV_BroadcastMessageWithFilterLISTEN));
+	
 }
