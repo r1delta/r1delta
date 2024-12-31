@@ -1317,7 +1317,8 @@ __int64 (*oCNetChan__SendDatagramLISTEN_Part2)(__int64 thisptr, unsigned int len
 __int64 CNetChan__SendDatagramLISTEN_Part2_Hook(__int64 thisptr, unsigned int length, int SendToResult) {
 	// Get original function pointer
 	static auto original_fn = oCNetChan__SendDatagramLISTEN_Part2;
-
+	if ((*(uint8_t*)(((uintptr_t)thisptr) + 216) > 0)) // make sure client netchan
+		return original_fn(thisptr, length, SendToResult);
 	// Check packet size
 	if (length == PACKET_SIZE) {
 		g_consecutive_packets++;
@@ -1335,13 +1336,13 @@ __int64 CNetChan__SendDatagramLISTEN_Part2_Hook(__int64 thisptr, unsigned int le
 		Warning("Circuit breaker tripped due to packets!");
 	}
 
-	void** vtable = *(void***)thisptr;  // Get vtable pointer
-	using LastReceivedFn = double(__fastcall*)(__int64);
-	LastReceivedFn LastReceived = (LastReceivedFn)vtable[22];  // Assuming IsTimingOut is at index 7
-	if (LastReceived(thisptr) > 5.f) {
-		should_retry = true;
-		Warning("Circuit breaker tripped due to timeout!");
-	}
+	//void** vtable = *(void***)thisptr;  // Get vtable pointer
+	//using LastReceivedFn = double(__fastcall*)(__int64);
+	//LastReceivedFn LastReceived = (LastReceivedFn)vtable[22];  // Assuming IsTimingOut is at index 7
+	//if (LastReceived(thisptr) > 5.f) {
+	//	should_retry = true;
+	//	Warning("Circuit breaker tripped due to timeout, lastreceived was %f\n", LastReceived(thisptr));
+	//}
 
 	// Handle retry if needed
 	if (should_retry) {
