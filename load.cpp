@@ -1306,6 +1306,49 @@ __int64 dynamic_initializer_for__prop_dynamic__() {
 		reinterpret_cast<void***>(G_server + 0xB2F278),
 		"prop_control_panel");
 }
+// Global variables to track state
+static int g_consecutive_packets = 0;
+static const int PACKET_THRESHOLD = 30;
+static const int PACKET_SIZE = 16;
+__int64 (*oCNetChan__SendDatagramLISTEN_Part2)(__int64 thisptr, unsigned int SendToResult, int length);
+__int64 CNetChan__SendDatagramLISTEN_Part2_Hook(__int64 thisptr, unsigned int SendToResult, int length) {
+	// Get original function pointer
+	static auto original_fn = oCNetChan__SendDatagramLISTEN_Part2;
+
+	// Check packet size
+	if (length == PACKET_SIZE) {
+		g_consecutive_packets++;
+	}
+	else {
+		g_consecutive_packets = 0;
+	}
+
+	// Check conditions for retry
+	bool should_retry = false;
+
+	// Check packet threshold
+	if (g_consecutive_packets > PACKET_THRESHOLD) {
+		should_retry = true;
+	}
+
+	// Check IsTimingOut virtual function
+	if (*(unsigned __int8(__fastcall**)(_QWORD))(thisptr + 56)) {
+		auto IsTimingOut = *(unsigned __int8(__fastcall**)(_QWORD))(thisptr + 56);
+		if (IsTimingOut(thisptr)) {
+			should_retry = true;
+		}
+	}
+
+	// Handle retry if needed
+	if (should_retry) {
+		Cbuf_AddText(0, "retry\n", 0);
+		g_consecutive_packets = 0;
+	}
+
+	// Call original function
+	return original_fn(thisptr, SendToResult, length);
+}
+
 static FORCEINLINE void
 do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 {
@@ -1355,7 +1398,9 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook((LPVOID)(server_base + 0x3B3200), &CBaseEntity__SetMoveType, reinterpret_cast<LPVOID*>(&oCBaseEntity__SetMoveType));
 	MH_CreateHook((LPVOID)(server_base + 0x4E2F30), &CPlayer_GetLevel, reinterpret_cast<LPVOID*>(NULL));
 	MH_CreateHook((LPVOID)(server_base + 0x1442D0), &CServerGameDLL_DLLShutdown, reinterpret_cast<LPVOID*>(NULL));
-	
+	if (!IsDedicatedServer()) {
+		MH_CreateHook((LPVOID)(engine_base_spec + 0x1E2930), &CNetChan__SendDatagramLISTEN_Part2_Hook, reinterpret_cast<LPVOID*>(&oCNetChan__SendDatagramLISTEN_Part2));
+	}
 	
 	MH_CreateHook((LPVOID)(server_base + 0x18760), &dynamic_initializer_for__prop_dynamic__, reinterpret_cast<LPVOID*>(&odynamic_initializer_for__prop_dynamic__));
 
