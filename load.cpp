@@ -1310,7 +1310,10 @@ __int64 dynamic_initializer_for__prop_dynamic__() {
 static int g_consecutive_packets = 0;
 static const int PACKET_THRESHOLD = 1500;
 static const int PACKET_SIZE = 16;
+static double g_last_retry_time = 0.0;
+static const double RETRY_DELAY = 5.0; // 5 second delay
 __int64 (*oCNetChan__SendDatagramLISTEN_Part2)(__int64 thisptr, unsigned int length, int SendToResult);
+
 __int64 CNetChan__SendDatagramLISTEN_Part2_Hook(__int64 thisptr, unsigned int length, int SendToResult) {
 	// Get original function pointer
 	static auto original_fn = oCNetChan__SendDatagramLISTEN_Part2;
@@ -1332,24 +1335,26 @@ __int64 CNetChan__SendDatagramLISTEN_Part2_Hook(__int64 thisptr, unsigned int le
 		Warning("Circuit breaker tripped!");
 	}
 
-
 	void** vtable = *(void***)thisptr;  // Get vtable pointer
 	using IsTimingOutFn = unsigned __int8(__fastcall*)(__int64);
-	IsTimingOutFn IsTimingOut = (IsTimingOutFn)vtable[7];  // Assuming IsTimingOut is at index 7, adjust if needed
+	IsTimingOutFn IsTimingOut = (IsTimingOutFn)vtable[7];  // Assuming IsTimingOut is at index 7
 	if (IsTimingOut(thisptr)) {
 		should_retry = true;
 	}
 
 	// Handle retry if needed
 	if (should_retry) {
-		Cbuf_AddText(0, "retry\n", 0);
-		g_consecutive_packets = 0;
+		double current_time = Plat_FloatTime();
+		if (current_time - g_last_retry_time >= RETRY_DELAY) {
+			Cbuf_AddText(0, "retry\n", 0);
+			g_consecutive_packets = 0;
+			g_last_retry_time = current_time;
+		}
 	}
 
 	// Call original function
 	return original_fn(thisptr, length, SendToResult);
 }
-
 static FORCEINLINE void
 do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 {
