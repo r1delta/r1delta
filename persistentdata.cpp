@@ -995,7 +995,7 @@ char __fastcall GetConfigPath(char* outPath, size_t outPathSize, int configType)
 
 	// Construct the base path
 	char tempPath[512];
-	auto size = snprintf(tempPath, sizeof(tempPath), "%s%s%s", folderPath, "/Respawn/Titanfall", subFolder);
+	auto size = snprintf(tempPath, sizeof(tempPath), "%s%s%s", folderPath, "/Respawn/R1Delta", subFolder);
 
 	if (size >= 511)
 	{
