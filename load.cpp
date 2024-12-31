@@ -1333,7 +1333,7 @@ __int64 CNetChan__SendDatagramLISTEN_Part2_Hook(__int64 thisptr, unsigned int le
 	// Check packet threshold
 	if (g_consecutive_packets > PACKET_THRESHOLD) {
 		should_retry = true;
-		Warning("Circuit breaker tripped due to packets!");
+		Warning("Circuit breaker tripped due to packets!\n");
 	}
 
 	//void** vtable = *(void***)thisptr;  // Get vtable pointer
