@@ -1114,7 +1114,7 @@ Enforce a maximum length of 32 characters.
 		}
 	}
 
-	Msg("Updated client name: %s to: %s\n", name,nameBuffer);
+	//Msg("Updated client name: %s to: %s\n", name,nameBuffer);
 	CBaseClientSetNameOriginal(thisptr, nameBuffer);
 }
 
