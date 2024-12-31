@@ -119,10 +119,10 @@ void Cbuf_AddText(int a1, const char* a2, unsigned int a3) {
 		OriginalCCVar_FindVar(cvarinterface, "cl_updaterate")->m_nFlags &= ~(FCVAR_HIDDEN | FCVAR_DEVELOPMENTONLY);
 	}
 	PData_OnConsoleCommand(a2);
-	//bool shouldLog = true;
-	//if (a2 == nullptr || *a2 == '\0' || strcmp_static(a2, "\n") == 0) {
-		bool shouldLog = false;
-	//}
+	bool shouldLog = true;
+	if (a2 == nullptr || *a2 == '\0' || *a2 == '_' || strcmp_static(a2, "\n") == 0) {
+		shouldLog = false;
+	}
 	auto engine = G_engine;
 	uintptr_t returnToKeyInput = engine + 0x14E668;
 	uintptr_t returnToKeyInput2 = engine + 0x14E5FB;
