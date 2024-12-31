@@ -1331,12 +1331,12 @@ __int64 CNetChan__SendDatagramLISTEN_Part2_Hook(__int64 thisptr, unsigned int Se
 		should_retry = true;
 	}
 
-	// Check IsTimingOut virtual function
-	if (*(unsigned __int8(__fastcall**)(_QWORD))(thisptr + 56)) {
-		auto IsTimingOut = *(unsigned __int8(__fastcall**)(_QWORD))(thisptr + 56);
-		if (IsTimingOut(thisptr)) {
-			should_retry = true;
-		}
+
+	void** vtable = *(void***)thisptr;  // Get vtable pointer
+	using IsTimingOutFn = unsigned __int8(__fastcall*)(__int64);
+	IsTimingOutFn IsTimingOut = (IsTimingOutFn)vtable[7];  // Assuming IsTimingOut is at index 7, adjust if needed
+	if (IsTimingOut(thisptr)) {
+		should_retry = true;
 	}
 
 	// Handle retry if needed
