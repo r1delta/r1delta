@@ -520,7 +520,7 @@ SQInteger Script_Server_GetActiveBurnCardIndex(HSQUIRRELVM v) {
 
 
 SQInteger OpenDiscordURL(HSQUIRRELVM v) {
-	const char* url = "https://discord.gg/zbFCcSM5t7";
+	const char* url = "https://discord.gg/tUVWPp4Hv3";
 	int result = (int)ShellExecuteA(NULL, "open", url, NULL, NULL, SW_SHOWNORMAL);
 	if (result <= 32) {
 		return sq_throwerror(v, "Failed to open URL");
