@@ -518,6 +518,16 @@ SQInteger Script_Server_GetActiveBurnCardIndex(HSQUIRRELVM v) {
 	return 1;
 }
 
+
+SQInteger OpenDiscordURL(HSQUIRRELVM v) {
+	const char* url = "https://discord.gg/zbFCcSM5t7";
+	int result = (int)ShellExecuteA(NULL, "open", url, NULL, NULL, SW_SHOWNORMAL);
+	if (result <= 32) {
+		return sq_throwerror(v, "Failed to open URL");
+	}
+	return 1;
+}
+
 SQInteger SetupScoreboardHeader(HSQUIRRELVM v) {
 	auto r1_vm = GetUIVMPtr();
 	SQObject vgui;
@@ -609,6 +619,17 @@ bool GetSQVMFuncs() {
 		"string",    // Returns a string
 		"str",
 		"Get a persistent data value"
+	);
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_UI,
+		"OpenDiscordURL",
+		(SQFUNCTION)OpenDiscordURL,
+		"", // String
+		1,      // Expects 2 parameters
+		"void",    // Returns a string
+		"str",
+		"Open a discord URL"
 	);
 
 	REGISTER_SCRIPT_FUNCTION(
