@@ -174,11 +174,14 @@ __int64 Detour_NET_OutOfBandPrintf(int sock, void* adr, const char* fmt, ...) {
 		return NET_SendPacketOriginal(0, sock, adr, (uint32*)(startup.GetBasePointer()), startup.GetNumBytesWritten(), 0i64, 0, 0, 0, 0i64, 1);
 	}
 
+	char buffer[1200];  // Choose appropriate size
 	va_list args;
 	va_start(args, fmt);
-	__int64 result = Original_NET_OutOfBandPrintf(sock, adr, fmt, args);
+	vsnprintf(buffer, sizeof(buffer), fmt, args);
 	va_end(args);
-	return result;
+
+	// Then send the formatted string
+	return Original_NET_OutOfBandPrintf(sock, adr, "%s", buffer);
 }
 
 typedef __int64 (*bf_write__WriteUBitLongType)(bf_write* a1, unsigned int a2, signed int a3);
