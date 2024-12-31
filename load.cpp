@@ -1311,7 +1311,7 @@ static int g_consecutive_packets = 0;
 static const int PACKET_THRESHOLD = 1500;
 static const int PACKET_SIZE = 16;
 static double g_last_retry_time = 0.0;
-static const double RETRY_DELAY = 5.0; // 5 second delay
+static const double RETRY_DELAY = 15.0; // 15 second delay
 __int64 (*oCNetChan__SendDatagramLISTEN_Part2)(__int64 thisptr, unsigned int length, int SendToResult);
 
 __int64 CNetChan__SendDatagramLISTEN_Part2_Hook(__int64 thisptr, unsigned int length, int SendToResult) {
@@ -1332,14 +1332,15 @@ __int64 CNetChan__SendDatagramLISTEN_Part2_Hook(__int64 thisptr, unsigned int le
 	// Check packet threshold
 	if (g_consecutive_packets > PACKET_THRESHOLD) {
 		should_retry = true;
-		Warning("Circuit breaker tripped!");
+		Warning("Circuit breaker tripped due to packets!");
 	}
 
 	void** vtable = *(void***)thisptr;  // Get vtable pointer
-	using IsTimingOutFn = unsigned __int8(__fastcall*)(__int64);
-	IsTimingOutFn IsTimingOut = (IsTimingOutFn)vtable[7];  // Assuming IsTimingOut is at index 7
-	if (IsTimingOut(thisptr)) {
+	using LastReceivedFn = double(__fastcall*)(__int64);
+	LastReceivedFn LastReceived = (LastReceivedFn)vtable[22];  // Assuming IsTimingOut is at index 7
+	if (LastReceived(thisptr) > 5.f) {
 		should_retry = true;
+		Warning("Circuit breaker tripped due to timeout!");
 	}
 
 	// Handle retry if needed
