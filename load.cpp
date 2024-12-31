@@ -1308,7 +1308,7 @@ __int64 dynamic_initializer_for__prop_dynamic__() {
 }
 // Global variables to track state
 static int g_consecutive_packets = 0;
-static const int PACKET_THRESHOLD = 500;
+static const int PACKET_THRESHOLD = 10000;
 static const int PACKET_SIZE = 16;
 __int64 (*oCNetChan__SendDatagramLISTEN_Part2)(__int64 thisptr, unsigned int length, int SendToResult);
 __int64 CNetChan__SendDatagramLISTEN_Part2_Hook(__int64 thisptr, unsigned int length, int SendToResult) {
