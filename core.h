@@ -67,12 +67,12 @@ extern int G_is_dedi;
 
 __forceinline bool IsNoOrigin() {
     const wchar_t* cmdLine = GetCommandLineW();
-    return !!wcsstr(cmdLine, L"-noorigin");
+    return !wcsstr(cmdLine, L"-useorigin");
 }
 
 __forceinline bool IsNoConsole() {
     const wchar_t* cmdLine = GetCommandLineW();
-    return !wcsstr(cmdLine, L"-console");
+    return !wcsstr(cmdLine, L"-allocconsole");
 }
 
 #define ENGINE_DLL_BASE (G_is_dedi ? G_engine_ds : G_engine)

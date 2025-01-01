@@ -527,7 +527,9 @@ SQInteger GetServerList(HSQUIRRELVM v) {
 
 				// Convert to Squirrel array
 				sq_newarray(v, 0);
-
+				if (serverList.getServers().size() == 0) {
+					throw std::runtime_error("No servers found.");
+				}
 				for (auto server : serverList.getServers()) {
 					sq_newtable(v);
 

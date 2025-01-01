@@ -1,4 +1,4 @@
-// Originally based on SpectreLauncher by Barnaby https://github.com/R1Spectre/SpectreLauncher
+﻿// Originally based on SpectreLauncher by Barnaby https://github.com/R1Spectre/SpectreLauncher
 // Mitigations from Titanfall Black Market Edition mod by p0358 https://github.com/p0358/black_market_edition
 
 #define WIN32_LEAN_AND_MEAN
@@ -10,6 +10,9 @@
 #include <Shlwapi.h>
 #include <iostream>
 #include <unordered_map>
+#include <Psapi.h>
+#include <winternl.h>
+#include <immintrin.h>
 
 #pragma comment(lib, "Imm32.lib")
 
@@ -191,14 +194,17 @@ void PrependPath()
 	errno_t err = _wdupenv_s(&pPath, &len, L"PATH");
 	if (!err)
 	{
-		swprintf_s(buffer, L"PATH=%s\\bin\\x64_retail\\;.;%s", exePath, pPath);
+		// Modified to include r1delta path first, then the regular retail path
+		swprintf_s(buffer,
+			L"PATH=%s\\r1delta\\bin\\x64_delta\\;%s\\bin\\x64_retail\\;.;%s",
+			exePath, exePath, pPath);
+
 		auto result = _wputenv(buffer);
 		if (result == -1)
 		{
 			MessageBoxW(
 				GetForegroundWindow(),
-				L"Warning: could not prepend the current directory to app's PATH environment variable. Something may break because of "
-				L"that.",
+				L"Warning: could not prepend the directories to app's PATH environment variable. Something may break because of that.",
 				L"R1Delta Launcher Warning",
 				0);
 		}
@@ -208,8 +214,7 @@ void PrependPath()
 	{
 		MessageBoxW(
 			GetForegroundWindow(),
-			L"Warning: could not get current PATH environment variable in order to prepend the current directory to it. Something may "
-			L"break because of that.",
+			L"Warning: could not get current PATH environment variable in order to prepend the directories to it. Something may break because of that.",
 			L"R1Delta Launcher Warning",
 			0);
 	}
@@ -313,7 +318,129 @@ void SetMitigationPolicies()
 	} //else MessageBoxA(0, "Shadow stack is not enabled!!!", "", 0);
 }
 
-//int main(int argc, char* argv[])
+bool ScanFileForOggS(const char* filepath, const __m128i& pattern, char* buffer, size_t bufferSize) {
+	HANDLE hFile = CreateFileA(
+		filepath,
+		GENERIC_READ,
+		FILE_SHARE_READ,
+		nullptr,
+		OPEN_EXISTING,
+		FILE_FLAG_SEQUENTIAL_SCAN,
+		nullptr
+	);
+
+	if (hFile == INVALID_HANDLE_VALUE) {
+		return false;
+	}
+
+	size_t carryLen = 0;
+	bool foundOggS = false;
+	static auto containsOggS = [&](const char* buf, size_t size) -> bool {
+		if (size < 4) return false;
+
+		const size_t lastPossible = size - 4;
+
+		for (size_t i = 0; i + 16 <= size; i++) {
+			__m128i chunk = _mm_loadu_si128(reinterpret_cast<const __m128i*>(buf + i));
+			__m128i eq = _mm_cmpeq_epi32(chunk, pattern);
+			int mask = _mm_movemask_epi8(eq);
+			if (mask) {
+				for (int offset = 0; offset < 13; offset++) {
+					if (i + offset + 4 > size) break;
+					if (memcmp(buf + i + offset, "OggS", 4) == 0) {
+						return true;
+					}
+				}
+			}
+		}
+
+		size_t start = (size < 16) ? 0 : (size - 16);
+		for (size_t i = start; i + 4 <= size; i++) {
+			if (memcmp(buf + i, "OggS", 4) == 0) {
+				return true;
+			}
+		}
+
+		return false;
+		};
+
+	while (true) {
+		DWORD actual = 0;
+		if (!ReadFile(hFile, buffer + carryLen, bufferSize, &actual, nullptr) || actual == 0) {
+			break;
+		}
+
+		size_t blockSize = carryLen + actual;
+		if (containsOggS(buffer, blockSize)) {
+			foundOggS = true;
+			break;
+		}
+
+		if (blockSize >= 3) {
+			memcpy(buffer, buffer + blockSize - 3, 3);
+			carryLen = 3;
+		}
+		else {
+			memcpy(buffer, buffer + 0, blockSize);
+			carryLen = blockSize;
+		}
+	}
+
+	CloseHandle(hFile);
+	return foundOggS;
+}
+
+int RunAudioInstallerIfNecessary() {
+	if (std::filesystem::exists("vpk/audio_done.txt")) {
+		return 0;
+	}
+
+	std::ifstream camList("vpk/cam_list.txt");
+	if (!camList) {
+		return 1;
+	}
+
+	std::string line;
+	std::getline(camList, line);
+	if (line != "CAMLIST") {
+		return 1;
+	}
+
+	const __m128i pattern = _mm_set1_epi32(0x5367674F);
+	constexpr size_t BUFFER_SIZE = 64 * 1024;
+	alignas(16) char buffer[BUFFER_SIZE + 16];
+
+	const char* targetVpk = "vpk/client_mp_common.bsp.pak000_040.vpk";
+	if (!ScanFileForOggS(targetVpk, pattern, buffer, BUFFER_SIZE)) {
+		std::ofstream doneFile("vpk/audio_done.txt");
+		doneFile << "1";
+		return 0;
+	}
+
+	// Run the installer
+	std::string cmd = R"(bin\x64\audio_installer.exe vpk/cam_list.txt)";
+	STARTUPINFOA si = { sizeof(STARTUPINFOA) };
+	PROCESS_INFORMATION pi = {};
+
+	if (!CreateProcessA(nullptr, const_cast<LPSTR>(cmd.c_str()), nullptr, nullptr,
+		FALSE, 0, nullptr, nullptr, &si, &pi)) {
+		return 1;
+	}
+
+	WaitForSingleObject(pi.hProcess, INFINITE);
+	DWORD exitCode = 0;
+	GetExitCodeProcess(pi.hProcess, &exitCode);
+	CloseHandle(pi.hProcess);
+	CloseHandle(pi.hThread);
+
+	if (exitCode == 0 && !ScanFileForOggS(targetVpk, pattern, buffer, BUFFER_SIZE)) {
+		std::ofstream doneFile("vpk/audio_done.txt");
+		doneFile << "1";
+	}
+
+	return static_cast<int>(exitCode);
+}
+
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine, int nCmdShow)
 {
 	//AllocConsole();
@@ -333,14 +460,21 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine,
 	}
 
 	SetCurrentDirectory(exePath);
-
+	if (RunAudioInstallerIfNecessary()) {
+		MessageBoxA(
+			GetForegroundWindow(),
+			"Failed setting up game audio.\nThe game cannot continue and has to exit.",
+			"R1Delta Launcher Error",
+			0);
+		return 1;
+	}
 	{
 		SetMitigationPolicies();
 
 		PrependPath();
 
 		printf("[*] Loading launcher.dll\n");
-		swprintf_s(buffer, L"%s\\bin\\x64_retail\\launcher.dll", exePath);
+		swprintf_s(buffer, L"%s\\r1delta\\bin\\x64_delta\\launcher.dll", exePath);
 		hLauncherModule = LoadLibraryExW(buffer, 0, LOAD_WITH_ALTERED_SEARCH_PATH);
 		if (!hLauncherModule)
 		{
@@ -360,7 +494,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine,
 			0);
 		return 1;
 	}
+	char newCmdLine[1024];
+	if (strlen(lpCmdLine) > 0) {
+		sprintf_s(newCmdLine, "%s -game r1delta -noorigin", lpCmdLine);
+	}
+	else {
+		strcpy_s(newCmdLine, "-game r1delta -noorigin");
+	}
 
 	return ((int(/*__fastcall*/*)(HINSTANCE, HINSTANCE, LPSTR, int))LauncherMain)(
-		hInstance, hPrevInstance, lpCmdLine, nCmdShow); // the parameters aren't really used anyways
+		hInstance, hPrevInstance, newCmdLine, nCmdShow); // the parameters aren't really used anyways
 }

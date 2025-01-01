@@ -120,7 +120,7 @@ void Cbuf_AddText(int a1, const char* a2, unsigned int a3) {
 	}
 	PData_OnConsoleCommand(a2);
 	bool shouldLog = true;
-	if (a2 == nullptr || *a2 == '\0' || *a2 == '_' || strcmp_static(a2, "\n") == 0) {
+	if (a2 == nullptr || *a2 == '\0' || *a2 == '_' || strcmp_static(a2, "\n") == 0 || (a2[0] == 'r' && a2[1] == 'e' && a2[2] == 's' && a2[3] == 'e')) {
 		shouldLog = false;
 	}
 	auto engine = G_engine;

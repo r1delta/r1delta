@@ -965,6 +965,8 @@ void ConvertScriptVariant(ScriptVariant_t* variant, ConversionDirection directio
 // Function to check if server.dll is in the call stack
 // TODO(mrsteyk): performance
 __forceinline bool serverRunning(void* a1) {
+	if (IsDedicatedServer())
+		return true;
 	//return isServerScriptVM || a1 == realvmptr || a1 == fakevmptr || (realvmptr && a1 == *(void**)(((uintptr_t)realvmptr + 8)));
 	if (isServerScriptVM || a1 == realvmptr || a1 == fakevmptr || (realvmptr && a1 == *(void**)(((uintptr_t)realvmptr + 8))))
 		return true; // SQVM handle check

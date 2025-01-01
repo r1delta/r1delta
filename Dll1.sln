@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 16
-VisualStudioVersion = 16.0.35425.106
+# Visual Studio Version 17
+VisualStudioVersion = 17.8.34330.188
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "tier0", "Dll1.vcxproj", "{FF6A4DE4-E3D3-4F2B-8640-0A4815865FBE}"
 	ProjectSection(ProjectDependencies) = postProject
@@ -11,6 +11,8 @@ EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "mimalloc", "thirdparty\mimalloc\ide\vs2022\mimalloc.vcxproj", "{ABB5EAE7-B3E6-432E-B636-333449892EA6}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "launcher", "launch\launcher.vcxproj", "{4E116D7B-5E62-42D8-9649-56B00CC61AB3}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "dedi_launch", "dedi_launch\dedi_launch.vcxproj", "{33E52B4A-8E73-4A95-B9A3-96BD7B2E1FB6}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -44,6 +46,14 @@ Global
 		{4E116D7B-5E62-42D8-9649-56B00CC61AB3}.Release|x64.Build.0 = Release|x64
 		{4E116D7B-5E62-42D8-9649-56B00CC61AB3}.Release|x86.ActiveCfg = Release|Win32
 		{4E116D7B-5E62-42D8-9649-56B00CC61AB3}.Release|x86.Build.0 = Release|Win32
+		{33E52B4A-8E73-4A95-B9A3-96BD7B2E1FB6}.Debug|x64.ActiveCfg = Debug|x64
+		{33E52B4A-8E73-4A95-B9A3-96BD7B2E1FB6}.Debug|x64.Build.0 = Debug|x64
+		{33E52B4A-8E73-4A95-B9A3-96BD7B2E1FB6}.Debug|x86.ActiveCfg = Debug|Win32
+		{33E52B4A-8E73-4A95-B9A3-96BD7B2E1FB6}.Debug|x86.Build.0 = Debug|Win32
+		{33E52B4A-8E73-4A95-B9A3-96BD7B2E1FB6}.Release|x64.ActiveCfg = Release|x64
+		{33E52B4A-8E73-4A95-B9A3-96BD7B2E1FB6}.Release|x64.Build.0 = Release|x64
+		{33E52B4A-8E73-4A95-B9A3-96BD7B2E1FB6}.Release|x86.ActiveCfg = Release|Win32
+		{33E52B4A-8E73-4A95-B9A3-96BD7B2E1FB6}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

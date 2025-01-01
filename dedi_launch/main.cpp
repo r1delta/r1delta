@@ -154,12 +154,8 @@ int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdL
 	// Get the root directory the .exe is in
 	char* pRootDir = GetBaseDir( moduleName );
 	SetCurrentDirectoryA(pRootDir);
-#ifdef _DEBUG
-	int len = 
-#endif
 	_snprintf_s(szBuffer, sizeof(szBuffer), _TRUNCATE, "PATH=%s\\r1delta\\bin\\x64_delta\\;%s\\bin\\x64_retail\\;.;%s", pRootDir, pRootDir, pPath);
 	szBuffer[ sizeof(szBuffer) - 1 ] = 0;
-	assert( len < 4096 );
 	_putenv( szBuffer );
 	if (pPath != nullptr) {
 		free(pPath);

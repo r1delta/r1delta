@@ -43,11 +43,10 @@
 #include "logging.h"
 #include <tier0/platform.h>
 #include "thirdparty/mimalloc//include/mimalloc-new-delete.h"
-
+uint64_t g_PerformanceFrequency;
+int G_is_dedi;
 typedef const char* (__cdecl* wine_get_version_func)();
 CPUInformation* (__fastcall* GetCPUInformationOriginal)();
-
-
 
 const CPUInformation* GetCPUInformationDet()
 {
@@ -71,16 +70,13 @@ const CPUInformation* GetCPUInformationDet()
 	return result;
 }
 
-uint64_t g_PerformanceFrequency;
-int G_is_dedi;
-
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 {
 	// make sure we're game and not tools
 	char path[MAX_PATH];
 	if (GetModuleFileNameA(NULL, path, MAX_PATH)) {
 		char* exeName = strrchr(path, '\\') ? strrchr(path, '\\') + 1 : path;
-		if (_stricmp(exeName, "r1ds.exe") != 0 && 
+		if (_stricmp(exeName, "r1delta_ds.exe") != 0 && 
 			_stricmp(exeName, "titanfall.exe") != 0 && 
 			_stricmp(exeName, "r1delta.exe") != 0) { // TODO
 			return TRUE; 
@@ -89,32 +85,11 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 	switch (fdwReason)
 	{
 	case DLL_PROCESS_ATTACH: {
-		int argc;
-		LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-
-		if (argv) {
-			bool foundR1Delta = false;
-			for (int i = 1; i < argc; i++) {
-				if (wcscmp(argv[i], L"-game") == 0 && i + 1 < argc && wcscmp(argv[i + 1], L"r1delta") == 0) {
-					foundR1Delta = true;
-					break;
-				}
-			}
-
-			LocalFree(argv);
-
-			if (!foundR1Delta) {
-				return TRUE;
-			}
-		}
 		if (!IsDedicatedServer() && !IsNoConsole())
 		{
 			AllocConsole();
 			SetConsoleTitleW(L"R1Delta");
 			freopen("CONOUT$", "wt", stdout);
-		}
-		else if (!IsDedicatedServer()) {
-			FreeConsole();
 		}
 
 		LARGE_INTEGER freq;
@@ -129,8 +104,8 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 				// Extract the executable name from the path
 				char* exeName = strrchr(path, '\\') ? strrchr(path, '\\') + 1 : path;
 
-				// Compare the executable name with "r1ds.exe"
-				if (_stricmp(exeName, "r1ds.exe") == 0) {
+				// Compare the executable name with "r1delta_ds.exe"
+				if (_stricmp(exeName, "r1delta_ds.exe") == 0) {
 					G_is_dedi = 1;
 				}
 				else {
