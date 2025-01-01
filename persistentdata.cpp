@@ -393,6 +393,30 @@ bool PDataValidator::isValid(const std::string_view& key, const std::string_view
 	// Get the type for this key
 	auto type = getKeyType(key);
 	if (!type.valid()) return false;
+	// Additional validation for "gen" key
+	if (key == "gen" && type.type == SchemaType::Type::Int) {
+		int genValue;
+		auto res = std::from_chars(value.data(), value.data() + value.size(), genValue);
+		if (res.ec == std::errc::invalid_argument || res.ec == std::errc::result_out_of_range) {
+			return false;
+		}
+		if (genValue < 0 || genValue > 9) {
+			return false;
+		}
+	}
+
+	// Check for invalid weapon strings in loadouts
+	if (key.find("titanLoadouts") != std::string_view::npos) {
+		if (value.find("mp_weapon") != std::string_view::npos) {
+			return false;
+		}
+	}
+	
+	if (key.find("pilotLoadouts") != std::string_view::npos) {
+		if (value.find("mp_titanweapon") != std::string_view::npos) {
+			return false;
+		}
+	}
 
 	// Validate value against type
 	switch (type.type) {
