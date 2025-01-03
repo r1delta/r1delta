@@ -261,23 +261,129 @@ bool(__fastcall* oCClientState__ProcessVoiceData)(void*, SVC_VoiceData*);
 
 
 
-bool __fastcall CClientState__ProcessVoiceData(void* thisptr, SVC_VoiceData* msg) {
-	char chReceived[32767];
+class IVoiceCodec
+{
+protected:
+	virtual            ~IVoiceCodec() {}
 
+public:
+	// Initialize the object. The uncompressed format is always 8-bit signed mono.
+	virtual bool    Init(int quality, unsigned int nSamplesPerSec) = 0;
+
+	// Use this to delete the object.
+	virtual void    Release() = 0;
+
+
+	// Compress the voice data.
+	// pUncompressed        -    16-bit signed mono voice data.
+	// maxCompressedBytes    -    The length of the pCompressed buffer. Don't exceed this.
+	// bFinal                -    Set to true on the last call to Compress (the user stopped talking).
+	//                            Some codecs like big block sizes and will hang onto data you give them in Compress calls.
+	//                            When you call with bFinal, the codec will give you compressed data no matter what.
+	// Return the number of bytes you filled into pCompressed.
+	virtual int        Compress(const char* pUncompressed, int nSamples, char* pCompressed, int maxCompressedBytes/*, bool bFinal*/) = 0;
+
+	// Decompress voice data. pUncompressed is 16-bit signed mono.
+	virtual int        Decompress(const char* pCompressed, int compressedBytes, char* pUncompressed, int maxUncompressedBytes) = 0;
+
+	// Some codecs maintain state between Compress and Decompress calls. This should clear that state.
+	virtual bool    ResetState() = 0;
+};
+char g_VoiceBuffer[20][65536] = { 0 }; // Or whatever size you want
+int g_VoiceBufferPos[20] = { 0 };  // Track position in each buffer
+float GetVolumeCurve(float volume, int curveType) {
+    float result = 0.0f;
+    if (volume <= 0.0f)
+        return 0.0f;
+    if (volume >= 1.0f)
+        return 1.0f;
+
+    switch (curveType) {
+    case 0:
+        return volume;
+    case 1: {
+        float* curveParam = (float*)(G_engine + 0x1A0DC2C); // Where dword_181A0DC2C was
+        return logf(1.0f - (volume * 0.9f)) * (*curveParam * -1.0f);
+    }
+          // ... other cases as needed
+    }
+    return result;
+}
+
+void SubmitVoiceAudio(const void* data, int len, int entityIndex) {
+    // Keep original basic validation
+   // if (!*(uint64_t*)(G_engine + 0x200DF78) || // qword_18200DF78 
+   //     !*(_DWORD*)(voice_enable + 92) ||
+   //     len > sizeof(g_VoiceBuffer[0]) ||
+   //     (*(unsigned __int8(__fastcall**)(int64_t, uint32_t))(*(_QWORD*)g_ClientDLL + 456i64))(g_ClientDLL, entityIndex))
+   // {
+   //     return;
+   // }
+
+    // Get voice channel object base
+    char* voiceChannelBase = (char*)(G_engine + 0x2017B60); // unk_182017B60
+    char* voiceChannel = voiceChannelBase + 200 * entityIndex;
+
+    // Setup our audio buffer descriptor
+    struct AudioBufferDesc {
+        int64_t field0;
+        const char* buffer;
+        int64_t field16;
+        int64_t field24;
+        int64_t field32;
+        int field40;
+    } desc = {};
+
+    desc.buffer = (const char*)data;
+    *(int*)((char*)&desc + 12) = 2 * len;
+
+    // Handle volume scaling
+    float volume = 0.0f;
+    float rawVolume = 1.f;//*(float*)(sound_volume_voice + 88);
+    if (rawVolume >= 0.0f) {
+        volume = 1.0f;
+        if (rawVolume <= 1.0f)
+            volume = rawVolume;
+    }
+
+    // Apply volume curve using our new function
+    float scaledVolume = GetVolumeCurve(volume, 0);
+
+    // Get audio interface from voice channel
+    auto audioInterface = *(int64_t**)(voiceChannel + 24 * 8);
+
+    // Submit audio data
+    char tempBuffer[8];
+    (*(void(__fastcall**)(int64_t*, int64_t, int64_t))((*audioInterface) + 96))(audioInterface, 0, 0);
+    (*(void(__fastcall**)(int64_t*, char*))((*audioInterface) + 200))(audioInterface, tempBuffer);
+
+    if (*(int*)(tempBuffer + 8) == 64)
+        (*(void (**)(void))((*audioInterface) + 176))();
+    else
+        (*(void(__fastcall**)(int64_t*, AudioBufferDesc*, int64_t))((*audioInterface) + 168))(audioInterface, &desc, 0);
+}
+bool __fastcall CClientState__ProcessVoiceData(void* thisptr, SVC_VoiceData* msg) {
+	char chReceived[0x4000];
 	unsigned int dwLength = msg->m_nLength;
 	unsigned int dwLengthBytes = dwLength * 8;
 	int bitsRead = msg->m_DataIn.ReadBitsClamped(chReceived, dwLengthBytes);
-	if (bitsRead == 0 || msg->m_DataIn.IsOverflowed())
+	if (bitsRead == 0 || msg->m_DataIn.IsOverflowed() || msg->m_nFromClient > 21 || msg->m_nFromClient < 0)
 		return false;
 
-	
-	static auto processvoicedata_pt2 = reinterpret_cast<void(*)(__int64, int, char*, unsigned int)>(G_engine + 0x17310);
-	printf("Args : %d %d %d\n", msg->m_nXUID, msg->m_nFromClient, dwLength);
-	processvoicedata_pt2(msg->m_nXUID, msg->m_nFromClient, chReceived, dwLength);
+
+	typedef IVoiceCodec* (*CreateInterfaceFn)(const char* name, int* returnCode);
+	CreateInterfaceFn CreateInterface = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(GetModuleHandleA("vaudio_speex.dll"), "CreateInterface"));
+	static auto codec = CreateInterface("vaudio_speex", 0);
+	static bool bDone = false;
+    if (!bDone) {
+        bDone = true;
+        codec->Init(3, 48000);
+    }
+	char chDecoded[0x4000];
+	unsigned int decodedLen = codec->Decompress(chReceived, dwLengthBytes, chDecoded, sizeof(chDecoded));
+    static auto GiveClientDLLVoice = reinterpret_cast<void(*)(void* Src, int a2, int a3)>(G_engine + 0x118F0);
+    GiveClientDLLVoice(chDecoded, decodedLen, msg->m_nFromClient);
 	return true;
-
-	
-
 }
 
 //-
@@ -685,7 +791,7 @@ security_fixes_engine(uintptr_t engine_base)
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E51D0), &CNetChan___ProcessMessages, reinterpret_cast<LPVOID*>(&oCNetChan___ProcessMessages)) == MH_OK);
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0xDA330), &CGameClient__ProcessVoiceData, reinterpret_cast<LPVOID*>(&oCGameClient__ProcessVoiceData)) == MH_OK);
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x17D400), &CClientState__ProcessUserMessage, reinterpret_cast<LPVOID*>(&oCClientState__ProcessUserMessage)) == MH_OK);
-	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x17D600), &CClientState__ProcessVoiceData, reinterpret_cast<LPVOID*>(&oCClientState__ProcessVoiceData)) == MH_OK);
+	//R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x17D600), &CClientState__ProcessVoiceData, reinterpret_cast<LPVOID*>(&oCClientState__ProcessVoiceData)) == MH_OK);
 	//R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E0C80), &CNetChan___FlowNewPacket, NULL) == MH_OK); // my fucking god STOP PASTING SHIT FROM APEX
     R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1F23C0), &NET_ReceiveDatagram, reinterpret_cast<LPVOID*>(&oNET_ReceiveDatagram)) == MH_OK);
 	// TODO(dogecore): ip bans
