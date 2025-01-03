@@ -156,7 +156,7 @@ struct CLC_VoiceData {
 bool(__fastcall* oCGameClient__ProcessVoiceData)(void*, CLC_VoiceData*);
 
 bool __fastcall CGameClient__ProcessVoiceData(void* thisptr, CLC_VoiceData* msg) {
-	char voiceDataBuffer[4096];
+	char voiceDataBuffer[32767];
 
 	void* thisptr_shifted = reinterpret_cast<uintptr_t>(thisptr) == 16 ? nullptr : reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(thisptr) - 8);
 	int bitsRead = msg->m_DataIn.ReadBitsClamped(voiceDataBuffer, msg->m_nLength);
@@ -259,36 +259,25 @@ int Voice_AddIncomingData(int iEntity, int nChannel, const char* pchData, int nD
 
 bool(__fastcall* oCClientState__ProcessVoiceData)(void*, SVC_VoiceData*);
 
+
+
 bool __fastcall CClientState__ProcessVoiceData(void* thisptr, SVC_VoiceData* msg) {
-	char chReceived[4104];
+	char chReceived[32767];
 
 	unsigned int dwLength = msg->m_nLength;
-
-	if (dwLength >= 0x1000)
-		dwLength = 4096;
-
-	int bitsRead = msg->m_DataIn.ReadBitsClamped(chReceived, msg->m_nLength);
+	unsigned int dwLengthBytes = dwLength * 8;
+	int bitsRead = msg->m_DataIn.ReadBitsClamped(chReceived, dwLengthBytes);
 	if (bitsRead == 0 || msg->m_DataIn.IsOverflowed())
-		return true;
+		return false;
 
-	static auto voice_enable = OriginalCCVar_FindVar2(cvarinterface, "voice_enable");
-	if (!voice_enable->m_Value.m_nValue)
-		return true;
+	
+	static auto processvoicedata_pt2 = reinterpret_cast<void(*)(__int64, int, char*, unsigned int)>(G_engine + 0x17310);
+	printf("Args : %d %d %d\n", msg->m_nXUID, msg->m_nFromClient, dwLength);
+	processvoicedata_pt2(msg->m_nXUID, msg->m_nFromClient, chReceived, dwLength);
+	return true;
 
-	int iEntity = msg->m_nFromClient;
+	
 
-	int nChannel = Voice_GetChannel(iEntity);
-	if (nChannel == VOICE_CHANNEL_ERROR)
-	{
-		nChannel = Voice_AssignChannel(iEntity, false);
-		if (nChannel == VOICE_CHANNEL_ERROR)
-		{
-			Warning("ProcessVoiceData: Voice_AssignChannel failed for client %d!\n", iEntity);
-			return true;
-		}
-	}
-
-	return Voice_AddIncomingData(iEntity, nChannel, chReceived, msg->m_nLength, 0, 1);
 }
 
 //-
@@ -694,7 +683,7 @@ security_fixes_engine(uintptr_t engine_base)
 
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E96E0), &CNetChan__ProcessPacket, reinterpret_cast<LPVOID*>(&oCNetChan__ProcessPacket)) == MH_OK);
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E51D0), &CNetChan___ProcessMessages, reinterpret_cast<LPVOID*>(&oCNetChan___ProcessMessages)) == MH_OK);
-	//R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0xDA330), &CGameClient__ProcessVoiceData, reinterpret_cast<LPVOID*>(&oCGameClient__ProcessVoiceData)) == MH_OK);
+	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0xDA330), &CGameClient__ProcessVoiceData, reinterpret_cast<LPVOID*>(&oCGameClient__ProcessVoiceData)) == MH_OK);
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x17D400), &CClientState__ProcessUserMessage, reinterpret_cast<LPVOID*>(&oCClientState__ProcessUserMessage)) == MH_OK);
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x17D600), &CClientState__ProcessVoiceData, reinterpret_cast<LPVOID*>(&oCClientState__ProcessVoiceData)) == MH_OK);
 	//R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E0C80), &CNetChan___FlowNewPacket, NULL) == MH_OK); // my fucking god STOP PASTING SHIT FROM APEX
