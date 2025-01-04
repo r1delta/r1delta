@@ -196,7 +196,7 @@ void PrependPath()
 	{
 		// Modified to include r1delta path first, then the regular retail path
 		swprintf_s(buffer,
-			L"PATH=%s\\r1delta\\bin\\x64_delta\\;%s\\bin\\x64_retail\\;.;%s",
+			L"PATH=%s\\r1delta\\bin\\;%s\\bin\\x64_retail\\;.;%s",
 			exePath, exePath, pPath);
 
 		auto result = _wputenv(buffer);
@@ -474,7 +474,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine,
 		PrependPath();
 
 		printf("[*] Loading launcher.dll\n");
-		swprintf_s(buffer, L"%s\\r1delta\\bin\\x64_delta\\launcher.dll", exePath);
+		swprintf_s(buffer, L"%s\\r1delta\\bin\\launcher.dll", exePath);
 		hLauncherModule = LoadLibraryExW(buffer, 0, LOAD_WITH_ALTERED_SEARCH_PATH);
 		if (!hLauncherModule)
 		{

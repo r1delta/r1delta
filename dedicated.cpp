@@ -295,8 +295,8 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 	reinterpret_cast<char(__fastcall*)(__int64, CreateInterfaceFn)>((uintptr_t)(engine) + 0x01A04A0)(0, (CreateInterfaceFn)(engineDS + 0xE9000)); // connect nondedi engine
 	reinterpret_cast<void(__fastcall*)(int, void*)>((uintptr_t)(engine) + 0x47F580)(0, 0); // register nondedi engine cvars
 #if BUILD_DEBUG
-	if (!InitNetChanWarningHooks())
-		MessageBoxA(NULL, "Failed to initialize warning hooks", "ERROR", 16);
+	//if (!InitNetChanWarningHooks())
+	//	MessageBoxA(NULL, "Failed to initialize warning hooks", "ERROR", 16);
 #endif
 	return Host_InitDedicatedOriginal(a1, a2, a3);
 }

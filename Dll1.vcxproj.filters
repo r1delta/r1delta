@@ -389,4 +389,7 @@
   <ItemGroup>
     <Natvis Include="base.natvis" />
   </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="server.capnp" />
+  </ItemGroup>
 </Project>

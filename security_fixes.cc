@@ -363,29 +363,40 @@ void SubmitVoiceAudio(const void* data, int len, int entityIndex) {
         (*(void(__fastcall**)(int64_t*, AudioBufferDesc*, int64_t))((*audioInterface) + 168))(audioInterface, &desc, 0);
 }
 bool __fastcall CClientState__ProcessVoiceData(void* thisptr, SVC_VoiceData* msg) {
-	char chReceived[0x4000];
-	unsigned int dwLength = msg->m_nLength;
-	unsigned int dwLengthBytes = dwLength * 8;
-	int bitsRead = msg->m_DataIn.ReadBitsClamped(chReceived, dwLengthBytes);
-	if (bitsRead == 0 || msg->m_DataIn.IsOverflowed() || msg->m_nFromClient > 21 || msg->m_nFromClient < 0)
-		return false;
+    char chReceived[0x4000];
+    unsigned int dwLength = msg->m_nLength;
+    if (dwLength >= 0x1000)
+        dwLength = 4096;
+    unsigned int dwLengthBytes = dwLength * 8;
+    int bitsRead = msg->m_DataIn.ReadBitsClamped(chReceived, dwLengthBytes);
+    if (bitsRead == 0 || msg->m_DataIn.IsOverflowed() || msg->m_nFromClient > 21 || msg->m_nFromClient < 0)
+        return false;
+
+    //typedef IVoiceCodec* (*CreateInterfaceFn)(const char* name, int* returnCode);
+    //CreateInterfaceFn CreateInterface = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(GetModuleHandleA("vaudio_speex.dll"), "CreateInterface"));
+    //static auto codec = CreateInterface("vaudio_speex", 0);
+    //static bool bDone = false;
+    //if (!bDone) {
+    //    bDone = true;
+    //    codec->Init(3, 48000);
+    //}
+    //
+    //char chDecoded[8192];
+    //unsigned int decodedLen = codec->Decompress(chReceived, dwLength, chDecoded, sizeof(chDecoded));
+    //if (decodedLen == 0)
+    //    return false;
+    static auto CL_ProcessVoiceData = reinterpret_cast<void(*)(unsigned __int64, unsigned int, char*, unsigned int)>(G_engine + 0x17310);
+    CL_ProcessVoiceData(msg->m_nXUID, msg->m_nFromClient, chReceived, dwLength);
+    return true;
 
 
-	typedef IVoiceCodec* (*CreateInterfaceFn)(const char* name, int* returnCode);
-	CreateInterfaceFn CreateInterface = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(GetModuleHandleA("vaudio_speex.dll"), "CreateInterface"));
-	static auto codec = CreateInterface("vaudio_speex", 0);
-	static bool bDone = false;
-    if (!bDone) {
-        bDone = true;
-        codec->Init(3, 48000);
-    }
-	char chDecoded[0x4000];
-	unsigned int decodedLen = codec->Decompress(chReceived, dwLengthBytes, chDecoded, sizeof(chDecoded));
-    static auto GiveClientDLLVoice = reinterpret_cast<void(*)(void* Src, int a2, int a3)>(G_engine + 0x118F0);
-    GiveClientDLLVoice(chDecoded, decodedLen, msg->m_nFromClient);
-	return true;
+
 }
-
+HMODULE __fastcall sub_180126B40(char* a1, __int64 a2, __int64 a3, __int64 a4) {
+    if (strcmp(a1, "vaudio_speex"))
+        return 0;
+    return LoadLibraryA("r1delta\\bin\\vaudio_speex.dll");
+}
 //-
 
 struct CPostDataUpdateCall {
@@ -791,9 +802,10 @@ security_fixes_engine(uintptr_t engine_base)
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E51D0), &CNetChan___ProcessMessages, reinterpret_cast<LPVOID*>(&oCNetChan___ProcessMessages)) == MH_OK);
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0xDA330), &CGameClient__ProcessVoiceData, reinterpret_cast<LPVOID*>(&oCGameClient__ProcessVoiceData)) == MH_OK);
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x17D400), &CClientState__ProcessUserMessage, reinterpret_cast<LPVOID*>(&oCClientState__ProcessUserMessage)) == MH_OK);
-	//R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x17D600), &CClientState__ProcessVoiceData, reinterpret_cast<LPVOID*>(&oCClientState__ProcessVoiceData)) == MH_OK);
+	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x17D600), &CClientState__ProcessVoiceData, reinterpret_cast<LPVOID*>(&oCClientState__ProcessVoiceData)) == MH_OK);
 	//R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E0C80), &CNetChan___FlowNewPacket, NULL) == MH_OK); // my fucking god STOP PASTING SHIT FROM APEX
     R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1F23C0), &NET_ReceiveDatagram, reinterpret_cast<LPVOID*>(&oNET_ReceiveDatagram)) == MH_OK);
+    R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x126B40), &sub_180126B40, reinterpret_cast<LPVOID*>(NULL)) == MH_OK);
 	// TODO(dogecore): ip bans
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x237F0), &CBaseClientState__ProcessSplitScreenUser, NULL) == MH_OK);
 

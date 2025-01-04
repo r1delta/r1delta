@@ -1361,6 +1361,15 @@ __int64 CNetChan__SendDatagramLISTEN_Part2_Hook(__int64 thisptr, unsigned int le
 	// Call original function
 	return original_fn(thisptr, length, SendToResult);
 }
+__int64 (*oStringCompare_AllTalkHookDedi)(__int64 a1, __int64 a2);
+__int64 StringCompare_AllTalkHookDedi(__int64 a1, __int64 a2) {
+	static const ConVarR1* var = 0;
+	if (!var && OriginalCCVar_FindVar2)
+		var = OriginalCCVar_FindVar2(cvarinterface, "sv_alltalk");
+	if (((((uintptr_t)(_ReturnAddress())) == G_engine_ds + 0x05FCD3) || (((uintptr_t)(_ReturnAddress())) == G_engine + 0x0EE5EC)) && var->m_Value.m_nValue == 1)
+		return false;
+	return strcmp((const char*)a1, (const char*)a2);
+}
 static FORCEINLINE void
 do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 {
@@ -1474,6 +1483,7 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("vstdlib.dll"), "VStdLib_GetICVarFactory"), &VStdLib_GetICVarFactory, NULL);
 	if (!IsDedicatedServer()) {
 		auto launcher = G_launcher;
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x471980), &StringCompare_AllTalkHookDedi, reinterpret_cast<LPVOID*>(&oStringCompare_AllTalkHookDedi));
 
 		MH_CreateHook((LPVOID)(engine_base_spec + 0x136860), &Status_ConMsg, NULL);
 		MH_CreateHook((LPVOID)(engine_base_spec + 0x1BF500), &Status_ConMsg, NULL);
@@ -1515,7 +1525,6 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 }
 
 static bool should_init_security_fixes = false;
-
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
 	const LDR_DLL_NOTIFICATION_DATA* notification_data,
@@ -1538,6 +1547,7 @@ void __stdcall LoaderNotificationCallback(
 	if (strcmp_static(name, L"engine_ds.dll") == 0) {
 		G_engine_ds = (uintptr_t)notification_data->Loaded.DllBase;
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x433C0), &ProcessConnectionlessPacketDedi, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginal));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x30FE20), &StringCompare_AllTalkHookDedi, reinterpret_cast<LPVOID*>(&oStringCompare_AllTalkHookDedi));
 		InitAddons();
 		InitDedicated();
 		constexpr auto a = (1 << 2);

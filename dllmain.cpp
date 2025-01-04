@@ -120,7 +120,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 
 		LoadLibraryW(L"OnDemandConnRouteHelper"); // stop fucking reloading this thing
 		LoadLibraryA("TextShaping.dll"); // fix "Patcher Error" dialogs having no text
-		SetDllDirectory(L"r1delta\\bin\\x64_delta");
+		SetDllDirectory(L"r1delta\\bin");
 
 		MH_Initialize();
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("tier0_orig.dll"), "GetCPUInformation"), &GetCPUInformationDet, reinterpret_cast<LPVOID*>(&GetCPUInformationOriginal));

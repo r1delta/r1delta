@@ -14,6 +14,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "launcher", "launch\launcher
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "dedi_launch", "dedi_launch\dedi_launch.vcxproj", "{33E52B4A-8E73-4A95-B9A3-96BD7B2E1FB6}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Dll2", "vaudio_opus\Dll2.vcxproj", "{7AACD69C-140D-48D7-9622-CD4335049EB1}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -54,6 +56,14 @@ Global
 		{33E52B4A-8E73-4A95-B9A3-96BD7B2E1FB6}.Release|x64.Build.0 = Release|x64
 		{33E52B4A-8E73-4A95-B9A3-96BD7B2E1FB6}.Release|x86.ActiveCfg = Release|Win32
 		{33E52B4A-8E73-4A95-B9A3-96BD7B2E1FB6}.Release|x86.Build.0 = Release|Win32
+		{7AACD69C-140D-48D7-9622-CD4335049EB1}.Debug|x64.ActiveCfg = Debug|x64
+		{7AACD69C-140D-48D7-9622-CD4335049EB1}.Debug|x64.Build.0 = Debug|x64
+		{7AACD69C-140D-48D7-9622-CD4335049EB1}.Debug|x86.ActiveCfg = Debug|Win32
+		{7AACD69C-140D-48D7-9622-CD4335049EB1}.Debug|x86.Build.0 = Debug|Win32
+		{7AACD69C-140D-48D7-9622-CD4335049EB1}.Release|x64.ActiveCfg = Release|x64
+		{7AACD69C-140D-48D7-9622-CD4335049EB1}.Release|x64.Build.0 = Release|x64
+		{7AACD69C-140D-48D7-9622-CD4335049EB1}.Release|x86.ActiveCfg = Release|Win32
+		{7AACD69C-140D-48D7-9622-CD4335049EB1}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -130,8 +130,8 @@ void InitClient()
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("ws2_32.dll"), "getaddrinfo"), &hookedGetAddrInfo, reinterpret_cast<LPVOID*>(&originalGetAddrInfo));
 
 #if BUILD_DEBUG
-	if (!InitNetChanWarningHooks())
-		MessageBoxA(NULL, "Failed to initialize warning hooks", "ERROR", 16);
+	//if (!InitNetChanWarningHooks())
+	//	MessageBoxA(NULL, "Failed to initialize warning hooks", "ERROR", 16);
 #endif
 	MH_EnableHook(MH_ALL_HOOKS);
 }
