@@ -365,8 +365,8 @@ void SubmitVoiceAudio(const void* data, int len, int entityIndex) {
 bool __fastcall CClientState__ProcessVoiceData(void* thisptr, SVC_VoiceData* msg) {
     char chReceived[0x4000];
     unsigned int dwLength = msg->m_nLength;
-    if (dwLength >= 0x1000)
-        dwLength = 4096;
+    if (dwLength >= 0x4000)
+        dwLength = 0x4000;
     unsigned int dwLengthBytes = dwLength * 8;
     int bitsRead = msg->m_DataIn.ReadBitsClamped(chReceived, dwLengthBytes);
     if (bitsRead == 0 || msg->m_DataIn.IsOverflowed() || msg->m_nFromClient > 21 || msg->m_nFromClient < 0)

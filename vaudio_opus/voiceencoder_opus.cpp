@@ -90,59 +90,106 @@ struct opus_options
 int g_iSampleRate = 0;
 opus_options g_OpusOpts[] =
 {
-        {48000, 256, 120},
-        {48000, 120, 60},
-        {48000, 256, 60},
-        {48000, 256, 120},
-};
+{48000, 128, 64},  // Try this - 128 is a valid power of 2 that might work
+{48000, 128, 64},  // Try this - 128 is a valid power of 2 that might work
+{48000, 128, 64},  // Try this - 128 is a valid power of 2 that might work
+{48000, 128, 64}  // Try this - 128 is a valid power of 2 that might work
+}; class VoiceEncoder_Opus : public IFrameEncoder {
+private:
+	OpusEncoder* m_EncoderState;
+	OpusDecoder* m_DecoderState;
+	int m_iVersion;
+	float m_smoothedGain = 1.0f;
+	static constexpr float NOISE_THRESHOLD = 2000.0f;
+	static constexpr float RELEASE_TIME = 0.1f;
 
-class VoiceEncoder_Opus : public IFrameEncoder
-{
-public:
-	VoiceEncoder_Opus();
-	virtual ~VoiceEncoder_Opus();
-
-	// Fix Init to match interface
-	bool Init(int quality, int samplerate, int& rawFrameSize, int& encodedFrameSize) override;
-	void Release() override;
-
-	// Fix Encode/Decode to match interface
-	void EncodeFrame(const char* pUncompressedBytes, char* pCompressed) override;
-	void DecodeFrame(const char* pCompressed, char* pDecompressedBytes) override;
-	bool ResetState() override;
-	void PreprocessFrame(int16_t* samples, int numSamples, int sampleRate)
-	{
+	void PreprocessFrame(int16_t* samples, int numSamples, int sampleRate) {
 		float smoothingCoeff = 1.0f - exp(-1.0f / (sampleRate * RELEASE_TIME));
 
-		for (int i = 0; i < numSamples; i++)
-		{
-			// Get sample amplitude
+		for (int i = 0; i < numSamples; i++) {
 			float amplitude = std::abs(samples[i]);
-
-			// Calculate target gain (0 or 1)
 			float targetGain = (amplitude > NOISE_THRESHOLD) ? 1.0f : 0.0f;
-
-			// Smooth the gain changes to avoid artifacts
 			m_smoothedGain += (targetGain - m_smoothedGain) * smoothingCoeff;
-
-			// Apply gain
 			samples[i] = static_cast<int16_t>(samples[i] * m_smoothedGain);
 		}
 	}
 
-private:
-	bool InitStates();
-	void TermStates();
-	static constexpr float NOISE_THRESHOLD = 2000.0f;  // Adjust based on your input levels
-	static constexpr float RELEASE_TIME = 0.1f;  // Seconds
-	float m_smoothedGain = 1.0f;
+public:
+	bool Init(int quality, int samplerate, int& rawFrameSize, int& encodedFrameSize) {
+		int error;
+		m_EncoderState = opus_encoder_create(24000, CHANNELS, OPUS_APPLICATION_VOIP, &error);
+		if (error != OPUS_OK) {
+			MessageBoxA(NULL, "Encoder State Failed", "Encoder State Failed", 16);
+			return false;
+		}
 
-	OpusCustomEncoder* m_EncoderState;
-	OpusCustomDecoder* m_DecoderState;
-	OpusCustomMode* m_Mode;
-	int m_iVersion;
+		m_DecoderState = opus_decoder_create(24000, CHANNELS, &error);
+		if (error != OPUS_OK) {
+			MessageBoxA(NULL, "Decoder State Failed", "Decoder State Failed", 16);
+			return false;
+		}
+
+		// Increase bitrate (default is around 32kbps)
+		opus_encoder_ctl(m_EncoderState, OPUS_SET_BITRATE(40000));  // 40kbps
+
+		// Increase complexity back to 10 for better quality
+		opus_encoder_ctl(m_EncoderState, OPUS_SET_COMPLEXITY(10));
+
+		// Force wider bandwidth mode
+		opus_encoder_ctl(m_EncoderState, OPUS_SET_MAX_BANDWIDTH(OPUS_BANDWIDTH_FULLBAND));
+
+		// Disable any voice optimizations that might reduce quality
+		opus_encoder_ctl(m_EncoderState, OPUS_SET_APPLICATION(OPUS_APPLICATION_AUDIO));
+		opus_decoder_ctl(m_DecoderState, OPUS_SET_GAIN(0));  // No additional gain
+
+		// Increase the packet size a bit
+		rawFrameSize = 240 * BYTES_PER_SAMPLE;
+		encodedFrameSize = 40;  // Give it more room for better quality
+
+
+		return true;
+	}
+
+	void EncodeFrame(const char* pUncompressed, char* pCompressed) {
+		int16_t samples[240];
+		memcpy(samples, pUncompressed, 240 * BYTES_PER_SAMPLE);
+
+		PreprocessFrame(samples, 240, 24000);
+
+		opus_encode(m_EncoderState,
+			samples,
+			240,
+			(unsigned char*)pCompressed,
+			40);  // Match the new encodedFrameSize
+	}
+
+	void DecodeFrame(const char* pCompressed, char* pDecompressed) {
+		opus_decode(m_DecoderState,
+			(const unsigned char*)pCompressed,
+			40,  // Match the new encodedFrameSize
+			(opus_int16*)pDecompressed,
+			240,
+			0);
+	}
+	void Release() override {
+		if (m_EncoderState) {
+			opus_encoder_destroy(m_EncoderState);
+			m_EncoderState = NULL;
+		}
+		if (m_DecoderState) {
+			opus_decoder_destroy(m_DecoderState);
+			m_DecoderState = NULL;
+		}
+		delete this;
+	}
+
+	bool ResetState() override {
+		opus_encoder_ctl(m_EncoderState, OPUS_RESET_STATE);
+		opus_decoder_ctl(m_DecoderState, OPUS_RESET_STATE);
+		m_smoothedGain = 1.0f;  // Reset the noise gate state too
+		return true;
+	}
 };
-
 
 // VoiceCodec_Frame can be used to wrap a frame encoder for the engine. As it gets sound data, it will queue it
 // until it has enough for a frame, then it will compress it. Same thing for decompression.
@@ -314,174 +361,6 @@ extern "C" __declspec(dllexport) void* CreateInterface(const char* pName, int* p
 	//return new VoiceCodec_Uncompressed;
 }
 
-//////////////////////////////////////////////////////////////////////
-// Construction/Destruction
-//////////////////////////////////////////////////////////////////////
-
-VoiceEncoder_Opus::VoiceEncoder_Opus()
-{
-	m_EncoderState = NULL;
-	m_DecoderState = NULL;
-	m_Mode = NULL;
-	m_iVersion = 0;
-}
-
-VoiceEncoder_Opus::~VoiceEncoder_Opus()
-{
-	TermStates();
-}
-
-
-
-void VoiceEncoder_Opus::Release()
-{
-	delete this;
-}
-bool VoiceEncoder_Opus::Init(int quality, int samplerate, int& rawFrameSize, int& encodedFrameSize)
-{
-	m_iVersion = quality;
-
-	printf("VoiceEncoder_Opus::Init quality:%i samplerate param:%i, struct rate: %i\n", quality, samplerate, samplerate * 2);
-	g_iSampleRate = samplerate * 2;
-	rawFrameSize = g_OpusOpts[m_iVersion].iRawFrameSize * BYTES_PER_SAMPLE;
-
-	int iError = 0;
-	m_Mode = opus_custom_mode_create(samplerate*2, g_OpusOpts[m_iVersion].iRawFrameSize, &iError);
-
-	if (iError != 0) {
-		printf("opus_custom_mode_create failed: %d samplerate: %d, opus opts: %d\n", iError, samplerate, g_OpusOpts[m_iVersion].iRawFrameSize);
-		return false;
-	}
-
-	m_EncoderState = opus_custom_encoder_create(m_Mode, CHANNELS, &iError);
-	if( iError != 0 )
-	{
-		printf("opus_custom_encoder_create failed: %d\n", iError);
-		return false;
-	}
-	m_DecoderState = opus_custom_decoder_create(m_Mode, CHANNELS, &iError);
-	if( iError != 0 )
-	{
-		printf("opus_custom_decoder_create failed: %d\n", iError);
-		return false;
-	}
-
-	if (!InitStates()) {
-		printf("InitStates failed\n");
-		return false;
-	}
-
-	encodedFrameSize = g_OpusOpts[m_iVersion].iPacketSize;
-	return true;
-}
-
-void VoiceEncoder_Opus::EncodeFrame(const char* pUncompressedBytes, char* pCompressed)
-{
-	// Create a buffer for preprocessing
-	int16_t* samples = (int16_t*)pUncompressedBytes;
-
-	// Apply preprocessing
-	PreprocessFrame(samples, g_OpusOpts[m_iVersion].iRawFrameSize, g_iSampleRate);  // Assuming 48kHz
-
-	unsigned char output[1024];
-
-	opus_custom_encode(m_EncoderState, (opus_int16*)samples, g_OpusOpts[m_iVersion].iRawFrameSize, output, g_OpusOpts[m_iVersion].iPacketSize);
-
-	for (int i = 0; i < g_OpusOpts[m_iVersion].iPacketSize; i++)
-	{
-		*pCompressed = (char)output[i];
-		pCompressed++;
-	}
-}
-
-
-// In VoiceEncoder_Opus::DecodeFrame
-void VoiceEncoder_Opus::DecodeFrame(const char* pCompressed, char* pDecompressedBytes)
-{
-	// Validate inputs
-	if (!pCompressed || !pDecompressedBytes || !m_DecoderState) {
-		return;
-	}
-
-	if (m_iVersion >= sizeof(g_OpusOpts) / sizeof(g_OpusOpts[0])) {
-		return;
-	}
-
-	const int packetSize = g_OpusOpts[m_iVersion].iPacketSize;
-	const int frameSize = g_OpusOpts[m_iVersion].iRawFrameSize;
-
-	// Use stack buffer with size checking
-	constexpr int MAX_PACKET_SIZE = 1024;
-	if (packetSize > MAX_PACKET_SIZE) {
-		return;
-	}
-
-	unsigned char output[MAX_PACKET_SIZE];
-	const char* in = pCompressed;
-
-	// Convert input bytes to unsigned
-	for (int i = 0; i < packetSize; i++) {
-		output[i] = static_cast<unsigned char>(in[i]);
-	}
-
-	// Decode the frame
-	int result = opus_custom_decode(
-		m_DecoderState,
-		output,
-		packetSize,
-		reinterpret_cast<opus_int16*>(pDecompressedBytes),
-		frameSize
-	);
-
-	// Check for decode errors
-	if (result < 0) {
-		// Handle error - could log or set an error state
-		// For now, we'll zero out the output
-		memset(pDecompressedBytes, 0, frameSize * BYTES_PER_SAMPLE);
-	}
-}
-
-bool VoiceEncoder_Opus::ResetState()
-{
-	opus_custom_encoder_ctl(m_EncoderState, OPUS_RESET_STATE );
-	opus_custom_decoder_ctl(m_DecoderState, OPUS_RESET_STATE );
-
-	return true;
-}
-
-bool VoiceEncoder_Opus::InitStates()
-{
-	if ( !m_EncoderState || !m_DecoderState )
-		return false;
-	// Add these controls:
-	opus_custom_encoder_ctl(m_EncoderState, OPUS_SET_SIGNAL(OPUS_SIGNAL_VOICE));
-	opus_custom_encoder_ctl(m_EncoderState, OPUS_SET_VBR(1));
-	opus_custom_encoder_ctl(m_EncoderState, OPUS_SET_COMPLEXITY(10)); // Maximum complexity
-	opus_custom_encoder_ctl(m_EncoderState, OPUS_SET_DTX(1));      // Enable discontinuous transmission
-
-
-	opus_custom_encoder_ctl(m_EncoderState, OPUS_RESET_STATE );
-	opus_custom_decoder_ctl(m_DecoderState, OPUS_RESET_STATE );
-
-	return true;
-}
-
-void VoiceEncoder_Opus::TermStates()
-{
-	if( m_EncoderState )
-	{
-		opus_custom_encoder_destroy( m_EncoderState );
-		m_EncoderState = NULL;
-	}
-
-	if( m_DecoderState )
-	{
-		opus_custom_decoder_destroy( m_DecoderState );
-		m_DecoderState = NULL;
-	}
-
-	opus_custom_mode_destroy( m_Mode );
-}
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 {
 	return TRUE;
