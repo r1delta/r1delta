@@ -100,10 +100,12 @@ private:
 	OpusDecoder* m_DecoderState;
 	int m_iVersion;
 	float m_smoothedGain = 1.0f;
-	static constexpr float NOISE_THRESHOLD = 2000.0f;
-	static constexpr float RELEASE_TIME = 0.1f;
+	// Much lower threshold, much faster response time
+	static constexpr float NOISE_THRESHOLD = 500.0f;  // Was 2000.0f
+	static constexpr float RELEASE_TIME = 0.01f;      // Was 0.1f - 10x faster
 
 	void PreprocessFrame(int16_t* samples, int numSamples, int sampleRate) {
+		// Faster smoothing coefficient due to shorter release time
 		float smoothingCoeff = 1.0f - exp(-1.0f / (sampleRate * RELEASE_TIME));
 
 		for (int i = 0; i < numSamples; i++) {
