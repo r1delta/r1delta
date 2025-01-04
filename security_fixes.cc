@@ -794,7 +794,7 @@ security_fixes_init()
 void
 security_fixes_engine(uintptr_t engine_base)
 {
-	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E1230), &CNetChan__ProcessControlMessage, reinterpret_cast<LPVOID*>(&oCNetChan__ProcessControlMessage)) == MH_OK);
+	//R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E1230), &CNetChan__ProcessControlMessage, reinterpret_cast<LPVOID*>(&oCNetChan__ProcessControlMessage)) == MH_OK);
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x27EA0), &CBaseClientState__ProcessGetCvarValue, NULL) == MH_OK);
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x536F0), &CL_CopyExistingEntity, reinterpret_cast<LPVOID*>(&oCL_CopyExistingEntity)) == MH_OK);
 
