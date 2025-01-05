@@ -13,7 +13,6 @@
 #include <Psapi.h>
 #include <winternl.h>
 #include <immintrin.h>
-
 #pragma comment(lib, "Imm32.lib")
 
 namespace fs = std::filesystem;
@@ -441,6 +440,107 @@ int RunAudioInstallerIfNecessary() {
 	return static_cast<int>(exitCode);
 }
 
+std::wstring GetSteamDllPath()
+{
+	wchar_t pathString[512];
+	DWORD pathStringSize = sizeof(pathString);
+
+	if (RegGetValue(HKEY_CURRENT_USER, L"Software\\Valve\\Steam\\ActiveProcess", L"SteamClientDll64", RRF_RT_REG_SZ, nullptr, pathString, &pathStringSize) == ERROR_SUCCESS)
+	{
+		return pathString;
+	}
+
+	return L"";
+}
+#define VFUNC_OF(a, off) (*reinterpret_cast<void***>(a))[off]
+
+class CGameID {
+public:
+	CGameID(int appid, int type, int modid) : m_nAppID(appid), m_nType(type), m_nModID(modid) {};
+	unsigned int m_nAppID : 24;
+	unsigned int m_nType : 8;
+	unsigned int m_nModID : 32;
+};
+
+
+void DoSteamStart(PSTR lpCmdLine) {
+	auto concatInterface = [](const char* name, int version) -> std::string {
+		std::stringstream ss;
+		ss << name;
+		ss << std::setfill('0') << std::setw(3) << version;
+		return ss.str();
+		};
+
+	std::wstring steamclientDll = GetSteamDllPath();
+	if (steamclientDll == L"") {
+		MessageBox(nullptr, L"Couldn't locate steamclient!", L"R1", 0);
+		return;
+	}
+
+	// add steam directory to path
+	auto idx = steamclientDll.find_last_of('\\');
+	std::wstring steamDirectory = steamclientDll.substr(0, idx + 1);
+	steamDirectory += L";";
+
+	wchar_t* PATH_VAR = new wchar_t[65535]; // grr extended windows path limit
+	memcpy(PATH_VAR, steamDirectory.data(), sizeof(wchar_t) * steamDirectory.size());
+	int written = GetEnvironmentVariable(L"PATH", PATH_VAR + steamDirectory.size(), static_cast<DWORD>(sizeof(PATH_VAR) - steamDirectory.size()));
+	PATH_VAR[written + 1] = '\0';
+	SetEnvironmentVariableW(L"PATH", PATH_VAR);
+	delete[] PATH_VAR;
+
+	// Load steamclient64.dll
+	HMODULE steamclient64 = LoadLibrary(steamclientDll.c_str());
+	if (!steamclient64) {
+		MessageBox(nullptr, L"Couldn't load steamclient!", L"R1", 0);
+		return;
+	}
+
+	// Get all the stuff we need from steam
+	using fnCreateInterface = void* (*)(const char*, int*);
+	fnCreateInterface CreateInterface = reinterpret_cast<fnCreateInterface>(GetProcAddress(steamclient64, "CreateInterface"));
+	void* clientEngine = nullptr;
+	for (int i = 5; i < 1000; i++) {
+		clientEngine = CreateInterface(concatInterface("CLIENTENGINE_INTERFACE_VERSION", i).c_str(), NULL);
+		if (clientEngine) {
+			break;
+		}
+	}
+	if (!clientEngine) {
+		MessageBox(nullptr, L"Couldn't get CLIENTENGINE_INTERFACE_VERSION", L"R1", 0);
+		return;
+	}
+
+
+	using fnCreateSteamPipe = std::uint32_t(*)();
+	std::uint32_t pipe = reinterpret_cast<fnCreateSteamPipe>(GetProcAddress(steamclient64, "Steam_CreateSteamPipe"))();
+
+	using fnConnectToGlobalUser = std::uint32_t(*)(std::uint32_t pipe);
+	std::uint32_t user = reinterpret_cast<fnConnectToGlobalUser>(GetProcAddress(steamclient64, "Steam_ConnectToGlobalUser"))(pipe);
+
+	using fnGetClientUser = void* (__thiscall*)(void*, std::uint32_t, std::uint32_t);
+	void* clientUser = reinterpret_cast<fnGetClientUser>(VFUNC_OF(clientEngine, 8))(clientEngine, user, pipe);
+
+	using fnCreateProcess = void(__thiscall*)(void* thisptr, const char* path, const char* commandline, const char* startdirectory, CGameID* id, const char*, int, int, int, int);
+	using fnBIsSubscribedApp = bool(__thiscall*)(void* thisptr, std::uint32_t appId);
+
+	// todo: offsets change once in a while, consider finding them by the IPC log string dynamically
+	bool ownsTitanfall = reinterpret_cast<fnBIsSubscribedApp>(VFUNC_OF(clientUser, 184))(clientUser, 1454890);
+	CGameID gameID(ownsTitanfall ? 1454890 : 1182480, 1, 0x79dcc3b0 | (0x80000000));
+
+	char currentExecutable[MAX_PATH];
+	GetModuleFileNameA(nullptr, currentExecutable, ARRAYSIZE(currentExecutable));
+	char currentDirectory[MAX_PATH];
+	GetCurrentDirectoryA(sizeof(currentDirectory), currentDirectory);
+
+	std::string commandLine = currentExecutable;
+	commandLine += " -bunny ";
+	commandLine += lpCmdLine;
+
+	fnCreateProcess _CreateProcess = reinterpret_cast<fnCreateProcess>(VFUNC_OF(clientUser, 104));
+	_CreateProcess(clientUser, currentExecutable, commandLine.c_str(), currentDirectory, &gameID, "R1Delta", 0, 0, 0, 0);
+}
+
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine, int nCmdShow)
 {
 	//AllocConsole();
@@ -448,6 +548,23 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine,
 	//FILE *pCout, *pCerr;
 	//freopen_s(&pCout, "conout$", "w", stdout);
 	//freopen_s(&pCerr, "conout$", "w", stderr);
+
+	if (!strstr(lpCmdLine, "-bunny")) {
+		auto exceptionFilter = [](int code) -> int {
+			if (code & 0x80000000) {
+				return EXCEPTION_EXECUTE_HANDLER;
+			}
+			return EXCEPTION_CONTINUE_SEARCH;
+			};
+
+		__try {
+			DoSteamStart(lpCmdLine);
+		}
+		__except (exceptionFilter(GetExceptionCode())) {
+			MessageBox(nullptr, L"Exception while attempting to start through steam, please update R1Delta or open a github issue (or let us know in discord) about this!", L"R1", 0);
+		}
+		return 0;
+	}
 
 	if (!GetExePathWide(exePath, sizeof(exePath)))
 	{
