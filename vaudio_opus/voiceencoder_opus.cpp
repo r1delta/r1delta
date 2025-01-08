@@ -1,9 +1,11 @@
 #include "pch.h"
-#include <span>
-#include <stdio.h>
+#include <cstdint>
+#include <cstdio>
 #include <opus/opus.h>
 #include <opus/opus_custom.h>
-#include <cassert>
+
+#include "../core.h"
+
 #ifndef IVOICECODEC_H
 #define IVOICECODEC_H
 #pragma once
@@ -81,20 +83,7 @@ public:
 
 #define CHANNELS 1
 
-struct opus_options
-{
-	int iSampleRate;
-	int iRawFrameSize;
-	int iPacketSize;
-};
-int g_iSampleRate = 0;
-opus_options g_OpusOpts[] =
-{
-{48000, 128, 64},  // Try this - 128 is a valid power of 2 that might work
-{48000, 128, 64},  // Try this - 128 is a valid power of 2 that might work
-{48000, 128, 64},  // Try this - 128 is a valid power of 2 that might work
-{48000, 128, 64}  // Try this - 128 is a valid power of 2 that might work
-}; class VoiceEncoder_Opus : public IFrameEncoder {
+class VoiceEncoder_Opus : public IFrameEncoder {
 private:
 	OpusEncoder* m_EncoderState;
 	OpusDecoder* m_DecoderState;
@@ -104,11 +93,27 @@ private:
 	static constexpr float NOISE_THRESHOLD = 500.0f;  // Was 2000.0f
 	static constexpr float RELEASE_TIME = 0.01f;      // Was 0.1f - 10x faster
 
-	void PreprocessFrame(int16_t* samples, int numSamples, int sampleRate) {
-		// Faster smoothing coefficient due to shorter release time
-		float smoothingCoeff = 1.0f - exp(-1.0f / (sampleRate * RELEASE_TIME));
+	static constexpr uint16_t SAMPLE_RATE = 24000;
+	static constexpr uint32_t BITRATE = 40000;
+	static constexpr uint32_t COMPLEXITY = 10;
+	static constexpr uint32_t BANDWIDTH = OPUS_BANDWIDTH_FULLBAND;
+	// 10ms
+	static constexpr size_t FRAME_SIZE = 240;
+	static constexpr size_t PACKET_SIZE = 40;
 
-		for (int i = 0; i < numSamples; i++) {
+	void PreprocessFrame(int16_t samples[FRAME_SIZE]) {
+		
+#if BUILD_DEBUG
+		// Faster smoothing coefficient due to shorter release time
+		float smoothingCoeff = 1.0f - expf(-1.0f / (SAMPLE_RATE * RELEASE_TIME));
+#else
+		static_assert(SAMPLE_RATE == 24000);
+		static_assert(RELEASE_TIME == 0.01f);
+		// 1-math.exp(-1/(24000*0.01)) = 0.004157998154890041
+		constexpr float smoothingCoeff = 9362979470485.f / 2251799813685248.f;
+#endif
+
+		for (int i = 0; i < FRAME_SIZE; i++) {
 			float amplitude = std::abs(samples[i]);
 			float targetGain = (amplitude > NOISE_THRESHOLD) ? 1.0f : 0.0f;
 			m_smoothedGain += (targetGain - m_smoothedGain) * smoothingCoeff;
@@ -119,34 +124,34 @@ private:
 public:
 	bool Init(int quality, int samplerate, int& rawFrameSize, int& encodedFrameSize) {
 		int error;
-		m_EncoderState = opus_encoder_create(24000, CHANNELS, OPUS_APPLICATION_VOIP, &error);
+		m_EncoderState = opus_encoder_create(SAMPLE_RATE, CHANNELS, OPUS_APPLICATION_VOIP, &error);
 		if (error != OPUS_OK) {
 			MessageBoxA(NULL, "Encoder State Failed", "Encoder State Failed", 16);
 			return false;
 		}
 
-		m_DecoderState = opus_decoder_create(24000, CHANNELS, &error);
+		m_DecoderState = opus_decoder_create(SAMPLE_RATE, CHANNELS, &error);
 		if (error != OPUS_OK) {
 			MessageBoxA(NULL, "Decoder State Failed", "Decoder State Failed", 16);
 			return false;
 		}
 
 		// Increase bitrate (default is around 32kbps)
-		opus_encoder_ctl(m_EncoderState, OPUS_SET_BITRATE(40000));  // 40kbps
+		opus_encoder_ctl(m_EncoderState, OPUS_SET_BITRATE(BITRATE));  // 40kbps
 
 		// Increase complexity back to 10 for better quality
-		opus_encoder_ctl(m_EncoderState, OPUS_SET_COMPLEXITY(10));
+		opus_encoder_ctl(m_EncoderState, OPUS_SET_COMPLEXITY(COMPLEXITY));
 
 		// Force wider bandwidth mode
-		opus_encoder_ctl(m_EncoderState, OPUS_SET_MAX_BANDWIDTH(OPUS_BANDWIDTH_FULLBAND));
+		opus_encoder_ctl(m_EncoderState, OPUS_SET_MAX_BANDWIDTH(BANDWIDTH));
 
 		// Disable any voice optimizations that might reduce quality
 		opus_encoder_ctl(m_EncoderState, OPUS_SET_APPLICATION(OPUS_APPLICATION_AUDIO));
 		opus_decoder_ctl(m_DecoderState, OPUS_SET_GAIN(0));  // No additional gain
 
 		// Increase the packet size a bit
-		rawFrameSize = 240 * BYTES_PER_SAMPLE;
-		encodedFrameSize = 40;  // Give it more room for better quality
+		rawFrameSize = FRAME_SIZE * BYTES_PER_SAMPLE;
+		encodedFrameSize = PACKET_SIZE;  // Give it more room for better quality
 
 
 		return true;
@@ -156,7 +161,7 @@ public:
 		int16_t samples[240];
 		memcpy(samples, pUncompressed, 240 * BYTES_PER_SAMPLE);
 
-		PreprocessFrame(samples, 240, 24000);
+		PreprocessFrame(samples);
 
 		opus_encode(m_EncoderState,
 			samples,
@@ -218,7 +223,7 @@ public:
 		if (m_pFrameEncoder && m_pFrameEncoder->Init(quality, nSamplesPerSec, m_nRawBytes, m_nEncodedBytes))
 		{
 			m_nRawSamples = m_nRawBytes / BYTES_PER_SAMPLE;
-			assert(m_nRawBytes <= MAX_FRAMEBUFFER_SAMPLES && m_nEncodedBytes <= MAX_FRAMEBUFFER_SAMPLES);
+			R1DAssert(m_nRawBytes <= MAX_FRAMEBUFFER_SAMPLES && m_nEncodedBytes <= MAX_FRAMEBUFFER_SAMPLES);
 			return true;
 		}
 		else
@@ -354,13 +359,10 @@ public:
 
 extern "C" __declspec(dllexport) void* CreateInterface(const char* pName, int* pReturnCode)
 {
-	//return new VoiceCodec_Uncompressed;
-	assert(strcmp(pName, "vaudio_speex") == 0);
+	R1DAssert(strcmp_static(pName, "vaudio_speex") == 0);
 
 	IFrameEncoder* pEncoder = new VoiceEncoder_Opus;
 	return CreateVoiceCodec_Frame(pEncoder);
-
-	//return new VoiceCodec_Uncompressed;
 }
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)

@@ -2,6 +2,24 @@
 #include "filesystem.h"
 #include <shared_mutex>
 
+bool
+FileCache::CheckFileReplace_Internal(std::string_view prefix, std::string_view svFilePath)
+{
+    std::size_t hashedPath = fnv1a_hash(prefix);
+
+    // Inline normalization (replace '/' with '\\')
+    for (char c : svFilePath) {
+        auto c_new = c == '/' ? '\\' : c;
+        hashedPath = FileCache::fnv1a_hash_single(c_new, hashedPath);
+    }
+
+    if (cache.count(hashedPath) > 0) {
+        return true;
+    }
+
+    return false;
+}
+
 bool FileCache::FileExists(const std::string& filePath) {
     std::size_t hashedPath = fnv1a_hash(filePath);
 
@@ -25,29 +43,13 @@ bool FileCache::TryReplaceFile(const char* pszFilePath) {
         svFilePath.remove_prefix(3);
     }
 
-    // Single cache lookup
-    std::vector<std::string_view> paths_to_check = { "r1delta\\" };
     {
         std::shared_lock<std::shared_mutex> lock(cacheMutex); // Use shared lock for reading
-        paths_to_check.insert(paths_to_check.end(), addonsFolderCache.begin(), addonsFolderCache.end());
-    }
 
-    for (const auto& prefix : paths_to_check) {
-        std::string fullPath;
-        fullPath.reserve(prefix.size() + svFilePath.size());
-        fullPath.append(prefix);
+        if (CheckFileReplace_Internal("r1delta\\", svFilePath)) return true;
 
-        // Inline normalization (replace '/' with '\\')
-        for (char c : svFilePath) {
-            fullPath.push_back(c == '/' ? '\\' : c);
-        }
-
-        std::size_t hashedPath = fnv1a_hash(fullPath);
-        {
-            std::shared_lock<std::shared_mutex> lock(cacheMutex); // Use shared lock for reading
-            if (cache.count(hashedPath) > 0) {
-                return true;
-            }
+        for (const auto& prefix : addonsFolderCache) {
+            if (CheckFileReplace_Internal(prefix, svFilePath)) return true;
         }
     }
     return false;
@@ -57,7 +59,7 @@ bool FileCache::TryReplaceFile(const char* pszFilePath) {
 void FileCache::UpdateCache() {
     while (true) {
         std::unordered_set<std::size_t> newCache;
-        std::unordered_set<std::string> newAddonsFolderCache;
+        std::unordered_set<std::string, HashStrings, std::equal_to<>> newAddonsFolderCache;
 
         std::filesystem::create_directories("r1delta/addons");
         ScanDirectory("r1delta", newCache);
@@ -81,7 +83,7 @@ void FileCache::UpdateCache() {
     }
 }
 
-void FileCache::ScanDirectory(const std::filesystem::path& directory, std::unordered_set<std::size_t>& cache, std::unordered_set<std::string>* addonsFolderCache) {
+void FileCache::ScanDirectory(const std::filesystem::path& directory, std::unordered_set<std::size_t>& cache, std::unordered_set<std::string, HashStrings, std::equal_to<>>* addonsFolderCache) {
     try {
         for (const auto& entry : std::filesystem::directory_iterator(directory)) {
             if (entry.is_regular_file()) {

@@ -359,9 +359,6 @@
     <ClCompile Include="persistentdata.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="weaponxdebug.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="netchanwarnings.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

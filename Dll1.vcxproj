@@ -299,7 +299,6 @@
     <ClCompile Include="vsdk\tier1\netadr.cpp" />
     <ClCompile Include="vsdk\tier1\utlbuffer.cpp" />
     <ClCompile Include="vsdk\vstdlib\strtools.cpp" />
-    <ClCompile Include="weaponxdebug.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
