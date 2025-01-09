@@ -60,9 +60,7 @@ uintptr_t CreateFunction(void* func, void* real) {
 	uint8_t* bytes = (uint8_t*)ret;
 
 	if (bytes >= ((uint8_t*)execMem + EXEC_MEM_SIZE)) {
-#if BUILD_DEBUG
-		__debugbreak();
-#endif
+		R1DAssert(!"Unreachable");
 		return 0;
 	}
 

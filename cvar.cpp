@@ -32,6 +32,8 @@
 // ======------------------==------------------------==+++***************************######%%
 // =========-----===--------==------------------------==++********#*#####**#######*########%%
 
+#include "core.h"
+
 #include <MinHook.h>
 #include <cstdlib>
 #include <crtdbg.h>	
@@ -265,6 +267,8 @@ const ConCommandBaseR1O* CCVar_FindCommandBase2(uintptr_t thisptr, const char* n
 }
 
 ConVarR1O* CCVar_FindVar(uintptr_t thisptr, const char* var_name) {
+	ZoneScoped;
+	
 	//std::cout << __FUNCTION__ << ": " << var_name << std::endl;
 	auto it = ccBaseMap.find(var_name);
 	ConVarR1O* r1optr = it == ccBaseMap.end() ? NULL : (ConVarR1O*)it->second->r1optr;
@@ -280,6 +284,9 @@ static bool cvar_recursive = false;
 void GlobalChangeCallback(ConVarR1* var, const char* pOldValue) {
 	if (cvar_recursive)
 		return;
+
+	ZoneScoped;
+
 	var = (ConVarR1*)(((uintptr_t)var) - 48);
 
 	static uintptr_t physics_scaled_mem_val = 0;
@@ -318,6 +325,8 @@ void GlobalChangeCallback(ConVarR1* var, const char* pOldValue) {
 	// unimplemented - impl r1o convar change callbacks
 }
 const ConVarR1O* CCVar_FindVar2(uintptr_t thisptr, const char* var_name) {
+	ZoneScoped;
+	
 	//std::cout << __FUNCTION__ << ": " << var_name << std::endl;
 	//static int iFlag = 0;
 	//static bool bInitDone = false;
@@ -437,6 +446,8 @@ void Con_ColorPrintf(const SourceColor* clr, char* fmt, ...)
 	if (!((*staticGameConsole)->m_pConsole)) return;
 	if (!((*staticGameConsole)->m_pConsole->m_pConsolePanel)) return;
 
+	ZoneScoped;
+	
 	// Create a buffer for the formatted message
 	char pMessage[1024];
 
@@ -445,10 +456,12 @@ void Con_ColorPrintf(const SourceColor* clr, char* fmt, ...)
 	va_start(args, fmt);
 
 	// Format the message
-	vsnprintf(pMessage, sizeof(pMessage), fmt, args);
+	auto len = vsnprintf(pMessage, sizeof(pMessage), fmt, args);
 
 	// Clean up the variable argument list
 	va_end(args);
+
+	ZoneText(pMessage, len);
 
 	// Print the message with color
 	(*staticGameConsole)->m_pConsole->m_pConsolePanel->ColorPrint(*clr, pMessage);

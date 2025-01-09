@@ -1,4 +1,6 @@
-﻿#include <string>
+﻿#include "core.h"
+
+#include <string>
 #include <vector>
 #include <cstring>
 #include <algorithm>

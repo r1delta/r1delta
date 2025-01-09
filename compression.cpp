@@ -58,6 +58,8 @@ fill_mean_std(uint64_t metrics[PERF_METRICS_SIZE], uint32_t idx, float div, floa
 }
 
 void* r1dc_init(void* params) {
+	ZoneScoped;
+
 #if R1DC_USE_ZS1
 	return ZSTD_createDCtx();
 #else
@@ -75,6 +77,8 @@ __int64 r1dc_reinit(void* p) {
 }
 
 __int64 r1dc_deinit(void* p) {
+	ZoneScoped;
+
 #if R1DC_USE_ZS1
 	// NOTE(mrsteyk): did I tell you that I hate C++?
 	ZSTD_freeDCtx((ZSTD_DCtx*)p);
@@ -85,6 +89,8 @@ __int64 r1dc_deinit(void* p) {
 }
 
 __int64 r1dc_decompress(void* p, void* pIn_buf, size_t* pIn_buf_size, void* pOut_buf, size_t* pOut_buf_size, int no_more_input_bytes_flag) {
+	ZoneScoped;
+
 #if R1DC_USE_ZS1
 	auto ret = 0;
 	// NOTE(mrsteyk): did I tell you that I hate C++?
@@ -95,6 +101,7 @@ __int64 r1dc_decompress(void* p, void* pIn_buf, size_t* pIn_buf_size, void* pOut
 	}
 	return ret;
 #else
+#if 0
 	const float div = g_PerformanceFrequency / 1000;
 
 	LARGE_INTEGER start, end;
@@ -133,6 +140,13 @@ __int64 r1dc_decompress(void* p, void* pIn_buf, size_t* pIn_buf_size, void* pOut
 	}
 
 	return ret;
+#else
+	auto ret =  reinterpret_cast<decltype(&r1dc_decompress)>(lzham_decompressor_decompress)(p, pIn_buf, pIn_buf_size, pOut_buf, pOut_buf_size, no_more_input_bytes_flag);
+	TracyPlot("r1dc_decompress_memory_in", (int64_t)*pIn_buf_size);
+	TracyPlot("r1dc_decompress_memory_out", (int64_t)*pOut_buf_size);
+
+	return ret;
+#endif
 #endif
 }
 
@@ -148,6 +162,7 @@ uintptr_t __fastcall OpenForRead_hk(
 	uint64_t* a6,
 	uint64_t a7)
 {
+#if 0
 	//fprintf(stdout, "OpenForRead: [%s]%s(%s) a7=%llX\n", pathid ? pathid : "NULLPTR", filepath, mode ? mode : "NULLMODE", a7);
 	
 	const float div = g_PerformanceFrequency / 1000;
@@ -188,6 +203,44 @@ uintptr_t __fastcall OpenForRead_hk(
 	OutputDebugStringA(tmp);
 
 	return cfh;
+#endif
+	ZoneScoped;
+	ZoneTextF("Open: [%s]%s(%s)", pathid ? pathid : "(NULL)", filepath, mode ? mode : "(NULL)");
+	return reinterpret_cast<decltype(&OpenForRead_hk)>(OpenForRead_o)(a1, filepath, mode, pathid, a5, a6, a7);
+}
+
+// NOTE(mrsteyk): idk if name is correct...
+void* CPackedStore__ReadData_o = nullptr;
+__int64 __fastcall CPackedStore__ReadData_hk(
+	__int64 a1,
+	unsigned int* a2,
+	char* a3,
+	signed __int64 a4,
+	uint64_t* a5)
+{
+	ZoneScoped;
+	ZoneTextF("%p", a5);
+
+	auto ret = reinterpret_cast<decltype(&CPackedStore__ReadData_hk)>(CPackedStore__ReadData_o)(a1, a2, a3, a4, a5);
+
+	return ret;
+}
+void* CPackedStore__CachedRead_o = nullptr;
+__int64 __fastcall CPackedStore__CachedRead_hk(
+	__int64 a1,
+	__int64 a2,
+	unsigned int* a3,
+	unsigned __int64 a4,
+	char* a5,
+	__int64(__fastcall* a6)(__int64))
+{
+	ZoneScoped;
+
+	auto ret = reinterpret_cast<decltype(&CPackedStore__CachedRead_hk)>(CPackedStore__CachedRead_o)(a1, a2, a3, a4, a5, a6);
+
+	ZoneValue(ret);
+
+	return ret;
 }
 
 void InitCompressionHooks() {
@@ -201,11 +254,14 @@ void InitCompressionHooks() {
 #endif
 
 	//~ mrsteyk: profile...
+	if constexpr (BUILD_PROFILE)
 	{
 		auto fs = G_filesystem_stdio;
 		auto open_for_read_ptr = LPVOID(fs + 0x19C00);
-		//MH_CreateHook(open_for_read_ptr, OpenForRead_hk, &OpenForRead_o);
-		//MH_CreateHook(LPVOID(fs + 0x753B0), r1dc_decompress, &lzham_decompressor_decompress);
+		MH_CreateHook(open_for_read_ptr, OpenForRead_hk, &OpenForRead_o);
+		MH_CreateHook(LPVOID(fs + 0x753B0), r1dc_decompress, &lzham_decompressor_decompress);
+		MH_CreateHook(LPVOID(fs + 0x72410), CPackedStore__CachedRead_hk, &CPackedStore__CachedRead_o);
+		MH_CreateHook(LPVOID(fs + 0x6BD20), CPackedStore__ReadData_hk, &CPackedStore__ReadData_o);
 		MH_EnableHook(MH_ALL_HOOKS);
 	}
 }

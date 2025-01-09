@@ -69,6 +69,8 @@ std::wstring StringToWide(const std::string_view& str) {
 // Helper function to convert wide string to string
 // NOTE(mrsteyk): null terminated
 char* WideToStringArena(Arena* arena, const std::wstring_view& wide) {
+	ZoneScoped;
+
 	if (wide.empty()) return arena_strdup(arena, "", 0);
 	int size = WideCharToMultiByte(CP_UTF8, 0, wide.data(), (int)wide.size(), nullptr, 0, nullptr, nullptr);
 	auto ret = (char*)arena_push(arena, size + 1);
@@ -86,6 +88,8 @@ struct String16
 // Helper function to convert string to wide string
 // NOTE(mrsteyk): null terminated
 String16 StringToWideArena(Arena* arena, const std::string_view& str) {
+	ZoneScoped;
+	
 	if (str.empty()) return { arena_wstrdup(arena, L"", 0), 0 };
 	int size = MultiByteToWideChar(CP_UTF8, 0, str.data(), (int)str.size(), nullptr, 0);
 	auto ret = (wchar_t*)arena_push(arena, (size + 1) * sizeof(wchar_t));
@@ -147,6 +151,7 @@ public:
 	}
 
 	void ResolveHostToIPv4(const wchar_t* host) {
+		ZoneScoped;
 
 		ADDRINFOW hints = {};
 		hints.ai_family = AF_INET; // Only IPv4
@@ -183,6 +188,8 @@ public:
 	U8Array SendRequest(Arena* perm, const String16 host, const wchar_t* path,
 		const U8Array data, bool isPost = true, bool ipv4_force = true)
 	{
+		ZoneScoped;
+		
 		if (!hSession) return {0, 0};
 
 		auto arena = tctx.get_arena_for_scratch(&perm, 1);
@@ -323,6 +330,8 @@ std::string generate_uuid() {
 #endif
 
 SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
+	ZoneScoped;
+	
 	SQObject obj;
 	SQInteger top = sq_gettop(nullptr, v);
 	//Warning("GetServerHeartbeat: Stack top: %d\n", top);
@@ -473,6 +482,8 @@ SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
 	// TODO(mrsteyk): worker thread with ring buffer.
 	// Send using WinHTTP
 	std::thread([](Arena* thread_arena, U8Array sdata) {
+		ZoneScopedN("send heartbeat");
+		
 		WinHttpClient client;
 		auto ms_url = CCVar_FindVar(cvarinterface, "r1d_ms");
 		auto host = StringToWideArena(thread_arena, ms_url->m_Value.m_pszString);
@@ -506,6 +517,8 @@ SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
 	return 1;
 }
 SQInteger GetServerList(HSQUIRRELVM v) {
+	ZoneScoped;
+
 	auto arena = tctx.get_arena_for_scratch();
 	auto temp = TempArena(arena);
 
@@ -635,6 +648,8 @@ SQInteger GetServerList(HSQUIRRELVM v) {
 }
 pCHostState__State_GameShutdown_t oGameShutDown;
 void Hk_CHostState__State_GameShutdown(void* thisptr) {
+	ZoneScoped;
+	
 	static auto hostport_cvar = CCVar_FindVar(cvarinterface, "hostport");
 	static auto host_map_cvar = CCVar_FindVar(cvarinterface, "host_map");
 	if (strlen(host_map_cvar->m_Value.m_pszString) > 2) {

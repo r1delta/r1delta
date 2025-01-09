@@ -33,7 +33,9 @@
 // =========-----===--------==------------------------==++********#*#####**#######*########%%
 
 // (╯°□°)╯︵ ┻━┻ 
-	
+
+#include "core.h"
+
 #include <Windows.h>
 #include <iostream>
 #include "defs.h"
@@ -46,6 +48,8 @@ ServerClassInitFunc ServerClassInit_DT_LocalPlayerExclusiveOriginal;
 ServerClassInitFunc ServerClassInit_DT_TitanSoulOriginal;
 
 void DestroySendProp(SendProp* sendTablePtr, int* sendTableLengthPtr, const char* propname) {
+	ZoneScoped;
+
 	for (int i = 0; i < *sendTableLengthPtr; ++i) {
 		//std::cout << "SendProp name: " << sendTablePtr[i].name << std::endl;
 		if (strcmp(sendTablePtr[i].name, propname) == 0) {
@@ -67,6 +71,8 @@ void DestroySendProp(SendProp* sendTablePtr, int* sendTableLengthPtr, const char
 }
 
 void RenameSendProp(SendProp* sendTablePtr, int* sendTableLengthPtr, const char* currentName, const char* newName) {
+	ZoneScoped;
+
 	for (int i = 0; i < *sendTableLengthPtr; ++i) {
 		if (strcmp(sendTablePtr[i].name, currentName) == 0) {
 			sendTablePtr[i].name = (char*)newName;
@@ -79,6 +85,8 @@ void RenameSendProp(SendProp* sendTablePtr, int* sendTableLengthPtr, const char*
 }
 
 SendProp* FindSendProp(SendProp* sendTablePtr, int sendTableLength, const char* propName) {
+	ZoneScoped;
+
 	for (int i = 0; i < sendTableLength; ++i) {
 		if (strcmp(sendTablePtr[i].name, propName) == 0) {
 			return &sendTablePtr[i];
@@ -89,6 +97,8 @@ SendProp* FindSendProp(SendProp* sendTablePtr, int sendTableLength, const char* 
 
 void MoveSendProp(SendProp* sourceTablePtr, int* sourceTableLengthPtr, const char* sourcePropName,
 	SendProp* destTablePtr, int* destTableLengthPtr, const char* destPropName) {
+	ZoneScoped;
+
 	// Find the source send prop
 	for (int i = 0; i < *sourceTableLengthPtr; ++i) {
 		if (strcmp(sourceTablePtr[i].name, sourcePropName) == 0) {
@@ -112,6 +122,7 @@ void MoveSendProp(SendProp* sourceTablePtr, int* sourceTableLengthPtr, const cha
 }
 
 void ServerClassInit_DT_BasePlayer() {
+	ZoneScoped;
 	ServerClassInit_DT_BasePlayerOriginal();
 	ServerClassInit_DT_LocalOriginal();
 	void* serverPtr = (void*)G_server;

@@ -1,3 +1,5 @@
+#include "core.h"
+
 #include "keyvalues.h"
 #include <windows.h>
 #include "bitbuf.h"
@@ -8,6 +10,9 @@
 //#define Assert(...) (0)
 // implementation of the ConVar class
 // heavily based on https://github.com/Mauler125/r5sdk/blob/master/r5dev/vpc/keyvalues.cpp
+
+#undef ARRAYSIZE
+#define ARRAYSIZE(x) (sizeof(x)/sizeof(x[0]))
 
 typedef int HKeySymbol;
 #define INVALID_KEY_SYMBOL (-1)

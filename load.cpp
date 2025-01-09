@@ -32,6 +32,10 @@
 // ======------------------==------------------------==+++***************************######%%
 // =========-----===--------==------------------------==++********#*#####**#######*########%%
 
+#include "core.h"
+#include "arena.hh"
+#include "tctx.hh"
+
 #include "load.h"
 #include <cstdlib>
 #include <crtdbg.h>	
@@ -460,30 +464,11 @@ void CHL2_Player_Precache(uintptr_t a1, uintptr_t a2) {
 		}
 	}
 }
-bool isProcessingSendTables = false;
-typedef char* (__cdecl* COM_StringCopyType)(char* in);
-COM_StringCopyType COM_StringCopyOriginal;
-char* __cdecl COM_StringCopy(char* in)
-{
-	if (isProcessingSendTables) {
-		std::ofstream file("test.txt", std::ios::app);
-		file << in << "\n";
-		file.close();
-	}
-	return COM_StringCopyOriginal(in);
-}
-typedef char(__fastcall* DataTable_SetupReceiveTableFromSendTableType)(__int64, __int64);
-DataTable_SetupReceiveTableFromSendTableType DataTable_SetupReceiveTableFromSendTableOriginal;
-char __fastcall DataTable_SetupReceiveTableFromSendTable(__int64 a1, __int64 a2)
-{
-	isProcessingSendTables = true;
-	char ret = DataTable_SetupReceiveTableFromSendTableOriginal(a1, a2);
-	isProcessingSendTables = false;
-	return ret;
-}
 
 int32_t ReadConnectPacket2015AndWriteConnectPacket2014(bf_read& msg, bf_write& buffer)
 {
+	ZoneScoped;
+
 	char type = msg.ReadByte();
 	if (type != 'A')
 	{
@@ -569,6 +554,8 @@ ProcessConnectionlessPacketType ProcessConnectionlessPacketOriginal;
 double lastReceived = 0.f;
 char __fastcall ProcessConnectionlessPacketDedi(unsigned int* a1, netpacket_s* a2)
 {
+	ZoneScoped;
+
 	char buffer[1200] = { 0 };
 	bf_write writer(reinterpret_cast<char*>(buffer), sizeof(buffer));
 
@@ -1122,20 +1109,6 @@ Enforce a maximum length of 32 characters.
 	CBaseClientSetNameOriginal(thisptr, nameBuffer);
 }
 
-
-
-typedef void* (*CEntityFactoryDictionary__CreateType)(void* thisptr, const char* pClassName);
-CEntityFactoryDictionary__CreateType CEntityFactoryDictionary__CreateOriginal;
-void* CEntityFactoryDictionary__Create(void* thisptr, const char* pClassName) {
-	if (strstr(pClassName, "prop_physics") != NULL) {// && uintptr_t(_ReturnAddress()) != mapload) {
-		pClassName = "prop_dynamic_override";
-	}
-	/*if(strstr(pClassName, "prop_control_panel") != NULL) {
-		pClassName = "prop_dynamic";
-	}*/
-	return CEntityFactoryDictionary__CreateOriginal(thisptr, pClassName);
-}
-
 /**
  * Validates and processes the sign-on state from a network buffer.
  *
@@ -1264,6 +1237,8 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 }
 __forceinline void DebugConnectMsg(int node1, int node2, const char* pszFormat, ...)
 {
+	ZoneScoped;
+
 	// Stack-allocated buffer for the complete format string
 	char finalFormat[512];  // Adjust size as needed
 	snprintf(finalFormat, sizeof(finalFormat), "node 1: %%d node 2: %%d: %s", pszFormat);
@@ -1531,6 +1506,20 @@ void __stdcall LoaderNotificationCallback(
 	void* context) {
 	if (notification_reason != LDR_DLL_NOTIFICATION_REASON_LOADED)
 		return;
+	
+	ZoneScoped;
+#if BUILD_PROFILE
+	if (ZoneIsActive)
+	{
+		extern char* WideToStringArena(Arena* arena, const std::wstring_view & wide);
+		auto arena = tctx.get_arena_for_scratch();
+		auto temp = TempArena(arena);
+
+		auto s = WideToStringArena(arena, std::wstring_view(notification_data->Loaded.BaseDllName->Buffer, notification_data->Loaded.BaseDllName->Length));
+		ZoneTextF(s, strlen(s));
+	}
+#endif
+	
 	doBinaryPatchForFile(notification_data->Loaded);
 
 	auto name = notification_data->Loaded.BaseDllName->Buffer;
@@ -1539,12 +1528,11 @@ void __stdcall LoaderNotificationCallback(
 		G_filesystem_stdio = (uintptr_t)notification_data->Loaded.DllBase;
 		InitCompressionHooks();
 	}
-
-	if (strcmp_static(name, L"engine.dll") == 0) {
+	else if (strcmp_static(name, L"engine.dll") == 0) {
 		do_engine(notification_data);
 		should_init_security_fixes = true;
 	}
-	if (strcmp_static(name, L"engine_ds.dll") == 0) {
+	else if (strcmp_static(name, L"engine_ds.dll") == 0) {
 		G_engine_ds = (uintptr_t)notification_data->Loaded.DllBase;
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x433C0), &ProcessConnectionlessPacketDedi, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x30FE20), &StringCompare_AllTalkHookDedi, reinterpret_cast<LPVOID*>(&oStringCompare_AllTalkHookDedi));
@@ -1553,17 +1541,19 @@ void __stdcall LoaderNotificationCallback(
 		constexpr auto a = (1 << 2);
 		should_init_security_fixes = true;
 	}
+	else {
+		bool is_client = !strcmp_static(name, L"client.dll");
+		bool is_server = !is_client && !strcmp_static(name, L"server.dll");
 
-	bool is_client = !strcmp_static(name, L"client.dll");
-	bool is_server = !strcmp_static(name, L"server.dll");
-
-	if (is_client) {
-		G_client = (uintptr_t)notification_data->Loaded.DllBase;
-		InitClient();
-	}
-	if (is_server) do_server(notification_data);
-	if (should_init_security_fixes && (is_client || is_server)) {
-		security_fixes_init();
-		should_init_security_fixes = false;
+		if (is_client) {
+			G_client = (uintptr_t)notification_data->Loaded.DllBase;
+			InitClient();
+		}
+		if (is_server) do_server(notification_data);
+		R1DAssert(!should_init_security_fixes && (is_client || is_server));
+		if (should_init_security_fixes && (is_client || is_server)) {
+			security_fixes_init();
+			should_init_security_fixes = false;
+		}
 	}
 }

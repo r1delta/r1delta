@@ -1,3 +1,5 @@
+#include "core.h"
+
 #include "bitbuf.h"
 #include "dedicated.h"
 #include "logging.h"

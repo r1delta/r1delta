@@ -18,6 +18,8 @@ signed __int64 __fastcall sub_1806580E0(char* a1, signed __int64 a2, const char*
 // write access to const memory has been detected, the output may be wrong!
 const char* PredictionErrorFn(__int64 thisptr, const datamap_t* pCurrentMap, const typedescription_t* pField, const char* fmt, ...)
 {
+	ZoneScoped;
+	
 	++*(DWORD*)(thisptr + 32);
 	const char* fieldname = "empty";
 	const char* classname = "empty";

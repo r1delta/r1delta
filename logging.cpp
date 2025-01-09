@@ -114,6 +114,9 @@ typedef void (*Cbuf_AddTextType)(int a1, const char* a2, unsigned int a3);
 Cbuf_AddTextType Cbuf_AddTextOriginal;
 static bool bDone = false;
 void Cbuf_AddText(int a1, const char* a2, unsigned int a3) {
+	ZoneScoped;
+	ZoneText(a2, strlen(a2));
+	
 	if (!bDone) {
 		bDone = true;
 		OriginalCCVar_FindVar(cvarinterface, "cl_updaterate")->m_nFlags &= ~(FCVAR_HIDDEN | FCVAR_DEVELOPMENTONLY);
@@ -321,6 +324,8 @@ char* SafeFormatArena(Arena* arena, const char* format, va_list args) {
 }
 
 void MsgHook(const char* pMsg, ...) {
+	ZoneScoped;
+
 	auto arena = tctx.get_arena_for_scratch();
 	auto temp = TempArena(arena);
 	
@@ -336,6 +341,8 @@ void MsgHook(const char* pMsg, ...) {
 }
 
 void WarningHook(const char* pMsg, ...) {
+	ZoneScoped;
+
 	auto arena = tctx.get_arena_for_scratch();
 	auto temp = TempArena(arena);
 
@@ -351,6 +358,8 @@ void WarningHook(const char* pMsg, ...) {
 }
 
 void Warning_SpewCallStackHook(int iMaxCallStackLength, const char* pMsg, ...) {
+	ZoneScoped;
+
 	auto arena = tctx.get_arena_for_scratch();
 	auto temp = TempArena(arena);
 
@@ -366,6 +375,8 @@ void Warning_SpewCallStackHook(int iMaxCallStackLength, const char* pMsg, ...) {
 }
 
 void DevMsgHook(int level, const char* pMsg, ...) {
+	ZoneScoped;
+
 	auto arena = tctx.get_arena_for_scratch();
 	auto temp = TempArena(arena);
 
@@ -381,6 +392,8 @@ void DevMsgHook(int level, const char* pMsg, ...) {
 }
 
 void DevWarningHook(int level, const char* pMsg, ...) {
+	ZoneScoped;
+	
 	auto arena = tctx.get_arena_for_scratch();
 	auto temp = TempArena(arena);
 
@@ -396,6 +409,8 @@ void DevWarningHook(int level, const char* pMsg, ...) {
 }
 
 void ConColorMsgHook(const Color* clr, const char* pMsg, ...) {
+	ZoneScoped;
+	
 	auto arena = tctx.get_arena_for_scratch();
 	auto temp = TempArena(arena);
 
@@ -411,6 +426,8 @@ void ConColorMsgHook(const Color* clr, const char* pMsg, ...) {
 }
 
 void ConDMsgHook(const char* pMsg, ...) {
+	ZoneScoped;
+	
 	auto arena = tctx.get_arena_for_scratch();
 	auto temp = TempArena(arena);
 
@@ -426,6 +443,8 @@ void ConDMsgHook(const char* pMsg, ...) {
 }
 
 void COM_TimestampedLogHook(const char* pMsg, ...) {
+	ZoneScoped;
+	
 	auto arena = tctx.get_arena_for_scratch();
 	auto temp = TempArena(arena);
 
@@ -440,6 +459,8 @@ void COM_TimestampedLogHook(const char* pMsg, ...) {
 	}
 }
 extern "C" __declspec(dllexport) void Error(const char* pMsg, ...) {
+	ZoneScoped;
+	
 	if (strcmp_static(pMsg, "UserMessageBegin:  Unregistered message '%s'\n") == 0 ||
 		strcmp_static(pMsg, "MESSAGE_END called with no active message\n") == 0) {
 		return;

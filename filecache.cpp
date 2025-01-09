@@ -1,3 +1,5 @@
+#include "core.h"
+
 #include "filecache.h"
 #include "filesystem.h"
 #include <shared_mutex>
@@ -34,6 +36,8 @@ bool FileCache::FileExists(const std::string& filePath) {
     return cache.contains(hashedPath);
 }
 bool FileCache::TryReplaceFile(const char* pszFilePath) {
+    ZoneScoped;
+
     std::string_view svFilePath(pszFilePath);
     if (V_IsAbsolutePath(pszFilePath)) {
         return false;
@@ -84,6 +88,8 @@ void FileCache::UpdateCache() {
 }
 
 void FileCache::ScanDirectory(const std::filesystem::path& directory, std::unordered_set<std::size_t>& cache, std::unordered_set<std::string, HashStrings, std::equal_to<>>* addonsFolderCache) {
+    ZoneScoped;
+
     try {
         for (const auto& entry : std::filesystem::directory_iterator(directory)) {
             if (entry.is_regular_file()) {

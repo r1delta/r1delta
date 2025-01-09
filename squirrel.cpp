@@ -1,5 +1,7 @@
 ﻿#pragma once
 
+#include "core.h"
+
 #include "load.h"
 #include <cstdlib>
 #include <crtdbg.h>	

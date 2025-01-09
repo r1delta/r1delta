@@ -34,6 +34,7 @@
 // ======------------------==------------------------==+++***************************######%%
 // =========-----===--------==------------------------==++********#*#####**#######*########%%
 
+#include "core.h"
 
 #include <MinHook.h>
 #include "load.h"
@@ -70,27 +71,48 @@ const CPUInformation* GetCPUInformationDet()
 	return result;
 }
 
+#if BUILD_PROFILE
+#include "tracy-0.11.1/public/TracyClient.cpp"
+#endif
+
+static int skip_dllmain = -1;
+
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 {
 	// make sure we're game and not tools
-	char path[MAX_PATH];
-	if (GetModuleFileNameA(NULL, path, MAX_PATH)) {
-		char* exeName = strrchr(path, '\\') ? strrchr(path, '\\') + 1 : path;
-		if (_stricmp(exeName, "r1delta_ds.exe") != 0 && 
-			_stricmp(exeName, "titanfall.exe") != 0 && 
-			_stricmp(exeName, "r1delta.exe") != 0) { // TODO
-			return TRUE; 
+	if (skip_dllmain == 1)
+	{
+		return TRUE;
+	}
+	else if (skip_dllmain == -1)
+	{
+		char path[MAX_PATH];
+		if (GetModuleFileNameA(NULL, path, MAX_PATH)) {
+			char* exeName = strrchr(path, '\\') ? strrchr(path, '\\') + 1 : path;
+			if (_stricmp(exeName, "r1delta_ds.exe") != 0 &&
+				_stricmp(exeName, "titanfall.exe") != 0 &&
+				_stricmp(exeName, "r1delta.exe") != 0) { // TODO
+				skip_dllmain = 1;
+				return TRUE;
+			}
 		}
 	}
 	switch (fdwReason)
 	{
 	case DLL_PROCESS_ATTACH: {
+		skip_dllmain = 0;
+
 		if (!IsDedicatedServer() && !IsNoConsole())
 		{
 			AllocConsole();
 			SetConsoleTitleW(L"R1Delta");
 			freopen("CONOUT$", "wt", stdout);
 		}
+
+#if BUILD_PROFILE
+		TracyPlotConfig("r1dc_decompress_memory_in", tracy::PlotFormatType::Memory, false, true, 0);
+		TracyPlotConfig("r1dc_decompress_memory_out", tracy::PlotFormatType::Memory, false, true, 0);
+#endif
 
 		LARGE_INTEGER freq;
 		QueryPerformanceFrequency(&freq);
@@ -119,8 +141,8 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 		}
 
 		LoadLibraryW(L"OnDemandConnRouteHelper"); // stop fucking reloading this thing
-		LoadLibraryA("TextShaping.dll"); // fix "Patcher Error" dialogs having no text
-		SetDllDirectory(L"r1delta\\bin");
+		LoadLibraryW(L"TextShaping.dll"); // fix "Patcher Error" dialogs having no text
+		SetDllDirectoryW(L"r1delta\\bin");
 
 		MH_Initialize();
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("tier0_orig.dll"), "GetCPUInformation"), &GetCPUInformationDet, reinterpret_cast<LPVOID*>(&GetCPUInformationOriginal));

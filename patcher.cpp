@@ -32,6 +32,8 @@
 // ======------------------==------------------------==+++***************************######%%
 // =========-----===--------==------------------------==++********#*#####**#######*########%%
 
+#include "core.h"
+
 #include "load.h"
 #include <cstdlib>
 #include <crtdbg.h>	
@@ -66,6 +68,8 @@ struct PatchInstruction {
 // Helper function to convert hex string to bytes
 
 std::vector<unsigned char> hexStringToBytes(const std::string& hexStr) {
+    ZoneScoped;
+
     std::vector<unsigned char> bytes;
     std::istringstream hexStream(hexStr);
     std::string byteString;
@@ -85,6 +89,8 @@ std::vector<unsigned char> hexStringToBytes(const std::string& hexStr) {
 
 // Helper function to parse byte string, handling escape sequences
 std::vector<unsigned char> parseByteString(const std::string& byteStr) {
+    ZoneScoped;
+    
     std::vector<unsigned char> bytes;
     for (size_t i = 0; i < byteStr.length(); ++i) {
         if (byteStr[i] == '\\' && i + 1 < byteStr.length() && byteStr[i + 1] == 'x') {
@@ -100,6 +106,8 @@ std::vector<unsigned char> parseByteString(const std::string& byteStr) {
 }
 
 std::vector<PatchInstruction> ParsePatchFile(const std::string& filePath) {
+    ZoneScoped;
+    
     std::vector<PatchInstruction> instructions;
     std::ifstream file(filePath);
     std::string line;
@@ -152,6 +160,8 @@ std::vector<PatchInstruction> ParsePatchFile(const std::string& filePath) {
 }
 
 std::string UnicodeToString(PCUNICODE_STRING unicodeString) {
+    ZoneScoped;
+    
     if (!unicodeString || !unicodeString->Buffer) return "";
 
     // Calculate the size required for the new string
@@ -177,6 +187,8 @@ Patch(void* addr, const std::vector<uint8_t>& bytes) {
 }
 
 bool ApplyPatch(const PatchInstruction& instruction, void* targetModuleBase) {
+    ZoneScoped;
+    
     // NOTE(mrsteyk): CModule was being constructed every single fucking time anyway
     auto mz = (PIMAGE_DOS_HEADER)targetModuleBase;
     auto pe = (PIMAGE_NT_HEADERS64)((uint8_t*)targetModuleBase + mz->e_lfanew);
@@ -227,6 +239,8 @@ std::vector<PatchInstruction> patchInstructions;
 
 void
 initialisePatchInstructions() {
+    ZoneScoped;
+    
     // Parse the patch file and get patch instructions
     patchInstructions = ParsePatchFile("r1delta/r1delta.wpatch");
 
@@ -244,6 +258,8 @@ initialisePatchInstructions() {
 
 static inline int
 instruction_compare_module_name(const PatchInstruction& ins, const PCUNICODE_STRING basename) {
+    ZoneScoped;
+    
     // NOTE(mrsteyk): this works on the assumption that all modules are non extended ASCII.
     
     auto len = ins.moduleName.length();
@@ -260,6 +276,8 @@ instruction_compare_module_name(const PatchInstruction& ins, const PCUNICODE_STR
 }
 
 void doBinaryPatchForFile(LDR_DLL_LOADED_NOTIFICATION_DATA data) {
+    ZoneScoped;
+    
     //std::cout << "Started patching for " << moduleName << std::endl;
 
     for (const auto& instruction : patchInstructions) {
