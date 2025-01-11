@@ -7,7 +7,7 @@
 #include "factory.h"
 
 ConVarR1* cvar_net_chan_limit_msec = nullptr;
-
+ConVarR1* cvar_net_maxpacketdrop = nullptr;
 //-
 
 class INetChannelHandler {
@@ -26,6 +26,7 @@ public:
 
 void(__fastcall* oCNetChan__ProcessPacket)(CNetChan*, netpacket_s*, bool);
 bool(__fastcall* oCNetChan___ProcessMessages)(CNetChan*, bf_read*);
+int(__fastcall* oCNetChan__ProcessPacketHeader)(CNetChan*, netpacket_s*);
 bool g_bInProcessMessageClient = false;
 class ProcessMessageScope {
 public:
@@ -140,6 +141,22 @@ void __fastcall CNetChan__ProcessPacket(CNetChan* thisptr, netpacket_s* packet, 
 #endif
 		pMessageHandler->ConnectionCrashed("Max processing time reached");
 	}
+}
+
+
+int __fastcall CNetChan__ProcessPacketHeader(CNetChan* thisptr, netpacket_s* packet) {
+    if (!thisptr)
+        return oCNetChan__ProcessPacketHeader(thisptr, packet);
+    
+    int seqNum = *(int*)((uintptr_t)packet + 84);
+    
+    int m_PacketDrop = seqNum - (thisptr->m_nInSequenceNr + thisptr->m_nChokedPackets + 1);
+
+    if (cvar_net_maxpacketdrop->m_Value.m_nValue > 0 && m_PacketDrop > cvar_net_maxpacketdrop->m_Value.m_nValue) {
+        Msg("CNetChan::ProcessPacketHeader: Packet drop (%d) exceeded limit (%d)\n", m_PacketDrop, cvar_net_maxpacketdrop->m_Value.m_nValue);
+        return -1;
+    }
+    return oCNetChan__ProcessPacketHeader(thisptr, packet);
 }
 
 struct CLC_VoiceData {
@@ -789,6 +806,7 @@ security_fixes_init()
 	ConVarR1* RegisterConVar(const char* name, const char* value, int flags, const char* helpString);
 	cvar_net_chan_limit_msec = RegisterConVar("net_chan_limit_msec", "225", FCVAR_GAMEDLL | FCVAR_CHEAT, "Netchannel processing is limited to so many milliseconds, abort connection if exceeding budget");
 	R1DAssert(cvar_net_chan_limit_msec);
+    cvar_net_maxpacketdrop = RegisterConVar("net_maxpacketdrop", "net_maxpacketdrop", 0, "Ignore any packets with the sequence number more than this ahead (0 == no limit)");
 }
 
 void
@@ -799,7 +817,8 @@ security_fixes_engine(uintptr_t engine_base)
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x536F0), &CL_CopyExistingEntity, reinterpret_cast<LPVOID*>(&oCL_CopyExistingEntity)) == MH_OK);
 
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E96E0), &CNetChan__ProcessPacket, reinterpret_cast<LPVOID*>(&oCNetChan__ProcessPacket)) == MH_OK);
-	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E51D0), &CNetChan___ProcessMessages, reinterpret_cast<LPVOID*>(&oCNetChan___ProcessMessages)) == MH_OK);
+    R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E73C0), &CNetChan__ProcessPacketHeader, reinterpret_cast<LPVOID*>(&oCNetChan__ProcessPacketHeader)) == MH_OK);
+    R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E51D0), &CNetChan___ProcessMessages, reinterpret_cast<LPVOID*>(&oCNetChan___ProcessMessages)) == MH_OK);
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0xDA330), &CGameClient__ProcessVoiceData, reinterpret_cast<LPVOID*>(&oCGameClient__ProcessVoiceData)) == MH_OK);
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x17D400), &CClientState__ProcessUserMessage, reinterpret_cast<LPVOID*>(&oCClientState__ProcessUserMessage)) == MH_OK);
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x17D600), &CClientState__ProcessVoiceData, reinterpret_cast<LPVOID*>(&oCClientState__ProcessVoiceData)) == MH_OK);
