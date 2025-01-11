@@ -1550,7 +1550,6 @@ void __stdcall LoaderNotificationCallback(
 			InitClient();
 		}
 		if (is_server) do_server(notification_data);
-		R1DAssert(!should_init_security_fixes && (is_client || is_server));
 		if (should_init_security_fixes && (is_client || is_server)) {
 			security_fixes_init();
 			should_init_security_fixes = false;

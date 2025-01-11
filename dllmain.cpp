@@ -71,6 +71,121 @@ const CPUInformation* GetCPUInformationDet()
 	return result;
 }
 
+static void
+nvapi_stuff()
+{
+	auto nv = LoadLibraryExW(L"nvapi64.dll", 0, LOAD_LIBRARY_SEARCH_SYSTEM32);
+	if (!nv)
+	{
+		return;
+	}
+
+	using nvapi_queryiface_t = void*(__fastcall*)(uintptr_t);
+	auto nvapi_queryiface = (nvapi_queryiface_t)GetProcAddress(nv, "nvapi_QueryInterface");
+
+	using nvapi_start_call_profile_t = int32_t(__fastcall*)(uintptr_t, uintptr_t*);
+	using nvapi_end_call_profile_t = int32_t(__fastcall*)(uintptr_t, uintptr_t, uint64_t);
+	auto nvapi_start_call = (nvapi_start_call_profile_t)nvapi_queryiface(0x33C7358C);
+	auto nvapi_end_call = (nvapi_end_call_profile_t)nvapi_queryiface(0x593E8644);
+
+	if (!nvapi_start_call || !nvapi_end_call)
+	{
+		nvapi_start_call = nullptr;
+		nvapi_end_call = nullptr;
+	}
+
+	int32_t nvret = 0;
+#define NVAPI_CALL(id, X) { uintptr_t hprofile; if (nvapi_start_call) nvapi_start_call(id, &hprofile); nvret = X; if (nvapi_end_call) nvapi_end_call(id, hprofile, nvret); }
+
+	constexpr uintptr_t nvapi_get_session_id = 0x694D52E;
+	using nvapi_get_session_t = int32_t(__fastcall*)(uintptr_t*);
+	auto nvapi_get_session = (nvapi_get_session_t)nvapi_queryiface(nvapi_get_session_id);
+
+	constexpr uintptr_t nvapi_end_session_id = 0xDAD9CFF8;
+	using nvapi_end_session_t = int32_t(__fastcall*)(uintptr_t);
+	auto nvapi_end_session = (nvapi_end_session_t)nvapi_queryiface(nvapi_end_session_id);
+
+	constexpr uintptr_t nvapi_load_settings_id = 0x375DBD6B;
+	using nvapi_load_settings_t = int32_t(__fastcall*)(uintptr_t);
+	auto nvapi_load_settings = (nvapi_load_settings_t)nvapi_queryiface(nvapi_load_settings_id);
+
+	constexpr uintptr_t nvapi_profile_by_name_id = 0x7E4A9A0B;
+	using nvapi_profile_by_name_t = int32_t(__fastcall*)(uintptr_t, const wchar_t*, uintptr_t*);
+	auto nvapi_profile_by_name = (nvapi_profile_by_name_t)nvapi_queryiface(nvapi_profile_by_name_id);
+
+	constexpr uintptr_t nvapi_create_app_id = 0x4347A9DE;
+	using nvapi_create_app_t = int32_t(__fastcall*)(uintptr_t, uintptr_t, void*);
+	auto nvapi_create_app = (nvapi_create_app_t)nvapi_queryiface(nvapi_create_app_id);
+
+	if (!nvapi_get_session || !nvapi_end_session || !nvapi_load_settings || !nvapi_profile_by_name_id || !nvapi_create_app)
+	{
+		return;
+	}
+
+	uintptr_t handle = 0;
+	NVAPI_CALL(nvapi_get_session_id, nvapi_get_session(&handle));
+	if (nvret)
+	{
+		printf("NVAPI: nvapi_get_session fail 0x%X (%d)", nvret, nvret);
+		return;
+	}
+
+	NVAPI_CALL(nvapi_load_settings_id, nvapi_load_settings(handle));
+
+	uintptr_t profile = 0;
+	NVAPI_CALL(nvapi_profile_by_name_id, nvapi_profile_by_name(handle, L"TitanFall", &profile));
+	if (nvret)
+	{
+		printf("NVAPI: nvapi_profile_by_name fail 0x%X (%d)", nvret, nvret);
+		return;
+	}
+	else {
+		struct app_info_t
+		{
+			uint32_t struct_ver;
+			uint32_t blergh;
+			wchar_t app_name[2048];
+			wchar_t app_name2[2048];
+
+			wchar_t string1[2048];
+			wchar_t string2[2048];
+
+			uint32_t flags;
+
+			wchar_t string3[2048];
+		};
+		static_assert(sizeof(app_info_t) == 20492);
+
+		app_info_t ai;
+		memset(&ai, 0, sizeof(ai));
+		ai.struct_ver = 0x4500C;
+
+		memcpy(ai.app_name, L"r1delta.exe", sizeof(L"r1delta.exe"));
+		memcpy(ai.app_name2, L"r1delta.exe", sizeof(L"r1delta.exe"));
+		
+		NVAPI_CALL(nvapi_create_app_id, nvapi_create_app(handle, profile, &ai));
+		if (nvret)
+		{
+			// NOTE(mrsteyk): this can fail if we are already added to "TitanFall" profile.
+			//printf("NVAPI: nvapi_create_app fail 0x%X (%d)", nvret, nvret);
+			return;
+		} else {
+			NVAPI_CALL(nvapi_load_settings_id, nvapi_load_settings(handle));
+			if (nvret)
+			{
+				printf("NVAPI: nvapi_load_settings fail 0x%X (%d)", nvret, nvret);
+				return;
+			}
+			else
+			{
+				// ergh, idk?
+			}
+		}
+	}
+
+	NVAPI_CALL(nvapi_end_session_id, nvapi_end_session(handle));
+}
+
 #if BUILD_PROFILE
 #include "tracy-0.11.1/public/TracyClient.cpp"
 #endif
@@ -132,6 +247,11 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 				}
 				else {
 					G_is_dedi = 0;
+
+					if (_stricmp(exeName, "r1delta.exe") == 0)
+					{
+						nvapi_stuff();
+					}
 				}
 			}
 			else {
