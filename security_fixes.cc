@@ -148,6 +148,10 @@ int __fastcall CNetChan__ProcessPacketHeader(CNetChan* thisptr, netpacket_s* pac
     if (!thisptr)
         return oCNetChan__ProcessPacketHeader(thisptr, packet);
     
+    if(!packet) {
+        return -1;
+	}
+
     int seqNum = *(int*)((uintptr_t)packet + 84);
     
     int m_PacketDrop = seqNum - (thisptr->m_nInSequenceNr + thisptr->m_nChokedPackets + 1);
