@@ -515,11 +515,27 @@ void DoSteamStart(PSTR lpCmdLine) {
 	using fnCreateSteamPipe = std::uint32_t(*)();
 	std::uint32_t pipe = reinterpret_cast<fnCreateSteamPipe>(GetProcAddress(steamclient64, "Steam_CreateSteamPipe"))();
 
+	if (!pipe) {
+		MessageBox(nullptr, L"Couldn't create steam pipe", L"R1", 0);
+		return;
+	
+	}
+
 	using fnConnectToGlobalUser = std::uint32_t(*)(std::uint32_t pipe);
 	std::uint32_t user = reinterpret_cast<fnConnectToGlobalUser>(GetProcAddress(steamclient64, "Steam_ConnectToGlobalUser"))(pipe);
 
+	if(!user) {
+		MessageBox(nullptr, L"Couldn't connect to global user", L"R1", 0);
+		return;
+	}
+
 	using fnGetClientUser = void* (__thiscall*)(void*, std::uint32_t, std::uint32_t);
 	void* clientUser = reinterpret_cast<fnGetClientUser>(VFUNC_OF(clientEngine, 8))(clientEngine, user, pipe);
+
+	if(!clientUser) {
+		MessageBox(nullptr, L"Couldn't get client user", L"R1", 0);
+		return;
+	}
 
 	using fnCreateProcess = void(__thiscall*)(void* thisptr, const char* path, const char* commandline, const char* startdirectory, CGameID* id, const char*, int, int, int, int);
 	using fnBIsSubscribedApp = bool(__thiscall*)(void* thisptr, std::uint32_t appId);
@@ -549,6 +565,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine,
 	//freopen_s(&pCout, "conout$", "w", stdout);
 	//freopen_s(&pCerr, "conout$", "w", stderr);
 
+
+
 	if (!strstr(lpCmdLine, "-bunny")) {
 		auto exceptionFilter = [](int code) -> int {
 			if (code & 0x80000000) {
@@ -561,6 +579,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine,
 			DoSteamStart(lpCmdLine);
 		}
 		__except (exceptionFilter(GetExceptionCode())) {
+			// print the exception
 			MessageBox(nullptr, L"Exception while attempting to start through steam, please update R1Delta or open a github issue (or let us know in discord) about this!", L"R1", 0);
 		}
 		return 0;
