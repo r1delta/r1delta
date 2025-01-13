@@ -264,6 +264,9 @@
     <ClInclude Include="security_fixes.hh">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="steam.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">
@@ -372,6 +375,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="security_fixes.cc">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="steam.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

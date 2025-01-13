@@ -85,15 +85,15 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>X:\Games\EA\Titanfall\r1delta\bin\</OutDir>
-    <IncludePath>$(ProjectDir)thirdparty\capnp\include;$(ProjectDir)thirdparty\minhook\include;$(ProjectDir)thirdparty\mimalloc\include;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
-    <LibraryPath>$(ProjectDir)thirdparty\capnp\lib\$(Configuration);$(ProjectDir)thirdparty\minhook\lib;$(SolutionDir)thirdparty\mimalloc\$(Configuration);$(VC_LibraryPath_X64);$(WindowsSDK_LibraryPath_x64);$(LibraryPath)</LibraryPath>
+    <IncludePath>$(ProjectDir)thirdparty\steam;$(ProjectDir)thirdparty\capnp\include;$(ProjectDir)thirdparty\minhook\include;$(ProjectDir)thirdparty\mimalloc\include;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+    <LibraryPath>$(ProjectDir)thirdparty\steam\lib;$(ProjectDir)thirdparty\capnp\lib\$(Configuration);$(ProjectDir)thirdparty\minhook\lib;$(SolutionDir)thirdparty\mimalloc\$(Configuration);$(VC_LibraryPath_X64);$(WindowsSDK_LibraryPath_x64);$(LibraryPath)</LibraryPath>
     <IntDir>$(ProjectDir)$(Platform)\$(Configuration)\tier0</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>X:\Games\EA\Titanfall\r1delta\bin\</OutDir>
     <IntDir>$(ProjectDir)$(Platform)\$(Configuration)\tier0</IntDir>
-    <IncludePath>$(ProjectDir)thirdparty\capnp\include;$(ProjectDir)thirdparty\minhook\include;$(ProjectDir)thirdparty\mimalloc\include;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
-    <LibraryPath>$(ProjectDir)thirdparty\capnp\lib\$(Configuration);$(ProjectDir)thirdparty\minhook\lib;$(SolutionDir)thirdparty\mimalloc\$(Configuration);$(VC_LibraryPath_X64);$(WindowsSDK_LibraryPath_x64);$(LibraryPath)</LibraryPath>
+    <IncludePath>$(ProjectDir)thirdparty\steam;$(ProjectDir)thirdparty\capnp\include;$(ProjectDir)thirdparty\minhook\include;$(ProjectDir)thirdparty\mimalloc\include;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+    <LibraryPath>$(ProjectDir)thirdparty\steam\lib;$(ProjectDir)thirdparty\capnp\lib\$(Configuration);$(ProjectDir)thirdparty\minhook\lib;$(SolutionDir)thirdparty\mimalloc\$(Configuration);$(VC_LibraryPath_X64);$(WindowsSDK_LibraryPath_x64);$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Label="Vcpkg">
     <VcpkgEnabled>true</VcpkgEnabled>
@@ -147,7 +147,7 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>winhttp.lib;Shell32.lib;capnp.lib;kj.lib;mimalloc-static.lib;vstdlib.lib;tier0_orig.lib;libminhook.lib;$(CoreLibraryDependencies);%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>steam_api64.lib;winhttp.lib;Shell32.lib;capnp.lib;kj.lib;mimalloc-static.lib;vstdlib.lib;tier0_orig.lib;libminhook.lib;$(CoreLibraryDependencies);%(AdditionalDependencies)</AdditionalDependencies>
       <ModuleDefinitionFile>test.def</ModuleDefinitionFile>
     </Link>
   </ItemDefinitionGroup>
@@ -172,7 +172,7 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>winhttp.lib;Shell32.lib;capnp.lib;kj.lib;mimalloc-static.lib;vstdlib.lib;tier0_orig.lib;libminhook.lib;$(CoreLibraryDependencies);%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>steam_api64.lib;winhttp.lib;Shell32.lib;capnp.lib;kj.lib;mimalloc-static.lib;vstdlib.lib;tier0_orig.lib;libminhook.lib;$(CoreLibraryDependencies);%(AdditionalDependencies)</AdditionalDependencies>
       <ModuleDefinitionFile>test.def</ModuleDefinitionFile>
     </Link>
   </ItemDefinitionGroup>
@@ -209,6 +209,7 @@
     <ClInclude Include="security_fixes.hh" />
     <ClInclude Include="sendmoveclampfix.h" />
     <ClInclude Include="squirrel.h" />
+    <ClInclude Include="steam.h" />
     <ClInclude Include="TableDestroyer.h" />
     <ClInclude Include="tctx.hh" />
     <ClInclude Include="thirdparty\nlohmann\json.hpp" />
@@ -288,6 +289,7 @@
     </ClCompile>
     <ClCompile Include="sendmoveclampfix.cpp" />
     <ClCompile Include="squirrel.cpp" />
+    <ClCompile Include="steam.cpp" />
     <ClCompile Include="TableDestroyer.cpp" />
     <ClCompile Include="tctx.cpp" />
     <ClCompile Include="utils.cpp" />
