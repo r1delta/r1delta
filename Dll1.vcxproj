@@ -328,15 +328,15 @@
   <PropertyGroup Label="Vcpkg" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <VcpkgAdditionalInstallOptions>--overlay-ports=overlays/ports</VcpkgAdditionalInstallOptions>
   </PropertyGroup>
-  <ItemGroup>
-    <CustomBuild Include="server.capnp">
-      <Message>Generating Cap'n Proto headers...</Message>
-      <Command>
+<ItemGroup>
+  <CustomBuild Include="server.capnp">
+    <Message>Generating Cap'n Proto headers...</Message>
+    <Command>
       cd "$(ProjectDir)"
-      thirdparty\capnp\bin\capnp.exe compile -I. --output="$(ProjectDir)thirdparty\capnp\bin\capnpc-c++.exe" %(Identity)
+      "$(ProjectDir)vcpkg_installed\x64-windows\tools\capnproto\capnp.exe" compile -I. --output="$(ProjectDir)vcpkg_installed\x64-windows\tools\capnproto\capnpc-c++.exe" %(Identity)
     </Command>
-      <Outputs>$(ProjectDir)\server.capnp.h</Outputs>
-      <AdditionalInputs>server.capnp</AdditionalInputs>
-    </CustomBuild>
-  </ItemGroup>
+    <Outputs>$(ProjectDir)\server.capnp.h</Outputs>
+    <AdditionalInputs>server.capnp</AdditionalInputs>
+  </CustomBuild>
+</ItemGroup>
 </Project>
