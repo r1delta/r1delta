@@ -391,7 +391,7 @@ static void FixedResample48to441(const float* input, float* output, int inputFra
     const float step = 1.0f / ratio;
     const int outputFrames = int(inputFrames * ratio);
 
-#ifdef __AVX2__
+#if __AVX2__
     // Process 8 output frames at a time with AVX2
     const __m256 vStep = _mm256_set1_ps(step);
     const __m256 vOne = _mm256_set1_ps(1.0f);
@@ -457,8 +457,62 @@ static void FixedResample48to441(const float* input, float* output, int inputFra
         pos += step;
     }
 #else
-    float pos = 0.0f;
-    for (int i = 0; i < outputFrames; i++) {
+    // Process 4 output frames at a time with SSE3
+    const __m128 vStep = _mm_set1_ps(step);
+    const __m128 vOne = _mm_set1_ps(1.0f);
+    __m128 vPos = _mm_set_ps(3.0f, 2.0f, 1.0f, 0.0f);
+    vPos = _mm_mul_ps(vPos, vStep);
+
+    int i = 0;
+    for (; i < outputFrames - 3; i += 4) {
+        __m128i vIdx = _mm_cvttps_epi32(vPos);
+        __m128 vFrac = _mm_sub_ps(vPos, _mm_cvtepi32_ps(vIdx));
+
+        int indices[4];
+        _mm_store_si128((__m128i*)indices, vIdx);
+
+        // Load input samples
+        float tempL[4], tempR[4], tempNextL[4], tempNextR[4];
+        for (int j = 0; j < 4; j++) {
+            tempL[j] = input[indices[j] * 2];
+            tempR[j] = input[indices[j] * 2 + 1];
+            tempNextL[j] = input[indices[j] * 2 + 2];
+            tempNextR[j] = input[indices[j] * 2 + 3];
+        }
+
+        __m128 vL = _mm_load_ps(tempL);
+        __m128 vR = _mm_load_ps(tempR);
+        __m128 vNextL = _mm_load_ps(tempNextL);
+        __m128 vNextR = _mm_load_ps(tempNextR);
+
+        __m128 vOneMinusFrac = _mm_sub_ps(vOne, vFrac);
+
+        // Linear interpolation
+        __m128 vOutL = _mm_add_ps(
+            _mm_mul_ps(vL, vOneMinusFrac),
+            _mm_mul_ps(vNextL, vFrac)
+        );
+        __m128 vOutR = _mm_add_ps(
+            _mm_mul_ps(vR, vOneMinusFrac),
+            _mm_mul_ps(vNextR, vFrac)
+        );
+
+        // Store results
+        float outL[4], outR[4];
+        _mm_store_ps(outL, vOutL);
+        _mm_store_ps(outR, vOutR);
+
+        for (int j = 0; j < 4; j++) {
+            output[i * 2 + j * 2] = outL[j];
+            output[i * 2 + j * 2 + 1] = outR[j];
+        }
+
+        vPos = _mm_add_ps(vPos, _mm_mul_ps(vStep, _mm_set1_ps(4.0f)));
+    }
+
+    // Handle remaining frames
+    float pos = _mm_cvtss_f32(vPos);
+    for (; i < outputFrames; i++) {
         int idx = (int)pos;
         float frac = pos - idx;
 
