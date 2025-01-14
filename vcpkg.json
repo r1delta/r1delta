@@ -1,0 +1,38 @@
+{
+  "name": "r1delta",
+  "version": "1.0.0",
+  "dependencies": [
+    {
+      "name": "opus",
+      "version>=": "1.4"
+    },
+    {
+      "name": "opusfile",
+      "version>=": "0.12+20221121#1"
+    },
+    {
+      "name": "capnproto",
+      "version>=": "1.0.1"
+    },
+    "minhook",
+    {
+      "name": "mimalloc",
+      "version>=": "2.1.2"
+    },
+    {
+      "name": "zstd",
+      "version>=": "1.5.5"
+    },
+    {
+      "name": "libsamplerate",
+      "version>=": "0.2.2#1"
+    }
+  ],
+  "overrides": [
+    {
+      "name": "minhook",
+      "version": "1.3.3#3"
+    }
+  ],
+  "builtin-baseline": "78b61582c9e093fda56a01ebb654be15a0033897"
+}
