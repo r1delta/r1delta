@@ -416,7 +416,7 @@ bool __fastcall CClientState__ProcessVoiceData(void* thisptr, SVC_VoiceData* msg
 HMODULE __fastcall sub_180126B40(char* a1, __int64 a2, __int64 a3, __int64 a4) {
     if (strcmp(a1, "vaudio_speex"))
         return 0;
-    return LoadLibraryA("r1delta\\bin\\vaudio_speex.dll");
+    return LoadLibraryA("r1delta\\bin_delta\\vaudio_speex.dll");
 }
 //-
 
