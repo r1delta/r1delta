@@ -1,15 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <OutDir>X:\Games\EA\Titanfall\bin\x64_retail</OutDir>
-    <IncludePath>$(ProjectDir)thirdparty\minhook\include;$(ProjectDir)thirdparty\mimalloc\include;$(ProjectDir)thirdparty\zstd;$(ProjectDir)thirdparty\capnproto;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
-    <LibraryPath>$(ProjectDir)thirdparty\minhook\lib;$(SolutionDir)thirdparty\mimalloc\$(Configuration);$(LibraryPath)</LibraryPath>
+    <OutDir>X:\Games\EA\Titanfall\r1delta\bin\</OutDir>
+    <IntDir>$(ProjectDir)$(Platform)\$(Configuration)\tier0</IntDir>
+    <IncludePath>$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(IncludePath)</IncludePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <OutDir>X:\Games\EA\Titanfall\bin\x64_retail</OutDir>
-    <IntDir>$(ProjectDir)$(Platform)\$(Configuration)\</IntDir>
-    <IncludePath>$(ProjectDir)thirdparty\minhook\include;$(ProjectDir)thirdparty\mimalloc\include;$(ProjectDir)thirdparty\zstd;$(ProjectDir)thirdparty\capnproto;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
-    <LibraryPath>$(ProjectDir)thirdparty\minhook\lib;$(SolutionDir)thirdparty\mimalloc\$(Configuration);$(LibraryPath)</LibraryPath>
+    <OutDir>X:\Games\EA\Titanfall\r1delta\bin\</OutDir>
+    <IntDir>$(ProjectDir)$(Platform)\$(Configuration)\tier0</IntDir>
+    <IncludePath>$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(IncludePath)</IncludePath>
   </PropertyGroup>
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -54,13 +53,13 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
@@ -85,18 +84,21 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>X:\Games\EA\Titanfall\r1delta\bin\</OutDir>
-    <IncludePath>$(ProjectDir)thirdparty\steam;$(ProjectDir)thirdparty\capnp\include;$(ProjectDir)thirdparty\minhook\include;$(ProjectDir)thirdparty\mimalloc\include;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
-    <LibraryPath>$(ProjectDir)thirdparty\steam\lib;$(ProjectDir)thirdparty\capnp\lib\$(Configuration);$(ProjectDir)thirdparty\minhook\lib;$(SolutionDir)thirdparty\mimalloc\$(Configuration);$(VC_LibraryPath_X64);$(WindowsSDK_LibraryPath_x64);$(LibraryPath)</LibraryPath>
+    <IncludePath>$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\steam;$(ProjectDir)thirdparty\capnp\include;$(ProjectDir)thirdparty\minhook\include;$(ProjectDir)thirdparty\mimalloc\include;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+    <LibraryPath>$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\steam\lib;$(ProjectDir)thirdparty\capnp\lib\$(Configuration);$(ProjectDir)thirdparty\minhook\lib;$(SolutionDir)thirdparty\mimalloc\$(Configuration);$(VC_LibraryPath_X64);$(WindowsSDK_LibraryPath_x64);$(LibraryPath)</LibraryPath>
     <IntDir>$(ProjectDir)$(Platform)\$(Configuration)\tier0</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>X:\Games\EA\Titanfall\r1delta\bin\</OutDir>
     <IntDir>$(ProjectDir)$(Platform)\$(Configuration)\tier0</IntDir>
-    <IncludePath>$(ProjectDir)thirdparty\steam;$(ProjectDir)thirdparty\capnp\include;$(ProjectDir)thirdparty\minhook\include;$(ProjectDir)thirdparty\mimalloc\include;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
-    <LibraryPath>$(ProjectDir)thirdparty\steam\lib;$(ProjectDir)thirdparty\capnp\lib\$(Configuration);$(ProjectDir)thirdparty\minhook\lib;$(SolutionDir)thirdparty\mimalloc\$(Configuration);$(VC_LibraryPath_X64);$(WindowsSDK_LibraryPath_x64);$(LibraryPath)</LibraryPath>
+    <IncludePath>$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\steam;$(ProjectDir)thirdparty\capnp\include;$(ProjectDir)thirdparty\minhook\include;$(ProjectDir)thirdparty\mimalloc\include;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+    <LibraryPath>$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\steam\lib;$(ProjectDir)thirdparty\capnp\lib\$(Configuration);$(ProjectDir)thirdparty\minhook\lib;$(SolutionDir)thirdparty\mimalloc\$(Configuration);$(VC_LibraryPath_X64);$(WindowsSDK_LibraryPath_x64);$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Label="Vcpkg">
     <VcpkgEnabled>true</VcpkgEnabled>
+    <VcpkgEnableManifest>true</VcpkgEnableManifest>
+    <VcpkgTriplet>x64-windows</VcpkgTriplet>
+    <VcpkgOverlayPorts>$(ProjectDir)..\overlays\ports</VcpkgOverlayPorts>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -147,7 +149,7 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>steam_api64.lib;winhttp.lib;Shell32.lib;capnp.lib;kj.lib;mimalloc-static.lib;vstdlib.lib;tier0_orig.lib;libminhook.lib;$(CoreLibraryDependencies);%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>winhttp.lib;Shell32.lib;vstdlib.lib;tier0_orig.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ModuleDefinitionFile>test.def</ModuleDefinitionFile>
     </Link>
   </ItemDefinitionGroup>
@@ -172,12 +174,13 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>steam_api64.lib;winhttp.lib;Shell32.lib;capnp.lib;kj.lib;mimalloc-static.lib;vstdlib.lib;tier0_orig.lib;libminhook.lib;$(CoreLibraryDependencies);%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>winhttp.lib;Shell32.lib;vstdlib.lib;tier0_orig.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ModuleDefinitionFile>test.def</ModuleDefinitionFile>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="arena.hh" />
+    <ClInclude Include="audio.h" />
     <ClInclude Include="beardbgon.h" />
     <ClInclude Include="bitbuf.h" />
     <ClInclude Include="client.h" />
@@ -261,6 +264,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="arena.cc" />
+    <ClCompile Include="audio.cpp" />
     <ClCompile Include="bitbuf.cpp" />
     <ClCompile Include="client.cpp" />
     <ClCompile Include="compression.cpp" />
@@ -317,6 +321,12 @@
   </ImportGroup>
   <PropertyGroup>
     <CapnpCompiler>$(ProjectDir)thirdparty\capnp\bin\capnp.exe</CapnpCompiler>
+  </PropertyGroup>
+  <PropertyGroup Label="Vcpkg" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <VcpkgAdditionalInstallOptions>--overlay-ports=overlays/ports</VcpkgAdditionalInstallOptions>
+  </PropertyGroup>
+  <PropertyGroup Label="Vcpkg" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <VcpkgAdditionalInstallOptions>--overlay-ports=overlays/ports</VcpkgAdditionalInstallOptions>
   </PropertyGroup>
   <ItemGroup>
     <CustomBuild Include="server.capnp">

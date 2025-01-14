@@ -8,8 +8,6 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "tier0", "Dll1.vcxproj", "{F
 		{ABB5EAE7-B3E6-432E-B636-333449892EA6} = {ABB5EAE7-B3E6-432E-B636-333449892EA6}
 	EndProjectSection
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "mimalloc", "thirdparty\mimalloc\ide\vs2022\mimalloc.vcxproj", "{ABB5EAE7-B3E6-432E-B636-333449892EA6}"
-EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "launcher", "launch\launcher.vcxproj", "{4E116D7B-5E62-42D8-9649-56B00CC61AB3}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "dedi_launch", "dedi_launch\dedi_launch.vcxproj", "{33E52B4A-8E73-4A95-B9A3-96BD7B2E1FB6}"

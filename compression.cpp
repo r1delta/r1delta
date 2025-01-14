@@ -3,7 +3,7 @@
 #include <cstdio>
 
 #include "core.h"
-
+#include "audio.h"
 #include <MinHook.h>
 //#include "thirdparty/zstd/zstd.h"
 
@@ -252,16 +252,17 @@ void InitCompressionHooks() {
 	MH_CreateHook(LPVOID(fs + 0x753B0), r1dc_decompress, &lzham_decompressor_decompress);
 	MH_EnableHook(MH_ALL_HOOKS);
 #endif
-
+	auto fs = G_filesystem_stdio;
+	MH_CreateHook(LPVOID(fs + 0x23860), Hooked_CBaseFileSystem__SyncRead, NULL);
 	//~ mrsteyk: profile...
 	if constexpr (BUILD_PROFILE)
 	{
-		auto fs = G_filesystem_stdio;
 		auto open_for_read_ptr = LPVOID(fs + 0x19C00);
 		MH_CreateHook(open_for_read_ptr, OpenForRead_hk, &OpenForRead_o);
 		MH_CreateHook(LPVOID(fs + 0x753B0), r1dc_decompress, &lzham_decompressor_decompress);
 		MH_CreateHook(LPVOID(fs + 0x72410), CPackedStore__CachedRead_hk, &CPackedStore__CachedRead_o);
 		MH_CreateHook(LPVOID(fs + 0x6BD20), CPackedStore__ReadData_hk, &CPackedStore__ReadData_o);
-		MH_EnableHook(MH_ALL_HOOKS);
 	}
+	MH_EnableHook(MH_ALL_HOOKS);
+
 }

@@ -2,7 +2,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <opus/opus.h>
-#include <opus/opus_custom.h>
 
 #include "../core.h"
 

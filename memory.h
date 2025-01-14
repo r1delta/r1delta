@@ -37,7 +37,7 @@
 #include "framework.h"
 #include <concurrent_unordered_map.h>
 #include <MinHook.h>
-#include "thirdparty/mimalloc//include/mimalloc.h"
+#include "mimalloc.h"
 #include <Windows.h>
 #include <Psapi.h>
 typedef size_t(*MemAllocFailHandler_t)(size_t); // should return 0, first argument is size of failed allocation

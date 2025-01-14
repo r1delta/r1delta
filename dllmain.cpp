@@ -43,7 +43,7 @@
 #include "filesystem.h"
 #include "logging.h"
 #include <tier0/platform.h>
-#include "thirdparty/mimalloc//include/mimalloc-new-delete.h"
+#include "mimalloc-new-delete.h"
 uint64_t g_PerformanceFrequency;
 int G_is_dedi;
 typedef const char* (__cdecl* wine_get_version_func)();

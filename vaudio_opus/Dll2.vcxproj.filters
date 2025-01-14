@@ -21,27 +21,6 @@
     <ClInclude Include="pch.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="opus\opus_custom.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="opus\opus_defines.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="opus\opus_multistream.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="opus\opus_projection.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="opus\opus_types.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="opus\opusfile.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="opus\opus.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp">
