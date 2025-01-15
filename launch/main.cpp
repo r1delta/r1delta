@@ -195,8 +195,8 @@ void PrependPath()
 	{
 		// Modified to include r1delta path first, then the regular retail path
 		swprintf_s(buffer,
-			L"PATH=%s\\r1delta\\bin\\;%s\\bin\\x64_retail\\;.;%s",
-			exePath, exePath, pPath);
+			L"PATH=%s\\r1delta\\bin_delta\\;%s\\r1delta\\bin\\;%s\\bin\\x64_retail\\;.;%s",
+			exePath, exePath, exePath, pPath);
 
 		auto result = _wputenv(buffer);
 		if (result == -1)

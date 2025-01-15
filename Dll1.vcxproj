@@ -83,13 +83,13 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <OutDir>X:\Games\EA\Titanfall\r1delta\bin\</OutDir>
+    <OutDir>X:\Games\EA\Titanfall\r1delta\bin_delta\</OutDir>
     <IncludePath>$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\steam;$(ProjectDir)thirdparty\capnp\include;$(ProjectDir)thirdparty\minhook\include;$(ProjectDir)thirdparty\mimalloc\include;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
     <LibraryPath>$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\steam\lib;$(ProjectDir)thirdparty\capnp\lib\$(Configuration);$(ProjectDir)thirdparty\minhook\lib;$(SolutionDir)thirdparty\mimalloc\$(Configuration);$(VC_LibraryPath_X64);$(WindowsSDK_LibraryPath_x64);$(LibraryPath)</LibraryPath>
     <IntDir>$(ProjectDir)$(Platform)\$(Configuration)\tier0</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <OutDir>X:\Games\EA\Titanfall\r1delta\bin\</OutDir>
+    <OutDir>X:\Games\EA\Titanfall\r1delta\bin_delta\</OutDir>
     <IntDir>$(ProjectDir)$(Platform)\$(Configuration)\tier0</IntDir>
     <IncludePath>$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\steam;$(ProjectDir)thirdparty\capnp\include;$(ProjectDir)thirdparty\minhook\include;$(ProjectDir)thirdparty\mimalloc\include;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
     <LibraryPath>$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\steam\lib;$(ProjectDir)thirdparty\capnp\lib\$(Configuration);$(ProjectDir)thirdparty\minhook\lib;$(SolutionDir)thirdparty\mimalloc\$(Configuration);$(VC_LibraryPath_X64);$(WindowsSDK_LibraryPath_x64);$(LibraryPath)</LibraryPath>
@@ -333,7 +333,7 @@
       <Message>Generating Cap'n Proto headers...</Message>
       <Command>
       cd "$(ProjectDir)"
-      thirdparty\capnp\bin\capnp.exe compile -I. --output="$(ProjectDir)thirdparty\capnp\bin\capnpc-c++.exe" %(Identity)
+      "$(ProjectDir)vcpkg_installed\x64-windows\tools\capnproto\capnp.exe" compile -I. --output="$(ProjectDir)vcpkg_installed\x64-windows\tools\capnproto\capnpc-c++.exe" %(Identity)
     </Command>
       <Outputs>$(ProjectDir)\server.capnp.h</Outputs>
       <AdditionalInputs>server.capnp</AdditionalInputs>

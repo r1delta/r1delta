@@ -262,6 +262,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 
 		LoadLibraryW(L"OnDemandConnRouteHelper"); // stop fucking reloading this thing
 		LoadLibraryW(L"TextShaping.dll"); // fix "Patcher Error" dialogs having no text
+		SetDllDirectoryW(L"r1delta\\bin_delta");
 		SetDllDirectoryW(L"r1delta\\bin");
 
 		MH_Initialize();
