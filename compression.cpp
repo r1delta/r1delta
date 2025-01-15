@@ -253,7 +253,7 @@ void InitCompressionHooks() {
 	MH_EnableHook(MH_ALL_HOOKS);
 #endif
 	auto fs = G_filesystem_stdio;
-	MH_CreateHook(LPVOID(fs + 0x23860), Hooked_CBaseFileSystem__SyncRead, NULL);
+	MH_CreateHook(LPVOID(fs + 0x23860), Hooked_CBaseFileSystem__SyncRead, reinterpret_cast<LPVOID*>(&Original_CBaseFileSystem__SyncRead));
 	//~ mrsteyk: profile...
 	if constexpr (BUILD_PROFILE)
 	{

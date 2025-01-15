@@ -337,6 +337,7 @@ struct OpusContext {
     SRC_STATE* srcState = nullptr;
     int64_t currentDecodePos = 0;  // How many bytes of PCM we've decoded
     bool reachedEnd = false;
+    int channels = 2; // default to stereo, will be set from opus header
 };
 
 // We'll keep a global map from WAV filename => decoded opus context
@@ -525,6 +526,109 @@ static void FixedResample48to441(const float* input, float* output, int inputFra
 }
 #endif
 
+// SSE2 resampler for any number of channels
+static void FixedResample48to441MultiChannel(const float* input, float* output,
+    int inputFrames, int channels) {
+    const float ratio = 0.91875f;  // 44100/48000
+    const float step = 1.0f / ratio;
+    const int outputFrames = int(inputFrames * ratio);
+
+    // Process 4 samples at a time with SSE2
+    const __m128 vStep = _mm_set1_ps(step);
+    const __m128 vOne = _mm_set1_ps(1.0f);
+    __m128 vPos = _mm_set_ps(3.0f, 2.0f, 1.0f, 0.0f);
+    vPos = _mm_mul_ps(vPos, vStep);
+
+    int i = 0;
+    for (; i < outputFrames - 3; i += 4) {
+        __m128i vIdx = _mm_cvttps_epi32(vPos);
+        __m128 vFrac = _mm_sub_ps(vPos, _mm_cvtepi32_ps(vIdx));
+
+        // Store indices
+        int indices[4];
+        _mm_store_si128((__m128i*)indices, vIdx);
+
+        // Process each channel
+        for (int ch = 0; ch < channels; ch++) {
+            // Load samples for this channel
+            float temp[4], tempNext[4];
+            for (int j = 0; j < 4; j++) {
+                temp[j] = input[indices[j] * channels + ch];
+                tempNext[j] = input[(indices[j] + 1) * channels + ch];
+            }
+
+            __m128 vSamp = _mm_load_ps(temp);
+            __m128 vNext = _mm_load_ps(tempNext);
+
+            // Linear interpolation
+            __m128 vOneMinusFrac = _mm_sub_ps(vOne, vFrac);
+            __m128 vOut = _mm_add_ps(
+                _mm_mul_ps(vSamp, vOneMinusFrac),
+                _mm_mul_ps(vNext, vFrac)
+            );
+
+            // Store results
+            float result[4];
+            _mm_store_ps(result, vOut);
+            for (int j = 0; j < 4; j++) {
+                output[i * channels + j * channels + ch] = result[j];
+            }
+        }
+
+        vPos = _mm_add_ps(vPos, _mm_mul_ps(vStep, _mm_set1_ps(4.0f)));
+    }
+
+    // Handle remaining frames
+    float pos = _mm_cvtss_f32(vPos);
+    for (; i < outputFrames; i++) {
+        int idx = (int)pos;
+        float frac = pos - idx;
+
+        for (int ch = 0; ch < channels; ch++) {
+            float samp0 = input[idx * channels + ch];
+            float samp1 = input[(idx + 1) * channels + ch];
+            output[i * channels + ch] = samp0 * (1 - frac) + samp1 * frac;
+        }
+
+        pos += step;
+    }
+}
+
+// SSE2 float to int16 converter for any number of channels
+static void FloatToInt16MultiChannel(const float* in, int16_t* out,
+    size_t frames, int channels) {
+    const __m128 scale = _mm_set1_ps(32767.0f);
+    const size_t totalSamples = frames * channels;
+
+    size_t i = 0;
+    for (; i < totalSamples - 7; i += 8) {
+        // Load 8 floats (2 registers worth)
+        __m128 in1 = _mm_load_ps(&in[i]);
+        __m128 in2 = _mm_load_ps(&in[i + 4]);
+
+        // Scale to int16 range
+        in1 = _mm_mul_ps(in1, scale);
+        in2 = _mm_mul_ps(in2, scale);
+
+        // Convert to int32
+        __m128i i1 = _mm_cvtps_epi32(in1);
+        __m128i i2 = _mm_cvtps_epi32(in2);
+
+        // Pack to int16
+        __m128i shorts = _mm_packs_epi32(i1, i2);
+
+        // Store result
+        _mm_store_si128((__m128i*) & out[i], shorts);
+    }
+
+    // Handle remaining samples
+    for (; i < totalSamples; i++) {
+        float sample = in[i] * 32767.0f;
+        if (sample > 32767.f) sample = 32767.f;
+        if (sample < -32768.f) sample = -32768.f;
+        out[i] = (int16_t)sample;
+    }
+}
 static bool DecodeOpusChunk(OpusContext& ctx, int64_t offset, size_t bytesNeeded) {
     using clock = std::chrono::high_resolution_clock;
     auto totalStart = clock::now();
@@ -533,11 +637,14 @@ static bool DecodeOpusChunk(OpusContext& ctx, int64_t offset, size_t bytesNeeded
         return true;
     }
 
+    // Use larger initial chunk for first decode to reduce iterations
     const size_t DECODE_CHUNK = ctx.pcmData.empty() ? 32768 : 5760;
 
     auto allocStart = clock::now();
-    std::vector<float> decodeBuf(DECODE_CHUNK * 2);
-    std::vector<float> resampleBuf((DECODE_CHUNK * 441) / 480 * 2); // pre-calculate output size
+    // Allocate buffers based on channel count
+    std::vector<float> decodeBuf(DECODE_CHUNK * ctx.channels);
+    // Calculate output size accounting for 48->44.1 ratio
+    std::vector<float> resampleBuf((DECODE_CHUNK * 441) / 480 * ctx.channels);
     auto allocEnd = clock::now();
 
     int64_t totalOpusTime = 0;
@@ -547,64 +654,97 @@ static bool DecodeOpusChunk(OpusContext& ctx, int64_t offset, size_t bytesNeeded
 
     while (!ctx.reachedEnd && ctx.pcmData.size() * sizeof(int16_t) < offset + bytesNeeded) {
         auto opusStart = clock::now();
-        int framesDecoded = op_read_float_stereo(ctx.opusFile, decodeBuf.data(), DECODE_CHUNK);
+        // Decode frames - returns number of frames (not samples)
+        int framesDecoded = op_read_float(ctx.opusFile,
+            decodeBuf.data(),
+            int(DECODE_CHUNK * ctx.channels), // buf_size is total floats
+            nullptr);  // we don't need link index
         auto opusEnd = clock::now();
         totalOpusTime += std::chrono::duration_cast<std::chrono::microseconds>(opusEnd - opusStart).count();
 
         if (framesDecoded <= 0) {
             ctx.reachedEnd = true;
-            if (framesDecoded < 0) return false;
+            if (framesDecoded < 0) {
+                Msg("[Opus] Decode error, code=%d\n", framesDecoded);
+                return false;
+            }
             break;
         }
         totalFrames += framesDecoded;
 
         auto resampleStart = clock::now();
-        // Use our fixed resampler instead of libsamplerate
-        FixedResample48to441(decodeBuf.data(), resampleBuf.data(), framesDecoded);
-        int outputFrames = int(framesDecoded * 0.91875f);
+        // Calculate output frames based on ratio
+        int outputFrames = int(framesDecoded * 0.91875f); // 44100/48000
+
+        if (ctx.channels == 2) {
+            // Use optimized stereo path
+            FixedResample48to441(decodeBuf.data(),
+                resampleBuf.data(),
+                framesDecoded);
+        }
+        else {
+            // Use multi-channel path
+            FixedResample48to441MultiChannel(decodeBuf.data(),
+                resampleBuf.data(),
+                framesDecoded,
+                ctx.channels);
+    }
         auto resampleEnd = clock::now();
         totalResampleTime += std::chrono::duration_cast<std::chrono::microseconds>(resampleEnd - resampleStart).count();
 
         auto convertStart = clock::now();
         size_t oldSize = ctx.pcmData.size();
-        size_t newSamples = outputFrames * 2;
+        size_t newSamples = outputFrames * ctx.channels;
         ctx.pcmData.resize(oldSize + newSamples);
 
+        if (ctx.channels == 2) {
+            // Use optimized stereo path with SSE/AVX2
 #ifdef __AVX2__
-        for (size_t i = 0; i < newSamples; i += 8) {
-            __m256 floats = _mm256_load_ps(&resampleBuf[i]);
-            floats = _mm256_mul_ps(floats, _mm256_set1_ps(32767.0f));
-            __m256i ints = _mm256_cvtps_epi32(floats);
-            __m128i shorts = _mm_packs_epi32(_mm256_extractf128_si256(ints, 0),
-                _mm256_extractf128_si256(ints, 1));
-            _mm_store_si128((__m128i*) & ctx.pcmData[oldSize + i], shorts);
-        }
+// Process 8 stereo pairs at a time
+            for (size_t i = 0; i < newSamples; i += 8) {
+                __m256 floats = _mm256_load_ps(&resampleBuf[i]);
+                floats = _mm256_mul_ps(floats, _mm256_set1_ps(32767.0f));
+                __m256i ints = _mm256_cvtps_epi32(floats);
+                __m128i shorts = _mm_packs_epi32(_mm256_extractf128_si256(ints, 0),
+                    _mm256_extractf128_si256(ints, 1));
+                _mm_store_si128((__m128i*) & ctx.pcmData[oldSize + i], shorts);
+            }
 #else
-        for (size_t i = 0; i < newSamples; i += 4) {
-            __m128 floats = _mm_load_ps(&resampleBuf[i]);
-            floats = _mm_mul_ps(floats, _mm_set1_ps(32767.0f));
-            __m128i ints = _mm_cvtps_epi32(floats);
-            __m128i shorts = _mm_packs_epi32(ints, ints);
-            _mm_store_si128((__m128i*) & ctx.pcmData[oldSize + i], shorts);
-        }
+// Process 4 stereo pairs at a time with SSE2
+            for (size_t i = 0; i < newSamples; i += 4) {
+                __m128 floats = _mm_load_ps(&resampleBuf[i]);
+                floats = _mm_mul_ps(floats, _mm_set1_ps(32767.0f));
+                __m128i ints = _mm_cvtps_epi32(floats);
+                __m128i shorts = _mm_packs_epi32(ints, ints);
+                _mm_store_si128((__m128i*) & ctx.pcmData[oldSize + i], shorts);
+            }
 #endif
+        }
+        else {
+            // Use multi-channel path
+            FloatToInt16MultiChannel(resampleBuf.data(),
+                &ctx.pcmData[oldSize],
+                outputFrames,
+                ctx.channels);
+        }
 
         auto convertEnd = clock::now();
         totalConvertTime += std::chrono::duration_cast<std::chrono::microseconds>(convertEnd - convertStart).count();
 
         ctx.currentDecodePos = ctx.pcmData.size() * sizeof(int16_t);
-    }
+}
 
     auto totalEnd = clock::now();
     auto totalMicros = std::chrono::duration_cast<std::chrono::microseconds>(totalEnd - totalStart).count();
     auto allocMicros = std::chrono::duration_cast<std::chrono::microseconds>(allocEnd - allocStart).count();
 
-    Msg("Opus decode timing:\n"
+    Msg("Opus decode timing (channels=%d):\n"
         "  Total time: %.2fms\n"
         "  Buffer alloc: %.2fms\n"
         "  Opus decode: %.2fms (%d frames)\n"
         "  Resampling: %.2fms\n"
         "  Float conversion: %.2fms\n",
+        ctx.channels,
         totalMicros / 1000.0f,
         allocMicros / 1000.0f,
         totalOpusTime / 1000.0f, totalFrames,
@@ -736,6 +876,9 @@ static __int64 HandleOpusRead(CBaseFileSystem* fs, FileAsyncRequest_t* request) 
 // --------------------------------------------------------------------
 // The main hooked function
 // --------------------------------------------------------------------
+__int64 (*Original_CBaseFileSystem__SyncRead)(
+    CBaseFileSystem* filesystem,
+    FileAsyncRequest_t* request);
 __int64 __fastcall Hooked_CBaseFileSystem__SyncRead(
     CBaseFileSystem* filesystem,
     FileAsyncRequest_t* request)
@@ -778,5 +921,7 @@ __int64 __fastcall Hooked_CBaseFileSystem__SyncRead(
     }
 
     // Fallback to original
-    return HandleOriginalRead(filesystem, request);
+    //return HandleOriginalRead(filesystem, request);
+    // actually call original function lol the rebuild is just for testing
+    return Original_CBaseFileSystem__SyncRead(filesystem, request);
 }
