@@ -689,6 +689,22 @@ static bool DecodeOpusChunk(OpusContext& ctx, int64_t offset, size_t bytesNeeded
                 framesDecoded,
                 ctx.channels);
     }
+        // In DecodeOpusChunk, right after op_read_float:
+        // Log a few samples from first frame to verify channel separation
+        if (framesDecoded > 0) {
+            Msg("[Opus] First decoded frame samples:\n");
+            for (int ch = 0; ch < ctx.channels; ch++) {
+                Msg("  Ch%d: %.6f\n", ch, decodeBuf[ch]);
+            }
+        }
+
+        // After resampling:
+        if (outputFrames > 0) {
+            Msg("[Opus] First resampled frame samples:\n");
+            for (int ch = 0; ch < ctx.channels; ch++) {
+                Msg("  Ch%d: %.6f\n", ch, resampleBuf[ch]);
+            }
+        }
         auto resampleEnd = clock::now();
         totalResampleTime += std::chrono::duration_cast<std::chrono::microseconds>(resampleEnd - resampleStart).count();
 
@@ -766,7 +782,7 @@ static bool OpenOpusContext(
         return true;
     }
 
-    // Read the opus file
+    // Read the opus file into memory
     auto fileData = ReadEntireFileIntoMem(filesystem, opusName.c_str(), pathID);
     if (fileData.empty()) {
         return false;
@@ -786,8 +802,37 @@ static bool OpenOpusContext(
         return false;
     }
 
+    // Get header info for channel count and mapping
+    const OpusHead* head = op_head(ctx.opusFile, -1);
+    if (!head) {
+        op_free(ctx.opusFile);
+        return false;
+    }
+
+    ctx.channels = head->channel_count;
+
+    // Debug logging for channel info
+    Msg("[Opus] File: %s\n", opusName.c_str());
+    Msg("[Opus] Channel count: %d, mapping family: %d\n",
+        head->channel_count,
+        head->mapping_family);
+
+    if (head->mapping_family > 0) {
+        Msg("[Opus] Stream count: %d, coupled count: %d\n",
+            head->stream_count,
+            head->coupled_count);
+
+        Msg("[Opus] Channel mapping:");
+        //for (int i = 0; i < head->channel_count; i++) {
+        //    Msg(" %d", head->channel_mapping[i]);
+        //}
+
+        Msg("\n");
+    }
+
     // Create resampler
-    ctx.srcState = src_new(SRC_SINC_FASTEST, 2, &error);
+    error = 0;
+    ctx.srcState = src_new(SRC_SINC_FASTEST, ctx.channels, &error);
     if (!ctx.srcState || error != 0) {
         op_free(ctx.opusFile);
         return false;
@@ -799,7 +844,6 @@ static bool OpenOpusContext(
     g_opusCache[wavName] = std::move(ctx);
     return true;
 }
-
 static __int64 HandleOpusRead(CBaseFileSystem* fs, FileAsyncRequest_t* request) {
     std::unique_lock<std::mutex> lock(g_opusCacheMutex);
     auto it = g_opusCache.find(request->pszFilename);
