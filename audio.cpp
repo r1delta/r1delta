@@ -689,22 +689,7 @@ static bool DecodeOpusChunk(OpusContext& ctx, int64_t offset, size_t bytesNeeded
                 framesDecoded,
                 ctx.channels);
     }
-        // In DecodeOpusChunk, right after op_read_float:
-        // Log a few samples from first frame to verify channel separation
-        if (framesDecoded > 0) {
-            Msg("[Opus] First decoded frame samples:\n");
-            for (int ch = 0; ch < ctx.channels; ch++) {
-                Msg("  Ch%d: %.6f\n", ch, decodeBuf[ch]);
-            }
-        }
 
-        // After resampling:
-        if (outputFrames > 0) {
-            Msg("[Opus] First resampled frame samples:\n");
-            for (int ch = 0; ch < ctx.channels; ch++) {
-                Msg("  Ch%d: %.6f\n", ch, resampleBuf[ch]);
-            }
-        }
         auto resampleEnd = clock::now();
         totalResampleTime += std::chrono::duration_cast<std::chrono::microseconds>(resampleEnd - resampleStart).count();
 
