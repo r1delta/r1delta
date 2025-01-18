@@ -61,6 +61,7 @@ bool (*oCPortalPlayer__CreateMove)(__int64 a1, float a2, __int64 a3, char a4);
 bool CPortalPlayer__CreateMove(__int64 a1, float a2, __int64 a3, char a4) {
 	static auto ref = OriginalCCVar_FindVar(cvarinterface, "host_timescale");
 	a2 *= ref->m_Value.m_fValue;
+
 	return oCPortalPlayer__CreateMove(a1, a2, a3, a4);
 }
 __int64 (*osub_18008E820)(__int64 a1, unsigned int a2);

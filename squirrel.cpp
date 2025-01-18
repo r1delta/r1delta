@@ -198,7 +198,6 @@ typedef __int64 (*CPlayer__SetXP)(__int64 a1,int a2);
 
 CPlayer__SetXP CPlayer__SetXPRebuildOrig;
 void __fastcall CPlayer__SetXPRebuild(__int64 a1, int a2) {
-	//Msg("CPlayer__SetXPRebuild\n");
 	*(int*)(a1 + 0x1834) = a2;
 	return;
 }
@@ -208,7 +207,6 @@ typedef __int64 (*CPlayer__SetGen)(__int64 a1, int a2);
 CPlayer__SetGen CPlayer__SetGenOrig;
 
 void __fastcall CPlayer__SetGenHook(__int64 a1, int a2) {
-	Msg("CPlayer__SetGenHook %d\n", a2);
 	*(int*)(a1 + 0x183C) = a2;
 }
 
@@ -339,8 +337,6 @@ int UpdateAddons(HSQUIRRELVM v, SQInteger index, SQBool enabled) {
 }
 
 int GetMods(HSQUIRRELVM v) {
-
-	sq_compilebuffer(v, "printt(\"Hello, World!\")", -1, "test", SQTrue);
 
 	auto func_addr = g_CVFileSystem->GetSearchPath;
 	auto remove_file_addr = g_CVFileSystem->RemoveFile;
@@ -530,20 +526,6 @@ SQInteger OpenDiscordURL(HSQUIRRELVM v) {
 	return 1;
 }
 
-SQInteger SetupScoreboardHeader(HSQUIRRELVM v) {
-	auto r1_vm = GetUIVMPtr();
-	SQObject vgui;
-	sq_getstackobj(r1_vm, v, 2,&vgui);
-	//v2 = (*(__int64(__fastcall**)(_QWORD))(**(_QWORD**)(a1 + 40) + 1552i64))(*(_QWORD*)(a1 + 40));
-
-	__int64 raw = reinterpret_cast<__int64>(vgui._unVal.pInstance);
-	// Correcting vgui_ptr calculation using raw as a1
-	//auto vgui_ptr = (*(__int64(__fastcall**)(__int64))(**(__int64**)(raw + 40) + 1552i64))(*(__int64*)(raw + 40));
-		// call first vgui function
-	//reinterpret_cast<void(__fastcall*)(__int64)>(vgui_ptr + 0x8)(vgui_ptr);
-	//Msg("VGUI PTR: %x\n", vgui_ptr);
-	return 1;
-}
 
 // Function to initialize all SQVM functions
 bool GetSQVMFuncs() {
@@ -668,19 +650,6 @@ bool GetSQVMFuncs() {
 	);
 
 
-	//REGISTER_SCRIPT_FUNCTION(
-	//	SCRIPT_CONTEXT_SERVER,
-	//	"GenChanged",
-	//	(SQFUNCTION)Script_GenChanged_Rebuild,
-	//	"I", // String
-	//	3,      // Expects 2 parameters
-	//	"void",    // Returns a string
-	//	"",
-	//	"Updates gen value from persistent vars"
-	//);
-
-
-
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_UI,
 		"UpdateAddons",
@@ -689,17 +658,6 @@ bool GetSQVMFuncs() {
 		3,      // Expects 2 parameters
 		"int",    // Returns a string
 		"int index,bool enabled",
-		"Updates the selected addons"
-	);
-
-	REGISTER_SCRIPT_FUNCTION(
-		SCRIPT_CONTEXT_UI,
-		"SetupScoreboardHeader",
-		(SQFUNCTION)SetupScoreboardHeader,
-		".I", // String
-		2,      // Expects 2 parameters
-		"void",    // Returns a string
-		"void",
 		"Updates the selected addons"
 	);
 
