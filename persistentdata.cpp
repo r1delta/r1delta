@@ -453,12 +453,16 @@ std::string PDataValidator::resolveArrayIndices(const std::string_view& key) con
         std::string arrayName = segment.substr(0, bracketPos);
         std::string indexStr = segment.substr(bracketPos+1, segment.find(']')-bracketPos-1);
         
-        // Validate and resolve index
+        // Validate array access first
+        if (!validateArrayAccess(arrayName, indexStr)) {
+            return ""; // Return empty string for invalid indices
+        }
+
+        // Then resolve index if needed
         auto arrayIt = arrays.find(arrayName);
         if (arrayIt != arrays.end()) {
             const ArrayDef& def = arrayIt->second;
             if (std::holds_alternative<std::string>(def.size)) {
-                // Enum-based size, resolve to numeric index
                 const auto& enumName = std::get<std::string>(def.size);
                 auto enumIt = enums.find(enumName);
                 if (enumIt != enums.end()) {
@@ -494,6 +498,7 @@ std::string PDataValidator::resolveArrayIndices(const std::string_view& key) con
 bool PDataValidator::isValid(const std::string_view& key, const std::string_view& value) const
 {
     std::string resolvedKey = resolveArrayIndices(key);
+    if (resolvedKey.empty()) return false; // Invalid indices
     std::vector<std::string> segments = splitOnDot(resolvedKey);
     std::string baseKey;
     baseKey.reserve(key.size()); // rough
@@ -650,13 +655,15 @@ bool PDataValidator::validateArrayAccess(const std::string_view& arrayName,
 	// Check if array size is defined by an enum
 	if (std::holds_alternative<std::string>(arrayDef.size)) {
 		const std::string& enumName = std::get<std::string>(arrayDef.size);
+		// Validate that the index is a valid enum value name
 		return isValidEnumValue(enumName, index);
 	}
 
-	// Otherwise it's a fixed size array
+	// Otherwise validate numeric index against fixed size
 	int idx;
 	auto res = std::from_chars(index.data(), index.data() + index.size(), idx);
-	if (res.ec == std::errc::invalid_argument || res.ec == std::errc::result_out_of_range) return false;
+	if (res.ec != std::errc() || res.ptr != index.data() + index.size()) 
+		return false;
 	return idx >= 0 && idx < std::get<int>(arrayDef.size);
 }
 
