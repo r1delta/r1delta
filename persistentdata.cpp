@@ -183,6 +183,7 @@ struct ArrayDef {
 
 class PDataValidator {
 public:
+	bool processSegmentForArrays(std::string& currentBase, const std::string& segment) const;
 	// Main validation function
 	bool isValid(const std::string_view& key, const std::string_view& value) const;
 
@@ -365,36 +366,121 @@ private:
 
 // Implementation
 
-bool PDataValidator::isValid(const std::string_view& key, const std::string_view& value) const {
-
-	size_t key_size = key.size();
-
-	int check_for_array = 0;
-	//size_t parts_count = 1;
-	for (size_t i = 0; i < key_size; ++i) {
-		//if (key[i] == '.') parts_count++;
-		if (key[i] == '[') check_for_array = 1;
-	}
-
-	if (check_for_array)
+static std::vector<std::string> splitOnDot(const std::string_view& key)
+{
+	std::vector<std::string> parts;
+	size_t start = 0;
+	while (true)
 	{
-		size_t offset = 0;
-		size_t pos;
-		while ((pos = key.find('[', offset)) != key.npos)
+		size_t dotPos = key.find('.', start);
+		if (dotPos == std::string::npos)
 		{
-			size_t end_pos = key.find(']', pos);
-			if (end_pos == key.npos) return false;
-			
-			auto index = key.substr(pos + 1, end_pos - pos - 1);
-			if (!validateArrayAccess(key.substr(0, pos), index)) return false;
-
-			offset = end_pos + 1;
+			parts.emplace_back(key.substr(start));
+			break;
 		}
+		parts.emplace_back(key.substr(start, dotPos - start));
+		start = dotPos + 1;
+	}
+	return parts;
+}
+
+// Takes a single segment (e.g. "weaponKillStats[mp_weapon_lmg][x]")
+// and iterates over all bracket references. Each bracket reference
+// is validated as arrayName[index].
+bool PDataValidator::processSegmentForArrays(std::string& currentBase, const std::string& segment) const
+{
+	// This function appends the bracket‐free part of each segment to 'currentBase'.
+	// Then, for every [index] found, it calls validateArrayAccess(...) on the base + that index.
+	//
+	// Example 1: segment = "gen"
+	//   No brackets => remainder = "gen".
+	//   If currentBase is empty, currentBase becomes "gen".
+	//   If currentBase was "something", it becomes "something.gen".
+	//
+	// Example 2: segment = "npcTitans[titan_atlas]"
+	//   arrayName = "npcTitans", index = "titan_atlas"
+	//   validateArrayAccess("npcTitans", "titan_atlas")
+	//   We do NOT append "[titan_atlas]" to currentBase. Instead, we keep "npcTitans" in currentBase.
+	//   The next bracket or next segment will pick up from there.
+
+	size_t offset = 0;
+	while (true)
+	{
+		// Find the next bracket in 'segment'
+		size_t bracketStart = segment.find('[', offset);
+		if (bracketStart == std::string::npos)
+		{
+			// No more brackets. The remainder is a plain identifier (e.g. "gen", or "npcTitans" if no bracket).
+			std::string remainder = segment.substr(offset);
+			if (!remainder.empty())
+			{
+				// If currentBase was non-empty, insert a dot, e.g. "foo" + "." + "bar"
+				if (!currentBase.empty())
+					currentBase.push_back('.');
+				currentBase.append(remainder);
+			}
+			break;
+		}
+
+		// The portion before '[' is our array name
+		std::string arrayName = segment.substr(offset, bracketStart - offset);
+
+		if (!arrayName.empty())
+		{
+			// e.g. from "npcTitans[something]", arrayName = "npcTitans"
+			if (!currentBase.empty())
+				currentBase.push_back('.');
+			currentBase.append(arrayName);
+		}
+
+		// Find the matching ']' 
+		size_t bracketEnd = segment.find(']', bracketStart);
+		if (bracketEnd == std::string::npos)
+			return false; // malformed bracket usage
+
+		// The bracket content is the array index
+		std::string index = segment.substr(bracketStart + 1, bracketEnd - (bracketStart + 1));
+
+		// Validate arrayName -> index
+		if (!validateArrayAccess(currentBase, index))
+			return false;
+
+		// We leave 'currentBase' alone here (it stays "npcTitans", for instance),
+		// because the bracket was validated. We do not store "[index]" in 'currentBase'.
+		// The next bracket or next segment will pick up from the same base name.
+
+		offset = bracketEnd + 1; // move past the ']'
 	}
 
-	// Get the type for this key
-	auto type = getKeyType(key);
-	if (!type.valid()) return false;
+	return true;
+}
+
+bool PDataValidator::isValid(const std::string_view& key, const std::string_view& value) const
+{
+	// Split on '.' first
+	std::vector<std::string> segments = splitOnDot(key);
+
+	// We will accumulate a "base key" that has bracket-free segments joined with '.'.
+	// Example: if key = "weaponKillStats[mp_weapon_lmg].npcTitans[titan_atlas]"
+	//   - first segment = "weaponKillStats[mp_weapon_lmg]"
+	//   - second segment = "npcTitans[titan_atlas]"
+	// final baseKey might be "weaponKillStats.npcTitans" 
+	// Then we look up that final string in 'keys'.
+	// Meanwhile each bracket usage is validated by validateArrayAccess in processSegmentForArrays().
+	std::string baseKey;
+	baseKey.reserve(key.size()); // rough
+
+	for (size_t i = 0; i < segments.size(); i++)
+	{
+		if (!processSegmentForArrays(baseKey, segments[i]))
+			return false;
+	}
+
+	// Now that all bracket references were validated, check if baseKey is in schema
+	SchemaType type = getKeyType(baseKey);
+	if (!type.valid())
+		return false;
+
 	// Additional validation for "gen" key
 	if (key == "gen" && type.type == SchemaType::Type::Int) {
 		int genValue;
@@ -420,39 +506,41 @@ bool PDataValidator::isValid(const std::string_view& key, const std::string_view
 		}
 	}
 
-	// Validate value against type
-	switch (type.type) {
+
+	// Validate value
+	switch (type.type)
+	{
 	case SchemaType::Type::Bool:
-		return value == "0" || value == "1" ||
-			value == "true" || value == "false";
+		return (value == "0" || value == "1" ||
+			value == "true" || value == "false");
 
-	case SchemaType::Type::Int: {
+	case SchemaType::Type::Int:
+	{
 		if (value.empty()) return false;
-
-		size_t start = 0;
-		if (value[0] == '-') {
-			if (value.length() == 1) return false; // Just a minus sign
-			start = 1;
-		}
-
-		for (size_t i = start; i < value.length(); i++) {
-			if (!std::isdigit(value[i])) return false;
-		}
+		size_t start = (value[0] == '-') ? 1 : 0;
+		if (start == value.size()) return false; // just "-"
+		for (size_t i = start; i < value.size(); i++)
+			if (!std::isdigit(static_cast<unsigned char>(value[i])))
+				return false;
 		return true;
 	}
 
-	case SchemaType::Type::Float: {
-		float val;
-		auto res = std::from_chars(value.data(), value.data() + value.size(), val);
-		if (res.ec == std::errc::invalid_argument || res.ec == std::errc::result_out_of_range) return false;
-		return true;
+	case SchemaType::Type::Float:
+	{
+		float tmp;
+		auto res = std::from_chars(value.data(), value.data() + value.size(), tmp);
+		return (res.ec != std::errc::invalid_argument && res.ec != std::errc::result_out_of_range);
 	}
 
 	case SchemaType::Type::String:
-		return true; // All strings are valid
+		// allow any string (subject to your IsValidUserInfo / length checks)
+		return true;
 
 	case SchemaType::Type::Enum:
 		return isValidEnumValue(type.enumName, value);
+
+	default:
+		return false;
 	}
 
 	return false;
