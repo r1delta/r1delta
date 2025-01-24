@@ -1,5 +1,7 @@
 ﻿#include "core.h"
 
+class PDef;
+
 #include <string>
 #include <vector>
 #include <cstring>
@@ -757,7 +759,7 @@ public:
 			Error("PData validator failed to initialize");
 		}
 		
-		return s_validator->isValid(key, value);
+		return s_validator->resolveArrayIndices(key);
 	}
 };
 
