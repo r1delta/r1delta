@@ -459,15 +459,62 @@ bool PDataValidator::processSegmentForArrays(std::string& currentBase, const std
 	return true;
 }
 
+std::string PDataValidator::resolveArrayIndices(const std::string_view& key) const {
+    std::vector<std::string> segments = splitOnDot(key);
+    std::string resolvedKey;
+    
+    for (const auto& segment : segments) {
+        size_t bracketPos = segment.find('[');
+        if (bracketPos == std::string::npos) {
+            if (!resolvedKey.empty()) resolvedKey += ".";
+            resolvedKey += segment;
+            continue;
+        }
+
+        std::string arrayName = segment.substr(0, bracketPos);
+        std::string indexStr = segment.substr(bracketPos+1, segment.find(']')-bracketPos-1);
+        
+        // Validate and resolve index
+        auto arrayIt = arrays.find(arrayName);
+        if (arrayIt != arrays.end()) {
+            const ArrayDef& def = arrayIt->second;
+            if (std::holds_alternative<std::string>(def.size)) {
+                // Enum-based size, resolve to numeric index
+                const auto& enumName = std::get<std::string>(def.size);
+                auto enumIt = enums.find(enumName);
+                if (enumIt != enums.end()) {
+                    // Find case-insensitive match
+                    auto lowerIndex = [&]{
+                        std::string s;
+                        s.reserve(indexStr.size());
+                        for(char c : indexStr) s += tolower(c);
+                        return s;
+                    }();
+                    
+                    for (const auto& [name, value] : enumIt->second) {
+                        std::string lowerName;
+                        lowerName.reserve(name.size());
+                        for(char c : name) lowerName += tolower(c);
+                        
+                        if (lowerName == lowerIndex) {
+                            indexStr = std::to_string(value);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        
+        if (!resolvedKey.empty()) resolvedKey += ".";
+        resolvedKey += arrayName + "[" + indexStr + "]";
+    }
+    
+    return resolvedKey;
+}
+
 bool PDataValidator::isValid(const std::string_view& key, const std::string_view& value) const
 {
-	// Split on '.' first
-	std::vector<std::string> segments = splitOnDot(key);
-
-	// We will accumulate a "base key" that has bracket-free segments joined with '.'.
-	// Example: if key = "weaponKillStats[mp_weapon_lmg].npcTitans[titan_atlas]"
-	//   - first segment = "weaponKillStats[mp_weapon_lmg]"
-	//   - second segment = "npcTitans[titan_atlas]"
+    std::string resolvedKey = resolveArrayIndices(key);
 	// final baseKey might be "weaponKillStats.npcTitans" 
 	// Then we look up that final string in 'keys'.
 	// Meanwhile each bracket usage is validated by validateArrayAccess in processSegmentForArrays().
