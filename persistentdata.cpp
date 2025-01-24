@@ -515,17 +515,16 @@ std::string PDataValidator::resolveArrayIndices(const std::string_view& key) con
 bool PDataValidator::isValid(const std::string_view& key, const std::string_view& value) const
 {
     std::string resolvedKey = resolveArrayIndices(key);
-	// final baseKey might be "weaponKillStats.npcTitans" 
-	// Then we look up that final string in 'keys'.
-	// Meanwhile each bracket usage is validated by validateArrayAccess in processSegmentForArrays().
-	std::string baseKey;
-	baseKey.reserve(key.size()); // rough
+    std::string resolvedKey = resolveArrayIndices(key);
+    std::vector<std::string> segments = splitOnDot(resolvedKey);
+    std::string baseKey;
+    baseKey.reserve(key.size()); // rough
 
-	for (size_t i = 0; i < segments.size(); i++)
-	{
-		if (!processSegmentForArrays(baseKey, segments[i]))
-			return false;
-	}
+    for (const auto& segment : segments) {
+        if (!processSegmentForArrays(baseKey, segment)) {
+            return false;
+        }
+    }
 
 	// Now that all bracket references were validated, check if baseKey is in schema
 	SchemaType type = getKeyType(baseKey);
