@@ -122,9 +122,12 @@ const char* hashUserInfoKeyArena(Arena* arena, const char* key)
 #ifdef HASH_USERINFO_KEYS
 # error NOT IMPLEMENTED
 #else
+	// First resolve array indices
+	std::string resolvedKey = PDef::ResolveKeyIndices(key);
+    
 	// NOTE(mrsteyk): guarantee key length validity.
 	constexpr size_t MAX_LENGTH_DUP = MAX_LENGTH - sizeof(PERSIST_COMMAND);
-	auto len = strlen(key);
+	auto len = resolvedKey.length();
 	if (len > MAX_LENGTH_DUP)
 	{
 		R1DAssert(!"Bad stuff happened!");
@@ -186,6 +189,7 @@ public:
 	bool processSegmentForArrays(std::string& currentBase, const std::string& segment) const;
 	// Main validation function
 	bool isValid(const std::string_view& key, const std::string_view& value) const;
+	std::string resolveArrayIndices(const std::string_view& key) const;
 
 private:
 	friend class SchemaParser;
@@ -695,6 +699,11 @@ private:
 
 public:
 	static bool IsValidKeyAndValue(const std::string& key, const std::string& value) {
+		std::call_once(s_initFlag, InitValidator);
+		return s_validator->isValid(key, value);
+	}
+
+	static std::string ResolveKeyIndices(const std::string_view& key) {
 		// Initialize validator on first use
 		std::call_once(s_initFlag, InitValidator);
 
