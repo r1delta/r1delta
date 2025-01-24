@@ -119,29 +119,6 @@ std::string hashUserInfoKey(const std::string& key) {
 #endif
 }
 
-const char* hashUserInfoKeyArena(Arena* arena, const char* key)
-{
-#ifdef HASH_USERINFO_KEYS
-# error NOT IMPLEMENTED
-#else
-	// First resolve array indices
-	std::string resolvedKey = PDef::ResolveKeyIndices(key);
-    
-	// NOTE(mrsteyk): guarantee key length validity.
-	constexpr size_t MAX_LENGTH_DUP = MAX_LENGTH - sizeof(PERSIST_COMMAND);
-	auto len = resolvedKey.length();
-	if (len > MAX_LENGTH_DUP)
-	{
-		R1DAssert(!"Bad stuff happened!");
-		len = MAX_LENGTH_DUP;
-	}
-
-	auto ret = (char*)arena_push(arena, len + 1);
-	memcpy(ret, key, len);
-	return ret;
-#endif
-}
-
 
 // ConVar handling
 __int64 CConVar__GetSplitScreenPlayerSlot(char* fakethisptr) {
@@ -517,7 +494,6 @@ std::string PDataValidator::resolveArrayIndices(const std::string_view& key) con
 bool PDataValidator::isValid(const std::string_view& key, const std::string_view& value) const
 {
     std::string resolvedKey = resolveArrayIndices(key);
-    std::string resolvedKey = resolveArrayIndices(key);
     std::vector<std::string> segments = splitOnDot(resolvedKey);
     std::string baseKey;
     baseKey.reserve(key.size()); // rough
@@ -886,7 +862,28 @@ bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 
 	return !buffer.IsOverflowed();
 }
+const char* hashUserInfoKeyArena(Arena* arena, const char* key)
+{
+#ifdef HASH_USERINFO_KEYS
+# error NOT IMPLEMENTED
+#else
+	// First resolve array indices
+	std::string resolvedKey = PDef::ResolveKeyIndices(key);
 
+	// NOTE(mrsteyk): guarantee key length validity.
+	constexpr size_t MAX_LENGTH_DUP = MAX_LENGTH - sizeof(PERSIST_COMMAND);
+	auto len = resolvedKey.length();
+	if (len > MAX_LENGTH_DUP)
+	{
+		R1DAssert(!"Bad stuff happened!");
+		len = MAX_LENGTH_DUP;
+	}
+
+	auto ret = (char*)arena_push(arena, len + 1);
+	memcpy(ret, key, len);
+	return ret;
+#endif
+}
 // Squirrel VM functions
 SQInteger Script_ClientGetPersistentData(HSQUIRRELVM v) {
 	if (sq_gettop(nullptr, v) != 3) {
@@ -1203,6 +1200,8 @@ static double g_flLastCommandTime = 0.0;
 static constexpr double SAVE_DELAY = 5.0; // 5 second delay
 static bool g_bRecursive = false;
 static bool g_bSavePending = false;
+
+
 // Command handling
 void setinfopersist_cmd(const CCommand& args) {
 	auto engine = G_engine;
