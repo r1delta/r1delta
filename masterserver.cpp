@@ -47,16 +47,26 @@ struct HeartbeatInfo {
     int port;
     std::vector<PlayerInfo> players;
 };
+static ConVarR1O* delta_ms_url = nullptr;
+static ConVarR1O* hostport = nullptr;
+static ConVarR1O* host_map = nullptr;
+
+
+void InitMasterServerCVars() {
+    static bool initialized = false;
+    if (!initialized) {
+        delta_ms_url = CCVar_FindVar(cvarinterface, "delta_ms_url");
+        hostport = CCVar_FindVar(cvarinterface, "hostport");
+        host_map = CCVar_FindVar(cvarinterface, "host_map");
+        initialized = true;
+    }
+}
 
 // These functions need to be implemented by the user of this interface
 namespace MasterServerClient {
     static std::mutex httpMutex;
     static std::unique_ptr<httplib::Client> httpClient;
     static std::atomic<int64_t> lastHeartbeatTime{0};
-    static ConVarR1O* delta_ms_url = nullptr;
-    static ConVarR1O* hostport = nullptr;
-    static ConVarR1O* host_map = nullptr;
-    
     bool SendServerHeartbeat(const HeartbeatInfo& heartbeat) {
         InitMasterServerCVars();
         if (!delta_ms_url || !delta_ms_url->m_Value.m_pszString[0]) {
@@ -159,17 +169,8 @@ namespace MasterServerClient {
 } // namespace MasterServerClient
 
 
-void InitMasterServerCVars() {
-    static bool initialized = false;
-    if (!initialized) {
-        MasterServerClient::delta_ms_url = CCVar_FindVar(cvarinterface, "delta_ms_url");
-        MasterServerClient::hostport = CCVar_FindVar(cvarinterface, "hostport");
-        MasterServerClient::host_map = CCVar_FindVar(cvarinterface, "host_map");
-        initialized = true;
-    }
-}
-
 SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
+    InitMasterServerCVars();
     SQObject obj;
     SQInteger top = sq_gettop(nullptr, v);
     if (top < 2) {
@@ -201,7 +202,7 @@ SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
             continue;
         }
         auto key = node->key._unVal.pString->_val;
-
+        heartbeat.port = hostport->m_Value.m_nValue;
         switch (node->val._type) {
         case OT_STRING: {
             auto str = reinterpret_cast<SQString*>(node->val._unVal.pRefCounted);
@@ -220,9 +221,9 @@ SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
             if (strcmp_static(key, "max_players") == 0) {
                 heartbeat.maxPlayers = node->val._unVal.nInteger;
             }
-            else if (strcmp_static(key, "port") == 0) { // Port is also in heartbeat now
-                heartbeat.port = node->val._unVal.nInteger;
-            }
+            //else if (strcmp_static(key, "port") == 0) { // Port is also in heartbeat now
+            //    heartbeat.port = node->val._unVal.nInteger;
+            //}
             break;
         case OT_ARRAY:
             if (strcmp_static(key, "players") == 0) {
@@ -277,9 +278,9 @@ SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
         if (!port_forward_warning_shown) {
             port_forward_warning_shown = true;
             if (!IsDedicatedServer()) {
-                int hostport = MasterServerClient::hostport ? MasterServerClient::hostport->m_Value.m_nValue : 27015;
+                int hostport_val = hostport ? hostport->m_Value.m_nValue : 27015;
                 char cmd[64];
-                snprintf(cmd, sizeof(cmd), "script_ui ShowPortForwardWarning(%d)\n", hostport);
+                snprintf(cmd, sizeof(cmd), "script_ui ShowPortForwardWarning(%d)\n", hostport_val);
                 Cbuf_AddText(0, cmd, 0);
             }
             else {
