@@ -11,6 +11,13 @@
 #include <string>
 #include <vector>
 #include <sstream>
+#include <mutex>
+#include <atomic>
+#include <chrono>
+#include <httplib.h>
+#include <nlohmann/json.hpp>
+
+using json = nlohmann::json;
 
 
 // --- Agnostic Master Server Interface ---
@@ -43,26 +50,105 @@ struct HeartbeatInfo {
 
 // These functions need to be implemented by the user of this interface
 namespace MasterServerClient {
-
+    static std::mutex httpMutex;
+    static std::unique_ptr<httplib::Client> httpClient;
+    static std::atomic<int64_t> lastHeartbeatTime{0};
+    
     bool SendServerHeartbeat(const HeartbeatInfo& heartbeat) {
-        // User implementation to send heartbeat data to master server
-        // Return true on success, false on failure
-        Warning("MasterServerClient::SendServerHeartbeat - NOT IMPLEMENTED\n");
-        return false; // Indicate failure for placeholder
+        auto* delta_ms_url = CCVar_FindVar(cvarinterface, "delta_ms_url");
+        if (!delta_ms_url || !delta_ms_url->m_Value.m_pszString[0]) {
+            Warning("MasterServerClient: delta_ms_url not set\n");
+            return false;
+        }
+
+        std::lock_guard<std::mutex> lock(httpMutex);
+        if (!httpClient) {
+            httpClient = std::make_unique<httplib::Client>(delta_ms_url->m_Value.m_pszString);
+            httpClient->set_connection_timeout(3);
+        }
+
+        json j;
+        j["host_name"] = heartbeat.hostName;
+        j["map_name"] = heartbeat.mapName;
+        j["game_mode"] = heartbeat.gameMode;
+        j["max_players"] = heartbeat.maxPlayers;
+        j["port"] = heartbeat.port;
+        
+        j["players"] = json::array();
+        for (const auto& p : heartbeat.players) {
+            json pj;
+            pj["name"] = p.name;
+            pj["gen"] = p.gen;
+            pj["lvl"] = p.lvl;
+            pj["team"] = p.team;
+            j["players"].push_back(pj);
+        }
+
+        auto res = httpClient->Post("/heartbeat", j.dump(), "application/json");
+        if (!res || res->status != 200) {
+            Warning("MasterServerClient: Heartbeat failed - %s\n", 
+                res ? res->body.c_str() : "Connection failed");
+            return false;
+        }
+        
+        lastHeartbeatTime = std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        return true;
     }
 
     std::vector<ServerInfo> GetServerList() {
-        // User implementation to get server list from master server
-        // Return a vector of ServerInfo
-        Warning("MasterServerClient::GetServerList - NOT IMPLEMENTED\n");
-        return {}; // Return empty list for placeholder
+        auto* delta_ms_url = CCVar_FindVar(cvarinterface, "delta_ms_url");
+        if (!delta_ms_url) return {};
+
+        httplib::Client cli(delta_ms_url->m_Value.m_pszString);
+        cli.set_connection_timeout(2);
+        
+        auto res = cli.Get("/servers");
+        if (!res || res->status != 200) return {};
+
+        try {
+            auto j = json::parse(res->body);
+            std::vector<ServerInfo> servers;
+            
+            for (const auto& sj : j) {
+                ServerInfo si;
+                si.hostName = sj["host_name"];
+                si.mapName = sj["map_name"];
+                si.gameMode = sj["game_mode"];
+                si.maxPlayers = sj["max_players"];
+                si.port = sj["port"];
+                si.ip = sj["ip"];
+                
+                for (const auto& pj : sj["players"]) {
+                    PlayerInfo pi;
+                    pi.name = pj["name"];
+                    pi.gen = pj["gen"];
+                    pi.lvl = pj["lvl"];
+                    pi.team = pj["team"];
+                    si.players.push_back(pi);
+                }
+                servers.push_back(si);
+            }
+            return servers;
+        } catch (...) {
+            Warning("MasterServerClient: Invalid server list response\n");
+            return {};
+        }
     }
 
     void OnServerShutdown(int port) {
-        // User implementation to notify master server of shutdown
-        Warning("MasterServerClient::OnServerShutdown - NOT IMPLEMENTED for port %d\n", port);
-    }
+        auto* delta_ms_url = CCVar_FindVar(cvarinterface, "delta_ms_url");
+        if (!delta_ms_url) return;
 
+        httplib::Client cli(delta_ms_url->m_Value.m_pszString);
+        cli.set_connection_timeout(2);
+        
+        std::string path = "/heartbeat/" + std::to_string(port);
+        auto res = cli.Delete(path.c_str());
+        if (!res || res->status != 200) {
+            Warning("MasterServerClient: Shutdown notification failed\n");
+        }
+    }
 } // namespace MasterServerClient
 
 
