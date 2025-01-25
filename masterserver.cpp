@@ -81,6 +81,7 @@ namespace MasterServerClient {
         if (!httpClient || current_url != last_url) {
             httpClient = std::make_unique<httplib::Client>(current_url);
             httpClient->set_connection_timeout(3);
+            httpClient->set_address_family(AF_INET);  // Force IPv4
             last_url = current_url;
         }
 
@@ -119,6 +120,7 @@ namespace MasterServerClient {
         
         httplib::Client cli(delta_ms_url->m_Value.m_pszString);
         cli.set_connection_timeout(2);
+        cli.set_address_family(AF_INET);  // Force IPv4
         
         auto res = cli.Get("/servers");
         if (!res || res->status != 200) return {};
@@ -159,6 +161,7 @@ namespace MasterServerClient {
         
         httplib::Client cli(delta_ms_url->m_Value.m_pszString);
         cli.set_connection_timeout(2);
+        cli.set_address_family(AF_INET);  // Force IPv4
         
         std::string path = "/heartbeat/" + std::to_string(port);
         auto res = cli.Delete(path.c_str());
