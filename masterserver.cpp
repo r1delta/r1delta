@@ -53,18 +53,25 @@ namespace MasterServerClient {
     static std::mutex httpMutex;
     static std::unique_ptr<httplib::Client> httpClient;
     static std::atomic<int64_t> lastHeartbeatTime{0};
+    static ConVarR1O* delta_ms_url = nullptr;
+    static ConVarR1O* hostport = nullptr;
+    static ConVarR1O* host_map = nullptr;
     
     bool SendServerHeartbeat(const HeartbeatInfo& heartbeat) {
-        auto* delta_ms_url = CCVar_FindVar(cvarinterface, "delta_ms_url");
+        InitMasterServerCVars();
         if (!delta_ms_url || !delta_ms_url->m_Value.m_pszString[0]) {
             Warning("MasterServerClient: delta_ms_url not set\n");
             return false;
         }
 
         std::lock_guard<std::mutex> lock(httpMutex);
-        if (!httpClient) {
-            httpClient = std::make_unique<httplib::Client>(delta_ms_url->m_Value.m_pszString);
+        static std::string last_url;
+        std::string current_url = delta_ms_url->m_Value.m_pszString;
+        
+        if (!httpClient || current_url != last_url) {
+            httpClient = std::make_unique<httplib::Client>(current_url);
             httpClient->set_connection_timeout(3);
+            last_url = current_url;
         }
 
         json j;
@@ -97,9 +104,9 @@ namespace MasterServerClient {
     }
 
     std::vector<ServerInfo> GetServerList() {
-        auto* delta_ms_url = CCVar_FindVar(cvarinterface, "delta_ms_url");
+        InitMasterServerCVars();
         if (!delta_ms_url) return {};
-
+        
         httplib::Client cli(delta_ms_url->m_Value.m_pszString);
         cli.set_connection_timeout(2);
         
@@ -137,9 +144,9 @@ namespace MasterServerClient {
     }
 
     void OnServerShutdown(int port) {
-        auto* delta_ms_url = CCVar_FindVar(cvarinterface, "delta_ms_url");
+        InitMasterServerCVars();
         if (!delta_ms_url) return;
-
+        
         httplib::Client cli(delta_ms_url->m_Value.m_pszString);
         cli.set_connection_timeout(2);
         
@@ -151,6 +158,16 @@ namespace MasterServerClient {
     }
 } // namespace MasterServerClient
 
+
+void InitMasterServerCVars() {
+    static bool initialized = false;
+    if (!initialized) {
+        MasterServerClient::delta_ms_url = CCVar_FindVar(cvarinterface, "delta_ms_url");
+        MasterServerClient::hostport = CCVar_FindVar(cvarinterface, "hostport");
+        MasterServerClient::host_map = CCVar_FindVar(cvarinterface, "host_map");
+        initialized = true;
+    }
+}
 
 SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
     SQObject obj;
@@ -260,7 +277,7 @@ SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
         if (!port_forward_warning_shown) {
             port_forward_warning_shown = true;
             if (!IsDedicatedServer()) {
-                int hostport = OriginalCCVar_FindVar2(cvarinterface, "hostport")->m_Value.m_nValue;
+                int hostport = MasterServerClient::hostport ? MasterServerClient::hostport->m_Value.m_nValue : 27015;
                 char cmd[64];
                 snprintf(cmd, sizeof(cmd), "script_ui ShowPortForwardWarning(%d)\n", hostport);
                 Cbuf_AddText(0, cmd, 0);
@@ -378,14 +395,13 @@ typedef void(__fastcall* pCHostState__State_GameShutdown_t)(void* thisptr);
 pCHostState__State_GameShutdown_t oGameShutDown;
 
 void Hk_CHostState__State_GameShutdown(void* thisptr) {
-    static auto hostport_cvar = CCVar_FindVar(cvarinterface, "hostport");
-    static auto host_map_cvar = CCVar_FindVar(cvarinterface, "host_map");
-    if (strlen(host_map_cvar->m_Value.m_pszString) > 2) {
-        int port = hostport_cvar->m_Value.m_nValue;
+    InitMasterServerCVars();
+    if (strlen(host_map->m_Value.m_pszString) > 2) {
+        int port = hostport->m_Value.m_nValue;
         MasterServerClient::OnServerShutdown(port);
-
-        host_map_cvar->m_Value.m_StringLength = 0;
-        host_map_cvar->m_Value.m_pszString[0] = '\0';
+        
+        host_map->m_Value.m_StringLength = 0;
+        host_map->m_Value.m_pszString[0] = '\0';
     }
     oGameShutDown(thisptr);
 }
