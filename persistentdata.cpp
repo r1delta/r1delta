@@ -680,35 +680,6 @@ bool PDataValidator::validateArrayAccess(const std::string_view& arrayName,
 	return idx >= 0 && idx < size;
 }
 
-#if 0
-std::vector<std::string> PDataValidator::splitKey(const std::string& key) const {
-	const auto key_size = key.size();
-
-	size_t counter = 1;
-	for (size_t i = 0; i < key_size; ++i) if (key[i] == '.') counter++;
-	std::vector<std::string> result;
-	result.reserve(counter);
-		
-	size_t i = 0;
-	while (i < key_size)
-	{
-		size_t j = i;
-		while (j < key_size && key[j] != '.')
-		{
-			++j;
-		}
-		if (j != i)
-		{
-			auto v = key.substr(i, j - i);
-			result.push_back(v);
-		}
-		i = j + 1;
-	}
-
-	return std::move(result);
-}
-#endif
-
 std::string readFile(const std::string& filename) {
 	std::ifstream file(filename);
 	if (!file.is_open()) {
