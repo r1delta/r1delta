@@ -441,56 +441,36 @@ bool PDataValidator::processSegmentForArrays(std::string& currentBase, const std
 std::string PDataValidator::resolveArrayIndices(const std::string_view& key) const {
     std::vector<std::string> segments = splitOnDot(key);
     std::string resolvedKey;
+    std::string currentValidationBase;  // Tracks the base name for validation
     
     for (const auto& segment : segments) {
-        size_t bracketPos = segment.find('[');
-        if (bracketPos == std::string::npos) {
-            if (!resolvedKey.empty()) resolvedKey += ".";
-            resolvedKey += segment;
-            continue;
-        }
-
-        std::string arrayName = segment.substr(0, bracketPos);
-        std::string indexStr = segment.substr(bracketPos+1, segment.find(']')-bracketPos-1);
+        // Get base name without any array indices for validation
+        std::string baseName = getBaseArrayName(segment);
         
-        // Validate array access first
-        if (!validateArrayAccess(arrayName, indexStr)) {
-			Warning(__FUNCTION__ ": out of bound pdata array index %s for %s!\n", indexStr.c_str(), arrayName.c_str());
-            return "";
+        // Build the validation base with dot separators
+        if (!currentValidationBase.empty()) {
+            currentValidationBase += ".";
         }
+        currentValidationBase += baseName;
 
-        // Then resolve index if needed
-        auto arrayIt = arrays.find(arrayName);
-        if (arrayIt != arrays.end()) {
-            const ArrayDef& def = arrayIt->second;
-            if (std::holds_alternative<std::string>(def.size)) {
-                const auto& enumName = std::get<std::string>(def.size);
-                auto enumIt = enums.find(enumName);
-                if (enumIt != enums.end()) {
-                    // Find case-insensitive match
-                    auto lowerIndex = [&]{
-                        std::string s;
-                        s.reserve(indexStr.size());
-                        for(char c : indexStr) s += tolower(c);
-                        return s;
-                    }();
-                    
-                    for (const auto& [name, value] : enumIt->second) {
-                        std::string lowerName;
-                        lowerName.reserve(name.size());
-                        for(char c : name) lowerName += tolower(c);
-                        
-                        if (lowerName == lowerIndex) {
-                            indexStr = std::to_string(value);
-                            break;
-                        }
-                    }
-                }
+        // Process array indices if present
+        size_t bracketPos = segment.find('[');
+        if (bracketPos != std::string::npos) {
+            std::string indexStr = segment.substr(bracketPos+1, segment.find(']')-bracketPos-1);
+            
+            // Validate using the accumulated base name without indices
+            if (!validateArrayAccess(currentValidationBase, indexStr)) {
+                Warning(__FUNCTION__ ": out of bound pdata array index %s for %s!\n", 
+                    indexStr.c_str(), currentValidationBase.c_str());
+                return "";
             }
         }
-        
-        if (!resolvedKey.empty()) resolvedKey += ".";
-        resolvedKey += arrayName + "[" + indexStr + "]";
+
+        // Build resolved key with indices
+        if (!resolvedKey.empty()) {
+            resolvedKey += ".";
+        }
+        resolvedKey += segment;
     }
     
     return resolvedKey;
