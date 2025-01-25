@@ -1347,6 +1347,47 @@ __int64 StringCompare_AllTalkHookDedi(__int64 a1, __int64 a2) {
 		return false;
 	return strcmp((const char*)a1, (const char*)a2);
 }
+#define MOVETYPE_NOCLIP 9
+void DisableNoClip(void* pPlayer) {
+	auto sub_03B3200 = reinterpret_cast<void(*)(void*, int, int)>(G_server + 0x3B3200);
+	auto sub_025D680 = reinterpret_cast<void(*)(void*, int, const char*)>(G_server + 0x25D680);
+
+	sub_03B3200(pPlayer, 2, 0);
+	sub_025D680(pPlayer, 0, "noclip OFF\n");
+}
+void noclip_cmd(const CCommand& args)
+{
+	auto UTIL_GetCommandClient = reinterpret_cast<void* (*)()>(G_server + 0x01438F0);
+	auto EnableNoClip = reinterpret_cast<void (*)(void*)>(G_server + 0xDAC70);
+	void* pPlayer = UTIL_GetCommandClient();
+	if (!pPlayer)
+		return;
+	int pPlayer_GetMoveType = *(_BYTE*)(((uintptr_t)pPlayer) + 444);
+	if (args.ArgC() >= 2)
+	{
+		bool bEnable = atoi(args.Arg(1)) ? true : false;
+		if (bEnable && pPlayer_GetMoveType != MOVETYPE_NOCLIP)
+		{
+			EnableNoClip(pPlayer);
+		}
+		else if (!bEnable && pPlayer_GetMoveType == MOVETYPE_NOCLIP)
+		{
+			DisableNoClip(pPlayer);
+		}
+	}
+	else
+	{
+		// Toggle the noclip state if there aren't any arguments.
+		if (pPlayer_GetMoveType != MOVETYPE_NOCLIP)
+		{
+			EnableNoClip(pPlayer);
+		}
+		else
+		{
+			DisableNoClip(pPlayer);
+		}
+	}
+}
 static FORCEINLINE void
 do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 {
@@ -1430,6 +1471,7 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	if (!IsDedicatedServer()) {
 		RegisterConCommand("script_client", script_client_cmd, "Execute Squirrel code in client context", FCVAR_NONE);
 		RegisterConCommand("script_ui", script_ui_cmd, "Execute Squirrel code in UI context", FCVAR_NONE);
+		RegisterConCommand("noclip", noclip_cmd, "Toggles NOCLIP mode.", FCVAR_GAMEDLL | FCVAR_CHEAT);
 	}
 
 	//0x0000415198 on dedicated
