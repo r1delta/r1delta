@@ -353,17 +353,39 @@ static std::vector<std::string> splitOnDot(const std::string_view& key)
 {
 	std::vector<std::string> parts;
 	size_t start = 0;
-	while (true)
-	{
+	size_t length = key.length();
+	
+	while (start < length) {
 		size_t dotPos = key.find('.', start);
-		if (dotPos == std::string::npos)
-		{
+		
+		// Check if dot is followed by array bracket
+		bool splitDot = true;
+		if (dotPos != std::string_view::npos) {
+			// Look ahead to see if next character is '['
+			if (dotPos + 1 < length && key[dotPos + 1] == '[') {
+				splitDot = false;
+			}
+		}
+
+		if (!splitDot) {
+			// Find end of this segment (either next real dot or end)
+			size_t realDot = key.find('.', dotPos + 1);
+			if (realDot == std::string_view::npos) {
+				parts.emplace_back(key.substr(start));
+				break;
+			}
+			dotPos = realDot;
+		}
+
+		if (dotPos == std::string_view::npos) {
 			parts.emplace_back(key.substr(start));
 			break;
 		}
+
 		parts.emplace_back(key.substr(start, dotPos - start));
 		start = dotPos + 1;
 	}
+	
 	return parts;
 }
 
