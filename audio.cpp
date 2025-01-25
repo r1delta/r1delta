@@ -319,10 +319,10 @@ __int64 HandleOriginalRead(CBaseFileSystem* filesystem, FileAsyncRequest_t* requ
     case FSASYNC_ERR_FILEOPEN: statusStr = "ERR_FILEOPEN";  break;
     case FSASYNC_ERR_READING:  statusStr = "ERR_READING";   break;
     }
-    
-    Msg("SyncRead: file='%s' offset=%lld bytes=%lld status=%s\n",
-        request->pszFilename, request->nOffset, request->nBytes, statusStr);
-
+    if (g_pLogAudio->m_Value.m_nValue == 1) {
+        Msg("SyncRead: file='%s' offset=%lld bytes=%lld status=%s\n",
+            request->pszFilename, request->nOffset, request->nBytes, statusStr);
+    }
     return originalResult;
 }
 
