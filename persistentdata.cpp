@@ -353,39 +353,17 @@ static std::vector<std::string> splitOnDot(const std::string_view& key)
 {
 	std::vector<std::string> parts;
 	size_t start = 0;
-	size_t length = key.length();
-	
-	while (start < length) {
+	while (true)
+	{
 		size_t dotPos = key.find('.', start);
-		
-		// Check if dot is followed by array bracket
-		bool splitDot = true;
-		if (dotPos != std::string_view::npos) {
-			// Look ahead to see if next character is '['
-			if (dotPos + 1 < length && key[dotPos + 1] == '[') {
-				splitDot = false;
-			}
-		}
-
-		if (!splitDot) {
-			// Find end of this segment (either next real dot or end)
-			size_t realDot = key.find('.', dotPos + 1);
-			if (realDot == std::string_view::npos) {
-				parts.emplace_back(key.substr(start));
-				break;
-			}
-			dotPos = realDot;
-		}
-
-		if (dotPos == std::string_view::npos) {
+		if (dotPos == std::string::npos)
+		{
 			parts.emplace_back(key.substr(start));
 			break;
 		}
-
 		parts.emplace_back(key.substr(start, dotPos - start));
 		start = dotPos + 1;
 	}
-	
 	return parts;
 }
 
@@ -477,7 +455,8 @@ std::string PDataValidator::resolveArrayIndices(const std::string_view& key) con
         
         // Validate array access first
         if (!validateArrayAccess(arrayName, indexStr)) {
-            return ""; // Return empty string for invalid indices
+			Warning(__FUNCTION__ ": out of bound pdata array index %s for %s!\n", indexStr.c_str(), arrayName.c_str());
+            return "";
         }
 
         // Then resolve index if needed
@@ -674,19 +653,45 @@ bool PDataValidator::validateArrayAccess(const std::string_view& arrayName,
 
 	const auto& arrayDef = it->second;
 
-	// Check if array size is defined by an enum
+	// Helper to check if a string is all digits
+	auto isNumeric = [](std::string_view str) {
+		return !str.empty() &&
+			std::all_of(str.begin(), str.end(), [](unsigned char c) {
+			return std::isdigit(c);
+				});
+	};
+
 	if (std::holds_alternative<std::string>(arrayDef.size)) {
 		const std::string& enumName = std::get<std::string>(arrayDef.size);
-		// Validate that the index is a valid enum value name
+		auto enumIt = enums.find(enumName);
+		if (enumIt == enums.end()) return false;
+
+		if (isNumeric(index)) {
+			// Convert numeric index to integer
+			int idx;
+			auto res = std::from_chars(index.data(), index.data() + index.size(), idx);
+			if (res.ec != std::errc() || res.ptr != index.data() + index.size())
+				return false;
+
+			// Find maximum value in enum
+			int maxVal = -1;
+			for (const auto& [_, value] : enumIt->second) {
+				maxVal = std::max(maxVal, value);
+			}
+			return idx >= 0 && idx <= maxVal;
+		}
+
+		// Non-numeric index, validate as enum value name
 		return isValidEnumValue(enumName, index);
 	}
 
-	// Otherwise validate numeric index against fixed size
+	// Handle fixed-size array
+	int size = std::get<int>(arrayDef.size);
 	int idx;
 	auto res = std::from_chars(index.data(), index.data() + index.size(), idx);
-	if (res.ec != std::errc() || res.ptr != index.data() + index.size()) 
+	if (res.ec != std::errc() || res.ptr != index.data() + index.size())
 		return false;
-	return idx >= 0 && idx < std::get<int>(arrayDef.size);
+	return idx >= 0 && idx < size;
 }
 
 #if 0
@@ -910,6 +915,8 @@ const char* hashUserInfoKeyArena(Arena* arena, const char* key)
 
 	auto ret = (char*)arena_push(arena, len + 1);
 	memcpy(ret, key, len);
+	if (std::string(key) != std::string(ret))
+		Msg("hashUserInfoKeyArena: in: %s out %s\n", key, ret);
 	return ret;
 #endif
 }
