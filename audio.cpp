@@ -319,10 +319,10 @@ __int64 HandleOriginalRead(CBaseFileSystem* filesystem, FileAsyncRequest_t* requ
     case FSASYNC_ERR_FILEOPEN: statusStr = "ERR_FILEOPEN";  break;
     case FSASYNC_ERR_READING:  statusStr = "ERR_READING";   break;
     }
-    if (g_pLogAudio->m_Value.m_nValue == 1) {
+   /* if (g_pLogAudio->m_Value.m_nValue == 1) {
         Msg("SyncRead: file='%s' offset=%lld bytes=%lld status=%s\n",
             request->pszFilename, request->nOffset, request->nBytes, statusStr);
-    }
+    }*/
     return originalResult;
 }
 
@@ -898,11 +898,11 @@ static __int64 HandleOpusRead(CBaseFileSystem* fs, FileAsyncRequest_t* request) 
     pPerformAsyncCallback(fs, request, pDest, actualRead,
         (actualRead < request->nBytes) ? FSASYNC_ERR_READING : FSASYNC_OK);
 
-    if (g_pLogAudio->m_Value.m_nValue == 1) {
+   /* if (g_pLogAudio->m_Value.m_nValue == 1) {
         Msg("SyncRead (opus): file='%s' offset=%lld bytes=%lld skip=%lld [actual %d]\n",
             request->pszFilename, (long long)request->nOffset, (long long)request->nBytes,
             (long long)ctx.skipOffset, actualRead);
-    }
+    }*/
 
 
     return (actualRead == 0 && request->nBytes != 0) ?
