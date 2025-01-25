@@ -1,5 +1,11 @@
 ﻿#include "core.h"
 
+// Helper to extract base name from a segment with possible array index
+static std::string getBaseArrayName(const std::string_view& segment) {
+    size_t bracketPos = segment.find('[');
+    return std::string(bracketPos == std::string::npos ? segment : segment.substr(0, bracketPos));
+}
+
 class PDef;
 
 #include <string>
