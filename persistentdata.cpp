@@ -840,6 +840,11 @@ bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 			}
 		}
 		else {
+			// Skip networkid_force CVar case-insensitively
+			if (::_stricmp(var.name, "networkid_force") == 0) {
+				continue; // Skip this CVar
+			}
+
 			// Check if convar exists and has FCVAR_USERINFO flag
 			auto cvar = OriginalCCVar_FindVar(cvarinterface, var.name);
 			if (!cvar || !(cvar->m_nFlags & (FCVAR_USERINFO | FCVAR_REPLICATED))) {
