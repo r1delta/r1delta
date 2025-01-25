@@ -1,5 +1,3 @@
-#include <winsock2.h>
-#include <ws2tcpip.h>
 #include <windows.h>
 #include "core.h"
 #include "client.h"
@@ -41,10 +39,10 @@ void sub_18027F2C0(__int64 a1, const char* a2, void* a3)
 	sub_18027F2C0Original(a1, a2, a3);
 }
 
-typedef int (WSAAPI* GetAddrInfoFn)(PCSTR, PCSTR, const ADDRINFOA*, PADDRINFOA*);
+typedef int (*GetAddrInfoFn)(PCSTR, PCSTR, const void*, void*);
 GetAddrInfoFn originalGetAddrInfo = nullptr;
 
-int WSAAPI hookedGetAddrInfo(PCSTR pNodeName, PCSTR pServiceName, const ADDRINFOA* pHints, PADDRINFOA* ppResult) {
+int hookedGetAddrInfo(PCSTR pNodeName, PCSTR pServiceName, const void* pHints, void* ppResult) {
 	const size_t nodelen = strlen(pNodeName);
 
 	// block respawn servers to prevent accidentally DoSing

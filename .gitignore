@@ -437,3 +437,4 @@ FodyWeavers.xsd
 build/
 vcpkg/
 vcpkg_installed/
+.aider*

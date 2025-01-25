@@ -10,10 +10,6 @@
       "name": "opusfile",
       "version>=": "0.12+20221121#1"
     },
-    {
-      "name": "capnproto",
-      "version>=": "1.0.1"
-    },
     "minhook",
     {
       "name": "mimalloc",
@@ -28,7 +24,7 @@
       "version>=": "0.2.2#1"
     },
     {
-      "name": "httplib",
+      "name": "cpp-httplib",
       "version>=": "0.11.3"
     },
     {

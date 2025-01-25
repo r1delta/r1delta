@@ -33,7 +33,7 @@
     <Keyword>Win32Proj</Keyword>
     <ProjectGuid>{ff6a4de4-e3d3-4f2b-8640-0a4815865fbe}</ProjectGuid>
     <RootNamespace>Dll1</RootNamespace>
-    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.19041.0</WindowsTargetPlatformVersion>
     <ProjectName>tier0</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -53,13 +53,13 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
@@ -84,15 +84,15 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>X:\Games\EA\Titanfall\r1delta\bin_delta\</OutDir>
-    <IncludePath>$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\steam;$(ProjectDir)thirdparty\capnp\include;$(ProjectDir)thirdparty\minhook\include;$(ProjectDir)thirdparty\mimalloc\include;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
-    <LibraryPath>$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\steam\lib;$(ProjectDir)thirdparty\capnp\lib\$(Configuration);$(ProjectDir)thirdparty\minhook\lib;$(SolutionDir)thirdparty\mimalloc\$(Configuration);$(VC_LibraryPath_X64);$(WindowsSDK_LibraryPath_x64);$(LibraryPath)</LibraryPath>
+    <IncludePath>$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\steam;$(ProjectDir)thirdparty\minhook\include;$(ProjectDir)thirdparty\mimalloc\include;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+    <LibraryPath>$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\steam\lib;$(ProjectDir)thirdparty\minhook\lib;$(SolutionDir)thirdparty\mimalloc\$(Configuration);$(VC_LibraryPath_X64);$(WindowsSDK_LibraryPath_x64);$(LibraryPath)</LibraryPath>
     <IntDir>$(ProjectDir)$(Platform)\$(Configuration)\tier0</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>X:\Games\EA\Titanfall\r1delta\bin_delta\</OutDir>
     <IntDir>$(ProjectDir)$(Platform)\$(Configuration)\tier0</IntDir>
-    <IncludePath>$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\steam;$(ProjectDir)thirdparty\capnp\include;$(ProjectDir)thirdparty\minhook\include;$(ProjectDir)thirdparty\mimalloc\include;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
-    <LibraryPath>$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\steam\lib;$(ProjectDir)thirdparty\capnp\lib\$(Configuration);$(ProjectDir)thirdparty\minhook\lib;$(SolutionDir)thirdparty\mimalloc\$(Configuration);$(VC_LibraryPath_X64);$(WindowsSDK_LibraryPath_x64);$(LibraryPath)</LibraryPath>
+    <IncludePath>$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\steam;$(ProjectDir)thirdparty\minhook\include;$(ProjectDir)thirdparty\mimalloc\include;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+    <LibraryPath>$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\steam\lib;$(ProjectDir)thirdparty\minhook\lib;$(SolutionDir)thirdparty\mimalloc\$(Configuration);$(VC_LibraryPath_X64);$(WindowsSDK_LibraryPath_x64);$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Label="Vcpkg">
     <VcpkgEnabled>true</VcpkgEnabled>
@@ -319,24 +319,10 @@
   <ImportGroup Label="ExtensionTargets">
     <Import Project="$(VCTargetsPath)\BuildCustomizations\masm.targets" />
   </ImportGroup>
-  <PropertyGroup>
-    <CapnpCompiler>$(ProjectDir)thirdparty\capnp\bin\capnp.exe</CapnpCompiler>
-  </PropertyGroup>
   <PropertyGroup Label="Vcpkg" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <VcpkgAdditionalInstallOptions>--overlay-ports=$(SolutionDir)\overlays/ports</VcpkgAdditionalInstallOptions>
   </PropertyGroup>
   <PropertyGroup Label="Vcpkg" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <VcpkgAdditionalInstallOptions>--overlay-ports=$(SolutionDir)\overlays/ports</VcpkgAdditionalInstallOptions>
   </PropertyGroup>
-  <ItemGroup>
-    <CustomBuild Include="server.capnp">
-      <Message>Generating Cap'n Proto headers...</Message>
-      <Command>
-      cd "$(ProjectDir)"
-      "$(ProjectDir)vcpkg_installed\x64-windows\tools\capnproto\capnp.exe" compile -I. --output="$(ProjectDir)vcpkg_installed\x64-windows\tools\capnproto\capnpc-c++.exe" %(Identity)
-    </Command>
-      <Outputs>$(ProjectDir)\server.capnp.h</Outputs>
-      <AdditionalInputs>server.capnp</AdditionalInputs>
-    </CustomBuild>
-  </ItemGroup>
 </Project>

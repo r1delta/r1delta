@@ -374,8 +374,8 @@ inline uint64 __ROR8__(uint64 value, int count) { return __ROL__((uint64)value, 
 #define _UNKNOWN char
 
 #ifdef _MSC_VER
-#define snprintf _snprintf
-#define vsnprintf _vsnprintf
+//  #define snprintf _snprintf
+//  #define vsnprintf _vsnprintf
 #endif
 inline int32 abs32(int32 x) { return x >= 0 ? x : -x; }
 

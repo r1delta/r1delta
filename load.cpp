@@ -1465,7 +1465,7 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	RegisterConCommand("verifyain", verifyain_cmd, "Reads the .ain file from disk, compares its nodes & links to in-memory data, logs differences.", FCVAR_CHEAT);
 	RegisterConCommand("updateain", updateain_cmd, "Calls StartRebuild, then overwrites node/link data in the .ain file.", FCVAR_CHEAT);
 	RegisterConCommand("bot_dummy", AddBotDummyConCommand, "Adds a bot.", FCVAR_GAMEDLL | FCVAR_CHEAT);
-	RegisterConVar("r1d_ms", "ms.r1delta.net", FCVAR_CLIENTDLL, "Url for r1d masterserver");
+	RegisterConVar("delta_ms_url", "ms.r1delta.net", FCVAR_CLIENTDLL, "Url for r1d masterserver");
 	RegisterConVar("riff_floorislava", "0", FCVAR_HIDDEN, "Enable floor is lava mode");
 	RegisterConCommand("script", script_cmd, "Execute Squirrel code in server context", FCVAR_GAMEDLL | FCVAR_CHEAT);
 	if (!IsDedicatedServer()) {
