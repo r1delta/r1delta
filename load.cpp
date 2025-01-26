@@ -80,6 +80,9 @@
 #include "engine.h"
 #include "security_fixes.hh"
 #include "steam.h"
+#include "persistentdata.h"
+#include "netadr.h"
+#include <httplib.h>
 #pragma intrinsic(_ReturnAddress)
 
 
@@ -1109,6 +1112,126 @@ Enforce a maximum length of 32 characters.
 	//Msg("Updated client name: %s to: %s\n", name,nameBuffer);
 	CBaseClientSetNameOriginal(thisptr, nameBuffer);
 }
+struct AuthResponse {
+	bool success = false;
+	char failureReason[256];
+	char discordName[32];
+	char pomeloName[32];
+};
+AuthResponse Server_AuthCallback(const char* clientIP, const char* serverIP, char* token) {
+	AuthResponse whatever;
+	whatever.success = true;
+	strcpy_s(whatever.discordName, clientIP);
+	strcpy_s(whatever.pomeloName, serverIP);
+	return whatever;
+}
+
+namespace {
+	std::string trim(const std::string& s) {
+		size_t start = s.find_first_not_of(" \t\n\r");
+		return (start == std::string::npos) ? "" : s.substr(start, s.find_last_not_of(" \t\n\r") - start + 1);
+	}
+
+	bool is_valid_ipv4(const std::string& ip) {
+		std::istringstream iss(trim(ip));
+		std::string part;
+		int count = 0;
+		while (std::getline(iss, part, '.')) {
+			if (++count > 4 || part.empty() || part.size() > 3) return false;
+			for (char c : part) if (!std::isdigit(c)) return false;
+			int num = std::stoi(part);
+			if (num < 0 || num > 255) return false;
+		}
+		return count == 4;
+	}
+}
+
+std::string get_public_ip() {
+	static std::string cached_ip = [] {
+		for (const char* host : { "checkip.amazonaws.com", "eth0.me", "api.ipify.org" }) {
+			httplib::Client client(host);
+			client.set_read_timeout(1);
+			if (auto res = client.Get("/")) {
+				std::string ip = trim(res->body);
+				if (res->status == 200 && is_valid_ipv4(ip)) return ip;
+			}
+		}
+		return std::string("0.0.0.0");
+	}();
+	return cached_ip;
+}
+
+void Shared_OnLocalAuthFailure() {
+	Warning("%s", "Invalid auth token!\n");
+	Cbuf_AddText(0, "disconnect \"Invalid auth token\";delta_start_discord_auth", 0);
+}
+
+bool (*oCBaseClientConnect)(
+	__int64 a1,
+	_BYTE* a2,
+	int a3,
+	__int64 a4,
+	char a5,
+	int a6,
+	CUtlVector<NetMessageCvar_t>* conVars,
+	char* a8,
+	int a9);
+bool __fastcall HookedCBaseClientConnect(
+	__int64 a1,
+	_BYTE* a2,
+	int a3,
+	__int64 a4,
+	char bFakePlayer,
+	int a6,
+	CUtlVector<NetMessageCvar_t>* conVars,
+	char* a8,
+	int a9)
+{
+	if (bFakePlayer)
+		return oCBaseClientConnect(a1, a2, a3, a4, bFakePlayer, a6, conVars, a8, a9);
+	static auto bUseOnlineAuth = OriginalCCVar_FindVar(cvarinterface, "delta_online_auth_enable");
+	static auto iSyncUsernameWithDiscord = OriginalCCVar_FindVar(cvarinterface, "delta_discord_username_sync");
+	static auto iHostPort = OriginalCCVar_FindVar(cvarinterface, "hostport");
+	if (bUseOnlineAuth->m_Value.m_nValue != 1)
+		return oCBaseClientConnect(a1, a2, a3, a4, bFakePlayer, a6, conVars, a8, a9);
+	if (!IsDedicatedServer() && a4 && reinterpret_cast<bool(__fastcall*)(__int64)>((*(uintptr_t**)(a4))[6])(a4)) { // never auth on loopback
+		return oCBaseClientConnect(a1, a2, a3, a4, bFakePlayer, a6, conVars, a8, a9);
+	}; 
+	bool allow = false;
+	if (conVars) {
+		CUtlVector<NetMessageCvar_t>& vector_ptr = *conVars;
+		FOR_EACH_VEC(vector_ptr, current) {
+			if (!strcmp(vector_ptr[current].name, "delta_server_auth_token")) {
+				allow = true;
+
+				const char* v9 = reinterpret_cast<const char * (__fastcall*)(__int64)>((*(uintptr_t**)(a4))[1])(a4);
+				auto res = Server_AuthCallback(v9, (get_public_ip()+":"+ std::to_string(iHostPort->m_Value.m_nValue)).c_str(), vector_ptr[current].value);
+				if (!res.success) {
+					V_snprintf(a8, a9, "%s", res.failureReason);
+					return false;
+				}
+				if (iSyncUsernameWithDiscord->m_Value.m_nValue != 0) {
+					auto newName = iSyncUsernameWithDiscord->m_Value.m_nValue == 1 ? res.discordName : res.pomeloName;
+					a2 = (uint8*)newName;
+					FOR_EACH_VEC(vector_ptr, current) {
+						if (!strcmp(vector_ptr[current].name, "name")) {
+							vector_ptr.Remove(current);
+						}
+					}
+					NetMessageCvar_t newNameVar;
+					strcpy_s(newNameVar.name, sizeof(newNameVar.name), "name");
+					strcpy_s(newNameVar.value, sizeof(newNameVar.value), newName);
+					vector_ptr.AddToTail(newNameVar);
+				}
+			}
+		}
+	}
+	if (!allow) {
+		V_snprintf(a8, a9, "%s", "Invalid ConVars in CBaseClient::Connect.");
+		return false;
+	}
+	return oCBaseClientConnect(a1, a2, a3, a4, bFakePlayer, a6, conVars, a8, a9);
+}
 
 /**
  * Validates and processes the sign-on state from a network buffer.
@@ -1477,6 +1600,10 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	RegisterConCommand("updateain", updateain_cmd, "Calls StartRebuild, then overwrites node/link data in the .ain file.", FCVAR_CHEAT);
 	RegisterConCommand("bot_dummy", AddBotDummyConCommand, "Adds a bot.", FCVAR_GAMEDLL | FCVAR_CHEAT);
 	RegisterConVar("delta_ms_url", "ms.r1delta.net", FCVAR_CLIENTDLL, "Url for r1d masterserver");
+	RegisterConVar("delta_server_auth_token", "", FCVAR_USERINFO | FCVAR_SERVER_CANNOT_QUERY | FCVAR_DONTRECORD | FCVAR_PROTECTED | FCVAR_HIDDEN, "Per-server auth token");
+	RegisterConVar("delta_persistent_master_auth_token", "", FCVAR_ARCHIVE | FCVAR_SERVER_CANNOT_QUERY | FCVAR_DONTRECORD | FCVAR_PROTECTED | FCVAR_HIDDEN, "Persistent master server authentication token");
+	RegisterConVar("delta_online_auth_enable", "1", FCVAR_GAMEDLL, "Whether to use master server auth");
+	RegisterConVar("delta_discord_username_sync", "2", FCVAR_GAMEDLL, "Controls if player names are synced with Discord: 0=Off,1=Norm,2=Pomelo");
 	RegisterConVar("riff_floorislava", "0", FCVAR_HIDDEN, "Enable floor is lava mode");
 	RegisterConCommand("script", script_cmd, "Execute Squirrel code in server context", FCVAR_GAMEDLL | FCVAR_CHEAT);
 	if (!IsDedicatedServer()) {
@@ -1490,9 +1617,11 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 
 	if (IsDedicatedServer()) {
 		MH_CreateHook((LPVOID)(G_engine_ds + 0x45530), &HookedCBaseClientSetName, reinterpret_cast<LPVOID*>(&CBaseClientSetNameOriginal));
+		MH_CreateHook((LPVOID)(G_engine_ds + 0x491A0), &HookedCBaseClientConnect, reinterpret_cast<LPVOID*>(&oCBaseClientConnect));
 	}
 	else {
 		MH_CreateHook((LPVOID)(G_engine + 0xD4840), &HookedCBaseClientSetName, reinterpret_cast<LPVOID*>(&CBaseClientSetNameOriginal));
+		MH_CreateHook((LPVOID)(G_engine + 0xD7DC0), &HookedCBaseClientConnect, reinterpret_cast<LPVOID*>(&oCBaseClientConnect));
 	}
 
 	//MH_CreateHook((LPVOID)(server_base + 0x364140), &sub_364140, reinterpret_cast<LPVOID*>(NULL));

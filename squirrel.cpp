@@ -38,6 +38,7 @@
 
 #include <random>
 #include "masterserver.h"
+#include "shellapi.h"
 
 
 #pragma intrinsic(_ReturnAddress)

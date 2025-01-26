@@ -1,7 +1,7 @@
 ﻿// Originally based on SpectreLauncher by Barnaby https://github.com/R1Spectre/SpectreLauncher
 // Mitigations from Titanfall Black Market Edition mod by p0358 https://github.com/p0358/black_market_edition
 
-#define WIN32_LEAN_AND_MEAN
+
 #include <Windows.h>
 #include <TlHelp32.h>
 #include <filesystem>
