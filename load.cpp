@@ -83,8 +83,8 @@
 #include "persistentdata.h"
 #include "netadr.h"
 #include <httplib.h>
+#include "audio.h"
 #pragma intrinsic(_ReturnAddress)
-
 
 
 extern "C"
@@ -1324,6 +1324,8 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		MH_CreateHook((LPVOID)(engine_base + 0x21EB70), &CEngineVGui__HideGameUI, reinterpret_cast<LPVOID*>(&CEngineVGui__HideGameUIOriginal));
 		RegisterConCommand("toggleconsole", ToggleConsoleCommand, "Toggles the console", (1 << 17));
 		RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
+		//g_pLogAudio = RegisterConVar("fs_log_audio", "0", FCVAR_NONE, "Log audio file reads");
+
 		InitSteamHooks();
 		InitAddons();
 

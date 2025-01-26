@@ -13,6 +13,9 @@
 
 #include "load.h"
 #include "logging.h"
+#include "audio.h"
+
+
 
 // --------------------------------------------------------------------
 // Core filesystem enums/structs (from your snippet)
@@ -316,9 +319,10 @@ __int64 HandleOriginalRead(CBaseFileSystem* filesystem, FileAsyncRequest_t* requ
     case FSASYNC_ERR_FILEOPEN: statusStr = "ERR_FILEOPEN";  break;
     case FSASYNC_ERR_READING:  statusStr = "ERR_READING";   break;
     }
-    Msg("SyncRead: file='%s' offset=%lld bytes=%lld status=%s\n",
-        request->pszFilename, request->nOffset, request->nBytes, statusStr);
-
+   /* if (g_pLogAudio->m_Value.m_nValue == 1) {
+        Msg("SyncRead: file='%s' offset=%lld bytes=%lld status=%s\n",
+            request->pszFilename, request->nOffset, request->nBytes, statusStr);
+    }*/
     return originalResult;
 }
 
@@ -894,9 +898,12 @@ static __int64 HandleOpusRead(CBaseFileSystem* fs, FileAsyncRequest_t* request) 
     pPerformAsyncCallback(fs, request, pDest, actualRead,
         (actualRead < request->nBytes) ? FSASYNC_ERR_READING : FSASYNC_OK);
 
-    Msg("SyncRead (opus): file='%s' offset=%lld bytes=%lld skip=%lld [actual %d]\n",
-        request->pszFilename, (long long)request->nOffset, (long long)request->nBytes,
-        (long long)ctx.skipOffset, actualRead);
+   /* if (g_pLogAudio->m_Value.m_nValue == 1) {
+        Msg("SyncRead (opus): file='%s' offset=%lld bytes=%lld skip=%lld [actual %d]\n",
+            request->pszFilename, (long long)request->nOffset, (long long)request->nBytes,
+            (long long)ctx.skipOffset, actualRead);
+    }*/
+
 
     return (actualRead == 0 && request->nBytes != 0) ?
         FSASYNC_ERR_READING : FSASYNC_OK;
@@ -922,7 +929,6 @@ __int64 __fastcall Hooked_CBaseFileSystem__SyncRead(
         pPerformAsyncCallback = reinterpret_cast<void(__fastcall*)(CBaseFileSystem*, FileAsyncRequest_t*, void*, std::uint64_t, std::uint64_t)>(G_filesystem_stdio + 0x1F200);
         pReleaseAsyncOpenedFiles = reinterpret_cast<void(__fastcall*)(CRITICAL_SECTION*, void*)>(G_filesystem_stdio + 0x233C0);
         pLogFileAccess = reinterpret_cast<void(__fastcall*)(CBaseFileSystem*, const char*, const char*, void*)>(G_filesystem_stdio + 0x9A40);
-
         pAsyncOpenedFilesCriticalSection = reinterpret_cast<CRITICAL_SECTION*>(G_filesystem_stdio + 0xF90A0);
         pAsyncOpenedFilesTable = G_filesystem_stdio + 0xF90D0;
         pFileAccessLoggingPointer = reinterpret_cast<void*>(G_filesystem_stdio + 0xCDBC0);
