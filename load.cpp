@@ -1384,8 +1384,6 @@ void StartDiscordAuth(const CCommand& args) {
 		cli.set_connection_timeout(2);
 		cli.set_address_family(AF_INET);
 		cli.set_follow_location(true);
-
-		cli.set_read_timeout(2);
 		
 		auto result = cli.Get(std::format("/discord-auth?code={}", discord_code));
 
@@ -1397,20 +1395,20 @@ void StartDiscordAuth(const CCommand& args) {
 		}
 
 		auto token_j = j["token"].get<std::string>();
-
 		auto v = CCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token");
-	
-		v->m_Value.m_pszString = (char*)token_j.c_str();
-		done = true;
+		v->m_Value.m_StringLength = token_j.size() + 1;
+		memcpy(v->m_Value.m_pszString, token_j.c_str(), token_j.size());
+		auto str = std::format("delta_persistent_master_auth_token \"{}\"\n", token_j);
 		res.set_content("Success", "text/plain");
+		auto v2 = CCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token");
 		svr.stop();
+		return;
 	});
 
 	svr.listen("localhost", 80);
 	
 	return;
 }
-
 
 static FORCEINLINE void
 do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
