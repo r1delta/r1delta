@@ -1170,7 +1170,6 @@ void Shared_OnLocalAuthFailure() {
 }
 
 
-
 bool (*oCBaseClientConnect)(
 	__int64 a1,
 	_BYTE* a2,
