@@ -84,6 +84,9 @@
 #include "netadr.h"
 #include <httplib.h>
 #include "audio.h"
+#include <nlohmann/json.hpp>
+#include "shellapi.h"
+
 #pragma intrinsic(_ReturnAddress)
 
 
@@ -1166,6 +1169,8 @@ void Shared_OnLocalAuthFailure() {
 	Cbuf_AddText(0, "disconnect \"Invalid auth token\";delta_start_discord_auth", 0);
 }
 
+
+
 bool (*oCBaseClientConnect)(
 	__int64 a1,
 	_BYTE* a2,
@@ -1307,6 +1312,107 @@ bool NET_StringCmd__ReadFromBuffer(NET_StringCmd* thisptr, bf_read& buffer)
 	return true;
 }
 
+//1F7F0
+__int64 (*oXmaCallback)();
+__int64 XmaCallback()
+{
+
+	// if ( *(_DWORD *)(qword_2018C88 + 92) )
+	ConVarR1* xma_useaudio = OriginalCCVar_FindVar(cvarinterface, "sound_useXMA");
+	// sub_114B0();
+	//call that sub
+
+	if (xma_useaudio->m_Value.m_nValue == 1) {
+		typedef void (*XmaCallback_t)();
+		typedef __int64 (*XmaCallback_t2)();
+		XmaCallback_t sub_114B0 = (XmaCallback_t)(G_engine + 0x114B0);
+		sub_114B0();
+		auto val = *(int*)(G_engine + 0x443648);
+		if (val)
+			return (uintptr_t)xma_useaudio;
+
+		//set dword_7931F8
+		*(int*)(G_engine + 0x7931FC) = 0xC000;
+		*(const char**)(G_engine + 0x793208) = "sound/xma.acache";
+		*(int*)(G_engine + 0x44364C) = 1024;
+	
+		XmaCallback_t sub_EA00 = (XmaCallback_t)(G_engine + 0xEA00);
+		XmaCallback_t sub_ADA0 = (XmaCallback_t)(G_engine + 0xADA0);
+		XmaCallback_t sub_B160 = (XmaCallback_t)(G_engine + 0xB160);
+		XmaCallback_t2 sub_A880 = (XmaCallback_t2)(G_engine + 0xA880);
+		sub_EA00();
+		sub_ADA0();
+		sub_B160();
+		*(int*)(G_engine + 0x443648) = 1;
+		return sub_A880();
+
+	}
+
+
+	return oXmaCallback();
+}
+
+void StartDiscordAuth(const CCommand& args) {
+	if (args.ArgC() != 1) {
+		Warning("Usage: delta_start_discord_auth\n");
+		return;
+	}
+	if (IsDedicatedServer()) {
+		Warning("This command is not available on dedicated servers.\n");
+		return;
+	}
+
+	//discord://api/oauth2/authorize?client_id=1304910395013595176&response_type=code&redirect_uri=http%3A%2F%2Flocalhost%2Fdiscord-auth&scope=identify
+	// open this url
+	auto url = "https://discord.com/api/oauth2/authorize?client_id=1304910395013595176&response_type=code&redirect_uri=http%3A%2F%2Flocalhost%2Fdiscord-auth&scope=identify";
+	int result = (int)ShellExecuteA(NULL, "open", url, NULL, NULL, SW_SHOWNORMAL);
+
+	static bool done = false;
+	// spin up a httplib server
+	httplib::Server svr;
+	svr.Get("/discord-auth", [&svr](const httplib::Request& req, httplib::Response& res) {
+		// read the query string
+		auto query = req.params;
+		auto code = query.find("code");
+		if (code == query.end()) {
+			res.set_content("Invalid auth token", "text/plain");
+			return;
+		}
+
+		auto discord_code = code->second;
+		auto ms_url = CCVar_FindVar(cvarinterface, "delta_ms_url")->m_Value.m_pszString;
+		httplib::Client cli(ms_url);
+		cli.set_connection_timeout(2);
+		cli.set_address_family(AF_INET);
+		cli.set_follow_location(true);
+
+		cli.set_read_timeout(2);
+		
+		auto result = cli.Get(std::format("/discord-auth?code={}", discord_code));
+
+		auto j = nlohmann::json::parse(result->body);
+
+		if (j.contains("error")) {
+			res.set_content(j["error"].get<std::string>(), "text/plain");
+			return;
+		}
+
+		auto token_j = j["token"].get<std::string>();
+
+		auto v = CCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token");
+	
+		v->m_Value.m_pszString = (char*)token_j.c_str();
+		done = true;
+		res.set_content("Success", "text/plain");
+		svr.stop();
+	});
+
+	svr.listen("localhost", 80);
+	
+	return;
+}
+
+
 static FORCEINLINE void
 do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 {
@@ -1323,9 +1429,10 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		MH_CreateHook((LPVOID)(engine_base + 0x21F9C0), &CEngineVGui__Init, reinterpret_cast<LPVOID*>(&CEngineVGui__InitOriginal));
 		MH_CreateHook((LPVOID)(engine_base + 0x21EB70), &CEngineVGui__HideGameUI, reinterpret_cast<LPVOID*>(&CEngineVGui__HideGameUIOriginal));
 		RegisterConCommand("toggleconsole", ToggleConsoleCommand, "Toggles the console", (1 << 17));
+		RegisterConCommand("delta_start_discord_auth", StartDiscordAuth, "Starts the discord auth process", 0);
 		RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
 		//g_pLogAudio = RegisterConVar("fs_log_audio", "0", FCVAR_NONE, "Log audio file reads");
-
+		MH_CreateHook((LPVOID)(engine_base + 0x11DB0), &XmaCallback, reinterpret_cast<LPVOID*>(&oXmaCallback));
 		InitSteamHooks();
 		InitAddons();
 
