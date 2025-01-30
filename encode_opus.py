@@ -47,8 +47,8 @@ def encode_wav(wav_path, opus_bitrate='96', force=False):
                 '-r', '48000',          # Resample to Opus preferred rate
                 '-c', '1',              # Force mono output
                 '-V1',                  # Enable verbose error reporting
-                '-remix', str(channel+1), # Extract specific channel
-                '-'
+                '-',                    # Output to stdout
+                'remix', str(channel+1)  # Extract specific channel
             ]
             
             opusenc_cmd = [
