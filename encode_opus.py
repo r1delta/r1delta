@@ -5,26 +5,18 @@ import os
 import shutil
 from pathlib import Path
 
-def get_wav_channels(wav_path):
-    """Get number of channels in WAV file using ffprobe"""
-    cmd = [
-        'ffprobe', '-v', 'error',
-        '-select_streams', 'a:0',
-        '-show_entries', 'stream=channels',
-        '-of', 'csv=p=0',
-        wav_path
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise RuntimeError(f"Error getting channels for {wav_path}: {result.stderr}")
-    return int(result.stdout.strip())
 
 def encode_wav(wav_path, opus_bitrate='96', force=False):
     wav_path = Path(wav_path)
     base_name = wav_path.with_suffix('')
     
     try:
-        channels = get_wav_channels(wav_path)
+        # Get channels using sox instead of ffprobe
+        sox_info = subprocess.run(
+            ['sox', '--i', '-c', str(wav_path)],
+            capture_output=True, text=True, check=True
+        )
+        channels = int(sox_info.stdout.strip())
     except Exception as e:
         print(f"Skipping {wav_path}: {str(e)}")
         return
@@ -42,30 +34,39 @@ def encode_wav(wav_path, opus_bitrate='96', force=False):
     temp_dir.mkdir(exist_ok=True)
 
     try:
-        # Split to mono channels and encode
         for channel in range(channels):
-            temp_wav = temp_dir / f'channel_{channel}.wav'
             opus_path = base_name.with_suffix(f'.opus{channel}')
-
-            # Extract single channel using ffmpeg
-            ffmpeg_cmd = [
-                'ffmpeg', '-y', '-v', 'error',
-                '-i', str(wav_path),
-                '-af', f'pan=mono|c0=c{channel}',
-                '-ar', '48000',  # Opus prefers 48kHz
-                str(temp_wav)
+            
+            # Use sox to read input and pipe raw PCM to opusenc
+            sox_cmd = [
+                'sox',
+                str(wav_path),
+                '-t', 'raw',
+                '-e', 'signed-integer',  # Force specific PCM format
+                '-b', '16',
+                '-r', '48000',          # Resample to Opus preferred rate
+                '-c', '1',              # Force mono output
+                '-V1',                  # Enable verbose error reporting
+                '-remix', str(channel+1), # Extract specific channel
+                '-'
             ]
-            subprocess.run(ffmpeg_cmd, check=True)
-
-            # Encode to opus
+            
             opusenc_cmd = [
                 'opusenc',
+                '--raw', '--raw-rate', '48000',
                 '--bitrate', opus_bitrate,
                 '--quiet',
-                str(temp_wav),
+                '-',                    # Read from stdin
                 str(opus_path)
             ]
-            subprocess.run(opusenc_cmd, check=True)
+
+            # Pipe sox output directly to opusenc
+            with subprocess.Popen(sox_cmd, stdout=subprocess.PIPE) as sox_proc:
+                subprocess.run(
+                    opusenc_cmd,
+                    stdin=sox_proc.stdout,
+                    check=True
+                )
 
             print(f"Created {opus_path}")
 
@@ -95,7 +96,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # Check for required tools
-    required_tools = ['ffprobe', 'ffmpeg', 'opusenc']
+    required_tools = ['sox', 'opusenc']
     for tool in required_tools:
         if not shutil.which(tool):
             print(f"Error: Required tool '{tool}' not found in PATH")
