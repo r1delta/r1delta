@@ -86,7 +86,7 @@
 #include "audio.h"
 #include <nlohmann/json.hpp>
 #include "shellapi.h"
-//#include <jwt-cpp/jwt.h>
+#include <jwt-cpp/jwt.h>
 
 #pragma intrinsic(_ReturnAddress)
 
@@ -1124,23 +1124,52 @@ struct AuthResponse {
 };
 AuthResponse Server_AuthCallback(const char* clientIP, const char* serverIP, char* token) {
 
-	Msg("Auth token: %s\n", token);
-
-	if(token == nullptr || strlen(token) == 0) {
+	if(token == nullptr) {
 		AuthResponse whatever;
 		whatever.success = false;
 		strcpy_s(whatever.failureReason, "No auth token provided");
 		return whatever;
 	}
 
+	if(strlen(token) < 10) {
+		AuthResponse whatever;
+		whatever.success = false;
+		strcpy_s(whatever.failureReason, "Invalid auth token");
+		return whatever;
+	}
+
 	// decode the jwt token
-	//auto decoded = jwt::decode(token);
-	
-	AuthResponse whatever;
-	whatever.success = true;
-	strcpy_s(whatever.discordName, clientIP);
-	strcpy_s(whatever.pomeloName, serverIP);
-	return whatever;
+
+	try {
+		auto decoded = jwt::decode(token);
+
+		// check if the token is expired
+		if (decoded.get_expires_at() < std::chrono::system_clock::now()) {
+			AuthResponse whatever;
+			whatever.success = false;
+			strcpy_s(whatever.failureReason, "Token is expired");
+			return whatever;
+		} 
+		
+		auto payload = decoded.get_payload_claims();
+
+		auto discordName = payload["display_name"].as_string();
+
+		auto pomeloName = payload["pomelo_name"].as_string();
+
+
+		AuthResponse whatever;
+		whatever.success = true;
+		strcpy_s(whatever.discordName, discordName.c_str());
+		strcpy_s(whatever.pomeloName, pomeloName.c_str());
+		return whatever;
+	}
+	catch (const std::exception& e) {
+		AuthResponse whatever;
+		whatever.success = false;
+		strcpy_s(whatever.failureReason, e.what());
+		return whatever;
+	}
 }
 
 namespace {
@@ -1212,9 +1241,9 @@ bool __fastcall HookedCBaseClientConnect(
 	static auto iHostPort = OriginalCCVar_FindVar(cvarinterface, "hostport");
 	if (bUseOnlineAuth->m_Value.m_nValue != 1)
 		return oCBaseClientConnect(a1, a2, a3, a4, bFakePlayer, a6, conVars, a8, a9);
-	//if (!IsDedicatedServer() && a4 && reinterpret_cast<bool(__fastcall*)(__int64)>((*(uintptr_t**)(a4))[6])(a4)) { // never auth on loopback
-	//	return oCBaseClientConnect(a1, a2, a3, a4, bFakePlayer, a6, conVars, a8, a9);
-	//}; 
+	if (!IsDedicatedServer() && a4 && reinterpret_cast<bool(__fastcall*)(__int64)>((*(uintptr_t**)(a4))[6])(a4)) { // never auth on loopback
+		return oCBaseClientConnect(a1, a2, a3, a4, bFakePlayer, a6, conVars, a8, a9);
+	}; 
 	bool allow = false;
 	if (conVars) {
 		CUtlVector<NetMessageCvar_t>& vector_ptr = *conVars;
@@ -1279,11 +1308,6 @@ __int64 __fastcall HookedCBaseStateClientConnect(
 	int a11)
 {
 
-	Msg("Client connecting from %s\n", public_ip);
-	Msg("Client connecting from %s\n", private_ip);
-	Msg("Num players %d\n", num_players);
-	Msg("a9 %s\n", a9);
-
 	auto ms_url = CCVar_FindVar(cvarinterface, "delta_ms_url")->m_Value.m_pszString;
 	httplib::Client cli(ms_url);
 	cli.set_connection_timeout(2);
@@ -1310,9 +1334,9 @@ __int64 __fastcall HookedCBaseStateClientConnect(
 		if (result->status == 200) {
 			auto json = nlohmann::json::parse(result->body);
 			auto token = json["token"].get<std::string>();
-			auto var = CCVar_FindVar(cvarinterface, "delta_server_auth_token");
-			V_snprintf(failureReason, 256, "%s", token.c_str());
-			Msg("Got token from master server: %s\n", token.c_str());
+			var->m_Value.m_StringLength = token.size() + 1;
+			memcpy(var->m_Value.m_pszString, token.c_str(), token.size());
+			var->m_Value.m_pszString[token.size()] = '\0';
 		}
 		else {
 			Warning("Failed to get token from master server: %s\n", result->body.c_str());
@@ -1322,8 +1346,6 @@ __int64 __fastcall HookedCBaseStateClientConnect(
 		Warning("Failed to get token from master server: %s\n", to_string(result.error()));
 	}
 
-	var->m_Value.m_StringLength = 256;
-	var->m_Value.m_pszString = failureReason;
 	cli.stop();
 
 	return oCBaseStateClientConnect(a1, public_ip, private_ip, num_players, a5, a6, a7, a8, a9, a10, a11);
