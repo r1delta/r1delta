@@ -1250,7 +1250,6 @@ bool __fastcall HookedCBaseClientConnect(
 		FOR_EACH_VEC(vector_ptr, current) {
 			if (!strcmp(vector_ptr[current].name, "delta_server_auth_token")) {
 				allow = true;
-
 				const char* v9 = reinterpret_cast<const char * (__fastcall*)(__int64)>((*(uintptr_t**)(a4))[1])(a4);
 				auto res = Server_AuthCallback(v9, (get_public_ip()+":"+ std::to_string(iHostPort->m_Value.m_nValue)).c_str(), vector_ptr[current].value);
 				if (!res.success) {
@@ -1294,6 +1293,11 @@ __int64 (*oCBaseStateClientConnect)(
 	__int64* a10,
 	int a11);
 
+
+typedef void (*SetConvarString_t)(ConVarR1* var, const char* value);
+
+SetConvarString_t SetConvarStringOriginal;
+
 __int64 __fastcall HookedCBaseStateClientConnect(
 	__int64 a1,
 	const char* public_ip,
@@ -1324,7 +1328,7 @@ __int64 __fastcall HookedCBaseStateClientConnect(
 
 	// send the json payload to the master server
 	result = cli.Post("/server-token", j.dump(), "application/json");
-	auto var = CCVar_FindVar(cvarinterface, "delta_server_auth_token");
+	auto var = OriginalCCVar_FindVar(cvarinterface, "delta_server_auth_token");
 
 	// allocate a 256 char buffer for the failure reason
 	char failureReason[256];
@@ -1334,9 +1338,10 @@ __int64 __fastcall HookedCBaseStateClientConnect(
 		if (result->status == 200) {
 			auto json = nlohmann::json::parse(result->body);
 			auto token = json["token"].get<std::string>();
-			var->m_Value.m_StringLength = token.size() + 1;
+			/*var->m_Value.m_StringLength = token.size() + 1;
 			memcpy(var->m_Value.m_pszString, token.c_str(), token.size());
-			var->m_Value.m_pszString[token.size()] = '\0';
+			var->m_Value.m_pszString[token.size()] = '\0';*/
+			SetConvarStringOriginal(var, token.c_str());
 		}
 		else {
 			Warning("Failed to get token from master server: %s\n", result->body.c_str());
@@ -1499,24 +1504,16 @@ void StartDiscordAuth(const CCommand& args) {
 		cli.set_connection_timeout(2);
 		cli.set_address_family(AF_INET);
 		cli.set_follow_location(true);
-		
 		auto result = cli.Get(std::format("/discord-auth?code={}", discord_code));
-
 		auto j = nlohmann::json::parse(result->body);
-
 		if (j.contains("error")) {
 			res.set_content(j["error"].get<std::string>(), "text/plain");
-
 			return;
 		}
-
 		auto token_j = j["token"].get<std::string>();
-		auto v = CCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token");
-		v->m_Value.m_StringLength = token_j.size() + 1;
-		memcpy(v->m_Value.m_pszString, token_j.c_str(), token_j.size());
-		auto str = std::format("delta_persistent_master_auth_token \"{}\"\n", token_j);
+		auto v = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token");
+		SetConvarStringOriginal(v,token_j.c_str());
 		res.set_content("Success", "text/plain");
-		auto v2 = CCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token");
 		svr.stop();
 		return;
 	});
@@ -1544,6 +1541,7 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		RegisterConCommand("toggleconsole", ToggleConsoleCommand, "Toggles the console", (1 << 17));
 		RegisterConCommand("delta_start_discord_auth", StartDiscordAuth, "Starts the discord auth process", 0);
 		RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
+		
 		//g_pLogAudio = RegisterConVar("fs_log_audio", "0", FCVAR_NONE, "Log audio file reads");
 		MH_CreateHook((LPVOID)(engine_base + 0x11DB0), &XmaCallback, reinterpret_cast<LPVOID*>(&oXmaCallback));
 		InitSteamHooks();
@@ -1756,6 +1754,8 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	LDR_DLL_LOADED_NOTIFICATION_DATA* ndata = GetModuleNotificationData(L"vstdlib");
 	doBinaryPatchForFile(*ndata);
 	FreeModuleNotificationData(ndata);
+	auto stb_lib = (uintptr_t)GetModuleHandleA("vstdlib.dll");
+	SetConvarStringOriginal = (SetConvarString_t)(stb_lib + 0x24DE0);
 	uintptr_t vTableAddr = server_base + 0x807220;
 
 	RemoveItemsFromVTable(vTableAddr, 35, 2);
