@@ -84,6 +84,10 @@
 #include "netadr.h"
 #include <httplib.h>
 #include "audio.h"
+#include <nlohmann/json.hpp>
+#include "shellapi.h"
+#include <jwt-cpp/jwt.h>
+
 #pragma intrinsic(_ReturnAddress)
 
 
@@ -1119,11 +1123,53 @@ struct AuthResponse {
 	char pomeloName[32];
 };
 AuthResponse Server_AuthCallback(const char* clientIP, const char* serverIP, char* token) {
-	AuthResponse whatever;
-	whatever.success = true;
-	strcpy_s(whatever.discordName, clientIP);
-	strcpy_s(whatever.pomeloName, serverIP);
-	return whatever;
+
+	if(token == nullptr) {
+		AuthResponse whatever;
+		whatever.success = false;
+		strcpy_s(whatever.failureReason, "No auth token provided");
+		return whatever;
+	}
+
+	if(strlen(token) < 10) {
+		AuthResponse whatever;
+		whatever.success = false;
+		strcpy_s(whatever.failureReason, "Invalid auth token");
+		return whatever;
+	}
+
+	// decode the jwt token
+
+	try {
+		auto decoded = jwt::decode(token);
+
+		// check if the token is expired
+		if (decoded.get_expires_at() < std::chrono::system_clock::now()) {
+			AuthResponse whatever;
+			whatever.success = false;
+			strcpy_s(whatever.failureReason, "Token is expired");
+			return whatever;
+		} 
+		
+		auto payload = decoded.get_payload_claims();
+
+		auto discordName = payload["display_name"].as_string();
+
+		auto pomeloName = payload["pomelo_name"].as_string();
+
+
+		AuthResponse whatever;
+		whatever.success = true;
+		strcpy_s(whatever.discordName, discordName.c_str());
+		strcpy_s(whatever.pomeloName, pomeloName.c_str());
+		return whatever;
+	}
+	catch (const std::exception& e) {
+		AuthResponse whatever;
+		whatever.success = false;
+		strcpy_s(whatever.failureReason, e.what());
+		return whatever;
+	}
 }
 
 namespace {
@@ -1166,6 +1212,7 @@ void Shared_OnLocalAuthFailure() {
 	Cbuf_AddText(0, "disconnect \"Invalid auth token\";delta_start_discord_auth", 0);
 }
 
+
 bool (*oCBaseClientConnect)(
 	__int64 a1,
 	_BYTE* a2,
@@ -1203,7 +1250,6 @@ bool __fastcall HookedCBaseClientConnect(
 		FOR_EACH_VEC(vector_ptr, current) {
 			if (!strcmp(vector_ptr[current].name, "delta_server_auth_token")) {
 				allow = true;
-
 				const char* v9 = reinterpret_cast<const char * (__fastcall*)(__int64)>((*(uintptr_t**)(a4))[1])(a4);
 				auto res = Server_AuthCallback(v9, (get_public_ip()+":"+ std::to_string(iHostPort->m_Value.m_nValue)).c_str(), vector_ptr[current].value);
 				if (!res.success) {
@@ -1232,6 +1278,84 @@ bool __fastcall HookedCBaseClientConnect(
 	}
 	return oCBaseClientConnect(a1, a2, a3, a4, bFakePlayer, a6, conVars, a8, a9);
 }
+
+
+__int64 (*oCBaseStateClientConnect)(
+	__int64 a1,
+	const char* public_ip,
+	const char* private_ip,
+	int num_players,
+	char a5,
+	int a6,
+	_BYTE* a7,
+	int a8,
+	const char* a9,
+	__int64* a10,
+	int a11);
+
+
+typedef void (*SetConvarString_t)(ConVarR1* var, const char* value);
+
+SetConvarString_t SetConvarStringOriginal;
+
+__int64 __fastcall HookedCBaseStateClientConnect(
+	__int64 a1,
+	const char* public_ip,
+	const char* private_ip,
+	int num_players,
+	char a5,
+	int a6,
+	_BYTE* a7,
+	int a8,
+	const char* a9,
+	__int64* a10,
+	int a11)
+{
+
+	auto ms_url = CCVar_FindVar(cvarinterface, "delta_ms_url")->m_Value.m_pszString;
+	httplib::Client cli(ms_url);
+	cli.set_connection_timeout(2);
+	cli.set_address_family(AF_INET);
+	cli.set_follow_location(true);
+
+	cli.set_bearer_token_auth(CCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token")->m_Value.m_pszString);
+
+	// send a json payload with the server's public ip as ip 
+	nlohmann::json j;
+	j["ip"] = public_ip;
+
+	httplib::Result result;
+
+	// send the json payload to the master server
+	result = cli.Post("/server-token", j.dump(), "application/json");
+	auto var = OriginalCCVar_FindVar(cvarinterface, "delta_server_auth_token");
+
+	// allocate a 256 char buffer for the failure reason
+	char failureReason[256];
+
+
+	if (result) {
+		if (result->status == 200) {
+			auto json = nlohmann::json::parse(result->body);
+			auto token = json["token"].get<std::string>();
+			/*var->m_Value.m_StringLength = token.size() + 1;
+			memcpy(var->m_Value.m_pszString, token.c_str(), token.size());
+			var->m_Value.m_pszString[token.size()] = '\0';*/
+			SetConvarStringOriginal(var, token.c_str());
+		}
+		else {
+			Warning("Failed to get token from master server: %s\n", result->body.c_str());
+		}
+	}
+	else {
+		Warning("Failed to get token from master server: %s\n", to_string(result.error()));
+	}
+
+	cli.stop();
+
+	return oCBaseStateClientConnect(a1, public_ip, private_ip, num_players, a5, a6, a7, a8, a9, a10, a11);
+}
+
 
 /**
  * Validates and processes the sign-on state from a network buffer.
@@ -1307,6 +1431,98 @@ bool NET_StringCmd__ReadFromBuffer(NET_StringCmd* thisptr, bf_read& buffer)
 	return true;
 }
 
+//1F7F0
+__int64 (*oXmaCallback)();
+__int64 XmaCallback()
+{
+
+	// if ( *(_DWORD *)(qword_2018C88 + 92) )
+	ConVarR1* xma_useaudio = OriginalCCVar_FindVar(cvarinterface, "sound_useXMA");
+	// sub_114B0();
+	//call that sub
+
+	if (xma_useaudio->m_Value.m_nValue == 1) {
+		typedef void (*XmaCallback_t)();
+		typedef __int64 (*XmaCallback_t2)();
+		XmaCallback_t sub_114B0 = (XmaCallback_t)(G_engine + 0x114B0);
+		sub_114B0();
+		auto val = *(int*)(G_engine + 0x443648);
+		if (val)
+			return (uintptr_t)xma_useaudio;
+
+		//set dword_7931F8
+		*(int*)(G_engine + 0x7931FC) = 0xC000;
+		*(const char**)(G_engine + 0x793208) = "sound/xma.acache";
+		*(int*)(G_engine + 0x44364C) = 1024;
+	
+		XmaCallback_t sub_EA00 = (XmaCallback_t)(G_engine + 0xEA00);
+		XmaCallback_t sub_ADA0 = (XmaCallback_t)(G_engine + 0xADA0);
+		XmaCallback_t sub_B160 = (XmaCallback_t)(G_engine + 0xB160);
+		XmaCallback_t2 sub_A880 = (XmaCallback_t2)(G_engine + 0xA880);
+		sub_EA00();
+		sub_ADA0();
+		sub_B160();
+		*(int*)(G_engine + 0x443648) = 1;
+		return sub_A880();
+
+	}
+
+
+	return oXmaCallback();
+}
+
+void StartDiscordAuth(const CCommand& args) {
+	if (args.ArgC() != 1) {
+		Warning("Usage: delta_start_discord_auth\n");
+		return;
+	}
+	if (IsDedicatedServer()) {
+		Warning("This command is not available on dedicated servers.\n");
+		return;
+	}
+
+	//discord://api/oauth2/authorize?client_id=1304910395013595176&response_type=code&redirect_uri=http%3A%2F%2Flocalhost%2Fdiscord-auth&scope=identify
+	// open this url
+	auto url = "https://discord.com/api/oauth2/authorize?client_id=1304910395013595176&response_type=code&redirect_uri=http%3A%2F%2Flocalhost%2Fdiscord-auth&scope=identify";
+	int result = (int)ShellExecuteA(NULL, "open", url, NULL, NULL, SW_SHOWNORMAL);
+
+	static bool done = false;
+	// spin up a httplib server
+	httplib::Server svr;
+	svr.Get("/discord-auth", [&svr](const httplib::Request& req, httplib::Response& res) {
+		// read the query string
+		auto query = req.params;
+		auto code = query.find("code");
+		if (code == query.end()) {
+			res.set_content("Invalid auth token", "text/plain");
+			return;
+		}
+
+		auto discord_code = code->second;
+		auto ms_url = CCVar_FindVar(cvarinterface, "delta_ms_url")->m_Value.m_pszString;
+		httplib::Client cli(ms_url);
+		cli.set_connection_timeout(2);
+		cli.set_address_family(AF_INET);
+		cli.set_follow_location(true);
+		auto result = cli.Get(std::format("/discord-auth?code={}", discord_code));
+		auto j = nlohmann::json::parse(result->body);
+		if (j.contains("error")) {
+			res.set_content(j["error"].get<std::string>(), "text/plain");
+			return;
+		}
+		auto token_j = j["token"].get<std::string>();
+		auto v = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token");
+		SetConvarStringOriginal(v,token_j.c_str());
+		res.set_content("Success", "text/plain");
+		svr.stop();
+		return;
+	});
+
+	svr.listen("localhost", 80);
+	
+	return;
+}
+
 static FORCEINLINE void
 do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 {
@@ -1323,9 +1539,11 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		MH_CreateHook((LPVOID)(engine_base + 0x21F9C0), &CEngineVGui__Init, reinterpret_cast<LPVOID*>(&CEngineVGui__InitOriginal));
 		MH_CreateHook((LPVOID)(engine_base + 0x21EB70), &CEngineVGui__HideGameUI, reinterpret_cast<LPVOID*>(&CEngineVGui__HideGameUIOriginal));
 		RegisterConCommand("toggleconsole", ToggleConsoleCommand, "Toggles the console", (1 << 17));
+		RegisterConCommand("delta_start_discord_auth", StartDiscordAuth, "Starts the discord auth process", 0);
 		RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
+		
 		//g_pLogAudio = RegisterConVar("fs_log_audio", "0", FCVAR_NONE, "Log audio file reads");
-
+		MH_CreateHook((LPVOID)(engine_base + 0x11DB0), &XmaCallback, reinterpret_cast<LPVOID*>(&oXmaCallback));
 		InitSteamHooks();
 		InitAddons();
 
@@ -1536,6 +1754,8 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	LDR_DLL_LOADED_NOTIFICATION_DATA* ndata = GetModuleNotificationData(L"vstdlib");
 	doBinaryPatchForFile(*ndata);
 	FreeModuleNotificationData(ndata);
+	auto stb_lib = (uintptr_t)GetModuleHandleA("vstdlib.dll");
+	SetConvarStringOriginal = (SetConvarString_t)(stb_lib + 0x24DE0);
 	uintptr_t vTableAddr = server_base + 0x807220;
 
 	RemoveItemsFromVTable(vTableAddr, 35, 2);
@@ -1624,6 +1844,7 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	else {
 		MH_CreateHook((LPVOID)(G_engine + 0xD4840), &HookedCBaseClientSetName, reinterpret_cast<LPVOID*>(&CBaseClientSetNameOriginal));
 		MH_CreateHook((LPVOID)(G_engine + 0xD7DC0), &HookedCBaseClientConnect, reinterpret_cast<LPVOID*>(&oCBaseClientConnect));
+		MH_CreateHook((LPVOID)(G_engine + 0x2AA90), &HookedCBaseStateClientConnect, reinterpret_cast<LPVOID*>(&oCBaseStateClientConnect));
 	}
 
 	//MH_CreateHook((LPVOID)(server_base + 0x364140), &sub_364140, reinterpret_cast<LPVOID*>(NULL));

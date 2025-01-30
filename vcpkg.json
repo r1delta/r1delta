@@ -16,6 +16,12 @@
       "version>=": "2.1.2"
     },
     {
+      "name": "jwt-cpp"
+    },
+    {
+      "name": "openssl"
+    },
+    {
       "name": "zstd",
       "version>=": "1.5.5"
     },
