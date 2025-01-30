@@ -331,17 +331,18 @@ __int64 HandleOriginalRead(CBaseFileSystem* filesystem, FileAsyncRequest_t* requ
 // --------------------------------------------------------------------
 
 struct OpusContext {
-    std::vector<int16_t> pcmData;
+    struct Track {
+        std::vector<int16_t> pcmData;
+        std::vector<unsigned char> opusFileData;
+        OggOpusFile* opusFile = nullptr;
+        int64_t currentDecodePos = 0;
+        bool reachedEnd = false;
+        int channels = 1;
+    };
+    
+    std::vector<Track> tracks;
     bool skipDiscovered = false;
     int64_t skipOffset = 0;
-
-    // Streaming state
-    std::vector<unsigned char> opusFileData;  // Keep the file data
-    OggOpusFile* opusFile = nullptr;
-    SRC_STATE* srcState = nullptr;
-    int64_t currentDecodePos = 0;  // How many bytes of PCM we've decoded
-    bool reachedEnd = false;
-    int channels = 2; // default to stereo, will be set from opus header
 };
 
 // We'll keep a global map from WAV filename => decoded opus context
@@ -650,50 +651,23 @@ static bool DecodeOpusChunk(OpusContext& ctx, int64_t offset, size_t bytesNeeded
 
         const size_t DECODE_CHUNK = 5760;
         while (!track.reachedEnd && track.pcmData.size() * sizeof(int16_t) < trackOffset + trackBytesNeeded) {
-        auto opusStart = clock::now();
-        // Decode frames - returns number of frames (not samples)
-        int framesDecoded = op_read_float(ctx.opusFile,
-            decodeBuf.data(),
-            int(DECODE_CHUNK * ctx.channels), // buf_size is total floats
-            nullptr);  // we don't need link index
-        auto opusEnd = clock::now();
-        totalOpusTime += std::chrono::duration_cast<std::chrono::microseconds>(opusEnd - opusStart).count();
+            std::vector<float> decodeBuf(DECODE_CHUNK * track.channels);
+            int framesDecoded = op_read_float(track.opusFile,
+                decodeBuf.data(),
+                decodeBuf.size(),
+                nullptr);
 
-        if (framesDecoded <= 0) {
-            ctx.reachedEnd = true;
-            if (framesDecoded < 0) {
-                Msg("[Opus] Decode error, code=%d\n", framesDecoded);
-                return false;
+            if (framesDecoded <= 0) {
+                track.reachedEnd = true;
+                if (framesDecoded < 0) {
+                    Msg("[Opus] Track %d decode error: %d\n", i, framesDecoded);
+                    return false;
+                }
+                break;
             }
-            break;
-        }
-        totalFrames += framesDecoded;
 
-        auto resampleStart = clock::now();
-        // Calculate output frames based on ratio
-        int outputFrames = int(framesDecoded * 0.91875f); // 44100/48000
-
-        if (ctx.channels == 2) {
-            // Use optimized stereo path
-            FixedResample48to441(decodeBuf.data(),
-                resampleBuf.data(),
-                framesDecoded);
-        }
-        else {
-            // Use multi-channel path
-            FixedResample48to441MultiChannel(decodeBuf.data(),
-                resampleBuf.data(),
-                framesDecoded,
-                ctx.channels);
-    }
-
-        auto resampleEnd = clock::now();
-        totalResampleTime += std::chrono::duration_cast<std::chrono::microseconds>(resampleEnd - resampleStart).count();
-
-        auto convertStart = clock::now();
-        size_t oldSize = ctx.pcmData.size();
-        size_t newSamples = outputFrames * ctx.channels;
-        ctx.pcmData.resize(oldSize + newSamples);
+            size_t oldSize = track.pcmData.size();
+            track.pcmData.resize(oldSize + framesDecoded * track.channels);
 
             FloatToInt16MultiChannel(decodeBuf.data(),
                 &track.pcmData[oldSize],
