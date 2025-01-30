@@ -86,6 +86,7 @@
 #include "audio.h"
 #include <nlohmann/json.hpp>
 #include "shellapi.h"
+//#include <jwt-cpp/jwt.h>
 
 #pragma intrinsic(_ReturnAddress)
 
@@ -1122,6 +1123,19 @@ struct AuthResponse {
 	char pomeloName[32];
 };
 AuthResponse Server_AuthCallback(const char* clientIP, const char* serverIP, char* token) {
+
+	Msg("Auth token: %s\n", token);
+
+	if(token == nullptr || strlen(token) == 0) {
+		AuthResponse whatever;
+		whatever.success = false;
+		strcpy_s(whatever.failureReason, "No auth token provided");
+		return whatever;
+	}
+
+	// decode the jwt token
+	//auto decoded = jwt::decode(token);
+	
 	AuthResponse whatever;
 	whatever.success = true;
 	strcpy_s(whatever.discordName, clientIP);
@@ -1198,9 +1212,9 @@ bool __fastcall HookedCBaseClientConnect(
 	static auto iHostPort = OriginalCCVar_FindVar(cvarinterface, "hostport");
 	if (bUseOnlineAuth->m_Value.m_nValue != 1)
 		return oCBaseClientConnect(a1, a2, a3, a4, bFakePlayer, a6, conVars, a8, a9);
-	if (!IsDedicatedServer() && a4 && reinterpret_cast<bool(__fastcall*)(__int64)>((*(uintptr_t**)(a4))[6])(a4)) { // never auth on loopback
-		return oCBaseClientConnect(a1, a2, a3, a4, bFakePlayer, a6, conVars, a8, a9);
-	}; 
+	//if (!IsDedicatedServer() && a4 && reinterpret_cast<bool(__fastcall*)(__int64)>((*(uintptr_t**)(a4))[6])(a4)) { // never auth on loopback
+	//	return oCBaseClientConnect(a1, a2, a3, a4, bFakePlayer, a6, conVars, a8, a9);
+	//}; 
 	bool allow = false;
 	if (conVars) {
 		CUtlVector<NetMessageCvar_t>& vector_ptr = *conVars;
@@ -1236,6 +1250,85 @@ bool __fastcall HookedCBaseClientConnect(
 	}
 	return oCBaseClientConnect(a1, a2, a3, a4, bFakePlayer, a6, conVars, a8, a9);
 }
+
+
+__int64 (*oCBaseStateClientConnect)(
+	__int64 a1,
+	const char* public_ip,
+	const char* private_ip,
+	int num_players,
+	char a5,
+	int a6,
+	_BYTE* a7,
+	int a8,
+	const char* a9,
+	__int64* a10,
+	int a11);
+
+__int64 __fastcall HookedCBaseStateClientConnect(
+	__int64 a1,
+	const char* public_ip,
+	const char* private_ip,
+	int num_players,
+	char a5,
+	int a6,
+	_BYTE* a7,
+	int a8,
+	const char* a9,
+	__int64* a10,
+	int a11)
+{
+
+	Msg("Client connecting from %s\n", public_ip);
+	Msg("Client connecting from %s\n", private_ip);
+	Msg("Num players %d\n", num_players);
+	Msg("a9 %s\n", a9);
+
+	auto ms_url = CCVar_FindVar(cvarinterface, "delta_ms_url")->m_Value.m_pszString;
+	httplib::Client cli(ms_url);
+	cli.set_connection_timeout(2);
+	cli.set_address_family(AF_INET);
+	cli.set_follow_location(true);
+
+	cli.set_bearer_token_auth(CCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token")->m_Value.m_pszString);
+
+	// send a json payload with the server's public ip as ip 
+	nlohmann::json j;
+	j["ip"] = public_ip;
+
+	httplib::Result result;
+
+	// send the json payload to the master server
+	result = cli.Post("/server-token", j.dump(), "application/json");
+	auto var = CCVar_FindVar(cvarinterface, "delta_server_auth_token");
+
+	// allocate a 256 char buffer for the failure reason
+	char failureReason[256];
+
+
+	if (result) {
+		if (result->status == 200) {
+			auto json = nlohmann::json::parse(result->body);
+			auto token = json["token"].get<std::string>();
+			auto var = CCVar_FindVar(cvarinterface, "delta_server_auth_token");
+			V_snprintf(failureReason, 256, "%s", token.c_str());
+			Msg("Got token from master server: %s\n", token.c_str());
+		}
+		else {
+			Warning("Failed to get token from master server: %s\n", result->body.c_str());
+		}
+	}
+	else {
+		Warning("Failed to get token from master server: %s\n", to_string(result.error()));
+	}
+
+	var->m_Value.m_StringLength = 256;
+	var->m_Value.m_pszString = failureReason;
+	cli.stop();
+
+	return oCBaseStateClientConnect(a1, public_ip, private_ip, num_players, a5, a6, a7, a8, a9, a10, a11);
+}
+
 
 /**
  * Validates and processes the sign-on state from a network buffer.
@@ -1391,6 +1484,7 @@ void StartDiscordAuth(const CCommand& args) {
 
 		if (j.contains("error")) {
 			res.set_content(j["error"].get<std::string>(), "text/plain");
+
 			return;
 		}
 
@@ -1728,6 +1822,7 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	else {
 		MH_CreateHook((LPVOID)(G_engine + 0xD4840), &HookedCBaseClientSetName, reinterpret_cast<LPVOID*>(&CBaseClientSetNameOriginal));
 		MH_CreateHook((LPVOID)(G_engine + 0xD7DC0), &HookedCBaseClientConnect, reinterpret_cast<LPVOID*>(&oCBaseClientConnect));
+		MH_CreateHook((LPVOID)(G_engine + 0x2AA90), &HookedCBaseStateClientConnect, reinterpret_cast<LPVOID*>(&oCBaseStateClientConnect));
 	}
 
 	//MH_CreateHook((LPVOID)(server_base + 0x364140), &sub_364140, reinterpret_cast<LPVOID*>(NULL));
