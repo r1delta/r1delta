@@ -55,13 +55,12 @@ def encode_wav(wav_path, opus_bitrate='96', force=False):
                 '-t', 'raw',
                 '-e', 'signed-integer',
                 '-b', '16',
-                '-r', '48000',
+                '-r', '48000',  # Output at 48kHz directly
                 '-c', '1',
                 '-V1',
                 '--no-dither',  # Prevent potential truncation from dithering
                 '-', 
-                'remix', str(channel+1),
-                'rate', '-v', '48000'  # High quality resampling
+                'remix', str(channel+1)  # Extract single channel
             ]
             
             opusenc_cmd = [
