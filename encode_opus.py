@@ -11,7 +11,18 @@ def encode_wav(wav_path, opus_bitrate='96', force=False):
     base_name = wav_path.with_suffix('')
     
     try:
-        # Get channels using sox instead of ffprobe
+        # Get duration and sample rate using sox
+        sox_info = subprocess.run(
+            ['sox', '--i', '-D', str(wav_path)],
+            capture_output=True, text=True, check=True
+        )
+        original_duration = float(sox_info.stdout.strip())
+    except Exception as e:
+        print(f"Skipping {wav_path}: {str(e)}")
+        return
+
+    try:
+        # Get channels using sox
         sox_info = subprocess.run(
             ['sox', '--i', '-c', str(wav_path)],
             capture_output=True, text=True, check=True
@@ -42,13 +53,15 @@ def encode_wav(wav_path, opus_bitrate='96', force=False):
                 'sox',
                 str(wav_path),
                 '-t', 'raw',
-                '-e', 'signed-integer',  # Force specific PCM format
+                '-e', 'signed-integer',
                 '-b', '16',
-                '-r', '48000',          # Resample to Opus preferred rate
-                '-c', '1',              # Force mono output
-                '-V1',                  # Enable verbose error reporting
-                '-',                    # Output to stdout
-                'remix', str(channel+1)  # Extract specific channel
+                '-r', '48000',
+                '-c', '1',
+                '-V1',
+                '--no-dither',  # Prevent potential truncation from dithering
+                '-', 
+                'remix', str(channel+1),
+                'rate', '-v', '48000'  # High quality resampling
             ]
             
             opusenc_cmd = [
@@ -56,17 +69,35 @@ def encode_wav(wav_path, opus_bitrate='96', force=False):
                 '--raw', '--raw-rate', '48000',
                 '--bitrate', opus_bitrate,
                 '--quiet',
-                '-',                    # Read from stdin
+                '-',
                 str(opus_path)
             ]
 
-            # Pipe sox output directly to opusenc
-            with subprocess.Popen(sox_cmd, stdout=subprocess.PIPE) as sox_proc:
-                subprocess.run(
+            # Run with error checking
+            with subprocess.Popen(sox_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as sox_proc:
+                opus_result = subprocess.run(
                     opusenc_cmd,
                     stdin=sox_proc.stdout,
+                    stderr=subprocess.PIPE,
                     check=True
                 )
+
+                # Check for any warnings
+                sox_stderr = sox_proc.stderr.read().decode()
+                if sox_stderr:
+                    print(f"sox processing {wav_path} channel {channel}: {sox_stderr}")
+
+                opus_stderr = opus_result.stderr.decode()
+                if opus_stderr:
+                    print(f"opusenc processing {opus_path}: {opus_stderr}")
+
+            # Verify output duration
+            opus_info = subprocess.run(
+                ['opusinfo', str(opus_path)],
+                capture_output=True, text=True
+            )
+            if f"Playback duration: {original_duration:.2f}" not in opus_info.stdout:
+                print(f"Warning: {opus_path} duration mismatch detected!")
 
             print(f"Created {opus_path}")
 
