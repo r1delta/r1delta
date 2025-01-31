@@ -41,6 +41,12 @@ char SV_BroadcastMessageWithFilterLISTEN(__int64 a1, __int64 a2, __int64 a3) {
 	}
 	return oSV_BroadcastMessageWithFilterLISTEN(a1, a2, a3);
 }
+void* lastDeletedNetChan = NULL;
+void* (*oCNetChan___dtor)(CNetChan* a1, __int64 a2, __int64 a3);
+void* __fastcall CNetChan___dtor(CNetChan* a1, __int64 a2, __int64 a3) {
+    lastDeletedNetChan = a1;
+    return oCNetChan___dtor(a1, a2, a3);
+}
 bool __fastcall CNetChan___ProcessMessages(CNetChan* thisptr, bf_read* buf) {
 	std::unique_ptr<ProcessMessageScope> scope;
 	if ((*(uint8_t*)(((uintptr_t)thisptr) + 216) <= 0)) {
@@ -72,8 +78,13 @@ bool __fastcall CNetChan___ProcessMessages(CNetChan* thisptr, bf_read* buf) {
 
 	LARGE_INTEGER start, end;
 	QueryPerformanceCounter(&start);
-
+    lastDeletedNetChan = NULL;
 	const auto original = oCNetChan___ProcessMessages(thisptr, buf);
+    // wndrr: we were deleted, bail out!
+    if (lastDeletedNetChan == thisptr) {
+        lastDeletedNetChan = NULL;
+        return false;
+    }
 
 	QueryPerformanceCounter(&end);
 
@@ -122,8 +133,13 @@ void __fastcall CNetChan__ProcessPacket(CNetChan* thisptr, netpacket_s* packet, 
 
 	LARGE_INTEGER start, end;
 	QueryPerformanceCounter(&start);
-
+    lastDeletedNetChan = NULL;
 	oCNetChan__ProcessPacket(thisptr, packet, bHasHeader);
+    // wndrr: we were deleted, bail out!
+    if (lastDeletedNetChan == thisptr) {
+        lastDeletedNetChan = NULL;
+        return;
+    }
 
 	const auto pMessageHandler = *reinterpret_cast<INetChannelHandler**>(reinterpret_cast<uintptr_t>(thisptr) + 0x3ED0);
 
@@ -147,7 +163,7 @@ void __fastcall CNetChan__ProcessPacket(CNetChan* thisptr, netpacket_s* packet, 
 int __fastcall CNetChan__ProcessPacketHeader(CNetChan* thisptr, netpacket_s* packet) {
     if (!thisptr)
         return oCNetChan__ProcessPacketHeader(thisptr, packet);
-    
+
     if(!packet) {
         return -1;
 	}
@@ -823,6 +839,7 @@ security_fixes_engine(uintptr_t engine_base)
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E96E0), &CNetChan__ProcessPacket, reinterpret_cast<LPVOID*>(&oCNetChan__ProcessPacket)) == MH_OK);
     R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E73C0), &CNetChan__ProcessPacketHeader, reinterpret_cast<LPVOID*>(&oCNetChan__ProcessPacketHeader)) == MH_OK);
     R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E51D0), &CNetChan___ProcessMessages, reinterpret_cast<LPVOID*>(&oCNetChan___ProcessMessages)) == MH_OK);
+    R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E9EA0), &CNetChan___dtor, reinterpret_cast<LPVOID*>(&oCNetChan___dtor)) == MH_OK);
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0xDA330), &CGameClient__ProcessVoiceData, reinterpret_cast<LPVOID*>(&oCGameClient__ProcessVoiceData)) == MH_OK);
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x17D400), &CClientState__ProcessUserMessage, reinterpret_cast<LPVOID*>(&oCClientState__ProcessUserMessage)) == MH_OK);
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x17D600), &CClientState__ProcessVoiceData, reinterpret_cast<LPVOID*>(&oCClientState__ProcessVoiceData)) == MH_OK);
