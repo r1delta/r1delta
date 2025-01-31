@@ -1483,7 +1483,7 @@ void StartDiscordAuth(const CCommand& args) {
 
 	//discord://api/oauth2/authorize?client_id=1304910395013595176&response_type=code&redirect_uri=http%3A%2F%2Flocalhost%2Fdiscord-auth&scope=identify
 	// open this url
-	auto url = "https://discord.com/api/oauth2/authorize?client_id=1304910395013595176&response_type=code&redirect_uri=http%3A%2F%2Flocalhost%2Fdiscord-auth&scope=identify";
+	auto url = "https://discord.com/oauth2/authorize?client_id=1304910395013595176&response_type=code&redirect_uri=http%3A%2F%2Flocalhost%3A5555%2Fdiscord-auth&scope=identify";
 	int result = (int)ShellExecuteA(NULL, "open", url, NULL, NULL, SW_SHOWNORMAL);
 
 	static bool done = false;
