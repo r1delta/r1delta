@@ -1518,7 +1518,7 @@ void StartDiscordAuth(const CCommand& args) {
 		return;
 	});
 
-	svr.listen("localhost", 80);
+	svr.listen("localhost", 5555);
 	
 	return;
 }
