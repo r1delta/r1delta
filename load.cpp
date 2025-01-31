@@ -1436,10 +1436,6 @@ __int64 __fastcall HookedCBaseStateClientConnect(
 	result = cli.Post("/server-token", j.dump(), "application/json");
 	auto var = OriginalCCVar_FindVar(cvarinterface, "delta_server_auth_token");
 
-	// allocate a 256 char buffer for the failure reason
-	char failureReason[256];
-
-
 	if (result) {
 		if (result->status == 200) {
 			auto json = nlohmann::json::parse(result->body);
