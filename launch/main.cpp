@@ -564,6 +564,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine,
 	//FILE *pCout, *pCerr;
 	//freopen_s(&pCout, "conout$", "w", stdout);
 	//freopen_s(&pCerr, "conout$", "w", stderr);
+	SetEnvironmentVariable(L"ContentId", L"1025161");
 
 
 
