@@ -1249,9 +1249,7 @@ AuthResponse Server_AuthCallback(const char* clientIP, const char* serverIP, cha
 
 	try {
 
-		auto base64Decoded = base64_encode((const unsigned char*)token, strlen(token));
-
-		auto decoded = jwt::decode(base64Decoded);
+		auto decoded = jwt::decode(token);
 
 		// check if the token is expired
 		if (decoded.get_expires_at() < std::chrono::system_clock::now()) {
@@ -1449,8 +1447,7 @@ __int64 __fastcall HookedCBaseStateClientConnect(
 			/*var->m_Value.m_StringLength = token.size() + 1;
 			memcpy(var->m_Value.m_pszString, token.c_str(), token.size());
 			var->m_Value.m_pszString[token.size()] = '\0';*/
-			auto decoded_token = b64decode(token.c_str(), token.size());
-			SetConvarStringOriginal(var, decoded_token.c_str());
+			SetConvarStringOriginal(var, token.c_str());
 		}
 		else {
 			Warning("Failed to get token from master server: %s\n", result->body.c_str());

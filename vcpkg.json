@@ -1,7 +1,27 @@
 {
   "name": "r1delta",
   "version": "1.0.0",
+  "builtin-baseline": "78b61582c9e093fda56a01ebb654be15a0033897",
   "dependencies": [
+    {
+      "name": "cpp-httplib",
+      "version>=": "0.11.3"
+    },
+    "jwt-cpp",
+    {
+      "name": "libsamplerate",
+      "version>=": "0.2.2#1"
+    },
+    {
+      "name": "mimalloc",
+      "version>=": "2.1.2"
+    },
+    "minhook",
+    {
+      "name": "nlohmann-json",
+      "version>=": "3.11.2"
+    },
+    "openssl",
     {
       "name": "opus",
       "version>=": "1.4"
@@ -10,39 +30,12 @@
       "name": "opusfile",
       "version>=": "0.12+20221121#1"
     },
-    "minhook",
-    {
-      "name": "mimalloc",
-      "version>=": "2.1.2"
-    },
-    {
-      "name": "jwt-cpp"
-    },
-    {
-      "name": "openssl"
-    },
-    {
-      "name": "zstd",
-      "version>=": "1.5.5"
-    },
-    {
-      "name": "libsamplerate",
-      "version>=": "0.2.2#1"
-    },
-    {
-      "name": "cpp-httplib",
-      "version>=": "0.11.3"
-    },
-    {
-      "name": "nlohmann-json",
-      "version>=": "3.11.2"
-    }
+    "aklomp-base64"
   ],
   "overrides": [
     {
       "name": "minhook",
       "version": "1.3.3#3"
     }
-  ],
-  "builtin-baseline": "78b61582c9e093fda56a01ebb654be15a0033897"
+  ]
 }
