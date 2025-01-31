@@ -1249,7 +1249,7 @@ AuthResponse Server_AuthCallback(const char* clientIP, const char* serverIP, cha
 
 	try {
 
-		auto base64Decoded = b64decode(token, strlen(token));
+		auto base64Decoded = base64_encode((const unsigned char*)token, strlen(token));
 
 		auto decoded = jwt::decode(base64Decoded);
 
