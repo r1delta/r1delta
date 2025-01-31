@@ -189,9 +189,9 @@ static bool EndsWithWav(const char* filename) {
     return (ext == ".wav");
 }
 
-static std::string MakeOpusFilename(const char* wavFile) {
+static std::string MakeOpusFilename(const char* wavFile, int trackIndex) {
     std::string fn(wavFile);
-    return fn.substr(0, fn.size() - 4) + ".opus";
+    return fn.substr(0, fn.size() - 4) + ".opus" + std::to_string(trackIndex);
 }
 
 // --------------------------------------------------------------------
@@ -789,7 +789,7 @@ static __int64 HandleOpusRead(CBaseFileSystem* fs, FileAsyncRequest_t* request) 
             request->pfnAlloc(request->pszFilename, request->nBytes) :
             malloc(request->nBytes));
 
-    const size_t bytesToCopy = std::min(request->nBytes, interleaved.size() * sizeof(int16_t));
+    const size_t bytesToCopy = (std::min)((size_t)request->nBytes, interleaved.size() * sizeof(int16_t));
     memcpy(pDest, interleaved.data(), bytesToCopy);
 
     if (request->flags & FSASYNC_FLAGS_NULLTERMINATE) {
@@ -837,10 +837,10 @@ __int64 __fastcall Hooked_CBaseFileSystem__SyncRead(
     // If it's a .wav...
     if (EndsWithWav(request->pszFilename)) {
         // Check for matching .opus
-        std::string opusName = MakeOpusFilename(request->pszFilename);
+        std::string opusName = MakeOpusFilename(request->pszFilename, 0);
         if (FSOperations::FileExists(filesystem, opusName.c_str(), request->pszPathID)) {
             // Attempt to open & decode
-            if (OpenOpusContext(request->pszFilename, opusName, filesystem, request->pszPathID)) {
+            if (OpenOpusContext(request->pszFilename, filesystem, request->pszPathID)) {
                 // If successful, handle the read from our decoded buffer
                 return HandleOpusRead(filesystem, request);
             }

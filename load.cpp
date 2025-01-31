@@ -1241,7 +1241,8 @@ bool __fastcall HookedCBaseClientConnect(
 	static auto iHostPort = OriginalCCVar_FindVar(cvarinterface, "hostport");
 	if (bUseOnlineAuth->m_Value.m_nValue != 1)
 		return oCBaseClientConnect(a1, a2, a3, a4, bFakePlayer, a6, conVars, a8, a9);
-	if (!IsDedicatedServer() && a4 && reinterpret_cast<bool(__fastcall*)(__int64)>((*(uintptr_t**)(a4))[6])(a4)) { // never auth on loopback
+	bool bIsLoopback = !IsDedicatedServer() && a4 && reinterpret_cast<bool(__fastcall*)(__int64)>((*(uintptr_t**)(a4))[6])(a4);
+	if () { // never auth on loopback
 		return oCBaseClientConnect(a1, a2, a3, a4, bFakePlayer, a6, conVars, a8, a9);
 	}; 
 	bool allow = false;
