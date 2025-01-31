@@ -1419,6 +1419,9 @@ __int64 __fastcall HookedCBaseStateClientConnect(
 	__int64* a10,
 	int a11)
 {
+	static auto bUseOnlineAuth = OriginalCCVar_FindVar(cvarinterface, "delta_online_auth_enable");
+	if (bUseOnlineAuth->m_Value.m_nValue != 1)
+		return oCBaseStateClientConnect(a1, public_ip, private_ip, num_players, a5, a6, a7, a8, a9, a10, a11);
 
 	auto ms_url = CCVar_FindVar(cvarinterface, "delta_ms_url")->m_Value.m_pszString;
 	httplib::Client cli(ms_url);
