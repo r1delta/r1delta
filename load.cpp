@@ -1242,9 +1242,6 @@ bool __fastcall HookedCBaseClientConnect(
 	if (bUseOnlineAuth->m_Value.m_nValue != 1)
 		return oCBaseClientConnect(a1, a2, a3, a4, bFakePlayer, a6, conVars, a8, a9);
 	bool bIsLoopback = !IsDedicatedServer() && a4 && reinterpret_cast<bool(__fastcall*)(__int64)>((*(uintptr_t**)(a4))[6])(a4);
-	if () { // never auth on loopback
-		return oCBaseClientConnect(a1, a2, a3, a4, bFakePlayer, a6, conVars, a8, a9);
-	}; 
 	bool allow = false;
 	if (conVars) {
 		CUtlVector<NetMessageCvar_t>& vector_ptr = *conVars;
@@ -1253,11 +1250,11 @@ bool __fastcall HookedCBaseClientConnect(
 				allow = true;
 				const char* v9 = reinterpret_cast<const char * (__fastcall*)(__int64)>((*(uintptr_t**)(a4))[1])(a4);
 				auto res = Server_AuthCallback(v9, (get_public_ip()+":"+ std::to_string(iHostPort->m_Value.m_nValue)).c_str(), vector_ptr[current].value);
-				if (!res.success) {
+				if (!res.success && !bIsLoopback) {
 					V_snprintf(a8, a9, "%s", res.failureReason);
 					return false;
 				}
-				if (iSyncUsernameWithDiscord->m_Value.m_nValue != 0) {
+				if (res.success && iSyncUsernameWithDiscord->m_Value.m_nValue != 0) {
 					auto newName = iSyncUsernameWithDiscord->m_Value.m_nValue == 1 ? res.discordName : res.pomeloName;
 					a2 = (uint8*)newName;
 					FOR_EACH_VEC(vector_ptr, current) {
@@ -1273,7 +1270,7 @@ bool __fastcall HookedCBaseClientConnect(
 			}
 		}
 	}
-	if (!allow) {
+	if (!allow && !bIsLoopback) {
 		V_snprintf(a8, a9, "%s", "Invalid ConVars in CBaseClient::Connect.");
 		return false;
 	}
