@@ -1610,15 +1610,28 @@ void StartDiscordAuth(const CCommand& args) {
 		cli.set_address_family(AF_INET);
 		cli.set_follow_location(true);
 		auto result = cli.Get(std::format("/discord-auth?code={}", discord_code));
-		auto j = nlohmann::json::parse(result->body);
+		nlohmann::json j;
+		try {
+			j = nlohmann::json::parse(result->body);
+		}
+		catch (const std::exception& e) {
+			res.set_content("Invalid auth token", "text/plain");
+			svr.stop();
+			return;
+		}
+		auto errorVar = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token_failed_reason");
+
 		if (j.contains("error")) {
 			res.set_content(j["error"].get<std::string>(), "text/plain");
+			SetConvarStringOriginal(errorVar,j["error"].get<std::string>().c_str());
+			svr.stop();
 			return;
 		}
 		auto token_j = j["token"].get<std::string>();
 		auto v = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token");
 		SetConvarStringOriginal(v,token_j.c_str());
 		res.set_content("Success", "text/plain");
+		SetConvarStringOriginal(errorVar, "");
 		svr.stop();
 		return;
 	});
@@ -1929,6 +1942,7 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	RegisterConVar("delta_ms_url", "ms.r1delta.net", FCVAR_CLIENTDLL, "Url for r1d masterserver");
 	RegisterConVar("delta_server_auth_token", "", FCVAR_USERINFO | FCVAR_SERVER_CANNOT_QUERY | FCVAR_DONTRECORD | FCVAR_PROTECTED | FCVAR_HIDDEN, "Per-server auth token");
 	RegisterConVar("delta_persistent_master_auth_token", "", FCVAR_ARCHIVE | FCVAR_SERVER_CANNOT_QUERY | FCVAR_DONTRECORD | FCVAR_PROTECTED | FCVAR_HIDDEN, "Persistent master server authentication token");
+	RegisterConVar("delta_persistent_master_auth_token_failed_reason", "", FCVAR_ARCHIVE | FCVAR_SERVER_CANNOT_QUERY | FCVAR_DONTRECORD | FCVAR_PROTECTED | FCVAR_HIDDEN, "Persistent master server authentication token");
 	RegisterConVar("delta_online_auth_enable", "1", FCVAR_GAMEDLL, "Whether to use master server auth");
 	RegisterConVar("delta_discord_username_sync", "2", FCVAR_GAMEDLL, "Controls if player names are synced with Discord: 0=Off,1=Norm,2=Pomelo");
 	RegisterConVar("riff_floorislava", "0", FCVAR_HIDDEN, "Enable floor is lava mode");
