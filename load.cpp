@@ -1229,6 +1229,15 @@ struct AuthResponse {
 	char discordName[32];
 	char pomeloName[32];
 };
+
+
+static const std::string rsa_pub_key = "-----BEGIN PUBLIC KEY-----\n"
+"MIGbMBAGByqGSM49AgEGBSuBBAAjA4GGAAQBdpE0DWg/pnwoqGmfXKS3xQcetcxe\n"
+"GvzFBcGvI2L2oGUnfJk23YPF+JHKzxGinfZ4U5H2veEMpmjWyUmSalcC7JAAUtWV\n"
+"WpL3q6pySBrwTzJEq1T6WGo7+q8v0FbrAQhTrGcI87LL59WflWg89YahPhZOUdQ6\n"
+"1K+a6P0iZF1Sbv3yCH4=\n"
+"-----END PUBLIC KEY-----\n";
+
 AuthResponse Server_AuthCallback(const char* clientIP, const char* serverIP, char* token) {
 
 	if(token == nullptr) {
@@ -1249,6 +1258,9 @@ AuthResponse Server_AuthCallback(const char* clientIP, const char* serverIP, cha
 
 	try {
 
+		//auto& verifyer = jwt::verify().allow_algorithm(jwt::algorithm::es512(rsa_pub_key, "", "", ""));
+
+
 		auto decoded = jwt::decode(token);
 
 		// check if the token is expired
@@ -1258,12 +1270,23 @@ AuthResponse Server_AuthCallback(const char* clientIP, const char* serverIP, cha
 			strcpy_s(whatever.failureReason, "Token is expired");
 			return whatever;
 		} 
-		
+
+		//verifyer.verify(decoded);
 		auto payload = decoded.get_payload_claims();
 
 		auto discordName = payload["display_name"].as_string();
 
 		auto pomeloName = payload["pomelo_name"].as_string();
+
+	/*	auto server_ip = payload["server_ip"].as_string();
+		if (server_ip != serverIP) {
+			AuthResponse whatever;
+			whatever.success = false;
+			strcpy_s(whatever.failureReason, "Invalid server IP");
+			return whatever;
+		}*/
+
+
 
 
 		AuthResponse whatever;
@@ -1447,6 +1470,9 @@ __int64 __fastcall HookedCBaseStateClientConnect(
 			memcpy(var->m_Value.m_pszString, token.c_str(), token.size());
 			var->m_Value.m_pszString[token.size()] = '\0';*/
 			SetConvarStringOriginal(var, token.c_str());
+
+			// print the length of the var to the console
+			Msg("Server Auth Token Length: %d\n", var->m_Value.m_StringLength);
 		}
 		else {
 			Warning("Failed to get token from master server: %s\n", result->body.c_str());
