@@ -1184,7 +1184,7 @@ std::string get_public_ip() {
 }
 
 // Server_AuthCallback verifies the server auth token.
-AuthResponse Server_AuthCallback(const char* clientIP, const char* serverIP, const char* token) {
+AuthResponse Server_AuthCallback(bool loopback, const char* serverIP, const char* token) {
 	AuthResponse response;
 	if (token == nullptr) {
 		response.success = false;
@@ -1221,7 +1221,7 @@ AuthResponse Server_AuthCallback(const char* clientIP, const char* serverIP, con
 
 		// Extra check: the token’s server_ip must match exactly.
 		std::string tokenServerIP = decoded.get_payload_claim("s").as_string();
-		if (tokenServerIP != serverIP && !(!IsDedicatedServer() && (std::string(clientIP) == "loopback" || std::string(clientIP).starts_with("[::1]")))) {
+		if (tokenServerIP != serverIP && !loopback) {
 			response.success = false;
 			strncpy(response.failureReason, "Token server IP mismatch", sizeof(response.failureReason));
 			return response;
@@ -1281,24 +1281,19 @@ bool __fastcall HookedCBaseClientConnect(
 
 	// Determine if this is a loopback connection.
 	bool bIsLoopback = false;
-	if (a4) {
-		// Call engine function to determine loopback status.
-		typedef bool(__fastcall* IsLoopbackFn)(__int64);
-		IsLoopbackFn IsLoopback = reinterpret_cast<IsLoopbackFn>((*((uintptr_t**)a4))[6]);
-		bIsLoopback = !IsLoopback(a4) && !IsDedicatedServer();
-	}
-
+	typedef const char* (__fastcall* GetClientIPFn)(__int64);
+	GetClientIPFn GetClientIP = reinterpret_cast<GetClientIPFn>((*((uintptr_t**)a4))[1]);
+	const char* clientIP = GetClientIP(a4);
+	bIsLoopback = (std::string(clientIP) == std::string("loopback") || std::string(clientIP).starts_with("[::1]")) && !IsDedicatedServer();
 	bool allow = false;
 	if (conVars) {
 		for (int i = 0; i < conVars->Count(); i++) {
 			NetMessageCvar_t& var = conVars->Element(i);
 			if (strcmp(var.name, "delta_server_auth_token") == 0) {
 				allow = true;
-				typedef const char* (__fastcall* GetClientIPFn)(__int64);
-				GetClientIPFn GetClientIP = reinterpret_cast<GetClientIPFn>((*((uintptr_t**)a4))[1]);
-				const char* clientIP = GetClientIP(a4);
+
 				std::string actualServerIP = get_public_ip() + ":" + std::to_string(iHostPort->m_Value.m_nValue); // if we're not using ports comment this out later
-				AuthResponse res = Server_AuthCallback(clientIP, actualServerIP.c_str(), jwt_compact::expandJWT(var.value).c_str());
+				AuthResponse res = Server_AuthCallback(bIsLoopback, actualServerIP.c_str(), jwt_compact::expandJWT(var.value).c_str());
 				if (!res.success && !bIsLoopback) {
 					V_snprintf(a8, a9, "%s", res.failureReason);
 					return false;
