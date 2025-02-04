@@ -19,6 +19,7 @@
 #include <zstd.h>
 #include "MinHook.h"  // Adjust include path as needed
 #include "audio.h"
+#include "load.h"
 
 // --------------------------------------------------------------------------
 // Compiler-specific "force inline" macro
@@ -35,7 +36,7 @@
 // Constants and Definitions
 // --------------------------------------------------------------------------
 
-constexpr uint64_t R1D_marker = 0x5244315f5f4d4150; // Marker written by packedstore.cpp
+constexpr uint64_t R1D_marker = 0x5244315f5f4d4150ULL; // Marker written by packedstore.cpp
 
 // Define ring buffer sizes (must be powers of two)
 static constexpr size_t R1DC_INBUF_SIZE = 1 << 20;
@@ -66,9 +67,11 @@ struct r1dc_context_t
     size_t outDataCount; // = outWritePos - outReadPos
 
     // Marker detection.
-    bool     isZstdChunk;   // true if marker has been detected
+    bool     isZstdChunk;   // true if marker has been detected (i.e. we are in ZSTD mode)
     uint64_t chunkMarker;   // stores marker (should equal R1D_marker)
-    
+
+    // New flag: whether we have already determined the stream type.
+    bool     typeDetermined;
 };
 
 // --------------------------------------------------------------------------
@@ -141,7 +144,6 @@ r1dc_decompress_t original_lzham_decompressor_decompress = nullptr;
 // r1dc_init: Allocate and initialize a new r1dc context.
 void* r1dc_init(void* a1)
 {
-    
     r1dc_context_t* ctx = new r1dc_context_t;
     std::memset(ctx, 0, sizeof(*ctx));
 
@@ -155,13 +157,11 @@ void* r1dc_init(void* a1)
     ctx->zstd_inited = false;
     ctx->isZstdChunk = false;
     ctx->chunkMarker = 0ULL;
+    ctx->typeDetermined = false; // not determined until we see at least 8 bytes
 
-    auto a1_copy = static_cast<uint8_t*>(a1);
-
-    original_lzham_decompressor_init(a1);
-
-    ctx->lzham_ctx = a1;
-
+    // Initialize the original LZHAM decompressor.
+    ctx->lzham_ctx = original_lzham_decompressor_init(a1);
+    
     return ctx;
 }
 
@@ -182,16 +182,17 @@ __int64 r1dc_reinit(void* p)
     ctx->zstd_inited = false;
     ctx->isZstdChunk = false;
     ctx->chunkMarker = 0ULL;
+    ctx->typeDetermined = false; // reset determination for the new chunk
 
     if (ctx->zds)
     {
         ZSTD_initDStream(ctx->zds);
     }
 
-    if(ctx->lzham_ctx)
-	{
-		return original_lzham_decompressor_reinit(ctx->lzham_ctx);
-	}
+    if (ctx->lzham_ctx)
+    {
+        return original_lzham_decompressor_reinit(ctx->lzham_ctx);
+    }
 
     return 0;
 }
@@ -206,7 +207,6 @@ __int64 r1dc_deinit(void* p)
     __int64 ret = 0;
     if (ctx->lzham_ctx)
         ret = original_lzham_decompressor_deinit(ctx->lzham_ctx);
- 
 
     delete ctx;
     return ret;
@@ -227,46 +227,65 @@ __int64 r1dc_decompress(
     if (!p) return 0;
     r1dc_context_t* ctx = static_cast<r1dc_context_t*>(p);
 
+    // We'll work with a local pointer to the input buffer.
     uint8_t* callerIn = static_cast<uint8_t*>(pIn_buf);
     size_t   callerInSize = *pIn_buf_size;
 
     // ----------------------------------------------------------------------
-    // Step 1: If we have not yet detected the marker, check the first 8 bytes.
-    //         We'll do an unaligned read for speed (assuming x86/x64).
+    // Step 1: Determine stream type (if not already done).
+    // In fallback (LZHAM) mode we must not disturb the caller's input data.
     // ----------------------------------------------------------------------
-    if (!ctx->isZstdChunk)
+    if (!ctx->typeDetermined)
     {
         if (callerInSize < sizeof(uint64_t))
         {
-            // Not enough input to check the marker.
-            return 0;
-        }
-
-        // Faster unaligned read for the marker:
-        uint64_t markerVal = *reinterpret_cast<const uint64_t*>(callerIn);
-        if (markerVal == R1D_marker)
-        {
-            ctx->isZstdChunk = true;
-            ctx->chunkMarker = markerVal;
-            // Skip the marker bytes.
-            callerIn += sizeof(uint64_t);
-            callerInSize -= sizeof(uint64_t);
+            // Not enough input to decide.
+            // If no more input is coming then we must assume fallback.
+            if (no_more_input_bytes_flag)
+            {
+                ctx->typeDetermined = true;
+                ctx->isZstdChunk = false;
+            }
+            else
+            {
+                return 0; // wait for more data
+            }
         }
         else
         {
-            // Not a ZSTD–compressed chunk; fallback to the original LZHAM decompressor.
-            typedef __int64 (*orig_decompress_t)(void*, void*, size_t*, void*, size_t*, int);
-            orig_decompress_t orig =
-                reinterpret_cast<orig_decompress_t>(original_lzham_decompressor_decompress);
-
-            return orig(ctx->lzham_ctx, pIn_buf, pIn_buf_size,
-                pOut_buf, pOut_buf_size,
-                no_more_input_bytes_flag);
+            // Peek at the first 8 bytes.
+            uint64_t markerVal = *reinterpret_cast<const uint64_t*>(callerIn);
+            ctx->typeDetermined = true;
+            if (markerVal == R1D_marker)
+            {
+                ctx->isZstdChunk = true;
+                ctx->chunkMarker = markerVal;
+                // In ZSTD mode, we consume the marker bytes.
+                callerIn += sizeof(uint64_t);
+                callerInSize -= sizeof(uint64_t);
+            }
+            else
+            {
+                ctx->isZstdChunk = false;
+            }
         }
     }
 
     // ----------------------------------------------------------------------
-    // Step 2: Append all caller input data to our internal input ring buffer.
+    // Step 2: Fallback to LZHAM if the stream is not a ZSTD chunk.
+    // In fallback mode we do not alter the caller's input buffer.
+    // ----------------------------------------------------------------------
+    if (!ctx->isZstdChunk)
+    {
+        return original_lzham_decompressor_decompress(
+            ctx->lzham_ctx, pIn_buf, pIn_buf_size,
+            pOut_buf, pOut_buf_size,
+            no_more_input_bytes_flag);
+    }
+
+    // ----------------------------------------------------------------------
+    // Step 3: In ZSTD mode, append all caller input data to our internal input ring buffer.
+    // (Since we have already consumed any marker bytes, we append the rest.)
     // ----------------------------------------------------------------------
     if (callerInSize > 0)
     {
@@ -279,7 +298,7 @@ __int64 r1dc_decompress(
     }
 
     // ----------------------------------------------------------------------
-    // Step 3: Initialize the ZSTD stream if not already done.
+    // Step 4: Initialize the ZSTD stream if not already done.
     // ----------------------------------------------------------------------
     if (!ctx->zstd_inited)
     {
@@ -293,7 +312,7 @@ __int64 r1dc_decompress(
     }
 
     // ----------------------------------------------------------------------
-    // Step 4: Decompression loop.
+    // Step 5: Decompression loop.
     // ----------------------------------------------------------------------
     bool frameComplete = false;
     while (ctx->inDataCount > 0 && (ctx->outDataCount < R1DC_OUTBUF_SIZE))
@@ -301,16 +320,13 @@ __int64 r1dc_decompress(
         // Get contiguous region from the input ring.
         size_t inContig = 0;
         uint8_t* inPtr = RingBuffer_GetContiguous(ctx->inputRing, R1DC_INBUF_SIZE,
-            ctx->inReadPos, ctx->inDataCount,
-            inContig);
+            ctx->inReadPos, ctx->inDataCount, inContig);
         ZSTD_inBuffer inBuf = { inPtr, inContig, 0 };
 
         // Get contiguous free space in the output ring.
         size_t outContig = 0;
         uint8_t* outPtr = RingBuffer_GetContiguous(ctx->outputRing, R1DC_OUTBUF_SIZE,
-            ctx->outWritePos,
-            (R1DC_OUTBUF_SIZE - ctx->outDataCount),
-            outContig);
+            ctx->outWritePos, (R1DC_OUTBUF_SIZE - ctx->outDataCount), outContig);
         ZSTD_outBuffer outBuf = { outPtr, outContig, 0 };
 
         // Decompress
@@ -321,10 +337,10 @@ __int64 r1dc_decompress(
             return 0;
         }
 
-        // Update input ring: consumed inBuf.pos bytes
+        // Update input ring: consumed inBuf.pos bytes.
         RingBuffer_Consume(inBuf.pos, ctx->inReadPos, ctx->inDataCount);
 
-        // Update output ring: produced outBuf.pos bytes
+        // Update output ring: produced outBuf.pos bytes.
         ctx->outWritePos += outBuf.pos;
         ctx->outDataCount += outBuf.pos;
 
@@ -341,7 +357,7 @@ __int64 r1dc_decompress(
     }
 
     // ----------------------------------------------------------------------
-    // Step 5: Copy decompressed data from the output ring buffer to caller’s buffer.
+    // Step 6: Copy decompressed data from the output ring buffer to the caller’s buffer.
     // ----------------------------------------------------------------------
     uint8_t* callerOut = static_cast<uint8_t*>(pOut_buf);
     size_t   callerOutCap = *pOut_buf_size;
@@ -351,8 +367,7 @@ __int64 r1dc_decompress(
     {
         size_t contig = 0;
         uint8_t* outContigPtr = RingBuffer_GetContiguous(ctx->outputRing, R1DC_OUTBUF_SIZE,
-            ctx->outReadPos, ctx->outDataCount,
-            contig);
+            ctx->outReadPos, ctx->outDataCount, contig);
         size_t toCopy = (std::min)(callerOutCap - copied, contig);
         std::memcpy(callerOut + copied, outContigPtr, toCopy);
         copied += toCopy;
@@ -361,7 +376,7 @@ __int64 r1dc_decompress(
     *pOut_buf_size = copied;
 
     // ----------------------------------------------------------------------
-    // Step 6: If the decompression frame is complete (frameComplete == true)
+    // Step 7: If the decompression frame is complete (frameComplete == true)
     //         and no data remains in the ring buffers, return -1.
     //         Otherwise, return 0.
     // ----------------------------------------------------------------------
@@ -377,8 +392,6 @@ __int64 r1dc_decompress(
 // --------------------------------------------------------------------------
 void InitCompressionHooks()
 {
-    return;
-    extern uintptr_t G_filesystem_stdio; // Defined elsewhere in your engine
     auto fs = G_filesystem_stdio;
 
     MH_CreateHook(
@@ -394,7 +407,7 @@ void InitCompressionHooks()
     MH_CreateHook(
         reinterpret_cast<LPVOID>(fs + 0x753A0),
         r1dc_deinit,
-       (void**)&original_lzham_decompressor_deinit
+        (void**)&original_lzham_decompressor_deinit
     );
     MH_CreateHook(
         reinterpret_cast<LPVOID>(fs + 0x753B0),
@@ -402,10 +415,9 @@ void InitCompressionHooks()
         (void**)&original_lzham_decompressor_decompress
     );
 
-    // Example of hooking another function for reading, if you use it:
-    // MH_CreateHook(LPVOID(fs + 0x23860),
-    //               Hooked_CBaseFileSystem__SyncRead,
-    //               reinterpret_cast<LPVOID*>(&Original_CBaseFileSystem__SyncRead));
+    MH_CreateHook(LPVOID(fs + 0x23860),
+        Hooked_CBaseFileSystem__SyncRead,
+        reinterpret_cast<LPVOID*>(&Original_CBaseFileSystem__SyncRead));
 
     MH_EnableHook(MH_ALL_HOOKS);
 }
