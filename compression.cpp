@@ -48,6 +48,8 @@ struct r1dc_context_t
 {
     // ZSTD streaming decompression context.
     ZSTD_DStream* zds;
+    void* lzham_ctx;   // original LZHAM decompressor context
+    bool lzham_inited; // true if the LZHAM decompressor has been initialized
     bool zstd_inited;  // true if the ZSTD DStream has been initialized
 
     // Ring buffer for input.
@@ -66,6 +68,7 @@ struct r1dc_context_t
     // Marker detection.
     bool     isZstdChunk;   // true if marker has been detected
     uint64_t chunkMarker;   // stores marker (should equal R1D_marker)
+    
 };
 
 // --------------------------------------------------------------------------
@@ -126,18 +129,19 @@ typedef __int64 (*r1dc_decompress_t)(
     int no_more_input_bytes_flag
     );
 
-void* original_lzham_decompressor_init = nullptr;
-void* original_lzham_decompressor_reinit = nullptr;
-void* original_lzham_decompressor_deinit = nullptr;
-void* original_lzham_decompressor_decompress = nullptr;
+r1dc_init_t original_lzham_decompressor_init = nullptr;
+r1dc_reinit_t original_lzham_decompressor_reinit = nullptr;
+r1dc_deinit_t original_lzham_decompressor_deinit = nullptr;
+r1dc_decompress_t original_lzham_decompressor_decompress = nullptr;
 
 // --------------------------------------------------------------------------
 // r1dc hook implementations with ring buffer logic.
 // --------------------------------------------------------------------------
 
 // r1dc_init: Allocate and initialize a new r1dc context.
-void* r1dc_init(void* /*params*/)
+void* r1dc_init(void* a1)
 {
+    
     r1dc_context_t* ctx = new r1dc_context_t;
     std::memset(ctx, 0, sizeof(*ctx));
 
@@ -151,6 +155,12 @@ void* r1dc_init(void* /*params*/)
     ctx->zstd_inited = false;
     ctx->isZstdChunk = false;
     ctx->chunkMarker = 0ULL;
+
+    auto a1_copy = static_cast<uint8_t*>(a1);
+
+    original_lzham_decompressor_init(a1);
+
+    ctx->lzham_ctx = a1;
 
     return ctx;
 }
@@ -177,6 +187,12 @@ __int64 r1dc_reinit(void* p)
     {
         ZSTD_initDStream(ctx->zds);
     }
+
+    if(ctx->lzham_ctx)
+	{
+		return original_lzham_decompressor_reinit(ctx->lzham_ctx);
+	}
+
     return 0;
 }
 
@@ -187,8 +203,13 @@ __int64 r1dc_deinit(void* p)
     r1dc_context_t* ctx = static_cast<r1dc_context_t*>(p);
     if (ctx->zds)
         ZSTD_freeDStream(ctx->zds);
+    __int64 ret = 0;
+    if (ctx->lzham_ctx)
+        ret = original_lzham_decompressor_deinit(ctx->lzham_ctx);
+ 
+
     delete ctx;
-    return 0;
+    return ret;
 }
 
 // r1dc_decompress: Decompress data using ring buffer logic and ZSTD streaming.
@@ -238,7 +259,7 @@ __int64 r1dc_decompress(
             orig_decompress_t orig =
                 reinterpret_cast<orig_decompress_t>(original_lzham_decompressor_decompress);
 
-            return orig(p, pIn_buf, pIn_buf_size,
+            return orig(ctx->lzham_ctx, pIn_buf, pIn_buf_size,
                 pOut_buf, pOut_buf_size,
                 no_more_input_bytes_flag);
         }
@@ -356,28 +377,29 @@ __int64 r1dc_decompress(
 // --------------------------------------------------------------------------
 void InitCompressionHooks()
 {
+    return;
     extern uintptr_t G_filesystem_stdio; // Defined elsewhere in your engine
     auto fs = G_filesystem_stdio;
 
     MH_CreateHook(
         reinterpret_cast<LPVOID>(fs + 0x75380),
         r1dc_init,
-        &original_lzham_decompressor_init
+        (void**)&original_lzham_decompressor_init
     );
     MH_CreateHook(
         reinterpret_cast<LPVOID>(fs + 0x75390),
         r1dc_reinit,
-        &original_lzham_decompressor_reinit
+        (void**)&original_lzham_decompressor_reinit
     );
     MH_CreateHook(
         reinterpret_cast<LPVOID>(fs + 0x753A0),
         r1dc_deinit,
-        &original_lzham_decompressor_deinit
+       (void**)&original_lzham_decompressor_deinit
     );
     MH_CreateHook(
         reinterpret_cast<LPVOID>(fs + 0x753B0),
         r1dc_decompress,
-        &original_lzham_decompressor_decompress
+        (void**)&original_lzham_decompressor_decompress
     );
 
     // Example of hooking another function for reading, if you use it:
