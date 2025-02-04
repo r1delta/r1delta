@@ -195,6 +195,7 @@
     <ClInclude Include="filecache.h" />
     <ClInclude Include="filesystem.h" />
     <ClInclude Include="framework.h" />
+    <ClInclude Include="jwt_compact.h" />
     <ClInclude Include="keyvalues.h" />
     <ClInclude Include="load.h" />
     <ClInclude Include="logging.h" />

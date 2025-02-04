@@ -87,6 +87,7 @@
 #include <nlohmann/json.hpp>
 #include "shellapi.h"
 #include <jwt-cpp/jwt.h>
+#include "jwt_compact.h"
 
 #pragma intrinsic(_ReturnAddress)
 
@@ -792,113 +793,6 @@ ConVarR1* RegisterConVar(const char* name, const char* value, int flags, const c
 	return newVar;
 }
 
-#include <stdint.h>
-#include <stdlib.h>
-
-
-static char encoding_table[] = { 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H',
-								'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P',
-								'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X',
-								'Y', 'Z', 'a', 'b', 'c', 'd', 'e', 'f',
-								'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n',
-								'o', 'p', 'q', 'r', 's', 't', 'u', 'v',
-								'w', 'x', 'y', 'z', '0', '1', '2', '3',
-								'4', '5', '6', '7', '8', '9', '+', '/' };
-static char* decoding_table = NULL;
-static int mod_table[] = { 0, 2, 1 };
-
-static const int B64index[256] = { 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0, 62, 63, 62, 62, 63, 52, 53, 54, 55,
-56, 57, 58, 59, 60, 61,  0,  0,  0,  0,  0,  0,  0,  0,  1,  2,  3,  4,  5,  6,
-7,  8,  9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,  0,
-0,  0,  0, 63,  0, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
-41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51 };
-
-std::string b64decode(const void* data, const size_t len)
-{
-	unsigned char* p = (unsigned char*)data;
-	int pad = len > 0 && (len % 4 || p[len - 1] == '=');
-	const size_t L = ((len + 3) / 4 - pad) * 4;
-	std::string str(L / 4 * 3 + pad, '\0');
-
-	for (size_t i = 0, j = 0; i < L; i += 4)
-	{
-		int n = B64index[p[i]] << 18 | B64index[p[i + 1]] << 12 | B64index[p[i + 2]] << 6 | B64index[p[i + 3]];
-		str[j++] = n >> 16;
-		str[j++] = n >> 8 & 0xFF;
-		str[j++] = n & 0xFF;
-	}
-	if (pad)
-	{
-		int n = B64index[p[L]] << 18 | B64index[p[L + 1]] << 12;
-		str[str.size() - 1] = n >> 16;
-
-		if (len > L + 2 && p[L + 2] != '=')
-		{
-			n |= B64index[p[L + 2]] << 6;
-			str.push_back(n >> 8 & 0xFF);
-		}
-	}
-	return str;
-}
-
-static const unsigned char base64_table[65] =
-"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-/**
-* base64_encode - Base64 encode
-* @src: Data to be encoded
-* @len: Length of the data to be encoded
-* @out_len: Pointer to output length variable, or %NULL if not used
-* Returns: Allocated buffer of out_len bytes of encoded data,
-* or empty string on failure
-*/
-std::string base64_encode(const unsigned char* src, size_t len)
-{
-	unsigned char* out, * pos;
-	const unsigned char* end, * in;
-
-	size_t olen;
-
-	olen = 4 * ((len + 2) / 3); /* 3-byte blocks to 4-byte */
-
-	if (olen < len)
-		return std::string(); /* integer overflow */
-
-	std::string outStr;
-	outStr.resize(olen);
-	out = (unsigned char*)&outStr[0];
-
-	end = src + len;
-	in = src;
-	pos = out;
-	while (end - in >= 3) {
-		*pos++ = base64_table[in[0] >> 2];
-		*pos++ = base64_table[((in[0] & 0x03) << 4) | (in[1] >> 4)];
-		*pos++ = base64_table[((in[1] & 0x0f) << 2) | (in[2] >> 6)];
-		*pos++ = base64_table[in[2] & 0x3f];
-		in += 3;
-	}
-
-	if (end - in) {
-		*pos++ = base64_table[in[0] >> 2];
-		if (end - in == 1) {
-			*pos++ = base64_table[(in[0] & 0x03) << 4];
-			*pos++ = '=';
-		}
-		else {
-			*pos++ = base64_table[((in[0] & 0x03) << 4) |
-				(in[1] >> 4)];
-			*pos++ = base64_table[(in[1] & 0x0f) << 2];
-		}
-		*pos++ = '=';
-	}
-
-	return outStr;
-}
-
-
 LDR_DLL_LOADED_NOTIFICATION_DATA* GetModuleNotificationData(const wchar_t* moduleName)
 {
 	HMODULE hMods[1024];
@@ -1231,77 +1125,10 @@ struct AuthResponse {
 };
 
 
-static const std::string rsa_pub_key = "-----BEGIN PUBLIC KEY-----\n"
-"MIGbMBAGByqGSM49AgEGBSuBBAAjA4GGAAQBdpE0DWg/pnwoqGmfXKS3xQcetcxe\n"
-"GvzFBcGvI2L2oGUnfJk23YPF+JHKzxGinfZ4U5H2veEMpmjWyUmSalcC7JAAUtWV\n"
-"WpL3q6pySBrwTzJEq1T6WGo7+q8v0FbrAQhTrGcI87LL59WflWg89YahPhZOUdQ6\n"
-"1K+a6P0iZF1Sbv3yCH4=\n"
+static const std::string ecdsa_pub_key = "-----BEGIN PUBLIC KEY-----\n"
+"MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEPc1fjPhVLc/prdKT5ku5xNQ9mM3v\n"
+"9FHTsnwhx2tPbmVNB0TAJyKNnWVf993HPtb5+W/JAJtJCFg0txDyBBHONg==\n"
 "-----END PUBLIC KEY-----\n";
-
-AuthResponse Server_AuthCallback(const char* clientIP, const char* serverIP, char* token) {
-
-	if(token == nullptr) {
-		AuthResponse whatever;
-		whatever.success = false;
-		strcpy_s(whatever.failureReason, "No auth token provided");
-		return whatever;
-	}
-
-	if(strlen(token) < 10) {
-		AuthResponse whatever;
-		whatever.success = false;
-		strcpy_s(whatever.failureReason, "Invalid auth token");
-		return whatever;
-	}
-
-	// decode the jwt token
-
-	try {
-
-		//auto& verifyer = jwt::verify().allow_algorithm(jwt::algorithm::es512(rsa_pub_key, "", "", ""));
-
-
-		auto decoded = jwt::decode(token);
-
-		// check if the token is expired
-		if (decoded.get_expires_at() < std::chrono::system_clock::now()) {
-			AuthResponse whatever;
-			whatever.success = false;
-			strcpy_s(whatever.failureReason, "Token is expired");
-			return whatever;
-		} 
-
-		//verifyer.verify(decoded);
-		auto payload = decoded.get_payload_claims();
-
-		auto discordName = payload["display_name"].as_string();
-
-		auto pomeloName = payload["pomelo_name"].as_string();
-
-	/*	auto server_ip = payload["server_ip"].as_string();
-		if (server_ip != serverIP) {
-			AuthResponse whatever;
-			whatever.success = false;
-			strcpy_s(whatever.failureReason, "Invalid server IP");
-			return whatever;
-		}*/
-
-
-
-
-		AuthResponse whatever;
-		whatever.success = true;
-		strcpy_s(whatever.discordName, discordName.c_str());
-		strcpy_s(whatever.pomeloName, pomeloName.c_str());
-		return whatever;
-	}
-	catch (const std::exception& e) {
-		AuthResponse whatever;
-		whatever.success = false;
-		strcpy_s(whatever.failureReason, e.what());
-		return whatever;
-	}
-}
 
 namespace {
 	std::string trim(const std::string& s) {
@@ -1323,20 +1150,6 @@ namespace {
 	}
 }
 
-std::string get_public_ip() {
-	static std::string cached_ip = [] {
-		for (const char* host : { "checkip.amazonaws.com", "eth0.me", "api.ipify.org" }) {
-			httplib::Client client(host);
-			client.set_read_timeout(1);
-			if (auto res = client.Get("/")) {
-				std::string ip = trim(res->body);
-				if (res->status == 200 && is_valid_ipv4(ip)) return ip;
-			}
-		}
-		return std::string("0.0.0.0");
-	}();
-	return cached_ip;
-}
 
 void Shared_OnLocalAuthFailure() {
 	Warning("%s", "Invalid auth token!\n");
@@ -1344,6 +1157,96 @@ void Shared_OnLocalAuthFailure() {
 }
 
 
+
+typedef void (*SetConvarString_t)(ConVarR1* var, const char* value);
+
+SetConvarString_t SetConvarStringOriginal;
+
+// Helper function to get the server’s public IP.
+std::string get_public_ip() {
+	static std::string cached_ip = []() -> std::string {
+		const char* hosts[] = { "checkip.amazonaws.com", "eth0.me", "api.ipify.org" };
+		for (const char* host : hosts) {
+			httplib::Client client(host);
+			client.set_read_timeout(1, 0);
+			if (auto res = client.Get("/")) {
+				std::string ip = res->body;
+				// Trim whitespace.
+				ip.erase(0, ip.find_first_not_of(" \t\n\r"));
+				ip.erase(ip.find_last_not_of(" \t\n\r") + 1);
+				if (res->status == 200 && !ip.empty())
+					return ip;
+			}
+		}
+		return std::string("0.0.0.0");
+	}();
+	return cached_ip;
+}
+
+// Server_AuthCallback verifies the server auth token.
+AuthResponse Server_AuthCallback(const char* clientIP, const char* serverIP, const char* token) {
+	AuthResponse response;
+	if (token == nullptr) {
+		response.success = false;
+		strncpy(response.failureReason, "No auth token provided", sizeof(response.failureReason));
+		return response;
+	}
+	if (strlen(token) < 10) {
+		response.success = false;
+		strncpy(response.failureReason, "Invalid auth token", sizeof(response.failureReason));
+		return response;
+	}
+	try {
+		auto decoded = jwt::decode(token);
+
+		// Verify expiration.
+		auto exp = decoded.get_payload_claim("e").as_int();
+		auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+		if (exp < now) {
+			response.success = false;
+			strncpy(response.failureReason, "Token is expired", sizeof(response.failureReason));
+			return response;
+		}
+
+		// Create a verifier that checks the ES256 signature using the public key,
+		// and also ensures the token’s "server_ip" claim matches the serverIP.
+		auto verifier = jwt::verify()
+			.allow_algorithm(jwt::algorithm::es256(ecdsa_pub_key, "", "", ""));
+
+		verifier.verify(decoded); // Will throw if verification fails.
+
+		// Extract minimal claims.
+		std::string displayName = decoded.get_payload_claim("dn").as_string();
+		std::string pomeloName = decoded.get_payload_claim("p").as_string();
+
+		// Extra check: the token’s server_ip must match exactly.
+		std::string tokenServerIP = decoded.get_payload_claim("s").as_string();
+		if (tokenServerIP != serverIP && !(!IsDedicatedServer() && (std::string(clientIP) == "loopback" || std::string(clientIP).starts_with("[::1]")))) {
+			response.success = false;
+			strncpy(response.failureReason, "Token server IP mismatch", sizeof(response.failureReason));
+			return response;
+		}
+
+		response.success = true;
+		strncpy(response.discordName, displayName.c_str(), sizeof(response.discordName) - 1);
+		response.discordName[sizeof(response.discordName) - 1] = '\0';
+		strncpy(response.pomeloName, pomeloName.c_str(), sizeof(response.pomeloName) - 1);
+		response.pomeloName[sizeof(response.pomeloName) - 1] = '\0';
+		return response;
+	}
+	catch (const std::exception& e) {
+		response.success = false;
+		strncpy(response.failureReason, e.what(), sizeof(response.failureReason) - 1);
+		response.failureReason[sizeof(response.failureReason) - 1] = '\0';
+		return response;
+	}
+}
+
+
+
+// --- Hook functions for in–game connection ---
+
+// Original function pointer for client connection.
 bool (*oCBaseClientConnect)(
 	__int64 a1,
 	_BYTE* a2,
@@ -1354,6 +1257,8 @@ bool (*oCBaseClientConnect)(
 	CUtlVector<NetMessageCvar_t>* conVars,
 	char* a8,
 	int a9);
+
+// Hooked client connection function.
 bool __fastcall HookedCBaseClientConnect(
 	__int64 a1,
 	_BYTE* a2,
@@ -1367,36 +1272,52 @@ bool __fastcall HookedCBaseClientConnect(
 {
 	if (bFakePlayer)
 		return oCBaseClientConnect(a1, a2, a3, a4, bFakePlayer, a6, conVars, a8, a9);
+
 	static auto bUseOnlineAuth = OriginalCCVar_FindVar(cvarinterface, "delta_online_auth_enable");
 	static auto iSyncUsernameWithDiscord = OriginalCCVar_FindVar(cvarinterface, "delta_discord_username_sync");
 	static auto iHostPort = OriginalCCVar_FindVar(cvarinterface, "hostport");
 	if (bUseOnlineAuth->m_Value.m_nValue != 1)
 		return oCBaseClientConnect(a1, a2, a3, a4, bFakePlayer, a6, conVars, a8, a9);
-	bool bIsLoopback = !IsDedicatedServer() && a4 && reinterpret_cast<bool(__fastcall*)(__int64)>((*(uintptr_t**)(a4))[6])(a4);
+
+	// Determine if this is a loopback connection.
+	bool bIsLoopback = false;
+	if (a4) {
+		// Call engine function to determine loopback status.
+		typedef bool(__fastcall* IsLoopbackFn)(__int64);
+		IsLoopbackFn IsLoopback = reinterpret_cast<IsLoopbackFn>((*((uintptr_t**)a4))[6]);
+		bIsLoopback = !IsLoopback(a4) && !IsDedicatedServer();
+	}
+
 	bool allow = false;
 	if (conVars) {
-		CUtlVector<NetMessageCvar_t>& vector_ptr = *conVars;
-		FOR_EACH_VEC(vector_ptr, current) {
-			if (!strcmp(vector_ptr[current].name, "delta_server_auth_token")) {
+		for (int i = 0; i < conVars->Count(); i++) {
+			NetMessageCvar_t& var = conVars->Element(i);
+			if (strcmp(var.name, "delta_server_auth_token") == 0) {
 				allow = true;
-				const char* v9 = reinterpret_cast<const char * (__fastcall*)(__int64)>((*(uintptr_t**)(a4))[1])(a4);
-				auto res = Server_AuthCallback(v9, (get_public_ip()+":"+ std::to_string(iHostPort->m_Value.m_nValue)).c_str(), vector_ptr[current].value);
+				typedef const char* (__fastcall* GetClientIPFn)(__int64);
+				GetClientIPFn GetClientIP = reinterpret_cast<GetClientIPFn>((*((uintptr_t**)a4))[1]);
+				const char* clientIP = GetClientIP(a4);
+				std::string actualServerIP = get_public_ip() + ":" + std::to_string(iHostPort->m_Value.m_nValue); // if we're not using ports comment this out later
+				AuthResponse res = Server_AuthCallback(clientIP, actualServerIP.c_str(), jwt_compact::expandJWT(var.value).c_str());
 				if (!res.success && !bIsLoopback) {
 					V_snprintf(a8, a9, "%s", res.failureReason);
 					return false;
 				}
 				if (res.success && iSyncUsernameWithDiscord->m_Value.m_nValue != 0) {
-					auto newName = iSyncUsernameWithDiscord->m_Value.m_nValue == 1 ? res.discordName : res.pomeloName;
-					a2 = (uint8*)newName;
-					FOR_EACH_VEC(vector_ptr, current) {
-						if (!strcmp(vector_ptr[current].name, "name")) {
-							vector_ptr.Remove(current);
+					const char* newName = (iSyncUsernameWithDiscord->m_Value.m_nValue == 1) ? res.discordName : res.pomeloName;
+					// Update the client's "name" convar.
+					a2 = (_BYTE*)(newName);
+					for (int j = 0; j < conVars->Count(); j++) {
+						NetMessageCvar_t& innerVar = conVars->Element(j);
+						if (strcmp(innerVar.name, "name") == 0) {
+							conVars->Remove(j);
+							break;
 						}
 					}
 					NetMessageCvar_t newNameVar;
-					strcpy_s(newNameVar.name, sizeof(newNameVar.name), "name");
-					strcpy_s(newNameVar.value, sizeof(newNameVar.value), newName);
-					vector_ptr.AddToTail(newNameVar);
+					strncpy(newNameVar.name, "name", sizeof(newNameVar.name));
+					strncpy(newNameVar.value, newName, sizeof(newNameVar.value));
+					conVars->AddToTail(newNameVar);
 				}
 			}
 		}
@@ -1408,7 +1329,7 @@ bool __fastcall HookedCBaseClientConnect(
 	return oCBaseClientConnect(a1, a2, a3, a4, bFakePlayer, a6, conVars, a8, a9);
 }
 
-
+// Original function pointer for state client connection.
 __int64 (*oCBaseStateClientConnect)(
 	__int64 a1,
 	const char* public_ip,
@@ -1422,11 +1343,7 @@ __int64 (*oCBaseStateClientConnect)(
 	__int64* a10,
 	int a11);
 
-
-typedef void (*SetConvarString_t)(ConVarR1* var, const char* value);
-
-SetConvarString_t SetConvarStringOriginal;
-
+// Hooked state client connection function.
 __int64 __fastcall HookedCBaseStateClientConnect(
 	__int64 a1,
 	const char* public_ip,
@@ -1444,49 +1361,49 @@ __int64 __fastcall HookedCBaseStateClientConnect(
 	if (bUseOnlineAuth->m_Value.m_nValue != 1)
 		return oCBaseStateClientConnect(a1, public_ip, private_ip, num_players, a5, a6, a7, a8, a9, a10, a11);
 
-	auto ms_url = CCVar_FindVar(cvarinterface, "delta_ms_url")->m_Value.m_pszString;
+	// Obtain the master server URL from the engine convars.
+	auto ms_url = OriginalCCVar_FindVar(cvarinterface, "delta_ms_url")->m_Value.m_pszString;
 	httplib::Client cli(ms_url);
-	cli.set_connection_timeout(2);
-	cli.set_address_family(AF_INET);
+	cli.set_connection_timeout(2, 0);
 	cli.set_follow_location(true);
 
-	cli.set_bearer_token_auth(CCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token")->m_Value.m_pszString);
+	// Use the persistent master server auth token.
+	auto persistentToken = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token")->m_Value.m_pszString;
+	cli.set_bearer_token_auth(persistentToken);
 
-	// send a json payload with the server's public ip as ip 
+	// Prepare a JSON payload with the server's public IP.
 	nlohmann::json j;
 	j["ip"] = public_ip;
 
-	httplib::Result result;
-
-	// send the json payload to the master server
-	result = cli.Post("/server-token", j.dump(), "application/json");
+	auto result = cli.Post("/server-token", j.dump(), "application/json");
 	auto var = OriginalCCVar_FindVar(cvarinterface, "delta_server_auth_token");
-
-	if (result) {
-		if (result->status == 200) {
-			auto json = nlohmann::json::parse(result->body);
-			auto token = json["token"].get<std::string>();
-			/*var->m_Value.m_StringLength = token.size() + 1;
-			memcpy(var->m_Value.m_pszString, token.c_str(), token.size());
-			var->m_Value.m_pszString[token.size()] = '\0';*/
-			SetConvarStringOriginal(var, token.c_str());
-
-			// print the length of the var to the console
+	if (result && result->status == 200) {
+		try {
+			auto jsonResponse = nlohmann::json::parse(result->body);
+			std::string token = jsonResponse["token"].get<std::string>();
+			// Update the server auth token convar.
+			SetConvarStringOriginal(var, jwt_compact::compactJWT(token).c_str());
 			Msg("Server Auth Token Length: %d\n", var->m_Value.m_StringLength);
+			auto decoded = jwt::decode(token);
+			std::string pomeloName = decoded.get_payload_claim("p").as_string();
+			SetConvarStringOriginal(OriginalCCVar_FindVar(cvarinterface, "name"), pomeloName.c_str());
+			SetConvarStringOriginal(OriginalCCVar_FindVar(cvarinterface, "hostname"), (pomeloName+"'s R1Delta Server").c_str());
 		}
-		else {
-			Warning("Failed to get token from master server: %s\n", result->body.c_str());
+		catch (const std::exception& e) {
+			Warning("Failed to parse token from master server: %s\n", e.what());
 		}
 	}
 	else {
-		Warning("Failed to get token from master server: %s\n", to_string(result.error()));
+		if (result) {
+			Warning("Failed to get token from master server: %s\n", result->body.c_str());
+		}
+		else {
+			Warning("Failed to get token from master server. Error: %d\n", static_cast<int>(result.error()));
+		}
 	}
-
 	cli.stop();
-
 	return oCBaseStateClientConnect(a1, public_ip, private_ip, num_players, a5, a6, a7, a8, a9, a10, a11);
 }
-
 
 /**
  * Validates and processes the sign-on state from a network buffer.
@@ -1967,7 +1884,7 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	RegisterConCommand("bot_dummy", AddBotDummyConCommand, "Adds a bot.", FCVAR_GAMEDLL | FCVAR_CHEAT);
 	RegisterConVar("delta_ms_url", "ms.r1delta.net", FCVAR_CLIENTDLL, "Url for r1d masterserver");
 	RegisterConVar("delta_server_auth_token", "", FCVAR_USERINFO | FCVAR_SERVER_CANNOT_QUERY | FCVAR_DONTRECORD | FCVAR_PROTECTED | FCVAR_HIDDEN, "Per-server auth token");
-	RegisterConVar("delta_persistent_master_auth_token", "", FCVAR_ARCHIVE | FCVAR_SERVER_CANNOT_QUERY | FCVAR_DONTRECORD | FCVAR_PROTECTED | FCVAR_HIDDEN, "Persistent master server authentication token");
+	RegisterConVar("delta_persistent_master_auth_token", "DEFAULT", FCVAR_ARCHIVE | FCVAR_SERVER_CANNOT_QUERY | FCVAR_DONTRECORD | FCVAR_PROTECTED | FCVAR_HIDDEN, "Persistent master server authentication token");
 	RegisterConVar("delta_persistent_master_auth_token_failed_reason", "", FCVAR_ARCHIVE | FCVAR_SERVER_CANNOT_QUERY | FCVAR_DONTRECORD | FCVAR_PROTECTED | FCVAR_HIDDEN, "Persistent master server authentication token");
 	RegisterConVar("delta_online_auth_enable", "1", FCVAR_GAMEDLL, "Whether to use master server auth");
 	RegisterConVar("delta_discord_username_sync", "2", FCVAR_GAMEDLL, "Controls if player names are synced with Discord: 0=Off,1=Norm,2=Pomelo");

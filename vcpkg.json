@@ -30,7 +30,8 @@
       "name": "opusfile",
       "version>=": "0.12+20221121#1"
     },
-    "aklomp-base64"
+    "aklomp-base64",
+    "zstd"
   ],
   "overrides": [
     {

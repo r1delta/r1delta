@@ -1,268 +1,389 @@
-#include "compression.h"
+// r1dc_hooks.cpp
+//
+// This file implements the r1dc_* hooks that replace the original LZHAM routines with
+// a ZSTD–based decompressor that uses internal ring buffers for both input and output.
+// Compressed data produced by packedstore.cpp is assumed to begin with an 8–byte marker
+// (R1D_marker). If the marker is found, the code uses the ZSTD streaming API with a ring
+// buffer to decompress the data. Otherwise, it falls back to the original LZHAM code.
+//
+// Note: The function ZSTD_isFrameDone is not part of the official ZSTD API. Instead, this
+// implementation sets a local flag when ZSTD_decompressStream returns 0 (indicating the frame
+// is complete).
+
 #include <cstdint>
 #include <cstdio>
-
-#include "core.h"
+#include <cstdlib>
+#include <cstring>
+#include <cmath>
+#include <algorithm>  // for (std::min)
+#include <zstd.h>
+#include "MinHook.h"  // Adjust include path as needed
 #include "audio.h"
-#include <MinHook.h>
-//#include "thirdparty/zstd/zstd.h"
 
-extern uintptr_t G_filesystem_stdio;
+// --------------------------------------------------------------------------
+// Compiler-specific "force inline" macro
+// --------------------------------------------------------------------------
+#if defined(_MSC_VER)
+#define R1DC_FORCE_INLINE __forceinline
+#elif defined(__GNUC__) || defined(__clang__)
+#define R1DC_FORCE_INLINE inline __attribute__((always_inline))
+#else
+#define R1DC_FORCE_INLINE inline
+#endif
 
-// R1DELTA
-constexpr uint64_t R1D_marker = 18388560042537298;
-constexpr uint32_t R1D_marker_32 = 'R1D';
+// --------------------------------------------------------------------------
+// Constants and Definitions
+// --------------------------------------------------------------------------
 
-void* lzham_decompressor_init;
-void* lzham_decompressor_reinit;
-void* lzham_decompressor_deinit;
-void* lzham_decompressor_decompress;
+constexpr uint64_t R1D_marker = 0x5244315f5f4d4150; // Marker written by packedstore.cpp
 
-// TODO(mrsteyk): figure out a way to hotswap algorithms based on input?
-//                maybe implement my marker idea or wait forever?
-#define R1DC_USE_ZS1 0
+// Define ring buffer sizes (must be powers of two)
+static constexpr size_t R1DC_INBUF_SIZE = 1 << 20;
+static constexpr size_t R1DC_OUTBUF_SIZE = 1 << 20;
 
-constexpr size_t PERF_METRICS_SIZE = 4096;
-#define PERF_METRIC_CLAMP( x ) ((x + 1ull) < PERF_METRICS_SIZE ? (x + 1ull) : PERF_METRICS_SIZE)
+// --------------------------------------------------------------------------
+// Internal context for r1dc hooks
+// --------------------------------------------------------------------------
+struct r1dc_context_t
+{
+    // ZSTD streaming decompression context.
+    ZSTD_DStream* zds;
+    bool zstd_inited;  // true if the ZSTD DStream has been initialized
 
-struct PerfMetrics {
-	uint64_t metrics[PERF_METRICS_SIZE]{ 0 };
-	uint32_t idx = -1;
+    // Ring buffer for input.
+    uint8_t inputRing[R1DC_INBUF_SIZE];
+    // Monotonic counters and data count.
+    size_t inWritePos;   // total bytes written into the input ring
+    size_t inReadPos;    // total bytes consumed from the input ring
+    size_t inDataCount;  // = inWritePos - inReadPos
+
+    // Ring buffer for output.
+    uint8_t outputRing[R1DC_OUTBUF_SIZE];
+    size_t outWritePos;  // total bytes written into the output ring
+    size_t outReadPos;   // total bytes consumed from the output ring
+    size_t outDataCount; // = outWritePos - outReadPos
+
+    // Marker detection.
+    bool     isZstdChunk;   // true if marker has been detected
+    uint64_t chunkMarker;   // stores marker (should equal R1D_marker)
 };
 
-PerfMetrics r1dc_decompress_speeds;
-size_t r1dc_decompress_sizes[PERF_METRICS_SIZE];
+// --------------------------------------------------------------------------
+// Helper functions: ring buffer utilities.
+// Since our ring buffers are powers of two, we can use bitmasking.
+// --------------------------------------------------------------------------
 
-static void
-fill_mean_std(uint64_t metrics[PERF_METRICS_SIZE], uint32_t idx, float div, float* mean_, float* stddev_)
+// Returns a pointer to the contiguous region starting at 'pos' in the ring buffer.
+// 'dataCount' is the number of valid bytes stored in the ring.
+// The function sets 'contigLen' to the length of the contiguous segment.
+R1DC_FORCE_INLINE uint8_t* RingBuffer_GetContiguous(uint8_t* ring, size_t ringSize, size_t pos,
+    size_t dataCount, size_t& contigLen)
 {
-	auto last = PERF_METRIC_CLAMP(idx);
-
-	float sum = 0;
-	for (size_t i = 0; i < last; ++i)
-	{
-		sum += metrics[i] / div;
-	}
-	float mean = sum / last;
-	float stddev = 0;
-	for (size_t i = 0; i < last; ++i)
-	{
-		float e = metrics[i] / div;
-		float d = (e - mean);
-		stddev += d * d;
-	}
-	stddev = sqrtf(stddev / last);
-
-	*mean_ = mean;
-	*stddev_ = stddev;
+    size_t index = pos & (ringSize - 1);
+    contigLen = (std::min)(dataCount, ringSize - index);
+    return ring + index;
 }
 
-void* r1dc_init(void* params) {
-	ZoneScoped;
-
-#if R1DC_USE_ZS1
-	return ZSTD_createDCtx();
-#else
-	return reinterpret_cast<decltype(&r1dc_init)>(lzham_decompressor_init)(params);
-#endif
-}
-
-__int64 r1dc_reinit(void* p) {
-#if R1DC_USE_ZS1
-	// TODO(mrsteyk): double check if DCtx doesn't need resetting since streaming API is separate
-	return 0;
-#else
-	return reinterpret_cast<decltype(&r1dc_reinit)>(lzham_decompressor_reinit)(p);
-#endif
-}
-
-__int64 r1dc_deinit(void* p) {
-	ZoneScoped;
-
-#if R1DC_USE_ZS1
-	// NOTE(mrsteyk): did I tell you that I hate C++?
-	ZSTD_freeDCtx((ZSTD_DCtx*)p);
-	return 0;
-#else
-	return reinterpret_cast<decltype(&r1dc_deinit)>(lzham_decompressor_deinit)(p);
-#endif
-}
-
-__int64 r1dc_decompress(void* p, void* pIn_buf, size_t* pIn_buf_size, void* pOut_buf, size_t* pOut_buf_size, int no_more_input_bytes_flag) {
-	ZoneScoped;
-
-#if R1DC_USE_ZS1
-	auto ret = 0;
-	// NOTE(mrsteyk): did I tell you that I hate C++?
-	auto size = ZSTD_decompressDCtx((ZSTD_DCtx*)p, pOut_buf, *pOut_buf_size, pIn_buf, *pIn_buf_size);
-	if (!ZSTD_isError(size)) {
-		*pOut_buf_size = size;
-		ret = -1;
-	}
-	return ret;
-#else
-#if 0
-	const float div = g_PerformanceFrequency / 1000;
-
-	LARGE_INTEGER start, end;
-	QueryPerformanceCounter(&start);
-	auto ret = reinterpret_cast<decltype(&r1dc_decompress)>(lzham_decompressor_decompress)(p, pIn_buf, pIn_buf_size, pOut_buf, pOut_buf_size, no_more_input_bytes_flag);
-	QueryPerformanceCounter(&end);
-	auto dur = end.QuadPart - start.QuadPart;
-
-	auto idx = _InterlockedIncrement(&r1dc_decompress_speeds.idx);
-	r1dc_decompress_speeds.metrics[idx % PERF_METRICS_SIZE] = dur;
-	
-	auto out_size = *pOut_buf_size;
-	r1dc_decompress_sizes[idx % PERF_METRICS_SIZE] = out_size;
-
-	if (idx % 512 == 0) {
-		float mean, stddev;
-		fill_mean_std(r1dc_decompress_speeds.metrics, idx, div, &mean, &stddev);
-
-		float mean_mb = 0;
-		auto last = PERF_METRIC_CLAMP(idx);
-		for (size_t i = 0; i < last; ++i)
-		{
-			mean_mb += r1dc_decompress_sizes[i] / 1024.f / 1024.f;
-		}
-		mean_mb /= last;
-		float mean_mbs = (mean * 1000) / mean_mb;
-
-		char tmp[128];
-		auto ms = dur / div;
-
-		float mb = out_size / 1024.f / 1024.f;
-		float mbs = (ms * 1000.f) / mb;
-
-		sprintf_s(tmp, "Decomp %.2fmb: %.2fms (%.2fmb/s) | mean %.2fms (%2.fmb/s) | std %.2fms\n", mb, ms, mbs, mean, mean_mbs, stddev);
-		OutputDebugStringA(tmp);
-	}
-
-	return ret;
-#else
-	auto ret =  reinterpret_cast<decltype(&r1dc_decompress)>(lzham_decompressor_decompress)(p, pIn_buf, pIn_buf_size, pOut_buf, pOut_buf_size, no_more_input_bytes_flag);
-	TracyPlot("r1dc_decompress_memory_in", (int64_t)*pIn_buf_size);
-	TracyPlot("r1dc_decompress_memory_out", (int64_t)*pOut_buf_size);
-
-	return ret;
-#endif
-#endif
-}
-
-PerfMetrics open_read_speeds;
-
-void* OpenForRead_o = nullptr;
-uintptr_t __fastcall OpenForRead_hk(
-	uintptr_t a1,
-	const char* filepath,
-	const char* mode,
-	const char* pathid,
-	uint64_t a5,
-	uint64_t* a6,
-	uint64_t a7)
+// Append 'len' bytes from src into the ring buffer. Update writePos and dataCount.
+R1DC_FORCE_INLINE void RingBuffer_Append(uint8_t* ring, size_t ringSize,
+    const uint8_t* src, size_t len,
+    size_t& writePos, size_t& dataCount)
 {
-#if 0
-	//fprintf(stdout, "OpenForRead: [%s]%s(%s) a7=%llX\n", pathid ? pathid : "NULLPTR", filepath, mode ? mode : "NULLMODE", a7);
-	
-	const float div = g_PerformanceFrequency / 1000;
-	
-	LARGE_INTEGER start, end;
-	QueryPerformanceCounter(&start);
-	// 144 byte allocations...
-	auto cfh = reinterpret_cast<decltype(&OpenForRead_hk)>(OpenForRead_o)(a1, filepath, mode, pathid, a5, a6, a7);
-	QueryPerformanceCounter(&end);
-	auto dur = end.QuadPart - start.QuadPart;
-
-	auto idx = _InterlockedIncrement(&open_read_speeds.idx);
-	open_read_speeds.metrics[idx % PERF_METRICS_SIZE] = dur;
-
-#if 0
-	float sum = 0;
-	auto last = (idx + 1ull) < open_read_speeds_count ? (idx + 1ull) : open_read_speeds_count;
-	for (size_t i = 0; i < last; ++i)
-	{
-		sum += open_read_speeds[i] / div;
-	}
-	float mean = sum / last;
-	float stddev = 0;
-	for (size_t i = 0; i < last; ++i)
-	{
-		float e = open_read_speeds[i] / div;
-		float d = (e - mean);
-		stddev += d * d;
-	}
-	stddev = sqrtf(stddev/last);
-#else
-	float mean, stddev;
-	fill_mean_std(open_read_speeds.metrics, idx, div, &mean, &stddev);
-#endif
-
-	char tmp[128];
-	sprintf_s(tmp, "OpenForRead: %.2fms | mean %.2fms | std %.2fms\n", dur/div, mean, stddev);
-	OutputDebugStringA(tmp);
-
-	return cfh;
-#endif
-	ZoneScoped;
-	ZoneTextF("Open: [%s]%s(%s)", pathid ? pathid : "(NULL)", filepath, mode ? mode : "(NULL)");
-	return reinterpret_cast<decltype(&OpenForRead_hk)>(OpenForRead_o)(a1, filepath, mode, pathid, a5, a6, a7);
+    size_t remaining = len;
+    while (remaining > 0)
+    {
+        size_t index = writePos & (ringSize - 1);
+        size_t space = ringSize - index;
+        size_t toCopy = (std::min)(remaining, space);
+        std::memcpy(ring + index, src, toCopy);
+        src += toCopy;
+        writePos += toCopy;
+        dataCount += toCopy;
+        remaining -= toCopy;
+    }
 }
 
-// NOTE(mrsteyk): idk if name is correct...
-void* CPackedStore__ReadData_o = nullptr;
-__int64 __fastcall CPackedStore__ReadData_hk(
-	__int64 a1,
-	unsigned int* a2,
-	char* a3,
-	signed __int64 a4,
-	uint64_t* a5)
+// Consume (remove) 'len' bytes from the ring buffer by advancing the read pointer.
+R1DC_FORCE_INLINE void RingBuffer_Consume(size_t len, size_t& readPos, size_t& dataCount)
 {
-	ZoneScoped;
-	ZoneTextF("%p", a5);
-
-	auto ret = reinterpret_cast<decltype(&CPackedStore__ReadData_hk)>(CPackedStore__ReadData_o)(a1, a2, a3, a4, a5);
-
-	return ret;
+    readPos += len;
+    dataCount -= len;
 }
-void* CPackedStore__CachedRead_o = nullptr;
-__int64 __fastcall CPackedStore__CachedRead_hk(
-	__int64 a1,
-	__int64 a2,
-	unsigned int* a3,
-	unsigned __int64 a4,
-	char* a5,
-	__int64(__fastcall* a6)(__int64))
+
+// --------------------------------------------------------------------------
+// Original function pointer types and globals for fallback.
+// (These will be set by MinHook when we install our hooks.)
+// --------------------------------------------------------------------------
+typedef void* (*r1dc_init_t)(void* params);
+typedef __int64 (*r1dc_reinit_t)(void* p);
+typedef __int64 (*r1dc_deinit_t)(void* p);
+typedef __int64 (*r1dc_decompress_t)(
+    void* p,
+    void* pIn_buf,
+    size_t* pIn_buf_size,
+    void* pOut_buf,
+    size_t* pOut_buf_size,
+    int no_more_input_bytes_flag
+    );
+
+void* original_lzham_decompressor_init = nullptr;
+void* original_lzham_decompressor_reinit = nullptr;
+void* original_lzham_decompressor_deinit = nullptr;
+void* original_lzham_decompressor_decompress = nullptr;
+
+// --------------------------------------------------------------------------
+// r1dc hook implementations with ring buffer logic.
+// --------------------------------------------------------------------------
+
+// r1dc_init: Allocate and initialize a new r1dc context.
+void* r1dc_init(void* /*params*/)
 {
-	ZoneScoped;
+    r1dc_context_t* ctx = new r1dc_context_t;
+    std::memset(ctx, 0, sizeof(*ctx));
 
-	auto ret = reinterpret_cast<decltype(&CPackedStore__CachedRead_hk)>(CPackedStore__CachedRead_o)(a1, a2, a3, a4, a5, a6);
+    ctx->zds = ZSTD_createDStream();
+    if (!ctx->zds)
+    {
+        fprintf(stderr, "[r1dc] Failed to create ZSTD DStream\n");
+        delete ctx;
+        return nullptr;
+    }
+    ctx->zstd_inited = false;
+    ctx->isZstdChunk = false;
+    ctx->chunkMarker = 0ULL;
 
-	ZoneValue(ret);
-
-	return ret;
+    return ctx;
 }
 
-void InitCompressionHooks() {
-#if R1DC_USE_ZS1
-	auto fs = G_filesystem_stdio;
-	MH_CreateHook(LPVOID(fs + 0x75380), r1dc_init, &lzham_decompressor_init);
-	MH_CreateHook(LPVOID(fs + 0x75390), r1dc_reinit, &lzham_decompressor_reinit);
-	MH_CreateHook(LPVOID(fs + 0x753A0), r1dc_deinit, &lzham_decompressor_deinit);
-	MH_CreateHook(LPVOID(fs + 0x753B0), r1dc_decompress, &lzham_decompressor_decompress);
-	MH_EnableHook(MH_ALL_HOOKS);
-#endif
-	auto fs = G_filesystem_stdio;
-	MH_CreateHook(LPVOID(fs + 0x23860), Hooked_CBaseFileSystem__SyncRead, reinterpret_cast<LPVOID*>(&Original_CBaseFileSystem__SyncRead));
-	//~ mrsteyk: profile...
-	if constexpr (BUILD_PROFILE)
-	{
-		auto open_for_read_ptr = LPVOID(fs + 0x19C00);
-		MH_CreateHook(open_for_read_ptr, OpenForRead_hk, &OpenForRead_o);
-		MH_CreateHook(LPVOID(fs + 0x753B0), r1dc_decompress, &lzham_decompressor_decompress);
-		MH_CreateHook(LPVOID(fs + 0x72410), CPackedStore__CachedRead_hk, &CPackedStore__CachedRead_o);
-		MH_CreateHook(LPVOID(fs + 0x6BD20), CPackedStore__ReadData_hk, &CPackedStore__ReadData_o);
-	}
-	MH_EnableHook(MH_ALL_HOOKS);
+// r1dc_reinit: Reset the context for a new compressed chunk.
+__int64 r1dc_reinit(void* p)
+{
+    if (!p) return 0;
+    r1dc_context_t* ctx = static_cast<r1dc_context_t*>(p);
 
+    ctx->inWritePos = 0;
+    ctx->inReadPos = 0;
+    ctx->inDataCount = 0;
+
+    ctx->outWritePos = 0;
+    ctx->outReadPos = 0;
+    ctx->outDataCount = 0;
+
+    ctx->zstd_inited = false;
+    ctx->isZstdChunk = false;
+    ctx->chunkMarker = 0ULL;
+
+    if (ctx->zds)
+    {
+        ZSTD_initDStream(ctx->zds);
+    }
+    return 0;
+}
+
+// r1dc_deinit: Free the context.
+__int64 r1dc_deinit(void* p)
+{
+    if (!p) return 0;
+    r1dc_context_t* ctx = static_cast<r1dc_context_t*>(p);
+    if (ctx->zds)
+        ZSTD_freeDStream(ctx->zds);
+    delete ctx;
+    return 0;
+}
+
+// r1dc_decompress: Decompress data using ring buffer logic and ZSTD streaming.
+// The caller provides input data (pIn_buf with size *pIn_buf_size) and an output
+// buffer (pOut_buf with capacity *pOut_buf_size). On success, the output size is
+// updated and -1 is returned.
+__int64 r1dc_decompress(
+    void* p,
+    void* pIn_buf,
+    size_t* pIn_buf_size,
+    void* pOut_buf,
+    size_t* pOut_buf_size,
+    int no_more_input_bytes_flag)
+{
+    if (!p) return 0;
+    r1dc_context_t* ctx = static_cast<r1dc_context_t*>(p);
+
+    uint8_t* callerIn = static_cast<uint8_t*>(pIn_buf);
+    size_t   callerInSize = *pIn_buf_size;
+
+    // ----------------------------------------------------------------------
+    // Step 1: If we have not yet detected the marker, check the first 8 bytes.
+    //         We'll do an unaligned read for speed (assuming x86/x64).
+    // ----------------------------------------------------------------------
+    if (!ctx->isZstdChunk)
+    {
+        if (callerInSize < sizeof(uint64_t))
+        {
+            // Not enough input to check the marker.
+            return 0;
+        }
+
+        // Faster unaligned read for the marker:
+        uint64_t markerVal = *reinterpret_cast<const uint64_t*>(callerIn);
+        if (markerVal == R1D_marker)
+        {
+            ctx->isZstdChunk = true;
+            ctx->chunkMarker = markerVal;
+            // Skip the marker bytes.
+            callerIn += sizeof(uint64_t);
+            callerInSize -= sizeof(uint64_t);
+        }
+        else
+        {
+            // Not a ZSTD–compressed chunk; fallback to the original LZHAM decompressor.
+            typedef __int64 (*orig_decompress_t)(void*, void*, size_t*, void*, size_t*, int);
+            orig_decompress_t orig =
+                reinterpret_cast<orig_decompress_t>(original_lzham_decompressor_decompress);
+
+            return orig(p, pIn_buf, pIn_buf_size,
+                pOut_buf, pOut_buf_size,
+                no_more_input_bytes_flag);
+        }
+    }
+
+    // ----------------------------------------------------------------------
+    // Step 2: Append all caller input data to our internal input ring buffer.
+    // ----------------------------------------------------------------------
+    if (callerInSize > 0)
+    {
+        // (We assume there's enough free space in the ring.)
+        RingBuffer_Append(ctx->inputRing, R1DC_INBUF_SIZE,
+            callerIn, callerInSize,
+            ctx->inWritePos, ctx->inDataCount);
+        // Mark caller input as fully consumed.
+        *pIn_buf_size = 0;
+    }
+
+    // ----------------------------------------------------------------------
+    // Step 3: Initialize the ZSTD stream if not already done.
+    // ----------------------------------------------------------------------
+    if (!ctx->zstd_inited)
+    {
+        size_t initRes = ZSTD_initDStream(ctx->zds);
+        if (ZSTD_isError(initRes))
+        {
+            fprintf(stderr, "[r1dc] ZSTD_initDStream error: %s\n", ZSTD_getErrorName(initRes));
+            return 0;
+        }
+        ctx->zstd_inited = true;
+    }
+
+    // ----------------------------------------------------------------------
+    // Step 4: Decompression loop.
+    // ----------------------------------------------------------------------
+    bool frameComplete = false;
+    while (ctx->inDataCount > 0 && (ctx->outDataCount < R1DC_OUTBUF_SIZE))
+    {
+        // Get contiguous region from the input ring.
+        size_t inContig = 0;
+        uint8_t* inPtr = RingBuffer_GetContiguous(ctx->inputRing, R1DC_INBUF_SIZE,
+            ctx->inReadPos, ctx->inDataCount,
+            inContig);
+        ZSTD_inBuffer inBuf = { inPtr, inContig, 0 };
+
+        // Get contiguous free space in the output ring.
+        size_t outContig = 0;
+        uint8_t* outPtr = RingBuffer_GetContiguous(ctx->outputRing, R1DC_OUTBUF_SIZE,
+            ctx->outWritePos,
+            (R1DC_OUTBUF_SIZE - ctx->outDataCount),
+            outContig);
+        ZSTD_outBuffer outBuf = { outPtr, outContig, 0 };
+
+        // Decompress
+        size_t ret = ZSTD_decompressStream(ctx->zds, &outBuf, &inBuf);
+        if (ZSTD_isError(ret))
+        {
+            fprintf(stderr, "[r1dc] Decompression error: %s\n", ZSTD_getErrorName(ret));
+            return 0;
+        }
+
+        // Update input ring: consumed inBuf.pos bytes
+        RingBuffer_Consume(inBuf.pos, ctx->inReadPos, ctx->inDataCount);
+
+        // Update output ring: produced outBuf.pos bytes
+        ctx->outWritePos += outBuf.pos;
+        ctx->outDataCount += outBuf.pos;
+
+        if (ret == 0)
+        {
+            // The current frame is complete.
+            frameComplete = true;
+            break;
+        }
+
+        // If no progress was made, break to avoid infinite loop.
+        if (inBuf.pos == 0 && outBuf.pos == 0)
+            break;
+    }
+
+    // ----------------------------------------------------------------------
+    // Step 5: Copy decompressed data from the output ring buffer to caller’s buffer.
+    // ----------------------------------------------------------------------
+    uint8_t* callerOut = static_cast<uint8_t*>(pOut_buf);
+    size_t   callerOutCap = *pOut_buf_size;
+    size_t   copied = 0;
+
+    while (copied < callerOutCap && ctx->outDataCount > 0)
+    {
+        size_t contig = 0;
+        uint8_t* outContigPtr = RingBuffer_GetContiguous(ctx->outputRing, R1DC_OUTBUF_SIZE,
+            ctx->outReadPos, ctx->outDataCount,
+            contig);
+        size_t toCopy = (std::min)(callerOutCap - copied, contig);
+        std::memcpy(callerOut + copied, outContigPtr, toCopy);
+        copied += toCopy;
+        RingBuffer_Consume(toCopy, ctx->outReadPos, ctx->outDataCount);
+    }
+    *pOut_buf_size = copied;
+
+    // ----------------------------------------------------------------------
+    // Step 6: If the decompression frame is complete (frameComplete == true)
+    //         and no data remains in the ring buffers, return -1.
+    //         Otherwise, return 0.
+    // ----------------------------------------------------------------------
+    if (frameComplete && (ctx->inDataCount == 0) && (ctx->outDataCount == 0))
+        return -1;
+    else
+        return 0;
+}
+
+// --------------------------------------------------------------------------
+// Hook Registration: Replace the original LZHAM functions with our r1dc hooks.
+// (Adjust the address offsets as appropriate for your module.)
+// --------------------------------------------------------------------------
+void InitCompressionHooks()
+{
+    extern uintptr_t G_filesystem_stdio; // Defined elsewhere in your engine
+    auto fs = G_filesystem_stdio;
+
+    MH_CreateHook(
+        reinterpret_cast<LPVOID>(fs + 0x75380),
+        r1dc_init,
+        &original_lzham_decompressor_init
+    );
+    MH_CreateHook(
+        reinterpret_cast<LPVOID>(fs + 0x75390),
+        r1dc_reinit,
+        &original_lzham_decompressor_reinit
+    );
+    MH_CreateHook(
+        reinterpret_cast<LPVOID>(fs + 0x753A0),
+        r1dc_deinit,
+        &original_lzham_decompressor_deinit
+    );
+    MH_CreateHook(
+        reinterpret_cast<LPVOID>(fs + 0x753B0),
+        r1dc_decompress,
+        &original_lzham_decompressor_decompress
+    );
+
+    // Example of hooking another function for reading, if you use it:
+    // MH_CreateHook(LPVOID(fs + 0x23860),
+    //               Hooked_CBaseFileSystem__SyncRead,
+    //               reinterpret_cast<LPVOID*>(&Original_CBaseFileSystem__SyncRead));
+
+    MH_EnableHook(MH_ALL_HOOKS);
 }

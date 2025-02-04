@@ -390,6 +390,7 @@ bool ScanFileForOggS(const char* filepath, const __m128i& pattern, char* buffer,
 }
 
 int RunAudioInstallerIfNecessary() {
+	return false;
 	if (std::filesystem::exists("vpk/audio_done.txt")) {
 		return 0;
 	}

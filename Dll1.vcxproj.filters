@@ -270,6 +270,9 @@
     <ClInclude Include="audio.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="jwt_compact.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">
