@@ -1529,52 +1529,52 @@ void StartDiscordAuth(const CCommand& args) {
 	auto url = "https://discord.com/oauth2/authorize?client_id=1304910395013595176&response_type=code&redirect_uri=http%3A%2F%2Flocalhost%3A5555%2Fdiscord-auth&scope=identify";
 	int result = (int)ShellExecuteA(NULL, "open", url, NULL, NULL, SW_SHOWNORMAL);
 
-	static bool done = false;
-	// spin up a httplib server
-	httplib::Server svr;
-	svr.Get("/discord-auth", [&svr](const httplib::Request& req, httplib::Response& res) {
-		// read the query string
-		auto query = req.params;
-		auto code = query.find("code");
-		if (code == query.end()) {
-			res.set_content("Invalid auth token", "text/plain");
-			return;
-		}
+	std::thread([]() {
+		httplib::Server svr;
+		svr.Get("/discord-auth", [&svr](const httplib::Request& req, httplib::Response& res) {
+			// read the query string
+			auto query = req.params;
+			auto code = query.find("code");
+			if (code == query.end()) {
+				res.set_content("Invalid auth token", "text/plain");
+				return;
+			}
 
-		auto discord_code = code->second;
-		auto ms_url = CCVar_FindVar(cvarinterface, "delta_ms_url")->m_Value.m_pszString;
-		httplib::Client cli(ms_url);
-		cli.set_connection_timeout(2);
-		cli.set_address_family(AF_INET);
-		cli.set_follow_location(true);
-		auto result = cli.Get(std::format("/discord-auth?code={}", discord_code));
-		nlohmann::json j;
-		try {
-			j = nlohmann::json::parse(result->body);
-		}
-		catch (const std::exception& e) {
-			res.set_content("Invalid auth token", "text/plain");
+			auto discord_code = code->second;
+			auto ms_url = CCVar_FindVar(cvarinterface, "delta_ms_url")->m_Value.m_pszString;
+			httplib::Client cli(ms_url);
+			cli.set_connection_timeout(2);
+			cli.set_address_family(AF_INET);
+			cli.set_follow_location(true);
+			auto result = cli.Get(std::format("/discord-auth?code={}", discord_code));
+			nlohmann::json j;
+			try {
+				j = nlohmann::json::parse(result->body);
+			}
+			catch (const std::exception& e) {
+				res.set_content("Invalid auth token", "text/plain");
+				svr.stop();
+				return;
+			}
+			auto errorVar = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token_failed_reason");
+
+			if (j.contains("error")) {
+				res.set_content(j["error"].get<std::string>(), "text/plain");
+				SetConvarStringOriginal(errorVar, j["error"].get<std::string>().c_str());
+				svr.stop();
+				return;
+			}
+			auto token_j = j["token"].get<std::string>();
+			auto v = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token");
+			SetConvarStringOriginal(v, token_j.c_str());
+			res.set_content("Success", "text/plain");
+			SetConvarStringOriginal(errorVar, "");
 			svr.stop();
 			return;
-		}
-		auto errorVar = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token_failed_reason");
+			});
 
-		if (j.contains("error")) {
-			res.set_content(j["error"].get<std::string>(), "text/plain");
-			SetConvarStringOriginal(errorVar,j["error"].get<std::string>().c_str());
-			svr.stop();
-			return;
-		}
-		auto token_j = j["token"].get<std::string>();
-		auto v = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token");
-		SetConvarStringOriginal(v,token_j.c_str());
-		res.set_content("Success", "text/plain");
-		SetConvarStringOriginal(errorVar, "");
-		svr.stop();
-		return;
-	});
-
-	svr.listen("localhost", 5555);
+		svr.listen("localhost", 5555);
+		}).detach();
 	
 	return;
 }
