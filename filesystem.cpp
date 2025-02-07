@@ -177,31 +177,63 @@ void replace_underscore(char* str) {
     char* pos = strstr(str, "_dir");
     if (pos) *pos = '\0';
 }
-int fs_sprintf_hook(char* Buffer, const char* Format, ...) {
-    va_list args;
-    va_start(args, Format);
-
-
-    if (strcmp_static(Format, "%s_%03d.vpk") == 0) {
-        const char* a1 = va_arg(args, const char*);
-        if (strstr(a1, "singlechunk") != nullptr) {
-            va_end(args);
-
-			void* rettocheckformorefiles = (void*)(G_filesystem_stdio + IsDedicatedServer() ? 0x1783EB : 0x6D6CB);
-            if (rettocheckformorefiles == _ReturnAddress()) {
-                Buffer[0] = 0;
-                return 0;// sprintf(Buffer, "%s", "DOESNOTEXIST.vpk");
-            }
-            return sprintf(Buffer, "%s_dir.vpk", a1);
-        }
-        va_end(args);
-        va_start(args, Format);
-    }
-
-    int result = vsprintf(Buffer, Format, args);
-    va_end(args);
-    return result;
+// Helper function to check if a file exists.
+static bool file_exists(const char* path)
+{
+	FILE* f = fopen(path, "r");
+	if (f)
+	{
+		fclose(f);
+		return true;
+	}
+	return false;
 }
+
+// Our modified hook.
+int fs_sprintf_hook(char* Buffer, const char* Format, ...) {
+	va_list args;
+	va_start(args, Format);
+
+	if (strcmp_static(Format, "%s_%03d.vpk") == 0) {
+		// Pull the two parameters.
+		const char* a1 = va_arg(args, const char*);
+		int chunk = va_arg(args, int);
+
+		// Special branch for chunk 1337.
+		if (chunk >= 0x1337) {
+			va_end(args);
+			// Perform the same check-for-more-files as in the singlechunk branch.
+			void* rettocheckformorefiles = (void*)(G_filesystem_stdio + (IsDedicatedServer() ? 0x1783EB : 0x6D6CB));
+			if (rettocheckformorefiles == _ReturnAddress()) {
+				Buffer[0] = 0;
+				return 0;
+			}
+			// If we're dedicated *and* the file exists, use the server filename. (Server VPKs don't work yet. Will fix tomorrow)
+			//if (IsDedicatedServer() && file_exists("vpk/server_mp_delta_common.bsp.pak000_000.vpk"))
+			//	return sprintf(Buffer, "%s", "vpk/server_mp_delta_common.bsp.pak000_000.vpk");
+			//else
+				return sprintf(Buffer, "%s", "vpk/client_mp_delta_common.bsp.pak000_000.vpk");
+		}
+		// Existing branch: if the string contains "singlechunk", do the original work.
+		if (strstr(a1, "singlechunk") != nullptr) {
+			va_end(args);
+			void* rettocheckformorefiles = (void*)(G_filesystem_stdio + (IsDedicatedServer() ? 0x1783EB : 0x6D6CB));
+			if (rettocheckformorefiles == _ReturnAddress()) {
+				Buffer[0] = 0;
+				return 0;
+			}
+			return sprintf(Buffer, "%s_dir.vpk", a1);
+		}
+		// For any other case we reinitialize the va_list so that the normal vsprintf gets all parameters.
+		va_end(args);
+		va_start(args, Format);
+	}
+
+	int result = vsprintf(Buffer, Format, args);
+	va_end(args);
+	return result;
+}
+
 
 typedef __int64 (*AddVPKFileType)(IFileSystem* fileSystem, char* a2, char** a3, char a4, int a5, char a6);
 AddVPKFileType AddVPKFileOriginal;

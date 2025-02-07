@@ -178,6 +178,12 @@ namespace FSOperations {
             )(innerThis, filename, pathID);
     }
 }
+// A simple helper to check the header.
+static bool IsOpusFile(const std::vector<unsigned char>& fileData)
+{
+    // An Opus (Ogg) file always begins with "OggS"
+    return (fileData.size() >= 4 && std::memcmp(fileData.data(), "OggS", 4) == 0);
+}
 
 // --------------------------------------------------------------------
 // Helpers from your snippet
@@ -189,12 +195,6 @@ static bool EndsWithWav(const char* filename) {
     auto ext = fn.substr(fn.size() - 4);
     for (auto& c : ext) c = tolower((unsigned char)c);
     return (ext == ".wav");
-}
-
-// This version of MakeOpusFilename returns a single opus filename (without a track index)
-static std::string MakeOpusFilename(const char* wavFile) {
-    std::string fn(wavFile);
-    return fn.substr(0, fn.size() - 4) + ".opus";
 }
 
 // --------------------------------------------------------------------
@@ -210,144 +210,89 @@ static CRITICAL_SECTION* pAsyncOpenedFilesCriticalSection;
 static std::uint64_t pAsyncOpenedFilesTable;
 static void* pFileAccessLoggingPointer;
 
-// --------------------------------------------------------------------
-// Original read handler (unchanged from your snippet)
-// --------------------------------------------------------------------
-__int64 HandleOriginalRead(CBaseFileSystem* filesystem, FileAsyncRequest_t* request)
-{
-    AsyncOpenedFile_t* pHeldFile = nullptr;
-    if (request->hSpecificAsyncFile != (void*)FS_INVALID_ASYNC_FILE) {
-        EnterCriticalSection_(pAsyncOpenedFilesCriticalSection);
-        std::uint64_t entryBase = pAsyncOpenedFilesTable + (24ULL * ((__int64)request->hSpecificAsyncFile & 0xFFFF));
-        std::uint64_t ptrStruct = *reinterpret_cast<std::uint64_t*>(entryBase + 16ULL);
-        if (ptrStruct) {
-            _InterlockedIncrement(reinterpret_cast<volatile long*>(ptrStruct + 8ULL));
-            pHeldFile = reinterpret_cast<AsyncOpenedFile_t*>(ptrStruct);
-        }
-        LeaveCriticalSection_(pAsyncOpenedFilesCriticalSection);
-    }
-
-    FileHandle_t hFile = pHeldFile ? *reinterpret_cast<FileHandle_t*>(reinterpret_cast<std::uint64_t>(pHeldFile) + 16) : nullptr;
-    if (!pHeldFile || !hFile) {
-        hFile = FSOperations::OpenFile(filesystem, request->pszFilename, "rb", 0, request->pszPathID, 0);
-        if (pHeldFile) {
-            *reinterpret_cast<FileHandle_t*>(reinterpret_cast<std::uint64_t>(pHeldFile) + 16) = hFile;
-        }
-    }
-
-    __int64 originalResult;
-    if (!hFile) {
-        // File open error
-        if (request->pfnCallback) {
-            auto criticalSection = reinterpret_cast<LPCRITICAL_SECTION>(reinterpret_cast<std::uint64_t>(filesystem) + 408);
-            EnterCriticalSection_(criticalSection);
-            request->pfnCallback(request, 0, 0xFFFFFFFF);
-            LeaveCriticalSection_(criticalSection);
-        }
-        originalResult = FSASYNC_ERR_FILEOPEN;
-    }
-    else {
-        // Calculate read size
-        int nBytesToRead = request->nBytes
-            ? static_cast<int>(request->nBytes)
-            : static_cast<int>(FSOperations::GetFileSize(filesystem, hFile) - request->nOffset);
-        if (nBytesToRead < 0) nBytesToRead = 0;
-
-        // Prepare buffer
-        void* pDest;
-        int nBytesBuffer;
-        if (request->pData) {
-            pDest = request->pData;
-            nBytesBuffer = nBytesToRead;
-        }
-        else {
-            nBytesBuffer = nBytesToRead + ((request->flags & FSASYNC_FLAGS_NULLTERMINATE) ? 1 : 0);
-            std::uint64_t alignment = 0;
-            if (FSOperations::GetOptimalIO(filesystem, hFile, &alignment, 0, 0)
-                && (request->nOffset % alignment == 0))
-            {
-                nBytesBuffer = static_cast<int>(pGetOptimalReadSize(filesystem, hFile, nBytesBuffer));
-            }
-            if (request->pfnAlloc) {
-                pDest = request->pfnAlloc(request->pszFilename, nBytesBuffer);
-            }
-            else {
-                pDest = FSOperations::AllocOptimalReadBuffer(filesystem, hFile, nBytesBuffer, request->nOffset);
-            }
-        }
-
-        if (request->nOffset > 0) {
-            FSOperations::SeekFile(filesystem, hFile, request->nOffset, 0);
-        }
-
-        // Bump thread priority
-        int oldPriority = ThreadGetPriority(0);
-        if (oldPriority < 2)
-            ThreadSetPriority(0, 2);
-
-        __int64 nBytesRead = FSOperations::ReadFile(filesystem, pDest, nBytesToRead, nBytesToRead, hFile);
-
-        // Restore thread priority
-        if (oldPriority < 2)
-            ThreadSetPriority(0, oldPriority);
-
-        if (!pHeldFile) {
-            FSOperations::CloseFile(filesystem, hFile);
-        }
-
-        if (request->flags & FSASYNC_FLAGS_NULLTERMINATE) {
-            reinterpret_cast<char*>(pDest)[nBytesRead] = '\0';
-        }
-
-        if ((nBytesRead == 0) && (nBytesToRead != 0)) {
-            Warning("SyncRead failed: file='%s' nBytesRead=0 nBytesToRead=%lld\n",
-                request->pszFilename, nBytesToRead);
-            originalResult = FSASYNC_ERR_READING;
-        }
-        else {
-            originalResult = FSASYNC_OK;
-        }
-
-        int finalBytes = (nBytesRead < nBytesToRead) ? static_cast<int>(nBytesRead) : nBytesToRead;
-        pPerformAsyncCallback(filesystem, request, pDest, finalBytes, originalResult);
-    }
-
-    if (pHeldFile) {
-        pReleaseAsyncOpenedFiles(pAsyncOpenedFilesCriticalSection, request->hSpecificAsyncFile);
-    }
-
-    const char* statusStr = "UNKNOWN";
-    switch (originalResult) {
-    case FSASYNC_OK:           statusStr = "OK";            break;
-    case FSASYNC_ERR_FILEOPEN: statusStr = "ERR_FILEOPEN";  break;
-    case FSASYNC_ERR_READING:  statusStr = "ERR_READING";   break;
-    }
-    /* if (g_pLogAudio->m_Value.m_nValue == 1) {
-         Msg("SyncRead: file='%s' offset=%lld bytes=%lld status=%s\n",
-             request->pszFilename, request->nOffset, request->nBytes, statusStr);
-     }*/
-    return originalResult;
-}
 
 // --------------------------------------------------------------------
 // Now, implement .opus streaming decode (single opus file with multi‐channels)
 // --------------------------------------------------------------------
-
+// Global cache (and mutex) for our Opus contexts:
 struct OpusContext {
-    // In this single‐file version we use only one track.
     struct Track {
-        std::vector<int16_t> pcmData;           // Decoded PCM data (already interleaved)
-        std::vector<unsigned char> opusFileData;  // The complete opus file in memory
-        OggOpusFile* opusFile = nullptr;          // Handle returned by op_open_memory()
-        int64_t currentDecodePos = 0;             // Bytes decoded so far (pcmData.size()*sizeof(int16_t))
+        // Entire file data in memory.
+        std::vector<unsigned char> opusFileData;
+        // Pointer returned by op_open_memory.
+        OggOpusFile* opusFile = nullptr;
+        // Ring buffer holding decoded PCM data (48 kHz, interleaved int16_t).
+        std::vector<int16_t> pcmRingBuffer;
+        // Count of frames (each frame = one sample per channel) that have been consumed.
+        size_t readFrameIndex = 0;
+        // Persistent fractional offset (in frames) in the source 48 kHz data.
+        double resamplePos = 0.0;
+        // Flag indicating the end of the Opus file.
         bool reachedEnd = false;
+        // Number of channels.
         int channels = 1;
+        // Use a unique_ptr so that the mutex is movable.
+        std::unique_ptr<std::recursive_mutex> bufferMutex;
+
+        // Default constructor: allocate a new mutex.
+        Track() : bufferMutex(std::make_unique<std::recursive_mutex>()) { }
+
+        // Delete copy constructor/assignment.
+        Track(const Track&) = delete;
+        Track& operator=(const Track&) = delete;
+
+        // Move constructor: move members and ensure the new object gets a valid mutex.
+        Track(Track&& other) noexcept :
+            opusFileData(std::move(other.opusFileData)),
+            opusFile(other.opusFile),
+            pcmRingBuffer(std::move(other.pcmRingBuffer)),
+            readFrameIndex(other.readFrameIndex),
+            resamplePos(other.resamplePos),
+            reachedEnd(other.reachedEnd),
+            channels(other.channels),
+            bufferMutex(std::move(other.bufferMutex))
+        {
+            if (!bufferMutex) {
+                // If the source’s mutex pointer is null, create a new mutex.
+                bufferMutex = std::make_unique<std::recursive_mutex>();
+            }
+            other.opusFile = nullptr;
+            other.readFrameIndex = 0;
+            other.resamplePos = 0.0;
+            other.reachedEnd = false;
+        }
+
+        // Move assignment operator.
+        Track& operator=(Track&& other) noexcept {
+            if (this != &other) {
+                opusFileData = std::move(other.opusFileData);
+                opusFile = other.opusFile;
+                pcmRingBuffer = std::move(other.pcmRingBuffer);
+                readFrameIndex = other.readFrameIndex;
+                resamplePos = other.resamplePos;
+                reachedEnd = other.reachedEnd;
+                channels = other.channels;
+                bufferMutex = std::move(other.bufferMutex);
+                if (!bufferMutex) {
+                    bufferMutex = std::make_unique<std::recursive_mutex>();
+                }
+                other.opusFile = nullptr;
+                other.readFrameIndex = 0;
+                other.resamplePos = 0.0;
+                other.reachedEnd = false;
+            }
+            return *this;
+        }
+
+        ~Track() {
+            if (opusFile)
+                op_free(opusFile);
+        }
     };
 
     std::vector<Track> tracks;
-    bool skipDiscovered = false;
-    int64_t skipOffset = 0;
 };
+
 
 static std::unordered_map<std::string, OpusContext> g_opusCache;
 static std::mutex g_opusCacheMutex;
@@ -379,411 +324,345 @@ static std::vector<unsigned char> ReadEntireFileIntoMem(
     return fileData;
 }
 
-// Simple fixed-ratio 48kHz -> 44.1kHz resampler
-#ifdef USE_LIBSAMPLERATE
-static bool FixedResample48to441(const float* input, float* output, int inputFrames) {
-    SRC_DATA srcData = {};
-    srcData.data_in = input;
-    srcData.data_out = output;
-    srcData.input_frames = inputFrames;
-    srcData.output_frames = int(inputFrames * 0.91875f);
-    srcData.src_ratio = 0.91875; // 44100/48000
-
-    int error = src_simple(&srcData, SRC_ZERO_ORDER_HOLD, 2); // 2 channels
-    return (error == 0);
-}
-#else
-static void FixedResample48to441(const float* input, float* output, int inputFrames) {
-    const float ratio = 0.91875f;  // 44100/48000
-    const float step = 1.0f / ratio;
-    const int outputFrames = int(inputFrames * ratio);
-
-#if __AVX2__
-    // Process 8 output frames at a time with AVX2 (omitted for brevity)
-#else
-    // Process 4 output frames at a time with SSE3 (omitted for brevity)
-    float pos = 0.0f;
-    for (int i = 0; i < outputFrames; i++) {
-        int idx = (int)pos;
-        float frac = pos - idx;
-        output[i * 2] = input[idx * 2] * (1 - frac) + input[(idx + 1) * 2] * frac;
-        output[i * 2 + 1] = input[idx * 2 + 1] * (1 - frac) + input[(idx + 1) * 2 + 1] * frac;
-        pos += step;
-    }
-#endif
-}
-#endif
 
 // SSE2 resampler for any number of channels
-static void FixedResample48to441MultiChannel(const float* input, float* output,
-    int inputFrames, int channels) {
-    const float ratio = 0.91875f;  // 44100/48000
-    const float step = 1.0f / ratio;
-    const int outputFrames = int(inputFrames * ratio);
-
-    // Process 4 samples at a time with SSE2
-    const __m128 vStep = _mm_set1_ps(step);
-    const __m128 vOne = _mm_set1_ps(1.0f);
-    __m128 vPos = _mm_set_ps(3.0f, 2.0f, 1.0f, 0.0f);
-    vPos = _mm_mul_ps(vPos, vStep);
-
-    int i = 0;
-    for (; i < outputFrames - 3; i += 4) {
-        __m128i vIdx = _mm_cvttps_epi32(vPos);
-        __m128 vFrac = _mm_sub_ps(vPos, _mm_cvtepi32_ps(vIdx));
-
-        // Store indices
-        int indices[4];
-        _mm_store_si128((__m128i*)indices, vIdx);
-
-        // Process each channel
+static void FixedResample48to441MultiChannel_Persistent(const float* input, int availableFrames,
+    float* output, int outputFrameCount, int channels, double& inPos)
+{
+    const double step = 48000.0 / 44100.0; // Approximately 1.088435.
+    for (int i = 0; i < outputFrameCount; i++) {
+        int idx = (int)inPos;
+        double frac = inPos - idx;
+        int idxNext = (idx + 1 < availableFrames ? idx + 1 : availableFrames - 1);
         for (int ch = 0; ch < channels; ch++) {
-            // Load samples for this channel
-            float temp[4], tempNext[4];
-            for (int j = 0; j < 4; j++) {
-                temp[j] = input[indices[j] * channels + ch];
-                tempNext[j] = input[(indices[j] + 1) * channels + ch];
-            }
-
-            __m128 vSamp = _mm_load_ps(temp);
-            __m128 vNext = _mm_load_ps(tempNext);
-
-            // Linear interpolation
-            __m128 vOneMinusFrac = _mm_sub_ps(vOne, vFrac);
-            __m128 vOut = _mm_add_ps(
-                _mm_mul_ps(vSamp, vOneMinusFrac),
-                _mm_mul_ps(vNext, vFrac)
-            );
-
-            // Store results
-            float result[4];
-            _mm_store_ps(result, vOut);
-            for (int j = 0; j < 4; j++) {
-                output[i * channels + j * channels + ch] = result[j];
-            }
+            float s0 = input[idx * channels + ch];
+            float s1 = input[idxNext * channels + ch];
+            output[i * channels + ch] = s0 * (1.0f - (float)frac) + s1 * (float)frac;
         }
-
-        vPos = _mm_add_ps(vPos, _mm_mul_ps(vStep, _mm_set1_ps(4.0f)));
-    }
-
-    // Handle remaining frames
-    float pos = _mm_cvtss_f32(vPos);
-    for (; i < outputFrames; i++) {
-        int idx = (int)pos;
-        float frac = pos - idx;
-        for (int ch = 0; ch < channels; ch++) {
-            float samp0 = input[idx * channels + ch];
-            float samp1 = input[(idx + 1) * channels + ch];
-            output[i * channels + ch] = samp0 * (1 - frac) + samp1 * frac;
-        }
-        pos += step;
+        inPos += step;
+        // Prevent overrunning the available data.
+        if (inPos >= availableFrames)
+            inPos = availableFrames - 1;
     }
 }
 
-// SSE2 float to int16 converter for any number of channels
-static void FloatToInt16MultiChannel(const float* in, int16_t* out,
-    size_t frames, int channels) {
-    const __m128 scale = _mm_set1_ps(32767.0f);
-    const size_t totalSamples = frames * channels;
-
-    size_t i = 0;
-    for (; i < totalSamples - 7; i += 8) {
-        // Load 8 floats (2 registers worth)
-        __m128 in1 = _mm_load_ps(&in[i]);
-        __m128 in2 = _mm_load_ps(&in[i + 4]);
-
-        // Scale to int16 range
-        in1 = _mm_mul_ps(in1, scale);
-        in2 = _mm_mul_ps(in2, scale);
-
-        // Convert to int32
-        __m128i i1 = _mm_cvtps_epi32(in1);
-        __m128i i2 = _mm_cvtps_epi32(in2);
-
-        // Pack to int16
-        __m128i shorts = _mm_packs_epi32(i1, i2);
-
-        // Store result
-        _mm_store_si128((__m128i*) & out[i], shorts);
+static void ConsumeFramesFromRingBuffer(OpusContext::Track& track) {
+    std::lock_guard<std::recursive_mutex> lock(*track.bufferMutex);
+    size_t wholeFramesConsumed = (size_t)std::floor(track.resamplePos);
+    if (wholeFramesConsumed > 0) {
+        size_t samplesToRemove = wholeFramesConsumed * track.channels;
+        track.pcmRingBuffer.erase(track.pcmRingBuffer.begin(),
+            track.pcmRingBuffer.begin() + samplesToRemove);
+        track.readFrameIndex = 0;
+        track.resamplePos -= wholeFramesConsumed;
     }
-
-    // Handle remaining samples
-    for (; i < totalSamples; i++) {
-        float sample = in[i] * 32767.0f;
-        if (sample > 32767.f) sample = 32767.f;
-        if (sample < -32768.f) sample = -32768.f;
+}
+static void FloatToInt16MultiChannel(const float* in, int16_t* out, size_t frames, int channels) {
+    size_t totalSamples = frames * channels;
+    size_t i = 0;
+    const __m128 scale = _mm_set1_ps(32767.0f);
+    for (; i + 7 < totalSamples; i += 8) {
+        __m128 f0 = _mm_loadu_ps(in + i);
+        __m128 f1 = _mm_loadu_ps(in + i + 4);
+        f0 = _mm_mul_ps(f0, scale);
+        f1 = _mm_mul_ps(f1, scale);
+        __m128i i0 = _mm_cvtps_epi32(f0);
+        __m128i i1 = _mm_cvtps_epi32(f1);
+        __m128i packed = _mm_packs_epi32(i0, i1);
+        _mm_storeu_si128((__m128i*)(out + i), packed);
+    }
+    for (; i < totalSamples; ++i) {
+        float scaled = in[i] * 32767.0f;
+        int32_t sample = (int32_t)(scaled + (scaled >= 0.f ? 0.5f : -0.5f));
+        if (sample > 32767)
+            sample = 32767;
+        else if (sample < -32768)
+            sample = -32768;
         out[i] = (int16_t)sample;
     }
 }
+//-----------------------------------------------------------------------------
+// Assume these types are defined elsewhere:
+//
+// struct OpusContext {
+//     struct Track {
+//         std::vector<unsigned char> opusFileData;  // Entire file data in memory
+//         OggOpusFile* opusFile = nullptr;            // Opened via op_open_memory
+//         std::vector<int16_t> pcmRingBuffer;         // Ring buffer holding decoded PCM (48 kHz)
+//         size_t readFrameIndex = 0;                  // In frames: how many frames have been consumed
+//         double resamplePos = 0.0;                   // Persistent fractional offset in source frames
+//         bool reachedEnd = false;                    // Set to true if end-of-file is reached
+//         int channels = 1;                           // Number of channels
+//         std::recursive_mutex bufferMutex;           // Mutex protecting the track’s data/state
+//     };
+//
+//     std::vector<Track> tracks;
+// };
+//
+// Also assume that a helper function is available:
+//
+// void FloatToInt16MultiChannel(const float* in, int16_t* out, size_t frames, int channels);
+//
+// which converts interleaved float PCM (normalized to [–1, 1]) to int16_t PCM.
+//-----------------------------------------------------------------------------
 
-// Decode enough data so that the decoded PCM buffer holds at least the requested range.
-// In this single-file version we decode from the single track and use its 'channels' field.
-static bool DecodeOpusChunk(OpusContext& ctx, int64_t offset, size_t bytesNeeded) {
-    if (ctx.tracks.empty()) return false;
-    auto& track = ctx.tracks[0];
-    const size_t bytesPerSample = sizeof(int16_t) * track.channels;
-    const size_t samplesNeeded = bytesNeeded / bytesPerSample;
-    size_t trackOffset = offset / bytesPerSample;
-    size_t trackBytesNeeded = samplesNeeded * sizeof(int16_t);
+// Fully implemented DecodeOpusChunk function.
+static bool DecodeOpusChunk(OpusContext& ctx, size_t framesNeeded)
+{
+    // Ensure there is at least one track.
+    if (ctx.tracks.empty())
+        return false;
 
-    // If we already have enough decoded data, nothing more to do.
-    if (track.pcmData.size() * sizeof(int16_t) >= trackOffset * sizeof(int16_t) + trackBytesNeeded)
+    // Work with the first track.
+    OpusContext::Track& track = ctx.tracks[0];
+
+    // Lock the track's buffer while updating or reading its state.
+    std::lock_guard<std::recursive_mutex> lock(*track.bufferMutex);
+
+    // Calculate the total frames available in the ring buffer.
+    size_t currentFrames = track.pcmRingBuffer.size() / track.channels;
+
+    // If we already have enough decoded frames (past the consumed index),
+    // then there is no need to decode further.
+    if (currentFrames >= track.readFrameIndex + framesNeeded)
         return true;
 
-    const size_t DECODE_CHUNK = 5760;
-    while (!track.reachedEnd &&
-        (track.pcmData.size() * sizeof(int16_t) < trackOffset * sizeof(int16_t) + trackBytesNeeded))
-    {
-        std::vector<float> decodeBuf(DECODE_CHUNK * track.channels);
-        int framesDecoded = op_read_float(track.opusFile,
-            decodeBuf.data(),
-            (int)decodeBuf.size(),
-            nullptr);
+    // Define the number of frames to decode in each iteration.
+    // You may adjust this value based on your performance/quality needs.
+    const size_t DECODE_CHUNK = 23040;
 
-        if (framesDecoded <= 0) {
+    // Loop until either the file has reached its end or we have enough frames.
+    while (!track.reachedEnd &&
+        ((track.pcmRingBuffer.size() / track.channels) < (track.readFrameIndex + framesNeeded)))
+    {
+        // Allocate a temporary buffer to hold decoded float samples.
+        // We decode DECODE_CHUNK frames at a time; multiply by the number of channels.
+        std::vector<float> decodeBuf(DECODE_CHUNK * track.channels);
+
+        // Attempt to decode samples from the Opus file.
+        // op_read_float() returns the number of frames decoded (or <= 0 on error/end).
+        int framesDecoded = op_read_float(track.opusFile, decodeBuf.data(), (int)decodeBuf.size(), nullptr);
+
+        if (framesDecoded <= 0)
+        {
+            // Mark that we've reached the end of the file.
             track.reachedEnd = true;
-            if (framesDecoded < 0) {
-                Msg("[Opus] decode error: %d\n", framesDecoded);
+
+            // If framesDecoded is negative, an error occurred.
+            if (framesDecoded < 0)
+            {
+                Warning("[Opus] decode error: %d\n", framesDecoded);
                 return false;
             }
+            // Otherwise, break out (EOF reached).
             break;
         }
 
-        size_t oldSize = track.pcmData.size();
-        track.pcmData.resize(oldSize + framesDecoded * track.channels);
+        // Determine the current number of frames before appending.
+        size_t prevFrameCount = track.pcmRingBuffer.size() / track.channels;
+        // Resize the ring buffer to accommodate the new decoded frames.
+        track.pcmRingBuffer.resize((prevFrameCount + framesDecoded) * track.channels);
 
+        // Convert the decoded float PCM data to int16_t PCM data and store it
+        // in the ring buffer starting at the position corresponding to prevFrameCount.
         FloatToInt16MultiChannel(decodeBuf.data(),
-            &track.pcmData[oldSize],
+            &track.pcmRingBuffer[prevFrameCount * track.channels],
             framesDecoded,
             track.channels);
-
-        track.currentDecodePos = track.pcmData.size() * sizeof(int16_t);
     }
+
     return true;
 }
 
-// Open the opus context for the given wav file by looking for a single matching .opus file.
-static bool OpenOpusContext(
-    const std::string& wavName,
-    CBaseFileSystem* filesystem,
-    const char* pathID)
+
+
+
+bool OpenOpusContext(const std::string& wavName, CBaseFileSystem* filesystem, const char* pathID)
 {
     std::lock_guard<std::mutex> lock(g_opusCacheMutex);
-    if (g_opusCache.find(wavName) != g_opusCache.end()) {
-        return true;
-    }
+    if (g_opusCache.find(wavName) != g_opusCache.end())
+        return true; // Already opened
 
     OpusContext ctx;
 
-    std::string opusName = MakeOpusFilename(wavName.c_str());
-    auto fileData = ReadEntireFileIntoMem(filesystem, opusName.c_str(), pathID);
-    if (fileData.empty()) {
+    // Read the entire file into memory.
+    std::vector<unsigned char> fileData = ReadEntireFileIntoMem(filesystem, wavName.c_str(), pathID);
+    if (fileData.empty())
         return false;
-    }
 
+    // Only proceed if the header is that of an Opus (Ogg) file.
+    if (!IsOpusFile(fileData))
+        return false;
+
+    // Create a new track.
     OpusContext::Track newTrack;
     newTrack.opusFileData = std::move(fileData);
 
     int error = 0;
-    newTrack.opusFile = op_open_memory(
-        newTrack.opusFileData.data(),
+    newTrack.opusFile = op_open_memory(newTrack.opusFileData.data(),
         newTrack.opusFileData.size(),
         &error);
-
     if (!newTrack.opusFile || error != 0) {
-        op_free(newTrack.opusFile);
+        if (newTrack.opusFile)
+            op_free(newTrack.opusFile);
+        Warning("[Opus] op_open_memory failed with error %d for file %s\n", error, wavName.c_str());
         return false;
     }
 
     const OpusHead* head = op_head(newTrack.opusFile, -1);
     if (!head) {
         op_free(newTrack.opusFile);
+        Warning("[Opus] op_head failed for file %s\n", wavName.c_str());
         return false;
     }
-
     newTrack.channels = head->channel_count;
-    Msg("[Opus] Opened opus file '%s': channels=%d\n", opusName.c_str(), head->channel_count);
+    Msg("[Opus] Opened opus file '%s': channels=%d\n", wavName.c_str(), newTrack.channels);
 
+    // Optionally pre-decode a few seconds (e.g. 2 seconds at 48 kHz) into the ring buffer.
+    const size_t INITIAL_DECODE_FRAMES = 48000 * 2;
+    // Add the track to our context first so that DecodeOpusChunk (which uses the context)
+    // will write into newTrack.
     ctx.tracks.push_back(std::move(newTrack));
-    // Reserve some space (adjust as needed)
-    ctx.tracks[0].pcmData.reserve(1024 * ctx.tracks[0].channels);
+    if (!DecodeOpusChunk(ctx, INITIAL_DECODE_FRAMES)) {
+        Warning("[Opus] Initial decode failed for '%s'\n", wavName.c_str());
+    }
 
     g_opusCache[wavName] = std::move(ctx);
     return true;
 }
 
+
+
 // This function handles the read request by decoding data from the single opus file.
 __int64 HandleOpusRead(CBaseFileSystem* filesystem, FileAsyncRequest_t* request)
 {
-    // --------------------------------------------------
-    // 1. Acquire pHeldFile if the engine gave us hSpecificAsyncFile
-    //    (so partial reads reuse the same handle)
-    // --------------------------------------------------
-    AsyncOpenedFile_t* pHeldFile = nullptr;
-    if (request->hSpecificAsyncFile != (void*)FS_INVALID_ASYNC_FILE)
+    // (1) Ensure the file is in our cache.
     {
-        EnterCriticalSection_(pAsyncOpenedFilesCriticalSection);
-        std::uint64_t entryBase = pAsyncOpenedFilesTable
-            + (24ULL * (static_cast<std::uint64_t>((__int64)request->hSpecificAsyncFile) & 0xFFFF));
-        std::uint64_t ptrStruct = *reinterpret_cast<std::uint64_t*>(entryBase + 16ULL);
-        if (ptrStruct)
-        {
-            _InterlockedIncrement(reinterpret_cast<volatile long*>(ptrStruct + 8ULL));
-            pHeldFile = reinterpret_cast<AsyncOpenedFile_t*>(ptrStruct);
+        std::lock_guard<std::mutex> lock(g_opusCacheMutex);
+        if (g_opusCache.find(request->pszFilename) == g_opusCache.end()) {
+            if (!OpenOpusContext(request->pszFilename, filesystem, request->pszPathID))
+                return -99999; // Signal an error (fallback to original read).
         }
-        LeaveCriticalSection_(pAsyncOpenedFilesCriticalSection);
     }
+    OpusContext& ctx = g_opusCache[request->pszFilename];
+    if (ctx.tracks.empty())
+        return -99999;
+    OpusContext::Track& track = ctx.tracks[0];
 
-    // We won't actually do file I/O from pHeldFile, but some
-    // games rely on it to track partial offsets. So let's at least
-    // store and restore it if needed:
-    FileHandle_t hFile = pHeldFile
-        ? *reinterpret_cast<FileHandle_t*>(reinterpret_cast<std::uint64_t>(pHeldFile) + 16)
-        : nullptr;
-
-    // --------------------------------------------------
-    // 2. Bump thread priority (like the original read does)
-    // --------------------------------------------------
-    int oldPriority = ThreadGetPriority(0);
-    if (oldPriority < 2) {
-        ThreadSetPriority(0, 2);
-    }
-
-    // --------------------------------------------------
-    // 3. Decode from our global opus cache
-    // --------------------------------------------------
-    std::unique_lock<std::mutex> lock(g_opusCacheMutex);
-
-    // Make sure we have an OpusContext
-    auto it = g_opusCache.find(request->pszFilename);
-    if (it == g_opusCache.end()) {
-        // Must open it first
-        if (!OpenOpusContext(request->pszFilename, filesystem, request->pszPathID)) {
-            lock.unlock();
-            // Failed to open .opus? Fall back to original read:
-            // We'll do that by returning a sentinel, so the caller can call HandleOriginalRead.
-            return -99999; // Some sentinel that we'll check for.
-        }
-        it = g_opusCache.find(request->pszFilename);
-        if (it == g_opusCache.end() || it->second.tracks.empty()) {
-            lock.unlock();
-            // No valid track after opening => fallback
-            return -99999;
+    int channels = track.channels;
+    // *** FIX: Adjust the decoder's starting position if this is the first read.
+// The underlying audio engine caches about 10ms (offset in the range ~1024 to ~10468 bytes)
+// but our Opus decoding starts at the very beginning.
+// So, if we see a nonzero async offset and our persistent resamplePos is still zero,
+// then advance (skip) the decoded data accordingly.
+    {
+        std::lock_guard<std::recursive_mutex> lock(*track.bufferMutex);
+        if (track.resamplePos < 1e-6 && request->nOffset > 0) {
+            // The async request's offset is in bytes for 44.1kHz data.
+            // Subtract the header (79 bytes) which the engine expects but which our decoded stream does not have.
+            int64_t effectiveOffset = request->nOffset - 79;
+            if (effectiveOffset < 0)
+                effectiveOffset = 0;
+            // Each frame in 44.1kHz int16 PCM is (2 * channels) bytes.
+            size_t skipFrames44 = effectiveOffset / (sizeof(int16_t) * channels);
+            // Convert from 44.1kHz frames to 48kHz frames using the ratio.
+            const double conversionRatio = 48000.0 / 44100.0;
+            double skipFrames48 = skipFrames44 * conversionRatio;
+            // Advance our persistent resample position.
+            track.resamplePos = skipFrames48;
+            // (Optionally log the adjustment)
+            Msg("[Opus] Adjusted starting position: skipped %f frames (48kHz)\n", skipFrames48);
         }
     }
 
-    OpusContext& ctx = it->second;
-    if (ctx.tracks.empty()) {
-        lock.unlock();
-        return -99999; // fallback
-    }
-    auto& track = ctx.tracks[0];
 
-    // We do not do special skipOffset logic here unless you need it.
-    // Just treat nOffset as the position in the decoded PCM data:
-    const size_t bytesPerSample = sizeof(int16_t) * track.channels;
-    int64_t fileOffset = request->nOffset; // simplest approach
-    if (fileOffset < 0) {
-        fileOffset = 0; // can't do negative
+    size_t bytesPerFrame = sizeof(int16_t) * channels;
+    size_t framesRequested44 = request->nBytes / bytesPerFrame;
+
+    // (2) Get the current persistent offset.
+    double currentOffset = 0.0;
+    {
+        std::lock_guard<std::recursive_mutex> lock(*track.bufferMutex);
+        currentOffset = track.resamplePos;
     }
 
-    // The game wants nBytes from offset => decode enough to fill that range.
-    // E.g. if offset=10000, nBytes=4096, we want samples covering [10000..(10000+4096)).
-    if (!DecodeOpusChunk(ctx, fileOffset, request->nBytes)) {
-        lock.unlock();
-        if (request->pfnCallback) {
-            // Error
-            request->pfnCallback(request, 0, FSASYNC_ERR_READING);
+    // (3) Compute how many 48 kHz input frames are needed.
+    // The conversion ratio is: step = 48000 / 44100 ≃ 1.088435.
+    const double step = 48000.0 / 44100.0;
+    double inPosNeeded = currentOffset + framesRequested44 * step;
+    size_t inputFramesNeeded = (size_t)std::ceil(inPosNeeded);
+
+    // (4) Ensure enough decoded frames are available in the ring buffer.
+    {
+        std::lock_guard<std::recursive_mutex> lock(*track.bufferMutex);
+        size_t availableFrames = track.pcmRingBuffer.size() / channels;
+        if (availableFrames < track.readFrameIndex + inputFramesNeeded) {
+            if (!DecodeOpusChunk(ctx, inputFramesNeeded)) {
+                Warning("[Opus] Not enough decoded frames available for '%s'\n", request->pszFilename);
+                // Optionally, you can fill with silence.
+            }
         }
-      //  goto OpusReadDoneErr;
     }
 
-    // How many samples are actually available from offset -> end of decode?
-    size_t trackOffsetSamples = static_cast<size_t>(fileOffset / bytesPerSample);
-    size_t totalDecodedSamples = track.pcmData.size() / track.channels; // track is interleaved
-    size_t availableSamples = (totalDecodedSamples > trackOffsetSamples)
-        ? (totalDecodedSamples - trackOffsetSamples)
-        : 0;
-
-    // The user wants this many *bytes*, i.e. (samplesNeeded = nBytes / bytesPerSample)
-    size_t samplesNeeded = static_cast<size_t>(request->nBytes / bytesPerSample);
-    size_t samplesToCopy = std::min(availableSamples, samplesNeeded);
-    size_t bytesToCopy = samplesToCopy * bytesPerSample;
-
-    // --------------------------------------------------
-    // 4. Prepare output buffer (like original code)
-    // --------------------------------------------------
-    void* pDest = nullptr;
-    if (request->pData) {
-        pDest = request->pData;
+    // (5) Determine how many frames are available for resampling.
+    size_t framesAvailable;
+    {
+        std::lock_guard<std::recursive_mutex> lock(*track.bufferMutex);
+        framesAvailable = (track.pcmRingBuffer.size() / channels) - track.readFrameIndex;
     }
-    else {
-        // We might want to respect alignment. For brevity, skip that:
-        if (request->pfnAlloc) {
+    size_t framesForResample = std::min(inputFramesNeeded, framesAvailable);
+
+    // (6) Convert the available int16_t PCM (48 kHz) data to floats.
+    std::vector<float> inputFloat(framesForResample * channels);
+    {
+        std::lock_guard<std::recursive_mutex> lock(*track.bufferMutex);
+        const int16_t* src = &track.pcmRingBuffer[track.readFrameIndex * channels];
+        for (size_t i = 0; i < framesForResample * channels; i++) {
+            inputFloat[i] = src[i] / 32767.0f;
+        }
+    }
+
+    // (7) Allocate an output buffer for 44.1 kHz float samples.
+    std::vector<float> resampleOut(framesRequested44 * channels, 0.0f);
+    double inPos = currentOffset; // Starting fractional position
+    FixedResample48to441MultiChannel_Persistent(inputFloat.data(), (int)framesForResample,
+        resampleOut.data(), (int)framesRequested44,
+        channels, inPos);
+
+    // (8) Update our persistent state—advance by the whole number of frames consumed.
+    {
+        std::lock_guard<std::recursive_mutex> lock(*track.bufferMutex);
+        track.resamplePos = inPos;  // update the resampler's fractional offset
+        ConsumeFramesFromRingBuffer(track);  // remove already-consumed frames
+    }
+
+
+    // (9) Convert the resampled float PCM back to int16_t.
+    std::vector<int16_t> finalPCM(framesRequested44 * channels);
+    FloatToInt16MultiChannel(resampleOut.data(), finalPCM.data(), framesRequested44, channels);
+
+    // (10) Prepare the destination buffer and copy the data.
+    void* pDest = request->pData;
+    if (!pDest) {
+        if (request->pfnAlloc)
             pDest = request->pfnAlloc(request->pszFilename, request->nBytes);
-        }
-        else {
+        else
             pDest = malloc(request->nBytes);
-        }
     }
-
-    // Copy the data
-    if (bytesToCopy > 0) {
-        const int16_t* srcPtr = &track.pcmData[trackOffsetSamples * track.channels];
-        memcpy(pDest, srcPtr, bytesToCopy);
-    }
-    // If we have fewer samples than requested => zero out the remainder
-    if (bytesToCopy < static_cast<size_t>(request->nBytes)) {
+    size_t bytesToCopy = finalPCM.size() * sizeof(int16_t);
+    bytesToCopy = std::min(bytesToCopy, static_cast<size_t>(request->nBytes));
+    memcpy(pDest, finalPCM.data(), bytesToCopy);
+    if (bytesToCopy < static_cast<size_t>(request->nBytes))
         memset((char*)pDest + bytesToCopy, 0, request->nBytes - bytesToCopy);
-    }
-
-    // Null‐terminate if flags say so
-    if (request->flags & FSASYNC_FLAGS_NULLTERMINATE) {
-        // The original code sets: dest[nBytesRead] = '\0'
-        // We'll do the same. Here finalBytes = bytesToCopy
+    if (request->flags & FSASYNC_FLAGS_NULLTERMINATE)
         reinterpret_cast<char*>(pDest)[bytesToCopy] = '\0';
-    }
 
-    lock.unlock(); // done with the opus context
+    // (11) Invoke the asynchronous callback.
+    pPerformAsyncCallback(filesystem, request, pDest, bytesToCopy, FSASYNC_OK);
 
-    // --------------------------------------------------
-    // 5. Check finalBytes vs. requested
-    // --------------------------------------------------
-    __int64 finalBytes = static_cast<__int64>(bytesToCopy);
-    __int64 resultStatus = FSASYNC_OK;
-    if ((finalBytes == 0) && (request->nBytes != 0)) {
-        // The original read logic calls FSASYNC_ERR_READING if read=0 but we wanted >0
-        resultStatus = FSASYNC_ERR_READING;
-        Warning("[Opus] decode returned 0 bytes for '%s'\n", request->pszFilename);
-    }
-
-    // --------------------------------------------------
-    // 6. Call the async callback with the actual finalBytes
-    // --------------------------------------------------
-    pPerformAsyncCallback(filesystem, request, pDest, finalBytes, resultStatus);
-
-    // Thread priority restore
-    if (oldPriority < 2) {
-        ThreadSetPriority(0, oldPriority);
-    }
-
-    // Release hold on the file if we had one
-    if (pHeldFile) {
-        pReleaseAsyncOpenedFiles(pAsyncOpenedFilesCriticalSection, request->hSpecificAsyncFile);
-    }
-
-    return resultStatus;
-
-//OpusReadDoneErr:
-    // Something went wrong, but still do the priority restore + release
-    if (oldPriority < 2) {
-        ThreadSetPriority(0, oldPriority);
-    }
-    if (pHeldFile) {
-        pReleaseAsyncOpenedFiles(pAsyncOpenedFilesCriticalSection, request->hSpecificAsyncFile);
-    }
-    return FSASYNC_ERR_READING;
+    return FSASYNC_OK;
 }
+
 
 // --------------------------------------------------------------------
 // The main hooked function
@@ -817,20 +696,18 @@ __int64 __fastcall Hooked_CBaseFileSystem__SyncRead(
         }
         return FSASYNC_ERR_FILEOPEN;
     }
-    // If ends with .wav => check for .opus
+    // If the file name ends with ".wav" then check whether it’s really an opus file.
     if (EndsWithWav(request->pszFilename)) {
-        std::string opusName = MakeOpusFilename(request->pszFilename);
-        if (FSOperations::FileExists(filesystem, opusName.c_str(), request->pszPathID)) {
-            // Attempt to do an Opus read:
+        // Try to open the file as an opus file – note we use the same filename.
+        if (OpenOpusContext(request->pszFilename, filesystem, request->pszPathID)) {
             __int64 result = HandleOpusRead(filesystem, request);
             if (result != -99999) {
-                // That means we handled it or failed inside
                 return result;
             }
-            // If result == -99999 => fallback to original
+            // If result == -99999 then something went wrong during opus handling;
+            // we then fall back to the original read.
         }
     }
-
 
     // Fallback to original read (or simply call it for testing)
     return Original_CBaseFileSystem__SyncRead(filesystem, request);
