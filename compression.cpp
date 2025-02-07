@@ -418,6 +418,8 @@ void InitCompressionHooks()
     MH_CreateHook(LPVOID(fs + 0x23860),
         Hooked_CBaseFileSystem__SyncRead,
         reinterpret_cast<LPVOID*>(&Original_CBaseFileSystem__SyncRead));
-
+    MH_CreateHook(LPVOID(fs + 0x23490),
+        CFileAsyncReadJob_dtor,
+        reinterpret_cast<LPVOID*>(&Original_CFileAsyncReadJob_dtor));
     MH_EnableHook(MH_ALL_HOOKS);
 }

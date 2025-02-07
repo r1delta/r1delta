@@ -6,3 +6,5 @@ __int64 __fastcall Hooked_CBaseFileSystem__SyncRead(CBaseFileSystem* filesystem,
 extern __int64 (*Original_CBaseFileSystem__SyncRead)(
     CBaseFileSystem* filesystem,
     FileAsyncRequest_t* request);
+void CFileAsyncReadJob_dtor(FileAsyncRequest_t* thisptr);
+extern void (*Original_CFileAsyncReadJob_dtor)(FileAsyncRequest_t* thisptr);
