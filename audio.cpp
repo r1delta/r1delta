@@ -325,26 +325,35 @@ static std::vector<unsigned char> ReadEntireFileIntoMem(
 }
 
 
-// SSE2 resampler for any number of channels
 static void FixedResample48to441MultiChannel_Persistent(const float* input, int availableFrames,
     float* output, int outputFrameCount, int channels, double& inPos)
 {
-    const double step = 48000.0 / 44100.0; // Approximately 1.088435.
+    const double step = 48000.0 / 44100.0;
     for (int i = 0; i < outputFrameCount; i++) {
+        // Check if we have at least one full step available
+        if (inPos >= availableFrames - 1) {
+            // Fill remaining output with silence rather than repeating the last sample
+            for (int j = i; j < outputFrameCount; j++) {
+                for (int ch = 0; ch < channels; ch++) {
+                    output[j * channels + ch] = 0.0f;
+                }
+            }
+            inPos = availableFrames - 1;
+            break;
+        }
+
         int idx = (int)inPos;
         double frac = inPos - idx;
-        int idxNext = (idx + 1 < availableFrames ? idx + 1 : availableFrames - 1);
+        int idxNext = idx + 1;  // Safe because we know inPos < availableFrames - 1
         for (int ch = 0; ch < channels; ch++) {
             float s0 = input[idx * channels + ch];
             float s1 = input[idxNext * channels + ch];
             output[i * channels + ch] = s0 * (1.0f - (float)frac) + s1 * (float)frac;
         }
         inPos += step;
-        // Prevent overrunning the available data.
-        if (inPos >= availableFrames)
-            inPos = availableFrames - 1;
     }
 }
+
 
 static void ConsumeFramesFromRingBuffer(OpusContext::Track& track) {
     std::lock_guard<std::recursive_mutex> lock(*track.bufferMutex);
@@ -576,7 +585,7 @@ __int64 HandleOpusRead(CBaseFileSystem* filesystem, FileAsyncRequest_t* request)
         if (track.resamplePos < 1e-6 && request->nOffset > 0) {
             // The async request's offset is in bytes for 44.1kHz data.
             // Subtract the header (79 bytes) which the engine expects but which our decoded stream does not have.
-            int64_t effectiveOffset = request->nOffset - 79;
+            int64_t effectiveOffset = request->nOffset;
             if (effectiveOffset < 0)
                 effectiveOffset = 0;
             // Each frame in 44.1kHz int16 PCM is (2 * channels) bytes.
