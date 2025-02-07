@@ -348,15 +348,31 @@ static void FixedResample48to441MultiChannel_Persistent(const float* input, int 
 
 static void ConsumeFramesFromRingBuffer(OpusContext::Track& track) {
     std::lock_guard<std::recursive_mutex> lock(*track.bufferMutex);
-    size_t wholeFramesConsumed = (size_t)std::floor(track.resamplePos);
-    if (wholeFramesConsumed > 0) {
-        size_t samplesToRemove = wholeFramesConsumed * track.channels;
+
+    // Calculate how many whole frames we want to consume.
+    size_t wholeFramesToConsume = (size_t)std::floor(track.resamplePos);
+
+    // Calculate how many frames are actually available.
+    size_t availableFrames = track.pcmRingBuffer.size() / track.channels;
+
+    // Clamp the number of frames to consume to the available frames.
+    if (wholeFramesToConsume > availableFrames) {
+        wholeFramesToConsume = availableFrames;
+    }
+
+    if (wholeFramesToConsume > 0) {
+        size_t samplesToRemove = wholeFramesToConsume * track.channels;
+        // Erase exactly that many samples.
         track.pcmRingBuffer.erase(track.pcmRingBuffer.begin(),
             track.pcmRingBuffer.begin() + samplesToRemove);
         track.readFrameIndex = 0;
-        track.resamplePos -= wholeFramesConsumed;
+        track.resamplePos -= wholeFramesToConsume;
     }
 }
+
+
+
+
 static void FloatToInt16MultiChannel(const float* in, int16_t* out, size_t frames, int channels) {
     size_t totalSamples = frames * channels;
     size_t i = 0;
