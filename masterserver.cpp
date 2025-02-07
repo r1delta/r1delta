@@ -9,6 +9,7 @@
 #include <mutex>
 #include <atomic>
 #include <chrono>
+#include <thread>
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 #include "load.h"
@@ -267,25 +268,27 @@ SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
 
     heartbeat.players = players;
 
-    static bool portForwardWarningShown = false;
-    if (!MasterServerClient::SendServerHeartbeat(heartbeat)) {
-        if (!portForwardWarningShown) {
-            portForwardWarningShown = true;
-            if (!IsDedicatedServer()) {
-                int val = hostport ? hostport->m_Value.m_nValue : 27015;
-                char cmd[64];
-                snprintf(cmd, sizeof(cmd), "script_ui ShowPortForwardWarning(%d)\n", val);
-                Cbuf_AddText(0, cmd, 0);
-            }
-            else {
-                Warning("GetServerHeartbeat: Heartbeat send failed.\n");
+    static std::atomic<bool> portForwardWarningShown = false;
+
+    std::thread([heartbeat]() {
+        if (!MasterServerClient::SendServerHeartbeat(heartbeat)) {
+            if (!portForwardWarningShown.load()) {
+                portForwardWarningShown.store(true, std::memory_order_relaxed);
+                if (!IsDedicatedServer()) {
+                    int val = hostport ? hostport->m_Value.m_nValue : 27015;
+                    char cmd[64];
+                    snprintf(cmd, sizeof(cmd), "script_ui ShowPortForwardWarning(%d)\n", val);
+                    Cbuf_AddText(0, cmd, 0);
+                }
+                else {
+                    Warning("GetServerHeartbeat: Heartbeat send failed.\n");
+                }
             }
         }
-    }
-    else {
-        portForwardWarningShown = false;
-    }
-
+        else {
+            portForwardWarningShown.store(false, std::memory_order_relaxed);
+        }
+    }).detach();
     return 1;
 }
 
