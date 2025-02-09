@@ -281,25 +281,6 @@ __int64 __fastcall AddVPKFile(IFileSystem* fileSystem, char* vpkPath, char** a3,
 
 		if (pos)
 		{
-			// Determine the length of the keyword ("server_" or "client_")
-			size_t keywordLen = isServer ? strlen("server_") : strlen("client_");
-			// The portion immediately following the keyword.
-			const char* after = pos + keywordLen;
-			const char* mp_common = "mp_common";
-
-			// If the text after the keyword is not "mp_common", then
-			// rewrite the prefix (i.e. everything before pos) to "english".
-			if (strncmp(after, mp_common, strlen(mp_common)) != 0)
-			{
-				// Construct a new path: "english" + <the keyword and everything after>
-				char newPath[1024];
-				snprintf(newPath, sizeof(newPath), "english%s", pos);
-				// Copy the new path back into vpkPath.
-				strncpy(vpkPath, newPath, sizeof(newPath));
-				// Ensure null termination.
-				vpkPath[sizeof(newPath) - 1] = '\0';
-			}
-
 			// If we're on a dedicated server and the special file exists,
 			// and the path contains "client_", change it to "server_"
 			if (!isServer && IsDedicatedServer() &&
