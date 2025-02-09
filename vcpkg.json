@@ -9,10 +9,6 @@
     },
     "jwt-cpp",
     {
-      "name": "libsamplerate",
-      "version>=": "0.2.2#1"
-    },
-    {
       "name": "mimalloc",
       "version>=": "2.1.7"
     },
@@ -23,15 +19,13 @@
     },
     "openssl",
     {
-      "name": "opus",
-      "version>=": "1.4"
-    },
-    {
       "name": "opusfile",
       "version>=": "0.12+20221121#1"
     },
     "aklomp-base64",
-    "zstd"
+    "zstd",
+    "libogg",
+    "libvorbis"
   ],
   "overrides": [
     {

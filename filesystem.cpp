@@ -199,23 +199,27 @@ int fs_sprintf_hook(char* Buffer, const char* Format, ...) {
 		const char* a1 = va_arg(args, const char*);
 		int chunk = va_arg(args, int);
 
-		// Special branch for chunk 1337.
-		if (chunk >= 0x1337) {
+		// Only handle special chunk values if the path contains "vpk\\" or "vpk/"
+		if (chunk >= 0x1337 && (strstr(a1, "vpk\\") != NULL || strstr(a1, "vpk/") != NULL)) {
 			va_end(args);
-			// Perform the same check-for-more-files as in the singlechunk branch.
-			void* rettocheckformorefiles = (void*)(G_filesystem_stdio + (IsDedicatedServer() ? 0x1783EB : 0x6D6CB));
+			// Check for the "more-files" situation as in the singlechunk branch.
+			void* rettocheckformorefiles = (void*)(IsDedicatedServer() ? (G_vscript + 0x1783EB)
+				: (G_filesystem_stdio + 0x6D6CB));
 			if (rettocheckformorefiles == _ReturnAddress()) {
 				Buffer[0] = 0;
 				return 0;
 			}
-			// If we're dedicated *and* the file exists, use the server filename. (Server VPKs don't work yet. Will fix tomorrow)
-			//if (IsDedicatedServer() && file_exists("vpk/server_mp_delta_common.bsp.pak000_000.vpk"))
-			//	return sprintf(Buffer, "%s", "vpk/server_mp_delta_common.bsp.pak000_000.vpk");
-			//else
+			// Instead of a file_exists check, decide based on the string contents:
+			if (strstr(a1, "server_") != NULL) {
+				return sprintf(Buffer, "%s", "vpk/server_mp_delta_common.bsp.pak000_000.vpk");
+			}
+			else if (strstr(a1, "client_") != NULL) {
 				return sprintf(Buffer, "%s", "vpk/client_mp_delta_common.bsp.pak000_000.vpk");
+			}
 		}
+
 		// Existing branch: if the string contains "singlechunk", do the original work.
-		if (strstr(a1, "singlechunk") != nullptr) {
+		if (strstr(a1, "singlechunk") != NULL) {
 			va_end(args);
 			void* rettocheckformorefiles = (void*)(G_filesystem_stdio + (IsDedicatedServer() ? 0x1783EB : 0x6D6CB));
 			if (rettocheckformorefiles == _ReturnAddress()) {
@@ -235,21 +239,80 @@ int fs_sprintf_hook(char* Buffer, const char* Format, ...) {
 }
 
 
+
 typedef __int64 (*AddVPKFileType)(IFileSystem* fileSystem, char* a2, char** a3, char a4, int a5, char a6);
 AddVPKFileType AddVPKFileOriginal;
-__int64 __fastcall AddVPKFile(IFileSystem* fileSystem, char* a2, char** a3, char a4, int a5, char a6)
-{
-    replace_underscore(a2);
-    //g_CVFileSystemInterface = fileSystem;
-    //void* rettoaddonsystem = (void*)(G_engine + 0x127EF4);
-    //auto AddPackFile = reinterpret_cast<bool (*)(IFileSystem * fileSystem, const char* pPath, const char* pathID)>(G_filesystem_stdio + 0x18030);
-    //
-    //if (_ReturnAddress() == rettoaddonsystem) {
-    //    lastZipPackFilePath = a2;
-    //    return AddPackFile(fileSystem, a2, "GAME");
-    //}
 
-    return AddVPKFileOriginal(fileSystem, a2, a3, a4, a5, a6);
+__int64 __fastcall AddVPKFile(IFileSystem* fileSystem, char* vpkPath, char** a3, char a4, int a5, char a6)
+{
+	// Check if the path contains "_dir"
+	if (strstr(vpkPath, "_dir") != NULL)
+	{
+		// Look for "server_" and "client_" within the path.
+		char* posServer = strstr(vpkPath, "server_");
+		char* posClient = strstr(vpkPath, "client_");
+		char* pos = NULL;
+		bool isServer = false;
+
+		// If both substrings are present, pick the one that occurs first.
+		if (posServer && posClient)
+		{
+			if (posServer < posClient)
+			{
+				pos = posServer;
+				isServer = true;
+			}
+			else
+			{
+				pos = posClient;
+				isServer = false;
+			}
+		}
+		else if (posServer)
+		{
+			pos = posServer;
+			isServer = true;
+		}
+		else if (posClient)
+		{
+			pos = posClient;
+			isServer = false;
+		}
+
+		if (pos)
+		{
+			// Determine the length of the keyword ("server_" or "client_")
+			size_t keywordLen = isServer ? strlen("server_") : strlen("client_");
+			// The portion immediately following the keyword.
+			const char* after = pos + keywordLen;
+			const char* mp_common = "mp_common";
+
+			// If the text after the keyword is not "mp_common", then
+			// rewrite the prefix (i.e. everything before pos) to "english".
+			if (strncmp(after, mp_common, strlen(mp_common)) != 0)
+			{
+				// Construct a new path: "english" + <the keyword and everything after>
+				char newPath[1024];
+				snprintf(newPath, sizeof(newPath), "english%s", pos);
+				// Copy the new path back into vpkPath.
+				strncpy(vpkPath, newPath, sizeof(newPath));
+				// Ensure null termination.
+				vpkPath[sizeof(newPath) - 1] = '\0';
+			}
+
+			// If we're on a dedicated server and the special file exists,
+			// and the path contains "client_", change it to "server_"
+			if (!isServer && IsDedicatedServer() &&
+				file_exists("vpk/server_mp_delta_common.bsp.pak000_000.vpk"))
+			{
+				// Overwrite the "client_" substring with "server_".
+				memcpy(pos, "server_", strlen("server_"));
+			}
+		}
+	}
+
+	// Finally, call the original function.
+	return AddVPKFileOriginal(fileSystem, vpkPath, a3, a4, a5, a6);
 }
 
 //

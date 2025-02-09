@@ -1985,7 +1985,11 @@ void __stdcall LoaderNotificationCallback(
 #endif
 	
 	doBinaryPatchForFile(notification_data->Loaded);
-
+	static bool bDone = false;
+	if (GetModuleHandleA("dedicated.dll") && !bDone) {
+		InitCompressionHooks();
+		bDone = true;
+	}
 	auto name = notification_data->Loaded.BaseDllName->Buffer;
 
 	if (strcmp_static(name, L"filesystem_stdio.dll") == 0) {
