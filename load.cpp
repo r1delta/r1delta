@@ -1222,11 +1222,11 @@ AuthResponse Server_AuthCallback(bool loopback, const char* serverIP, const char
 		std::string id = decoded.get_payload_claim("di").as_string();
 		// Extra check: the token’s server_ip must match exactly.
 		std::string tokenServerIP = decoded.get_payload_claim("s").as_string();
-		if (tokenServerIP != serverIP && !loopback) {
+		/*if (tokenServerIP != serverIP && !loopback) {
 			response.success = false;
 			strncpy(response.failureReason, "Token server IP mismatch", sizeof(response.failureReason));
 			return response;
-		}
+		}*/
 
 		response.success = true;
 		strncpy(response.discordName, displayName.c_str(), sizeof(response.discordName) - 1);
@@ -1300,8 +1300,10 @@ bool __fastcall HookedCBaseClientConnect(
 					V_snprintf(a8, a9, "%s", res.failureReason);
 					return false;
 				}
-				if (IsDedicatedServer()) 
+				if (IsDedicatedServer()) {
+					// a1 is 8 bytes ahead on dedicated servers
 					*(int64*)(a1 + 0x284) = res.discordId;
+				}
 				else
 					*(int64*)(a1 + 0x2fc) = res.discordId;
 
@@ -1881,14 +1883,12 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook((LPVOID)(server_base + 0x1532A0), &sub_1801532A0, reinterpret_cast<LPVOID*>(&osub_1801532A0));
 	
 	if (IsDedicatedServer()) {
-		MH_CreateHook((LPVOID)(engine_base_spec + 0x45F30), &GetUserIDStringHook, reinterpret_cast<LPVOID*>(&GetUserIDStringOriginal));
+		MH_CreateHook((LPVOID)(G_engine_ds + 0x45EB0), &GetUserIDStringHook, reinterpret_cast<LPVOID*>(&GetUserIDStringOriginal));
 	}
 	else {
 		MH_CreateHook((LPVOID)(engine_base_spec + 0xD5260), &GetUserIDStringHook, reinterpret_cast<LPVOID*>(&GetUserIDStringOriginal));
 
 	}
-	MH_CreateHook((LPVOID)(engine_base_spec + (IsDedicatedServer() ? 0x45F30 : 0xD5260)), &GetUserIDStringHook, reinterpret_cast<LPVOID*>(&GetUserIDStringOriginal));
-
 	if (!IsDedicatedServer()) {
 		MH_CreateHook((LPVOID)(engine_base_spec + 0x1E2930), &CNetChan__SendDatagramLISTEN_Part2_Hook, reinterpret_cast<LPVOID*>(&oCNetChan__SendDatagramLISTEN_Part2));
 	}
