@@ -543,7 +543,7 @@ void DoSteamStart(PSTR lpCmdLine) {
 
 	// todo: offsets change once in a while, consider finding them by the IPC log string dynamically
 	bool ownsTitanfall = reinterpret_cast<fnBIsSubscribedApp>(VFUNC_OF(clientUser, 184))(clientUser, 1454890);
-	CGameID gameID(ownsTitanfall ? 1454890 : 1182480, 1, 0x79dcc3b0 | (0x80000000));
+	CGameID gameID(ownsTitanfall ? 1454890 : 480, 1, 0x79dcc3b0 | (0x80000000));
 
 	char currentExecutable[MAX_PATH];
 	GetModuleFileNameA(nullptr, currentExecutable, ARRAYSIZE(currentExecutable));
@@ -570,21 +570,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine,
 
 
 	if (!strstr(lpCmdLine, "-bunny")) {
-		auto exceptionFilter = [](int code) -> int {
-			if (code & 0x80000000) {
-				return EXCEPTION_EXECUTE_HANDLER;
-			}
-			return EXCEPTION_CONTINUE_SEARCH;
-			};
-
-		__try {
+		try {
 			DoSteamStart(lpCmdLine);
 		}
-		__except (exceptionFilter(GetExceptionCode())) {
-			// print the exception
-			MessageBox(nullptr, L"Exception while attempting to start through steam, please update R1Delta or open a github issue (or let us know in discord) about this!", L"R1", 0);
+		catch(...) {
+			MessageBox(nullptr, L"An error occurred while trying to connect to steam. Launching game normally", L"R1", 0);
 		}
-		return 0;
+				
 	}
 
 	if (!GetExePathWide(exePath, sizeof(exePath)))
