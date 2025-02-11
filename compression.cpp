@@ -392,34 +392,57 @@ __int64 r1dc_decompress(
 // --------------------------------------------------------------------------
 void InitCompressionHooks()
 {
-    auto fs = G_filesystem_stdio;
+    auto fs = G_filesystem_stdio ? G_filesystem_stdio : G_vscript;
+    if (!IsDedicatedServer()) {
+        MH_CreateHook(
+            reinterpret_cast<LPVOID>(fs + 0x75380),
+            r1dc_init,
+            (void**)&original_lzham_decompressor_init
+        );
+        MH_CreateHook(
+            reinterpret_cast<LPVOID>(fs + 0x75390),
+            r1dc_reinit,
+            (void**)&original_lzham_decompressor_reinit
+        );
+        MH_CreateHook(
+            reinterpret_cast<LPVOID>(fs + 0x753A0),
+            r1dc_deinit,
+            (void**)&original_lzham_decompressor_deinit
+        );
+        MH_CreateHook(
+            reinterpret_cast<LPVOID>(fs + 0x753B0),
+            r1dc_decompress,
+            (void**)&original_lzham_decompressor_decompress
+        );
 
-    MH_CreateHook(
-        reinterpret_cast<LPVOID>(fs + 0x75380),
-        r1dc_init,
-        (void**)&original_lzham_decompressor_init
-    );
-    MH_CreateHook(
-        reinterpret_cast<LPVOID>(fs + 0x75390),
-        r1dc_reinit,
-        (void**)&original_lzham_decompressor_reinit
-    );
-    MH_CreateHook(
-        reinterpret_cast<LPVOID>(fs + 0x753A0),
-        r1dc_deinit,
-        (void**)&original_lzham_decompressor_deinit
-    );
-    MH_CreateHook(
-        reinterpret_cast<LPVOID>(fs + 0x753B0),
-        r1dc_decompress,
-        (void**)&original_lzham_decompressor_decompress
-    );
-
-    MH_CreateHook(LPVOID(fs + 0x23860),
-        Hooked_CBaseFileSystem__SyncRead,
-        reinterpret_cast<LPVOID*>(&Original_CBaseFileSystem__SyncRead));
-    MH_CreateHook(LPVOID(fs + 0x23490),
-        CFileAsyncReadJob_dtor,
-        reinterpret_cast<LPVOID*>(&Original_CFileAsyncReadJob_dtor));
+        MH_CreateHook(LPVOID(fs + 0x23860),
+            Hooked_CBaseFileSystem__SyncRead,
+            reinterpret_cast<LPVOID*>(&Original_CBaseFileSystem__SyncRead));
+        MH_CreateHook(LPVOID(fs + 0x23490),
+            CFileAsyncReadJob_dtor,
+            reinterpret_cast<LPVOID*>(&Original_CFileAsyncReadJob_dtor));
+    }
+    else {
+        MH_CreateHook(
+            reinterpret_cast<LPVOID>(fs + 0x180090),
+            r1dc_init,
+            (void**)&original_lzham_decompressor_init
+        );
+        MH_CreateHook(
+            reinterpret_cast<LPVOID>(fs + 0x1800A0),
+            r1dc_reinit,
+            (void**)&original_lzham_decompressor_reinit
+        );
+        MH_CreateHook(
+            reinterpret_cast<LPVOID>(fs + 0x1800B0),
+            r1dc_deinit,
+            (void**)&original_lzham_decompressor_deinit
+        );
+        MH_CreateHook(
+            reinterpret_cast<LPVOID>(fs + 0x1800C0),
+            r1dc_decompress,
+            (void**)&original_lzham_decompressor_decompress
+        );
+    }
     MH_EnableHook(MH_ALL_HOOKS);
 }
