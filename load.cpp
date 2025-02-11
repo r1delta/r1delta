@@ -1514,6 +1514,52 @@ __int64 XmaCallback()
 	return oXmaCallback();
 }
 
+typedef char* (*GetUserIDString_t)(void* id);
+GetUserIDString_t GetUserIDStringOriginal;
+
+
+typedef struct USERID_s
+{
+	int			idtype;
+	uintptr_t snowflake;
+} USERID_t;
+
+typedef USERID_s*(*GetUserID_t)(__int64 base_client, USERID_s* id);
+
+GetUserID_t GetUserIDOriginal;
+
+
+USERID_s* GetNetworkId(__int64 base_client, USERID_s* userId) {
+	
+	//// get the id from per server token
+	auto var = OriginalCCVar_FindVar(cvarinterface, "delta_server_auth_token");
+
+	if (var->m_Value.m_StringLength < 10) {
+		Warning("Invalid auth token!\n");
+	}
+	
+	try {
+		auto expand = jwt_compact::expandJWT(var->m_Value.m_pszString);
+		auto decoded = jwt::decode(expand);
+		auto discord_id = decoded.get_payload_claim("di").as_string();
+		*(int64*)(base_client + 0x2fc) = stoll(discord_id);
+	}
+	catch (const std::exception& e) {
+		*(int64*)(base_client + 0x2fc) = 0;
+	}
+
+	return GetUserIDOriginal(base_client, userId);
+
+}
+
+
+const char* GetUserIDStringHook(USERID_s* id) {
+	char buffer[256];
+	sprintf(buffer, "%lld", id->snowflake); 
+	return buffer;
+	
+}
+
 void StartDiscordAuth(const CCommand& args) {
 	if (args.ArgC() != 1) {
 		Warning("Usage: delta_start_discord_auth\n");
@@ -1848,7 +1894,12 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook((LPVOID)(server_base + 0x4E2F30), &CPlayer_GetLevel, reinterpret_cast<LPVOID*>(NULL));
 	MH_CreateHook((LPVOID)(server_base + 0x1442D0), &CServerGameDLL_DLLShutdown, reinterpret_cast<LPVOID*>(NULL));
 	MH_CreateHook((LPVOID)(server_base + 0x1532A0), &sub_1801532A0, reinterpret_cast<LPVOID*>(&osub_1801532A0));
+	
+	if (!IsDedicatedServer()) {
+		MH_CreateHook((LPVOID)(engine_base_spec + 0xD5260), &GetUserIDStringHook, reinterpret_cast<LPVOID*>(&GetUserIDStringOriginal));
+		MH_CreateHook((LPVOID)(engine_base_spec + 0xD5430), &GetNetworkId, reinterpret_cast<LPVOID*>(&GetUserIDOriginal));
 
+	}
 	if (!IsDedicatedServer()) {
 		MH_CreateHook((LPVOID)(engine_base_spec + 0x1E2930), &CNetChan__SendDatagramLISTEN_Part2_Hook, reinterpret_cast<LPVOID*>(&oCNetChan__SendDatagramLISTEN_Part2));
 	}
