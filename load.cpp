@@ -1122,6 +1122,7 @@ struct AuthResponse {
 	char failureReason[256];
 	char discordName[32];
 	char pomeloName[32];
+	int64 discordId = 0;
 };
 
 
@@ -1218,20 +1219,21 @@ AuthResponse Server_AuthCallback(bool loopback, const char* serverIP, const char
 		// Extract minimal claims.
 		std::string displayName = decoded.get_payload_claim("dn").as_string();
 		std::string pomeloName = decoded.get_payload_claim("p").as_string();
-
+		std::string id = decoded.get_payload_claim("di").as_string();
 		// Extra check: the token’s server_ip must match exactly.
 		std::string tokenServerIP = decoded.get_payload_claim("s").as_string();
-		if (tokenServerIP != serverIP && !loopback) {
+		/*if (tokenServerIP != serverIP && !loopback) {
 			response.success = false;
 			strncpy(response.failureReason, "Token server IP mismatch", sizeof(response.failureReason));
 			return response;
-		}
+		}*/
 
 		response.success = true;
 		strncpy(response.discordName, displayName.c_str(), sizeof(response.discordName) - 1);
 		response.discordName[sizeof(response.discordName) - 1] = '\0';
 		strncpy(response.pomeloName, pomeloName.c_str(), sizeof(response.pomeloName) - 1);
 		response.pomeloName[sizeof(response.pomeloName) - 1] = '\0';
+		response.discordId = std::stoll(id);
 		return response;
 	}
 	catch (const std::exception& e) {
@@ -1298,6 +1300,7 @@ bool __fastcall HookedCBaseClientConnect(
 					V_snprintf(a8, a9, "%s", res.failureReason);
 					return false;
 				}
+				*(int64*)(a1 + 0x2fc) = res.discordId;
 				if (res.success && iSyncUsernameWithDiscord->m_Value.m_nValue != 0) {
 					const char* newName = (iSyncUsernameWithDiscord->m_Value.m_nValue == 1) ? res.discordName : res.pomeloName;
 					// Update the client's "name" convar.
@@ -1381,6 +1384,7 @@ __int64 __fastcall HookedCBaseStateClientConnect(
 			Msg("Server Auth Token Length: %d\n", var->m_Value.m_StringLength);
 			auto decoded = jwt::decode(token);
 			std::string pomeloName = decoded.get_payload_claim("p").as_string();
+			std::string id = decoded.get_payload_claim("di").as_string();
 			SetConvarStringOriginal(OriginalCCVar_FindVar(cvarinterface, "name"), pomeloName.c_str());
 			SetConvarStringOriginal(OriginalCCVar_FindVar(cvarinterface, "hostname"), (pomeloName+"'s R1Delta Server").c_str());
 		}
@@ -1527,30 +1531,6 @@ typedef struct USERID_s
 typedef USERID_s*(*GetUserID_t)(__int64 base_client, USERID_s* id);
 
 GetUserID_t GetUserIDOriginal;
-
-
-USERID_s* GetNetworkId(__int64 base_client, USERID_s* userId) {
-	
-	//// get the id from per server token
-	auto var = OriginalCCVar_FindVar(cvarinterface, "delta_server_auth_token");
-
-	if (var->m_Value.m_StringLength < 10) {
-		Warning("Invalid auth token!\n");
-	}
-	
-	try {
-		auto expand = jwt_compact::expandJWT(var->m_Value.m_pszString);
-		auto decoded = jwt::decode(expand);
-		auto discord_id = decoded.get_payload_claim("di").as_string();
-		*(int64*)(base_client + 0x2fc) = stoll(discord_id);
-	}
-	catch (const std::exception& e) {
-		*(int64*)(base_client + 0x2fc) = 0;
-	}
-
-	return GetUserIDOriginal(base_client, userId);
-
-}
 
 
 const char* GetUserIDStringHook(USERID_s* id) {
@@ -1897,7 +1877,7 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	
 	if (!IsDedicatedServer()) {
 		MH_CreateHook((LPVOID)(engine_base_spec + 0xD5260), &GetUserIDStringHook, reinterpret_cast<LPVOID*>(&GetUserIDStringOriginal));
-		MH_CreateHook((LPVOID)(engine_base_spec + 0xD5430), &GetNetworkId, reinterpret_cast<LPVOID*>(&GetUserIDOriginal));
+	//	MH_CreateHook((LPVOID)(engine_base_spec + 0xD5430), &GetNetworkId, reinterpret_cast<LPVOID*>(&GetUserIDOriginal));
 
 	}
 	if (!IsDedicatedServer()) {
