@@ -30,6 +30,7 @@
 #include "MinHook.h"  // Adjust include path as needed
 #include "audio.h"
 #include "load.h"
+#include "logging.h"
 
 // --------------------------------------------------------------------------
 // Constants, marker
@@ -41,7 +42,7 @@ static const size_t MAX_CHUNK_COMPRESSED_SIZE = 1U << 20; // 1 MB max compressed
 // Original function pointer types for fallback to LZHAM
 // --------------------------------------------------------------------------
 typedef void* (*r1dc_init_t)     (void* params);
-typedef __int64  (*r1dc_reinit_t)   (void* p);
+typedef __int64  (*r1dc_reinit_t)   (void* p, void* unk1, void* unk2, void* unk3);
 typedef __int64  (*r1dc_deinit_t)   (void* p);
 typedef __int64  (*r1dc_decompress_t)(
     void* p,
@@ -108,7 +109,7 @@ void* r1dc_init(void* params)
 // --------------------------------------------------------------------------
 // r1dc_reinit: Called each time the engine wants to start a new chunk
 // --------------------------------------------------------------------------
-__int64 r1dc_reinit(void* p)
+__int64 r1dc_reinit(void* p, void* unk1, void* unk2, void* unk3)
 {
     if (!p) return 0;
     r1dc_context_t* ctx = static_cast<r1dc_context_t*>(p);
@@ -130,7 +131,7 @@ __int64 r1dc_reinit(void* p)
 
     // Also re-init the fallback LZHAM context
     if (ctx->lzham_ctx) {
-        return original_lzham_decompressor_reinit(ctx->lzham_ctx);
+        return original_lzham_decompressor_reinit(ctx->lzham_ctx, unk1, unk2, unk3);
     }
     return 0;
 }
@@ -148,7 +149,7 @@ __int64 r1dc_deinit(void* p)
     if (ctx->lzham_ctx)
     {
         ret = original_lzham_decompressor_deinit(ctx->lzham_ctx);
-       // ctx->lzham_ctx = nullptr;
+        ctx->lzham_ctx = nullptr;
     }
 
     // Free any leftover decompression buffer
@@ -259,7 +260,7 @@ __int64 r1dc_decompress(
             if (ctx->totalComp + n > MAX_CHUNK_COMPRESSED_SIZE)
             {
                 // This is an error or extremely unexpected
-                fprintf(stderr, "[r1dc] Error: compressed data exceeds 1MB chunk limit!\n");
+                Warning("[r1dc] Error: compressed data exceeds 1MB chunk limit!\n");
                 // You could return an error code here:
                 //   return some negative or engine-specific error
                 n = MAX_CHUNK_COMPRESSED_SIZE - ctx->totalComp;
@@ -295,7 +296,7 @@ __int64 r1dc_decompress(
                 );
                 if (ZSTD_isError(actualSize))
                 {
-                    fprintf(stderr, "[r1dc] ZSTD decompress error: %s\n",
+                    Warning("[r1dc] ZSTD decompress error: %s\n",
                         ZSTD_getErrorName(actualSize));
                     // Return an error code so the engine sees we failed
                     return -1;
@@ -337,7 +338,42 @@ __int64 r1dc_decompress(
     // Not done yet
     return 0;
 }
+int (*osub_180019350)(__int64 a1, char* a2, unsigned __int8* a3, unsigned int a4, char a5, int a6);
+#define PATHSEPARATOR(c) ((c) == '\\' || (c) == '/')
+void  V_StripFilename(char* path)
+{
+    int             length;
 
+    length = V_strlen(path) - 1;
+    if (length <= 0)
+        return;
+
+    while (length > 0 &&
+        !PATHSEPARATOR(path[length]))
+    {
+        length--;
+    }
+
+    path[length] = 0;
+}
+
+int sub_180019350(__int64 a1, char* a2, unsigned __int8* a3, unsigned int a4, char a5, int a6)
+{
+
+    if (V_stristr(a2, "PLATFORM") || *a2 == '.' || strlen(a2) < 3 || V_stristr((char*)a3, "EXECUTABLE_PATH")) {
+        //return 0;
+        //reinterpret_cast<void(*)(__int64 a1, char* a2, unsigned __int8* a3)>(G_filesystem_stdio + 0x16CB0)(a1, a2, a3);
+        
+
+        a2 = (char*)"\x00";
+    }
+    auto ret = osub_180019350(a1, a2, a3, a4, a5, a6);
+
+    //if (V_stristr((char*)a2, "PLATFORM") || V_stristr((char*)a3, "EXECUTABLE_PATH")) {
+    //    reinterpret_cast<void(*)(__int64 a1, unsigned __int8* a2)>(G_filesystem_stdio + 0x16EC0)(a1, a3);
+    //}
+    return ret;
+}
 // --------------------------------------------------------------------------
 // Hook setup: Adjust addresses as needed
 // --------------------------------------------------------------------------
@@ -375,6 +411,9 @@ void InitCompressionHooks()
         MH_CreateHook(LPVOID(fs + 0x23490),
             CFileAsyncReadJob_dtor,
             reinterpret_cast<LPVOID*>(&Original_CFileAsyncReadJob_dtor));
+        MH_CreateHook(LPVOID(fs + 0x19350),
+            sub_180019350,
+            reinterpret_cast<LPVOID*>(&osub_180019350));
     }
     else
     {
