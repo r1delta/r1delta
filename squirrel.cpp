@@ -925,32 +925,40 @@ void ConvertScriptVariant(ScriptVariant_t* variant, ConversionDirection directio
 
 // Function to check if server.dll is in the call stack
 // TODO(mrsteyk): performance
-__forceinline bool serverRunning(void* a1) {
+// Helper constant for the diag prints offset.
+constexpr uintptr_t DIAG_PRINTS_OFFSET = 0xe8;
+
+// Optional helper to get the diag prints pointer from a VM.
+inline char* getDiagPrints(void* vm) {
+	return *reinterpret_cast<char**>(reinterpret_cast<uintptr_t>(vm) + DIAG_PRINTS_OFFSET);
+}
+
+__forceinline bool serverRunning(void* vmInstance) {
+	// If we're a dedicated server, we're obviously running.
 	if (IsDedicatedServer())
 		return true;
-	//return isServerScriptVM || a1 == realvmptr || a1 == fakevmptr || (realvmptr && a1 == *(void**)(((uintptr_t)realvmptr + 8)));
-	if (isServerScriptVM || a1 == realvmptr || a1 == fakevmptr || (realvmptr && a1 == *(void**)(((uintptr_t)realvmptr + 8))))
-		return true; // SQVM handle check
 
-	// NOTE(mrsteyk): Server VM exists? If no, we can't be running server.
+	// Check early-out conditions.
+	if (isServerScriptVM ||
+		vmInstance == realvmptr ||
+		vmInstance == fakevmptr ||
+		(realvmptr && vmInstance == *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(realvmptr) + sizeof(void*))))
+	{
+		return true;
+	}
+
+	// If we don't have a valid real VM pointer, the server isn't running.
 	if (!realvmptr)
 		return false;
 
-	const HMODULE serverDllBase = (HMODULE)G_server;
-	const SIZE_T serverDllSize = 0xFB5000; // no comment
-	constexpr size_t stack_size = 72;
-	void* stack[stack_size];
+	// Compare diag prints pointers to verify if this VM is actually the server.
+	// The idea: if the diag prints (at offset DIAG_PRINTS_OFFSET) match, it's the server in disguise.
+	char* vmDiagPrints = getDiagPrints(vmInstance);
+	char* serverDiagPrints = getDiagPrints(static_cast<R1SquirrelVM*>(realvmptr)->sqvm);
 
-	USHORT frames = CaptureStackBackTrace(0, stack_size, stack, NULL);
-
-	for (USHORT i = 0; i < frames; i++) {
-		if ((stack[i] >= serverDllBase) && ((ULONG_PTR)stack[i] < (ULONG_PTR)serverDllBase + serverDllSize)) {
-			return TRUE;
-		}
-	}
-
-	return FALSE;
+	return vmDiagPrints && serverDiagPrints && (vmDiagPrints == serverDiagPrints);
 }
+
 
 const char* FieldTypeToString(int fieldType)
 {
