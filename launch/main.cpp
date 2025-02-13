@@ -572,6 +572,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine,
 	if (!strstr(lpCmdLine, "-bunny")) {
 		try {
 			DoSteamStart(lpCmdLine);
+			return 1;
 		}
 		catch(...) {
 			MessageBox(nullptr, L"An error occurred while trying to connect to steam. Launching game normally", L"R1", 0);
