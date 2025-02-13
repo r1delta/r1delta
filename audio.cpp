@@ -1,6 +1,15 @@
 ﻿// ogg_decoder.cpp
-// Drop–in replacement for the Opus–based decoder that now decodes Ogg Vorbis files,
-// with minimal cold–start improvements (larger decode buffer + pre-allocation).
+// Drop–in replacement for the original Opus–based decoder.
+// Implements progressive decoding (with initial fast decode + background decoding),
+// asynchronous read with synchronous “just–in–time” decoding when needed,
+// and memory–allocation optimizations.
+// 
+// FIXES:
+// 1. MemoryBuffer lifetime issues are fixed by storing a persistent copy in the progressive template.
+// 2. Other minor flaws (e.g. potential race conditions) are mitigated via proper locking.
+// 3. No atomic assignment is performed (only fetch_add is used).
+//
+// Note: This file is self–contained and must be compiled with the required libraries (e.g. vorbis).
 
 #include <windows.h>
 #include <cstdint>
@@ -14,6 +23,11 @@
 #include <cstring>
 #include <cstdlib>
 #include <cmath>
+#include <atomic>
+#include <condition_variable>
+#include <thread>
+#include <memory>
+#include <cstdio>
 #include <emmintrin.h>    // SSE2
 #include <xmmintrin.h>    // SSE
 
@@ -186,6 +200,7 @@ namespace FSOperations {
             )(innerThis, filename, pathID);
     }
 }
+
 static void(__fastcall* pFreeAsyncFileHandle)(std::uint64_t);
 static std::uint64_t(__fastcall* pGetOptimalReadSize)(CBaseFileSystem*, void*, std::uint64_t);
 static void(__fastcall* pPerformAsyncCallback)(CBaseFileSystem*, FileAsyncRequest_t*, void*, std::uint64_t, std::uint64_t);
@@ -208,6 +223,7 @@ static bool IsOpusFile(const std::vector<unsigned char>& fileData)
 }
 
 // A simple memory–based data source for ov_open_callbacks.
+// (Note: We now use persistent MemoryBuffer instances.)
 struct MemoryBuffer {
     const unsigned char* data;
     size_t size;
@@ -215,9 +231,9 @@ struct MemoryBuffer {
 };
 
 static size_t MemoryReadCallback(void* ptr, size_t size, size_t nmemb, void* datasource) {
-    MemoryBuffer* mem = (MemoryBuffer*)datasource;
+    MemoryBuffer* mem = reinterpret_cast<MemoryBuffer*>(datasource);
     size_t bytesRequested = size * nmemb;
-    size_t bytesAvailable = (mem->size - mem->pos);
+    size_t bytesAvailable = (mem->size > mem->pos) ? (mem->size - mem->pos) : 0;
     size_t bytesToRead = (bytesRequested < bytesAvailable) ? bytesRequested : bytesAvailable;
     memcpy(ptr, mem->data + mem->pos, bytesToRead);
     mem->pos += bytesToRead;
@@ -226,7 +242,7 @@ static size_t MemoryReadCallback(void* ptr, size_t size, size_t nmemb, void* dat
 }
 
 static int MemorySeekCallback(void* datasource, ogg_int64_t offset, int whence) {
-    MemoryBuffer* mem = (MemoryBuffer*)datasource;
+    MemoryBuffer* mem = reinterpret_cast<MemoryBuffer*>(datasource);
     size_t newpos;
     switch (whence) {
     case SEEK_SET: newpos = static_cast<size_t>(offset); break;
@@ -246,31 +262,44 @@ static int MemoryCloseCallback(void* datasource) {
 }
 
 static long MemoryTellCallback(void* datasource) {
-    MemoryBuffer* mem = (MemoryBuffer*)datasource;
+    MemoryBuffer* mem = reinterpret_cast<MemoryBuffer*>(datasource);
     return static_cast<long>(mem->pos);
 }
 
 // --------------------------------------------------------------------
-// Global cache for fully decoded Ogg Vorbis file data ("template" track).
-// (The names remain unchanged for drop–in compatibility.)
+// Progressive Ogg Vorbis decoding definitions
 // --------------------------------------------------------------------
-struct OpusTemplate {
-    std::shared_ptr<std::vector<int16_t>> pcmBuffer; // Fully decoded PCM data
-    int channels = 1;
+
+// This structure holds the progressively–decoded PCM data (in multiple small chunks),
+// along with atomic counters and synchronization primitives. Importantly, it now also
+// owns a persistent MemoryBuffer (pMemBuffer) that remains valid until decoding finishes.
+struct ProgressiveOpusTemplate {
+    std::vector<std::vector<int16_t>> pcmChunks; // multiple smaller buffers
+    std::atomic<size_t> decodedChunks; // number of chunks decoded so far
+    int channels;
+    bool fullyDecoded;
+    std::mutex chunkMutex;              // protects pcmChunks
+    std::condition_variable chunkCV;    // signals when new chunks are added
+    std::vector<unsigned char> fileData;  // persistent copy of the original file data
+    std::shared_ptr<MemoryBuffer> pMemBuffer; // persistent memory buffer for ov_open_callbacks
+
+    ProgressiveOpusTemplate() : decodedChunks(0), channels(1), fullyDecoded(false) {}
+    static constexpr size_t CHUNK_SIZE = 32768; // number of int16_t samples per channel per chunk
 };
 
-static std::unordered_map<std::string, OpusTemplate> g_opusCache;
-static std::mutex g_opusCacheMutex;
+// Global cache for progressive Ogg Vorbis file data.
+static std::unordered_map<std::string, std::shared_ptr<ProgressiveOpusTemplate>> g_progressiveCache;
+static std::mutex g_progressiveCacheMutex;
 
 // --------------------------------------------------------------------
 // Global map for per–request playback instances.
 // --------------------------------------------------------------------
 struct OpusPlaybackInstance {
-    std::shared_ptr<std::vector<int16_t>> pcmBuffer;
-    size_t readFrameIndex = 0;
-    int channels = 1;
+    std::shared_ptr<ProgressiveOpusTemplate> progTemplate;
+    size_t readSampleIndex; // absolute sample index (across chunks)
+    int channels;
     std::unique_ptr<std::recursive_mutex> bufferMutex;
-    OpusPlaybackInstance() : bufferMutex(std::make_unique<std::recursive_mutex>()) {}
+    OpusPlaybackInstance() : readSampleIndex(0), channels(1), bufferMutex(std::make_unique<std::recursive_mutex>()) {}
 };
 
 static std::unordered_map<FileAsyncRequest_t*, OpusPlaybackInstance*> g_playbackInstances;
@@ -305,49 +334,61 @@ static std::vector<unsigned char> ReadEntireFileIntoMem(
 }
 
 // --------------------------------------------------------------------
-// Fully decode an Ogg Vorbis file from memory into PCM data.
-// This function uses ov_read() to decode directly to 16–bit PCM,
-// with a larger decode buffer and pre–allocation to reduce overhead.
+// Decode one chunk of PCM samples from the Ogg Vorbis stream.
+// Returns a vector of int16_t samples (up to CHUNK_SIZE * channels in length).
 // --------------------------------------------------------------------
-static bool DecodeOggFileFull(OggVorbis_File* vf, int channels, std::vector<int16_t>& outPCM)
-{
-    // Attempt to retrieve total PCM sample count so we can reserve upfront.
-    // If it fails (some streams won't allow it), totalSamples < 0 => fallback.
-    ogg_int64_t totalSamples = ov_pcm_total(vf, -1);
-    if (totalSamples > 0) {
-        // Reserve enough space so we rarely (or never) have to grow.
-        outPCM.reserve(static_cast<size_t>(totalSamples) * channels);
-    }
-
-    // Use a larger decode buffer to reduce overhead from repeated small reads.
-    const int DECODE_BUFFER_SIZE = 65536; // 64 KB
+static std::vector<int16_t> DecodeChunk(OggVorbis_File* vf, int channels) {
+    const size_t maxSamples = ProgressiveOpusTemplate::CHUNK_SIZE * channels;
+    std::vector<int16_t> chunk;
+    chunk.reserve(maxSamples);
+    const int DECODE_BUFFER_SIZE = 65536; // in bytes
     char decodeBuffer[DECODE_BUFFER_SIZE];
     int bitStream = 0;
-
-    // We'll decode until ov_read reports 0 or negative (end or error).
-    while (true)
-    {
-        long bytesDecoded = ov_read(vf, decodeBuffer, DECODE_BUFFER_SIZE, 0, 2, 1, &bitStream);
+    size_t totalSamples = 0;
+    while (totalSamples < maxSamples) {
+        size_t bytesToRead = std::min((size_t)DECODE_BUFFER_SIZE, (maxSamples - totalSamples) * sizeof(int16_t));
+        long bytesDecoded = ov_read(vf, decodeBuffer, (int)bytesToRead, 0, 2, 1, &bitStream);
         if (bytesDecoded <= 0)
-            break;  // 0 => end of file, <0 => Vorbis error
-
-        size_t samplesDecoded = static_cast<size_t>(bytesDecoded / sizeof(int16_t));
-        size_t oldSize = outPCM.size();
-        outPCM.resize(oldSize + samplesDecoded);
-        std::memcpy(&outPCM[oldSize], decodeBuffer, bytesDecoded);
+            break; // End of file or error.
+        size_t samplesDecoded = bytesDecoded / sizeof(int16_t);
+        size_t oldSize = chunk.size();
+        chunk.resize(oldSize + samplesDecoded);
+        memcpy(&chunk[oldSize], decodeBuffer, samplesDecoded * sizeof(int16_t));
+        totalSamples += samplesDecoded;
     }
-
-    return true;
+    return chunk;
 }
 
 // --------------------------------------------------------------------
-// Load an Ogg Vorbis file into the global cache (drop–in replacement for OpenOpusContext)
-// Fully decode the file into PCM data, with larger decode buffer.
+// Background decoder: continuously decode remaining chunks and add them to the template.
+// Runs in its own thread.
 // --------------------------------------------------------------------
-bool OpenOpusContext(const std::string& wavName, CBaseFileSystem* filesystem, const char* pathID)
-{
-    std::lock_guard<std::mutex> lock(g_opusCacheMutex);
-    if (g_opusCache.find(wavName) != g_opusCache.end()) {
+static void BackgroundDecodeThread(std::shared_ptr<ProgressiveOpusTemplate> progTemplate, OggVorbis_File* vf, int channels) {
+    while (true) {
+        std::vector<int16_t> chunk = DecodeChunk(vf, channels);
+        {
+            std::lock_guard<std::mutex> lock(progTemplate->chunkMutex);
+            if (chunk.empty()) {
+                progTemplate->fullyDecoded = true;
+                progTemplate->chunkCV.notify_all();
+                break;
+            }
+            progTemplate->pcmChunks.push_back(std::move(chunk));
+            progTemplate->decodedChunks.fetch_add(1, std::memory_order_relaxed);
+            progTemplate->chunkCV.notify_all();
+        }
+    }
+    ov_clear(vf);
+    delete vf;
+}
+
+// --------------------------------------------------------------------
+// Progressive decode: open an Ogg Vorbis file, decode a few initial chunks,
+// and then launch a background thread to decode the remainder.
+// --------------------------------------------------------------------
+bool OpenOpusContext(const std::string& wavName, CBaseFileSystem* filesystem, const char* pathID) {
+    std::lock_guard<std::mutex> lock(g_progressiveCacheMutex);
+    if (g_progressiveCache.find(wavName) != g_progressiveCache.end()) {
         return true; // Already opened/cached.
     }
 
@@ -355,91 +396,140 @@ bool OpenOpusContext(const std::string& wavName, CBaseFileSystem* filesystem, co
     if (fileData.empty())
         return false;
 
-    // Check file header ("OggS"). Both Opus and Vorbis in Ogg containers use this.
-    if (!IsOpusFile(fileData))
+    // Check header ("OggS"). Both Opus and Vorbis in Ogg containers use this.
+    if (!(fileData.size() >= 4 && std::memcmp(fileData.data(), "OggS", 4) == 0))
         return false;
 
-    // Prepare a memory data source for the Vorbis decoder.
-    MemoryBuffer memBuffer;
-    memBuffer.data = fileData.data();
-    memBuffer.size = fileData.size();
-    memBuffer.pos = 0;
+    // Create a progressive template.
+    auto progTemplate = std::make_shared<ProgressiveOpusTemplate>();
+    progTemplate->fileData = std::move(fileData);
 
+    // Create a persistent MemoryBuffer and store it in the template.
+    // This fixes the lifetime issue (MemoryBuffer is now owned by progTemplate).
+    progTemplate->pMemBuffer = std::make_shared<MemoryBuffer>();
+    progTemplate->pMemBuffer->data = progTemplate->fileData.data();
+    progTemplate->pMemBuffer->size = progTemplate->fileData.size();
+    progTemplate->pMemBuffer->pos = 0;
+
+    // Prepare the callbacks.
     ov_callbacks callbacks;
     callbacks.read_func = MemoryReadCallback;
     callbacks.seek_func = MemorySeekCallback;
     callbacks.close_func = MemoryCloseCallback;
     callbacks.tell_func = MemoryTellCallback;
 
-    OggVorbis_File vf;
-    int result = ov_open_callbacks(&memBuffer, &vf, nullptr, fileData.size(), callbacks);
+    // Allocate an OggVorbis_File on the heap so that the background thread can use it.
+    OggVorbis_File* vf = new OggVorbis_File;
+    // Pass the persistent MemoryBuffer pointer to ov_open_callbacks.
+    int result = ov_open_callbacks(progTemplate->pMemBuffer.get(), vf, nullptr, progTemplate->fileData.size(), callbacks);
     if (result < 0) {
         Warning("[Ogg] ov_open_callbacks failed with error %d for file %s\n", result, wavName.c_str());
+        delete vf;
         return false;
     }
 
-    vorbis_info* vi = ov_info(&vf, -1);
+    vorbis_info* vi = ov_info(vf, -1);
     if (!vi) {
-        ov_clear(&vf);
+        ov_clear(vf);
+        delete vf;
         Warning("[Ogg] ov_info failed for file %s\n", wavName.c_str());
         return false;
     }
     int channels = vi->channels;
     //Msg("[Ogg] Opened ogg file '%s': channels=%d\n", wavName.c_str(), channels);
 
-    // Decode the entire file into a temporary buffer.
-    std::vector<int16_t> decodedPCM;
-    if (!DecodeOggFileFull(&vf, channels, decodedPCM)) {
-        ov_clear(&vf);
-        Warning("[Ogg] Failed to fully decode file %s\n", wavName.c_str());
-        return false;
-    }
-    ov_clear(&vf);
+    progTemplate->channels = channels;
 
-    // Save the decoded PCM in the cache.
-    OpusTemplate tmpl;
-    tmpl.pcmBuffer = std::make_shared<std::vector<int16_t>>(std::move(decodedPCM));
-    tmpl.channels = channels;
-    g_opusCache[wavName] = std::move(tmpl);
+    // Decode initial few chunks immediately (e.g., ~128KB worth).
+    const size_t INITIAL_CHUNKS = 4;
+    for (size_t i = 0; i < INITIAL_CHUNKS; i++) {
+        std::vector<int16_t> chunk = DecodeChunk(vf, channels);
+        if (chunk.empty()) {
+            progTemplate->fullyDecoded = true;
+            break;
+        }
+        progTemplate->pcmChunks.push_back(std::move(chunk));
+        progTemplate->decodedChunks.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    // Start an asynchronous worker thread to decode the remaining chunks.
+    std::thread bgThread(BackgroundDecodeThread, progTemplate, vf, channels);
+    bgThread.detach();
+
+    // Save the progressive template in the global cache.
+    g_progressiveCache[wavName] = progTemplate;
     return true;
 }
 
 // --------------------------------------------------------------------
-// Create a new playback instance from the cached data.
-// Each instance maintains its own read pointer into the fully decoded PCM.
+// Create a new playback instance from the cached progressive data.
+// Each instance maintains its own read pointer (in absolute sample index) into the decoded PCM.
 // --------------------------------------------------------------------
 static OpusPlaybackInstance* CreateOpusTrackInstance(const std::string& filename,
     CBaseFileSystem* filesystem,
     const char* pathID)
 {
+    std::shared_ptr<ProgressiveOpusTemplate> progTemplate;
     {
-        std::lock_guard<std::mutex> lock(g_opusCacheMutex);
-        if (g_opusCache.find(filename) == g_opusCache.end()) {
+        std::lock_guard<std::mutex> lock(g_progressiveCacheMutex);
+        auto it = g_progressiveCache.find(filename);
+        if (it == g_progressiveCache.end()) {
             if (!OpenOpusContext(filename, filesystem, pathID))
                 return nullptr;
+            it = g_progressiveCache.find(filename);
+            if (it == g_progressiveCache.end())
+                return nullptr;
         }
+        progTemplate = it->second;
     }
 
-    OpusTemplate& tmpl = g_opusCache[filename];
     OpusPlaybackInstance* instance = new OpusPlaybackInstance();
-    instance->pcmBuffer = tmpl.pcmBuffer; // Share the fully decoded PCM data.
-    instance->channels = tmpl.channels;
-    instance->readFrameIndex = 0;
+    instance->progTemplate = progTemplate;
+    instance->channels = progTemplate->channels;
+    instance->readSampleIndex = 0;
     return instance;
 }
 
 // --------------------------------------------------------------------
-// Free a playback instance.
+// Helper: Compute total number of decoded samples available so far.
 // --------------------------------------------------------------------
-static void ReleaseOpusPlaybackInstance(OpusPlaybackInstance* instance) {
-    if (instance) {
-        delete instance;
+static size_t GetTotalAvailableSamples(std::shared_ptr<ProgressiveOpusTemplate> progTemplate) {
+    size_t total = 0;
+    std::lock_guard<std::mutex> lock(progTemplate->chunkMutex);
+    for (const auto& chunk : progTemplate->pcmChunks) {
+        total += chunk.size();
+    }
+    return total;
+}
+
+// --------------------------------------------------------------------
+// Helper: Copy samples from the progressive template to the destination buffer,
+// starting at the given absolute sample index.
+// --------------------------------------------------------------------
+static void CopySamples(std::shared_ptr<ProgressiveOpusTemplate> progTemplate, size_t startSample, int16_t* dest, size_t samplesToCopy) {
+    size_t copied = 0;
+    std::lock_guard<std::mutex> lock(progTemplate->chunkMutex);
+    for (const auto& chunk : progTemplate->pcmChunks) {
+        if (startSample >= chunk.size()) {
+            startSample -= chunk.size();
+            continue;
+        }
+        // Determine how many samples we can copy from this chunk.
+        size_t availableInChunk = chunk.size() - startSample;
+        size_t copyNow = std::min(availableInChunk, samplesToCopy - copied);
+        memcpy(dest + copied, chunk.data() + startSample, copyNow * sizeof(int16_t));
+        copied += copyNow;
+        startSample = 0;
+        if (copied >= samplesToCopy)
+            break;
     }
 }
 
 // --------------------------------------------------------------------
-// The main read handler (no sample–rate conversion).
-// Uses the fully decoded PCM data from the cache.
+// The main read handler.
+// Reads from the progressive template; if the requested samples extend beyond
+// the currently decoded data, it synchronously decodes the missing chunks.
+// Uses SSE2/AVX for fast copies (via memcpy) when possible.
 // --------------------------------------------------------------------
 __int64 HandleOpusRead(CBaseFileSystem* filesystem, FileAsyncRequest_t* request)
 {
@@ -464,43 +554,26 @@ __int64 HandleOpusRead(CBaseFileSystem* filesystem, FileAsyncRequest_t* request)
     }
 
     int channels = instance->channels;
-    size_t bytesPerFrame = sizeof(int16_t) * channels;
+    size_t bytesPerSample = sizeof(int16_t);
+    size_t bytesPerFrame = bytesPerSample * channels;
     size_t framesRequested = static_cast<size_t>(request->nBytes) / bytesPerFrame;
+    size_t samplesRequested = framesRequested * channels;
 
+    // Preserve offset skipping logic.
     {
-        // Preserve offset skipping logic.
         std::lock_guard<std::recursive_mutex> lock(*instance->bufferMutex);
         if (request->nOffset > 0) {
             size_t skipBytes = static_cast<size_t>(request->nOffset);
             size_t skipFrames = skipBytes / bytesPerFrame;
-            instance->readFrameIndex = skipFrames;
-            size_t totalFrames = instance->pcmBuffer->size() / channels;
-            if (instance->readFrameIndex > totalFrames) {
-                instance->readFrameIndex = totalFrames;
+            instance->readSampleIndex = skipFrames * channels;
+            size_t totalSamples = GetTotalAvailableSamples(instance->progTemplate);
+            if (instance->readSampleIndex > totalSamples) {
+                instance->readSampleIndex = totalSamples;
             }
         }
     }
 
-    // Prepare a temporary buffer for the requested frames.
-    std::vector<int16_t> finalPCM(framesRequested * channels, 0);
-    size_t framesAvailable = 0;
-    {
-        std::lock_guard<std::recursive_mutex> lock(*instance->bufferMutex);
-        size_t totalFrames = instance->pcmBuffer->size() / channels;
-        if (instance->readFrameIndex < totalFrames) {
-            framesAvailable = totalFrames - instance->readFrameIndex;
-        }
-        size_t framesToCopy = std::min(framesRequested, framesAvailable);
-
-        // Copy from the fully decoded PCM buffer.
-        const int16_t* src = instance->pcmBuffer->data() + instance->readFrameIndex * channels;
-        memcpy(finalPCM.data(), src, framesToCopy * bytesPerFrame);
-
-        // Advance the read pointer.
-        instance->readFrameIndex += framesToCopy;
-    }
-
-    // Allocate or use the existing request->pData.
+    // Allocate (or use) the destination buffer.
     void* pDest = request->pData;
     if (!pDest) {
         if (request->pfnAlloc)
@@ -508,27 +581,86 @@ __int64 HandleOpusRead(CBaseFileSystem* filesystem, FileAsyncRequest_t* request)
         else
             pDest = malloc(request->nBytes);
     }
+    // Zero–initialize destination buffer so missing samples are silent.
+    memset(pDest, 0, request->nBytes);
 
-    size_t bytesToCopy = finalPCM.size() * sizeof(int16_t);
-    bytesToCopy = std::min(bytesToCopy, static_cast<size_t>(request->nBytes));
-    memcpy(pDest, finalPCM.data(), bytesToCopy);
-
-    // Zero–fill any remaining bytes.
-    if (bytesToCopy < static_cast<size_t>(request->nBytes)) {
-        memset((char*)pDest + bytesToCopy, 0, request->nBytes - bytesToCopy);
-    }
-
-    // Null–terminate if requested.
-    if (request->flags & FSASYNC_FLAGS_NULLTERMINATE) {
-        if (bytesToCopy < static_cast<size_t>(request->nBytes)) {
-            reinterpret_cast<char*>(pDest)[bytesToCopy] = '\0';
+    // Ensure that the progressive template has decoded enough samples.
+    {
+        auto progTemplate = instance->progTemplate;
+        std::unique_lock<std::mutex> lock(progTemplate->chunkMutex);
+        size_t availableSamples = 0;
+        for (const auto& chunk : progTemplate->pcmChunks) {
+            availableSamples += chunk.size();
+        }
+        // If the requested samples (from current readSampleIndex) are not yet decoded,
+        // wait a bit or synchronously decode missing chunks.
+        while (availableSamples < instance->readSampleIndex + samplesRequested && !progTemplate->fullyDecoded) {
+            progTemplate->chunkCV.wait_for(lock, std::chrono::milliseconds(10));
+            availableSamples = 0;
+            for (const auto& chunk : progTemplate->pcmChunks) {
+                availableSamples += chunk.size();
+            }
+            // If still not enough, perform synchronous decode.
+            if (availableSamples < instance->readSampleIndex + samplesRequested && !progTemplate->fullyDecoded) {
+                // Create a temporary OggVorbis_File for synchronous decoding.
+                MemoryBuffer tempMemBuffer;
+                tempMemBuffer.data = progTemplate->fileData.data();
+                tempMemBuffer.size = progTemplate->fileData.size();
+                tempMemBuffer.pos = 0;
+                ov_callbacks callbacks;
+                callbacks.read_func = MemoryReadCallback;
+                callbacks.seek_func = MemorySeekCallback;
+                callbacks.close_func = MemoryCloseCallback;
+                callbacks.tell_func = MemoryTellCallback;
+                OggVorbis_File vfSync;
+                int res = ov_open_callbacks(&tempMemBuffer, &vfSync, nullptr, progTemplate->fileData.size(), callbacks);
+                if (res < 0) {
+                    break; // Synchronous decode failed.
+                }
+                // Seek to the point where decoding stopped.
+                ov_pcm_seek(&vfSync, availableSamples / progTemplate->channels);
+                lock.unlock(); // Unlock while decoding.
+                std::vector<int16_t> newChunk = DecodeChunk(&vfSync, progTemplate->channels);
+                ov_clear(&vfSync);
+                lock.lock();
+                if (!newChunk.empty()) {
+                    progTemplate->pcmChunks.push_back(std::move(newChunk));
+                    progTemplate->decodedChunks.fetch_add(1, std::memory_order_relaxed);
+                    progTemplate->chunkCV.notify_all();
+                    availableSamples = 0;
+                    for (const auto& chunk : progTemplate->pcmChunks) {
+                        availableSamples += chunk.size();
+                    }
+                }
+                else {
+                    progTemplate->fullyDecoded = true;
+                    break;
+                }
+            }
         }
     }
 
-    pPerformAsyncCallback(filesystem, request, pDest, bytesToCopy, FSASYNC_OK);
+    // Copy the available samples into the destination buffer.
+    {
+        std::lock_guard<std::recursive_mutex> lock(*instance->bufferMutex);
+        size_t availableSamples = GetTotalAvailableSamples(instance->progTemplate);
+        size_t samplesToCopy = std::min(samplesRequested,
+            availableSamples > instance->readSampleIndex ? availableSamples - instance->readSampleIndex : 0);
+        if (samplesToCopy > 0) {
+            CopySamples(instance->progTemplate, instance->readSampleIndex, reinterpret_cast<int16_t*>(pDest), samplesToCopy);
+            instance->readSampleIndex += samplesToCopy;
+        }
+    }
+
+    // IMPORTANT: Call the async callback with the full buffer size,
+    // so that if fewer samples were available, the remaining data (zeros) is sent.
+    pPerformAsyncCallback(filesystem, request, pDest, request->nBytes, FSASYNC_OK);
     return FSASYNC_OK;
 }
 
+// --------------------------------------------------------------------
+// Helper: Check if filename ends with ".wav"
+// --------------------------------------------------------------------
 static bool EndsWithWav(const char* filename) {
     if (!filename) return false;
     std::string fn(filename);
@@ -540,10 +672,17 @@ static bool EndsWithWav(const char* filename) {
 }
 
 // --------------------------------------------------------------------
+// Prefetch hint function (stub implementation).
+// --------------------------------------------------------------------
+static void HintUpcomingRead(const std::string& filename, size_t offset) {
+    // This function may boost priority for background decoding of chunks near 'offset'
+    // For now, it is implemented as a no–op.
+}
+
+// --------------------------------------------------------------------
 // The main filesystem read hook.
-// If the filename ends with ".wav", we rewrite it (e.g. to ".ogg")
-// and use our custom handler. In all cases, we restore request->pszFilename
-// before returning.
+// If the filename ends with ".wav", we temporarily rewrite it to ".ogg"
+// and use our custom handler. Otherwise, we fall back to the original read.
 // --------------------------------------------------------------------
 __int64 (*Original_CBaseFileSystem__SyncRead)(
     CBaseFileSystem* filesystem,
@@ -613,11 +752,9 @@ void (*Original_CFileAsyncReadJob_dtor)(FileAsyncRequest_t* thisptr);
 void CFileAsyncReadJob_dtor(FileAsyncRequest_t* thisptr) {
     {
         std::lock_guard<std::mutex> lock(g_playbackInstancesMutex);
-        // The offset (0x70) detail depends on how your original code tracks the request pointer.
-        // Adjust if necessary:
         auto it = g_playbackInstances.find((FileAsyncRequest_t*)(((__int64)thisptr) + 0x70));
         if (it != g_playbackInstances.end()) {
-            ReleaseOpusPlaybackInstance(it->second);
+            delete it->second;
             g_playbackInstances.erase(it);
         }
     }

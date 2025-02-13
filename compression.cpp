@@ -253,8 +253,9 @@ __int64 r1dc_decompress(
         }
         else
         {
-            // Peek at the first 8 bytes.
-            uint64_t markerVal = *reinterpret_cast<const uint64_t*>(callerIn);
+            // Safely peek at the first 8 bytes using memcpy.
+            uint64_t markerVal = 0;
+            std::memcpy(&markerVal, callerIn, sizeof(uint64_t));
             ctx->typeDetermined = true;
             if (markerVal == R1D_marker)
             {
@@ -284,17 +285,23 @@ __int64 r1dc_decompress(
     }
 
     // ----------------------------------------------------------------------
-    // Step 3: In ZSTD mode, append all caller input data to our internal input ring buffer.
-    // (Since we have already consumed any marker bytes, we append the rest.)
+    // Step 3: In ZSTD mode, append as much caller input data as possible to our internal input ring buffer.
+    // This fix prevents buffer overflow. Any bytes that cannot be appended remain unconsumed.
     // ----------------------------------------------------------------------
     if (callerInSize > 0)
     {
-        // (We assume there's enough free space in the ring.)
-        RingBuffer_Append(ctx->inputRing, R1DC_INBUF_SIZE,
-            callerIn, callerInSize,
-            ctx->inWritePos, ctx->inDataCount);
-        // Mark caller input as fully consumed.
-        *pIn_buf_size = 0;
+        size_t freeSpace = R1DC_INBUF_SIZE - ctx->inDataCount;
+        size_t toAppend = (std::min)(callerInSize, freeSpace);
+        if (toAppend > 0)
+        {
+            RingBuffer_Append(ctx->inputRing, R1DC_INBUF_SIZE,
+                callerIn, toAppend,
+                ctx->inWritePos, ctx->inDataCount);
+            callerIn += toAppend;
+            callerInSize -= toAppend;
+        }
+        // Update caller's input size to reflect any unconsumed input.
+        *pIn_buf_size = callerInSize;
     }
 
     // ----------------------------------------------------------------------
@@ -376,14 +383,19 @@ __int64 r1dc_decompress(
     *pOut_buf_size = copied;
 
     // ----------------------------------------------------------------------
-    // Step 7: If the decompression frame is complete (frameComplete == true)
-    //         and no data remains in the ring buffers, return -1.
-    //         Otherwise, return 0.
+    // Step 7: If the decompression frame is complete, reset state for the next frame.
+    //         Return -1 if no pending output remains; otherwise, return 0.
     // ----------------------------------------------------------------------
-    if (frameComplete && (ctx->inDataCount == 0) && (ctx->outDataCount == 0))
-        return -1;
-    else
-        return 0;
+    if (frameComplete)
+    {
+        // Reset the stream state so that a subsequent call will detect a new frame.
+        ctx->zstd_inited = false;
+        ctx->typeDetermined = false;
+        // Note: Any leftover input in the ring is assumed to be the start of the next frame.
+        if (ctx->outDataCount == 0)
+            return -1;
+    }
+    return 0;
 }
 
 // --------------------------------------------------------------------------
