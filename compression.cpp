@@ -1,129 +1,49 @@
 // r1dc_hooks.cpp
 //
-// This file implements the r1dc_* hooks that replace the original LZHAM routines with
-// a ZSTD–based decompressor that uses internal ring buffers for both input and output.
-// Compressed data produced by packedstore.cpp is assumed to begin with an 8–byte marker
-// (R1D_marker). If the marker is found, the code uses the ZSTD streaming API with a ring
-// buffer to decompress the data. Otherwise, it falls back to the original LZHAM code.
+// Single-shot ZSTD or fallback LZHAM decompression, with minimal overhead.
 //
-// Note: The function ZSTD_isFrameDone is not part of the official ZSTD API. Instead, this
-// implementation sets a local flag when ZSTD_decompressStream returns 0 (indicating the frame
-// is complete).
+// - If the 8-byte ZSTD marker is present, we accumulate up to 1 MB of compressed data
+//   into a fixed-size buffer. Once we see no_more_input_bytes_flag == 1, we do
+//   a single ZSTD_decompress() directly from that buffer into a single
+//   dynamically allocated buffer, and then feed that out to the game's requests.
+//
+// - If it's not ZSTD, we defer everything to LZHAM's original functions.
+//
+// We return 3 (LZHAM_DECOMP_STATUS_SUCCESS) when we've output all data,
+// so that the calling code sees the same success code it expects from LZHAM.
+//
+// This approach cuts out ring-buffer overhead, repeated streaming calls,
+// repeated allocations, and repeated memcpys.
+//
+// NOTE: We keep the same function signatures as the original code so that
+//       hooking is straightforward. We also keep the hooking addresses at the end,
+//       but you'll need to adjust them for your environment.
+//
 
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cmath>
-#include <algorithm>  // for (std::min)
+#include <algorithm>
+#include <vector>   // only needed if you prefer a dynamic approach for the decompressed buffer
 #include <zstd.h>
 #include "MinHook.h"  // Adjust include path as needed
 #include "audio.h"
 #include "load.h"
 
 // --------------------------------------------------------------------------
-// Compiler-specific "force inline" macro
+// Constants, marker
 // --------------------------------------------------------------------------
-#if defined(_MSC_VER)
-#define R1DC_FORCE_INLINE __forceinline
-#elif defined(__GNUC__) || defined(__clang__)
-#define R1DC_FORCE_INLINE inline __attribute__((always_inline))
-#else
-#define R1DC_FORCE_INLINE inline
-#endif
+constexpr uint64_t R1D_marker = 0x5244315f5f4d4150ULL; // "PAM__1DR" in little-endian
+static const size_t MAX_CHUNK_COMPRESSED_SIZE = 1U << 20; // 1 MB max compressed chunk
 
 // --------------------------------------------------------------------------
-// Constants and Definitions
+// Original function pointer types for fallback to LZHAM
 // --------------------------------------------------------------------------
-
-constexpr uint64_t R1D_marker = 0x5244315f5f4d4150ULL; // Marker written by packedstore.cpp
-
-// Define ring buffer sizes (must be powers of two)
-static constexpr size_t R1DC_INBUF_SIZE = 1 << 20;
-static constexpr size_t R1DC_OUTBUF_SIZE = 1 << 20;
-
-// --------------------------------------------------------------------------
-// Internal context for r1dc hooks
-// --------------------------------------------------------------------------
-struct r1dc_context_t
-{
-    // ZSTD streaming decompression context.
-    ZSTD_DStream* zds;
-    void* lzham_ctx;   // original LZHAM decompressor context
-    bool lzham_inited; // true if the LZHAM decompressor has been initialized
-    bool zstd_inited;  // true if the ZSTD DStream has been initialized
-
-    // Ring buffer for input.
-    uint8_t inputRing[R1DC_INBUF_SIZE];
-    // Monotonic counters and data count.
-    size_t inWritePos;   // total bytes written into the input ring
-    size_t inReadPos;    // total bytes consumed from the input ring
-    size_t inDataCount;  // = inWritePos - inReadPos
-
-    // Ring buffer for output.
-    uint8_t outputRing[R1DC_OUTBUF_SIZE];
-    size_t outWritePos;  // total bytes written into the output ring
-    size_t outReadPos;   // total bytes consumed from the output ring
-    size_t outDataCount; // = outWritePos - outReadPos
-
-    // Marker detection.
-    bool     isZstdChunk;   // true if marker has been detected (i.e. we are in ZSTD mode)
-    uint64_t chunkMarker;   // stores marker (should equal R1D_marker)
-
-    // New flag: whether we have already determined the stream type.
-    bool     typeDetermined;
-};
-
-// --------------------------------------------------------------------------
-// Helper functions: ring buffer utilities.
-// Since our ring buffers are powers of two, we can use bitmasking.
-// --------------------------------------------------------------------------
-
-// Returns a pointer to the contiguous region starting at 'pos' in the ring buffer.
-// 'dataCount' is the number of valid bytes stored in the ring.
-// The function sets 'contigLen' to the length of the contiguous segment.
-R1DC_FORCE_INLINE uint8_t* RingBuffer_GetContiguous(uint8_t* ring, size_t ringSize, size_t pos,
-    size_t dataCount, size_t& contigLen)
-{
-    size_t index = pos & (ringSize - 1);
-    contigLen = (std::min)(dataCount, ringSize - index);
-    return ring + index;
-}
-
-// Append 'len' bytes from src into the ring buffer. Update writePos and dataCount.
-R1DC_FORCE_INLINE void RingBuffer_Append(uint8_t* ring, size_t ringSize,
-    const uint8_t* src, size_t len,
-    size_t& writePos, size_t& dataCount)
-{
-    size_t remaining = len;
-    while (remaining > 0)
-    {
-        size_t index = writePos & (ringSize - 1);
-        size_t space = ringSize - index;
-        size_t toCopy = (std::min)(remaining, space);
-        std::memcpy(ring + index, src, toCopy);
-        src += toCopy;
-        writePos += toCopy;
-        dataCount += toCopy;
-        remaining -= toCopy;
-    }
-}
-
-// Consume (remove) 'len' bytes from the ring buffer by advancing the read pointer.
-R1DC_FORCE_INLINE void RingBuffer_Consume(size_t len, size_t& readPos, size_t& dataCount)
-{
-    readPos += len;
-    dataCount -= len;
-}
-
-// --------------------------------------------------------------------------
-// Original function pointer types and globals for fallback.
-// (These will be set by MinHook when we install our hooks.)
-// --------------------------------------------------------------------------
-typedef void* (*r1dc_init_t)(void* params);
-typedef __int64 (*r1dc_reinit_t)(void* p);
-typedef __int64 (*r1dc_deinit_t)(void* p);
-typedef __int64 (*r1dc_decompress_t)(
+typedef void* (*r1dc_init_t)     (void* params);
+typedef __int64  (*r1dc_reinit_t)   (void* p);
+typedef __int64  (*r1dc_deinit_t)   (void* p);
+typedef __int64  (*r1dc_decompress_t)(
     void* p,
     void* pIn_buf,
     size_t* pIn_buf_size,
@@ -132,90 +52,133 @@ typedef __int64 (*r1dc_decompress_t)(
     int no_more_input_bytes_flag
     );
 
-r1dc_init_t original_lzham_decompressor_init = nullptr;
-r1dc_reinit_t original_lzham_decompressor_reinit = nullptr;
-r1dc_deinit_t original_lzham_decompressor_deinit = nullptr;
-r1dc_decompress_t original_lzham_decompressor_decompress = nullptr;
+// Global pointers to the original LZHAM routines (set by MinHook)
+static r1dc_init_t       original_lzham_decompressor_init = nullptr;
+static r1dc_reinit_t     original_lzham_decompressor_reinit = nullptr;
+static r1dc_deinit_t     original_lzham_decompressor_deinit = nullptr;
+static r1dc_decompress_t original_lzham_decompressor_decompress = nullptr;
 
 // --------------------------------------------------------------------------
-// r1dc hook implementations with ring buffer logic.
+// r1dc context struct
 // --------------------------------------------------------------------------
-
-// r1dc_init: Allocate and initialize a new r1dc context.
-void* r1dc_init(void* a1)
+struct r1dc_context_t
 {
-    r1dc_context_t* ctx = new r1dc_context_t;
+    // LZHAM fallback
+    void* lzham_ctx;
+    bool  lzham_inited;
+
+    // We detect whether the current chunk is ZSTD or not:
+    bool  typeDetermined;
+    bool  isZstdChunk;
+
+    // For single-shot ZSTD:
+    bool     decompressed;       // have we done the ZSTD decompress yet?
+    size_t   totalComp;          // how many compressed bytes accumulated so far
+    uint8_t  m_compBuf[MAX_CHUNK_COMPRESSED_SIZE]; // fixed-size buffer for up to 1 MB
+    // Decompressed data:
+    uint8_t* m_decompBuf;        // single allocation for the uncompressed chunk
+    size_t   m_decompSize;       // total uncompressed size
+    size_t   m_decompPos;        // how many bytes we've handed off so far
+};
+
+// --------------------------------------------------------------------------
+// r1dc_init
+// --------------------------------------------------------------------------
+void* r1dc_init(void* params)
+{
+    r1dc_context_t* ctx = new r1dc_context_t();
     std::memset(ctx, 0, sizeof(*ctx));
 
-    ctx->zds = ZSTD_createDStream();
-    if (!ctx->zds)
-    {
-        fprintf(stderr, "[r1dc] Failed to create ZSTD DStream\n");
-        delete ctx;
-        return nullptr;
-    }
-    ctx->zstd_inited = false;
-    ctx->isZstdChunk = false;
-    ctx->chunkMarker = 0ULL;
-    ctx->typeDetermined = false; // not determined until we see at least 8 bytes
+    // Create the fallback LZHAM context
+    ctx->lzham_ctx = original_lzham_decompressor_init(params);
+    ctx->lzham_inited = (ctx->lzham_ctx != nullptr);
 
-    // Initialize the original LZHAM decompressor.
-    ctx->lzham_ctx = original_lzham_decompressor_init(a1);
-    
+    // No chunk type known yet
+    ctx->typeDetermined = false;
+    ctx->isZstdChunk = false;
+    ctx->decompressed = false;
+    ctx->totalComp = 0;
+    ctx->m_decompBuf = nullptr;
+    ctx->m_decompSize = 0;
+    ctx->m_decompPos = 0;
+
     return ctx;
 }
 
-// r1dc_reinit: Reset the context for a new compressed chunk.
+// --------------------------------------------------------------------------
+// r1dc_reinit: Called each time the engine wants to start a new chunk
+// --------------------------------------------------------------------------
 __int64 r1dc_reinit(void* p)
 {
     if (!p) return 0;
     r1dc_context_t* ctx = static_cast<r1dc_context_t*>(p);
 
-    ctx->inWritePos = 0;
-    ctx->inReadPos = 0;
-    ctx->inDataCount = 0;
-
-    ctx->outWritePos = 0;
-    ctx->outReadPos = 0;
-    ctx->outDataCount = 0;
-
-    ctx->zstd_inited = false;
+    // Reset ZSTD detection
+    ctx->typeDetermined = false;
     ctx->isZstdChunk = false;
-    ctx->chunkMarker = 0ULL;
-    ctx->typeDetermined = false; // reset determination for the new chunk
+    ctx->decompressed = false;
+    ctx->totalComp = 0;
+    ctx->m_decompPos = 0;
 
-    if (ctx->zds)
+    // Free any old decompression buffer from the previous chunk
+    if (ctx->m_decompBuf)
     {
-        ZSTD_initDStream(ctx->zds);
+        free(ctx->m_decompBuf);
+        ctx->m_decompBuf = nullptr;
     }
+    ctx->m_decompSize = 0;
 
-    if (ctx->lzham_ctx)
-    {
+    // Also re-init the fallback LZHAM context
+    if (ctx->lzham_ctx) {
         return original_lzham_decompressor_reinit(ctx->lzham_ctx);
     }
-
     return 0;
 }
 
-// r1dc_deinit: Free the context.
+// --------------------------------------------------------------------------
+// r1dc_deinit
+// --------------------------------------------------------------------------
 __int64 r1dc_deinit(void* p)
 {
     if (!p) return 0;
     r1dc_context_t* ctx = static_cast<r1dc_context_t*>(p);
-    if (ctx->zds)
-        ZSTD_freeDStream(ctx->zds);
+
     __int64 ret = 0;
+    // Deinit the fallback LZHAM
     if (ctx->lzham_ctx)
+    {
         ret = original_lzham_decompressor_deinit(ctx->lzham_ctx);
+       // ctx->lzham_ctx = nullptr;
+    }
+
+    // Free any leftover decompression buffer
+    if (ctx->m_decompBuf)
+    {
+        free(ctx->m_decompBuf);
+        ctx->m_decompBuf = nullptr;
+    }
 
     delete ctx;
     return ret;
 }
 
-// r1dc_decompress: Decompress data using ring buffer logic and ZSTD streaming.
-// The caller provides input data (pIn_buf with size *pIn_buf_size) and an output
-// buffer (pOut_buf with capacity *pOut_buf_size). On success, the output size is
-// updated and -1 is returned.
+// --------------------------------------------------------------------------
+// r1dc_decompress: Our main hooking function.
+//
+// Return codes that the engine expects from LZHAM:
+//  - 3 => LZHAM_DECOMP_STATUS_SUCCESS (the entire chunk was decompressed).
+//  - 0 => not done yet, need more input or the caller will keep pulling.
+//  - (negative or anything else => error).
+//
+// We'll replicate that: once we've fed all decompressed bytes, we return 3.
+//
+// For ZSTD:
+//  - On the first call(s), accumulate compressed data up to totalComp.
+//  - Once no_more_input_bytes_flag == 1, do a single shot ZSTD_decompress.
+//  - Then we feed the decompressed data out in subsequent calls, if any.
+//
+// If the chunk is NOT ZSTD, just fallback to original LZHAM.
+//
 __int64 r1dc_decompress(
     void* p,
     void* pIn_buf,
@@ -227,185 +190,163 @@ __int64 r1dc_decompress(
     if (!p) return 0;
     r1dc_context_t* ctx = static_cast<r1dc_context_t*>(p);
 
-    // We'll work with a local pointer to the input buffer.
-    uint8_t* callerIn = static_cast<uint8_t*>(pIn_buf);
-    size_t   callerInSize = *pIn_buf_size;
-
-    // ----------------------------------------------------------------------
-    // Step 1: Determine stream type (if not already done).
-    // In fallback (LZHAM) mode we must not disturb the caller's input data.
-    // ----------------------------------------------------------------------
+    // If we haven't decided whether it's ZSTD or not:
     if (!ctx->typeDetermined)
     {
-        if (callerInSize < sizeof(uint64_t))
+        // If we have at least 8 bytes, check for marker
+        if (*pIn_buf_size >= sizeof(uint64_t))
         {
-            // Not enough input to decide.
-            // If no more input is coming then we must assume fallback.
-            if (no_more_input_bytes_flag)
+            uint64_t maybeMarker = 0;
+            std::memcpy(&maybeMarker, pIn_buf, sizeof(uint64_t));
+            if (maybeMarker == R1D_marker)
+            {
+                // Mark it as ZSTD chunk
+                ctx->typeDetermined = true;
+                ctx->isZstdChunk = true;
+                // Skip the marker in the input
+                uint8_t* inputBytes = static_cast<uint8_t*>(pIn_buf);
+                inputBytes += sizeof(uint64_t);
+                *pIn_buf_size -= sizeof(uint64_t);
+                pIn_buf = inputBytes;
+            }
+            else
             {
                 ctx->typeDetermined = true;
                 ctx->isZstdChunk = false;
             }
-            else
-            {
-                return 0; // wait for more data
-            }
+        }
+        else if (no_more_input_bytes_flag)
+        {
+            // We got so few bytes we couldn't even check the marker => fallback
+            ctx->typeDetermined = true;
+            ctx->isZstdChunk = false;
         }
         else
         {
-            // Safely peek at the first 8 bytes using memcpy.
-            uint64_t markerVal = 0;
-            std::memcpy(&markerVal, callerIn, sizeof(uint64_t));
-            ctx->typeDetermined = true;
-            if (markerVal == R1D_marker)
-            {
-                ctx->isZstdChunk = true;
-                ctx->chunkMarker = markerVal;
-                // In ZSTD mode, we consume the marker bytes.
-                callerIn += sizeof(uint64_t);
-                callerInSize -= sizeof(uint64_t);
-            }
-            else
-            {
-                ctx->isZstdChunk = false;
-            }
+            // Not enough data yet to confirm => wait for next call
+            // No data is consumed here
+            return 0;
         }
     }
 
-    // ----------------------------------------------------------------------
-    // Step 2: Fallback to LZHAM if the stream is not a ZSTD chunk.
-    // In fallback mode we do not alter the caller's input buffer.
-    // ----------------------------------------------------------------------
+    // If not ZSTD, fallback to original LZHAM logic
     if (!ctx->isZstdChunk)
     {
+        // Just call the original LZHAM function
         return original_lzham_decompressor_decompress(
-            ctx->lzham_ctx, pIn_buf, pIn_buf_size,
-            pOut_buf, pOut_buf_size,
-            no_more_input_bytes_flag);
+            ctx->lzham_ctx,
+            pIn_buf,
+            pIn_buf_size,
+            pOut_buf,
+            pOut_buf_size,
+            no_more_input_bytes_flag
+        );
     }
 
-    // ----------------------------------------------------------------------
-    // Step 3: In ZSTD mode, append as much caller input data as possible to our internal input ring buffer.
-    // This fix prevents buffer overflow. Any bytes that cannot be appended remain unconsumed.
-    // ----------------------------------------------------------------------
-    if (callerInSize > 0)
+    // ----------------------
+    // ZSTD path
+    // ----------------------
+
+    // (A) If we haven't yet decompressed, we accumulate compressed data
+    //     until no_more_input_bytes_flag == 1
+    if (!ctx->decompressed)
     {
-        size_t freeSpace = R1DC_INBUF_SIZE - ctx->inDataCount;
-        size_t toAppend = (std::min)(callerInSize, freeSpace);
-        if (toAppend > 0)
+        // Copy the incoming bytes into our fixed buffer (up to 1MB)
+        if (*pIn_buf_size > 0)
         {
-            RingBuffer_Append(ctx->inputRing, R1DC_INBUF_SIZE,
-                callerIn, toAppend,
-                ctx->inWritePos, ctx->inDataCount);
-            callerIn += toAppend;
-            callerInSize -= toAppend;
-        }
-        // Update caller's input size to reflect any unconsumed input.
-        *pIn_buf_size = callerInSize;
-    }
+            size_t n = *pIn_buf_size;
+            // Cap in case an unexpected overflow
+            if (ctx->totalComp + n > MAX_CHUNK_COMPRESSED_SIZE)
+            {
+                // This is an error or extremely unexpected
+                fprintf(stderr, "[r1dc] Error: compressed data exceeds 1MB chunk limit!\n");
+                // You could return an error code here:
+                //   return some negative or engine-specific error
+                n = MAX_CHUNK_COMPRESSED_SIZE - ctx->totalComp;
+            }
 
-    // ----------------------------------------------------------------------
-    // Step 4: Initialize the ZSTD stream if not already done.
-    // ----------------------------------------------------------------------
-    if (!ctx->zstd_inited)
-    {
-        size_t initRes = ZSTD_initDStream(ctx->zds);
-        if (ZSTD_isError(initRes))
-        {
-            fprintf(stderr, "[r1dc] ZSTD_initDStream error: %s\n", ZSTD_getErrorName(initRes));
-            return 0;
-        }
-        ctx->zstd_inited = true;
-    }
-
-    // ----------------------------------------------------------------------
-    // Step 5: Decompression loop.
-    // ----------------------------------------------------------------------
-    bool frameComplete = false;
-    while (ctx->inDataCount > 0 && (ctx->outDataCount < R1DC_OUTBUF_SIZE))
-    {
-        // Get contiguous region from the input ring.
-        size_t inContig = 0;
-        uint8_t* inPtr = RingBuffer_GetContiguous(ctx->inputRing, R1DC_INBUF_SIZE,
-            ctx->inReadPos, ctx->inDataCount, inContig);
-        ZSTD_inBuffer inBuf = { inPtr, inContig, 0 };
-
-        // Get contiguous free space in the output ring.
-        size_t outContig = 0;
-        uint8_t* outPtr = RingBuffer_GetContiguous(ctx->outputRing, R1DC_OUTBUF_SIZE,
-            ctx->outWritePos, (R1DC_OUTBUF_SIZE - ctx->outDataCount), outContig);
-        ZSTD_outBuffer outBuf = { outPtr, outContig, 0 };
-
-        // Decompress
-        size_t ret = ZSTD_decompressStream(ctx->zds, &outBuf, &inBuf);
-        if (ZSTD_isError(ret))
-        {
-            fprintf(stderr, "[r1dc] Decompression error: %s\n", ZSTD_getErrorName(ret));
-            return 0;
+            std::memcpy(&ctx->m_compBuf[ctx->totalComp], pIn_buf, n);
+            ctx->totalComp += n;
+            // Mark we consumed them
+            *pIn_buf_size = 0;
         }
 
-        // Update input ring: consumed inBuf.pos bytes.
-        RingBuffer_Consume(inBuf.pos, ctx->inReadPos, ctx->inDataCount);
-
-        // Update output ring: produced outBuf.pos bytes.
-        ctx->outWritePos += outBuf.pos;
-        ctx->outDataCount += outBuf.pos;
-
-        if (ret == 0)
+        // If the engine says "no more input," then do the single-shot decompress
+        if (no_more_input_bytes_flag)
         {
-            // The current frame is complete.
-            frameComplete = true;
-            break;
+            if (ctx->totalComp > 0)
+            {
+                // Get the frame size if possible
+                unsigned long long fSize = ZSTD_getFrameContentSize(ctx->m_compBuf, ctx->totalComp);
+                if (fSize == ZSTD_CONTENTSIZE_ERROR || fSize == ZSTD_CONTENTSIZE_UNKNOWN)
+                {
+                    // fallback guess, or do your own logic
+                    fSize = 5ULL << 20; // e.g. guess up to 5 MB
+                }
+
+                // Allocate decompression buffer
+                ctx->m_decompBuf = static_cast<uint8_t*>(malloc((size_t)fSize));
+                ctx->m_decompSize = (size_t)fSize;
+
+                // Single-shot decompress
+                size_t const actualSize = ZSTD_decompress(
+                    ctx->m_decompBuf, ctx->m_decompSize,
+                    ctx->m_compBuf, ctx->totalComp
+                );
+                if (ZSTD_isError(actualSize))
+                {
+                    fprintf(stderr, "[r1dc] ZSTD decompress error: %s\n",
+                        ZSTD_getErrorName(actualSize));
+                    // Return an error code so the engine sees we failed
+                    return -1;
+                }
+
+                // Shrink to actual size
+                ctx->m_decompSize = actualSize;
+            }
+            // Mark that we've done the single-shot
+            ctx->decompressed = true;
+        }
+    }
+
+    // (B) Now deliver from m_decompBuf to the caller
+    size_t wantOut = *pOut_buf_size;
+    *pOut_buf_size = 0;
+
+    if (ctx->decompressed)
+    {
+        const size_t remaining = (ctx->m_decompSize > ctx->m_decompPos)
+            ? (ctx->m_decompSize - ctx->m_decompPos) : 0;
+        if (remaining > 0 && wantOut > 0)
+        {
+            const size_t toCopy = (std::min)(remaining, wantOut);
+            std::memcpy(pOut_buf,
+                &ctx->m_decompBuf[ctx->m_decompPos],
+                toCopy);
+            ctx->m_decompPos += toCopy;
+            *pOut_buf_size = toCopy;
         }
 
-        // If no progress was made, break to avoid infinite loop.
-        if (inBuf.pos == 0 && outBuf.pos == 0)
-            break;
+        // If we've delivered everything, return LZHAM_DECOMP_STATUS_SUCCESS == 3
+        if (ctx->m_decompPos >= ctx->m_decompSize)
+        {
+            return 3;
+        }
     }
 
-    // ----------------------------------------------------------------------
-    // Step 6: Copy decompressed data from the output ring buffer to the caller’s buffer.
-    // ----------------------------------------------------------------------
-    uint8_t* callerOut = static_cast<uint8_t*>(pOut_buf);
-    size_t   callerOutCap = *pOut_buf_size;
-    size_t   copied = 0;
-
-    while (copied < callerOutCap && ctx->outDataCount > 0)
-    {
-        size_t contig = 0;
-        uint8_t* outContigPtr = RingBuffer_GetContiguous(ctx->outputRing, R1DC_OUTBUF_SIZE,
-            ctx->outReadPos, ctx->outDataCount, contig);
-        size_t toCopy = (std::min)(callerOutCap - copied, contig);
-        std::memcpy(callerOut + copied, outContigPtr, toCopy);
-        copied += toCopy;
-        RingBuffer_Consume(toCopy, ctx->outReadPos, ctx->outDataCount);
-    }
-    *pOut_buf_size = copied;
-
-    // ----------------------------------------------------------------------
-    // Step 7: If the decompression frame is complete, reset state for the next frame.
-    //         Return -1 if no pending output remains; otherwise, return 0.
-    // ----------------------------------------------------------------------
-    if (frameComplete)
-    {
-        // Reset the stream state so that a subsequent call will detect a new frame.
-        ctx->zstd_inited = false;
-        ctx->typeDetermined = false;
-        // Note: Any leftover input in the ring is assumed to be the start of the next frame.
-        if (ctx->outDataCount == 0)
-            return -1;
-    }
+    // Not done yet
     return 0;
 }
 
 // --------------------------------------------------------------------------
-// Hook Registration: Replace the original LZHAM functions with our r1dc hooks.
-// (Adjust the address offsets as appropriate for your module.)
+// Hook setup: Adjust addresses as needed
 // --------------------------------------------------------------------------
 void InitCompressionHooks()
 {
     auto fs = G_filesystem_stdio ? G_filesystem_stdio : G_vscript;
-    if (!IsDedicatedServer()) {
+
+    if (!IsDedicatedServer())
+    {
         MH_CreateHook(
             reinterpret_cast<LPVOID>(fs + 0x75380),
             r1dc_init,
@@ -427,6 +368,7 @@ void InitCompressionHooks()
             (void**)&original_lzham_decompressor_decompress
         );
 
+        // Example of hooking some file read routines...
         MH_CreateHook(LPVOID(fs + 0x23860),
             Hooked_CBaseFileSystem__SyncRead,
             reinterpret_cast<LPVOID*>(&Original_CBaseFileSystem__SyncRead));
@@ -434,7 +376,8 @@ void InitCompressionHooks()
             CFileAsyncReadJob_dtor,
             reinterpret_cast<LPVOID*>(&Original_CFileAsyncReadJob_dtor));
     }
-    else {
+    else
+    {
         MH_CreateHook(
             reinterpret_cast<LPVOID>(fs + 0x180090),
             r1dc_init,
@@ -456,5 +399,6 @@ void InitCompressionHooks()
             (void**)&original_lzham_decompressor_decompress
         );
     }
+
     MH_EnableHook(MH_ALL_HOOKS);
 }
