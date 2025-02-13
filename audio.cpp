@@ -1,13 +1,17 @@
 ﻿// ogg_decoder.cpp
 // Drop–in replacement for the original Opus–based decoder.
-// Implements progressive decoding (with initial fast decode + background decoding),
+// Implements progressive decoding (with an enlarged initial decode buffer + background decoding),
 // asynchronous read with synchronous “just–in–time” decoding when needed,
 // and memory–allocation optimizations.
-// 
+//
 // FIXES:
 // 1. MemoryBuffer lifetime issues are fixed by storing a persistent copy in the progressive template.
-// 2. Other minor flaws (e.g. potential race conditions) are mitigated via proper locking.
-// 3. No atomic assignment is performed (only fetch_add is used).
+// 2. A single shared OggVorbis_File is used for both background and synchronous decoding,
+//    preventing sample misalignment.
+// 3. A larger initial synchronous decode buffer is filled so that the handoff to the async thread
+//    doesn’t cause underruns.
+// 4. In the synchronous branch, if more samples are needed the code immediately decodes additional
+//    chunks rather than waiting, reducing the chance of buffer underruns.
 //
 // Note: This file is self–contained and must be compiled with the required libraries (e.g. vorbis).
 
@@ -283,7 +287,11 @@ struct ProgressiveOpusTemplate {
     std::vector<unsigned char> fileData;  // persistent copy of the original file data
     std::shared_ptr<MemoryBuffer> pMemBuffer; // persistent memory buffer for ov_open_callbacks
 
-    ProgressiveOpusTemplate() : decodedChunks(0), channels(1), fullyDecoded(false) {}
+    // Shared decoder pointer and a mutex to protect it.
+    OggVorbis_File* vf;
+    std::mutex decodeMutex;
+
+    ProgressiveOpusTemplate() : decodedChunks(0), channels(1), fullyDecoded(false), vf(nullptr) {}
     static constexpr size_t CHUNK_SIZE = 32768; // number of int16_t samples per channel per chunk
 };
 
@@ -363,9 +371,13 @@ static std::vector<int16_t> DecodeChunk(OggVorbis_File* vf, int channels) {
 // Background decoder: continuously decode remaining chunks and add them to the template.
 // Runs in its own thread.
 // --------------------------------------------------------------------
-static void BackgroundDecodeThread(std::shared_ptr<ProgressiveOpusTemplate> progTemplate, OggVorbis_File* vf, int channels) {
+static void BackgroundDecodeThread(std::shared_ptr<ProgressiveOpusTemplate> progTemplate, int channels) {
     while (true) {
-        std::vector<int16_t> chunk = DecodeChunk(vf, channels);
+        std::vector<int16_t> chunk;
+        {
+            std::lock_guard<std::mutex> decodeLock(progTemplate->decodeMutex);
+            chunk = DecodeChunk(progTemplate->vf, channels);
+        }
         {
             std::lock_guard<std::mutex> lock(progTemplate->chunkMutex);
             if (chunk.empty()) {
@@ -378,12 +390,14 @@ static void BackgroundDecodeThread(std::shared_ptr<ProgressiveOpusTemplate> prog
             progTemplate->chunkCV.notify_all();
         }
     }
-    ov_clear(vf);
-    delete vf;
+    // Clean up the shared decoder.
+    ov_clear(progTemplate->vf);
+    delete progTemplate->vf;
+    progTemplate->vf = nullptr;
 }
 
 // --------------------------------------------------------------------
-// Progressive decode: open an Ogg Vorbis file, decode a few initial chunks,
+// Progressive decode: open an Ogg Vorbis file, decode a larger number of initial chunks,
 // and then launch a background thread to decode the remainder.
 // --------------------------------------------------------------------
 bool OpenOpusContext(const std::string& wavName, CBaseFileSystem* filesystem, const char* pathID) {
@@ -405,7 +419,6 @@ bool OpenOpusContext(const std::string& wavName, CBaseFileSystem* filesystem, co
     progTemplate->fileData = std::move(fileData);
 
     // Create a persistent MemoryBuffer and store it in the template.
-    // This fixes the lifetime issue (MemoryBuffer is now owned by progTemplate).
     progTemplate->pMemBuffer = std::make_shared<MemoryBuffer>();
     progTemplate->pMemBuffer->data = progTemplate->fileData.data();
     progTemplate->pMemBuffer->size = progTemplate->fileData.size();
@@ -418,9 +431,8 @@ bool OpenOpusContext(const std::string& wavName, CBaseFileSystem* filesystem, co
     callbacks.close_func = MemoryCloseCallback;
     callbacks.tell_func = MemoryTellCallback;
 
-    // Allocate an OggVorbis_File on the heap so that the background thread can use it.
+    // Allocate an OggVorbis_File on the heap so that it can be shared.
     OggVorbis_File* vf = new OggVorbis_File;
-    // Pass the persistent MemoryBuffer pointer to ov_open_callbacks.
     int result = ov_open_callbacks(progTemplate->pMemBuffer.get(), vf, nullptr, progTemplate->fileData.size(), callbacks);
     if (result < 0) {
         Warning("[Ogg] ov_open_callbacks failed with error %d for file %s\n", result, wavName.c_str());
@@ -439,11 +451,17 @@ bool OpenOpusContext(const std::string& wavName, CBaseFileSystem* filesystem, co
     //Msg("[Ogg] Opened ogg file '%s': channels=%d\n", wavName.c_str(), channels);
 
     progTemplate->channels = channels;
+    // Store the shared decoder in the template.
+    progTemplate->vf = vf;
 
-    // Decode initial few chunks immediately (e.g., ~128KB worth).
-    const size_t INITIAL_CHUNKS = 4;
+    // Increase the initial buffer by decoding more chunks synchronously.
+    const size_t INITIAL_CHUNKS = 8; // increased from 4
     for (size_t i = 0; i < INITIAL_CHUNKS; i++) {
-        std::vector<int16_t> chunk = DecodeChunk(vf, channels);
+        std::vector<int16_t> chunk;
+        {
+            std::lock_guard<std::mutex> decodeLock(progTemplate->decodeMutex);
+            chunk = DecodeChunk(progTemplate->vf, channels);
+        }
         if (chunk.empty()) {
             progTemplate->fullyDecoded = true;
             break;
@@ -453,7 +471,7 @@ bool OpenOpusContext(const std::string& wavName, CBaseFileSystem* filesystem, co
     }
 
     // Start an asynchronous worker thread to decode the remaining chunks.
-    std::thread bgThread(BackgroundDecodeThread, progTemplate, vf, channels);
+    std::thread bgThread(BackgroundDecodeThread, progTemplate, channels);
     bgThread.detach();
 
     // Save the progressive template in the global cache.
@@ -587,56 +605,27 @@ __int64 HandleOpusRead(CBaseFileSystem* filesystem, FileAsyncRequest_t* request)
     // Ensure that the progressive template has decoded enough samples.
     {
         auto progTemplate = instance->progTemplate;
-        std::unique_lock<std::mutex> lock(progTemplate->chunkMutex);
-        size_t availableSamples = 0;
-        for (const auto& chunk : progTemplate->pcmChunks) {
-            availableSamples += chunk.size();
-        }
-        // If the requested samples (from current readSampleIndex) are not yet decoded,
-        // wait a bit or synchronously decode missing chunks.
+        size_t availableSamples = GetTotalAvailableSamples(progTemplate);
+        // If insufficient samples are buffered, synchronously decode additional chunks immediately.
         while (availableSamples < instance->readSampleIndex + samplesRequested && !progTemplate->fullyDecoded) {
-            progTemplate->chunkCV.wait_for(lock, std::chrono::milliseconds(10));
-            availableSamples = 0;
-            for (const auto& chunk : progTemplate->pcmChunks) {
-                availableSamples += chunk.size();
+            std::vector<int16_t> newChunk;
+            {
+                std::lock_guard<std::mutex> decodeLock(progTemplate->decodeMutex);
+                newChunk = DecodeChunk(progTemplate->vf, progTemplate->channels);
             }
-            // If still not enough, perform synchronous decode.
-            if (availableSamples < instance->readSampleIndex + samplesRequested && !progTemplate->fullyDecoded) {
-                // Create a temporary OggVorbis_File for synchronous decoding.
-                MemoryBuffer tempMemBuffer;
-                tempMemBuffer.data = progTemplate->fileData.data();
-                tempMemBuffer.size = progTemplate->fileData.size();
-                tempMemBuffer.pos = 0;
-                ov_callbacks callbacks;
-                callbacks.read_func = MemoryReadCallback;
-                callbacks.seek_func = MemorySeekCallback;
-                callbacks.close_func = MemoryCloseCallback;
-                callbacks.tell_func = MemoryTellCallback;
-                OggVorbis_File vfSync;
-                int res = ov_open_callbacks(&tempMemBuffer, &vfSync, nullptr, progTemplate->fileData.size(), callbacks);
-                if (res < 0) {
-                    break; // Synchronous decode failed.
-                }
-                // Seek to the point where decoding stopped.
-                ov_pcm_seek(&vfSync, availableSamples / progTemplate->channels);
-                lock.unlock(); // Unlock while decoding.
-                std::vector<int16_t> newChunk = DecodeChunk(&vfSync, progTemplate->channels);
-                ov_clear(&vfSync);
-                lock.lock();
-                if (!newChunk.empty()) {
+            if (!newChunk.empty()) {
+                {
+                    std::lock_guard<std::mutex> lock(progTemplate->chunkMutex);
                     progTemplate->pcmChunks.push_back(std::move(newChunk));
                     progTemplate->decodedChunks.fetch_add(1, std::memory_order_relaxed);
                     progTemplate->chunkCV.notify_all();
-                    availableSamples = 0;
-                    for (const auto& chunk : progTemplate->pcmChunks) {
-                        availableSamples += chunk.size();
-                    }
-                }
-                else {
-                    progTemplate->fullyDecoded = true;
-                    break;
                 }
             }
+            else {
+                progTemplate->fullyDecoded = true;
+                break;
+            }
+            availableSamples = GetTotalAvailableSamples(progTemplate);
         }
     }
 
