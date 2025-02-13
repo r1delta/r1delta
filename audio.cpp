@@ -611,15 +611,18 @@ __int64 HandleOpusRead(CBaseFileSystem* filesystem, FileAsyncRequest_t* request)
             std::vector<int16_t> newChunk;
             {
                 std::lock_guard<std::mutex> decodeLock(progTemplate->decodeMutex);
+                // Check if the decoder has already been cleaned up.
+                if (progTemplate->vf == nullptr) {
+                    progTemplate->fullyDecoded = true;
+                    break;
+                }
                 newChunk = DecodeChunk(progTemplate->vf, progTemplate->channels);
             }
             if (!newChunk.empty()) {
-                {
-                    std::lock_guard<std::mutex> lock(progTemplate->chunkMutex);
-                    progTemplate->pcmChunks.push_back(std::move(newChunk));
-                    progTemplate->decodedChunks.fetch_add(1, std::memory_order_relaxed);
-                    progTemplate->chunkCV.notify_all();
-                }
+                std::lock_guard<std::mutex> lock(progTemplate->chunkMutex);
+                progTemplate->pcmChunks.push_back(std::move(newChunk));
+                progTemplate->decodedChunks.fetch_add(1, std::memory_order_relaxed);
+                progTemplate->chunkCV.notify_all();
             }
             else {
                 progTemplate->fullyDecoded = true;
@@ -628,6 +631,7 @@ __int64 HandleOpusRead(CBaseFileSystem* filesystem, FileAsyncRequest_t* request)
             availableSamples = GetTotalAvailableSamples(progTemplate);
         }
     }
+
 
     // Copy the available samples into the destination buffer.
     {
