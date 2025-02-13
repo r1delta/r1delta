@@ -116,7 +116,8 @@ namespace MasterServerClient {
         }
 
         auto res = httpClient->Post("/heartbeat", j.dump(), "application/json");
-        if (!res || res->status != 200) {
+        if (!res || (res->status != 200 && res->status != 429)) {
+
             Warning("MasterServerClient: Heartbeat failed - %s\n",
                 res ? res->body.c_str() : "Connection failed");
             return false;
