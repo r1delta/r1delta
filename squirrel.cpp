@@ -39,6 +39,7 @@
 #include <random>
 #include "masterserver.h"
 #include "shellapi.h"
+#include <set>
 
 
 #pragma intrinsic(_ReturnAddress)
@@ -922,35 +923,324 @@ void ConvertScriptVariant(ScriptVariant_t* variant, ConversionDirection directio
 }
 
 
+//------------------------------------------------------------------------------
+// Thread-local server context guard (RAII style)
+//------------------------------------------------------------------------------
+thread_local int g_serverContextCounter = 0;
+thread_local bool g_serverContextActive = false;
 
-// Function to check if server.dll is in the call stack
-// TODO(mrsteyk): performance
-__forceinline bool serverRunning(void* a1) {
+class ServerContextGuard {
+public:
+	ServerContextGuard() {
+		// If we're not already in the server context, mark it as active.
+		if (g_serverContextCounter == 0) {
+			g_serverContextActive = true;
+		}
+		++g_serverContextCounter;
+	}
+	~ServerContextGuard() {
+		--g_serverContextCounter;
+		// Only clear the flag when the outermost context exits.
+		if (g_serverContextCounter == 0) {
+			g_serverContextActive = false;
+		}
+	}
+};
+
+//-----------------------------------------------------------------------------
+// Define global original function pointers (initialized to nullptr).
+//-----------------------------------------------------------------------------
+sub_0098C10_t original_sub_0098C10 = nullptr;
+sub_00D6D50_t original_sub_00D6D50 = nullptr;
+sub_0149E70_t original_sub_0149E70 = nullptr;
+sub_0144B60_t original_sub_0144B60 = nullptr;
+sub_01499E0_t original_sub_01499E0 = nullptr;
+sub_0281150_t original_sub_0281150 = nullptr;
+sub_02811D0_t original_sub_02811D0 = nullptr;
+sub_03BD500_t original_sub_03BD500 = nullptr;
+sub_041EDF0_t original_sub_041EDF0 = nullptr;
+sub_04A4B00_t original_sub_04A4B00 = nullptr;
+
+//-----------------------------------------------------------------------------
+// Hook function definitions
+//-----------------------------------------------------------------------------
+
+// Hook for sub_0098C10
+__int64 __fastcall hooked_sub_0098C10(
+	__int64 a1,
+	__int64 a2,
+	__int64 a3,
+	__int64 a4,
+	__int64 a5,
+	__int64 a6
+) {
+	ServerContextGuard guard;
+	return original_sub_0098C10(a1, a2, a3, a4, a5, a6);
+}
+
+// Hook for sub_00D6D50
+void __fastcall hooked_sub_00D6D50(
+	__int64 a1,
+	__int64 a2,
+	__int64 a3
+) {
+	ServerContextGuard guard;
+	original_sub_00D6D50(a1, a2, a3);
+}
+
+// Hook for sub_0149E70
+void __fastcall hooked_sub_0149E70(
+	__int64 a1,
+	__int64 a2,
+	__int64 a3
+) {
+	ServerContextGuard guard;
+	original_sub_0149E70(a1, a2, a3);
+}
+
+// Hook for sub_0144B60
+char __fastcall hooked_sub_0144B60(
+	__int64 a1,
+	unsigned __int8* a2,
+	__int64 a3,
+	__int64 a4,
+	__int64 a5,
+	char a6,
+	char a7
+) {
+	ServerContextGuard guard;
+	return original_sub_0144B60(a1, a2, a3, a4, a5, a6, a7);
+}
+
+// Hook for sub_01499E0
+void __fastcall hooked_sub_01499E0(
+	__int64 a1,
+	__int64 a2
+) {
+	ServerContextGuard guard;
+	original_sub_01499E0(a1, a2);
+}
+
+// Hook for sub_0281150
+__int64 hooked_sub_0281150() {
+	ServerContextGuard guard;
+	return original_sub_0281150();
+}
+
+// Hook for sub_02811D0
+__int64 hooked_sub_02811D0() {
+	ServerContextGuard guard;
+	return original_sub_02811D0();
+}
+
+// Hook for sub_03BD500
+void __fastcall hooked_sub_03BD500(_QWORD* a1) {
+	ServerContextGuard guard;
+	original_sub_03BD500(a1);
+}
+
+// Hook for sub_041EDF0
+__int64 __fastcall hooked_sub_041EDF0(__int64 a1) {
+	ServerContextGuard guard;
+	return original_sub_041EDF0(a1);
+}
+
+// Hook for sub_04A4B00
+void* __fastcall hooked_sub_04A4B00(__int64 a1) {
+	ServerContextGuard guard;
+	return original_sub_04A4B00(a1);
+}
+sub_01499C0_t original_sub_01499C0 = nullptr;
+sub_0284D10_t original_sub_0284D10 = nullptr;
+sub_01461F0_t original_sub_01461F0 = nullptr;
+
+// Hook for sub_01499C0
+__int64 __fastcall hooked_sub_01499C0(
+	__int64 a1,
+	__int64 a2,
+	unsigned __int8 a3
+) {
+	ServerContextGuard guard;
+	return original_sub_01499C0(a1, a2, a3);
+}
+
+// Hook for sub_0284D10
+bool __fastcall hooked_sub_0284D10(
+	_BYTE* a1,
+	__int64 a2
+) {
+	ServerContextGuard guard;
+	return original_sub_0284D10(a1, a2);
+}
+
+// Hook for sub_01461F0
+void __fastcall hooked_sub_01461F0(
+	__int64 a1,
+	unsigned __int8 a2
+) {
+	ServerContextGuard guard;
+	original_sub_01461F0(a1, a2);
+}
+// A simple hash combine helper.
+static inline size_t hashCombine(size_t seed, size_t value) {
+	return seed ^ (value + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2));
+}
+
+// Compute a hash from a vector of RVAs.
+size_t HashCallStack(const std::vector<uintptr_t>& callStack) {
+	size_t seed = 0;
+	for (auto rva : callStack) {
+		seed = hashCombine(seed, std::hash<uintptr_t>()(rva));
+	}
+	return seed;
+}
+
+// Global containers for call stacks and caching.
+static std::vector<std::vector<uintptr_t>> g_collectedCallStacks;
+static std::unordered_set<size_t> g_seenCallStackHashes;
+static std::set<uintptr_t> g_cachedHookRVAs;
+static bool g_solutionDirty = false;
+
+// Add a new call stack if it hasn't been seen before.
+void AddCallStack(const std::vector<uintptr_t>& callStack) {
+	size_t hash = HashCallStack(callStack);
+	if (g_seenCallStackHashes.find(hash) == g_seenCallStackHashes.end()) {
+		g_seenCallStackHashes.insert(hash);
+		g_collectedCallStacks.push_back(callStack);
+		g_solutionDirty = true;
+	}
+}
+
+// Greedy (approximate) hitting-set computation: choose a set of RVAs such that every collected call stack
+// contains at least one of them.
+std::set<uintptr_t> ComputeMinimalHookRVAs() {
+	std::set<uintptr_t> hookRVAs;
+	if (g_collectedCallStacks.empty())
+		return hookRVAs;
+
+	// Keep track of indices of call stacks that are not yet "hit."
+	std::set<size_t> uncovered;
+	for (size_t i = 0; i < g_collectedCallStacks.size(); ++i) {
+		uncovered.insert(i);
+	}
+
+	while (!uncovered.empty()) {
+		// Count the frequency of each RVA among all currently uncovered call stacks.
+		std::map<uintptr_t, size_t> rvaFrequency;
+		for (size_t idx : uncovered) {
+			for (auto rva : g_collectedCallStacks[idx]) {
+				rvaFrequency[rva]++;
+			}
+		}
+		// Choose the RVA that appears in the most uncovered call stacks.
+		uintptr_t bestRVA = 0;
+		size_t bestCount = 0;
+		for (auto& entry : rvaFrequency) {
+			if (entry.second > bestCount) {
+				bestCount = entry.second;
+				bestRVA = entry.first;
+			}
+		}
+		hookRVAs.insert(bestRVA);
+
+		// Remove all call stacks that contain this chosen RVA.
+		std::set<size_t> stillUncovered;
+		for (size_t idx : uncovered) {
+			const auto& stack = g_collectedCallStacks[idx];
+			if (std::find(stack.begin(), stack.end(), bestRVA) == stack.end()) {
+				stillUncovered.insert(idx);
+			}
+		}
+		uncovered = std::move(stillUncovered);
+	}
+	return hookRVAs;
+}
+
+// Modified serverRunning() function that caches call stacks and the hitting set solution.
+/*__forceinline bool serverRunning(void* a1) {
+
+	// Fallback logic (for cases outside of our hooked functions):
 	if (IsDedicatedServer())
 		return true;
-	//return isServerScriptVM || a1 == realvmptr || a1 == fakevmptr || (realvmptr && a1 == *(void**)(((uintptr_t)realvmptr + 8)));
-	if (isServerScriptVM || a1 == realvmptr || a1 == fakevmptr || (realvmptr && a1 == *(void**)(((uintptr_t)realvmptr + 8))))
-		return true; // SQVM handle check
+	if (isServerScriptVM || a1 == realvmptr || a1 == fakevmptr ||
+		(realvmptr && a1 == *(void**)(((uintptr_t)realvmptr + 8))))
+	{
+		return true;
+	}
+	// First, if our thread-local server context flag is active, we're in server context.
+	if (g_serverContextActive)
+		return true;
 
-	// NOTE(mrsteyk): Server VM exists? If no, we can't be running server.
-	if (!realvmptr)
-		return false;
+	// Not in server context.
+	return false;
+}*/
 
-	const HMODULE serverDllBase = (HMODULE)G_server;
-	const SIZE_T serverDllSize = 0xFB5000; // no comment
-	constexpr size_t stack_size = 72;
-	void* stack[stack_size];
 
-	USHORT frames = CaptureStackBackTrace(0, stack_size, stack, NULL);
+__forceinline bool serverRunning(void* a1) {
+	bool computedServerRunning = false;
+	bool serverStackTrace = false;
+	bool didStackTrace = false;
+	// Early-out conditions
+	if (IsDedicatedServer()) {
+		computedServerRunning = true;
+	}
+	else if (isServerScriptVM || a1 == realvmptr || a1 == fakevmptr ||
+		(realvmptr && a1 == *(void**)(((uintptr_t)realvmptr + 8))))
+	{
+		computedServerRunning = true;
+	}
+	else if (!realvmptr) {
+		computedServerRunning = false;
+	}
+	else {
+		didStackTrace = true;
+		// Perform a stack walk to see if any frame is within server.dll.
+		const HMODULE serverDllBase = (HMODULE)G_server;
+		const SIZE_T serverDllSize = 0xFB5000;  // Example size of server.dll
+		constexpr size_t STACK_SIZE = 72;
+		void* stack[STACK_SIZE] = { 0 };
+		USHORT frames = CaptureStackBackTrace(0, STACK_SIZE, stack, NULL);
 
-	for (USHORT i = 0; i < frames; i++) {
-		if ((stack[i] >= serverDllBase) && ((ULONG_PTR)stack[i] < (ULONG_PTR)serverDllBase + serverDllSize)) {
-			return TRUE;
+		for (USHORT i = 0; i < frames; i++) {
+			if (stack[i] >= serverDllBase &&
+				(uintptr_t)stack[i] < (uintptr_t)serverDllBase + serverDllSize)
+			{
+				computedServerRunning = true;
+				serverStackTrace = true;
+				break;
+			}
+		}
+	}
+	// Check if our thread-local flag (set by our hook guards) is in sync.
+	if (didStackTrace && serverStackTrace != g_serverContextActive && realvmptr) {
+		// Walk the stack again to locate the first server.dll frame.
+		const HMODULE serverDllBase = (HMODULE)G_server;
+		const SIZE_T serverDllSize = 0xFB5000;
+		constexpr size_t STACK_SIZE = 72;
+		void* stack[STACK_SIZE] = { 0 };
+		USHORT frames = CaptureStackBackTrace(0, STACK_SIZE, stack, NULL);
+
+		for (USHORT i = 0; i < frames; i++) {
+			if (stack[i] >= serverDllBase &&
+				(uintptr_t)stack[i] < (uintptr_t)serverDllBase + serverDllSize)
+			{
+				uintptr_t rva = (uintptr_t)stack[i] - (uintptr_t)serverDllBase;
+				Warning("serverRunning: g_serverContextActive mismatch! computed=%s, flag=%s, at RVA 0x%lx\n",
+					computedServerRunning ? "true" : "false",
+					g_serverContextActive ? "true" : "false",
+					rva);
+#ifdef _DEBUG
+				__debugbreak();
+#endif
+				break;
+			}
 		}
 	}
 
-	return FALSE;
+	return computedServerRunning;
 }
+
+
 
 const char* FieldTypeToString(int fieldType)
 {
@@ -1019,22 +1309,6 @@ void __fastcall CSquirrelVM__RegisterFunctionGuts(__int64* a1, __int64 a2, const
 			}
 		}
 	}
-	/*
-	LPCVOID baseAddressDll = (LPCVOID)G_vscript;
-	LPCVOID address1 = (LPCVOID)((uintptr_t)(baseAddressDll)+0xCE27);
-	LPCVOID address2 = (LPCVOID)((uintptr_t)(baseAddressDll)+0xD3C0);
-	char value1 = 0x22;
-	char data1[] = { 0x00, 0x05, 0x01, 0x05, 0x00, 0x05, 0x02, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x03, 0x04, 0x04 };
-	WriteProcessMemory(GetCurrentProcess(), (LPVOID)address1, &value1, 1, NULL);
-	WriteProcessMemory(GetCurrentProcess(), (LPVOID)address2, data1, sizeof(data1), NULL);
-	//std::cout << __FUNCTION__ ": translated call" << std::endl;
-	CSquirrelVM__RegisterFunctionGutsOriginal(a1, a2, a3);
-	char value2 = 0x21;
-	char data2[] = { 0x00, 0x05, 0x01, 0x05, 0x00, 0x02, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x03, 0x04, 0x04 };
-	WriteProcessMemory(GetCurrentProcess(), (LPVOID)address1, &value2, 1, NULL);
-	WriteProcessMemory(GetCurrentProcess(), (LPVOID)address2, data2, sizeof(data2), NULL);
-	*/
-	//
 	CSquirrelVM__RegisterFunctionGutsOriginal(a1, a2, a3);
 }
 void __fastcall CSquirrelVM__TranslateCall(__int64* a1) {

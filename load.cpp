@@ -1882,6 +1882,69 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook((LPVOID)(server_base + 0x1442D0), &CServerGameDLL_DLLShutdown, reinterpret_cast<LPVOID*>(NULL));
 	MH_CreateHook((LPVOID)(server_base + 0x1532A0), &sub_1801532A0, reinterpret_cast<LPVOID*>(&osub_1801532A0));
 	
+	// Hook sub_0098C10 at server_base + 0x098C10
+	MH_CreateHook((LPVOID)(server_base + 0x098C10),
+		&hooked_sub_0098C10,
+		reinterpret_cast<LPVOID*>(&original_sub_0098C10));
+
+	// Hook sub_00D6D50 at server_base + 0x0D6D50
+	MH_CreateHook((LPVOID)(server_base + 0x0D6D50),
+		&hooked_sub_00D6D50,
+		reinterpret_cast<LPVOID*>(&original_sub_00D6D50));
+
+	// Hook sub_0149E70 at server_base + 0x1499E70
+	MH_CreateHook((LPVOID)(server_base + 0x0149E70),
+		&hooked_sub_0149E70,
+		reinterpret_cast<LPVOID*>(&original_sub_0149E70));
+
+	// Hook sub_0144B60 at server_base + 0x144B60
+	MH_CreateHook((LPVOID)(server_base + 0x144B60),
+		&hooked_sub_0144B60,
+		reinterpret_cast<LPVOID*>(&original_sub_0144B60));
+
+	// Hook sub_01499E0 at server_base + 0x1499E0
+	MH_CreateHook((LPVOID)(server_base + 0x1499E0),
+		&hooked_sub_01499E0,
+		reinterpret_cast<LPVOID*>(&original_sub_01499E0));
+
+	// Hook sub_0281150 at server_base + 0x0281150
+	MH_CreateHook((LPVOID)(server_base + 0x0281150),
+		&hooked_sub_0281150,
+		reinterpret_cast<LPVOID*>(&original_sub_0281150));
+
+	// Hook sub_02811D0 at server_base + 0x02811D0
+	MH_CreateHook((LPVOID)(server_base + 0x02811D0),
+		&hooked_sub_02811D0,
+		reinterpret_cast<LPVOID*>(&original_sub_02811D0));
+
+	// Hook sub_03BD500 at server_base + 0x03BD500
+	MH_CreateHook((LPVOID)(server_base + 0x03BD500),
+		&hooked_sub_03BD500,
+		reinterpret_cast<LPVOID*>(&original_sub_03BD500));
+
+	// Hook sub_041EDF0 at server_base + 0x041EDF0
+	MH_CreateHook((LPVOID)(server_base + 0x041EDF0),
+		&hooked_sub_041EDF0,
+		reinterpret_cast<LPVOID*>(&original_sub_041EDF0));
+
+	// Hook sub_04A4B00 at server_base + 0x04A4B00
+	MH_CreateHook((LPVOID)(server_base + 0x04A4B00),
+		&hooked_sub_04A4B00,
+		reinterpret_cast<LPVOID*>(&original_sub_04A4B00));
+	MH_CreateHook((LPVOID)(server_base + 0x1499C0),
+		&hooked_sub_01499C0,
+		reinterpret_cast<LPVOID*>(&original_sub_01499C0));
+
+	MH_CreateHook((LPVOID)(server_base + 0x284D10),
+		&hooked_sub_0284D10,
+		reinterpret_cast<LPVOID*>(&original_sub_0284D10));
+
+	MH_CreateHook((LPVOID)(server_base + 0x1461F0),
+		&hooked_sub_01461F0,
+		reinterpret_cast<LPVOID*>(&original_sub_01461F0));
+
+
+
 	if (IsDedicatedServer()) {
 		MH_CreateHook((LPVOID)(G_engine_ds + 0x45EB0), &GetUserIDStringHook, reinterpret_cast<LPVOID*>(&GetUserIDStringOriginal));
 	}

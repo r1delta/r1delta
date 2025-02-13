@@ -499,3 +499,164 @@ extern void* sq_getentity(HSQUIRRELVM v, SQInteger iStackPos);
     ScriptFunctionRegistry::getInstance().addFunction(std::make_unique<SQFuncRegistration>( \
         static_cast<ScriptContext>(context), name, func, typeMask, paramsCheck, returnType, argNames, helpText \
     ))
+
+//-----------------------------------------------------------------------------
+// Function pointer typedefs and extern declarations for the original functions
+//-----------------------------------------------------------------------------
+
+// sub_0098C10: __int64 __fastcall sub_0098C10(__int64 a1, __int64 a2, __int64 a3, __int64 a4, __int64 a5, __int64 a6);
+typedef __int64(__fastcall* sub_0098C10_t)(
+	__int64 a1,
+	__int64 a2,
+	__int64 a3,
+	__int64 a4,
+	__int64 a5,
+	__int64 a6
+	);
+extern sub_0098C10_t original_sub_0098C10;
+
+// sub_00D6D50: void __fastcall sub_00D6D50(__int64 a1, __int64 a2, __int64 a3);
+typedef void(__fastcall* sub_00D6D50_t)(
+	__int64 a1,
+	__int64 a2,
+	__int64 a3
+	);
+extern sub_00D6D50_t original_sub_00D6D50;
+
+// sub_0149E70: void __fastcall sub_0149E70(__int64 a1, __int64 a2, __int64 a3);
+typedef void(__fastcall* sub_0149E70_t)(
+	__int64 a1,
+	__int64 a2,
+	__int64 a3
+	);
+extern sub_0149E70_t original_sub_0149E70;
+
+// sub_0144B60: char __fastcall sub_0144B60(__int64 a1, unsigned __int8 *a2, __int64 a3, __int64 a4, __int64 a5, char a6, char a7);
+typedef char(__fastcall* sub_0144B60_t)(
+	__int64 a1,
+	unsigned __int8* a2,
+	__int64 a3,
+	__int64 a4,
+	__int64 a5,
+	char a6,
+	char a7
+	);
+extern sub_0144B60_t original_sub_0144B60;
+
+// sub_01499E0: void __fastcall sub_01499E0(__int64 a1, __int64 a2);
+typedef void(__fastcall* sub_01499E0_t)(
+	__int64 a1,
+	__int64 a2
+	);
+extern sub_01499E0_t original_sub_01499E0;
+
+// sub_0281150: __int64 sub_0281150();
+typedef __int64 (*sub_0281150_t)();
+extern sub_0281150_t original_sub_0281150;
+
+// sub_02811D0: __int64 sub_02811D0();
+typedef __int64 (*sub_02811D0_t)();
+extern sub_02811D0_t original_sub_02811D0;
+
+// sub_03BD500: void __fastcall sub_03BD500(_QWORD *a1);
+typedef void(__fastcall* sub_03BD500_t)(_QWORD* a1);
+extern sub_03BD500_t original_sub_03BD500;
+
+// sub_041EDF0: __int64 __fastcall sub_041EDF0(__int64 a1);
+typedef __int64(__fastcall* sub_041EDF0_t)(__int64 a1);
+extern sub_041EDF0_t original_sub_041EDF0;
+
+// sub_04A4B00: void* __fastcall sub_04A4B00(__int64 a1);
+typedef void* (__fastcall* sub_04A4B00_t)(__int64 a1);
+extern sub_04A4B00_t original_sub_04A4B00;
+
+//-----------------------------------------------------------------------------
+// Hook function declarations
+//-----------------------------------------------------------------------------
+
+__int64 __fastcall hooked_sub_0098C10(
+	__int64 a1,
+	__int64 a2,
+	__int64 a3,
+	__int64 a4,
+	__int64 a5,
+	__int64 a6
+);
+
+void __fastcall hooked_sub_00D6D50(
+	__int64 a1,
+	__int64 a2,
+	__int64 a3
+);
+
+void __fastcall hooked_sub_0149E70(
+	__int64 a1,
+	__int64 a2,
+	__int64 a3
+);
+
+char __fastcall hooked_sub_0144B60(
+	__int64 a1,
+	unsigned __int8* a2,
+	__int64 a3,
+	__int64 a4,
+	__int64 a5,
+	char a6,
+	char a7
+);
+
+void __fastcall hooked_sub_01499E0(
+	__int64 a1,
+	__int64 a2
+);
+
+__int64 hooked_sub_0281150();
+__int64 hooked_sub_02811D0();
+void __fastcall hooked_sub_03BD500(_QWORD* a1);
+__int64 __fastcall hooked_sub_041EDF0(__int64 a1);
+void* __fastcall hooked_sub_04A4B00(__int64 a1);
+//-----------------------------------------------------------------------------
+// Function pointer typedefs and extern declarations for additional functions
+//-----------------------------------------------------------------------------
+
+// sub_01499C0: __int64 __fastcall sub_01499C0(__int64 a1, __int64 a2, unsigned __int8 a3);
+typedef __int64(__fastcall* sub_01499C0_t)(
+	__int64 a1,
+	__int64 a2,
+	unsigned __int8 a3
+	);
+extern sub_01499C0_t original_sub_01499C0;
+
+// sub_0284D10: bool __fastcall sub_0284D10(_BYTE* a1, __int64 a2);
+typedef bool(__fastcall* sub_0284D10_t)(
+	_BYTE* a1,
+	__int64 a2
+	);
+extern sub_0284D10_t original_sub_0284D10;
+
+// sub_01461F0: void __fastcall sub_01461F0(__int64 a1, unsigned __int8 a2);
+typedef void(__fastcall* sub_01461F0_t)(
+	__int64 a1,
+	unsigned __int8 a2
+	);
+extern sub_01461F0_t original_sub_01461F0;
+
+//-----------------------------------------------------------------------------
+// Hook function declarations for the additional functions
+//-----------------------------------------------------------------------------
+
+__int64 __fastcall hooked_sub_01499C0(
+	__int64 a1,
+	__int64 a2,
+	unsigned __int8 a3
+);
+
+bool __fastcall hooked_sub_0284D10(
+	_BYTE* a1,
+	__int64 a2
+);
+
+void __fastcall hooked_sub_01461F0(
+	__int64 a1,
+	unsigned __int8 a2
+);
