@@ -56,6 +56,16 @@
 #pragma intrinsic(_ReturnAddress)
 
 struct PatchInstruction {
+    PatchInstruction() = default;
+    PatchInstruction(std::string moduleName, std::string sectionName, long long offset, std::string originalBytes, std::string newBytes) {
+        this->moduleName = moduleName;
+        this->sectionName = "." + sectionName;
+        this->offset = offset;
+        this->originalBytes = std::vector<unsigned char>(originalBytes.begin(), originalBytes.end());
+        this->newBytes = std::vector<unsigned char>(newBytes.begin(), newBytes.end());
+        this->lineNumber = 666;
+        this->fileName = "<native>";
+    }
     std::string moduleName;
     std::string sectionName;
     long long offset; // For 64-bit compatibility
@@ -248,6 +258,12 @@ initialisePatchInstructions() {
     if (IsDedicatedServer()) {
         std::vector<PatchInstruction> dedicatedServerPatchInstructions = ParsePatchFile("r1delta/r1delta_ds.wpatch");
         patchInstructions.insert(patchInstructions.end(), dedicatedServerPatchInstructions.begin(), dedicatedServerPatchInstructions.end());
+        if (!std::filesystem::exists("vpk/englishserver_mp_common.bsp.pak000_dir.vpk")) {
+            patchInstructions.push_back(PatchInstruction("engine_ds.dll", "rdata", 0x422980, "vpk/server_", "vpk/client_\x00"));
+            patchInstructions.push_back(PatchInstruction("engine_ds.dll", "rdata", 0x4229A8, "%sserver_%s%s", "%sclient_%s%s\x00"));
+            patchInstructions.push_back(PatchInstruction("dedicated.dll", "rdata", 0x208E50, "vpk/server", "vpk/client"));
+            patchInstructions.push_back(PatchInstruction("dedicated.dll", "rdata", 0x205AC8, "vpk/server", "vpk/client"));
+        }
     }
 
     if (IsNoOrigin()) {
