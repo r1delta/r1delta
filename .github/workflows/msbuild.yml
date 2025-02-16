@@ -63,15 +63,16 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: r1delta/core
+          path: core
 
       - name: Format Delta Files
         run: |
-          mkdir ${{env.BUILD_PATH}}/delta
-          mkdir ${{env.BUILD_PATH}}/delta/bin_delta
-          cp delta/bin/* ${{env.BUILD_PATH}}/delta/bin_delta/
+          mkdir ${{env.BUILD_PATH}}/r1delta
+          mkdir ${{env.BUILD_PATH}}/r1delta/bin_delta
+          cp delta/bin/* ${{env.BUILD_PATH}}/r1delta/bin_delta/
           cp delta/R1Delta.exe ${{env.BUILD_PATH}}/
           cp delta/R1Delta_DS.exe ${{env.BUILD_PATH}}/
-
+          rsync -avr --exclude=".git*" --exclude="*.md" core ${{env.BUILD_PATH}}/r1delta
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
