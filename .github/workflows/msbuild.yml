@@ -15,6 +15,7 @@ env:
   # Path to the solution file relative to the root of the project.
   SOLUTION_FILE_PATH: .
   BUILD_PATH: "/build"
+  OUTPUT_PATH: "/output"
   VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
 
   # Configuration type to build.
@@ -67,14 +68,13 @@ jobs:
 
       - name: Format Delta Files
         run: |
-          mkdir ${{env.BUILD_PATH}}/r1delta
-          mkdir ${{env.BUILD_PATH}}/r1delta/bin_delta
-          cp delta/bin/* ${{env.BUILD_PATH}}/r1delta/bin_delta/
-          cp delta/R1Delta.exe ${{env.BUILD_PATH}}/
-          cp delta/R1Delta_DS.exe ${{env.BUILD_PATH}}/
-          rsync -avr --exclude=".git*" --exclude="*.md" core ${{env.BUILD_PATH}}/r1delta
+          mkdir ${{env.OUTPUT_PATH}}/r1delta
+          mkdir ${{env.OUTPUT_PATH}}/r1delta/bin_delta
+          cp ${{env.BUILD_PATH}}/*.exe ${{env.OUTPUT_PATH}}/
+          cp ${{env.BUILD_PATH}}/*.dll ${{env.OUTPUT_PATH}}/r1delta/bin_delta/
+          rsync -avr --exclude=".git*" --exclude="*.md" core ${{env.OUTPUT_PATH}}/r1delta
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          path: ${{env.BUILD_PATH}}
+          path: ${{env.OUTPUT_PATH}}
           name: delta
