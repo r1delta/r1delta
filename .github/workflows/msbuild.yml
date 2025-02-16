@@ -50,6 +50,7 @@ jobs:
         triplet: x64-windows-release
         token: ${{ github.token }}
         github-binarycache: true
+        revision: master
 
     - name: Build
       working-directory: ${{env.GITHUB_WORKSPACE}}
