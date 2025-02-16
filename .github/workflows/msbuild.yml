@@ -62,5 +62,5 @@ jobs:
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        path: ${{env.GITHUB_WORKSPACE}}/${{env.BUILD_PATH}}
+        path: ${{env.BUILD_PATH}}
         name: delta
