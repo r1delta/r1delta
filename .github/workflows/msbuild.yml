@@ -33,12 +33,9 @@ jobs:
     - name: Add MSBuild to PATH
       uses: microsoft/setup-msbuild@v1.0.2
 
-    - name: run-vcpkg
-      uses: lukka/run-vcpkg@v11.5
-      with:
-        vcpkgGitCommitId: 78b61582c9e093fda56a01ebb654be15a0033897
-        runVcpkgInstall: true
-        vcpkgJsonGlob: '**/vcpkg.json'
+    - name: Restore vcpkg packages
+      working-directory: ${{env.GITHUB_WORKSPACE}}
+      run: vcpkg integrate install
 
     - name: Build
       working-directory: ${{env.GITHUB_WORKSPACE}}
