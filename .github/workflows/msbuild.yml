@@ -72,7 +72,7 @@ jobs:
           mkdir ${{env.OUTPUT_PATH}}/r1delta/bin_delta
           cp ${{env.BUILD_PATH}}/*.exe ${{env.OUTPUT_PATH}}/
           cp ${{env.BUILD_PATH}}/*.dll ${{env.OUTPUT_PATH}}/r1delta/bin_delta/
-          robocopy core ${{ env.OUTPUT_PATH }}/r1delta /E /XD .git /XF *.md || exit 0
+          robocopy core ${{ env.OUTPUT_PATH }}/r1delta /E /XD .git /XF *.md || $true
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
