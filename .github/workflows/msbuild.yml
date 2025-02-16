@@ -42,15 +42,16 @@ jobs:
           core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
           core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
-    - name: vcpkg build
-      id: vcpkg
-      uses: johnwason/vcpkg-action@v6
+    - name: cache-vcpkg-archives
+      id: cache-vcpkg-archives
+      uses: pat-s/always-upload-cache@v3
       with:
-        manifest-dir: ${{ github.workspace }} # Set to directory containing vcpkg.json
-        triplet: x64-windows-release
-        token: ${{ github.token }}
-        github-binarycache: true
-        revision: 78b61582c9e093fda56a01ebb654be15a0033897
+          path: ${{ github.workspace }}/vcpkg_cache
+          key: ${{ runner.os }}-windows-vcpkg-${{ hashFiles('vcpkg/vcpkg_dry_run.txt') }}
+
+    - name: Restore vcpkg packages
+      working-directory: ${{env.GITHUB_WORKSPACE}}
+      run: vcpkg integrate install
 
     - name: Build
       working-directory: ${{env.GITHUB_WORKSPACE}}
