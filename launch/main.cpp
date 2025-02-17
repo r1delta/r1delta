@@ -474,7 +474,6 @@ void DoSteamStart(PSTR lpCmdLine) {
 
 	std::wstring steamclientDll = GetSteamDllPath();
 	if (steamclientDll == L"") {
-		MessageBox(nullptr, L"Couldn't locate steamclient!", L"R1", 0);
 		return;
 	}
 
@@ -493,7 +492,6 @@ void DoSteamStart(PSTR lpCmdLine) {
 	// Load steamclient64.dll
 	HMODULE steamclient64 = LoadLibrary(steamclientDll.c_str());
 	if (!steamclient64) {
-		MessageBox(nullptr, L"Couldn't load steamclient!", L"R1", 0);
 		return;
 	}
 
@@ -508,7 +506,6 @@ void DoSteamStart(PSTR lpCmdLine) {
 		}
 	}
 	if (!clientEngine) {
-		MessageBox(nullptr, L"Couldn't get CLIENTENGINE_INTERFACE_VERSION", L"R1", 0);
 		return;
 	}
 
@@ -517,7 +514,6 @@ void DoSteamStart(PSTR lpCmdLine) {
 	std::uint32_t pipe = reinterpret_cast<fnCreateSteamPipe>(GetProcAddress(steamclient64, "Steam_CreateSteamPipe"))();
 
 	if (!pipe) {
-		MessageBox(nullptr, L"Couldn't create steam pipe", L"R1", 0);
 		return;
 	
 	}
@@ -526,7 +522,6 @@ void DoSteamStart(PSTR lpCmdLine) {
 	std::uint32_t user = reinterpret_cast<fnConnectToGlobalUser>(GetProcAddress(steamclient64, "Steam_ConnectToGlobalUser"))(pipe);
 
 	if(!user) {
-		MessageBox(nullptr, L"Couldn't connect to global user", L"R1", 0);
 		return;
 	}
 
@@ -534,7 +529,6 @@ void DoSteamStart(PSTR lpCmdLine) {
 	void* clientUser = reinterpret_cast<fnGetClientUser>(VFUNC_OF(clientEngine, 8))(clientEngine, user, pipe);
 
 	if(!clientUser) {
-		MessageBox(nullptr, L"Couldn't get client user", L"R1", 0);
 		return;
 	}
 
@@ -575,7 +569,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine,
 			return 1;
 		}
 		catch(...) {
-			MessageBox(nullptr, L"An error occurred while trying to connect to steam. Launching game normally", L"R1", 0);
 		}
 				
 	}
