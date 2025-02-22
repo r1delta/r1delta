@@ -191,7 +191,17 @@ nvapi_stuff()
 #endif
 
 static int skip_dllmain = -1;
-
+bool Plat_IsInToolMode() {
+		static HMODULE matsystem = 0;
+		if (!matsystem) {
+			matsystem = GetModuleHandleA("materialsystem_dx11.dll");
+			return false;
+		}
+		HMODULE module2;
+		BOOL check1 = GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCTSTR)_ReturnAddress(), &module2);
+		BOOL check2 = module2 == (HMODULE)matsystem;
+		return check1 && check2;
+}
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 {
 	// make sure we're game and not tools
@@ -267,6 +277,9 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 
 		MH_Initialize();
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("tier0_orig.dll"), "GetCPUInformation"), &GetCPUInformationDet, reinterpret_cast<LPVOID*>(&GetCPUInformationOriginal));
+		if (!IsDedicatedServer())
+			MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("tier0_orig.dll"), "Plat_IsInToolMode"), &GetCPUInformationDet, reinterpret_cast<LPVOID*>(NULL));
+
 		MH_EnableHook(MH_ALL_HOOKS);
 
 		initialisePatchInstructions();
