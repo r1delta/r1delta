@@ -1,0 +1,81 @@
+# This workflow uses actions that are not certified by GitHub.
+# They are provided by a third-party and are governed by
+# separate terms of service, privacy policy, and support
+# documentation.
+
+name: Build Project
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  # Path to the solution file relative to the root of the project.
+  SOLUTION_FILE_PATH: .
+  BUILD_PATH: "/build"
+  OUTPUT_PATH: "/output"
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+
+  # Configuration type to build.
+  # You can convert this to a build matrix if you need coverage of multiple configuration types.
+  # https://docs.github.com/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
+  BUILD_CONFIGURATION: Release
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: cache-vcpkg-archives
+        id: cache-vcpkg-archives
+        uses: pat-s/always-upload-cache@v3
+        with:
+          path: ${{ github.workspace }}/vcpkg_cache
+          key: ${{ runner.os }}-windows-vcpkg-${{ hashFiles('vcpkg/vcpkg_dry_run.txt') }}
+
+      - name: Restore vcpkg packages
+        working-directory: ${{env.GITHUB_WORKSPACE}}
+        run: vcpkg integrate install
+
+      - name: Build
+        working-directory: ${{env.GITHUB_WORKSPACE}}
+        # Add additional options to the MSBuild command line here (like platform or verbosity level).
+        # See https://docs.microsoft.com/visualstudio/msbuild/msbuild-command-line-reference
+        run: msbuild /m /p:Configuration=${{env.BUILD_CONFIGURATION}}  /p:OutDir=${{env.BUILD_PATH}} /p:WarningLevel=0 ${{env.SOLUTION_FILE_PATH}}
+
+      - name: Checkout Scripts
+        uses: actions/checkout@v4
+        with:
+          repository: r1delta/core
+          path: core
+
+      - name: Format Delta Files
+        run: |
+          mkdir ${{env.OUTPUT_PATH}}/r1delta
+          mkdir ${{env.OUTPUT_PATH}}/r1delta/bin_delta
+          cp ${{env.BUILD_PATH}}/*.exe ${{env.OUTPUT_PATH}}/
+          cp ${{env.BUILD_PATH}}/*.dll ${{env.OUTPUT_PATH}}/r1delta/bin_delta/
+          robocopy core ${{ env.OUTPUT_PATH }}/r1delta /E /XD .git /XF *.md; exit 0
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          path: ${{env.OUTPUT_PATH}}
+          name: delta

@@ -4,9 +4,6 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 VisualStudioVersion = 17.8.34330.188
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "tier0", "Dll1.vcxproj", "{FF6A4DE4-E3D3-4F2B-8640-0A4815865FBE}"
-	ProjectSection(ProjectDependencies) = postProject
-		{ABB5EAE7-B3E6-432E-B636-333449892EA6} = {ABB5EAE7-B3E6-432E-B636-333449892EA6}
-	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "launcher", "launch\launcher.vcxproj", "{4E116D7B-5E62-42D8-9649-56B00CC61AB3}"
 EndProject
