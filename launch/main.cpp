@@ -566,6 +566,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine,
 	if (!strstr(lpCmdLine, "-bunny")) {
 		try {
 			DoSteamStart(lpCmdLine);
+			return 0;
 		}
 		catch(...) {
 		}
