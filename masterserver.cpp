@@ -298,15 +298,15 @@ SQInteger GetServerList(HSQUIRRELVM v) {
     sq_newarray(v, 0);
 
     if (servers.empty()) {
-        sq_newtable(v);
-        sq_pushstring(v, "host_name", -1); sq_pushstring(v, "* But nobody came.", -1); sq_newslot(v, -3, 0);
-        sq_pushstring(v, "map_name", -1); sq_pushstring(v, "mp_lobby", -1); sq_newslot(v, -3, 0);
-        sq_pushstring(v, "game_mode", -1); sq_pushstring(v, "-", -1); sq_newslot(v, -3, 0);
-        sq_pushstring(v, "max_players", -1); sq_pushinteger(0, v, 0); sq_newslot(v, -3, 0);
-        sq_pushstring(v, "port", -1); sq_pushinteger(0, v, 0); sq_newslot(v, -3, 0);
-        sq_pushstring(v, "ip", -1); sq_pushstring(v, "0.0.0.0", -1); sq_newslot(v, -3, 0);
-        sq_pushstring(v, "players", -1); sq_newarray(v, 0); sq_newslot(v, -3, 0);
-        sq_arrayappend(v, -2);
+        //sq_newtable(v);
+        //sq_pushstring(v, "host_name", -1); sq_pushstring(v, "* But nobody came.", -1); sq_newslot(v, -3, 0);
+        //sq_pushstring(v, "map_name", -1); sq_pushstring(v, "mp_lobby", -1); sq_newslot(v, -3, 0);
+        //sq_pushstring(v, "game_mode", -1); sq_pushstring(v, "-", -1); sq_newslot(v, -3, 0);
+        //sq_pushstring(v, "max_players", -1); sq_pushinteger(0, v, 0); sq_newslot(v, -3, 0);
+        //sq_pushstring(v, "port", -1); sq_pushinteger(0, v, 0); sq_newslot(v, -3, 0);
+        //sq_pushstring(v, "ip", -1); sq_pushstring(v, "0.0.0.0", -1); sq_newslot(v, -3, 0);
+        //sq_pushstring(v, "players", -1); sq_newarray(v, 0); sq_newslot(v, -3, 0);
+        //sq_arrayappend(v, -2);
         return 1;
     }
 
