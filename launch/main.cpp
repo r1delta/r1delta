@@ -567,17 +567,21 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine,
 	//freopen_s(&pCerr, "conout$", "w", stderr);
 	SetEnvironmentVariable(L"ContentId", L"1025161");
 
+	char path[MAX_PATH];
+	GetModuleFileNameA(NULL, path, MAX_PATH);
+	*strrchr(path, '\\') = '\0';
+	SetCurrentDirectoryA(path);
 
 
-	if (!strstr(lpCmdLine, "-bunny")) {
-		try {
-			DoSteamStart(lpCmdLine);
-			return 0;
-		}
-		catch(...) {
-		}
-				
-	}
+	//if (!strstr(lpCmdLine, "-bunny")) {
+	//	try {
+	//		DoSteamStart(lpCmdLine);
+	//		return 0;
+	//	}
+	//	catch(...) {
+	//	}
+	//			
+	//}
 
 	if (!GetExePathWide(exePath, sizeof(exePath)))
 	{
