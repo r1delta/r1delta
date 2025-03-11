@@ -494,7 +494,7 @@ void SetRanked(HSQUIRRELVM v) {
 	Msg("SetRanked: %d\n", ranked);
 	if (player) {
 		auto player_ptr = reinterpret_cast<__int64>(player);
-		*(int*)(player_ptr + 0x1844) = ranked;
+		*(bool*)(player_ptr + 0x1844) = ranked;
 	}
 }
 
@@ -714,8 +714,8 @@ bool GetSQVMFuncs() {
 		".Ib",
 		3,
 		"void",
-		"int",
-		"Set player gen"
+		"void",
+		"Set player ranked"
 	);
 
 	REGISTER_SCRIPT_FUNCTION(
