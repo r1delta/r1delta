@@ -138,6 +138,7 @@ void ServerClassInit_DT_BasePlayer() {
 	DestroySendProp(DT_Local, DT_LocalLen, "m_titanReady");
 	DestroySendProp(DT_BasePlayer, DT_BasePlayerLen, "m_bWallRun");
 	DestroySendProp(DT_BasePlayer, DT_BasePlayerLen, "m_bDoubleJump");
+	RenameSendProp(DT_BasePlayer, DT_BasePlayerLen, "m_iBonusProgress", "m_rank");
 	RenameSendProp(DT_BasePlayer, DT_BasePlayerLen, "m_ladderSurfaceProps", "m_activeBurnCardIndex");
 	DestroySendProp(DT_BasePlayer, DT_BasePlayerLen, "m_hasHacking");
 
