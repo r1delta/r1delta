@@ -474,6 +474,7 @@ void DoSteamStart(PSTR lpCmdLine) {
 
 	std::wstring steamclientDll = GetSteamDllPath();
 	if (steamclientDll == L"") {
+		throw std::runtime_error("");
 		return;
 	}
 
@@ -492,6 +493,7 @@ void DoSteamStart(PSTR lpCmdLine) {
 	// Load steamclient64.dll
 	HMODULE steamclient64 = LoadLibrary(steamclientDll.c_str());
 	if (!steamclient64) {
+		throw std::runtime_error("");
 		return;
 	}
 
@@ -506,6 +508,7 @@ void DoSteamStart(PSTR lpCmdLine) {
 		}
 	}
 	if (!clientEngine) {
+		throw std::runtime_error("");
 		return;
 	}
 
@@ -514,6 +517,7 @@ void DoSteamStart(PSTR lpCmdLine) {
 	std::uint32_t pipe = reinterpret_cast<fnCreateSteamPipe>(GetProcAddress(steamclient64, "Steam_CreateSteamPipe"))();
 
 	if (!pipe) {
+		throw std::runtime_error("");
 		return;
 	
 	}
@@ -522,6 +526,7 @@ void DoSteamStart(PSTR lpCmdLine) {
 	std::uint32_t user = reinterpret_cast<fnConnectToGlobalUser>(GetProcAddress(steamclient64, "Steam_ConnectToGlobalUser"))(pipe);
 
 	if(!user) {
+		throw std::runtime_error("");
 		return;
 	}
 
@@ -529,6 +534,7 @@ void DoSteamStart(PSTR lpCmdLine) {
 	void* clientUser = reinterpret_cast<fnGetClientUser>(VFUNC_OF(clientEngine, 8))(clientEngine, user, pipe);
 
 	if(!clientUser) {
+		throw std::runtime_error("");
 		return;
 	}
 
