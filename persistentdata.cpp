@@ -69,8 +69,6 @@ bool IsValidUserInfo(const char* value, int length) {
 		case '\\': // Escapes
 		case '{':  // Code blocks/JSON
 		case '}':
-		case '(':  // Code execution/commands  
-		case ')':
 		case '\'': // String delimiters
 		case '`':
 		case ';':  // Command separators
