@@ -32,35 +32,6 @@ std::string GetWindowsVersionInfo();
 std::string GetLastErrorString(DWORD errorCode);
 
 typedef NTSTATUS(WINAPI* RtlGetVersionPtr)(PRTL_OSVERSIONINFOW);
-void DumpAvailableResources(HMODULE hModule, std::ofstream& log) {
-    log << "\n=== Available Resources in Module ===\n";
-
-    // Check for WAVE resources
-    HRSRC hRes = FindResourceA(hModule, NULL, MAKEINTRESOURCEA(10));
-    if (hRes) log << "Found RCDATA resources\n";
-
-    hRes = FindResourceA(hModule, NULL, "WAVE");
-    if (hRes) log << "Found WAVE resources\n";
-
-    hRes = FindResourceA(hModule, MAKEINTRESOURCEA(CRASH_SOUND), "WAVE");
-    if (hRes) {
-        log << "Found CRASH_SOUND resource with ID " << CRASH_SOUND << "\n";
-        DWORD size = SizeofResource(hModule, hRes);
-        log << "Resource size: " << size << " bytes\n";
-    }
-    else {
-        log << "Failed to find CRASH_SOUND resource with ID " << CRASH_SOUND << "\n";
-    }
-
-    // Try looking for resources of any type with the right ID
-    hRes = FindResourceA(hModule, MAKEINTRESOURCEA(CRASH_SOUND), NULL);
-    if (hRes) {
-        DWORD type = 0;
-        log << "Found resource with ID " << CRASH_SOUND << " but of different type\n";
-    }
-
-    log << "=== End Resource Dump ===\n";
-}
 // Global crash handler function
 LONG WINAPI CustomCrashHandler(EXCEPTION_POINTERS* exInfo)
 {
