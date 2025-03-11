@@ -88,6 +88,7 @@
 #include "shellapi.h"
 #include <jwt-cpp/jwt.h>
 #include "jwt_compact.h"
+#include "vector.h"
 
 #pragma intrinsic(_ReturnAddress)
 
@@ -1066,56 +1067,92 @@ __int64 __fastcall HookedServerClassRegister(__int64 a1, char* a2, __int64 a3) {
 typedef void (*CBaseClientSetNameType)(__int64 thisptr, const char* name);
 CBaseClientSetNameType CBaseClientSetNameOriginal;
 
-void __fastcall HookedCBaseClientSetName(__int64 thisptr,  const char* name)
+void __fastcall HookedCBaseClientSetName(__int64 thisptr, const char* name)
 {
 	/*
-	* Restrict client names to printable ASCII characters.
-Enforce a maximum length of 32 characters.
+	* Restrict client names to valid characters.
+	* Enforce a maximum length of 32 characters.
 	*/
 
-	const char* nameBuffer = name;
+	// Handle null or empty name
+	if (!name || !*name) {
+		CBaseClientSetNameOriginal(thisptr, "unnamed");
+		return;
+	}
+
 	size_t nameSize = strlen(name);
 
-	// Check if the name is too long
-	if (nameSize > 32)
-	{
-		// Truncate the name
-		char truncatedName[256];
-		strncpy_s(truncatedName, name, 32);
-		truncatedName[32] = '\0';
-
-		nameBuffer = truncatedName;
-		nameSize = 32;
+	// Check if name is too short
+	if (nameSize < 2) {
+		CBaseClientSetNameOriginal(thisptr, "unnamed");
+		return;
 	}
 
-	// Check if the name contains any non-printable ASCII characters
-	for (size_t i = 0; i < nameSize; i++)
-	{
-		if (name[i] < 32 || name[i] > 126)
-		{
-			// Remove the non-printable character
-			char printableName[256];
-			size_t j = 0;
-			for (size_t i = 0; i < nameSize; i++)
-			{
-				if (name[i] >= 32 && name[i] <= 126)
-				{
-					printableName[j] = name[i];
-					j++;
-				}
-			}
-			printableName[j] = '\0';
-			nameBuffer = printableName;
+	// Check if the name is too long
+	if (nameSize > 32) {
+		nameSize = 32; // Truncate to max length
+	}
+
+	// Create a sanitized name buffer
+	char sanitizedName[256];
+	size_t sanitizedIndex = 0;
+
+	// Process each character using the IsValidUserInfo validation logic
+	for (size_t i = 0; i < nameSize && sanitizedIndex < 32; i++) {
+		char c = name[i];
+
+		// Basic ASCII printable range check
+		if (c < 32 || c > 126) {
+			continue; // Skip non-printable characters
+		}
+
+		// Check for explicitly denied characters
+		bool isInvalid = false;
+		switch (c) {
+		case '"':  // String termination
+		case '\\': // Escapes
+		case '{':  // Code blocks/JSON
+		case '}':
+		case '\'': // String delimiters
+		case '`':
+		case ';':  // Command separators
+		case '/':
+		case '*':
+		case '<':  // XML/HTML
+		case '>':
+		case '&':  // Shell
+		case '|':
+		case '$':
+		case '!':
+		case '?':
+		case '+':  // URL encoding
+		case '%':
+		case '\n': // Any whitespace except regular space
+		case '\r':
+		case '\t':
+		case '\v':
+		case '\f':
+			isInvalid = true;
 			break;
 		}
+
+		if (!isInvalid) {
+			sanitizedName[sanitizedIndex++] = c;
+		}
 	}
-	if (nameSize < 2)
-	{
-		nameBuffer = "unnamed";
-		nameSize = 7; // length of "unnamed"
+
+	// Add null terminator
+	sanitizedName[sanitizedIndex] = '\0';
+
+	// If no valid characters were found, use default name
+	if (sanitizedIndex == 0) {
+		CBaseClientSetNameOriginal(thisptr, "unnamed");
+		return;
 	}
-	//Msg("Updated client name: %s to: %s\n", name,nameBuffer);
-	CBaseClientSetNameOriginal(thisptr, nameBuffer);
+
+	// Call original function with sanitized name
+	//Msg("Updated client name: %s to: %s\n", name, sanitizedName);
+	CBaseClientSetNameOriginal(thisptr, sanitizedName);
 }
 struct AuthResponse {
 	bool success = false;
@@ -1828,6 +1865,77 @@ bool sub_1801532A0(__int64 a1, __int64 a2, __int64 a3)
 		return 0;
 	return osub_1801532A0(a1, a2, a3);
 }
+void (*oCProjectile__PhysicsSimulate)(__int64 thisptr);
+void CProjectile__PhysicsSimulate(__int64 thisptr)
+{
+	oCProjectile__PhysicsSimulate(thisptr);
+	if (*(uintptr_t*)thisptr == (G_server + 0x8DA9D0)) {
+		// Get current velocities
+		Vector vecVelocity;
+		Vector angVelocity;
+		memcpy(&angVelocity, reinterpret_cast<Vector* (*)(uintptr_t)>(G_server + 0x3BB300)(thisptr), sizeof(Vector));
+		memcpy(&vecVelocity, reinterpret_cast<Vector * (*)(uintptr_t)>(G_server + 0x91B10)(thisptr), sizeof(Vector));
+		float flSpeed = vecVelocity.Length();
+		float flFrameTime = pGlobalVarsServer->frametime;
+		const float LAUNCH_SPEED = 1300.0f;
+
+		// Calculate normalized speed (0.0 to 1.0)
+		float flSpeedRatio = flSpeed / LAUNCH_SPEED;
+
+		// Apply exponential decay with velocity-dependent coefficient
+		// Base damping when stationary
+		float flBaseDamping = 3.f;  // Reduced from ~5.0
+		float flMinDamping = 0.25f;  // Reduced from ~0.5-1.0
+
+
+		// Calculate damping coefficient that varies with velocity
+		// Higher exponent = sharper curve (keeps spinning longer while moving)
+		float flExponent = 1.5f;
+		float flDampingCoeff = flBaseDamping - (flBaseDamping - flMinDamping) * powf(flSpeedRatio, flExponent);
+
+		float flDecayFactor = exp(-flDampingCoeff * flFrameTime);
+
+		// Apply to angular velocity
+		angVelocity.x *= flDecayFactor;
+		angVelocity.y *= flDecayFactor;
+		angVelocity.z *= flDecayFactor;
+
+		// Optional: Cut off small rotations
+		const float ANGULAR_VELOCITY_EPSILON = 0.5f;
+		if (fabs(angVelocity.x) < ANGULAR_VELOCITY_EPSILON &&
+			fabs(angVelocity.y) < ANGULAR_VELOCITY_EPSILON &&
+			fabs(angVelocity.z) < ANGULAR_VELOCITY_EPSILON)
+		{
+			angVelocity = Vector(0, 0, 0);
+		}
+		Msg("flSpeed: %f X: %f Y: %f Z: %f dampCoeff: %f, decayFactor: %f, angVel: %f %f %f \n", flSpeed, vecVelocity.x, vecVelocity.y, vecVelocity.z, flDampingCoeff, flDecayFactor, angVelocity.x, angVelocity.y, angVelocity.z);
+		reinterpret_cast<void(*)(__int64 thisptr, float, float, float)>(G_server + 0x3BB2A0)(thisptr, angVelocity.x, angVelocity.y, angVelocity.z);
+	}
+}
+CRITICAL_SECTION g_cs;
+typedef __int64(__fastcall* t_sub_1032C0)(__int64 a1, char a2);
+typedef __int64(__fastcall* t_sub_103120)(__int64 a1, __int64 a2, __int64 a3, int a4);
+t_sub_1032C0 original_sub_1032C0 = nullptr;
+t_sub_103120 original_sub_103120 = nullptr;
+
+
+__int64 (*o_sub_1032C0)(__int64, char);
+__int64 __fastcall sub_1032C0_hook(__int64 a1, char a2)
+{
+	EnterCriticalSection(&g_cs);
+	__int64 ret = o_sub_1032C0(a1, a2);
+	LeaveCriticalSection(&g_cs);
+	return ret;
+}
+
+__int64 (*o_sub_103120)(__int64, __int64, __int64, int);
+__int64 __fastcall sub_103120_hook(__int64 a1, __int64 a2, __int64 a3, int a4)
+{
+	EnterCriticalSection(&g_cs);
+	__int64 ret = o_sub_103120(a1, a2, a3, a4);
+	LeaveCriticalSection(&g_cs);
+	return ret;
+}
 
 static FORCEINLINE void
 do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
@@ -1876,7 +1984,7 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook((LPVOID)(server_base + 0x3A1EC0), &CBaseEntity__SendProxy_CellOrigin, reinterpret_cast<LPVOID*>(NULL));
 	MH_CreateHook((LPVOID)(server_base + 0x3A2020), &CBaseEntity__SendProxy_CellOriginXY, reinterpret_cast<LPVOID*>(NULL));
 	MH_CreateHook((LPVOID)(server_base + 0x3A2130), &CBaseEntity__SendProxy_CellOriginZ, reinterpret_cast<LPVOID*>(NULL));
-	MH_CreateHook((LPVOID)(server_base + 0x3C8B70), &CBaseEntity__VPhysicsInitNormal, reinterpret_cast<LPVOID*>(&oCBaseEntity__VPhysicsInitNormal));
+	//MH_CreateHook((LPVOID)(server_base + 0x3C8B70), &CBaseEntity__VPhysicsInitNormal, reinterpret_cast<LPVOID*>(&oCBaseEntity__VPhysicsInitNormal));
 	MH_CreateHook((LPVOID)(server_base + 0x3B3200), &CBaseEntity__SetMoveType, reinterpret_cast<LPVOID*>(&oCBaseEntity__SetMoveType));
 	MH_CreateHook((LPVOID)(server_base + 0x4E2F30), &CPlayer_GetLevel, reinterpret_cast<LPVOID*>(NULL));
 	MH_CreateHook((LPVOID)(server_base + 0x1442D0), &CServerGameDLL_DLLShutdown, reinterpret_cast<LPVOID*>(NULL));
@@ -1910,7 +2018,8 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook((LPVOID)(server_base + 0x25E340), &DispatchSpawn, reinterpret_cast<LPVOID*>(&oDispatchSpawn));
 	MH_CreateHook((LPVOID)(server_base + 0x369E00), &InitTableHook, reinterpret_cast<LPVOID*>(&original_init_table));
 	MH_CreateHook((LPVOID)(server_base + 0x2820A0), &HandleSquirrelClientCommand, reinterpret_cast<LPVOID*>(&oHandleSquirrelClientCommand));
-	
+	//MH_CreateHook((LPVOID)(server_base + 0x59F380), &CProjectile__PhysicsSimulate, reinterpret_cast<LPVOID*>(&oCProjectile__PhysicsSimulate));
+
 	//MH_CreateHook((LPVOID)(server_base + 0x364140), &DebugConnectMsg, reinterpret_cast<LPVOID*>(0));
 	
 	RegisterConCommand("updatescriptdata", updatescriptdata_cmd, "Dumps the script data in the AI node graph to disk", FCVAR_CHEAT);
@@ -2048,6 +2157,14 @@ void __stdcall LoaderNotificationCallback(
 		InitDedicated();
 		constexpr auto a = (1 << 2);
 		should_init_security_fixes = true;
+	}
+	else if (strcmp_static(name, L"vphysics.dll") == 0) {
+		InitializeCriticalSectionAndSpinCount(&g_cs, 4000);
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x1032C0), &sub_1032C0_hook, reinterpret_cast<LPVOID*>(&o_sub_1032C0));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x103120), &sub_103120_hook, reinterpret_cast<LPVOID*>(&o_sub_103120));
+
+		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0xFFFF), &sub_FFFF, reinterpret_cast<LPVOID*>(&ovphys_sub_FFFF));
+		//MH_EnableHook(MH_ALL_HOOKS);
 	}
 	else {
 		bool is_client = !strcmp_static(name, L"client.dll");
