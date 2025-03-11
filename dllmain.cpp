@@ -277,8 +277,8 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 
 		MH_Initialize();
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("tier0_orig.dll"), "GetCPUInformation"), &GetCPUInformationDet, reinterpret_cast<LPVOID*>(&GetCPUInformationOriginal));
-		if (!IsDedicatedServer())
-			MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("tier0_orig.dll"), "Plat_IsInToolMode"), &GetCPUInformationDet, reinterpret_cast<LPVOID*>(NULL));
+//		if (!IsDedicatedServer())
+//			MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("tier0_orig.dll"), "Plat_IsInToolMode"), &GetCPUInformationDet, reinterpret_cast<LPVOID*>(NULL));
 
 		MH_EnableHook(MH_ALL_HOOKS);
 
