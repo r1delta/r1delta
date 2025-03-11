@@ -243,10 +243,10 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 	MH_CreateHook(LPVOID(engineDS + 0x6ABF0), LPVOID(engine + 0xF9BB0), NULL); // CServerRemoteAccess::GetUserBanList
 	MH_CreateHook(LPVOID(engineDS + 0x53690), LPVOID(engine + 0xE1F00), NULL); // Filter_Add_f
 	MH_CreateHook(LPVOID(engineDS + 0x52B60), LPVOID(engine + 0xE13D0), NULL); // Filter_ShouldDiscard
-	MH_CreateHook(LPVOID(engineDS + 0x53AF0), LPVOID(engine + 0xE2370), NULL); // banid
-	MH_CreateHook(LPVOID(engineDS + 0x53040), LPVOID(engine + 0xE18B0), NULL); // removeid
+	//MH_CreateHook(LPVOID(engineDS + 0x53AF0), LPVOID(engine + 0xE2370), NULL); // banid
+	//MH_CreateHook(LPVOID(engineDS + 0x53040), LPVOID(engine + 0xE18B0), NULL); // removeid
 	MH_CreateHook(LPVOID(engineDS + 0x52C80), LPVOID(engine + 0xE14F0), NULL); // removeip
-	MH_CreateHook(LPVOID(engineDS + 0x52730), LPVOID(engine + 0xE0FA0), NULL); // writeid
+	//MH_CreateHook(LPVOID(engineDS + 0x52730), LPVOID(engine + 0xE0FA0), NULL); // writeid
 	MH_CreateHook(LPVOID(engineDS + 0x525F0), LPVOID(engine + 0xE0E60), NULL); // writeip
 
 

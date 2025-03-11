@@ -1064,6 +1064,22 @@ __int64 __fastcall HookedServerClassRegister(__int64 a1, char* a2, __int64 a3) {
 	return ServerClassRegister_7F7E0(a1, a2, a3);
 }
 
+// SetrankFunction (__int64 player, int rank)
+typedef void (*SetRankFunctionType)(__int64, int);
+
+void __fastcall HookedSetRankFunction(__int64 player, int rank)
+{
+	if (rank > 100) return;
+	*(int*)(player + 0x15A0) = rank;
+}
+
+typedef int (*GetRankFunctionType)(__int64);
+
+int __fastcall HookedGetRankFunction(__int64 player)
+{
+	return *(int*)(player + 0x15A0);
+}
+
 typedef void (*CBaseClientSetNameType)(__int64 thisptr, const char* name);
 CBaseClientSetNameType CBaseClientSetNameOriginal;
 
@@ -1989,7 +2005,9 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook((LPVOID)(server_base + 0x4E2F30), &CPlayer_GetLevel, reinterpret_cast<LPVOID*>(NULL));
 	MH_CreateHook((LPVOID)(server_base + 0x1442D0), &CServerGameDLL_DLLShutdown, reinterpret_cast<LPVOID*>(NULL));
 	MH_CreateHook((LPVOID)(server_base + 0x1532A0), &sub_1801532A0, reinterpret_cast<LPVOID*>(&osub_1801532A0));
-	
+	MH_CreateHook((LPVOID)(server_base + 0x21B6B0), &HookedGetRankFunction, NULL);
+	MH_CreateHook((LPVOID)(server_base + 0x50B8B0), &HookedSetRankFunction, NULL);
+
 	if (IsDedicatedServer()) {
 		MH_CreateHook((LPVOID)(G_engine_ds + 0x45EB0), &GetUserIDStringHook, reinterpret_cast<LPVOID*>(&GetUserIDStringOriginal));
 	}
