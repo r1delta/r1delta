@@ -273,6 +273,12 @@
     <ClInclude Include="jwt_compact.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="crashhandler.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="resource.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">
@@ -389,6 +395,9 @@
     <ClCompile Include="audio.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="crashhandler.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
@@ -400,5 +409,10 @@
   </ItemGroup>
   <ItemGroup>
     <Natvis Include="base.natvis" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="resources.rc">
+      <Filter>Resource Files</Filter>
+    </ResourceCompile>
   </ItemGroup>
 </Project>

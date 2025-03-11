@@ -44,6 +44,7 @@
 #include "logging.h"
 #include <tier0/platform.h>
 #include "mimalloc-new-delete.h"
+#include "crashhandler.h"
 uint64_t g_PerformanceFrequency;
 int G_is_dedi;
 typedef const char* (__cdecl* wine_get_version_func)();
@@ -274,7 +275,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 		LoadLibraryW(L"TextShaping.dll"); // fix "Patcher Error" dialogs having no text
 		SetDllDirectoryW(L"r1delta\\bin_delta");
 		SetDllDirectoryW(L"r1delta\\bin");
-
+		InstallExceptionHandler();
 		MH_Initialize();
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("tier0_orig.dll"), "GetCPUInformation"), &GetCPUInformationDet, reinterpret_cast<LPVOID*>(&GetCPUInformationOriginal));
 //		if (!IsDedicatedServer())

@@ -189,6 +189,7 @@
     <ClInclude Include="compression.h" />
     <ClInclude Include="coordsize.h" />
     <ClInclude Include="core.h" />
+    <ClInclude Include="crashhandler.h" />
     <ClInclude Include="cvar.h" />
     <ClInclude Include="dedicated.h" />
     <ClInclude Include="engine.h" />
@@ -211,6 +212,7 @@
     <ClInclude Include="physics.h" />
     <ClInclude Include="platform.h" />
     <ClInclude Include="predictionerror.h" />
+    <ClInclude Include="resource.h" />
     <ClInclude Include="security_fixes.hh" />
     <ClInclude Include="sendmoveclampfix.h" />
     <ClInclude Include="squirrel.h" />
@@ -270,6 +272,7 @@
     <ClCompile Include="bitbuf.cpp" />
     <ClCompile Include="client.cpp" />
     <ClCompile Include="compression.cpp" />
+    <ClCompile Include="crashhandler.cpp" />
     <ClCompile Include="cvar.cpp" />
     <ClCompile Include="dedicated.cpp" />
     <ClCompile Include="dllmain.cpp" />
@@ -316,6 +319,9 @@
   </ItemGroup>
   <ItemGroup>
     <Natvis Include="base.natvis" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="resources.rc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

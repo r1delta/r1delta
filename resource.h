@@ -1,0 +1,1 @@
+#define CRASH_SOUND 1033
