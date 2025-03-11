@@ -1,4 +1,4 @@
-The R1Delta project utilizes third-party code for various functions. In accordance with the respective licenses of these open-source projects, we provide the following legal notices and attributions:
+:) The R1Delta project utilizes third-party code for various functions. In accordance with the respective licenses of these open-source projects, we provide the following legal notices and attributions:
 
 Source SDK:
 R1Delta uses portions of the Source SDK. The full license text for the Source SDK is as follows:
