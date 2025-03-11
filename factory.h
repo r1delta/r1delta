@@ -47,7 +47,7 @@ struct CGlobalVarsServer2015 {
 	float curtime;                                         // 0x0010
 	char pad0[4];                                      // 0x0014, padding to align next member at 8-byte boundary
 	float curtimeUnkSeemsLikeCopy;                         // 0x0018
-	int frametime;                                         // 0x001C
+	float frametime;                                         // 0x001C
 	int maxClients;                                        // 0x0020
 	int tickcount;                                         // 0x0024
 	float interval_per_tick;                               // 0x0028
