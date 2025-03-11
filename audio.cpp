@@ -665,14 +665,6 @@ static bool EndsWithWav(const char* filename) {
 }
 
 // --------------------------------------------------------------------
-// Prefetch hint function (stub implementation).
-// --------------------------------------------------------------------
-static void HintUpcomingRead(const std::string& filename, size_t offset) {
-    // This function may boost priority for background decoding of chunks near 'offset'
-    // For now, it is implemented as a no–op.
-}
-
-// --------------------------------------------------------------------
 // The main filesystem read hook.
 // If the filename ends with ".wav", we temporarily rewrite it to ".ogg"
 // and use our custom handler. Otherwise, we fall back to the original read.
