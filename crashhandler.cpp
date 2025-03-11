@@ -95,8 +95,39 @@ LONG WINAPI CustomCrashHandler(EXCEPTION_POINTERS* exInfo)
     DWORD pid = GetCurrentProcessId();
 
     // Create filename
+    CreateDirectoryA("crashes", NULL);
+
+    // Create filename with path
+    char exePath[MAX_PATH];
+    GetModuleFileNameA(NULL, exePath, MAX_PATH);
+
+    // Extract directory from path
+    char exeDir[MAX_PATH];
+    strcpy_s(exeDir, exePath);
+    for (int i = strlen(exeDir) - 1; i >= 0; i--) {
+        if (exeDir[i] == '\\' || exeDir[i] == '/') {
+            exeDir[i + 1] = '\0';
+            break;
+        }
+    }
+
+    // Create crashes directory path
+    char crashesDir[MAX_PATH];
+    sprintf_s(crashesDir, "%scrashes", exeDir);
+
+    // Create crashes directory if it doesn't exist
+    if (!CreateDirectoryA(crashesDir, NULL)) {
+        // If directory creation failed but it's because the directory already exists, that's fine
+        if (GetLastError() != ERROR_ALREADY_EXISTS) {
+            // Just continue - we'll try to write to the current directory as a fallback
+        }
+    }
+
+    // Create filename with path
     char filename[MAX_PATH];
+    char filepath[MAX_PATH];
     sprintf_s(filename, "r1delta_crash_%lld_%lu.log", (long long)currentTime, pid);
+    sprintf_s(filepath, "%s\\%s", crashesDir, filename);
 
     std::stringstream crashLog;
     crashLog << "// SMAAAASH!!!" << std::endl;
@@ -161,13 +192,13 @@ LONG WINAPI CustomCrashHandler(EXCEPTION_POINTERS* exInfo)
         crashLog << (char*)(G_engine + 0x2291560) << std::endl;
     }
     // Write crash log to file
-    std::ofstream logFile(filename);
+    std::ofstream logFile(filepath);
     if (logFile.is_open()) {
         logFile << crashLog.str();
         logFile.close();
         if (!IsDedicatedServer()) {
 
-            ShellExecuteA(NULL, "open", "notepad.exe", filename, NULL, SW_SHOWNORMAL);
+            ShellExecuteA(NULL, "open", "notepad.exe", filepath, NULL, SW_SHOWNORMAL);
             // Get the handle to THIS DLL module
             HMODULE hModule;
             if (GetModuleHandleExA(
