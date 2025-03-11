@@ -1,4 +1,4 @@
-#include <windows.h>
+﻿#include <windows.h>
 #include <dbghelp.h>
 #include <psapi.h>
 #include <time.h>
@@ -17,7 +17,14 @@
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "dbghelp.lib")
 #pragma comment(lib, "psapi.lib")
-
+const char* g_CrashMessages[] = {
+    "// Northstar has cras- oh wait, wrong line.",
+    "// Disconnect: Disconnect: Authentication Failed..",
+    "// Seeing this error message does not fill you with determination.",
+    "// ****NEWS**FLASH**** 1",
+    "// Time Wasted Debugging: %s",
+    "// SMAAAASH!!!"
+};
 // Function declarations
 void GetSystemInfoEnhanced(std::stringstream& ss);
 void GetCallStack(CONTEXT* context, std::stringstream& ss);
@@ -128,9 +135,11 @@ LONG WINAPI CustomCrashHandler(EXCEPTION_POINTERS* exInfo)
     char filepath[MAX_PATH];
     sprintf_s(filename, "r1delta_crash_%lld_%lu.log", (long long)currentTime, pid);
     sprintf_s(filepath, "%s\\%s", crashesDir, filename);
-
+    srand(time(NULL));
     std::stringstream crashLog;
-    crashLog << "// SMAAAASH!!!" << std::endl;
+    // Pick a random message from the array
+    int randomIndex = rand() % (sizeof(g_CrashMessages) / sizeof(g_CrashMessages[0]));
+    crashLog << g_CrashMessages[randomIndex] << std::endl;
     crashLog << "Unfortunately, R1Delta has crashed. Please send this crash report to a programmer in the Discord server.";
 #ifdef _DEBUG   
     crashLog << ".. or don't, because this is a debug build.";
