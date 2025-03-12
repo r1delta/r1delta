@@ -210,11 +210,25 @@ LONG WINAPI CustomCrashHandler(EXCEPTION_POINTERS* exInfo)
             ShellExecuteA(NULL, "open", "notepad.exe", filepath, NULL, SW_SHOWNORMAL);
             // Get the handle to THIS DLL module
             HMODULE hModule;
-            GetModuleHandleExA(
+            if (GetModuleHandleExA(
                 GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
                 GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
                 (LPCSTR)&CustomCrashHandler,
-                &hModule);
+                &hModule
+            )) {
+                // Find the resource by name
+                HRSRC hRes = FindResourceA(hModule, "CRASH_SOUND2", "WAVE");
+                if (hRes) {
+                    HGLOBAL hData = LoadResource(hModule, hRes);
+                    if (hData) {
+                        LPVOID pData = LockResource(hData);
+                        DWORD size = SizeofResource(hModule, hRes);
+
+                        // Play directly from memory
+                        PlaySoundA((LPCSTR)pData, NULL, SND_MEMORY);
+                    }
+                }
+            }
             Sleep(50);
         }
 
