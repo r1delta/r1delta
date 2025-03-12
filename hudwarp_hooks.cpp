@@ -47,8 +47,8 @@ void __fastcall RenderHud_Hook(__int64 a1, __int64 a2, __int64 a3)
 {
 	// Update state once per frame to prevent possible issues with one or neither applying
 	//static ConVarR1 hudwarp_use_gpu{ "hudwarp_use_gpu" };
-
-	shouldUseGPUHudwarp = true;
+	static ConVarR1* hudwarp_use_gpu = OriginalCCVar_FindVar(cvarinterface, "hudwarp_use_gpu");
+	shouldUseGPUHudwarp = hudwarp_use_gpu->m_Value.m_nValue == 1;
 
 	//static ConVarR1 hudwarp_disable{ "hudwarp_disable" };
 //	isHudwarpDisabled = hudwarp_disable.m_Value.m_nValue;
