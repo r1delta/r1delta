@@ -89,6 +89,8 @@
 #include <jwt-cpp/jwt.h>
 #include "jwt_compact.h"
 #include "vector.h"
+#include "hudwarp.h"
+#include "hudwarp_hooks.h"
 
 #pragma intrinsic(_ReturnAddress)
 
@@ -2037,9 +2039,8 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook((LPVOID)(server_base + 0x369E00), &InitTableHook, reinterpret_cast<LPVOID*>(&original_init_table));
 	MH_CreateHook((LPVOID)(server_base + 0x2820A0), &HandleSquirrelClientCommand, reinterpret_cast<LPVOID*>(&oHandleSquirrelClientCommand));
 	//MH_CreateHook((LPVOID)(server_base + 0x59F380), &CProjectile__PhysicsSimulate, reinterpret_cast<LPVOID*>(&oCProjectile__PhysicsSimulate));
-
+	SetupHudWarpHooks();
 	//MH_CreateHook((LPVOID)(server_base + 0x364140), &DebugConnectMsg, reinterpret_cast<LPVOID*>(0));
-	
 	RegisterConCommand("updatescriptdata", updatescriptdata_cmd, "Dumps the script data in the AI node graph to disk", FCVAR_CHEAT);
 	RegisterConCommand("verifyain", verifyain_cmd, "Reads the .ain file from disk, compares its nodes & links to in-memory data, logs differences.", FCVAR_CHEAT);
 	RegisterConCommand("updateain", updateain_cmd, "Calls StartRebuild, then overwrites node/link data in the .ain file.", FCVAR_CHEAT);
@@ -2051,6 +2052,8 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	RegisterConVar("delta_online_auth_enable", "1", FCVAR_GAMEDLL, "Whether to use master server auth");
 	RegisterConVar("delta_discord_username_sync", "2", FCVAR_GAMEDLL, "Controls if player names are synced with Discord: 0=Off,1=Norm,2=Pomelo");
 	RegisterConVar("riff_floorislava", "0", FCVAR_HIDDEN, "Enable floor is lava mode");
+	RegisterConVar("hudwarp_use_gpu", "1", FCVAR_ARCHIVE,"Use GPU for HUD warp");
+	RegisterConVar("hudwarp_disable", "0", FCVAR_ARCHIVE, "GPU device to use for HUD warp");
 	RegisterConCommand("script", script_cmd, "Execute Squirrel code in server context", FCVAR_GAMEDLL | FCVAR_CHEAT);
 	if (!IsDedicatedServer()) {
 		RegisterConCommand("script_client", script_client_cmd, "Execute Squirrel code in client context", FCVAR_NONE);

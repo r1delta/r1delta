@@ -197,6 +197,8 @@
     <ClInclude Include="filecache.h" />
     <ClInclude Include="filesystem.h" />
     <ClInclude Include="framework.h" />
+    <ClInclude Include="hudwarp.h" />
+    <ClInclude Include="hudwarp_hooks.h" />
     <ClInclude Include="jwt_compact.h" />
     <ClInclude Include="keyvalues.h" />
     <ClInclude Include="load.h" />
@@ -280,6 +282,8 @@
     <ClCompile Include="factory.cpp" />
     <ClCompile Include="filecache.cpp" />
     <ClCompile Include="filesystem.cpp" />
+    <ClCompile Include="hudwarp.cpp" />
+    <ClCompile Include="hudwarp_hooks.cpp" />
     <ClCompile Include="keyvalues.cpp" />
     <ClCompile Include="load.cpp" />
     <ClCompile Include="logging.cpp" />
