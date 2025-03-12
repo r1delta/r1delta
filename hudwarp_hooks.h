@@ -4,3 +4,5 @@
 #include <DirectXMath.h>
 
 void SetupHudWarpHooks();
+void SetupHudWarpMatSystemHooks();
+void SetupHudWarpVguiHooks();

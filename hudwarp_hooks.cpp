@@ -181,7 +181,7 @@ void __fastcall CMatSystemSurface__ApplyHudwarpSettings(void* thisptr, HudwarpSe
 	hudwarp_chopsize->m_Value.m_nValue = originalChopsize;
 }
 typedef __int64(__fastcall* sub_5ADC0_type)(__int64 queuedRenderContext, unsigned long color, const char* pszName);
-sub_5ADC0_type sub_5ADC0;
+sub_5ADC0_type sub_5ADC0 = nullptr;
 __int64 __fastcall sub_5ADC0_Hook(__int64 queuedRenderContext, unsigned long color, const char* pszName) {
 	static unsigned int hudEventDepth = 0;
 
@@ -259,21 +259,23 @@ void __fastcall OnWindowSizeChanged(unsigned int w, unsigned int h, bool isInGam
 
 
 void SetupHudWarpHooks() {
-	DWORD64 materialSystemBase = (DWORD64)GetModuleHandle(L"materialsystem_dx11.dll");
-	DWORD64 vguimatsurfacedllBaseAddress = (DWORD64)GetModuleHandle(L"vguimatsurface.dll");
 	DWORD64 clientBaseAddress = (DWORD64)GetModuleHandle(L"client.dll");
-	DWORD64 sub_63D0_addr = materialSystemBase + 0x63D0;
-	SetPixMarker = (SetPixMarker_type)(materialSystemBase + 0x5D7E0);
-//	MH_CreateHook((void*)sub_63D0_addr, &sub_63D0, reinterpret_cast<LPVOID*>(&sub_63D0_org));
-//	MH_CreateHook((void*)(clientBaseAddress + 0x2AE630), &RenderHud_Hook, reinterpret_cast<LPVOID*>(&RenderHud));
-//	MH_CreateHook((void*)(vguimatsurfacedllBaseAddress + 0xBAC0), &sub_18000BAC0, reinterpret_cast<LPVOID*>(&sub_18000BAC0_org));
-//	MH_CreateHook((void*)(vguimatsurfacedllBaseAddress + 0x15A30), &CMatSystemSurface__ApplyHudwarpSettings, reinterpret_cast<LPVOID*>(&CMatSystemSurface__ApplyHudwarpSettings_org));
-
-//	MH_CreateHook((void*)(materialSystemBase + 0x5ADC0), &sub_5ADC0_Hook, reinterpret_cast<LPVOID*>(&sub_5ADC0));
-
-
-//	MH_CreateHook((void*)(vguimatsurfacedllBaseAddress + 0xBE60), &sub_18000BE60, reinterpret_cast<LPVOID*>(&sub_18000BE60_org));
-//	MH_CreateHook((void*)(vguimatsurfacedllBaseAddress + 0x154A0), &sub_1800154A0, reinterpret_cast<LPVOID*>(&sub_1800154A0_org));
-
+	MH_CreateHook((void*)(clientBaseAddress + 0x2AE630), &RenderHud_Hook, reinterpret_cast<LPVOID*>(&RenderHud));
 	MH_EnableHook(MH_ALL_HOOKS);
+}
+
+void SetupHudWarpMatSystemHooks() {
+	DWORD64 materialSystemBase = (DWORD64)GetModuleHandle(L"materialsystem_dx11.dll");
+	DWORD64 sub_63D0_addr = materialSystemBase + 0x63D0;
+	MH_CreateHook((void*)sub_63D0_addr, &sub_63D0, reinterpret_cast<LPVOID*>(&sub_63D0_org));
+	MH_CreateHook((void*)(materialSystemBase + 0x5ADC0), &sub_5ADC0_Hook, reinterpret_cast<LPVOID*>(&sub_5ADC0));
+	SetPixMarker = (SetPixMarker_type)(materialSystemBase + 0x5D7E0);
+}
+
+void SetupHudWarpVguiHooks() {
+	DWORD64 vguimatsurfacedllBaseAddress = (DWORD64)GetModuleHandle(L"vguimatsurface.dll");
+	MH_CreateHook((void*)(vguimatsurfacedllBaseAddress + 0xBAC0), &sub_18000BAC0, reinterpret_cast<LPVOID*>(&sub_18000BAC0_org));
+	MH_CreateHook((void*)(vguimatsurfacedllBaseAddress + 0x15A30), &CMatSystemSurface__ApplyHudwarpSettings, reinterpret_cast<LPVOID*>(&CMatSystemSurface__ApplyHudwarpSettings_org));
+	MH_CreateHook((void*)(vguimatsurfacedllBaseAddress + 0xBE60), &sub_18000BE60, reinterpret_cast<LPVOID*>(&sub_18000BE60_org));
+	MH_CreateHook((void*)(vguimatsurfacedllBaseAddress + 0x154A0), &sub_1800154A0, reinterpret_cast<LPVOID*>(&sub_1800154A0_org));
 }

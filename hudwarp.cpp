@@ -241,7 +241,7 @@ void HudwarpProcess::Resize(unsigned int w, unsigned int h)
 	m_pShaderResourceView->Release();
 
 	// Create new render target
-	static DWORD64 vguimatsurfacedllBaseAddress = (DWORD64)GetModuleHandleA("materialsystem_dx11.dll");
+	static DWORD64 vguimatsurfacedllBaseAddress = (DWORD64)GetModuleHandle(L"materialsystem_dx11.dll");
 	m_width = *reinterpret_cast<unsigned int*>(vguimatsurfacedllBaseAddress + 0x290DD8);
 	m_height = *reinterpret_cast<unsigned int*>(vguimatsurfacedllBaseAddress + 0x290DD8 + 4);
 

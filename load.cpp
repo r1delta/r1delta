@@ -2039,7 +2039,6 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook((LPVOID)(server_base + 0x369E00), &InitTableHook, reinterpret_cast<LPVOID*>(&original_init_table));
 	MH_CreateHook((LPVOID)(server_base + 0x2820A0), &HandleSquirrelClientCommand, reinterpret_cast<LPVOID*>(&oHandleSquirrelClientCommand));
 	//MH_CreateHook((LPVOID)(server_base + 0x59F380), &CProjectile__PhysicsSimulate, reinterpret_cast<LPVOID*>(&oCProjectile__PhysicsSimulate));
-	SetupHudWarpHooks();
 	//MH_CreateHook((LPVOID)(server_base + 0x364140), &DebugConnectMsg, reinterpret_cast<LPVOID*>(0));
 	RegisterConCommand("updatescriptdata", updatescriptdata_cmd, "Dumps the script data in the AI node graph to disk", FCVAR_CHEAT);
 	RegisterConCommand("verifyain", verifyain_cmd, "Reads the .ain file from disk, compares its nodes & links to in-memory data, logs differences.", FCVAR_CHEAT);
@@ -2187,6 +2186,14 @@ void __stdcall LoaderNotificationCallback(
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0xFFFF), &sub_FFFF, reinterpret_cast<LPVOID*>(&ovphys_sub_FFFF));
 		//MH_EnableHook(MH_ALL_HOOKS);
 	}
+	else if(strcmp_static(name, L"materialsystem_dx11.dll") == 0) {
+		SetupHudWarpMatSystemHooks();
+		MH_EnableHook(MH_ALL_HOOKS);
+	}
+	else if(strcmp_static(name, L"vguimatsurface.dll") == 0) {
+		SetupHudWarpVguiHooks();
+		MH_EnableHook(MH_ALL_HOOKS);
+	}
 	else {
 		bool is_client = !strcmp_static(name, L"client.dll");
 		bool is_server = !is_client && !strcmp_static(name, L"server.dll");
@@ -2194,6 +2201,7 @@ void __stdcall LoaderNotificationCallback(
 		if (is_client) {
 			G_client = (uintptr_t)notification_data->Loaded.DllBase;
 			InitClient();
+			SetupHudWarpHooks();
 		}
 		if (is_server) do_server(notification_data);
 		if (should_init_security_fixes && (is_client || is_server)) {
