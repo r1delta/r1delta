@@ -137,6 +137,11 @@ void SetMitigationPolicies()
 
 int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow )
 {
+	char path[MAX_PATH];
+	GetModuleFileNameA(NULL, path, MAX_PATH);
+	*strrchr(path, '\\') = '\0';
+	SetCurrentDirectoryA(path);
+
 	// Must add 'bin' to the path....
 	char* pPath = nullptr;
 	size_t len;

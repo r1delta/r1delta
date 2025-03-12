@@ -1,4 +1,4 @@
-#include <windows.h>
+﻿#include <windows.h>
 #include <dbghelp.h>
 #include <psapi.h>
 #include <time.h>
@@ -17,7 +17,14 @@
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "dbghelp.lib")
 #pragma comment(lib, "psapi.lib")
-
+const char* g_CrashMessages[] = {
+    "// Northstar has cras- oh wait, wrong line.",
+    "// Disconnect: Disconnect: Authentication Failed..",
+    "// Seeing this error message does not fill you with determination.",
+    "// ****NEWS**FLASH**** 1",
+    "// Time Wasted Debugging: %s",
+    "// SMAAAASH!!!"
+};
 // Function declarations
 void GetSystemInfoEnhanced(std::stringstream& ss);
 void GetCallStack(CONTEXT* context, std::stringstream& ss);
@@ -32,35 +39,6 @@ std::string GetWindowsVersionInfo();
 std::string GetLastErrorString(DWORD errorCode);
 
 typedef NTSTATUS(WINAPI* RtlGetVersionPtr)(PRTL_OSVERSIONINFOW);
-void DumpAvailableResources(HMODULE hModule, std::ofstream& log) {
-    log << "\n=== Available Resources in Module ===\n";
-
-    // Check for WAVE resources
-    HRSRC hRes = FindResourceA(hModule, NULL, MAKEINTRESOURCEA(10));
-    if (hRes) log << "Found RCDATA resources\n";
-
-    hRes = FindResourceA(hModule, NULL, "WAVE");
-    if (hRes) log << "Found WAVE resources\n";
-
-    hRes = FindResourceA(hModule, MAKEINTRESOURCEA(CRASH_SOUND), "WAVE");
-    if (hRes) {
-        log << "Found CRASH_SOUND resource with ID " << CRASH_SOUND << "\n";
-        DWORD size = SizeofResource(hModule, hRes);
-        log << "Resource size: " << size << " bytes\n";
-    }
-    else {
-        log << "Failed to find CRASH_SOUND resource with ID " << CRASH_SOUND << "\n";
-    }
-
-    // Try looking for resources of any type with the right ID
-    hRes = FindResourceA(hModule, MAKEINTRESOURCEA(CRASH_SOUND), NULL);
-    if (hRes) {
-        DWORD type = 0;
-        log << "Found resource with ID " << CRASH_SOUND << " but of different type\n";
-    }
-
-    log << "=== End Resource Dump ===\n";
-}
 // Global crash handler function
 LONG WINAPI CustomCrashHandler(EXCEPTION_POINTERS* exInfo)
 {
@@ -124,11 +102,44 @@ LONG WINAPI CustomCrashHandler(EXCEPTION_POINTERS* exInfo)
     DWORD pid = GetCurrentProcessId();
 
     // Create filename
-    char filename[MAX_PATH];
-    sprintf_s(filename, "r1delta_crash_%lld_%lu.log", (long long)currentTime, pid);
+    CreateDirectoryA("crashes", NULL);
 
+    // Create filename with path
+    char exePath[MAX_PATH];
+    GetModuleFileNameA(NULL, exePath, MAX_PATH);
+
+    // Extract directory from path
+    char exeDir[MAX_PATH];
+    strcpy_s(exeDir, exePath);
+    for (int i = strlen(exeDir) - 1; i >= 0; i--) {
+        if (exeDir[i] == '\\' || exeDir[i] == '/') {
+            exeDir[i + 1] = '\0';
+            break;
+        }
+    }
+
+    // Create crashes directory path
+    char crashesDir[MAX_PATH];
+    sprintf_s(crashesDir, "%scrashes", exeDir);
+
+    // Create crashes directory if it doesn't exist
+    if (!CreateDirectoryA(crashesDir, NULL)) {
+        // If directory creation failed but it's because the directory already exists, that's fine
+        if (GetLastError() != ERROR_ALREADY_EXISTS) {
+            // Just continue - we'll try to write to the current directory as a fallback
+        }
+    }
+
+    // Create filename with path
+    char filename[MAX_PATH];
+    char filepath[MAX_PATH];
+    sprintf_s(filename, "r1delta_crash_%lld_%lu.log", (long long)currentTime, pid);
+    sprintf_s(filepath, "%s\\%s", crashesDir, filename);
+    srand(time(NULL));
     std::stringstream crashLog;
-    crashLog << "// SMAAAASH!!!" << std::endl;
+    // Pick a random message from the array
+    int randomIndex = rand() % (sizeof(g_CrashMessages) / sizeof(g_CrashMessages[0]));
+    crashLog << g_CrashMessages[randomIndex] << std::endl;
     crashLog << "Unfortunately, R1Delta has crashed. Please send this crash report to a programmer in the Discord server.";
 #ifdef _DEBUG   
     crashLog << ".. or don't, because this is a debug build.";
@@ -190,13 +201,13 @@ LONG WINAPI CustomCrashHandler(EXCEPTION_POINTERS* exInfo)
         crashLog << (char*)(G_engine + 0x2291560) << std::endl;
     }
     // Write crash log to file
-    std::ofstream logFile(filename);
+    std::ofstream logFile(filepath);
     if (logFile.is_open()) {
         logFile << crashLog.str();
         logFile.close();
         if (!IsDedicatedServer()) {
 
-            ShellExecuteA(NULL, "open", "notepad.exe", filename, NULL, SW_SHOWNORMAL);
+            ShellExecuteA(NULL, "open", "notepad.exe", filepath, NULL, SW_SHOWNORMAL);
             // Get the handle to THIS DLL module
             HMODULE hModule;
             GetModuleHandleExA(
