@@ -153,6 +153,13 @@
       <AdditionalDependencies>winhttp.lib;Shell32.lib;vstdlib.lib;tier0_orig.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ModuleDefinitionFile>test.def</ModuleDefinitionFile>
     </Link>
+    <PreLinkEvent>
+      <Command>
+      </Command>
+    </PreLinkEvent>
+    <PreBuildEvent>
+      <Command>tskill r1delta &amp; exit 0</Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
