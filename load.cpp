@@ -1893,6 +1893,11 @@ void CProjectile__PhysicsSimulate(__int64 thisptr)
 		Vector angVelocity;
 		memcpy(&angVelocity, reinterpret_cast<Vector* (*)(uintptr_t)>(G_server + 0x3BB300)(thisptr), sizeof(Vector));
 		memcpy(&vecVelocity, reinterpret_cast<Vector * (*)(uintptr_t)>(G_server + 0x91B10)(thisptr), sizeof(Vector));
+		if (vecVelocity.Length() < 10.f && vecVelocity.z) { // I'm sure it's fine :slight_smile:
+			reinterpret_cast<Vector* (*)(uintptr_t)>(G_server + 0x3BB300)(thisptr)->Zero();
+			*(int*)(thisptr + 360) |= 32;
+			*(_BYTE*)(thisptr + 444) = 0;
+		}
 		float flSpeed = vecVelocity.Length();
 		float flFrameTime = pGlobalVarsServer->frametime;
 		const float LAUNCH_SPEED = 1300.0f;
@@ -1926,7 +1931,7 @@ void CProjectile__PhysicsSimulate(__int64 thisptr)
 		{
 			angVelocity = Vector(0, 0, 0);
 		}
-		Msg("flSpeed: %f X: %f Y: %f Z: %f dampCoeff: %f, decayFactor: %f, angVel: %f %f %f \n", flSpeed, vecVelocity.x, vecVelocity.y, vecVelocity.z, flDampingCoeff, flDecayFactor, angVelocity.x, angVelocity.y, angVelocity.z);
+		//Msg("flSpeed: %f X: %f Y: %f Z: %f dampCoeff: %f, decayFactor: %f, angVel: %f %f %f \n", flSpeed, vecVelocity.x, vecVelocity.y, vecVelocity.z, flDampingCoeff, flDecayFactor, angVelocity.x, angVelocity.y, angVelocity.z);
 		reinterpret_cast<void(*)(__int64 thisptr, float, float, float)>(G_server + 0x3BB2A0)(thisptr, angVelocity.x, angVelocity.y, angVelocity.z);
 	}
 }
@@ -1935,7 +1940,105 @@ typedef __int64(__fastcall* t_sub_1032C0)(__int64 a1, char a2);
 typedef __int64(__fastcall* t_sub_103120)(__int64 a1, __int64 a2, __int64 a3, int a4);
 t_sub_1032C0 original_sub_1032C0 = nullptr;
 t_sub_103120 original_sub_103120 = nullptr;
+void (*oCGrenadeFrag__ResolveFlyCollisionCustom)(__int64 a1, float* a2, float* a3);
+__int64 __fastcall UTIL_GetEntityByIndex(int iIndex)
+{
+	__int64 result; // rax
+	char* pEdicts; // rdx
+	char* pEnt; // rcx
+	__int64 v1; // rcx
+	__int64 (*v2)(void); // rdx
 
+	if (iIndex <= 0)
+		return 0LL;
+
+	pEdicts = (char*)pGlobalVarsServer->pEdicts;
+	if (!pEdicts)
+		return 0LL;
+
+	pEnt = &pEdicts[56 * iIndex];
+	result = *(_DWORD*)pEnt >> 1;
+
+	if ((*(_DWORD*)pEnt & 2) == 0)
+	{
+		// Inline of IServerUnknown::GetBaseEntity
+		v1 = *(_QWORD*)(pEnt + 48);
+		if (!v1)
+			return 0LL;
+
+		return v1;
+	}
+
+	return 0LL;
+}
+void CGrenadeFrag__ResolveFlyCollisionCustom(__int64 a1, float* a2, float* a3) // void* thisptr, CGameTrace* trace, Vector* move
+{
+	float x = *(float*)(a1 + 636);
+	float y = *((float*)(a1 + 636) + 1);
+	float z = *(float*)(a1 + 644);
+
+	//Msg("CGrenadeFrag::ResolveFlyCollisionCustom - a1: %p, vel: [%.2f, %.2f, %.2f], normal: [%.2f, %.2f, %.2f]\n",
+	//	a1, x, y, z, a2[8], a2[9], a2[10]);
+
+	char trace[104];
+	Vector vel;
+	memcpy(trace, a2, sizeof(trace));
+	memcpy(&vel, a3, sizeof(vel));
+	static auto sub_4AA8E0 = reinterpret_cast<void(*)(__int64, __int64)>(G_server + 0x4AA8E0);
+	// Calculate speed squared
+	float speedSqr = x * x + y * y + z * z;
+
+	// If speed is below threshold (30*30), zero out velocity
+	if (speedSqr < 900.0f)  // 30*30 = 900
+	{
+		Vector zeroVel = Vector(0, 0, 0);
+		static auto CBaseEntity__SetAbsVelocity = reinterpret_cast<void(*)(__int64, Vector*)>(G_server + 0x3BA970);
+		CBaseEntity__SetAbsVelocity(a1, &zeroVel);
+		oCBaseEntity__SetMoveType((void*)a1, 0, 0);
+		return;
+	}
+
+	oCGrenadeFrag__ResolveFlyCollisionCustom(a1, (float*)&trace, (float*)&vel); // original stomps the params or some shit
+
+	// Stop if on ground.
+	if (a2[10] > 0.7)  // Floor
+	{
+		static auto sub_1803B9B30 = reinterpret_cast<void(*)(__int64)>(G_server + 0x3b9b30);
+		if ((*(_DWORD*)(a1 + 352) & 0x1000LL) != 0)
+			sub_1803B9B30(a1); // Update abs velocity
+	
+		// Get current velocity after bounce
+		Vector currVel = *(Vector*)(a1 + 636);
+		//if (currVel.z < 30.f)
+		//{
+		//	Msg("Post-bounce vel: %f, %f, %f\n", currVel.x, currVel.x, currVel.z);
+		//	// Your existing code to handle z velocity
+		//	currVel = Vector(0, 0, 0);
+		//	static auto CBaseEntity__SetAbsVelocity = reinterpret_cast<void(*)(__int64, Vector*)>(G_server + 0x3BA970);
+		//	CBaseEntity__SetAbsVelocity(a1, &currVel);
+		//}
+		// Calculate speed squared
+		float speedSqr = currVel.x * currVel.x + currVel.y * currVel.y + currVel.z * currVel.z;
+	
+		// If speed is below threshold (30*30), zero out velocity
+		if (speedSqr < 900.0f)  // 30*30 = 900
+		{
+			currVel = Vector(0, 0, 0);
+			static auto CBaseEntity__SetAbsVelocity = reinterpret_cast<void(*)(__int64, Vector*)>(G_server + 0x3BA970);
+			CBaseEntity__SetAbsVelocity(a1, &currVel);
+		}
+	
+	
+		// Set ground entity
+		auto ent = *(_QWORD*)((__int64)(a2)+96);
+		if ((*(unsigned __int8(__fastcall**)(__int64, __int64))(*(_QWORD*)a1 + 824LL))(a1, ent))
+			sub_4AA8E0(a1, ent);
+
+		//if ((*(unsigned __int8(__fastcall**)(__int64, __int64))(*(_QWORD*)a1 + 824LL))(a1, ent))
+		//	sub_4AA8E0(a1, ent);
+	}
+
+}
 
 __int64 (*o_sub_1032C0)(__int64, char);
 __int64 __fastcall sub_1032C0_hook(__int64 a1, char a2)
@@ -1950,7 +2053,36 @@ __int64 (*o_sub_103120)(__int64, __int64, __int64, int);
 __int64 __fastcall sub_103120_hook(__int64 a1, __int64 a2, __int64 a3, int a4)
 {
 	EnterCriticalSection(&g_cs);
+
+	// Get base address of vphysics.dll
+	static uintptr_t base = (uintptr_t)GetModuleHandleA("vphysics.dll");
+
+	// Calculate addresses of key memory locations
+	uintptr_t physics_pp_mindists_addr = base + 0x1EF1D0; // Adjust this offset to match your binary
+	int* physics_pp_mindists = (int*)(physics_pp_mindists_addr + 0x5C); // +0x5C to get the flag
+	uintptr_t qword_1801EF258_addr = base + 0x1EF258;
+	void** qword_1801EF258 = (void**)qword_1801EF258_addr;
+
+	// Check if we need to manually set the pointer (non-parallel path)
+	int needsManualSet = (*physics_pp_mindists == 0);
+
+	// Save original value and set our value if needed
+	void* original_value = NULL;
+	if (needsManualSet) {
+		original_value = *qword_1801EF258;
+		*qword_1801EF258 = (void*)(a1 + 0x100078); // a1 + 1048696
+	}
+
+	// Call original function
 	__int64 ret = o_sub_103120(a1, a2, a3, a4);
+
+	// Restore original value if we changed it
+	if (needsManualSet) {
+		//static auto sub_1801032C0 = (__int64(*)(__int64, char))(base + 0x1032C0);;
+		//sub_1801032C0(a1, 0xFF);
+		*qword_1801EF258 = original_value;
+	}
+
 	LeaveCriticalSection(&g_cs);
 	return ret;
 }
@@ -2002,14 +2134,14 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook((LPVOID)(server_base + 0x3A1EC0), &CBaseEntity__SendProxy_CellOrigin, reinterpret_cast<LPVOID*>(NULL));
 	MH_CreateHook((LPVOID)(server_base + 0x3A2020), &CBaseEntity__SendProxy_CellOriginXY, reinterpret_cast<LPVOID*>(NULL));
 	MH_CreateHook((LPVOID)(server_base + 0x3A2130), &CBaseEntity__SendProxy_CellOriginZ, reinterpret_cast<LPVOID*>(NULL));
-	//MH_CreateHook((LPVOID)(server_base + 0x3C8B70), &CBaseEntity__VPhysicsInitNormal, reinterpret_cast<LPVOID*>(&oCBaseEntity__VPhysicsInitNormal));
+	MH_CreateHook((LPVOID)(server_base + 0x3C8B70), &CBaseEntity__VPhysicsInitNormal, reinterpret_cast<LPVOID*>(&oCBaseEntity__VPhysicsInitNormal));
 	MH_CreateHook((LPVOID)(server_base + 0x3B3200), &CBaseEntity__SetMoveType, reinterpret_cast<LPVOID*>(&oCBaseEntity__SetMoveType));
 	MH_CreateHook((LPVOID)(server_base + 0x4E2F30), &CPlayer_GetLevel, reinterpret_cast<LPVOID*>(NULL));
 	MH_CreateHook((LPVOID)(server_base + 0x1442D0), &CServerGameDLL_DLLShutdown, reinterpret_cast<LPVOID*>(NULL));
 	MH_CreateHook((LPVOID)(server_base + 0x1532A0), &sub_1801532A0, reinterpret_cast<LPVOID*>(&osub_1801532A0));
 	MH_CreateHook((LPVOID)(server_base + 0x21B6B0), &HookedGetRankFunction, NULL);
 	MH_CreateHook((LPVOID)(server_base + 0x50B8B0), &HookedSetRankFunction, NULL);
-
+	MH_CreateHook((LPVOID)(server_base + 0x410F60), &CGrenadeFrag__ResolveFlyCollisionCustom, reinterpret_cast<LPVOID*>(&oCGrenadeFrag__ResolveFlyCollisionCustom));
 	if (IsDedicatedServer()) {
 		MH_CreateHook((LPVOID)(G_engine_ds + 0x45EB0), &GetUserIDStringHook, reinterpret_cast<LPVOID*>(&GetUserIDStringOriginal));
 	}
@@ -2038,7 +2170,7 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook((LPVOID)(server_base + 0x25E340), &DispatchSpawn, reinterpret_cast<LPVOID*>(&oDispatchSpawn));
 	MH_CreateHook((LPVOID)(server_base + 0x369E00), &InitTableHook, reinterpret_cast<LPVOID*>(&original_init_table));
 	MH_CreateHook((LPVOID)(server_base + 0x2820A0), &HandleSquirrelClientCommand, reinterpret_cast<LPVOID*>(&oHandleSquirrelClientCommand));
-	//MH_CreateHook((LPVOID)(server_base + 0x59F380), &CProjectile__PhysicsSimulate, reinterpret_cast<LPVOID*>(&oCProjectile__PhysicsSimulate));
+	MH_CreateHook((LPVOID)(server_base + 0x59F380), &CProjectile__PhysicsSimulate, reinterpret_cast<LPVOID*>(&oCProjectile__PhysicsSimulate));
 	//MH_CreateHook((LPVOID)(server_base + 0x364140), &DebugConnectMsg, reinterpret_cast<LPVOID*>(0));
 	RegisterConCommand("updatescriptdata", updatescriptdata_cmd, "Dumps the script data in the AI node graph to disk", FCVAR_CHEAT);
 	RegisterConCommand("verifyain", verifyain_cmd, "Reads the .ain file from disk, compares its nodes & links to in-memory data, logs differences.", FCVAR_CHEAT);
