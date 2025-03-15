@@ -435,6 +435,7 @@ FodyWeavers.xsd
 !libminhook.lib
 !vstdlib.lib
 build/
+build2/
 vcpkg/
 vcpkg_installed/
 .aider*
