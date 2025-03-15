@@ -1888,51 +1888,51 @@ void CProjectile__PhysicsSimulate(__int64 thisptr)
 {
 	oCProjectile__PhysicsSimulate(thisptr);
 	if (*(uintptr_t*)thisptr == (G_server + 0x8DA9D0)) {
-		// Get current velocities
+		// Get current velocity
 		Vector vecVelocity;
-		Vector angVelocity;
-		memcpy(&angVelocity, reinterpret_cast<Vector* (*)(uintptr_t)>(G_server + 0x3BB300)(thisptr), sizeof(Vector));
 		memcpy(&vecVelocity, reinterpret_cast<Vector * (*)(uintptr_t)>(G_server + 0x91B10)(thisptr), sizeof(Vector));
-		if (vecVelocity.Length() < 10.f && vecVelocity.z) { // I'm sure it's fine :slight_smile:
-			reinterpret_cast<Vector* (*)(uintptr_t)>(G_server + 0x3BB300)(thisptr)->Zero();
-			*(int*)(thisptr + 360) |= 32;
-			*(_BYTE*)(thisptr + 444) = 0;
-		}
+
 		float flSpeed = vecVelocity.Length();
-		float flFrameTime = pGlobalVarsServer->frametime;
-		const float LAUNCH_SPEED = 1300.0f;
 
-		// Calculate normalized speed (0.0 to 1.0)
-		float flSpeedRatio = flSpeed / LAUNCH_SPEED;
-
-		// Apply exponential decay with velocity-dependent coefficient
-		// Base damping when stationary
-		float flBaseDamping = 3.f;  // Reduced from ~5.0
-		float flMinDamping = 0.25f;  // Reduced from ~0.5-1.0
-
-
-		// Calculate damping coefficient that varies with velocity
-		// Higher exponent = sharper curve (keeps spinning longer while moving)
-		float flExponent = 1.5f;
-		float flDampingCoeff = flBaseDamping - (flBaseDamping - flMinDamping) * powf(flSpeedRatio, flExponent);
-
-		float flDecayFactor = exp(-flDampingCoeff * flFrameTime);
-
-		// Apply to angular velocity
-		angVelocity.x *= flDecayFactor;
-		angVelocity.y *= flDecayFactor;
-		angVelocity.z *= flDecayFactor;
-
-		// Optional: Cut off small rotations
-		const float ANGULAR_VELOCITY_EPSILON = 0.5f;
-		if (fabs(angVelocity.x) < ANGULAR_VELOCITY_EPSILON &&
-			fabs(angVelocity.y) < ANGULAR_VELOCITY_EPSILON &&
-			fabs(angVelocity.z) < ANGULAR_VELOCITY_EPSILON)
-		{
-			angVelocity = Vector(0, 0, 0);
+		// Stop when velocity is very low
+		if (flSpeed < 5.f && vecVelocity.z) {
+			reinterpret_cast<Vector* (*)(uintptr_t)>(G_server + 0x3BB300)(thisptr)->Zero();
+			//*(int*)(thisptr + 360) |= 32;
+			//*(_BYTE*)(thisptr + 444) = 0;
+			return;
 		}
-		//Msg("flSpeed: %f X: %f Y: %f Z: %f dampCoeff: %f, decayFactor: %f, angVel: %f %f %f \n", flSpeed, vecVelocity.x, vecVelocity.y, vecVelocity.z, flDampingCoeff, flDecayFactor, angVelocity.x, angVelocity.y, angVelocity.z);
-		reinterpret_cast<void(*)(__int64 thisptr, float, float, float)>(G_server + 0x3BB2A0)(thisptr, angVelocity.x, angVelocity.y, angVelocity.z);
+
+		// Calculate direction vector
+		Vector vecDirection;
+		if (flSpeed > 0.1f) {
+			vecDirection.x = vecVelocity.x / flSpeed;
+			vecDirection.y = vecVelocity.y / flSpeed;
+			vecDirection.z = vecVelocity.z / flSpeed;
+		}
+		else {
+			vecDirection.x = 0;
+			vecDirection.y = 0;
+			vecDirection.z = 1;
+		}
+
+		// Base rotation speed
+		float baseSpinRate = 8.0f;
+
+		// Make spin rate somewhat proportional to speed
+		// Use non-linear scaling so it still spins at lower speeds
+		float speedFactor = 500.f * (0.3f + 0.7f * (flSpeed / 1300.0f));
+		float spinRate = baseSpinRate * speedFactor;
+
+		// Set rotation primarily along the direction of travel
+		// This makes it look like a bullet/arrow spinning as it flies
+		Vector angVelocity;
+		angVelocity.x = vecDirection.x * spinRate;
+		angVelocity.y = vecDirection.y * spinRate;
+		angVelocity.z = vecDirection.z * spinRate;
+
+		// Apply the new angular velocity each frame
+		reinterpret_cast<void(*)(__int64 thisptr, float, float, float)>(G_server + 0x3BB2A0)(thisptr,
+			angVelocity.x, angVelocity.y, angVelocity.z);
 	}
 }
 CRITICAL_SECTION g_cs;
