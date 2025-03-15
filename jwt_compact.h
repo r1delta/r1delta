@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstring>
 #include <algorithm>
+#define USE_LOGGING
 // Optional logging (if you have logging.h in your project).
 #ifdef USE_LOGGING
 #include "logging.h"
