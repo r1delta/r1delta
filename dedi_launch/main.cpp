@@ -13,6 +13,10 @@
 #include <unistd.h>
 #define MAX_PATH PATH_MAX
 #endif
+#ifndef _MSC_VER && !(__MINGW32__ || __MINGW64__)
+// provides __cpuidex on mingw
+#include <intrin.h>
+#endif
 #include <string>
 
 typedef int (*DedicatedMain_t)( HINSTANCE hInstance, HINSTANCE hPrevInstance, 
