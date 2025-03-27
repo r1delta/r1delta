@@ -42,6 +42,8 @@ typedef NTSTATUS(WINAPI* RtlGetVersionPtr)(PRTL_OSVERSIONINFOW);
 // Global crash handler function
 LONG WINAPI CustomCrashHandler(EXCEPTION_POINTERS* exInfo)
 {
+    if (IsDebuggerPresent())
+        return EXCEPTION_CONTINUE_SEARCH;
     // Capture GetLastError as early as possible
     DWORD lastError = GetLastError();
 
