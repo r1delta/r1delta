@@ -84,15 +84,15 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>X:\Games\EA\Titanfall\r1delta\bin_delta\</OutDir>
-    <IncludePath>$(ProjectDir)thirdparty\discord_social_sdk\include;$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\steam;$(ProjectDir)thirdparty\minhook\include;$(ProjectDir)thirdparty\mimalloc\include;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
-    <LibraryPath>$(ProjectDir)thirdparty\discord_social_sdk\lib\$(Configuration);$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\steam\lib;$(ProjectDir)thirdparty\minhook\lib;$(SolutionDir)thirdparty\mimalloc\$(Configuration);$(VC_LibraryPath_X64);$(WindowsSDK_LibraryPath_x64);$(LibraryPath)</LibraryPath>
+    <IncludePath>$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\steam;$(ProjectDir)thirdparty\minhook\include;$(ProjectDir)thirdparty\mimalloc\include;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+    <LibraryPath>$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\steam\lib;$(ProjectDir)thirdparty\minhook\lib;$(SolutionDir)thirdparty\mimalloc\$(Configuration);$(VC_LibraryPath_X64);$(WindowsSDK_LibraryPath_x64);$(LibraryPath)</LibraryPath>
     <IntDir>$(ProjectDir)$(Platform)\$(Configuration)\tier0</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>X:\Games\EA\Titanfall\r1delta\bin_delta\</OutDir>
     <IntDir>$(ProjectDir)$(Platform)\$(Configuration)\tier0</IntDir>
-    <IncludePath>$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\steam;$(ProjectDir)thirdparty\minhook\include;$(ProjectDir)thirdparty\mimalloc\include;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
-    <LibraryPath>$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\steam\lib;$(ProjectDir)thirdparty\minhook\lib;$(SolutionDir)thirdparty\mimalloc\$(Configuration);$(VC_LibraryPath_X64);$(WindowsSDK_LibraryPath_x64);$(LibraryPath)</LibraryPath>
+    <IncludePath>$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\discord_social_sdk\include;$(ProjectDir)thirdparty\steam;$(ProjectDir)thirdparty\minhook\include;$(ProjectDir)thirdparty\mimalloc\include;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+    <LibraryPath>$(ProjectDir)thirdparty\discord_social_sdk\lib\$(Configuration);$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\steam\lib;$(ProjectDir)thirdparty\minhook\lib;$(SolutionDir)thirdparty\mimalloc\$(Configuration);$(VC_LibraryPath_X64);$(WindowsSDK_LibraryPath_x64);$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Label="Vcpkg">
     <VcpkgEnabled>true</VcpkgEnabled>
@@ -150,7 +150,7 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>discord_partner_sdk.lib;winhttp.lib;Shell32.lib;vstdlib.lib;tier0_orig.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>winhttp.lib;Shell32.lib;vstdlib.lib;tier0_orig.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ModuleDefinitionFile>test.def</ModuleDefinitionFile>
     </Link>
     <PreLinkEvent>
@@ -182,7 +182,7 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>discord_partner_sdk.lib;winhttp.lib;Shell32.lib;vstdlib.lib;tier0_orig.lib;discord_partner_sdk.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>winhttp.lib;Shell32.lib;vstdlib.lib;tier0_orig.lib;discord_partner_sdk.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ModuleDefinitionFile>test.def</ModuleDefinitionFile>
     </Link>
   </ItemDefinitionGroup>
