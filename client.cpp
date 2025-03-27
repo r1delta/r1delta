@@ -105,6 +105,50 @@ __int64 SharedVehicleViewSmoothing(
 	}
 	return oSharedVehicleViewSmoothing(a1, a2, a3, a4, a5, a6, a7, a8, a9);
 }
+typedef void* CLoadingDialog;
+namespace vgui {
+	typedef void* Panel;
+}
+struct CGameUI
+{
+	_BYTE gap0[24];
+	char m_szPreviousStatusText[128];
+};
+void CGameUI__StartProgressBar(CGameUI* thisptr)
+{
+	static auto CLoadingDialog__ctor = (void(*)(void* thisptr, void* parent))(G_client + 0x363A10);
+	static auto vgui__PHandle__Get = (vgui::Panel * (*)(void* a1))(G_client + 0x689A70);
+	static auto vgui__PHandle__Set = (vgui::Panel * (*)(void* a1, vgui::Panel* pEnt))(G_client + 0x689AE0);
+	static auto CLoadingDialog__SetProgressPoint = (bool(*)(CLoadingDialog* a1, float progress))(G_client + 0x363640);
+	static auto CLoadingDialog__Open = (void(*)(CLoadingDialog * a1))(G_client + 0x3631C0);
+	static auto BaseModPanel = (vgui::Panel*(*)())(G_client + 0x3871D0);
+	static auto GetLoadingDialogHandle = (CLoadingDialog * (*)())(G_client + 0x363720);
+	auto g_hLoadingDialog = (CLoadingDialog*)(G_client + 0xB151D8);
+	CLoadingDialog* v2; // eax
+	vgui::Panel* v3; // eax
+	CLoadingDialog* v4; // eax
+	CLoadingDialog* v5; // eax
+
+	if (!GetLoadingDialogHandle())
+	{
+		v2 = (CLoadingDialog*)operator new(0x3E0u * 2); // just for safety
+		CLoadingDialog__ctor(v2, BaseModPanel());
+		vgui__PHandle__Set(g_hLoadingDialog, v2);
+	}
+	thisptr->m_szPreviousStatusText[0] = 0;
+	CLoadingDialog__SetProgressPoint(GetLoadingDialogHandle(), 0.0);
+	CLoadingDialog__Open(GetLoadingDialogHandle());
+}
+bool (*oCGameUI__UpdateProgressBar)(CGameUI* thisptr, float progress, const char* statusText);
+bool CGameUI__UpdateProgressBar(CGameUI* thisptr, float progress, const char* statusText) {
+	auto ret = true;// oCGameUI__UpdateProgressBar(thisptr, progress, statusText);
+	static auto CGameUI__ContinueProgressBar = (bool (*)(CGameUI * a1, float a2))(G_client + 0x360D60);
+	static auto CGameUI__SetProgressBarText = (bool (*)(CGameUI * a1, const char* a2))(G_client + 0x360E40);
+	CGameUI__ContinueProgressBar(thisptr, progress);
+	if (statusText && strlen (statusText) > 2)
+		CGameUI__SetProgressBarText(thisptr, statusText);
+	return ret;
+}
 void InitClient()
 {
 	auto client = G_client;
@@ -124,6 +168,8 @@ void InitClient()
 	MH_CreateHook((LPVOID)(client + 0x8E820), &sub_18008E820, reinterpret_cast<LPVOID*>(&osub_18008E820));
 	MH_CreateHook((LPVOID)(engine + 0x47A410), &KeyValues__SetString__Client, reinterpret_cast<LPVOID*>(&oKeyValues__SetString__Client));
 	MH_CreateHook((LPVOID)(client + 0x286F50), &SharedVehicleViewSmoothing, reinterpret_cast<LPVOID*>(&oSharedVehicleViewSmoothing));
+	MH_CreateHook((LPVOID)(client + 0x360210), &CGameUI__StartProgressBar, NULL);
+	MH_CreateHook((LPVOID)(client + 0x3601C0), &CGameUI__UpdateProgressBar, reinterpret_cast<LPVOID*>(&oCGameUI__UpdateProgressBar));
 
 	if (IsNoOrigin())
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("ws2_32.dll"), "getaddrinfo"), &hookedGetAddrInfo, reinterpret_cast<LPVOID*>(&originalGetAddrInfo));
