@@ -2,17 +2,21 @@
 // Mitigations from Titanfall Black Market Edition mod by p0358 https://github.com/p0358/black_market_edition
 
 
-#include <Windows.h>
-#include <TlHelp32.h>
+#include <windows.h>
+#include <tlhelp32.h>
 #include <filesystem>
 #include <sstream>
 #include <fstream>
-#include <Shlwapi.h>
+#include <shlwapi.h>
 #include <iostream>
 #include <unordered_map>
-#include <Psapi.h>
+#include <psapi.h>
 #include <winternl.h>
 #include <immintrin.h>
+#ifndef _MSC_VER && !(__MINGW32__ || __MINGW64__)
+// provides __cpuidex on mingw
+#include <intrin.h>
+#endif
 #pragma comment(lib, "Imm32.lib")
 
 namespace fs = std::filesystem;
@@ -34,16 +38,16 @@ DWORD GetProcessByName(const std::wstring& processName)
 {
 	HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
 
-	PROCESSENTRY32 processSnapshotEntry = { 0 };
+	PROCESSENTRY32W processSnapshotEntry = { 0 };
 	processSnapshotEntry.dwSize = sizeof(PROCESSENTRY32);
 
 	if (snapshot == INVALID_HANDLE_VALUE)
 		return 0;
 
-	if (!Process32First(snapshot, &processSnapshotEntry))
+	if (!Process32FirstW(snapshot, &processSnapshotEntry))
 		return 0;
 
-	while (Process32Next(snapshot, &processSnapshotEntry))
+	while (Process32NextW(snapshot, &processSnapshotEntry))
 	{
 		if (!wcscmp(processSnapshotEntry.szExeFile, processName.c_str()))
 		{
@@ -446,7 +450,7 @@ std::wstring GetSteamDllPath()
 	wchar_t pathString[512];
 	DWORD pathStringSize = sizeof(pathString);
 
-	if (RegGetValue(HKEY_CURRENT_USER, L"Software\\Valve\\Steam\\ActiveProcess", L"SteamClientDll64", RRF_RT_REG_SZ, nullptr, pathString, &pathStringSize) == ERROR_SUCCESS)
+	if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Valve\\Steam\\ActiveProcess", L"SteamClientDll64", RRF_RT_REG_SZ, nullptr, pathString, &pathStringSize) == ERROR_SUCCESS)
 	{
 		return pathString;
 	}
@@ -485,13 +489,13 @@ void DoSteamStart(PSTR lpCmdLine) {
 
 	wchar_t* PATH_VAR = new wchar_t[65535]; // grr extended windows path limit
 	memcpy(PATH_VAR, steamDirectory.data(), sizeof(wchar_t) * steamDirectory.size());
-	int written = GetEnvironmentVariable(L"PATH", PATH_VAR + steamDirectory.size(), static_cast<DWORD>(sizeof(PATH_VAR) - steamDirectory.size()));
+	int written = GetEnvironmentVariableW(L"PATH", PATH_VAR + steamDirectory.size(), static_cast<DWORD>(sizeof(PATH_VAR) - steamDirectory.size()));
 	PATH_VAR[written + 1] = '\0';
 	SetEnvironmentVariableW(L"PATH", PATH_VAR);
 	delete[] PATH_VAR;
 
 	// Load steamclient64.dll
-	HMODULE steamclient64 = LoadLibrary(steamclientDll.c_str());
+	HMODULE steamclient64 = LoadLibraryW(steamclientDll.c_str());
 	if (!steamclient64) {
 		throw std::runtime_error("");
 		return;
@@ -565,7 +569,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine,
 	//FILE *pCout, *pCerr;
 	//freopen_s(&pCout, "conout$", "w", stdout);
 	//freopen_s(&pCerr, "conout$", "w", stderr);
-	SetEnvironmentVariable(L"ContentId", L"1025161");
+	SetEnvironmentVariableW(L"ContentId", L"1025161");
 
 	char path[MAX_PATH];
 	GetModuleFileNameA(NULL, path, MAX_PATH);
@@ -593,7 +597,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine,
 		return 1;
 	}
 
-	SetCurrentDirectory(exePath);
+	SetCurrentDirectoryW(exePath);
 	if (RunAudioInstallerIfNecessary()) {
 		MessageBoxA(
 			GetForegroundWindow(),
