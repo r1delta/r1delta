@@ -439,3 +439,5 @@ build2/
 vcpkg/
 vcpkg_installed/
 .aider*
+!/thirdparty/discord_social_sdk/lib
+!/thirdparty/discord_social_sdk/bin
