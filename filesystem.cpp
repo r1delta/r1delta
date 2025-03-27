@@ -200,7 +200,7 @@ int fs_sprintf_hook(char* Buffer, const char* Format, ...) {
 		int chunk = va_arg(args, int);
 
 		// Only handle special chunk values if the path contains "vpk\\" or "vpk/"
-		if (chunk >= 0x1337 && (strstr(a1, "vpk\\") != NULL || strstr(a1, "vpk/") != NULL)) {
+		if (chunk >= 128 && (strstr(a1, "vpk\\") != NULL || strstr(a1, "vpk/") != NULL)) {
 			va_end(args);
 			// Check for the "more-files" situation as in the singlechunk branch.
 			void* rettocheckformorefiles = (void*)(IsDedicatedServer() ? (G_vscript + 0x1783EB)
