@@ -1,4 +1,4 @@
-// %*++***###*##**##++**+++*++*%%%%%%%+*%+#*+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#=%%%#**#+#%
+ï»¿// %*++***###*##**##++**+++*++*%%%%%%%+*%+#*+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#=%%%#**#+#%
 // ==----------------------------------------------------------------------=================+
 // =------------------------------------::----------------------------------===---==========+
 // ---------------------------------:-:--::::-::::-------------------=======================+
@@ -91,7 +91,7 @@
 #include "vector.h"
 #include "hudwarp.h"
 #include "hudwarp_hooks.h"
-
+#define DISCORD
 #define DISCORDPP_IMPLEMENTATION
 #ifdef DISCORD
 #include <discordpp.h>
@@ -100,8 +100,10 @@ std::atomic<bool> running = true;
 
 // Signal handler to stop the application
 
+//
 //auto client = std::make_shared<discordpp::Client>();
 
+std::unique_ptr<discordpp::Client> client;
 
 
 #pragma intrinsic(_ReturnAddress)
@@ -1230,7 +1232,7 @@ typedef void (*SetConvarString_t)(ConVarR1* var, const char* value);
 
 SetConvarString_t SetConvarStringOriginal;
 
-// Helper function to get the server’s public IP.
+// Helper function to get the serverï¿½s public IP.
 std::string get_public_ip() {
 	static std::string cached_ip = []() -> std::string {
 		const char* hosts[] = { "checkip.amazonaws.com", "eth0.me", "api.ipify.org" };
@@ -1277,7 +1279,7 @@ AuthResponse Server_AuthCallback(bool loopback, const char* serverIP, const char
 		}
 
 		// Create a verifier that checks the ES256 signature using the public key,
-		// and also ensures the token’s "server_ip" claim matches the serverIP.
+		// and also ensures the tokenï¿½s "server_ip" claim matches the serverIP.
 		auto verifier = jwt::verify()
 			.allow_algorithm(jwt::algorithm::es256(ecdsa_pub_key, "", "", ""));
 
@@ -1287,7 +1289,7 @@ AuthResponse Server_AuthCallback(bool loopback, const char* serverIP, const char
 		std::string displayName = decoded.get_payload_claim("dn").as_string();
 		std::string pomeloName = decoded.get_payload_claim("p").as_string();
 		std::string id = decoded.get_payload_claim("di").as_string();
-		// Extra check: the token’s server_ip must match exactly.
+		// Extra check: the tokenï¿½s server_ip must match exactly.
 		std::string tokenServerIP = decoded.get_payload_claim("s").as_string();
 		/*if (tokenServerIP != serverIP && !loopback) {
 			response.success = false;
@@ -1313,7 +1315,7 @@ AuthResponse Server_AuthCallback(bool loopback, const char* serverIP, const char
 
 
 
-// --- Hook functions for in–game connection ---
+// --- Hook functions for inï¿½game connection ---
 
 // Original function pointer for client connection.
 bool (*oCBaseClientConnect)(
@@ -1446,6 +1448,23 @@ __int64 __fastcall HookedCBaseStateClientConnect(
 	// Prepare a JSON payload with the server's public IP.
 	nlohmann::json j;
 	j["ip"] = public_ip;
+
+	if (client) {
+		discordpp::Activity activity;
+		activity.SetType(discordpp::ActivityTypes::Playing);
+		activity.SetDetails("R1Delta");
+		activity.SetState("Playing on ");
+
+		// Update the presence
+		client->UpdateRichPresence(activity, [](discordpp::ClientResult result) {
+			if (result.Successful()) {
+				Msg("Rich presence updated successfully\n");
+			}
+			else {
+				Warning("Failed to update rich presence: %s\n", result.Error().c_str());
+			}
+			});
+	}
 
 	auto result = cli.Post("/server-token", j.dump(), "application/json");
 	auto var = OriginalCCVar_FindVar(cvarinterface, "delta_server_auth_token");
@@ -1614,11 +1633,11 @@ const char* GetUserIDStringHook(USERID_s* id) {
 	
 }
 
-void StartDiscordAuth(const CCommand& args) {
+void StartDiscordAuth(const CCommand& ccargs) {
 #ifndef DISCORD
 	Warning("Build was compiled without DISCORD defined.\n");
 #else
-	if (args.ArgC() != 1) {
+	if (ccargs.ArgC() != 1) {
 		Warning("Usage: delta_start_discord_auth\n");
 		return;
 	}
@@ -1627,59 +1646,63 @@ void StartDiscordAuth(const CCommand& args) {
 		return;
 	}
 
-	//discord://api/oauth2/authorize?client_id=1304910395013595176&response_type=code&redirect_uri=http%3A%2F%2Flocalhost%2Fdiscord-auth&scope=identify
-	// open this url
-	auto url = "https://discord.com/oauth2/authorize?client_id=1304910395013595176&response_type=code&redirect_uri=http%3A%2F%2Flocalhost%3A5555%2Fdiscord-auth&scope=identify";
-	int result = (int)ShellExecuteA(NULL, "open", url, NULL, NULL, SW_SHOWNORMAL);
 
-	std::thread([]() {
-		client = std::make_shared<discordpp::Client>();
-		// Set up authentication arguments
 		discordpp::AuthorizationArgs args{};
 		args.SetClientId(1304910395013595176);
-		args.SetScopes("identify");
-		client->Authorize(args, [client2 = std::move(client)](auto result, auto code, auto redirectUri) {
-			if (!result.Successful()) {
-				std::cerr << "Authentication Error: " << result.Error() << std::endl;
-				Msg("Doing Stuff");
+		std::string scopes = discordpp::Client::GetDefaultPresenceScopes() + " identify";
+		args.SetScopes(scopes);
+		if (client) {
+			if (client->IsAuthenticated()) {
+				Msg("Already authenticated with Discord.\n");
+				client->Connect();
 				return;
 			}
+			auto clientPtr = client.get();
+			client->Authorize(args, [clientPtr](auto dis_result, auto code, auto redirectUri) {
+				if (!dis_result.Successful()) {
+					std::cerr << "Authentication Error: " << dis_result.Error() << std::endl;
+					Msg("Doing Stuff");
+					return;
+				}
+				else {
+					Msg("Got code: %s\n", code.c_str());
+				}
 
-			auto discord_code = code->second;
-			auto ms_url = CCVar_FindVar(cvarinterface, "delta_ms_url")->m_Value.m_pszString;
-			httplib::Client cli(ms_url);
-			cli.set_connection_timeout(2);
-			cli.set_address_family(AF_INET);
-			cli.set_follow_location(true);
-			auto result = cli.Get(std::format("/discord-auth?code={}", discord_code));
-			nlohmann::json j;
-			try {
-				j = nlohmann::json::parse(result->body);
-			}
-			catch (const std::exception& e) {
-				res.set_content("Invalid auth token", "text/plain");
-				svr.stop();
+				auto ms_url = CCVar_FindVar(cvarinterface, "delta_ms_url")->m_Value.m_pszString;
+				httplib::Client cli(ms_url);
+				cli.set_connection_timeout(2);
+				cli.set_address_family(AF_INET);
+				cli.set_follow_location(true);
+				auto result = cli.Get(std::format("/discord-auth?code={}", code));
+				nlohmann::json j;
+				try {
+					j = nlohmann::json::parse(result->body);
+				}
+				catch (const std::exception& e) {
+					return;
+				}
+				auto errorVar = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token_failed_reason");
+
+				if (j.contains("error")) {
+					SetConvarStringOriginal(errorVar, j["error"].get<std::string>().c_str());
+					return;
+				}
+				auto token_j = j["token"].get<std::string>();
+				auto access_token = j["access_token"].get<std::string>();
+				auto v = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token");
+				SetConvarStringOriginal(v, token_j.c_str());
+				SetConvarStringOriginal(errorVar, "");
+				clientPtr->UpdateToken(discordpp::AuthorizationTokenType::Bearer, access_token, [clientPtr](auto result) {
+					if (result.Successful()) {
+						clientPtr->Connect();
+					}
+					else {
+						Warning("Failed to update token: %s\n", result.Error().c_str());
+					}
+					});
 				return;
-			}
-			auto errorVar = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token_failed_reason");
-
-			if (j.contains("error")) {
-				res.set_content(j["error"].get<std::string>(), "text/plain");
-				SetConvarStringOriginal(errorVar, j["error"].get<std::string>().c_str());
-				svr.stop();
-				return;
-			}
-			auto token_j = j["token"].get<std::string>();
-			auto v = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token");
-			SetConvarStringOriginal(v, token_j.c_str());
-			res.set_content("Success", "text/plain");
-			SetConvarStringOriginal(errorVar, "");
-			svr.stop();
-			return;
-			});
-
-		svr.listen("localhost", 5555);
-		}).detach();
+				});
+		}
 #endif
 	return;
 }
@@ -2311,22 +2334,37 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 
 void DiscordThread() {
 #ifdef DISCORD
-	client = std::make_shared<discordpp::Client>();
+	client = std::make_unique<discordpp::Client>();
 	client->AddLogCallback([](auto message, auto severity) {
-		//Msg("[Discord::%s] %s\n", EnumToString(severity), message.c_str());
-		std::cout << "[" << EnumToString(severity) << "] " << message << std::endl;
+		Msg("[Discord::%s] %s\n", EnumToString(severity), message.c_str());
+	//	std::cout << "[" << EnumToString(severity) << "] " << message << std::endl;
 		}, discordpp::LoggingSeverity::Info);
 
 	client->SetStatusChangedCallback([](auto status, auto error, auto details) {
-		printf("Status has changed to %s\n", discordpp::Client::StatusToString(status).c_str());
+		Msg("Status has changed to %s\n", discordpp::Client::StatusToString(status).c_str());
 		if (status == discordpp::Client::Status::Ready) {
-			printf("Client is ready, you can now call SDK functions. For example:\n");
+			Msg("Client is ready, you can now call SDK functions. For example:\n");
+			discordpp::Activity activity;
+			activity.SetType(discordpp::ActivityTypes::Playing);
+			activity.SetDetails("Battle Creek");
+			activity.SetState("In Competitive Match");
+			client->UpdateRichPresence(activity, [](discordpp::ClientResult result) {
+				if (result.Successful()) {
+					std::cout << "Rich presence updated!\n";
+				}
+				else {
+					std::cout << "Failed to update rich presence: " << result.Error() << "\n";
+				}
+				});
+
 		}
 		else if (error != discordpp::Client::Error::None) {
-			printf("Error connecting: %s %d\n", discordpp::Client::ErrorToString(error).c_str(),
+			Msg("Error connecting: %s %d\n", discordpp::Client::ErrorToString(error).c_str(),
 				details);
 		}
 		});
+
+
 
 	while (running) {
 		discordpp::RunCallbacks();
