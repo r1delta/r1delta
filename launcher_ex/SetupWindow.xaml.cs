@@ -147,6 +147,15 @@ namespace launcher_ex
                 System.Windows.MessageBox.Show("Please select or enter a valid path.");
                 return;
             }
+            // Get the current executable directory
+            string exePath = Assembly.GetExecutingAssembly().Location;
+            string exeDirectory = Path.GetDirectoryName(exePath);
+
+            if (string.Equals(Path.GetFullPath(path), Path.GetFullPath(exeDirectory), StringComparison.OrdinalIgnoreCase))
+            {
+                System.Windows.MessageBox.Show("The install path cannot be the current executable directory. Please choose a different folder.", "Invalid Path", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
 
             SelectedPath = path;
             // Check available free space if the path is in the form "C:\..."
