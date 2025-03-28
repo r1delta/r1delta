@@ -376,6 +376,10 @@ static void BackgroundDecodeThread(std::shared_ptr<ProgressiveOpusTemplate> prog
         std::vector<int16_t> chunk;
         {
             std::lock_guard<std::mutex> decodeLock(progTemplate->decodeMutex);
+            // If vf is already null, break out.
+            if (progTemplate->vf == nullptr) {
+                break;
+            }
             chunk = DecodeChunk(progTemplate->vf, channels);
         }
         {
@@ -390,11 +394,17 @@ static void BackgroundDecodeThread(std::shared_ptr<ProgressiveOpusTemplate> prog
             progTemplate->chunkCV.notify_all();
         }
     }
-    // Clean up the shared decoder.
-    ov_clear(progTemplate->vf);
-    delete progTemplate->vf;
-    progTemplate->vf = nullptr;
+    // Cleanup the shared decoder under the same mutex to prevent races.
+    {
+        std::lock_guard<std::mutex> decodeLock(progTemplate->decodeMutex);
+        if (progTemplate->vf) {
+            ov_clear(progTemplate->vf);
+            delete progTemplate->vf;
+            progTemplate->vf = nullptr;
+        }
+    }
 }
+
 
 // --------------------------------------------------------------------
 // Progressive decode: open an Ogg Vorbis file, decode a larger number of initial chunks,

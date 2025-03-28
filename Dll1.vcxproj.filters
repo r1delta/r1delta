@@ -25,9 +25,6 @@
     <Filter Include="3rd Party\nlohmann">
       <UniqueIdentifier>{d733a0ec-6a08-4454-bed7-aaa45a5a0a33}</UniqueIdentifier>
     </Filter>
-    <Filter Include="3rd Party\discord">
-      <UniqueIdentifier>{6d27f37e-5a2f-4d5e-9458-daf40c5aec7b}</UniqueIdentifier>
-    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="framework.h">
@@ -287,12 +284,6 @@
     </ClInclude>
     <ClInclude Include="hudwarp_hooks.h">
       <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="thirdparty\discord_social_sdk\include\discordpp.h">
-      <Filter>3rd Party\discord</Filter>
-    </ClInclude>
-    <ClInclude Include="thirdparty\discord_social_sdk\include\cdiscord.h">
-      <Filter>3rd Party\discord</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
