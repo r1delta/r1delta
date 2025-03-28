@@ -93,8 +93,9 @@
 #include "hudwarp_hooks.h"
 
 #define DISCORDPP_IMPLEMENTATION
+#ifdef DISCORD
 #include <discordpp.h>
-
+#endif
 std::atomic<bool> running = true;
 
 // Signal handler to stop the application
@@ -1614,6 +1615,9 @@ const char* GetUserIDStringHook(USERID_s* id) {
 }
 
 void StartDiscordAuth(const CCommand& args) {
+#ifndef DISCORD
+	Warning("Build was compiled without DISCORD defined.\n");
+#else
 	if (args.ArgC() != 1) {
 		Warning("Usage: delta_start_discord_auth\n");
 		return;
@@ -1676,7 +1680,7 @@ void StartDiscordAuth(const CCommand& args) {
 
 		svr.listen("localhost", 5555);
 		}).detach();
-	
+#endif
 	return;
 }
 const char* GetBuildNo() {
@@ -2306,6 +2310,7 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 
 
 void DiscordThread() {
+#ifdef DISCORD
 	client = std::make_shared<discordpp::Client>();
 	client->AddLogCallback([](auto message, auto severity) {
 		//Msg("[Discord::%s] %s\n", EnumToString(severity), message.c_str());
@@ -2328,7 +2333,7 @@ void DiscordThread() {
 		std::this_thread::sleep_for(std::chrono::milliseconds(16));
 
 	}
-
+#endif
 }
 
 static bool should_init_security_fixes = false;
