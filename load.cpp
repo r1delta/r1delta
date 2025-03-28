@@ -91,7 +91,7 @@
 #include "vector.h"
 #include "hudwarp.h"
 #include "hudwarp_hooks.h"
-#define DISCORD
+
 #define DISCORDPP_IMPLEMENTATION
 #ifdef DISCORD
 #include <discordpp.h>
