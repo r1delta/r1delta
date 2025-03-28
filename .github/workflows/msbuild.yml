@@ -53,6 +53,8 @@ jobs:
       - name: Restore vcpkg packages
         working-directory: ${{env.GITHUB_WORKSPACE}}
         run: vcpkg integrate install
+      - name: Restore NuGet packages
+        run: nuget restore ${{env.SOLUTION_FILE_PATH}}
 
       - name: Build
         working-directory: ${{env.GITHUB_WORKSPACE}}
