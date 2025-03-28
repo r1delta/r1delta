@@ -1666,6 +1666,30 @@ void StartDiscordAuth(const CCommand& args) {
 	
 	return;
 }
+const char* GetBuildNo() {
+	static char buffer[64] = {};
+
+	if (buffer[0] == '\0') {
+		std::tm epoch_tm = {};
+		epoch_tm.tm_year = 2023 - 1900;
+		epoch_tm.tm_mon = 11;  // December
+		epoch_tm.tm_mday = 1;
+		epoch_tm.tm_hour = 0;
+		epoch_tm.tm_min = 0;
+		epoch_tm.tm_sec = 0;
+		std::time_t epoch_time = _mkgmtime(&epoch_tm);
+		std::time_t current_time = std::time(nullptr);
+		double seconds_since = std::difftime(current_time, epoch_time);
+		int beat = static_cast<int>(seconds_since / 86400);
+#ifdef _DEBUG
+		std::snprintf(buffer, sizeof(buffer), "R1DMP_PC_BUILD_%d (DEBUG)", beat);
+#else
+		std::snprintf(buffer, sizeof(buffer), "R1DMP_PC_BUILD_%d", beat);
+#endif
+	}
+
+	return buffer;
+}
 
 static FORCEINLINE void
 do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
@@ -1677,7 +1701,10 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook((LPVOID)(engine_base + 0x203C20), &NET_SetConVar__ReadFromBuffer, NULL);
 	MH_CreateHook((LPVOID)(engine_base + 0x202F80), &NET_SetConVar__WriteToBuffer, NULL);
 	MH_CreateHook((LPVOID)(engine_base + 0x1FE3F0), &SVC_ServerInfo__WriteToBuffer, reinterpret_cast<LPVOID*>(&SVC_ServerInfo__WriteToBufferOriginal));
+	MH_CreateHook((LPVOID)(engine_base + 0x19CBC0), &GetBuildNo, NULL);
+
 	//MH_CreateHook((LPVOID)(engine_base + 0x0D2490), &ProcessConnectionlessPacketClient, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginalClient));
+
 	if (!IsDedicatedServer()) {
 		MH_CreateHook((LPVOID)(G_engine + 0x1305E0), &ExecuteConfigFile, NULL);
 		MH_CreateHook((LPVOID)(engine_base + 0x21F9C0), &CEngineVGui__Init, reinterpret_cast<LPVOID*>(&CEngineVGui__InitOriginal));

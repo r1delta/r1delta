@@ -203,6 +203,7 @@ bool Plat_IsInToolMode() {
 		BOOL check2 = module2 == (HMODULE)matsystem;
 		return check1 && check2;
 }
+
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 {
 	// make sure we're game and not tools
@@ -271,8 +272,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 			}
 		}
 
-		LoadLibraryW(L"OnDemandConnRouteHelper"); // stop fucking reloading this thing
-		LoadLibraryW(L"TextShaping.dll"); // fix "Patcher Error" dialogs having no text
+
 		SetDllDirectoryW(L"r1delta\\bin_delta");
 		SetDllDirectoryW(L"r1delta\\bin");
 		InstallExceptionHandler();
@@ -316,8 +316,6 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 			doBinaryPatchForFile(*ndata);
 			FreeModuleNotificationData(ndata);
 		}
-
-	
 
 		break; 
 	}
