@@ -91,7 +91,7 @@
 #include "vector.h"
 #include "hudwarp.h"
 #include "hudwarp_hooks.h"
-
+#define DISCORD
 #define DISCORDPP_IMPLEMENTATION
 #ifdef DISCORD
 #include <discordpp.h>
@@ -1633,11 +1633,11 @@ const char* GetUserIDStringHook(USERID_s* id) {
 	
 }
 
-void StartDiscordAuth(const CCommand& args) {
+void StartDiscordAuth(const CCommand& ccargs) {
 #ifndef DISCORD
 	Warning("Build was compiled without DISCORD defined.\n");
 #else
-	if (args.ArgC() != 1) {
+	if (ccargs.ArgC() != 1) {
 		Warning("Usage: delta_start_discord_auth\n");
 		return;
 	}
@@ -1646,13 +1646,7 @@ void StartDiscordAuth(const CCommand& args) {
 		return;
 	}
 
-	//discord://api/oauth2/authorize?client_id=1304910395013595176&response_type=code&redirect_uri=http%3A%2F%2Flocalhost%2Fdiscord-auth&scope=identify
-	// open this url
-	//auto url = "https://discord.com/oauth2/authorize?client_id=1304910395013595176&response_type=code&redirect_uri=http%3A%2F%2Flocalhost%3A5555%2Fdiscord-auth&scope=identify";
-	//int result = (int)ShellExecuteA(NULL, "open", url, NULL, NULL, SW_SHOWNORMAL);
 
-		//client = std::make_shared<discordpp::Client>();
-		// Set up authentication arguments
 		discordpp::AuthorizationArgs args{};
 		args.SetClientId(1304910395013595176);
 		std::string scopes = discordpp::Client::GetDefaultPresenceScopes() + " identify";
@@ -1689,23 +1683,26 @@ void StartDiscordAuth(const CCommand& args) {
 				}
 				auto errorVar = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token_failed_reason");
 
-			if (j.contains("error")) {
-				res.set_content(j["error"].get<std::string>(), "text/plain");
-				SetConvarStringOriginal(errorVar, j["error"].get<std::string>().c_str());
-				svr.stop();
+				if (j.contains("error")) {
+					SetConvarStringOriginal(errorVar, j["error"].get<std::string>().c_str());
+					return;
+				}
+				auto token_j = j["token"].get<std::string>();
+				auto access_token = j["access_token"].get<std::string>();
+				auto v = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token");
+				SetConvarStringOriginal(v, token_j.c_str());
+				SetConvarStringOriginal(errorVar, "");
+				clientPtr->UpdateToken(discordpp::AuthorizationTokenType::Bearer, access_token, [clientPtr](auto result) {
+					if (result.Successful()) {
+						clientPtr->Connect();
+					}
+					else {
+						Warning("Failed to update token: %s\n", result.Error().c_str());
+					}
+					});
 				return;
-			}
-			auto token_j = j["token"].get<std::string>();
-			auto v = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token");
-			SetConvarStringOriginal(v, token_j.c_str());
-			res.set_content("Success", "text/plain");
-			SetConvarStringOriginal(errorVar, "");
-			svr.stop();
-			return;
-			});
-
-		svr.listen("localhost", 5555);
-		}).detach();
+				});
+		}
 #endif
 	return;
 }
@@ -2337,7 +2334,7 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 
 void DiscordThread() {
 #ifdef DISCORD
-	client = std::make_shared<discordpp::Client>();
+	client = std::make_unique<discordpp::Client>();
 	client->AddLogCallback([](auto message, auto severity) {
 		Msg("[Discord::%s] %s\n", EnumToString(severity), message.c_str());
 	//	std::cout << "[" << EnumToString(severity) << "] " << message << std::endl;
@@ -2347,6 +2344,19 @@ void DiscordThread() {
 		Msg("Status has changed to %s\n", discordpp::Client::StatusToString(status).c_str());
 		if (status == discordpp::Client::Status::Ready) {
 			Msg("Client is ready, you can now call SDK functions. For example:\n");
+			discordpp::Activity activity;
+			activity.SetType(discordpp::ActivityTypes::Playing);
+			activity.SetDetails("Battle Creek");
+			activity.SetState("In Competitive Match");
+			client->UpdateRichPresence(activity, [](discordpp::ClientResult result) {
+				if (result.Successful()) {
+					std::cout << "Rich presence updated!\n";
+				}
+				else {
+					std::cout << "Failed to update rich presence: " << result.Error() << "\n";
+				}
+				});
+
 		}
 		else if (error != discordpp::Client::Error::None) {
 			Msg("Error connecting: %s %d\n", discordpp::Client::ErrorToString(error).c_str(),
@@ -2355,18 +2365,6 @@ void DiscordThread() {
 		});
 
 
-	discordpp::Activity activity;
-	activity.SetType(discordpp::ActivityTypes::Playing);
-	activity.SetDetails("Battle Creek");
-	activity.SetState("In Competitive Match");
-	client->UpdateRichPresence(activity, [](discordpp::ClientResult result) {
-		if (result.Successful()) {
-			std::cout << "Rich presence updated!\n";
-		}
-		else {
-			std::cout << "Failed to update rich presence: " << result.Error() << "\n";
-		}
-		});
 
 	while (running) {
 		discordpp::RunCallbacks();
