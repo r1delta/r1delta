@@ -542,13 +542,13 @@ namespace R1Delta
                 // pointing to the downloaded files in selectedDir.
 
                 // Optional: Create an empty critical VPK file if the server doesn't provide it
-                // string finalVpkPath = Path.Combine(selectedDir, "vpk", "client_mp_common.bsp.pak000_000.vpk");
-                // if (!File.Exists(finalVpkPath)) // Only if not downloaded
-                // {
-                //     Console.WriteLine("Creating placeholder empty VPK file.");
-                //     Directory.CreateDirectory(Path.GetDirectoryName(finalVpkPath)!);
-                //     using (File.Create(finalVpkPath)) { /* empty file */ }
-                // }
+                string finalVpkPath = Path.Combine(selectedDir, "vpk", "client_mp_common.bsp.pak000_000.vpk");
+                if (!File.Exists(finalVpkPath)) // Only if not downloaded
+                {
+                    Console.WriteLine("Creating placeholder empty VPK file.");
+                    Directory.CreateDirectory(Path.GetDirectoryName(finalVpkPath)!);
+                    using (File.Create(finalVpkPath)) { /* empty file */ }
+                }
 
 
                 // Create the junctions in the CWD pointing to the installation dir
