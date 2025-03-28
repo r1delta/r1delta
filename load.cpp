@@ -92,6 +92,17 @@
 #include "hudwarp.h"
 #include "hudwarp_hooks.h"
 
+#define DISCORDPP_IMPLEMENTATION
+#include <discordpp.h>
+
+std::atomic<bool> running = true;
+
+// Signal handler to stop the application
+
+//auto client = std::make_shared<discordpp::Client>();
+
+
+
 #pragma intrinsic(_ReturnAddress)
 
 
@@ -980,7 +991,7 @@ void InitAddons() {
 	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x6EE10 : 0x02C30)), &CBaseFileSystem__FindFirst, reinterpret_cast<LPVOID*>(&oCBaseFileSystem__FindFirst));
 	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x86E00 : 0x1C4A0)), &CBaseFileSystem__FindNext, reinterpret_cast<LPVOID*>(&oCBaseFileSystem__FindNext));
 	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x7F180 : 0x14780)), &HookedHandleOpenRegularFile, reinterpret_cast<LPVOID*>(&HandleOpenRegularFileOriginal));
-	
+	//client = std::make_shared<discordpp::Client>();
 	MH_EnableHook(MH_ALL_HOOKS);
 }
 std::unordered_map<std::string, std::string, HashStrings> g_LastEntCreateKeyValues;
@@ -1618,13 +1629,15 @@ void StartDiscordAuth(const CCommand& args) {
 	int result = (int)ShellExecuteA(NULL, "open", url, NULL, NULL, SW_SHOWNORMAL);
 
 	std::thread([]() {
-		httplib::Server svr;
-		svr.Get("/discord-auth", [&svr](const httplib::Request& req, httplib::Response& res) {
-			// read the query string
-			auto query = req.params;
-			auto code = query.find("code");
-			if (code == query.end()) {
-				res.set_content("Invalid auth token", "text/plain");
+		client = std::make_shared<discordpp::Client>();
+		// Set up authentication arguments
+		discordpp::AuthorizationArgs args{};
+		args.SetClientId(1304910395013595176);
+		args.SetScopes("identify");
+		client->Authorize(args, [client2 = std::move(client)](auto result, auto code, auto redirectUri) {
+			if (!result.Successful()) {
+				std::cerr << "Authentication Error: " << result.Error() << std::endl;
+				Msg("Doing Stuff");
 				return;
 			}
 
@@ -2291,6 +2304,33 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	//std::cout << "did hooks" << std::endl;
 }
 
+
+void DiscordThread() {
+	client = std::make_shared<discordpp::Client>();
+	client->AddLogCallback([](auto message, auto severity) {
+		//Msg("[Discord::%s] %s\n", EnumToString(severity), message.c_str());
+		std::cout << "[" << EnumToString(severity) << "] " << message << std::endl;
+		}, discordpp::LoggingSeverity::Info);
+
+	client->SetStatusChangedCallback([](auto status, auto error, auto details) {
+		printf("Status has changed to %s\n", discordpp::Client::StatusToString(status).c_str());
+		if (status == discordpp::Client::Status::Ready) {
+			printf("Client is ready, you can now call SDK functions. For example:\n");
+		}
+		else if (error != discordpp::Client::Error::None) {
+			printf("Error connecting: %s %d\n", discordpp::Client::ErrorToString(error).c_str(),
+				details);
+		}
+		});
+
+	while (running) {
+		discordpp::RunCallbacks();
+		std::this_thread::sleep_for(std::chrono::milliseconds(16));
+
+	}
+
+}
+
 static bool should_init_security_fixes = false;
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
@@ -2319,7 +2359,6 @@ void __stdcall LoaderNotificationCallback(
 		bDone = true;
 	}
 	auto name = notification_data->Loaded.BaseDllName->Buffer;
-
 	if (strcmp_static(name, L"filesystem_stdio.dll") == 0) {
 		G_filesystem_stdio = (uintptr_t)notification_data->Loaded.DllBase;
 		InitCompressionHooks();
@@ -2327,6 +2366,7 @@ void __stdcall LoaderNotificationCallback(
 	else if (strcmp_static(name, L"engine.dll") == 0) {
 		do_engine(notification_data);
 		should_init_security_fixes = true;
+		//client = std::make_shared<discordpp::Client>();
 	}
 	else if (strcmp_static(name, L"engine_ds.dll") == 0) {
 		G_engine_ds = (uintptr_t)notification_data->Loaded.DllBase;
@@ -2361,6 +2401,7 @@ void __stdcall LoaderNotificationCallback(
 			G_client = (uintptr_t)notification_data->Loaded.DllBase;
 			InitClient();
 			SetupHudWarpHooks();
+			std::thread(DiscordThread).detach();
 		}
 		if (is_server) do_server(notification_data);
 		if (should_init_security_fixes && (is_client || is_server)) {
@@ -2368,4 +2409,7 @@ void __stdcall LoaderNotificationCallback(
 			should_init_security_fixes = false;
 		}
 	}
+
+	//CreateThread(nullptr, 0, (LPTHREAD_START_ROUTINE)DiscordThread, nullptr, 0, nullptr);
 }
+
