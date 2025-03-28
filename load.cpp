@@ -91,10 +91,11 @@
 #include "vector.h"
 #include "hudwarp.h"
 #include "hudwarp_hooks.h"
-#define DISCORD
+//#define DISCORD
 #define DISCORDPP_IMPLEMENTATION
 #ifdef DISCORD
 #include <discordpp.h>
+std::shared_ptr<discordpp::Client> client;
 #endif
 std::atomic<bool> running = true;
 
@@ -103,7 +104,6 @@ std::atomic<bool> running = true;
 //
 //auto client = std::make_shared<discordpp::Client>();
 
-std::unique_ptr<discordpp::Client> client;
 
 
 #pragma intrinsic(_ReturnAddress)
@@ -1449,23 +1449,6 @@ __int64 __fastcall HookedCBaseStateClientConnect(
 	nlohmann::json j;
 	j["ip"] = public_ip;
 
-	if (client) {
-		discordpp::Activity activity;
-		activity.SetType(discordpp::ActivityTypes::Playing);
-		activity.SetDetails("R1Delta");
-		activity.SetState("Playing on ");
-
-		// Update the presence
-		client->UpdateRichPresence(activity, [](discordpp::ClientResult result) {
-			if (result.Successful()) {
-				Msg("Rich presence updated successfully\n");
-			}
-			else {
-				Warning("Failed to update rich presence: %s\n", result.Error().c_str());
-			}
-			});
-	}
-
 	auto result = cli.Post("/server-token", j.dump(), "application/json");
 	auto var = OriginalCCVar_FindVar(cvarinterface, "delta_server_auth_token");
 	if (result && result->status == 200) {
@@ -1687,21 +1670,26 @@ void StartDiscordAuth(const CCommand& ccargs) {
 					SetConvarStringOriginal(errorVar, j["error"].get<std::string>().c_str());
 					return;
 				}
-				auto token_j = j["token"].get<std::string>();
+				auto token_j = j["token"].get<std::string>(); 
 				auto access_token = j["access_token"].get<std::string>();
 				auto v = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token");
 				SetConvarStringOriginal(v, token_j.c_str());
 				SetConvarStringOriginal(errorVar, "");
-				clientPtr->UpdateToken(discordpp::AuthorizationTokenType::Bearer, access_token, [clientPtr](auto result) {
+				
+				// Next Step: Update the token and connect
+				clientPtr->UpdateToken(discordpp::AuthorizationTokenType::Bearer, access_token, [](discordpp::ClientResult result) {
+				
 					if (result.Successful()) {
-						clientPtr->Connect();
+						Msg("Successfully updated token\n");
+						//client->Connect();
 					}
 					else {
 						Warning("Failed to update token: %s\n", result.Error().c_str());
 					}
+					
 					});
-				return;
 				});
+				
 		}
 #endif
 	return;
