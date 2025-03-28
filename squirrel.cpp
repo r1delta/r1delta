@@ -531,13 +531,46 @@ SQInteger Script_Server_GetActiveBurnCardIndex(HSQUIRRELVM v) {
 
 
 SQInteger OpenDiscordURL(HSQUIRRELVM v) {
-	const char* url = "https://discord.gg/tUVWPp4Hv3";
-	int result = (int)ShellExecuteA(NULL, "open", url, NULL, NULL, SW_SHOWNORMAL);
-	if (result <= 32) {
+	// Define the URL as a wide string
+	const wchar_t* url = L"https://discord.gg/tUVWPp4Hv3";
+
+	// Prepare the command line buffer: "explorer.exe <url>"
+	wchar_t commandLine[256];
+	// Ensure safe formatting; you may adjust the buffer size if necessary
+	if (swprintf(commandLine, sizeof(commandLine) / sizeof(wchar_t), L"explorer.exe %s", url) < 0) {
+		return sq_throwerror(v, "Failed to prepare command line");
+	}
+
+	// Initialize the STARTUPINFO structure
+	STARTUPINFOW si = { 0 };
+	si.cb = sizeof(si);
+	PROCESS_INFORMATION pi = { 0 };
+
+	// Create the process
+	BOOL success = CreateProcessW(
+		NULL,           // Use command line parsing to find executable
+		commandLine,    // Command line string
+		NULL,           // Process security attributes
+		NULL,           // Thread security attributes
+		FALSE,          // Do not inherit handles
+		0,              // No creation flags
+		NULL,           // Use parent's environment block
+		NULL,           // Use parent's starting directory 
+		&si,            // Pointer to STARTUPINFO structure
+		&pi             // Pointer to PROCESS_INFORMATION structure
+	);
+
+	if (!success) {
 		return sq_throwerror(v, "Failed to open URL");
 	}
+
+	// Close process and thread handles since they are not needed
+	CloseHandle(pi.hProcess);
+	CloseHandle(pi.hThread);
+
 	return 1;
 }
+
 
 
 // Function to initialize all SQVM functions

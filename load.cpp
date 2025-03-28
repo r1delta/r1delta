@@ -93,8 +93,9 @@
 #include "hudwarp_hooks.h"
 
 #define DISCORDPP_IMPLEMENTATION
-#include "discordpp.h"
-
+#ifdef DISCORD
+#include <discordpp.h>
+#endif
 std::atomic<bool> running = true;
 
 // Signal handler to stop the application
@@ -1231,7 +1232,7 @@ typedef void (*SetConvarString_t)(ConVarR1* var, const char* value);
 
 SetConvarString_t SetConvarStringOriginal;
 
-// Helper function to get the server’s public IP.
+// Helper function to get the server�s public IP.
 std::string get_public_ip() {
 	static std::string cached_ip = []() -> std::string {
 		const char* hosts[] = { "checkip.amazonaws.com", "eth0.me", "api.ipify.org" };
@@ -1278,7 +1279,7 @@ AuthResponse Server_AuthCallback(bool loopback, const char* serverIP, const char
 		}
 
 		// Create a verifier that checks the ES256 signature using the public key,
-		// and also ensures the token’s "server_ip" claim matches the serverIP.
+		// and also ensures the token�s "server_ip" claim matches the serverIP.
 		auto verifier = jwt::verify()
 			.allow_algorithm(jwt::algorithm::es256(ecdsa_pub_key, "", "", ""));
 
@@ -1288,7 +1289,7 @@ AuthResponse Server_AuthCallback(bool loopback, const char* serverIP, const char
 		std::string displayName = decoded.get_payload_claim("dn").as_string();
 		std::string pomeloName = decoded.get_payload_claim("p").as_string();
 		std::string id = decoded.get_payload_claim("di").as_string();
-		// Extra check: the token’s server_ip must match exactly.
+		// Extra check: the token�s server_ip must match exactly.
 		std::string tokenServerIP = decoded.get_payload_claim("s").as_string();
 		/*if (tokenServerIP != serverIP && !loopback) {
 			response.success = false;
@@ -1314,7 +1315,7 @@ AuthResponse Server_AuthCallback(bool loopback, const char* serverIP, const char
 
 
 
-// --- Hook functions for in–game connection ---
+// --- Hook functions for in�game connection ---
 
 // Original function pointer for client connection.
 bool (*oCBaseClientConnect)(
@@ -1632,8 +1633,11 @@ const char* GetUserIDStringHook(USERID_s* id) {
 	
 }
 
-void StartDiscordAuth(const CCommand& ccargs) {
-	if (ccargs.ArgC() != 1) {
+void StartDiscordAuth(const CCommand& args) {
+#ifndef DISCORD
+	Warning("Build was compiled without DISCORD defined.\n");
+#else
+	if (args.ArgC() != 1) {
 		Warning("Usage: delta_start_discord_auth\n");
 		return;
 	}
@@ -1685,27 +1689,49 @@ void StartDiscordAuth(const CCommand& ccargs) {
 				}
 				auto errorVar = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token_failed_reason");
 
-				if (j.contains("error")) {
-					SetConvarStringOriginal(errorVar, j["error"].get<std::string>().c_str());
-					return;
-				}
-				auto token_j = j["token"].get<std::string>();
-				auto access_token = j["access_token"].get<std::string>();
-				auto v = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token");
-				SetConvarStringOriginal(v, token_j.c_str());
-				SetConvarStringOriginal(errorVar, "");
-				Msg("Successfully authenticated with Discord.\n");
-				clientPtr->UpdateToken(discordpp::AuthorizationTokenType::Bearer, access_token, [clientPtr](discordpp::ClientResult result) {
-					clientPtr->Connect();
-					});
+			if (j.contains("error")) {
+				res.set_content(j["error"].get<std::string>(), "text/plain");
+				SetConvarStringOriginal(errorVar, j["error"].get<std::string>().c_str());
+				svr.stop();
 				return;
-				});
-		}
-		else {
-			Warning("Failed to create Discord client.\n");
-		}
-		
+			}
+			auto token_j = j["token"].get<std::string>();
+			auto v = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token");
+			SetConvarStringOriginal(v, token_j.c_str());
+			res.set_content("Success", "text/plain");
+			SetConvarStringOriginal(errorVar, "");
+			svr.stop();
+			return;
+			});
+
+		svr.listen("localhost", 5555);
+		}).detach();
+#endif
 	return;
+}
+const char* GetBuildNo() {
+	static char buffer[64] = {};
+
+	if (buffer[0] == '\0') {
+		std::tm epoch_tm = {};
+		epoch_tm.tm_year = 2023 - 1900;
+		epoch_tm.tm_mon = 11;  // December
+		epoch_tm.tm_mday = 1;
+		epoch_tm.tm_hour = 0;
+		epoch_tm.tm_min = 0;
+		epoch_tm.tm_sec = 0;
+		std::time_t epoch_time = _mkgmtime(&epoch_tm);
+		std::time_t current_time = std::time(nullptr);
+		double seconds_since = std::difftime(current_time, epoch_time);
+		int beat = static_cast<int>(seconds_since / 86400);
+#ifdef _DEBUG
+		std::snprintf(buffer, sizeof(buffer), "R1DMP_PC_BUILD_%d (DEBUG)", beat);
+#else
+		std::snprintf(buffer, sizeof(buffer), "R1DMP_PC_BUILD_%d", beat);
+#endif
+	}
+
+	return buffer;
 }
 
 static FORCEINLINE void
@@ -1718,7 +1744,10 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook((LPVOID)(engine_base + 0x203C20), &NET_SetConVar__ReadFromBuffer, NULL);
 	MH_CreateHook((LPVOID)(engine_base + 0x202F80), &NET_SetConVar__WriteToBuffer, NULL);
 	MH_CreateHook((LPVOID)(engine_base + 0x1FE3F0), &SVC_ServerInfo__WriteToBuffer, reinterpret_cast<LPVOID*>(&SVC_ServerInfo__WriteToBufferOriginal));
+	MH_CreateHook((LPVOID)(engine_base + 0x19CBC0), &GetBuildNo, NULL);
+
 	//MH_CreateHook((LPVOID)(engine_base + 0x0D2490), &ProcessConnectionlessPacketClient, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginalClient));
+
 	if (!IsDedicatedServer()) {
 		MH_CreateHook((LPVOID)(G_engine + 0x1305E0), &ExecuteConfigFile, NULL);
 		MH_CreateHook((LPVOID)(engine_base + 0x21F9C0), &CEngineVGui__Init, reinterpret_cast<LPVOID*>(&CEngineVGui__InitOriginal));
@@ -2307,12 +2336,8 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 
 
 void DiscordThread() {
-	static bool once = false;
-	if (!once) {
-		once = true;
-		client = std::make_unique<discordpp::Client>();
-	}
-	client->Connect();
+#ifdef DISCORD
+	client = std::make_shared<discordpp::Client>();
 	client->AddLogCallback([](auto message, auto severity) {
 		Msg("[Discord::%s] %s\n", EnumToString(severity), message.c_str());
 	//	std::cout << "[" << EnumToString(severity) << "] " << message << std::endl;
@@ -2348,7 +2373,7 @@ void DiscordThread() {
 		std::this_thread::sleep_for(std::chrono::milliseconds(16));
 
 	}
-
+#endif
 }
 
 static bool should_init_security_fixes = false;

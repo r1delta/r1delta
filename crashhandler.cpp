@@ -209,7 +209,30 @@ LONG WINAPI CustomCrashHandler(EXCEPTION_POINTERS* exInfo)
         logFile.close();
         if (!IsDedicatedServer()) {
 
-            ShellExecuteA(NULL, "open", "notepad.exe", filepath, NULL, SW_SHOWNORMAL);
+            char cmdLine[1024];
+            sprintf_s(cmdLine, "notepad.exe \"%s\"", filepath);  // Build command line with the file path
+
+            STARTUPINFOA si = { 0 };
+            si.cb = sizeof(si);
+            PROCESS_INFORMATION pi = { 0 };
+
+            if (CreateProcessA(
+                NULL,        // Application name: NULL means the executable is the first token of the command line.
+                cmdLine,     // Command line (must be mutable)
+                NULL,        // Process handle not inheritable
+                NULL,        // Thread handle not inheritable
+                FALSE,       // Set handle inheritance to FALSE
+                0,           // No creation flags
+                NULL,        // Use parent's environment block
+                NULL,        // Use parent's starting directory 
+                &si,         // Pointer to STARTUPINFO structure
+                &pi          // Pointer to PROCESS_INFORMATION structure
+            ))
+            {
+                CloseHandle(pi.hProcess);
+                CloseHandle(pi.hThread);
+                Sleep(100);
+            }
             // Get the handle to THIS DLL module
             HMODULE hModule;
             if (GetModuleHandleExA(

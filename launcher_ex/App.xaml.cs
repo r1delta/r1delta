@@ -1,4 +1,5 @@
-﻿using System;
+﻿using R1Delta;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Configuration;
@@ -154,6 +155,7 @@ namespace launcher_ex
             }
         }
 
+
         [StructLayout(LayoutKind.Sequential)]
         private struct PROCESS_MITIGATION_USER_SHADOW_STACK_POLICY // Needs Win10 20H1+ / Win 11
         {
@@ -209,18 +211,7 @@ namespace launcher_ex
         [STAThread] // Required for MessageBox
         protected override void OnStartup(StartupEventArgs e)
         {
-            // Force High Performance GPU on Laptops
-            // NVIDIA: Load nvapi64.dll. This is enough to signal the driver.
-            // AMD: The C++ export trick (__declspec(dllexport) DWORD AmdPowerXpressRequestHighPerformance = 1)
-            //      doesn't have a direct, reliable C# equivalent using LoadLibrary.
-            //      Users might need to configure this via AMD driver settings.
-            IntPtr hNvApi = LoadLibraryW("nvapi64.dll");
-            // We don't need to keep the handle, just loading it is the signal.
-            // FreeLibrary(hNvApi); // Optional: Can free it if desired, but not necessary for the effect.
-
-            // Set ContentId environment variable (reason unknown, but kept from original)
-            Environment.SetEnvironmentVariable("ContentId", "1025161");
-
+            VisualCppInstaller.EnsureVisualCppRedistributables();
             string exePath;
             // Get the directory containing the current executable
             exePath = AppContext.BaseDirectory ?? Path.GetDirectoryName(Assembly.GetEntryAssembly().Location);
@@ -231,12 +222,43 @@ namespace launcher_ex
             // Ensure trailing slash is removed for consistency
             exePath = exePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
+
             // Set the current directory to the executable's path
             Directory.SetCurrentDirectory(exePath);
 
+            string binPath = Path.Combine(exePath, "bin");
+            string vpkPath = Path.Combine(exePath, "vpk");
+            string r1Path = Path.Combine(exePath, "r1");
+
+            bool isBinJunction = !Directory.Exists(binPath) || (new DirectoryInfo(binPath).Attributes & FileAttributes.ReparsePoint) != 0;
+            bool isVpkJunction = !Directory.Exists(vpkPath) || (new DirectoryInfo(vpkPath).Attributes & FileAttributes.ReparsePoint) != 0;
+            bool isR1Junction = !Directory.Exists(r1Path) || (new DirectoryInfo(r1Path).Attributes & FileAttributes.ReparsePoint) != 0;
+
+            string targetVpkFullPath = Path.Combine(exePath, "vpk\\client_mp_common.bsp.pak000_000.vpk");
+            if (!isBinJunction && !isVpkJunction && !isR1Junction && !File.Exists(targetVpkFullPath))
+            {
+                ShowError("Unfortunately, it appears your installation is corrupted. The required directories 'bin', 'vpk', and 'r1' are not junctions but the marker VPK file \'client_mp_common.bsp.pak000_000.vpk\' is missing. R1Delta cannot continue and must now exit.");
+                Environment.Exit(1);
+            }
+            TitanfallManager.EnsureTitanfallPresent();
+            // Force High Performance GPU on Laptops
+            // NVIDIA: Load nvapi64.dll. This is enough to signal the driver.
+            // AMD: The C++ export trick (__declspec(dllexport) DWORD AmdPowerXpressRequestHighPerformance = 1)
+            //      doesn't have a direct, reliable C# equivalent using LoadLibrary.
+            //      Users might need to configure this via AMD driver settings.
+            IntPtr hNvApi = LoadLibraryW("nvapi64.dll");
+            // We don't need to keep the handle, just loading it is the signal.
+            // FreeLibrary(hNvApi); // Optional: Can free it if desired, but not necessary for the effect.
+
+            // Set ContentId environment variable (needed for other languages)
+            Environment.SetEnvironmentVariable("ContentId", "1025161");
+
+
+
+
             // Check if the game executable exists in the current directory
             // Do this *before* audio check and PATH modification as it's a fundamental check.
-            if (!File.Exists(Path.Combine(exePath, GAME_EXECUTABLE)))
+            /*if (!File.Exists(Path.Combine(exePath, GAME_EXECUTABLE)))
             {
                 string extraHint = "";
                 if (File.Exists(Path.Combine(exePath, "..", GAME_EXECUTABLE)) || File.Exists(Path.Combine(exePath, "..", "..", GAME_EXECUTABLE)))
@@ -251,7 +273,7 @@ namespace launcher_ex
                 }
                 ShowError($"'{GAME_EXECUTABLE}' not found in the current directory ('{exePath}').\nMake sure the launcher is placed in the main Titanfall game folder.{extraHint}");
                 Environment.Exit( 1);
-            }
+            }*/
 
             // Run audio installer if necessary
             try
@@ -269,14 +291,12 @@ namespace launcher_ex
             }
 
 
-            // Apply Process Mitigation Policies
-            SetMitigationPolicies();
-
             // Prepend required directories to PATH
             if (!PrependPath(exePath))
             {
                 // Warning already shown in PrependPath
             }
+            
 
             // Load the actual game launcher DLL
             IntPtr hLauncherModule = IntPtr.Zero;
@@ -316,10 +336,12 @@ namespace launcher_ex
             {*/
                 Debug.WriteLine("[*] Launching the game via LauncherMain...");
                 var launcherMain = (LauncherMainDelegate)Marshal.GetDelegateForFunctionPointer(pLauncherMain, typeof(LauncherMainDelegate));
+            // Apply Process Mitigation Policies
+            SetMitigationPolicies();
 
-                // Call LauncherMain. Parameters are mostly unused by the target function according to the original code comment.
-                // Pass dummy values or approximations.
-                int result = launcherMain(
+            // Call LauncherMain. Parameters are mostly unused by the target function according to the original code comment.
+            // Pass dummy values or approximations.
+            int result = launcherMain(
                     IntPtr.Zero, // hInstance - Not readily available/needed
                     IntPtr.Zero, // hPrevInstance - Always zero in modern Windows
                     string.Join(" ", Environment.GetCommandLineArgs()), // lpCmdLine - Pass command line arguments
@@ -615,10 +637,10 @@ namespace launcher_ex
                 }
                 catch (Exception ex) { Debug.WriteLine($"Error applying User Shadow Stack policy: {ex.Message}"); }
             }
-            else
-            {
-                Debug.WriteLine("Skipping UserShadowStackPolicy setup as CPU does not support CET.");
-            }
+            //else
+            //{
+               // Debug.WriteLine("Skipping UserShadowStackPolicy setup as CPU does not support CET.");
+            //}
         }
 
         // --- Audio Installer Logic ---
