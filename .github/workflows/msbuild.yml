@@ -58,7 +58,7 @@ jobs:
         working-directory: ${{env.GITHUB_WORKSPACE}}
         # Add additional options to the MSBuild command line here (like platform or verbosity level).
         # See https://docs.microsoft.com/visualstudio/msbuild/msbuild-command-line-reference
-        run: msbuild /m /p:Configuration=${{env.BUILD_CONFIGURATION}}  /p:OutDir=${{env.BUILD_PATH}} /p:WarningLevel=0 ${{env.SOLUTION_FILE_PATH}}
+        run: msbuild /m /restore /p:Configuration=${{env.BUILD_CONFIGURATION}}  /p:OutDir=${{env.BUILD_PATH}} /p:WarningLevel=0 ${{env.SOLUTION_FILE_PATH}}
 
       - name: Checkout Scripts
         uses: actions/checkout@v4
