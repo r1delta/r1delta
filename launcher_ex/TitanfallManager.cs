@@ -17,6 +17,7 @@ using launcher_ex; // Assuming JunctionPoint is here
 using System.Net; // For HttpStatusCode if FastDownloadService throws specific exceptions
 using System.Text;
 using Monitor.Core.Utilities;
+using System.Reflection;
 // Assuming Monitor.Core.Utilities exists if needed, not directly used here
 // using Monitor.Core.Utilities;
 
@@ -457,11 +458,15 @@ namespace R1Delta
                 );
                 Environment.Exit(0);
             }
-
-            // 2) Set current working directory to the .exe folder
-            string exeDir = Path.GetDirectoryName(Environment.GetCommandLineArgs()[0])
-                            ?? Directory.GetCurrentDirectory();
-            Directory.SetCurrentDirectory(exeDir);
+            string exeDir;
+            // Get the directory containing the current executable
+            exeDir = AppContext.BaseDirectory ?? Path.GetDirectoryName(Assembly.GetEntryAssembly().Location);
+            if (string.IsNullOrEmpty(exeDir))
+            {
+                throw new Exception("Could not determine application directory.");
+            }
+            // Ensure trailing slash is removed for consistency
+            exeDir = exeDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
             // 3) Clean up any invalid junctions
             RemoveInvalidJunction("bin");
@@ -478,13 +483,15 @@ namespace R1Delta
                 // Done—let the rest of your logic run
                 return;
             }
-
             // 5) Try to find Titanfall folder from external logic
             //    This will return null if not found
             //    Assuming TitanfallFinder.TitanfallLocator exists and works
-            string foundInstall = TitanfallFinder.TitanfallLocator.FindTitanfallOrR1Delta();
-            if (!string.IsNullOrEmpty(foundInstall))
+            string foundInstallExe = TitanfallFinder.TitanfallLocator.FindTitanfallOrR1Delta();
+            if (!string.IsNullOrEmpty(foundInstallExe))
             {
+                // Remove the last component (the exe filename) to get the installation directory.
+                string foundInstall = Path.GetDirectoryName(foundInstallExe);
+
                 // Check if the found installation seems valid (e.g., contains the VPK)
                 string foundVpk = Path.Combine(foundInstall, "vpk", "client_mp_common.bsp.pak000_000.vpk");
                 if (File.Exists(foundVpk))
@@ -493,6 +500,7 @@ namespace R1Delta
                     CreateJunctionIfNeeded("bin", Path.Combine(foundInstall, "bin"));
                     CreateJunctionIfNeeded("r1", Path.Combine(foundInstall, "r1"));
                     CreateJunctionIfNeeded("vpk", Path.Combine(foundInstall, "vpk"));
+                    CreateJunctionIfNeeded("platform", Path.Combine(foundInstall, "platform"));
                     Console.WriteLine("Junctions created to existing installation.");
                     return;
                 }
@@ -568,416 +576,330 @@ namespace R1Delta
         }
 
         /// <summary>
-        /// Download all needed Titanfall files to <paramref name="installDir"/>,
-        /// checking existing files and handling cancellation/errors robustly.
+        /// Downloads all needed Titanfall files to <paramref name="installDir"/>, verifying existing files
+        /// and supporting cancellation. Returns true if everything is valid at the end, false otherwise.
         /// </summary>
-        /// <param name="installDir">The target directory for downloaded files.</param>
-        /// <param name="progressUI">The UI element implementing progress reporting and cancellation.</param>
-        /// <param name="externalCts">The cancellation token source controlled externally (e.g., by the UI cancel button).</param>
-        /// <returns>True if all files were downloaded and verified successfully, false otherwise.</returns>
+        /// <param name="installDir">Directory where files are downloaded.</param>
+        /// <param name="progressUI">UI object for progress and error reporting.</param>
+        /// <param name="externalCts">Cancellation source controlled externally (e.g., user clicking cancel).</param>
+        /// <returns>True if all files ended up valid, false otherwise (including cancellation).</returns>
         public static async Task<bool> DownloadAllFilesWithResume(
             string installDir,
             IInstallProgress progressUI,
-            CancellationToken externalCts) // Renamed for clarity
+            CancellationToken externalCts)
         {
-            var fileReceivedBytes = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
-            var fileTotalBytes = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
-            var filesToDownload = new List<(string Url, string DestPath, ulong XxHash, long FileSize)>();
-
-            // --- State for coordinating first error reporting ---
-            object errorLock = new object();
-            bool errorHasOccurred = false;
-            // ---
-
-            // --- FIX: Connect UI Cancellation Request ---
-            // Ensure progressUI is not null before assigning
+            //--- 1. Validate parameters and prepare data structures ---
             if (progressUI == null)
             {
-                Console.WriteLine("Error: Progress UI object is null. Cannot proceed with download.");
-                // Decide how to handle this - throw, return false, etc.
-                return false; // Or throw new ArgumentNullException(nameof(progressUI));
+                Console.WriteLine("Error: progressUI is null.");
+                return false;
             }
-            // --- End Fix ---
 
-            Console.WriteLine("Checking existing files...");
+            // These dictionaries track, per-file, how many bytes are received and how many are expected
+            var fileReceivedBytes = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+            var fileTotalBytes = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
 
-            // 1. Identify files needing download and calculate total size
+            // The final list of files that actually require downloading
+            var filesToDownload = new List<(string Url, string DestPath, ulong XxHash, long FileSize)>();
+            double lastUpdateTime = 0;
+            var progressHistory = new Queue<(double Time, long Progress)>();
+            double rollingInterval = 10.0; // seconds
+
+            // Error-handling lock and flag
+            object errorLock = new object();
+            bool errorReported = false;
+
+            Console.WriteLine("Verifying existing files...");
+
+            //--- 2. Check existing files, build a list of downloads needed, and populate tracking info ---
             try
             {
                 foreach (var (url, relPath, expectedHash, knownSize) in s_fileList)
                 {
-                    // Basic validation
-                    if (knownSize <= 0)
-                    {
-                        Console.WriteLine($"Warning: File '{relPath}' has size {knownSize} listed. Skipping hash/size check, will assume download needed if missing.");
-                        // Decide if zero-size files are valid or errors
-                    }
                     if (string.IsNullOrWhiteSpace(relPath))
                     {
-                        Console.WriteLine($"Warning: Invalid relative path found in file list for URL '{url}'. Skipping.");
+                        Console.WriteLine($"Warning: invalid relative path in file list for URL {url}. Skipping.");
                         continue;
                     }
 
+                    // Destination path for this file
                     string destPath = Path.Combine(installDir, relPath);
                     string? directoryPath = Path.GetDirectoryName(destPath);
-
                     if (string.IsNullOrEmpty(directoryPath))
                     {
-                        progressUI.ShowError($"Internal Error: Invalid destination path generated for relative path: {relPath}");
+                        progressUI.ShowError($"Error: Could not determine directory for: {relPath}");
                         return false;
                     }
-                    // Ensure directory exists before checking/writing file
                     Directory.CreateDirectory(directoryPath);
 
+                    // Default assumption is we need to download
                     bool needsDownload = true;
+
+                    // If file is present, verify size + checksum
                     if (File.Exists(destPath))
                     {
                         try
                         {
-                            FileInfo fileInfo = new FileInfo(destPath);
-                            // Only verify hash if size matches and is positive
-                            if (fileInfo.Length == knownSize && knownSize > 0)
+                            var existing = new FileInfo(destPath);
+
+                            // If file size matches known size, and > 0, verify checksum
+                            if (existing.Length == knownSize && knownSize > 0)
                             {
-                                Console.WriteLine($"Verifying checksum for existing file: {relPath}...");
                                 ulong localXx = ComputeXxHash64(destPath);
                                 if (localXx == expectedHash)
                                 {
-                                    Console.WriteLine($"File is correct: {relPath}");
+                                    Console.WriteLine($"File verified: {relPath}");
                                     needsDownload = false;
                                 }
                                 else
                                 {
-                                    Console.WriteLine($"Checksum mismatch for {relPath}. Expected 0x{expectedHash:X}, Got 0x{localXx:X}. Will re-download.");
-                                    TryDeleteFile(destPath); // Delete corrupt file
+                                    Console.WriteLine($"Checksum mismatch: {relPath}, will re-download.");
+                                    TryDeleteFile(destPath);
                                 }
                             }
-                            // Handle zero-byte files: if expected size is 0 and file exists with size 0, it's correct.
-                            else if (fileInfo.Length == 0 && knownSize == 0)
+                            // Zero-byte file case
+                            else if (existing.Length == 0 && knownSize == 0)
                             {
-                                Console.WriteLine($"Zero-byte file exists and is expected: {relPath}");
+                                Console.WriteLine($"Zero-byte file as expected: {relPath}");
                                 needsDownload = false;
                             }
                             else
                             {
-                                Console.WriteLine($"Size mismatch for {relPath}. Expected {knownSize}, Got {fileInfo.Length}. Will re-download.");
-                                TryDeleteFile(destPath); // Delete incorrect size file
+                                // Size mismatch → re-download
+                                Console.WriteLine($"Size mismatch for {relPath}. Expected {knownSize}, got {existing.Length}. Re-downloading.");
+                               // TryDeleteFile(destPath);
                             }
-                        }
-                        catch (IOException ex)
-                        {
-                            Console.WriteLine($"Warning: Error accessing {destPath} for verification: {ex.Message}. Will attempt re-download.");
-                            // Don't necessarily fail the whole process here, just mark for download
                         }
                         catch (Exception ex)
                         {
-                            Console.WriteLine($"Warning: Unexpected error verifying {destPath}: {ex.Message}. Will attempt re-download.");
+                            // Any IO or unexpected errors → re-download
+                            Console.WriteLine($"Warning: Could not verify {destPath} ({ex.Message}). Will re-download.");
                         }
                     }
 
-                    // Track total size and received bytes (initialize based on check results)
-                    fileTotalBytes[destPath] = knownSize; // Track expected size
+                    // Record expected size
+                    fileTotalBytes[destPath] = knownSize;
+
+                    // If needs download, we initialize 0 bytes received
+                    // If already valid, set to knownSize
+                    fileReceivedBytes[destPath] = needsDownload ? 0 : knownSize;
+
                     if (needsDownload)
                     {
                         filesToDownload.Add((url, destPath, expectedHash, knownSize));
-                        fileReceivedBytes[destPath] = 0; // Needs download, start count at 0
-                    }
-                    else
-                    {
-                        fileReceivedBytes[destPath] = knownSize; // Already present and correct
                     }
                 }
             }
             catch (Exception ex)
             {
-                // Catch errors during the file checking phase (e.g., directory creation permissions)
-                progressUI.ShowError($"Fatal Error during file checking phase: {ex.Message}");
-                Console.WriteLine($"Fatal Error during file checking: {ex.ToString()}");
+                progressUI.ShowError($"Fatal error during file-check phase: {ex.Message}");
+                Console.WriteLine(ex);
                 return false;
             }
 
-            long totalSizeToProcess = fileTotalBytes.Values.Sum();
-            long alreadyDownloadedBytes = fileReceivedBytes.Values.Sum();
+            long totalBytesNeeded = fileTotalBytes.Values.Sum();
+            long alreadyPresentBytes = fileReceivedBytes.Values.Sum();
+            long lastProgressBytes = alreadyPresentBytes; // Initialize with the starting progress
 
-            // Initial progress report based on existing files
-            double initialPercent = totalSizeToProcess > 0 ? (alreadyDownloadedBytes / (double)totalSizeToProcess) * 100.0 : 100.0;
+            // Report initial progress
+            double initialPercent = totalBytesNeeded > 0
+                ? (alreadyPresentBytes / (double)totalBytesNeeded) * 100.0
+                : 100.0;
             progressUI.ReportProgress(initialPercent, 0);
 
-
-            // If no files actually need downloading
             if (filesToDownload.Count == 0)
             {
+                // All files verified already
                 Console.WriteLine("All files are already present and correct.");
-                progressUI.ReportProgress(100.0, 0); // Ensure final report
+                progressUI.ReportProgress(100.0, 0);
                 return true;
             }
 
-            Console.WriteLine($"{filesToDownload.Count} file(s) need downloading. Total size: {totalSizeToProcess:N0} bytes. Already present: {alreadyDownloadedBytes:N0} bytes.");
+            Console.WriteLine($"{filesToDownload.Count} file(s) need download. " +
+                              $"Size: {totalBytesNeeded:N0} bytes total, {alreadyPresentBytes:N0} bytes already present.");
 
-            // 2. Setup for Parallel Downloads and Progress Reporting
+            //--- 3. Setup concurrency, progress tracking, and cancellation ---
             object progressLock = new object();
-            long overallProgressBytes = alreadyDownloadedBytes; // Start count from already present bytes
+            long overallProgress = alreadyPresentBytes;
             Stopwatch stopwatch = Stopwatch.StartNew();
-            double lastReportedSpeed = 0;
-            const double reportingIntervalSeconds = 2; // Report speed more frequently
+            double lastSpeed = 0;
+            const double speedUpdateIntervalSec = 0.2;
 
-            const int MaxParallelDownloads = 8; // Keep concurrency limit reasonable
-            using var concurrencySemaphore = new SemaphoreSlim(MaxParallelDownloads, MaxParallelDownloads);
-
-            // --- Use a dedicated internal CTS linked to the external one ---
-            // This allows us to cancel internally on error without affecting the external source directly,
-            // while still respecting external cancellation requests.
             using var internalCts = CancellationTokenSource.CreateLinkedTokenSource(externalCts);
-            var combinedToken = internalCts.Token; // Use this token for all async operations
+            CancellationToken token = internalCts.Token;
 
-            // --- FIX: Create FastDownloadService ONCE ---
-            using var downloader = new FastDownloadService(); // Reuse this instance
+            // We create one downloader instance and reuse it
+            using var downloader = new FastDownloadService();
 
-            // 3. Create and Start Download Tasks
+            const int MAX_CONCURRENT = 8;
+            using var concurrency = new SemaphoreSlim(MAX_CONCURRENT, MAX_CONCURRENT);
+
+            //--- 4. Build the download tasks ---
             var downloadTasks = filesToDownload.Select(file => Task.Run(async () =>
             {
-                // Respect semaphore and cancellation token *before* starting work
-                await concurrencySemaphore.WaitAsync(combinedToken);
-                combinedToken.ThrowIfCancellationRequested(); // Check before proceeding
+                await concurrency.WaitAsync(token).ConfigureAwait(false);
+                token.ThrowIfCancellationRequested();
+                try {
+                // Create a new downloader instance for this file
+                using var downloader = new FastDownloadService();
 
-                try
-                {
-                    Console.WriteLine($"Starting download task for: {Path.GetFileName(file.DestPath)}"); // Log task start
-
-                    // Define the progress handler locally to capture 'file' safely
-                    Action<long, long> progressHandler = (currentFileBytesReceived, totalFileLength) =>
+                    // Local progress handler for this file
+                    void OnProgress(long bytesReceived, long fileSize)
                     {
-                        // --- FIX: Check cancellation at start of handler ---
-                        if (combinedToken.IsCancellationRequested) return;
+                        if (token.IsCancellationRequested)
+                            return;
 
                         lock (progressLock)
                         {
-                            // Calculate the *change* in bytes for this specific file since the last report
-                            long previousBytesForThisFile = fileReceivedBytes.ContainsKey(file.DestPath) ? fileReceivedBytes[file.DestPath] : 0;
-                            long bytesDeltaForThisFile = currentFileBytesReceived - previousBytesForThisFile;
+                            // Update per-file progress
+                            fileReceivedBytes[file.DestPath] = bytesReceived;
 
-                            // Update the specific file's progress
-                            fileReceivedBytes[file.DestPath] = currentFileBytesReceived;
+                            // Recalculate overall progress
+                            overallProgress = fileReceivedBytes.Values.Sum();
+                            overallProgress = Math.Min(overallProgress, totalBytesNeeded);
 
-                            // Update the overall progress by the delta
-                            overallProgressBytes += bytesDeltaForThisFile;
+                            double percent = totalBytesNeeded > 0
+                                ? (overallProgress / (double)totalBytesNeeded) * 100.0
+                                : 100.0;
 
-                            // Ensure overall progress doesn't exceed total size due to rounding or concurrency nuances
-                            overallProgressBytes = Math.Min(overallProgressBytes, totalSizeToProcess);
+                            double currentTime = stopwatch.Elapsed.TotalSeconds;
 
-                            double elapsedSeconds = stopwatch.Elapsed.TotalSeconds;
-                            double currentOverallSpeed = lastReportedSpeed; // Use last known speed until interval passes
+                            // Enqueue the current snapshot
+                            progressHistory.Enqueue((currentTime, overallProgress));
 
-                            // Calculate and update speed periodically
-                            if (elapsedSeconds >= reportingIntervalSeconds)
+                            // Remove entries older than our rolling window
+                            while (progressHistory.Count > 0 && progressHistory.Peek().Time < currentTime - rollingInterval)
                             {
-                                // Calculate speed based on overall progress change since last report
-                                // This requires tracking the overall progress at the *last report time*
-                                // Simpler approach: Calculate instantaneous speed for the interval
-                                long totalBytesNow = fileReceivedBytes.Values.Sum(); // Potentially expensive? No, dictionary sum is fast.
-                                // We need overall bytes *at the start of the interval*
-                                // Let's reset stopwatch and track bytes transferred *during* the interval
-
-                                // Alternative: Keep it simple - average speed over the interval
-                                // Recalculate total bytes received *now*
-                                long currentTotalReceived = fileReceivedBytes.Values.Sum();
-                                // We need the total bytes at the *last* report interval...
-                                // Let's stick to the previous simpler speed calculation for now:
-                                // It calculates average speed since the *last speed calculation*, not overall average.
-
-                                // Re-implementing the speed calc based on overall progress change:
-                                // Need 'overallPreviousBytesAtLastReport' variable outside the handler? Complex.
-                                // Let's use the simpler approach based on total download amount:
-                                double percent = totalSizeToProcess > 0 ? (overallProgressBytes / (double)totalSizeToProcess) * 100.0 : (file.FileSize > 0 ? 100.0 : 0);
-                                percent = Clamp(percent, 0.0, 100.0); // Use Clamp
-
-                                // Speed calculation needs refinement - let's use total elapsed time for average
-                                double totalElapsed = stopwatch.Elapsed.TotalSeconds;
-                                if (totalElapsed > 1) // Avoid division by zero/tiny numbers early on
-                                {
-                                    // Speed based on bytes downloaded *since start*, divided by *total time*
-                                    currentOverallSpeed = (overallProgressBytes - alreadyDownloadedBytes) / totalElapsed;
-                                    currentOverallSpeed = Math.Max(0, currentOverallSpeed); // Ensure non-negative
-                                    lastReportedSpeed = currentOverallSpeed; // Update last reported speed
-                                }
-
-                                // Report progress
-                                progressUI.ReportProgress(percent, currentOverallSpeed);
-
-                                // Reset stopwatch ONLY if we base speed on intervals (which we aren't right now)
-                                // stopwatch.Restart();
+                                progressHistory.Dequeue();
                             }
-                            else
+
+                            // Only update if enough time has passed since the last update.
+                            if (currentTime - lastUpdateTime >= speedUpdateIntervalSec)
                             {
-                                // Report progress update without recalculating speed if interval hasn't passed
-                                double percent = totalSizeToProcess > 0 ? (overallProgressBytes / (double)totalSizeToProcess) * 100.0 : (file.FileSize > 0 ? 100.0 : 0);
-                                percent = Clamp(percent, 0.0, 100.0);
-                                progressUI.ReportProgress(percent, lastReportedSpeed); // Report with last known speed
+                                // Use the oldest snapshot in our window as the baseline.
+                                var oldest = progressHistory.Peek();
+                                double timeDelta = currentTime - oldest.Time;
+                                long progressDelta = overallProgress - oldest.Progress;
+                                double rollingSpeed = timeDelta > 0 ? progressDelta / timeDelta : 0;
+
+                                progressUI.ReportProgress((int)Clamp(percent, 0, 100), rollingSpeed);
+
+                                lastUpdateTime = currentTime;
                             }
                         }
-                    };
-
-                    // --- Download ---
-                    try
-                    {
-                        // Subscribe progress handler *before* starting download
-                        downloader.DownloadProgressChanged += progressHandler;
-                        Console.WriteLine($"Executing DownloadFileAsync for: {Path.GetFileName(file.DestPath)}");
-                        await downloader.DownloadFileAsync(file.Url, file.DestPath, combinedToken);
-                    }
-                    finally
-                    {
-                        // Unsubscribe progress handler *after* download finishes or fails
-                        downloader.DownloadProgressChanged -= progressHandler;
-                        Console.WriteLine($"DownloadFileAsync finished for: {Path.GetFileName(file.DestPath)}");
                     }
 
-                    // --- Verification ---
-                    // Check cancellation *after* download completes but *before* verification
-                    combinedToken.ThrowIfCancellationRequested();
 
-                    Console.WriteLine($"Download complete, verifying: {Path.GetFileName(file.DestPath)}");
-                    FileInfo downloadedFileInfo = new FileInfo(file.DestPath);
-
-                    if (downloadedFileInfo.Length != file.FileSize)
-                    {
-                        throw new IOException($"Verification Failed: Size mismatch for {Path.GetFileName(file.DestPath)}. Expected: {file.FileSize}, Got: {downloadedFileInfo.Length}");
-                    }
-
-                    // Only hash if the file has content and hash is expected
-                    if (file.FileSize > 0)
-                    {
-                        ulong finalXx = ComputeXxHash64(file.DestPath);
-                        if (finalXx != file.XxHash)
-                        {
-                            throw new IOException($"Verification Failed: Checksum mismatch for {Path.GetFileName(file.DestPath)}. Expected: 0x{file.XxHash:X}, Got: 0x{finalXx:X}");
-                        }
-                    }
-
-                    Console.WriteLine($"Verification successful: {Path.GetFileName(file.DestPath)}");
-
-                    // Final update for this file's progress (ensures it's marked as 100% complete)
-                    lock (progressLock)
-                    {
-                        long previousBytes = fileReceivedBytes.ContainsKey(file.DestPath) ? fileReceivedBytes[file.DestPath] : 0;
-                        overallProgressBytes += (file.FileSize - previousBytes); // Add remaining delta
-                        fileReceivedBytes[file.DestPath] = file.FileSize; // Mark as complete
-                        overallProgressBytes = Math.Min(overallProgressBytes, totalSizeToProcess); // Clamp
-
-                        // Report final progress after successful verification
-                        double percent = totalSizeToProcess > 0 ? (overallProgressBytes / (double)totalSizeToProcess) * 100.0 : 100.0;
-                        progressUI.ReportProgress(Clamp(percent, 0.0, 100.0), lastReportedSpeed);
-                    }
-                }
-                catch (OperationCanceledException)
+                    downloader.DownloadProgressChanged += OnProgress;
+                try
                 {
-                    Console.WriteLine($"Download cancelled for {Path.GetFileName(file.DestPath)}.");
-                    // Don't show UI error here, let the WhenAll handler manage cancellation messages.
-                    TryDeleteFile(file.DestPath); // Clean up partial file on cancellation
-                    throw; // Re-throw OCE
-                }
-                catch (Exception ex) // Catches download errors AND verification errors
-                {
-                    bool isFirstError = false;
-                    lock (errorLock) // --- CRITICAL SECTION for Error Reporting ---
-                    {
-                        if (!errorHasOccurred)
-                        {
-                            errorHasOccurred = true;
-                            isFirstError = true;
-                        }
-                    } // --- END CRITICAL SECTION ---
-
-                    string errorMsg = $"Error processing {Path.GetFileName(file.DestPath)}: {ex.Message}";
-                    Console.WriteLine(errorMsg); // Log all errors
-
-                    if (isFirstError)
-                    {
-                        Console.WriteLine($"First error detected, reporting to UI and requesting cancellation...");
-                        progressUI.ShowError(errorMsg); // Show only the first error in the UI
-
-                        // *** CRITICAL: Signal cancellation to other tasks via internal CTS ***
-                        try
-                        {
-                            internalCts.Cancel();
-                        }
-                        catch (ObjectDisposedException) { /* Ignore if CTS disposed */ }
-                        catch (AggregateException aggEx) when (aggEx.InnerExceptions.All(e => e is ObjectDisposedException)) { /* Ignore */ }
-                    }
-                    else
-                    {
-                        Console.WriteLine($"Subsequent error (UI report suppressed): {errorMsg}");
-                    }
-
-                    TryDeleteFile(file.DestPath); // Clean up potentially corrupt file on error
-                    throw; // Re-throw the original exception so Task.WhenAll sees the failure.
+                    Console.WriteLine($"Downloading: {Path.GetFileName(file.DestPath)}");
+                    await downloader.DownloadFileAsync(file.Url, file.DestPath, token).ConfigureAwait(false);
                 }
                 finally
                 {
-                    concurrencySemaphore.Release();
-                    Console.WriteLine($"Semaphore released for task: {Path.GetFileName(file.DestPath)}");
+                    downloader.DownloadProgressChanged -= OnProgress;
                 }
-            }, combinedToken)).ToList(); // Pass combinedToken to Task.Run as well
 
-            // 4. Wait for all tasks and handle results
+                token.ThrowIfCancellationRequested();
+
+                                    // Verify file size and checksum
+                    var fi = new FileInfo(file.DestPath);
+                    if (fi.Length != file.FileSize)
+                    {
+                        throw new IOException($"Size mismatch after download: expected {file.FileSize}, got {fi.Length}.");
+                    }
+                    if (file.FileSize > 0)
+                    {
+                        ulong actualXx = ComputeXxHash64(file.DestPath);
+                        if (actualXx != file.XxHash)
+                        {
+                            throw new IOException($"Checksum mismatch: expected 0x{file.XxHash:X}, got 0x{actualXx:X}.");
+                        }
+                    }
+                    Console.WriteLine($"Download verified: {Path.GetFileName(file.DestPath)}");
+                }
+                catch (OperationCanceledException)
+                {
+                    // Clean up partial file
+                   // throw;
+                }
+                catch (Exception ex)
+                {
+                    bool firstError;
+                    lock (errorLock)
+                    {
+                        firstError = !errorReported;
+                        if (firstError)
+                            errorReported = true;
+                    }
+
+                    if (firstError)
+                    {
+                        // Show and trigger cancellation for everyone
+                        progressUI.ShowError($"Error downloading {Path.GetFileName(file.DestPath)}: {ex.Message}");
+                        internalCts.Cancel();
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Additional error on {Path.GetFileName(file.DestPath)}: {ex.Message}");
+                    }
+
+                    // Delete the possibly corrupt file
+                    TryDeleteFile(file.DestPath);
+                    throw;
+                }
+                finally
+                {
+                    concurrency.Release();
+                }
+            }, token)).ToList();
+
+            //--- 5. Await all tasks and interpret result ---
             try
             {
-                Console.WriteLine("Waiting for all download tasks to complete...");
-                await Task.WhenAll(downloadTasks);
-                Console.WriteLine("All download tasks finished or were cancelled/faulted.");
+                Console.WriteLine("Awaiting all parallel downloads...");
+                await Task.WhenAll(downloadTasks).ConfigureAwait(false);
 
-                // Check cancellation state *after* WhenAll returns
-                if (combinedToken.IsCancellationRequested)
+                if (token.IsCancellationRequested)
                 {
-                    if (externalCts.IsCancellationRequested) // Cancelled by user/external source
+                    if (externalCts.IsCancellationRequested)
                     {
-                        Console.WriteLine("Download process cancelled by external request.");
-                        // Avoid showing error if already cancelled. UI should reflect cancellation.
-                        // progressUI.ShowError("Download cancelled."); // Maybe not needed if UI handles it
+                        Console.WriteLine("Operation cancelled by external request.");
+                        // UI can handle “Cancelled” display on its own if desired
                     }
-                    else // Cancelled internally due to an error
+                    else
                     {
-                        Console.WriteLine("Download process stopped due to an error in one or more files.");
-                        // The first error message should have already been shown via progressUI.ShowError.
+                        Console.WriteLine("Operation cancelled internally (error).");
                     }
-                    return false; // Indicate failure/cancellation
+                    return false;
                 }
-                else
-                {
-                    // If WhenAll completed without throwing and no cancellation was requested, success!
-                    Console.WriteLine("All downloads completed and verified successfully.");
-                    progressUI.ReportProgress(100.0, 0); // Final 100% report
-                    return true; // Indicate success
-                }
+
+                // Everything succeeded
+                Console.WriteLine("All downloads verified successfully.");
+                progressUI.ReportProgress(100.0, 0);
+                return true;
             }
             catch (OperationCanceledException)
             {
-                // This catches OCE if WhenAll itself is cancelled *before* all tasks finish
-                // (e.g., external cancellation happens while WhenAll is awaited).
-                // It also catches OCE re-thrown by individual tasks if that's the first exception seen by WhenAll.
-                Console.WriteLine("Download operation was cancelled (caught OCE after WhenAll).");
-                if (!errorHasOccurred) // Only show generic cancel message if no specific error was reported
-                {
-                    // progressUI.ShowError("Download cancelled."); // UI should handle this based on token state
-                }
-                return false; // Indicate failure/cancellation
+                Console.WriteLine("Operation cancelled (caught OCE after WhenAll).");
+                return false;
             }
             catch (Exception ex)
             {
-                // This catches the first non-OCE exception re-thrown by a task, if WhenAll aggregates it.
-                Console.WriteLine($"An unexpected error occurred during download aggregation: {ex.Message}");
-                // The first specific error should have already been logged/shown by the failing task's catch block.
-                // Avoid showing a generic error if a specific one was already shown by the 'isFirstError' logic.
-                if (!errorHasOccurred)
+                // If any non-cancellation error was thrown, the first error was already displayed
+                Console.WriteLine($"Unexpected aggregator error: {ex.Message}");
+                if (!errorReported)
                 {
-                    // This case is less likely now but handles unexpected aggregation errors
+                    // Show a generic message only if no first-error was displayed
                     progressUI.ShowError($"Download error: {ex.Message}");
                 }
-                return false; // Indicate failure
+                return false;
             }
             finally
             {
                 stopwatch.Stop();
-                Console.WriteLine("Download process finished.");
+                Console.WriteLine("Download process complete.");
             }
         }
 
@@ -1045,37 +967,7 @@ namespace R1Delta
             // Check if junction path already exists
             if (Directory.Exists(junctionPath) || File.Exists(junctionPath))
             {
-                // Check if it's already the correct junction
-                if ((File.GetAttributes(junctionPath) & FileAttributes.ReparsePoint) == FileAttributes.ReparsePoint)
-                {
-                    try
-                    {
-                        // Assuming JunctionPoint.GetTarget exists
-                        string currentTarget = JunctionPoint.GetTarget(junctionPath);
-                        if (string.Equals(Path.GetFullPath(currentTarget).TrimEnd('\\'), Path.GetFullPath(targetDir).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
-                        {
-                            // Console.WriteLine($"Junction '{junctionPointRelative}' already exists and points correctly.");
-                            return; // Already correct
-                        }
-                        else
-                        {
-                            Console.WriteLine($"Junction '{junctionPointRelative}' exists but points to '{currentTarget}'. Removing and recreating.");
-                            JunctionPoint.Delete(junctionPath);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"Error checking existing junction '{junctionPointRelative}'. Attempting to delete and recreate. Error: {ex.Message}");
-                        try { JunctionPoint.Delete(junctionPath); } catch { /* Ignore delete error if it fails */ }
-                    }
-                }
-                else
-                {
-                    Console.WriteLine($"Path '{junctionPointRelative}' exists but is not a junction. Please remove it manually.");
-                    // Handle this case - maybe throw an error or exit?
-                    // For robustness, we could try deleting it if it's empty? Risky.
-                    return; // Don't proceed
-                }
+                Console.WriteLine($"Path '{junctionPointRelative}' exists but is not a junction. Please remove it manually.");
             }
 
             // Create the junction

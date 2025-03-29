@@ -1,6 +1,5 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics; // For Debug.WriteLine
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -11,291 +10,182 @@ using System.Threading.Tasks;
 
 public class FastDownloadService : IDisposable
 {
-    // Number of segments to download in parallel.
-    public int ParallelCount { get; set; } = 12; // Reduced default, 16 might be too high sometimes
-
-    // Buffer size for reading from network stream and writing to file.
-    public int BufferSize { get; set; } = 64 * 1024; // Standard buffer size (80KB), 1MB might be excessive per segment
-
-    // Event to report download progress:
-    // long: current bytes downloaded
-    // long: total bytes to download.
+    /// <summary>Event to report download progress: (bytesReceived, totalBytes).</summary>
     public event Action<long, long> DownloadProgressChanged;
 
-    // HttpClient is intended to be reused. Create it once.
-    // Use WinHttpHandler for potential HTTP/2 support on .NET Framework 4.6.2+ on compatible Windows versions.
-    // Avoid forcing HTTP/2, let the handler negotiate.
     private readonly HttpClient _httpClient;
     private bool _disposed = false;
-    public class Http2CustomHandler : WinHttpHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, System.Threading.CancellationToken cancellationToken)
-        {
-            request.Version = new Version("2.0");
-            return base.SendAsync(request, cancellationToken);
-        }
-    }
+
+    public int BufferSize { get; set; } = 64 * 1024; // 64KB buffer for reading/writing
 
     public FastDownloadService()
     {
-        // WinHttpHandler is generally more performant on Windows than HttpClientHandler
-        // and is required for HTTP/2 on .NET Framework before .NET Core 3.0 / .NET 5+
-        var handler = new Http2CustomHandler { };
-        _httpClient = new HttpClient(handler, disposeHandler: true);
-        // Set a reasonable timeout
-        _httpClient.Timeout = TimeSpan.FromMinutes(0.5); // Adjust as needed
+        // Using a basic handler here for simplicity; you can still try WinHttpHandler if needed.
+        var handler = new HttpClientHandler();
+        _httpClient = new HttpClient(handler, disposeHandler: true)
+        {
+            Timeout = TimeSpan.FromSeconds(30) // example timeout
+        };
     }
 
     /// <summary>
-    /// Downloads a file from the specified URL to the destination path using parallel segments if supported.
+    /// Downloads a file from <paramref name="url"/> to <paramref name="destinationPath"/>,
+    /// attempting to **resume** if an existing partial file is found and the server supports range requests.
     /// </summary>
-    /// <param name="url">File URL</param>
-    /// <param name="destinationPath">Local file destination path</param>
-    /// <param name="cancellationToken">Cancellation token</param>
     public async Task DownloadFileAsync(string url, string destinationPath, CancellationToken cancellationToken)
     {
         if (_disposed) throw new ObjectDisposedException(nameof(FastDownloadService));
-        if (string.IsNullOrEmpty(url)) throw new ArgumentNullException(nameof(url));
-        if (string.IsNullOrEmpty(destinationPath)) throw new ArgumentNullException(nameof(destinationPath));
 
-        long totalLength = 0;
-        bool rangeProcessingSupported = false;
+        // 1) HEAD request to discover total size and range support
+        long totalLength;
+        bool rangeSupported;
+        (totalLength, rangeSupported) = await GetServerInfoAsync(url, cancellationToken);
 
-        try
+        // 2) Check local file
+        long existingLength = 0;
+        bool doPartialResume = false;
+        if (File.Exists(destinationPath))
         {
-            // 1. HEAD Request to get file size and check for Range support
-            using (var headRequest = new HttpRequestMessage(HttpMethod.Head, url))
-            using (var headResponse = await _httpClient.SendAsync(headRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken))
+            var fi = new FileInfo(destinationPath);
+            existingLength = fi.Length;
+
+            // If the file is already fully downloaded, skip
+            if (existingLength == totalLength && totalLength > 0)
             {
-                // Allow redirects if necessary (HttpClient handles this by default, but check status)
-                headResponse.EnsureSuccessStatusCode();
-
-                totalLength = headResponse.Content.Headers.ContentLength ?? 0;
-                rangeProcessingSupported = headResponse.Headers.AcceptRanges?.Contains("bytes") == true;
-
-                Debug.WriteLine($"HEAD Request Results: TotalLength={totalLength}, RangeSupported={rangeProcessingSupported}");
-
-                if (totalLength <= 0)
-                {
-                    // If size is unknown or zero, parallel download based on size isn't possible.
-                    // Consider falling back to sequential download or throwing an error.
-                    // For simplicity, we'll throw if size is needed for parallel logic.
-                    rangeProcessingSupported = false; // Force sequential if size is 0/unknown
-                    Debug.WriteLine("Content-Length is zero or unknown.");
-                    // If you want to handle zero-byte files specifically:
-                    if (totalLength == 0)
-                    {
-                        File.WriteAllBytes(destinationPath, new byte[0]); // Create empty file
-                        DownloadProgressChanged?.Invoke(0, 0);
-                        Debug.WriteLine("Created empty file as Content-Length is 0.");
-                        return; // Download complete
-                    }
-                    // If length is unknown, proceed to sequential download below.
-                }
+                // OPTIONAL: do a quick checksum if you want to confirm correctness
+                DownloadProgressChanged?.Invoke(totalLength, totalLength);
+                Debug.WriteLine($"[FastDownloadService] File already complete: {destinationPath}");
+                return;
             }
 
-            // 2. Check if file already exists and matches size
-            if (File.Exists(destinationPath))
+            // If we have a partial file, and the server supports Range, plan to resume
+            if (existingLength > 0 && existingLength < totalLength && rangeSupported)
             {
-                var existingFileInfo = new FileInfo(destinationPath);
-                if (existingFileInfo.Length == totalLength)
-                {
-                    Debug.WriteLine($"File '{destinationPath}' already exists with correct size ({totalLength} bytes). Skipping download.");
-                    DownloadProgressChanged?.Invoke(totalLength, totalLength); // Report as complete
-                    return;
-                }
-                else
-                {
-                    Debug.WriteLine($"File '{destinationPath}' exists but size mismatch (Expected: {totalLength}, Actual: {existingFileInfo.Length}). Overwriting.");
-                }
-            }
-
-            // Ensure directory exists
-            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath));
-
-            // 3. Decide on Download Strategy (Parallel vs Sequential)
-            if (rangeProcessingSupported && totalLength > 0 && ParallelCount > 1)
-            {
-                Debug.WriteLine("Attempting parallel download...");
-                await DownloadFileParallelAsync(url, destinationPath, totalLength, cancellationToken);
+                doPartialResume = true;
             }
             else
             {
-                Debug.WriteLine("Server does not support range requests, Content-Length is unknown, or ParallelCount is 1. Falling back to sequential download...");
-                await DownloadFileSequentialAsync(url, destinationPath, totalLength, cancellationToken);
+                // If partial file is useless (no range support or mismatch), overwrite
+                existingLength = 0;
+                TryDeleteFile(destinationPath);
             }
         }
-        catch (OperationCanceledException)
+
+        // 3) If totalLength was unknown or zero, fallback to sequential from scratch
+        if (totalLength <= 0)
         {
-            Debug.WriteLine("Download cancelled.");
-            // Optionally delete partial file on cancellation
-            TryDeleteFile(destinationPath);
-            throw; // Re-throw cancellation exception
+            // Some servers do not provide Content-Length reliably; we will treat it as unknown
+            // and do a normal single GET.  We'll call that a "sequential" non-resumable scenario.
+            await DownloadFromZeroAsync(url, destinationPath, cancellationToken, 0, -1);
+            return;
         }
-        catch (Exception ex)
+
+        // 4) If partial resume is possible, do it
+        if (doPartialResume)
         {
-            Debug.WriteLine($"Error during download: {ex.Message}");
-            // Attempt to delete the potentially corrupted partial file
-            TryDeleteFile(destinationPath);
-            throw; // Re-throw the exception
+            // Resume from the existingLength to the end
+            // e.g. Range: bytes=existingLength-(totalLength-1)
+            Debug.WriteLine($"[FastDownloadService] Resuming from {existingLength} of {totalLength} bytes.");
+            await DownloadFromZeroAsync(url, destinationPath, cancellationToken, existingLength, totalLength);
+        }
+        else
+        {
+            // Otherwise, start fresh
+            Debug.WriteLine("[FastDownloadService] No partial resume; starting fresh download.");
+            await DownloadFromZeroAsync(url, destinationPath, cancellationToken, 0, totalLength);
         }
     }
 
-    private async Task DownloadFileParallelAsync(string url, string destinationPath, long totalLength, CancellationToken cancellationToken)
+    /// <summary>
+    /// Actually does the GET. If <paramref name="resumeStart"/> &gt; 0, it tries a Range request.
+    /// If the server doesn't support Range, the server's response might be full content.
+    /// </summary>
+    private async Task DownloadFromZeroAsync(
+        string url,
+        string destinationPath,
+        CancellationToken cancellationToken,
+        long resumeStart,
+        long totalLength)
     {
-        long totalDownloaded = 0;
-        object progressLock = new object(); // Lock for progress reporting
-        object fileLock = new object(); // <<< Lock for FileStream access
-
-        using (var destinationStream = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None, BufferSize, useAsync: true))
+        long bytesDownloadedSoFar = resumeStart;
+        var mode = (resumeStart > 0) ? FileMode.OpenOrCreate : FileMode.Create;
+        using (var fs = new FileStream(destinationPath, mode, FileAccess.Write, FileShare.None, BufferSize, useAsync: true))
         {
-            destinationStream.SetLength(totalLength);
-
-            int actualParallelCount = (int)Math.Min(ParallelCount, totalLength);
-            if (actualParallelCount <= 0) actualParallelCount = 1;
-
-            long segmentSize = totalLength / actualParallelCount;
-            var downloadTasks = new List<Task>(actualParallelCount);
-
-            using (var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+            // If resuming, ensure we seek to the correct offset in the file
+            if (resumeStart > 0)
             {
-                var internalToken = linkedCts.Token;
+                fs.Seek(resumeStart, SeekOrigin.Begin);
+            }
 
-                for (int i = 0; i < actualParallelCount; i++)
+            // Build the request
+            using (var request = new HttpRequestMessage(HttpMethod.Get, url))
+            {
+                if (resumeStart > 0 && totalLength > 0)
                 {
-                    long start = i * segmentSize;
-                    long end = (i == actualParallelCount - 1) ? totalLength - 1 : start + segmentSize - 1;
+                    // e.g. "Range: bytes=resumeStart-"
+                    request.Headers.Range = new RangeHeaderValue(resumeStart, null);
+                }
 
-                    if (start > end || start >= totalLength) continue;
+                // 1) Send request
+                using (var response = await _httpClient.SendAsync(
+                    request,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    cancellationToken))
+                {
+                    response.EnsureSuccessStatusCode();
 
-                    downloadTasks.Add(Task.Run(async () =>
+                    // 2) If partial requested but server doesn't comply, 
+                    // it might return status 200 + full content instead of 206
+                    // We'll proceed to read the whole stream anyway.
+
+                    // 3) Read stream in chunks, write to file, report progress
+                    using (var networkStream = await response.Content.ReadAsStreamAsync())
                     {
-                        byte[] buffer = new byte[BufferSize];
+                        var buffer = new byte[BufferSize];
                         int bytesRead;
-                        long currentSegmentBytesRead = 0;
-                        long currentFilePosition = start; // Track position for this segment
-
-                        using (var request = new HttpRequestMessage(HttpMethod.Get, url))
+                        while ((bytesRead = await networkStream.ReadAsync(buffer, 0, buffer.Length, cancellationToken)) > 0)
                         {
-                            request.Headers.Range = new RangeHeaderValue(start, end);
-                            Debug.WriteLine($"Starting segment {i}: Range {start}-{end}");
-
-                            using (var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, internalToken))
-                            {
-                                // Ensure success *and* partial content
-                                if (!response.IsSuccessStatusCode)
-                                {
-                                    // Throw specific exception including status code
-                                    throw new HttpRequestException($"Segment download failed with status code {response.StatusCode} for range {start}-{end}.");
-                                }
-                                if (response.StatusCode != HttpStatusCode.PartialContent)
-                                {
-                                    throw new InvalidOperationException($"Server did not return PartialContent for range {start}-{end}. Status: {response.StatusCode}. Ensure server supports Range requests properly.");
-                                }
-                                // Optional: Verify Content-Range header matches request if present
-                                // var contentRange = response.Content.Headers.ContentRange;
-                                // if (contentRange == null || contentRange.From != start || contentRange.To != end) { ... handle mismatch ... }
-
-
-                                using (var networkStream = await response.Content.ReadAsStreamAsync())
-                                {
-                                    while ((bytesRead = await networkStream.ReadAsync(buffer, 0, buffer.Length, internalToken)) > 0)
-                                    {
-                                        // --- CRITICAL SECTION ---
-                                        // Lock the FileStream before seeking and writing
-                                        lock (fileLock) // <<< Acquire lock
-                                        {
-                                            // Seek must be inside the lock with the Write
-                                            destinationStream.Seek(currentFilePosition, SeekOrigin.Begin);
-                                            // Write synchronously within the lock for simplicity and guaranteed atomicity
-                                            // of seek+write. Async write within lock can be complex.
-                                            // Since disk I/O is often the bottleneck anyway, sync write here
-                                            // might not hurt overall performance significantly compared to network download time.
-                                            destinationStream.Write(buffer, 0, bytesRead);
-
-                                            // Alternatively, keep WriteAsync but ensure the lock covers both Seek and await WriteAsync:
-                                            // This requires the lock statement itself to be async, which isn't directly possible.
-                                            // You'd need SemaphoreSlim(1,1).WaitAsync() / Release() instead of lock().
-                                            // For simplicity and guaranteed correctness, Write() sync is often preferred here.
-
-                                        } // <<< Release lock
-
-                                        currentFilePosition += bytesRead; // Update position for the *next* write of this task
-                                        currentSegmentBytesRead += bytesRead;
-
-                                        // Update total progress safely
-                                        lock (progressLock)
-                                        {
-                                            totalDownloaded += bytesRead;
-                                            DownloadProgressChanged?.Invoke(totalDownloaded, totalLength);
-                                        }
-                                    }
-                                }
-                            }
-                            Debug.WriteLine($"Finished segment {i}: Range {start}-{end}, Read {currentSegmentBytesRead} bytes.");
+                            await fs.WriteAsync(buffer, 0, bytesRead, cancellationToken);
+                            bytesDownloadedSoFar += bytesRead;
+                            DownloadProgressChanged?.Invoke(bytesDownloadedSoFar, totalLength);
                         }
-                    }, internalToken));
+                    }
                 }
+            }
 
-                try
-                {
-                    await Task.WhenAll(downloadTasks);
-                    // Flush FileStream buffers to ensure all data is written to disk
-                    await destinationStream.FlushAsync(internalToken); // Add flush before closing
-                    DownloadProgressChanged?.Invoke(totalLength, totalLength);
-                    Debug.WriteLine("Parallel download completed successfully.");
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"Error occurred during parallel download: {ex.Message}");
-                    try { linkedCts.Cancel(); } catch { /* Ignore */ }
-                    // Important: Ensure partial file deletion happens on ANY exception from WhenAll
-                    throw; // Re-throw the original exception
-                }
-                // No finally block needed for TryDeleteFile here, as it's handled in the outer DownloadFileAsync catch block.
+            // If we knew the total, do a final 100% event
+            if (totalLength > 0 && bytesDownloadedSoFar >= totalLength)
+            {
+                DownloadProgressChanged?.Invoke(totalLength, totalLength);
             }
         }
     }
 
-    private async Task DownloadFileSequentialAsync(string url, string destinationPath, long totalLength, CancellationToken cancellationToken)
+    /// <summary>
+    /// Does a HEAD request to retrieve Content-Length and see if Range is accepted.
+    /// Returns (totalLength, rangeSupported).
+    /// </summary>
+    private async Task<(long totalLength, bool rangeSupported)> GetServerInfoAsync(string url, CancellationToken cancellationToken)
     {
-        long totalDownloaded = 0;
-        byte[] buffer = new byte[BufferSize];
-        int bytesRead;
-
-        using (var request = new HttpRequestMessage(HttpMethod.Get, url))
-        using (var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken))
+        long length = 0;
+        bool range = false;
+        using (var req = new HttpRequestMessage(HttpMethod.Head, url))
         {
-            response.EnsureSuccessStatusCode();
-
-            // If totalLength was unknown from HEAD, try to get it now
-            if (totalLength <= 0)
+            using (var resp = await _httpClient.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cancellationToken))
             {
-                totalLength = response.Content.Headers.ContentLength ?? -1; // Use -1 if still unknown
-                Debug.WriteLine($"Sequential download: ContentLength from GET response: {totalLength}");
-            }
-
-            using (var networkStream = await response.Content.ReadAsStreamAsync())
-            using (var fileStream = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None, BufferSize, useAsync: true))
-            {
-                while ((bytesRead = await networkStream.ReadAsync(buffer, 0, buffer.Length, cancellationToken)) > 0)
+                resp.EnsureSuccessStatusCode();
+                length = resp.Content.Headers.ContentLength ?? 0;
+                if (resp.Headers.AcceptRanges != null)
                 {
-                    await fileStream.WriteAsync(buffer, 0, bytesRead, cancellationToken);
-                    totalDownloaded += bytesRead;
-                    // Report progress (totalLength might be -1 if unknown)
-                    DownloadProgressChanged?.Invoke(totalDownloaded, totalLength);
+                    // "bytes" is typical if range requests are supported
+                    range = resp.Headers.AcceptRanges.Any(val => val.Equals("bytes", StringComparison.OrdinalIgnoreCase));
                 }
             }
         }
-
-        // Final progress report if length was known
-        if (totalLength > 0)
-        {
-            DownloadProgressChanged?.Invoke(totalLength, totalLength);
-        }
-        Debug.WriteLine("Sequential download completed successfully.");
+        return (length, range);
     }
 
+    /// <summary>Helper to delete a file if it exists.</summary>
     private void TryDeleteFile(string filePath)
     {
         try
@@ -303,39 +193,22 @@ public class FastDownloadService : IDisposable
             if (File.Exists(filePath))
             {
                 File.Delete(filePath);
-                Debug.WriteLine($"Deleted partial file: {filePath}");
+                Debug.WriteLine($"[FastDownloadService] Deleted file: {filePath}");
             }
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"Failed to delete partial file '{filePath}': {ex.Message}");
-            // Log or handle the inability to delete if necessary
+            Debug.WriteLine($"[FastDownloadService] Error deleting file '{filePath}': {ex.Message}");
         }
     }
 
     public void Dispose()
     {
-        Dispose(true);
-        GC.SuppressFinalize(this);
-    }
-
-    protected virtual void Dispose(bool disposing)
-    {
         if (!_disposed)
         {
-            if (disposing)
-            {
-                // Dispose managed resources
-                _httpClient?.Dispose();
-            }
-            // Dispose unmanaged resources if any (none in this class)
+            _httpClient.Dispose();
             _disposed = true;
         }
-    }
-
-    // Finalizer (just in case Dispose is not called)
-    ~FastDownloadService()
-    {
-        Dispose(false);
+        GC.SuppressFinalize(this);
     }
 }

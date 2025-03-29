@@ -274,7 +274,7 @@ namespace launcher_ex
             this.Dispatcher.Invoke(() =>
             {
                 ProgressBar.Value = percent;
-                StatusText.Text = $"Downloading... {percent:0.0}% at {FormatBytesPerSec(bytesPerSecond)}";
+                StatusText.Text = $"Downloading... {percent:0}% at {FormatBytesPerSec(bytesPerSecond)}";
             });
         }
 

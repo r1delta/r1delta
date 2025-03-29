@@ -211,7 +211,6 @@ namespace launcher_ex
         [STAThread] // Required for MessageBox
         protected override void OnStartup(StartupEventArgs e)
         {
-            VisualCppInstaller.EnsureVisualCppRedistributables();
             string exePath;
             // Get the directory containing the current executable
             exePath = AppContext.BaseDirectory ?? Path.GetDirectoryName(Assembly.GetEntryAssembly().Location);
@@ -225,7 +224,7 @@ namespace launcher_ex
 
             // Set the current directory to the executable's path
             Directory.SetCurrentDirectory(exePath);
-
+            VisualCppInstaller.EnsureVisualCppRedistributables();
             string binPath = Path.Combine(exePath, "bin");
             string vpkPath = Path.Combine(exePath, "vpk");
             string r1Path = Path.Combine(exePath, "r1");
@@ -373,9 +372,112 @@ namespace launcher_ex
             System.Windows.Forms.MessageBox.Show(message, title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
 
+        // Constants for FormatMessage
+        private const uint FORMAT_MESSAGE_ALLOCATE_BUFFER = 0x00000100;
+        private const uint FORMAT_MESSAGE_IGNORE_INSERTS = 0x00000200;
+        private const uint FORMAT_MESSAGE_FROM_SYSTEM = 0x00001000;
+        private const uint FORMAT_MESSAGE_ARGUMENT_ARRAY = 0x00002000;
+
+        // P/Invoke declaration for FormatMessage
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern uint FormatMessage(
+            uint dwFlags,
+            IntPtr lpSource,
+            uint dwMessageId,
+            uint dwLanguageId,
+            out IntPtr lpBuffer, // Using IntPtr for out buffer allocated by the system
+            uint nSize,
+            IntPtr[] Arguments); // Changed from va_list* to IntPtr[] for C# marshalling
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr LocalFree(IntPtr hMem);
+
+        // --- Modified Helper Function ---
+        private static string GetFormattedErrorMessage(int errorCode, params string[] args)
+        {
+            IntPtr lpMsgBuf = IntPtr.Zero;
+            IntPtr[] pArgs = null;
+            IntPtr[] pArgsPtr = null; // Pointer to array of string pointers
+
+            try
+            {
+                uint dwFlags = FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM;
+                uint dwMessageId = (uint)errorCode;
+                uint dwLangId = 0; // Default language
+
+                if (args != null && args.Length > 0)
+                {
+                    dwFlags |= FORMAT_MESSAGE_ARGUMENT_ARRAY;
+                    pArgs = new IntPtr[args.Length];
+                    // Allocate memory for each string and store pointers
+                    for (int i = 0; i < args.Length; i++)
+                    {
+                        // Use StringToHGlobalUni for Unicode strings (%1 expects LPWSTR usually)
+                        pArgs[i] = Marshal.StringToHGlobalUni(args[i]);
+                    }
+                    // Create a pointer to the array of pointers
+                    pArgsPtr = pArgs;
+                }
+                else
+                {
+                    // If no args, tell FormatMessage to ignore inserts
+                    dwFlags |= FORMAT_MESSAGE_IGNORE_INSERTS;
+                }
+
+
+                // Call FormatMessage
+                uint charCount = FormatMessage(
+                    dwFlags,
+                    IntPtr.Zero, // Source (null for system errors)
+                    dwMessageId,
+                    dwLangId,    // Default language
+                    out lpMsgBuf,// Output buffer allocated by system
+                    0,           // Minimum size (0 lets system decide)
+                    pArgsPtr);   // Array of insert strings
+
+                if (charCount == 0)
+                {
+                    // FormatMessage failed, fall back to Win32Exception
+                    // (This might happen if the error code itself is invalid)
+                    int formatMessageError = Marshal.GetLastWin32Error();
+                    Console.WriteLine($"FormatMessage failed with error: {formatMessageError}"); // Debug info
+                    return new Win32Exception(errorCode).Message; // Fallback
+                }
+
+                // Convert the buffer to a C# string
+                string message = Marshal.PtrToStringUni(lpMsgBuf).Trim(); // Trim trailing newline/whitespace
+
+                return message;
+            }
+            finally
+            {
+                // Free the buffer allocated by FormatMessage
+                if (lpMsgBuf != IntPtr.Zero)
+                {
+                    LocalFree(lpMsgBuf);
+                }
+                // Free the memory allocated for the arguments
+                if (pArgs != null)
+                {
+                    for (int i = 0; i < pArgs.Length; i++)
+                    {
+                        if (pArgs[i] != IntPtr.Zero)
+                        {
+                            Marshal.FreeHGlobal(pArgs[i]);
+                        }
+                    }
+                }
+            }
+        }
+
+
+        // --- Updated LibraryLoadError ---
         private static void LibraryLoadError(int errorCode, string libName, string location)
         {
-            string errorMessage = new Win32Exception(errorCode).Message;
+            // Get the formatted error message using the helper
+            // For error 193 (%1 is not a valid Win32 application), %1 is typically the filename.
+            string errorMessage = GetFormattedErrorMessage(errorCode, location);
+
             StringBuilder text = new StringBuilder();
 
             text.AppendFormat("Failed to load the {0} at \"{1}\" ({2}):\n\n{3}\n\n", libName, location, errorCode, errorMessage);
@@ -383,14 +485,13 @@ namespace launcher_ex
 
             bool fileExists = File.Exists(location);
 
-            if (errorCode == 126 && fileExists) // ERROR_MOD_NOT_FOUND (but file exists indicates dependency issue)
+            if (errorCode == 126 && fileExists) // ERROR_MOD_NOT_FOUND
             {
                 text.AppendFormat("\n\nThe file at the specified location DOES exist, so this error indicates that one of its *dependencies* failed to be found.\n\n");
                 text.Append("Try the following steps:\n");
                 text.Append("1. Install Visual C++ Redistributable (usually 2015-2022 x64): https://aka.ms/vs/17/release/vc_redist.x64.exe\n");
                 text.Append("2. If using Steam/EA App, try verifying/repairing game files.");
             }
-            // Game executable check is now done earlier, so these hints are less likely needed here, but kept for robustness.
             else if (!File.Exists(GAME_EXECUTABLE))
             {
                 if (File.Exists(Path.Combine(Directory.GetCurrentDirectory(), "..", GAME_EXECUTABLE)) || File.Exists(Path.Combine(Directory.GetCurrentDirectory(), "..", "..", GAME_EXECUTABLE)))
@@ -409,7 +510,7 @@ namespace launcher_ex
                 text.AppendFormat("\n\n'{0}' has been found in the current directory, but the required file '{1}' is missing.\nDid you unpack all R1Delta files here?", GAME_EXECUTABLE, libName);
             }
 
-            ShowError(text.ToString());
+            ShowError(text.ToString()); // Replace with your actual UI error display method
         }
 
         private static bool PrependPath(string exePath)
