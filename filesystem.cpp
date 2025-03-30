@@ -158,12 +158,12 @@ __int64(*HandleOpenRegularFileOriginal)(__int64 a1, __int64 a2, char a3);
 
 // The hook function remains largely the same
 int64_t __fastcall HookedHandleOpenRegularFile(int64_t a1, int64_t a2, char a3) {
-	const char* path = reinterpret_cast<const char*>(a2 + 63);
-	if (FastFileSystemHook::shouldFailRead(path)) {
+	char* path = reinterpret_cast<char*>(a2 + 63);
+	if (FastFileSystemHook::shouldFailRead(path))
 		return 0;
-	}
 	return HandleOpenRegularFileOriginal(a1, a2, a3);
 }
+
 
 FileSystem_UpdateAddonSearchPathsType FileSystem_UpdateAddonSearchPathsTypeOriginal;
 bool done = false;

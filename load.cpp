@@ -978,7 +978,25 @@ int __fastcall CPlayer_GetLevel(__int64 thisptr)
 	GetLevelFromXP_t GetLevelFromXP = (GetLevelFromXP_t)(G_server + 0x28E740);
 	return GetLevelFromXP(xp);
 }
-
+__int64 (*oFileSystem_AddLoadedSearchPath)(
+	__int64 a1,
+	unsigned __int8* a2,
+	_BYTE* a3,
+	char* a4,
+	char* Source,
+	char a6);
+__int64 FileSystem_AddLoadedSearchPath(
+	__int64 a1,
+	unsigned __int8* a2,
+	_BYTE* a3,
+	char* a4,
+	char* Source,
+	char a6)
+{
+	if (!V_stristr(a4, "r1delta"))
+		a4 = 0;
+	return oFileSystem_AddLoadedSearchPath(a1, a2, a3, a4, Source, a6);
+}
 void InitAddons() {
 	static bool done = false;
 	if (done) return;
@@ -994,9 +1012,12 @@ void InitAddons() {
 	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x6EE10 : 0x02C30)), &CBaseFileSystem__FindFirst, reinterpret_cast<LPVOID*>(&oCBaseFileSystem__FindFirst));
 	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x86E00 : 0x1C4A0)), &CBaseFileSystem__FindNext, reinterpret_cast<LPVOID*>(&oCBaseFileSystem__FindNext));
 	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x7F180 : 0x14780)), &HookedHandleOpenRegularFile, reinterpret_cast<LPVOID*>(&HandleOpenRegularFileOriginal));
+	MH_CreateHook((LPVOID)(engine_base_spec + (IsDedicatedServer() ? 0x96980 : 0x128C80)), &FileSystem_AddLoadedSearchPath, reinterpret_cast<LPVOID*>(&oFileSystem_AddLoadedSearchPath));
+
 	//client = std::make_shared<discordpp::Client>();
 	MH_EnableHook(MH_ALL_HOOKS);
 }
+
 std::unordered_map<std::string, std::string, HashStrings> g_LastEntCreateKeyValues;
 void (*oCC_Ent_Create)(const CCommand* args);
 bool g_bIsEntCreateCommand = false;
@@ -1718,6 +1739,7 @@ const char* GetBuildNo() {
 
 	return buffer;
 }
+
 
 static FORCEINLINE void
 do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)

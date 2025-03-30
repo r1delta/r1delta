@@ -65,7 +65,7 @@ __int64 __fastcall Host_InitHook(bool a1) {
 	//LoadLibraryW(L"r1delta\\bin\\tier0_orig.dll");
 	//LoadLibraryW(L"r1delta\\bin\\vtex_dll.dll");
 	//LoadLibraryW(L"r1delta\\bin_delta\\vaudio_speex.dll");
-	PatchLdrLoadDll();
+	//PatchLdrLoadDll();
 
 	return ret;
 }
