@@ -294,13 +294,23 @@ bool PrependPathEnvironment(const char* gameInstallPath, const char* launcherExe
     if (currentPath != nullptr && currentPath[0] != '\0') free(currentPath); // Free memory allocated by _dupenv_s
     return true;
 }
-
+bool g_suppressMessageBoxes = false;
 // Formats and displays a fatal error message then exits.
 void FatalError(const char* message, const char* title = "R1Delta Dedicated Launcher Error")
 {
-    MessageBoxA(NULL, message, title, MB_OK | MB_ICONERROR);
+    // Only show the message box if the flag is NOT set
+    if (!g_suppressMessageBoxes)
+    {
+        MessageBoxA(NULL, message, title, MB_OK | MB_ICONERROR);
+    }
+
+    // Always print to stderr and exit
+    fprintf(stderr, "FATAL ERROR: %s\n", message); // Added newline for clarity
+    fflush(stderr);
     ExitProcess(1);
 }
+
+
 
 // Formats and displays a LoadLibrary error message then exits.
 void LibraryLoadError(const char* libName, const char* location, DWORD errorCode)
@@ -328,6 +338,28 @@ void LibraryLoadError(const char* libName, const char* location, DWORD errorCode
 // --- WinMain Entry Point ---
 int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
+    // --- Argument Parsing using CommandLineToArgvW ---
+    int argc;
+    LPWSTR* argvW = CommandLineToArgvW(GetCommandLineW(), &argc); // Get wide-char args
+
+    if (argvW == NULL)
+    {
+        fprintf(stderr, "Warning: Failed to parse command line using CommandLineToArgvW.\n");
+    }
+    else
+    {
+        for (int i = 1; i < argc; ++i)
+        {
+            if (wcscmp(argvW[i], L"-nomessagebox") == 0)
+            {
+                g_suppressMessageBoxes = true;
+                break;
+            }
+        }
+
+        LocalFree(argvW);
+    }
+
     char launcherExeDir[MAX_PATH];
     char registryPath[MAX_PATH];
     char gameInstallPath[MAX_PATH];
