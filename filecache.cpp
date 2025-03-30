@@ -23,7 +23,7 @@ FileCache::FileCache() {
         return;
     }
     r1deltaBasePath = executableDirectory / "r1delta";
-    r1deltaAddonsPath = r1deltaBasePath / "addons";
+    r1deltaAddonsPath = std::filesystem::current_path() / "r1" / "addons";
 
     // Optionally start the UpdateCache thread here
     // std::thread(&FileCache::UpdateCache, this).detach();
