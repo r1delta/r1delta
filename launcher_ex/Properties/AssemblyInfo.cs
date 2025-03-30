@@ -7,12 +7,12 @@ using System.Windows;
 // General Information about an assembly is controlled through the following
 // set of attributes. Change these attribute values to modify the information
 // associated with an assembly.
-[assembly: AssemblyTitle("launcher_ex")]
+[assembly: AssemblyTitle("R1Delta")]
 [assembly: AssemblyDescription("")]
 [assembly: AssemblyConfiguration("")]
-[assembly: AssemblyCompany("Atlas Playbook v0.4.1")]
+[assembly: AssemblyCompany("Interstellar Modding Corporation")]
 [assembly: AssemblyProduct("launcher_ex")]
-[assembly: AssemblyCopyright("Copyright © Atlas Playbook v0.4.1 2025")]
+[assembly: AssemblyCopyright("")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 

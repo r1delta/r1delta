@@ -696,20 +696,58 @@ private:
 
 	static void InitValidator() {
 		try {
-			// Construct path to _pdef.nut relative to game directory
-			std::filesystem::path schemaPath = "r1delta/scripts/vscripts/_pdef.nut";
+			// --- MODIFICATION START ---
+
+			// 1. Get the directory containing the executable. This might throw.
+			std::filesystem::path exeDir = GetExecutableDirectory();
+
+			// 2. Define the relative path to the schema file from the executable directory.
+			std::filesystem::path relativeSchemaPath = "r1delta/scripts/vscripts/_pdef.nut";
+
+			// 3. Construct the full path by combining the executable dir and the relative path.
+			std::filesystem::path schemaPath = exeDir / relativeSchemaPath;
+
+			// Normalize the path for clearer error messages (optional but good practice)
+			schemaPath = std::filesystem::absolute(schemaPath).lexically_normal();
+
+			// 4. Check if the file exists at the calculated absolute path.
 			if (!std::filesystem::exists(schemaPath)) {
-				Error("Could not find _pdef.nut at: %s", schemaPath.string().c_str());
+				// Use the Error function, assuming it's fatal.
+				// Provide the full path in the error message.
+				Error("FATAL: Could not find _pdef.nut. Expected location: %s",
+					schemaPath.string().c_str());
+				// If Error doesn't terminate, uncomment the line below:
+				// throw std::runtime_error("FATAL: Could not find _pdef.nut at: " + schemaPath.string()); 
 			}
 
-			std::string schemaCode = readFile(schemaPath.string());
+			// 5. Read the file using the full path.
+			// Assuming readFile can handle std::filesystem::path or std::string
+			std::string schemaCode = readFile(schemaPath.string()); // Pass path directly if readFile supports it
+
+			// --- MODIFICATION END ---
+
+			// 6. Parse the schema and create the validator.
 			s_validator = std::make_unique<PDataValidator>(SchemaParser::parse(schemaCode));
+
+			// Optional: Add a log message for successful initialization if desired
+			// Log("PData validator initialized successfully using schema: %s", schemaPath.string().c_str());
+
 		}
 		catch (const std::exception& e) {
-			Error("Failed to initialize PData validator: %s", std::string(e.what()).c_str());
+			// Catch any exception during the process (GetExecutableDirectory, filesystem ops, readFile, parse, etc.)
+			// Use the Error function, assuming it's fatal.
+			Error("FATAL: Failed to initialize PData validator: %s", e.what());
+			// If Error doesn't terminate, uncomment the line below:
+			// throw std::runtime_error(std::string("FATAL: Failed to initialize PData validator: ") + e.what());
 		}
-	}
+		catch (...) {
+			// Catch any non-standard exceptions
+			Error("FATAL: An unknown error occurred during PData validator initialization.");
+			// If Error doesn't terminate, uncomment the line below:
+			// throw std::runtime_error("FATAL: An unknown error occurred during PData validator initialization.");
+		}
 
+	}
 public:
 	static bool IsValidKeyAndValue(const std::string& key, const std::string& value) {
 		std::call_once(s_initFlag, InitValidator);

@@ -45,7 +45,7 @@
 
 #include <windows.h>
 #pragma warning(pop)
-
+#include <filesystem>
 #include <string>
 
 #if !defined(BUILD_DEBUG)
@@ -242,3 +242,32 @@ struct EqualToStdString
 #define TracyFiberEnterHint(x,y)
 #define TracyFiberLeave
 #endif
+
+inline std::filesystem::path GetExecutableDirectory() {
+    std::vector<wchar_t> buffer(MAX_PATH); // Start with MAX_PATH
+    DWORD pathLen = 0;
+
+    // Try to get the path, increasing buffer size if necessary
+    // See: https://docs.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-getmodulefilenamew
+    while (true) {
+        pathLen = GetModuleFileNameW(NULL, buffer.data(), static_cast<DWORD>(buffer.size()));
+        if (pathLen == 0) {
+            // Error getting path
+            throw std::runtime_error("Failed to get executable path. Error code: " + std::to_string(GetLastError()));
+        }
+        else if (pathLen < buffer.size()) {
+            // Success, path fits in buffer
+            break;
+        }
+        else {
+            // Buffer too small, double its size and retry
+            buffer.resize(buffer.size() * 2);
+            if (buffer.size() > 32767) { // Avoid excessively large buffers (limit for GetModuleFileName)
+                throw std::runtime_error("Executable path exceeds maximum length.");
+            }
+        }
+    }
+
+    std::filesystem::path executablePath(buffer.data(), buffer.data() + pathLen);
+    return executablePath.parent_path(); // Return the directory containing the executable
+}

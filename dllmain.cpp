@@ -203,7 +203,109 @@ bool Plat_IsInToolMode() {
 		BOOL check2 = module2 == (HMODULE)matsystem;
 		return check1 && check2;
 }
+void (*CCommandLine__CreateCmdLineOriginal)(void* thisptr, char* commandline);
+#include <Windows.h>
+#include <string>
+#include <vector>
+#include <filesystem> // Requires C++17
+#include <cstdlib> // For std::getenv
+#include <stdexcept> // For exception handling (optional but good)
+#include <iostream> // For debug output (alternative to OutputDebugStringA)
 
+// Assuming this is defined elsewhere
+extern void (*CCommandLine__CreateCmdLineOriginal)(void* thisptr, char* commandline);
+
+void CCommandLine__CreateCmdLine(void* thisptr, char* commandline) {
+	std::string finalCmdLineStr;
+
+	// 1. Start with the original command line content, if any.
+	if (commandline != nullptr && commandline[0] != '\0') {
+		finalCmdLineStr = commandline;
+	}
+
+	// 2. Try to determine the path and construct the -game argument.
+	std::string gameArg; // Holds the "-game ..." part
+	try {
+		std::string exePathStr;
+		DWORD pathLen = 0;
+		std::vector<char> buffer(MAX_PATH);
+
+		do {
+			pathLen = GetModuleFileNameA(NULL, buffer.data(), static_cast<DWORD>(buffer.size()));
+			if (pathLen == 0) {
+				OutputDebugStringA("Warning: GetModuleFileNameA failed in CCommandLine__CreateCmdLine. Cannot add -game argument.\n");
+				exePathStr.clear();
+				break;
+			}
+			if (pathLen < buffer.size()) {
+				exePathStr.assign(buffer.data(), pathLen);
+				break;
+			}
+			if (buffer.size() > MAX_PATH * 16) { // Add a safety limit
+				OutputDebugStringA("Warning: GetModuleFileNameA buffer size exceeded limit. Cannot add -game argument.\n");
+				exePathStr.clear();
+				break;
+			}
+			buffer.resize(buffer.size() * 2);
+		} while (true);
+
+		if (!exePathStr.empty()) {
+			std::filesystem::path exePath = exePathStr;
+			std::filesystem::path exeDir = exePath.parent_path();
+			std::filesystem::path r1deltaPath = exeDir / "r1delta";
+			// Ensure the path string is properly quoted for the command line
+			gameArg = "-game \"" + r1deltaPath.string() + "\"";
+		}
+	}
+	catch (const std::filesystem::filesystem_error& e) {
+		OutputDebugStringA("Warning: Filesystem error constructing r1delta path: ");
+		OutputDebugStringA(e.what());
+		OutputDebugStringA(". Cannot add -game argument.\n");
+		gameArg.clear(); // Ensure it's empty on error
+	}
+	catch (const std::bad_alloc& e) {
+		OutputDebugStringA("Warning: Memory allocation error during path finding: ");
+		OutputDebugStringA(e.what());
+		OutputDebugStringA(". Cannot add -game argument.\n");
+		gameArg.clear();
+	}
+	catch (...) { // Catch any other unexpected exceptions
+		OutputDebugStringA("Warning: Unknown error during path finding. Cannot add -game argument.\n");
+		gameArg.clear();
+	}
+
+
+	// 3. Append the "-game" argument if constructed successfully.
+	// Check if "-game" is already present to avoid duplicates (optional but good practice)
+	// A simple check: does finalCmdLineStr contain "-game "?
+	bool gameArgPresent = (finalCmdLineStr.find("-game ") != std::string::npos);
+
+	if (!gameArg.empty() && !gameArgPresent) {
+		if (!finalCmdLineStr.empty()) {
+			finalCmdLineStr += " "; // Add separator
+		}
+		finalCmdLineStr += gameArg;
+	}
+
+
+	// 4. Append arguments from the environment variable.
+	const char* envArgs = std::getenv("R1DELTA_LAUNCH_ARGS");
+	if (envArgs != nullptr && envArgs[0] != '\0') {
+		if (!finalCmdLineStr.empty()) {
+			finalCmdLineStr += " "; // Add separator
+		}
+		finalCmdLineStr += envArgs;
+	}
+
+	// 5. Prepare the final buffer for the original function.
+	// The original function expects a 'char*' and might modify it.
+	// Copy to a mutable buffer.
+	std::vector<char> finalCmdLineBuffer(finalCmdLineStr.begin(), finalCmdLineStr.end());
+	finalCmdLineBuffer.push_back('\0'); // Ensure null-termination
+
+	// 6. Call the original function.
+	CCommandLine__CreateCmdLineOriginal(thisptr, finalCmdLineBuffer.data());
+}
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 {
 	// make sure we're game and not tools
@@ -278,6 +380,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 		InstallExceptionHandler();
 		MH_Initialize();
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("tier0_orig.dll"), "GetCPUInformation"), &GetCPUInformationDet, reinterpret_cast<LPVOID*>(&GetCPUInformationOriginal));
+		MH_CreateHook((LPVOID)(((uintptr_t)GetModuleHandleA("tier0_orig.dll"))+0xbf60), &CCommandLine__CreateCmdLine, reinterpret_cast<LPVOID*>(&CCommandLine__CreateCmdLineOriginal));
 //		if (!IsDedicatedServer())
 //			MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("tier0_orig.dll"), "Plat_IsInToolMode"), &GetCPUInformationDet, reinterpret_cast<LPVOID*>(NULL));
 
