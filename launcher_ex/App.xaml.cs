@@ -477,8 +477,8 @@ namespace launcher_ex
             SetMitigationPolicies();
 
             // 15. Prepare arguments and call LauncherMain
-         //   try
-        //    {
+            try
+            {
                 Debug.WriteLine("[*] Preparing arguments for LauncherMain...");
                 var launcherMain = (LauncherMainDelegate)Marshal.GetDelegateForFunctionPointer(pLauncherMain, typeof(LauncherMainDelegate));
 
@@ -503,13 +503,14 @@ namespace launcher_ex
                 // It will be unloaded when the process exits.
 
                 Environment.Exit(result);
-            //}
-            //catch (Exception ex)
-            //{
-               // ShowError($"An error occurred while executing 'LauncherMain'.\nError: {ex.Message}\n\nThe game may not have started correctly.");
+
+            }
+            catch (Exception ex)
+            {
+                // ShowError($"An error occurred while executing 'LauncherMain'.\nError: {ex.Message}\n\nThe game may not have started correctly.");
                 // Don't FreeLibrary here either, the process might still be running somehow
-               // Environment.Exit(1); // Indicate failure
-            //}
+                Process.GetCurrentProcess().Kill();
+            }
         }
 
         // --- Helper Functions ---
