@@ -201,7 +201,4 @@
     <Error Condition="!Exists('..\packages\Costura.Fody.6.0.0\build\Costura.Fody.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Costura.Fody.6.0.0\build\Costura.Fody.targets'))" />
   </Target>
   <Import Project="..\packages\Costura.Fody.6.0.0\build\Costura.Fody.targets" Condition="Exists('..\packages\Costura.Fody.6.0.0\build\Costura.Fody.targets')" />
-  <Target Name="CopySPSM" BeforeTargets="Build">
-    <Copy SourceFiles="System.Net.Http.WinHttpHandler.dll" DestinationFolder="$(OutputPath)\bin" />
-  </Target>
 </Project>
