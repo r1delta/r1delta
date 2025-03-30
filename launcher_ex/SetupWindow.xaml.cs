@@ -214,7 +214,7 @@ namespace launcher_ex
             // Note: We pass the stored _originalLauncherDir here
             // Use the registry path as the primary default if it's valid
             string registryPath = RegistryHelper.GetInstallPath();
-            if (!validateRegistry || TitanfallManager.ValidateGamePath(registryPath, _originalLauncherDir))
+            if ((!validateRegistry && registryPath != null ) || TitanfallManager.ValidateGamePath(registryPath, _originalLauncherDir))
             {
                 Debug.WriteLine($"[SetupWindow.GetDefaultInstallPath] Using registry path as default: {registryPath}");
                 return registryPath;

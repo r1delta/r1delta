@@ -1003,10 +1003,10 @@ namespace R1Delta
             catch (OperationCanceledException)
             {
                 Debug.WriteLine("Download operation was cancelled (caught OCE).");
-                if (!errorReported) // Only show generic cancel if no specific error was shown
-                {
-                    progressUI.ShowError("Download Cancelled");
-                }
+                //if (!errorReported) // Only show generic cancel if no specific error was shown
+                //{
+                //    progressUI.ShowError("Download Cancelled");
+                //}
                 // Report last known progress before cancellation
                 progressUI.ReportProgress(overallProgress, totalBytesNeeded, 0);
                 return false;
