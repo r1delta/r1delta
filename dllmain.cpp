@@ -204,14 +204,6 @@ bool Plat_IsInToolMode() {
 		return check1 && check2;
 }
 void (*CCommandLine__CreateCmdLineOriginal)(void* thisptr, char* commandline);
-#include <Windows.h>
-#include <string>
-#include <vector>
-#include <filesystem> // Requires C++17
-#include <cstdlib> // For std::getenv
-#include <stdexcept> // For exception handling (optional but good)
-#include <iostream> // For debug output (alternative to OutputDebugStringA)
-
 // Assuming this is defined elsewhere
 extern void (*CCommandLine__CreateCmdLineOriginal)(void* thisptr, char* commandline);
 
