@@ -114,7 +114,6 @@ R1Delta incorporates code from several open-source projects. We are grateful to 
 - **[IcePixelx/silver-bun](https://github.com/IcePixelx/silver-bun)**: TODO
 - **[snake-biscuits/bsp_regen](https://github.com/snake-biscuits/bsp_regen)**: GPLv3 License
 - **[nlohmann/json](https://github.com/nlohmann/json)**: MIT License
-- **[jeff.brown: Manipulating NTFS Junction Points in .NET](https://www.codeproject.com/KB/files/JunctionPointsNet.aspx)**: Unknown
 
 R1Delta itself is licensed under the GNU General Public License v3.0 (GPLv3). For full license texts and additional legal notices, please refer to the LICENSE file and thirdpartylegalnotices.txt in this repository.
 
