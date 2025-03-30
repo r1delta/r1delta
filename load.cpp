@@ -2262,6 +2262,7 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	RegisterConVar("riff_floorislava", "0", FCVAR_HIDDEN, "Enable floor is lava mode");
 	RegisterConVar("hudwarp_use_gpu", "1", FCVAR_ARCHIVE,"Use GPU for HUD warp");
 	RegisterConVar("hudwarp_disable", "0", FCVAR_ARCHIVE, "GPU device to use for HUD warp");
+	RegisterConVar("hide_server", "0", FCVAR_NONE, "Hide this server from the master server");
 	RegisterConCommand("script", script_cmd, "Execute Squirrel code in server context", FCVAR_GAMEDLL | FCVAR_CHEAT);
 	if (!IsDedicatedServer()) {
 		RegisterConCommand("script_client", script_client_cmd, "Execute Squirrel code in client context", FCVAR_NONE);
