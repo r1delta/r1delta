@@ -253,6 +253,18 @@ namespace launcher_ex
                 return; // Keep compiler happy
             }
 
+            // Check if the "r1delta" subdirectory exists next to the launcher executable.
+            string requiredR1DeltaPath = Path.Combine(originalLauncherExeDir, R1DELTA_SUBDIR);
+            if (!Directory.Exists(requiredR1DeltaPath))
+            {
+                ShowError($"Essential directory '{R1DELTA_SUBDIR}' not found in:\n{originalLauncherExeDir}\n\n" +
+                          $"This usually means the R1Delta archive was not extracted correctly.\n\n" +
+                          $"Please ensure you extract *ALL* files and folders from the R1Delta zip file directly into a new, empty folder where this launcher ({Path.GetFileName(Assembly.GetEntryAssembly()?.Location ?? "launcher_ex.exe")}) is located.",
+                          "R1Delta Installation Error");
+                Environment.Exit(1);
+                return; // Exit immediately
+            }
+
             // --- Setup and Validation Logic ---
             string finalInstallPath = null;
             string finalLaunchArgs = null;
