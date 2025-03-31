@@ -828,7 +828,7 @@ namespace R1Delta
             Stopwatch stopwatch = Stopwatch.StartNew();
             using var internalCts = CancellationTokenSource.CreateLinkedTokenSource(externalCts);
             CancellationToken token = internalCts.Token;
-            const int MAX_CONCURRENT = 8;
+            const int MAX_CONCURRENT = 1;
             using var concurrency = new SemaphoreSlim(MAX_CONCURRENT, MAX_CONCURRENT);
 
             // --- 4. Build and run download tasks ---
