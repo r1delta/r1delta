@@ -17,6 +17,7 @@
       "name": "nlohmann-json",
       "version>=": "3.11.2"
     },
+    "openssl",
     {
       "name": "opusfile",
       "version>=": "0.12+20221121#1"
