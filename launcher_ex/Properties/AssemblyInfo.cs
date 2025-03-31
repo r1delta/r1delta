@@ -11,10 +11,11 @@ using System.Windows;
 [assembly: AssemblyDescription("")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("Interstellar Modding Corporation")]
-[assembly: AssemblyProduct("launcher_ex")]
+[assembly: AssemblyProduct("R1Delta Launcher")]
 [assembly: AssemblyCopyright("")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
+[assembly: AssemblyMetadata("SquirrelAwareVersion", "1")]
 
 // Setting ComVisible to false makes the types in this assembly not visible
 // to COM components.  If you need to access a type in this assembly from
