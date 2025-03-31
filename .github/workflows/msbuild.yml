@@ -201,6 +201,8 @@ jobs:
       # Checkout the main repository again to get the nuspec file
       - name: Checkout Nuspec File
         uses: actions/checkout@v4
+        with:
+          clean: false # Add this line
 
       - name: Get Version from Tag
         id: get_version
