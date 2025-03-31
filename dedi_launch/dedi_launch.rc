@@ -79,7 +79,7 @@ BEGIN
         BLOCK "040904b0"
         BEGIN
             // --- Set your values here ---
-            VALUE "CompanyName",      "The Interstellar Modding Corporation\0"
+            VALUE "CompanyName",      "Interstellar Modding Corporation\0"
             VALUE "FileDescription",  "R1Delta Dedicated Server\0" // User-friendly name shown in Task Manager, Details tab
             VALUE "FileVersion",      "1.0.0.1\0" // Example version string
             VALUE "InternalName",     "r1delta_ds.exe\0" // Usually the executable name
