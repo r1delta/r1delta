@@ -2435,7 +2435,16 @@ void DiscordThread() {
 	}
 #endif
 }
-
+__int64 (*oAddSearchPathDedi)(__int64 a1, const char* a2, __int64 a3, unsigned int a4);
+__int64 __fastcall AddSearchPathDedi(__int64 a1, const char* a2, __int64 a3, unsigned int a4) {
+	if (!strcmp_static(a2, "r1delta")) {
+		auto a = _strdup((std::filesystem::path(GetExecutableDirectory()) / "r1delta").string().c_str());
+		a2 = a;
+		auto ret = oAddSearchPathDedi(a1, a2, a3, a4);
+		return ret;
+	}
+	return oAddSearchPathDedi(a1, a2, a3, a4);
+}
 static bool should_init_security_fixes = false;
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
@@ -2461,6 +2470,7 @@ void __stdcall LoaderNotificationCallback(
 	static bool bDone = false;
 	if (GetModuleHandleA("dedicated.dll") && !bDone) {
 		InitCompressionHooks();
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("dedicated.dll") + 0x84000), &AddSearchPathDedi, reinterpret_cast<LPVOID*>(&oAddSearchPathDedi));
 		bDone = true;
 	}
 	auto name = notification_data->Loaded.BaseDllName->Buffer;
