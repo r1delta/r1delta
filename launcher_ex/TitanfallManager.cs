@@ -867,7 +867,7 @@ namespace R1Delta
                             }
 
                             // Only report UI updates periodically or at the end
-                            if (currentTime - lastUpdateTime >= 0.2 || overallProgress == totalBytesNeeded)
+                            if (currentTime - lastUpdateTime >= 1 || overallProgress == totalBytesNeeded)
                             {
                                 double rollingSpeed = 0;
                                 if (progressHistory.Count > 1)
