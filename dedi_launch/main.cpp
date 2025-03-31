@@ -415,7 +415,7 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
                 " A) Run the main R1Delta launcher once to set the path, OR\n"
                 " B) Place this dedicated launcher directly inside the main Titanfall game folder.\n"
                 "If you are seeing this message and you do not understand why, you have likely launched the Dedicated Server by mistake.\n"
-                "In that case, please make sure you are launching "R1Delta Launcher" and not "R1Delta Dedicated Server" from the Start Menu.",
+                "In that case, please make sure you are launching \"R1Delta Launcher\" and not \"R1Delta Dedicated Server\" from the Start Menu.",
                 registryPathFound ? registryPath : "Not Found",
                 registryPathFound ? (ValidateGameDirectory(registryPath) ? "Valid" : "Invalid") : "N/A",
                 launcherExeDir);
