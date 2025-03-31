@@ -10,7 +10,7 @@
     <licenseUrl>https://github.com/r1delta/r1delta/blob/main/LICENSE</licenseUrl>
     <tags>Titanfall Mod Launcher Game</tags>
     <mainExe>r1delta.exe</mainExe>
-    <icon>launcher_ex/icon1.ico/icon>
+    <icon>launcher_ex/icon1.ico</icon>
   </metadata>
   <files>
     <file src="BUILD_OUTPUT\r1delta.exe" target="lib\net462\" />
