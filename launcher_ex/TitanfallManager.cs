@@ -199,7 +199,7 @@ namespace R1Delta
     public static class TitanfallManager
     {
         // Truncated s_fileList (Keep as is)
-        private static readonly List<(string Url, string RelativePath, ulong XxHash, long Size)> s_fileList
+        public static readonly List<(string Url, string RelativePath, ulong XxHash, long Size)> s_fileList
             = new List<(string, string, ulong, long)>
         {
             ("https://but.nobody-ca.me/r1/bin/dxsupport.cfg","bin/dxsupport.cfg",0x7a90e15c4da10d29,94158),

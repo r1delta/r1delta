@@ -1,5 +1,6 @@
 ﻿using Dark.Net;
 using R1Delta;
+using Squirrel;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -18,7 +19,7 @@ using Application = System.Windows.Application;
 using MessageBox = System.Windows.MessageBox; // Use WPF MessageBox
 using MessageBoxButton = System.Windows.MessageBoxButton; // Disambiguate
 using MessageBoxImage = System.Windows.MessageBoxImage; // Disambiguate
-
+using Squirrel;
 
 namespace launcher_ex
 {
@@ -229,11 +230,286 @@ namespace launcher_ex
         // Define the delegate for LauncherMain
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         delegate int LauncherMainDelegate(IntPtr hInstance, IntPtr hPrevInstance, [MarshalAs(UnmanagedType.LPStr)] string lpCmdLine, int nCmdShow);
+        private bool IsDevelopmentEnvironment()
+        {
+            // Debugger attached?
+            if (Debugger.IsAttached)
+            {
+                Debug.WriteLine("[DevCheck] Debugger is attached.");
+                return true;
+            }
 
+            // Compiled in Debug mode? (Less reliable if Release builds are debugged)
+#if DEBUG
+            Debug.WriteLine("[DevCheck] Compiled in DEBUG mode.");
+            return true;
+#endif
+
+            // Running from a path that doesn't look like Squirrel's install path?
+            // Squirrel installs to %LocalAppData%\AppName\app-x.y.z\
+            string currentDir = AppContext.BaseDirectory ?? "";
+            if (!currentDir.Contains(Path.DirectorySeparatorChar + "app-"))
+            {
+                Debug.WriteLine($"[DevCheck] Current directory '{currentDir}' does not contain '\\app-'. Assuming dev environment.");
+                return true;
+            }
+
+            return false;
+        }
+        private const string GitHubRepoUrl = "https://github.com/r1delta/r1delta";
+        private const string SquirrelAppName = "R1Delta";
+
+        protected async Task<bool> UpdateCheck() // Returns true if startup should continue, false otherwise
+        {
+
+            // --- Determine if Update Check is Needed ---
+            bool isDevMode = IsDevelopmentEnvironment();
+            if (isDevMode)
+            {
+                Debug.WriteLine("[Squirrel] Skipping update check in development environment.");
+                return true; // Development mode, OK to continue startup
+            }
+
+            // --- Squirrel App Hooks ---
+            // Run these first thing.
+            using (var mgr = new UpdateManager("")) // Temp manager used for hooks
+            {
+                try
+                {
+                    SquirrelAwareApp.HandleEvents(
+                        onInitialInstall: v => // 'v' is the version being installed
+                        {
+                            // Determine the names of the executables
+                            var mainExeName = Path.GetFileName(Assembly.GetEntryAssembly().Location); // e.g., r1delta.exe
+                            var dsExeName = "r1delta_ds.exe";
+                            var updateOnlyFlag = false; // For initial install, always create
+
+                            Debug.WriteLine($"[Squirrel Install] Creating shortcuts for {mainExeName} and {dsExeName}");
+
+                            // Create shortcuts for the main executable (Start Menu)
+                            mgr.CreateShortcutsForExecutable(mainExeName, ShortcutLocation.StartMenu, updateOnlyFlag, null, null);
+
+                            // Create shortcut for the dedicated server executable (Start Menu ONLY)
+                            mgr.CreateShortcutsForExecutable(dsExeName, ShortcutLocation.StartMenu, updateOnlyFlag, null, null);
+                        },
+                        onAppUpdate: v => // 'v' is the new version being updated to
+                        {
+                            // Determine the names of the executables
+                            var mainExeName = Path.GetFileName(Assembly.GetEntryAssembly().Location);
+                            var dsExeName = "r1delta_ds.exe";
+                            var updateOnlyFlag = true; // For updates, only modify existing shortcuts
+
+                            Debug.WriteLine($"[Squirrel Update] Updating shortcuts for {mainExeName} and {dsExeName}");
+
+                            // Update shortcuts for the main executable (Start Menu)
+                            mgr.CreateShortcutsForExecutable(mainExeName, ShortcutLocation.StartMenu, updateOnlyFlag, null, null);
+
+                            // Update shortcut for the dedicated server executable (Start Menu ONLY)
+                            mgr.CreateShortcutsForExecutable(dsExeName, ShortcutLocation.StartMenu, updateOnlyFlag, null, null);
+                        },
+                        onAppUninstall: v => // 'v' is the version being uninstalled
+                        {
+                            // --- 1. Standard Shortcut Removal ---
+                            var mainExeName = Path.GetFileName(Assembly.GetEntryAssembly().Location);
+                            var dsExeName = "r1delta_ds.exe";
+                            Debug.WriteLine($"[Squirrel Uninstall] Removing standard shortcuts for {mainExeName} and {dsExeName}");
+                            try
+                            {
+                                mgr.RemoveShortcutsForExecutable(mainExeName, ShortcutLocation.StartMenu);
+                                mgr.RemoveShortcutsForExecutable(dsExeName, ShortcutLocation.StartMenu);
+                            }
+                            catch (Exception ex)
+                            {
+                                Debug.WriteLine($"[Squirrel Uninstall] Error removing shortcuts: {ex.Message}");
+                                // Log or warn, but continue uninstall
+                            }
+
+                            // --- 2. Optional Game Content Deletion ---
+                            string gamePath = null;
+                            try
+                            {
+                                // Get the path where the launcher *thinks* the game files are
+                                gamePath = RegistryHelper.GetInstallPath();
+
+                                if (!string.IsNullOrEmpty(gamePath) && Directory.Exists(gamePath))
+                                {
+                                    // Define the marker file path
+                                    string markerFileName = Path.Combine("vpk", "client_mp_delta_common.bsp.pak000_000.vpk"); // Relative path, only exists in Delta installs (not vanilla)
+                                    string fullMarkerPath = Path.Combine(gamePath, markerFileName);
+
+                                    Debug.WriteLine($"[Squirrel Uninstall] Checking for downloaded content marker: {fullMarkerPath}");
+
+                                    // Check if the marker file exists
+                                    if (File.Exists(fullMarkerPath))
+                                    {
+                                        Debug.WriteLine($"[Squirrel Uninstall] Downloaded content marker found.");
+
+                                        // Ask the user for confirmation
+                                        var result = MessageBox.Show(
+                                            $"R1Delta appears to have downloaded Titanfall game files to:\n\n{gamePath}\n\n" +
+                                            $"Do you want to delete these downloaded game files?\n\n" +
+                                            $"(This will NOT affect game installations managed by Steam/EA App unless you pointed R1Delta to that folder AND the marker file '{markerFileName}' exists there, which is unlikely).",
+                                            "Delete Downloaded Game Files?",
+                                            MessageBoxButton.YesNo,
+                                            MessageBoxImage.Question);
+
+                                        if (result == MessageBoxResult.Yes)
+                                        {
+                                            Debug.WriteLine($"[Squirrel Uninstall] User confirmed deletion. Deleting files listed in TitanfallManager.s_fileList from {gamePath}...");
+                                            int filesDeleted = 0;
+                                            int errors = 0;
+                                            List<string> errorDetails = new List<string>();
+
+                                            // Iterate through the list of files downloaded by your manager
+                                            foreach (var fileInfo in TitanfallManager.s_fileList) // Hardcoded list of files that Delta installs use
+                                            {
+                                                string fileToDelete = Path.Combine(gamePath, fileInfo.RelativePath);
+                                                try
+                                                {
+                                                    if (File.Exists(fileToDelete))
+                                                    {
+                                                        File.Delete(fileToDelete);
+                                                        filesDeleted++;
+                                                        Debug.WriteLine($"  Deleted: {fileToDelete}");
+                                                    }
+                                                    else
+                                                    {
+                                                        Debug.WriteLine($"  Skipped (already missing): {fileToDelete}");
+                                                    }
+                                                }
+                                                catch (IOException ioEx) // Catch specific IO errors
+                                                {
+                                                    errors++;
+                                                    string errorMsg = $"  ERROR deleting {fileToDelete}: {ioEx.Message}";
+                                                    Debug.WriteLine(errorMsg);
+                                                    errorDetails.Add(errorMsg);
+                                                }
+                                                catch (UnauthorizedAccessException authEx) // Catch permissions errors
+                                                {
+                                                    errors++;
+                                                    string errorMsg = $"  ERROR deleting {fileToDelete} (Access Denied): {authEx.Message}";
+                                                    Debug.WriteLine(errorMsg);
+                                                    errorDetails.Add(errorMsg);
+                                                }
+                                                catch (Exception ex) // Catch other unexpected errors
+                                                {
+                                                    errors++;
+                                                    string errorMsg = $"  UNEXPECTED ERROR deleting {fileToDelete}: {ex.Message}";
+                                                    Debug.WriteLine(errorMsg);
+                                                    errorDetails.Add(errorMsg);
+                                                }
+                                            }
+
+                                            Debug.WriteLine($"[Squirrel Uninstall] Deletion attempt complete. Files deleted: {filesDeleted}, Errors: {errors}");
+
+                                            // Optionally, try to delete empty directories (use with caution)
+                                            // Example: Delete 'vpk' if empty after file removal
+                                            // try {
+                                            //    var vpkDir = Path.Combine(gamePath, "vpk");
+                                            //    if (Directory.Exists(vpkDir) && !Directory.EnumerateFileSystemEntries(vpkDir).Any()) {
+                                            //        Directory.Delete(vpkDir);
+                                            //        Debug.WriteLine($"  Deleted empty directory: {vpkDir}");
+                                            //    }
+                                            // } catch (Exception ex) { Debug.WriteLine($"Error deleting empty directory vpk: {ex.Message}"); errors++; }
+                                            // Repeat for other potentially empty parent dirs like 'bin/x64_retail', 'bin' etc. if desired.
+
+
+                                            // Inform the user of the outcome
+                                            string summaryMessage = $"Attempted to delete downloaded game files.\n\nFiles successfully deleted: {filesDeleted}\nErrors encountered: {errors}";
+                                            if (errors > 0)
+                                            {
+                                                summaryMessage += "\n\nSome files could not be deleted (they might be in use or permissions may be required):\n" + string.Join("\n", errorDetails.Take(5)) + (errorDetails.Count > 5 ? "\n..." : "");
+                                            }
+                                            MessageBox.Show(summaryMessage, "Deletion Result", MessageBoxButton.OK, errors > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
+                                        }
+                                        else
+                                        {
+                                            Debug.WriteLine($"[Squirrel Uninstall] User declined deletion.");
+                                        }
+                                    }
+                                    else
+                                    {
+                                        Debug.WriteLine($"[Squirrel Uninstall] Downloaded content marker NOT found. Skipping deletion prompt.");
+                                    }
+                                }
+                                else
+                                {
+                                    Debug.WriteLine($"[Squirrel Uninstall] Game path registry key not found, empty, or directory does not exist ('{gamePath}'). Cannot check for downloaded files.");
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                // Catch errors during the check/deletion process itself (e.g., reading registry failed)
+                                Debug.WriteLine($"[Squirrel Uninstall] Error during optional game file deletion process: {ex.Message}");
+                                MessageBox.Show($"An error occurred while attempting to check for or delete downloaded game files:\n{ex.Message}",
+                                                "Uninstall Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                            }
+                        } // End of onAppUninstall lambda
+                        // onAppObsoleted could also remove shortcuts if needed
+                    );
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[Squirrel] Error handling Squirrel events: {ex.Message}");
+                    // Log or warn, but likely continue
+                }
+            } // Dispose the temporary UpdateManager
+
+
+
+            // --- Perform Update Check ---
+            Debug.WriteLine("[Squirrel] Checking for updates...");
+            try
+            {
+                using (var updateManager = await UpdateManager.GitHubUpdateManager(GitHubRepoUrl))
+                {
+                    var updateInfo = await updateManager.CheckForUpdate();
+
+                    if (updateInfo.ReleasesToApply.Any())
+                    {
+                        Debug.WriteLine($"[Squirrel] Update available: {updateInfo.FutureReleaseEntry.Version}");
+
+                        // Show some progress indication here if desired (e.g., simple progress window)
+                        await updateManager.DownloadReleases(updateInfo.ReleasesToApply);
+                        await updateManager.ApplyReleases(updateInfo);
+
+                        Debug.WriteLine("[Squirrel] Update applied. Requesting restart.");
+                        UpdateManager.RestartApp(); // Signal Squirrel to restart
+
+                        // Shutdown(0); // Shutdown is often implicit after RestartApp signals, but explicit is fine.
+                        return false; // Update applied, DO NOT continue current startup
+                    }
+                    else
+                    {
+                        Debug.WriteLine("[Squirrel] No updates found.");
+                        return true; // No updates, OK to continue startup
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Squirrel] Update check failed: {ex.Message}");
+                ShowWarning($"Could not check for updates. You might be offline or GitHub is unreachable.\n\n" +
+                            $"The application might be out of date.\n\nError: {ex.Message}",
+                            "Update Check Failed");
+                // Allow execution to continue despite error, as per requirements
+                return true; // Update check failed, but allow continuing startup
+            }
+        }
         // --- Main Entry Point ---
         [STAThread] // Required for MessageBox and SetupWindow
         protected override void OnStartup(StartupEventArgs e)
         {
+            bool shouldContinueStartup = UpdateCheck().GetAwaiter().GetResult();
+
+            // --- Exit if Update Check Handled It ---
+            if (!shouldContinueStartup)
+            {
+                // If UpdateCheck returned false, it means it either triggered
+                // a restart (via RestartApp) or called Shutdown directly.
+                // We just need to exit OnStartup cleanly.
+                return;
+            }
             DarkNet.Instance.SetCurrentProcessTheme(Theme.Auto);
 
             string originalLauncherExeDir;

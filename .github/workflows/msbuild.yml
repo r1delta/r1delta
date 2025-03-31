@@ -1,83 +1,175 @@
-# This workflow uses actions that are not certified by GitHub.
-# They are provided by a third-party and are governed by
-# separate terms of service, privacy policy, and support
-# documentation.
-
-name: Build Project
+# .github/workflows/build-and-release.yml
+name: Build & Release Project
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main"] # Build on push to main
+    tags:
+      - 'v*' # Trigger release process on tags like v1.0.0, v2.3.4-beta
+
   pull_request:
-    branches: ["main"]
+    branches: ["main"] # Build PRs
 
 env:
-  # Path to the solution file relative to the root of the project.
   SOLUTION_FILE_PATH: .
-  BUILD_PATH: "/build"
-  OUTPUT_PATH: "/output"
+  BUILD_PATH: ${{ github.workspace }}/build # Use absolute paths in CI
+  OUTPUT_PATH: ${{ github.workspace }}/output # Final arranged files for packaging
+  RELEASE_PATH: ${{ github.workspace }}/release # Squirrel output (Setup.exe etc)
   VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
-
-  # Configuration type to build.
-  # You can convert this to a build matrix if you need coverage of multiple configuration types.
-  # https://docs.github.com/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
   BUILD_CONFIGURATION: Release
+  NUSPEC_FILE: r1delta.nuspec # Path to your nuspec file
+  APP_ID: R1Delta # MUST match nuspec ID and SquirrelAppName in code
 
 permissions:
-  contents: write
+  contents: write # Needed to write releases
 
 jobs:
   build:
     runs-on: windows-latest
+    outputs:
+       version: ${{ steps.get_version.outputs.version }} # Pass version to release job
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Required for git describe to find tags
+
+      - name: Get Version
+        id: get_version
+        # Use tag name if available (e.g., v1.2.3 -> 1.2.3), else use commit SHA for dev builds
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION=$(echo "${{ github.ref }}" | sed 's|refs/tags/v||')
+          else
+            VERSION="0.0.0-${{ github.sha }}" # Or another dev version scheme
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Determined version: $VERSION"
 
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
 
+      # --- VCPKG and NuGet Restore (Keep as is) ---
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@v7
         with:
           script: |
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
-
       - name: cache-vcpkg-archives
-        id: cache-vcpkg-archives
         uses: pat-s/always-upload-cache@v3
         with:
           path: ${{ github.workspace }}/vcpkg_cache
           key: ${{ runner.os }}-windows-vcpkg-${{ hashFiles('vcpkg/vcpkg_dry_run.txt') }}
-
       - name: Restore vcpkg packages
-        working-directory: ${{env.GITHUB_WORKSPACE}}
         run: vcpkg integrate install
       - name: Restore NuGet packages
         run: nuget restore ${{env.SOLUTION_FILE_PATH}}
+      # --- End VCPKG/NuGet ---
 
-      - name: Build
-        working-directory: ${{env.GITHUB_WORKSPACE}}
-        # Add additional options to the MSBuild command line here (like platform or verbosity level).
-        # See https://docs.microsoft.com/visualstudio/msbuild/msbuild-command-line-reference
-        run: msbuild /m /restore /p:Configuration=${{env.BUILD_CONFIGURATION}}  /p:OutDir=${{env.BUILD_PATH}} /p:WarningLevel=0 ${{env.SOLUTION_FILE_PATH}}
+      - name: Build Solution
+        run: msbuild /m /restore /p:Configuration=${{env.BUILD_CONFIGURATION}} /p:OutDir=${{env.BUILD_PATH}}\ /p:WarningLevel=0 ${{env.SOLUTION_FILE_PATH}}
 
-      - name: Checkout Scripts
+      - name: Checkout Core Scripts
         uses: actions/checkout@v4
         with:
           repository: r1delta/core
           path: core
 
-      - name: Format Delta Files
+      - name: Create Output Directory Structure for Packaging
         run: |
+          mkdir ${{env.OUTPUT_PATH}}
           mkdir ${{env.OUTPUT_PATH}}/r1delta
           mkdir ${{env.OUTPUT_PATH}}/r1delta/bin_delta
+          # Copy EXEs
           cp ${{env.BUILD_PATH}}/*.exe ${{env.OUTPUT_PATH}}/
+          # Copy bin_delta DLLs
           cp ${{env.BUILD_PATH}}/*.dll ${{env.OUTPUT_PATH}}/r1delta/bin_delta/
-          robocopy core ${{ env.OUTPUT_PATH }}/r1delta /E /XD .git /XF *.md; exit 0
+          # Copy core files (excluding .git, .md)
+          robocopy core ${{ env.OUTPUT_PATH }}/r1delta /E /XD .git /XF *.md /NFL /NDL /NJH /NJS /nc /ns /np; if ($lastexitcode -le 1) { exit 0 } else { exit $lastexitcode } # robocopy exit codes...
+          # Copy necessary dependencies (adjust paths if needed)
+          cp ${{env.BUILD_PATH}}/Dark.Net.dll ${{env.OUTPUT_PATH}}/
+          # Add cp commands for other dependencies listed in nuspec here
+          # Example: cp ${{env.BUILD_PATH}}/OtherDependency.dll ${{env.OUTPUT_PATH}}/
+          echo "Contents of OUTPUT_PATH:"
+          dir ${{env.OUTPUT_PATH}} /s
 
-      - name: Upload artifacts
+      - name: Upload Build Artifact (Optional - for debugging/dev builds)
         uses: actions/upload-artifact@v4
         with:
+          name: delta-build-${{ steps.get_version.outputs.version }}
           path: ${{env.OUTPUT_PATH}}
-          name: delta
+
+  # ----- Separate Job for Releasing -----
+  release:
+    needs: build # Depends on the build job completing
+    if: startsWith(github.ref, 'refs/tags/v') # Only run this job for tags like v*
+    runs-on: windows-latest
+
+    steps:
+      - name: Download Build Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: delta-build-${{ needs.build.outputs.version }} # Use version from build job
+          path: ${{ env.OUTPUT_PATH }} # Download to the expected output path
+
+      - name: Install Squirrel Tool
+        run: dotnet tool install --global Squirrel.Windows --version 3.0.0 # Or desired version
+
+      - name: Display contents before packaging
+        run: |
+           echo "Contents of ${{env.OUTPUT_PATH}} before packaging:"
+           dir ${{env.OUTPUT_PATH}} /s
+
+      - name: Package Application (Squirrel Pack)
+        id: pack
+        run: |
+          squirrel --pack ${{ env.APP_ID }} ${{ env.NUSPEC_FILE }} ${{ needs.build.outputs.version }} ${{ env.RELEASE_PATH }} --packDirectory ${{ env.OUTPUT_PATH }}
+          # Find the generated nupkg file
+          $nupkgFile = Get-ChildItem -Path "${{ env.RELEASE_PATH }}" -Filter "*.nupkg" | Where-Object { $_.Name -notlike "*-delta.nupkg" } | Select-Object -ExpandProperty FullName -First 1
+          echo "nupkg_path=$nupkgFile" >> $GITHUB_OUTPUT
+          echo "Created package: $nupkgFile"
+
+      - name: Releasify Package (Squirrel Releasify)
+        run: |
+           squirrel --releasify "${{ steps.pack.outputs.nupkg_path }}" --releaseDir ${{ env.RELEASE_PATH }}
+           echo "Contents of RELEASE_PATH after releasify:"
+           dir ${{ env.RELEASE_PATH }}
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }} # Use the tag that triggered the workflow
+          name: Release ${{ github.ref_name }}
+          body: |
+            Release notes for ${{ github.ref_name }}.
+            (You can automate release notes generation later if desired)
+          draft: false
+          prerelease: contains(github.ref_name, '-') # Mark as pre-release if tag contains '-' (e.g., v1.0.0-beta)
+
+      - name: Upload Release Assets (Setup.exe, RELEASES, Full Nupkg)
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ env.RELEASE_PATH }}/Setup.exe
+          asset_name: Setup.exe
+          asset_content_type: application/octet-stream
+      - uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ env.RELEASE_PATH }}/RELEASES
+          asset_name: RELEASES
+          asset_content_type: application/octet-stream
+      - uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ steps.pack.outputs.nupkg_path }} # Upload the FULL nupkg
+          asset_name: ${{ env.APP_ID }}-${{ needs.build.outputs.version }}-full.nupkg # Example name
+          asset_content_type: application/zip
