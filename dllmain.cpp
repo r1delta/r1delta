@@ -314,7 +314,6 @@ void CCommandLine__CreateCmdLine(void* thisptr, char* commandline) {
 	if (!g_r1delta_launch_args.empty()) {
 		if (!finalCmdLineStr.empty()) finalCmdLineStr += " ";
 		finalCmdLineStr += g_r1delta_launch_args; // Append stored args
-		finalCmdLineStr += " -novid ";
 		OutputDebugStringA("[r1delta_core] Appended args from internal storage: ");
 		OutputDebugStringA(g_r1delta_launch_args.c_str());
 		OutputDebugStringA("\n");
@@ -322,6 +321,7 @@ void CCommandLine__CreateCmdLine(void* thisptr, char* commandline) {
 	else {
 		OutputDebugStringA("[r1delta_core] No user launch arguments appended (Internal storage was empty).\n");
 	}
+	finalCmdLineStr += " -novid ";
 
 
 	// 5. Prepare buffer for original function call (unchanged)
