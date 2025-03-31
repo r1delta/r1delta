@@ -227,8 +227,6 @@ jobs:
 
       - name: Upload RELEASES File Asset
         uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ${{ github.workspace }}\squirrel_release\RELEASES
@@ -237,8 +235,6 @@ jobs:
 
       - name: Upload Full Nupkg Asset
         uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ${{ github.workspace }}\squirrel_release\${{ env.PACKAGE_NAME }}-${{ steps.get_version.outputs.version }}-full.nupkg
