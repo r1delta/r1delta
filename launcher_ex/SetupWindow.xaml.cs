@@ -321,8 +321,7 @@ namespace launcher_ex
                 MessageBox.Show(
                     this, // Explicitly set owner window
                     $"Installation into the 'r1delta' subdirectory of the launcher's current location ('{_originalLauncherDir}') is not allowed.\n\n" +
-                    $"Please choose a different directory.\n\n" +
-                    $"(You *can* install directly into '{_originalLauncherDir}' if desired, just not the 'r1delta' folder inside it.)",
+                    $"Please choose a different directory.",
                     "Invalid Install Location",
                     MessageBoxButton.OK,
                     MessageBoxImage.Warning);
@@ -367,7 +366,18 @@ namespace launcher_ex
                 Close();
                 return;
             }
-
+            // Compare the normalized selected path with the normalized forbidden path, ignoring case.
+            if (string.Compare(SelectedPath, _originalLauncherDir, true) != -1)
+            {
+                MessageBox.Show(
+                    this, // Explicitly set owner window
+                    $"New installs into the launcher's current location ('{_originalLauncherDir}') are not supported.\n\n" +
+                    $"Please choose a different directory.",
+                    "Invalid Install Location",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
             // --- 4. Perform Full Validation Checks (for NEW install location) ---
             // Prevent installing directly into system folders (Unchanged)
             string systemRoot = Environment.GetFolderPath(Environment.SpecialFolder.Windows); string programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles); string programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
