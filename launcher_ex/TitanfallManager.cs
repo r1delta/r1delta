@@ -801,11 +801,11 @@ namespace R1Delta
                             if (existing.Length == knownSize)
                             {
                                 if (knownSize == 0) { needsDownload = false; }
-                                else { ulong localXx = ComputeXxHash64(destPath); if (localXx == expectedHash) { needsDownload = false; } else { Debug.WriteLine($"Checksum mismatch: {relPath}..."); TryDeleteFile(destPath); } }
+                                else { ulong localXx = ComputeXxHash64(destPath); if (localXx == expectedHash) { needsDownload = false; } else { Debug.WriteLine($"Checksum mismatch: {relPath}...");  } }
                             }
-                            else { Debug.WriteLine($"Size mismatch: {relPath}..."); TryDeleteFile(destPath); }
+                            else { Debug.WriteLine($"Size mismatch: {relPath}..."); }
                         }
-                        catch (Exception ex) { Debug.WriteLine($"Warning: Could not verify {destPath} ({ex.GetType().Name}: {ex.Message})..."); TryDeleteFile(destPath); }
+                        catch (Exception ex) { Debug.WriteLine($"Warning: Could not verify {destPath} ({ex.GetType().Name}: {ex.Message})..."); }
                     }
                     fileTotalBytes[destPath] = knownSize;
                     fileReceivedBytes[destPath] = needsDownload ? 0 : knownSize;

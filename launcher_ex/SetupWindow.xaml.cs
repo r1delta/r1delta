@@ -522,7 +522,7 @@ namespace launcher_ex
 
             // Update Status Text Label
             // Example format: Downloading... 55% (1.2 GB / 2.2 GB) - 15.3 MB/s - ETA: 1m 30s
-            StatusText.Text = $"Downloading: {percent:0}% ({downloadedSizeStr} / {totalSizeStr})\nSpeed: {speedStr} | ETA: {etaStr}";
+            StatusText.Text = $"Downloading: {percent:0}% ({downloadedSizeStr} / {totalSizeStr})\nSpeed: {speedStr} | ETA: {etaStr}\nSetup will launch the game automatically when complete.";
 
             // Special case for completion
             if (percent >= 100)
