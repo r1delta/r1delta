@@ -40,6 +40,22 @@ jobs:
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
 
+      # --- Create VCPKG Cache Directory ---
+      - name: Prepare VCPKG Cache Directory
+        run: |
+          # Create the cache directory
+          New-Item -ItemType Directory -Force -Path "${{ env.VCPKG_DEFAULT_BINARY_CACHE }}"
+          Write-Host "Created VCPKG cache directory at ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}"
+          
+          # Verify the directory exists
+          if (Test-Path -Path "${{ env.VCPKG_DEFAULT_BINARY_CACHE }}") {
+            Write-Host "VCPKG cache directory exists at ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}"
+          } else {
+            Write-Error "Failed to create VCPKG cache directory at ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}"
+            exit 1
+          }
+        shell: pwsh
+
       # --- VCPKG Cache & Restore ---
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@v7
