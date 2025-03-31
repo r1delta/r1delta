@@ -312,6 +312,22 @@ namespace launcher_ex
 
             // --- Update internal SelectedPath state ---
             SelectedPath = path;
+            // Construct the absolute path to the forbidden subdirectory
+            string forbiddenPath = Path.GetFullPath(Path.Combine(_originalLauncherDir, "r1delta"));
+
+            // Compare the normalized selected path with the normalized forbidden path, ignoring case.
+            if (string.Equals(SelectedPath, forbiddenPath, StringComparison.OrdinalIgnoreCase))
+            {
+                MessageBox.Show(
+                    this, // Explicitly set owner window
+                    $"Installation into the 'r1delta' subdirectory of the launcher's current location ('{_originalLauncherDir}') is not allowed.\n\n" +
+                    $"Please choose a different directory.\n\n" +
+                    $"(You *can* install directly into '{_originalLauncherDir}' if desired, just not the 'r1delta' folder inside it.)",
+                    "Invalid Install Location",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return; // Stop processing if the path is forbidden
+            }
 
             // --- 2. Use TitanfallManager's validation ---
             bool pathLooksValidInitially = TitanfallManager.ValidateGamePath(path, _originalLauncherDir);
