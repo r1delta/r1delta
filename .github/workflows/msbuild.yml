@@ -1,11 +1,12 @@
+# .github/workflows/msbuild.yml
 name: Build and Release Project
 
 on:
   push:
     branches: ["main"]
-    tags: ['v*'] # Trigger on version tags (e.g., v1.0.0)
   pull_request:
     branches: ["main"]
+  workflow_dispatch: # Optional: Allows manual triggering
 
 env:
   # Use paths relative to the workspace for better consistency
@@ -28,7 +29,7 @@ jobs:
       # Pass the path to the directory containing the prepared files
       artifact_path: ${{ steps.format_files.outputs.output_dir }}
       # Pass the name used for the artifact upload/download
-      artifact_name: delta
+      artifact_name: delta # Keep this simple and static
     steps:
       - uses: actions/checkout@v4
         with:
@@ -38,6 +39,9 @@ jobs:
         uses: microsoft/setup-msbuild@v2
 
       # --- VCPKG Cache & Restore ---
+      # Ensure vcpkg is bootstrapped/installed before this if not present on runner
+      # Example: Run .\vcpkg\bootstrap-vcpkg.bat if needed
+
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@v7
         with:
@@ -45,20 +49,20 @@ jobs:
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
-      # NOTE: Consider refining vcpkg cache key if needed, hashFiles might be better
       - name: cache-vcpkg-archives
         id: cache-vcpkg-archives
-        uses: pat-s/always-upload-cache@v3
+        uses: pat-s/always-upload-cache@v3 # Consider standard actions/cache@v4 if 'always-upload' isn't strictly needed
         with:
           path: ${{ github.workspace }}/vcpkg_cache # Adjust if your cache path is different
-          # Example using hashFiles for better cache invalidation:
-          key: ${{ runner.os }}-windows-vcpkg-${{ hashFiles('**/vcpkg.json', '.github/workflows/**') }}
+          key: ${{ runner.os }}-windows-vcpkg-${{ hashFiles('**/vcpkg.json', '.github/workflows/**') }} # Recommended key
           restore-keys: |
             ${{ runner.os }}-windows-vcpkg-
 
-      - name: Restore vcpkg packages
-        # Assuming vcpkg is installed globally or correctly setup
+      - name: vcpkg integrate install # Ensure vcpkg executable is in PATH
+        # This step assumes vcpkg is already bootstrapped/installed and its root is known or in PATH
+        # Add path if necessary: $env:PATH += ";${{ github.workspace }}\vcpkg"
         run: vcpkg integrate install
+        shell: pwsh
 
       - name: Restore NuGet packages
         run: nuget restore ${{env.SOLUTION_FILE_PATH}}
@@ -83,28 +87,35 @@ jobs:
       # --- Prepare Output Directory ---
       - name: Prepare Output Directory
         id: format_files # Give step an ID to reference its outputs
-        # Use PowerShell (default on Windows runner) for native commands
         shell: pwsh
         run: |
           # Create directories using Windows paths
+          $ErrorActionPreference = 'Stop' # Ensure script stops on error
           New-Item -ItemType Directory -Force -Path "${{ env.OUTPUT_PATH }}"
           New-Item -ItemType Directory -Force -Path "${{ env.OUTPUT_PATH }}\r1delta"
           New-Item -ItemType Directory -Force -Path "${{ env.OUTPUT_PATH }}\r1delta\bin_delta"
 
           # Copy files using Windows paths and commands
-          Copy-Item -Path "${{ env.BUILD_PATH }}\*.exe" -Destination "${{ env.OUTPUT_PATH }}\" -ErrorAction Stop
-          Copy-Item -Path "${{ env.BUILD_PATH }}\*.dll" -Destination "${{ env.OUTPUT_PATH }}\r1delta\bin_delta\" -ErrorAction Stop
+          Write-Host "Copying EXE files from ${{ env.BUILD_PATH }} to ${{ env.OUTPUT_PATH }}"
+          Copy-Item -Path "${{ env.BUILD_PATH }}\*.exe" -Destination "${{ env.OUTPUT_PATH }}\"
+
+          Write-Host "Copying DLL files from ${{ env.BUILD_PATH }} to ${{ env.OUTPUT_PATH }}\r1delta\bin_delta\"
+          Copy-Item -Path "${{ env.BUILD_PATH }}\*.dll" -Destination "${{ env.OUTPUT_PATH }}\r1delta\bin_delta\"
 
           # Robocopy is a robust Windows tool for directory copying
+          Write-Host "Copying core scripts using Robocopy"
           robocopy "${{ github.workspace }}\core" "${{ env.OUTPUT_PATH }}\r1delta" /E /XD .git /XF *.md
           # Check Robocopy exit code (0-7 are success/no-op/files copied)
           if ($LASTEXITCODE -ge 8) {
-              Write-Error "Robocopy failed with exit code $LASTEXITCODE"
-              exit 1 # Fail the step
+              throw "Robocopy failed with exit code $LASTEXITCODE"
+          } else {
+              Write-Host "Robocopy completed successfully (Exit Code: $LASTEXITCODE)"
           }
 
           # Output the path to the prepared directory for the artifact upload
-          echo "output_dir=${{ env.OUTPUT_PATH }}" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          $outputPath = "${{ env.OUTPUT_PATH }}"
+          Write-Host "Outputting directory path: $outputPath"
+          echo "output_dir=$outputPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       # --- Upload Artifact ---
       - name: Upload Build Artifact
@@ -113,7 +124,7 @@ jobs:
           # Use the directory path output by the previous step
           path: ${{ steps.format_files.outputs.output_dir }}
           # Use the name defined in the job's outputs
-          name: ${{ jobs.build.outputs.artifact_name }}
+          name: ${{ jobs.build.outputs.artifact_name }} # This context (within the same job) is correct
 
   # --- Release Job ---
   release:
@@ -126,7 +137,7 @@ jobs:
       - name: Download Build Artifact
         uses: actions/download-artifact@v4
         with:
-          # Use the artifact name passed from the build job
+          # Use the artifact name passed from the build job (CORRECTED SYNTAX)
           name: ${{ needs.build.outputs.artifact_name }}
           # Download directly into a folder named 'release_files' in the workspace
           path: ${{ github.workspace }}\release_files
@@ -151,7 +162,7 @@ jobs:
         id: get_version
         run: |
           # Extract version from tag like 'refs/tags/v1.2.3' -> '1.2.3'
-          $version = "${{ github.ref }}".Substring("refs/tags/v".Length)
+          $version = $env:GITHUB_REF -replace '^refs/tags/v', ''
           Write-Host "Extracted version: $version"
           echo "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
         shell: pwsh
@@ -167,7 +178,7 @@ jobs:
         run: |
           nuget pack ${{ env.NUSPEC_FILE }} -Version ${{ steps.get_version.outputs.version }} -OutputDirectory ${{ github.workspace }}\package_output -NoPackageAnalysis
           # Note: Ensure your .nuspec file <file src=...> paths are relative
-          # to the nuspec file itself (e.g., src="r1delta.exe", src="r1delta\bin_delta\tier0.dll")
+          # to the nuspec file itself (e.g., src="R1Delta.exe", src="r1delta\bin_delta\tier0.dll")
         shell: pwsh # Use PowerShell for easier multi-line commands and variable expansion
 
       - name: Create Release Output Directory
