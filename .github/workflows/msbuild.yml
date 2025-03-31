@@ -146,9 +146,7 @@ jobs:
       - name: Download Build Artifact
         uses: actions/download-artifact@v4
         with:
-          # Use the artifact name passed from the build job (CORRECTED SYNTAX)
-          name: ${{ needs.build.outputs.artifact_name }}
-          # Download directly into a folder named 'release_files' in the workspace
+          name: ${{ needs.build.outputs.artifact_name }} # Correctly referencing output
           path: ${{ github.workspace }}\release_files
 
       - name: Setup NuGet CLI
@@ -156,11 +154,15 @@ jobs:
         with:
           nuget-version: 'latest'
 
-      - name: Setup Chocolatey
-        uses: crazy-max/ghaction-chocolatey@v3
+      # -------------------------------------------------------------
+      # REMOVED the problematic 'Setup Chocolatey' step.
+      # Chocolatey is already available on windows-latest runners.
+      # -------------------------------------------------------------
 
       - name: Install Squirrel.Windows
+        # Use the choco command directly, it's already in the PATH
         run: choco install squirrel.windows --no-progress -y
+        shell: pwsh # Or cmd, both should work for choco
 
       # Checkout the main repository again to get the nuspec file
       - name: Checkout Nuspec File
@@ -182,20 +184,16 @@ jobs:
         shell: pwsh
 
       - name: Pack with NuGet
-        # Run nuget pack from the directory containing the nuspec and the files
         working-directory: ${{ github.workspace }}\release_files
         run: |
           nuget pack ${{ env.NUSPEC_FILE }} -Version ${{ steps.get_version.outputs.version }} -OutputDirectory ${{ github.workspace }}\package_output -NoPackageAnalysis
-          # Note: Ensure your .nuspec file <file src=...> paths are relative
-          # to the nuspec file itself (e.g., src="R1Delta.exe", src="r1delta\bin_delta\tier0.dll")
-        shell: pwsh # Use PowerShell for easier multi-line commands and variable expansion
+        shell: pwsh
 
       - name: Create Release Output Directory
         run: mkdir ${{ github.workspace }}\squirrel_release
         shell: pwsh
 
       - name: Releasify with Squirrel
-        # Run Squirrel from the workspace root, pointing to the nupkg and output dir
         run: |
           Squirrel --releasify "${{ github.workspace }}\package_output\${{ env.PACKAGE_NAME }}.${{ steps.get_version.outputs.version }}.nupkg" --releaseDir "${{ github.workspace }}\squirrel_release"
           REM Add optional parameters below if needed:
@@ -213,8 +211,8 @@ jobs:
         with:
           tag_name: ${{ github.ref }}
           release_name: R1Delta ${{ steps.get_version.outputs.version }}
-          draft: false # Set to true if you want to manually publish later
-          prerelease: false # Set to true if this is a pre-release
+          draft: false
+          prerelease: false
 
       # --- Upload Release Assets ---
       - name: Upload Setup.exe Asset
@@ -225,7 +223,7 @@ jobs:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ${{ github.workspace }}\squirrel_release\Setup.exe
           asset_name: Setup.exe
-          asset_content_type: application/vnd.microsoft.portable-executable # More specific type
+          asset_content_type: application/vnd.microsoft.portable-executable
 
       - name: Upload RELEASES File Asset
         uses: actions/upload-release-asset@v1
@@ -243,7 +241,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          # Squirrel renames the nupkg to include '-full'
           asset_path: ${{ github.workspace }}\squirrel_release\${{ env.PACKAGE_NAME }}-${{ steps.get_version.outputs.version }}-full.nupkg
           asset_name: ${{ env.PACKAGE_NAME }}-${{ steps.get_version.outputs.version }}-full.nupkg
           asset_content_type: application/zip
