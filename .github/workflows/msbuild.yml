@@ -4,6 +4,7 @@ name: Build and Release Project
 on:
   push:
     branches: ["main"]
+    tags: ["v*"]
   pull_request:
     branches: ["main"]
   workflow_dispatch: # Optional: Allows manual triggering
