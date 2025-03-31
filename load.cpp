@@ -987,16 +987,54 @@ __int64 (*oFileSystem_AddLoadedSearchPath)(
 	char a6);
 __int64 FileSystem_AddLoadedSearchPath(
 	__int64 a1,
-	unsigned __int8* a2,
-	_BYTE* a3,
-	char* a4,
+	unsigned __int8* a2, // Often 'byte*' or 'unsigned char*'
+	_BYTE* a3,         // Often 'byte*' or 'unsigned char*'
+	char* a4,          // The path string we are interested in
 	char* Source,
 	char a6)
 {
-	if (!V_stristr(a4, "r1delta"))
-		a4 = 0;
+	const char* suffix = "r1delta";
+	const size_t suffix_len = 7; // strlen("r1delta")
+
+	// Check if a4 is valid and long enough to potentially end with the suffix
+	if (a4) // Check if a4 is not NULL
+	{
+		size_t path_len = strlen(a4);
+		if (path_len >= suffix_len)
+		{
+			// Point to the potential start of the suffix within a4
+			const char* end_of_path = a4 + (path_len - suffix_len);
+
+			// Case-insensitive comparison of the last 'suffix_len' bytes
+			if (_strnicmp(end_of_path, suffix, suffix_len) == 0)
+			{
+				// It ends with "r1delta". Now check for "gameinfo.txt" in that directory.
+				char gameinfo_path[MAX_PATH];
+
+				// Construct the full path: a4 + "\" + "gameinfo.txt"
+				// Use sprintf_s for safety on MSVC
+				int chars_written = sprintf_s(gameinfo_path, MAX_PATH, "%s\\gameinfo.txt", a4);
+
+				// Check if path construction was successful and if the file exists
+				if (chars_written > 0 && GetFileAttributesA(gameinfo_path) != INVALID_FILE_ATTRIBUTES)
+				{
+					// "gameinfo.txt" exists in the directory specified by a4.
+					// Nullify a4 as requested.
+					a4 = 0; // or nullptr in C++11 onwards
+				}
+				// else: gameinfo.txt doesn't exist or path construction failed, leave a4 as is.
+			}
+			// else: a4 does not end with "r1delta", leave a4 as is.
+		}
+		// else: a4 is shorter than the suffix, leave a4 as is.
+	}
+	// else: a4 was already NULL, leave it as NULL.
+
+
+	// Call the original function with the potentially modified a4
 	return oFileSystem_AddLoadedSearchPath(a1, a2, a3, a4, Source, a6);
 }
+
 void InitAddons() {
 	static bool done = false;
 	if (done) return;
