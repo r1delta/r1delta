@@ -80,8 +80,9 @@ namespace launcher_ex
         private const string CAM_LIST_FILE = "vpk\\cam_list.txt"; // Relative to game dir
         private const string TARGET_VPK_FILE = "vpk\\client_mp_common.bsp.pak000_040.vpk"; // Relative to game dir
         private const string AUDIO_INSTALLER_EXE = "bin\\x64\\audio_installer.exe"; // Relative to game dir
-        // --- NEW: Environment variable name for launch args ---
-        private const string LAUNCH_ARGS_ENV_VAR = "R1DELTA_LAUNCH_ARGS";
+        // Delegate for the exported C++ function (Unchanged)
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void SetR1DeltaLaunchArgsDelegate([MarshalAs(UnmanagedType.LPStr)] string args);
 
 
         // --- Mitigation Policy Structures & Enum ---
@@ -427,17 +428,6 @@ namespace launcher_ex
                 // Warning already shown in PrependPath
             }
 
-            // 12. Set Launch Arguments Environment Variable
-            try
-            {
-                Environment.SetEnvironmentVariable(LAUNCH_ARGS_ENV_VAR, finalLaunchArgs ?? "");
-                Debug.WriteLine($"[*] Set environment variable '{LAUNCH_ARGS_ENV_VAR}'='{finalLaunchArgs ?? ""}'");
-            }
-            catch (Exception ex)
-            {
-                ShowWarning($"Warning: Could not set launch arguments environment variable ({LAUNCH_ARGS_ENV_VAR}).\nError: {ex.Message}");
-            }
-
 
             // 13. Load the actual game launcher DLL (from original launcher dir)
             IntPtr hLauncherModule = IntPtr.Zero;
@@ -455,6 +445,17 @@ namespace launcher_ex
                     LibraryLoadError(errorCode, LAUNCHER_DLL_NAME, launcherDllPath, originalLauncherExeDir);
                     Environment.Exit(1);
                 }
+                IntPtr hCoreModule = LoadLibraryW(Path.Combine(originalLauncherExeDir, R1DELTA_SUBDIR, BIN_DELTA_SUBDIR, "tier0.dll"));
+                IntPtr pSetArgs = GetProcAddress(hCoreModule, "SetR1DeltaLaunchArgs");
+
+                Debug.WriteLine($"[*] Calling SetR1DeltaLaunchArgs with: '{finalLaunchArgs ?? ""}'");
+                var setArgsDelegate = (SetR1DeltaLaunchArgsDelegate)Marshal.GetDelegateForFunctionPointer(pSetArgs, typeof(SetR1DeltaLaunchArgsDelegate));
+                setArgsDelegate(finalLaunchArgs ?? ""); // Pass the arguments
+                Debug.WriteLine($"[*] Successfully called SetR1DeltaLaunchArgs.");
+
+                
+                    
+
 
                 Debug.WriteLine("[*] Getting LauncherMain address");
                 pLauncherMain = GetProcAddress(hLauncherModule, "LauncherMain");
@@ -482,27 +483,19 @@ namespace launcher_ex
                 Debug.WriteLine("[*] Preparing arguments for LauncherMain...");
                 var launcherMain = (LauncherMainDelegate)Marshal.GetDelegateForFunctionPointer(pLauncherMain, typeof(LauncherMainDelegate));
 
-                // Construct *only* the mandatory -game argument
-                // It points to the r1delta subdir in the *original* launcher location
-                string r1deltaGamePath = Path.Combine(originalLauncherExeDir, R1DELTA_SUBDIR);
-                // Ensure path is quoted if it contains spaces
-                string gameArg = $"-game \"{r1deltaGamePath}\"";
-
-                Debug.WriteLine($"[*] Calling LauncherMain with args: {gameArg}");
-                Debug.WriteLine($"[*] Note: User arguments ('{finalLaunchArgs ?? ""}') are passed via the '{LAUNCH_ARGS_ENV_VAR}' environment variable.");
 
                 // Call LauncherMain with only the -game argument.
                 int result = launcherMain(
                         IntPtr.Zero, // hInstance - Not readily available/needed
                         IntPtr.Zero, // hPrevInstance - Always zero in modern Windows
-                        gameArg,     // lpCmdLine - ONLY the -game argument
+                        "",   
                         1            // nCmdShow - SW_SHOWNORMAL
                     );
 
                 // Note: We don't FreeLibrary(hLauncherModule) here because the game process relies on it.
                 // It will be unloaded when the process exits.
 
-                Environment.Exit(result);
+                Process.GetCurrentProcess().Kill();
 
             }
             catch (Exception ex)
