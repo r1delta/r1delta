@@ -235,7 +235,7 @@ namespace launcher_ex
                 string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
                 if (!string.IsNullOrEmpty(localAppData))
                 {
-                    return Path.Combine(localAppData, "R1Delta", "Content");
+                    return Path.Combine(localAppData, "R1DeltaContent");
                 }
             }
             catch (Exception ex)
