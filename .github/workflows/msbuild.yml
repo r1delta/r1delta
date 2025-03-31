@@ -124,7 +124,7 @@ jobs:
           # Use the directory path output by the previous step
           path: ${{ steps.format_files.outputs.output_dir }}
           # Use the name defined in the job's outputs
-          name: ${{ jobs.build.outputs.artifact_name }} # This context (within the same job) is correct
+          name: delta # This context (within the same job) is correct
 
   # --- Release Job ---
   release:
