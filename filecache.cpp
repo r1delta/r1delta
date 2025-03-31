@@ -3,15 +3,7 @@
 #include <thread>   // For std::thread if UpdateCache runs in background
 #include <iostream> // For std::cerr (replace with Msg/Warning)
 
-// Assumed global logging functions (replace std::cerr)
-// extern void Msg(const char* fmt, ...);
-// extern void Warning(const char* fmt, ...);
-// Placeholder implementations:
-#include <cstdio>
-#include <cstdarg>
-void Msg(const char* fmt, ...) { va_list args; va_start(args, fmt); vprintf(fmt, args); va_end(args); printf("\n"); }
-void Warning(const char* fmt, ...) { va_list args; va_start(args, fmt); fprintf(stderr, "Warning: "); vfprintf(stderr, fmt, args); va_end(args); fprintf(stderr, "\n"); }
-
+#include "logging.h"
 
 FileCache::FileCache() {
     executableDirectory = GetExecutableDirectory();
