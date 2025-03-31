@@ -17,6 +17,7 @@ env:
   VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
   VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/vcpkg_cache
   BUILD_CONFIGURATION: Release
+  MSBUILD_DEBUG_TYPE: Release
   # --- Squirrel Env Vars ---
   NUSPEC_FILE: R1Delta.nuspec # Name of your nuspec file
   PACKAGE_NAME: R1Delta      # MUST match <id> in nuspec and SquirrelAppName
@@ -80,6 +81,7 @@ jobs:
         run: >
           msbuild /m /restore
           /p:Configuration=${{env.BUILD_CONFIGURATION}}
+          /p:DebugType=${{env.MSBUILD_DEBUG_TYPE}}
           /p:OutDir=${{env.BUILD_PATH}}/
           /p:WarningLevel=0
           ${{env.SOLUTION_FILE_PATH}}
@@ -117,6 +119,8 @@ jobs:
 
           Write-Host "Copying DLL files from ${{ env.BUILD_PATH }} to $binDeltaPath"
           Copy-Item -Path "${{ env.BUILD_PATH }}/*.dll" -Destination "$binDeltaPath/" -ErrorAction SilentlyContinue # Continue if no files match
+          Write-Host "Copying PDB files from ${{ env.BUILD_PATH }} to $binDeltaPath"
+          Copy-Item -Path "${{ env.BUILD_PATH }}/*.pdb" -Destination "$binDeltaPath/" -ErrorAction SilentlyContinue # Continue if no files match
 
           # Copy core scripts (assuming they are checked out to 'core')
           $coreSourcePath = "${{ github.workspace }}/core" # Path where core scripts were checked out
