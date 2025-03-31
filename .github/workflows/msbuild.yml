@@ -164,6 +164,7 @@ jobs:
 
   # --- Release Job ---
   release:
+    permissions: write-all
     needs: build # Depends on the build job finishing successfully
     if: startsWith(github.ref, 'refs/tags/v') # Only run on tagged pushes (v*)
     runs-on: windows-latest
