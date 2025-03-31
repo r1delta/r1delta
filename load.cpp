@@ -996,14 +996,21 @@ __int64 FileSystem_AddLoadedSearchPath(
 	const char* suffix = "r1delta";
 	const size_t suffix_len = 7; // strlen("r1delta")
 
-	// Check if a4 is valid and long enough to potentially end with the suffix
-	if (a4) // Check if a4 is not NULL
+	// Store the original value of a4, as we might need it later.
+	char* original_a4 = a4;
+	// Prepare the value to be passed to the original function.
+	// Default to nullifying a4, unless the specific conditions are met.
+	char* result_a4 = nullptr; // Use nullptr for modern C++, or 0 for C/older C++
+
+	// --- Start checking the conditions under which a4 should *NOT* be nullified ---
+	bool keep_original_path = false;
+	if (original_a4) // Check if original_a4 is not NULL
 	{
-		size_t path_len = strlen(a4);
+		size_t path_len = strlen(original_a4);
 		if (path_len >= suffix_len)
 		{
-			// Point to the potential start of the suffix within a4
-			const char* end_of_path = a4 + (path_len - suffix_len);
+			// Point to the potential start of the suffix within original_a4
+			const char* end_of_path = original_a4 + (path_len - suffix_len);
 
 			// Case-insensitive comparison of the last 'suffix_len' bytes
 			if (_strnicmp(end_of_path, suffix, suffix_len) == 0)
@@ -1011,28 +1018,34 @@ __int64 FileSystem_AddLoadedSearchPath(
 				// It ends with "r1delta". Now check for "gameinfo.txt" in that directory.
 				char gameinfo_path[MAX_PATH];
 
-				// Construct the full path: a4 + "\" + "gameinfo.txt"
-				// Use sprintf_s for safety on MSVC
-				int chars_written = sprintf_s(gameinfo_path, MAX_PATH, "%s\\gameinfo.txt", a4);
+				// Construct the full path: original_a4 + "\" + "gameinfo.txt"
+				int chars_written = sprintf_s(gameinfo_path, MAX_PATH, "%s\\gameinfo.txt", original_a4);
 
 				// Check if path construction was successful and if the file exists
 				if (chars_written > 0 && GetFileAttributesA(gameinfo_path) != INVALID_FILE_ATTRIBUTES)
 				{
-					// "gameinfo.txt" exists in the directory specified by a4.
-					// Nullify a4 as requested.
-					a4 = 0; // or nullptr in C++11 onwards
+					// "gameinfo.txt" exists in the directory specified by original_a4.
+					// This is the *only* condition where we want to keep the original path.
+					keep_original_path = true;
 				}
-				// else: gameinfo.txt doesn't exist or path construction failed, leave a4 as is.
+				// else: gameinfo.txt doesn't exist or path construction failed.
 			}
-			// else: a4 does not end with "r1delta", leave a4 as is.
+			// else: original_a4 does not end with "r1delta".
 		}
-		// else: a4 is shorter than the suffix, leave a4 as is.
+		// else: original_a4 is shorter than the suffix.
 	}
-	// else: a4 was already NULL, leave it as NULL.
+	// else: original_a4 was already NULL.
+	// --- End checking the conditions ---
 
+	// Decide the final value for a4 based on whether the specific conditions were met
+	if (keep_original_path)
+	{
+		result_a4 = original_a4; // Keep the original path
+	}
+	// else: result_a4 remains nullptr (the default action is to nullify)
 
-	// Call the original function with the potentially modified a4
-	return oFileSystem_AddLoadedSearchPath(a1, a2, a3, a4, Source, a6);
+	// Call the original function with the final result_a4 value
+	return oFileSystem_AddLoadedSearchPath(a1, a2, a3, result_a4, Source, a6);
 }
 
 void InitAddons() {
