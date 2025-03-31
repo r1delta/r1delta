@@ -17,7 +17,7 @@ env:
   VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
   VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/vcpkg_cache
   BUILD_CONFIGURATION: Release
-  MSBUILD_DEBUG_TYPE: Release
+  MSBUILD_DEBUG_TYPE: pdbonly
   # --- Squirrel Env Vars ---
   NUSPEC_FILE: R1Delta.nuspec # Name of your nuspec file
   PACKAGE_NAME: R1Delta      # MUST match <id> in nuspec and SquirrelAppName
