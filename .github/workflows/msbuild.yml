@@ -10,11 +10,12 @@ on:
   workflow_dispatch: # Optional: Allows manual triggering
 
 env:
-  # Use paths relative to the workspace for better consistency
+  # Use paths with forward slashes for better consistency in YAML
   SOLUTION_FILE_PATH: .
-  BUILD_PATH: ${{ github.workspace }}\build # Windows-style path relative to workspace
-  OUTPUT_PATH: ${{ github.workspace }}\output # Windows-style path relative to workspace
+  BUILD_PATH: ${{ github.workspace }}/build
+  OUTPUT_PATH: ${{ github.workspace }}/output
   VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+  VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/vcpkg_cache
   BUILD_CONFIGURATION: Release
   # --- Squirrel Env Vars ---
   NUSPEC_FILE: R1Delta.nuspec # Name of your nuspec file
@@ -40,9 +41,6 @@ jobs:
         uses: microsoft/setup-msbuild@v2
 
       # --- VCPKG Cache & Restore ---
-      # Ensure vcpkg is bootstrapped/installed before this if not present on runner
-      # Example: Run .\vcpkg\bootstrap-vcpkg.bat if needed
-
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@v7
         with:
@@ -52,16 +50,14 @@ jobs:
 
       - name: cache-vcpkg-archives
         id: cache-vcpkg-archives
-        uses: pat-s/always-upload-cache@v3 # Consider standard actions/cache@v4 if 'always-upload' isn't strictly needed
+        uses: actions/cache@v4
         with:
-          path: ${{ github.workspace }}/vcpkg_cache # Adjust if your cache path is different
-          key: ${{ runner.os }}-windows-vcpkg-${{ hashFiles('**/vcpkg.json', '.github/workflows/**') }} # Recommended key
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: ${{ runner.os }}-windows-vcpkg-${{ hashFiles('**/vcpkg.json', '.github/workflows/**') }}
           restore-keys: |
             ${{ runner.os }}-windows-vcpkg-
 
-      - name: vcpkg integrate install # Ensure vcpkg executable is in PATH
-        # This step assumes vcpkg is already bootstrapped/installed and its root is known or in PATH
-        # Add path if necessary: $env:PATH += ";${{ github.workspace }}\vcpkg"
+      - name: vcpkg integrate install
         run: vcpkg integrate install
         shell: pwsh
 
@@ -70,70 +66,70 @@ jobs:
 
       # --- Build Step ---
       - name: Build Solution
-        run: > # Using > for multi-line readability
+        run: >
           msbuild /m /restore
           /p:Configuration=${{env.BUILD_CONFIGURATION}}
-          /p:OutDir=${{env.BUILD_PATH}}\
+          /p:OutDir=${{env.BUILD_PATH}}/
           /p:WarningLevel=0
           ${{env.SOLUTION_FILE_PATH}}
-        # MSBuild automatically uses the correct shell (cmd/powershell)
 
       # --- Checkout Core Scripts ---
       - name: Checkout Core Scripts
         uses: actions/checkout@v4
         with:
           repository: r1delta/core
-          path: core # Checkout to 'core' subdirectory
+          path: core
 
       # --- Prepare Output Directory ---
       - name: Prepare Output Directory
-        id: format_files # Give step an ID to reference its outputs
+        id: format_files
         shell: pwsh
         run: |
-          # Create directories using Windows paths
+          # Create directories
           $ErrorActionPreference = 'Stop' # Ensure script stops on error
-          New-Item -ItemType Directory -Force -Path "${{ env.OUTPUT_PATH }}"
-          New-Item -ItemType Directory -Force -Path "${{ env.OUTPUT_PATH }}\r1delta"
-          New-Item -ItemType Directory -Force -Path "${{ env.OUTPUT_PATH }}\r1delta\bin_delta"
+          $outputPath = "${{ env.OUTPUT_PATH }}"
+          $deltaPath = Join-Path -Path $outputPath -ChildPath "r1delta"
+          $binDeltaPath = Join-Path -Path $deltaPath -ChildPath "bin_delta"
+          
+          New-Item -ItemType Directory -Force -Path $outputPath
+          New-Item -ItemType Directory -Force -Path $deltaPath
+          New-Item -ItemType Directory -Force -Path $binDeltaPath
 
-          # Copy files using Windows paths and commands
-          Write-Host "Copying EXE files from ${{ env.BUILD_PATH }} to ${{ env.OUTPUT_PATH }}"
-          Copy-Item -Path "${{ env.BUILD_PATH }}\*.exe" -Destination "${{ env.OUTPUT_PATH }}\"
+          # Copy files
+          Write-Host "Copying EXE files from ${{ env.BUILD_PATH }} to $outputPath"
+          Copy-Item -Path "${{ env.BUILD_PATH }}/*.exe" -Destination "$outputPath/"
 
-          Write-Host "Copying DLL files from ${{ env.BUILD_PATH }} to ${{ env.OUTPUT_PATH }}\r1delta\bin_delta\"
-          Copy-Item -Path "${{ env.BUILD_PATH }}\*.dll" -Destination "${{ env.OUTPUT_PATH }}\r1delta\bin_delta\"
+          Write-Host "Copying DLL files from ${{ env.BUILD_PATH }} to $binDeltaPath"
+          Copy-Item -Path "${{ env.BUILD_PATH }}/*.dll" -Destination "$binDeltaPath/"
 
-          # Robocopy is a robust Windows tool for directory copying
+          # Copy core scripts using Robocopy
           Write-Host "Copying core scripts using Robocopy"
-          robocopy "${{ github.workspace }}\core" "${{ env.OUTPUT_PATH }}\r1delta" /E /XD .git /XF *.md
-          $RoboExitCode = $LASTEXITCODE # Capture the exit code
+          $coreSourcePath = "${{ github.workspace }}/core"
+          robocopy "$coreSourcePath" "$deltaPath" /E /XD .git /XF *.md
+          $RoboExitCode = $LASTEXITCODE
           Write-Host "Robocopy exit code: $RoboExitCode"
 
           # Check Robocopy exit code (0-7 are success/no-op/files copied)
           if ($RoboExitCode -ge 8) {
               Write-Error "Robocopy failed with exit code $RoboExitCode"
-              exit 1 # Explicitly exit script with error code 1
+              exit 1
           } else {
               Write-Host "Robocopy completed successfully."
-              # No error, proceed
           }
 
           # Output the path to the prepared directory for the artifact upload
-          $outputPath = "${{ env.OUTPUT_PATH }}"
           Write-Host "Outputting directory path: $outputPath"
-          echo "output_dir=$outputPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          echo "output_dir=$outputPath" >> $env:GITHUB_OUTPUT
 
-          # Explicitly exit with 0 if Robocopy was successful (exit codes 0-7)
+          # Explicitly exit with 0 if successful
           exit 0
 
       # --- Upload Artifact ---
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v4
         with:
-          # Use the directory path output by the previous step
           path: ${{ steps.format_files.outputs.output_dir }}
-          # Use the name defined in the job's outputs
-          name: delta # This context (within the same job) is correct
+          name: delta
 
   # --- Release Job ---
   release:
@@ -146,7 +142,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: ${{ needs.build.outputs.artifact_name }}
-          path: ${{ github.workspace }}\release_files
+          path: ${{ github.workspace }}/release_files
 
       - name: Setup NuGet CLI
         uses: NuGet/setup-nuget@v2
@@ -155,22 +151,18 @@ jobs:
 
       # --- Install Squirrel Tool via NuGet ---
       - name: Install Squirrel.Windows Tool
-        id: install_squirrel # Give step an ID
+        id: install_squirrel
         run: |
           # Define where to install the tool package
-          $squirrelToolPath = "${{ github.workspace }}\squirrel-tool"
+          $squirrelToolPath = "${{ github.workspace }}/squirrel-tool"
           New-Item -ItemType Directory -Force -Path $squirrelToolPath
 
           # Install the specific NuGet package containing the tool
-          # -ExcludeVersion prevents creating a versioned subfolder in OutputDirectory
-          # -DirectDownload can sometimes be faster/more reliable in CI
           nuget install Squirrel.Windows -OutputDirectory $squirrelToolPath -ExcludeVersion -NoCache -DirectDownload
 
-          # Find the actual tools directory (might vary slightly with package updates)
-          # Usually it's under a 'tools' subfolder within the package contents
-          $squirrelExeDir = Join-Path $squirrelToolPath "Squirrel.Windows\tools" # Common path structure
+          # Find the actual tools directory
+          $squirrelExeDir = Join-Path $squirrelToolPath "Squirrel.Windows\tools"
           if (-not (Test-Path (Join-Path $squirrelExeDir "Squirrel.exe"))) {
-             # Fallback or alternative search if needed, adjust based on actual package structure if it changes
              Write-Warning "Squirrel.exe not found in expected path: $squirrelExeDir. Searching..."
              $foundPath = Get-ChildItem -Path $squirrelToolPath -Recurse -Filter Squirrel.exe | Select-Object -First 1
              if ($foundPath) {
@@ -184,10 +176,10 @@ jobs:
 
           # Add the directory containing Squirrel.exe to the PATH for subsequent steps
           Write-Host "Adding $squirrelExeDir to PATH"
-          echo "$squirrelExeDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "$squirrelExeDir" >> $env:GITHUB_PATH
 
-          # Output the path for potential future reference (optional)
-          echo "squirrel_exe_dir=$squirrelExeDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          # Output the path for reference in other steps if needed
+          echo "squirrel_exe_dir=$squirrelExeDir" >> $env:GITHUB_OUTPUT
         shell: pwsh
 
       # Checkout the main repository again to get the nuspec file
@@ -199,35 +191,33 @@ jobs:
         run: |
           $version = $env:GITHUB_REF -replace '^refs/tags/v', ''
           Write-Host "Extracted version: $version"
-          echo "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          echo "version=$version" >> $env:GITHUB_OUTPUT
         shell: pwsh
 
       - name: Prepare for NuGet Pack
-        run: Copy-Item -Path "${{ env.NUSPEC_FILE }}" -Destination "${{ github.workspace }}\release_files\"
+        run: Copy-Item -Path "${{ env.NUSPEC_FILE }}" -Destination "${{ github.workspace }}/release_files/"
         shell: pwsh
 
       - name: Pack with NuGet
-        working-directory: ${{ github.workspace }}\release_files
+        working-directory: ${{ github.workspace }}/release_files
         run: |
-          nuget pack ${{ env.NUSPEC_FILE }} -Version ${{ steps.get_version.outputs.version }} -OutputDirectory ${{ github.workspace }}\package_output -NoPackageAnalysis
+          nuget pack ${{ env.NUSPEC_FILE }} -Version ${{ steps.get_version.outputs.version }} -OutputDirectory ${{ github.workspace }}/package_output -NoPackageAnalysis
         shell: pwsh
 
       - name: Create Release Output Directory
-        run: mkdir ${{ github.workspace }}\squirrel_release
+        run: mkdir ${{ github.workspace }}/squirrel_release
         shell: pwsh
 
       # --- Releasify Step ---
-      # Now uses the Squirrel.exe found via NuGet and added to PATH
       - name: Releasify with Squirrel
         run: |
           REM Verify Squirrel is in PATH (optional debug)
           where Squirrel.exe
 
           REM Run the releasify command
-          Squirrel --releasify "${{ github.workspace }}\package_output\${{ env.PACKAGE_NAME }}.${{ steps.get_version.outputs.version }}.nupkg" --releaseDir "${{ github.workspace }}\squirrel_release"
+          Squirrel --releasify "${{ github.workspace }}/package_output/${{ env.PACKAGE_NAME }}.${{ steps.get_version.outputs.version }}.nupkg" --releaseDir "${{ github.workspace }}/squirrel_release"
         shell: cmd # Squirrel often works best in cmd
 
-      # ... (Keep Create GitHub Release and Upload Assets steps as they were) ...
       - name: Create GitHub Release
         id: create_release
         uses: actions/create-release@v1
@@ -245,7 +235,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ${{ github.workspace }}\squirrel_release\Setup.exe
+          asset_path: ${{ github.workspace }}/squirrel_release/Setup.exe
           asset_name: Setup.exe
           asset_content_type: application/vnd.microsoft.portable-executable
 
@@ -255,7 +245,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ${{ github.workspace }}\squirrel_release\RELEASES
+          asset_path: ${{ github.workspace }}/squirrel_release/RELEASES
           asset_name: RELEASES
           asset_content_type: text/plain
 
@@ -265,6 +255,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ${{ github.workspace }}\squirrel_release\${{ env.PACKAGE_NAME }}-${{ steps.get_version.outputs.version }}-full.nupkg
+          asset_path: ${{ github.workspace }}/squirrel_release/${{ env.PACKAGE_NAME }}-${{ steps.get_version.outputs.version }}-full.nupkg
           asset_name: ${{ env.PACKAGE_NAME }}-${{ steps.get_version.outputs.version }}-full.nupkg
           asset_content_type: application/zip
