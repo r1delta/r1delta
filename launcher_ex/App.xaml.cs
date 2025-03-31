@@ -1,5 +1,5 @@
 ﻿using Dark.Net;
-using R1Delta;
+using R1Delta; // Assuming this namespace contains RegistryHelper and VisualCppInstaller
 using Squirrel;
 using System;
 using System.Collections.Generic;
@@ -19,7 +19,7 @@ using Application = System.Windows.Application;
 using MessageBox = System.Windows.MessageBox; // Use WPF MessageBox
 using MessageBoxButton = System.Windows.MessageBoxButton; // Disambiguate
 using MessageBoxImage = System.Windows.MessageBoxImage; // Disambiguate
-using Squirrel;
+// Note: Squirrel using statement was duplicated, removed one.
 
 namespace launcher_ex
 {
@@ -68,6 +68,20 @@ namespace launcher_ex
         private static extern short GetAsyncKeyState(int vKey);
         private const int VK_F4 = 0x73; // Virtual key code for F4
 
+        // P/Invoke declaration for FormatMessage
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern uint FormatMessage(
+            uint dwFlags,
+            IntPtr lpSource,
+            uint dwMessageId,
+            uint dwLanguageId,
+            out IntPtr lpBuffer, // Using IntPtr for out buffer allocated by the system
+            uint nSize,
+            IntPtr[] Arguments); // Changed from va_list* to IntPtr[] for C# marshalling
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr LocalFree(IntPtr hMem);
+
 
         // --- Constants ---
         private const uint LOAD_WITH_ALTERED_SEARCH_PATH = 0x00000008;
@@ -81,20 +95,23 @@ namespace launcher_ex
         private const string CAM_LIST_FILE = "vpk\\cam_list.txt"; // Relative to game dir
         private const string TARGET_VPK_FILE = "vpk\\client_mp_common.bsp.pak000_040.vpk"; // Relative to game dir
         private const string AUDIO_INSTALLER_EXE = "bin\\x64\\audio_installer.exe"; // Relative to game dir
+
+        // Constants for FormatMessage
+        private const uint FORMAT_MESSAGE_ALLOCATE_BUFFER = 0x00000100;
+        private const uint FORMAT_MESSAGE_IGNORE_INSERTS = 0x00000200;
+        private const uint FORMAT_MESSAGE_FROM_SYSTEM = 0x00001000;
+        private const uint FORMAT_MESSAGE_ARGUMENT_ARRAY = 0x00002000;
+
+        private const string GitHubRepoUrl = "https://github.com/r1delta/r1delta"; // Make sure this is correct
+        private const string SquirrelAppName = "R1Delta"; // Needs to match the name used during packaging
+
+
         // Delegate for the exported C++ function (Unchanged)
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate void SetR1DeltaLaunchArgsDelegate([MarshalAs(UnmanagedType.LPStr)] string args);
 
 
         // --- Mitigation Policy Structures & Enum ---
-        // (Keep Mitigation Policy Enums and Structs as they were - unchanged)
-        // ... PROCESS_MITIGATION_POLICY enum ...
-        // ... MitigationFlags enum ...
-        // ... PROCESS_MITIGATION_ASLR_POLICY struct ...
-        // ... PROCESS_MITIGATION_EXTENSION_POINT_DISABLE_POLICY struct ...
-        // ... PROCESS_MITIGATION_IMAGE_LOAD_POLICY struct ...
-        // ... PROCESS_MITIGATION_USER_SHADOW_STACK_POLICY struct ...
-        // ... MitigationPolicyNames dictionary ...
         #region Mitigation Policy Structs & Enums
         private enum PROCESS_MITIGATION_POLICY
         {
@@ -230,6 +247,7 @@ namespace launcher_ex
         // Define the delegate for LauncherMain
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         delegate int LauncherMainDelegate(IntPtr hInstance, IntPtr hPrevInstance, [MarshalAs(UnmanagedType.LPStr)] string lpCmdLine, int nCmdShow);
+
         private bool IsDevelopmentEnvironment()
         {
             // Debugger attached?
@@ -242,26 +260,34 @@ namespace launcher_ex
             // Compiled in Debug mode? (Less reliable if Release builds are debugged)
 #if DEBUG
             Debug.WriteLine("[DevCheck] Compiled in DEBUG mode.");
-            return true;
+            // return true; // Let's rely more on path check for dev vs installed
 #endif
 
             // Running from a path that doesn't look like Squirrel's install path?
             // Squirrel installs to %LocalAppData%\AppName\app-x.y.z\
+            // Or %LocalAppData%\AppName for the top-level stubs
             string currentDir = AppContext.BaseDirectory ?? "";
-            if (!currentDir.Contains(Path.DirectorySeparatorChar + "app-"))
-            {
-                Debug.WriteLine($"[DevCheck] Current directory '{currentDir}' does not contain '\\app-'. Assuming dev environment.");
-                return true;
-            }
+            string parentDirName = Path.GetFileName(Path.GetDirectoryName(currentDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)));
+            string currentDirName = Path.GetFileName(currentDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
 
-            return false;
+            // Check if we are inside an 'app-x.y.z' folder or if the parent folder is the SquirrelAppName
+            bool isInAppFolder = currentDirName.StartsWith("app-");
+            bool isInSquirrelRoot = !string.IsNullOrEmpty(parentDirName) && parentDirName.Equals(SquirrelAppName, StringComparison.OrdinalIgnoreCase);
+
+            if (!isInAppFolder && !isInSquirrelRoot)
+            {
+                 Debug.WriteLine($"[DevCheck] Current directory '{currentDir}' doesn't appear to be a Squirrel install path (not in 'app-x.y.z' or '{SquirrelAppName}'). Assuming dev environment.");
+                 return true;
+            }
+            else
+            {
+                 Debug.WriteLine($"[DevCheck] Current directory '{currentDir}' looks like a Squirrel install path. Assuming installed environment.");
+                 return false;
+            }
         }
-        private const string GitHubRepoUrl = "https://github.com/r1delta/r1delta";
-        private const string SquirrelAppName = "R1Delta";
 
         protected async Task<bool> UpdateCheck() // Returns true if startup should continue, false otherwise
         {
-
             // --- Determine if Update Check is Needed ---
             bool isDevMode = IsDevelopmentEnvironment();
             if (isDevMode)
@@ -272,64 +298,133 @@ namespace launcher_ex
 
             // --- Squirrel App Hooks ---
             // Run these first thing.
-            using (var mgr = new UpdateManager("")) // Temp manager used for hooks
+            // Use UpdateManager(urlOrPath, appName) constructor for hooks if needed,
+            // though an empty one often works if RootAppDirectory is found correctly.
+            using (var mgr = new UpdateManager("", SquirrelAppName)) // Temp manager used for hooks
             {
                 try
                 {
+                    // Define target executable names *outside* the lambdas
+                    const string mainExeTargetName = "r1delta.exe";
+                    const string dsExeTargetName = "r1delta_ds.exe";
+
                     SquirrelAwareApp.HandleEvents(
                         onInitialInstall: v => // 'v' is the version being installed
                         {
-                            // Determine the names of the executables
-                            var mainExeName = Path.GetFileName(Assembly.GetEntryAssembly().Location); // e.g., r1delta.exe
-                            var dsExeName = "r1delta_ds.exe";
                             var updateOnlyFlag = false; // For initial install, always create
+                            var locations = ShortcutLocation.StartMenu; // Explicitly Start Menu ONLY
 
-                            Debug.WriteLine($"[Squirrel Install] Creating shortcuts for {mainExeName} and {dsExeName}");
+                            Debug.WriteLine($"[Squirrel Install] Creating Start Menu shortcuts for {mainExeTargetName} and {dsExeTargetName}");
 
-                            // Create shortcuts for the main executable (Start Menu)
-                            mgr.CreateShortcutsForExecutable(mainExeName, ShortcutLocation.StartMenu, updateOnlyFlag, null, null);
-
-                            // Create shortcut for the dedicated server executable (Start Menu ONLY)
-                            mgr.CreateShortcutsForExecutable(dsExeName, ShortcutLocation.StartMenu, updateOnlyFlag, null, null);
-                        },
-                        onAppUpdate: v => // 'v' is the new version being updated to
-                        {
-                            // Determine the names of the executables
-                            var mainExeName = Path.GetFileName(Assembly.GetEntryAssembly().Location);
-                            var dsExeName = "r1delta_ds.exe";
-                            var updateOnlyFlag = true; // For updates, only modify existing shortcuts
-
-                            Debug.WriteLine($"[Squirrel Update] Updating shortcuts for {mainExeName} and {dsExeName}");
-
-                            // Update shortcuts for the main executable (Start Menu)
-                            mgr.CreateShortcutsForExecutable(mainExeName, ShortcutLocation.StartMenu, updateOnlyFlag, null, null);
-
-                            // Update shortcut for the dedicated server executable (Start Menu ONLY)
-                            mgr.CreateShortcutsForExecutable(dsExeName, ShortcutLocation.StartMenu, updateOnlyFlag, null, null);
-                        },
-                        onAppUninstall: v => // 'v' is the version being uninstalled
-                        {
-                            // --- 1. Standard Shortcut Removal ---
-                            var mainExeName = Path.GetFileName(Assembly.GetEntryAssembly().Location);
-                            var dsExeName = "r1delta_ds.exe";
-                            Debug.WriteLine($"[Squirrel Uninstall] Removing standard shortcuts for {mainExeName} and {dsExeName}");
                             try
                             {
-                                mgr.RemoveShortcutsForExecutable(mainExeName, ShortcutLocation.StartMenu);
-                                mgr.RemoveShortcutsForExecutable(dsExeName, ShortcutLocation.StartMenu);
+                                // Create shortcuts for the main executable (Start Menu)
+                                // Squirrel will use the AssemblyTitle/Company from mainExeTargetName
+                                mgr.CreateShortcutsForExecutable(mainExeTargetName, locations, updateOnlyFlag, null, null);
+                                Debug.WriteLine($"[Squirrel Install] Created shortcut for {mainExeTargetName}");
                             }
                             catch (Exception ex)
                             {
-                                Debug.WriteLine($"[Squirrel Uninstall] Error removing shortcuts: {ex.Message}");
-                                // Log or warn, but continue uninstall
+                                Debug.WriteLine($"[Squirrel Install] FAILED to create shortcut for {mainExeTargetName}: {ex.Message}");
                             }
 
-                            // --- 2. Optional Game Content Deletion ---
+                            try
+                            {
+                                // Create shortcut for the dedicated server executable (Start Menu ONLY)
+                                // Squirrel will use the AssemblyTitle/Company from dsExeTargetName
+                                mgr.CreateShortcutsForExecutable(dsExeTargetName, locations, updateOnlyFlag, null, null);
+                                Debug.WriteLine($"[Squirrel Install] Created shortcut for {dsExeTargetName}");
+                            }
+                            catch (Exception ex)
+                            {
+                                Debug.WriteLine($"[Squirrel Install] FAILED to create shortcut for {dsExeTargetName}: {ex.Message}");
+                            }
+
+                            // --- Optional: First Run Launch ---
+                            // This might not be strictly necessary if the SquirrelAware attribute
+                            // is correctly set on r1delta.exe, as Squirrel might launch it anyway.
+                            // try
+                            // {
+                            //     // Get the path to the newly installed main executable
+                            //     string appDir = mgr.RootAppDirectory; // Gets %LocalAppData%\R1Delta
+                            //     string currentAppDir = Path.Combine(appDir, "app-" + v.Version.ToString());
+                            //     string mainExePath = Path.Combine(currentAppDir, mainExeTargetName);
+
+                            //     if (File.Exists(mainExePath))
+                            //     {
+                            //         Debug.WriteLine($"[Squirrel Install] Attempting to launch {mainExePath} after initial install.");
+                            //         Process.Start(mainExePath);
+                            //     }
+                            //     else
+                            //     {
+                            //          Debug.WriteLine($"[Squirrel Install] Could not find {mainExePath} to launch after install.");
+                            //     }
+                            // }
+                            // catch(Exception ex)
+                            // {
+                            //     Debug.WriteLine($"[Squirrel Install] Error trying to launch app after install: {ex.Message}");
+                            // }
+                        },
+                        onAppUpdate: v => // 'v' is the new version being updated to
+                        {
+                            var updateOnlyFlag = true; // For updates, only modify existing shortcuts
+                            var locations = ShortcutLocation.StartMenu; // Explicitly Start Menu ONLY
+
+                            Debug.WriteLine($"[Squirrel Update] Updating Start Menu shortcuts for {mainExeTargetName} and {dsExeTargetName}");
+
+                            try
+                            {
+                                // Update shortcuts for the main executable (Start Menu)
+                                mgr.CreateShortcutsForExecutable(mainExeTargetName, locations, updateOnlyFlag, null, null);
+                                Debug.WriteLine($"[Squirrel Update] Updated shortcut for {mainExeTargetName}");
+                            }
+                            catch (Exception ex)
+                            {
+                                Debug.WriteLine($"[Squirrel Update] FAILED to update shortcut for {mainExeTargetName}: {ex.Message}");
+                            }
+
+                            try
+                            {
+                                // Update shortcut for the dedicated server executable (Start Menu ONLY)
+                                mgr.CreateShortcutsForExecutable(dsExeTargetName, locations, updateOnlyFlag, null, null);
+                                Debug.WriteLine($"[Squirrel Update] Updated shortcut for {dsExeTargetName}");
+                            }
+                            catch (Exception ex)
+                            {
+                                Debug.WriteLine($"[Squirrel Update] FAILED to update shortcut for {dsExeTargetName}: {ex.Message}");
+                            }
+                        },
+                        onAppUninstall: v => // 'v' is the version being uninstalled
+                        {
+                            var locations = ShortcutLocation.StartMenu; // Explicitly Start Menu ONLY
+
+                            Debug.WriteLine($"[Squirrel Uninstall] Removing Start Menu shortcuts for {mainExeTargetName} and {dsExeTargetName}");
+                            try
+                            {
+                                // Use the *target* exe names here too for consistency
+                                mgr.RemoveShortcutsForExecutable(mainExeTargetName, locations);
+                                Debug.WriteLine($"[Squirrel Uninstall] Removed shortcut for {mainExeTargetName}");
+                            }
+                            catch (Exception ex)
+                            {
+                                Debug.WriteLine($"[Squirrel Uninstall] Error removing shortcut for {mainExeTargetName}: {ex.Message}");
+                            }
+                            try
+                            {
+                                mgr.RemoveShortcutsForExecutable(dsExeTargetName, locations);
+                                Debug.WriteLine($"[Squirrel Uninstall] Removed shortcut for {dsExeTargetName}");
+                            }
+                            catch (Exception ex)
+                            {
+                                Debug.WriteLine($"[Squirrel Uninstall] Error removing shortcut for {dsExeTargetName}: {ex.Message}");
+                            }
+
+                            // --- Optional Game Content Deletion ---
                             string gamePath = null;
                             try
                             {
                                 // Get the path where the launcher *thinks* the game files are
-                                gamePath = RegistryHelper.GetInstallPath();
+                                gamePath = RegistryHelper.GetInstallPath(); // Assumes RegistryHelper exists in R1Delta namespace
 
                                 if (!string.IsNullOrEmpty(gamePath) && Directory.Exists(gamePath))
                                 {
@@ -361,7 +456,8 @@ namespace launcher_ex
                                             List<string> errorDetails = new List<string>();
 
                                             // Iterate through the list of files downloaded by your manager
-                                            foreach (var fileInfo in TitanfallManager.s_fileList) // Hardcoded list of files that Delta installs use
+                                            // Assumes TitanfallManager and s_fileList exist in R1Delta namespace
+                                            foreach (var fileInfo in TitanfallManager.s_fileList)
                                             {
                                                 string fileToDelete = Path.Combine(gamePath, fileInfo.RelativePath);
                                                 try
@@ -402,18 +498,6 @@ namespace launcher_ex
 
                                             Debug.WriteLine($"[Squirrel Uninstall] Deletion attempt complete. Files deleted: {filesDeleted}, Errors: {errors}");
 
-                                            // Optionally, try to delete empty directories (use with caution)
-                                            // Example: Delete 'vpk' if empty after file removal
-                                            // try {
-                                            //    var vpkDir = Path.Combine(gamePath, "vpk");
-                                            //    if (Directory.Exists(vpkDir) && !Directory.EnumerateFileSystemEntries(vpkDir).Any()) {
-                                            //        Directory.Delete(vpkDir);
-                                            //        Debug.WriteLine($"  Deleted empty directory: {vpkDir}");
-                                            //    }
-                                            // } catch (Exception ex) { Debug.WriteLine($"Error deleting empty directory vpk: {ex.Message}"); errors++; }
-                                            // Repeat for other potentially empty parent dirs like 'bin/x64_retail', 'bin' etc. if desired.
-
-
                                             // Inform the user of the outcome
                                             string summaryMessage = $"Attempted to delete downloaded game files.\n\nFiles successfully deleted: {filesDeleted}\nErrors encountered: {errors}";
                                             if (errors > 0)
@@ -446,6 +530,11 @@ namespace launcher_ex
                             }
                         } // End of onAppUninstall lambda
                         // onAppObsoleted could also remove shortcuts if needed
+                        // onAppObsoleted: v => {
+                        //     var locations = ShortcutLocation.StartMenu;
+                        //     mgr.RemoveShortcutsForExecutable(mainExeTargetName, locations);
+                        //     mgr.RemoveShortcutsForExecutable(dsExeTargetName, locations);
+                        // }
                     );
                 }
                 catch (Exception ex)
@@ -456,12 +545,13 @@ namespace launcher_ex
             } // Dispose the temporary UpdateManager
 
 
-
             // --- Perform Update Check ---
             Debug.WriteLine("[Squirrel] Checking for updates...");
             try
             {
-                using (var updateManager = await UpdateManager.GitHubUpdateManager(GitHubRepoUrl))
+                // Use the GitHub URL associated with your *actual application*
+                // Pass the SquirrelAppName to ensure it looks in the correct %LocalAppData% folder
+                using (var updateManager = await UpdateManager.GitHubUpdateManager(GitHubRepoUrl, SquirrelAppName))
                 {
                     var updateInfo = await updateManager.CheckForUpdate();
 
@@ -469,14 +559,19 @@ namespace launcher_ex
                     {
                         Debug.WriteLine($"[Squirrel] Update available: {updateInfo.FutureReleaseEntry.Version}");
 
-                        // Show some progress indication here if desired (e.g., simple progress window)
-                        await updateManager.DownloadReleases(updateInfo.ReleasesToApply);
-                        await updateManager.ApplyReleases(updateInfo);
+                        // Consider showing a progress window here
+                        // var progressWindow = new UpdateProgressWindow(); // Example
+                        // progressWindow.Show();
+                        // Progress<int> progress = new Progress<int>(p => progressWindow.UpdateProgress(p));
+
+                        await updateManager.DownloadReleases(updateInfo.ReleasesToApply/*, progress*/);
+                        await updateManager.ApplyReleases(updateInfo/*, progress*/);
+
+                        // progressWindow.Close();
 
                         Debug.WriteLine("[Squirrel] Update applied. Requesting restart.");
-                        UpdateManager.RestartApp(); // Signal Squirrel to restart
+                        UpdateManager.RestartApp(); // Signal Squirrel to restart the *currently running* app (r1delta.exe)
 
-                        // Shutdown(0); // Shutdown is often implicit after RestartApp signals, but explicit is fine.
                         return false; // Update applied, DO NOT continue current startup
                     }
                     else
@@ -489,33 +584,54 @@ namespace launcher_ex
             catch (Exception ex)
             {
                 Debug.WriteLine($"[Squirrel] Update check failed: {ex.Message}");
+                // Avoid showing message box if it's a common network error maybe?
                 ShowWarning($"Could not check for updates. You might be offline or GitHub is unreachable.\n\n" +
                             $"The application might be out of date.\n\nError: {ex.Message}",
                             "Update Check Failed");
-                // Allow execution to continue despite error, as per requirements
                 return true; // Update check failed, but allow continuing startup
             }
         }
+
         // --- Main Entry Point ---
         [STAThread] // Required for MessageBox and SetupWindow
-        protected override void OnStartup(StartupEventArgs e)
+        protected override async void OnStartup(StartupEventArgs e) // Changed to async void
         {
-            bool shouldContinueStartup = UpdateCheck().GetAwaiter().GetResult();
+            // --- Run Update Check Asynchronously ---
+            bool shouldContinueStartup = false; // Default to not continuing
+            try
+            {
+                shouldContinueStartup = await UpdateCheck(); // Use await
+            }
+            catch (Exception ex)
+            {
+                // Catch potential exceptions from UpdateCheck itself if not caught inside
+                Debug.WriteLine($"[Startup] Critical error during async UpdateCheck: {ex.Message}");
+                ShowError($"A critical error occurred during the update check:\n{ex.Message}\n\nThe application cannot start.", "Startup Error");
+                Shutdown(1); // Use Shutdown instead of Environment.Exit in WPF App
+                return;
+            }
 
             // --- Exit if Update Check Handled It ---
             if (!shouldContinueStartup)
             {
-                // If UpdateCheck returned false, it means it either triggered
-                // a restart (via RestartApp) or called Shutdown directly.
-                // We just need to exit OnStartup cleanly.
-                return;
+                // If UpdateCheck returned false, it likely called RestartApp or handled shutdown.
+                // We might need to explicitly shut down if RestartApp doesn't guarantee it immediately.
+                Debug.WriteLine("[Startup] UpdateCheck indicated shutdown/restart. Exiting OnStartup.");
+                // Check if Shutdown has already been called or is pending
+                if (Application.Current != null && Application.Current.Dispatcher != null && !Application.Current.Dispatcher.HasShutdownStarted)
+                {
+                     Shutdown(0); // Graceful shutdown
+                }
+                return; // Exit OnStartup cleanly
             }
+
+            // --- Continue with the rest of the startup logic ---
             DarkNet.Instance.SetCurrentProcessTheme(Theme.Auto);
 
             string originalLauncherExeDir;
             try
             {
-                originalLauncherExeDir = AppContext.BaseDirectory ?? Path.GetDirectoryName(Assembly.GetEntryAssembly().Location);
+                originalLauncherExeDir = AppContext.BaseDirectory ?? Path.GetDirectoryName(Assembly.GetEntryAssembly()?.Location);
                 if (string.IsNullOrEmpty(originalLauncherExeDir))
                 {
                     throw new Exception("Could not determine launcher executable directory.");
@@ -526,7 +642,7 @@ namespace launcher_ex
             catch (Exception ex)
             {
                 ShowError($"Fatal error getting launcher path: {ex.Message}");
-                Environment.Exit(1);
+                Shutdown(1); // Use Shutdown
                 return; // Keep compiler happy
             }
 
@@ -538,7 +654,7 @@ namespace launcher_ex
                           $"This usually means the R1Delta archive was not extracted correctly.\n\n" +
                           $"Please ensure you extract *ALL* files and folders from the R1Delta zip file directly into a new, empty folder where this launcher ({Path.GetFileName(Assembly.GetEntryAssembly()?.Location ?? "launcher_ex.exe")}) is located.",
                           "R1Delta Installation Error");
-                Environment.Exit(1);
+                Shutdown(1); // Use Shutdown
                 return; // Exit immediately
             }
 
@@ -566,6 +682,7 @@ namespace launcher_ex
                     try
                     {
                         // Use the constant from TitanfallManager
+                        // Assumes TitanfallManager and ValidationFileRelativePath exist in R1Delta namespace
                         coreVpkFullPath = Path.GetFullPath(Path.Combine(currentInstallPath, TitanfallManager.ValidationFileRelativePath));
                         coreVpkExists = File.Exists(coreVpkFullPath);
                     }
@@ -585,7 +702,7 @@ namespace launcher_ex
                 if (needsSetup)
                 {
                     Debug.WriteLine("[*] Launching Setup Window...");
-                    SetupWindow setupWindow = null;
+                    SetupWindow setupWindow = null; // Assumes SetupWindow exists in R1Delta namespace
                     try
                     {
                         // Pass current settings to SetupWindow constructor
@@ -606,15 +723,16 @@ namespace launcher_ex
                             RegistryHelper.SaveInstallPath(finalInstallPath); // Path saved by SetupWindow only if download happened, ensure it's saved here too.
                             RegistryHelper.SaveShowSetupOnLaunch(finalShowSetupSetting);
                             RegistryHelper.SaveLaunchArguments(finalLaunchArgs);
-                            // --- !!! ADD THIS CHECK HERE !!! ---
-                            if (!finalShowSetupSetting) // This means the user checked "Do not show again"
+
+                            // Show F4 hint if user disabled setup window
+                            if (!finalShowSetupSetting)
                             {
                                 MessageBox.Show(
                                     "Setup will not be shown automatically on the next launch.\n\n" +
                                     "Hold the F4 key while starting the launcher if you need to access setup options again (e.g., change path, arguments).",
-                                    "Setup Hidden", // Title of the message box
+                                    "Setup Hidden",
                                     MessageBoxButton.OK,
-                                    MessageBoxImage.Information // Icon
+                                    MessageBoxImage.Information
                                 );
                             }
                         }
@@ -622,13 +740,14 @@ namespace launcher_ex
                         {
                             // User cancelled the setup window
                             Debug.WriteLine("[*] Setup Window cancelled by user.");
-                            Environment.Exit(0); // Exit gracefully
+                            Shutdown(0); // Exit gracefully using WPF's Shutdown
                             return;
                         }
                     }
                     finally
                     {
-                        setupWindow?.Dispose(); // Dispose IProgress if needed
+                        // If SetupWindow implements IDisposable (e.g., for IProgress), dispose it
+                        (setupWindow as IDisposable)?.Dispose();
                     }
                 }
                 else
@@ -640,12 +759,13 @@ namespace launcher_ex
                     finalLaunchArgs = currentArgs; // Keep existing args
 
                     // Sanity check: Ensure the path is still valid (it should be)
+                    // Assumes TitanfallManager and ValidateGamePath exist in R1Delta namespace
                     if (!TitanfallManager.ValidateGamePath(finalInstallPath, originalLauncherExeDir))
                     {
                         ShowError($"The previously configured game path is no longer valid:\n{finalInstallPath}\n\nPlease restart the launcher. Setup will run again.");
                         // Optionally clear the invalid path from registry?
                         // RegistryHelper.SaveInstallPath("");
-                        Environment.Exit(1);
+                        Shutdown(1); // Use Shutdown
                         return;
                     }
                 }
@@ -653,9 +773,10 @@ namespace launcher_ex
             catch (Exception ex)
             {
                 ShowError($"An unexpected error occurred during the initial setup check: {ex.Message}\nThe application will now exit.");
-                Environment.Exit(1);
+                Shutdown(1); // Use Shutdown
                 return;
             }
+
 
             // --- Proceed to Launch ---
 
@@ -668,17 +789,17 @@ namespace launcher_ex
             catch (Exception ex)
             {
                 ShowError($"Fatal Error: Could not change directory to the game path:\n{finalInstallPath}\n\nError: {ex.Message}");
-                Environment.Exit(1);
+                Shutdown(1); // Use Shutdown
                 return;
             }
 
             // 7. Ensure VCPP Redistributables are installed
-            VisualCppInstaller.EnsureVisualCppRedistributables(); // Assuming this class exists and works
+            VisualCppInstaller.EnsureVisualCppRedistributables(); // Assuming this class exists and works in R1Delta namespace
 
             // 8. Force High Performance GPU (unchanged logic)
-            IntPtr hNvApi = LoadLibraryW("nvapi64.dll");
-            LoadLibraryW("TextShaping.dll");
-            // Optional: FreeLibrary(hNvApi);
+            IntPtr hNvApi = LoadLibraryW("nvapi64.dll"); // Attempt to load nvapi
+            LoadLibraryW("TextShaping.dll"); // Load TextShaping
+            // Optional: FreeLibrary(hNvApi); // Usually not needed, OS handles ref counting
 
             // 9. Set ContentId environment variable (unchanged logic)
             Environment.SetEnvironmentVariable("ContentId", "1025161");
@@ -688,27 +809,31 @@ namespace launcher_ex
             {
                 if (RunAudioInstallerIfNecessary() != 0) // No longer needs path argument
                 {
-                    ShowError($"Failed setting up game audio.\nThe game cannot continue and has to exit.");
-                    Environment.Exit(1);
+                    // Error message shown inside RunAudioInstallerIfNecessary
+                    Shutdown(1); // Use Shutdown
+                    return;
                 }
             }
             catch (Exception ex)
             {
                 ShowError($"An error occurred during the audio setup check.\nThe game cannot continue and has to exit.\n\nError: {ex.Message}");
-                Environment.Exit(1);
+                Shutdown(1); // Use Shutdown
+                return;
             }
 
             // 11. Prepend required R1Delta directories (relative to original launcher dir) to PATH
             if (!PrependPath(finalInstallPath, originalLauncherExeDir))
             {
-                // Warning already shown in PrependPath
+                // Warning already shown in PrependPath, but continue execution
             }
 
 
             // 13. Load the actual game launcher DLL (from original launcher dir)
             IntPtr hLauncherModule = IntPtr.Zero;
             IntPtr pLauncherMain = IntPtr.Zero;
+            IntPtr hCoreModule = IntPtr.Zero; // Keep track of core module
             string launcherDllPath = Path.Combine(originalLauncherExeDir, R1DELTA_SUBDIR, BIN_SUBDIR, LAUNCHER_DLL_NAME);
+            string coreDllPath = Path.Combine(originalLauncherExeDir, R1DELTA_SUBDIR, BIN_DELTA_SUBDIR, "tier0.dll"); // Assuming tier0 is the core
 
             try
             {
@@ -719,36 +844,60 @@ namespace launcher_ex
                 {
                     int errorCode = Marshal.GetLastWin32Error();
                     LibraryLoadError(errorCode, LAUNCHER_DLL_NAME, launcherDllPath, originalLauncherExeDir);
-                    Environment.Exit(1);
+                    Shutdown(1); // Use Shutdown
+                    return; // Keep compiler happy
                 }
-                IntPtr hCoreModule = LoadLibraryW(Path.Combine(originalLauncherExeDir, R1DELTA_SUBDIR, BIN_DELTA_SUBDIR, "tier0.dll"));
+
+                // Load the core DLL to get the SetArgs function
+                Debug.WriteLine($"[*] Loading core DLL from {coreDllPath}");
+                hCoreModule = LoadLibraryExW(coreDllPath, IntPtr.Zero, LOAD_WITH_ALTERED_SEARCH_PATH); // Use altered search path here too
+                if (hCoreModule == IntPtr.Zero)
+                {
+                    int errorCode = Marshal.GetLastWin32Error();
+                    LibraryLoadError(errorCode, "tier0.dll", coreDllPath, originalLauncherExeDir); // Adjust libName if different
+                    FreeLibrary(hLauncherModule); // Clean up already loaded library
+                    Shutdown(1);
+                    return;
+                }
+
                 IntPtr pSetArgs = GetProcAddress(hCoreModule, "SetR1DeltaLaunchArgs");
+                if (pSetArgs == IntPtr.Zero)
+                {
+                    int errorCode = Marshal.GetLastWin32Error();
+                    ShowError($"Failed to find the 'SetR1DeltaLaunchArgs' function in the core DLL ('{Path.GetFileName(coreDllPath)}').\nError code: {errorCode}\n\nThe game cannot continue and has to exit.");
+                    FreeLibrary(hLauncherModule);
+                    FreeLibrary(hCoreModule);
+                    Shutdown(1);
+                    return;
+                }
 
                 Debug.WriteLine($"[*] Calling SetR1DeltaLaunchArgs with: '{finalLaunchArgs ?? ""}'");
                 var setArgsDelegate = (SetR1DeltaLaunchArgsDelegate)Marshal.GetDelegateForFunctionPointer(pSetArgs, typeof(SetR1DeltaLaunchArgsDelegate));
                 setArgsDelegate(finalLaunchArgs ?? ""); // Pass the arguments
                 Debug.WriteLine($"[*] Successfully called SetR1DeltaLaunchArgs.");
 
-                
-                    
-
-
+                // Now get LauncherMain from the launcher DLL
                 Debug.WriteLine("[*] Getting LauncherMain address");
                 pLauncherMain = GetProcAddress(hLauncherModule, "LauncherMain");
                 if (pLauncherMain == IntPtr.Zero)
                 {
                     int errorCode = Marshal.GetLastWin32Error();
                     ShowError($"Failed to find the 'LauncherMain' function in '{LAUNCHER_DLL_NAME}'.\nError code: {errorCode}\n\nThe game cannot continue and has to exit.");
-                    FreeLibrary(hLauncherModule); // Clean up loaded library
-                    Environment.Exit(1);
+                    FreeLibrary(hLauncherModule);
+                    FreeLibrary(hCoreModule);
+                    Shutdown(1);
+                    return;
                 }
             }
             catch (Exception ex)
             {
-                ShowError($"An unexpected error occurred while loading '{LAUNCHER_DLL_NAME}'.\nError: {ex.Message}\n\nThe game cannot continue and has to exit.");
+                ShowError($"An unexpected error occurred while loading DLLs or functions.\nError: {ex.Message}\n\nThe game cannot continue and has to exit.");
                 if (hLauncherModule != IntPtr.Zero) FreeLibrary(hLauncherModule);
-                Environment.Exit(1);
+                if (hCoreModule != IntPtr.Zero) FreeLibrary(hCoreModule);
+                Shutdown(1);
+                return;
             }
+            // Do not free hCoreModule here, the game might depend on it.
 
             // 14. Apply Process Mitigation Policies
             SetMitigationPolicies();
@@ -759,28 +908,29 @@ namespace launcher_ex
                 Debug.WriteLine("[*] Preparing arguments for LauncherMain...");
                 var launcherMain = (LauncherMainDelegate)Marshal.GetDelegateForFunctionPointer(pLauncherMain, typeof(LauncherMainDelegate));
 
-
-                // Call LauncherMain with only the -game argument.
+                // Call LauncherMain. Arguments are now passed via SetR1DeltaLaunchArgs.
                 int result = launcherMain(
                         IntPtr.Zero, // hInstance - Not readily available/needed
                         IntPtr.Zero, // hPrevInstance - Always zero in modern Windows
-                        "",   
+                        "",          // lpCmdLine - Pass empty string, args handled internally
                         1            // nCmdShow - SW_SHOWNORMAL
                     );
 
-                // Note: We don't FreeLibrary(hLauncherModule) here because the game process relies on it.
-                // It will be unloaded when the process exits.
-
-                Process.GetCurrentProcess().Kill();
-
+                // If LauncherMain returns, the game process likely exited or the C++ code returned control.
+                Debug.WriteLine($"[*] LauncherMain returned with code: {result}. Shutting down launcher.");
+                // Don't FreeLibrary(hLauncherModule/hCoreModule) here because the game process relies on them until it fully exits.
+                // The OS will clean them up when the process terminates.
+                Shutdown(result); // Exit with the code from LauncherMain
             }
             catch (Exception ex)
             {
-                // ShowError($"An error occurred while executing 'LauncherMain'.\nError: {ex.Message}\n\nThe game may not have started correctly.");
+                ShowError($"An error occurred while executing 'LauncherMain'.\nError: {ex.Message}\n\nThe game may not have started correctly.");
                 // Don't FreeLibrary here either, the process might still be running somehow
-                Process.GetCurrentProcess().Kill();
+                Shutdown(1); // Exit with an error code
             }
+            // No need for Process.GetCurrentProcess().Kill() if using Shutdown() properly.
         }
+
 
         // --- Helper Functions ---
 
@@ -796,32 +946,12 @@ namespace launcher_ex
             MessageBox.Show(message, title, MessageBoxButton.OK, MessageBoxImage.Warning);
         }
 
-        // Constants for FormatMessage
-        private const uint FORMAT_MESSAGE_ALLOCATE_BUFFER = 0x00000100;
-        private const uint FORMAT_MESSAGE_IGNORE_INSERTS = 0x00000200;
-        private const uint FORMAT_MESSAGE_FROM_SYSTEM = 0x00001000;
-        private const uint FORMAT_MESSAGE_ARGUMENT_ARRAY = 0x00002000;
-
-        // P/Invoke declaration for FormatMessage
-        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        private static extern uint FormatMessage(
-            uint dwFlags,
-            IntPtr lpSource,
-            uint dwMessageId,
-            uint dwLanguageId,
-            out IntPtr lpBuffer, // Using IntPtr for out buffer allocated by the system
-            uint nSize,
-            IntPtr[] Arguments); // Changed from va_list* to IntPtr[] for C# marshalling
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern IntPtr LocalFree(IntPtr hMem);
-
         // --- Modified Helper Function ---
         private static string GetFormattedErrorMessage(int errorCode, params string[] args)
         {
             IntPtr lpMsgBuf = IntPtr.Zero;
             IntPtr[] pArgs = null;
-            IntPtr[] pArgsPtr = null; // Pointer to array of string pointers
+            IntPtr pArgsPtr = IntPtr.Zero; // Pointer to array of string pointers (use IntPtr for the array itself)
 
             try
             {
@@ -837,10 +967,15 @@ namespace launcher_ex
                     for (int i = 0; i < args.Length; i++)
                     {
                         // Use StringToHGlobalUni for Unicode strings (%1 expects LPWSTR usually)
-                        pArgs[i] = Marshal.StringToHGlobalUni(args[i]);
+                        pArgs[i] = Marshal.StringToHGlobalUni(args[i] ?? ""); // Handle null args gracefully
                     }
-                    // Create a pointer to the array of pointers
-                    pArgsPtr = pArgs;
+                    // Allocate unmanaged memory for the array of pointers and copy the pointers
+                    int sizeOfPtr = Marshal.SizeOf<IntPtr>();
+                    pArgsPtr = Marshal.AllocHGlobal(args.Length * sizeOfPtr);
+                    for(int i = 0; i < args.Length; i++)
+                    {
+                        Marshal.WriteIntPtr(pArgsPtr, i * sizeOfPtr, pArgs[i]);
+                    }
                 }
                 else
                 {
@@ -857,7 +992,7 @@ namespace launcher_ex
                     dwLangId,    // Default language
                     out lpMsgBuf,// Output buffer allocated by system
                     0,           // Minimum size (0 lets system decide)
-                    pArgsPtr);   // Array of insert strings
+                    pArgsPtr == IntPtr.Zero ? null : new IntPtr[] { pArgsPtr }); // Pass the pointer to the array if it exists
 
                 if (charCount == 0)
                 {
@@ -879,7 +1014,7 @@ namespace launcher_ex
                 {
                     LocalFree(lpMsgBuf);
                 }
-                // Free the memory allocated for the arguments
+                // Free the memory allocated for the argument strings
                 if (pArgs != null)
                 {
                     for (int i = 0; i < pArgs.Length; i++)
@@ -889,6 +1024,11 @@ namespace launcher_ex
                             Marshal.FreeHGlobal(pArgs[i]);
                         }
                     }
+                }
+                // Free the memory allocated for the array of pointers
+                if (pArgsPtr != IntPtr.Zero)
+                {
+                    Marshal.FreeHGlobal(pArgsPtr);
                 }
             }
         }
@@ -903,31 +1043,49 @@ namespace launcher_ex
 
             StringBuilder text = new StringBuilder();
 
-            text.AppendFormat("Failed to load the {0} at \"{1}\" ({2}):\n\n{3}\n\n", libName, location, errorCode, errorMessage);
+            text.AppendFormat("Failed to load the library '{0}'\nLocation: \"{1}\"\nError Code: {2}\n\nSystem Message: {3}\n\n", libName, location, errorCode, errorMessage);
             text.Append("Make sure you followed the R1Delta installation instructions carefully before reaching out for help.");
 
-            bool fileExists = File.Exists(location);
-            string gameExePathInLauncherDir = Path.Combine(originalLauncherExeDir, "Titanfall.exe"); // Check for accidental placement
+            bool fileExists = false;
+            try { fileExists = File.Exists(location); } catch { /* Ignore errors checking existence */ }
 
-            if (errorCode == 126 && fileExists) // ERROR_MOD_NOT_FOUND
+            string gameExePathInLauncherDir = Path.Combine(originalLauncherExeDir, "Titanfall.exe"); // Check for accidental placement
+            bool gameExeMisplaced = false;
+            try { gameExeMisplaced = File.Exists(gameExePathInLauncherDir); } catch { /* Ignore */ }
+
+
+            if (errorCode == 126) // ERROR_MOD_NOT_FOUND
             {
-                text.AppendFormat("\n\nThe file '{0}' DOES exist, so this error indicates that one of its *dependencies* failed to be found.\n\n", libName);
-                text.Append("This usually means a required R1Delta file (in r1delta\\bin or r1delta\\bin_delta) is missing or corrupted, or a system dependency is missing.\n\n");
-                text.Append("Try the following steps:\n");
-                text.Append("1. Ensure *all* R1Delta files were extracted correctly into the launcher's directory.\n");
-                text.Append("2. Install Visual C++ Redistributable (usually 2015-2022 x64): https://aka.ms/vs/17/release/vc_redist.x64.exe\n");
-                text.Append("3. If using Steam/EA App for the base game files, try verifying/repairing game files (though this error is more likely R1Delta related).");
+                text.AppendFormat("\n\nThis error means Windows found the file '{0}' but could not load one of its *dependencies*.", libName);
+                text.Append("\n\nCommon Causes & Solutions:");
+                text.Append("\n1. Missing R1Delta Files: Ensure *all* files and folders from the R1Delta zip were extracted correctly into the launcher's directory (especially the 'r1delta\\bin' and 'r1delta\\bin_delta' subfolders). Re-extracting might help.");
+                text.Append("\n2. Missing Visual C++ Redistributable: Install the latest Microsoft Visual C++ Redistributable (usually x64 version for 2015-2022). Link: https://aka.ms/vs/17/release/vc_redist.x64.exe");
+                text.Append("\n3. Corrupted Files: Antivirus might have interfered, or the download was incomplete. Try disabling antivirus temporarily and re-extracting R1Delta.");
+                text.Append("\n4. Incorrect PATH: Although the launcher tries to set the PATH, external factors could interfere. This is less likely if other parts loaded.");
             }
-            else if (File.Exists(gameExePathInLauncherDir)) // Titanfall.exe found *next to the launcher*
+            else if (errorCode == 127) // ERROR_PROC_NOT_FOUND
+            {
+                 text.AppendFormat("\n\nThis error means a required function was not found within '{0}' or one of its dependencies.", libName);
+                 text.Append("\n\nThis usually indicates a version mismatch (e.g., an older R1Delta file mixed with newer ones) or corrupted files.");
+                 text.Append("\n\nSolution: Delete the 'r1delta' folder completely and re-extract the latest version of R1Delta.");
+            }
+            else if (errorCode == 193) // ERROR_BAD_EXE_FORMAT
+            {
+                 text.AppendFormat("\n\nThis error means '{0}' is not a valid Windows application or DLL, or it's the wrong architecture (e.g., trying to load a 32-bit DLL in a 64-bit process).", libName);
+                 text.Append("\n\nThis strongly suggests file corruption or incorrect download/extraction.");
+                 text.Append("\n\nSolution: Delete the 'r1delta' folder and re-extract the correct (usually 64-bit) version of R1Delta.");
+            }
+            else if (gameExeMisplaced) // Titanfall.exe found *next to the launcher*
             {
                 string launcherDirName = new DirectoryInfo(originalLauncherExeDir).Name;
-                text.AppendFormat("\n\nWe detected 'Titanfall.exe' in the *same directory* as the R1Delta launcher ('{0}').\n\n", originalLauncherExeDir);
-                text.Append("This is incorrect. R1Delta should be placed in its *own* folder, separate from the Titanfall game files.\n");
-                text.Append("Please move the R1Delta launcher and its associated files (like the 'r1delta' folder) to a new, empty directory.");
+                text.AppendFormat("\n\nIMPORTANT: We detected 'Titanfall.exe' in the *same directory* as the R1Delta launcher ('{0}').", originalLauncherExeDir);
+                text.Append("\n\nThis is incorrect. R1Delta should be placed in its *own* folder, separate from the Titanfall game files.");
+                text.Append("\nPlease move the R1Delta launcher and its associated files (like the 'r1delta' folder) to a new, empty directory, then run the setup again.");
             }
             else if (!fileExists) // The specific DLL we tried to load is missing
             {
-                text.AppendFormat("\n\nThe required R1Delta file '{0}' is missing from '{1}'.\nDid you unpack *all* R1Delta files into the launcher's directory?", libName, Path.GetDirectoryName(location));
+                text.AppendFormat("\n\nThe required R1Delta file '{0}' is missing from '{1}'.", libName, Path.GetDirectoryName(location));
+                text.Append("\nDid you unpack *all* R1Delta files into the launcher's directory?");
             }
 
             ShowError(text.ToString());
@@ -946,32 +1104,41 @@ namespace launcher_ex
             try
             {
                 string currentPath = Environment.GetEnvironmentVariable("PATH") ?? "";
+                // Ensure paths exist before adding them to avoid cluttering PATH with invalid entries
                 string r1DeltaBinDelta = Path.Combine(launcherExeDir, R1DELTA_SUBDIR, BIN_DELTA_SUBDIR);
                 string r1DeltaBin = Path.Combine(launcherExeDir, R1DELTA_SUBDIR, BIN_SUBDIR);
                 string retailBin = Path.Combine(gameInstallPath, RETAIL_BIN_SUBDIR); // Game's retail bin
-                string retailGameDirBin = Path.Combine(gameInstallPath, "r1", RETAIL_BIN_SUBDIR); // Game's r1 retail bin
+                string retailGameDirBin = Path.Combine(gameInstallPath, "r1", RETAIL_BIN_SUBDIR); // Game's r1 retail bin (less common?)
+
+                List<string> pathsToAdd = new List<string>();
+                if (Directory.Exists(r1DeltaBinDelta)) pathsToAdd.Add(r1DeltaBinDelta);
+                if (Directory.Exists(r1DeltaBin)) pathsToAdd.Add(r1DeltaBin);
+                if (Directory.Exists(retailBin)) pathsToAdd.Add(retailBin);
+                if (Directory.Exists(retailGameDirBin)) pathsToAdd.Add(retailGameDirBin);
 
                 // Construct the new PATH: r1delta_delta -> r1delta -> game_retail -> game_r1_retail -> original PATH
                 // Order matters for DLL loading precedence. R1Delta overrides first.
-                string newPath = string.Join(Path.PathSeparator.ToString(),
-                                             r1DeltaBinDelta,
-                                             r1DeltaBin,
-                                             retailBin,
-                                             retailGameDirBin,
-                                             currentPath);
+                string newPath = string.Join(Path.PathSeparator.ToString(), pathsToAdd.Concat(new[] { currentPath }));
 
                 Environment.SetEnvironmentVariable("PATH", newPath);
                 Debug.WriteLine($"[*] Updated PATH:");
-                Debug.WriteLine($"    Prepended: {r1DeltaBinDelta}");
-                Debug.WriteLine($"    Prepended: {r1DeltaBin}");
-                Debug.WriteLine($"    Prepended: {retailBin}");
-                Debug.WriteLine($"    Prepended: {retailGameDirBin}");
+                foreach(var p in pathsToAdd) { Debug.WriteLine($"    Prepended: {p}"); }
                 // Debug.WriteLine($"    Original: {currentPath}"); // Can be very long
                 return true;
             }
+            catch (ArgumentException argEx) // Path.Combine might throw this
+            {
+                 ShowWarning($"Warning: Could not construct PATH elements. Check for invalid characters in paths.\nGame Path: {gameInstallPath}\nLauncher Path: {launcherExeDir}\nError: {argEx.Message}");
+                 return false;
+            }
+            catch (System.Security.SecurityException secEx)
+            {
+                 ShowWarning($"Warning: Insufficient permissions to modify the PATH environment variable.\nError: {secEx.Message}");
+                 return false;
+            }
             catch (Exception ex)
             {
-                ShowWarning($"Warning: could not modify the PATH environment variable. Game components might fail to load.\nError: {ex.Message}");
+                ShowWarning($"Warning: An unexpected error occurred while modifying the PATH environment variable.\nError: {ex.Message}");
                 return false;
             }
         }
@@ -992,20 +1159,22 @@ namespace launcher_ex
                 {
                     if (ImmIsIME(list[i]))
                     {
+                        Debug.WriteLine("IME detected.");
                         return true;
                     }
                 }
+                Debug.WriteLine("No IME detected.");
                 return false;
             }
             catch (DllNotFoundException)
             {
                 // imm32.dll might not be present on some very minimal Windows installs (unlikely)
-                Debug.WriteLine("Warning: Could not check for IME installation (imm32.dll not found?).");
+                Debug.WriteLine("Warning: Could not check for IME installation (imm32.dll not found?). Assuming IME present.");
                 return true; // Assume IME might be installed to be safe regarding mitigations
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Warning: Exception checking for IME installation: {ex.Message}");
+                Debug.WriteLine($"Warning: Exception checking for IME installation: {ex.Message}. Assuming IME present.");
                 return true; // Assume IME might be installed
             }
         }
@@ -1021,14 +1190,22 @@ namespace launcher_ex
 
             if (pSetPolicy == IntPtr.Zero)
             {
-                Debug.WriteLine("SetProcessMitigationPolicy not found. Skipping mitigation setup.");
+                Debug.WriteLine("SetProcessMitigationPolicy not found. Skipping mitigation setup (OS likely older than Windows 8).");
                 return; // Not supported on this OS version (Win7 or older)
             }
 
             // Dynamically load GetProcessMitigationPolicy if needed
             if (pGetPolicy != IntPtr.Zero)
             {
-                pGetProcessMitigationPolicy = (GetProcessMitigationPolicyDelegate)Marshal.GetDelegateForFunctionPointer(pGetPolicy, typeof(GetProcessMitigationPolicyDelegate));
+                try
+                {
+                    pGetProcessMitigationPolicy = (GetProcessMitigationPolicyDelegate)Marshal.GetDelegateForFunctionPointer(pGetPolicy, typeof(GetProcessMitigationPolicyDelegate));
+                }
+                catch (Exception ex)
+                {
+                     Debug.WriteLine($"Warning: Could not get delegate for GetProcessMitigationPolicy: {ex.Message}");
+                     pGetProcessMitigationPolicy = null;
+                }
             }
 
 
@@ -1043,30 +1220,40 @@ namespace launcher_ex
                     if (!SetProcessMitigationPolicy(policy, buffer, size))
                     {
                         int error = Marshal.GetLastWin32Error();
-                        // Ignore ERROR_INVALID_PARAMETER (87) for ShadowStack if CPU doesn't support CET
-                        // Also ignore ERROR_NOT_SUPPORTED (50) which might occur on some VMs or older Win10/11 builds
-                        if (policy == PROCESS_MITIGATION_POLICY.ProcessUserShadowStackPolicy && (error == 87 || error == 50))
-                        {
-                            Debug.WriteLine($"Ignoring SetProcessMitigationPolicy error {error} for UserShadowStackPolicy as CPU/OS may lack CET support.");
-                            return;
-                        }
-                        // Ignore ERROR_ACCESS_DENIED (5) which can happen if policy is already set by system/debugger.
-                        if (error == 5) // Access denied might be less critical
-                        {
-                            Debug.WriteLine($"Ignoring SetProcessMitigationPolicy error {error} (Access Denied) for policy {policy}. It might be already enforced.");
-                            return;
-                        }
-
-
                         string policyName = MitigationPolicyNames.ContainsKey(policy) ? MitigationPolicyNames[policy] : policy.ToString();
-                        // Use WPF MessageBox here as well
-                        MessageBox.Show($"Failed to set mitigation policy: {policyName}\nError: {error} ({new Win32Exception(error).Message})\n\nThis is usually a non-fatal error, the game might still work.",
-                                        "Mitigation Policy Warning", MessageBoxButton.OK, MessageBoxImage.Warning);
+
+                        // Ignore errors that are common/expected or less critical
+                        if (policy == PROCESS_MITIGATION_POLICY.ProcessUserShadowStackPolicy && (error == 87 /*INVALID_PARAMETER*/ || error == 50 /*NOT_SUPPORTED*/))
+                        {
+                            Debug.WriteLine($"Ignoring SetProcessMitigationPolicy error {error} for {policyName} as CPU/OS may lack CET support.");
+                            return;
+                        }
+                        if (error == 5) // ERROR_ACCESS_DENIED
+                        {
+                            Debug.WriteLine($"Ignoring SetProcessMitigationPolicy error {error} (Access Denied) for policy {policyName}. It might be already enforced by system/debugger/group policy.");
+                            return;
+                        }
+                        if (error == 87 && policy != PROCESS_MITIGATION_POLICY.ProcessUserShadowStackPolicy) // ERROR_INVALID_PARAMETER for other policies might indicate OS incompatibility
+                        {
+                            Debug.WriteLine($"Ignoring SetProcessMitigationPolicy error {error} (Invalid Parameter) for policy {policyName}. OS might not support this specific policy/flag combination.");
+                            return;
+                        }
+
+
+                        // Show warning for other errors
+                        ShowWarning($"Failed to set mitigation policy: {policyName}\nError: {error} ({new Win32Exception(error).Message})\n\nThis is usually a non-fatal error, the game might still work.",
+                                        "Mitigation Policy Warning");
                     }
                     else
                     {
                         Debug.WriteLine($"Successfully applied mitigation policy: {policy}");
                     }
+                }
+                catch (Exception ex) // Catch unexpected errors during the P/Invoke or marshalling
+                {
+                     string policyName = MitigationPolicyNames.ContainsKey(policy) ? MitigationPolicyNames[policy] : policy.ToString();
+                     Debug.WriteLine($"Unexpected exception setting mitigation policy {policyName}: {ex.Message}");
+                     ShowWarning($"An unexpected error occurred while trying to set mitigation policy: {policyName}\nError: {ex.Message}", "Mitigation Policy Error");
                 }
                 finally
                 {
@@ -1083,6 +1270,7 @@ namespace launcher_ex
                 {
                     GCHandle handle = GCHandle.Alloc(aslrPolicy, GCHandleType.Pinned);
                     try { pGetProcessMitigationPolicy(GetCurrentProcess(), PROCESS_MITIGATION_POLICY.ProcessASLRPolicy, handle.AddrOfPinnedObject(), (nuint)Marshal.SizeOf(aslrPolicy)); }
+                    catch (Exception getEx) { Debug.WriteLine($"Warning: Failed to get current ASLR policy: {getEx.Message}"); }
                     finally { if (handle.IsAllocated) handle.Free(); }
                 }
                 // Set desired flags: BottomUp, ForceRelocate, HighEntropy, DisallowStripped
@@ -1103,6 +1291,7 @@ namespace launcher_ex
                     {
                         GCHandle handle = GCHandle.Alloc(extPolicy, GCHandleType.Pinned);
                         try { pGetProcessMitigationPolicy(GetCurrentProcess(), PROCESS_MITIGATION_POLICY.ProcessExtensionPointDisablePolicy, handle.AddrOfPinnedObject(), (nuint)Marshal.SizeOf(extPolicy)); }
+                        catch (Exception getEx) { Debug.WriteLine($"Warning: Failed to get current Extension Point policy: {getEx.Message}"); }
                         finally { if (handle.IsAllocated) handle.Free(); }
                     }
                     // Set desired flags: DisableExtensionPoints
@@ -1124,10 +1313,12 @@ namespace launcher_ex
                 {
                     GCHandle handle = GCHandle.Alloc(imgPolicy, GCHandleType.Pinned);
                     try { pGetProcessMitigationPolicy(GetCurrentProcess(), PROCESS_MITIGATION_POLICY.ProcessImageLoadPolicy, handle.AddrOfPinnedObject(), (nuint)Marshal.SizeOf(imgPolicy)); }
+                    catch (Exception getEx) { Debug.WriteLine($"Warning: Failed to get current Image Load policy: {getEx.Message}"); }
                     finally { if (handle.IsAllocated) handle.Free(); }
                 }
                 // Set desired flags: NoRemoteImages, PreferSystem32
-                imgPolicy.SetFlags(true, false, true);
+                // NoLowMandatoryLabelImages can sometimes cause issues with certain overlays/injectors, keep false unless needed.
+                imgPolicy.SetFlags(noRemote: true, noLowMandatory: false, preferSystem32: true);
                 SetPolicyEnsureOK(PROCESS_MITIGATION_POLICY.ProcessImageLoadPolicy, imgPolicy);
             }
             catch (Exception ex) { Debug.WriteLine($"Error applying Image Load policy: {ex.Message}"); }
@@ -1152,7 +1343,7 @@ namespace launcher_ex
                         gotPolicy = pGetProcessMitigationPolicy(GetCurrentProcess(), PROCESS_MITIGATION_POLICY.ProcessUserShadowStackPolicy, handle.AddrOfPinnedObject(), policySize);
                     }
                     catch (EntryPointNotFoundException) { /* GetPolicy might not exist */ }
-                    catch (Exception getEx) { Debug.WriteLine($"Error getting UserShadowStackPolicy: {getEx.Message}"); }
+                    catch (Exception getEx) { Debug.WriteLine($"Warning: Error getting UserShadowStackPolicy: {getEx.Message}"); }
                     finally { if (handle.IsAllocated) handle.Free(); }
                 }
 
@@ -1196,10 +1387,18 @@ namespace launcher_ex
 
             try
             {
+                // Ensure file exists before trying to open
+                if (!File.Exists(filepath))
+                {
+                    Debug.WriteLine($"Warning: File not found for OggS scan: {filepath}");
+                    return false;
+                }
+
                 using (FileStream fs = new FileStream(filepath, FileMode.Open, FileAccess.Read, FileShare.Read))
                 {
                     int bytesRead;
                     int overlap = 0; // How many bytes from the previous buffer to prepend to the current one
+                    long filePosition = 0; // Track position for better debugging
 
                     while ((bytesRead = fs.Read(buffer, overlap, bufferSize - overlap)) > 0)
                     {
@@ -1219,7 +1418,7 @@ namespace launcher_ex
                             }
                             if (match)
                             {
-                                Debug.WriteLine($"Found 'OggS' pattern in {filepath}");
+                                Debug.WriteLine($"Found 'OggS' pattern in {filepath} at approx offset {filePosition + i}");
                                 return true; // Pattern found
                             }
                         }
@@ -1231,18 +1430,24 @@ namespace launcher_ex
                             // Copy the end of the buffer to the beginning for the next read
                             Buffer.BlockCopy(buffer, currentBufferSize - overlap, buffer, 0, overlap);
                         }
+                        filePosition += bytesRead; // Update approximate position
                     }
                 }
             }
-            catch (FileNotFoundException)
+            catch (FileNotFoundException) // Should be caught by File.Exists check, but keep for safety
             {
-                Debug.WriteLine($"Warning: File not found during OggS scan: {filepath}");
-                return false; // File doesn't exist, can't contain the pattern
+                Debug.WriteLine($"Warning: File not found during OggS scan (should have been checked): {filepath}");
+                return false;
             }
             catch (IOException ex)
             {
                 Debug.WriteLine($"Warning: IO error during OggS scan of {filepath}: {ex.Message}");
-                return false;
+                return false; // Treat IO errors as pattern not found / cannot verify
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                 Debug.WriteLine($"Warning: Access denied during OggS scan of {filepath}: {ex.Message}");
+                 return false; // Treat permission errors as pattern not found / cannot verify
             }
             catch (Exception ex)
             {
@@ -1268,106 +1473,154 @@ namespace launcher_ex
             string targetVpkPath = Path.Combine(Directory.GetCurrentDirectory(), TARGET_VPK_FILE);
             string installerPath = Path.Combine(Directory.GetCurrentDirectory(), AUDIO_INSTALLER_EXE);
 
-            if (File.Exists(audioDonePath))
-            {
-                Debug.WriteLine("Audio setup already marked as done.");
-                return 0; // Already done
-            }
-
-            if (!File.Exists(camListPath))
-            {
-                Debug.WriteLine($"Warning: {CAM_LIST_FILE} not found in CWD ({Directory.GetCurrentDirectory()}). Cannot check audio state.");
-                // Proceed without audio check/install for Delta VPKs.
-                return 0; // Indicate success (nothing to do/check)
-            }
-
-            // Check header of cam_list.txt (unchanged logic)
             try
             {
-                using (StreamReader reader = new StreamReader(camListPath))
+                if (File.Exists(audioDonePath))
                 {
-                    string firstLine = reader.ReadLine();
-                    if (firstLine != "CAMLIST")
+                    Debug.WriteLine("Audio setup already marked as done.");
+                    return 0; // Already done
+                }
+
+                if (!File.Exists(camListPath))
+                {
+                    Debug.WriteLine($"Required file '{CAM_LIST_FILE}' not found in CWD ({Directory.GetCurrentDirectory()}). Assuming Delta install or cannot check audio state. Skipping audio install.");
+                    // Proceed without audio check/install for Delta VPKs or if base files are missing.
+                    return 0; // Indicate success (nothing to do/check)
+                }
+
+                // Check header of cam_list.txt
+                try
+                {
+                    using (StreamReader reader = new StreamReader(camListPath))
                     {
-                        Debug.WriteLine($"Warning: Invalid header in {camListPath}. Expected 'CAMLIST', got '{firstLine}'. Cannot proceed with audio check.");
-                        return 1; // Fail as list might be corrupt
+                        string firstLine = reader.ReadLine();
+                        if (firstLine != "CAMLIST")
+                        {
+                            Debug.WriteLine($"Warning: Invalid header in {camListPath}. Expected 'CAMLIST', got '{firstLine}'. Cannot proceed with audio check.");
+                            // Don't fail here, maybe the VPK scan is still useful? Or maybe fail? Let's fail to be safe.
+                            ShowError($"Audio check file '{CAM_LIST_FILE}' has an invalid format. Cannot verify audio state.", "Audio Check Error");
+                            return 1; // Fail as list might be corrupt
+                        }
                     }
                 }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Error reading {camListPath}: {ex.Message}");
-                return 1; // Failed to read list
-            }
-
-            // Scan the target VPK for "OggS"
-            bool needsInstall = ScanFileForOggS(targetVpkPath);
-
-            if (!needsInstall)
-            {
-                Debug.WriteLine($"Target VPK '{targetVpkPath}' does not contain 'OggS'. Audio setup not needed or already complete.");
-                // Create the done file to skip check next time
-                try { File.WriteAllText(audioDonePath, "1"); } catch (Exception ex) { Debug.WriteLine($"Warning: Could not create audio done file '{audioDonePath}': {ex.Message}"); }
-                return 0; // Success (not needed)
-            }
-
-            // --- Need to run the installer ---
-            Debug.WriteLine($"'OggS' found in '{targetVpkPath}'. Running audio installer...");
-
-            if (!File.Exists(installerPath))
-            {
-                ShowError($"Audio installer '{AUDIO_INSTALLER_EXE}' not found in game directory ({Directory.GetCurrentDirectory()}). Cannot fix audio automatically.\nPlease ensure all base game files are present.", "Audio Installer Missing");
-                return 1; // Installer missing
-            }
-
-            ProcessStartInfo psi = new ProcessStartInfo
-            {
-                FileName = installerPath,
-                Arguments = $"\"{camListPath}\"", // Quote path in case of spaces
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                WorkingDirectory = Directory.GetCurrentDirectory() // Explicitly set CWD for the process
-            };
-
-            try
-            {
-                using (Process process = Process.Start(psi))
+                catch (Exception ex)
                 {
-                    if (process == null)
-                    {
-                        throw new Exception("Failed to start audio installer process.");
-                    }
-                    process.WaitForExit(); // Consider adding a timeout?
+                    Debug.WriteLine($"Error reading {camListPath}: {ex.Message}");
+                    ShowError($"Could not read the audio check file '{CAM_LIST_FILE}'. Cannot verify audio state.\nError: {ex.Message}", "Audio Check Error");
+                    return 1; // Failed to read list
+                }
 
-                    if (process.ExitCode != 0)
-                    {
-                        ShowError($"Audio installer failed with exit code {process.ExitCode}. Please check for errors or run it manually if necessary (Executable: {installerPath}).", "Audio Installation Failed");
-                        return 1; // Installer failed
-                    }
+                // Scan the target VPK for "OggS"
+                bool needsInstall = ScanFileForOggS(targetVpkPath);
 
-                    Debug.WriteLine("Audio installer finished successfully.");
-
-                    // Re-scan VPK to confirm fix
-                    if (ScanFileForOggS(targetVpkPath))
+                if (!needsInstall)
+                {
+                    // This case covers:
+                    // 1. VPK doesn't exist (ScanFileForOggS returns false) - Nothing to fix.
+                    // 2. VPK exists but doesn't contain "OggS" - Already fixed or never broken.
+                    Debug.WriteLine($"Target VPK '{Path.GetFileName(targetVpkPath)}' does not contain 'OggS' or is missing. Audio setup not needed or already complete.");
+                    // Create the done file to skip check next time, but only if cam_list was present.
+                    try
                     {
-                        Debug.WriteLine($"Warning: Target VPK '{targetVpkPath}' still contains 'OggS' after installer ran. The fix might not have worked.");
-                        ShowWarning($"Audio installer finished, but the target file still seems incorrect. Audio issues might persist.", "Audio Setup Warning");
-                        // Don't create done file if re-scan fails
+                         // Ensure directory exists before writing
+                         Directory.CreateDirectory(Path.GetDirectoryName(audioDonePath));
+                         File.WriteAllText(audioDonePath, DateTime.UtcNow.ToString("o")); // Write timestamp
+                         Debug.WriteLine($"Created audio done marker: {audioDonePath}");
                     }
-                    else
+                    catch (Exception ex)
                     {
-                        Debug.WriteLine("Target VPK verified clean after install.");
-                        // Create the done file
-                        try { File.WriteAllText(audioDonePath, "1"); } catch (Exception ex) { Debug.WriteLine($"Warning: Could not create audio done file '{audioDonePath}' after successful install: {ex.Message}"); }
+                        Debug.WriteLine($"Warning: Could not create audio done file '{audioDonePath}': {ex.Message}");
+                        // Non-fatal, just means check runs again next time.
                     }
+                    return 0; // Success (not needed or already done)
+                }
 
-                    return 0; // Success (even if verification failed, we tried)
+                // --- Need to run the installer ---
+                Debug.WriteLine($"'OggS' found in '{Path.GetFileName(targetVpkPath)}'. Running audio installer...");
+
+                if (!File.Exists(installerPath))
+                {
+                    ShowError($"Audio installer '{AUDIO_INSTALLER_EXE}' not found in game directory ({Directory.GetCurrentDirectory()}). Cannot fix audio automatically.\nPlease ensure all base game files are present, or verify/repair game files via Steam/EA App if applicable.", "Audio Installer Missing");
+                    return 1; // Installer missing
+                }
+
+                ProcessStartInfo psi = new ProcessStartInfo
+                {
+                    FileName = installerPath,
+                    Arguments = $"\"{camListPath}\"", // Quote path in case of spaces
+                    UseShellExecute = false, // Must be false to redirect IO or wait correctly without shell
+                    CreateNoWindow = true,   // Hide console window
+                    WorkingDirectory = Directory.GetCurrentDirectory() // Explicitly set CWD for the process
+                };
+
+                try
+                {
+                    using (Process process = Process.Start(psi))
+                    {
+                        if (process == null)
+                        {
+                            throw new Exception("Failed to start audio installer process (Process.Start returned null).");
+                        }
+
+                        // Wait for the process to exit. Add a reasonable timeout.
+                        bool exited = process.WaitForExit(120000); // 120 seconds timeout
+
+                        if (!exited)
+                        {
+                             ShowError($"Audio installer process did not exit within the timeout period (2 minutes). It might be stuck. Please check Task Manager.", "Audio Installation Timeout");
+                             try { process.Kill(); } catch { /* Ignore errors killing */ }
+                             return 1; // Timed out
+                        }
+
+                        if (process.ExitCode != 0)
+                        {
+                            ShowError($"Audio installer failed with exit code {process.ExitCode}. Please check for errors or run it manually if necessary.\nExecutable: {installerPath}\nArguments: \"{camListPath}\"", "Audio Installation Failed");
+                            return 1; // Installer failed
+                        }
+
+                        Debug.WriteLine("Audio installer finished successfully.");
+
+                        // Re-scan VPK to confirm fix
+                        if (ScanFileForOggS(targetVpkPath))
+                        {
+                            Debug.WriteLine($"Warning: Target VPK '{Path.GetFileName(targetVpkPath)}' still contains 'OggS' after installer ran. The fix might not have worked or the file is locked.");
+                            ShowWarning($"Audio installer finished, but the target file still seems incorrect. Audio issues might persist. Try restarting the launcher.", "Audio Setup Warning");
+                            // Don't create done file if re-scan fails
+                        }
+                        else
+                        {
+                            Debug.WriteLine("Target VPK verified clean after install.");
+                            // Create the done file
+                            try
+                            {
+                                Directory.CreateDirectory(Path.GetDirectoryName(audioDonePath));
+                                File.WriteAllText(audioDonePath, DateTime.UtcNow.ToString("o"));
+                                Debug.WriteLine($"Created audio done marker: {audioDonePath}");
+                            }
+                            catch (Exception ex)
+                            {
+                                Debug.WriteLine($"Warning: Could not create audio done file '{audioDonePath}' after successful install: {ex.Message}");
+                            }
+                        }
+
+                        return 0; // Success (installer ran, even if verification failed, we tried)
+                    }
+                }
+                catch (Win32Exception w32ex) // Catch specific errors from Process.Start
+                {
+                     ShowError($"An error occurred starting the audio installer (Win32 Error {w32ex.NativeErrorCode}):\n{w32ex.Message}\n\nCheck file permissions and if the installer exists.", "Audio Installation Error");
+                     return 1;
+                }
+                catch (Exception ex)
+                {
+                    ShowError($"An unexpected error occurred while running the audio installer:\n{ex.Message}", "Audio Installation Error");
+                    return 1; // Error running installer
                 }
             }
-            catch (Exception ex)
+            catch (Exception outerEx) // Catch errors before even starting checks (e.g., CWD access denied)
             {
-                ShowError($"An error occurred while running the audio installer:\n{ex.Message}", "Audio Installation Error");
-                return 1; // Error running installer
+                 ShowError($"A critical error occurred during audio setup initialization:\n{outerEx.Message}", "Audio Setup Error");
+                 return 1;
             }
         }
     }

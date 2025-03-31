@@ -10,6 +10,8 @@
     <OutputType>WinExe</OutputType>
     <RootNamespace>launcher_ex</RootNamespace>
     <AssemblyName>r1delta</AssemblyName>
+    <company>The Interstellar Modding Corporation</company>
+    <product>R1Delta Launcher</product>
     <TargetFrameworkVersion>v4.6.2</TargetFrameworkVersion>
     <LangVersion>9.0</LangVersion>
     <FileAlignment>512</FileAlignment>
@@ -220,6 +222,12 @@
   </ItemGroup>
   <ItemGroup>
     <Resource Include="setup_sidebar.png" />
+  </ItemGroup>
+  <!-- Add this ItemGroup for the SquirrelAwareVersion attribute -->
+  <ItemGroup>
+    <AssemblyAttribute Include="Squirrel.SquirrelAwareVersionAttribute">
+       <_Parameter1>1</_Parameter1> <!-- Pass "1" as the first constructor argument -->
+    </AssemblyAttribute>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <Import Project="..\packages\Fody.6.8.2\build\Fody.targets" Condition="Exists('..\packages\Fody.6.8.2\build\Fody.targets')" />
