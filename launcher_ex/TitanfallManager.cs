@@ -112,7 +112,7 @@ namespace R1Delta
             {
                 Debug.WriteLine($"Error reading registry key {RegistryBaseKey}\\{ShowSetupOnLaunchValueName}: {ex.Message}. Defaulting to true.");
             }
-            return true; // Default: show setup
+            return false; // Default: show setup
         }
 
         /// <summary>

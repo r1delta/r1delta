@@ -728,7 +728,7 @@ namespace launcher_ex
                             if (!finalShowSetupSetting)
                             {
                                 MessageBox.Show(
-                                    "Setup will not be shown automatically on the next launch.\n\n" +
+                                    "Setup will not be shown automatically on the next launch because the \"Do not show this window again\" box was checked.\n\n" +
                                     "Hold the F4 key while starting the launcher if you need to access setup options again (e.g., change path, arguments).",
                                     "Setup Hidden",
                                     MessageBoxButton.OK,
