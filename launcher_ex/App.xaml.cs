@@ -443,7 +443,7 @@ namespace launcher_ex
                                         var result = MessageBox.Show(
                                             $"R1Delta appears to have downloaded Titanfall game files to:\n\n{gamePath}\n\n" +
                                             $"Do you want to delete these downloaded game files?\n\n" +
-                                            $"(This will NOT affect game installations managed by Steam/EA App unless you pointed R1Delta to that folder AND the marker file '{markerFileName}' exists there, which is unlikely).",
+                                            $"(This will NOT affect game installations managed by Steam/EA App.)",
                                             "Delete Downloaded Game Files?",
                                             MessageBoxButton.YesNo,
                                             MessageBoxImage.Question);
