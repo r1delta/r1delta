@@ -2214,7 +2214,76 @@ __int64 __fastcall sub_103120_hook(__int64 a1, __int64 a2, __int64 a3, int a4)
 	LeaveCriticalSection(&g_cs);
 	return ret;
 }
+void (*oUTIL_LogPrintf)(const char* fmt, ...);
+void UTIL_LogPrintf(char* fmt, ...)
+{
+	char tempString[1024]; // [esp+0h] [ebp-400h] BYREF
+	va_list params; // [esp+40Ch] [ebp+Ch] BYREF
 
+	va_start(params, fmt);
+	V_vsnprintf(tempString, 1024, fmt, params);
+	oUTIL_LogPrintf("%s", tempString);
+	if (IsDedicatedServer())
+		Msg("%s", tempString);
+	static auto UTIL_ClientPrintAll = (void(*)(unsigned int, char*))(G_server + 0x25D5B0);
+	UTIL_ClientPrintAll(2, tempString);
+}
+void (*oCServerGameDLL_OnSayTextMsg)(void* pThis, int clientIndex, char* text, char isTeamChat);
+// Simplified IServerUnknown and CBaseEntity/CBasePlayer interfaces
+class CBasePlayer {
+public:
+	uint8_t GetLifeState() const {
+		// Offset 865 from the start of the CBaseEntity/CBasePlayer object
+		return *(uint8_t*)((uintptr_t)this + 865);
+	}
+
+	// Check if alive (assuming LIFE_ALIVE == 0)
+	bool IsAlive() const {
+		return GetLifeState() == 0; // LIFE_ALIVE is typically 0
+	}
+};
+
+void __fastcall CServerGameDLL_OnSayTextMsg(void* pThis, int clientIndex, char* text, char isTeamChat) {
+	oCServerGameDLL_OnSayTextMsg(pThis, clientIndex, text, isTeamChat);
+	// 1. Get Player Entity
+	CBasePlayer* pSenderEntity = (CBasePlayer*)UTIL_GetEntityByIndex(clientIndex);
+
+	if (!pSenderEntity) {
+		return;
+	}
+
+	// 2. Get Player Name (using vtable index 43 / offset 344)
+	// We need the vtable pointer first (usually the first member of the object)
+	uintptr_t* vtable = *(uintptr_t**)pSenderEntity;
+	// Get the function pointer from the vtable
+	auto getPlayerNameFunc = (const char* (*)(const CBasePlayer*)) vtable[43]; // 344 / 8 = 43
+
+	const char* playerName = nullptr;
+	if (getPlayerNameFunc) {
+		playerName = getPlayerNameFunc(pSenderEntity);
+	}
+
+	if (!playerName) {
+		playerName = "<Unknown>"; // Fallback name
+	}
+
+	// 3. Check if Player is Dead (using offset 865 / m_lifeState)
+	bool isSenderDead = !pSenderEntity->IsAlive(); // IsAlive checks m_lifeState at 865
+
+	// 4. Format the Output String
+	char formattedMsg[1024]; // Adjust size as needed
+	const char* deadPrefix = isSenderDead ? "[DEAD]" : "";
+	const char* teamPrefix = isTeamChat ? "[TEAM]" : "";
+
+	snprintf(formattedMsg, sizeof(formattedMsg), "%s%s%s: %s",
+		deadPrefix,
+		teamPrefix,
+		playerName,
+		text ? text : "<Empty Message>"); // Handle null text just in case
+
+	// 5. Print the Formatted Message
+	Msg("%s\n", formattedMsg);
+}
 static FORCEINLINE void
 do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 {
@@ -2270,6 +2339,9 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook((LPVOID)(server_base + 0x21B6B0), &HookedGetRankFunction, NULL);
 	MH_CreateHook((LPVOID)(server_base + 0x50B8B0), &HookedSetRankFunction, NULL);
 	MH_CreateHook((LPVOID)(server_base + 0x410F60), &CGrenadeFrag__ResolveFlyCollisionCustom, reinterpret_cast<LPVOID*>(&oCGrenadeFrag__ResolveFlyCollisionCustom));
+	MH_CreateHook((LPVOID)(server_base + 0x25E290), &UTIL_LogPrintf, reinterpret_cast<LPVOID*>(&oUTIL_LogPrintf));
+	MH_CreateHook((LPVOID)(server_base + 0x148730), &CServerGameDLL_OnSayTextMsg, reinterpret_cast<LPVOID*>(&oCServerGameDLL_OnSayTextMsg));
+	
 	if (IsDedicatedServer()) {
 		MH_CreateHook((LPVOID)(G_engine_ds + 0x45EB0), &GetUserIDStringHook, reinterpret_cast<LPVOID*>(&GetUserIDStringOriginal));
 	}

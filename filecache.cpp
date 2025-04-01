@@ -9,7 +9,7 @@ FileCache::FileCache() {
     executableDirectory = GetExecutableDirectory();
     if (executableDirectory.empty()) {
         // Handle error: Cannot proceed without executable path
-        Warning("Failed to get executable directory! FileCache disabled.");
+        Warning("Failed to get executable directory! FileCache disabled.\n");
         // Potentially throw or set an error state
         initialized.store(true, std::memory_order_release); // Prevent waits if unusable
         return;
@@ -32,11 +32,11 @@ void FileCache::ScanDirectory(const std::filesystem::path& directory,
     if (!std::filesystem::is_directory(directory, ec) || ec) {
         if (ec) {
             // Log specific error if exists
-            Warning("Error accessing directory '%s': %s", directory.string().c_str(), ec.message().c_str());
+            Warning("Error accessing directory '%s': %s\n", directory.string().c_str(), ec.message().c_str());
         }
         else if (&directory == &r1deltaAddonsPath || &directory == &r1deltaBasePath) {
             // Only warn if the primary base directories don't exist
-            Msg("Directory '%s' not found for scanning.", directory.string().c_str());
+            Msg("Directory '%s' not found for scanning.\n", directory.string().c_str());
         }
         return; // Don't try to iterate if it doesn't exist or isn't accessible
     }
@@ -53,7 +53,7 @@ void FileCache::ScanDirectory(const std::filesystem::path& directory,
 
     for (const auto& entry : std::filesystem::directory_iterator(directory, std::filesystem::directory_options::skip_permission_denied, ec)) {
         if (ec) {
-            Warning("Error iterating directory '%s': %s", directory.string().c_str(), ec.message().c_str());
+            Warning("Error iterating directory '%s': %s\n", directory.string().c_str(), ec.message().c_str());
             ec.clear(); // Try to continue with next entries
             continue;
         }
@@ -82,19 +82,19 @@ void FileCache::ScanDirectory(const std::filesystem::path& directory,
             ScanDirectory(currentPath, currentCache, nullptr); // Don't pass addonsFolderCache down recursion
         }
         else if (ec) {
-            Warning("Error checking entry type for '%s': %s", normalizedPathString.c_str(), ec.message().c_str());
+            Warning("Error checking entry type for '%s': %s\n", normalizedPathString.c_str(), ec.message().c_str());
             ec.clear(); // Try to continue
         }
     }
     if (ec) { // Catch potential error from end of iteration
-        Warning("Error finishing iteration of directory '%s': %s", directory.string().c_str(), ec.message().c_str());
+        Warning("Error finishing iteration of directory '%s': %s\n", directory.string().c_str(), ec.message().c_str());
     }
 }
 
 void FileCache::UpdateCache() {
     // Ensure base paths are valid
     if (executableDirectory.empty()) {
-        Warning("FileCache::UpdateCache called but executable directory is unknown. Aborting.");
+        Warning("FileCache::UpdateCache called but executable directory is unknown. Aborting.\n");
         initialized.store(true, std::memory_order_release); // Mark as "initialized" to unblock waiters, even though unusable
         cacheCondition.notify_all();
         return;
@@ -108,12 +108,12 @@ void FileCache::UpdateCache() {
             std::unordered_set<std::size_t> newCache;
             std::unordered_set<std::string, HashStrings, std::equal_to<>> newAddonsFolderCache;
 
-            Msg("Starting file cache scan...");
+            Msg("Starting file cache scan...\n");
 
             // Create directories if they don't exist (optional, depends on desired behavior)
             std::error_code ec;
             std::filesystem::create_directories(r1deltaAddonsPath, ec);
-            if (ec) Warning("Could not create directory: %s: %s", r1deltaAddonsPath.string().c_str(), ec.message().c_str());
+            if (ec) Warning("Could not create directory: %s: %s\n", r1deltaAddonsPath.string().c_str(), ec.message().c_str());
 
 
             // Scan base r1delta directory (excluding addons)
@@ -122,7 +122,7 @@ void FileCache::UpdateCache() {
             // Scan addons directory - this collects addon folders AND their files
             ScanDirectory(r1deltaAddonsPath, newCache, &newAddonsFolderCache);
 
-            Msg("File cache scan complete. Found %zu files, %zu addon folders.", newCache.size(), newAddonsFolderCache.size());
+            Msg("File cache scan complete. Found %zu files, %zu addon folders.\n", newCache.size(), newAddonsFolderCache.size());
 
             { // Lock scope for swapping caches
                 std::unique_lock<std::shared_mutex> lock(cacheMutex);
