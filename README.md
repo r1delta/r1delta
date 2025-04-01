@@ -16,10 +16,6 @@ For developers and contributors, keep reading below.
 # Building From Source
 todo
 
-# Additional Resources:
-- Download DLC Maps from here if you don't have the Deluxe Edition: [https://archive.org/details/r1titanfall_org](https://archive.org/details/r1titanfall_org) the DLC maps are the .zip files that weigh ~1.5GB
-- Download the ported Titanfall Online maps ready to be used on Titanfall 1 with R1Delta (M.I.A, Nest and Box) from here: [https://icedrive.net/s/Sbt9huiYFCbtykiBVzVtzu6Twi6C](https://icedrive.net/s/Sbt9huiYFCbtykiBVzVtzu6Twi6C)
-
 # Credits
 - [@r3muxd](https://github.com/r3muxd)
 - [@sonny-tel](https://github.com/sonny-tel)
