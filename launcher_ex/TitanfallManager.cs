@@ -1048,7 +1048,7 @@ namespace R1Delta
         private static ulong ComputeXxHash64(string filePath)
         {
             // ... (implementation unchanged)
-            const int bufferSize = 64 * 1024;
+            const int bufferSize = 4 * 1024 * 1024;
             try { using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize, FileOptions.SequentialScan); if (stream.Length == 0) { return 0xEF46DB3751D8E999; } var hasher = new XXH64(); byte[] buffer = new byte[bufferSize]; int bytesRead; while ((bytesRead = stream.Read(buffer, 0, buffer.Length)) > 0) { hasher.Update(buffer.AsSpan(0, bytesRead)); } return hasher.Digest(); }
             catch (Exception ex) { Debug.WriteLine($"Error computing xxHash64 for {filePath}: {ex.Message}"); return 0; }
         }
