@@ -65,7 +65,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
-          key: ${{ runner.os }}-windows-vcpkg-${{ hashFiles('**/vcpkg.json', '.github/workflows/**') }}
+          key: ${{ runner.os }}-windows-vcpkg-r1-${{ hashFiles('**/vcpkg.json', '.github/workflows/**') }}
           restore-keys: |
             ${{ runner.os }}-windows-vcpkg-
 
