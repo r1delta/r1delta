@@ -337,6 +337,24 @@ int UpdateAddons(HSQUIRRELVM v, SQInteger index, SQBool enabled) {
 	return 1;
 }
 
+int GetModPath(HSQUIRRELVM v) {
+	auto func_addr = g_CVFileSystem->GetSearchPath;
+
+	auto func = (int(__fastcall*)(void*, const char*, int64, char*, int64))func_addr;
+
+	char szModPath[260];
+
+	auto ret = func(g_CVFileSystem, "GAME", 0, szModPath, 260);
+
+	sq_pushstring(v, szModPath, -1);
+	char szAddOnListPath[260];
+	sprintf_s(szAddOnListPath, "%s/%s", szModPath, "r1");
+	sq_pushstring(v, szAddOnListPath, -1);
+
+	return 1;
+
+}
+
 int GetMods(HSQUIRRELVM v) {
 
 	auto func_addr = g_CVFileSystem->GetSearchPath;
@@ -664,9 +682,22 @@ bool GetSQVMFuncs() {
 
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_UI,
-		"GetModPath",
+		"GetMods",
 		(SQFUNCTION)GetMods,
 		".ss", // String
+		1,      // Expects 2 parameters
+		"string",    // Returns a string
+		"str",
+		"Get a persistent data value"
+	);
+
+
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_UI,
+		"GetModPath",
+		(SQFUNCTION)GetModPath,
+		".", // String
 		1,      // Expects 2 parameters
 		"string",    // Returns a string
 		"str",
