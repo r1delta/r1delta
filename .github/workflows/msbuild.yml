@@ -193,7 +193,7 @@ jobs:
         run: |
           $squirrelToolPath = "${{ github.workspace }}/squirrel-tool"
           New-Item -ItemType Directory -Force -Path $squirrelToolPath
-          nuget install Squirrel.Windows -OutputDirectory $squirrelToolPath -ExcludeVersion -NoCache -DirectDownload
+          nuget install Clowd.Squirrel -OutputDirectory $squirrelToolPath -ExcludeVersion -NoCache -DirectDownload
           # Find the tools directory robustly
           $squirrelExeDir = Join-Path $squirrelToolPath "Squirrel.Windows\tools"
           if (-not (Test-Path (Join-Path $squirrelExeDir "Squirrel.exe"))) {
