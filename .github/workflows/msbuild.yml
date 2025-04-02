@@ -259,7 +259,7 @@ jobs:
           )
 
           echo Releasifying %NUGET_PACKAGE_PATH% to %SQUIRREL_RELEASE_DIR%
-          Squirrel --releasify "%NUGET_PACKAGE_PATH%" --releaseDir "%SQUIRREL_RELEASE_DIR%"
+          Squirrel releasify "%NUGET_PACKAGE_PATH%" --releaseDir "%SQUIRREL_RELEASE_DIR%"
         shell: cmd # Squirrel often works best in cmd
 
       # Check if releasify succeeded before creating GitHub release
