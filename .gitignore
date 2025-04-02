@@ -439,3 +439,4 @@ build2/
 vcpkg/
 vcpkg_installed/
 .aider*
+packages/

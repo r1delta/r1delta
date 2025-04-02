@@ -97,7 +97,7 @@ namespace TitanfallFinder
             string registryResult = TryFindViaOtherRegistry();
             if (!string.IsNullOrEmpty(registryResult))
                 candidates.Add(new Tuple<string, string>("OtherRegistry", registryResult));
-
+            candidates.Add(new Tuple<string, string>("CurrentDirectory", "."));
             // Now validate them in order
             foreach (var candidate in candidates)
             {

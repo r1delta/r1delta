@@ -978,6 +978,75 @@ int __fastcall CPlayer_GetLevel(__int64 thisptr)
 	GetLevelFromXP_t GetLevelFromXP = (GetLevelFromXP_t)(G_server + 0x28E740);
 	return GetLevelFromXP(xp);
 }
+__int64 (*oFileSystem_AddLoadedSearchPath)(
+	__int64 a1,
+	unsigned __int8* a2,
+	_BYTE* a3,
+	char* a4,
+	char* Source,
+	char a6);
+__int64 FileSystem_AddLoadedSearchPath(
+	__int64 a1,
+	unsigned __int8* a2, // Often 'byte*' or 'unsigned char*'
+	_BYTE* a3,         // Often 'byte*' or 'unsigned char*'
+	char* a4,          // The path string we are interested in
+	char* Source,
+	char a6)
+{
+	const char* suffix = "r1delta";
+	const size_t suffix_len = 7; // strlen("r1delta")
+
+	// Store the original value of a4, as we might need it later.
+	char* original_a4 = a4;
+	// Prepare the value to be passed to the original function.
+	// Default to nullifying a4, unless the specific conditions are met.
+	char* result_a4 = nullptr; // Use nullptr for modern C++, or 0 for C/older C++
+
+	// --- Start checking the conditions under which a4 should *NOT* be nullified ---
+	bool keep_original_path = false;
+	if (original_a4) // Check if original_a4 is not NULL
+	{
+		size_t path_len = strlen(original_a4);
+		if (path_len >= suffix_len)
+		{
+			// Point to the potential start of the suffix within original_a4
+			const char* end_of_path = original_a4 + (path_len - suffix_len);
+
+			// Case-insensitive comparison of the last 'suffix_len' bytes
+			if (_strnicmp(end_of_path, suffix, suffix_len) == 0)
+			{
+				// It ends with "r1delta". Now check for "gameinfo.txt" in that directory.
+				char gameinfo_path[MAX_PATH];
+
+				// Construct the full path: original_a4 + "\" + "gameinfo.txt"
+				int chars_written = sprintf_s(gameinfo_path, MAX_PATH, "%s\\gameinfo.txt", original_a4);
+
+				// Check if path construction was successful and if the file exists
+				if (chars_written > 0 && GetFileAttributesA(gameinfo_path) != INVALID_FILE_ATTRIBUTES)
+				{
+					// "gameinfo.txt" exists in the directory specified by original_a4.
+					// This is the *only* condition where we want to keep the original path.
+					keep_original_path = true;
+				}
+				// else: gameinfo.txt doesn't exist or path construction failed.
+			}
+			// else: original_a4 does not end with "r1delta".
+		}
+		// else: original_a4 is shorter than the suffix.
+	}
+	// else: original_a4 was already NULL.
+	// --- End checking the conditions ---
+
+	// Decide the final value for a4 based on whether the specific conditions were met
+	if (keep_original_path)
+	{
+		result_a4 = original_a4; // Keep the original path
+	}
+	// else: result_a4 remains nullptr (the default action is to nullify)
+
+	// Call the original function with the final result_a4 value
+	return oFileSystem_AddLoadedSearchPath(a1, a2, a3, result_a4, Source, a6);
+}
 
 void InitAddons() {
 	static bool done = false;
@@ -994,9 +1063,12 @@ void InitAddons() {
 	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x6EE10 : 0x02C30)), &CBaseFileSystem__FindFirst, reinterpret_cast<LPVOID*>(&oCBaseFileSystem__FindFirst));
 	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x86E00 : 0x1C4A0)), &CBaseFileSystem__FindNext, reinterpret_cast<LPVOID*>(&oCBaseFileSystem__FindNext));
 	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x7F180 : 0x14780)), &HookedHandleOpenRegularFile, reinterpret_cast<LPVOID*>(&HandleOpenRegularFileOriginal));
+	MH_CreateHook((LPVOID)(engine_base_spec + (IsDedicatedServer() ? 0x96980 : 0x128C80)), &FileSystem_AddLoadedSearchPath, reinterpret_cast<LPVOID*>(&oFileSystem_AddLoadedSearchPath));
+
 	//client = std::make_shared<discordpp::Client>();
 	MH_EnableHook(MH_ALL_HOOKS);
 }
+
 std::unordered_map<std::string, std::string, HashStrings> g_LastEntCreateKeyValues;
 void (*oCC_Ent_Create)(const CCommand* args);
 bool g_bIsEntCreateCommand = false;
@@ -1719,6 +1791,7 @@ const char* GetBuildNo() {
 	return buffer;
 }
 
+
 static FORCEINLINE void
 do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 {
@@ -2141,7 +2214,76 @@ __int64 __fastcall sub_103120_hook(__int64 a1, __int64 a2, __int64 a3, int a4)
 	LeaveCriticalSection(&g_cs);
 	return ret;
 }
+void (*oUTIL_LogPrintf)(const char* fmt, ...);
+void UTIL_LogPrintf(char* fmt, ...)
+{
+	char tempString[1024]; // [esp+0h] [ebp-400h] BYREF
+	va_list params; // [esp+40Ch] [ebp+Ch] BYREF
 
+	va_start(params, fmt);
+	V_vsnprintf(tempString, 1024, fmt, params);
+	oUTIL_LogPrintf("%s", tempString);
+	if (IsDedicatedServer())
+		Msg("%s", tempString);
+	static auto UTIL_ClientPrintAll = (void(*)(unsigned int, char*))(G_server + 0x25D5B0);
+	UTIL_ClientPrintAll(2, tempString);
+}
+void (*oCServerGameDLL_OnSayTextMsg)(void* pThis, int clientIndex, char* text, char isTeamChat);
+// Simplified IServerUnknown and CBaseEntity/CBasePlayer interfaces
+class CBasePlayer {
+public:
+	uint8_t GetLifeState() const {
+		// Offset 865 from the start of the CBaseEntity/CBasePlayer object
+		return *(uint8_t*)((uintptr_t)this + 865);
+	}
+
+	// Check if alive (assuming LIFE_ALIVE == 0)
+	bool IsAlive() const {
+		return GetLifeState() == 0; // LIFE_ALIVE is typically 0
+	}
+};
+
+void __fastcall CServerGameDLL_OnSayTextMsg(void* pThis, int clientIndex, char* text, char isTeamChat) {
+	oCServerGameDLL_OnSayTextMsg(pThis, clientIndex, text, isTeamChat);
+	// 1. Get Player Entity
+	CBasePlayer* pSenderEntity = (CBasePlayer*)UTIL_GetEntityByIndex(clientIndex);
+
+	if (!pSenderEntity) {
+		return;
+	}
+
+	// 2. Get Player Name (using vtable index 43 / offset 344)
+	// We need the vtable pointer first (usually the first member of the object)
+	uintptr_t* vtable = *(uintptr_t**)pSenderEntity;
+	// Get the function pointer from the vtable
+	auto getPlayerNameFunc = (const char* (*)(const CBasePlayer*)) vtable[43]; // 344 / 8 = 43
+
+	const char* playerName = nullptr;
+	if (getPlayerNameFunc) {
+		playerName = getPlayerNameFunc(pSenderEntity);
+	}
+
+	if (!playerName) {
+		playerName = "<Unknown>"; // Fallback name
+	}
+
+	// 3. Check if Player is Dead (using offset 865 / m_lifeState)
+	bool isSenderDead = !pSenderEntity->IsAlive(); // IsAlive checks m_lifeState at 865
+
+	// 4. Format the Output String
+	char formattedMsg[1024]; // Adjust size as needed
+	const char* deadPrefix = isSenderDead ? "[DEAD]" : "";
+	const char* teamPrefix = isTeamChat ? "[TEAM]" : "";
+
+	snprintf(formattedMsg, sizeof(formattedMsg), "%s%s%s: %s",
+		deadPrefix,
+		teamPrefix,
+		playerName,
+		text ? text : "<Empty Message>"); // Handle null text just in case
+
+	// 5. Print the Formatted Message
+	Msg("%s\n", formattedMsg);
+}
 static FORCEINLINE void
 do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 {
@@ -2197,6 +2339,10 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook((LPVOID)(server_base + 0x21B6B0), &HookedGetRankFunction, NULL);
 	MH_CreateHook((LPVOID)(server_base + 0x50B8B0), &HookedSetRankFunction, NULL);
 	MH_CreateHook((LPVOID)(server_base + 0x410F60), &CGrenadeFrag__ResolveFlyCollisionCustom, reinterpret_cast<LPVOID*>(&oCGrenadeFrag__ResolveFlyCollisionCustom));
+	MH_CreateHook((LPVOID)(server_base + 0x25E290), &UTIL_LogPrintf, reinterpret_cast<LPVOID*>(&oUTIL_LogPrintf));
+	if (IsDedicatedServer())
+		MH_CreateHook((LPVOID)(server_base + 0x148730), &CServerGameDLL_OnSayTextMsg, reinterpret_cast<LPVOID*>(&oCServerGameDLL_OnSayTextMsg));
+	
 	if (IsDedicatedServer()) {
 		MH_CreateHook((LPVOID)(G_engine_ds + 0x45EB0), &GetUserIDStringHook, reinterpret_cast<LPVOID*>(&GetUserIDStringOriginal));
 	}
@@ -2240,6 +2386,7 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	RegisterConVar("riff_floorislava", "0", FCVAR_HIDDEN, "Enable floor is lava mode");
 	RegisterConVar("hudwarp_use_gpu", "1", FCVAR_ARCHIVE,"Use GPU for HUD warp");
 	RegisterConVar("hudwarp_disable", "0", FCVAR_ARCHIVE, "GPU device to use for HUD warp");
+	RegisterConVar("hide_server", "0", FCVAR_NONE, "Whether the server should be hidden from the master server");
 	RegisterConCommand("script", script_cmd, "Execute Squirrel code in server context", FCVAR_GAMEDLL | FCVAR_CHEAT);
 	if (!IsDedicatedServer()) {
 		RegisterConCommand("script_client", script_client_cmd, "Execute Squirrel code in client context", FCVAR_NONE);
@@ -2361,7 +2508,16 @@ void DiscordThread() {
 	}
 #endif
 }
-
+__int64 (*oAddSearchPathDedi)(__int64 a1, const char* a2, __int64 a3, unsigned int a4);
+__int64 __fastcall AddSearchPathDedi(__int64 a1, const char* a2, __int64 a3, unsigned int a4) {
+	if (!strcmp_static(a2, "r1delta")) {
+		auto a = _strdup((std::filesystem::path(GetExecutableDirectory()) / "r1delta").string().c_str());
+		a2 = a;
+		auto ret = oAddSearchPathDedi(a1, a2, a3, a4);
+		return ret;
+	}
+	return oAddSearchPathDedi(a1, a2, a3, a4);
+}
 static bool should_init_security_fixes = false;
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
@@ -2387,6 +2543,7 @@ void __stdcall LoaderNotificationCallback(
 	static bool bDone = false;
 	if (GetModuleHandleA("dedicated.dll") && !bDone) {
 		InitCompressionHooks();
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("dedicated.dll") + 0x84000), &AddSearchPathDedi, reinterpret_cast<LPVOID*>(&oAddSearchPathDedi));
 		bDone = true;
 	}
 	auto name = notification_data->Loaded.BaseDllName->Buffer;

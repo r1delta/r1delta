@@ -73,12 +73,12 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <TargetName>vaudio_speex</TargetName>
-    <OutDir>X:\Games\EA\Titanfall\r1delta\bin_delta\</OutDir>
+    <OutDir>S:\game\r1delta\bin_delta\</OutDir>
     <IncludePath>$(ProjectDir)vcpkg_installed\x64-windows\include;$(VC_IncludePath);$(WindowsSDK_IncludePath);</IncludePath>
     <LibraryPath>$(ProjectDir)vcpkg_installed\x64-windows\lib;$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <OutDir>X:\Games\EA\Titanfall\r1delta\bin_delta\</OutDir>
+    <OutDir>S:\game\r1delta\bin_delta\</OutDir>
     <TargetName>vaudio_speex</TargetName>
     <IncludePath>$(ProjectDir)vcpkg_installed\x64-windows\include;$(VC_IncludePath);$(WindowsSDK_IncludePath);</IncludePath>
     <LibraryPath>$(ProjectDir)vcpkg_installed\x64-windows\lib;$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>

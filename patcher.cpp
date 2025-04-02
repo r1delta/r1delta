@@ -247,18 +247,29 @@ bool ApplyPatch(const PatchInstruction& instruction, void* targetModuleBase) {
 
 std::vector<PatchInstruction> patchInstructions;
 
-void
-initialisePatchInstructions() {
+void initialisePatchInstructions() {
     ZoneScoped;
-    
-    // Parse the patch file and get patch instructions
-    patchInstructions = ParsePatchFile("r1delta/r1delta.wpatch");
 
-    // If it's a dedicated server, also load and apply instructions from "r1delta_ds.patch"
+    // Get the base directory where the executable resides
+    std::filesystem::path exeDir = GetExecutableDirectory();
+    std::filesystem::path r1deltaBaseDir = exeDir / "r1delta";
+
+    // Construct absolute paths for patch files
+    std::filesystem::path mainPatchFile = r1deltaBaseDir / "r1delta.wpatch";
+    std::filesystem::path dsPatchFile = r1deltaBaseDir / "r1delta_ds.wpatch";
+    std::filesystem::path noOriginPatchFile = r1deltaBaseDir / "r1delta_noorigin.wpatch";
+
+    // Parse the main patch file using its absolute path
+    patchInstructions = ParsePatchFile(mainPatchFile.string());
+
+    // If it's a dedicated server, also load and apply instructions from its absolute path
     if (IsDedicatedServer()) {
-        std::vector<PatchInstruction> dedicatedServerPatchInstructions = ParsePatchFile("r1delta/r1delta_ds.wpatch");
+        std::vector<PatchInstruction> dedicatedServerPatchInstructions = ParsePatchFile(dsPatchFile.string());
         patchInstructions.insert(patchInstructions.end(), dedicatedServerPatchInstructions.begin(), dedicatedServerPatchInstructions.end());
+
+        // This check uses a relative path "vpk/..." - leave as is
         if (!std::filesystem::exists("vpk/englishserver_mp_common.bsp.pak000_dir.vpk")) {
+            // These paths "vpk/..." are left relative as requested
             patchInstructions.push_back(PatchInstruction("engine_ds.dll", "rdata", 0x422980, "vpk/server_", "vpk/client_\x00"));
             patchInstructions.push_back(PatchInstruction("engine_ds.dll", "rdata", 0x4229A8, "%sserver_%s%s", "%sclient_%s%s\x00"));
             patchInstructions.push_back(PatchInstruction("dedicated.dll", "rdata", 0x208E50, "vpk/server", "vpk/client"));
@@ -267,7 +278,8 @@ initialisePatchInstructions() {
     }
 
     if (IsNoOrigin()) {
-        std::vector<PatchInstruction> noOriginPatchInstructions = ParsePatchFile("r1delta/r1delta_noorigin.wpatch");
+        // Load the no-origin patch file using its absolute path
+        std::vector<PatchInstruction> noOriginPatchInstructions = ParsePatchFile(noOriginPatchFile.string());
         patchInstructions.insert(patchInstructions.end(), noOriginPatchInstructions.begin(), noOriginPatchInstructions.end());
     }
 }

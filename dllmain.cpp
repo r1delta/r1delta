@@ -190,6 +190,7 @@ nvapi_stuff()
 #if BUILD_PROFILE
 #include "tracy-0.11.1/public/TracyClient.cpp"
 #endif
+#include <Shlwapi.h>
 
 static int skip_dllmain = -1;
 bool Plat_IsInToolMode() {
@@ -202,6 +203,138 @@ bool Plat_IsInToolMode() {
 		BOOL check1 = GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCTSTR)_ReturnAddress(), &module2);
 		BOOL check2 = module2 == (HMODULE)matsystem;
 		return check1 && check2;
+}
+
+
+// Define the global storage in the .cpp file
+static std::string g_r1delta_launch_args;
+
+// Exported function for C# to call - No exceptions thrown by this function itself
+extern "C" __declspec(dllexport) void SetR1DeltaLaunchArgs(const char* args)
+{
+	OutputDebugStringA("[r1delta_core] SetR1DeltaLaunchArgs called.\n");
+	if (args)
+	{
+		// std::string assignment can technically throw std::bad_alloc if out of memory,
+		// but this is a catastrophic failure anyway. We won't wrap this.
+		g_r1delta_launch_args = args;
+		OutputDebugStringA("[r1delta_core] Launch args set internally to: ");
+		OutputDebugStringA(args);
+		OutputDebugStringA("\n");
+	}
+	else
+	{
+		g_r1delta_launch_args.clear(); // Safe operation
+		OutputDebugStringA("[r1delta_core] Launch args cleared (null passed).\n");
+	}
+}
+
+// --- Modified CCommandLine__CreateCmdLine hook (No exceptions, no env var) ---
+void (*CCommandLine__CreateCmdLine_Original)(void* thisptr, char* commandline);
+void CCommandLine__CreateCmdLine(void* thisptr, char* commandline) {
+	OutputDebugStringA("[r1delta_core] CCommandLine__CreateCmdLine hook entered.\n");
+	std::string finalCmdLineStr;
+	std::string gameArg; // Holds the "-game ..." part
+
+	// 1. Start with original command line (unchanged)
+	if (commandline != nullptr && commandline[0] != '\0') {
+		finalCmdLineStr = commandline;
+		OutputDebugStringA("[r1delta_core] Original command line: ");
+		OutputDebugStringA(commandline);
+		OutputDebugStringA("\n");
+	}
+
+	// 2. Construct -game argument (Using WinAPI, no exceptions)
+	char exePathBuffer[MAX_PATH * 2]; // Slightly larger buffer just in case
+	DWORD pathLen = GetModuleFileNameA(NULL, exePathBuffer, sizeof(exePathBuffer));
+
+	if (pathLen > 0 && pathLen < sizeof(exePathBuffer)) {
+		exePathBuffer[pathLen] = '\0'; // Ensure null termination
+		char exeDirBuffer[MAX_PATH * 2];
+		strncpy_s(exeDirBuffer, sizeof(exeDirBuffer), exePathBuffer, _TRUNCATE);
+
+		// Remove the filename part to get the directory
+		if (PathRemoveFileSpecA(exeDirBuffer)) {
+			// Construct the r1delta path
+			char r1deltaPathBuffer[MAX_PATH * 2 + 10]; // Space for "\\r1delta" + quotes + game arg
+			// Check buffer size before concatenating
+			if (strlen(exeDirBuffer) + strlen("\\r1delta") < sizeof(r1deltaPathBuffer)) {
+				strncpy_s(r1deltaPathBuffer, sizeof(r1deltaPathBuffer), exeDirBuffer, _TRUNCATE);
+				strncat_s(r1deltaPathBuffer, sizeof(r1deltaPathBuffer), "\\r1delta", _TRUNCATE);
+
+				// Ensure path doesn't exceed buffer before adding quotes/arg
+				if (strlen(r1deltaPathBuffer) + strlen("-game \"\"") < sizeof(exePathBuffer)) {
+					// Use a temporary buffer for the final game arg construction
+					char tempGameArg[sizeof(exePathBuffer)];
+					sprintf_s(tempGameArg, sizeof(tempGameArg), "-game \"%s\"", r1deltaPathBuffer);
+					gameArg = tempGameArg; // Assign to std::string
+
+					OutputDebugStringA("[r1delta_core] Constructed game arg: ");
+					OutputDebugStringA(gameArg.c_str());
+					OutputDebugStringA("\n");
+				}
+				else {
+					OutputDebugStringA("[r1delta_core] Warning: Constructed r1delta path too long for buffer.\n");
+				}
+
+			}
+			else {
+				OutputDebugStringA("[r1delta_core] Warning: Exe directory path too long to append \\r1delta.\n");
+			}
+		}
+		else {
+			OutputDebugStringA("[r1delta_core] Warning: PathRemoveFileSpecA failed.\n");
+		}
+	}
+	else if (pathLen == 0) {
+		DWORD error = GetLastError();
+		char errorMsg[100];
+		sprintf_s(errorMsg, sizeof(errorMsg), "[r1delta_core] Warning: GetModuleFileNameA failed. Error: %lu\n", error);
+		OutputDebugStringA(errorMsg);
+	}
+	else { // pathLen >= sizeof(exePathBuffer)
+		OutputDebugStringA("[r1delta_core] Warning: GetModuleFileNameA buffer too small.\n");
+	}
+
+
+	// 3. Append "-game" argument if constructed and not already present
+	// Use C-style search to avoid potential std::string exceptions if manipulated strangely
+	bool gameArgPresent = (strstr(finalCmdLineStr.c_str(), "-game ") != nullptr);
+
+	if (!gameArg.empty() && !gameArgPresent) {
+		if (!finalCmdLineStr.empty()) finalCmdLineStr += " ";
+		finalCmdLineStr += gameArg;
+	}
+	else if (gameArgPresent) {
+		OutputDebugStringA("[r1delta_core] -game arg already present in original command line.\n");
+	}
+
+
+	// 4. Append arguments ONLY from internal storage. No environment variable check.
+	if (!g_r1delta_launch_args.empty()) {
+		if (!finalCmdLineStr.empty()) finalCmdLineStr += " ";
+		finalCmdLineStr += g_r1delta_launch_args; // Append stored args
+		OutputDebugStringA("[r1delta_core] Appended args from internal storage: ");
+		OutputDebugStringA(g_r1delta_launch_args.c_str());
+		OutputDebugStringA("\n");
+	}
+	else {
+		OutputDebugStringA("[r1delta_core] No user launch arguments appended (Internal storage was empty).\n");
+	}
+	finalCmdLineStr += " -novid ";
+
+
+	// 5. Prepare buffer for original function call (unchanged)
+	// std::vector can throw bad_alloc, but again, that's catastrophic.
+	std::vector<char> finalCmdLineBuffer(finalCmdLineStr.begin(), finalCmdLineStr.end());
+	finalCmdLineBuffer.push_back('\0'); // Ensure null-termination
+
+	// 6. Call original function (unchanged)
+	OutputDebugStringA("[r1delta_core] Calling original CCommandLine::CreateCmdLine with final args: ");
+	OutputDebugStringA(finalCmdLineBuffer.data());
+	OutputDebugStringA("\n");
+	CCommandLine__CreateCmdLine_Original(thisptr, finalCmdLineBuffer.data());
+	OutputDebugStringA("[r1delta_core] CCommandLine__CreateCmdLine hook finished.\n");
 }
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
@@ -278,6 +411,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 		InstallExceptionHandler();
 		MH_Initialize();
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("tier0_orig.dll"), "GetCPUInformation"), &GetCPUInformationDet, reinterpret_cast<LPVOID*>(&GetCPUInformationOriginal));
+		MH_CreateHook((LPVOID)(((uintptr_t)GetModuleHandleA("tier0_orig.dll"))+0xbf60), &CCommandLine__CreateCmdLine, reinterpret_cast<LPVOID*>(&CCommandLine__CreateCmdLine_Original));
 //		if (!IsDedicatedServer())
 //			MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("tier0_orig.dll"), "Plat_IsInToolMode"), &GetCPUInformationDet, reinterpret_cast<LPVOID*>(NULL));
 

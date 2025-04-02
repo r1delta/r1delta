@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2010/07/nuspec.xsd">
+  <metadata>
+    <id>R1Delta</id>
+    <!-- Use $version$ token for nuget pack -Version -->
+    <version>$version$</version>
+    <title>R1Delta Launcher</title>
+    <authors>The Interstellar Modding Corporation</authors>
+    <description>Launcher and modding framework for Titanfall 1.</description>
+    <projectUrl>https://github.com/r1delta/r1delta</projectUrl>
+    <licenseUrl>https://github.com/r1delta/r1delta/blob/main/LICENSE</licenseUrl>
+    <tags>Titanfall Mod Launcher Game</tags>
+  </metadata>
+  <files>
+    <!-- Source paths are now relative to the nuspec file's location -->
+    <!-- in the 'release_package' directory -->
+    <file src="r1delta.exe" target="lib\net462\" />
+    <file src="R1Delta_DS.exe" target="lib\net462\" />
+    <file src="r1delta\**\*.*" target="lib\net462\r1delta\" />
+  </files>
+</package>

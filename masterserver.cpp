@@ -54,6 +54,7 @@ struct HeartbeatInfo {
 static ConVarR1O* delta_ms_url = nullptr;
 static ConVarR1O* hostport = nullptr;
 static ConVarR1O* host_map = nullptr;
+static ConVarR1O* hide_server = nullptr;
 
 // --------------------------------
 // CVar Initialization
@@ -64,6 +65,7 @@ void InitMasterServerCVars() {
         delta_ms_url = CCVar_FindVar(cvarinterface, "delta_ms_url");
         hostport = CCVar_FindVar(cvarinterface, "hostport");
         host_map = CCVar_FindVar(cvarinterface, "host_map");
+        hide_server = CCVar_FindVar(cvarinterface, "hide_server");
         initialized = true;
     }
 }
@@ -93,6 +95,14 @@ namespace MasterServerClient {
         if (!delta_ms_url || !delta_ms_url->m_Value.m_pszString[0]) {
             Warning("MasterServerClient: delta_ms_url not set\n");
             return false;
+        }
+        if (hide_server->m_Value.m_nValue == 1) {
+            static bool hasWarned = false;
+            if (!hasWarned) {
+                hasWarned = true;
+                Warning("hide_server is 1, ignoring master server heartbeat requests\n");
+            }
+            return true;
         }
 
         std::lock_guard<std::mutex> lock(httpMutex);

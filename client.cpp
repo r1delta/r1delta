@@ -116,6 +116,9 @@ struct CGameUI
 };
 void CGameUI__StartProgressBar(CGameUI* thisptr)
 {
+    static ConVarR1* enable = OriginalCCVar_FindVar(cvarinterface, "progressbar_enabled");
+    if (enable->m_Value.m_nValue != 1)
+        return;
 	static auto CLoadingDialog__ctor = (void(*)(void* thisptr, void* parent))(G_client + 0x363A10);
 	static auto vgui__PHandle__Get = (vgui::Panel * (*)(void* a1))(G_client + 0x689A70);
 	static auto vgui__PHandle__Set = (vgui::Panel * (*)(void* a1, vgui::Panel* pEnt))(G_client + 0x689AE0);
@@ -149,6 +152,215 @@ bool CGameUI__UpdateProgressBar(CGameUI* thisptr, float progress, const char* st
 		CGameUI__SetProgressBarText(thisptr, statusText);
 	return ret;
 }
+
+typedef __int64(__fastcall* tCHudChat__FormatAndDisplayMessage)(
+    __int64 a1, const CHAR* a2, unsigned int a3, char a4, char a5);
+typedef struct player_info_s {
+    char	_0x0000[0x0008];	// 0x0000
+    char	szName[32];			// 0x0008
+    char	_0x0028[0x0228];	// 0x0028
+} player_info_t;
+// Matches disassembly call [vtable+0x80]
+typedef bool(__fastcall* tEngineClient_GetPlayerInfo)(
+    uintptr_t pEngineClient,    // RCX
+    unsigned int playerIndex,   // RDX (EDX)
+    player_info_s* outputBuffer          // R8
+    );
+
+// Matches disassembly call [vtable+0x58]
+typedef const wchar_t* (__fastcall* tLocalize_Find)(
+    uintptr_t pLocalize,        // RCX
+    const char* tokenName       // RDX
+    );
+
+// --- Hook Variables ---
+tCHudChat__FormatAndDisplayMessage oCHudChat__FormatAndDisplayMessage = nullptr;
+
+// --- Helper Functions ---
+
+// --- Helper Functions ---
+inline std::wstring MultiByteToWide(const char* str, int strLen = -1) {
+    if (!str || strLen == 0 || (strLen == -1 && *str == '\0')) {
+        return std::wstring();
+    }
+    // Ensure the input string length for MultiByteToWideChar is calculated correctly
+    // If strLen is -1, use strlen to avoid reading past embedded nulls if they exist.
+    // However, MultiByteToWideChar handles -1 itself, so this might be redundant unless
+    // we suspect the input 'str' itself is not properly terminated within its buffer.
+    // Let's stick to passing strLen = -1 for now, relying on the guaranteed termination
+    // we added for szName.
+
+    int size_needed = MultiByteToWideChar(CP_UTF8, 0, str, strLen, NULL, 0);
+    if (size_needed <= 0) {
+        return std::wstring(); // Error or empty string
+    }
+    std::wstring wstrTo(size_needed, L'\0');
+    int result = MultiByteToWideChar(CP_UTF8, 0, str, strLen, &wstrTo[0], size_needed);
+    if (result == 0) {
+        return std::wstring(); // Conversion failed
+    }
+    // Remove potential trailing null if MultiByteToWideChar included it when strLen was -1
+    if (!wstrTo.empty() && wstrTo.back() == L'\0') {
+        wstrTo.pop_back();
+    }
+    return wstrTo;
+}
+
+inline std::string WideToMultiByte(const std::wstring& wstr, unsigned int codePage = CP_UTF8) { // Default to UTF-8
+    if (wstr.empty()) {
+        return std::string();
+    }
+    int size_needed = WideCharToMultiByte(codePage, 0, wstr.c_str(), (int)wstr.size(), NULL, 0, NULL, NULL);
+    if (size_needed <= 0) {
+        return std::string();
+    }
+    std::string strTo(size_needed, '\0');
+    int result = WideCharToMultiByte(codePage, 0, wstr.c_str(), (int)wstr.size(), &strTo[0], size_needed, NULL, NULL);
+    if (result == 0) {
+        return std::string(); // Conversion failed
+    }
+    return strTo;
+}
+int recurse = 0;
+// --- Hooked Function ---
+__int64 __fastcall CHudChat__FormatAndDisplayMessage_Hooked(
+    __int64 a1, // CHudChat* this
+    const CHAR* a2, // message
+    unsigned int a3, // player index/entity id
+    char a4, // is team chat?
+    char a5  // is dead chat?
+) {
+    if (recurse != 0) {
+        return oCHudChat__FormatAndDisplayMessage(a1, a2, a3, a4, a5);
+    }
+    recurse++;
+    // --- Static variables & Global Init (remain the same) ---
+    static uintptr_t s_pEngineClient = 0;
+    static uintptr_t s_pVGuiLocalize = 0;
+    static bool s_globalsInitialized = false;
+    // --- Constants for Global Retrieval (remain the same) ---
+    constexpr uintptr_t IDA_ANALYSIS_BASE_ADDRESS = 0x180000000;
+    constexpr uintptr_t IDA_ADDR_G_PENGINECLIENT = 0x180BF51E8;
+    constexpr uintptr_t IDA_ADDR_G_PVGUILOCALIZE = 0x18380E750;
+    constexpr uintptr_t OFFSET_G_PENGINECLIENT = IDA_ADDR_G_PENGINECLIENT - IDA_ANALYSIS_BASE_ADDRESS;
+    constexpr uintptr_t OFFSET_G_PVGUILOCALIZE = IDA_ADDR_G_PVGUILOCALIZE - IDA_ANALYSIS_BASE_ADDRESS;
+
+    // --- Initialize Globals on first call ---
+    if (!s_globalsInitialized && G_client != 0) {
+        uintptr_t addressOfEnginePtr = G_client + OFFSET_G_PENGINECLIENT;
+        uintptr_t addressOfLocalizePtr = G_client + OFFSET_G_PVGUILOCALIZE;
+        bool canReadEngine = !IsBadReadPtr((void*)addressOfEnginePtr, sizeof(uintptr_t));
+        bool canReadLocalize = !IsBadReadPtr((void*)addressOfLocalizePtr, sizeof(uintptr_t));
+        if (canReadEngine) s_pEngineClient = *(uintptr_t*)addressOfEnginePtr;
+        if (canReadLocalize) s_pVGuiLocalize = *(uintptr_t*)addressOfLocalizePtr;
+        s_globalsInitialized = true;
+    }
+
+    // --- Reconstruct the message string ---
+    std::wstring finalMessageStringW;
+    bool nameRetrievedSuccessfully = false;
+    player_info_t playerInfo = {}; // Zero initialize
+
+    // 1. Get Player Info
+    if (s_pEngineClient != 0 && !IsBadReadPtr((void*)s_pEngineClient, sizeof(uintptr_t))) {
+        uintptr_t engineClientVtable = *(uintptr_t*)s_pEngineClient;
+        if (engineClientVtable != 0) {
+            uintptr_t* pGetPlayerInfoFuncAddrLocation = (uintptr_t*)(engineClientVtable + 0x80);
+            if (!IsBadReadPtr(pGetPlayerInfoFuncAddrLocation, sizeof(uintptr_t))) {
+                uintptr_t getPlayerInfoFuncAddr = *pGetPlayerInfoFuncAddrLocation;
+                if (getPlayerInfoFuncAddr != 0) {
+                    tEngineClient_GetPlayerInfo pGetPlayerInfo = (tEngineClient_GetPlayerInfo)getPlayerInfoFuncAddr;
+                    bool funcReturnedSuccess = pGetPlayerInfo(s_pEngineClient, a3, &playerInfo);
+                    playerInfo.szName[sizeof(playerInfo.szName) - 1] = '\0'; // GUARANTEE termination
+                    if (funcReturnedSuccess && playerInfo.szName[0] != '\0') {
+                        nameRetrievedSuccessfully = true;
+                    }
+                }
+            }
+        }
+    }
+    const char* nameToUse = nameRetrievedSuccessfully ? playerInfo.szName : "?UNKNOWN?";
+
+    // 2. Get Prefixes (remain the same)
+    const wchar_t* deadPrefix = L"";
+    const wchar_t* teamPrefix = L"";
+    if (s_pVGuiLocalize != 0 && !IsBadReadPtr((void*)s_pVGuiLocalize, sizeof(uintptr_t))) {
+        uintptr_t localizeVtable = *(uintptr_t*)s_pVGuiLocalize;
+        if (localizeVtable != 0) {
+            uintptr_t* pLocalizeFindFuncAddrLocation = (uintptr_t*)(localizeVtable + 0x58); // Offset 88
+            if (!IsBadReadPtr(pLocalizeFindFuncAddrLocation, sizeof(uintptr_t))) {
+                uintptr_t localizeFindFuncAddr = *pLocalizeFindFuncAddrLocation;
+                if (localizeFindFuncAddr != 0) {
+                    tLocalize_Find pLocalizeFind = (tLocalize_Find)localizeFindFuncAddr;
+                    if (a5) {
+                        const wchar_t* foundPrefix = pLocalizeFind(s_pVGuiLocalize, "#HUD_CHAT_DEAD_PREFIX");
+                        if (foundPrefix) { deadPrefix = foundPrefix; }
+                    }
+                    if (a4) {
+                        const wchar_t* foundPrefix = pLocalizeFind(s_pVGuiLocalize, "#HUD_CHAT_TEAM_PREFIX");
+                        if (foundPrefix) { teamPrefix = foundPrefix; }
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Assemble the final string (WideChar)
+    finalMessageStringW.clear(); // Start fresh
+    finalMessageStringW.append(deadPrefix);
+    finalMessageStringW.append(teamPrefix);
+
+    // Convert and append name - check result
+    std::wstring wideName = MultiByteToWide(nameToUse, -1);
+    // --- Add a check here ---
+    // Breakpoint: Inspect wideName. Is it valid? Does it have weird characters?
+    finalMessageStringW.append(wideName);
+
+    // --- Add a check here ---
+    // Breakpoint: Inspect finalMessageStringW. Does it look correct so far?
+
+    // *** TRY ALTERNATIVE APPENDS FOR COLON ***
+
+    // Method 1: Character by character (most likely to bypass weird interactions)
+    finalMessageStringW.push_back(L':');
+    finalMessageStringW.push_back(L' ');
+
+    // Method 2: Explicit array (if Method 1 fails)
+    // const wchar_t colonSpace[] = { L':', L' ', L'\0' };
+    // finalMessageStringW.append(colonSpace);
+
+    // Method 3: Original append (keep commented out unless others fail)
+    // finalMessageStringW.append(L": ");
+
+    // --- Add a check here ---
+    // Breakpoint: Inspect finalMessageStringW. Does it contain the colon and space now? Check length.
+
+    // Append message
+    if (a2 != nullptr && !IsBadReadPtr(a2, 1)) {
+        finalMessageStringW.append(MultiByteToWide(a2, -1));
+    }
+
+    // 4. Convert wide string to multibyte and print using Msg()
+    std::string finalMessageMB = WideToMultiByte(finalMessageStringW, CP_UTF8); // Or CP_ACP
+
+    if (!finalMessageMB.empty()) {
+        Msg("%s\n", finalMessageMB.c_str());
+    }
+
+    // --- Call the original function ---
+    if (oCHudChat__FormatAndDisplayMessage) {
+        return oCHudChat__FormatAndDisplayMessage(a1, a2, a3, a4, a5);
+    }
+    else {
+        return 0;
+    }
+}
+char (*oMsgFunc__SayText)(__int64 a1);
+char __fastcall MsgFunc__SayText(__int64 a1) {
+    recurse = 0;
+    return oMsgFunc__SayText(a1);
+}
+
 void InitClient()
 {
 	auto client = G_client;
@@ -170,6 +382,8 @@ void InitClient()
 	MH_CreateHook((LPVOID)(client + 0x286F50), &SharedVehicleViewSmoothing, reinterpret_cast<LPVOID*>(&oSharedVehicleViewSmoothing));
 	MH_CreateHook((LPVOID)(client + 0x360210), &CGameUI__StartProgressBar, NULL);
 	MH_CreateHook((LPVOID)(client + 0x3601C0), &CGameUI__UpdateProgressBar, reinterpret_cast<LPVOID*>(&oCGameUI__UpdateProgressBar));
+	MH_CreateHook((LPVOID)(client + 0x17D440), &CHudChat__FormatAndDisplayMessage_Hooked, reinterpret_cast<LPVOID*>(&oCHudChat__FormatAndDisplayMessage));
+    MH_CreateHook((LPVOID)(client + 0x17DAA0), &MsgFunc__SayText, reinterpret_cast<LPVOID*>(&oMsgFunc__SayText));
 
 	if (IsNoOrigin())
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("ws2_32.dll"), "getaddrinfo"), &hookedGetAddrInfo, reinterpret_cast<LPVOID*>(&originalGetAddrInfo));

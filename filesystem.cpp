@@ -54,8 +54,6 @@
 
 namespace fs = std::filesystem;
 
-FileCache fileCache;
-
 ReadFileFromFilesystemType readFileFromFilesystem;
 ReadFromCacheType readFromCache;
 ReadFileFromVPKType readFileFromVPK;
@@ -78,14 +76,14 @@ bool V_IsAbsolutePath(const char* pStr) {
 }
 
 bool ReadFromCacheHook(IFileSystem* filesystem, char* path, void* result) {
-    if (fileCache.TryReplaceFile(path))
+    if (FileCache::GetInstance().TryReplaceFile(path))
         return false;
 
     return readFromCache(filesystem, path, result);
 }
 
 FileHandle_t ReadFileFromVPKHook(VPKData* vpkInfo, __int64* b, char* filename) {
-    if (fileCache.TryReplaceFile(filename)) {
+    if (FileCache::GetInstance().TryReplaceFile(filename)) {
         *b = -1;
         return b;
     }
@@ -97,7 +95,7 @@ std::atomic_flag threadStarted = ATOMIC_FLAG_INIT;
 
 void StartFileCacheThread() {
     if (!threadStarted.test_and_set()) {
-        std::thread([]() { fileCache.UpdateCache(); }).detach();
+        std::thread([]() { FileCache::GetInstance().UpdateCache(); }).detach();
     }
 }
 class FastFileSystemHook {
@@ -158,17 +156,17 @@ __int64(*HandleOpenRegularFileOriginal)(__int64 a1, __int64 a2, char a3);
 
 // The hook function remains largely the same
 int64_t __fastcall HookedHandleOpenRegularFile(int64_t a1, int64_t a2, char a3) {
-	const char* path = reinterpret_cast<const char*>(a2 + 63);
-	if (FastFileSystemHook::shouldFailRead(path)) {
+	char* path = reinterpret_cast<char*>(a2 + 63);
+	if (FastFileSystemHook::shouldFailRead(path))
 		return 0;
-	}
 	return HandleOpenRegularFileOriginal(a1, a2, a3);
 }
+
 
 FileSystem_UpdateAddonSearchPathsType FileSystem_UpdateAddonSearchPathsTypeOriginal;
 bool done = false;
 __int64 __fastcall FileSystem_UpdateAddonSearchPaths(void* a1) {
-    fileCache.RequestManualRescan();
+    FileCache::GetInstance().RequestManualRescan();
 	FastFileSystemHook::resetNonexistentCache();
     return FileSystem_UpdateAddonSearchPathsTypeOriginal(a1);
 }
