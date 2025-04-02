@@ -286,6 +286,7 @@ namespace launcher_ex
             }
         }
 
+
         protected async Task<bool> UpdateCheck() // Returns true if startup should continue, false otherwise
         {
             // --- Determine if Update Check is Needed ---
@@ -309,7 +310,7 @@ namespace launcher_ex
                     const string dsExeTargetName = "r1delta_ds.exe";
 
                     SquirrelAwareApp.HandleEvents(
-                        onInitialInstall: v => // 'v' is the version being installed
+                        onInitialInstall: (v,t) => // 'v' is the version being installed
                         {
                             var updateOnlyFlag = false; // For initial install, always create
                             var locations = ShortcutLocation.StartMenu; // Explicitly Start Menu ONLY
@@ -365,7 +366,7 @@ namespace launcher_ex
                             //     Debug.WriteLine($"[Squirrel Install] Error trying to launch app after install: {ex.Message}");
                             // }
                         },
-                        onAppUpdate: v => // 'v' is the new version being updated to
+                        onAppUpdate: (v,t) => // 'v' is the new version being updated to
                         {
                             var updateOnlyFlag = true; // For updates, only modify existing shortcuts
                             var locations = ShortcutLocation.StartMenu; // Explicitly Start Menu ONLY
@@ -394,7 +395,7 @@ namespace launcher_ex
                                 Debug.WriteLine($"[Squirrel Update] FAILED to update shortcut for {dsExeTargetName}: {ex.Message}");
                             }
                         },
-                        onAppUninstall: v => // 'v' is the version being uninstalled
+                        onAppUninstall: (v,t) => // 'v' is the version being uninstalled
                         {
                             var locations = ShortcutLocation.StartMenu; // Explicitly Start Menu ONLY
 
@@ -551,7 +552,7 @@ namespace launcher_ex
             {
                 // Use the GitHub URL associated with your *actual application*
                 // Pass the SquirrelAppName to ensure it looks in the correct %LocalAppData% folder
-                using (var updateManager = await UpdateManager.GitHubUpdateManager(GitHubRepoUrl, SquirrelAppName))
+                using (var updateManager = new UpdateManager(GitHubRepoUrl, SquirrelAppName))
                 {
                     var updateInfo = await updateManager.CheckForUpdate();
 
