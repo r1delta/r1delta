@@ -89,7 +89,8 @@
   <PropertyGroup Label="Vcpkg">
     <VcpkgEnabled>true</VcpkgEnabled>
     <VcpkgEnableManifest>true</VcpkgEnableManifest>
-    <VcpkgTriplet>x64-windows</VcpkgTriplet>
+    <VcpkgTriplet>x64-windows-fix-cmake</VcpkgTriplet>
+    <VcpkgTripletDirectory>$(SolutionDir)\custom-triplets</VcpkgTripletDirectory>
     <VcpkgOverlayPorts>$(ProjectDir)..\overlays\ports</VcpkgOverlayPorts>
   </PropertyGroup>
   <PropertyGroup Label="Vcpkg" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
