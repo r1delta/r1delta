@@ -262,18 +262,66 @@ jobs:
           Squirrel releasify --package "%NUGET_PACKAGE_PATH%" --releaseDir "%SQUIRREL_RELEASE_DIR%"
         shell: cmd # Squirrel often works best in cmd
 
-      # Check if releasify succeeded before creating GitHub release
-      - name: Check Releasify Output
+      # --- Find Release Assets ---
+      - name: Find Release Assets
+        id: find_assets
         shell: pwsh
         run: |
-          $setupExePath = "${{ github.workspace }}/squirrel_release/Setup.exe"
-          if (-not (Test-Path $setupExePath)) {
-            Write-Error "Squirrel releasify failed: Setup.exe not found in ${{ github.workspace }}/squirrel_release"
-            Write-Host "Contents of squirrel_release directory:"
-            Get-ChildItem -Path "${{ github.workspace }}/squirrel_release" -Recurse | Select-Object FullName, Length, LastWriteTime
+          $ErrorActionPreference = 'Stop'
+          $releaseDir = "${{ github.workspace }}/squirrel_release"
+          Write-Host "Searching for assets in: $releaseDir"
+
+          # Find the Setup executable (allow for variations like AppNameSetup.exe)
+          $setupFile = Get-ChildItem -Path $releaseDir -Filter *.exe | Where-Object { $_.Name -match '^(Setup|.*Setup)\.exe$' } | Select-Object -First 1
+          if (-not $setupFile) {
+            Write-Host "Standard Setup*.exe not found. Looking for any .exe..."
+            $setupFile = Get-ChildItem -Path $releaseDir -Filter *.exe | Select-Object -First 1
+          }
+          if (-not $setupFile) {
+            Write-Error "Could not find any Setup executable (.exe) in $releaseDir"
+            Get-ChildItem -Path $releaseDir -Recurse | Select-Object FullName, Length # Debug output
             exit 1
           }
-          Write-Host "Releasify successful, Setup.exe found at $setupExePath."
+          $setupExePath = $setupFile.FullName
+          $setupExeName = $setupFile.Name
+          Write-Host "Found Setup Executable: $setupExePath (Name: $setupExeName)"
+          echo "setup_exe_path=$setupExePath" >> $env:GITHUB_OUTPUT
+          echo "setup_exe_name=$setupExeName" >> $env:GITHUB_OUTPUT
+
+          # Find the RELEASES file
+          $releasesPath = Join-Path $releaseDir "RELEASES"
+          if (-not (Test-Path $releasesPath)) {
+            Write-Error "RELEASES file not found at $releasesPath"
+            Get-ChildItem -Path $releaseDir -Recurse | Select-Object FullName, Length # Debug output
+            exit 1
+          }
+          Write-Host "Found RELEASES file: $releasesPath"
+          echo "releases_path=$releasesPath" >> $env:GITHUB_OUTPUT
+          echo "releases_name=RELEASES" >> $env:GITHUB_OUTPUT # Name is static
+
+          # Find the full nupkg file
+          $fullNupkgFile = Get-ChildItem -Path $releaseDir -Filter *-full.nupkg | Select-Object -First 1
+          if (-not $fullNupkgFile) {
+            Write-Error "Could not find the full nupkg file (*-full.nupkg) in $releaseDir"
+            Get-ChildItem -Path $releaseDir -Recurse | Select-Object FullName, Length # Debug output
+            exit 1
+          }
+          $fullNupkgPath = $fullNupkgFile.FullName
+          $fullNupkgName = $fullNupkgFile.Name
+          Write-Host "Found Full Nupkg: $fullNupkgPath (Name: $fullNupkgName)"
+          echo "full_nupkg_path=$fullNupkgPath" >> $env:GITHUB_OUTPUT
+          echo "full_nupkg_name=$fullNupkgName" >> $env:GITHUB_OUTPUT
+
+          # Optional: Verify all outputs were set
+          Write-Host "Outputting variables:"
+          Write-Host " setup_exe_path: $(echo $env:GITHUB_OUTPUT | Select-String 'setup_exe_path=')"
+          Write-Host " setup_exe_name: $(echo $env:GITHUB_OUTPUT | Select-String 'setup_exe_name=')"
+          Write-Host " releases_path: $(echo $env:GITHUB_OUTPUT | Select-String 'releases_path=')"
+          Write-Host " releases_name: $(echo $env:GITHUB_OUTPUT | Select-String 'releases_name=')"
+          Write-Host " full_nupkg_path: $(echo $env:GITHUB_OUTPUT | Select-String 'full_nupkg_path=')"
+          Write-Host " full_nupkg_name: $(echo $env:GITHUB_OUTPUT | Select-String 'full_nupkg_name=')"
+
+      # Remove the old 'Check Releasify Output' step as the check is now part of 'Find Release Assets'
 
       - name: Create GitHub Release
         id: create_release
@@ -286,28 +334,16 @@ jobs:
           draft: false      # Set to true if you want to manually publish later
           prerelease: false # Set to true if this is a pre-release
 
-      # Define asset paths clearly using workspace variables for robustness
-      - name: Define Asset Paths
-        id: asset_paths
-        shell: pwsh
-        run: |
-          echo "setup_exe=${{ github.workspace }}/squirrel_release/Setup.exe" >> $env:GITHUB_OUTPUT
-          echo "releases_file=${{ github.workspace }}/squirrel_release/RELEASES" >> $env:GITHUB_OUTPUT
-          echo "full_nupkg=${{ github.workspace }}/squirrel_release/${{ env.PACKAGE_NAME }}-${{ steps.get_version.outputs.version }}-full.nupkg" >> $env:GITHUB_OUTPUT
-        # Add checks to ensure files exist before setting outputs
-        # if (-not (Test-Path "${{ github.workspace }}/squirrel_release/Setup.exe")) { Write-Error "Setup.exe not found for upload"; exit 1 }
-        # if (-not (Test-Path "${{ github.workspace }}/squirrel_release/RELEASES")) { Write-Error "RELEASES not found for upload"; exit 1 }
-        # if (-not (Test-Path "${{ github.workspace }}/squirrel_release/${{ env.PACKAGE_NAME }}-${{ steps.get_version.outputs.version }}-full.nupkg")) { Write-Error "Full nupkg not found for upload"; exit 1 }
+      # Remove the old 'Define Asset Paths' step
 
-
-      - name: Upload Setup.exe Asset
+      - name: Upload Setup Executable Asset
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ${{ steps.asset_paths.outputs.setup_exe }}
-          asset_name: Setup.exe
+          asset_path: ${{ steps.find_assets.outputs.setup_exe_path }}
+          asset_name: ${{ steps.find_assets.outputs.setup_exe_name }}
           asset_content_type: application/vnd.microsoft.portable-executable
 
       - name: Upload RELEASES File Asset
@@ -316,8 +352,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ${{ steps.asset_paths.outputs.releases_file }}
-          asset_name: RELEASES
+          asset_path: ${{ steps.find_assets.outputs.releases_path }}
+          asset_name: ${{ steps.find_assets.outputs.releases_name }}
           asset_content_type: text/plain
 
       - name: Upload Full Nupkg Asset
@@ -326,6 +362,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ${{ steps.asset_paths.outputs.full_nupkg }}
-          asset_name: ${{ env.PACKAGE_NAME }}-${{ steps.get_version.outputs.version }}-full.nupkg
+          asset_path: ${{ steps.find_assets.outputs.full_nupkg_path }}
+          asset_name: ${{ steps.find_assets.outputs.full_nupkg_name }}
           asset_content_type: application/zip
