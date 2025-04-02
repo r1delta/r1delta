@@ -41,6 +41,14 @@ jobs:
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
 
+      # Ensures we have the latest vcpkg tool and ports before building
+      - name: Update vcpkg installation
+        run: |
+          cd C:/vcpkg
+          git pull
+          ./bootstrap-vcpkg.bat -disableMetrics
+        shell: cmd # Use cmd for consistency with the bootstrap batch file
+
       # --- Create VCPKG Cache Directory ---
       - name: Prepare VCPKG Cache Directory
         run: |
