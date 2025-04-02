@@ -303,13 +303,24 @@ SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
     return 1;
 }
 
-SQInteger GetServerList(HSQUIRRELVM v) {
-    auto servers = MasterServerClient::GetServerList();
+static std::vector<ServerInfo> gv_ServerList;
+
+SQInteger DispatchServerListReq(HSQUIRRELVM v) {
+
+    std::thread([]() {
+        gv_ServerList = MasterServerClient::GetServerList();
+    }).detach();
+
+
+    return 1;
+}
+
+SQInteger PollServerList(HSQUIRRELVM v) {
     sq_newarray(v, 0);
 
-    if (servers.empty()) {
+    if (gv_ServerList.empty()) {
         //sq_newtable(v);
-        //sq_pushstring(v, "host_name", -1); sq_pushstring(v, "* But nobody came.", -1); sq_newslot(v, -3, 0);
+        //sq_pushstring(v, "host_name", -1); sq_pushstring(v, "No servers found.", -1); sq_newslot(v, -3, 0);
         //sq_pushstring(v, "map_name", -1); sq_pushstring(v, "mp_lobby", -1); sq_newslot(v, -3, 0);
         //sq_pushstring(v, "game_mode", -1); sq_pushstring(v, "-", -1); sq_newslot(v, -3, 0);
         //sq_pushstring(v, "max_players", -1); sq_pushinteger(0, v, 0); sq_newslot(v, -3, 0);
@@ -319,8 +330,8 @@ SQInteger GetServerList(HSQUIRRELVM v) {
         //sq_arrayappend(v, -2);
         return 1;
     }
-
-    for (auto& s : servers) {
+    
+    for (auto& s : gv_ServerList) {
         sq_newtable(v);
         sq_pushstring(v, "host_name", -1); sq_pushstring(v, s.hostName.c_str(), -1); sq_newslot(v, -3, 0);
         sq_pushstring(v, "map_name", -1); sq_pushstring(v, s.mapName.c_str(), -1); sq_newslot(v, -3, 0);
@@ -328,7 +339,7 @@ SQInteger GetServerList(HSQUIRRELVM v) {
         sq_pushstring(v, "max_players", -1); sq_pushinteger(0, v, s.maxPlayers); sq_newslot(v, -3, 0);
         sq_pushstring(v, "port", -1); sq_pushinteger(0, v, s.port); sq_newslot(v, -3, 0);
         sq_pushstring(v, "ip", -1); sq_pushstring(v, s.ip.c_str(), -1); sq_newslot(v, -3, 0);
-
+    
         sq_pushstring(v, "players", -1);
         sq_newarray(v, 0);
         for (auto& p : s.players) {
@@ -342,6 +353,7 @@ SQInteger GetServerList(HSQUIRRELVM v) {
         sq_newslot(v, -3, 0);
         sq_arrayappend(v, -2);
     }
+
     return 1;
 }
 
