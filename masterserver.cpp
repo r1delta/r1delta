@@ -306,6 +306,8 @@ SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
 static std::vector<ServerInfo> gv_ServerList;
 
 SQInteger DispatchServerListReq(HSQUIRRELVM v) {
+    if (gv_ServerList.size())
+        gv_ServerList.clear();
 
     std::thread([]() {
         gv_ServerList = MasterServerClient::GetServerList();
