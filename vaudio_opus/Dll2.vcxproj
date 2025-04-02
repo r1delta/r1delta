@@ -88,12 +88,14 @@
     <VcpkgEnableManifest>true</VcpkgEnableManifest>
     <VcpkgTriplet>x64-windows</VcpkgTriplet>
     <VcpkgOverlayPorts>$(ProjectDir)..\overlays\ports</VcpkgOverlayPorts>
+    <VcpkgTripletDirectory>$(SolutionDir)\custom-triplets</VcpkgTripletDirectory>
+    <VcpkgTriplet>x64-windows-fix-cmake</VcpkgTriplet>
   </PropertyGroup>
   <PropertyGroup Label="Vcpkg" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <VcpkgAdditionalInstallOptions>--overlay-ports=$(SolutionDir)\overlays\ports</VcpkgAdditionalInstallOptions>
+    <VcpkgAdditionalInstallOptions>--overlay-ports=$(SolutionDir)overlays/ports --overlay-triplets=$(SolutionDir)custom-triplets</VcpkgAdditionalInstallOptions>
   </PropertyGroup>
   <PropertyGroup Label="Vcpkg" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <VcpkgAdditionalInstallOptions>--overlay-ports=$(SolutionDir)\overlays\ports</VcpkgAdditionalInstallOptions>
+    <VcpkgAdditionalInstallOptions>--overlay-ports=$(SolutionDir)overlays/ports --overlay-triplets=$(SolutionDir)custom-triplets</VcpkgAdditionalInstallOptions>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
