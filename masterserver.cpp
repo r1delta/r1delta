@@ -71,6 +71,7 @@ void InitMasterServerCVars() {
 }
 
 namespace MasterServerClient {
+    static std::vector<ServerInfo> serverList;
     static std::mutex httpMutex;
     static std::unique_ptr<httplib::Client> httpClient;
 
@@ -139,21 +140,23 @@ namespace MasterServerClient {
     // --------------------------------
     // Server List
     // --------------------------------
-    std::vector<ServerInfo> GetServerList() {
+    void GetServerList() {
         InitMasterServerCVars();
-        if (!delta_ms_url) return {};
+
+        if (!delta_ms_url) 
+            return;
 
         httplib::Client cli(delta_ms_url->m_Value.m_pszString);
         cli.set_connection_timeout(2);
         cli.set_address_family(AF_INET);
 
         auto res = cli.Get("/servers");
-        if (!res || res->status != 200) return {};
+
+        if (!res || res->status != 200)
+            return;
 
         try {
             auto j = json::parse(res->body);
-            std::vector<ServerInfo> servers;
-
             for (auto& sj : j) {
                 ServerInfo si;
                 si.hostName = sj["host_name"];
@@ -171,13 +174,12 @@ namespace MasterServerClient {
                     pi.team = pj["team"];
                     si.players.push_back(pi);
                 }
-                servers.push_back(si);
+                serverList.push_back(si);
             }
-            return servers;
         }
         catch (...) {
             Warning("MasterServerClient: Invalid server list response\n");
-            return {};
+            return;
         }
     }
 
@@ -303,14 +305,11 @@ SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
     return 1;
 }
 
-static std::vector<ServerInfo> gv_ServerList;
-
 SQInteger DispatchServerListReq(HSQUIRRELVM v) {
-    if (gv_ServerList.size())
-        gv_ServerList.clear();
+    MasterServerClient::serverList.clear();
 
     std::thread([]() {
-        gv_ServerList = MasterServerClient::GetServerList();
+        MasterServerClient::GetServerList();
     }).detach();
 
 
@@ -320,7 +319,7 @@ SQInteger DispatchServerListReq(HSQUIRRELVM v) {
 SQInteger PollServerList(HSQUIRRELVM v) {
     sq_newarray(v, 0);
 
-    if (gv_ServerList.empty()) {
+    if (MasterServerClient::serverList.empty()) {
         //sq_newtable(v);
         //sq_pushstring(v, "host_name", -1); sq_pushstring(v, "No servers found.", -1); sq_newslot(v, -3, 0);
         //sq_pushstring(v, "map_name", -1); sq_pushstring(v, "mp_lobby", -1); sq_newslot(v, -3, 0);
@@ -333,7 +332,7 @@ SQInteger PollServerList(HSQUIRRELVM v) {
         return 1;
     }
     
-    for (auto& s : gv_ServerList) {
+    for (auto& s : MasterServerClient::serverList) {
         sq_newtable(v);
         sq_pushstring(v, "host_name", -1); sq_pushstring(v, s.hostName.c_str(), -1); sq_newslot(v, -3, 0);
         sq_pushstring(v, "map_name", -1); sq_pushstring(v, s.mapName.c_str(), -1); sq_newslot(v, -3, 0);
