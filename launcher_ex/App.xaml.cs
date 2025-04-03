@@ -609,7 +609,7 @@ namespace launcher_ex
                 // Catch potential exceptions from UpdateCheck itself if not caught inside
                 Debug.WriteLine($"[Startup] Critical error during async UpdateCheck: {ex.Message}");
                 ShowError($"A critical error occurred during the update check:\n{ex.Message}\n\nThe application cannot start.", "Startup Error");
-                Shutdown(1); // Use Shutdown instead of Environment.Exit in WPF App
+                Process.GetCurrentProcess().Kill(); // Use Shutdown instead of Environment.Exit in WPF App
                 return;
             }
 
@@ -644,7 +644,7 @@ namespace launcher_ex
             catch (Exception ex)
             {
                 ShowError($"Fatal error getting launcher path: {ex.Message}");
-                Shutdown(1); // Use Shutdown
+                Process.GetCurrentProcess().Kill(); // Use Shutdown
                 return; // Keep compiler happy
             }
 
@@ -656,7 +656,7 @@ namespace launcher_ex
                           $"This usually means the R1Delta archive was not extracted correctly.\n\n" +
                           $"Please ensure you extract *ALL* files and folders from the R1Delta zip file directly into a new, empty folder where this launcher ({Path.GetFileName(Assembly.GetEntryAssembly()?.Location ?? "launcher_ex.exe")}) is located.",
                           "R1Delta Installation Error");
-                Shutdown(1); // Use Shutdown
+                Process.GetCurrentProcess().Kill(); // Use Shutdown
                 return; // Exit immediately
             }
 
@@ -767,7 +767,7 @@ namespace launcher_ex
                         ShowError($"The previously configured game path is no longer valid:\n{finalInstallPath}\n\nPlease restart the launcher. Setup will run again.");
                         // Optionally clear the invalid path from registry?
                         // RegistryHelper.SaveInstallPath("");
-                        Shutdown(1); // Use Shutdown
+                        Process.GetCurrentProcess().Kill(); // Use Shutdown
                         return;
                     }
                 }
@@ -775,7 +775,7 @@ namespace launcher_ex
             catch (Exception ex)
             {
                 ShowError($"An unexpected error occurred during the initial setup check: {ex.Message}\nThe application will now exit.");
-                Shutdown(1); // Use Shutdown
+                Process.GetCurrentProcess().Kill(); // Use Shutdown
                 return;
             }
 
@@ -791,7 +791,7 @@ namespace launcher_ex
             catch (Exception ex)
             {
                 ShowError($"Fatal Error: Could not change directory to the game path:\n{finalInstallPath}\n\nError: {ex.Message}");
-                Shutdown(1); // Use Shutdown
+                Process.GetCurrentProcess().Kill(); // Use Shutdown
                 return;
             }
 
@@ -812,14 +812,14 @@ namespace launcher_ex
                 if (RunAudioInstallerIfNecessary() != 0) // No longer needs path argument
                 {
                     // Error message shown inside RunAudioInstallerIfNecessary
-                    Shutdown(1); // Use Shutdown
+                    Process.GetCurrentProcess().Kill(); // Use Shutdown
                     return;
                 }
             }
             catch (Exception ex)
             {
                 ShowError($"An error occurred during the audio setup check.\nThe game cannot continue and has to exit.\n\nError: {ex.Message}");
-                Shutdown(1); // Use Shutdown
+                Process.GetCurrentProcess().Kill(); // Use Shutdown
                 return;
             }
 
@@ -846,7 +846,7 @@ namespace launcher_ex
                 {
                     int errorCode = Marshal.GetLastWin32Error();
                     LibraryLoadError(errorCode, LAUNCHER_DLL_NAME, launcherDllPath, originalLauncherExeDir);
-                    Shutdown(1); // Use Shutdown
+                    Process.GetCurrentProcess().Kill(); // Use Shutdown
                     return; // Keep compiler happy
                 }
 
@@ -858,7 +858,7 @@ namespace launcher_ex
                     int errorCode = Marshal.GetLastWin32Error();
                     LibraryLoadError(errorCode, "tier0.dll", coreDllPath, originalLauncherExeDir); // Adjust libName if different
                     FreeLibrary(hLauncherModule); // Clean up already loaded library
-                    Shutdown(1);
+                    Process.GetCurrentProcess().Kill();
                     return;
                 }
 
@@ -869,7 +869,7 @@ namespace launcher_ex
                     ShowError($"Failed to find the 'SetR1DeltaLaunchArgs' function in the core DLL ('{Path.GetFileName(coreDllPath)}').\nError code: {errorCode}\n\nThe game cannot continue and has to exit.");
                     FreeLibrary(hLauncherModule);
                     FreeLibrary(hCoreModule);
-                    Shutdown(1);
+                    Process.GetCurrentProcess().Kill();
                     return;
                 }
 
@@ -887,7 +887,7 @@ namespace launcher_ex
                     ShowError($"Failed to find the 'LauncherMain' function in '{LAUNCHER_DLL_NAME}'.\nError code: {errorCode}\n\nThe game cannot continue and has to exit.");
                     FreeLibrary(hLauncherModule);
                     FreeLibrary(hCoreModule);
-                    Shutdown(1);
+                    Process.GetCurrentProcess().Kill();
                     return;
                 }
             }
@@ -896,7 +896,7 @@ namespace launcher_ex
                 ShowError($"An unexpected error occurred while loading DLLs or functions.\nError: {ex.Message}\n\nThe game cannot continue and has to exit.");
                 if (hLauncherModule != IntPtr.Zero) FreeLibrary(hLauncherModule);
                 if (hCoreModule != IntPtr.Zero) FreeLibrary(hCoreModule);
-                Shutdown(1);
+                Process.GetCurrentProcess().Kill();
                 return;
             }
             // Do not free hCoreModule here, the game might depend on it.
@@ -926,11 +926,11 @@ namespace launcher_ex
             }
             catch (Exception ex)
             {
-                ShowError($"An error occurred while executing 'LauncherMain'.\nError: {ex.Message}\n\nThe game may not have started correctly.");
+                //ShowError($"An error occurred while executing 'LauncherMain'.\nError: {ex.Message}\n\nThe game may not have started correctly.");
                 // Don't FreeLibrary here either, the process might still be running somehow
-                Shutdown(1); // Exit with an error code
+                Process.GetCurrentProcess().Kill(); // Exit with an error code
             }
-            // No need for Process.GetCurrentProcess().Kill() if using Shutdown() properly.
+            Process.GetCurrentProcess().Kill();
         }
 
 
