@@ -1,6 +1,7 @@
 ﻿using Dark.Net;
 using R1Delta; // Assuming this namespace contains RegistryHelper and VisualCppInstaller
 using Squirrel;
+using Squirrel.Sources;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -552,7 +553,7 @@ namespace launcher_ex
             {
                 // Use the GitHub URL associated with your *actual application*
                 // Pass the SquirrelAppName to ensure it looks in the correct %LocalAppData% folder
-                using (var updateManager = new UpdateManager(GitHubRepoUrl, SquirrelAppName))
+                using (var updateManager = new UpdateManager(new GithubSource(GitHubRepoUrl, "", false), SquirrelAppName))
                 {
                     var updateInfo = await updateManager.CheckForUpdate();
 

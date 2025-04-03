@@ -749,8 +749,19 @@ bool GetSQVMFuncs() {
 
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_UI,
-		"GetServerList",
-		(SQFUNCTION)GetServerList,
+		"DispatchServerListReq",
+		(SQFUNCTION)DispatchServerListReq,
+		".ib", // String
+		1,      // Expects 2 parameters
+		"void",    // Returns a string
+		"str",
+		"Gets server list"
+	);
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_UI,
+		"PollServerList",
+		(SQFUNCTION)PollServerList,
 		".ib", // String
 		1,      // Expects 2 parameters
 		"void",    // Returns a string

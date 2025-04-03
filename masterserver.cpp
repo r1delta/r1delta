@@ -71,6 +71,7 @@ void InitMasterServerCVars() {
 }
 
 namespace MasterServerClient {
+    static std::vector<ServerInfo> serverList;
     static std::mutex httpMutex;
     static std::unique_ptr<httplib::Client> httpClient;
 
@@ -139,21 +140,23 @@ namespace MasterServerClient {
     // --------------------------------
     // Server List
     // --------------------------------
-    std::vector<ServerInfo> GetServerList() {
+    void GetServerList() {
         InitMasterServerCVars();
-        if (!delta_ms_url) return {};
+
+        if (!delta_ms_url) 
+            return;
 
         httplib::Client cli(delta_ms_url->m_Value.m_pszString);
         cli.set_connection_timeout(2);
         cli.set_address_family(AF_INET);
 
         auto res = cli.Get("/servers");
-        if (!res || res->status != 200) return {};
+
+        if (!res || res->status != 200)
+            return;
 
         try {
             auto j = json::parse(res->body);
-            std::vector<ServerInfo> servers;
-
             for (auto& sj : j) {
                 ServerInfo si;
                 si.hostName = sj["host_name"];
@@ -171,13 +174,12 @@ namespace MasterServerClient {
                     pi.team = pj["team"];
                     si.players.push_back(pi);
                 }
-                servers.push_back(si);
+                serverList.push_back(si);
             }
-            return servers;
         }
         catch (...) {
             Warning("MasterServerClient: Invalid server list response\n");
-            return {};
+            return;
         }
     }
 
@@ -303,13 +305,23 @@ SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
     return 1;
 }
 
-SQInteger GetServerList(HSQUIRRELVM v) {
-    auto servers = MasterServerClient::GetServerList();
+SQInteger DispatchServerListReq(HSQUIRRELVM v) {
+    MasterServerClient::serverList.clear();
+
+    std::thread([]() {
+        MasterServerClient::GetServerList();
+    }).detach();
+
+
+    return 1;
+}
+
+SQInteger PollServerList(HSQUIRRELVM v) {
     sq_newarray(v, 0);
 
-    if (servers.empty()) {
+    if (MasterServerClient::serverList.empty()) {
         //sq_newtable(v);
-        //sq_pushstring(v, "host_name", -1); sq_pushstring(v, "* But nobody came.", -1); sq_newslot(v, -3, 0);
+        //sq_pushstring(v, "host_name", -1); sq_pushstring(v, "No servers found.", -1); sq_newslot(v, -3, 0);
         //sq_pushstring(v, "map_name", -1); sq_pushstring(v, "mp_lobby", -1); sq_newslot(v, -3, 0);
         //sq_pushstring(v, "game_mode", -1); sq_pushstring(v, "-", -1); sq_newslot(v, -3, 0);
         //sq_pushstring(v, "max_players", -1); sq_pushinteger(0, v, 0); sq_newslot(v, -3, 0);
@@ -319,8 +331,8 @@ SQInteger GetServerList(HSQUIRRELVM v) {
         //sq_arrayappend(v, -2);
         return 1;
     }
-
-    for (auto& s : servers) {
+    
+    for (auto& s : MasterServerClient::serverList) {
         sq_newtable(v);
         sq_pushstring(v, "host_name", -1); sq_pushstring(v, s.hostName.c_str(), -1); sq_newslot(v, -3, 0);
         sq_pushstring(v, "map_name", -1); sq_pushstring(v, s.mapName.c_str(), -1); sq_newslot(v, -3, 0);
@@ -328,7 +340,7 @@ SQInteger GetServerList(HSQUIRRELVM v) {
         sq_pushstring(v, "max_players", -1); sq_pushinteger(0, v, s.maxPlayers); sq_newslot(v, -3, 0);
         sq_pushstring(v, "port", -1); sq_pushinteger(0, v, s.port); sq_newslot(v, -3, 0);
         sq_pushstring(v, "ip", -1); sq_pushstring(v, s.ip.c_str(), -1); sq_newslot(v, -3, 0);
-
+    
         sq_pushstring(v, "players", -1);
         sq_newarray(v, 0);
         for (auto& p : s.players) {
@@ -342,6 +354,7 @@ SQInteger GetServerList(HSQUIRRELVM v) {
         sq_newslot(v, -3, 0);
         sq_arrayappend(v, -2);
     }
+
     return 1;
 }
 
