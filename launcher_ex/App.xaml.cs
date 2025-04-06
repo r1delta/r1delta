@@ -314,7 +314,7 @@ namespace launcher_ex
                         onInitialInstall: (v,t) => // 'v' is the version being installed
                         {
                             var updateOnlyFlag = false; // For initial install, always create
-                            var locations = ShortcutLocation.StartMenu; // Explicitly Start Menu ONLY
+                            var locations = ShortcutLocation.StartMenu | ShortcutLocation.Desktop;
 
                             Debug.WriteLine($"[Squirrel Install] Creating Start Menu shortcuts for {mainExeTargetName} and {dsExeTargetName}");
 
