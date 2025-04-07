@@ -117,7 +117,7 @@ namespace MasterServerClient {
         j["game_mode"] = heartbeat.gameMode;
         j["max_players"] = heartbeat.maxPlayers;
         j["port"] = heartbeat.port;
-		auto password_var = CCVar_FindVar(cvarinterface, "password");
+		auto password_var = CCVar_FindVar(cvarinterface, "sv_password");
 		if (password_var && password_var->m_Value.m_pszString[0]) {
 			j["has_password"] = 1;
 		}
