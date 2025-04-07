@@ -119,10 +119,10 @@ namespace MasterServerClient {
         j["port"] = heartbeat.port;
 		auto password_var = CCVar_FindVar(cvarinterface, "sv_password");
 		if (password_var && password_var->m_Value.m_pszString[0]) {
-			j["has_password"] = 1;
+			j["has_password"] = true;
 		}
         else {
-            j["has_password"] = 0;
+            j["has_password"] = false;
         }
         j["players"] = json::array();
         for (auto& p : heartbeat.players) {
