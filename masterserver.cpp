@@ -349,6 +349,7 @@ SQInteger PollServerList(HSQUIRRELVM v) {
         sq_pushstring(v, "max_players", -1); sq_pushinteger(0, v, s.maxPlayers); sq_newslot(v, -3, 0);
         sq_pushstring(v, "port", -1); sq_pushinteger(0, v, s.port); sq_newslot(v, -3, 0);
         sq_pushstring(v, "ip", -1); sq_pushstring(v, s.ip.c_str(), -1); sq_newslot(v, -3, 0);
+		sq_pushstring(v, "has_password", -1); sq_pushinteger(0, v, s.hasPassword ? 1 : 0); sq_newslot(v, -3, 0);
     
         sq_pushstring(v, "players", -1);
         sq_newarray(v, 0);
