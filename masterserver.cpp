@@ -36,6 +36,7 @@ struct ServerInfo {
     int maxPlayers;
     int port;
     std::string ip;
+	bool hasPassword;
     std::vector<PlayerInfo> players;
 };
 
@@ -45,6 +46,7 @@ struct HeartbeatInfo {
     std::string gameMode;
     int maxPlayers;
     int port;
+	bool hasPassword;
     std::vector<PlayerInfo> players;
 };
 
@@ -115,7 +117,13 @@ namespace MasterServerClient {
         j["game_mode"] = heartbeat.gameMode;
         j["max_players"] = heartbeat.maxPlayers;
         j["port"] = heartbeat.port;
-
+		auto password_var = CCVar_FindVar(cvarinterface, "sv_password");
+		if (password_var && password_var->m_Value.m_pszString[0]) {
+			j["has_password"] = true;
+		}
+        else {
+            j["has_password"] = false;
+        }
         j["players"] = json::array();
         for (auto& p : heartbeat.players) {
             json pj;
@@ -165,6 +173,7 @@ namespace MasterServerClient {
                 si.maxPlayers = sj["max_players"];
                 si.port = sj["port"];
                 si.ip = sj["ip"];
+				si.hasPassword = sj["has_password"];
 
                 for (auto& pj : sj["players"]) {
                     PlayerInfo pi;
@@ -340,6 +349,7 @@ SQInteger PollServerList(HSQUIRRELVM v) {
         sq_pushstring(v, "max_players", -1); sq_pushinteger(0, v, s.maxPlayers); sq_newslot(v, -3, 0);
         sq_pushstring(v, "port", -1); sq_pushinteger(0, v, s.port); sq_newslot(v, -3, 0);
         sq_pushstring(v, "ip", -1); sq_pushstring(v, s.ip.c_str(), -1); sq_newslot(v, -3, 0);
+		sq_pushstring(v, "has_password", -1); sq_pushinteger(0, v, s.hasPassword ? 1 : 0); sq_newslot(v, -3, 0);
     
         sq_pushstring(v, "players", -1);
         sq_newarray(v, 0);
