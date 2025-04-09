@@ -35,7 +35,6 @@
 // =========-----===--------==------------------------==++********#*#####**#######*########%%
 
 #include "core.h"
-
 #include <MinHook.h>
 #include "load.h"
 #include "core.h"
@@ -45,6 +44,12 @@
 #include <tier0/platform.h>
 #include "mimalloc-new-delete.h"
 #include "crashhandler.h"
+#if BUILD_PROFILE
+#include "tracy-0.11.1/public/TracyClient.cpp"
+#endif
+#include <Shlwapi.h>
+#include <ShlObj_core.h>
+
 uint64_t g_PerformanceFrequency;
 int G_is_dedi;
 typedef const char* (__cdecl* wine_get_version_func)();
@@ -186,11 +191,6 @@ nvapi_stuff()
 
 	NVAPI_CALL(nvapi_end_session_id, nvapi_end_session(handle));
 }
-
-#if BUILD_PROFILE
-#include "tracy-0.11.1/public/TracyClient.cpp"
-#endif
-#include <Shlwapi.h>
 
 static int skip_dllmain = -1;
 bool Plat_IsInToolMode() {
@@ -336,7 +336,158 @@ void CCommandLine__CreateCmdLine(void* thisptr, char* commandline) {
 	CCommandLine__CreateCmdLine_Original(thisptr, finalCmdLineBuffer.data());
 	OutputDebugStringA("[r1delta_core] CCommandLine__CreateCmdLine hook finished.\n");
 }
+HRESULT(WINAPI* SHGetFolderPathAOriginal)(HWND hwnd, int csidl, HANDLE hToken, DWORD dwFlags, LPSTR  pszPath);
+STDAPI SHGetFolderPathAHook(HWND hwnd, int csidl, HANDLE hToken, DWORD dwFlags, LPSTR pszPath) {
+	if (csidl != 5) {
+		return SHGetFolderPathAOriginal(hwnd, csidl, hToken, dwFlags, pszPath);
+	}
+	LPWSTR newPath[512 * sizeof(wchar_t)] = { 0 };
+	memset(pszPath, 0, MAX_PATH);
+	auto ret = SHGetKnownFolderPath(FOLDERID_SavedGames, dwFlags, hToken, newPath);
+	WideCharToMultiByte(CP_UTF8, 0, newPath[0], lstrlenW(*newPath), pszPath, MAX_PATH, NULL, NULL);
+	return ret;
+}
+// Helper function to check if a directory exists
+bool DirectoryExists(const WCHAR* szPath)
+{
+	DWORD dwAttrib = GetFileAttributesW(szPath);
+	return (dwAttrib != INVALID_FILE_ATTRIBUTES && (dwAttrib & FILE_ATTRIBUTE_DIRECTORY));
+}
 
+// Function to perform the one-time migration
+void MigrateOldSaveLocation()
+{
+	OutputDebugStringA("[r1delta_core] Checking for old save location migration...\n");
+
+	PWSTR pszDocumentsPath = nullptr;
+	PWSTR pszSavedGamesPath = nullptr;
+	HRESULT hr_doc = SHGetKnownFolderPath(FOLDERID_Documents, 0, NULL, &pszDocumentsPath);
+	HRESULT hr_sg = SHGetKnownFolderPath(FOLDERID_SavedGames, 0, NULL, &pszSavedGamesPath);
+
+	if (SUCCEEDED(hr_doc) && SUCCEEDED(hr_sg))
+	{
+		WCHAR szOldBasePath[MAX_PATH];
+		WCHAR szNewBasePath[MAX_PATH];
+		WCHAR szOldRespawnPath[MAX_PATH];
+		WCHAR szNewRespawnPath[MAX_PATH];
+		WCHAR szOldR1DeltaPath[MAX_PATH];
+		WCHAR szNewR1DeltaPath[MAX_PATH];
+
+		// Construct paths: e.g., C:\Users\User\Documents\Respawn\R1Delta
+		PathCombineW(szOldBasePath, pszDocumentsPath, L"Respawn");
+		PathCombineW(szOldR1DeltaPath, szOldBasePath, L"R1Delta");
+
+		// Construct paths: e.g., C:\Users\User\Saved Games\Respawn\R1Delta
+		PathCombineW(szNewBasePath, pszSavedGamesPath, L"Respawn");
+		PathCombineW(szNewR1DeltaPath, szNewBasePath, L"R1Delta");
+
+		OutputDebugStringA("[r1delta_core] Old path check: ");
+		OutputDebugStringW(szOldR1DeltaPath);
+		OutputDebugStringA("\n");
+		OutputDebugStringA("[r1delta_core] New path check: ");
+		OutputDebugStringW(szNewR1DeltaPath);
+		OutputDebugStringA("\n");
+
+
+		// Check if the old path exists and the new one *doesn't*
+		if (DirectoryExists(szOldR1DeltaPath))
+		{
+			OutputDebugStringA("[r1delta_core] Old path exists.\n");
+			if (!DirectoryExists(szNewR1DeltaPath))
+			{
+				OutputDebugStringA("[r1delta_core] New path does NOT exist. Attempting migration.\n");
+
+				// Ensure the parent directory (Saved Games\Respawn) exists
+				if (!DirectoryExists(szNewBasePath))
+				{
+					if (CreateDirectoryW(szNewBasePath, NULL))
+					{
+						OutputDebugStringA("[r1delta_core] Created intermediate directory: ");
+						OutputDebugStringW(szNewBasePath);
+						OutputDebugStringA("\n");
+					}
+					else
+					{
+						DWORD dwError = GetLastError();
+						char errorMsg[200];
+						sprintf_s(errorMsg, sizeof(errorMsg), "[r1delta_core] Failed to create intermediate directory %ls. Error: %lu. Migration aborted.\n", szNewBasePath, dwError);
+						OutputDebugStringA(errorMsg);
+						goto cleanup; // Abort migration
+					}
+				}
+				else {
+					OutputDebugStringA("[r1delta_core] Intermediate directory already exists: ");
+					OutputDebugStringW(szNewBasePath);
+					OutputDebugStringA("\n");
+				}
+
+
+				// Attempt to move the directory
+				if (MoveFileExW(szOldR1DeltaPath, szNewR1DeltaPath, MOVEFILE_WRITE_THROUGH))
+				{
+					OutputDebugStringA("[r1delta_core] Successfully migrated '");
+					OutputDebugStringW(szOldR1DeltaPath);
+					OutputDebugStringA("' to '");
+					OutputDebugStringW(szNewR1DeltaPath);
+					OutputDebugStringA("'.\n");
+				}
+				else
+				{
+					DWORD dwError = GetLastError();
+					char errorMsg[256];
+					sprintf_s(errorMsg, sizeof(errorMsg), "[r1delta_core] Failed to move directory %ls to %ls. Error: %lu\n", szOldR1DeltaPath, szNewR1DeltaPath, dwError);
+					OutputDebugStringA(errorMsg);
+				}
+			}
+			else
+			{
+				OutputDebugStringA("[r1delta_core] New path already exists. Migration not needed or already done.\n");
+				// Optional: Consider deleting the old directory if the new one exists and migration wasn't needed?
+				// Be cautious with deleting user data. Maybe just leave it.
+				 // SHFILEOPSTRUCTW fileOp = {0};
+				 // fileOp.wFunc = FO_DELETE;
+				 // fileOp.pFrom = szOldR1DeltaPath; // Need double null termination for SHFileOperation
+				 // // Add double null termination
+				 // WCHAR szOldPathDoubleNull[MAX_PATH + 1];
+				 // wcscpy_s(szOldPathDoubleNull, MAX_PATH, szOldR1DeltaPath);
+				 // szOldPathDoubleNull[wcslen(szOldR1DeltaPath) + 1] = L'\0'; // Add second null terminator
+				 // fileOp.pFrom = szOldPathDoubleNull;
+				 // fileOp.fFlags = FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT;
+				 // int result = SHFileOperationW(&fileOp);
+				 // if (result == 0) {
+				 //     OutputDebugStringA("[r1delta_core] Successfully deleted redundant old directory.\n");
+				 // } else {
+				 //     char errorMsg[200];
+				 //     sprintf_s(errorMsg, sizeof(errorMsg),"[r1delta_core] Failed to delete redundant old directory (Error code: %d).\n", result);
+				 //     OutputDebugStringA(errorMsg);
+				 // }
+			}
+		}
+		else
+		{
+			OutputDebugStringA("[r1delta_core] Old path does not exist. No migration needed.\n");
+		}
+	}
+	else
+	{
+		if (FAILED(hr_doc)) {
+			char errorMsg[150];
+			sprintf_s(errorMsg, sizeof(errorMsg), "[r1delta_core] Failed to get Documents folder path. HRESULT: 0x%X\n", hr_doc);
+			OutputDebugStringA(errorMsg);
+		}
+		if (FAILED(hr_sg)) {
+			char errorMsg[150];
+			sprintf_s(errorMsg, sizeof(errorMsg), "[r1delta_core] Failed to get Saved Games folder path. HRESULT: 0x%X\n", hr_sg);
+			OutputDebugStringA(errorMsg);
+		}
+		OutputDebugStringA("[r1delta_core] Could not get required folder paths. Migration check skipped.\n");
+	}
+
+cleanup:
+	// Free the memory allocated by SHGetKnownFolderPath
+	if (pszDocumentsPath) CoTaskMemFree(pszDocumentsPath);
+	if (pszSavedGamesPath) CoTaskMemFree(pszSavedGamesPath);
+}
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 {
 	// make sure we're game and not tools
@@ -410,6 +561,11 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 		SetDllDirectoryW(L"r1delta\\bin");
 		InstallExceptionHandler();
 		MH_Initialize();
+		LoadLibraryA("shell32.dll");
+		if (!IsDedicatedServer()) {
+			MigrateOldSaveLocation();
+			MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("shell32.dll"), "SHGetFolderPathA"), &SHGetFolderPathAHook, reinterpret_cast<LPVOID*>(&SHGetFolderPathAOriginal));
+		}
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("tier0_orig.dll"), "GetCPUInformation"), &GetCPUInformationDet, reinterpret_cast<LPVOID*>(&GetCPUInformationOriginal));
 		MH_CreateHook((LPVOID)(((uintptr_t)GetModuleHandleA("tier0_orig.dll"))+0xbf60), &CCommandLine__CreateCmdLine, reinterpret_cast<LPVOID*>(&CCommandLine__CreateCmdLine_Original));
 //		if (!IsDedicatedServer())
