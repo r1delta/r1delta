@@ -6,6 +6,7 @@
 #include "dedicated.h"
 #include "netchanwarnings.h"
 #include "netadr.h"
+#include "sv_filter.h"
 #pragma intrinsic(_ReturnAddress)
 
 #define VTABLE_UPDATE_FORCE 1
@@ -754,15 +755,16 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 	MH_CreateHook(LPVOID(engine + 0xF8050), LPVOID(engineDS + 0x69050), NULL); // CRCONServer::RunFrame
 	MH_CreateHook(LPVOID(engine + 0xF4B90), LPVOID(engineDS + 0x65B70), NULL); // RCONServer
 	MH_CreateHook(LPVOID(engine + 0xF4BA0), LPVOID(engineDS + 0x65B80), NULL); // RPTServer
+	MH_CreateHook((LPVOID)(G_engine + 0xE13D0), &CBanSystem::Filter_ShouldDiscard, NULL);
 
-	MH_CreateHook(LPVOID(engineDS + 0x6ABF0), LPVOID(engine + 0xF9BB0), NULL); // CServerRemoteAccess::GetUserBanList
-	MH_CreateHook(LPVOID(engineDS + 0x53690), LPVOID(engine + 0xE1F00), NULL); // Filter_Add_f
-	MH_CreateHook(LPVOID(engineDS + 0x52B60), LPVOID(engine + 0xE13D0), NULL); // Filter_ShouldDiscard
+	//MH_CreateHook(LPVOID(engineDS + 0x6ABF0), LPVOID(engine + 0xF9BB0), NULL); // CServerRemoteAccess::GetUserBanList
+	//MH_CreateHook(LPVOID(engineDS + 0x53690), LPVOID(engine + 0xE1F00), NULL); // Filter_Add_f
+	//MH_CreateHook(LPVOID(engineDS + 0x52B60), LPVOID(engine + 0xE13D0), NULL); // Filter_ShouldDiscard
 	//MH_CreateHook(LPVOID(engineDS + 0x53AF0), LPVOID(engine + 0xE2370), NULL); // banid
 	//MH_CreateHook(LPVOID(engineDS + 0x53040), LPVOID(engine + 0xE18B0), NULL); // removeid
-	MH_CreateHook(LPVOID(engineDS + 0x52C80), LPVOID(engine + 0xE14F0), NULL); // removeip
-	//MH_CreateHook(LPVOID(engineDS + 0x52730), LPVOID(engine + 0xE0FA0), NULL); // writeid
-	MH_CreateHook(LPVOID(engineDS + 0x525F0), LPVOID(engine + 0xE0E60), NULL); // writeip
+	//MH_CreateHook(LPVOID(engineDS + 0x52C80), LPVOID(engine + 0xE14F0), NULL); // removeip
+	////MH_CreateHook(LPVOID(engineDS + 0x52730), LPVOID(engine + 0xE0FA0), NULL); // writeid
+	//MH_CreateHook(LPVOID(engineDS + 0x525F0), LPVOID(engine + 0xE0E60), NULL); // writeip
 
 
 

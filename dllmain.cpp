@@ -49,7 +49,9 @@
 #endif
 #include <Shlwapi.h>
 #include <ShlObj_core.h>
-
+#include <PathCch.h>
+#include <shellapi.h>
+#pragma comment(lib, "Pathcch.lib")
 uint64_t g_PerformanceFrequency;
 int G_is_dedi;
 typedef const char* (__cdecl* wine_get_version_func)();
@@ -353,123 +355,186 @@ bool DirectoryExists(const WCHAR* szPath)
 	DWORD dwAttrib = GetFileAttributesW(szPath);
 	return (dwAttrib != INVALID_FILE_ATTRIBUTES && (dwAttrib & FILE_ATTRIBUTE_DIRECTORY));
 }
-
-// Function to perform the one-time migration
+// Function to perform the one-time migration and profile copy
 void MigrateOldSaveLocation()
 {
-	OutputDebugStringA("[r1delta_core] Checking for old save location migration...\n");
+	OutputDebugStringA("[r1delta_core] Checking for old save location migration/copy...\n");
 
 	PWSTR pszDocumentsPath = nullptr;
 	PWSTR pszSavedGamesPath = nullptr;
 	HRESULT hr_doc = SHGetKnownFolderPath(FOLDERID_Documents, 0, NULL, &pszDocumentsPath);
 	HRESULT hr_sg = SHGetKnownFolderPath(FOLDERID_SavedGames, 0, NULL, &pszSavedGamesPath);
 
+	bool migrationPerformed = false; // Flag to track if R1Delta was moved
+
 	if (SUCCEEDED(hr_doc) && SUCCEEDED(hr_sg))
 	{
-		WCHAR szOldBasePath[MAX_PATH];
-		WCHAR szNewBasePath[MAX_PATH];
-		WCHAR szOldRespawnPath[MAX_PATH];
-		WCHAR szNewRespawnPath[MAX_PATH];
+		WCHAR szOldRespawnBase[MAX_PATH];
+		WCHAR szNewRespawnBase[MAX_PATH];
 		WCHAR szOldR1DeltaPath[MAX_PATH];
 		WCHAR szNewR1DeltaPath[MAX_PATH];
+		WCHAR szOldTitanfallPath[MAX_PATH];
 
-		// Construct paths: e.g., C:\Users\User\Documents\Respawn\R1Delta
-		PathCombineW(szOldBasePath, pszDocumentsPath, L"Respawn");
-		PathCombineW(szOldR1DeltaPath, szOldBasePath, L"R1Delta");
+		// Construct base paths
+		// Using PathCchCombine for safer path construction
+		PathCchCombine(szOldRespawnBase, MAX_PATH, pszDocumentsPath, L"Respawn");
+		PathCchCombine(szNewRespawnBase, MAX_PATH, pszSavedGamesPath, L"Respawn");
 
-		// Construct paths: e.g., C:\Users\User\Saved Games\Respawn\R1Delta
-		PathCombineW(szNewBasePath, pszSavedGamesPath, L"Respawn");
-		PathCombineW(szNewR1DeltaPath, szNewBasePath, L"R1Delta");
+		// Construct specific game paths
+		PathCchCombine(szOldR1DeltaPath, MAX_PATH, szOldRespawnBase, L"R1Delta");
+		PathCchCombine(szNewR1DeltaPath, MAX_PATH, szNewRespawnBase, L"R1Delta");
+		PathCchCombine(szOldTitanfallPath, MAX_PATH, szOldRespawnBase, L"Titanfall");
 
-		OutputDebugStringA("[r1delta_core] Old path check: ");
+		// --- 1. R1Delta Migration (Move) ---
+		OutputDebugStringA("[r1delta_core] Checking R1Delta move: ");
 		OutputDebugStringW(szOldR1DeltaPath);
-		OutputDebugStringA("\n");
-		OutputDebugStringA("[r1delta_core] New path check: ");
+		OutputDebugStringA(" -> ");
 		OutputDebugStringW(szNewR1DeltaPath);
 		OutputDebugStringA("\n");
 
-
-		// Check if the old path exists and the new one *doesn't*
 		if (DirectoryExists(szOldR1DeltaPath))
 		{
-			OutputDebugStringA("[r1delta_core] Old path exists.\n");
+			OutputDebugStringA("[r1delta_core] Old R1Delta path exists.\n");
 			if (!DirectoryExists(szNewR1DeltaPath))
 			{
-				OutputDebugStringA("[r1delta_core] New path does NOT exist. Attempting migration.\n");
+				OutputDebugStringA("[r1delta_core] New R1Delta path does NOT exist. Attempting migration.\n");
 
 				// Ensure the parent directory (Saved Games\Respawn) exists
-				if (!DirectoryExists(szNewBasePath))
+				if (!DirectoryExists(szNewRespawnBase))
 				{
-					if (CreateDirectoryW(szNewBasePath, NULL))
+					if (CreateDirectoryW(szNewRespawnBase, NULL))
 					{
 						OutputDebugStringA("[r1delta_core] Created intermediate directory: ");
-						OutputDebugStringW(szNewBasePath);
+						OutputDebugStringW(szNewRespawnBase);
 						OutputDebugStringA("\n");
 					}
 					else
 					{
 						DWORD dwError = GetLastError();
-						char errorMsg[200];
-						sprintf_s(errorMsg, sizeof(errorMsg), "[r1delta_core] Failed to create intermediate directory %ls. Error: %lu. Migration aborted.\n", szNewBasePath, dwError);
+						char errorMsg[256];
+						sprintf_s(errorMsg, sizeof(errorMsg), "[r1delta_core] Failed to create intermediate directory %ls. Error: %lu. Migration aborted.\n", szNewRespawnBase, dwError);
 						OutputDebugStringA(errorMsg);
-						goto cleanup; // Abort migration
+						goto cleanup; // Abort if intermediate dir fails
 					}
 				}
-				else {
-					OutputDebugStringA("[r1delta_core] Intermediate directory already exists: ");
-					OutputDebugStringW(szNewBasePath);
-					OutputDebugStringA("\n");
-				}
-
 
 				// Attempt to move the directory
 				if (MoveFileExW(szOldR1DeltaPath, szNewR1DeltaPath, MOVEFILE_WRITE_THROUGH))
 				{
-					OutputDebugStringA("[r1delta_core] Successfully migrated '");
-					OutputDebugStringW(szOldR1DeltaPath);
-					OutputDebugStringA("' to '");
-					OutputDebugStringW(szNewR1DeltaPath);
-					OutputDebugStringA("'.\n");
+					OutputDebugStringA("[r1delta_core] Successfully migrated R1Delta data.\n");
+					migrationPerformed = true; // Mark that we potentially created the new path
 				}
 				else
 				{
 					DWORD dwError = GetLastError();
-					char errorMsg[256];
+					char errorMsg[300];
 					sprintf_s(errorMsg, sizeof(errorMsg), "[r1delta_core] Failed to move directory %ls to %ls. Error: %lu\n", szOldR1DeltaPath, szNewR1DeltaPath, dwError);
+					OutputDebugStringA(errorMsg);
+					// Continue to Titanfall check even if move fails
+				}
+			}
+			else
+			{
+				OutputDebugStringA("[r1delta_core] New R1Delta path already exists. R1Delta migration not needed.\n");
+				migrationPerformed = true; // New path exists, treat as if migration happened for subsequent checks
+			}
+		}
+		else
+		{
+			OutputDebugStringA("[r1delta_core] Old R1Delta path does not exist. R1Delta migration not needed.\n");
+		}
+
+		// --- 2. Titanfall Profile Copy ---
+		// Only attempt this if the new R1Delta path doesn't exist *now*
+		// (meaning the R1Delta migration wasn't performed or didn't exist initially)
+		// AND the old Titanfall path *does* exist.
+
+		OutputDebugStringA("[r1delta_core] Checking Titanfall copy: ");
+		OutputDebugStringW(szOldTitanfallPath);
+		OutputDebugStringA(" -> ");
+		OutputDebugStringW(szNewR1DeltaPath);
+		OutputDebugStringA("\n");
+
+		if (!DirectoryExists(szNewR1DeltaPath)) // Check if target *still* doesn't exist
+		{
+			if (DirectoryExists(szOldTitanfallPath))
+			{
+				OutputDebugStringA("[r1delta_core] Old Titanfall path exists and New R1Delta path does NOT exist. Attempting copy.\n");
+
+				// Ensure the parent directory (Saved Games\Respawn) exists
+				if (!DirectoryExists(szNewRespawnBase))
+				{
+					if (CreateDirectoryW(szNewRespawnBase, NULL))
+					{
+						OutputDebugStringA("[r1delta_core] Created intermediate directory: ");
+						OutputDebugStringW(szNewRespawnBase);
+						OutputDebugStringA("\n");
+					}
+					else
+					{
+						DWORD dwError = GetLastError();
+						char errorMsg[256];
+						sprintf_s(errorMsg, sizeof(errorMsg), "[r1delta_core] Failed to create intermediate directory %ls for copy. Error: %lu. Copy aborted.\n", szNewRespawnBase, dwError);
+						OutputDebugStringA(errorMsg);
+						goto cleanup; // Abort if intermediate dir fails
+					}
+				}
+
+				// SHFileOperation requires double-null-terminated strings for paths
+				WCHAR szFrom[MAX_PATH + 1] = { 0 }; // +1 for second null
+				WCHAR szTo[MAX_PATH + 1] = { 0 };   // +1 for second null
+				wcscpy_s(szFrom, MAX_PATH, szOldTitanfallPath);
+				wcscpy_s(szTo, MAX_PATH, szNewR1DeltaPath);
+				// szFrom[wcslen(szFrom) + 1] = L'\0'; // Already zero-initialized
+				// szTo[wcslen(szTo) + 1] = L'\0';     // Already zero-initialized
+
+				SHFILEOPSTRUCTW sfop = { 0 };
+				sfop.hwnd = NULL; // No owner window
+				sfop.wFunc = FO_COPY;
+				sfop.pFrom = szFrom;
+				sfop.pTo = szTo;
+				// FOF_NOCONFIRMATION: Overwrite existing files without asking
+				// FOF_NOERRORUI: Don't display error dialogs
+				// FOF_SILENT: Don't display progress
+				// FOF_NOCONFIRMMKDIR: Create directories without asking
+				sfop.fFlags = FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT | FOF_NOCONFIRMMKDIR;
+
+				int result = SHFileOperationW(&sfop);
+
+				if (result == 0 && !sfop.fAnyOperationsAborted)
+				{
+					// Verify the target directory exists after copy
+					if (DirectoryExists(szNewR1DeltaPath)) {
+						OutputDebugStringA("[r1delta_core] Successfully copied Titanfall data to new R1Delta location.\n");
+					}
+					else {
+						// This case is unlikely if SHFileOperation returned 0, but good to check
+						OutputDebugStringA("[r1delta_core] SHFileOperation reported success, but target directory not found after copy.\n");
+					}
+				}
+				else
+				{
+					char errorMsg[300];
+					// sfop.fAnyOperationsAborted might be true if the user cancelled (not applicable here due to flags)
+					// or if there was an error. result contains a system error code if non-zero.
+					sprintf_s(errorMsg, sizeof(errorMsg), "[r1delta_core] Failed to copy directory %ls to %ls. SHFileOperation result: %d, Aborted: %d\n", szOldTitanfallPath, szNewR1DeltaPath, result, sfop.fAnyOperationsAborted);
 					OutputDebugStringA(errorMsg);
 				}
 			}
 			else
 			{
-				OutputDebugStringA("[r1delta_core] New path already exists. Migration not needed or already done.\n");
-				// Optional: Consider deleting the old directory if the new one exists and migration wasn't needed?
-				// Be cautious with deleting user data. Maybe just leave it.
-				 // SHFILEOPSTRUCTW fileOp = {0};
-				 // fileOp.wFunc = FO_DELETE;
-				 // fileOp.pFrom = szOldR1DeltaPath; // Need double null termination for SHFileOperation
-				 // // Add double null termination
-				 // WCHAR szOldPathDoubleNull[MAX_PATH + 1];
-				 // wcscpy_s(szOldPathDoubleNull, MAX_PATH, szOldR1DeltaPath);
-				 // szOldPathDoubleNull[wcslen(szOldR1DeltaPath) + 1] = L'\0'; // Add second null terminator
-				 // fileOp.pFrom = szOldPathDoubleNull;
-				 // fileOp.fFlags = FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT;
-				 // int result = SHFileOperationW(&fileOp);
-				 // if (result == 0) {
-				 //     OutputDebugStringA("[r1delta_core] Successfully deleted redundant old directory.\n");
-				 // } else {
-				 //     char errorMsg[200];
-				 //     sprintf_s(errorMsg, sizeof(errorMsg),"[r1delta_core] Failed to delete redundant old directory (Error code: %d).\n", result);
-				 //     OutputDebugStringA(errorMsg);
-				 // }
+				OutputDebugStringA("[r1delta_core] Old Titanfall path does not exist. Copy not needed.\n");
 			}
 		}
 		else
 		{
-			OutputDebugStringA("[r1delta_core] Old path does not exist. No migration needed.\n");
+			OutputDebugStringA("[r1delta_core] New R1Delta path already exists. Titanfall copy skipped.\n");
 		}
+
 	}
 	else
 	{
+		// Original error handling for failing to get known folder paths
 		if (FAILED(hr_doc)) {
 			char errorMsg[150];
 			sprintf_s(errorMsg, sizeof(errorMsg), "[r1delta_core] Failed to get Documents folder path. HRESULT: 0x%X\n", hr_doc);
@@ -480,13 +545,15 @@ void MigrateOldSaveLocation()
 			sprintf_s(errorMsg, sizeof(errorMsg), "[r1delta_core] Failed to get Saved Games folder path. HRESULT: 0x%X\n", hr_sg);
 			OutputDebugStringA(errorMsg);
 		}
-		OutputDebugStringA("[r1delta_core] Could not get required folder paths. Migration check skipped.\n");
+		OutputDebugStringA("[r1delta_core] Could not get required folder paths. Migration/copy check skipped.\n");
 	}
 
 cleanup:
 	// Free the memory allocated by SHGetKnownFolderPath
 	if (pszDocumentsPath) CoTaskMemFree(pszDocumentsPath);
 	if (pszSavedGamesPath) CoTaskMemFree(pszSavedGamesPath);
+
+	OutputDebugStringA("[r1delta_core] Migration/copy check finished.\n");
 }
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 {

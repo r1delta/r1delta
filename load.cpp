@@ -97,6 +97,7 @@
 #include <discordpp.h>
 std::shared_ptr<discordpp::Client> client;
 #endif
+#include "sv_filter.h"
 std::atomic<bool> running = true;
 
 // Signal handler to stop the application
@@ -1368,7 +1369,6 @@ AuthResponse Server_AuthCallback(bool loopback, const char* serverIP, const char
 			strncpy(response.failureReason, "Token server IP mismatch", sizeof(response.failureReason));
 			return response;
 		}*/
-
 		response.success = true;
 		strncpy(response.discordName, displayName.c_str(), sizeof(response.discordName) - 1);
 		response.discordName[sizeof(response.discordName) - 1] = '\0';
@@ -1437,6 +1437,11 @@ bool __fastcall HookedCBaseClientConnect(
 
 				std::string actualServerIP = get_public_ip() + ":" + std::to_string(iHostPort->m_Value.m_nValue); // if we're not using ports comment this out later
 				AuthResponse res = Server_AuthCallback(bIsLoopback, actualServerIP.c_str(), jwt_compact::expandJWT(var.value).c_str());
+				if (CBanSystem::Filter_IsUserBanned(res.discordId)) {
+					V_snprintf(a8, a9, "%s", "Discord UserID not allowed to join this server.");
+					return false;
+				}
+
 				if (!res.success && !bIsLoopback) {
 					V_snprintf(a8, a9, "%s", res.failureReason);
 					return false;
@@ -2450,6 +2455,27 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		//MH_CreateHook((LPVOID)(engine_base_spec + 0x1C79A0), &DataTable_SetupReceiveTableFromSendTable, reinterpret_cast<LPVOID*>(&DataTable_SetupReceiveTableFromSendTableOriginal));
 	}
 	MH_CreateHook((LPVOID)(G_vscript + (IsDedicatedServer() ? 0x0B660 : 0xB640)), &CSquirrelVM__PrintFunc1, NULL);
+	void* ret = reinterpret_cast<void*>((reinterpret_cast<CreateInterfaceFn>(GetProcAddress(GetModuleHandleA("vstdlib.dll"), "CreateInterface"))("VEngineCvar007", 0)));
+	auto v = (decltype(&OriginalCCVar_FindCommand)((*(void***)ret))); // Assuming OriginalCCVar_FindVar is defined elsewhere
+	auto findcmdptr = v[17];
+	MH_CreateHook(findcmdptr((uintptr_t)ret, "banip")->m_pCommandCallback, &CBanSystem::addip, NULL);
+	MH_CreateHook(findcmdptr((uintptr_t)ret, "addip")->m_pCommandCallback, &CBanSystem::addip, NULL);
+	MH_CreateHook(findcmdptr((uintptr_t)ret, "removeip")->m_pCommandCallback, &CBanSystem::removeip, NULL);
+	MH_CreateHook(findcmdptr((uintptr_t)ret, "listip")->m_pCommandCallback, &CBanSystem::listip, NULL);
+	MH_CreateHook(findcmdptr((uintptr_t)ret, "writeip")->m_pCommandCallback, &CBanSystem::writeip, NULL);
+	MH_CreateHook(findcmdptr((uintptr_t)ret, "writeid")->m_pCommandCallback, &CBanSystem::writeid, NULL);
+	RegisterConCommand("removeallids", &CBanSystem::removeallids, "Remove all user IDs from the ban list.", 0);
+	MH_CreateHook(findcmdptr((uintptr_t)ret, "removeid")->m_pCommandCallback, &CBanSystem::removeid, NULL);
+	MH_CreateHook(findcmdptr((uintptr_t)ret, "listid")->m_pCommandCallback, &CBanSystem::listid, NULL);
+	MH_CreateHook(findcmdptr((uintptr_t)ret, "banid")->m_pCommandCallback, &CBanSystem::banid, NULL);
+	MH_CreateHook(findcmdptr((uintptr_t)ret, "kickid")->m_pCommandCallback, &CBanSystem::kickid, NULL);
+	MH_CreateHook(findcmdptr((uintptr_t)ret, "kick")->m_pCommandCallback, &CBanSystem::kick, NULL);
+	if (IsDedicatedServer()) {
+		MH_CreateHook((LPVOID)(G_engine_ds + 0x6ABF0), &CBanSystem::RemoteAccess_GetUserBanList, NULL);
+	}
+	else {
+		MH_CreateHook((LPVOID)(G_engine + 0xF9BB0), &CBanSystem::RemoteAccess_GetUserBanList, NULL);
+	}
 
 	//MH_CreateHook((LPVOID)(engine_base_spec + 0x1C79A0), &sub_1801C79A0, reinterpret_cast<LPVOID*>(&sub_1801C79A0Original));
 	//
