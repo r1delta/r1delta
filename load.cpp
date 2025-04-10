@@ -1688,6 +1688,10 @@ GetUserID_t GetUserIDOriginal;
 
 const char* GetUserIDStringHook(USERID_s* id) {
 	char buffer[256];
+	if (id->snowflake == 1) {
+		sprintf(buffer, "%s", "UNKNOWN");
+		return buffer;
+	}
 	sprintf(buffer, "%lld", id->snowflake); 
 	return buffer;
 	
@@ -1795,7 +1799,10 @@ const char* GetBuildNo() {
 
 	return buffer;
 }
-
+const char* (*oCNetChan__GetAddress)(CNetChan* thisptr);
+const char* CNetChan__GetAddress(CNetChan* thisptr) {
+	return (netadr_t(std::string(oCNetChan__GetAddress(thisptr)).c_str())).GetAddressString();
+}
 
 static FORCEINLINE void
 do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
@@ -1808,6 +1815,7 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook((LPVOID)(engine_base + 0x202F80), &NET_SetConVar__WriteToBuffer, NULL);
 	MH_CreateHook((LPVOID)(engine_base + 0x1FE3F0), &SVC_ServerInfo__WriteToBuffer, reinterpret_cast<LPVOID*>(&SVC_ServerInfo__WriteToBufferOriginal));
 	MH_CreateHook((LPVOID)(engine_base + 0x19CBC0), &GetBuildNo, NULL);
+	MH_CreateHook((LPVOID)(engine_base + 0x1E0C10), &CNetChan__GetAddress, reinterpret_cast<LPVOID*>(&oCNetChan__GetAddress));
 
 	//MH_CreateHook((LPVOID)(engine_base + 0x0D2490), &ProcessConnectionlessPacketClient, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginalClient));
 
@@ -2465,6 +2473,7 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook(findcmdptr((uintptr_t)ret, "writeip")->m_pCommandCallback, &CBanSystem::writeip, NULL);
 	MH_CreateHook(findcmdptr((uintptr_t)ret, "writeid")->m_pCommandCallback, &CBanSystem::writeid, NULL);
 	RegisterConCommand("removeallids", &CBanSystem::removeallids, "Remove all user IDs from the ban list.", 0);
+	RegisterConCommand("removeallips", &CBanSystem::removeallips, "Remove all IPs from the ban list.", 0);
 	MH_CreateHook(findcmdptr((uintptr_t)ret, "removeid")->m_pCommandCallback, &CBanSystem::removeid, NULL);
 	MH_CreateHook(findcmdptr((uintptr_t)ret, "listid")->m_pCommandCallback, &CBanSystem::listid, NULL);
 	MH_CreateHook(findcmdptr((uintptr_t)ret, "banid")->m_pCommandCallback, &CBanSystem::banid, NULL);

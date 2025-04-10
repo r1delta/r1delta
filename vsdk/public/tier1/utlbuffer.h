@@ -379,15 +379,20 @@ protected:
 	// it can't read *anything* new
 	bool CheckArbitraryPeekGet( int nOffset, int &nIncrement );
 
-	CUtlMemory<uint8> m_Memory;
-	int m_Get;
-	int m_Put;
+	CUtlMemory<unsigned char> m_Memory;
+	size_t m_Get;
+	size_t m_Put;
 
-	int m_nMaxPut;
-	uint16 m_nTab;
+	unsigned char m_Error;
+	unsigned char m_Flags;
+	unsigned char m_Reserved;
+#if defined( _GAMECONSOLE )
+	unsigned char pad;
+#endif
 
-	uint8 m_Error;
-	uint8 m_Flags;
+	int m_nTab;
+	size_t m_nMaxPut;
+	size_t m_nOffset;
 
 	UtlBufferOverflowFunc_t m_GetOverflowFunc;
 	UtlBufferOverflowFunc_t m_PutOverflowFunc;

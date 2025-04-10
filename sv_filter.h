@@ -191,11 +191,9 @@ private:
 
             if (it != m_vecIpBans.end()) {
                 char szRemovedIpStr[INET6_ADDRSTRLEN];
-                // Use the address from the found entry for consistent formatting
-                it->address.ToString(szRemovedIpStr, sizeof(szRemovedIpStr), true);
 
                 m_vecIpBans.erase(it);
-                Msg("Removed IP ban for %s.\n", szRemovedIpStr); // Use formatted IP
+                Msg("Removed IP ban for %s.\n", it->address.GetAddressString()); // Use formatted IP
                 FireBanEventInternal("server_removeban", nullptr, 0, szRemovedIpStr, 0, GetCommandIssuerInternal(), false);
                 bRemoved = true;
             }
@@ -221,9 +219,7 @@ private:
         int nSlot = 1;
         float flCurrentTime = GetCurrentTimeInternal();
         for (const auto& entry : m_vecIpBans) {
-            char szAddrStr[128]; // CNetAdr::ToString uses static buffers, copy result
-            strncpy(szAddrStr, entry.address.ToString(true), sizeof(szAddrStr) - 1);
-            szAddrStr[sizeof(szAddrStr) - 1] = '\0';
+            const char* szAddrStr = entry.address.GetAddressString();
 
             if (entry.banTime == 0.0f) {
                 Msg("%d %s : permanent\n", nSlot, szAddrStr);
@@ -251,18 +247,17 @@ private:
             return;
         }
 
-        Msg("Writing permanent IP bans to %s...\n", szFilePath);
+        //Msg("Writing permanent IP bans to %s...\n", szFilePath);
         int nWritten = 0;
         for (const auto& entry : m_vecIpBans) {
             if (entry.banTime == 0.0f) { // Only permanent bans
-                char szAddrStr[128];
-                entry.address.ToString(szAddrStr, sizeof(szAddrStr), true); // Get base IP string
+                const char* szAddrStr = entry.address.GetAddressString();
                 outFile << "addip 0 " << szAddrStr << "\r\n"; // Use \r\n as specified
                 nWritten++;
             }
         }
         outFile.close();
-        Msg("Wrote %d permanent IP ban entries.\n", nWritten);
+       // Msg("Wrote %d permanent IP ban entries.\n", nWritten);
     }
 
     // --- Discord ID Filtering ---
@@ -279,7 +274,7 @@ private:
             return;
         }
 
-        Msg("Writing permanent Discord ID bans to %s...\n", szFilePath);
+       // Msg("Writing permanent Discord ID bans to %s...\n", szFilePath);
         int nWritten = 0;
         for (const auto& entry : m_vecIdBans) {
             if (entry.banTime == 0.0f) {
@@ -288,13 +283,21 @@ private:
             }
         }
         outFile.close();
-        Msg("Wrote %d permanent Discord ID ban entries.\n", nWritten);
+       // Msg("Wrote %d permanent Discord ID ban entries.\n", nWritten);
     }
 
     void RemoveAllIDsInternal(const CCommand& args) {
         size_t nRemovedCount = m_vecIdBans.size();
         m_vecIdBans.clear();
         Msg("Removed all %zu Discord ID ban entries.\n", nRemovedCount);
+        writeid();
+        // Fire event? Specification doesn't mention one for removeall.
+    }
+    void RemoveAllIPsInternal(const CCommand& args) {
+        size_t nRemovedCount = m_vecIpBans.size();
+        m_vecIpBans.clear();
+        Msg("Removed all %zu IP ban entries.\n", nRemovedCount);
+        writeip();
         // Fire event? Specification doesn't mention one for removeall.
     }
 
@@ -571,38 +574,40 @@ private:
 
     // --- Remote Administration ---
     void RemoteAccess_GetUserBanListInternal(CUtlBuffer* pList) {
-        if (!pList) return;
+        if (!pList) {
+            return;
+        }
 
         PruneExpiredBans(); // Ensure list is current
 
+        char szLineBuffer[256];
+
         // Order: Discord IDs first, then IPs
         int nIndex = 1;
-        float flCurrentTime = GetCurrentTimeInternal();
 
-        // Write Discord ID Bans
+        // --- Write Discord ID Bans ---
         for (const auto& entry : m_vecIdBans) {
-            // Format: "%i %s : %.3f min\n"
-            // Note: %s for uint64_t needs careful handling. Use Printf's %llu or string conversion.
-            char szIdString[32];
-            snprintf(szIdString, sizeof(szIdString), "%llu", entry.uniqueID);
-
-            // Calculate remaining time for display consistency if needed, but spec asks for original banTime.
-            // float flDuration = (entry.banTime == 0.0f) ? 0.0f : entry.banTime; // Use original duration
-            // The spec example shows 0.000 for permanent, so use banTime directly.
-            pList->Printf("%i %s : %.3f min\n", nIndex++, szIdString, entry.banTime);
+            int charsWritten = snprintf(szLineBuffer, sizeof(szLineBuffer),
+                "%i %llu : %.3f min\n",
+                nIndex++,
+                entry.uniqueID,
+                entry.banTime);
+            pList->PutStringWithoutNull(szLineBuffer); // we have to do it this way because the cutlbuffer flags are screwed internally
         }
 
-        // Reset index for IP bans
-        nIndex = 1;
-        // Write IP Address Bans
+        // --- Write IP Address Bans ---
         for (const auto& entry : m_vecIpBans) {
-            char szAddrStr[128];
-            entry.address.ToString(szAddrStr, sizeof(szAddrStr), true); // Get base IP string
-            // float flDuration = (entry.banTime == 0.0f) ? 0.0f : entry.banTime;
-            pList->Printf("%i %s : %.3f min\n", nIndex++, szAddrStr, entry.banTime);
-        }
-    }
+            const char* szAddrStr = entry.address.GetAddressString();
+            int charsWritten = snprintf(szLineBuffer, sizeof(szLineBuffer),
+                "%i %s : %.3f min\n",
+                nIndex++,
+                szAddrStr,
+                entry.banTime);
 
+            pList->PutStringWithoutNull(szLineBuffer);
+        }
+        pList->PutChar(00);
+    }
     // --- Filtering ---
     bool Filter_IsUserBannedInternal(uint64_t nId) {
         PruneExpiredBans(); // Keep list fresh
@@ -739,7 +744,7 @@ private:
     inline bool IsPlayerValid(IBannablePlayerPointer pPlayer) {
         if (!pPlayer) return false;
         // Check IsActive, IsConnected, IsSpawned, !IsFakeClient
-        bool isActive = CallVFunc<bool>(pPlayer, VFUNC_OFFSET_ISACTIVE);
+        bool isActive = true; //CallVFunc<bool>(pPlayer, VFUNC_OFFSET_ISACTIVE);
         bool isConnected = CallVFunc<bool>(pPlayer, VFUNC_OFFSET_ISCONNECTED);
         bool isSpawned = true; //CallVFunc<bool>(pPlayer, VFUNC_OFFSET_ISSPAWNED); probably not a great idea
         bool isFake = CallVFunc<bool>(pPlayer, VFUNC_OFFSET_ISFAKECLIENT);
@@ -913,8 +918,6 @@ private:
     }
 
     void FireBanEventInternal(const char* pszEventName, IBannablePlayerPointer pSubject, uint64_t nBannedId, const char* pszBannedIpStr, float flDuration, IBannablePlayerPointer pAdmin, bool bWasKicked) {
-        writeid();
-        writeip();
         uintptr_t engineBase = GetEngineBase();
         uintptr_t eventManagerPtrAddr = engineBase + (IsDedicatedServer() ? OFFSET_EVENTMANAGER_PTR_DS : OFFSET_EVENTMANAGER_PTR_LISTEN);
         void* pEventManager = *reinterpret_cast<void**>(eventManagerPtrAddr);
@@ -1006,6 +1009,7 @@ public:
     static void writeip() { GetInstance().WriteIPInternal(); }
     static void writeid() { GetInstance().WriteIDInternal(); }
     static void removeallids(const CCommand& args) { GetInstance().RemoveAllIDsInternal(args); }
+    static void removeallips(const CCommand& args) { GetInstance().RemoveAllIPsInternal(args); }
     static void removeid(const CCommand& args) { GetInstance().RemoveIDInternal(args); }
     static void listid(const CCommand& args) { GetInstance().ListIDInternal(args); }
     static void banid(const CCommand& args) { GetInstance().BanIDInternal(args); }

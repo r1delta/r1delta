@@ -1469,7 +1469,7 @@ void CUtlBuffer::SeekPut( SeekType_t type, int offset )
 		break;
 
 	case SEEK_CURRENT:
-		Assert( offset >= -m_Put && offset <= INT_MAX-m_Put );
+		//Assert( offset >= -m_Put && offset <= INT_MAX-m_Put );
 		m_Put += offset;
 		break;
 

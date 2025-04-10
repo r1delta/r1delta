@@ -202,7 +202,8 @@ bool __fastcall CGameClient__ProcessVoiceData(void* thisptr, CLC_VoiceData* msg)
 		return false;
 
 	auto SV_BroadcastVoiceData = reinterpret_cast<void(__cdecl*)(void*, int, char*, uint64)>(G_engine + 0xEE4D0);
-
+    if (IsDedicatedServer())
+        auto SV_BroadcastVoiceData = reinterpret_cast<void(__cdecl*)(void*, int, char*, uint64)>(G_engine_ds + 0x5FB80);
 	if (thisptr_shifted)
 		SV_BroadcastVoiceData(thisptr_shifted, (bitsRead + 7) / 8, voiceDataBuffer, *reinterpret_cast<uint64*>(reinterpret_cast<uintptr_t>(msg) + 0x88));
 
@@ -840,7 +841,10 @@ security_fixes_engine(uintptr_t engine_base)
     R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E73C0), &CNetChan__ProcessPacketHeader, reinterpret_cast<LPVOID*>(&oCNetChan__ProcessPacketHeader)) == MH_OK);
     R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E51D0), &CNetChan___ProcessMessages, reinterpret_cast<LPVOID*>(&oCNetChan___ProcessMessages)) == MH_OK);
     R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E9EA0), &CNetChan___dtor, reinterpret_cast<LPVOID*>(&oCNetChan___dtor)) == MH_OK);
-	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0xDA330), &CGameClient__ProcessVoiceData, reinterpret_cast<LPVOID*>(&oCGameClient__ProcessVoiceData)) == MH_OK);
+    if (!IsDedicatedServer())
+	    R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0xDA330), &CGameClient__ProcessVoiceData, reinterpret_cast<LPVOID*>(&oCGameClient__ProcessVoiceData)) == MH_OK);
+    else
+        R1DAssert(MH_CreateHook((LPVOID)(G_engine_ds + 0x4BA20), &CGameClient__ProcessVoiceData, reinterpret_cast<LPVOID*>(&oCGameClient__ProcessVoiceData)) == MH_OK);
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x17D400), &CClientState__ProcessUserMessage, reinterpret_cast<LPVOID*>(&oCClientState__ProcessUserMessage)) == MH_OK);
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x17D600), &CClientState__ProcessVoiceData, reinterpret_cast<LPVOID*>(&oCClientState__ProcessVoiceData)) == MH_OK);
 	//R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E0C80), &CNetChan___FlowNewPacket, NULL) == MH_OK); // my fucking god STOP PASTING SHIT FROM APEX

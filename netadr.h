@@ -203,6 +203,62 @@ public:
 
         return false;
     }
+    // New method to get the address part as a string, preferring IPv4 format if possible
+    void GetAddressString(char* pchBuffer, size_t unBufferSize) const
+    {
+        if (type == netadrtype_t::NA_NULL)
+        {
+            strncpy(pchBuffer, "null", unBufferSize);
+        }
+        else if (type == netadrtype_t::NA_LOOPBACK)
+        {
+            // Keep "loopback" for the specific type NA_LOOPBACK
+            strncpy(pchBuffer, "loopback", unBufferSize);
+        }
+        else if (type == netadrtype_t::NA_IP)
+        {
+            // Check if it's an IPv4-mapped IPv6 address
+            if (IN6_IS_ADDR_V4MAPPED(&adr))
+            {
+                // Extract the IPv4 address (last 4 bytes)
+                struct in_addr ipv4_addr;
+                memcpy(&ipv4_addr, &adr.s6_addr[12], sizeof(ipv4_addr)); // Copy the IPv4 part
+
+                // Format using AF_INET
+                inet_ntop(AF_INET, &ipv4_addr, pchBuffer, unBufferSize);
+            }
+            // Check if it's the IPv6 loopback ::1
+            else if (IN6_IS_ADDR_LOOPBACK(&adr))
+            {
+                // Format IPv6 loopback specifically as ::1
+                inet_ntop(AF_INET6, &adr, pchBuffer, unBufferSize);
+            }
+            // Otherwise, format as a standard IPv6 address
+            else
+            {
+                inet_ntop(AF_INET6, &adr, pchBuffer, unBufferSize);
+            }
+        }
+        else
+        {
+            strncpy(pchBuffer, "unknown", unBufferSize);
+        }
+
+        // Ensure null termination just in case inet_ntop didn't or strncpy didn't fill
+        if (unBufferSize > 0) {
+            pchBuffer[unBufferSize - 1] = '\0';
+        }
+    }
+
+    // Version returning a static buffer for convenience (like ToString)
+    const char* GetAddressString() const
+    {
+        static char s[4][INET6_ADDRSTRLEN]; // Use larger IPv6 buffer size
+        static int slot = 0;
+        int useSlot = (slot++) % 4;
+        GetAddressString(s[useSlot], sizeof(s[0]));
+        return s[useSlot];
+    }
 
 private:
     netadrtype_t type;
