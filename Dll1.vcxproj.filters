@@ -285,6 +285,9 @@
     <ClInclude Include="hudwarp_hooks.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="sv_filter.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">

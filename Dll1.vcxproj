@@ -228,6 +228,7 @@
     <ClInclude Include="sendmoveclampfix.h" />
     <ClInclude Include="squirrel.h" />
     <ClInclude Include="steam.h" />
+    <ClInclude Include="sv_filter.h" />
     <ClInclude Include="TableDestroyer.h" />
     <ClInclude Include="tctx.hh" />
     <ClInclude Include="thirdparty\nlohmann\json.hpp" />
