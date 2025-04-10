@@ -37,6 +37,7 @@ struct ServerInfo {
     int port;
     std::string ip;
 	bool hasPassword;
+	std::string description;
     std::vector<PlayerInfo> players;
 };
 
@@ -47,6 +48,7 @@ struct HeartbeatInfo {
     int maxPlayers;
     int port;
 	bool hasPassword;
+	std::string description;
     std::vector<PlayerInfo> players;
 };
 
@@ -57,6 +59,7 @@ static ConVarR1O* delta_ms_url = nullptr;
 static ConVarR1O* hostport = nullptr;
 static ConVarR1O* host_map = nullptr;
 static ConVarR1O* hide_server = nullptr;
+static ConVarR1O* server_description = nullptr;
 
 // --------------------------------
 // CVar Initialization
@@ -68,6 +71,8 @@ void InitMasterServerCVars() {
         hostport = CCVar_FindVar(cvarinterface, "hostport");
         host_map = CCVar_FindVar(cvarinterface, "host_map");
         hide_server = CCVar_FindVar(cvarinterface, "hide_server");
+		server_description = CCVar_FindVar(cvarinterface, "server_description");
+        
         initialized = true;
     }
 }
@@ -124,6 +129,7 @@ namespace MasterServerClient {
         else {
             j["has_password"] = false;
         }
+		j["description"] = heartbeat.description;
         j["players"] = json::array();
         for (auto& p : heartbeat.players) {
             json pj;
@@ -174,6 +180,7 @@ namespace MasterServerClient {
                 si.port = sj["port"];
                 si.ip = sj["ip"];
 				si.hasPassword = sj["has_password"];
+				si.description = sj["description"];
 
                 for (auto& pj : sj["players"]) {
                     PlayerInfo pi;
@@ -232,6 +239,7 @@ SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
 
     HeartbeatInfo heartbeat;
     heartbeat.port = hostport->m_Value.m_nValue;
+	heartbeat.description = server_description->m_Value.m_pszString;
     std::vector<PlayerInfo> players;
 
     auto table = obj._unVal.pTable;
@@ -350,7 +358,7 @@ SQInteger PollServerList(HSQUIRRELVM v) {
         sq_pushstring(v, "port", -1); sq_pushinteger(0, v, s.port); sq_newslot(v, -3, 0);
         sq_pushstring(v, "ip", -1); sq_pushstring(v, s.ip.c_str(), -1); sq_newslot(v, -3, 0);
 		sq_pushstring(v, "has_password", -1); sq_pushinteger(0, v, s.hasPassword ? 1 : 0); sq_newslot(v, -3, 0);
-    
+		sq_pushstring(v, "description", -1); sq_pushstring(v, s.description.c_str(), -1); sq_newslot(v, -3, 0);
         sq_pushstring(v, "players", -1);
         sq_newarray(v, 0);
         for (auto& p : s.players) {
