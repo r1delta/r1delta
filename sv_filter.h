@@ -23,8 +23,15 @@
 #include "netadr.h"
 #define IBannablePlayerPointer  void*
 
+// Forward declaration
+struct ConVarR1;
+
 // Main class implementation
 class CBanSystem {
+public:
+    // Public static member to hold the ConVar pointer, accessible for registration
+    static ConVarR1* m_pSvBanlistAutosave;
+
 private:
     // --- Singleton Pattern ---
     CBanSystem() {} // Private constructor
@@ -135,6 +142,7 @@ private:
             FireBanEventInternal("server_addban", nullptr, 0, adrTarget.ToString(true), flBanMinutes, GetCommandIssuerInternal(), false);
         }
         PruneExpiredBans(); // Clean up just in case
+        MaybeWriteBans(true); // Write bans if autosave is enabled
     }
 
     void RemoveIPInternal(const CCommand& args) {
@@ -203,6 +211,7 @@ private:
             }
         }
         // No need to prune again if removed by IP, but does no harm if removed by slot.
+        MaybeWriteBans(true); // Write bans if autosave is enabled
     }
 
 
@@ -247,6 +256,8 @@ private:
             return;
         }
 
+        outFile << "sv_banlist_autosave 0\r\n"; // Disable autosave during execution
+
         //Msg("Writing permanent IP bans to %s...\n", szFilePath);
         int nWritten = 0;
         for (const auto& entry : m_vecIpBans) {
@@ -256,6 +267,7 @@ private:
                 nWritten++;
             }
         }
+        outFile << "sv_banlist_autosave 1\r\n"; // Re-enable autosave after execution
         outFile.close();
        // Msg("Wrote %d permanent IP ban entries.\n", nWritten);
     }
@@ -274,6 +286,8 @@ private:
             return;
         }
 
+        outFile << "sv_banlist_autosave 0\r\n"; // Disable autosave during execution
+
        // Msg("Writing permanent Discord ID bans to %s...\n", szFilePath);
         int nWritten = 0;
         for (const auto& entry : m_vecIdBans) {
@@ -282,6 +296,7 @@ private:
                 nWritten++;
             }
         }
+        outFile << "sv_banlist_autosave 1\r\n"; // Re-enable autosave after execution
         outFile.close();
        // Msg("Wrote %d permanent Discord ID ban entries.\n", nWritten);
     }
@@ -290,14 +305,14 @@ private:
         size_t nRemovedCount = m_vecIdBans.size();
         m_vecIdBans.clear();
         Msg("Removed all %zu Discord ID ban entries.\n", nRemovedCount);
-        writeid();
+        MaybeWriteBans(false); // Write bans if autosave is enabled
         // Fire event? Specification doesn't mention one for removeall.
     }
     void RemoveAllIPsInternal(const CCommand& args) {
         size_t nRemovedCount = m_vecIpBans.size();
         m_vecIpBans.clear();
         Msg("Removed all %zu IP ban entries.\n", nRemovedCount);
-        writeip();
+        MaybeWriteBans(true); // Write bans if autosave is enabled
         // Fire event? Specification doesn't mention one for removeall.
     }
 
@@ -375,6 +390,7 @@ private:
                 Msg("Error: Discord ID %llu not found in the ban list.\n", nIdValue);
             }
         }
+        MaybeWriteBans(false); // Write bans if autosave is enabled
     }
 
     void ListIDInternal(const CCommand& args) {
@@ -485,6 +501,7 @@ private:
             Msg("Note: Player with Discord ID %llu is not currently online, cannot kick.\n", nTargetUniqueID);
         }
         PruneExpiredBans(); // Clean up
+        MaybeWriteBans(false); // Write bans if autosave is enabled
     }
 
     // --- Kick Commands ---
@@ -643,6 +660,16 @@ private:
         return false; // No active ban found
     }
 
+    // Helper to write bans if autosave is enabled
+    void MaybeWriteBans(bool isIpBan) {
+        if (m_pSvBanlistAutosave && m_pSvBanlistAutosave->m_Value.m_nValue != 0) {
+            if (isIpBan) {
+                WriteIPInternal();
+            } else {
+                WriteIDInternal();
+            }
+        }
+    }
 
 private:
 
