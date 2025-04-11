@@ -747,7 +747,7 @@ private:
         bool isActive = true; //CallVFunc<bool>(pPlayer, VFUNC_OFFSET_ISACTIVE);
         bool isConnected = CallVFunc<bool>(pPlayer, VFUNC_OFFSET_ISCONNECTED);
         bool isSpawned = true; //CallVFunc<bool>(pPlayer, VFUNC_OFFSET_ISSPAWNED); probably not a great idea
-        bool isFake = CallVFunc<bool>(pPlayer, VFUNC_OFFSET_ISFAKECLIENT);
+        bool isFake = false; // CallVFunc<bool>(pPlayer, VFUNC_OFFSET_ISFAKECLIENT);
         return isActive && isConnected && isSpawned && !isFake;
     }
 
