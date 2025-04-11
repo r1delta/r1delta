@@ -108,7 +108,7 @@ void FileCache::UpdateCache() {
             std::unordered_set<std::size_t> newCache;
             std::unordered_set<std::string, HashStrings, std::equal_to<>> newAddonsFolderCache;
 
-            Msg("Starting file cache scan...\n");
+            //Msg("Starting file cache scan...\n");
 
             // Create directories if they don't exist (optional, depends on desired behavior)
             std::error_code ec;
@@ -122,7 +122,7 @@ void FileCache::UpdateCache() {
             // Scan addons directory - this collects addon folders AND their files
             ScanDirectory(r1deltaAddonsPath, newCache, &newAddonsFolderCache);
 
-            Msg("File cache scan complete. Found %zu files, %zu addon folders.\n", newCache.size(), newAddonsFolderCache.size());
+            //Msg("File cache scan complete. Found %zu files, %zu addon folders.\n", newCache.size(), newAddonsFolderCache.size());
 
             { // Lock scope for swapping caches
                 std::unique_lock<std::shared_mutex> lock(cacheMutex);

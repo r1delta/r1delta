@@ -705,7 +705,14 @@ int __fastcall hook_CUtlBuffer_GetInt(__int64 buffer_struct_ptr) // a1 is the bu
 		return original_result;
 	}
 }
-
+char (*oCServerRemoteAccess__LookupStringValue__6B490)(__int64 a1, unsigned __int8* a2, __int64 a3);
+char CServerRemoteAccess__LookupStringValue__6B490(__int64 a1, unsigned __int8* a2, __int64 a3) {
+	if (strcmp_static(a2, "launchplaylist") == 0) {
+		reinterpret_cast<__int64(*)(__int64, const char*)>(G_engine_ds + 0x3268F0)(a3, reinterpret_cast<char* (*)()>(G_engine_ds + 0xB8C40)());
+		return true;
+	}
+	return oCServerRemoteAccess__LookupStringValue__6B490(a1, a2, a3);
+}
 typedef __int64(*Host_InitDedicatedType)(__int64 a1, __int64 a2, __int64 a3);
 Host_InitDedicatedType Host_InitDedicatedOriginal;
 __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
@@ -717,6 +724,8 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 	uintptr_t engineDS = G_engine_ds;
 
 	NET_CreateNetChannelOriginal = NET_CreateNetChannelType(engine + 0x1F1B10);
+	MH_CreateHook(LPVOID(engineDS + 0x6B490), LPVOID(CServerRemoteAccess__LookupStringValue__6B490), reinterpret_cast<LPVOID*>(&oCServerRemoteAccess__LookupStringValue__6B490)); // NET_BufferToBufferCompress
+
 	MH_CreateHook(LPVOID(engine + 0x1F4FC0), LPVOID(NET_Config), reinterpret_cast<LPVOID*>(&oNET_Config)); // NET_BufferToBufferCompress
 	MH_CreateHook(LPVOID(engineDS + 0x67480), LPVOID(hook_CUtlBuffer_GetInt), reinterpret_cast<LPVOID*>(&original_CUtlBuffer_GetInt)); // NET_BufferToBufferCompress
 	MH_CreateHook(LPVOID(engineDS + 0x6C680), LPVOID(hook_CServerRemoteAccess_WriteDataRequest), reinterpret_cast<LPVOID*>(&original_CServerRemoteAccess_WriteDataRequest)); // NET_BufferToBufferCompress
@@ -891,6 +900,13 @@ void Host_Map_Helper(const CCommand* args, int flags)
 	}
 	oHost_Map_Helper(args, flags);
 }
+char* (*osub_180311910)(char* a1, const char* a2, signed __int64 a3);
+char* __fastcall sub_180311910(char* a1, const char* a2, signed __int64 a3) {
+	auto ret = osub_180311910(a1, a2, a3);
+	if (((uintptr_t)(_ReturnAddress()) == (G_engine_ds + 0xA8B28)))
+		Msg("(fs) %s\n", a2);
+	return ret;
+}
 void InitDedicated()
 {
 	uintptr_t offsets[] = {
@@ -953,7 +969,7 @@ void InitDedicated()
 	//MH_CreateHook((LPVOID)(engine_ds + 0x318D60), &KeyValues__SetString__Dedi, reinterpret_cast<LPVOID*>(&oKeyValues__SetString__Dedi));
 	MH_CreateHook((LPVOID)(engine_ds + 0x318D60), &KeyValues__SetString__Dedi, reinterpret_cast<LPVOID*>(&oKeyValues__SetString__Dedi));
 	MH_CreateHook((LPVOID)(engine_ds + 0xA4AD0), &Host_Map_Helper, reinterpret_cast<LPVOID*>(&oHost_Map_Helper));
-	
+	MH_CreateHook((LPVOID)(engine_ds + 0x311910), &sub_180311910, reinterpret_cast<LPVOID*>(&osub_180311910));
 	//MH_CreateHook((LPVOID)(engine_ds + 0x360230), &vsnprintf_l_hk, NULL);
 	MH_EnableHook(MH_ALL_HOOKS);
 }

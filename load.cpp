@@ -2538,11 +2538,11 @@ void DiscordThread() {
 
 
 
-	while (running) {
-		discordpp::RunCallbacks();
-		std::this_thread::sleep_for(std::chrono::milliseconds(16));
+		while (running) {
+			discordpp::RunCallbacks();
+			std::this_thread::sleep_for(std::chrono::milliseconds(16));
 
-	}
+		}
 #endif
 }
 __int64 (*oAddSearchPathDedi)(__int64 a1, const char* a2, __int64 a3, unsigned int a4);
@@ -2555,6 +2555,58 @@ __int64 __fastcall AddSearchPathDedi(__int64 a1, const char* a2, __int64 a3, uns
 	}
 	return oAddSearchPathDedi(a1, a2, a3, a4);
 }
+void (*oCServerInfoPanel__OnServerDataResponse_14730)(__int64 a1, const char* a2, const char* a3);
+void CServerInfoPanel__OnServerDataResponse_14730(__int64 a1, const char* a2, const char* a3) {
+	if (strcmp_static(a2, "maplist") == 0) {
+		reinterpret_cast<void(*)(__int64, const char*, const char*)>((uintptr_t(GetModuleHandleA("AdminServer.dll")) + 0xB310))((a1 - 704), "map", a3);
+
+	}
+	//if (strcmp_static(a2, "map") == 0) {
+
+	if (strcmp_static(a2, "map") == 0 && strlen(a3) > 3) {
+		static bool bDone = false;
+		if (!bDone) {
+			bDone = true;
+			// Get the engine interface
+			void* ret = reinterpret_cast<void*>((reinterpret_cast<CreateInterfaceFn>(GetProcAddress(GetModuleHandleA("engine_ds.dll"), "CreateInterface"))("VENGINE_HLDS_API_VERSION002", 0)));
+
+			// Prepare a string to hold all playlist names
+			std::string combined_playlists;
+			int v7 = 0;
+			// Get the total number of playlists
+			int playlist_count = (*(int(__fastcall**)(void*))(*(_QWORD*)ret + 152LL))(ret);
+
+			// Check if there are any playlists to process to avoid issues with do-while on count 0
+			if (playlist_count > 0)
+			{
+				// Loop through all playlists
+				do
+				{
+					// Get the name of the current playlist
+					char* playlist = (*(char* (__fastcall**)(void*, _QWORD))(*(_QWORD*)ret + 160LL))(ret, (unsigned int)v7);
+					// Append the playlist name to the combined string
+					combined_playlists += playlist;
+					// Append a newline character
+					combined_playlists += '\n';
+					// Increment index
+					++v7;
+				} while (v7 < playlist_count); // Continue until all playlists are processed
+			}
+
+			// Call the target function once with the combined, newline-separated string
+			reinterpret_cast<void(*)(__int64, const char*, const char*)>((uintptr_t(GetModuleHandleA("AdminServer.dll")) + 0xB310))((a1 - 704), "launchplaylist", combined_playlists.c_str());
+
+		}
+		char* playlist = reinterpret_cast<char* (*)()>(G_engine_ds + 0xB8C40)();
+		if (playlist) {
+			reinterpret_cast<void(*)(__int64, const char*, const char*)>((uintptr_t(GetModuleHandleA("AdminServer.dll")) + 0xB200))(a1 - 704, "launchplaylist", playlist);
+		}
+	}
+
+	//}
+	oCServerInfoPanel__OnServerDataResponse_14730(a1, a2, a3);
+
+}
 static bool should_init_security_fixes = false;
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
@@ -2562,12 +2614,12 @@ void __stdcall LoaderNotificationCallback(
 	void* context) {
 	if (notification_reason != LDR_DLL_NOTIFICATION_REASON_LOADED)
 		return;
-	
+
 	ZoneScoped;
 #if BUILD_PROFILE
 	if (ZoneIsActive)
 	{
-		extern char* WideToStringArena(Arena* arena, const std::wstring_view & wide);
+		extern char* WideToStringArena(Arena * arena, const std::wstring_view & wide);
 		auto arena = tctx.get_arena_for_scratch();
 		auto temp = TempArena(arena);
 
@@ -2575,7 +2627,7 @@ void __stdcall LoaderNotificationCallback(
 		ZoneTextF(s, strlen(s));
 	}
 #endif
-	
+
 	doBinaryPatchForFile(notification_data->Loaded);
 	static bool bDone = false;
 	if (GetModuleHandleA("dedicated.dll") && !bDone) {
@@ -2610,12 +2662,16 @@ void __stdcall LoaderNotificationCallback(
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0xFFFF), &sub_FFFF, reinterpret_cast<LPVOID*>(&ovphys_sub_FFFF));
 		//MH_EnableHook(MH_ALL_HOOKS);
 	}
-	else if(strcmp_static(name, L"materialsystem_dx11.dll") == 0) {
+	else if (strcmp_static(name, L"materialsystem_dx11.dll") == 0) {
 		SetupHudWarpMatSystemHooks();
 		MH_EnableHook(MH_ALL_HOOKS);
 	}
-	else if(strcmp_static(name, L"vguimatsurface.dll") == 0) {
+	else if (strcmp_static(name, L"vguimatsurface.dll") == 0) {
 		SetupHudWarpVguiHooks();
+		MH_EnableHook(MH_ALL_HOOKS);
+	}
+	else if ((strcmp_static(name, L"adminserver.dll") == 0) || ((strcmp_static(name, L"AdminServer.dll")) == 0)) {
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("AdminServer.dll") + 0x14730), &CServerInfoPanel__OnServerDataResponse_14730, reinterpret_cast<LPVOID*>(&oCServerInfoPanel__OnServerDataResponse_14730));
 		MH_EnableHook(MH_ALL_HOOKS);
 	}
 	else {
