@@ -192,10 +192,10 @@ private:
             if (it != m_vecIpBans.end()) {
                 char szRemovedIpStr[INET6_ADDRSTRLEN];
 
-                m_vecIpBans.erase(it);
                 Msg("Removed IP ban for %s.\n", it->address.GetAddressString()); // Use formatted IP
                 FireBanEventInternal("server_removeban", nullptr, 0, szRemovedIpStr, 0, GetCommandIssuerInternal(), false);
                 bRemoved = true;
+                m_vecIpBans.erase(it);
             }
             else {
                 // Use the potentially reconstructed input string if not found
@@ -334,10 +334,10 @@ private:
 
                 if (it != m_vecIdBans.end()) {
                     uint64_t nRemovedId = it->uniqueID;
-                    m_vecIdBans.erase(it);
                     Msg("Removed Discord ID ban for %llu.\n", nRemovedId);
                     FireBanEventInternal("server_removeban", nullptr, nRemovedId, nullptr, 0, GetCommandIssuerInternal(), false);
                     bRemoved = true;
+                    m_vecIdBans.erase(it);
                 }
                 else {
                     Msg("Error: Invalid slot number %d or Discord ID %llu not found.\n", nSlot, nIdValue);
@@ -347,10 +347,10 @@ private:
             else {
                 // Valid slot number
                 uint64_t nRemovedId = m_vecIdBans[nSlot - 1].uniqueID; // Get ID before removing
-                m_vecIdBans.erase(m_vecIdBans.begin() + (nSlot - 1));
                 Msg("Removed Discord ID ban entry in slot %d (ID: %llu).\n", nSlot, nRemovedId);
                 FireBanEventInternal("server_removeban", nullptr, nRemovedId, nullptr, 0, GetCommandIssuerInternal(), false);
                 bRemoved = true;
+                m_vecIdBans.erase(m_vecIdBans.begin() + (nSlot - 1));
             }
         }
         else {
@@ -366,10 +366,10 @@ private:
 
             if (it != m_vecIdBans.end()) {
                 uint64_t nRemovedId = it->uniqueID;
-                m_vecIdBans.erase(it);
                 Msg("Removed Discord ID ban for %llu.\n", nRemovedId);
                 FireBanEventInternal("server_removeban", nullptr, nRemovedId, nullptr, 0, GetCommandIssuerInternal(), false);
                 bRemoved = true;
+                m_vecIdBans.erase(it);
             }
             else {
                 Msg("Error: Discord ID %llu not found in the ban list.\n", nIdValue);
