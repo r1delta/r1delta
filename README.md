@@ -14,7 +14,7 @@ If you're having issues please open an issue or join the [discord](https://disco
 For developers and contributors, keep reading below.
 
 # Building From Source
-todo
+We don't know how (todo)
 
 # Credits
 - [@r3muxd](https://github.com/r3muxd)
