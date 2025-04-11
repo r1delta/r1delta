@@ -2297,6 +2297,81 @@ void __fastcall CServerGameDLL_OnSayTextMsg(void* pThis, int clientIndex, char* 
 	// 5. Print the Formatted Message
 	Msg("%s\n", formattedMsg);
 }
+
+ConVarR1* host_mostRecentMapCvar = nullptr;
+ConVarR1* host_mostRecentGamemodeCvar = nullptr;
+void GamemodeChangeCallback(IConVar* var_iconvar, const char* pOldValue, float flOldValue)
+{
+	auto Cbuf_AddText2 = (Cbuf_AddTextType)(IsDedicatedServer() ? (G_engine_ds + 0x72d70) : (G_engine + 0x102D50));
+
+	ConVarR1* gamemodeCvar = OriginalCCVar_FindVar(cvarinterface, "mp_gamemode");
+	const char* newValue = pOldValue;
+	char command[256];
+	snprintf(command, sizeof(command), "host_mostRecentGamemode \"%s\"\n", newValue ? newValue : "");
+	Cbuf_AddText2(0, command, 0);
+}
+
+void HostMapChangeCallback(IConVar* var_iconvar, const char* pOldValue, float flOldValue)
+{
+	auto Cbuf_AddText2 = (Cbuf_AddTextType)(IsDedicatedServer() ? (G_engine_ds + 0x72d70) : (G_engine + 0x102D50));
+
+	const char* newValue = pOldValue;
+
+	// Check if the value is valid and not the lobby map
+	if (newValue && newValue[0] != '\0' && strcmp_static(newValue, "mp_lobby.bsp") != 0)
+	{
+		char mapNameToStore[256]; // Buffer to hold the potentially trimmed map name
+		char command[256 + 30];   // Command buffer (make slightly larger for prefix/quotes/suffix)
+
+		strncpy(mapNameToStore, newValue, sizeof(mapNameToStore) - 1);
+		mapNameToStore[sizeof(mapNameToStore) - 1] = '\0';
+
+		// --- Trim ".bsp" suffix if present ---
+		size_t len = strlen(mapNameToStore);
+		const char* suffix = ".bsp";
+		size_t suffixLen = strlen(suffix); // length is 4
+
+		// Check if string is long enough and ends with the suffix
+		if (len >= suffixLen && strcmp(mapNameToStore + len - suffixLen, suffix) == 0)
+		{
+			// Null-terminate the string before the suffix starts
+			mapNameToStore[len - suffixLen] = '\0';
+		}
+		// --- End trimming logic ---
+
+		// Construct the command using the (potentially) trimmed map name
+		snprintf(command, sizeof(command), "host_mostRecentMap \"%s\"\n", mapNameToStore);
+		Cbuf_AddText2(0, command, 0);
+	}
+}
+void InitializeRecentHostVars()
+{
+	host_mostRecentGamemodeCvar = RegisterConVar(
+		"host_mostRecentGamemode",
+		"",
+		FCVAR_HIDDEN,
+		"Stores the last gamemode set via mp_gamemode."
+	);
+
+	host_mostRecentMapCvar = RegisterConVar(
+		"host_mostRecentMap",
+		"",
+		FCVAR_HIDDEN,
+		"Stores the last map set via host_map, excluding mp_lobby."
+	);
+
+	ConVarR1* mp_gamemode = OriginalCCVar_FindVar(cvarinterface, "mp_gamemode");
+	ConVarR1* host_map = OriginalCCVar_FindVar(cvarinterface, "host_map");
+	{
+		mp_gamemode->m_fnChangeCallbacks.AddToTail((FnChangeCallback_t)GamemodeChangeCallback);
+		GamemodeChangeCallback(nullptr, "", 0.0f);
+	}
+	{
+		host_map->m_fnChangeCallbacks.AddToTail((FnChangeCallback_t)HostMapChangeCallback);
+		HostMapChangeCallback(nullptr, "", 0.0f);
+	}
+}
+
 static FORCEINLINE void
 do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 {
@@ -2498,7 +2573,6 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook(LPVOID(server_base + 0x41E070), &CHL2_Player_Precache, 0);
 
 	security_fixes_server(engine_base, server_base);
-
 	R1DAssert(MH_EnableHook(MH_ALL_HOOKS) == MH_OK);
 	//std::cout << "did hooks" << std::endl;
 }
@@ -2558,8 +2632,11 @@ __int64 __fastcall AddSearchPathDedi(__int64 a1, const char* a2, __int64 a3, uns
 void (*oCServerInfoPanel__OnServerDataResponse_14730)(__int64 a1, const char* a2, const char* a3);
 void CServerInfoPanel__OnServerDataResponse_14730(__int64 a1, const char* a2, const char* a3) {
 	if (strcmp_static(a2, "maplist") == 0) {
-		reinterpret_cast<void(*)(__int64, const char*, const char*)>((uintptr_t(GetModuleHandleA("AdminServer.dll")) + 0xB310))((a1 - 704), "map", a3);
-
+		static bool bDone = false;
+		if (!bDone) {
+			bDone = true;
+			reinterpret_cast<void(*)(__int64, const char*, const char*)>((uintptr_t(GetModuleHandleA("AdminServer.dll")) + 0xB310))((a1 - 704), "map", a3);
+		}
 	}
 	//if (strcmp_static(a2, "map") == 0) {
 

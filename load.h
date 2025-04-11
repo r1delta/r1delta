@@ -111,3 +111,4 @@ extern uintptr_t G_client;
 
 LDR_DLL_LOADED_NOTIFICATION_DATA* GetModuleNotificationData(const wchar_t* moduleName);
 void FreeModuleNotificationData(LDR_DLL_LOADED_NOTIFICATION_DATA*);
+void InitializeRecentHostVars();

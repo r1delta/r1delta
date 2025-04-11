@@ -358,7 +358,9 @@ char __fastcall CServerGameDLL__DLLInit(void* thisptr, CreateInterfaceFn appSyst
 	tfomsghandler->Init();
 	tfogamemanager->Init();
 	staticclasssystem->Init();
-	return CServerGameDLL__DLLInitOriginal(thisptr, fnptr, fnptr, fnptr, pGlobals);
+	auto ret = CServerGameDLL__DLLInitOriginal(thisptr, fnptr, fnptr, fnptr, pGlobals);
+	InitializeRecentHostVars();
+	return ret;
 }
 
 extern "C" __declspec(dllexport) void StackToolsNotify_LoadedLibrary(char* pModuleName)
