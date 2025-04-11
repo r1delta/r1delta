@@ -969,7 +969,7 @@ void InitDedicated()
 	//MH_CreateHook((LPVOID)(engine_ds + 0x318D60), &KeyValues__SetString__Dedi, reinterpret_cast<LPVOID*>(&oKeyValues__SetString__Dedi));
 	MH_CreateHook((LPVOID)(engine_ds + 0x318D60), &KeyValues__SetString__Dedi, reinterpret_cast<LPVOID*>(&oKeyValues__SetString__Dedi));
 	MH_CreateHook((LPVOID)(engine_ds + 0xA4AD0), &Host_Map_Helper, reinterpret_cast<LPVOID*>(&oHost_Map_Helper));
-	MH_CreateHook((LPVOID)(engine_ds + 0x311910), &sub_180311910, reinterpret_cast<LPVOID*>(&osub_180311910));
+	//MH_CreateHook((LPVOID)(engine_ds + 0x311910), &sub_180311910, reinterpret_cast<LPVOID*>(&osub_180311910));
 	//MH_CreateHook((LPVOID)(engine_ds + 0x360230), &vsnprintf_l_hk, NULL);
 	MH_EnableHook(MH_ALL_HOOKS);
 }
