@@ -14,7 +14,25 @@ If you're having issues please open an issue or join the [discord](https://disco
 For developers and contributors, keep reading below.
 
 # Building From Source
-todo
+1. [Install vcpkg and run vcpkg integrate install](https://learn.microsoft.com/en-us/vcpkg/get_started/get-started-msbuild)
+2. Make your dev root directory somewhere (on the disk you want to build R1Delta on) like `C:\depot\r1delta`
+3. Run the following commands in a command prompt (**not as Administrator**):
+4. `subst S: C:\depot\r1delta` 
+5. `git clone --recursive http://github.com/r1delta/r1delta S:\src`
+6. `mkdir S:\game`
+7. `git clone http://github.com/r1delta/CORE S:\game\r1delta`
+8. Build S:\src\r1delta.sln (open Dll1.sln, restore the NuGet packages if it's not done automatically, and build the solution)
+9. If you did this right, you should now have `S:\game\r1delta.exe` and it should boot properly.
+10. It is recommended, though not required, that you put your original R1 install (or delta'd R1 content) at S:\content.
+   
+If you want to make the S: subst persistent across restarts, you need to import a registry key.
+For example, this is for `C:\depot\r1delta`:
+```
+REGEDIT4 
+
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Session Manager\DOS Devices] 
+"S:"="\\??\\C:\\depot\\r1delta"
+```
 
 # Credits
 - [@r3muxd](https://github.com/r3muxd)
