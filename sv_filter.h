@@ -558,19 +558,40 @@ private:
 
     void KickInternal(const CCommand& args) {
         // Usage: kick <name>
-        if (args.ArgC() != 2) {
+        if (args.ArgC() < 2) {
             Msg("Usage: kick <name>\n");
             return;
         }
 
-        const char* pszName = args.Arg(1);
-        // The CCommand ArgS might be better if name has spaces and quotes were used,
-        // but Arg(1) handles the first token which is usually the name.
-        // If names can contain spaces, the command issuer must use quotes: kick "Player Name"
-        // CCommand should handle the tokenization correctly in that case, giving "Player Name" as Arg(1).
-
+        // Concatenate all arguments with NO spaces to build the full target name
+        std::string fullName;
+        for (int i = 1; i < args.ArgC(); i++) {
+            fullName += args.Arg(i);
+        }
+        
+        const char* pszName = fullName.c_str();
+        
+        // Get all players that match the name (partial or exact)
         std::vector<IBannablePlayerPointer> vecMatchingPlayers = FindPlayersByNameInternal(pszName);
-
+        
+        // First check for exact name match
+        IBannablePlayerPointer pExactMatch = nullptr;
+        for (auto* pPlayer : vecMatchingPlayers) {
+            const char* playerName = GetPlayerNameInternal(pPlayer);
+            if (playerName && strcmp(playerName, pszName) == 0) {
+                pExactMatch = pPlayer;
+                break;
+            }
+        }
+        
+        if (pExactMatch) {
+            // Kick the exact match even if there are other partial matches
+            Msg("Kicking player %s.\n", GetPlayerNameInternal(pExactMatch));
+            KickPlayerInternal(pExactMatch, "Kicked by administrator");
+            return;
+        }
+        
+        // No exact match found, proceed with partial matches
         if (vecMatchingPlayers.empty()) {
             Msg("Error: Player matching '%s' not found.\n", pszName);
         }
@@ -582,7 +603,7 @@ private:
             Msg("Please use 'kickid <userid>' for clarity.\n");
         }
         else {
-            // Exactly one match
+            // Exactly one partial match
             IBannablePlayerPointer pPlayerToKick = vecMatchingPlayers[0];
             Msg("Kicking player %s.\n", GetPlayerNameInternal(pPlayerToKick));
             KickPlayerInternal(pPlayerToKick, "Kicked by administrator");
