@@ -2146,7 +2146,7 @@ void CGrenadeFrag__ResolveFlyCollisionCustom(__int64 a1, float* a2, float* a3) /
 	oCGrenadeFrag__ResolveFlyCollisionCustom(a1, (float*)&trace, (float*)&vel); // original stomps the params or some shit
 
 	// Stop if on ground.
-	if (a2[10] > 0.7)  // Floor
+	if (a2[10] > 0.9)  // Floor
 	{
 		static auto sub_1803B9B30 = reinterpret_cast<void(*)(__int64)>(G_server + 0x3b9b30);
 		if ((*(_DWORD*)(a1 + 352) & 0x1000LL) != 0)
