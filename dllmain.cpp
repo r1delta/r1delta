@@ -630,7 +630,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 		MH_Initialize();
 		LoadLibraryA("shell32.dll");
 		if (!IsDedicatedServer()) {
-			MigrateOldSaveLocation();
+			//MigrateOldSaveLocation();
 			MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("shell32.dll"), "SHGetFolderPathA"), &SHGetFolderPathAHook, reinterpret_cast<LPVOID*>(&SHGetFolderPathAOriginal));
 		}
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("tier0_orig.dll"), "GetCPUInformation"), &GetCPUInformationDet, reinterpret_cast<LPVOID*>(&GetCPUInformationOriginal));
