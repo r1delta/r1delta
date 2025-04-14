@@ -25,7 +25,8 @@
     "aklomp-base64",
     "zstd",
     "libogg",
-    "libvorbis"
+    "libvorbis",
+    "discord-game-sdk"
   ],
   "overrides": [
     {
