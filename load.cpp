@@ -2176,7 +2176,7 @@ void CGrenadeFrag__ResolveFlyCollisionCustom(__int64 a1, float* a2, float* a3) /
 	
 		// Set ground entity
 		auto ent = *(_QWORD*)((__int64)(a2)+96);
-		if ((*(unsigned __int8(__fastcall**)(__int64, __int64))(*(_QWORD*)a1 + 824LL))(a1, ent))
+		if ((*(unsigned __int8(__fastcall**)(__int64, __int64))(*(_QWORD*)a1 + 824LL))(a1, ent) && a2[10] == 1.0f)
 			sub_4AA8E0(a1, ent);
 
 		//if ((*(unsigned __int8(__fastcall**)(__int64, __int64))(*(_QWORD*)a1 + 824LL))(a1, ent))
