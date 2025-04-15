@@ -110,7 +110,7 @@ namespace MasterServerClient {
                 hasWarned = true;
                 Warning("hide_server is 1, ignoring master server heartbeat requests\n");
             }
-            return true;
+            //return true;
         }
 
         std::lock_guard<std::mutex> lock(httpMutex);
