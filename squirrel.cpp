@@ -39,7 +39,7 @@
 #include <random>
 #include "masterserver.h"
 #include "shellapi.h"
-
+#include "discord.h"
 
 #pragma intrinsic(_ReturnAddress)
 
@@ -598,6 +598,67 @@ SQInteger OpenDiscordURL(HSQUIRRELVM v) {
 	return 1;
 }
 
+size_t to_narrow(const wchar_t* src, char* dest, size_t dest_len) {
+	size_t i;
+	wchar_t code;
+
+	i = 0;
+
+	while (src[i] != '\0' && i < (dest_len - 1)) {
+		code = src[i];
+		if (code < 128)
+			dest[i] = char(code);
+		else {
+			dest[i] = '?';
+			if (code >= 0xD800 && code <= 0xDBFF)
+				// lead surrogate, skip the next code unit, which is the trail
+				i++;
+		}
+		i++;
+	}
+
+	dest[i] = '\0';
+
+	return i - 1;
+
+}
+
+SQInteger Script_Localize(HSQUIRRELVM v) {
+	const char* str;
+	sq_getstring(v, -1, &str);
+	
+	auto mod = GetModuleHandleA("localize.dll");
+	if (!mod) {
+		Msg("Failed to get localize.dll module handle\n");
+		return 0;
+	}
+	CreateInterfaceFn localizeCreate = (CreateInterfaceFn)(GetProcAddress(mod,"CreateInterface"));
+	if (!localizeCreate) {
+		Msg("Failed to get CreateInterface function\n");
+		return 0;
+	}
+	auto localize_vtable = localizeCreate("Localize_001", nullptr);
+	if (!localize_vtable) {
+		Msg("Failed to get Localize_001 interface\n");
+		return 0;
+	}
+	auto result =  Call<const wchar_t*>((void*)localize_vtable, 10,str);
+	// script_client(printt(Localize("#EOG_XP_TOTAL")))
+	if (result == nullptr) {
+		sq_pushstring(v, (const char*)"", -1);
+		return 1;
+	}
+
+	char* char_result = new char[256];
+	wcstombs(char_result, result, 256);
+
+	Msg("Original: %s Localize: %ls\n", str, result);
+
+	sq_pushstring(v, (const char*)char_result, -1);
+	return 1;
+
+}
+
 
 
 // Function to initialize all SQVM functions
@@ -677,6 +738,40 @@ bool GetSQVMFuncs() {
 		"str",
 		"Get a persistent data value"
 	);
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_CLIENT,
+		"Localize",
+		(SQFUNCTION)Script_Localize,
+		".s", // String
+		2,      // Expects 2 parameters
+		"void",    // Returns a string
+		"str",
+		"Set a persistent data value"
+	);
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_UI,
+		"SendDiscordUI",
+		(SQFUNCTION)SendDiscordUI,
+		"", // String
+		1,      // Expects 2 parameters
+		"void",    // Returns a string
+		"str",
+		"Send discord UI"
+	);
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_CLIENT,
+		"SendDiscordClient",
+		(SQFUNCTION)SendDiscordClient,
+		".t", // String
+		2,      // Expects 2 parameters
+		"void",    // Returns a string
+		"str",
+		"Send discord UI"
+	);
+
 
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_UI,

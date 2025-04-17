@@ -91,13 +91,15 @@
 #include "vector.h"
 #include "hudwarp.h"
 #include "hudwarp_hooks.h"
+#include "discord.h"
 //#define DISCORD
 #define DISCORDPP_IMPLEMENTATION
 #ifdef DISCORD
 #include <discordpp.h>
-std::shared_ptr<discordpp::Client> client;
 #endif
 #include "sv_filter.h"
+#include <discord-game-sdk/discord.h>  
+
 
 // Define and initialize the static member for the ConVar
 ConVarR1* CBanSystem::m_pSvBanlistAutosave = nullptr;
@@ -877,6 +879,7 @@ uintptr_t G_server;
 uintptr_t G_engine;
 uintptr_t G_engine_ds;
 uintptr_t G_client;
+uintptr_t G_localize;
 
 class CPluginBotManager
 {
@@ -2582,48 +2585,50 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	//std::cout << "did hooks" << std::endl;
 }
 
+//
+//void DiscordThread() {
+//	
+//#ifdef DISCORD
+//	client = std::make_unique<discordpp::Client>();
+//	client->AddLogCallback([](auto message, auto severity) {
+//		Msg("[Discord::%s] %s\n", EnumToString(severity), message.c_str());
+//	//	std::cout << "[" << EnumToString(severity) << "] " << message << std::endl;
+//		}, discordpp::LoggingSeverity::Info);
+//
+//	client->SetStatusChangedCallback([](auto status, auto error, auto details) {
+//		Msg("Status has changed to %s\n", discordpp::Client::StatusToString(status).c_str());
+//		if (status == discordpp::Client::Status::Ready) {
+//			Msg("Client is ready, you can now call SDK functions. For example:\n");
+//			discordpp::Activity activity;
+//			activity.SetType(discordpp::ActivityTypes::Playing);
+//			activity.SetDetails("Battle Creek");
+//			activity.SetState("In Competitive Match");
+//			client->UpdateRichPresence(activity, [](discordpp::ClientResult result) {
+//				if (result.Successful()) {
+//					std::cout << "Rich presence updated!\n";
+//				}
+//				else {
+//					std::cout << "Failed to update rich presence: " << result.Error() << "\n";
+//				}
+//				});
+//
+//		}
+//		else if (error != discordpp::Client::Error::None) {
+//			Msg("Error connecting: %s %d\n", discordpp::Client::ErrorToString(error).c_str(),
+//				details);
+//		}
+//		});
+//
+//
+//
+//		while (running) {
+//			discordpp::RunCallbacks();
+//			std::this_thread::sleep_for(std::chrono::milliseconds(16));
+//
+//		}
+//#endif
+//}
 
-void DiscordThread() {
-#ifdef DISCORD
-	client = std::make_unique<discordpp::Client>();
-	client->AddLogCallback([](auto message, auto severity) {
-		Msg("[Discord::%s] %s\n", EnumToString(severity), message.c_str());
-	//	std::cout << "[" << EnumToString(severity) << "] " << message << std::endl;
-		}, discordpp::LoggingSeverity::Info);
-
-	client->SetStatusChangedCallback([](auto status, auto error, auto details) {
-		Msg("Status has changed to %s\n", discordpp::Client::StatusToString(status).c_str());
-		if (status == discordpp::Client::Status::Ready) {
-			Msg("Client is ready, you can now call SDK functions. For example:\n");
-			discordpp::Activity activity;
-			activity.SetType(discordpp::ActivityTypes::Playing);
-			activity.SetDetails("Battle Creek");
-			activity.SetState("In Competitive Match");
-			client->UpdateRichPresence(activity, [](discordpp::ClientResult result) {
-				if (result.Successful()) {
-					std::cout << "Rich presence updated!\n";
-				}
-				else {
-					std::cout << "Failed to update rich presence: " << result.Error() << "\n";
-				}
-				});
-
-		}
-		else if (error != discordpp::Client::Error::None) {
-			Msg("Error connecting: %s %d\n", discordpp::Client::ErrorToString(error).c_str(),
-				details);
-		}
-		});
-
-
-
-		while (running) {
-			discordpp::RunCallbacks();
-			std::this_thread::sleep_for(std::chrono::milliseconds(16));
-
-		}
-#endif
-}
 __int64 (*oAddSearchPathDedi)(__int64 a1, const char* a2, __int64 a3, unsigned int a4);
 __int64 __fastcall AddSearchPathDedi(__int64 a1, const char* a2, __int64 a3, unsigned int a4) {
 	if (!strcmp_static(a2, "r1delta")) {
@@ -2711,7 +2716,7 @@ void __stdcall LoaderNotificationCallback(
 #endif
 
 	doBinaryPatchForFile(notification_data->Loaded);
-	static bool bDone = false;
+	static bool bDone = false;	
 	if (GetModuleHandleA("dedicated.dll") && !bDone) {
 		InitCompressionHooks();
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("dedicated.dll") + 0x84000), &AddSearchPathDedi, reinterpret_cast<LPVOID*>(&oAddSearchPathDedi));
@@ -2755,6 +2760,9 @@ void __stdcall LoaderNotificationCallback(
 	else if ((strcmp_static(name, L"adminserver.dll") == 0) || ((strcmp_static(name, L"AdminServer.dll")) == 0)) {
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("AdminServer.dll") + 0x14730), &CServerInfoPanel__OnServerDataResponse_14730, reinterpret_cast<LPVOID*>(&oCServerInfoPanel__OnServerDataResponse_14730));
 		MH_EnableHook(MH_ALL_HOOKS);
+	}
+	else if ((strcmp_static(name, "localize.dll") == 0)) {
+		G_localize = (uintptr_t)notification_data->Loaded.DllBase;
 	}
 	else {
 		bool is_client = !strcmp_static(name, L"client.dll");

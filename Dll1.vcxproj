@@ -201,6 +201,7 @@
     <ClInclude Include="crashhandler.h" />
     <ClInclude Include="cvar.h" />
     <ClInclude Include="dedicated.h" />
+    <ClInclude Include="discord.h" />
     <ClInclude Include="engine.h" />
     <ClInclude Include="factory.h" />
     <ClInclude Include="filecache.h" />
@@ -287,6 +288,7 @@
     <ClCompile Include="crashhandler.cpp" />
     <ClCompile Include="cvar.cpp" />
     <ClCompile Include="dedicated.cpp" />
+    <ClCompile Include="discord.cpp" />
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="engine.cpp" />
     <ClCompile Include="factory.cpp" />

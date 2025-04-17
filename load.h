@@ -106,6 +106,7 @@ extern uintptr_t G_server;
 extern uintptr_t G_engine;
 extern uintptr_t G_engine_ds;
 extern uintptr_t G_client;
+extern uintptr_t G_localize;
 
 
 
