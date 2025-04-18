@@ -139,7 +139,7 @@ SQInteger SendDiscordClient(HSQUIRRELVM v)
 	activity.GetAssets().SetLargeImage(presence.mapName.c_str());
 	activity.GetAssets().SetLargeText(presence.mapDisplayName.c_str());
 	activity.GetAssets().SetSmallImage("logo");
-	activity.GetAssets().SetSmallText("");
+	activity.GetAssets().SetSmallText("R1Delta");
 	activity.GetParty().SetId("R1Delta");
 	activity.GetParty().SetPrivacy(discord::ActivityPartyPrivacy::Private);
 	activity.GetParty().GetSize().SetCurrentSize(presence.playerCount);
