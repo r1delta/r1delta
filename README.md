@@ -44,6 +44,7 @@ REGEDIT4
 - [@bt](https://github.com/eepycats)
 - [@dogecore](https://github.com/HappyDOGE)
 - [@Allusive](https://github.com/AllusiveWheat)
+- [@koutsie](https://github.com/koutsie)
 
 ## Third-Party Code Attribution
 

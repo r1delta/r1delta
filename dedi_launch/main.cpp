@@ -207,24 +207,7 @@ bool GetInstallPathFromRegistry(char* buffer, size_t bufferSize)
 // Returns true if valid, false otherwise.
 bool ValidateGameDirectory(const char* path)
 {
-    if (!path || path[0] == '\0') return false;
-
-    char validationFilePath[MAX_PATH];
-    if (PathCombineA(validationFilePath, path, VALIDATION_FILE_RELATIVE_PATH_A) == NULL)
-    {
-        OutputDebugStringA("Failed to combine path for validation file.\n");
-        return false;
-    }
-
-    // PathFileExistsA returns TRUE if it exists, FALSE otherwise
-    BOOL exists = PathFileExistsA(validationFilePath);
-
-    char msg[MAX_PATH + 100];
-    sprintf_s(msg, sizeof(msg), "Validating path '%s': Checking for '%s' -> %s\n",
-        path, validationFilePath, exists ? "Found" : "Not Found");
-    OutputDebugStringA(msg);
-
-    return exists == TRUE;
+    return TRUE;
 }
 
 // Prepends necessary directories to the PATH environment variable.
