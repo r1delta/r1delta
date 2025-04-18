@@ -3,7 +3,7 @@
 #include "logging.h"  
 #include "squirrel.h"
 #include "load.h"
-#define DISOCRD_CLIENT_ID 1304910395013595176  
+#define DISCORD_APPLICATION_ID 1304910395013595176  
 
 static discord::Core* core = nullptr;
 

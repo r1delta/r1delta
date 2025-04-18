@@ -1,12 +1,17 @@
 #include "discord.h"
 #include <thread>
 
+static bool is_discord_running = false;
+
 void DiscordThread() {
-	auto result = discord::Core::Create(DISOCRD_CLIENT_ID, DiscordCreateFlags_Default, &core);
+	auto result = discord::Core::Create(DISCORD_APPLICATION_ID, DiscordCreateFlags_Default, &core);
 	if (result != discord::Result::Ok) {
 		Msg("Discord: Failed to create core:\n");
 		return;
 	}
+
+	is_discord_running = true;
+
 	Msg("Discord: Core created successfully\n");
 	/*discord::Activity activity;
 	activity.SetName("R1Delta");
@@ -48,6 +53,10 @@ struct PresenceInfo {
 
 SQInteger SendDiscordUI(HSQUIRRELVM v)
 {
+	if (!is_discord_running) {
+		Warning("SendDiscordUI: Discord is not running");
+		return 1;
+	}
 
 	discord::Activity activity;
 	memset(&activity, 0, sizeof(activity));
@@ -66,7 +75,6 @@ SQInteger SendDiscordUI(HSQUIRRELVM v)
 	activity.GetParty().SetId("R1Delta");
 	activity.GetParty().SetPrivacy(discord::ActivityPartyPrivacy::Private);
 	
-	
 	core->ActivityManager().UpdateActivity(activity, [](discord::Result result) {
 		if (result != discord::Result::Ok) {
 			Msg("Discord: Failed to update activity: %d\n", result);
@@ -81,6 +89,11 @@ SQInteger SendDiscordUI(HSQUIRRELVM v)
 
 SQInteger SendDiscordClient(HSQUIRRELVM v)
 {
+	if (!is_discord_running) {
+		Warning("SendDiscordClient: Discord is not running");
+		return 1;
+	}
+
 	Msg("Discord: SendDiscordClient\n");
 	SQObject obj;
 	SQInteger top = sq_gettop(nullptr, v);

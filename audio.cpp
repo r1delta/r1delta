@@ -43,6 +43,8 @@
 #include "logging.h"
 #include "audio.h"
 
+#include "thread.h"
+
 // --------------------------------------------------------------------
 // Core filesystem enums/structs (unchanged)
 // --------------------------------------------------------------------
@@ -481,7 +483,7 @@ bool OpenOpusContext(const std::string& wavName, CBaseFileSystem* filesystem, co
     }
 
     // Start an asynchronous worker thread to decode the remaining chunks.
-    std::thread bgThread(BackgroundDecodeThread, progTemplate, channels);
+    CThread bgThread(BackgroundDecodeThread, progTemplate, channels);
     bgThread.detach();
 
     // Save the progressive template in the global cache.

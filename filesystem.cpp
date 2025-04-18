@@ -50,6 +50,7 @@
 #include "load.h"
 #include <shared_mutex>
 #include <string_view>
+#include "thread.h"
 #pragma intrinsic(_ReturnAddress)
 
 namespace fs = std::filesystem;
@@ -95,7 +96,7 @@ std::atomic_flag threadStarted = ATOMIC_FLAG_INIT;
 
 void StartFileCacheThread() {
     if (!threadStarted.test_and_set()) {
-        std::thread([]() { FileCache::GetInstance().UpdateCache(); }).detach();
+        CThread([]() { FileCache::GetInstance().UpdateCache(); }).detach();
     }
 }
 class FastFileSystemHook {
