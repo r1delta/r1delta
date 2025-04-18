@@ -16,6 +16,7 @@
 #include "cvar.h"
 #include "logging.h"
 #include "masterserver.h"
+#include "thread.h"
 
 using json = nlohmann::json;
 
@@ -300,7 +301,7 @@ SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
 
     static std::atomic<bool> portForwardWarningShown = false;
 
-    std::thread([heartbeat]() {
+    CThread([heartbeat]() {
         if (!MasterServerClient::SendServerHeartbeat(heartbeat)) {
             if (!portForwardWarningShown.load()) {
                 portForwardWarningShown.store(true, std::memory_order_relaxed);
@@ -325,7 +326,7 @@ SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
 SQInteger DispatchServerListReq(HSQUIRRELVM v) {
     MasterServerClient::serverList.clear();
 
-    std::thread([]() {
+    CThread([]() {
         MasterServerClient::GetServerList();
     }).detach();
 

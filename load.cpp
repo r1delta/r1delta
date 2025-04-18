@@ -99,6 +99,7 @@
 #endif
 #include "sv_filter.h"
 #include <discord-game-sdk/discord.h>  
+#include "thread.h"
 
 
 // Define and initialize the static member for the ConVar
@@ -2772,7 +2773,7 @@ void __stdcall LoaderNotificationCallback(
 			G_client = (uintptr_t)notification_data->Loaded.DllBase;
 			InitClient();
 			SetupHudWarpHooks();
-			std::thread(DiscordThread).detach();
+			CThread(DiscordThread).detach();
 		}
 		if (is_server) do_server(notification_data);
 		if (should_init_security_fixes && (is_client || is_server)) {
