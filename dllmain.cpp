@@ -51,6 +51,7 @@
 #include <ShlObj_core.h>
 #include <PathCch.h>
 #include <shellapi.h>
+#include "thread.h"
 #pragma comment(lib, "Pathcch.lib")
 uint64_t g_PerformanceFrequency;
 int G_is_dedi;
@@ -73,7 +74,7 @@ const CPUInformation* GetCPUInformationDet()
 
 	// NOTE(mrsteyk): Some threads want logical core count, wanderer want's singleplayer
 	if (result->m_nLogicalProcessors >= 20) {
-		result->m_nLogicalProcessors = 19;
+		result->m_nLogicalProcessors = (19 - CThread::m_total_threads);
 	}
 
 	return result;

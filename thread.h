@@ -14,9 +14,12 @@ class CThread
 	std::thread m_thread;
 
 public:
+    static int m_total_threads;
+
     template <typename Callable, typename... Args>
     CThread(Callable&& func, Args&&... args) {
         AllocateThreadID(); 
+        m_total_threads++;
         m_thread = std::thread([=]() {
             func(args...); 
             });
@@ -26,6 +29,7 @@ public:
         if (m_thread.joinable()) {
             m_thread.join(); 
         }
+        m_total_threads--;
         FreeThreadID(); 
     }
 
