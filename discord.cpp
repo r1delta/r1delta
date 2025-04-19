@@ -4,7 +4,7 @@
 static bool is_discord_running = false;
 
 void DiscordThread() {
-	auto result = discord::Core::Create(DISCORD_APPLICATION_ID, DiscordCreateFlags_Default, &core);
+	auto result = discord::Core::Create(DISCORD_APPLICATION_ID, DiscordCreateFlags_NoRequireDiscord, &core);
 	if (result != discord::Result::Ok) {
 		Msg("Discord: Failed to create core:\n");
 		return;
