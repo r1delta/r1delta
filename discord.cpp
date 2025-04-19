@@ -1,6 +1,10 @@
 #include "discord.h"
 #include <thread>
-
+#include <chrono>
+#include <string>
+#include <algorithm>
+#include <windows.h>
+#include <tlhelp32.h>
 static bool is_discord_running = false;
 bool IsDiscordProcessRunning() {
 	DWORD process_id = 0;
