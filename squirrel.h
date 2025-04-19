@@ -387,6 +387,8 @@ void script_cmd(const CCommand& args);
 void script_client_cmd(const CCommand& args);
 void script_ui_cmd(const CCommand& args);
 
+void localilze_string(const char* str, char* localized_str, int size);
+
 enum SVFlags_t
 {
 	SV_FREE = 0x01,

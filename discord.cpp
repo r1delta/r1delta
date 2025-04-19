@@ -13,26 +13,6 @@ void DiscordThread() {
 	is_discord_running = true;
 
 	Msg("Discord: Core created successfully\n");
-	/*discord::Activity activity;
-	activity.SetName("R1Delta");
-	activity.SetType(discord::ActivityType::Playing);
-	activity.SetState("Main Menu");
-	activity.SetDetails("Playing Titanfall");
-	activity.GetTimestamps().SetStart(time(nullptr));
-	activity.GetAssets().SetLargeImage("logo");
-	activity.GetAssets().SetLargeText("R1Delta");
-	activity.GetAssets().SetSmallImage("");
-	
-
-
-	core->ActivityManager().UpdateActivity(activity, [](discord::Result result) {
-		if (result != discord::Result::Ok) {
-			Msg("Discord: Failed to update activity:\n");
-		}
-		else {
-			Msg("Discord: Activity updated successfully\n");
-		}
-		});*/
 
 	while (true) {
 		core->RunCallbacks();
@@ -61,20 +41,43 @@ SQInteger SendDiscordUI(HSQUIRRELVM v)
 	discord::Activity activity;
 	memset(&activity, 0, sizeof(activity));
 
-	activity.SetName("R1Delta");
-	activity.SetType(discord::ActivityType::Playing);
-	activity.SetState("Main Menu");
-	activity.GetParty().GetSize().SetCurrentSize(1);
-	activity.GetParty().GetSize().SetMaxSize(1);
-	activity.SetDetails("Playing Titanfall");
-	activity.GetTimestamps().SetStart(time(nullptr));
-	activity.GetAssets().SetLargeImage("logo");
-	activity.GetAssets().SetLargeText("R1Delta");
-	activity.SetSupportedPlatforms(static_cast<uint32_t>(discord::ActivitySupportedPlatformFlags::Desktop));
-	
-	activity.GetParty().SetId("R1Delta");
-	activity.GetParty().SetPrivacy(discord::ActivityPartyPrivacy::Private);
-	
+	// get the name of loaded level
+	const char* levelName = nullptr;
+
+	sq_getstring(v, 2, &levelName);
+
+	if (levelName != nullptr) {
+		Msg("Discord: SendDiscordUI: Level name: %s\n", levelName);
+		activity.SetName("R1Delta");
+		activity.SetType(discord::ActivityType::Playing);
+		activity.SetState("Loading");
+		activity.GetParty().GetSize().SetCurrentSize(1);
+		activity.GetParty().GetSize().SetMaxSize(1);
+		char levelNameStr[256];
+		localilze_string(levelName, levelNameStr, 256);
+		activity.SetDetails(("Loading " + std::string(levelNameStr) + "...").c_str());
+		activity.GetTimestamps().SetStart(time(nullptr));
+		activity.GetAssets().SetLargeImage(levelName);
+		activity.GetAssets().SetLargeText(levelNameStr);
+		activity.GetAssets().SetSmallImage("logo");
+		activity.GetAssets().SetSmallText("R1Delta");
+		activity.SetSupportedPlatforms(static_cast<uint32_t>(discord::ActivitySupportedPlatformFlags::Desktop));
+	}
+	else {
+		activity.SetName("R1Delta");
+		activity.SetType(discord::ActivityType::Playing);
+		activity.SetState("Main Menu");
+		activity.GetParty().GetSize().SetCurrentSize(1);
+		activity.GetParty().GetSize().SetMaxSize(1);
+		activity.SetDetails("Playing Titanfall");
+		activity.GetTimestamps().SetStart(time(nullptr));
+		activity.GetAssets().SetLargeImage("logo");
+		activity.GetAssets().SetLargeText("R1Delta");
+		activity.SetSupportedPlatforms(static_cast<uint32_t>(discord::ActivitySupportedPlatformFlags::Desktop));
+
+		activity.GetParty().SetId("R1Delta");
+		activity.GetParty().SetPrivacy(discord::ActivityPartyPrivacy::Private);
+	}
 	core->ActivityManager().UpdateActivity(activity, [](discord::Result result) {
 		if (result != discord::Result::Ok) {
 			Msg("Discord: Failed to update activity: %d\n", result);

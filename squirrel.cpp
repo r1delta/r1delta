@@ -686,6 +686,37 @@ SQInteger Script_Localize(HSQUIRRELVM v) {
 }
 
 
+void localilze_string(const char* str, char* localized_str, int size)
+{
+	auto mod = GetModuleHandleA("localize.dll");
+	if (!mod) {
+		Msg("Failed to get localize.dll module handle\n");
+		return;
+	}
+	CreateInterfaceFn localizeCreate = (CreateInterfaceFn)(GetProcAddress(mod, "CreateInterface"));
+	if (!localizeCreate) {
+		Msg("Failed to get CreateInterface function\n");
+		return;
+	}
+	auto localize_vtable = localizeCreate("Localize_001", nullptr);
+	if (!localize_vtable) {
+		Msg("Failed to get Localize_001 interface\n");
+		return;
+	}
+	auto result = Call<const wchar_t*>((void*)localize_vtable, 10, str);
+	// script_client(printt(Localize("#EOG_XP_TOTAL")))
+	if (result == nullptr) {
+		strncpy(localized_str, "", size);
+		return;
+	}
+
+	auto ut8_str = utf8_encode(result);
+	//Msg("Original: %s Localize: %ls, UTF8: %s\n", str, result, ut8_str);
+	strncpy(localized_str, ut8_str.c_str(), size);
+	return;
+}
+
+
 
 // Function to initialize all SQVM functions
 bool GetSQVMFuncs() {
@@ -780,8 +811,8 @@ bool GetSQVMFuncs() {
 		SCRIPT_CONTEXT_UI,
 		"SendDiscordUI",
 		(SQFUNCTION)SendDiscordUI,
-		"", // String
-		1,      // Expects 2 parameters
+		".", // String
+		2,      // Expects 2 parameters
 		"void",    // Returns a string
 		"str",
 		"Send discord UI"
@@ -1483,6 +1514,8 @@ void script_ui_cmd(const CCommand& args)
 {
 	run_script(args, GetUIVMPtr);
 }
+
+
 
 //__int64 __fastcall sq_throwerrorhook(__int64 a1, const char* a2)
 //{
