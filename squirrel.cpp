@@ -437,14 +437,17 @@ int GetMods(HSQUIRRELVM v) {
 			auto addon_name = addoninfo->GetWString("addontitle");
 			auto version = addoninfo->GetWString("addonversion");
 			auto description = addoninfo->GetWString("addondescription");
+			auto localization = addoninfo->GetWString("addonlocalization");
 			char author_str[260];
 			char addon_name_str[260];
-			char description_str[260];
+			char description_str[1024];
 			char version_str[260];
+			char localization_str[260];
 			wcstombs(addon_name_str, addon_name, 260);
 			wcstombs(author_str, author, 260);
-			wcstombs(description_str, description, 260);
+			wcstombs(description_str, description, 1024);
 			wcstombs(version_str, version, 260);
+			wcstombs(localization_str, localization, 260);
 			sq_newtable(v);
 			sq_pushstring(v, "name", -1);
 			sq_pushstring(v, name, -1);
@@ -463,6 +466,9 @@ int GetMods(HSQUIRRELVM v) {
 			sq_newslot(v, -3, 0);
 			sq_pushstring(v, "image", -1);
 			sq_pushstring(v, image, strlen(image));
+			sq_newslot(v, -3, 0);
+			sq_pushstring(v, "localization", -1);
+			sq_pushstring(v, localization_str, strlen(localization_str));
 			sq_newslot(v, -3, 0);
 			sq_arrayappend(v, -2);
 			if (bIsVPK) {
@@ -623,6 +629,26 @@ size_t to_narrow(const wchar_t* src, char* dest, size_t dest_len) {
 
 }
 
+// Convert a wide Unicode string to an UTF8 string
+std::string utf8_encode(const std::wstring& wstr)
+{
+	if (wstr.empty()) return std::string();
+	int size_needed = WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), NULL, 0, NULL, NULL);
+	std::string strTo(size_needed, 0);
+	WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), &strTo[0], size_needed, NULL, NULL);
+	return strTo;
+}
+
+// Convert an UTF8 string to a wide Unicode String
+std::wstring utf8_decode(const std::string& str)
+{
+	if (str.empty()) return std::wstring();
+	int size_needed = MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), NULL, 0);
+	std::wstring wstrTo(size_needed, 0);
+	MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), &wstrTo[0], size_needed);
+	return wstrTo;
+}
+
 SQInteger Script_Localize(HSQUIRRELVM v) {
 	const char* str;
 	sq_getstring(v, -1, &str);
@@ -649,12 +675,12 @@ SQInteger Script_Localize(HSQUIRRELVM v) {
 		return 1;
 	}
 
-	char* char_result = new char[256];
-	wcstombs(char_result, result, 256);
+	auto ut8_str = utf8_encode(result);
+	//Msg("Original: %s Localize: %ls, UTF8: %s\n", str, result, ut8_str);
 
-	Msg("Original: %s Localize: %ls\n", str, result);
+	// Push the localized string onto the stack
+	sq_pushstring(v, ut8_str.c_str(), -1);
 
-	sq_pushstring(v, (const char*)char_result, -1);
 	return 1;
 
 }
