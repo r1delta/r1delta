@@ -58,6 +58,8 @@ int G_is_dedi;
 typedef const char* (__cdecl* wine_get_version_func)();
 CPUInformation* (__fastcall* GetCPUInformationOriginal)();
 
+#define TOTAL_CTHREADS 5
+
 const CPUInformation* GetCPUInformationDet()
 {
 	CPUInformation* result = GetCPUInformationOriginal();
@@ -74,7 +76,7 @@ const CPUInformation* GetCPUInformationDet()
 
 	// NOTE(mrsteyk): Some threads want logical core count, wanderer want's singleplayer
 	if (result->m_nLogicalProcessors >= 20) {
-		result->m_nLogicalProcessors = (19 - CThread::m_total_threads);
+		result->m_nLogicalProcessors = (19 - TOTAL_CTHREADS);
 	}
 
 	return result;
