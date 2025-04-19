@@ -2,9 +2,34 @@
 #include <thread>
 
 static bool is_discord_running = false;
+bool IsDiscordProcessRunning() {
+	DWORD process_id = 0;
+	HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+
+	if (snapshot != INVALID_HANDLE_VALUE) {
+		PROCESSENTRY32 pe32;
+		pe32.dwSize = sizeof(PROCESSENTRY32);
+
+		if (Process32First(snapshot, &pe32)) {
+			do {
+				std::string processNameLower = pe32.szExeFile;
+				std::transform(processNameLower.begin(), processNameLower.end(), processNameLower.begin(), ::tolower);
+				if (processNameLower == "discord.exe" || processNameLower == "discordcanary.exe" || processNameLower == "discordptb.exe") {
+					CloseHandle(snapshot);
+					return true;
+				}
+			} while (Process32Next(snapshot, &pe32));
+		}
+		CloseHandle(snapshot);
+	}
+	return false;
+}
 
 void DiscordThread() {
 	auto result = discord::Core::Create(DISCORD_APPLICATION_ID, DiscordCreateFlags_NoRequireDiscord, &core);
+	if (!IsDiscordProcessRunning()) {
+		Msg("Discord: Discord not running.\n");
+	}
 	if (result != discord::Result::Ok) {
 		Msg("Discord: Failed to create core:\n");
 		return;
@@ -93,7 +118,7 @@ SQInteger SendDiscordUI(HSQUIRRELVM v)
 SQInteger SendDiscordClient(HSQUIRRELVM v)
 {
 	if (!is_discord_running) {
-		Warning("SendDiscordClient: Discord is not running");
+		Warning("SendDiscordClient: Discord is not running\n");
 		return 1;
 	}
 
