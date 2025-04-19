@@ -75,7 +75,7 @@ const CPUInformation* GetCPUInformationDet()
 	//                 CRASH
 
 	// NOTE(mrsteyk): Some threads want logical core count, wanderer want's singleplayer
-	if (result->m_nLogicalProcessors >= 20) {
+	if (result->m_nLogicalProcessors >= 20 - TOTAL_CTHREADS) {
 		result->m_nLogicalProcessors = (19 - TOTAL_CTHREADS);
 	}
 
