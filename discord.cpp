@@ -14,11 +14,11 @@ bool IsDiscordProcessRunning() {
 		PROCESSENTRY32 pe32;
 		pe32.dwSize = sizeof(PROCESSENTRY32);
 
-		if (Process32First(snapshot, &pe32)) {
+		if (Process32FirstW(snapshot, &pe32)) {
 			do {
-				std::string processNameLower = pe32.szExeFile;
+				std::wstring processNameLower = pe32.szExeFile;
 				std::transform(processNameLower.begin(), processNameLower.end(), processNameLower.begin(), ::tolower);
-				if (processNameLower == "discord.exe" || processNameLower == "discordcanary.exe" || processNameLower == "discordptb.exe") {
+				if (processNameLower == L"discord.exe" || processNameLower == L"discordcanary.exe" || processNameLower == L"discordptb.exe") {
 					CloseHandle(snapshot);
 					return true;
 				}
