@@ -318,6 +318,18 @@ void LibraryLoadError(const char* libName, const char* location, DWORD errorCode
     FatalError(szBuf, "DLL Load Error");
 }
 
+int main()
+{
+	// This is a Windows application, so we should not use main() directly.
+    // Instead, we will use WinMain as the entry point.
+    auto console = GetCommandLineA();
+	if (console && strstr(console, "-console") == nullptr)
+	{
+        FreeConsole();
+	}
+	return WinMain(GetModuleHandle(NULL), NULL, GetCommandLineA(), SW_HIDE);
+}
+
 // --- WinMain Entry Point ---
 int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
