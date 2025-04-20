@@ -39,6 +39,8 @@ struct ServerInfo {
     std::string ip;
 	bool hasPassword;
 	std::string description;
+	std::string playlist;
+	std::string playlist_display_name;
     std::vector<PlayerInfo> players;
 };
 
@@ -50,6 +52,8 @@ struct HeartbeatInfo {
     int port;
 	bool hasPassword;
 	std::string description;
+    std::string playlist;
+	std::string playlist_display_name;
     std::vector<PlayerInfo> players;
 };
 
@@ -131,6 +135,8 @@ namespace MasterServerClient {
             j["has_password"] = false;
         }
 		j["description"] = heartbeat.description;
+		j["playlist"] = heartbeat.playlist;
+        j["playlist_display_name"] = heartbeat.playlist_display_name;
         j["players"] = json::array();
         for (auto& p : heartbeat.players) {
             json pj;
@@ -182,6 +188,8 @@ namespace MasterServerClient {
                 si.ip = sj["ip"];
 				si.hasPassword = sj["has_password"];
 				si.description = sj["description"];
+				si.playlist = sj["playlist"];
+				si.playlist_display_name = sj["playlist_display_name"];
 
                 for (auto& pj : sj["players"]) {
                     PlayerInfo pi;
@@ -260,6 +268,8 @@ SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
             if (!strcmp_static(key, "host_name")) heartbeat.hostName = s->_val;
             if (!strcmp_static(key, "map_name")) heartbeat.mapName = s->_val;
             if (!strcmp_static(key, "game_mode")) heartbeat.gameMode = s->_val;
+			if (!strcmp_static(key, "playlist")) heartbeat.playlist = s->_val;
+			if (!strcmp_static(key, "playlist_display_name")) heartbeat.playlist_display_name = s->_val;
             break;
         }
         case OT_INTEGER:
@@ -360,6 +370,8 @@ SQInteger PollServerList(HSQUIRRELVM v) {
         sq_pushstring(v, "ip", -1); sq_pushstring(v, s.ip.c_str(), -1); sq_newslot(v, -3, 0);
 		sq_pushstring(v, "has_password", -1); sq_pushinteger(0, v, s.hasPassword ? 1 : 0); sq_newslot(v, -3, 0);
 		sq_pushstring(v, "description", -1); sq_pushstring(v, s.description.c_str(), -1); sq_newslot(v, -3, 0);
+		sq_pushstring(v, "playlist", -1); sq_pushstring(v, s.playlist.c_str(), -1); sq_newslot(v, -3, 0);
+		sq_pushstring(v, "playlist_display_name", -1); sq_pushstring(v, s.playlist_display_name.c_str(), -1); sq_newslot(v, -3, 0);
         sq_pushstring(v, "players", -1);
         sq_newarray(v, 0);
         for (auto& p : s.players) {

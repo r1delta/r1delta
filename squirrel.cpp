@@ -797,6 +797,17 @@ bool GetSQVMFuncs() {
 	);
 
 	REGISTER_SCRIPT_FUNCTION(
+		 SCRIPT_CONTEXT_UI,
+		"Localize",
+		(SQFUNCTION)Script_Localize,
+		".s", // String
+		2,      // Expects 2 parameters
+		"void",    // Returns a string
+		"str",
+		"Set a persistent data value"
+	);
+
+	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_CLIENT,
 		"Localize",
 		(SQFUNCTION)Script_Localize,
