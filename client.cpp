@@ -361,6 +361,16 @@ char __fastcall MsgFunc__SayText(__int64 a1) {
     return oMsgFunc__SayText(a1);
 }
 
+// from bme
+typedef _QWORD* (__fastcall* sub_18017E140_type)(_QWORD*, __int64, char*);
+sub_18017E140_type sub_18017E140_org;
+_QWORD* __fastcall sub_18017E140(_QWORD* a1, __int64 a2, char* a3)
+{
+    auto ret = sub_18017E140_org(a1, a2, a3);
+    *(bool*)(a1[77] + 1011) = true; // enable Unicode input in CBaseHudChatEntry
+    return ret;
+}
+
 void InitClient()
 {
 	auto client = G_client;
@@ -384,6 +394,7 @@ void InitClient()
 	MH_CreateHook((LPVOID)(client + 0x3601C0), &CGameUI__UpdateProgressBar, reinterpret_cast<LPVOID*>(&oCGameUI__UpdateProgressBar));
 	MH_CreateHook((LPVOID)(client + 0x17D440), &CHudChat__FormatAndDisplayMessage_Hooked, reinterpret_cast<LPVOID*>(&oCHudChat__FormatAndDisplayMessage));
     MH_CreateHook((LPVOID)(client + 0x17DAA0), &MsgFunc__SayText, reinterpret_cast<LPVOID*>(&oMsgFunc__SayText));
+    MH_CreateHook((LPVOID)(client + 0x17E140), &sub_18017E140, reinterpret_cast<LPVOID*>(&sub_18017E140_org));
 
 	if (IsNoOrigin())
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("ws2_32.dll"), "getaddrinfo"), &hookedGetAddrInfo, reinterpret_cast<LPVOID*>(&originalGetAddrInfo));
