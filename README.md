@@ -14,7 +14,7 @@ If you're having issues please open an issue or join the [discord](https://disco
 For developers and contributors, keep reading below.
 
 ## Hosting a server
-Instructions on how to run the dedicated server on docker are [here](https://gist.github.com/quad-damage/3f4ad9c524b638510340cc31da86d3ff)
+Instructions on how to run the dedicated server on Docker are [here](https://gist.github.com/quad-damage/3f4ad9c524b638510340cc31da86d3ff)
 
 The master server will not list your server if it can't be connected to, so make sure to port-forward 27015 (and onwards if you're running multiple servers, 27016 etc)
 
