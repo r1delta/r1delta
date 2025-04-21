@@ -822,7 +822,7 @@ bool GetSQVMFuncs() {
 		SCRIPT_CONTEXT_UI,
 		"SendDiscordUI",
 		(SQFUNCTION)SendDiscordUI,
-		".t", // String
+		".", // String
 		2,      // Expects 2 parameters
 		"void",    // Returns a string
 		"str",
@@ -833,7 +833,7 @@ bool GetSQVMFuncs() {
 		SCRIPT_CONTEXT_CLIENT,
 		"SendDiscordClient",
 		(SQFUNCTION)SendDiscordClient,
-		".t", // String
+		".", // String
 		2,      // Expects 2 parameters
 		"void",    // Returns a string
 		"str",
