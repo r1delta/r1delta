@@ -192,35 +192,42 @@ void EnsureOriginStarted()
 
 void PrependPath()
 {
-	wchar_t* pPath;
-	size_t len;
-	errno_t err = _wdupenv_s(&pPath, &len, L"PATH");
-	if (!err)
-	{
-		// Modified to include r1delta path first, then the regular retail path
-		swprintf_s(buffer,
-			L"PATH=%s\\r1delta\\bin_delta\\;%s\\r1delta\\bin\\;%s\\bin\\x64_retail\\;.;%s",
-			exePath, exePath, exePath, pPath);
-
-		auto result = _wputenv(buffer);
-		if (result == -1)
-		{
-			MessageBoxW(
-				GetForegroundWindow(),
-				L"Warning: could not prepend the directories to app's PATH environment variable. Something may break because of that.",
-				L"R1Delta Launcher Warning",
-				0);
-		}
-		free(pPath);
-	}
-	else
-	{
-		MessageBoxW(
-			GetForegroundWindow(),
-			L"Warning: could not get current PATH environment variable in order to prepend the directories to it. Something may break because of that.",
-			L"R1Delta Launcher Warning",
-			0);
-	}
+    DWORD pathSize = 0;
+    DWORD result = GetEnvironmentVariableW(L"PATH", NULL, 0);
+    if (result == 0 && GetLastError() != ERROR_ENVVAR_NOT_FOUND)
+    {
+        MessageBoxW(
+            GetForegroundWindow(),
+            L"Warning: could not get current PATH environment variable. Something may break because of that.",
+            L"R1Delta Launcher Warning",
+            0);
+        return;
+    }
+    
+    std::wstring newPath = std::wstring(exePath) + L"\\r1delta\\bin_delta\\;" + 
+                           std::wstring(exePath) + L"\\r1delta\\bin\\;" + 
+                           std::wstring(exePath) + L"\\bin\\x64_retail\\;.";
+    
+    if (result > 0) {
+        std::wstring currentPath(result, L'\0');
+        GetEnvironmentVariableW(L"PATH", &currentPath[0], result);
+        
+        // Remove null terminator if present
+        if (!currentPath.empty() && currentPath.back() == L'\0') {
+            currentPath.pop_back();
+        }
+        
+        newPath += L";" + currentPath;
+    }
+    
+    if (!SetEnvironmentVariableW(L"PATH", newPath.c_str()))
+    {
+        MessageBoxW(
+            GetForegroundWindow(),
+            L"Warning: could not set PATH environment variable. Something may break because of that.",
+            L"R1Delta Launcher Warning",
+            0);
+    }
 }
 
 

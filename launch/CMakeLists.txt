@@ -29,5 +29,5 @@ if(MSVC)
         RUNTIME_OUTPUT_DIRECTORY_RELEASE "../"
     )
 else()
-    target_link_libraries(${PROJECT_NAME} imm32 shlwapi ucrtbase)
+    target_link_libraries(${PROJECT_NAME} imm32 shlwapi msvcrt)
 endif()
