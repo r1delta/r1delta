@@ -2810,10 +2810,6 @@ void S_Shutdown_Hook()
 		Deinit_MMNotificationClient();
 }
 
-//FuncStatic<void> Snd_Restart_DirectSound("engine.dll", 0x15AF0);
-//HookedFuncStatic<void> S_Init("engine.dll", 0xEA00);
-//HookedFuncStatic<void> S_Shutdown("engine.dll", 0x114B0);
-
 void Setup_MMNotificationClient()
 {
 	MH_CreateHook((LPVOID)(G_engine + 0xEA00), &S_Init_Hook, reinterpret_cast<LPVOID*>(&oS_Init));
@@ -2909,6 +2905,5 @@ void __stdcall LoaderNotificationCallback(
 		}
 	}
 
-	//CreateThread(nullptr, 0, (LPTHREAD_START_ROUTINE)DiscordThread, nullptr, 0, nullptr);
 }
 
