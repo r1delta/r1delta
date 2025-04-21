@@ -2378,6 +2378,12 @@ void InitializeRecentHostVars()
 		host_map->m_fnChangeCallbacks.AddToTail((FnChangeCallback_t)HostMapChangeCallback);
 		HostMapChangeCallback(nullptr, "", 0.0f);
 	}
+
+	auto m_sensitivity = OriginalCCVar_FindVar(cvarinterface, "m_sensitivity");
+	if (m_sensitivity) {
+		m_sensitivity->m_fMinVal = 0.01f;
+	}
+
 }
 
 static FORCEINLINE void
@@ -2492,6 +2498,7 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		RegisterConCommand("script_ui", script_ui_cmd, "Execute Squirrel code in UI context", FCVAR_NONE);
 		RegisterConCommand("noclip", noclip_cmd, "Toggles NOCLIP mode.", FCVAR_GAMEDLL | FCVAR_CHEAT);
 	}
+
 
 	//0x0000415198 on dedicated
 	// 0x0620818 on client
