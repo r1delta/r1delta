@@ -100,7 +100,7 @@
 #include "sv_filter.h"
 #include <discord-game-sdk/discord.h>  
 #include "thread.h"
-
+#include <Mmdeviceapi.h>
 
 // Define and initialize the static member for the ConVar
 ConVarR1* CBanSystem::m_pSvBanlistAutosave = nullptr;
@@ -2702,6 +2702,125 @@ void CServerInfoPanel__OnServerDataResponse_14730(__int64 a1, const char* a2, co
 	oCServerInfoPanel__OnServerDataResponse_14730(a1, a2, a3);
 
 }
+
+//
+
+
+class CDevicesManager;
+class MMNotificationClient : public IMMNotificationClient
+{
+public:
+	MMNotificationClient() {};
+	virtual ~MMNotificationClient() {};
+	ULONG STDMETHODCALLTYPE AddRef() { return 1; };
+	ULONG STDMETHODCALLTYPE Release() { return 1; };
+	HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, VOID** ppvInterface);
+	HRESULT STDMETHODCALLTYPE OnDefaultDeviceChanged(EDataFlow flow, ERole role, LPCWSTR pwstrDeviceId);
+	HRESULT STDMETHODCALLTYPE OnDeviceAdded(LPCWSTR pwstrDeviceId) { return S_OK; };
+	HRESULT STDMETHODCALLTYPE OnDeviceRemoved(LPCWSTR pwstrDeviceId) { return S_OK; };
+	HRESULT STDMETHODCALLTYPE OnDeviceStateChanged(LPCWSTR pwstrDeviceId, DWORD dwNewState) { return S_OK; };
+	HRESULT STDMETHODCALLTYPE OnPropertyValueChanged(LPCWSTR pwstrDeviceId, const PROPERTYKEY key) { return S_OK; };
+};
+
+
+HRESULT STDMETHODCALLTYPE MMNotificationClient::QueryInterface(REFIID riid, VOID** ppvInterface)
+{
+	if (IID_IUnknown == riid)
+	{
+		AddRef();
+		*ppvInterface = (IUnknown*)this;
+	}
+	else if (__uuidof(IMMNotificationClient) == riid)
+	{
+		AddRef();
+		*ppvInterface = (IMMNotificationClient*)this;
+	}
+	else
+	{
+		*ppvInterface = NULL;
+		return E_NOINTERFACE;
+	}
+	return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE MMNotificationClient::OnDefaultDeviceChanged(EDataFlow flow, ERole role, LPCWSTR pwstrDeviceId)
+{
+	
+	if (role == eMultimedia)
+	{
+		Msg("Default device changed to %ls\n", pwstrDeviceId);
+		int refresh_rate = *reinterpret_cast<int*>(G_engine + 0x7CAEA4);
+		if (G_client) {
+			Cbuf_AddText(0, "sound_reboot_xaudio",0);
+		}
+	}
+	return S_OK;
+}
+
+MMNotificationClient g_mmNotificationClient{};
+
+IMMDeviceEnumerator* g_mmDeviceEnumerator = nullptr;
+
+void Init_MMNotificationClient()
+{
+	HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), (void**)&g_mmDeviceEnumerator);
+	if (SUCCEEDED(hr))
+	{
+		g_mmDeviceEnumerator->RegisterEndpointNotificationCallback(&g_mmNotificationClient);
+	}
+}
+
+void Deinit_MMNotificationClient()
+{
+	if (g_mmDeviceEnumerator)
+	{
+		g_mmDeviceEnumerator->UnregisterEndpointNotificationCallback(&g_mmNotificationClient);
+		g_mmDeviceEnumerator->Release();
+		g_mmDeviceEnumerator = nullptr;
+	}
+}
+
+typedef void(__cdecl* Snd_Restart_DirectSound_t)();
+Snd_Restart_DirectSound_t Snd_Restart_DirectSound = nullptr;
+
+void ConCommand_sound_reboot_xaudio(const CCommand& args)
+{
+	Msg("Restarting XAudio...\n");
+	Snd_Restart_DirectSound();
+	Msg("Restarted XAudio...\n");
+}
+typedef void(__cdecl* S_Init_t)();
+typedef void(__cdecl* S_Shutdown_t)();
+S_Init_t oS_Init = nullptr;
+S_Shutdown_t oS_Shutdown = nullptr;
+
+void S_Init_Hook()
+{
+	oS_Init();
+	bool g_bNoSound = *reinterpret_cast<bool*>(G_engine + 0x20144E4);
+	if (!g_bNoSound)
+		Init_MMNotificationClient();
+}
+
+void S_Shutdown_Hook()
+{
+	oS_Shutdown();
+	bool g_bNoSound = *reinterpret_cast<bool*>(G_engine + 0x20144E4);
+	if (!g_bNoSound)
+		Deinit_MMNotificationClient();
+}
+
+//FuncStatic<void> Snd_Restart_DirectSound("engine.dll", 0x15AF0);
+//HookedFuncStatic<void> S_Init("engine.dll", 0xEA00);
+//HookedFuncStatic<void> S_Shutdown("engine.dll", 0x114B0);
+
+void Setup_MMNotificationClient()
+{
+	MH_CreateHook((LPVOID)(G_engine + 0xEA00), &S_Init_Hook, reinterpret_cast<LPVOID*>(&oS_Init));
+	MH_CreateHook((LPVOID)(G_engine + 0x114B0), &S_Shutdown_Hook, reinterpret_cast<LPVOID*>(&oS_Shutdown));
+	Snd_Restart_DirectSound = reinterpret_cast<Snd_Restart_DirectSound_t>(G_engine + 0x15AF0);
+}
+
 static bool should_init_security_fixes = false;
 void __stdcall LoaderNotificationCallback(
 	unsigned long notification_reason,
@@ -2780,6 +2899,7 @@ void __stdcall LoaderNotificationCallback(
 			G_client = (uintptr_t)notification_data->Loaded.DllBase;
 			InitClient();
 			SetupHudWarpHooks();
+			Setup_MMNotificationClient();
 			CThread(DiscordThread).detach();
 		}
 		if (is_server) do_server(notification_data);
