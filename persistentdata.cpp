@@ -1126,7 +1126,7 @@ SQInteger Script_ServerSetPersistentUserDataKVString(HSQUIRRELVM v) {
 
 	if (!(!GetClientConVarsKV(index) || index == 18)) {
 		//return sq_throwerror(v, "Client has NULL m_ConVars.");
-		CVEngineServer_ClientCommand(0, edict, PERSIST_COMMAND" \"%s\" \"%s\" nosend", hashedKey, pValue);
+		CVEngineServer_ClientCommand(0, edict, PERSIST_COMMAND" \"%s\" \"%s\"", hashedKey, pValue);
 		GetClientConVarsKV(index)->SetString(modifiedKey, pValue);
 		//Msg("Server setting persistent value: key=%s, value=%s, hashed=%s\n",
 		//	pKey, pValue, "true");
@@ -1336,6 +1336,8 @@ void setinfopersist_cmd(const CCommand& args) {
 }
 
 char ExecuteConfigFile(int configType) {
+	if (OriginalCCVar_FindVar && OriginalCCVar_FindVar(cvarinterface, "cl_fovScale"))
+		OriginalCCVar_FindVar(cvarinterface, "cl_fovScale")->m_fMaxVal = 1.7f;
 	constexpr size_t MAX_PATH_LENGTH = 1024;
 	constexpr size_t MAX_BUFFER_SIZE = 1024 * 1024; // 1 MB
 

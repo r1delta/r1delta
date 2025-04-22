@@ -1,4 +1,4 @@
-#include <windows.h>
+﻿#include <windows.h>
 #include "core.h"
 #include "client.h"
 #include "persistentdata.h"
@@ -370,7 +370,52 @@ _QWORD* __fastcall sub_18017E140(_QWORD* a1, __int64 a2, char* a3)
     *(bool*)(a1[77] + 1011) = true; // enable Unicode input in CBaseHudChatEntry
     return ret;
 }
+float GetZoomFrac() {
+    // remember the last non‑zero zoom fraction
+    static float lastNonZero = 1.0f;
 
+    float rawZoom = 1.0f;
+    // your existing zoom check
+    if (reinterpret_cast<bool(*)()>(G_client + 0x2C23C0)() &&
+        reinterpret_cast<__int64(*)()>(G_client + 0x2C2360)())
+    {
+        rawZoom = 1.0f
+            - reinterpret_cast<float(*)(__int64)>(G_client + 0x35CF0)(
+                reinterpret_cast<__int64(*)(int)>(G_client + 0x7B120)(0)
+                );
+    }
+
+    // if it’s non‑zero, update lastNonZero; otherwise keep the old one
+    if (rawZoom > 0.0f) {
+        lastNonZero = rawZoom;
+        return rawZoom;
+    }
+    else {
+        // clamp to previous
+        return lastNonZero;
+    }
+}
+
+void (*oWeaponSprayFunction1)(__int64 a1, __int64 a2, float a3, __int64 a4, _DWORD* a5, char a6, float a7, char a8);
+void WeaponSprayFunction1(__int64 a1, __int64 a2, float a3, __int64 a4, _DWORD* a5, char a6, float a7, char a8) {
+    oWeaponSprayFunction1(a1, a2, a3, a4, a5, a6, a7, a8);
+    // 2) grab zoom scale
+    float zoom = GetZoomFrac();
+    // 3) scale the three final sway components
+    //    [pitch] = float at addr (a1 + 12)
+    //    [yaw]   = float at addr (a1 + 16)
+    //    [roll]  = float at addr (a1 + 20)
+    *(float*)(a1 + 12) *= zoom;
+    *(float*)(a1 + 16) *= zoom;
+    *(float*)(a1 + 20) *= zoom;
+
+}
+/*void (*oWeaponSprayFunction2)(float* a1, __int64 a2, __int64 a3, _DWORD* a4, __int64 a5);
+void WeaponSprayFunction2(float* a1, __int64 a2, __int64 a3, _DWORD* a4, __int64 a5) {
+    if (GetZoomed())
+        return;
+    return oWeaponSprayFunction2(a1, a2, a3, a4, a5);
+}*/
 void InitClient()
 {
 	auto client = G_client;
@@ -395,6 +440,10 @@ void InitClient()
 	MH_CreateHook((LPVOID)(client + 0x17D440), &CHudChat__FormatAndDisplayMessage_Hooked, reinterpret_cast<LPVOID*>(&oCHudChat__FormatAndDisplayMessage));
     MH_CreateHook((LPVOID)(client + 0x17DAA0), &MsgFunc__SayText, reinterpret_cast<LPVOID*>(&oMsgFunc__SayText));
     MH_CreateHook((LPVOID)(client + 0x17E140), &sub_18017E140, reinterpret_cast<LPVOID*>(&sub_18017E140_org));
+
+    MH_CreateHook((LPVOID)(client + 0x47F1E0), &WeaponSprayFunction1, reinterpret_cast<LPVOID*>(&oWeaponSprayFunction1));
+    //MH_CreateHook((LPVOID)(client + 0x47FED0), &WeaponSprayFunction2, reinterpret_cast<LPVOID*>(&oWeaponSprayFunction2));
+
 
 	if (IsNoOrigin())
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("ws2_32.dll"), "getaddrinfo"), &hookedGetAddrInfo, reinterpret_cast<LPVOID*>(&originalGetAddrInfo));
