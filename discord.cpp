@@ -126,7 +126,7 @@ SQInteger SendDiscordClient(HSQUIRRELVM v)
 		return 1;
 	}
 
-	Msg("Discord: SendDiscordClient\n");
+	//Msg("Discord: SendDiscordClient\n");
 	SQObject obj;
 	SQInteger top = sq_gettop(nullptr, v);
 	if (top < 2) {
@@ -190,7 +190,7 @@ SQInteger SendDiscordClient(HSQUIRRELVM v)
 	activity.GetParty().GetSize().SetCurrentSize(presence.playerCount);
 	activity.GetParty().GetSize().SetMaxSize(presence.maxPlayers);
 	
-	Msg("Playlist: %s\n", presence.playlist.c_str());
+	//Msg("Playlist: %s\n", presence.playlist.c_str());
 
 	//activity.SetSupportedPlatforms(static_cast<uint32_t>(discord::ActivitySupportedPlatformFlags::Desktop));
 
@@ -202,9 +202,9 @@ SQInteger SendDiscordClient(HSQUIRRELVM v)
 		if (result != discord::Result::Ok) {
 			Msg("Discord: Failed to update activity: %d\n", result);
 		}
-		else {
-			Msg("Discord: Activity updated successfully\n");
-		}
+		//else {
+		//	Msg("Discord: Activity updated successfully\n");
+		//}
 		});
 
 	return 1;
