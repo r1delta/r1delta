@@ -291,6 +291,9 @@
     <ClInclude Include="discord.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="r1d_version.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">

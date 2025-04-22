@@ -102,6 +102,8 @@
 #include "thread.h"
 #include <Mmdeviceapi.h>
 
+#include "r1d_version.h"
+
 // Define and initialize the static member for the ConVar
 ConVarR1* CBanSystem::m_pSvBanlistAutosave = nullptr;
 
@@ -2386,6 +2388,33 @@ void InitializeRecentHostVars()
 
 }
 
+typedef char* (*GetVersionString_t)();
+GetVersionString_t oGetVersionString = nullptr;
+
+char* GetVersionString() {
+	// Call the original function
+	char* versionString = oGetVersionString();
+	// Append the custom version string
+	const char* r1d = "R1Delta ";
+	const char* customVersion = R1D_VERSION;
+	size_t newLength = strlen(versionString) + strlen(customVersion) + strlen(r1d) + 5; // +3 for "+(" and ")"
+	char* newVersionString = (char*)malloc(newLength + 1);
+	if (newVersionString) {
+		strcpy(newVersionString, versionString);
+		strcat(newVersionString, " + ");
+		strcat(newVersionString, r1d);
+		strcat(newVersionString, "(");
+		strcat(newVersionString, customVersion);
+		strcat(newVersionString, ")");
+	}
+	return newVersionString;
+}
+
+void InitVersionHook() {
+	MH_CreateHook((LPVOID)(G_client + 0x2DBE20), &GetVersionString, (LPVOID*)&oGetVersionString);
+	MH_EnableHook(MH_ALL_HOOKS);
+}
+
 static FORCEINLINE void
 do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 {
@@ -2896,6 +2925,7 @@ void __stdcall LoaderNotificationCallback(
 			InitClient();
 			SetupHudWarpHooks();
 			Setup_MMNotificationClient();
+			InitVersionHook();
 			CThread(DiscordThread).detach();
 		}
 		if (is_server) do_server(notification_data);

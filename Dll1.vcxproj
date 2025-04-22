@@ -227,6 +227,7 @@
     <ClInclude Include="physics.h" />
     <ClInclude Include="platform.h" />
     <ClInclude Include="predictionerror.h" />
+    <ClInclude Include="r1d_version.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="security_fixes.hh" />
     <ClInclude Include="sendmoveclampfix.h" />
