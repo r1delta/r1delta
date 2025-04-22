@@ -718,17 +718,7 @@ void localilze_string(const char* str, char* localized_str, int size)
 }
 
 int GetR1DVersion(HSQUIRRELVM v) {
-	// Append the custom version string
-	const char* r1d = "R1Delta ";
-	const char* customVersion = R1D_VERSION;
-	size_t newLength = strlen(customVersion) + strlen(r1d) + 5; // +3 for "+(" and ")"
-	char* newVersionString = (char*)malloc(newLength + 1);
-	if (newVersionString) {
-		strcat(newVersionString, r1d);
-		strcat(newVersionString, "(");
-		strcat(newVersionString, customVersion);
-		strcat(newVersionString, ")");
-	}
+	const char* newVersionString = "R1Delta " R1D_VERSION;
 	sq_pushstring(v, newVersionString, -1);
 	return 1;
 }
