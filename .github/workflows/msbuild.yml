@@ -52,6 +52,21 @@ jobs:
           }
         shell: pwsh
 
+      - name: Inject Git tag into r1d_version.h
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $tag     = '${{ github.ref_name }}'
+          $hdrPath = "${{ github.workspace }}/r1d_version.h"
+
+          Write-Host "Updating R1D_VERSION to $tag in $hdrPath"
+          (Get-Content $hdrPath) |
+            ForEach-Object {
+              $_ -replace '#define\s+R1D_VERSION\s+".*"',
+                          "#define R1D_VERSION `"$tag`""
+            } |
+            Set-Content $hdrPath
+
       # --- VCPKG Cache & Restore ---
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@v7
