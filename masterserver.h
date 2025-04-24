@@ -9,3 +9,8 @@ void Hk_CHostState__State_GameShutdown(void* thisptr);
 SQInteger DispatchServerListReq(HSQUIRRELVM v);
 SQInteger PollServerList(HSQUIRRELVM v);
 SQInteger GetServerHeartbeat(HSQUIRRELVM v);
+
+namespace MasterServerClient {
+    void StartHeartbeatThread();
+    void StopHeartbeatThread();
+}

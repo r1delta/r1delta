@@ -10,6 +10,7 @@
 #include <atomic>
 #include <chrono>
 #include <thread>
+#include <ctime>
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 #include "load.h"
@@ -85,7 +86,11 @@ void InitMasterServerCVars() {
 namespace MasterServerClient {
     static std::vector<ServerInfo> serverList;
     static std::mutex httpMutex;
+    static std::mutex heartbeatMutex;
     static std::unique_ptr<httplib::Client> httpClient;
+    static HeartbeatInfo lastHeartbeat;
+    static std::atomic<bool> heartbeatThreadRunning{false};
+    static std::atomic<std::chrono::system_clock::time_point> lastHeartbeatTime{std::chrono::system_clock::now()};
 
     // --------------------------------
     // Internal: Ensures httpClient is valid
@@ -101,9 +106,52 @@ namespace MasterServerClient {
     }
 
     // --------------------------------
+    // Heartbeat Thread
+    // --------------------------------
+    void StartHeartbeatThread() {
+        if (heartbeatThreadRunning.load(std::memory_order_acquire)) {
+            return; // Thread is already running
+        }
+
+        heartbeatThreadRunning.store(true, std::memory_order_release);
+        
+        // Start with a random delay (1-3 seconds) to avoid flooding the master server
+        std::this_thread::sleep_for(std::chrono::seconds(1 + (std::rand() % 3)));
+        
+        CThread([]{
+            while (heartbeatThreadRunning.load(std::memory_order_acquire)) {
+                HeartbeatInfo currentHeartbeat;
+                bool isHibernating = false;
+                
+                {
+                    std::lock_guard<std::mutex> lock(heartbeatMutex);
+                    currentHeartbeat = lastHeartbeat;
+                    
+                    // Check if server is hibernating (no heartbeat for 60 seconds)
+                    auto now = std::chrono::system_clock::now();
+                    auto lastTime = lastHeartbeatTime.load(std::memory_order_acquire);
+                    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - lastTime).count();
+                    
+                    if (elapsed > 60) {
+                        isHibernating = true;
+                        // Clear player list during hibernation
+                        currentHeartbeat.players.clear();
+                    }
+                }
+                
+                // Send the heartbeat
+                SendServerHeartbeat(currentHeartbeat, isHibernating);
+                
+                // Wait 5-7 seconds before next heartbeat
+                std::this_thread::sleep_for(std::chrono::seconds(5 + (std::rand() % 3)));
+            }
+        }).detach();
+    }
+
+    // --------------------------------
     // Heartbeat
     // --------------------------------
-    bool SendServerHeartbeat(const HeartbeatInfo& heartbeat) {
+    bool SendServerHeartbeat(const HeartbeatInfo& heartbeat, bool isHibernating = false) {
         InitMasterServerCVars();
         if (!delta_ms_url || !delta_ms_url->m_Value.m_pszString[0]) {
             Warning("MasterServerClient: delta_ms_url not set\n");
@@ -138,13 +186,15 @@ namespace MasterServerClient {
 		j["playlist"] = heartbeat.playlist;
         j["playlist_display_name"] = heartbeat.playlist_display_name;
         j["players"] = json::array();
-        for (auto& p : heartbeat.players) {
-            json pj;
-            pj["name"] = p.name;
-            pj["gen"] = p.gen;
-            pj["lvl"] = p.lvl;
-            pj["team"] = p.team;
-            j["players"].push_back(pj);
+        if (!isHibernating) {
+            for (auto& p : heartbeat.players) {
+                json pj;
+                pj["name"] = p.name;
+                pj["gen"] = p.gen;
+                pj["lvl"] = p.lvl;
+                pj["team"] = p.team;
+                j["players"].push_back(pj);
+            }
         }
 
         auto res = httpClient->Post("/heartbeat", j.dump(), "application/json");
@@ -209,9 +259,17 @@ namespace MasterServerClient {
     }
 
     // --------------------------------
+    // Stop Heartbeat Thread
+    // --------------------------------
+    void StopHeartbeatThread() {
+        heartbeatThreadRunning.store(false, std::memory_order_release);
+    }
+
+    // --------------------------------
     // On Shutdown
     // --------------------------------
     void OnServerShutdown(int port) {
+        StopHeartbeatThread();
         InitMasterServerCVars();
         if (!delta_ms_url) return;
 
@@ -309,27 +367,17 @@ SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
 
     heartbeat.players = players;
 
-    static std::atomic<bool> portForwardWarningShown = false;
+    // Update the last heartbeat time and data
+    {
+        std::lock_guard<std::mutex> lock(MasterServerClient::heartbeatMutex);
+        MasterServerClient::lastHeartbeat = heartbeat;
+        MasterServerClient::lastHeartbeatTime.store(std::chrono::system_clock::now(), std::memory_order_release);
+    }
 
-    CThread([heartbeat]() {
-        if (!MasterServerClient::SendServerHeartbeat(heartbeat)) {
-            if (!portForwardWarningShown.load()) {
-                portForwardWarningShown.store(true, std::memory_order_relaxed);
-                if (!IsDedicatedServer()) {
-                    int val = hostport ? hostport->m_Value.m_nValue : 27015;
-                    char cmd[64];
-                    snprintf(cmd, sizeof(cmd), "script_ui ShowPortForwardWarning(%d)\n", val);
-                    Cbuf_AddText(0, cmd, 0);
-                }
-                else {
-                    Warning("GetServerHeartbeat: Heartbeat send failed.\n");
-                }
-            }
-        }
-        else {
-            portForwardWarningShown.store(false, std::memory_order_relaxed);
-        }
-    }).detach();
+    // Ensure the heartbeat thread is running
+    if (!MasterServerClient::heartbeatThreadRunning.load(std::memory_order_acquire)) {
+        MasterServerClient::StartHeartbeatThread();
+    }
     return 1;
 }
 
@@ -404,3 +452,10 @@ void Hk_CHostState__State_GameShutdown(void* thisptr) {
     }
     oGameShutDown(thisptr);
 }
+
+// Initialize random seed for heartbeat timing
+struct RandomInitializer {
+    RandomInitializer() {
+        std::srand(static_cast<unsigned int>(std::time(nullptr)));
+    }
+} g_randomInitializer;
