@@ -178,7 +178,8 @@ namespace MasterServerClient {
 
         try {
             auto j = json::parse(res->body);
-            for (auto& sj : j) {
+            auto servers = j["servers"];
+            for (auto& sj : servers) {
                 ServerInfo si;
                 si.hostName = sj["host_name"];
                 si.mapName = sj["map_name"];
