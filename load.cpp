@@ -899,6 +899,9 @@ __int64 __fastcall CPortal_Player__ChangeTeam(__int64 thisptr, unsigned int inde
 		index = botTeamIndex;
 	return oCPortal_Player__ChangeTeam(thisptr, index);
 }
+
+static int g_botCounter = 1; // Counter for sequential bot names
+
 void AddBotDummyConCommand(const CCommand& args)
 {
 	// Expected usage: bot_dummy -team <team index>
@@ -934,8 +937,9 @@ void AddBotDummyConCommand(const CCommand& args)
 
 	botTeamIndex = teamIndex;
 
-	// Use a default bot name for dummy bots
-	const char* dummyBotName = "DummyBot";
+	// Generate sequential bot name
+	char botName[16]; // Buffer for "BotXX" + null terminator
+	snprintf(botName, sizeof(botName), "Bot%02d", g_botCounter);
 
 	HMODULE serverModule = GetModuleHandleA("server.dll");
 	if (!serverModule)
@@ -961,13 +965,18 @@ void AddBotDummyConCommand(const CCommand& args)
 	}
 
 	isCreatingBot = true;
-	__int64 pBot = pBotManager->CreateBot(dummyBotName);
+	__int64 pBot = pBotManager->CreateBot(botName);
 	isCreatingBot = false;
 
 	if (!pBot)
 	{
-		Warning("Failed to create dummy bot with name: %s\n", dummyBotName);
+		Warning("Failed to create dummy bot with name: %s\n", botName);
 		return;
+	}
+	else
+	{
+		// Increment counter only if bot creation was successful
+		g_botCounter++;
 	}
 
 	typedef void (*ClientFullyConnectedFn)(__int64 thisptr, __int64 entity);
@@ -976,7 +985,7 @@ void AddBotDummyConCommand(const CCommand& args)
 
 	CServerGameClients_ClientFullyConnected(0, pBot);
 
-	Msg("Dummy bot '%s' has been successfully created and assigned to team %d.\n", dummyBotName, teamIndex);
+	Msg("Dummy bot '%s' has been successfully created and assigned to team %d.\n", botName, teamIndex);
 }
 
 //0x4E2F30
