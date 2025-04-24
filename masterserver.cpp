@@ -106,6 +106,66 @@ namespace MasterServerClient {
     }
 
     // --------------------------------
+    // Heartbeat
+    // --------------------------------
+    bool SendServerHeartbeat(const HeartbeatInfo& heartbeat, bool isHibernating = false) {
+        InitMasterServerCVars();
+        if (!delta_ms_url || !delta_ms_url->m_Value.m_pszString[0]) {
+            Warning("MasterServerClient: delta_ms_url not set\n");
+            return false;
+        }
+        if (hide_server->m_Value.m_nValue == 1) {
+            static bool hasWarned = false;
+            if (!hasWarned) {
+                hasWarned = true;
+                Warning("hide_server is 1, ignoring master server heartbeat requests\n");
+            }
+            return true;
+        }
+
+        std::lock_guard<std::mutex> lock(httpMutex);
+        EnsureHttpClient(delta_ms_url->m_Value.m_pszString);
+
+        json j;
+        j["host_name"] = heartbeat.hostName;
+        j["map_name"] = heartbeat.mapName;
+        j["game_mode"] = heartbeat.gameMode;
+        j["max_players"] = heartbeat.maxPlayers;
+        j["port"] = heartbeat.port;
+        auto password_var = CCVar_FindVar(cvarinterface, "sv_password");
+        if (password_var && password_var->m_Value.m_pszString[0]) {
+            j["has_password"] = true;
+        }
+        else {
+            j["has_password"] = false;
+        }
+        j["description"] = heartbeat.description;
+        j["playlist"] = heartbeat.playlist;
+        j["playlist_display_name"] = heartbeat.playlist_display_name;
+        j["players"] = json::array();
+        if (!isHibernating) {
+            for (auto& p : heartbeat.players) {
+                json pj;
+                pj["name"] = p.name;
+                pj["gen"] = p.gen;
+                pj["lvl"] = p.lvl;
+                pj["team"] = p.team;
+                j["players"].push_back(pj);
+            }
+        }
+
+        auto res = httpClient->Post("/heartbeat", j.dump(), "application/json");
+        if (!res || (res->status != 200 && res->status != 429)) {
+
+            Warning("MasterServerClient: Heartbeat failed - %s\n",
+                res ? res->body.c_str() : "Connection failed");
+            return false;
+        }
+
+        return true;
+    }
+
+    // --------------------------------
     // Heartbeat Thread
     // --------------------------------
     void StartHeartbeatThread() {
@@ -146,66 +206,6 @@ namespace MasterServerClient {
                 std::this_thread::sleep_for(std::chrono::seconds(5 + (std::rand() % 3)));
             }
         }).detach();
-    }
-
-    // --------------------------------
-    // Heartbeat
-    // --------------------------------
-    bool SendServerHeartbeat(const HeartbeatInfo& heartbeat, bool isHibernating = false) {
-        InitMasterServerCVars();
-        if (!delta_ms_url || !delta_ms_url->m_Value.m_pszString[0]) {
-            Warning("MasterServerClient: delta_ms_url not set\n");
-            return false;
-        }
-        if (hide_server->m_Value.m_nValue == 1) {
-            static bool hasWarned = false;
-            if (!hasWarned) {
-                hasWarned = true;
-                Warning("hide_server is 1, ignoring master server heartbeat requests\n");
-            }
-            return true;
-        }
-
-        std::lock_guard<std::mutex> lock(httpMutex);
-        EnsureHttpClient(delta_ms_url->m_Value.m_pszString);
-
-        json j;
-        j["host_name"] = heartbeat.hostName;
-        j["map_name"] = heartbeat.mapName;
-        j["game_mode"] = heartbeat.gameMode;
-        j["max_players"] = heartbeat.maxPlayers;
-        j["port"] = heartbeat.port;
-		auto password_var = CCVar_FindVar(cvarinterface, "sv_password");
-		if (password_var && password_var->m_Value.m_pszString[0]) {
-			j["has_password"] = true;
-		}
-        else {
-            j["has_password"] = false;
-        }
-		j["description"] = heartbeat.description;
-		j["playlist"] = heartbeat.playlist;
-        j["playlist_display_name"] = heartbeat.playlist_display_name;
-        j["players"] = json::array();
-        if (!isHibernating) {
-            for (auto& p : heartbeat.players) {
-                json pj;
-                pj["name"] = p.name;
-                pj["gen"] = p.gen;
-                pj["lvl"] = p.lvl;
-                pj["team"] = p.team;
-                j["players"].push_back(pj);
-            }
-        }
-
-        auto res = httpClient->Post("/heartbeat", j.dump(), "application/json");
-        if (!res || (res->status != 200 && res->status != 429)) {
-
-            Warning("MasterServerClient: Heartbeat failed - %s\n",
-                res ? res->body.c_str() : "Connection failed");
-            return false;
-        }
-
-        return true;
     }
 
     // --------------------------------
