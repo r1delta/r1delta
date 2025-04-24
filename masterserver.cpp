@@ -11,6 +11,7 @@
 #include <chrono>
 #include <thread>
 #include <ctime>
+#include <random>
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 #include "load.h"
@@ -85,6 +86,7 @@ void InitMasterServerCVars() {
 
 namespace MasterServerClient {
     static std::vector<ServerInfo> serverList;
+    static std::mutex serverListMutex;
     static std::mutex httpMutex;
     static std::mutex heartbeatMutex;
     static std::unique_ptr<httplib::Client> httpClient;
@@ -176,7 +178,10 @@ namespace MasterServerClient {
         heartbeatThreadRunning.store(true, std::memory_order_release);
         
         // Start with a random delay (1-3 seconds) to avoid flooding the master server
-        std::this_thread::sleep_for(std::chrono::seconds(1 + (std::rand() % 3)));
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution<> delayDist(1, 3);
+        std::this_thread::sleep_for(std::chrono::seconds(delayDist(gen)));
         
         CThread([]{
             while (heartbeatThreadRunning.load(std::memory_order_acquire)) {
@@ -203,7 +208,10 @@ namespace MasterServerClient {
                 SendServerHeartbeat(currentHeartbeat, isHibernating);
                 
                 // Wait 5-7 seconds before next heartbeat
-                std::this_thread::sleep_for(std::chrono::seconds(5 + (std::rand() % 3)));
+                std::random_device rd;
+                std::mt19937 gen(rd());
+                std::uniform_int_distribution<> waitDist(5, 7);
+                std::this_thread::sleep_for(std::chrono::seconds(waitDist(gen)));
             }
         }).detach();
     }
@@ -224,6 +232,8 @@ namespace MasterServerClient {
 
         try {
             auto j = json::parse(res->body);
+            std::vector<ServerInfo> newServerList;
+            
             for (auto& sj : j) {
                 ServerInfo si;
                 si.hostName = sj["host_name"];
@@ -245,7 +255,13 @@ namespace MasterServerClient {
                     pi.team = pj["team"];
                     si.players.push_back(pi);
                 }
-                serverList.push_back(si);
+                newServerList.push_back(si);
+            }
+            
+            // Update the server list with mutex protection
+            {
+                std::lock_guard<std::mutex> lock(serverListMutex);
+                serverList = std::move(newServerList);
             }
         }
         catch (...) {
@@ -374,7 +390,10 @@ SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
 }
 
 SQInteger DispatchServerListReq(HSQUIRRELVM v) {
-    MasterServerClient::serverList.clear();
+    {
+        std::lock_guard<std::mutex> lock(MasterServerClient::serverListMutex);
+        MasterServerClient::serverList.clear();
+    }
 
     CThread([]() {
         MasterServerClient::GetServerList();
@@ -387,7 +406,14 @@ SQInteger DispatchServerListReq(HSQUIRRELVM v) {
 SQInteger PollServerList(HSQUIRRELVM v) {
     sq_newarray(v, 0);
 
-    if (MasterServerClient::serverList.empty()) {
+    // Make a copy of the server list with mutex protection
+    std::vector<ServerInfo> serverListCopy;
+    {
+        std::lock_guard<std::mutex> lock(MasterServerClient::serverListMutex);
+        serverListCopy = MasterServerClient::serverList;
+    }
+
+    if (serverListCopy.empty()) {
         //sq_newtable(v);
         //sq_pushstring(v, "host_name", -1); sq_pushstring(v, "No servers found.", -1); sq_newslot(v, -3, 0);
         //sq_pushstring(v, "map_name", -1); sq_pushstring(v, "mp_lobby", -1); sq_newslot(v, -3, 0);
@@ -400,7 +426,7 @@ SQInteger PollServerList(HSQUIRRELVM v) {
         return 1;
     }
     
-    for (auto& s : MasterServerClient::serverList) {
+    for (auto& s : serverListCopy) {
         sq_newtable(v);
         sq_pushstring(v, "host_name", -1); sq_pushstring(v, s.hostName.c_str(), -1); sq_newslot(v, -3, 0);
         sq_pushstring(v, "map_name", -1); sq_pushstring(v, s.mapName.c_str(), -1); sq_newslot(v, -3, 0);
@@ -445,9 +471,4 @@ void Hk_CHostState__State_GameShutdown(void* thisptr) {
     oGameShutDown(thisptr);
 }
 
-// Initialize random seed for heartbeat timing
-struct RandomInitializer {
-    RandomInitializer() {
-        std::srand(static_cast<unsigned int>(std::time(nullptr)));
-    }
-} g_randomInitializer;
+// No need for a random initializer with <random>
