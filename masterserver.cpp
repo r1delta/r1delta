@@ -224,7 +224,7 @@ namespace MasterServerClient {
 
         if (!delta_ms_url) 
             return;
-
+        EnsureHttpClient(delta_ms_url->m_Value.m_pszString);
         auto res = httpClient->Get("/servers");
 
         if (!res || res->status != 200)
@@ -284,7 +284,7 @@ namespace MasterServerClient {
         StopHeartbeatThread();
         InitMasterServerCVars();
         if (!delta_ms_url) return;
-
+        EnsureHttpClient(delta_ms_url->m_Value.m_pszString);
         std::string path = "/heartbeat/" + std::to_string(port);
         auto res = httpClient->Delete(path.c_str());
         if (!res || res->status != 200)
