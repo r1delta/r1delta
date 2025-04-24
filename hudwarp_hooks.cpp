@@ -263,12 +263,21 @@ void SetupHudWarpHooks() {
 	MH_CreateHook((void*)(clientBaseAddress + 0x2AE630), &RenderHud_Hook, reinterpret_cast<LPVOID*>(&RenderHud));
 	MH_EnableHook(MH_ALL_HOOKS);
 }
-
+char (*osub_180001CC0)();
+char sub_180001CC0() {
+	auto ret = osub_180001CC0();
+	uintptr_t m = (uintptr_t)(GetModuleHandleA("materialsystem_dx11.dll"));
+	int* ptr = (int*)(m + 0x293218);
+	if (*ptr == 0)
+		*ptr = 1;
+	return ret;
+}
 void SetupHudWarpMatSystemHooks() {
 	DWORD64 materialSystemBase = (DWORD64)GetModuleHandle(L"materialsystem_dx11.dll");
 	DWORD64 sub_63D0_addr = materialSystemBase + 0x63D0;
 	MH_CreateHook((void*)sub_63D0_addr, &sub_63D0, reinterpret_cast<LPVOID*>(&sub_63D0_org));
 	MH_CreateHook((void*)(materialSystemBase + 0x5ADC0), &sub_5ADC0_Hook, reinterpret_cast<LPVOID*>(&sub_5ADC0));
+	MH_CreateHook((void*)(materialSystemBase + 0x1CC0), &sub_180001CC0, reinterpret_cast<LPVOID*>(&osub_180001CC0));
 	SetPixMarker = (SetPixMarker_type)(materialSystemBase + 0x5D7E0);
 }
 
