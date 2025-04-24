@@ -217,11 +217,7 @@ namespace MasterServerClient {
         if (!delta_ms_url) 
             return;
 
-        httplib::Client cli(delta_ms_url->m_Value.m_pszString);
-        cli.set_connection_timeout(2);
-        cli.set_address_family(AF_INET);
-
-        auto res = cli.Get("/servers");
+        auto res = httpClient->Get("/servers");
 
         if (!res || res->status != 200)
             return;
@@ -273,12 +269,8 @@ namespace MasterServerClient {
         InitMasterServerCVars();
         if (!delta_ms_url) return;
 
-        httplib::Client cli(delta_ms_url->m_Value.m_pszString);
-        cli.set_connection_timeout(2);
-        cli.set_address_family(AF_INET);
-
         std::string path = "/heartbeat/" + std::to_string(port);
-        auto res = cli.Delete(path.c_str());
+        auto res = httpClient->Delete(path.c_str());
         if (!res || res->status != 200)
             Warning("MasterServerClient: Shutdown notification failed\n");
     }
