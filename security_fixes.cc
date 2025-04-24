@@ -28,6 +28,9 @@ void(__fastcall* oCNetChan__ProcessPacket)(CNetChan*, netpacket_s*, bool);
 bool(__fastcall* oCNetChan___ProcessMessages)(CNetChan*, bf_read*);
 int(__fastcall* oCNetChan__ProcessPacketHeader)(CNetChan*, netpacket_s*);
 bool g_bInProcessMessageClient = false;
+static int g_recursiveBroadcastDepth = 0; // Counter for recursive calls
+constexpr int MAX_RECURSIVE_BROADCAST_DEPTH = 3;
+
 class ProcessMessageScope {
 public:
 	ProcessMessageScope() { g_bInProcessMessageClient = true; }
@@ -36,10 +39,22 @@ public:
 char (*oSV_BroadcastMessageWithFilterLISTEN)(__int64 a1, __int64 a2, __int64 a3);
 char SV_BroadcastMessageWithFilterLISTEN(__int64 a1, __int64 a2, __int64 a3) {
 	if (g_bInProcessMessageClient) {
-		Warning("Recursive message broadcast detected.\n");
-		return true;
+		g_recursiveBroadcastDepth++;
+		if (g_recursiveBroadcastDepth > MAX_RECURSIVE_BROADCAST_DEPTH) {
+			Warning("Recursive message broadcast depth limit (%d) exceeded. Blocking call.\n", MAX_RECURSIVE_BROADCAST_DEPTH);
+			// We decrement here because the call is blocked, effectively ending this recursive path.
+			g_recursiveBroadcastDepth--;
+			return true; // Block the call
+		}
+		// Call allowed, decrement after it returns
+		char result = oSV_BroadcastMessageWithFilterLISTEN(a1, a2, a3);
+		g_recursiveBroadcastDepth--;
+		return result;
+	} else {
+		// Reset counter if the call is not from within ProcessMessages
+		g_recursiveBroadcastDepth = 0;
+		return oSV_BroadcastMessageWithFilterLISTEN(a1, a2, a3);
 	}
-	return oSV_BroadcastMessageWithFilterLISTEN(a1, a2, a3);
 }
 void* lastDeletedNetChan = NULL;
 void* (*oCNetChan___dtor)(CNetChan* a1, __int64 a2, __int64 a3);
@@ -79,6 +94,7 @@ bool __fastcall CNetChan___ProcessMessages(CNetChan* thisptr, bf_read* buf) {
 	LARGE_INTEGER start, end;
 	QueryPerformanceCounter(&start);
     lastDeletedNetChan = NULL;
+	g_recursiveBroadcastDepth = 0; // Reset recursion counter before processing messages
 	const auto original = oCNetChan___ProcessMessages(thisptr, buf);
     // wndrr: we were deleted, bail out!
     if (lastDeletedNetChan == thisptr) {
