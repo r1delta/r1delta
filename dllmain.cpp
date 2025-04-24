@@ -614,10 +614,8 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 				else {
 					G_is_dedi = 0;
 
-					if (_stricmp(exeName, "r1delta.exe") == 0)
-					{
 						nvapi_stuff();
-					}
+					
 				}
 			}
 			else {
