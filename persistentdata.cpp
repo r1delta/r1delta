@@ -1331,8 +1331,11 @@ void setinfopersist_cmd(const CCommand& args) {
 	else {
 		setinfo_cmd(args);
 	}
-
 	*setinfo_cmd_flags = FCVAR_USERINFO;
+	#ifdef CI 
+		*setinfo_cmd |= FCVAR_HIDDEN
+	#endif
+	
 }
 
 char ExecuteConfigFile(int configType) {
