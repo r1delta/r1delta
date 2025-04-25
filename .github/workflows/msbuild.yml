@@ -95,6 +95,7 @@ jobs:
       - name: Build Solution
         run: >
           msbuild /m /restore
+          /D IN_CI
           /p:Configuration=${{env.BUILD_CONFIGURATION}}
           /p:DebugType=${{env.MSBUILD_DEBUG_TYPE}}
           /p:OutDir=${{env.BUILD_PATH}}/
