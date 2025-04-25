@@ -1332,9 +1332,6 @@ void setinfopersist_cmd(const CCommand& args) {
 		setinfo_cmd(args);
 	}
 	*setinfo_cmd_flags = FCVAR_USERINFO;
-	#ifdef CI 
-		*setinfo_cmd |= FCVAR_HIDDEN
-	#endif
 	
 }
 
