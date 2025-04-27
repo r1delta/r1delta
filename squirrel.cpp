@@ -851,8 +851,8 @@ bool GetSQVMFuncs() {
 		SCRIPT_CONTEXT_CLIENT,
 		"SendDiscordClient",
 		(SQFUNCTION)SendDiscordClient,
-		".", // String
-		2,      // Expects 2 parameters
+		"..", // String
+		3,      // Expects 2 parameters
 		"void",    // Returns a string
 		"str",
 		"Send discord client"

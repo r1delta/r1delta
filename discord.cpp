@@ -58,6 +58,7 @@ struct PresenceInfo {
 	int team;
 	std::string playlist;
 	std::string playlistDisplayName;
+	bool init;
 };
 
 SQInteger SendDiscordUI(HSQUIRRELVM v)
@@ -144,7 +145,8 @@ SQInteger SendDiscordClient(HSQUIRRELVM v)
 
 	auto table = obj._unVal.pTable;
 	PresenceInfo presence;
-
+	SQBool init;
+	sq_getbool(nullptr, v, 3, &init);
 	if (!table) {
 		Warning("GetServerHeartbeat: Table is null\n");
 		return 1;
@@ -170,6 +172,8 @@ SQInteger SendDiscordClient(HSQUIRRELVM v)
 			if (!strcmp_static(key, "player_count")) presence.playerCount = node.val._unVal.nInteger;
 			if (!strcmp_static(key, "team")) presence.team = node.val._unVal.nInteger;
 			break;
+		case OT_BOOL:
+			break;
 		}
 	}
 
@@ -180,7 +184,8 @@ SQInteger SendDiscordClient(HSQUIRRELVM v)
 	activity.SetType(discord::ActivityType::Playing);
     activity.SetDetails((presence.playlistDisplayName).c_str());
 	activity.SetState(presence.gameMode.c_str());
-	activity.GetTimestamps().SetStart(time(nullptr));
+	if(init)
+		activity.GetTimestamps().SetStart(time(nullptr));
 	activity.GetAssets().SetLargeImage(presence.mapName.c_str());
 	activity.GetAssets().SetLargeText(presence.mapDisplayName.c_str());
 	activity.GetAssets().SetSmallImage("logo");
@@ -200,7 +205,7 @@ SQInteger SendDiscordClient(HSQUIRRELVM v)
 
 	core->ActivityManager().UpdateActivity(activity, [](discord::Result result) {
 		if (result != discord::Result::Ok) {
-			Msg("Discord: Failed to update activity: %d\n", result);
+			//Msg("Discord: Failed to update activity: %d\n", result);
 		}
 		//else {
 		//	Msg("Discord: Activity updated successfully\n");
