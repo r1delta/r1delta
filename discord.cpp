@@ -211,7 +211,7 @@ const char* CreateDiscordSecret() {
 	}
 	char ip_port[256];
 	sprintf_s(ip_port, "%s:%d", ip,port);
-	if (strcmp(ip,"0:ffff::") == 0) {
+	if (strcmp(ip,"loopback") == 0) {
 		auto port = ns_addr->GetPort();
 		if (!port) {
 			auto host_port = CCVar_FindVar(cvarinterface, "hostport");
