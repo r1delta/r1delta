@@ -26,11 +26,7 @@ vcpkg_configure_cmake(
       -DBUILD_SHARED_LIBS=ON
       -DBUILD_TESTS=OFF
 )
-vcpkg_build_cmake()
 
-# 3) Upstream `install()` drops:
-#      lib/rconpp.lib          ← good
-#      include/rconpp/...      ← we’ll re-copy this ourselves
 vcpkg_install_cmake()
 
 # 4) Remove any stray include/ folders that were created
@@ -40,14 +36,11 @@ file(REMOVE_RECURSE
     "${CURRENT_PACKAGES_DIR}/debug/share"
 )
 
-# 5) Copy your headers from rcon/include → installed include/
-#    This will produce: installed/.../include/rconpp/*.hpp
 file(COPY
     "${SOURCE_PATH}/include"
     DESTINATION "${CURRENT_PACKAGES_DIR}"
 )
 
-# 6) PDBs & LICENSE
 vcpkg_copy_pdbs()
 vcpkg_install_copyright(
     FILE_LIST "${SOURCE_PATH}/LICENSE"
