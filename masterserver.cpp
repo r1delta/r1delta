@@ -41,6 +41,7 @@ struct ServerInfo {
     int port;
     std::string ip;
 	bool hasPassword;
+    std::string version;
 	std::string description;
 	std::string playlist;
 	std::string playlist_display_name;
@@ -250,7 +251,7 @@ namespace MasterServerClient {
 				si.description = sj["description"];
 				si.playlist = sj["playlist"];
 				si.playlist_display_name = sj["playlist_display_name"];
-
+				si.version = sj["version"];
                 for (auto& pj : sj["players"]) {
                     PlayerInfo pi;
                     pi.name = pj["name"];
@@ -340,6 +341,7 @@ SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
             if (!strcmp_static(key, "game_mode")) heartbeat.gameMode = s->_val;
 			if (!strcmp_static(key, "playlist")) heartbeat.playlist = s->_val;
 			if (!strcmp_static(key, "playlist_display_name")) heartbeat.playlist_display_name = s->_val;
+			
             break;
         }
         case OT_INTEGER:
@@ -442,6 +444,7 @@ SQInteger PollServerList(HSQUIRRELVM v) {
 		sq_pushstring(v, "description", -1); sq_pushstring(v, s.description.c_str(), -1); sq_newslot(v, -3, 0);
 		sq_pushstring(v, "playlist", -1); sq_pushstring(v, s.playlist.c_str(), -1); sq_newslot(v, -3, 0);
 		sq_pushstring(v, "playlist_display_name", -1); sq_pushstring(v, s.playlist_display_name.c_str(), -1); sq_newslot(v, -3, 0);
+		sq_pushstring(v, "version", -1); sq_pushstring(v, s.version.c_str(), -1); sq_newslot(v, -3, 0);
         sq_pushstring(v, "players", -1);
         sq_newarray(v, 0);
         for (auto& p : s.players) {
