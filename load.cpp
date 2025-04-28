@@ -101,6 +101,7 @@
 #include <discord-game-sdk/discord.h>  
 #include "thread.h"
 #include <Mmdeviceapi.h>
+#include <rconpp/client.h>
 
 #include "r1d_version.h"
 
@@ -114,6 +115,7 @@ std::atomic<bool> running = true;
 //
 //auto client = std::make_shared<discordpp::Client>();
 
+auto rcon_client = std::shared_ptr<rconpp::rcon_client>(nullptr);
 
 
 #pragma intrinsic(_ReturnAddress)
@@ -2466,6 +2468,37 @@ void InitializeRecentHostVars()
 
 }
 
+void rcon_cmd(const CCommand& args) {
+	char    message[1024];   // Command message
+	char    szParam[256];
+	message[0] = 0;
+
+	rcon_client.reset();
+	
+
+	for (int i = 1; i < args.ArgC(); i++)
+	{
+		const char* pParam = args[i];
+		// put quotes around empty arguments so we can pass things like this: rcon sv_password ""
+		// otherwise the "" on the end is lost
+		if (strchr(pParam, ' ') || (strlen(pParam) == 0))
+		{
+			snprintf(szParam, sizeof(szParam), "\"%s\"", pParam);
+			strncat(message, szParam, sizeof(message));
+		}
+		else
+		{
+			strncat(message, pParam, sizeof(message));
+		}
+		if (i != (args.ArgC() - 1))
+		{
+			strncat(message, " ", sizeof(message));
+		}
+	}
+
+	rcon_client->send_data(message, 3,rconpp::data_type::SERVERDATA_EXECCOMMAND);
+
+}
 
 
 static FORCEINLINE void
@@ -2580,6 +2613,7 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		RegisterConCommand("script_client", script_client_cmd, "Execute Squirrel code in client context", FCVAR_NONE);
 		RegisterConCommand("script_ui", script_ui_cmd, "Execute Squirrel code in UI context", FCVAR_NONE);
 		RegisterConCommand("noclip", noclip_cmd, "Toggles NOCLIP mode.", FCVAR_GAMEDLL | FCVAR_CHEAT);
+		RegisterConCommand("rcon", rcon_cmd, "RCON command.", FCVAR_GAMEDLL);
 	}
 
 

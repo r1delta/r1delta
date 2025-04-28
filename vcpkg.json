@@ -33,7 +33,10 @@
       "name": "discord-game-sdk",
       "version>=": "2.5.6#5"
     },
-    "rconpp"
+    {
+      "name": "rconpp",
+      "version>=": "v1.0.0"
+    }
   ],
   "overrides": [
     {
