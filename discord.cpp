@@ -210,19 +210,22 @@ struct PresenceInfo {
 
 
 
-const char* CreateDiscordSecret() {
+std::string CreateDiscordSecret() {
 	auto base_client = GetBaseClient(-1);
 	if (!base_client) {
 		return "";
 	}
 	auto net_chan = *(uintptr_t*)((uintptr_t)(base_client) + 0x20);
 	auto ns_addr = (netadr_t*)(net_chan + 0xE4);
-	auto port = ns_addr->GetPort();
-	auto ip = CallVFunc<char*>(0x1, (void*)net_chan);
-	if (!ip || !ns_addr) {
+	auto port = htons(ns_addr->GetPort());
+	std::string ip = CallVFunc<char*>(0x1, (void*)net_chan);
+	if (!ns_addr) {
 		return "";
 	}
-	if (strcmp(ip, "0:ffff::") == 0) {
+	if (ip.empty()) {
+		return "";
+	}
+	if (ip.compare("0:ffff::") == 0) {
 		if (!MasterServerClient::IsValidHeartBeat.load()) {
 			return "";
 		}
@@ -232,12 +235,10 @@ const char* CreateDiscordSecret() {
 			port = host_port->m_Value.m_nValue;
 		}
 		std::string public_ip = G_public_ip;
-		char real_ip[256];
-		sprintf_s(real_ip, "%s:%d", public_ip.c_str(), port);
-		return real_ip;
+		return std::format("{}:{}", public_ip, port);
 	}
 	
-	return ip;
+	return std::format("{}:{}", ip, port);
 
 }
 
@@ -388,7 +389,7 @@ SQInteger SendDiscordClient(HSQUIRRELVM v)
 		activity.GetTimestamps().SetEnd(currentTime + endTime);
 	}
 	if (sec != "") {
-		activity.GetSecrets().SetJoin(sec);
+		activity.GetSecrets().SetJoin(sec.c_str());
 	}
 	core->ActivityManager().UpdateActivity(activity, [](discord::Result result) {
 		if (result != discord::Result::Ok) {

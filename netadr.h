@@ -226,7 +226,6 @@ public:
 
                 // Format using AF_INET
                 inet_ntop(AF_INET, &ipv4_addr, pchBuffer, unBufferSize);
-				sprintf(pchBuffer + strlen(pchBuffer), ":%u", ntohs(port)); // Append port
             }
             // Check if it's the IPv6 loopback ::1
             else if (IN6_IS_ADDR_LOOPBACK(&adr))
