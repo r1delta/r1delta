@@ -5,7 +5,32 @@
 #include <algorithm>
 #include <windows.h>
 #include <tlhelp32.h>
+#include "utils.h"
+#include "netadr.h"
 static bool is_discord_running = false;
+
+void HandleDiscordJoin(const char* secret) {
+
+	// do somethign with it
+	Msg("Discord Secert %s\n", secret);
+	Cbuf_AddText(0, ("disconnect;connect " + std::string(secret)).c_str(), 0);
+	return;
+}
+
+void HandleDiscordJoinRequest(const discord::User request) {
+	Msg("Discord: Join request from %s\n", request.GetUsername());
+}
+
+
+void HandleDiscordInvite(discord::ActivityActionType type, const discord::User user, const discord::Activity activity) {
+
+	Msg("Discord: Invite %s\n", user.GetUsername());
+}
+
+// func for get local baseClient
+typedef void* (__fastcall* GetBaseClientFunc)(int slot);
+GetBaseClientFunc GetBaseClient;
+
 bool IsDiscordProcessRunning() {
 	DWORD process_id = 0;
 	HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -30,6 +55,7 @@ bool IsDiscordProcessRunning() {
 }
 
 void DiscordThread() {
+	GetBaseClient = (GetBaseClientFunc)(G_engine + 0x5F470);
 	auto result = discord::Core::Create(DISCORD_APPLICATION_ID, DiscordCreateFlags_NoRequireDiscord, &core);
 	if (!IsDiscordProcessRunning()) {
 		Msg("Discord: Discord not running.\n");
@@ -41,8 +67,12 @@ void DiscordThread() {
 
 	is_discord_running = true;
 
-	Msg("Discord: Core created successfully\n");
+	core->ActivityManager().OnActivityJoin.Connect(HandleDiscordJoin);
+	core->ActivityManager().OnActivityJoinRequest.Connect(HandleDiscordJoinRequest);
+	core->ActivityManager().OnActivityInvite.Connect(HandleDiscordInvite);
 
+	Msg("Discord: Core created successfully\n");
+	
 	while (true) {
 		core->RunCallbacks();
 		std::this_thread::sleep_for(std::chrono::milliseconds(16));
@@ -59,7 +89,36 @@ struct PresenceInfo {
 	std::string playlist;
 	std::string playlistDisplayName;
 	bool init;
+	float endTime;
 };
+
+struct ns_address
+{
+	netadr_t m_adr; // ip:port and network type (NULL/IP/BROADCAST/etc).
+};
+
+
+const char* CreateDiscordSecret() {
+	auto base_client = GetBaseClient(-1);
+	//*(_QWORD *)(a1 + 0x20) = v6;
+	if (!base_client) {
+		return "";
+	}
+	auto net_chan = *(uintptr_t*)((uintptr_t)(base_client) + 0x20);
+	auto ns_addr =(uintptr_t*)(net_chan+ 0xE4);
+	typedef const char* (__fastcall* to_string_t)(uintptr_t* netadr,int t);
+	auto to_string = (to_string_t)(G_engine + 0x4885B0);
+	auto ip_port = to_string(ns_addr, 0);
+	if (ip_port == "loopback") {
+		return "loop";
+	}
+	return ip_port;
+	//Cbuf_AddText(0, ("disconnect;connect " + std::string(ip_port)).c_str(), 0);
+
+}
+
+
+
 
 SQInteger SendDiscordUI(HSQUIRRELVM v)
 {
@@ -70,11 +129,12 @@ SQInteger SendDiscordUI(HSQUIRRELVM v)
 
 	discord::Activity activity;
 	memset(&activity, 0, sizeof(activity));
-
+	
 	// get the name of loaded level
 	const char* levelName = nullptr;
 
 	sq_getstring(v, 2, &levelName);
+	
 
 	if (levelName != nullptr) {
 		Msg("Discord: SendDiscordUI: Level name: %s\n", levelName);
@@ -172,6 +232,9 @@ SQInteger SendDiscordClient(HSQUIRRELVM v)
 			if (!strcmp_static(key, "player_count")) presence.playerCount = node.val._unVal.nInteger;
 			if (!strcmp_static(key, "team")) presence.team = node.val._unVal.nInteger;
 			break;
+		case OT_FLOAT:
+			if (!strcmp_static(key, "end_time")) presence.endTime = node.val._unVal.fFloat;
+			break;
 		case OT_BOOL:
 			break;
 		}
@@ -190,27 +253,30 @@ SQInteger SendDiscordClient(HSQUIRRELVM v)
 	activity.GetAssets().SetLargeText(presence.mapDisplayName.c_str());
 	activity.GetAssets().SetSmallImage("logo");
 	activity.GetAssets().SetSmallText("R1Delta");
-	activity.GetParty().SetId("R1Delta");
+    auto sec = CreateDiscordSecret();  
+    std::string partyId = "delta_" + std::string(sec);  
+    activity.GetParty().SetId(partyId.c_str());
 	activity.GetParty().SetPrivacy(discord::ActivityPartyPrivacy::Private);
 	activity.GetParty().GetSize().SetCurrentSize(presence.playerCount);
 	activity.GetParty().GetSize().SetMaxSize(presence.maxPlayers);
+	if (presence.endTime && presence.mapName != "mp_lobby") {
+		auto currentTime = time(nullptr);
+		auto endTime = static_cast<time_t>(presence.endTime);
+		activity.GetTimestamps().SetEnd(currentTime + endTime);
+	}
+	activity.GetSecrets().SetJoin(CreateDiscordSecret());
 	
-	//Msg("Playlist: %s\n", presence.playlist.c_str());
-
-	//activity.SetSupportedPlatforms(static_cast<uint32_t>(discord::ActivitySupportedPlatformFlags::Desktop));
-
-	/*if (presence.mapName == "mp_lobby") {
-		activity.SetState("In the Lobby");
-	}*/
-
 	core->ActivityManager().UpdateActivity(activity, [](discord::Result result) {
 		if (result != discord::Result::Ok) {
-			//Msg("Discord: Failed to update activity: %d\n", result);
+			Msg("Discord: Failed to update activity: %d\n", result);
 		}
 		//else {
 		//	Msg("Discord: Activity updated successfully\n");
 		//}
 		});
+
+
+	
 
 	return 1;
 }
