@@ -12,22 +12,106 @@
 
 static bool is_discord_running = false;
 
+bool parseAndValidateIpOctets(const char* ip_part, size_t ip_len, unsigned int& o1, unsigned int& o2, unsigned int& o3, unsigned int& o4) {
+	// Ensure the ip_part doesn't contain invalid characters (like another ':')
+	// or start/end with '.' or have consecutive '..'
+	if (ip_len == 0 || ip_part[0] == '.' || ip_part[ip_len - 1] == '.') {
+		return false;
+	}
+	for (size_t i = 0; i < ip_len; ++i) {
+		if (!(isdigit(ip_part[i]) || ip_part[i] == '.')) {
+			return false; // Invalid character
+		}
+		if (i > 0 && ip_part[i] == '.' && ip_part[i - 1] == '.') {
+			return false; // Consecutive dots
+		}
+	}
 
-bool isIpValid(const char* ip) {
+	int chars_consumed = 0;
+	// Use sscanf on the specific IP part. %n checks if the whole IP part was consumed.
+	// Need a temporary buffer if ip_part is not null-terminated correctly
+	// (e.g., if using strncpy without manual termination). Using std::string is safer.
+	std::string ip_str(ip_part, ip_len); // Create a null-terminated string
 
-	unsigned int o1, o2, o3, o4;
-	// %3u limits to at most 3 digits per field
-	if (sscanf_s(ip, "%3u.%3u.%3u.%3u", &o1, &o2, &o3, &o4) != 4)
-		return 0;
+	if (sscanf(ip_str.c_str(), "%3u.%3u.%3u.%3u%n", &o1, &o2, &o3, &o4, &chars_consumed) != 4) {
+		return false; // Didn't parse exactly 4 numbers
+	}
+
+	// Ensure the *entire* IP part string was consumed by sscanf
+	if (static_cast<size_t>(chars_consumed) != ip_str.length()) {
+		return false; // Extra characters found within or after the IP part
+	}
+
+	// Check numeric ranges
 	return (o1 <= 255 && o2 <= 255 && o3 <= 255 && o4 <= 255);
 }
+
+
+bool isIpPortValid(const char* address) {
+	if (!address || address[0] == '\0') {
+		return false;
+	}
+
+	const char* colon_ptr = strrchr(address, ':'); // Find the *last* colon
+	const char* ip_part_start = address;
+	size_t ip_part_len = 0;
+	unsigned int o1, o2, o3, o4; // For IP octets
+	unsigned long port = 0;      // For port number
+
+	if (colon_ptr != nullptr) {
+		// Potential IP:Port format
+		ip_part_len = colon_ptr - address;
+		const char* port_part_start = colon_ptr + 1;
+		size_t port_part_len = strlen(port_part_start);
+
+		if (ip_part_len == 0 || port_part_len == 0) {
+			return false; // IP or Port part is empty (e.g., ":123" or "1.2.3.4:")
+		}
+
+		// Validate IP Part
+		if (!parseAndValidateIpOctets(ip_part_start, ip_part_len, o1, o2, o3, o4)) {
+			return false;
+		}
+
+		// Validate Port Part
+		char* endptr;
+		errno = 0; // Reset errno before calling strtoul
+		port = strtoul(port_part_start, &endptr, 10);
+
+		// Check for conversion errors (non-digit chars, overflow, underflow)
+		if (errno != 0 || *endptr != '\0' || port_part_start == endptr) {
+			// errno check handles overflow/underflow
+			// *endptr != '\0' checks if the entire port string was consumed
+			// port_part_start == endptr checks if any digits were converted at all
+			return false;
+		}
+
+		// Check port range (standard ports are 1-65535)
+		if (port == 0 || port > 65535) { // Port 0 is often reserved/invalid for connections
+			return false;
+		}
+
+		// If we reach here, both IP and Port are valid
+		return true;
+
+	}
+	else {
+		// No colon found, treat the whole string as an IP address
+		ip_part_len = strlen(address);
+		if (ip_part_len == 0) return false; // Should have been caught earlier, but good practice
+
+		// Validate the entire string as just an IP
+		return parseAndValidateIpOctets(ip_part_start, ip_part_len, o1, o2, o3, o4);
+	}
+}
+
 
 void HandleDiscordJoin(const char* secret) {
 
 	// do somethign with it
 	// make sure secret is a valid ipv4 adress
 	Msg("Discord: Join secret: %s\n", secret);
-	if (!isIpValid(secret)) {
+	if (!isIpPortValid(secret)) {
 		Msg("Discord: Invalid secret: %s\n", secret);
 		return;
 	}
@@ -119,13 +203,14 @@ const char* CreateDiscordSecret() {
 		return "";
 	}
 	auto net_chan = *(uintptr_t*)((uintptr_t)(base_client) + 0x20);
+	auto ns_addr = (netadr_t*)(net_chan + 0xE4);
+	auto port = ns_addr->GetPort();
 	auto ip = CallVFunc<const char*>(0x1, (void*)net_chan);
-	auto ns_addr = (netadr_t*)(net_chan+ 0xE4);
 	if (!ip || !ns_addr) {
 		return "";
 	}
 	char ip_port[256];
-	sprintf_s(ip_port, "%s:%d", ip, ns_addr->GetPort());
+	sprintf_s(ip_port, "%s:%d", ip,port);
 	if (strcmp(ip,"0:ffff::") == 0) {
 		auto port = ns_addr->GetPort();
 		if (!port) {
@@ -277,6 +362,7 @@ SQInteger SendDiscordClient(HSQUIRRELVM v)
 	activity.GetAssets().SetSmallText("R1Delta");
     auto sec = CreateDiscordSecret();  
     std::string partyId = "delta_" + std::string(sec);  
+	Msg("Discord: Party ID: %s\n", partyId.c_str());
     activity.GetParty().SetId(partyId.c_str());
 	activity.GetParty().SetPrivacy(discord::ActivityPartyPrivacy::Private);
 	activity.GetParty().GetSize().SetCurrentSize(presence.playerCount);
