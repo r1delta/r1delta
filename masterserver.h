@@ -10,10 +10,10 @@ SQInteger DispatchServerListReq(HSQUIRRELVM v);
 SQInteger PollServerList(HSQUIRRELVM v);
 SQInteger GetServerHeartbeat(HSQUIRRELVM v);
 
-
+//bool IsValidHeartBeat;
 
 namespace MasterServerClient {
     void StartHeartbeatThread();
     void StopHeartbeatThread();
-    inline bool IsValidHeartBeat;
+    extern std::atomic<bool> IsValidHeartBeat; // Changed to extern and atomic
 }

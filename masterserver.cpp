@@ -93,6 +93,7 @@ namespace MasterServerClient {
     static HeartbeatInfo lastHeartbeat;
     static std::atomic<bool> heartbeatThreadRunning{false};
     static std::atomic<std::chrono::system_clock::time_point> lastHeartbeatTime{std::chrono::system_clock::now()};
+    std::atomic<bool> IsValidHeartBeat{ false };
 
     // --------------------------------
     // Internal: Ensures httpClient is valid
@@ -161,10 +162,10 @@ namespace MasterServerClient {
 
             Warning("MasterServerClient: Heartbeat failed - %s\n",
                 res ? res->body.c_str() : "Connection failed");
-			IsValidHeartBeat = false;
+            IsValidHeartBeat.store(false, std::memory_order_release);
             return false;
         }
-		IsValidHeartBeat = true;
+        IsValidHeartBeat.store(true, std::memory_order_release);
         return true;
     }
 

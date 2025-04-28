@@ -211,7 +211,7 @@ const char* CreateDiscordSecret() {
 		return "";
 	}
 	if (strcmp(ip, "0:ffff::") == 0) {
-		if (!MasterServerClient::IsValidHeartBeat) {
+		if (!MasterServerClient::IsValidHeartBeat.load()) {
 			return "";
 		}
 		auto port = ns_addr->GetPort();
