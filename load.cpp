@@ -2246,6 +2246,75 @@ __int64 __fastcall sub_103120_hook(__int64 a1, __int64 a2, __int64 a3, int a4)
 	LeaveCriticalSection(&g_cs);
 	return ret;
 }
+//		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x100880), &sub_100880_hook, reinterpret_cast<LPVOID*>(&o_sub_100880));
+
+inline bool IsMemoryReadable(void* ptr, size_t size, DWORD protect_required_flags_oneof)
+{
+	static SYSTEM_INFO sysInfo;
+	if (!sysInfo.dwPageSize)
+		GetSystemInfo(&sysInfo);
+
+	MEMORY_BASIC_INFORMATION memInfo;
+
+	if (!VirtualQuery(ptr, &memInfo, sizeof(memInfo)))
+		return false;
+
+	if (memInfo.RegionSize < size)
+		return false;
+
+	return (memInfo.State & MEM_COMMIT) && !(memInfo.Protect & PAGE_NOACCESS) && (memInfo.Protect & protect_required_flags_oneof) != 0;
+}
+
+typedef void(__fastcall* sub_180100880_type)(uintptr_t);
+sub_180100880_type o_sub_100880 = nullptr;
+void __fastcall sub_100880_hook(uintptr_t a1) // we fix seldom crash in vphysics on level shutdown (but most frequent crash to be reported)
+{
+	auto cl = reinterpret_cast<void*>(G_engine + 0x5F4B0);
+	unsigned int& baseLocalClient__m_nSignonState = *((_DWORD*)cl + 29);
+	bool cl_isActive = baseLocalClient__m_nSignonState == 8;
+	uintptr_t vPhysicsBase = (uintptr_t)GetModuleHandleA("vphysics.dll");
+	static auto* sub_1800FFB50 = reinterpret_cast<__int64(*)(uintptr_t)>(vPhysicsBase + 0xFFB50);
+	static auto* sub_1800FF010 = reinterpret_cast<__int64(*)(uintptr_t)>(vPhysicsBase + 0xFF010);
+	static auto* sub_1800CA0B0 = reinterpret_cast<__int64(*)(uintptr_t)>(vPhysicsBase + 0xCA0B0);
+	bool do_check = !cl_isActive; 
+	void(__fastcall * **v2)(_QWORD, __int64); 
+	__int64 v3;
+	sub_1800FFB50(a1);
+	sub_1800FF010(a1);
+	int i = 0;
+	while (*(__int16*)(a1 + 1310866))
+	{
+		i++;
+		v2 = **(void(__fastcall*****)(_QWORD, __int64))(a1 + 1310872);
+		if (v2)
+		{
+			if (*v2 && **v2) 
+			{
+				if (do_check)
+				{
+					if (!IsMemoryReadable(**v2, 8, PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY))
+					{
+						break;
+					}
+				}
+				(**v2)((_QWORD)v2, 1i64);
+			}
+		}
+	}
+	v3 = *(_QWORD*)(a1 + 1310872);
+	if (v3 != a1 + 1310880)
+	{
+		if (v3)
+			sub_1800CA0B0(v3);
+		*(_QWORD*)(a1 + 1310872) = 0i64;
+		*(__int16*)(a1 + 1310864) = 0;
+	}
+	*(__int16*)(a1 + 1310866) = 0;
+	DeleteCriticalSection((LPCRITICAL_SECTION)(a1 + 8));
+}
+
+
+
 void (*oUTIL_LogPrintf)(const char* fmt, ...);
 void UTIL_LogPrintf(char* fmt, ...)
 {
@@ -2882,6 +2951,8 @@ void __stdcall LoaderNotificationCallback(
 		InitializeCriticalSectionAndSpinCount(&g_cs, 4000);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x1032C0), &sub_1032C0_hook, reinterpret_cast<LPVOID*>(&o_sub_1032C0));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x103120), &sub_103120_hook, reinterpret_cast<LPVOID*>(&o_sub_103120));
+		//CreateMiscHook(vphysicsdllBaseAddress, 0x100880, &sub_180100880, reinterpret_cast<LPVOID*>(&sub_180100880_org));
+		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x100880), &sub_100880_hook, reinterpret_cast<LPVOID*>(&o_sub_100880));
 
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0xFFFF), &sub_FFFF, reinterpret_cast<LPVOID*>(&ovphys_sub_FFFF));
 		//MH_EnableHook(MH_ALL_HOOKS);
