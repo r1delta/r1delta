@@ -283,8 +283,6 @@ SQInteger SendDiscordUI(HSQUIRRELVM v)
 		}
 		});
 
-	core->ActivityManager().RegisterCommand("r1delta://");
-
 	return 1;
 }
 
