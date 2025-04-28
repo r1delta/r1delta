@@ -723,6 +723,14 @@ int GetR1DVersion(HSQUIRRELVM v) {
 	return 1;
 }
 
+// please god someone change this to pushconst
+int GetMinimumR1DVersion(HSQUIRRELVM v)
+{
+	const char* versionString = R1D_MINIMUM_VERSION;
+	sq_pushstring(v, versionString, -1);
+	return 1;
+}
+
 
 
 // Function to initialize all SQVM functions
@@ -845,6 +853,17 @@ bool GetSQVMFuncs() {
 		"void",    // Returns a string
 		"str",
 		"Send discord server"
+	);
+	
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_UI,
+		"GetMinimumR1DVersion",
+		(SQFUNCTION)GetMinimumR1DVersion,
+		".", // String
+		1,     
+		"void",
+		"str",
+		"Get r1d minimum server for filtering"
 	);
 
 	REGISTER_SCRIPT_FUNCTION(
