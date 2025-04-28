@@ -205,13 +205,12 @@ const char* CreateDiscordSecret() {
 	auto net_chan = *(uintptr_t*)((uintptr_t)(base_client) + 0x20);
 	auto ns_addr = (netadr_t*)(net_chan + 0xE4);
 	auto port = ns_addr->GetPort();
-	auto ip = CallVFunc<const char*>(0x1, (void*)net_chan);
+	auto ip = CallVFunc<char*>(0x1, (void*)net_chan);
 	if (!ip || !ns_addr) {
 		return "";
 	}
-	char ip_port[256];
-	sprintf_s(ip_port, "%s:%d", ip,port);
-	if (strcmp(ip,"loopback") == 0) {
+
+	if (strcmp(ip, "loopback") == 0) {
 		auto port = ns_addr->GetPort();
 		if (!port) {
 			auto host_port = CCVar_FindVar(cvarinterface, "hostport");
@@ -222,7 +221,8 @@ const char* CreateDiscordSecret() {
 		sprintf_s(real_ip, "%s:%d", public_ip.c_str(), port);
 		return real_ip;
 	}
-	return ip_port;
+	
+	return ip;
 
 }
 
