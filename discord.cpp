@@ -7,12 +7,30 @@
 #include <tlhelp32.h>
 #include "utils.h"
 #include "netadr.h"
+#include <regex>
 static bool is_discord_running = false;
+
+
+bool isIpValid(const char* ip) {
+
+	try {
+		const std::regex rx(R"(^\[::ffff:(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}\]:(6553[0-5]|655[0-2][0-9]|65[0-4][0-9]{2}|6[0-4][0-9]{3}|[1-5][0-9]{4}|[0-9]{1,4})$)");
+		return	std::regex_match(ip, rx);
+	}
+	catch (const std::regex_error& e) {
+		Msg("Discord: Regex error: %s\n", e.what());
+		return false;
+	}
+}
 
 void HandleDiscordJoin(const char* secret) {
 
 	// do somethign with it
-	Msg("Discord Secert %s\n", secret);
+	// make sure secret is a valid ipv4 adress
+	if (!isIpValid(secret)) {
+		Msg("Discord: Invalid secret: %s\n", secret);
+		return;
+	}
 	Cbuf_AddText(0, ("disconnect;connect " + std::string(secret)).c_str(), 0);
 	return;
 }
