@@ -8,6 +8,7 @@
 #include "utils.h"
 #include "netadr.h"
 #include <regex>
+#include "httplib.h"
 static bool is_discord_running = false;
 
 
@@ -110,10 +111,23 @@ struct PresenceInfo {
 	float endTime;
 };
 
-struct ns_address
-{
-	netadr_t m_adr; // ip:port and network type (NULL/IP/BROADCAST/etc).
-};
+
+std::string getPublicIp() {
+	static std::string cached_ip = []() -> std::string {
+		httplib::Client client("api.ipify.org");
+		client.set_read_timeout(1, 0);
+		if (auto res = client.Get("/")) {
+			std::string ip = res->body;
+			// Trim whitespace.
+			ip.erase(0, ip.find_first_not_of(" \t\n\r"));
+			ip.erase(ip.find_last_not_of(" \t\n\r") + 1);
+			if (res->status == 200 && !ip.empty())
+				return ip;
+		}
+		return std::string("0.0.0.0");
+		}();
+	return cached_ip;
+}
 
 
 const char* CreateDiscordSecret() {
@@ -123,15 +137,22 @@ const char* CreateDiscordSecret() {
 		return "";
 	}
 	auto net_chan = *(uintptr_t*)((uintptr_t)(base_client) + 0x20);
-	auto ns_addr =(uintptr_t*)(net_chan+ 0xE4);
-	typedef const char* (__fastcall* to_string_t)(uintptr_t* netadr,int t);
+	auto ns_addr =(netadr_t*)(net_chan+ 0xE4);
+	typedef const char* (__fastcall* to_string_t)(netadr_t* netadr,int t);
 	auto to_string = (to_string_t)(G_engine + 0x4885B0);
 	auto ip_port = to_string(ns_addr, 0);
-	if (ip_port == "loopback") {
-		return "loop";
+	if (strcmp(ip_port,"loopback") == 0) {
+		auto port = ns_addr->GetPort();
+		if (!port) {
+			auto host_port = CCVar_FindVar(cvarinterface, "hostport");
+			port = host_port->m_Value.m_nValue;
+		}
+		std::string ip = getPublicIp();
+		char real_ip[256];
+		sprintf_s(real_ip, "[::ffff:%s]:%d", ip.c_str(), port);
+		return real_ip;
 	}
 	return ip_port;
-	//Cbuf_AddText(0, ("disconnect;connect " + std::string(ip_port)).c_str(), 0);
 
 }
 
