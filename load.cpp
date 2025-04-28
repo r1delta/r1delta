@@ -115,7 +115,7 @@ std::atomic<bool> running = true;
 //
 //auto client = std::make_shared<discordpp::Client>();
 
-auto rcon_client = std::shared_ptr<rconpp::rcon_client>(nullptr);
+std::shared_ptr<rconpp::rcon_client> g_rcon_client;
 
 
 #pragma intrinsic(_ReturnAddress)
@@ -1718,6 +1718,51 @@ const char* GetUserIDStringHook(USERID_s* id) {
 	
 }
 
+
+void rcon_init() {
+
+
+
+}
+
+
+void rcon_cmd(const CCommand& args) {
+	char    message[1024];   // Command message
+	char    szParam[256];
+	message[0] = 0;
+	rconpp::rcon_client rcon_client("192.168.1.123", 27015, "");
+
+	rcon_client.on_log = [](std::string_view log) {
+		Msg("RCON: %s\n", log.data());
+	};
+	static bool con = false;
+	if (!con) {
+		rcon_client.start(true);
+	}
+	for (int i = 1; i < args.ArgC(); i++)
+	{
+		const char* pParam = args[i];
+		// put quotes around empty arguments so we can pass things like this: rcon sv_password ""
+		// otherwise the "" on the end is lost
+		if (strchr(pParam, ' ') || (strlen(pParam) == 0))
+		{
+			snprintf(szParam, sizeof(szParam), "\"%s\"", pParam);
+			strncat(message, szParam, sizeof(message));
+		}
+		else
+		{
+			strncat(message, pParam, sizeof(message));
+		}
+		if (i != (args.ArgC() - 1))
+		{
+			strncat(message, " ", sizeof(message));
+		}
+	}
+
+	rcon_client.send_data_sync(message, 3, rconpp::data_type::SERVERDATA_EXECCOMMAND);
+
+}
+
 void StartDiscordAuth(const CCommand& ccargs) {
 #ifndef DISCORD
 	Warning("Build was compiled without DISCORD defined.\n");
@@ -1847,7 +1892,7 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		RegisterConCommand("toggleconsole", ToggleConsoleCommand, "Toggles the console", (1 << 17));
 		RegisterConCommand("delta_start_discord_auth", StartDiscordAuth, "Starts the discord auth process", 0);
 		RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
-		
+		RegisterConCommand("rcon", rcon_cmd, "RCON command.", FCVAR_DONTRECORD);
 		//g_pLogAudio = RegisterConVar("fs_log_audio", "0", FCVAR_NONE, "Log audio file reads");
 		MH_CreateHook((LPVOID)(engine_base + 0x11DB0), &XmaCallback, reinterpret_cast<LPVOID*>(&oXmaCallback));
 		InitSteamHooks();
@@ -2468,37 +2513,6 @@ void InitializeRecentHostVars()
 
 }
 
-void rcon_cmd(const CCommand& args) {
-	char    message[1024];   // Command message
-	char    szParam[256];
-	message[0] = 0;
-
-	rcon_client.reset();
-	
-
-	for (int i = 1; i < args.ArgC(); i++)
-	{
-		const char* pParam = args[i];
-		// put quotes around empty arguments so we can pass things like this: rcon sv_password ""
-		// otherwise the "" on the end is lost
-		if (strchr(pParam, ' ') || (strlen(pParam) == 0))
-		{
-			snprintf(szParam, sizeof(szParam), "\"%s\"", pParam);
-			strncat(message, szParam, sizeof(message));
-		}
-		else
-		{
-			strncat(message, pParam, sizeof(message));
-		}
-		if (i != (args.ArgC() - 1))
-		{
-			strncat(message, " ", sizeof(message));
-		}
-	}
-
-	rcon_client->send_data(message, 3,rconpp::data_type::SERVERDATA_EXECCOMMAND);
-
-}
 
 
 static FORCEINLINE void
@@ -2613,7 +2627,6 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		RegisterConCommand("script_client", script_client_cmd, "Execute Squirrel code in client context", FCVAR_NONE);
 		RegisterConCommand("script_ui", script_ui_cmd, "Execute Squirrel code in UI context", FCVAR_NONE);
 		RegisterConCommand("noclip", noclip_cmd, "Toggles NOCLIP mode.", FCVAR_GAMEDLL | FCVAR_CHEAT);
-		RegisterConCommand("rcon", rcon_cmd, "RCON command.", FCVAR_GAMEDLL);
 	}
 
 
@@ -3016,6 +3029,7 @@ void __stdcall LoaderNotificationCallback(
 			SetupHudWarpHooks();
 			Setup_MMNotificationClient();
 			CThread(DiscordThread).detach();
+			CThread(rcon_init).detach();
 			
 		}
 		if (is_server) do_server(notification_data);
