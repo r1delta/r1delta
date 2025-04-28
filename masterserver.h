@@ -10,7 +10,10 @@ SQInteger DispatchServerListReq(HSQUIRRELVM v);
 SQInteger PollServerList(HSQUIRRELVM v);
 SQInteger GetServerHeartbeat(HSQUIRRELVM v);
 
+
+
 namespace MasterServerClient {
     void StartHeartbeatThread();
     void StopHeartbeatThread();
+    inline bool IsValidHeartBeat;
 }

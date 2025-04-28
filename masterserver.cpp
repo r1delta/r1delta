@@ -161,9 +161,10 @@ namespace MasterServerClient {
 
             Warning("MasterServerClient: Heartbeat failed - %s\n",
                 res ? res->body.c_str() : "Connection failed");
+			IsValidHeartBeat = false;
             return false;
         }
-
+		IsValidHeartBeat = true;
         return true;
     }
 
