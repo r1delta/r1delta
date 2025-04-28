@@ -209,7 +209,6 @@ const char* CreateDiscordSecret() {
 	if (!ip || !ns_addr) {
 		return "";
 	}
-
 	if (strcmp(ip, "loopback") == 0) {
 		auto port = ns_addr->GetPort();
 		if (!port) {
@@ -283,6 +282,8 @@ SQInteger SendDiscordUI(HSQUIRRELVM v)
 			Msg("Discord: Activity updated successfully\n");
 		}
 		});
+
+	core->ActivityManager().RegisterCommand("r1delta://");
 
 	return 1;
 }
@@ -362,7 +363,6 @@ SQInteger SendDiscordClient(HSQUIRRELVM v)
 	activity.GetAssets().SetSmallText("R1Delta");
     auto sec = CreateDiscordSecret();  
     std::string partyId = "delta_" + std::string(sec);  
-	Msg("Discord: Party ID: %s\n", partyId.c_str());
     activity.GetParty().SetId(partyId.c_str());
 	activity.GetParty().SetPrivacy(discord::ActivityPartyPrivacy::Private);
 	activity.GetParty().GetSize().SetCurrentSize(presence.playerCount);
