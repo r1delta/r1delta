@@ -132,7 +132,6 @@ std::string getPublicIp() {
 
 const char* CreateDiscordSecret() {
 	auto base_client = GetBaseClient(-1);
-	//*(_QWORD *)(a1 + 0x20) = v6;
 	if (!base_client) {
 		return "";
 	}
