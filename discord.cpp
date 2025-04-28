@@ -9,6 +9,7 @@
 #include "netadr.h"
 #include <regex>
 #include "httplib.h"
+#include "masterserver.h"
 
 static bool is_discord_running = false;
 
@@ -210,6 +211,9 @@ const char* CreateDiscordSecret() {
 		return "";
 	}
 	if (strcmp(ip, "0:ffff::") == 0) {
+		if (!MasterServerClient::IsValidHeartBeat.load()) {
+			return "";
+		}
 		auto port = ns_addr->GetPort();
 		if (!port) {
 			auto host_port = CCVar_FindVar(cvarinterface, "hostport");
@@ -371,8 +375,9 @@ SQInteger SendDiscordClient(HSQUIRRELVM v)
 		auto endTime = static_cast<time_t>(presence.endTime);
 		activity.GetTimestamps().SetEnd(currentTime + endTime);
 	}
-	activity.GetSecrets().SetJoin(sec);
-	
+	if (sec != "") {
+		activity.GetSecrets().SetJoin(sec);
+	}
 	core->ActivityManager().UpdateActivity(activity, [](discord::Result result) {
 		if (result != discord::Result::Ok) {
 			Msg("Discord: Failed to update activity: %d\n", result);
