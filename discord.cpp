@@ -209,7 +209,7 @@ const char* CreateDiscordSecret() {
 	if (!ip || !ns_addr) {
 		return "";
 	}
-	if (strcmp(ip, "loopback") == 0) {
+	if (strcmp(ip, "0:ffff::") == 0) {
 		auto port = ns_addr->GetPort();
 		if (!port) {
 			auto host_port = CCVar_FindVar(cvarinterface, "hostport");
