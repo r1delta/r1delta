@@ -283,6 +283,7 @@ SQInteger SendDiscordUI(HSQUIRRELVM v)
 		}
 		});
 
+
 	return 1;
 }
 
@@ -381,6 +382,7 @@ SQInteger SendDiscordClient(HSQUIRRELVM v)
 		//}
 		});
 
+	core->ActivityManager().RegisterCommand(std::format("%localappdata%/R1Delta/r1delta.exe +connect {}", sec).c_str());
 
 	
 
