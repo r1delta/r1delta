@@ -108,8 +108,8 @@ extern uintptr_t G_engine_ds;
 extern uintptr_t G_client;
 extern uintptr_t G_localize;
 
-
-
+static inline std::string G_public_ip;
+std::string get_public_ip();
 LDR_DLL_LOADED_NOTIFICATION_DATA* GetModuleNotificationData(const wchar_t* moduleName);
 void FreeModuleNotificationData(LDR_DLL_LOADED_NOTIFICATION_DATA*);
 void InitializeRecentHostVars();

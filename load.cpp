@@ -2911,6 +2911,7 @@ void __stdcall LoaderNotificationCallback(
 			SetupHudWarpHooks();
 			Setup_MMNotificationClient();
 			CThread(DiscordThread).detach();
+			
 		}
 		if (is_server) do_server(notification_data);
 		if (should_init_security_fixes && (is_client || is_server)) {

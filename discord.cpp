@@ -9,25 +9,24 @@
 #include "netadr.h"
 #include <regex>
 #include "httplib.h"
+
 static bool is_discord_running = false;
 
 
 bool isIpValid(const char* ip) {
 
-	try {
-		const std::regex rx(R"(^\[::ffff:(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}\]:(6553[0-5]|655[0-2][0-9]|65[0-4][0-9]{2}|6[0-4][0-9]{3}|[1-5][0-9]{4}|[0-9]{1,4})$)");
-		return	std::regex_match(ip, rx);
-	}
-	catch (const std::regex_error& e) {
-		Msg("Discord: Regex error: %s\n", e.what());
-		return false;
-	}
+	unsigned int o1, o2, o3, o4;
+	// %3u limits to at most 3 digits per field
+	if (sscanf_s(ip, "%3u.%3u.%3u.%3u", &o1, &o2, &o3, &o4) != 4)
+		return 0;
+	return (o1 <= 255 && o2 <= 255 && o3 <= 255 && o4 <= 255);
 }
 
 void HandleDiscordJoin(const char* secret) {
 
 	// do somethign with it
 	// make sure secret is a valid ipv4 adress
+	Msg("Discord: Join secret: %s\n", secret);
 	if (!isIpValid(secret)) {
 		Msg("Discord: Invalid secret: %s\n", secret);
 		return;
@@ -75,6 +74,7 @@ bool IsDiscordProcessRunning() {
 
 void DiscordThread() {
 	GetBaseClient = (GetBaseClientFunc)(G_engine + 0x5F470);
+	G_public_ip = get_public_ip();
 	auto result = discord::Core::Create(DISCORD_APPLICATION_ID, DiscordCreateFlags_NoRequireDiscord, &core);
 	if (!IsDiscordProcessRunning()) {
 		Msg("Discord: Discord not running.\n");
@@ -83,7 +83,6 @@ void DiscordThread() {
 		Msg("Discord: Failed to create core:\n");
 		return;
 	}
-
 	is_discord_running = true;
 
 	core->ActivityManager().OnActivityJoin.Connect(HandleDiscordJoin);
@@ -112,22 +111,6 @@ struct PresenceInfo {
 };
 
 
-std::string getPublicIp() {
-	static std::string cached_ip = []() -> std::string {
-		httplib::Client client("api.ipify.org");
-		client.set_read_timeout(1, 0);
-		if (auto res = client.Get("/")) {
-			std::string ip = res->body;
-			// Trim whitespace.
-			ip.erase(0, ip.find_first_not_of(" \t\n\r"));
-			ip.erase(ip.find_last_not_of(" \t\n\r") + 1);
-			if (res->status == 200 && !ip.empty())
-				return ip;
-		}
-		return std::string("0.0.0.0");
-		}();
-	return cached_ip;
-}
 
 
 const char* CreateDiscordSecret() {
@@ -136,26 +119,27 @@ const char* CreateDiscordSecret() {
 		return "";
 	}
 	auto net_chan = *(uintptr_t*)((uintptr_t)(base_client) + 0x20);
-	auto ns_addr =(netadr_t*)(net_chan+ 0xE4);
-	typedef const char* (__fastcall* to_string_t)(netadr_t* netadr,int t);
-	auto to_string = (to_string_t)(G_engine + 0x4885B0);
-	auto ip_port = to_string(ns_addr, 0);
-	if (strcmp(ip_port,"loopback") == 0) {
+	auto ip = CallVFunc<const char*>(0x1, (void*)net_chan);
+	auto ns_addr = (netadr_t*)(net_chan+ 0xE4);
+	if (!ip || !ns_addr) {
+		return "";
+	}
+	char ip_port[256];
+	sprintf_s(ip_port, "%s:%d", ip, ns_addr->GetPort());
+	if (strcmp(ip,"0:ffff::") == 0) {
 		auto port = ns_addr->GetPort();
 		if (!port) {
 			auto host_port = CCVar_FindVar(cvarinterface, "hostport");
 			port = host_port->m_Value.m_nValue;
 		}
-		std::string ip = getPublicIp();
+		std::string public_ip = G_public_ip;
 		char real_ip[256];
-		sprintf_s(real_ip, "[::ffff:%s]:%d", ip.c_str(), port);
+		sprintf_s(real_ip, "%s:%d", public_ip.c_str(), port);
 		return real_ip;
 	}
 	return ip_port;
 
 }
-
-
 
 
 SQInteger SendDiscordUI(HSQUIRRELVM v)
@@ -302,7 +286,7 @@ SQInteger SendDiscordClient(HSQUIRRELVM v)
 		auto endTime = static_cast<time_t>(presence.endTime);
 		activity.GetTimestamps().SetEnd(currentTime + endTime);
 	}
-	activity.GetSecrets().SetJoin(CreateDiscordSecret());
+	activity.GetSecrets().SetJoin(sec);
 	
 	core->ActivityManager().UpdateActivity(activity, [](discord::Result result) {
 		if (result != discord::Result::Ok) {
