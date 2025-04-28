@@ -116,7 +116,19 @@ void HandleDiscordJoin(const char* secret) {
 		Msg("Discord: Invalid secret: %s\n", secret);
 		return;
 	}
-	Cbuf_AddText(0, ("disconnect;connect " + std::string(secret)).c_str(), 0);
+	//remove all ;
+	std::string secretStr(secret);
+	secretStr.erase(std::remove(secretStr.begin(), secretStr.end(), ';'), secretStr.end());
+	// remove all \n
+	secretStr.erase(std::remove(secretStr.begin(), secretStr.end(), '\n'), secretStr.end());
+	// remove all \r
+	secretStr.erase(std::remove(secretStr.begin(), secretStr.end(), '\r'), secretStr.end());
+	// remove all \t
+	secretStr.erase(std::remove(secretStr.begin(), secretStr.end(), '\t'), secretStr.end());
+	// remove all \"
+	secretStr.erase(std::remove(secretStr.begin(), secretStr.end(), '\"'), secretStr.end());
+
+	Cbuf_AddText(0, ("disconnect;connect " + std::string(secretStr)).c_str(), 0);
 	return;
 }
 
