@@ -19,6 +19,7 @@
 #include "logging.h"
 #include "masterserver.h"
 #include "thread.h"
+#include "r1d_version.h"
 
 using json = nlohmann::json;
 
@@ -135,6 +136,7 @@ namespace MasterServerClient {
         j["game_mode"] = heartbeat.gameMode;
         j["max_players"] = heartbeat.maxPlayers;
         j["port"] = heartbeat.port;
+        j["version"] = R1D_VERSION;
         auto password_var = CCVar_FindVar(cvarinterface, "sv_password");
         if (password_var && password_var->m_Value.m_pszString[0]) {
             j["has_password"] = true;
