@@ -1820,6 +1820,13 @@ const char* GetBuildNo() {
 }
 const char* (*oCNetChan__GetAddress)(CNetChan* thisptr);
 const char* CNetChan__GetAddress(CNetChan* thisptr) {
+	auto orginal = oCNetChan__GetAddress(thisptr);
+	if (orginal == nullptr) {
+		return nullptr;
+	}
+	if (strcmp_static(orginal, "loopback") == 0) {
+		return orginal;
+	}
 	return (netadr_t(std::string(oCNetChan__GetAddress(thisptr)).c_str())).GetAddressString();
 }
 
