@@ -1778,7 +1778,13 @@ void rcon_cmd(const CCommand& args) {
 	}
 	auto response = g_Rcon->send_data_sync(message, 3, rconpp::data_type::SERVERDATA_EXECCOMMAND, true);
 	if (response.server_responded) {
-		Msg("%s\n", response.data.c_str());
+		auto data = response.data;
+		if (data.size() > 0) {
+			Msg("%s\n", data.c_str());
+		}
+		else {
+			Msg("No response from server.\n");
+		}
 	}
 
 }
