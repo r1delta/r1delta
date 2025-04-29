@@ -1735,10 +1735,9 @@ std::shared_ptr<rconpp::rcon_client> rcon_init(
 	const char* pass
 ) {
 	auto client = CreateRconClient(ip, port, pass);
-	//client->start(true);
 	client->on_log = [](const std::string_view& log) {
 		std::cout << log << "\n";
-		};
+	};
 	return client;
 }
 
@@ -1746,7 +1745,9 @@ void rcon_init_thread() {
 	g_Rcon = rcon_init("192.168.1.123", 27015, "1");
 }
 void rcon_callback(const rconpp::response& response) {
-	std::cout << "RCON Response: " << response.data << "\n";
+	if (response.server_responded) {
+		Msg("%s", response.data.data());
+	}
 }
 
 
@@ -1776,16 +1777,7 @@ void rcon_cmd(const CCommand& args) {
 	if (!g_Rcon->connected) {
 		g_Rcon->start(true);
 	}
-	auto response = g_Rcon->send_data_sync(message, 3, rconpp::data_type::SERVERDATA_EXECCOMMAND, true);
-	if (response.server_responded) {
-		auto data = response.data;
-		if (data.size() > 0) {
-			Msg("%s\n", data.c_str());
-		}
-		else {
-			Msg("No response from server.\n");
-		}
-	}
+	g_Rcon->send_data(message, 3, rconpp::data_type::SERVERDATA_EXECCOMMAND, rcon_callback);
 
 }
 
