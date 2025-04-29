@@ -58,7 +58,7 @@ int G_is_dedi;
 typedef const char* (__cdecl* wine_get_version_func)();
 CPUInformation* (__fastcall* GetCPUInformationOriginal)();
 
-#define TOTAL_CTHREADS 5 // we should really make a constexpr constructor or something
+#define TOTAL_CTHREADS 6 // we should really make a constexpr constructor or something
 
 const CPUInformation* GetCPUInformationDet()
 {

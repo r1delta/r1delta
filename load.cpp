@@ -1717,12 +1717,36 @@ const char* GetUserIDStringHook(USERID_s* id) {
 	return buffer;
 	
 }
+std::shared_ptr<rconpp::rcon_client> CreateRconClient(
+	const char* ip,
+	int         port,
+	const char* pass
+) {
+	// forwards ip,port,pass into rcon_client’s only ctor
+	return std::make_shared<rconpp::rcon_client>(ip, port, pass);
+}
 
+std::shared_ptr<rconpp::rcon_client> g_Rcon = nullptr;
 
-void rcon_init() {
+// init returns the shared_ptr so the caller can keep it alive
+std::shared_ptr<rconpp::rcon_client> rcon_init(
+	const char* ip,
+	int         port,
+	const char* pass
+) {
+	auto client = CreateRconClient(ip, port, pass);
+	//client->start(true);
+	client->on_log = [](const std::string_view& log) {
+		std::cout << log << "\n";
+		};
+	return client;
+}
 
-
-
+void rcon_init_thread() {
+	g_Rcon = rcon_init("192.168.1.123", 27015, "1");
+}
+void rcon_callback(const rconpp::response& response) {
+	std::cout << "RCON Response: " << response.data << "\n";
 }
 
 
@@ -1730,15 +1754,6 @@ void rcon_cmd(const CCommand& args) {
 	char    message[1024];   // Command message
 	char    szParam[256];
 	message[0] = 0;
-	rconpp::rcon_client rcon_client("192.168.1.123", 27015, "");
-
-	rcon_client.on_log = [](std::string_view log) {
-		Msg("RCON: %s\n", log.data());
-	};
-	static bool con = false;
-	if (!con) {
-		rcon_client.start(true);
-	}
 	for (int i = 1; i < args.ArgC(); i++)
 	{
 		const char* pParam = args[i];
@@ -1758,10 +1773,16 @@ void rcon_cmd(const CCommand& args) {
 			strncat(message, " ", sizeof(message));
 		}
 	}
-
-	rcon_client.send_data_sync(message, 3, rconpp::data_type::SERVERDATA_EXECCOMMAND);
+	if (!g_Rcon->connected) {
+		g_Rcon->start(true);
+	}
+	auto response = g_Rcon->send_data_sync(message, 3, rconpp::data_type::SERVERDATA_EXECCOMMAND, true);
+	if (response.server_responded) {
+		Msg("%s\n", response.data.c_str());
+	}
 
 }
+
 
 void StartDiscordAuth(const CCommand& ccargs) {
 #ifndef DISCORD
@@ -3029,7 +3050,7 @@ void __stdcall LoaderNotificationCallback(
 			SetupHudWarpHooks();
 			Setup_MMNotificationClient();
 			CThread(DiscordThread).detach();
-			CThread(rcon_init).detach();
+			CThread(rcon_init_thread).detach();
 			
 		}
 		if (is_server) do_server(notification_data);
