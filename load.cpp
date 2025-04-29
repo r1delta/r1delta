@@ -1736,7 +1736,7 @@ std::shared_ptr<rconpp::rcon_client> rcon_init(
 ) {
 	auto client = CreateRconClient(ip, port, pass);
 	client->on_log = [](const std::string_view& log) {
-		std::cout << log << "\n";
+		Msg("%s", log.data());
 	};
 	return client;
 }
