@@ -400,8 +400,6 @@ SQInteger SendDiscordClient(HSQUIRRELVM v)
 		//}
 		});
 
-	core->ActivityManager().RegisterCommand(std::format("%localappdata%/R1Delta/r1delta.exe +connect {}", sec).c_str());
-
 	
 
 	return 1;
