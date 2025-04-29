@@ -1823,6 +1823,23 @@ const char* CNetChan__GetAddress(CNetChan* thisptr) {
 	return (netadr_t(std::string(oCNetChan__GetAddress(thisptr)).c_str())).GetAddressString();
 }
 
+//2A200
+
+typedef __int64(__fastcall* sub_2A200_t)(__int64 a1, __int64 a2, unsigned int a3);
+sub_2A200_t sub_2A200Original;
+int64 sub_2A200(__int64 a1, __int64 a2, unsigned int a3) {
+	static auto id = OriginalCCVar_FindVar(cvarinterface, "platform_user_id");
+	if (id->m_Value.m_nValue == 0) {
+		static std::random_device rd;                          
+		static std::mt19937       gen(rd());     
+		std::uniform_int_distribution<> dist(0, 99999);        
+		auto randNum = dist(gen);
+		id->m_Value.m_nValue = randNum;
+	}
+	return sub_2A200Original(a1, a2, a3);
+}
+
+
 static FORCEINLINE void
 do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 {
@@ -1845,7 +1862,7 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		RegisterConCommand("toggleconsole", ToggleConsoleCommand, "Toggles the console", (1 << 17));
 		RegisterConCommand("delta_start_discord_auth", StartDiscordAuth, "Starts the discord auth process", 0);
 		RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
-		
+		MH_CreateHook((LPVOID)(G_engine + 0x2A200), &sub_2A200, reinterpret_cast<LPVOID*>(&sub_2A200Original));
 		//g_pLogAudio = RegisterConVar("fs_log_audio", "0", FCVAR_NONE, "Log audio file reads");
 		MH_CreateHook((LPVOID)(engine_base + 0x11DB0), &XmaCallback, reinterpret_cast<LPVOID*>(&oXmaCallback));
 		InitSteamHooks();
