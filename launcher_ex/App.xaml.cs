@@ -726,17 +726,7 @@ namespace launcher_ex
                             RegistryHelper.SaveShowSetupOnLaunch(finalShowSetupSetting);
                             RegistryHelper.SaveLaunchArguments(finalLaunchArgs);
 
-                            // Show F4 hint if user disabled setup window
-                            if (!finalShowSetupSetting)
-                            {
-                                MessageBox.Show(
-                                    "Setup will not be shown automatically on the next launch because the \"Do not show this window again\" box was checked.\n\n" +
-                                    "Hold the F4 key while starting the launcher if you need to access setup options again (e.g., change path, arguments).",
-                                    "Setup Hidden",
-                                    MessageBoxButton.OK,
-                                    MessageBoxImage.Information
-                                );
-                            }
+                            // F4 hint message box moved to SetupWindow.xaml.cs
                         }
                         else
                         {

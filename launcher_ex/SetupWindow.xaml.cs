@@ -349,6 +349,21 @@ namespace launcher_ex
                 }
             }
 
+            // --- Show F4 Hint Message Box HERE if checkbox is checked ---
+            // Determine the setting *before* potentially closing the window early
+            bool showSetupNextTime = !(DoNotShowAgainCheckbox.IsChecked ?? false);
+            if (!showSetupNextTime) // If the checkbox IS checked (meaning DON'T show setup)
+            {
+                MessageBox.Show(
+                    this, // Owner window
+                    "Setup will not be shown automatically on the next launch because the \"Do not show this window again\" box was checked.\n\n" +
+                    "Hold the F4 key while starting the launcher if you need to access setup options again (e.g., change path, arguments).",
+                    "Setup Hidden",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information
+                );
+            }
+
             // --- 3. Handle Existing Installation Case (Shortcut) ---
             if (pathLooksValidInitially && isExistingInstallation)
             {
@@ -358,7 +373,7 @@ namespace launcher_ex
                 catch (Exception ex) { Debug.WriteLine($"Error saving path to registry (shortcut path): {ex.Message}"); MessageBox.Show($"Could not save path to registry: {ex.Message}...", "Registry Save Warning", MessageBoxButton.OK, MessageBoxImage.Warning); }
 
                 // --- Set return properties based on UI ---
-                this.ShowSetupOnLaunch = !(DoNotShowAgainCheckbox.IsChecked ?? false);
+                this.ShowSetupOnLaunch = showSetupNextTime; // Use the value determined above
                 this.LaunchArguments = LaunchArgsTextBox.Text;
 
                 // --- Close dialog ---
@@ -403,7 +418,7 @@ namespace launcher_ex
             // --- 7. Set return properties and Close Window ---
             if (success)
             {
-                this.ShowSetupOnLaunch = !(DoNotShowAgainCheckbox.IsChecked ?? false);
+                this.ShowSetupOnLaunch = showSetupNextTime; // Use the value determined earlier
                 this.LaunchArguments = LaunchArgsTextBox.Text;
             }
             // If success is false, the DialogResult will be false, and App.xaml.cs should handle exit.
