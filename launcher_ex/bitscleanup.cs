@@ -190,11 +190,11 @@ namespace BitsCleanup
             Debug.WriteLine($"[BitsJanitor Predicate] Evaluating R1Delta job for general cleanup: {name} (State: {state})");
 
             // b) TRANSFERRED but never completed
-            if (state == BackgroundCopyJobState.Transferred)
-            {
-                Debug.WriteLine($"[BitsJanitor Predicate] Matched R1Delta job '{name}': Stuck in TRANSFERRED state.");
-                return true;
-            }
+            //if (state == BackgroundCopyJobState.Transferred)
+            //{
+            //    Debug.WriteLine($"[BitsJanitor Predicate] Matched R1Delta job '{name}': Stuck in TRANSFERRED state.");
+            //    return true;
+            //}
 
             // c) Older than 7 days (based on modification time)
             try
