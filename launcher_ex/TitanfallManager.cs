@@ -307,6 +307,7 @@ namespace R1Delta
             double lastUpdate = -1;
             object progressLock = new object();
             bool errorReported = false;
+            bool cancellationOccurred = false; // Flag to track if any task was cancelled
             long overallProgress = 0; // Initialize overall progress
 
             Debug.WriteLine($"Verifying existing files in: {installDir}");
@@ -530,7 +531,11 @@ namespace R1Delta
                 catch (OperationCanceledException)
                 {
                     Debug.WriteLine($"Cancelled: {Path.GetFileName(item.Dest)}");
-                    // Don't re-throw cancellation, let Task.WhenAll handle it
+                    lock (progressLock) // Use lock for thread safety
+                    {
+                        cancellationOccurred = true; // SET FLAG
+                    }
+                    // Don't re-throw cancellation, let Task.WhenAll handle it (or check flag later)
                 }
                 catch (Exception ex)
                 {
@@ -568,10 +573,11 @@ namespace R1Delta
                 }
                 progressUI.ReportProgress(overallProgress, totalNeeded, 0);
 
-                if (errorReported)
+                // *** CHECK FLAGS HERE ***
+                if (errorReported || cancellationOccurred) // Check both flags
                 {
-                    Debug.WriteLine("Download process completed with errors.");
-                    return false; // Return false if any error occurred
+                    Debug.WriteLine($"Download process completed with {(errorReported ? "errors" : "")}{(cancellationOccurred ? (errorReported ? " and" : "") + " cancellation" : "")}.");
+                    return false; // Return false if any error or cancellation occurred
                 }
 
                 // Double-check overall progress after completion (optional sanity check)
@@ -584,19 +590,20 @@ namespace R1Delta
 
 
                 Debug.WriteLine("All downloads completed and verified successfully.");
-                EnsurePlaceholderVpkExists(installDir);
+                EnsurePlaceholderVpkExists(installDir); // *** ONLY CALL IF NO ERRORS/CANCELLATION ***
                 return true; // Success
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) // Catches cancellation thrown by WhenAll itself
             {
-                Debug.WriteLine("Download operation was cancelled.");
-                 // Recalculate progress one last time on cancellation
+                Debug.WriteLine("Download operation was cancelled (WhenAll).");
                 lock(progressLock)
                 {
+                    cancellationOccurred = true; // Ensure flag is set here too
+                    // Recalculate progress
                     overallProgress = fileReceivedBytes.Values.Sum();
                     overallProgress = Clamp(overallProgress, 0, totalNeeded);
                 }
-                progressUI.ReportProgress(overallProgress, totalNeeded, 0); // Update progress on cancel
+                progressUI.ReportProgress(overallProgress, totalNeeded, 0);
                 return false; // Return false as the operation didn't complete fully
             }
             // No need for a general catch here, as individual task exceptions are handled within the Task.Run lambda
