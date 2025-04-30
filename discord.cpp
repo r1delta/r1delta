@@ -185,9 +185,9 @@ void DiscordThread() {
 	core->ActivityManager().OnActivityJoin.Connect(HandleDiscordJoin);
 	core->ActivityManager().OnActivityJoinRequest.Connect(HandleDiscordJoinRequest);
 	core->ActivityManager().OnActivityInvite.Connect(HandleDiscordInvite);
-	if (auto x = core->ActivityManager().RegisterCommand("%localappdata%/R1Delta/r1delta.exe") != discord::Result::Ok) {
-		Msg("Discord: Failed to register command %d\n", x);
-	}
+	//if (auto x = core->ActivityManager().RegisterCommand("%localappdata%/R1Delta/r1delta.exe") != discord::Result::Ok) {
+	//	Msg("Discord: Failed to register command %d\n", x);
+	//}
 
 	Msg("Discord: Core created successfully\n");
 	
