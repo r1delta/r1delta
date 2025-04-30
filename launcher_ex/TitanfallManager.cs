@@ -426,7 +426,8 @@ namespace R1Delta
             catch (OperationCanceledException)
             {
                 Debug.WriteLine("Verification cancelled.");
-                progressUI.ShowError("Operation Cancelled");
+                if (!externalCts.IsCancellationRequested)
+                    progressUI.ShowError("Operation Cancelled");
                 return false;
             }
             catch (Exception ex)
@@ -681,7 +682,8 @@ namespace R1Delta
                     // If cancelled, ensure the UI shows cancellation message if not already shown by error
                     if (cancellationOccurred && !errorReported)
                     {
-                        progressUI.ShowError("Operation Cancelled");
+                        if (!externalCts.IsCancellationRequested)
+                            progressUI.ShowError("Operation Cancelled");
                     }
                     return false; // Return false if any error or cancellation occurred
                 }
@@ -713,7 +715,7 @@ namespace R1Delta
                 }
                 progressUI.ReportProgress(overallProgress, totalNeeded, 0);
                  // Ensure cancellation message is shown
-                if (!errorReported) progressUI.ShowError("Operation Cancelled");
+                if (!errorReported && !externalCts.IsCancellationRequested) progressUI.ShowError("Operation Cancelled");
                 return false; // Return false as the operation didn't complete fully
             }
             // No need for a general catch here, as individual task exceptions are handled within the Task.Run lambda
