@@ -298,14 +298,16 @@ namespace R1Delta
             // Ensure installDir is an absolute path for FastDownloadService
             installDir = Path.GetFullPath(installDir);
 
+            // Dictionary to track bytes received per file path. Crucial for aggregate progress.
             var fileReceivedBytes = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
             var fileTotalBytes = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
             var toDownload = new List<(string Url, string Dest, ulong Hash, long Size)>();
             var history = new Queue<(double Time, long Progress)>();
             const double rollingWindow = 5.0;
             double lastUpdate = -1;
-            object progressLock = new object(); // Renamed from errorLock for clarity
+            object progressLock = new object();
             bool errorReported = false;
+            long overallProgress = 0; // Initialize overall progress
 
             Debug.WriteLine($"Verifying existing files in: {installDir}");
             try
@@ -329,11 +331,13 @@ namespace R1Delta
                     Directory.CreateDirectory(dir);
 
                     bool needs = true;
+                    long currentSize = 0; // Track current size for initial progress
                     if (File.Exists(dest))
                     {
                         try
                         {
                             var fi = new FileInfo(dest);
+                            currentSize = fi.Length; // Store actual size
                             if (fi.Length == knownSize)
                             {
                                 if (knownSize == 0) // Empty files are always considered valid if size matches
@@ -356,7 +360,8 @@ namespace R1Delta
                     }
 
                     fileTotalBytes[dest] = knownSize;
-                    fileReceivedBytes[dest] = needs ? 0 : knownSize; // Assume 0 if needs download
+                    // Initialize received bytes: full size if valid, 0 if needs download (or partial if BITS resumes later)
+                    fileReceivedBytes[dest] = needs ? 0 : knownSize;
                     if (needs)
                         toDownload.Add((url, dest, expectedHash, knownSize));
                 }
@@ -375,14 +380,14 @@ namespace R1Delta
             }
 
             var totalNeeded = fileTotalBytes.Values.Sum();
-            // Correct calculation for alreadyHave: Sum sizes from fileReceivedBytes where the key (dest path) is NOT in the toDownload list's Dest paths.
-            var toDownloadPaths = new HashSet<string>(toDownload.Select(item => item.Dest), StringComparer.OrdinalIgnoreCase);
-            var alreadyHave = fileReceivedBytes.Where(kvp => !toDownloadPaths.Contains(kvp.Key)).Sum(kvp => kvp.Value);
-            progressUI.ReportProgress(alreadyHave, totalNeeded, 0.0);
+            // Calculate initial overall progress by summing the initial state of fileReceivedBytes
+            overallProgress = fileReceivedBytes.Values.Sum();
+            progressUI.ReportProgress(overallProgress, totalNeeded, 0.0);
 
             if (!toDownload.Any())
             {
                 Debug.WriteLine("All files present and verified.");
+                // Ensure final progress is reported as 100%
                 progressUI.ReportProgress(totalNeeded, totalNeeded, 0.0);
                 EnsurePlaceholderVpkExists(installDir);
                 return true;
@@ -407,7 +412,7 @@ namespace R1Delta
 
 
             var stopwatch = Stopwatch.StartNew();
-            var overallProgress = alreadyHave; // Start progress from already verified files
+            // overallProgress is already initialized correctly above
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(externalCts);
             var token = linked.Token;
             using var sem = new SemaphoreSlim(10, 10); // Limit concurrent downloads
@@ -423,39 +428,37 @@ namespace R1Delta
                 try
                 {
                     // Progress reporting setup
-                    long currentFileBytes = 0; // Track progress for this specific file
-                    void OnProg(long got, long total) // total here is BITS' total, might differ slightly if resuming
+                    // 'got' is bytes for *this* file, 'total' is total for *this* file (from BITS)
+                    void OnProg(long got, long total)
                     {
                         if (token.IsCancellationRequested) return;
 
                         lock (progressLock)
                         {
-                            // Calculate delta for this file only
-                            var delta = got - currentFileBytes;
-                            currentFileBytes = got; // Update this file's progress
+                            // Update the specific file's progress in the dictionary
+                            // Clamp 'got' to ensure it doesn't exceed the expected size (item.Size)
+                            // BITS total might sometimes be slightly off during resume.
+                            long clampedGot = Clamp(got, 0, item.Size);
+                            fileReceivedBytes[item.Dest] = clampedGot;
 
-                            // Update overall progress
-                            overallProgress += delta;
-                            // Clamp overall progress to prevent over/undershooting due to concurrency/resume inaccuracies
+                            // Recalculate overall progress by summing all current values
+                            overallProgress = fileReceivedBytes.Values.Sum();
+                            // Clamp overall progress to prevent over/undershooting
                             overallProgress = Clamp(overallProgress, 0, totalNeeded);
 
-                            // Update the dictionaries (optional, mainly for debugging/state)
-                            fileReceivedBytes[item.Dest] = got;
-
-                            // Calculate rolling speed
+                            // Calculate rolling speed based on the corrected overallProgress
                             var now = stopwatch.Elapsed.TotalSeconds;
-                            // Explicitly name tuple elements
                             history.Enqueue((Time: now, Progress: overallProgress));
                             while (history.Count > 1 && history.Peek().Time < now - rollingWindow)
                                 history.Dequeue();
 
                             // Throttle UI updates
-                            if (now - lastUpdate >= 0.5 || overallProgress == totalNeeded || got == item.Size) // Update slightly more often
+                            // Update slightly more often, or when this file finishes (got == item.Size)
+                            if (now - lastUpdate >= 0.5 || overallProgress == totalNeeded || got >= item.Size)
                             {
                                 double speed = 0;
                                 if (history.Count > 1)
                                 {
-                                    // Explicitly name destructured elements
                                     (double t0, long p0) = history.Peek();
                                     var dt = now - t0;
                                     var dp = overallProgress - p0;
@@ -499,21 +502,20 @@ namespace R1Delta
                      Debug.WriteLine($"Verified {Path.GetFileName(item.Dest)} OK.");
 
                     // --- Final Progress Update ---
-                    // Ensure this file's contribution is fully accounted for
+                    // Ensure this file's contribution is fully accounted for by setting its final size
+                    // and recalculating the overall progress one last time.
                     lock (progressLock)
                     {
-                        // Get the previously recorded bytes for this file (might be 0 or partial from resume)
-                        // Use TryGetValue for safety, although the key should exist
-                        fileReceivedBytes.TryGetValue(item.Dest, out var previousBytes);
-                        var finalDelta = item.Size - previousBytes; // Calculate remaining delta needed
-                        overallProgress += finalDelta; // Add only the remaining delta
-                        fileReceivedBytes[item.Dest] = item.Size; // Mark as complete in dictionary
+                        // Mark as complete in dictionary with the definitive size
+                        fileReceivedBytes[item.Dest] = item.Size;
+                        // Recalculate overall progress based on the final state
+                        overallProgress = fileReceivedBytes.Values.Sum();
                         overallProgress = Clamp(overallProgress, 0, totalNeeded); // Clamp again
 
-                        // Force one last UI update for this file completion if needed
+                        // Force one last UI update reflecting the completion
                         var now = stopwatch.Elapsed.TotalSeconds;
                         double speed = 0; // Speed is less relevant on final update
-                         if (history.Count > 1) // history.Count is a property, access directly
+                         if (history.Count > 1)
                          {
                              (double t0, long p0) = history.Peek();
                              var dt = now - t0;
@@ -556,7 +558,13 @@ namespace R1Delta
                 await Task.WhenAll(tasks).ConfigureAwait(false);
                 // Don't check token here, WhenAll throws if any task was cancelled
 
-                // Final progress update after all tasks complete
+                // Final progress update after all tasks complete (or are cancelled/error out)
+                // Recalculate one last time based on the final state in fileReceivedBytes
+                lock(progressLock) // Ensure thread safety for final calculation
+                {
+                    overallProgress = fileReceivedBytes.Values.Sum();
+                    overallProgress = Clamp(overallProgress, 0, totalNeeded);
+                }
                 progressUI.ReportProgress(overallProgress, totalNeeded, 0);
 
                 if (errorReported)
@@ -570,7 +578,7 @@ namespace R1Delta
                 {
                      Debug.WriteLine($"Warning: Final progress {overallProgress} does not match total {totalNeeded}.");
                      // Might indicate calculation issues or files changing size unexpectedly.
-                     // Decide if this should be an error or just a warning. For now, just warn.
+                     // For now, just warn. If downloads succeeded, we should be okay.
                 }
 
 
@@ -581,6 +589,12 @@ namespace R1Delta
             catch (OperationCanceledException)
             {
                 Debug.WriteLine("Download operation was cancelled.");
+                 // Recalculate progress one last time on cancellation
+                lock(progressLock)
+                {
+                    overallProgress = fileReceivedBytes.Values.Sum();
+                    overallProgress = Clamp(overallProgress, 0, totalNeeded);
+                }
                 progressUI.ReportProgress(overallProgress, totalNeeded, 0); // Update progress on cancel
                 return false; // Return false as the operation didn't complete fully
             }
