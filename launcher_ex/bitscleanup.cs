@@ -16,6 +16,9 @@ namespace BitsCleanup
     /// </summary>
     public static class BitsJanitor
     {
+        // Constant for the R1Delta job name prefix
+        private const string R1DeltaJobPrefix = "R1Delta|";
+
         /// <summary>
         /// Scans all BITS jobs accessible to the current user context (or all users if run with sufficient privileges)
         /// and cancels jobs that match the specified predicate.
@@ -24,20 +27,22 @@ namespace BitsCleanup
         /// If null, defaults to <see cref="DefaultFirefoxPredicate"/>.</param>
         /// <param name="log">The TextWriter to log output to. If null, defaults to a writer that uses Debug.WriteLine.</param>
         public static void PurgeStaleJobs(
-            Func<BackgroundCopyJob, string, BackgroundCopyJobState, bool> shouldDelete = null, // Updated type signature
+            Func<BackgroundCopyJob, string, BackgroundCopyJobState, bool> shouldDelete, // Removed default null, predicate is now required
             TextWriter log = null)
         {
-            // Use default predicate if none provided
-            if (shouldDelete == null)
-            {
-                shouldDelete = DefaultFirefoxPredicate;
-                Debug.WriteLine("[BitsJanitor] Using DefaultFirefoxPredicate for cleanup.");
-            }
             // Use Debug logger if none provided
             if (log == null)
             {
                 log = new DebugTextWriter(); // Use wrapper for Debug.WriteLine
             }
+            // Ensure a predicate is provided
+            if (shouldDelete == null)
+            {
+                log.WriteLine("[BitsJanitor] ERROR: PurgeStaleJobs called with a null predicate. Aborting cleanup.");
+                // Optionally throw an exception: throw new ArgumentNullException(nameof(shouldDelete));
+                return;
+            }
+
 
             BackgroundCopyManager mgr = null;
             // IEnumerable<BackgroundCopyJob> enumJobs = null; // Changed from IEnumBackgroundCopyJobs
@@ -84,7 +89,7 @@ namespace BitsCleanup
                         // Pass the BackgroundCopyJob object itself
                         if (shouldDelete(currentJob, jobName ?? string.Empty, jobState))
                         {
-                            log.WriteLine($"[BitsJanitor] Cancelling Job {jobId} ('{jobName ?? "[No Name]"}' - State: {jobState})");
+                            log.WriteLine($"[BitsJanitor] Cancelling Job {jobId} ('{jobName ?? "[No Name]"}' - State: {jobState}) matching predicate.");
                             try
                             {
                                 currentJob.Cancel(); // Attempt to cancel the job
@@ -119,7 +124,7 @@ namespace BitsCleanup
                     }
                 }
 
-                log.WriteLine($"\n[BitsJanitor] Summary: {cleanedCount} out of {totalCount} evaluated BITS jobs cancelled.");
+                log.WriteLine($"\n[BitsJanitor] Summary for current predicate: {cleanedCount} out of {totalCount} evaluated BITS jobs cancelled.");
             }
             catch (COMException comEx)
             {
@@ -137,7 +142,7 @@ namespace BitsCleanup
                 // Ensure the manager COM object is released
                 log.WriteLine("[BitsJanitor] Releasing BITS Manager...");
                 mgr?.Dispose(); // Dispose the manager wrapper
-                log.WriteLine("[BitsJanitor] Cleanup finished.");
+                log.WriteLine("[BitsJanitor] Cleanup finished for current predicate.");
             }
         }
 
@@ -153,8 +158,9 @@ namespace BitsCleanup
             bool isMozilla = !string.IsNullOrEmpty(name) && name.StartsWith("MozillaUpdate", StringComparison.OrdinalIgnoreCase);
             bool isStuckTransferred = state == BackgroundCopyJobState.Transferred;
 
-            if (isMozilla) Debug.WriteLine($"[BitsJanitor Predicate] Found Mozilla job: {name}");
-            if (isStuckTransferred) Debug.WriteLine($"[BitsJanitor Predicate] Found job stuck in Transferred state: {name}");
+            // Don't log here, let the caller decide verbosity
+            // if (isMozilla) Debug.WriteLine($"[BitsJanitor Predicate] Found Mozilla job: {name}");
+            // if (isStuckTransferred) Debug.WriteLine($"[BitsJanitor Predicate] Found job stuck in Transferred state: {name}");
 
             return isMozilla || isStuckTransferred;
         }
@@ -163,14 +169,14 @@ namespace BitsCleanup
         /// Combined predicate that includes DefaultFirefoxPredicate logic AND R1Delta-specific cleanup.
         /// - Cleans up non-R1Delta jobs matching DefaultFirefoxPredicate (Mozilla* or stuck TRANSFERRED).
         /// - Cleans up R1Delta jobs if:
-        ///   - The target file is missing (orphaned).
         ///   - The job is stuck in TRANSFERRED state.
         ///   - The job hasn't been modified in over 7 days.
+        /// Does NOT clean up based on target file existence anymore (handled by Orphaned predicate).
         /// </summary>
         public static bool CombinedCleanupPredicate(BackgroundCopyJob job, string name, BackgroundCopyJobState state)
         {
             // 1) Check non-R1Delta jobs using the Firefox predicate
-            if (string.IsNullOrEmpty(name) || !name.StartsWith("R1Delta|", StringComparison.OrdinalIgnoreCase))
+            if (string.IsNullOrEmpty(name) || !name.StartsWith(R1DeltaJobPrefix, StringComparison.OrdinalIgnoreCase))
             {
                 if (DefaultFirefoxPredicate(job, name, state))
                 {
@@ -180,8 +186,8 @@ namespace BitsCleanup
                 return false;
             }
 
-            // 2) R1Delta-specific cleanup logic:
-            Debug.WriteLine($"[BitsJanitor Predicate] Evaluating R1Delta job: {name} (State: {state})");
+            // 2) R1Delta-specific cleanup logic (excluding orphaned check):
+            Debug.WriteLine($"[BitsJanitor Predicate] Evaluating R1Delta job for general cleanup: {name} (State: {state})");
 
             // b) TRANSFERRED but never completed
             if (state == BackgroundCopyJobState.Transferred)
@@ -194,33 +200,88 @@ namespace BitsCleanup
             try
             {
                 var jobTimes = job.RetrieveTimes();
-                var modTime = jobTimes.ModificationTime;
-                if (modTime != default(DateTime) && modTime.Kind != DateTimeKind.Unspecified)
+                // Use UtcNow for comparison consistency
+                var modTimeUtc = jobTimes.ModificationTime.ToUniversalTime();
+                // Check if ModificationTime is valid (not default/unspecified) before comparing
+                if (jobTimes.ModificationTime != default(DateTime) && jobTimes.ModificationTime.Kind != DateTimeKind.Unspecified)
                 {
-                    var age = DateTime.UtcNow - modTime.ToUniversalTime();
+                    var age = DateTime.UtcNow - modTimeUtc;
                     if (age > TimeSpan.FromDays(7))
                     {
-                        Debug.WriteLine($"[BitsJanitor Predicate] Matched R1Delta job '{name}': Too old (Modified {modTime}, Age: {age.TotalDays:F1} days).");
+                        Debug.WriteLine($"[BitsJanitor Predicate] Matched R1Delta job '{name}': Too old (Modified UTC {modTimeUtc}, Age: {age.TotalDays:F1} days).");
                         return true;
                     }
                 }
                 else
                 {
-                    Debug.WriteLine($"[BitsJanitor Predicate] R1Delta job '{name}' has invalid modification time. Skipping age check.");
+                    // Log if the modification time seems invalid, might indicate an issue with the job itself.
+                    Debug.WriteLine($"[BitsJanitor Predicate] R1Delta job '{name}' has invalid modification time ({jobTimes.ModificationTime}). Skipping age check.");
                 }
             }
             catch (COMException ex)
             {
                 Debug.WriteLine($"[BitsJanitor Predicate] WARNING: COM Error getting times for job {name}: {ex.Message} (0x{ex.ErrorCode:X}). Skipping age check.");
             }
-            catch (Exception ex)
+            catch (Exception ex) // Catch potential timezone conversion errors etc.
             {
-                Debug.WriteLine($"[BitsJanitor Predicate] WARNING: Error getting times for job {name}: {ex.Message}. Skipping age check.");
+                Debug.WriteLine($"[BitsJanitor Predicate] WARNING: Error getting/processing times for job {name}: {ex.Message}. Skipping age check.");
             }
 
+
             // If none of the cleanup conditions met, keep the job.
-            Debug.WriteLine($"[BitsJanitor Predicate] No cleanup needed for R1Delta job: {name}");
+            Debug.WriteLine($"[BitsJanitor Predicate] No general cleanup needed for R1Delta job: {name}");
             return false;
+        }
+
+        /// <summary>
+        /// Creates a predicate function that identifies R1Delta BITS jobs associated with a *different*
+        /// installation directory than the one provided.
+        /// Assumes job names are formatted like "R1Delta|C:\Path\To\Install\Dir\vpk\file.vpk".
+        /// </summary>
+        /// <param name="currentInstallDir">The absolute, normalized path to the current installation directory.</param>
+        /// <returns>A predicate function for use with PurgeStaleJobs.</returns>
+        public static Func<BackgroundCopyJob, string, BackgroundCopyJobState, bool> CreateOrphanedR1DeltaPredicate(string currentInstallDir)
+        {
+            // Normalize the path for reliable comparison (e.g., ensure trailing slash consistency)
+            // Path.TrimEndingDirectorySeparator is available in .NET Core 3.0+ / .NET 5+
+            // For broader compatibility, we can manually ensure it doesn't end with a slash unless it's a root (e.g., "C:\")
+            string normalizedInstallDir = Path.GetFullPath(currentInstallDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            // Handle root case like "C:\" which becomes "C:" after trimming
+             if (normalizedInstallDir.Length == 2 && normalizedInstallDir[1] == ':')
+             {
+                 normalizedInstallDir += Path.DirectorySeparatorChar;
+             }
+
+            // Construct the expected prefix for jobs belonging to the *current* directory
+            string currentJobPrefix = $"{R1DeltaJobPrefix}{normalizedInstallDir}{Path.DirectorySeparatorChar}";
+            // Use OrdinalIgnoreCase for case-insensitive file system paths
+            var comparisonType = StringComparison.OrdinalIgnoreCase;
+
+            Debug.WriteLine($"[BitsJanitor Predicate] Creating Orphaned predicate for install dir: '{normalizedInstallDir}'");
+            Debug.WriteLine($"[BitsJanitor Predicate] -> Will keep jobs starting with: '{currentJobPrefix}'");
+
+            // Return the actual predicate function (lambda)
+            return (job, name, state) =>
+            {
+                // Basic check: Is it an R1Delta job at all?
+                if (string.IsNullOrEmpty(name) || !name.StartsWith(R1DeltaJobPrefix, comparisonType))
+                {
+                    return false; // Not an R1Delta job, ignore.
+                }
+
+                // Check: Does it belong to the CURRENT installation directory?
+                // We expect the job name to be "R1Delta|DRIVE:\path\to\install\actual\file.ext"
+                // So we check if the name starts with "R1Delta|DRIVE:\path\to\install\"
+                if (name.StartsWith(currentJobPrefix, comparisonType))
+                {
+                    // Belongs to the current directory, keep it (don't delete).
+                    return false;
+                }
+
+                // It IS an R1Delta job, but it does NOT belong to the current directory.
+                Debug.WriteLine($"[BitsJanitor Predicate] Matched Orphaned R1Delta job: '{name}' (Does not match current prefix '{currentJobPrefix}')");
+                return true; // Delete it.
+            };
         }
 
 

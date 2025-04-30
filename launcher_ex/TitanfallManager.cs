@@ -289,14 +289,26 @@ namespace R1Delta
                 return false;
             }
 
-            if (string.IsNullOrWhiteSpace(installDir) || !Directory.Exists(installDir))
+            // Ensure installDir is an absolute, normalized path for FastDownloadService and BITS cleanup logic
+            try
             {
-                progressUI.ShowError("Internal Error: Invalid installation directory.");
+                installDir = Path.GetFullPath(installDir);
+            }
+            catch (Exception ex)
+            {
+                progressUI.ShowError($"Internal Error: Invalid installation directory '{installDir}': {ex.Message}");
                 return false;
             }
 
-            // Ensure installDir is an absolute path for FastDownloadService
-            installDir = Path.GetFullPath(installDir);
+            if (!Directory.Exists(installDir))
+            {
+                 // It might be created later, but let's ensure the base exists for verification/cleanup
+                 try { Directory.CreateDirectory(installDir); } catch (Exception ex) {
+                     progressUI.ShowError($"Internal Error: Could not create installation directory '{installDir}': {ex.Message}");
+                     return false;
+                 }
+            }
+
 
             // Dictionary to track bytes received per file path. Crucial for aggregate progress.
             var fileReceivedBytes = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
@@ -397,12 +409,19 @@ namespace R1Delta
             Debug.WriteLine($"{toDownload.Count} files to download/resume.");
 
             // --- BITS Cleanup ---
+            var logWriter = new DebugTextWriter();
             try
             {
-                Debug.WriteLine("Running BITS cleanup...");
-                // Use the combined predicate for cleanup
-                BitsJanitor.PurgeStaleJobs(BitsJanitor.CombinedCleanupPredicate, new DebugTextWriter());
-                Debug.WriteLine("BITS cleanup finished.");
+                // 1. Clean up R1Delta jobs pointing to *other* directories
+                Debug.WriteLine($"Running BITS cleanup for orphaned R1Delta jobs (current dir: {installDir})...");
+                var orphanPredicate = BitsJanitor.CreateOrphanedR1DeltaPredicate(installDir);
+                BitsJanitor.PurgeStaleJobs(orphanPredicate, logWriter);
+                Debug.WriteLine("Orphaned R1Delta job cleanup finished.");
+
+                // 2. Clean up general stale jobs (Mozilla, old/stuck R1Delta in *this* dir)
+                Debug.WriteLine("Running general BITS cleanup (Mozilla, old/stuck R1Delta)...");
+                BitsJanitor.PurgeStaleJobs(BitsJanitor.CombinedCleanupPredicate, logWriter);
+                Debug.WriteLine("General BITS cleanup finished.");
             }
             catch (Exception ex)
             {
@@ -419,7 +438,8 @@ namespace R1Delta
             using var sem = new SemaphoreSlim(10, 10); // Limit concurrent downloads
 
             // --- FastDownloadService Instantiation ---
-            using var dl = new FastDownloadService(installDir); // Pass installDir
+            // Pass the normalized installDir
+            using var dl = new FastDownloadService(installDir);
 
             var tasks = toDownload.Select(item => Task.Run(async () =>
             {
@@ -474,14 +494,27 @@ namespace R1Delta
                     dl.DownloadProgressChanged += OnProg;
                     try
                     {
-                        Debug.WriteLine($"Downloading/Resuming {Path.GetFileName(item.Dest)}");
-                        await dl.DownloadFileAsync(item.Url, item.Dest, token).ConfigureAwait(false);
+                        // Construct the BITS job name including the full destination path
+                        // Ensure installDir is prepended correctly if item.Dest is relative (it shouldn't be here)
+                        string fullDestPath = Path.GetFullPath(item.Dest); // Should already be absolute from earlier combine
+                        string jobName = $"R1Delta|{fullDestPath}";
+
+                        Debug.WriteLine($"Downloading/Resuming {Path.GetFileName(item.Dest)} (Job: '{jobName}')");
+                        // Pass the job name to FastDownloadService (assuming it accepts it)
+                        // If DownloadFileAsync doesn't accept a job name, this needs adjustment in FastDownloadService
+                        await dl.DownloadFileAsync(item.Url, item.Dest, token).ConfigureAwait(false); // TODO: Update FastDownloadService to accept jobName if needed
                         Debug.WriteLine($"Finished {Path.GetFileName(item.Dest)}");
                     }
                     finally
                     {
-                        token.ThrowIfCancellationRequested(); // Check cancellation after download completes
-                        dl.DownloadProgressChanged -= OnProg;
+                        // Check cancellation before removing progress handler
+                        if (!token.IsCancellationRequested)
+                        {
+                           dl.DownloadProgressChanged -= OnProg;
+                        } else {
+                            // If cancelled, try to remove handler but don't throw if it fails
+                            try { dl.DownloadProgressChanged -= OnProg; } catch {}
+                        }
                     }
 
                     token.ThrowIfCancellationRequested(); // Check cancellation after download completes
@@ -577,6 +610,11 @@ namespace R1Delta
                 if (errorReported || cancellationOccurred) // Check both flags
                 {
                     Debug.WriteLine($"Download process completed with {(errorReported ? "errors" : "")}{(cancellationOccurred ? (errorReported ? " and" : "") + " cancellation" : "")}.");
+                    // If cancelled, ensure the UI shows cancellation message if not already shown by error
+                    if (cancellationOccurred && !errorReported)
+                    {
+                        progressUI.ShowError("Operation Cancelled");
+                    }
                     return false; // Return false if any error or cancellation occurred
                 }
 
@@ -604,6 +642,8 @@ namespace R1Delta
                     overallProgress = Clamp(overallProgress, 0, totalNeeded);
                 }
                 progressUI.ReportProgress(overallProgress, totalNeeded, 0);
+                 // Ensure cancellation message is shown
+                if (!errorReported) progressUI.ShowError("Operation Cancelled");
                 return false; // Return false as the operation didn't complete fully
             }
             // No need for a general catch here, as individual task exceptions are handled within the Task.Run lambda
