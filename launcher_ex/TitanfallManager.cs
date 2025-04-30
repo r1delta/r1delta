@@ -321,6 +321,7 @@ namespace R1Delta
             bool errorReported = false;
             bool cancellationOccurred = false; // Flag to track if any task was cancelled
             long overallProgress = 0; // Initialize overall progress
+            long maxReportedOverallProgress = -1; // Initialize max reported progress to ensure first report goes through
 
             Debug.WriteLine($"Verifying existing files in: {installDir}");
             try
@@ -373,8 +374,9 @@ namespace R1Delta
                     }
 
                     fileTotalBytes[dest] = knownSize;
-                    // Initialize received bytes: full size if valid, 0 if needs download (or partial if BITS resumes later)
-                    fileReceivedBytes[dest] = needs ? 0 : knownSize;
+                    // Initialize received bytes: Use actual current size if file exists, otherwise 0.
+                    // This makes the initial progress reflect the state BITS might resume from more closely.
+                    fileReceivedBytes[dest] = currentSize;
                     if (needs)
                         toDownload.Add((url, dest, expectedHash, knownSize));
                 }
@@ -394,7 +396,9 @@ namespace R1Delta
 
             var totalNeeded = fileTotalBytes.Values.Sum();
             // Calculate initial overall progress by summing the initial state of fileReceivedBytes
-            overallProgress = fileReceivedBytes.Values.Sum();
+            // Clamp initial progress to ensure it doesn't exceed totalNeeded due to oversized existing files
+            overallProgress = Clamp(fileReceivedBytes.Values.Sum(), 0, totalNeeded);
+            maxReportedOverallProgress = overallProgress; // Set initial max reported
             progressUI.ReportProgress(overallProgress, totalNeeded, 0.0);
 
             if (!toDownload.Any())
@@ -467,27 +471,37 @@ namespace R1Delta
                             // Clamp overall progress to prevent over/undershooting
                             overallProgress = Clamp(overallProgress, 0, totalNeeded);
 
-                            // Calculate rolling speed based on the corrected overallProgress
-                            var now = stopwatch.Elapsed.TotalSeconds;
-                            history.Enqueue((Time: now, Progress: overallProgress));
-                            while (history.Count > 1 && history.Peek().Time < now - rollingWindow)
-                                history.Dequeue();
-
-                            // Throttle UI updates
-                            // Update slightly more often, or when this file finishes (got == item.Size)
-                            if (now - lastUpdate >= 0.5 || overallProgress == totalNeeded || got >= item.Size)
+                            // --- MONOTONIC PROGRESS CHECK ---
+                            // Only report if progress hasn't decreased and enough time has passed or it's the end
+                            if (overallProgress >= maxReportedOverallProgress)
                             {
-                                double speed = 0;
-                                if (history.Count > 1)
+                                maxReportedOverallProgress = overallProgress; // Update max reported
+
+                                // Calculate rolling speed based on the corrected overallProgress
+                                var now = stopwatch.Elapsed.TotalSeconds;
+                                history.Enqueue((Time: now, Progress: overallProgress));
+                                while (history.Count > 1 && history.Peek().Time < now - rollingWindow)
+                                    history.Dequeue();
+
+                                // Throttle UI updates
+                                // Update slightly more often, or when this file finishes (got == item.Size)
+                                if (now - lastUpdate >= 0.5 || overallProgress == totalNeeded || got >= item.Size)
                                 {
-                                    (double t0, long p0) = history.Peek();
-                                    var dt = now - t0;
-                                    var dp = overallProgress - p0;
-                                    if (dt > 0.01) speed = dp / dt;
+                                    double speed = 0;
+                                    if (history.Count > 1)
+                                    {
+                                        (double t0, long p0) = history.Peek();
+                                        var dt = now - t0;
+                                        var dp = overallProgress - p0;
+                                        if (dt > 0.01) speed = dp / dt;
+                                    }
+                                    progressUI.ReportProgress(overallProgress, totalNeeded, speed);
+                                    lastUpdate = now;
                                 }
-                                progressUI.ReportProgress(overallProgress, totalNeeded, speed);
-                                lastUpdate = now;
                             }
+                            // If overallProgress < maxReportedOverallProgress, we simply skip the UI update
+                            // to prevent the bar from going backward. The next update where progress
+                            // catches up will be reported.
                         }
                     }
 
@@ -547,18 +561,22 @@ namespace R1Delta
                         overallProgress = fileReceivedBytes.Values.Sum();
                         overallProgress = Clamp(overallProgress, 0, totalNeeded); // Clamp again
 
-                        // Force one last UI update reflecting the completion
-                        var now = stopwatch.Elapsed.TotalSeconds;
-                        double speed = 0; // Speed is less relevant on final update
-                         if (history.Count > 1)
-                         {
-                             (double t0, long p0) = history.Peek();
-                             var dt = now - t0;
-                             var dp = overallProgress - p0;
-                             if (dt > 0.01) speed = dp / dt;
-                         }
-                        progressUI.ReportProgress(overallProgress, totalNeeded, speed);
-                        lastUpdate = now;
+                        // Force one last UI update reflecting the completion, ensuring it's >= max reported
+                        if (overallProgress >= maxReportedOverallProgress)
+                        {
+                            maxReportedOverallProgress = overallProgress; // Update max
+                            var now = stopwatch.Elapsed.TotalSeconds;
+                            double speed = 0; // Speed is less relevant on final update
+                             if (history.Count > 1)
+                             {
+                                 (double t0, long p0) = history.Peek();
+                                 var dt = now - t0;
+                                 var dp = overallProgress - p0;
+                                 if (dt > 0.01) speed = dp / dt;
+                             }
+                            progressUI.ReportProgress(overallProgress, totalNeeded, speed);
+                            lastUpdate = now;
+                        }
                     }
                 }
                 catch (OperationCanceledException)
@@ -603,8 +621,14 @@ namespace R1Delta
                 {
                     overallProgress = fileReceivedBytes.Values.Sum();
                     overallProgress = Clamp(overallProgress, 0, totalNeeded);
+                    // Ensure the final report shows the correct clamped value, even if it means
+                    // reporting a value slightly lower than a previous peak if clamping occurred.
+                    // Or, more simply, just report the final calculated value.
+                    maxReportedOverallProgress = overallProgress; // Update max to final value
                 }
+                // Report final progress regardless of whether it decreased due to clamping/final calculation
                 progressUI.ReportProgress(overallProgress, totalNeeded, 0);
+
 
                 // *** CHECK FLAGS HERE ***
                 if (errorReported || cancellationOccurred) // Check both flags
@@ -640,6 +664,8 @@ namespace R1Delta
                     // Recalculate progress
                     overallProgress = fileReceivedBytes.Values.Sum();
                     overallProgress = Clamp(overallProgress, 0, totalNeeded);
+                    // Report final progress state on cancellation
+                    maxReportedOverallProgress = overallProgress;
                 }
                 progressUI.ReportProgress(overallProgress, totalNeeded, 0);
                  // Ensure cancellation message is shown
