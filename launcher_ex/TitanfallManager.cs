@@ -295,13 +295,16 @@ namespace R1Delta
                 return false;
             }
 
+            // Ensure installDir is an absolute path for FastDownloadService
+            installDir = Path.GetFullPath(installDir);
+
             var fileReceivedBytes = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
             var fileTotalBytes = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
             var toDownload = new List<(string Url, string Dest, ulong Hash, long Size)>();
             var history = new Queue<(double Time, long Progress)>();
             const double rollingWindow = 5.0;
             double lastUpdate = -1;
-            object errorLock = new object();
+            object progressLock = new object(); // Renamed from errorLock for clarity
             bool errorReported = false;
 
             Debug.WriteLine($"Verifying existing files in: {installDir}");
@@ -333,7 +336,7 @@ namespace R1Delta
                             var fi = new FileInfo(dest);
                             if (fi.Length == knownSize)
                             {
-                                if (knownSize == 0)
+                                if (knownSize == 0) // Empty files are always considered valid if size matches
                                     needs = false;
                                 else if (ComputeXxHash64(dest) == expectedHash)
                                     needs = false;
@@ -342,17 +345,18 @@ namespace R1Delta
                             }
                             else
                             {
-                                Debug.WriteLine($"Size mismatch: {relPath}");
+                                Debug.WriteLine($"Size mismatch: {relPath} (Expected: {knownSize}, Got: {fi.Length})");
                             }
                         }
                         catch (Exception ex)
                         {
                             Debug.WriteLine($"Warning verifying {dest}: {ex.Message}");
+                            // Assume needs download if verification fails
                         }
                     }
 
                     fileTotalBytes[dest] = knownSize;
-                    fileReceivedBytes[dest] = needs ? 0 : knownSize;
+                    fileReceivedBytes[dest] = needs ? 0 : knownSize; // Assume 0 if needs download
                     if (needs)
                         toDownload.Add((url, dest, expectedHash, knownSize));
                 }
@@ -371,61 +375,89 @@ namespace R1Delta
             }
 
             var totalNeeded = fileTotalBytes.Values.Sum();
-            var alreadyHave = fileReceivedBytes.Values.Sum();
+            var alreadyHave = fileReceivedBytes.Values.Where(kvp => !toDownload.Any(item => item.Dest.Equals(kvp.Key, StringComparison.OrdinalIgnoreCase))).Sum(kvp => kvp.Value); // Sum only files NOT in toDownload list
             progressUI.ReportProgress(alreadyHave, totalNeeded, 0.0);
 
             if (!toDownload.Any())
             {
-                Debug.WriteLine("All files present.");
+                Debug.WriteLine("All files present and verified.");
                 progressUI.ReportProgress(totalNeeded, totalNeeded, 0.0);
                 EnsurePlaceholderVpkExists(installDir);
                 return true;
             }
 
-            Debug.WriteLine($"{toDownload.Count} files to download.");
+            Debug.WriteLine($"{toDownload.Count} files to download/resume.");
+
+            // --- BITS Cleanup ---
+            try
+            {
+                Debug.WriteLine("Running BITS cleanup...");
+                // Use the combined predicate for cleanup
+                BitsJanitor.PurgeStaleJobs(BitsJanitor.CombinedCleanupPredicate, new DebugTextWriter());
+                Debug.WriteLine("BITS cleanup finished.");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Warning: BITS cleanup failed: {ex.Message}");
+                // Continue regardless of cleanup failure
+            }
+            // --- End BITS Cleanup ---
+
+
             var stopwatch = Stopwatch.StartNew();
-            var overall = alreadyHave;
+            var overallProgress = alreadyHave; // Start progress from already verified files
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(externalCts);
             var token = linked.Token;
-            using var sem = new SemaphoreSlim(10, 10);
+            using var sem = new SemaphoreSlim(10, 10); // Limit concurrent downloads
 
-            BitsJanitor.PurgeStaleJobs();
+            // --- FastDownloadService Instantiation ---
+            using var dl = new FastDownloadService(installDir); // Pass installDir
 
             var tasks = toDownload.Select(item => Task.Run(async () =>
             {
                 await sem.WaitAsync(token).ConfigureAwait(false);
                 token.ThrowIfCancellationRequested();
 
-                using var dl = new FastDownloadService();
                 try
                 {
-                    void OnProg(long got, long total)
+                    // Progress reporting setup
+                    long currentFileBytes = 0; // Track progress for this specific file
+                    void OnProg(long got, long total) // total here is BITS' total, might differ slightly if resuming
                     {
                         if (token.IsCancellationRequested) return;
-                        lock (errorLock)
-                        {
-                            var prev = fileReceivedBytes[item.Dest];
-                            var delta = got - prev;
-                            overall += delta;
-                            fileReceivedBytes[item.Dest] = got;
-                            overall = Clamp(overall, alreadyHave, totalNeeded);
 
+                        lock (progressLock)
+                        {
+                            // Calculate delta for this file only
+                            var delta = got - currentFileBytes;
+                            currentFileBytes = got; // Update this file's progress
+
+                            // Update overall progress
+                            overallProgress += delta;
+                            // Clamp overall progress to prevent over/undershooting due to concurrency/resume inaccuracies
+                            overallProgress = Clamp(overallProgress, 0, totalNeeded);
+
+                            // Update the dictionaries (optional, mainly for debugging/state)
+                            fileReceivedBytes[item.Dest] = got;
+
+                            // Calculate rolling speed
                             var now = stopwatch.Elapsed.TotalSeconds;
-                            history.Enqueue((now, overall));
+                            history.Enqueue((now, overallProgress));
                             while (history.Count > 1 && history.Peek().Time < now - rollingWindow)
                                 history.Dequeue();
 
-                            if (now - lastUpdate >= 1 || overall == totalNeeded)
+                            // Throttle UI updates
+                            if (now - lastUpdate >= 0.5 || overallProgress == totalNeeded || got == item.Size) // Update slightly more often
                             {
                                 double speed = 0;
                                 if (history.Count > 1)
                                 {
                                     var (t0, p0) = history.Peek();
                                     var dt = now - t0;
-                                    var dp = overall - p0;
+                                    var dp = overallProgress - p0;
                                     if (dt > 0.01) speed = dp / dt;
                                 }
-                                progressUI.ReportProgress(overall, totalNeeded, speed);
+                                progressUI.ReportProgress(overallProgress, totalNeeded, speed);
                                 lastUpdate = now;
                             }
                         }
@@ -434,50 +466,71 @@ namespace R1Delta
                     dl.DownloadProgressChanged += OnProg;
                     try
                     {
-                        Debug.WriteLine($"Downloading {Path.GetFileName(item.Dest)}");
+                        Debug.WriteLine($"Downloading/Resuming {Path.GetFileName(item.Dest)}");
                         await dl.DownloadFileAsync(item.Url, item.Dest, token).ConfigureAwait(false);
+                        Debug.WriteLine($"Finished {Path.GetFileName(item.Dest)}");
                     }
                     finally
                     {
                         dl.DownloadProgressChanged -= OnProg;
                     }
 
-                    // Final correction
-                    lock (errorLock)
-                    {
-                        var prev = fileReceivedBytes[item.Dest];
-                        var delta = item.Size - prev;
-                        overall += delta;
-                        fileReceivedBytes[item.Dest] = item.Size;
-                        overall = Clamp(overall, alreadyHave, totalNeeded);
-                    }
+                    token.ThrowIfCancellationRequested(); // Check cancellation after download completes
 
-                    token.ThrowIfCancellationRequested();
-
+                    // --- Post-Download Verification ---
                     var fi2 = new FileInfo(item.Dest);
                     if (fi2.Length != item.Size)
-                        throw new IOException($"Size mismatch after download: expected {item.Size}, got {fi2.Length}");
+                    {
+                        throw new IOException($"Size mismatch after download for {Path.GetFileName(item.Dest)}: expected {item.Size}, got {fi2.Length}");
+                    }
 
-                    if (item.Size > 0 && ComputeXxHash64(item.Dest) != item.Hash)
-                        throw new IOException($"Checksum mismatch on {Path.GetFileName(item.Dest)}");
+                    if (item.Size > 0) // Only hash non-empty files
+                    {
+                        var actualHash = ComputeXxHash64(item.Dest);
+                        if (actualHash != item.Hash)
+                        {
+                            throw new IOException($"Checksum mismatch after download for {Path.GetFileName(item.Dest)}: expected {item.Hash:X}, got {actualHash:X}");
+                        }
+                    }
+                     Debug.WriteLine($"Verified {Path.GetFileName(item.Dest)} OK.");
+
+                    // --- Final Progress Update ---
+                    // Ensure this file's contribution is fully accounted for
+                    lock (progressLock)
+                    {
+                        var previousBytes = fileReceivedBytes[item.Dest];
+                        var finalDelta = item.Size - previousBytes;
+                        overallProgress += finalDelta;
+                        fileReceivedBytes[item.Dest] = item.Size; // Mark as complete in dictionary
+                        overallProgress = Clamp(overallProgress, 0, totalNeeded); // Clamp again
+
+                        // Force one last UI update for this file completion if needed
+                        var now = stopwatch.Elapsed.TotalSeconds;
+                        double speed = 0; // Speed is less relevant on final update
+                         if (history.Count > 1) { var (t0, p0) = history.Peek(); var dt = now - t0; var dp = overallProgress - p0; if (dt > 0.01) speed = dp / dt; }
+                        progressUI.ReportProgress(overallProgress, totalNeeded, speed);
+                        lastUpdate = now;
+                    }
                 }
                 catch (OperationCanceledException)
                 {
                     Debug.WriteLine($"Cancelled: {Path.GetFileName(item.Dest)}");
-                    throw;
+                    // Don't re-throw cancellation, let Task.WhenAll handle it
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine($"Error on {Path.GetFileName(item.Dest)}: {ex}");
-                    bool first;
-                    lock (errorLock)
+                    Debug.WriteLine($"Error downloading/verifying {Path.GetFileName(item.Dest)}: {ex}");
+                    bool firstError;
+                    lock (progressLock) // Use the same lock for error reporting flag
                     {
-                        first = !errorReported;
-                        if (first) errorReported = true;
+                        firstError = !errorReported;
+                        if (firstError) errorReported = true;
                     }
-                    if (first)
+                    if (firstError) // Report only the first error encountered
                         progressUI.ShowError($"Download error ({Path.GetFileName(item.Dest)}): {ex.Message}");
-                    throw;
+
+                    // We don't re-throw here to allow other downloads to potentially finish,
+                    // but the errorReported flag will cause the overall result to be false.
                 }
                 finally
                 {
@@ -487,39 +540,43 @@ namespace R1Delta
 
             try
             {
-                Debug.WriteLine($"Waiting for {tasks.Count} downloads...");
+                Debug.WriteLine($"Waiting for {tasks.Count} download tasks...");
                 await Task.WhenAll(tasks).ConfigureAwait(false);
-                token.ThrowIfCancellationRequested();
+                // Don't check token here, WhenAll throws if any task was cancelled
 
-                progressUI.ReportProgress(overall, totalNeeded, 0);
+                // Final progress update after all tasks complete
+                progressUI.ReportProgress(overallProgress, totalNeeded, 0);
+
                 if (errorReported)
                 {
-                    Debug.WriteLine("Completed with errors.");
-                    return false;
+                    Debug.WriteLine("Download process completed with errors.");
+                    return false; // Return false if any error occurred
                 }
 
-                Debug.WriteLine("All downloads verified.");
+                // Double-check overall progress after completion (optional sanity check)
+                if (overallProgress != totalNeeded)
+                {
+                     Debug.WriteLine($"Warning: Final progress {overallProgress} does not match total {totalNeeded}.");
+                     // Might indicate calculation issues or files changing size unexpectedly.
+                     // Decide if this should be an error or just a warning.
+                }
+
+
+                Debug.WriteLine("All downloads completed and verified successfully.");
                 EnsurePlaceholderVpkExists(installDir);
-                return true;
+                return true; // Success
             }
             catch (OperationCanceledException)
             {
-                Debug.WriteLine("Download cancelled.");
-                progressUI.ReportProgress(overall, totalNeeded, 0);
-                return false;
+                Debug.WriteLine("Download operation was cancelled.");
+                progressUI.ReportProgress(overallProgress, totalNeeded, 0); // Update progress on cancel
+                return false; // Return false as the operation didn't complete fully
             }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Unexpected error: {ex}");
-                if (!errorReported)
-                    progressUI.ShowError($"Unexpected error: {ex.Message}");
-                progressUI.ReportProgress(overall, totalNeeded, 0);
-                return false;
-            }
+            // No need for a general catch here, as individual task exceptions are handled within the Task.Run lambda
             finally
             {
                 stopwatch.Stop();
-                Debug.WriteLine($"Finished in {stopwatch.Elapsed.TotalSeconds:F1}s");
+                Debug.WriteLine($"Download process finished in {stopwatch.Elapsed.TotalSeconds:F1}s");
             }
         }
 
@@ -542,7 +599,7 @@ namespace R1Delta
             try
             {
                 using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufSize, FileOptions.SequentialScan);
-                if (stream.Length == 0) return 0xEF46DB3751D8E999;
+                if (stream.Length == 0) return 0xEF46DB3751D8E999; // Precomputed hash for empty file
                 var hasher = new XXH64();
                 var buffer = new byte[bufSize];
                 int read;
@@ -550,10 +607,15 @@ namespace R1Delta
                     hasher.Update(buffer.AsSpan(0, read));
                 return hasher.Digest();
             }
-            catch (Exception ex)
+            catch (IOException ex) // Catch specific IO exceptions
             {
-                Debug.WriteLine($"Error hashing {filePath}: {ex.Message}");
-                return 0;
+                Debug.WriteLine($"IO Error hashing {filePath}: {ex.Message}");
+                return 0; // Return 0 on error to force re-download
+            }
+            catch (Exception ex) // Catch other potential exceptions
+            {
+                 Debug.WriteLine($"Unexpected Error hashing {filePath}: {ex.Message}");
+                 return 0; // Return 0 on error
             }
         }
 
@@ -580,16 +642,25 @@ namespace R1Delta
             if (val.CompareTo(max) > 0) return max;
             return val;
         }
+
+        // Helper class to redirect Console.Write/WriteLine to Debug.Write/WriteLine
+        private class DebugTextWriter : TextWriter
+        {
+            public override Encoding Encoding => Encoding.UTF8;
+            public override void WriteLine(string value) => Debug.WriteLine(value);
+            public override void Write(string value) => Debug.Write(value);
+        }
     }
+
 
     /// <summary>
     /// Interface for reporting installation/download progress and errors.
     /// </summary>
     public interface IInstallProgress : IDisposable
     {
-        /// <param name="bytesDownloaded">Total bytes downloaded so far.</param>
-        /// <param name="totalBytes">Total bytes to download.</param>
-        /// <param name="bytesPerSecond">Current download speed.</param>
+        /// <param name="bytesDownloaded">Total bytes downloaded so far across all files.</param>
+        /// <param name="totalBytes">Total bytes required for all files.</param>
+        /// <param name="bytesPerSecond">Current estimated download speed.</param>
         void ReportProgress(long bytesDownloaded, long totalBytes, double bytesPerSecond);
 
         /// <summary>Action invoked if the user requests cancellation.</summary>
