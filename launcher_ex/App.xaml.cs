@@ -459,7 +459,7 @@ namespace launcher_ex
 
                                             // Iterate through the list of files downloaded by your manager
                                             // Assumes TitanfallManager and s_fileList exist in R1Delta namespace
-                                            foreach (var fileInfo in TitanfallManager.s_fileList)
+                                            foreach (var fileInfo in TitanfallFileList.s_fileList)
                                             {
                                                 string fileToDelete = Path.Combine(gamePath, fileInfo.RelativePath);
                                                 try
