@@ -81,23 +81,7 @@ public class FastDownloadService : IDisposable
         if (_bitsManager == null) throw new InvalidOperationException("BITS Manager not initialized.");
 
         // 1) Build a deterministic job name from the file's relative path
-        string relPath;
-        try
-        {
-            // Use Uri for robust relative path calculation
-            // Ensure installRoot ends with a separator for MakeRelativeUri
-            var installRootUri = new Uri(_installRoot.EndsWith(Path.DirectorySeparatorChar.ToString()) ? _installRoot : _installRoot + Path.DirectorySeparatorChar);
-            var destAbsUri = new Uri(destAbsPath);
-            relPath = Uri.UnescapeDataString(installRootUri.MakeRelativeUri(destAbsUri).ToString())
-                         .Replace('/', Path.DirectorySeparatorChar); // Keep OS separator for consistency? Or force '/'? Let's force '/' for job name.
-             relPath = relPath.Replace(Path.DirectorySeparatorChar, '/').ToLowerInvariant();
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"[FastDownloadService] Error creating relative path for job name ('{_installRoot}', '{destAbsPath}'): {ex.Message}");
-            // Fallback to a less ideal name if relative path fails
-            relPath = Path.GetFileName(destAbsPath).ToLowerInvariant();
-        }
+        string relPath = destAbsPath.Replace("\\", "/");
 
         string jobName = $"R1Delta|{relPath}";
         Debug.WriteLine($"[FastDownloadService] Searching/Creating job: {jobName}");
@@ -127,27 +111,12 @@ public class FastDownloadService : IDisposable
 
                     // If the destination file no longer exists on disk, cancel & re-create
                     string existingPath = null;
-                    BackgroundCopyFile fileInfo = null; // Use library type
-                    try
-                    {
-                        fileInfo = currentJob.EnumerateFiles().FirstOrDefault(); // Get first file
-                        if (fileInfo != null)
-                        {
-                            existingPath = fileInfo.LocalName;
-                        }
-                    }
-                    catch (COMException ex) { Debug.WriteLine($"[FastDownloadService] COM Error checking files for job {currentJob.Id}: {ex.Message}"); }
-                    finally
-                    {
-                        fileInfo?.Dispose(); // Dispose the file wrapper
-                    }
 
-                    if (string.IsNullOrEmpty(existingPath) || !File.Exists(existingPath))
+                    foreach (var f in currentJob.EnumerateFiles())
                     {
-                        Debug.WriteLine($"[FastDownloadService] Destination file '{existingPath ?? "null"}' missing for job {currentJob.Id}. Cancelling and recreating.");
-                        try { currentJob.Cancel(); } catch (COMException ex) { Debug.WriteLine($"[FastDownloadService] Error cancelling job {currentJob.Id}: {ex.Message}"); }
-                        // Let the finally block dispose the cancelled job, then break to create a new one
-                        break; // Exit foreach loop to create a new job
+                        existingPath = f.LocalName;   // the RCW is still valid here
+                        f.Dispose();                  // release it explicitly
+                        break;                        // we only need the first file
                     }
 
                     Debug.WriteLine($"[FastDownloadService] Job {currentJob.Id} state: {state}");
@@ -207,8 +176,8 @@ public class FastDownloadService : IDisposable
             newJob.AddFile(url, destAbsPath);
             newJob.Priority = BackgroundCopyJobPriority.Foreground;
             // Resilience tweaks (moved from previous location):
-            newJob.SetNoProgressTimeout(120); // 2 minutes
-            newJob.SetMinimumRetryDelay(30);  // 30 seconds
+            newJob.NoProgressTimeout = 120; // 2 minutes
+            newJob.MinimumRetryDelay = 30;  // 30 seconds
             Debug.WriteLine($"[FastDownloadService] Created new job {newJob.Id}");
             return newJob; // Return the newly created job
         }
@@ -350,7 +319,7 @@ public class FastDownloadService : IDisposable
 
                     case BackgroundCopyJobState.Connecting:
                     case BackgroundCopyJobState.Transferring:
-                        var prog = job.Progress; // Use Progress property from the wrapper
+                        var prog = job.RetrieveProgress(); // Use Progress property from the wrapper
                         long done = (long)prog.BytesTransferred;
                         long total = (long)prog.BytesTotal;
                         // Ensure total is plausible (BITS sometimes reports 0 or -1 initially)
@@ -386,7 +355,7 @@ public class FastDownloadService : IDisposable
                     case BackgroundCopyJobState.TransientError:
                         // Waiting state, report current progress if available
                          Debug.WriteLine($"[FastDownloadService] Job {job.Id} in state {state}. Waiting.");
-                         var currentProg = job.Progress; // Use Progress property
+                         var currentProg = job.RetrieveProgress(); // Use Progress property
                          long currentDone = (long)currentProg.BytesTransferred;
                          long currentTotal = (long)currentProg.BytesTotal;
                          if (currentTotal <= 0) { try { if (File.Exists(destinationPath)) currentTotal = new FileInfo(destinationPath).Length; } catch {} }
@@ -436,21 +405,16 @@ public class FastDownloadService : IDisposable
                     // Do NOT call Cancel() or Suspend() here. State should be handled by the loop/cancellation logic.
                     // The Dispose() method on the wrapper should release the COM object reference.
                     toDispose.Dispose();
-                    Debug.WriteLine($"[FastDownloadService] Job {toDispose.Id} disposed via wrapper.");
                 }
                 catch (InvalidComObjectException)
                 {
-                     Debug.WriteLine($"[FastDownloadService] Job {toDispose.Id} COM object already released.");
                 }
                 catch (COMException ex)
                 {
                     // Log COM errors during dispose, but don't throw from finally
-                    Debug.WriteLine($"[FastDownloadService] COM Error disposing job {toDispose.Id}: {ex.Message}");
                 }
                 catch (Exception ex)
                 {
-                    // Log other potential errors during dispose
-                    Debug.WriteLine($"[FastDownloadService] Error disposing job {toDispose.Id}: {ex.Message}");
                 }
             }
         }

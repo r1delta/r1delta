@@ -253,7 +253,7 @@ namespace BitsCleanup
              }
 
             // Construct the expected prefix for jobs belonging to the *current* directory
-            string currentJobPrefix = $"{R1DeltaJobPrefix}{normalizedInstallDir}{Path.DirectorySeparatorChar}";
+            string currentJobPrefix = $"{R1DeltaJobPrefix}{normalizedInstallDir}{Path.DirectorySeparatorChar}".Replace("\\","/");
             // Use OrdinalIgnoreCase for case-insensitive file system paths
             var comparisonType = StringComparison.OrdinalIgnoreCase;
 
