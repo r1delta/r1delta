@@ -375,7 +375,7 @@ namespace R1Delta
             }
 
             var totalNeeded = fileTotalBytes.Values.Sum();
-            var alreadyHave = fileReceivedBytes.Values.Where(kvp => !toDownload.Any(item => item.Dest.Equals(kvp.Key, StringComparison.OrdinalIgnoreCase))).Sum(kvp => kvp.Value); // Sum only files NOT in toDownload list
+            var alreadyHave = fileReceivedBytes.Values.Where(kvp => !toDownload.Any(item => item.Dest.Equals(kvp, StringComparison.OrdinalIgnoreCase))).Sum(kvp => kvp.Value); // Sum only files NOT in toDownload list
             progressUI.ReportProgress(alreadyHave, totalNeeded, 0.0);
 
             if (!toDownload.Any())

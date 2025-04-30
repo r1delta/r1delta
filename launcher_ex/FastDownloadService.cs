@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;   // For Marshal, InvalidComObjectException, COMException
@@ -73,7 +74,7 @@ public class FastDownloadService : IDisposable
     }
 
     // Added Helper Method
-    private IBackgroundCopyJob GetOrCreateJob(string url, string destAbsPath)
+    private BackgroundCopyJob GetOrCreateJob(string url, string destAbsPath)
     {
         // Ensure manager is available (should be, due to constructor wait)
         if (_bitsManager == null) throw new InvalidOperationException("BITS Manager not initialized.");
@@ -83,7 +84,7 @@ public class FastDownloadService : IDisposable
         try
         {
             // Use Uri for robust relative path calculation
-            var installRootUri = new Uri(_installRoot.EndsWith(Path.DirectorySeparatorChar) ? _installRoot : _installRoot + Path.DirectorySeparatorChar);
+            var installRootUri = new Uri(_installRoot.EndsWith(Path.DirectorySeparatorChar.ToString()) ? _installRoot : _installRoot + Path.DirectorySeparatorChar);
             var destAbsUri = new Uri(destAbsPath);
             relPath = Uri.UnescapeDataString(installRootUri.MakeRelativeUri(destAbsUri).ToString())
                          .Replace('/', Path.DirectorySeparatorChar); // Keep OS separator for consistency? Or force '/'? Let's force '/' for job name.
@@ -99,15 +100,15 @@ public class FastDownloadService : IDisposable
         string jobName = $"R1Delta|{relPath}";
         Debug.WriteLine($"[FastDownloadService] Searching/Creating job: {jobName}");
 
-        IEnumBackgroundCopyJobs enumJobs = null;
-        IBackgroundCopyJob job = null;
-        IEnumBackgroundCopyFiles filesEnum = null;
-        IBackgroundCopyFile fileInfo = null;
+        IEnumerable<BackgroundCopyJob> enumJobs = null;
+        BackgroundCopyJob job = null;
+        IEnumerable<BackgroundCopyFile> filesEnum = null;
+        BackgroundCopyFile fileInfo = null;
 
         try
         {
             // 2) Scan existing jobs
-            _bitsManager.EnumJobs(0, out enumJobs); // 0 = Current user jobs
+            enumJobs = _bitsManager.EnumerateJobs(false); // 0 = Current user jobs
             uint fetched;
             while (enumJobs.Next(1, out job, out fetched) == 0 && fetched == 1) // S_OK = 0
             {
@@ -129,7 +130,7 @@ public class FastDownloadService : IDisposable
                 string existingPath = null;
                 try
                 {
-                    job.EnumFiles(out filesEnum);
+                    filesEnum = job.EnumerateFiles();
                     if (filesEnum.Next(1, out fileInfo, out fetched) == 0 && fetched == 1) // S_OK = 0
                     {
                         existingPath = fileInfo.LocalName;
@@ -204,9 +205,6 @@ public class FastDownloadService : IDisposable
         {
             newJob.AddFile(url, destAbsPath);
             newJob.Priority = BackgroundCopyJobPriority.Foreground;
-            // Resilience tweaks:
-            newJob.SetNoProgressTimeout(120); // 2 minutes
-            newJob.SetMinimumRetryDelay(30);  // 30 seconds
             Debug.WriteLine($"[FastDownloadService] Created new job {newJob.Id}");
             return newJob;
         }
