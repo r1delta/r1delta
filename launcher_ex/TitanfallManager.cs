@@ -375,7 +375,9 @@ namespace R1Delta
             }
 
             var totalNeeded = fileTotalBytes.Values.Sum();
-            var alreadyHave = fileReceivedBytes.Values.Where(kvp => !toDownload.Any(item => item.Dest.Equals(kvp, StringComparison.OrdinalIgnoreCase))).Sum(kvp => kvp.Value); // Sum only files NOT in toDownload list
+            // Correct calculation for alreadyHave: Sum sizes from fileReceivedBytes where the key (dest path) is NOT in the toDownload list's Dest paths.
+            var toDownloadPaths = new HashSet<string>(toDownload.Select(item => item.Dest), StringComparer.OrdinalIgnoreCase);
+            var alreadyHave = fileReceivedBytes.Where(kvp => !toDownloadPaths.Contains(kvp.Key)).Sum(kvp => kvp.Value);
             progressUI.ReportProgress(alreadyHave, totalNeeded, 0.0);
 
             if (!toDownload.Any())
@@ -442,7 +444,8 @@ namespace R1Delta
 
                             // Calculate rolling speed
                             var now = stopwatch.Elapsed.TotalSeconds;
-                            history.Enqueue((now, overallProgress));
+                            // Explicitly name tuple elements
+                            history.Enqueue((Time: now, Progress: overallProgress));
                             while (history.Count > 1 && history.Peek().Time < now - rollingWindow)
                                 history.Dequeue();
 
@@ -452,7 +455,8 @@ namespace R1Delta
                                 double speed = 0;
                                 if (history.Count > 1)
                                 {
-                                    var (t0, p0) = history.Peek();
+                                    // Explicitly name destructured elements
+                                    (double t0, long p0) = history.Peek();
                                     var dt = now - t0;
                                     var dp = overallProgress - p0;
                                     if (dt > 0.01) speed = dp / dt;
@@ -498,16 +502,24 @@ namespace R1Delta
                     // Ensure this file's contribution is fully accounted for
                     lock (progressLock)
                     {
-                        var previousBytes = fileReceivedBytes[item.Dest];
-                        var finalDelta = item.Size - previousBytes;
-                        overallProgress += finalDelta;
+                        // Get the previously recorded bytes for this file (might be 0 or partial from resume)
+                        // Use TryGetValue for safety, although the key should exist
+                        fileReceivedBytes.TryGetValue(item.Dest, out var previousBytes);
+                        var finalDelta = item.Size - previousBytes; // Calculate remaining delta needed
+                        overallProgress += finalDelta; // Add only the remaining delta
                         fileReceivedBytes[item.Dest] = item.Size; // Mark as complete in dictionary
                         overallProgress = Clamp(overallProgress, 0, totalNeeded); // Clamp again
 
                         // Force one last UI update for this file completion if needed
                         var now = stopwatch.Elapsed.TotalSeconds;
                         double speed = 0; // Speed is less relevant on final update
-                         if (history.Count > 1) { var (t0, p0) = history.Peek(); var dt = now - t0; var dp = overallProgress - p0; if (dt > 0.01) speed = dp / dt; }
+                         if (history.Count > 1) // history.Count is a property, access directly
+                         {
+                             (double t0, long p0) = history.Peek();
+                             var dt = now - t0;
+                             var dp = overallProgress - p0;
+                             if (dt > 0.01) speed = dp / dt;
+                         }
                         progressUI.ReportProgress(overallProgress, totalNeeded, speed);
                         lastUpdate = now;
                     }
@@ -558,7 +570,7 @@ namespace R1Delta
                 {
                      Debug.WriteLine($"Warning: Final progress {overallProgress} does not match total {totalNeeded}.");
                      // Might indicate calculation issues or files changing size unexpectedly.
-                     // Decide if this should be an error or just a warning.
+                     // Decide if this should be an error or just a warning. For now, just warn.
                 }
 
 
@@ -649,6 +661,8 @@ namespace R1Delta
             public override Encoding Encoding => Encoding.UTF8;
             public override void WriteLine(string value) => Debug.WriteLine(value);
             public override void Write(string value) => Debug.Write(value);
+            // Add missing WriteLine() override
+            public override void WriteLine() => Debug.WriteLine(string.Empty);
         }
     }
 

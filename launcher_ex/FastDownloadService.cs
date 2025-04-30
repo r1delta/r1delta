@@ -6,6 +6,7 @@ using System.Runtime.InteropServices;   // For Marshal, InvalidComObjectExceptio
 using System.Threading;
 using System.Threading.Tasks;
 using usis.Net.Bits;                    // BITS interop
+using System.Linq;                      // For LINQ methods like FirstOrDefault
 
 public class FastDownloadService : IDisposable
 {
@@ -84,6 +85,7 @@ public class FastDownloadService : IDisposable
         try
         {
             // Use Uri for robust relative path calculation
+            // Ensure installRoot ends with a separator for MakeRelativeUri
             var installRootUri = new Uri(_installRoot.EndsWith(Path.DirectorySeparatorChar.ToString()) ? _installRoot : _installRoot + Path.DirectorySeparatorChar);
             var destAbsUri = new Uri(destAbsPath);
             relPath = Uri.UnescapeDataString(installRootUri.MakeRelativeUri(destAbsUri).ToString())
@@ -100,119 +102,121 @@ public class FastDownloadService : IDisposable
         string jobName = $"R1Delta|{relPath}";
         Debug.WriteLine($"[FastDownloadService] Searching/Creating job: {jobName}");
 
-        IEnumerable<BackgroundCopyJob> enumJobs = null;
-        BackgroundCopyJob job = null;
-        IEnumerable<BackgroundCopyFile> filesEnum = null;
-        BackgroundCopyFile fileInfo = null;
-
+        // Use try-finally to ensure job objects are disposed if not returned
+        BackgroundCopyJob foundJob = null;
         try
         {
-            // 2) Scan existing jobs
-            enumJobs = _bitsManager.EnumerateJobs(false); // 0 = Current user jobs
-            uint fetched;
-            while (enumJobs.Next(1, out job, out fetched) == 0 && fetched == 1) // S_OK = 0
+            // 2) Scan existing jobs using foreach
+            foreach (var currentJob in _bitsManager.EnumerateJobs(false)) // false = Current user jobs
             {
                 string currentJobName = null;
-                try { currentJobName = job.DisplayName; } catch { /* Ignore COM errors getting name */ }
+                bool disposeCurrentJob = true; // Assume we dispose unless it's the one we return
 
-                if (currentJobName != jobName)
-                {
-                    Marshal.ReleaseComObject(job); // Release job if name doesn't match
-                    job = null;
-                    continue;
-                }
-
-                // Found job by name, now check its state and validity
-                Debug.WriteLine($"[FastDownloadService] Found existing job {job.Id} with name {jobName}");
-                var state = job.State;
-
-                // If the destination file no longer exists on disk, cancel & re-create
-                string existingPath = null;
                 try
                 {
-                    filesEnum = job.EnumerateFiles();
-                    if (filesEnum.Next(1, out fileInfo, out fetched) == 0 && fetched == 1) // S_OK = 0
+                    try { currentJobName = currentJob.DisplayName; } catch { /* Ignore COM errors getting name */ }
+
+                    if (currentJobName != jobName)
                     {
-                        existingPath = fileInfo.LocalName;
+                        continue; // Move to the next job, currentJob will be disposed by finally block below
                     }
+
+                    // Found job by name, now check its state and validity
+                    Debug.WriteLine($"[FastDownloadService] Found existing job {currentJob.Id} with name {jobName}");
+                    var state = currentJob.State;
+
+                    // If the destination file no longer exists on disk, cancel & re-create
+                    string existingPath = null;
+                    BackgroundCopyFile fileInfo = null; // Use library type
+                    try
+                    {
+                        fileInfo = currentJob.EnumerateFiles().FirstOrDefault(); // Get first file
+                        if (fileInfo != null)
+                        {
+                            existingPath = fileInfo.LocalName;
+                        }
+                    }
+                    catch (COMException ex) { Debug.WriteLine($"[FastDownloadService] COM Error checking files for job {currentJob.Id}: {ex.Message}"); }
+                    finally
+                    {
+                        fileInfo?.Dispose(); // Dispose the file wrapper
+                    }
+
+                    if (string.IsNullOrEmpty(existingPath) || !File.Exists(existingPath))
+                    {
+                        Debug.WriteLine($"[FastDownloadService] Destination file '{existingPath ?? "null"}' missing for job {currentJob.Id}. Cancelling and recreating.");
+                        try { currentJob.Cancel(); } catch (COMException ex) { Debug.WriteLine($"[FastDownloadService] Error cancelling job {currentJob.Id}: {ex.Message}"); }
+                        // Let the finally block dispose the cancelled job, then break to create a new one
+                        break; // Exit foreach loop to create a new job
+                    }
+
+                    Debug.WriteLine($"[FastDownloadService] Job {currentJob.Id} state: {state}");
+                    // States you can resume from:
+                    if (state == BackgroundCopyJobState.Suspended ||
+                        state == BackgroundCopyJobState.Error ||
+                        state == BackgroundCopyJobState.TransientError ||
+                        state == BackgroundCopyJobState.Queued ||
+                        state == BackgroundCopyJobState.Connecting || // Can also resume from these potentially
+                        state == BackgroundCopyJobState.Transferring)
+                    {
+                        Debug.WriteLine($"[FastDownloadService] Resuming job {currentJob.Id} from state {state}.");
+                        disposeCurrentJob = false; // We are returning this job, don't dispose it
+                        foundJob = currentJob;
+                        return foundJob; // Return the existing job to be resumed
+                    }
+
+                    // Already transferred? Complete it now and return null (no download needed)
+                    if (state == BackgroundCopyJobState.Transferred)
+                    {
+                        Debug.WriteLine($"[FastDownloadService] Job {currentJob.Id} already transferred. Completing.");
+                        try { currentJob.Complete(); } catch (COMException ex) { Debug.WriteLine($"[FastDownloadService] Error completing job {currentJob.Id}: {ex.Message}"); }
+                        // Let the finally block dispose the completed job
+                        return null; // Signal that download is already complete
+                    }
+
+                    // Otherwise (Cancelled / Acknowledged) - tear down & recreate
+                    Debug.WriteLine($"[FastDownloadService] Job {currentJob.Id} in state {state}. Cancelling and recreating.");
+                    try { currentJob.Cancel(); } catch (COMException ex) { Debug.WriteLine($"[FastDownloadService] Error cancelling job {currentJob.Id}: {ex.Message}"); }
+                    // Let the finally block dispose the cancelled job, then break to create a new one
+                    break; // Exit foreach loop to create a new job
                 }
-                catch (COMException ex) { Debug.WriteLine($"[FastDownloadService] COM Error checking files for job {job.Id}: {ex.Message}"); }
                 finally
                 {
-                    if (fileInfo != null) { Marshal.ReleaseComObject(fileInfo); fileInfo = null; }
-                    if (filesEnum != null) { Marshal.ReleaseComObject(filesEnum); filesEnum = null; }
+                    // Dispose the job wrapper if it wasn't the one we decided to return
+                    if (disposeCurrentJob)
+                    {
+                        currentJob?.Dispose();
+                    }
                 }
-
-                if (string.IsNullOrEmpty(existingPath) || !File.Exists(existingPath))
-                {
-                    Debug.WriteLine($"[FastDownloadService] Destination file '{existingPath ?? "null"}' missing for job {job.Id}. Cancelling and recreating.");
-                    try { job.Cancel(); } catch (COMException ex) { Debug.WriteLine($"[FastDownloadService] Error cancelling job {job.Id}: {ex.Message}"); }
-                    Marshal.ReleaseComObject(job);
-                    job = null;
-                    break; // Exit loop to create a new job
-                }
-
-                Debug.WriteLine($"[FastDownloadService] Job {job.Id} state: {state}");
-                // States you can resume from:
-                if (state == BackgroundCopyJobState.Suspended ||
-                    state == BackgroundCopyJobState.Error ||
-                    state == BackgroundCopyJobState.TransientError ||
-                    state == BackgroundCopyJobState.Queued ||
-                    state == BackgroundCopyJobState.Connecting || // Can also resume from these potentially
-                    state == BackgroundCopyJobState.Transferring)
-                {
-                    Debug.WriteLine($"[FastDownloadService] Resuming job {job.Id} from state {state}.");
-                    return job; // Return the existing job to be resumed
-                }
-
-                // Already transferred? Complete it now and return null (no download needed)
-                if (state == BackgroundCopyJobState.Transferred)
-                {
-                    Debug.WriteLine($"[FastDownloadService] Job {job.Id} already transferred. Completing.");
-                    try { job.Complete(); } catch (COMException ex) { Debug.WriteLine($"[FastDownloadService] Error completing job {job.Id}: {ex.Message}"); }
-                    Marshal.ReleaseComObject(job);
-                    return null; // Signal that download is already complete
-                }
-
-                // Otherwise (Cancelled / Acknowledged) - tear down & recreate
-                Debug.WriteLine($"[FastDownloadService] Job {job.Id} in state {state}. Cancelling and recreating.");
-                try { job.Cancel(); } catch (COMException ex) { Debug.WriteLine($"[FastDownloadService] Error cancelling job {job.Id}: {ex.Message}"); }
-                Marshal.ReleaseComObject(job);
-                job = null;
-                break; // Exit loop to create a new job
-            }
+            } // End foreach
         }
         catch (COMException ex)
         {
             Debug.WriteLine($"[FastDownloadService] COM Error enumerating jobs: {ex.Message}");
-            // Clean up potentially acquired job object if error occurred mid-loop
-            if (job != null) { Marshal.ReleaseComObject(job); job = null; }
+            // Don't try to dispose foundJob here as it might be partially initialized or invalid
             throw; // Re-throw the exception
         }
-        finally
-        {
-            // Ensure enumerator is released
-            if (enumJobs != null) Marshal.ReleaseComObject(enumJobs);
-            // Ensure intermediate COM objects are released if loop exited unexpectedly
-             if (fileInfo != null) { Marshal.ReleaseComObject(fileInfo); }
-             if (filesEnum != null) { Marshal.ReleaseComObject(filesEnum); }
-        }
+        // If loop completes without returning/breaking, foundJob is still null
 
         // 3) No suitable existing job found - create a new one
         Debug.WriteLine($"[FastDownloadService] Creating new job for {jobName}");
-        var newJob = _bitsManager.CreateJob(jobName, BackgroundCopyJobType.Download);
+        BackgroundCopyJob newJob = null; // Initialize to null
         try
         {
+            newJob = _bitsManager.CreateJob(jobName, BackgroundCopyJobType.Download);
             newJob.AddFile(url, destAbsPath);
             newJob.Priority = BackgroundCopyJobPriority.Foreground;
+            // Resilience tweaks (moved from previous location):
+            newJob.SetNoProgressTimeout(120); // 2 minutes
+            newJob.SetMinimumRetryDelay(30);  // 30 seconds
             Debug.WriteLine($"[FastDownloadService] Created new job {newJob.Id}");
-            return newJob;
+            return newJob; // Return the newly created job
         }
         catch (Exception)
         {
-            // If adding file or setting properties fails, clean up the created job
-            try { newJob.Cancel(); } catch { /* Ignore */ }
-            newJob.Dispose(); // Release the COM object
+            // If creating job, adding file, or setting properties fails, clean up the created job
+            try { newJob?.Cancel(); } catch { /* Ignore */ }
+            newJob?.Dispose(); // Release the COM object via wrapper
             throw;
         }
     }
@@ -253,7 +257,10 @@ public class FastDownloadService : IDisposable
             {
                 // File already fully downloaded and job completed by GetOrCreateJob
                 Debug.WriteLine($"[FastDownloadService] Job for {Path.GetFileName(destinationPath)} already complete.");
-                DownloadProgressChanged?.Invoke(new FileInfo(destinationPath).Length, new FileInfo(destinationPath).Length); // Report 100%
+                // Ensure file exists before getting length
+                long fileSize = 0;
+                try { if (File.Exists(destinationPath)) fileSize = new FileInfo(destinationPath).Length; } catch {}
+                DownloadProgressChanged?.Invoke(fileSize, fileSize); // Report 100%
                 tcs.TrySetResult(true);
                 goto exitLoop; // Skip download logic
             }
@@ -300,6 +307,9 @@ public class FastDownloadService : IDisposable
                  {
                      // This case shouldn't be hit often due to GetOrCreateJob logic, but log if it does.
                      Debug.WriteLine($"[FastDownloadService] Job {job.Id} in unexpected state {initialState} before loop.");
+                     // If it's Transferred/Acknowledged/Cancelled, GetOrCreateJob should have handled it.
+                     // If it's Error/TransientError/Suspended, we resume above.
+                     // If it's Queued/Connecting/Transferring, we don't need to do anything.
                  }
             }
             else
@@ -332,7 +342,7 @@ public class FastDownloadService : IDisposable
                         goto exitLoop;
 
                     case BackgroundCopyJobState.Error:
-                        var error = job.GetErrorInfo();
+                        var error = job.GetErrorInfo(); // Use GetErrorInfo() from the wrapper
                         var errorMsg = $"BITS job failed: {error.Description} (0x{error.Code:X})";
                         Debug.WriteLine($"[FastDownloadService] Job {job.Id} failed: {error.Description}");
                         tcs.TrySetException(new BackgroundCopyException(errorMsg));
@@ -340,12 +350,12 @@ public class FastDownloadService : IDisposable
 
                     case BackgroundCopyJobState.Connecting:
                     case BackgroundCopyJobState.Transferring:
-                        var prog = job.RetrieveProgress();
+                        var prog = job.Progress; // Use Progress property from the wrapper
                         long done = (long)prog.BytesTransferred;
                         long total = (long)prog.BytesTotal;
                         // Ensure total is plausible (BITS sometimes reports 0 or -1 initially)
                         if (total <= 0) {
-                            try { total = new FileInfo(destinationPath).Length; } catch {} // Try to get size from potentially existing file
+                            try { if (File.Exists(destinationPath)) total = new FileInfo(destinationPath).Length; } catch {} // Try to get size from potentially existing file
                         }
                         if (done >= 0 && total > 0) // Only report if total seems valid
                             DownloadProgressChanged?.Invoke(done, total);
@@ -376,10 +386,10 @@ public class FastDownloadService : IDisposable
                     case BackgroundCopyJobState.TransientError:
                         // Waiting state, report current progress if available
                          Debug.WriteLine($"[FastDownloadService] Job {job.Id} in state {state}. Waiting.");
-                         var currentProg = job.RetrieveProgress();
+                         var currentProg = job.Progress; // Use Progress property
                          long currentDone = (long)currentProg.BytesTransferred;
                          long currentTotal = (long)currentProg.BytesTotal;
-                         if (currentTotal <= 0) { try { currentTotal = new FileInfo(destinationPath).Length; } catch {} }
+                         if (currentTotal <= 0) { try { if (File.Exists(destinationPath)) currentTotal = new FileInfo(destinationPath).Length; } catch {} }
                          if (currentDone >= 0 && currentTotal > 0)
                             DownloadProgressChanged?.Invoke(currentDone, currentTotal);
                         break;
