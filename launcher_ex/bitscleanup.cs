@@ -167,7 +167,7 @@ namespace BitsCleanup
         ///   - The job is stuck in TRANSFERRED state.
         ///   - The job hasn't been modified in over 7 days.
         /// </summary>
-        public static bool CombinedCleanupPredicate(BackgroundCopyJob job, string name, BackgroundCopyJobState state) // Updated type signature
+        public static bool CombinedCleanupPredicate(BackgroundCopyJob job, string name, BackgroundCopyJobState state)
         {
             // 1) Check non-R1Delta jobs using the Firefox predicate
             if (string.IsNullOrEmpty(name) || !name.StartsWith("R1Delta|", StringComparison.OrdinalIgnoreCase))
@@ -177,79 +177,48 @@ namespace BitsCleanup
                     Debug.WriteLine($"[BitsJanitor Predicate] Matched non-R1Delta job '{name}' via DefaultFirefoxPredicate.");
                     return true;
                 }
-                // If not R1Delta and not matched by Firefox rule, keep it.
                 return false;
             }
 
             // 2) R1Delta-specific cleanup logic:
             Debug.WriteLine($"[BitsJanitor Predicate] Evaluating R1Delta job: {name} (State: {state})");
 
-            // a) Orphaned file check
-            BackgroundCopyFile fileInfo = null; // Use library type
-            string targetPath = null;
-            bool fileExists = false;
-            try
-            {
-                // Use LINQ FirstOrDefault() on the IEnumerable<BackgroundCopyFile>
-                fileInfo = job.EnumerateFiles().FirstOrDefault();
-                if (fileInfo != null)
-                {
-                    targetPath = fileInfo.LocalName; // Access property from library type
-                    if (!string.IsNullOrEmpty(targetPath))
-                    {
-                        fileExists = File.Exists(targetPath);
-                    }
-                }
-                else
-                {
-                    // Job has no files? Consider this orphaned?
-                    Debug.WriteLine($"[BitsJanitor Predicate] R1Delta job '{name}' has no files associated.");
-                    // return true; // Optionally treat jobs with no files as needing cleanup
-                }
-            }
-            catch (COMException ex) { Debug.WriteLine($"[BitsJanitor Predicate] COM Error checking file for job {name}: {ex.Message}"); }
-            finally
-            {
-                // Dispose the file wrapper if obtained
-                fileInfo?.Dispose();
-            }
-
-            if (!fileExists && !string.IsNullOrEmpty(targetPath)) // Only trigger if we got a path but it doesn't exist
-            {
-                Debug.WriteLine($"[BitsJanitor Predicate] Matched R1Delta job '{name}': Target file '{targetPath}' does not exist (orphaned).");
-                return true;
-            }
-             // Handle case where targetPath is null/empty or fileInfo was null?
-             // If fileInfo was null, maybe the job is invalid and should be cleaned?
-             // Let's stick to cleaning only if the file path was determined but doesn't exist for now.
-
-            // b) TRANSFERRED but never completed (should ideally be handled by the app, but cleanup as fallback)
+            // b) TRANSFERRED but never completed
             if (state == BackgroundCopyJobState.Transferred)
             {
-                 Debug.WriteLine($"[BitsJanitor Predicate] Matched R1Delta job '{name}': Stuck in TRANSFERRED state.");
-                 return true;
+                Debug.WriteLine($"[BitsJanitor Predicate] Matched R1Delta job '{name}': Stuck in TRANSFERRED state.");
+                return true;
             }
 
             // c) Older than 7 days (based on modification time)
             try
             {
-                // Access ModificationTime property from the library's JobTimes struct
-                var modTime = job.ModificationTime; // This should be a DateTime directly
-                if (modTime != default(DateTime)) // Check if time is valid
+                var jobTimes = job.RetrieveTimes();
+                var modTime = jobTimes.ModificationTime;
+                if (modTime != default(DateTime) && modTime.Kind != DateTimeKind.Unspecified)
                 {
-                    var age = DateTime.UtcNow - modTime.ToUniversalTime(); // Ensure comparison is UTC vs UTC
+                    var age = DateTime.UtcNow - modTime.ToUniversalTime();
                     if (age > TimeSpan.FromDays(7))
                     {
                         Debug.WriteLine($"[BitsJanitor Predicate] Matched R1Delta job '{name}': Too old (Modified {modTime}, Age: {age.TotalDays:F1} days).");
                         return true;
                     }
                 }
+                else
+                {
+                    Debug.WriteLine($"[BitsJanitor Predicate] R1Delta job '{name}' has invalid modification time. Skipping age check.");
+                }
             }
-            catch (COMException ex) { Debug.WriteLine($"[BitsJanitor Predicate] COM Error getting times for job {name}: {ex.Message}"); }
-            // No ArgumentOutOfRangeException expected with DateTime property access
+            catch (COMException ex)
+            {
+                Debug.WriteLine($"[BitsJanitor Predicate] WARNING: COM Error getting times for job {name}: {ex.Message} (0x{ex.ErrorCode:X}). Skipping age check.");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[BitsJanitor Predicate] WARNING: Error getting times for job {name}: {ex.Message}. Skipping age check.");
+            }
 
-
-            // If none of the R1Delta cleanup conditions met, keep the job.
+            // If none of the cleanup conditions met, keep the job.
             Debug.WriteLine($"[BitsJanitor Predicate] No cleanup needed for R1Delta job: {name}");
             return false;
         }
