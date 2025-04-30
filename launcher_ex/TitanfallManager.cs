@@ -479,6 +479,7 @@ namespace R1Delta
                     }
                     finally
                     {
+                        token.ThrowIfCancellationRequested(); // Check cancellation after download completes
                         dl.DownloadProgressChanged -= OnProg;
                     }
 
