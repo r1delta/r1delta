@@ -639,9 +639,11 @@ namespace R1Delta
                         firstError = !errorReported;
                         if (firstError) errorReported = true;
                     }
-                    if (firstError) // Report only the first error encountered
+                    if (firstError)
+                    {
                         progressUI.ShowError($"Download error ({Path.GetFileName(item.Dest)}): {ex.Message}");
-
+                        linked.Cancel();
+                    }
                     // We don't re-throw here to allow other downloads to potentially finish,
                     // but the errorReported flag will cause the overall result to be false.
                 }
