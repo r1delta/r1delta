@@ -391,6 +391,10 @@ SQInteger SendDiscordClient(HSQUIRRELVM v)
 	if (sec != "") {
 		activity.GetSecrets().SetJoin(sec.c_str());
 	}
+
+	core->ActivityManager().RegisterCommand("%localappdata%/R1Delta/r1delta.exe");
+ 
+
 	core->ActivityManager().UpdateActivity(activity, [](discord::Result result) {
 		if (result != discord::Result::Ok) {
 			Msg("Discord: Failed to update activity: %d\n", result);
