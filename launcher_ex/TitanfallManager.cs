@@ -232,6 +232,27 @@ namespace R1Delta
                 }
 
                 Debug.WriteLine($"[ValidateGamePath] OK: {full}");
+                // --- BITS Cleanup ---
+                var logWriter = new DebugTextWriter();
+                try
+                {
+                    // 1. Clean up R1Delta jobs pointing to *other* directories
+                    Debug.WriteLine($"Running BITS cleanup for orphaned R1Delta jobs in ValidateGamePath...");
+                    var orphanPredicate = BitsJanitor.CreateOrphanedR1DeltaPredicate("INVALID");
+                    BitsJanitor.PurgeStaleJobs(orphanPredicate, logWriter);
+                    Debug.WriteLine("Orphaned R1Delta job cleanup finished.");
+
+                    // 2. Clean up general stale jobs (Mozilla, old/stuck R1Delta in *this* dir)
+                    Debug.WriteLine("Running general BITS cleanup (Mozilla, old/stuck R1Delta)...");
+                    BitsJanitor.PurgeStaleJobs(BitsJanitor.CombinedCleanupPredicate, logWriter);
+                    Debug.WriteLine("General BITS cleanup finished.");
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Warning: BITS cleanup failed: {ex.Message}");
+                    // Continue regardless of cleanup failure
+                }
+                // --- End BITS Cleanup ---
                 return true;
             }
             catch (Exception ex) when (
@@ -256,6 +277,27 @@ namespace R1Delta
         /// </summary>
         private static void EnsurePlaceholderVpkExists(string installDir)
         {
+            // --- BITS Cleanup ---
+            var logWriter = new DebugTextWriter();
+            try
+            {
+                // 1. Clean up R1Delta jobs pointing to *other* directories
+                Debug.WriteLine($"Running BITS cleanup for orphaned R1Delta jobs in EnsurePlaceholderVpkExists...");
+                var orphanPredicate = BitsJanitor.CreateOrphanedR1DeltaPredicate("INVALID");
+                BitsJanitor.PurgeStaleJobs(orphanPredicate, logWriter);
+                Debug.WriteLine("Orphaned R1Delta job cleanup finished.");
+
+                // 2. Clean up general stale jobs (Mozilla, old/stuck R1Delta in *this* dir)
+                Debug.WriteLine("Running general BITS cleanup (Mozilla, old/stuck R1Delta)...");
+                BitsJanitor.PurgeStaleJobs(BitsJanitor.CombinedCleanupPredicate, logWriter);
+                Debug.WriteLine("General BITS cleanup finished.");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Warning: BITS cleanup failed: {ex.Message}");
+                // Continue regardless of cleanup failure
+            }
+            // --- End BITS Cleanup ---
             var placeholder = Path.Combine(installDir, ValidationFileRelativePath);
             if (File.Exists(placeholder)) return;
 
