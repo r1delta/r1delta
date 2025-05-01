@@ -1,19 +1,281 @@
 ﻿<Window x:Class="launcher_ex.SetupWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="R1Delta Setup"
-        Height="470"
-        Width="840"
+        xmlns:shell="http://schemas.microsoft.com/winfx/2006/xaml/presentation/shell"
+        Height="430"
+        Width="850"
         WindowStartupLocation="CenterScreen"
         ResizeMode="NoResize"
         FontFamily="Arial"
-        FontSize="12" UseLayoutRounding="True"
-        Loaded="Window_Loaded"
-              Icon="{x:Null}"
-        >
+        FontSize="12" 
+        UseLayoutRounding="True"
+        Title="R1Delta"
+        Icon="pack://application:,,,/icon1.ico"
+        Loaded="Window_Loaded">
     <!-- Add Loaded event handler -->
+
+    <WindowChrome.WindowChrome>
+        <WindowChrome
+            ResizeBorderThickness="6"
+            CaptionHeight="43"
+            CornerRadius="25,25,10,10"
+            GlassFrameThickness="0">
+        </WindowChrome>
+    </WindowChrome.WindowChrome>
+
     <Window.Resources>
         <ResourceDictionary>
+            <Style x:Key="CloseButtonStyle" TargetType="Button">
+                <Setter Property="Width" Value="20" />
+                <Setter Property="Height" Value="20" />
+                <Setter Property="Background" Value="#FF720202" />
+                <Setter Property="BorderBrush" Value="Transparent" />
+                <Setter Property="Foreground" Value="White" />
+                <Setter Property="HorizontalAlignment" Value="Right" />
+                <Setter Property="VerticalAlignment" Value="Top" />
+                <Setter Property="FontSize" Value="9" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border Background="{TemplateBinding Background}">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter Property="Background" Value="#FF920202" />
+                                </Trigger>
+                                <Trigger Property="IsPressed" Value="true">
+                                    <Setter Property="Foreground" Value="#FFAAAAAA"/>
+                                    <!-- Dim text when disabled -->
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+            <Style x:Key="MinimizeButtonStyle" TargetType="Button">
+                <Setter Property="Width" Value="20" />
+                <Setter Property="Height" Value="20" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderBrush" Value="Transparent" />
+                <Setter Property="Foreground" Value="White" />
+                <Setter Property="FontWeight" Value="Bold" />
+                <Setter Property="HorizontalAlignment" Value="Right" />
+                <Setter Property="VerticalAlignment" Value="Top" />
+                <Setter Property="FontSize" Value="8" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border Background="{TemplateBinding Background}">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter Property="Background" Value="#fe191919" />
+                                </Trigger>
+                                <Trigger Property="IsPressed" Value="True">
+                                    <Setter Property="Background" Value="#ee0f0f0f" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!-- Dark theme colors -->
+            <Color x:Key="DarkBackgroundColor">#FF1E1E1E</Color>
+            <Color x:Key="DarkForegroundColor">#FFF0F0F0</Color>
+            <Color x:Key="DarkControlColor">#FF2D2D30</Color>
+            <Color x:Key="DarkBorderColor">#FF3E3E42</Color>
+            <Color x:Key="SomeHoverColor">#FF3A3A3A</Color>
+            <!-- Moved Hover Color -->
+
+            <!-- Brushes -->
+            <SolidColorBrush x:Key="WindowBackgroundBrush" Color="{StaticResource DarkBackgroundColor}"/>
+            <SolidColorBrush x:Key="TextBrush" Color="{StaticResource DarkForegroundColor}"/>
+            <SolidColorBrush x:Key="ControlBrush" Color="{StaticResource DarkControlColor}"/>
+            <SolidColorBrush x:Key="BorderBrushDark" Color="{StaticResource DarkBorderColor}"/>
+            <SolidColorBrush x:Key="SomeHoverColorBrush" Color="{StaticResource SomeHoverColor}" />
+            <!-- Moved Hover Brush -->
+
+            <!-- Focus Visual Style -->
+            <Style x:Key="WhiteFocusVisual">
+                <Setter Property="Control.Template">
+                    <Setter.Value>
+                        <ControlTemplate>
+                            <Rectangle Stroke="White" StrokeThickness="1" StrokeDashArray="1,2" />
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!-- Global Styles for common controls - DARK THEME -->
+            <Style TargetType="TextBlock">
+                <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            </Style>
+
+            <Style TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
+                <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                <Setter Property="Background" Value="{StaticResource ControlBrush}"/>
+                <Setter Property="BorderBrush" Value="{StaticResource BorderBrushDark}"/>
+                <Setter Property="VerticalContentAlignment" Value="Center"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="TextBox">
+                            <Border 
+                    Background="{TemplateBinding Background}" 
+                    BorderBrush="{TemplateBinding BorderBrush}" 
+                    BorderThickness="{TemplateBinding BorderThickness}" 
+                    CornerRadius="4">
+                                <ScrollViewer Margin="0" x:Name="PART_ContentHost"/>
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                <Setter Property="Background" Value="{StaticResource ControlBrush}" />
+                <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+                <Setter Property="BorderBrush" Value="{StaticResource BorderBrushDark}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border
+                    x:Name="Border"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="7">
+                                <ContentPresenter
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Margin="4" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Border" Property="Background" Value="{StaticResource SomeHoverColorBrush}" />
+                                </Trigger>
+                                <Trigger Property="IsPressed" Value="true">
+                                    <Setter TargetName="Border" Property="Opacity" Value="0.8" />
+                                    <Setter Property="Foreground" Value="#FFAAAAAA"/>
+                                    <!-- Dim text when disabled -->
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!-- Dark CheckBox Style (Applied by default to all CheckBoxes when this theme is loaded) -->
+            <Style TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}">
+                <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="CheckBox">
+                            <Grid x:Name="RootGrid" VerticalAlignment="Center" SnapsToDevicePixels="True" UseLayoutRounding="True">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <!-- The checkbox box -->
+                                <Border x:Name="Border"
+                          Width="17" Height="16"
+                          Background="{StaticResource ControlBrush}"
+                          BorderBrush="{StaticResource BorderBrushDark}"
+                          BorderThickness="1"
+                          VerticalAlignment="Center"
+                          HorizontalAlignment="Left"
+                          SnapsToDevicePixels="True"
+                          CornerRadius="2"
+                          UseLayoutRounding="True"/>
+                                <!-- Check Mark -->
+                                <Path x:Name="CheckMark"
+                              Data="M2,8 L6,12 L14,4"
+                              Stroke="{StaticResource TextBrush}"
+                              StrokeThickness="2"
+                              Visibility="Collapsed"
+                              VerticalAlignment="Center"
+                              HorizontalAlignment="Center"
+                              Grid.Column="0"
+                              SnapsToDevicePixels="True"
+                              UseLayoutRounding="True">
+                                    <Path.RenderTransform>
+                                        <TranslateTransform Y="-2"/>
+                                    </Path.RenderTransform>
+                                </Path>
+                                <!-- ContentPresenter for the label -->
+                                <ContentPresenter x:Name="contentPresenter"
+                                    Grid.Column="1"
+                                    VerticalAlignment="Center"
+                                    Margin="4,0,0,0"
+                                    RecognizesAccessKey="True"
+                                    ContentSource="Content"
+                                    SnapsToDevicePixels="True"
+                                    UseLayoutRounding="True"/>
+                            </Grid>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsChecked" Value="True">
+                                    <Setter TargetName="CheckMark" Property="Visibility" Value="Visible" />
+                                </Trigger>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter TargetName="Border" Property="Opacity" Value="0.5" />
+                                    <Setter TargetName="CheckMark" Property="Opacity" Value="0.5" />
+                                    <Setter Property="Foreground" Value="#FFAAAAAA"/>
+                                    <!-- Dim text when disabled -->
+                                </Trigger>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Border" Property="Background" Value="{StaticResource SomeHoverColorBrush}" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <Style TargetType="ProgressBar" BasedOn="{StaticResource {x:Type ProgressBar}}">
+                <Setter Property="Foreground" Value="#FF007ACC" />
+                <!-- Keep the blue progress, maybe adjust? -->
+                <Setter Property="Background" Value="{StaticResource ControlBrush}"/>
+                <Setter Property="BorderBrush" Value="{StaticResource BorderBrushDark}"/>
+            </Style>
+
+
+            <Style x:Key="FilePickerButtonStyle" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                <Setter Property="Background" Value="{StaticResource ControlBrush}" />
+                <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+                <Setter Property="BorderBrush" Value="{StaticResource BorderBrushDark}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border
+                    x:Name="Border"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="4">
+                                <ContentPresenter
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Margin="4" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Border" Property="Background" Value="{StaticResource SomeHoverColorBrush}" />
+                                </Trigger>
+                                <Trigger Property="IsPressed" Value="true">
+                                    <Setter TargetName="Border" Property="Opacity" Value="0.8" />
+                                    <Setter Property="Foreground" Value="#FFAAAAAA"/>
+                                    <!-- Dim text when disabled -->
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+
             <!-- Keep your scale transform -->
             <ScaleTransform x:Key="windowScaleTransform" ScaleX="2" ScaleY="2" />
 
@@ -39,27 +301,47 @@
             <!-- Content -->
         </Grid.RowDefinitions>
 
+        <Grid.Background>
+            <ImageBrush ImageSource="/menu_background_imc.png" Stretch="UniformToFill" />
+        </Grid.Background>
+
+
         <!-- Header -->
         <!-- Remove explicit Background/BorderBrush -->
         <Border x:Name="HeaderBorder"
-            Grid.Row="0" BorderThickness="0,0,0,1">
-            <Grid Margin="8">
+            Grid.Row="0" BorderThickness="0,0,0,0">
+            <Grid Margin="8,4,8,12">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="206*"/>
+                    <ColumnDefinition Width="3*"/>
+                    <ColumnDefinition Width="161*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <!-- SetupTitleBarText already has x:Name -->
                 <TextBlock Grid.Column="1" Text="Welcome to R1Delta!"
-                           FontWeight="Bold" VerticalAlignment="Center"
-                           FontSize="22" Margin="1,0,0,0"
-                           x:Name="SetupTitleBarText"/>
-                <Image Grid.Column="2" Source="pack://application:,,,/r1delta_logo.png"
-                       Width="32" Height="32" Margin="8,0,0,0"
+                           FontWeight="Bold" VerticalAlignment="Top"
+                           FontSize="22" Margin="1,16,0,0"
+                           x:Name="SetupTitleBarText" Grid.ColumnSpan="3"/>
+                <Image Grid.Column="4" Source="pack://application:,,,/r1delta_logo.png"
+                       Width="32" Height="32" Margin="8,13,0,0"
                        VerticalAlignment="Top"/>
             </Grid>
         </Border>
 
+        <Border Height="43" VerticalAlignment="Top">
+            <DockPanel LastChildFill="False" WindowChrome.IsHitTestVisibleInChrome="True">
+                <!-- Title -->
+
+                <!-- Close Button -->
+                <Button Content="X" DockPanel.Dock="Right" VerticalAlignment="Top" HorizontalAlignment="Right" Width="20" Height="12" Style="{StaticResource CloseButtonStyle}" 
+                        Click="OnCloseButtonClicked"/>
+
+                <!-- Minimize Button -->
+                <Button Content="—" DockPanel.Dock="Right" VerticalAlignment="Top" HorizontalAlignment="Right" Width="20" Height="12" Style="{StaticResource MinimizeButtonStyle}"
+                        Click="OnMinimizeButtonClicked"/>
+            </DockPanel>
+        </Border>
 
         <!-- Main content area -->
         <Grid Grid.Row="1" Margin="8" Grid.RowSpan="2">
@@ -69,14 +351,6 @@
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
-
-                <Image Grid.Column="0"
-                       Source="pack://application:,,,/setup_sidebar.png"
-                       Width="77"
-                       Margin="-1,0,10,0"
-                       Height="126"
-                       Stretch="Fill"
-                       VerticalAlignment="Top"/>
                 <DockPanel Grid.Column="1" LastChildFill="False">
                     <Grid DockPanel.Dock="Top">
                         <Grid.RowDefinitions>
@@ -86,10 +360,10 @@
 
                         <!-- Remove explicit Foreground -->
                         <TextBlock Grid.Row="0"
-                                   Margin="0,0,0,10"
+                                   Margin="0,-13,0,23"
                                    Text="To play, please point us to your Titanfall directory. Don't have the game? It'll be installed there instead. (13 GB required, 191.8 GB available on C:)"
                                    TextWrapping="Wrap"
-                                   x:Name="InstructionsTextBlock"/>
+                                   x:Name="InstructionsTextBlock" FontSize="10"/>
 
                         <Grid Grid.Row="1">
                             <Grid.RowDefinitions>
@@ -105,32 +379,38 @@
                             <!-- Remove explicit Foreground/Background -->
                             <TextBox x:Name="PathTextBox" Grid.Row="0" Grid.Column="0"
                                      Height="22"
-                                     Text="C:\Users\r3muxd\AppData\Local\R1Delta\" />
+                                     Text="C:\Users\r3muxd\AppData\Local\R1Delta\" FontSize="10" HorizontalAlignment="Left" Margin="0,-11,0,13" Width="285" />
                             <!-- Keep specific Foreground for the Emoji/Icon button if desired -->
                             <Button x:Name="BrowseButton" ToolTip="Browse for directory"
-                                    Content="📂" Grid.Row="0" Grid.Column="1"
-                                    Margin="8,0,0,0" Click="OnBrowseClicked"
+                                    Content="📂"
+                                    Margin="290,-11,0,0" Click="OnBrowseClicked"
                                     Foreground="Orange"
-                                    Width="64" Height="22" VerticalAlignment="Center"/>
+                                    Width="35" Height="22
+                                    
+                                    " VerticalAlignment="Top" FontSize="11" HorizontalAlignment="Left" Style="{StaticResource FilePickerButtonStyle}"/>
                             <!-- Remove explicit Foreground -->
-                            <TextBlock Text="Launch arguments:" Grid.Row="1" Grid.Column="0"
-                                       Margin="0,10,0,2"/>
+                            <TextBlock Text="Launch Arguments:" Grid.Row="1" Grid.Column="0"
+                                       Margin="0,0,0,12" FontSize="11" FontWeight="Bold"/>
                             <!-- Remove explicit Foreground/Background -->
-                            <TextBox x:Name="LaunchArgsTextBox" Grid.Row="2" Grid.Column="0"
-                                     Height="22" />
-                            <Button Content="OK" Grid.Row="2" Grid.Column="1"
-                                    VerticalAlignment="Center" HorizontalAlignment="Right"
-                                    Margin="8,0,0,0" Click="OnPathOkClicked"
-                                    Width="64" Height="22" />
+                            <TextBox x:Name="LaunchArgsTextBox" Grid.Row="1" Grid.Column="0" FontSize="8" Margin="0,17,86,36" Grid.RowSpan="2" />
+                            <Button x:Name="PlayOrInstallButton" Content="Play" Grid.Row="2" Grid.Column="1" HorizontalAlignment="Left"
+                                    Margin="6,26,0,-6" Click="OnPathOkClicked"
+                                    Width="68" FontWeight="Bold" Height="22" FontSize="9" />
                         </Grid>
                     </Grid>
                 </DockPanel>
                 <!-- Remove explicit Style and Foreground -->
                 <CheckBox x:Name="DoNotShowAgainCheckbox"
                           Content=" Do not show this window again when I launch R1Delta."
-                          Margin="0,135,0,0" Grid.ColumnSpan="2"
-                          VerticalAlignment="Center"
-                          VerticalContentAlignment="Center" />
+                          Margin="0,123,173,0" Grid.ColumnSpan="2"
+                          VerticalAlignment="Top"
+                          VerticalContentAlignment="Center"
+                          Checked="DoNotShowAgainCheckbox_Checked"
+                          Height="20">
+                    <CheckBox.LayoutTransform>
+                        <ScaleTransform ScaleX="0.5" ScaleY="0.5" />
+                    </CheckBox.LayoutTransform>
+                </CheckBox>
 
             </Grid>
             <!-- End PathSelectionPanel -->
@@ -145,12 +425,12 @@
                 <StackPanel Grid.Row="1" Orientation="Vertical">
                     <!-- Remove explicit Foreground -->
                     <TextBlock x:Name="StatusText" Text="Downloading files (0 / 0)..."
-                               Margin="2,0,0,0"/>
-                    <ProgressBar x:Name="ProgressBar" Height="20" Minimum="0" Maximum="100" Margin="3,5,0,0"/>
+                               Margin="2,0,0,0" FontSize="10"/>
+                    <ProgressBar x:Name="ProgressBar" Height="18" Minimum="0" Maximum="100" Margin="3,5,0,0"/>
                 </StackPanel>
                 <StackPanel Grid.Row="2" Orientation="Horizontal" VerticalAlignment="Bottom"
                             HorizontalAlignment="Right" Margin="0,10,0,0">
-                    <Button Content="Cancel" Width="64" x:Name="CancelButton" Height="20"
+                    <Button Content="Cancel" Width="64" x:Name="CancelButton" Height="22" FontSize="11"
                             Click="OnCancelDownloadClicked"/>
                 </StackPanel>
             </Grid>
