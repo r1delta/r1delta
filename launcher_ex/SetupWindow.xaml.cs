@@ -640,6 +640,13 @@ namespace launcher_ex
             estimatedTimeLeftRun.FontSize = 8;
             estimatedTimeLeftRun.FontWeight = FontWeights.Bold;
             StatusText.Inlines.Add(estimatedTimeLeftRun);
+            Run speedLeadup = new Run(" at ");
+            speedLeadup.FontSize = 8;
+            StatusText.Inlines.Add(speedLeadup);
+            Run speedRun = new Run(speedStr);
+            speedRun.FontSize = 8;
+            speedRun.FontWeight = FontWeights.Bold;
+            StatusText.Inlines.Add(speedRun);
             Run setupInfo = new Run("\nSetup will launch the game automatically when complete.");
             setupInfo.FontSize = 6;
             StatusText.Inlines.Add(setupInfo);
