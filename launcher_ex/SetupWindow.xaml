@@ -113,7 +113,7 @@
                                        Margin="0,4,0,8" FontSize="11" FontWeight="Bold"/>
                             <!-- Remove explicit Foreground/Background -->
                             <TextBox x:Name="LaunchArgsTextBox" Grid.Row="1" Grid.Column="0" FontSize="8" Margin="0,21,86,32" Grid.RowSpan="2" />
-                            <Button Content="Play" Grid.Row="2" Grid.Column="1" HorizontalAlignment="Left"
+                            <Button x:Name="PlayOrInstallButton" Content="Play" Grid.Row="2" Grid.Column="1" HorizontalAlignment="Left"
                                     Margin="6,18,0,2" Click="OnPathOkClicked"
                                     Width="68" FontWeight="Bold" Height="22" FontSize="9" />
                         </Grid>

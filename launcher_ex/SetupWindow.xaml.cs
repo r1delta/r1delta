@@ -93,7 +93,18 @@ namespace launcher_ex
 
 
             UpdateInstructionsText();
+            UpdatePlayOrInstallButton();
             PathTextBox.TextChanged += PathTextBox_TextChanged;
+        }
+
+        private void UpdatePlayOrInstallButton()
+        {
+            string installPath = PathTextBox.Text;
+
+            if (TitanfallManager.ValidateGamePath(installPath, _originalLauncherDir))
+                PlayOrInstallButton.Content = "Play";
+            else
+                PlayOrInstallButton.Content = "Install";
         }
 
         private void Window_Loaded(object sender, RoutedEventArgs e) => ApplyTheme();
@@ -283,7 +294,8 @@ namespace launcher_ex
             }
             catch { /* Ignore errors setting initial directory */ }
 
-            if (dialog.ShowDialog() == CommonFileDialogResult.Ok) { PathTextBox.Text = dialog.FileName; }
+            if (dialog.ShowDialog() == CommonFileDialogResult.Ok) { PathTextBox.Text = dialog.FileName; UpdatePlayOrInstallButton(); }
+
         }
 
         private void PathTextBox_TextChanged(object sender, TextChangedEventArgs e)
