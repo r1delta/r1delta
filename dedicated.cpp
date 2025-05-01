@@ -186,18 +186,17 @@ __int64 Detour_NET_OutOfBandPrintf(int sock, void* adr, const char* fmt, ...) {
 	return Original_NET_OutOfBandPrintf(sock, adr, "%s", buffer);
 }
 
-typedef __int64 (*bf_write__WriteUBitLongType)(bf_write* a1, unsigned int a2, signed int a3);
+typedef void (*bf_write__WriteUBitLongType)(bf_write* a1, unsigned int a2, signed int a3);
 bf_write__WriteUBitLongType bf_write__WriteUBitLongOriginal;
-__int64 __fastcall bf_write__WriteUBitLong(bf_write* a1, unsigned int a2, signed int a3)
+void __forceinline __fastcall bf_write__WriteUBitLong(bf_write* a1, unsigned int a2, signed int a3)
 {
 	uintptr_t engineDS = G_engine_ds;
-	auto ret = bf_write__WriteUBitLongOriginal(a1, a2, a3);
-	if (uintptr_t(_ReturnAddress()) == (engineDS + 0x51018) || uintptr_t(_ReturnAddress()) == (engineDS + 0x5101D)) {
-		a1->WriteOneBit(0);
-		a1->WriteOneBit(0);
-		a1->WriteUBitLong(0, 12);
+	bf_write__WriteUBitLongOriginal(a1, a2, a3);
+	if (a1 && uintptr_t(_ReturnAddress()) == (engineDS + 0x5101D) && !a1->IsOverflowed() && a1->GetNumBitsLeft() >= 14) {
+		bf_write__WriteUBitLongOriginal(a1, 0, 1); // use engine ver in case our struct is wrong somehow?
+		bf_write__WriteUBitLongOriginal(a1, 0, 1);
+		bf_write__WriteUBitLongOriginal(a1, 0, 12);
 	}
-	return ret;
 }
 // --- Game Function Pointers ---
 // Original function we are hooking
