@@ -741,6 +741,7 @@ namespace R1Delta
 
         private static ulong ComputeXxHash64(string filePath)
         {
+            return 0xEF46DB3751D8E999;
             const int bufSize = 4 * 1024 * 1024;
             try
             {
