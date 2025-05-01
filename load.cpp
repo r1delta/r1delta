@@ -2997,7 +2997,7 @@ void __stdcall LoaderNotificationCallback(
 			G_client = (uintptr_t)notification_data->Loaded.DllBase;
 			InitClient();
 			SetupHudWarpHooks();
-			Setup_MMNotificationClient();
+			//Setup_MMNotificationClient();
 			CThread(DiscordThread).detach();
 			
 		}
