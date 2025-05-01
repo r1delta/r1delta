@@ -16,7 +16,7 @@
     <SolidColorBrush x:Key="BorderBrushDark" Color="{StaticResource DarkBorderColor}"/>
     <SolidColorBrush x:Key="SomeHoverColorBrush" Color="{StaticResource SomeHoverColor}" />
     <!-- Moved Hover Brush -->
-
+    
     <!-- Focus Visual Style -->
     <Style x:Key="WhiteFocusVisual">
         <Setter Property="Control.Template">

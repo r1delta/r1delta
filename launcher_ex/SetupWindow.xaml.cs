@@ -494,6 +494,17 @@ namespace launcher_ex
             var result = MessageBox.Show(this, "Are you sure you want to cancel the download?", "Confirm Cancellation", MessageBoxButton.YesNo, MessageBoxImage.Warning);
             if (result == MessageBoxResult.Yes) { CancelButton.IsEnabled = false; StatusText.Text = "Canceling..."; OnCancelRequested?.Invoke(); }
         }
+
+        private void OnCloseButtonClicked(object sender, RoutedEventArgs e)
+        {
+            Environment.Exit(0);
+        }
+
+        private void OnMinimizeButtonClicked(object sender, RoutedEventArgs e)
+        {
+            WindowState = WindowState.Minimized;
+        }
+
         // --- Helper Methods ---
 
         private string FormatBytesPerSec(double bytesPerSec)
