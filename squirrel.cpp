@@ -731,7 +731,92 @@ int GetMinimumR1DVersion(HSQUIRRELVM v)
 	return 1;
 }
 
+struct CRecipientFilter {
+	char pad[58];
+};
 
+int64 UserMsgBegin_Wrapper(int64_t filter, const char* name) {
+	auto UserMsgBegin = reinterpret_cast<int (*)(int64_t, const char**)>(G_server + 0x629910);
+	auto value = (0x00000200DA9BEBE0);
+	auto v6 = UserMsgBegin(0, &name);
+	if (v6 == -1) {
+		Error("UserMessageBegin:  Unregistered message '%s'\n", name);
+	}
+	auto ServerCreateMessage = reinterpret_cast<int64 (*)(void*, int64_t, int64, const char*, char)>(g_r1oCVEngineServerInterface[42]);
+	return ServerCreateMessage(g_r1oCVEngineServerInterface, filter, v6, name, 1);
+
+}
+
+void EndMessage() {
+	auto ServerEndMessage = reinterpret_cast<int64(*)(void*)>(g_r1oCVEngineServerInterface[43]);
+	ServerEndMessage(g_r1oCVEngineServerInterface);
+}
+
+
+
+void ConstructCRecipientFilter(void* a1)
+{
+	// 1) patch in the vtable pointer:
+	void** vftable = reinterpret_cast<void**>(G_server + 0x07C9298);
+	*reinterpret_cast<void***>(a1) = vftable;
+
+	// 2) zero the rest of the fields at offsets 8,16,24,32,40,48:
+	//    – WORD at +8
+	*reinterpret_cast<uint16_t*>  (reinterpret_cast<uint8_t*>(a1) + 8) = 0;
+	//    – QWORDs at +16, +24, +32
+	*reinterpret_cast<uint64_t*>  (reinterpret_cast<uint8_t*>(a1) + 16) = 0;
+	*reinterpret_cast<uint64_t*>  (reinterpret_cast<uint8_t*>(a1) + 24) = 0;
+	*reinterpret_cast<uint64_t*>  (reinterpret_cast<uint8_t*>(a1) + 32) = 0;
+	//    – DWORD at +40
+	*reinterpret_cast<uint32_t*>  (reinterpret_cast<uint8_t*>(a1) + 40) = 0;
+	//    – WORD at +48
+	*reinterpret_cast<uint16_t*>  (reinterpret_cast<uint8_t*>(a1) + 48) = 0;
+}
+
+void SendChatMsg(int fromIndex,const char* msg,bool team)
+{
+	//int64 filter{};
+	Msg("Msg %s\n", msg);
+	CreateInterfaceFn CreateIntServer = (CreateInterfaceFn)(GetProcAddress((HMODULE)G_server, "CreateInterface"));
+	if (!CreateIntServer) {
+		Msg("Failed to get CreateInterface function\n");
+		return;
+	}
+	CRecipientFilter filter;
+	auto DestoryFilter = reinterpret_cast<void (*)(int64,bool)>(G_server + 0x1E78D0);
+	auto MessageWriteByte = reinterpret_cast<void (*)(int64, int, int)>(G_server + 0x142FA0);
+	auto MessageWriteString = reinterpret_cast<void (*)(int64,const char*)>(G_server + 0x663AF0);
+	auto MessageWriteBool = reinterpret_cast<void (*)(bool)>(G_server + 0x14AB60);
+	
+	ConstructCRecipientFilter(&filter);
+	
+
+	auto CRecipientFilter__AddAllPlayers = reinterpret_cast<int64(*)(int64_t)>(G_server + 0x1E7BA0);  // adjust “baseAddress” to your module’s load base);
+
+	// 4) Finally call it, passing the address of your fakeFilter (cast to int64):
+	auto res = CRecipientFilter__AddAllPlayers(reinterpret_cast<int64_t>(&filter));
+	auto v3 = UserMsgBegin_Wrapper(reinterpret_cast<int64_t>(&filter), "SayText");
+	int64_t* activeMsg = reinterpret_cast<int64_t*>(G_server + 0xC31058);
+	MessageWriteByte(v3, fromIndex, 8);
+	*activeMsg = v3;
+	MessageWriteString(0, msg);
+	MessageWriteBool(team);
+	MessageWriteBool(false);
+	EndMessage();
+	DestoryFilter(reinterpret_cast<int64_t>(&filter),0);
+
+
+}
+
+void SendChatWrapper(HSQUIRRELVM v) {
+	const char* msg;
+	sq_getstring(v, 2, &msg);
+	if (msg == nullptr) {
+		Msg("SendChatWrapper: msg is null\n");
+		return;
+	}
+	//SendChatMsg(0,msg,false);
+}
 
 // Function to initialize all SQVM functions
 bool GetSQVMFuncs() {
@@ -815,6 +900,17 @@ bool GetSQVMFuncs() {
 		 SCRIPT_CONTEXT_UI,
 		"Localize",
 		(SQFUNCTION)Script_Localize,
+		".s", // String
+		2,      // Expects 2 parameters
+		"void",    // Returns a string
+		"str",
+		"Set a persistent data value"
+	);
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER,
+		"SendChatMsg",
+		(SQFUNCTION)SendChatWrapper,
 		".s", // String
 		2,      // Expects 2 parameters
 		"void",    // Returns a string
