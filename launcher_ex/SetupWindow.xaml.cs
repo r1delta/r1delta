@@ -19,6 +19,7 @@ using System.Runtime.InteropServices;
 using System.Windows.Interop;
 using System.Text;
 using System.Windows.Documents;
+using System.Windows.Media.Imaging;
 
 namespace launcher_ex
 {
@@ -100,6 +101,8 @@ namespace launcher_ex
         private void ApplyTheme()
         {
             bool useDarkTheme = false; // Default to light
+
+            this.Icon = new BitmapImage(new Uri("pack://application:,,,/icon1.ico"));
 
             try
             {

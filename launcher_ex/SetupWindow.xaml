@@ -8,9 +8,9 @@
         FontFamily="Arial"
         FontSize="12" 
         UseLayoutRounding="True"
-        Loaded="Window_Loaded"
-              Icon="{x:Null}"
-        >
+        Title="R1Delta"
+        Icon="pack://application:,,,/icon1.ico"
+        Loaded="Window_Loaded">
     <!-- Add Loaded event handler -->
     <Window.Resources>
         <ResourceDictionary>
@@ -112,10 +112,10 @@
                             <TextBlock Text="Launch Arguments:" Grid.Row="1" Grid.Column="0"
                                        Margin="0,4,0,8" FontSize="11" FontWeight="Bold"/>
                             <!-- Remove explicit Foreground/Background -->
-                            <TextBox x:Name="LaunchArgsTextBox" Grid.Row="1" Grid.Column="0" FontSize="10" Margin="0,21,137,32" Grid.RowSpan="2" />
+                            <TextBox x:Name="LaunchArgsTextBox" Grid.Row="1" Grid.Column="0" FontSize="8" Margin="0,21,86,32" Grid.RowSpan="2" />
                             <Button Content="Play" Grid.Row="2" Grid.Column="1" HorizontalAlignment="Left"
                                     Margin="6,18,0,2" Click="OnPathOkClicked"
-                                    Width="68" FontWeight="Bold" Height="22" FontSize="11" />
+                                    Width="68" FontWeight="Bold" Height="22" FontSize="9" />
                         </Grid>
                     </Grid>
                 </DockPanel>
