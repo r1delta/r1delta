@@ -111,34 +111,34 @@ namespace launcher_ex
 
         private void ApplyTheme()
         {
-            bool useDarkTheme = false; // Default to light
+            bool useDarkTheme = true; // Default to light
 
             this.Icon = new BitmapImage(new Uri("pack://application:,,,/icon1.ico"));
 
-            try
-            {
-                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize"))
-                {
-                    if (key != null)
-                    {
-                        object registryValueObject = key.GetValue("AppsUseLightTheme");
-                        if (registryValueObject != null)
-                        {
-                            int registryValue = (int)registryValueObject;
-                            if (registryValue == 0) // Dark Theme is Active
-                            {
-                                useDarkTheme = true;
-                            }
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error reading theme registry key: {ex.Message}");
-                // Defaulting to light theme on error
-                useDarkTheme = false;
-            }
+            //try
+            //{
+            //    using (RegistryKey key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize"))
+            //    {
+            //        if (key != null)
+            //        {
+            //            object registryValueObject = key.GetValue("AppsUseLightTheme");
+            //            if (registryValueObject != null)
+            //            {
+            //                int registryValue = (int)registryValueObject;
+            //                if (registryValue == 0) // Dark Theme is Active
+            //                {
+            //                    useDarkTheme = true;
+            //                }
+            //            }
+            //        }
+            //    }
+            //}
+            //catch (Exception ex)
+            //{
+            //    Console.WriteLine($"Error reading theme registry key: {ex.Message}");
+            //    // Defaulting to light theme on error
+            //    useDarkTheme = false;
+            //}
 
             // --- Apply the chosen theme ---
             if (useDarkTheme)
