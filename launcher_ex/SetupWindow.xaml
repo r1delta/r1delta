@@ -105,9 +105,11 @@
                             <!-- Keep specific Foreground for the Emoji/Icon button if desired -->
                             <Button x:Name="BrowseButton" ToolTip="Browse for directory"
                                     Content="📂"
-                                    Margin="290,-2,0,0" Click="OnBrowseClicked"
+                                    Margin="290,-1,0,0" Click="OnBrowseClicked"
                                     Foreground="Orange"
-                                    Width="35" Height="22" VerticalAlignment="Top" FontSize="11" HorizontalAlignment="Left"/>
+                                    Width="35" Height="22
+                                    
+                                    " VerticalAlignment="Top" FontSize="11" HorizontalAlignment="Left"/>
                             <!-- Remove explicit Foreground -->
                             <TextBlock Text="Launch Arguments:" Grid.Row="1" Grid.Column="0"
                                        Margin="0,4,0,8" FontSize="11" FontWeight="Bold"/>
