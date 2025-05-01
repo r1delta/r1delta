@@ -2,11 +2,10 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="R1Delta Setup"
-        Height="470"
-        Width="840"
+        Height="375"
+        Width="630"
         WindowStartupLocation="CenterScreen"
         ResizeMode="NoResize"
-        FontFamily="Arial"
         FontSize="12" UseLayoutRounding="True"
         Loaded="Window_Loaded"
               Icon="{x:Null}"
@@ -15,13 +14,7 @@
     <Window.Resources>
         <ResourceDictionary>
             <!-- Keep your scale transform -->
-            <ScaleTransform x:Key="windowScaleTransform" ScaleX="2" ScaleY="2" />
-
-            <!-- MERGED DICTIONARIES FIRST -->
-            <ResourceDictionary.MergedDictionaries>
-                <!-- This base theme is loaded regardless of light/dark mode -->
-                <ResourceDictionary Source="/PresentationFramework.Classic,Version=4.0.0.0,Culture=neutral,PublicKeyToken=31bf3856ad364e35,processorArchitecture=MSIL;component/themes/Classic.xaml" />
-            </ResourceDictionary.MergedDictionaries>
+            <ScaleTransform x:Key="windowScaleTransform" ScaleX="1.5" ScaleY="1.5" />
 
             <!-- No theme-specific resources here anymore -->
 
@@ -51,7 +44,7 @@
                 </Grid.ColumnDefinitions>
                 <!-- SetupTitleBarText already has x:Name -->
                 <TextBlock Grid.Column="1" Text="Welcome to R1Delta!"
-                           FontWeight="Bold" VerticalAlignment="Center"
+                           FontWeight="Bold" VerticalAlignment="Top"
                            FontSize="22" Margin="1,0,0,0"
                            x:Name="SetupTitleBarText"/>
                 <Image Grid.Column="2" Source="pack://application:,,,/r1delta_logo.png"
@@ -74,7 +67,7 @@
                        Source="pack://application:,,,/setup_sidebar.png"
                        Width="77"
                        Margin="-1,0,10,0"
-                       Height="126"
+                       Height="130"
                        Stretch="Fill"
                        VerticalAlignment="Top"/>
                 <DockPanel Grid.Column="1" LastChildFill="False">
@@ -118,7 +111,7 @@
                             <!-- Remove explicit Foreground/Background -->
                             <TextBox x:Name="LaunchArgsTextBox" Grid.Row="2" Grid.Column="0"
                                      Height="22" />
-                            <Button Content="OK" Grid.Row="2" Grid.Column="1"
+                            <Button Content="Play" Grid.Row="2" Grid.Column="1"
                                     VerticalAlignment="Center" HorizontalAlignment="Right"
                                     Margin="8,0,0,0" Click="OnPathOkClicked"
                                     Width="64" Height="22" />
@@ -158,4 +151,5 @@
         </Grid>
         <!-- End Main content area Grid -->
     </Grid>
+
 </Window>
