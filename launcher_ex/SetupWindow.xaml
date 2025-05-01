@@ -101,11 +101,11 @@
                             <!-- Remove explicit Foreground/Background -->
                             <TextBox x:Name="PathTextBox" Grid.Row="0" Grid.Column="0"
                                      Height="22"
-                                     Text="C:\Users\r3muxd\AppData\Local\R1Delta\" FontSize="10" HorizontalAlignment="Left" Margin="0,-1,0,3" Width="249" />
+                                     Text="C:\Users\r3muxd\AppData\Local\R1Delta\" FontSize="10" HorizontalAlignment="Left" Margin="0,-1,0,3" Width="285" />
                             <!-- Keep specific Foreground for the Emoji/Icon button if desired -->
                             <Button x:Name="BrowseButton" ToolTip="Browse for directory"
                                     Content="📂"
-                                    Margin="254,-1,0,0" Click="OnBrowseClicked"
+                                    Margin="290,-2,0,0" Click="OnBrowseClicked"
                                     Foreground="Orange"
                                     Width="35" Height="22" VerticalAlignment="Top" FontSize="11" HorizontalAlignment="Left"/>
                             <!-- Remove explicit Foreground -->
