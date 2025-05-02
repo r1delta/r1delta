@@ -26,12 +26,10 @@ namespace launcher_ex
     public partial class UpdateProgressWindow : Window
     {
         bool _canceled;
-        bool _applying;
         public bool Canceled => _canceled;
 
         public UpdateProgressWindow()
         {
-            _applying = false;
             InitializeComponent();
         }
 
@@ -42,45 +40,17 @@ namespace launcher_ex
         {
             Dispatcher.Invoke(() =>
             {
-                if (_applying)
-                {
-                    ProgressBar.Value = percent;
-                    //StatusText.Text = $"Updating… {percent}%";
-                    StatusText.Text = string.Empty;
-                    Run downloadHeader = new Run("Updating...\n");
-                    downloadHeader.FontSize = 24;
-                    downloadHeader.FontWeight = FontWeights.Bold;
-                    Run subtext = new Run("Downloading files: ");
-                    subtext.FontSize = 12;
-                    subtext.FontWeight = FontWeights.Regular;
-                    Run percentage = new Run(percent.ToString());
-                    percentage.FontSize = 12;
+                ProgressBar.Value = percent;
+                //StatusText.Text = $"Updating… {percent}%";
+                StatusText.Text = string.Empty;
+                Run downloadHeader = new Run("Updating...\n");
+                downloadHeader.FontSize = 24;
+                downloadHeader.FontWeight = FontWeights.Bold;
+                Run percentage = new Run(percent.ToString());
+                percentage.FontSize = 12;
 
-                    StatusText.Inlines.Add(downloadHeader);
-                    StatusText.Inlines.Add(subtext);
-                    StatusText.Inlines.Add(percentage);
-                }
-                else
-                {
-                    ProgressBar.Value = percent;
-                    //StatusText.Text = $"Updating… {percent}%";
-                    StatusText.Text = string.Empty;
-                    Run downloadHeader = new Run("Updating...\n");
-                    downloadHeader.FontSize = 24;
-                    downloadHeader.FontWeight = FontWeights.Bold;
-                    Run subtext = new Run("Applying updated files: ");
-                    subtext.FontSize = 12;
-                    subtext.FontWeight = FontWeights.Regular;
-                    Run percentage = new Run(percent.ToString());
-                    percentage.FontSize = 12;
-
-                    StatusText.Inlines.Add(downloadHeader);
-                    StatusText.Inlines.Add(subtext);
-                    StatusText.Inlines.Add(percentage);
-
-                    if (percent == 100)
-                        _applying = true;
-                }
+                StatusText.Inlines.Add(downloadHeader);
+                StatusText.Inlines.Add(percentage);
             });
         }
 
