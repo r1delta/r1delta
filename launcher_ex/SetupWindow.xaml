@@ -381,9 +381,9 @@
                             <!-- Keep specific Foreground for the Emoji/Icon button if desired -->
                             <Button x:Name="BrowseButton" ToolTip="Browse for directory"
                                     Content="📂"
-                                    Margin="76,-13,0,0" Click="OnBrowseClicked"
+                                    Margin="65,-13,0,0" Click="OnBrowseClicked"
                                     Foreground="Orange"
-                                    Width="35" Height="22
+                                    Width="36" Height="22
                                     
                                     " VerticalAlignment="Top" FontSize="11" HorizontalAlignment="Left" Style="{StaticResource FilePickerButtonStyle}" Grid.Column="1"/>
                             <!-- Remove explicit Foreground -->

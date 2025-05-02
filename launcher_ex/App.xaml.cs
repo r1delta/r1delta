@@ -581,34 +581,13 @@ namespace launcher_ex
                                 if (progressWindow.Canceled)
                                     throw new OperationCanceledException();
 
-                                //progressWindow.StatusText.Text = string.Empty;
-                                //Run downloadHeader = new Run("Downloading Update\n");
-                                //downloadHeader.FontSize = 24;
-                                //downloadHeader.FontWeight = FontWeights.Bold;
-                                //progressWindow.StatusText.Inlines.Add(downloadHeader);
-                                //Run subtext = new Run("Getting the latest version of R1Delta");
-                                //subtext.FontSize = 12;
-                                //subtext.FontWeight = FontWeights.Regular;
-                                //progressWindow.StatusText.Inlines.Add(subtext);
-
-                                //progressWindow.UpdateProgress(p);
+                                progressWindow.SetDownloading(true);
                             });
                             await updateManager.ApplyReleases(updateInfo, p =>
                             {
                                 if (progressWindow.Canceled)
                                     throw new OperationCanceledException();
-
-                                //progressWindow.StatusText.Text = string.Empty;
-                                //Run downloadHeader = new Run("Installing Update\n");
-                                //downloadHeader.FontSize = 24;
-                                //downloadHeader.FontWeight = FontWeights.Bold;
-                                //progressWindow.StatusText.Inlines.Add(downloadHeader);
-                                //Run subtext = new Run("Applying downloaded files");
-                                //subtext.FontSize = 12;
-                                //subtext.FontWeight = FontWeights.Regular;
-                                //progressWindow.StatusText.Inlines.Add(subtext);
-
-                                //progressWindow.UpdateProgress(p);
+                                progressWindow.SetDownloading(false);
                             });
                         }
                         catch (OperationCanceledException)
