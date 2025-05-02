@@ -296,7 +296,7 @@
 
         <!-- Status text -->
         <TextBlock x:Name="StatusText"
-               Text="Preparing update…"
+               Text="Preparing Update…"
                FontSize="24"
                FontWeight="Bold"
                Margin="29,70,25,20" Grid.Row="2"/>
