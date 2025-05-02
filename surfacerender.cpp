@@ -12,6 +12,8 @@ ILocalize* localize = nullptr;
 
 vgui::HFont WatermarkFont = 0, WatermarkSmallFont = 0;
 
+ConVarR1* cvar_delta_watermark = nullptr;
+
 void DrawWatermark() {
     if (!WatermarkFont) {
         WatermarkFont = surface->CreateFont();
@@ -21,6 +23,8 @@ void DrawWatermark() {
         WatermarkSmallFont = surface->CreateFont();
         surface->SetFontGlyphSet(WatermarkSmallFont, "Verdana", 12, 100, 0, 0, vgui::FONTFLAG_DROPSHADOW | vgui::FONTFLAG_ANTIALIAS);
     }
+
+    if (!cvar_delta_watermark->m_Value.m_nValue) return;
 
     int screenWidth, screenHeight;
     surface->GetScreenSize(screenWidth, screenHeight);
@@ -86,6 +90,9 @@ void PaintTraverse(uintptr_t thisptr, vgui::VPANEL paintPanel, bool forceRepaint
 
 void SetupSurfaceRenderHooks()
 {
+    ConVarR1* RegisterConVar(const char* name, const char* value, int flags, const char* helpString);
+    cvar_delta_watermark = RegisterConVar("delta_watermark", "1", FCVAR_GAMEDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Show R1Delta watermark with version information");
+
 	auto vguimatsurface = GetModuleHandleA("vguimatsurface.dll");
 	auto vguimatsurface_CreateInterface = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(vguimatsurface, "CreateInterface"));
     surface = (vgui::ISurface*)vguimatsurface_CreateInterface("VGUI_Surface031", 0);
