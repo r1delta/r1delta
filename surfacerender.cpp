@@ -147,7 +147,7 @@ void DrawWatermark() {
     if (!strcmp_static(R1D_VERSION, "dev"))
         snprintf(ansiBuffer1, sizeof(ansiBuffer1), "R1Delta [dev]");
     else
-        snprintf(ansiBuffer1, sizeof(ansiBuffer1), "R1Delta v%s", R1D_VERSION);
+        snprintf(ansiBuffer1, sizeof(ansiBuffer1), "R1Delta %s", R1D_VERSION);
     wchar_t watermarkText1[512];
     localize->ConvertANSIToUnicode(ansiBuffer1, watermarkText1, sizeof(watermarkText1));
 
