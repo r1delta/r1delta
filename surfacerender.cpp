@@ -84,13 +84,14 @@ __int64 sub_1800165C0(
     // we didn’t draw anything, so return 0
     return 0;
 }
+ConVarR1* cvar_delta_watermark = nullptr;
+
 __int64(*osub_18028BEA0)(__int64 a1, __int64 a2, double a3);
 __int64 __fastcall sub_18028BEA0(__int64 a1, __int64 a2, double a3) {
     // Clear your buffer and read the new state
     memset(fpsStringData, 0, sizeof(fpsStringData));
-    static auto delta_watermark = OriginalCCVar_FindVar(cvarinterface, "delta_watermark");
     static auto cl_showfps = OriginalCCVar_FindVar(cvarinterface, "cl_showfps");
-    bool isDrawing = cl_showfps->m_Value.m_nValue == 1 && delta_watermark->m_Value.m_nValue == 1;
+    bool isDrawing = cl_showfps->m_Value.m_nValue == 1 && cvar_delta_watermark->m_Value.m_nValue == 1;
     g_bIsDrawingFPSPanel = isDrawing;
     // This static remembers what the last state was
     static bool wasDrawing = false;
@@ -116,7 +117,6 @@ __int64 __fastcall sub_18028BEA0(__int64 a1, __int64 a2, double a3) {
     return ret;
 }
 
-ConVarR1* cvar_delta_watermark = nullptr;
 vgui::HFont WatermarkFont = 0, WatermarkSmallFont = 0;
 void DrawWatermark() {
     if (!surface || !localize) return; // Ensure interfaces are valid
