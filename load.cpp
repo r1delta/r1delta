@@ -2394,7 +2394,7 @@ void __fastcall CServerGameDLL_OnSayTextMsg(void* pThis, int clientIndex, char* 
 	const char* deadPrefix = isSenderDead ? "[DEAD]" : "";
 	const char* teamPrefix = isTeamChat ? "[TEAM]" : "";
 
-	snprintf(formattedMsg, sizeof(formattedMsg), "%s%s%s: %s",
+	snprintf(formattedMsg, sizeof(formattedMsg), "*** CHAT *** %s%s%s: %s",
 		deadPrefix,
 		teamPrefix,
 		playerName,

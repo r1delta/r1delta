@@ -344,7 +344,7 @@ __int64 __fastcall CHudChat__FormatAndDisplayMessage_Hooked(
     std::string finalMessageMB = WideToMultiByte(finalMessageStringW, CP_UTF8); // Or CP_ACP
 
     if (!finalMessageMB.empty()) {
-        Msg("%s\n", finalMessageMB.c_str());
+        Msg("*** CHAT *** %s\n", finalMessageMB.c_str());
     }
 
     // --- Call the original function ---
