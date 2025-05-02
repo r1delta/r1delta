@@ -562,10 +562,10 @@ namespace launcher_ex
                     {
                         Debug.WriteLine($"[Squirrel] Update available: {updateInfo.FutureReleaseEntry.Version}");
 
-                        var progressWindow = new UpdateProgressWindow
-                        {
-                            Owner = Application.Current.MainWindow
-                        };
+                        var progressWindow = new UpdateProgressWindow();
+                        //{
+                        //    Owner = Application.Current.MainWindow
+                        //};
                         DarkNet.Instance.SetWindowThemeWpf(progressWindow, Theme.Auto);
                         progressWindow.Show();
                         var cts = new CancellationTokenSource();
