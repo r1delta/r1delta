@@ -169,6 +169,9 @@
     <Compile Include="TitanfallFileList.cs" />
     <Compile Include="TitanfallFinder.cs" />
     <Compile Include="TitanfallManager.cs" />
+    <Compile Include="UpdateProgressWindow.xaml.cs">
+      <DependentUpon>UpdateProgressWindow.xaml</DependentUpon>
+    </Compile>
     <Page Include="DarkTheme.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
@@ -184,6 +187,10 @@
       <DependentUpon>SetupWindow.xaml</DependentUpon>
       <SubType>Code</SubType>
     </Compile>
+    <Page Include="UpdateProgressWindow.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Properties\AssemblyInfo.cs">

@@ -13,6 +13,7 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 // using System.Windows.Forms; // No longer needed
@@ -561,15 +562,50 @@ namespace launcher_ex
                     {
                         Debug.WriteLine($"[Squirrel] Update available: {updateInfo.FutureReleaseEntry.Version}");
 
-                        // Consider showing a progress window here
-                        // var progressWindow = new UpdateProgressWindow(); // Example
-                        // progressWindow.Show();
-                        // Progress<int> progress = new Progress<int>(p => progressWindow.UpdateProgress(p));
+                        var progressWindow = new UpdateProgressWindow
+                        {
+                            Owner = Application.Current.MainWindow
+                        };
+                        DarkNet.Instance.SetWindowThemeWpf(progressWindow, Theme.Auto);
+                        progressWindow.Show();
+                        var cts = new CancellationTokenSource();
 
-                        await updateManager.DownloadReleases(updateInfo.ReleasesToApply/*, progress*/);
-                        await updateManager.ApplyReleases(updateInfo/*, progress*/);
+                        // wire the Cancel button to cancel the token
+                        progressWindow.CancelButton.Click += (s, e) => cts.Cancel();
+                        try
+                        {
+                            await updateManager.DownloadReleases(updateInfo.ReleasesToApply, p =>
+                            {
+                                if (progressWindow.Canceled)
+                                    throw new OperationCanceledException();
+                                progressWindow.UpdateProgress(p);
+                            });
+                            await updateManager.ApplyReleases(updateInfo, p =>
+                            {
+                                if (progressWindow.Canceled)
+                                    throw new OperationCanceledException();
+                                progressWindow.UpdateProgress(p);
+                            });
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            // handle cancellation if you want
+                            progressWindow.Close();
+                            return false;
+                        }
+                        catch (Exception ex)
+                        {
+                            // Handle other exceptions
+                            Debug.WriteLine($"[Squirrel] Update error: {ex.Message}");
+                            ShowError($"An error occurred while applying the update:\n{ex.Message}", "Update Error");
+                            progressWindow.Close();
+                            return false; // Allow continuing startup
+                        }
+                        finally
+                        {
+                            progressWindow.Close();
+                        }
 
-                        // progressWindow.Close();
 
                         Debug.WriteLine("[Squirrel] Update applied. Requesting restart.");
                         UpdateManager.RestartApp(); // Signal Squirrel to restart the *currently running* app (r1delta.exe)
