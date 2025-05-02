@@ -7,7 +7,7 @@
         UseLayoutRounding="True"
         Icon="pack://application:,,,/icon1.ico"
         Title="Updating…" Height="220" Width="550"
-        WindowStartupLocation="CenterOwner"
+        WindowStartupLocation="CenterScreen"
         ResizeMode="NoResize"
         >
 
