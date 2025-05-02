@@ -289,7 +289,7 @@
 
     <!-- Remove explicit Background="{DynamicResource WindowBackgroundBrush}" -->
     <!-- The background will be set by the loaded theme or default -->
-    <Grid Margin="0" LayoutTransform="{StaticResource windowScaleTransform}">
+    <Grid Margin="-15,0,-15,0" LayoutTransform="{StaticResource windowScaleTransform}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <!-- Header -->
@@ -307,7 +307,7 @@
         <!-- Remove explicit Background/BorderBrush -->
         <Border x:Name="HeaderBorder"
             Grid.Row="0" BorderThickness="0,0,0,0">
-            <Grid Margin="8,4,8,12">
+            <Grid Margin="18,4,18,12">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="206*"/>
@@ -321,7 +321,7 @@
                            FontSize="22" Margin="1,16,0,0"
                            x:Name="SetupTitleBarText" Grid.ColumnSpan="3"/>
                 <Image Grid.Column="3" Source="pack://application:,,,/r1delta_logo.png"
-                       Width="32" Height="32" Margin="151,12,2,0"
+                       Width="32" Height="32" Margin="150,12,3,0"
                        VerticalAlignment="Top"/>
             </Grid>
         </Border>
@@ -332,7 +332,7 @@
 
                 <!-- Close Button -->
                 <Button Content="X" DockPanel.Dock="Right" VerticalAlignment="Top" HorizontalAlignment="Right" Width="20" Height="12" Style="{StaticResource CloseButtonStyle}" 
-                        Click="OnCloseButtonClicked"/>
+                        Click="OnCloseButtonClicked" Margin="0,0,10,0"/>
 
                 <!-- Minimize Button -->
                 <Button Content="—" DockPanel.Dock="Right" VerticalAlignment="Top" HorizontalAlignment="Right" Width="20" Height="12" Style="{StaticResource MinimizeButtonStyle}"
@@ -357,12 +357,12 @@
 
                         <!-- Remove explicit Foreground -->
                         <TextBlock Grid.Row="0"
-                                   Margin="0,-13,0,23"
+                                   Margin="10,-13,10,23"
                                    Text="To play, please point us to your Titanfall directory. Don't have the game? It'll be installed there instead. (13 GB required, 191.8 GB available on C:)"
                                    TextWrapping="Wrap"
                                    x:Name="InstructionsTextBlock" FontSize="10"/>
 
-                        <Grid Grid.Row="1">
+                        <Grid Grid.Row="1" Margin="10,0,10,0">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
@@ -377,22 +377,22 @@
                             <!-- Remove explicit Foreground/Background -->
                             <TextBox x:Name="PathTextBox" Grid.Row="0" Grid.Column="0"
                                      Height="22"
-                                     Text="C:\Users\r3muxd\AppData\Local\R1Delta\" FontSize="10" HorizontalAlignment="Left" Margin="0,-16,0,18" Width="285" Grid.ColumnSpan="2" />
+                                     Text="C:\Users\r3muxd\AppData\Local\R1Delta\" FontSize="10" HorizontalAlignment="Left" Margin="0,-13,0,15" Width="285" Grid.ColumnSpan="2" />
                             <!-- Keep specific Foreground for the Emoji/Icon button if desired -->
                             <Button x:Name="BrowseButton" ToolTip="Browse for directory"
                                     Content="📂"
-                                    Margin="69,-16,0,0" Click="OnBrowseClicked"
+                                    Margin="76,-13,0,0" Click="OnBrowseClicked"
                                     Foreground="Orange"
                                     Width="35" Height="22
                                     
                                     " VerticalAlignment="Top" FontSize="11" HorizontalAlignment="Left" Style="{StaticResource FilePickerButtonStyle}" Grid.Column="1"/>
                             <!-- Remove explicit Foreground -->
                             <TextBlock Text="Launch Arguments:" Grid.Row="1" Grid.Column="0"
-                                       Margin="0,0,0,12" FontSize="11" FontWeight="Bold" Grid.ColumnSpan="2"/>
+                                       Margin="0,2,0,10" FontSize="11" FontWeight="Bold" Grid.ColumnSpan="2"/>
                             <!-- Remove explicit Foreground/Background -->
-                            <TextBox x:Name="LaunchArgsTextBox" Grid.Row="1" Grid.Column="0" FontSize="8" Margin="0,15,86,38" Grid.RowSpan="2" Grid.ColumnSpan="2" />
-                            <Button x:Name="PlayOrInstallButton" Content="Play" Grid.Row="2" Grid.Column="2" HorizontalAlignment="Left"
-                                    Margin="6,21,0,-1" Click="OnPathOkClicked"
+                            <TextBox x:Name="LaunchArgsTextBox" Grid.Row="1" Grid.Column="0" FontSize="8" Margin="0,19,86,34" Grid.RowSpan="2" Grid.ColumnSpan="2" />
+                            <Button x:Name="PlayOrInstallButton" Content="Play" Grid.Row="2" Grid.Column="2" HorizontalAlignment="Center"
+                                    Margin="0,21,0,-1" Click="OnPathOkClicked"
                                     Width="68" FontWeight="Bold" Height="22" FontSize="9" />
                         </Grid>
                     </Grid>
@@ -400,11 +400,11 @@
                 <!-- Remove explicit Style and Foreground -->
                 <CheckBox x:Name="DoNotShowAgainCheckbox"
                           Content=" Do not show this window again when I launch R1Delta."
-                          Margin="0,131,173,0" Grid.ColumnSpan="2"
+                          Margin="10,131,163,0" Grid.ColumnSpan="2"
                           VerticalAlignment="Top"
                           VerticalContentAlignment="Center"
                           Checked="DoNotShowAgainCheckbox_Checked"
-                          Height="20">
+                          Height="20" FontSize="14">
                     <CheckBox.LayoutTransform>
                         <ScaleTransform ScaleX="0.5" ScaleY="0.5" />
                     </CheckBox.LayoutTransform>
@@ -414,7 +414,7 @@
             <!-- End PathSelectionPanel -->
 
             <!-- Progress panel -->
-            <Grid x:Name="ProgressPanel" Visibility="Hidden" Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2">
+            <Grid x:Name="ProgressPanel" Visibility="Hidden" Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" Margin="10,0,10,0">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
