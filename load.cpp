@@ -91,6 +91,7 @@
 #include "vector.h"
 #include "hudwarp.h"
 #include "hudwarp_hooks.h"
+#include "surfacerender.h"
 #include "discord.h"
 //#define DISCORD
 #define DISCORDPP_IMPLEMENTATION
@@ -2999,6 +3000,7 @@ void __stdcall LoaderNotificationCallback(
 			InitClient();
 			SetupHudWarpHooks();
 			Setup_MMNotificationClient();
+			SetupSurfaceRenderHooks();
 			CThread(DiscordThread).detach();
 			
 		}

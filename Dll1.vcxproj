@@ -192,6 +192,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="appsystem.h" />
     <ClInclude Include="arena.hh" />
     <ClInclude Include="audio.h" />
     <ClInclude Include="beardbgon.h" />
@@ -215,6 +216,7 @@
     <ClInclude Include="jwt_compact.h" />
     <ClInclude Include="keyvalues.h" />
     <ClInclude Include="load.h" />
+    <ClInclude Include="localize.h" />
     <ClInclude Include="logging.h" />
     <ClInclude Include="masterserver.h" />
     <ClInclude Include="memory.h" />
@@ -233,6 +235,7 @@
     <ClInclude Include="sendmoveclampfix.h" />
     <ClInclude Include="squirrel.h" />
     <ClInclude Include="steam.h" />
+    <ClInclude Include="surfacerender.h" />
     <ClInclude Include="sv_filter.h" />
     <ClInclude Include="TableDestroyer.h" />
     <ClInclude Include="tctx.hh" />
@@ -241,6 +244,7 @@
     <ClInclude Include="thirdparty\zstd\zstd.h" />
     <ClInclude Include="utils.h" />
     <ClInclude Include="vector.h" />
+    <ClInclude Include="vguisurface.h" />
     <!-- Add the following includes from the first version -->
     <ClInclude Include="vsdk\public\bitvec.h" />
     <ClInclude Include="vsdk\public\math_pfns.h" />
@@ -319,6 +323,7 @@
     <ClCompile Include="sendmoveclampfix.cpp" />
     <ClCompile Include="squirrel.cpp" />
     <ClCompile Include="steam.cpp" />
+    <ClCompile Include="surfacerender.cpp" />
     <ClCompile Include="TableDestroyer.cpp" />
     <ClCompile Include="tctx.cpp" />
     <ClCompile Include="utils.cpp" />
