@@ -18,6 +18,8 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows.Interop;
 using System.Text;
+using System.Windows.Documents;
+using System.Windows.Media.Imaging;
 
 namespace launcher_ex
 {
@@ -91,39 +93,52 @@ namespace launcher_ex
 
 
             UpdateInstructionsText();
+            UpdatePlayOrInstallButton();
             PathTextBox.TextChanged += PathTextBox_TextChanged;
+        }
+
+        private void UpdatePlayOrInstallButton()
+        {
+            string installPath = PathTextBox.Text;
+
+            if (TitanfallManager.ValidateGamePath(installPath, _originalLauncherDir))
+                PlayOrInstallButton.Content = "Play";
+            else
+                PlayOrInstallButton.Content = "Install";
         }
 
         private void Window_Loaded(object sender, RoutedEventArgs e) => ApplyTheme();
 
         private void ApplyTheme()
         {
-            bool useDarkTheme = false; // Default to light
+            bool useDarkTheme = true; // Default to light
 
-            try
-            {
-                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize"))
-                {
-                    if (key != null)
-                    {
-                        object registryValueObject = key.GetValue("AppsUseLightTheme");
-                        if (registryValueObject != null)
-                        {
-                            int registryValue = (int)registryValueObject;
-                            if (registryValue == 0) // Dark Theme is Active
-                            {
-                                useDarkTheme = true;
-                            }
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error reading theme registry key: {ex.Message}");
-                // Defaulting to light theme on error
-                useDarkTheme = false;
-            }
+            this.Icon = new BitmapImage(new Uri("pack://application:,,,/icon1.ico"));
+
+            //try
+            //{
+            //    using (RegistryKey key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize"))
+            //    {
+            //        if (key != null)
+            //        {
+            //            object registryValueObject = key.GetValue("AppsUseLightTheme");
+            //            if (registryValueObject != null)
+            //            {
+            //                int registryValue = (int)registryValueObject;
+            //                if (registryValue == 0) // Dark Theme is Active
+            //                {
+            //                    useDarkTheme = true;
+            //                }
+            //            }
+            //        }
+            //    }
+            //}
+            //catch (Exception ex)
+            //{
+            //    Console.WriteLine($"Error reading theme registry key: {ex.Message}");
+            //    // Defaulting to light theme on error
+            //    useDarkTheme = false;
+            //}
 
             // --- Apply the chosen theme ---
             if (useDarkTheme)
@@ -156,7 +171,7 @@ namespace launcher_ex
             }
             if (TryFindResource("ControlBrush") is Brush headerBgBrush)
             {
-                HeaderBorder.Background = headerBgBrush;
+                //HeaderBorder.Background = headerBgBrush;
             }
             if (TryFindResource("BorderBrushDark") is Brush headerBorderBrush)
             {
@@ -279,7 +294,8 @@ namespace launcher_ex
             }
             catch { /* Ignore errors setting initial directory */ }
 
-            if (dialog.ShowDialog() == CommonFileDialogResult.Ok) { PathTextBox.Text = dialog.FileName; }
+            if (dialog.ShowDialog() == CommonFileDialogResult.Ok) { PathTextBox.Text = dialog.FileName; UpdatePlayOrInstallButton(); }
+
         }
 
         private void PathTextBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -293,11 +309,55 @@ namespace launcher_ex
         {
             // ... (implementation unchanged)
             string path = PathTextBox.Text;
-            string finalText = "To play, please point us to your Titanfall directory.\nDon't have the game? It'll be installed there instead.\r\n(13 GB required";
+
+            InstructionsTextBlock.Text = string.Empty;
+
+            Run initialText = new Run("To play, please point us to your Titanfall directory.\nDon't have the game? It'll be installed there instead.\r\n");
+            initialText.FontSize = 10;
             string drivePath = string.Empty;
-            try { if (!string.IsNullOrWhiteSpace(path)) { drivePath = Path.GetPathRoot(path); } if (!string.IsNullOrEmpty(drivePath)) { DriveInfo drive = new DriveInfo(drivePath); double availableGB = drive.AvailableFreeSpace / (1024.0 * 1024 * 1024); finalText += $", {availableGB:F1} GB available on {drive.Name.TrimEnd('\\')}"; if (availableGB < 13) finalText += " (!)"; } }
+            string sizeAvailable = string.Empty;
+            string driveName = string.Empty;
+            try 
+            {
+                if (!string.IsNullOrWhiteSpace(path))
+                {
+                    drivePath = Path.GetPathRoot(path);
+                }
+                if (!string.IsNullOrEmpty(drivePath))
+                {
+                    DriveInfo drive = new DriveInfo(drivePath);
+                    double availableGB = drive.AvailableFreeSpace / (1024.0 * 1024 * 1024);
+                    sizeAvailable = $"{availableGB:F1} GB";
+                    driveName = drive.Name.TrimEnd('\\');
+                }
+            }
             catch { /* Ignore drive info errors */ }
-            finalText += ")"; InstructionsTextBlock.Text = finalText;
+            InstructionsTextBlock.Inlines.Add(initialText);
+            InstructionsTextBlock.Inlines.Add("\n");
+            Run openingParen = new Run("(");
+            openingParen.FontSize = 7;
+            InstructionsTextBlock.Inlines.Add(openingParen);
+            Run gameSize = new Run("13 GB");
+            gameSize.FontSize = 7;
+            gameSize.FontWeight = FontWeights.Bold;
+            InstructionsTextBlock.Inlines.Add(gameSize);
+            Run middleofSentence = new Run(" will be required, ");
+            middleofSentence.FontSize = 7;
+            InstructionsTextBlock.Inlines.Add(middleofSentence);
+            Run sizeAvailableRun = new Run(sizeAvailable);
+            sizeAvailableRun.FontSize = 7;
+            sizeAvailableRun.FontWeight = FontWeights.Bold;
+            InstructionsTextBlock.Inlines.Add(sizeAvailableRun);
+            Run availableOn = new Run(" available on ");
+            availableOn.FontSize = 7;
+            InstructionsTextBlock.Inlines.Add(availableOn);
+            Run driveLetter = new Run(driveName);
+            driveLetter.FontSize = 7;
+            driveLetter.FontWeight = FontWeights.Bold;
+            InstructionsTextBlock.Inlines.Add(driveLetter);
+            Run closingParen = new Run(")");
+            closingParen.FontSize = 7;
+            InstructionsTextBlock.Inlines.Add(closingParen);
         }
 
         private const long RequiredSpaceBytes = 13L * 1024 * 1024 * 1024; // 13 GB
@@ -435,6 +495,17 @@ namespace launcher_ex
             var result = MessageBox.Show(this, "Are you sure you want to cancel the download?", "Confirm Cancellation", MessageBoxButton.YesNo, MessageBoxImage.Warning);
             if (result == MessageBoxResult.Yes) { CancelButton.IsEnabled = false; StatusText.Text = "Canceling..."; OnCancelRequested?.Invoke(); }
         }
+
+        private void OnCloseButtonClicked(object sender, RoutedEventArgs e)
+        {
+            Environment.Exit(0);
+        }
+
+        private void OnMinimizeButtonClicked(object sender, RoutedEventArgs e)
+        {
+            WindowState = WindowState.Minimized;
+        }
+
         // --- Helper Methods ---
 
         private string FormatBytesPerSec(double bytesPerSec)
@@ -551,12 +622,60 @@ namespace launcher_ex
 
             // Update Status Text Label
             // Example format: Downloading... 55% (1.2 GB / 2.2 GB) - 15.3 MB/s - ETA: 1m 30s
-            StatusText.Text = $"Downloading: {percent:0}% ({downloadedSizeStr} / {totalSizeStr})\nSpeed: {speedStr} | ETA: {etaStr}\nSetup will launch the game automatically when complete.";
+            StatusText.Text = string.Empty;
+            Run downloadingHeader = new Run($"Downloading: {percent:0}%\n\r");
+            downloadingHeader.FontSize = 14;
+            downloadingHeader.FontWeight = FontWeights.Bold;
+            StatusText.Inlines.Add(downloadingHeader);
+
+            Run openingParen1 = new Run("(");
+            openingParen1.FontSize = 8;
+            StatusText.Inlines.Add(openingParen1);
+            Run downloadedSizeRun = new Run(downloadedSizeStr);
+            downloadedSizeRun.FontSize = 8;
+            downloadedSizeRun.FontWeight = FontWeights.Bold;
+            StatusText.Inlines.Add(downloadedSizeRun);
+            Run separatorRun = new Run(" / ");
+            separatorRun.FontSize = 8;
+            StatusText.Inlines.Add(separatorRun);
+            Run totalSizeRun = new Run(totalSizeStr);
+            totalSizeRun.FontSize = 8;
+            totalSizeRun.FontWeight= FontWeights.Bold;
+            StatusText.Inlines.Add(totalSizeRun);
+            Run closingParen1 = new Run(") ");
+            closingParen1.FontSize = 8;
+            StatusText.Inlines.Add(closingParen1);
+            Run estimatedTimeLeftLeadup = new Run("Estimated time remaining is: ");
+            estimatedTimeLeftLeadup.FontSize = 8;
+            StatusText.Inlines.Add(estimatedTimeLeftLeadup);
+            Run estimatedTimeLeftRun = new Run(etaStr);
+            estimatedTimeLeftRun.FontSize = 8;
+            estimatedTimeLeftRun.FontWeight = FontWeights.Bold;
+            StatusText.Inlines.Add(estimatedTimeLeftRun);
+            Run speedLeadup = new Run(" at ");
+            speedLeadup.FontSize = 8;
+            StatusText.Inlines.Add(speedLeadup);
+            Run speedRun = new Run(speedStr);
+            speedRun.FontSize = 8;
+            speedRun.FontWeight = FontWeights.Bold;
+            StatusText.Inlines.Add(speedRun);
+            Run setupInfo = new Run("\nSetup will launch the game automatically when complete.");
+            setupInfo.FontSize = 6;
+            StatusText.Inlines.Add(setupInfo);
+            //StatusText.Text = $"Downloading: {percent:0}% ({downloadedSizeStr} / {totalSizeStr})\nSpeed: {speedStr} | ETA: {etaStr}\nSetup will launch the game automatically when complete.";
 
             // Special case for completion
             if (percent >= 100)
             {
-                StatusText.Text = $"Download Complete ({totalSizeStr})";
+                // make this use the progress bar in the future!!!
+                StatusText.Text = string.Empty;
+                Run downloadingDoneHead = new Run($"Download Complete ({totalSizeStr})");
+                downloadingDoneHead.FontSize = 14;
+                downloadingDoneHead.FontWeight = FontWeights.Bold;
+                StatusText.Inlines.Add(downloadingDoneHead);
+                Run validatingFilesTip = new Run("\nValidating downloaded files might take a while if you've downloaded this to a Hard Drive.");
+                validatingFilesTip.FontSize = 8;
+                StatusText.Inlines.Add(validatingFilesTip);
                 CancelButton.IsEnabled = false; // Disable cancel when done
             }
         }
@@ -648,6 +767,11 @@ namespace launcher_ex
             // Remove the icon
             SendMessage(hwnd, WM_SETICON, new IntPtr(1), IntPtr.Zero);
             SendMessage(hwnd, WM_SETICON, IntPtr.Zero, IntPtr.Zero);
+        }
+
+        private void DoNotShowAgainCheckbox_Checked(object sender, RoutedEventArgs e)
+        {
+
         }
     }
 }

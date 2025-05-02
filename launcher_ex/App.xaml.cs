@@ -16,6 +16,8 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Documents;
+
 // using System.Windows.Forms; // No longer needed
 using Application = System.Windows.Application;
 using MessageBox = System.Windows.MessageBox; // Use WPF MessageBox
@@ -578,12 +580,34 @@ namespace launcher_ex
                             {
                                 if (progressWindow.Canceled)
                                     throw new OperationCanceledException();
+
+                                progressWindow.StatusText.Text = string.Empty;
+                                Run downloadHeader = new Run("Downloading Update\n");
+                                downloadHeader.FontSize = 24;
+                                downloadHeader.FontWeight = FontWeights.Bold;
+                                progressWindow.StatusText.Inlines.Add(downloadHeader);
+                                Run subtext = new Run("Getting the latest version of R1Delta");
+                                subtext.FontSize = 12;
+                                subtext.FontWeight = FontWeights.Regular;
+                                progressWindow.StatusText.Inlines.Add(subtext);
+
                                 progressWindow.UpdateProgress(p);
                             });
                             await updateManager.ApplyReleases(updateInfo, p =>
                             {
                                 if (progressWindow.Canceled)
                                     throw new OperationCanceledException();
+
+                                progressWindow.StatusText.Text = string.Empty;
+                                Run downloadHeader = new Run("Installing Update\n");
+                                downloadHeader.FontSize = 24;
+                                downloadHeader.FontWeight = FontWeights.Bold;
+                                progressWindow.StatusText.Inlines.Add(downloadHeader);
+                                Run subtext = new Run("Applying downloaded files");
+                                subtext.FontSize = 12;
+                                subtext.FontWeight = FontWeights.Regular;
+                                progressWindow.StatusText.Inlines.Add(subtext);
+
                                 progressWindow.UpdateProgress(p);
                             });
                         }
