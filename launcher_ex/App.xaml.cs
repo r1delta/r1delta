@@ -500,6 +500,28 @@ namespace launcher_ex
                                                     errorDetails.Add(errorMsg);
                                                 }
                                             }
+                                            // --- Delete the common VPK file as well ---
+                                            string commonVpkPath = Path.Combine(gamePath, "vpk", "client_mp_common.bsp.pak000_000.vpk");
+                                            try
+                                            {
+                                                if (File.Exists(commonVpkPath))
+                                                {
+                                                    File.Delete(commonVpkPath);
+                                                    filesDeleted++;
+                                                    Debug.WriteLine($"  Deleted additional file: {commonVpkPath}");
+                                                }
+                                                else
+                                                {
+                                                    Debug.WriteLine($"  Skipped additional file (already missing): {commonVpkPath}");
+                                                }
+                                            }
+                                            catch (Exception ex)
+                                            {
+                                                errors++;
+                                                string errorMsg = $"  ERROR deleting additional file {commonVpkPath}: {ex.Message}";
+                                                Debug.WriteLine(errorMsg);
+                                                errorDetails.Add(errorMsg);
+                                            }
 
                                             Debug.WriteLine($"[Squirrel Uninstall] Deletion attempt complete. Files deleted: {filesDeleted}, Errors: {errors}");
 
@@ -580,7 +602,7 @@ namespace launcher_ex
                             {
                                 if (progressWindow.Canceled)
                                     throw new OperationCanceledException();
-                                progressWindow.UpdateProgress(p,"Downloading Updating...");
+                                progressWindow.UpdateProgress(p,"Downloading update...");
                             });
                             await updateManager.ApplyReleases(updateInfo, p =>
                             {
