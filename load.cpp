@@ -1914,15 +1914,16 @@ __forceinline void DebugConnectMsg(int node1, int node2, const char* pszFormat, 
 	Msg(finalFormat, node1, node2, args);
 	va_end(args);
 }
-bool (*oHandleSquirrelClientCommand)(__int64 player, __int64 args);
-bool HandleSquirrelClientCommand(__int64 player, __int64 args) {
+bool (*oHandleSquirrelClientCommand)(__int64 player, CCommand* args);
+bool HandleSquirrelClientCommand(__int64 player, CCommand* args) {
 	static auto HandlePlayerClientCommand = reinterpret_cast<decltype(oHandleSquirrelClientCommand)>(G_server + 0x5014F0);
 	static auto g_pVoiceManager = G_server + 0xB3B8B0;
-	static auto HandleVoiceClientCommand = reinterpret_cast<bool (*)(__int64 voice, __int64 player, __int64 args)>(G_server + 0x275C20);
+	static auto HandleVoiceClientCommand = reinterpret_cast<bool (*)(__int64 voice, __int64 player, CCommand* args)>(G_server + 0x275C20);
 
 	if (oHandleSquirrelClientCommand(player, args)) return true;
 	if (HandlePlayerClientCommand(player, args)) return true;
 	if (HandleVoiceClientCommand(g_pVoiceManager, player, args)) return true;
+	if (!strcmp_static(args->Arg(0), "resetidletimer")) { reinterpret_cast<void(*)()>((G_server + 0xDB210))(); return true; }
 
 	return false;
 }
