@@ -193,6 +193,7 @@ void __forceinline __fastcall bf_write__WriteUBitLong(bf_write* a1, unsigned int
 	uintptr_t engineDS = G_engine_ds;
 	bf_write__WriteUBitLongOriginal(a1, a2, a3);
 	if (a1 && uintptr_t(_ReturnAddress()) == (engineDS + 0x5101D) && !a1->IsOverflowed() && a1->GetNumBitsLeft() >= 14) {
+		Msg("Writing: %d\n", a2);
 		bf_write__WriteUBitLongOriginal(a1, 0, 1); // use engine ver in case our struct is wrong somehow?
 		bf_write__WriteUBitLongOriginal(a1, 0, 1);
 		bf_write__WriteUBitLongOriginal(a1, 0, 12);
@@ -758,7 +759,7 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 	MH_CreateHook(LPVOID(engineDS + 0x13B000), LPVOID(engine + 0x1E9EA0), NULL); // CNetChan__CNetChan__dtor
 	MH_CreateHook(LPVOID(engineDS + 0x017940), LPVOID(engine + 0x028BC0), NULL); // CLC_SplitPlayerConnect__dtor
 	MH_CreateHook(LPVOID(engineDS + 0x12F140), LPVOID(engine + 0x1DC830), NULL); // SendTable_WriteInfos
-	MH_CreateHook(LPVOID(engineDS + 0x71C0), &bf_write__WriteUBitLong, reinterpret_cast<LPVOID*>(&bf_write__WriteUBitLongOriginal)); // bf_write__WriteUBitLong
+	//MH_CreateHook(LPVOID(engineDS + 0x71C0), &bf_write__WriteUBitLong, reinterpret_cast<LPVOID*>(&bf_write__WriteUBitLongOriginal)); // bf_write__WriteUBitLong
 	MH_CreateHook(LPVOID(engineDS + 0x497F0), LPVOID(engine + 0xD8420), NULL); // CBaseClient::ConnectionStart
 	MH_CreateHook(LPVOID(engine + 0xF8050), LPVOID(engineDS + 0x69050), NULL); // CRCONServer::RunFrame
 	MH_CreateHook(LPVOID(engine + 0xF4B90), LPVOID(engineDS + 0x65B70), NULL); // RCONServer

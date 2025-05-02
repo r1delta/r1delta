@@ -416,6 +416,43 @@ void WeaponSprayFunction2(float* a1, __int64 a2, __int64 a3, _DWORD* a4, __int64
         return;
     return oWeaponSprayFunction2(a1, a2, a3, a4, a5);
 }*/
+__int64 (*oLoadingProgress__SetupControlStates)(__int64 a1, const char* a2, const char* a3);
+static char g_last_a3_value[256] = "";
+
+// --- Hook Function Implementation ---
+__int64 __fastcall LoadingProgress__SetupControlStates(__int64 a1, const char* a2, const char* a3) {
+    // The value we will actually pass to the original function
+    const char* effective_a3 = a3;
+
+    // Check if a3 is valid and starts with "mp_"
+    if (a3 != nullptr && strncmp(a3, "mp_", 3) == 0) {
+
+        // Check if we have a previously stored non-"mp_" value
+        if (g_last_a3_value[0] != '\0') {
+            effective_a3 = g_last_a3_value; // Use the stored value
+        }
+        else {
+        }
+    }
+    else {
+        // a3 does not start with "mp_" or is NULL.
+        // Store this value as the new "last good value" if it's not NULL.
+        if (a3 != nullptr) {
+            strncpy(g_last_a3_value, a3, 256 - 1);
+            // Ensure null termination
+            g_last_a3_value[256 - 1] = '\0';
+        }
+        else {
+            // If a3 is null, clear the stored value as it's not a valid "last value"
+            g_last_a3_value[0] = '\0';
+        }
+    }
+
+
+
+    return oLoadingProgress__SetupControlStates(a1, a2, effective_a3);
+}
+
 void InitClient()
 {
 	auto client = G_client;
@@ -443,6 +480,7 @@ void InitClient()
 
     MH_CreateHook((LPVOID)(client + 0x47F1E0), &WeaponSprayFunction1, reinterpret_cast<LPVOID*>(&oWeaponSprayFunction1));
     //MH_CreateHook((LPVOID)(client + 0x47FED0), &WeaponSprayFunction2, reinterpret_cast<LPVOID*>(&oWeaponSprayFunction2));
+    MH_CreateHook((LPVOID)(client + 0x3C5830), &LoadingProgress__SetupControlStates, reinterpret_cast<LPVOID*>(&oLoadingProgress__SetupControlStates));
 
 
 	if (IsNoOrigin())
