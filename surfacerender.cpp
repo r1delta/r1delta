@@ -90,7 +90,7 @@ __int64 __fastcall sub_18028BEA0(__int64 a1, __int64 a2, double a3) {
     memset(fpsStringData, 0, sizeof(fpsStringData));
     static auto delta_watermark = OriginalCCVar_FindVar(cvarinterface, "delta_watermark");
     static auto cl_showfps = OriginalCCVar_FindVar(cvarinterface, "cl_showfps");
-    bool isDrawing = cl_showfps->m_Value.m_nValue == 1 && delta_watermark->m_Value.m_nValue == 0;
+    bool isDrawing = cl_showfps->m_Value.m_nValue == 1 && delta_watermark->m_Value.m_nValue == 1;
     g_bIsDrawingFPSPanel = isDrawing;
     // This static remembers what the last state was
     static bool wasDrawing = false;
@@ -120,9 +120,6 @@ ConVarR1* cvar_delta_watermark = nullptr;
 vgui::HFont WatermarkFont = 0, WatermarkSmallFont = 0;
 void DrawWatermark() {
     if (!surface || !localize) return; // Ensure interfaces are valid
-    static auto var = OriginalCCVar_FindVar(cvarinterface, "delta_watermark");
-    if (var->m_Value.m_nValue != 0)
-        return;
     // Create fonts if they don't exist
     if (!WatermarkFont) {
         WatermarkFont = surface->CreateFont();
