@@ -97,12 +97,17 @@ namespace launcher_ex
             PathTextBox.TextChanged += PathTextBox_TextChanged;
         }
 
-        private void UpdatePlayOrInstallButton()
+        private void UpdatePlayOrInstallButton(bool fullCheck = false)
         {
             string installPath = PathTextBox.Text;
-            string foundPath = TitanfallManager.TryFindExistingValidPath(_originalLauncherDir, false);
+            string foundPath = TitanfallManager.TryFindExistingValidPath(_originalLauncherDir, fullCheck);
 
-            if (!string.IsNullOrEmpty(foundPath))
+            bool isPlay = !string.IsNullOrEmpty(foundPath);
+
+            if (fullCheck)
+                isPlay = TitanfallManager.ValidateGamePath(installPath, _originalLauncherDir);
+
+            if (isPlay)
                 PlayOrInstallButton.Content = "Play";
             else
                 PlayOrInstallButton.Content = "Install";
@@ -295,7 +300,7 @@ namespace launcher_ex
             }
             catch { /* Ignore errors setting initial directory */ }
 
-            if (dialog.ShowDialog() == CommonFileDialogResult.Ok) { PathTextBox.Text = dialog.FileName; UpdatePlayOrInstallButton(); }
+            if (dialog.ShowDialog() == CommonFileDialogResult.Ok) { PathTextBox.Text = dialog.FileName; UpdatePlayOrInstallButton(true); }
 
         }
 
