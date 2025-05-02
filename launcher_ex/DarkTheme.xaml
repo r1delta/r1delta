@@ -16,7 +16,7 @@
     <SolidColorBrush x:Key="BorderBrushDark" Color="{StaticResource DarkBorderColor}"/>
     <SolidColorBrush x:Key="SomeHoverColorBrush" Color="{StaticResource SomeHoverColor}" />
     <!-- Moved Hover Brush -->
-
+    
     <!-- Focus Visual Style -->
     <Style x:Key="WhiteFocusVisual">
         <Setter Property="Control.Template">
@@ -38,13 +38,52 @@
         <Setter Property="Background" Value="{StaticResource ControlBrush}"/>
         <Setter Property="BorderBrush" Value="{StaticResource BorderBrushDark}"/>
         <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TextBox">
+                    <Border 
+                    Background="{TemplateBinding Background}" 
+                    BorderBrush="{TemplateBinding BorderBrush}" 
+                    BorderThickness="{TemplateBinding BorderThickness}" 
+                    CornerRadius="4">
+                        <ScrollViewer Margin="0" x:Name="PART_ContentHost"/>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
-
+    
     <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-        <Setter Property="Background" Value="{StaticResource ControlBrush}"/>
-        <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
-        <Setter Property="BorderBrush" Value="{StaticResource BorderBrushDark}"/>
-        <Setter Property="FocusVisualStyle" Value="{StaticResource WhiteFocusVisual}"/>
+        <Setter Property="Background" Value="{StaticResource ControlBrush}" />
+        <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource BorderBrushDark}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border
+                    x:Name="Border"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="7">
+                        <ContentPresenter
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Margin="4" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Border" Property="Background" Value="{StaticResource SomeHoverColorBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="true">
+                            <Setter TargetName="Border" Property="Opacity" Value="0.8" />
+                            <Setter Property="Foreground" Value="#FFAAAAAA"/>
+                            <!-- Dim text when disabled -->
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <!-- Dark CheckBox Style (Applied by default to all CheckBoxes when this theme is loaded) -->
@@ -68,6 +107,7 @@
                           VerticalAlignment="Center"
                           HorizontalAlignment="Left"
                           SnapsToDevicePixels="True"
+                          CornerRadius="2"
                           UseLayoutRounding="True"/>
                         <!-- Check Mark -->
                         <Path x:Name="CheckMark"

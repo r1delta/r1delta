@@ -16,6 +16,8 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Documents;
+
 // using System.Windows.Forms; // No longer needed
 using Application = System.Windows.Application;
 using MessageBox = System.Windows.MessageBox; // Use WPF MessageBox
@@ -578,13 +580,13 @@ namespace launcher_ex
                             {
                                 if (progressWindow.Canceled)
                                     throw new OperationCanceledException();
-                                progressWindow.UpdateProgress(p);
+                                progressWindow.UpdateProgress(p,"Downloading Updating...");
                             });
                             await updateManager.ApplyReleases(updateInfo, p =>
                             {
                                 if (progressWindow.Canceled)
                                     throw new OperationCanceledException();
-                                progressWindow.UpdateProgress(p);
+                                progressWindow.UpdateProgress(p, "Applying Update...");
                             });
                         }
                         catch (OperationCanceledException)
