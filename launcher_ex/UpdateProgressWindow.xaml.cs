@@ -26,25 +26,13 @@ namespace launcher_ex
     public partial class UpdateProgressWindow : Window
     {
         bool _canceled;
-        bool _downloading;
+        bool _applying;
         public bool Canceled => _canceled;
-        public bool Downloading => _downloading;
 
         public UpdateProgressWindow()
         {
+            _applying = false;
             InitializeComponent();
-        }
-
-        public void SetDownloading(bool downloading)
-        {
-            try
-            {
-                _downloading = downloading;
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine(ex);
-            }
         }
 
         /// <summary>
@@ -54,7 +42,7 @@ namespace launcher_ex
         {
             Dispatcher.Invoke(() =>
             {
-                if (Downloading)
+                if (_applying)
                 {
                     ProgressBar.Value = percent;
                     //StatusText.Text = $"Updating… {percent}%";
@@ -89,6 +77,9 @@ namespace launcher_ex
                     StatusText.Inlines.Add(downloadHeader);
                     StatusText.Inlines.Add(subtext);
                     StatusText.Inlines.Add(percentage);
+
+                    if (percent == 100)
+                        _applying = true;
                 }
             });
         }

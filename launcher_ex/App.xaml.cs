@@ -580,14 +580,11 @@ namespace launcher_ex
                             {
                                 if (progressWindow.Canceled)
                                     throw new OperationCanceledException();
-
-                                progressWindow.SetDownloading(true);
                             });
                             await updateManager.ApplyReleases(updateInfo, p =>
                             {
                                 if (progressWindow.Canceled)
                                     throw new OperationCanceledException();
-                                progressWindow.SetDownloading(false);
                             });
                         }
                         catch (OperationCanceledException)
