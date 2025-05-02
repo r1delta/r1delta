@@ -3001,6 +3001,7 @@ void __stdcall LoaderNotificationCallback(
 			SetupHudWarpHooks();
 			Setup_MMNotificationClient();
 			SetupSurfaceRenderHooks();
+			SetupSquirrelErrorNotificationHooks();
 			CThread(DiscordThread).detach();
 			
 		}
