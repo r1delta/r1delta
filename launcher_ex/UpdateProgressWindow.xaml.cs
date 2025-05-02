@@ -36,14 +36,14 @@ namespace launcher_ex
         /// <summary>
         /// Call this (on any thread) to update the UI.
         /// </summary>
-        public void UpdateProgress(int percent)
+        public void UpdateProgress(int percent,string headerText)
         {
             Dispatcher.Invoke(() =>
             {
                 ProgressBar.Value = percent;
                 //StatusText.Text = $"Updating… {percent}%";
                 StatusText.Text = string.Empty;
-                Run downloadHeader = new Run("Updating...\n");
+                Run downloadHeader = new Run(headerText + "\n");
                 downloadHeader.FontSize = 24;
                 downloadHeader.FontWeight = FontWeights.Bold;
                 Run percentage = new Run(percent.ToString());
