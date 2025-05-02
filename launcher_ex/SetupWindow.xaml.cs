@@ -100,8 +100,9 @@ namespace launcher_ex
         private void UpdatePlayOrInstallButton()
         {
             string installPath = PathTextBox.Text;
+            string foundPath = TitanfallManager.TryFindExistingValidPath(_originalLauncherDir, false);
 
-            if (TitanfallManager.ValidateGamePath(installPath, _originalLauncherDir))
+            if (!string.IsNullOrEmpty(foundPath))
                 PlayOrInstallButton.Content = "Play";
             else
                 PlayOrInstallButton.Content = "Install";
