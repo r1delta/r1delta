@@ -2370,7 +2370,7 @@ void __fastcall CServerGameDLL_OnSayTextMsg(void* pThis, int clientIndex, char* 
 	auto v = r1sqvm->sqvm;
 
 	base_getroottable(v);
-	sq_pushstring(v, "CodeCallback_OnPlayerChatMsg", -1);
+	sq_pushstring(v, "CodeCallback_OnClientChatMsg", -1);
 	sq_get_noerr(v, -2);
 	if (sq_gettype(v, -1) == OT_CLOSURE) {
 		base_getroottable(v);
