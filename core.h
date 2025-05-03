@@ -79,7 +79,7 @@ extern int G_is_dedi;
 
 __forceinline bool IsNoOrigin() {
 //    const wchar_t* cmdLine = GetCommandLineW();
-    return false;
+    return true;
 }
 
 __forceinline bool IsNoConsole() {
