@@ -78,8 +78,8 @@ extern int G_is_dedi;
 #define IsDedicatedServer() (G_is_dedi)
 
 __forceinline bool IsNoOrigin() {
-    const wchar_t* cmdLine = GetCommandLineW();
-    return !wcsstr(cmdLine, L"-useorigin");
+//    const wchar_t* cmdLine = GetCommandLineW();
+    return false;
 }
 
 __forceinline bool IsNoConsole() {
