@@ -99,6 +99,8 @@ void __stdcall LoaderNotificationCallback(
 	const LDR_DLL_NOTIFICATION_DATA* notification_data,
 	void* context);
 
+class ILocalize;
+
 extern uintptr_t G_launcher;
 extern uintptr_t G_vscript;
 extern uintptr_t G_filesystem_stdio;
@@ -107,6 +109,7 @@ extern uintptr_t G_engine;
 extern uintptr_t G_engine_ds;
 extern uintptr_t G_client;
 extern uintptr_t G_localize;
+extern ILocalize* G_localizeIface;
 
 static inline std::string G_public_ip;
 std::string get_public_ip();

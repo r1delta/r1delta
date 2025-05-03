@@ -5,6 +5,8 @@
 #include "load.h"
 #include "weaponxdebug.h"
 #include "netchanwarnings.h"
+#include "localchatwriter.h"
+#include "localize.h"
 
 typedef void (*sub_18027F2C0Type)(__int64 a1, const char* a2, void* a3);
 sub_18027F2C0Type sub_18027F2C0Original;
@@ -221,139 +223,206 @@ inline std::string WideToMultiByte(const std::wstring& wstr, unsigned int codePa
     }
     return strTo;
 }
+
+bool skip_valid_ansi_csi_sgr(char*& str)
+{
+    if (*str++ != '\x1B')
+        return false;
+    if (*str++ != '[') // CSI
+        return false;
+    for (char* c = str; *c; c++)
+    {
+        if (*c >= '0' && *c <= '9')
+            continue;
+        if (*c == ';' || *c == ':')
+            continue;
+        if (*c == 'm') // SGR
+            break;
+        return false;
+    }
+    return true;
+}
+
+void RemoveAsciiControlSequences(char* str, bool allow_color_codes)
+{
+    for (char* pc = str, c = *pc; c = *pc; pc++)
+    {
+        // skip UTF-8 characters
+        int bytesToSkip = 0;
+        if ((c & 0xE0) == 0xC0)
+            bytesToSkip = 1; // skip 2-byte UTF-8 sequence
+        else if ((c & 0xF0) == 0xE0)
+            bytesToSkip = 2; // skip 3-byte UTF-8 sequence
+        else if ((c & 0xF8) == 0xF0)
+            bytesToSkip = 3; // skip 4-byte UTF-8 sequence
+        else if ((c & 0xFC) == 0xF8)
+            bytesToSkip = 4; // skip 5-byte UTF-8 sequence
+        else if ((c & 0xFE) == 0xFC)
+            bytesToSkip = 5; // skip 6-byte UTF-8 sequence
+
+        bool invalid = false;
+        char* orgpc = pc;
+        for (int i = 0; i < bytesToSkip; i++)
+        {
+            char next = pc[1];
+
+            // valid UTF-8 part
+            if ((next & 0xC0) == 0x80)
+            {
+                pc++;
+                continue;
+            }
+
+            // invalid UTF-8 part or encountered \0
+            invalid = true;
+            break;
+        }
+        if (invalid)
+        {
+            // erase the whole "UTF-8" sequence
+            for (char* x = orgpc; x <= pc; x++)
+                if (*x != '\0')
+                    *x = ' ';
+                else
+                    break;
+        }
+        if (bytesToSkip > 0)
+            continue; // this byte was already handled as UTF-8
+
+        // an invalid control character or an UTF-8 part outside of UTF-8 sequence
+        if ((iscntrl(c) && c != '\n' && c != '\r' && c != '\x1B') || (c & 0x80) != 0)
+        {
+            *pc = ' ';
+            continue;
+        }
+
+        if (c == '\x1B') // separate handling for this escape sequence...
+            if (allow_color_codes && skip_valid_ansi_csi_sgr(pc)) // ...which we allow for color codes...
+                pc--;
+            else // ...but remove it otherwise
+                *pc = ' ';
+    }
+}
+
 int recurse = 0;
-// --- Hooked Function ---
 __int64 __fastcall CHudChat__FormatAndDisplayMessage_Hooked(
-    __int64 a1, // CHudChat* this
-    const CHAR* a2, // message
-    unsigned int a3, // player index/entity id
-    char a4, // is team chat?
-    char a5  // is dead chat?
+    __int64 thisptr, // CHudChat* this
+    const CHAR* message, // message
+    unsigned int senderId, // player index/entity id
+    char teamChat, // is team chat?
+    char deadChat // is dead chat?
 ) {
     if (recurse != 0) {
-        return oCHudChat__FormatAndDisplayMessage(a1, a2, a3, a4, a5);
+        return oCHudChat__FormatAndDisplayMessage(thisptr, message, senderId, teamChat, deadChat);
     }
     recurse++;
-    // --- Static variables & Global Init (remain the same) ---
+
     static uintptr_t s_pEngineClient = 0;
-    static uintptr_t s_pVGuiLocalize = 0;
     static bool s_globalsInitialized = false;
-    // --- Constants for Global Retrieval (remain the same) ---
+
     constexpr uintptr_t IDA_ANALYSIS_BASE_ADDRESS = 0x180000000;
     constexpr uintptr_t IDA_ADDR_G_PENGINECLIENT = 0x180BF51E8;
-    constexpr uintptr_t IDA_ADDR_G_PVGUILOCALIZE = 0x18380E750;
     constexpr uintptr_t OFFSET_G_PENGINECLIENT = IDA_ADDR_G_PENGINECLIENT - IDA_ANALYSIS_BASE_ADDRESS;
-    constexpr uintptr_t OFFSET_G_PVGUILOCALIZE = IDA_ADDR_G_PVGUILOCALIZE - IDA_ANALYSIS_BASE_ADDRESS;
 
-    // --- Initialize Globals on first call ---
     if (!s_globalsInitialized && G_client != 0) {
         uintptr_t addressOfEnginePtr = G_client + OFFSET_G_PENGINECLIENT;
-        uintptr_t addressOfLocalizePtr = G_client + OFFSET_G_PVGUILOCALIZE;
-        bool canReadEngine = !IsBadReadPtr((void*)addressOfEnginePtr, sizeof(uintptr_t));
-        bool canReadLocalize = !IsBadReadPtr((void*)addressOfLocalizePtr, sizeof(uintptr_t));
-        if (canReadEngine) s_pEngineClient = *(uintptr_t*)addressOfEnginePtr;
-        if (canReadLocalize) s_pVGuiLocalize = *(uintptr_t*)addressOfLocalizePtr;
+        s_pEngineClient = *(uintptr_t*)addressOfEnginePtr;
         s_globalsInitialized = true;
     }
 
-    // --- Reconstruct the message string ---
+    bool isAnonymous = senderId == 0;
+
     std::wstring finalMessageStringW;
     bool nameRetrievedSuccessfully = false;
-    player_info_t playerInfo = {}; // Zero initialize
+    player_info_t playerInfo = {};
 
-    // 1. Get Player Info
-    if (s_pEngineClient != 0 && !IsBadReadPtr((void*)s_pEngineClient, sizeof(uintptr_t))) {
+    int myTeam = -1, theirTeam = -1;
+    if (s_pEngineClient && !isAnonymous) {
         uintptr_t engineClientVtable = *(uintptr_t*)s_pEngineClient;
         if (engineClientVtable != 0) {
             uintptr_t* pGetPlayerInfoFuncAddrLocation = (uintptr_t*)(engineClientVtable + 0x80);
-            if (!IsBadReadPtr(pGetPlayerInfoFuncAddrLocation, sizeof(uintptr_t))) {
-                uintptr_t getPlayerInfoFuncAddr = *pGetPlayerInfoFuncAddrLocation;
-                if (getPlayerInfoFuncAddr != 0) {
-                    tEngineClient_GetPlayerInfo pGetPlayerInfo = (tEngineClient_GetPlayerInfo)getPlayerInfoFuncAddr;
-                    bool funcReturnedSuccess = pGetPlayerInfo(s_pEngineClient, a3, &playerInfo);
-                    playerInfo.szName[sizeof(playerInfo.szName) - 1] = '\0'; // GUARANTEE termination
-                    if (funcReturnedSuccess && playerInfo.szName[0] != '\0') {
-                        nameRetrievedSuccessfully = true;
-                    }
-                }
+            uintptr_t getPlayerInfoFuncAddr = *pGetPlayerInfoFuncAddrLocation;
+            tEngineClient_GetPlayerInfo pGetPlayerInfo = (tEngineClient_GetPlayerInfo)getPlayerInfoFuncAddr;
+            bool funcReturnedSuccess = pGetPlayerInfo(s_pEngineClient, senderId, &playerInfo);
+            playerInfo.szName[sizeof(playerInfo.szName) - 1] = '\0'; // GUARANTEE termination
+            if (funcReturnedSuccess && playerInfo.szName[0] != '\0') {
+                nameRetrievedSuccessfully = true;
             }
         }
-    }
-    const char* nameToUse = nameRetrievedSuccessfully ? playerInfo.szName : "?UNKNOWN?";
 
-    // 2. Get Prefixes (remain the same)
+        void*(*GetClientEntitySelf)(int idx) = (decltype(GetClientEntitySelf))(G_client + 0x7B1B0);
+        void*(*GetClientEntity)(int idx) = (decltype(GetClientEntity))(G_client + 0x280FE0);
+
+        auto me = GetClientEntitySelf(-1);
+        auto them = GetClientEntity(senderId);
+
+        if (me && them) {
+            myTeam = (*(int(__fastcall**)(void*))(*(_QWORD*)me + 768LL))(me);
+            theirTeam = (*(int(__fastcall**)(void*))(*(_QWORD*)them + 768LL))(them);
+        }
+    }
+    const char* nameToUse = isAnonymous ? "" : (nameRetrievedSuccessfully ? playerInfo.szName : "?UNKNOWN?");
+
     const wchar_t* deadPrefix = L"";
     const wchar_t* teamPrefix = L"";
-    if (s_pVGuiLocalize != 0 && !IsBadReadPtr((void*)s_pVGuiLocalize, sizeof(uintptr_t))) {
-        uintptr_t localizeVtable = *(uintptr_t*)s_pVGuiLocalize;
-        if (localizeVtable != 0) {
-            uintptr_t* pLocalizeFindFuncAddrLocation = (uintptr_t*)(localizeVtable + 0x58); // Offset 88
-            if (!IsBadReadPtr(pLocalizeFindFuncAddrLocation, sizeof(uintptr_t))) {
-                uintptr_t localizeFindFuncAddr = *pLocalizeFindFuncAddrLocation;
-                if (localizeFindFuncAddr != 0) {
-                    tLocalize_Find pLocalizeFind = (tLocalize_Find)localizeFindFuncAddr;
-                    if (a5) {
-                        const wchar_t* foundPrefix = pLocalizeFind(s_pVGuiLocalize, "#HUD_CHAT_DEAD_PREFIX");
-                        if (foundPrefix) { deadPrefix = foundPrefix; }
-                    }
-                    if (a4) {
-                        const wchar_t* foundPrefix = pLocalizeFind(s_pVGuiLocalize, "#HUD_CHAT_TEAM_PREFIX");
-                        if (foundPrefix) { teamPrefix = foundPrefix; }
-                    }
-                }
-            }
+    if (G_localizeIface) {
+        if (deadChat) {
+            const wchar_t* foundPrefix = G_localizeIface->Find("#HUD_CHAT_DEAD_PREFIX");
+            if (foundPrefix) { deadPrefix = foundPrefix; }
+        }
+        if (teamChat) {
+            const wchar_t* foundPrefix = G_localizeIface->Find("#HUD_CHAT_TEAM_PREFIX");
+            if (foundPrefix) { teamPrefix = foundPrefix; }
         }
     }
 
-    // 3. Assemble the final string (WideChar)
-    finalMessageStringW.clear(); // Start fresh
+    bool doNameSeparator = !isAnonymous;
+
+    LocalChatWriter::SwatchColor playerNameColor = LocalChatWriter::MainTextColor;
+    if (theirTeam != -1) {
+        if (theirTeam != 2 && theirTeam != 3) {
+            playerNameColor = LocalChatWriter::MainTextColor;
+            const wchar_t* foundPrefix = G_localizeIface->Find("#HUD_CHAT_SPEC_PREFIX");
+            if (foundPrefix) teamPrefix = foundPrefix;
+        } else {
+            int opposite = theirTeam == 2 ? 3 : 2;
+            playerNameColor = myTeam == opposite ? LocalChatWriter::EnemyTeamNameColor : LocalChatWriter::SameTeamNameColor;
+        }
+    }
+
+    auto writer = LocalChatWriter();
+    writer.InsertChar(L'\n');
+    writer.InsertSwatchColorChange(playerNameColor);
+
     finalMessageStringW.append(deadPrefix);
+    writer.InsertText(deadPrefix);
     finalMessageStringW.append(teamPrefix);
+    writer.InsertText(teamPrefix);
 
-    // Convert and append name - check result
     std::wstring wideName = MultiByteToWide(nameToUse, -1);
-    // --- Add a check here ---
-    // Breakpoint: Inspect wideName. Is it valid? Does it have weird characters?
     finalMessageStringW.append(wideName);
+    writer.InsertText(wideName.c_str());
 
-    // --- Add a check here ---
-    // Breakpoint: Inspect finalMessageStringW. Does it look correct so far?
-
-    // *** TRY ALTERNATIVE APPENDS FOR COLON ***
-
-    // Method 1: Character by character (most likely to bypass weird interactions)
-    finalMessageStringW.push_back(L':');
-    finalMessageStringW.push_back(L' ');
-
-    // Method 2: Explicit array (if Method 1 fails)
-    // const wchar_t colonSpace[] = { L':', L' ', L'\0' };
-    // finalMessageStringW.append(colonSpace);
-
-    // Method 3: Original append (keep commented out unless others fail)
-    // finalMessageStringW.append(L": ");
-
-    // --- Add a check here ---
-    // Breakpoint: Inspect finalMessageStringW. Does it contain the colon and space now? Check length.
+    if (doNameSeparator) {
+        finalMessageStringW.push_back(L':');
+        finalMessageStringW.push_back(L' ');
+        writer.InsertSwatchColorChange(LocalChatWriter::MainTextColor);
+        writer.InsertChar(L':');
+        writer.InsertChar(L' ');
+    }
 
     // Append message
-    if (a2 != nullptr && !IsBadReadPtr(a2, 1)) {
-        finalMessageStringW.append(MultiByteToWide(a2, -1));
+    if (message != nullptr && !IsBadReadPtr(message, 1)) {
+        RemoveAsciiControlSequences((char*)message, true);
+        auto text = MultiByteToWide(message, -1);
+        finalMessageStringW.append(text);
+        writer.Write(message);
     }
 
-    // 4. Convert wide string to multibyte and print using Msg()
-    std::string finalMessageMB = WideToMultiByte(finalMessageStringW, CP_UTF8); // Or CP_ACP
+    std::string finalMessageMB = WideToMultiByte(finalMessageStringW, CP_UTF8);
+    Msg("*** CHAT *** %s\n", finalMessageMB.c_str());
 
-    if (!finalMessageMB.empty()) {
-        Msg("*** CHAT *** %s\n", finalMessageMB.c_str());
-    }
-
-    // --- Call the original function ---
-    if (oCHudChat__FormatAndDisplayMessage) {
-        return oCHudChat__FormatAndDisplayMessage(a1, a2, a3, a4, a5);
-    }
-    else {
-        return 0;
-    }
+    // return oCHudChat__FormatAndDisplayMessage(thisptr, message, senderId, teamChat, deadChat);
 }
 char (*oMsgFunc__SayText)(__int64 a1);
 char __fastcall MsgFunc__SayText(__int64 a1) {

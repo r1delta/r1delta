@@ -92,6 +92,7 @@
 #include "hudwarp.h"
 #include "hudwarp_hooks.h"
 #include "surfacerender.h"
+#include "localchatwriter.h"
 #include "discord.h"
 //#define DISCORD
 #define DISCORDPP_IMPLEMENTATION
@@ -884,6 +885,7 @@ uintptr_t G_engine;
 uintptr_t G_engine_ds;
 uintptr_t G_client;
 uintptr_t G_localize;
+ILocalize* G_localizeIface;
 
 class CPluginBotManager
 {
@@ -3000,8 +3002,10 @@ void __stdcall LoaderNotificationCallback(
 			InitClient();
 			SetupHudWarpHooks();
 			Setup_MMNotificationClient();
+			SetupLocalizeIface();
 			SetupSurfaceRenderHooks();
 			SetupSquirrelErrorNotificationHooks();
+			SetupChatWriter();
 			CThread(DiscordThread).detach();
 			
 		}

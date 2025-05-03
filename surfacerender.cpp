@@ -8,8 +8,8 @@
 
 vgui::IPanel* panel = nullptr;
 vgui::ISurface* surface = nullptr;
+
 char fpsStringData[4096] = { 0 };
-ILocalize* localize = nullptr;
 bool g_bIsDrawingFPSPanel = false;
 __int64 (*osub_1800165C0)(
     __int64 a1,
@@ -119,8 +119,6 @@ __int64 __fastcall sub_18028BEA0(__int64 a1, __int64 a2, double a3) {
 
 vgui::HFont WatermarkFont = 0, WatermarkSmallFont = 0;
 void DrawWatermark() {
-    if (!surface || !localize) return; // Ensure interfaces are valid
-    // Create fonts if they don't exist
     if (!WatermarkFont) {
         WatermarkFont = surface->CreateFont();
         surface->SetFontGlyphSet(WatermarkFont, "Verdana", 14, 650, 0, 0, vgui::FONTFLAG_DROPSHADOW | vgui::FONTFLAG_ANTIALIAS);
@@ -129,12 +127,6 @@ void DrawWatermark() {
         WatermarkSmallFont = surface->CreateFont();
         surface->SetFontGlyphSet(WatermarkSmallFont, "Verdana", 12, 100, 0, 0, vgui::FONTFLAG_DROPSHADOW | vgui::FONTFLAG_ANTIALIAS);
     }
-    // Check if fonts are valid after creation attempt
-    if (!WatermarkFont || !WatermarkSmallFont) {
-        // Optionally log an error here
-        return;
-    }
-
 
     if (!cvar_delta_watermark->m_Value.m_nValue) return;
 
@@ -149,18 +141,16 @@ void DrawWatermark() {
     else
         snprintf(ansiBuffer1, sizeof(ansiBuffer1), "R1Delta %s", R1D_VERSION);
     wchar_t watermarkText1[512];
-    localize->ConvertANSIToUnicode(ansiBuffer1, watermarkText1, sizeof(watermarkText1));
+    G_localizeIface->ConvertANSIToUnicode(ansiBuffer1, watermarkText1, sizeof(watermarkText1));
 
     // Line 2+: FPS Info or Default URL
-    char ansiBuffer2[4096]; // Use a separate buffer for the second text block
+    const char* urlString = "https://r1delta.net/";
+    const char* secondData = urlString;
     if (fpsStringData[0] != '\x00') {
-        snprintf(ansiBuffer2, sizeof(ansiBuffer2), "%s", fpsStringData);
-    }
-    else {
-        snprintf(ansiBuffer2, sizeof(ansiBuffer2), "https://r1delta.net/");
+        secondData = fpsStringData;
     }
     wchar_t watermarkText2[4096];
-    localize->ConvertANSIToUnicode(ansiBuffer2, watermarkText2, sizeof(watermarkText2));
+    G_localizeIface->ConvertANSIToUnicode(secondData, watermarkText2, sizeof(watermarkText2));
 
     // --- Calculate Text Dimensions and Total Height/Max Width ---
     int text1Wide, text1Tall;
@@ -400,9 +390,6 @@ void SetupSurfaceRenderHooks() {
 	auto vgui_CreateInterface = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(vgui, "CreateInterface"));
 	panel = (vgui::IPanel*)vgui_CreateInterface("VGUI_Panel009", 0);
 
-    auto mlocalize = GetModuleHandleA("localize.dll");
-    auto localize_CreateInterface = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(mlocalize, "CreateInterface"));
-    localize = (ILocalize*)localize_CreateInterface("Localize_001", 0);
 	MH_CreateHook(GetVFunc<LPVOID>(panel, 46), &PaintTraverse, reinterpret_cast<LPVOID*>(&oPaintTraverse));
     MH_CreateHook((LPVOID)(((uintptr_t)(vguimatsurface)) + 0x165C0), &sub_1800165C0, reinterpret_cast<LPVOID*>(&osub_1800165C0));
     MH_CreateHook((LPVOID)(((uintptr_t)(G_client)) + 0x28BEA0), &sub_18028BEA0, reinterpret_cast<LPVOID*>(&osub_18028BEA0));
@@ -414,4 +401,10 @@ void SetupSquirrelErrorNotificationHooks() {
 
     auto launcher = (uintptr_t)GetModuleHandleA("launcher.dll");
     MH_CreateHook((LPVOID)(launcher + 0x3A5E0), &OnClientScriptErrorHook, reinterpret_cast<LPVOID*>(&oOnClientScriptErrorHook));
+}
+
+void SetupLocalizeIface() {
+    auto mlocalize = GetModuleHandleA("localize.dll");
+    auto localize_CreateInterface = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(mlocalize, "CreateInterface"));
+    G_localizeIface = (ILocalize*)localize_CreateInterface("Localize_001", 0);
 }

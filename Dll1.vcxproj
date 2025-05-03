@@ -216,6 +216,7 @@
     <ClInclude Include="jwt_compact.h" />
     <ClInclude Include="keyvalues.h" />
     <ClInclude Include="load.h" />
+    <ClInclude Include="localchatwriter.h" />
     <ClInclude Include="localize.h" />
     <ClInclude Include="logging.h" />
     <ClInclude Include="masterserver.h" />
@@ -306,6 +307,7 @@
     <ClCompile Include="hudwarp_hooks.cpp" />
     <ClCompile Include="keyvalues.cpp" />
     <ClCompile Include="load.cpp" />
+    <ClCompile Include="localchatwriter.cpp" />
     <ClCompile Include="logging.cpp" />
     <ClCompile Include="masterserver.cpp" />
     <ClCompile Include="memory.cpp" />

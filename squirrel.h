@@ -464,7 +464,7 @@ extern sq_compilebuffer_t sq_compilebuffer;
 extern base_getroottable_t base_getroottable;
 extern sq_call_t sq_call;
 extern sq_newslot_t sq_newslot;
-extern SQVM_Pop_t SQVM_Pop;
+extern SQVM_Pop_t sq_pop;
 extern sq_push_t sq_push;
 extern SQVM_Raise_Error_t SQVM_Raise_Error;
 extern IdType2Name_t IdType2Name;

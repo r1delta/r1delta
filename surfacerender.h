@@ -2,3 +2,4 @@
 
 void SetupSurfaceRenderHooks();
 void SetupSquirrelErrorNotificationHooks();
+void SetupLocalizeIface();

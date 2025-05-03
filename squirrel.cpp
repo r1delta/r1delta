@@ -115,7 +115,7 @@ sq_compilebuffer_t sq_compilebuffer;
 base_getroottable_t base_getroottable;
 sq_call_t sq_call;
 sq_newslot_t sq_newslot;
-SQVM_Pop_t SQVM_Pop;
+SQVM_Pop_t sq_pop;
 sq_push_t sq_push;
 SQVM_Raise_Error_t SQVM_Raise_Error;
 IdType2Name_t IdType2Name;
@@ -735,24 +735,21 @@ struct CRecipientFilter {
 	char pad[58];
 };
 
-int64 UserMsgBegin_Wrapper(int64_t filter, const char* name) {
-	auto UserMsgBegin = reinterpret_cast<int (*)(int64_t, const char**)>(G_server + 0x629910);
+int64 UserMsgBegin_Wrapper(CRecipientFilter* filter, const char* name) {
+	auto UserMsgBegin = reinterpret_cast<int (*)(CRecipientFilter*, const char**)>(G_server + 0x629910);
 	auto value = (0x00000200DA9BEBE0);
 	auto v6 = UserMsgBegin(0, &name);
 	if (v6 == -1) {
 		Error("UserMessageBegin:  Unregistered message '%s'\n", name);
 	}
-	auto ServerCreateMessage = reinterpret_cast<int64 (*)(void*, int64_t, int64, const char*, char)>(g_r1oCVEngineServerInterface[42]);
+	auto ServerCreateMessage = reinterpret_cast<int64 (*)(void*, CRecipientFilter*, int64, const char*, char)>(g_r1oCVEngineServerInterface[42]);
 	return ServerCreateMessage(g_r1oCVEngineServerInterface, filter, v6, name, 1);
-
 }
 
 void EndMessage() {
 	auto ServerEndMessage = reinterpret_cast<int64(*)(void*)>(g_r1oCVEngineServerInterface[43]);
 	ServerEndMessage(g_r1oCVEngineServerInterface);
 }
-
-
 
 void ConstructCRecipientFilter(void* a1)
 {
@@ -773,49 +770,78 @@ void ConstructCRecipientFilter(void* a1)
 	*reinterpret_cast<uint16_t*>  (reinterpret_cast<uint8_t*>(a1) + 48) = 0;
 }
 
-void SendChatMsg(int fromIndex,const char* msg,bool team)
+void SendChatMsg(CRecipientFilter* filter, int fromIndex, const char* msg, bool team, bool dead)
 {
-	//int64 filter{};
-	Msg("Msg %s\n", msg);
-	CreateInterfaceFn CreateIntServer = (CreateInterfaceFn)(GetProcAddress((HMODULE)G_server, "CreateInterface"));
-	if (!CreateIntServer) {
-		Msg("Failed to get CreateInterface function\n");
-		return;
-	}
-	CRecipientFilter filter;
-	auto DestoryFilter = reinterpret_cast<void (*)(int64,bool)>(G_server + 0x1E78D0);
-	auto MessageWriteByte = reinterpret_cast<void (*)(int64, int, int)>(G_server + 0x142FA0);
-	auto MessageWriteString = reinterpret_cast<void (*)(int64,const char*)>(G_server + 0x663AF0);
-	auto MessageWriteBool = reinterpret_cast<void (*)(bool)>(G_server + 0x14AB60);
-	
-	ConstructCRecipientFilter(&filter);
-	
+	static auto MessageWriteByte = reinterpret_cast<void (*)(int64, int, int)>(G_server + 0x142FA0);
+	static auto MessageWriteString = reinterpret_cast<void (*)(int64,const char*)>(G_server + 0x663AF0);
+	static auto MessageWriteBool = reinterpret_cast<void (*)(bool)>(G_server + 0x14AB60);
 
-	auto CRecipientFilter__AddAllPlayers = reinterpret_cast<int64(*)(int64_t)>(G_server + 0x1E7BA0);  // adjust “baseAddress” to your module’s load base);
+	static int64_t* activeMsg = reinterpret_cast<int64_t*>(G_server + 0xC31058);
 
-	// 4) Finally call it, passing the address of your fakeFilter (cast to int64):
-	auto res = CRecipientFilter__AddAllPlayers(reinterpret_cast<int64_t>(&filter));
-	auto v3 = UserMsgBegin_Wrapper(reinterpret_cast<int64_t>(&filter), "SayText");
-	int64_t* activeMsg = reinterpret_cast<int64_t*>(G_server + 0xC31058);
-	MessageWriteByte(v3, fromIndex, 8);
-	*activeMsg = v3;
+	*activeMsg = UserMsgBegin_Wrapper(filter, "SayText");
+	MessageWriteByte(*activeMsg, fromIndex, 8);
 	MessageWriteString(0, msg);
 	MessageWriteBool(team);
-	MessageWriteBool(false);
+	MessageWriteBool(dead);
 	EndMessage();
-	DestoryFilter(reinterpret_cast<int64_t>(&filter),0);
-
-
 }
 
 void SendChatWrapper(HSQUIRRELVM v) {
-	const char* msg;
-	sq_getstring(v, 2, &msg);
-	if (msg == nullptr) {
-		Msg("SendChatWrapper: msg is null\n");
-		return;
+	// args: this, entity player / bool = true (broadcast) / array of entities for multiple recipients, int fromPlayerIndex, string text, bool isTeam = false, bool isDead = false
+
+	static auto CRecipientFilter__AddAllPlayers = reinterpret_cast<void(*)(void*)>(G_server + 0x1E7BA0);
+	static auto CRecipientFilter__AddRecipient = reinterpret_cast<void(*)(void*, void*)>(G_server + 0x1E7CB0);
+	static auto DestroyFilter = reinterpret_cast<void(*)(void*, bool)>(G_server + 0x1E78D0);
+
+	SQInteger fromPlayer = 0;
+	if (sq_getinteger(nullptr, v, 3, &fromPlayer)) return;
+
+	const SQChar* msg = nullptr;
+	if (sq_getstring(v, 4, &msg)) return;
+
+	SQBool isTeam = false, isDead = false;
+	sq_getbool(nullptr, v, 5, &isTeam);
+	sq_getbool(nullptr, v, 6, &isDead);
+
+	CRecipientFilter filter;
+	ConstructCRecipientFilter(&filter);
+
+	SQObjectType playerType = sq_gettype(v, 2);
+	if (playerType == OT_BOOL) {
+		SQBool whichPlayer = false;
+		if (sq_getbool(nullptr, v, 2, &whichPlayer)) return;
+		if (whichPlayer) CRecipientFilter__AddAllPlayers(&filter);
+	} else if (playerType == OT_INSTANCE) {
+		void* entity = sq_getentity(v, 2);
+		if (!entity) {
+			sq_throwerror(v, "Passed instance is not a valid entity");
+			return;
+		}
+		CRecipientFilter__AddRecipient(&filter, entity);
+	} else if (playerType == OT_ARRAY) {
+		sq_push(v, 2);
+		sq_pushnull(v);
+		while (SQ_SUCCEEDED(sq_next(v, -2))) {
+			if (sq_gettype(v, -1) != OT_INSTANCE) {
+				sq_pop(v, 4);
+				sq_throwerror(v, "Array element is not an entity");
+				return;
+			}
+			void* entity = sq_getentity(v, -1);
+			if (!entity) {
+				sq_pop(v, 4);
+				sq_throwerror(v, "Array member instance is not a valid entity");
+				return;
+			}
+			CRecipientFilter__AddRecipient(&filter, entity);
+			sq_pop(v, 2);
+		}
+
+		sq_pop(v, 2);
 	}
-	//SendChatMsg(0,msg,false);
+
+	SendChatMsg(&filter, fromPlayer, msg, isTeam, isDead);
+	DestroyFilter(&filter, 0);
 }
 
 // Function to initialize all SQVM functions
@@ -852,7 +878,7 @@ bool GetSQVMFuncs() {
 	base_getroottable = reinterpret_cast<base_getroottable_t>(baseAddress + (IsDedicatedServer() ? 0x56520 : 0x56440));
 	sq_call = reinterpret_cast<sq_call_t>(baseAddress + (IsDedicatedServer() ? 0x18D20 : 0x18C40));
 	sq_newslot = reinterpret_cast<sq_newslot_t>(baseAddress + (IsDedicatedServer() ? 0x17340 : 0x17260));
-	SQVM_Pop = reinterpret_cast<SQVM_Pop_t>(baseAddress + (IsDedicatedServer() ? 0x2BD40 : 0x2BC60));
+	sq_pop = reinterpret_cast<SQVM_Pop_t>(baseAddress + (IsDedicatedServer() ? 0x2BD40 : 0x2BC60));
 	sq_push = reinterpret_cast<sq_push_t>(baseAddress + (IsDedicatedServer() ? 0x166C0 : 0x165E0));
 	SQVM_Raise_Error = reinterpret_cast<SQVM_Raise_Error_t>(baseAddress + (IsDedicatedServer() ? 0x41290 : 0x411B0));
 	IdType2Name = reinterpret_cast<IdType2Name_t>(baseAddress + (IsDedicatedServer() ? 0x3C740 : 0x3C660));
@@ -904,18 +930,18 @@ bool GetSQVMFuncs() {
 		2,      // Expects 2 parameters
 		"void",    // Returns a string
 		"str",
-		"Set a persistent data value"
+		"Localize string"
 	);
 
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_SERVER,
 		"SendChatMsg",
 		(SQFUNCTION)SendChatWrapper,
-		".s", // String
-		2,      // Expects 2 parameters
-		"void",    // Returns a string
+		"..isbb", // String
+		-4,      // Expects at least 4 parameters
+		"void",
 		"str",
-		"Set a persistent data value"
+		"Send a chat message"
 	);
 
 	REGISTER_SCRIPT_FUNCTION(
@@ -926,7 +952,7 @@ bool GetSQVMFuncs() {
 		2,      // Expects 2 parameters
 		"void",    // Returns a string
 		"str",
-		"Set a persistent data value"
+		"Localize string"
 	);
 
 	REGISTER_SCRIPT_FUNCTION(
