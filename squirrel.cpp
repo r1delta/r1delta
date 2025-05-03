@@ -737,7 +737,6 @@ struct CRecipientFilter {
 
 int64 UserMsgBegin_Wrapper(CRecipientFilter* filter, const char* name) {
 	auto UserMsgBegin = reinterpret_cast<int (*)(CRecipientFilter*, const char**)>(G_server + 0x629910);
-	auto value = (0x00000200DA9BEBE0);
 	auto v6 = UserMsgBegin(0, &name);
 	if (v6 == -1) {
 		Error("UserMessageBegin:  Unregistered message '%s'\n", name);
