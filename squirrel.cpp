@@ -793,10 +793,10 @@ void SendChatWrapper(HSQUIRRELVM v) {
 	static auto DestroyFilter = reinterpret_cast<void(*)(void*, bool)>(G_server + 0x1E78D0);
 
 	SQInteger fromPlayer = 0;
-	if (sq_getinteger(nullptr, v, 3, &fromPlayer)) return;
+	if (SQ_FAILED(sq_getinteger(nullptr, v, 3, &fromPlayer))) return;
 
 	const SQChar* msg = nullptr;
-	if (sq_getstring(v, 4, &msg)) return;
+	if (SQ_FAILED(sq_getstring(v, 4, &msg))) return;
 
 	SQBool isTeam = false, isDead = false;
 	sq_getbool(nullptr, v, 5, &isTeam);
@@ -808,7 +808,7 @@ void SendChatWrapper(HSQUIRRELVM v) {
 	SQObjectType playerType = sq_gettype(v, 2);
 	if (playerType == OT_BOOL) {
 		SQBool whichPlayer = false;
-		if (sq_getbool(nullptr, v, 2, &whichPlayer)) return;
+		if (SQ_FAILED(sq_getbool(nullptr, v, 2, &whichPlayer))) return;
 		if (whichPlayer) CRecipientFilter__AddAllPlayers(&filter);
 	} else if (playerType == OT_INSTANCE) {
 		void* entity = sq_getentity(v, 2);
@@ -1180,8 +1180,6 @@ bool GetSQVMFuncs() {
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_UI, // Available in client script contexts
 		"SquirrelNativeFunctionTest", (SQFUNCTION)SquirrelNativeFunctionTest, ".sifb", 0, "string", "string text, int a2, float a3, bool a4", "Test registering and calling native function in Squirrel.");
-
-
 
 	initialized = true;
 	return true;
@@ -1665,7 +1663,7 @@ void run_script(const CCommand& args, R1SquirrelVM* (*GetVMPtr)())
 	if (SQ_SUCCEEDED(compileRes))
 	{
 		base_getroottable(vm->sqvm);
-		SQRESULT callRes = sq_call(vm->sqvm, 1, SQFalse, SQFalse);
+		SQRESULT callRes = sq_call(vm->sqvm, 1, SQFalse, SQTrue);
 	}
 }
 

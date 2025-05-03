@@ -2366,45 +2366,68 @@ public:
 };
 
 void __fastcall CServerGameDLL_OnSayTextMsg(void* pThis, int clientIndex, char* text, char isTeamChat) {
+	auto r1sqvm = GetServerVMPtr();
+	auto v = r1sqvm->sqvm;
+
+	base_getroottable(v);
+	sq_pushstring(v, "CodeCallback_OnPlayerChatMsg", -1);
+	sq_get_noerr(v, -2);
+	if (sq_gettype(v, -1) == OT_CLOSURE) {
+		base_getroottable(v);
+		sq_pushinteger(r1sqvm, v, clientIndex);
+		sq_pushstring(v, text, -1);
+		sq_pushbool(r1sqvm, v, isTeamChat);
+		if (SQ_SUCCEEDED(sq_call(v, 4, SQTrue, SQTrue))) {
+			if (sq_gettype(v, -1) == OT_STRING) sq_getstring(v, -1, (const SQChar**)&text);
+			sq_pop(v, 1);
+		}
+	}
+	sq_pop(v, 2);
+
+	if (!text || !text[0]) return;
+
 	oCServerGameDLL_OnSayTextMsg(pThis, clientIndex, text, isTeamChat);
-	// 1. Get Player Entity
-	CBasePlayer* pSenderEntity = (CBasePlayer*)UTIL_GetEntityByIndex(clientIndex);
 
-	if (!pSenderEntity) {
-		return;
+	if (IsDedicatedServer()) {
+		// 1. Get Player Entity
+		CBasePlayer* pSenderEntity = (CBasePlayer*)UTIL_GetEntityByIndex(clientIndex);
+
+		if (!pSenderEntity) {
+			return;
+		}
+
+		// 2. Get Player Name (using vtable index 43 / offset 344)
+		// We need the vtable pointer first (usually the first member of the object)
+		uintptr_t* vtable = *(uintptr_t**)pSenderEntity;
+		// Get the function pointer from the vtable
+		auto getPlayerNameFunc = (const char* (*)(const CBasePlayer*)) vtable[43]; // 344 / 8 = 43
+
+		const char* playerName = nullptr;
+		if (getPlayerNameFunc) {
+			playerName = getPlayerNameFunc(pSenderEntity);
+		}
+
+		if (!playerName) {
+			playerName = "<Unknown>"; // Fallback name
+		}
+
+		// 3. Check if Player is Dead (using offset 865 / m_lifeState)
+		bool isSenderDead = !pSenderEntity->IsAlive(); // IsAlive checks m_lifeState at 865
+
+		// 4. Format the Output String
+		char formattedMsg[1024]; // Adjust size as needed
+		const char* deadPrefix = isSenderDead ? "[DEAD]" : "";
+		const char* teamPrefix = isTeamChat ? "[TEAM]" : "";
+
+		snprintf(formattedMsg, sizeof(formattedMsg), "*** CHAT *** %s%s%s: %s",
+			deadPrefix,
+			teamPrefix,
+			playerName,
+			text ? text : "<Empty Message>"); // Handle null text just in case
+
+		// 5. Print the Formatted Message
+		Msg("%s\n", formattedMsg);
 	}
-
-	// 2. Get Player Name (using vtable index 43 / offset 344)
-	// We need the vtable pointer first (usually the first member of the object)
-	uintptr_t* vtable = *(uintptr_t**)pSenderEntity;
-	// Get the function pointer from the vtable
-	auto getPlayerNameFunc = (const char* (*)(const CBasePlayer*)) vtable[43]; // 344 / 8 = 43
-
-	const char* playerName = nullptr;
-	if (getPlayerNameFunc) {
-		playerName = getPlayerNameFunc(pSenderEntity);
-	}
-
-	if (!playerName) {
-		playerName = "<Unknown>"; // Fallback name
-	}
-
-	// 3. Check if Player is Dead (using offset 865 / m_lifeState)
-	bool isSenderDead = !pSenderEntity->IsAlive(); // IsAlive checks m_lifeState at 865
-
-	// 4. Format the Output String
-	char formattedMsg[1024]; // Adjust size as needed
-	const char* deadPrefix = isSenderDead ? "[DEAD]" : "";
-	const char* teamPrefix = isTeamChat ? "[TEAM]" : "";
-
-	snprintf(formattedMsg, sizeof(formattedMsg), "*** CHAT *** %s%s%s: %s",
-		deadPrefix,
-		teamPrefix,
-		playerName,
-		text ? text : "<Empty Message>"); // Handle null text just in case
-
-	// 5. Print the Formatted Message
-	Msg("%s\n", formattedMsg);
 }
 
 ConVarR1* host_mostRecentMapCvar = nullptr;
@@ -2545,7 +2568,7 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook((LPVOID)(server_base + 0x50B8B0), &HookedSetRankFunction, NULL);
 	MH_CreateHook((LPVOID)(server_base + 0x410F60), &CGrenadeFrag__ResolveFlyCollisionCustom, reinterpret_cast<LPVOID*>(&oCGrenadeFrag__ResolveFlyCollisionCustom));
 	MH_CreateHook((LPVOID)(server_base + 0x25E290), &UTIL_LogPrintf, reinterpret_cast<LPVOID*>(&oUTIL_LogPrintf));
-	if (IsDedicatedServer())
+	//if (IsDedicatedServer())
 		MH_CreateHook((LPVOID)(server_base + 0x148730), &CServerGameDLL_OnSayTextMsg, reinterpret_cast<LPVOID*>(&oCServerGameDLL_OnSayTextMsg));
 	
 	if (IsDedicatedServer()) {
