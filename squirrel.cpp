@@ -789,7 +789,7 @@ void SendChatMsg(CRecipientFilter* filter, int fromIndex, const char* msg, bool 
 	EndMessage();
 }
 
-void SendChatWrapper(HSQUIRRELVM v) {
+int SendChatWrapper(HSQUIRRELVM v) {
 	// args: this, entity player / bool = true (broadcast) / array of entities for multiple recipients, int fromPlayerIndex, string text, bool isTeam = false, bool isDead = false
 
 	static auto CRecipientFilter__AddAllPlayers = reinterpret_cast<void(*)(void*)>(G_server + 0x1E7BA0);
@@ -797,10 +797,10 @@ void SendChatWrapper(HSQUIRRELVM v) {
 	static auto DestroyFilter = reinterpret_cast<void(*)(void*, bool)>(G_server + 0x1E78D0);
 
 	SQInteger fromPlayer = 0;
-	if (SQ_FAILED(sq_getinteger(nullptr, v, 3, &fromPlayer))) return;
+	if (SQ_FAILED(sq_getinteger(nullptr, v, 3, &fromPlayer))) return -1;
 
 	const SQChar* msg = nullptr;
-	if (SQ_FAILED(sq_getstring(v, 4, &msg))) return;
+	if (SQ_FAILED(sq_getstring(v, 4, &msg))) return -1;
 
 	SQBool isTeam = false, isDead = false;
 	sq_getbool(nullptr, v, 5, &isTeam);
@@ -812,13 +812,13 @@ void SendChatWrapper(HSQUIRRELVM v) {
 	SQObjectType playerType = sq_gettype(v, 2);
 	if (playerType == OT_BOOL) {
 		SQBool whichPlayer = false;
-		if (SQ_FAILED(sq_getbool(nullptr, v, 2, &whichPlayer))) return;
+		if (SQ_FAILED(sq_getbool(nullptr, v, 2, &whichPlayer))) return -1;
 		if (whichPlayer) CRecipientFilter__AddAllPlayers(&filter);
 	} else if (playerType == OT_INSTANCE) {
 		void* entity = sq_getentity(v, 2);
 		if (!entity) {
 			sq_throwerror(v, "Passed instance is not a valid entity");
-			return;
+			return -1;
 		}
 		CRecipientFilter__AddRecipient(&filter, entity);
 	} else if (playerType == OT_ARRAY) {
@@ -828,13 +828,13 @@ void SendChatWrapper(HSQUIRRELVM v) {
 			if (sq_gettype(v, -1) != OT_INSTANCE) {
 				sq_pop(v, 4);
 				sq_throwerror(v, "Array element is not an entity");
-				return;
+				return -1;
 			}
 			void* entity = sq_getentity(v, -1);
 			if (!entity) {
 				sq_pop(v, 4);
 				sq_throwerror(v, "Array member instance is not a valid entity");
-				return;
+				return -1;
 			}
 			CRecipientFilter__AddRecipient(&filter, entity);
 			sq_pop(v, 2);
@@ -845,6 +845,7 @@ void SendChatWrapper(HSQUIRRELVM v) {
 
 	SendChatMsg(&filter, fromPlayer, msg, isTeam, isDead);
 	DestroyFilter(&filter, 0);
+	return 0;
 }
 
 void RunAutorunScripts(R1SquirrelVM* r1sqvm, const char* prefix) {

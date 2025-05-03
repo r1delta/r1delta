@@ -392,7 +392,7 @@ __int64 __fastcall CHudChat__FormatAndDisplayMessage_Hooked(
     }
 
     auto writer = LocalChatWriter();
-    writer.InsertChar(L'\n');
+    writer.InsertChar('\n');
     writer.InsertSwatchColorChange(playerNameColor);
 
     finalMessageStringW.append(deadPrefix);
@@ -408,8 +408,8 @@ __int64 __fastcall CHudChat__FormatAndDisplayMessage_Hooked(
         finalMessageStringW.push_back(L':');
         finalMessageStringW.push_back(L' ');
         writer.InsertSwatchColorChange(LocalChatWriter::MainTextColor);
-        writer.InsertChar(L':');
-        writer.InsertChar(L' ');
+        writer.InsertChar(':');
+        writer.InsertChar(' ');
     }
 
     // Append message
