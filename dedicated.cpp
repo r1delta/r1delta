@@ -814,9 +814,9 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 #endif
 	// copy sendtable funcs
 	DWORD oldProtect;
-	VirtualProtect((LPVOID)(G_engine_ds + 0x550760), 173 * sizeof(uintptr_t), PAGE_READWRITE, &oldProtect);
-	memcpy((void*)(G_engine_ds + 0x550760), (void*)(G_engine + 0x7CB3F0), 173 * sizeof(uintptr_t));
-	VirtualProtect((LPVOID)(G_engine_ds + 0x550760), 173 * sizeof(uintptr_t), oldProtect, &oldProtect);
+	VirtualProtect((LPVOID)(G_engine_ds + 0x550760), 99 * sizeof(uintptr_t), PAGE_READWRITE, &oldProtect);
+	memcpy((void*)(G_engine_ds + 0x550760), (void*)(G_engine + 0x7CB3F0), 99 * sizeof(uintptr_t));
+	VirtualProtect((LPVOID)(G_engine_ds + 0x550760), 99 * sizeof(uintptr_t), oldProtect, &oldProtect);
 	MH_EnableHook(MH_ALL_HOOKS);
 	reinterpret_cast<char(__fastcall*)(__int64, CreateInterfaceFn)>((uintptr_t)(engine) + 0x01A04A0)(0, (CreateInterfaceFn)(engineDS + 0xE9000)); // connect nondedi engine
 	reinterpret_cast<void(__fastcall*)(int, void*)>((uintptr_t)(engine) + 0x47F580)(0, 0); // register nondedi engine cvars
