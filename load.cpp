@@ -2936,6 +2936,9 @@ void S_Shutdown_Hook()
 	if (!g_bNoSound)
 		Deinit_MMNotificationClient();
 }
+void toggleFullscreenMap_cmd(const CCommand& ccargs) {
+	return;
+}
 
 void Setup_MMNotificationClient()
 {
@@ -3029,6 +3032,7 @@ void __stdcall LoaderNotificationCallback(
 			SetupSurfaceRenderHooks();
 			SetupSquirrelErrorNotificationHooks();
 			SetupChatWriter();
+			RegisterConCommand("+toggleFullscreenMap", toggleFullscreenMap_cmd, "Toggles the fullscreen map.", FCVAR_CLIENTDLL);
 			CThread(DiscordThread).detach();
 			
 		}
