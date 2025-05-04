@@ -49,6 +49,11 @@ __int64 sub_1800165C0(
     va_list args;
     va_start(args, fmt);
 
+    if (fmt[0] == 'n') {
+        // name: %s
+        g_bIsDrawingFPSPanel = false;
+    }
+
     if (!g_bIsDrawingFPSPanel) {
         // if we're not drawing the FPS panel, just call the real function
         auto result = sub_180016490(a1, a2, a3, a4, a5, a6, a7, a8, fmt, args);
