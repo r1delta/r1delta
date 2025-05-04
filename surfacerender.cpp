@@ -22,6 +22,18 @@ __int64 (*osub_1800165C0)(
     int a8,
     const char* fmt,
     ...);
+__int64 (*sub_180016490)(
+    __int64 a1,
+    __int64 a2,
+    __int64 a3,
+    __int64 a4,
+    int a5,
+    unsigned int a6,
+    unsigned int a7,
+    int a8,
+    const char* fmt,
+    va_list va);
+
 __int64 sub_1800165C0(
     __int64 a1,
     __int64 a2,
@@ -37,38 +49,21 @@ __int64 sub_1800165C0(
     va_list args;
     va_start(args, fmt);
 
+    if (fmt[0] == 'n') {
+        // name: %s
+        g_bIsDrawingFPSPanel = false;
+    }
+
     if (!g_bIsDrawingFPSPanel) {
         // if we're not drawing the FPS panel, just call the real function
-        __int64 result = osub_1800165C0(
-            a1, a2, a3, a4,
-            a5, a6, a7, a8,
-            fmt, args  // note: MSVC will forward this as variadic
-        );
+        auto result = sub_180016490(a1, a2, a3, a4, a5, a6, a7, a8, fmt, args);
         va_end(args);
         return result;
     }
 
     // otherwise, format into a temp buffer and append to fpsStringData
     char temp[4096];
-    int len = 0;
-    int v274; // [rsp+428h] [rbp+2F0h]
-    unsigned __int8 v275; // [rsp+428h] [rbp+2F0h]
-    int v276; // [rsp+430h] [rbp+2F8h] BYREF
-    double v277; // [rsp+438h] [rbp+300h]
-    float v218; // [rsp+120h] [rbp-18h] BYREF
-    double v208; // [rsp+C0h] [rbp-78h] BYREF
-    static auto g_pEngineClient = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(GetModuleHandleA("engine.dll"), "CreateInterface"))("VEngineClient013", 0);
-    auto v113 = (__int64*)(*(__int64(__fastcall**)())(*(_QWORD*)g_pEngineClient + 1280LL))();
-    if (v113)
-    {
-
-        auto v114 = *v113;
-        (*(void(__fastcall**)(__int64*, float*, double*, int*))(v114 + 192))(v113, &v218, &v208, &v276);
-    }
-    if (!V_stristr(fmt, "server CPU"))
-        len = _snprintf_s(temp, sizeof(temp), _TRUNCATE, "%s\n", fmt);
-    else
-        len = _snprintf_s(temp, sizeof(temp), _TRUNCATE, (std::string(fmt)+std::string("\n")).c_str(), (int)((unsigned char)v276));
+    int len = vsnprintf(temp, sizeof(temp), (std::string(fmt) + std::string("\n")).c_str(), args);
     va_end(args);
 
     if (len > 2) {
@@ -390,6 +385,7 @@ void SetupSurfaceRenderHooks() {
 	auto vgui_CreateInterface = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(vgui, "CreateInterface"));
 	panel = (vgui::IPanel*)vgui_CreateInterface("VGUI_Panel009", 0);
 
+    sub_180016490 = (decltype(sub_180016490))(((uintptr_t)(vguimatsurface)) + 0x16490);
 	MH_CreateHook(GetVFunc<LPVOID>(panel, 46), &PaintTraverse, reinterpret_cast<LPVOID*>(&oPaintTraverse));
     MH_CreateHook((LPVOID)(((uintptr_t)(vguimatsurface)) + 0x165C0), &sub_1800165C0, reinterpret_cast<LPVOID*>(&osub_1800165C0));
     MH_CreateHook((LPVOID)(((uintptr_t)(G_client)) + 0x28BEA0), &sub_18028BEA0, reinterpret_cast<LPVOID*>(&osub_18028BEA0));
