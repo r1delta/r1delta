@@ -20,7 +20,7 @@ public:
 
 };
 
-void(*oRichTextInsertChar)(vgui_BaseRichText* thisptr, char ch);
+void(*oRichTextInsertChar)(vgui_BaseRichText* thisptr, wchar_t wch);
 void(*oRichTextInsertColorChange)(vgui_BaseRichText* thisptr, Color clr);
 void(*oRichTextInsertStringWide)(vgui_BaseRichText* thisptr, const wchar_t* wch);
 void(*oRichTextInsertFade)(vgui_BaseRichText* thisptr, float show, float fade);

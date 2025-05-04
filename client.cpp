@@ -313,7 +313,8 @@ __int64 __fastcall CHudChat__FormatAndDisplayMessage_Hooked(
     char deadChat // is dead chat?
 ) {
     if (recurse != 0) {
-        return oCHudChat__FormatAndDisplayMessage(thisptr, message, senderId, teamChat, deadChat);
+        // return oCHudChat__FormatAndDisplayMessage(thisptr, message, senderId, teamChat, deadChat);
+        return 0;
     }
     recurse++;
 
@@ -391,7 +392,7 @@ __int64 __fastcall CHudChat__FormatAndDisplayMessage_Hooked(
     }
 
     auto writer = LocalChatWriter();
-    writer.InsertChar(L'\n');
+    writer.InsertChar('\n');
     writer.InsertSwatchColorChange(playerNameColor);
 
     finalMessageStringW.append(deadPrefix);
@@ -407,8 +408,8 @@ __int64 __fastcall CHudChat__FormatAndDisplayMessage_Hooked(
         finalMessageStringW.push_back(L':');
         finalMessageStringW.push_back(L' ');
         writer.InsertSwatchColorChange(LocalChatWriter::MainTextColor);
-        writer.InsertChar(L':');
-        writer.InsertChar(L' ');
+        writer.InsertChar(':');
+        writer.InsertChar(' ');
     }
 
     // Append message
@@ -423,6 +424,7 @@ __int64 __fastcall CHudChat__FormatAndDisplayMessage_Hooked(
     Msg("*** CHAT *** %s\n", finalMessageMB.c_str());
 
     // return oCHudChat__FormatAndDisplayMessage(thisptr, message, senderId, teamChat, deadChat);
+    return 0;
 }
 char (*oMsgFunc__SayText)(__int64 a1);
 char __fastcall MsgFunc__SayText(__int64 a1) {

@@ -193,8 +193,12 @@ void __fastcall CPlayer__Script_Gen_Changed(__int64 a1) {
 	CPlayer__Script_Gen_Changed_Orig(a1);
 }
 
-
-R1SquirrelVM* GetUIVMPtr();
+R1SquirrelVM* GetClientVMPtr() {
+	return *(R1SquirrelVM**)(G_client + 0x16BBE78);
+}
+R1SquirrelVM* GetUIVMPtr() {
+	return *(R1SquirrelVM**)(G_client + 0x16C1FA8);
+}
 
 typedef __int64 (*CPlayer__SetXP)(__int64 a1,int a2);
 
@@ -785,7 +789,7 @@ void SendChatMsg(CRecipientFilter* filter, int fromIndex, const char* msg, bool 
 	EndMessage();
 }
 
-void SendChatWrapper(HSQUIRRELVM v) {
+int SendChatWrapper(HSQUIRRELVM v) {
 	// args: this, entity player / bool = true (broadcast) / array of entities for multiple recipients, int fromPlayerIndex, string text, bool isTeam = false, bool isDead = false
 
 	static auto CRecipientFilter__AddAllPlayers = reinterpret_cast<void(*)(void*)>(G_server + 0x1E7BA0);
@@ -793,10 +797,10 @@ void SendChatWrapper(HSQUIRRELVM v) {
 	static auto DestroyFilter = reinterpret_cast<void(*)(void*, bool)>(G_server + 0x1E78D0);
 
 	SQInteger fromPlayer = 0;
-	if (SQ_FAILED(sq_getinteger(nullptr, v, 3, &fromPlayer))) return;
+	if (SQ_FAILED(sq_getinteger(nullptr, v, 3, &fromPlayer))) return -1;
 
 	const SQChar* msg = nullptr;
-	if (SQ_FAILED(sq_getstring(v, 4, &msg))) return;
+	if (SQ_FAILED(sq_getstring(v, 4, &msg))) return -1;
 
 	SQBool isTeam = false, isDead = false;
 	sq_getbool(nullptr, v, 5, &isTeam);
@@ -808,13 +812,13 @@ void SendChatWrapper(HSQUIRRELVM v) {
 	SQObjectType playerType = sq_gettype(v, 2);
 	if (playerType == OT_BOOL) {
 		SQBool whichPlayer = false;
-		if (SQ_FAILED(sq_getbool(nullptr, v, 2, &whichPlayer))) return;
+		if (SQ_FAILED(sq_getbool(nullptr, v, 2, &whichPlayer))) return -1;
 		if (whichPlayer) CRecipientFilter__AddAllPlayers(&filter);
 	} else if (playerType == OT_INSTANCE) {
 		void* entity = sq_getentity(v, 2);
 		if (!entity) {
 			sq_throwerror(v, "Passed instance is not a valid entity");
-			return;
+			return -1;
 		}
 		CRecipientFilter__AddRecipient(&filter, entity);
 	} else if (playerType == OT_ARRAY) {
@@ -824,13 +828,13 @@ void SendChatWrapper(HSQUIRRELVM v) {
 			if (sq_gettype(v, -1) != OT_INSTANCE) {
 				sq_pop(v, 4);
 				sq_throwerror(v, "Array element is not an entity");
-				return;
+				return -1;
 			}
 			void* entity = sq_getentity(v, -1);
 			if (!entity) {
 				sq_pop(v, 4);
 				sq_throwerror(v, "Array member instance is not a valid entity");
-				return;
+				return -1;
 			}
 			CRecipientFilter__AddRecipient(&filter, entity);
 			sq_pop(v, 2);
@@ -841,6 +845,49 @@ void SendChatWrapper(HSQUIRRELVM v) {
 
 	SendChatMsg(&filter, fromPlayer, msg, isTeam, isDead);
 	DestroyFilter(&filter, 0);
+	return 0;
+}
+
+void RunAutorunScripts(R1SquirrelVM* r1sqvm, const char* prefix) {
+	auto FindFirst = (const char*(*__fastcall)(uintptr_t thisptr, const char* searchString, uintptr_t* handle))(g_CVFileSystem->FindFirst);
+	auto FindNext = (const char* (*__fastcall)(uintptr_t thisptr, uintptr_t handle))(g_CVFileSystem->FindNext);
+	auto FindClose = (void(*__fastcall)(uintptr_t thisptr, uintptr_t handle))(g_CVFileSystem->FindClose);
+
+	char search[128] = { 0 };
+	sprintf_s(search, "scripts/vscripts/autorun/%s", prefix);
+
+	char runFilename[128] = { 0 };
+
+	uintptr_t handle = 0;
+	const char* filename = FindFirst(g_CVFileSystemInterface, search, &handle);
+	while (filename) {
+		sprintf_s(runFilename, "autorun/%s", filename);
+		sprintf_s(search, "scripts/vscripts/%s", runFilename);
+		Call<void, const char*, const char*>(r1sqvm, 20, search, runFilename);
+		filename = FindNext(g_CVFileSystemInterface, handle);
+	}
+	FindClose(g_CVFileSystemInterface, handle);
+}
+
+uintptr_t(*__fastcall oOnCreateClientScriptVM)(uintptr_t);
+uintptr_t OnCreateClientScriptVM(uintptr_t thisptr) {
+	auto ret = oOnCreateClientScriptVM(thisptr);
+	RunAutorunScripts(GetClientVMPtr(), "cl_*");
+	return ret;
+}
+
+bool(*__fastcall oOnCreateUIScriptVM)();
+bool OnCreateUIScriptVM() {
+	bool ret = oOnCreateUIScriptVM();
+	if (ret) RunAutorunScripts(GetUIVMPtr(), "ui_*");
+	return ret;
+}
+
+uintptr_t(*__fastcall oOnCreateServerScriptVM)(uintptr_t);
+uintptr_t OnCreateServerScriptVM(uintptr_t thisptr) {
+	auto ret = oOnCreateServerScriptVM(thisptr);
+	RunAutorunScripts(GetServerVMPtr(), "sv_*");
+	return ret;
 }
 
 // Function to initialize all SQVM functions
@@ -909,6 +956,11 @@ bool GetSQVMFuncs() {
 	CSquirrelVM__GetEntityFromInstance = reinterpret_cast<CSquirrelVM__GetEntityFromInstance_t>(baseAddress + (IsDedicatedServer() ? 0x9950 : 0x9930));
 	AddSquirrelReg = reinterpret_cast<AddSquirrelReg_t>(baseAddress + (IsDedicatedServer() ? 0x8E70 : 0x8E50));
 	sq_GetEntityConstant_CBaseEntity = reinterpret_cast<sq_GetEntityConstant_CBaseEntity_t>(G_client + 0x2EF850);
+
+	MH_CreateHook((LPVOID)(G_client + 0x2BECF0), OnCreateClientScriptVM, (LPVOID*)&oOnCreateClientScriptVM);
+	MH_CreateHook((LPVOID)(G_client + 0x2E4AD0), OnCreateUIScriptVM, (LPVOID*)&oOnCreateUIScriptVM);
+	if (G_server) MH_CreateHook((LPVOID)(G_server + 0x2815D0), OnCreateServerScriptVM, (LPVOID*)&oOnCreateServerScriptVM);
+	MH_EnableHook(MH_ALL_HOOKS);
 
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_CLIENT,
@@ -1634,12 +1686,6 @@ void CSquirrelVM__PrintFunc3(void* m_hVM, const char* s, ...)
 
 	g_uiLineIncomplete = !endsWithNewline;
 	va_end(params);
-}
-R1SquirrelVM* GetClientVMPtr() {
-	return *(R1SquirrelVM**)(G_client + 0x16BBE78);
-}
-R1SquirrelVM* GetUIVMPtr() {
-	return *(R1SquirrelVM**)(G_client + 0x16C1FA8);
 }
 using SQCompileBufferFn = SQRESULT(*)(HSQUIRRELVM, const SQChar*, SQInteger, const SQChar*, SQBool);
 using BaseGetRootTableFn = __int64(*)(HSQUIRRELVM);
