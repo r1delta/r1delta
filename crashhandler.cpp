@@ -179,14 +179,14 @@ LONG WINAPI CustomCrashHandler(EXCEPTION_POINTERS* exInfo)
     GetRegistersWithContent(exInfo->ContextRecord, crashLog);
     crashLog << std::endl;
 
-    // Add call stack info (prioritized higher)
-    crashLog << "=== Call Stack ===" << std::endl;
-    GetCallStack(exInfo->ContextRecord, crashLog);
-    crashLog << std::endl;
-
-    // Add stack memory dump (new section)
+    // Dumps 512 bytes above RSP, and 512 bytes below.
     crashLog << "=== Stack Memory Dump ===" << std::endl;
     DumpStackMemory(exInfo->ContextRecord, crashLog);
+    crashLog << std::endl;
+
+    // Add call stack info (NOT prioritized higher, fuck you Gemini, edits CTX)
+    crashLog << "=== Call Stack ===" << std::endl;
+    GetCallStack(exInfo->ContextRecord, crashLog);
     crashLog << std::endl;
 
     // Add loaded modules info
@@ -536,12 +536,13 @@ void GetRegistersWithContent(CONTEXT* context, std::stringstream& ss)
 void DumpStackMemory(CONTEXT* context, std::stringstream& ss, size_t bytesToDump)
 {
 #ifdef _M_X64
-    DWORD64 stackPointer = context->Rsp;
+    DWORD64 stackPointer = context->Rsp - 512;
 #else
     DWORD64 stackPointer = context->Esp;
 #endif
 
     // Ensure bytesToDump is multiple of 16
+    bytesToDump += 512;
     bytesToDump = (bytesToDump + 15) & ~15;
 
     // Align stack pointer for nice output
