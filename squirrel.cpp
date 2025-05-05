@@ -906,6 +906,7 @@ int AutoCVar(HSQUIRRELVM v) {
 	strcat_s(actualKey, size, key);
 	actualKey[size - 1] = '\0';
 
+	const char* defaultValueCopy = strdup(defaultValue);
 	const char* descCopy = strdup(desc);
 
 	// if exists, bail
@@ -915,7 +916,7 @@ int AutoCVar(HSQUIRRELVM v) {
 	ConVarR1* RegisterConVar(const char* name, const char* value, int flags, const char* helpString);
 	RegisterConVar(
 		actualKey,
-		defaultValue, // no need to copy, constructor saves value internally
+		defaultValueCopy,
 		FCVAR_GAMEDLL,
 		descCopy
 	);
