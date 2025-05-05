@@ -890,6 +890,37 @@ uintptr_t OnCreateServerScriptVM(uintptr_t thisptr) {
 	return ret;
 }
 
+int AutoCVar(HSQUIRRELVM v) {
+	const char *key, *defaultValue = "", * desc = "";
+	if (SQ_FAILED(sq_getstring(v, 2, &key))) return -1;
+	sq_getstring(v, 3, &defaultValue);
+	sq_getstring(v, 4, &desc);
+
+	constexpr const char* AUTOCVAR_PREFIX = "autocvar_",
+		AUTOCVAR_PREFIX_SIZE = std::char_traits<char>::length(AUTOCVAR_PREFIX);
+
+	size_t size = AUTOCVAR_PREFIX_SIZE + strlen(key) + 1;
+	char* actualKey = (char*)malloc(size);
+	if (!actualKey) return -1;
+	strcpy_s(actualKey, size, AUTOCVAR_PREFIX);
+	strcat_s(actualKey, size, key);
+	actualKey[size - 1] = '\0';
+
+	// if exists, bail
+	if (OriginalCCVar_FindVar(cvarinterface, actualKey)) return 0;
+
+	// register cvar
+	ConVarR1* RegisterConVar(const char* name, const char* value, int flags, const char* helpString);
+	RegisterConVar(
+		actualKey,
+		defaultValue,
+		FCVAR_GAMEDLL,
+		desc
+	);
+
+	return 0;
+}
+
 // Function to initialize all SQVM functions
 bool GetSQVMFuncs() {
 	static bool initialized = false;
@@ -969,7 +1000,7 @@ bool GetSQVMFuncs() {
 		".ss", // String
 		3,      // Expects 2 parameters
 		"string",    // Returns a string
-		"str",
+		"string key, string defaultValue",
 		"Get a persistent data value"
 	);
 
@@ -979,8 +1010,8 @@ bool GetSQVMFuncs() {
 		(SQFUNCTION)Script_Localize,
 		".s", // String
 		2,      // Expects 2 parameters
-		"void",    // Returns a string
-		"str",
+		"string",    // Returns a string
+		"string locKey",
 		"Localize string"
 	);
 
@@ -991,7 +1022,7 @@ bool GetSQVMFuncs() {
 		"..isbb", // String
 		-4,      // Expects at least 4 parameters
 		"void",
-		"str",
+		"entity player / bool = true (broadcast) / array of entities for multiple recipients, int fromPlayerIndex, string text, bool isTeam = false, bool isDead = false",
 		"Send a chat message"
 	);
 
@@ -1001,8 +1032,8 @@ bool GetSQVMFuncs() {
 		(SQFUNCTION)Script_Localize,
 		".s", // String
 		2,      // Expects 2 parameters
-		"void",    // Returns a string
-		"str",
+		"string",    // Returns a string
+		"string locKey",
 		"Localize string"
 	);
 
@@ -1013,7 +1044,7 @@ bool GetSQVMFuncs() {
 		".", // String
 		2,      // Expects 2 parameters
 		"void",    // Returns a string
-		"str",
+		"string levelName",
 		"Send discord UI"
 	);
 
@@ -1023,9 +1054,9 @@ bool GetSQVMFuncs() {
 		(SQFUNCTION)GetR1DVersion,
 		".", // String
 		1,      // Expects 2 parameters
-		"void",    // Returns a string
-		"str",
-		"Send discord server"
+		"string",    // Returns a string
+		"",
+		"Get R1Delta version"
 	);
 	
 	REGISTER_SCRIPT_FUNCTION(
@@ -1034,8 +1065,8 @@ bool GetSQVMFuncs() {
 		(SQFUNCTION)GetMinimumR1DVersion,
 		".", // String
 		1,     
-		"void",
-		"str",
+		"string",
+		"",
 		"Get r1d minimum server for filtering"
 	);
 
@@ -1046,7 +1077,7 @@ bool GetSQVMFuncs() {
 		"..", // String
 		3,      // Expects 2 parameters
 		"void",    // Returns a string
-		"str",
+		"table data, bool init",
 		"Send discord client"
 	);
 
@@ -1055,10 +1086,10 @@ bool GetSQVMFuncs() {
 		SCRIPT_CONTEXT_UI,
 		"OpenDiscordURL",
 		(SQFUNCTION)OpenDiscordURL,
-		"", // String
+		".", // String
 		1,      // Expects 2 parameters
 		"void",    // Returns a string
-		"str",
+		"",
 		"Open a discord URL"
 	);
 
@@ -1066,11 +1097,11 @@ bool GetSQVMFuncs() {
 		SCRIPT_CONTEXT_UI,
 		"GetMods",
 		(SQFUNCTION)GetMods,
-		".ss", // String
+		".", // String
 		1,      // Expects 2 parameters
-		"string",    // Returns a string
-		"str",
-		"Get a persistent data value"
+		"table",    // Returns a string
+		"",
+		"Get installed mods"
 	);
 
 
@@ -1082,8 +1113,8 @@ bool GetSQVMFuncs() {
 		".I", // String
 		2,      // Expects 2 parameters
 		"string",    // Returns a string
-		"str",
-		"Get a persistent data value"
+		"",
+		"Get path to addons and open it in explorer"
 	);
 
 	REGISTER_SCRIPT_FUNCTION(
@@ -1093,7 +1124,7 @@ bool GetSQVMFuncs() {
 		".ss", // String
 		3,      // Expects 2 parameters
 		"string",    // Returns a string
-		"str",
+		"string key, string defaultValue",
 		"Get a persistent data value"
 	);
 
@@ -1116,7 +1147,7 @@ bool GetSQVMFuncs() {
 		".ib", // String
 		3,      // Expects 2 parameters
 		"int",    // Returns a string
-		"int index,bool enabled",
+		"int index, bool enabled",
 		"Updates the selected addons"
 	);
 
@@ -1124,21 +1155,21 @@ bool GetSQVMFuncs() {
 		SCRIPT_CONTEXT_UI,
 		"DispatchServerListReq",
 		(SQFUNCTION)DispatchServerListReq,
-		".ib", // String
+		".", // String
 		1,      // Expects 2 parameters
 		"void",    // Returns a string
-		"str",
-		"Gets server list"
+		"",
+		"Starts fetching server list from MS"
 	);
 
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_UI,
 		"PollServerList",
 		(SQFUNCTION)PollServerList,
-		".ib", // String
+		".", // String
 		1,      // Expects 2 parameters
-		"void",    // Returns a string
-		"str",
+		"table",    // Returns a string
+		"",
 		"Gets server list"
 	);
 
@@ -1149,7 +1180,7 @@ bool GetSQVMFuncs() {
 		".t",
 		2,
 		"void",
-		"str",
+		"table data",
 		"Send data to the cpp server"
 	);
 
@@ -1160,7 +1191,7 @@ bool GetSQVMFuncs() {
 		".Ii",
 		3,
 		"void",
-		"int",
+		"entity player, int xp",
 		"Add XP"
 	);
 
@@ -1171,7 +1202,7 @@ bool GetSQVMFuncs() {
 		".Ib",
 		3,
 		"void",
-		"void",
+		"entity player, bool isPlayingRanked",
 		"Set player ranked"
 	);
 
@@ -1182,8 +1213,19 @@ bool GetSQVMFuncs() {
 		".Ii",
 		3,
 		"void",
-		"int",
+		"entity player, int gen",
 		"Set player gen"
+	);
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER,
+		"AutoCVar",
+		(SQFUNCTION)AutoCVar,
+		".sss",
+		-2,
+		"void",
+		"string name, string defaultValue = \"\", string description = \"\"",
+		"Create a script-used ConVar if it doesn't already exist."
 	);
 
 	REGISTER_SCRIPT_FUNCTION(
@@ -1193,7 +1235,7 @@ bool GetSQVMFuncs() {
 		"..ss", // String
 		4,      // Expects 3 parameters
 		"string",    // Returns an int (idk if i is the right char for this lmao)
-		"str",
+		"string key, string defaultValue",
 		"Get a persistent userinfo value"
 	);
 
@@ -1204,7 +1246,7 @@ bool GetSQVMFuncs() {
 		".Ii", // String
 		3,      // Expects 2 parameters
 		"void",    // Returns an int (idk if i is the right char for this lmao)
-		"str",
+		"entity player, int index",
 		"Get a persistent userinfo value"
 	);
 
@@ -1215,7 +1257,7 @@ bool GetSQVMFuncs() {
 		".I", // String
 		2,      // Expects 2 parameters
 		"int",    // Returns an int (idk if i is the right char for this lmao)
-		"str",
+		"entity player",
 		"Get a persistent userinfo value"
 	);
 
@@ -1226,7 +1268,7 @@ bool GetSQVMFuncs() {
 		"..ss", // String
 		4,      // Expects 3 parameters
 		"string",    // Returns an int (idk if i is the right char for this lmao)
-		"str",
+		"string key, string value",
 		"Set a persistent userinfo value (this does NOT replicate you will need to send the replication command)"
 	);
 	REGISTER_SCRIPT_FUNCTION(
