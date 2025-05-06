@@ -372,6 +372,12 @@ void OnScreenSizeChanged(uintptr_t thisptr, int w, int h) {
     WatermarkFont = WatermarkSmallFont = ScriptErrorNotificationFont = 0;
 }
 
+__int64(*oCPluginHudMessage_ctor)(uintptr_t thisptr, uintptr_t panel);
+__int64 CPluginHudMessage_ctor(uintptr_t thisptr, uintptr_t ppanel) {
+    auto engineVgui = ((void* (*__fastcall)())(G_engine + 0x21E670))();
+    return oCPluginHudMessage_ctor(thisptr, (*(__int64(__fastcall**)(void*, int))(*(_QWORD*)engineVgui + 8LL))(engineVgui, 5));
+}
+
 extern ConVarR1* RegisterConVar(const char* name, const char* value, int flags, const char* helpString);
 
 void SetupSurfaceRenderHooks() {
@@ -390,6 +396,7 @@ void SetupSurfaceRenderHooks() {
     MH_CreateHook((LPVOID)(((uintptr_t)(vguimatsurface)) + 0x165C0), &sub_1800165C0, reinterpret_cast<LPVOID*>(&osub_1800165C0));
     MH_CreateHook((LPVOID)(((uintptr_t)(G_client)) + 0x28BEA0), &sub_18028BEA0, reinterpret_cast<LPVOID*>(&osub_18028BEA0));
     MH_CreateHook((LPVOID)(((uintptr_t)(vguimatsurface)) + 0x119E0), &OnScreenSizeChanged, reinterpret_cast<LPVOID*>(&oOnScreenSizeChanged));
+    MH_CreateHook((LPVOID)(((uintptr_t)(G_engine)) + 0x5E860), &CPluginHudMessage_ctor, reinterpret_cast<LPVOID*>(&oCPluginHudMessage_ctor));
 }
 
 void SetupSquirrelErrorNotificationHooks() {

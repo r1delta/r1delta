@@ -924,6 +924,114 @@ int AutoCVar(HSQUIRRELVM v) {
 	return 0;
 }
 
+int TableToKeyValues(HSQUIRRELVM v, KeyValues* kv, int tableN) {
+	sq_push(v, tableN);
+	sq_pushnull(v);
+
+	while (SQ_SUCCEEDED(sq_next(v, -2))) {
+		if (sq_gettype(v, -2) != OT_STRING) {
+			sq_pop(v, 4);
+			sq_throwerror(v, "Table keys must be strings");
+			return -1;
+		}
+
+		const char* key = nullptr;
+		sq_getstring(v, -2, &key);
+
+		switch (sq_gettype(v, -1)) {
+		case OT_BOOL:
+			{
+				SQBool val;
+				sq_getbool(nullptr, v, -1, &val);
+				kv->SetInt(key, val);
+				break;
+			}
+		case OT_INTEGER:
+			{
+				SQInteger val;
+				sq_getinteger(nullptr, v, -1, &val);
+				kv->SetInt(key, val);
+				break;
+			}
+		case OT_FLOAT:
+			{
+				SQFloat val;
+				sq_getfloat(nullptr, v, -1, &val);
+				kv->SetFloat(key, val);
+				break;
+			}
+		case OT_STRING:
+			{
+				const SQChar* val = nullptr;
+				sq_getstring(v, -1, &val);
+				kv->SetString(key, val);
+				break;
+			}
+		case OT_TABLE:
+			{
+				KeyValues* subKV = kv->FindKey(key, true);
+				if (SQ_FAILED(TableToKeyValues(v, subKV, -1)))
+					return -1;
+				break;
+			}
+		default:
+			{
+				sq_pop(v, 4);
+				sq_throwerror(v, "Unknown value type in table");
+				return -1;
+			}
+		}
+
+		sq_pop(v, 2);
+	}
+
+	sq_pop(v, 2);
+
+	return 0;
+}
+
+int SendMenu(HSQUIRRELVM v) {
+	void* player = sq_getentity(v, 2);
+	if (!player) {
+		sq_throwerror(v, "Passed instance is not a valid entity");
+		return -1;
+	}
+
+	SQInteger type = -1;
+	sq_getinteger(nullptr, v, 3, &type);
+	if (type < 0 || type > 3) {
+		sq_throwerror(v, "Invalid menu type [0-3]");
+		return -1;
+	}
+
+	KeyValues* kv = new KeyValues("menu");
+	SQObjectType dataType = sq_gettype(v, 4);
+	if (dataType == OT_TABLE) {
+		if (SQ_FAILED(TableToKeyValues(v, kv, 4))) {
+			kv->DeleteThis();
+			return -1;
+		}
+	} else {
+		kv->DeleteThis();
+		// sq_throwerror(v, "Invalid data type, need string for KV file path or table for direct KV");
+		// maybe later
+		sq_throwerror(v, "Invalid data type, need table for KV data");
+		return -1;
+	}
+
+	auto engine = IsDedicatedServer() ? G_engine_ds : G_engine;
+	void(__fastcall* pluginSendMessage)(void* thisptr, void* entity, int type, KeyValues* kv, void* plugin) = (decltype(pluginSendMessage))(engine + (IsDedicatedServer() ? 0x63140 : 0xF24E0));
+
+	char fakePluginThisptr[64];
+	memset(fakePluginThisptr, 0, sizeof(fakePluginThisptr));
+
+	auto edict = *reinterpret_cast<void**>(reinterpret_cast<__int64>(player) + 64);
+	pluginSendMessage(&fakePluginThisptr, edict, type, kv, (void*)1);
+
+	kv->DeleteThis();
+	return 0;
+}
+
 // Function to initialize all SQVM functions
 bool GetSQVMFuncs() {
 	static bool initialized = false;
@@ -1229,6 +1337,17 @@ bool GetSQVMFuncs() {
 		"void",
 		"string name, string defaultValue = \"\", string description = \"\"",
 		"Create a script-used ConVar if it doesn't already exist."
+	);
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER,
+		"SendMenu",
+		(SQFUNCTION)SendMenu,
+		".Ist",
+		4,
+		"void",
+		"entity player, int type, table data",
+		"Send a plugin menu to this player."
 	);
 
 	REGISTER_SCRIPT_FUNCTION(
