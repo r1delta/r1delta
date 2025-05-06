@@ -883,9 +883,9 @@ bool OnCreateUIScriptVM() {
 	return ret;
 }
 
-uintptr_t(*__fastcall oOnCreateServerScriptVM)(uintptr_t);
-uintptr_t OnCreateServerScriptVM(uintptr_t thisptr) {
-	auto ret = oOnCreateServerScriptVM(thisptr);
+uintptr_t(*__fastcall oOnCreateServerScriptVM)();
+uintptr_t OnCreateServerScriptVM() {
+	auto ret = oOnCreateServerScriptVM();
 	RunAutorunScripts(GetServerVMPtr(), "sv_*");
 	return ret;
 }
@@ -993,7 +993,7 @@ bool GetSQVMFuncs() {
 
 	MH_CreateHook((LPVOID)(G_client + 0x2BECF0), OnCreateClientScriptVM, (LPVOID*)&oOnCreateClientScriptVM);
 	MH_CreateHook((LPVOID)(G_client + 0x2E4AD0), OnCreateUIScriptVM, (LPVOID*)&oOnCreateUIScriptVM);
-	if (G_server) MH_CreateHook((LPVOID)(G_server + 0x2815D0), OnCreateServerScriptVM, (LPVOID*)&oOnCreateServerScriptVM);
+	if (G_server) MH_CreateHook((LPVOID)(G_server + 0x276600), OnCreateServerScriptVM, (LPVOID*)&oOnCreateServerScriptVM);
 	MH_EnableHook(MH_ALL_HOOKS);
 
 	REGISTER_SCRIPT_FUNCTION(
