@@ -183,6 +183,28 @@ bool FileCache::TryReplaceFile(const char* pszRelativeFilePath) {
         return false; // Invalid input
     }
 
+    // NOTE(mrsteyk): operate under the assumption that game also uses 260 byte paths, as evident by the original.
+    //                this issue already manifested itself long ago and I swear I fixed it, idk why it popped up again.
+    //                also please stop using Gemini to rewrite everything, it's annoying.
+    bool found_null = false;
+    for (size_t i = 0; i < 260; ++i)
+    {
+        if (pszRelativeFilePath[i] == 0)
+        {
+            found_null = true;
+            break;
+        }
+        // NOTE(mrsteyk): do not handle unicode in replacement names.
+        if (!isprint(pszRelativeFilePath[i])) // if (pszRelativeFilePath[i] < 0)
+        {
+            return false;
+        }
+    }
+    if (!found_null)
+    {
+        return false;
+    }
+
     // Use std::filesystem::path for robust joining, handle input slashes automatically
     std::filesystem::path relativePath(pszRelativeFilePath);
 
