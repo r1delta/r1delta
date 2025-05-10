@@ -248,7 +248,9 @@ private:
 
         const char* pszBaseDir = ".";
         char szFilePath[512];
-        snprintf(szFilePath, sizeof(szFilePath), "%s/r1/cfg/banned_ip.cfg", pszBaseDir);
+        snprintf(szFilePath, sizeof(szFilePath), "%s/r1/cfg/", pszBaseDir);
+        if (!std::filesystem::is_directory(szFilePath)) std::filesystem::create_directory(szFilePath);
+        strcat_s(szFilePath, "banned_ip.cfg");
 
         std::ofstream outFile(szFilePath);
         if (!outFile.is_open()) {
@@ -278,7 +280,9 @@ private:
 
         const char* pszBaseDir = ".";
         char szFilePath[512];
-        snprintf(szFilePath, sizeof(szFilePath), "%s/r1/cfg/banned_user.cfg", pszBaseDir);
+        snprintf(szFilePath, sizeof(szFilePath), "%s/r1/cfg/", pszBaseDir);
+        if (!std::filesystem::is_directory(szFilePath)) std::filesystem::create_directory(szFilePath);
+        strcat_s(szFilePath, "banned_user.cfg");
 
         std::ofstream outFile(szFilePath);
         if (!outFile.is_open()) {
