@@ -1,6 +1,3 @@
-[submodule "silver-bun"]
-	path = thirdparty
-	url = https://github.com/IcePixelx/silver-bun
 [submodule "vendor/cpp-httplib"]
 	path = vendor/cpp-httplib
 	url = https://github.com/yhirose/cpp-httplib
