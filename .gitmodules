@@ -1,3 +1,27 @@
 [submodule "silver-bun"]
 	path = thirdparty
 	url = https://github.com/IcePixelx/silver-bun
+[submodule "vendor/cpp-httplib"]
+	path = vendor/cpp-httplib
+	url = https://github.com/yhirose/cpp-httplib
+[submodule "vendor/nlohmann"]
+	path = vendor/nlohmann
+	url = https://github.com/nlohmann/json
+[submodule "vendor/minhook"]
+	path = vendor/minhook
+	url = https://github.com/TsudaKageyu/minhook
+[submodule "vendor/mimalloc"]
+	path = vendor/mimalloc
+	url = https://github.com/microsoft/mimalloc
+[submodule "vendor/zstd"]
+	path = vendor/zstd
+	url = https://github.com/facebook/zstd
+[submodule "vendor/vorbis"]
+	path = vendor/vorbis
+	url = https://github.com/xiph/vorbis
+[submodule "vendor/ogg"]
+	path = vendor/ogg
+	url = https://github.com/xiph/ogg
+[submodule "vendor/jwt-cpp"]
+	path = vendor/jwt-cpp
+	url = https://github.com/Thalhammer/jwt-cpp
