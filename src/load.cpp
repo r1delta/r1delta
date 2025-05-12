@@ -112,12 +112,12 @@ extern "C"
           "mov    %%rbp, %%rax\n\t"
           "cmp    $0x250, %%eax\n\t"
           "jg     1f\n\t"
-          "jmp    *%[continue]\n\t"
+          "jmp    *%[cont_addr]\n\t"
           "1:\n\t"
           "jmp    *%[ret0]\n\t"
           :
           : [ret0] "r" (CNetChan__ProcessSubChannelData_ret0),
-            [continue] "r" (CNetChan__ProcessSubChannelData_Asm_continue)
+            [cont_addr] "r" (CNetChan__ProcessSubChannelData_Asm_continue)
           : "rax", "memory"
       );
   }
