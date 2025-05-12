@@ -248,11 +248,9 @@ std::string CreateDiscordSecret() {
 
 SQInteger SendDiscordUI(HSQUIRRELVM v)
 {
-	if (!is_discord_running) {
-		Warning("SendDiscordUI: Discord is not running");
+	if (!is_discord_running)
 		return 1;
-	}
-
+	
 	discord::Activity activity;
 	memset(&activity, 0, sizeof(activity));
 	
@@ -309,10 +307,9 @@ SQInteger SendDiscordUI(HSQUIRRELVM v)
 
 SQInteger SendDiscordClient(HSQUIRRELVM v)
 {
-	if (!is_discord_running) {
-		Warning("SendDiscordClient: Discord is not running\n");
+	if (!is_discord_running) 
 		return 1;
-	}
+	
 
 	//Msg("Discord: SendDiscordClient\n");
 	SQObject obj;
