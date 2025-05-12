@@ -8,6 +8,11 @@ endif()
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+if(MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 8)
+  enable_language(ASM_MASM)
+  set(ASM_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/netchan_fix.asm")
+endif()
+
 add_definitions(-DWIN32_LEAN_AND_MEAN -D_WINSOCK_DEPRECATED_NO_WARNINGS)
 
 add_subdirectory(vendor/minhook)
@@ -32,6 +37,7 @@ set(DELTASRCS
   "${CMAKE_CURRENT_SOURCE_DIR}/vendor/vsdk/tier1/netadr.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/vendor/vsdk/tier1/utlbuffer.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/vendor/vsdk/vstdlib/strtools.cpp"
+  ${ASM_FILES}
 )
 
 list(REMOVE_DUPLICATES DELTASRCS)

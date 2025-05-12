@@ -91,6 +91,7 @@ extern "C"
   uintptr_t CNetChan__ProcessSubChannelData_ret0 = 0;
   uintptr_t CNetChan__ProcessSubChannelData_Asm_continue = 0;
   
+#if defined(_MSC_VER) && defined(_M_IX86)
   void _CNetChan__ProcessSubChannelData_AsmConductBufferSizeCheck()
   {
       __asm {
@@ -104,6 +105,28 @@ extern "C"
           jmp    [CNetChan__ProcessSubChannelData_Asm_continue]
       }
   }
+#elif defined(__clang__) || defined(__GNUC__) // Clang or GCC (x64)
+  void _CNetChan__ProcessSubChannelData_AsmConductBufferSizeCheck()
+  {
+      asm volatile (
+          "mov    %%rbp, %%rax\n\t"
+          "cmp    $0x250, %%eax\n\t"
+          "jg     1f\n\t"
+          "jmp    *%[continue]\n\t"
+          "1:\n\t"
+          "jmp    *%[ret0]\n\t"
+          :
+          : [ret0] "r" (CNetChan__ProcessSubChannelData_ret0),
+            [continue] "r" (CNetChan__ProcessSubChannelData_Asm_continue)
+          : "rax", "memory"
+      );
+  }
+#elif defined(_MSC_VER) && defined(_M_X64)
+  void _CNetChan__ProcessSubChannelData_AsmConductBufferSizeCheck();
+  // See netchan_Fix.asm for implementation
+#else
+  #error "Unsupported compiler/platform for assembly code"
+#endif
 }
 void* dll_notification_cookie_;
 
