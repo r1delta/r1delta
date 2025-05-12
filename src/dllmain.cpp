@@ -549,9 +549,13 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 	case DLL_PROCESS_ATTACH: {
 		skip_dllmain = 0;
 
-		//AllocConsole();
-		//SetConsoleTitleW(L"R1Delta");
-		//freopen("CONOUT$", "wt", stdout);
+		if (!IsDedicatedServer() && !IsNoConsole())
+		{
+			AllocConsole();
+			SetConsoleTitleW(L"R1Delta");
+			FILE* fp;
+			freopen_s(&fp, "CONOUT$", "wt", stdout);
+		}
 
 #if BUILD_PROFILE
 		TracyPlotConfig("r1dc_decompress_memory_in", tracy::PlotFormatType::Memory, false, true, 0);
