@@ -71,6 +71,16 @@ __int64 __fastcall sub_18008E820(__int64 a1, unsigned int a2)
 		return osub_18008E820(a1, a2);
 	return 0;
 }
+
+char (*osub_395040)(__int64 a1, const char* a2, __int64 a3, __int64 a4);
+char __fastcall sub_395040(__int64 a1, const char* a2, __int64 a3, __int64 a4) {
+    static void* connectionProblem = (void*)(G_client + 0x395a1d);
+    if (_ReturnAddress() == connectionProblem) {
+        Cbuf_AddText(0, "retry\n", 0);
+    }
+    return osub_395040(a1, a2, a3, a4);
+}
+
 void* (*oKeyValues__SetString__Client)(__int64 a1, char* a2, const char* a3);
 void* KeyValues__SetString__Client(__int64 a1, char* a2, const char* a3)
 {
@@ -548,7 +558,7 @@ void InitClient()
 	MH_CreateHook((LPVOID)(client + 0x17D440), &CHudChat__FormatAndDisplayMessage_Hooked, reinterpret_cast<LPVOID*>(&oCHudChat__FormatAndDisplayMessage));
     MH_CreateHook((LPVOID)(client + 0x17DAA0), &MsgFunc__SayText, reinterpret_cast<LPVOID*>(&oMsgFunc__SayText));
     MH_CreateHook((LPVOID)(client + 0x17E140), &sub_18017E140, reinterpret_cast<LPVOID*>(&sub_18017E140_org));
-
+    MH_CreateHook((LPVOID)(client + 0x395040), &sub_395040, reinterpret_cast<LPVOID*>(&osub_395040));
     MH_CreateHook((LPVOID)(client + 0x47F1E0), &WeaponSprayFunction1, reinterpret_cast<LPVOID*>(&oWeaponSprayFunction1));
     //MH_CreateHook((LPVOID)(client + 0x47FED0), &WeaponSprayFunction2, reinterpret_cast<LPVOID*>(&oWeaponSprayFunction2));
     MH_CreateHook((LPVOID)(client + 0x3C5830), &LoadingProgress__SetupControlStates, reinterpret_cast<LPVOID*>(&oLoadingProgress__SetupControlStates));
