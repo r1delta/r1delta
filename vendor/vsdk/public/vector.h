@@ -190,12 +190,18 @@ public:
 
 	// return true if this vector is exactly (0,0,0) -- only fast if vector is coming from memory, not registers
 	inline bool IsZeroFast() const
-{
-    COMPILE_TIME_ASSERT(sizeof(vec_t) == sizeof(int));
-    return (*reinterpret_cast<const int* __restrict__>(&x) == 0 &&
-            *reinterpret_cast<const int* __restrict__>(&y) == 0 &&
-            *reinterpret_cast<const int* __restrict__>(&z) == 0);
-}
+	{
+			COMPILE_TIME_ASSERT(sizeof(vec_t) == sizeof(int));
+	#if defined(_MSC_VER)
+			return (*reinterpret_cast<const int*>(&x) == 0 &&
+							*reinterpret_cast<const int*>(&y) == 0 &&
+							*reinterpret_cast<const int*>(&z) == 0);
+	#else
+			return (*reinterpret_cast<const int* __restrict__>(&x) == 0 &&
+							*reinterpret_cast<const int* __restrict__>(&y) == 0 &&
+							*reinterpret_cast<const int* __restrict__>(&z) == 0);
+	#endif
+	}
 
 	vec_t	NormalizeInPlace();
 	Vector	Normalized() const;
