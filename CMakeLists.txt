@@ -8,6 +8,10 @@ endif()
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+set(BUILD_TESTING OFF CACHE BOOL "Disable tests in all submodules" FORCE)
+set(MI_BUILD_TESTS OFF CACHE BOOL "Disable mimalloc tests" FORCE)
+set(JSON_BuildTests OFF CACHE BOOL "Disable nlohmann_json tests" FORCE)
+
 if(MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 8)
   enable_language(ASM_MASM)
   set(ASM_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/netchan_fix.asm")

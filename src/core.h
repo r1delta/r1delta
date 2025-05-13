@@ -1,7 +1,6 @@
 #pragma once
 
 #pragma warning(push)
-#pragma warning(disable)
 
 #include <winsock2.h>
 #include <windows.h>

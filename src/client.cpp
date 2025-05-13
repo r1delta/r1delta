@@ -1,4 +1,4 @@
-﻿﻿#include <windows.h>
+﻿#include <windows.h>
 #include "core.h"
 #include "client.h"
 #include "persistentdata.h"
@@ -466,7 +466,7 @@ float GetZoomFrac() {
                 );
     }
 
-    // if it’s non‑zero, update lastNonZero; otherwise keep the old one
+    // if it's non‑zero, update lastNonZero; otherwise keep the old one
     if (rawZoom > 0.0f) {
         lastNonZero = rawZoom;
         return rawZoom;
