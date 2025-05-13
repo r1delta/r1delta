@@ -8,7 +8,7 @@
 
 ConVarR1* cvar_net_chan_limit_msec = nullptr;
 ConVarR1* cvar_net_maxpacketdrop = nullptr;
-//-
+
 
 class INetChannelHandler {
 public:

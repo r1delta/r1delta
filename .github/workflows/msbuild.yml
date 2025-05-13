@@ -43,14 +43,13 @@ jobs:
 
       # --- Create VCPKG Cache Directory ---
       - name: Prepare VCPKG Cache Directory
-        run: |
-          New-Item -ItemType Directory -Force -Path "${{ env.VCPKG_DEFAULT_BINARY_CACHE }}"
-          Write-Host "Created VCPKG cache directory at ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}"
-          if (-not (Test-Path -Path "${{ env.VCPKG_DEFAULT_BINARY_CACHE }}")) {
-            Write-Error "Failed to create VCPKG cache directory at ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}"
-            exit 1
-          }
         shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/vcpkg/installed"
+          New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/vcpkg/packages"
+          New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/vcpkg/buildtrees"
+          New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/vcpkg/downloads"
+
 
       - name: Inject Git tag into r1d_version.h
         if: startsWith(github.ref, 'refs/tags/')
