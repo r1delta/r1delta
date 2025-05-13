@@ -31,8 +31,8 @@ if(MSVC)
   target_link_libraries(${PROJECT_NAME} PRIVATE
     imm32
     shlwapi
-    ucrt
     "$<$<CONFIG:Debug>:ucrtd>"
+    "$<$<CONFIG:Release>:ucrt>"
   )
   
   target_link_options(${PROJECT_NAME} PRIVATE
