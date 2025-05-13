@@ -75,14 +75,17 @@ jobs:
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
-      - name: cache-vcpkg-archives
-        id: cache-vcpkg-archives
+      - name: Cache vcpkg build artifacts
         uses: actions/cache@v4
         with:
-          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
-          key: ${{ runner.os }}-windows-vcpkg-r1-${{ hashFiles('**/vcpkg.json', '.github/workflows/**') }}
+          path: |
+            ${{ github.workspace }}/vcpkg/installed
+            ${{ github.workspace }}/vcpkg/buildtrees
+            ${{ github.workspace }}/vcpkg/downloads
+            ${{ github.workspace }}/vcpkg/packages
+          key: ${{ runner.os }}-vcpkg-${{ hashFiles('**/vcpkg.json') }}
           restore-keys: |
-            ${{ runner.os }}-windows-vcpkg-
+            ${{ runner.os }}-vcpkg-
 
       - name: vcpkg integrate install
         run: vcpkg integrate install
