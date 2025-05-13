@@ -75,7 +75,7 @@ jobs:
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
       - name: Fetch vcpkg
-        run: cd ${{ github.workspace }}/vcpkg && git pull
+        run: cd ${{ github.workspace }}/vcpkg && git fetch && git pull
         shell: pwsh
 
       - name: vcpkg integrate install
