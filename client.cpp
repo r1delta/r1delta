@@ -31,10 +31,6 @@ void sub_18027F2C0(__int64 a1, const char* a2, void* a3)
 {
 	if (!strcmp_static(a2, "SayText"))
 	{
-		//// raise fov to how bme does it
-		//auto var = (ConVarR1*)(OriginalCCVar_FindVar2(cvarinterface, "cl_fovScale"));
-		//var->m_fMaxVal = 2.5f;
-
 		sub_18027F2C0Original(a1, "TextMsg", TextMsg);
 	}
 
