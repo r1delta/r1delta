@@ -84,7 +84,7 @@ jobs:
         run: nuget restore ${{env.SOLUTION_FILE_PATH}}
 
       - name: Install vcpkg deps
-        run: vcpkg install --triplet x64-windows-fix-cmake
+        run: vcpkg install --triplet x64-windows
         shell: pwsh
 
       - name: Cache vcpkg build artifacts
