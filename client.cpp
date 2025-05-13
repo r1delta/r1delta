@@ -467,6 +467,13 @@ float GetZoomFrac() {
     }
 }
 
+void (*osub_21F3F0)();
+void sub_21F3F0() {
+    Cbuf_AddText(0,"retry\n",0);
+    osub_21F3F0();
+    return;
+}
+
 void (*oWeaponSprayFunction1)(__int64 a1, __int64 a2, float a3, __int64 a4, _DWORD* a5, char a6, float a7, char a8);
 void WeaponSprayFunction1(__int64 a1, __int64 a2, float a3, __int64 a4, _DWORD* a5, char a6, float a7, char a8) {
     oWeaponSprayFunction1(a1, a2, a3, a4, a5, a6, a7, a8);
@@ -537,7 +544,7 @@ void InitClient()
 	MH_CreateHook((LPVOID)(engine + 0x4801B0), &ConVar_PrintDescription, reinterpret_cast<LPVOID*>(&ConVar_PrintDescriptionOriginal));
 	MH_CreateHook((LPVOID)(engine + 0x47FB00), &CConVar__GetSplitScreenPlayerSlot, NULL);
 	MH_CreateHook((LPVOID)(engine + 0x4722E0), &sub_1804722E0, 0);
-
+    MH_CreateHook((LPVOID)(engine + 0x21F3F0), &sub_21F3F0, reinterpret_cast<LPVOID*>(&osub_21F3F0));
 	//MH_CreateHook((LPVOID)(client + 0x4A6150), &WeaponXRegisterClient, reinterpret_cast<LPVOID*>(&oWeaponXRegisterClient));
 	MH_CreateHook((LPVOID)(client + 0x959F0), &CPortalPlayer__CreateMove, reinterpret_cast<LPVOID*>(&oCPortalPlayer__CreateMove));
 	MH_CreateHook((LPVOID)(client + 0x8E820), &sub_18008E820, reinterpret_cast<LPVOID*>(&osub_18008E820));
