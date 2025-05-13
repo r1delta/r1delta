@@ -1,33 +1,50 @@
 project(launcher)
 
-include_directories(.)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 add_definitions(-D_WIN32_WINNT=0x0A00)
 
-file(GLOB LAUNCHERSRC_FILES "${PROJECT_SOURCE_DIR}/*.cpp" "${PROJECT_SOURCE_DIR}/*.cc" "${PROJECT_SOURCE_DIR}/*.rc")
-file(GLOB LAUNCHERH_FILES "${PROJECT_SOURCE_DIR}/*.h" "${PROJECT_SOURCE_DIR}/*.hh")
-
-# Visual Studio folders
-#source_group("Source Files" FILES ${LAUNCHERSRC_FILES})
-#source_group("Header Files" FILES ${LAUNCHERH_FILES})
-
-add_executable(${PROJECT_NAME} ${LAUNCHERSRC_FILES} ${LAUNCHERH_FILES})
-
-target_compile_definitions(${PROJECT_NAME} PUBLIC
-    "_CONSOLE"
-    "$<$<CONFIG:Debug>:DEBUG>"
-    "$<$<CONFIG:Debug>:_DEBUG>"
-    "$<$<CONFIG:Release>:NDEBUG>"
+file(GLOB_RECURSE LAUNCHER_SRC 
+  "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp" 
+  "${CMAKE_CURRENT_SOURCE_DIR}/*.cc"
+  "${CMAKE_CURRENT_SOURCE_DIR}/*.rc"
 )
 
-set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "R1Delta")
+add_executable(${PROJECT_NAME} WIN32 ${LAUNCHER_SRC})
+
+set_target_properties(${PROJECT_NAME} PROPERTIES 
+  OUTPUT_NAME "R1Delta"
+)
+
+target_include_directories(${PROJECT_NAME} PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+  "$<$<CONFIG:Debug>:DEBUG>"
+  "$<$<CONFIG:Debug>:_DEBUG>"
+  "$<$<CONFIG:Release>:NDEBUG>"
+)
 
 if(MSVC)
-    target_link_libraries(${PROJECT_NAME} imm32 shlwapi ucrt "$<$<CONFIG:Debug>:ucrtd>")
-    set_target_properties(${PROJECT_NAME} PROPERTIES
-        LINK_FLAGS "/MAP /DEBUG /SUBSYSTEM:WINDOWS /STACK:\"0x7A1200\""
-        RUNTIME_OUTPUT_DIRECTORY_DEBUG "../"
-        RUNTIME_OUTPUT_DIRECTORY_RELEASE "../"
-    )
+  target_link_libraries(${PROJECT_NAME} PRIVATE
+    imm32
+    shlwapi
+    ucrt
+    "$<$<CONFIG:Debug>:ucrtd>"
+  )
+  
+  target_link_options(${PROJECT_NAME} PRIVATE
+    /MAP
+    /DEBUG
+    /STACK:"0x7A1200"
+  )
 else()
-    target_link_libraries(${PROJECT_NAME} imm32 shlwapi msvcrt)
+  target_link_libraries(${PROJECT_NAME} PRIVATE
+    imm32
+    shlwapi
+    "$<$<CONFIG:Debug>:ucrtd>"
+    "$<$<CONFIG:Release>:ucrt>"
+  )
 endif()
