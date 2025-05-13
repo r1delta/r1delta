@@ -20,7 +20,7 @@
     {
       "name": "openssl",
       "default-features": false,
-      "features": ["core"]
+      "features": []
     },
     {
       "name": "opusfile",
