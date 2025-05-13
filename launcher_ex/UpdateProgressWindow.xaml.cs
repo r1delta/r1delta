@@ -46,7 +46,7 @@ namespace launcher_ex
                 Run downloadHeader = new Run(headerText + "\n");
                 downloadHeader.FontSize = 24;
                 downloadHeader.FontWeight = FontWeights.Bold;
-                Run percentage = new Run(percent.ToString());
+                Run percentage = new Run(percent.ToString() + "%");
                 percentage.FontSize = 12;
 
                 StatusText.Inlines.Add(downloadHeader);

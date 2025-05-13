@@ -15,7 +15,7 @@ env:
   BUILD_PATH: ${{ github.workspace }}/build
   OUTPUT_PATH: ${{ github.workspace }}/output
   USERNAME: "r1delta" # GitHub username for NuGet authentication
-  VCPKG_BINARY_SOURCES: "clear;nuget,https://nuget.pkg.github.com/r1delta/index.json,readwrite"
+  VCPKG_BINARY_SOURCES: "clear;files, ${{ github.workspace }}/vcpkg,readwrite"
   BUILD_CONFIGURATION: Release
   MSBUILD_DEBUG_TYPE: pdbonly
   # --- Squirrel Env Vars ---
@@ -72,20 +72,6 @@ jobs:
           script: |
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
-
-      - name: Configure vcpkg binary cache (GitHub Packages)
-        shell: pwsh
-        run: |
-          nuget sources add `
-            -name "GitHub" `
-            -source "https://nuget.pkg.github.com/r1delta/index.json" `
-            -username "${{ env.USERNAME }}" `
-            -password "${{ secrets.GITHUB_TOKEN }}" `
-            -storepasswordincleartext
-
-          nuget setapikey `
-            "${{ secrets.GITHUB_TOKEN }}" `
-            -source "https://nuget.pkg.github.com/r1delta/index.json"
 
       - name: vcpkg integrate install
         run: vcpkg integrate install
