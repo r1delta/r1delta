@@ -17,7 +17,11 @@
       "name": "nlohmann-json",
       "version>=": "3.11.2"
     },
-    "openssl",
+    {
+      "name": "openssl",
+      "default-features": false,
+      "features": ["ssl3", "weak-ssl-ciphers", "fips"]
+    },
     {
       "name": "opusfile",
       "version>=": "0.12+20221121#1"
