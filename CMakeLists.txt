@@ -47,7 +47,7 @@ set(DELTASRCS
 list(REMOVE_DUPLICATES DELTASRCS)
 
 list(FILTER DELTASRCS EXCLUDE REGEX "src/launch/main.cpp$")
-list(FILTER DELTASRCS EXCLUDE REGEX "src/dedi_launch/main.cpp$")
+list(FILTER DELTASRCS EXCLUDE REGEX "src/dedicated/main.cpp$")
 
 add_library(${PROJECT_NAME} SHARED ${DELTASRCS})
 
