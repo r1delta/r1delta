@@ -93,7 +93,7 @@ jobs:
             ${{ github.workspace }}/vcpkg/buildtrees
             ${{ github.workspace }}/vcpkg/downloads
             ${{ github.workspace }}/vcpkg/packages
-          key: ${{ runner.os }}-vcpkg-${{ hashFiles('**/vcpkg.json') }}
+          key: ${{ runner.os }}-vcpkg-${{ hashFiles('./vcpkg.json') }}
           restore-keys: |
             ${{ runner.os }}-vcpkg-
 
