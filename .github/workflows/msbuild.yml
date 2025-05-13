@@ -15,7 +15,8 @@ env:
   BUILD_PATH: ${{ github.workspace }}/build
   OUTPUT_PATH: ${{ github.workspace }}/output
   USERNAME: "r1delta" # GitHub username for NuGet authentication
-  VCPKG_BINARY_SOURCES: "clear;files, ${{ github.workspace }}/vcpkg,readwrite"
+  VCPKG_BINARY_SOURCES: "clear;files,D:/a/r1delta/vcpkg,readwrite"
+
   BUILD_CONFIGURATION: Release
   MSBUILD_DEBUG_TYPE: pdbonly
   # --- Squirrel Env Vars ---
