@@ -83,9 +83,17 @@ jobs:
       - name: Restore NuGet packages
         run: nuget restore ${{env.SOLUTION_FILE_PATH}}
 
-      - name: Install vcpkg deps
-        run: vcpkg install --triplet x64-windows
-        shell: pwsh
+      # --- Build Step ---
+      - name: Build Solution
+        run: >
+          msbuild /m /restore
+          /p:CI=1
+          /p:Configuration=${{env.BUILD_CONFIGURATION}}
+          /p:DebugType=${{env.MSBUILD_DEBUG_TYPE}}
+          /p:OutDir=${{env.BUILD_PATH}}/
+          /p:WarningLevel=0
+          ${{env.SOLUTION_FILE_PATH}}
+
 
       - name: Cache vcpkg build artifacts
         uses: actions/cache@v4
@@ -99,16 +107,6 @@ jobs:
             restore-keys: |
               ${{ runner.os }}-vcpkg-
 
-      # --- Build Step ---
-      - name: Build Solution
-        run: >
-          msbuild /m /restore
-          /p:CI=1
-          /p:Configuration=${{env.BUILD_CONFIGURATION}}
-          /p:DebugType=${{env.MSBUILD_DEBUG_TYPE}}
-          /p:OutDir=${{env.BUILD_PATH}}/
-          /p:WarningLevel=0
-          ${{env.SOLUTION_FILE_PATH}}
 
       # --- Checkout Core Scripts (If core is a separate repo) ---
       # If core scripts are part of the main repository, this step is not needed.
