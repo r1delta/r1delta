@@ -14,8 +14,7 @@ env:
   SOLUTION_FILE_PATH: .
   BUILD_PATH: ${{ github.workspace }}/build
   OUTPUT_PATH: ${{ github.workspace }}/output
-  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
-  VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/vcpkg_cache
+  # VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
   BUILD_CONFIGURATION: Release
   MSBUILD_DEBUG_TYPE: pdbonly
   # --- Squirrel Env Vars ---
