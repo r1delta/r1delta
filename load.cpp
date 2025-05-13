@@ -578,10 +578,6 @@ int32_t ReadConnectPacket2015AndWriteConnectPacket2014(bf_read& msg, bf_write& b
 
 	buffer.WriteByte(msg.ReadByte()); // lowViolence 
 
-	//if (msg.ReadByte() != 1)
-	//{
-	//	return false;
-	//}
 	buffer.WriteByte(1);
 
 	return !buffer.IsOverflowed() ? lastChallenge : -1;
