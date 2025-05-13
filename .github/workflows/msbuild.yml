@@ -75,24 +75,29 @@ jobs:
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
-      - name: Cache vcpkg build artifacts
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ github.workspace }}/vcpkg/installed
-            ${{ github.workspace }}/vcpkg/buildtrees
-            ${{ github.workspace }}/vcpkg/downloads
-            ${{ github.workspace }}/vcpkg/packages
-          key: ${{ runner.os }}-vcpkg-${{ hashFiles('**/vcpkg.json') }}
-          restore-keys: |
-            ${{ runner.os }}-vcpkg-
-
+     
       - name: vcpkg integrate install
         run: vcpkg integrate install
         shell: pwsh
 
       - name: Restore NuGet packages
         run: nuget restore ${{env.SOLUTION_FILE_PATH}}
+
+      - name: Install vcpkg deps
+        run: vcpkg install --triplet x64-windows-fix-cmake
+        shell: pwsh
+
+      - name: Cache vcpkg build artifacts
+              uses: actions/cache@v4
+              with:
+                path: |
+                  ${{ github.workspace }}/vcpkg/installed
+                  ${{ github.workspace }}/vcpkg/buildtrees
+                  ${{ github.workspace }}/vcpkg/downloads
+                  ${{ github.workspace }}/vcpkg/packages
+                key: ${{ runner.os }}-vcpkg-${{ hashFiles('**/vcpkg.json') }}
+                restore-keys: |
+                  ${{ runner.os }}-vcpkg-
 
       # --- Build Step ---
       - name: Build Solution
