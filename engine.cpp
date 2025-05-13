@@ -21,7 +21,7 @@ void Host_Error(const char* error, ...) {
 
 	va_start(params, error);
 	((void(__cdecl*)(const char*, ...))(G_engine + 0x130510))(error, params);
-	va_end(error);
+	va_end(params);
 }
 
 
