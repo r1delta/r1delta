@@ -889,7 +889,16 @@ namespace launcher_ex
             Environment.SetEnvironmentVariable("FROM_DELTA_LAUNCHER", "1");
             try
             {
-                
+                var launcherDllPathFull = Path.GetFullPath(originalLauncherExeDir);
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "Titanfall.exe",
+                    WorkingDirectory = launcherDllPathFull,
+                    UseShellExecute = true,
+                    Arguments = finalLaunchArgs,
+                });
+                Debug.WriteLine($"[*] Starting Titanfall.exe from: {launcherDllPathFull}");
+
             }
             catch (Exception ex)
             {
@@ -898,37 +907,6 @@ namespace launcher_ex
                 if (hCoreModule != IntPtr.Zero) FreeLibrary(hCoreModule);
                 Process.GetCurrentProcess().Kill();
                 return;
-            }
-            // Do not free hCoreModule here, the game might depend on it.
-
-            // 14. Apply Process Mitigation Policies
-            SetMitigationPolicies();
-
-            // 15. Prepare arguments and call LauncherMain
-            try
-            {
-                Debug.WriteLine("[*] Preparing arguments for LauncherMain...");
-                var launcherMain = (LauncherMainDelegate)Marshal.GetDelegateForFunctionPointer(pLauncherMain, typeof(LauncherMainDelegate));
-
-                // Call LauncherMain. Arguments are now passed via SetR1DeltaLaunchArgs.
-                int result = launcherMain(
-                        IntPtr.Zero, // hInstance - Not readily available/needed
-                        IntPtr.Zero, // hPrevInstance - Always zero in modern Windows
-                        "",          // lpCmdLine - Pass empty string, args handled internally
-                        1            // nCmdShow - SW_SHOWNORMAL
-                    );
-
-                // If LauncherMain returns, the game process likely exited or the C++ code returned control.
-                Debug.WriteLine($"[*] LauncherMain returned with code: {result}. Shutting down launcher.");
-                // Don't FreeLibrary(hLauncherModule/hCoreModule) here because the game process relies on them until it fully exits.
-                // The OS will clean them up when the process terminates.
-                Shutdown(result); // Exit with the code from LauncherMain
-            }
-            catch (Exception ex)
-            {
-                //ShowError($"An error occurred while executing 'LauncherMain'.\nError: {ex.Message}\n\nThe game may not have started correctly.");
-                // Don't FreeLibrary here either, the process might still be running somehow
-                Process.GetCurrentProcess().Kill(); // Exit with an error code
             }
             Process.GetCurrentProcess().Kill();
         }
