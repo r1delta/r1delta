@@ -1,70 +1,102 @@
-# Welcome :)
-#
-# Using CMake and this file, you can:
-# - Compile the launcher and the dedicated server launcher
-# - Generate Visual Studio solution/project files (please, please, PLEASE use the provided ones first)
-#
-# What you can't do with CMake and this file (yet):
-# - Compile tier0 (basically all r1delta code) and vaudio_opus
-#
-# With that being said, you can get started with these commands (on linux and msys2 [windows]):
-# mkdir build && cd build
-# cmake -DCMAKE_TOOLCHAIN_FILE=../cmake/mingw64-toolchain.cmake ..
-# make
-#
-# If you're using this on Windows and you want to use Visual Studio you don't need to pass the toolchain parameter.
 cmake_minimum_required(VERSION 3.13)
+project(tier0 LANGUAGES C CXX ASM)
 
-if(NOT DEFINED CMAKE_BUILD_TYPE OR CMAKE_BUILD_TYPE STREQUAL "")
-    # Always compile on release by default
-    set(CMAKE_BUILD_TYPE "Release")
+if(COMMAND cmake_policy)
+  cmake_policy(SET CMP0003 NEW)
 endif()
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
 
-project(r1delta)
+set(BUILD_TESTING OFF CACHE BOOL "Disable tests in all submodules" FORCE)
+set(MI_BUILD_TESTS OFF CACHE BOOL "Disable mimalloc tests" FORCE)
+set(JSON_BuildTests OFF CACHE BOOL "Disable nlohmann_json tests" FORCE)
 
-if(MSVC)
-    message("-- Using MSVC")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /DUNICODE /D_UNICODE /W0 /sdl /MP /Gy /permissive-")
-    set(CMAKE_CXX_FLAGS_DEBUG "/Od")
-    set(CMAKE_CXX_FLAGS_RELEASE "/O2 /Oi")
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /SUBSYSTEM:WINDOWS /STACK:0x7A1200")
-else()
-    message("-- NOT using MSVC")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -w -mwindows")
-    set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g2 -gdwarf-2")
-    set(CMAKE_CXX_FLAGS_RELEASE "-O2 -s")
+if(MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 8)
+  enable_language(ASM_MASM)
+  set(ASM_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/netchan_fix.asm")
 endif()
 
-add_subdirectory(launch)
-add_subdirectory(dedi_launch)
-##add_subdirectory(vaudio_opus)
-##add_subdirectory(vsdk)
+add_definitions(-DWIN32_LEAN_AND_MEAN -D_WINSOCK_DEPRECATED_NO_WARNINGS)
 
-## here goes the tier0 impl
-#project(tier0)
+add_subdirectory(vendor/minhook)
+add_subdirectory(vendor/mimalloc)
+add_subdirectory(vendor/nlohmann)
+add_subdirectory(vendor/cpp-httplib)
+add_subdirectory(vendor/zstd/build/cmake)
+add_subdirectory(vendor/ogg)
+add_subdirectory(vendor/vorbis)
 
-#file(GLOB TIER0SRC_FILES "${PROJECT_SOURCE_DIR}/*.cpp ${PROJECT_SOURCE_DIR}/*.cc")
-#file(GLOB TIER0H_FILES "${PROJECT_SOURCE_DIR}/*.h ${PROJECT_SOURCE_DIR}/*.hh")
-#file(GLOB TIER0RC_FILES "${PROJECT_SOURCE_DIR/*.rc")
+file(GLOB_RECURSE OTHER_SRC_FILES "src/*.cpp")
 
-#if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-#    add_definitions(-DDEBUG)
-#endif()
-#if(CMAKE_BUILD_TYPE STREQUAL "Release")
-#    add_definitions(-DNDEBUG)
-#endif()
+set(DELTASRCS
+  ${OTHER_SRC_FILES}
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/security_fixes.cc"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/arena.cc"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/tctx.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/vsdk/tier0/dbg.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/vsdk/tier0/platformtime.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/vsdk/tier0/valve_tracelogging.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/vsdk/tier1/ipv6text.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/vsdk/tier1/netadr.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/vsdk/tier1/utlbuffer.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/vsdk/vstdlib/strtools.cpp"
+  ${ASM_FILES}
+)
 
-#add_definitions(-DWIN32
-#    -DWINDOWS
-#    -DUSRDLL
-#    -DDLL1_EXPORTS
-#    -DWIN32_LEAN_AND_MEAN
-#    -D_CRT_SECURE_NO_WARNINGS
-#)
+list(REMOVE_DUPLICATES DELTASRCS)
 
-#add_library(tier0 SHARED ${TIER0SRC_FILES} ${TIER0H_FILES} ${TIER0RC_FILES})
-#target_link_libraries(tier0 winhttp shell32 vstdlib tier0_orig)
+list(FILTER DELTASRCS EXCLUDE REGEX "src/launch/main.cpp$")
+list(FILTER DELTASRCS EXCLUDE REGEX "src/dedicated/main.cpp$")
+
+add_library(${PROJECT_NAME} SHARED ${DELTASRCS})
+
+# Copy mimalloc.dll
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+  $<TARGET_FILE:mimalloc>
+  $<TARGET_FILE_DIR:${PROJECT_NAME}>
+  COMMENT "Copying mimalloc.dll to executable directory")
+
+# Copy mimalloc-redirect.dll
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+  "$<TARGET_FILE_DIR:mimalloc>/mimalloc-redirect.dll"
+  $<TARGET_FILE_DIR:${PROJECT_NAME}>
+  COMMENT "Copying mimalloc-redirect.dll to executable directory")
+
+# Copy tier0_orig.dll
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+  "${CMAKE_CURRENT_SOURCE_DIR}/libs/tier0_orig.dll"
+  $<TARGET_FILE_DIR:${PROJECT_NAME}>
+  COMMENT "Copying tier0_orig.dll to executable directory")
+
+target_include_directories(${PROJECT_NAME} PRIVATE
+  src
+  vendor/
+  vendor/minhook/include
+  vendor/mimalloc/include
+  vendor/nlohmann/include
+  vendor/zstd/lib
+  vendor/ogg/include
+  vendor/vorbis/include
+  vendor/vsdk/public
+)
+
+target_link_libraries(${PROJECT_NAME} PRIVATE
+  minhook
+  mimalloc
+  nlohmann_json
+  httplib
+  libzstd_static
+  winhttp
+  shell32
+  Shlwapi
+  ws2_32
+  crypt32
+  ${CMAKE_SOURCE_DIR}/libs/vstdlib.lib
+  ${CMAKE_SOURCE_DIR}/libs/tier0_orig.lib
+  vorbis
+  vorbisfile
+)

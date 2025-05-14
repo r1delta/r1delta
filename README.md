@@ -23,26 +23,27 @@ The master server will not show your server if it can't be connected to publicly
 If you want to make a friends-only server and hide it from the server browser you should put `hide_server 1` into the console, you can then give out your ip and port for a direct connect (in the style of ip:port) or use Discord game invites, just note that you'll still need to port-forward if your friends are going to connect over the internet. You can also set `sv_password` if you'd like to password protect your server but keep it on the server browser, just keep in mind this *will* leak your server's IP.
 
 # Building From Source
-1. [Install vcpkg and run vcpkg integrate install](https://learn.microsoft.com/en-us/vcpkg/get_started/get-started-msbuild)
-2. Make your dev root directory somewhere (on the disk you want to build R1Delta on) like `C:\depot\r1delta`
-3. Run the following commands in a command prompt (**not as Administrator**):
-4. `subst S: C:\depot\r1delta` 
-5. `git clone --recursive http://github.com/r1delta/r1delta S:\src`
-6. `mkdir S:\game`
-7. `git clone http://github.com/r1delta/CORE S:\game\r1delta`
-8. Build S:\src\r1delta.sln (open Dll1.sln, restore the NuGet packages if it's not done automatically, and build the solution)
-9. If you did this right, you should now have `S:\game\r1delta.exe` and it should boot properly.
-10. It is recommended, though not required, that you put your original R1 install (or delta'd R1 content) at S:\content.
+
+## Using CMake
+This is the recommended approach for new builds and supports compilers like Clang.
+Ensure you have CMake installed. Dependencies are handled via Git submodules, so make sure you have cloned the repository recursively (`git clone --recursive ...`).
+
+1. Create a build directory:
+   ```
+   mkdir build && cd build
+   ```
+2. Configure CMake (this example uses Visual Studio 2022 generator, adapt as needed for other generators like Ninja or for Clang):
+   ```
+   cmake .. -G "Visual Studio 17 2022" -A x64
+   ```
+   For Clang with Unix Makefiles, you could use:
+   ```
+   cmake .. -G "Unix Makefiles" -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+   ```
+3. Build the project:
+   `cmake --build . --config Release`
+4. The output will be in `build/Release` (or similar, depending on your generator and configuration). You should find `tier0.dll` here. Copy this to your `S:\game\r1delta\bin_delta` directory.
    
-If you want to make the S: subst persistent across restarts, you need to import a registry key.
-For example, this is for `C:\depot\r1delta`:
-```
-REGEDIT4 
-
-[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Session Manager\DOS Devices] 
-"S:"="\\??\\C:\\depot\\r1delta"
-```
-
 # Credits
 - [@r3muxd](https://github.com/r3muxd)
 - [@sonny-tel](https://github.com/sonny-tel)
