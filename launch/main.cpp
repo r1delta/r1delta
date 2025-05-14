@@ -448,12 +448,6 @@ bool EnsureStartedFromLauncher()
 	{
 		return false;
 	}
-
-	if (delta_env[0] != '1')
-	{
-		return false;
-	}
-
 	return true;
 }
 
