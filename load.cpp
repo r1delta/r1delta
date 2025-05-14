@@ -1361,7 +1361,7 @@ AuthResponse Server_AuthCallback(bool loopback, const char* serverIP, const char
 		auto decoded = jwt::decode(token);
 
 		// Verify expiration.
-		auto exp = decoded.get_payload_claim("e").as_integer();
+		auto exp = decoded.get_payload_claim("e").as_int();
 		auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
 		if (exp < now) {
 			response.success = false;
