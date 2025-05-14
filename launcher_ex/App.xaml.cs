@@ -886,60 +886,10 @@ namespace launcher_ex
             IntPtr hCoreModule = IntPtr.Zero; // Keep track of core module
             string launcherDllPath = Path.Combine(originalLauncherExeDir, R1DELTA_SUBDIR, BIN_SUBDIR, LAUNCHER_DLL_NAME);
             string coreDllPath = Path.Combine(originalLauncherExeDir, R1DELTA_SUBDIR, BIN_DELTA_SUBDIR, "tier0.dll"); // Assuming tier0 is the core
-
+            Environment.SetEnvironmentVariable("FROM_DELTA_LAUNCHER", "1");
             try
             {
-                Debug.WriteLine($"[*] Loading {LAUNCHER_DLL_NAME} from {launcherDllPath}");
-                // Use LOAD_WITH_ALTERED_SEARCH_PATH to ensure dependencies are found in the modified PATH
-                hLauncherModule = LoadLibraryExW(launcherDllPath, IntPtr.Zero, LOAD_WITH_ALTERED_SEARCH_PATH);
-                if (hLauncherModule == IntPtr.Zero)
-                {
-                    int errorCode = Marshal.GetLastWin32Error();
-                    LibraryLoadError(errorCode, LAUNCHER_DLL_NAME, launcherDllPath, originalLauncherExeDir);
-                    Process.GetCurrentProcess().Kill(); // Use Shutdown
-                    return; // Keep compiler happy
-                }
-
-                // Load the core DLL to get the SetArgs function
-                Debug.WriteLine($"[*] Loading core DLL from {coreDllPath}");
-                hCoreModule = LoadLibraryExW(coreDllPath, IntPtr.Zero, LOAD_WITH_ALTERED_SEARCH_PATH); // Use altered search path here too
-                if (hCoreModule == IntPtr.Zero)
-                {
-                    int errorCode = Marshal.GetLastWin32Error();
-                    LibraryLoadError(errorCode, "tier0.dll", coreDllPath, originalLauncherExeDir); // Adjust libName if different
-                    FreeLibrary(hLauncherModule); // Clean up already loaded library
-                    Process.GetCurrentProcess().Kill();
-                    return;
-                }
-
-                IntPtr pSetArgs = GetProcAddress(hCoreModule, "SetR1DeltaLaunchArgs");
-                if (pSetArgs == IntPtr.Zero)
-                {
-                    int errorCode = Marshal.GetLastWin32Error();
-                    ShowError($"Failed to find the 'SetR1DeltaLaunchArgs' function in the core DLL ('{Path.GetFileName(coreDllPath)}').\nError code: {errorCode}\n\nThe game cannot continue and has to exit.");
-                    FreeLibrary(hLauncherModule);
-                    FreeLibrary(hCoreModule);
-                    Process.GetCurrentProcess().Kill();
-                    return;
-                }
-
-                Debug.WriteLine($"[*] Calling SetR1DeltaLaunchArgs with: '{finalLaunchArgs ?? ""}'");
-                var setArgsDelegate = (SetR1DeltaLaunchArgsDelegate)Marshal.GetDelegateForFunctionPointer(pSetArgs, typeof(SetR1DeltaLaunchArgsDelegate));
-                setArgsDelegate(finalLaunchArgs ?? ""); // Pass the arguments
-                Debug.WriteLine($"[*] Successfully called SetR1DeltaLaunchArgs.");
-
-                // Now get LauncherMain from the launcher DLL
-                Debug.WriteLine("[*] Getting LauncherMain address");
-                pLauncherMain = GetProcAddress(hLauncherModule, "LauncherMain");
-                if (pLauncherMain == IntPtr.Zero)
-                {
-                    int errorCode = Marshal.GetLastWin32Error();
-                    ShowError($"Failed to find the 'LauncherMain' function in '{LAUNCHER_DLL_NAME}'.\nError code: {errorCode}\n\nThe game cannot continue and has to exit.");
-                    FreeLibrary(hLauncherModule);
-                    FreeLibrary(hCoreModule);
-                    Process.GetCurrentProcess().Kill();
-                    return;
-                }
+                
             }
             catch (Exception ex)
             {

@@ -475,99 +475,14 @@ public:
 };
 
 
-void DoSteamStart(PSTR lpCmdLine) {
-	auto concatInterface = [](const char* name, int version) -> std::string {
-		std::stringstream ss;
-		ss << name;
-		ss << std::setfill('0') << std::setw(3) << version;
-		return ss.str();
-		};
-
-	std::wstring steamclientDll = GetSteamDllPath();
-	if (steamclientDll == L"") {
-		throw std::runtime_error("");
-		return;
+bool EnsureStartedFromLauncher() {
+	auto delta_env = getenv("FROM_DELTA_LAUNCHER");
+	if(!delta_env) {
+		return false;
 	}
-
-	// add steam directory to path
-	auto idx = steamclientDll.find_last_of('\\');
-	std::wstring steamDirectory = steamclientDll.substr(0, idx + 1);
-	steamDirectory += L";";
-
-	wchar_t* PATH_VAR = new wchar_t[65535]; // grr extended windows path limit
-	memcpy(PATH_VAR, steamDirectory.data(), sizeof(wchar_t) * steamDirectory.size());
-	int written = GetEnvironmentVariableW(L"PATH", PATH_VAR + steamDirectory.size(), static_cast<DWORD>(sizeof(PATH_VAR) - steamDirectory.size()));
-	PATH_VAR[written + 1] = '\0';
-	SetEnvironmentVariableW(L"PATH", PATH_VAR);
-	delete[] PATH_VAR;
-
-	// Load steamclient64.dll
-	HMODULE steamclient64 = LoadLibraryW(steamclientDll.c_str());
-	if (!steamclient64) {
-		throw std::runtime_error("");
-		return;
-	}
-
-	// Get all the stuff we need from steam
-	using fnCreateInterface = void* (*)(const char*, int*);
-	fnCreateInterface CreateInterface = reinterpret_cast<fnCreateInterface>(GetProcAddress(steamclient64, "CreateInterface"));
-	void* clientEngine = nullptr;
-	for (int i = 5; i < 1000; i++) {
-		clientEngine = CreateInterface(concatInterface("CLIENTENGINE_INTERFACE_VERSION", i).c_str(), NULL);
-		if (clientEngine) {
-			break;
-		}
-	}
-	if (!clientEngine) {
-		throw std::runtime_error("");
-		return;
-	}
-
-
-	using fnCreateSteamPipe = std::uint32_t(*)();
-	std::uint32_t pipe = reinterpret_cast<fnCreateSteamPipe>(GetProcAddress(steamclient64, "Steam_CreateSteamPipe"))();
-
-	if (!pipe) {
-		throw std::runtime_error("");
-		return;
-	
-	}
-
-	using fnConnectToGlobalUser = std::uint32_t(*)(std::uint32_t pipe);
-	std::uint32_t user = reinterpret_cast<fnConnectToGlobalUser>(GetProcAddress(steamclient64, "Steam_ConnectToGlobalUser"))(pipe);
-
-	if(!user) {
-		throw std::runtime_error("");
-		return;
-	}
-
-	using fnGetClientUser = void* (__thiscall*)(void*, std::uint32_t, std::uint32_t);
-	void* clientUser = reinterpret_cast<fnGetClientUser>(VFUNC_OF(clientEngine, 8))(clientEngine, user, pipe);
-
-	if(!clientUser) {
-		throw std::runtime_error("");
-		return;
-	}
-
-	using fnCreateProcess = void(__thiscall*)(void* thisptr, const char* path, const char* commandline, const char* startdirectory, CGameID* id, const char*, int, int, int, int);
-	using fnBIsSubscribedApp = bool(__thiscall*)(void* thisptr, std::uint32_t appId);
-
-	// todo: offsets change once in a while, consider finding them by the IPC log string dynamically
-	bool ownsTitanfall = reinterpret_cast<fnBIsSubscribedApp>(VFUNC_OF(clientUser, 184))(clientUser, 1454890);
-	CGameID gameID(ownsTitanfall ? 1454890 : 480, 1, 0x79dcc3b0 | (0x80000000));
-
-	char currentExecutable[MAX_PATH];
-	GetModuleFileNameA(nullptr, currentExecutable, ARRAYSIZE(currentExecutable));
-	char currentDirectory[MAX_PATH];
-	GetCurrentDirectoryA(sizeof(currentDirectory), currentDirectory);
-
-	std::string commandLine = currentExecutable;
-	commandLine += " -bunny ";
-	commandLine += lpCmdLine;
-
-	fnCreateProcess _CreateProcess = reinterpret_cast<fnCreateProcess>(VFUNC_OF(clientUser, 104));
-	_CreateProcess(clientUser, currentExecutable, commandLine.c_str(), currentDirectory, &gameID, "R1Delta", 0, 0, 0, 0);
+	return true;
 }
+
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine, int nCmdShow)
 {
@@ -583,6 +498,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine,
 	*strrchr(path, '\\') = '\0';
 	SetCurrentDirectoryA(path);
 
+	if(!EnsureStartedFromLauncher()) {
+		
+		return 0;
+	}
 
 	//if (!strstr(lpCmdLine, "-bunny")) {
 	//	try {
