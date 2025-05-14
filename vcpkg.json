@@ -1,7 +1,7 @@
 {
   "name": "r1delta",
   "version": "1.0.0",
-  "builtin-baseline": "41c447cc210dc39aa85d4a5f58b4a1b9e573b3dc",
+  "builtin-baseline": "78b61582c9e093fda56a01ebb654be15a0033897",
   "dependencies": [
     {
       "name": "cpp-httplib",
@@ -17,11 +17,7 @@
       "name": "nlohmann-json",
       "version>=": "3.11.2"
     },
-    {
-      "name": "openssl",
-      "default-features": false,
-      "features": []
-    },
+    "openssl",
     {
       "name": "opusfile",
       "version>=": "0.12+20221121#1"
