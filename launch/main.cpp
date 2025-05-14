@@ -452,17 +452,14 @@ bool EnsureStartedFromLauncher()
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine, int nCmdShow)
 {
-	 AllocConsole();
-	 SetConsoleTitle(TEXT("R1Delta Launcher"));
-	 FILE *pCout, *pCerr;
-	 freopen_s(&pCout, "conout$", "w", stdout);
-	 freopen_s(&pCerr, "conout$", "w", stderr);
+	 //AllocConsole();
+	 //SetConsoleTitle(TEXT("R1Delta Launcher"));
+	 //FILE *pCout, *pCerr;
+	 //freopen_s(&pCout, "conout$", "w", stdout);
+	 //freopen_s(&pCerr, "conout$", "w", stderr);
 	 // Get the current working directory
 	 wchar_t currentDir[MAX_PATH];
 	 GetCurrentDirectoryW(MAX_PATH, currentDir);
-	 // print current path
-	 printf("Current path: %ls\n", currentDir);
-
 	 
 	 DWORD result = GetEnvironmentVariableW(L"PATH", NULL, 0);
 	 if (result == 0 && GetLastError() != ERROR_ENVVAR_NOT_FOUND)
@@ -477,15 +474,18 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine,
 	 std::wstring currentPath(result, L'\0');
 	 GetEnvironmentVariableW(L"PATH", &currentPath[0], result);
 
-	 // get the first path 
-	 std::wstring firstPath = currentPath.substr(0, currentPath.find(L";"));
+	 // Get the current exe path
+	 if (!GetExePathWide(exePath, sizeof(exePath) / sizeof(wchar_t)))
+	 {
+		 MessageBoxW(
+			 GetForegroundWindow(),
+			 L"Warning: could not get current exe path. Something may break because of that.",
+			 L"R1Delta Launcher Warning",
+			 0);
+		 return 1;
+	 }
 
-	 std::wstring secondPath = currentPath.substr(currentPath.find(L";") + 1, currentPath.find(L";", currentPath.find(L";") + 1) - currentPath.find(L";") - 1);
-	 
-	 printf("First path: %ls\n", firstPath.c_str());
-	 printf("Second path: %ls\n", secondPath.c_str());
-
-	/*if (!EnsureStartedFromLauncher())
+	if (!EnsureStartedFromLauncher())
 	{
 		PROCESS_INFORMATION pi;
 		memset(&pi, 0, sizeof(pi));
@@ -510,7 +510,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine,
 			return 1;
 		}
 		return 1;
-	}*/
+	}
 
 	if (RunAudioInstallerIfNecessary())
 	{
@@ -522,29 +522,20 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine,
 		return 1;
 	}
 	{
-
-
-		printf("[*] Loading launcher.dll\n");
-		swprintf_s(buffer, L"%s\\launcher.dll", secondPath.c_str());
-		printf("[*] Loading %ls\n", buffer);
+		swprintf_s(buffer, L"%s\\r1delta\\bin\\\launcher.dll", exePath);
 		hLauncherModule = LoadLibraryExW(buffer, 0, LOAD_WITH_ALTERED_SEARCH_PATH);
 		if (!hLauncherModule)
 		{
 			LibraryLoadError(GetLastError(), L"launcher.dll", buffer);
 			return 1;
 		}
-
-		printf("[*] Loading tier0.dll\n");
-		swprintf_s(buffer, L"%s\\tier0.dll", firstPath.c_str());
-		printf("[*] Loading %ls\n", buffer);
+		swprintf_s(buffer, L"%s\\r1delta\\bin_delta\\tier0.dll", exePath);
 		auto hCoreModule = LoadLibraryExW(buffer, 0, LOAD_WITH_ALTERED_SEARCH_PATH);
 		if (!hCoreModule)
 		{
 			LibraryLoadError(GetLastError(), L"tier0.dll", buffer);
 			return 1;
 		}
-
-		// Need to call the set args func
 		using SetR1DeltaLaunchArgs_t = void(__stdcall*)(const char*);
 		auto SetArgs = reinterpret_cast<SetR1DeltaLaunchArgs_t>(GetProcAddress(hCoreModule, "SetR1DeltaLaunchArgs"));
 
