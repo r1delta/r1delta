@@ -74,10 +74,6 @@ jobs:
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
-      - name: Fetch vcpkg
-        run: cd ${{ github.workspace }}/vcpkg && git fetch && git pull
-        shell: pwsh
-
       - name: vcpkg integrate install
         run: vcpkg integrate install
         shell: pwsh
