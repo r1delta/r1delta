@@ -443,8 +443,8 @@ bool EnsureStartedFromLauncher()
 {
 	//auto delta_env = getenv("FROM_DELTA_LAUNCHER");
 	wchar_t delta_env[2];
-	auto delta_env = GetEnvironmentVariableW(L"FROM_DELTA_LAUNCHER", delta_env, 1);
-	if (!delta_env)
+	auto delta_env_size = GetEnvironmentVariableW(L"FROM_DELTA_LAUNCHER", delta_env, 1);
+	if (!delta_env_size)
 	{
 		return false;
 	}
