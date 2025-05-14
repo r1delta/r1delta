@@ -890,10 +890,11 @@ namespace launcher_ex
             try
             {
                 var launcherDllPathFull = Path.GetFullPath(originalLauncherExeDir);
+                var fullExePath = Path.Combine(launcherDllPathFull,"Titanfall.exe");
                 Process.Start(new ProcessStartInfo
                 {
-                    FileName = "Titanfall.exe",
-                    WorkingDirectory = launcherDllPathFull,
+                    FileName = fullExePath,
+                    WorkingDirectory = finalInstallPath,
                     UseShellExecute = true,
                     Arguments = finalLaunchArgs,
                 });

@@ -82,7 +82,7 @@ void LibraryLoadError(DWORD dwMessageId, const wchar_t *libName, const wchar_t *
 {
 	char text[8192];
 	std::string message = std::system_category().message(dwMessageId);
-
+	printf("%s", message.c_str());
 	sprintf_s(
 		text,
 		"Failed to load the %ls at \"%ls\" (%lu):\n\n%hs\n\nMake sure you followed the R1Delta installation instructions carefully "
@@ -91,7 +91,7 @@ void LibraryLoadError(DWORD dwMessageId, const wchar_t *libName, const wchar_t *
 		location,
 		dwMessageId,
 		message.c_str());
-
+	printf("%s", text);
 	if (dwMessageId == 126 && std::filesystem::exists(location))
 	{
 		sprintf_s(
@@ -122,72 +122,17 @@ void LibraryLoadError(DWORD dwMessageId, const wchar_t *libName, const wchar_t *
 			"to any random folder.",
 			text);
 	}
-	else if (fs::exists("Titanfall.exe"))
+	/*else if (fs::exists("Titanfall.exe"))
 	{
 		sprintf_s(
 			text,
 			"%s\n\nTitanfall.exe has been found in the current directory: is the game installation corrupted or did you not unpack all "
 			"R1Delta files here?",
 			text);
-	}
+	}*/
 
 	MessageBoxA(GetForegroundWindow(), text, "R1Delta Launcher Error", 0);
 }
-
-#if 0
-void EnsureOriginStarted()
-{
-	if (GetProcessByName(L"Origin.exe") || GetProcessByName(L"EADesktop.exe"))
-		return; // already started
-
-	// unpacked exe will crash if origin isn't open on launch, so launch it
-	// get origin path from registry, code here is reversed from OriginSDK.dll
-	HKEY key;
-	if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SOFTWARE\\WOW6432Node\\Origin", 0, KEY_READ, &key) != ERROR_SUCCESS)
-	{
-		MessageBoxA(0, "Error: failed reading Origin path!", "R1Delta Launcher Error", MB_OK);
-		return;
-	}
-
-	char originPath[520];
-	DWORD originPathLength = 520;
-	if (RegQueryValueExA(key, "ClientPath", 0, 0, (LPBYTE)&originPath, &originPathLength) != ERROR_SUCCESS)
-	{
-		MessageBoxA(0, "Error: failed reading Origin path!", "R1Delta Launcher Error", MB_OK);
-		return;
-	}
-
-	printf("[*] Starting Origin...\n");
-
-	PROCESS_INFORMATION pi;
-	memset(&pi, 0, sizeof(pi));
-	STARTUPINFOA si;
-	memset(&si, 0, sizeof(si));
-	si.cb = sizeof(STARTUPINFOA);
-	si.dwFlags = STARTF_USESHOWWINDOW;
-	si.wShowWindow = SW_MINIMIZE;
-	CreateProcessA(
-		originPath,
-		(char*)"",
-		NULL,
-		NULL,
-		false,
-		CREATE_DEFAULT_ERROR_MODE | CREATE_NEW_PROCESS_GROUP,
-		NULL,
-		NULL,
-		(LPSTARTUPINFOA)&si,
-		&pi);
-
-	printf("[*] Waiting for Origin...\n");
-
-	// wait for origin to be ready, this process is created when origin is ready enough to launch game without any errors
-	while (!GetProcessByName(L"OriginClientService.exe") && !GetProcessByName(L"EADesktop.exe"))
-		Sleep(200);
-
-	CloseHandle(pi.hProcess);
-	CloseHandle(pi.hThread);
-}
-#endif
 
 void PrependPath()
 {
@@ -204,17 +149,15 @@ void PrependPath()
 	}
 
 	std::wstring newPath = std::wstring(exePath) + L"\\r1delta\\bin_delta\\;" +
-						   std::wstring(exePath) + L"\\r1delta\\bin\\;" +
-						   std::wstring(exePath) + L"\\bin\\x64_retail\\;.";
+		std::wstring(exePath) + L"\\r1delta\\bin\\;" +
+		std::wstring(exePath) + L"\\bin\\x64_retail\\;.";
 
-	if (result > 0)
-	{
+	if (result > 0) {
 		std::wstring currentPath(result, L'\0');
 		GetEnvironmentVariableW(L"PATH", &currentPath[0], result);
 
 		// Remove null terminator if present
-		if (!currentPath.empty() && currentPath.back() == L'\0')
-		{
+		if (!currentPath.empty() && currentPath.back() == L'\0') {
 			currentPath.pop_back();
 		}
 
@@ -509,41 +452,40 @@ bool EnsureStartedFromLauncher()
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine, int nCmdShow)
 {
-	// AllocConsole();
-	// SetConsoleTitle(TEXT("R1Delta Launcher"));
-	// FILE *pCout, *pCerr;
-	// freopen_s(&pCout, "conout$", "w", stdout);
-	// freopen_s(&pCerr, "conout$", "w", stderr);
-	SetEnvironmentVariableW(L"ContentId", L"1025161");
+	 AllocConsole();
+	 SetConsoleTitle(TEXT("R1Delta Launcher"));
+	 FILE *pCout, *pCerr;
+	 freopen_s(&pCout, "conout$", "w", stdout);
+	 freopen_s(&pCerr, "conout$", "w", stderr);
+	 // Get the current working directory
+	 wchar_t currentDir[MAX_PATH];
+	 GetCurrentDirectoryW(MAX_PATH, currentDir);
+	 // print current path
+	 printf("Current path: %ls\n", currentDir);
 
-	char path[MAX_PATH];
-	GetModuleFileNameA(NULL, path, MAX_PATH);
-	*strrchr(path, '\\') = '\0';
-	SetCurrentDirectoryA(path);
+	 
+	 DWORD result = GetEnvironmentVariableW(L"PATH", NULL, 0);
+	 if (result == 0 && GetLastError() != ERROR_ENVVAR_NOT_FOUND)
+	 {
+		 MessageBoxW(
+			 GetForegroundWindow(),
+			 L"Warning: could not get current PATH environment variable. Something may break because of that.",
+			 L"R1Delta Launcher Warning",
+			 0);
+		 return 1;
+	 }
+	 std::wstring currentPath(result, L'\0');
+	 GetEnvironmentVariableW(L"PATH", &currentPath[0], result);
 
-	// if (!strstr(lpCmdLine, "-bunny")) {
-	//	try {
-	//		DoSteamStart(lpCmdLine);
-	//		return 0;
-	//	}
-	//	catch(...) {
-	//	}
-	//
-	// }
+	 // get the first path 
+	 std::wstring firstPath = currentPath.substr(0, currentPath.find(L";"));
 
-	if (!GetExePathWide(exePath, sizeof(exePath)))
-	{
-		MessageBoxA(
-			GetForegroundWindow(),
-			"Failed getting game directory.\nThe game cannot continue and has to exit.",
-			"R1Delta Launcher Error",
-			0);
-		return 1;
-	}
+	 std::wstring secondPath = currentPath.substr(currentPath.find(L";") + 1, currentPath.find(L";", currentPath.find(L";") + 1) - currentPath.find(L";") - 1);
+	 
+	 printf("First path: %ls\n", firstPath.c_str());
+	 printf("Second path: %ls\n", secondPath.c_str());
 
-	SetCurrentDirectoryW(exePath);
-
-	if (!EnsureStartedFromLauncher())
+	/*if (!EnsureStartedFromLauncher())
 	{
 		PROCESS_INFORMATION pi;
 		memset(&pi, 0, sizeof(pi));
@@ -567,9 +509,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine,
 			MessageBoxA(0, "Failed to start the launcher!", "R1Delta Launcher Error", MB_OK);
 			return 1;
 		}
-
-		return 0;
-	}
+		return 1;
+	}*/
 
 	if (RunAudioInstallerIfNecessary())
 	{
@@ -581,21 +522,49 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine,
 		return 1;
 	}
 	{
-		SetMitigationPolicies();
 
-		PrependPath();
 
 		printf("[*] Loading launcher.dll\n");
-		swprintf_s(buffer, L"%s\\r1delta\\bin\\launcher.dll", exePath);
+		swprintf_s(buffer, L"%s\\launcher.dll", secondPath.c_str());
+		printf("[*] Loading %ls\n", buffer);
 		hLauncherModule = LoadLibraryExW(buffer, 0, LOAD_WITH_ALTERED_SEARCH_PATH);
 		if (!hLauncherModule)
 		{
 			LibraryLoadError(GetLastError(), L"launcher.dll", buffer);
 			return 1;
 		}
+
+		printf("[*] Loading tier0.dll\n");
+		swprintf_s(buffer, L"%s\\tier0.dll", firstPath.c_str());
+		printf("[*] Loading %ls\n", buffer);
+		auto hCoreModule = LoadLibraryExW(buffer, 0, LOAD_WITH_ALTERED_SEARCH_PATH);
+		if (!hCoreModule)
+		{
+			LibraryLoadError(GetLastError(), L"tier0.dll", buffer);
+			return 1;
+		}
+
+		// Need to call the set args func
+		using SetR1DeltaLaunchArgs_t = void(__stdcall*)(const char*);
+		auto SetArgs = reinterpret_cast<SetR1DeltaLaunchArgs_t>(GetProcAddress(hCoreModule, "SetR1DeltaLaunchArgs"));
+
+		if (!SetArgs)
+		{
+			MessageBoxA(
+				GetForegroundWindow(),
+				"Failed to load SetR1DeltaLaunchArgs function.\nThe game cannot continue and has to exit.",
+				"R1Delta Launcher Error",
+				0);
+			return 1;
+		}
+
+		SetArgs(lpCmdLine);
+
+		SetMitigationPolicies();
 	}
 
 	printf("[*] Launching the game...\n");
+
 	auto LauncherMain = GetLauncherMain();
 	if (!LauncherMain)
 	{
@@ -606,16 +575,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine,
 			0);
 		return 1;
 	}
-	char newCmdLine[1024];
-	if (strlen(lpCmdLine) > 0)
-	{
-		sprintf_s(newCmdLine, "%s -game r1delta -noorigin", lpCmdLine);
-	}
-	else
-	{
-		strcpy_s(newCmdLine, "-game r1delta -noorigin");
-	}
+
 
 	return ((int(/*__fastcall*/ *)(HINSTANCE, HINSTANCE, LPSTR, int))LauncherMain)(
-		hInstance, hPrevInstance, newCmdLine, nCmdShow); // the parameters aren't really used anyways
+		0, 0, nullptr, 1); // the parameters aren't really used anyways
 }

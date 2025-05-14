@@ -466,6 +466,8 @@ extern "C" __declspec(dllexport) void Error(const char* pMsg, ...) {
 		return;
 	}
 
+
+
 #if 0
 	va_list args;
 	va_start(args, pMsg);
@@ -481,6 +483,8 @@ extern "C" __declspec(dllexport) void Error(const char* pMsg, ...) {
 	va_start(args, pMsg);
 	char* formatted = SafeFormatArena(arena, pMsg, args);
 	va_end(args);
+
+	printf("%s", formatted);
 
 	reinterpret_cast<WarningFn>(GetProcAddress(GetModuleHandleA("tier0_orig.dll"), "Error"))("%s", formatted);
 #endif

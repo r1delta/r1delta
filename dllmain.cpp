@@ -572,6 +572,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 			char* exeName = strrchr(path, '\\') ? strrchr(path, '\\') + 1 : path;
 			if (_stricmp(exeName, "r1delta_ds.exe") != 0 &&
 				_stricmp(exeName, "titanfall.exe") != 0 &&
+				_stricmp(exeName, "titanfall1.exe") != 0 &&
 				_stricmp(exeName, "r1delta.exe") != 0) { // TODO
 				skip_dllmain = 1;
 				return TRUE;
