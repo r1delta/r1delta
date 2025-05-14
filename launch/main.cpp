@@ -498,7 +498,8 @@ public:
 
 bool EnsureStartedFromLauncher()
 {
-	auto delta_env = getenv("FROM_DELTA_LAUNCHER");
+	//auto delta_env = getenv("FROM_DELTA_LAUNCHER");
+	auto delta_env = GetEnvironmentVariableW(L"FROM_DELTA_LAUNCHER", nullptr, 0);
 	if (!delta_env)
 	{
 		return false;
@@ -544,7 +545,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine,
 
 	if (!EnsureStartedFromLauncher())
 	{
-
 		PROCESS_INFORMATION pi;
 		memset(&pi, 0, sizeof(pi));
 		STARTUPINFOA si;
@@ -553,18 +553,18 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine,
 		si.dwFlags = STARTF_USESHOWWINDOW;
 		si.wShowWindow = SW_SHOWDEFAULT;
 		if (!CreateProcessA(
-				"r1delta.exe",
-				nullptr,
-				nullptr,
-				nullptr,
-				false,
-				CREATE_DEFAULT_ERROR_MODE | CREATE_NEW_PROCESS_GROUP,
-				nullptr,
-				exePath,
-				(LPSTARTUPINFOA)&si,
-				&pi))
+			"r1delta.exe",
+			nullptr,
+			NULL,
+			NULL,
+			false,
+			CREATE_DEFAULT_ERROR_MODE | CREATE_NEW_PROCESS_GROUP,
+			NULL,
+			NULL,
+			(LPSTARTUPINFOA)&si,
+			&pi))
 		{
-			MessageBoxA(0, "Failed to start the game!", "R1Delta Launcher Error", MB_OK);
+			MessageBoxA(0, "Failed to start the launcher!", "R1Delta Launcher Error", MB_OK);
 			return 1;
 		}
 

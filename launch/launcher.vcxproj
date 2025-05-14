@@ -79,11 +79,11 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
     <OutDir>S:\game\</OutDir>
-    <TargetName>R1Delta</TargetName>
+    <TargetName>Titanfall</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
-    <TargetName>R1Delta</TargetName>
+    <TargetName>Titanfall</TargetName>
     <OutDir>S:\game\</OutDir>
   </PropertyGroup>
   <PropertyGroup Label="Vcpkg">
