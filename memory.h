@@ -184,6 +184,37 @@ enum EDeltaAllocHeaps : uint8_t
 };
 static_assert(HEAP_COUNT <= 256, "too many allocation heaps!");
 
+__forceinline static const char* Mem_tag_to_cstring(EDeltaAllocTags tag)
+{
+    switch (tag)
+    {
+    case TAG_DEFAULT:
+        return "TAG_DEFAULT";
+    case TAG_GAME:
+        return "TAG_GAME";
+    case TAG_NEW:
+        return "TAG_NEW";
+    default:
+        return "TAG_UNKNOWN";
+    }
+}
+__forceinline static const char* Mem_heap_to_cstring(EDeltaAllocHeaps heap)
+{
+    switch (heap)
+    {
+    case HEAP_DEFAULT:
+        return "HEAP_DEFAULT";
+    case HEAP_SYSTEM:
+        return "HEAP_SYSTEM";
+    case HEAP_GAME:
+        return "HEAP_GAME";
+    case HEAP_DELTA:
+        return "HEAP_DELTA";
+    default:
+        return "HEAP_UNKNOWN";
+    }
+}
+
 class CMimMemAlloc : public IMemAlloc {
     std::array<HANDLE, (size_t)HEAP_COUNT> _heaps = { 0 };
 
@@ -224,7 +255,7 @@ class CMimMemAlloc : public IMemAlloc {
     static_assert(sizeof(alloc_check_t) == 16, "alloc_check_t has invalid size! not 16");
 
 public:
-    __forceinline void* mi_malloc(size_t nSize, EDeltaAllocTags tag = TAG_DEFAULT, EDeltaAllocHeaps heap = HEAP_DEFAULT)
+    void* mi_malloc(size_t nSize, EDeltaAllocTags tag = TAG_DEFAULT, EDeltaAllocHeaps heap = HEAP_DEFAULT)
     {
         //R1DAssert(nSize);
         if (!nSize)
@@ -235,6 +266,7 @@ public:
         HANDLE _heap;
         if (heap == HEAP_DEFAULT)
         {
+            R1DAssert(0);
             heap = HEAP_GAME;
         }
         _heap = _heaps[heap];
@@ -290,13 +322,13 @@ public:
         return aligned;
     }
 
-    __forceinline void* mi_malloc_aligned(size_t nSize, size_t alignment, EDeltaAllocTags tag = TAG_DEFAULT, EDeltaAllocHeaps heap = HEAP_DEFAULT)
+    void* mi_malloc_aligned(size_t nSize, size_t alignment, EDeltaAllocTags tag = TAG_DEFAULT, EDeltaAllocHeaps heap = HEAP_DEFAULT)
     {
         R1DAssert(alignment <= 16);
         return mi_malloc(nSize, tag, heap);
     }
 
-    __forceinline void mi_free(void* aligned, EDeltaAllocTags tag = TAG_DEFAULT, EDeltaAllocHeaps heap = HEAP_DEFAULT)
+    void mi_free(void* aligned, EDeltaAllocTags tag = TAG_DEFAULT, EDeltaAllocHeaps heap = HEAP_DEFAULT)
     {
         if (!aligned)
             return;
@@ -332,12 +364,12 @@ public:
                 R1DAssert(heap == check->heap);
                 if (heap != check->heap)
                 {
-                    Warning("[MEM] Heap index mismatch in FREE at %p - %d expected, but got %d!\n", aligned, (int)heap, (int)check->heap);
+                    Warning("[MEM] Heap index mismatch in FREE at %p - %d(%s) expected, but got %d(%s)!\n", aligned, (int)heap, Mem_heap_to_cstring(heap), (int)check->heap, Mem_heap_to_cstring((EDeltaAllocHeaps)check->heap));
                 }
                 R1DAssert(tag == check->tag);
                 if (tag != check->tag)
                 {
-                    Warning("[MEM] Heap tag mismatch in FREE at %p - %d expected, but got %d!\n", aligned, (int)tag, (int)check->tag);
+                    Warning("[MEM] Heap tag mismatch in FREE at %p - %d(%s) expected, but got %d(%s)!\n", aligned, (int)tag, Mem_tag_to_cstring(tag), (int)check->tag, Mem_tag_to_cstring((EDeltaAllocTags)check->tag));
                 }
 
                 auto heap = check->heap;
@@ -388,13 +420,13 @@ public:
         }
     }
 
-    __forceinline void mi_free_aligned(void* aligned, size_t alignment, EDeltaAllocTags tag = TAG_DEFAULT, EDeltaAllocHeaps heap = HEAP_DEFAULT)
+    void mi_free_aligned(void* aligned, size_t alignment, EDeltaAllocTags tag = TAG_DEFAULT, EDeltaAllocHeaps heap = HEAP_DEFAULT)
     {
         R1DAssert(alignment <= 16);
         return mi_free(aligned, tag, heap);
     }
 
-    __forceinline void mi_free_size(void* aligned, size_t size, EDeltaAllocTags tag = TAG_DEFAULT, EDeltaAllocHeaps heap = HEAP_DEFAULT)
+    void mi_free_size(void* aligned, size_t size, EDeltaAllocTags tag = TAG_DEFAULT, EDeltaAllocHeaps heap = HEAP_DEFAULT)
     {
         if (!aligned)
             return;
@@ -425,13 +457,13 @@ public:
         }
     }
 
-    __forceinline void mi_free_size_aligned(void* aligned, size_t size, size_t align, EDeltaAllocTags tag = TAG_DEFAULT, EDeltaAllocHeaps heap = HEAP_DEFAULT)
+    void mi_free_size_aligned(void* aligned, size_t size, size_t align, EDeltaAllocTags tag = TAG_DEFAULT, EDeltaAllocHeaps heap = HEAP_DEFAULT)
     {
         R1DAssert(align <= 16);
         return mi_free_size(aligned, size, tag, heap);
     }
 
-    __forceinline size_t mi_usable_size(void* aligned)
+    size_t mi_usable_size(void* aligned)
     {
         if (!aligned)
             return 0;
@@ -458,7 +490,7 @@ public:
         }
     }
 
-    __forceinline void* mi_realloc(void* aligned, size_t size, EDeltaAllocTags tag = TAG_DEFAULT, EDeltaAllocHeaps heap = HEAP_DEFAULT)
+    void* mi_realloc(void* aligned, size_t size, EDeltaAllocTags tag = TAG_DEFAULT, EDeltaAllocHeaps heap = HEAP_DEFAULT)
     {
         alloc_check_t* check = (alloc_check_t*)(uintptr_t(aligned) - sizeof(alloc_check_t));
         alloc_check_t::hash_t hash = check->do_hash(uintptr_t(check), check->size, check->align_skip, check->tag, check->heap);
@@ -473,12 +505,12 @@ public:
                 R1DAssert(heap == check->heap);
                 if (heap != check->heap)
                 {
-                    Warning("[MEM] Heap index mismatch in REALLOC at %p - %d expected, but got %d!\n", aligned, (int)heap, (int)check->heap);
+                    Warning("[MEM] Heap index mismatch in REALLOC at %p - %d(%s) expected, but got %d(%s)!\n", aligned, (int)heap, Mem_heap_to_cstring(heap), (int)check->heap, Mem_heap_to_cstring((EDeltaAllocHeaps)check->heap));
                 }
                 R1DAssert(tag == check->tag);
                 if (tag != check->tag)
                 {
-                    Warning("[MEM] Heap tag mismatch in REALLOC at %p - %d expected, but got %d!\n", aligned, (int)tag, (int)check->tag);
+                    Warning("[MEM] Heap tag mismatch in REALLOC at %p - %d(%s) expected, but got %d(%s)!\n", aligned, (int)tag, Mem_tag_to_cstring(tag), (int)check->tag, Mem_tag_to_cstring((EDeltaAllocTags)check->tag));
                 }
                 
                 auto heap = check->heap;
@@ -556,7 +588,7 @@ public:
         }
     }
 
-    __forceinline void* mi_realloc_aligned(void* aligned, size_t size, size_t alignment, EDeltaAllocTags tag = TAG_DEFAULT, EDeltaAllocHeaps heap = HEAP_DEFAULT)
+    void* mi_realloc_aligned(void* aligned, size_t size, size_t alignment, EDeltaAllocTags tag = TAG_DEFAULT, EDeltaAllocHeaps heap = HEAP_DEFAULT)
     {
         R1DAssert(alignment <= 16);
         return mi_realloc(aligned, size, tag, heap);
