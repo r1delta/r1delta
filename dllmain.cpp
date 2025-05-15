@@ -42,7 +42,52 @@
 #include "filesystem.h"
 #include "logging.h"
 #include <tier0/platform.h>
-#include "mimalloc-new-delete.h"
+
+//- mrsteyk: override new/delete
+#include "memory.h"
+
+#if 1
+#if defined(_MSC_VER) && defined(_Ret_notnull_) && defined(_Post_writable_byte_size_)
+// stay consistent with VCRT definitions
+#define mi_decl_new(n)          [[nodiscard]] __declspec(allocator) __declspec(restrict) _Ret_notnull_ _Post_writable_byte_size_(n)
+#define mi_decl_new_nothrow(n)  [[nodiscard]] __declspec(allocator) __declspec(restrict) _Ret_maybenull_ _Success_(return != NULL) _Post_writable_byte_size_(n)
+#else
+#define mi_decl_new(n)          [[nodiscard]] __declspec(allocator) __declspec(restrict)
+#define mi_decl_new_nothrow(n)  [[nodiscard]] __declspec(allocator) __declspec(restrict)
+#endif
+
+void operator delete(void* p) noexcept { GlobalAllocator()->mi_free(p, TAG_NEW, HEAP_DELTA); };
+void operator delete[](void* p) noexcept { GlobalAllocator()->mi_free(p, TAG_NEW, HEAP_DELTA); };
+
+void operator delete  (void* p, const std::nothrow_t&) noexcept { GlobalAllocator()->mi_free(p, TAG_NEW, HEAP_DELTA); }
+void operator delete[](void* p, const std::nothrow_t&) noexcept { GlobalAllocator()->mi_free(p, TAG_NEW, HEAP_DELTA); }
+
+mi_decl_new(n) void* operator new(std::size_t n) noexcept(false) { return GlobalAllocator()->mi_malloc(n, TAG_NEW, HEAP_DELTA); }
+mi_decl_new(n) void* operator new[](std::size_t n) noexcept(false) { return GlobalAllocator()->mi_malloc(n, TAG_NEW, HEAP_DELTA); }
+
+mi_decl_new_nothrow(n) void* operator new  (std::size_t n, const std::nothrow_t& tag) noexcept { (void)(tag); return GlobalAllocator()->mi_malloc(n, TAG_NEW, HEAP_DELTA); }
+mi_decl_new_nothrow(n) void* operator new[](std::size_t n, const std::nothrow_t& tag) noexcept { (void)(tag); return GlobalAllocator()->mi_malloc(n, TAG_NEW, HEAP_DELTA); }
+
+#if (__cplusplus >= 201402L || _MSC_VER >= 1916)
+void operator delete  (void* p, std::size_t n) noexcept { GlobalAllocator()->mi_free_size(p, n, TAG_NEW, HEAP_DELTA); };
+void operator delete[](void* p, std::size_t n) noexcept { GlobalAllocator()->mi_free_size(p, n, TAG_NEW, HEAP_DELTA); };
+#endif
+
+#if (__cplusplus > 201402L || defined(__cpp_aligned_new))
+void operator delete  (void* p, std::align_val_t al) noexcept { GlobalAllocator()->mi_free_aligned(p, static_cast<size_t>(al), TAG_NEW, HEAP_DELTA); }
+void operator delete[](void* p, std::align_val_t al) noexcept { GlobalAllocator()->mi_free_aligned(p, static_cast<size_t>(al), TAG_NEW, HEAP_DELTA); }
+void operator delete  (void* p, std::size_t n, std::align_val_t al) noexcept { GlobalAllocator()->mi_free_size_aligned(p, n, static_cast<size_t>(al), TAG_NEW, HEAP_DELTA); };
+void operator delete[](void* p, std::size_t n, std::align_val_t al) noexcept { GlobalAllocator()->mi_free_size_aligned(p, n, static_cast<size_t>(al), TAG_NEW, HEAP_DELTA); };
+void operator delete  (void* p, std::align_val_t al, const std::nothrow_t&) noexcept { GlobalAllocator()->mi_free_aligned(p, static_cast<size_t>(al), TAG_NEW, HEAP_DELTA); }
+void operator delete[](void* p, std::align_val_t al, const std::nothrow_t&) noexcept { GlobalAllocator()->mi_free_aligned(p, static_cast<size_t>(al), TAG_NEW, HEAP_DELTA); }
+
+void* operator new  (std::size_t n, std::align_val_t al) noexcept(false) { return GlobalAllocator()->mi_malloc_aligned(n, static_cast<size_t>(al), TAG_NEW, HEAP_DELTA); }
+void* operator new[](std::size_t n, std::align_val_t al) noexcept(false) { return GlobalAllocator()->mi_malloc_aligned(n, static_cast<size_t>(al), TAG_NEW, HEAP_DELTA); }
+void* operator new  (std::size_t n, std::align_val_t al, const std::nothrow_t&) noexcept { return GlobalAllocator()->mi_malloc_aligned(n, static_cast<size_t>(al), TAG_NEW, HEAP_DELTA); }
+void* operator new[](std::size_t n, std::align_val_t al, const std::nothrow_t&) noexcept { return GlobalAllocator()->mi_malloc_aligned(n, static_cast<size_t>(al), TAG_NEW, HEAP_DELTA); }
+#endif
+#endif
+
 #include "crashhandler.h"
 #if BUILD_PROFILE
 #include "tracy-0.11.1/public/TracyClient.cpp"
@@ -663,8 +708,11 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 			if (!wine_get_version)
 			{
 				LDR_DLL_LOADED_NOTIFICATION_DATA* ndata = GetModuleNotificationData(L"launcher.dll");
-				doBinaryPatchForFile(*ndata);
-				FreeModuleNotificationData(ndata);
+				if (ndata)
+				{
+					doBinaryPatchForFile(*ndata);
+					FreeModuleNotificationData(ndata);
+				}
 			}
 		}
 		else {

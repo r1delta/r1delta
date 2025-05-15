@@ -916,7 +916,7 @@ int SendChatWrapper(HSQUIRRELVM v) {
 void RunAutorunScripts(R1SquirrelVM* r1sqvm, const char* prefix) {
 	auto FindFirst = (const char*(*__fastcall)(uintptr_t thisptr, const char* searchString, uintptr_t* handle))(g_CVFileSystem->FindFirst);
 	auto FindNext = (const char* (*__fastcall)(uintptr_t thisptr, uintptr_t handle))(g_CVFileSystem->FindNext);
-	auto FindClose = (void(*__fastcall)(uintptr_t thisptr, uintptr_t handle))(g_CVFileSystem->FindClose);
+	auto FindClose = (void(__fastcall*)(uintptr_t thisptr, uintptr_t handle))(g_CVFileSystem->FindClose);
 
 	char search[128] = { 0 };
 	sprintf_s(search, "scripts/vscripts/autorun/%s", prefix);
@@ -971,8 +971,8 @@ int AutoCVar(HSQUIRRELVM v) {
 	strcat_s(actualKey, size, key);
 	actualKey[size - 1] = '\0';
 
-	const char* defaultValueCopy = strdup(defaultValue);
-	const char* descCopy = strdup(desc);
+	const char* defaultValueCopy = _strdup(defaultValue);
+	const char* descCopy = _strdup(desc);
 
 	// if exists, bail
 	if (OriginalCCVar_FindVar(cvarinterface, actualKey)) return 0;

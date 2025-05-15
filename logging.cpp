@@ -289,12 +289,12 @@ char* SafeFormat(const char* format, va_list args) {
 	va_end(args_copy);
 
 	if (size < 0) {
-		return strdup("Error formatting string");
+		return _strdup("Error formatting string");
 	}
 
 	char* ret = (char*)malloc(size + 1);
 	if (ret == NULL) {
-		return strdup("Memory allocation error");
+		return _strdup("Memory allocation error");
 	}
 
 	vsnprintf(ret, size + 1, format, args);

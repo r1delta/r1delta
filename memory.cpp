@@ -42,12 +42,19 @@
 #pragma intrinsic(_ReturnAddress)
 
 
-IMemAlloc* g_pMemAllocSingleton;
+IMemAlloc* g_pMemAllocSingleton = 0;
 extern "C" __declspec(dllexport) IMemAlloc * CreateGlobalMemAlloc() {
-	if (!g_pMemAllocSingleton) {
-        g_pMemAllocSingleton = new CMimMemAlloc();
-	}
-	return g_pMemAllocSingleton;
+    if (!g_pMemAllocSingleton) {
+        // NOTE(mrsteyk): if to move it out - it will break due to static initialisation order.
+        static CMimMemAlloc mem;
+        g_pMemAllocSingleton = &mem;
+    }
+    return g_pMemAllocSingleton;
+}
+
+CMimMemAlloc* GlobalAllocator()
+{
+    return (CMimMemAlloc*)CreateGlobalMemAlloc();
 }
 
 void* __cdecl hkcalloc_base(size_t Count, size_t Size)

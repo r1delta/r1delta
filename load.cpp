@@ -2989,16 +2989,21 @@ void __stdcall LoaderNotificationCallback(
 		bDone = true;
 	}
 	auto name = notification_data->Loaded.BaseDllName->Buffer;
-	if (strcmp_static(name, L"filesystem_stdio.dll") == 0) {
+	auto name_len = notification_data->Loaded.BaseDllName->Length;
+	if (!G_is_dedi && string_equal_size(name, name_len, L"launcher.dll")) {
+		G_launcher = (uintptr_t)GetModuleHandleW(L"launcher.dll");
+		G_vscript = G_launcher;
+	}
+	if (string_equal_size(name, name_len, L"filesystem_stdio.dll")) {
 		G_filesystem_stdio = (uintptr_t)notification_data->Loaded.DllBase;
 		InitCompressionHooks();
 	}
-	else if (strcmp_static(name, L"engine.dll") == 0) {
+	else if (string_equal_size(name, name_len, L"engine.dll")) {
 		do_engine(notification_data);
 		should_init_security_fixes = true;
 		//client = std::make_shared<discordpp::Client>();
 	}
-	else if (strcmp_static(name, L"engine_ds.dll") == 0) {
+	else if (string_equal_size(name, name_len, L"engine_ds.dll")) {
 		G_engine_ds = (uintptr_t)notification_data->Loaded.DllBase;
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x433C0), &ProcessConnectionlessPacketDedi, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x30FE20), &StringCompare_AllTalkHookDedi, reinterpret_cast<LPVOID*>(&oStringCompare_AllTalkHookDedi));
@@ -3007,7 +3012,7 @@ void __stdcall LoaderNotificationCallback(
 		constexpr auto a = (1 << 2);
 		should_init_security_fixes = true;
 	}
-	else if (strcmp_static(name, L"vphysics.dll") == 0) {
+	else if (string_equal_size(name, name_len, L"vphysics.dll")) {
 		InitializeCriticalSectionAndSpinCount(&g_cs, 4000);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x1032C0), &sub_1032C0_hook, reinterpret_cast<LPVOID*>(&o_sub_1032C0));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x103120), &sub_103120_hook, reinterpret_cast<LPVOID*>(&o_sub_103120));
@@ -3017,24 +3022,24 @@ void __stdcall LoaderNotificationCallback(
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0xFFFF), &sub_FFFF, reinterpret_cast<LPVOID*>(&ovphys_sub_FFFF));
 		//MH_EnableHook(MH_ALL_HOOKS);
 	}
-	else if (strcmp_static(name, L"materialsystem_dx11.dll") == 0) {
+	else if (string_equal_size(name, name_len, L"materialsystem_dx11.dll")) {
 		SetupHudWarpMatSystemHooks();
 		MH_EnableHook(MH_ALL_HOOKS);
 	}
-	else if (strcmp_static(name, L"vguimatsurface.dll") == 0) {
+	else if (string_equal_size(name, name_len, L"vguimatsurface.dll")) {
 		SetupHudWarpVguiHooks();
 		MH_EnableHook(MH_ALL_HOOKS);
 	}
-	else if ((strcmp_static(name, L"adminserver.dll") == 0) || ((strcmp_static(name, L"AdminServer.dll")) == 0)) {
+	else if ((string_equal_size(name, name_len, L"adminserver.dll")) || ((string_equal_size(name, name_len, L"AdminServer.dll")))) {
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("AdminServer.dll") + 0x14730), &CServerInfoPanel__OnServerDataResponse_14730, reinterpret_cast<LPVOID*>(&oCServerInfoPanel__OnServerDataResponse_14730));
 		MH_EnableHook(MH_ALL_HOOKS);
 	}
-	else if ((strcmp_static(name, "localize.dll") == 0)) {
+	else if ((string_equal_size(name, name_len, "localize.dll"))) {
 		G_localize = (uintptr_t)notification_data->Loaded.DllBase;
 	}
 	else {
-		bool is_client = !strcmp_static(name, L"client.dll");
-		bool is_server = !is_client && !strcmp_static(name, L"server.dll");
+		bool is_client = string_equal_size(name, name_len, L"client.dll");
+		bool is_server = !is_client && string_equal_size(name, name_len, L"server.dll");
 
 		if (is_client) {
 			G_client = (uintptr_t)notification_data->Loaded.DllBase;

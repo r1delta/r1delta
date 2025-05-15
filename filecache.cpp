@@ -195,7 +195,7 @@ bool FileCache::TryReplaceFile(const char* pszRelativeFilePath) {
             break;
         }
         // NOTE(mrsteyk): do not handle unicode in replacement names.
-        if (!isprint(pszRelativeFilePath[i])) // if (pszRelativeFilePath[i] < 0)
+        if (!isprint((unsigned char)pszRelativeFilePath[i])) // if (pszRelativeFilePath[i] < 0)
         {
             return false;
         }
