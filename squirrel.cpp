@@ -567,6 +567,33 @@ SQInteger Script_Server_GetActiveBurnCardIndex(HSQUIRRELVM v) {
 	return 1;
 }
 
+SQInteger Script_ServerGetPlayerIp(HSQUIRRELVM v)
+{
+	void* player = sq_getentity(v, 2);
+	if (!player)
+	{
+		return sq_throwerror(v, "player is null");
+	}
+
+	auto edict = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(player) + 64);
+	auto index = ((edict - reinterpret_cast<__int64>(pGlobalVarsServer->pEdicts)) / 56);
+	if (index < 0 || index >= 32)
+	{
+		return sq_throwerror(v, "invalid player index");
+	}
+	typedef void* (*GetPlayerNetInfo_t)(uintptr_t, int);
+	static auto get_player_net_info = (GetPlayerNetInfo_t)(g_CVEngineServer->GetPlayerNetInfo);
+	auto net_chan = get_player_net_info(g_CVEngineServerInterface, index);
+	if (!net_chan) {
+		return sq_throwerror(v, "invalid net chan");
+	}
+	std::string ip = CallVFunc<char*>(0x1, (void*)net_chan);
+	if (ip.empty()) {
+		return sq_throwerror(v, "invalid ip");
+	}
+	sq_pushstring(v, ip.c_str(), -1);
+	return 1;
+}
 
 SQInteger OpenDiscordURL(HSQUIRRELVM v) {
 	// Define the URL as a wide string
@@ -1176,6 +1203,17 @@ bool GetSQVMFuncs() {
 		(SQFUNCTION)GetMinimumR1DVersion,
 		".", // String
 		1,     
+		"string",
+		"",
+		"Get r1d minimum server for filtering"
+	);
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER,
+		"GetPlayerIP",
+		(SQFUNCTION)Script_ServerGetPlayerIp,
+		".I", // String
+		2,
 		"string",
 		"",
 		"Get r1d minimum server for filtering"

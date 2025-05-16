@@ -1308,7 +1308,7 @@ void setinfopersist_cmd(const CCommand& args) {
 		g_bNoSendConVar = false;
 
 		// Only start/reset timer if value actually changed
-		if (valueChanged) {
+		if (valueChanged && !g_bTimerActive) {
 			g_flLastCommandTime = Plat_FloatTime();
 			g_bTimerActive = true;
 		}
