@@ -576,14 +576,14 @@ SQInteger Script_ServerGetPlayerIp(HSQUIRRELVM v)
 	}
 
 	auto edict = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(player) + 64);
-	auto index = ((edict - reinterpret_cast<__int64>(pGlobalVarsServer->pEdicts)) / 56) - 1;
+	auto index = ((edict - reinterpret_cast<__int64>(pGlobalVarsServer->pEdicts)) / 56);
 	if (index < 0 || index >= 32)
 	{
 		return sq_throwerror(v, "invalid player index");
 	}
 	typedef void* (*GetPlayerNetInfo_t)(uintptr_t, int);
 	static auto get_player_net_info = (GetPlayerNetInfo_t)(g_CVEngineServer->GetPlayerNetInfo);
-	auto net_chan = get_player_net_info(g_CVEngineServerInterface, index + 1);
+	auto net_chan = get_player_net_info(g_CVEngineServerInterface, index);
 	if (!net_chan) {
 		return sq_throwerror(v, "invalid net chan");
 	}
