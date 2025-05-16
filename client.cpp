@@ -119,6 +119,8 @@ struct CGameUI
     _BYTE gap0[24];
     char m_szPreviousStatusText[128];
 };
+typedef void* (*CGameUI__StartProgressBarType)(CGameUI* thispt);
+CGameUI__StartProgressBarType CGameUI__StartProgressBarOriginal;
 void CGameUI__StartProgressBar(CGameUI *thisptr)
 {
     static ConVarR1 *enable = OriginalCCVar_FindVar(cvarinterface, "delta_useLegacyProgressBar");
@@ -146,11 +148,12 @@ void CGameUI__StartProgressBar(CGameUI *thisptr)
     thisptr->m_szPreviousStatusText[0] = 0;
     CLoadingDialog__SetProgressPoint(GetLoadingDialogHandle(), 0.0);
     CLoadingDialog__Open(GetLoadingDialogHandle());
+	CGameUI__StartProgressBarOriginal(thisptr);
 }
 bool (*oCGameUI__UpdateProgressBar)(CGameUI *thisptr, float progress, const char *statusText);
 bool CGameUI__UpdateProgressBar(CGameUI *thisptr, float progress, const char *statusText)
 {
-    auto ret = true; // oCGameUI__UpdateProgressBar(thisptr, progress, statusText);
+    auto ret = oCGameUI__UpdateProgressBar(thisptr, progress, statusText);
     static auto CGameUI__ContinueProgressBar = (bool (*)(CGameUI *a1, float a2))(G_client + 0x360D60);
     static auto CGameUI__SetProgressBarText = (bool (*)(CGameUI *a1, const char *a2))(G_client + 0x360E40);
     CGameUI__ContinueProgressBar(thisptr, progress);
@@ -615,7 +618,7 @@ void InitClient()
     MH_CreateHook((LPVOID)(client + 0x8E820), &sub_18008E820, reinterpret_cast<LPVOID *>(&osub_18008E820));
     MH_CreateHook((LPVOID)(engine + 0x47A410), &KeyValues__SetString__Client, reinterpret_cast<LPVOID *>(&oKeyValues__SetString__Client));
     MH_CreateHook((LPVOID)(client + 0x286F50), &SharedVehicleViewSmoothing, reinterpret_cast<LPVOID *>(&oSharedVehicleViewSmoothing));
-    MH_CreateHook((LPVOID)(client + 0x360210), &CGameUI__StartProgressBar, NULL);
+    MH_CreateHook((LPVOID)(client + 0x360210), &CGameUI__StartProgressBar, reinterpret_cast<LPVOID*>(&CGameUI__StartProgressBarOriginal));
     MH_CreateHook((LPVOID)(client + 0x3601C0), &CGameUI__UpdateProgressBar, reinterpret_cast<LPVOID *>(&oCGameUI__UpdateProgressBar));
     MH_CreateHook((LPVOID)(client + 0x3C34D0), &BaseModUI__LoadingProgress__PaintBackground, reinterpret_cast<LPVOID*>(&oBaseModUI__LoadingProgress__PaintBackground));
     MH_CreateHook((LPVOID)(client + 0x17D440), &CHudChat__FormatAndDisplayMessage_Hooked, reinterpret_cast<LPVOID *>(&oCHudChat__FormatAndDisplayMessage));
