@@ -14,3 +14,5 @@ enum class TextMsgPrintType_t
 };
 
 void InitClient();
+
+extern char* g_loadingStatusText;

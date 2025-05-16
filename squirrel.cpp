@@ -41,6 +41,7 @@
 #include "shellapi.h"
 #include "discord.h"
 #include "r1d_version.h"
+#include "client.h"
 
 #pragma intrinsic(_ReturnAddress)
 
@@ -534,6 +535,16 @@ void SetRanked(HSQUIRRELVM v) {
 		auto player_ptr = reinterpret_cast<__int64>(player);
 		*(bool*)(player_ptr + 0x1844) = ranked;
 	}
+}
+
+SQInteger Script_GetLoadingStatusText(HSQUIRRELVM v)
+{
+	if (g_loadingStatusText)
+		sq_pushstring(v, g_loadingStatusText, -1);
+	else
+		sq_pushnull(v);
+
+	return 1;
 }
 
 SQInteger Script_Server_SetActiveBurnCardIndex(HSQUIRRELVM v) {
@@ -1392,6 +1403,16 @@ bool GetSQVMFuncs() {
 		"string",    // Returns an int (idk if i is the right char for this lmao)
 		"string key, string value",
 		"Set a persistent userinfo value (this does NOT replicate you will need to send the replication command)"
+	);
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_UI, // Available in client script contexts
+		"GetLoadingStatusText",
+		Script_GetLoadingStatusText,
+		"..ss", // String
+		0, 
+		"string",
+		"",
+		"Get the loading progres status text from engine vgui."
 	);
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_UI, // Available in client script contexts

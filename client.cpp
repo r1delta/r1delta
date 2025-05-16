@@ -7,9 +7,11 @@
 #include "netchanwarnings.h"
 #include "localchatwriter.h"
 #include "localize.h"
+#include "squirrel.h"
 
 typedef void (*sub_18027F2C0Type)(__int64 a1, const char *a2, void *a3);
 sub_18027F2C0Type sub_18027F2C0Original;
+char* g_loadingStatusText = new char[512];
 
 void TextMsg(bf_read *msg)
 {
@@ -108,8 +110,10 @@ __int64 SharedVehicleViewSmoothing(
 typedef void *CLoadingDialog;
 namespace vgui
 {
-    typedef void *Panel;
+    typedef void* Panel;
+    typedef void* Label;
 }
+
 struct CGameUI
 {
     _BYTE gap0[24];
@@ -117,7 +121,7 @@ struct CGameUI
 };
 void CGameUI__StartProgressBar(CGameUI *thisptr)
 {
-    static ConVarR1 *enable = OriginalCCVar_FindVar(cvarinterface, "progressbar_enabled");
+    static ConVarR1 *enable = OriginalCCVar_FindVar(cvarinterface, "delta_useLegacyProgressBar");
     if (enable->m_Value.m_nValue != 1)
         return;
     static auto CLoadingDialog__ctor = (void (*)(void *thisptr, void *parent))(G_client + 0x363A10);
@@ -151,8 +155,28 @@ bool CGameUI__UpdateProgressBar(CGameUI *thisptr, float progress, const char *st
     static auto CGameUI__SetProgressBarText = (bool (*)(CGameUI *a1, const char *a2))(G_client + 0x360E40);
     CGameUI__ContinueProgressBar(thisptr, progress);
     if (statusText && strlen(statusText) > 2)
+    {
+        strcpy(g_loadingStatusText, statusText);
         CGameUI__SetProgressBarText(thisptr, statusText);
+    }
     return ret;
+}
+
+void (*oBaseModUI__LoadingProgress__PaintBackground)(__int64* thisptr);
+void BaseModUI__LoadingProgress__PaintBackground(__int64* thisptr)
+{
+    vgui::Panel* loadingRes = reinterpret_cast<vgui::Panel*>(thisptr);
+    vgui::Label* loadingText = reinterpret_cast<vgui::Label*>(thisptr);
+
+    static auto vgui__Label__SetText = (void (*)(vgui::Label * label, const char* value))(G_client + 0x6B9190);
+    static auto vgui__Panel__FindChildByName = (vgui::Panel * (*)(vgui::Panel * panel, const char* childName, bool recurseDown))(G_client + 0x68DC50);
+
+    loadingText = (vgui::Label*)vgui__Panel__FindChildByName((vgui::Panel*)thisptr, "ProgressLabel", false);
+
+    if (loadingText)
+        vgui__Label__SetText(loadingText, g_loadingStatusText);
+
+    return oBaseModUI__LoadingProgress__PaintBackground(thisptr);
 }
 
 typedef __int64(__fastcall *tCHudChat__FormatAndDisplayMessage)(
@@ -593,6 +617,7 @@ void InitClient()
     MH_CreateHook((LPVOID)(client + 0x286F50), &SharedVehicleViewSmoothing, reinterpret_cast<LPVOID *>(&oSharedVehicleViewSmoothing));
     MH_CreateHook((LPVOID)(client + 0x360210), &CGameUI__StartProgressBar, NULL);
     MH_CreateHook((LPVOID)(client + 0x3601C0), &CGameUI__UpdateProgressBar, reinterpret_cast<LPVOID *>(&oCGameUI__UpdateProgressBar));
+    MH_CreateHook((LPVOID)(client + 0x3C34D0), &BaseModUI__LoadingProgress__PaintBackground, reinterpret_cast<LPVOID*>(&oBaseModUI__LoadingProgress__PaintBackground));
     MH_CreateHook((LPVOID)(client + 0x17D440), &CHudChat__FormatAndDisplayMessage_Hooked, reinterpret_cast<LPVOID *>(&oCHudChat__FormatAndDisplayMessage));
     MH_CreateHook((LPVOID)(client + 0x17DAA0), &MsgFunc__SayText, reinterpret_cast<LPVOID *>(&oMsgFunc__SayText));
     MH_CreateHook((LPVOID)(client + 0x17E140), &sub_18017E140, reinterpret_cast<LPVOID *>(&sub_18017E140_org));
