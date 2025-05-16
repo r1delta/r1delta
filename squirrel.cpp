@@ -567,6 +567,24 @@ SQInteger Script_Server_GetActiveBurnCardIndex(HSQUIRRELVM v) {
 	return 1;
 }
 
+SQInteger Script_ServerGetPlayerUserID(HSQUIRRELVM v) {
+	void* player = sq_getentity(v, 2);
+	if (!player)
+	{
+		return sq_throwerror(v, "player is null");
+	}
+	auto serverVm = GetServerVMPtr();
+	auto edict = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(player) + 64);
+	if (!edict) {
+		return sq_throwerror(v, "edict is null");
+	}
+	typedef int (*GetPlayerNetInfo_t)(uintptr_t, uintptr_t);
+	static auto get_player_user_id = (GetPlayerNetInfo_t)(g_CVEngineServer->GetPlayerUserId);
+	auto user_id = get_player_user_id(g_CVEngineServerInterface, edict);
+	sq_pushinteger(serverVm,v, user_id);
+	return 1;
+}
+
 SQInteger Script_ServerGetPlayerIp(HSQUIRRELVM v)
 {
 	void* player = sq_getentity(v, 2);
@@ -1216,7 +1234,18 @@ bool GetSQVMFuncs() {
 		2,
 		"string",
 		"",
-		"Get r1d minimum server for filtering"
+		"Get player ip"
+	);
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER,
+		"GetPlayerUserId",
+		(SQFUNCTION)Script_ServerGetPlayerUserID,
+		".I", // String
+		2,
+		"string",
+		"",
+		"Get player user id"
 	);
 
 	REGISTER_SCRIPT_FUNCTION(
