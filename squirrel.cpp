@@ -569,23 +569,29 @@ SQInteger Script_Server_GetActiveBurnCardIndex(HSQUIRRELVM v) {
 
 SQInteger Script_ServerGetPlayerIp(HSQUIRRELVM v)
 {
-	const void* player = sq_getentity(v, 2);
+	void* player = sq_getentity(v, 2);
 	if (!player)
 	{
 		return sq_throwerror(v, "player is null");
 	}
-	auto r1_vm = GetServerVMPtr();
-	auto player_ptr = reinterpret_cast<__int64>(player);
 
-	auto ent_idx = 0;
-
+	auto edict = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(player) + 64);
+	auto index = ((edict - reinterpret_cast<__int64>(pGlobalVarsServer->pEdicts)) / 56) - 1;
+	if (index < 0 || index >= 32)
+	{
+		return sq_throwerror(v, "invalid player index");
+	}
 	typedef void* (*GetPlayerNetInfo_t)(uintptr_t, int);
-	auto get_player_net_info = (GetPlayerNetInfo_t)(g_CVEngineServer->GetPlayerNetInfo);
-	auto net_chan = get_player_net_info(g_CVEngineServerInterface, ent_idx);
+	static auto get_player_net_info = (GetPlayerNetInfo_t)(g_CVEngineServer->GetPlayerNetInfo);
+	auto net_chan = get_player_net_info(g_CVEngineServerInterface, index + 1);
+	if (!net_chan) {
+		return sq_throwerror(v, "invalid net chan");
+	}
 	std::string ip = CallVFunc<char*>(0x1, (void*)net_chan);
-
+	if (ip.empty()) {
+		return sq_throwerror(v, "invalid ip");
+	}
 	sq_pushstring(v, ip.c_str(), -1);
-
 	return 1;
 }
 
@@ -1197,6 +1203,17 @@ bool GetSQVMFuncs() {
 		(SQFUNCTION)GetMinimumR1DVersion,
 		".", // String
 		1,     
+		"string",
+		"",
+		"Get r1d minimum server for filtering"
+	);
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER,
+		"GetPlayerIP",
+		(SQFUNCTION)Script_ServerGetPlayerIp,
+		".I", // String
+		2,
 		"string",
 		"",
 		"Get r1d minimum server for filtering"
