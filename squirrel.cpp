@@ -567,6 +567,27 @@ SQInteger Script_Server_GetActiveBurnCardIndex(HSQUIRRELVM v) {
 	return 1;
 }
 
+SQInteger Script_ServerGetPlayerIp(HSQUIRRELVM v)
+{
+	const void* player = sq_getentity(v, 2);
+	if (!player)
+	{
+		return sq_throwerror(v, "player is null");
+	}
+	auto r1_vm = GetServerVMPtr();
+	auto player_ptr = reinterpret_cast<__int64>(player);
+
+	auto ent_idx = 0;
+
+	typedef void* (*GetPlayerNetInfo_t)(uintptr_t, int);
+	auto get_player_net_info = (GetPlayerNetInfo_t)(g_CVEngineServer->GetPlayerNetInfo);
+	auto net_chan = get_player_net_info(g_CVEngineServerInterface, ent_idx);
+	std::string ip = CallVFunc<char*>(0x1, (void*)net_chan);
+
+	sq_pushstring(v, ip.c_str(), -1);
+
+	return 1;
+}
 
 SQInteger OpenDiscordURL(HSQUIRRELVM v) {
 	// Define the URL as a wide string
