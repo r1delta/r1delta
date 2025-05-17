@@ -2614,6 +2614,7 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	RegisterConVar("server_description", "", FCVAR_NONE, "Server description");
 	RegisterConVar("delta_ui_server_filter", "0", FCVAR_NONE, "Script managed vgui filter convar");
 	RegisterConVar("delta_autoBalanceTeams", "1", FCVAR_NONE, "Whether to autobalance teams on death/private match/lobby start. Managed by script");
+	RegisterConVar("delta_useLegacyProgressBar", "0", FCVAR_ARCHIVE, "Whether or not to use the old loading bar");
 	CBanSystem::m_pSvBanlistAutosave = RegisterConVar("sv_banlist_autosave", "1", FCVAR_ARCHIVE, "Automatically save ban lists after modification commands.");
 	RegisterConCommand("script", script_cmd, "Execute Squirrel code in server context", FCVAR_GAMEDLL | FCVAR_CHEAT);
 	if (!IsDedicatedServer()) {

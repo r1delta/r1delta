@@ -79,11 +79,11 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
     <OutDir>S:\game\</OutDir>
-    <TargetName>R1Delta</TargetName>
+    <TargetName>Titanfall</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
-    <TargetName>R1Delta</TargetName>
+    <TargetName>Titanfall</TargetName>
     <OutDir>S:\game\</OutDir>
   </PropertyGroup>
   <PropertyGroup Label="Vcpkg">
@@ -163,6 +163,7 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>shlwapi.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <StackReserveSize>0x7A1200</StackReserveSize>
+      <StackCommitSize>8000000</StackCommitSize>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>

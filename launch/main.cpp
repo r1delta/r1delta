@@ -1,7 +1,6 @@
 ﻿// Originally based on SpectreLauncher by Barnaby https://github.com/R1Spectre/SpectreLauncher
 // Mitigations from Titanfall Black Market Edition mod by p0358 https://github.com/p0358/black_market_edition
 
-
 #include <windows.h>
 #include <tlhelp32.h>
 #include <filesystem>
@@ -34,11 +33,11 @@ HMODULE hTier0Module;
 wchar_t exePath[4096];
 wchar_t buffer[8192];
 
-DWORD GetProcessByName(const std::wstring& processName)
+DWORD GetProcessByName(const std::wstring &processName)
 {
 	HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
 
-	PROCESSENTRY32W processSnapshotEntry = { 0 };
+	PROCESSENTRY32W processSnapshotEntry = {0};
 	processSnapshotEntry.dwSize = sizeof(PROCESSENTRY32);
 
 	if (snapshot == INVALID_HANDLE_VALUE)
@@ -60,7 +59,7 @@ DWORD GetProcessByName(const std::wstring& processName)
 	return 0;
 }
 
-bool GetExePathWide(wchar_t* dest, DWORD destSize)
+bool GetExePathWide(wchar_t *dest, DWORD destSize)
 {
 	if (!dest)
 		return NULL;
@@ -79,11 +78,11 @@ FARPROC GetLauncherMain()
 	return Launcher_LauncherMain;
 }
 
-void LibraryLoadError(DWORD dwMessageId, const wchar_t* libName, const wchar_t* location)
+void LibraryLoadError(DWORD dwMessageId, const wchar_t *libName, const wchar_t *location)
 {
 	char text[8192];
 	std::string message = std::system_category().message(dwMessageId);
-
+	printf("%s", message.c_str());
 	sprintf_s(
 		text,
 		"Failed to load the %ls at \"%ls\" (%lu):\n\n%hs\n\nMake sure you followed the R1Delta installation instructions carefully "
@@ -92,7 +91,7 @@ void LibraryLoadError(DWORD dwMessageId, const wchar_t* libName, const wchar_t* 
 		location,
 		dwMessageId,
 		message.c_str());
-
+	printf("%s", text);
 	if (dwMessageId == 126 && std::filesystem::exists(location))
 	{
 		sprintf_s(
@@ -123,120 +122,64 @@ void LibraryLoadError(DWORD dwMessageId, const wchar_t* libName, const wchar_t* 
 			"to any random folder.",
 			text);
 	}
-	else if (fs::exists("Titanfall.exe"))
+	/*else if (fs::exists("Titanfall.exe"))
 	{
 		sprintf_s(
 			text,
 			"%s\n\nTitanfall.exe has been found in the current directory: is the game installation corrupted or did you not unpack all "
 			"R1Delta files here?",
 			text);
-	}
+	}*/
 
 	MessageBoxA(GetForegroundWindow(), text, "R1Delta Launcher Error", 0);
 }
 
-#if 0
-void EnsureOriginStarted()
-{
-	if (GetProcessByName(L"Origin.exe") || GetProcessByName(L"EADesktop.exe"))
-		return; // already started
-
-	// unpacked exe will crash if origin isn't open on launch, so launch it
-	// get origin path from registry, code here is reversed from OriginSDK.dll
-	HKEY key;
-	if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SOFTWARE\\WOW6432Node\\Origin", 0, KEY_READ, &key) != ERROR_SUCCESS)
-	{
-		MessageBoxA(0, "Error: failed reading Origin path!", "R1Delta Launcher Error", MB_OK);
-		return;
-	}
-
-	char originPath[520];
-	DWORD originPathLength = 520;
-	if (RegQueryValueExA(key, "ClientPath", 0, 0, (LPBYTE)&originPath, &originPathLength) != ERROR_SUCCESS)
-	{
-		MessageBoxA(0, "Error: failed reading Origin path!", "R1Delta Launcher Error", MB_OK);
-		return;
-	}
-
-	printf("[*] Starting Origin...\n");
-
-	PROCESS_INFORMATION pi;
-	memset(&pi, 0, sizeof(pi));
-	STARTUPINFOA si;
-	memset(&si, 0, sizeof(si));
-	si.cb = sizeof(STARTUPINFOA);
-	si.dwFlags = STARTF_USESHOWWINDOW;
-	si.wShowWindow = SW_MINIMIZE;
-	CreateProcessA(
-		originPath,
-		(char*)"",
-		NULL,
-		NULL,
-		false,
-		CREATE_DEFAULT_ERROR_MODE | CREATE_NEW_PROCESS_GROUP,
-		NULL,
-		NULL,
-		(LPSTARTUPINFOA)&si,
-		&pi);
-
-	printf("[*] Waiting for Origin...\n");
-
-	// wait for origin to be ready, this process is created when origin is ready enough to launch game without any errors
-	while (!GetProcessByName(L"OriginClientService.exe") && !GetProcessByName(L"EADesktop.exe"))
-		Sleep(200);
-
-	CloseHandle(pi.hProcess);
-	CloseHandle(pi.hThread);
-}
-#endif
-
 void PrependPath()
 {
-    DWORD pathSize = 0;
-    DWORD result = GetEnvironmentVariableW(L"PATH", NULL, 0);
-    if (result == 0 && GetLastError() != ERROR_ENVVAR_NOT_FOUND)
-    {
-        MessageBoxW(
-            GetForegroundWindow(),
-            L"Warning: could not get current PATH environment variable. Something may break because of that.",
-            L"R1Delta Launcher Warning",
-            0);
-        return;
-    }
-    
-    std::wstring newPath = std::wstring(exePath) + L"\\r1delta\\bin_delta\\;" + 
-                           std::wstring(exePath) + L"\\r1delta\\bin\\;" + 
-                           std::wstring(exePath) + L"\\bin\\x64_retail\\;.";
-    
-    if (result > 0) {
-        std::wstring currentPath(result, L'\0');
-        GetEnvironmentVariableW(L"PATH", &currentPath[0], result);
-        
-        // Remove null terminator if present
-        if (!currentPath.empty() && currentPath.back() == L'\0') {
-            currentPath.pop_back();
-        }
-        
-        newPath += L";" + currentPath;
-    }
-    
-    if (!SetEnvironmentVariableW(L"PATH", newPath.c_str()))
-    {
-        MessageBoxW(
-            GetForegroundWindow(),
-            L"Warning: could not set PATH environment variable. Something may break because of that.",
-            L"R1Delta Launcher Warning",
-            0);
-    }
-}
+	DWORD pathSize = 0;
+	DWORD result = GetEnvironmentVariableW(L"PATH", NULL, 0);
+	if (result == 0 && GetLastError() != ERROR_ENVVAR_NOT_FOUND)
+	{
+		MessageBoxW(
+			GetForegroundWindow(),
+			L"Warning: could not get current PATH environment variable. Something may break because of that.",
+			L"R1Delta Launcher Warning",
+			0);
+		return;
+	}
 
+	std::wstring newPath = std::wstring(exePath) + L"\\r1delta\\bin_delta\\;" +
+		std::wstring(exePath) + L"\\r1delta\\bin\\;" +
+		std::wstring(exePath) + L"\\bin\\x64_retail\\;.";
+
+	if (result > 0) {
+		std::wstring currentPath(result, L'\0');
+		GetEnvironmentVariableW(L"PATH", &currentPath[0], result);
+
+		// Remove null terminator if present
+		if (!currentPath.empty() && currentPath.back() == L'\0') {
+			currentPath.pop_back();
+		}
+
+		newPath += L";" + currentPath;
+	}
+
+	if (!SetEnvironmentVariableW(L"PATH", newPath.c_str()))
+	{
+		MessageBoxW(
+			GetForegroundWindow(),
+			L"Warning: could not set PATH environment variable. Something may break because of that.",
+			L"R1Delta Launcher Warning",
+			0);
+	}
+}
 
 bool IsAnyIMEInstalled()
 {
 	auto count = GetKeyboardLayoutList(0, nullptr);
 	if (count == 0)
 		return false;
-	auto* list = reinterpret_cast<HKL*>(_alloca(count * sizeof(HKL)));
+	auto *list = reinterpret_cast<HKL *>(_alloca(count * sizeof(HKL)));
 	GetKeyboardLayoutList(count, list);
 	for (int i = 0; i < count; i++)
 		if (ImmIsIME(list[i]))
@@ -246,19 +189,19 @@ bool IsAnyIMEInstalled()
 
 bool DoesCpuSupportCetShadowStack()
 {
-	int cpuInfo[4] = { 0, 0, 0, 0 };
+	int cpuInfo[4] = {0, 0, 0, 0};
 	__cpuidex(cpuInfo, 7, 0);
 	return (cpuInfo[2] & (1 << 7)) != 0; // Check bit 7 in ECX (cpuInfo[2])
 }
 
-std::unordered_map<PROCESS_MITIGATION_POLICY, const char*> g_mitigationPolicyNames = {
-	{ ProcessASLRPolicy, "ProcessASLRPolicy" },
-	{ ProcessDynamicCodePolicy, "ProcessDynamicCodePolicy" },
-	{ ProcessExtensionPointDisablePolicy, "ProcessExtensionPointDisablePolicy" },
-	{ ProcessControlFlowGuardPolicy, "ProcessControlFlowGuardPolicy" },
-	{ ProcessSignaturePolicy, "ProcessSignaturePolicy" },
-	{ ProcessImageLoadPolicy, "ProcessImageLoadPolicy" },
-	{ ProcessUserShadowStackPolicy, "ProcessUserShadowStackPolicy" },
+std::unordered_map<PROCESS_MITIGATION_POLICY, const char *> g_mitigationPolicyNames = {
+	{ProcessASLRPolicy, "ProcessASLRPolicy"},
+	{ProcessDynamicCodePolicy, "ProcessDynamicCodePolicy"},
+	{ProcessExtensionPointDisablePolicy, "ProcessExtensionPointDisablePolicy"},
+	{ProcessControlFlowGuardPolicy, "ProcessControlFlowGuardPolicy"},
+	{ProcessSignaturePolicy, "ProcessSignaturePolicy"},
+	{ProcessImageLoadPolicy, "ProcessImageLoadPolicy"},
+	{ProcessUserShadowStackPolicy, "ProcessUserShadowStackPolicy"},
 };
 
 void SetMitigationPolicies()
@@ -271,19 +214,18 @@ void SetMitigationPolicies()
 	if (!SetProcessMitigationPolicy || !GetProcessMitigationPolicy)
 		return;
 
-	auto SetProcessMitigationPolicyEnsureOK = [SetProcessMitigationPolicy](PROCESS_MITIGATION_POLICY MitigationPolicy, PVOID lpBuffer, SIZE_T dwLength) {
+	auto SetProcessMitigationPolicyEnsureOK = [SetProcessMitigationPolicy](PROCESS_MITIGATION_POLICY MitigationPolicy, PVOID lpBuffer, SIZE_T dwLength)
+	{
 		bool result = SetProcessMitigationPolicy(MitigationPolicy, lpBuffer, dwLength);
 		if (!result)
 		{
 			auto lastError = GetLastError();
 			if (MitigationPolicy == ProcessUserShadowStackPolicy && !DoesCpuSupportCetShadowStack())
 				return;
-			MessageBoxA(0, ("Failed mitigation: "
-				+ (g_mitigationPolicyNames.find(MitigationPolicy) != g_mitigationPolicyNames.end() ? g_mitigationPolicyNames[MitigationPolicy] : std::to_string(MitigationPolicy))
-				+ ", error: " + std::to_string(lastError) + "\n\nThis is a non-fatal error.").c_str(),
-				"SetProcessMitigationPolicy failed", 0);
+			MessageBoxA(0, ("Failed mitigation: " + (g_mitigationPolicyNames.find(MitigationPolicy) != g_mitigationPolicyNames.end() ? g_mitigationPolicyNames[MitigationPolicy] : std::to_string(MitigationPolicy)) + ", error: " + std::to_string(lastError) + "\n\nThis is a non-fatal error.").c_str(),
+						"SetProcessMitigationPolicy failed", 0);
 		}
-		};
+	};
 
 	PROCESS_MITIGATION_ASLR_POLICY ap;
 	GetProcessMitigationPolicy(::GetCurrentProcess(), ProcessASLRPolicy, &ap, sizeof(ap));
@@ -322,13 +264,14 @@ void SetMitigationPolicies()
 	GetProcessMitigationPolicy(::GetCurrentProcess(), ProcessUserShadowStackPolicy, &usspp, sizeof(usspp));
 	if (usspp.EnableUserShadowStack)
 	{
-		//MessageBoxA(0, "Enabling shadow stack strict mode", "", 0);
+		// MessageBoxA(0, "Enabling shadow stack strict mode", "", 0);
 		usspp.EnableUserShadowStackStrictMode = true;
 		SetProcessMitigationPolicyEnsureOK(ProcessUserShadowStackPolicy, &usspp, sizeof(usspp));
-	} //else MessageBoxA(0, "Shadow stack is not enabled!!!", "", 0);
+	} // else MessageBoxA(0, "Shadow stack is not enabled!!!", "", 0);
 }
 
-bool ScanFileForOggS(const char* filepath, const __m128i& pattern, char* buffer, size_t bufferSize) {
+bool ScanFileForOggS(const char *filepath, const __m128i &pattern, char *buffer, size_t bufferSize)
+{
 	HANDLE hFile = CreateFileA(
 		filepath,
 		GENERIC_READ,
@@ -336,28 +279,35 @@ bool ScanFileForOggS(const char* filepath, const __m128i& pattern, char* buffer,
 		nullptr,
 		OPEN_EXISTING,
 		FILE_FLAG_SEQUENTIAL_SCAN,
-		nullptr
-	);
+		nullptr);
 
-	if (hFile == INVALID_HANDLE_VALUE) {
+	if (hFile == INVALID_HANDLE_VALUE)
+	{
 		return false;
 	}
 
 	size_t carryLen = 0;
 	bool foundOggS = false;
-	static auto containsOggS = [&](const char* buf, size_t size) -> bool {
-		if (size < 4) return false;
+	static auto containsOggS = [&](const char *buf, size_t size) -> bool
+	{
+		if (size < 4)
+			return false;
 
 		const size_t lastPossible = size - 4;
 
-		for (size_t i = 0; i + 16 <= size; i++) {
-			__m128i chunk = _mm_loadu_si128(reinterpret_cast<const __m128i*>(buf + i));
+		for (size_t i = 0; i + 16 <= size; i++)
+		{
+			__m128i chunk = _mm_loadu_si128(reinterpret_cast<const __m128i *>(buf + i));
 			__m128i eq = _mm_cmpeq_epi32(chunk, pattern);
 			int mask = _mm_movemask_epi8(eq);
-			if (mask) {
-				for (int offset = 0; offset < 13; offset++) {
-					if (i + offset + 4 > size) break;
-					if (memcmp(buf + i + offset, "OggS", 4) == 0) {
+			if (mask)
+			{
+				for (int offset = 0; offset < 13; offset++)
+				{
+					if (i + offset + 4 > size)
+						break;
+					if (memcmp(buf + i + offset, "OggS", 4) == 0)
+					{
 						return true;
 					}
 				}
@@ -365,32 +315,39 @@ bool ScanFileForOggS(const char* filepath, const __m128i& pattern, char* buffer,
 		}
 
 		size_t start = (size < 16) ? 0 : (size - 16);
-		for (size_t i = start; i + 4 <= size; i++) {
-			if (memcmp(buf + i, "OggS", 4) == 0) {
+		for (size_t i = start; i + 4 <= size; i++)
+		{
+			if (memcmp(buf + i, "OggS", 4) == 0)
+			{
 				return true;
 			}
 		}
 
 		return false;
-		};
+	};
 
-	while (true) {
+	while (true)
+	{
 		DWORD actual = 0;
-		if (!ReadFile(hFile, buffer + carryLen, bufferSize, &actual, nullptr) || actual == 0) {
+		if (!ReadFile(hFile, buffer + carryLen, bufferSize, &actual, nullptr) || actual == 0)
+		{
 			break;
 		}
 
 		size_t blockSize = carryLen + actual;
-		if (containsOggS(buffer, blockSize)) {
+		if (containsOggS(buffer, blockSize))
+		{
 			foundOggS = true;
 			break;
 		}
 
-		if (blockSize >= 3) {
+		if (blockSize >= 3)
+		{
 			memcpy(buffer, buffer + blockSize - 3, 3);
 			carryLen = 3;
 		}
-		else {
+		else
+		{
 			memcpy(buffer, buffer + 0, blockSize);
 			carryLen = blockSize;
 		}
@@ -400,20 +357,24 @@ bool ScanFileForOggS(const char* filepath, const __m128i& pattern, char* buffer,
 	return foundOggS;
 }
 
-int RunAudioInstallerIfNecessary() {
+int RunAudioInstallerIfNecessary()
+{
 	return false;
-	if (std::filesystem::exists("vpk/audio_done.txt")) {
+	if (std::filesystem::exists("vpk/audio_done.txt"))
+	{
 		return 0;
 	}
 
 	std::ifstream camList("vpk/cam_list.txt");
-	if (!camList) {
+	if (!camList)
+	{
 		return 1;
 	}
 
 	std::string line;
 	std::getline(camList, line);
-	if (line != "CAMLIST") {
+	if (line != "CAMLIST")
+	{
 		return 1;
 	}
 
@@ -421,8 +382,9 @@ int RunAudioInstallerIfNecessary() {
 	constexpr size_t BUFFER_SIZE = 64 * 1024;
 	alignas(16) char buffer[BUFFER_SIZE + 16];
 
-	const char* targetVpk = "vpk/client_mp_common.bsp.pak000_040.vpk";
-	if (!ScanFileForOggS(targetVpk, pattern, buffer, BUFFER_SIZE)) {
+	const char *targetVpk = "vpk/client_mp_common.bsp.pak000_040.vpk";
+	if (!ScanFileForOggS(targetVpk, pattern, buffer, BUFFER_SIZE))
+	{
 		std::ofstream doneFile("vpk/audio_done.txt");
 		doneFile << "1";
 		return 0;
@@ -430,11 +392,12 @@ int RunAudioInstallerIfNecessary() {
 
 	// Run the installer
 	std::string cmd = R"(bin\x64\audio_installer.exe vpk/cam_list.txt)";
-	STARTUPINFOA si = { sizeof(STARTUPINFOA) };
+	STARTUPINFOA si = {sizeof(STARTUPINFOA)};
 	PROCESS_INFORMATION pi = {};
 
 	if (!CreateProcessA(nullptr, const_cast<LPSTR>(cmd.c_str()), nullptr, nullptr,
-		FALSE, 0, nullptr, nullptr, &si, &pi)) {
+						FALSE, 0, nullptr, nullptr, &si, &pi))
+	{
 		return 1;
 	}
 
@@ -444,7 +407,8 @@ int RunAudioInstallerIfNecessary() {
 	CloseHandle(pi.hProcess);
 	CloseHandle(pi.hThread);
 
-	if (exitCode == 0 && !ScanFileForOggS(targetVpk, pattern, buffer, BUFFER_SIZE)) {
+	if (exitCode == 0 && !ScanFileForOggS(targetVpk, pattern, buffer, BUFFER_SIZE))
+	{
 		std::ofstream doneFile("vpk/audio_done.txt");
 		doneFile << "1";
 	}
@@ -464,9 +428,10 @@ std::wstring GetSteamDllPath()
 
 	return L"";
 }
-#define VFUNC_OF(a, off) (*reinterpret_cast<void***>(a))[off]
+#define VFUNC_OF(a, off) (*reinterpret_cast<void ***>(a))[off]
 
-class CGameID {
+class CGameID
+{
 public:
 	CGameID(int appid, int type, int modid) : m_nAppID(appid), m_nType(type), m_nModID(modid) {};
 	unsigned int m_nAppID : 24;
@@ -474,138 +439,82 @@ public:
 	unsigned int m_nModID : 32;
 };
 
-
-void DoSteamStart(PSTR lpCmdLine) {
-	auto concatInterface = [](const char* name, int version) -> std::string {
-		std::stringstream ss;
-		ss << name;
-		ss << std::setfill('0') << std::setw(3) << version;
-		return ss.str();
-		};
-
-	std::wstring steamclientDll = GetSteamDllPath();
-	if (steamclientDll == L"") {
-		throw std::runtime_error("");
-		return;
+bool EnsureStartedFromLauncher()
+{
+	//auto delta_env = getenv("FROM_DELTA_LAUNCHER");
+	wchar_t delta_env[2];
+	auto delta_env_size = GetEnvironmentVariableW(L"FROM_DELTA_LAUNCHER", delta_env, 1);
+	if (!delta_env_size)
+	{
+		return false;
 	}
-
-	// add steam directory to path
-	auto idx = steamclientDll.find_last_of('\\');
-	std::wstring steamDirectory = steamclientDll.substr(0, idx + 1);
-	steamDirectory += L";";
-
-	wchar_t* PATH_VAR = new wchar_t[65535]; // grr extended windows path limit
-	memcpy(PATH_VAR, steamDirectory.data(), sizeof(wchar_t) * steamDirectory.size());
-	int written = GetEnvironmentVariableW(L"PATH", PATH_VAR + steamDirectory.size(), static_cast<DWORD>(sizeof(PATH_VAR) - steamDirectory.size()));
-	PATH_VAR[written + 1] = '\0';
-	SetEnvironmentVariableW(L"PATH", PATH_VAR);
-	delete[] PATH_VAR;
-
-	// Load steamclient64.dll
-	HMODULE steamclient64 = LoadLibraryW(steamclientDll.c_str());
-	if (!steamclient64) {
-		throw std::runtime_error("");
-		return;
-	}
-
-	// Get all the stuff we need from steam
-	using fnCreateInterface = void* (*)(const char*, int*);
-	fnCreateInterface CreateInterface = reinterpret_cast<fnCreateInterface>(GetProcAddress(steamclient64, "CreateInterface"));
-	void* clientEngine = nullptr;
-	for (int i = 5; i < 1000; i++) {
-		clientEngine = CreateInterface(concatInterface("CLIENTENGINE_INTERFACE_VERSION", i).c_str(), NULL);
-		if (clientEngine) {
-			break;
-		}
-	}
-	if (!clientEngine) {
-		throw std::runtime_error("");
-		return;
-	}
-
-
-	using fnCreateSteamPipe = std::uint32_t(*)();
-	std::uint32_t pipe = reinterpret_cast<fnCreateSteamPipe>(GetProcAddress(steamclient64, "Steam_CreateSteamPipe"))();
-
-	if (!pipe) {
-		throw std::runtime_error("");
-		return;
-	
-	}
-
-	using fnConnectToGlobalUser = std::uint32_t(*)(std::uint32_t pipe);
-	std::uint32_t user = reinterpret_cast<fnConnectToGlobalUser>(GetProcAddress(steamclient64, "Steam_ConnectToGlobalUser"))(pipe);
-
-	if(!user) {
-		throw std::runtime_error("");
-		return;
-	}
-
-	using fnGetClientUser = void* (__thiscall*)(void*, std::uint32_t, std::uint32_t);
-	void* clientUser = reinterpret_cast<fnGetClientUser>(VFUNC_OF(clientEngine, 8))(clientEngine, user, pipe);
-
-	if(!clientUser) {
-		throw std::runtime_error("");
-		return;
-	}
-
-	using fnCreateProcess = void(__thiscall*)(void* thisptr, const char* path, const char* commandline, const char* startdirectory, CGameID* id, const char*, int, int, int, int);
-	using fnBIsSubscribedApp = bool(__thiscall*)(void* thisptr, std::uint32_t appId);
-
-	// todo: offsets change once in a while, consider finding them by the IPC log string dynamically
-	bool ownsTitanfall = reinterpret_cast<fnBIsSubscribedApp>(VFUNC_OF(clientUser, 184))(clientUser, 1454890);
-	CGameID gameID(ownsTitanfall ? 1454890 : 480, 1, 0x79dcc3b0 | (0x80000000));
-
-	char currentExecutable[MAX_PATH];
-	GetModuleFileNameA(nullptr, currentExecutable, ARRAYSIZE(currentExecutable));
-	char currentDirectory[MAX_PATH];
-	GetCurrentDirectoryA(sizeof(currentDirectory), currentDirectory);
-
-	std::string commandLine = currentExecutable;
-	commandLine += " -bunny ";
-	commandLine += lpCmdLine;
-
-	fnCreateProcess _CreateProcess = reinterpret_cast<fnCreateProcess>(VFUNC_OF(clientUser, 104));
-	_CreateProcess(clientUser, currentExecutable, commandLine.c_str(), currentDirectory, &gameID, "R1Delta", 0, 0, 0, 0);
+	return true;
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine, int nCmdShow)
 {
-	//AllocConsole();
-	//SetConsoleTitle(TEXT("R1Delta Launcher"));
-	//FILE *pCout, *pCerr;
-	//freopen_s(&pCout, "conout$", "w", stdout);
-	//freopen_s(&pCerr, "conout$", "w", stderr);
-	SetEnvironmentVariableW(L"ContentId", L"1025161");
+	 //AllocConsole();
+	 //SetConsoleTitle(TEXT("R1Delta Launcher"));
+	 //FILE *pCout, *pCerr;
+	 //freopen_s(&pCout, "conout$", "w", stdout);
+	 //freopen_s(&pCerr, "conout$", "w", stderr);
+	 // Get the current working directory
+	 wchar_t currentDir[MAX_PATH];
+	 GetCurrentDirectoryW(MAX_PATH, currentDir);
+	 
+	 DWORD result = GetEnvironmentVariableW(L"PATH", NULL, 0);
+	 if (result == 0 && GetLastError() != ERROR_ENVVAR_NOT_FOUND)
+	 {
+		 MessageBoxW(
+			 GetForegroundWindow(),
+			 L"Warning: could not get current PATH environment variable. Something may break because of that.",
+			 L"R1Delta Launcher Warning",
+			 0);
+		 return 1;
+	 }
+	 std::wstring currentPath(result, L'\0');
+	 GetEnvironmentVariableW(L"PATH", &currentPath[0], result);
 
-	char path[MAX_PATH];
-	GetModuleFileNameA(NULL, path, MAX_PATH);
-	*strrchr(path, '\\') = '\0';
-	SetCurrentDirectoryA(path);
+	 // Get the current exe path
+	 if (!GetExePathWide(exePath, sizeof(exePath) / sizeof(wchar_t)))
+	 {
+		 MessageBoxW(
+			 GetForegroundWindow(),
+			 L"Warning: could not get current exe path. Something may break because of that.",
+			 L"R1Delta Launcher Warning",
+			 0);
+		 return 1;
+	 }
 
-
-	//if (!strstr(lpCmdLine, "-bunny")) {
-	//	try {
-	//		DoSteamStart(lpCmdLine);
-	//		return 0;
-	//	}
-	//	catch(...) {
-	//	}
-	//			
-	//}
-
-	if (!GetExePathWide(exePath, sizeof(exePath)))
+	if (!EnsureStartedFromLauncher())
 	{
-		MessageBoxA(
-			GetForegroundWindow(),
-			"Failed getting game directory.\nThe game cannot continue and has to exit.",
-			"R1Delta Launcher Error",
-			0);
+		PROCESS_INFORMATION pi;
+		memset(&pi, 0, sizeof(pi));
+		STARTUPINFOA si;
+		memset(&si, 0, sizeof(si));
+		si.cb = sizeof(STARTUPINFOA);
+		si.dwFlags = STARTF_USESHOWWINDOW;
+		si.wShowWindow = SW_SHOWDEFAULT;
+		if (!CreateProcessA(
+			"r1delta.exe",
+			nullptr,
+			NULL,
+			NULL,
+			false,
+			CREATE_DEFAULT_ERROR_MODE | CREATE_NEW_PROCESS_GROUP,
+			NULL,
+			NULL,
+			(LPSTARTUPINFOA)&si,
+			&pi))
+		{
+			MessageBoxA(0, "Failed to start the launcher!", "R1Delta Launcher Error", MB_OK);
+			return 1;
+		}
 		return 1;
 	}
 
-	SetCurrentDirectoryW(exePath);
-	if (RunAudioInstallerIfNecessary()) {
+	if (RunAudioInstallerIfNecessary())
+	{
 		MessageBoxA(
 			GetForegroundWindow(),
 			"Failed setting up game audio.\nThe game cannot continue and has to exit.",
@@ -614,21 +523,40 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine,
 		return 1;
 	}
 	{
-		SetMitigationPolicies();
-
-		PrependPath();
-
-		printf("[*] Loading launcher.dll\n");
-		swprintf_s(buffer, L"%s\\r1delta\\bin\\launcher.dll", exePath);
+		swprintf_s(buffer, L"%s\\r1delta\\bin\\\launcher.dll", exePath);
 		hLauncherModule = LoadLibraryExW(buffer, 0, LOAD_WITH_ALTERED_SEARCH_PATH);
 		if (!hLauncherModule)
 		{
 			LibraryLoadError(GetLastError(), L"launcher.dll", buffer);
 			return 1;
 		}
+		swprintf_s(buffer, L"%s\\r1delta\\bin_delta\\tier0.dll", exePath);
+		auto hCoreModule = LoadLibraryExW(buffer, 0, LOAD_WITH_ALTERED_SEARCH_PATH);
+		if (!hCoreModule)
+		{
+			LibraryLoadError(GetLastError(), L"tier0.dll", buffer);
+			return 1;
+		}
+		using SetR1DeltaLaunchArgs_t = void(__stdcall*)(const char*);
+		auto SetArgs = reinterpret_cast<SetR1DeltaLaunchArgs_t>(GetProcAddress(hCoreModule, "SetR1DeltaLaunchArgs"));
+
+		if (!SetArgs)
+		{
+			MessageBoxA(
+				GetForegroundWindow(),
+				"Failed to load SetR1DeltaLaunchArgs function.\nThe game cannot continue and has to exit.",
+				"R1Delta Launcher Error",
+				0);
+			return 1;
+		}
+
+		SetArgs(lpCmdLine);
+
+		SetMitigationPolicies();
 	}
 
 	printf("[*] Launching the game...\n");
+
 	auto LauncherMain = GetLauncherMain();
 	if (!LauncherMain)
 	{
@@ -639,14 +567,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine,
 			0);
 		return 1;
 	}
-	char newCmdLine[1024];
-	if (strlen(lpCmdLine) > 0) {
-		sprintf_s(newCmdLine, "%s -game r1delta -noorigin", lpCmdLine);
-	}
-	else {
-		strcpy_s(newCmdLine, "-game r1delta -noorigin");
-	}
 
-	return ((int(/*__fastcall*/*)(HINSTANCE, HINSTANCE, LPSTR, int))LauncherMain)(
-		hInstance, hPrevInstance, newCmdLine, nCmdShow); // the parameters aren't really used anyways
+
+	return ((int(/*__fastcall*/ *)(HINSTANCE, HINSTANCE, LPSTR, int))LauncherMain)(
+		0, 0, nullptr, 1); // the parameters aren't really used anyways
 }

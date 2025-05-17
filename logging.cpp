@@ -135,7 +135,7 @@ void Cbuf_AddText(int a1, const char* a2, unsigned int a3) {
 		shouldLog = false;
 	}
 	if (!strcmp_static(a2, "startupmenu")) // if someone can send commands into this buffer they can do far worse at that stage than disconnecting the client
-		Cbuf_AddTextOriginal(a1, "net_secure 0\neverything_unlocked 1\n", a3);
+		Cbuf_AddTextOriginal(a1, "net_secure 0\n", a3);
 	size_t len = strlen(a2);
 	if (shouldLog) {
 		if (len > 0 && (a2[len - 1] == '\n' || a2[len - 1] == '\r')) {
@@ -466,6 +466,8 @@ extern "C" __declspec(dllexport) void Error(const char* pMsg, ...) {
 		return;
 	}
 
+
+
 #if 0
 	va_list args;
 	va_start(args, pMsg);
@@ -481,6 +483,8 @@ extern "C" __declspec(dllexport) void Error(const char* pMsg, ...) {
 	va_start(args, pMsg);
 	char* formatted = SafeFormatArena(arena, pMsg, args);
 	va_end(args);
+
+	printf("%s", formatted);
 
 	reinterpret_cast<WarningFn>(GetProcAddress(GetModuleHandleA("tier0_orig.dll"), "Error"))("%s", formatted);
 #endif
