@@ -547,6 +547,15 @@ SQInteger Script_GetLoadingStatusText(HSQUIRRELVM v)
 	return 1;
 }
 
+SQInteger Script_IsDedicated(HSQUIRRELVM v)
+{
+	auto r1sqvm = GetServerVMPtr();
+
+	sq_pushbool(r1sqvm, r1sqvm->sqvm, IsDedicatedServer());
+
+	return 1;
+}
+
 SQInteger Script_Server_SetActiveBurnCardIndex(HSQUIRRELVM v) {
 	const void* player = sq_getentity(v, 2);
 	if (!player) {
@@ -1480,6 +1489,16 @@ bool GetSQVMFuncs() {
 		"string",
 		"",
 		"Get the loading progres status text from engine vgui."
+	);
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER, // Available in client script contexts
+		"IsDedicated",
+		Script_IsDedicated,
+		"..ss", // String
+		0,
+		"bool",
+		"",
+		"Returns whether the the server is dedicated or listen."
 	);
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_UI, // Available in client script contexts
