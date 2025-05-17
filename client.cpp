@@ -141,7 +141,7 @@ void CGameUI__StartProgressBar(CGameUI *thisptr)
 
     if (!GetLoadingDialogHandle())
     {
-        v2 = (CLoadingDialog *)operator new(0x3E0u * 2); // just for safety
+        v2 = (CLoadingDialog *)GlobalAllocator()->mi_malloc(0x3E0u * 2, TAG_GAME, HEAP_GAME); // just for safety
         CLoadingDialog__ctor(v2, BaseModPanel());
         vgui__PHandle__Set(g_hLoadingDialog, v2);
     }

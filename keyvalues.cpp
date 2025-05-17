@@ -40,11 +40,37 @@ public:
 	virtual int(__thiscall GetSymbolForStringCaseSensitive)(HKeySymbol& hCaseInsensitiveSymbol, const char* name, bool bCreate) = 0;
 };
 
+#if 0
 extern "C" {
 	__declspec(dllimport) int V_UTF8ToUnicode(const char* pUTF8, wchar_t* pwchDest, int cubDestSizeInBytes);
 	__declspec(dllimport) int V_UnicodeToUTF8(const wchar_t* pUnicode, char* pUTF8, int cubDestSizeInBytes);
 	__declspec(dllimport) CKeyValuesSystem* KeyValuesSystem();
 }
+#else
+int V_UTF8ToUnicode(const char* pUTF8, wchar_t* pwchDest, int cubDestSizeInBytes);
+int V_UnicodeToUTF8(const wchar_t* pUnicode, char* pUTF8, int cubDestSizeInBytes);
+CKeyValuesSystem* KeyValuesSystem();
+
+decltype(&V_UTF8ToUnicode) V_UTF8ToUnicode_ = 0;
+decltype(&V_UnicodeToUTF8) V_UnicodeToUTF8_ = 0;
+decltype(&KeyValuesSystem) KeyValuesSystem_ = 0;
+
+int V_UTF8ToUnicode(const char* pUTF8, wchar_t* pwchDest, int cubDestSizeInBytes)
+{
+	if (!V_UTF8ToUnicode_) V_UTF8ToUnicode_ = decltype(&V_UTF8ToUnicode)(GetProcAddress(LoadLibraryA("vstdlib.dll"), "V_UTF8ToUnicode"));
+	return V_UTF8ToUnicode_(pUTF8, pwchDest, cubDestSizeInBytes);
+}
+int V_UnicodeToUTF8(const wchar_t* pUnicode, char* pUTF8, int cubDestSizeInBytes)
+{
+	if (!V_UnicodeToUTF8_) V_UnicodeToUTF8_ = decltype(&V_UnicodeToUTF8)(GetProcAddress(LoadLibraryA("vstdlib.dll"), "V_UnicodeToUTF8"));
+	return V_UnicodeToUTF8_(pUnicode, pUTF8, cubDestSizeInBytes);
+}
+CKeyValuesSystem* KeyValuesSystem()
+{
+	if (!KeyValuesSystem_) KeyValuesSystem_ = decltype(&KeyValuesSystem)(GetProcAddress(LoadLibraryA("vstdlib.dll"), "KeyValuesSystem"));
+	return KeyValuesSystem_();
+}
+#endif
 
 KeyValues::KeyValues() {} // default constructor for copying and such
 
