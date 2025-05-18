@@ -33,6 +33,7 @@
 // =========-----===--------==------------------------==++********#*#####**#######*########%%
 
 #include "memory.h"
+#include "cvar.h"
 #include <iostream>
 #include <Psapi.h>
 #include <intrin.h>
@@ -41,6 +42,12 @@
 
 #pragma intrinsic(_ReturnAddress)
 
+ConCommandR1* RegisterConCommand(const char* commandName, void (*callback)(const CCommand&), const char* helpString, int flags);
+
+void DeltaMemoryStats(const CCommand& c)
+{
+    GlobalAllocator()->DumpStats();
+}
 
 IMemAlloc* g_pMemAllocSingleton = 0;
 extern "C" __declspec(dllexport) IMemAlloc * CreateGlobalMemAlloc() {

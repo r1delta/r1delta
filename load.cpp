@@ -1885,6 +1885,10 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 
 	}
 
+	// TODO(mrsteyk): nice-ify.
+	extern void DeltaMemoryStats(const CCommand & c);
+	RegisterConCommand("delta_memory_stats", DeltaMemoryStats, "Dump memory stats", 0);
+
 	// TODO(mrsteyk): fuck Windows for not abiding by stack reserve rules.
 	security_fixes_engine(engine_base);
 

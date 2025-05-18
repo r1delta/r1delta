@@ -282,6 +282,7 @@ decltype(&DevWarning) DevWarningOriginal = nullptr;
 decltype(&ConColorMsg) ConColorMsgOriginal = nullptr;
 decltype(&ConDMsg) ConDMsgOriginal = nullptr;
 decltype(&COM_TimestampedLog) COM_TimestampedLogOriginal = nullptr;
+#if 0
 char* SafeFormat(const char* format, va_list args) {
 	va_list args_copy;
 	va_copy(args_copy, args);
@@ -300,6 +301,7 @@ char* SafeFormat(const char* format, va_list args) {
 	vsnprintf(ret, size + 1, format, args);
 	return ret;
 }
+#endif
 
 char* SafeFormatArena(Arena* arena, const char* format, va_list args) {
 	va_list args_copy;

@@ -41,6 +41,7 @@
 #include <MinHook.h>
 #include <array>
 // NOTE(mrsteyk): cyclic includes
+extern "C" __declspec(dllimport) void Msg(const char* _Printf_format_string_ pMsg, ...);
 extern "C" __declspec(dllimport) void Warning(const char* _Printf_format_string_ pMsg, ...);
 //#define ASAN_ENABLED 1
 // NOTE(mrsteyk): for heap check it's also advised to disable new/delete overrides. It also might not be really necessary as corruption detection can easilly see it.
@@ -165,6 +166,13 @@ enum EDeltaAllocTags : uint8_t
     // C++ junk with new.
     TAG_NEW,
 
+    //-
+
+    // r1dc
+    TAG_COMPRESSION,
+    // audio.cpp
+    TAG_AUDIO,
+
     TAG_COUNT,
 };
 static_assert(TAG_COUNT <= 256, "too many allocation tags!");
@@ -194,7 +202,12 @@ __forceinline static const char* Mem_tag_to_cstring(EDeltaAllocTags tag)
         return "TAG_GAME";
     case TAG_NEW:
         return "TAG_NEW";
+    case TAG_COMPRESSION:
+        return "TAG_COMPRESSION";
+    case TAG_AUDIO:
+        return "TAG_AUDIO";
     default:
+        R1DAssert(!(tag < TAG_COUNT));
         return "TAG_UNKNOWN";
     }
 }
@@ -749,12 +762,77 @@ public:
     }
 
     void DumpStats() override {
-        mi_stats_print(nullptr);
+        //mi_stats_print(nullptr);
+        Msg("Delta Allocator stats:\n");
+        for (size_t i = 0; i < _heaps.size(); ++i)
+        {
+            auto heap = _heaps[i];
+            R1DAssert(HeapLock(heap));
+
+            size_t regions_count = 0;
+            size_t current_commit = 0, free_memory = 0;
+            std::array<size_t, TAG_COUNT> tag_mem = { 0 };
+            std::array<size_t, TAG_COUNT> tag_count = { 0 };
+
+            PROCESS_HEAP_ENTRY e = {};
+            while (HeapWalk(heap, &e))
+            {
+                regions_count++;
+
+                if (!(e.wFlags & PROCESS_HEAP_UNCOMMITTED_RANGE))
+                {
+                    current_commit += e.cbData + e.cbOverhead;
+
+                    // TODO(mrsteyk): if proper alignment makes it, adjust this code.
+                    uint8_t* p = (uint8_t*)e.lpData;
+                    
+                    alloc_check_t* check = (alloc_check_t*)(p + 0);
+                    size_t align_skip = 0 + sizeof(*check);
+                    auto hash = check->do_hash(uintptr_t(check), check->size, align_skip, check->tag, check->heap);
+
+                    if (check->align_skip == align_skip && check->hash == hash)
+                    {
+                        alloc_check_t::hash_t check2 = *(alloc_check_t::hash_t*)(uintptr_t(check) + sizeof(*check) + check->size);
+                        if (check2 == hash)
+                        {
+                            tag_mem[check->tag] += check->size;
+                            tag_count[check->tag]++;
+
+                            R1DAssert(e.cbData == (MEM_ALLOC_OVERHEAD + check->size));
+                        }
+                        else
+                        {
+                            R1DAssert(!"Heap corruption after block");
+                        }
+                    }
+                }
+                else
+                {
+                    free_memory += e.cbData + e.cbOverhead;
+                }
+            }
+
+            Msg("* %s used %.02f MB (%.02f MB free, %.02f MB commit)\n", Mem_heap_to_cstring((EDeltaAllocHeaps)i), (float)(current_commit + free_memory) / (1 << 20),
+                (float)free_memory / (1 << 20), (float)current_commit / (1 << 20));
+            for (size_t j = 0; j < tag_mem.size(); ++j)
+            {
+                if (tag_count[j] == 0)
+                {
+                    continue;
+                }
+                Msg(" * %s %zu, %.02f MB (overhead %.2f MB)\n", Mem_tag_to_cstring((EDeltaAllocTags)j), tag_count[j], (float)tag_mem[j] / (1 << 20), (float)(tag_count[j] * MEM_ALLOC_OVERHEAD) / (1 << 20));
+            }
+
+            R1DAssert(HeapUnlock(heap));
+        }
+
+        extern void AudioReportMemory();
+        AudioReportMemory();
     }
 
     void DumpStatsFileBase(char const* pchFileBase) override {
         (void)pchFileBase;
-        mi_stats_print(nullptr);
+        DumpStats();
     }
 
     size_t ComputeMemoryUsedBy(char const* pchSubStr) override {

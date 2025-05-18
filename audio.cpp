@@ -285,30 +285,32 @@ struct ProgressiveOpusTemplate {
     std::mutex chunkMutex;              // protects pcmChunks
     std::condition_variable chunkCV;    // signals when new chunks are added
     std::vector<unsigned char> fileData;  // persistent copy of the original file data
-    std::shared_ptr<MemoryBuffer> pMemBuffer; // persistent memory buffer for ov_open_callbacks
+    MemoryBuffer pMemBuffer; // persistent memory buffer for ov_open_callbacks
 
     // Shared decoder pointer and a mutex to protect it.
     OggVorbis_File* vf;
     std::mutex decodeMutex;
 
     ProgressiveOpusTemplate() : decodedChunks(0), channels(1), fullyDecoded(false), vf(nullptr) {}
+    ~ProgressiveOpusTemplate() {}
 
     static constexpr size_t CHUNK_SIZE = 32768; // number of int16_t samples per channel per chunk
 };
 
-static std::unordered_map<std::string, std::shared_ptr<ProgressiveOpusTemplate>> g_progressiveCache;
+static std::unordered_map<std::string, ProgressiveOpusTemplate*> g_progressiveCache;
 static std::mutex g_progressiveCacheMutex;
 
 // --------------------------------------------------------------------
 // Global map for per–request playback instances.
 // --------------------------------------------------------------------
 struct OpusPlaybackInstance {
-    std::shared_ptr<ProgressiveOpusTemplate> progTemplate;
+    ProgressiveOpusTemplate* progTemplate;
     size_t readSampleIndex; // absolute sample index (across chunks)
     int channels;
     std::unique_ptr<std::recursive_mutex> bufferMutex;
 
     OpusPlaybackInstance() : readSampleIndex(0), channels(1), bufferMutex(std::make_unique<std::recursive_mutex>()) {}
+    ~OpusPlaybackInstance() {}
 };
 
 static std::unordered_map<FileAsyncRequest_t*, OpusPlaybackInstance*> g_playbackInstances;
@@ -372,7 +374,7 @@ static std::vector<int16_t> DecodeChunk(OggVorbis_File* vf, int channels) {
 // Background decoder: continuously decode remaining chunks and add them to the template.
 // Runs in its own thread.
 // --------------------------------------------------------------------
-static void BackgroundDecodeThread(std::shared_ptr<ProgressiveOpusTemplate> progTemplate, int channels) {
+static void BackgroundDecodeThread(ProgressiveOpusTemplate* progTemplate, int channels) {
     while (true) {
         std::vector<int16_t> chunk;
         {
@@ -398,7 +400,7 @@ static void BackgroundDecodeThread(std::shared_ptr<ProgressiveOpusTemplate> prog
         std::lock_guard<std::mutex> decodeLock(progTemplate->decodeMutex);
         if (progTemplate->vf) {
             ov_clear(progTemplate->vf);
-            delete progTemplate->vf;
+            GlobalAllocator()->mi_free(progTemplate->vf, TAG_AUDIO, HEAP_DELTA);
             progTemplate->vf = nullptr;
         }
     }
@@ -408,7 +410,7 @@ static void BackgroundDecodeThread(std::shared_ptr<ProgressiveOpusTemplate> prog
 // Background decoder entry-point wrapper (new).
 // Bumps its own thread priority one notch to reduce underruns.
 // --------------------------------------------------------------------
-static void BackgroundDecodeWrapper(std::shared_ptr<ProgressiveOpusTemplate> progTemplate, int channels) {
+static void BackgroundDecodeWrapper(ProgressiveOpusTemplate* progTemplate, int channels) {
     DWORD tid = GetCurrentThreadId();
     int basePrio = ThreadGetPriority(tid);
     ThreadSetPriority(tid, basePrio + 1);
@@ -434,14 +436,13 @@ bool OpenOpusContext(const std::string& wavName, CBaseFileSystem* filesystem, co
         return false;
 
     // Create a progressive template.
-    auto progTemplate = std::make_shared<ProgressiveOpusTemplate>();
+    auto progTemplate = new (GlobalAllocator()->mi_malloc(sizeof(ProgressiveOpusTemplate), TAG_AUDIO, HEAP_DELTA)) ProgressiveOpusTemplate();
     progTemplate->fileData = std::move(fileData);
 
     // Create a persistent MemoryBuffer and store it in the template.
-    progTemplate->pMemBuffer = std::make_shared<MemoryBuffer>();
-    progTemplate->pMemBuffer->data = progTemplate->fileData.data();
-    progTemplate->pMemBuffer->size = progTemplate->fileData.size();
-    progTemplate->pMemBuffer->pos = 0;
+    progTemplate->pMemBuffer.data = progTemplate->fileData.data();
+    progTemplate->pMemBuffer.size = progTemplate->fileData.size();
+    progTemplate->pMemBuffer.pos = 0;
 
     // Prepare the callbacks.
     ov_callbacks callbacks;
@@ -451,18 +452,20 @@ bool OpenOpusContext(const std::string& wavName, CBaseFileSystem* filesystem, co
     callbacks.tell_func = MemoryTellCallback;
 
     // Allocate an OggVorbis_File on the heap so that it can be shared.
-    OggVorbis_File* vf = new OggVorbis_File;
-    int result = ov_open_callbacks(progTemplate->pMemBuffer.get(), vf, nullptr, progTemplate->fileData.size(), callbacks);
+    OggVorbis_File* vf = (OggVorbis_File*)GlobalAllocator()->mi_malloc(sizeof(OggVorbis_File), TAG_AUDIO, HEAP_DELTA);
+    int result = ov_open_callbacks(&progTemplate->pMemBuffer, vf, nullptr, progTemplate->fileData.size(), callbacks);
     if (result < 0) {
+        R1DAssert(!"Unreachable");
         Warning("[Ogg] ov_open_callbacks failed with error %d for file %s\n", result, wavName.c_str());
-        delete vf;
+        GlobalAllocator()->mi_free(vf, TAG_AUDIO, HEAP_DELTA);
         return false;
     }
 
     vorbis_info* vi = ov_info(vf, -1);
     if (!vi) {
+        R1DAssert(!"Unreachable");
         ov_clear(vf);
-        delete vf;
+        GlobalAllocator()->mi_free(vf, TAG_AUDIO, HEAP_DELTA);
         Warning("[Ogg] ov_info failed for file %s\n", wavName.c_str());
         return false;
     }
@@ -472,19 +475,22 @@ bool OpenOpusContext(const std::string& wavName, CBaseFileSystem* filesystem, co
     progTemplate->vf = vf;
 
     // Increase the initial buffer by decoding more chunks synchronously.
-    const size_t INITIAL_CHUNKS = 16; // increased from 8
-    for (size_t i = 0; i < INITIAL_CHUNKS; i++) {
-        std::vector<int16_t> chunk;
-        {
-            std::lock_guard<std::mutex> decodeLock(progTemplate->decodeMutex);
-            chunk = DecodeChunk(progTemplate->vf, channels);
+    {
+        std::lock_guard<std::mutex> decodeLock(progTemplate->decodeMutex);
+
+        const size_t INITIAL_CHUNKS = 16; // increased from 8
+        for (size_t i = 0; i < INITIAL_CHUNKS; i++) {
+            std::vector<int16_t> chunk;
+            {
+                chunk = DecodeChunk(progTemplate->vf, channels);
+            }
+            if (chunk.empty()) {
+                progTemplate->fullyDecoded = true;
+                break;
+            }
+            progTemplate->pcmChunks.push_back(std::move(chunk));
+            progTemplate->decodedChunks.fetch_add(1, std::memory_order_relaxed);
         }
-        if (chunk.empty()) {
-            progTemplate->fullyDecoded = true;
-            break;
-        }
-        progTemplate->pcmChunks.push_back(std::move(chunk));
-        progTemplate->decodedChunks.fetch_add(1, std::memory_order_relaxed);
     }
 
     // Start an asynchronous worker thread with bumped priority.
@@ -504,11 +510,12 @@ static OpusPlaybackInstance* CreateOpusTrackInstance(const std::string& filename
     CBaseFileSystem* filesystem,
     const char* pathID)
 {
-    std::shared_ptr<ProgressiveOpusTemplate> progTemplate;
+    ProgressiveOpusTemplate* progTemplate;
     {
         std::lock_guard<std::mutex> lock(g_progressiveCacheMutex);
         auto it = g_progressiveCache.find(filename);
         if (it == g_progressiveCache.end()) {
+            R1DAssert(!"Will deadlock due to double g_progressiveCacheMutex lock. Blame wanderer for using Gemini.");
             if (!OpenOpusContext(filename, filesystem, pathID))
                 return nullptr;
             it = g_progressiveCache.find(filename);
@@ -518,7 +525,7 @@ static OpusPlaybackInstance* CreateOpusTrackInstance(const std::string& filename
         progTemplate = it->second;
     }
 
-    OpusPlaybackInstance* instance = new OpusPlaybackInstance();
+    OpusPlaybackInstance* instance = new (GlobalAllocator()->mi_malloc(sizeof(*instance), TAG_AUDIO, HEAP_DELTA)) OpusPlaybackInstance();
     instance->progTemplate = progTemplate;
     instance->channels = progTemplate->channels;
     instance->readSampleIndex = 0;
@@ -528,7 +535,7 @@ static OpusPlaybackInstance* CreateOpusTrackInstance(const std::string& filename
 // --------------------------------------------------------------------
 // Helper: Compute total number of decoded samples available so far.
 // --------------------------------------------------------------------
-static size_t GetTotalAvailableSamples(std::shared_ptr<ProgressiveOpusTemplate> progTemplate) {
+static size_t GetTotalAvailableSamples(ProgressiveOpusTemplate* progTemplate) {
     size_t total = 0;
     std::lock_guard<std::mutex> lock(progTemplate->chunkMutex);
     for (const auto& chunk : progTemplate->pcmChunks) {
@@ -541,7 +548,7 @@ static size_t GetTotalAvailableSamples(std::shared_ptr<ProgressiveOpusTemplate> 
 // Helper: Copy samples from the progressive template to the destination buffer,
 // starting at the given absolute sample index.
 // --------------------------------------------------------------------
-static void CopySamples(std::shared_ptr<ProgressiveOpusTemplate> progTemplate, size_t startSample, int16_t* dest, size_t samplesToCopy)
+static void CopySamples(ProgressiveOpusTemplate* progTemplate, size_t startSample, int16_t* dest, size_t samplesToCopy)
 {
     size_t copied = 0;
     std::lock_guard<std::mutex> lock(progTemplate->chunkMutex);
@@ -612,7 +619,7 @@ __int64 HandleOpusRead(CBaseFileSystem* filesystem, FileAsyncRequest_t* request)
         if (request->pfnAlloc)
             pDest = request->pfnAlloc(request->pszFilename, request->nBytes);
         else
-            pDest = malloc(request->nBytes);
+            pDest = GlobalAllocator()->mi_malloc(request->nBytes, TAG_AUDIO, HEAP_DELTA);
     }
 
     // Ensure that the progressive template has decoded enough samples.
@@ -749,9 +756,31 @@ void CFileAsyncReadJob_dtor(FileAsyncRequest_t* thisptr) {
         std::lock_guard<std::mutex> lock(g_playbackInstancesMutex);
         auto it = g_playbackInstances.find((FileAsyncRequest_t*)(((__int64)thisptr) + 0x70));
         if (it != g_playbackInstances.end()) {
-            delete it->second;
+            OpusPlaybackInstance* instance = it->second;
+            instance->~OpusPlaybackInstance();
+            GlobalAllocator()->mi_free(instance, TAG_AUDIO, HEAP_DELTA);
             g_playbackInstances.erase(it);
         }
     }
     return Original_CFileAsyncReadJob_dtor(thisptr);
+}
+
+// NOTE(mrsteyk): I'm not too fond of how this shit works, so this function is to track my suspicions.
+void AudioReportMemory()
+{
+    {
+        std::lock_guard<std::mutex> lock(g_progressiveCacheMutex);
+        size_t total_untracked_mem = 0;
+        for (auto& e : g_progressiveCache)
+        {
+            ProgressiveOpusTemplate* pt = e.second;
+
+            std::lock_guard<std::mutex> lock(pt->chunkMutex);
+            for (auto& ee : pt->pcmChunks)
+            {
+                total_untracked_mem += ee.size() * sizeof(ee[0]);
+            }
+        }
+        Msg("* Delta Audio: num entries in progressive cache: %zu, untracked sample mem: %.02f MB\n", g_progressiveCache.size(), (float)total_untracked_mem / (1 << 20));
+    }
 }

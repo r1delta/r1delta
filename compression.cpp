@@ -65,6 +65,8 @@ static r1dc_decompress_t original_lzham_decompressor_decompress = nullptr;
 // --------------------------------------------------------------------------
 struct r1dc_context_t
 {
+    ~r1dc_context_t() {}
+
     std::mutex mtx;          // Guard all mutable state below
     // LZHAM fallback
     void* lzham_ctx;
@@ -89,7 +91,7 @@ struct r1dc_context_t
 // --------------------------------------------------------------------------
 void* r1dc_init(void* params)
 {
-    r1dc_context_t* ctx = new r1dc_context_t();
+    r1dc_context_t* ctx = new (GlobalAllocator()->mi_malloc(sizeof(*ctx), TAG_COMPRESSION, HEAP_DELTA)) r1dc_context_t();
     std::memset(ctx, 0, sizeof(*ctx));
 
     // Create the fallback LZHAM context
@@ -129,7 +131,7 @@ __int64 r1dc_reinit(void* p, void* unk1, void* unk2, void* unk3)
     // Free any old decompression buffer from the previous chunk
     if (ctx->m_decompBuf)
     {
-        free(ctx->m_decompBuf);
+        GlobalAllocator()->mi_free(ctx->m_decompBuf, TAG_COMPRESSION, HEAP_DELTA);
         ctx->m_decompBuf = nullptr;
     }
     ctx->m_decompSize = 0;
@@ -162,11 +164,13 @@ __int64 r1dc_deinit(void* p)
     // Free any leftover decompression buffer
     if (ctx->m_decompBuf)
     {
-        free(ctx->m_decompBuf);
+        GlobalAllocator()->mi_free(ctx->m_decompBuf, TAG_COMPRESSION, HEAP_DELTA);
         ctx->m_decompBuf = nullptr;
     }
 
-    delete ctx;
+    // Destroy mutex.
+    ctx->~r1dc_context_t();
+    GlobalAllocator()->mi_free(ctx);
     return ret;
 }
 
@@ -268,6 +272,8 @@ __int64 r1dc_decompress(
             // Cap in case an unexpected overflow
             if (ctx->totalComp + n > MAX_CHUNK_COMPRESSED_SIZE)
             {
+                R1DAssert(!"Chunk limit exceeded");
+
                 // This is an error or extremely unexpected
                 Warning("[r1dc] Error: compressed data exceeds 1MB chunk limit!\n");
                 // You could return an error code here:
@@ -295,7 +301,7 @@ __int64 r1dc_decompress(
                 }
 
                 // Allocate decompression buffer
-                ctx->m_decompBuf = static_cast<uint8_t*>(malloc((size_t)fSize));
+                ctx->m_decompBuf = static_cast<uint8_t*>(GlobalAllocator()->mi_malloc((size_t)fSize, TAG_COMPRESSION, HEAP_DELTA));
                 ctx->m_decompSize = (size_t)fSize;
 
                 // Single-shot decompress
@@ -308,6 +314,7 @@ __int64 r1dc_decompress(
                     Warning("[r1dc] ZSTD decompress error: %s\n",
                         ZSTD_getErrorName(actualSize));
                     // Return an error code so the engine sees we failed
+                    R1DAssert(!"Decompression error");
                     return -1;
                 }
 
@@ -345,6 +352,7 @@ __int64 r1dc_decompress(
     }
 
     // Not done yet
+    R1DAssert(!"Unreachable?");
     return 0;
 }
 int (*osub_180019350)(__int64 a1, char* a2, unsigned __int8* a3, unsigned int a4, char a5, int a6);
