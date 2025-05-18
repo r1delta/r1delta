@@ -1,0 +1,13 @@
+diff --git a/src/hook.c b/src/hook.c
+index eb7f354..6bc9ff6 100644
+--- a/src/hook.c
++++ b/src/hook.c
+@@ -39,7 +39,7 @@
+ #endif
+ 
+ // Initial capacity of the HOOK_ENTRY buffer.
+-#define INITIAL_HOOK_CAPACITY   32
++#define INITIAL_HOOK_CAPACITY   64
+ 
+ // Initial capacity of the thread IDs buffer.
+ #define INITIAL_THREAD_CAPACITY 128
