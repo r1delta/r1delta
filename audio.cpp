@@ -43,6 +43,7 @@
 #include "logging.h"
 #include "audio.h"
 #include "thread.h"
+#include "tctx.hh"
 
 // --------------------------------------------------------------------
 // Core filesystem enums/structs (unchanged)
@@ -297,7 +298,7 @@ struct ProgressiveOpusTemplate {
     static constexpr size_t CHUNK_SIZE = 32768; // number of int16_t samples per channel per chunk
 };
 
-static std::unordered_map<std::string, ProgressiveOpusTemplate*> g_progressiveCache;
+static std::unordered_map<std::string, ProgressiveOpusTemplate*, HashStrings, std::equal_to<>> g_progressiveCache;
 static std::mutex g_progressiveCacheMutex;
 
 // --------------------------------------------------------------------
@@ -358,6 +359,17 @@ static std::vector<int16_t> DecodeChunk(OggVorbis_File* vf, int channels) {
     size_t totalSamples = 0;
     while (totalSamples < maxSamples) {
         size_t bytesToRead = std::min((size_t)DECODE_BUFFER_SIZE, (maxSamples - totalSamples) * sizeof(int16_t));
+#if 1
+        long bytesDecoded = ov_read(vf, decodeBuffer, (int)bytesToRead, 0, 2, 1, &bitStream);
+        if (bytesDecoded <= 0)
+            break; // End of file or error.
+        size_t samplesDecoded = bytesDecoded / sizeof(int16_t);
+        size_t oldSize = chunk.size();
+        chunk.resize(oldSize + samplesDecoded);
+        R1DAssert(chunk.size() <= maxSamples);
+        memcpy(&chunk[oldSize], decodeBuffer, samplesDecoded * sizeof(int16_t));
+        totalSamples += samplesDecoded;
+#else
         long bytesDecoded = ov_read(vf, decodeBuffer, (int)bytesToRead, 0, 2, 1, &bitStream);
         if (bytesDecoded <= 0)
             break; // End of file or error.
@@ -366,6 +378,7 @@ static std::vector<int16_t> DecodeChunk(OggVorbis_File* vf, int channels) {
         chunk.resize(oldSize + samplesDecoded);
         memcpy(&chunk[oldSize], decodeBuffer, samplesDecoded * sizeof(int16_t));
         totalSamples += samplesDecoded;
+#endif
     }
     return chunk;
 }
@@ -421,13 +434,13 @@ static void BackgroundDecodeWrapper(ProgressiveOpusTemplate* progTemplate, int c
 // Progressive decode: open an Ogg Vorbis file, decode a larger number of initial chunks,
 // and then launch a background thread to decode the remainder.
 // --------------------------------------------------------------------
-bool OpenOpusContext(const std::string& wavName, CBaseFileSystem* filesystem, const char* pathID) {
+bool OpenOpusContext(const char* wavName, CBaseFileSystem* filesystem, const char* pathID) {
     std::lock_guard<std::mutex> lock(g_progressiveCacheMutex);
     if (g_progressiveCache.find(wavName) != g_progressiveCache.end()) {
         return true; // Already opened/cached.
     }
 
-    std::vector<unsigned char> fileData = ReadEntireFileIntoMem(filesystem, wavName.c_str(), pathID);
+    std::vector<unsigned char> fileData = ReadEntireFileIntoMem(filesystem, wavName, pathID);
     if (fileData.empty())
         return false;
 
@@ -456,7 +469,7 @@ bool OpenOpusContext(const std::string& wavName, CBaseFileSystem* filesystem, co
     int result = ov_open_callbacks(&progTemplate->pMemBuffer, vf, nullptr, progTemplate->fileData.size(), callbacks);
     if (result < 0) {
         R1DAssert(!"Unreachable");
-        Warning("[Ogg] ov_open_callbacks failed with error %d for file %s\n", result, wavName.c_str());
+        Warning("[Ogg] ov_open_callbacks failed with error %d for file %s\n", result, wavName);
         GlobalAllocator()->mi_free(vf, TAG_AUDIO, HEAP_DELTA);
         return false;
     }
@@ -466,7 +479,7 @@ bool OpenOpusContext(const std::string& wavName, CBaseFileSystem* filesystem, co
         R1DAssert(!"Unreachable");
         ov_clear(vf);
         GlobalAllocator()->mi_free(vf, TAG_AUDIO, HEAP_DELTA);
-        Warning("[Ogg] ov_info failed for file %s\n", wavName.c_str());
+        Warning("[Ogg] ov_info failed for file %s\n", wavName);
         return false;
     }
     int channels = vi->channels;
@@ -506,7 +519,7 @@ bool OpenOpusContext(const std::string& wavName, CBaseFileSystem* filesystem, co
 // Create a new playback instance from the cached progressive data.
 // Each instance maintains its own read pointer (in absolute sample index) into the decoded PCM.
 // --------------------------------------------------------------------
-static OpusPlaybackInstance* CreateOpusTrackInstance(const std::string& filename,
+static OpusPlaybackInstance* CreateOpusTrackInstance(const char* filename,
     CBaseFileSystem* filesystem,
     const char* pathID)
 {
@@ -616,6 +629,7 @@ __int64 HandleOpusRead(CBaseFileSystem* filesystem, FileAsyncRequest_t* request)
     // Allocate (or use) the destination buffer.
     void* pDest = request->pData;
     if (!pDest) {
+        R1DAssert(!"Unreachable?");
         if (request->pfnAlloc)
             pDest = request->pfnAlloc(request->pszFilename, request->nBytes);
         else
@@ -681,12 +695,10 @@ __int64 HandleOpusRead(CBaseFileSystem* filesystem, FileAsyncRequest_t* request)
 // --------------------------------------------------------------------
 static bool EndsWithWav(const char* filename) {
     if (!filename) return false;
-    std::string fn(filename);
+    std::string_view fn(filename);
     if (fn.size() < 4) return false;
     auto ext = fn.substr(fn.size() - 4);
-    for (auto& c : ext)
-        c = tolower((unsigned char)c);
-    return (ext == ".wav");
+    return ext[0] == '.' && tolower(ext[1]) == 'w' && tolower(ext[2]) == 'a' && tolower(ext[3]) == 'v';
 }
 
 // --------------------------------------------------------------------
@@ -727,10 +739,18 @@ __int64 __fastcall Hooked_CBaseFileSystem__SyncRead(
 
     // If the filename ends with ".wav", rewrite it temporarily.
     if (EndsWithWav(request->pszFilename)) {
+        auto arena = tctx.get_arena_for_scratch();
+        auto temp = TempArena(arena);
+
         const char* originalFilename = request->pszFilename;
-        std::string modifiedFilename(request->pszFilename);
-        modifiedFilename.replace(modifiedFilename.size() - 4, 4, ".ogg");
-        request->pszFilename = modifiedFilename.c_str();
+        const size_t originalFilename_len = strlen(request->pszFilename);
+        
+        // Why was this done in the first place?
+        auto modifiedFileName = (char*)arena_push(arena, originalFilename_len + 1);
+        memcpy(modifiedFileName, originalFilename, originalFilename_len);
+        memcpy(modifiedFileName + originalFilename_len - 4, ".ogg", 4);
+
+        request->pszFilename = modifiedFileName;
 
         __int64 result = FSASYNC_ERR_FILEOPEN;
         if (OpenOpusContext(request->pszFilename, filesystem, request->pszPathID)) {

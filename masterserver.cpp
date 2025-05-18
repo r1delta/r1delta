@@ -412,51 +412,48 @@ SQInteger DispatchServerListReq(HSQUIRRELVM v) {
 SQInteger PollServerList(HSQUIRRELVM v) {
     sq_newarray(v, 0);
 
-    // Make a copy of the server list with mutex protection
-    std::vector<ServerInfo> serverListCopy;
     {
         std::lock_guard<std::mutex> lock(MasterServerClient::serverListMutex);
-        serverListCopy = MasterServerClient::serverList;
-    }
 
-    if (serverListCopy.empty()) {
-        //sq_newtable(v);
-        //sq_pushstring(v, "host_name", -1); sq_pushstring(v, "No servers found.", -1); sq_newslot(v, -3, 0);
-        //sq_pushstring(v, "map_name", -1); sq_pushstring(v, "mp_lobby", -1); sq_newslot(v, -3, 0);
-        //sq_pushstring(v, "game_mode", -1); sq_pushstring(v, "-", -1); sq_newslot(v, -3, 0);
-        //sq_pushstring(v, "max_players", -1); sq_pushinteger(0, v, 0); sq_newslot(v, -3, 0);
-        //sq_pushstring(v, "port", -1); sq_pushinteger(0, v, 0); sq_newslot(v, -3, 0);
-        //sq_pushstring(v, "ip", -1); sq_pushstring(v, "0.0.0.0", -1); sq_newslot(v, -3, 0);
-        //sq_pushstring(v, "players", -1); sq_newarray(v, 0); sq_newslot(v, -3, 0);
-        //sq_arrayappend(v, -2);
-        return 1;
-    }
-    
-    for (auto& s : serverListCopy) {
-        sq_newtable(v);
-        sq_pushstring(v, "host_name", -1); sq_pushstring(v, s.hostName.c_str(), -1); sq_newslot(v, -3, 0);
-        sq_pushstring(v, "map_name", -1); sq_pushstring(v, s.mapName.c_str(), -1); sq_newslot(v, -3, 0);
-        sq_pushstring(v, "game_mode", -1); sq_pushstring(v, s.gameMode.c_str(), -1); sq_newslot(v, -3, 0);
-        sq_pushstring(v, "max_players", -1); sq_pushinteger(0, v, s.maxPlayers); sq_newslot(v, -3, 0);
-        sq_pushstring(v, "port", -1); sq_pushinteger(0, v, s.port); sq_newslot(v, -3, 0);
-        sq_pushstring(v, "ip", -1); sq_pushstring(v, s.ip.c_str(), -1); sq_newslot(v, -3, 0);
-		sq_pushstring(v, "has_password", -1); sq_pushinteger(0, v, s.hasPassword ? 1 : 0); sq_newslot(v, -3, 0);
-		sq_pushstring(v, "description", -1); sq_pushstring(v, s.description.c_str(), -1); sq_newslot(v, -3, 0);
-		sq_pushstring(v, "playlist", -1); sq_pushstring(v, s.playlist.c_str(), -1); sq_newslot(v, -3, 0);
-		sq_pushstring(v, "playlist_display_name", -1); sq_pushstring(v, s.playlist_display_name.c_str(), -1); sq_newslot(v, -3, 0);
-		sq_pushstring(v, "version", -1); sq_pushstring(v, s.version.c_str(), -1); sq_newslot(v, -3, 0);
-        sq_pushstring(v, "players", -1);
-        sq_newarray(v, 0);
-        for (auto& p : s.players) {
+        if (MasterServerClient::serverList.empty()) {
+            //sq_newtable(v);
+            //sq_pushstring(v, "host_name", -1); sq_pushstring(v, "No servers found.", -1); sq_newslot(v, -3, 0);
+            //sq_pushstring(v, "map_name", -1); sq_pushstring(v, "mp_lobby", -1); sq_newslot(v, -3, 0);
+            //sq_pushstring(v, "game_mode", -1); sq_pushstring(v, "-", -1); sq_newslot(v, -3, 0);
+            //sq_pushstring(v, "max_players", -1); sq_pushinteger(0, v, 0); sq_newslot(v, -3, 0);
+            //sq_pushstring(v, "port", -1); sq_pushinteger(0, v, 0); sq_newslot(v, -3, 0);
+            //sq_pushstring(v, "ip", -1); sq_pushstring(v, "0.0.0.0", -1); sq_newslot(v, -3, 0);
+            //sq_pushstring(v, "players", -1); sq_newarray(v, 0); sq_newslot(v, -3, 0);
+            //sq_arrayappend(v, -2);
+            return 1;
+        }
+
+        for (auto& s : MasterServerClient::serverList) {
             sq_newtable(v);
-            sq_pushstring(v, "name", -1); sq_pushstring(v, p.name.c_str(), -1); sq_newslot(v, -3, 0);
-            sq_pushstring(v, "gen", -1); sq_pushinteger(0, v, p.gen); sq_newslot(v, -3, 0);
-            sq_pushstring(v, "lvl", -1); sq_pushinteger(0, v, p.lvl); sq_newslot(v, -3, 0);
-            sq_pushstring(v, "team", -1); sq_pushinteger(0, v, p.team); sq_newslot(v, -3, 0);
+            sq_pushstring(v, "host_name", -1); sq_pushstring(v, s.hostName.c_str(), -1); sq_newslot(v, -3, 0);
+            sq_pushstring(v, "map_name", -1); sq_pushstring(v, s.mapName.c_str(), -1); sq_newslot(v, -3, 0);
+            sq_pushstring(v, "game_mode", -1); sq_pushstring(v, s.gameMode.c_str(), -1); sq_newslot(v, -3, 0);
+            sq_pushstring(v, "max_players", -1); sq_pushinteger(0, v, s.maxPlayers); sq_newslot(v, -3, 0);
+            sq_pushstring(v, "port", -1); sq_pushinteger(0, v, s.port); sq_newslot(v, -3, 0);
+            sq_pushstring(v, "ip", -1); sq_pushstring(v, s.ip.c_str(), -1); sq_newslot(v, -3, 0);
+            sq_pushstring(v, "has_password", -1); sq_pushinteger(0, v, s.hasPassword ? 1 : 0); sq_newslot(v, -3, 0);
+            sq_pushstring(v, "description", -1); sq_pushstring(v, s.description.c_str(), -1); sq_newslot(v, -3, 0);
+            sq_pushstring(v, "playlist", -1); sq_pushstring(v, s.playlist.c_str(), -1); sq_newslot(v, -3, 0);
+            sq_pushstring(v, "playlist_display_name", -1); sq_pushstring(v, s.playlist_display_name.c_str(), -1); sq_newslot(v, -3, 0);
+            sq_pushstring(v, "version", -1); sq_pushstring(v, s.version.c_str(), -1); sq_newslot(v, -3, 0);
+            sq_pushstring(v, "players", -1);
+            sq_newarray(v, 0);
+            for (auto& p : s.players) {
+                sq_newtable(v);
+                sq_pushstring(v, "name", -1); sq_pushstring(v, p.name.c_str(), -1); sq_newslot(v, -3, 0);
+                sq_pushstring(v, "gen", -1); sq_pushinteger(0, v, p.gen); sq_newslot(v, -3, 0);
+                sq_pushstring(v, "lvl", -1); sq_pushinteger(0, v, p.lvl); sq_newslot(v, -3, 0);
+                sq_pushstring(v, "team", -1); sq_pushinteger(0, v, p.team); sq_newslot(v, -3, 0);
+                sq_arrayappend(v, -2);
+            }
+            sq_newslot(v, -3, 0);
             sq_arrayappend(v, -2);
         }
-        sq_newslot(v, -3, 0);
-        sq_arrayappend(v, -2);
     }
 
     return 1;

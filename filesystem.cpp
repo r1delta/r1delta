@@ -102,13 +102,15 @@ void StartFileCacheThread() {
 class FastFileSystemHook {
 private:
 	struct TrieNode {
-		std::unordered_map<std::string, std::unique_ptr<TrieNode>, HashStrings> children;
+		std::unordered_map<std::string, std::unique_ptr<TrieNode>, HashStrings, std::equal_to<>> children;
 		bool exists = false;
 		bool checked = false;
 	};
 	static TrieNode root;
 	static std::shared_mutex cacheMutex;
 	static bool checkAndCachePath(const char* fullPath) {
+		ZoneScoped;
+
 		TrieNode* node = &root;
 		std::string currentPath;
 		const char* part = fullPath;

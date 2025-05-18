@@ -187,11 +187,13 @@ bool FileCache::TryReplaceFile(const char* pszRelativeFilePath) {
     //                this issue already manifested itself long ago and I swear I fixed it, idk why it popped up again.
     //                also please stop using Gemini to rewrite everything, it's annoying.
     bool found_null = false;
+    size_t pszRelativeFilePath_len = 0;
     for (size_t i = 0; i < 260; ++i)
     {
         if (pszRelativeFilePath[i] == 0)
         {
             found_null = true;
+            pszRelativeFilePath_len = i;
             break;
         }
         // NOTE(mrsteyk): do not handle unicode in replacement names.
@@ -205,11 +207,23 @@ bool FileCache::TryReplaceFile(const char* pszRelativeFilePath) {
         return false;
     }
 
+    // NOTE(mrsteyk): part of is_absolute check without dumb fluff. Read `is_absolute` code to find out more.
+    //if ((pszRelativeFilePath[0] == '/' || pszRelativeFilePath[0] == '\\') && (pszRelativeFilePath[1] == '/' || pszRelativeFilePath[1] == '\\'))
+    if (pszRelativeFilePath[0] == '/' || pszRelativeFilePath[0] == '\\')
+    {
+        return false;
+    }
+    if (pszRelativeFilePath[1] == ':')
+    {
+        return false;
+    }
+
     // Use std::filesystem::path for robust joining, handle input slashes automatically
     std::filesystem::path relativePath(pszRelativeFilePath);
 
     // Immediately return false if the input is somehow absolute already
     if (relativePath.is_absolute()) {
+        R1DAssert(!"Unreachable?");
         // Or maybe use V_IsAbsolutePath if it's more specific?
         // if (V_IsAbsolutePath(pszRelativeFilePath)) { return false; }
         return false;
@@ -219,11 +233,13 @@ bool FileCache::TryReplaceFile(const char* pszRelativeFilePath) {
     // Standardize: remove leading "./" or ".\\"
     std::string pathStr = relativePath.lexically_normal().string();
     if (pathStr.starts_with(".\\") || pathStr.starts_with("./")) {
+        R1DAssert(!"Unreachable?");
         pathStr.erase(0, 2);
     }
     // Handle the "/*/" prefix - convert to view for checking efficiently
     std::string_view svFilePath(pathStr);
     if (svFilePath.starts_with("*/") || svFilePath.starts_with("*\\")) { // Check both separators
+        R1DAssert(!"Unreachable?");
         svFilePath.remove_prefix(2); // Remove only 2 chars
     }
     // Recreate path object from the potentially modified view

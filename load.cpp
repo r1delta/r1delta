@@ -802,7 +802,7 @@ typedef void (*ConCommandConstructorType)(
 
 ConCommandR1* RegisterConCommand(const char* commandName, void (*callback)(const CCommand&), const char* helpString, int flags) {
 	ConCommandConstructorType conCommandConstructor = (ConCommandConstructorType)(IsDedicatedServer() ? (G_engine_ds + 0x31F260) : (G_engine + 0x4808F0));
-	ConCommandR1* newCommand = new ConCommandR1;
+	ConCommandR1* newCommand = new (GlobalAllocator()->mi_malloc(sizeof(ConCommandR1), TAG_GAME, HEAP_GAME)) ConCommandR1;
 	
 	conCommandConstructor(newCommand, commandName, callback, helpString, flags, nullptr);
 
@@ -812,7 +812,7 @@ ConCommandR1* RegisterConCommand(const char* commandName, void (*callback)(const
 ConVarR1* RegisterConVar(const char* name, const char* value, int flags, const char* helpString) {
 	typedef void (*ConVarConstructorType)(ConVarR1* newVar, const char* name, const char* value, int flags, const char* helpString);
 	ConVarConstructorType conVarConstructor = (ConVarConstructorType)(IsDedicatedServer() ? (G_engine_ds + 0x320460) : (G_engine + 0x481AF0));
-	ConVarR1* newVar = new ConVarR1;
+	ConVarR1* newVar = new (GlobalAllocator()->mi_malloc(sizeof(ConVarR1), TAG_GAME, HEAP_GAME)) ConVarR1;
 
 
 	conVarConstructor(newVar, name, value, flags, helpString);
@@ -1090,7 +1090,7 @@ void InitAddons() {
 	MH_EnableHook(MH_ALL_HOOKS);
 }
 
-std::unordered_map<std::string, std::string, HashStrings> g_LastEntCreateKeyValues;
+std::unordered_map<std::string, std::string, HashStrings, std::equal_to<>> g_LastEntCreateKeyValues;
 void (*oCC_Ent_Create)(const CCommand* args);
 bool g_bIsEntCreateCommand = false;
 
