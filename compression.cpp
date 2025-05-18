@@ -31,6 +31,7 @@
 #include "audio.h"
 #include "load.h"
 #include "logging.h"
+#include <mutex>
 
 // --------------------------------------------------------------------------
 // Constants, marker
@@ -64,6 +65,7 @@ static r1dc_decompress_t original_lzham_decompressor_decompress = nullptr;
 // --------------------------------------------------------------------------
 struct r1dc_context_t
 {
+    std::mutex mtx;          // Guard all mutable state below
     // LZHAM fallback
     void* lzham_ctx;
     bool  lzham_inited;
@@ -102,6 +104,7 @@ void* r1dc_init(void* params)
     ctx->m_decompBuf = nullptr;
     ctx->m_decompSize = 0;
     ctx->m_decompPos = 0;
+    
 
     return ctx;
 }
@@ -113,6 +116,8 @@ __int64 r1dc_reinit(void* p, void* unk1, void* unk2, void* unk3)
 {
     if (!p) return 0;
     r1dc_context_t* ctx = static_cast<r1dc_context_t*>(p);
+
+    std::lock_guard<std::mutex> lock(ctx->mtx);
 
     // Reset ZSTD detection
     ctx->typeDetermined = false;
@@ -143,6 +148,8 @@ __int64 r1dc_deinit(void* p)
 {
     if (!p) return 0;
     r1dc_context_t* ctx = static_cast<r1dc_context_t*>(p);
+
+    std::lock_guard<std::mutex> lock(ctx->mtx);
 
     __int64 ret = 0;
     // Deinit the fallback LZHAM
@@ -190,6 +197,8 @@ __int64 r1dc_decompress(
 {
     if (!p) return 0;
     r1dc_context_t* ctx = static_cast<r1dc_context_t*>(p);
+
+    std::lock_guard<std::mutex> lock(ctx->mtx);
 
     // If we haven't decided whether it's ZSTD or not:
     if (!ctx->typeDetermined)
