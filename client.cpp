@@ -176,6 +176,10 @@ void BaseModUI__LoadingProgress__PaintBackground(__int64* thisptr)
 
     loadingText = (vgui::Label*)vgui__Panel__FindChildByName((vgui::Panel*)thisptr, "ProgressLabel", false);
 
+    // doesn't seem to localize #LoadingProgress_LoadResources properly
+    if (!strcmp_static(g_loadingStatusText, "#LoadingProgress_LoadResources"))
+        return oBaseModUI__LoadingProgress__PaintBackground(thisptr);
+
     if (loadingText)
         vgui__Label__SetText(loadingText, g_loadingStatusText);
 
