@@ -779,12 +779,16 @@ namespace launcher_ex
                             finalInstallPath = setupWindow.SelectedPath;
                             finalShowSetupSetting = setupWindow.ShowSetupOnLaunch;
                             finalLaunchArgs = setupWindow.LaunchArguments;
+                            string[] passedLaunchArgs = Environment.GetCommandLineArgs();
+                            for(int i = 1; i < passedLaunchArgs.Length; i++)
+                                finalLaunchArgs += " " + passedLaunchArgs[i];
+
                             Debug.WriteLine($"[*] Setup Window OK. Path: '{finalInstallPath}', ShowNextTime: {finalShowSetupSetting}, Args: '{finalLaunchArgs}'");
 
                             // Save the chosen settings back to the registry
                             RegistryHelper.SaveInstallPath(finalInstallPath); // Path saved by SetupWindow only if download happened, ensure it's saved here too.
                             RegistryHelper.SaveShowSetupOnLaunch(finalShowSetupSetting);
-                            RegistryHelper.SaveLaunchArguments(finalLaunchArgs);
+                            RegistryHelper.SaveLaunchArguments(setupWindow.LaunchArguments);
 
                             // F4 hint message box moved to SetupWindow.xaml.cs
                         }
