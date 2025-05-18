@@ -78,12 +78,12 @@ BEGIN
         BLOCK "040904b0"
         BEGIN
             VALUE "CompanyName", "Interstellar Modding Corporation"
-            VALUE "FileDescription", "R1 Delta Runner "
+            VALUE "FileDescription", "R1Delta Launcher"
             VALUE "FileVersion", "1.0.0.1"
             VALUE "InternalName", "launcher.exe"
             VALUE "LegalCopyright", "Copyright (C) 2025 The Interstellar Modding Corporation"
             VALUE "OriginalFilename", "Titanfall.exe"
-            VALUE "ProductName", "R1 Delta Launcher"
+            VALUE "ProductName", "R1Delta Launcher"
             VALUE "ProductVersion", "1.0.0.1"
         END
     END
