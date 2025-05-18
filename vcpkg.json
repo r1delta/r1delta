@@ -7,7 +7,6 @@
       "name": "cpp-httplib",
       "version>=": "0.11.3"
     },
-    "jwt-cpp",
     {
       "name": "mimalloc",
       "version>=": "2.1.7"
@@ -17,7 +16,6 @@
       "name": "nlohmann-json",
       "version>=": "3.11.2"
     },
-    "openssl",
     {
       "name": "opusfile",
       "version>=": "0.12+20221121#1"

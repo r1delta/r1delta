@@ -86,8 +86,10 @@
 #include "audio.h"
 #include <nlohmann/json.hpp>
 #include "shellapi.h"
+#ifdef JWT
 #include <jwt-cpp/jwt.h>
 #include "jwt_compact.h"
+#endif
 #include "vector.h"
 #include "hudwarp.h"
 #include "hudwarp_hooks.h"
@@ -1346,6 +1348,7 @@ std::string get_public_ip() {
 
 // Server_AuthCallback verifies the server auth token.
 AuthResponse Server_AuthCallback(bool loopback, const char* serverIP, const char* token) {
+#ifdef JWT
 	AuthResponse response;
 	if (token == nullptr) {
 		response.success = false;
@@ -1401,6 +1404,12 @@ AuthResponse Server_AuthCallback(bool loopback, const char* serverIP, const char
 		response.failureReason[sizeof(response.failureReason) - 1] = '\0';
 		return response;
 	}
+#else
+	AuthResponse response;
+	response.success = false;
+	strncpy(response.failureReason, "Discord support not enabled", sizeof(response.failureReason));
+	return response;
+#endif
 }
 
 
@@ -1454,7 +1463,12 @@ bool __fastcall HookedCBaseClientConnect(
 				allow = true;
 
 				std::string actualServerIP = get_public_ip() + ":" + std::to_string(iHostPort->m_Value.m_nValue); // if we're not using ports comment this out later
+
+				#ifdef JWT
 				AuthResponse res = Server_AuthCallback(bIsLoopback, actualServerIP.c_str(), jwt_compact::expandJWT(var.value).c_str());
+				#else
+				AuthResponse res = Server_AuthCallback(bIsLoopback, actualServerIP.c_str(), var.value);
+				#endif
 				if (CBanSystem::Filter_IsUserBanned(res.discordId)) {
 					V_snprintf(a8, a9, "%s", "Discord UserID not allowed to join this server.");
 					return false;
@@ -1548,6 +1562,7 @@ __int64 __fastcall HookedCBaseStateClientConnect(
 	auto var = OriginalCCVar_FindVar(cvarinterface, "delta_server_auth_token");
 	if (result && result->status == 200) {
 		try {
+			#ifdef JWT
 			auto jsonResponse = nlohmann::json::parse(result->body);
 			std::string token = jsonResponse["token"].get<std::string>();
 			// Update the server auth token convar.
@@ -1558,6 +1573,7 @@ __int64 __fastcall HookedCBaseStateClientConnect(
 			std::string id = decoded.get_payload_claim("di").as_string();
 			SetConvarStringOriginal(OriginalCCVar_FindVar(cvarinterface, "name"), pomeloName.c_str());
 			SetConvarStringOriginal(OriginalCCVar_FindVar(cvarinterface, "hostname"), (pomeloName+"'s R1Delta Server").c_str());
+			#endif // JWT
 		}
 		catch (const std::exception& e) {
 			Warning("Failed to parse token from master server: %s\n", e.what());
