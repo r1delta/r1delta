@@ -78,13 +78,13 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
-    <OutDir>S:\game\</OutDir>
+    <OutDir>E:\Games\EA\R1Delta\</OutDir>
     <TargetName>R1Delta_DS</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
     <TargetName>R1Delta_DS</TargetName>
-    <OutDir>S:\game\</OutDir>
+    <OutDir>E:\Games\EA\R1Delta\</OutDir>
   </PropertyGroup>
   <PropertyGroup Label="Vcpkg">
     <VcpkgEnabled>true</VcpkgEnabled>
