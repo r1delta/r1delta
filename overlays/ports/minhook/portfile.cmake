@@ -19,8 +19,9 @@ vcpkg_apply_patches(
 )
 
 vcpkg_apply_patches(
-	SOURCE_PATH ${SOURCE_PATH}
+    SOURCE_PATH ${SOURCE_PATH}
     PATCHES ${CMAKE_CURRENT_LIST_DIR}/increase_initial_hook_capacity.patch
+)
 
 vcpkg_configure_cmake(
     SOURCE_PATH "${SOURCE_PATH}"
