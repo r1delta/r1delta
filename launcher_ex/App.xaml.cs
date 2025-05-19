@@ -725,6 +725,11 @@ namespace launcher_ex
             string finalLaunchArgs = null;
             bool finalShowSetupSetting = true; // Default to showing setup
 
+            string[] passedLaunchArgs = Environment.GetCommandLineArgs();
+            for (int i = 1; i < passedLaunchArgs.Length; i++)
+                finalLaunchArgs += " " + passedLaunchArgs[i];
+            finalLaunchArgs += " ";
+
             try
             {
                 // 1. Check F4 key state
@@ -778,10 +783,7 @@ namespace launcher_ex
                             // Setup completed successfully (path validated, download done if needed)
                             finalInstallPath = setupWindow.SelectedPath;
                             finalShowSetupSetting = setupWindow.ShowSetupOnLaunch;
-                            finalLaunchArgs = setupWindow.LaunchArguments;
-                            string[] passedLaunchArgs = Environment.GetCommandLineArgs();
-                            for(int i = 1; i < passedLaunchArgs.Length; i++)
-                                finalLaunchArgs += " " + passedLaunchArgs[i];
+                            finalLaunchArgs += setupWindow.LaunchArguments;
 
                             Debug.WriteLine($"[*] Setup Window OK. Path: '{finalInstallPath}', ShowNextTime: {finalShowSetupSetting}, Args: '{finalLaunchArgs}'");
 
@@ -812,7 +814,7 @@ namespace launcher_ex
                     Debug.WriteLine("[*] Skipping Setup Window based on settings and VPK check.");
                     finalInstallPath = currentInstallPath; // Already validated by coreVpkExists check
                     finalShowSetupSetting = currentShowSetupSetting; // Keep existing setting
-                    finalLaunchArgs = currentArgs; // Keep existing args
+                    finalLaunchArgs += currentArgs; // Keep existing args
 
                     // Sanity check: Ensure the path is still valid (it should be)
                     // Assumes TitanfallManager and ValidateGamePath exist in R1Delta namespace
@@ -832,7 +834,6 @@ namespace launcher_ex
                 Process.GetCurrentProcess().Kill(); // Use Shutdown
                 return;
             }
-
 
             // --- Proceed to Launch ---
 
