@@ -97,14 +97,11 @@ void* operator new[](std::size_t n, std::align_val_t al, const std::nothrow_t&) 
 #include <ShlObj_core.h>
 #include <PathCch.h>
 #include <shellapi.h>
-#include "thread.h"
 #pragma comment(lib, "Pathcch.lib")
 uint64_t g_PerformanceFrequency;
 int G_is_dedi;
 typedef const char* (__cdecl* wine_get_version_func)();
 CPUInformation* (__fastcall* GetCPUInformationOriginal)();
-
-#define TOTAL_CTHREADS 5 // we should really make a constexpr constructor or something
 
 const CPUInformation* GetCPUInformationDet()
 {
@@ -121,8 +118,8 @@ const CPUInformation* GetCPUInformationDet()
 	//                 CRASH
 
 	// NOTE(mrsteyk): Some threads want logical core count, wanderer want's singleplayer
-	if (result->m_nLogicalProcessors >= 20 - TOTAL_CTHREADS) {
-		result->m_nLogicalProcessors = (19 - TOTAL_CTHREADS);
+	if (result->m_nLogicalProcessors >= 20) {
+		result->m_nLogicalProcessors = 19;
 	}
 
 	return result;

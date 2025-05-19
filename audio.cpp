@@ -42,7 +42,6 @@
 #include "load.h"
 #include "logging.h"
 #include "audio.h"
-#include "thread.h"
 #include "tctx.hh"
 
 // --------------------------------------------------------------------
@@ -507,7 +506,7 @@ bool OpenOpusContext(const char* wavName, CBaseFileSystem* filesystem, const cha
     }
 
     // Start an asynchronous worker thread with bumped priority.
-    CThread bgThread(BackgroundDecodeWrapper, progTemplate, channels);
+    std::thread bgThread(BackgroundDecodeWrapper, progTemplate, channels);
     bgThread.detach();
 
     // Save the progressive template in the global cache.

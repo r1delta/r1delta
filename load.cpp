@@ -103,7 +103,6 @@
 #endif
 #include "sv_filter.h"
 #include <discord-game-sdk/discord.h>  
-#include "thread.h"
 #include <Mmdeviceapi.h>
 
 #include "r1d_version.h"
@@ -3058,7 +3057,7 @@ void __stdcall LoaderNotificationCallback(
 			SetupSquirrelErrorNotificationHooks();
 			SetupChatWriter();
 			RegisterConCommand("+toggleFullscreenMap", toggleFullscreenMap_cmd, "Toggles the fullscreen map.", FCVAR_CLIENTDLL);
-			CThread(DiscordThread).detach();
+			std::thread(DiscordThread).detach();
 			
 		}
 		if (is_server) do_server(notification_data);

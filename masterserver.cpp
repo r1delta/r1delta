@@ -18,7 +18,6 @@
 #include "cvar.h"
 #include "logging.h"
 #include "masterserver.h"
-#include "thread.h"
 #include "r1d_version.h"
 
 using json = nlohmann::json;
@@ -188,7 +187,7 @@ namespace MasterServerClient {
         std::uniform_int_distribution<> delayDist(1, 3);
         std::this_thread::sleep_for(std::chrono::seconds(delayDist(gen)));
         
-        CThread([]{
+        std::thread([]{
             while (heartbeatThreadRunning.load(std::memory_order_acquire)) {
                 HeartbeatInfo currentHeartbeat;
                 bool isHibernating = false;
@@ -401,7 +400,7 @@ SQInteger DispatchServerListReq(HSQUIRRELVM v) {
         MasterServerClient::serverList.clear();
     }
 
-    CThread([]() {
+    std::thread([]() {
         MasterServerClient::GetServerList();
     }).detach();
 
