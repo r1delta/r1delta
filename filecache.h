@@ -23,12 +23,12 @@ private:
     // Cache data structures
     std::unordered_set<std::size_t> cache; // Stores hashes of absolute, normalized file paths
     std::unordered_set<std::string, HashStrings, std::equal_to<>> addonsFolderCache; // Stores absolute, normalized addon directory paths
-    mutable std::shared_mutex cacheMutex; // Mutable for const methods like TryReplaceFile if needed
+    mutable SRWLOCK cacheMutex; // Mutable for const methods like TryReplaceFile if needed
 
     // State variables
     std::atomic<bool> initialized{ false };
     std::atomic<bool> manualRescanRequested{ false };
-    std::condition_variable_any cacheCondition;
+    CONDITION_VARIABLE cacheCondition;
 
     // Paths
     std::filesystem::path executableDirectory; // Store the base path
@@ -67,6 +67,6 @@ public:
 
     void RequestManualRescan() {
         manualRescanRequested.store(true, std::memory_order_release);
-        cacheCondition.notify_all(); // Notify the waiting UpdateCache loop
+        WakeAllConditionVariable(&cacheCondition); // Notify the waiting UpdateCache loop
     }
 };

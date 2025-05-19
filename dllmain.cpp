@@ -42,6 +42,7 @@
 #include "filesystem.h"
 #include "logging.h"
 #include <tier0/platform.h>
+#include <KnownFolders.h>
 
 //- mrsteyk: override new/delete
 #include "memory.h"

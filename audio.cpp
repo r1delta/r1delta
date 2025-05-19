@@ -283,23 +283,23 @@ struct ProgressiveOpusTemplate {
     std::atomic<size_t> decodedChunks;          // number of chunks decoded so far
     int channels;
     bool fullyDecoded;
-    std::mutex chunkMutex;              // protects pcmChunks
+    SRWLOCK chunkMutex;                 // protects pcmChunks
     std::condition_variable chunkCV;    // signals when new chunks are added
     std::vector<unsigned char> fileData;  // persistent copy of the original file data
     MemoryBuffer pMemBuffer; // persistent memory buffer for ov_open_callbacks
 
     // Shared decoder pointer and a mutex to protect it.
     OggVorbis_File* vf;
-    std::mutex decodeMutex;
+    SRWLOCK decodeMutex;
 
-    ProgressiveOpusTemplate() : decodedChunks(0), channels(1), fullyDecoded(false), vf(nullptr) {}
+    ProgressiveOpusTemplate() : decodedChunks(0), channels(1), fullyDecoded(false), vf(nullptr), chunkMutex(SRWLOCK_INIT), decodeMutex(SRWLOCK_INIT) {}
     ~ProgressiveOpusTemplate() {}
 
     static constexpr size_t CHUNK_SIZE = 32768; // number of int16_t samples per channel per chunk
 };
 
 static std::unordered_map<std::string, ProgressiveOpusTemplate*, HashStrings, std::equal_to<>> g_progressiveCache;
-static std::mutex g_progressiveCacheMutex;
+static SRWLOCK g_progressiveCacheMutex = SRWLOCK_INIT;
 
 // --------------------------------------------------------------------
 // Global map for per–request playback instances.
@@ -315,7 +315,7 @@ struct OpusPlaybackInstance {
 };
 
 static std::unordered_map<FileAsyncRequest_t*, OpusPlaybackInstance*> g_playbackInstances;
-static std::mutex g_playbackInstancesMutex;
+static SRWLOCK g_playbackInstancesMutex = SRWLOCK_INIT;
 
 // --------------------------------------------------------------------
 // Helper: Read entire file via FSOperations (unchanged)
@@ -391,14 +391,14 @@ static void BackgroundDecodeThread(ProgressiveOpusTemplate* progTemplate, int ch
     while (true) {
         std::vector<int16_t> chunk;
         {
-            std::lock_guard<std::mutex> decodeLock(progTemplate->decodeMutex);
+            SRWGuard decodeLock(&progTemplate->decodeMutex);
             if (progTemplate->vf == nullptr) {
                 break;
             }
             chunk = DecodeChunk(progTemplate->vf, channels);
         }
         {
-            std::lock_guard<std::mutex> lock(progTemplate->chunkMutex);
+            SRWGuard lock(&progTemplate->chunkMutex);
             if (chunk.empty()) {
                 progTemplate->fullyDecoded = true;
                 progTemplate->chunkCV.notify_all();
@@ -410,7 +410,7 @@ static void BackgroundDecodeThread(ProgressiveOpusTemplate* progTemplate, int ch
         }
     }
     {
-        std::lock_guard<std::mutex> decodeLock(progTemplate->decodeMutex);
+        SRWGuard decodeLock(&progTemplate->decodeMutex);
         if (progTemplate->vf) {
             ov_clear(progTemplate->vf);
             GlobalAllocator()->mi_free(progTemplate->vf, TAG_AUDIO, HEAP_DELTA);
@@ -435,7 +435,7 @@ static void BackgroundDecodeWrapper(ProgressiveOpusTemplate* progTemplate, int c
 // and then launch a background thread to decode the remainder.
 // --------------------------------------------------------------------
 bool OpenOpusContext(const char* wavName, CBaseFileSystem* filesystem, const char* pathID) {
-    std::lock_guard<std::mutex> lock(g_progressiveCacheMutex);
+    SRWGuard lock(&g_progressiveCacheMutex);
     if (g_progressiveCache.find(wavName) != g_progressiveCache.end()) {
         return true; // Already opened/cached.
     }
@@ -489,7 +489,7 @@ bool OpenOpusContext(const char* wavName, CBaseFileSystem* filesystem, const cha
 
     // Increase the initial buffer by decoding more chunks synchronously.
     {
-        std::lock_guard<std::mutex> decodeLock(progTemplate->decodeMutex);
+        SRWGuard decodeLock(&progTemplate->decodeMutex);
 
         const size_t INITIAL_CHUNKS = 16; // increased from 8
         for (size_t i = 0; i < INITIAL_CHUNKS; i++) {
@@ -525,7 +525,7 @@ static OpusPlaybackInstance* CreateOpusTrackInstance(const char* filename,
 {
     ProgressiveOpusTemplate* progTemplate;
     {
-        std::lock_guard<std::mutex> lock(g_progressiveCacheMutex);
+        SRWGuard lock(&g_progressiveCacheMutex);
         auto it = g_progressiveCache.find(filename);
         if (it == g_progressiveCache.end()) {
             R1DAssert(!"Will deadlock due to double g_progressiveCacheMutex lock. Blame wanderer for using Gemini.");
@@ -550,7 +550,7 @@ static OpusPlaybackInstance* CreateOpusTrackInstance(const char* filename,
 // --------------------------------------------------------------------
 static size_t GetTotalAvailableSamples(ProgressiveOpusTemplate* progTemplate) {
     size_t total = 0;
-    std::lock_guard<std::mutex> lock(progTemplate->chunkMutex);
+    SRWGuard lock(&progTemplate->chunkMutex);
     for (const auto& chunk : progTemplate->pcmChunks) {
         total += chunk.size();
     }
@@ -564,7 +564,7 @@ static size_t GetTotalAvailableSamples(ProgressiveOpusTemplate* progTemplate) {
 static void CopySamples(ProgressiveOpusTemplate* progTemplate, size_t startSample, int16_t* dest, size_t samplesToCopy)
 {
     size_t copied = 0;
-    std::lock_guard<std::mutex> lock(progTemplate->chunkMutex);
+    SRWGuard lock(&progTemplate->chunkMutex);
     for (const auto& chunk : progTemplate->pcmChunks) {
         if (startSample >= chunk.size()) {
             startSample -= chunk.size();
@@ -589,7 +589,7 @@ static void CopySamples(ProgressiveOpusTemplate* progTemplate, size_t startSampl
 __int64 HandleOpusRead(CBaseFileSystem* filesystem, FileAsyncRequest_t* request) {
     OpusPlaybackInstance* instance = nullptr;
     {
-        std::lock_guard<std::mutex> lock(g_playbackInstancesMutex);
+        SRWGuard lock(&g_playbackInstancesMutex);
         auto it = g_playbackInstances.find(request);
         if (it != g_playbackInstances.end())
             instance = it->second;
@@ -601,7 +601,7 @@ __int64 HandleOpusRead(CBaseFileSystem* filesystem, FileAsyncRequest_t* request)
             return FSASYNC_ERR_FILEOPEN;
         }
         {
-            std::lock_guard<std::mutex> lock(g_playbackInstancesMutex);
+            SRWGuard lock(&g_playbackInstancesMutex);
             g_playbackInstances[request] = instance;
         }
     }
@@ -644,7 +644,7 @@ __int64 HandleOpusRead(CBaseFileSystem* filesystem, FileAsyncRequest_t* request)
         while (availableSamples < instance->readSampleIndex + samplesRequested && !progTemplate->fullyDecoded) {
             std::vector<int16_t> newChunk;
             {
-                std::lock_guard<std::mutex> decodeLock(progTemplate->decodeMutex);
+                SRWGuard decodeLock(&progTemplate->decodeMutex);
                 if (progTemplate->vf == nullptr) {
                     progTemplate->fullyDecoded = true;
                     break;
@@ -652,7 +652,7 @@ __int64 HandleOpusRead(CBaseFileSystem* filesystem, FileAsyncRequest_t* request)
                 newChunk = DecodeChunk(progTemplate->vf, progTemplate->channels);
             }
             if (!newChunk.empty()) {
-                std::lock_guard<std::mutex> lock(progTemplate->chunkMutex);
+                SRWGuard lock(&progTemplate->chunkMutex);
                 progTemplate->pcmChunks.push_back(std::move(newChunk));
                 progTemplate->decodedChunks.fetch_add(1, std::memory_order_relaxed);
                 progTemplate->chunkCV.notify_all();
@@ -773,7 +773,7 @@ void (*Original_CFileAsyncReadJob_dtor)(FileAsyncRequest_t* thisptr);
 
 void CFileAsyncReadJob_dtor(FileAsyncRequest_t* thisptr) {
     {
-        std::lock_guard<std::mutex> lock(g_playbackInstancesMutex);
+        SRWGuard lock(&g_playbackInstancesMutex);
         auto it = g_playbackInstances.find((FileAsyncRequest_t*)(((__int64)thisptr) + 0x70));
         if (it != g_playbackInstances.end()) {
             OpusPlaybackInstance* instance = it->second;
@@ -789,13 +789,13 @@ void CFileAsyncReadJob_dtor(FileAsyncRequest_t* thisptr) {
 void AudioReportMemory()
 {
     {
-        std::lock_guard<std::mutex> lock(g_progressiveCacheMutex);
+        SRWGuard lock(&g_progressiveCacheMutex);
         size_t total_untracked_mem = 0;
         for (auto& e : g_progressiveCache)
         {
             ProgressiveOpusTemplate* pt = e.second;
 
-            std::lock_guard<std::mutex> lock(pt->chunkMutex);
+            SRWGuard lock(&pt->chunkMutex);
             for (auto& ee : pt->pcmChunks)
             {
                 total_untracked_mem += ee.size() * sizeof(ee[0]);

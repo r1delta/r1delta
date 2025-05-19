@@ -6,6 +6,8 @@
 #include "logging.h"
 
 FileCache::FileCache() {
+    cacheMutex = SRWLOCK_INIT;
+    cacheCondition = CONDITION_VARIABLE_INIT;
     executableDirectory = GetExecutableDirectory();
     if (executableDirectory.empty()) {
         // Handle error: Cannot proceed without executable path
@@ -96,7 +98,7 @@ void FileCache::UpdateCache() {
     if (executableDirectory.empty()) {
         Warning("FileCache::UpdateCache called but executable directory is unknown. Aborting.\n");
         initialized.store(true, std::memory_order_release); // Mark as "initialized" to unblock waiters, even though unusable
-        cacheCondition.notify_all();
+        WakeAllConditionVariable(&cacheCondition);
         return;
     }
 
@@ -125,7 +127,7 @@ void FileCache::UpdateCache() {
             //Msg("File cache scan complete. Found %zu files, %zu addon folders.\n", newCache.size(), newAddonsFolderCache.size());
 
             { // Lock scope for swapping caches
-                std::unique_lock<std::shared_mutex> lock(cacheMutex);
+                SRWGuard lock(&cacheMutex);
                 cache = std::move(newCache);
                 addonsFolderCache = std::move(newAddonsFolderCache);
 
@@ -138,7 +140,7 @@ void FileCache::UpdateCache() {
 
             // Notify waiters ONLY on the first scan completion
             if (!firstScan) { // This means it was the first scan run
-                cacheCondition.notify_all();
+                WakeAllConditionVariable(&cacheCondition);
             }
         } // End build scope
 
@@ -146,15 +148,17 @@ void FileCache::UpdateCache() {
         // Wait for manual rescan request
         { // Lock scope for waiting
             ZoneScopedN("FileCache Wait For Rescan");
-            std::unique_lock<std::shared_mutex> lock(cacheMutex); // Use unique lock for condition variable wait
-            cacheCondition.wait(lock, [this]() {
-                // Wait until initialized (should be true after first loop) AND manual rescan requested
-                return initialized.load(std::memory_order_acquire) &&
-                    manualRescanRequested.load(std::memory_order_acquire);
-                });
+            
+            AcquireSRWLockExclusive(&cacheMutex);
+            while (!(initialized.load(std::memory_order_acquire) &&
+                manualRescanRequested.load(std::memory_order_acquire)))
+            {
+                SleepConditionVariableSRW(&cacheCondition, &cacheMutex, INFINITE, 0);
+            }
 
             // Reset the request flag *after* waking up
             manualRescanRequested.store(false, std::memory_order_relaxed); // Relaxed is fine, protected by mutex
+            ReleaseSRWLockExclusive(&cacheMutex);
         }
     }
 }
@@ -166,17 +170,17 @@ bool FileCache::TryReplaceFile(const char* pszRelativeFilePath) {
 
     // Ensure cache is initialized and ready
     if (!initialized.load(std::memory_order_acquire)) {
-        // Optionally wait here, but could deadlock if UpdateCache fails.
-        // Better to have FileExists/TryReplaceFile wait individually.
-        // OR return false immediately if not initialized. For simplicity, let's wait like FileExists.
-        std::shared_lock<std::shared_mutex> lock(cacheMutex);
-        cacheCondition.wait(lock, [this]() { return initialized.load(std::memory_order_acquire); });
-        // Lock is re-acquired, proceed below (or re-check initialized state)
+        AcquireSRWLockShared(&cacheMutex);
+        do {
+            SleepConditionVariableSRW(&cacheCondition, &cacheMutex, INFINITE, CONDITION_VARIABLE_LOCKMODE_SHARED);
+        } while (!initialized.load(std::memory_order_acquire));
+        ReleaseSRWLockShared(&cacheMutex);
     }
-    // Re-check after wait just in case of spurious wakeup or error during init
-    if (!initialized.load(std::memory_order_acquire)) {
-        return false; // Cache never initialized properly
-    }
+
+    // NOTE(mrsteyk): R1DAssert macro still evaluates the expression.
+#if BUILD_DEBUG
+    R1DAssert(initialized.load(std::memory_order_acquire));
+#endif
 
 
     if (!pszRelativeFilePath || *pszRelativeFilePath == '\0') {
@@ -251,7 +255,7 @@ bool FileCache::TryReplaceFile(const char* pszRelativeFilePath) {
 
     // --- Check Paths ---
     { // Shared lock scope for reading cache and addonsFolderCache
-        std::shared_lock<std::shared_mutex> lock(cacheMutex);
+        SRWGuardShared lock(&cacheMutex);
 
         // 1. Check in r1delta base directory
         std::filesystem::path potentialBasePath = r1deltaBasePath / relativePath;
@@ -289,14 +293,16 @@ bool FileCache::FileExists(const std::string& filePath) {
     std::size_t hashedPath = fnv1a_hash(checkPath.string());
 
     // Acquire lock, wait for initialization if needed, then check cache
-    std::shared_lock<std::shared_mutex> sharedLock(cacheMutex);
+    AcquireSRWLockShared(&cacheMutex);
 
     // Wait ONLY if not initialized yet.
-    cacheCondition.wait(sharedLock, [this]() {
-        return initialized.load(std::memory_order_acquire);
-        });
+    while (!initialized.load(std::memory_order_acquire))
+    {
+        SleepConditionVariableSRW(&cacheCondition, &cacheMutex, INFINITE, CONDITION_VARIABLE_LOCKMODE_SHARED);
+    }
+    ReleaseSRWLockShared(&cacheMutex);
 
     // Initialized is true and we hold the lock
     return cache.contains(hashedPath);
 
-} // sharedLock is automatically released here
+}

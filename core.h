@@ -47,6 +47,8 @@
 #pragma warning(pop)
 #include <filesystem>
 #include <string>
+#include <mutex>
+#include <shared_mutex>
 
 #if !defined(BUILD_DEBUG)
 # if defined(NDEBUG)
@@ -141,6 +143,37 @@ struct EqualToStdString
     }
 };
 #endif
+
+// NOTE(mrsteyk): dumb wrapper.
+class SRWGuard
+{
+    PSRWLOCK lock;
+public:
+    SRWGuard(SRWLOCK* lock)
+    {
+        this->lock = lock;
+        AcquireSRWLockExclusive(this->lock);
+    }
+    ~SRWGuard()
+    {
+        ReleaseSRWLockExclusive(this->lock);
+    }
+};
+// NOTE(mrsteyk): dumb wrapper.
+class SRWGuardShared
+{
+    PSRWLOCK lock;
+public:
+    SRWGuardShared(SRWLOCK* lock)
+    {
+        this->lock = lock;
+        AcquireSRWLockShared(this->lock);
+    }
+    ~SRWGuardShared()
+    {
+        ReleaseSRWLockShared(this->lock);
+    }
+};
 
 
 #if BUILD_PROFILE

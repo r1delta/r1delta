@@ -2962,6 +2962,7 @@ void Setup_MMNotificationClient()
 	MH_CreateHook((LPVOID)(G_engine + 0xEA00), &S_Init_Hook, reinterpret_cast<LPVOID*>(&oS_Init));
 	MH_CreateHook((LPVOID)(G_engine + 0x114B0), &S_Shutdown_Hook, reinterpret_cast<LPVOID*>(&oS_Shutdown));
 	Snd_Restart_DirectSound = reinterpret_cast<Snd_Restart_DirectSound_t>(G_engine + 0x15AF0);
+	MH_EnableHook(MH_ALL_HOOKS);
 }
 
 static bool should_init_security_fixes = false;
@@ -2990,6 +2991,7 @@ void __stdcall LoaderNotificationCallback(
 	if (GetModuleHandleA("dedicated.dll") && !bDone) {
 		InitCompressionHooks();
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("dedicated.dll") + 0x84000), &AddSearchPathDedi, reinterpret_cast<LPVOID*>(&oAddSearchPathDedi));
+		MH_EnableHook(MH_ALL_HOOKS);
 		bDone = true;
 	}
 	auto name = notification_data->Loaded.BaseDllName->Buffer;
@@ -3011,6 +3013,7 @@ void __stdcall LoaderNotificationCallback(
 		G_engine_ds = (uintptr_t)notification_data->Loaded.DllBase;
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x433C0), &ProcessConnectionlessPacketDedi, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x30FE20), &StringCompare_AllTalkHookDedi, reinterpret_cast<LPVOID*>(&oStringCompare_AllTalkHookDedi));
+		MH_EnableHook(MH_ALL_HOOKS);
 		InitAddons();
 		InitDedicated();
 		constexpr auto a = (1 << 2);
@@ -3024,7 +3027,7 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x100880), &sub_100880_hook, reinterpret_cast<LPVOID*>(&o_sub_100880));
 
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0xFFFF), &sub_FFFF, reinterpret_cast<LPVOID*>(&ovphys_sub_FFFF));
-		//MH_EnableHook(MH_ALL_HOOKS);
+		MH_EnableHook(MH_ALL_HOOKS);
 	}
 	else if (string_equal_size(name, name_len, L"materialsystem_dx11.dll")) {
 		SetupHudWarpMatSystemHooks();

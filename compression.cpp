@@ -67,7 +67,7 @@ struct r1dc_context_t
 {
     ~r1dc_context_t() {}
 
-    std::mutex mtx;          // Guard all mutable state below
+    SRWLOCK mtx = SRWLOCK_INIT;          // Guard all mutable state below
     // LZHAM fallback
     void* lzham_ctx;
     bool  lzham_inited;
@@ -119,7 +119,7 @@ __int64 r1dc_reinit(void* p, void* unk1, void* unk2, void* unk3)
     if (!p) return 0;
     r1dc_context_t* ctx = static_cast<r1dc_context_t*>(p);
 
- //   std::lock_guard<std::mutex> lock(ctx->mtx);
+ //   SRWGuard lock(&ctx->mtx);
 
     // Reset ZSTD detection
     ctx->typeDetermined = false;
@@ -151,7 +151,7 @@ __int64 r1dc_deinit(void* p)
     if (!p) return 0;
     r1dc_context_t* ctx = static_cast<r1dc_context_t*>(p);
 
-  //  std::lock_guard<std::mutex> lock(ctx->mtx);
+  //  SRWGuard lock(&ctx->mtx);
 
     __int64 ret = 0;
     // Deinit the fallback LZHAM
@@ -202,7 +202,7 @@ __int64 r1dc_decompress(
     if (!p) return 0;
     r1dc_context_t* ctx = static_cast<r1dc_context_t*>(p);
 
-   // std::lock_guard<std::mutex> lock(ctx->mtx);
+   // SRWGuard lock(&ctx->mtx);
 
     // If we haven't decided whether it's ZSTD or not:
     if (!ctx->typeDetermined)

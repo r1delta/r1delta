@@ -51,6 +51,7 @@
 #include <shared_mutex>
 #include <string_view>
 #include "thread.h"
+#include "tctx.hh"
 #pragma intrinsic(_ReturnAddress)
 
 namespace fs = std::filesystem;
@@ -102,28 +103,26 @@ void StartFileCacheThread() {
 class FastFileSystemHook {
 private:
 	struct TrieNode {
-		std::unordered_map<std::string, std::unique_ptr<TrieNode>, HashStrings, std::equal_to<>> children;
+		std::unordered_map<std::string, TrieNode, HashStrings, std::equal_to<>> children;
 		bool exists = false;
 		bool checked = false;
 	};
 	static TrieNode root;
-	static std::shared_mutex cacheMutex;
+	static SRWLOCK cacheMutex;
 	static bool checkAndCachePath(const char* fullPath) {
 		ZoneScoped;
 
 		TrieNode* node = &root;
-		std::string currentPath;
 		const char* part = fullPath;
+		const size_t part_len = strlen(fullPath);
+		std::string currentPath;
+		currentPath.reserve(part_len);
 		while (*part) {
 			while (*part && *part != '\\' && *part != '/') {
 				currentPath += *part++;
 			}
 			if (*part) part++; // Skip the separator
 			auto& child = node->children[currentPath];
-			if (!child) {
-				child = std::make_unique<TrieNode>();
-			}
-			node = child.get();
 			if (!node->checked) {
 				DWORD attributes = GetFileAttributesA(currentPath.c_str());
 				node->exists = (attributes != INVALID_FILE_ATTRIBUTES);
@@ -132,7 +131,6 @@ private:
 			if (!node->exists) {
 				return false;
 			}
-			currentPath += '\\';
 		}
 		return true;
 	}
@@ -143,17 +141,21 @@ public:
 		//	if (*path++ == '.') dot_count++;
 		//if (dot_count > 2) return false;
 
-		std::shared_lock<std::shared_mutex> lock(cacheMutex);
-		return !checkAndCachePath(path);
+		AcquireSRWLockShared(&cacheMutex);
+		auto ret = !checkAndCachePath(path);
+		ReleaseSRWLockShared(&cacheMutex);
+		
+		return ret;
 	}
 	static void resetNonexistentCache() {
-		std::unique_lock<std::shared_mutex> writeLock(cacheMutex);
+		AcquireSRWLockExclusive(&cacheMutex);
 		root = TrieNode();
+		ReleaseSRWLockExclusive(&cacheMutex);
 	}
 };
 
 FastFileSystemHook::TrieNode FastFileSystemHook::root;
-std::shared_mutex FastFileSystemHook::cacheMutex;
+SRWLOCK FastFileSystemHook::cacheMutex = SRWLOCK_INIT;
 
 __int64(*HandleOpenRegularFileOriginal)(__int64 a1, __int64 a2, char a3);
 

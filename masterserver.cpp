@@ -88,9 +88,9 @@ void InitMasterServerCVars() {
 
 namespace MasterServerClient {
     static std::vector<ServerInfo> serverList;
-    static std::mutex serverListMutex;
-    static std::mutex httpMutex;
-    static std::mutex heartbeatMutex;
+    static SRWLOCK serverListMutex = SRWLOCK_INIT;
+    static SRWLOCK httpMutex = SRWLOCK_INIT;
+    static SRWLOCK heartbeatMutex = SRWLOCK_INIT;
     static std::unique_ptr<httplib::Client> httpClient;
     static HeartbeatInfo lastHeartbeat;
     static std::atomic<bool> heartbeatThreadRunning{false};
@@ -128,7 +128,7 @@ namespace MasterServerClient {
             return true;
         }
 
-        std::lock_guard<std::mutex> lock(httpMutex);
+        SRWGuard lock(&httpMutex);
         EnsureHttpClient(delta_ms_url->m_Value.m_pszString);
 
         json j;
@@ -194,7 +194,7 @@ namespace MasterServerClient {
                 bool isHibernating = false;
                 
                 {
-                    std::lock_guard<std::mutex> lock(heartbeatMutex);
+                    SRWGuard lock(&heartbeatMutex);
                     currentHeartbeat = lastHeartbeat;
                     
                     // Check if server is hibernating (no heartbeat for 60 seconds)
@@ -265,7 +265,7 @@ namespace MasterServerClient {
             
             // Update the server list with mutex protection
             {
-                std::lock_guard<std::mutex> lock(serverListMutex);
+                SRWGuard lock(&serverListMutex);
                 serverList = std::move(newServerList);
             }
         }
@@ -383,7 +383,7 @@ SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
 
     // Update the last heartbeat time and data
     {
-        std::lock_guard<std::mutex> lock(MasterServerClient::heartbeatMutex);
+        SRWGuard lock(&MasterServerClient::heartbeatMutex);
         MasterServerClient::lastHeartbeat = heartbeat;
         MasterServerClient::lastHeartbeatTime.store(std::chrono::system_clock::now(), std::memory_order_release);
     }
@@ -397,7 +397,7 @@ SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
 
 SQInteger DispatchServerListReq(HSQUIRRELVM v) {
     {
-        std::lock_guard<std::mutex> lock(MasterServerClient::serverListMutex);
+        SRWGuard lock(&MasterServerClient::serverListMutex);
         MasterServerClient::serverList.clear();
     }
 
@@ -413,7 +413,7 @@ SQInteger PollServerList(HSQUIRRELVM v) {
     sq_newarray(v, 0);
 
     {
-        std::lock_guard<std::mutex> lock(MasterServerClient::serverListMutex);
+        SRWGuard lock(&MasterServerClient::serverListMutex);
 
         if (MasterServerClient::serverList.empty()) {
             //sq_newtable(v);
