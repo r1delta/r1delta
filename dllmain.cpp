@@ -642,7 +642,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 		QueryPerformanceFrequency(&freq);
 		g_PerformanceFrequency = freq.QuadPart;
 
-		VirtualAlloc((void*)0xFFEEFFEE, 1, MEM_RESERVE, PAGE_NOACCESS);
+		VirtualAlloc((void*)0xFFEEFFEEull, 1, MEM_RESERVE, PAGE_NOACCESS);
 
 		{
 			char path[MAX_PATH];

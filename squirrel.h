@@ -8,6 +8,9 @@ enum ScriptContext
 	SCRIPT_CONTEXT_UI
 };
 
+#define sq_pushstring_std(vm, s) sq_pushstring((vm), (s).c_str(), (s).length())
+#define sq_pushstring_lit(vm, S) sq_pushstring((vm), (S), sizeof(S) - 1)
+
 #define SQ_SUCCEEDED(res) ((res)>=0)
 
 #define SQTrue	(1)

@@ -20,6 +20,7 @@
 //       but you'll need to adjust them for your environment.
 //
 
+#include "core.h"
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -91,6 +92,8 @@ struct r1dc_context_t
 // --------------------------------------------------------------------------
 void* r1dc_init(void* params)
 {
+    ZoneScoped;
+
     r1dc_context_t* ctx = new (GlobalAllocator()->mi_malloc(sizeof(*ctx), TAG_COMPRESSION, HEAP_DELTA)) r1dc_context_t();
     std::memset(ctx, 0, sizeof(*ctx));
 
@@ -116,6 +119,8 @@ void* r1dc_init(void* params)
 // --------------------------------------------------------------------------
 __int64 r1dc_reinit(void* p, void* unk1, void* unk2, void* unk3)
 {
+    ZoneScoped;
+
     if (!p) return 0;
     r1dc_context_t* ctx = static_cast<r1dc_context_t*>(p);
 
@@ -148,6 +153,8 @@ __int64 r1dc_reinit(void* p, void* unk1, void* unk2, void* unk3)
 // --------------------------------------------------------------------------
 __int64 r1dc_deinit(void* p)
 {
+    ZoneScoped;
+
     if (!p) return 0;
     r1dc_context_t* ctx = static_cast<r1dc_context_t*>(p);
 
@@ -199,6 +206,8 @@ __int64 r1dc_decompress(
     size_t* pOut_buf_size,
     int no_more_input_bytes_flag)
 {
+    ZoneScoped;
+
     if (!p) return 0;
     r1dc_context_t* ctx = static_cast<r1dc_context_t*>(p);
 

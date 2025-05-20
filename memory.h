@@ -179,7 +179,7 @@ static_assert(TAG_COUNT <= 256, "too many allocation tags!");
 
 enum EDeltaAllocHeaps : uint8_t
 {
-    HEAP_DEFAULT = -1,
+    HEAP_DEFAULT = 0xFF,
     
     // GPH
     HEAP_SYSTEM = 0,
@@ -270,6 +270,8 @@ class CMimMemAlloc : public IMemAlloc {
 public:
     void* mi_malloc(size_t nSize, EDeltaAllocTags tag = TAG_DEFAULT, EDeltaAllocHeaps heap = HEAP_DEFAULT)
     {
+        ZoneScoped;
+
         //R1DAssert(nSize);
         if (!nSize)
         {
@@ -303,7 +305,7 @@ public:
         R1DAssert(uintptr_t(aligned) % 16 == 0);
 
         alloc_check_t* check = (alloc_check_t*)(uintptr_t(aligned) - sizeof(alloc_check_t));
-        check->align_skip = align_skip;
+        check->align_skip = (uint16_t)align_skip;
         check->tag = tag;
         check->heap = heap;
         check->size = nSize;
@@ -343,6 +345,8 @@ public:
 
     void mi_free(void* aligned, EDeltaAllocTags tag = TAG_DEFAULT, EDeltaAllocHeaps heap = HEAP_DEFAULT)
     {
+        ZoneScoped;
+
         if (!aligned)
             return;
 
@@ -441,6 +445,8 @@ public:
 
     void mi_free_size(void* aligned, size_t size, EDeltaAllocTags tag = TAG_DEFAULT, EDeltaAllocHeaps heap = HEAP_DEFAULT)
     {
+        ZoneScoped;
+
         if (!aligned)
             return;
 
@@ -478,6 +484,8 @@ public:
 
     size_t mi_usable_size(void* aligned)
     {
+        ZoneScoped;
+
         if (!aligned)
             return 0;
 
@@ -505,6 +513,8 @@ public:
 
     void* mi_realloc(void* aligned, size_t size, EDeltaAllocTags tag = TAG_DEFAULT, EDeltaAllocHeaps heap = HEAP_DEFAULT)
     {
+        ZoneScoped;
+
         alloc_check_t* check = (alloc_check_t*)(uintptr_t(aligned) - sizeof(alloc_check_t));
         alloc_check_t::hash_t hash = check->do_hash(uintptr_t(check), check->size, check->align_skip, check->tag, check->heap);
         if (check->hash == hash)
@@ -643,7 +653,7 @@ public:
             if (m_pfnAllocFailHandler) {
                 size_t result = m_pfnAllocFailHandler(nSize);
                 if (result == 0) {
-                    p = mi_malloc(nSize);
+                    p = mi_malloc(nSize, TAG_GAME, HEAP_GAME);
                     if (!p) {
                         m_nFailedAllocationSize = nSize;
                     }
@@ -762,6 +772,8 @@ public:
     }
 
     void DumpStats() override {
+        ZoneScoped;
+
         //mi_stats_print(nullptr);
         Msg("Delta Allocator stats:\n");
         for (size_t i = 0; i < _heaps.size(); ++i)
@@ -788,7 +800,7 @@ public:
                     
                     alloc_check_t* check = (alloc_check_t*)(p + 0);
                     size_t align_skip = 0 + sizeof(*check);
-                    auto hash = check->do_hash(uintptr_t(check), check->size, align_skip, check->tag, check->heap);
+                    auto hash = check->do_hash(uintptr_t(check), check->size, (uint16_t)align_skip, check->tag, check->heap);
 
                     if (check->align_skip == align_skip && check->hash == hash)
                     {
@@ -941,6 +953,8 @@ public:
     }
 
     void GlobalMemoryStatus(size_t* pUsedMemory, size_t* pFreeMemory) override {
+        ZoneScoped;
+        
         size_t current_commit = 0;
         size_t free_memory = 0;
 

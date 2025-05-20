@@ -119,16 +119,6 @@ extern "C" {
 }
 
 // --------------------------------------------------------------------
-// Critical section helpers (unchanged)
-// --------------------------------------------------------------------
-static void EnterCriticalSection_(LPCRITICAL_SECTION cs) {
-    ::EnterCriticalSection(cs);
-}
-static void LeaveCriticalSection_(LPCRITICAL_SECTION cs) {
-    ::LeaveCriticalSection(cs);
-}
-
-// --------------------------------------------------------------------
 // Core filesystem vtable–based function pointers (unchanged)
 // --------------------------------------------------------------------
 constexpr std::uint64_t FS_INVALID_ASYNC_FILE = 0xFFFFULL;
@@ -283,7 +273,7 @@ struct ProgressiveOpusTemplate {
     int channels;
     bool fullyDecoded;
     SRWLOCK chunkMutex;                 // protects pcmChunks
-    std::condition_variable chunkCV;    // signals when new chunks are added
+    //CONDITION_VARIABLE chunkCV;    // signals when new chunks are added
     std::vector<unsigned char> fileData;  // persistent copy of the original file data
     MemoryBuffer pMemBuffer; // persistent memory buffer for ov_open_callbacks
 
@@ -307,9 +297,9 @@ struct OpusPlaybackInstance {
     ProgressiveOpusTemplate* progTemplate;
     size_t readSampleIndex; // absolute sample index (across chunks)
     int channels;
-    std::unique_ptr<std::recursive_mutex> bufferMutex;
+    SRWLOCK bufferMutex;
 
-    OpusPlaybackInstance() : readSampleIndex(0), channels(1), bufferMutex(std::make_unique<std::recursive_mutex>()) {}
+    OpusPlaybackInstance() : readSampleIndex(0), channels(1), bufferMutex(SRWLOCK_INIT) {}
     ~OpusPlaybackInstance() {}
 };
 
@@ -324,6 +314,8 @@ static std::vector<unsigned char> ReadEntireFileIntoMem(
     const char* path,
     const char* pathID)
 {
+    ZoneScoped;
+
     std::vector<unsigned char> fileData;
     void* file = FSOperations::OpenFile(fs, path, "rb", 0, pathID, 0);
     if (!file) {
@@ -349,24 +341,21 @@ static std::vector<unsigned char> ReadEntireFileIntoMem(
 // Returns a vector of int16_t samples (up to CHUNK_SIZE * channels in length).
 // --------------------------------------------------------------------
 static std::vector<int16_t> DecodeChunk(OggVorbis_File* vf, int channels) {
+    ZoneScoped;
+
     const size_t maxSamples = ProgressiveOpusTemplate::CHUNK_SIZE * channels;
-    std::vector<int16_t> chunk;
-    chunk.reserve(maxSamples);
-    const int DECODE_BUFFER_SIZE = 65536; // in bytes
-    char decodeBuffer[DECODE_BUFFER_SIZE];
+    std::vector<int16_t> chunk(maxSamples, 0);
+    //const int DECODE_BUFFER_SIZE = 65536; // in bytes
+    //char decodeBuffer[DECODE_BUFFER_SIZE];
     int bitStream = 0;
     size_t totalSamples = 0;
     while (totalSamples < maxSamples) {
-        size_t bytesToRead = std::min((size_t)DECODE_BUFFER_SIZE, (maxSamples - totalSamples) * sizeof(int16_t));
+        size_t bytesToRead = (maxSamples - totalSamples) * sizeof(int16_t);
 #if 1
-        long bytesDecoded = ov_read(vf, decodeBuffer, (int)bytesToRead, 0, 2, 1, &bitStream);
+        long bytesDecoded = ov_read(vf, (char*)&chunk[totalSamples], (int)bytesToRead, 0, 2, 1, &bitStream);
         if (bytesDecoded <= 0)
             break; // End of file or error.
         size_t samplesDecoded = bytesDecoded / sizeof(int16_t);
-        size_t oldSize = chunk.size();
-        chunk.resize(oldSize + samplesDecoded);
-        R1DAssert(chunk.size() <= maxSamples);
-        memcpy(&chunk[oldSize], decodeBuffer, samplesDecoded * sizeof(int16_t));
         totalSamples += samplesDecoded;
 #else
         long bytesDecoded = ov_read(vf, decodeBuffer, (int)bytesToRead, 0, 2, 1, &bitStream);
@@ -379,6 +368,7 @@ static std::vector<int16_t> DecodeChunk(OggVorbis_File* vf, int channels) {
         totalSamples += samplesDecoded;
 #endif
     }
+    chunk.resize(totalSamples);
     return chunk;
 }
 
@@ -400,12 +390,12 @@ static void BackgroundDecodeThread(ProgressiveOpusTemplate* progTemplate, int ch
             SRWGuard lock(&progTemplate->chunkMutex);
             if (chunk.empty()) {
                 progTemplate->fullyDecoded = true;
-                progTemplate->chunkCV.notify_all();
+                //WakeAllConditionVariable(&progTemplate->chunkCV);
                 break;
             }
             progTemplate->pcmChunks.push_back(std::move(chunk));
             progTemplate->decodedChunks.fetch_add(1, std::memory_order_relaxed);
-            progTemplate->chunkCV.notify_all();
+            //WakeAllConditionVariable(&progTemplate->chunkCV);
         }
     }
     {
@@ -434,6 +424,8 @@ static void BackgroundDecodeWrapper(ProgressiveOpusTemplate* progTemplate, int c
 // and then launch a background thread to decode the remainder.
 // --------------------------------------------------------------------
 bool OpenOpusContext(const char* wavName, CBaseFileSystem* filesystem, const char* pathID) {
+    ZoneScoped;
+
     SRWGuard lock(&g_progressiveCacheMutex);
     if (g_progressiveCache.find(wavName) != g_progressiveCache.end()) {
         return true; // Already opened/cached.
@@ -465,7 +457,7 @@ bool OpenOpusContext(const char* wavName, CBaseFileSystem* filesystem, const cha
 
     // Allocate an OggVorbis_File on the heap so that it can be shared.
     OggVorbis_File* vf = (OggVorbis_File*)GlobalAllocator()->mi_malloc(sizeof(OggVorbis_File), TAG_AUDIO, HEAP_DELTA);
-    int result = ov_open_callbacks(&progTemplate->pMemBuffer, vf, nullptr, progTemplate->fileData.size(), callbacks);
+    int result = ov_open_callbacks(&progTemplate->pMemBuffer, vf, nullptr, (long)progTemplate->fileData.size(), callbacks);
     if (result < 0) {
         R1DAssert(!"Unreachable");
         Warning("[Ogg] ov_open_callbacks failed with error %d for file %s\n", result, wavName);
@@ -522,6 +514,8 @@ static OpusPlaybackInstance* CreateOpusTrackInstance(const char* filename,
     CBaseFileSystem* filesystem,
     const char* pathID)
 {
+    ZoneScoped;
+    
     ProgressiveOpusTemplate* progTemplate;
     {
         SRWGuard lock(&g_progressiveCacheMutex);
@@ -548,8 +542,19 @@ static OpusPlaybackInstance* CreateOpusTrackInstance(const char* filename,
 // Helper: Compute total number of decoded samples available so far.
 // --------------------------------------------------------------------
 static size_t GetTotalAvailableSamples(ProgressiveOpusTemplate* progTemplate) {
+    ZoneScoped;
+    
     size_t total = 0;
     SRWGuard lock(&progTemplate->chunkMutex);
+    for (const auto& chunk : progTemplate->pcmChunks) {
+        total += chunk.size();
+    }
+    return total;
+}
+static size_t GetTotalAvailableSamplesNoLock(ProgressiveOpusTemplate* progTemplate) {
+    ZoneScoped;
+
+    size_t total = 0;
     for (const auto& chunk : progTemplate->pcmChunks) {
         total += chunk.size();
     }
@@ -562,6 +567,8 @@ static size_t GetTotalAvailableSamples(ProgressiveOpusTemplate* progTemplate) {
 // --------------------------------------------------------------------
 static void CopySamples(ProgressiveOpusTemplate* progTemplate, size_t startSample, int16_t* dest, size_t samplesToCopy)
 {
+    ZoneScoped;
+
     size_t copied = 0;
     SRWGuard lock(&progTemplate->chunkMutex);
     for (const auto& chunk : progTemplate->pcmChunks) {
@@ -586,6 +593,8 @@ static void CopySamples(ProgressiveOpusTemplate* progTemplate, size_t startSampl
 // Uses SSE2/AVX for fast copies (via memcpy) when possible.
 // --------------------------------------------------------------------
 __int64 HandleOpusRead(CBaseFileSystem* filesystem, FileAsyncRequest_t* request) {
+    ZoneScoped;
+
     OpusPlaybackInstance* instance = nullptr;
     {
         SRWGuard lock(&g_playbackInstancesMutex);
@@ -612,16 +621,15 @@ __int64 HandleOpusRead(CBaseFileSystem* filesystem, FileAsyncRequest_t* request)
     size_t samplesRequested = framesRequested * channels;
 
     // Handle skipping
+    if (request->nOffset > 0)
     {
-        std::lock_guard<std::recursive_mutex> lock(*instance->bufferMutex);
-        if (request->nOffset > 0) {
-            size_t skipBytes = static_cast<size_t>(request->nOffset);
-            size_t skipFrames = skipBytes / bytesPerFrame;
-            instance->readSampleIndex = skipFrames * channels;
-            size_t totalSamples = GetTotalAvailableSamples(instance->progTemplate);
-            if (instance->readSampleIndex > totalSamples) {
-                instance->readSampleIndex = totalSamples;
-            }
+        SRWGuard lock(&instance->bufferMutex);
+        size_t skipBytes = static_cast<size_t>(request->nOffset);
+        size_t skipFrames = skipBytes / bytesPerFrame;
+        instance->readSampleIndex = skipFrames * channels;
+        size_t totalSamples = GetTotalAvailableSamples(instance->progTemplate);
+        if (instance->readSampleIndex > totalSamples) {
+            instance->readSampleIndex = totalSamples;
         }
     }
 
@@ -640,10 +648,11 @@ __int64 HandleOpusRead(CBaseFileSystem* filesystem, FileAsyncRequest_t* request)
         auto progTemplate = instance->progTemplate;
         size_t availableSamples = GetTotalAvailableSamples(progTemplate);
         // If insufficient samples are buffered, synchronously decode additional chunks immediately.
+        SRWGuard decodeLock(&progTemplate->decodeMutex);
+        SRWGuard lock(&progTemplate->chunkMutex);
         while (availableSamples < instance->readSampleIndex + samplesRequested && !progTemplate->fullyDecoded) {
             std::vector<int16_t> newChunk;
             {
-                SRWGuard decodeLock(&progTemplate->decodeMutex);
                 if (progTemplate->vf == nullptr) {
                     progTemplate->fullyDecoded = true;
                     break;
@@ -651,23 +660,22 @@ __int64 HandleOpusRead(CBaseFileSystem* filesystem, FileAsyncRequest_t* request)
                 newChunk = DecodeChunk(progTemplate->vf, progTemplate->channels);
             }
             if (!newChunk.empty()) {
-                SRWGuard lock(&progTemplate->chunkMutex);
                 progTemplate->pcmChunks.push_back(std::move(newChunk));
                 progTemplate->decodedChunks.fetch_add(1, std::memory_order_relaxed);
-                progTemplate->chunkCV.notify_all();
+                //WakeAllConditionVariable(&progTemplate->chunkCV);
             }
             else {
                 progTemplate->fullyDecoded = true;
                 break;
             }
-            availableSamples = GetTotalAvailableSamples(progTemplate);
+            availableSamples = GetTotalAvailableSamplesNoLock(progTemplate);
         }
     }
 
     // Copy the available samples into the destination buffer, then zero the remainder.
     size_t copiedSamples = 0;
     {
-        std::lock_guard<std::recursive_mutex> lock(*instance->bufferMutex);
+        SRWGuard lock(&instance->bufferMutex);
         size_t availableSamples = GetTotalAvailableSamples(instance->progTemplate);
         size_t toCopy = std::min(samplesRequested,
             availableSamples > instance->readSampleIndex ? availableSamples - instance->readSampleIndex : 0);
@@ -678,7 +686,7 @@ __int64 HandleOpusRead(CBaseFileSystem* filesystem, FileAsyncRequest_t* request)
         }
     }
     // Zero any remaining bytes (silence).
-    size_t bytesCopied = copiedSamples * sizeof(int16_t);
+    __int64 bytesCopied = copiedSamples * sizeof(int16_t);
     if (bytesCopied < request->nBytes) {
         memset((char*)pDest + bytesCopied, 0, request->nBytes - bytesCopied);
     }
@@ -693,6 +701,8 @@ __int64 HandleOpusRead(CBaseFileSystem* filesystem, FileAsyncRequest_t* request)
 // Helper: Check if filename ends with ".wav"
 // --------------------------------------------------------------------
 static bool EndsWithWav(const char* filename) {
+    ZoneScoped;
+
     if (!filename) return false;
     std::string_view fn(filename);
     if (fn.size() < 4) return false;
@@ -713,6 +723,8 @@ __int64 __fastcall Hooked_CBaseFileSystem__SyncRead(
     CBaseFileSystem* filesystem,
     FileAsyncRequest_t* request)
 {
+    ZoneScoped;
+
     static bool bInited = false;
     if (!bInited) {
         bInited = true;
@@ -787,6 +799,8 @@ void CFileAsyncReadJob_dtor(FileAsyncRequest_t* thisptr) {
 // NOTE(mrsteyk): I'm not too fond of how this shit works, so this function is to track my suspicions.
 void AudioReportMemory()
 {
+    ZoneScoped;
+
     {
         SRWGuard lock(&g_progressiveCacheMutex);
         size_t total_untracked_mem = 0;

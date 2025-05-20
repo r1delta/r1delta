@@ -114,6 +114,7 @@ private:
 		TrieNode* node = &root;
 		const char* part = fullPath;
 		const size_t part_len = strlen(fullPath);
+		R1DAssert(part_len < 260);
 		std::string currentPath;
 		currentPath.reserve(part_len);
 		while (*part) {
@@ -121,8 +122,9 @@ private:
 				currentPath += *part++;
 			}
 			if (*part) part++; // Skip the separator
-			auto& child = node->children[currentPath];
+			node = &node->children[currentPath];
 			if (!node->checked) {
+				ZoneScopedN("checkAndCachePath make node");
 				DWORD attributes = GetFileAttributesA(currentPath.c_str());
 				node->exists = (attributes != INVALID_FILE_ATTRIBUTES);
 				node->checked = true;
@@ -130,11 +132,14 @@ private:
 			if (!node->exists) {
 				return false;
 			}
+			currentPath += '\\';
 		}
 		return true;
 	}
 public:
 	static bool shouldFailRead(const char* path) {
+		ZoneScoped;
+
 		//int dot_count = 0;
 		//while (*path && dot_count <= 2)
 		//	if (*path++ == '.') dot_count++;
@@ -147,6 +152,8 @@ public:
 		return ret;
 	}
 	static void resetNonexistentCache() {
+		ZoneScoped;
+
 		AcquireSRWLockExclusive(&cacheMutex);
 		root = TrieNode();
 		ReleaseSRWLockExclusive(&cacheMutex);
@@ -193,6 +200,8 @@ static bool file_exists(const char* path)
 
 // Our modified hook.
 int fs_sprintf_hook(char* Buffer, const char* Format, ...) {
+	ZoneScoped;
+
 	va_list args;
 	va_start(args, Format);
 
@@ -247,6 +256,8 @@ AddVPKFileType AddVPKFileOriginal;
 
 __int64 __fastcall AddVPKFile(IFileSystem* fileSystem, char* vpkPath, char** a3, char a4, int a5, char a6)
 {
+	ZoneScoped;
+
 	// Check if the path contains "_dir"
 	if (strstr(vpkPath, "_dir") != NULL)
 	{
@@ -294,8 +305,11 @@ __int64 __fastcall AddVPKFile(IFileSystem* fileSystem, char* vpkPath, char** a3,
 		}
 	}
 
-	// Finally, call the original function.
-	return AddVPKFileOriginal(fileSystem, vpkPath, a3, a4, a5, a6);
+	{
+		ZoneScopedN("AddVPKFileOriginal");
+		// Finally, call the original function.
+		return AddVPKFileOriginal(fileSystem, vpkPath, a3, a4, a5, a6);
+	}
 }
 
 //

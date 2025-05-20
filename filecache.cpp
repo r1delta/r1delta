@@ -4,6 +4,7 @@
 #include <iostream> // For std::cerr (replace with Msg/Warning)
 
 #include "logging.h"
+#include "tctx.hh"
 
 FileCache::FileCache() {
     cacheMutex = SRWLOCK_INIT;
@@ -127,6 +128,7 @@ void FileCache::UpdateCache() {
             //Msg("File cache scan complete. Found %zu files, %zu addon folders.\n", newCache.size(), newAddonsFolderCache.size());
 
             { // Lock scope for swapping caches
+                ZoneScopedN("FileCache update cacheMutex");
                 SRWGuard lock(&cacheMutex);
                 cache = std::move(newCache);
                 addonsFolderCache = std::move(newAddonsFolderCache);
@@ -187,30 +189,6 @@ bool FileCache::TryReplaceFile(const char* pszRelativeFilePath) {
         return false; // Invalid input
     }
 
-    // NOTE(mrsteyk): operate under the assumption that game also uses 260 byte paths, as evident by the original.
-    //                this issue already manifested itself long ago and I swear I fixed it, idk why it popped up again.
-    //                also please stop using Gemini to rewrite everything, it's annoying.
-    bool found_null = false;
-    size_t pszRelativeFilePath_len = 0;
-    for (size_t i = 0; i < 260; ++i)
-    {
-        if (pszRelativeFilePath[i] == 0)
-        {
-            found_null = true;
-            pszRelativeFilePath_len = i;
-            break;
-        }
-        // NOTE(mrsteyk): do not handle unicode in replacement names.
-        if (!isprint((unsigned char)pszRelativeFilePath[i])) // if (pszRelativeFilePath[i] < 0)
-        {
-            return false;
-        }
-    }
-    if (!found_null)
-    {
-        return false;
-    }
-
     // NOTE(mrsteyk): part of is_absolute check without dumb fluff. Read `is_absolute` code to find out more.
     //if ((pszRelativeFilePath[0] == '/' || pszRelativeFilePath[0] == '\\') && (pszRelativeFilePath[1] == '/' || pszRelativeFilePath[1] == '\\'))
     if (pszRelativeFilePath[0] == '/' || pszRelativeFilePath[0] == '\\')
@@ -222,45 +200,166 @@ bool FileCache::TryReplaceFile(const char* pszRelativeFilePath) {
         return false;
     }
 
-    // Use std::filesystem::path for robust joining, handle input slashes automatically
-    std::filesystem::path relativePath(pszRelativeFilePath);
-
-    // Immediately return false if the input is somehow absolute already
-    if (relativePath.is_absolute()) {
-        R1DAssert(!"Unreachable?");
-        // Or maybe use V_IsAbsolutePath if it's more specific?
-        // if (V_IsAbsolutePath(pszRelativeFilePath)) { return false; }
+    // NOTE(mrsteyk): operate under the assumption that game also uses 260 byte paths, as evident by the original.
+    //                this issue already manifested itself long ago and I swear I fixed it, idk why it popped up again.
+    //                also please stop using Gemini to rewrite everything, it's annoying.
+    bool found_null = false;
+    size_t pszRelativeFilePath_len = 0;
+    size_t pszRelativeFilePath_parts = 1;
+    {
+        ZoneScopedN("TryReplaceFile>260+Null Check");
+        for (size_t i = 0; i < 260; ++i)
+        {
+            if (pszRelativeFilePath[i] == 0)
+            {
+                found_null = true;
+                pszRelativeFilePath_len = i;
+                break;
+            }
+            else if (pszRelativeFilePath[i] == '/' || pszRelativeFilePath[i] == '\\')
+            {
+                pszRelativeFilePath_parts++;
+            }
+            // NOTE(mrsteyk): do not handle unicode in replacement names.
+            else if (!isprint((unsigned char)pszRelativeFilePath[i])) // if (pszRelativeFilePath[i] < 0)
+            {
+                return false;
+            }
+        }
+    }
+    if (!found_null)
+    {
+        return false;
+    }
+    if (pszRelativeFilePath[pszRelativeFilePath_len - 1] == '/' || pszRelativeFilePath[pszRelativeFilePath_len - 1] == '\\')
+    {
         return false;
     }
 
-    // --- Path normalization and potential prefix stripping ---
-    // Standardize: remove leading "./" or ".\\"
-    std::string pathStr = relativePath.lexically_normal().string();
-    if (pathStr.starts_with(".\\") || pathStr.starts_with("./")) {
-        R1DAssert(!"Unreachable?");
-        pathStr.erase(0, 2);
+    Arena* arena = tctx.get_arena_for_scratch();
+    TempArena temp = TempArena(arena);
+
+    struct S8 {
+        const char* ptr;
+        size_t size;
+    };
+    S8* path_parts = (S8*)arena_push(arena, sizeof(*path_parts) * pszRelativeFilePath_parts);
+    size_t path_parts_idx = 0;
+
+    const char* path_part_curr = pszRelativeFilePath;
+    size_t path_part_size = 0;
+    for (size_t i = 0; i < pszRelativeFilePath_len; ++i)
+    {
+        if (pszRelativeFilePath[i] == '/' || pszRelativeFilePath[i] == '\\')
+        {
+            R1DAssert(path_part_size > 0);
+            if (path_parts_idx == 0 && path_part_size == 1 && path_part_curr[0] == '*')
+            {
+                // SKIP
+            }
+            else if (path_part_size == 1 && path_part_curr[0] == '.')
+            {
+                // SKIP
+            }
+            else if (path_parts_idx && path_part_size == 2 && path_part_curr[0] == '.' && path_part_curr[1] == '.')
+            {
+                // Remove `../` with directory change.
+                path_parts_idx--;
+            }
+            else// if (path_part_size)
+            {
+                R1DAssert(path_part_size);
+                path_parts[path_parts_idx] = { .ptr = path_part_curr, .size = path_part_size };
+                path_parts_idx++;
+            }
+            // NOTE(mrsteyk): Skip separators, because buggy Hammer material names or something.
+            do {
+                ++i;
+            } while (pszRelativeFilePath[i] == '/' || pszRelativeFilePath[i] == '\\');
+            path_part_curr = pszRelativeFilePath + i;
+            path_part_size = 1;
+        }
+        else
+        {
+            path_part_size++;
+        }
     }
-    // Handle the "/*/" prefix - convert to view for checking efficiently
-    std::string_view svFilePath(pathStr);
-    if (svFilePath.starts_with("*/") || svFilePath.starts_with("*\\")) { // Check both separators
-        R1DAssert(!"Unreachable?");
-        svFilePath.remove_prefix(2); // Remove only 2 chars
+    if (path_part_size)
+    {
+        R1DAssert((path_part_curr + path_part_size) <= (pszRelativeFilePath + pszRelativeFilePath_len));
+        path_parts[path_parts_idx] = { .ptr = path_part_curr, .size = path_part_size };
+        path_parts_idx++;
     }
-    // Recreate path object from the potentially modified view
-    relativePath = std::filesystem::path(svFilePath);
-    // Ensure it's still relative after potential normalization/stripping
-    if (relativePath.empty() || relativePath.is_absolute()) {
+    if (path_parts_idx == 0)
+    {
         return false;
     }
+    
+    size_t path_size = path_parts_idx;
+    for (size_t i = 0; i < path_parts_idx; ++i)
+    {
+        path_size += path_parts[i].size;
+    }
+    // NOTE(mrsteyk): remove conversion middleman.
+    wchar_t* path = (wchar_t*)arena_push(arena, sizeof(wchar_t) * path_size);
+    size_t path_idx = 0;
+    for (size_t i = 0; i < path_parts_idx; ++i)
+    {
+        for (size_t j = 0; j < path_parts[i].size; ++j)
+        {
+            path[path_idx + j] = path_parts[i].ptr[j];
+        }
+        path_idx += path_parts[i].size;
+        path[path_idx] = L'\\';
+        path_idx++;
+    }
+    path_idx--;
+    path[path_idx] = 0;
+
+#if BUILD_DEBUG
+    {
+        // Use std::filesystem::path for robust joining, handle input slashes automatically
+        std::filesystem::path relativePath(pszRelativeFilePath);
+
+        // --- Path normalization and potential prefix stripping ---
+        // Standardize: remove leading "./" or ".\\"
+        std::wstring pathStr = relativePath.lexically_normal();
+        std::wstring_view svFilePath(pathStr);
+        if (svFilePath.starts_with(L".\\") || svFilePath.starts_with(L"./")) {
+            R1DAssert(!"Unreachable?");
+            svFilePath.remove_prefix(2);
+        }
+        // Handle the "/*/" prefix - convert to view for checking efficiently
+        if (svFilePath.starts_with(L"*/") || svFilePath.starts_with(L"*\\")) { // Check both separators
+            R1DAssert(!"Unreachable?");
+            svFilePath.remove_prefix(2); // Remove only 2 chars
+        }
+        if (svFilePath.empty())
+        {
+            return false;
+        }
+        // Recreate path object from the potentially modified view
+        relativePath = std::filesystem::path(svFilePath);
+        // Ensure it's still relative after potential normalization/stripping
+        if (relativePath.empty() || relativePath.is_absolute()) {
+            R1DAssert(!"Unreachable?");
+            return false;
+        }
+
+        R1DAssert(relativePath.native() == path);
+    }
+#endif
+    std::filesystem::path relativePath(std::move(std::wstring(path, path_idx)));
 
     // --- Check Paths ---
     { // Shared lock scope for reading cache and addonsFolderCache
+        ZoneScopedN("TryReplaceFile>Check Paths");
         SRWGuardShared lock(&cacheMutex);
 
         // 1. Check in r1delta base directory
         std::filesystem::path potentialBasePath = r1deltaBasePath / relativePath;
         potentialBasePath.make_preferred(); // Normalize separators
-        std::size_t baseHash = fnv1a_hash(potentialBasePath.string());
+        std::size_t baseHash = fnv1a_hash(potentialBasePath);
         if (cache.contains(baseHash)) {
             return true;
         }
@@ -272,7 +371,7 @@ bool FileCache::TryReplaceFile(const char* pszRelativeFilePath) {
             // No need to call make_preferred again IF addonDirString is already preferred AND relativePath uses preferred.
             // But calling it again is safe and ensures consistency.
             potentialAddonPath.make_preferred();
-            std::size_t addonHash = fnv1a_hash(potentialAddonPath.string());
+            std::size_t addonHash = fnv1a_hash(potentialAddonPath);
             if (cache.contains(addonHash)) {
                 return true;
             }
@@ -284,13 +383,16 @@ bool FileCache::TryReplaceFile(const char* pszRelativeFilePath) {
 
 // filecache.cpp (continued)
 
+#if 0
 bool FileCache::FileExists(const std::string& filePath) {
+    ZoneScoped;
+
     // If the cache might contain relative paths too (it shouldn't with the current scan logic),
     // you might need path normalization here as well. Assuming filePath is expected to be
     // an absolute, normalized path for direct lookup.
     std::filesystem::path checkPath = filePath;
     checkPath.make_preferred(); // Ensure consistent format with cached paths
-    std::size_t hashedPath = fnv1a_hash(checkPath.string());
+    std::size_t hashedPath = fnv1a_hash(checkPath);
 
     // Acquire lock, wait for initialization if needed, then check cache
     AcquireSRWLockShared(&cacheMutex);
@@ -300,9 +402,11 @@ bool FileCache::FileExists(const std::string& filePath) {
     {
         SleepConditionVariableSRW(&cacheCondition, &cacheMutex, INFINITE, CONDITION_VARIABLE_LOCKMODE_SHARED);
     }
-    ReleaseSRWLockShared(&cacheMutex);
 
     // Initialized is true and we hold the lock
-    return cache.contains(hashedPath);
+    auto ret = cache.contains(hashedPath);
+    ReleaseSRWLockShared(&cacheMutex);
 
+    return ret;
 }
+#endif

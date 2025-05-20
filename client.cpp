@@ -135,9 +135,6 @@ void CGameUI__StartProgressBar(CGameUI *thisptr)
     static auto GetLoadingDialogHandle = (CLoadingDialog * (*)())(G_client + 0x363720);
     auto g_hLoadingDialog = (CLoadingDialog *)(G_client + 0xB151D8);
     CLoadingDialog *v2; // eax
-    vgui::Panel *v3;    // eax
-    CLoadingDialog *v4; // eax
-    CLoadingDialog *v5; // eax
 
     if (!GetLoadingDialogHandle())
     {

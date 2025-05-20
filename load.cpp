@@ -2143,7 +2143,6 @@ __int64 __fastcall UTIL_GetEntityByIndex(int iIndex)
 	char* pEdicts; // rdx
 	char* pEnt; // rcx
 	__int64 v1; // rcx
-	__int64 (*v2)(void); // rdx
 
 	if (iIndex <= 0)
 		return 0LL;

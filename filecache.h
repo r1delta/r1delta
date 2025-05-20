@@ -47,6 +47,14 @@ private:
     static std::size_t fnv1a_hash(const std::string& s) {
         return fnv1a_hash(std::string_view(s));
     }
+    static std::size_t fnv1a_hash(const std::wstring& s, std::size_t hash = 14695981039346656037ULL) {
+        for (uint16_t c : s) {
+            R1DAssert(c <= 0xFF);
+            hash ^= static_cast<size_t>(c);
+            hash *= 1099511628211ULL; // FNV prime
+        }
+        return hash;
+    }
 
     // Internal scanning method
     void ScanDirectory(const std::filesystem::path& directory,
@@ -61,7 +69,7 @@ public:
     }
 
     // Public interface methods (remain instance methods)
-    bool FileExists(const std::string& filePath); // Checks exact absolute path match
+    //bool FileExists(const std::string& filePath); // Checks exact absolute path match
     bool TryReplaceFile(const char* pszRelativeFilePath); // Checks relative paths in specific locations
     void UpdateCache(); // Starts the background update loop (or performs initial scan)
 
