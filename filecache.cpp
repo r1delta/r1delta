@@ -18,10 +18,9 @@ FileCache::FileCache() {
         return;
     }
     r1deltaBasePath = executableDirectory / "r1delta";
+    r1deltaBasePath.make_preferred();
     r1deltaAddonsPath = std::filesystem::current_path() / "r1" / "addons";
-
-    // Optionally start the UpdateCache thread here
-    // std::thread(&FileCache::UpdateCache, this).detach();
+    r1deltaAddonsPath.make_preferred();
 }
 
 
@@ -47,10 +46,7 @@ void FileCache::ScanDirectory(const std::filesystem::path& directory,
 
     // Ensure the base addon directory itself is added if requested
     if (currentAddonsFolders && directory == r1deltaAddonsPath) {
-        // Store normalized version
-        std::filesystem::path normAddonsPath = r1deltaAddonsPath;
-        normAddonsPath.make_preferred(); // Use native separators (\ on Windows)
-        currentAddonsFolders->insert(normAddonsPath.string());
+        currentAddonsFolders->insert(r1deltaAddonsPath.string());
     }
 
 
@@ -300,6 +296,7 @@ bool FileCache::TryReplaceFile(const char* pszRelativeFilePath) {
     {
         path_size += path_parts[i].size;
     }
+#if BUILD_DEBUG
     // NOTE(mrsteyk): remove conversion middleman.
     wchar_t* path = (wchar_t*)arena_push(arena, sizeof(wchar_t) * path_size);
     size_t path_idx = 0;
@@ -316,7 +313,6 @@ bool FileCache::TryReplaceFile(const char* pszRelativeFilePath) {
     path_idx--;
     path[path_idx] = 0;
 
-#if BUILD_DEBUG
     {
         // Use std::filesystem::path for robust joining, handle input slashes automatically
         std::filesystem::path relativePath(pszRelativeFilePath);
@@ -349,29 +345,35 @@ bool FileCache::TryReplaceFile(const char* pszRelativeFilePath) {
         R1DAssert(relativePath.native() == path);
     }
 #endif
-    std::filesystem::path relativePath(std::move(std::wstring(path, path_idx)));
-
     // --- Check Paths ---
     { // Shared lock scope for reading cache and addonsFolderCache
         ZoneScopedN("TryReplaceFile>Check Paths");
         SRWGuardShared lock(&cacheMutex);
 
         // 1. Check in r1delta base directory
-        std::filesystem::path potentialBasePath = r1deltaBasePath / relativePath;
-        potentialBasePath.make_preferred(); // Normalize separators
-        std::size_t baseHash = fnv1a_hash(potentialBasePath);
+        // std::filesystem::path potentialBasePath = r1deltaBasePath / relativePath;
+        //potentialBasePath.make_preferred(); // Normalize separators
+
+        auto baseHash = fnv1a_hash(r1deltaBasePath);
+        for (size_t i = 0; i < path_parts_idx; ++i)
+        {
+            baseHash = fnv1a_hash(std::string_view("\\", 1), baseHash);
+            baseHash = fnv1a_hash(std::string_view(path_parts[i].ptr, path_parts[i].size), baseHash);
+        }
+
         if (cache.contains(baseHash)) {
             return true;
         }
 
         // 2. Check in each addon directory
         for (const std::string& addonDirString : addonsFolderCache) {
-            // addonDirString is already absolute and normalized from ScanDirectory
-            std::filesystem::path potentialAddonPath = std::filesystem::path(addonDirString) / relativePath;
-            // No need to call make_preferred again IF addonDirString is already preferred AND relativePath uses preferred.
-            // But calling it again is safe and ensures consistency.
-            potentialAddonPath.make_preferred();
-            std::size_t addonHash = fnv1a_hash(potentialAddonPath);
+            std::size_t addonHash = fnv1a_hash(addonDirString);
+            for (size_t i = 0; i < path_parts_idx; ++i)
+            {
+                addonHash = fnv1a_hash(std::string_view("\\", 1), addonHash);
+                addonHash = fnv1a_hash(std::string_view(path_parts[i].ptr, path_parts[i].size), addonHash);
+            }
+
             if (cache.contains(addonHash)) {
                 return true;
             }

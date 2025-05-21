@@ -35,22 +35,30 @@ private:
     std::filesystem::path r1deltaBasePath;     // Store the r1delta path
     std::filesystem::path r1deltaAddonsPath;   // Store the addons path
 
+    static constexpr std::size_t FNV1A_HASH_INIT = 14695981039346656037ULL;
     // FNV-1a hash function implementation
-    static constexpr std::size_t fnv1a_hash(std::string_view sv, std::size_t hash = 14695981039346656037ULL) {
+    static constexpr std::size_t fnv1a_hash(std::string_view sv, std::size_t hash = FNV1A_HASH_INIT) {
         for (unsigned char c : sv) { // Use unsigned char for hashing bytes correctly
             hash ^= static_cast<size_t>(c);
             hash *= 1099511628211ULL; // FNV prime
         }
         return hash;
     }
-    // Overload for convenience if needed (e.g. std::string)
-    static std::size_t fnv1a_hash(const std::string& s) {
-        return fnv1a_hash(std::string_view(s));
+    static constexpr std::size_t fnv1a_hash(const std::wstring_view& s, std::size_t hash = FNV1A_HASH_INIT) {
+        for (uint16_t c : s) {
+            hash ^= static_cast<size_t>(c & 0xFF);
+            hash *= 1099511628211ULL; // FNV prime
+        }
+        return hash;
     }
-    static std::size_t fnv1a_hash(const std::wstring& s, std::size_t hash = 14695981039346656037ULL) {
+    // Overload for convenience if needed (e.g. std::string)
+    static std::size_t fnv1a_hash(const std::string& s, std::size_t hash = FNV1A_HASH_INIT) {
+        return fnv1a_hash(std::string_view(s), hash);
+    }
+    static std::size_t fnv1a_hash(const std::wstring& s, std::size_t hash = FNV1A_HASH_INIT) {
         for (uint16_t c : s) {
             R1DAssert(c <= 0xFF);
-            hash ^= static_cast<size_t>(c);
+            hash ^= static_cast<size_t>(c & 0xFF);
             hash *= 1099511628211ULL; // FNV prime
         }
         return hash;
