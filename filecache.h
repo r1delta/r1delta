@@ -23,6 +23,7 @@ private:
     // Cache data structures
     std::unordered_set<std::size_t> cache; // Stores hashes of absolute, normalized file paths
     std::unordered_set<std::string, HashStrings, std::equal_to<>> addonsFolderCache; // Stores absolute, normalized addon directory paths
+    std::vector<std::size_t> addonsFolderCacheHashes;
     mutable SRWLOCK cacheMutex; // Mutable for const methods like TryReplaceFile if needed
 
     // State variables
@@ -33,6 +34,7 @@ private:
     // Paths
     std::filesystem::path executableDirectory; // Store the base path
     std::filesystem::path r1deltaBasePath;     // Store the r1delta path
+    std::size_t r1deltaBasePathHash;
     std::filesystem::path r1deltaAddonsPath;   // Store the addons path
 
     static constexpr std::size_t FNV1A_HASH_INIT = 14695981039346656037ULL;

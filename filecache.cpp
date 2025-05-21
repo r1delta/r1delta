@@ -19,6 +19,7 @@ FileCache::FileCache() {
     }
     r1deltaBasePath = executableDirectory / "r1delta";
     r1deltaBasePath.make_preferred();
+    r1deltaBasePathHash = fnv1a_hash(r1deltaBasePath);
     r1deltaAddonsPath = std::filesystem::current_path() / "r1" / "addons";
     r1deltaAddonsPath.make_preferred();
 }
@@ -128,6 +129,11 @@ void FileCache::UpdateCache() {
                 SRWGuard lock(&cacheMutex);
                 cache = std::move(newCache);
                 addonsFolderCache = std::move(newAddonsFolderCache);
+                addonsFolderCacheHashes.clear();
+                for (const auto& k : newAddonsFolderCache)
+                {
+                    addonsFolderCacheHashes.push_back(fnv1a_hash(k));
+                }
 
                 // Set initialized only AFTER the first successful scan completes
                 if (firstScan) {
@@ -354,7 +360,7 @@ bool FileCache::TryReplaceFile(const char* pszRelativeFilePath) {
         // std::filesystem::path potentialBasePath = r1deltaBasePath / relativePath;
         //potentialBasePath.make_preferred(); // Normalize separators
 
-        auto baseHash = fnv1a_hash(r1deltaBasePath);
+        auto baseHash = r1deltaBasePathHash;
         for (size_t i = 0; i < path_parts_idx; ++i)
         {
             baseHash = fnv1a_hash(std::string_view("\\", 1), baseHash);
@@ -366,8 +372,8 @@ bool FileCache::TryReplaceFile(const char* pszRelativeFilePath) {
         }
 
         // 2. Check in each addon directory
-        for (const std::string& addonDirString : addonsFolderCache) {
-            std::size_t addonHash = fnv1a_hash(addonDirString);
+        for (const std::size_t addonDirStringHash : addonsFolderCacheHashes) {
+            std::size_t addonHash = addonDirStringHash;
             for (size_t i = 0; i < path_parts_idx; ++i)
             {
                 addonHash = fnv1a_hash(std::string_view("\\", 1), addonHash);
