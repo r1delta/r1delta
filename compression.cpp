@@ -20,6 +20,7 @@
 //       but you'll need to adjust them for your environment.
 //
 
+#include "core.h"
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -65,7 +66,9 @@ static r1dc_decompress_t original_lzham_decompressor_decompress = nullptr;
 // --------------------------------------------------------------------------
 struct r1dc_context_t
 {
-    std::mutex mtx;          // Guard all mutable state below
+    ~r1dc_context_t() {}
+
+    SRWLOCK mtx = SRWLOCK_INIT;          // Guard all mutable state below
     // LZHAM fallback
     void* lzham_ctx;
     bool  lzham_inited;
@@ -89,7 +92,9 @@ struct r1dc_context_t
 // --------------------------------------------------------------------------
 void* r1dc_init(void* params)
 {
-    r1dc_context_t* ctx = new r1dc_context_t();
+    ZoneScoped;
+
+    r1dc_context_t* ctx = new (GlobalAllocator()->mi_malloc(sizeof(*ctx), TAG_COMPRESSION, HEAP_DELTA)) r1dc_context_t();
     std::memset(ctx, 0, sizeof(*ctx));
 
     // Create the fallback LZHAM context
@@ -114,10 +119,12 @@ void* r1dc_init(void* params)
 // --------------------------------------------------------------------------
 __int64 r1dc_reinit(void* p, void* unk1, void* unk2, void* unk3)
 {
+    ZoneScoped;
+
     if (!p) return 0;
     r1dc_context_t* ctx = static_cast<r1dc_context_t*>(p);
 
- //   std::lock_guard<std::mutex> lock(ctx->mtx);
+ //   SRWGuard lock(&ctx->mtx);
 
     // Reset ZSTD detection
     ctx->typeDetermined = false;
@@ -129,7 +136,7 @@ __int64 r1dc_reinit(void* p, void* unk1, void* unk2, void* unk3)
     // Free any old decompression buffer from the previous chunk
     if (ctx->m_decompBuf)
     {
-        free(ctx->m_decompBuf);
+        GlobalAllocator()->mi_free(ctx->m_decompBuf, TAG_COMPRESSION, HEAP_DELTA);
         ctx->m_decompBuf = nullptr;
     }
     ctx->m_decompSize = 0;
@@ -146,10 +153,12 @@ __int64 r1dc_reinit(void* p, void* unk1, void* unk2, void* unk3)
 // --------------------------------------------------------------------------
 __int64 r1dc_deinit(void* p)
 {
+    ZoneScoped;
+
     if (!p) return 0;
     r1dc_context_t* ctx = static_cast<r1dc_context_t*>(p);
 
-  //  std::lock_guard<std::mutex> lock(ctx->mtx);
+  //  SRWGuard lock(&ctx->mtx);
 
     __int64 ret = 0;
     // Deinit the fallback LZHAM
@@ -162,11 +171,13 @@ __int64 r1dc_deinit(void* p)
     // Free any leftover decompression buffer
     if (ctx->m_decompBuf)
     {
-        free(ctx->m_decompBuf);
+        GlobalAllocator()->mi_free(ctx->m_decompBuf, TAG_COMPRESSION, HEAP_DELTA);
         ctx->m_decompBuf = nullptr;
     }
 
-    delete ctx;
+    // Destroy mutex.
+    ctx->~r1dc_context_t();
+    GlobalAllocator()->mi_free(ctx);
     return ret;
 }
 
@@ -195,10 +206,12 @@ __int64 r1dc_decompress(
     size_t* pOut_buf_size,
     int no_more_input_bytes_flag)
 {
+    ZoneScoped;
+
     if (!p) return 0;
     r1dc_context_t* ctx = static_cast<r1dc_context_t*>(p);
 
-   // std::lock_guard<std::mutex> lock(ctx->mtx);
+   // SRWGuard lock(&ctx->mtx);
 
     // If we haven't decided whether it's ZSTD or not:
     if (!ctx->typeDetermined)
@@ -268,6 +281,8 @@ __int64 r1dc_decompress(
             // Cap in case an unexpected overflow
             if (ctx->totalComp + n > MAX_CHUNK_COMPRESSED_SIZE)
             {
+                R1DAssert(!"Chunk limit exceeded");
+
                 // This is an error or extremely unexpected
                 Warning("[r1dc] Error: compressed data exceeds 1MB chunk limit!\n");
                 // You could return an error code here:
@@ -295,7 +310,7 @@ __int64 r1dc_decompress(
                 }
 
                 // Allocate decompression buffer
-                ctx->m_decompBuf = static_cast<uint8_t*>(malloc((size_t)fSize));
+                ctx->m_decompBuf = static_cast<uint8_t*>(GlobalAllocator()->mi_malloc((size_t)fSize, TAG_COMPRESSION, HEAP_DELTA));
                 ctx->m_decompSize = (size_t)fSize;
 
                 // Single-shot decompress
@@ -308,6 +323,7 @@ __int64 r1dc_decompress(
                     Warning("[r1dc] ZSTD decompress error: %s\n",
                         ZSTD_getErrorName(actualSize));
                     // Return an error code so the engine sees we failed
+                    R1DAssert(!"Decompression error");
                     return -1;
                 }
 
@@ -345,6 +361,7 @@ __int64 r1dc_decompress(
     }
 
     // Not done yet
+    R1DAssert(!"Unreachable?");
     return 0;
 }
 int (*osub_180019350)(__int64 a1, char* a2, unsigned __int8* a3, unsigned int a4, char a5, int a6);

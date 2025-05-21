@@ -195,7 +195,7 @@ float __fastcall sub_35E240(int a1)
 
 int sub_390AE0(CAI_Network* network)
 {
-	static const float dword_1061618 = sqrtf(1.1754944e-38);
+	static const float dword_1061618 = sqrtf(1.1754944e-38f);
 	auto UTIL_TraceLine = reinterpret_cast<void** (*)(Vector3f* a1, Vector3f* a2, __int64 a3, __int64 a4, int a5, char* a6)>(G_server + 0x263AF0);
 
 	CAI_Node** nodes = network->nodes;

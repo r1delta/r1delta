@@ -18,7 +18,6 @@
 #include "cvar.h"
 #include "logging.h"
 #include "masterserver.h"
-#include "thread.h"
 #include "r1d_version.h"
 
 using json = nlohmann::json;
@@ -88,9 +87,9 @@ void InitMasterServerCVars() {
 
 namespace MasterServerClient {
     static std::vector<ServerInfo> serverList;
-    static std::mutex serverListMutex;
-    static std::mutex httpMutex;
-    static std::mutex heartbeatMutex;
+    static SRWLOCK serverListMutex = SRWLOCK_INIT;
+    static SRWLOCK httpMutex = SRWLOCK_INIT;
+    static SRWLOCK heartbeatMutex = SRWLOCK_INIT;
     static std::unique_ptr<httplib::Client> httpClient;
     static HeartbeatInfo lastHeartbeat;
     static std::atomic<bool> heartbeatThreadRunning{false};
@@ -128,7 +127,7 @@ namespace MasterServerClient {
             return true;
         }
 
-        std::lock_guard<std::mutex> lock(httpMutex);
+        SRWGuard lock(&httpMutex);
         EnsureHttpClient(delta_ms_url->m_Value.m_pszString);
 
         json j;
@@ -188,13 +187,13 @@ namespace MasterServerClient {
         std::uniform_int_distribution<> delayDist(1, 3);
         std::this_thread::sleep_for(std::chrono::seconds(delayDist(gen)));
         
-        CThread([]{
+        std::thread([]{
             while (heartbeatThreadRunning.load(std::memory_order_acquire)) {
                 HeartbeatInfo currentHeartbeat;
                 bool isHibernating = false;
                 
                 {
-                    std::lock_guard<std::mutex> lock(heartbeatMutex);
+                    SRWGuard lock(&heartbeatMutex);
                     currentHeartbeat = lastHeartbeat;
                     
                     // Check if server is hibernating (no heartbeat for 60 seconds)
@@ -265,7 +264,7 @@ namespace MasterServerClient {
             
             // Update the server list with mutex protection
             {
-                std::lock_guard<std::mutex> lock(serverListMutex);
+                SRWGuard lock(&serverListMutex);
                 serverList = std::move(newServerList);
             }
         }
@@ -379,11 +378,12 @@ SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
         }
     }
 
-    heartbeat.players = players;
+    heartbeat.players = std::move(players);
 
     // Update the last heartbeat time and data
     {
-        std::lock_guard<std::mutex> lock(MasterServerClient::heartbeatMutex);
+        ZoneScopedN("GetServerHeartbeat heartbeatMutex | update heartbeat");
+        SRWGuard lock(&MasterServerClient::heartbeatMutex);
         MasterServerClient::lastHeartbeat = heartbeat;
         MasterServerClient::lastHeartbeatTime.store(std::chrono::system_clock::now(), std::memory_order_release);
     }
@@ -397,11 +397,12 @@ SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
 
 SQInteger DispatchServerListReq(HSQUIRRELVM v) {
     {
-        std::lock_guard<std::mutex> lock(MasterServerClient::serverListMutex);
+        ZoneScopedN("DispatchServerListReq serverListMutex");
+        SRWGuard lock(&MasterServerClient::serverListMutex);
         MasterServerClient::serverList.clear();
     }
 
-    CThread([]() {
+    std::thread([]() {
         MasterServerClient::GetServerList();
     }).detach();
 
@@ -410,53 +411,66 @@ SQInteger DispatchServerListReq(HSQUIRRELVM v) {
 }
 
 SQInteger PollServerList(HSQUIRRELVM v) {
+    ZoneScoped;
+
     sq_newarray(v, 0);
 
-    // Make a copy of the server list with mutex protection
-    std::vector<ServerInfo> serverListCopy;
+#if 1
     {
-        std::lock_guard<std::mutex> lock(MasterServerClient::serverListMutex);
-        serverListCopy = MasterServerClient::serverList;
-    }
+        ZoneScopedN("PollServerList serverListMutex");
+        SRWGuard lock(&MasterServerClient::serverListMutex);
 
-    if (serverListCopy.empty()) {
-        //sq_newtable(v);
-        //sq_pushstring(v, "host_name", -1); sq_pushstring(v, "No servers found.", -1); sq_newslot(v, -3, 0);
-        //sq_pushstring(v, "map_name", -1); sq_pushstring(v, "mp_lobby", -1); sq_newslot(v, -3, 0);
-        //sq_pushstring(v, "game_mode", -1); sq_pushstring(v, "-", -1); sq_newslot(v, -3, 0);
-        //sq_pushstring(v, "max_players", -1); sq_pushinteger(0, v, 0); sq_newslot(v, -3, 0);
-        //sq_pushstring(v, "port", -1); sq_pushinteger(0, v, 0); sq_newslot(v, -3, 0);
-        //sq_pushstring(v, "ip", -1); sq_pushstring(v, "0.0.0.0", -1); sq_newslot(v, -3, 0);
-        //sq_pushstring(v, "players", -1); sq_newarray(v, 0); sq_newslot(v, -3, 0);
-        //sq_arrayappend(v, -2);
-        return 1;
-    }
-    
-    for (auto& s : serverListCopy) {
-        sq_newtable(v);
-        sq_pushstring(v, "host_name", -1); sq_pushstring(v, s.hostName.c_str(), -1); sq_newslot(v, -3, 0);
-        sq_pushstring(v, "map_name", -1); sq_pushstring(v, s.mapName.c_str(), -1); sq_newslot(v, -3, 0);
-        sq_pushstring(v, "game_mode", -1); sq_pushstring(v, s.gameMode.c_str(), -1); sq_newslot(v, -3, 0);
-        sq_pushstring(v, "max_players", -1); sq_pushinteger(0, v, s.maxPlayers); sq_newslot(v, -3, 0);
-        sq_pushstring(v, "port", -1); sq_pushinteger(0, v, s.port); sq_newslot(v, -3, 0);
-        sq_pushstring(v, "ip", -1); sq_pushstring(v, s.ip.c_str(), -1); sq_newslot(v, -3, 0);
-		sq_pushstring(v, "has_password", -1); sq_pushinteger(0, v, s.hasPassword ? 1 : 0); sq_newslot(v, -3, 0);
-		sq_pushstring(v, "description", -1); sq_pushstring(v, s.description.c_str(), -1); sq_newslot(v, -3, 0);
-		sq_pushstring(v, "playlist", -1); sq_pushstring(v, s.playlist.c_str(), -1); sq_newslot(v, -3, 0);
-		sq_pushstring(v, "playlist_display_name", -1); sq_pushstring(v, s.playlist_display_name.c_str(), -1); sq_newslot(v, -3, 0);
-		sq_pushstring(v, "version", -1); sq_pushstring(v, s.version.c_str(), -1); sq_newslot(v, -3, 0);
-        sq_pushstring(v, "players", -1);
-        sq_newarray(v, 0);
-        for (auto& p : s.players) {
+        if (MasterServerClient::serverList.empty()) {
+            //sq_newtable(v);
+            //sq_pushstring(v, "host_name", -1); sq_pushstring(v, "No servers found.", -1); sq_newslot(v, -3, 0);
+            //sq_pushstring(v, "map_name", -1); sq_pushstring(v, "mp_lobby", -1); sq_newslot(v, -3, 0);
+            //sq_pushstring(v, "game_mode", -1); sq_pushstring(v, "-", -1); sq_newslot(v, -3, 0);
+            //sq_pushstring(v, "max_players", -1); sq_pushinteger(0, v, 0); sq_newslot(v, -3, 0);
+            //sq_pushstring(v, "port", -1); sq_pushinteger(0, v, 0); sq_newslot(v, -3, 0);
+            //sq_pushstring(v, "ip", -1); sq_pushstring(v, "0.0.0.0", -1); sq_newslot(v, -3, 0);
+            //sq_pushstring(v, "players", -1); sq_newarray(v, 0); sq_newslot(v, -3, 0);
+            //sq_arrayappend(v, -2);
+            return 1;
+        }
+
+        for (auto& s : MasterServerClient::serverList)
+#else
+    {
+        decltype(MasterServerClient::serverList) serverList;
+        {
+            ZoneScopedN("PollServerList serverListMutex");
+            SRWGuard lock(&MasterServerClient::serverListMutex);
+            serverList = MasterServerClient::serverList;
+        }
+
+        for (auto& s : serverList)
+#endif
+        {
             sq_newtable(v);
-            sq_pushstring(v, "name", -1); sq_pushstring(v, p.name.c_str(), -1); sq_newslot(v, -3, 0);
-            sq_pushstring(v, "gen", -1); sq_pushinteger(0, v, p.gen); sq_newslot(v, -3, 0);
-            sq_pushstring(v, "lvl", -1); sq_pushinteger(0, v, p.lvl); sq_newslot(v, -3, 0);
-            sq_pushstring(v, "team", -1); sq_pushinteger(0, v, p.team); sq_newslot(v, -3, 0);
+            sq_pushstring_lit(v, "host_name"); sq_pushstring_std(v, s.hostName); sq_newslot(v, -3, 0);
+            sq_pushstring_lit(v, "map_name"); sq_pushstring_std(v, s.mapName); sq_newslot(v, -3, 0);
+            sq_pushstring_lit(v, "game_mode"); sq_pushstring_std(v, s.gameMode); sq_newslot(v, -3, 0);
+            sq_pushstring_lit(v, "max_players"); sq_pushinteger(0, v, s.maxPlayers); sq_newslot(v, -3, 0);
+            sq_pushstring_lit(v, "port"); sq_pushinteger(0, v, s.port); sq_newslot(v, -3, 0);
+            sq_pushstring_lit(v, "ip"); sq_pushstring_std(v, s.ip); sq_newslot(v, -3, 0);
+            sq_pushstring_lit(v, "has_password"); sq_pushinteger(0, v, s.hasPassword ? 1 : 0); sq_newslot(v, -3, 0);
+            sq_pushstring_lit(v, "description"); sq_pushstring_std(v, s.description); sq_newslot(v, -3, 0);
+            sq_pushstring_lit(v, "playlist"); sq_pushstring_std(v, s.playlist); sq_newslot(v, -3, 0);
+            sq_pushstring_lit(v, "playlist_display_name"); sq_pushstring_std(v, s.playlist_display_name); sq_newslot(v, -3, 0);
+            sq_pushstring_lit(v, "version"); sq_pushstring_std(v, s.version); sq_newslot(v, -3, 0);
+            sq_pushstring_lit(v, "players");
+            sq_newarray(v, 0);
+            for (auto& p : s.players) {
+                sq_newtable(v);
+                sq_pushstring_lit(v, "name"); sq_pushstring_std(v, p.name); sq_newslot(v, -3, 0);
+                sq_pushstring_lit(v, "gen"); sq_pushinteger(0, v, p.gen); sq_newslot(v, -3, 0);
+                sq_pushstring_lit(v, "lvl"); sq_pushinteger(0, v, p.lvl); sq_newslot(v, -3, 0);
+                sq_pushstring_lit(v, "team"); sq_pushinteger(0, v, p.team); sq_newslot(v, -3, 0);
+                sq_arrayappend(v, -2);
+            }
+            sq_newslot(v, -3, 0);
             sq_arrayappend(v, -2);
         }
-        sq_newslot(v, -3, 0);
-        sq_arrayappend(v, -2);
     }
 
     return 1;

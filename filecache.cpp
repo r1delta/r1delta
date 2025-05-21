@@ -4,8 +4,11 @@
 #include <iostream> // For std::cerr (replace with Msg/Warning)
 
 #include "logging.h"
+#include "tctx.hh"
 
 FileCache::FileCache() {
+    cacheMutex = SRWLOCK_INIT;
+    cacheCondition = CONDITION_VARIABLE_INIT;
     executableDirectory = GetExecutableDirectory();
     if (executableDirectory.empty()) {
         // Handle error: Cannot proceed without executable path
@@ -15,10 +18,10 @@ FileCache::FileCache() {
         return;
     }
     r1deltaBasePath = executableDirectory / "r1delta";
+    r1deltaBasePath.make_preferred();
+    r1deltaBasePathHash = fnv1a_hash(r1deltaBasePath);
     r1deltaAddonsPath = std::filesystem::current_path() / "r1" / "addons";
-
-    // Optionally start the UpdateCache thread here
-    // std::thread(&FileCache::UpdateCache, this).detach();
+    r1deltaAddonsPath.make_preferred();
 }
 
 
@@ -44,10 +47,7 @@ void FileCache::ScanDirectory(const std::filesystem::path& directory,
 
     // Ensure the base addon directory itself is added if requested
     if (currentAddonsFolders && directory == r1deltaAddonsPath) {
-        // Store normalized version
-        std::filesystem::path normAddonsPath = r1deltaAddonsPath;
-        normAddonsPath.make_preferred(); // Use native separators (\ on Windows)
-        currentAddonsFolders->insert(normAddonsPath.string());
+        currentAddonsFolders->insert(r1deltaAddonsPath.string());
     }
 
 
@@ -96,7 +96,7 @@ void FileCache::UpdateCache() {
     if (executableDirectory.empty()) {
         Warning("FileCache::UpdateCache called but executable directory is unknown. Aborting.\n");
         initialized.store(true, std::memory_order_release); // Mark as "initialized" to unblock waiters, even though unusable
-        cacheCondition.notify_all();
+        WakeAllConditionVariable(&cacheCondition);
         return;
     }
 
@@ -125,9 +125,15 @@ void FileCache::UpdateCache() {
             //Msg("File cache scan complete. Found %zu files, %zu addon folders.\n", newCache.size(), newAddonsFolderCache.size());
 
             { // Lock scope for swapping caches
-                std::unique_lock<std::shared_mutex> lock(cacheMutex);
+                ZoneScopedN("FileCache update cacheMutex");
+                SRWGuard lock(&cacheMutex);
                 cache = std::move(newCache);
                 addonsFolderCache = std::move(newAddonsFolderCache);
+                addonsFolderCacheHashes.clear();
+                for (const auto& k : newAddonsFolderCache)
+                {
+                    addonsFolderCacheHashes.push_back(fnv1a_hash(k));
+                }
 
                 // Set initialized only AFTER the first successful scan completes
                 if (firstScan) {
@@ -138,7 +144,7 @@ void FileCache::UpdateCache() {
 
             // Notify waiters ONLY on the first scan completion
             if (!firstScan) { // This means it was the first scan run
-                cacheCondition.notify_all();
+                WakeAllConditionVariable(&cacheCondition);
             }
         } // End build scope
 
@@ -146,15 +152,17 @@ void FileCache::UpdateCache() {
         // Wait for manual rescan request
         { // Lock scope for waiting
             ZoneScopedN("FileCache Wait For Rescan");
-            std::unique_lock<std::shared_mutex> lock(cacheMutex); // Use unique lock for condition variable wait
-            cacheCondition.wait(lock, [this]() {
-                // Wait until initialized (should be true after first loop) AND manual rescan requested
-                return initialized.load(std::memory_order_acquire) &&
-                    manualRescanRequested.load(std::memory_order_acquire);
-                });
+            
+            AcquireSRWLockExclusive(&cacheMutex);
+            while (!(initialized.load(std::memory_order_acquire) &&
+                manualRescanRequested.load(std::memory_order_acquire)))
+            {
+                SleepConditionVariableSRW(&cacheCondition, &cacheMutex, INFINITE, 0);
+            }
 
             // Reset the request flag *after* waking up
             manualRescanRequested.store(false, std::memory_order_relaxed); // Relaxed is fine, protected by mutex
+            ReleaseSRWLockExclusive(&cacheMutex);
         }
     }
 }
@@ -166,93 +174,212 @@ bool FileCache::TryReplaceFile(const char* pszRelativeFilePath) {
 
     // Ensure cache is initialized and ready
     if (!initialized.load(std::memory_order_acquire)) {
-        // Optionally wait here, but could deadlock if UpdateCache fails.
-        // Better to have FileExists/TryReplaceFile wait individually.
-        // OR return false immediately if not initialized. For simplicity, let's wait like FileExists.
-        std::shared_lock<std::shared_mutex> lock(cacheMutex);
-        cacheCondition.wait(lock, [this]() { return initialized.load(std::memory_order_acquire); });
-        // Lock is re-acquired, proceed below (or re-check initialized state)
+        AcquireSRWLockShared(&cacheMutex);
+        do {
+            SleepConditionVariableSRW(&cacheCondition, &cacheMutex, INFINITE, CONDITION_VARIABLE_LOCKMODE_SHARED);
+        } while (!initialized.load(std::memory_order_acquire));
+        ReleaseSRWLockShared(&cacheMutex);
     }
-    // Re-check after wait just in case of spurious wakeup or error during init
-    if (!initialized.load(std::memory_order_acquire)) {
-        return false; // Cache never initialized properly
-    }
+
+    // NOTE(mrsteyk): R1DAssert macro still evaluates the expression.
+#if BUILD_DEBUG
+    R1DAssert(initialized.load(std::memory_order_acquire));
+#endif
 
 
     if (!pszRelativeFilePath || *pszRelativeFilePath == '\0') {
         return false; // Invalid input
     }
 
+    // NOTE(mrsteyk): part of is_absolute check without dumb fluff. Read `is_absolute` code to find out more.
+    //if ((pszRelativeFilePath[0] == '/' || pszRelativeFilePath[0] == '\\') && (pszRelativeFilePath[1] == '/' || pszRelativeFilePath[1] == '\\'))
+    if (pszRelativeFilePath[0] == '/' || pszRelativeFilePath[0] == '\\')
+    {
+        return false;
+    }
+    if (pszRelativeFilePath[1] == ':')
+    {
+        return false;
+    }
+
     // NOTE(mrsteyk): operate under the assumption that game also uses 260 byte paths, as evident by the original.
     //                this issue already manifested itself long ago and I swear I fixed it, idk why it popped up again.
     //                also please stop using Gemini to rewrite everything, it's annoying.
     bool found_null = false;
-    for (size_t i = 0; i < 260; ++i)
+    size_t pszRelativeFilePath_len = 0;
+    size_t pszRelativeFilePath_parts = 1;
     {
-        if (pszRelativeFilePath[i] == 0)
+        ZoneScopedN("TryReplaceFile>260+Null Check");
+        for (size_t i = 0; i < 260; ++i)
         {
-            found_null = true;
-            break;
-        }
-        // NOTE(mrsteyk): do not handle unicode in replacement names.
-        if (!isprint(pszRelativeFilePath[i])) // if (pszRelativeFilePath[i] < 0)
-        {
-            return false;
+            if (pszRelativeFilePath[i] == 0)
+            {
+                found_null = true;
+                pszRelativeFilePath_len = i;
+                break;
+            }
+            else if (pszRelativeFilePath[i] == '/' || pszRelativeFilePath[i] == '\\')
+            {
+                pszRelativeFilePath_parts++;
+            }
+            // NOTE(mrsteyk): do not handle unicode in replacement names.
+            else if (!isprint((unsigned char)pszRelativeFilePath[i])) // if (pszRelativeFilePath[i] < 0)
+            {
+                return false;
+            }
         }
     }
     if (!found_null)
     {
         return false;
     }
-
-    // Use std::filesystem::path for robust joining, handle input slashes automatically
-    std::filesystem::path relativePath(pszRelativeFilePath);
-
-    // Immediately return false if the input is somehow absolute already
-    if (relativePath.is_absolute()) {
-        // Or maybe use V_IsAbsolutePath if it's more specific?
-        // if (V_IsAbsolutePath(pszRelativeFilePath)) { return false; }
+    if (pszRelativeFilePath[pszRelativeFilePath_len - 1] == '/' || pszRelativeFilePath[pszRelativeFilePath_len - 1] == '\\')
+    {
         return false;
     }
 
-    // --- Path normalization and potential prefix stripping ---
-    // Standardize: remove leading "./" or ".\\"
-    std::string pathStr = relativePath.lexically_normal().string();
-    if (pathStr.starts_with(".\\") || pathStr.starts_with("./")) {
-        pathStr.erase(0, 2);
+    Arena* arena = tctx.get_arena_for_scratch();
+    TempArena temp = TempArena(arena);
+
+    struct S8 {
+        const char* ptr;
+        size_t size;
+    };
+    S8* path_parts = (S8*)arena_push(arena, sizeof(*path_parts) * pszRelativeFilePath_parts);
+    size_t path_parts_idx = 0;
+
+    const char* path_part_curr = pszRelativeFilePath;
+    size_t path_part_size = 0;
+    for (size_t i = 0; i < pszRelativeFilePath_len; ++i)
+    {
+        if (pszRelativeFilePath[i] == '/' || pszRelativeFilePath[i] == '\\')
+        {
+            R1DAssert(path_part_size > 0);
+            if (path_parts_idx == 0 && path_part_size == 1 && path_part_curr[0] == '*')
+            {
+                // SKIP
+            }
+            else if (path_part_size == 1 && path_part_curr[0] == '.')
+            {
+                // SKIP
+            }
+            else if (path_parts_idx && path_part_size == 2 && path_part_curr[0] == '.' && path_part_curr[1] == '.')
+            {
+                // Remove `../` with directory change.
+                path_parts_idx--;
+            }
+            else// if (path_part_size)
+            {
+                R1DAssert(path_part_size);
+                path_parts[path_parts_idx] = { .ptr = path_part_curr, .size = path_part_size };
+                path_parts_idx++;
+            }
+            // NOTE(mrsteyk): Skip separators, because buggy Hammer material names or something.
+            do {
+                ++i;
+            } while (pszRelativeFilePath[i] == '/' || pszRelativeFilePath[i] == '\\');
+            path_part_curr = pszRelativeFilePath + i;
+            path_part_size = 1;
+        }
+        else
+        {
+            path_part_size++;
+        }
     }
-    // Handle the "/*/" prefix - convert to view for checking efficiently
-    std::string_view svFilePath(pathStr);
-    if (svFilePath.starts_with("*/") || svFilePath.starts_with("*\\")) { // Check both separators
-        svFilePath.remove_prefix(2); // Remove only 2 chars
+    if (path_part_size)
+    {
+        R1DAssert((path_part_curr + path_part_size) <= (pszRelativeFilePath + pszRelativeFilePath_len));
+        path_parts[path_parts_idx] = { .ptr = path_part_curr, .size = path_part_size };
+        path_parts_idx++;
     }
-    // Recreate path object from the potentially modified view
-    relativePath = std::filesystem::path(svFilePath);
-    // Ensure it's still relative after potential normalization/stripping
-    if (relativePath.empty() || relativePath.is_absolute()) {
+    if (path_parts_idx == 0)
+    {
         return false;
     }
+    
+    size_t path_size = path_parts_idx;
+    for (size_t i = 0; i < path_parts_idx; ++i)
+    {
+        path_size += path_parts[i].size;
+    }
+#if BUILD_DEBUG
+    // NOTE(mrsteyk): remove conversion middleman.
+    wchar_t* path = (wchar_t*)arena_push(arena, sizeof(wchar_t) * path_size);
+    size_t path_idx = 0;
+    for (size_t i = 0; i < path_parts_idx; ++i)
+    {
+        for (size_t j = 0; j < path_parts[i].size; ++j)
+        {
+            path[path_idx + j] = path_parts[i].ptr[j];
+        }
+        path_idx += path_parts[i].size;
+        path[path_idx] = L'\\';
+        path_idx++;
+    }
+    path_idx--;
+    path[path_idx] = 0;
 
+    {
+        // Use std::filesystem::path for robust joining, handle input slashes automatically
+        std::filesystem::path relativePath(pszRelativeFilePath);
+
+        // --- Path normalization and potential prefix stripping ---
+        // Standardize: remove leading "./" or ".\\"
+        std::wstring pathStr = relativePath.lexically_normal();
+        std::wstring_view svFilePath(pathStr);
+        if (svFilePath.starts_with(L".\\") || svFilePath.starts_with(L"./")) {
+            R1DAssert(!"Unreachable?");
+            svFilePath.remove_prefix(2);
+        }
+        // Handle the "/*/" prefix - convert to view for checking efficiently
+        if (svFilePath.starts_with(L"*/") || svFilePath.starts_with(L"*\\")) { // Check both separators
+            R1DAssert(!"Unreachable?");
+            svFilePath.remove_prefix(2); // Remove only 2 chars
+        }
+        if (svFilePath.empty())
+        {
+            return false;
+        }
+        // Recreate path object from the potentially modified view
+        relativePath = std::filesystem::path(svFilePath);
+        // Ensure it's still relative after potential normalization/stripping
+        if (relativePath.empty() || relativePath.is_absolute()) {
+            R1DAssert(!"Unreachable?");
+            return false;
+        }
+
+        R1DAssert(relativePath.native() == path);
+    }
+#endif
     // --- Check Paths ---
     { // Shared lock scope for reading cache and addonsFolderCache
-        std::shared_lock<std::shared_mutex> lock(cacheMutex);
+        ZoneScopedN("TryReplaceFile>Check Paths");
+        SRWGuardShared lock(&cacheMutex);
 
         // 1. Check in r1delta base directory
-        std::filesystem::path potentialBasePath = r1deltaBasePath / relativePath;
-        potentialBasePath.make_preferred(); // Normalize separators
-        std::size_t baseHash = fnv1a_hash(potentialBasePath.string());
+        // std::filesystem::path potentialBasePath = r1deltaBasePath / relativePath;
+        //potentialBasePath.make_preferred(); // Normalize separators
+
+        auto baseHash = r1deltaBasePathHash;
+        for (size_t i = 0; i < path_parts_idx; ++i)
+        {
+            baseHash = fnv1a_hash(std::string_view("\\", 1), baseHash);
+            baseHash = fnv1a_hash(std::string_view(path_parts[i].ptr, path_parts[i].size), baseHash);
+        }
+
         if (cache.contains(baseHash)) {
             return true;
         }
 
         // 2. Check in each addon directory
-        for (const std::string& addonDirString : addonsFolderCache) {
-            // addonDirString is already absolute and normalized from ScanDirectory
-            std::filesystem::path potentialAddonPath = std::filesystem::path(addonDirString) / relativePath;
-            // No need to call make_preferred again IF addonDirString is already preferred AND relativePath uses preferred.
-            // But calling it again is safe and ensures consistency.
-            potentialAddonPath.make_preferred();
-            std::size_t addonHash = fnv1a_hash(potentialAddonPath.string());
+        for (const std::size_t addonDirStringHash : addonsFolderCacheHashes) {
+            std::size_t addonHash = addonDirStringHash;
+            for (size_t i = 0; i < path_parts_idx; ++i)
+            {
+                addonHash = fnv1a_hash(std::string_view("\\", 1), addonHash);
+                addonHash = fnv1a_hash(std::string_view(path_parts[i].ptr, path_parts[i].size), addonHash);
+            }
+
             if (cache.contains(addonHash)) {
                 return true;
             }
@@ -264,23 +391,30 @@ bool FileCache::TryReplaceFile(const char* pszRelativeFilePath) {
 
 // filecache.cpp (continued)
 
+#if 0
 bool FileCache::FileExists(const std::string& filePath) {
+    ZoneScoped;
+
     // If the cache might contain relative paths too (it shouldn't with the current scan logic),
     // you might need path normalization here as well. Assuming filePath is expected to be
     // an absolute, normalized path for direct lookup.
     std::filesystem::path checkPath = filePath;
     checkPath.make_preferred(); // Ensure consistent format with cached paths
-    std::size_t hashedPath = fnv1a_hash(checkPath.string());
+    std::size_t hashedPath = fnv1a_hash(checkPath);
 
     // Acquire lock, wait for initialization if needed, then check cache
-    std::shared_lock<std::shared_mutex> sharedLock(cacheMutex);
+    AcquireSRWLockShared(&cacheMutex);
 
     // Wait ONLY if not initialized yet.
-    cacheCondition.wait(sharedLock, [this]() {
-        return initialized.load(std::memory_order_acquire);
-        });
+    while (!initialized.load(std::memory_order_acquire))
+    {
+        SleepConditionVariableSRW(&cacheCondition, &cacheMutex, INFINITE, CONDITION_VARIABLE_LOCKMODE_SHARED);
+    }
 
     // Initialized is true and we hold the lock
-    return cache.contains(hashedPath);
+    auto ret = cache.contains(hashedPath);
+    ReleaseSRWLockShared(&cacheMutex);
 
-} // sharedLock is automatically released here
+    return ret;
+}
+#endif

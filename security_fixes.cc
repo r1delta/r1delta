@@ -805,7 +805,7 @@ void NET_ClearLastError()
 	*net_error = 0;
 }
 
-bool(*__fastcall oNET_ReceiveDatagram)(const int sock, netpacket_t* packet, bool encrypted);
+bool(__fastcall *oNET_ReceiveDatagram)(const int sock, netpacket_t* packet, bool encrypted);
 
 bool __fastcall NET_ReceiveDatagram(const int sock, netpacket_t* packet, bool encrypted)
 {
