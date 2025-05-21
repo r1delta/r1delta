@@ -101,38 +101,99 @@ void StartFileCacheThread() {
 }
 class FastFileSystemHook {
 private:
-	struct TrieNode {
-		std::unordered_map<std::string, TrieNode, HashStrings, std::equal_to<>> children;
-		bool exists = false;
-		bool checked = false;
+	struct FFSS
+	{
+		const char* ptr;
+		size_t len;
+
+		bool equals(FFSS other)
+		{
+			if (!this->len || this->len != other.len)
+			{
+				return false;
+			}
+			return !memcmp(this->ptr, other.ptr, this->len);
+		}
 	};
-	static TrieNode root;
+	static uint64_t hash64(FFSS s)
+	{
+		uint64_t h = 0x100;
+		for (ptrdiff_t i = 0; i < s.len; i++) {
+			unsigned char e = s.ptr[i] & 0xdf;
+			// TODO(mrsteyk): some bit magic?
+			if (e == 0xf)
+			{
+				e = '\\';
+			}
+			h ^= e & 255;
+			h *= 1111111111111111111;
+		}
+		return h;
+	}
+	struct Payload
+	{
+		bool checked;
+		bool exists;
+	};
+	static constexpr size_t TRIE_BITS = 2;
+	struct Trie
+	{
+		Trie* child[1 << TRIE_BITS];
+		FFSS key;
+		Payload value;
+	};
+	static Trie* root;
 	static SRWLOCK cacheMutex;
+	static Arena* trieArena;
+
+	static Trie* lookup(Trie** map, FFSS key) {
+		ZoneScoped;
+
+		for (uint64_t h = hash64(key); *map; h <<= TRIE_BITS) {
+			if (key.equals((*map)->key)) {
+				return *map;
+			}
+			map = &(*map)->child[h >> (64 - TRIE_BITS)];
+		}
+		Trie* ret;
+		{
+			ZoneScopedN("lookup>allocation");
+
+			ReleaseSRWLockShared(&cacheMutex);
+			AcquireSRWLockExclusive(&cacheMutex);
+			*map = (Trie*)arena_push(trieArena, sizeof(Trie));
+			char* ptr = (char*)arena_push(trieArena, key.len + 1);
+			memcpy(ptr, key.ptr, key.len);
+			(*map)->key = { .ptr = ptr, .len = key.len };
+			ret = *map;
+			ReleaseSRWLockExclusive(&cacheMutex);
+			AcquireSRWLockShared(&cacheMutex);
+		}
+		return ret;
+	}
+
 	static bool checkAndCachePath(const char* fullPath) {
 		ZoneScoped;
 
-		TrieNode* node = &root;
 		const char* part = fullPath;
 		const size_t part_len = strlen(fullPath);
 		R1DAssert(part_len < 260);
-		std::string currentPath;
-		currentPath.reserve(part_len);
-		while (*part) {
-			while (*part && *part != '\\' && *part != '/') {
-				currentPath += *part++;
+		size_t i = 0;
+		while (i < part_len) {
+			while (i < part_len && part[i] != '\\' && part[i] != '/') {
+				i++;
 			}
-			if (*part) part++; // Skip the separator
-			node = &node->children[currentPath];
-			if (!node->checked) {
+			if (i < part_len) i++; // Skip the separator
+			Trie* node = lookup(&root, { .ptr = part, .len = i });
+			if (!node->value.checked) {
 				ZoneScopedN("checkAndCachePath make node");
-				DWORD attributes = GetFileAttributesA(currentPath.c_str());
-				node->exists = (attributes != INVALID_FILE_ATTRIBUTES);
-				node->checked = true;
+				DWORD attributes = GetFileAttributesA(node->key.ptr);
+				node->value.exists = (attributes != INVALID_FILE_ATTRIBUTES);
+				node->value.checked = true;
 			}
-			if (!node->exists) {
+			if (!node->value.exists) {
 				return false;
 			}
-			currentPath += '\\';
 		}
 		return true;
 	}
@@ -155,12 +216,14 @@ public:
 		ZoneScoped;
 
 		AcquireSRWLockExclusive(&cacheMutex);
-		root = TrieNode();
+		root = 0;
+		arena_clear(trieArena);
 		ReleaseSRWLockExclusive(&cacheMutex);
 	}
 };
 
-FastFileSystemHook::TrieNode FastFileSystemHook::root;
+FastFileSystemHook::Trie* FastFileSystemHook::root = 0;
+Arena* FastFileSystemHook::trieArena = arena_alloc();
 SRWLOCK FastFileSystemHook::cacheMutex = SRWLOCK_INIT;
 
 __int64(*HandleOpenRegularFileOriginal)(__int64 a1, __int64 a2, char a3);
