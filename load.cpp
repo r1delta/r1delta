@@ -3046,6 +3046,7 @@ void __stdcall LoaderNotificationCallback(
 			SetupSquirrelErrorNotificationHooks();
 			SetupChatWriter();
 			RegisterConCommand("+toggleFullscreenMap", toggleFullscreenMap_cmd, "Toggles the fullscreen map.", FCVAR_CLIENTDLL);
+			RegisterConVar("cl_hold_to_rodeo_enable", "0", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "0: Automatic rodeo. 1: Hold to rodeo ALL titans. 2: Hold to rodeo friendlies, automatically rodeo hostile titans.");
 			CThread(DiscordThread).detach();
 			
 		}
