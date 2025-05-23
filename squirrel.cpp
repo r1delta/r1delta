@@ -461,8 +461,6 @@ int GetMods(HSQUIRRELVM v) {
 				//if it does not exist add it
 				auto it = std::find(modLocalization_files.begin(), modLocalization_files.end(), localization_str);
 				if (it != modLocalization_files.end()) {
-					// already exists
-					Msg("Localization file already exists: %s\n", localization_str);
 				}
 				else {
 					modLocalization_files.push_back(localization_str);
