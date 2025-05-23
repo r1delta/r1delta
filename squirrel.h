@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include <string>
 #include "defs.h"
+#include <vector>
 enum ScriptContext
 {
 	SCRIPT_CONTEXT_SERVER,
@@ -496,6 +497,7 @@ extern CSquirrelVM__GetEntityFromInstance_t CSquirrelVM__GetEntityFromInstance;
 extern sq_GetEntityConstant_CBaseEntity_t sq_GetEntityConstant_CBaseEntity; // CLIENT
 extern AddSquirrelReg_t AddSquirrelReg;
 extern void* sq_getentity(HSQUIRRELVM v, SQInteger iStackPos);
+extern std::vector<std::string> modLocalization_files;
 
 #define REGISTER_SCRIPT_FUNCTION(context, name, func, typeMask, paramsCheck, returnType, argNames, helpText) \
     ScriptFunctionRegistry::getInstance().addFunction(std::make_unique<SQFuncRegistration>( \

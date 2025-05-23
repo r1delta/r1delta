@@ -148,6 +148,7 @@ CSquirrelVM__RegisterGlobalConstantInt_t CSquirrelVM__RegisterGlobalConstantInt;
 CSquirrelVM__GetEntityFromInstance_t CSquirrelVM__GetEntityFromInstance;
 sq_GetEntityConstant_CBaseEntity_t sq_GetEntityConstant_CBaseEntity; // CLIENT
 AddSquirrelReg_t AddSquirrelReg;
+std::vector<std::string> modLocalization_files;
 //
 //const char* __fastcall Script_GetConVarString(const char* a1, __int64 a2, __int64 a3)
 //{
@@ -370,6 +371,8 @@ int GetAddonsPath(HSQUIRRELVM v) {
 
 }
 
+
+
 int GetMods(HSQUIRRELVM v) {
 
 	auto func_addr = g_CVFileSystem->GetSearchPath;
@@ -433,7 +436,6 @@ int GetMods(HSQUIRRELVM v) {
 		printf("Addon: %s\n", szAddonDirName);
 		if (load_addon_info_file(nullptr, &kv, name, bIsVPK)) {
 			char image[260];
-			printf("Addon After load: %s\n", szAddonDirName);
 			get_addon_image(nullptr, name, image, 260, bIsVPK);
 			snprintf(addoninfoFilename, 260, "%s%s%c%s%c%s", szModPath, "addons", '\\', szAddonDirName, '\\', "addoninfo.txt");
 			KeyValues* addoninfo = new KeyValues("AddonInfo");
@@ -454,6 +456,23 @@ int GetMods(HSQUIRRELVM v) {
 			wcstombs(description_str, description, 1024);
 			wcstombs(version_str, version, 260);
 			wcstombs(localization_str, localization, 260);
+			if (localization_str != "") {
+				// don't add dup;aicates 
+				//if it does not exist add it
+				auto it = std::find(modLocalization_files.begin(), modLocalization_files.end(), localization_str);
+				if (it != modLocalization_files.end()) {
+					// already exists
+					Msg("Localization file already exists: %s\n", localization_str);
+				}
+				else {
+					modLocalization_files.push_back(localization_str);
+					typedef void(__fastcall* pCLocalize__ReloadLocalizationFiles_t)(void*);
+					if (G_localize) {
+						static void(__fastcall * pCLocalize__ReloadLocalizationFiles)(void* pVguiLocalize) = (pCLocalize__ReloadLocalizationFiles_t)(G_localize + 0x3A40);
+						pCLocalize__ReloadLocalizationFiles(G_localizeIface);
+					}
+				}
+			}
 			sq_newtable(v);
 			sq_pushstring(v, "name", -1);
 			sq_pushstring(v, name, -1);
@@ -1112,6 +1131,7 @@ bool GetSQVMFuncs() {
 	if (MH_CreateHook(reinterpret_cast<void*>((engine + (IsDedicatedServer() ? 0xAA4A0 : 0x14BB10))), &Hk_CHostState__State_GameShutdown, reinterpret_cast<void**>(&oGameShutDown)) != MH_OK) {
 			Msg("Failed to hook CHostState__State_GameShutdown\n");
 	}
+
 
 	uintptr_t baseAddress = G_vscript;
 	if (G_server) {

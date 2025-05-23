@@ -2953,6 +2953,22 @@ void toggleFullscreenMap_cmd(const CCommand& ccargs) {
 	return;
 }
 
+
+bool __fastcall pCLocalise__AddFile(void* pVguiLocalize, const char* path, const char* pathId, bool bIncludeFallbackSearchPaths) {
+	
+	auto ret = o_pCLocalise__AddFile(pVguiLocalize, path, pathId, bIncludeFallbackSearchPaths);
+	return true;
+}
+static void(__fastcall* o_pCLocalize__ReloadLocalizationFiles)(void* pVguiLocalize) = nullptr;
+
+static void __fastcall h_CLocalize__ReloadLocalizationFiles(void* pVguiLocalize)
+{
+	for (const auto& file : modLocalization_files) {
+		o_pCLocalise__AddFile(G_localizeIface, file.c_str(), "GAME", false);
+	}
+	o_pCLocalize__ReloadLocalizationFiles(pVguiLocalize);
+}
+
 void Setup_MMNotificationClient()
 {
 	MH_CreateHook((LPVOID)(G_engine + 0xEA00), &S_Init_Hook, reinterpret_cast<LPVOID*>(&oS_Init));
@@ -3030,7 +3046,7 @@ void __stdcall LoaderNotificationCallback(
 		MH_EnableHook(MH_ALL_HOOKS);
 	}
 	else if ((strcmp_static(name, "localize.dll") == 0)) {
-		G_localize = (uintptr_t)notification_data->Loaded.DllBase;
+		
 	}
 	else {
 		bool is_client = !strcmp_static(name, L"client.dll");
@@ -3047,6 +3063,10 @@ void __stdcall LoaderNotificationCallback(
 			SetupChatWriter();
 			RegisterConCommand("+toggleFullscreenMap", toggleFullscreenMap_cmd, "Toggles the fullscreen map.", FCVAR_CLIENTDLL);
 			RegisterConVar("cl_hold_to_rodeo_enable", "0", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "0: Automatic rodeo. 1: Hold to rodeo ALL titans. 2: Hold to rodeo friendlies, automatically rodeo hostile titans.");
+			typedef bool(__fastcall* o_pCLocalise__AddFile_t)(void*, const char*, const char*, bool);
+			o_pCLocalise__AddFile = (o_pCLocalise__AddFile_t)(G_localize + 0x7760);
+			MH_CreateHook((LPVOID)(G_localize + 0x3A40), &h_CLocalize__ReloadLocalizationFiles, (LPVOID*)&o_pCLocalize__ReloadLocalizationFiles);
+			MH_EnableHook(MH_ALL_HOOKS);
 			CThread(DiscordThread).detach();
 			
 		}

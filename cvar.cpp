@@ -421,6 +421,10 @@ char CEngineVGui__Init(__int64 a1)
 	staticGameConsole = (CGameConsole**)(G_engine + 0x316AC48);
 	*staticGameConsole = (CGameConsole*)(reinterpret_cast<CreateInterfaceFn>(GetProcAddress((HMODULE)G_client, "CreateInterface"))("GameConsole004", 0));
 
+	for (const auto& file : modLocalization_files) {
+		o_pCLocalise__AddFile(G_localizeIface, file.c_str(), nullptr, false);
+	}
+
 	return CEngineVGui__InitOriginal(a1);
 }
 

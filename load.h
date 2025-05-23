@@ -110,6 +110,7 @@ extern uintptr_t G_engine_ds;
 extern uintptr_t G_client;
 extern uintptr_t G_localize;
 extern ILocalize* G_localizeIface;
+static bool(__fastcall* o_pCLocalise__AddFile)(void* pVguiLocalize, const char* path, const char* pathId, bool bIncludeFallbackSearchPaths);
 
 static inline std::string G_public_ip;
 std::string get_public_ip();
