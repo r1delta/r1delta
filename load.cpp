@@ -2966,6 +2966,7 @@ static void __fastcall h_CLocalize__ReloadLocalizationFiles(void* pVguiLocalize)
 	for (const auto& file : modLocalization_files) {
 		o_pCLocalise__AddFile(G_localizeIface, file.c_str(), "GAME", false);
 	}
+	o_pCLocalise__AddFile(G_localizeIface, "resource/delta_%language%.txt", "GAME", false);
 	o_pCLocalize__ReloadLocalizationFiles(pVguiLocalize);
 }
 
