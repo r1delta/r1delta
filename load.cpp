@@ -2957,9 +2957,9 @@ void toggleFullscreenMap_cmd(const CCommand& ccargs) {
 bool __fastcall pCLocalise__AddFile(void* pVguiLocalize, const char* path, const char* pathId, bool bIncludeFallbackSearchPaths) {
 //	G_localizeIface = (ILocalize*)pVguiLocalize;
 	auto ret = o_pCLocalise__AddFile(pVguiLocalize, path, pathId, bIncludeFallbackSearchPaths);
-	if (ret) {
+	/*if (ret) {
 		Msg("Added localization file: %s\n", path);
-	}
+	}*/
 	return ret;
 }
 static void(__fastcall* o_pCLocalize__ReloadLocalizationFiles)(void* pVguiLocalize) = nullptr;
