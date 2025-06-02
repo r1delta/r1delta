@@ -2955,9 +2955,12 @@ void toggleFullscreenMap_cmd(const CCommand& ccargs) {
 
 
 bool __fastcall pCLocalise__AddFile(void* pVguiLocalize, const char* path, const char* pathId, bool bIncludeFallbackSearchPaths) {
-	
+//	G_localizeIface = (ILocalize*)pVguiLocalize;
 	auto ret = o_pCLocalise__AddFile(pVguiLocalize, path, pathId, bIncludeFallbackSearchPaths);
-	return true;
+	if (ret) {
+		Msg("Added localization file: %s\n", path);
+	}
+	return ret;
 }
 static void(__fastcall* o_pCLocalize__ReloadLocalizationFiles)(void* pVguiLocalize) = nullptr;
 
@@ -3047,7 +3050,7 @@ void __stdcall LoaderNotificationCallback(
 		MH_EnableHook(MH_ALL_HOOKS);
 	}
 	else if ((strcmp_static(name, "localize.dll") == 0)) {
-		
+		Msg("localize.dll loaded, setting up localization hooks.\n");
 	}
 	else {
 		bool is_client = !strcmp_static(name, L"client.dll");
@@ -3059,14 +3062,15 @@ void __stdcall LoaderNotificationCallback(
 			SetupHudWarpHooks();
 			Setup_MMNotificationClient();
 			SetupLocalizeIface();
+			typedef bool(__fastcall* o_pCLocalise__AddFile_t)(void*, const char*, const char*, bool);
+			o_pCLocalise__AddFile = (o_pCLocalise__AddFile_t)(G_localize + 0x7760);
 			SetupSurfaceRenderHooks();
 			SetupSquirrelErrorNotificationHooks();
 			SetupChatWriter();
 			RegisterConCommand("+toggleFullscreenMap", toggleFullscreenMap_cmd, "Toggles the fullscreen map.", FCVAR_CLIENTDLL);
 			RegisterConVar("cl_hold_to_rodeo_enable", "0", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "0: Automatic rodeo. 1: Hold to rodeo ALL titans. 2: Hold to rodeo friendlies, automatically rodeo hostile titans.");
 			RegisterConVar("bot_kick_on_death", "1", FCVAR_GAMEDLL | FCVAR_CHEAT, "Enable/disable bots getting kicked on death.");
-			typedef bool(__fastcall* o_pCLocalise__AddFile_t)(void*, const char*, const char*, bool);
-			o_pCLocalise__AddFile = (o_pCLocalise__AddFile_t)(G_localize + 0x7760);
+		//	MH_CreateHook((LPVOID)(G_localize + 0x7760), &pCLocalise__AddFile, reinterpret_cast<LPVOID*>(&o_pCLocalise__AddFile));
 			MH_CreateHook((LPVOID)(G_localize + 0x3A40), &h_CLocalize__ReloadLocalizationFiles, (LPVOID*)&o_pCLocalize__ReloadLocalizationFiles);
 			MH_EnableHook(MH_ALL_HOOKS);
 			CThread(DiscordThread).detach();
