@@ -443,6 +443,8 @@ bool PDataValidator::processSegmentForArrays(std::string& currentBase, const std
 }
 
 std::string PDataValidator::resolveArrayIndices(const std::string_view& key) const {
+	ZoneScoped;
+
     std::vector<std::string> segments = splitOnDot(key);
     std::string resolvedKey;
     std::string currentValidationBase;  // Tracks the base name for validation
@@ -896,6 +898,8 @@ bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 }
 const char* hashUserInfoKeyArena(Arena* arena, const char* key)
 {
+	ZoneScoped;
+
 #ifdef HASH_USERINFO_KEYS
 # error NOT IMPLEMENTED
 #else
@@ -913,8 +917,13 @@ const char* hashUserInfoKeyArena(Arena* arena, const char* key)
 
 	auto ret = (char*)arena_push(arena, len + 1);
 	memcpy(ret, key, len);
-	if (std::string(key) != std::string(ret))
+	// TODO(mrsteyk): debug only check?
+	//if (std::string(key) != std::string(ret))
+	if (key[len] != 0 || !!memcmp(ret, key, len))
+	{
+		R1DAssert(!"in != out");
 		Msg("hashUserInfoKeyArena: in: %s out %s\n", key, ret);
+	}
 	return ret;
 #endif
 }

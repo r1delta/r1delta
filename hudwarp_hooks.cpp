@@ -3,7 +3,7 @@
 ID3D11Device* pDevice;
 ID3D11DeviceContext** ppID3D11DeviceContext;
 
-typedef __int64(*__fastcall SetPixMarker_type)(__int64 queuedRenderContext, unsigned long color, const char* pszName);
+typedef __int64(__fastcall *SetPixMarker_type)(__int64 queuedRenderContext, unsigned long color, const char* pszName);
 SetPixMarker_type SetPixMarker = nullptr;
 
 
@@ -40,7 +40,7 @@ void QueueEndEvent()
 }
 
 
-typedef void(*__fastcall RenderHud_type)(__int64 a1, __int64 a2, __int64 a3);
+typedef void(__fastcall *RenderHud_type)(__int64 a1, __int64 a2, __int64 a3);
 //HookedFuncStaticWithType<RenderHud_type> RenderHud("client.dll", 0x2AE630);
 RenderHud_type RenderHud;
 void __fastcall RenderHud_Hook(__int64 a1, __int64 a2, __int64 a3)
@@ -217,7 +217,7 @@ __int64 __fastcall sub_5ADC0_Hook(__int64 queuedRenderContext, unsigned long col
 
 
 
-typedef float* (*__fastcall sub_18000BE60_type)(float* a1, float* a2, float* a3, float* a4, float a5, float* a6, float* a7, DWORD* a8);
+typedef float* (__fastcall *sub_18000BE60_type)(float* a1, float* a2, float* a3, float* a4, float a5, float* a6, float* a7, DWORD* a8);
 //HookedFuncStaticWithType<sub_18000BE60_type> sub_18000BE60_org("vguimatsurface.dll", 0xBE60);
 sub_18000BE60_type sub_18000BE60_org;
 float* __fastcall sub_18000BE60(float* a1, float* a2, float* a3, float* a4, float a5, float* a6, float* a7, DWORD* a8)
@@ -232,7 +232,7 @@ float* __fastcall sub_18000BE60(float* a1, float* a2, float* a3, float* a4, floa
 	return ret;
 }
 
-typedef void** (*__fastcall sub_1800154A0_type)(__int64 a1, int a2, int a3, int a4, int a5);
+typedef void** (__fastcall *sub_1800154A0_type)(__int64 a1, int a2, int a3, int a4, int a5);
 //HookedFuncStaticWithType<sub_1800154A0_type> sub_1800154A0_org("vguimatsurface.dll", 0x154A0);
 sub_1800154A0_type sub_1800154A0_org;
 void** __fastcall sub_1800154A0(__int64 a1, int a2, int a3, int a4, int a5)

@@ -23,29 +23,47 @@ private:
     // Cache data structures
     std::unordered_set<std::size_t> cache; // Stores hashes of absolute, normalized file paths
     std::unordered_set<std::string, HashStrings, std::equal_to<>> addonsFolderCache; // Stores absolute, normalized addon directory paths
-    mutable std::shared_mutex cacheMutex; // Mutable for const methods like TryReplaceFile if needed
+    std::vector<std::size_t> addonsFolderCacheHashes;
+    mutable SRWLOCK cacheMutex; // Mutable for const methods like TryReplaceFile if needed
 
     // State variables
     std::atomic<bool> initialized{ false };
     std::atomic<bool> manualRescanRequested{ false };
-    std::condition_variable_any cacheCondition;
+    CONDITION_VARIABLE cacheCondition;
 
     // Paths
     std::filesystem::path executableDirectory; // Store the base path
     std::filesystem::path r1deltaBasePath;     // Store the r1delta path
+    std::size_t r1deltaBasePathHash;
     std::filesystem::path r1deltaAddonsPath;   // Store the addons path
 
+    static constexpr std::size_t FNV1A_HASH_INIT = 14695981039346656037ULL;
     // FNV-1a hash function implementation
-    static constexpr std::size_t fnv1a_hash(std::string_view sv, std::size_t hash = 14695981039346656037ULL) {
+    static constexpr std::size_t fnv1a_hash(std::string_view sv, std::size_t hash = FNV1A_HASH_INIT) {
         for (unsigned char c : sv) { // Use unsigned char for hashing bytes correctly
             hash ^= static_cast<size_t>(c);
             hash *= 1099511628211ULL; // FNV prime
         }
         return hash;
     }
+    static constexpr std::size_t fnv1a_hash(const std::wstring_view& s, std::size_t hash = FNV1A_HASH_INIT) {
+        for (uint16_t c : s) {
+            hash ^= static_cast<size_t>(c & 0xFF);
+            hash *= 1099511628211ULL; // FNV prime
+        }
+        return hash;
+    }
     // Overload for convenience if needed (e.g. std::string)
-    static std::size_t fnv1a_hash(const std::string& s) {
-        return fnv1a_hash(std::string_view(s));
+    static std::size_t fnv1a_hash(const std::string& s, std::size_t hash = FNV1A_HASH_INIT) {
+        return fnv1a_hash(std::string_view(s), hash);
+    }
+    static std::size_t fnv1a_hash(const std::wstring& s, std::size_t hash = FNV1A_HASH_INIT) {
+        for (uint16_t c : s) {
+            R1DAssert(c <= 0xFF);
+            hash ^= static_cast<size_t>(c & 0xFF);
+            hash *= 1099511628211ULL; // FNV prime
+        }
+        return hash;
     }
 
     // Internal scanning method
@@ -61,12 +79,12 @@ public:
     }
 
     // Public interface methods (remain instance methods)
-    bool FileExists(const std::string& filePath); // Checks exact absolute path match
+    //bool FileExists(const std::string& filePath); // Checks exact absolute path match
     bool TryReplaceFile(const char* pszRelativeFilePath); // Checks relative paths in specific locations
     void UpdateCache(); // Starts the background update loop (or performs initial scan)
 
     void RequestManualRescan() {
         manualRescanRequested.store(true, std::memory_order_release);
-        cacheCondition.notify_all(); // Notify the waiting UpdateCache loop
+        WakeAllConditionVariable(&cacheCondition); // Notify the waiting UpdateCache loop
     }
 };

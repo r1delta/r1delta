@@ -7,10 +7,6 @@
       "name": "cpp-httplib",
       "version>=": "0.11.3"
     },
-    {
-      "name": "mimalloc",
-      "version>=": "2.1.7"
-    },
     "minhook",
     {
       "name": "nlohmann-json",
@@ -33,10 +29,6 @@
     {
       "name": "minhook",
       "version": "1.3.3#3"
-    },
-    {
-      "name": "mimalloc",
-      "version": "2.2.3"
     }
   ]
 }

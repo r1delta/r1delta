@@ -234,9 +234,17 @@ bool ApplyPatch(const PatchInstruction& instruction, void* targetModuleBase) {
 
     for (size_t i = 0; i < instruction.originalBytes.size(); ++i) {
         if (sectionMemory[i] != instruction.originalBytes[i]) {
-            std::string errorMsg = "Original bytes do not match\nFile: " + instruction.fileName + "\nLine: " + std::to_string(instruction.lineNumber);
-            MessageBoxA(nullptr, errorMsg.c_str(), "Patcher Error", MB_OK);
-            return false;
+            if (i == 0 && !memcmp(sectionMemory, instruction.newBytes.data(), instruction.newBytes.size()))
+            {
+                // NOTE(mrsteyk): already patched
+                return true;
+            }
+            else
+            {
+                std::string errorMsg = "Original bytes do not match\nFile: " + instruction.fileName + "\nLine: " + std::to_string(instruction.lineNumber);
+                MessageBoxA(nullptr, errorMsg.c_str(), "Patcher Error", MB_OK);
+                return false;
+            }
         }
     }
 
