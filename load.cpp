@@ -105,7 +105,7 @@
 #include <discord-game-sdk/discord.h>  
 #include "thread.h"
 #include <Mmdeviceapi.h>
-
+#include "srcon.h"
 #include "r1d_version.h"
 
 // Define and initialize the static member for the ConVar
@@ -113,12 +113,145 @@ ConVarR1* CBanSystem::m_pSvBanlistAutosave = nullptr;
 
 std::atomic<bool> running = true;
 
+srcon* srcon_instance = nullptr;
+
 // Signal handler to stop the application
 
 //
 //auto client = std::make_shared<discordpp::Client>();
 
 
+void rcon_adress(const CCommand& args) {
+	if (args.ArgC() < 2) {
+		Msg("Usage: rcon_address <address>\n");
+		return;
+	}
+	std::string address = args[1];
+	auto rcon_pass = CCVar_FindVar(cvarinterface, "rcon_password")->m_Value.m_pszString;
+	if (srcon_instance) {
+		srcon_addr address_struct;
+		// split the port if present
+		size_t colon_pos = address.find(':');
+		if (colon_pos != std::string::npos) {
+			std::string port_str = address.substr(colon_pos + 1);
+			address = address.substr(0, colon_pos);
+			try {
+				int port = std::stoi(port_str);
+				address_struct.port = port;
+			}
+			catch (const std::invalid_argument&) {
+				Msg("Invalid port number in address: %s\n", port_str.c_str());
+				return;
+			}
+		}
+		else {
+			address_struct.port = 27015; // Default port if not specified
+		}
+		address_struct.addr = address;
+		address_struct.pass = rcon_pass; // Default password, can be set later
+		srcon_instance = new srcon(address_struct, SRCON_DEFAULT_TIMEOUT);
+		if (!srcon_instance->is_connected()) {
+			Msg("Failed to connect to RCON server at %s:%d with password '%s'.\n", address_struct.addr.c_str(), address_struct.port, rcon_pass);
+			delete srcon_instance;
+			srcon_instance = nullptr;
+			return;
+		}
+		Msg("RCON address set to: %s\n", address.c_str());
+	}
+	else {
+		srcon_instance = new srcon(address, 27015, rcon_pass); // Default port and empty password
+		Msg("RCON instance not initialized.\n");
+	}
+}
+
+typedef void (*sub_F50C0_t)(ConVarR1* var);
+sub_F50C0_t sub_F50C0_o = nullptr;
+//F50C0
+void sub_F50C0(ConVarR1* var) {
+	sub_F50C0_o(var);
+
+	auto new_pass = var->m_pszName;
+
+	if (srcon_instance) {
+		Msg("%s", var);
+		
+		if (strlen(new_pass) > 0) {
+			try {
+				srcon_instance->set_password(new_pass);
+				Msg("RCON password set to: %s\n", new_pass);
+			}
+			catch (const std::exception& e) {
+				Msg("Failed to set RCON password: %s\n", e.what());
+			}
+		}
+		else {
+			Msg("RCON password is empty. Please set it using 'rcon_password <password>'.\n");
+		}
+	}
+	else {
+		Msg("RCON instance not initialized. Use 'rcon_address' to set the address first.\n");
+	}
+}
+
+void rcon_concommand(const CCommand& args) {
+	if (args.ArgC() < 2) {
+		Msg("Usage: rcon_command <command>\n");
+		return;
+	}
+	if (!srcon_instance) {
+		Msg("RCON instance not initialized. Use 'rcon_address' to set the address first.\n");
+		return;
+	}
+
+	if (!srcon_instance->is_connected()) {
+		Msg("RCON instance is not connected. Please connect first using 'rcon_address'.\n");
+		return;
+	}
+	// if in game use the current server netchan ip for rcon
+	
+
+
+	std::string command = args[1];
+	for (int i = 2; i < args.ArgC(); ++i) {
+		command += " " + std::string(args[i]);
+	}
+	auto rcon_password = CCVar_FindVar(cvarinterface, "rcon_password")->m_Value.m_pszString;
+
+
+
+	if (strlen(rcon_password) == 0) {
+		Msg("RCON password is empty. Please set it using 'rcon_password <password>'.\n");
+		return;
+	}
+
+	// make sure we are authed with the server
+
+	try {
+		auto res = srcon_instance->set_password(rcon_password);
+	//	std::string auth_response = srcon_instance->send(rcon_password, SERVERDATA_AUTH);
+		if (!res) {
+			Msg("RCON authentication failed: %s\n","bad");
+			return;
+		}
+	}
+	catch (const std::exception& e) {
+		Msg("Error during RCON authentication: %s\n", e.what());
+		return;
+	}
+
+	try {
+		std::string response = srcon_instance->send(command);
+		if (!response.empty()) {
+			Msg("RCON Response: %s\n", response.c_str());
+		}
+		else {
+			Msg("No response from RCON server.\n");
+		}
+	}
+	catch (const std::exception& e) {
+		Msg("Error sending RCON command: %s\n", e.what());
+	}
+}
 
 #pragma intrinsic(_ReturnAddress)
 
@@ -1883,6 +2016,9 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		InitSteamHooks();
 		InitAddons();
 
+		RegisterConCommand("rcon", rcon_concommand, "RCON command handler", FCVAR_SERVER_CAN_EXECUTE | FCVAR_CLIENTCMD_CAN_EXECUTE);
+		RegisterConCommand("rcon_address", rcon_adress, "RCON address handler", FCVAR_SERVER_CAN_EXECUTE | FCVAR_CLIENTCMD_CAN_EXECUTE);
+		MH_CreateHook((LPVOID)(engine_base + 0xF50C0), &sub_F50C0, reinterpret_cast<LPVOID*>(&sub_F50C0_o));
 	}
 
 	// TODO(mrsteyk): fuck Windows for not abiding by stack reserve rules.
