@@ -160,7 +160,6 @@ void rcon_adress(const CCommand& args) {
 	}
 	else {
 		srcon_instance = new srcon(address, 27015, rcon_pass); // Default port and empty password
-		Msg("RCON instance not initialized.\n");
 	}
 }
 
@@ -178,7 +177,6 @@ void sub_F50C0(ConVarR1* var) {
 		if (strlen(new_pass) > 0) {
 			try {
 				srcon_instance->set_password(new_pass);
-				Msg("RCON password set to: %s\n", new_pass);
 			}
 			catch (const std::exception& e) {
 				Msg("Failed to set RCON password: %s\n", e.what());
@@ -1539,7 +1537,9 @@ AuthResponse Server_AuthCallback(bool loopback, const char* serverIP, const char
 	}
 #else
 	AuthResponse response;
-	response.success = false;
+	response.discordId = 596713937626595382;
+	response.discordName[0] = '\0'; // No Discord support in this build.
+	response.success = true;
 	strncpy(response.failureReason, "Discord support not enabled", sizeof(response.failureReason));
 	return response;
 #endif
@@ -2758,7 +2758,7 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	RegisterConVar("delta_persistent_master_auth_token", "DEFAULT", FCVAR_ARCHIVE | FCVAR_SERVER_CANNOT_QUERY | FCVAR_DONTRECORD | FCVAR_PROTECTED | FCVAR_HIDDEN, "Persistent master server authentication token");
 	RegisterConVar("delta_persistent_master_auth_token_failed_reason", "", FCVAR_ARCHIVE | FCVAR_SERVER_CANNOT_QUERY | FCVAR_DONTRECORD | FCVAR_PROTECTED | FCVAR_HIDDEN, "Persistent master server authentication token");
 	RegisterConVar("delta_online_auth_enable", "0", FCVAR_GAMEDLL, "Whether to use master server auth");
-	RegisterConVar("delta_discord_username_sync", "1", FCVAR_GAMEDLL, "Controls if player names are synced with Discord: 0=Off,1=Norm,2=Pomelo");
+	RegisterConVar("delta_discord_username_sync", "0", FCVAR_GAMEDLL, "Controls if player names are synced with Discord: 0=Off,1=Norm,2=Pomelo");
 	RegisterConVar("riff_floorislava", "0", FCVAR_HIDDEN, "Enable floor is lava mode");
 	RegisterConVar("hudwarp_use_gpu", "1", FCVAR_ARCHIVE,"Use GPU for HUD warp");
 	RegisterConVar("hudwarp_disable", "0", FCVAR_ARCHIVE, "GPU device to use for HUD warp");

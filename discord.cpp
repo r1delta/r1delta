@@ -169,6 +169,18 @@ bool IsDiscordProcessRunning() {
 	return false;
 }
 
+void HandleDiscordUserReady() {
+	discord::User user;
+	auto result = core->UserManager().GetCurrentUser(&user);
+	if (result != discord::Result::Ok) {
+		Msg("Discord: Failed to get current user %d \n", result);
+		return;
+	}
+	Msg("Discord: Current user: %s, id: %lld\n", user.GetUsername(), user.GetId());
+
+}
+
+
 void DiscordThread() {
 	GetBaseClient = (GetBaseClientFunc)(G_engine + 0x5F470);
 	G_public_ip = get_public_ip();
@@ -181,15 +193,14 @@ void DiscordThread() {
 		return;
 	}
 	is_discord_running = true;
-
 	core->ActivityManager().OnActivityJoin.Connect(HandleDiscordJoin);
 	core->ActivityManager().OnActivityJoinRequest.Connect(HandleDiscordJoinRequest);
 	core->ActivityManager().OnActivityInvite.Connect(HandleDiscordInvite);
-	//if (auto x = core->ActivityManager().RegisterCommand("%localappdata%/R1Delta/r1delta.exe") != discord::Result::Ok) {
-	//	Msg("Discord: Failed to register command %d\n", x);
-	//}
+	
+	core->UserManager().OnCurrentUserUpdate.Connect(HandleDiscordUserReady);
 
 	Msg("Discord: Core created successfully\n");
+
 	
 	while (true) {
 		core->RunCallbacks();
