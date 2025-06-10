@@ -103,7 +103,6 @@
 #endif
 #include "sv_filter.h"
 #include <discord-game-sdk/discord.h>  
-#include "thread.h"
 #include <Mmdeviceapi.h>
 #include "srcon.h"
 #include "r1d_version.h"
@@ -933,7 +932,7 @@ typedef void (*ConCommandConstructorType)(
 
 ConCommandR1* RegisterConCommand(const char* commandName, void (*callback)(const CCommand&), const char* helpString, int flags) {
 	ConCommandConstructorType conCommandConstructor = (ConCommandConstructorType)(IsDedicatedServer() ? (G_engine_ds + 0x31F260) : (G_engine + 0x4808F0));
-	ConCommandR1* newCommand = new ConCommandR1;
+	ConCommandR1* newCommand = new (GlobalAllocator()->mi_malloc(sizeof(ConCommandR1), TAG_GAME, HEAP_GAME)) ConCommandR1;
 	
 	conCommandConstructor(newCommand, commandName, callback, helpString, flags, nullptr);
 
@@ -943,7 +942,7 @@ ConCommandR1* RegisterConCommand(const char* commandName, void (*callback)(const
 ConVarR1* RegisterConVar(const char* name, const char* value, int flags, const char* helpString) {
 	typedef void (*ConVarConstructorType)(ConVarR1* newVar, const char* name, const char* value, int flags, const char* helpString);
 	ConVarConstructorType conVarConstructor = (ConVarConstructorType)(IsDedicatedServer() ? (G_engine_ds + 0x320460) : (G_engine + 0x481AF0));
-	ConVarR1* newVar = new ConVarR1;
+	ConVarR1* newVar = new (GlobalAllocator()->mi_malloc(sizeof(ConVarR1), TAG_GAME, HEAP_GAME)) ConVarR1;
 
 
 	conVarConstructor(newVar, name, value, flags, helpString);
@@ -1221,7 +1220,7 @@ void InitAddons() {
 	MH_EnableHook(MH_ALL_HOOKS);
 }
 
-std::unordered_map<std::string, std::string, HashStrings> g_LastEntCreateKeyValues;
+std::unordered_map<std::string, std::string, HashStrings, std::equal_to<>> g_LastEntCreateKeyValues;
 void (*oCC_Ent_Create)(const CCommand* args);
 bool g_bIsEntCreateCommand = false;
 
@@ -2021,6 +2020,10 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		MH_CreateHook((LPVOID)(engine_base + 0xF50C0), &sub_F50C0, reinterpret_cast<LPVOID*>(&sub_F50C0_o));
 	}
 
+	// TODO(mrsteyk): nice-ify.
+	extern void DeltaMemoryStats(const CCommand & c);
+	RegisterConCommand("delta_memory_stats", DeltaMemoryStats, "Dump memory stats", 0);
+
 	// TODO(mrsteyk): fuck Windows for not abiding by stack reserve rules.
 	security_fixes_engine(engine_base);
 
@@ -2276,7 +2279,6 @@ __int64 __fastcall UTIL_GetEntityByIndex(int iIndex)
 	char* pEdicts; // rdx
 	char* pEnt; // rcx
 	__int64 v1; // rcx
-	__int64 (*v2)(void); // rdx
 
 	if (iIndex <= 0)
 		return 0LL;
@@ -3114,6 +3116,7 @@ void Setup_MMNotificationClient()
 	MH_CreateHook((LPVOID)(G_engine + 0xEA00), &S_Init_Hook, reinterpret_cast<LPVOID*>(&oS_Init));
 	MH_CreateHook((LPVOID)(G_engine + 0x114B0), &S_Shutdown_Hook, reinterpret_cast<LPVOID*>(&oS_Shutdown));
 	Snd_Restart_DirectSound = reinterpret_cast<Snd_Restart_DirectSound_t>(G_engine + 0x15AF0);
+	MH_EnableHook(MH_ALL_HOOKS);
 }
 
 static bool should_init_security_fixes = false;
@@ -3142,28 +3145,35 @@ void __stdcall LoaderNotificationCallback(
 	if (GetModuleHandleA("dedicated.dll") && !bDone) {
 		InitCompressionHooks();
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("dedicated.dll") + 0x84000), &AddSearchPathDedi, reinterpret_cast<LPVOID*>(&oAddSearchPathDedi));
+		MH_EnableHook(MH_ALL_HOOKS);
 		bDone = true;
 	}
 	auto name = notification_data->Loaded.BaseDllName->Buffer;
-	if (strcmp_static(name, L"filesystem_stdio.dll") == 0) {
+	auto name_len = notification_data->Loaded.BaseDllName->Length;
+	if (!G_is_dedi && string_equal_size(name, name_len, L"launcher.dll")) {
+		G_launcher = (uintptr_t)GetModuleHandleW(L"launcher.dll");
+		G_vscript = G_launcher;
+	}
+	if (string_equal_size(name, name_len, L"filesystem_stdio.dll")) {
 		G_filesystem_stdio = (uintptr_t)notification_data->Loaded.DllBase;
 		InitCompressionHooks();
 	}
-	else if (strcmp_static(name, L"engine.dll") == 0) {
+	else if (string_equal_size(name, name_len, L"engine.dll")) {
 		do_engine(notification_data);
 		should_init_security_fixes = true;
 		//client = std::make_shared<discordpp::Client>();
 	}
-	else if (strcmp_static(name, L"engine_ds.dll") == 0) {
+	else if (string_equal_size(name, name_len, L"engine_ds.dll")) {
 		G_engine_ds = (uintptr_t)notification_data->Loaded.DllBase;
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x433C0), &ProcessConnectionlessPacketDedi, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x30FE20), &StringCompare_AllTalkHookDedi, reinterpret_cast<LPVOID*>(&oStringCompare_AllTalkHookDedi));
+		MH_EnableHook(MH_ALL_HOOKS);
 		InitAddons();
 		InitDedicated();
 		constexpr auto a = (1 << 2);
 		should_init_security_fixes = true;
 	}
-	else if (strcmp_static(name, L"vphysics.dll") == 0) {
+	else if (string_equal_size(name, name_len, L"vphysics.dll")) {
 		InitializeCriticalSectionAndSpinCount(&g_cs, 4000);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x1032C0), &sub_1032C0_hook, reinterpret_cast<LPVOID*>(&o_sub_1032C0));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x103120), &sub_103120_hook, reinterpret_cast<LPVOID*>(&o_sub_103120));
@@ -3171,26 +3181,26 @@ void __stdcall LoaderNotificationCallback(
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x100880), &sub_100880_hook, reinterpret_cast<LPVOID*>(&o_sub_100880));
 
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0xFFFF), &sub_FFFF, reinterpret_cast<LPVOID*>(&ovphys_sub_FFFF));
-		//MH_EnableHook(MH_ALL_HOOKS);
+		MH_EnableHook(MH_ALL_HOOKS);
 	}
-	else if (strcmp_static(name, L"materialsystem_dx11.dll") == 0) {
+	else if (string_equal_size(name, name_len, L"materialsystem_dx11.dll")) {
 		SetupHudWarpMatSystemHooks();
 		MH_EnableHook(MH_ALL_HOOKS);
 	}
-	else if (strcmp_static(name, L"vguimatsurface.dll") == 0) {
+	else if (string_equal_size(name, name_len, L"vguimatsurface.dll")) {
 		SetupHudWarpVguiHooks();
 		MH_EnableHook(MH_ALL_HOOKS);
 	}
-	else if ((strcmp_static(name, L"adminserver.dll") == 0) || ((strcmp_static(name, L"AdminServer.dll")) == 0)) {
+	else if ((string_equal_size(name, name_len, L"adminserver.dll")) || ((string_equal_size(name, name_len, L"AdminServer.dll")))) {
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("AdminServer.dll") + 0x14730), &CServerInfoPanel__OnServerDataResponse_14730, reinterpret_cast<LPVOID*>(&oCServerInfoPanel__OnServerDataResponse_14730));
 		MH_EnableHook(MH_ALL_HOOKS);
 	}
-	else if ((strcmp_static(name, "localize.dll") == 0)) {
-		Msg("localize.dll loaded, setting up localization hooks.\n");
+	else if ((string_equal_size(name, name_len, "localize.dll"))) {
+		G_localize = (uintptr_t)notification_data->Loaded.DllBase;
 	}
 	else {
-		bool is_client = !strcmp_static(name, L"client.dll");
-		bool is_server = !is_client && !strcmp_static(name, L"server.dll");
+		bool is_client = string_equal_size(name, name_len, L"client.dll");
+		bool is_server = !is_client && string_equal_size(name, name_len, L"server.dll");
 
 		if (is_client) {
 			G_client = (uintptr_t)notification_data->Loaded.DllBase;
@@ -3204,13 +3214,11 @@ void __stdcall LoaderNotificationCallback(
 			SetupSquirrelErrorNotificationHooks();
 			SetupChatWriter();
 			RegisterConCommand("+toggleFullscreenMap", toggleFullscreenMap_cmd, "Toggles the fullscreen map.", FCVAR_CLIENTDLL);
+			std::thread(DiscordThread).detach();
 			RegisterConVar("cl_hold_to_rodeo_enable", "0", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "0: Automatic rodeo. 1: Hold to rodeo ALL titans. 2: Hold to rodeo friendlies, automatically rodeo hostile titans.");
 			RegisterConVar("bot_kick_on_death", "1", FCVAR_GAMEDLL | FCVAR_CHEAT, "Enable/disable bots getting kicked on death.");
-		//	MH_CreateHook((LPVOID)(G_localize + 0x7760), &pCLocalise__AddFile, reinterpret_cast<LPVOID*>(&o_pCLocalise__AddFile));
 			MH_CreateHook((LPVOID)(G_localize + 0x3A40), &h_CLocalize__ReloadLocalizationFiles, (LPVOID*)&o_pCLocalize__ReloadLocalizationFiles);
 			MH_EnableHook(MH_ALL_HOOKS);
-			CThread(DiscordThread).detach();
-			
 		}
 		if (is_server) do_server(notification_data);
 		if (should_init_security_fixes && (is_client || is_server)) {

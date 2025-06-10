@@ -282,6 +282,7 @@ decltype(&DevWarning) DevWarningOriginal = nullptr;
 decltype(&ConColorMsg) ConColorMsgOriginal = nullptr;
 decltype(&ConDMsg) ConDMsgOriginal = nullptr;
 decltype(&COM_TimestampedLog) COM_TimestampedLogOriginal = nullptr;
+#if 0
 char* SafeFormat(const char* format, va_list args) {
 	va_list args_copy;
 	va_copy(args_copy, args);
@@ -289,17 +290,18 @@ char* SafeFormat(const char* format, va_list args) {
 	va_end(args_copy);
 
 	if (size < 0) {
-		return strdup("Error formatting string");
+		return _strdup("Error formatting string");
 	}
 
 	char* ret = (char*)malloc(size + 1);
 	if (ret == NULL) {
-		return strdup("Memory allocation error");
+		return _strdup("Memory allocation error");
 	}
 
 	vsnprintf(ret, size + 1, format, args);
 	return ret;
 }
+#endif
 
 char* SafeFormatArena(Arena* arena, const char* format, va_list args) {
 	va_list args_copy;

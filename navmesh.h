@@ -44,7 +44,7 @@ struct CAI_NodeLink
 {
 	short srcId;
 	short destId;
-	bool hulls[MAX_HULLS];
+	uint8_t hulls[MAX_HULLS];
 	char unk0;
 	char unk1; // maps => unk0 on disk
 	char unk2[5];
@@ -116,7 +116,7 @@ struct CAI_NodeLinkDisk
 	short srcId;
 	short destId;
 	char unk0;
-	bool hulls[5];
+	uint8_t hulls[5];
 };
 #pragma pack(pop)
 #pragma pack(push, 1)

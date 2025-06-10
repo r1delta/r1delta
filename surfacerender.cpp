@@ -374,7 +374,7 @@ void OnScreenSizeChanged(uintptr_t thisptr, int w, int h) {
 
 __int64(*oCPluginHudMessage_ctor)(uintptr_t thisptr, uintptr_t panel);
 __int64 CPluginHudMessage_ctor(uintptr_t thisptr, uintptr_t ppanel) {
-    auto engineVgui = ((void* (*__fastcall)())(G_engine + 0x21E670))();
+    auto engineVgui = ((void* (__fastcall*)())(G_engine + 0x21E670))();
     return oCPluginHudMessage_ctor(thisptr, (*(__int64(__fastcall**)(void*, int))(*(_QWORD*)engineVgui + 8LL))(engineVgui, 5));
 }
 
