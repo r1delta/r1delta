@@ -46,7 +46,7 @@ extern "C" __declspec(dllimport) void Warning(const char* _Printf_format_string_
 //#define ASAN_ENABLED 1
 // NOTE(mrsteyk): for heap check it's also advised to disable new/delete overrides. It also might not be really necessary as corruption detection can easilly see it.
 #define HEAP_CHECK_ENABLED 0
-
+#define PRINT_MEMORY_ERRORS 0 
 #define MI_MALLOC_VERSION 228
 #define mi_collect(...) for (size_t i = 0; i <(size_t)HEAP_COUNT; ++i) HeapCompact(this->_heaps[i], 0)
 #define mi_stats_print(...)
@@ -381,12 +381,17 @@ public:
                 R1DAssert(heap == check->heap);
                 if (heap != check->heap)
                 {
-                    Warning("[MEM] Heap index mismatch in FREE at %p - %d(%s) expected, but got %d(%s)!\n", aligned, (int)heap, Mem_heap_to_cstring(heap), (int)check->heap, Mem_heap_to_cstring((EDeltaAllocHeaps)check->heap));
+                #ifndef PRINT_MEMORY_ERRORS
+                  Warning("[MEM] Heap index mismatch in FREE at %p - %d(%s) expected, but got %d(%s)!\n", aligned, (int)heap, Mem_heap_to_cstring(heap), (int)check->heap, Mem_heap_to_cstring((EDeltaAllocHeaps)check->heap));
+                #endif
                 }
                 R1DAssert(tag == check->tag);
                 if (tag != check->tag)
                 {
+                #ifndef PRINT_MEMORY_ERRORS
                     Warning("[MEM] Heap tag mismatch in FREE at %p - %d(%s) expected, but got %d(%s)!\n", aligned, (int)tag, Mem_tag_to_cstring(tag), (int)check->tag, Mem_tag_to_cstring((EDeltaAllocTags)check->tag));
+                #endif // PRINT_MEMORY_ERRORS
+
                 }
 
                 auto heap = check->heap;
