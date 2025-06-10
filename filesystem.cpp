@@ -50,7 +50,7 @@
 #include "load.h"
 #include <shared_mutex>
 #include <string_view>
-#include "thread.h"
+#include "tctx.hh"
 #pragma intrinsic(_ReturnAddress)
 
 namespace fs = std::filesystem;
@@ -96,62 +96,135 @@ std::atomic_flag threadStarted = ATOMIC_FLAG_INIT;
 
 void StartFileCacheThread() {
     if (!threadStarted.test_and_set()) {
-        CThread([]() { FileCache::GetInstance().UpdateCache(); }).detach();
+        std::thread([]() { FileCache::GetInstance().UpdateCache(); }).detach();
     }
 }
 class FastFileSystemHook {
 private:
-	struct TrieNode {
-		std::unordered_map<std::string, std::unique_ptr<TrieNode>, HashStrings> children;
-		bool exists = false;
-		bool checked = false;
-	};
-	static TrieNode root;
-	static std::shared_mutex cacheMutex;
-	static bool checkAndCachePath(const char* fullPath) {
-		TrieNode* node = &root;
-		std::string currentPath;
-		const char* part = fullPath;
-		while (*part) {
-			while (*part && *part != '\\' && *part != '/') {
-				currentPath += *part++;
-			}
-			if (*part) part++; // Skip the separator
-			auto& child = node->children[currentPath];
-			if (!child) {
-				child = std::make_unique<TrieNode>();
-			}
-			node = child.get();
-			if (!node->checked) {
-				DWORD attributes = GetFileAttributesA(currentPath.c_str());
-				node->exists = (attributes != INVALID_FILE_ATTRIBUTES);
-				node->checked = true;
-			}
-			if (!node->exists) {
+	struct FFSS
+	{
+		const char* ptr;
+		size_t len;
+
+		bool equals(FFSS other)
+		{
+			if (!this->len || this->len != other.len)
+			{
 				return false;
 			}
-			currentPath += '\\';
+			return !memcmp(this->ptr, other.ptr, this->len);
+		}
+	};
+	static uint64_t hash64(FFSS s)
+	{
+		uint64_t h = 0x100;
+		for (ptrdiff_t i = 0; i < s.len; i++) {
+			unsigned char e = s.ptr[i] & 0xdf;
+			// TODO(mrsteyk): some bit magic?
+			if (e == 0xf)
+			{
+				e = '\\';
+			}
+			h ^= e & 255;
+			h *= 1111111111111111111;
+		}
+		return h;
+	}
+	struct Payload
+	{
+		bool checked;
+		bool exists;
+	};
+	static constexpr size_t TRIE_BITS = 2;
+	struct Trie
+	{
+		Trie* child[1 << TRIE_BITS];
+		FFSS key;
+		Payload value;
+	};
+	static Trie* root;
+	static SRWLOCK cacheMutex;
+	static Arena* trieArena;
+
+	static Trie* lookup(Trie** map, FFSS key) {
+		ZoneScoped;
+
+		for (uint64_t h = hash64(key); *map; h <<= TRIE_BITS) {
+			if (key.equals((*map)->key)) {
+				return *map;
+			}
+			map = &(*map)->child[h >> (64 - TRIE_BITS)];
+		}
+		Trie* ret;
+		{
+			ZoneScopedN("lookup>allocation");
+
+			ReleaseSRWLockShared(&cacheMutex);
+			AcquireSRWLockExclusive(&cacheMutex);
+			*map = (Trie*)arena_push(trieArena, sizeof(Trie));
+			char* ptr = (char*)arena_push(trieArena, key.len + 1);
+			memcpy(ptr, key.ptr, key.len);
+			(*map)->key = { .ptr = ptr, .len = key.len };
+			ret = *map;
+			ReleaseSRWLockExclusive(&cacheMutex);
+			AcquireSRWLockShared(&cacheMutex);
+		}
+		return ret;
+	}
+
+	static bool checkAndCachePath(const char* fullPath) {
+		ZoneScoped;
+
+		const char* part = fullPath;
+		const size_t part_len = strlen(fullPath);
+		R1DAssert(part_len < 260);
+		size_t i = 0;
+		while (i < part_len) {
+			while (i < part_len && part[i] != '\\' && part[i] != '/') {
+				i++;
+			}
+			if (i < part_len) i++; // Skip the separator
+			Trie* node = lookup(&root, { .ptr = part, .len = i });
+			if (!node->value.checked) {
+				ZoneScopedN("checkAndCachePath make node");
+				DWORD attributes = GetFileAttributesA(node->key.ptr);
+				node->value.exists = (attributes != INVALID_FILE_ATTRIBUTES);
+				node->value.checked = true;
+			}
+			if (!node->value.exists) {
+				return false;
+			}
 		}
 		return true;
 	}
 public:
 	static bool shouldFailRead(const char* path) {
+		ZoneScoped;
+
 		//int dot_count = 0;
 		//while (*path && dot_count <= 2)
 		//	if (*path++ == '.') dot_count++;
 		//if (dot_count > 2) return false;
 
-		std::shared_lock<std::shared_mutex> lock(cacheMutex);
-		return !checkAndCachePath(path);
+		AcquireSRWLockShared(&cacheMutex);
+		auto ret = !checkAndCachePath(path);
+		ReleaseSRWLockShared(&cacheMutex);
+		
+		return ret;
 	}
 	static void resetNonexistentCache() {
-		std::unique_lock<std::shared_mutex> writeLock(cacheMutex);
-		root = TrieNode();
+		ZoneScoped;
+
+		AcquireSRWLockExclusive(&cacheMutex);
+		root = 0;
+		arena_clear(trieArena);
+		ReleaseSRWLockExclusive(&cacheMutex);
 	}
 };
 
-FastFileSystemHook::TrieNode FastFileSystemHook::root;
-std::shared_mutex FastFileSystemHook::cacheMutex;
+FastFileSystemHook::Trie* FastFileSystemHook::root = 0;
+Arena* FastFileSystemHook::trieArena = arena_alloc();
+SRWLOCK FastFileSystemHook::cacheMutex = SRWLOCK_INIT;
 
 __int64(*HandleOpenRegularFileOriginal)(__int64 a1, __int64 a2, char a3);
 
@@ -190,6 +263,8 @@ static bool file_exists(const char* path)
 
 // Our modified hook.
 int fs_sprintf_hook(char* Buffer, const char* Format, ...) {
+	ZoneScoped;
+
 	va_list args;
 	va_start(args, Format);
 
@@ -244,6 +319,8 @@ AddVPKFileType AddVPKFileOriginal;
 
 __int64 __fastcall AddVPKFile(IFileSystem* fileSystem, char* vpkPath, char** a3, char a4, int a5, char a6)
 {
+	ZoneScoped;
+
 	// Check if the path contains "_dir"
 	if (strstr(vpkPath, "_dir") != NULL)
 	{
@@ -291,8 +368,11 @@ __int64 __fastcall AddVPKFile(IFileSystem* fileSystem, char* vpkPath, char** a3,
 		}
 	}
 
-	// Finally, call the original function.
-	return AddVPKFileOriginal(fileSystem, vpkPath, a3, a4, a5, a6);
+	{
+		ZoneScopedN("AddVPKFileOriginal");
+		// Finally, call the original function.
+		return AddVPKFileOriginal(fileSystem, vpkPath, a3, a4, a5, a6);
+	}
 }
 
 //

@@ -67,7 +67,7 @@ void      (*OriginalCCVar_QueueMaterialThreadSetValue1)(uintptr_t thisptr, ConVa
 void      (*OriginalCCVar_QueueMaterialThreadSetValue2)(uintptr_t thisptr, ConVarR1* pConVar, int nValue);
 void      (*OriginalCCVar_QueueMaterialThreadSetValue3)(uintptr_t thisptr, ConVarR1* pConVar, float flValue);
 uintptr_t cvarinterface;
-std::unordered_map<std::string, WVar*, HashStrings> ccBaseMap;
+std::unordered_map<std::string, WVar*, HashStrings, std::equal_to<>> ccBaseMap;
 
 
 bool ConCommandBaseR1OIsCVar(ConCommandBaseR1O* ptr) {

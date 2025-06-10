@@ -318,7 +318,7 @@ int UpdateAddons(HSQUIRRELVM v, SQInteger index, SQBool enabled) {
 	auto func = (int(__fastcall*)(void*, const char*, int64, char*, int64))func_addr;
 	char szModPath[260];
 	char szAddOnListPath[260];
-	char szAddonDirName[60];
+	//char szAddonDirName[60];
 	auto ret = func(file_system, "MOD", 0, szModPath, 260);
 	snprintf(szAddOnListPath, 260, "%s%s", szModPath, "addonlist.txt");
 	KeyValues* kv = new KeyValues("AddonList");
@@ -931,9 +931,9 @@ int SendChatWrapper(HSQUIRRELVM v) {
 }
 
 void RunAutorunScripts(R1SquirrelVM* r1sqvm, const char* prefix) {
-	auto FindFirst = (const char*(*__fastcall)(uintptr_t thisptr, const char* searchString, uintptr_t* handle))(g_CVFileSystem->FindFirst);
-	auto FindNext = (const char* (*__fastcall)(uintptr_t thisptr, uintptr_t handle))(g_CVFileSystem->FindNext);
-	auto FindClose = (void(*__fastcall)(uintptr_t thisptr, uintptr_t handle))(g_CVFileSystem->FindClose);
+	auto FindFirst = (const char*(__fastcall*)(uintptr_t thisptr, const char* searchString, uintptr_t* handle))(g_CVFileSystem->FindFirst);
+	auto FindNext = (const char* (__fastcall*)(uintptr_t thisptr, uintptr_t handle))(g_CVFileSystem->FindNext);
+	auto FindClose = (void(__fastcall*)(uintptr_t thisptr, uintptr_t handle))(g_CVFileSystem->FindClose);
 
 	char search[128] = { 0 };
 	sprintf_s(search, "scripts/vscripts/autorun/%s", prefix);
@@ -951,21 +951,21 @@ void RunAutorunScripts(R1SquirrelVM* r1sqvm, const char* prefix) {
 	FindClose(g_CVFileSystemInterface, handle);
 }
 
-uintptr_t(*__fastcall oOnCreateClientScriptVM)(uintptr_t);
+uintptr_t(__fastcall *oOnCreateClientScriptVM)(uintptr_t);
 uintptr_t OnCreateClientScriptVM(uintptr_t thisptr) {
 	auto ret = oOnCreateClientScriptVM(thisptr);
 	RunAutorunScripts(GetClientVMPtr(), "cl_*");
 	return ret;
 }
 
-bool(*__fastcall oOnCreateUIScriptVM)();
+bool(__fastcall *oOnCreateUIScriptVM)();
 bool OnCreateUIScriptVM() {
 	bool ret = oOnCreateUIScriptVM();
 	if (ret) RunAutorunScripts(GetUIVMPtr(), "ui_*");
 	return ret;
 }
 
-uintptr_t(*__fastcall oOnCreateServerScriptVM)();
+uintptr_t(__fastcall *oOnCreateServerScriptVM)();
 uintptr_t OnCreateServerScriptVM() {
 	auto ret = oOnCreateServerScriptVM();
 	RunAutorunScripts(GetServerVMPtr(), "sv_*");
@@ -978,8 +978,8 @@ int AutoCVar(HSQUIRRELVM v) {
 	sq_getstring(v, 3, &defaultValue);
 	sq_getstring(v, 4, &desc);
 
-	constexpr const char* AUTOCVAR_PREFIX = "autocvar_",
-		AUTOCVAR_PREFIX_SIZE = std::char_traits<char>::length(AUTOCVAR_PREFIX);
+	constexpr const char* AUTOCVAR_PREFIX = "autocvar_";
+	constexpr size_t AUTOCVAR_PREFIX_SIZE = std::char_traits<char>::length(AUTOCVAR_PREFIX);
 
 	size_t size = AUTOCVAR_PREFIX_SIZE + strlen(key) + 1;
 	char* actualKey = (char*)malloc(size);
@@ -988,8 +988,8 @@ int AutoCVar(HSQUIRRELVM v) {
 	strcat_s(actualKey, size, key);
 	actualKey[size - 1] = '\0';
 
-	const char* defaultValueCopy = strdup(defaultValue);
-	const char* descCopy = strdup(desc);
+	const char* defaultValueCopy = _strdup(defaultValue);
+	const char* descCopy = _strdup(desc);
 
 	// if exists, bail
 	if (OriginalCCVar_FindVar(cvarinterface, actualKey)) return 0;

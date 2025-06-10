@@ -425,7 +425,6 @@ char __fastcall MatchRecvPropsToSendProps_R(__int64 a1, __int64 a2, __int64 pSen
 	__int64 v17; // [rsp+38h] [rbp-30h]
 	__int64 v18[5]; // [rsp+40h] [rbp-28h] BYREF
 	__int64 v7; // rdx
-	unsigned __int8* v9; // rcx
 
 	auto sub_1801D9D00 = (__int64(__fastcall*)(__int64 a1, _QWORD * a2))(ENGINE_DLL_BASE + 0x1D9D00);
 	v5 = (_QWORD*)pSendTable;

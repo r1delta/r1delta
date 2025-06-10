@@ -118,6 +118,7 @@ uint64 Plat_RelativeTicks()
 	return Ticks;
 }
 
+#if 0
 double Plat_FloatTime()
 {
 	// We subtract off the tick base to keep the diff as small
@@ -125,6 +126,7 @@ double Plat_FloatTime()
 	uint64 Ticks = Plat_RelativeTicks(); // NOTE: inits globals
 	return ((double)(int64)(Ticks - g_TickBase)) / g_TickFrequencyDouble;
 }
+#endif
 
 uint64 Plat_USTime()
 {
