@@ -1711,7 +1711,7 @@ GetUserIDString_t GetUserIDStringOriginal;
 typedef struct USERID_s
 {
 	int			idtype;
-	uintptr_t snowflake;
+	int64_t snowflake;
 } USERID_t;
 
 typedef USERID_s*(*GetUserID_t)(__int64 base_client, USERID_s* id);
