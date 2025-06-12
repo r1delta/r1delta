@@ -85,6 +85,9 @@
 #define R1DAssert(e) (e)
 #endif
 
+#define Stringify_(S) #S
+#define Stringify(S) Stringify_(S)
+
 extern uint64_t g_PerformanceFrequency;
 
 extern int G_is_dedi;

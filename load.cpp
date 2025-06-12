@@ -881,6 +881,7 @@ uintptr_t G_server;
 uintptr_t G_engine;
 uintptr_t G_engine_ds;
 uintptr_t G_client;
+uintptr_t G_matsystem;
 uintptr_t G_localize;
 ILocalize* G_localizeIface;
 
@@ -3048,6 +3049,7 @@ void __stdcall LoaderNotificationCallback(
 		MH_EnableHook(MH_ALL_HOOKS);
 	}
 	else if (string_equal_size(name, name_len, L"materialsystem_dx11.dll")) {
+		G_matsystem = (uintptr_t)notification_data->Loaded.DllBase;
 		SetupHudWarpMatSystemHooks();
 		MH_EnableHook(MH_ALL_HOOKS);
 	}
