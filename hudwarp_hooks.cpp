@@ -195,6 +195,8 @@ void __fastcall CMatSystemSurface__ApplyHudwarpSettings(void* thisptr, HudwarpSe
 	hudwarp_chopsize->m_Value.m_nValue = originalChopsize;
 }
 
+// TODO(mrsteyk): figure out better flags?
+#if BUILD_DEBUG
 static void BeginPixEvent_(const char* name)
 {
 	if (PIX)
@@ -254,8 +256,6 @@ static void SetPixMarker_(const char* name)
 	}
 }
 
-// TODO(mrsteyk): figure out better flags?
-#if BUILD_DEBUG
 void EndPixEvent_Hook(void* queueRenderContext)
 {
 	EndPixEvent_();
@@ -265,6 +265,10 @@ void SetPixMarker_Hook(void* queueRenderContext, uint32_t color, const char* psz
 {
 	SetPixMarker_(pszName);
 }
+#else
+#define BeginPixEvent_(...)
+#define EndPixEvent_(...)
+#define SetPixMarker_(...)
 #endif
 
 void __fastcall BeginPixEvent_Hook(void* queuedRenderContext, unsigned long color, const char* pszName) {
