@@ -1,42 +1,58 @@
 #include "hudwarp.h"
 #include "hudwarp_hooks.h"
-ID3D11Device* pDevice;
-ID3D11DeviceContext** ppID3D11DeviceContext;
+#include "load.h"
 
-typedef __int64(__fastcall *SetPixMarker_type)(__int64 queuedRenderContext, unsigned long color, const char* pszName);
-SetPixMarker_type SetPixMarker = nullptr;
+// ID3DUserDefinedAnnotation
+#include <d3d11_1.h>
+#include "tctx.hh"
 
+ID3D11Device* pDevice = 0;
+ID3D11DeviceContext** ppID3D11DeviceContext = 0;
+ID3DUserDefinedAnnotation* PIX = 0;
 
+typedef __int64(__fastcall *BeginPixEvent_type)(__int64 queuedRenderContext, unsigned long color, const char* pszName);
+BeginPixEvent_type BeginPixEvent = nullptr;
+
+void* QueueXEvent_materials = 0;
 HudwarpProcess* hudwarpProcess;
 bool isRenderingHud = false;
 bool shouldUseGPUHudwarp = true;
 bool isHudwarpDisabled = false;
 void SetupHudwarp()
 {
-	DWORD64 materialSystemBase = (DWORD64)GetModuleHandle(L"materialsystem_dx11.dll");
-	pDevice = *(ID3D11Device**)(materialSystemBase + 0x290D88);
-	ppID3D11DeviceContext = (ID3D11DeviceContext**)(materialSystemBase + 0x290D90);
-	hudwarpProcess = new HudwarpProcess(pDevice, ppID3D11DeviceContext);
-}
+	R1DAssert(!pDevice);
+	R1DAssert(!ppID3D11DeviceContext);
+	R1DAssert(!hudwarpProcess);
 
+	pDevice = *(ID3D11Device**)(G_matsystem + 0x290D88);
+	ppID3D11DeviceContext = (ID3D11DeviceContext**)(G_matsystem + 0x290D90);
+	hudwarpProcess = new HudwarpProcess(pDevice, ppID3D11DeviceContext);
+
+	R1DAssert(G_engine);
+	QueueXEvent_materials = *(void**)(G_engine + 0x318A688);
+	R1DAssert(QueueXEvent_materials);
+
+	auto hr = (*ppID3D11DeviceContext)->QueryInterface(IID_PPV_ARGS(&PIX));
+	R1DAssert(!FAILED(hr));
+	if (FAILED(hr))
+	{
+		PIX = 0;
+	}
+}
 
 
 void QueueBeginEvent(const char* markerName)
 {
-	static DWORD64 enginedllBaseAddress = (DWORD64)(GetModuleHandle(L"engine.dll"));
-	static auto materials = *(__int64*)(enginedllBaseAddress + 0x318A688);
-	auto queuedRenderContext = (*(__int64(__fastcall**)(__int64))(*(DWORD64*)materials + 896i64))(materials);
+	auto queuedRenderContext = (*(__int64(__fastcall**)(void*))(*(uintptr_t*)QueueXEvent_materials + 896i64))(QueueXEvent_materials);
 
-	SetPixMarker(queuedRenderContext, 111111, markerName); // hijack color field for our purposes
+	BeginPixEvent(queuedRenderContext, 111111, markerName); // hijack color field for our purposes
 }
 
 void QueueEndEvent()
 {
-	static DWORD64 enginedllBaseAddress = (DWORD64)(GetModuleHandle(L"engine.dll"));
-	static auto materials = *(__int64*)(enginedllBaseAddress + 0x318A688);
-	auto queuedRenderContext = (*(__int64(__fastcall**)(__int64))(*(DWORD64*)materials + 896i64))(materials);
+	auto queuedRenderContext = (*(__int64(__fastcall**)(void*))(*(uintptr_t*)QueueXEvent_materials + 896i64))(QueueXEvent_materials);
 
-	SetPixMarker(queuedRenderContext, 222222, ""); // hijack color field for our purposes
+	BeginPixEvent(queuedRenderContext, 222222, ""); // hijack color field for our purposes
 }
 
 
@@ -46,12 +62,10 @@ RenderHud_type RenderHud;
 void __fastcall RenderHud_Hook(__int64 a1, __int64 a2, __int64 a3)
 {
 	// Update state once per frame to prevent possible issues with one or neither applying
-	//static ConVarR1 hudwarp_use_gpu{ "hudwarp_use_gpu" };
 	static ConVarR1* hudwarp_use_gpu = OriginalCCVar_FindVar(cvarinterface, "hudwarp_use_gpu");
 	shouldUseGPUHudwarp = hudwarp_use_gpu->m_Value.m_nValue == 1;
 
-	//static ConVarR1 hudwarp_disable{ "hudwarp_disable" };
-//	isHudwarpDisabled = hudwarp_disable.m_Value.m_nValue;
+
 	static ConVarR1* hudwarp_disable = OriginalCCVar_FindVar(cvarinterface, "hudwarp_disable");
 	isHudwarpDisabled = hudwarp_disable->m_Value.m_nValue == 1;
 	QueueBeginEvent("HUD");
@@ -180,18 +194,94 @@ void __fastcall CMatSystemSurface__ApplyHudwarpSettings(void* thisptr, HudwarpSe
 
 	hudwarp_chopsize->m_Value.m_nValue = originalChopsize;
 }
-typedef __int64(__fastcall* sub_5ADC0_type)(__int64 queuedRenderContext, unsigned long color, const char* pszName);
-sub_5ADC0_type sub_5ADC0 = nullptr;
-__int64 __fastcall sub_5ADC0_Hook(__int64 queuedRenderContext, unsigned long color, const char* pszName) {
+
+static void BeginPixEvent_(const char* name)
+{
+	if (PIX)
+	{
+		TempArena temp(tctx.get_arena_for_scratch());
+
+		const size_t len = name ? strlen(name) : 0;
+		const wchar_t* nw = L"NULL";
+		if (len)
+		{
+			wchar_t* buf = (wchar_t*)arena_push(temp.arena, (len + 1) * 2);
+			for (size_t i = 0; i < len; i++)
+			{
+				buf[i] = name[i];
+			}
+			nw = buf;
+		}
+
+		PIX->BeginEvent(nw);
+	}
+}
+static void BeginPixEvent_(const wchar_t* name)
+{
+	if (PIX)
+	{
+		PIX->BeginEvent(name);
+	}
+}
+
+static void EndPixEvent_()
+{
+	if (PIX)
+	{
+		PIX->EndEvent();
+	}
+}
+
+static void SetPixMarker_(const char* name)
+{
+	if (PIX)
+	{
+		TempArena temp(tctx.get_arena_for_scratch());
+
+		const size_t len = name ? strlen(name) : 0;
+		const wchar_t* nw = L"NULL";
+		if (len)
+		{
+			wchar_t* buf = (wchar_t*)arena_push(temp.arena, (len + 1) * 2);
+			for (size_t i = 0; i < len; i++)
+			{
+				buf[i] = name[i];
+			}
+			nw = buf;
+		}
+
+		PIX->SetMarker(nw);
+	}
+}
+
+// TODO(mrsteyk): figure out better flags?
+#if BUILD_DEBUG
+void EndPixEvent_Hook(void* queueRenderContext)
+{
+	EndPixEvent_();
+}
+
+void SetPixMarker_Hook(void* queueRenderContext, uint32_t color, const char* pszName)
+{
+	SetPixMarker_(pszName);
+}
+#endif
+
+void __fastcall BeginPixEvent_Hook(void* queuedRenderContext, unsigned long color, const char* pszName) {
 	static unsigned int hudEventDepth = 0;
 
 	switch (color)
 	{
 	case 111111:
-		if (!strcmp(pszName, "HUD"))
+		if (!strcmp_static(pszName, "HUD"))
 		{
 			isRenderingHud = true;
+			BeginPixEvent_(L"HUD");
 			HudRenderStart();
+		}
+		else
+		{
+			R1DAssert(0);
 		}
 
 		if (isRenderingHud)
@@ -205,16 +295,23 @@ __int64 __fastcall sub_5ADC0_Hook(__int64 queuedRenderContext, unsigned long col
 			{
 				isRenderingHud = false;
 				HudRenderFinish();
+				EndPixEvent_();
 			}
+		}
+		else
+		{
+			R1DAssert(0);
 		}
 
 		break;
+
+	default: {
+#if BUILD_DEBUG
+		BeginPixEvent_(pszName);
+#endif
+	}break;
 	}
-
-	return sub_5ADC0(queuedRenderContext, color, pszName);
 }
-
-
 
 
 typedef float* (__fastcall *sub_18000BE60_type)(float* a1, float* a2, float* a3, float* a4, float a5, float* a6, float* a7, DWORD* a8);
@@ -259,32 +356,41 @@ void __fastcall OnWindowSizeChanged(unsigned int w, unsigned int h, bool isInGam
 
 
 void SetupHudWarpHooks() {
-	DWORD64 clientBaseAddress = (DWORD64)GetModuleHandle(L"client.dll");
-	MH_CreateHook((void*)(clientBaseAddress + 0x2AE630), &RenderHud_Hook, reinterpret_cast<LPVOID*>(&RenderHud));
+	R1DAssert(G_client);
+
+	MH_CreateHook((void*)(G_client + 0x2AE630), &RenderHud_Hook, reinterpret_cast<LPVOID*>(&RenderHud));
 	MH_EnableHook(MH_ALL_HOOKS);
 }
 char (*osub_180001CC0)();
 char sub_180001CC0() {
 	auto ret = osub_180001CC0();
-	uintptr_t m = (uintptr_t)(GetModuleHandleA("materialsystem_dx11.dll"));
-	int* ptr = (int*)(m + 0x293218);
+	int* ptr = (int*)(G_matsystem + 0x293218);
 	if (*ptr == 0)
 		*ptr = 1;
 	return ret;
 }
 void SetupHudWarpMatSystemHooks() {
-	DWORD64 materialSystemBase = (DWORD64)GetModuleHandle(L"materialsystem_dx11.dll");
-	DWORD64 sub_63D0_addr = materialSystemBase + 0x63D0;
+	uintptr_t sub_63D0_addr = G_matsystem + 0x63D0;
 	MH_CreateHook((void*)sub_63D0_addr, &sub_63D0, reinterpret_cast<LPVOID*>(&sub_63D0_org));
-	MH_CreateHook((void*)(materialSystemBase + 0x5ADC0), &sub_5ADC0_Hook, reinterpret_cast<LPVOID*>(&sub_5ADC0));
-	MH_CreateHook((void*)(materialSystemBase + 0x1CC0), &sub_180001CC0, reinterpret_cast<LPVOID*>(&osub_180001CC0));
-	SetPixMarker = (SetPixMarker_type)(materialSystemBase + 0x5D7E0);
+	
+	// NOTE(mrsteyk): changed to queued hooks.
+	R1DAssert(MH_CreateHook((void*)(G_matsystem + 0x626D0), &BeginPixEvent_Hook, 0) == MH_OK);
+#if BUILD_DEBUG
+	R1DAssert(MH_CreateHook((void*)(G_matsystem + 0x626E0), &EndPixEvent_Hook, 0) == MH_OK);
+	R1DAssert(MH_CreateHook((void*)(G_matsystem + 0x626F0), &SetPixMarker_Hook, 0) == MH_OK);
+#endif
+	MH_CreateHook((void*)(G_matsystem + 0x1CC0), &sub_180001CC0, reinterpret_cast<LPVOID*>(&osub_180001CC0));
+	BeginPixEvent = (BeginPixEvent_type)(G_matsystem + 0x5D7E0);
+
+	MH_EnableHook(MH_ALL_HOOKS);
 }
 
 void SetupHudWarpVguiHooks() {
-	DWORD64 vguimatsurfacedllBaseAddress = (DWORD64)GetModuleHandle(L"vguimatsurface.dll");
+	uintptr_t vguimatsurfacedllBaseAddress = (uintptr_t)GetModuleHandleW(L"vguimatsurface.dll");
 	MH_CreateHook((void*)(vguimatsurfacedllBaseAddress + 0xBAC0), &sub_18000BAC0, reinterpret_cast<LPVOID*>(&sub_18000BAC0_org));
 	MH_CreateHook((void*)(vguimatsurfacedllBaseAddress + 0x15A30), &CMatSystemSurface__ApplyHudwarpSettings, reinterpret_cast<LPVOID*>(&CMatSystemSurface__ApplyHudwarpSettings_org));
 	MH_CreateHook((void*)(vguimatsurfacedllBaseAddress + 0xBE60), &sub_18000BE60, reinterpret_cast<LPVOID*>(&sub_18000BE60_org));
 	MH_CreateHook((void*)(vguimatsurfacedllBaseAddress + 0x154A0), &sub_1800154A0, reinterpret_cast<LPVOID*>(&sub_1800154A0_org));
+
+	MH_EnableHook(MH_ALL_HOOKS);
 }

@@ -108,6 +108,7 @@ extern uintptr_t G_server;
 extern uintptr_t G_engine;
 extern uintptr_t G_engine_ds;
 extern uintptr_t G_client;
+extern uintptr_t G_matsystem;
 extern uintptr_t G_localize;
 extern ILocalize* G_localizeIface;
 static bool(__fastcall* o_pCLocalise__AddFile)(void* pVguiLocalize, const char* path, const char* pathId, bool bIncludeFallbackSearchPaths);
