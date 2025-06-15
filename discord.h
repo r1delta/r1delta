@@ -8,7 +8,6 @@
 static discord::Core* core = nullptr;
 
 extern void DiscordThread();
-
-
+extern int64 GetDiscordId();
 SQInteger SendDiscordUI(HSQUIRRELVM v);
 SQInteger SendDiscordClient(HSQUIRRELVM v);
