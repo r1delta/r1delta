@@ -130,7 +130,7 @@ void FileCache::UpdateCache() {
                 cache = std::move(newCache);
                 addonsFolderCache = std::move(newAddonsFolderCache);
                 addonsFolderCacheHashes.clear();
-                for (const auto& k : newAddonsFolderCache)
+                for (const auto& k : addonsFolderCache)
                 {
                     addonsFolderCacheHashes.push_back(fnv1a_hash(k));
                 }
