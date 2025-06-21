@@ -1541,6 +1541,9 @@ __int64 __fastcall HookedCBaseStateClientConnect(
 	int a11)
 {
 	static auto bUseOnlineAuth = OriginalCCVar_FindVar(cvarinterface, "delta_online_auth_enable");
+
+
+
 	if (bUseOnlineAuth->m_Value.m_nValue != 1)
 		return oCBaseStateClientConnect(a1, public_ip, private_ip, num_players, a5, a6, a7, a8, a9, a10, a11);
 
@@ -1719,6 +1722,19 @@ typedef USERID_s*(*GetUserID_t)(__int64 base_client, USERID_s* id);
 
 GetUserID_t GetUserIDOriginal;
 
+USERID_s* GetUserIDHook(__int64 base_client, USERID_s* id) {
+	id->idtype = 1; // Set idtype to 1 for USERID_TYPE_DISCORD
+	id->snowflake = 0; // Initialize snowflake to 0
+	if (base_client == 0) {
+		id->snowflake = 1; // Set to 1 for unknown user
+		return id;
+	}
+	if (IsDedicatedServer())
+		id->snowflake = *(int64_t*)(base_client + 0x284); // Get the snowflake from the base client
+	else 
+		id->snowflake = *(int64_t*)(base_client + 0x2FC); // Get the snowflake from the base client
+	return id;
+}
 
 const char* GetUserIDStringHook(USERID_s* id) {
 	char buffer[256];
@@ -2588,10 +2604,12 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	
 	if (IsDedicatedServer()) {
 		MH_CreateHook((LPVOID)(G_engine_ds + 0x45EB0), &GetUserIDStringHook, reinterpret_cast<LPVOID*>(&GetUserIDStringOriginal));
+		MH_CreateHook((LPVOID)(G_engine_ds + 0x46080), &GetUserIDHook, reinterpret_cast<LPVOID*>(&GetUserIDOriginal));
+
 	}
 	else {
 		MH_CreateHook((LPVOID)(engine_base_spec + 0xD5260), &GetUserIDStringHook, reinterpret_cast<LPVOID*>(&GetUserIDStringOriginal));
-
+		MH_CreateHook((LPVOID)(engine_base_spec + 0xD5430), &GetUserIDHook, reinterpret_cast<LPVOID*>(&GetUserIDOriginal));
 	}
 	if (!IsDedicatedServer()) {
 		MH_CreateHook((LPVOID)(engine_base_spec + 0x1E2930), &CNetChan__SendDatagramLISTEN_Part2_Hook, reinterpret_cast<LPVOID*>(&oCNetChan__SendDatagramLISTEN_Part2));
