@@ -1728,6 +1728,11 @@ USERID_s* GetUserIDHook(__int64 base_client, USERID_s* id) {
 	if (base_client == 0) {
 		return id;
 	}
+	auto var = OriginalCCVar_FindVar(cvarinterface, "delta_online_auth_enable");
+	if (var->m_Value.m_nValue != 1) {
+		id->snowflake = 1; // Set snowflake to 1 if online auth is not enabled
+		return id;
+	}
 	if (IsDedicatedServer())
 		id->snowflake = *(int64_t*)(base_client + 0x284); // Get the snowflake from the base client
 	else 
