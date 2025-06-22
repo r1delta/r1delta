@@ -1763,69 +1763,45 @@ void StartDiscordAuth(const CCommand& ccargs) {
 		Warning("This command is not available on dedicated servers.\n");
 		return;
 	}
-
-
-		discordpp::AuthorizationArgs args{};
-		args.SetClientId(1304910395013595176);
-		std::string scopes = discordpp::Client::GetDefaultPresenceScopes() + " identify";
-		args.SetScopes(scopes);
-		if (client) {
-			if (client->IsAuthenticated()) {
-				Msg("Already authenticated with Discord.\n");
-				client->Connect();
+	auto v = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token");
+	std::string_view token = v->m_Value.m_pszString;
+	if (token.compare("DEFAULT") == 0) {
+		core->ApplicationManager().GetOAuth2Token([](discord::Result discordResult, const discord::OAuth2Token& token) {
+			if (discordResult != discord::Result::Ok) {
+				Msg("Discord: Failed to get OAuth2 token: %d\n", discordResult);
 				return;
 			}
-			auto clientPtr = client.get();
-			client->Authorize(args, [clientPtr](auto dis_result, auto code, auto redirectUri) {
-				if (!dis_result.Successful()) {
-					std::cerr << "Authentication Error: " << dis_result.Error() << std::endl;
-					Msg("Doing Stuff");
-					return;
-				}
-				else {
-					Msg("Got code: %s\n", code.c_str());
-				}
+			auto ms_url = OriginalCCVar_FindVar(cvarinterface, "delta_ms_url")->m_Value.m_pszString;
+			httplib::Client cli(ms_url);
+			cli.set_connection_timeout(2, 0);
+			cli.set_follow_location(true);
 
-				auto ms_url = CCVar_FindVar(cvarinterface, "delta_ms_url")->m_Value.m_pszString;
-				httplib::Client cli(ms_url);
-				cli.set_connection_timeout(2);
-				cli.set_address_family(AF_INET);
-				cli.set_follow_location(true);
-				auto result = cli.Get(std::format("/discord-auth?code={}", code));
-				nlohmann::json j;
-				try {
-					j = nlohmann::json::parse(result->body);
-				}
-				catch (const std::exception& e) {
-					return;
-				}
-				auto errorVar = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token_failed_reason");
+			cli.set_read_timeout(2, 0);
+			auto stuff = std::format("/discord-auth?token={}", token.GetAccessToken());
+			auto result = cli.Get(stuff);
+			nlohmann::json j;
+			try {
+				j = nlohmann::json::parse(result->body);
+			}
+			catch (const std::exception& e) {
+				return;
+			}
+			auto errorVar = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token_failed_reason");
 
-				if (j.contains("error")) {
-					SetConvarStringOriginal(errorVar, j["error"].get<std::string>().c_str());
-					return;
-				}
-				auto token_j = j["token"].get<std::string>(); 
-				auto access_token = j["access_token"].get<std::string>();
-				auto v = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token");
-				SetConvarStringOriginal(v, token_j.c_str());
-				SetConvarStringOriginal(errorVar, "");
-				
-				// Next Step: Update the token and connect
-				clientPtr->UpdateToken(discordpp::AuthorizationTokenType::Bearer, access_token, [](discordpp::ClientResult result) {
-				
-					if (result.Successful()) {
-						Msg("Successfully updated token\n");
-						//client->Connect();
-					}
-					else {
-						Warning("Failed to update token: %s\n", result.Error().c_str());
-					}
-					
-					});
-				});
-				
-		}
+			if (j.contains("error")) {
+				SetConvarStringOriginal(errorVar, j["error"].get<std::string>().c_str());
+				return;
+			}
+			auto token_j = j["token"].get<std::string>();
+			auto v = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token");
+			SetConvarStringOriginal(v, token_j.c_str());
+			SetConvarStringOriginal(errorVar, "");
+			Msg("Discord: Successfully authenticated\n");
+			});
+	}
+	else {
+		Msg("Discord: Already authenticated\n");
+	}
 #endif
 	return;
 }
