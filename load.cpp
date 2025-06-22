@@ -38,13 +38,13 @@
 
 #include "load.h"
 #include <cstdlib>
-#include <crtdbg.h>	
+#include <crtdbg.h>
 #include <new>
 #include "windows.h"
 
 #include <iostream>
 #include "cvar.h"
-#include <winternl.h>  // For UNICODE_STRING.
+#include <winternl.h> // For UNICODE_STRING.
 #include <fstream>
 #include <filesystem>
 #include <array>
@@ -87,7 +87,8 @@
 #include <nlohmann/json.hpp>
 #include "shellapi.h"
 #ifdef JWT
-#include <jwt-cpp/jwt.h>
+#include "l8w8jwt/decode.h"
+#include "l8w8jwt/encode.h"
 #include "jwt_compact.h"
 #endif
 #include "vector.h"
@@ -96,31 +97,28 @@
 #include "surfacerender.h"
 #include "localchatwriter.h"
 #include "discord.h"
-//#define DISCORD
+// #define DISCORD
 #define DISCORDPP_IMPLEMENTATION
 #ifdef DISCORD
 #include <discordpp.h>
 #endif
 #include "sv_filter.h"
-#include <discord-game-sdk/discord.h>  
+#include <discord-game-sdk/discord.h>
 #include <Mmdeviceapi.h>
 
 #include "r1d_version.h"
 
 // Define and initialize the static member for the ConVar
-ConVarR1* CBanSystem::m_pSvBanlistAutosave = nullptr;
+ConVarR1 *CBanSystem::m_pSvBanlistAutosave = nullptr;
 
 std::atomic<bool> running = true;
 
 // Signal handler to stop the application
 
 //
-//auto client = std::make_shared<discordpp::Client>();
-
-
+// auto client = std::make_shared<discordpp::Client>();
 
 #pragma intrinsic(_ReturnAddress)
-
 
 extern "C"
 {
@@ -128,9 +126,9 @@ extern "C"
 	uintptr_t CNetChan__ProcessSubChannelData_Asm_continue = 0;
 	extern uintptr_t CNetChan__ProcessSubChannelData_AsmConductBufferSizeCheck;
 }
-void* dll_notification_cookie_;
+void *dll_notification_cookie_;
 
-void Status_ConMsg(const char* text, ...)
+void Status_ConMsg(const char *text, ...)
 // clang-format off
 {
 	char formatted[2048];
@@ -1345,7 +1343,6 @@ std::string get_public_ip() {
 	}();
 	return cached_ip;
 }
-
 // Server_AuthCallback verifies the server auth token.
 AuthResponse Server_AuthCallback(bool loopback, const char* serverIP, const char* token) {
 #ifdef JWT
@@ -1361,35 +1358,52 @@ AuthResponse Server_AuthCallback(bool loopback, const char* serverIP, const char
 		return response;
 	}
 	try {
-		auto decoded = jwt::decode(token);
+		struct l8w8jwt_decoding_params params;
+		l8w8jwt_decoding_params_init(&params);
+		params.alg = L8W8JWT_ALG_ES256;
+		params.jwt = (char*)token;
+		params.jwt_length = strlen(token);
+		params.verification_key = (unsigned char*)ecdsa_pub_key.c_str();
+		params.verification_key_length = ecdsa_pub_key.length();
+		params.validate_exp = 0;
+		params.exp_tolerance_seconds = 60;
 
-		// Verify expiration.
-		auto exp = decoded.get_payload_claim("e").as_int();
-		auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-		if (exp < now) {
+		enum l8w8jwt_validation_result validation_result;
+		l8w8jwt_claim* claims;
+		size_t claims_count;
+		int decode_result = l8w8jwt_decode(&params, &validation_result, &claims, &claims_count);
+
+		if (decode_result == L8W8JWT_SUCCESS && validation_result == L8W8JWT_VALID)
+		{
+			Msg("Token valid\n");
+		}
+		else
+		{
+			printf("\n Example HS512 token validation failed! \n");
 			response.success = false;
-			strncpy(response.failureReason, "Token is expired", sizeof(response.failureReason));
+			strncpy(response.failureReason, "Token is invalid", sizeof(response.failureReason));
 			return response;
 		}
 
-		// Create a verifier that checks the ES256 signature using the public key,
-		// and also ensures the token�s "server_ip" claim matches the serverIP.
-		auto verifier = jwt::verify()
-			.allow_algorithm(jwt::algorithm::es256(ecdsa_pub_key, "", "", ""));
+	
+		
 
-		verifier.verify(decoded); // Will throw if verification fails.
-
+		auto dn = l8w8jwt_get_claim(claims, claims_count, "dn", strlen("dn"));
+		auto pn = l8w8jwt_get_claim(claims, claims_count, "p", strlen("p"));
+		auto di = l8w8jwt_get_claim(claims, claims_count, "di", strlen("di"));
+		auto s = l8w8jwt_get_claim(claims, claims_count, "s", strlen("s"));
 		// Extract minimal claims.
-		std::string displayName = decoded.get_payload_claim("dn").as_string();
-		std::string pomeloName = decoded.get_payload_claim("p").as_string();
-		std::string id = decoded.get_payload_claim("di").as_string();
+		std::string displayName = dn ? std::string((char*)dn->value, dn->value_length) : "";
+		std::string pomeloName = pn ? std::string((char*)pn->value, pn->value_length) : "";
+		std::string id = di ? std::string((char*)di->value, di->value_length) : "";
 		// Extra check: the token�s server_ip must match exactly.
-		std::string tokenServerIP = decoded.get_payload_claim("s").as_string();
+		std::string tokenServerIP = s ? std::string((char*)s->value, s->value_length) : "";
 		/*if (tokenServerIP != serverIP && !loopback) {
 			response.success = false;
 			strncpy(response.failureReason, "Token server IP mismatch", sizeof(response.failureReason));
 			return response;
 		}*/
+		Msg("Token server IP: %s, expected: %s\n", tokenServerIP.c_str(), serverIP);
 		response.success = true;
 		strncpy(response.discordName, displayName.c_str(), sizeof(response.discordName) - 1);
 		response.discordName[sizeof(response.discordName) - 1] = '\0';
@@ -1570,12 +1584,12 @@ __int64 __fastcall HookedCBaseStateClientConnect(
 			std::string token = jsonResponse["token"].get<std::string>();
 			// Update the server auth token convar.
 			SetConvarStringOriginal(var, jwt_compact::compactJWT(token).c_str());
-			Msg("Server Auth Token Length: %d\n", var->m_Value.m_StringLength);
+			/*Msg("Server Auth Token Length: %d\n", var->m_Value.m_StringLength);
 			auto decoded = jwt::decode(token);
 			std::string pomeloName = decoded.get_payload_claim("p").as_string();
 			std::string id = decoded.get_payload_claim("di").as_string();
 			SetConvarStringOriginal(OriginalCCVar_FindVar(cvarinterface, "name"), pomeloName.c_str());
-			SetConvarStringOriginal(OriginalCCVar_FindVar(cvarinterface, "hostname"), (pomeloName+"'s R1Delta Server").c_str());
+			SetConvarStringOriginal(OriginalCCVar_FindVar(cvarinterface, "hostname"), (pomeloName+"'s R1Delta Server").c_str());*/
 			#endif // JWT
 		}
 		catch (const std::exception& e) {
@@ -1750,7 +1764,7 @@ const char* GetUserIDStringHook(USERID_s* id) {
 	return buffer;
 	
 }
-
+#define DISCORD
 void StartDiscordAuth(const CCommand& ccargs) {
 #ifndef DISCORD
 	Warning("Build was compiled without DISCORD defined.\n");
@@ -1765,7 +1779,7 @@ void StartDiscordAuth(const CCommand& ccargs) {
 	}
 	auto v = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token");
 	std::string_view token = v->m_Value.m_pszString;
-	if (token.compare("DEFAULT") == 0) {
+	if (token.compare("DEFAULT") == 0 || token.empty()) {
 		core->ApplicationManager().GetOAuth2Token([](discord::Result discordResult, const discord::OAuth2Token& token) {
 			if (discordResult != discord::Result::Ok) {
 				Msg("Discord: Failed to get OAuth2 token: %d\n", discordResult);
