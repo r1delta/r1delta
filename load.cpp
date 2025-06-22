@@ -1724,9 +1724,8 @@ GetUserID_t GetUserIDOriginal;
 
 USERID_s* GetUserIDHook(__int64 base_client, USERID_s* id) {
 	id->idtype = 1; // Set idtype to 1 for USERID_TYPE_DISCORD
-	id->snowflake = 0; // Initialize snowflake to 0
+	id->snowflake = 1; // Initialize snowflake to 0
 	if (base_client == 0) {
-		id->snowflake = 1; // Set to 1 for unknown user
 		return id;
 	}
 	if (IsDedicatedServer())
