@@ -1581,12 +1581,32 @@ __int64 __fastcall HookedCBaseStateClientConnect(
 			std::string token = jsonResponse["token"].get<std::string>();
 			// Update the server auth token convar.
 			SetConvarStringOriginal(var, jwt_compact::compactJWT(token).c_str());
-			/*Msg("Server Auth Token Length: %d\n", var->m_Value.m_StringLength);
-			auto decoded = jwt::decode(token);
-			std::string pomeloName = decoded.get_payload_claim("p").as_string();
-			std::string id = decoded.get_payload_claim("di").as_string();
+			Msg("Server Auth Token Length: %d\n", var->m_Value.m_StringLength);
+			struct l8w8jwt_decoding_params params;
+			l8w8jwt_decoding_params_init(&params);
+			params.alg = L8W8JWT_ALG_ES256;
+			params.jwt = (char*)token.c_str();
+			params.jwt_length = token.length();
+			params.verification_key = (unsigned char*)ecdsa_pub_key.c_str();
+			params.verification_key_length = ecdsa_pub_key.length();
+			params.validate_exp = 0;
+			params.exp_tolerance_seconds = 60;
+
+			enum l8w8jwt_validation_result validation_result;
+			l8w8jwt_claim* claims;
+			size_t claims_count;
+			int decode_result = l8w8jwt_decode(&params, &validation_result, &claims, &claims_count);
+
+			if (decode_result == L8W8JWT_SUCCESS)
+			{
+				Msg("Token valid\n");
+			}
+			auto p = l8w8jwt_get_claim(claims, claims_count, "dn", strlen("dn"));
+			auto di = l8w8jwt_get_claim(claims, claims_count, "di", strlen("di"));
+			std::string pomeloName = p->value;
+			std::string id = di->value;
 			SetConvarStringOriginal(OriginalCCVar_FindVar(cvarinterface, "name"), pomeloName.c_str());
-			SetConvarStringOriginal(OriginalCCVar_FindVar(cvarinterface, "hostname"), (pomeloName+"'s R1Delta Server").c_str());*/
+			SetConvarStringOriginal(OriginalCCVar_FindVar(cvarinterface, "hostname"), (pomeloName+"'s R1Delta Server").c_str());
 			#endif // JWT
 		}
 		catch (const std::exception& e) {
@@ -2612,7 +2632,7 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	RegisterConVar("delta_persistent_master_auth_token", "DEFAULT", FCVAR_ARCHIVE | FCVAR_SERVER_CANNOT_QUERY | FCVAR_DONTRECORD | FCVAR_PROTECTED | FCVAR_HIDDEN, "Persistent master server authentication token");
 	RegisterConVar("delta_persistent_master_auth_token_failed_reason", "", FCVAR_ARCHIVE | FCVAR_SERVER_CANNOT_QUERY | FCVAR_DONTRECORD | FCVAR_PROTECTED | FCVAR_HIDDEN, "Persistent master server authentication token");
 	RegisterConVar("delta_online_auth_enable", "0", FCVAR_GAMEDLL, "Whether to use master server auth");
-	RegisterConVar("delta_discord_username_sync", "1", FCVAR_GAMEDLL, "Controls if player names are synced with Discord: 0=Off,1=Norm,2=Pomelo");
+	RegisterConVar("delta_discord_username_sync", "0", FCVAR_GAMEDLL, "Controls if player names are synced with Discord: 0=Off,1=Norm,2=Pomelo");
 	RegisterConVar("riff_floorislava", "0", FCVAR_HIDDEN, "Enable floor is lava mode");
 	RegisterConVar("hudwarp_use_gpu", "1", FCVAR_ARCHIVE,"Use GPU for HUD warp");
 	RegisterConVar("hudwarp_disable", "0", FCVAR_ARCHIVE, "GPU device to use for HUD warp");
