@@ -1,0 +1,28 @@
+{
+  "name": "l8w8jwt",
+  "version": "2.5.0",
+  "description": "A lightweight, zero-dependency JSON Web Token (JWT) library for C/C++",
+  "homepage": "https://github.com/GlitchedPolygons/l8w8jwt",
+  "license": "Apache-2.0",
+  "dependencies": [
+    {
+      "name": "mbedtls",
+      "version>=": "3.6.1" 
+    },
+    "jsmn",
+    {
+      "name": "vcpkg-cmake",
+      "host": true
+    },
+    {
+      "name": "vcpkg-cmake-config",
+      "host": true
+    }
+  ],
+  "overrides": [
+    {
+      "name": "mbedtls",
+      "version": "3.6.1"
+    }
+  ]
+}

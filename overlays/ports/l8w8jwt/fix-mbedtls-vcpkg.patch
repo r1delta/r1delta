@@ -1,0 +1,100 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -70,9 +70,8 @@
+ 
+ option(ENABLE_TESTING "Build MbedTLS tests." OFF)
+ option(ENABLE_PROGRAMS "Build MbedTLS example programs." OFF)
+-
+ if (NOT TARGET mbedtls)
+-    add_subdirectory(lib/mbedtls mbedtls)
++   # find_package(mbedTLS CONFIG REQUIRED)
+ endif ()
+ 
+ if (NOT TARGET chillbuff)
+@@ -80,7 +79,6 @@
+ endif ()
+ 
+ set(l8w8jwt_headers
+-        ${CMAKE_CURRENT_LIST_DIR}/lib/jsmn/jsmn.h
+         ${CMAKE_CURRENT_LIST_DIR}/lib/checknum/include/checknum.h
+         ${CMAKE_CURRENT_LIST_DIR}/include/l8w8jwt/retcodes.h
+         ${CMAKE_CURRENT_LIST_DIR}/include/l8w8jwt/algs.h
+@@ -141,40 +139,30 @@
+ endif ()
+ 
+ if (L8W8JWT_PACKAGE)
+-
+-    if (NOT L8W8JWT_SYSNAME)
+-        set(L8W8JWT_SYSNAME ${CMAKE_SYSTEM_NAME})
+-    endif ()
+-
++    # Set output directories to vcpkg paths directly
+     set_target_properties(${PROJECT_NAME} PROPERTIES
+-            ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}/bin"
+-            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}/bin"
+-            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}/bin"
+-
+-            ARCHIVE_OUTPUT_DIRECTORY_DEBUG "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}/bin/debug"
+-            LIBRARY_OUTPUT_DIRECTORY_DEBUG "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}/bin/debug"
+-            RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}/bin/debug"
+-
+-            ARCHIVE_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}/bin/release"
+-            LIBRARY_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}/bin/release"
+-            RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}/bin/release"
+-            )
++            ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_INSTALL_PREFIX}/lib"
++            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_INSTALL_PREFIX}/lib"
++            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_INSTALL_PREFIX}/bin"
+ 
+-    add_custom_command(TARGET ${PROJECT_NAME}
+-            POST_BUILD COMMAND ${CMAKE_COMMAND}
+-            -E copy ${CMAKE_CURRENT_LIST_DIR}/NOTICE "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}/NOTICE"
++            ARCHIVE_OUTPUT_DIRECTORY_DEBUG "${CMAKE_INSTALL_PREFIX}/debug/lib"
++            LIBRARY_OUTPUT_DIRECTORY_DEBUG "${CMAKE_INSTALL_PREFIX}/debug/lib"
++            RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_INSTALL_PREFIX}/debug/bin"
++
++            ARCHIVE_OUTPUT_DIRECTORY_RELEASE "${CMAKE_INSTALL_PREFIX}/lib"
++            LIBRARY_OUTPUT_DIRECTORY_RELEASE "${CMAKE_INSTALL_PREFIX}/lib"
++            RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_INSTALL_PREFIX}/bin"
+             )
+ 
++    # Copy files directly to install prefix
+     add_custom_command(TARGET ${PROJECT_NAME}
+             POST_BUILD COMMAND ${CMAKE_COMMAND}
+-            -E copy_directory ${CMAKE_CURRENT_LIST_DIR}/include "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}/include"
++            -E copy ${CMAKE_CURRENT_LIST_DIR}/NOTICE "${CMAKE_INSTALL_PREFIX}/share/${PROJECT_NAME}/NOTICE"
+             )
+ 
+-    string(TOLOWER "${PROJECT_NAME}-${L8W8JWT_VERSION_STRING}-${L8W8JWT_SYSNAME}-${CMAKE_HOST_SYSTEM_PROCESSOR}.tar.gz" L8W8JWT_OUTPUT_ARCHIVE_FILENAME)
+-
+     add_custom_command(TARGET ${PROJECT_NAME}
+             POST_BUILD COMMAND ${CMAKE_COMMAND}
+-            -E tar "czvf" ${L8W8JWT_OUTPUT_ARCHIVE_FILENAME} ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}
++            -E copy_directory ${CMAKE_CURRENT_LIST_DIR}/include "${CMAKE_INSTALL_PREFIX}/include"
+             )
+ endif ()
+ 
+@@ -183,8 +171,8 @@
+ endif ()
+ 
+ target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_LIST_DIR}/lib/checknum/include)
+-target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_LIST_DIR}/lib/mbedtls/include)
+-target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_LIST_DIR}/lib/jsmn)
++find_path(JSMN_INCLUDE_DIRS "jsmn.h")
++target_include_directories(${PROJECT_NAME} PRIVATE ${JSMN_INCLUDE_DIRS})
+ target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
+ 
+ target_link_libraries(${PROJECT_NAME}
+@@ -192,9 +180,9 @@
+         )
+ 
+ target_link_libraries(${PROJECT_NAME}
+-        PRIVATE mbedtls
+-        PRIVATE mbedx509
+-        PRIVATE mbedcrypto
++        PRIVATE ${MBEDTLS_TLS_LIBRARY}
++        PRIVATE ${MBEDTLS_X509_LIBRARY}
++        PRIVATE ${MBEDTLS_CRYPTO_LIBRARY}
+         )
+ 
+ if ((${CMAKE_SYSTEM_NAME} STREQUAL "Linux") OR (${CYGWIN}))
