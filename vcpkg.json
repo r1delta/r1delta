@@ -23,6 +23,7 @@
     "zstd",
     "libogg",
     "libvorbis",
+    "l8w8jwt",
     {
       "name": "discord-game-sdk",
       "version>=": "2.5.6#5"
