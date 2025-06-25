@@ -12,6 +12,11 @@
 #include "masterserver.h"
 #include <nlohmann/json.hpp>
 
+// Define for discord auth stuff.
+#define DISCORD
+
+
+
 static bool is_discord_running = false;
 
 bool parseAndValidateIpOctets(const char* ip_part, size_t ip_len, unsigned int& o1, unsigned int& o2, unsigned int& o3, unsigned int& o4) {
@@ -191,7 +196,6 @@ int64 GetDiscordId() {
 }
 
 DiscordCommandQueue g_DiscordCommandQueue;
-//#define DISCORD
 void DiscordAuthCommand(const CCommand& args) {
 #ifndef DISCORD
 	Warning("Build was compiled without DISCORD defined.\n");
