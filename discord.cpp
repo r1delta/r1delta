@@ -10,6 +10,7 @@
 #include <regex>
 #include "httplib.h"
 #include "masterserver.h"
+#include <nlohmann/json.hpp>
 
 static bool is_discord_running = false;
 
@@ -189,10 +190,68 @@ int64 GetDiscordId() {
 	return user.GetId();
 }
 
+DiscordCommandQueue g_DiscordCommandQueue;
+#define DISCORD
+void DiscordAuthCommand(const CCommand& args) {
+#ifndef DISCORD
+	Warning("Build was compiled without DISCORD defined.\n");
+#else
+	if (!is_discord_running) {
+		Msg("Discord: Discord is not running\n");
+		return;
+	}
+	
+	if (args.ArgC() != 1) {
+		Warning("Usage: delta_start_discord_auth\n");
+		return;
+	}
+	if (IsDedicatedServer()) {
+		Warning("This command is not available on dedicated servers.\n");
+		return;
+	}
+
+	g_DiscordCommandQueue.AddCommand(DiscordCommandType::AUTH);
+#endif
+}
+
+void ProcessDiscordAuth() {
+	core->ApplicationManager().GetOAuth2Token([](discord::Result discordResult, const discord::OAuth2Token& token) {
+		if (discordResult != discord::Result::Ok) {
+			Msg("Discord: Failed to auth: %d\n", discordResult);
+			return;
+		}
+		auto ms_url = OriginalCCVar_FindVar(cvarinterface, "delta_ms_url")->m_Value.m_pszString;
+		httplib::Client cli(ms_url);
+		cli.set_connection_timeout(2, 0);
+		cli.set_follow_location(true);
+		cli.set_read_timeout(2, 0);
+		auto stuff = std::format("/discord-auth?token={}", token.GetAccessToken());
+		auto result = cli.Get(stuff);
+		nlohmann::json j;
+		try {
+			j = nlohmann::json::parse(result->body);
+		}
+		catch (const std::exception& e) {
+			return;
+		}
+		auto errorVar = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token_failed_reason");
+		if (j.contains("error")) {
+			SetConvarStringOriginal(errorVar, j["error"].get<std::string>().c_str());
+			return;
+		}
+		auto token_j = j["token"].get<std::string>();
+		auto v = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token");
+		SetConvarStringOriginal(v, token_j.c_str());
+		SetConvarStringOriginal(errorVar, "");
+		Msg("Discord: Successfully authenticated\n");
+		});
+}
+
 void DiscordThread() {
 	GetBaseClient = (GetBaseClientFunc)(G_engine + 0x5F470);
 	G_public_ip = get_public_ip();
 	auto result = discord::Core::Create(DISCORD_APPLICATION_ID, DiscordCreateFlags_NoRequireDiscord, &core);
+
 	if (!IsDiscordProcessRunning()) {
 		Msg("Discord: Discord not running.\n");
 	}
@@ -206,6 +265,7 @@ void DiscordThread() {
 	core->ActivityManager().OnActivityJoinRequest.Connect(HandleDiscordJoinRequest);
 	core->ActivityManager().OnActivityInvite.Connect(HandleDiscordInvite);
 	core->UserManager().OnCurrentUserUpdate.Connect(HandleDiscordUserReady);
+	
 	//if (auto x = core->ActivityManager().RegisterCommand("%localappdata%/R1Delta/r1delta.exe") != discord::Result::Ok) {
 	//	Msg("Discord: Failed to register command %d\n", x);
 	//}
@@ -214,6 +274,14 @@ void DiscordThread() {
 	
 	while (true) {
 		core->RunCallbacks();
+		DiscordCommandType cmd;
+		while (g_DiscordCommandQueue.GetNextCommand(cmd)) {
+			switch (cmd) {
+			case DiscordCommandType::AUTH:
+				ProcessDiscordAuth();
+				break;
+			}
+		}
 		std::this_thread::sleep_for(std::chrono::milliseconds(16));
 	}
 }
@@ -266,7 +334,10 @@ std::string CreateDiscordSecret() {
 
 }
 
+void DoDiscordAuth()
+{
 
+}
 SQInteger SendDiscordUI(HSQUIRRELVM v)
 {
 	if (!is_discord_running)

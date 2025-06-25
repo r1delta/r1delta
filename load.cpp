@@ -86,6 +86,7 @@
 #include "audio.h"
 #include <nlohmann/json.hpp>
 #include "shellapi.h"
+//#define JWT
 #ifdef JWT
 #include <l8w8jwt/decode.h>
 #include "l8w8jwt/encode.h"
@@ -1318,9 +1319,6 @@ void Shared_OnLocalAuthFailure() {
 }
 
 
-
-typedef void (*SetConvarString_t)(ConVarR1* var, const char* value);
-
 SetConvarString_t SetConvarStringOriginal;
 
 // Helper function to get the server�s public IP.
@@ -1778,40 +1776,18 @@ void StartDiscordAuth(const CCommand& ccargs) {
 		return;
 	}
 	auto v = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token");
+	if(!v) {
+		Warning("delta_persistent_master_auth_token not found.\n");
+		return;
+	}
 	std::string_view token = v->m_Value.m_pszString;
 	if (token.compare("DEFAULT") == 0 || token.empty()) {
-		core->ApplicationManager().GetOAuth2Token([](discord::Result discordResult, const discord::OAuth2Token& token) {
-			if (discordResult != discord::Result::Ok) {
-				Msg("Discord: Failed to get OAuth2 token: %d\n", discordResult);
-				return;
-			}
-			auto ms_url = OriginalCCVar_FindVar(cvarinterface, "delta_ms_url")->m_Value.m_pszString;
-			httplib::Client cli(ms_url);
-			cli.set_connection_timeout(2, 0);
-			cli.set_follow_location(true);
-
-			cli.set_read_timeout(2, 0);
-			auto stuff = std::format("/discord-auth?token={}", token.GetAccessToken());
-			auto result = cli.Get(stuff);
-			nlohmann::json j;
-			try {
-				j = nlohmann::json::parse(result->body);
-			}
-			catch (const std::exception& e) {
-				return;
-			}
-			auto errorVar = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token_failed_reason");
-
-			if (j.contains("error")) {
-				SetConvarStringOriginal(errorVar, j["error"].get<std::string>().c_str());
-				return;
-			}
-			auto token_j = j["token"].get<std::string>();
-			auto v = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token");
-			SetConvarStringOriginal(v, token_j.c_str());
-			SetConvarStringOriginal(errorVar, "");
-			Msg("Discord: Successfully authenticated\n");
-			});
+		if (core) {
+			Msg("Fish\n");
+		}
+		else {
+			Warning("Discord is NULL\n");
+		}
 	}
 	else {
 		Msg("Discord: Already authenticated\n");
@@ -1885,7 +1861,7 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		MH_CreateHook((LPVOID)(engine_base + 0x21F9C0), &CEngineVGui__Init, reinterpret_cast<LPVOID*>(&CEngineVGui__InitOriginal));
 		MH_CreateHook((LPVOID)(engine_base + 0x21EB70), &CEngineVGui__HideGameUI, reinterpret_cast<LPVOID*>(&CEngineVGui__HideGameUIOriginal));
 		RegisterConCommand("toggleconsole", ToggleConsoleCommand, "Toggles the console", (1 << 17));
-		RegisterConCommand("delta_start_discord_auth", StartDiscordAuth, "Starts the discord auth process", 0);
+		RegisterConCommand("delta_start_discord_auth", DiscordAuthCommand, "Starts the discord auth process", 0);
 		RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
 		MH_CreateHook((LPVOID)(G_engine + 0x2A200), &sub_2A200, reinterpret_cast<LPVOID*>(&sub_2A200Original));
 		//g_pLogAudio = RegisterConVar("fs_log_audio", "0", FCVAR_NONE, "Log audio file reads");
@@ -2747,51 +2723,6 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	R1DAssert(MH_EnableHook(MH_ALL_HOOKS) == MH_OK);
 	//std::cout << "did hooks" << std::endl;
 }
-
-//
-//void DiscordThread() {
-//	
-//#ifdef DISCORD
-//	client = std::make_unique<discordpp::Client>();
-//	client->AddLogCallback([](auto message, auto severity) {
-//		Msg("[Discord::%s] %s\n", EnumToString(severity), message.c_str());
-//	//	std::cout << "[" << EnumToString(severity) << "] " << message << std::endl;
-//		}, discordpp::LoggingSeverity::Info);
-//
-//	client->SetStatusChangedCallback([](auto status, auto error, auto details) {
-//		Msg("Status has changed to %s\n", discordpp::Client::StatusToString(status).c_str());
-//		if (status == discordpp::Client::Status::Ready) {
-//			Msg("Client is ready, you can now call SDK functions. For example:\n");
-//			discordpp::Activity activity;
-//			activity.SetType(discordpp::ActivityTypes::Playing);
-//			activity.SetDetails("Battle Creek");
-//			activity.SetState("In Competitive Match");
-//			client->UpdateRichPresence(activity, [](discordpp::ClientResult result) {
-//				if (result.Successful()) {
-//					std::cout << "Rich presence updated!\n";
-//				}
-//				else {
-//					std::cout << "Failed to update rich presence: " << result.Error() << "\n";
-//				}
-//				});
-//
-//		}
-//		else if (error != discordpp::Client::Error::None) {
-//			Msg("Error connecting: %s %d\n", discordpp::Client::ErrorToString(error).c_str(),
-//				details);
-//		}
-//		});
-//
-//
-//
-//		while (running) {
-//			discordpp::RunCallbacks();
-//			std::this_thread::sleep_for(std::chrono::milliseconds(16));
-//
-//		}
-//#endif
-//}
-
 __int64 (*oAddSearchPathDedi)(__int64 a1, const char* a2, __int64 a3, unsigned int a4);
 __int64 __fastcall AddSearchPathDedi(__int64 a1, const char* a2, __int64 a3, unsigned int a4) {
 	if (!strcmp_static(a2, "r1delta")) {
@@ -3092,11 +3023,11 @@ void __stdcall LoaderNotificationCallback(
 			SetupSquirrelErrorNotificationHooks();
 			SetupChatWriter();
 			RegisterConCommand("+toggleFullscreenMap", toggleFullscreenMap_cmd, "Toggles the fullscreen map.", FCVAR_CLIENTDLL);
-			std::thread(DiscordThread).detach();
 			RegisterConVar("cl_hold_to_rodeo_enable", "0", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "0: Automatic rodeo. 1: Hold to rodeo ALL titans. 2: Hold to rodeo friendlies, automatically rodeo hostile titans.");
 			RegisterConVar("bot_kick_on_death", "1", FCVAR_GAMEDLL | FCVAR_CHEAT, "Enable/disable bots getting kicked on death.");
 			MH_CreateHook((LPVOID)(G_localize + 0x3A40), &h_CLocalize__ReloadLocalizationFiles, (LPVOID*)&o_pCLocalize__ReloadLocalizationFiles);
 			MH_EnableHook(MH_ALL_HOOKS);
+			std::thread(DiscordThread).detach();
 		}
 		if (is_server) do_server(notification_data);
 		if (should_init_security_fixes && (is_client || is_server)) {
