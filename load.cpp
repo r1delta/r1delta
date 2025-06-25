@@ -98,7 +98,6 @@
 #include "surfacerender.h"
 #include "localchatwriter.h"
 #include "discord.h"
-// #define DISCORD
 #define DISCORDPP_IMPLEMENTATION
 #ifdef DISCORD
 #include <discordpp.h>

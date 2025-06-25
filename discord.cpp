@@ -191,7 +191,7 @@ int64 GetDiscordId() {
 }
 
 DiscordCommandQueue g_DiscordCommandQueue;
-#define DISCORD
+//#define DISCORD
 void DiscordAuthCommand(const CCommand& args) {
 #ifndef DISCORD
 	Warning("Build was compiled without DISCORD defined.\n");
