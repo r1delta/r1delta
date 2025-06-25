@@ -251,6 +251,7 @@ namespace MasterServerClient {
                 si.port = sj["port"];
                 si.ip = sj["ip"];
 				si.hasPassword = sj["has_password"];
+				si.has_auth = sj["has_auth"];
 				si.description = sj["description"];
 				si.playlist = sj["playlist"];
 				si.playlist_display_name = sj["playlist_display_name"];
@@ -349,6 +350,7 @@ SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
         }
         case OT_INTEGER:
             if (!strcmp_static(key, "max_players")) heartbeat.maxPlayers = node.val._unVal.nInteger;
+			if (!strcmp_static(key, "has_auth")) heartbeat.has_auth = node.val._unVal.nInteger;
             break;
         case OT_ARRAY:
             if (!strcmp_static(key, "players")) {
@@ -458,6 +460,7 @@ SQInteger PollServerList(HSQUIRRELVM v) {
             sq_pushstring_lit(v, "port"); sq_pushinteger(0, v, s.port); sq_newslot(v, -3, 0);
             sq_pushstring_lit(v, "ip"); sq_pushstring_std(v, s.ip); sq_newslot(v, -3, 0);
             sq_pushstring_lit(v, "has_password"); sq_pushinteger(0, v, s.hasPassword ? 1 : 0); sq_newslot(v, -3, 0);
+			sq_pushstring_lit(v, "has_auth"); sq_pushinteger(0, v, s.has_auth ? 1 : 0); sq_newslot(v, -3, 0);
             sq_pushstring_lit(v, "description"); sq_pushstring_std(v, s.description); sq_newslot(v, -3, 0);
             sq_pushstring_lit(v, "playlist"); sq_pushstring_std(v, s.playlist); sq_newslot(v, -3, 0);
             sq_pushstring_lit(v, "playlist_display_name"); sq_pushstring_std(v, s.playlist_display_name); sq_newslot(v, -3, 0);
