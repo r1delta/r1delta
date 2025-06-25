@@ -86,7 +86,7 @@
 #include "audio.h"
 #include <nlohmann/json.hpp>
 #include "shellapi.h"
-//#define JWT
+#define JWT
 #ifdef JWT
 #include <l8w8jwt/decode.h>
 #include "l8w8jwt/encode.h"
