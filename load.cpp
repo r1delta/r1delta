@@ -87,7 +87,7 @@
 #include <nlohmann/json.hpp>
 #include "shellapi.h"
 #ifdef JWT
-#include "l8w8jwt/decode.h"
+#include <l8w8jwt/decode.h>
 #include "l8w8jwt/encode.h"
 #include "jwt_compact.h"
 #endif
