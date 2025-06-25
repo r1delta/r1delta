@@ -38,6 +38,7 @@ struct ServerInfo {
     std::string gameMode;
     int maxPlayers;
     int port;
+    bool has_auth;
     std::string ip;
 	bool hasPassword;
     std::string version;
@@ -53,6 +54,7 @@ struct HeartbeatInfo {
     std::string gameMode;
     int maxPlayers;
     int port;
+    bool has_auth;
 	bool hasPassword;
 	std::string description;
     std::string playlist;
@@ -136,6 +138,8 @@ namespace MasterServerClient {
         j["game_mode"] = heartbeat.gameMode;
         j["max_players"] = heartbeat.maxPlayers;
         j["port"] = heartbeat.port;
+        auto auth_Var = CCVar_FindVar(cvarinterface, "delta_online_auth_enable");
+		j["has_auth"] = auth_Var->m_Value.m_nValue != 0;
         j["version"] = R1D_VERSION;
         auto password_var = CCVar_FindVar(cvarinterface, "sv_password");
         if (password_var && password_var->m_Value.m_pszString[0]) {
@@ -340,7 +344,7 @@ SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
             if (!strcmp_static(key, "game_mode")) heartbeat.gameMode = s->_val;
 			if (!strcmp_static(key, "playlist")) heartbeat.playlist = s->_val;
 			if (!strcmp_static(key, "playlist_display_name")) heartbeat.playlist_display_name = s->_val;
-			
+            if (!strcmp_static(key, "is_auth")) heartbeat.playlist = s->_val;
             break;
         }
         case OT_INTEGER:
