@@ -1781,39 +1781,7 @@ const char* GetUserIDStringHook(USERID_s* id) {
 	return buffer;
 	
 }
-#define DISCORD
-void StartDiscordAuth(const CCommand& ccargs) {
-#ifndef DISCORD
-	Warning("Build was compiled without DISCORD defined.\n");
-#else
-	if (ccargs.ArgC() != 1) {
-		Warning("Usage: delta_start_discord_auth\n");
-		return;
-	}
-	if (IsDedicatedServer()) {
-		Warning("This command is not available on dedicated servers.\n");
-		return;
-	}
-	auto v = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token");
-	if(!v) {
-		Warning("delta_persistent_master_auth_token not found.\n");
-		return;
-	}
-	std::string_view token = v->m_Value.m_pszString;
-	if (token.compare("DEFAULT") == 0 || token.empty()) {
-		if (core) {
-			Msg("Fish\n");
-		}
-		else {
-			Warning("Discord is NULL\n");
-		}
-	}
-	else {
-		Msg("Discord: Already authenticated\n");
-	}
-#endif
-	return;
-}
+
 const char* GetBuildNo() {
 	static char buffer[64] = {};
 
