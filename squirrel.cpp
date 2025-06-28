@@ -622,6 +622,21 @@ SQInteger Script_ServerGetPlayerUserID(HSQUIRRELVM v) {
 	return 1;
 }
 
+SQInteger Script_ServerGetPlayerPlatformUserID(HSQUIRRELVM v) {
+	void* player = sq_getentity(v, 2);
+	if (!player)
+	{
+		return sq_throwerror(v, "player is null");
+	}
+	auto serverVm = GetServerVMPtr();
+	auto uid = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(player) + 0x1448);
+	if (!uid) {
+		return sq_throwerror(v, "edict is null");
+	}
+	sq_pushstring(v, std::to_string(uid).c_str(), -1);
+	return 1;
+}
+
 SQInteger Script_ServerGetPlayerIp(HSQUIRRELVM v)
 {
 	void* player = sq_getentity(v, 2);
@@ -1287,6 +1302,17 @@ bool GetSQVMFuncs() {
 	);
 
 	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER,
+		"GetPlayerPlatformUserId",
+		(SQFUNCTION)Script_ServerGetPlayerPlatformUserID,
+		".I", // String
+		2,
+		"string",
+		"",
+		"Get player platform user id"
+	);
+
+	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_CLIENT,
 		"SendDiscordClient",
 		(SQFUNCTION)SendDiscordClient,
@@ -1410,6 +1436,7 @@ bool GetSQVMFuncs() {
 		"entity player, int xp",
 		"Add XP"
 	);
+
 
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_SERVER,

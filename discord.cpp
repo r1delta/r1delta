@@ -184,7 +184,6 @@ void HandleDiscordUserReady() {
 		SetConvarStringOriginal(platform_user_id_var, std::to_string(std::rand()).c_str());
 		return;
 	}
-	Msg("Discord: Current user: %s, id: %lld\n", user.GetUsername(), user.GetId());
 	SetConvarStringOriginal(platform_user_id_var, std::to_string(user.GetId()).c_str());
 }
 
