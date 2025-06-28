@@ -258,12 +258,15 @@ void DiscordThread() {
 	GetBaseClient = (GetBaseClientFunc)(G_engine + 0x5F470);
 	G_public_ip = get_public_ip();
 	auto result = discord::Core::Create(DISCORD_APPLICATION_ID, DiscordCreateFlags_NoRequireDiscord, &core);
-
+	std::srand(std::time(0));
 	if (!IsDiscordProcessRunning()) {
 		Msg("Discord: Discord not running.\n");
 	}
 	if (result != discord::Result::Ok) {
 		Msg("Discord: Failed to create core:\n");
+		auto platform_user_id_var = OriginalCCVar_FindVar(cvarinterface, "platform_user_id");
+		SetConvarStringOriginal(platform_user_id_var, std::to_string(std::rand()).c_str());
+
 		return;
 	}
 	is_discord_running = true;
