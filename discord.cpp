@@ -178,11 +178,14 @@ bool IsDiscordProcessRunning() {
 void HandleDiscordUserReady() {
 	discord::User user;
 	auto result = core->UserManager().GetCurrentUser(&user);
+	auto platform_user_id_var = OriginalCCVar_FindVar(cvarinterface, "platform_user_id");
 	if (result != discord::Result::Ok) {
 		Msg("Discord: Failed to get current user %d \n", result);
+		SetConvarStringOriginal(platform_user_id_var, std::to_string(std::rand()).c_str());
 		return;
 	}
 	Msg("Discord: Current user: %s, id: %lld\n", user.GetUsername(), user.GetId());
+	SetConvarStringOriginal(platform_user_id_var, std::to_string(user.GetId()).c_str());
 }
 
 int64 GetDiscordId() {
