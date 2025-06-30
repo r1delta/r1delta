@@ -266,8 +266,11 @@ void DiscordThread() {
 		while (true) {
 			std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 			auto platform_user_id_var = OriginalCCVar_FindVar(cvarinterface, "platform_user_id");
-			SetConvarStringOriginal(platform_user_id_var, std::to_string(std::rand()).c_str());
-			break;
+			if(platform_user_id_var) {
+				SetConvarStringOriginal(platform_user_id_var, std::to_string(std::rand()).c_str());
+				return;
+			}
+			return;
 		}
 		return;
 	}
