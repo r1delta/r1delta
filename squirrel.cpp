@@ -630,9 +630,6 @@ SQInteger Script_ServerGetPlayerPlatformUserID(HSQUIRRELVM v) {
 	}
 	auto serverVm = GetServerVMPtr();
 	auto uid = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(player) + 0x1448);
-	if (!uid) {
-		return sq_throwerror(v, "edict is null");
-	}
 	sq_pushstring(v, std::to_string(uid).c_str(), -1);
 	return 1;
 }
