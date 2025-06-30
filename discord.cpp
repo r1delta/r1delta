@@ -262,10 +262,13 @@ void DiscordThread() {
 		Msg("Discord: Discord not running.\n");
 	}
 	if (result != discord::Result::Ok) {
-		Msg("Discord: Failed to create core:\n");
-		auto platform_user_id_var = OriginalCCVar_FindVar(cvarinterface, "platform_user_id");
-		SetConvarStringOriginal(platform_user_id_var, std::to_string(std::rand()).c_str());
-
+		Msg("Discord: Failed to create core %d:\n",result);
+		while (true) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+			auto platform_user_id_var = OriginalCCVar_FindVar(cvarinterface, "platform_user_id");
+			SetConvarStringOriginal(platform_user_id_var, std::to_string(std::rand()).c_str());
+			break;
+		}
 		return;
 	}
 	is_discord_running = true;
