@@ -484,15 +484,126 @@ __int64 __fastcall CHudChat__FormatAndDisplayMessage_Hooked(
     std::string finalMessageMB = WideToMultiByte(finalMessageStringW, CP_UTF8);
     Msg("*** CHAT *** %s\n", finalMessageMB.c_str());
 
-    // return oCHudChat__FormatAndDisplayMessage(thisptr, message, senderId, teamChat, deadChat);
     return 0;
 }
-char (*oMsgFunc__SayText)(__int64 a1);
-char __fastcall MsgFunc__SayText(__int64 a1)
+char (*oMsgFunc__SayText)(bf_read* a1);
+
+typedef bool(__fastcall* tReadStringFromBuffer)(bf_read* pBuffer, char* dest, int maxLength, bool* bOverflow, void* unknown);
+
+typedef bool(__fastcall* tShouldFilterMessage)(int playerIndex);
+
+typedef char(__fastcall* tAddGameLine)(CHudChat* pThis, const char* text, int playerSlot, bool isTeamMsg, bool isDeadMsg);
+
+char __fastcall MsgFunc__SayText(bf_read* pBuffer)
 {
-    recurse = 0;
-    return oMsgFunc__SayText(a1);
+	recurse = 0; 
+    static auto dword_99DEE0 = (uint32_t*)(G_client + 0x99DEE0);
+    static auto qword_F808C8_ptr = (CHudChat**)(G_client + 0xF808C8);
+    static auto ReadStringFunc = (tReadStringFromBuffer)(G_client + 0x66AE20);
+    static auto FilterMessageFunc = (tShouldFilterMessage)(G_client + 0x444490);
+    static auto AddGameLineFunc = (tAddGameLine)(G_client + 0x17D440);
+
+
+    unsigned int playerSlot;
+    int bitsLeft = pBuffer->m_nBitsAvail;
+    if (bitsLeft >= 8)
+    {
+        playerSlot = static_cast<uint8_t>(pBuffer->m_nInBufWord);
+        pBuffer->m_nBitsAvail -= 8;
+
+        if (pBuffer->m_nBitsAvail == 0) 
+        {
+            pBuffer->m_nBitsAvail = 32;
+            if (pBuffer->m_pDataIn >= pBuffer->m_pBufferEnd) {
+                pBuffer->m_bOverflow = true;
+                pBuffer->m_nInBufWord = 0;
+            }
+            else {
+                pBuffer->m_nInBufWord = *pBuffer->m_pDataIn;
+            }
+            pBuffer->m_pDataIn++;
+        }
+        else
+        {
+            pBuffer->m_nInBufWord >>= 8;
+        }
+    }
+    else 
+    {
+        uint32_t lowBits = pBuffer->m_nInBufWord;
+        int bitsFromNext = 8 - bitsLeft;
+
+        if (pBuffer->m_pDataIn >= pBuffer->m_pBufferEnd) {
+            pBuffer->m_bOverflow = true;
+        }
+
+        if (pBuffer->m_bOverflow) {
+            playerSlot = 0;
+        }
+        else {
+            uint32_t nextWord = *pBuffer->m_pDataIn;
+            pBuffer->m_pDataIn++;
+
+            uint32_t highBits = (nextWord & dword_99DEE0[bitsFromNext]) << bitsLeft;
+            playerSlot = highBits | lowBits;
+
+            pBuffer->m_nInBufWord = nextWord >> bitsFromNext;
+            pBuffer->m_nBitsAvail = 32 - bitsFromNext;
+        }
+    }
+
+    
+	char* str = (char*)GlobalAllocator()->mi_malloc(256, TAG_GAME, HEAP_GAME);
+    if (!ReadStringFunc(pBuffer, str, 256, nullptr, nullptr)) {
+        return 1;
+    }
+
+   
+    bool isTeam = (pBuffer->m_nInBufWord & 1) != 0;
+    if (--pBuffer->m_nBitsAvail == 0) {
+        pBuffer->m_nBitsAvail = 32;
+        if (pBuffer->m_pDataIn >= pBuffer->m_pBufferEnd) {
+            pBuffer->m_bOverflow = true;
+            pBuffer->m_nInBufWord = 0;
+        }
+        else {
+            pBuffer->m_nInBufWord = *pBuffer->m_pDataIn;
+        }
+        pBuffer->m_pDataIn++;
+    }
+    else {
+        pBuffer->m_nInBufWord >>= 1;
+    }
+
+    bool isDead = (pBuffer->m_nInBufWord & 1) != 0;
+    if (--pBuffer->m_nBitsAvail == 0) {
+        pBuffer->m_nBitsAvail = 32;
+        if (pBuffer->m_pDataIn >= pBuffer->m_pBufferEnd) {
+            pBuffer->m_bOverflow = true;
+            pBuffer->m_nInBufWord = 0;
+        }
+        else {
+            pBuffer->m_nInBufWord = *pBuffer->m_pDataIn;
+        }
+        pBuffer->m_pDataIn++;
+    }
+    else {
+        pBuffer->m_nInBufWord >>= 1;
+    }
+
+   
+    if (FilterMessageFunc(playerSlot - 1)) {
+        return 1; 
+    }
+
+    for (CHudChat* i = *qword_F808C8_ptr; i; i = i->next) {
+        AddGameLineFunc(i, str, playerSlot, isTeam, isDead);
+    }
+
+    return 1;
 }
+
+
 
 // from bme
 typedef _QWORD *(__fastcall *sub_18017E140_type)(_QWORD *, __int64, char *);
