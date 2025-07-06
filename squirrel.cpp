@@ -1244,6 +1244,17 @@ bool GetSQVMFuncs() {
 	);
 
 	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER,
+		"Localize",
+		(SQFUNCTION)Script_Localize,
+		".s", // String
+		2,      // Expects 2 parameters
+		"string",    // Returns a string
+		"string locKey",
+		"Localize string"
+	);
+
+	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_UI,
 		"SendDiscordUI",
 		(SQFUNCTION)SendDiscordUI,
