@@ -178,6 +178,9 @@ bool IsDiscordProcessRunning() {
 void HandleDiscordUserReady() {
 	discord::User user;
 	auto result = core->UserManager().GetCurrentUser(&user);
+	if (!cvarinterface) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+	}
 	auto platform_user_id_var = OriginalCCVar_FindVar(cvarinterface, "platform_user_id");
 	if (result != discord::Result::Ok) {
 		Msg("Discord: Failed to get current user %d \n", result);
