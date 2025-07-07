@@ -896,14 +896,16 @@ namespace launcher_ex
             {
                 var launcherDllPathFull = Path.GetFullPath(originalLauncherExeDir);
                 var fullExePath = Path.Combine(launcherDllPathFull,"Titanfall.exe");
-                Process.Start(new ProcessStartInfo
+                var psi = new ProcessStartInfo
                 {
                     FileName = fullExePath,
                     WorkingDirectory = finalInstallPath,
-                    UseShellExecute = true,
+                    UseShellExecute = false,
                     Arguments = finalLaunchArgs,
-                });
+                };
                 Debug.WriteLine($"[*] Starting Titanfall.exe from: {launcherDllPathFull}");
+                psi.EnvironmentVariables["__COMPAT_LAYER"] = "NoDTToDITMouseBatch=1";
+                Process.Start(psi);
 
             }
             catch (Exception ex)
