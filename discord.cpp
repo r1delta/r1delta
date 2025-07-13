@@ -273,6 +273,9 @@ void DiscordThread() {
 				SetConvarStringOriginal(platform_user_id_var, std::to_string(std::rand()).c_str());
 				return;
 			}
+			else {
+				std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+			}
 			return;
 		}
 		return;
