@@ -592,14 +592,11 @@ char __fastcall MsgFunc__SayText(bf_read* pBuffer)
     }
 
    
-    if (FilterMessageFunc(playerSlot - 1)) {
-        return 1; 
+    if (!FilterMessageFunc(playerSlot - 1)) {
+        for (CHudChat* i = *qword_F808C8_ptr; i; i = i->next) {
+            AddGameLineFunc(i, str, playerSlot, isTeam, isDead);
+        }
     }
-
-    for (CHudChat* i = *qword_F808C8_ptr; i; i = i->next) {
-        AddGameLineFunc(i, str, playerSlot, isTeam, isDead);
-    }
-
     return 1;
 }
 
