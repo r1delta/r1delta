@@ -516,10 +516,10 @@ int32_t ReadConnectPacket2015AndWriteConnectPacket2014(bf_read& msg, bf_write& b
 	buffer.WriteByte('A');
 
 	int version = msg.ReadLong();
-	if (version != 1040)
+	/*if (version != 1040)
 	{
 		return -1;
-	}
+	}*/
 	buffer.WriteLong(1036); // 2014 version
 
 	buffer.WriteLong(msg.ReadLong()); // hostVersion
@@ -608,17 +608,118 @@ char __fastcall ProcessConnectionlessPacketDedi(unsigned int* a1, netpacket_s* a
 }
 
 ProcessConnectionlessPacketType ProcessConnectionlessPacketOriginalClient;
+ProcessConnectionlessPacketType ProcessConnectionlessPacketOriginalBaseClient;
+
+int32_t ReadConnectPacketXenonAndWriteConnectPacket2015(bf_read& msg, bf_write& buffer)
+{
+	ZoneScoped;
+	char type = msg.ReadByte();
+	Msg("ReadConnectPacketXenonAndWriteConnectPacket2015: type %c\n", type);
+	if (type != 'A')
+	{
+		return -1;
+	}
+
+	//buffer.WriteLong(-1);
+	buffer.WriteByte('A');
+
+	int version = msg.ReadLong();
+	Msg("ReadConnectPacket2015AndWriteConnectPacket2015: version %d\n", version);
+	buffer.WriteLong(1040); // 2015 version
+	auto hostVersion = msg.ReadLong();
+	buffer.WriteLong(hostVersion); // hostVersion
+	Msg("ReadConnectPacket2015AndWriteConnectPacket2015: hostVersion %d\n", hostVersion);
+	int32_t lastChallenge = msg.ReadLong();
+	buffer.WriteLong(lastChallenge); // challengeNr
+	buffer.WriteLong(msg.ReadLong()); // unknown 
+	buffer.WriteLong(msg.ReadLong()); // unknown1
+	auto platformUserId = msg.ReadLongLong();
+	buffer.WriteLongLong(platformUserId); // platformUserId
+	Msg("ReadConnectPacket2015AndWriteConnectPacket2015: platformUserId %lld\n", platformUserId);
+	char tempStr[256];
+	msg.ReadString(tempStr, sizeof(tempStr));
+	buffer.WriteString(tempStr); // name
+	msg.ReadString(tempStr, sizeof(tempStr));
+	buffer.WriteString(tempStr); // password
+
+	msg.ReadString(tempStr, sizeof(tempStr));
+	buffer.WriteString(tempStr); // unknown2
+
+	int unknownCount = msg.ReadByte();
+	buffer.WriteByte(unknownCount);
+	for (int i = 0; i < unknownCount; i++)
+	{
+		buffer.WriteLongLong(msg.ReadLongLong()); // unknown3
+	}
+
+	msg.ReadString(tempStr, sizeof(tempStr));
+	buffer.WriteString(tempStr); // serverFilter
+
+	buffer.WriteLong(msg.ReadLong()); // playlistVersionNumber
+	buffer.WriteLong(msg.ReadLong()); // persistenceVersionNumber
+	buffer.WriteLongLong(msg.ReadLongLong()); // persistenceHash
+
+	int numberOfPlayers = msg.ReadByte();
+	buffer.WriteByte(numberOfPlayers);
+	for (int i = 0; i < numberOfPlayers; i++)
+	{
+		// Read SplitPlayerConnect from 2015 packet
+		int type = msg.ReadUBitLong(6);
+		Msg("SplitPlayerConnect type: %d\n", type); // 0 = player, 1 = spectator, 2 = bot, 3 = server
+		int count = msg.ReadByte();
+		Msg("SplitPlayerConnect count: %d\n", count);
+		// Write SplitPlayerConnect to 2014 packet
+		buffer.WriteUBitLong(56, 6);
+		buffer.WriteByte(count);
+
+		for (int j = 0; j < count; j++)
+		{
+			msg.ReadString(tempStr, sizeof(tempStr));
+			buffer.WriteString(tempStr); // key
+
+			msg.ReadString(tempStr, sizeof(tempStr));
+			buffer.WriteString(tempStr); // value
+		}
+	}
+
+	buffer.WriteByte(msg.ReadByte()); // lowViolence 
+	auto id = msg.ReadByte();
+	buffer.WriteByte(id);
+
+	return !buffer.IsOverflowed() ? lastChallenge : -1;
+}
+
+
+char __fastcall ProcessConnectionlessPacketBaseClient(unsigned int* a1, netpacket_s* a2)
+{
+	char type = ((char*)a2->pData + 4)[0];
+	Msg("ProcessConnectionlessPacketBaseClient: type %c\n", type);
+	return ProcessConnectionlessPacketOriginalBaseClient(a1, a2);
+}
 
 
 char __fastcall ProcessConnectionlessPacketClient(unsigned int* a1, netpacket_s* a2)
 {
-	static auto sv_limit_quires = CCVar_FindVar(cvarinterface,"sv_limit_queries");
-	static auto& sv_limit_queries_var = sv_limit_quires->m_Value.m_nValue;
-	if (sv_limit_queries_var == 1 && a2->pData[4] == 'N') {
-		sv_limit_queries_var = 0;
+	char buffer[1200] = { 0 };
+	bf_write writer(reinterpret_cast<char*>(buffer), sizeof(buffer));
+	char type = ((char*)a2->pData + 4)[0];
+	Msg("ProcessConnectionlessPacketClient: type %c\n", type);
+	if (((char*)a2->pData + 4)[0] == 'A') {
+		bf_read copy = a2->message;
+		copy.ReadByte();
+		auto version = copy.ReadLong(); // skip version
+		if (version == 1040) {
+			return ProcessConnectionlessPacketOriginalClient(a1, a2);
+		}
 	}
-	else if(sv_limit_queries_var == 0 && a2->pData[4] != 'N') {
-		sv_limit_queries_var = 1;
+	if (((char*)a2->pData + 4)[0] == 'A' && ReadConnectPacketXenonAndWriteConnectPacket2015(a2->message, writer) != -1)
+	{
+		if (lastReceived == a2->received)
+			return false;
+		lastReceived = a2->received;
+		bf_read converted(reinterpret_cast<char*>(buffer), writer.GetNumBytesWritten());
+		a2->message = converted;
+		return ProcessConnectionlessPacketOriginalClient(a1, a2);
 	}
 	return ProcessConnectionlessPacketOriginalClient(a1, a2);
 }
@@ -1662,15 +1763,15 @@ bool (*oNET_SignOnState__ReadFromBuffer)(NET_SignOnState* thisptr, bf_read& buff
 bool NET_SignOnState__ReadFromBuffer(NET_SignOnState* thisptr, bf_read& buffer)
 {
 	// Process the original buffer read
-	oNET_SignOnState__ReadFromBuffer(thisptr, buffer);
+	bool ret = oNET_SignOnState__ReadFromBuffer(thisptr, buffer);
+	Msg("Signonstate %d\n", thisptr->m_nSignonState);
+	//// Reject duplicate SIGNONSTATE_FULL messages when file transmission is active
+	//if (thisptr->GetNetChannel()->m_bConnectionComplete_OrPreSignon && thisptr->m_nSignonState == SIGNONSTATE_FULL) {
+	//	Warning("NET_SignOnState::ReadFromBuffer: blocked attempt at re-ACKing SIGNONSTATE_FULL\n");
+	//	return false;
+	//}
 
-	// Reject duplicate SIGNONSTATE_FULL messages when file transmission is active
-	if (thisptr->GetNetChannel()->m_bConnectionComplete_OrPreSignon && thisptr->m_nSignonState == SIGNONSTATE_FULL) {
-		Warning("NET_SignOnState::ReadFromBuffer: blocked attempt at re-ACKing SIGNONSTATE_FULL\n");
-		return false;
-	}
-
-	return true;
+	return ret;
 }
 struct alignas(8) NET_StringCmd : INetMessage
 {
@@ -1841,9 +1942,11 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook((LPVOID)(engine_base + 0x19CBC0), &GetBuildNo, NULL);
 	MH_CreateHook((LPVOID)(engine_base + 0x1E0C10), &CNetChan__GetAddress, reinterpret_cast<LPVOID*>(&oCNetChan__GetAddress));
 
-	//MH_CreateHook((LPVOID)(engine_base + 0x0D2490), &ProcessConnectionlessPacketClient, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginalClient));
-
+	MH_CreateHook((LPVOID)(engine_base + 0x204160), &NET_SignOnState__ReadFromBuffer, reinterpret_cast<LPVOID*>(&oNET_SignOnState__ReadFromBuffer));
 	if (!IsDedicatedServer()) {
+		MH_CreateHook((LPVOID)(engine_base + 0x0D2490), &ProcessConnectionlessPacketClient, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginalClient));
+		MH_CreateHook((LPVOID)(engine_base + 0x266C0), &ProcessConnectionlessPacketBaseClient, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginalBaseClient));
+
 		MH_CreateHook((LPVOID)(G_engine + 0x1305E0), &ExecuteConfigFile, NULL);
 		MH_CreateHook((LPVOID)(engine_base + 0x21F9C0), &CEngineVGui__Init, reinterpret_cast<LPVOID*>(&CEngineVGui__InitOriginal));
 		MH_CreateHook((LPVOID)(engine_base + 0x21EB70), &CEngineVGui__HideGameUI, reinterpret_cast<LPVOID*>(&CEngineVGui__HideGameUIOriginal));
@@ -2647,6 +2750,7 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 
 
 	MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("vstdlib.dll"), "VStdLib_GetICVarFactory"), &VStdLib_GetICVarFactory, NULL);
+	
 	if (!IsDedicatedServer()) {
 		auto launcher = G_launcher;
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine.dll") + 0x471980), &StringCompare_AllTalkHookDedi, reinterpret_cast<LPVOID*>(&oStringCompare_AllTalkHookDedi));
