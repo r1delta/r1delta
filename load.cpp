@@ -3009,7 +3009,7 @@ void __stdcall LoaderNotificationCallback(
 			SetupSurfaceRenderHooks();
 			SetupSquirrelErrorNotificationHooks();
 			SetupChatWriter();
-			RegisterConVar("delta_enable_ads_sway", "1", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Use new spray system. 0: Old spray system. 1: New spray system.");
+			RegisterConVar("delta_enable_ads_sway", "0", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Use new spray system. 0: Old spray system. 1: New spray system.");
 			RegisterConCommand("+toggleFullscreenMap", toggleFullscreenMap_cmd, "Toggles the fullscreen map.", FCVAR_CLIENTDLL);
 			RegisterConVar("cl_hold_to_rodeo_enable", "0", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "0: Automatic rodeo. 1: Hold to rodeo ALL titans. 2: Hold to rodeo friendlies, automatically rodeo hostile titans.");
 			RegisterConVar("bot_kick_on_death", "1", FCVAR_GAMEDLL | FCVAR_CHEAT, "Enable/disable bots getting kicked on death.");
