@@ -651,6 +651,11 @@ void WeaponSprayFunction1(__int64 a1, __int64 a2, float a3, __int64 a4, _DWORD *
 {
     oWeaponSprayFunction1(a1, a2, a3, a4, a5, a6, a7, a8);
     // 2) grab zoom scale
+    auto var = CCVar_FindVar(cvarinterface, "delta_use_new_spray");
+    if(var && var->m_Value.m_nValue == 0)
+    {
+        return;
+	}
     float zoom = GetZoomFrac();
     // 3) scale the three final sway components
     //    [pitch] = float at addr (a1 + 12)
