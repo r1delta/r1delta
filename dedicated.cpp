@@ -476,6 +476,7 @@ bool __fastcall CSocketCreator_CreateListenSocket_Hook(void* this_ptr, netadr_t*
 		return false; // Original returns 0 on failure
 	}
 
+
 	// 5. Prepare the bind address (Replicates sub_180327090 and a3 check)
 	struct sockaddr_storage bind_addr_storage;
 	memset(&bind_addr_storage, 0, sizeof(bind_addr_storage));
