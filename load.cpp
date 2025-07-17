@@ -1763,15 +1763,237 @@ bool (*oNET_SignOnState__ReadFromBuffer)(NET_SignOnState* thisptr, bf_read& buff
 bool NET_SignOnState__ReadFromBuffer(NET_SignOnState* thisptr, bf_read& buffer)
 {
 	// Process the original buffer read
-	bool ret = oNET_SignOnState__ReadFromBuffer(thisptr, buffer);
-	Msg("Signonstate %d\n", thisptr->m_nSignonState);
-	//// Reject duplicate SIGNONSTATE_FULL messages when file transmission is active
-	//if (thisptr->GetNetChannel()->m_bConnectionComplete_OrPreSignon && thisptr->m_nSignonState == SIGNONSTATE_FULL) {
-	//	Warning("NET_SignOnState::ReadFromBuffer: blocked attempt at re-ACKing SIGNONSTATE_FULL\n");
-	//	return false;
-	//}
+	auto size = buffer.GetNumBytesLeft();
+	Msg("NET_SignOnState::ReadFromBuffer: size %d\n", size);
+	Msg("Signonstate %s(%d)\n", thisptr->GetName(), thisptr->m_nSignonState);
+	if (size > 28) {
+	 return oNET_SignOnState__ReadFromBuffer(thisptr, buffer);
+	}
+	
+	int signonState = 0;
+	if (buffer.m_nBitsAvail >= 8)
+	{
+		signonState = (unsigned __int8)buffer.m_nInBufWord;
+		buffer.m_nBitsAvail -= 8;
+		if (buffer.m_nBitsAvail == 0)
+		{
+			if (buffer.m_pDataIn == buffer.m_pBufferEnd)
+			{
+				buffer.m_nBitsAvail = 1;
+				buffer.m_nInBufWord = 0;
+				buffer.m_bOverflow = 1;
+			}
+			else if (buffer.m_pDataIn <= buffer.m_pBufferEnd)
+			{
+				buffer.m_nInBufWord = *buffer.m_pDataIn;
+				buffer.m_pDataIn++;
+				buffer.m_nBitsAvail = 32;
+			}
+			else
+			{
+				buffer.m_bOverflow = 1;
+				buffer.m_nInBufWord = 0;
+			}
+		}
+		else
+		{
+			buffer.m_nInBufWord >>= 8;
+		}
+	}
+	else
+	{
+		int bitsNeeded = 8 - buffer.m_nBitsAvail;
+		signonState = buffer.m_nInBufWord;
 
-	return ret;
+		if (buffer.m_pDataIn == buffer.m_pBufferEnd)
+		{
+			buffer.m_nBitsAvail = 1;
+			buffer.m_nInBufWord = 0;
+			buffer.m_bOverflow = 1;
+		}
+		else if (buffer.m_pDataIn <= buffer.m_pBufferEnd)
+		{
+			buffer.m_nInBufWord = *buffer.m_pDataIn;
+			buffer.m_pDataIn++;
+		}
+		else
+		{
+			buffer.m_bOverflow = 1;
+			buffer.m_nInBufWord = 0;
+		}
+
+		if (!buffer.m_bOverflow)
+		{
+			signonState |= (buffer.m_nInBufWord & ((1 << bitsNeeded) - 1)) << buffer.m_nBitsAvail;
+			buffer.m_nBitsAvail = 32 - bitsNeeded;
+			buffer.m_nInBufWord >>= bitsNeeded;
+		}
+	}
+	thisptr->m_nSignonState = (SIGNONSTATE)signonState;
+
+	// Read spawn count (32 bits)
+	int spawnCount = 0;
+	if (buffer.m_nBitsAvail >= 32)
+	{
+		spawnCount = buffer.m_nInBufWord;
+		buffer.m_nBitsAvail -= 32;
+		if (buffer.m_nBitsAvail == 0)
+		{
+			if (buffer.m_pDataIn == buffer.m_pBufferEnd)
+			{
+				buffer.m_nBitsAvail = 1;
+				buffer.m_nInBufWord = 0;
+				buffer.m_bOverflow = 1;
+			}
+			else if (buffer.m_pDataIn <= buffer.m_pBufferEnd)
+			{
+				buffer.m_nInBufWord = *buffer.m_pDataIn;
+				buffer.m_pDataIn++;
+				buffer.m_nBitsAvail = 32;
+			}
+			else
+			{
+				buffer.m_bOverflow = 1;
+				buffer.m_nInBufWord = 0;
+			}
+		}
+		else
+		{
+			buffer.m_nInBufWord = 0;
+		}
+	}
+	else
+	{
+		int bitsNeeded = 32 - buffer.m_nBitsAvail;
+		spawnCount = buffer.m_nInBufWord;
+
+		if (buffer.m_pDataIn == buffer.m_pBufferEnd)
+		{
+			buffer.m_nBitsAvail = 1;
+			buffer.m_nInBufWord = 0;
+			buffer.m_bOverflow = 1;
+		}
+		else if (buffer.m_pDataIn <= buffer.m_pBufferEnd)
+		{
+			buffer.m_nInBufWord = *buffer.m_pDataIn;
+			buffer.m_pDataIn++;
+		}
+		else
+		{
+			buffer.m_bOverflow = 1;
+			buffer.m_nInBufWord = 0;
+		}
+
+		if (!buffer.m_bOverflow)
+		{
+			spawnCount |= (buffer.m_nInBufWord & ((1 << bitsNeeded) - 1)) << buffer.m_nBitsAvail;
+			buffer.m_nBitsAvail = 32 - bitsNeeded;
+			buffer.m_nInBufWord >>= bitsNeeded;
+		}
+	}
+	thisptr->m_nSpawnCount = spawnCount;
+
+	// Read server player count (32 bits)
+	int serverPlayers = 0;
+	if (buffer.m_nBitsAvail >= 32)
+	{
+		serverPlayers = buffer.m_nInBufWord;
+		buffer.m_nBitsAvail -= 32;
+		if (buffer.m_nBitsAvail == 0)
+		{
+			if (buffer.m_pDataIn == buffer.m_pBufferEnd)
+			{
+				buffer.m_nBitsAvail = 1;
+				buffer.m_nInBufWord = 0;
+				buffer.m_bOverflow = 1;
+			}
+			else if (buffer.m_pDataIn <= buffer.m_pBufferEnd)
+			{
+				buffer.m_nInBufWord = *buffer.m_pDataIn;
+				buffer.m_pDataIn++;
+				buffer.m_nBitsAvail = 32;
+			}
+			else
+			{
+				buffer.m_bOverflow = 1;
+				buffer.m_nInBufWord = 0;
+			}
+		}
+		else
+		{
+			buffer.m_nInBufWord = 0;
+		}
+	}
+	else
+	{
+		int bitsNeeded = 32 - buffer.m_nBitsAvail;
+		serverPlayers = buffer.m_nInBufWord;
+
+		if (buffer.m_pDataIn == buffer.m_pBufferEnd)
+		{
+			buffer.m_nBitsAvail = 1;
+			buffer.m_nInBufWord = 0;
+			buffer.m_bOverflow = 1;
+		}
+		else if (buffer.m_pDataIn <= buffer.m_pBufferEnd)
+		{
+			buffer.m_nInBufWord = *buffer.m_pDataIn;
+			buffer.m_pDataIn++;
+		}
+		else
+		{
+			buffer.m_bOverflow = 1;
+			buffer.m_nInBufWord = 0;
+		}
+
+		if (!buffer.m_bOverflow)
+		{
+			serverPlayers |= (buffer.m_nInBufWord & ((1 << bitsNeeded) - 1)) << buffer.m_nBitsAvail;
+			buffer.m_nBitsAvail = 32 - bitsNeeded;
+			buffer.m_nInBufWord >>= bitsNeeded;
+		}
+	}
+	thisptr->m_numServerPlayers = serverPlayers;
+
+	// Skip the remaining data that was written but not stored in this struct
+	// This includes the server info, map name, player slot, strings, and conditional data
+	// We need to read and discard this data to keep the buffer in sync
+
+	// Skip server info length and data
+	int serverInfoLength = 0;
+	// Read 32-bit length (same pattern as above)
+	if (buffer.m_nBitsAvail >= 32)
+	{
+		serverInfoLength = buffer.m_nInBufWord;
+		buffer.m_nBitsAvail -= 32;
+		if (buffer.m_nBitsAvail == 0)
+		{
+			if (buffer.m_pDataIn <= buffer.m_pBufferEnd)
+			{
+				buffer.m_nInBufWord = *buffer.m_pDataIn;
+				buffer.m_pDataIn++;
+				buffer.m_nBitsAvail = 32;
+			}
+		}
+		else
+		{
+			buffer.m_nInBufWord = 0;
+		}
+	}
+	// Skip the data bytes
+	if (serverInfoLength > 0)
+	{
+	}
+
+	// Skip map name length and data (similar pattern)
+	int mapNameLength = 0;
+	// Read and skip map name length and data...
+	// Skip player slot, strings, and conditional data...
+	Msg("Signonstate %s(%d)\n", thisptr->GetName(), thisptr->m_nSignonState);
+
+	return !buffer.m_bOverflow;
+
+	return false;
 }
 struct alignas(8) NET_StringCmd : INetMessage
 {
@@ -1785,8 +2007,10 @@ static_assert(offsetof(NET_SignOnState, m_nSignonState) == 32);
 bool (*oNET_StringCmd__ReadFromBuffer)(NET_StringCmd* thisptr, bf_read& buffer);
 bool NET_StringCmd__ReadFromBuffer(NET_StringCmd* thisptr, bf_read& buffer)
 {
+	Msg("NET_StringCmd::ReadFromBuffer: size %d\n", buffer.GetNumBytesLeft());
 	// Process the original buffer read
 	oNET_StringCmd__ReadFromBuffer(thisptr, buffer);
+	Msg("NET_StringCmd::ReadFromBuffer: command %s\n", thisptr->m_szCommand ? thisptr->m_szCommand : "NULL");
 
 	// Get the network channel and check if file transmission is active
 	if (!thisptr->GetNetChannel()->m_bConnectionComplete_OrPreSignon) {
