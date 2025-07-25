@@ -1758,6 +1758,288 @@ struct alignas(8) NET_SignOnState : INetMessage
 	int m_nSpawnCount;
 	int m_numServerPlayers;
 };
+
+
+typedef bool (*ReadString_t)(bf_read& buffer, char* dest, int maxLen, int flag,bool line);
+ReadString_t ReadStringOriginal;
+
+typedef bool (*OtherReadString_t)(bf_read& buffer, char* dest, int maxLen);
+
+bool ReadXenonSignOnState(NET_SignOnState* thisptr, bf_read& buffer)
+{
+
+	static auto ReadStringOriginal = reinterpret_cast<ReadString_t>(G_engine + 0x48CA60);
+	static auto OtherReadString_48D550 = reinterpret_cast<OtherReadString_t>(G_engine + 0x48D550);
+	// Helper function for reading 32 bits
+	auto Read32Bits = [&buffer]() -> int {
+		int value = 0;
+		if (buffer.m_nBitsAvail >= 32)
+		{
+			value = buffer.m_nInBufWord;
+			buffer.m_nBitsAvail -= 32;
+			if (buffer.m_nBitsAvail == 0)
+			{
+				const unsigned int* pDataIn = (const unsigned int*)buffer.m_pDataIn;
+				const unsigned int* pBufferEnd = (const unsigned int*)buffer.m_pBufferEnd;
+				buffer.m_nBitsAvail = 32;
+				if (pDataIn == pBufferEnd)
+				{
+					buffer.m_nBitsAvail = 1;
+					buffer.m_nInBufWord = 0;
+					buffer.m_pDataIn = pDataIn + 1;
+				}
+				else if (pDataIn <= pBufferEnd)
+				{
+					buffer.m_nInBufWord = *pDataIn;
+					buffer.m_pDataIn = pDataIn + 1;
+				}
+				else
+				{
+					buffer.m_bOverflow = 1;
+					buffer.m_nInBufWord = 0;
+				}
+			}
+			else
+			{
+				buffer.m_nInBufWord = 0;
+			}
+		}
+		else
+		{
+			int bitsNeeded = 32 - buffer.m_nBitsAvail;
+			value = buffer.m_nInBufWord;
+
+			const unsigned int* pDataIn = (const unsigned int*)buffer.m_pDataIn;
+			const unsigned int* pBufferEnd = (const unsigned int*)buffer.m_pBufferEnd;
+			if (pDataIn == pBufferEnd)
+			{
+				buffer.m_nBitsAvail = 1;
+				buffer.m_nInBufWord = 0;
+				buffer.m_bOverflow = 1;
+			}
+			else if (pDataIn <= pBufferEnd)
+			{
+				buffer.m_nInBufWord = *pDataIn;
+			}
+			else
+			{
+				buffer.m_bOverflow = 1;
+				buffer.m_nInBufWord = 0;
+			}
+			buffer.m_pDataIn = pDataIn + 1;
+
+			if (!buffer.m_bOverflow)
+			{
+				unsigned int mask = (1 << bitsNeeded) - 1;
+				value |= (buffer.m_nInBufWord & mask) << buffer.m_nBitsAvail;
+				buffer.m_nBitsAvail = 32 - bitsNeeded;
+				buffer.m_nInBufWord >>= bitsNeeded;
+			}
+		}
+		return value;
+		};
+
+	// Helper function for reading 8 bits
+	auto Read8Bits = [&buffer]() -> int {
+		int value = 0;
+		if (buffer.m_nBitsAvail >= 8)
+		{
+			value = (unsigned __int8)buffer.m_nInBufWord;
+			buffer.m_nBitsAvail -= 8;
+			if (buffer.m_nBitsAvail == 0)
+			{
+				const unsigned int* pDataIn = (const unsigned int*)buffer.m_pDataIn;
+				const unsigned int* pBufferEnd = (const unsigned int*)buffer.m_pBufferEnd;
+				buffer.m_nBitsAvail = 32;
+				if (pDataIn == pBufferEnd)
+				{
+					buffer.m_nBitsAvail = 1;
+					buffer.m_nInBufWord = 0;
+					buffer.m_pDataIn = pDataIn + 1;
+				}
+				else if (pDataIn <= pBufferEnd)
+				{
+					buffer.m_nInBufWord = *pDataIn;
+					buffer.m_pDataIn = pDataIn + 1;
+				}
+				else
+				{
+					buffer.m_bOverflow = 1;
+					buffer.m_nInBufWord = 0;
+				}
+			}
+			else
+			{
+				buffer.m_nInBufWord >>= 8;
+			}
+		}
+		else
+		{
+			int bitsNeeded = 8 - buffer.m_nBitsAvail;
+			value = buffer.m_nInBufWord;
+
+			const unsigned int* pDataIn = (const unsigned int*)buffer.m_pDataIn;
+			const unsigned int* pBufferEnd = (const unsigned int*)buffer.m_pBufferEnd;
+			if (pDataIn == pBufferEnd)
+			{
+				buffer.m_nBitsAvail = 1;
+				buffer.m_nInBufWord = 0;
+				buffer.m_bOverflow = 1;
+			}
+			else if (pDataIn <= pBufferEnd)
+			{
+				buffer.m_nInBufWord = *pDataIn;
+			}
+			else
+			{
+				buffer.m_bOverflow = 1;
+				buffer.m_nInBufWord = 0;
+			}
+			buffer.m_pDataIn = pDataIn + 1;
+
+			if (!buffer.m_bOverflow)
+			{
+				unsigned int mask = (1 << bitsNeeded) - 1;
+				value |= (buffer.m_nInBufWord & mask) << buffer.m_nBitsAvail;
+				buffer.m_nBitsAvail = 32 - bitsNeeded;
+				buffer.m_nInBufWord >>= bitsNeeded;
+			}
+		}
+		return value;
+		};
+
+	// Read all values in order
+
+	// 1. Read signon state (8 bits)
+	int signonState = Read8Bits();
+	thisptr->m_nSignonState = (SIGNONSTATE)signonState;
+
+	// 2. Read spawn count (32 bits)
+	int spawnCount = Read32Bits();
+	thisptr->m_nSpawnCount = spawnCount;
+
+	// 3. Read server player count (32 bits)
+	int serverPlayers = Read32Bits();
+	thisptr->m_numServerPlayers = serverPlayers;
+
+	// 4. Read server info length and data (32 bits length)
+	int serverInfoLength = Read32Bits();
+	if (serverInfoLength > 1280)
+		return false;
+
+	char* serverInfoData = nullptr;
+	if (serverInfoLength > 0)
+	{
+		serverInfoData = new char[serverInfoLength + 1];
+		OtherReadString_48D550(buffer, serverInfoData, serverInfoLength);
+		serverInfoData[serverInfoLength] = 0; // null terminate
+	}
+
+	// 5. Read map name length and data (32 bits length)
+	int mapNameLength = Read32Bits();
+	if (mapNameLength > 32)
+	{
+		if (serverInfoData) delete[] serverInfoData;
+		return false;
+	}
+
+	char mapName[33] = { 0 };
+	if (mapNameLength > 0)
+	{
+		OtherReadString_48D550(buffer, mapName, mapNameLength);
+		mapName[mapNameLength] = 0; // null terminate
+	}
+
+	// 6. Read game mode name length and data (32 bits length)
+	int gameModeLength = Read32Bits();
+	if (gameModeLength > 32)
+	{
+		if (serverInfoData) delete[] serverInfoData;
+		return false;
+	}
+
+	char gameModeName[33] = { 0 };
+	if (gameModeLength > 0)
+	{
+		OtherReadString_48D550(buffer, gameModeName, gameModeLength);
+		gameModeName[gameModeLength] = 0; // null terminate
+	}
+
+	// 7. Read player slot (8 bits)
+	int playerSlot = Read8Bits();
+	bool playerSlotBool = (playerSlot != 0);
+
+	// 8. Read first string (level name)
+	char levelName[32] = { 0 };
+	ReadStringOriginal(buffer, levelName, 32, false, 0);
+
+	// 9. Read max clients (32 bits)
+	int maxClients = Read32Bits();
+
+	// 10. Read second string (game directory)
+	char gameDir[128] = { 0 };
+	ReadStringOriginal(buffer, gameDir, 128, false, 0);
+
+	// 11. Read string table version (32 bits)
+	int stringTableVersion = Read32Bits();
+
+	// 12. Conditional reading based on signon state (16-bit values)
+	int value232 = 0, value236 = 0, value240 = 0, value244 = 0;
+	if (signonState == 6)
+	{
+		// Read four 16-bit values
+		value232 = Read32Bits() & 0xFFFF;
+		value236 = Read32Bits() & 0xFFFF;
+		value240 = Read32Bits() & 0xFFFF;
+		value244 = Read32Bits() & 0xFFFF;
+	}
+
+	// Print all values
+	Msg("=== NET_SignOnState Read Results ===\n");
+	Msg("Signon State: %d\n", signonState);
+	Msg("Spawn Count: %d\n", spawnCount);
+	Msg("Server Players: %d\n", serverPlayers);
+	Msg("Server Info Length: %d\n", serverInfoLength);
+	if (serverInfoData && serverInfoLength > 0)
+	{
+		Msg("Server Info Data: %s\n", serverInfoData);
+	}
+	Msg("Map Name Length: %d\n", mapNameLength);
+	if (mapNameLength > 0)
+	{
+		Msg("Map Name: %s\n", mapName);
+	}
+	Msg("Game Mode Length: %d\n", gameModeLength);
+	if (gameModeLength > 0)
+	{
+		Msg("Game Mode Name: %s\n", gameModeName);
+	}
+	Msg("Player Slot: %d (bool: %s)\n", playerSlot, playerSlotBool ? "true" : "false");
+	Msg("Level Name: %s\n", levelName);
+	Msg("Max Clients: %d\n", maxClients);
+	Msg("Game Directory: %s\n", gameDir);
+	Msg("String Table Version: %d\n", stringTableVersion);
+
+	if (signonState == 6)
+	{
+		Msg("=== Conditional Values (Signon State 6) ===\n");
+		Msg("Value 232: %d\n", value232);
+		Msg("Value 236: %d\n", value236);
+		Msg("Value 240: %d\n", value240);
+		Msg("Value 244: %d\n", value244);
+	}
+
+	Msg("Buffer Overflow: %s\n", buffer.m_bOverflow ? "true" : "false");
+	Msg("===================================\n");
+
+	// Cleanup
+	if (serverInfoData)
+		delete[] serverInfoData;
+
+	return !buffer.m_bOverflow;
+
+}
+
 static_assert(offsetof(NET_SignOnState, m_nSignonState) == 32);
 bool (*oNET_SignOnState__ReadFromBuffer)(NET_SignOnState* thisptr, bf_read& buffer);
 bool NET_SignOnState__ReadFromBuffer(NET_SignOnState* thisptr, bf_read& buffer)
@@ -1765,10 +2047,13 @@ bool NET_SignOnState__ReadFromBuffer(NET_SignOnState* thisptr, bf_read& buffer)
 	// Process the original buffer read
 	auto size = buffer.GetNumBytesLeft();
 	Msg("NET_SignOnState::ReadFromBuffer: size %d\n", size);
-	Msg("Signonstate %s(%d)\n", thisptr->GetName(), thisptr->m_nSignonState);
 	if (size > 28) {
-	 return oNET_SignOnState__ReadFromBuffer(thisptr, buffer);
+	 bool ret =  oNET_SignOnState__ReadFromBuffer(thisptr, buffer);
+	 Msg("Signonstate %s(%d)\n", thisptr->GetName(), thisptr->m_nSignonState);
+	 return ret;
 	}
+
+	//return ReadXenonSignOnState(thisptr, buffer);
 	
 	int signonState = 0;
 	if (buffer.m_nBitsAvail >= 8)
@@ -1959,6 +2244,11 @@ bool NET_SignOnState__ReadFromBuffer(NET_SignOnState* thisptr, bf_read& buffer)
 	// This includes the server info, map name, player slot, strings, and conditional data
 	// We need to read and discard this data to keep the buffer in sync
 
+	// Make sure to store the data in a buffer and print it later if needed
+	char bufferData[1024] = { 0 };
+	// Read the server info length (32 bits)
+	
+
 	// Skip server info length and data
 	int serverInfoLength = 0;
 	// Read 32-bit length (same pattern as above)
@@ -1973,6 +2263,7 @@ bool NET_SignOnState__ReadFromBuffer(NET_SignOnState* thisptr, bf_read& buffer)
 				buffer.m_nInBufWord = *buffer.m_pDataIn;
 				buffer.m_pDataIn++;
 				buffer.m_nBitsAvail = 32;
+
 			}
 		}
 		else
@@ -1983,6 +2274,23 @@ bool NET_SignOnState__ReadFromBuffer(NET_SignOnState* thisptr, bf_read& buffer)
 	// Skip the data bytes
 	if (serverInfoLength > 0)
 	{
+		if (buffer.m_nBitsAvail >= serverInfoLength * 8)
+		{
+			buffer.m_nBitsAvail -= serverInfoLength * 8;
+			if (buffer.m_pDataIn + serverInfoLength <= buffer.m_pBufferEnd)
+			{
+				memcpy(bufferData, buffer.m_pDataIn, serverInfoLength);
+				buffer.m_pDataIn += serverInfoLength;
+			}
+			else
+			{
+				buffer.m_bOverflow = true;
+			}
+		}
+		else
+		{
+			buffer.m_bOverflow = true;
+		}
 	}
 
 	// Skip map name length and data (similar pattern)
@@ -1990,10 +2298,10 @@ bool NET_SignOnState__ReadFromBuffer(NET_SignOnState* thisptr, bf_read& buffer)
 	// Read and skip map name length and data...
 	// Skip player slot, strings, and conditional data...
 	Msg("Signonstate %s(%d)\n", thisptr->GetName(), thisptr->m_nSignonState);
-
+	Msg("Server Info Length: %d, Map Name Length: %d, Server Players: %d, Spawn Count: %d\n",
+		serverInfoLength, mapNameLength, thisptr->m_numServerPlayers, thisptr->m_nSpawnCount);
 	return !buffer.m_bOverflow;
 
-	return false;
 }
 struct alignas(8) NET_StringCmd : INetMessage
 {
