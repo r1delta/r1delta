@@ -2461,6 +2461,43 @@ int64 sub_2A200(__int64 a1, __int64 a2, unsigned int a3) {
 }
 
 
+
+struct acache_entry {
+	char path[260];
+	int blockCount; // Sample rate * duration * channels
+	float duration;
+	uint channels;
+	uint unk0;
+	uint unk1;
+	union {
+		uint headerSize_SampleDepth; // 0x10 for 16 bit, 0x20 for 32 bit
+		struct {
+			uint headerSize : 8;
+			uint sampleDepth : 24;
+		}d;
+	};
+	uint unk3;
+	uint offset;
+	int terminator;
+};
+
+typedef __int64* (*GetAcacheHk_t)(const char*);
+GetAcacheHk_t GetAcacheOriginal;
+__int64* GetAcacheHk(const char* wav_path) {
+	auto ret = GetAcacheOriginal(wav_path);
+	if (!ret) {
+		//Msg("wav_path: %s\n", wav_path);
+		if(strstr(wav_path, "wpn_valkyrie_1p_wpnfire_reduced_2ch_01") != nullptr) {
+			return (__int64*)(G_engine + 0x1fcdae8);
+		}
+		else if(strstr(wav_path, "wpn_valkyrie_1p_wpnfire_reduced_2ch_02") != nullptr) {
+			return (__int64*)(G_engine + 0x1fcdb00);
+		}
+		return ret;
+	}
+	return ret;
+}
+
 static FORCEINLINE void
 do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 {
@@ -2487,6 +2524,7 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
 		MH_CreateHook((LPVOID)(G_engine + 0x2A200), &sub_2A200, reinterpret_cast<LPVOID*>(&sub_2A200Original));
 		//g_pLogAudio = RegisterConVar("fs_log_audio", "0", FCVAR_NONE, "Log audio file reads");
+		MH_CreateHook((LPVOID)(G_engine + 0xAE00), &GetAcacheHk, reinterpret_cast<LPVOID*>(&GetAcacheOriginal));
 		MH_CreateHook((LPVOID)(engine_base + 0x11DB0), &XmaCallback, reinterpret_cast<LPVOID*>(&oXmaCallback));
 		InitSteamHooks();
 		InitAddons();
@@ -3134,67 +3172,6 @@ void InitializeRecentHostVars()
 }
 
 
-struct acache_entry {
-	char path[260];
-	int blockCount; // Sample rate * duration * channels
-	float duration;
-	uint channels;
-	uint unk0;
-	uint unk1;
-	union {
-		uint headerSize_SampleDepth; // 0x10 for 16 bit, 0x20 for 32 bit
-		struct {
-			uint headerSize : 8;
-			uint sampleDepth : 24;
-		}d;
-	};
-	uint unk3;
-	uint offset;
-	int terminator;
-};
-
-typedef __int64*(*GetAcacheHk_t)(const char*);
-GetAcacheHk_t GetAcacheOriginal;
-__int64* GetAcacheHk(const char* wav_path) {
-	auto ret = GetAcacheOriginal(wav_path);
-	if (!ret) {
-		//Msg("GetAcacheHk: %s\n", wav_path);
-
-		//auto acacheFIle_1A0DEB8 = (uintptr_t)(G_engine + 0x1A0DEB8);
-		//auto entry = (char*)&acacheFIle_1A0DEB8 + 296 * 20366;
-		auto entry_loc = (char*)(G_engine+ 0x1fcdae8); // This is the entry for "misc/empty.wav"
-		acache_entry entry{};
-		entry.path[0] = '\0'; // Initialize the path array to avoid undefined behavior  
-		strncpy_s(entry.path, "sound/weapons/valkyrie/wpn_valkyrie_1p_wpnfire_reduced_2ch_01.wav", sizeof(entry.path) - 1);
-		entry.path[sizeof(entry.path) - 1] = '\0'; // Ensure null termination
-		// pad the path to 260 bytes
-		for (size_t i = strlen(entry.path); i < sizeof(entry.path); ++i) {
-			entry.path[i] = '\0'; // Fill the rest with null characters
-		}
-		entry.blockCount = 323326;
-		entry.duration = 3.665828;
-		entry.channels = 2;
-		entry.unk0 = 0;
-		entry.unk1 = 0;
-		entry.d.headerSize = 80;
-		entry.d.sampleDepth = 16;
-		entry.unk3 = 0;
-		entry.offset = 0x2F6C4010;
-		entry.terminator = 1;
-		//memcpy(entry_loc, &entry, sizeof(acache_entry)); // Copy the entry to the location
-		
-		//// allocate a buffer for the entry and copy the entry data
-		//__int64* entry_buffer = new __int64[sizeof(acache_entry) / sizeof(__int64)];
-		//memcpy(entry_buffer, &entry, sizeof(acache_entry));
-
-		//// Cast the buffer to __int64* and return it
-		//return entry_buffer; // Return the buffer as __int64*
-		//return nullptr;
-		return (__int64*)entry_loc; // Return null if the original function returns null
-	}
-	return ret;
-}
-
 static FORCEINLINE void
 do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 {
@@ -3222,7 +3199,6 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook((LPVOID)(server_base + 0x71E9FC), &hkrealloc_base, NULL);
 	MH_CreateHook((LPVOID)(server_base + 0x72B480), &hkrecalloc_base, NULL);
 	MH_CreateHook((LPVOID)(server_base + 0x721000), &hkfree_base, NULL);
-	MH_CreateHook((LPVOID)(G_engine + 0xAE00) ,&GetAcacheHk, reinterpret_cast<LPVOID*>(&GetAcacheOriginal));
 	//MH_CreateHook((LPVOID)(server_base + 0x364D00), &CAI_NetworkManager__LoadNavMesh, reinterpret_cast<LPVOID*>(&CAI_NetworkManager__LoadNavMeshOriginal));
 	MH_CreateHook((LPVOID)(vscript_base + (dedi ? 0x6A80 : 0x6A60)), &CScriptVM__ctor, reinterpret_cast<LPVOID*>(&CScriptVM__ctororiginal));
 	MH_CreateHook((LPVOID)(vscript_base + (dedi ? 0x1210 : 0x1210)), &CScriptManager__CreateNewVM, reinterpret_cast<LPVOID*>(&CScriptManager__CreateNewVMOriginal));
