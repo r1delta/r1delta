@@ -14,7 +14,7 @@ If you're having issues please open an issue or join the [discord](https://disco
 For developers and contributors, keep reading below.
 
 ## Hosting a server
-You can run "R1Delta Dedicated Server" on Windows in the start menu to run a dedicated server, or if you want to host a listen server you can just click "Create Server" from the main menu in R1Delta.
+You can run "R1Delta Dedicated Server" on Windows in the start menu to run a dedicated server, or if you want to host a listen server you can just click "Private Match" from the lobby menu in R1Delta.
 
 Instructions on how to run the dedicated server on Docker are [here](https://gist.github.com/quad-damage/3f4ad9c524b638510340cc31da86d3ff). This image is managed by one of our contributors ([@quadruple](https://github.com/quad-damage)) and not officially maintained by R1Delta, but we still endorse it.
 
