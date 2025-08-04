@@ -1858,7 +1858,7 @@ __int64* GetAcacheHk(const char* wav_path) {
 			return (__int64*)(G_engine + 0x1fcdae8);
 		}
 		else if(strstr(wav_path, "wpn_valkyrie_1p_wpnfire_reduced_2ch_02") != nullptr) {
-			return (__int64*)(G_engine + 0x1fcdb00);
+			return (__int64*)(G_engine + 0x1fcdc10);
 		}
 		return ret;
 	}
