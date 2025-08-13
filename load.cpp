@@ -592,6 +592,14 @@ char __fastcall ProcessConnectionlessPacketDedi(unsigned int* a1, netpacket_s* a
 	char buffer[1200] = { 0 };
 	bf_write writer(reinterpret_cast<char*>(buffer), sizeof(buffer));
 
+	// make a copy of the message and read the version number 
+	bf_read copy = a2->message;
+	copy.ReadByte();
+	auto version = copy.ReadLong(); // skip version
+	if (version == 1042) {
+		return ProcessConnectionlessPacketOriginal(a1, a2);
+	}
+
 	if (((char*)a2->pData + 4)[0] == 'A' && ReadConnectPacket2015AndWriteConnectPacket2014(a2->message, writer) != -1)
 	{
 		if (lastReceived == a2->received)
