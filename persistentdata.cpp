@@ -693,7 +693,7 @@ std::string readFile(const std::string& filename) {
 }
 
 
-static bool g_pdef_use_gamefs = false;
+static bool g_pdef_use_gamefs = true;
 static bool TryReadPDefWithGameFS(std::string& outText)
 {
 	if (!g_CBaseFileSystemInterface)
@@ -736,12 +736,7 @@ static bool TryReadPDefWithGameFS(std::string& outText)
 	return true;
 }
 
-class PDef {
-private:
-	static std::unique_ptr<PDataValidator> s_validator;
-	static std::once_flag s_initFlag;
-
-	static void InitValidator() {
+void PDef::InitValidator() {
 		try {
 			bool useGameFS = g_pdef_use_gamefs;
 			if (OriginalCCVar_FindVar) {
@@ -754,6 +749,7 @@ private:
 
 			if (useGameFS) {
 				if (!TryReadPDefWithGameFS(schemaCode)) {
+					Msg("Failed to get pdata using game functions falling back to hardcoded path\n");
 					// If FS read failed (e.g., too early or not mounted), fallback to raw path
 					useGameFS = false;
 				}
@@ -768,7 +764,7 @@ private:
 
 				if (!std::filesystem::exists(schemaPath)) {
 					Error("FATAL: Could not find _pdef.nut. Expected location: %s",
-						  schemaPath.string().c_str());
+						schemaPath.string().c_str());
 				}
 				schemaCode = readFile(schemaPath.string());
 			}
@@ -781,15 +777,13 @@ private:
 		catch (...) {
 			Error("FATAL: An unknown error occurred during PData validator initialization.");
 		}
-
 	}
-public:
-	static bool IsValidKeyAndValue(const std::string& key, const std::string& value) {
+	bool PDef::IsValidKeyAndValue(const std::string& key, const std::string& value) {
 		std::call_once(s_initFlag, InitValidator);
 		return s_validator->isValid(key, value);
 	}
 
-	static std::string ResolveKeyIndices(const std::string_view& key) {
+	std::string PDef::ResolveKeyIndices(const std::string_view& key) {
 		// Initialize validator on first use
 		std::call_once(s_initFlag, InitValidator);
 
@@ -799,7 +793,7 @@ public:
 		
 		return s_validator->resolveArrayIndices(key);
 	}
-};
+
 
 std::unique_ptr<PDataValidator> PDef::s_validator;
 std::once_flag PDef::s_initFlag;

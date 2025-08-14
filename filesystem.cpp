@@ -51,6 +51,7 @@
 #include <shared_mutex>
 #include <string_view>
 #include "tctx.hh"
+#include "persistentdata.h"
 #pragma intrinsic(_ReturnAddress)
 
 namespace fs = std::filesystem;
@@ -242,7 +243,10 @@ bool done = false;
 __int64 __fastcall FileSystem_UpdateAddonSearchPaths(void* a1) {
     FileCache::GetInstance().RequestManualRescan();
 	FastFileSystemHook::resetNonexistentCache();
-    return FileSystem_UpdateAddonSearchPathsTypeOriginal(a1);
+    auto ret = FileSystem_UpdateAddonSearchPathsTypeOriginal(a1);
+
+	PDef::InitValidator();
+	return ret;
 }
 
 void replace_underscore(char* str) {
