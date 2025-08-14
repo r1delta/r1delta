@@ -694,6 +694,7 @@ std::string readFile(const std::string& filename) {
 
 
 static bool g_pdef_use_gamefs = true;
+//#define PDATA_DEBUG false;
 static bool TryReadPDefWithGameFS(std::string& outText)
 {
 	if (!g_CBaseFileSystemInterface)
@@ -715,6 +716,9 @@ static bool TryReadPDefWithGameFS(std::string& outText)
 	if (!fh)
 		return false;
 	int len = sizeFunc(g_CBaseFileSystemInterface, fh);
+#ifdef PDATA_DEBUG
+	Msg("Pdata Size %d\n", len);
+#endif // PDATA_DEBUG
 	if (len <= 0) {
 		closeFunc(g_CBaseFileSystemInterface, fh);
 		return false;
@@ -723,15 +727,16 @@ static bool TryReadPDefWithGameFS(std::string& outText)
 	buf.resize(static_cast<size_t>(len));
 
 	int rd = readFunc(g_CBaseFileSystemInterface, buf.data(), len, fh);
+#ifdef PDATA_DEBUG
+	Msg("Pdata READ Size %d\n", rd);
+#endif // PDATA_DEBUG
+
 	if (rd < 0) {
 		closeFunc(g_CBaseFileSystemInterface, fh);
 		return false;
 	}
 	// Close the file
 	closeFunc(g_CBaseFileSystemInterface, fh);
-	if (rd <= 0)
-		return false;
-
 	outText = std::move(buf);
 	return true;
 }
@@ -749,9 +754,9 @@ void PDef::InitValidator() {
 
 			if (useGameFS) {
 				if (!TryReadPDefWithGameFS(schemaCode)) {
-					Msg("Failed to get pdata using game functions falling back to hardcoded path\n");
 					// If FS read failed (e.g., too early or not mounted), fallback to raw path
 					useGameFS = false;
+					Msg("No modded _pdef.nut found in GameFS, falling back to r1delta path.\n");
 				}
 			}
 
