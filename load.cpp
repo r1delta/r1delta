@@ -1457,7 +1457,7 @@ bool __fastcall HookedCBaseClientConnect(
 	static auto bUseOnlineAuth = OriginalCCVar_FindVar(cvarinterface, "delta_online_auth_enable");
 	static auto iSyncUsernameWithDiscord = OriginalCCVar_FindVar(cvarinterface, "delta_discord_username_sync");
 	static auto iHostPort = OriginalCCVar_FindVar(cvarinterface, "hostport");
-	if (conVars) {
+	/*if (conVars) {
 		long long user_id = 0;
 		for (int i = 0; i < conVars->Count(); i++) {
 			NetMessageCvar_t& var = conVars->Element(i);
@@ -1470,7 +1470,7 @@ bool __fastcall HookedCBaseClientConnect(
 			V_snprintf(a8, a9, "%s", "Banned from server");
 			return false;
 		}
-	}
+	}*/
 	if (bUseOnlineAuth->m_Value.m_nValue != 1)
 		return oCBaseClientConnect(a1, a2, a3, a4, bFakePlayer, a6, conVars, a8, a9);
 
