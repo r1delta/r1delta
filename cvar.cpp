@@ -492,3 +492,12 @@ void ToggleConsoleCommand(const CCommand& args)
 		(*staticGameConsole)->Hide();
 	}
 }
+
+void ClearConsoleCommand(const CCommand& args)
+{
+	if (!(*staticGameConsole)->m_bInitialized)
+	{
+		return;
+	}
+	(*staticGameConsole)->Clear();
+}

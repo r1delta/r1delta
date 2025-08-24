@@ -396,6 +396,7 @@ inline const char* CCommand::operator[](int nIndex) const
 	return Arg(nIndex);
 }
 void ToggleConsoleCommand(const CCommand& args);
+void ClearConsoleCommand(const CCommand& args);
 extern CGameConsole** staticGameConsole;
 typedef char (*CEngineVGui__HideGameUIType)(__int64 a1);
 extern CEngineVGui__HideGameUIType CEngineVGui__HideGameUIOriginal;
