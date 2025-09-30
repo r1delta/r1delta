@@ -54,6 +54,7 @@ REGEDIT4
 - [@dogecore](https://github.com/HappyDOGE)
 - [@Allusive](https://github.com/AllusiveWheat)
 - [@koutsie](https://github.com/koutsie)
+- [@dyslexi](https://github.com/Dys-lexi/)
 
 ## Third-Party Code Attribution
 
