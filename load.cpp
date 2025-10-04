@@ -1454,6 +1454,43 @@ bool __fastcall HookedCBaseClientConnect(
 	if (bFakePlayer)
 		return oCBaseClientConnect(a1, a2, a3, a4, bFakePlayer, a6, conVars, a8, a9);
 
+	// Version check
+	static auto skipVersionCheck = OriginalCCVar_FindVar(cvarinterface, "delta_skip_version_check");
+	if (skipVersionCheck->m_Value.m_nValue == 0) {
+		const char* serverVersion = R1D_VERSION;
+		const char* clientVersion = nullptr;
+
+		// Find client's delta_version from conVars
+		if (conVars) {
+			for (int i = 0; i < conVars->Count(); i++) {
+				NetMessageCvar_t& var = conVars->Element(i);
+				if (strcmp(var.name, "delta_version") == 0) {
+					clientVersion = var.value;
+					break;
+				}
+			}
+		}
+
+		// If client didn't send version, reject
+		if (!clientVersion) {
+			V_snprintf(a8, a9, "Client is missing delta_version. Please update R1Delta.");
+			return false;
+		}
+
+		// Check version compatibility
+		bool serverIsDev = (strcmp(serverVersion, "dev") == 0);
+		bool clientIsDev = (strcmp(clientVersion, "dev") == 0);
+
+		if (serverIsDev || clientIsDev) {
+			// DEV servers accept all clients, DEV clients can connect to all servers
+			// Allow connection
+		} else if (strcmp(serverVersion, clientVersion) != 0) {
+			// Version mismatch
+			V_snprintf(a8, a9, "Version mismatch: Server is running R1Delta %s, you have %s.", serverVersion, clientVersion);
+			return false;
+		}
+	}
+
 	static auto bUseOnlineAuth = OriginalCCVar_FindVar(cvarinterface, "delta_online_auth_enable");
 	static auto iSyncUsernameWithDiscord = OriginalCCVar_FindVar(cvarinterface, "delta_discord_username_sync");
 	static auto iHostPort = OriginalCCVar_FindVar(cvarinterface, "hostport");
@@ -2649,6 +2686,8 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	RegisterConCommand("bot_dummy", AddBotDummyConCommand, "Adds a bot.", FCVAR_GAMEDLL | FCVAR_CHEAT);
 	RegisterConVar("delta_ms_url", "ms.r1delta.net", FCVAR_CLIENTDLL, "Url for r1d masterserver");
 	RegisterConVar("delta_server_auth_token", "", FCVAR_USERINFO | FCVAR_SERVER_CANNOT_QUERY | FCVAR_DONTRECORD | FCVAR_PROTECTED | FCVAR_HIDDEN, "Per-server auth token");
+	RegisterConVar("delta_version", R1D_VERSION, FCVAR_USERINFO | FCVAR_DONTRECORD, "R1Delta version number");
+	RegisterConVar("delta_skip_version_check", "0", FCVAR_GAMEDLL, "Skip version check for connecting clients (sets server to dev mode)");
 	RegisterConVar("delta_persistent_master_auth_token", "DEFAULT", FCVAR_ARCHIVE | FCVAR_SERVER_CANNOT_QUERY | FCVAR_DONTRECORD | FCVAR_PROTECTED | FCVAR_HIDDEN, "Persistent master server authentication token");
 	RegisterConVar("delta_persistent_master_auth_token_failed_reason", "", FCVAR_ARCHIVE | FCVAR_SERVER_CANNOT_QUERY | FCVAR_DONTRECORD | FCVAR_PROTECTED | FCVAR_HIDDEN, "Persistent master server authentication token");
 	RegisterConVar("delta_online_auth_enable", "0", FCVAR_GAMEDLL, "Whether to use master server auth");
