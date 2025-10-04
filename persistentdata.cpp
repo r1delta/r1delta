@@ -877,7 +877,7 @@ bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 	else {
 		numvars = byteCount;
 	}
-	if (numvars > 4096) {
+	if (numvars > 4096*4) {
 		Warning("Client sent too many ConVars %d\n", numvars);
 		return false;
 	}
