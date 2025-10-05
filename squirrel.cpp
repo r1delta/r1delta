@@ -816,10 +816,12 @@ void localilze_string(const char* str, char* localized_str, int size)
 }
 
 int GetR1DVersion(HSQUIRRELVM v) {
-	const char* newVersionString = "R1Delta " R1D_VERSION;
+	const char* newVersionString = R1D_VERSION;
 	sq_pushstring(v, newVersionString, -1);
 	return 1;
 }
+
+
 
 // please god someone change this to pushconst
 int GetMinimumR1DVersion(HSQUIRRELVM v)
