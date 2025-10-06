@@ -42,6 +42,7 @@
 #include "discord.h"
 #include "r1d_version.h"
 #include "client.h"
+#include "surfacerender.h"
 
 #pragma intrinsic(_ReturnAddress)
 
@@ -1333,6 +1334,16 @@ bool GetSQVMFuncs() {
 		"Send discord client"
 	);
 
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_CLIENT,
+		"AddDamageNumber",
+		(SQFUNCTION)Script_AddDamageNumber,
+		".ffffbi", // . this, f float, f float, f float, f float, b bool
+		7,
+		"void",
+		"float damage, float x, float y, float z, bool isCritical",
+		"Adds a floating damage number to the HUD."
+	);
 
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_UI,

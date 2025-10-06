@@ -383,6 +383,7 @@ __int64 __fastcall CSquirrelVM__ReleaseValue(__int64* a1, ScriptVariant_t* a2);
 bool __fastcall CSquirrelVM__SetValue(__int64* a1, void* a2, unsigned int a3, ScriptVariant_t* a4);
 bool __fastcall CSquirrelVM__SetValueEx(__int64* a1, __int64 a2, const char* a3, ScriptVariant_t* a4);
 __declspec(dllexport) R1SquirrelVM* GetServerVMPtr();
+__declspec(dllexport) R1SquirrelVM* GetClientVMPtr();
 
 void CSquirrelVM__PrintFunc1(void* m_hVM, const char* s, ...);
 void CSquirrelVM__PrintFunc2(void* m_hVM, const char* s, ...);
