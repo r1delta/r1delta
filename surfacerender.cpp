@@ -605,7 +605,7 @@ void FontSizeChangeCallback(IConVar* var, const char* pOldValue, float flOldValu
 
 void SetupSurfaceRenderHooks() {
     cvar_delta_watermark = RegisterConVar("delta_watermark", "1", FCVAR_GAMEDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Show R1Delta watermark with version information");
-    cvar_delta_damage_numbers = RegisterConVar("delta_damage_numbers", "1", FCVAR_GAMEDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Show TF2-style floating damage numbers on hit.");
+    cvar_delta_damage_numbers = RegisterConVar("delta_damage_numbers", "0", FCVAR_GAMEDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Show TF2-style floating damage numbers on hit.");
     cvar_delta_damage_numbers_lifetime = RegisterConVar("delta_damage_numbers_lifetime", "1.5", FCVAR_GAMEDLL, "How long damage numbers stay on screen.");
     cvar_delta_damage_numbers_size = RegisterConVar("delta_damage_numbers_size", "32", FCVAR_GAMEDLL, "Font size for normal damage numbers.");
     cvar_delta_damage_numbers_crit_size = RegisterConVar("delta_damage_numbers_crit_size", "36", FCVAR_GAMEDLL, "Font size for critical damage numbers.");
