@@ -1916,6 +1916,16 @@ __int64* GetAcacheHk(const char* wav_path) {
 	return ret;
 }
 
+typedef __int64(*Host_InitType)(bool a1);
+Host_InitType Host_InitOriginal;
+
+void Host_InitHook(bool a1) {
+	Host_InitOriginal(a1);
+	OriginalCCVar_FindVar(cvarinterface, "sv_alltalk")->m_nFlags |= FCVAR_REPLICATED;
+
+	return;
+}
+
 static FORCEINLINE void
 do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 {
@@ -1928,6 +1938,7 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook((LPVOID)(engine_base + 0x1FE3F0), &SVC_ServerInfo__WriteToBuffer, reinterpret_cast<LPVOID*>(&SVC_ServerInfo__WriteToBufferOriginal));
 	MH_CreateHook((LPVOID)(engine_base + 0x19CBC0), &GetBuildNo, NULL);
 	MH_CreateHook((LPVOID)(engine_base + 0x1E0C10), &CNetChan__GetAddress, reinterpret_cast<LPVOID*>(&oCNetChan__GetAddress));
+	MH_CreateHook((void*)(engine_base + 0x133AA0), &Host_InitHook, (void**)&Host_InitOriginal);
 
 	//MH_CreateHook((LPVOID)(engine_base + 0x0D2490), &ProcessConnectionlessPacketClient, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginalClient));
 
@@ -2708,6 +2719,9 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		RegisterConCommand("noclip", noclip_cmd, "Toggles NOCLIP mode.", FCVAR_GAMEDLL | FCVAR_CHEAT);
 	}
 
+	//auto allTalk = OriginalCCVar_FindVar(cvarinterface, "sv_alltalk");
+
+	//allTalk->m_nFlags |= FCVAR_REPLICATED;
 
 	//0x0000415198 on dedicated
 	// 0x0620818 on client
