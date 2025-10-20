@@ -1922,7 +1922,11 @@ Host_InitType Host_InitOriginal;
 void Host_InitHook(bool a1) {
 	Host_InitOriginal(a1);
 	OriginalCCVar_FindVar(cvarinterface, "sv_alltalk")->m_nFlags |= FCVAR_REPLICATED;
-
+	auto user_id = OriginalCCVar_FindVar(cvarinterface, "platform_user_id");
+	if (user_id->m_Value.m_StringLength < 10) {
+		std::srand(std::time(0));
+		SetConvarStringOriginal(OriginalCCVar_FindVar(cvarinterface, "platform_user_id"), std::to_string(std::rand()).c_str());
+	}
 	return;
 }
 
