@@ -1812,7 +1812,12 @@ USERID_s* GetUserIDHook(__int64 base_client, USERID_s* id) {
 	}
 	auto var = OriginalCCVar_FindVar(cvarinterface, "delta_online_auth_enable");
 	if (var->m_Value.m_nValue != 1) {
-		id->snowflake = *(int64_t*)(base_client + 0x45810);
+		if (IsDedicatedServer()) {
+			id->snowflake = *(int64_t*)(base_client + 0x34B70);
+		}
+		else {
+			id->snowflake = *(int64_t*)(base_client + 0x45810);
+		}
 		return id;
 	}
 	if (IsDedicatedServer())
