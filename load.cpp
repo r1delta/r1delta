@@ -1,4 +1,4 @@
-﻿// %*++***###*##**##++**+++*++*%%%%%%%+*%+#*+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#=%%%#**#+#%
+// %*++***###*##**##++**+++*++*%%%%%%%+*%+#*+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#=%%%#**#+#%
 // ==----------------------------------------------------------------------=================+
 // =------------------------------------::----------------------------------===---==========+
 // ---------------------------------:-:--::::-::::-------------------=======================+
@@ -1606,8 +1606,8 @@ __int64 __fastcall HookedCBaseStateClientConnect(
 
 
 
-	/*if (bUseOnlineAuth->m_Value.m_nValue != 1)
-		return oCBaseStateClientConnect(a1, public_ip, private_ip, num_players, a5, a6, a7, a8, a9, a10, a11);*/
+	if (bUseOnlineAuth->m_Value.m_nValue != 1)
+		return oCBaseStateClientConnect(a1, public_ip, private_ip, num_players, a5, a6, a7, a8, a9, a10, a11);
 
 	// Obtain the master server URL from the engine convars.
 	auto ms_url = OriginalCCVar_FindVar(cvarinterface, "delta_ms_url")->m_Value.m_pszString;
