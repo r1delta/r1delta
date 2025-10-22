@@ -384,6 +384,7 @@ bool __fastcall CSquirrelVM__SetValue(__int64* a1, void* a2, unsigned int a3, Sc
 bool __fastcall CSquirrelVM__SetValueEx(__int64* a1, __int64 a2, const char* a3, ScriptVariant_t* a4);
 __declspec(dllexport) R1SquirrelVM* GetServerVMPtr();
 __declspec(dllexport) R1SquirrelVM* GetClientVMPtr();
+__declspec(dllexport) R1SquirrelVM* GetUIVMPtr();
 
 void CSquirrelVM__PrintFunc1(void* m_hVM, const char* s, ...);
 void CSquirrelVM__PrintFunc2(void* m_hVM, const char* s, ...);
@@ -457,6 +458,8 @@ typedef SQRESULT(*sq_getinstanceup_t)(HSQUIRRELVM, SQInteger, SQUserPointer*, SQ
 typedef void (*sq_newarray_t)(HSQUIRRELVM, SQInteger);
 typedef SQRESULT(*sq_arrayappend_t)(HSQUIRRELVM, SQInteger);
 typedef SQRESULT(*sq_throwerror_t)(HSQUIRRELVM, const char* err);
+typedef void (*sq_settop_t)(HSQUIRRELVM, int);
+typedef void (*sq_removetwo_t)(HSQUIRRELVM);
 typedef bool (*RunCallback_t)(R1SquirrelVM*, const char*);
 typedef __int64 (*CSquirrelVM__RegisterGlobalConstantInt_t)(R1SquirrelVM*, const char*, signed int);
 typedef void* (*CSquirrelVM__GetEntityFromInstance_t)(R1SquirrelVM*, SQObject*, char**);
@@ -495,6 +498,8 @@ extern sq_getinstanceup_t sq_getinstanceup;
 extern sq_newarray_t sq_newarray;
 extern sq_arrayappend_t sq_arrayappend;
 extern sq_throwerror_t sq_throwerror;
+extern sq_settop_t sq_settop;
+extern sq_removetwo_t sq_removetwo;
 extern RunCallback_t RunCallback;
 extern CSquirrelVM__RegisterGlobalConstantInt_t CSquirrelVM__RegisterGlobalConstantInt;
 extern CSquirrelVM__GetEntityFromInstance_t CSquirrelVM__GetEntityFromInstance;

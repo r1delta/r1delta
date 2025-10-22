@@ -52,6 +52,7 @@
 #include "factory.h"
 #include "logging.h"
 #include "load.h"
+#include "mcp_server.h"
 void      (*OriginalCCVar_RegisterConCommand)(uintptr_t thisptr, ConCommandBaseR1* pCommandBase);
 void      (*OriginalCCVar_UnregisterConCommand)(uintptr_t thisptr, ConCommandBaseR1* pCommandBase);
 ConCommandBaseR1* (*OriginalCCVar_FindCommandBase)(uintptr_t thisptr, const char* name);
@@ -459,7 +460,7 @@ void Con_ColorPrintf(const SourceColor* clr, char* fmt, ...)
 	if (!((*staticGameConsole)->m_pConsole->m_pConsolePanel)) return;
 
 	ZoneScoped;
-	
+
 	// Create a buffer for the formatted message
 	char pMessage[1024];
 
@@ -474,6 +475,9 @@ void Con_ColorPrintf(const SourceColor* clr, char* fmt, ...)
 	va_end(args);
 
 	ZoneText(pMessage, len);
+
+	// Capture for MCP server
+	MCPServer::Server::GetInstance().CaptureConsoleOutput(pMessage);
 
 	// Print the message with color
 	(*staticGameConsole)->m_pConsole->m_pConsolePanel->ColorPrint(*clr, pMessage);

@@ -144,7 +144,9 @@ sq_getinstanceup_t sq_getinstanceup;
 sq_newarray_t sq_newarray;
 sq_arrayappend_t sq_arrayappend;
 sq_throwerror_t sq_throwerror;
+sq_removetwo_t sq_removetwo;
 RunCallback_t RunCallback;
+sq_settop_t sq_settop;
 CSquirrelVM__RegisterGlobalConstantInt_t CSquirrelVM__RegisterGlobalConstantInt;
 CSquirrelVM__GetEntityFromInstance_t CSquirrelVM__GetEntityFromInstance;
 sq_GetEntityConstant_CBaseEntity_t sq_GetEntityConstant_CBaseEntity; // CLIENT
@@ -1304,6 +1306,8 @@ bool GetSQVMFuncs() {
 	sq_newarray = reinterpret_cast<sq_newarray_t>(baseAddress + (IsDedicatedServer() ? 0x15090 : 0x14FB0));
 	sq_arrayappend = reinterpret_cast<sq_arrayappend_t>(baseAddress + (IsDedicatedServer() ? 0x15380 : 0x152A0));
 	sq_throwerror = reinterpret_cast<sq_throwerror_t>(baseAddress + (IsDedicatedServer() ? 0x18A10 : 0x18930));
+	sq_settop = reinterpret_cast<sq_settop_t>(baseAddress + (IsDedicatedServer() ? 0x171E0 : 0x017100));
+	sq_removetwo = reinterpret_cast<sq_removetwo_t>(baseAddress + (IsDedicatedServer() ? 0x2BBF0 : 0x2bb10));
 	RunCallback = reinterpret_cast<RunCallback_t>(baseAddress + (IsDedicatedServer() ? 0x89C0 : 0x89A0));
 	CSquirrelVM__RegisterGlobalConstantInt = reinterpret_cast<CSquirrelVM__RegisterGlobalConstantInt_t>(baseAddress + (IsDedicatedServer() ? 0xA6A0 : 0xA680));
 	CSquirrelVM__GetEntityFromInstance = reinterpret_cast<CSquirrelVM__GetEntityFromInstance_t>(baseAddress + (IsDedicatedServer() ? 0x9950 : 0x9930));
@@ -2160,6 +2164,8 @@ using SQCallFn = SQRESULT(*)(HSQUIRRELVM, SQInteger, SQBool, SQBool);
 
 void run_script(const CCommand& args, R1SquirrelVM* (*GetVMPtr)())
 {
+	static auto fatal_script_errors = OriginalCCVar_FindVar(cvarinterface, "fatal_script_errors");
+	auto bak = fatal_script_errors->m_Value.m_nValue;
 	auto launcher = G_launcher;
 	SQCompileBufferFn sq_compilebuffer = reinterpret_cast<SQCompileBufferFn>(launcher + (IsDedicatedServer() ? 0x1A6C0 : 0x1A5E0));
 	BaseGetRootTableFn base_getroottable = reinterpret_cast<BaseGetRootTableFn>(launcher + (IsDedicatedServer() ? 0x56520 : 0x56440));
@@ -2171,6 +2177,7 @@ void run_script(const CCommand& args, R1SquirrelVM* (*GetVMPtr)())
 		Warning("Can't run script code on a VM when that VM is not present.");
 		return;
 	}
+	fatal_script_errors->m_Value.m_nValue = 0;
 
 	SQRESULT compileRes = sq_compilebuffer(vm->sqvm, code.c_str(), static_cast<SQInteger>(code.length()), "console", 1);
 	if (SQ_SUCCEEDED(compileRes))
@@ -2178,6 +2185,7 @@ void run_script(const CCommand& args, R1SquirrelVM* (*GetVMPtr)())
 		base_getroottable(vm->sqvm);
 		SQRESULT callRes = sq_call(vm->sqvm, 1, SQFalse, SQTrue);
 	}
+	fatal_script_errors->m_Value.m_nValue = bak;
 }
 
 void script_cmd(const CCommand& args)

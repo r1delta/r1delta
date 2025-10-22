@@ -86,7 +86,7 @@
 #include "audio.h"
 #include <nlohmann/json.hpp>
 #include "shellapi.h"
-#define JWT
+//#define JWT
 #ifdef JWT
 #include <l8w8jwt/decode.h>
 #include "l8w8jwt/encode.h"
@@ -96,6 +96,7 @@
 #include "hudwarp.h"
 #include "hudwarp_hooks.h"
 #include "surfacerender.h"
+#include "mcp_server.h"
 #include "localchatwriter.h"
 #include "discord.h"
 #define DISCORDPP_IMPLEMENTATION
@@ -1959,6 +1960,30 @@ void Host_InitHook(bool a1) {
 		std::srand(std::time(0));
 		SetConvarStringOriginal(OriginalCCVar_FindVar(cvarinterface, "platform_user_id"), std::to_string(std::rand()).c_str());
 	}
+
+	// Initialize MCP server only if -usemcp argument is present
+	bool useMcp = false;
+	int argc;
+	LPWSTR* argvW = CommandLineToArgvW(GetCommandLineW(), &argc);
+
+	if (argvW != NULL)
+	{
+		for (int i = 1; i < argc; ++i)
+		{
+			if (wcscmp(argvW[i], L"-usemcp") == 0)
+			{
+				useMcp = true;
+				break;
+			}
+		}
+		LocalFree(argvW);
+	}
+
+	if (useMcp)
+	{
+		MCPServer::InitializeMCP();
+	}
+
 	return;
 }
 

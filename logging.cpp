@@ -330,12 +330,12 @@ void MsgHook(const char* pMsg, ...) {
 
 	auto arena = tctx.get_arena_for_scratch();
 	auto temp = TempArena(arena);
-	
+
 	va_list args;
 	va_start(args, pMsg);
 	char* formatted = SafeFormatArena(arena, pMsg, args);
 	va_end(args);
-	
+
 	if (!IsDedicatedServer()) printf("%s", formatted);
 	if (MsgOriginal) {
 		MsgOriginal("%s", formatted);
@@ -395,7 +395,7 @@ void DevMsgHook(int level, const char* pMsg, ...) {
 
 void DevWarningHook(int level, const char* pMsg, ...) {
 	ZoneScoped;
-	
+
 	auto arena = tctx.get_arena_for_scratch();
 	auto temp = TempArena(arena);
 
@@ -412,7 +412,7 @@ void DevWarningHook(int level, const char* pMsg, ...) {
 
 void ConColorMsgHook(const Color* clr, const char* pMsg, ...) {
 	ZoneScoped;
-	
+
 	auto arena = tctx.get_arena_for_scratch();
 	auto temp = TempArena(arena);
 
@@ -429,7 +429,7 @@ void ConColorMsgHook(const Color* clr, const char* pMsg, ...) {
 
 void ConDMsgHook(const char* pMsg, ...) {
 	ZoneScoped;
-	
+
 	auto arena = tctx.get_arena_for_scratch();
 	auto temp = TempArena(arena);
 
@@ -446,7 +446,7 @@ void ConDMsgHook(const char* pMsg, ...) {
 
 void COM_TimestampedLogHook(const char* pMsg, ...) {
 	ZoneScoped;
-	
+
 	auto arena = tctx.get_arena_for_scratch();
 	auto temp = TempArena(arena);
 
@@ -501,7 +501,7 @@ void InitLoggingHooks()
 	MH_CreateHook((LPVOID)GetProcAddress(tier0, "DevMsg"), &DevMsgHook, reinterpret_cast<LPVOID*>(&DevMsgOriginal));
 	MH_CreateHook((LPVOID)GetProcAddress(tier0, "DevWarning"), &DevWarningHook, reinterpret_cast<LPVOID*>(&DevWarningOriginal));
 	MH_CreateHook((LPVOID)GetProcAddress(tier0, "ConColorMsg"), &ConColorMsgHook, reinterpret_cast<LPVOID*>(&ConColorMsgOriginal));
-	MH_CreateHook((LPVOID)GetProcAddress(tier0, "ConDMsgHook"), &ConDMsgHook, reinterpret_cast<LPVOID*>(&ConDMsgOriginal));
+	MH_CreateHook((LPVOID)GetProcAddress(tier0, "ConDMsg"), &ConDMsgHook, reinterpret_cast<LPVOID*>(&ConDMsgOriginal));
 	MH_CreateHook((LPVOID)GetProcAddress(tier0, "COM_TimestampedLog"), &COM_TimestampedLogHook, reinterpret_cast<LPVOID*>(&COM_TimestampedLogOriginal));
 
 	MH_EnableHook(MH_ALL_HOOKS);
