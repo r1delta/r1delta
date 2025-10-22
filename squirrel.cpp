@@ -1163,8 +1163,7 @@ bool GetSQVMFuncs() {
 	}
 
 
-	// Install (MinHook)
-	MH_CreateHook((LPVOID)(G_launcher + 0x4D6E1), SQFinalize_Seatbelt, (LPVOID*)&oSQFinalize);
+	MH_CreateHook((LPVOID)(G_launcher + 0x4D6D0), &SQFinalize_Seatbelt, (LPVOID*)&oSQFinalize);
 
 	uintptr_t baseAddress = G_vscript;
 	if (G_server) {
