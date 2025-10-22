@@ -980,6 +980,12 @@ json Server::ExecuteSquirrelScript(const json& args) {
     std::string script = args["script"];
     std::string context = args.value("context", "server");
     bool capture = args.value("capture_output", true);
+    if (context != "server" && IsDedicatedServer()) {
+        return json{
+            {"content", "Dedi server. Invalid VM context."},
+            {"isError", true}
+        };
+    }
 
     // Validate context before creating the task
     R1SquirrelVM* vm = nullptr;

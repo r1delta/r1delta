@@ -10,6 +10,22 @@
 #include "mcp_server.h"
 #pragma intrinsic(_ReturnAddress)
 
+// Hook for CSys::ConsoleOutput
+typedef void (*ConsoleOutputType)(void* thisptr, char* string);
+ConsoleOutputType ConsoleOutputOriginal = nullptr;
+
+void ConsoleOutputHook(void* thisptr, char* string) {
+	// Call the original function first
+	if (ConsoleOutputOriginal) {
+		ConsoleOutputOriginal(thisptr, string);
+	}
+
+	// Report the message to MCP server if it's enabled
+	if (ShouldEnableMCP() && string && *string) {
+		MCPServer::Server::GetInstance().CaptureConsoleOutput(string);
+	}
+}
+
 #define VTABLE_UPDATE_FORCE 1
 
 #if BUILD_DEBUG
@@ -728,6 +744,11 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 	NET_CreateNetChannelOriginal = NET_CreateNetChannelType(engine + 0x1F1B10);
 	MH_CreateHook(LPVOID(engineDS + 0x6B490), LPVOID(CServerRemoteAccess__LookupStringValue__6B490), reinterpret_cast<LPVOID*>(&oCServerRemoteAccess__LookupStringValue__6B490)); // NET_BufferToBufferCompress
 
+	// Hook CSys::ConsoleOutput at G_vscript + 0x6B800 for dedicated server only
+	if (IsDedicatedServer() && G_vscript) {
+		MH_CreateHook(LPVOID(G_vscript + 0x6B800), LPVOID(ConsoleOutputHook), reinterpret_cast<LPVOID*>(&ConsoleOutputOriginal));
+	}
+
 	MH_CreateHook(LPVOID(engine + 0x1F4FC0), LPVOID(NET_Config), reinterpret_cast<LPVOID*>(&oNET_Config)); // NET_BufferToBufferCompress
 	MH_CreateHook(LPVOID(engineDS + 0x67480), LPVOID(hook_CUtlBuffer_GetInt), reinterpret_cast<LPVOID*>(&original_CUtlBuffer_GetInt)); // NET_BufferToBufferCompress
 	MH_CreateHook(LPVOID(engineDS + 0x6C680), LPVOID(hook_CServerRemoteAccess_WriteDataRequest), reinterpret_cast<LPVOID*>(&original_CServerRemoteAccess_WriteDataRequest)); // NET_BufferToBufferCompress
@@ -826,11 +847,14 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 	//if (!InitNetChanWarningHooks())
 	//	MessageBoxA(NULL, "Failed to initialize warning hooks", "ERROR", 16);
 #endif
+	auto result = Host_InitDedicatedOriginal(a1, a2, a3);
+
 	MCPServer::InstallEchoCommandFix();
 	if (ShouldEnableMCP()) {
 		MCPServer::InitializeMCP();
 	}
-	return Host_InitDedicatedOriginal(a1, a2, a3);
+
+	return result;
 }
 char* __fastcall sub_311910(char* a1, const char* a2, signed __int64 a3)
 {

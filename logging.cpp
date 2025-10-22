@@ -114,6 +114,8 @@ typedef void (*Cbuf_AddTextType)(int a1, const char* a2, unsigned int a3);
 Cbuf_AddTextType Cbuf_AddTextOriginal;
 static bool bDone = false;
 void Cbuf_AddText(int a1, const char* a2, unsigned int a3) {
+	if (IsDedicatedServer() && !Cbuf_AddTextOriginal)
+		Cbuf_AddTextOriginal = (Cbuf_AddTextType)(G_engine_ds + 0x72d70);
 	ZoneScoped;
 	ZoneText(a2, strlen(a2));
 	
