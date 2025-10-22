@@ -1009,6 +1009,10 @@ json Server::ExecuteSquirrelScript(const json& args) {
 
     // Run the script on the VM thread and return execution status
     json executionResult = RunOnVMThreadAndWait([=]() -> json {
+
+        static auto fatal_script_errors = OriginalCCVar_FindVar(cvarinterface, "fatal_script_errors");
+        auto bak = fatal_script_errors->m_pParent->m_Value.m_nValue;
+        fatal_script_errors->m_pParent->m_Value.m_nValue = 0;
         typedef SQRESULT(*SQCompileBufferFn)(HSQUIRRELVM, const SQChar*, SQInteger, const SQChar*, SQBool);
         typedef __int64(*BaseGetRootTableFn)(HSQUIRRELVM);
         typedef SQRESULT(*SQCallFn)(HSQUIRRELVM, SQInteger, SQBool, SQBool);
@@ -1041,7 +1045,7 @@ json Server::ExecuteSquirrelScript(const json& args) {
         if (!success) {
             result["errorMessage"] = errorMsg;
         }
-
+        fatal_script_errors->m_pParent->m_Value.m_nValue = bak;
         return result;
     });
 

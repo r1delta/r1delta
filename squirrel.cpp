@@ -2165,7 +2165,7 @@ using SQCallFn = SQRESULT(*)(HSQUIRRELVM, SQInteger, SQBool, SQBool);
 void run_script(const CCommand& args, R1SquirrelVM* (*GetVMPtr)())
 {
 	static auto fatal_script_errors = OriginalCCVar_FindVar(cvarinterface, "fatal_script_errors");
-	auto bak = fatal_script_errors->m_Value.m_nValue;
+	auto bak = fatal_script_errors->m_pParent->m_Value.m_nValue;
 	auto launcher = G_launcher;
 	SQCompileBufferFn sq_compilebuffer = reinterpret_cast<SQCompileBufferFn>(launcher + (IsDedicatedServer() ? 0x1A6C0 : 0x1A5E0));
 	BaseGetRootTableFn base_getroottable = reinterpret_cast<BaseGetRootTableFn>(launcher + (IsDedicatedServer() ? 0x56520 : 0x56440));
@@ -2177,7 +2177,7 @@ void run_script(const CCommand& args, R1SquirrelVM* (*GetVMPtr)())
 		Warning("Can't run script code on a VM when that VM is not present.");
 		return;
 	}
-	fatal_script_errors->m_Value.m_nValue = 0;
+	fatal_script_errors->m_pParent->m_Value.m_nValue = 0;
 
 	SQRESULT compileRes = sq_compilebuffer(vm->sqvm, code.c_str(), static_cast<SQInteger>(code.length()), "console", 1);
 	if (SQ_SUCCEEDED(compileRes))
@@ -2185,7 +2185,7 @@ void run_script(const CCommand& args, R1SquirrelVM* (*GetVMPtr)())
 		base_getroottable(vm->sqvm);
 		SQRESULT callRes = sq_call(vm->sqvm, 1, SQFalse, SQTrue);
 	}
-	fatal_script_errors->m_Value.m_nValue = bak;
+	fatal_script_errors->m_pParent->m_Value.m_nValue = bak;
 }
 
 void script_cmd(const CCommand& args)
