@@ -886,6 +886,33 @@ void SendChatMsg(CRecipientFilter* filter, int fromIndex, const char* msg, bool 
 	EndMessage();
 }
 
+void SendShowMenu(CRecipientFilter* filter, const char* menuText, int numOptions, int secondsToStayOpen, bool needMore)
+{
+	static auto MessageWriteBits = reinterpret_cast<void (*)(int64, int /*value*/, int /*bits*/)>(G_server + 0x142FA0);
+	static auto MessageWriteStr = reinterpret_cast<void (*)(int64, const char*)>(G_server + 0x663AF0);
+	static auto MessageWriteBool = reinterpret_cast<void (*)(bool)>(G_server + 0x14AB60);
+	static int64_t* activeMsg = reinterpret_cast<int64_t*>(G_server + 0xC31058);
+
+	// Build the option bitmask: option i is (1<<i), 0-based.
+	int optionBits = 0;
+	for (int i = 0; i < numOptions; ++i)
+		optionBits |= (1 << i);
+
+	// Start the usermessage
+	*activeMsg = UserMsgBegin_Wrapper(filter, "ShowMenu");
+
+	// Payload (match bf_write order/sizes for ShowMenu)
+	MessageWriteBits(*activeMsg, optionBits, 16);                 // WriteShort
+	MessageWriteBits(*activeMsg, secondsToStayOpen, 8);           // WriteChar
+	MessageWriteBits(*activeMsg, needMore ? 1 : 0, 8);  // WriteByte
+
+	// Your string writer ignores the first arg (you pass 0 in SendChatMsg), but it
+	// was declared (int64, const char*). Passing *activeMsg is also okay.
+	MessageWriteStr(*activeMsg, menuText);
+
+	EndMessage();
+}
+
 int SendChatWrapper(HSQUIRRELVM v) {
 	// args: this, entity player / bool = true (broadcast) / array of entities for multiple recipients, int fromPlayerIndex, string text, bool isTeam = false, bool isDead = false
 
@@ -944,6 +971,73 @@ int SendChatWrapper(HSQUIRRELVM v) {
 	DestroyFilter(&filter, 0);
 	return 0;
 }
+
+int SendShowMenuUM(HSQUIRRELVM v) {
+	// Squirrel: SendShowMenuUM( playerOrTrueForAll, string menuText, int numOptions, int secondsToStayOpen = -1, bool needMore = false )
+
+	const SQChar* text = nullptr;
+	SQInteger numOptions = 0, secs = -1;
+	SQBool needMore = false;
+
+	if (SQ_FAILED(sq_getstring(v, 3, &text)))                 return sq_throwerror(v, "menuText required");
+	if (SQ_FAILED(sq_getinteger(nullptr, v, 4, &numOptions))) return sq_throwerror(v, "numOptions required");
+	sq_getinteger(nullptr, v, 5, &secs);
+	sq_getbool(nullptr, v, 6, &needMore);
+
+	static auto AddAll = reinterpret_cast<void(*)(void*)>(G_server + 0x1E7BA0);
+	static auto AddRec = reinterpret_cast<void(*)(void*, void*)>(G_server + 0x1E7CB0);
+	static auto Destroy = reinterpret_cast<void(*)(void*, bool)>(G_server + 0x1E78D0);
+
+	CRecipientFilter filter;
+	ConstructCRecipientFilter(&filter);
+
+	SQObjectType t = sq_gettype(v, 2);
+
+	if (t == OT_BOOL) {
+		SQBool all = false;
+		sq_getbool(nullptr, v, 2, &all);
+		if (all) AddAll(&filter);
+	}
+	else if (t == OT_INSTANCE) {
+		void* entity = sq_getentity(v, 2);
+		if (!entity) {
+			Destroy(&filter, 0);
+			return sq_throwerror(v, "Passed instance is not a valid entity");
+		}
+		// IMPORTANT: AddRecipient expects CBaseEntity*, NOT edict_t*
+		AddRec(&filter, entity);
+	}
+	else if (t == OT_ARRAY) {
+		// Match SendChatWrapper’s behavior: allow an array of entity instances
+		sq_push(v, 2);
+		sq_pushnull(v);
+		while (SQ_SUCCEEDED(sq_next(v, -2))) {
+			if (sq_gettype(v, -1) != OT_INSTANCE) {
+				sq_pop(v, 4);
+				Destroy(&filter, 0);
+				return sq_throwerror(v, "Array element is not an entity");
+			}
+			void* entity = sq_getentity(v, -1);
+			if (!entity) {
+				sq_pop(v, 4);
+				Destroy(&filter, 0);
+				return sq_throwerror(v, "Array member instance is not a valid entity");
+			}
+			AddRec(&filter, entity);
+			sq_pop(v, 2);
+		}
+		sq_pop(v, 2);
+	}
+	else {
+		Destroy(&filter, 0);
+		return sq_throwerror(v, "argument 1 must be entity, array of entities, or bool(true=all)");
+	}
+
+	SendShowMenu(&filter, text, (int)numOptions, (int)secs, needMore != 0);
+	Destroy(&filter, 0);
+	return 0;
+}
+
 
 void RunAutorunScripts(R1SquirrelVM* r1sqvm, const char* prefix) {
 	auto FindFirst = (const char*(__fastcall*)(uintptr_t thisptr, const char* searchString, uintptr_t* handle))(g_CVFileSystem->FindFirst);
@@ -1252,6 +1346,17 @@ bool GetSQVMFuncs() {
 		"void",
 		"entity player / bool = true (broadcast) / array of entities for multiple recipients, int fromPlayerIndex, string text, bool isTeam = false, bool isDead = false",
 		"Send a chat message"
+	);
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER,
+		"SendShowMenuUM",
+		(SQFUNCTION)SendShowMenuUM,
+		".Ishi",   // this, entity/bool, string, int, [int], [bool]
+		-3,
+		"void",
+		"entity playerOrAll, string menuText, int numOptions, int secondsToStayOpen = -1, bool needMore = false",
+		"Send legacy ShowMenu usermessage (CS:S/EP2)."
 	);
 
 	REGISTER_SCRIPT_FUNCTION(

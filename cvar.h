@@ -397,6 +397,27 @@ inline const char* CCommand::operator[](int nIndex) const
 }
 void ToggleConsoleCommand(const CCommand& args);
 void ClearConsoleCommand(const CCommand& args);
+void Slot1Command(const CCommand& args);
+void Slot2Command(const CCommand& args);
+void Slot3Command(const CCommand& args);
+void Slot4Command(const CCommand& args);
+void Slot5Command(const CCommand& args);
+void Slot6Command(const CCommand& args);
+void Slot7Command(const CCommand& args);
+void Slot8Command(const CCommand& args);
+void Slot9Command(const CCommand& args);
+void Slot10Command(const CCommand& args);
+
+// Function pointer typedefs for HUD functions
+typedef void* (*GetHudType)(int);
+typedef __int64 (*CHudFindElementType)(__int64, __int64);
+typedef void (*CHudMenuSelectMenuItemType)(__int64, int);
+
+// External function pointers
+extern GetHudType GetHud;
+extern CHudFindElementType CHudFindElement;
+extern CHudMenuSelectMenuItemType CHudMenuSelectMenuItem;
+
 extern CGameConsole** staticGameConsole;
 typedef char (*CEngineVGui__HideGameUIType)(__int64 a1);
 extern CEngineVGui__HideGameUIType CEngineVGui__HideGameUIOriginal;

@@ -69,6 +69,11 @@ void      (*OriginalCCVar_QueueMaterialThreadSetValue3)(uintptr_t thisptr, ConVa
 uintptr_t cvarinterface;
 std::unordered_map<std::string, WVar*, HashStrings, std::equal_to<>> ccBaseMap;
 
+// HUD function pointers
+GetHudType GetHud;
+CHudFindElementType CHudFindElement;
+CHudMenuSelectMenuItemType CHudMenuSelectMenuItem;
+
 
 bool ConCommandBaseR1OIsCVar(ConCommandBaseR1O* ptr) {
 	return !!((ConCommandR1O*)ptr)->unused2;
@@ -500,4 +505,124 @@ void ClearConsoleCommand(const CCommand& args)
 		return;
 	}
 	(*staticGameConsole)->Clear();
+}
+
+void Slot1Command(const CCommand& args)
+{
+	if (!GetHud) return;
+	void* hud = GetHud(0);
+	if (!hud) return;
+
+	__int64 hudMenu = CHudFindElement((__int64)hud, (__int64)"CHudMenu");
+	if (hudMenu) {
+		CHudMenuSelectMenuItem(hudMenu, 1);
+	}
+}
+
+void Slot2Command(const CCommand& args)
+{
+	if (!GetHud) return;
+	void* hud = GetHud(0);
+	if (!hud) return;
+
+	__int64 hudMenu = CHudFindElement((__int64)hud, (__int64)"CHudMenu");
+	if (hudMenu) {
+		CHudMenuSelectMenuItem(hudMenu, 2);
+	}
+}
+
+void Slot3Command(const CCommand& args)
+{
+	if (!GetHud) return;
+	void* hud = GetHud(0);
+	if (!hud) return;
+
+	__int64 hudMenu = CHudFindElement((__int64)hud, (__int64)"CHudMenu");
+	if (hudMenu) {
+		CHudMenuSelectMenuItem(hudMenu, 3);
+	}
+}
+
+void Slot4Command(const CCommand& args)
+{
+	if (!GetHud) return;
+	void* hud = GetHud(0);
+	if (!hud) return;
+
+	__int64 hudMenu = CHudFindElement((__int64)hud, (__int64)"CHudMenu");
+	if (hudMenu) {
+		CHudMenuSelectMenuItem(hudMenu, 4);
+	}
+}
+
+void Slot5Command(const CCommand& args)
+{
+	if (!GetHud) return;
+	void* hud = GetHud(0);
+	if (!hud) return;
+
+	__int64 hudMenu = CHudFindElement((__int64)hud, (__int64)"CHudMenu");
+	if (hudMenu) {
+		CHudMenuSelectMenuItem(hudMenu, 5);
+	}
+}
+
+void Slot6Command(const CCommand& args)
+{
+	if (!GetHud) return;
+	void* hud = GetHud(0);
+	if (!hud) return;
+
+	__int64 hudMenu = CHudFindElement((__int64)hud, (__int64)"CHudMenu");
+	if (hudMenu) {
+		CHudMenuSelectMenuItem(hudMenu, 6);
+	}
+}
+
+void Slot7Command(const CCommand& args)
+{
+	if (!GetHud) return;
+	void* hud = GetHud(0);
+	if (!hud) return;
+
+	__int64 hudMenu = CHudFindElement((__int64)hud, (__int64)"CHudMenu");
+	if (hudMenu) {
+		CHudMenuSelectMenuItem(hudMenu, 7);
+	}
+}
+
+void Slot8Command(const CCommand& args)
+{
+	if (!GetHud) return;
+	void* hud = GetHud(0);
+	if (!hud) return;
+
+	__int64 hudMenu = CHudFindElement((__int64)hud, (__int64)"CHudMenu");
+	if (hudMenu) {
+		CHudMenuSelectMenuItem(hudMenu, 8);
+	}
+}
+
+void Slot9Command(const CCommand& args)
+{
+	if (!GetHud) return;
+	void* hud = GetHud(0);
+	if (!hud) return;
+
+	__int64 hudMenu = CHudFindElement((__int64)hud, (__int64)"CHudMenu");
+	if (hudMenu) {
+		CHudMenuSelectMenuItem(hudMenu, 9);
+	}
+}
+
+void Slot10Command(const CCommand& args)
+{
+	if (!GetHud) return;
+	void* hud = GetHud(0);
+	if (!hud) return;
+
+	__int64 hudMenu = CHudFindElement((__int64)hud, (__int64)"CHudMenu");
+	if (hudMenu) {
+		CHudMenuSelectMenuItem(hudMenu, 10);
+	}
 }

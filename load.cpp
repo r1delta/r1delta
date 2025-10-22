@@ -1986,6 +1986,18 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		RegisterConCommand("clear", ClearConsoleCommand, "Clears the console", (1 << 17));
 		RegisterConCommand("delta_start_discord_auth", DiscordAuthCommand, "Starts the discord auth process", 0);
 		RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
+
+		// Register slot commands
+		RegisterConCommand("slot1", Slot1Command, "Select menu slot 1", 0);
+		RegisterConCommand("slot2", Slot2Command, "Select menu slot 2", 0);
+		RegisterConCommand("slot3", Slot3Command, "Select menu slot 3", 0);
+		RegisterConCommand("slot4", Slot4Command, "Select menu slot 4", 0);
+		RegisterConCommand("slot5", Slot5Command, "Select menu slot 5", 0);
+		RegisterConCommand("slot6", Slot6Command, "Select menu slot 6", 0);
+		RegisterConCommand("slot7", Slot7Command, "Select menu slot 7", 0);
+		RegisterConCommand("slot8", Slot8Command, "Select menu slot 8", 0);
+		RegisterConCommand("slot9", Slot9Command, "Select menu slot 9", 0);
+		RegisterConCommand("slot10", Slot10Command, "Select menu slot 10", 0);
 		MH_CreateHook((LPVOID)(G_engine + 0x2A200), &sub_2A200, reinterpret_cast<LPVOID*>(&sub_2A200Original));
 		//g_pLogAudio = RegisterConVar("fs_log_audio", "0", FCVAR_NONE, "Log audio file reads");
 		MH_CreateHook((LPVOID)(G_engine + 0xAE00), &GetAcacheHk, reinterpret_cast<LPVOID*>(&GetAcacheOriginal));

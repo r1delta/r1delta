@@ -727,6 +727,11 @@ void InitClient()
 {
     auto client = G_client;
     auto engine = G_engine;
+
+    // Initialize HUD function pointers
+    GetHud = (GetHudType)(client + 0x173390);
+    CHudFindElement = (CHudFindElementType)(client + 0x175850);
+    CHudMenuSelectMenuItem = (CHudMenuSelectMenuItemType)(client + 0x1B3850);
     MH_CreateHook((LPVOID)(client + 0x21FE50), &PredictionErrorFn, reinterpret_cast<LPVOID *>(NULL));
     // MH_CreateHook((LPVOID)(client + 0x029840), &C_BaseEntity__VPhysicsInitNormal, reinterpret_cast<LPVOID*>(NULL));
     MH_CreateHook((LPVOID)(client + 0x27F2C0), &sub_18027F2C0, reinterpret_cast<LPVOID *>(&sub_18027F2C0Original));
