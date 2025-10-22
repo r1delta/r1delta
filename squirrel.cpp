@@ -888,32 +888,6 @@ void SendChatMsg(CRecipientFilter* filter, int fromIndex, const char* msg, bool 
 	EndMessage();
 }
 
-void SendShowMenu(CRecipientFilter* filter, const char* menuText, int numOptions, int secondsToStayOpen, bool needMore)
-{
-	static auto MessageWriteBits = reinterpret_cast<void (*)(int64, int /*value*/, int /*bits*/)>(G_server + 0x142FA0);
-	static auto MessageWriteStr = reinterpret_cast<void (*)(int64, const char*)>(G_server + 0x663AF0);
-	static auto MessageWriteBool = reinterpret_cast<void (*)(bool)>(G_server + 0x14AB60);
-	static int64_t* activeMsg = reinterpret_cast<int64_t*>(G_server + 0xC31058);
-
-	// Build the option bitmask: option i is (1<<i), 0-based.
-	int optionBits = 0;
-	for (int i = 0; i < numOptions; ++i)
-		optionBits |= (1 << i);
-
-	// Start the usermessage
-	*activeMsg = UserMsgBegin_Wrapper(filter, "ShowMenu");
-
-	// Payload (match bf_write order/sizes for ShowMenu)
-	MessageWriteBits(*activeMsg, optionBits, 16);                 // WriteShort
-	MessageWriteBits(*activeMsg, secondsToStayOpen, 8);           // WriteChar
-	MessageWriteBits(*activeMsg, needMore ? 1 : 0, 8);  // WriteByte
-
-	// Your string writer ignores the first arg (you pass 0 in SendChatMsg), but it
-	// was declared (int64, const char*). Passing *activeMsg is also okay.
-	MessageWriteStr(*activeMsg, menuText);
-
-	EndMessage();
-}
 
 int SendChatWrapper(HSQUIRRELVM v) {
 	// args: this, entity player / bool = true (broadcast) / array of entities for multiple recipients, int fromPlayerIndex, string text, bool isTeam = false, bool isDead = false
@@ -974,69 +948,86 @@ int SendChatWrapper(HSQUIRRELVM v) {
 	return 0;
 }
 
-int SendShowMenuUM(HSQUIRRELVM v) {
-	// Squirrel: SendShowMenuUM( playerOrTrueForAll, string menuText, int numOptions, int secondsToStayOpen = -1, bool needMore = false )
+// --- raw one-packet send ---
+static inline void SendShowMenuRaw(void* filter, uint16_t keysMask, int secondsToStayOpen, bool needMore, const char* text)
+{
+	static auto MessageWriteBits = reinterpret_cast<void (*)(int64_t, int, int)>(G_server + 0x142FA0);
+	static auto MessageWriteStr = reinterpret_cast<void (*)(int64_t, const char*)>(G_server + 0x663AF0);
+	static int64_t* gActiveMsg = reinterpret_cast<int64_t*>(G_server + 0xC31058);
 
-	const SQChar* text = nullptr;
-	SQInteger numOptions = 0, secs = -1;
-	SQBool needMore = false;
+	*gActiveMsg = UserMsgBegin_Wrapper((CRecipientFilter*)filter, "ShowMenu");
+	MessageWriteBits(*gActiveMsg, (int)(keysMask & 0xFFFF), 16);
+	MessageWriteBits(*gActiveMsg, (int)(secondsToStayOpen & 0xFF), 8);
+	MessageWriteBits(*gActiveMsg, needMore ? 1 : 0, 8);
+	MessageWriteStr(*gActiveMsg, text ? text : "");
+	EndMessage();
+}
 
-	if (SQ_FAILED(sq_getstring(v, 3, &text)))                 return sq_throwerror(v, "menuText required");
-	if (SQ_FAILED(sq_getinteger(nullptr, v, 4, &numOptions))) return sq_throwerror(v, "numOptions required");
-	sq_getinteger(nullptr, v, 5, &secs);
-	sq_getbool(nullptr, v, 6, &needMore);
+// --- auto-chunk (splits on '\n' where possible) ---
+static inline void SendShowMenuChunked(void* filter, uint16_t keysMask, int secondsToStayOpen, const char* fullText, size_t maxBytesPerChunk = 190)
+{
+	if (!fullText || !*fullText) { SendShowMenuRaw(filter, keysMask, secondsToStayOpen, /*needMore=*/false, ""); return; }
 
+	const char* p = fullText; const char* end = fullText + std::strlen(fullText);
+	while (p < end) {
+		const char* start = p; const char* lastNL = nullptr; size_t taken = 0;
+		while (p < end && taken < maxBytesPerChunk) { if (*p == '\n') lastNL = p; ++p; ++taken; }
+		const char* chunkEnd = (p >= end) ? end : (lastNL ? lastNL + 1 : start + taken);
+		if (lastNL && chunkEnd == lastNL + 1) p = chunkEnd; // break after newline
+		std::string chunk(start, chunkEnd);
+		SendShowMenuRaw(filter, keysMask, secondsToStayOpen, /*needMore=*/(chunkEnd < end), chunk.c_str());
+	}
+}
+
+// --- one public function: SendShowMenu(recips, text, keysMask, seconds) ---
+int SendShowMenu(HSQUIRRELVM v)
+{
+	// Expect: this + 4 args
+	if (sq_gettop(GetServerVMPtr(), v) != 5) return sq_throwerror(v, "usage: SendShowMenu(recips, text, keysMask, secondsToStayOpen)");
+
+	const SQChar* text = nullptr; SQInteger mask = 0, secs = -1;
+	if (SQ_FAILED(sq_getstring(v, 3, &text))) return sq_throwerror(v, "text required");
+	if (SQ_FAILED(sq_getinteger(GetServerVMPtr(), v, 4, &mask))) return sq_throwerror(v, "keysMask required");
+	if (SQ_FAILED(sq_getinteger(GetServerVMPtr(), v, 5, &secs))) return sq_throwerror(v, "secondsToStayOpen required");
+
+	// Build filter ON THIS STACK FRAME
 	static auto AddAll = reinterpret_cast<void(*)(void*)>(G_server + 0x1E7BA0);
 	static auto AddRec = reinterpret_cast<void(*)(void*, void*)>(G_server + 0x1E7CB0);
-	static auto Destroy = reinterpret_cast<void(*)(void*, bool)>(G_server + 0x1E78D0);
+	static auto DestroyF = reinterpret_cast<void(*)(void*, bool)>(G_server + 0x1E78D0);
 
-	CRecipientFilter filter;
+	CRecipientFilter filter;                 // <— real object, correct size/layout
 	ConstructCRecipientFilter(&filter);
 
 	SQObjectType t = sq_gettype(v, 2);
-
 	if (t == OT_BOOL) {
-		SQBool all = false;
-		sq_getbool(nullptr, v, 2, &all);
+		SQBool all = SQFalse; sq_getbool(nullptr, v, 2, &all);
 		if (all) AddAll(&filter);
 	}
 	else if (t == OT_INSTANCE) {
-		void* entity = sq_getentity(v, 2);
-		if (!entity) {
-			Destroy(&filter, 0);
-			return sq_throwerror(v, "Passed instance is not a valid entity");
-		}
-		// IMPORTANT: AddRecipient expects CBaseEntity*, NOT edict_t*
-		AddRec(&filter, entity);
+		void* ent = sq_getentity(v, 2);
+		if (!ent) { DestroyF(&filter, 0); return sq_throwerror(v, "instance is not a valid entity"); }
+		AddRec(&filter, ent);                // expects CBaseEntity*
 	}
 	else if (t == OT_ARRAY) {
-		// Match SendChatWrapper’s behavior: allow an array of entity instances
-		sq_push(v, 2);
-		sq_pushnull(v);
+		sq_push(v, 2); sq_pushnull(v);
 		while (SQ_SUCCEEDED(sq_next(v, -2))) {
-			if (sq_gettype(v, -1) != OT_INSTANCE) {
-				sq_pop(v, 4);
-				Destroy(&filter, 0);
-				return sq_throwerror(v, "Array element is not an entity");
-			}
-			void* entity = sq_getentity(v, -1);
-			if (!entity) {
-				sq_pop(v, 4);
-				Destroy(&filter, 0);
-				return sq_throwerror(v, "Array member instance is not a valid entity");
-			}
-			AddRec(&filter, entity);
+			if (sq_gettype(v, -1) != OT_INSTANCE) { sq_pop(v, 4); DestroyF(&filter, 0); return sq_throwerror(v, "array element is not an entity"); }
+			void* ent = sq_getentity(v, -1);
+			if (!ent) { sq_pop(v, 4); DestroyF(&filter, 0); return sq_throwerror(v, "array element is not a valid entity"); }
+			AddRec(&filter, ent);
 			sq_pop(v, 2);
 		}
 		sq_pop(v, 2);
 	}
 	else {
-		Destroy(&filter, 0);
-		return sq_throwerror(v, "argument 1 must be entity, array of entities, or bool(true=all)");
+		DestroyF(&filter, 0);
+		return sq_throwerror(v, "arg1 must be entity, array<entity>, or bool(true=all)");
 	}
 
-	SendShowMenu(&filter, text, (int)numOptions, (int)secs, needMore != 0);
-	Destroy(&filter, 0);
+	// Send (auto-chunked)
+	SendShowMenuChunked(&filter, (uint16_t)(mask & 0xFFFF), (int)secs, text);
+
+	DestroyF(&filter, 0);
 	return 0;
 }
 
@@ -1354,14 +1345,15 @@ bool GetSQVMFuncs() {
 
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_SERVER,
-		"SendShowMenuUM",
-		(SQFUNCTION)SendShowMenuUM,
-		".Ishi",   // this, entity/bool, string, int, [int], [bool]
-		-3,
+		"SendShowMenu",
+		(SQFUNCTION)SendShowMenu,
+		".Isii",  // this, recipients, string, int keysMask, int seconds
+		5,        // IMPORTANT: expect 5 total (includes `this`)
 		"void",
-		"entity playerOrAll, string menuText, int numOptions, int secondsToStayOpen = -1, bool needMore = false",
-		"Send legacy ShowMenu usermessage (CS:S/EP2)."
+		"entity|array|bool recipients, string text, int keysMask, int secondsToStayOpen",
+		"Send ShowMenu (CS:S/EP2) with automatic chunking and full keys mask."
 	);
+
 
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_CLIENT,
