@@ -389,6 +389,8 @@ __int64 __fastcall SetPreCache(__int64 a1, __int64 a2, char a3) {
 		sub_1800F5680("armsmodel_imc", a2, PVOID(a1 + 472), PVOID(a1 + 488));
 
 	auto armsmodel_militia_exists = sub_1800F5680("armsmodel_militia", a2, &elem[1]->ptr, &elem[1]->big_size);
+	if (OriginalCCVar_FindVar(cvarinterface, "developer")->m_Value.m_nValue == 1)
+		Cbuf_AddText(0, "developer 1\n", 0);
 
 	return ret;
 }
