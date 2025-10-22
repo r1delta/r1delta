@@ -324,7 +324,7 @@ int UpdateAddons(HSQUIRRELVM v, SQInteger index, SQBool enabled) {
 	snprintf(szAddOnListPath, 260, "%s%s", szModPath, "addonlist.txt");
 	KeyValues* kv = new KeyValues("AddonList");
 	kv_load_file_addr(kv, base_file_system, szAddOnListPath, nullptr, 0);
-	auto vm = GetServerVMPtr();
+	auto vm = GetUIVMPtr();
 	std::cout << kv->GetString() << std::endl;
 	int i = 0; // Declare the iterator before the loop
 	for (KeyValues* subkey = kv->GetFirstValue(); subkey; subkey = subkey->GetNextValue(), ++i) {
@@ -399,7 +399,7 @@ int GetMods(HSQUIRRELVM v) {
 	char szModPath[260];
 	char szAddOnListPath[260];
 	char szAddonDirName[64];
-	auto vm = GetServerVMPtr();
+	auto vm = GetUIVMPtr();
 	auto ret = func(file_system, "MOD", 0, szModPath, 260);
 	snprintf(szAddOnListPath, 260, "%s%s", szModPath, "addonlist.txt");
 	KeyValues* kv = new KeyValues("AddonList");
@@ -457,7 +457,7 @@ int GetMods(HSQUIRRELVM v) {
 			wcstombs(description_str, description, 1024);
 			wcstombs(version_str, version, 260);
 			wcstombs(localization_str, localization, 260);
-			if (localization_str != "") {
+			if (localization_str[0] != '\0') {
 				// don't add dup;aicates 
 				//if it does not exist add it
 				auto it = std::find(modLocalization_files.begin(), modLocalization_files.end(), localization_str);
@@ -1129,6 +1129,23 @@ int SendMenu(HSQUIRRELVM v) {
 	return 0;
 }
 
+using SQFinalize_t = __int64(__fastcall*)(void* self);
+static SQFinalize_t  oSQFinalize;
+
+__int64 __fastcall SQFinalize_Seatbelt(void* self) {
+    // _class is at +56 (0x38)
+    void* klass = *reinterpret_cast<void**>((char*)self + 56);
+    if (!klass) {
+        static std::atomic<uint64_t> hits{0};
+        if ((hits.fetch_add(1, std::memory_order_relaxed) & 0xFF) == 0) {
+            Warning("[sq] Seatbelt: Finalize on %p with null _class — skipping (count=%llu). THIS SHOULD NEVER HAPPEN. If you see this, ping @r3muxd on Discord immediately!\n", self, hits.load());
+        }
+        return 0; // treat as already-finalized
+    }
+
+    return oSQFinalize(self);
+}
+
 // Function to initialize all SQVM functions
 bool GetSQVMFuncs() {
 	static bool initialized = false;
@@ -1145,6 +1162,10 @@ bool GetSQVMFuncs() {
 			Msg("Failed to hook CHostState__State_GameShutdown\n");
 	}
 
+
+	// Install (MinHook)
+	MH_CreateHook((LPVOID)(G_launcher + 0x4D6E1), SQFinalize_Seatbelt, (LPVOID*)&oSQFinalize);
+	MH_EnableHook(MH_ALL_HOOKS);
 
 	uintptr_t baseAddress = G_vscript;
 	if (G_server) {
@@ -1753,6 +1774,12 @@ __forceinline bool serverRunning(void* vmInstance) {
 	if (IsDedicatedServer())
 		return true;
 
+	// ... but, if we're not running the listen server, then we're not.
+	// TODO(dr3murr): do we need this if we check !realvmptr? idk, most loads will be coming from mp_lobby listen server,
+	// and i don't know if we clear the pointer ever from there...	
+	if (*(int*)(G_engine + 0x2966168) == 0)
+		return false;
+	
 	// Check early-out conditions.
 	if (isServerScriptVM ||
 		vmInstance == realvmptr ||
@@ -2074,3 +2101,4 @@ void script_ui_cmd(const CCommand& args)
 //	//	Warning("sq_throwerror: %s\n", a2);
 //	//return sq_throwerror(a1, a2);
 //}
+

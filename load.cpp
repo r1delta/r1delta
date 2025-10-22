@@ -1484,10 +1484,37 @@ bool __fastcall HookedCBaseClientConnect(
 		if (serverIsDev || clientIsDev) {
 			// DEV servers accept all clients, DEV clients can connect to all servers
 			// Allow connection
-		} else if (strcmp(serverVersion, clientVersion) != 0) {
-			// Version mismatch
-			V_snprintf(a8, a9, "Version mismatch: Server is running R1Delta %s, you have %s.", serverVersion, clientVersion);
-			return false;
+		} else {
+			// Parse versions as major.minor.hotfix (with optional "v" prefix)
+			int serverMajor = 0, serverMinor = 0, serverHotfix = 0;
+			int clientMajor = 0, clientMinor = 0, clientHotfix = 0;
+
+			// Try parsing with "v" prefix first, then without
+			int serverParsed = sscanf(serverVersion, "v%d.%d.%d", &serverMajor, &serverMinor, &serverHotfix);
+			if (serverParsed < 2) {
+				serverParsed = sscanf(serverVersion, "%d.%d.%d", &serverMajor, &serverMinor, &serverHotfix);
+			}
+
+			int clientParsed = sscanf(clientVersion, "v%d.%d.%d", &clientMajor, &clientMinor, &clientHotfix);
+			if (clientParsed < 2) {
+				clientParsed = sscanf(clientVersion, "%d.%d.%d", &clientMajor, &clientMinor, &clientHotfix);
+			}
+
+			// Require major.minor to match exactly, allow client hotfix >= server hotfix
+			if (serverParsed >= 2 && clientParsed >= 2) {
+				if (serverMajor != clientMajor || serverMinor != clientMinor) {
+					V_snprintf(a8, a9, "Version mismatch: Server is running R1Delta %s, you have %s.", serverVersion, clientVersion);
+					return false;
+				}
+				if (clientHotfix < serverHotfix) {
+					V_snprintf(a8, a9, "Version mismatch: Server is running R1Delta %s, you have %s. Please update your client.", serverVersion, clientVersion);
+					return false;
+				}
+			} else if (strcmp(serverVersion, clientVersion) != 0) {
+				// Fallback to exact string match for non-standard versions
+				V_snprintf(a8, a9, "Version mismatch: Server is running R1Delta %s, you have %s.", serverVersion, clientVersion);
+				return false;
+			}
 		}
 	}
 

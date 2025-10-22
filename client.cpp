@@ -121,6 +121,16 @@ struct CGameUI
 };
 typedef void* (*CGameUI__StartProgressBarType)(CGameUI* thispt);
 CGameUI__StartProgressBarType CGameUI__StartProgressBarOriginal;
+
+typedef vgui::Panel* (*vgui__PHandle__Get_Type)(void* a1);
+vgui__PHandle__Get_Type vgui__PHandle__Get_Original;
+vgui::Panel* vgui__PHandle__Get_Hook(void* a1)
+{
+    if ((uintptr_t)a1 < 0x500)
+        return 0;
+    return vgui__PHandle__Get_Original(a1);
+}
+
 void CGameUI__StartProgressBar(CGameUI *thisptr)
 {
     static ConVarR1 *enable = OriginalCCVar_FindVar(cvarinterface, "delta_useLegacyProgressBar");
@@ -742,6 +752,7 @@ void InitClient()
     MH_CreateHook((LPVOID)(client + 0x47F1E0), &WeaponSprayFunction1, reinterpret_cast<LPVOID *>(&oWeaponSprayFunction1));
     // MH_CreateHook((LPVOID)(client + 0x47FED0), &WeaponSprayFunction2, reinterpret_cast<LPVOID*>(&oWeaponSprayFunction2));
     MH_CreateHook((LPVOID)(client + 0x3C5830), &LoadingProgress__SetupControlStates, reinterpret_cast<LPVOID *>(&oLoadingProgress__SetupControlStates));
+    MH_CreateHook((LPVOID)(client + 0x689A70), &vgui__PHandle__Get_Hook, reinterpret_cast<LPVOID *>(&vgui__PHandle__Get_Original));
 
     if (IsNoOrigin())
         MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("ws2_32.dll"), "getaddrinfo"), &hookedGetAddrInfo, reinterpret_cast<LPVOID *>(&originalGetAddrInfo));
