@@ -120,6 +120,7 @@ void Cbuf_AddText(int a1, const char* a2, unsigned int a3) {
 	if (!bDone) {
 		bDone = true;
 		OriginalCCVar_FindVar(cvarinterface, "cl_updaterate")->m_nFlags &= ~(FCVAR_HIDDEN | FCVAR_DEVELOPMENTONLY);
+		OriginalCCVar_FindCommand(cvarinterface, "help")->m_nFlags &= ~(FCVAR_HIDDEN | FCVAR_DEVELOPMENTONLY);
 	}
 	PData_OnConsoleCommand(a2);
 	bool shouldLog = true;

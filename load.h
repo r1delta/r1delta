@@ -118,3 +118,6 @@ std::string get_public_ip();
 LDR_DLL_LOADED_NOTIFICATION_DATA* GetModuleNotificationData(const wchar_t* moduleName);
 void FreeModuleNotificationData(LDR_DLL_LOADED_NOTIFICATION_DATA*);
 void InitializeRecentHostVars();
+class CCommand;
+void Find(const CCommand& args);
+bool ShouldEnableMCP();

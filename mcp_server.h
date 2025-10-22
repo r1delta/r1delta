@@ -156,7 +156,10 @@ private:
 // Initialize MCP server hooks and commands
 void InitializeMCP();
 
-// Echo command fix
+// Ensure the fixed echo command is installed
+void InstallEchoCommandFix();
+
+// Echo command implementation
 void EchoCommand(const ::CCommand& args);
 
 } // namespace MCPServer

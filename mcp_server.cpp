@@ -1851,15 +1851,21 @@ void MCPStatusCommand(const ::CCommand& args) {
 // Initialization
 // ============================================================================
 
+void InstallEchoCommandFix() {
+    static std::once_flag once;
+    std::call_once(once, []() {
+        auto* existingEcho = CCVar_FindCommand(cvarinterface, "echo");
+        if (existingEcho) {
+            CCVar_UnregisterConCommand(cvarinterface, existingEcho);
+        }
+        RegisterConCommand("echo", EchoCommand, "Echo text to console", FCVAR_CLIENTDLL | FCVAR_SERVER_CAN_EXECUTE);
+    });
+}
+
 void InitializeMCP() {
     Msg("Initializing MCP Server...\n");
 
-    // Unregister and re-register echo command with our fixed version
-    auto* existingEcho = CCVar_FindCommand(cvarinterface, "echo");
-    if (existingEcho) {
-        CCVar_UnregisterConCommand(cvarinterface, existingEcho);
-    }
-    RegisterConCommand("echo", EchoCommand, "Echo text to console", FCVAR_CLIENTDLL | FCVAR_SERVER_CAN_EXECUTE);
+    InstallEchoCommandFix();
 
     // Register MCP console commands
     RegisterConCommand("mcp_start_stdio", MCPStartStdioCommand, "Start MCP server on stdio transport", FCVAR_NONE);

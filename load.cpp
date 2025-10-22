@@ -1949,6 +1949,32 @@ __int64* GetAcacheHk(const char* wav_path) {
 	return ret;
 }
 
+bool ShouldEnableMCP() {
+	static bool parsed = false;
+	static bool useMcp = false;
+
+	if (!parsed) {
+		parsed = true;
+		int argc = 0;
+		LPWSTR* argvW = CommandLineToArgvW(GetCommandLineW(), &argc);
+
+		if (argvW != NULL)
+		{
+			for (int i = 1; i < argc; ++i)
+			{
+				if (wcscmp(argvW[i], L"-usemcp") == 0)
+				{
+					useMcp = true;
+					break;
+				}
+			}
+			LocalFree(argvW);
+		}
+	}
+
+	return useMcp;
+}
+
 typedef __int64(*Host_InitType)(bool a1);
 Host_InitType Host_InitOriginal;
 
@@ -1961,31 +1987,81 @@ void Host_InitHook(bool a1) {
 		SetConvarStringOriginal(OriginalCCVar_FindVar(cvarinterface, "platform_user_id"), std::to_string(std::rand()).c_str());
 	}
 
+	MCPServer::InstallEchoCommandFix();
+
 	// Initialize MCP server only if -usemcp argument is present
-	bool useMcp = false;
-	int argc;
-	LPWSTR* argvW = CommandLineToArgvW(GetCommandLineW(), &argc);
-
-	if (argvW != NULL)
-	{
-		for (int i = 1; i < argc; ++i)
-		{
-			if (wcscmp(argvW[i], L"-usemcp") == 0)
-			{
-				useMcp = true;
-				break;
-			}
-		}
-		LocalFree(argvW);
-	}
-
-	if (useMcp)
+	if (ShouldEnableMCP())
 	{
 		MCPServer::InitializeMCP();
 	}
 
 	return;
 }
+inline bool CaselessStringLessThan(const char* const& lhs, const char* const& rhs) {
+	if (!lhs) return false;
+	if (!rhs) return true;
+	return (_stricmp(lhs, rhs) < 0);
+}
+
+static bool ConVarSortFunc(ConCommandBaseR1* const& lhs, ConCommandBaseR1* const& rhs)
+{
+	return CaselessStringLessThan(lhs->m_pszName, rhs->m_pszName);
+}
+
+
+class ICVarIteratorInternal
+{
+public:
+    virtual void SetFirst() = 0;
+	virtual void Next() = 0;
+	virtual bool IsValid() = 0;
+	virtual ConCommandBaseR1* Get() = 0;
+};
+void Find(const CCommand& args)
+{
+	const char* search;
+
+	if (args.ArgC() != 2)
+	{
+		Msg("Usage:  find <string>\n");
+		return;
+	}
+
+	// Get substring to find
+	search = args[1];
+
+	// Use std::vector to store matching cvars for sorting
+	std::vector<ConCommandBaseR1*> matches;
+
+	// Use the FactoryInternalIterator to iterate through all cvars
+	typedef ICVarIteratorInternal* (__thiscall *FactoryInternalIterator_t)(void* cvar);
+	FactoryInternalIterator_t pFactoryInternalIterator = (FactoryInternalIterator_t)(*(uintptr_t**)((void*)cvarinterface))[40];
+	ICVarIteratorInternal* it = pFactoryInternalIterator((void*)cvarinterface);
+	if (it)
+	{
+		for (it->SetFirst(); it->IsValid(); it->Next())
+		{
+			ConCommandBaseR1* var = it->Get();
+			if (!var) continue;
+
+			if (!V_stristr(var->m_pszName, search) &&
+				!V_stristr(var->m_pszHelpString, search))
+				continue;
+
+			matches.push_back(var);
+		}
+	}
+
+	// Sort the results by name
+	std::sort(matches.begin(), matches.end(), ConVarSortFunc);
+
+	// Print the results
+	for (const auto& var : matches)
+	{
+		ConVar_PrintDescription(var);
+	}
+}
+
 
 static FORCEINLINE void
 do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
@@ -2768,6 +2844,8 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	RegisterConCommand("verifyain", verifyain_cmd, "Reads the .ain file from disk, compares its nodes & links to in-memory data, logs differences.", FCVAR_CHEAT);
 	RegisterConCommand("updateain", updateain_cmd, "Calls StartRebuild, then overwrites node/link data in the .ain file.", FCVAR_CHEAT);
 	RegisterConCommand("bot_dummy", AddBotDummyConCommand, "Adds a bot.", FCVAR_GAMEDLL | FCVAR_CHEAT);
+	if (IsDedicatedServer())
+		RegisterConCommand("find", Find, "Find a command or convar.", FCVAR_NONE);
 	RegisterConVar("delta_ms_url", "ms.r1delta.net", FCVAR_CLIENTDLL, "Url for r1d masterserver");
 	RegisterConVar("delta_server_auth_token", "", FCVAR_USERINFO | FCVAR_SERVER_CANNOT_QUERY | FCVAR_DONTRECORD | FCVAR_PROTECTED | FCVAR_HIDDEN, "Per-server auth token");
 	RegisterConVar("delta_version", R1D_VERSION, FCVAR_USERINFO | FCVAR_DONTRECORD, "R1Delta version number");

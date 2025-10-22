@@ -36,6 +36,7 @@ void sub_18027F2C0(__int64 a1, const char *a2, void *a3)
     {
         sub_18027F2C0Original(a1, "TextMsg", TextMsg);
     }
+    OriginalCCVar_FindCommand(cvarinterface, "find")->m_pCommandCallback = (FnCommandCallback_t)Find;
 
     sub_18027F2C0Original(a1, a2, a3);
 }

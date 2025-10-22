@@ -7,6 +7,7 @@
 #include "netchanwarnings.h"
 #include "netadr.h"
 #include "sv_filter.h"
+#include "mcp_server.h"
 #pragma intrinsic(_ReturnAddress)
 
 #define VTABLE_UPDATE_FORCE 1
@@ -825,6 +826,10 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 	//if (!InitNetChanWarningHooks())
 	//	MessageBoxA(NULL, "Failed to initialize warning hooks", "ERROR", 16);
 #endif
+	MCPServer::InstallEchoCommandFix();
+	if (ShouldEnableMCP()) {
+		MCPServer::InitializeMCP();
+	}
 	return Host_InitDedicatedOriginal(a1, a2, a3);
 }
 char* __fastcall sub_311910(char* a1, const char* a2, signed __int64 a3)
