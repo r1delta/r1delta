@@ -78,3 +78,8 @@ R1Delta itself is licensed under the GNU General Public License v3.0 (GPLv3). Fo
 ![bear](https://github.com/r1delta/r1delta/assets/37985788/41548f20-0878-4e1e-8538-e9be808fc363)
 ![bear](https://github.com/r1delta/r1delta/assets/37985788/41548f20-0878-4e1e-8538-e9be808fc363)
 ![bear](https://github.com/r1delta/r1delta/assets/37985788/41548f20-0878-4e1e-8538-e9be808fc363)
+
+# FAQ
+
+## Q: What if I have hiccups
+Remind yourself you are not a fish
