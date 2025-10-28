@@ -170,6 +170,7 @@ std::string srcon::send(const std::string data, const int type)
 	return recv(halt_id);
 }
 
+
 std::string srcon::recv(unsigned long halt_id) const
 {
 	unsigned int bytes = 0;

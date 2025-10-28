@@ -18,7 +18,6 @@
 
 
 static bool is_discord_running = false;
-
 bool parseAndValidateIpOctets(const char* ip_part, size_t ip_len, unsigned int& o1, unsigned int& o2, unsigned int& o3, unsigned int& o4) {
 	// Ensure the ip_part doesn't contain invalid characters (like another ':')
 	// or start/end with '.' or have consecutive '..'
@@ -149,8 +148,6 @@ void HandleDiscordInvite(discord::ActivityActionType type, const discord::User u
 }
 
 // func for get local baseClient
-typedef void* (__fastcall* GetBaseClientFunc)(int slot);
-GetBaseClientFunc GetBaseClient;
 
 bool IsDiscordProcessRunning() {
 	DWORD process_id = 0;
@@ -222,6 +219,7 @@ void DiscordAuthCommand(const CCommand& args) {
 	g_DiscordCommandQueue.AddCommand(DiscordCommandType::AUTH);
 #endif
 }
+//GetBaseClientFunc GetBaseClient;
 
 void ProcessDiscordAuth() {
 	core->ApplicationManager().GetOAuth2Token([](discord::Result discordResult, const discord::OAuth2Token& token) {

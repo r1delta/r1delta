@@ -115,52 +115,301 @@ ConVarR1 *CBanSystem::m_pSvBanlistAutosave = nullptr;
 std::atomic<bool> running = true;
 
 srcon* srcon_instance = nullptr;
+// Add near the top with other includes
+#include <mutex>
 
-// Signal handler to stop the application
+// Add these global variables after the existing RCON declarations
+static std::mutex g_rcon_mutex;
+static std::string g_last_rcon_address;
+static int g_last_rcon_port = 27015;
+GetBaseClientFunc GetBaseClient;
 
-//
-//auto client = std::make_shared<discordpp::Client>();
+// Helper function to detect if we're connected to a server
+static inline bool IsConnectedToServer()
+{
+	if (!GetBaseClient) return false;
 
+	void* base_client = GetBaseClient(-1);
+	if (!base_client) return false;
 
-void rcon_adress(const CCommand& args) {
-	if (args.ArgC() < 2) {
-		Msg("Usage: rcon_address <address>\n");
-		return;
+	auto net_chan = *reinterpret_cast<uintptr_t*>(reinterpret_cast<uintptr_t>(base_client) + 0x20);
+	return (net_chan != 0);
+}
+
+// Improved TryGetCurrentServerNetAdr that extracts just the IP without port
+static bool TryGetCurrentServerNetAdr(std::string& outIp, uint16_t& outPort)
+{
+	if (!GetBaseClient) return false;
+
+	void* base_client = GetBaseClient(-1);
+	if (!base_client) return false;
+
+	auto net_chan = *reinterpret_cast<uintptr_t*>(reinterpret_cast<uintptr_t>(base_client) + 0x20);
+	if (!net_chan) return false;
+
+	auto ns_addr = reinterpret_cast<netadr_t*>(net_chan + 0xE4);
+	if (!ns_addr) return false;
+	outPort = htons(ns_addr->GetPort());
+	const char* addrStr = CallVFunc<char*>(0x1, reinterpret_cast<void*>(net_chan));
+	if (!addrStr || !addrStr[0]) return false;
+
+	// Parse the address string to extract just IP (might be "ip:port" or just "ip")
+	std::string fullAddr(addrStr);
+	size_t colonPos = fullAddr.find(':');
+	if (colonPos != std::string::npos) {
+		outIp = fullAddr.substr(0, colonPos);
 	}
-	std::string address = args[1];
-	auto rcon_pass = CCVar_FindVar(cvarinterface, "rcon_password")->m_Value.m_pszString;
-	if (srcon_instance) {
-		srcon_addr address_struct;
-		// split the port if present
-		size_t colon_pos = address.find(':');
-		if (colon_pos != std::string::npos) {
-			std::string port_str = address.substr(colon_pos + 1);
-			address = address.substr(0, colon_pos);
-			try {
-				int port = std::stoi(port_str);
-				address_struct.port = port;
-			}
-			catch (const std::invalid_argument&) {
-				Msg("Invalid port number in address: %s\n", port_str.c_str());
-				return;
-			}
+	else {
+		outIp = fullAddr;
+	}
+
+	return true;
+}
+
+void rcon_address(const CCommand& args) {
+	std::lock_guard<std::mutex> lock(g_rcon_mutex);
+
+	if (args.ArgC() < 2) {
+		if (srcon_instance) {
+			srcon_addr addr = srcon_instance->get_addr();
+			Msg("Current RCON address: %s:%d\n", addr.addr.c_str(), addr.port);
 		}
 		else {
-			address_struct.port = 27015; // Default port if not specified
+			Msg("Usage: rcon_address <address[:port]>\n");
+			Msg("RCON is not currently connected.\n");
 		}
+		return;
+	}
+
+	std::string address = args.Arg(1);
+	Msg("%s\n", address);
+	auto rcon_pass = CCVar_FindVar(cvarinterface, "rcon_password");
+	if (!rcon_pass) {
+		Warning("rcon_password ConVar not found!\n");
+		return;
+	}
+
+	std::string password = rcon_pass->m_Value.m_pszString;
+
+	// Parse address and port
+	srcon_addr address_struct;
+	size_t colon_pos = address.find(':');
+	if (colon_pos != std::string::npos) {
+		std::string port_str = address.substr(colon_pos + 1);
+		address_struct.addr = address.substr(0, colon_pos);
+		try {
+			address_struct.port = std::stoi(port_str);
+		}
+		catch (const std::exception&) {
+			Warning("Invalid port number in address: %s\n", port_str.c_str());
+			return;
+		}
+	}
+	else {
 		address_struct.addr = address;
-		address_struct.pass = rcon_pass; // Default password, can be set later
+		address_struct.port = 27015;
+	}
+
+	address_struct.pass = password;
+
+	// Clean up old instance
+	if (srcon_instance) {
+		delete srcon_instance;
+		srcon_instance = nullptr;
+	}
+
+	// Create new instance
+	try {
 		srcon_instance = new srcon(address_struct, SRCON_DEFAULT_TIMEOUT);
+
 		if (!srcon_instance->is_connected()) {
-			Msg("Failed to connect to RCON server at %s:%d with password '%s'.\n", address_struct.addr.c_str(), address_struct.port, rcon_pass);
+			Warning("Failed to connect to RCON server at %s:%d\n",
+				address_struct.addr.c_str(), address_struct.port);
 			delete srcon_instance;
 			srcon_instance = nullptr;
 			return;
 		}
-		Msg("RCON address set to: %s\n", address.c_str());
+
+		// Store for later
+		g_last_rcon_address = address_struct.addr;
+		g_last_rcon_port = address_struct.port;
+
+		Msg("RCON connected to: %s:%d\n", address_struct.addr.c_str(), address_struct.port);
 	}
-	else {
-		srcon_instance = new srcon(address, 27015, rcon_pass); // Default port and empty password
+	catch (const std::exception& e) {
+		Warning("RCON connection error: %s\n", e.what());
+		if (srcon_instance) {
+			delete srcon_instance;
+			srcon_instance = nullptr;
+		}
+	}
+}
+
+// Replace your existing rcon_concommand function
+void rcon_concommand(const CCommand& args) {
+	std::lock_guard<std::mutex> lock(g_rcon_mutex);
+
+	if (args.ArgC() < 2) {
+		Msg("Usage: rcon <command> [args...]\n");
+		Msg("Example: rcon status\n");
+		return;
+	}
+
+	// Build command string
+	std::string cmd = "";
+	for (int i = 1; i < args.ArgC(); ++i) {
+		cmd += args[i];
+		cmd += " ";
+	}
+
+	Msg("command %s\n", cmd);
+
+	// Get password
+	auto rcon_password_var = CCVar_FindVar(cvarinterface, "rcon_password");
+	if (!rcon_password_var) {
+		Warning("rcon_password ConVar not found!\n");
+		return;
+	}
+
+	std::string rcon_password = rcon_password_var->m_Value.m_pszString;
+	if (rcon_password.empty()) {
+		Warning("RCON password is empty. Set it with 'rcon_password <password>'\n");
+		return;
+	}
+
+	// Auto-detect server address if in-game and not manually set
+	std::string targetIp;
+	uint16_t targetPort = 27015;
+	bool usingLiveServer = false;
+
+	if (IsConnectedToServer() && TryGetCurrentServerNetAdr(targetIp, targetPort)) {
+		// We're in-game, use the current server
+		usingLiveServer = true;
+
+		// Check if we need to reconnect to a different server
+		bool needReconnect = false;
+		if (!srcon_instance) {
+			needReconnect = true;
+		}
+		else {
+			srcon_addr current = srcon_instance->get_addr();
+			if (current.addr != targetIp || current.port != targetPort) {
+				needReconnect = true;
+			}
+		}
+
+		if (needReconnect) {
+			Msg("Auto-connecting RCON to current server: %s:%d\n", targetIp.c_str(), targetPort);
+
+			if (srcon_instance) {
+				delete srcon_instance;
+				srcon_instance = nullptr;
+			}
+
+			try {
+				srcon_addr addr;
+				addr.addr = targetIp;
+				addr.port = targetPort;
+				addr.pass = rcon_password;
+				srcon_instance = new srcon(addr, SRCON_DEFAULT_TIMEOUT);
+
+				if (!srcon_instance->is_connected()) {
+					Warning("Failed to connect to server's RCON at %s:%d\n", targetIp.c_str(), targetPort);
+					delete srcon_instance;
+					srcon_instance = nullptr;
+					return;
+				}
+			}
+			catch (const std::exception& e) {
+				Warning("RCON connection error: %s\n", e.what());
+				if (srcon_instance) {
+					delete srcon_instance;
+					srcon_instance = nullptr;
+				}
+				return;
+			}
+		}
+	}
+
+	// Check if we have a connection
+	if (!srcon_instance) {
+		Warning("RCON not connected. Use 'rcon_address <ip[:port]>' to connect first.\n");
+		return;
+	}
+
+	if (!srcon_instance->is_connected()) {
+		Warning("RCON connection lost. Reconnecting...\n");
+
+		srcon_addr addr = srcon_instance->get_addr();
+		delete srcon_instance;
+		srcon_instance = nullptr;
+
+		try {
+			addr.pass = rcon_password;
+			srcon_instance = new srcon(addr, SRCON_DEFAULT_TIMEOUT);
+
+			if (!srcon_instance->is_connected()) {
+				Warning("Failed to reconnect to RCON server.\n");
+				delete srcon_instance;
+				srcon_instance = nullptr;
+				return;
+			}
+		}
+		catch (const std::exception& e) {
+			Warning("RCON reconnection error: %s\n", e.what());
+			if (srcon_instance) {
+				delete srcon_instance;
+				srcon_instance = nullptr;
+			}
+			return;
+		}
+	}
+
+	// Send command
+	try {
+		std::string response = srcon_instance->send(cmd);
+
+		if (response.empty()) {
+			Msg("RCON: Command sent (no response)\n");
+		}
+		else {
+			// Print response with proper formatting
+			Msg("RCON Response:\n%s\n", response.c_str());
+		}
+	}
+	catch (const std::exception& e) {
+		Warning("Error sending RCON command: %s\n", e.what());
+	}
+}
+
+
+// Add a status command
+void rcon_status(const CCommand& args) {
+	std::lock_guard<std::mutex> lock(g_rcon_mutex);
+
+	if (!srcon_instance) {
+		Msg("RCON Status: Not connected\n");
+		if (!g_last_rcon_address.empty()) {
+			Msg("Last address: %s:%d\n", g_last_rcon_address.c_str(), g_last_rcon_port);
+		}
+		return;
+	}
+
+	srcon_addr addr = srcon_instance->get_addr();
+	Msg("RCON Status: Connected\n");
+	Msg("Address: %s:%d\n", addr.addr.c_str(), addr.port);
+	Msg("Connected: %s\n", srcon_instance->is_connected() ? "Yes" : "No");
+
+	// Check if we're also connected to this server
+	std::string liveIp;
+	uint16_t livePort = 0;
+	if (TryGetCurrentServerNetAdr(liveIp, livePort)) {
+		if (liveIp == addr.addr && livePort == addr.port) {
+			Msg("Note: This is your current game server\n");
+		}
+		else {
+			Msg("Current game server: %s:%d\n", liveIp.c_str(), livePort);
+		}
 	}
 }
 
@@ -177,7 +426,11 @@ void sub_F50C0(ConVarR1* var) {
 		
 		if (strlen(new_pass) > 0) {
 			try {
-				srcon_instance->set_password(new_pass);
+				auto current = srcon_instance;
+				srcon_addr addr = srcon_instance->get_addr();
+				addr.pass = new_pass;
+				auto new_isnt = new srcon(addr);
+				srcon_instance = new_isnt;
 			}
 			catch (const std::exception& e) {
 				Msg("Failed to set RCON password: %s\n", e.what());
@@ -187,71 +440,7 @@ void sub_F50C0(ConVarR1* var) {
 			Msg("RCON password is empty. Please set it using 'rcon_password <password>'.\n");
 		}
 	}
-	else {
-		Msg("RCON instance not initialized. Use 'rcon_address' to set the address first.\n");
-	}
 }
-
-void rcon_concommand(const CCommand& args) {
-	if (args.ArgC() < 2) {
-		Msg("Usage: rcon_command <command>\n");
-		return;
-	}
-	if (!srcon_instance) {
-		Msg("RCON instance not initialized. Use 'rcon_address' to set the address first.\n");
-		return;
-	}
-
-	if (!srcon_instance->is_connected()) {
-		Msg("RCON instance is not connected. Please connect first using 'rcon_address'.\n");
-		return;
-	}
-	// if in game use the current server netchan ip for rcon
-	
-
-
-	std::string command = args[1];
-	for (int i = 2; i < args.ArgC(); ++i) {
-		command += " " + std::string(args[i]);
-	}
-	auto rcon_password = CCVar_FindVar(cvarinterface, "rcon_password")->m_Value.m_pszString;
-
-
-
-	if (strlen(rcon_password) == 0) {
-		Msg("RCON password is empty. Please set it using 'rcon_password <password>'.\n");
-		return;
-	}
-
-	// make sure we are authed with the server
-
-	try {
-		auto res = srcon_instance->set_password(rcon_password);
-	//	std::string auth_response = srcon_instance->send(rcon_password, SERVERDATA_AUTH);
-		if (!res) {
-			Msg("RCON authentication failed: %s\n","bad");
-			return;
-		}
-	}
-	catch (const std::exception& e) {
-		Msg("Error during RCON authentication: %s\n", e.what());
-		return;
-	}
-
-	try {
-		std::string response = srcon_instance->send(command);
-		if (!response.empty()) {
-			Msg("RCON Response: %s\n", response.c_str());
-		}
-		else {
-			Msg("No response from RCON server.\n");
-		}
-	}
-	catch (const std::exception& e) {
-		Msg("Error sending RCON command: %s\n", e.what());
-	}
-}
-
 #pragma intrinsic(_ReturnAddress)
 
 extern "C"
@@ -2244,7 +2433,7 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		InitAddons();
 
 		RegisterConCommand("rcon", rcon_concommand, "RCON command handler", FCVAR_SERVER_CAN_EXECUTE | FCVAR_CLIENTCMD_CAN_EXECUTE);
-		RegisterConCommand("rcon_address", rcon_adress, "RCON address handler", FCVAR_SERVER_CAN_EXECUTE | FCVAR_CLIENTCMD_CAN_EXECUTE);
+		RegisterConCommand("rcon_address", rcon_address, "RCON address handler", FCVAR_SERVER_CAN_EXECUTE | FCVAR_CLIENTCMD_CAN_EXECUTE);
 		MH_CreateHook((LPVOID)(engine_base + 0xF50C0), &sub_F50C0, reinterpret_cast<LPVOID*>(&sub_F50C0_o));
 	}
 
@@ -3084,12 +3273,12 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook(findcmdptr((uintptr_t)ret, "banid")->m_pCommandCallback, &CBanSystem::banid, NULL);
 	MH_CreateHook(findcmdptr((uintptr_t)ret, "kickid")->m_pCommandCallback, &CBanSystem::kickid, NULL);
 	MH_CreateHook(findcmdptr((uintptr_t)ret, "kick")->m_pCommandCallback, &CBanSystem::kick, NULL);
-	if (IsDedicatedServer()) {
+	/*if (IsDedicatedServer()) {
 		MH_CreateHook((LPVOID)(G_engine_ds + 0x6ABF0), &CBanSystem::RemoteAccess_GetUserBanList, NULL);
 	}
 	else {
 		MH_CreateHook((LPVOID)(G_engine + 0xF9BB0), &CBanSystem::RemoteAccess_GetUserBanList, NULL);
-	}
+	}*/
 
 	//MH_CreateHook((LPVOID)(engine_base_spec + 0x1C79A0), &sub_1801C79A0, reinterpret_cast<LPVOID*>(&sub_1801C79A0Original));
 	//
@@ -3413,7 +3602,6 @@ void __stdcall LoaderNotificationCallback(
 			RegisterConVar("delta_improved_colorblind", "0", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Allows certain other things to change color depending on your colorblind setting.");
 			MH_CreateHook((LPVOID)(G_localize + 0x3A40), &h_CLocalize__ReloadLocalizationFiles, (LPVOID*)&o_pCLocalize__ReloadLocalizationFiles);
 			MH_EnableHook(MH_ALL_HOOKS);
-			std::thread(DiscordThread).detach();
 		}
 		if (is_server) do_server(notification_data);
 		if (should_init_security_fixes && (is_client || is_server)) {
@@ -3421,6 +3609,5 @@ void __stdcall LoaderNotificationCallback(
 			should_init_security_fixes = false;
 		}
 	}
-
 }
 
