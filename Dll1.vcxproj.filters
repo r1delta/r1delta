@@ -309,6 +309,9 @@
     <ClInclude Include="localchatwriter.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="srcon.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">
@@ -441,6 +444,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="localchatwriter.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="srcon.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

@@ -460,7 +460,7 @@ SQInteger PollServerList(HSQUIRRELVM v) {
             sq_pushstring_lit(v, "port"); sq_pushinteger(0, v, s.port); sq_newslot(v, -3, 0);
             sq_pushstring_lit(v, "ip"); sq_pushstring_std(v, s.ip); sq_newslot(v, -3, 0);
             sq_pushstring_lit(v, "has_password"); sq_pushinteger(0, v, s.hasPassword ? 1 : 0); sq_newslot(v, -3, 0);
-			sq_pushstring_lit(v, "has_auth"); sq_pushinteger(0, v, s.has_auth ? 1 : 0); sq_newslot(v, -3, 0);
+      			sq_pushstring_lit(v, "has_auth"); sq_pushinteger(0, v, s.has_auth ? 1 : 0); sq_newslot(v, -3, 0);
             sq_pushstring_lit(v, "description"); sq_pushstring_std(v, s.description); sq_newslot(v, -3, 0);
             sq_pushstring_lit(v, "playlist"); sq_pushstring_std(v, s.playlist); sq_newslot(v, -3, 0);
             sq_pushstring_lit(v, "playlist_display_name"); sq_pushstring_std(v, s.playlist_display_name); sq_newslot(v, -3, 0);

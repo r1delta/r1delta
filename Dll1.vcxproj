@@ -236,6 +236,7 @@
     <ClInclude Include="security_fixes.hh" />
     <ClInclude Include="sendmoveclampfix.h" />
     <ClInclude Include="squirrel.h" />
+    <ClInclude Include="srcon.h" />
     <ClInclude Include="steam.h" />
     <ClInclude Include="surfacerender.h" />
     <ClInclude Include="sv_filter.h" />
@@ -326,6 +327,7 @@
     </ClCompile>
     <ClCompile Include="sendmoveclampfix.cpp" />
     <ClCompile Include="squirrel.cpp" />
+    <ClCompile Include="srcon.cpp" />
     <ClCompile Include="steam.cpp" />
     <ClCompile Include="surfacerender.cpp" />
     <ClCompile Include="TableDestroyer.cpp" />

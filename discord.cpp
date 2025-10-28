@@ -267,13 +267,13 @@ void DiscordThread() {
 		return;
 	}
 	is_discord_running = true;
-
 	core->ActivityManager().OnActivityJoin.Connect(HandleDiscordJoin);
 	core->ActivityManager().OnActivityJoinRequest.Connect(HandleDiscordJoinRequest);
 	core->ActivityManager().OnActivityInvite.Connect(HandleDiscordInvite);
 	core->UserManager().OnCurrentUserUpdate.Connect(HandleDiscordUserReady);
 
 	Msg("Discord: Core created successfully\n");
+
 	
 	while (true) {
 		core->RunCallbacks();
