@@ -1988,6 +1988,7 @@ void Host_InitHook(bool a1) {
 		std::srand(std::time(0));
 		SetConvarStringOriginal(OriginalCCVar_FindVar(cvarinterface, "platform_user_id"), std::to_string(std::rand()).c_str());
 	}
+	user_id->m_nFlags |= FCVAR_DEVELOPMENTONLY;
 
 	MCPServer::InstallEchoCommandFix();
 
