@@ -60,6 +60,7 @@
 #include "model_info.h"
 //#include "thirdparty/silver-bun/silver-bun.h"
 #include "load.h"
+#include "logging.h"
 
 #pragma comment(lib, "Dbghelp.lib")
 
@@ -301,6 +302,9 @@ public:
 	virtual void whatever() = 0;
 	virtual void Init() = 0;
 };
+
+
+
 CGlobalVarsServer2015* pGlobalVarsServer;
 char __fastcall CServerGameDLL__DLLInit(void* thisptr, CreateInterfaceFn appSystemFactory,
 	CreateInterfaceFn physicsFactory, CreateInterfaceFn fileSystemFactory,
@@ -360,6 +364,7 @@ char __fastcall CServerGameDLL__DLLInit(void* thisptr, CreateInterfaceFn appSyst
 	staticclasssystem->Init();
 	auto ret = CServerGameDLL__DLLInitOriginal(thisptr, fnptr, fnptr, fnptr, pGlobals);
 	InitializeRecentHostVars();
+	OriginalCCVar_FindVar(cvarinterface, "sv_pausable_dev")->m_nFlags &= ~(FCVAR_HIDDEN | FCVAR_DEVELOPMENTONLY);
 	return ret;
 }
 

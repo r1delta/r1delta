@@ -42,6 +42,7 @@
 #include "discord.h"
 #include "r1d_version.h"
 #include "client.h"
+#include "surfacerender.h"
 
 #pragma intrinsic(_ReturnAddress)
 
@@ -143,7 +144,9 @@ sq_getinstanceup_t sq_getinstanceup;
 sq_newarray_t sq_newarray;
 sq_arrayappend_t sq_arrayappend;
 sq_throwerror_t sq_throwerror;
+sq_removetwo_t sq_removetwo;
 RunCallback_t RunCallback;
+sq_settop_t sq_settop;
 CSquirrelVM__RegisterGlobalConstantInt_t CSquirrelVM__RegisterGlobalConstantInt;
 CSquirrelVM__GetEntityFromInstance_t CSquirrelVM__GetEntityFromInstance;
 sq_GetEntityConstant_CBaseEntity_t sq_GetEntityConstant_CBaseEntity; // CLIENT
@@ -323,7 +326,7 @@ int UpdateAddons(HSQUIRRELVM v, SQInteger index, SQBool enabled) {
 	snprintf(szAddOnListPath, 260, "%s%s", szModPath, "addonlist.txt");
 	KeyValues* kv = new KeyValues("AddonList");
 	kv_load_file_addr(kv, base_file_system, szAddOnListPath, nullptr, 0);
-	auto vm = GetServerVMPtr();
+	auto vm = GetUIVMPtr();
 	std::cout << kv->GetString() << std::endl;
 	int i = 0; // Declare the iterator before the loop
 	for (KeyValues* subkey = kv->GetFirstValue(); subkey; subkey = subkey->GetNextValue(), ++i) {
@@ -398,7 +401,7 @@ int GetMods(HSQUIRRELVM v) {
 	char szModPath[260];
 	char szAddOnListPath[260];
 	char szAddonDirName[64];
-	auto vm = GetServerVMPtr();
+	auto vm = GetUIVMPtr();
 	auto ret = func(file_system, "MOD", 0, szModPath, 260);
 	snprintf(szAddOnListPath, 260, "%s%s", szModPath, "addonlist.txt");
 	KeyValues* kv = new KeyValues("AddonList");
@@ -456,7 +459,7 @@ int GetMods(HSQUIRRELVM v) {
 			wcstombs(description_str, description, 1024);
 			wcstombs(version_str, version, 260);
 			wcstombs(localization_str, localization, 260);
-			if (localization_str != "") {
+			if (localization_str[0] != '\0') {
 				// don't add dup;aicates 
 				//if it does not exist add it
 				auto it = std::find(modLocalization_files.begin(), modLocalization_files.end(), localization_str);
@@ -619,6 +622,18 @@ SQInteger Script_ServerGetPlayerUserID(HSQUIRRELVM v) {
 	static auto get_player_user_id = (GetPlayerNetInfo_t)(g_CVEngineServer->GetPlayerUserId);
 	auto user_id = get_player_user_id(g_CVEngineServerInterface, edict);
 	sq_pushinteger(serverVm,v, user_id);
+	return 1;
+}
+
+SQInteger Script_ServerGetPlayerPlatformUserID(HSQUIRRELVM v) {
+	void* player = sq_getentity(v, 2);
+	if (!player)
+	{
+		return sq_throwerror(v, "player is null");
+	}
+	auto serverVm = GetServerVMPtr();
+	auto uid = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(player) + 0x1448);
+	sq_pushstring(v, std::to_string(uid).c_str(), -1);
 	return 1;
 }
 
@@ -804,10 +819,12 @@ void localilze_string(const char* str, char* localized_str, int size)
 }
 
 int GetR1DVersion(HSQUIRRELVM v) {
-	const char* newVersionString = "R1Delta " R1D_VERSION;
+	const char* newVersionString = R1D_VERSION;
 	sq_pushstring(v, newVersionString, -1);
 	return 1;
 }
+
+
 
 // please god someone change this to pushconst
 int GetMinimumR1DVersion(HSQUIRRELVM v)
@@ -871,6 +888,7 @@ void SendChatMsg(CRecipientFilter* filter, int fromIndex, const char* msg, bool 
 	EndMessage();
 }
 
+
 int SendChatWrapper(HSQUIRRELVM v) {
 	// args: this, entity player / bool = true (broadcast) / array of entities for multiple recipients, int fromPlayerIndex, string text, bool isTeam = false, bool isDead = false
 
@@ -929,6 +947,90 @@ int SendChatWrapper(HSQUIRRELVM v) {
 	DestroyFilter(&filter, 0);
 	return 0;
 }
+
+// --- raw one-packet send ---
+static inline void SendShowMenuRaw(void* filter, uint16_t keysMask, int secondsToStayOpen, bool needMore, const char* text)
+{
+	static auto MessageWriteBits = reinterpret_cast<void (*)(int64_t, int, int)>(G_server + 0x142FA0);
+	static auto MessageWriteStr = reinterpret_cast<void (*)(int64_t, const char*)>(G_server + 0x663AF0);
+	static int64_t* gActiveMsg = reinterpret_cast<int64_t*>(G_server + 0xC31058);
+
+	*gActiveMsg = UserMsgBegin_Wrapper((CRecipientFilter*)filter, "ShowMenu");
+	MessageWriteBits(*gActiveMsg, (int)(keysMask & 0xFFFF), 16);
+	MessageWriteBits(*gActiveMsg, (int)(secondsToStayOpen & 0xFF), 8);
+	MessageWriteBits(*gActiveMsg, needMore ? 1 : 0, 8);
+	MessageWriteStr(*gActiveMsg, text ? text : "");
+	EndMessage();
+}
+
+// --- auto-chunk (splits on '\n' where possible) ---
+static inline void SendShowMenuChunked(void* filter, uint16_t keysMask, int secondsToStayOpen, const char* fullText, size_t maxBytesPerChunk = 190)
+{
+	if (!fullText || !*fullText) { SendShowMenuRaw(filter, keysMask, secondsToStayOpen, /*needMore=*/false, ""); return; }
+
+	const char* p = fullText; const char* end = fullText + std::strlen(fullText);
+	while (p < end) {
+		const char* start = p; const char* lastNL = nullptr; size_t taken = 0;
+		while (p < end && taken < maxBytesPerChunk) { if (*p == '\n') lastNL = p; ++p; ++taken; }
+		const char* chunkEnd = (p >= end) ? end : (lastNL ? lastNL + 1 : start + taken);
+		if (lastNL && chunkEnd == lastNL + 1) p = chunkEnd; // break after newline
+		std::string chunk(start, chunkEnd);
+		SendShowMenuRaw(filter, keysMask, secondsToStayOpen, /*needMore=*/(chunkEnd < end), chunk.c_str());
+	}
+}
+
+// --- one public function: SendShowMenu(recips, text, keysMask, seconds) ---
+int SendShowMenu(HSQUIRRELVM v)
+{
+	// Expect: this + 4 args
+	if (sq_gettop(GetServerVMPtr(), v) != 5) return sq_throwerror(v, "usage: SendShowMenu(recips, text, keysMask, secondsToStayOpen)");
+
+	const SQChar* text = nullptr; SQInteger mask = 0, secs = -1;
+	if (SQ_FAILED(sq_getstring(v, 3, &text))) return sq_throwerror(v, "text required");
+	if (SQ_FAILED(sq_getinteger(GetServerVMPtr(), v, 4, &mask))) return sq_throwerror(v, "keysMask required");
+	if (SQ_FAILED(sq_getinteger(GetServerVMPtr(), v, 5, &secs))) return sq_throwerror(v, "secondsToStayOpen required");
+
+	// Build filter ON THIS STACK FRAME
+	static auto AddAll = reinterpret_cast<void(*)(void*)>(G_server + 0x1E7BA0);
+	static auto AddRec = reinterpret_cast<void(*)(void*, void*)>(G_server + 0x1E7CB0);
+	static auto DestroyF = reinterpret_cast<void(*)(void*, bool)>(G_server + 0x1E78D0);
+
+	CRecipientFilter filter;                 // <— real object, correct size/layout
+	ConstructCRecipientFilter(&filter);
+
+	SQObjectType t = sq_gettype(v, 2);
+	if (t == OT_BOOL) {
+		SQBool all = SQFalse; sq_getbool(nullptr, v, 2, &all);
+		if (all) AddAll(&filter);
+	}
+	else if (t == OT_INSTANCE) {
+		void* ent = sq_getentity(v, 2);
+		if (!ent) { DestroyF(&filter, 0); return sq_throwerror(v, "instance is not a valid entity"); }
+		AddRec(&filter, ent);                // expects CBaseEntity*
+	}
+	else if (t == OT_ARRAY) {
+		sq_push(v, 2); sq_pushnull(v);
+		while (SQ_SUCCEEDED(sq_next(v, -2))) {
+			if (sq_gettype(v, -1) != OT_INSTANCE) { sq_pop(v, 4); DestroyF(&filter, 0); return sq_throwerror(v, "array element is not an entity"); }
+			void* ent = sq_getentity(v, -1);
+			if (!ent) { sq_pop(v, 4); DestroyF(&filter, 0); return sq_throwerror(v, "array element is not a valid entity"); }
+			AddRec(&filter, ent);
+			sq_pop(v, 2);
+		}
+		sq_pop(v, 2);
+	}
+	else {
+		DestroyF(&filter, 0);
+		return sq_throwerror(v, "arg1 must be entity, array<entity>, or bool(true=all)");
+	}
+
+	// Send (auto-chunked)
+	SendShowMenuChunked(&filter, (uint16_t)(mask & 0xFFFF), (int)secs, text);
+
+	DestroyF(&filter, 0);
+	return 0;
+}
+
 
 void RunAutorunScripts(R1SquirrelVM* r1sqvm, const char* prefix) {
 	auto FindFirst = (const char*(__fastcall*)(uintptr_t thisptr, const char* searchString, uintptr_t* handle))(g_CVFileSystem->FindFirst);
@@ -1114,6 +1216,23 @@ int SendMenu(HSQUIRRELVM v) {
 	return 0;
 }
 
+using SQFinalize_t = __int64(__fastcall*)(void* self);
+static SQFinalize_t  oSQFinalize;
+
+__int64 __fastcall SQFinalize_Seatbelt(void* self) {
+    // _class is at +56 (0x38)
+    void* klass = *reinterpret_cast<void**>((char*)self + 56);
+    if (!klass) {
+        static std::atomic<uint64_t> hits{0};
+        if ((hits.fetch_add(1, std::memory_order_relaxed) & 0xFF) == 0) {
+            Warning("[sq] Seatbelt: Finalize on %p with null _class — skipping (count=%llu). THIS SHOULD NEVER HAPPEN. If you see this, ping @r3muxd on Discord immediately!\n", self, hits.load());
+        }
+        return 0; // treat as already-finalized
+    }
+
+    return oSQFinalize(self);
+}
+
 // Function to initialize all SQVM functions
 bool GetSQVMFuncs() {
 	static bool initialized = false;
@@ -1130,6 +1249,8 @@ bool GetSQVMFuncs() {
 			Msg("Failed to hook CHostState__State_GameShutdown\n");
 	}
 
+
+	MH_CreateHook((LPVOID)(G_launcher + 0x4D6D0), &SQFinalize_Seatbelt, (LPVOID*)&oSQFinalize);
 
 	uintptr_t baseAddress = G_vscript;
 	if (G_server) {
@@ -1176,6 +1297,8 @@ bool GetSQVMFuncs() {
 	sq_newarray = reinterpret_cast<sq_newarray_t>(baseAddress + (IsDedicatedServer() ? 0x15090 : 0x14FB0));
 	sq_arrayappend = reinterpret_cast<sq_arrayappend_t>(baseAddress + (IsDedicatedServer() ? 0x15380 : 0x152A0));
 	sq_throwerror = reinterpret_cast<sq_throwerror_t>(baseAddress + (IsDedicatedServer() ? 0x18A10 : 0x18930));
+	sq_settop = reinterpret_cast<sq_settop_t>(baseAddress + (IsDedicatedServer() ? 0x171E0 : 0x017100));
+	sq_removetwo = reinterpret_cast<sq_removetwo_t>(baseAddress + (IsDedicatedServer() ? 0x2BBF0 : 0x2bb10));
 	RunCallback = reinterpret_cast<RunCallback_t>(baseAddress + (IsDedicatedServer() ? 0x89C0 : 0x89A0));
 	CSquirrelVM__RegisterGlobalConstantInt = reinterpret_cast<CSquirrelVM__RegisterGlobalConstantInt_t>(baseAddress + (IsDedicatedServer() ? 0xA6A0 : 0xA680));
 	CSquirrelVM__GetEntityFromInstance = reinterpret_cast<CSquirrelVM__GetEntityFromInstance_t>(baseAddress + (IsDedicatedServer() ? 0x9950 : 0x9930));
@@ -1221,7 +1344,30 @@ bool GetSQVMFuncs() {
 	);
 
 	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER,
+		"SendShowMenu",
+		(SQFUNCTION)SendShowMenu,
+		".Isii",  // this, recipients, string, int keysMask, int seconds
+		5,        // IMPORTANT: expect 5 total (includes `this`)
+		"void",
+		"entity|array|bool recipients, string text, int keysMask, int secondsToStayOpen",
+		"Send ShowMenu (CS:S/EP2) with automatic chunking and full keys mask."
+	);
+
+
+	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_CLIENT,
+		"Localize",
+		(SQFUNCTION)Script_Localize,
+		".s", // String
+		2,      // Expects 2 parameters
+		"string",    // Returns a string
+		"string locKey",
+		"Localize string"
+	);
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER,
 		"Localize",
 		(SQFUNCTION)Script_Localize,
 		".s", // String
@@ -1287,6 +1433,17 @@ bool GetSQVMFuncs() {
 	);
 
 	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER,
+		"GetPlayerPlatformUserId",
+		(SQFUNCTION)Script_ServerGetPlayerPlatformUserID,
+		".I", // String
+		2,
+		"string",
+		"",
+		"Get player platform user id"
+	);
+
+	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_CLIENT,
 		"SendDiscordClient",
 		(SQFUNCTION)SendDiscordClient,
@@ -1297,6 +1454,16 @@ bool GetSQVMFuncs() {
 		"Send discord client"
 	);
 
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_CLIENT,
+		"AddDamageNumber",
+		(SQFUNCTION)Script_AddDamageNumber,
+		".ffffbi", // . this, f float, f float, f float, f float, b bool
+		7,
+		"void",
+		"float damage, float x, float y, float z, bool isCritical",
+		"Adds a floating damage number to the HUD."
+	);
 
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_UI,
@@ -1410,6 +1577,7 @@ bool GetSQVMFuncs() {
 		"entity player, int xp",
 		"Add XP"
 	);
+
 
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_SERVER,
@@ -1705,6 +1873,12 @@ __forceinline bool serverRunning(void* vmInstance) {
 	if (IsDedicatedServer())
 		return true;
 
+	// ... but, if we're not running the listen server, then we're not.
+	// TODO(dr3murr): do we need this if we check !realvmptr? idk, most loads will be coming from mp_lobby listen server,
+	// and i don't know if we clear the pointer ever from there...	
+	if (*(int*)(G_engine + 0x2966168) == 0)
+		return false;
+	
 	// Check early-out conditions.
 	if (isServerScriptVM ||
 		vmInstance == realvmptr ||
@@ -1982,6 +2156,8 @@ using SQCallFn = SQRESULT(*)(HSQUIRRELVM, SQInteger, SQBool, SQBool);
 
 void run_script(const CCommand& args, R1SquirrelVM* (*GetVMPtr)())
 {
+	static auto fatal_script_errors = OriginalCCVar_FindVar(cvarinterface, "fatal_script_errors");
+	auto bak = fatal_script_errors->m_pParent->m_Value.m_nValue;
 	auto launcher = G_launcher;
 	SQCompileBufferFn sq_compilebuffer = reinterpret_cast<SQCompileBufferFn>(launcher + (IsDedicatedServer() ? 0x1A6C0 : 0x1A5E0));
 	BaseGetRootTableFn base_getroottable = reinterpret_cast<BaseGetRootTableFn>(launcher + (IsDedicatedServer() ? 0x56520 : 0x56440));
@@ -1993,6 +2169,7 @@ void run_script(const CCommand& args, R1SquirrelVM* (*GetVMPtr)())
 		Warning("Can't run script code on a VM when that VM is not present.");
 		return;
 	}
+	fatal_script_errors->m_pParent->m_Value.m_nValue = 0;
 
 	SQRESULT compileRes = sq_compilebuffer(vm->sqvm, code.c_str(), static_cast<SQInteger>(code.length()), "console", 1);
 	if (SQ_SUCCEEDED(compileRes))
@@ -2000,6 +2177,7 @@ void run_script(const CCommand& args, R1SquirrelVM* (*GetVMPtr)())
 		base_getroottable(vm->sqvm);
 		SQRESULT callRes = sq_call(vm->sqvm, 1, SQFalse, SQTrue);
 	}
+	fatal_script_errors->m_pParent->m_Value.m_nValue = bak;
 }
 
 void script_cmd(const CCommand& args)
@@ -2026,3 +2204,4 @@ void script_ui_cmd(const CCommand& args)
 //	//	Warning("sq_throwerror: %s\n", a2);
 //	//return sq_throwerror(a1, a2);
 //}
+

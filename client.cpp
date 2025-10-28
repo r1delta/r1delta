@@ -36,6 +36,7 @@ void sub_18027F2C0(__int64 a1, const char *a2, void *a3)
     {
         sub_18027F2C0Original(a1, "TextMsg", TextMsg);
     }
+    OriginalCCVar_FindCommand(cvarinterface, "find")->m_pCommandCallback = (FnCommandCallback_t)Find;
 
     sub_18027F2C0Original(a1, a2, a3);
 }
@@ -121,6 +122,16 @@ struct CGameUI
 };
 typedef void* (*CGameUI__StartProgressBarType)(CGameUI* thispt);
 CGameUI__StartProgressBarType CGameUI__StartProgressBarOriginal;
+
+typedef vgui::Panel* (*vgui__PHandle__Get_Type)(void* a1);
+vgui__PHandle__Get_Type vgui__PHandle__Get_Original;
+vgui::Panel* vgui__PHandle__Get_Hook(void* a1)
+{
+    if ((uintptr_t)a1 < 0x500)
+        return 0;
+    return vgui__PHandle__Get_Original(a1);
+}
+
 void CGameUI__StartProgressBar(CGameUI *thisptr)
 {
     static ConVarR1 *enable = OriginalCCVar_FindVar(cvarinterface, "delta_useLegacyProgressBar");
@@ -484,15 +495,123 @@ __int64 __fastcall CHudChat__FormatAndDisplayMessage_Hooked(
     std::string finalMessageMB = WideToMultiByte(finalMessageStringW, CP_UTF8);
     Msg("*** CHAT *** %s\n", finalMessageMB.c_str());
 
-    // return oCHudChat__FormatAndDisplayMessage(thisptr, message, senderId, teamChat, deadChat);
     return 0;
 }
-char (*oMsgFunc__SayText)(__int64 a1);
-char __fastcall MsgFunc__SayText(__int64 a1)
+char (*oMsgFunc__SayText)(bf_read* a1);
+
+typedef bool(__fastcall* tReadStringFromBuffer)(bf_read* pBuffer, char* dest, int maxLength, bool* bOverflow, void* unknown);
+
+typedef bool(__fastcall* tShouldFilterMessage)(int playerIndex);
+
+typedef char(__fastcall* tAddGameLine)(CHudChat* pThis, const char* text, int playerSlot, bool isTeamMsg, bool isDeadMsg);
+
+char __fastcall MsgFunc__SayText(bf_read* pBuffer)
 {
-    recurse = 0;
-    return oMsgFunc__SayText(a1);
+	recurse = 0; 
+    static auto dword_99DEE0 = (uint32_t*)(G_client + 0x99DEE0);
+    static auto qword_F808C8_ptr = (CHudChat**)(G_client + 0xF808C8);
+    static auto ReadStringFunc = (tReadStringFromBuffer)(G_client + 0x66AE20);
+    static auto FilterMessageFunc = (tShouldFilterMessage)(G_client + 0x444490);
+    static auto AddGameLineFunc = (tAddGameLine)(G_client + 0x17D440);
+
+
+    unsigned int playerSlot;
+    int bitsLeft = pBuffer->m_nBitsAvail;
+    if (bitsLeft >= 8)
+    {
+        playerSlot = static_cast<uint8_t>(pBuffer->m_nInBufWord);
+        pBuffer->m_nBitsAvail -= 8;
+
+        if (pBuffer->m_nBitsAvail == 0) 
+        {
+            pBuffer->m_nBitsAvail = 32;
+            if (pBuffer->m_pDataIn >= pBuffer->m_pBufferEnd) {
+                pBuffer->m_bOverflow = true;
+                pBuffer->m_nInBufWord = 0;
+            }
+            else {
+                pBuffer->m_nInBufWord = *pBuffer->m_pDataIn;
+            }
+            pBuffer->m_pDataIn++;
+        }
+        else
+        {
+            pBuffer->m_nInBufWord >>= 8;
+        }
+    }
+    else 
+    {
+        uint32_t lowBits = pBuffer->m_nInBufWord;
+        int bitsFromNext = 8 - bitsLeft;
+
+        if (pBuffer->m_pDataIn >= pBuffer->m_pBufferEnd) {
+            pBuffer->m_bOverflow = true;
+        }
+
+        if (pBuffer->m_bOverflow) {
+            playerSlot = 0;
+        }
+        else {
+            uint32_t nextWord = *pBuffer->m_pDataIn;
+            pBuffer->m_pDataIn++;
+
+            uint32_t highBits = (nextWord & dword_99DEE0[bitsFromNext]) << bitsLeft;
+            playerSlot = highBits | lowBits;
+
+            pBuffer->m_nInBufWord = nextWord >> bitsFromNext;
+            pBuffer->m_nBitsAvail = 32 - bitsFromNext;
+        }
+    }
+
+    
+	char* str = (char*)GlobalAllocator()->mi_malloc(256, TAG_GAME, HEAP_GAME);
+    if (!ReadStringFunc(pBuffer, str, 256, nullptr, nullptr)) {
+        return 1;
+    }
+
+   
+    bool isTeam = (pBuffer->m_nInBufWord & 1) != 0;
+    if (--pBuffer->m_nBitsAvail == 0) {
+        pBuffer->m_nBitsAvail = 32;
+        if (pBuffer->m_pDataIn >= pBuffer->m_pBufferEnd) {
+            pBuffer->m_bOverflow = true;
+            pBuffer->m_nInBufWord = 0;
+        }
+        else {
+            pBuffer->m_nInBufWord = *pBuffer->m_pDataIn;
+        }
+        pBuffer->m_pDataIn++;
+    }
+    else {
+        pBuffer->m_nInBufWord >>= 1;
+    }
+
+    bool isDead = (pBuffer->m_nInBufWord & 1) != 0;
+    if (--pBuffer->m_nBitsAvail == 0) {
+        pBuffer->m_nBitsAvail = 32;
+        if (pBuffer->m_pDataIn >= pBuffer->m_pBufferEnd) {
+            pBuffer->m_bOverflow = true;
+            pBuffer->m_nInBufWord = 0;
+        }
+        else {
+            pBuffer->m_nInBufWord = *pBuffer->m_pDataIn;
+        }
+        pBuffer->m_pDataIn++;
+    }
+    else {
+        pBuffer->m_nInBufWord >>= 1;
+    }
+
+   
+    if (!FilterMessageFunc(playerSlot - 1)) {
+        for (CHudChat* i = *qword_F808C8_ptr; i; i = i->next) {
+            AddGameLineFunc(i, str, playerSlot, isTeam, isDead);
+        }
+    }
+    return 1;
 }
+
+
 
 // from bme
 typedef _QWORD *(__fastcall *sub_18017E140_type)(_QWORD *, __int64, char *);
@@ -543,6 +662,11 @@ void WeaponSprayFunction1(__int64 a1, __int64 a2, float a3, __int64 a4, _DWORD *
 {
     oWeaponSprayFunction1(a1, a2, a3, a4, a5, a6, a7, a8);
     // 2) grab zoom scale
+    auto var = CCVar_FindVar(cvarinterface, "delta_enable_ads_sway");
+    if(var && var->m_Value.m_nValue == 1)
+    {
+        return;
+	}
     float zoom = GetZoomFrac();
     // 3) scale the three final sway components
     //    [pitch] = float at addr (a1 + 12)
@@ -604,6 +728,11 @@ void InitClient()
 {
     auto client = G_client;
     auto engine = G_engine;
+
+    // Initialize HUD function pointers
+    GetHud = (GetHudType)(client + 0x173390);
+    CHudFindElement = (CHudFindElementType)(client + 0x175850);
+    CHudMenuSelectMenuItem = (CHudMenuSelectMenuItemType)(client + 0x1B3850);
     MH_CreateHook((LPVOID)(client + 0x21FE50), &PredictionErrorFn, reinterpret_cast<LPVOID *>(NULL));
     // MH_CreateHook((LPVOID)(client + 0x029840), &C_BaseEntity__VPhysicsInitNormal, reinterpret_cast<LPVOID*>(NULL));
     MH_CreateHook((LPVOID)(client + 0x27F2C0), &sub_18027F2C0, reinterpret_cast<LPVOID *>(&sub_18027F2C0Original));
@@ -629,6 +758,7 @@ void InitClient()
     MH_CreateHook((LPVOID)(client + 0x47F1E0), &WeaponSprayFunction1, reinterpret_cast<LPVOID *>(&oWeaponSprayFunction1));
     // MH_CreateHook((LPVOID)(client + 0x47FED0), &WeaponSprayFunction2, reinterpret_cast<LPVOID*>(&oWeaponSprayFunction2));
     MH_CreateHook((LPVOID)(client + 0x3C5830), &LoadingProgress__SetupControlStates, reinterpret_cast<LPVOID *>(&oLoadingProgress__SetupControlStates));
+    MH_CreateHook((LPVOID)(client + 0x689A70), &vgui__PHandle__Get_Hook, reinterpret_cast<LPVOID *>(&vgui__PHandle__Get_Original));
 
     if (IsNoOrigin())
         MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("ws2_32.dll"), "getaddrinfo"), &hookedGetAddrInfo, reinterpret_cast<LPVOID *>(&originalGetAddrInfo));

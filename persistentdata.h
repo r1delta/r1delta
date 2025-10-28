@@ -51,3 +51,13 @@ extern CBaseClientState__InternalProcessStringCmdType CBaseClientState__Internal
 char CBaseClientState__InternalProcessStringCmd(void* thisptr, void* msg, bool bIsHLTV);
 char ExecuteConfigFile(int configType);
 void PData_OnConsoleCommand(const char* str);
+class PDataValidator;
+class PDef {
+private:
+	static std::unique_ptr<PDataValidator> s_validator;
+	static std::once_flag s_initFlag;
+public:
+	static void InitValidator();
+	static bool IsValidKeyAndValue(const std::string& key, const std::string& value);
+	static std::string ResolveKeyIndices(const std::string_view& key);
+};

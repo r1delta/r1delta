@@ -52,6 +52,7 @@
 #include "factory.h"
 #include "logging.h"
 #include "load.h"
+#include "mcp_server.h"
 void      (*OriginalCCVar_RegisterConCommand)(uintptr_t thisptr, ConCommandBaseR1* pCommandBase);
 void      (*OriginalCCVar_UnregisterConCommand)(uintptr_t thisptr, ConCommandBaseR1* pCommandBase);
 ConCommandBaseR1* (*OriginalCCVar_FindCommandBase)(uintptr_t thisptr, const char* name);
@@ -68,6 +69,11 @@ void      (*OriginalCCVar_QueueMaterialThreadSetValue2)(uintptr_t thisptr, ConVa
 void      (*OriginalCCVar_QueueMaterialThreadSetValue3)(uintptr_t thisptr, ConVarR1* pConVar, float flValue);
 uintptr_t cvarinterface;
 std::unordered_map<std::string, WVar*, HashStrings, std::equal_to<>> ccBaseMap;
+
+// HUD function pointers
+GetHudType GetHud;
+CHudFindElementType CHudFindElement;
+CHudMenuSelectMenuItemType CHudMenuSelectMenuItem;
 
 
 bool ConCommandBaseR1OIsCVar(ConCommandBaseR1O* ptr) {
@@ -454,7 +460,7 @@ void Con_ColorPrintf(const SourceColor* clr, char* fmt, ...)
 	if (!((*staticGameConsole)->m_pConsole->m_pConsolePanel)) return;
 
 	ZoneScoped;
-	
+
 	// Create a buffer for the formatted message
 	char pMessage[1024];
 
@@ -469,6 +475,9 @@ void Con_ColorPrintf(const SourceColor* clr, char* fmt, ...)
 	va_end(args);
 
 	ZoneText(pMessage, len);
+
+	// Capture for MCP server
+	MCPServer::Server::GetInstance().CaptureConsoleOutput(pMessage);
 
 	// Print the message with color
 	(*staticGameConsole)->m_pConsole->m_pConsolePanel->ColorPrint(*clr, pMessage);
@@ -490,5 +499,134 @@ void ToggleConsoleCommand(const CCommand& args)
 	else
 	{
 		(*staticGameConsole)->Hide();
+	}
+}
+
+void ClearConsoleCommand(const CCommand& args)
+{
+	if (!(*staticGameConsole)->m_bInitialized)
+	{
+		return;
+	}
+	(*staticGameConsole)->Clear();
+}
+
+void Slot1Command(const CCommand& args)
+{
+	if (!GetHud) return;
+	void* hud = GetHud(0);
+	if (!hud) return;
+
+	__int64 hudMenu = CHudFindElement((__int64)hud, (__int64)"CHudMenu");
+	if (hudMenu) {
+		CHudMenuSelectMenuItem(hudMenu, 1);
+	}
+}
+
+void Slot2Command(const CCommand& args)
+{
+	if (!GetHud) return;
+	void* hud = GetHud(0);
+	if (!hud) return;
+
+	__int64 hudMenu = CHudFindElement((__int64)hud, (__int64)"CHudMenu");
+	if (hudMenu) {
+		CHudMenuSelectMenuItem(hudMenu, 2);
+	}
+}
+
+void Slot3Command(const CCommand& args)
+{
+	if (!GetHud) return;
+	void* hud = GetHud(0);
+	if (!hud) return;
+
+	__int64 hudMenu = CHudFindElement((__int64)hud, (__int64)"CHudMenu");
+	if (hudMenu) {
+		CHudMenuSelectMenuItem(hudMenu, 3);
+	}
+}
+
+void Slot4Command(const CCommand& args)
+{
+	if (!GetHud) return;
+	void* hud = GetHud(0);
+	if (!hud) return;
+
+	__int64 hudMenu = CHudFindElement((__int64)hud, (__int64)"CHudMenu");
+	if (hudMenu) {
+		CHudMenuSelectMenuItem(hudMenu, 4);
+	}
+}
+
+void Slot5Command(const CCommand& args)
+{
+	if (!GetHud) return;
+	void* hud = GetHud(0);
+	if (!hud) return;
+
+	__int64 hudMenu = CHudFindElement((__int64)hud, (__int64)"CHudMenu");
+	if (hudMenu) {
+		CHudMenuSelectMenuItem(hudMenu, 5);
+	}
+}
+
+void Slot6Command(const CCommand& args)
+{
+	if (!GetHud) return;
+	void* hud = GetHud(0);
+	if (!hud) return;
+
+	__int64 hudMenu = CHudFindElement((__int64)hud, (__int64)"CHudMenu");
+	if (hudMenu) {
+		CHudMenuSelectMenuItem(hudMenu, 6);
+	}
+}
+
+void Slot7Command(const CCommand& args)
+{
+	if (!GetHud) return;
+	void* hud = GetHud(0);
+	if (!hud) return;
+
+	__int64 hudMenu = CHudFindElement((__int64)hud, (__int64)"CHudMenu");
+	if (hudMenu) {
+		CHudMenuSelectMenuItem(hudMenu, 7);
+	}
+}
+
+void Slot8Command(const CCommand& args)
+{
+	if (!GetHud) return;
+	void* hud = GetHud(0);
+	if (!hud) return;
+
+	__int64 hudMenu = CHudFindElement((__int64)hud, (__int64)"CHudMenu");
+	if (hudMenu) {
+		CHudMenuSelectMenuItem(hudMenu, 8);
+	}
+}
+
+void Slot9Command(const CCommand& args)
+{
+	if (!GetHud) return;
+	void* hud = GetHud(0);
+	if (!hud) return;
+
+	__int64 hudMenu = CHudFindElement((__int64)hud, (__int64)"CHudMenu");
+	if (hudMenu) {
+		CHudMenuSelectMenuItem(hudMenu, 9);
+	}
+}
+
+void Slot10Command(const CCommand& args)
+{
+	if (!GetHud) return;
+	void* hud = GetHud(0);
+	if (!hud) return;
+
+	__int64 hudMenu = CHudFindElement((__int64)hud, (__int64)"CHudMenu");
+	if (hudMenu) {
+		CHudMenuSelectMenuItem(hudMenu, 10);
 	}
 }

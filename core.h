@@ -80,10 +80,14 @@
 #define AlignPow2(p, a) (((p)+(a)-1)&(~((a)-1)))
 #if BUILD_DEBUG
 // NOTE(mrsteyk): force semicolon at the end
+//#define R1DAssert(e) (e)
 #define R1DAssert(e) do { if (!(e)) __debugbreak(); } while(0)
 #else
 #define R1DAssert(e) (e)
 #endif
+
+#define Stringify_(S) #S
+#define Stringify(S) Stringify_(S)
 
 extern uint64_t g_PerformanceFrequency;
 

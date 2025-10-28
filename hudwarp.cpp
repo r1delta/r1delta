@@ -1,13 +1,15 @@
 #include "hudwarp.h"
+#include "load.h"
 #include <d3dcompiler.h>
 #pragma comment(lib, "d3dcompiler.lib")
+
 // Ported from TFORevive by Barnaby
 
 bool CompileShader(const char* szShader, const char* szEntrypoint, const char* szTarget, ID3D10Blob** pBlob)
 {
 	ID3D10Blob* pErrorBlob = nullptr;
 
-	auto hr = D3DCompile(szShader, strlen(szShader), 0, nullptr, nullptr, szEntrypoint, szTarget, D3DCOMPILE_ENABLE_STRICTNESS, 0, pBlob, &pErrorBlob);
+	auto hr = D3DCompile(szShader, strlen(szShader), 0, nullptr, nullptr, szEntrypoint, szTarget, D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, pBlob, &pErrorBlob);
 	if (FAILED(hr))
 	{
 		if (pErrorBlob)
@@ -65,9 +67,9 @@ HudwarpProcess::HudwarpProcess(ID3D11Device* pDevice, ID3D11DeviceContext** ppID
 			return;
 	}
 
-	static DWORD64 vguimatsurfacedllBaseAddress = (DWORD64)GetModuleHandle(L"materialsystem_dx11.dll");
-	m_width = *reinterpret_cast<unsigned int*>(vguimatsurfacedllBaseAddress + 0x290DD8);
-	m_height = *reinterpret_cast<unsigned int*>(vguimatsurfacedllBaseAddress + 0x290DD8 + 4);
+	auto resolution = reinterpret_cast<unsigned int*>(G_matsystem + 0x290DD8);
+	m_width = resolution[0];
+	m_height = resolution[1];
 
 	// We add a border to the texture so that the HUD can't get cut off by the texture boundaries
 	unsigned int widthWithBorder = m_width * (1.0f + HUD_TEX_BORDER_SIZE * 2.0f);
@@ -121,10 +123,7 @@ HudwarpProcess::HudwarpProcess(ID3D11Device* pDevice, ID3D11DeviceContext** ppID
 	bd.ByteWidth = sizeof(ConstantBuffer);
 	bd.Usage = D3D11_USAGE_DEFAULT;
 
-	// Setup orthographic projection
-	mOrtho = XMMatrixOrthographicLH(1.0f, 1.0f, 0.0f, 1.0f);
 	ConstantBuffer cb;
-	cb.mProjection = mOrtho;
 	cb.xWarp = 0.0f;
 	cb.xScale = 1.0f;
 	cb.yWarp = 0.0f;
@@ -144,10 +143,10 @@ HudwarpProcess::HudwarpProcess(ID3D11Device* pDevice, ID3D11DeviceContext** ppID
 	bd.StructureByteStride = sizeof(Vertex);
 
 	// left and top edge of window
-	float left = 1.0f / -2;
-	float right = 1.0f / 2;
-	float top = 1.0f / 2;
-	float bottom = 1.0f / -2;
+	float left = -1.0f;
+	float right = 1.0f;
+	float top = 1.0f;
+	float bottom = -1.0f;
 
 	Vertex pVerts[4] = {
 		{ XMFLOAT3(left, top, 1.0f), XMFLOAT2(0.0f, 0.0f) },
@@ -177,7 +176,8 @@ HudwarpProcess::HudwarpProcess(ID3D11Device* pDevice, ID3D11DeviceContext** ppID
 	// Describe the Sample State
 	D3D11_SAMPLER_DESC sampDesc;
 	ZeroMemory(&sampDesc, sizeof(sampDesc));
-	sampDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+	// NOTE(mrsteyk): changed from D3D11_FILTER_MIN_MAG_MIP_LINEAR since MaxAnisotropy doesn't make sense otherwise?
+	sampDesc.Filter = D3D11_FILTER_ANISOTROPIC;
 	sampDesc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
 	sampDesc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
 	sampDesc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
@@ -193,6 +193,7 @@ HudwarpProcess::HudwarpProcess(ID3D11Device* pDevice, ID3D11DeviceContext** ppID
 	D3D11_RENDER_TARGET_BLEND_DESC rt_blend_desc;
 	ZeroMemory(&rt_blend_desc, sizeof(rt_blend_desc));
 	rt_blend_desc.BlendEnable = true;
+#if 0
 	rt_blend_desc.SrcBlend = D3D11_BLEND_ONE;
 	rt_blend_desc.DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
 	rt_blend_desc.BlendOp = D3D11_BLEND_OP_ADD;
@@ -200,6 +201,16 @@ HudwarpProcess::HudwarpProcess(ID3D11Device* pDevice, ID3D11DeviceContext** ppID
 	rt_blend_desc.DestBlendAlpha = D3D11_BLEND_ONE;
 	rt_blend_desc.BlendOpAlpha = D3D11_BLEND_OP_ADD;
 	rt_blend_desc.RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+#else
+	// NOTE(mrsteyk): game uses this for HUD rendering on top final image!
+	rt_blend_desc.SrcBlend = D3D11_BLEND_SRC_ALPHA;
+	rt_blend_desc.DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
+	rt_blend_desc.BlendOp = D3D11_BLEND_OP_ADD;
+	rt_blend_desc.SrcBlendAlpha = D3D11_BLEND_INV_DEST_ALPHA;
+	rt_blend_desc.DestBlendAlpha = D3D11_BLEND_ONE;
+	rt_blend_desc.BlendOpAlpha = D3D11_BLEND_OP_ADD;
+	rt_blend_desc.RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+#endif
 
 	D3D11_BLEND_DESC blend_desc;
 	ZeroMemory(&blend_desc, sizeof(blend_desc));
@@ -215,7 +226,10 @@ HudwarpProcess::HudwarpProcess(ID3D11Device* pDevice, ID3D11DeviceContext** ppID
 	cmdesc.FillMode = D3D11_FILL_SOLID;
 	cmdesc.CullMode = D3D11_CULL_BACK;
 	cmdesc.FrontCounterClockwise = false;
-	cmdesc.MultisampleEnable = true;
+	// NOTE(mrsteyk): multisample operates on edges mainly, there's no reason to sample fullscreen tri multiple times? Esp with anisotropy
+	//cmdesc.MultisampleEnable = true;
+	//cmdesc.AntialiasedLineEnable = true;
+	cmdesc.DepthClipEnable = true;
 	pDevice->CreateRasterizerState(&cmdesc, &m_pCWcullMode);
 }
 
@@ -241,9 +255,10 @@ void HudwarpProcess::Resize(unsigned int w, unsigned int h)
 	m_pShaderResourceView->Release();
 
 	// Create new render target
-	static DWORD64 vguimatsurfacedllBaseAddress = (DWORD64)GetModuleHandle(L"materialsystem_dx11.dll");
-	m_width = *reinterpret_cast<unsigned int*>(vguimatsurfacedllBaseAddress + 0x290DD8);
-	m_height = *reinterpret_cast<unsigned int*>(vguimatsurfacedllBaseAddress + 0x290DD8 + 4);
+	uintptr_t vguimatsurfacedllBaseAddress = G_matsystem;
+	auto resolution = reinterpret_cast<unsigned int*>(vguimatsurfacedllBaseAddress + 0x290DD8);
+	m_width = resolution[0];
+	m_height = resolution[1];
 
 	// We add a border to the texture so that the HUD can't get cut off by the texture boundaries
 	unsigned int widthWithBorder = m_width * (1.0f + HUD_TEX_BORDER_SIZE * 2.0f);
@@ -358,7 +373,6 @@ void HudwarpProcess::Finish()
 
 	// Update the constant buffer
 	ConstantBuffer cb;
-	cb.mProjection = mOrtho;
 	cb.aspectRatio = (float)m_width / (float)m_height;
 	cb.xWarp = m_hudwarpSettings.xWarp;
 	cb.xScale = m_hudwarpSettings.xScale;

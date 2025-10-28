@@ -1,4 +1,6 @@
 ﻿#include "core.h"
+#include "filesystem.h" 
+
 
 // Helper to extract base name from a segment with possible array index
 static std::string getBaseArrayName(const std::string_view& segment) {
@@ -691,72 +693,102 @@ std::string readFile(const std::string& filename) {
 }
 
 
-class PDef {
-private:
-	static std::unique_ptr<PDataValidator> s_validator;
-	static std::once_flag s_initFlag;
+static bool g_pdef_use_gamefs = true;
+//#define PDATA_DEBUG false;
+static bool TryReadPDefWithGameFS(std::string& outText)
+{
+	if (!g_CBaseFileSystemInterface)
+		return false;
 
-	static void InitValidator() {
+	constexpr const char* kPdefRelPath = "scripts/vscripts/_pdef.nut";
+	const char* pid = "GAME";
+
+	typedef FileHandle_t(__thiscall* OpenFunc)(void*, const char*, const char*, const char*);
+	OpenFunc openFunc = (OpenFunc)g_CBaseFileSystem->Open;
+	typedef int64_t(__thiscall* SizeFunc)(void*, FileHandle_t);
+	SizeFunc sizeFunc = (SizeFunc)g_CBaseFileSystem->Size2;
+	typedef void(__thiscall* CloseFunc)(void*, FileHandle_t);
+	CloseFunc closeFunc = (CloseFunc)g_CBaseFileSystem->Close;
+	typedef int(__thiscall* ReadFunc)(void*, void*, int, FileHandle_t);
+	ReadFunc readFunc = (ReadFunc)g_CBaseFileSystem->Read;
+
+	auto fh = openFunc(g_CBaseFileSystemInterface, kPdefRelPath, "rb", pid);
+	if (!fh)
+		return false;
+	int len = sizeFunc(g_CBaseFileSystemInterface, fh);
+#ifdef PDATA_DEBUG
+	Msg("Pdata Size %d\n", len);
+#endif // PDATA_DEBUG
+	if (len <= 0) {
+		closeFunc(g_CBaseFileSystemInterface, fh);
+		return false;
+	}
+	std::string buf;
+	buf.resize(static_cast<size_t>(len));
+
+	int rd = readFunc(g_CBaseFileSystemInterface, buf.data(), len, fh);
+#ifdef PDATA_DEBUG
+	Msg("Pdata READ Size %d\n", rd);
+#endif // PDATA_DEBUG
+
+	if (rd < 0) {
+		closeFunc(g_CBaseFileSystemInterface, fh);
+		return false;
+	}
+	// Close the file
+	closeFunc(g_CBaseFileSystemInterface, fh);
+	outText = std::move(buf);
+	return true;
+}
+
+void PDef::InitValidator() {
 		try {
-			// --- MODIFICATION START ---
-
-			// 1. Get the directory containing the executable. This might throw.
-			std::filesystem::path exeDir = GetExecutableDirectory();
-
-			// 2. Define the relative path to the schema file from the executable directory.
-			std::filesystem::path relativeSchemaPath = "r1delta/scripts/vscripts/_pdef.nut";
-
-			// 3. Construct the full path by combining the executable dir and the relative path.
-			std::filesystem::path schemaPath = exeDir / relativeSchemaPath;
-
-			// Normalize the path for clearer error messages (optional but good practice)
-			schemaPath = std::filesystem::absolute(schemaPath).lexically_normal();
-
-			// 4. Check if the file exists at the calculated absolute path.
-			if (!std::filesystem::exists(schemaPath)) {
-				// Use the Error function, assuming it's fatal.
-				// Provide the full path in the error message.
-				Error("FATAL: Could not find _pdef.nut. Expected location: %s",
-					schemaPath.string().c_str());
-				// If Error doesn't terminate, uncomment the line below:
-				// throw std::runtime_error("FATAL: Could not find _pdef.nut at: " + schemaPath.string()); 
+			bool useGameFS = g_pdef_use_gamefs;
+			if (OriginalCCVar_FindVar) {
+				if (auto* cv = OriginalCCVar_FindVar(cvarinterface, "delta_pdef_use_gamefs")) {
+					useGameFS = (cv->m_Value.m_nValue != 0);
+				}
 			}
 
-			// 5. Read the file using the full path.
-			// Assuming readFile can handle std::filesystem::path or std::string
-			std::string schemaCode = readFile(schemaPath.string()); // Pass path directly if readFile supports it
+			std::string schemaCode;
 
-			// --- MODIFICATION END ---
+			if (useGameFS) {
+				if (!TryReadPDefWithGameFS(schemaCode)) {
+					// If FS read failed (e.g., too early or not mounted), fallback to raw path
+					useGameFS = false;
+					Msg("No modded _pdef.nut found in GameFS, falling back to r1delta path.\n");
+				}
+			}
 
-			// 6. Parse the schema and create the validator.
+			if (!useGameFS) {
+				// Raw path fallback (loose file in r1delta)
+				auto exeDir = GetExecutableDirectory();
+				auto schemaPath = std::filesystem::absolute(
+					exeDir / std::filesystem::path("r1delta") / "scripts" / "vscripts" / "_pdef.nut"
+				).lexically_normal();
+
+				if (!std::filesystem::exists(schemaPath)) {
+					Error("FATAL: Could not find _pdef.nut. Expected location: %s",
+						schemaPath.string().c_str());
+				}
+				schemaCode = readFile(schemaPath.string());
+			}
+
 			s_validator = std::make_unique<PDataValidator>(SchemaParser::parse(schemaCode));
-
-			// Optional: Add a log message for successful initialization if desired
-			// Log("PData validator initialized successfully using schema: %s", schemaPath.string().c_str());
-
 		}
 		catch (const std::exception& e) {
-			// Catch any exception during the process (GetExecutableDirectory, filesystem ops, readFile, parse, etc.)
-			// Use the Error function, assuming it's fatal.
 			Error("FATAL: Failed to initialize PData validator: %s", e.what());
-			// If Error doesn't terminate, uncomment the line below:
-			// throw std::runtime_error(std::string("FATAL: Failed to initialize PData validator: ") + e.what());
 		}
 		catch (...) {
-			// Catch any non-standard exceptions
 			Error("FATAL: An unknown error occurred during PData validator initialization.");
-			// If Error doesn't terminate, uncomment the line below:
-			// throw std::runtime_error("FATAL: An unknown error occurred during PData validator initialization.");
 		}
-
 	}
-public:
-	static bool IsValidKeyAndValue(const std::string& key, const std::string& value) {
+	bool PDef::IsValidKeyAndValue(const std::string& key, const std::string& value) {
 		std::call_once(s_initFlag, InitValidator);
 		return s_validator->isValid(key, value);
 	}
 
-	static std::string ResolveKeyIndices(const std::string_view& key) {
+	std::string PDef::ResolveKeyIndices(const std::string_view& key) {
 		// Initialize validator on first use
 		std::call_once(s_initFlag, InitValidator);
 
@@ -766,7 +798,7 @@ public:
 		
 		return s_validator->resolveArrayIndices(key);
 	}
-};
+
 
 std::unique_ptr<PDataValidator> PDef::s_validator;
 std::once_flag PDef::s_initFlag;
@@ -845,7 +877,7 @@ bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 	else {
 		numvars = byteCount;
 	}
-	if (numvars > 4096) {
+	if (numvars > 4096*4) {
 		Warning("Client sent too many ConVars %d\n", numvars);
 		return false;
 	}

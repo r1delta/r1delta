@@ -154,7 +154,7 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>Shlwapi.lib;winhttp.lib;Shell32.lib;vstdlib.lib;tier0_orig.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Shlwapi.lib;winhttp.lib;Shell32.lib;vstdlib.lib;tier0_orig.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ModuleDefinitionFile>test.def</ModuleDefinitionFile>
     </Link>
     <PreLinkEvent>
@@ -187,7 +187,7 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>Shlwapi.lib;winhttp.lib;Shell32.lib;vstdlib.lib;tier0_orig.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Shlwapi.lib;winhttp.lib;Shell32.lib;vstdlib.lib;tier0_orig.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ModuleDefinitionFile>test.def</ModuleDefinitionFile>
     </Link>
   </ItemDefinitionGroup>
@@ -220,6 +220,7 @@
     <ClInclude Include="localize.h" />
     <ClInclude Include="logging.h" />
     <ClInclude Include="masterserver.h" />
+    <ClInclude Include="mcp_server.h" />
     <ClInclude Include="memory.h" />
     <ClInclude Include="model_info.h" />
     <ClInclude Include="navmesh.h" />
@@ -311,6 +312,7 @@
     <ClCompile Include="localchatwriter.cpp" />
     <ClCompile Include="logging.cpp" />
     <ClCompile Include="masterserver.cpp" />
+    <ClCompile Include="mcp_server.cpp" />
     <ClCompile Include="memory.cpp" />
     <ClCompile Include="model_info.cpp" />
     <ClCompile Include="navmesh.cpp" />

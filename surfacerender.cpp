@@ -5,6 +5,29 @@
 #include "squirrel.h"
 
 #include "r1d_version.h"
+#include <vector>
+#include <algorithm> // for std::max
+
+// Forward declare or include Vector type
+#include "public/vector.h"
+
+// This struct holds the information for one floating damage number
+struct DamageNumber_t
+{
+    int damage;
+    Vector worldPos;
+    float spawnTime;
+    bool isCritical;
+    float batchWindow;
+    int sourceID;
+};
+
+// Global list to hold all active damage numbers
+std::vector<DamageNumber_t> g_DamageNumbers;
+
+// Font handles for drawing
+vgui::HFont DamageNumberFont = 0;
+vgui::HFont DamageNumberCritFont = 0;
 
 vgui::IPanel* panel = nullptr;
 vgui::ISurface* surface = nullptr;
@@ -80,6 +103,16 @@ __int64 sub_1800165C0(
     return 0;
 }
 ConVarR1* cvar_delta_watermark = nullptr;
+ConVarR1* cvar_delta_damage_numbers = nullptr;
+ConVarR1* cvar_delta_damage_numbers_lifetime = nullptr;
+ConVarR1* cvar_delta_damage_numbers_size = nullptr;
+ConVarR1* cvar_delta_damage_numbers_crit_size = nullptr;
+ConVarR1* cvar_delta_damage_numbers_batching = nullptr;
+ConVarR1* cvar_delta_damage_numbers_batching_window = nullptr;
+
+// Define the function pointer type for GetVectorInScreenSpace
+typedef bool(*GetVectorInScreenSpace_t)(Vector, int&, int&, Vector*);
+GetVectorInScreenSpace_t GetVectorInScreenSpace_ptr = nullptr;
 
 __int64(*osub_18028BEA0)(__int64 a1, __int64 a2, double a3);
 __int64 __fastcall sub_18028BEA0(__int64 a1, __int64 a2, double a3) {
@@ -267,6 +300,135 @@ void DrawWatermark() {
         line = wcstok_s(nullptr, L"\n", &ctx);
     }
 }
+void DrawDamageNumbers()
+{
+    if (!cvar_delta_damage_numbers || !cvar_delta_damage_numbers->m_Value.m_nValue)
+        return;
+
+    if (!GetVectorInScreenSpace_ptr) // Make sure the pointer is valid
+        return;
+
+    // Initialize fonts if they haven't been already
+    if (!DamageNumberFont)
+    {
+        DamageNumberFont = surface->CreateFont();
+        surface->SetFontGlyphSet(DamageNumberFont, "ConduitITCPro-Medium", cvar_delta_damage_numbers_size->m_Value.m_nValue, 800, 0, 0, vgui::FONTFLAG_ANTIALIAS);
+    }
+    if (!DamageNumberCritFont)
+    {
+        DamageNumberCritFont = surface->CreateFont();
+        surface->SetFontGlyphSet(DamageNumberCritFont, "ConduitITCPro-Medium", cvar_delta_damage_numbers_crit_size->m_Value.m_nValue, 900, 0, 0, vgui::FONTFLAG_ANTIALIAS);
+    }
+
+    float currentTime = Plat_FloatTime();
+    float lifeTime = cvar_delta_damage_numbers_lifetime->m_Value.m_fValue;
+
+    // Iterate backwards so we can safely erase elements
+    for (int i = g_DamageNumbers.size() - 1; i >= 0; --i)
+    {
+        auto& item = g_DamageNumbers[i];
+
+        // Remove expired numbers
+        if (currentTime > item.spawnTime + lifeTime)
+        {
+            g_DamageNumbers.erase(g_DamageNumbers.begin() + i);
+            continue;
+        }
+
+        // Batching logic (similar to TF2)
+        if (cvar_delta_damage_numbers_batching && cvar_delta_damage_numbers_batching->m_Value.m_nValue &&
+            item.batchWindow > 0.f && item.sourceID != -1 && i > 0)
+        {
+            // Check if previous item is from same source and within batch window
+            auto& prevItem = g_DamageNumbers[i - 1];
+            float timeDiff = item.spawnTime - prevItem.spawnTime;
+
+            if (timeDiff <= item.batchWindow && prevItem.sourceID == item.sourceID)
+            {
+                // Merge this damage into the previous one
+                prevItem.damage += item.damage;
+                // Reset the spawn time so the batched number appears fresh and starts animating from the bottom
+                prevItem.spawnTime = item.spawnTime;
+                // Also update the position to the new hit location
+                prevItem.worldPos = item.worldPos;
+
+                prevItem.isCritical = item.isCritical;
+
+                g_DamageNumbers.erase(g_DamageNumbers.begin() + i);
+                continue;
+            }
+        }
+
+        float lifeFrac = (currentTime - item.spawnTime) / lifeTime;
+
+        // Apply exponential ease-in curve: slow start, fast end
+        float easedLifeFrac = powf(lifeFrac, 2.5f);
+
+        // Animate position upwards with exponential easing
+        Vector animatedWorldPos = item.worldPos;
+        animatedWorldPos.z += easedLifeFrac * 40.0f; // Moves 40 units up over its lifetime
+
+        int x, y;
+        if (!GetVectorInScreenSpace_ptr(animatedWorldPos, x, y, nullptr))
+        {
+            continue; // Not on screen
+        }
+
+        // Calculate fade-out alpha with exponential curve (starts fading after 50% lifetime)
+        int alpha = 255;
+        if (lifeFrac > 0.5f)
+        {
+            // Exponential fade: slow fade at first, then fast fade at the end
+            float fadeLifeFrac = (lifeFrac - 0.5f) * 2.0f; // 0 to 1 over the fade period
+            float easedFade = powf(fadeLifeFrac, 3.0f); // Ease-in: slow then fast (adjust power for steepness)
+            alpha = static_cast<int>(255.0f * (1.0f - easedFade));
+            alpha = std::max(0, alpha); // Clamp
+        }
+
+        // Prepare text and font
+        wchar_t wBuf[16];
+        swprintf(wBuf, 16, L"%d", item.damage);
+
+        vgui::HFont currentFont = item.isCritical ? DamageNumberCritFont : DamageNumberFont;
+
+        // Get text size first
+        int textWide, textTall;
+        surface->GetTextSize(currentFont, wBuf, textWide, textTall);
+
+        // Center the text
+        x -= textWide / 2;
+        y -= textTall / 2;
+
+        // Set font
+        surface->DrawSetTextFont(currentFont);
+
+        // Draw red outline by rendering text multiple times with offset
+        // Outline is always red (255, 0, 0)
+        int outlineOffsets[][2] = {
+            {-1, -1}, {0, -1}, {1, -1},
+            {-1,  0},          {1,  0},
+            {-1,  1}, {0,  1}, {1,  1}
+        };
+
+        // Draw outline in red
+        surface->DrawSetTextColor(255, 0, 0, alpha);
+        for (int j = 0; j < 8; j++)
+        {
+            surface->DrawSetTextPos(x + outlineOffsets[j][0], y + outlineOffsets[j][1]);
+            surface->DrawPrintText(wBuf, wcslen(wBuf));
+        }
+
+        // Draw main text
+        // Crits: black text, Non-crits: white text
+        if (item.isCritical)
+            surface->DrawSetTextColor(0, 0, 0, alpha);  // Black for crits
+        else
+            surface->DrawSetTextColor(255, 255, 255, alpha);  // White for non-crits
+
+        surface->DrawSetTextPos(x, y);
+        surface->DrawPrintText(wBuf, wcslen(wBuf));
+    }
+}
 
 #define NUM_STATES 3
 ConVarR1* cvar_delta_script_errors_notification = nullptr;
@@ -349,7 +511,11 @@ void PaintTraverse(uintptr_t thisptr, vgui::VPANEL paintPanel, bool forceRepaint
         }
     }
 
-    if (paintPanel == inGameRenderPanel) DrawWatermark();
+    if (paintPanel == inGameRenderPanel)
+    {
+        DrawWatermark();
+        DrawDamageNumbers();
+    }
     if (paintPanel == inGameRenderPanel || paintPanel == menuRenderPanel) DrawScriptErrors();
 }
 
@@ -369,7 +535,7 @@ uint64_t OnClientScriptErrorHook(uintptr_t sqstate) {
 void(*oOnScreenSizeChanged)(uintptr_t thisptr, int w, int h);
 void OnScreenSizeChanged(uintptr_t thisptr, int w, int h) {
     oOnScreenSizeChanged(thisptr, w, h);
-    WatermarkFont = WatermarkSmallFont = ScriptErrorNotificationFont = 0;
+    WatermarkFont = WatermarkSmallFont = ScriptErrorNotificationFont = DamageNumberFont = DamageNumberCritFont = 0;
 }
 
 __int64(*oCPluginHudMessage_ctor)(uintptr_t thisptr, uintptr_t panel);
@@ -380,8 +546,73 @@ __int64 CPluginHudMessage_ctor(uintptr_t thisptr, uintptr_t ppanel) {
 
 extern ConVarR1* RegisterConVar(const char* name, const char* value, int flags, const char* helpString);
 
+// Squirrel script function to add a damage number
+SQInteger Script_AddDamageNumber(HSQUIRRELVM v) {
+    if (g_DamageNumbers.size() > 50) // Prevent spam
+        return 0;
+
+    auto r1_vm = GetClientVMPtr();
+
+    SQFloat damage;
+    Vector pos;
+    SQBool isCritical;
+    SQInteger sourceID = -1;
+
+    // Arg 2: damage (float)
+    if (SQ_FAILED(sq_getfloat(r1_vm, v, 2, &damage)))
+        return sq_throwerror(v, "Invalid argument 1: expected float damage");
+
+    // Arg 3, 4, 5: position (vector as 3 floats)
+    if (SQ_FAILED(sq_getfloat(r1_vm, v, 3, &pos.x)) ||
+        SQ_FAILED(sq_getfloat(r1_vm, v, 4, &pos.y)) ||
+        SQ_FAILED(sq_getfloat(r1_vm, v, 5, &pos.z)))
+        return sq_throwerror(v, "Invalid argument 2,3,4: expected vector position");
+
+    // Arg 6: isCritical (bool)
+    if (SQ_FAILED(sq_getbool(r1_vm, v, 6, &isCritical)))
+        return sq_throwerror(v, "Invalid argument 5: expected bool isCritical");
+
+    // Arg 7: sourceID (optional int) - for batching
+    sq_getinteger(r1_vm, v, 7, &sourceID);
+
+    // Block damage numbers at or very close to the origin (invalid position)
+    const float EPSILON = 0.1f;
+    if (fabs(pos.x) < EPSILON && fabs(pos.y) < EPSILON && fabs(pos.z) < EPSILON)
+        return 0; // Reject this damage number
+
+    // Add the damage number to the global list
+    DamageNumber_t dmgNum;
+    dmgNum.damage = (int)damage;
+    dmgNum.worldPos = pos;
+    dmgNum.spawnTime = Plat_FloatTime();
+    dmgNum.isCritical = isCritical != 0;
+
+    // Set batching parameters
+    dmgNum.batchWindow = cvar_delta_damage_numbers_batching && cvar_delta_damage_numbers_batching->m_Value.m_nValue
+                          ? cvar_delta_damage_numbers_batching_window->m_Value.m_fValue
+                          : 0.f;
+    dmgNum.sourceID = sourceID;
+
+    g_DamageNumbers.push_back(dmgNum);
+
+    return 0;
+}
+void FontSizeChangeCallback(IConVar* var, const char* pOldValue, float flOldValue) {
+    DamageNumberFont = 0;
+    DamageNumberCritFont = 0;
+
+}
+
 void SetupSurfaceRenderHooks() {
     cvar_delta_watermark = RegisterConVar("delta_watermark", "1", FCVAR_GAMEDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Show R1Delta watermark with version information");
+    cvar_delta_damage_numbers = RegisterConVar("delta_damage_numbers", "0", FCVAR_GAMEDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Show TF2-style floating damage numbers on hit.");
+    cvar_delta_damage_numbers_lifetime = RegisterConVar("delta_damage_numbers_lifetime", "1.5", FCVAR_GAMEDLL, "How long damage numbers stay on screen.");
+    cvar_delta_damage_numbers_size = RegisterConVar("delta_damage_numbers_size", "32", FCVAR_GAMEDLL, "Font size for normal damage numbers.");
+    cvar_delta_damage_numbers_crit_size = RegisterConVar("delta_damage_numbers_crit_size", "36", FCVAR_GAMEDLL, "Font size for critical damage numbers.");
+    cvar_delta_damage_numbers_batching = RegisterConVar("delta_damage_numbers_batching", "1", FCVAR_GAMEDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Batch damage numbers from the same source within a time window.");
+    cvar_delta_damage_numbers_batching_window = RegisterConVar("delta_damage_numbers_batching_window", "3", FCVAR_GAMEDLL, "Time window for batching damage numbers (seconds).");
+    cvar_delta_damage_numbers_size->m_fnChangeCallbacks.AddToTail((FnChangeCallback_t)FontSizeChangeCallback);
+    cvar_delta_damage_numbers_crit_size->m_fnChangeCallbacks.AddToTail((FnChangeCallback_t)FontSizeChangeCallback);
 
 	auto vguimatsurface = GetModuleHandleA("vguimatsurface.dll");
 	auto vguimatsurface_CreateInterface = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(vguimatsurface, "CreateInterface"));
@@ -397,6 +628,9 @@ void SetupSurfaceRenderHooks() {
     MH_CreateHook((LPVOID)(((uintptr_t)(G_client)) + 0x28BEA0), &sub_18028BEA0, reinterpret_cast<LPVOID*>(&osub_18028BEA0));
     MH_CreateHook((LPVOID)(((uintptr_t)(vguimatsurface)) + 0x119E0), &OnScreenSizeChanged, reinterpret_cast<LPVOID*>(&oOnScreenSizeChanged));
     MH_CreateHook((LPVOID)(((uintptr_t)(G_engine)) + 0x5E860), &CPluginHudMessage_ctor, reinterpret_cast<LPVOID*>(&oCPluginHudMessage_ctor));
+
+    // Initialize GetVectorInScreenSpace function pointer
+    GetVectorInScreenSpace_ptr = reinterpret_cast<GetVectorInScreenSpace_t>(G_client + 0x0105170);
 }
 
 void SetupSquirrelErrorNotificationHooks() {

@@ -14,7 +14,7 @@ If you're having issues please open an issue or join the [discord](https://disco
 For developers and contributors, keep reading below.
 
 ## Hosting a server
-You can run "R1Delta Dedicated Server" on Windows in the start menu to run a dedicated server, or if you want to host a listen server you can just click "Create Server" from the main menu in R1Delta.
+You can run "R1Delta Dedicated Server" on Windows in the start menu to run a dedicated server, or if you want to host a listen server you can just click "Private Match" from the lobby menu in R1Delta.
 
 Instructions on how to run the dedicated server on Docker are [here](https://gist.github.com/quad-damage/3f4ad9c524b638510340cc31da86d3ff). This image is managed by one of our contributors ([@quadruple](https://github.com/quad-damage)) and not officially maintained by R1Delta, but we still endorse it.
 
@@ -54,6 +54,7 @@ REGEDIT4
 - [@dogecore](https://github.com/HappyDOGE)
 - [@Allusive](https://github.com/AllusiveWheat)
 - [@koutsie](https://github.com/koutsie)
+- [@dyslexi](https://github.com/Dys-lexi/)
 
 ## Third-Party Code Attribution
 
@@ -77,3 +78,8 @@ R1Delta itself is licensed under the GNU General Public License v3.0 (GPLv3). Fo
 ![bear](https://github.com/r1delta/r1delta/assets/37985788/41548f20-0878-4e1e-8538-e9be808fc363)
 ![bear](https://github.com/r1delta/r1delta/assets/37985788/41548f20-0878-4e1e-8538-e9be808fc363)
 ![bear](https://github.com/r1delta/r1delta/assets/37985788/41548f20-0878-4e1e-8538-e9be808fc363)
+
+# FAQ
+
+## Q: What if I have hiccups
+Remind yourself you are not a fish

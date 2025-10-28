@@ -114,12 +114,15 @@ typedef void (*Cbuf_AddTextType)(int a1, const char* a2, unsigned int a3);
 Cbuf_AddTextType Cbuf_AddTextOriginal;
 static bool bDone = false;
 void Cbuf_AddText(int a1, const char* a2, unsigned int a3) {
+	if (IsDedicatedServer() && !Cbuf_AddTextOriginal)
+		Cbuf_AddTextOriginal = (Cbuf_AddTextType)(G_engine_ds + 0x72d70);
 	ZoneScoped;
 	ZoneText(a2, strlen(a2));
 	
 	if (!bDone) {
 		bDone = true;
 		OriginalCCVar_FindVar(cvarinterface, "cl_updaterate")->m_nFlags &= ~(FCVAR_HIDDEN | FCVAR_DEVELOPMENTONLY);
+		OriginalCCVar_FindCommand(cvarinterface, "help")->m_nFlags &= ~(FCVAR_HIDDEN | FCVAR_DEVELOPMENTONLY);
 	}
 	PData_OnConsoleCommand(a2);
 	bool shouldLog = true;
@@ -330,12 +333,12 @@ void MsgHook(const char* pMsg, ...) {
 
 	auto arena = tctx.get_arena_for_scratch();
 	auto temp = TempArena(arena);
-	
+
 	va_list args;
 	va_start(args, pMsg);
 	char* formatted = SafeFormatArena(arena, pMsg, args);
 	va_end(args);
-	
+
 	if (!IsDedicatedServer()) printf("%s", formatted);
 	if (MsgOriginal) {
 		MsgOriginal("%s", formatted);
@@ -395,7 +398,7 @@ void DevMsgHook(int level, const char* pMsg, ...) {
 
 void DevWarningHook(int level, const char* pMsg, ...) {
 	ZoneScoped;
-	
+
 	auto arena = tctx.get_arena_for_scratch();
 	auto temp = TempArena(arena);
 
@@ -412,7 +415,7 @@ void DevWarningHook(int level, const char* pMsg, ...) {
 
 void ConColorMsgHook(const Color* clr, const char* pMsg, ...) {
 	ZoneScoped;
-	
+
 	auto arena = tctx.get_arena_for_scratch();
 	auto temp = TempArena(arena);
 
@@ -429,7 +432,7 @@ void ConColorMsgHook(const Color* clr, const char* pMsg, ...) {
 
 void ConDMsgHook(const char* pMsg, ...) {
 	ZoneScoped;
-	
+
 	auto arena = tctx.get_arena_for_scratch();
 	auto temp = TempArena(arena);
 
@@ -446,7 +449,7 @@ void ConDMsgHook(const char* pMsg, ...) {
 
 void COM_TimestampedLogHook(const char* pMsg, ...) {
 	ZoneScoped;
-	
+
 	auto arena = tctx.get_arena_for_scratch();
 	auto temp = TempArena(arena);
 
@@ -501,7 +504,7 @@ void InitLoggingHooks()
 	MH_CreateHook((LPVOID)GetProcAddress(tier0, "DevMsg"), &DevMsgHook, reinterpret_cast<LPVOID*>(&DevMsgOriginal));
 	MH_CreateHook((LPVOID)GetProcAddress(tier0, "DevWarning"), &DevWarningHook, reinterpret_cast<LPVOID*>(&DevWarningOriginal));
 	MH_CreateHook((LPVOID)GetProcAddress(tier0, "ConColorMsg"), &ConColorMsgHook, reinterpret_cast<LPVOID*>(&ConColorMsgOriginal));
-	MH_CreateHook((LPVOID)GetProcAddress(tier0, "ConDMsgHook"), &ConDMsgHook, reinterpret_cast<LPVOID*>(&ConDMsgOriginal));
+	MH_CreateHook((LPVOID)GetProcAddress(tier0, "ConDMsg"), &ConDMsgHook, reinterpret_cast<LPVOID*>(&ConDMsgOriginal));
 	MH_CreateHook((LPVOID)GetProcAddress(tier0, "COM_TimestampedLog"), &COM_TimestampedLogHook, reinterpret_cast<LPVOID*>(&COM_TimestampedLogOriginal));
 
 	MH_EnableHook(MH_ALL_HOOKS);

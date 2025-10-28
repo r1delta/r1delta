@@ -36,6 +36,10 @@
 #define ALIGN16_POST
 #endif
 
+#ifndef ALIGN8_POST
+#define ALIGN8_POST
+#endif
+
 #include "tier0/dbg.h"
 #include "tier0/platform.h"
 //#include "tier0/threadtools.h"

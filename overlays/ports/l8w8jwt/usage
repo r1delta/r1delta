@@ -1,0 +1,4 @@
+l8w8jwt provides CMake targets:
+
+    find_package(l8w8jwt CONFIG REQUIRED)
+    target_link_libraries(main PRIVATE l8w8jwt::l8w8jwt)

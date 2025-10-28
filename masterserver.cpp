@@ -38,6 +38,7 @@ struct ServerInfo {
     std::string gameMode;
     int maxPlayers;
     int port;
+    bool has_auth;
     std::string ip;
 	bool hasPassword;
     std::string version;
@@ -53,6 +54,7 @@ struct HeartbeatInfo {
     std::string gameMode;
     int maxPlayers;
     int port;
+    bool has_auth;
 	bool hasPassword;
 	std::string description;
     std::string playlist;
@@ -136,6 +138,8 @@ namespace MasterServerClient {
         j["game_mode"] = heartbeat.gameMode;
         j["max_players"] = heartbeat.maxPlayers;
         j["port"] = heartbeat.port;
+        auto auth_Var = CCVar_FindVar(cvarinterface, "delta_online_auth_enable");
+		j["has_auth"] = auth_Var->m_Value.m_nValue != 0;
         j["version"] = R1D_VERSION;
         auto password_var = CCVar_FindVar(cvarinterface, "sv_password");
         if (password_var && password_var->m_Value.m_pszString[0]) {
@@ -247,6 +251,7 @@ namespace MasterServerClient {
                 si.port = sj["port"];
                 si.ip = sj["ip"];
 				si.hasPassword = sj["has_password"];
+				si.has_auth = sj["has_auth"];
 				si.description = sj["description"];
 				si.playlist = sj["playlist"];
 				si.playlist_display_name = sj["playlist_display_name"];
@@ -340,11 +345,12 @@ SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
             if (!strcmp_static(key, "game_mode")) heartbeat.gameMode = s->_val;
 			if (!strcmp_static(key, "playlist")) heartbeat.playlist = s->_val;
 			if (!strcmp_static(key, "playlist_display_name")) heartbeat.playlist_display_name = s->_val;
-			
+            if (!strcmp_static(key, "is_auth")) heartbeat.playlist = s->_val;
             break;
         }
         case OT_INTEGER:
             if (!strcmp_static(key, "max_players")) heartbeat.maxPlayers = node.val._unVal.nInteger;
+			if (!strcmp_static(key, "has_auth")) heartbeat.has_auth = node.val._unVal.nInteger;
             break;
         case OT_ARRAY:
             if (!strcmp_static(key, "players")) {
@@ -454,6 +460,7 @@ SQInteger PollServerList(HSQUIRRELVM v) {
             sq_pushstring_lit(v, "port"); sq_pushinteger(0, v, s.port); sq_newslot(v, -3, 0);
             sq_pushstring_lit(v, "ip"); sq_pushstring_std(v, s.ip); sq_newslot(v, -3, 0);
             sq_pushstring_lit(v, "has_password"); sq_pushinteger(0, v, s.hasPassword ? 1 : 0); sq_newslot(v, -3, 0);
+      			sq_pushstring_lit(v, "has_auth"); sq_pushinteger(0, v, s.has_auth ? 1 : 0); sq_newslot(v, -3, 0);
             sq_pushstring_lit(v, "description"); sq_pushstring_std(v, s.description); sq_newslot(v, -3, 0);
             sq_pushstring_lit(v, "playlist"); sq_pushstring_std(v, s.playlist); sq_newslot(v, -3, 0);
             sq_pushstring_lit(v, "playlist_display_name"); sq_pushstring_std(v, s.playlist_display_name); sq_newslot(v, -3, 0);

@@ -1,4 +1,4 @@
-﻿// %*++***###*##**##++**+++*++*%%%%%%%+*%+#*+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#=%%%#**#+#%
+// %*++***###*##**##++**+++*++*%%%%%%%+*%+#*+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%#=%%%#**#+#%
 // ==----------------------------------------------------------------------=================+
 // =------------------------------------::----------------------------------===---==========+
 // ---------------------------------:-:--::::-::::-------------------=======================+
@@ -38,13 +38,13 @@
 
 #include "load.h"
 #include <cstdlib>
-#include <crtdbg.h>	
+#include <crtdbg.h>
 #include <new>
 #include "windows.h"
 
 #include <iostream>
 #include "cvar.h"
-#include <winternl.h>  // For UNICODE_STRING.
+#include <winternl.h> // For UNICODE_STRING.
 #include <fstream>
 #include <filesystem>
 #include <array>
@@ -86,29 +86,31 @@
 #include "audio.h"
 #include <nlohmann/json.hpp>
 #include "shellapi.h"
+//#define JWT
 #ifdef JWT
-#include <jwt-cpp/jwt.h>
+#include <l8w8jwt/decode.h>
+#include "l8w8jwt/encode.h"
 #include "jwt_compact.h"
 #endif
 #include "vector.h"
 #include "hudwarp.h"
 #include "hudwarp_hooks.h"
 #include "surfacerender.h"
+#include "mcp_server.h"
 #include "localchatwriter.h"
 #include "discord.h"
-//#define DISCORD
 #define DISCORDPP_IMPLEMENTATION
 #ifdef DISCORD
 #include <discordpp.h>
 #endif
 #include "sv_filter.h"
-#include <discord-game-sdk/discord.h>  
+#include <discord-game-sdk/discord.h>
 #include <Mmdeviceapi.h>
 #include "srcon.h"
 #include "r1d_version.h"
 
 // Define and initialize the static member for the ConVar
-ConVarR1* CBanSystem::m_pSvBanlistAutosave = nullptr;
+ConVarR1 *CBanSystem::m_pSvBanlistAutosave = nullptr;
 
 std::atomic<bool> running = true;
 
@@ -252,16 +254,15 @@ void rcon_concommand(const CCommand& args) {
 
 #pragma intrinsic(_ReturnAddress)
 
-
 extern "C"
 {
 	uintptr_t CNetChan__ProcessSubChannelData_ret0 = 0;
 	uintptr_t CNetChan__ProcessSubChannelData_Asm_continue = 0;
 	extern uintptr_t CNetChan__ProcessSubChannelData_AsmConductBufferSizeCheck;
 }
-void* dll_notification_cookie_;
+void *dll_notification_cookie_;
 
-void Status_ConMsg(const char* text, ...)
+void Status_ConMsg(const char *text, ...)
 // clang-format off
 {
 	char formatted[2048];
@@ -521,6 +522,8 @@ __int64 __fastcall SetPreCache(__int64 a1, __int64 a2, char a3) {
 		sub_1800F5680("armsmodel_imc", a2, PVOID(a1 + 472), PVOID(a1 + 488));
 
 	auto armsmodel_militia_exists = sub_1800F5680("armsmodel_militia", a2, &elem[1]->ptr, &elem[1]->big_size);
+	if (OriginalCCVar_FindVar(cvarinterface, "developer")->m_Value.m_nValue == 1)
+		Cbuf_AddText(0, "developer 1\n", 0);
 
 	return ret;
 }
@@ -1012,6 +1015,7 @@ uintptr_t G_server;
 uintptr_t G_engine;
 uintptr_t G_engine_ds;
 uintptr_t G_client;
+uintptr_t G_matsystem;
 uintptr_t G_localize;
 ILocalize* G_localizeIface;
 
@@ -1450,9 +1454,6 @@ void Shared_OnLocalAuthFailure() {
 }
 
 
-
-typedef void (*SetConvarString_t)(ConVarR1* var, const char* value);
-
 SetConvarString_t SetConvarStringOriginal;
 
 // Helper function to get the server�s public IP.
@@ -1475,7 +1476,6 @@ std::string get_public_ip() {
 	}();
 	return cached_ip;
 }
-
 // Server_AuthCallback verifies the server auth token.
 AuthResponse Server_AuthCallback(bool loopback, const char* serverIP, const char* token) {
 #ifdef JWT
@@ -1491,35 +1491,52 @@ AuthResponse Server_AuthCallback(bool loopback, const char* serverIP, const char
 		return response;
 	}
 	try {
-		auto decoded = jwt::decode(token);
+		struct l8w8jwt_decoding_params params;
+		l8w8jwt_decoding_params_init(&params);
+		params.alg = L8W8JWT_ALG_ES256;
+		params.jwt = (char*)token;
+		params.jwt_length = strlen(token);
+		params.verification_key = (unsigned char*)ecdsa_pub_key.c_str();
+		params.verification_key_length = ecdsa_pub_key.length();
+		params.validate_exp = 0;
+		params.exp_tolerance_seconds = 60;
 
-		// Verify expiration.
-		auto exp = decoded.get_payload_claim("e").as_int();
-		auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-		if (exp < now) {
+		enum l8w8jwt_validation_result validation_result;
+		l8w8jwt_claim* claims;
+		size_t claims_count;
+		int decode_result = l8w8jwt_decode(&params, &validation_result, &claims, &claims_count);
+
+		if (decode_result == L8W8JWT_SUCCESS && validation_result == L8W8JWT_VALID)
+		{
+			Msg("Token valid\n");
+		}
+		else
+		{
+			printf("\n Example HS512 token validation failed! \n");
 			response.success = false;
-			strncpy(response.failureReason, "Token is expired", sizeof(response.failureReason));
+			strncpy(response.failureReason, "Token is invalid", sizeof(response.failureReason));
 			return response;
 		}
 
-		// Create a verifier that checks the ES256 signature using the public key,
-		// and also ensures the token�s "server_ip" claim matches the serverIP.
-		auto verifier = jwt::verify()
-			.allow_algorithm(jwt::algorithm::es256(ecdsa_pub_key, "", "", ""));
+	
+		
 
-		verifier.verify(decoded); // Will throw if verification fails.
-
+		auto dn = l8w8jwt_get_claim(claims, claims_count, "dn", strlen("dn"));
+		auto pn = l8w8jwt_get_claim(claims, claims_count, "p", strlen("p"));
+		auto di = l8w8jwt_get_claim(claims, claims_count, "di", strlen("di"));
+		auto s = l8w8jwt_get_claim(claims, claims_count, "s", strlen("s"));
 		// Extract minimal claims.
-		std::string displayName = decoded.get_payload_claim("dn").as_string();
-		std::string pomeloName = decoded.get_payload_claim("p").as_string();
-		std::string id = decoded.get_payload_claim("di").as_string();
+		std::string displayName = dn ? std::string((char*)dn->value, dn->value_length) : "";
+		std::string pomeloName = pn ? std::string((char*)pn->value, pn->value_length) : "";
+		std::string id = di ? std::string((char*)di->value, di->value_length) : "";
 		// Extra check: the token�s server_ip must match exactly.
-		std::string tokenServerIP = decoded.get_payload_claim("s").as_string();
+		std::string tokenServerIP = s ? std::string((char*)s->value, s->value_length) : "";
 		/*if (tokenServerIP != serverIP && !loopback) {
 			response.success = false;
 			strncpy(response.failureReason, "Token server IP mismatch", sizeof(response.failureReason));
 			return response;
 		}*/
+		Msg("Token server IP: %s, expected: %s\n", tokenServerIP.c_str(), serverIP);
 		response.success = true;
 		strncpy(response.discordName, displayName.c_str(), sizeof(response.discordName) - 1);
 		response.discordName[sizeof(response.discordName) - 1] = '\0';
@@ -1575,9 +1592,87 @@ bool __fastcall HookedCBaseClientConnect(
 	if (bFakePlayer)
 		return oCBaseClientConnect(a1, a2, a3, a4, bFakePlayer, a6, conVars, a8, a9);
 
+	// Version check
+	static auto skipVersionCheck = OriginalCCVar_FindVar(cvarinterface, "delta_skip_version_check");
+	if (skipVersionCheck->m_Value.m_nValue == 0) {
+		const char* serverVersion = R1D_VERSION;
+		const char* clientVersion = nullptr;
+
+		// Find client's delta_version from conVars
+		if (conVars) {
+			for (int i = 0; i < conVars->Count(); i++) {
+				NetMessageCvar_t& var = conVars->Element(i);
+				if (strcmp(var.name, "delta_version") == 0) {
+					clientVersion = var.value;
+					break;
+				}
+			}
+		}
+
+		// If client didn't send version, reject
+		if (!clientVersion) {
+			V_snprintf(a8, a9, "Client is missing delta_version. Please update R1Delta.");
+			return false;
+		}
+
+		// Check version compatibility
+		bool serverIsDev = (strcmp(serverVersion, "dev") == 0);
+		bool clientIsDev = (strcmp(clientVersion, "dev") == 0);
+
+		if (serverIsDev || clientIsDev) {
+			// DEV servers accept all clients, DEV clients can connect to all servers
+			// Allow connection
+		} else {
+			// Parse versions as major.minor.hotfix (with optional "v" prefix)
+			int serverMajor = 0, serverMinor = 0, serverHotfix = 0;
+			int clientMajor = 0, clientMinor = 0, clientHotfix = 0;
+
+			// Try parsing with "v" prefix first, then without
+			int serverParsed = sscanf(serverVersion, "v%d.%d.%d", &serverMajor, &serverMinor, &serverHotfix);
+			if (serverParsed < 2) {
+				serverParsed = sscanf(serverVersion, "%d.%d.%d", &serverMajor, &serverMinor, &serverHotfix);
+			}
+
+			int clientParsed = sscanf(clientVersion, "v%d.%d.%d", &clientMajor, &clientMinor, &clientHotfix);
+			if (clientParsed < 2) {
+				clientParsed = sscanf(clientVersion, "%d.%d.%d", &clientMajor, &clientMinor, &clientHotfix);
+			}
+
+			// Require major.minor to match exactly, allow client hotfix >= server hotfix
+			if (serverParsed >= 2 && clientParsed >= 2) {
+				if (serverMajor != clientMajor || serverMinor != clientMinor) {
+					V_snprintf(a8, a9, "Version mismatch: Server is running R1Delta %s, you have %s.", serverVersion, clientVersion);
+					return false;
+				}
+				if (clientHotfix < serverHotfix) {
+					V_snprintf(a8, a9, "Version mismatch: Server is running R1Delta %s, you have %s. Please update your client.", serverVersion, clientVersion);
+					return false;
+				}
+			} else if (strcmp(serverVersion, clientVersion) != 0) {
+				// Fallback to exact string match for non-standard versions
+				V_snprintf(a8, a9, "Version mismatch: Server is running R1Delta %s, you have %s.", serverVersion, clientVersion);
+				return false;
+			}
+		}
+	}
+
 	static auto bUseOnlineAuth = OriginalCCVar_FindVar(cvarinterface, "delta_online_auth_enable");
 	static auto iSyncUsernameWithDiscord = OriginalCCVar_FindVar(cvarinterface, "delta_discord_username_sync");
 	static auto iHostPort = OriginalCCVar_FindVar(cvarinterface, "hostport");
+	/*if (conVars) {
+		long long user_id = 0;
+		for (int i = 0; i < conVars->Count(); i++) {
+			NetMessageCvar_t& var = conVars->Element(i);
+			if (strcmp(var.name, "platform_user_id") == 0) {
+				user_id = strtoull(var.value,nullptr,10);
+				break;
+			}
+		}
+		if (CBanSystem::Filter_IsUserBanned(user_id)) {
+			V_snprintf(a8, a9, "%s", "Banned from server");
+			return false;
+		}
+	}*/
 	if (bUseOnlineAuth->m_Value.m_nValue != 1)
 		return oCBaseClientConnect(a1, a2, a3, a4, bFakePlayer, a6, conVars, a8, a9);
 
@@ -1673,6 +1768,9 @@ __int64 __fastcall HookedCBaseStateClientConnect(
 	int a11)
 {
 	static auto bUseOnlineAuth = OriginalCCVar_FindVar(cvarinterface, "delta_online_auth_enable");
+
+
+
 	if (bUseOnlineAuth->m_Value.m_nValue != 1)
 		return oCBaseStateClientConnect(a1, public_ip, private_ip, num_players, a5, a6, a7, a8, a9, a10, a11);
 
@@ -1699,12 +1797,32 @@ __int64 __fastcall HookedCBaseStateClientConnect(
 			std::string token = jsonResponse["token"].get<std::string>();
 			// Update the server auth token convar.
 			SetConvarStringOriginal(var, jwt_compact::compactJWT(token).c_str());
-			Msg("Server Auth Token Length: %d\n", var->m_Value.m_StringLength);
-			auto decoded = jwt::decode(token);
-			std::string pomeloName = decoded.get_payload_claim("p").as_string();
-			std::string id = decoded.get_payload_claim("di").as_string();
+			/*Msg("Server Auth Token Length: %d\n", var->m_Value.m_StringLength);
+			struct l8w8jwt_decoding_params params;
+			l8w8jwt_decoding_params_init(&params);
+			params.alg = L8W8JWT_ALG_ES256;
+			params.jwt = (char*)token.c_str();
+			params.jwt_length = token.length();
+			params.verification_key = (unsigned char*)ecdsa_pub_key.c_str();
+			params.verification_key_length = ecdsa_pub_key.length();
+			params.validate_exp = 0;
+			params.exp_tolerance_seconds = 60;
+
+			enum l8w8jwt_validation_result validation_result;
+			l8w8jwt_claim* claims;
+			size_t claims_count;
+			int decode_result = l8w8jwt_decode(&params, &validation_result, &claims, &claims_count);
+
+			if (decode_result == L8W8JWT_SUCCESS)
+			{
+				Msg("Token valid\n");
+			}
+			auto p = l8w8jwt_get_claim(claims, claims_count, "dn", strlen("dn"));
+			auto di = l8w8jwt_get_claim(claims, claims_count, "di", strlen("di"));
+			std::string pomeloName = p->value;
+			std::string id = di->value;
 			SetConvarStringOriginal(OriginalCCVar_FindVar(cvarinterface, "name"), pomeloName.c_str());
-			SetConvarStringOriginal(OriginalCCVar_FindVar(cvarinterface, "hostname"), (pomeloName+"'s R1Delta Server").c_str());
+			SetConvarStringOriginal(OriginalCCVar_FindVar(cvarinterface, "hostname"), (pomeloName+"'s R1Delta Server").c_str());*/
 			#endif // JWT
 		}
 		catch (const std::exception& e) {
@@ -1851,6 +1969,28 @@ typedef USERID_s*(*GetUserID_t)(__int64 base_client, USERID_s* id);
 
 GetUserID_t GetUserIDOriginal;
 
+USERID_s* GetUserIDHook(__int64 base_client, USERID_s* id) {
+	id->idtype = 1; // Set idtype to 1 for USERID_TYPE_DISCORD
+	id->snowflake = 1; // Initialize snowflake to 0
+	if (base_client == 0) {
+		return id;
+	}
+	auto var = OriginalCCVar_FindVar(cvarinterface, "delta_online_auth_enable");
+	if (var->m_Value.m_nValue != 1) {
+		if (IsDedicatedServer()) {
+			id->snowflake = *(int64_t*)(base_client + 0x34B70);
+		}
+		else {
+			id->snowflake = *(int64_t*)(base_client + 0x45810);
+		}
+		return id;
+	}
+	if (IsDedicatedServer())
+		id->snowflake = *(int64_t*)(base_client + 0x284); // Get the snowflake from the base client
+	else 
+		id->snowflake = *(int64_t*)(base_client + 0x2FC); // Get the snowflake from the base client
+	return id;
+}
 
 const char* GetUserIDStringHook(USERID_s* id) {
 	char buffer[256];
@@ -1863,84 +2003,6 @@ const char* GetUserIDStringHook(USERID_s* id) {
 	
 }
 
-void StartDiscordAuth(const CCommand& ccargs) {
-#ifndef DISCORD
-	Warning("Build was compiled without DISCORD defined.\n");
-#else
-	if (ccargs.ArgC() != 1) {
-		Warning("Usage: delta_start_discord_auth\n");
-		return;
-	}
-	if (IsDedicatedServer()) {
-		Warning("This command is not available on dedicated servers.\n");
-		return;
-	}
-
-
-		discordpp::AuthorizationArgs args{};
-		args.SetClientId(1304910395013595176);
-		std::string scopes = discordpp::Client::GetDefaultPresenceScopes() + " identify";
-		args.SetScopes(scopes);
-		if (client) {
-			if (client->IsAuthenticated()) {
-				Msg("Already authenticated with Discord.\n");
-				client->Connect();
-				return;
-			}
-			auto clientPtr = client.get();
-			client->Authorize(args, [clientPtr](auto dis_result, auto code, auto redirectUri) {
-				if (!dis_result.Successful()) {
-					std::cerr << "Authentication Error: " << dis_result.Error() << std::endl;
-					Msg("Doing Stuff");
-					return;
-				}
-				else {
-					Msg("Got code: %s\n", code.c_str());
-				}
-
-				auto ms_url = CCVar_FindVar(cvarinterface, "delta_ms_url")->m_Value.m_pszString;
-				httplib::Client cli(ms_url);
-				cli.set_connection_timeout(2);
-				cli.set_address_family(AF_INET);
-				cli.set_follow_location(true);
-				auto result = cli.Get(std::format("/discord-auth?code={}", code));
-				nlohmann::json j;
-				try {
-					j = nlohmann::json::parse(result->body);
-				}
-				catch (const std::exception& e) {
-					return;
-				}
-				auto errorVar = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token_failed_reason");
-
-				if (j.contains("error")) {
-					SetConvarStringOriginal(errorVar, j["error"].get<std::string>().c_str());
-					return;
-				}
-				auto token_j = j["token"].get<std::string>(); 
-				auto access_token = j["access_token"].get<std::string>();
-				auto v = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token");
-				SetConvarStringOriginal(v, token_j.c_str());
-				SetConvarStringOriginal(errorVar, "");
-				
-				// Next Step: Update the token and connect
-				clientPtr->UpdateToken(discordpp::AuthorizationTokenType::Bearer, access_token, [](discordpp::ClientResult result) {
-				
-					if (result.Successful()) {
-						Msg("Successfully updated token\n");
-						//client->Connect();
-					}
-					else {
-						Warning("Failed to update token: %s\n", result.Error().c_str());
-					}
-					
-					});
-				});
-				
-		}
-#endif
-	return;
-}
 const char* GetBuildNo() {
 	static char buffer[64] = {};
 
@@ -1987,6 +2049,157 @@ int64 sub_2A200(__int64 a1, __int64 a2, unsigned int a3) {
 }
 
 
+
+struct acache_entry {
+	char path[260];
+	int blockCount; // Sample rate * duration * channels
+	float duration;
+	uint channels;
+	uint unk0;
+	uint unk1;
+	union {
+		uint headerSize_SampleDepth; // 0x10 for 16 bit, 0x20 for 32 bit
+		struct {
+			uint headerSize : 8;
+			uint sampleDepth : 24;
+		}d;
+	};
+	uint unk3;
+	uint offset;
+	int terminator;
+};
+
+typedef __int64* (*GetAcacheHk_t)(const char*);
+GetAcacheHk_t GetAcacheOriginal;
+__int64* GetAcacheHk(const char* wav_path) {
+	auto ret = GetAcacheOriginal(wav_path);
+	if (!ret) {
+		//Msg("wav_path: %s\n", wav_path);
+		if(strstr(wav_path, "wpn_valkyrie_1p_wpnfire_reduced_2ch_01") != nullptr) {
+			return (__int64*)(G_engine + 0x1fcdae8);
+		}
+		else if(strstr(wav_path, "wpn_valkyrie_1p_wpnfire_reduced_2ch_02") != nullptr) {
+			return (__int64*)(G_engine + 0x1fcdc10);
+		}
+		return ret;
+	}
+	return ret;
+}
+
+bool ShouldEnableMCP() {
+	static bool parsed = false;
+	static bool useMcp = false;
+
+	if (!parsed) {
+		parsed = true;
+		int argc = 0;
+		LPWSTR* argvW = CommandLineToArgvW(GetCommandLineW(), &argc);
+
+		if (argvW != NULL)
+		{
+			for (int i = 1; i < argc; ++i)
+			{
+				if (wcscmp(argvW[i], L"-usemcp") == 0)
+				{
+					useMcp = true;
+					break;
+				}
+			}
+			LocalFree(argvW);
+		}
+	}
+
+	return useMcp;
+}
+
+typedef __int64(*Host_InitType)(bool a1);
+Host_InitType Host_InitOriginal;
+
+void Host_InitHook(bool a1) {
+	Host_InitOriginal(a1);
+	OriginalCCVar_FindVar(cvarinterface, "sv_alltalk")->m_nFlags |= FCVAR_REPLICATED;
+	auto user_id = OriginalCCVar_FindVar(cvarinterface, "platform_user_id");
+	if (user_id->m_Value.m_StringLength < 10) {
+		std::srand(std::time(0));
+		SetConvarStringOriginal(OriginalCCVar_FindVar(cvarinterface, "platform_user_id"), std::to_string(std::rand()).c_str());
+	}
+
+	MCPServer::InstallEchoCommandFix();
+
+	// Initialize MCP server only if -usemcp argument is present
+	if (ShouldEnableMCP())
+	{
+		MCPServer::InitializeMCP();
+	}
+
+	return;
+}
+inline bool CaselessStringLessThan(const char* const& lhs, const char* const& rhs) {
+	if (!lhs) return false;
+	if (!rhs) return true;
+	return (_stricmp(lhs, rhs) < 0);
+}
+
+static bool ConVarSortFunc(ConCommandBaseR1* const& lhs, ConCommandBaseR1* const& rhs)
+{
+	return CaselessStringLessThan(lhs->m_pszName, rhs->m_pszName);
+}
+
+
+class ICVarIteratorInternal
+{
+public:
+    virtual void SetFirst() = 0;
+	virtual void Next() = 0;
+	virtual bool IsValid() = 0;
+	virtual ConCommandBaseR1* Get() = 0;
+};
+void Find(const CCommand& args)
+{
+	const char* search;
+
+	if (args.ArgC() != 2)
+	{
+		Msg("Usage:  find <string>\n");
+		return;
+	}
+
+	// Get substring to find
+	search = args[1];
+
+	// Use std::vector to store matching cvars for sorting
+	std::vector<ConCommandBaseR1*> matches;
+
+	// Use the FactoryInternalIterator to iterate through all cvars
+	typedef ICVarIteratorInternal* (__thiscall *FactoryInternalIterator_t)(void* cvar);
+	FactoryInternalIterator_t pFactoryInternalIterator = (FactoryInternalIterator_t)(*(uintptr_t**)((void*)cvarinterface))[40];
+	ICVarIteratorInternal* it = pFactoryInternalIterator((void*)cvarinterface);
+	if (it)
+	{
+		for (it->SetFirst(); it->IsValid(); it->Next())
+		{
+			ConCommandBaseR1* var = it->Get();
+			if (!var) continue;
+
+			if (!V_stristr(var->m_pszName, search) &&
+				!V_stristr(var->m_pszHelpString, search))
+				continue;
+
+			matches.push_back(var);
+		}
+	}
+
+	// Sort the results by name
+	std::sort(matches.begin(), matches.end(), ConVarSortFunc);
+
+	// Print the results
+	for (const auto& var : matches)
+	{
+		ConVar_PrintDescription(var);
+	}
+}
+
+
 static FORCEINLINE void
 do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 {
@@ -1999,6 +2212,7 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook((LPVOID)(engine_base + 0x1FE3F0), &SVC_ServerInfo__WriteToBuffer, reinterpret_cast<LPVOID*>(&SVC_ServerInfo__WriteToBufferOriginal));
 	MH_CreateHook((LPVOID)(engine_base + 0x19CBC0), &GetBuildNo, NULL);
 	MH_CreateHook((LPVOID)(engine_base + 0x1E0C10), &CNetChan__GetAddress, reinterpret_cast<LPVOID*>(&oCNetChan__GetAddress));
+	MH_CreateHook((void*)(engine_base + 0x133AA0), &Host_InitHook, (void**)&Host_InitOriginal);
 
 	//MH_CreateHook((LPVOID)(engine_base + 0x0D2490), &ProcessConnectionlessPacketClient, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginalClient));
 
@@ -2007,10 +2221,24 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		MH_CreateHook((LPVOID)(engine_base + 0x21F9C0), &CEngineVGui__Init, reinterpret_cast<LPVOID*>(&CEngineVGui__InitOriginal));
 		MH_CreateHook((LPVOID)(engine_base + 0x21EB70), &CEngineVGui__HideGameUI, reinterpret_cast<LPVOID*>(&CEngineVGui__HideGameUIOriginal));
 		RegisterConCommand("toggleconsole", ToggleConsoleCommand, "Toggles the console", (1 << 17));
-		RegisterConCommand("delta_start_discord_auth", StartDiscordAuth, "Starts the discord auth process", 0);
+		RegisterConCommand("clear", ClearConsoleCommand, "Clears the console", (1 << 17));
+		RegisterConCommand("delta_start_discord_auth", DiscordAuthCommand, "Starts the discord auth process", 0);
 		RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
+
+		// Register slot commands
+		RegisterConCommand("slot1", Slot1Command, "Select menu slot 1", 0);
+		RegisterConCommand("slot2", Slot2Command, "Select menu slot 2", 0);
+		RegisterConCommand("slot3", Slot3Command, "Select menu slot 3", 0);
+		RegisterConCommand("slot4", Slot4Command, "Select menu slot 4", 0);
+		RegisterConCommand("slot5", Slot5Command, "Select menu slot 5", 0);
+		RegisterConCommand("slot6", Slot6Command, "Select menu slot 6", 0);
+		RegisterConCommand("slot7", Slot7Command, "Select menu slot 7", 0);
+		RegisterConCommand("slot8", Slot8Command, "Select menu slot 8", 0);
+		RegisterConCommand("slot9", Slot9Command, "Select menu slot 9", 0);
+		RegisterConCommand("slot10", Slot10Command, "Select menu slot 10", 0);
 		MH_CreateHook((LPVOID)(G_engine + 0x2A200), &sub_2A200, reinterpret_cast<LPVOID*>(&sub_2A200Original));
 		//g_pLogAudio = RegisterConVar("fs_log_audio", "0", FCVAR_NONE, "Log audio file reads");
+		MH_CreateHook((LPVOID)(G_engine + 0xAE00), &GetAcacheHk, reinterpret_cast<LPVOID*>(&GetAcacheOriginal));
 		MH_CreateHook((LPVOID)(engine_base + 0x11DB0), &XmaCallback, reinterpret_cast<LPVOID*>(&oXmaCallback));
 		InitSteamHooks();
 		InitAddons();
@@ -2661,7 +2889,6 @@ void InitializeRecentHostVars()
 }
 
 
-
 static FORCEINLINE void
 do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 {
@@ -2723,10 +2950,12 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	
 	if (IsDedicatedServer()) {
 		MH_CreateHook((LPVOID)(G_engine_ds + 0x45EB0), &GetUserIDStringHook, reinterpret_cast<LPVOID*>(&GetUserIDStringOriginal));
+		MH_CreateHook((LPVOID)(G_engine_ds + 0x46080), &GetUserIDHook, reinterpret_cast<LPVOID*>(&GetUserIDOriginal));
+
 	}
 	else {
 		MH_CreateHook((LPVOID)(engine_base_spec + 0xD5260), &GetUserIDStringHook, reinterpret_cast<LPVOID*>(&GetUserIDStringOriginal));
-
+		MH_CreateHook((LPVOID)(engine_base_spec + 0xD5430), &GetUserIDHook, reinterpret_cast<LPVOID*>(&GetUserIDOriginal));
 	}
 	if (!IsDedicatedServer()) {
 		MH_CreateHook((LPVOID)(engine_base_spec + 0x1E2930), &CNetChan__SendDatagramLISTEN_Part2_Hook, reinterpret_cast<LPVOID*>(&oCNetChan__SendDatagramLISTEN_Part2));
@@ -2755,8 +2984,12 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	RegisterConCommand("verifyain", verifyain_cmd, "Reads the .ain file from disk, compares its nodes & links to in-memory data, logs differences.", FCVAR_CHEAT);
 	RegisterConCommand("updateain", updateain_cmd, "Calls StartRebuild, then overwrites node/link data in the .ain file.", FCVAR_CHEAT);
 	RegisterConCommand("bot_dummy", AddBotDummyConCommand, "Adds a bot.", FCVAR_GAMEDLL | FCVAR_CHEAT);
+	if (IsDedicatedServer())
+		RegisterConCommand("find", Find, "Find a command or convar.", FCVAR_NONE);
 	RegisterConVar("delta_ms_url", "ms.r1delta.net", FCVAR_CLIENTDLL, "Url for r1d masterserver");
 	RegisterConVar("delta_server_auth_token", "", FCVAR_USERINFO | FCVAR_SERVER_CANNOT_QUERY | FCVAR_DONTRECORD | FCVAR_PROTECTED | FCVAR_HIDDEN, "Per-server auth token");
+	RegisterConVar("delta_version", R1D_VERSION, FCVAR_USERINFO | FCVAR_DONTRECORD, "R1Delta version number");
+	RegisterConVar("delta_skip_version_check", "0", FCVAR_GAMEDLL, "Skip version check for connecting clients (sets server to dev mode)");
 	RegisterConVar("delta_persistent_master_auth_token", "DEFAULT", FCVAR_ARCHIVE | FCVAR_SERVER_CANNOT_QUERY | FCVAR_DONTRECORD | FCVAR_PROTECTED | FCVAR_HIDDEN, "Persistent master server authentication token");
 	RegisterConVar("delta_persistent_master_auth_token_failed_reason", "", FCVAR_ARCHIVE | FCVAR_SERVER_CANNOT_QUERY | FCVAR_DONTRECORD | FCVAR_PROTECTED | FCVAR_HIDDEN, "Persistent master server authentication token");
 	RegisterConVar("delta_online_auth_enable", "0", FCVAR_GAMEDLL, "Whether to use master server auth");
@@ -2777,6 +3010,9 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		RegisterConCommand("noclip", noclip_cmd, "Toggles NOCLIP mode.", FCVAR_GAMEDLL | FCVAR_CHEAT);
 	}
 
+	//auto allTalk = OriginalCCVar_FindVar(cvarinterface, "sv_alltalk");
+
+	//allTalk->m_nFlags |= FCVAR_REPLICATED;
 
 	//0x0000415198 on dedicated
 	// 0x0620818 on client
@@ -2870,51 +3106,6 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	R1DAssert(MH_EnableHook(MH_ALL_HOOKS) == MH_OK);
 	//std::cout << "did hooks" << std::endl;
 }
-
-//
-//void DiscordThread() {
-//	
-//#ifdef DISCORD
-//	client = std::make_unique<discordpp::Client>();
-//	client->AddLogCallback([](auto message, auto severity) {
-//		Msg("[Discord::%s] %s\n", EnumToString(severity), message.c_str());
-//	//	std::cout << "[" << EnumToString(severity) << "] " << message << std::endl;
-//		}, discordpp::LoggingSeverity::Info);
-//
-//	client->SetStatusChangedCallback([](auto status, auto error, auto details) {
-//		Msg("Status has changed to %s\n", discordpp::Client::StatusToString(status).c_str());
-//		if (status == discordpp::Client::Status::Ready) {
-//			Msg("Client is ready, you can now call SDK functions. For example:\n");
-//			discordpp::Activity activity;
-//			activity.SetType(discordpp::ActivityTypes::Playing);
-//			activity.SetDetails("Battle Creek");
-//			activity.SetState("In Competitive Match");
-//			client->UpdateRichPresence(activity, [](discordpp::ClientResult result) {
-//				if (result.Successful()) {
-//					std::cout << "Rich presence updated!\n";
-//				}
-//				else {
-//					std::cout << "Failed to update rich presence: " << result.Error() << "\n";
-//				}
-//				});
-//
-//		}
-//		else if (error != discordpp::Client::Error::None) {
-//			Msg("Error connecting: %s %d\n", discordpp::Client::ErrorToString(error).c_str(),
-//				details);
-//		}
-//		});
-//
-//
-//
-//		while (running) {
-//			discordpp::RunCallbacks();
-//			std::this_thread::sleep_for(std::chrono::milliseconds(16));
-//
-//		}
-//#endif
-//}
-
 __int64 (*oAddSearchPathDedi)(__int64 a1, const char* a2, __int64 a3, unsigned int a4);
 __int64 __fastcall AddSearchPathDedi(__int64 a1, const char* a2, __int64 a3, unsigned int a4) {
 	if (!strcmp_static(a2, "r1delta")) {
@@ -3184,6 +3375,7 @@ void __stdcall LoaderNotificationCallback(
 		MH_EnableHook(MH_ALL_HOOKS);
 	}
 	else if (string_equal_size(name, name_len, L"materialsystem_dx11.dll")) {
+		G_matsystem = (uintptr_t)notification_data->Loaded.DllBase;
 		SetupHudWarpMatSystemHooks();
 		MH_EnableHook(MH_ALL_HOOKS);
 	}
@@ -3213,12 +3405,15 @@ void __stdcall LoaderNotificationCallback(
 			SetupSurfaceRenderHooks();
 			SetupSquirrelErrorNotificationHooks();
 			SetupChatWriter();
+			RegisterConVar("delta_enable_ads_sway", "1", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Enable/disable viewmodel ads sway.");
 			RegisterConCommand("+toggleFullscreenMap", toggleFullscreenMap_cmd, "Toggles the fullscreen map.", FCVAR_CLIENTDLL);
 			std::thread(DiscordThread).detach();
 			RegisterConVar("cl_hold_to_rodeo_enable", "0", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "0: Automatic rodeo. 1: Hold to rodeo ALL titans. 2: Hold to rodeo friendlies, automatically rodeo hostile titans.");
 			RegisterConVar("bot_kick_on_death", "1", FCVAR_GAMEDLL | FCVAR_CHEAT, "Enable/disable bots getting kicked on death.");
+			RegisterConVar("delta_improved_colorblind", "0", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Allows certain other things to change color depending on your colorblind setting.");
 			MH_CreateHook((LPVOID)(G_localize + 0x3A40), &h_CLocalize__ReloadLocalizationFiles, (LPVOID*)&o_pCLocalize__ReloadLocalizationFiles);
 			MH_EnableHook(MH_ALL_HOOKS);
+			std::thread(DiscordThread).detach();
 		}
 		if (is_server) do_server(notification_data);
 		if (should_init_security_fixes && (is_client || is_server)) {
