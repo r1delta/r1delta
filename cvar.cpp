@@ -518,7 +518,7 @@ void Slot1Command(const CCommand& args)
 	if (!hud) return;
 
 	__int64 hudMenu = CHudFindElement((__int64)hud, (__int64)"CHudMenu");
-	if (hudMenu) {
+	if (hudMenu && *(_BYTE *)(hudMenu + 0x10)) {
 		CHudMenuSelectMenuItem(hudMenu, 1);
 	}
 }
@@ -530,7 +530,7 @@ void Slot2Command(const CCommand& args)
 	if (!hud) return;
 
 	__int64 hudMenu = CHudFindElement((__int64)hud, (__int64)"CHudMenu");
-	if (hudMenu) {
+	if (hudMenu && *(_BYTE *)(hudMenu + 0x10)) {
 		CHudMenuSelectMenuItem(hudMenu, 2);
 	}
 }
@@ -542,7 +542,7 @@ void Slot3Command(const CCommand& args)
 	if (!hud) return;
 
 	__int64 hudMenu = CHudFindElement((__int64)hud, (__int64)"CHudMenu");
-	if (hudMenu) {
+	if (hudMenu && *(_BYTE *)(hudMenu + 0x10)) {
 		CHudMenuSelectMenuItem(hudMenu, 3);
 	}
 }
@@ -554,7 +554,7 @@ void Slot4Command(const CCommand& args)
 	if (!hud) return;
 
 	__int64 hudMenu = CHudFindElement((__int64)hud, (__int64)"CHudMenu");
-	if (hudMenu) {
+	if (hudMenu && *(_BYTE *)(hudMenu + 0x10)) {
 		CHudMenuSelectMenuItem(hudMenu, 4);
 	}
 }
@@ -566,7 +566,7 @@ void Slot5Command(const CCommand& args)
 	if (!hud) return;
 
 	__int64 hudMenu = CHudFindElement((__int64)hud, (__int64)"CHudMenu");
-	if (hudMenu) {
+	if (hudMenu && *(_BYTE *)(hudMenu + 0x10)) {
 		CHudMenuSelectMenuItem(hudMenu, 5);
 	}
 }
@@ -578,7 +578,7 @@ void Slot6Command(const CCommand& args)
 	if (!hud) return;
 
 	__int64 hudMenu = CHudFindElement((__int64)hud, (__int64)"CHudMenu");
-	if (hudMenu) {
+	if (hudMenu && *(_BYTE *)(hudMenu + 0x10)) {
 		CHudMenuSelectMenuItem(hudMenu, 6);
 	}
 }
@@ -590,7 +590,7 @@ void Slot7Command(const CCommand& args)
 	if (!hud) return;
 
 	__int64 hudMenu = CHudFindElement((__int64)hud, (__int64)"CHudMenu");
-	if (hudMenu) {
+	if (hudMenu && *(_BYTE *)(hudMenu + 0x10)) {
 		CHudMenuSelectMenuItem(hudMenu, 7);
 	}
 }
@@ -602,7 +602,7 @@ void Slot8Command(const CCommand& args)
 	if (!hud) return;
 
 	__int64 hudMenu = CHudFindElement((__int64)hud, (__int64)"CHudMenu");
-	if (hudMenu) {
+	if (hudMenu && *(_BYTE *)(hudMenu + 0x10)) {
 		CHudMenuSelectMenuItem(hudMenu, 8);
 	}
 }
@@ -614,7 +614,7 @@ void Slot9Command(const CCommand& args)
 	if (!hud) return;
 
 	__int64 hudMenu = CHudFindElement((__int64)hud, (__int64)"CHudMenu");
-	if (hudMenu) {
+	if (hudMenu && *(_BYTE *)(hudMenu + 0x10)) {
 		CHudMenuSelectMenuItem(hudMenu, 9);
 	}
 }
@@ -626,7 +626,7 @@ void Slot10Command(const CCommand& args)
 	if (!hud) return;
 
 	__int64 hudMenu = CHudFindElement((__int64)hud, (__int64)"CHudMenu");
-	if (hudMenu) {
+	if (hudMenu && *(_BYTE *)(hudMenu + 0x10)) {
 		CHudMenuSelectMenuItem(hudMenu, 10);
 	}
 }

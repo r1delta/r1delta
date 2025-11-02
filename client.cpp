@@ -724,6 +724,26 @@ __int64 __fastcall LoadingProgress__SetupControlStates(__int64 a1, const char *a
     return oLoadingProgress__SetupControlStates(a1, a2, effective_a3);
 }
 
+typedef void *(*CHudMenu__ThinkType)(__int64 a1);
+CHudMenu__ThinkType oCHudMenu__Think = nullptr;
+void *__fastcall CHudMenu__Think(__int64 a1)
+{
+    // Store the byte value before calling Think
+    BYTE prevValue = *(_BYTE *)(a1 + 648);
+
+    // Call the original Think function
+    void *result = oCHudMenu__Think(a1);
+
+    // Check if the byte went from non-zero to 0 (menu timed out)
+    BYTE newValue = *(_BYTE *)(a1 + 648);
+    if (prevValue != 0 && newValue == 0) {
+        // Menu timed out, send slot10 to cancel on server
+        Cbuf_AddText(0, "slot10\n", 0);
+    }
+
+    return result;
+}
+
 void InitClient()
 {
     auto client = G_client;
@@ -733,6 +753,7 @@ void InitClient()
     GetHud = (GetHudType)(client + 0x173390);
     CHudFindElement = (CHudFindElementType)(client + 0x175850);
     CHudMenuSelectMenuItem = (CHudMenuSelectMenuItemType)(client + 0x1B3850);
+    MH_CreateHook((LPVOID)(client + 0x1B3740), &CHudMenu__Think, reinterpret_cast<LPVOID *>(&oCHudMenu__Think));
     MH_CreateHook((LPVOID)(client + 0x21FE50), &PredictionErrorFn, reinterpret_cast<LPVOID *>(NULL));
     // MH_CreateHook((LPVOID)(client + 0x029840), &C_BaseEntity__VPhysicsInitNormal, reinterpret_cast<LPVOID*>(NULL));
     MH_CreateHook((LPVOID)(client + 0x27F2C0), &sub_18027F2C0, reinterpret_cast<LPVOID *>(&sub_18027F2C0Original));
