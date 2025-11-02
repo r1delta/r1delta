@@ -737,8 +737,8 @@ void *__fastcall CHudMenu__Think(__int64 a1)
     // Check if the byte went from non-zero to 0 (menu timed out)
     BYTE newValue = *(_BYTE *)(a1 + 648);
     if (prevValue != 0 && newValue == 0) {
-        // Menu timed out, send slot10 to cancel on server
-        Cbuf_AddText(0, "slot10\n", 0);
+        // Menu timed out, send menuselect -1 to cancel on server
+        Cbuf_AddText(0, "menuselect -1\n", 0);
     }
 
     return result;
