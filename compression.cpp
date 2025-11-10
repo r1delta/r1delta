@@ -40,6 +40,8 @@
 // --------------------------------------------------------------------------
 constexpr uint64_t R1D_marker = 0x5244315f5f4d4150ULL; // "PAM__1DR" in little-endian
 static const size_t MAX_CHUNK_COMPRESSED_SIZE = 1U << 20; // 1 MB max compressed chunk
+static const size_t MAX_DECOMPRESSED_SIZE = 128U << 20; // 128 MB cap to prevent allocation bombs
+static const size_t DECOMP_BUFFER_CHUNK = 1U << 20; // Grow decompression buffer in 1 MB chunks
 
 // --------------------------------------------------------------------------
 // Original function pointer types for fallback to LZHAM
@@ -311,42 +313,101 @@ __int64 r1dc_decompress(
             *pIn_buf_size = 0;
         }
 
-        // If the engine says "no more input," then do the single-shot decompress
+        // If the engine says "no more input," then decompress using streaming
         if (no_more_input_bytes_flag)
         {
             if (ctx->totalComp > 0)
             {
-                // Get the frame size if possible
+                // Get the frame size if known
                 unsigned long long fSize = ZSTD_getFrameContentSize(ctx->m_compBuf, ctx->totalComp);
-                if (fSize == ZSTD_CONTENTSIZE_ERROR || fSize == ZSTD_CONTENTSIZE_UNKNOWN)
+
+                // Determine initial buffer size
+                size_t initialSize = DECOMP_BUFFER_CHUNK;
+                if (fSize != ZSTD_CONTENTSIZE_ERROR && fSize != ZSTD_CONTENTSIZE_UNKNOWN)
                 {
-                    // fallback guess, or do your own logic
-                    fSize = 5ULL << 20; // e.g. guess up to 5 MB
+                    // Known size - check against cap
+                    if (fSize > MAX_DECOMPRESSED_SIZE)
+                    {
+                        Warning("[r1dc] Frame size %llu exceeds max allowed %zu\n", fSize, MAX_DECOMPRESSED_SIZE);
+                        R1DAssert(!"Frame size exceeds cap");
+                        ctx->active.fetch_sub(1);
+                        return -1;
+                    }
+                    initialSize = (size_t)fSize;
                 }
 
-                // Allocate decompression buffer
-                ctx->m_decompBuf = static_cast<uint8_t*>(GlobalAllocator()->mi_malloc((size_t)fSize, TAG_COMPRESSION, HEAP_DELTA));
-                ctx->m_decompSize = (size_t)fSize;
+                // Allocate initial buffer
+                ctx->m_decompBuf = static_cast<uint8_t*>(GlobalAllocator()->mi_malloc(initialSize, TAG_COMPRESSION, HEAP_DELTA));
+                size_t bufferCapacity = initialSize;
+                ctx->m_decompSize = 0; // Actual bytes decompressed
 
-                // Single-shot decompress
-                size_t const actualSize = ZSTD_decompress(
-                    ctx->m_decompBuf, ctx->m_decompSize,
-                    ctx->m_compBuf, ctx->totalComp
-                );
-                if (ZSTD_isError(actualSize))
+                // Create streaming decompression context
+                ZSTD_DStream* dstream = ZSTD_createDStream();
+                if (!dstream)
                 {
-                    Warning("[r1dc] ZSTD decompress error: %s\n",
-                        ZSTD_getErrorName(actualSize));
-                    // Return an error code so the engine sees we failed
-                    R1DAssert(!"Decompression error");
+                    Warning("[r1dc] Failed to create ZSTD_DStream\n");
+                    GlobalAllocator()->mi_free(ctx->m_decompBuf, TAG_COMPRESSION, HEAP_DELTA);
+                    ctx->m_decompBuf = nullptr;
                     ctx->active.fetch_sub(1);
                     return -1;
                 }
 
-                // Shrink to actual size
-                ctx->m_decompSize = actualSize;
+                ZSTD_initDStream(dstream);
+
+                // Prepare input
+                ZSTD_inBuffer input = { ctx->m_compBuf, ctx->totalComp, 0 };
+
+                // Decompress with growable buffer
+                bool error = false;
+                while (input.pos < input.size)
+                {
+                    // Ensure we have output space
+                    if (ctx->m_decompSize >= bufferCapacity)
+                    {
+                        // Need to grow - check cap
+                        size_t newCapacity = bufferCapacity + DECOMP_BUFFER_CHUNK;
+                        if (newCapacity > MAX_DECOMPRESSED_SIZE)
+                        {
+                            Warning("[r1dc] Decompressed size exceeds max allowed %zu\n", MAX_DECOMPRESSED_SIZE);
+                            error = true;
+                            break;
+                        }
+
+                        // Realloc
+                        uint8_t* newBuf = static_cast<uint8_t*>(GlobalAllocator()->mi_malloc(newCapacity, TAG_COMPRESSION, HEAP_DELTA));
+                        std::memcpy(newBuf, ctx->m_decompBuf, ctx->m_decompSize);
+                        GlobalAllocator()->mi_free(ctx->m_decompBuf, TAG_COMPRESSION, HEAP_DELTA);
+                        ctx->m_decompBuf = newBuf;
+                        bufferCapacity = newCapacity;
+                    }
+
+                    // Decompress
+                    ZSTD_outBuffer output = { ctx->m_decompBuf + ctx->m_decompSize, bufferCapacity - ctx->m_decompSize, 0 };
+                    size_t ret = ZSTD_decompressStream(dstream, &output, &input);
+
+                    if (ZSTD_isError(ret))
+                    {
+                        Warning("[r1dc] ZSTD decompress stream error: %s\n", ZSTD_getErrorName(ret));
+                        error = true;
+                        break;
+                    }
+
+                    ctx->m_decompSize += output.pos;
+                }
+
+                ZSTD_freeDStream(dstream);
+
+                if (error)
+                {
+                    GlobalAllocator()->mi_free(ctx->m_decompBuf, TAG_COMPRESSION, HEAP_DELTA);
+                    ctx->m_decompBuf = nullptr;
+                    ctx->m_decompSize = 0;
+                    R1DAssert(!"Decompression error");
+                    ctx->active.fetch_sub(1);
+                    return -1;
+                }
             }
-            // Mark that we've done the single-shot
+            // Mark that we've done the decompression
             ctx->decompressed = true;
         }
     }
