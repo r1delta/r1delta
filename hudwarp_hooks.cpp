@@ -12,7 +12,7 @@ ID3DUserDefinedAnnotation* PIX = 0;
 
 // Thread safety and error tracking
 static DWORD gRenderThreadId = 0;
-static bool gGPUHudwarpFailed = false;
+bool gGPUHudwarpFailed = false;
 
 typedef __int64(__fastcall *BeginPixEvent_type)(__int64 queuedRenderContext, unsigned long color, const char* pszName);
 BeginPixEvent_type BeginPixEvent = nullptr;
