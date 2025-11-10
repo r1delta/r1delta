@@ -5,6 +5,25 @@
 
 // Ported from TFORevive by Barnaby
 
+// External error flag to disable GPU hudwarp on failures
+extern bool gGPUHudwarpFailed;
+
+// Helper macro to check HRESULT and fail closed
+#define CHECK_D3D_HRESULT(hr, msg) \
+	if (FAILED(hr)) { \
+		gGPUHudwarpFailed = true; \
+		/* TODO: Log error message */ \
+		return; \
+	}
+
+// Helper for Resize where we can't return from constructor
+#define CHECK_D3D_HRESULT_RESIZE(hr, msg) \
+	if (FAILED(hr)) { \
+		gGPUHudwarpFailed = true; \
+		/* TODO: Log error message */ \
+		return; \
+	}
+
 bool CompileShader(const char* szShader, const char* szEntrypoint, const char* szTarget, ID3D10Blob** pBlob)
 {
 	ID3D10Blob* pErrorBlob = nullptr;
@@ -38,11 +57,13 @@ HudwarpProcess::HudwarpProcess(ID3D11Device* pDevice, ID3D11DeviceContext** ppID
 	if (!pVertexShader)
 	{
 		if (!CompileShader(hudwarpShader, "VS", "vs_5_0", &pBlob))
+		{
+			gGPUHudwarpFailed = true;
 			return;
+		}
 
 		HRESULT hr = pDevice->CreateVertexShader(pBlob->GetBufferPointer(), pBlob->GetBufferSize(), nullptr, &pVertexShader);
-		if (FAILED(hr))
-			return;
+		CHECK_D3D_HRESULT(hr, "CreateVertexShader failed");
 	}
 
 	// Define/create the input layout for the vertex shader
@@ -53,18 +74,33 @@ HudwarpProcess::HudwarpProcess(ID3D11Device* pDevice, ID3D11DeviceContext** ppID
 	UINT numElements = 2;
 
 	HRESULT hr = pDevice->CreateInputLayout(layout, numElements, pBlob->GetBufferPointer(), pBlob->GetBufferSize(), &m_pVertexLayout);
-	if (FAILED(hr))
-		return;
+	CHECK_D3D_HRESULT(hr, "CreateInputLayout failed");
 
 	// Create pixel shader
 	if (!pPixelShader)
 	{
+		// Release the blob from VS compilation before reusing
+		if (pBlob)
+		{
+			pBlob->Release();
+			pBlob = nullptr;
+		}
+
 		if (!CompileShader(hudwarpShader, "PS", "ps_5_0", &pBlob))
+		{
+			gGPUHudwarpFailed = true;
 			return;
+		}
 
 		hr = pDevice->CreatePixelShader(pBlob->GetBufferPointer(), pBlob->GetBufferSize(), nullptr, &pPixelShader);
-		if (FAILED(hr))
-			return;
+		CHECK_D3D_HRESULT(hr, "CreatePixelShader failed");
+	}
+
+	// Release the blob when done
+	if (pBlob)
+	{
+		pBlob->Release();
+		pBlob = nullptr;
 	}
 
 	auto resolution = reinterpret_cast<unsigned int*>(G_matsystem + 0x290DD8);
@@ -75,9 +111,8 @@ HudwarpProcess::HudwarpProcess(ID3D11Device* pDevice, ID3D11DeviceContext** ppID
 	unsigned int widthWithBorder = m_width * (1.0f + HUD_TEX_BORDER_SIZE * 2.0f);
 	unsigned int heightWithBorder = m_height * (1.0f + HUD_TEX_BORDER_SIZE * 2.0f);
 
-	// Setup the texture descriptor
-	D3D11_TEXTURE2D_DESC textureDesc;
-	ZeroMemory(&textureDesc, sizeof(textureDesc));
+	// Setup the texture descriptor - Initialize with {} to zero all fields
+	D3D11_TEXTURE2D_DESC textureDesc = {};
 	textureDesc.Width = widthWithBorder;
 	textureDesc.Height = heightWithBorder;
 	textureDesc.MipLevels = 1;
@@ -90,16 +125,18 @@ HudwarpProcess::HudwarpProcess(ID3D11Device* pDevice, ID3D11DeviceContext** ppID
 	textureDesc.MiscFlags = 0;
 
 	// Create the render texture
-	m_pDevice->CreateTexture2D(&textureDesc, NULL, &m_pRenderTexture);
+	hr = m_pDevice->CreateTexture2D(&textureDesc, NULL, &m_pRenderTexture);
+	CHECK_D3D_HRESULT(hr, "CreateTexture2D failed");
 
-	// Setup the render target view descriptor
-	D3D11_RENDER_TARGET_VIEW_DESC renderTargetViewDesc;
+	// Setup the render target view descriptor - Initialize with {} to zero all fields
+	D3D11_RENDER_TARGET_VIEW_DESC renderTargetViewDesc = {};
 	renderTargetViewDesc.Format = textureDesc.Format;
 	renderTargetViewDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
 	renderTargetViewDesc.Texture2D.MipSlice = 0;
 
 	// Create the render target view.
-	m_pDevice->CreateRenderTargetView(m_pRenderTexture, &renderTargetViewDesc, &m_pRenderTargetView);
+	hr = m_pDevice->CreateRenderTargetView(m_pRenderTexture, &renderTargetViewDesc, &m_pRenderTargetView);
+	CHECK_D3D_HRESULT(hr, "CreateRenderTargetView failed");
 
 	// Create our viewport
 	viewport.Width = (float)widthWithBorder;
@@ -107,15 +144,16 @@ HudwarpProcess::HudwarpProcess(ID3D11Device* pDevice, ID3D11DeviceContext** ppID
 	viewport.MinDepth = 0.0f;
 	viewport.MaxDepth = 1.0f;
 
-	// Setup the shader resource view descriptor
-	D3D11_SHADER_RESOURCE_VIEW_DESC shaderResourceViewDesc;
+	// Setup the shader resource view descriptor - Initialize with {} to zero all fields
+	D3D11_SHADER_RESOURCE_VIEW_DESC shaderResourceViewDesc = {};
 	shaderResourceViewDesc.Format = textureDesc.Format;
 	shaderResourceViewDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
 	shaderResourceViewDesc.Texture2D.MostDetailedMip = 0;
 	shaderResourceViewDesc.Texture2D.MipLevels = 1;
 
 	// Create the shader resource view.
-	m_pDevice->CreateShaderResourceView(m_pRenderTexture, &shaderResourceViewDesc, &m_pShaderResourceView);
+	hr = m_pDevice->CreateShaderResourceView(m_pRenderTexture, &shaderResourceViewDesc, &m_pShaderResourceView);
+	CHECK_D3D_HRESULT(hr, "CreateShaderResourceView failed");
 
 	// Create the constant buffer
 	D3D11_BUFFER_DESC bd{ 0 };
@@ -132,7 +170,8 @@ HudwarpProcess::HudwarpProcess(ID3D11Device* pDevice, ID3D11DeviceContext** ppID
 
 	D3D11_SUBRESOURCE_DATA sr{ 0 };
 	sr.pSysMem = &cb;
-	pDevice->CreateBuffer(&bd, &sr, &m_pConstantBuffer);
+	hr = pDevice->CreateBuffer(&bd, &sr, &m_pConstantBuffer);
+	CHECK_D3D_HRESULT(hr, "CreateBuffer (constant buffer) failed");
 
 	// Create a triangle to render
 	// Create a vertex buffer, start by setting up a description.
@@ -158,7 +197,8 @@ HudwarpProcess::HudwarpProcess(ID3D11Device* pDevice, ID3D11DeviceContext** ppID
 	// create the buffer.
 	ZeroMemory(&sr, sizeof(sr));
 	sr.pSysMem = &pVerts;
-	pDevice->CreateBuffer(&bd, &sr, &m_pVertexBuffer);
+	hr = pDevice->CreateBuffer(&bd, &sr, &m_pVertexBuffer);
+	CHECK_D3D_HRESULT(hr, "CreateBuffer (vertex buffer) failed");
 
 	// Create an index buffer
 	ZeroMemory(&bd, sizeof(bd));
@@ -171,7 +211,8 @@ HudwarpProcess::HudwarpProcess(ID3D11Device* pDevice, ID3D11DeviceContext** ppID
 	bd.StructureByteStride = sizeof(UINT);
 
 	sr.pSysMem = &pIndices;
-	pDevice->CreateBuffer(&bd, &sr, &m_pIndexBuffer);
+	hr = pDevice->CreateBuffer(&bd, &sr, &m_pIndexBuffer);
+	CHECK_D3D_HRESULT(hr, "CreateBuffer (index buffer) failed");
 
 	// Describe the Sample State
 	D3D11_SAMPLER_DESC sampDesc;
@@ -187,7 +228,8 @@ HudwarpProcess::HudwarpProcess(ID3D11Device* pDevice, ID3D11DeviceContext** ppID
 	sampDesc.MaxLOD = D3D11_FLOAT32_MAX;
 
 	//Create the Sample State
-	pDevice->CreateSamplerState(&sampDesc, &m_pSamplerState);
+	hr = pDevice->CreateSamplerState(&sampDesc, &m_pSamplerState);
+	CHECK_D3D_HRESULT(hr, "CreateSamplerState failed");
 
 	// Create Enabled Blend State
 	D3D11_RENDER_TARGET_BLEND_DESC rt_blend_desc;
@@ -218,7 +260,8 @@ HudwarpProcess::HudwarpProcess(ID3D11Device* pDevice, ID3D11DeviceContext** ppID
 	blend_desc.IndependentBlendEnable = false;
 	blend_desc.RenderTarget[0] = rt_blend_desc;
 
-	pDevice->CreateBlendState(&blend_desc, &m_pBlendState);
+	hr = pDevice->CreateBlendState(&blend_desc, &m_pBlendState);
+	CHECK_D3D_HRESULT(hr, "CreateBlendState failed");
 
 	D3D11_RASTERIZER_DESC cmdesc;
 
@@ -230,21 +273,24 @@ HudwarpProcess::HudwarpProcess(ID3D11Device* pDevice, ID3D11DeviceContext** ppID
 	//cmdesc.MultisampleEnable = true;
 	//cmdesc.AntialiasedLineEnable = true;
 	cmdesc.DepthClipEnable = true;
-	pDevice->CreateRasterizerState(&cmdesc, &m_pCWcullMode);
+	hr = pDevice->CreateRasterizerState(&cmdesc, &m_pCWcullMode);
+	CHECK_D3D_HRESULT(hr, "CreateRasterizerState failed");
 }
 
 HudwarpProcess::~HudwarpProcess()
 {
-	m_pRenderTexture->Release();
-	m_pRenderTargetView->Release();
-	m_pShaderResourceView->Release();
-	m_pSamplerState->Release();
-	m_pBlendState->Release();
-	m_pVertexBuffer->Release();
-	m_pVertexBuffer->Release();
-	m_pIndexBuffer->Release();
-	m_pConstantBuffer->Release();
-	m_pCWcullMode->Release();
+	// Release all D3D11 resources
+	if (m_pRenderTexture) m_pRenderTexture->Release();
+	if (m_pRenderTargetView) m_pRenderTargetView->Release();
+	if (m_pShaderResourceView) m_pShaderResourceView->Release();
+	if (m_pSamplerState) m_pSamplerState->Release();
+	if (m_pBlendState) m_pBlendState->Release();
+	if (m_pVertexBuffer) m_pVertexBuffer->Release(); // FIX: was released twice!
+	if (m_pVertexLayout) m_pVertexLayout->Release(); // FIX: was missing!
+	if (m_pIndexBuffer) m_pIndexBuffer->Release();
+	if (m_pConstantBuffer) m_pConstantBuffer->Release();
+	if (m_pCWcullMode) m_pCWcullMode->Release();
+	// Note: pVertexShader and pPixelShader are global and shared, don't release here
 }
 
 void HudwarpProcess::Resize(unsigned int w, unsigned int h)
@@ -264,9 +310,8 @@ void HudwarpProcess::Resize(unsigned int w, unsigned int h)
 	unsigned int widthWithBorder = m_width * (1.0f + HUD_TEX_BORDER_SIZE * 2.0f);
 	unsigned int heightWithBorder = m_height * (1.0f + HUD_TEX_BORDER_SIZE * 2.0f);
 
-	// Setup the texture descriptor
-	D3D11_TEXTURE2D_DESC textureDesc;
-	ZeroMemory(&textureDesc, sizeof(textureDesc));
+	// Setup the texture descriptor - Initialize with {} to zero all fields
+	D3D11_TEXTURE2D_DESC textureDesc = {};
 	textureDesc.Width = widthWithBorder;
 	textureDesc.Height = heightWithBorder;
 	textureDesc.MipLevels = 1;
@@ -279,26 +324,33 @@ void HudwarpProcess::Resize(unsigned int w, unsigned int h)
 	textureDesc.MiscFlags = 0;
 
 	// Create the render texture
-	m_pDevice->CreateTexture2D(&textureDesc, NULL, &m_pRenderTexture);
+	HRESULT hr = m_pDevice->CreateTexture2D(&textureDesc, NULL, &m_pRenderTexture);
+	CHECK_D3D_HRESULT_RESIZE(hr, "CreateTexture2D failed in Resize");
 
-	// Setup the render target view descriptor
-	D3D11_RENDER_TARGET_VIEW_DESC renderTargetViewDesc;
+	// Setup the render target view descriptor - Initialize with {} to zero all fields
+	D3D11_RENDER_TARGET_VIEW_DESC renderTargetViewDesc = {};
 	renderTargetViewDesc.Format = textureDesc.Format;
 	renderTargetViewDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
 	renderTargetViewDesc.Texture2D.MipSlice = 0;
 
 	// Create the render target view.
-	m_pDevice->CreateRenderTargetView(m_pRenderTexture, &renderTargetViewDesc, &m_pRenderTargetView);
+	hr = m_pDevice->CreateRenderTargetView(m_pRenderTexture, &renderTargetViewDesc, &m_pRenderTargetView);
+	CHECK_D3D_HRESULT_RESIZE(hr, "CreateRenderTargetView failed in Resize");
 
-	// Setup the shader resource view descriptor
-	D3D11_SHADER_RESOURCE_VIEW_DESC shaderResourceViewDesc;
+	// Setup the shader resource view descriptor - Initialize with {} to zero all fields
+	D3D11_SHADER_RESOURCE_VIEW_DESC shaderResourceViewDesc = {};
 	shaderResourceViewDesc.Format = textureDesc.Format;
 	shaderResourceViewDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
 	shaderResourceViewDesc.Texture2D.MostDetailedMip = 0;
 	shaderResourceViewDesc.Texture2D.MipLevels = 1;
 
 	// Create the shader resource view.
-	m_pDevice->CreateShaderResourceView(m_pRenderTexture, &shaderResourceViewDesc, &m_pShaderResourceView);
+	hr = m_pDevice->CreateShaderResourceView(m_pRenderTexture, &shaderResourceViewDesc, &m_pShaderResourceView);
+	CHECK_D3D_HRESULT_RESIZE(hr, "CreateShaderResourceView failed in Resize");
+
+	// Update the viewport dimensions (FIX: was previously missing)
+	viewport.Width = (float)widthWithBorder;
+	viewport.Height = (float)heightWithBorder;
 }
 
 void HudwarpProcess::UpdateSettings(HudwarpSettings* hudwarpSettings)
@@ -328,23 +380,26 @@ void HudwarpProcess::Begin()
 
 void HudwarpProcess::Finish()
 {
-	// Set the current blend state
-	ID3D11BlendState* pOriginalBlendState;
+	// ===== SAVE COMPLETE PIPELINE STATE =====
+
+	// Blend state
+	ID3D11BlendState* pOriginalBlendState = nullptr;
 	float oldBlendFactor[4];
 	unsigned int oldSampleMask;
 	m_pContext->OMGetBlendState(&pOriginalBlendState, oldBlendFactor, &oldSampleMask);
 
-	// Get current shader state
-	ID3D11VertexShader* pOriginalVertexShader;
-	ID3D11PixelShader* pOriginalPixelShader;
+	// Shaders
+	ID3D11VertexShader* pOriginalVertexShader = nullptr;
+	ID3D11PixelShader* pOriginalPixelShader = nullptr;
 	m_pContext->VSGetShader(&pOriginalVertexShader, 0, 0);
 	m_pContext->PSGetShader(&pOriginalPixelShader, 0, 0);
 
-	ID3D11Buffer* pOriginalVertexBuffer;
+	// Input assembler state
+	ID3D11Buffer* pOriginalVertexBuffer = nullptr;
 	UINT originalVertexStride = 0;
 	UINT originalVertexOffset = 0;
-	ID3D11InputLayout* pOriginalVertexLayout;
-	ID3D11Buffer* pOriginalIndexBuffer;
+	ID3D11InputLayout* pOriginalVertexLayout = nullptr;
+	ID3D11Buffer* pOriginalIndexBuffer = nullptr;
 	DXGI_FORMAT originalIndexFormat;
 	UINT originalIndexOffset = 0;
 	D3D11_PRIMITIVE_TOPOLOGY originalPrimitiveTopology;
@@ -352,6 +407,24 @@ void HudwarpProcess::Finish()
 	m_pContext->IAGetInputLayout(&pOriginalVertexLayout);
 	m_pContext->IAGetIndexBuffer(&pOriginalIndexBuffer, &originalIndexFormat, &originalIndexOffset);
 	m_pContext->IAGetPrimitiveTopology(&originalPrimitiveTopology);
+
+	// Rasterizer state (FIX: was not saved!)
+	ID3D11RasterizerState* pOriginalRasterizerState = nullptr;
+	m_pContext->RSGetState(&pOriginalRasterizerState);
+
+	// Constant buffers (FIX: was not saved!)
+	ID3D11Buffer* pOriginalVSConstantBuffer = nullptr;
+	ID3D11Buffer* pOriginalPSConstantBuffer = nullptr;
+	m_pContext->VSGetConstantBuffers(0, 1, &pOriginalVSConstantBuffer);
+	m_pContext->PSGetConstantBuffers(0, 1, &pOriginalPSConstantBuffer);
+
+	// Shader resources (FIX: was not saved!)
+	ID3D11ShaderResourceView* pOriginalPSSRV = nullptr;
+	m_pContext->PSGetShaderResources(0, 1, &pOriginalPSSRV);
+
+	// Samplers (FIX: was not saved!)
+	ID3D11SamplerState* pOriginalPSSampler = nullptr;
+	m_pContext->PSGetSamplers(0, 1, &pOriginalPSSampler);
 
 	// Set the blend state	
 	m_pContext->OMSetBlendState(m_pBlendState, NULL, 0xffffffff);
@@ -396,20 +469,61 @@ void HudwarpProcess::Finish()
 	// Draw the texture to the screen
 	m_pContext->DrawIndexed(6, 0, 0);
 
-	// **************************************************
-	// *** RESTORE STATE OTHERWISE WE GET VISUAL BUGS ***
-	// **************************************************
-	// Set the shaders
+	// ===== RESTORE COMPLETE PIPELINE STATE =====
+
+	// Restore shaders
 	m_pContext->VSSetShader(pOriginalVertexShader, 0, 0);
 	m_pContext->PSSetShader(pOriginalPixelShader, 0, 0);
+
+	// Restore input assembler state
 	m_pContext->IASetVertexBuffers(0, 1, &pOriginalVertexBuffer, &originalVertexStride, &originalVertexOffset);
 	m_pContext->IASetInputLayout(pOriginalVertexLayout);
 	m_pContext->IASetIndexBuffer(pOriginalIndexBuffer, originalIndexFormat, originalIndexOffset);
 	m_pContext->IASetPrimitiveTopology(originalPrimitiveTopology);
 
-	// Set the render target back
+	// Restore render targets
 	m_pContext->OMSetRenderTargets(1, &m_pOriginalRenderTargetView, m_pOriginalDepthStencilView);
 
-	// Restore the blend state
+	// Restore blend state
 	m_pContext->OMSetBlendState(pOriginalBlendState, oldBlendFactor, oldSampleMask);
+
+	// Restore rasterizer state (FIX: was not restored!)
+	m_pContext->RSSetState(pOriginalRasterizerState);
+
+	// Restore constant buffers (FIX: was not restored!)
+	m_pContext->VSSetConstantBuffers(0, 1, &pOriginalVSConstantBuffer);
+	m_pContext->PSSetConstantBuffers(0, 1, &pOriginalPSConstantBuffer);
+
+	// Restore shader resources (FIX: was not restored!)
+	m_pContext->PSSetShaderResources(0, 1, &pOriginalPSSRV);
+
+	// Restore samplers (FIX: was not restored!)
+	m_pContext->PSSetSamplers(0, 1, &pOriginalPSSampler);
+
+	// ===== RELEASE ALL AddRef'd COM POINTERS =====
+	// All the Get* calls above AddRef, so we must Release them
+
+	if (pOriginalBlendState) pOriginalBlendState->Release();
+	if (pOriginalVertexShader) pOriginalVertexShader->Release();
+	if (pOriginalPixelShader) pOriginalPixelShader->Release();
+	if (pOriginalVertexBuffer) pOriginalVertexBuffer->Release();
+	if (pOriginalVertexLayout) pOriginalVertexLayout->Release();
+	if (pOriginalIndexBuffer) pOriginalIndexBuffer->Release();
+	if (pOriginalRasterizerState) pOriginalRasterizerState->Release();
+	if (pOriginalVSConstantBuffer) pOriginalVSConstantBuffer->Release();
+	if (pOriginalPSConstantBuffer) pOriginalPSConstantBuffer->Release();
+	if (pOriginalPSSRV) pOriginalPSSRV->Release();
+	if (pOriginalPSSampler) pOriginalPSSampler->Release();
+
+	// Release the saved RT/DSV from Begin() (FIX: was not released!)
+	if (m_pOriginalRenderTargetView)
+	{
+		m_pOriginalRenderTargetView->Release();
+		m_pOriginalRenderTargetView = nullptr;
+	}
+	if (m_pOriginalDepthStencilView)
+	{
+		m_pOriginalDepthStencilView->Release();
+		m_pOriginalDepthStencilView = nullptr;
+	}
 }
