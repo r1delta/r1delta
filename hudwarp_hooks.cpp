@@ -10,6 +10,10 @@ ID3D11Device* pDevice = 0;
 ID3D11DeviceContext** ppID3D11DeviceContext = 0;
 ID3DUserDefinedAnnotation* PIX = 0;
 
+// Thread safety and error tracking
+static DWORD gRenderThreadId = 0;
+static bool gGPUHudwarpFailed = false;
+
 typedef __int64(__fastcall *BeginPixEvent_type)(__int64 queuedRenderContext, unsigned long color, const char* pszName);
 BeginPixEvent_type BeginPixEvent = nullptr;
 
@@ -83,6 +87,9 @@ char __fastcall sub_63D0(HWND a1, unsigned int a2, __int64 a3)
 	// Initialization of DirectX swapchain and related device/context setup
 	auto ret = sub_63D0_org(a1, a2, a3);
 
+	// Capture render thread ID for thread safety
+	gRenderThreadId = GetCurrentThreadId();
+
 	// Init GPU Hudwarp
 	SetupHudwarp();
 
@@ -92,7 +99,7 @@ char __fastcall sub_63D0(HWND a1, unsigned int a2, __int64 a3)
 
 void HudRenderStart()
 {
-	if (!shouldUseGPUHudwarp)
+	if (!shouldUseGPUHudwarp || gGPUHudwarpFailed)
 		return;
 
 	if (hudwarpProcess)
@@ -101,7 +108,7 @@ void HudRenderStart()
 
 void HudRenderFinish()
 {
-	if (!shouldUseGPUHudwarp)
+	if (!shouldUseGPUHudwarp || gGPUHudwarpFailed)
 		return;
 
 	if (hudwarpProcess)
@@ -180,14 +187,17 @@ void __fastcall CMatSystemSurface__ApplyHudwarpSettings(void* thisptr, HudwarpSe
 	// Replace chopsize, it gets set from the cvar in CMatSystemSurface__ApplyHudwarpSettings
 	if (hudwarp_use_gpu->m_Value.m_nValue || hudwarp_disable->m_Value.m_nValue == 1)
 	{
-		if (screenX > screenY) [[likely]]
-			{
-				hudwarp_chopsize->m_Value.m_nValue = screenX;
-			}
-		else
-		{
-			hudwarp_chopsize->m_Value.m_nValue = screenY;
-		}
+		// FIX: Clamp to safe range to avoid massive allocations in materialsystem_dx11
+		// that can cause crashes on low-memory systems
+		unsigned int targetChopsize = (screenX > screenY) ? screenX : screenY;
+
+		// Clamp to range [64, 512] to prevent excessive geometry/texture allocations
+		if (targetChopsize < 64)
+			targetChopsize = 64;
+		else if (targetChopsize > 512)
+			targetChopsize = 512;
+
+		hudwarp_chopsize->m_Value.m_nValue = targetChopsize;
 	}
 
 	CMatSystemSurface__ApplyHudwarpSettings_org(thisptr, &newSettings, screenX, screenY);
@@ -272,6 +282,10 @@ void SetPixMarker_Hook(void* queueRenderContext, uint32_t color, const char* psz
 #endif
 
 void __fastcall BeginPixEvent_Hook(void* queuedRenderContext, unsigned long color, const char* pszName) {
+	// Thread safety gate: only process on render thread
+	if (gRenderThreadId != 0 && GetCurrentThreadId() != gRenderThreadId)
+		return;
+
 	static unsigned int hudEventDepth = 0;
 
 	switch (color)
