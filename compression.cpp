@@ -33,6 +33,7 @@
 #include "load.h"
 #include "logging.h"
 #include <mutex>
+#include <atomic>
 
 // --------------------------------------------------------------------------
 // Constants, marker
@@ -69,6 +70,10 @@ struct r1dc_context_t
     ~r1dc_context_t() {}
 
     SRWLOCK mtx = SRWLOCK_INIT;          // Guard all mutable state below
+
+    // Debug reentrancy tracking
+    std::atomic<uint32_t> active{0};
+
     // LZHAM fallback
     void* lzham_ctx;
     bool  lzham_inited;
@@ -124,7 +129,10 @@ __int64 r1dc_reinit(void* p, void* unk1, void* unk2, void* unk3)
     if (!p) return 0;
     r1dc_context_t* ctx = static_cast<r1dc_context_t*>(p);
 
- //   SRWGuard lock(&ctx->mtx);
+    SRWGuard lock(&ctx->mtx);
+
+    // Reentrancy check: ensure no other thread is using this context
+    R1DAssert(ctx->active.load() == 0 && "Context still in use during reinit");
 
     // Reset ZSTD detection
     ctx->typeDetermined = false;
@@ -158,7 +166,10 @@ __int64 r1dc_deinit(void* p)
     if (!p) return 0;
     r1dc_context_t* ctx = static_cast<r1dc_context_t*>(p);
 
-  //  SRWGuard lock(&ctx->mtx);
+    SRWGuard lock(&ctx->mtx);
+
+    // Reentrancy check: ensure no other thread is using this context
+    R1DAssert(ctx->active.load() == 0 && "Context still in use during deinit");
 
     __int64 ret = 0;
     // Deinit the fallback LZHAM
@@ -211,7 +222,11 @@ __int64 r1dc_decompress(
     if (!p) return 0;
     r1dc_context_t* ctx = static_cast<r1dc_context_t*>(p);
 
-   // SRWGuard lock(&ctx->mtx);
+    SRWGuard lock(&ctx->mtx);
+
+    // Reentrancy check: track active usage
+    uint32_t prevActive = ctx->active.fetch_add(1);
+    R1DAssert(prevActive == 0 && "Concurrent decompress calls on same context");
 
     // If we haven't decided whether it's ZSTD or not:
     if (!ctx->typeDetermined)
@@ -248,6 +263,7 @@ __int64 r1dc_decompress(
         {
             // Not enough data yet to confirm => wait for next call
             // No data is consumed here
+            ctx->active.fetch_sub(1);
             return 0;
         }
     }
@@ -256,6 +272,7 @@ __int64 r1dc_decompress(
     if (!ctx->isZstdChunk)
     {
         // Just call the original LZHAM function
+        ctx->active.fetch_sub(1);
         return original_lzham_decompressor_decompress(
             ctx->lzham_ctx,
             pIn_buf,
@@ -278,16 +295,14 @@ __int64 r1dc_decompress(
         if (*pIn_buf_size > 0)
         {
             size_t n = *pIn_buf_size;
-            // Cap in case an unexpected overflow
+            // Check for chunk size overflow - bail early instead of clamping
             if (ctx->totalComp + n > MAX_CHUNK_COMPRESSED_SIZE)
             {
+                Warning("[r1dc] Error: compressed data exceeds 1MB chunk limit! (%zu + %zu > %zu)\n",
+                    ctx->totalComp, n, MAX_CHUNK_COMPRESSED_SIZE);
                 R1DAssert(!"Chunk limit exceeded");
-
-                // This is an error or extremely unexpected
-                Warning("[r1dc] Error: compressed data exceeds 1MB chunk limit!\n");
-                // You could return an error code here:
-                //   return some negative or engine-specific error
-                n = MAX_CHUNK_COMPRESSED_SIZE - ctx->totalComp;
+                ctx->active.fetch_sub(1);
+                return -1; // Return error instead of continuing with partial data
             }
 
             std::memcpy(&ctx->m_compBuf[ctx->totalComp], pIn_buf, n);
@@ -324,6 +339,7 @@ __int64 r1dc_decompress(
                         ZSTD_getErrorName(actualSize));
                     // Return an error code so the engine sees we failed
                     R1DAssert(!"Decompression error");
+                    ctx->active.fetch_sub(1);
                     return -1;
                 }
 
@@ -356,12 +372,13 @@ __int64 r1dc_decompress(
         // If we've delivered everything, return LZHAM_DECOMP_STATUS_SUCCESS == 3
         if (ctx->m_decompPos >= ctx->m_decompSize)
         {
+            ctx->active.fetch_sub(1);
             return 3;
         }
     }
 
     // Not done yet
-    R1DAssert(!"Unreachable?");
+    ctx->active.fetch_sub(1);
     return 0;
 }
 int (*osub_180019350)(__int64 a1, char* a2, unsigned __int8* a3, unsigned int a4, char a5, int a6);
