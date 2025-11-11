@@ -421,7 +421,7 @@ void CHL2_Player_Precache(uintptr_t a1, uintptr_t a2) {
 			"watersplash",
 			0xFFFFFFFFi64,
 			0i64);
-		
+
 		auto StaticClassSystem001_ptr = (uintptr_t*)(server_mod + 0xC31000);
 		auto StaticClassSystem001 = *StaticClassSystem001_ptr;
 		using PrecacheModel_t = uintptr_t(__fastcall*)(const void*);
