@@ -854,6 +854,8 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 		MCPServer::InitializeMCP();
 	}
 
+	OriginalCCVar_FindVar(cvarinterface, "sv_alltalk")->m_nFlags |= FCVAR_REPLICATED;
+
 	return result;
 }
 char* __fastcall sub_311910(char* a1, const char* a2, signed __int64 a3)
