@@ -18,6 +18,8 @@
 #endif
 #pragma comment(lib, "Imm32.lib")
 
+//SKIBIDI TOILET
+
 namespace fs = std::filesystem;
 
 extern "C"
