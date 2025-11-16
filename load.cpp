@@ -31,7 +31,7 @@
 // =====---------------------------------------------=++++******************************####%
 // ======------------------==------------------------==+++***************************######%%
 // =========-----===--------==------------------------==++********#*#####**#######*########%%
-
+#define DELAYIMP_INSECURE_WRITABLE_HOOKS
 #include "core.h"
 #include "arena.hh"
 #include "tctx.hh"
@@ -41,6 +41,7 @@
 #include <crtdbg.h>
 #include <new>
 #include "windows.h"
+#include <delayimp.h>
 
 #include <iostream>
 #include "cvar.h"
@@ -874,6 +875,261 @@ void FreeModuleNotificationData(LDR_DLL_LOADED_NOTIFICATION_DATA* data) {
 	delete data->FullDllName;
 	delete data;
 }
+
+static HMODULE g_vstdlibThreadShim = nullptr;
+static bool g_vstdlibThreadRedirectsInstalled = false;
+
+static const char* const g_vstdlibThreadExports[] = {
+	"??0CThread@@QEAA@XZ",
+	"??0CThreadEvent@@QEAA@PEBD_N1@Z",
+	"??0CThreadEvent@@QEAA@_N@Z",
+	"??0CThreadFullMutex@@QEAA@_NPEBD@Z",
+	"??0CThreadLocalBase@GenericThreadLocals@@QEAA@XZ",
+	"??0CThreadMutex@@QEAA@XZ",
+	"??0CThreadRWLock@@QEAA@XZ",
+	"??0CThreadSemaphore@@QEAA@HH@Z",
+	"??0CThreadSpinRWLock@@QEAA@XZ",
+	"??0CThreadSyncObject@@IEAA@XZ",
+	"??0CWorkerThread@@QEAA@XZ",
+	"??1CThread@@UEAA@XZ",
+	"??1CThreadEvent@@QEAA@XZ",
+	"??1CThreadFullMutex@@QEAA@XZ",
+	"??1CThreadLocalBase@GenericThreadLocals@@QEAA@XZ",
+	"??1CThreadMutex@@QEAA@XZ",
+	"??1CThreadRWLock@@QEAA@XZ",
+	"??1CThreadSemaphore@@QEAA@XZ",
+	"??1CThreadSyncObject@@QEAA@XZ",
+	"??1CWorkerThread@@UEAA@XZ",
+	"??4CThreadLocalBase@GenericThreadLocals@@QEAAAEAV01@AEBV01@@Z",
+	"??4CThreadSpinRWLock@@QEAAAEAV0@AEBV0@@Z",
+	"??7CThreadSyncObject@@QEBA_NXZ",
+	"??BCThreadSyncObject@@QEAAPEAXXZ",
+	"??_FCThreadEvent@@QEAAXXZ",
+	"??_FCThreadFullMutex@@QEAAXXZ",
+	"?AssertOwnedByCurrentThread@CThreadFullMutex@@QEAA_NXZ",
+	"?AssertOwnedByCurrentThread@CThreadMutex@@QEAA_NXZ",
+	"?AssertUseable@CThreadSyncObject@@IEAAXXZ",
+	"?BoostPriority@CWorkerThread@@QEAAHXZ",
+	"?CalcStackDepth@CThread@@QEAA_KPEAX@Z",
+	"?Call@CWorkerThread@@IEAAHII_NP6AIIPEAPEAVCThreadEvent@@HI@Z@Z",
+	"?CallMaster@CWorkerThread@@QEAAHII@Z",
+	"?CallWorker@CWorkerThread@@QEAAHII_N@Z",
+	"?Check@CThreadEvent@@QEAA_NXZ",
+	"?CheckNamedEvent@CThreadEvent@@SA?AW4NamedEventResult_t@@PEBDI@Z",
+	"?Get@CThreadLocalBase@GenericThreadLocals@@QEBAPEAXXZ",
+	"?GetCallHandle@CWorkerThread@@QEAAAEAVCThreadEvent@@XZ",
+	"?GetCallParam@CWorkerThread@@QEBAIXZ",
+	"?GetCurrentCThread@CThread@@SAPEAV1@XZ",
+	"?GetHandle@CThreadSyncObject@@QEBAQEAXXZ",
+	"?GetName@CThread@@QEAAPEBDXZ",
+	"?GetPriority@CThread@@QEBAHXZ",
+	"?GetResult@CThread@@QEAAHXZ",
+	"?GetThreadHandle@CThread@@IEBAQEAUThreadHandle_t__@@XZ",
+	"?GetThreadHandle@CThread@@QEAAPEAUThreadHandle_t__@@XZ",
+	"?GetThreadID@CThread@@IEBA?BIXZ",
+	"?GetThreadProc@CThread@@MEAAP6AKPEAX@ZXZ",
+	"?Init@CThread@@MEAA_NXZ",
+	"?IsAlive@CThread@@QEAA_NXZ",
+	"?IsLockedForRead@CThreadSpinRWLock@@QEAA_NXZ",
+	"?IsLockedForWrite@CThreadSpinRWLock@@QEAA_NXZ",
+	"?IsSuspended@CThread@@QEAA_NXZ",
+	"?Join@CThread@@QEAA_NI@Z",
+	"?Lock@CThreadFullMutex@@QEAAXI@Z",
+	"?Lock@CThreadFullMutex@@QEAAXXZ",
+	"?Lock@CThreadMutex@@QEAAXXZ",
+	"?Lock@CThreadMutex@@QEBAXXZ",
+	"?LockForRead@CThreadRWLock@@QEAAXXZ",
+	"?LockForRead@CThreadRWLock@@QEBAXXZ",
+	"?LockForRead@CThreadSpinRWLock@@QEAAXXZ",
+	"?LockForRead@CThreadSpinRWLock@@QEBAXXZ",
+	"?LockForWrite@CThreadRWLock@@QEAAXXZ",
+	"?LockForWrite@CThreadRWLock@@QEBAXXZ",
+	"?LockForWrite@CThreadSpinRWLock@@QEAAXXZ",
+	"?LockForWrite@CThreadSpinRWLock@@QEBAXXZ",
+	"?LockSilent@CThreadMutex@@QEAAXXZ",
+	"?OnExit@CThread@@MEAAXXZ",
+	"?PeekCall@CWorkerThread@@QEAA_NPEAI@Z",
+	"?Release@CThreadFullMutex@@QEAA_NXZ",
+	"?Release@CThreadSemaphore@@QEAA_NHPEAH@Z",
+	"?ReleaseWaiter@CThreadFastMutexSlow@@AEAAXXZ",
+	"?Reply@CWorkerThread@@QEAAXI@Z",
+	"?Reset@CThreadEvent@@QEAA_NXZ",
+	"?Resume@CThread@@QEAAIXZ",
+	"?Set@CThreadEvent@@QEAA_NXZ",
+	"?Set@CThreadLocalBase@GenericThreadLocals@@QEAAXPEAX@Z",
+	"?SetName@CThread@@QEAAXPEBD@Z",
+	"?SetPriority@CThread@@QEAA_NH@Z",
+	"?SetTrace@CThreadFullMutex@@QEAAX_N@Z",
+	"?SetTrace@CThreadMutex@@QEAAX_N@Z",
+	"?ShutdownSemaphore@CThreadFastMutexSlow@@AEAAXXZ",
+	"?Sleep@CThread@@SAXI@Z",
+	"?SpinLockForRead@CThreadSpinRWLock@@QEAAXXZ",
+	"?SpinLockForWrite@CThreadSpinRWLock@@QEAAXXZ",
+	"?Start@CThread@@UEAA_N_KW4ThreadPriorityEnum_t@1@@Z",
+	"?Stop@CThread@@QEAAXH@Z",
+	"?Suspend@CThread@@QEAAIXZ",
+	"?Terminate@CThread@@QEAA_NH@Z",
+	"?ThreadProc@CThread@@KAKPEAX@Z",
+	"?TryLock@CThreadMutex@@QEAA_NXZ",
+	"?TryLock@CThreadMutex@@QEBA_NXZ",
+	"?TryLockForRead@CThreadSpinRWLock@@QEAA_NXZ",
+	"?TryLockForRead@CThreadSpinRWLock@@QEBA_NXZ",
+	"?TryLockForRead_UnforcedInline@CThreadSpinRWLock@@QEAA_NXZ",
+	"?TryLockForWrite@CThreadSpinRWLock@@QEAA_NXZ",
+	"?TryLockForWrite@CThreadSpinRWLock@@QEBAXXZ",
+	"?TryLockForWrite_UnforcedInline@CThreadSpinRWLock@@QEAA_NXZ",
+	"?Unlock@CThreadFullMutex@@QEAAXXZ",
+	"?Unlock@CThreadMutex@@QEAAXXZ",
+	"?Unlock@CThreadMutex@@QEBAXXZ",
+	"?UnlockRead@CThreadRWLock@@QEAAXXZ",
+	"?UnlockRead@CThreadRWLock@@QEBAXXZ",
+	"?UnlockRead@CThreadSpinRWLock@@QEAAXXZ",
+	"?UnlockRead@CThreadSpinRWLock@@QEBAXXZ",
+	"?UnlockSilent@CThreadMutex@@QEAAXXZ",
+	"?UnlockWrite@CThreadRWLock@@QEAAXXZ",
+	"?UnlockWrite@CThreadRWLock@@QEBAXXZ",
+	"?UnlockWrite@CThreadSpinRWLock@@QEAAXXZ",
+	"?UnlockWrite@CThreadSpinRWLock@@QEBAXXZ",
+	"?Wait@CThreadEvent@@QEAA_NI@Z",
+	"?Wait@CThreadSyncObject@@QEAA_NI@Z",
+	"?WaitForCall@CWorkerThread@@QEAA_NIPEAI@Z",
+	"?WaitForCall@CWorkerThread@@QEAA_NPEAI@Z",
+	"?WaitForCreateComplete@CThread@@MEAA_NPEAVCThreadEvent@@@Z",
+	"?WaitForLock@CThreadFastMutexSlow@@AEAAII@Z",
+	"?WaitForMultiple@CThreadEvent@@SAIHPEAPEAV1@_NI@Z",
+	"?WaitForMultiple@CThreadEvent@@SAIHPEAV1@_NI@Z",
+	"?WaitForMultiple@CThreadSyncObject@@SAIHPEAPEAV1@_NI@Z",
+	"?WaitForMultiple@CThreadSyncObject@@SAIHPEAV1@_NI@Z",
+	"?WaitForRead@CThreadRWLock@@AEAAXXZ",
+	"?WaitForReply@CWorkerThread@@IEAAHIP6AIIPEAPEAVCThreadEvent@@HI@Z@Z",
+	"?WaitForReply@CWorkerThread@@QEAAHI@Z",
+	"?Yield@CThread@@SAXXZ",
+	"AllocateThreadID",
+	"CreateSimpleThread",
+	"DeclareCurrentThreadIsMainThread",
+	"FreeThreadID",
+	"GetThreadedLoadLibraryFunc",
+	"ReleaseThreadHandle",
+	"SetThreadedLoadLibraryFunc",
+	"ThreadGetCurrentHandle",
+	"ThreadGetPriority",
+	"ThreadInMainThread",
+	"ThreadJoin",
+	"ThreadSetAffinity",
+	"ThreadSetDebugName",
+	"ThreadSetPriority",
+	"ThreadSleep",
+	"CreateNewThreadPool",
+	"DestroyThreadPool",
+	"RunThreadPoolTests",
+	"WT_AbortItemTask",
+	"WT_AlwaysAbortCondition",
+	"WT_AppendTaskItemPointers",
+	"WT_AppendTaskItems",
+	"WT_AppendTaskItems_Begin",
+	"WT_AppendTaskItems_End",
+	"WT_AsyncCall",
+	"WT_BeginWaitingForWork",
+	"WT_BlockItemTask",
+	"WT_ClearTaskItems",
+	"WT_DefaultAbortCondition",
+	"WT_DoStuff",
+	"WT_DoStuffOrSleepUntil",
+	"WT_EndWaitingForWork",
+	"WT_GetItemTaskBlockCount",
+	"WT_GetThreadCount",
+	"WT_GetThreadType",
+	"WT_GetWakeEventForThread",
+	"WT_Init",
+	"WT_InitTaskItemPointers",
+	"WT_IsAsyncCallDone",
+	"WT_IsInitialized",
+	"WT_ItemTaskHasWork",
+	"WT_NumActiveThreadTypes",
+	"WT_ParallelProcess",
+	"WT_PollItemTask",
+	"WT_Resume",
+	"WT_SetAllTaskItems",
+	"WT_SetAllowItemTaskCallback",
+	"WT_SetItemTaskBlockCount",
+	"WT_SetItemTaskCallback",
+	"WT_SetTaskAffinity",
+	"WT_SetThreadType",
+	"WT_Shutdown",
+	"WT_Suspend",
+	"WT_TryDoAsyncCall",
+	"WT_TryDoTaskItem",
+	"WT_UnblockItemTask",
+	"WT_WaitAllAsyncCalls_ThisIsABadIdeaLongTerm",
+	"WT_WaitAsyncCall",
+	"WT_WaitItemTask"
+};
+
+void InstallVstdlibWindowsThreadsRedirects()
+{
+	if (g_vstdlibThreadRedirectsInstalled)
+		return;
+
+	HMODULE vstdlib = GetModuleHandleA("vstdlib.dll");
+	if (!vstdlib)
+		return;
+
+	if (!g_vstdlibThreadShim)
+	{
+		g_vstdlibThreadShim = LoadLibraryA("vstdlib_r1o.dll");
+		if (!g_vstdlibThreadShim)
+		{
+			Warning("Failed to load vstdlib_r1o.dll, WindowsThreads hooks inactive.\n");
+			return;
+		}
+	}
+
+	bool installed_any = false;
+	for (const char* export_name : g_vstdlibThreadExports)
+	{
+		auto source = GetProcAddress(vstdlib, export_name);
+		auto target = GetProcAddress(g_vstdlibThreadShim, export_name);
+
+		if (!source || !target)
+			continue;
+
+		const auto create_status = MH_CreateHook(source, target, nullptr);
+		if (create_status != MH_OK && create_status != MH_ERROR_ALREADY_CREATED)
+			continue;
+
+		const auto enable_status = MH_EnableHook(source);
+		if (enable_status != MH_OK && enable_status != MH_ERROR_ENABLED)
+			continue;
+
+		installed_any = true;
+	}
+
+	if (installed_any)
+	{
+		g_vstdlibThreadRedirectsInstalled = true;
+	}
+}
+
+static FARPROC WINAPI DelayLoadVstdlibHook(unsigned dliNotify, PDelayLoadInfo pdli)
+{
+	if (dliNotify != dliNotePreLoadLibrary || !pdli || !pdli->szDll)
+		return nullptr;
+
+	if (_stricmp(pdli->szDll, "vstdlib.dll") != 0)
+		return nullptr;
+
+	HMODULE module = LoadLibraryA(pdli->szDll);
+	if (!module)
+	{
+		Warning("Failed to delay-load %s.\n", pdli->szDll);
+		return nullptr;
+	}
+
+	InstallVstdlibWindowsThreadsRedirects();
+	return reinterpret_cast<FARPROC>(module);
+}
+
+extern "C" PfnDliHook __pfnDliNotifyHook2 = DelayLoadVstdlibHook;
 
 uintptr_t G_launcher;
 uintptr_t G_vscript;
@@ -3252,6 +3508,9 @@ void __stdcall LoaderNotificationCallback(
 	}
 	else if ((string_equal_size(name, name_len, "localize.dll"))) {
 		G_localize = (uintptr_t)notification_data->Loaded.DllBase;
+	}
+	else if ((string_equal_size(name, name_len, "vstdlib.dll"))) {
+		InstallVstdlibWindowsThreadsRedirects();
 	}
 	else {
 		bool is_client = string_equal_size(name, name_len, L"client.dll");
