@@ -15,7 +15,8 @@
 // Define for discord auth stuff.
 #define DISCORD
 
-
+// Global buffer for localized map display name (used by watermark)
+char g_cl_MapDisplayName[128] = "main menu";
 
 static bool is_discord_running = false;
 
@@ -402,9 +403,7 @@ SQInteger SendDiscordUI(HSQUIRRELVM v)
 
 SQInteger SendDiscordClient(HSQUIRRELVM v)
 {
-	if (!is_discord_running) 
-		return 1;
-	
+
 
 	//Msg("Discord: SendDiscordClient\n");
 	SQObject obj;
@@ -442,7 +441,19 @@ SQInteger SendDiscordClient(HSQUIRRELVM v)
 			if (!strcmp_static(key, "map_name")) presence.mapName = s->_val;
 			if (!strcmp_static(key, "game_mode")) presence.gameMode = s->_val;
 			if (!strcmp_static(key, "playlist")) presence.playlist = s->_val;
-			if (!strcmp_static(key, "map_display_name")) presence.mapDisplayName = s->_val;
+			if (!strcmp_static(key, "map_display_name")) {
+				presence.mapDisplayName = s->_val;
+
+				// Capture the localized map name for the watermark
+				if (s->_val && s->length > 0) {
+					strncpy(g_cl_MapDisplayName, s->_val, sizeof(g_cl_MapDisplayName) - 1);
+					g_cl_MapDisplayName[sizeof(g_cl_MapDisplayName) - 1] = '\0';
+					// Convert to lowercase
+					for (int i = 0; g_cl_MapDisplayName[i]; i++) {
+						g_cl_MapDisplayName[i] = tolower(g_cl_MapDisplayName[i]);
+					}
+				}
+			}
 			if (!strcmp_static(key, "playlist_display_name")) presence.playlistDisplayName = s->_val;
 			break;
 		}
@@ -458,6 +469,8 @@ SQInteger SendDiscordClient(HSQUIRRELVM v)
 			break;
 		}
 	}
+	if (!is_discord_running)
+		return 1;
 
 
 	discord::Activity activity;
