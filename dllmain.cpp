@@ -41,6 +41,7 @@
 #include "patcher.h"
 #include "filesystem.h"
 #include "logging.h"
+#include "eos_network.h"
 #include <tier0/platform.h>
 #include <KnownFolders.h>
 
@@ -728,6 +729,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 	case DLL_THREAD_DETACH:
 		break;
 	case DLL_PROCESS_DETACH:
+		eos::ShutdownNetworking();
 		MH_DisableHook(MH_ALL_HOOKS);
 		MH_Uninitialize();
 		break;

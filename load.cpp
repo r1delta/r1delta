@@ -100,6 +100,8 @@
 #include "mcp_server.h"
 #include "localchatwriter.h"
 #include "discord.h"
+#include "eos_network.h"
+#include "net_hooks.h"
 #define DISCORDPP_IMPLEMENTATION
 #ifdef DISCORD
 #include <discordpp.h>
@@ -2254,6 +2256,12 @@ void Host_InitHook(bool a1) {
 		MCPServer::InitializeMCP();
 	}
 
+	if (!eos::InitializeNetworking())
+	{
+		Msg("EOS: Initialization skipped or failed\n");
+	}
+	net_hooks::Initialize();
+
 	return;
 }
 inline bool CaselessStringLessThan(const char* const& lhs, const char* const& rhs) {
@@ -2371,10 +2379,10 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	extern void DeltaMemoryStats(const CCommand & c);
 	RegisterConCommand("delta_memory_stats", DeltaMemoryStats, "Dump memory stats", 0);
 
-	// TODO(mrsteyk): fuck Windows for not abiding by stack reserve rules.
-	security_fixes_engine(engine_base);
+    // TODO(mrsteyk): fuck Windows for not abiding by stack reserve rules.
+    security_fixes_engine(engine_base);
 
-	R1DAssert(MH_EnableHook(MH_ALL_HOOKS) == MH_OK);
+    R1DAssert(MH_EnableHook(MH_ALL_HOOKS) == MH_OK);
 
 	//// Fix stack smash in CNetChan::ProcessSubChannelData
 	CNetChan__ProcessSubChannelData_Asm_continue = (uintptr_t)(engine_base + 0x1E8DDA);

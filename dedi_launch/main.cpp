@@ -26,7 +26,7 @@ const char* RETAIL_BIN_SUBDIR_A = "bin\\x64_retail";
 const char* R1_RETAIL_BIN_SUBDIR_A = "r1\\bin\\x64_retail";
 
 // Target DLL to load (relative to game install dir)
-const char* DEDICATED_DLL_NAME_A = "bin\\x64_retail\\dedicated.dll";
+const char* DEDICATED_DLL_NAME_A = "dedicated.dll";
 
 // Typedef for the function pointer in dedicated.dll
 typedef int (*DedicatedMain_t)(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow);

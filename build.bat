@@ -23,14 +23,14 @@ if not "%msvc%"=="1" if not "%clang%"=="1" set msvc=1
 if "%clang%"=="1" set msvc=0 && echo [clang build]
 if "%msvc%"=="1" set clang=0 && echo [msvc build]
 
-set cl_common=     /DUNICODE=1 /D_UNICDE=1 /std:c++latest /I..\ /I..\packages\minhook.1.3.3\lib\native\include\ /I..\thirdparty\nlohmann\ /I..\thirdparty\mimalloc\include\ /I..\thirdparty\capnp-sources\c++\src\ /I..\vsdk\ /I..\vsdk\public\ /nologo /FC /Z7
-set clang_common=  -DUNICODE=1 -DUNICODE=1 -std=c++20 -I..\ -I..\packages\minhook.1.3.3\lib\native\include\ -I..\thirdparty\nlohmann\ -I..\thirdparty\mimalloc\include\ -I..\vsdk\ -I..\vsdk\public\ -gcodeview -fdiagnostics-absolute-paths -Wall -Wno-unknown-warning-option -Wno-missing-braces -Wno-unused-function -Wno-writable-strings -Wno-unused-value -Wno-unused-variable -Wno-unused-local-typedef -Wno-deprecated-register -Wno-deprecated-declarations -Wno-unused-but-set-variable -Wno-single-bit-bitfield-constant-conversion -Wno-compare-distinct-pointer-types -Wno-initializer-overrides -Wno-incompatible-pointer-types-discards-qualifiers -Xclang -flto-visibility-public-std -D_USE_MATH_DEFINES -Dstrdup=_strdup -Dgnu_printf=printf -ferror-limit=10000
+set cl_common=     /DUNICODE=1 /D_UNICDE=1 /std:c++latest /I..\ /I..\packages\minhook.1.3.3\lib\native\include\ /I..\thirdparty\nlohmann\ /I..\thirdparty\mimalloc\include\ /I..\thirdparty\capnp-sources\c++\src\ /I..\third_party\EOS-SDK\SDK\Include\ /I..\vsdk\ /I..\vsdk\public\ /nologo /FC /Z7
+set clang_common=  -DUNICODE=1 -DUNICODE=1 -std=c++20 -I..\ -I..\packages\minhook.1.3.3\lib\native\include\ -I..\thirdparty\nlohmann\ -I..\thirdparty\mimalloc\include\ -I..\thirdparty\capnp-sources\c++\src\ -I..\third_party\EOS-SDK\SDK\Include\ -I..\vsdk\ -I..\vsdk\public\ -gcodeview -fdiagnostics-absolute-paths -Wall -Wno-unknown-warning-option -Wno-missing-braces -Wno-unused-function -Wno-writable-strings -Wno-unused-value -Wno-unused-variable -Wno-unused-local-typedef -Wno-deprecated-register -Wno-deprecated-declarations -Wno-unused-but-set-variable -Wno-single-bit-bitfield-constant-conversion -Wno-compare-distinct-pointer-types -Wno-initializer-overrides -Wno-incompatible-pointer-types-discards-qualifiers -Xclang -flto-visibility-public-std -D_USE_MATH_DEFINES -Dstrdup=_strdup -Dgnu_printf=printf -ferror-limit=10000
 set cl_debug=      call cl /Od /Ob1 /DBUILD_DEBUG=1 /DMI_DEBUG=4 /DMI_SECURE=0 /DKJ_DEBUG=1 %cl_common% %auto_compile_flags%
 set cl_release=    call cl /O2 /DBUILD_DEBUG=0 /DKJ_NDEBUG=1 %cl_common% %auto_compile_flags%
 set clang_debug=   call clang++ -g -O0 -DBUILD_DEBUG=1 -DMI_DEBUG=4 -DMI_SECURE=0 -DKJ_DEBUG=1 %clang_common% %auto_compile_flags%
 set clang_release= call clang++ -g -O2 -DBUILD_DEBUG=0 -DKJ_NDEBUG=1 %clang_common% %auto_compile_flags%
-set cl_link=       /link /MANIFEST:EMBED /INCREMENTAL:NO /pdbaltpath:%%%%_PDB%%%% /NATVIS:"%~dp0\base.natvis" /noexp Shell32.lib User32.lib Shlwapi.lib
-set clang_link=    -fuse-ld=lld -Xlinker /MANIFEST:EMBED -Xlinker /pdbaltpath:%%%%_PDB%%%% -Xlinker /NATVIS:"%~dp0\base.natvis" -lShell32.lib -lUser32.lib -lShlwapi.lib
+set cl_link=       /link /MANIFEST:EMBED /INCREMENTAL:NO /pdbaltpath:%%%%_PDB%%%% /NATVIS:"%~dp0\base.natvis" /noexp Shell32.lib User32.lib Shlwapi.lib Ws2_32.lib
+set clang_link=    -fuse-ld=lld -Xlinker /MANIFEST:EMBED -Xlinker /pdbaltpath:%%%%_PDB%%%% -Xlinker /NATVIS:"%~dp0\base.natvis" -lShell32.lib -lUser32.lib -lShlwapi.lib -lWs2_32.lib
 set cl_out=        /out:
 set clang_out=     -o
 set cl_natvis=     /NATVIS:
@@ -69,6 +69,8 @@ if not exist build mkdir build
 set tier0_sources=..\tier0_amal.cc
 
 set mimalloc_sources=..\mimalloc_amal.cc
+set eos_sdk_lib=..\third_party\EOS-SDK\SDK\Lib\EOSSDK-Win64-Shipping.lib
+set eos_sdk_bin=..\third_party\EOS-SDK\SDK\Bin\EOSSDK-Win64-Shipping.dll
 
 set kj_sources=..\thirdparty\capnp-sources\c++\src\kj\array.c++ ..\thirdparty\capnp-sources\c++\src\kj\cidr.c++ ..\thirdparty\capnp-sources\c++\src\kj\kjlist.c++ ..\thirdparty\capnp-sources\c++\src\kj\common.c++ ..\thirdparty\capnp-sources\c++\src\kj\debug.c++ ..\thirdparty\capnp-sources\c++\src\kj\exception.c++ ..\thirdparty\capnp-sources\c++\src\kj\io.c++ ..\thirdparty\capnp-sources\c++\src\kj\memory.c++ ..\thirdparty\capnp-sources\c++\src\kj\mutex.c++ ..\thirdparty\capnp-sources\c++\src\kj\string.c++ ..\thirdparty\capnp-sources\c++\src\kj\source-location.c++ ..\thirdparty\capnp-sources\c++\src\kj\hash.c++ ..\thirdparty\capnp-sources\c++\src\kj\table.c++ ..\thirdparty\capnp-sources\c++\src\kj\thread.c++ ..\thirdparty\capnp-sources\c++\src\kj\main.c++ ..\thirdparty\capnp-sources\c++\src\kj\kjarena.c++ ..\thirdparty\capnp-sources\c++\src\kj\test-helpers.c++ ..\thirdparty\capnp-sources\c++\src\kj\units.c++ ..\thirdparty\capnp-sources\c++\src\kj\encoding.c++ ..\thirdparty\capnp-sources\c++\src\kj\refcount.c++ ..\thirdparty\capnp-sources\c++\src\kj\string-tree.c++ ..\thirdparty\capnp-sources\c++\src\kj\time.c++ ..\thirdparty\capnp-sources\c++\src\kj\filesystem.c++ ..\thirdparty\capnp-sources\c++\src\kj\filesystem-disk-unix.c++ ..\thirdparty\capnp-sources\c++\src\kj\filesystem-disk-win32.c++ ..\thirdparty\capnp-sources\c++\src\kj\parse\char.c++
 set kj_objs=array.obj cidr.obj kjlist.obj common.obj debug.obj exception.obj io.obj memory.obj mutex.obj string.obj source-location.obj hash.obj table.obj thread.obj main.obj kjarena.obj test-helpers.obj units.obj encoding.obj refcount.obj string-tree.obj time.obj filesystem.obj filesystem-disk-unix.obj filesystem-disk-win32.obj char.obj
@@ -90,10 +92,11 @@ if "%release%"=="1" set capnp_lib=capnp_release.lib
 if "%tier0%"=="1" ml64.exe /c /nologo /Zi /Fo"NetChanFixes.obj" /Fl"" /W3 /errorReport:prompt /Ta..\NetChanFixes.asm
 :: TODO(mrsteyk): crucify wanderer and Allusive for adding capnp this way.
 ::                FIX FIX FIX.
-if "%tier0%"=="1"    set built=1 && %compile% %tier0_sources% %mimalloc_sources% %compile_link%  NetChanFixes.obj ..\vstdlib.lib ..\tier0_orig.lib ..\packages\minhook.1.3.3\lib\native\lib\libMinHook-x64-v141-mt.lib %capnp_lib% %link_dll% /DEF:..\test.def %out%tier0.dll || exit /b 1
+if "%tier0%"=="1"    set built=1 && %compile% %tier0_sources% %mimalloc_sources% %compile_link%  NetChanFixes.obj ..\vstdlib.lib ..\tier0_orig.lib ..\packages\minhook.1.3.3\lib\native\lib\libMinHook-x64-v141-mt.lib %capnp_lib% %eos_sdk_lib% %link_dll% /DEF:..\test.def %out%tier0.dll || exit /b 1
 if "%launcher%"=="1" set built=1 && %compile% ..\launch\main.cpp %compile_link% /STACK:0x7A1200 %out%r1delta.exe || exit /b 1
 
 if "%tier0%"=="1"    for %%I in (tier0.dll tier0.pdb) do copy /Y %%I "C:\Program Files\EA Games\Titanfall\bin\x64_retail\"
+if "%tier0%"=="1"    if exist %eos_sdk_bin% copy /Y %eos_sdk_bin% "C:\Program Files\EA Games\Titanfall\bin\x64_retail\"
 if "%launcher%"=="1" for %%I in (r1delta.exe r1delta.pdb) do copy /Y %%I "C:\Program Files\EA Games\Titanfall\"
 popd
 

@@ -41,22 +41,6 @@ void sub_18027F2C0(__int64 a1, const char *a2, void *a3)
     sub_18027F2C0Original(a1, a2, a3);
 }
 
-typedef int (*GetAddrInfoFn)(PCSTR, PCSTR, const void *, void *);
-GetAddrInfoFn originalGetAddrInfo = nullptr;
-
-int hookedGetAddrInfo(PCSTR pNodeName, PCSTR pServiceName, const void *pHints, void *ppResult)
-{
-    const size_t nodelen = strlen(pNodeName);
-
-    // block respawn servers to prevent accidentally DoSing
-    if (nodelen >= 11 && strcmp_static(pNodeName + nodelen - 11, "respawn.com") == 0)
-        return WSA_SECURE_HOST_NOT_FOUND;
-    if (string_equal_size(pNodeName, nodelen, "r1-pc-int.s3.amazonaws.com") || string_equal_size(pNodeName, nodelen, "r1-pc.s3.amazonaws.com"))
-        return WSAHOST_NOT_FOUND;
-
-    return originalGetAddrInfo(pNodeName, pServiceName, pHints, ppResult);
-}
-
 bool (*oCPortalPlayer__CreateMove)(__int64 a1, float a2, __int64 a3, char a4);
 bool CPortalPlayer__CreateMove(__int64 a1, float a2, __int64 a3, char a4)
 {
@@ -782,7 +766,6 @@ void InitClient()
     MH_CreateHook((LPVOID)(client + 0x689A70), &vgui__PHandle__Get_Hook, reinterpret_cast<LPVOID *>(&vgui__PHandle__Get_Original));
 
     if (IsNoOrigin())
-        MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("ws2_32.dll"), "getaddrinfo"), &hookedGetAddrInfo, reinterpret_cast<LPVOID *>(&originalGetAddrInfo));
 
 #if BUILD_DEBUG
     // if (!InitNetChanWarningHooks())
