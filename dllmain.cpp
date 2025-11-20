@@ -126,6 +126,106 @@ const CPUInformation* GetCPUInformationDet()
 	return result;
 }
 
+// GetTFO* stub implementations
+extern "C" {
+	static void __fastcall StubFunction() {
+		// 0xC3 is RET instruction - this function just returns immediately
+		return;
+	}
+
+	// Create vtable with 256 function pointers all pointing to StubFunction
+	static void* g_stubVTable[256] = {
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction,
+		(void*)StubFunction, (void*)StubFunction, (void*)StubFunction, (void*)StubFunction
+	};
+
+	// Inner object with vtable pointer
+	static struct {
+		void** vtable = g_stubVTable;
+	} g_innerObject;
+
+
+
+	// GetTFO* function implementations
+	__declspec(dllexport) void* GetTFOEnvironment() {
+		return &g_innerObject;
+	}
+
+	__declspec(dllexport) void* GetTFOFileLogLevel() {
+		return &g_innerObject;
+	}
+
+	__declspec(dllexport) void* GetTFOFileLogger() {
+		return &g_innerObject;
+	}
+
+	__declspec(dllexport) void* GetTFOLoadingSplash() {
+		return &g_innerObject;
+	}
+}
+
 static void
 nvapi_stuff()
 {
@@ -679,10 +779,9 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 			MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("shell32.dll"), "SHGetFolderPathA"), &SHGetFolderPathAHook, reinterpret_cast<LPVOID*>(&SHGetFolderPathAOriginal));
 		}
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("tier0_orig.dll"), "GetCPUInformation"), &GetCPUInformationDet, reinterpret_cast<LPVOID*>(&GetCPUInformationOriginal));
-		MH_CreateHook((LPVOID)(((uintptr_t)GetModuleHandleA("tier0_orig.dll"))+0xbf60), &CCommandLine__CreateCmdLine, reinterpret_cast<LPVOID*>(&CCommandLine__CreateCmdLine_Original));
+		MH_CreateHook((LPVOID)(((uintptr_t)GetModuleHandleA("tier0_orig.dll"))+0x03500), &CCommandLine__CreateCmdLine, reinterpret_cast<LPVOID*>(&CCommandLine__CreateCmdLine_Original));
 //		if (!IsDedicatedServer())
 //			MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("tier0_orig.dll"), "Plat_IsInToolMode"), &GetCPUInformationDet, reinterpret_cast<LPVOID*>(NULL));
-		InstallVstdlibWindowsThreadsRedirects();
 		MH_EnableHook(MH_ALL_HOOKS);
 
 		initialisePatchInstructions();

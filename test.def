@@ -224,10 +224,10 @@ GetFileAndLineFromAddress=tier0_orig.GetFileAndLineFromAddress @222
 GetMinidumpBreakRequested=tier0_orig.GetMinidumpBreakRequested @223
 GetModuleNameFromAddress=tier0_orig.GetModuleNameFromAddress @224
 GetSymbolNameFromAddress=tier0_orig.GetSymbolNameFromAddress @225
-GetTFOEnvironment=tier0_orig.GetTFOEnvironment @226
-GetTFOFileLogLevel=tier0_orig.GetTFOFileLogLevel @227
-GetTFOFileLogger=tier0_orig.GetTFOFileLogger @228
-GetTFOLoadingSplash=tier0_orig.GetTFOLoadingSplash @229
+GetTFOEnvironment @226
+GetTFOFileLogLevel @227
+GetTFOFileLogger @228
+GetTFOLoadingSplash @229
 GetThreadedLoadLibraryFunc=tier0_orig.GetThreadedLoadLibraryFunc @230
 GetUnitTest=tier0_orig.GetUnitTest @231
 GetVAtom=tier0_orig.GetVAtom @232

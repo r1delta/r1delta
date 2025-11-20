@@ -3,6 +3,8 @@
 #include "localize.h"
 #include "load.h"
 #include "squirrel.h"
+#include "cvar.h"
+#include "logging.h"
 #include <cwctype>
 #include "r1d_version.h"
 #include <vector>
@@ -1380,6 +1382,119 @@ void FontSizeChangeCallback(IConVar* var, const char* pOldValue, float flOldValu
 
 }
 
+void DeltaWatermarkDebugCommand(const CCommand& args) {
+    // Get Local Player
+    static auto getlocalplayer = reinterpret_cast<void* (*)(int)>((uintptr_t)G_client + 0x7B120);
+    void* pLocalPlayer = getlocalplayer(-1);
+
+    if (!pLocalPlayer || !G_engine) {
+        Msg("No local player or engine not available\n");
+        return;
+    }
+
+    // Get engine client interface pointer
+    void* pEngineClient = (void*)(G_engine + 0x795650);
+    if (!pEngineClient) {
+        Msg("No engine client\n");
+        return;
+    }
+
+    // FPS - calculated from frame time using gpClientGlobals
+    void* gpClientGlobals = *(void**)(G_client + 0xAEA640);
+    float absoluteframetime = *(float*)((uintptr_t)gpClientGlobals + 0x0C);
+    float fps = (absoluteframetime > 0) ? (1.0f / absoluteframetime) : 0.0f;
+
+    // Velocity
+    float* vel = (float*)((uintptr_t)pLocalPlayer + OFF_VELOCITY);
+    float velocity_x = vel[0];
+    float velocity_y = vel[1];
+    float velocity = sqrtf(vel[0]*vel[0] + vel[1]*vel[1]);
+
+    // Network Stats
+    int pingMs = 0;
+    int lossIn = 0;
+    int lossOut = 0;
+    float serverVar = 0.0f;
+
+    void* nci = CallVFunc<void*>(160, pEngineClient);
+
+    if (nci) {
+        float latency = CallVFunc<float>(10, nci, 1);
+        pingMs = (int)(latency * 1000.0f);
+
+        float fLossIn = CallVFunc<float>(11, nci, 0);
+        float fLossOut = CallVFunc<float>(11, nci, 1);
+        lossIn = (int)(fLossIn * 100.0f);
+        lossOut = (int)(fLossOut * 100.0f);
+
+        float frameTime = 0, frameTimeStdDev = 0, startTimeStdDev = 0;
+        CallVFunc<void>(25, nci, &frameTime, &frameTimeStdDev, &startTimeStdDev);
+        serverVar = startTimeStdDev * 1000.0f;
+    }
+
+    // Player Stats (K/D)
+    int kills = 0;
+    int deaths = 0;
+    float kdRatio = 0.0f;
+    int localIndex = CallVFunc<int>(22, pEngineClient, 0);
+
+    void* g_PR = GetPlayerResource();
+    if (g_PR) {
+        int* pKills = (int*)((uintptr_t)g_PR + OFF_PR_KILLS);
+        int* pDeaths = (int*)((uintptr_t)g_PR + OFF_PR_DEATHS);
+        int* pPings = (int*)((uintptr_t)g_PR + OFF_PR_PING);
+
+        if (localIndex >= 0 && localIndex < 64) {
+            kills = pKills[localIndex];
+            deaths = pDeaths[localIndex];
+
+            if (!nci) pingMs = pPings[localIndex];
+
+            kdRatio = (deaths > 0) ? ((float)kills / (float)deaths) : (float)kills;
+        }
+    }
+
+    // Generation & XP
+    int rawGen = *(int*)((uintptr_t)pLocalPlayer + OFF_GEN);
+    int currentXP = *(int*)((uintptr_t)pLocalPlayer + OFF_XP);
+    float progress = (float)currentXP / XP_AT_MAX_LEVEL;
+    if (progress > 0.99f) progress = 0.99f;
+    float genDisplay = (float)(rawGen + 1) + progress;
+
+    // Player Name
+    const char* playerName = "Pilot";
+    static auto nameVar = OriginalCCVar_FindVar(cvarinterface, "name");
+    if (nameVar && nameVar->m_Value.m_pszString) {
+        playerName = nameVar->m_Value.m_pszString;
+    }
+
+    // Map name
+    const char* mapName = g_cl_MapDisplayName;
+
+    // Print all raw values
+    Msg("=== Delta Watermark Debug ===\n");
+    Msg("absoluteframetime: %f\n", absoluteframetime);
+    Msg("fps: %f\n", fps);
+    Msg("velocity_x: %f\n", velocity_x);
+    Msg("velocity_y: %f\n", velocity_y);
+    Msg("velocity: %f\n", velocity);
+    Msg("pingMs: %d\n", pingMs);
+    Msg("lossIn: %d%%\n", lossIn);
+    Msg("lossOut: %d%%\n", lossOut);
+    Msg("serverVar: %f ms\n", serverVar);
+    Msg("kills: %d\n", kills);
+    Msg("deaths: %d\n", deaths);
+    Msg("kdRatio: %f\n", kdRatio);
+    Msg("rawGen: %d\n", rawGen);
+    Msg("currentXP: %d\n", currentXP);
+    Msg("progress: %f\n", progress);
+    Msg("genDisplay: %f\n", genDisplay);
+    Msg("playerName: %s\n", playerName);
+    Msg("mapName: %s\n", mapName);
+    Msg("localIndex: %d\n", localIndex);
+}
+ConCommandR1* RegisterConCommand(const char* commandName, void (*callback)(const ::CCommand&), const char* helpString, int flags);
+
 void SetupSurfaceRenderHooks() {
     cvar_delta_watermark = RegisterConVar("delta_watermark", "1", FCVAR_GAMEDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Show R1Delta watermark with version information");
     cvar_delta_damage_numbers = RegisterConVar("delta_damage_numbers", "0", FCVAR_GAMEDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Show TF2-style floating damage numbers on hit.");
@@ -1390,6 +1505,8 @@ void SetupSurfaceRenderHooks() {
     cvar_delta_damage_numbers_batching_window = RegisterConVar("delta_damage_numbers_batching_window", "3", FCVAR_GAMEDLL, "Time window for batching damage numbers (seconds).");
     cvar_delta_damage_numbers_size->m_fnChangeCallbacks.AddToTail((FnChangeCallback_t)FontSizeChangeCallback);
     cvar_delta_damage_numbers_crit_size->m_fnChangeCallbacks.AddToTail((FnChangeCallback_t)FontSizeChangeCallback);
+
+    RegisterConCommand("delta_watermark_debug", DeltaWatermarkDebugCommand, "Print raw watermark debug information", FCVAR_NONE);
 
     auto vguimatsurface = GetModuleHandleA("vguimatsurface.dll");
     auto vguimatsurface_CreateInterface = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(vguimatsurface, "CreateInterface"));

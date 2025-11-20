@@ -100,7 +100,6 @@ void __stdcall LoaderNotificationCallback(
 	void* context);
 
 class ILocalize;
-void InstallVstdlibWindowsThreadsRedirects();
 extern uintptr_t G_launcher;
 extern uintptr_t G_vscript;
 extern uintptr_t G_filesystem_stdio;
