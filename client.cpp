@@ -169,7 +169,7 @@ void BaseModUI__LoadingProgress__PaintBackground(__int64* thisptr)
         OriginalCCVar_FindVar(cvarinterface, "r_lod_switch_scale")->m_nFlags = 0;
         OriginalCCVar_FindVar(cvarinterface, "model_defaultFadeDistMin")->m_nFlags = 0;
         OriginalCCVar_FindVar(cvarinterface, "model_defaultFadeDistScale")->m_nFlags = 0;        
-        Cbuf_AddText(0, "mat_rimlightnearstrength 0.5; mat_rimlightfarstrength 15;model_fadeRangeFraction 0.9;r_lod_switch_scale 5;model_defaultFadeDistMin 50000000000;model_defaultFadeDistScale 50000000\n", 0);
+        Cbuf_AddText(0, "rese;mat_rimlightnearstrength 0.5; mat_rimlightfarstrength 15;model_fadeRangeFraction 0.9;r_lod_switch_scale 5;model_defaultFadeDistMin 50000000000;model_defaultFadeDistScale 50000000\n", 0);
     }
     vgui::Panel* loadingRes = reinterpret_cast<vgui::Panel*>(thisptr);
     vgui::Label* loadingText = reinterpret_cast<vgui::Label*>(thisptr);
