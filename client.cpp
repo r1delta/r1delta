@@ -160,6 +160,17 @@ bool CGameUI__UpdateProgressBar(CGameUI *thisptr, float progress, const char *st
 void (*oBaseModUI__LoadingProgress__PaintBackground)(__int64* thisptr);
 void BaseModUI__LoadingProgress__PaintBackground(__int64* thisptr)
 {
+    static bool done = false;
+    if (!done) {
+        done = true;
+        OriginalCCVar_FindVar(cvarinterface, "mat_rimlightnearstrength")->m_nFlags = 0;
+        OriginalCCVar_FindVar(cvarinterface, "mat_rimlightfarstrength")->m_nFlags = 0;
+        OriginalCCVar_FindVar(cvarinterface, "model_fadeRangeFraction")->m_nFlags = 0;        
+        OriginalCCVar_FindVar(cvarinterface, "r_lod_switch_scale")->m_nFlags = 0;
+        OriginalCCVar_FindVar(cvarinterface, "model_defaultFadeDistMin")->m_nFlags = 0;
+        OriginalCCVar_FindVar(cvarinterface, "model_defaultFadeDistScale")->m_nFlags = 0;        
+        Cbuf_AddText(0, "mat_rimlightnearstrength 0.5; mat_rimlightfarstrength 15;model_fadeRangeFraction 0.9;r_lod_switch_scale 5;model_defaultFadeDistMin 50000000000;model_defaultFadeDistScale 50000000\n", 0);
+    }
     vgui::Panel* loadingRes = reinterpret_cast<vgui::Panel*>(thisptr);
     vgui::Label* loadingText = reinterpret_cast<vgui::Label*>(thisptr);
 
@@ -732,7 +743,6 @@ void InitClient()
 {
     auto client = G_client;
     auto engine = G_engine;
-
     // Initialize HUD function pointers
     GetHud = (GetHudType)(client + 0x173390);
     CHudFindElement = (CHudFindElementType)(client + 0x175850);
