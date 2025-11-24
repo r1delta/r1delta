@@ -388,27 +388,42 @@ char sub_180001CC0() {
 	return ret;
 }
 void SetupHudWarpMatSystemHooks() {
-	uintptr_t sub_63D0_addr = G_matsystem + 0x63D0;
-	MH_CreateHook((void*)sub_63D0_addr, &sub_63D0, reinterpret_cast<LPVOID*>(&sub_63D0_org));
-	
-	// NOTE(mrsteyk): changed to queued hooks.
-	R1DAssert(MH_CreateHook((void*)(G_matsystem + 0x626D0), &BeginPixEvent_Hook, 0) == MH_OK);
-#if BUILD_DEBUG
-	R1DAssert(MH_CreateHook((void*)(G_matsystem + 0x626E0), &EndPixEvent_Hook, 0) == MH_OK);
-	R1DAssert(MH_CreateHook((void*)(G_matsystem + 0x626F0), &SetPixMarker_Hook, 0) == MH_OK);
-#endif
+	// Check if -usegpuhudwarp command line argument is present
+	const wchar_t* cmdLine = GetCommandLineW();
+	bool useGPUHudwarp = wcsstr(cmdLine, L"-usegpuhudwarp") != nullptr;
+
+	// Always apply sub_180001CC0 hook
 	MH_CreateHook((void*)(G_matsystem + 0x1CC0), &sub_180001CC0, reinterpret_cast<LPVOID*>(&osub_180001CC0));
-	BeginPixEvent = (BeginPixEvent_type)(G_matsystem + 0x5D7E0);
+
+	// Only apply other hooks if -usegpuhudwarp is set
+	if (useGPUHudwarp) {
+		uintptr_t sub_63D0_addr = G_matsystem + 0x63D0;
+		MH_CreateHook((void*)sub_63D0_addr, &sub_63D0, reinterpret_cast<LPVOID*>(&sub_63D0_org));
+
+		// NOTE(mrsteyk): changed to queued hooks.
+		R1DAssert(MH_CreateHook((void*)(G_matsystem + 0x626D0), &BeginPixEvent_Hook, 0) == MH_OK);
+#if BUILD_DEBUG
+		R1DAssert(MH_CreateHook((void*)(G_matsystem + 0x626E0), &EndPixEvent_Hook, 0) == MH_OK);
+		R1DAssert(MH_CreateHook((void*)(G_matsystem + 0x626F0), &SetPixMarker_Hook, 0) == MH_OK);
+#endif
+		BeginPixEvent = (BeginPixEvent_type)(G_matsystem + 0x5D7E0);
+	}
 
 	MH_EnableHook(MH_ALL_HOOKS);
 }
 
 void SetupHudWarpVguiHooks() {
-	uintptr_t vguimatsurfacedllBaseAddress = (uintptr_t)GetModuleHandleW(L"vguimatsurface.dll");
-	MH_CreateHook((void*)(vguimatsurfacedllBaseAddress + 0xBAC0), &sub_18000BAC0, reinterpret_cast<LPVOID*>(&sub_18000BAC0_org));
-	MH_CreateHook((void*)(vguimatsurfacedllBaseAddress + 0x15A30), &CMatSystemSurface__ApplyHudwarpSettings, reinterpret_cast<LPVOID*>(&CMatSystemSurface__ApplyHudwarpSettings_org));
-	MH_CreateHook((void*)(vguimatsurfacedllBaseAddress + 0xBE60), &sub_18000BE60, reinterpret_cast<LPVOID*>(&sub_18000BE60_org));
-	MH_CreateHook((void*)(vguimatsurfacedllBaseAddress + 0x154A0), &sub_1800154A0, reinterpret_cast<LPVOID*>(&sub_1800154A0_org));
+	// Check if -usegpuhudwarp command line argument is present
+	const wchar_t* cmdLine = GetCommandLineW();
+	bool useGPUHudwarp = wcsstr(cmdLine, L"-usegpuhudwarp") != nullptr;
 
-	MH_EnableHook(MH_ALL_HOOKS);
+	if (useGPUHudwarp) {
+		uintptr_t vguimatsurfacedllBaseAddress = (uintptr_t)GetModuleHandleW(L"vguimatsurface.dll");
+		MH_CreateHook((void*)(vguimatsurfacedllBaseAddress + 0xBAC0), &sub_18000BAC0, reinterpret_cast<LPVOID*>(&sub_18000BAC0_org));
+		MH_CreateHook((void*)(vguimatsurfacedllBaseAddress + 0x15A30), &CMatSystemSurface__ApplyHudwarpSettings, reinterpret_cast<LPVOID*>(&CMatSystemSurface__ApplyHudwarpSettings_org));
+		MH_CreateHook((void*)(vguimatsurfacedllBaseAddress + 0xBE60), &sub_18000BE60, reinterpret_cast<LPVOID*>(&sub_18000BE60_org));
+		MH_CreateHook((void*)(vguimatsurfacedllBaseAddress + 0x154A0), &sub_1800154A0, reinterpret_cast<LPVOID*>(&sub_1800154A0_org));
+
+		MH_EnableHook(MH_ALL_HOOKS);
+	}
 }
