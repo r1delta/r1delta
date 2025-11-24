@@ -3235,7 +3235,7 @@ void __stdcall LoaderNotificationCallback(
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x1032C0), &sub_1032C0_hook, reinterpret_cast<LPVOID*>(&o_sub_1032C0));
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x103120), &sub_103120_hook, reinterpret_cast<LPVOID*>(&o_sub_103120));
 		//CreateMiscHook(vphysicsdllBaseAddress, 0x100880, &sub_180100880, reinterpret_cast<LPVOID*>(&sub_180100880_org));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x100880), &sub_100880_hook, reinterpret_cast<LPVOID*>(&o_sub_100880));
+		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x100880), &sub_100880_hook, reinterpret_cast<LPVOID*>(&o_sub_100880));
 
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0xFFFF), &sub_FFFF, reinterpret_cast<LPVOID*>(&ovphys_sub_FFFF));
 		MH_EnableHook(MH_ALL_HOOKS);

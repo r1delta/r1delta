@@ -376,8 +376,14 @@ void __fastcall OnWindowSizeChanged(unsigned int w, unsigned int h, bool isInGam
 void SetupHudWarpHooks() {
 	R1DAssert(G_client);
 
-	MH_CreateHook((void*)(G_client + 0x2AE630), &RenderHud_Hook, reinterpret_cast<LPVOID*>(&RenderHud));
-	MH_EnableHook(MH_ALL_HOOKS);
+	// Check if -usegpuhudwarp command line argument is present
+	const wchar_t* cmdLine = GetCommandLineW();
+	bool useGPUHudwarp = wcsstr(cmdLine, L"-usegpuhudwarp") != nullptr;
+
+	if (useGPUHudwarp) {
+		MH_CreateHook((void*)(G_client + 0x2AE630), &RenderHud_Hook, reinterpret_cast<LPVOID*>(&RenderHud));
+		MH_EnableHook(MH_ALL_HOOKS);
+	}
 }
 char (*osub_180001CC0)();
 char sub_180001CC0() {
