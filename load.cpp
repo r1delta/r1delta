@@ -2540,15 +2540,11 @@ typedef void(__fastcall* sub_180100880_type)(uintptr_t);
 sub_180100880_type o_sub_100880 = nullptr;
 void __fastcall sub_100880_hook(uintptr_t a1) // we fix seldom crash in vphysics on level shutdown (but most frequent crash to be reported)
 {
-	auto cl = reinterpret_cast<void*>(G_engine + 0x5F4B0);
-	unsigned int& baseLocalClient__m_nSignonState = *((_DWORD*)cl + 29);
-	bool cl_isActive = baseLocalClient__m_nSignonState == 8;
 	uintptr_t vPhysicsBase = (uintptr_t)GetModuleHandleA("vphysics.dll");
 	static auto* sub_1800FFB50 = reinterpret_cast<__int64(*)(uintptr_t)>(vPhysicsBase + 0xFFB50);
 	static auto* sub_1800FF010 = reinterpret_cast<__int64(*)(uintptr_t)>(vPhysicsBase + 0xFF010);
 	static auto* sub_1800CA0B0 = reinterpret_cast<__int64(*)(uintptr_t)>(vPhysicsBase + 0xCA0B0);
-	bool do_check = !cl_isActive; 
-	void(__fastcall * **v2)(_QWORD, __int64); 
+	void(__fastcall * **v2)(_QWORD, __int64);
 	__int64 v3;
 	sub_1800FFB50(a1);
 	sub_1800FF010(a1);
@@ -2559,14 +2555,12 @@ void __fastcall sub_100880_hook(uintptr_t a1) // we fix seldom crash in vphysics
 		v2 = **(void(__fastcall*****)(_QWORD, __int64))(a1 + 1310872);
 		if (v2)
 		{
-			if (*v2 && **v2) 
+			if (*v2 && **v2)
 			{
-				if (do_check)
+				// Always do memory readable check
+				if (!IsMemoryReadable(**v2, 8, PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY))
 				{
-					if (!IsMemoryReadable(**v2, 8, PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY))
-					{
-						break;
-					}
+					break;
 				}
 				(**v2)((_QWORD)v2, 1i64);
 			}
@@ -3238,8 +3232,8 @@ void __stdcall LoaderNotificationCallback(
 	}
 	else if (string_equal_size(name, name_len, L"vphysics.dll")) {
 		InitializeCriticalSectionAndSpinCount(&g_cs, 4000);
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x1032C0), &sub_1032C0_hook, reinterpret_cast<LPVOID*>(&o_sub_1032C0));
-		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x103120), &sub_103120_hook, reinterpret_cast<LPVOID*>(&o_sub_103120));
+		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x1032C0), &sub_1032C0_hook, reinterpret_cast<LPVOID*>(&o_sub_1032C0));
+		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x103120), &sub_103120_hook, reinterpret_cast<LPVOID*>(&o_sub_103120));
 		//CreateMiscHook(vphysicsdllBaseAddress, 0x100880, &sub_180100880, reinterpret_cast<LPVOID*>(&sub_180100880_org));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x100880), &sub_100880_hook, reinterpret_cast<LPVOID*>(&o_sub_100880));
 

@@ -230,59 +230,69 @@ __int64 r1dc_decompress(
     if (!p) return 0;
     r1dc_context_t* ctx = static_cast<r1dc_context_t*>(p);
 
-    SRWGuard lock(&ctx->mtx);
-
-    // Reentrancy check: track active usage
-    uint32_t prevActive = ctx->active.fetch_add(1);
-    R1DAssert(prevActive == 0 && "Concurrent decompress calls on same context");
-
-    // If we haven't decided whether it's ZSTD or not:
-    if (!ctx->typeDetermined)
+    // Determine type and check if we need to fallback to LZHAM
+    void* lzham_ctx_copy = nullptr;
     {
-        // If we have at least 8 bytes, check for marker
-        if (*pIn_buf_size >= sizeof(uint64_t))
+        SRWGuard lock(&ctx->mtx);
+
+        // Reentrancy check: track active usage
+        uint32_t prevActive = ctx->active.fetch_add(1);
+        R1DAssert(prevActive == 0 && "Concurrent decompress calls on same context");
+
+        // If we haven't decided whether it's ZSTD or not:
+        if (!ctx->typeDetermined)
         {
-            uint64_t maybeMarker = 0;
-            std::memcpy(&maybeMarker, pIn_buf, sizeof(uint64_t));
-            if (maybeMarker == R1D_marker)
+            // If we have at least 8 bytes, check for marker
+            if (*pIn_buf_size >= sizeof(uint64_t))
             {
-                // Mark it as ZSTD chunk
-                ctx->typeDetermined = true;
-                ctx->isZstdChunk = true;
-                // Skip the marker in the input
-                uint8_t* inputBytes = static_cast<uint8_t*>(pIn_buf);
-                inputBytes += sizeof(uint64_t);
-                *pIn_buf_size -= sizeof(uint64_t);
-                pIn_buf = inputBytes;
+                uint64_t maybeMarker = 0;
+                std::memcpy(&maybeMarker, pIn_buf, sizeof(uint64_t));
+                if (maybeMarker == R1D_marker)
+                {
+                    // Mark it as ZSTD chunk
+                    ctx->typeDetermined = true;
+                    ctx->isZstdChunk = true;
+                    // Skip the marker in the input
+                    uint8_t* inputBytes = static_cast<uint8_t*>(pIn_buf);
+                    inputBytes += sizeof(uint64_t);
+                    *pIn_buf_size -= sizeof(uint64_t);
+                    pIn_buf = inputBytes;
+                }
+                else
+                {
+                    ctx->typeDetermined = true;
+                    ctx->isZstdChunk = false;
+                }
             }
-            else
+            else if (no_more_input_bytes_flag)
             {
+                // We got so few bytes we couldn't even check the marker => fallback
                 ctx->typeDetermined = true;
                 ctx->isZstdChunk = false;
             }
+            else
+            {
+                // Not enough data yet to confirm => wait for next call
+                // No data is consumed here
+                ctx->active.fetch_sub(1);
+                return 0;
+            }
         }
-        else if (no_more_input_bytes_flag)
-        {
-            // We got so few bytes we couldn't even check the marker => fallback
-            ctx->typeDetermined = true;
-            ctx->isZstdChunk = false;
-        }
-        else
-        {
-            // Not enough data yet to confirm => wait for next call
-            // No data is consumed here
-            ctx->active.fetch_sub(1);
-            return 0;
-        }
-    }
 
-    // If not ZSTD, fallback to original LZHAM logic
-    if (!ctx->isZstdChunk)
+        // If not ZSTD, prepare to fallback to original LZHAM logic
+        if (!ctx->isZstdChunk)
+        {
+            lzham_ctx_copy = ctx->lzham_ctx;
+            ctx->active.fetch_sub(1);
+            // Lock will be released when we exit this scope
+        }
+    } // Lock released here
+
+    // If LZHAM fallback, call original function without holding lock
+    if (lzham_ctx_copy)
     {
-        // Just call the original LZHAM function
-        ctx->active.fetch_sub(1);
         return original_lzham_decompressor_decompress(
-            ctx->lzham_ctx,
+            lzham_ctx_copy,
             pIn_buf,
             pIn_buf_size,
             pOut_buf,
@@ -290,6 +300,9 @@ __int64 r1dc_decompress(
             no_more_input_bytes_flag
         );
     }
+
+    // Re-acquire lock for ZSTD path
+    SRWGuard lock(&ctx->mtx);
 
     // ----------------------
     // ZSTD path
