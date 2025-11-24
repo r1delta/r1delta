@@ -549,8 +549,7 @@ void SetRanked(HSQUIRRELVM v) {
 	auto r1sqvm = GetServerVMPtr();
 	SQBool ranked;
 	const void* player = sq_getentity(v, 2);
-	sq_getbool(r1sqvm, v, -1, &ranked);
-	Msg("SetRanked: %d\n", ranked);
+	sq_getbool(r1sqvm, v, 1, &ranked);
 	if (player) {
 		auto player_ptr = reinterpret_cast<__int64>(player);
 		*(bool*)(player_ptr + 0x1844) = ranked;
