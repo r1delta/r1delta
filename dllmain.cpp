@@ -461,16 +461,28 @@ void CCommandLine__CreateCmdLine(void* thisptr, char* commandline) {
 
 	// 4. Append arguments ONLY from internal storage. No environment variable check.
 	if (!g_r1delta_launch_args.empty()) {
-		if (!finalCmdLineStr.empty()) finalCmdLineStr += " ";
-		finalCmdLineStr += g_r1delta_launch_args; // Append stored args
-		OutputDebugStringA("[r1delta_core] Appended args from internal storage: ");
-		OutputDebugStringA(g_r1delta_launch_args.c_str());
-		OutputDebugStringA("\n");
+		// Check if launch args are already present to avoid duplication
+		bool launchArgsPresent = (strstr(finalCmdLineStr.c_str(), g_r1delta_launch_args.c_str()) != nullptr);
+		if (!launchArgsPresent) {
+			if (!finalCmdLineStr.empty()) finalCmdLineStr += " ";
+			finalCmdLineStr += g_r1delta_launch_args; // Append stored args
+			OutputDebugStringA("[r1delta_core] Appended args from internal storage: ");
+			OutputDebugStringA(g_r1delta_launch_args.c_str());
+			OutputDebugStringA("\n");
+		}
+		else {
+			OutputDebugStringA("[r1delta_core] Launch args already present in command line, skipping append.\n");
+		}
 	}
 	else {
 		OutputDebugStringA("[r1delta_core] No user launch arguments appended (Internal storage was empty).\n");
 	}
-	finalCmdLineStr += " -novid ";
+
+	// Check if -novid is already present to avoid duplication
+	bool novidPresent = (strstr(finalCmdLineStr.c_str(), "-novid") != nullptr);
+	if (!novidPresent) {
+		finalCmdLineStr += " -novid ";
+	}
 
 
 	// 5. Prepare buffer for original function call (unchanged)
