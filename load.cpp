@@ -1960,21 +1960,7 @@ bool ShouldEnableMCP() {
 
 	if (!parsed) {
 		parsed = true;
-		int argc = 0;
-		LPWSTR* argvW = CommandLineToArgvW(GetCommandLineW(), &argc);
-
-		if (argvW != NULL)
-		{
-			for (int i = 1; i < argc; ++i)
-			{
-				if (wcscmp(argvW[i], L"-usemcp") == 0)
-				{
-					useMcp = true;
-					break;
-				}
-			}
-			LocalFree(argvW);
-		}
+		useMcp = HasEngineCommandLineFlag("-usemcp");
 	}
 
 	return useMcp;

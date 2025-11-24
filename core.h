@@ -95,14 +95,26 @@ extern int G_is_dedi;
 
 #define IsDedicatedServer() (G_is_dedi)
 
+// Helper to check engine command line flags (uses tier0's Plat_GetCommandLineA instead of GetCommandLineW)
+// This ensures we check the command line as the engine sees it, after modifications by CCommandLine__CreateCmdLine hook
+__forceinline bool HasEngineCommandLineFlag(const char* flag) {
+    static auto Plat_GetCommandLineA = (const char* (*)())GetProcAddress(
+        GetModuleHandleA("tier0_orig.dll"),
+        "Plat_GetCommandLineA"
+    );
+
+    if (!Plat_GetCommandLineA) return false;
+
+    const char* cmdLine = Plat_GetCommandLineA();
+    return cmdLine && strstr(cmdLine, flag) != nullptr;
+}
+
 __forceinline bool IsNoOrigin() {
-//    const wchar_t* cmdLine = GetCommandLineW();
     return true;
 }
 
 __forceinline bool IsNoConsole() {
-    const wchar_t* cmdLine = GetCommandLineW();
-    return !wcsstr(cmdLine, L"-allocconsole");
+    return !HasEngineCommandLineFlag("-allocconsole");
 }
 
 #define ENGINE_DLL_BASE (G_is_dedi ? G_engine_ds : G_engine)

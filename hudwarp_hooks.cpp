@@ -377,8 +377,7 @@ void SetupHudWarpHooks() {
 	R1DAssert(G_client);
 
 	// Check if -usegpuhudwarp command line argument is present
-	const wchar_t* cmdLine = GetCommandLineW();
-	bool useGPUHudwarp = wcsstr(cmdLine, L"-usegpuhudwarp") != nullptr;
+	bool useGPUHudwarp = HasEngineCommandLineFlag("-usegpuhudwarp");
 
 	if (useGPUHudwarp) {
 		MH_CreateHook((void*)(G_client + 0x2AE630), &RenderHud_Hook, reinterpret_cast<LPVOID*>(&RenderHud));
@@ -395,8 +394,7 @@ char sub_180001CC0() {
 }
 void SetupHudWarpMatSystemHooks() {
 	// Check if -usegpuhudwarp command line argument is present
-	const wchar_t* cmdLine = GetCommandLineW();
-	bool useGPUHudwarp = wcsstr(cmdLine, L"-usegpuhudwarp") != nullptr;
+	bool useGPUHudwarp = HasEngineCommandLineFlag("-usegpuhudwarp");
 
 	// Always apply sub_180001CC0 hook
 	MH_CreateHook((void*)(G_matsystem + 0x1CC0), &sub_180001CC0, reinterpret_cast<LPVOID*>(&osub_180001CC0));
@@ -420,8 +418,7 @@ void SetupHudWarpMatSystemHooks() {
 
 void SetupHudWarpVguiHooks() {
 	// Check if -usegpuhudwarp command line argument is present
-	const wchar_t* cmdLine = GetCommandLineW();
-	bool useGPUHudwarp = wcsstr(cmdLine, L"-usegpuhudwarp") != nullptr;
+	bool useGPUHudwarp = HasEngineCommandLineFlag("-usegpuhudwarp");
 
 	if (useGPUHudwarp) {
 		uintptr_t vguimatsurfacedllBaseAddress = (uintptr_t)GetModuleHandleW(L"vguimatsurface.dll");

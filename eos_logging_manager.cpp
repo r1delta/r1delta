@@ -25,10 +25,15 @@ bool g_loggingInitialized = false;
 
 bool HasCommandLineFlag(const wchar_t* flag)
 {
-    const wchar_t* cmdLine = GetCommandLineW();
-    if (!cmdLine || !flag)
+    if (!flag)
         return false;
-    return wcsstr(cmdLine, flag) != nullptr;
+
+    // Convert wide string flag to narrow string for HasEngineCommandLineFlag
+    char narrowFlag[256];
+    size_t convertedChars = 0;
+    wcstombs_s(&convertedChars, narrowFlag, sizeof(narrowFlag), flag, _TRUNCATE);
+
+    return HasEngineCommandLineFlag(narrowFlag);
 }
 
 EOS_ELogLevel DetermineLogLevel()
