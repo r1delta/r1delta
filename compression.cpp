@@ -69,30 +69,41 @@ static r1dc_decompress_t original_lzham_decompressor_decompress = nullptr;
 // --------------------------------------------------------------------------
 struct r1dc_context_t
 {
+    // explicitly define ctor to avoid memset hacks
+    r1dc_context_t()
+        : active(0),
+        lzham_ctx(nullptr),
+        lzham_inited(false),
+        typeDetermined(false),
+        isZstdChunk(false),
+        decompressed(false),
+        totalComp(0),
+        m_decompBuf(nullptr),
+        m_decompSize(0),
+        m_decompPos(0)
+    {
+        InitializeSRWLock(&mtx);  // or SRWLOCK mtx = SRWLOCK_INIT; but don't memset it
+    }
+
     ~r1dc_context_t() {}
 
-    SRWLOCK mtx = SRWLOCK_INIT;          // Guard all mutable state below
+    SRWLOCK mtx;
+    std::atomic<uint32_t> active;
 
-    // Debug reentrancy tracking
-    std::atomic<uint32_t> active{0};
-
-    // LZHAM fallback
     void* lzham_ctx;
     bool  lzham_inited;
 
-    // We detect whether the current chunk is ZSTD or not:
     bool  typeDetermined;
     bool  isZstdChunk;
 
-    // For single-shot ZSTD:
-    bool     decompressed;       // have we done the ZSTD decompress yet?
-    size_t   totalComp;          // how many compressed bytes accumulated so far
-    uint8_t  m_compBuf[MAX_CHUNK_COMPRESSED_SIZE]; // fixed-size buffer for up to 1 MB
-    // Decompressed data:
-    uint8_t* m_decompBuf;        // single allocation for the uncompressed chunk
-    size_t   m_decompSize;       // total uncompressed size
-    size_t   m_decompPos;        // how many bytes we've handed off so far
+    bool     decompressed;
+    size_t   totalComp;
+    uint8_t  m_compBuf[MAX_CHUNK_COMPRESSED_SIZE];
+    uint8_t* m_decompBuf;
+    size_t   m_decompSize;
+    size_t   m_decompPos;
 };
+
 
 // --------------------------------------------------------------------------
 // r1dc_init
@@ -101,25 +112,15 @@ void* r1dc_init(void* params)
 {
     ZoneScoped;
 
-    r1dc_context_t* ctx = new (GlobalAllocator()->mi_malloc(sizeof(*ctx), TAG_COMPRESSION, HEAP_DELTA)) r1dc_context_t();
-    std::memset(ctx, 0, sizeof(*ctx));
+    void* mem = GlobalAllocator()->mi_malloc(sizeof(r1dc_context_t), TAG_COMPRESSION, HEAP_DELTA);
+    auto* ctx = new (mem) r1dc_context_t();
 
-    // Create the fallback LZHAM context
     ctx->lzham_ctx = original_lzham_decompressor_init(params);
     ctx->lzham_inited = (ctx->lzham_ctx != nullptr);
 
-    // No chunk type known yet
-    ctx->typeDetermined = false;
-    ctx->isZstdChunk = false;
-    ctx->decompressed = false;
-    ctx->totalComp = 0;
-    ctx->m_decompBuf = nullptr;
-    ctx->m_decompSize = 0;
-    ctx->m_decompPos = 0;
-    
-
     return ctx;
 }
+
 
 // --------------------------------------------------------------------------
 // r1dc_reinit: Called each time the engine wants to start a new chunk
@@ -168,31 +169,36 @@ __int64 r1dc_deinit(void* p)
     if (!p) return 0;
     r1dc_context_t* ctx = static_cast<r1dc_context_t*>(p);
 
-    SRWGuard lock(&ctx->mtx);
-
-    // Reentrancy check: ensure no other thread is using this context
-    R1DAssert(ctx->active.load() == 0 && "Context still in use during deinit");
-
     __int64 ret = 0;
-    // Deinit the fallback LZHAM
-    if (ctx->lzham_ctx)
+
     {
-        ret = original_lzham_decompressor_deinit(ctx->lzham_ctx);
-        ctx->lzham_ctx = nullptr;
+        SRWGuard lock(&ctx->mtx);
+
+        // Reentrancy check: ensure no other thread is using this context
+        R1DAssert(ctx->active.load() == 0 && "Context still in use during deinit");
+
+        // Deinit the fallback LZHAM
+        if (ctx->lzham_ctx)
+        {
+            ret = original_lzham_decompressor_deinit(ctx->lzham_ctx);
+            ctx->lzham_ctx = nullptr;
+        }
+
+        // Free any leftover decompression buffer
+        if (ctx->m_decompBuf)
+        {
+            GlobalAllocator()->mi_free(ctx->m_decompBuf, TAG_COMPRESSION, HEAP_DELTA);
+            ctx->m_decompBuf = nullptr;
+        }
+        // lock is released here
     }
 
-    // Free any leftover decompression buffer
-    if (ctx->m_decompBuf)
-    {
-        GlobalAllocator()->mi_free(ctx->m_decompBuf, TAG_COMPRESSION, HEAP_DELTA);
-        ctx->m_decompBuf = nullptr;
-    }
-
-    // Destroy mutex.
+    // Now it is safe to destroy and free the context
     ctx->~r1dc_context_t();
-    GlobalAllocator()->mi_free(ctx);
+    GlobalAllocator()->mi_free(ctx, TAG_COMPRESSION, HEAP_DELTA);
     return ret;
 }
+
 
 // --------------------------------------------------------------------------
 // r1dc_decompress: Our main hooking function.

@@ -1861,7 +1861,7 @@ USERID_s* GetUserIDHook(__int64 base_client, USERID_s* id) {
 }
 
 const char* GetUserIDStringHook(USERID_s* id) {
-	char buffer[256];
+	static char buffer[256];
 	if (id->snowflake == 1) {
 		sprintf(buffer, "%s", "UNKNOWN");
 		return buffer;
