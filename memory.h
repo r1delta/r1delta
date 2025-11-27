@@ -650,8 +650,6 @@ public:
     }
 
     void* Alloc(size_t nSize) override {
-        CheckVPhysics();
-
         void* p = mi_malloc(nSize, TAG_GAME, HEAP_GAME);
         if (!p) {
             m_nFailedAllocationSize = nSize;
@@ -664,11 +662,6 @@ public:
                     }
                 }
             }
-        }
-
-        void* returnAddress = _ReturnAddress();
-        if (m_vphysicsStart && returnAddress >= m_vphysicsStart && returnAddress < m_vphysicsEnd) {
-            memset(p, 0xFE, nSize);
         }
 
         R1DAssert(p);
@@ -1047,28 +1040,9 @@ public:
         mi_free_aligned(pMem, alignment, TAG_GAME, HEAP_GAME);
     }
 
-    void CheckVPhysics() {
-#if 0
-        if (!m_vphysicsChecked) {
-            HMODULE hModule = GetModuleHandleA("vphysics.dll");
-            if (hModule) {
-                MODULEINFO modInfo;
-                if (GetModuleInformation(GetCurrentProcess(), hModule, &modInfo, sizeof(MODULEINFO))) {
-                    m_vphysicsStart = modInfo.lpBaseOfDll;
-                    m_vphysicsEnd = (char*)m_vphysicsStart + modInfo.SizeOfImage;
-                }
-            }
-            m_vphysicsChecked = true;
-        }
-#endif
-    }
 private:
     MemAllocFailHandler_t m_pfnAllocFailHandler;
     size_t m_nFailedAllocationSize;
-private:
-    void* m_vphysicsStart = nullptr;
-    void* m_vphysicsEnd = nullptr;
-    bool m_vphysicsChecked = false;
 };
 
 typedef IMemAlloc* (*PFN_CreateGlobalMemAlloc)();
