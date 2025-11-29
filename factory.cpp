@@ -61,6 +61,7 @@
 //#include "thirdparty/silver-bun/silver-bun.h"
 #include "load.h"
 #include "logging.h"
+#include "vtable.h"
 
 #pragma comment(lib, "Dbghelp.lib")
 
@@ -523,67 +524,10 @@ __int64 VStdLib_GetICVarFactory() {
 }
 
 
-uintptr_t CreateTrampolineFunction(void* vftable, uintptr_t engineDsStart, uintptr_t engineDsEnd, int original_offset, int new_offset) {
-	void* execMem = VirtualAlloc(NULL, 128, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-	if (!execMem) return 0;
-
-	uint8_t* bytes = static_cast<uint8_t*>(execMem);
-
-	// Load the return address into rax
-	*bytes++ = 0x48; *bytes++ = 0x8B; *bytes++ = 0x04; *bytes++ = 0x24; // mov rax, [rsp]
-
-	// Move engineDsStart to r10 for comparison
-	*bytes++ = 0x49; *bytes++ = 0xBA; // mov r10, engineDsStart
-	*(uintptr_t*)bytes = engineDsStart;
-	bytes += sizeof(uintptr_t);
-
-	// cmp rax, r10
-	*bytes++ = 0x4C; *bytes++ = 0x39; *bytes++ = 0xD0;
-
-	// jb originalFunction (Offset will be filled later)
-	*bytes++ = 0x0F; *bytes++ = 0x82;
-	int32_t* jbOffsetLoc = reinterpret_cast<int32_t*>(bytes);
-	bytes += sizeof(int32_t);
-
-	// Move engineDsEnd to r10 for comparison
-	*bytes++ = 0x49; *bytes++ = 0xBA; // mov r10, engineDsEnd
-	*(uintptr_t*)bytes = engineDsEnd;
-	bytes += sizeof(uintptr_t);
-
-	// cmp rax, r10
-	*bytes++ = 0x4C; *bytes++ = 0x39; *bytes++ = 0xD0;
-
-	// ja originalFunction (Offset will be filled later)
-	*bytes++ = 0x0F; *bytes++ = 0x87;
-	int32_t* jaOffsetLoc = reinterpret_cast<int32_t*>(bytes);
-	bytes += sizeof(int32_t);
-
-	// Redirect to new function
-	uintptr_t newFunctionAddress = ((uintptr_t*)vftable)[new_offset];
-	*bytes++ = 0x48; *bytes++ = 0xB8; // mov rax, newFunctionAddress
-	*(uintptr_t*)bytes = newFunctionAddress;
-	bytes += sizeof(uintptr_t);
-	*bytes++ = 0xFF; *bytes++ = 0xE0; // jmp rax
-
-	uintptr_t originalFunctionLoc = reinterpret_cast<uintptr_t>(bytes);
-
-	// Fill in the offsets for jb and ja
-	*jbOffsetLoc = static_cast<int32_t>(originalFunctionLoc - (reinterpret_cast<uintptr_t>(jbOffsetLoc) + sizeof(int32_t)));
-	*jaOffsetLoc = static_cast<int32_t>(originalFunctionLoc - (reinterpret_cast<uintptr_t>(jaOffsetLoc) + sizeof(int32_t)));
-
-	// Original function pointer
-	uintptr_t originalFunctionAddress = ((uintptr_t*)vftable)[original_offset];
-
-	// mov rax, originalFunctionAddress
-	*bytes++ = 0x48; *bytes++ = 0xB8;
-	*(uintptr_t*)bytes = originalFunctionAddress;
-	bytes += sizeof(uintptr_t);
-
-	// jmp rax
-	*bytes++ = 0xFF; *bytes++ = 0xE0;
-
-	return reinterpret_cast<uintptr_t>(execMem);
-}
+// CreateTrampolineFunction is now CreateCallgate in utils.cpp
+// Alias for backwards compatibility
+#define CreateTrampolineFunction(vftable, start, end, orig, new_idx) \
+	CreateCallgate(vftable, start, end, orig, new_idx)
 
 const int indexMapping[] = {
 		0,  // CNetChan__GetName (original index 0, new index 0)

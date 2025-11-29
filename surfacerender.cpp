@@ -639,10 +639,3 @@ void SetupSquirrelErrorNotificationHooks() {
     auto launcher = (uintptr_t)GetModuleHandleA("launcher.dll");
     MH_CreateHook((LPVOID)(launcher + 0x3A5E0), &OnClientScriptErrorHook, reinterpret_cast<LPVOID*>(&oOnClientScriptErrorHook));
 }
-
-void SetupLocalizeIface() {
-    auto mlocalize = GetModuleHandleA("localize.dll");
-    auto localize_CreateInterface = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(mlocalize, "CreateInterface"));
-    G_localizeIface = (ILocalize*)localize_CreateInterface("Localize_001", 0);
-    G_localize = (uintptr_t)mlocalize;
-}

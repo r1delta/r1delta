@@ -39,3 +39,20 @@ public:
 
 	virtual wchar_t* GetValueByIndex(LocalizeStringIndex_t index) = 0;
 };
+
+// Global localization interface
+extern ILocalize* G_localizeIface;
+
+// List of mod localization files
+#include <vector>
+#include <string>
+extern std::vector<std::string> modLocalization_files;
+
+// Hook function pointers
+extern bool (*o_pCLocalise__AddFile)(void* pVguiLocalize, const char* path, const char* pathId, bool bIncludeFallbackSearchPaths);
+extern void (*o_pCLocalize__ReloadLocalizationFiles)(void* pVguiLocalize);
+
+// Hook functions
+bool __fastcall pCLocalise__AddFile(void* pVguiLocalize, const char* path, const char* pathId, bool bIncludeFallbackSearchPaths);
+void __fastcall h_CLocalize__ReloadLocalizationFiles(void* pVguiLocalize);
+void SetupLocalizeIface();

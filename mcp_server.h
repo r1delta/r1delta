@@ -48,6 +48,15 @@ void MCPResolveSQVMFrameTasksCommand(const ::CCommand& args);
 json RunOnVMThreadAndWait(std::function<json()> fn,
                           std::chrono::milliseconds timeout = std::chrono::milliseconds(2000));
 
+// Console output capture constants
+constexpr size_t kCaptureLineLimit = 500;
+constexpr auto kCaptureWaitTimeout = std::chrono::milliseconds(10000);
+
+// Helper functions for console capture
+std::string MakeEchoCommand(const std::string& marker);
+std::string AppendNewlineIfNeeded(const std::string& command);
+std::string GenerateGUID();
+
 // Console output capture
 struct ConsoleOutputCapture {
     enum class CaptureState {

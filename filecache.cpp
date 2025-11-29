@@ -4,7 +4,7 @@
 #include <iostream> // For std::cerr (replace with Msg/Warning)
 
 #include "logging.h"
-#include "tctx.hh"
+#include "tctx.h"
 
 FileCache::FileCache() {
     cacheMutex = SRWLOCK_INIT;

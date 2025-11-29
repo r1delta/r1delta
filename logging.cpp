@@ -5,9 +5,10 @@
 #include <intrin.h>
 #include <MinHook.h>
 #include <memory>
+#include <iostream>
 #include "load.h"
 #include "persistentdata.h"
-#include "tctx.hh"
+#include "tctx.h"
 #pragma intrinsic(_ReturnAddress)
 typedef void (*MsgFn)(const char*, ...);
 typedef void (*WarningFn)(const char*, ...);
@@ -508,4 +509,76 @@ void InitLoggingHooks()
 	MH_CreateHook((LPVOID)GetProcAddress(tier0, "COM_TimestampedLog"), &COM_TimestampedLogHook, reinterpret_cast<LPVOID*>(&COM_TimestampedLogOriginal));
 
 	MH_EnableHook(MH_ALL_HOOKS);
+}
+
+// Status message hook for recovered stripped debug logging
+void Status_ConMsg(const char* text, ...)
+{
+    char formatted[2048];
+    va_list list;
+
+    va_start(list, text);
+    vsprintf_s(formatted, text, list);
+    va_end(list);
+
+    auto endpos = strlen(formatted);
+    if (formatted[endpos - 1] == '\n')
+        formatted[endpos - 1] = '\0';
+
+    Msg("%s\n", formatted);
+}
+
+// Hook for Q_vsnprintf - recovers stripped debug logging
+signed __int64 __fastcall LogStrippedDbgMessage_vsnprintf(char* a1, signed __int64 a2, const char* a3, va_list a4)
+{
+    static bool recursive2 = false;
+    signed __int64 result;
+
+    if (a2 <= 0)
+        return 0i64;
+    result = vsnprintf(a1, a2, a3, a4);
+    if ((int)result < 0i64 || (int)result >= a2)
+    {
+        result = a2 - 1;
+        a1[a2 - 1] = 0;
+    }
+    if (!recursive2) {
+        recursive2 = true;
+        Msg("%s\n", a1);
+        recursive2 = false;
+    }
+    return result;
+}
+
+// Hook for Q_snprintf - recovers stripped debug logging
+void LogStrippedDbgMessage_snprintf(char* a1, signed __int64 a2, const char* a3, ...)
+{
+    int v5;
+    va_list ArgList;
+
+    va_start(ArgList, a3);
+    if (a2 > 0)
+    {
+        v5 = vsnprintf(a1, a2, a3, ArgList);
+        if (v5 < 0i64 || v5 >= a2)
+            a1[a2 - 1] = 0;
+    }
+    std::cout << a1 << std::endl;
+}
+
+// UTIL_LogPrintf hook for logging and broadcasting
+void (*oUTIL_LogPrintf)(const char* fmt, ...) = nullptr;
+
+void UTIL_LogPrintf(char* fmt, ...)
+{
+    char tempString[1024];
+    va_list params;
+
+    va_start(params, fmt);
+    V_vsnprintf(tempString, 1024, fmt, params);
+    oUTIL_LogPrintf("%s", tempString);
+    if (IsDedicatedServer())
+        Msg("%s", tempString);
+    static auto UTIL_ClientPrintAll = (void(*)(unsigned int, char*))(G_server + 0x25D5B0);
+    UTIL_ClientPrintAll(2, tempString);
 }

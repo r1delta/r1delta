@@ -395,3 +395,47 @@ __int64 __fastcall sub_3A1E80(__int64 a1, __int64 a2, unsigned int* a3, _DWORD* 
 	*a4 = result;
 	return result;
 }
+
+// Server class register hooks - redirects CControlPanelProp to CDynamicProp
+__int64 (*ServerClassRegister_7F7E0)(__int64 a1, char* a2, __int64 a3);
+
+__int64 __fastcall HookedServerClassRegister(__int64 a1, char* a2, __int64 a3) {
+	static __int64 originalPointerValue = 0;  // Stores where qword_C4A8D0 points to
+	static __int64 originalA3 = 0;           // Stores original a3 value
+
+	// Check if it's CDynamicProp
+	if (strcmp_static(a2, "CDynamicProp") == 0) {
+		// Store the dereferenced value and original pointer
+		originalPointerValue = *(__int64*)a3;
+		originalA3 = a3;
+	}
+	// Check if it's CControlPanelProp
+	else if (strcmp_static(a2, "CControlPanelProp") == 0) {
+		// Redirect the pointer
+		*(__int64*)a3 = originalPointerValue;
+		a3 = originalA3;
+	}
+
+	// Call original function
+	return ServerClassRegister_7F7E0(a1, a2, a3);
+}
+
+// Prop dynamic initializer hook
+__int64 (*odynamic_initializer_for__prop_dynamic__)();
+__int64 dynamic_initializer_for__prop_dynamic__() {
+	// Call original initializer
+	__int64 ret = odynamic_initializer_for__prop_dynamic__();
+
+	// Get function pointer from offset
+	using ServerFunc = __int64(*)();
+	ServerFunc serverFunction = reinterpret_cast<ServerFunc>(G_server + 0x25A6C0);
+	__int64 v0 = serverFunction();
+
+	// Cast and call final function
+	using FinalFunc = __int64(__fastcall*)(__int64*, void***, const char*);
+	FinalFunc finalFunction = **reinterpret_cast<FinalFunc**>(v0);
+
+	return finalFunction(reinterpret_cast<__int64*>(v0),
+		reinterpret_cast<void***>(G_server + 0xB2F278),
+		"prop_control_panel");
+}

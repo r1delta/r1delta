@@ -76,3 +76,11 @@ inline vtableRef2Engines netMessages[] = {
 	VTABLEREF2ENGINES("SVC_VoiceData", 0x5F5D88, 0x40E578),
 };
 void InitDedicated();
+
+// AddSearchPath hook for dedicated server
+extern __int64 (*oAddSearchPathDedi)(__int64 a1, const char* a2, __int64 a3, unsigned int a4);
+__int64 __fastcall AddSearchPathDedi(__int64 a1, const char* a2, __int64 a3, unsigned int a4);
+
+// Server info panel hook for dedicated server admin
+extern void (*oCServerInfoPanel__OnServerDataResponse_14730)(__int64 a1, const char* a2, const char* a3);
+void CServerInfoPanel__OnServerDataResponse_14730(__int64 a1, const char* a2, const char* a3);

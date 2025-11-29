@@ -1,6 +1,7 @@
 #include "core.h"
 #include "engine.h"
 #include "netadr.h"
+#include "netchanwarnings.h"
 
 #include "logging.h"
 #include "load.h"
@@ -881,5 +882,170 @@ security_fixes_server(uintptr_t engine_base, uintptr_t server_base)
 		MH_CreateHook((LPVOID)(engine_base + 0xcb6f0), &SV_BroadcastMessageWithFilterLISTEN, reinterpret_cast<LPVOID*>(&oSV_BroadcastMessageWithFilterLISTEN));
 	// make listen server host party lead
 	MH_CreateHook((LPVOID)(server_base + 0x510010), (LPVOID)(server_base + 0x25BD30), reinterpret_cast<LPVOID*>(NULL));
-	
+
+}
+
+// Name sanitization - prevents malicious/exploitable names
+typedef void (*CBaseClientSetNameType)(__int64 thisptr, const char* name);
+CBaseClientSetNameType CBaseClientSetNameOriginal;
+
+void __fastcall HookedCBaseClientSetName(__int64 thisptr, const char* name)
+{
+	// Handle null or empty name
+	if (!name || !*name) {
+		CBaseClientSetNameOriginal(thisptr, "unnamed");
+		return;
+	}
+
+	size_t nameSize = strlen(name);
+
+	// Check if name is too short
+	if (nameSize < 2) {
+		CBaseClientSetNameOriginal(thisptr, "unnamed");
+		return;
+	}
+
+	// Check if the name is too long
+	if (nameSize > 32) {
+		nameSize = 32; // Truncate to max length
+	}
+
+	// Create a sanitized name buffer
+	char sanitizedName[256];
+	size_t sanitizedIndex = 0;
+
+	// Process each character using the IsValidUserInfo validation logic
+	for (size_t i = 0; i < nameSize && sanitizedIndex < 32; i++) {
+		char c = name[i];
+
+		// Basic ASCII printable range check
+		if (c < 32 || c > 126) {
+			continue; // Skip non-printable characters
+		}
+
+		// Check for explicitly denied characters
+		bool isInvalid = false;
+		switch (c) {
+		case '"':  // String termination
+		case '\\': // Escapes
+		case '{':  // Code blocks/JSON
+		case '}':
+		case '\'': // String delimiters
+		case '`':
+		case ';':  // Command separators
+		case '/':
+		case '*':
+		case '<':  // XML/HTML
+		case '>':
+		case '&':  // Shell
+		case '|':
+		case '$':
+		case '!':
+		case '?':
+		case '+':  // URL encoding
+		case '%':
+		case '\n': // Any whitespace except regular space
+		case '\r':
+		case '\t':
+		case '\v':
+		case '\f':
+			isInvalid = true;
+			break;
+		}
+
+		if (!isInvalid) {
+			sanitizedName[sanitizedIndex++] = c;
+		}
+	}
+
+	// Add null terminator
+	sanitizedName[sanitizedIndex] = '\0';
+
+	// If no valid characters were found, use default name
+	if (sanitizedIndex == 0) {
+		CBaseClientSetNameOriginal(thisptr, "unnamed");
+		return;
+	}
+
+	CBaseClientSetNameOriginal(thisptr, sanitizedName);
+}
+
+// Sign-on state validation
+enum SIGNONSTATE : int {
+	SIGNONSTATE_NONE = 0,
+	SIGNONSTATE_CHALLENGE = 1,
+	SIGNONSTATE_CONNECTED = 2,
+	SIGNONSTATE_NEW = 3,
+	SIGNONSTATE_PRESPAWN = 4,
+	SIGNONSTATE_GETTING_DATA = 5,
+	SIGNONSTATE_SPAWN = 6,
+	SIGNONSTATE_FIRST_SNAP = 7,
+	SIGNONSTATE_FULL = 8,
+	SIGNONSTATE_CHANGELEVEL = 9,
+};
+
+struct alignas(8) NET_SignOnState : INetMessage
+{
+	bool m_bReliable;
+	void* m_NetChannel;
+	void* m_pMessageHandler;
+	SIGNONSTATE m_nSignonState;
+	int m_nSpawnCount;
+	int m_numServerPlayers;
+};
+
+bool (*oNET_SignOnState__ReadFromBuffer)(NET_SignOnState* thisptr, bf_read& buffer);
+bool NET_SignOnState__ReadFromBuffer(NET_SignOnState* thisptr, bf_read& buffer)
+{
+	oNET_SignOnState__ReadFromBuffer(thisptr, buffer);
+
+	// Reject duplicate SIGNONSTATE_FULL messages when file transmission is active
+	if (thisptr->GetNetChannel()->m_bConnectionComplete_OrPreSignon && thisptr->m_nSignonState == SIGNONSTATE_FULL) {
+		Warning("NET_SignOnState::ReadFromBuffer: blocked attempt at re-ACKing SIGNONSTATE_FULL\n");
+		return false;
+	}
+
+	return true;
+}
+
+// String command validation
+struct alignas(8) NET_StringCmd : INetMessage
+{
+	bool m_bReliable;
+	void* m_NetChannel;
+	void* m_pMessageHandler;
+	char* m_szCommand;
+	char m_szCommandBuffer[1024];
+};
+
+bool (*oNET_StringCmd__ReadFromBuffer)(NET_StringCmd* thisptr, bf_read& buffer);
+bool NET_StringCmd__ReadFromBuffer(NET_StringCmd* thisptr, bf_read& buffer)
+{
+	oNET_StringCmd__ReadFromBuffer(thisptr, buffer);
+
+	// Block stringcmd from inactive client
+	if (!thisptr->GetNetChannel()->m_bConnectionComplete_OrPreSignon) {
+		Warning("NET_StringCmd::ReadFromBuffer: blocked stringcmd from inactive client\n");
+		if (thisptr->m_szCommand)
+			thisptr->m_szCommand[0] = 0;
+		thisptr->m_szCommandBuffer[0] = 0;
+		return true;
+	}
+
+	return true;
+}
+
+// Squirrel client command handler
+bool (*oHandleSquirrelClientCommand)(__int64 player, CCommand* args);
+bool HandleSquirrelClientCommand(__int64 player, CCommand* args) {
+	static auto HandlePlayerClientCommand = reinterpret_cast<decltype(oHandleSquirrelClientCommand)>(G_server + 0x5014F0);
+	static auto g_pVoiceManager = G_server + 0xB3B8B0;
+	static auto HandleVoiceClientCommand = reinterpret_cast<bool (*)(__int64 voice, __int64 player, CCommand* args)>(G_server + 0x275C20);
+
+	if (oHandleSquirrelClientCommand(player, args)) return true;
+	if (HandlePlayerClientCommand(player, args)) return true;
+	if (HandleVoiceClientCommand(g_pVoiceManager, player, args)) return true;
+	if (!strcmp_static(args->Arg(0), "resetidletimer")) { reinterpret_cast<void(*)()>((G_server + 0xDB210))(); return true; }
+
+	return false;
 }

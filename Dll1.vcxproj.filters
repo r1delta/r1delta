@@ -255,13 +255,13 @@
     <ClInclude Include="thirdparty\zstd\zstd.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="arena.hh">
+    <ClInclude Include="arena.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="tctx.hh">
+    <ClInclude Include="tctx.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="security_fixes.hh">
+    <ClInclude Include="security_fixes.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="steam.h">
@@ -440,13 +440,13 @@
     <ClCompile Include="masterserver.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="arena.cc">
+    <ClCompile Include="arena.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="tctx.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="security_fixes.cc">
+    <ClCompile Include="security_fixes.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="steam.cpp">

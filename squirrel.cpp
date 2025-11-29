@@ -43,6 +43,7 @@
 #include "r1d_version.h"
 #include "client.h"
 #include "surfacerender.h"
+#include "localize.h"
 
 #pragma intrinsic(_ReturnAddress)
 
@@ -151,7 +152,6 @@ CSquirrelVM__RegisterGlobalConstantInt_t CSquirrelVM__RegisterGlobalConstantInt;
 CSquirrelVM__GetEntityFromInstance_t CSquirrelVM__GetEntityFromInstance;
 sq_GetEntityConstant_CBaseEntity_t sq_GetEntityConstant_CBaseEntity; // CLIENT
 AddSquirrelReg_t AddSquirrelReg;
-std::vector<std::string> modLocalization_files;
 //
 //const char* __fastcall Script_GetConVarString(const char* a1, __int64 a2, __int64 a3)
 //{

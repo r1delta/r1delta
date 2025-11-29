@@ -29,3 +29,14 @@ typedef void (*sub_18027F2C0Type)(__int64 a1, const char* a2, void* a3);
 extern sub_18027F2C0Type sub_18027F2C0Original;
 typedef void (*Cbuf_AddTextType)(int a1, const char* a2, unsigned int a3);
 extern Cbuf_AddTextType Cbuf_AddTextOriginal;
+
+// Status message hook for recovered stripped debug logging
+void Status_ConMsg(const char* text, ...);
+
+// Stripped debug logging recovery hooks
+signed __int64 __fastcall LogStrippedDbgMessage_vsnprintf(char* a1, signed __int64 a2, const char* a3, va_list a4);
+void LogStrippedDbgMessage_snprintf(char* a1, signed __int64 a2, const char* a3, ...);
+
+// UTIL_LogPrintf hook for logging and broadcasting
+extern void (*oUTIL_LogPrintf)(const char* fmt, ...);
+void UTIL_LogPrintf(char* fmt, ...);

@@ -1,4 +1,5 @@
 #include "model_info.h"
+#include "vtable.h"
 
 CVModelInfoServer* g_CVModelInfoServer;
 uintptr_t g_CVModelInfoServerInterface;
@@ -102,54 +103,58 @@ CVModelInfoServer::CVModelInfoServer(uintptr_t* r1vtable)
 
 void CVModelInfoServer::CreateR1OVTable()
 {
-	g_r1oCVModelInfoServerInterface[0] = CreateFunction((void*)dtor_0, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[1] = CreateFunction((void*)GetModel, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[2] = CreateFunction((void*)GetModelIndex, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[3] = CreateFunction((void*)GetModelName, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[4] = CreateFunction((void*)GetVCollide, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[5] = CreateFunction((void*)GetVCollideEx, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[6] = CreateFunction((void*)GetVCollideEx2, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[7] = CreateFunction((void*)GetModelRenderBounds, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[8] = CreateFunction(CModelInfo__UnkSetFlag, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[9] = CreateFunction(CModelInfo__UnkClearFlag, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[10] = CreateFunction(CModelInfo__GetFlag, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[11] = CreateFunction(CModelInfo__UnkTFOVoid, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[12] = CreateFunction(CModelInfo__UnkTFOVoid2, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[13] = CreateFunction(CModelInfo__ShouldRet0, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[14] = CreateFunction(CModelInfo__UnkTFOVoid3, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[15] = CreateFunction(CModelInfo__ClientFullyConnected, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[16] = CreateFunction((void*)GetModelFrameCount, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[17] = CreateFunction((void*)GetModelType, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[18] = CreateFunction(CModelInfo__UnkTFOShouldRet0_2, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[19] = CreateFunction((void*)GetModelExtraData, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[20] = CreateFunction((void*)IsTranslucentTwoPass, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[21] = CreateFunction((void*)ModelHasMaterialProxy, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[22] = CreateFunction((void*)IsTranslucent, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[23] = CreateFunction((void*)NullSub1, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[24] = CreateFunction((void*)UnkFunc1, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[25] = CreateFunction((void*)UnkFunc2, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[26] = CreateFunction((void*)UnkFunc3, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[27] = CreateFunction((void*)UnkFunc4, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[28] = CreateFunction((void*)UnkFunc5, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[29] = CreateFunction((void*)UnkFunc6, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[30] = CreateFunction((void*)UnkFunc7, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[31] = CreateFunction((void*)UnkFunc8, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[32] = CreateFunction((void*)UnkFunc9, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[33] = CreateFunction((void*)UnkFunc10, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[34] = CreateFunction((void*)UnkFunc11, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[35] = CreateFunction((void*)UnkFunc12, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[36] = CreateFunction((void*)UnkFunc13, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[37] = CreateFunction((void*)UnkFunc14, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[38] = CreateFunction((void*)UnkFunc15, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[39] = CreateFunction((void*)UnkFunc16, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[40] = CreateFunction((void*)UnkFunc17, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[41] = CreateFunction((void*)UnkFunc18, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[42] = CreateFunction((void*)UnkFunc19, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[43] = CreateFunction((void*)UnkFunc20, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[44] = CreateFunction((void*)UnkFunc21, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[45] = CreateFunction((void*)UnkFunc22, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[46] = CreateFunction((void*)UnkFunc23, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[47] = CreateFunction((void*)NullSub2, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[48] = CreateFunction((void*)UnkFunc24, (void*)g_CVModelInfoServerInterface);
-	g_r1oCVModelInfoServerInterface[49] = CreateFunction((void*)UnkFunc25, (void*)g_CVModelInfoServerInterface);
+	// R1O VModelInfoServer has additional TFO-specific functions inserted
+	// Original R1 vtable indices are remapped to account for these additions
+	g_r1oCVModelInfoServerInterface[0] = VTABLE_TRAMPOLINE(dtor_0, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[1] = VTABLE_TRAMPOLINE(GetModel, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[2] = VTABLE_TRAMPOLINE(GetModelIndex, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[3] = VTABLE_TRAMPOLINE(GetModelName, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[4] = VTABLE_TRAMPOLINE(GetVCollide, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[5] = VTABLE_TRAMPOLINE(GetVCollideEx, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[6] = VTABLE_TRAMPOLINE(GetVCollideEx2, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[7] = VTABLE_TRAMPOLINE(GetModelRenderBounds, g_CVModelInfoServerInterface);
+	// TFO-specific stubs (indices 8-15)
+	g_r1oCVModelInfoServerInterface[8] = VTABLE_TRAMPOLINE(CModelInfo__UnkSetFlag, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[9] = VTABLE_TRAMPOLINE(CModelInfo__UnkClearFlag, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[10] = VTABLE_TRAMPOLINE(CModelInfo__GetFlag, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[11] = VTABLE_TRAMPOLINE(CModelInfo__UnkTFOVoid, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[12] = VTABLE_TRAMPOLINE(CModelInfo__UnkTFOVoid2, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[13] = VTABLE_TRAMPOLINE(CModelInfo__ShouldRet0, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[14] = VTABLE_TRAMPOLINE(CModelInfo__UnkTFOVoid3, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[15] = VTABLE_TRAMPOLINE(CModelInfo__ClientFullyConnected, g_CVModelInfoServerInterface);
+	// Rest of vtable shifted
+	g_r1oCVModelInfoServerInterface[16] = VTABLE_TRAMPOLINE(GetModelFrameCount, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[17] = VTABLE_TRAMPOLINE(GetModelType, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[18] = VTABLE_TRAMPOLINE(CModelInfo__UnkTFOShouldRet0_2, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[19] = VTABLE_TRAMPOLINE(GetModelExtraData, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[20] = VTABLE_TRAMPOLINE(IsTranslucentTwoPass, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[21] = VTABLE_TRAMPOLINE(ModelHasMaterialProxy, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[22] = VTABLE_TRAMPOLINE(IsTranslucent, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[23] = VTABLE_TRAMPOLINE(NullSub1, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[24] = VTABLE_TRAMPOLINE(UnkFunc1, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[25] = VTABLE_TRAMPOLINE(UnkFunc2, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[26] = VTABLE_TRAMPOLINE(UnkFunc3, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[27] = VTABLE_TRAMPOLINE(UnkFunc4, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[28] = VTABLE_TRAMPOLINE(UnkFunc5, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[29] = VTABLE_TRAMPOLINE(UnkFunc6, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[30] = VTABLE_TRAMPOLINE(UnkFunc7, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[31] = VTABLE_TRAMPOLINE(UnkFunc8, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[32] = VTABLE_TRAMPOLINE(UnkFunc9, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[33] = VTABLE_TRAMPOLINE(UnkFunc10, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[34] = VTABLE_TRAMPOLINE(UnkFunc11, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[35] = VTABLE_TRAMPOLINE(UnkFunc12, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[36] = VTABLE_TRAMPOLINE(UnkFunc13, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[37] = VTABLE_TRAMPOLINE(UnkFunc14, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[38] = VTABLE_TRAMPOLINE(UnkFunc15, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[39] = VTABLE_TRAMPOLINE(UnkFunc16, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[40] = VTABLE_TRAMPOLINE(UnkFunc17, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[41] = VTABLE_TRAMPOLINE(UnkFunc18, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[42] = VTABLE_TRAMPOLINE(UnkFunc19, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[43] = VTABLE_TRAMPOLINE(UnkFunc20, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[44] = VTABLE_TRAMPOLINE(UnkFunc21, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[45] = VTABLE_TRAMPOLINE(UnkFunc22, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[46] = VTABLE_TRAMPOLINE(UnkFunc23, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[47] = VTABLE_TRAMPOLINE(NullSub2, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[48] = VTABLE_TRAMPOLINE(UnkFunc24, g_CVModelInfoServerInterface);
+	g_r1oCVModelInfoServerInterface[49] = VTABLE_TRAMPOLINE(UnkFunc25, g_CVModelInfoServerInterface);
 }

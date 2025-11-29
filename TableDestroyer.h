@@ -76,3 +76,11 @@ __int64 __fastcall sub_3A1E00(__int64 a1, __int64 a2, unsigned int* a3, _DWORD* 
 __int64 __fastcall sub_3A1E40(__int64 a1, __int64 a2, unsigned int* a3, _DWORD* a4);
 __int64 __fastcall sub_3A1E80(__int64 a1, __int64 a2, unsigned int* a3, _DWORD* a4);
 void DestroySendProp(SendProp* sendTablePtr, int* sendTableLengthPtr, const char* propname);
+
+// Server class register hook
+extern __int64 (*ServerClassRegister_7F7E0)(__int64 a1, char* a2, __int64 a3);
+__int64 __fastcall HookedServerClassRegister(__int64 a1, char* a2, __int64 a3);
+
+// Prop dynamic initializer hook
+extern __int64 (*odynamic_initializer_for__prop_dynamic__)();
+__int64 dynamic_initializer_for__prop_dynamic__();

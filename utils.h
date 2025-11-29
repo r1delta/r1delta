@@ -39,6 +39,8 @@
 
 void UpdateRWXFunction(void* rwxfunc, void* real);
 uintptr_t CreateFunction(void* func, void* real);
+uintptr_t CreateCallgate(void* vftable, uintptr_t dll_start, uintptr_t dll_end,
+                         int orig_idx, int new_idx);
 
 template <typename ReturnType, typename ...Args>
 inline ReturnType CallVFunc(int index, void* thisPtr, Args... args) {

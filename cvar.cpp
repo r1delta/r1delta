@@ -41,6 +41,8 @@
 #include "windows.h"
 
 #include <iostream>
+#include <vector>
+#include <algorithm>
 #include "cvar.h"
 #include <winternl.h>  // For UNICODE_STRING.
 #include <fstream>
@@ -52,6 +54,7 @@
 #include "factory.h"
 #include "logging.h"
 #include "load.h"
+#include "localize.h"
 #include "mcp_server.h"
 void      (*OriginalCCVar_RegisterConCommand)(uintptr_t thisptr, ConCommandBaseR1* pCommandBase);
 void      (*OriginalCCVar_UnregisterConCommand)(uintptr_t thisptr, ConCommandBaseR1* pCommandBase);
@@ -629,4 +632,173 @@ void Slot10Command(const CCommand& args)
 	if (hudMenu && *(_BYTE *)(hudMenu + 0x10)) {
 		CHudMenuSelectMenuItem(hudMenu, 10);
 	}
+}
+
+// RegisterConCommand - creates a new console command
+typedef void (*ConCommandConstructorType)(
+	ConCommandR1* newCommand, const char* name, void (*callback)(const CCommand&), const char* helpString, int flags, void* parent);
+
+ConCommandR1* RegisterConCommand(const char* commandName, void (*callback)(const CCommand&), const char* helpString, int flags) {
+	ConCommandConstructorType conCommandConstructor = (ConCommandConstructorType)(IsDedicatedServer() ? (G_engine_ds + 0x31F260) : (G_engine + 0x4808F0));
+	ConCommandR1* newCommand = new (GlobalAllocator()->mi_malloc(sizeof(ConCommandR1), TAG_GAME, HEAP_GAME)) ConCommandR1;
+
+	conCommandConstructor(newCommand, commandName, callback, helpString, flags, nullptr);
+
+	return newCommand;
+}
+
+// RegisterConVar - creates a new console variable
+ConVarR1* RegisterConVar(const char* name, const char* value, int flags, const char* helpString) {
+	typedef void (*ConVarConstructorType)(ConVarR1* newVar, const char* name, const char* value, int flags, const char* helpString);
+	ConVarConstructorType conVarConstructor = (ConVarConstructorType)(IsDedicatedServer() ? (G_engine_ds + 0x320460) : (G_engine + 0x481AF0));
+	ConVarR1* newVar = new (GlobalAllocator()->mi_malloc(sizeof(ConVarR1), TAG_GAME, HEAP_GAME)) ConVarR1;
+
+	conVarConstructor(newVar, name, value, flags, helpString);
+
+	return newVar;
+}
+
+// CVar iterator interface for finding commands/variables
+class ICVarIteratorInternal
+{
+public:
+    virtual void SetFirst() = 0;
+	virtual void Next() = 0;
+	virtual bool IsValid() = 0;
+	virtual ConCommandBaseR1* Get() = 0;
+};
+
+inline bool CaselessStringLessThan(const char* const& lhs, const char* const& rhs) {
+	if (!lhs) return false;
+	if (!rhs) return true;
+	return (_stricmp(lhs, rhs) < 0);
+}
+
+static bool ConVarSortFunc(ConCommandBaseR1* const& lhs, ConCommandBaseR1* const& rhs)
+{
+	return CaselessStringLessThan(lhs->m_pszName, rhs->m_pszName);
+}
+
+// Find command - searches for commands/cvars by name or help string
+void Find(const CCommand& args)
+{
+	const char* search;
+
+	if (args.ArgC() != 2)
+	{
+		Msg("Usage:  find <string>\n");
+		return;
+	}
+
+	// Get substring to find
+	search = args[1];
+
+	// Use std::vector to store matching cvars for sorting
+	std::vector<ConCommandBaseR1*> matches;
+
+	// Use the FactoryInternalIterator to iterate through all cvars
+	typedef ICVarIteratorInternal* (__thiscall *FactoryInternalIterator_t)(void* cvar);
+	FactoryInternalIterator_t pFactoryInternalIterator = (FactoryInternalIterator_t)(*(uintptr_t**)((void*)cvarinterface))[40];
+	ICVarIteratorInternal* it = pFactoryInternalIterator((void*)cvarinterface);
+	if (it)
+	{
+		for (it->SetFirst(); it->IsValid(); it->Next())
+		{
+			ConCommandBaseR1* var = it->Get();
+			if (!var) continue;
+
+			if (!V_stristr(var->m_pszName, search) &&
+				!V_stristr(var->m_pszHelpString, search))
+				continue;
+
+			matches.push_back(var);
+		}
+	}
+
+	// Sort the results by name
+	std::sort(matches.begin(), matches.end(), ConVarSortFunc);
+
+	// Print the results
+	for (const auto& var : matches)
+	{
+		ConVar_PrintDescription(var);
+	}
+}
+
+// ConVar change callbacks for recent host tracking
+ConVarR1* host_mostRecentMapCvar = nullptr;
+ConVarR1* host_mostRecentGamemodeCvar = nullptr;
+
+void GamemodeChangeCallback(IConVar* var_iconvar, const char* pOldValue, float flOldValue)
+{
+    auto Cbuf_AddText2 = (Cbuf_AddTextType)(IsDedicatedServer() ? (G_engine_ds + 0x72d70) : (G_engine + 0x102D50));
+
+    ConVarR1* gamemodeCvar = OriginalCCVar_FindVar(cvarinterface, "mp_gamemode");
+    const char* newValue = pOldValue;
+    char command[256];
+    snprintf(command, sizeof(command), "host_mostRecentGamemode \"%s\"\n", newValue ? newValue : "");
+    Cbuf_AddText2(0, command, 0);
+}
+
+void HostMapChangeCallback(IConVar* var_iconvar, const char* pOldValue, float flOldValue)
+{
+    auto Cbuf_AddText2 = (Cbuf_AddTextType)(IsDedicatedServer() ? (G_engine_ds + 0x72d70) : (G_engine + 0x102D50));
+
+    const char* newValue = pOldValue;
+
+    // Check if the value is valid and not the lobby map
+    if (newValue && newValue[0] != '\0' && strcmp_static(newValue, "mp_lobby.bsp") != 0)
+    {
+        char mapNameToStore[256];
+        char command[256 + 30];
+
+        strncpy(mapNameToStore, newValue, sizeof(mapNameToStore) - 1);
+        mapNameToStore[sizeof(mapNameToStore) - 1] = '\0';
+
+        // Trim ".bsp" suffix if present
+        size_t len = strlen(mapNameToStore);
+        const char* suffix = ".bsp";
+        size_t suffixLen = strlen(suffix);
+
+        if (len >= suffixLen && strcmp(mapNameToStore + len - suffixLen, suffix) == 0)
+        {
+            mapNameToStore[len - suffixLen] = '\0';
+        }
+
+        snprintf(command, sizeof(command), "host_mostRecentMap \"%s\"\n", mapNameToStore);
+        Cbuf_AddText2(0, command, 0);
+    }
+}
+
+void InitializeRecentHostVars()
+{
+    host_mostRecentGamemodeCvar = RegisterConVar(
+        "host_mostRecentGamemode",
+        "",
+        FCVAR_HIDDEN,
+        "Stores the last gamemode set via mp_gamemode."
+    );
+
+    host_mostRecentMapCvar = RegisterConVar(
+        "host_mostRecentMap",
+        "",
+        FCVAR_HIDDEN,
+        "Stores the last map set via host_map, excluding mp_lobby."
+    );
+
+    ConVarR1* mp_gamemode = OriginalCCVar_FindVar(cvarinterface, "mp_gamemode");
+    ConVarR1* host_map = OriginalCCVar_FindVar(cvarinterface, "host_map");
+    {
+        mp_gamemode->m_fnChangeCallbacks.AddToTail((FnChangeCallback_t)GamemodeChangeCallback);
+        GamemodeChangeCallback(nullptr, "", 0.0f);
+    }
+    {
+        host_map->m_fnChangeCallbacks.AddToTail((FnChangeCallback_t)HostMapChangeCallback);
+        HostMapChangeCallback(nullptr, "", 0.0f);
+    }
+
+    auto m_sensitivity = OriginalCCVar_FindVar(cvarinterface, "m_sensitivity");
+    if (m_sensitivity) {
+        m_sensitivity->m_fMinVal = 0.01f;
+    }
 }

@@ -427,3 +427,17 @@ typedef char (*CEngineVGui__InitType)(__int64 a1);
 extern CEngineVGui__InitType CEngineVGui__InitOriginal;
 char CEngineVGui__Init(__int64 a1);
 
+// ConCommand/ConVar registration
+ConCommandR1* RegisterConCommand(const char* commandName, void (*callback)(const CCommand&), const char* helpString, int flags);
+ConVarR1* RegisterConVar(const char* name, const char* value, int flags, const char* helpString);
+
+// Find command for searching commands/cvars
+void Find(const CCommand& args);
+
+// Recent host vars - tracks last used map/gamemode
+extern ConVarR1* host_mostRecentMapCvar;
+extern ConVarR1* host_mostRecentGamemodeCvar;
+void GamemodeChangeCallback(IConVar* var_iconvar, const char* pOldValue, float flOldValue);
+void HostMapChangeCallback(IConVar* var_iconvar, const char* pOldValue, float flOldValue);
+void InitializeRecentHostVars();
+

@@ -1,6 +1,6 @@
 #include "core.h"
 
-#include "tctx.hh"
+#include "tctx.h"
 
 thread_local TCtx tctx = {};
 

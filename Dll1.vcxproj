@@ -203,8 +203,10 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="appsystem.h" />
-    <ClInclude Include="arena.hh" />
+    <ClInclude Include="arena.h" />
     <ClInclude Include="audio.h" />
+    <ClInclude Include="audio_cache.h" />
+    <ClInclude Include="audio_device.h" />
     <ClInclude Include="beardbgon.h" />
     <ClInclude Include="bitbuf.h" />
     <ClInclude Include="client.h" />
@@ -231,6 +233,15 @@
     <ClInclude Include="jwt_compact.h" />
     <ClInclude Include="keyvalues.h" />
     <ClInclude Include="load.h" />
+    <ClInclude Include="auth.h" />
+    <ClInclude Include="bot.h" />
+    <ClInclude Include="chat.h" />
+    <ClInclude Include="commands.h" />
+    <ClInclude Include="misc.h" />
+    <ClInclude Include="networking.h" />
+    <ClInclude Include="physics_hooks.h" />
+    <ClInclude Include="precache.h" />
+    <ClInclude Include="usermessages.h" />
     <ClInclude Include="localchatwriter.h" />
     <ClInclude Include="localize.h" />
     <ClInclude Include="logging.h" />
@@ -244,18 +255,19 @@
     <ClInclude Include="patcher.h" />
     <ClInclude Include="persistentdata.h" />
     <ClInclude Include="physics.h" />
+    <ClInclude Include="player.h" />
     <ClInclude Include="platform.h" />
     <ClInclude Include="predictionerror.h" />
     <ClInclude Include="r1d_version.h" />
     <ClInclude Include="resource.h" />
-    <ClInclude Include="security_fixes.hh" />
+    <ClInclude Include="security_fixes.h" />
     <ClInclude Include="sendmoveclampfix.h" />
     <ClInclude Include="squirrel.h" />
     <ClInclude Include="steam.h" />
     <ClInclude Include="surfacerender.h" />
     <ClInclude Include="sv_filter.h" />
     <ClInclude Include="TableDestroyer.h" />
-    <ClInclude Include="tctx.hh" />
+    <ClInclude Include="tctx.h" />
     <ClInclude Include="thirdparty\nlohmann\json.hpp" />
     <ClInclude Include="thirdparty\nlohmann\json_fwd.hpp" />
     <ClInclude Include="thirdparty\zstd\zstd.h" />
@@ -305,8 +317,10 @@
     <ClInclude Include="weaponxdebug.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="arena.cc" />
+    <ClCompile Include="arena.cpp" />
     <ClCompile Include="audio.cpp" />
+    <ClCompile Include="audio_cache.cpp" />
+    <ClCompile Include="audio_device.cpp" />
     <ClCompile Include="bitbuf.cpp" />
     <ClCompile Include="client.cpp" />
     <ClCompile Include="compression.cpp" />
@@ -322,12 +336,24 @@
     <ClCompile Include="factory.cpp" />
     <ClCompile Include="filecache.cpp" />
     <ClCompile Include="filesystem.cpp" />
+    <ClCompile Include="filesystem_vtable.cpp" />
     <ClCompile Include="fake_ip_layer.cpp" />
     <ClCompile Include="net_hooks.cpp" />
     <ClCompile Include="hudwarp.cpp" />
     <ClCompile Include="hudwarp_hooks.cpp" />
     <ClCompile Include="keyvalues.cpp" />
     <ClCompile Include="load.cpp" />
+    <ClCompile Include="auth.cpp" />
+    <ClCompile Include="bot.cpp" />
+    <ClCompile Include="chat.cpp" />
+    <ClCompile Include="commands.cpp" />
+    <ClCompile Include="localize.cpp" />
+    <ClCompile Include="misc.cpp" />
+    <ClCompile Include="networking.cpp" />
+    <ClCompile Include="physics.cpp" />
+    <ClCompile Include="player.cpp" />
+    <ClCompile Include="precache.cpp" />
+    <ClCompile Include="usermessages.cpp" />
     <ClCompile Include="localchatwriter.cpp" />
     <ClCompile Include="logging.cpp" />
     <ClCompile Include="masterserver.cpp" />
@@ -340,7 +366,7 @@
     <ClCompile Include="patcher.cpp" />
     <ClCompile Include="persistentdata.cpp" />
     <ClCompile Include="predictionerror.cpp" />
-    <ClCompile Include="security_fixes.cc">
+    <ClCompile Include="security_fixes.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
     </ClCompile>

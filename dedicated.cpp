@@ -1,6 +1,8 @@
 #include "core.h"
 #include "dedicated.h"
 #include <intrin.h>
+#include <filesystem>
+#include <string>
 #include "logging.h"
 #include "load.h"
 #include "dedicated.h"
@@ -1012,4 +1014,70 @@ void InitDedicated()
 	//MH_CreateHook((LPVOID)(engine_ds + 0x311910), &sub_180311910, reinterpret_cast<LPVOID*>(&osub_180311910));
 	//MH_CreateHook((LPVOID)(engine_ds + 0x360230), &vsnprintf_l_hk, NULL);
 	MH_EnableHook(MH_ALL_HOOKS);
+}
+
+// AddSearchPath hook for dedicated server
+__int64 (*oAddSearchPathDedi)(__int64 a1, const char* a2, __int64 a3, unsigned int a4);
+__int64 __fastcall AddSearchPathDedi(__int64 a1, const char* a2, __int64 a3, unsigned int a4) {
+	if (!strcmp_static(a2, "r1delta")) {
+		auto a = _strdup((std::filesystem::path(GetExecutableDirectory()) / "r1delta").string().c_str());
+		a2 = a;
+		auto ret = oAddSearchPathDedi(a1, a2, a3, a4);
+		return ret;
+	}
+	return oAddSearchPathDedi(a1, a2, a3, a4);
+}
+
+// Server info panel hook for dedicated server admin
+void (*oCServerInfoPanel__OnServerDataResponse_14730)(__int64 a1, const char* a2, const char* a3);
+void CServerInfoPanel__OnServerDataResponse_14730(__int64 a1, const char* a2, const char* a3) {
+	if (strcmp_static(a2, "maplist") == 0) {
+		static bool bDone = false;
+		if (!bDone) {
+			bDone = true;
+			reinterpret_cast<void(*)(__int64, const char*, const char*)>((uintptr_t(GetModuleHandleA("AdminServer.dll")) + 0xB310))((a1 - 704), "map", a3);
+		}
+	}
+
+	if (strcmp_static(a2, "map") == 0 && strlen(a3) > 3) {
+		static bool bDone = false;
+		if (!bDone) {
+			bDone = true;
+			// Get the engine interface
+			void* ret = reinterpret_cast<void*>((reinterpret_cast<CreateInterfaceFn>(GetProcAddress(GetModuleHandleA("engine_ds.dll"), "CreateInterface"))("VENGINE_HLDS_API_VERSION002", 0)));
+
+			// Prepare a string to hold all playlist names
+			std::string combined_playlists;
+			int v7 = 0;
+			// Get the total number of playlists
+			int playlist_count = (*(int(__fastcall**)(void*))(*(_QWORD*)ret + 152LL))(ret);
+
+			// Check if there are any playlists to process to avoid issues with do-while on count 0
+			if (playlist_count > 0)
+			{
+				// Loop through all playlists
+				do
+				{
+					// Get the name of the current playlist
+					char* playlist = (*(char* (__fastcall**)(void*, _QWORD))(*(_QWORD*)ret + 160LL))(ret, (unsigned int)v7);
+					// Append the playlist name to the combined string
+					combined_playlists += playlist;
+					// Append a newline character
+					combined_playlists += '\n';
+					// Increment index
+					++v7;
+				} while (v7 < playlist_count); // Continue until all playlists are processed
+			}
+
+			// Call the target function once with the combined, newline-separated string
+			reinterpret_cast<void(*)(__int64, const char*, const char*)>((uintptr_t(GetModuleHandleA("AdminServer.dll")) + 0xB310))((a1 - 704), "launchplaylist", combined_playlists.c_str());
+
+		}
+		char* playlist = reinterpret_cast<char* (*)()>(G_engine_ds + 0xB8C40)();
+		if (playlist) {
+			reinterpret_cast<void(*)(__int64, const char*, const char*)>((uintptr_t(GetModuleHandleA("AdminServer.dll")) + 0xB200))(a1 - 704, "launchplaylist", playlist);
+		}
+	}
+
+	oCServerInfoPanel__OnServerDataResponse_14730(a1, a2, a3);
 }

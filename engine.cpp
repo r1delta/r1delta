@@ -1,5 +1,6 @@
 #include "engine.h"
 #include "load.h"
+#include "vtable.h"
 
 CVEngineServer* g_CVEngineServer = 0;
 uintptr_t g_CVEngineServerInterface;

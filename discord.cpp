@@ -10,6 +10,7 @@
 #include <regex>
 #include "httplib.h"
 #include "masterserver.h"
+#include "auth.h"
 #include <nlohmann/json.hpp>
 
 // Define for discord auth stuff.

@@ -42,7 +42,7 @@
 #include "load.h"
 #include "logging.h"
 #include "audio.h"
-#include "tctx.hh"
+#include "tctx.h"
 
 // --------------------------------------------------------------------
 // Core filesystem enums/structs (unchanged)

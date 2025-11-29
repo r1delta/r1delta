@@ -41,7 +41,7 @@ class PDef;
 #include <iostream>
 #include <regex>
 #include "load.h"
-#include "tctx.hh"
+#include "tctx.h"
 
 //#define HASH_USERINFO_KEYS
 // Constants

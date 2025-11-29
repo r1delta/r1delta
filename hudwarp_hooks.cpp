@@ -4,7 +4,7 @@
 
 // ID3DUserDefinedAnnotation
 #include <d3d11_1.h>
-#include "tctx.hh"
+#include "tctx.h"
 
 ID3D11Device* pDevice = 0;
 ID3D11DeviceContext** ppID3D11DeviceContext = 0;

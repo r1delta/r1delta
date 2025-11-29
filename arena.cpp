@@ -1,6 +1,6 @@
 #include "core.h"
 
-#include "arena.hh"
+#include "arena.h"
 
 Arena*
 arena_alloc(uint64_t reserve_, uint64_t commit_, uint64_t flags_)

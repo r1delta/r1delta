@@ -31,85 +31,46 @@
 // =====---------------------------------------------=++++******************************####%
 // ======------------------==------------------------==+++***************************######%%
 // =========-----===--------==------------------------==++********#*#####**#######*########%%
+//
+// Audio Device Change Notifications
+//
+// Handles Windows audio device change events to automatically restart XAudio
+// when the default audio device changes.
 
 #pragma once
 
-#include "windows.h"
-#include <winternl.h>  // For UNICODE_STRING.
-#include "core.h"
-#include "physics.h"
+#include <mmdeviceapi.h>
 
-enum {
-	// The DLL was loaded. The NotificationData parameter points to a
-	// LDR_DLL_LOADED_NOTIFICATION_DATA structure.
-	LDR_DLL_NOTIFICATION_REASON_LOADED = 1,
-	// The DLL was unloaded. The NotificationData parameter points to a
-	// LDR_DLL_UNLOADED_NOTIFICATION_DATA structure.
-	LDR_DLL_NOTIFICATION_REASON_UNLOADED = 2,
-};
-// Structure that is used for module load notifications.
-struct LDR_DLL_LOADED_NOTIFICATION_DATA {
-	// Reserved.
-	ULONG Flags;
-	// The full path name of the DLL module.
-	PCUNICODE_STRING FullDllName;
-	// The base file name of the DLL module.
-	PCUNICODE_STRING BaseDllName;
-	// A pointer to the base address for the DLL in memory.
-	PVOID DllBase;
-	// The size of the DLL image, in bytes.
-	ULONG SizeOfImage;
-};
-using PLDR_DLL_LOADED_NOTIFICATION_DATA = LDR_DLL_LOADED_NOTIFICATION_DATA*;
-// Structure that is used for module unload notifications.
-struct LDR_DLL_UNLOADED_NOTIFICATION_DATA {
-	// Reserved.
-	ULONG Flags;
-	// The full path name of the DLL module.
-	PCUNICODE_STRING FullDllName;
-	// The base file name of the DLL module.
-	PCUNICODE_STRING BaseDllName;
-	// A pointer to the base address for the DLL in memory.
-	PVOID DllBase;
-	// The size of the DLL image, in bytes.
-	ULONG SizeOfImage;
-};
-using PLDR_DLL_UNLOADED_NOTIFICATION_DATA = LDR_DLL_UNLOADED_NOTIFICATION_DATA*;
-// Union that is used for notifications.
-union LDR_DLL_NOTIFICATION_DATA {
-	LDR_DLL_LOADED_NOTIFICATION_DATA Loaded;
-	LDR_DLL_UNLOADED_NOTIFICATION_DATA Unloaded;
-};
-using PLDR_DLL_NOTIFICATION_DATA = LDR_DLL_NOTIFICATION_DATA*;
-// Signature of the notification callback function.
-using PLDR_DLL_NOTIFICATION_FUNCTION =
-VOID(CALLBACK*)(ULONG notification_reason,
-	const LDR_DLL_NOTIFICATION_DATA* notification_data,
-	PVOID context);
-// Signatures of the functions used for registering DLL notification callbacks.
-using LdrRegisterDllNotificationFunc =
-NTSTATUS(NTAPI*)(ULONG flags,
-	PLDR_DLL_NOTIFICATION_FUNCTION notification_function,
-	PVOID context,
-	PVOID* cookie);
-using LdrUnregisterDllNotificationFunc = NTSTATUS(NTAPI*)(PVOID cookie);
-extern void* dll_notification_cookie_;
-void __stdcall LoaderNotificationCallback(
-	unsigned long notification_reason,
-	const LDR_DLL_NOTIFICATION_DATA* notification_data,
-	void* context);
+// MMNotificationClient - Handles audio device change notifications
+class MMNotificationClient : public IMMNotificationClient {
+public:
+    MMNotificationClient() {}
+    virtual ~MMNotificationClient() {}
 
-class ILocalize;
-extern uintptr_t G_launcher;
-extern uintptr_t G_vscript;
-extern uintptr_t G_filesystem_stdio;
-extern uintptr_t G_server;
-extern uintptr_t G_engine;
-extern uintptr_t G_engine_ds;
-extern uintptr_t G_client;
-extern uintptr_t G_matsystem;
-extern uintptr_t G_localize;
-LDR_DLL_LOADED_NOTIFICATION_DATA* GetModuleNotificationData(const wchar_t* moduleName);
-void FreeModuleNotificationData(LDR_DLL_LOADED_NOTIFICATION_DATA*);
-void InitializeRecentHostVars();
-bool ShouldEnableMCP();
+    // IUnknown methods
+    ULONG STDMETHODCALLTYPE AddRef() override { return 1; }
+    ULONG STDMETHODCALLTYPE Release() override { return 1; }
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, VOID** ppvInterface) override;
+
+    // IMMNotificationClient methods
+    HRESULT STDMETHODCALLTYPE OnDefaultDeviceChanged(EDataFlow flow, ERole role, LPCWSTR pwstrDeviceId) override;
+    HRESULT STDMETHODCALLTYPE OnDeviceAdded(LPCWSTR pwstrDeviceId) override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE OnDeviceRemoved(LPCWSTR pwstrDeviceId) override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE OnDeviceStateChanged(LPCWSTR pwstrDeviceId, DWORD dwNewState) override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE OnPropertyValueChanged(LPCWSTR pwstrDeviceId, const PROPERTYKEY key) override { return S_OK; }
+};
+
+// Global instances
+extern MMNotificationClient g_mmNotificationClient;
+extern IMMDeviceEnumerator* g_mmDeviceEnumerator;
+
+// Initialization/cleanup functions
+void Init_MMNotificationClient();
+void Deinit_MMNotificationClient();
+
+// Setup hooks for S_Init/S_Shutdown to automatically manage device notifications
+void Setup_MMNotificationClient();
+
+// Console command to manually restart XAudio
+class CCommand;
+void ConCommand_sound_reboot_xaudio(const CCommand& args);
