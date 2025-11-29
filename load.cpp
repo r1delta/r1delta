@@ -371,7 +371,7 @@ sub_136E70Type sub_136E70Original;
 __int64 __fastcall sub_136E70(char* pPath)
 {
 	auto ret = sub_136E70Original(pPath);
-	reinterpret_cast<__int64(*)()>(G_engine + 0x19D7E0)();
+	reinterpret_cast<__int64(*)()>(G_engine + 0x19D730)();
 	return ret;	
 }
 void* SetPreCache_o = nullptr;
