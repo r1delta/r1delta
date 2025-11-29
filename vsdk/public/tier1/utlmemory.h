@@ -17,7 +17,7 @@
 #include "tier0/dbg.h"
 #include <string.h>
 #include "tier0/platform.h"
-#include "../memory.h"
+#include "memory.h"
 
 //#include "vsdk/public/tier0/memalloc.h"
 //#include "vsdk/mathlib/mathlib.h"

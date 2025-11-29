@@ -1,4 +1,4 @@
-#include "model_info.h"
+#include "model_info_vtable.h"
 #include "vtable.h"
 
 CVModelInfoServer* g_CVModelInfoServer;

@@ -33,7 +33,7 @@
 // =========-----===--------==------------------------==++********#*#####**#######*########%%
 
 #include "core.h"
-#include "utils.h"
+#include "vtable_tools.h"
 
 constexpr size_t EXEC_MEM_SIZE = 32 * 1152;
 static_assert(EXEC_MEM_SIZE % 4096 == 0, "EXEC_MEM_SIZE is not page granular");

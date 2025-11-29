@@ -1,6 +1,3 @@
-[submodule "silver-bun"]
-	path = thirdparty
-	url = https://github.com/IcePixelx/silver-bun
-[submodule "third_party/EOS-SDK"]
-	path = third_party/EOS-SDK
+[submodule "thirdparty/eos"]
+	path = thirdparty/eos
 	url = https://github.com/19h/EOS-SDK

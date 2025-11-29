@@ -2,7 +2,7 @@
 #pragma once
 
 #include "core.h"
-#include "engine.h"
+#include "engine_vtable.h"
 #include "bitbuf.h"
 #include "netadr.h"
 

@@ -2,7 +2,7 @@
 
 #include <cstdlib>
 #include "core.h"
-#include "utils.h"
+#include "vtable_tools.h"
 
 class INetMessage;
 

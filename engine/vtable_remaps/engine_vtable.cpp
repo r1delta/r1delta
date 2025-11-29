@@ -1,4 +1,4 @@
-#include "engine.h"
+#include "engine_vtable.h"
 #include "load.h"
 #include "vtable.h"
 

@@ -84,14 +84,14 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>S:\game\r1delta\bin_delta\</OutDir>
-    <IncludePath>$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\steam;$(ProjectDir)thirdparty\minhook\include;$(ProjectDir)thirdparty\mimalloc\include;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+    <IncludePath>$(ProjectDir);$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\steam;$(ProjectDir)thirdparty\minhook\include;$(ProjectDir)thirdparty\mimalloc\include;$(ProjectDir)engine;$(ProjectDir)engine\core;$(ProjectDir)engine\hooks;$(ProjectDir)engine\vtable_remaps;$(ProjectDir)engine\filesystem;$(ProjectDir)engine\memory;$(ProjectDir)engine\logging;$(ProjectDir)engine\net;$(ProjectDir)client;$(ProjectDir)client\audio;$(ProjectDir)client\rendering;$(ProjectDir)server;$(ProjectDir)server\physics;$(ProjectDir)server\ai;$(ProjectDir)shared;$(ProjectDir)sdk;$(ProjectDir)eos;$(ProjectDir)thirdparty;$(ProjectDir)ida;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
     <LibraryPath>$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\steam\lib;$(ProjectDir)thirdparty\minhook\lib;$(SolutionDir)thirdparty\mimalloc\$(Configuration);$(VC_LibraryPath_X64);$(WindowsSDK_LibraryPath_x64);$(LibraryPath)</LibraryPath>
     <IntDir>$(ProjectDir)$(Platform)\$(Configuration)\tier0</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>S:\game\r1delta\bin_delta\</OutDir>
     <IntDir>$(ProjectDir)$(Platform)\$(Configuration)\tier0</IntDir>
-    <IncludePath>$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\steam;$(ProjectDir)thirdparty\minhook\include;$(ProjectDir)thirdparty\mimalloc\include;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
+    <IncludePath>$(ProjectDir);$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\steam;$(ProjectDir)thirdparty\minhook\include;$(ProjectDir)thirdparty\mimalloc\include;$(ProjectDir)engine;$(ProjectDir)engine\core;$(ProjectDir)engine\hooks;$(ProjectDir)engine\vtable_remaps;$(ProjectDir)engine\filesystem;$(ProjectDir)engine\memory;$(ProjectDir)engine\logging;$(ProjectDir)engine\net;$(ProjectDir)client;$(ProjectDir)client\audio;$(ProjectDir)client\rendering;$(ProjectDir)server;$(ProjectDir)server\physics;$(ProjectDir)server\ai;$(ProjectDir)shared;$(ProjectDir)sdk;$(ProjectDir)eos;$(ProjectDir)thirdparty;$(ProjectDir)ida;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
     <LibraryPath>$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\steam\lib;$(ProjectDir)thirdparty\minhook\lib;$(SolutionDir)thirdparty\mimalloc\$(Configuration);$(VC_LibraryPath_X64);$(WindowsSDK_LibraryPath_x64);$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Label="Vcpkg">
@@ -149,7 +149,7 @@
       <LanguageStandard>stdcpp20</LanguageStandard>
       <OmitFramePointers>false</OmitFramePointers>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
-      <AdditionalIncludeDirectories>$(ProjectDir)third_party\EOS-SDK\SDK\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)thirdparty\eos\SDK\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -157,7 +157,7 @@
       <EnableUAC>false</EnableUAC>
       <AdditionalDependencies>Shlwapi.lib;winhttp.lib;Shell32.lib;vstdlib.lib;tier0_orig.lib;bcrypt.lib;Ws2_32.lib;EOSSDK-Win64-Shipping.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ModuleDefinitionFile>test.def</ModuleDefinitionFile>
-      <AdditionalLibraryDirectories>$(ProjectDir)third_party\EOS-SDK\SDK\Lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(ProjectDir)thirdparty\eos\SDK\Lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <PreLinkEvent>
       <Command>
@@ -167,7 +167,7 @@
       <Command>tskill r1delta &amp; exit 0</Command>
     </PreBuildEvent>
     <PostBuildEvent>
-      <Command>if exist "$(ProjectDir)third_party\EOS-SDK\SDK\Bin\EOSSDK-Win64-Shipping.dll" copy /Y "$(ProjectDir)third_party\EOS-SDK\SDK\Bin\EOSSDK-Win64-Shipping.dll" "$(OutDir)"</Command>
+      <Command>if exist "$(ProjectDir)thirdparty\eos\SDK\Bin\EOSSDK-Win64-Shipping.dll" copy /Y "$(ProjectDir)thirdparty\eos\SDK\Bin\EOSSDK-Win64-Shipping.dll" "$(OutDir)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -185,7 +185,7 @@
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
-      <AdditionalIncludeDirectories>$(ProjectDir)third_party\EOS-SDK\SDK\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)thirdparty\eos\SDK\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -195,85 +195,85 @@
       <EnableUAC>false</EnableUAC>
       <AdditionalDependencies>Shlwapi.lib;winhttp.lib;Shell32.lib;vstdlib.lib;tier0_orig.lib;bcrypt.lib;Ws2_32.lib;EOSSDK-Win64-Shipping.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ModuleDefinitionFile>test.def</ModuleDefinitionFile>
-      <AdditionalLibraryDirectories>$(ProjectDir)third_party\EOS-SDK\SDK\Lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(ProjectDir)thirdparty\eos\SDK\Lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <PostBuildEvent>
-      <Command>if exist "$(ProjectDir)third_party\EOS-SDK\SDK\Bin\EOSSDK-Win64-Shipping.dll" copy /Y "$(ProjectDir)third_party\EOS-SDK\SDK\Bin\EOSSDK-Win64-Shipping.dll" "$(OutDir)"</Command>
+      <Command>if exist "$(ProjectDir)thirdparty\eos\SDK\Bin\EOSSDK-Win64-Shipping.dll" copy /Y "$(ProjectDir)thirdparty\eos\SDK\Bin\EOSSDK-Win64-Shipping.dll" "$(OutDir)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="appsystem.h" />
-    <ClInclude Include="arena.h" />
-    <ClInclude Include="audio.h" />
-    <ClInclude Include="audio_cache.h" />
-    <ClInclude Include="audio_device.h" />
+    <ClInclude Include="engine\core\appsystem.h" />
+    <ClInclude Include="engine\memory\arena.h" />
+    <ClInclude Include="client\audio\audio.h" />
+    <ClInclude Include="client\audio\audio_cache.h" />
+    <ClInclude Include="client\audio\audio_device.h" />
     <ClInclude Include="beardbgon.h" />
-    <ClInclude Include="bitbuf.h" />
-    <ClInclude Include="client.h" />
-    <ClInclude Include="color.h" />
-    <ClInclude Include="compression.h" />
-    <ClInclude Include="coordsize.h" />
-    <ClInclude Include="core.h" />
-    <ClInclude Include="crashhandler.h" />
-    <ClInclude Include="cvar.h" />
-    <ClInclude Include="dedicated.h" />
-    <ClInclude Include="discord.h" />
-    <ClInclude Include="eos_logging_manager.h" />
-    <ClInclude Include="eos_layer.h" />
-    <ClInclude Include="eos_network.h" />
-    <ClInclude Include="net_hooks.h" />
-    <ClInclude Include="engine.h" />
-    <ClInclude Include="fake_ip_layer.h" />
-    <ClInclude Include="factory.h" />
-    <ClInclude Include="filecache.h" />
-    <ClInclude Include="filesystem.h" />
-    <ClInclude Include="framework.h" />
-    <ClInclude Include="hudwarp.h" />
-    <ClInclude Include="hudwarp_hooks.h" />
-    <ClInclude Include="jwt_compact.h" />
-    <ClInclude Include="keyvalues.h" />
-    <ClInclude Include="load.h" />
-    <ClInclude Include="auth.h" />
-    <ClInclude Include="bot.h" />
-    <ClInclude Include="chat.h" />
-    <ClInclude Include="commands.h" />
-    <ClInclude Include="misc.h" />
-    <ClInclude Include="networking.h" />
-    <ClInclude Include="physics_hooks.h" />
-    <ClInclude Include="precache.h" />
-    <ClInclude Include="usermessages.h" />
-    <ClInclude Include="localchatwriter.h" />
-    <ClInclude Include="localize.h" />
-    <ClInclude Include="logging.h" />
-    <ClInclude Include="masterserver.h" />
-    <ClInclude Include="mcp_server.h" />
-    <ClInclude Include="memory.h" />
-    <ClInclude Include="model_info.h" />
-    <ClInclude Include="navmesh.h" />
-    <ClInclude Include="netadr.h" />
-    <ClInclude Include="netchanwarnings.h" />
-    <ClInclude Include="patcher.h" />
-    <ClInclude Include="persistentdata.h" />
-    <ClInclude Include="physics.h" />
+    <ClInclude Include="sdk\bitbuf.h" />
+    <ClInclude Include="client\client.h" />
+    <ClInclude Include="sdk\color.h" />
+    <ClInclude Include="engine\compression.h" />
+    <ClInclude Include="sdk\coordsize.h" />
+    <ClInclude Include="engine\core\core.h" />
+    <ClInclude Include="engine\logging\crashhandler.h" />
+    <ClInclude Include="engine\cvar.h" />
+    <ClInclude Include="engine\dedicated.h" />
+    <ClInclude Include="client\discord.h" />
+    <ClInclude Include="eos\eos_logging_manager.h" />
+    <ClInclude Include="eos\eos_layer.h" />
+    <ClInclude Include="eos\eos_network.h" />
+    <ClInclude Include="engine\net\net_hooks.h" />
+    <ClInclude Include="engine\vtable_remaps\engine_vtable.h" />
+    <ClInclude Include="eos\fake_ip_layer.h" />
+    <ClInclude Include="engine\core\factory.h" />
+    <ClInclude Include="engine\filesystem\filecache.h" />
+    <ClInclude Include="engine\filesystem\filesystem.h" />
+    <ClInclude Include="engine\core\framework.h" />
+    <ClInclude Include="client\rendering\hudwarp.h" />
+    <ClInclude Include="client\rendering\hudwarp_hooks.h" />
+    <ClInclude Include="thirdparty\jwt\jwt_compact.h" />
+    <ClInclude Include="sdk\keyvalues.h" />
+    <ClInclude Include="engine\core\load.h" />
+    <ClInclude Include="engine\auth.h" />
+    <ClInclude Include="server\ai\bot.h" />
+    <ClInclude Include="server\chat.h" />
+    <ClInclude Include="shared\commands.h" />
+    <ClInclude Include="server\misc.h" />
+    <ClInclude Include="engine\net\networking.h" />
+    <ClInclude Include="server\physics\physics_hooks.h" />
+    <ClInclude Include="engine\precache.h" />
+    <ClInclude Include="server\usermessages.h" />
+    <ClInclude Include="client\localchatwriter.h" />
+    <ClInclude Include="client\localize.h" />
+    <ClInclude Include="engine\logging\logging.h" />
+    <ClInclude Include="engine\net\masterserver.h" />
+    <ClInclude Include="engine\mcp_server.h" />
+    <ClInclude Include="engine\memory\memory.h" />
+    <ClInclude Include="engine\vtable_remaps\model_info_vtable.h" />
+    <ClInclude Include="server\ai\navmesh.h" />
+    <ClInclude Include="sdk\netadr.h" />
+    <ClInclude Include="engine\net\netchanwarnings.h" />
+    <ClInclude Include="engine\hooks\patcher.h" />
+    <ClInclude Include="shared\persistentdata.h" />
+    <ClInclude Include="server\physics\physics.h" />
     <ClInclude Include="player.h" />
     <ClInclude Include="platform.h" />
-    <ClInclude Include="predictionerror.h" />
+    <ClInclude Include="client\predictionerror.h" />
     <ClInclude Include="r1d_version.h" />
     <ClInclude Include="resource.h" />
-    <ClInclude Include="security_fixes.h" />
-    <ClInclude Include="sendmoveclampfix.h" />
-    <ClInclude Include="squirrel.h" />
-    <ClInclude Include="steam.h" />
-    <ClInclude Include="surfacerender.h" />
-    <ClInclude Include="sv_filter.h" />
+    <ClInclude Include="engine\security_fixes.h" />
+    <ClInclude Include="engine\sendmoveclampfix.h" />
+    <ClInclude Include="shared\squirrel.h" />
+    <!-- Removed: steam.h -->
+    <ClInclude Include="client\rendering\surfacerender.h" />
+    <ClInclude Include="engine\sv_filter.h" />
     <ClInclude Include="TableDestroyer.h" />
-    <ClInclude Include="tctx.h" />
-    <ClInclude Include="thirdparty\nlohmann\json.hpp" />
-    <ClInclude Include="thirdparty\nlohmann\json_fwd.hpp" />
-    <ClInclude Include="thirdparty\zstd\zstd.h" />
-    <ClInclude Include="utils.h" />
-    <ClInclude Include="vector.h" />
-    <ClInclude Include="vguisurface.h" />
+    <ClInclude Include="engine\memory\tctx.h" />
+    <!-- vcpkg: nlohmann -->
+    <!-- vcpkg: nlohmann -->
+    <!-- vcpkg: zstd -->
+    <ClInclude Include="engine\vtable_tools.h" />
+    <ClInclude Include="sdk\vector.h" />
+    <ClInclude Include="client\rendering\vguisurface.h" />
     <!-- Add the following includes from the first version -->
     <ClInclude Include="vsdk\public\bitvec.h" />
     <ClInclude Include="vsdk\public\math_pfns.h" />
@@ -317,66 +317,66 @@
     <ClInclude Include="weaponxdebug.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="arena.cpp" />
-    <ClCompile Include="audio.cpp" />
-    <ClCompile Include="audio_cache.cpp" />
-    <ClCompile Include="audio_device.cpp" />
-    <ClCompile Include="bitbuf.cpp" />
-    <ClCompile Include="client.cpp" />
-    <ClCompile Include="compression.cpp" />
-    <ClCompile Include="crashhandler.cpp" />
-    <ClCompile Include="cvar.cpp" />
-    <ClCompile Include="dedicated.cpp" />
-    <ClCompile Include="discord.cpp" />
-    <ClCompile Include="dllmain.cpp" />
-    <ClCompile Include="engine.cpp" />
-    <ClCompile Include="eos_logging_manager.cpp" />
-    <ClCompile Include="eos_layer.cpp" />
-    <ClCompile Include="eos_network.cpp" />
-    <ClCompile Include="factory.cpp" />
-    <ClCompile Include="filecache.cpp" />
-    <ClCompile Include="filesystem.cpp" />
-    <ClCompile Include="filesystem_vtable.cpp" />
-    <ClCompile Include="fake_ip_layer.cpp" />
-    <ClCompile Include="net_hooks.cpp" />
-    <ClCompile Include="hudwarp.cpp" />
-    <ClCompile Include="hudwarp_hooks.cpp" />
-    <ClCompile Include="keyvalues.cpp" />
-    <ClCompile Include="load.cpp" />
-    <ClCompile Include="auth.cpp" />
-    <ClCompile Include="bot.cpp" />
-    <ClCompile Include="chat.cpp" />
-    <ClCompile Include="commands.cpp" />
-    <ClCompile Include="localize.cpp" />
-    <ClCompile Include="misc.cpp" />
-    <ClCompile Include="networking.cpp" />
-    <ClCompile Include="physics.cpp" />
+    <ClCompile Include="engine\memory\arena.cpp" />
+    <ClCompile Include="client\audio\audio.cpp" />
+    <ClCompile Include="client\audio\audio_cache.cpp" />
+    <ClCompile Include="client\audio\audio_device.cpp" />
+    <ClCompile Include="sdk\bitbuf.cpp" />
+    <ClCompile Include="client\client.cpp" />
+    <ClCompile Include="engine\compression.cpp" />
+    <ClCompile Include="engine\logging\crashhandler.cpp" />
+    <ClCompile Include="engine\cvar.cpp" />
+    <ClCompile Include="engine\dedicated.cpp" />
+    <ClCompile Include="client\discord.cpp" />
+    <ClCompile Include="engine\core\dllmain.cpp" />
+    <ClCompile Include="engine\vtable_remaps\engine_vtable.cpp" />
+    <ClCompile Include="eos\eos_logging_manager.cpp" />
+    <ClCompile Include="eos\eos_layer.cpp" />
+    <ClCompile Include="eos\eos_network.cpp" />
+    <ClCompile Include="engine\core\factory.cpp" />
+    <ClCompile Include="engine\filesystem\filecache.cpp" />
+    <ClCompile Include="engine\filesystem\filesystem.cpp" />
+    <ClCompile Include="engine\vtable_remaps\filesystem_vtable.cpp" />
+    <ClCompile Include="eos\fake_ip_layer.cpp" />
+    <ClCompile Include="engine\net\net_hooks.cpp" />
+    <ClCompile Include="client\rendering\hudwarp.cpp" />
+    <ClCompile Include="client\rendering\hudwarp_hooks.cpp" />
+    <ClCompile Include="sdk\keyvalues.cpp" />
+    <ClCompile Include="engine\core\load.cpp" />
+    <ClCompile Include="engine\auth.cpp" />
+    <ClCompile Include="server\ai\bot.cpp" />
+    <ClCompile Include="server\chat.cpp" />
+    <ClCompile Include="shared\commands.cpp" />
+    <ClCompile Include="client\localize.cpp" />
+    <ClCompile Include="server\misc.cpp" />
+    <ClCompile Include="engine\net\networking.cpp" />
+    <ClCompile Include="server\physics\physics.cpp" />
     <ClCompile Include="player.cpp" />
-    <ClCompile Include="precache.cpp" />
-    <ClCompile Include="usermessages.cpp" />
-    <ClCompile Include="localchatwriter.cpp" />
-    <ClCompile Include="logging.cpp" />
-    <ClCompile Include="masterserver.cpp" />
-    <ClCompile Include="mcp_server.cpp" />
-    <ClCompile Include="memory.cpp" />
-    <ClCompile Include="model_info.cpp" />
-    <ClCompile Include="navmesh.cpp" />
-    <ClCompile Include="netchanwarnings.cpp" />
-    <ClCompile Include="newbitbuf.cpp" />
-    <ClCompile Include="patcher.cpp" />
-    <ClCompile Include="persistentdata.cpp" />
-    <ClCompile Include="predictionerror.cpp" />
-    <ClCompile Include="security_fixes.cpp">
+    <ClCompile Include="engine\precache.cpp" />
+    <ClCompile Include="server\usermessages.cpp" />
+    <ClCompile Include="client\localchatwriter.cpp" />
+    <ClCompile Include="engine\logging\logging.cpp" />
+    <ClCompile Include="engine\net\masterserver.cpp" />
+    <ClCompile Include="engine\mcp_server.cpp" />
+    <ClCompile Include="engine\memory\memory.cpp" />
+    <ClCompile Include="engine\vtable_remaps\model_info_vtable.cpp" />
+    <ClCompile Include="server\ai\navmesh.cpp" />
+    <ClCompile Include="engine\net\netchanwarnings.cpp" />
+    <ClCompile Include="sdk\newbitbuf.cpp" />
+    <ClCompile Include="engine\hooks\patcher.cpp" />
+    <ClCompile Include="shared\persistentdata.cpp" />
+    <ClCompile Include="client\predictionerror.cpp" />
+    <ClCompile Include="engine\security_fixes.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="sendmoveclampfix.cpp" />
-    <ClCompile Include="squirrel.cpp" />
-    <ClCompile Include="steam.cpp" />
-    <ClCompile Include="surfacerender.cpp" />
+    <ClCompile Include="engine\sendmoveclampfix.cpp" />
+    <ClCompile Include="shared\squirrel.cpp" />
+    <!-- Removed: steam.cpp -->
+    <ClCompile Include="client\rendering\surfacerender.cpp" />
     <ClCompile Include="TableDestroyer.cpp" />
-    <ClCompile Include="tctx.cpp" />
-    <ClCompile Include="utils.cpp" />
+    <ClCompile Include="engine\memory\tctx.cpp" />
+    <ClCompile Include="engine\vtable_tools.cpp" />
     <!-- Add the following includes from the first version -->
     <ClCompile Include="vsdk\tier0\dbg.cpp" />
     <ClCompile Include="vsdk\tier0\platformtime.cpp" />

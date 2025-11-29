@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <windows.h>
 #include <tlhelp32.h>
-#include "utils.h"
+#include "vtable_tools.h"
 #include "netadr.h"
 #include <regex>
 #include "httplib.h"

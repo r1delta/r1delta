@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cstdlib>
-#include "utils.h"
+#include "vtable_tools.h"
 
 class CVModelInfoServer;
 

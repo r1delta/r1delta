@@ -3,7 +3,7 @@
 #include <cstdio>
 #include <opus/opus.h>
 
-#include "../core.h"
+#include "../engine/core/core.h"
 
 #ifndef IVOICECODEC_H
 #define IVOICECODEC_H

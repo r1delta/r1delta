@@ -56,8 +56,8 @@
 #include <string.h>
 #include <set>
 #include <map>
-#include "engine.h"
-#include "model_info.h"
+#include "engine_vtable.h"
+#include "model_info_vtable.h"
 //#include "thirdparty/silver-bun/silver-bun.h"
 #include "load.h"
 #include "logging.h"

@@ -1,5 +1,5 @@
 #pragma once
-#include "engine.h"
+#include "engine_vtable.h"
 bool InitNetChanWarningHooks();
 struct /*VFT*/ INetMessage
 {

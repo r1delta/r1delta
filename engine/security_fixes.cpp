@@ -1,5 +1,5 @@
 #include "core.h"
-#include "engine.h"
+#include "engine_vtable.h"
 #include "netadr.h"
 #include "netchanwarnings.h"
 

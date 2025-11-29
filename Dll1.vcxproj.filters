@@ -1,477 +1,631 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <Filter Include="Source Files">
+    <Filter Include="engine">
       <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
-      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
     </Filter>
-    <Filter Include="Header Files">
+    <Filter Include="engine\core">
+      <UniqueIdentifier>{a1b2c3d4-e5f6-7890-abcd-ef1234567890}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="engine\hooks">
+      <UniqueIdentifier>{a1b2c3d4-e5f6-7890-abcd-ef1234567891}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="engine\vtable_remaps">
+      <UniqueIdentifier>{a1b2c3d4-e5f6-7890-abcd-ef1234567892}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="engine\filesystem">
+      <UniqueIdentifier>{a1b2c3d4-e5f6-7890-abcd-ef1234567893}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="engine\memory">
+      <UniqueIdentifier>{a1b2c3d4-e5f6-7890-abcd-ef1234567894}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="engine\logging">
+      <UniqueIdentifier>{a1b2c3d4-e5f6-7890-abcd-ef1234567895}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="engine\net">
+      <UniqueIdentifier>{a1b2c3d4-e5f6-7890-abcd-ef1234567896}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="client">
       <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
-      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
     </Filter>
-    <Filter Include="Resource Files">
+    <Filter Include="client\audio">
+      <UniqueIdentifier>{b1b2c3d4-e5f6-7890-abcd-ef1234567890}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="client\rendering">
+      <UniqueIdentifier>{b1b2c3d4-e5f6-7890-abcd-ef1234567891}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="server">
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
-      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
-    <Filter Include="3rd Party">
-      <UniqueIdentifier>{7118953e-fe40-446a-b35b-5d417b6e18ab}</UniqueIdentifier>
+    <Filter Include="server\physics">
+      <UniqueIdentifier>{c1b2c3d4-e5f6-7890-abcd-ef1234567890}</UniqueIdentifier>
     </Filter>
-    <Filter Include="3rd Party\zstd">
-      <UniqueIdentifier>{e774be19-0d2b-469c-9983-43af2ea5f1d2}</UniqueIdentifier>
+    <Filter Include="server\ai">
+      <UniqueIdentifier>{c1b2c3d4-e5f6-7890-abcd-ef1234567891}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\sdk">
+    <Filter Include="shared">
+      <UniqueIdentifier>{d1b2c3d4-e5f6-7890-abcd-ef1234567890}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="sdk">
       <UniqueIdentifier>{3da493e0-1d34-408e-b11e-bfcb5a2a6579}</UniqueIdentifier>
     </Filter>
-    <Filter Include="3rd Party\nlohmann">
-      <UniqueIdentifier>{d733a0ec-6a08-4454-bed7-aaa45a5a0a33}</UniqueIdentifier>
+    <Filter Include="eos">
+      <UniqueIdentifier>{e1b2c3d4-e5f6-7890-abcd-ef1234567890}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="thirdparty">
+      <UniqueIdentifier>{7118953e-fe40-446a-b35b-5d417b6e18ab}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="thirdparty\jwt">
+      <UniqueIdentifier>{f1b2c3d4-e5f6-7890-abcd-ef1234567890}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="vsdk">
+      <UniqueIdentifier>{01b2c3d4-e5f6-7890-abcd-ef1234567890}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="vsdk\public">
+      <UniqueIdentifier>{01b2c3d4-e5f6-7890-abcd-ef1234567891}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="vsdk\public\minbase">
+      <UniqueIdentifier>{01b2c3d4-e5f6-7890-abcd-ef1234567892}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="vsdk\public\tier0">
+      <UniqueIdentifier>{01b2c3d4-e5f6-7890-abcd-ef1234567893}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="vsdk\public\tier1">
+      <UniqueIdentifier>{01b2c3d4-e5f6-7890-abcd-ef1234567894}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="vsdk\public\vstdlib">
+      <UniqueIdentifier>{01b2c3d4-e5f6-7890-abcd-ef1234567895}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="vsdk\tier0">
+      <UniqueIdentifier>{01b2c3d4-e5f6-7890-abcd-ef1234567896}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="vsdk\tier1">
+      <UniqueIdentifier>{01b2c3d4-e5f6-7890-abcd-ef1234567897}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="vsdk\vstdlib">
+      <UniqueIdentifier>{01b2c3d4-e5f6-7890-abcd-ef1234567898}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{11b2c3d4-e5f6-7890-abcd-ef1234567890}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="framework.h">
-      <Filter>Header Files</Filter>
+    <!-- engine\core -->
+    <ClInclude Include="engine\core\appsystem.h">
+      <Filter>engine\core</Filter>
     </ClInclude>
-    <ClInclude Include="cvar.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="engine\core\core.h">
+      <Filter>engine\core</Filter>
     </ClInclude>
-    <ClInclude Include="core.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="engine\core\factory.h">
+      <Filter>engine\core</Filter>
     </ClInclude>
-    <ClInclude Include="factory.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="engine\core\framework.h">
+      <Filter>engine\core</Filter>
     </ClInclude>
-    <ClInclude Include="filesystem.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="engine\core\load.h">
+      <Filter>engine\core</Filter>
     </ClInclude>
-    <ClInclude Include="memory.h">
-      <Filter>Header Files</Filter>
+    <!-- engine\hooks -->
+    <ClInclude Include="engine\hooks\patcher.h">
+      <Filter>engine\hooks</Filter>
     </ClInclude>
-    <ClInclude Include="load.h">
-      <Filter>Header Files</Filter>
+    <!-- engine\vtable_remaps -->
+    <ClInclude Include="engine\vtable_remaps\engine_vtable.h">
+      <Filter>engine\vtable_remaps</Filter>
     </ClInclude>
-    <ClInclude Include="TableDestroyer.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="engine\vtable_remaps\model_info_vtable.h">
+      <Filter>engine\vtable_remaps</Filter>
     </ClInclude>
-    <ClInclude Include="patcher.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="engine\vtable_tools.h">
+      <Filter>engine</Filter>
     </ClInclude>
-    <ClInclude Include="vector.h">
-      <Filter>Header Files</Filter>
+    <!-- engine\filesystem -->
+    <ClInclude Include="engine\filesystem\filecache.h">
+      <Filter>engine\filesystem</Filter>
     </ClInclude>
-    <ClInclude Include="bitbuf.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="engine\filesystem\filesystem.h">
+      <Filter>engine\filesystem</Filter>
     </ClInclude>
-    <ClInclude Include="platform.h">
-      <Filter>Header Files</Filter>
+    <!-- engine\memory -->
+    <ClInclude Include="engine\memory\arena.h">
+      <Filter>engine\memory</Filter>
     </ClInclude>
-    <ClInclude Include="coordsize.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="engine\memory\memory.h">
+      <Filter>engine\memory</Filter>
     </ClInclude>
-    <ClInclude Include="navmesh.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="engine\memory\tctx.h">
+      <Filter>engine\memory</Filter>
     </ClInclude>
-    <ClInclude Include="utils.h">
-      <Filter>Header Files</Filter>
+    <!-- engine\logging -->
+    <ClInclude Include="engine\logging\crashhandler.h">
+      <Filter>engine\logging</Filter>
     </ClInclude>
-    <ClInclude Include="logging.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="engine\logging\logging.h">
+      <Filter>engine\logging</Filter>
     </ClInclude>
-    <ClInclude Include="squirrel.h">
-      <Filter>Header Files</Filter>
+    <!-- engine\net -->
+    <ClInclude Include="engine\net\masterserver.h">
+      <Filter>engine\net</Filter>
     </ClInclude>
-    <ClInclude Include="physics.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="engine\net\netchanwarnings.h">
+      <Filter>engine\net</Filter>
     </ClInclude>
-    <ClInclude Include="predictionerror.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="engine\net\net_hooks.h">
+      <Filter>engine\net</Filter>
     </ClInclude>
-    <ClInclude Include="netadr.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="engine\net\networking.h">
+      <Filter>engine\net</Filter>
     </ClInclude>
-    <ClInclude Include="sendmoveclampfix.h">
-      <Filter>Header Files</Filter>
+    <!-- engine (root) -->
+    <ClInclude Include="engine\auth.h">
+      <Filter>engine</Filter>
     </ClInclude>
-    <ClInclude Include="dedicated.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="engine\compression.h">
+      <Filter>engine</Filter>
     </ClInclude>
-    <ClInclude Include="beardbgon.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="engine\cvar.h">
+      <Filter>engine</Filter>
     </ClInclude>
-    <ClInclude Include="client.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="engine\dedicated.h">
+      <Filter>engine</Filter>
     </ClInclude>
-    <ClInclude Include="engine.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="engine\mcp_server.h">
+      <Filter>engine</Filter>
     </ClInclude>
-    <ClInclude Include="filecache.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="engine\precache.h">
+      <Filter>engine</Filter>
     </ClInclude>
-    <ClInclude Include="model_info.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="engine\security_fixes.h">
+      <Filter>engine</Filter>
     </ClInclude>
-    <ClInclude Include="keyvalues.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="engine\sendmoveclampfix.h">
+      <Filter>engine</Filter>
     </ClInclude>
-    <ClInclude Include="color.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="engine\sv_filter.h">
+      <Filter>engine</Filter>
     </ClInclude>
-    <ClInclude Include="compression.h">
-      <Filter>Header Files</Filter>
+    <!-- client -->
+    <ClInclude Include="client\client.h">
+      <Filter>client</Filter>
     </ClInclude>
-    <ClInclude Include="vsdk\public\winlite.h">
-      <Filter>Source Files\sdk</Filter>
+    <ClInclude Include="client\discord.h">
+      <Filter>client</Filter>
     </ClInclude>
-    <ClInclude Include="vsdk\public\tier0\wchartypes.h">
-      <Filter>Source Files\sdk</Filter>
+    <ClInclude Include="client\localchatwriter.h">
+      <Filter>client</Filter>
     </ClInclude>
-    <ClInclude Include="vsdk\public\tier0\vprof.h">
-      <Filter>Source Files\sdk</Filter>
+    <ClInclude Include="client\localize.h">
+      <Filter>client</Filter>
     </ClInclude>
-    <ClInclude Include="vsdk\public\tier0\valve_tracelogging.h">
-      <Filter>Source Files\sdk</Filter>
+    <ClInclude Include="client\predictionerror.h">
+      <Filter>client</Filter>
     </ClInclude>
-    <ClInclude Include="vsdk\public\tier0\valve_on.h">
-      <Filter>Source Files\sdk</Filter>
+    <!-- client\audio -->
+    <ClInclude Include="client\audio\audio.h">
+      <Filter>client\audio</Filter>
     </ClInclude>
-    <ClInclude Include="vsdk\public\tier0\valve_off.h">
-      <Filter>Source Files\sdk</Filter>
+    <ClInclude Include="client\audio\audio_cache.h">
+      <Filter>client\audio</Filter>
     </ClInclude>
-    <ClInclude Include="vsdk\public\tier1\utlvector.h">
-      <Filter>Source Files\sdk</Filter>
+    <ClInclude Include="client\audio\audio_device.h">
+      <Filter>client\audio</Filter>
     </ClInclude>
-    <ClInclude Include="vsdk\public\tier1\utlpriorityqueue.h">
-      <Filter>Source Files\sdk</Filter>
+    <!-- client\rendering -->
+    <ClInclude Include="client\rendering\hudwarp.h">
+      <Filter>client\rendering</Filter>
     </ClInclude>
-    <ClInclude Include="vsdk\public\tier1\utlmemory.h">
-      <Filter>Source Files\sdk</Filter>
+    <ClInclude Include="client\rendering\hudwarp_hooks.h">
+      <Filter>client\rendering</Filter>
     </ClInclude>
-    <ClInclude Include="vsdk\public\tier1\utllinkedlist.h">
-      <Filter>Source Files\sdk</Filter>
+    <ClInclude Include="client\rendering\surfacerender.h">
+      <Filter>client\rendering</Filter>
     </ClInclude>
-    <ClInclude Include="vsdk\public\tier1\utliterator.h">
-      <Filter>Source Files\sdk</Filter>
+    <ClInclude Include="client\rendering\vguisurface.h">
+      <Filter>client\rendering</Filter>
     </ClInclude>
-    <ClInclude Include="vsdk\public\tier1\utlhashmap.h">
-      <Filter>Source Files\sdk</Filter>
+    <!-- server -->
+    <ClInclude Include="server\chat.h">
+      <Filter>server</Filter>
     </ClInclude>
-    <ClInclude Include="vsdk\public\tier1\utlbuffer.h">
-      <Filter>Source Files\sdk</Filter>
+    <ClInclude Include="server\misc.h">
+      <Filter>server</Filter>
     </ClInclude>
-    <ClInclude Include="vsdk\public\tier0\t0constants.h">
-      <Filter>Source Files\sdk</Filter>
+    <ClInclude Include="server\usermessages.h">
+      <Filter>server</Filter>
     </ClInclude>
-    <ClInclude Include="vsdk\public\vstdlib\strtools.h">
-      <Filter>Source Files\sdk</Filter>
+    <!-- server\physics -->
+    <ClInclude Include="server\physics\physics.h">
+      <Filter>server\physics</Filter>
     </ClInclude>
-    <ClInclude Include="vsdk\public\vstdlib\random.h">
-      <Filter>Source Files\sdk</Filter>
+    <ClInclude Include="server\physics\physics_hooks.h">
+      <Filter>server\physics</Filter>
     </ClInclude>
-    <ClInclude Include="vsdk\public\tier0\platformtime.h">
-      <Filter>Source Files\sdk</Filter>
+    <!-- server\ai -->
+    <ClInclude Include="server\ai\bot.h">
+      <Filter>server\ai</Filter>
     </ClInclude>
-    <ClInclude Include="vsdk\public\tier0\platform_sockets.h">
-      <Filter>Source Files\sdk</Filter>
+    <ClInclude Include="server\ai\navmesh.h">
+      <Filter>server\ai</Filter>
     </ClInclude>
-    <ClInclude Include="vsdk\public\tier0\platform.h">
-      <Filter>Source Files\sdk</Filter>
+    <!-- shared -->
+    <ClInclude Include="shared\commands.h">
+      <Filter>shared</Filter>
     </ClInclude>
-    <ClInclude Include="vsdk\public\tier1\netadr.h">
-      <Filter>Source Files\sdk</Filter>
+    <ClInclude Include="shared\persistentdata.h">
+      <Filter>shared</Filter>
     </ClInclude>
-    <ClInclude Include="vsdk\public\minbase\minbase_warnings.h">
-      <Filter>Source Files\sdk</Filter>
+    <ClInclude Include="shared\squirrel.h">
+      <Filter>shared</Filter>
     </ClInclude>
-    <ClInclude Include="vsdk\public\minbase\minbase_types.h">
-      <Filter>Source Files\sdk</Filter>
+    <!-- sdk -->
+    <ClInclude Include="sdk\bitbuf.h">
+      <Filter>sdk</Filter>
     </ClInclude>
-    <ClInclude Include="vsdk\public\minbase\minbase_securezeromemory_impl.h">
-      <Filter>Source Files\sdk</Filter>
+    <ClInclude Include="sdk\color.h">
+      <Filter>sdk</Filter>
     </ClInclude>
-    <ClInclude Include="vsdk\public\minbase\minbase_macros.h">
-      <Filter>Source Files\sdk</Filter>
+    <ClInclude Include="sdk\coordsize.h">
+      <Filter>sdk</Filter>
     </ClInclude>
-    <ClInclude Include="vsdk\public\minbase\minbase_limits.h">
-      <Filter>Source Files\sdk</Filter>
+    <ClInclude Include="sdk\keyvalues.h">
+      <Filter>sdk</Filter>
     </ClInclude>
-    <ClInclude Include="vsdk\public\minbase\minbase_identify.h">
-      <Filter>Source Files\sdk</Filter>
+    <ClInclude Include="sdk\netadr.h">
+      <Filter>sdk</Filter>
     </ClInclude>
-    <ClInclude Include="vsdk\public\minbase\minbase_endian.h">
-      <Filter>Source Files\sdk</Filter>
+    <ClInclude Include="sdk\vector.h">
+      <Filter>sdk</Filter>
     </ClInclude>
-    <ClInclude Include="vsdk\public\minbase\minbase_decls.h">
-      <Filter>Source Files\sdk</Filter>
+    <!-- eos -->
+    <ClInclude Include="eos\eos_layer.h">
+      <Filter>eos</Filter>
     </ClInclude>
-    <ClInclude Include="vsdk\public\minbase\minbase_annotations.h">
-      <Filter>Source Files\sdk</Filter>
+    <ClInclude Include="eos\eos_logging_manager.h">
+      <Filter>eos</Filter>
     </ClInclude>
-    <ClInclude Include="vsdk\public\tier0\memdbgon.h">
-      <Filter>Source Files\sdk</Filter>
+    <ClInclude Include="eos\eos_network.h">
+      <Filter>eos</Filter>
     </ClInclude>
-    <ClInclude Include="vsdk\public\tier0\memdbgoff.h">
-      <Filter>Source Files\sdk</Filter>
+    <ClInclude Include="eos\fake_ip_layer.h">
+      <Filter>eos</Filter>
     </ClInclude>
-    <ClInclude Include="vsdk\tier1\ipv6text.h">
-      <Filter>Source Files\sdk</Filter>
+    <!-- thirdparty -->
+    <ClInclude Include="thirdparty\jwt\jwt_compact.h">
+      <Filter>thirdparty\jwt</Filter>
     </ClInclude>
-    <ClInclude Include="vsdk\public\tier1\fmtstr.h">
-      <Filter>Source Files\sdk</Filter>
-    </ClInclude>
-    <ClInclude Include="vsdk\public\tier0\dbg.h">
-      <Filter>Source Files\sdk</Filter>
-    </ClInclude>
-    <ClInclude Include="vsdk\public\tier0\basetypes.h">
-      <Filter>Source Files\sdk</Filter>
-    </ClInclude>
+    <!-- root files -->
+    <ClInclude Include="beardbgon.h" />
+    <ClInclude Include="platform.h" />
+    <ClInclude Include="player.h" />
+    <ClInclude Include="r1d_version.h" />
+    <ClInclude Include="resource.h" />
+    <ClInclude Include="TableDestroyer.h" />
+    <ClInclude Include="weaponxdebug.h" />
+    <!-- vsdk -->
     <ClInclude Include="vsdk\public\bitvec.h">
-      <Filter>Source Files\sdk</Filter>
-    </ClInclude>
-    <ClInclude Include="vsdk\public\vector.h">
-      <Filter>Source Files\sdk</Filter>
-    </ClInclude>
-    <ClInclude Include="vsdk\public\vector2d.h">
-      <Filter>Source Files\sdk</Filter>
+      <Filter>vsdk\public</Filter>
     </ClInclude>
     <ClInclude Include="vsdk\public\math_pfns.h">
-      <Filter>Source Files\sdk</Filter>
+      <Filter>vsdk\public</Filter>
     </ClInclude>
-    <ClInclude Include="persistentdata.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="vsdk\public\vector.h">
+      <Filter>vsdk\public</Filter>
     </ClInclude>
-    <ClInclude Include="weaponxdebug.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="vsdk\public\vector2d.h">
+      <Filter>vsdk\public</Filter>
     </ClInclude>
-    <ClInclude Include="netchanwarnings.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="vsdk\public\winlite.h">
+      <Filter>vsdk\public</Filter>
     </ClInclude>
-    <ClInclude Include="thirdparty\nlohmann\json.hpp">
-      <Filter>3rd Party\nlohmann</Filter>
+    <ClInclude Include="vsdk\public\minbase\minbase_annotations.h">
+      <Filter>vsdk\public\minbase</Filter>
     </ClInclude>
-    <ClInclude Include="thirdparty\nlohmann\json_fwd.hpp">
-      <Filter>3rd Party\nlohmann</Filter>
+    <ClInclude Include="vsdk\public\minbase\minbase_decls.h">
+      <Filter>vsdk\public\minbase</Filter>
     </ClInclude>
-    <ClInclude Include="masterserver.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="vsdk\public\minbase\minbase_endian.h">
+      <Filter>vsdk\public\minbase</Filter>
     </ClInclude>
-    <ClInclude Include="thirdparty\zstd\zstd.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="vsdk\public\minbase\minbase_identify.h">
+      <Filter>vsdk\public\minbase</Filter>
     </ClInclude>
-    <ClInclude Include="arena.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="vsdk\public\minbase\minbase_limits.h">
+      <Filter>vsdk\public\minbase</Filter>
     </ClInclude>
-    <ClInclude Include="tctx.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="vsdk\public\minbase\minbase_macros.h">
+      <Filter>vsdk\public\minbase</Filter>
     </ClInclude>
-    <ClInclude Include="security_fixes.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="vsdk\public\minbase\minbase_securezeromemory_impl.h">
+      <Filter>vsdk\public\minbase</Filter>
     </ClInclude>
-    <ClInclude Include="steam.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="vsdk\public\minbase\minbase_types.h">
+      <Filter>vsdk\public\minbase</Filter>
     </ClInclude>
-    <ClInclude Include="audio.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="vsdk\public\minbase\minbase_warnings.h">
+      <Filter>vsdk\public\minbase</Filter>
     </ClInclude>
-    <ClInclude Include="jwt_compact.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="vsdk\public\tier0\basetypes.h">
+      <Filter>vsdk\public\tier0</Filter>
     </ClInclude>
-    <ClInclude Include="crashhandler.h">
-      <Filter>Source Files</Filter>
+    <ClInclude Include="vsdk\public\tier0\dbg.h">
+      <Filter>vsdk\public\tier0</Filter>
     </ClInclude>
-    <ClInclude Include="resource.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="vsdk\public\tier0\memdbgoff.h">
+      <Filter>vsdk\public\tier0</Filter>
     </ClInclude>
-    <ClInclude Include="hudwarp.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="vsdk\public\tier0\memdbgon.h">
+      <Filter>vsdk\public\tier0</Filter>
     </ClInclude>
-    <ClInclude Include="hudwarp_hooks.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="vsdk\public\tier0\platform.h">
+      <Filter>vsdk\public\tier0</Filter>
     </ClInclude>
-    <ClInclude Include="sv_filter.h">
-      <Filter>Source Files</Filter>
+    <ClInclude Include="vsdk\public\tier0\platformtime.h">
+      <Filter>vsdk\public\tier0</Filter>
     </ClInclude>
-    <ClInclude Include="discord.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="vsdk\public\tier0\platform_sockets.h">
+      <Filter>vsdk\public\tier0</Filter>
     </ClInclude>
-    <ClInclude Include="eos_logging_manager.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="vsdk\public\tier0\t0constants.h">
+      <Filter>vsdk\public\tier0</Filter>
     </ClInclude>
-    <ClInclude Include="eos_layer.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="vsdk\public\tier0\valve_off.h">
+      <Filter>vsdk\public\tier0</Filter>
     </ClInclude>
-    <ClInclude Include="eos_network.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="vsdk\public\tier0\valve_on.h">
+      <Filter>vsdk\public\tier0</Filter>
     </ClInclude>
-    <ClInclude Include="r1d_version.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="vsdk\public\tier0\valve_tracelogging.h">
+      <Filter>vsdk\public\tier0</Filter>
     </ClInclude>
-    <ClInclude Include="vguisurface.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="vsdk\public\tier0\vprof.h">
+      <Filter>vsdk\public\tier0</Filter>
     </ClInclude>
-    <ClInclude Include="surfacerender.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="vsdk\public\tier0\wchartypes.h">
+      <Filter>vsdk\public\tier0</Filter>
     </ClInclude>
-    <ClInclude Include="appsystem.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="vsdk\public\tier1\fmtstr.h">
+      <Filter>vsdk\public\tier1</Filter>
     </ClInclude>
-    <ClInclude Include="localize.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="vsdk\public\tier1\netadr.h">
+      <Filter>vsdk\public\tier1</Filter>
     </ClInclude>
-    <ClInclude Include="localchatwriter.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="vsdk\public\tier1\utlbuffer.h">
+      <Filter>vsdk\public\tier1</Filter>
     </ClInclude>
-    <ClInclude Include="fake_ip_layer.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="vsdk\public\tier1\utlhashmap.h">
+      <Filter>vsdk\public\tier1</Filter>
     </ClInclude>
-    <ClInclude Include="net_hooks.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="vsdk\public\tier1\utliterator.h">
+      <Filter>vsdk\public\tier1</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\tier1\utllinkedlist.h">
+      <Filter>vsdk\public\tier1</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\tier1\utlmemory.h">
+      <Filter>vsdk\public\tier1</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\tier1\utlpriorityqueue.h">
+      <Filter>vsdk\public\tier1</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\tier1\utlvector.h">
+      <Filter>vsdk\public\tier1</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\vstdlib\random.h">
+      <Filter>vsdk\public\vstdlib</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\public\vstdlib\strtools.h">
+      <Filter>vsdk\public\vstdlib</Filter>
+    </ClInclude>
+    <ClInclude Include="vsdk\tier1\ipv6text.h">
+      <Filter>vsdk\tier1</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="dllmain.cpp">
-      <Filter>Source Files</Filter>
+    <!-- engine\core -->
+    <ClCompile Include="engine\core\dllmain.cpp">
+      <Filter>engine\core</Filter>
     </ClCompile>
-    <ClCompile Include="cvar.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="engine\core\factory.cpp">
+      <Filter>engine\core</Filter>
     </ClCompile>
-    <ClCompile Include="factory.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="engine\core\load.cpp">
+      <Filter>engine\core</Filter>
     </ClCompile>
-    <ClCompile Include="filesystem.cpp">
-      <Filter>Source Files</Filter>
+    <!-- engine\hooks -->
+    <ClCompile Include="engine\hooks\patcher.cpp">
+      <Filter>engine\hooks</Filter>
     </ClCompile>
-    <ClCompile Include="fake_ip_layer.cpp">
-      <Filter>Source Files</Filter>
+    <!-- engine\vtable_remaps -->
+    <ClCompile Include="engine\vtable_remaps\engine_vtable.cpp">
+      <Filter>engine\vtable_remaps</Filter>
     </ClCompile>
-    <ClCompile Include="net_hooks.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="engine\vtable_remaps\filesystem_vtable.cpp">
+      <Filter>engine\vtable_remaps</Filter>
     </ClCompile>
-    <ClCompile Include="load.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="engine\vtable_remaps\model_info_vtable.cpp">
+      <Filter>engine\vtable_remaps</Filter>
     </ClCompile>
-    <ClCompile Include="memory.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="engine\vtable_tools.cpp">
+      <Filter>engine</Filter>
     </ClCompile>
-    <ClCompile Include="TableDestroyer.cpp">
-      <Filter>Source Files</Filter>
+    <!-- engine\filesystem -->
+    <ClCompile Include="engine\filesystem\filecache.cpp">
+      <Filter>engine\filesystem</Filter>
     </ClCompile>
-    <ClCompile Include="patcher.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="engine\filesystem\filesystem.cpp">
+      <Filter>engine\filesystem</Filter>
     </ClCompile>
-    <ClCompile Include="bitbuf.cpp">
-      <Filter>Source Files</Filter>
+    <!-- engine\memory -->
+    <ClCompile Include="engine\memory\arena.cpp">
+      <Filter>engine\memory</Filter>
     </ClCompile>
-    <ClCompile Include="newbitbuf.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="engine\memory\memory.cpp">
+      <Filter>engine\memory</Filter>
     </ClCompile>
-    <ClCompile Include="navmesh.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="engine\memory\tctx.cpp">
+      <Filter>engine\memory</Filter>
     </ClCompile>
-    <ClCompile Include="utils.cpp">
-      <Filter>Source Files</Filter>
+    <!-- engine\logging -->
+    <ClCompile Include="engine\logging\crashhandler.cpp">
+      <Filter>engine\logging</Filter>
     </ClCompile>
-    <ClCompile Include="squirrel.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="engine\logging\logging.cpp">
+      <Filter>engine\logging</Filter>
     </ClCompile>
-    <ClCompile Include="logging.cpp">
-      <Filter>Source Files</Filter>
+    <!-- engine\net -->
+    <ClCompile Include="engine\net\masterserver.cpp">
+      <Filter>engine\net</Filter>
     </ClCompile>
-    <ClCompile Include="predictionerror.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="engine\net\netchanwarnings.cpp">
+      <Filter>engine\net</Filter>
     </ClCompile>
-    <ClCompile Include="sendmoveclampfix.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="engine\net\net_hooks.cpp">
+      <Filter>engine\net</Filter>
     </ClCompile>
-    <ClCompile Include="dedicated.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="engine\net\networking.cpp">
+      <Filter>engine\net</Filter>
     </ClCompile>
-    <ClCompile Include="client.cpp">
-      <Filter>Source Files</Filter>
+    <!-- engine (root) -->
+    <ClCompile Include="engine\auth.cpp">
+      <Filter>engine</Filter>
     </ClCompile>
-    <ClCompile Include="engine.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="engine\compression.cpp">
+      <Filter>engine</Filter>
     </ClCompile>
-    <ClCompile Include="eos_logging_manager.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="engine\cvar.cpp">
+      <Filter>engine</Filter>
     </ClCompile>
-    <ClCompile Include="eos_layer.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="engine\dedicated.cpp">
+      <Filter>engine</Filter>
     </ClCompile>
-    <ClCompile Include="filecache.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="engine\mcp_server.cpp">
+      <Filter>engine</Filter>
     </ClCompile>
-    <ClCompile Include="model_info.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="engine\precache.cpp">
+      <Filter>engine</Filter>
     </ClCompile>
-    <ClCompile Include="eos_network.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="engine\security_fixes.cpp">
+      <Filter>engine</Filter>
     </ClCompile>
-    <ClCompile Include="keyvalues.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="engine\sendmoveclampfix.cpp">
+      <Filter>engine</Filter>
     </ClCompile>
-    <ClCompile Include="compression.cpp">
-      <Filter>Source Files</Filter>
+    <!-- client -->
+    <ClCompile Include="client\client.cpp">
+      <Filter>client</Filter>
     </ClCompile>
-    <ClCompile Include="vsdk\tier0\valve_tracelogging.cpp">
-      <Filter>Source Files\sdk</Filter>
+    <ClCompile Include="client\discord.cpp">
+      <Filter>client</Filter>
     </ClCompile>
-    <ClCompile Include="vsdk\tier1\utlbuffer.cpp">
-      <Filter>Source Files\sdk</Filter>
+    <ClCompile Include="client\localchatwriter.cpp">
+      <Filter>client</Filter>
     </ClCompile>
-    <ClCompile Include="vsdk\vstdlib\strtools.cpp">
-      <Filter>Source Files\sdk</Filter>
+    <ClCompile Include="client\localize.cpp">
+      <Filter>client</Filter>
+    </ClCompile>
+    <ClCompile Include="client\predictionerror.cpp">
+      <Filter>client</Filter>
+    </ClCompile>
+    <!-- client\audio -->
+    <ClCompile Include="client\audio\audio.cpp">
+      <Filter>client\audio</Filter>
+    </ClCompile>
+    <ClCompile Include="client\audio\audio_cache.cpp">
+      <Filter>client\audio</Filter>
+    </ClCompile>
+    <ClCompile Include="client\audio\audio_device.cpp">
+      <Filter>client\audio</Filter>
+    </ClCompile>
+    <!-- client\rendering -->
+    <ClCompile Include="client\rendering\hudwarp.cpp">
+      <Filter>client\rendering</Filter>
+    </ClCompile>
+    <ClCompile Include="client\rendering\hudwarp_hooks.cpp">
+      <Filter>client\rendering</Filter>
+    </ClCompile>
+    <ClCompile Include="client\rendering\surfacerender.cpp">
+      <Filter>client\rendering</Filter>
+    </ClCompile>
+    <!-- server -->
+    <ClCompile Include="server\chat.cpp">
+      <Filter>server</Filter>
+    </ClCompile>
+    <ClCompile Include="server\misc.cpp">
+      <Filter>server</Filter>
+    </ClCompile>
+    <ClCompile Include="server\usermessages.cpp">
+      <Filter>server</Filter>
+    </ClCompile>
+    <!-- server\physics -->
+    <ClCompile Include="server\physics\physics.cpp">
+      <Filter>server\physics</Filter>
+    </ClCompile>
+    <!-- server\ai -->
+    <ClCompile Include="server\ai\bot.cpp">
+      <Filter>server\ai</Filter>
+    </ClCompile>
+    <ClCompile Include="server\ai\navmesh.cpp">
+      <Filter>server\ai</Filter>
+    </ClCompile>
+    <!-- shared -->
+    <ClCompile Include="shared\commands.cpp">
+      <Filter>shared</Filter>
+    </ClCompile>
+    <ClCompile Include="shared\persistentdata.cpp">
+      <Filter>shared</Filter>
+    </ClCompile>
+    <ClCompile Include="shared\squirrel.cpp">
+      <Filter>shared</Filter>
+    </ClCompile>
+    <!-- sdk -->
+    <ClCompile Include="sdk\bitbuf.cpp">
+      <Filter>sdk</Filter>
+    </ClCompile>
+    <ClCompile Include="sdk\keyvalues.cpp">
+      <Filter>sdk</Filter>
+    </ClCompile>
+    <ClCompile Include="sdk\newbitbuf.cpp">
+      <Filter>sdk</Filter>
+    </ClCompile>
+    <!-- eos -->
+    <ClCompile Include="eos\eos_layer.cpp">
+      <Filter>eos</Filter>
+    </ClCompile>
+    <ClCompile Include="eos\eos_logging_manager.cpp">
+      <Filter>eos</Filter>
+    </ClCompile>
+    <ClCompile Include="eos\eos_network.cpp">
+      <Filter>eos</Filter>
+    </ClCompile>
+    <ClCompile Include="eos\fake_ip_layer.cpp">
+      <Filter>eos</Filter>
+    </ClCompile>
+    <!-- root files -->
+    <ClCompile Include="player.cpp" />
+    <ClCompile Include="TableDestroyer.cpp" />
+    <!-- vsdk -->
+    <ClCompile Include="vsdk\tier0\dbg.cpp">
+      <Filter>vsdk\tier0</Filter>
     </ClCompile>
     <ClCompile Include="vsdk\tier0\platformtime.cpp">
-      <Filter>Source Files\sdk</Filter>
+      <Filter>vsdk\tier0</Filter>
     </ClCompile>
-    <ClCompile Include="vsdk\tier1\netadr.cpp">
-      <Filter>Source Files\sdk</Filter>
+    <ClCompile Include="vsdk\tier0\valve_tracelogging.cpp">
+      <Filter>vsdk\tier0</Filter>
     </ClCompile>
     <ClCompile Include="vsdk\tier1\ipv6text.c">
-      <Filter>Source Files\sdk</Filter>
+      <Filter>vsdk\tier1</Filter>
     </ClCompile>
-    <ClCompile Include="vsdk\tier0\dbg.cpp">
-      <Filter>Source Files\sdk</Filter>
+    <ClCompile Include="vsdk\tier1\netadr.cpp">
+      <Filter>vsdk\tier1</Filter>
     </ClCompile>
-    <ClCompile Include="persistentdata.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="vsdk\tier1\utlbuffer.cpp">
+      <Filter>vsdk\tier1</Filter>
     </ClCompile>
-    <ClCompile Include="netchanwarnings.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="masterserver.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="arena.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="tctx.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="security_fixes.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="steam.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="audio.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="crashhandler.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="hudwarp.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="hudwarp_hooks.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="discord.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="surfacerender.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="localchatwriter.cpp">
-      <Filter>Source Files</Filter>
+    <ClCompile Include="vsdk\vstdlib\strtools.cpp">
+      <Filter>vsdk\vstdlib</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -479,7 +633,7 @@
   </ItemGroup>
   <ItemGroup>
     <MASM Include="NetChanFixes.asm">
-      <Filter>Source Files</Filter>
+      <Filter>engine\net</Filter>
     </MASM>
   </ItemGroup>
   <ItemGroup>

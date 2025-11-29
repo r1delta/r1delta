@@ -78,9 +78,9 @@
 #include "persistentdata.h"
 #include "weaponxdebug.h"
 #include "netchanwarnings.h"
-#include "engine.h"
+#include "engine_vtable.h"
 #include "security_fixes.h"
-#include "steam.h"
+// steam.h removed - unused
 #include "persistentdata.h"
 #include "netadr.h"
 #include <httplib.h>
@@ -443,7 +443,7 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		MH_CreateHook((LPVOID)(G_engine + 0x2A200), &CBaseClientState_SendConnectPacket, reinterpret_cast<LPVOID*>(&CBaseClientState_SendConnectPacket_Original));
 		//g_pLogAudio = RegisterConVar("fs_log_audio", "0", FCVAR_NONE, "Log audio file reads");
 		MH_CreateHook((LPVOID)(G_engine + 0xAE00), &GetAcacheHk, reinterpret_cast<LPVOID*>(&GetAcacheOriginal));
-		InitSteamHooks();
+		// InitSteamHooks(); // Removed - steam.cpp was unused
 		InitAddons();
 
 	}

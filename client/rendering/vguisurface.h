@@ -1,7 +1,7 @@
 #pragma once
 #include "appsystem.h"
 #include "vsdk/public/vector2d.h"
-#include "utils.h"
+#include "vtable_tools.h"
 
 #undef CreateFont // FUCK
 
