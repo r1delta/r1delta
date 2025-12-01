@@ -300,3 +300,7 @@ void ReconcileAddonListFile(IFileSystem* pFileSystem, const char* pModPath);
 
 // Texture streaming crash fix - mid-function patch
 void InitTextureStreamingPatch(uintptr_t filesystemBase);
+
+// Hook for sub_1800746B0 to detect texture streaming failures
+extern __int64 (*oSub_1800746B0)(__int64 a1, char* a2);
+__int64 __fastcall Sub_1800746B0_Hook(__int64 a1, char* a2);

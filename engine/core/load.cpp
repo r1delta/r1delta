@@ -151,25 +151,23 @@ struct SavedCall {
 	int a3;
 };
 
-// Original function def
-typedef __int64 (*sub_136E70Type)(char* pPath);
-sub_136E70Type sub_136E70Original;
-
-__int64 __fastcall sub_136E70(char* pPath)
+void __fastcall sub_136E70(char* pPath)
 {
-	// 1. Request the async mount
-	auto ret = sub_136E70Original(pPath);
-	// Check function (IsAsyncLoading)
-	typedef char (*sub_18019D7B0_t)();
-	static auto IsFilesystemBusy = reinterpret_cast<sub_18019D7B0_t>(G_engine + 0x19D7B0);
+	char v28[512] = { 0 };
 
-	// 2. Wait for it to finish.
-	while (IsFilesystemBusy())
-	{
-		Sleep(1);
-	}
+	// Check if pPath already ends with ".bsp"
+	const char* ext = ".bsp";
+	size_t len = strlen(pPath);
+	bool hasExt = (len >= 4 && _stricmp(pPath + len - 4, ext) == 0);
 
-	return ret;
+	if (hasExt)
+		snprintf(v28, sizeof(v28), "vpk/%s", pPath);
+	else
+		snprintf(v28, sizeof(v28), "vpk/%s.bsp", pPath);
+
+	static uintptr_t off_180795630 = (uintptr_t)(G_engine + 0x19FB30);
+	((bool(*)(const char*, unsigned int, char))(off_180795630))(v28, 2LL, 0LL);
+	((void(__fastcall*)())(G_engine + 0x19D730))();
 }
 
 
@@ -327,7 +325,8 @@ void InitAddons() {
 
 	// Texture streaming crash fix - client only (mid-function patch)
 	if (!IsDedicatedServer()) {
-		InitTextureStreamingPatch(filesystem_stdio);
+		//InitTextureStreamingPatch(filesystem_stdio);
+		MH_CreateHook((LPVOID)(filesystem_stdio + 0x746B0), &Sub_1800746B0_Hook, reinterpret_cast<LPVOID*>(&oSub_1800746B0));
 	}
 
 	//client = std::make_shared<discordpp::Client>();
@@ -671,7 +670,7 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		MH_CreateHook((LPVOID)(launcher + 0xB7A0), &CSquirrelVM__PrintFunc3, NULL);
 		MH_CreateHook((LPVOID)(engine_base + 0x23E20), &SVC_Print_Process_Hook, NULL);
 		MH_CreateHook((LPVOID)(engine_base + 0x22DD0), &CBaseClientState__InternalProcessStringCmd, reinterpret_cast<LPVOID*>(&CBaseClientState__InternalProcessStringCmdOriginal));
-		MH_CreateHook((LPVOID)(engine_base + 0x136E70), &sub_136E70, reinterpret_cast<LPVOID*>(&sub_136E70Original)); // fixes some vpk issue
+		MH_CreateHook((LPVOID)(engine_base + 0x136E70), &sub_136E70, reinterpret_cast<LPVOID*>(NULL)); // fixes some vpk issue
 		MH_CreateHook((LPVOID)(engine_base + 0x72360), &cl_DumpPrecacheStats, NULL);
 
 		//MH_CreateHook((LPVOID)(engine_base_spec + 0x473550), &sub_180473550, NULL);
