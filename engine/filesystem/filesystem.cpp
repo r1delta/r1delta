@@ -326,30 +326,30 @@ __int64 __fastcall AddVPKFile(IFileSystem* fileSystem, char* vpkPath, char** a3,
 	ZoneScoped;
 
 	// Check for mp_mia or mp_nest2 and load mp_angel_city assets first
-	//const char* mapAliases[] = { "mp_mia", "mp_nest2" };
-	//for (const char* alias : mapAliases)
-	//{
-	//	if (strstr(vpkPath, alias) != NULL)
-	//	{
-	//		// Create a modified path with mp_angel_city instead
-	//		size_t pathLen = strlen(vpkPath);
-	//		size_t aliasLen = strlen(alias);
-	//		size_t angelCityLen = strlen("mp_angel_city");
-	//		size_t newPathLen = pathLen - aliasLen + angelCityLen + 1;
-	//
-	//		char* modifiedPath = (char*)_alloca(newPathLen);
-	//		char* aliasPos = strstr(vpkPath, alias);
-	//		size_t prefixLen = aliasPos - vpkPath;
-	//
-	//		memcpy(modifiedPath, vpkPath, prefixLen);
-	//		memcpy(modifiedPath + prefixLen, "mp_angel_city", angelCityLen);
-	//		strcpy(modifiedPath + prefixLen + angelCityLen, aliasPos + aliasLen);
-	//
-	//		// Call original with mp_angel_city path first
-	//		AddVPKFileOriginal(fileSystem, modifiedPath, a3, a4, a5, a6);
-	//		break;
-	//	}
-	//}
+	const char* mapAliases[] = { "mp_mia", "mp_nest2" };
+	for (const char* alias : mapAliases)
+	{
+		if (strstr(vpkPath, alias) != NULL)
+		{
+			// Create a modified path with mp_angel_city instead
+			size_t pathLen = strlen(vpkPath);
+			size_t aliasLen = strlen(alias);
+			size_t angelCityLen = strlen("mp_angel_city");
+			size_t newPathLen = pathLen - aliasLen + angelCityLen + 1;
+	
+			char* modifiedPath = (char*)_alloca(newPathLen);
+			char* aliasPos = strstr(vpkPath, alias);
+			size_t prefixLen = aliasPos - vpkPath;
+	
+			memcpy(modifiedPath, vpkPath, prefixLen);
+			memcpy(modifiedPath + prefixLen, "mp_angel_city", angelCityLen);
+			strcpy(modifiedPath + prefixLen + angelCityLen, aliasPos + aliasLen);
+	
+			// Call original with mp_angel_city path first
+			AddVPKFileOriginal(fileSystem, modifiedPath, a3, a4, a5, a6);
+			break;
+		}
+	}
 
 	// Check if the path contains "_dir"
 	if (strstr(vpkPath, "_dir") != NULL)
