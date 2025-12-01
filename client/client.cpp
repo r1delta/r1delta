@@ -778,8 +778,8 @@ void InitClient()
     if (IsNoOrigin())
 
 #if BUILD_DEBUG
-    // if (!InitNetChanWarningHooks())
-    //	MessageBoxA(NULL, "Failed to initialize warning hooks", "ERROR", 16);
+    if (!InitNetChanWarningHooks())
+    MessageBoxA(NULL, "Failed to initialize warning hooks", "ERROR", 16);
 #endif
     MH_EnableHook(MH_ALL_HOOKS);
 }

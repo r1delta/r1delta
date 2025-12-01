@@ -854,10 +854,10 @@ security_fixes_engine(uintptr_t engine_base)
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x27EA0), &CBaseClientState__ProcessGetCvarValue, NULL) == MH_OK);
 	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x536F0), &CL_CopyExistingEntity, reinterpret_cast<LPVOID*>(&oCL_CopyExistingEntity)) == MH_OK);
 
-	R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E96E0), &CNetChan__ProcessPacket, reinterpret_cast<LPVOID*>(&oCNetChan__ProcessPacket)) == MH_OK);
+	//R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E96E0), &CNetChan__ProcessPacket, reinterpret_cast<LPVOID*>(&oCNetChan__ProcessPacket)) == MH_OK);
     R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E73C0), &CNetChan__ProcessPacketHeader, reinterpret_cast<LPVOID*>(&oCNetChan__ProcessPacketHeader)) == MH_OK);
-    R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E51D0), &CNetChan___ProcessMessages, reinterpret_cast<LPVOID*>(&oCNetChan___ProcessMessages)) == MH_OK);
-    R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E9EA0), &CNetChan___dtor, reinterpret_cast<LPVOID*>(&oCNetChan___dtor)) == MH_OK);
+    //R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E51D0), &CNetChan___ProcessMessages, reinterpret_cast<LPVOID*>(&oCNetChan___ProcessMessages)) == MH_OK);
+    //R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0x1E9EA0), &CNetChan___dtor, reinterpret_cast<LPVOID*>(&oCNetChan___dtor)) == MH_OK);
     if (!IsDedicatedServer())
 	    R1DAssert(MH_CreateHook((LPVOID)(engine_base + 0xDA330), &CGameClient__ProcessVoiceData, reinterpret_cast<LPVOID*>(&oCGameClient__ProcessVoiceData)) == MH_OK);
     else

@@ -38,17 +38,23 @@ private:
     std::filesystem::path r1deltaAddonsPath;   // Store the addons path
 
     static constexpr std::size_t FNV1A_HASH_INIT = 14695981039346656037ULL;
-    // FNV-1a hash function implementation
+
+    // Case-insensitive lowercase helper (ASCII only, sufficient for file paths)
+    static constexpr unsigned char to_lower(unsigned char c) {
+        return (c >= 'A' && c <= 'Z') ? (c + ('a' - 'A')) : c;
+    }
+
+    // FNV-1a hash function implementation (case-insensitive)
     static constexpr std::size_t fnv1a_hash(std::string_view sv, std::size_t hash = FNV1A_HASH_INIT) {
         for (unsigned char c : sv) { // Use unsigned char for hashing bytes correctly
-            hash ^= static_cast<size_t>(c);
+            hash ^= static_cast<size_t>(to_lower(c));
             hash *= 1099511628211ULL; // FNV prime
         }
         return hash;
     }
     static constexpr std::size_t fnv1a_hash(const std::wstring_view& s, std::size_t hash = FNV1A_HASH_INIT) {
         for (uint16_t c : s) {
-            hash ^= static_cast<size_t>(c & 0xFF);
+            hash ^= static_cast<size_t>(to_lower(static_cast<unsigned char>(c & 0xFF)));
             hash *= 1099511628211ULL; // FNV prime
         }
         return hash;
@@ -60,7 +66,7 @@ private:
     static std::size_t fnv1a_hash(const std::wstring& s, std::size_t hash = FNV1A_HASH_INIT) {
         for (uint16_t c : s) {
             R1DAssert(c <= 0xFF);
-            hash ^= static_cast<size_t>(c & 0xFF);
+            hash ^= static_cast<size_t>(to_lower(static_cast<unsigned char>(c & 0xFF)));
             hash *= 1099511628211ULL; // FNV prime
         }
         return hash;
