@@ -440,61 +440,61 @@ static void* AllocateNearby(void* target, size_t size)
 
 void InitTextureStreamingPatch(uintptr_t filesystemBase)
 {
-	// Address of the cmp instruction we're patching
+	// === Fix 1: Initialize rbx to 0 instead of stack garbage ===
+	// At 0x74DFA: "mov rbx, [rsp+50h]" (5 bytes) -> "xor rbx, rbx; nop; nop"
+	unsigned char* initAddr = (unsigned char*)(filesystemBase + 0x74DFA);
+	DWORD oldProtect1;
+	VirtualProtect(initAddr, 5, PAGE_EXECUTE_READWRITE, &oldProtect1);
+	initAddr[0] = 0x48;  // xor rbx, rbx
+	initAddr[1] = 0x31;
+	initAddr[2] = 0xDB;
+	initAddr[3] = 0x90;  // nop
+	initAddr[4] = 0x90;  // nop
+	VirtualProtect(initAddr, 5, oldProtect1, &oldProtect1);
+
+	// === Fix 2: Add NULL check before dereference ===
 	g_TextureStreamingPatchAddr = (unsigned char*)(filesystemBase + 0x74E06);
-
-	// Target address for the fallback path (LABEL_9)
 	unsigned char* fallbackAddr = (unsigned char*)(filesystemBase + 0x74E44);
-
-	// Return address after our check (after the original jz)
 	unsigned char* returnAddr = (unsigned char*)(filesystemBase + 0x74E0C);
 
-	// Allocate executable memory NEAR the target for relative jumps to work
 	g_TextureStreamingCodeCave = (unsigned char*)AllocateNearby(g_TextureStreamingPatchAddr, 64);
-	if (!g_TextureStreamingCodeCave) return;
+	if (!g_TextureStreamingCodeCave) {
+		Error("Couldn't alloc code cave");
+		return;
+	}
 
-	// Build the code cave:
-	// cmp rbx, -1
-	// je fallback
-	// cmp qword ptr [rbx], 0  (original instruction)
-	// je fallback
-	// jmp returnAddr
 	unsigned char* p = g_TextureStreamingCodeCave;
 
-	// cmp rbx, -1 (48 83 FB FF)
-	*p++ = 0x48; *p++ = 0x83; *p++ = 0xFB; *p++ = 0xFF;
+	// test rbx, rbx (check for NULL)
+	*p++ = 0x48; *p++ = 0x85; *p++ = 0xDB;
 
-	// je fallback (0F 84 xx xx xx xx) - will fill in offset
+	// jz fallback
 	*p++ = 0x0F; *p++ = 0x84;
 	int32_t fallbackOffset1 = (int32_t)(fallbackAddr - (p + 4));
 	memcpy(p, &fallbackOffset1, 4); p += 4;
 
-	// cmp qword ptr [rbx], 0 (48 83 3B 00) - original instruction
+	// cmp qword ptr [rbx], 0 (original instruction)
 	*p++ = 0x48; *p++ = 0x83; *p++ = 0x3B; *p++ = 0x00;
 
-	// je fallback (0F 84 xx xx xx xx)
+	// jz fallback
 	*p++ = 0x0F; *p++ = 0x84;
 	int32_t fallbackOffset2 = (int32_t)(fallbackAddr - (p + 4));
 	memcpy(p, &fallbackOffset2, 4); p += 4;
 
-	// jmp returnAddr (E9 xx xx xx xx)
+	// jmp returnAddr
 	*p++ = 0xE9;
 	int32_t returnOffset = (int32_t)(returnAddr - (p + 4));
-	memcpy(p, &returnOffset, 4); p += 4;
+	memcpy(p, &returnOffset, 4);
 
-	// Now patch the original code to jump to our code cave
-	DWORD oldProtect;
-	VirtualProtect(g_TextureStreamingPatchAddr, 6, PAGE_EXECUTE_READWRITE, &oldProtect);
-
-	// jmp codeCave (E9 xx xx xx xx) + nop
+	// Patch original to jump to code cave
+	DWORD oldProtect2;
+	VirtualProtect(g_TextureStreamingPatchAddr, 6, PAGE_EXECUTE_READWRITE, &oldProtect2);
 	g_TextureStreamingPatchAddr[0] = 0xE9;
 	int32_t caveJmpOffset = (int32_t)(g_TextureStreamingCodeCave - (g_TextureStreamingPatchAddr + 5));
 	memcpy(g_TextureStreamingPatchAddr + 1, &caveJmpOffset, 4);
-	g_TextureStreamingPatchAddr[5] = 0x90; // NOP the remaining byte
-
-	VirtualProtect(g_TextureStreamingPatchAddr, 6, oldProtect, &oldProtect);
+	g_TextureStreamingPatchAddr[5] = 0x90;
+	VirtualProtect(g_TextureStreamingPatchAddr, 6, oldProtect2, &oldProtect2);
 }
-
 //////////////////////////////////////////////////////////
 // The following patch addresses a use-after-free (UAF)
 // vulnerability in the ReconcileAddonListFile function, 
