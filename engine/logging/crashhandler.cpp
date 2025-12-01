@@ -104,29 +104,26 @@ LONG WINAPI CustomCrashHandler(EXCEPTION_POINTERS* exInfo)
     // Get current process ID
     DWORD pid = GetCurrentProcessId();
 
-    // Create filename
-    CreateDirectoryA("crashes", NULL);
-
-    // Create filename with path
-    char exePath[MAX_PATH];
-    GetModuleFileNameA(NULL, exePath, MAX_PATH);
+    // Create filename with path - using wide chars for Unicode path support
+    wchar_t exePathW[MAX_PATH];
+    GetModuleFileNameW(NULL, exePathW, MAX_PATH);
 
     // Extract directory from path
-    char exeDir[MAX_PATH];
-    strcpy_s(exeDir, exePath);
-    for (int i = strlen(exeDir) - 1; i >= 0; i--) {
-        if (exeDir[i] == '\\' || exeDir[i] == '/') {
-            exeDir[i + 1] = '\0';
+    wchar_t exeDirW[MAX_PATH];
+    wcscpy_s(exeDirW, exePathW);
+    for (int i = (int)wcslen(exeDirW) - 1; i >= 0; i--) {
+        if (exeDirW[i] == L'\\' || exeDirW[i] == L'/') {
+            exeDirW[i + 1] = L'\0';
             break;
         }
     }
 
     // Create crashes directory path
-    char crashesDir[MAX_PATH];
-    sprintf_s(crashesDir, "%scrashes", exeDir);
+    wchar_t crashesDirW[MAX_PATH];
+    swprintf_s(crashesDirW, L"%scrashes", exeDirW);
 
     // Create crashes directory if it doesn't exist
-    if (!CreateDirectoryA(crashesDir, NULL)) {
+    if (!CreateDirectoryW(crashesDirW, NULL)) {
         // If directory creation failed but it's because the directory already exists, that's fine
         if (GetLastError() != ERROR_ALREADY_EXISTS) {
             // Just continue - we'll try to write to the current directory as a fallback
@@ -134,10 +131,14 @@ LONG WINAPI CustomCrashHandler(EXCEPTION_POINTERS* exInfo)
     }
 
     // Create filename with path
-    char filename[MAX_PATH];
-    char filepath[MAX_PATH];
-    sprintf_s(filename, "r1delta_crash_%lld_%lu.log", (long long)currentTime, pid);
-    sprintf_s(filepath, "%s\\%s", crashesDir, filename);
+    wchar_t filenameW[MAX_PATH];
+    wchar_t filepathW[MAX_PATH];
+    swprintf_s(filenameW, L"r1delta_crash_%lld_%lu.log", (long long)currentTime, pid);
+    swprintf_s(filepathW, L"%s\\%s", crashesDirW, filenameW);
+
+    // Convert to UTF-8 for narrow string uses
+    char filepath[MAX_PATH * 3];
+    WideCharToMultiByte(CP_UTF8, 0, filepathW, -1, filepath, sizeof(filepath), NULL, NULL);
     srand(time(NULL));
     std::stringstream crashLog;
     // Pick a random message from the array
@@ -203,29 +204,29 @@ LONG WINAPI CustomCrashHandler(EXCEPTION_POINTERS* exInfo)
         crashLog << "=== Steam Crash Comment ===" << std::endl;
         crashLog << (char*)(G_engine + 0x2291560) << std::endl;
     }
-    // Write crash log to file
-    std::ofstream logFile(filepath);
+    // Write crash log to file using wide path for Unicode support
+    std::ofstream logFile(filepathW);
     if (logFile.is_open()) {
         logFile << crashLog.str();
         logFile.close();
         if (!IsDedicatedServer()) {
 
-            char cmdLine[1024];
-            sprintf_s(cmdLine, "notepad.exe \"%s\"", filepath);  // Build command line with the file path
+            wchar_t cmdLineW[1024];
+            swprintf_s(cmdLineW, L"notepad.exe \"%s\"", filepathW);  // Build command line with the file path
 
-            STARTUPINFOA si = { 0 };
+            STARTUPINFOW si = { 0 };
             si.cb = sizeof(si);
             PROCESS_INFORMATION pi = { 0 };
 
-            if (CreateProcessA(
+            if (CreateProcessW(
                 NULL,        // Application name: NULL means the executable is the first token of the command line.
-                cmdLine,     // Command line (must be mutable)
+                cmdLineW,    // Command line (must be mutable)
                 NULL,        // Process handle not inheritable
                 NULL,        // Thread handle not inheritable
                 FALSE,       // Set handle inheritance to FALSE
                 0,           // No creation flags
                 NULL,        // Use parent's environment block
-                NULL,        // Use parent's starting directory 
+                NULL,        // Use parent's starting directory
                 &si,         // Pointer to STARTUPINFO structure
                 &pi          // Pointer to PROCESS_INFORMATION structure
             ))
@@ -822,16 +823,20 @@ void GetSystemInfoEnhanced(std::stringstream& ss)
         ss << "Memory Load: " << memInfo.dwMemoryLoad << "%" << std::endl;
     }
 
-    // Get current executable path
-    char exePath[MAX_PATH];
-    GetModuleFileNameA(NULL, exePath, MAX_PATH);
+    // Get current executable path with Unicode support
+    wchar_t exePathW[MAX_PATH];
+    GetModuleFileNameW(NULL, exePathW, MAX_PATH);
 
     // Get disk info for the drive containing the executable
-    std::string exePathStr(exePath);
-    std::string driveLetter = exePathStr.substr(0, 3); // Get "C:\"
+    std::wstring exePathWStr(exePathW);
+    std::wstring driveLetterW = exePathWStr.substr(0, 3); // Get "C:\"
+
+    // Convert to narrow for logging
+    char driveLetter[8];
+    WideCharToMultiByte(CP_UTF8, 0, driveLetterW.c_str(), -1, driveLetter, sizeof(driveLetter), NULL, NULL);
 
     ULARGE_INTEGER freeBytesAvailable, totalBytes, totalFreeBytes;
-    if (GetDiskFreeSpaceExA(driveLetter.c_str(), &freeBytesAvailable, &totalBytes, &totalFreeBytes)) {
+    if (GetDiskFreeSpaceExW(driveLetterW.c_str(), &freeBytesAvailable, &totalBytes, &totalFreeBytes)) {
         ss << "Disk Total Space (" << driveLetter << "): " << totalBytes.QuadPart / (1024 * 1024 * 1024) << " GB" << std::endl;
         ss << "Disk Free Space (" << driveLetter << "): " << freeBytesAvailable.QuadPart / (1024 * 1024 * 1024) << " GB" << std::endl;
     }
@@ -858,9 +863,9 @@ void GetSystemInfoEnhanced(std::stringstream& ss)
         ss << "GPU Model: [Unable to retrieve GPU information]" << std::endl;
     }
 
-    // Get executable info
+    // Get executable info using wide path for Unicode support
     FILETIME creationTime, accessTime, writeTime;
-    HANDLE hExe = CreateFileA(exePath, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+    HANDLE hExe = CreateFileW(exePathW, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
     if (hExe != INVALID_HANDLE_VALUE) {
         if (GetFileTime(hExe, &creationTime, &accessTime, &writeTime)) {
             SYSTEMTIME stUTC, stLocal;
@@ -872,7 +877,10 @@ void GetSystemInfoEnhanced(std::stringstream& ss)
                 stLocal.wYear, stLocal.wMonth, stLocal.wDay,
                 stLocal.wHour, stLocal.wMinute, stLocal.wSecond);
 
-            ss << "Executable Path: " << exePath << std::endl;
+            // Convert wide path to UTF-8 for logging
+            char exePathUtf8[MAX_PATH * 3];
+            WideCharToMultiByte(CP_UTF8, 0, exePathW, -1, exePathUtf8, sizeof(exePathUtf8), NULL, NULL);
+            ss << "Executable Path: " << exePathUtf8 << std::endl;
             ss << "Executable Last Modified: " << dateStr << std::endl;
         }
         CloseHandle(hExe);

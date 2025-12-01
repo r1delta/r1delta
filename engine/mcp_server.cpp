@@ -246,8 +246,8 @@ bool ConsoleOutputCapture::WaitForCaptureComplete(const std::string& guidToWait,
 
 static std::filesystem::path GetExecutableDir() {
 #if defined(_WIN32)
-    char buf[MAX_PATH] = {0};
-    DWORD n = GetModuleFileNameA(nullptr, buf, MAX_PATH);
+    wchar_t buf[MAX_PATH] = {0};
+    DWORD n = GetModuleFileNameW(nullptr, buf, MAX_PATH);
     if (n == 0 || n == MAX_PATH) return std::filesystem::current_path();
     std::filesystem::path p(buf);
     return p.parent_path();

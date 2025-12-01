@@ -503,21 +503,21 @@ __forceinline BOOL CheckIfCallingDLLContainsR1o() {
 
 	// Get a handle to the module (DLL) based on the return address
 	HMODULE hModule;
-	if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)retAddress, &hModule)) {
+	if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCWSTR)retAddress, &hModule)) {
 		return FALSE; // Failed to get module handle
 	}
 
-	// Retrieve the module (DLL) name
-	char szModuleName[MAX_PATH];
-	if (GetModuleFileNameA(hModule, szModuleName, MAX_PATH) == 0) {
+	// Retrieve the module (DLL) name using wide char for Unicode support
+	wchar_t szModuleName[MAX_PATH];
+	if (GetModuleFileNameW(hModule, szModuleName, MAX_PATH) == 0) {
 		return FALSE; // Failed to get module name
 	}
 
 	// Convert module name to uppercase for case-insensitive comparison
-	_strupr_s(szModuleName, MAX_PATH);
+	_wcsupr_s(szModuleName, MAX_PATH);
 
 	// Check if "R1O" is in the module name
-	return strstr(szModuleName, "R1O") != NULL;
+	return wcsstr(szModuleName, L"R1O") != NULL;
 }
 __int64 VStdLib_GetICVarFactory() {
 	return CheckIfCallingDLLContainsR1o() ? (__int64)R1OFactory : (__int64)(((uintptr_t)(GetModuleHandleA("vstdlib.dll")) + 0x023DD0));

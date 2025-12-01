@@ -9,24 +9,24 @@
 
 #pragma comment(lib, "Shlwapi.lib") // Link against Shlwapi.lib for Path functions
 
-// Constants matching C# RegistryHelper
-const char* REGISTRY_BASE_KEY_A = "Software\\R1Delta";
-const char* REGISTRY_INSTALL_PATH_VALUE_A = "InstallPath";
+// Constants matching C# RegistryHelper (wide char versions for Unicode support)
+const wchar_t* REGISTRY_BASE_KEY_W = L"Software\\R1Delta";
+const wchar_t* REGISTRY_INSTALL_PATH_VALUE_W = L"InstallPath";
 
 // Validation file relative path (used for checking if a directory is valid)
-const char* VALIDATION_FILE_RELATIVE_PATH_A = "r1\\GameInfo.txt";
+const wchar_t* VALIDATION_FILE_RELATIVE_PATH_W = L"r1\\GameInfo.txt";
 
 // Relative paths for PATH modification (relative to launcher exe dir)
-const char* R1DELTA_SUBDIR_A = "r1delta";
-const char* BIN_DELTA_SUBDIR_A = "bin_delta";
-const char* BIN_SUBDIR_A = "bin";
+const wchar_t* R1DELTA_SUBDIR_W = L"r1delta";
+const wchar_t* BIN_DELTA_SUBDIR_W = L"bin_delta";
+const wchar_t* BIN_SUBDIR_W = L"bin";
 
 // Relative paths for PATH modification (relative to game install dir)
-const char* RETAIL_BIN_SUBDIR_A = "bin\\x64_retail";
-const char* R1_RETAIL_BIN_SUBDIR_A = "r1\\bin\\x64_retail";
+const wchar_t* RETAIL_BIN_SUBDIR_W = L"bin\\x64_retail";
+const wchar_t* R1_RETAIL_BIN_SUBDIR_W = L"r1\\bin\\x64_retail";
 
 // Target DLL to load (relative to game install dir)
-const char* DEDICATED_DLL_NAME_A = "dedicated.dll";
+const wchar_t* DEDICATED_DLL_NAME_W = L"dedicated.dll";
 
 // Typedef for the function pointer in dedicated.dll
 typedef int (*DedicatedMain_t)(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow);
@@ -136,20 +136,20 @@ void SetMitigationPolicies()
 // --- Helper Functions ---
 
 // Gets the directory containing the currently running executable.
-// Returns true on success, false on failure.
-bool GetExecutableDirectory(char* buffer, size_t bufferSize)
+// Returns true on success, false on failure. Uses wide chars for Unicode path support.
+bool GetExecutableDirectory(wchar_t* buffer, size_t bufferSize)
 {
     if (!buffer || bufferSize == 0) return false;
-    DWORD result = GetModuleFileNameA(NULL, buffer, (DWORD)bufferSize);
+    DWORD result = GetModuleFileNameW(NULL, buffer, (DWORD)bufferSize);
     if (result == 0 || result == bufferSize) // Failed or buffer too small
     {
         return false;
     }
     // Find the last backslash and null-terminate there
-    char* lastBackslash = strrchr(buffer, '\\');
+    wchar_t* lastBackslash = wcsrchr(buffer, L'\\');
     if (lastBackslash)
     {
-        *lastBackslash = '\0';
+        *lastBackslash = L'\0';
         return true;
     }
     // Should not happen for a full path, but handle case where only filename is returned
@@ -157,14 +157,14 @@ bool GetExecutableDirectory(char* buffer, size_t bufferSize)
 }
 
 // Reads the 'InstallPath' value from the registry.
-// Returns true on success, false on failure.
-bool GetInstallPathFromRegistry(char* buffer, size_t bufferSize)
+// Returns true on success, false on failure. Uses wide chars for Unicode path support.
+bool GetInstallPathFromRegistry(wchar_t* buffer, size_t bufferSize)
 {
     if (!buffer || bufferSize == 0) return false;
-    buffer[0] = '\0'; // Ensure null termination on failure
+    buffer[0] = L'\0'; // Ensure null termination on failure
 
     HKEY hKey;
-    LONG openResult = RegOpenKeyExA(HKEY_CURRENT_USER, REGISTRY_BASE_KEY_A, 0, KEY_READ, &hKey);
+    LONG openResult = RegOpenKeyExW(HKEY_CURRENT_USER, REGISTRY_BASE_KEY_W, 0, KEY_READ, &hKey);
     if (openResult != ERROR_SUCCESS)
     {
         // Key doesn't exist or access denied - this is expected if not set
@@ -173,8 +173,8 @@ bool GetInstallPathFromRegistry(char* buffer, size_t bufferSize)
     }
 
     DWORD valueType = 0;
-    DWORD dataSize = (DWORD)bufferSize;
-    LONG queryResult = RegQueryValueExA(hKey, REGISTRY_INSTALL_PATH_VALUE_A, NULL, &valueType, (LPBYTE)buffer, &dataSize);
+    DWORD dataSize = (DWORD)(bufferSize * sizeof(wchar_t));
+    LONG queryResult = RegQueryValueExW(hKey, REGISTRY_INSTALL_PATH_VALUE_W, NULL, &valueType, (LPBYTE)buffer, &dataSize);
 
     RegCloseKey(hKey);
 
@@ -182,99 +182,93 @@ bool GetInstallPathFromRegistry(char* buffer, size_t bufferSize)
     {
         // Value doesn't exist, wrong type, or buffer too small
         // OutputDebugStringA("Registry value 'InstallPath' not found, wrong type, or buffer too small.\n");
-        buffer[0] = '\0'; // Clear buffer again
+        buffer[0] = L'\0'; // Clear buffer again
         return false;
     }
 
     // Ensure null termination even if registry data wasn't null-terminated (unlikely)
-    if (dataSize >= bufferSize) {
-        buffer[bufferSize - 1] = '\0';
-    }
-    else {
-        // dataSize includes the null terminator if it fits
-        // buffer[dataSize] = '\0'; // Should already be there from RegQueryValueExA
+    size_t charCount = dataSize / sizeof(wchar_t);
+    if (charCount >= bufferSize) {
+        buffer[bufferSize - 1] = L'\0';
     }
 
-
-    OutputDebugStringA("Successfully read InstallPath from registry: ");
-    OutputDebugStringA(buffer);
-    OutputDebugStringA("\n");
+    OutputDebugStringW(L"Successfully read InstallPath from registry: ");
+    OutputDebugStringW(buffer);
+    OutputDebugStringW(L"\n");
     return true;
 }
 
 // Validates if the given path appears to be a valid game directory
 // by checking for the existence of "r1\GameInfo.txt".
 // Returns true if valid, false otherwise.
-bool ValidateGameDirectory(const char* path)
+bool ValidateGameDirectory(const wchar_t* path)
 {
     return TRUE;
 }
 
 // Prepends necessary directories to the PATH environment variable.
-// Returns true on success, false on failure.
-bool PrependPathEnvironment(const char* gameInstallPath, const char* launcherExeDir)
+// Returns true on success, false on failure. Uses wide chars for Unicode path support.
+bool PrependPathEnvironment(const wchar_t* gameInstallPath, const wchar_t* launcherExeDir)
 {
     if (!gameInstallPath || !launcherExeDir) return false;
 
     // Get current PATH
-    char* currentPath = nullptr;
+    wchar_t* currentPath = nullptr;
     size_t currentPathLen;
-    errno_t err = _dupenv_s(&currentPath, &currentPathLen, "PATH");
+    errno_t err = _wdupenv_s(&currentPath, &currentPathLen, L"PATH");
     if (err != 0 || currentPath == nullptr) {
-        //currentPath = ""; // Treat as empty if retrieval fails
+        currentPath = _wcsdup(L""); // Treat as empty if retrieval fails
         OutputDebugStringA("Warning: Failed to get current PATH environment variable.\n");
     }
 
     // Construct paths to prepend
-    char r1DeltaBinDelta[MAX_PATH];
-    char r1DeltaBin[MAX_PATH];
-    char retailBin[MAX_PATH];
-    char r1RetailBin[MAX_PATH];
+    wchar_t r1DeltaBinDelta[MAX_PATH];
+    wchar_t r1DeltaBin[MAX_PATH];
+    wchar_t retailBin[MAX_PATH];
+    wchar_t r1RetailBin[MAX_PATH];
 
     // R1Delta paths relative to launcher dir
-    PathCombineA(r1DeltaBinDelta, launcherExeDir, R1DELTA_SUBDIR_A);
-    PathCombineA(r1DeltaBinDelta, r1DeltaBinDelta, BIN_DELTA_SUBDIR_A);
+    PathCombineW(r1DeltaBinDelta, launcherExeDir, R1DELTA_SUBDIR_W);
+    PathCombineW(r1DeltaBinDelta, r1DeltaBinDelta, BIN_DELTA_SUBDIR_W);
 
-    PathCombineA(r1DeltaBin, launcherExeDir, R1DELTA_SUBDIR_A);
-    PathCombineA(r1DeltaBin, r1DeltaBin, BIN_SUBDIR_A);
+    PathCombineW(r1DeltaBin, launcherExeDir, R1DELTA_SUBDIR_W);
+    PathCombineW(r1DeltaBin, r1DeltaBin, BIN_SUBDIR_W);
 
     // Game paths relative to game install dir
-    PathCombineA(retailBin, gameInstallPath, RETAIL_BIN_SUBDIR_A);
-    PathCombineA(r1RetailBin, gameInstallPath, R1_RETAIL_BIN_SUBDIR_A);
+    PathCombineW(retailBin, gameInstallPath, RETAIL_BIN_SUBDIR_W);
+    PathCombineW(r1RetailBin, gameInstallPath, R1_RETAIL_BIN_SUBDIR_W);
 
     // Calculate required buffer size for the new PATH
     // Size = len(delta) + len(bin) + len(retail) + len(r1retail) + len(current) + 5 separators + 1 null term
-    size_t requiredSize = strlen(r1DeltaBinDelta) + strlen(r1DeltaBin) + strlen(retailBin) + strlen(r1RetailBin) + strlen(currentPath) + 6;
+    size_t requiredSize = wcslen(r1DeltaBinDelta) + wcslen(r1DeltaBin) + wcslen(retailBin) + wcslen(r1RetailBin) + wcslen(currentPath) + 6;
 
     // Allocate buffer for the new PATH string
-    std::vector<char> newPathBuffer(requiredSize);
+    std::vector<wchar_t> newPathBuffer(requiredSize);
 
     // Construct the new PATH string
-    sprintf_s(newPathBuffer.data(), requiredSize, "%s;%s;%s;%s;%s",
+    swprintf_s(newPathBuffer.data(), requiredSize, L"%s;%s;%s;%s;%s",
         r1DeltaBinDelta,
         r1DeltaBin,
         retailBin,
         r1RetailBin,
-        // ".\\", // Add current directory (game dir)? Generally done by LoadLibrary search order anyway.
         currentPath);
 
     // Set the new PATH environment variable
-    if (_putenv_s("PATH", newPathBuffer.data()) != 0)
+    if (_wputenv_s(L"PATH", newPathBuffer.data()) != 0)
     {
         OutputDebugStringA("Error: Failed to set the PATH environment variable.\n");
-        if (currentPath != nullptr && currentPath[0] != '\0') free(currentPath); // Free memory allocated by _dupenv_s
+        if (currentPath != nullptr) free(currentPath);
         return false;
     }
 
     OutputDebugStringA("Successfully updated PATH environment variable.\n");
-    OutputDebugStringA("New PATH prefix:\n");
-    OutputDebugStringA("  "); OutputDebugStringA(r1DeltaBinDelta); OutputDebugStringA("\n");
-    OutputDebugStringA("  "); OutputDebugStringA(r1DeltaBin); OutputDebugStringA("\n");
-    OutputDebugStringA("  "); OutputDebugStringA(retailBin); OutputDebugStringA("\n");
-    OutputDebugStringA("  "); OutputDebugStringA(r1RetailBin); OutputDebugStringA("\n");
+    OutputDebugStringW(L"New PATH prefix:\n");
+    OutputDebugStringW(L"  "); OutputDebugStringW(r1DeltaBinDelta); OutputDebugStringW(L"\n");
+    OutputDebugStringW(L"  "); OutputDebugStringW(r1DeltaBin); OutputDebugStringW(L"\n");
+    OutputDebugStringW(L"  "); OutputDebugStringW(retailBin); OutputDebugStringW(L"\n");
+    OutputDebugStringW(L"  "); OutputDebugStringW(r1RetailBin); OutputDebugStringW(L"\n");
 
-
-    if (currentPath != nullptr && currentPath[0] != '\0') free(currentPath); // Free memory allocated by _dupenv_s
+    if (currentPath != nullptr) free(currentPath);
     return true;
 }
 bool g_suppressMessageBoxes = false;
@@ -355,31 +349,31 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
         LocalFree(argvW);
     }
 
-    char launcherExeDir[MAX_PATH];
-    char registryPath[MAX_PATH];
-    char gameInstallPath[MAX_PATH];
-    gameInstallPath[0] = '\0'; // Initialize empty
+    wchar_t launcherExeDir[MAX_PATH];
+    wchar_t registryPath[MAX_PATH];
+    wchar_t gameInstallPath[MAX_PATH];
+    gameInstallPath[0] = L'\0'; // Initialize empty
 
     OutputDebugStringA("--- R1Delta Dedicated Server Launcher Starting ---\n");
 
     // 1. Get Launcher Executable Directory
-    if (!GetExecutableDirectory(launcherExeDir, sizeof(launcherExeDir)))
+    if (!GetExecutableDirectory(launcherExeDir, ARRAYSIZE(launcherExeDir)))
     {
         FatalError("Fatal Error: Could not determine launcher executable directory.");
     }
-    char msg[MAX_PATH + 50];
-    sprintf_s(msg, sizeof(msg), "Launcher Directory: %s\n", launcherExeDir);
-    OutputDebugStringA(msg);
+    wchar_t msgW[MAX_PATH + 50];
+    swprintf_s(msgW, ARRAYSIZE(msgW), L"Launcher Directory: %s\n", launcherExeDir);
+    OutputDebugStringW(msgW);
 
 
     // 2. Try Reading Install Path from Registry
-    bool registryPathFound = GetInstallPathFromRegistry(registryPath, sizeof(registryPath));
+    bool registryPathFound = GetInstallPathFromRegistry(registryPath, ARRAYSIZE(registryPath));
 
     // 3. Determine and Validate Game Install Path
     if (registryPathFound && ValidateGameDirectory(registryPath))
     {
         // Registry path is valid, use it
-        strcpy_s(gameInstallPath, sizeof(gameInstallPath), registryPath);
+        wcscpy_s(gameInstallPath, ARRAYSIZE(gameInstallPath), registryPath);
         OutputDebugStringA("Using valid game path found in registry.\n");
     }
     else
@@ -395,13 +389,20 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
         OutputDebugStringA("Falling back to check launcher executable directory...\n");
         if (ValidateGameDirectory(launcherExeDir))
         {
-            strcpy_s(gameInstallPath, sizeof(gameInstallPath), launcherExeDir);
+            wcscpy_s(gameInstallPath, ARRAYSIZE(gameInstallPath), launcherExeDir);
             OutputDebugStringA("Using launcher executable directory as game path (it appears valid).\n");
         }
         else
         {
-            // Neither registry nor launcher dir is valid
-            char errorMsg[MAX_PATH * 2 + 200];
+            // Neither registry nor launcher dir is valid - convert wide paths to UTF-8 for error message
+            char registryPathUtf8[MAX_PATH * 3] = "Not Found";
+            char launcherExeDirUtf8[MAX_PATH * 3] = "";
+            if (registryPathFound) {
+                WideCharToMultiByte(CP_UTF8, 0, registryPath, -1, registryPathUtf8, sizeof(registryPathUtf8), NULL, NULL);
+            }
+            WideCharToMultiByte(CP_UTF8, 0, launcherExeDir, -1, launcherExeDirUtf8, sizeof(launcherExeDirUtf8), NULL, NULL);
+
+            char errorMsg[MAX_PATH * 6 + 400];
             sprintf_s(errorMsg, sizeof(errorMsg),
                 "Could not find a valid Titanfall game directory.\n\n"
                 "Checked Registry Path (%s): %s\n"
@@ -411,24 +412,26 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
                 " B) Place this dedicated launcher directly inside the main Titanfall game folder.\n"
                 "If you are seeing this message and you do not understand why, you have likely launched the Dedicated Server by mistake.\n"
                 "In that case, please make sure you are launching \"R1Delta Launcher\" and not \"R1Delta Dedicated Server\" from the Start Menu.",
-                registryPathFound ? registryPath : "Not Found",
+                registryPathUtf8,
                 registryPathFound ? (ValidateGameDirectory(registryPath) ? "Valid" : "Invalid") : "N/A",
-                launcherExeDir);
+                launcherExeDirUtf8);
             FatalError(errorMsg);
         }
     }
 
-    // 4. Set Current Working Directory (CWD)
-    if (_chdir(gameInstallPath) != 0)
+    // 4. Set Current Working Directory (CWD) - use wide char version
+    if (_wchdir(gameInstallPath) != 0)
     {
-        char errorMsg[MAX_PATH + 100];
-        sprintf_s(errorMsg, sizeof(errorMsg), "Fatal Error: Could not change current directory to:\n%s", gameInstallPath);
+        char gameInstallPathUtf8[MAX_PATH * 3];
+        WideCharToMultiByte(CP_UTF8, 0, gameInstallPath, -1, gameInstallPathUtf8, sizeof(gameInstallPathUtf8), NULL, NULL);
+        char errorMsg[MAX_PATH * 3 + 100];
+        sprintf_s(errorMsg, sizeof(errorMsg), "Fatal Error: Could not change current directory to:\n%s", gameInstallPathUtf8);
         FatalError(errorMsg);
     }
-    char cwd[MAX_PATH];
-    _getcwd(cwd, sizeof(cwd));
-    sprintf_s(msg, sizeof(msg), "Current Directory set to: %s\n", cwd);
-    OutputDebugStringA(msg);
+    wchar_t cwdW[MAX_PATH];
+    _wgetcwd(cwdW, ARRAYSIZE(cwdW));
+    swprintf_s(msgW, ARRAYSIZE(msgW), L"Current Directory set to: %s\n", cwdW);
+    OutputDebugStringW(msgW);
 
     // 5. Prepend R1Delta and Game Binaries to PATH
     if (!PrependPathEnvironment(gameInstallPath, launcherExeDir))
@@ -444,23 +447,30 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     // 7. Load the Dedicated Server DLL (relative to gameInstallPath/CWD)
     OutputDebugStringA("Attempting to load dedicated server DLL...\n");
     // Since CWD is set and PATH includes the necessary bin folder, just the relative path should work.
-    // Using LoadLibraryA relies on standard search paths (including CWD and PATH).
-    HINSTANCE hDedicatedModule = LoadLibraryA(DEDICATED_DLL_NAME_A);
+    // Using LoadLibraryW for proper Unicode path support.
+    HINSTANCE hDedicatedModule = LoadLibraryW(DEDICATED_DLL_NAME_W);
     if (!hDedicatedModule)
     {
-        LibraryLoadError(DEDICATED_DLL_NAME_A, DEDICATED_DLL_NAME_A, GetLastError());
+        // Convert wide DLL name to narrow for error message
+        char dllNameA[64];
+        WideCharToMultiByte(CP_UTF8, 0, DEDICATED_DLL_NAME_W, -1, dllNameA, sizeof(dllNameA), NULL, NULL);
+        LibraryLoadError(dllNameA, dllNameA, GetLastError());
         // LibraryLoadError calls ExitProcess
     }
-    sprintf_s(msg, sizeof(msg), "Successfully loaded DLL: %s\n", DEDICATED_DLL_NAME_A);
-    OutputDebugStringA(msg);
+    OutputDebugStringW(L"Successfully loaded DLL: ");
+    OutputDebugStringW(DEDICATED_DLL_NAME_W);
+    OutputDebugStringW(L"\n");
 
 
     // 8. Get the address of the DedicatedMain function
     DedicatedMain_t pDedicatedMain = (DedicatedMain_t)GetProcAddress(hDedicatedModule, "DedicatedMain");
     if (!pDedicatedMain)
     {
+        // Convert wide DLL name to narrow for error message
+        char dllNameA[64];
+        WideCharToMultiByte(CP_UTF8, 0, DEDICATED_DLL_NAME_W, -1, dllNameA, sizeof(dllNameA), NULL, NULL);
         char errorMsg[200];
-        sprintf_s(errorMsg, sizeof(errorMsg), "Fatal Error: Could not find 'DedicatedMain' function in '%s'.", DEDICATED_DLL_NAME_A);
+        sprintf_s(errorMsg, sizeof(errorMsg), "Fatal Error: Could not find 'DedicatedMain' function in '%s'.", dllNameA);
         FreeLibrary(hDedicatedModule); // Clean up loaded library
         FatalError(errorMsg);
     }
