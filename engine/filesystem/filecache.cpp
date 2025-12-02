@@ -19,7 +19,9 @@ FileCache::FileCache() {
     }
     r1deltaBasePath = executableDirectory / "r1delta";
     r1deltaBasePath.make_preferred();
-    r1deltaBasePathHash = fnv1a_hash(r1deltaBasePath);
+    // Use UTF-8 for hashing to be compatible with narrow string path components in TryReplaceFile
+    auto u8base = r1deltaBasePath.u8string();
+    r1deltaBasePathHash = fnv1a_hash(std::string_view(reinterpret_cast<const char*>(u8base.c_str()), u8base.size()));
     r1deltaAddonsPath = std::filesystem::current_path() / "r1" / "addons";
     r1deltaAddonsPath.make_preferred();
 }
@@ -34,12 +36,12 @@ void FileCache::ScanDirectory(const std::filesystem::path& directory,
     // Check if directory exists first
     if (!std::filesystem::is_directory(directory, ec) || ec) {
         if (ec) {
-            // Log specific error if exists
-            Warning("Error accessing directory '%s': %s\n", directory.string().c_str(), ec.message().c_str());
+            // Log specific error if exists (use u8string for UTF-8 logging)
+            Warning("Error accessing directory '%s': %s\n", directory.u8string().c_str(), ec.message().c_str());
         }
         else if (&directory == &r1deltaAddonsPath || &directory == &r1deltaBasePath) {
             // Only warn if the primary base directories don't exist
-            Msg("Directory '%s' not found for scanning.\n", directory.string().c_str());
+            Msg("Directory '%s' not found for scanning.\n", directory.u8string().c_str());
         }
         return; // Don't try to iterate if it doesn't exist or isn't accessible
     }
@@ -47,30 +49,35 @@ void FileCache::ScanDirectory(const std::filesystem::path& directory,
 
     // Ensure the base addon directory itself is added if requested
     if (currentAddonsFolders && directory == r1deltaAddonsPath) {
-        currentAddonsFolders->insert(r1deltaAddonsPath.string());
+        // Convert u8string to std::string for storage (reinterpret cast is safe for UTF-8 data)
+        auto u8path = r1deltaAddonsPath.u8string();
+        currentAddonsFolders->insert(std::string(reinterpret_cast<const char*>(u8path.c_str()), u8path.size()));
     }
 
 
     for (const auto& entry : std::filesystem::directory_iterator(directory, std::filesystem::directory_options::skip_permission_denied, ec)) {
         if (ec) {
-            Warning("Error iterating directory '%s': %s\n", directory.string().c_str(), ec.message().c_str());
+            Warning("Error iterating directory '%s': %s\n", directory.u8string().c_str(), ec.message().c_str());
             ec.clear(); // Try to continue with next entries
             continue;
         }
 
         std::filesystem::path currentPath = entry.path();
         currentPath.make_preferred(); // Normalize path separators (e.g., \ on Windows)
-        std::string normalizedPathString = currentPath.string();
 
         if (entry.is_regular_file(ec) && !ec) {
-            // Hash the *absolute, normalized* path string
-            currentCache.insert(fnv1a_hash(normalizedPathString));
+            // Hash the *absolute, normalized* path as UTF-8 for Unicode support
+            // and compatibility with narrow string path components in TryReplaceFile
+            auto u8path = currentPath.u8string();
+            currentCache.insert(fnv1a_hash(std::string_view(reinterpret_cast<const char*>(u8path.c_str()), u8path.size())));
         }
         else if (entry.is_directory(ec) && !ec) {
             // If we are scanning the top-level addons directory, add this subdirectory to the addon cache
             if (currentAddonsFolders && std::filesystem::equivalent(directory, r1deltaAddonsPath, ec) && !ec)
             {
-                currentAddonsFolders->insert(normalizedPathString);
+                // Convert u8string to std::string for storage
+                auto u8path = currentPath.u8string();
+                currentAddonsFolders->insert(std::string(reinterpret_cast<const char*>(u8path.c_str()), u8path.size()));
                 // Don't scan recursively into the addon folder itself here,
                 // UpdateCache will call ScanDirectory on it separately if needed.
                 // If you *want* to allow nested addon folders, remove this continue
@@ -82,12 +89,12 @@ void FileCache::ScanDirectory(const std::filesystem::path& directory,
             ScanDirectory(currentPath, currentCache, nullptr); // Don't pass addonsFolderCache down recursion
         }
         else if (ec) {
-            Warning("Error checking entry type for '%s': %s\n", normalizedPathString.c_str(), ec.message().c_str());
+            Warning("Error checking entry type for '%s': %s\n", currentPath.u8string().c_str(), ec.message().c_str());
             ec.clear(); // Try to continue
         }
     }
     if (ec) { // Catch potential error from end of iteration
-        Warning("Error finishing iteration of directory '%s': %s\n", directory.string().c_str(), ec.message().c_str());
+        Warning("Error finishing iteration of directory '%s': %s\n", directory.u8string().c_str(), ec.message().c_str());
     }
 }
 
@@ -113,7 +120,7 @@ void FileCache::UpdateCache() {
             // Create directories if they don't exist (optional, depends on desired behavior)
             std::error_code ec;
             std::filesystem::create_directories(r1deltaAddonsPath, ec);
-            if (ec) Warning("Could not create directory: %s: %s\n", r1deltaAddonsPath.string().c_str(), ec.message().c_str());
+            if (ec) Warning("Could not create directory: %s: %s\n", r1deltaAddonsPath.u8string().c_str(), ec.message().c_str());
 
 
             // Scan base r1delta directory (excluding addons)

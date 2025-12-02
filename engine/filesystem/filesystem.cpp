@@ -189,8 +189,9 @@ private:
 			if (!node->value.checked) {
 				ZoneScopedN("checkAndCachePath make node");
 				// Convert narrow path to wide for proper Unicode support
+				// Game engine uses system code page (CP_ACP), not UTF-8
 				wchar_t wPath[MAX_PATH];
-				int wLen = MultiByteToWideChar(CP_UTF8, 0, node->key.ptr, (int)node->key.len, wPath, MAX_PATH - 1);
+				int wLen = MultiByteToWideChar(CP_ACP, 0, node->key.ptr, (int)node->key.len, wPath, MAX_PATH - 1);
 				if (wLen > 0) {
 					wPath[wLen] = L'\0';
 					DWORD attributes = GetFileAttributesW(wPath);
@@ -265,8 +266,9 @@ void replace_underscore(char* str) {
 static bool file_exists(const char* path)
 {
 	// Convert to wide string for proper Unicode support
+	// Game engine uses system code page (CP_ACP), not UTF-8
 	wchar_t wPath[MAX_PATH];
-	int wLen = MultiByteToWideChar(CP_UTF8, 0, path, -1, wPath, MAX_PATH);
+	int wLen = MultiByteToWideChar(CP_ACP, 0, path, -1, wPath, MAX_PATH);
 	if (wLen > 0) {
 		DWORD attrib = GetFileAttributesW(wPath);
 		return (attrib != INVALID_FILE_ATTRIBUTES && !(attrib & FILE_ATTRIBUTE_DIRECTORY));
