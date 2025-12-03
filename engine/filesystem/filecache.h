@@ -46,10 +46,18 @@ private:
         }
         return hash;
     }
+    // Wide character lowercase helper for Unicode paths
+    static constexpr wchar_t to_lower_w(wchar_t c) {
+        return (c >= L'A' && c <= L'Z') ? (c + (L'a' - L'A')) : c;
+    }
     static constexpr std::size_t fnv1a_hash(const std::wstring_view& s, std::size_t hash = FNV1A_HASH_INIT) {
-        for (uint16_t c : s) {
-            hash ^= static_cast<size_t>(to_lower(static_cast<unsigned char>(c & 0xFF)));
-            hash *= 1099511628211ULL; // FNV prime
+        for (wchar_t c : s) {
+            // Hash both bytes of wide char for proper Unicode support
+            wchar_t lc = to_lower_w(c);
+            hash ^= static_cast<size_t>(lc & 0xFF);
+            hash *= 1099511628211ULL;
+            hash ^= static_cast<size_t>((lc >> 8) & 0xFF);
+            hash *= 1099511628211ULL;
         }
         return hash;
     }
@@ -58,12 +66,11 @@ private:
         return fnv1a_hash(std::string_view(s), hash);
     }
     static std::size_t fnv1a_hash(const std::wstring& s, std::size_t hash = FNV1A_HASH_INIT) {
-        for (uint16_t c : s) {
-            R1DAssert(c <= 0xFF);
-            hash ^= static_cast<size_t>(to_lower(static_cast<unsigned char>(c & 0xFF)));
-            hash *= 1099511628211ULL; // FNV prime
-        }
-        return hash;
+        return fnv1a_hash(std::wstring_view(s), hash);
+    }
+    // Hash for filesystem::path - use native wide string on Windows
+    static std::size_t fnv1a_hash(const std::filesystem::path& p, std::size_t hash = FNV1A_HASH_INIT) {
+        return fnv1a_hash(p.native(), hash);
     }
 
     // Internal scanning method
