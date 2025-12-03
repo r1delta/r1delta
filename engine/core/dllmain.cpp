@@ -490,13 +490,6 @@ void CCommandLine__CreateCmdLine(void* thisptr, char* commandline) {
 		finalCmdLineStr += " -novid ";
 	}
 
-	// Add -sharedservervpk for non-dedicated servers
-	if (!IsDedicatedServer()) {
-		bool sharedServerVpkPresent = (strstr(finalCmdLineStr.c_str(), "-sharedservervpk") != nullptr);
-		if (!sharedServerVpkPresent) {
-			finalCmdLineStr += " -sharedservervpk vpk/client_mp_common.bsp ";
-		}
-	}
 
 	// 5. Prepare buffer for original function call (unchanged)
 	// std::vector can throw bad_alloc, but again, that's catastrophic.

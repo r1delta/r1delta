@@ -38,16 +38,10 @@ private:
     std::filesystem::path r1deltaAddonsPath;   // Store the addons path
 
     static constexpr std::size_t FNV1A_HASH_INIT = 14695981039346656037ULL;
-
-    // Case-insensitive lowercase helper (ASCII only, sufficient for file paths)
-    static constexpr unsigned char to_lower(unsigned char c) {
-        return (c >= 'A' && c <= 'Z') ? (c + ('a' - 'A')) : c;
-    }
-
-    // FNV-1a hash function implementation (case-insensitive)
+    // FNV-1a hash function implementation
     static constexpr std::size_t fnv1a_hash(std::string_view sv, std::size_t hash = FNV1A_HASH_INIT) {
         for (unsigned char c : sv) { // Use unsigned char for hashing bytes correctly
-            hash ^= static_cast<size_t>(to_lower(c));
+            hash ^= static_cast<size_t>(c);
             hash *= 1099511628211ULL; // FNV prime
         }
         return hash;

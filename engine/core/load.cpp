@@ -150,25 +150,14 @@ struct SavedCall {
 	std::string a2;
 	int a3;
 };
-
-void __fastcall sub_136E70(char* pPath)
-{
-	char v28[512] = { 0 };
-
-	// Check if pPath already ends with ".bsp"
-	const char* ext = ".bsp";
-	size_t len = strlen(pPath);
-	bool hasExt = (len >= 4 && _stricmp(pPath + len - 4, ext) == 0);
-
-	if (hasExt)
-		snprintf(v28, sizeof(v28), "vpk/%s", pPath);
-	else
-		snprintf(v28, sizeof(v28), "vpk/%s.bsp", pPath);
-
-	static uintptr_t off_180795630 = (uintptr_t)(G_engine + 0x19FB30);
-	((bool(*)(const char*, unsigned int, char))(off_180795630))(v28, 2LL, 0LL);
-	((void(__fastcall*)())(G_engine + 0x19D730))();
+typedef __int64 (*sub_136E70Type)(char* pPath);
+sub_136E70Type sub_136E70Original;
+__int64 __fastcall sub_136E70(char* pPath) {
+	auto ret = sub_136E70Original(pPath);
+	reinterpret_cast<__int64(*)()>(G_engine + 0x19D730)();
+	return ret;
 }
+	
 
 
 LDR_DLL_LOADED_NOTIFICATION_DATA* GetModuleNotificationData(const wchar_t* moduleName)
@@ -314,21 +303,9 @@ void InitAddons() {
 	auto filesystem_stdio = IsDedicatedServer() ? G_vscript : G_filesystem_stdio;
 	MH_CreateHook((LPVOID)(engine_base_spec + (IsDedicatedServer() ? 0x95AA0 : 0x127C70)), &FileSystem_UpdateAddonSearchPaths, reinterpret_cast<LPVOID*>(&FileSystem_UpdateAddonSearchPathsTypeOriginal));
 	MH_CreateHook((LPVOID)(engine_base_spec + (IsDedicatedServer() ? 0x950E0 : 0x1272B0)), &ReconcileAddonListFile, reinterpret_cast<LPVOID*>(&oReconcileAddonListFile));
-	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x1752B0 : 0x6A420)), &ReadFileFromVPKHook, reinterpret_cast<LPVOID*>(&readFileFromVPK));
-	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x750F0 : 0x9C20)), &ReadFromCacheHook, reinterpret_cast<LPVOID*>(&readFromCache));
-	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x80BB0 : 0x16250)), &AddVPKFile, reinterpret_cast<LPVOID*>(&AddVPKFileOriginal));
-	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x1A1514 : 0x9AB70)), &fs_sprintf_hook, reinterpret_cast<LPVOID*>(NULL));
-	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x6EE10 : 0x02C30)), &CBaseFileSystem__FindFirst, reinterpret_cast<LPVOID*>(&oCBaseFileSystem__FindFirst));
 	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x86E00 : 0x1C4A0)), &CBaseFileSystem__FindNext, reinterpret_cast<LPVOID*>(&oCBaseFileSystem__FindNext));
 	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x7F180 : 0x14780)), &HookedHandleOpenRegularFile, reinterpret_cast<LPVOID*>(&HandleOpenRegularFileOriginal));
 	MH_CreateHook((LPVOID)(engine_base_spec + (IsDedicatedServer() ? 0x96980 : 0x128C80)), &FileSystem_AddLoadedSearchPath, reinterpret_cast<LPVOID*>(&oFileSystem_AddLoadedSearchPath));
-
-	// Texture streaming crash fix - client only (mid-function patch)
-	if (!IsDedicatedServer()) {
-		//InitTextureStreamingPatch(filesystem_stdio);
-		MH_CreateHook((LPVOID)(filesystem_stdio + 0x746B0), &Sub_1800746B0_Hook, reinterpret_cast<LPVOID*>(&oSub_1800746B0));
-	}
-
 	//client = std::make_shared<discordpp::Client>();
 	MH_EnableHook(MH_ALL_HOOKS);
 }
@@ -661,7 +638,7 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 
 		MH_CreateHook((LPVOID)(engine_base_spec + 0x136860), &Status_ConMsg, NULL);
 		MH_CreateHook((LPVOID)(engine_base_spec + 0x1BF500), &Status_ConMsg, NULL);
-		//MH_CreateHook((LPVOID)(engine_base_spec + 0x4735A0), &sub_1804735A0, NULL);
+		MH_CreateHook((LPVOID)(engine_base + 0x136E70), &sub_136E70, reinterpret_cast<LPVOID*>(&sub_136E70Original)); // fixes some vpk issue
 		MH_CreateHook((LPVOID)(engine_base_spec + 0x8E6D0), &Status_ConMsg, NULL);
 		MH_CreateHook((LPVOID)(engine_base_spec + 0x22610), &Status_ConMsg, NULL);
 		MH_CreateHook((LPVOID)(engine_base_spec + 0x55C00), &CL_Retry_f, reinterpret_cast<LPVOID*>(&CL_Retry_fOriginal));
@@ -670,7 +647,7 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		MH_CreateHook((LPVOID)(launcher + 0xB7A0), &CSquirrelVM__PrintFunc3, NULL);
 		MH_CreateHook((LPVOID)(engine_base + 0x23E20), &SVC_Print_Process_Hook, NULL);
 		MH_CreateHook((LPVOID)(engine_base + 0x22DD0), &CBaseClientState__InternalProcessStringCmd, reinterpret_cast<LPVOID*>(&CBaseClientState__InternalProcessStringCmdOriginal));
-		MH_CreateHook((LPVOID)(engine_base + 0x136E70), &sub_136E70, reinterpret_cast<LPVOID*>(NULL)); // fixes some vpk issue
+		MH_CreateHook((LPVOID)(engine_base + 0x136E70), &sub_136E70, reinterpret_cast<LPVOID*>(&sub_136E70Original)); // fixes some vpk issue
 		MH_CreateHook((LPVOID)(engine_base + 0x72360), &cl_DumpPrecacheStats, NULL);
 
 		//MH_CreateHook((LPVOID)(engine_base_spec + 0x473550), &sub_180473550, NULL);

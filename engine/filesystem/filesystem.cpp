@@ -336,32 +336,6 @@ __int64 __fastcall AddVPKFile(IFileSystem* fileSystem, char* vpkPath, char** a3,
 {
 	ZoneScoped;
 
-	// Check for mp_mia or mp_nest2 and load mp_angel_city assets first
-	const char* mapAliases[] = { "mp_mia", "mp_nest2" };
-	for (const char* alias : mapAliases)
-	{
-		if (strstr(vpkPath, alias) != NULL)
-		{
-			// Create a modified path with mp_angel_city instead
-			size_t pathLen = strlen(vpkPath);
-			size_t aliasLen = strlen(alias);
-			size_t angelCityLen = strlen("mp_angel_city");
-			size_t newPathLen = pathLen - aliasLen + angelCityLen + 1;
-	
-			char* modifiedPath = (char*)_alloca(newPathLen);
-			char* aliasPos = strstr(vpkPath, alias);
-			size_t prefixLen = aliasPos - vpkPath;
-	
-			memcpy(modifiedPath, vpkPath, prefixLen);
-			memcpy(modifiedPath + prefixLen, "mp_angel_city", angelCityLen);
-			strcpy(modifiedPath + prefixLen + angelCityLen, aliasPos + aliasLen);
-	
-			// Call original with mp_angel_city path first
-			AddVPKFileOriginal(fileSystem, modifiedPath, a3, a4, a5, a6);
-			break;
-		}
-	}
-
 	// Check if the path contains "_dir"
 	if (strstr(vpkPath, "_dir") != NULL)
 	{
@@ -414,97 +388,6 @@ __int64 __fastcall AddVPKFile(IFileSystem* fileSystem, char* vpkPath, char** a3,
 		// Finally, call the original function.
 		return AddVPKFileOriginal(fileSystem, vpkPath, a3, a4, a5, a6);
 	}
-}
-
-// Mid-function patch for texture streaming to guard against invalid pointer dereference
-// At offset 0x74E06: cmp qword ptr [rbx], 0 / jz loc_180074E44
-// We patch this to check if rbx is valid first, and if not, jump to the fallback path
-static unsigned char* g_TextureStreamingPatchAddr = nullptr;
-static unsigned char* g_TextureStreamingCodeCave = nullptr;
-
-// Allocate executable memory within ±2GB of target for relative jumps
-static void* AllocateNearby(void* target, size_t size)
-{
-	SYSTEM_INFO si;
-	GetSystemInfo(&si);
-	uintptr_t granularity = si.dwAllocationGranularity;
-
-	uintptr_t targetAddr = (uintptr_t)target;
-	// Search within ±1GB to be safe
-	uintptr_t minAddr = targetAddr > 0x40000000 ? targetAddr - 0x40000000 : granularity;
-	uintptr_t maxAddr = targetAddr + 0x40000000;
-
-	// Search downward first
-	for (uintptr_t addr = (targetAddr - granularity) & ~(granularity - 1); addr >= minAddr; addr -= granularity) {
-		void* result = VirtualAlloc((void*)addr, size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-		if (result) return result;
-	}
-
-	// Search upward
-	for (uintptr_t addr = (targetAddr + granularity) & ~(granularity - 1); addr <= maxAddr; addr += granularity) {
-		void* result = VirtualAlloc((void*)addr, size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-		if (result) return result;
-	}
-
-	return nullptr;
-}
-
-void InitTextureStreamingPatch(uintptr_t filesystemBase)
-{
-	// === Fix 1: Initialize rbx to 0 instead of stack garbage ===
-	// At 0x74DFA: "mov rbx, [rsp+50h]" (5 bytes) -> "xor rbx, rbx; nop; nop"
-	unsigned char* initAddr = (unsigned char*)(filesystemBase + 0x74DFA);
-	DWORD oldProtect1;
-	VirtualProtect(initAddr, 5, PAGE_EXECUTE_READWRITE, &oldProtect1);
-	initAddr[0] = 0x48;  // xor rbx, rbx
-	initAddr[1] = 0x31;
-	initAddr[2] = 0xDB;
-	initAddr[3] = 0x90;  // nop
-	initAddr[4] = 0x90;  // nop
-	VirtualProtect(initAddr, 5, oldProtect1, &oldProtect1);
-
-	// === Fix 2: Add NULL check before dereference ===
-	g_TextureStreamingPatchAddr = (unsigned char*)(filesystemBase + 0x74E06);
-	unsigned char* fallbackAddr = (unsigned char*)(filesystemBase + 0x74E44);
-	unsigned char* returnAddr = (unsigned char*)(filesystemBase + 0x74E0C);
-
-	g_TextureStreamingCodeCave = (unsigned char*)AllocateNearby(g_TextureStreamingPatchAddr, 64);
-	if (!g_TextureStreamingCodeCave) {
-		Error("Couldn't alloc code cave");
-		return;
-	}
-
-	unsigned char* p = g_TextureStreamingCodeCave;
-
-	// test rbx, rbx (check for NULL)
-	*p++ = 0x48; *p++ = 0x85; *p++ = 0xDB;
-
-	// jz fallback
-	*p++ = 0x0F; *p++ = 0x84;
-	int32_t fallbackOffset1 = (int32_t)(fallbackAddr - (p + 4));
-	memcpy(p, &fallbackOffset1, 4); p += 4;
-
-	// cmp qword ptr [rbx], 0 (original instruction)
-	*p++ = 0x48; *p++ = 0x83; *p++ = 0x3B; *p++ = 0x00;
-
-	// jz fallback
-	*p++ = 0x0F; *p++ = 0x84;
-	int32_t fallbackOffset2 = (int32_t)(fallbackAddr - (p + 4));
-	memcpy(p, &fallbackOffset2, 4); p += 4;
-
-	// jmp returnAddr
-	*p++ = 0xE9;
-	int32_t returnOffset = (int32_t)(returnAddr - (p + 4));
-	memcpy(p, &returnOffset, 4);
-
-	// Patch original to jump to code cave
-	DWORD oldProtect2;
-	VirtualProtect(g_TextureStreamingPatchAddr, 6, PAGE_EXECUTE_READWRITE, &oldProtect2);
-	g_TextureStreamingPatchAddr[0] = 0xE9;
-	int32_t caveJmpOffset = (int32_t)(g_TextureStreamingCodeCave - (g_TextureStreamingPatchAddr + 5));
-	memcpy(g_TextureStreamingPatchAddr + 1, &caveJmpOffset, 4);
-	g_TextureStreamingPatchAddr[5] = 0x90;
-	VirtualProtect(g_TextureStreamingPatchAddr, 6, oldProtect2, &oldProtect2);
 }
 //////////////////////////////////////////////////////////
 // The following patch addresses a use-after-free (UAF)
