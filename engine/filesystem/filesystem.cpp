@@ -326,30 +326,30 @@ __int64 __fastcall AddVPKFile(IFileSystem* fileSystem, char* vpkPath, char** a3,
 	ZoneScoped;
 
 	// Check for mp_mia or mp_nest2 and load mp_angel_city assets first
-	//const char* mapAliases[] = { "mp_mia", "mp_nest2" };
-	//for (const char* alias : mapAliases)
-	//{
-	//	if (strstr(vpkPath, alias) != NULL)
-	//	{
-	//		// Create a modified path with mp_angel_city instead
-	//		size_t pathLen = strlen(vpkPath);
-	//		size_t aliasLen = strlen(alias);
-	//		size_t angelCityLen = strlen("mp_angel_city");
-	//		size_t newPathLen = pathLen - aliasLen + angelCityLen + 1;
-	//
-	//		char* modifiedPath = (char*)_alloca(newPathLen);
-	//		char* aliasPos = strstr(vpkPath, alias);
-	//		size_t prefixLen = aliasPos - vpkPath;
-	//
-	//		memcpy(modifiedPath, vpkPath, prefixLen);
-	//		memcpy(modifiedPath + prefixLen, "mp_angel_city", angelCityLen);
-	//		strcpy(modifiedPath + prefixLen + angelCityLen, aliasPos + aliasLen);
-	//
-	//		// Call original with mp_angel_city path first
-	//		AddVPKFileOriginal(fileSystem, modifiedPath, a3, a4, a5, a6);
-	//		break;
-	//	}
-	//}
+	const char* mapAliases[] = { "mp_mia", "mp_nest2" };
+	for (const char* alias : mapAliases)
+	{
+		if (strstr(vpkPath, alias) != NULL)
+		{
+			// Create a modified path with mp_angel_city instead
+			size_t pathLen = strlen(vpkPath);
+			size_t aliasLen = strlen(alias);
+			size_t angelCityLen = strlen("mp_angel_city");
+			size_t newPathLen = pathLen - aliasLen + angelCityLen + 1;
+
+			char* modifiedPath = (char*)_alloca(newPathLen);
+			char* aliasPos = strstr(vpkPath, alias);
+			size_t prefixLen = aliasPos - vpkPath;
+
+			memcpy(modifiedPath, vpkPath, prefixLen);
+			memcpy(modifiedPath + prefixLen, "mp_angel_city", angelCityLen);
+			strcpy(modifiedPath + prefixLen + angelCityLen, aliasPos + aliasLen);
+
+			// Call original with mp_angel_city path first
+			AddVPKFileOriginal(fileSystem, modifiedPath, a3, a4, a5, a6);
+			break;
+		}
+	}
 
 	// Check if the path contains "_dir"
 	if (strstr(vpkPath, "_dir") != NULL)
@@ -563,21 +563,4 @@ void ReconcileAddonListFile(IFileSystem* pFileSystem, const char* pModPath)
 		free((void*)ptr);
 
 	g_pFileSystemStringsToCleanup.clear();
-}
-
-// Hook for sub_1800746B0 to detect texture streaming failures
-__int64 (*oSub_1800746B0)(__int64 a1, char* a2);
-__int64 __fastcall Sub_1800746B0_Hook(__int64 a1, char* a2)
-{
-	void* retAddr = _ReturnAddress();
-	__int64 result = oSub_1800746B0(a1, a2);
-
-	if (result == 0 && retAddr == (void*)(G_filesystem_stdio + 0x74DFA)) {
-		char msg[512];
-		snprintf(msg, sizeof(msg), "Failed to open file:\n%s", a2 ? a2 : "(null)");
-		MessageBoxA(NULL, msg, "Filesystem Error", MB_OK | MB_ICONERROR);
-		TerminateProcess(GetCurrentProcess(), 1);
-	}
-
-	return result;
 }
