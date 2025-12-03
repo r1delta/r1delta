@@ -458,3 +458,20 @@ void ReconcileAddonListFile(IFileSystem* pFileSystem, const char* pModPath)
 
 	g_pFileSystemStringsToCleanup.clear();
 }
+
+// Hook for sub_1800746B0 to detect texture streaming failures
+__int64 (*oSub_1800746B0)(__int64 a1, char* a2);
+__int64 __fastcall Sub_1800746B0_Hook(__int64 a1, char* a2)
+{
+	void* retAddr = _ReturnAddress();
+	__int64 result = oSub_1800746B0(a1, a2);
+
+	if (result == 0 && retAddr == (void*)(G_filesystem_stdio + 0x74DFA)) {
+		char msg[512];
+		snprintf(msg, sizeof(msg), "Failed to open file:\n%s", a2 ? a2 : "(null)");
+		MessageBoxA(NULL, msg, "Filesystem Error", MB_OK | MB_ICONERROR);
+		TerminateProcess(GetCurrentProcess(), 1);
+	}
+
+	return result;
+}
