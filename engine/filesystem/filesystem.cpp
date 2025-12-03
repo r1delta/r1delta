@@ -188,16 +188,8 @@ private:
 			Trie* node = lookup(&root, { .ptr = part, .len = i });
 			if (!node->value.checked) {
 				ZoneScopedN("checkAndCachePath make node");
-				// Convert narrow path to wide for proper Unicode support
-				wchar_t wPath[MAX_PATH];
-				int wLen = MultiByteToWideChar(CP_UTF8, 0, node->key.ptr, (int)node->key.len, wPath, MAX_PATH - 1);
-				if (wLen > 0) {
-					wPath[wLen] = L'\0';
-					DWORD attributes = GetFileAttributesW(wPath);
-					node->value.exists = (attributes != INVALID_FILE_ATTRIBUTES);
-				} else {
-					node->value.exists = false;
-				}
+				DWORD attributes = GetFileAttributesA(node->key.ptr);
+				node->value.exists = (attributes != INVALID_FILE_ATTRIBUTES);
 				node->value.checked = true;
 			}
 			if (!node->value.exists) {
@@ -264,12 +256,11 @@ void replace_underscore(char* str) {
 // Helper function to check if a file exists.
 static bool file_exists(const char* path)
 {
-	// Convert to wide string for proper Unicode support
-	wchar_t wPath[MAX_PATH];
-	int wLen = MultiByteToWideChar(CP_UTF8, 0, path, -1, wPath, MAX_PATH);
-	if (wLen > 0) {
-		DWORD attrib = GetFileAttributesW(wPath);
-		return (attrib != INVALID_FILE_ATTRIBUTES && !(attrib & FILE_ATTRIBUTE_DIRECTORY));
+	FILE* f = fopen(path, "r");
+	if (f)
+	{
+		fclose(f);
+		return true;
 	}
 	return false;
 }

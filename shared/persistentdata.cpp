@@ -1223,72 +1223,48 @@ char CBaseClientState__InternalProcessStringCmd(void* thisptr, void* msg, bool b
 	Cbuf_Execute(); // fix cbuf overflow on too many stringcmds
 	return ret;
 }
-// Wide char version for proper Unicode path support (non-ASCII usernames)
-char __fastcall GetConfigPathW(wchar_t* outPath, size_t outPathSize, int configType)
+char __fastcall GetConfigPath(char* outPath, size_t outPathSize, int configType)
 {
-	PWSTR pszSavedGamesPath = nullptr;
+	CHAR folderPath[MAX_PATH];
 
-	// Get the user's Saved Games folder path using wide API (matches the hook in dllmain.cpp)
-	if (FAILED(SHGetKnownFolderPath(FOLDERID_SavedGames, 0, NULL, &pszSavedGamesPath)))
+	// Get the user's Documents folder path
+	if (SHGetFolderPathA(NULL, CSIDL_PERSONAL, NULL, 0, folderPath) < 0)
 	{
 		return 0;
 	}
 
-	WCHAR folderPathW[MAX_PATH];
-	wcscpy_s(folderPathW, MAX_PATH, pszSavedGamesPath);
-	CoTaskMemFree(pszSavedGamesPath);
-
 	// Determine the subfolder based on configType
-	const wchar_t* subFolderW = (configType == 1) ? L"/profile" : L"/local";
+	const char* subFolder = (configType == 1) ? "/profile" : "/local";
 
-	// Construct the base path in wide chars
-	wchar_t tempPathW[512];
-	auto size = swprintf_s(tempPathW, _countof(tempPathW), L"%s%s%s", folderPathW, L"/Respawn/R1Delta", subFolderW);
+	// Construct the base path
+	char tempPath[512];
+	auto size = snprintf(tempPath, sizeof(tempPath), "%s%s%s", folderPath, "/Respawn/R1Delta", subFolder);
 
-	if (size < 0 || size >= 511)
+	if (size >= 511)
 	{
 		return 0;
 	}
 
 	// Determine the config file name based on configType
-	const wchar_t* configFileW;
+	const char* configFile;
 	switch (configType)
 	{
 	case 0:
-		configFileW = L"settings.cfg";
+		configFile = "settings.cfg";
 		break;
 	case 1:
-		configFileW = L"profile.cfg";
+		configFile = "profile.cfg";
 		break;
 	case 2:
-		configFileW = L"videoconfig.txt";
+		configFile = "videoconfig.txt";
 		break;
 	default:
-		configFileW = L"error.cfg";
+		configFile = "error.cfg";
 		break;
 	}
 
-	// Construct the final path in wide chars
-	swprintf_s(outPath, outPathSize, L"%s/%s", tempPathW, configFileW);
-
-	return 1;
-}
-
-// UTF-8 narrow char version that wraps the wide version
-char __fastcall GetConfigPath(char* outPath, size_t outPathSize, int configType)
-{
-	wchar_t widePathW[512];
-	if (!GetConfigPathW(widePathW, _countof(widePathW), configType))
-	{
-		return 0;
-	}
-
-	// Convert wide path to UTF-8 for the output
-	int utf8Len = WideCharToMultiByte(CP_UTF8, 0, widePathW, -1, outPath, (int)outPathSize, NULL, NULL);
-	if (utf8Len <= 0)
-	{
-		return 0;
-	}
+	// Construct the final path
+	snprintf(outPath, outPathSize, "%s/%s", tempPath, configFile);
 
 	return 1;
 }
@@ -1406,13 +1382,12 @@ char ExecuteConfigFile(int configType) {
 	constexpr size_t MAX_PATH_LENGTH = 1024;
 	constexpr size_t MAX_BUFFER_SIZE = 1024 * 1024; // 1 MB
 
-	// Use wide path for proper Unicode support (non-ASCII usernames)
-	wchar_t pathBufferW[MAX_PATH_LENGTH];
-	if (!GetConfigPathW(pathBufferW, MAX_PATH_LENGTH, configType)) {
+	char pathBuffer[MAX_PATH_LENGTH];
+	if (!GetConfigPath(pathBuffer, MAX_PATH_LENGTH, configType)) {
 		return 0; // Failed to get config path
 	}
 
-	std::filesystem::path configPath(pathBufferW);
+	std::filesystem::path configPath(pathBuffer);
 
 	if (!std::filesystem::exists(configPath)) {
 		return 0; // Config file doesn't exist

@@ -393,62 +393,56 @@ void CCommandLine__CreateCmdLine(void* thisptr, char* commandline) {
 		OutputDebugStringA("\n");
 	}
 
-	// 2. Construct -game argument (Using WinAPI with wide chars for non-ASCII path support)
-	wchar_t exePathBufferW[MAX_PATH * 2];
-	DWORD pathLen = GetModuleFileNameW(NULL, exePathBufferW, _countof(exePathBufferW));
+	// 2. Construct -game argument (Using WinAPI, no exceptions)
+	char exePathBuffer[MAX_PATH * 2]; // Slightly larger buffer just in case
+	DWORD pathLen = GetModuleFileNameA(NULL, exePathBuffer, sizeof(exePathBuffer));
 
-	if (pathLen > 0 && pathLen < _countof(exePathBufferW)) {
-		exePathBufferW[pathLen] = L'\0'; // Ensure null termination
-		wchar_t exeDirBufferW[MAX_PATH * 2];
-		wcscpy_s(exeDirBufferW, _countof(exeDirBufferW), exePathBufferW);
+	if (pathLen > 0 && pathLen < sizeof(exePathBuffer)) {
+		exePathBuffer[pathLen] = '\0'; // Ensure null termination
+		char exeDirBuffer[MAX_PATH * 2];
+		strncpy_s(exeDirBuffer, sizeof(exeDirBuffer), exePathBuffer, _TRUNCATE);
 
 		// Remove the filename part to get the directory
-		if (PathRemoveFileSpecW(exeDirBufferW)) {
+		if (PathRemoveFileSpecA(exeDirBuffer)) {
 			// Construct the r1delta path
-			wchar_t r1deltaPathBufferW[MAX_PATH * 2 + 10];
+			char r1deltaPathBuffer[MAX_PATH * 2 + 10]; // Space for "\\r1delta" + quotes + game arg
 			// Check buffer size before concatenating
-			if (wcslen(exeDirBufferW) + wcslen(L"\\r1delta") < _countof(r1deltaPathBufferW)) {
-				wcscpy_s(r1deltaPathBufferW, _countof(r1deltaPathBufferW), exeDirBufferW);
-				wcscat_s(r1deltaPathBufferW, _countof(r1deltaPathBufferW), L"\\r1delta");
+			if (strlen(exeDirBuffer) + strlen("\\r1delta") < sizeof(r1deltaPathBuffer)) {
+				strncpy_s(r1deltaPathBuffer, sizeof(r1deltaPathBuffer), exeDirBuffer, _TRUNCATE);
+				strncat_s(r1deltaPathBuffer, sizeof(r1deltaPathBuffer), "\\r1delta", _TRUNCATE);
 
-				// Convert wide path to UTF-8 for the game argument
-				int utf8Len = WideCharToMultiByte(CP_UTF8, 0, r1deltaPathBufferW, -1, NULL, 0, NULL, NULL);
-				if (utf8Len > 0) {
-					char r1deltaPathUtf8[MAX_PATH * 4]; // UTF-8 can be up to 4 bytes per char
-					if (WideCharToMultiByte(CP_UTF8, 0, r1deltaPathBufferW, -1, r1deltaPathUtf8, sizeof(r1deltaPathUtf8), NULL, NULL) > 0) {
-						// Use a temporary buffer for the final game arg construction
-						char tempGameArg[MAX_PATH * 4 + 20];
-						sprintf_s(tempGameArg, sizeof(tempGameArg), "-game \"%s\"", r1deltaPathUtf8);
-						gameArg = tempGameArg; // Assign to std::string
+				// Ensure path doesn't exceed buffer before adding quotes/arg
+				if (strlen(r1deltaPathBuffer) + strlen("-game \"\"") < sizeof(exePathBuffer)) {
+					// Use a temporary buffer for the final game arg construction
+					char tempGameArg[sizeof(exePathBuffer)];
+					sprintf_s(tempGameArg, sizeof(tempGameArg), "-game \"%s\"", r1deltaPathBuffer);
+					gameArg = tempGameArg; // Assign to std::string
 
-						OutputDebugStringA("[r1delta_core] Constructed game arg: ");
-						OutputDebugStringA(gameArg.c_str());
-						OutputDebugStringA("\n");
-					}
-					else {
-						OutputDebugStringA("[r1delta_core] Warning: Failed to convert r1delta path to UTF-8.\n");
-					}
+					OutputDebugStringA("[r1delta_core] Constructed game arg: ");
+					OutputDebugStringA(gameArg.c_str());
+					OutputDebugStringA("\n");
 				}
 				else {
-					OutputDebugStringA("[r1delta_core] Warning: Failed to get UTF-8 length for r1delta path.\n");
+					OutputDebugStringA("[r1delta_core] Warning: Constructed r1delta path too long for buffer.\n");
 				}
+
 			}
 			else {
 				OutputDebugStringA("[r1delta_core] Warning: Exe directory path too long to append \\r1delta.\n");
 			}
 		}
 		else {
-			OutputDebugStringA("[r1delta_core] Warning: PathRemoveFileSpecW failed.\n");
+			OutputDebugStringA("[r1delta_core] Warning: PathRemoveFileSpecA failed.\n");
 		}
 	}
 	else if (pathLen == 0) {
 		DWORD error = GetLastError();
 		char errorMsg[100];
-		sprintf_s(errorMsg, sizeof(errorMsg), "[r1delta_core] Warning: GetModuleFileNameW failed. Error: %lu\n", error);
+		sprintf_s(errorMsg, sizeof(errorMsg), "[r1delta_core] Warning: GetModuleFileNameA failed. Error: %lu\n", error);
 		OutputDebugStringA(errorMsg);
 	}
-	else { // pathLen >= buffer size
-		OutputDebugStringA("[r1delta_core] Warning: GetModuleFileNameW buffer too small.\n");
+	else { // pathLen >= sizeof(exePathBuffer)
+		OutputDebugStringA("[r1delta_core] Warning: GetModuleFileNameA buffer too small.\n");
 	}
 
 
