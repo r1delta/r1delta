@@ -325,32 +325,6 @@ __int64 __fastcall AddVPKFile(IFileSystem* fileSystem, char* vpkPath, char** a3,
 {
 	ZoneScoped;
 
-	// Check for mp_mia or mp_nest2 and load mp_angel_city assets first
-	const char* mapAliases[] = { "mp_mia", "mp_nest2" };
-	for (const char* alias : mapAliases)
-	{
-		if (strstr(vpkPath, alias) != NULL)
-		{
-			// Create a modified path with mp_angel_city instead
-			size_t pathLen = strlen(vpkPath);
-			size_t aliasLen = strlen(alias);
-			size_t angelCityLen = strlen("mp_angel_city");
-			size_t newPathLen = pathLen - aliasLen + angelCityLen + 1;
-
-			char* modifiedPath = (char*)_alloca(newPathLen);
-			char* aliasPos = strstr(vpkPath, alias);
-			size_t prefixLen = aliasPos - vpkPath;
-
-			memcpy(modifiedPath, vpkPath, prefixLen);
-			memcpy(modifiedPath + prefixLen, "mp_angel_city", angelCityLen);
-			strcpy(modifiedPath + prefixLen + angelCityLen, aliasPos + aliasLen);
-
-			// Call original with mp_angel_city path first
-			AddVPKFileOriginal(fileSystem, modifiedPath, a3, a4, a5, a6);
-			break;
-		}
-	}
-
 	// Check if the path contains "_dir"
 	if (strstr(vpkPath, "_dir") != NULL)
 	{
@@ -403,96 +377,6 @@ __int64 __fastcall AddVPKFile(IFileSystem* fileSystem, char* vpkPath, char** a3,
 		// Finally, call the original function.
 		return AddVPKFileOriginal(fileSystem, vpkPath, a3, a4, a5, a6);
 	}
-}
-
-// Mid-function patch for texture streaming to guard against invalid pointer dereference
-// At offset 0x74E06: cmp qword ptr [rbx], 0 / jz loc_180074E44
-// We patch this to check if rbx is valid first, and if not, jump to the fallback path
-static unsigned char* g_TextureStreamingPatchAddr = nullptr;
-static unsigned char* g_TextureStreamingCodeCave = nullptr;
-
-// Allocate executable memory within ±2GB of target for relative jumps
-static void* AllocateNearby(void* target, size_t size)
-{
-	SYSTEM_INFO si;
-	GetSystemInfo(&si);
-	uintptr_t granularity = si.dwAllocationGranularity;
-
-	uintptr_t targetAddr = (uintptr_t)target;
-	// Search within ±1GB to be safe
-	uintptr_t minAddr = targetAddr > 0x40000000 ? targetAddr - 0x40000000 : granularity;
-	uintptr_t maxAddr = targetAddr + 0x40000000;
-
-	// Search downward first
-	for (uintptr_t addr = (targetAddr - granularity) & ~(granularity - 1); addr >= minAddr; addr -= granularity) {
-		void* result = VirtualAlloc((void*)addr, size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-		if (result) return result;
-	}
-
-	// Search upward
-	for (uintptr_t addr = (targetAddr + granularity) & ~(granularity - 1); addr <= maxAddr; addr += granularity) {
-		void* result = VirtualAlloc((void*)addr, size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-		if (result) return result;
-	}
-
-	return nullptr;
-}
-
-void InitTextureStreamingPatch(uintptr_t filesystemBase)
-{
-	// Address of the cmp instruction we're patching
-	g_TextureStreamingPatchAddr = (unsigned char*)(filesystemBase + 0x74E06);
-
-	// Target address for the fallback path (LABEL_9)
-	unsigned char* fallbackAddr = (unsigned char*)(filesystemBase + 0x74E44);
-
-	// Return address after our check (after the original jz)
-	unsigned char* returnAddr = (unsigned char*)(filesystemBase + 0x74E0C);
-
-	// Allocate executable memory NEAR the target for relative jumps to work
-	g_TextureStreamingCodeCave = (unsigned char*)AllocateNearby(g_TextureStreamingPatchAddr, 64);
-	if (!g_TextureStreamingCodeCave) return;
-
-	// Build the code cave:
-	// cmp rbx, -1
-	// je fallback
-	// cmp qword ptr [rbx], 0  (original instruction)
-	// je fallback
-	// jmp returnAddr
-	unsigned char* p = g_TextureStreamingCodeCave;
-
-	// cmp rbx, -1 (48 83 FB FF)
-	*p++ = 0x48; *p++ = 0x83; *p++ = 0xFB; *p++ = 0xFF;
-
-	// je fallback (0F 84 xx xx xx xx) - will fill in offset
-	*p++ = 0x0F; *p++ = 0x84;
-	int32_t fallbackOffset1 = (int32_t)(fallbackAddr - (p + 4));
-	memcpy(p, &fallbackOffset1, 4); p += 4;
-
-	// cmp qword ptr [rbx], 0 (48 83 3B 00) - original instruction
-	*p++ = 0x48; *p++ = 0x83; *p++ = 0x3B; *p++ = 0x00;
-
-	// je fallback (0F 84 xx xx xx xx)
-	*p++ = 0x0F; *p++ = 0x84;
-	int32_t fallbackOffset2 = (int32_t)(fallbackAddr - (p + 4));
-	memcpy(p, &fallbackOffset2, 4); p += 4;
-
-	// jmp returnAddr (E9 xx xx xx xx)
-	*p++ = 0xE9;
-	int32_t returnOffset = (int32_t)(returnAddr - (p + 4));
-	memcpy(p, &returnOffset, 4); p += 4;
-
-	// Now patch the original code to jump to our code cave
-	DWORD oldProtect;
-	VirtualProtect(g_TextureStreamingPatchAddr, 6, PAGE_EXECUTE_READWRITE, &oldProtect);
-
-	// jmp codeCave (E9 xx xx xx xx) + nop
-	g_TextureStreamingPatchAddr[0] = 0xE9;
-	int32_t caveJmpOffset = (int32_t)(g_TextureStreamingCodeCave - (g_TextureStreamingPatchAddr + 5));
-	memcpy(g_TextureStreamingPatchAddr + 1, &caveJmpOffset, 4);
-	g_TextureStreamingPatchAddr[5] = 0x90; // NOP the remaining byte
-
-	VirtualProtect(g_TextureStreamingPatchAddr, 6, oldProtect, &oldProtect);
 }
 
 //////////////////////////////////////////////////////////

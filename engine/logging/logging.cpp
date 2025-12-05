@@ -466,10 +466,9 @@ void COM_TimestampedLogHook(const char* pMsg, ...) {
 }
 extern "C" __declspec(dllexport) void Error(const char* pMsg, ...) {
 	ZoneScoped;
-
+	
 	if (strcmp_static(pMsg, "UserMessageBegin:  Unregistered message '%s'\n") == 0 ||
-		strcmp_static(pMsg, "MESSAGE_END called with no active message\n") == 0 ||
-		strstr(pMsg, "Failed to read SignonState") != nullptr) {
+		strcmp_static(pMsg, "MESSAGE_END called with no active message\n") == 0) {
 		return;
 	}
 
