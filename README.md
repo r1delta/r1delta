@@ -1,4 +1,6 @@
 # R1Delta
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/r1delta/r1delta)
+
 Dedicated server framework for Titanfall 1 that allows hosting custom servers and loading mods.
 
 ### Disclaimer
