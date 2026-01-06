@@ -207,19 +207,50 @@ __int64 Detour_NET_OutOfBandPrintf(int sock, void* adr, const char* fmt, ...) {
 	return Original_NET_OutOfBandPrintf(sock, adr, "%s", buffer);
 }
 
-typedef void (*bf_write__WriteUBitLongType)(bf_write* a1, unsigned int a2, signed int a3);
-bf_write__WriteUBitLongType bf_write__WriteUBitLongOriginal;
-void __forceinline __fastcall bf_write__WriteUBitLong(bf_write* a1, unsigned int a2, signed int a3)
+
+using EncodeSpecialFloatType = char(__fastcall*)(void* prop, float value, bf_write* out);
+static EncodeSpecialFloatType EncodeSpecialFloatOriginal = nullptr;
+
+using WriteBitCoordType = void(__fastcall*)(bf_write* out, float value, const char* name);
+using WriteBitCoordMPType = void(__fastcall*)(bf_write* out, float value, int coordType, const char* name);
+using WriteBitCellCoordType = void(__fastcall*)(bf_write* out, float value, int bits, int coordType, const char* name);
+using WriteBitFloatType = void(__fastcall*)(bf_write* out, float value, const char* name);
+using WriteBitNormalType = void(__fastcall*)(bf_write* out, float value, const char* name);
+
+static WriteBitCoordType WriteBitCoordFn = nullptr;
+static WriteBitCoordMPType WriteBitCoordMPFn = nullptr;
+static WriteBitCellCoordType WriteBitCellCoordFn = nullptr;
+static WriteBitFloatType WriteBitFloatFn = nullptr;
+static WriteBitNormalType WriteBitNormalFn = nullptr;
+
+static void InitEncodeSpecialFloatHelpers(uintptr_t engineDS)
 {
-	uintptr_t engineDS = G_engine_ds;
-	bf_write__WriteUBitLongOriginal(a1, a2, a3);
-	if (a1 && uintptr_t(_ReturnAddress()) == (engineDS + 0x5101D) && !a1->IsOverflowed() && a1->GetNumBitsLeft() >= 14) {
-		Msg("Writing: %d\n", a2);
-		bf_write__WriteUBitLongOriginal(a1, 0, 1); // use engine ver in case our struct is wrong somehow?
-		bf_write__WriteUBitLongOriginal(a1, 0, 1);
-		bf_write__WriteUBitLongOriginal(a1, 0, 12);
-	}
+	WriteBitCellCoordFn = reinterpret_cast<WriteBitCellCoordType>(engineDS + 0x321330);
+	WriteBitFloatFn = reinterpret_cast<WriteBitFloatType>(engineDS + 0x321410);
+	WriteBitCoordMPFn = reinterpret_cast<WriteBitCoordMPType>(engineDS + 0x322AA0);
+	WriteBitCoordFn = reinterpret_cast<WriteBitCoordType>(engineDS + 0x322CF0);
+	WriteBitNormalFn = reinterpret_cast<WriteBitNormalType>(engineDS + 0x322FD0);
 }
+
+static char __fastcall EncodeSpecialFloat_Hook(void* prop, float value, bf_write* out)
+{
+	if (!prop || !out) {
+		return 0;
+	}
+	const int flags = *reinterpret_cast<int*>(reinterpret_cast<BYTE*>(prop) + 0x58);
+	const int handledFlags = 2 | 0x1000 | 4 | 0x20 | 0x2000 | 0x4000;
+	if (flags & handledFlags) {
+		return EncodeSpecialFloatOriginal ? EncodeSpecialFloatOriginal(prop, value, out) : 0;
+	}
+	if (!(flags & 0x8000) || !WriteBitCellCoordFn) {
+		return 0;
+	}
+	const int bits = *reinterpret_cast<int*>(reinterpret_cast<BYTE*>(prop) + 0x14);
+	const char* name = *reinterpret_cast<const char**>(reinterpret_cast<BYTE*>(prop) + 0x48);
+	WriteBitCellCoordFn(out, value, bits, 2, name);
+	return 1;
+}
+
 // --- Game Function Pointers ---
 // Original function we are hooking
 void (*oNET_Config)();
@@ -745,6 +776,8 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 	uintptr_t engine = (uintptr_t)LoadLibraryA("engine.dll");
 	uintptr_t engineDS = G_engine_ds;
 
+	InitEncodeSpecialFloatHelpers(engineDS);
+
 	NET_CreateNetChannelOriginal = NET_CreateNetChannelType(engine + 0x1F1B10);
 	MH_CreateHook(LPVOID(engineDS + 0x6B490), LPVOID(CServerRemoteAccess__LookupStringValue__6B490), reinterpret_cast<LPVOID*>(&oCServerRemoteAccess__LookupStringValue__6B490)); // NET_BufferToBufferCompress
 
@@ -786,7 +819,7 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 	MH_CreateHook(LPVOID(engineDS + 0x13B000), LPVOID(engine + 0x1E9EA0), NULL); // CNetChan__CNetChan__dtor
 	MH_CreateHook(LPVOID(engineDS + 0x017940), LPVOID(engine + 0x028BC0), NULL); // CLC_SplitPlayerConnect__dtor
 	MH_CreateHook(LPVOID(engineDS + 0x12F140), LPVOID(engine + 0x1DC830), NULL); // SendTable_WriteInfos
-	//MH_CreateHook(LPVOID(engineDS + 0x71C0), &bf_write__WriteUBitLong, reinterpret_cast<LPVOID*>(&bf_write__WriteUBitLongOriginal)); // bf_write__WriteUBitLong
+	MH_CreateHook(LPVOID(engineDS + 0x11B110), &EncodeSpecialFloat_Hook, reinterpret_cast<LPVOID*>(&EncodeSpecialFloatOriginal)); // EncodeSpecialFloat
 	MH_CreateHook(LPVOID(engineDS + 0x497F0), LPVOID(engine + 0xD8420), NULL); // CBaseClient::ConnectionStart
 	MH_CreateHook(LPVOID(engine + 0xF8050), LPVOID(engineDS + 0x69050), NULL); // CRCONServer::RunFrame
 	MH_CreateHook(LPVOID(engine + 0xF4B90), LPVOID(engineDS + 0x65B70), NULL); // RCONServer
@@ -839,11 +872,6 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 #if BUILD_DEBUG && VTABLE_UPDATE_FORCE
 	OutputDebugStringA("};\n");
 #endif
-	// copy sendtable funcs
-	DWORD oldProtect;
-	VirtualProtect((LPVOID)(G_engine_ds + 0x550760), 99 * sizeof(uintptr_t), PAGE_READWRITE, &oldProtect);
-	memcpy((void*)(G_engine_ds + 0x550760), (void*)(G_engine + 0x7CB3F0), 99 * sizeof(uintptr_t));
-	VirtualProtect((LPVOID)(G_engine_ds + 0x550760), 99 * sizeof(uintptr_t), oldProtect, &oldProtect);
 	MH_EnableHook(MH_ALL_HOOKS);
 	reinterpret_cast<char(__fastcall*)(__int64, CreateInterfaceFn)>((uintptr_t)(engine) + 0x01A04A0)(0, (CreateInterfaceFn)(engineDS + 0xE9000)); // connect nondedi engine
 	reinterpret_cast<void(__fastcall*)(int, void*)>((uintptr_t)(engine) + 0x47F580)(0, 0); // register nondedi engine cvars
