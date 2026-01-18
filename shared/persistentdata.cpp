@@ -517,6 +517,9 @@ bool PDataValidator::isValid(const std::string_view& key, const std::string_view
 
 	// Check for invalid weapon strings in loadouts
 	if (key.find("titanLoadouts") != std::string_view::npos) {
+		if (value.find("mp_weapon_mega") != std::string_view::npos) {
+			return true;
+		}
 		if (value.find("mp_weapon") != std::string_view::npos) {
 			return false;
 		}
