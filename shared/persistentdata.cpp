@@ -526,6 +526,12 @@ bool PDataValidator::isValid(const std::string_view& key, const std::string_view
 	}
 	
 	if (key.find("pilotLoadouts") != std::string_view::npos) {
+		if (value.find("mp_weapon_mega3") != std::string_view::npos) {
+			return false;
+		}
+		if (value.find("mp_weapon_mega4") != std::string_view::npos) {
+			return false;
+		}
 		if (value.find("mp_titanweapon") != std::string_view::npos) {
 			return false;
 		}
