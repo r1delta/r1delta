@@ -181,6 +181,7 @@ GetUserIDString_t GetUserIDStringOriginal = nullptr;
 
 typedef USERID_s* (*GetUserID_t)(__int64 base_client, USERID_s* id);
 GetUserID_t GetUserIDOriginal = nullptr;
+extern bool g_inside_WriteDataRequest;
 
 // Hooked client connection function.
 bool __fastcall HookedCBaseClientConnect(
@@ -391,13 +392,20 @@ __int64 __fastcall HookedCBaseStateClientConnect(
 }
 
 USERID_s* GetUserIDHook(__int64 base_client, USERID_s* id) {
+    static auto var = OriginalCCVar_FindVar(cvarinterface, "delta_online_auth_enable");
+    if (g_inside_WriteDataRequest && var && var->m_Value.m_nValue == 0) {
+        if (GetUserIDOriginal) {
+            return GetUserIDOriginal(base_client, id);
+        }
+        return id;
+    }
+
     id->idtype = 1; // Set idtype to 1 for USERID_TYPE_DISCORD
     id->snowflake = 1; // Initialize snowflake to 0
     if (base_client == 0) {
         return id;
     }
-    auto var = OriginalCCVar_FindVar(cvarinterface, "delta_online_auth_enable");
-    if (var->m_Value.m_nValue != 1) {
+    if (!var || var->m_Value.m_nValue != 1) {
         if (IsDedicatedServer()) {
             id->snowflake = *(int64_t*)(base_client + 0x34B70);
         }
@@ -414,6 +422,14 @@ USERID_s* GetUserIDHook(__int64 base_client, USERID_s* id) {
 }
 
 const char* GetUserIDStringHook(USERID_s* id) {
+    static auto var = OriginalCCVar_FindVar(cvarinterface, "delta_online_auth_enable");
+    if (g_inside_WriteDataRequest && var && var->m_Value.m_nValue == 0) {
+        if (GetUserIDStringOriginal) {
+            return GetUserIDStringOriginal(id);
+        }
+        return "UNKNOWN";
+    }
+
     static char buffer[256];
     if (id->snowflake == 1) {
         sprintf(buffer, "%s", "UNKNOWN");
