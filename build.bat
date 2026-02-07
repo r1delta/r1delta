@@ -23,8 +23,8 @@ if not "%msvc%"=="1" if not "%clang%"=="1" set msvc=1
 if "%clang%"=="1" set msvc=0 && echo [clang build]
 if "%msvc%"=="1" set clang=0 && echo [msvc build]
 
-set cl_common=     /DUNICODE=1 /D_UNICDE=1 /std:c++latest /I..\ /I..\packages\minhook.1.3.3\lib\native\include\ /I..\thirdparty\nlohmann\ /I..\thirdparty\mimalloc\include\ /I..\thirdparty\capnp-sources\c++\src\ /I..\third_party\EOS-SDK\SDK\Include\ /I..\vsdk\ /I..\vsdk\public\ /nologo /FC /Z7
-set clang_common=  -DUNICODE=1 -DUNICODE=1 -std=c++20 -I..\ -I..\packages\minhook.1.3.3\lib\native\include\ -I..\thirdparty\nlohmann\ -I..\thirdparty\mimalloc\include\ -I..\thirdparty\capnp-sources\c++\src\ -I..\third_party\EOS-SDK\SDK\Include\ -I..\vsdk\ -I..\vsdk\public\ -gcodeview -fdiagnostics-absolute-paths -Wall -Wno-unknown-warning-option -Wno-missing-braces -Wno-unused-function -Wno-writable-strings -Wno-unused-value -Wno-unused-variable -Wno-unused-local-typedef -Wno-deprecated-register -Wno-deprecated-declarations -Wno-unused-but-set-variable -Wno-single-bit-bitfield-constant-conversion -Wno-compare-distinct-pointer-types -Wno-initializer-overrides -Wno-incompatible-pointer-types-discards-qualifiers -Xclang -flto-visibility-public-std -D_USE_MATH_DEFINES -Dstrdup=_strdup -Dgnu_printf=printf -ferror-limit=10000
+set cl_common=     /DUNICODE=1 /D_UNICDE=1 /std:c++latest /I..\ /I..\sdk\ /I..\engine\ /I..\packages\minhook.1.3.3\lib\native\include\ /I..\thirdparty\nlohmann\ /I..\thirdparty\mimalloc\include\ /I..\thirdparty\capnp-sources\c++\src\ /I..\third_party\EOS-SDK\SDK\Include\ /I..\vsdk\ /I..\vsdk\public\ /I..\engine\core\ /I..\engine\memory\ /nologo /FC /Z7
+set clang_common=  -DUNICODE=1 -DUNICODE=1 -std=c++20 -I..\ -I..\sdk\ -I..\engine\ -I..\packages\minhook.1.3.3\lib\native\include\ -I..\thirdparty\nlohmann\ -I..\thirdparty\mimalloc\include\ -I..\thirdparty\capnp-sources\c++\src\ -I..\third_party\EOS-SDK\SDK\Include\ -I..\vsdk\ -I..\vsdk\public\ -I..\engine\core\ -I..\engine\memory\ -gcodeview -fdiagnostics-absolute-paths -Wall -Wno-unknown-warning-option -Wno-missing-braces -Wno-unused-function -Wno-writable-strings -Wno-unused-value -Wno-unused-variable -Wno-unused-local-typedef -Wno-deprecated-register -Wno-deprecated-declarations -Wno-unused-but-set-variable -Wno-single-bit-bitfield-constant-conversion -Wno-compare-distinct-pointer-types -Wno-initializer-overrides -Wno-incompatible-pointer-types-discards-qualifiers -Xclang -flto-visibility-public-std -D_USE_MATH_DEFINES -Dstrdup=_strdup -Dgnu_printf=printf -ferror-limit=10000
 set cl_debug=      call cl /Od /Ob1 /DBUILD_DEBUG=1 /DMI_DEBUG=4 /DMI_SECURE=0 /DKJ_DEBUG=1 %cl_common% %auto_compile_flags%
 set cl_release=    call cl /O2 /DBUILD_DEBUG=0 /DKJ_NDEBUG=1 %cl_common% %auto_compile_flags%
 set clang_debug=   call clang++ -g -O0 -DBUILD_DEBUG=1 -DMI_DEBUG=4 -DMI_SECURE=0 -DKJ_DEBUG=1 %clang_common% %auto_compile_flags%
@@ -68,7 +68,7 @@ if not exist build mkdir build
 
 set tier0_sources=..\tier0_amal.cc
 
-set mimalloc_sources=..\mimalloc_amal.cc
+set mimalloc_sources=..\thirdparty\mimalloc\mimalloc_amal.cc
 set eos_sdk_lib=..\third_party\EOS-SDK\SDK\Lib\EOSSDK-Win64-Shipping.lib
 set eos_sdk_bin=..\third_party\EOS-SDK\SDK\Bin\EOSSDK-Win64-Shipping.dll
 
@@ -92,7 +92,7 @@ if "%release%"=="1" set capnp_lib=capnp_release.lib
 if "%tier0%"=="1" ml64.exe /c /nologo /Zi /Fo"NetChanFixes.obj" /Fl"" /W3 /errorReport:prompt /Ta..\NetChanFixes.asm
 :: TODO(mrsteyk): crucify wanderer and Allusive for adding capnp this way.
 ::                FIX FIX FIX.
-if "%tier0%"=="1"    set built=1 && %compile% %tier0_sources% %mimalloc_sources% %compile_link%  NetChanFixes.obj ..\vstdlib.lib ..\tier0_orig.lib ..\packages\minhook.1.3.3\lib\native\lib\libMinHook-x64-v141-mt.lib %capnp_lib% %eos_sdk_lib% %link_dll% /DEF:..\test.def %out%tier0.dll || exit /b 1
+if "%tier0%"=="1"    set built=1 && %compile% %tier0_sources% %compile_link%  NetChanFixes.obj ..\vstdlib.lib ..\tier0_orig.lib ..\packages\minhook.1.3.3\lib\native\lib\libMinHook-x64-v141-mt.lib %capnp_lib% %eos_sdk_lib% %link_dll% /DEF:..\test.def %out%tier0.dll || exit /b 1
 if "%launcher%"=="1" set built=1 && %compile% ..\launch\main.cpp %compile_link% /STACK:0x7A1200 %out%r1delta.exe || exit /b 1
 
 if "%tier0%"=="1"    for %%I in (tier0.dll tier0.pdb) do copy /Y %%I "C:\Program Files\EA Games\Titanfall\bin\x64_retail\"

@@ -40,26 +40,26 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
@@ -85,14 +85,14 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>S:\game\r1delta\bin_delta\</OutDir>
     <IncludePath>$(ProjectDir);$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\steam;$(ProjectDir)thirdparty\minhook\include;$(ProjectDir)thirdparty\mimalloc\include;$(ProjectDir)engine;$(ProjectDir)engine\core;$(ProjectDir)engine\hooks;$(ProjectDir)engine\vtable_remaps;$(ProjectDir)engine\filesystem;$(ProjectDir)engine\memory;$(ProjectDir)engine\logging;$(ProjectDir)engine\net;$(ProjectDir)client;$(ProjectDir)client\audio;$(ProjectDir)client\rendering;$(ProjectDir)server;$(ProjectDir)server\physics;$(ProjectDir)server\ai;$(ProjectDir)shared;$(ProjectDir)sdk;$(ProjectDir)eos;$(ProjectDir)thirdparty;$(ProjectDir)ida;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
-    <LibraryPath>$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\steam\lib;$(ProjectDir)thirdparty\minhook\lib;$(SolutionDir)thirdparty\mimalloc\$(Configuration);$(VC_LibraryPath_X64);$(WindowsSDK_LibraryPath_x64);$(LibraryPath)</LibraryPath>
+    <LibraryPath>$(ProjectDir)vcpkg_installed\x64-windows\lib;$(ProjectDir)thirdparty\steam\lib;$(ProjectDir)thirdparty\minhook\lib;$(SolutionDir)thirdparty\mimalloc\$(Configuration);$(VC_LibraryPath_X64);$(WindowsSDK_LibraryPath_x64);$(LibraryPath)</LibraryPath>
     <IntDir>$(ProjectDir)$(Platform)\$(Configuration)\tier0</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>S:\game\r1delta\bin_delta\</OutDir>
     <IntDir>$(ProjectDir)$(Platform)\$(Configuration)\tier0</IntDir>
     <IncludePath>$(ProjectDir);$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\steam;$(ProjectDir)thirdparty\minhook\include;$(ProjectDir)thirdparty\mimalloc\include;$(ProjectDir)engine;$(ProjectDir)engine\core;$(ProjectDir)engine\hooks;$(ProjectDir)engine\vtable_remaps;$(ProjectDir)engine\filesystem;$(ProjectDir)engine\memory;$(ProjectDir)engine\logging;$(ProjectDir)engine\net;$(ProjectDir)client;$(ProjectDir)client\audio;$(ProjectDir)client\rendering;$(ProjectDir)server;$(ProjectDir)server\physics;$(ProjectDir)server\ai;$(ProjectDir)shared;$(ProjectDir)sdk;$(ProjectDir)eos;$(ProjectDir)thirdparty;$(ProjectDir)ida;$(ProjectDir)vsdk;$(ProjectDir)vsdk\public;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
-    <LibraryPath>$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)thirdparty\steam\lib;$(ProjectDir)thirdparty\minhook\lib;$(SolutionDir)thirdparty\mimalloc\$(Configuration);$(VC_LibraryPath_X64);$(WindowsSDK_LibraryPath_x64);$(LibraryPath)</LibraryPath>
+    <LibraryPath>$(ProjectDir)vcpkg_installed\x64-windows\lib;$(ProjectDir)thirdparty\steam\lib;$(ProjectDir)thirdparty\minhook\lib;$(SolutionDir)thirdparty\mimalloc\$(Configuration);$(VC_LibraryPath_X64);$(WindowsSDK_LibraryPath_x64);$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Label="Vcpkg">
     <VcpkgEnabled>true</VcpkgEnabled>

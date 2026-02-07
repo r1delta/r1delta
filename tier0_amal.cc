@@ -30,8 +30,8 @@
 #include <winsock2.h>
 
 #include "core.h"
-#include "arena.hh"
-#include "tctx.hh"
+#include "arena.h"
+#include "tctx.h"
 
 /*
 #include "beardbgon.h"
@@ -73,7 +73,7 @@
 */
 
 //~ mrsteyk: C++ files
-#include "arena.cc"
+#include "arena.cpp"
 #include "tctx.cpp"
 
 #include "bitbuf.cpp"
