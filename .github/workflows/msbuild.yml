@@ -28,7 +28,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-2025-vs2026
     outputs:
       # Pass the path to the directory containing the prepared files
       artifact_path: ${{ steps.format_files.outputs.output_dir }}
