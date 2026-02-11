@@ -808,7 +808,10 @@ void __stdcall LoaderNotificationCallback(
 			RegisterConVar("delta_hud_show_challenge_completed", "1", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Show challenge completed notification.");
 			RegisterConVar("delta_hud_show_chat", "1", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Show chat.");
 			RegisterConVar("delta_hud_show_flyout", "1", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Show information about your weapons when you switch between them.");
+			RegisterConVar("delta_hud_show_hitmarkers", "1", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Show hitmarkers. 0: No hitmarkers. 1: Show all hitmarkers. 2: Only normal hitmarker. 3: Only weak/critical hitmarker.");
+			RegisterConVar("delta_hud_show_keybind_icons", "1", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Show persistent button prompts for your weapons and abilities on the HUD.");
 			RegisterConVar("delta_hud_show_levelup", "1", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Show level-up notification.");
+			RegisterConVar("delta_hud_show_obituaries", "1", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Show obituaries for player kills and deaths.");
 			RegisterConVar("delta_hud_show_titan_earnings", "1", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Show titan timer earnings below the crosshair.");
 			RegisterConVar("delta_hud_show_vdu", "1", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Show character VDUs on the top right.");
 			RegisterConVar("delta_hud_show_xpbar", "1", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Show XP bar.");
