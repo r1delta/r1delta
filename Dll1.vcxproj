@@ -401,6 +401,7 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
     <Import Project="$(VCTargetsPath)\BuildCustomizations\masm.targets" />
+    <Import Project="packages\YY-Thunks.1.1.9\build\native\YY-Thunks.targets" Condition="Exists('packages\YY-Thunks.1.1.9\build\native\YY-Thunks.targets')" />
   </ImportGroup>
   <PropertyGroup Label="Vcpkg" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <VcpkgAdditionalInstallOptions>--overlay-ports=$(SolutionDir)overlays/ports --overlay-triplets=$(SolutionDir)custom-triplets</VcpkgAdditionalInstallOptions>
@@ -408,4 +409,10 @@
   <PropertyGroup Label="Vcpkg" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <VcpkgAdditionalInstallOptions>--overlay-ports=$(SolutionDir)overlays/ports --overlay-triplets=$(SolutionDir)custom-triplets</VcpkgAdditionalInstallOptions>
   </PropertyGroup>
+  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
+    <PropertyGroup>
+      <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
+    </PropertyGroup>
+    <Error Condition="!Exists('packages\YY-Thunks.1.1.9\build\native\YY-Thunks.targets')" Text="$([System.String]::Format('$(ErrorText)', 'packages\YY-Thunks.1.1.9\build\native\YY-Thunks.targets'))" />
+  </Target>
 </Project>
