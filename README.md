@@ -52,7 +52,7 @@ REGEDIT4
 - [@PANCHO7532](https://github.com/PANCHO7532)
 - [@quadruple](https://github.com/quad-damage)
 - [@mv](https://github.com/mvoolt)
-- [@bt](https://github.com/eepycats)
+- [@NachosChipeados](https://github.com/NachosChipeados)
 - [@dogecore](https://github.com/HappyDOGE)
 - [@Allusive](https://github.com/AllusiveWheat)
 - [@koutsie](https://github.com/koutsie)
