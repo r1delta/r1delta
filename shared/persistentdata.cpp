@@ -26,6 +26,7 @@ class PDef;
 // Network message handling
 #include <unordered_map>
 #include <cstdint>
+#include <charconv>
 
 using R1OPersistentUserData = std::unordered_map<std::string, std::string>;
 static std::unordered_map<int, R1OPersistentUserData> s_R1OPersistentUserDataByPlayer;
@@ -63,51 +64,34 @@ bool R1OStorePersistentUserDataConVar(int playerSlot, const char* name, const ch
 	return true;
 }
 
-static const char* R1OFindPersistentUserDataConVar(int playerSlot, const char* name, const char* defaultValue)
+bool R1OGetPersistentUserDataConVar(int playerSlot, const char* name, std::string& value)
 {
 	if (!IsR1ODedicatedServer() || playerSlot < 0 || playerSlot >= 64
 		|| !IsR1OPersistentUserDataName(name))
-		return defaultValue;
+		return false;
 	const auto player = s_R1OPersistentUserDataByPlayer.find(playerSlot);
 	if (player == s_R1OPersistentUserDataByPlayer.end())
-		return defaultValue;
-	const auto value = player->second.find(name);
-	return value != player->second.end() ? value->second.c_str() : defaultValue;
+		return false;
+	const auto found = player->second.find(name);
+	if (found == player->second.end())
+		return false;
+	value = found->second;
+	return true;
+}
+
+static const char* R1OFindPersistentUserDataConVar(int playerSlot, const char* name, const char* defaultValue)
+{
+	static thread_local std::string value;
+	return R1OGetPersistentUserDataConVar(playerSlot, name, value) ? value.c_str() : defaultValue;
 }
 
 static void* R1OGetEntityFromScriptArgument(HSQUIRRELVM vm, SQInteger index)
 {
-	SQObject object = {};
-	if (!sq_getstackobj || SQ_FAILED(sq_getstackobj(nullptr, vm, index, &object))
-		|| object._type != OT_INSTANCE || !object._unVal.pInstance)
-		return nullptr;
-
-	__try {
-		auto context = *reinterpret_cast<uintptr_t**>(
-			reinterpret_cast<uintptr_t>(object._unVal.pInstance) + 0x40);
-		if (!context || !context[0])
-			return nullptr;
-		void* entity = reinterpret_cast<void*>(context[0]);
-		if (context[1]) {
-			void* adapter = *reinterpret_cast<void**>(context[1] + 0x40);
-			if (adapter) {
-				void** vtable = *reinterpret_cast<void***>(adapter);
-				if (vtable && vtable[0]) {
-					using UnwrapEntityFn = void*(__fastcall*)(void*, void*);
-					entity = reinterpret_cast<UnwrapEntityFn>(vtable[0])(adapter, entity);
-				}
-			}
-		}
-		return entity;
-	}
-	__except (EXCEPTION_EXECUTE_HANDLER) {
-		return nullptr;
-	}
+	return sq_getentity(vm, index);
 }
 
-static int R1OPlayerSlotFromScriptArgument(HSQUIRRELVM vm, SQInteger index)
+static int R1OPlayerSlotFromEntity(void* entity)
 {
-	void* entity = R1OGetEntityFromScriptArgument(vm, index);
 	if (!entity || !pGlobalVarsServer || !pGlobalVarsServer->pEdicts)
 		return -1;
 
@@ -142,6 +126,22 @@ static int R1OPlayerSlotFromScriptArgument(HSQUIRRELVM vm, SQInteger index)
 		return -1;
 	}
 }
+
+static int R1OPlayerSlotFromScriptArgument(HSQUIRRELVM vm, SQInteger index)
+{
+	return R1OPlayerSlotFromEntity(R1OGetEntityFromScriptArgument(vm, index));
+}
+
+static bool ParseR1OPersistentInteger(const std::string& value, int& result)
+{
+	if (value.empty())
+		return false;
+	const char* begin = value.data();
+	const char* end = begin + value.size();
+	const auto parsed = std::from_chars(begin, end, result);
+	return parsed.ec == std::errc() && parsed.ptr == end;
+}
+
 #include <shlobj.h>
 #include <filesystem>
 #include <iostream>
@@ -1184,12 +1184,12 @@ bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 
 			if (!PDef::IsValidKeyAndValue(nameStr, valueStr)) {
 				Warning("Invalid persistent data convar: key=%s value=%s\n", var.name, var.value);
-				continue;
+				return false;
 			}
 
 			if (!SafePrefixConVarName(var.name, sizeof(var.name), PERSIST_COMMAND" ")) {
 				Warning("Failed to prefix persistent data convar\n");
-				continue;
+				return false;
 			}
 		}
 		else {
@@ -1369,9 +1369,14 @@ KeyValues* GetClientConVarsKV(short index) {
 
 void Script_XPChanged_Rebuild(void* pPlayer) {
 	if (IsR1ODedicatedServer()) {
-		// R1O/TFO class-native binding calls this through the SQ VM, and TFO player
-		// object/entity layouts are not R1-compatible. XP is already defaulted by
-		// script-memory persistence, so do not touch R1 player net fields here.
+		const int playerSlot = R1OPlayerSlotFromEntity(pPlayer);
+		std::string value;
+		int xp = 0;
+		if (playerSlot < 0
+			|| !R1OGetPersistentUserDataConVar(playerSlot, PERSIST_COMMAND" xp", value)
+			|| !ParseR1OPersistentInteger(value, xp))
+			return;
+		*reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pPlayer) + 0x1834) = xp;
 		return;
 	}
 
@@ -1398,7 +1403,15 @@ void Script_XPChanged_Rebuild(void* pPlayer) {
 
 void Script_GenChanged_Rebuild(void* pPlayer) {
 	if (IsR1ODedicatedServer()) {
-		// See Script_XPChanged_Rebuild: avoid the R1 player layout on TFO SQ/entity objects.
+		const int playerSlot = R1OPlayerSlotFromEntity(pPlayer);
+		std::string value;
+		int generation = 0;
+		if (playerSlot < 0
+			|| !R1OGetPersistentUserDataConVar(playerSlot, PERSIST_COMMAND" gen", value)
+			|| !ParseR1OPersistentInteger(value, generation))
+			return;
+		generation = (std::max)(0, (std::min)(9, generation));
+		*reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pPlayer) + 0x183C) = generation;
 		return;
 	}
 

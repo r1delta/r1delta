@@ -34,6 +34,7 @@
 
 #include <WinSock2.h>
 #include <ws2tcpip.h>
+#include <d3d11.h>
 
 #include "core.h"
 #include "r1o_runtime_paths.h"
@@ -603,6 +604,7 @@ using MaterialSystemDx11ResetD3DResourcePointersType = void(__fastcall*)();
 using MaterialSystemDx11FlushConstantBufferUpdatesType = __int64(__fastcall*)();
 using MaterialSystemDx11InitializeMaterialType = __int64(__fastcall*)(__int64 material, __int64 vmt, __int64 vmtPatches, __int64 context);
 using MaterialSystemDx11IsErrorMaterialType = __int64(__fastcall*)(__int64 material);
+using MaterialSystemDx11OnLevelShutdownType = void(__fastcall*)(void* materialSystem);
 static MaterialSystemDx11SelectShaderResourceType MaterialSystemDx11SelectShaderResourceOriginal;
 static MaterialSystemDx11SelectShaderStageResourceType MaterialSystemDx11SelectShaderStageResourceOriginal;
 static MaterialSystemDx11CreateInputLayoutType MaterialSystemDx11CreateInputLayoutOriginal;
@@ -611,6 +613,7 @@ static MaterialSystemDx11ResetD3DResourcePointersType MaterialSystemDx11ResetD3D
 static MaterialSystemDx11FlushConstantBufferUpdatesType MaterialSystemDx11FlushConstantBufferUpdatesOriginal;
 static MaterialSystemDx11InitializeMaterialType MaterialSystemDx11InitializeMaterialOriginal;
 static MaterialSystemDx11IsErrorMaterialType MaterialSystemDx11IsErrorMaterialOriginal;
+static MaterialSystemDx11OnLevelShutdownType MaterialSystemDx11OnLevelShutdownOriginal;
 static bool s_MaterialSystemDx11NullResourceGuardInstalled;
 static uintptr_t s_MaterialSystemDx11Base;
 static int s_MaterialSystemDx11NullResourceLogBudget = 8;
@@ -620,6 +623,143 @@ static int s_MaterialSystemDx11ConstantBufferLogBudget = 8;
 static int s_MaterialSystemDx11InputLayoutLogBudget = 8;
 static int s_MaterialSystemDx11MaterialInitLogBudget = 8;
 static std::recursive_mutex s_MaterialSystemDx11MaterialInitMutex;
+static std::mutex s_MaterialSystemDx11LevelShutdownMutex;
+static bool MaterialSystemDx11LooksLikeUserRange(uintptr_t address, size_t size);
+
+static bool MaterialSystemDx11IsCommittedReadableRange(const void* value, size_t size)
+{
+	if (!size)
+		return true;
+
+	uintptr_t current = reinterpret_cast<uintptr_t>(value);
+	if (!MaterialSystemDx11LooksLikeUserRange(current, size))
+		return false;
+
+	const uintptr_t end = current + size - 1;
+	while (current <= end) {
+		MEMORY_BASIC_INFORMATION mbi{};
+		if (!VirtualQuery(reinterpret_cast<const void*>(current), &mbi, sizeof(mbi)))
+			return false;
+
+		if (mbi.State != MEM_COMMIT || !IsReadableProtect(mbi.Protect))
+			return false;
+
+		const uintptr_t regionEnd = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+		if (regionEnd <= current)
+			return false;
+
+		current = regionEnd;
+	}
+
+	return true;
+}
+
+static int MaterialSystemDx11LevelShutdownFenceExceptionFilter(EXCEPTION_POINTERS* info)
+{
+	if (!info || !info->ExceptionRecord || info->ExceptionRecord->ExceptionCode != EXCEPTION_ACCESS_VIOLATION)
+		return EXCEPTION_CONTINUE_SEARCH;
+	return EXCEPTION_EXECUTE_HANDLER;
+}
+
+static void MaterialSystemDx11LogLevelShutdownFence(
+	const char* result,
+	HRESULT createResult,
+	HRESULT waitResult,
+	ULONGLONG elapsedMs)
+{
+	char buffer[320];
+	_snprintf_s(
+		buffer,
+		sizeof(buffer),
+		_TRUNCATE,
+		"R1Delta: materialsystem_dx11 level-shutdown GPU fence result=%s create=0x%08lx wait=0x%08lx elapsed=%llums\n",
+		result,
+		static_cast<unsigned long>(createResult),
+		static_cast<unsigned long>(waitResult),
+		static_cast<unsigned long long>(elapsedMs));
+	OutputDebugStringA(buffer);
+}
+
+static void MaterialSystemDx11DrainGpuBeforeLevelShutdown()
+{
+	if (!s_MaterialSystemDx11Base || IsDedicatedServer())
+		return;
+
+	const ULONGLONG start = GetTickCount64();
+	HRESULT createResult = E_POINTER;
+	HRESULT waitResult = E_PENDING;
+	ID3D11Query* query = nullptr;
+	const char* result = "unavailable";
+
+	__try {
+		auto* deviceSlot = reinterpret_cast<ID3D11Device**>(s_MaterialSystemDx11Base + 0x290D88);
+		auto* contextSlot = reinterpret_cast<ID3D11DeviceContext**>(s_MaterialSystemDx11Base + 0x290D90);
+		if (!MaterialSystemDx11IsCommittedReadableRange(deviceSlot, sizeof(*deviceSlot))
+			|| !MaterialSystemDx11IsCommittedReadableRange(contextSlot, sizeof(*contextSlot))
+			|| !*deviceSlot
+			|| !*contextSlot
+			|| !MaterialSystemDx11IsCommittedReadableRange(*deviceSlot, sizeof(void*))
+			|| !MaterialSystemDx11IsCommittedReadableRange(*contextSlot, sizeof(void*))) {
+			result = "interfaces-unavailable";
+		}
+		else {
+			D3D11_QUERY_DESC desc{};
+			desc.Query = D3D11_QUERY_EVENT;
+			createResult = (*deviceSlot)->CreateQuery(&desc, &query);
+			if (FAILED(createResult) || !query) {
+				result = "create-failed";
+			}
+			else {
+				// The event is ordered after all commands already submitted to the
+				// immediate context. Waiting for it before level-shutdown callbacks
+				// prevents those callbacks from freeing resources still consumed by
+				// the NVIDIA worker thread.
+				(*contextSlot)->End(query);
+				(*contextSlot)->Flush();
+
+				constexpr ULONGLONG kFenceTimeoutMs = 2000;
+				do {
+					waitResult = (*contextSlot)->GetData(
+						query,
+						nullptr,
+						0,
+						D3D11_ASYNC_GETDATA_DONOTFLUSH);
+					if (waitResult != S_FALSE)
+						break;
+					SwitchToThread();
+				} while (GetTickCount64() - start < kFenceTimeoutMs);
+
+				result = waitResult == S_OK
+					? "complete"
+					: (waitResult == S_FALSE ? "timeout" : "wait-failed");
+			}
+		}
+	}
+	__except (MaterialSystemDx11LevelShutdownFenceExceptionFilter(GetExceptionInformation())) {
+		result = "access-violation";
+	}
+
+	if (query) {
+		__try {
+			query->Release();
+		}
+		__except (MaterialSystemDx11LevelShutdownFenceExceptionFilter(GetExceptionInformation())) {
+			result = "release-access-violation";
+		}
+	}
+
+	MaterialSystemDx11LogLevelShutdownFence(result, createResult, waitResult, GetTickCount64() - start);
+}
+
+static void __fastcall MaterialSystemDx11OnLevelShutdownGuard(void* materialSystem)
+{
+	if (!MaterialSystemDx11OnLevelShutdownOriginal)
+		return;
+
+	std::lock_guard<std::mutex> lock(s_MaterialSystemDx11LevelShutdownMutex);
+	MaterialSystemDx11DrainGpuBeforeLevelShutdown();
+	MaterialSystemDx11OnLevelShutdownOriginal(materialSystem);
+}
 
 static void MaterialSystemDx11LogMaterialInitGuard(const char* reason, __int64 material)
 {
@@ -1321,6 +1461,14 @@ void InstallMaterialSystemDx11NullShaderResourceGuard(uintptr_t materialSystemBa
 		0xB9, 0x01, 0x00, 0x00, 0x00,
 		0xB3, 0xFF
 	};
+	const unsigned char expectedOnLevelShutdownPrologue[] = {
+		0x48, 0x89, 0x74, 0x24, 0x10,
+		0x57,
+		0x48, 0x83, 0xEC, 0x20,
+		0x48, 0x63, 0xB9, 0x10, 0x09, 0x00, 0x00,
+		0x48, 0x8B, 0xF1,
+		0x48, 0x85, 0xFF
+	};
 	const bool materialInitInstalled = InstallMaterialSystemDx11CheckedHook(
 		materialSystemBase,
 		0x3AB60,
@@ -1385,8 +1533,16 @@ void InstallMaterialSystemDx11NullShaderResourceGuard(uintptr_t materialSystemBa
 		reinterpret_cast<void*>(&MaterialSystemDx11SelectShaderResourceGuard),
 		reinterpret_cast<void**>(&MaterialSystemDx11SelectShaderResourceOriginal),
 		"vertex");
+	const bool levelShutdownInstalled = InstallMaterialSystemDx11CheckedHook(
+		materialSystemBase,
+		0x4BE50,
+		expectedOnLevelShutdownPrologue,
+		sizeof(expectedOnLevelShutdownPrologue),
+		reinterpret_cast<void*>(&MaterialSystemDx11OnLevelShutdownGuard),
+		reinterpret_cast<void**>(&MaterialSystemDx11OnLevelShutdownOriginal),
+		"level-shutdown");
 
-	s_MaterialSystemDx11NullResourceGuardInstalled = materialInitInstalled || isErrorMaterialInstalled || resetInstalled || constantFlushInstalled || textureInstalled || inputLayoutInstalled || stageInstalled || vertexInstalled;
+	s_MaterialSystemDx11NullResourceGuardInstalled = materialInitInstalled || isErrorMaterialInstalled || resetInstalled || constantFlushInstalled || textureInstalled || inputLayoutInstalled || stageInstalled || vertexInstalled || levelShutdownInstalled;
 }
 
 static bool IsVPhysicsGuardNegativeStackIndexDisabled()
@@ -10581,6 +10737,17 @@ static __int64 __fastcall R1OCbuf_Dispatch(__int64 context, __int64 command, int
 			? R1OCbuf_DispatchOriginal(context, command, source, flags)
 			: 0);
 
+	// TFO creates the server VM while its initial script file-scope traversal
+	// is still active.  The native map bootstrap executes server.cfg after that
+	// traversal is complete.  Mark autorun ready only after the exec callback
+	// returns so addon scripts can safely use nested IncludeFile calls.
+	if (nameCopy[0]
+		&& !_stricmp(nameCopy, "exec")
+		&& arg1Copy[0]
+		&& (!_stricmp(arg1Copy, "server.cfg") || !_stricmp(arg1Copy, "server"))) {
+		MarkR1OServerAutorunBootstrapComplete();
+	}
+
 	if (overriddenIpArgument) {
 		__try {
 			*overriddenIpArgument = originalIpArgument;
@@ -12699,12 +12866,12 @@ static bool __fastcall R1ONETSetConVarReadFromBuffer(__int64 message, __int64 bi
 			std::string valueStr(var.value);
 			if (!PDef::IsValidKeyAndValue(nameStr, valueStr)) {
 				Warning("Invalid persistent data convar: key=%s value=%s\n", var.name, var.value);
-				continue;
+				return false;
 			}
 
 			if (!SafePrefixConVarName(var.name, sizeof(var.name), PERSIST_COMMAND" ")) {
 				Warning("Failed to prefix persistent data convar\n");
-				continue;
+				return false;
 			}
 		}
 		else {
@@ -15503,45 +15670,79 @@ static bool TryResolveR1ODediLooseReplacementPath(const char* fileName, char* ou
 			*it = '\\';
 	}
 
-	const char* candidates[5] = {};
+	const char* candidates[10] = {};
 	char cacheRelative[MAX_PATH] = {};
 	char rootRelative[MAX_PATH] = {};
 	char vscriptRelative[MAX_PATH] = {};
+	char vscriptNutRelative[MAX_PATH] = {};
+	char normalizedNutRelative[MAX_PATH] = {};
 	char playlistAliasRelative[MAX_PATH] = {};
 	size_t candidateCount = 0;
+	const auto addCandidate = [&](const char* candidate) {
+		if (!candidate || !candidate[0] || candidateCount >= std::size(candidates))
+			return;
+		for (size_t i = 0; i < candidateCount; ++i) {
+			if (!_stricmp(candidates[i], candidate))
+				return;
+		}
+		candidates[candidateCount++] = candidate;
+	};
 
 	const char* cacheMarker = strstr(normalized, "\\r1delta_r1o_vpk_cache\\");
 	if (cacheMarker) {
 		_snprintf_s(cacheRelative, sizeof(cacheRelative), _TRUNCATE, "%s", cacheMarker + strlen("\\r1delta_r1o_vpk_cache\\"));
-		candidates[candidateCount++] = cacheRelative;
+		addCandidate(cacheRelative);
 	}
 
 	if (normalized[0] && normalized[1] == ':') {
 		if (BuildR1ODediRelativeModPath(normalized, rootRelative, sizeof(rootRelative)))
-			candidates[candidateCount++] = rootRelative;
+			addCandidate(rootRelative);
 	}
 	else {
-		candidates[candidateCount++] = normalized;
+		addCandidate(normalized);
 	}
 
-	const bool hasSeparator = strchr(normalized, '\\') || strchr(normalized, '/');
-	if (!hasSeparator && strrchr(normalized, '.')) {
+	const char* normalizedExtension = strrchr(normalized, '.');
+	const char* normalizedSeparator = strrchr(normalized, '\\');
+	if (!normalizedExtension
+		|| (normalizedSeparator && normalizedExtension < normalizedSeparator)) {
+		_snprintf_s(
+			normalizedNutRelative,
+			sizeof(normalizedNutRelative),
+			_TRUNCATE,
+			"%s.nut",
+			normalized);
+		addCandidate(normalizedNutRelative);
+	}
+
+	if (_strnicmp(normalized, "scripts\\vscripts\\", strlen("scripts\\vscripts\\")) != 0) {
 		_snprintf_s(vscriptRelative, sizeof(vscriptRelative), _TRUNCATE, "scripts\\vscripts\\%s", normalized);
-		candidates[candidateCount++] = vscriptRelative;
+		addCandidate(vscriptRelative);
+		if (!normalizedExtension
+			|| (normalizedSeparator && normalizedExtension < normalizedSeparator)) {
+			_snprintf_s(
+				vscriptNutRelative,
+				sizeof(vscriptNutRelative),
+				_TRUNCATE,
+				"scripts\\vscripts\\%s.nut",
+				normalized);
+			addCandidate(vscriptNutRelative);
+		}
 	}
 
 	if (!_stricmp(normalized, "tfoplaylists.txt")) {
 		_snprintf_s(playlistAliasRelative, sizeof(playlistAliasRelative), _TRUNCATE, "playlists.txt");
-		candidates[candidateCount++] = playlistAliasRelative;
+		addCandidate(playlistAliasRelative);
 	}
 
 	for (size_t i = 0; i < candidateCount; ++i) {
 		const char* relative = candidates[i];
 		if (!relative || !relative[0])
 			continue;
-		if (_stricmp(relative, "playlists.txt") && !FileCache::GetInstance().TryReplaceFile(relative))
-			continue;
-		if (BuildR1ODediLooseModPath(relative, outPath, outPathSize))
+		if (!_stricmp(relative, "playlists.txt")
+			&& BuildR1ODediLooseModPath(relative, outPath, outPathSize))
+			return true;
+		if (FileCache::GetInstance().ResolveReplacementFile(relative, outPath, outPathSize))
 			return true;
 	}
 

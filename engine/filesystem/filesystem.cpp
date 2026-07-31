@@ -426,9 +426,23 @@ bool InstallVPKDirectoryLoadFlagRepair(uintptr_t filesystemBase)
 		return false;
 	}
 
+	// This function is called from the filesystem loader notification because
+	// map archives may be mounted before InitAddons.  Do not rely on an
+	// unrelated later MH_EnableHook(MH_ALL_HOOKS): if that boundary has not run
+	// yet, or compression hooks are disabled, the affected directory can be
+	// parsed while this hook is still dormant.  Leaving the installed flag
+	// clear on failure also lets InitAddons retry the enable.
+	const MH_STATUS enableStatus = MH_EnableHook(target);
+	if (enableStatus != MH_OK && enableStatus != MH_ERROR_ENABLED) {
+		Warning(
+			"R1Delta: VPK directory load-flag repair hook enable failed status=%d\n",
+			static_cast<int>(enableStatus));
+		return false;
+	}
+
 	s_VPKDirectoryLoadFlagRepairInstalled = true;
 	OutputDebugStringA(
-		"R1Delta: VPK directory load-flag repair hook installed\n");
+		"R1Delta: VPK directory load-flag repair hook installed and enabled\n");
 	return true;
 }
 

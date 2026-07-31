@@ -38,6 +38,7 @@ __int64 CConVar__GetSplitScreenPlayerSlot(char* thisptr);
 void setinfopersist_cmd(const CCommand& args);
 bool R1OReplacePersistentUserDataForPlayer(int playerSlot, const std::vector<NetMessageCvar_t>& values);
 bool R1OStorePersistentUserDataConVar(int playerSlot, const char* name, const char* value);
+bool R1OGetPersistentUserDataConVar(int playerSlot, const char* name, std::string& value);
 
 bool IsValidUserInfo(const char* value, int length = -1);
 struct CBaseClient;

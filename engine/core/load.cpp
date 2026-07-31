@@ -1981,7 +1981,31 @@ static bool ClientLooksLikeUserRange(uintptr_t address, size_t size)
 
 static bool ClientIsReadableRange(const void* value, size_t size)
 {
-	return ClientLooksLikeUserRange(reinterpret_cast<uintptr_t>(value), size);
+	if (!size)
+		return true;
+
+	uintptr_t current = reinterpret_cast<uintptr_t>(value);
+	if (!ClientLooksLikeUserRange(current, size))
+		return false;
+
+	const uintptr_t end = current + size - 1;
+	while (current <= end) {
+		MEMORY_BASIC_INFORMATION mbi{};
+		if (!VirtualQuery(reinterpret_cast<const void*>(current), &mbi, sizeof(mbi)))
+			return false;
+
+		const DWORD protect = mbi.Protect & 0xff;
+		if (mbi.State != MEM_COMMIT || (mbi.Protect & PAGE_GUARD) || protect == PAGE_NOACCESS)
+			return false;
+
+		const uintptr_t regionEnd = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+		if (regionEnd <= current)
+			return false;
+
+		current = regionEnd;
+	}
+
+	return true;
 }
 
 static const char* ClientNetStringCommandText(__int64 message)
@@ -7196,7 +7220,7 @@ static __int64 __fastcall ClientNetReceivePacket(unsigned int frameTime, __int64
 
 	static int logBudget = 128;
 	PacketLogSnapshot snapshot{};
-	if (logBudget > 0 && packet && ClientLooksLikeUserRange(static_cast<uintptr_t>(packet), 116)) {
+	if (logBudget > 0 && packet && ClientIsReadableRange(reinterpret_cast<const void*>(packet), 116)) {
 		// NET_ReceivePacket owns the packet and may release or recycle its
 		// payload before returning. Capture diagnostics while the input lifetime
 		// is still valid; never inspect packet storage after the original call.
@@ -7206,7 +7230,7 @@ static __int64 __fastcall ClientNetReceivePacket(unsigned int frameTime, __int64
 			const unsigned char* payload = *reinterpret_cast<unsigned char**>(packet + 40);
 			if (payload && snapshot.length > 0 && snapshot.length <= 4096) {
 				const size_t bytesToCopy = static_cast<size_t>(snapshot.length < 16 ? snapshot.length : 16);
-				if (ClientLooksLikeUserRange(reinterpret_cast<uintptr_t>(payload), bytesToCopy)) {
+				if (ClientIsReadableRange(payload, bytesToCopy)) {
 					memcpy(snapshot.firstBytes, payload, bytesToCopy);
 					snapshot.valid = true;
 				}
@@ -7352,7 +7376,7 @@ static __int64 __fastcall ClientNetConfig(char enableNetworking)
 
 static void InstallClientNetConfigPortHook(uintptr_t engineBase)
 {
-	if (!ShouldInstallR1OClientDebugHooks() || s_ClientNetConfigHookInstalled || !engineBase || IsDedicatedServer())
+	if (s_ClientNetConfigHookInstalled || !engineBase || IsDedicatedServer())
 		return;
 
 	s_ClientNetConfigEngineBase = engineBase;
@@ -8135,10 +8159,11 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		InstallClientRecvTableMergeHooks(engine_base);
 		InstallClientCopyNewEntityHook(engine_base);
 		InstallClientNetReceivePacketHook(engine_base);
-		InstallClientNetConfigPortHook(engine_base);
 		InstallClientLightProbeBlendHook(engine_base);
 		InstallClientModelLightingHook(engine_base);
 	}
+	if (!IsDedicatedServer())
+		InstallClientNetConfigPortHook(engine_base);
 	if (installClientDebugHooks)
 		PatchClientStaticPropLodNoMatchSentinel(engine_base);
 

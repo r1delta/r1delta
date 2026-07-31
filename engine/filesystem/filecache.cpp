@@ -37,7 +37,7 @@ void FileCache::ScanDirectory(const std::filesystem::path& directory,
             // Log specific error if exists
             Warning("Error accessing directory '%s': %s\n", directory.string().c_str(), ec.message().c_str());
         }
-        else if (&directory == &r1deltaAddonsPath || &directory == &r1deltaBasePath) {
+        else if (currentAddonsFolders || directory == r1deltaBasePath) {
             // Only warn if the primary base directories don't exist
             Msg("Directory '%s' not found for scanning.\n", directory.string().c_str());
         }
@@ -46,8 +46,8 @@ void FileCache::ScanDirectory(const std::filesystem::path& directory,
 
 
     // Ensure the base addon directory itself is added if requested
-    if (currentAddonsFolders && directory == r1deltaAddonsPath) {
-        currentAddonsFolders->insert(r1deltaAddonsPath.string());
+    if (currentAddonsFolders) {
+        currentAddonsFolders->insert(directory.string());
     }
 
 
@@ -68,7 +68,7 @@ void FileCache::ScanDirectory(const std::filesystem::path& directory,
         }
         else if (entry.is_directory(ec) && !ec) {
             // If we are scanning the top-level addons directory, add this subdirectory to the addon cache
-            if (currentAddonsFolders && std::filesystem::equivalent(directory, r1deltaAddonsPath, ec) && !ec)
+            if (currentAddonsFolders)
             {
                 currentAddonsFolders->insert(normalizedPathString);
                 // Don't scan recursively into the addon folder itself here,
@@ -110,17 +110,26 @@ void FileCache::UpdateCache() {
 
             //Msg("Starting file cache scan...\n");
 
+            // Dedicated startup changes the working directory from the Delta
+            // executable directory to the installed game directory after this
+            // DLL and the cache thread have already started.  Resolve r1/addons
+            // for every scan so the addon-refresh rescan follows that change
+            // instead of remaining pinned to the launcher's directory.
+            std::filesystem::path addonRoot =
+                std::filesystem::current_path() / "r1" / "addons";
+            addonRoot.make_preferred();
+
             // Create directories if they don't exist (optional, depends on desired behavior)
             std::error_code ec;
-            std::filesystem::create_directories(r1deltaAddonsPath, ec);
-            if (ec) Warning("Could not create directory: %s: %s\n", r1deltaAddonsPath.string().c_str(), ec.message().c_str());
+            std::filesystem::create_directories(addonRoot, ec);
+            if (ec) Warning("Could not create directory: %s: %s\n", addonRoot.string().c_str(), ec.message().c_str());
 
 
             // Scan base r1delta directory (excluding addons)
             ScanDirectory(r1deltaBasePath, newCache);
 
             // Scan addons directory - this collects addon folders AND their files
-            ScanDirectory(r1deltaAddonsPath, newCache, &newAddonsFolderCache);
+            ScanDirectory(addonRoot, newCache, &newAddonsFolderCache);
 
             //Msg("File cache scan complete. Found %zu files, %zu addon folders.\n", newCache.size(), newAddonsFolderCache.size());
 
@@ -129,6 +138,7 @@ void FileCache::UpdateCache() {
                 SRWGuard lock(&cacheMutex);
                 cache = std::move(newCache);
                 addonsFolderCache = std::move(newAddonsFolderCache);
+                r1deltaAddonsPath = std::move(addonRoot);
                 addonsFolderCacheHashes.clear();
                 for (const auto& k : addonsFolderCache)
                 {
@@ -387,6 +397,203 @@ bool FileCache::TryReplaceFile(const char* pszRelativeFilePath) {
     } // Release shared lock
 
     return false; // Not found in any checked location
+}
+
+bool FileCache::ResolveReplacementFile(
+    const char* pszRelativeFilePath,
+    char* pszResolvedPath,
+    size_t resolvedPathSize) {
+    if (!pszRelativeFilePath || !pszRelativeFilePath[0]
+        || !pszResolvedPath || resolvedPathSize == 0) {
+        return false;
+    }
+
+    pszResolvedPath[0] = '\0';
+
+    std::filesystem::path relativePath(pszRelativeFilePath);
+    relativePath = relativePath.lexically_normal();
+    if (relativePath.empty() || relativePath.is_absolute()) {
+        return false;
+    }
+
+    auto component = relativePath.begin();
+    if (component != relativePath.end() && *component == "*") {
+        relativePath = relativePath.lexically_relative("*");
+    }
+    if (relativePath.empty() || relativePath.is_absolute()) {
+        return false;
+    }
+    for (const auto& part : relativePath) {
+        if (part == "..") {
+            return false;
+        }
+    }
+
+    auto copyRegularFile = [&](const std::filesystem::path& root) {
+        std::error_code ec;
+        std::filesystem::path candidate = root / relativePath;
+        candidate.make_preferred();
+        if (!std::filesystem::is_regular_file(candidate, ec) || ec) {
+            return false;
+        }
+
+        const std::string path = candidate.string();
+        if (path.size() + 1 > resolvedPathSize) {
+            return false;
+        }
+        memcpy(pszResolvedPath, path.c_str(), path.size() + 1);
+        return true;
+    };
+
+    std::vector<std::filesystem::path> roots;
+    {
+        SRWGuardShared lock(&cacheMutex);
+        roots.push_back(r1deltaBasePath);
+        for (const std::string& addonDirectory : addonsFolderCache)
+            roots.emplace_back(addonDirectory);
+    }
+
+    // FileCache can be constructed before R1Delta_DS changes cwd to the
+    // installed game.  Resolve the live r1/addons tree as well as the latest
+    // completed cache snapshot so early autorun does not lose persistent
+    // addons while a requested rescan is still in flight.
+    std::error_code ec;
+    const std::filesystem::path liveAddonRoot =
+        std::filesystem::current_path(ec) / "r1" / "addons";
+    if (!ec) {
+        roots.push_back(liveAddonRoot);
+        for (const auto& entry : std::filesystem::directory_iterator(
+            liveAddonRoot,
+            std::filesystem::directory_options::skip_permission_denied,
+            ec)) {
+            if (ec)
+                break;
+            if (entry.is_directory(ec) && !ec)
+                roots.push_back(entry.path());
+            ec.clear();
+        }
+    }
+
+    for (const std::filesystem::path& root : roots) {
+        if (copyRegularFile(root)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::vector<std::string> FileCache::FindReplacementFileNames(
+    const char* pszRelativeDirectory,
+    const char* pszPattern) {
+    std::vector<std::string> results;
+    if (!pszRelativeDirectory || !pszRelativeDirectory[0]
+        || !pszPattern || !pszPattern[0]) {
+        return results;
+    }
+
+    if (!initialized.load(std::memory_order_acquire)) {
+        AcquireSRWLockShared(&cacheMutex);
+        do {
+            SleepConditionVariableSRW(
+                &cacheCondition,
+                &cacheMutex,
+                INFINITE,
+                CONDITION_VARIABLE_LOCKMODE_SHARED);
+        } while (!initialized.load(std::memory_order_acquire));
+        ReleaseSRWLockShared(&cacheMutex);
+    }
+
+    std::filesystem::path relativeDirectory(pszRelativeDirectory);
+    relativeDirectory = relativeDirectory.lexically_normal();
+    if (relativeDirectory.empty() || relativeDirectory.is_absolute()) {
+        return results;
+    }
+    for (const auto& part : relativeDirectory) {
+        if (part == "..") {
+            return results;
+        }
+    }
+
+    const std::string pattern(pszPattern);
+    const size_t wildcard = pattern.find('*');
+    const std::string prefix = pattern.substr(0, wildcard);
+    const std::string suffix =
+        wildcard == std::string::npos ? std::string() : pattern.substr(wildcard + 1);
+    const auto matchesPattern = [&](const std::string& name) {
+        if (wildcard == std::string::npos)
+            return _stricmp(name.c_str(), pattern.c_str()) == 0;
+        if (name.size() < prefix.size() + suffix.size())
+            return false;
+        return _strnicmp(name.c_str(), prefix.c_str(), prefix.size()) == 0
+            && _stricmp(name.c_str() + name.size() - suffix.size(), suffix.c_str()) == 0;
+    };
+
+    std::unordered_set<std::string, HashStrings, std::equal_to<>> seen;
+    const auto scanRoot = [&](const std::filesystem::path& root) {
+        std::error_code ec;
+        const std::filesystem::path directory = root / relativeDirectory;
+        if (!std::filesystem::is_directory(directory, ec) || ec)
+            return;
+
+        for (const auto& entry : std::filesystem::directory_iterator(
+            directory,
+            std::filesystem::directory_options::skip_permission_denied,
+            ec)) {
+            if (ec)
+                break;
+            if (!entry.is_regular_file(ec) || ec) {
+                ec.clear();
+                continue;
+            }
+            const std::string name = entry.path().filename().string();
+            if (!matchesPattern(name))
+                continue;
+
+            std::string folded = name;
+            std::transform(
+                folded.begin(),
+                folded.end(),
+                folded.begin(),
+                [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+            if (seen.insert(folded).second)
+                results.push_back(name);
+        }
+    };
+
+    {
+        SRWGuardShared lock(&cacheMutex);
+        scanRoot(r1deltaBasePath);
+        for (const std::string& addonDirectory : addonsFolderCache)
+            scanRoot(std::filesystem::path(addonDirectory));
+    }
+
+    // See ResolveReplacementFile: the dedicated launcher changes cwd after
+    // the cache thread starts.  Enumerate the live persistent addon root so
+    // startup autorun is correct even before the asynchronous rescan commits.
+    std::error_code ec;
+    const std::filesystem::path liveAddonRoot =
+        std::filesystem::current_path(ec) / "r1" / "addons";
+    if (!ec) {
+        scanRoot(liveAddonRoot);
+        for (const auto& entry : std::filesystem::directory_iterator(
+            liveAddonRoot,
+            std::filesystem::directory_options::skip_permission_denied,
+            ec)) {
+            if (ec)
+                break;
+            if (entry.is_directory(ec) && !ec)
+                scanRoot(entry.path());
+            ec.clear();
+        }
+    }
+
+    std::sort(
+        results.begin(),
+        results.end(),
+        [](const std::string& lhs, const std::string& rhs) {
+            return _stricmp(lhs.c_str(), rhs.c_str()) < 0;
+        });
+    return results;
 }
 
 // filecache.cpp (continued)

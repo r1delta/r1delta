@@ -20,6 +20,7 @@
 #include <intrin.h>
 #include "memory.h"
 #include "filesystem.h"
+#include "filecache.h"
 #include "defs.h"
 #include "factory.h"
 #include "core.h"
@@ -440,6 +441,7 @@ AddSquirrelReg_t AddSquirrelReg;
 
 static bool RunR1OTfoScriptCode(R1SquirrelVM* vm, const char* code, const char* sourceName);
 static std::atomic<R1SquirrelVM*> s_R1OTfoPendingServerAutorunVm{ nullptr };
+static std::atomic<bool> s_R1OTfoServerAutorunBootstrapComplete{ false };
 //
 //const char* __fastcall Script_GetConVarString(const char* a1, __int64 a2, __int64 a3)
 //{
@@ -564,11 +566,38 @@ void* __fastcall CSquirrelVM__GetEntityFromInstance_Rebuild(__int64 a2, __int64 
 
 void* sq_getentity(HSQUIRRELVM v, SQInteger iStackPos)
 {
-	if (IsR1ODedicatedServer())
+	SQObject obj;
+	if (!sq_getstackobj || SQ_FAILED(sq_getstackobj(nullptr, v, iStackPos, &obj)))
 		return nullptr;
 
-	SQObject obj;
-	sq_getstackobj(nullptr, v, iStackPos, &obj);
+	if (IsR1ODedicatedServer()) {
+		if (obj._type != OT_INSTANCE || !obj._unVal.pInstance)
+			return nullptr;
+
+		__try {
+			auto context = *reinterpret_cast<uintptr_t**>(
+				reinterpret_cast<uintptr_t>(obj._unVal.pInstance) + 0x40);
+			if (!context || !context[0])
+				return nullptr;
+
+			void* entity = reinterpret_cast<void*>(context[0]);
+			if (context[1]) {
+				void* adapter = *reinterpret_cast<void**>(context[1] + 0x40);
+				if (adapter) {
+					void** vtable = *reinterpret_cast<void***>(adapter);
+					if (vtable && vtable[0]) {
+						using UnwrapEntityFn = void*(__fastcall*)(void*, void*);
+						entity = reinterpret_cast<UnwrapEntityFn>(vtable[0])(adapter, entity);
+					}
+				}
+			}
+			return entity;
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER) {
+			return nullptr;
+		}
+	}
+
 	auto constant = (G_server + 0xD42040);
 	return CSquirrelVM__GetEntityFromInstance_Rebuild((__int64)(&obj), (__int64)((char**)constant));
 }
@@ -809,50 +838,40 @@ int GetMods(HSQUIRRELVM v) {
 
 
 
-void AddXp(HSQUIRRELVM v) {
-	if (IsR1ODedicatedServer())
-		return;
-
-	auto r1sqvm = GetServerVMPtr();
+SQInteger AddXp(HSQUIRRELVM v) {
 	SQInteger xp;
-	sq_getinteger(r1sqvm, v, 1, &xp);
+	if (SQ_FAILED(sq_getinteger(IsR1ODedicatedServer() ? nullptr : GetServerVMPtr(), v, 3, &xp)))
+		return sq_throwerror(v, "xp must be an integer");
 	auto player = sq_getentity(v, 2);
-
-	if (player) {
-		auto player_ptr = reinterpret_cast<__int64>(player);
-		CPlayer__SetXPRebuild(player_ptr, xp);
-	}
+	if (!player)
+		return sq_throwerror(v, "player is null");
+	CPlayer__SetXPRebuild(reinterpret_cast<__int64>(player), xp);
+	return 0;
 }
 
 
 
-void SetGenSQ(HSQUIRRELVM v) {
-	if (IsR1ODedicatedServer())
-		return;
-
-	auto r1sqvm = GetServerVMPtr();
+SQInteger SetGenSQ(HSQUIRRELVM v) {
 	SQInteger gen;
-	sq_getinteger(r1sqvm, v, 1, &gen);
+	if (SQ_FAILED(sq_getinteger(IsR1ODedicatedServer() ? nullptr : GetServerVMPtr(), v, 3, &gen)))
+		return sq_throwerror(v, "generation must be an integer");
 	auto player = sq_getentity(v, 2);
-
-	if (player) {
-		auto player_ptr = reinterpret_cast<__int64>(player);
-		SetGen(player_ptr, gen);
-	}
+	if (!player)
+		return sq_throwerror(v, "player is null");
+	SetGen(reinterpret_cast<__int64>(player), gen);
+	return 0;
 }
 
-void SetRanked(HSQUIRRELVM v) {
-	if (IsR1ODedicatedServer())
-		return;
-
-	auto r1sqvm = GetServerVMPtr();
+SQInteger SetRanked(HSQUIRRELVM v) {
 	SQBool ranked;
 	const void* player = sq_getentity(v, 2);
-	sq_getbool(r1sqvm, v, 1, &ranked);
-	if (player) {
-		auto player_ptr = reinterpret_cast<__int64>(player);
-		*(bool*)(player_ptr + 0x1844) = ranked;
-	}
+	if (!player)
+		return sq_throwerror(v, "player is null");
+	if (SQ_FAILED(sq_getbool(IsR1ODedicatedServer() ? nullptr : GetServerVMPtr(), v, 3, &ranked)))
+		return sq_throwerror(v, "ranked state must be a boolean");
+	auto player_ptr = reinterpret_cast<__int64>(player);
+	*(bool*)(player_ptr + 0x1844) = ranked != 0;
+	return 0;
 }
 
 SQInteger Script_GetLoadingStatusText(HSQUIRRELVM v)
@@ -880,40 +899,28 @@ SQInteger Script_IsDedicated(HSQUIRRELVM v)
 }
 
 SQInteger Script_Server_SetActiveBurnCardIndex(HSQUIRRELVM v) {
-	if (IsR1ODedicatedServer())
-		return 1;
-
 	const void* player = sq_getentity(v, 2);
-	if (!player) {
+	if (!player)
 		return sq_throwerror(v, "player is null");
-	}
-	auto r1_vm = GetServerVMPtr();
+
 	SQInteger index;
-	sq_getinteger(r1_vm, v, -1, &index);
+	if (SQ_FAILED(sq_getinteger(IsR1ODedicatedServer() ? nullptr : GetServerVMPtr(), v, 3, &index)))
+		return sq_throwerror(v, "burn card index must be an integer");
 
-	if (player) {
-		auto player_ptr = reinterpret_cast<__int64>(player);
-		*(int*)(player_ptr + 0x1A14) = index;
-	}
-
-	return 1;
+	auto player_ptr = reinterpret_cast<__int64>(player);
+	*(int*)(player_ptr + 0x1A14) = index;
+	return 0;
 }
 
 SQInteger Script_Server_GetActiveBurnCardIndex(HSQUIRRELVM v) {
-	if (IsR1ODedicatedServer()) {
-		sq_pushinteger(nullptr, v, 0);
-		return 1;
-	}
-
 	const void* player = sq_getentity(v, 2);
-	if (!player) {
+	if (!player)
 		return sq_throwerror(v, "player is null");
-	}
-	auto r1_vm = GetServerVMPtr();
+
 	auto player_ptr = reinterpret_cast<__int64>(player);
 	int value = *(int*)(player_ptr + 0x1A14);
 	
-	sq_pushinteger(r1_vm, v, value);
+	sq_pushinteger(IsR1ODedicatedServer() ? nullptr : GetServerVMPtr(), v, value);
 
 	return 1;
 }
@@ -1150,6 +1157,11 @@ int GetR1DVersion(HSQUIRRELVM v) {
 	return 1;
 }
 
+int GetR1DDisplayVersion(HSQUIRRELVM v) {
+	sq_pushstring(v, R1D_DISPLAY_VERSION, -1);
+	return 1;
+}
+
 
 
 // please god someone change this to pushconst
@@ -1364,6 +1376,143 @@ int SendShowMenu(HSQUIRRELVM v)
 }
 
 
+static bool RunR1OTfoAutorunFile(R1SquirrelVM* vm, const char* runFilename)
+{
+	if (!vm || !runFilename || !runFilename[0])
+		return false;
+
+	using OpenFunc = FileHandle_t(__thiscall*)(void*, const char*, const char*, const char*);
+	using SizeFunc = int64_t(__thiscall*)(void*, FileHandle_t);
+	using ReadFunc = int(__thiscall*)(void*, void*, int, FileHandle_t);
+	using CloseFunc = void(__thiscall*)(void*, FileHandle_t);
+
+	void* fileSystemInterface = GetR1ONativeFileSystem();
+	if (!fileSystemInterface)
+		return false;
+	const auto fileSystemVtable = *reinterpret_cast<uintptr_t**>(fileSystemInterface);
+	if (!fileSystemVtable)
+		return false;
+
+	// The first CBaseFileSystem methods are unchanged in TFO's
+	// VFileSystem017: Read/Open/Close/Size(handle) are slots 0/2/3/7.
+	const auto readFunc = reinterpret_cast<ReadFunc>(fileSystemVtable[0]);
+	const auto openFunc = reinterpret_cast<OpenFunc>(fileSystemVtable[2]);
+	const auto closeFunc = reinterpret_cast<CloseFunc>(fileSystemVtable[3]);
+	const auto sizeFunc = reinterpret_cast<SizeFunc>(fileSystemVtable[7]);
+	if (!openFunc || !sizeFunc || !readFunc || !closeFunc)
+		return false;
+
+	char scriptPath[MAX_PATH] = {};
+	_snprintf_s(
+		scriptPath,
+		sizeof(scriptPath),
+		_TRUNCATE,
+		"scripts/vscripts/%s",
+		runFilename);
+
+	char resolvedPath[MAX_PATH] = {};
+	const bool hasReplacement = FileCache::GetInstance().ResolveReplacementFile(
+		scriptPath,
+		resolvedPath,
+		sizeof(resolvedPath));
+	const char* openPath = hasReplacement ? resolvedPath : scriptPath;
+	const char* pathId = hasReplacement ? nullptr : "GAME";
+
+	constexpr int64_t kMaxAutorunScriptBytes = 8 * 1024 * 1024;
+	std::string script;
+	if (hasReplacement) {
+		HANDLE file = CreateFileA(
+			resolvedPath,
+			GENERIC_READ,
+			FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+			nullptr,
+			OPEN_EXISTING,
+			FILE_ATTRIBUTE_NORMAL,
+			nullptr);
+		if (file == INVALID_HANDLE_VALUE) {
+			Warning("R1O autorun could not open %s (error %lu).\n", resolvedPath, GetLastError());
+			return false;
+		}
+
+		LARGE_INTEGER size = {};
+		if (!GetFileSizeEx(file, &size)
+			|| size.QuadPart <= 0
+			|| size.QuadPart > kMaxAutorunScriptBytes) {
+			const DWORD error = GetLastError();
+			CloseHandle(file);
+			Warning(
+				"R1O autorun rejected %s with size %lld (error %lu).\n",
+				resolvedPath,
+				static_cast<long long>(size.QuadPart),
+				error);
+			return false;
+		}
+
+		script.resize(static_cast<size_t>(size.QuadPart));
+		DWORD bytesRead = 0;
+		const BOOL readOk = ReadFile(
+			file,
+			script.data(),
+			static_cast<DWORD>(script.size()),
+			&bytesRead,
+			nullptr);
+		const DWORD error = readOk ? ERROR_SUCCESS : GetLastError();
+		CloseHandle(file);
+		if (!readOk || bytesRead != script.size()) {
+			Warning(
+				"R1O autorun short read for %s (%lu of %zu bytes, error %lu).\n",
+				resolvedPath,
+				bytesRead,
+				script.size(),
+				error);
+			return false;
+		}
+	}
+	else {
+		FileHandle_t file = openFunc(
+			fileSystemInterface,
+			openPath,
+			"rb",
+			pathId);
+		if (!file) {
+			Warning("R1O autorun could not open %s.\n", scriptPath);
+			return false;
+		}
+
+		const int64_t fileSize = sizeFunc(fileSystemInterface, file);
+		if (fileSize <= 0 || fileSize > kMaxAutorunScriptBytes) {
+			closeFunc(fileSystemInterface, file);
+			Warning(
+				"R1O autorun rejected %s with invalid size %lld.\n",
+				scriptPath,
+				static_cast<long long>(fileSize));
+			return false;
+		}
+
+		script.resize(static_cast<size_t>(fileSize));
+		const int bytesRead = readFunc(
+			fileSystemInterface,
+			script.data(),
+			static_cast<int>(fileSize),
+			file);
+		closeFunc(fileSystemInterface, file);
+		if (bytesRead != fileSize) {
+			Warning(
+				"R1O autorun short read for %s (%d of %lld bytes).\n",
+				scriptPath,
+				bytesRead,
+				static_cast<long long>(fileSize));
+			return false;
+		}
+	}
+
+	// Legacy RunAutorunScripts invokes the VM's file runner directly.  Do not
+	// wrap this outer file in IncludeScript: TFO's native DoIncludeScript is
+	// non-reentrant, and an addon autorun that calls IncludeFile would fail
+	// while the outer IncludeScript was still active.
+	return RunR1OTfoScriptCode(vm, script.c_str(), runFilename);
+}
+
 void RunAutorunScripts(R1SquirrelVM* r1sqvm, const char* prefix) {
 	if (!r1sqvm || !prefix)
 		return;
@@ -1408,40 +1557,48 @@ void RunAutorunScripts(R1SquirrelVM* r1sqvm, const char* prefix) {
 	sprintf_s(search, "scripts/vscripts/autorun/%s", prefix);
 
 	char runFilename[MAX_PATH] = { 0 };
+	std::unordered_set<std::string, HashStrings, std::equal_to<>> executedScripts;
+	const auto runScript = [&](const char* filename) {
+		if (!filename || !filename[0])
+			return;
 
-	uintptr_t handle = 0;
-	const char* filename = FindFirst(fileSystemInterface, search, &handle);
-	while (filename) {
+		std::string folded(filename);
+		std::transform(
+			folded.begin(),
+			folded.end(),
+			folded.begin(),
+			[](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+		if (!executedScripts.insert(folded).second)
+			return;
+
 		sprintf_s(runFilename, "autorun/%s", filename);
 		if (IsR1ODedicatedServer()) {
-			char escapedFilename[MAX_PATH * 2] = {};
-			size_t escapedLength = 0;
-			for (const char* source = runFilename;
-				*source && escapedLength + 2 < sizeof(escapedFilename);
-				++source) {
-				if (*source == '\\' || *source == '"')
-					escapedFilename[escapedLength++] = '\\';
-				escapedFilename[escapedLength++] = *source;
-			}
-			escapedFilename[escapedLength] = '\0';
-
-			char code[MAX_PATH * 2 + 64] = {};
-			_snprintf_s(
-				code,
-				sizeof(code),
-				_TRUNCATE,
-				"IncludeScript(\"%s\", getroottable())",
-				escapedFilename);
-			RunR1OTfoScriptCode(r1sqvm, code, runFilename);
+			RunR1OTfoAutorunFile(r1sqvm, runFilename);
 		}
 		else {
 			sprintf_s(search, "scripts/vscripts/%s", runFilename);
 			Call<void, const char*, const char*>(r1sqvm, 20, search, runFilename);
 		}
+	};
+
+	uintptr_t handle = 0;
+	const char* filename = FindFirst(fileSystemInterface, search, &handle);
+	while (filename) {
+		runScript(filename);
 		filename = FindNext(fileSystemInterface, handle);
 	}
 	if (handle)
 		FindClose(fileSystemInterface, handle);
+
+	if (IsR1ODedicatedServer()) {
+		const std::vector<std::string> replacements =
+			FileCache::GetInstance().FindReplacementFileNames(
+				"scripts/vscripts/autorun",
+				prefix);
+		for (const std::string& replacement : replacements) {
+			runScript(replacement.c_str());
+		}
+	}
 }
 
 uintptr_t(__fastcall *oOnCreateClientScriptVM)(uintptr_t);
@@ -1514,7 +1671,11 @@ int AutoCVar(HSQUIRRELVM v) {
 		FCVAR_GAMEDLL,
 		descCopy
 	);
-	free(actualKey);
+	// ConCommandBase::Create stores the supplied name/help pointers instead of
+	// copying them.  AutoCVar's strings therefore have the same process
+	// lifetime as the ConVar itself.  In particular, do not free actualKey
+	// here: a later allocation can otherwise reuse the buffer and silently
+	// rename this ConVar to an unrelated command in lookup/autocomplete.
 
 	return 0;
 }
@@ -1687,20 +1848,36 @@ bool GetSQVMFuncs() {
 		MH_CreateHook((LPVOID)(G_launcher + 0x4D6D0), &SQFinalize_Seatbelt, (LPVOID*)&oSQFinalize);
 
 	uintptr_t baseAddress = G_vscript;
-	if (!r1oFakeDedi && G_server) {
-		if (IsDedicatedServer())
+	if (G_server) {
+		if (!r1oFakeDedi && IsDedicatedServer())
 			MH_CreateHook(reinterpret_cast<void*>(G_launcher + 0x3A5E0), &DedicatedScriptErrorHandler,
 				reinterpret_cast<void**>(&s_DedicatedScriptErrorHandlerOriginal));
-		if (MH_CreateHook(reinterpret_cast<void*>(G_server + 0x0050EA30), &CPlayer__SetXPRebuild, reinterpret_cast<void**>(&CPlayer__SetXPRebuildOrig)) != MH_OK) {
-			Msg("Failed to hook CPlayer__SetXPRebuild\n");
+
+		struct PlayerPersistenceHook {
+			uintptr_t target;
+			void* detour;
+			void** original;
+			const char* name;
+		};
+		const PlayerPersistenceHook hooks[] = {
+			{ G_server + 0x50EA30, reinterpret_cast<void*>(&CPlayer__SetXPRebuild),
+				reinterpret_cast<void**>(&CPlayer__SetXPRebuildOrig), "CPlayer::SetXP" },
+			{ G_server + 0x50E740, reinterpret_cast<void*>(&Script_XPChanged_Rebuild),
+				reinterpret_cast<void**>(&CPlayer__Script_XP_ChangedOrig), "CPlayer::XPChanged" },
+			{ G_server + 0x50E7A0, reinterpret_cast<void*>(&Script_GenChanged_Rebuild),
+				reinterpret_cast<void**>(&CPlayer__Script_Gen_Changed_Orig), "CPlayer::GenChanged" },
+		};
+		for (const PlayerPersistenceHook& hook : hooks) {
+			const R1OTfoImmediateHookResult result =
+				InstallR1OTfoImmediateHook(hook.target, hook.detour, hook.original);
+			if (!R1OTfoImmediateHookInstalled(result)) {
+				Warning(
+					"Failed to install %s hook (create=%d enable=%d)\n",
+					hook.name,
+					static_cast<int>(result.create),
+					static_cast<int>(result.enable));
+			}
 		}
-		if (MH_CreateHook(reinterpret_cast<void*>(G_server + 0x50E740), &Script_XPChanged_Rebuild, reinterpret_cast<void**>(&CPlayer__Script_XP_ChangedOrig)) != MH_OK) {
-			Msg("Failed to hook CPlayer__Script_XP_ChangedHook\n");
-		}
-		if (MH_CreateHook(reinterpret_cast<void*>(G_server + 0x50E7A0), &Script_GenChanged_Rebuild, reinterpret_cast<void**>(&CPlayer__Script_Gen_Changed_Orig)) != MH_OK) {
-			Msg("Failed to hook CPlayer__Script_XP_ChangedHook\n");
-		}
-		MH_EnableHook(MH_ALL_HOOKS);
 	}
 	if (!r1oFakeDedi) {
 	sq_compile = reinterpret_cast<sq_compile_t>(baseAddress + (IsDedicatedServer() ? 0x14A50 : 0x14970));
@@ -1836,6 +2013,17 @@ bool GetSQVMFuncs() {
 		"string",    // Returns a string
 		"",
 		"Get R1Delta version"
+	);
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_UI,
+		"GetR1DDisplayVersion",
+		(SQFUNCTION)GetR1DDisplayVersion,
+		".",
+		1,
+		"string",
+		"",
+		"Get the human-readable R1Delta release label"
 	);
 	
 	REGISTER_SCRIPT_FUNCTION(
@@ -2277,8 +2465,13 @@ void* CScriptManager__CreateNewVM_R1OTFO(__int64 a1, int a2, unsigned int a3) {
 		realvmptr = vmPtr;
 		// The normal R1 autorun hook sits above CScriptManager::CreateNewVM,
 		// after the VM's root table and IncludeScript helper are ready.  R1O
-		// does not use that hook, so defer its server autorun pass to the first
-		// dedicated RunFrame after this VM has been fully initialized.
+		// does not use that hook.  Leave this VM pending and reset its bootstrap
+		// readiness; the engine command dispatcher marks it ready only after
+		// the map's native "exec server.cfg" callback has returned, when the
+		// initial file-scope traversal is no longer re-entrant.
+		s_R1OTfoServerAutorunBootstrapComplete.store(
+			false,
+			std::memory_order_release);
 		s_R1OTfoPendingServerAutorunVm.store(
 			reinterpret_cast<R1SquirrelVM*>(vmPtr),
 			std::memory_order_release);
@@ -2729,9 +2922,20 @@ static bool RunR1OTfoScriptCode(R1SquirrelVM* vm, const char* code, const char* 
 	return SQ_SUCCEEDED(compileResult) && SQ_SUCCEEDED(callResult);
 }
 
+void MarkR1OServerAutorunBootstrapComplete()
+{
+	if (!IsR1ODedicatedServer())
+		return;
+
+	if (s_R1OTfoPendingServerAutorunVm.load(std::memory_order_acquire))
+		s_R1OTfoServerAutorunBootstrapComplete.store(true, std::memory_order_release);
+}
+
 bool RunR1OServerAutorunScriptsIfPending()
 {
 	if (!IsR1ODedicatedServer())
+		return false;
+	if (!s_R1OTfoServerAutorunBootstrapComplete.load(std::memory_order_acquire))
 		return false;
 
 	R1SquirrelVM* pendingVm =
@@ -2746,6 +2950,7 @@ bool RunR1OServerAutorunScriptsIfPending()
 		pendingVm,
 		nullptr,
 		std::memory_order_acq_rel);
+	s_R1OTfoServerAutorunBootstrapComplete.store(false, std::memory_order_release);
 	if (AreR1OFakeDediVerboseLogsEnabled())
 		OutputDebugStringA("R1Delta: completed R1O server autorun pass\n");
 	return true;

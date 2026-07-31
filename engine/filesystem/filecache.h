@@ -8,6 +8,7 @@
 #include <shared_mutex>
 #include <string>       // Include string
 #include <string_view> // Include string_view
+#include <vector>
 #include "core.h"       // For HashStrings, Msg, Warning, ZoneScoped etc.
 #include "filesystem.h" // For GetExecutableDirectory, V_IsAbsolutePath
 
@@ -81,6 +82,13 @@ public:
     // Public interface methods (remain instance methods)
     //bool FileExists(const std::string& filePath); // Checks exact absolute path match
     bool TryReplaceFile(const char* pszRelativeFilePath); // Checks relative paths in specific locations
+    bool ResolveReplacementFile(
+        const char* pszRelativeFilePath,
+        char* pszResolvedPath,
+        size_t resolvedPathSize);
+    std::vector<std::string> FindReplacementFileNames(
+        const char* pszRelativeDirectory,
+        const char* pszPattern);
     void UpdateCache(); // Starts the background update loop (or performs initial scan)
 
     void RequestManualRescan() {
