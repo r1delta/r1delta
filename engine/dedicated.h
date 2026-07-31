@@ -5,17 +5,11 @@
 #include "factory.h"
 #include "bitbuf.h"
 struct vtableRef2Engines {
-#if defined(BUILD_DEBUG)
 	const char* name;
-#endif
 	uintptr_t offset_engine;
 	uintptr_t offset_engine_ds;
 };
-#if defined(BUILD_DEBUG)
 #define VTABLEREF2ENGINES(N, E, EDS) { (N), (E), (EDS) }
-#else
-#define VTABLEREF2ENGINES(N, E, EDS) { (E), (EDS) }
-#endif
 
 #if !defined(BUILD_DEBUG)
 const
@@ -48,6 +42,7 @@ inline vtableRef2Engines netMessages[] = {
 	VTABLEREF2ENGINES("SVC_CmdKeyValues", 0x63EB88, 0x432A78),
 	VTABLEREF2ENGINES("SVC_CreateStringTable", 0x63EDC8, 0x432D68),
 	VTABLEREF2ENGINES("SVC_CrosshairAngle", 0x5F5F38, 0x40E728),
+	VTABLEREF2ENGINES("SVC_DLCNotifyOwnership", 0x5F5AA8, 0),
 	VTABLEREF2ENGINES("SVC_DurangoVoiceData", 0x5F5E18, 0x40E608),
 	VTABLEREF2ENGINES("SVC_EntityMessage", 0x5F5FC8, 0x40E7B8),
 	VTABLEREF2ENGINES("SVC_FixAngle", 0x5F5EA8, 0x40E698),
@@ -60,8 +55,11 @@ inline vtableRef2Engines netMessages[] = {
 	VTABLEREF2ENGINES("SVC_PersistenceNotifySaved", 0x5F5A08, 0x40E3B8),
 	VTABLEREF2ENGINES("SVC_PersistenceUpdateVar", 0x5F5968, 0x40E318),
 	VTABLEREF2ENGINES("SVC_PlaylistChange", 0x63EC18, 0x432B08),
+	VTABLEREF2ENGINES("SVC_PlaylistOverrides", 0x5F5B38, 0),
+	VTABLEREF2ENGINES("SVC_PlaylistPlayerCounts", 0x5F5BC8, 0),
 	VTABLEREF2ENGINES("SVC_Playlists", 0x5F5CF8, 0x40E4E8),
 	VTABLEREF2ENGINES("SVC_Print", 0x5F5718, 0x40E168),
+	VTABLEREF2ENGINES("SVC_RequestScreenshot", 0x5F6178, 0),
 	VTABLEREF2ENGINES("SVC_SendTable", 0x5F63E8, 0x40EB28),
 	VTABLEREF2ENGINES("SVC_ServerInfo", 0x5F6358, 0x40EA98),
 	VTABLEREF2ENGINES("SVC_ServerTick", 0x5F5688, 0x40E0D8),
@@ -76,6 +74,12 @@ inline vtableRef2Engines netMessages[] = {
 	VTABLEREF2ENGINES("SVC_VoiceData", 0x5F5D88, 0x40E578),
 };
 void InitDedicated();
+void InstallR1ORemoteAccessHooks(uintptr_t engineBase);
+void InstallR1OPlaylistCompatibilityHooks(uintptr_t engineBase);
+void ApplyR1OPlaylistAfterServerAutorun(uintptr_t engineBase);
+bool EnsureR1ORconListenerForPort(uintptr_t engineBase, int port);
+void EnsureR1ONetConsoleInitialized(uintptr_t engineBase);
+void InstallAdminServerHooks(uintptr_t adminServerBase);
 
 // AddSearchPath hook for dedicated server
 extern __int64 (*oAddSearchPathDedi)(__int64 a1, const char* a2, __int64 a3, unsigned int a4);

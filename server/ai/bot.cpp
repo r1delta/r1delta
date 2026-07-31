@@ -61,10 +61,16 @@ void AddBotDummyConCommand(const CCommand& args)
     char botName[16]; // Buffer for "BotXX" + null terminator
     snprintf(botName, sizeof(botName), "Bot%02d", g_botCounter);
 
-    HMODULE serverModule = GetModuleHandleA("server.dll");
+    const char* serverModuleName = IsR1ODedicatedServer() ? "server_local.dll" : "server.dll";
+    HMODULE serverModule = GetModuleHandleA(serverModuleName);
+    if (!serverModule && IsR1ODedicatedServer())
+    {
+        serverModuleName = "server.dll";
+        serverModule = GetModuleHandleA(serverModuleName);
+    }
     if (!serverModule)
     {
-        Warning("Failed to get handle for server.dll\n");
+        Warning("Failed to get handle for %s\n", serverModuleName);
         return;
     }
 
@@ -72,7 +78,7 @@ void AddBotDummyConCommand(const CCommand& args)
     CreateInterfaceFn CreateInterface = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(serverModule, "CreateInterface"));
     if (!CreateInterface)
     {
-        Warning("Failed to get CreateInterface function from server.dll\n");
+        Warning("Failed to get CreateInterface function from %s\n", serverModuleName);
         return;
     }
 

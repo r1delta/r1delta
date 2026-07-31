@@ -1,0 +1,19 @@
+{
+  "name": "r1delta-script-errors",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "test": "node --test",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:migrate:local": "wrangler d1 migrations apply r1delta-script-errors --local",
+    "db:migrate": "wrangler d1 migrations apply r1delta-script-errors --remote"
+  },
+  "devDependencies": {
+    "wrangler": "^4.36.0"
+  }
+}

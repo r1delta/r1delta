@@ -35,6 +35,7 @@
 // =========-----===--------==------------------------==++********#*#####**#######*########%%
 
 #include "core.h"
+#include "r1o_runtime_paths.h"
 #include <MinHook.h>
 #include "load.h"
 #include "core.h"
@@ -44,6 +45,7 @@
 #include "eos_network.h"
 #include <tier0/platform.h>
 #include <KnownFolders.h>
+#include <string>
 
 //- mrsteyk: override new/delete
 #include "memory.h"
@@ -91,6 +93,7 @@ void* operator new[](std::size_t n, std::align_val_t al, const std::nothrow_t&) 
 #endif
 
 #include "crashhandler.h"
+LONG WINAPI CustomCrashHandler(EXCEPTION_POINTERS* exInfo);
 #if BUILD_PROFILE
 #include "tracy-0.11.1/public/TracyClient.cpp"
 #endif
@@ -101,8 +104,116 @@ void* operator new[](std::size_t n, std::align_val_t al, const std::nothrow_t&) 
 #pragma comment(lib, "Pathcch.lib")
 uint64_t g_PerformanceFrequency;
 int G_is_dedi;
+int G_is_r1o_dedi;
 typedef const char* (__cdecl* wine_get_version_func)();
 CPUInformation* (__fastcall* GetCPUInformationOriginal)();
+
+using LoadLibraryAType = HMODULE(WINAPI*)(LPCSTR);
+using LoadLibraryWType = HMODULE(WINAPI*)(LPCWSTR);
+using LoadLibraryExAType = HMODULE(WINAPI*)(LPCSTR, HANDLE, DWORD);
+using LoadLibraryExWType = HMODULE(WINAPI*)(LPCWSTR, HANDLE, DWORD);
+using MessageBoxAType = int(WINAPI*)(HWND, LPCSTR, LPCSTR, UINT);
+using MessageBoxWType = int(WINAPI*)(HWND, LPCWSTR, LPCWSTR, UINT);
+using SetUnhandledExceptionFilterType = LPTOP_LEVEL_EXCEPTION_FILTER(WINAPI*)(LPTOP_LEVEL_EXCEPTION_FILTER);
+
+static LoadLibraryAType LoadLibraryAOriginal;
+static LoadLibraryWType LoadLibraryWOriginal;
+static LoadLibraryExAType LoadLibraryExAOriginal;
+static LoadLibraryExWType LoadLibraryExWOriginal;
+static MessageBoxAType MessageBoxAOriginal;
+static MessageBoxWType MessageBoxWOriginal;
+static SetUnhandledExceptionFilterType SetUnhandledExceptionFilterOriginal;
+
+static bool IsBugTrapModuleNameA(LPCSTR name)
+{
+	return name && StrStrIA(name, "BugTrap") != nullptr;
+}
+
+static bool IsBugTrapModuleNameW(LPCWSTR name)
+{
+	return name && StrStrIW(name, L"BugTrap") != nullptr;
+}
+
+static HMODULE WINAPI LoadLibraryAHook(LPCSTR name)
+{
+	if (IsBugTrapModuleNameA(name)) {
+		SetLastError(ERROR_MOD_NOT_FOUND);
+		OutputDebugStringA("[r1delta_core] Suppressed BugTrap LoadLibraryA.\n");
+		return nullptr;
+	}
+	return LoadLibraryAOriginal(name);
+}
+
+static HMODULE WINAPI LoadLibraryWHook(LPCWSTR name)
+{
+	if (IsBugTrapModuleNameW(name)) {
+		SetLastError(ERROR_MOD_NOT_FOUND);
+		OutputDebugStringA("[r1delta_core] Suppressed BugTrap LoadLibraryW.\n");
+		return nullptr;
+	}
+	return LoadLibraryWOriginal(name);
+}
+
+static HMODULE WINAPI LoadLibraryExAHook(LPCSTR name, HANDLE file, DWORD flags)
+{
+	if (IsBugTrapModuleNameA(name)) {
+		SetLastError(ERROR_MOD_NOT_FOUND);
+		OutputDebugStringA("[r1delta_core] Suppressed BugTrap LoadLibraryExA.\n");
+		return nullptr;
+	}
+	return LoadLibraryExAOriginal(name, file, flags);
+}
+
+static HMODULE WINAPI LoadLibraryExWHook(LPCWSTR name, HANDLE file, DWORD flags)
+{
+	if (IsBugTrapModuleNameW(name)) {
+		SetLastError(ERROR_MOD_NOT_FOUND);
+		OutputDebugStringA("[r1delta_core] Suppressed BugTrap LoadLibraryExW.\n");
+		return nullptr;
+	}
+	return LoadLibraryExWOriginal(name, file, flags);
+}
+
+static int WINAPI MessageBoxAHook(HWND hwnd, LPCSTR text, LPCSTR caption, UINT type)
+{
+	if (caption && _stricmp(caption, "TitanFall-Online") == 0) {
+		OutputDebugStringA("[r1delta_core] Suppressed TitanFall-Online stale-process MessageBoxA.\n");
+		return IDOK;
+	}
+	return MessageBoxAOriginal(hwnd, text, caption, type);
+}
+
+static int WINAPI MessageBoxWHook(HWND hwnd, LPCWSTR text, LPCWSTR caption, UINT type)
+{
+	if (caption && _wcsicmp(caption, L"TitanFall-Online") == 0) {
+		OutputDebugStringA("[r1delta_core] Suppressed TitanFall-Online stale-process MessageBoxW.\n");
+		return IDOK;
+	}
+	return MessageBoxWOriginal(hwnd, text, caption, type);
+}
+
+static LPTOP_LEVEL_EXCEPTION_FILTER WINAPI SetUnhandledExceptionFilterHook(LPTOP_LEVEL_EXCEPTION_FILTER filter)
+{
+	OutputDebugStringA("[r1delta_core] Suppressed external SetUnhandledExceptionFilter.\n");
+	return CustomCrashHandler;
+}
+
+static void InstallCrashOwnershipHooks()
+{
+	HMODULE kernel32 = GetModuleHandleA("kernel32.dll");
+	HMODULE user32 = GetModuleHandleA("user32.dll");
+	if (kernel32) {
+		MH_CreateHook(GetProcAddress(kernel32, "LoadLibraryA"), &LoadLibraryAHook, reinterpret_cast<LPVOID*>(&LoadLibraryAOriginal));
+		MH_CreateHook(GetProcAddress(kernel32, "LoadLibraryW"), &LoadLibraryWHook, reinterpret_cast<LPVOID*>(&LoadLibraryWOriginal));
+		MH_CreateHook(GetProcAddress(kernel32, "LoadLibraryExA"), &LoadLibraryExAHook, reinterpret_cast<LPVOID*>(&LoadLibraryExAOriginal));
+		MH_CreateHook(GetProcAddress(kernel32, "LoadLibraryExW"), &LoadLibraryExWHook, reinterpret_cast<LPVOID*>(&LoadLibraryExWOriginal));
+		MH_CreateHook(GetProcAddress(kernel32, "SetUnhandledExceptionFilter"), &SetUnhandledExceptionFilterHook, reinterpret_cast<LPVOID*>(&SetUnhandledExceptionFilterOriginal));
+	}
+	if (user32) {
+		MH_CreateHook(GetProcAddress(user32, "MessageBoxA"), &MessageBoxAHook, reinterpret_cast<LPVOID*>(&MessageBoxAOriginal));
+		MH_CreateHook(GetProcAddress(user32, "MessageBoxW"), &MessageBoxWHook, reinterpret_cast<LPVOID*>(&MessageBoxWOriginal));
+	}
+}
 
 const CPUInformation* GetCPUInformationDet()
 {
@@ -131,6 +242,104 @@ extern "C" {
 	static void __fastcall StubFunction() {
 		// 0xC3 is RET instruction - this function just returns immediately
 		return;
+	}
+
+	static const char* TFOEnvironment_GetExecutableBaseDir()
+	{
+		static char s_baseDirectory[MAX_PATH];
+		if (s_baseDirectory[0])
+			return s_baseDirectory;
+
+		DWORD len = GetModuleFileNameA(NULL, s_baseDirectory, sizeof(s_baseDirectory));
+		if (!len || len >= sizeof(s_baseDirectory)) {
+			strcpy_s(s_baseDirectory, ".");
+			return s_baseDirectory;
+		}
+
+		char* lastBackslash = strrchr(s_baseDirectory, '\\');
+		char* lastSlash = strrchr(s_baseDirectory, '/');
+		char* lastSeparator = lastBackslash;
+		if (!lastSeparator || (lastSlash && lastSlash > lastSeparator))
+			lastSeparator = lastSlash;
+		if (lastSeparator)
+			*lastSeparator = '\0';
+
+		return s_baseDirectory;
+	}
+
+	static const char* TFOEnvironment_GetTFOBinDir()
+	{
+		static const std::string s_binDirectory = r1delta::r1o::ResolveTFOBinDirectoryA();
+		return s_binDirectory.c_str();
+	}
+
+	static const char* TFOEnvironment_GetInstallBaseDir()
+	{
+		static char s_installDirectory[MAX_PATH];
+		if (s_installDirectory[0])
+			return s_installDirectory;
+
+		const DWORD len = GetCurrentDirectoryA(sizeof(s_installDirectory), s_installDirectory);
+		if (!len || len >= sizeof(s_installDirectory))
+			return TFOEnvironment_GetExecutableBaseDir();
+
+		return s_installDirectory;
+	}
+
+	static const std::wstring* TFOEnvironment_GetModDirectoryW()
+	{
+		static std::wstring s_modDirectory;
+		if (!s_modDirectory.empty())
+			return &s_modDirectory;
+
+		char modDirectory[MAX_PATH];
+		_snprintf_s(
+			modDirectory,
+			sizeof(modDirectory),
+			_TRUNCATE,
+			"%s\\r1delta",
+			TFOEnvironment_GetExecutableBaseDir());
+
+		wchar_t wideModDirectory[MAX_PATH];
+		const int converted = MultiByteToWideChar(
+			CP_UTF8,
+			0,
+			modDirectory,
+			-1,
+			wideModDirectory,
+			static_cast<int>(_countof(wideModDirectory)));
+		if (converted > 0)
+			s_modDirectory.assign(wideModDirectory);
+		else
+			s_modDirectory.assign(L".");
+
+		return &s_modDirectory;
+	}
+
+	static unsigned int __fastcall TFOEnvironment_HasBaseDirectory(void*)
+	{
+		return TFOEnvironment_GetExecutableBaseDir()[0] ? 1u : 0u;
+	}
+
+	static const char* __fastcall TFOEnvironment_GetBinDirectory(void*)
+	{
+		return TFOEnvironment_GetTFOBinDir();
+	}
+
+	static const std::wstring* __fastcall TFOEnvironment_GetModDirectory(void*)
+	{
+		return TFOEnvironment_GetModDirectoryW();
+	}
+
+	static const char* __fastcall TFOEnvironment_GetBaseDirectory(void*)
+	{
+		return TFOEnvironment_GetInstallBaseDir();
+	}
+
+	static void __fastcall TFOFileLogger_Log(void*, const char* message)
+	{
+		Msg("%s\n", message ? message : "(null)");
+		OutputDebugStringA(message);
 	}
 
 	// Create vtable with 256 function pointers all pointing to StubFunction
@@ -205,6 +414,17 @@ extern "C" {
 	static struct {
 		void** vtable = g_stubVTable;
 	} g_innerObject;
+
+	static struct TFOEnvironmentVTableInstaller {
+		TFOEnvironmentVTableInstaller()
+		{
+			g_stubVTable[2] = reinterpret_cast<void*>(TFOEnvironment_HasBaseDirectory);
+			g_stubVTable[3] = reinterpret_cast<void*>(TFOEnvironment_GetBinDirectory);
+			g_stubVTable[4] = reinterpret_cast<void*>(TFOEnvironment_GetModDirectory);
+			g_stubVTable[6] = reinterpret_cast<void*>(TFOEnvironment_GetBaseDirectory);
+			g_stubVTable[14] = reinterpret_cast<void*>(TFOFileLogger_Log);
+		}
+	} g_tfoEnvironmentVTableInstaller;
 
 
 
@@ -476,6 +696,17 @@ void CCommandLine__CreateCmdLine(void* thisptr, char* commandline) {
 	}
 	else {
 		OutputDebugStringA("[r1delta_core] No user launch arguments appended (Internal storage was empty).\n");
+	}
+
+	if (IsR1ODedicatedServer() && strstr(finalCmdLineStr.c_str(), "-nocheckoid") == nullptr) {
+		if (!finalCmdLineStr.empty()) finalCmdLineStr += " ";
+		finalCmdLineStr += "-nocheckoid";
+		OutputDebugStringA("[r1delta_core] Appended -nocheckoid for R1O fake dedicated server.\n");
+	}
+	if (IsR1ODedicatedServer() && strstr(finalCmdLineStr.c_str(), "-nosound") == nullptr) {
+		if (!finalCmdLineStr.empty()) finalCmdLineStr += " ";
+		finalCmdLineStr += "-nosound";
+		OutputDebugStringA("[r1delta_core] Appended -nosound for R1O fake dedicated server.\n");
 	}
 
 	// Check if -novid is already present to avoid duplication
@@ -766,9 +997,13 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 				// Compare the executable name with "r1delta_ds.exe"
 				if (_stricmp(exeName, "r1delta_ds.exe") == 0) {
 					G_is_dedi = 1;
+					const char* rawCommandLine = GetCommandLineA();
+					G_is_r1o_dedi = rawCommandLine &&
+						(strstr(rawCommandLine, "-r1o_dedi") || strstr(rawCommandLine, "-r1o_dedicated"));
 				}
 				else {
 					G_is_dedi = 0;
+					G_is_r1o_dedi = 0;
 
 						nvapi_stuff();
 					
@@ -777,6 +1012,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 			else {
 				// If GetModuleFileNameA fails, assume it's not a dedicated server.
 				G_is_dedi = 0;
+				G_is_r1o_dedi = 0;
 			}
 		}
 
@@ -785,6 +1021,8 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 		SetDllDirectoryW(L"r1delta\\bin");
 		InstallExceptionHandler();
 		MH_Initialize();
+		LoadLibraryA("user32.dll");
+		InstallCrashOwnershipHooks();
 		LoadLibraryA("shell32.dll");
 		if (!IsDedicatedServer()) {
 			//MigrateOldSaveLocation();
@@ -799,7 +1037,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 		initialisePatchInstructions();
 
 
-		if(!IsNoConsole() && !IsDedicatedServer())
+		if ((!IsNoConsole() && !IsDedicatedServer()) || IsR1ODedicatedServer())
 			InitLoggingHooks();
 		StartFileCacheThread();
 
@@ -828,6 +1066,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 		else {
 			G_launcher = (uintptr_t)GetModuleHandleW(L"dedicated.dll");
 			G_vscript = G_launcher;
+			HookDedicatedEngineLoader(G_launcher);
 			LDR_DLL_LOADED_NOTIFICATION_DATA* ndata = GetModuleNotificationData(L"dedicated.dll");
 			doBinaryPatchForFile(*ndata);
 			FreeModuleNotificationData(ndata);

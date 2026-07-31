@@ -8,4 +8,5 @@ typedef long SQInteger;
 void SetupSurfaceRenderHooks();
 void SetupSquirrelErrorNotificationHooks();
 void SetupLocalizeIface();
+void MarkDeltaWatermarkProgressBarUpdated();
 SQInteger Script_AddDamageNumber(HSQUIRRELVM v);

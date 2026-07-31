@@ -1,0 +1,4 @@
+LIBRARY GFSDK_SSAO.win64.dll
+EXPORTS
+    GFSDK_SSAO_CreateContext_D3D11 @1
+    GFSDK_SSAO_CreateContext_GL @2

@@ -95,6 +95,9 @@
     <ClInclude Include="engine\core\appsystem.h">
       <Filter>engine\core</Filter>
     </ClInclude>
+    <ClInclude Include="engine\core\player_resource_18.h">
+      <Filter>engine\core</Filter>
+    </ClInclude>
     <ClInclude Include="engine\core\core.h">
       <Filter>engine\core</Filter>
     </ClInclude>
@@ -107,7 +110,13 @@
     <ClInclude Include="engine\core\load.h">
       <Filter>engine\core</Filter>
     </ClInclude>
+    <ClInclude Include="engine\core\r1o_runtime_paths.h">
+      <Filter>engine\core</Filter>
+    </ClInclude>
     <!-- engine\hooks -->
+    <ClInclude Include="engine\hooks\minhook_checked.h">
+      <Filter>engine\hooks</Filter>
+    </ClInclude>
     <ClInclude Include="engine\hooks\patcher.h">
       <Filter>engine\hooks</Filter>
     </ClInclude>
@@ -126,6 +135,15 @@
       <Filter>engine\filesystem</Filter>
     </ClInclude>
     <ClInclude Include="engine\filesystem\filesystem.h">
+      <Filter>engine\filesystem</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\filesystem\r1o_vpk.h">
+      <Filter>engine\filesystem</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\filesystem\r1o_vpk_index_cache.h">
+      <Filter>engine\filesystem</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\filesystem\vpk_directory_repair.h">
       <Filter>engine\filesystem</Filter>
     </ClInclude>
     <!-- engine\memory -->
@@ -158,11 +176,17 @@
     <ClInclude Include="engine\net\networking.h">
       <Filter>engine\net</Filter>
     </ClInclude>
+    <ClInclude Include="engine\net\script_error_telemetry.h">
+      <Filter>engine\net</Filter>
+    </ClInclude>
     <!-- engine (root) -->
     <ClInclude Include="engine\auth.h">
       <Filter>engine</Filter>
     </ClInclude>
     <ClInclude Include="engine\compression.h">
+      <Filter>engine</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\compression_stream.h">
       <Filter>engine</Filter>
     </ClInclude>
     <ClInclude Include="engine\cvar.h">
@@ -232,6 +256,9 @@
     <ClInclude Include="server\misc.h">
       <Filter>server</Filter>
     </ClInclude>
+    <ClInclude Include="server\server_usercmd.h">
+      <Filter>server</Filter>
+    </ClInclude>
     <ClInclude Include="server\usermessages.h">
       <Filter>server</Filter>
     </ClInclude>
@@ -254,6 +281,9 @@
       <Filter>shared</Filter>
     </ClInclude>
     <ClInclude Include="shared\persistentdata.h">
+      <Filter>shared</Filter>
+    </ClInclude>
+    <ClInclude Include="shared\persistentdata_codec.h">
       <Filter>shared</Filter>
     </ClInclude>
     <ClInclude Include="shared\squirrel.h">
@@ -427,6 +457,12 @@
     <ClCompile Include="engine\core\dllmain.cpp">
       <Filter>engine\core</Filter>
     </ClCompile>
+    <ClCompile Include="engine\core\player_resource_18.cpp">
+      <Filter>engine\core</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\core\r1o_runtime_paths.cpp">
+      <Filter>engine\core</Filter>
+    </ClCompile>
     <ClCompile Include="engine\core\factory.cpp">
       <Filter>engine\core</Filter>
     </ClCompile>
@@ -434,6 +470,9 @@
       <Filter>engine\core</Filter>
     </ClCompile>
     <!-- engine\hooks -->
+    <ClCompile Include="engine\hooks\minhook_checked.cpp">
+      <Filter>engine\hooks</Filter>
+    </ClCompile>
     <ClCompile Include="engine\hooks\patcher.cpp">
       <Filter>engine\hooks</Filter>
     </ClCompile>
@@ -455,6 +494,15 @@
       <Filter>engine\filesystem</Filter>
     </ClCompile>
     <ClCompile Include="engine\filesystem\filesystem.cpp">
+      <Filter>engine\filesystem</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\filesystem\r1o_vpk.cpp">
+      <Filter>engine\filesystem</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\filesystem\r1o_vpk_index_cache.cpp">
+      <Filter>engine\filesystem</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\filesystem\vpk_directory_repair.cpp">
       <Filter>engine\filesystem</Filter>
     </ClCompile>
     <!-- engine\memory -->
@@ -487,11 +535,17 @@
     <ClCompile Include="engine\net\networking.cpp">
       <Filter>engine\net</Filter>
     </ClCompile>
+    <ClCompile Include="engine\net\script_error_telemetry.cpp">
+      <Filter>engine\net</Filter>
+    </ClCompile>
     <!-- engine (root) -->
     <ClCompile Include="engine\auth.cpp">
       <Filter>engine</Filter>
     </ClCompile>
     <ClCompile Include="engine\compression.cpp">
+      <Filter>engine</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\compression_stream.cpp">
       <Filter>engine</Filter>
     </ClCompile>
     <ClCompile Include="engine\cvar.cpp">
@@ -555,6 +609,9 @@
     <ClCompile Include="server\misc.cpp">
       <Filter>server</Filter>
     </ClCompile>
+    <ClCompile Include="server\server_usercmd.cpp">
+      <Filter>server</Filter>
+    </ClCompile>
     <ClCompile Include="server\usermessages.cpp">
       <Filter>server</Filter>
     </ClCompile>
@@ -574,6 +631,9 @@
       <Filter>shared</Filter>
     </ClCompile>
     <ClCompile Include="shared\persistentdata.cpp">
+      <Filter>shared</Filter>
+    </ClCompile>
+    <ClCompile Include="shared\persistentdata_codec.cpp">
       <Filter>shared</Filter>
     </ClCompile>
     <ClCompile Include="shared\squirrel.cpp">

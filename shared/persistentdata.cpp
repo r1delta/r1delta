@@ -1,4 +1,4 @@
-﻿#include "core.h"
+#include "core.h"
 #include "filesystem.h" 
 
 
@@ -17,14 +17,131 @@ class PDef;
 #include "bitbuf.h"
 #include "cvar.h"
 #include "persistentdata.h"
+#include "persistentdata_codec.h"
 #include "logging.h"
 #include "squirrel.h"
 #include "keyvalues.h"
 #include "factory.h"
+#include "load.h"
 // Network message handling
 #include <unordered_map>
 #include <cstdint>
-#include <unordered_set>
+
+using R1OPersistentUserData = std::unordered_map<std::string, std::string>;
+static std::unordered_map<int, R1OPersistentUserData> s_R1OPersistentUserDataByPlayer;
+
+static const char* R1OPersistKeyPrefix()
+{
+	return PERSIST_COMMAND" ";
+}
+
+static bool IsR1OPersistentUserDataName(const char* name)
+{
+	return name && strncmp(name, R1OPersistKeyPrefix(), strlen(R1OPersistKeyPrefix())) == 0;
+}
+
+bool R1OReplacePersistentUserDataForPlayer(int playerSlot, const std::vector<NetMessageCvar_t>& values)
+{
+	if (!IsR1ODedicatedServer() || playerSlot < 0 || playerSlot >= 64)
+		return false;
+
+	R1OPersistentUserData replacement;
+	for (const NetMessageCvar_t& var : values) {
+		if (IsR1OPersistentUserDataName(var.name))
+			replacement[var.name] = var.value;
+	}
+	s_R1OPersistentUserDataByPlayer[playerSlot] = std::move(replacement);
+	return true;
+}
+
+bool R1OStorePersistentUserDataConVar(int playerSlot, const char* name, const char* value)
+{
+	if (!IsR1ODedicatedServer() || playerSlot < 0 || playerSlot >= 64
+		|| !IsR1OPersistentUserDataName(name) || !value)
+		return false;
+	s_R1OPersistentUserDataByPlayer[playerSlot][name] = value;
+	return true;
+}
+
+static const char* R1OFindPersistentUserDataConVar(int playerSlot, const char* name, const char* defaultValue)
+{
+	if (!IsR1ODedicatedServer() || playerSlot < 0 || playerSlot >= 64
+		|| !IsR1OPersistentUserDataName(name))
+		return defaultValue;
+	const auto player = s_R1OPersistentUserDataByPlayer.find(playerSlot);
+	if (player == s_R1OPersistentUserDataByPlayer.end())
+		return defaultValue;
+	const auto value = player->second.find(name);
+	return value != player->second.end() ? value->second.c_str() : defaultValue;
+}
+
+static void* R1OGetEntityFromScriptArgument(HSQUIRRELVM vm, SQInteger index)
+{
+	SQObject object = {};
+	if (!sq_getstackobj || SQ_FAILED(sq_getstackobj(nullptr, vm, index, &object))
+		|| object._type != OT_INSTANCE || !object._unVal.pInstance)
+		return nullptr;
+
+	__try {
+		auto context = *reinterpret_cast<uintptr_t**>(
+			reinterpret_cast<uintptr_t>(object._unVal.pInstance) + 0x40);
+		if (!context || !context[0])
+			return nullptr;
+		void* entity = reinterpret_cast<void*>(context[0]);
+		if (context[1]) {
+			void* adapter = *reinterpret_cast<void**>(context[1] + 0x40);
+			if (adapter) {
+				void** vtable = *reinterpret_cast<void***>(adapter);
+				if (vtable && vtable[0]) {
+					using UnwrapEntityFn = void*(__fastcall*)(void*, void*);
+					entity = reinterpret_cast<UnwrapEntityFn>(vtable[0])(adapter, entity);
+				}
+			}
+		}
+		return entity;
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) {
+		return nullptr;
+	}
+}
+
+static int R1OPlayerSlotFromScriptArgument(HSQUIRRELVM vm, SQInteger index)
+{
+	void* entity = R1OGetEntityFromScriptArgument(vm, index);
+	if (!entity || !pGlobalVarsServer || !pGlobalVarsServer->pEdicts)
+		return -1;
+
+	__try {
+		const uintptr_t edict = *reinterpret_cast<const uintptr_t*>(
+			reinterpret_cast<uintptr_t>(entity) + 0x40);
+		const uintptr_t firstEdict = reinterpret_cast<uintptr_t>(pGlobalVarsServer->pEdicts);
+		if (edict < firstEdict + 56)
+			return -1;
+		const uintptr_t delta = edict - firstEdict;
+		if (delta % 56 != 0)
+			return -1;
+		const int playerSlot = static_cast<int>(delta / 56) - 1;
+		if (playerSlot < 0 || playerSlot >= 64)
+			return -1;
+		static int ownerLogBudget = 8;
+		if (ownerLogBudget > 0 && AreR1OFakeDediVerboseLogsEnabled()) {
+			--ownerLogBudget;
+			char message[192];
+			_snprintf_s(
+				message,
+				sizeof(message),
+				_TRUNCATE,
+				"R1Delta: R1O persistence script owner playerSlot=%d entity=%p\n",
+				playerSlot,
+				entity);
+			OutputDebugStringA(message);
+		}
+		return playerSlot;
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) {
+		return -1;
+	}
+}
 #include <shlobj.h>
 #include <filesystem>
 #include <iostream>
@@ -40,6 +157,8 @@ class PDef;
 #include <cctype>
 #include <iostream>
 #include <regex>
+#include <limits>
+#include <zstd.h>
 #include "load.h"
 #include "tctx.h"
 
@@ -811,25 +930,107 @@ void PDef::InitValidator() {
 
 std::unique_ptr<PDataValidator> PDef::s_validator;
 std::once_flag PDef::s_initFlag;
+
+namespace {
+constexpr uint32_t kPackedPDataMinEntries = 32;
+
+bool IsPersistentConVarName(const char* name)
+{
+	constexpr char prefix[] = PERSIST_COMMAND" ";
+	return name && strncmp(name, prefix, sizeof(prefix) - 1) == 0;
+}
+
+struct PackedPDataPayload {
+	std::string encoded;
+	uint32_t entryCount = 0;
+};
+
+bool BuildPackedPDataPayload(const NET_SetConVar* message, PackedPDataPayload& payload)
+{
+	if (!message || HasEngineCommandLineFlag("-r1delta_legacy_pdata_wire"))
+		return false;
+
+	std::vector<PersistentDataCodec::Entry> entries;
+	entries.reserve(message->m_ConVars.Count());
+	const size_t prefixLength = sizeof(PERSIST_COMMAND" ") - 1;
+	for (int i = 0; i < message->m_ConVars.Count(); ++i) {
+		const NetMessageCvar_t& var = message->m_ConVars[i];
+		if (!IsPersistentConVarName(var.name))
+			continue;
+
+		const char* key = var.name + prefixLength;
+		if (!PDef::IsValidKeyAndValue(key, var.value))
+			return false;
+		entries.push_back({ key, var.value });
+	}
+
+	if (entries.size() < kPackedPDataMinEntries
+		|| !PersistentDataCodec::Encode(entries, payload.encoded))
+		return false;
+	payload.entryCount = static_cast<uint32_t>(entries.size());
+	return true;
+}
+}
+
+bool IsPackedPDataWireName(const char* name)
+{
+	return name && strcmp(name, PersistentDataCodec::WireName) == 0;
+}
+
+bool DecodePackedPDataWire(const std::string& encoded, std::vector<NetMessageCvar_t>& output)
+{
+	std::vector<PersistentDataCodec::Entry> entries;
+	if (!PersistentDataCodec::Decode(encoded, entries))
+		return false;
+
+	std::vector<NetMessageCvar_t> decoded;
+	decoded.reserve(entries.size());
+	for (const PersistentDataCodec::Entry& entry : entries) {
+		NetMessageCvar_t var = {};
+		if (entry.key.size() >= sizeof(var.name) || entry.value.size() >= sizeof(var.value))
+			return false;
+		memcpy(var.name, entry.key.c_str(), entry.key.size() + 1);
+		if (!SafePrefixConVarName(var.name, sizeof(var.name), PERSIST_COMMAND" "))
+			return false;
+		memcpy(var.value, entry.value.c_str(), entry.value.size() + 1);
+		if (!PDef::IsValidKeyAndValue(var.name + sizeof(PERSIST_COMMAND" ") - 1, var.value))
+			return false;
+		decoded.push_back(var);
+	}
+	output = std::move(decoded);
+	return true;
+}
 bool NET_SetConVar__WriteToBuffer(NET_SetConVar* thisptr, bf_write& buffer) {
+	const int startBit = buffer.GetNumBitsWritten();
 	if (g_bNoSendConVar) {
-		// Write 0 ConVars
 		buffer.WriteByte(0);
 		return !buffer.IsOverflowed();
 	}
 	if (!IsDedicatedServer()) {
 		auto var = OriginalCCVar_FindVar(cvarinterface, "net_secure");
-		bool bVanilla = var->m_Value.m_nValue == 1;
-		if (bVanilla) {
+		const bool vanilla = var && var->m_Value.m_nValue == 1;
+		if (vanilla) {
 			for (int i = thisptr->m_ConVars.Count() - 1; i >= 0; --i) {
-				if (thisptr->m_ConVars[i].name[0] == '_') {
+				if (thisptr->m_ConVars[i].name[0] == '_')
 					thisptr->m_ConVars.Remove(i);
-				}
 			}
 		}
 	}
 
-	uint32_t numvars = thisptr->m_ConVars.Count();
+	PackedPDataPayload packed;
+	const bool usePackedPData = BuildPackedPDataPayload(thisptr, packed);
+	uint32_t nonPersistentCount = 0;
+	for (int i = 0; i < thisptr->m_ConVars.Count(); ++i) {
+		if (!IsPersistentConVarName(thisptr->m_ConVars[i].name))
+			++nonPersistentCount;
+	}
+	const uint32_t chunkCount = usePackedPData
+		? static_cast<uint32_t>((packed.encoded.size() + PersistentDataCodec::ChunkSize - 1) / PersistentDataCodec::ChunkSize)
+		: 0;
+	const uint32_t numvars = usePackedPData
+		? nonPersistentCount + chunkCount
+		: static_cast<uint32_t>(thisptr->m_ConVars.Count());
+
 	if (numvars < 255) {
 		buffer.WriteByte(numvars);
 	}
@@ -838,24 +1039,79 @@ bool NET_SetConVar__WriteToBuffer(NET_SetConVar* thisptr, bf_write& buffer) {
 		buffer.WriteUBitVar(numvars);
 	}
 
-	for (uint32_t i = 0; i < numvars; i++) {
-		NetMessageCvar_t* var = &thisptr->m_ConVars[i];
+	auto writeConVar = [&](NetMessageCvar_t& var) {
+		if (!IsDedicatedServer() && _stricmp(var.name, "platform_user_id") == 0 && var.value[0] == 0) {
+			ConVarR1* platformUserId = OriginalCCVar_FindVar
+				? OriginalCCVar_FindVar(cvarinterface, "platform_user_id")
+				: nullptr;
+			char fallback[32] = {};
+			if (platformUserId && platformUserId->m_Value.m_pszString && platformUserId->m_Value.m_pszString[0]) {
+				strncpy_s(fallback, sizeof(fallback), platformUserId->m_Value.m_pszString, _TRUNCATE);
+			}
+			else {
+				const unsigned long long generated =
+					100000000000000000ULL
+					+ ((static_cast<unsigned long long>(GetCurrentProcessId()) << 32) ^ GetTickCount64());
+				_snprintf_s(fallback, sizeof(fallback), _TRUNCATE, "%llu", generated);
+				if (platformUserId) {
+					if (SetConvarStringOriginal)
+						SetConvarStringOriginal(platformUserId, fallback);
+					platformUserId->m_Value.m_nValue = static_cast<int>(generated & 0x7FFFFFFF);
+				}
+			}
+			strncpy_s(var.value, sizeof(var.value), fallback, _TRUNCATE);
+		}
 
-		// Check if this is a persistent data convar
-		if (strncmp(var->name, PERSIST_COMMAND" ", 3) == 0) {
-			// Create a modified name without the prefix
-			char modifiedName[sizeof(var->name)];
-			// Set high bit on first character to mark it as persistent data
-			modifiedName[0] = var->name[3] | 0x80;
-			strcpy(modifiedName + 1, var->name + 4);
+		if (IsPersistentConVarName(var.name)) {
+			constexpr size_t prefixLength = sizeof(PERSIST_COMMAND" ") - 1;
+			char modifiedName[sizeof(var.name)] = {};
+			modifiedName[0] = static_cast<char>(static_cast<unsigned char>(var.name[prefixLength]) | 0x80);
+			strcpy_s(modifiedName + 1, sizeof(modifiedName) - 1, var.name + prefixLength + 1);
 			buffer.WriteString(modifiedName);
 		}
 		else {
-			buffer.WriteString(var->name);
+			buffer.WriteString(var.name);
 		}
-		buffer.WriteString(var->value);
+		buffer.WriteString(var.value);
+	};
+
+	for (int i = 0; i < thisptr->m_ConVars.Count(); ++i) {
+		NetMessageCvar_t& var = thisptr->m_ConVars[i];
+		if (usePackedPData && IsPersistentConVarName(var.name))
+			continue;
+		writeConVar(var);
 	}
-	return !buffer.IsOverflowed();
+
+	if (usePackedPData) {
+		for (size_t offset = 0; offset < packed.encoded.size(); offset += PersistentDataCodec::ChunkSize) {
+			const size_t length = (std::min)(PersistentDataCodec::ChunkSize, packed.encoded.size() - offset);
+			buffer.WriteString(PersistentDataCodec::WireName);
+			char chunk[PersistentDataCodec::ChunkSize + 1] = {};
+			memcpy(chunk, packed.encoded.data() + offset, length);
+			buffer.WriteString(chunk);
+		}
+	}
+
+	const bool result = !buffer.IsOverflowed();
+	static int writeLogBudget = 32;
+	if (writeLogBudget > 0 && (AreR1OFakeDediVerboseLogsEnabled() || usePackedPData)) {
+		--writeLogBudget;
+		char msg[512];
+		_snprintf_s(
+			msg,
+			sizeof(msg),
+			_TRUNCATE,
+			"R1Delta: NET_SetConVar write count=%u original=%d packedEntries=%u packedChunks=%u startBit=%d endBit=%d result=%d\n",
+			numvars,
+			thisptr->m_ConVars.Count(),
+			packed.entryCount,
+			chunkCount,
+			startBit,
+			buffer.GetNumBitsWritten(),
+			static_cast<int>(result));
+		OutputDebugStringA(msg);
+	}
+	return result;
 }
 bool SafePrefixConVarName(char* name, size_t nameBufferSize, const char* prefix) {
 	const size_t prefixLen = strlen(prefix);
@@ -890,7 +1146,12 @@ bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 		Warning("Client sent too many ConVars %d\n", numvars);
 		return false;
 	}
-	thisptr->m_ConVars.RemoveAll();
+	std::vector<NetMessageCvar_t> staged;
+	staged.reserve(numvars);
+	std::string packedPData;
+	bool sawPackedPData = false;
+	bool sawLegacyPData = false;
+	size_t decodedPersistentCount = 0;
 	for (uint32_t i = 0; i < numvars; i++) {
 		NetMessageCvar_t var;
 		if (!buffer.ReadString(var.name, sizeof(var.name)) ||
@@ -899,8 +1160,21 @@ bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 			return false;
 		}
 
+		if (IsPackedPDataWireName(var.name)) {
+			const size_t chunkLength = strlen(var.value);
+			if (!chunkLength || packedPData.size() > PersistentDataCodec::MaxEncodedSize
+				|| PersistentDataCodec::MaxEncodedSize - packedPData.size() < chunkLength) {
+				Warning("Invalid packed persistent data chunk\n");
+				return false;
+			}
+			sawPackedPData = true;
+			packedPData.append(var.value, chunkLength);
+			continue;
+		}
+
 		// Check if this is a persistent data convar by checking the high bit
-		if (var.name[0] & 0x80) {
+		if (static_cast<unsigned char>(var.name[0]) & 0x80) {
+			sawLegacyPData = true;
 			// Clear the high bit for validation
 			var.name[0] &= 0x7F;
 
@@ -925,17 +1199,57 @@ bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 			}
 
 			// Check if convar exists and has FCVAR_USERINFO flag
-			auto cvar = OriginalCCVar_FindVar(cvarinterface, var.name);
-			if (!cvar || !(cvar->m_nFlags & (FCVAR_USERINFO | FCVAR_REPLICATED))) {
+			int flags = 0;
+			if (OriginalCCVar_FindVar) {
+				if (auto* cvar = OriginalCCVar_FindVar(cvarinterface, var.name))
+					flags = cvar->m_nFlags;
+			}
+			if (!(flags & (FCVAR_USERINFO | FCVAR_REPLICATED))) {
 				Warning("Invalid userinfo convar (doesn't exist or missing FCVAR_USERINFO or FCVAR_REPLICATED flag): %s\n", var.name);
 				continue;
 			}
 		}
 
-		thisptr->m_ConVars.AddToTail(var);
+		staged.push_back(var);
 	}
 
-	return !buffer.IsOverflowed();
+	if (sawPackedPData) {
+		if (sawLegacyPData) {
+			Warning("Mixed packed and legacy persistent data payload\n");
+			return false;
+		}
+		std::vector<NetMessageCvar_t> decoded;
+		if (!DecodePackedPDataWire(packedPData, decoded)) {
+			Warning("Failed to decode packed persistent data payload\n");
+			return false;
+		}
+		decodedPersistentCount = decoded.size();
+		staged.insert(staged.end(), decoded.begin(), decoded.end());
+	}
+
+	if (buffer.IsOverflowed())
+		return false;
+	thisptr->m_ConVars.RemoveAll();
+	thisptr->m_ConVars.EnsureCapacity(static_cast<int>(staged.size()));
+	for (const NetMessageCvar_t& var : staged)
+		thisptr->m_ConVars.AddToTail(var);
+
+	if (sawPackedPData) {
+		static int packedDecodeLogBudget = 32;
+		if (packedDecodeLogBudget-- > 0) {
+			char message[256];
+			_snprintf_s(
+				message,
+				sizeof(message),
+				_TRUNCATE,
+				"R1Delta: NET_SetConVar decoded packedEntries=%zu total=%zu encodedBytes=%zu\n",
+				decodedPersistentCount,
+				staged.size(),
+				packedPData.size());
+			OutputDebugStringA(message);
+		}
+	}
+	return true;
 }
 const char* hashUserInfoKeyArena(Arena* arena, const char* key)
 {
@@ -996,6 +1310,7 @@ SQInteger Script_ClientGetPersistentData(HSQUIRRELVM v) {
 	auto varName = (char*)arena_push(arena, varName_size);
 	memcpy(varName, PERSIST_COMMAND" ", sizeof(PERSIST_COMMAND));
 	memcpy(varName + sizeof(PERSIST_COMMAND), hashedKey, hashedKey_len);
+	varName[sizeof(PERSIST_COMMAND) + hashedKey_len] = '\0';
 	
 	// NOTE(mrsteyk): hashed key can't be invalid, that must be a guarantee of hashUserInfoKey(Arena) given a valid key.
 	//                -1 cuz null terminator.
@@ -1038,15 +1353,28 @@ CBaseClientDS* g_pClientArrayDS;
 
 
 KeyValues* GetClientConVarsKV(short index) {
-	if (IsDedicatedServer())
+	if (index < 0 || IsR1ODedicatedServer())
+		return nullptr;
+	if (IsDedicatedServer()) {
+		if (!g_pClientArrayDS)
+			return nullptr;
 		return g_pClientArrayDS[index].m_ConVars;
-	else
+	}
+	else {
+		if (!g_pClientArray)
+			return nullptr;
 		return g_pClientArray[index].m_ConVars;
+	}
 }
 
 void Script_XPChanged_Rebuild(void* pPlayer) {
+	if (IsR1ODedicatedServer()) {
+		// R1O/TFO class-native binding calls this through the SQ VM, and TFO player
+		// object/entity layouts are not R1-compatible. XP is already defaulted by
+		// script-memory persistence, so do not touch R1 player net fields here.
+		return;
+	}
 
-	
 	auto edict = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(pPlayer) + 64);
 	auto index = ((edict - reinterpret_cast<__int64>(pGlobalVarsServer->pEdicts)) / 56) - 1;
 
@@ -1069,6 +1397,11 @@ void Script_XPChanged_Rebuild(void* pPlayer) {
 
 
 void Script_GenChanged_Rebuild(void* pPlayer) {
+	if (IsR1ODedicatedServer()) {
+		// See Script_XPChanged_Rebuild: avoid the R1 player layout on TFO SQ/entity objects.
+		return;
+	}
+
 	auto edict = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(pPlayer) + 64);
 	auto index = ((edict - reinterpret_cast<__int64>(pGlobalVarsServer->pEdicts)) / 56) - 1;
 
@@ -1096,6 +1429,28 @@ void Script_GenChanged_Rebuild(void* pPlayer) {
 
 
 SQInteger Script_ServerGetPersistentUserDataKVString(HSQUIRRELVM v) {
+	if (IsR1ODedicatedServer()) {
+		const int playerSlot = R1OPlayerSlotFromScriptArgument(v, 2);
+		if (playerSlot < 0)
+			return sq_throwerror(v, "player is null");
+		const char* pKey, * pDefaultValue;
+		if (SQ_FAILED(sq_getstring(v, 3, &pKey)) || SQ_FAILED(sq_getstring(v, 4, &pDefaultValue)))
+			return sq_throwerror(v, "Expected key and default string parameters");
+		if (!IsValidUserInfo(pKey) || !IsValidUserInfo(pDefaultValue))
+			return sq_throwerror(v, "Invalid user info key or default value.");
+
+		auto arena = tctx.get_arena_for_scratch();
+		auto temp = TempArena(arena);
+		auto hashedKey = hashUserInfoKeyArena(arena, pKey);
+		auto hashedKey_len = strlen(hashedKey);
+		size_t modifiedKey_size = hashedKey_len + sizeof(PERSIST_COMMAND) + 1;
+		auto modifiedKey = (char*)arena_push(arena, modifiedKey_size);
+		memcpy(modifiedKey, PERSIST_COMMAND" ", sizeof(PERSIST_COMMAND));
+		memcpy(modifiedKey + sizeof(PERSIST_COMMAND), hashedKey, hashedKey_len);
+		modifiedKey[sizeof(PERSIST_COMMAND) + hashedKey_len] = '\0';
+		sq_pushstring(v, R1OFindPersistentUserDataConVar(playerSlot, modifiedKey, pDefaultValue), -1);
+		return 1;
+	}
 	const void* pPlayer = sq_getentity(v, 2);
 	if (!pPlayer) {
 		return sq_throwerror(v, "player is null");
@@ -1117,6 +1472,7 @@ SQInteger Script_ServerGetPersistentUserDataKVString(HSQUIRRELVM v) {
 	auto modifiedKey = (char*)arena_push(arena, modifiedKey_size);
 	memcpy(modifiedKey, PERSIST_COMMAND" ", sizeof(PERSIST_COMMAND));
 	memcpy(modifiedKey + sizeof(PERSIST_COMMAND), hashedKey, hashedKey_len);
+	modifiedKey[sizeof(PERSIST_COMMAND) + hashedKey_len] = '\0';
 
 	R1DAssert(IsValidUserInfo(modifiedKey));
 
@@ -1141,6 +1497,30 @@ SQInteger Script_ServerGetPersistentUserDataKVString(HSQUIRRELVM v) {
 }
 
 SQInteger Script_ServerSetPersistentUserDataKVString(HSQUIRRELVM v) {
+	if (IsR1ODedicatedServer()) {
+		const int playerSlot = R1OPlayerSlotFromScriptArgument(v, 2);
+		if (playerSlot < 0)
+			return sq_throwerror(v, "player is null");
+		const char* pKey, * pValue;
+		if (SQ_FAILED(sq_getstring(v, 3, &pKey)) || SQ_FAILED(sq_getstring(v, 4, &pValue)))
+			return sq_throwerror(v, "Expected key and value string parameters");
+		if (!IsValidUserInfo(pKey) || !IsValidUserInfo(pValue))
+			return sq_throwerror(v, "Invalid user info key or value.");
+
+		auto arena = tctx.get_arena_for_scratch();
+		auto temp = TempArena(arena);
+		auto hashedKey = hashUserInfoKeyArena(arena, pKey);
+		auto hashedKey_len = strlen(hashedKey);
+		size_t modifiedKey_size = hashedKey_len + sizeof(PERSIST_COMMAND) + 1;
+		auto modifiedKey = (char*)arena_push(arena, modifiedKey_size);
+		memcpy(modifiedKey, PERSIST_COMMAND" ", sizeof(PERSIST_COMMAND));
+		memcpy(modifiedKey + sizeof(PERSIST_COMMAND), hashedKey, hashedKey_len);
+		modifiedKey[sizeof(PERSIST_COMMAND) + hashedKey_len] = '\0';
+		if (!R1OStorePersistentUserDataConVar(playerSlot, modifiedKey, pValue))
+			return sq_throwerror(v, "failed to store persistent data");
+		sq_pushstring(v, pValue, -1);
+		return 1;
+	}
 	static void (*CVEngineServer_ClientCommand)(__int64 a1, __int64 a2, const char* a3, ...) = 0;
 	if (!CVEngineServer_ClientCommand && !IsDedicatedServer())
 		CVEngineServer_ClientCommand = decltype(CVEngineServer_ClientCommand)(G_engine + 0xFE7F0);
@@ -1167,6 +1547,7 @@ SQInteger Script_ServerSetPersistentUserDataKVString(HSQUIRRELVM v) {
 	auto modifiedKey = (char*)arena_push(arena, modifiedKey_size);
 	memcpy(modifiedKey, PERSIST_COMMAND" ", sizeof(PERSIST_COMMAND));
 	memcpy(modifiedKey + sizeof(PERSIST_COMMAND), hashedKey, hashedKey_len);
+	modifiedKey[sizeof(PERSIST_COMMAND) + hashedKey_len] = '\0';
 
 	R1DAssert(IsValidUserInfo(modifiedKey));
 
@@ -1281,9 +1662,145 @@ char __fastcall GetConfigPath(char* outPath, size_t outPathSize, int configType)
 
 static bool g_bTimerActive = false;
 static double g_flLastCommandTime = 0.0;
-static constexpr double SAVE_DELAY = 5.0; // 5 second delay
+static constexpr double SAVE_DELAY = 5.0;
 static bool g_bRecursive = false;
-static bool g_bSavePending = false;
+static bool g_bValidatedProfileReplay = false;
+static bool g_bSaveWritePending = false;
+static bool g_bSaveQueuedThisFrame = false;
+static bool g_bFinishSaveBeforeQuit = false;
+
+static bool ValidatePersistentProfileEntry(
+	std::string_view key,
+	std::string_view value,
+	void*)
+{
+	return IsValidUserInfo(key.data(), static_cast<int>(key.size()))
+		&& IsValidUserInfo(value.data(), static_cast<int>(value.size()))
+		&& PDef::IsValidKeyAndValue(std::string(key), std::string(value));
+}
+
+static bool ValidateProfileContents(std::string_view contents)
+{
+	return PersistentDataCodec::ValidateProfile(contents, ValidatePersistentProfileEntry);
+}
+
+static bool ReadValidProfileFile(const std::filesystem::path& path, std::string* contents = nullptr)
+{
+	std::error_code error;
+	if (!std::filesystem::is_regular_file(path, error) || error)
+		return false;
+	const uintmax_t fileSize = std::filesystem::file_size(path, error);
+	if (error || !fileSize || fileSize > PersistentDataCodec::MaxRawSize)
+		return false;
+
+	std::string loaded(static_cast<size_t>(fileSize), '\0');
+	std::ifstream file(path, std::ios::binary);
+	if (!file.read(loaded.data(), static_cast<std::streamsize>(loaded.size()))
+		|| !ValidateProfileContents(loaded))
+		return false;
+	if (contents)
+		*contents = std::move(loaded);
+	return true;
+}
+
+static bool ReplaceFileWithCopy(const std::filesystem::path& source, const std::filesystem::path& destination)
+{
+	std::filesystem::path temporary = destination;
+	temporary += ".tmp";
+	DeleteFileW(temporary.c_str());
+	if (!CopyFileW(source.c_str(), temporary.c_str(), FALSE))
+		return false;
+	if (!MoveFileExW(temporary.c_str(), destination.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+		DeleteFileW(temporary.c_str());
+		return false;
+	}
+	return true;
+}
+
+static bool GetProfileTransactionPaths(
+	std::filesystem::path& profile,
+	std::filesystem::path& backup,
+	std::filesystem::path& marker)
+{
+	char path[MAX_PATH * 4] = {};
+	if (!GetConfigPath(path, sizeof(path), 1))
+		return false;
+	profile = std::filesystem::path(path);
+	backup = profile;
+	backup += ".bak";
+	marker = profile;
+	marker += ".saving";
+	return true;
+}
+
+static bool BeginProfileSaveTransaction()
+{
+	std::filesystem::path profile;
+	std::filesystem::path backup;
+	std::filesystem::path marker;
+	if (!GetProfileTransactionPaths(profile, backup, marker))
+		return false;
+
+	std::error_code error;
+	const bool profileExists = std::filesystem::exists(profile, error) && !error;
+	if (profileExists && !ReadValidProfileFile(profile)) {
+		Warning("Refusing to overwrite invalid persistent-data profile\n");
+		return false;
+	}
+	if (profileExists && !ReplaceFileWithCopy(profile, backup)) {
+		Warning("Failed to create persistent-data backup before save\n");
+		return false;
+	}
+
+	HANDLE markerHandle = CreateFileW(
+		marker.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS,
+		FILE_ATTRIBUTE_NORMAL, nullptr);
+	if (markerHandle == INVALID_HANDLE_VALUE) {
+		Warning("Failed to create persistent-data save marker\n");
+		return false;
+	}
+	const char markerContents[] = "R1Delta persistent-data save in progress\n";
+	DWORD written = 0;
+	const bool markerWritten = WriteFile(
+		markerHandle, markerContents, sizeof(markerContents) - 1, &written, nullptr) != FALSE
+		&& written == sizeof(markerContents) - 1
+		&& FlushFileBuffers(markerHandle) != FALSE;
+	CloseHandle(markerHandle);
+	if (!markerWritten) {
+		DeleteFileW(marker.c_str());
+		Warning("Failed to persist persistent-data save marker\n");
+		return false;
+	}
+	return true;
+}
+
+static void RecoverInterruptedProfileSave()
+{
+	std::filesystem::path profile;
+	std::filesystem::path backup;
+	std::filesystem::path marker;
+	if (!GetProfileTransactionPaths(profile, backup, marker))
+		return;
+
+	std::error_code error;
+	const bool interrupted = std::filesystem::exists(marker, error) && !error;
+	const bool primaryValid = ReadValidProfileFile(profile);
+	if (primaryValid) {
+		if (interrupted)
+			DeleteFileW(marker.c_str());
+		return;
+	}
+
+	if (ReadValidProfileFile(backup)) {
+		if (ReplaceFileWithCopy(backup, profile)) {
+			DeleteFileW(marker.c_str());
+			Warning("Recovered persistent data from the last completed profile save\n");
+		}
+		else {
+			Warning("Failed to recover interrupted persistent-data save\n");
+		}
+	}
+}
 
 
 // Command handling
@@ -1292,15 +1809,6 @@ void setinfopersist_cmd(const CCommand& args) {
 	auto setinfo_cmd = decltype(&setinfopersist_cmd)(engine + 0x5B520);
 	auto setinfo_cmd_flags = (int*)(engine + 0x05B5FF);
 	void(*ccommand_constructor)(CCommand * thisptr, int nArgC, const char** ppArgV) = decltype(ccommand_constructor)(engine + 0x4806F0);
-
-	static bool bUnprotectedFlags = false;
-	if (!bUnprotectedFlags) {
-		bUnprotectedFlags = true;
-		DWORD out;
-		VirtualProtect(setinfo_cmd_flags, sizeof(int), PAGE_EXECUTE_READWRITE, &out);
-	}
-
-	*setinfo_cmd_flags = FCVAR_PERSIST_MASK;
 
 	auto arena = tctx.get_arena_for_scratch();
 	auto temp = TempArena(arena);
@@ -1314,7 +1822,7 @@ void setinfopersist_cmd(const CCommand& args) {
 			Warning("Invalid user info value %s. Only certain characters are allowed.\n", args.Arg(1));
 			return;
 		}
-		if (!PDef::IsValidKeyAndValue(args.Arg(1), args.Arg(2))) {
+		if (!g_bValidatedProfileReplay && !PDef::IsValidKeyAndValue(args.Arg(1), args.Arg(2))) {
 			Warning("PData key %s, value %s failed validation.\n", args.Arg(1), args.Arg(2));
 			return;
 		}
@@ -1353,12 +1861,26 @@ void setinfopersist_cmd(const CCommand& args) {
 		CCommand* pCommand = reinterpret_cast<CCommand*>(commandMemory);
 		ccommand_constructor(pCommand, newArgv_size, newArgv);
 
+		static bool setInfoFlagsWritable = false;
+		if (!setInfoFlagsWritable) {
+			DWORD oldProtection = 0;
+			setInfoFlagsWritable = VirtualProtect(
+				setinfo_cmd_flags, sizeof(int), PAGE_EXECUTE_READWRITE, &oldProtection) != FALSE;
+		}
+		if (!setInfoFlagsWritable) {
+			Warning("Failed to enable persistent setinfo flags\n");
+			pCommand->~CCommand();
+			return;
+		}
+
+		*setinfo_cmd_flags = FCVAR_PERSIST_MASK;
+		const bool previousNoSend = g_bNoSendConVar;
 		g_bNoSendConVar = noSend;
 		setinfo_cmd(*pCommand);
-		g_bNoSendConVar = false;
+		g_bNoSendConVar = previousNoSend;
+		*setinfo_cmd_flags = FCVAR_USERINFO;
 
-		// Only start/reset timer if value actually changed
-		if (valueChanged && !g_bTimerActive) {
+		if (valueChanged && !g_bRecursive) {
 			g_flLastCommandTime = Plat_FloatTime();
 			g_bTimerActive = true;
 		}
@@ -1381,15 +1903,13 @@ void setinfopersist_cmd(const CCommand& args) {
 	else {
 		setinfo_cmd(args);
 	}
-	*setinfo_cmd_flags = FCVAR_USERINFO;
-	
 }
 
 char ExecuteConfigFile(int configType) {
 	if (OriginalCCVar_FindVar && OriginalCCVar_FindVar(cvarinterface, "cl_fovScale"))
 		OriginalCCVar_FindVar(cvarinterface, "cl_fovScale")->m_fMaxVal = 1.7f;
 	constexpr size_t MAX_PATH_LENGTH = 1024;
-	constexpr size_t MAX_BUFFER_SIZE = 1024 * 1024; // 1 MB
+	constexpr size_t MAX_BUFFER_SIZE = PersistentDataCodec::MaxRawSize;
 
 	char pathBuffer[MAX_PATH_LENGTH];
 	if (!GetConfigPath(pathBuffer, MAX_PATH_LENGTH, configType)) {
@@ -1397,12 +1917,21 @@ char ExecuteConfigFile(int configType) {
 	}
 
 	std::filesystem::path configPath(pathBuffer);
+	if (configType == 1)
+		RecoverInterruptedProfileSave();
 
 	if (!std::filesystem::exists(configPath)) {
 		return 0; // Config file doesn't exist
 	}
 
-	uintmax_t fileSize = std::filesystem::file_size(configPath);
+	std::string validatedProfile;
+	if (configType == 1 && !ReadValidProfileFile(configPath, &validatedProfile)) {
+		Warning("Persistent-data profile failed complete-file validation\n");
+		return 0;
+	}
+	const uintmax_t fileSize = configType == 1
+		? validatedProfile.size()
+		: std::filesystem::file_size(configPath);
 	if (fileSize == 0 || fileSize > MAX_BUFFER_SIZE) {
 		return 0; // File is empty or too large
 	}
@@ -1418,38 +1947,99 @@ char ExecuteConfigFile(int configType) {
 	auto engine = G_engine;
 	void* (*Exec_CmdGuts)(const char* commands, char bUseExecuteCommand) = decltype(Exec_CmdGuts)(engine + 0x01059A0);
 
-	std::ifstream file(configPath, std::ios::binary);
-	if (!file.read(buffer, fileSize)) {
-		return 0; // Failed to read file
+	if (configType == 1) {
+		memcpy(buffer, validatedProfile.data(), validatedProfile.size());
 	}
+	else {
+		std::ifstream file(configPath, std::ios::binary);
+		if (!file.read(buffer, static_cast<std::streamsize>(fileSize)))
+			return 0;
+	}
+	buffer[fileSize] = '\0';
 
 	g_bRecursive = true;
+	g_bValidatedProfileReplay = configType == 1;
 	Exec_CmdGuts(buffer, 1);
+	g_bValidatedProfileReplay = false;
 	g_bRecursive = false;
 	return 1; // Success
 }
 
 
 
-void PData_OnConsoleCommand(const char* str) {
-	// Skip if we're in a recursive call
-	if (g_bRecursive) {
+void PData_RunFrame()
+{
+	if (g_bRecursive || g_bSaveWritePending || !g_bTimerActive || !Cbuf_AddTextOriginal)
+		return;
+
+	const double currentTime = Plat_FloatTime();
+	if (currentTime - g_flLastCommandTime < SAVE_DELAY)
+		return;
+	if (!BeginProfileSaveTransaction()) {
+		g_flLastCommandTime = currentTime;
 		return;
 	}
 
-	// Check if we need to execute a pending save
-	if (g_bSavePending) {
-		g_bSavePending = false;
-		Cbuf_AddTextOriginal(0, "savePlayerConfig\n", 0);
+	Cbuf_AddTextOriginal(0, "savePlayerConfig\n", 0);
+	g_bTimerActive = false;
+	g_bSaveWritePending = true;
+	g_bSaveQueuedThisFrame = true;
+}
+
+void PData_FinishPendingSave()
+{
+	if (!g_bSaveWritePending || !g_CVFileSystem || !g_CVFileSystemInterface
+		|| !g_CVFileSystem->AsyncFinishAllWrites)
+		return;
+	if (g_bSaveQueuedThisFrame && !g_bFinishSaveBeforeQuit) {
+		g_bSaveQueuedThisFrame = false;
 		return;
 	}
+	g_bSaveQueuedThisFrame = false;
 
-	// Check if timer has expired
-	if (g_bTimerActive) {
-		double currentTime = Plat_FloatTime();
-		if (currentTime - g_flLastCommandTime >= SAVE_DELAY) {
-			g_bTimerActive = false;
-			g_bSavePending = true;
+	using AsyncFinishAllWritesFn = void(__fastcall*)(void* fileSystem);
+	reinterpret_cast<AsyncFinishAllWritesFn>(g_CVFileSystem->AsyncFinishAllWrites)(
+		reinterpret_cast<void*>(g_CVFileSystemInterface));
+
+	std::filesystem::path profile;
+	std::filesystem::path backup;
+	std::filesystem::path marker;
+	if (GetProfileTransactionPaths(profile, backup, marker)) {
+		if (ReadValidProfileFile(profile)) {
+			DeleteFileW(marker.c_str());
+		}
+		else if (ReadValidProfileFile(backup) && ReplaceFileWithCopy(backup, profile)) {
+			DeleteFileW(marker.c_str());
+			Warning("Restored persistent data after a failed profile save\n");
+		}
+		else {
+			DeleteFileW(profile.c_str());
+			DeleteFileW(marker.c_str());
+			Warning("Persistent-data profile save did not produce a valid file; scheduling a retry\n");
+			g_bTimerActive = true;
+			g_flLastCommandTime = Plat_FloatTime();
 		}
 	}
+	g_bSaveWritePending = false;
+	g_bFinishSaveBeforeQuit = false;
+}
+
+void PData_OnConsoleCommand(const char* str)
+{
+	if (g_bRecursive)
+		return;
+
+	const char* command = str;
+	while (command && (*command == ' ' || *command == '\t' || *command == '\r' || *command == '\n'))
+		++command;
+	if (command && g_bTimerActive) {
+		const bool quitCommand =
+			(_strnicmp(command, "quit", 4) == 0 && (command[4] == '\0' || isspace(static_cast<unsigned char>(command[4]))))
+			|| (_strnicmp(command, "exit", 4) == 0 && (command[4] == '\0' || isspace(static_cast<unsigned char>(command[4]))));
+		if (quitCommand) {
+			g_flLastCommandTime = Plat_FloatTime() - SAVE_DELAY;
+			g_bFinishSaveBeforeQuit = true;
+		}
+	}
+	PData_RunFrame();
 }

@@ -36,6 +36,7 @@
  
 #include "vtable_tools.h"
 #include "filecache.h"
+#include "vpk_directory_repair.h"
 
 #include <iostream>
 #include <string>
@@ -76,10 +77,15 @@ extern __int64(*HandleOpenRegularFileOriginal)(__int64 a1, __int64 a2, char a3);
 extern __int64 __fastcall HookedHandleOpenRegularFile(__int64 a1, __int64 a2, char a3);
 extern FileSystem_UpdateAddonSearchPathsType FileSystem_UpdateAddonSearchPathsTypeOriginal;
 __int64 __fastcall FileSystem_UpdateAddonSearchPaths(void* a1);
+void InvalidateAddonSearchCaches();
 void StartFileCacheThread();
 typedef __int64 (*AddVPKFileType)(IFileSystem* fileSystem, char* a2, char** a3, char a4, int a5, char a6);
 extern AddVPKFileType AddVPKFileOriginal;
 __int64 __fastcall AddVPKFile(IFileSystem* fileSystem, char* a2, char** a3, char a4, int a5, char a6);
+typedef void (*CPackFileParseDirectoryType)(void* packFile);
+extern CPackFileParseDirectoryType CPackFileParseDirectoryOriginal;
+void __fastcall CPackFileParseDirectory(void* packFile);
+bool InstallVPKDirectoryLoadFlagRepair(uintptr_t filesystemBase);
 typedef void (*CBaseFileSystem__CSearchPath__SetPathType)(void* thisptr, __int16* id);
 extern CBaseFileSystem__CSearchPath__SetPathType CBaseFileSystem__CSearchPath__SetPathOriginal;
 void __fastcall CBaseFileSystem__CSearchPath__SetPath(void* thisptr, __int16* id);

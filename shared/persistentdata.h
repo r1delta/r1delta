@@ -5,6 +5,8 @@
 #include "cvar.h"
 #include "squirrel.h"
 #include "netchanwarnings.h"
+#include <string>
+#include <vector>
 struct NetMessageCvar_t // sizeof=0x208
 {
 	char name[260];
@@ -29,8 +31,13 @@ extern NET_SetConVar__ReadFromBufferType NET_SetConVar__ReadFromBufferOriginal;
 
 bool __fastcall NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer);
 bool __fastcall NET_SetConVar__WriteToBuffer(NET_SetConVar* thisptr, bf_write& buffer);
+bool SafePrefixConVarName(char* name, size_t nameBufferSize, const char* prefix);
+bool IsPackedPDataWireName(const char* name);
+bool DecodePackedPDataWire(const std::string& encoded, std::vector<NetMessageCvar_t>& output);
 __int64 CConVar__GetSplitScreenPlayerSlot(char* thisptr);
 void setinfopersist_cmd(const CCommand& args);
+bool R1OReplacePersistentUserDataForPlayer(int playerSlot, const std::vector<NetMessageCvar_t>& values);
+bool R1OStorePersistentUserDataConVar(int playerSlot, const char* name, const char* value);
 
 bool IsValidUserInfo(const char* value, int length = -1);
 struct CBaseClient;
@@ -51,6 +58,8 @@ extern CBaseClientState__InternalProcessStringCmdType CBaseClientState__Internal
 char CBaseClientState__InternalProcessStringCmd(void* thisptr, void* msg, bool bIsHLTV);
 char ExecuteConfigFile(int configType);
 void PData_OnConsoleCommand(const char* str);
+void PData_RunFrame();
+void PData_FinishPendingSave();
 class PDataValidator;
 class PDef {
 private:

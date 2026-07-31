@@ -1,4 +1,4 @@
-﻿#include <windows.h>
+#include <windows.h>
 #include <dbghelp.h>
 #include <psapi.h>
 #include <time.h>
@@ -143,7 +143,7 @@ LONG WINAPI CustomCrashHandler(EXCEPTION_POINTERS* exInfo)
     // Pick a random message from the array
     int randomIndex = rand() % (sizeof(g_CrashMessages) / sizeof(g_CrashMessages[0]));
     crashLog << g_CrashMessages[randomIndex] << std::endl;
-    crashLog << "Unfortunately, R1Delta " R1D_VERSION "  has crashed. Please send this crash report to a programmer in the Discord server.";
+    crashLog << "Unfortunately, R1Delta " R1D_DISPLAY_VERSION " has crashed. Please send this crash report to a programmer in the Discord server.";
 #ifdef _DEBUG   
     crashLog << ".. or don't, because this is a debug build.";
 #endif

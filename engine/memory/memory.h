@@ -192,6 +192,17 @@ enum EDeltaAllocHeaps : uint8_t
 };
 static_assert(HEAP_COUNT <= 256, "too many allocation heaps!");
 
+// Gated allocator provenance tracing for startup-memory investigations. The
+// implementation is allocation-free so it can safely run from the allocator
+// itself. Enable it with -r1delta_trace_allocations.
+void TraceAllocatorHeapCreated(EDeltaAllocHeaps heap, HANDLE handle, size_t initialSize);
+void TraceAllocatorAllocation(
+    void* allocation,
+    size_t size,
+    EDeltaAllocTags tag,
+    EDeltaAllocHeaps heap);
+void DumpAllocatorTraceStats();
+
 __forceinline static const char* Mem_tag_to_cstring(EDeltaAllocTags tag)
 {
     switch (tag)
@@ -334,6 +345,11 @@ public:
         }
 #endif
 
+        // The optional provenance tracer records only large allocations. Keep
+        // its disabled path out of the allocator's normal small-allocation hot
+        // path instead of paying a function call for every allocation.
+        if (nSize >= (1ull << 20))
+            TraceAllocatorAllocation(aligned, nSize, tag, heap);
         return aligned;
     }
 
@@ -369,6 +385,12 @@ public:
             ReleaseSRWLockShared(&free_lru_lock);
         }
 #endif
+
+        if (!TryGetAllocationCheck(aligned, nullptr))
+        {
+            Warning("[MEM] Ignoring FREE for foreign allocation at %p\n", aligned);
+            return;
+        }
 
         alloc_check_t* check = (alloc_check_t*)(uintptr_t(aligned) - sizeof(alloc_check_t));
         alloc_check_t::hash_t hash = check->do_hash(uintptr_t(check), check->size, check->align_skip, check->tag, check->heap);
@@ -455,6 +477,12 @@ public:
         if (!aligned)
             return;
 
+        if (!TryGetAllocationCheck(aligned, nullptr))
+        {
+            Warning("[MEM] Ignoring FREE_SIZE for foreign allocation at %p\n", aligned);
+            return;
+        }
+
         alloc_check_t* check = (alloc_check_t*)(uintptr_t(aligned) - sizeof(alloc_check_t));
         alloc_check_t::hash_t hash = check->do_hash(uintptr_t(check), check->size, check->align_skip, check->tag, check->heap);
         if (check->hash == hash)
@@ -494,6 +522,9 @@ public:
         if (!aligned)
             return 0;
 
+        if (!TryGetAllocationCheck(aligned, nullptr))
+            return 0;
+
         alloc_check_t* check = (alloc_check_t*)(uintptr_t(aligned) - sizeof(alloc_check_t));
         alloc_check_t::hash_t hash = check->do_hash(uintptr_t(check), check->size, check->align_skip, check->tag, check->heap);
         if (check->hash == hash)
@@ -519,6 +550,15 @@ public:
     void* mi_realloc(void* aligned, size_t size, EDeltaAllocTags tag = TAG_DEFAULT, EDeltaAllocHeaps heap = HEAP_DEFAULT)
     {
         ZoneScoped;
+
+        if (!aligned)
+            return mi_malloc(size, tag, heap);
+
+        if (!TryGetAllocationCheck(aligned, nullptr))
+        {
+            Warning("[MEM] REALLOC rejected foreign allocation at %p\n", aligned);
+            return 0;
+        }
 
         alloc_check_t* check = (alloc_check_t*)(uintptr_t(aligned) - sizeof(alloc_check_t));
         alloc_check_t::hash_t hash = check->do_hash(uintptr_t(check), check->size, check->align_skip, check->tag, check->heap);
@@ -592,6 +632,14 @@ public:
                     }
 #endif
 
+                    if (size >= (1ull << 20))
+                    {
+                        TraceAllocatorAllocation(
+                            aligned_new,
+                            size,
+                            (EDeltaAllocTags)tag,
+                            (EDeltaAllocHeaps)heap);
+                    }
                     return aligned_new;
                 }
                 else {
@@ -634,6 +682,8 @@ public:
 
         _heaps[HEAP_GAME] = HeapCreate(options, 128ull * (1ull << 20), 0);
         _heaps[HEAP_DELTA] = HeapCreate(options, 16ull * (1ull << 20), 0);
+        TraceAllocatorHeapCreated(HEAP_GAME, _heaps[HEAP_GAME], 128ull * (1ull << 20));
+        TraceAllocatorHeapCreated(HEAP_DELTA, _heaps[HEAP_DELTA], 16ull * (1ull << 20));
         
 #if 0
         for (size_t i = 0; i < (size_t)HEAP_COUNT; ++i)
@@ -1009,8 +1059,9 @@ public:
                 }
             }
         }
-        memset(p, 0xFE, nSize);
         R1DAssert(p);
+        if (p)
+            memset(p, 0xFE, nSize);
         return p;
     }
 
@@ -1041,8 +1092,82 @@ public:
     }
 
 private:
+    static bool IsReadableRange(const void* ptr, size_t size)
+    {
+        constexpr uintptr_t kMinUserAddress = 0x10000;
+        constexpr uintptr_t kMaxUserAddress = 0x00007FFFFFFFFFFF;
+        if (!ptr || !size)
+            return false;
+
+        const uintptr_t begin = reinterpret_cast<uintptr_t>(ptr);
+        if (begin < kMinUserAddress || begin > kMaxUserAddress)
+            return false;
+
+        return size - 1 <= kMaxUserAddress - begin;
+    }
+
+    bool TryGetAllocationCheck(void* aligned, alloc_check_t* out) const
+    {
+        if (!aligned)
+            return false;
+
+        alloc_check_t* check = reinterpret_cast<alloc_check_t*>(reinterpret_cast<uintptr_t>(aligned) - sizeof(alloc_check_t));
+        if (!IsReadableRange(check, sizeof(*check)))
+            return false;
+
+        const alloc_check_t local = *check;
+        if (local.heap >= HEAP_COUNT || local.align_skip < sizeof(alloc_check_t) || local.align_skip > MEM_ALLOC_OVERHEAD)
+            return false;
+
+        const alloc_check_t::hash_t hash = alloc_check_t::do_hash(
+            reinterpret_cast<uintptr_t>(check),
+            local.size,
+            local.align_skip,
+            local.tag,
+            local.heap);
+        if (local.hash != hash)
+            return false;
+
+        alloc_check_t::hash_t* tail = reinterpret_cast<alloc_check_t::hash_t*>(reinterpret_cast<uintptr_t>(aligned) + local.size);
+        if (!IsReadableRange(tail, sizeof(*tail)) || *tail != hash)
+            return false;
+
+        if (out)
+            *out = local;
+        return true;
+    }
+
     MemAllocFailHandler_t m_pfnAllocFailHandler;
     size_t m_nFailedAllocationSize;
+
+public:
+    bool IsOwnedAllocation(void* aligned) const
+    {
+        return TryGetAllocationCheck(aligned, nullptr);
+    }
+
+    bool IsLikelyOwnedAllocation(void* aligned) const
+    {
+        if (!aligned)
+            return false;
+
+        alloc_check_t* check = reinterpret_cast<alloc_check_t*>(reinterpret_cast<uintptr_t>(aligned) - sizeof(alloc_check_t));
+        if (!IsReadableRange(check, sizeof(*check)))
+            return false;
+
+        const alloc_check_t local = *check;
+        if (local.heap >= HEAP_COUNT || local.tag >= TAG_COUNT ||
+            local.align_skip < sizeof(alloc_check_t) || local.align_skip > MEM_ALLOC_OVERHEAD)
+            return false;
+
+        const alloc_check_t::hash_t hash = alloc_check_t::do_hash(
+            reinterpret_cast<uintptr_t>(check),
+            local.size,
+            local.align_skip,
+            local.tag,
+            local.heap);
+        return local.hash == hash;
+    }
 };
 
 typedef IMemAlloc* (*PFN_CreateGlobalMemAlloc)();
@@ -1054,6 +1179,23 @@ void* __cdecl hkmalloc_base(size_t Size);
 void* __cdecl hkrealloc_base(void* Block, size_t Size);
 void __cdecl hkfree_base(void* Block);
 void* __cdecl hkrecalloc_base(void* Block, size_t Count, size_t Size);
+
+using MsvcCallocBaseFn = void* (__cdecl*)(size_t Count, size_t Size);
+using MsvcMallocBaseFn = void* (__cdecl*)(size_t Size);
+using MsvcReallocBaseFn = void* (__cdecl*)(void* Block, size_t Size);
+using MsvcRecallocBaseFn = void* (__cdecl*)(void* Block, size_t Count, size_t Size);
+using MsvcFreeBaseFn = void (__cdecl*)(void* Block);
+
+void RegisterMsvcAllocatorFallbacks(
+    uintptr_t moduleBase,
+    size_t moduleSize,
+    const char* moduleName,
+    MsvcCallocBaseFn callocFn,
+    MsvcMallocBaseFn mallocFn,
+    MsvcReallocBaseFn reallocFn,
+    MsvcRecallocBaseFn recallocFn,
+    MsvcFreeBaseFn freeFn);
+
 extern IMemAlloc* g_pMemAllocSingleton;
 extern "C" __declspec(dllexport) IMemAlloc * CreateGlobalMemAlloc();
 

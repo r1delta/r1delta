@@ -1,4 +1,3 @@
-# .github/workflows/msbuild.yml
 name: Build and Release Project
 
 on:
@@ -7,80 +6,124 @@ on:
     tags: ["v*"]
   pull_request:
     branches: ["main"]
-  workflow_dispatch: # Optional: Allows manual triggering
+  workflow_dispatch:
 
 env:
-  # Use paths with forward slashes for better consistency in YAML
-  SOLUTION_FILE_PATH: .
+  SOLUTION_FILE_PATH: Dll1.sln
   BUILD_PATH: ${{ github.workspace }}/build
   OUTPUT_PATH: ${{ github.workspace }}/output
-  USERNAME: "r1delta" # GitHub username for NuGet authentication
+  SYMBOL_PATH: ${{ github.workspace }}/symbols
+  CORE_REF: bf6ec2bb415afe16b73c3b7fcda3a512ae5eb260
   VCPKG_BINARY_SOURCES: "clear;files,D:/a/r1delta/vcpkg,readwrite"
-  # CL: "/DCI#1"
   BUILD_CONFIGURATION: Release
   MSBUILD_DEBUG_TYPE: pdbonly
-  # --- Squirrel Env Vars ---
-  NUSPEC_FILE: R1Delta.nuspec # Name of your nuspec file
-  PACKAGE_NAME: R1Delta # MUST match <id> in nuspec and SquirrelAppName
+  NUSPEC_FILE: R1Delta.nuspec
+  PACKAGE_NAME: R1Delta
+  DISPLAY_VERSION: "3.0 prerelease 1"
 
 permissions:
-  contents: write # Needed to create releases and upload assets
+  contents: write
 
 jobs:
   build:
     runs-on: windows-2025-vs2026
     outputs:
-      # Pass the path to the directory containing the prepared files
-      artifact_path: ${{ steps.format_files.outputs.output_dir }}
-      # Pass the name used for the artifact upload/download
-      artifact_name: delta # Keep this simple and static
+      artifact_name: delta
+      symbols_artifact_name: delta-symbols
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout R1Delta
+        uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Fetch all history for versioning if needed later
+          fetch-depth: 0
           submodules: true
+
+      - name: Checkout pinned CORE payload
+        uses: actions/checkout@v4
+        with:
+          repository: r1delta/CORE
+          ref: ${{ env.CORE_REF }}
+          path: core
+          persist-credentials: false
 
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
 
-      # --- Create VCPKG Cache Directory ---
-      - name: Prepare VCPKG Cache Directory
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: script-error-service/package-lock.json
+
+      - name: Prepare clean build directories
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/vcpkg/installed"
-          New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/vcpkg/packages"
-          New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/vcpkg/buildtrees"
-          New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/vcpkg/downloads"
+          $ErrorActionPreference = 'Stop'
+          foreach ($path in @(
+            '${{ env.BUILD_PATH }}',
+            '${{ env.OUTPUT_PATH }}',
+            '${{ env.SYMBOL_PATH }}'
+          )) {
+            if (Test-Path -LiteralPath $path) {
+              Remove-Item -LiteralPath $path -Recurse -Force
+            }
+            New-Item -ItemType Directory -Path $path | Out-Null
+          }
 
-      - name: Inject Git tag into r1d_version.h
+          foreach ($path in @(
+            '${{ github.workspace }}/vcpkg/installed',
+            '${{ github.workspace }}/vcpkg/packages',
+            '${{ github.workspace }}/vcpkg/buildtrees',
+            '${{ github.workspace }}/vcpkg/downloads'
+          )) {
+            New-Item -ItemType Directory -Force -Path $path | Out-Null
+          }
+
+      - name: Inject Git tag into compatibility version
         if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
         run: |
-          $tag     = '${{ github.ref_name }}'
-          $hdrPath = "${{ github.workspace }}/r1d_version.h"
+          $ErrorActionPreference = 'Stop'
+          $tag = '${{ github.ref_name }}'
+          if ($tag -notmatch '^v\d+\.\d+\.\d+$') {
+            throw "Release tag '$tag' is not a machine-readable R1Delta compatibility version (expected vMAJOR.MINOR.PATCH)."
+          }
 
-          Write-Host "Updating R1D_VERSION to $tag in $hdrPath"
-          (Get-Content $hdrPath) |
-            ForEach-Object {
-              $_ -replace '#define\s+R1D_VERSION\s+".*"',
-                          "#define R1D_VERSION `"$tag`""
-            } |
-            Set-Content $hdrPath
+          $header = '${{ github.workspace }}/r1d_version.h'
+          $content = Get-Content -LiteralPath $header -Raw
+          $displayVersions = [regex]::Matches(
+            $content,
+            '(?m)^\s*#define\s+R1D_DISPLAY_VERSION\s+"([^"]+)"\s*$'
+          )
+          if ($displayVersions.Count -ne 1) {
+            throw "r1d_version.h contains $($displayVersions.Count) display-version definitions; expected exactly one."
+          }
+          if ($displayVersions[0].Groups[1].Value -ne '${{ env.DISPLAY_VERSION }}') {
+            throw (
+              "r1d_version.h display version '$($displayVersions[0].Groups[1].Value)' " +
+              "does not match workflow DISPLAY_VERSION '${{ env.DISPLAY_VERSION }}'."
+            )
+          }
 
-      # --- VCPKG Cache & Restore ---
+          $updated = $content -replace '#define\s+R1D_VERSION\s+".*"', "#define R1D_VERSION `"$tag`""
+          Set-Content -LiteralPath $header -Value $updated
+
+          if (-not (Select-String -LiteralPath $header -Quiet -Pattern (
+            '#define\s+R1D_VERSION\s+"' + [regex]::Escape($tag) + '"'
+          ))) {
+            throw 'The compatibility version was not stamped into r1d_version.h.'
+          }
+          if (-not $updated.Contains($displayVersions[0].Value)) {
+            throw 'The independent display version was changed while stamping the compatibility version.'
+          }
+
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@v7
         with:
           script: |
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
-
-      - name: vcpkg integrate install
-        run: vcpkg integrate install
-        shell: pwsh
-
-      - name: Restore NuGet packages
-        run: nuget restore ${{env.SOLUTION_FILE_PATH}}
 
       - name: Cache vcpkg build artifacts
         uses: actions/cache@v4
@@ -94,299 +137,337 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-vcpkg-
 
-      # --- Build Step ---
-      - name: Build Solution
-        run: >
-          msbuild /m /restore
-          /p:CI=1
-          /p:Configuration=${{env.BUILD_CONFIGURATION}}
-          /p:DebugType=${{env.MSBUILD_DEBUG_TYPE}}
-          /p:OutDir=${{env.BUILD_PATH}}/
-          /p:WarningLevel=0
-          ${{env.SOLUTION_FILE_PATH}}
+      - name: Integrate vcpkg
+        shell: pwsh
+        run: vcpkg integrate install
 
-      # --- Checkout Core Scripts (If core is a separate repo) ---
-      # If core scripts are part of the main repository, this step is not needed.
-      # If they are separate, ensure the path is correct and consider 'clean: false'.
-      - name: Checkout Core Scripts
-        # Optional: Add a condition if this checkout isn't always needed
-        # if: github.repository != 'r1delta/core'
-        uses: actions/checkout@v4
-        with:
-          repository: r1delta/core # Make sure this is the correct repo
-          path: core # Checkout to a specific subdirectory
-          clean: false # Avoid cleaning the workspace if needed
+      - name: Restore NuGet packages
+        shell: pwsh
+        run: nuget restore '${{ env.SOLUTION_FILE_PATH }}'
 
-      # --- Prepare Output Directory ---
-      - name: Prepare Output Directory
-        id: format_files
+      - name: Rebuild clean Release binaries
         shell: pwsh
         run: |
-          # Create directories
-          $ErrorActionPreference = 'Stop' # Ensure script stops on error
-          $outputPath = "${{ env.OUTPUT_PATH }}"
-          $deltaPath = Join-Path -Path $outputPath -ChildPath "r1delta"
-          $binDeltaPath = Join-Path -Path $deltaPath -ChildPath "bin_delta"
+          $ErrorActionPreference = 'Stop'
+          msbuild '${{ env.SOLUTION_FILE_PATH }}' /m /restore /t:Rebuild `
+            /p:CI=1 `
+            /p:Configuration='${{ env.BUILD_CONFIGURATION }}' `
+            /p:Platform=x64 `
+            /p:DebugType='${{ env.MSBUILD_DEBUG_TYPE }}' `
+            /p:OutDir='${{ env.BUILD_PATH }}/' `
+            /p:WarningLevel=0
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release solution build failed with exit code $LASTEXITCODE."
+          }
 
-          New-Item -ItemType Directory -Force -Path $outputPath
-          New-Item -ItemType Directory -Force -Path $deltaPath
-          New-Item -ItemType Directory -Force -Path $binDeltaPath
-
-          # Copy build outputs
-          Write-Host "Copying EXE files from ${{ env.BUILD_PATH }} to $outputPath"
-          Copy-Item -Path "${{ env.BUILD_PATH }}/*.exe" -Destination "$outputPath/" -ErrorAction SilentlyContinue # Continue if no files match
-          Write-Host "Copying launcher config files from ${{ env.BUILD_PATH }} to $outputPath"
-          Copy-Item -Path "${{ env.BUILD_PATH }}/*.exe.config" -Destination "$outputPath/" -ErrorAction SilentlyContinue # Continue if no files match
-          Write-Host "Copying launcher tool files from ${{ env.BUILD_PATH }}/tools to $outputPath/tools"
-          Copy-Item -Path "${{ env.BUILD_PATH }}/tools" -Destination "$outputPath/" -Recurse -Force -ErrorAction SilentlyContinue # Continue if tools are not present
-
-          Write-Host "Copying DLL files from ${{ env.BUILD_PATH }} to $binDeltaPath"
-          Copy-Item -Path "${{ env.BUILD_PATH }}/*.dll" -Destination "$binDeltaPath/" -ErrorAction SilentlyContinue # Continue if no files match
-          Write-Host "Copying PDB files from ${{ env.BUILD_PATH }} to $binDeltaPath"
-          Copy-Item -Path "${{ env.BUILD_PATH }}/*.pdb" -Destination "$binDeltaPath/" -ErrorAction SilentlyContinue # Continue if no files match
-          Write-Host "Copying PNG files from ${{ env.BUILD_PATH }} to $binDeltaPath"
-          Copy-Item -Path "${{ env.BUILD_PATH }}/*.png" -Destination "$binDeltaPath/" -ErrorAction SilentlyContinue # Continue if no files match
-
-          # Copy core scripts (assuming they are checked out to 'core')
-          $coreSourcePath = "${{ github.workspace }}/core" # Path where core scripts were checked out
-          if (Test-Path $coreSourcePath) {
-            Write-Host "Copying core scripts using Robocopy from $coreSourcePath"
-            robocopy "$coreSourcePath" "$deltaPath" /E /XD .git /XF *.md
-            $RoboExitCode = $LASTEXITCODE
-            Write-Host "Robocopy exit code: $RoboExitCode"
-            # Check Robocopy exit code (0-7 are success/no-op/files copied)
-            if ($RoboExitCode -ge 8) {
-                Write-Error "Robocopy failed with exit code $RoboExitCode"
-                exit 1
-            } else {
-                Write-Host "Robocopy completed successfully."
+          # These DLL names intentionally shadow system/vendor modules only inside
+          # R1O fake dedicated. Keep them out of bin_delta's root so a normal
+          # Titanfall client can never discover them through the ordinary DLL path.
+          $stubPath = Join-Path '${{ env.BUILD_PATH }}' 'r1o_stubs'
+          New-Item -ItemType Directory -Force -Path $stubPath | Out-Null
+          foreach ($fileName in @(
+            'd3d11.dll',
+            'GFSDK_SSAO.win64.dll',
+            'GFSDK_TXAA.win64.dll'
+          )) {
+            $source = Join-Path '${{ env.BUILD_PATH }}' $fileName
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+              throw "Release solution build is missing fake-dedi stub $source."
             }
-          } else {
-            Write-Host "Core script source path ($coreSourcePath) not found. Skipping Robocopy."
-            # Decide if this is an error or expected behaviour based on your project structure
+            Move-Item -LiteralPath $source -Destination (Join-Path $stubPath $fileName)
           }
 
-          # --- Copy Nuspec file into the output directory ---
-          $nuspecSourcePath = "${{ github.workspace }}/${{ env.NUSPEC_FILE }}"
-          if (Test-Path $nuspecSourcePath) {
-            Write-Host "Copying Nuspec file '$($nuspecSourcePath)' to '$outputPath'"
-            Copy-Item -Path $nuspecSourcePath -Destination "$outputPath/"
-          } else {
-            Write-Error "Nuspec file not found at '$nuspecSourcePath'"
-            exit 1
+      - name: Build native regression tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $projects = [ordered]@{
+            compression_stream_tests = 'tests/compression_stream_tests.vcxproj'
+            r1o_vpk_tests = 'tests/r1o_vpk_tests.vcxproj'
+            vsdk_memalloc_tests = 'tests/vsdk_memalloc_tests.vcxproj'
+            persistentdata_codec_tests = 'tests/persistentdata_codec_tests.vcxproj'
           }
-          # --- End Nuspec Copy ---
 
-          # Output the path to the prepared directory for the artifact upload
-          Write-Host "Outputting directory path: $outputPath"
-          echo "output_dir=$outputPath" >> $env:GITHUB_OUTPUT
+          foreach ($entry in $projects.GetEnumerator()) {
+            $outDir = Join-Path '${{ env.BUILD_PATH }}' "tests/$($entry.Key)"
+            New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+            msbuild $entry.Value /m /restore /t:Rebuild `
+              /p:CI=1 `
+              /p:Configuration=Release `
+              /p:Platform=x64 `
+              /p:OutDir="$outDir/"
+            if ($LASTEXITCODE -ne 0) {
+              throw "$($entry.Key) build failed with exit code $LASTEXITCODE."
+            }
+          }
 
-          # Explicitly exit with 0 if successful
-          exit 0
+      - name: Run native regression tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tests = @(
+            'compression_stream_tests',
+            'r1o_vpk_tests',
+            'vsdk_memalloc_tests',
+            'persistentdata_codec_tests'
+          )
+          foreach ($test in $tests) {
+            $executable = Join-Path '${{ env.BUILD_PATH }}' "tests/$test/$test.exe"
+            if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
+              throw "Missing native test executable: $executable"
+            }
+            & $executable
+            if ($LASTEXITCODE -ne 0) {
+              throw "$test failed with exit code $LASTEXITCODE."
+            }
+          }
 
-      # --- Upload Artifact ---
-      - name: Upload Build Artifact
+      - name: Install script-error service dependencies
+        working-directory: script-error-service
+        shell: pwsh
+        run: npm ci
+
+      - name: Run script-error service tests
+        working-directory: script-error-service
+        shell: pwsh
+        run: npm test
+
+      - name: Validate clean build and pinned CORE runtime
+        shell: pwsh
+        run: |
+          & '${{ github.workspace }}/ci/verify_release_payload.ps1' `
+            -CorePath '${{ github.workspace }}/core' `
+            -BuildPath '${{ env.BUILD_PATH }}'
+
+      - name: Prepare release payload and symbols
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outputPath = '${{ env.OUTPUT_PATH }}'
+          $deltaPath = Join-Path $outputPath 'r1delta'
+          $binDeltaPath = Join-Path $deltaPath 'bin_delta'
+          $corePath = '${{ github.workspace }}/core'
+
+          New-Item -ItemType Directory -Force -Path $deltaPath | Out-Null
+          robocopy $corePath $deltaPath /E /XD .git .github bin_delta /XF *.md
+          $robocopyExitCode = $LASTEXITCODE
+          if ($robocopyExitCode -ge 8) {
+            throw "CORE copy failed with robocopy exit code $robocopyExitCode."
+          }
+          $global:LASTEXITCODE = 0
+
+          New-Item -ItemType Directory -Force -Path $binDeltaPath | Out-Null
+
+          foreach ($fileName in @('R1Delta_DS.exe', 'r1delta.exe', 'r1delta.exe.config', 'Titanfall.exe')) {
+            $source = Join-Path '${{ env.BUILD_PATH }}' $fileName
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+              throw "Missing required build output: $source"
+            }
+            Copy-Item -LiteralPath $source -Destination $outputPath
+          }
+
+          $builtDlls = @(Get-ChildItem -LiteralPath '${{ env.BUILD_PATH }}' -File -Filter '*.dll')
+          if ($builtDlls.Count -eq 0) {
+            throw 'The clean Release build produced no DLLs.'
+          }
+          $builtDlls | Copy-Item -Destination $binDeltaPath
+
+          $stubSourcePath = Join-Path '${{ env.BUILD_PATH }}' 'r1o_stubs'
+          if (-not (Test-Path -LiteralPath $stubSourcePath -PathType Container)) {
+            throw 'The R1O fake-dedicated graphics stub directory was not produced.'
+          }
+          Copy-Item -LiteralPath $stubSourcePath -Destination $binDeltaPath -Recurse
+
+          Get-ChildItem -LiteralPath '${{ env.BUILD_PATH }}' -File -Filter '*.png' |
+            Copy-Item -Destination $binDeltaPath
+
+          $toolsPath = Join-Path '${{ env.BUILD_PATH }}' 'tools'
+          if (-not (Test-Path -LiteralPath $toolsPath -PathType Container)) {
+            throw 'The launcher tools directory was not produced.'
+          }
+          Copy-Item -LiteralPath $toolsPath -Destination $outputPath -Recurse
+          Copy-Item -LiteralPath '${{ github.workspace }}/${{ env.NUSPEC_FILE }}' -Destination $outputPath
+
+          $pdbFiles = @(Get-ChildItem -LiteralPath '${{ env.BUILD_PATH }}' -File -Filter '*.pdb')
+          if ($pdbFiles.Count -eq 0) {
+            throw 'The clean Release build produced no PDB files.'
+          }
+          $pdbFiles | Copy-Item -Destination '${{ env.SYMBOL_PATH }}'
+
+      - name: Validate final release payload
+        shell: pwsh
+        run: |
+          & '${{ github.workspace }}/ci/verify_release_payload.ps1' `
+            -CorePath '${{ github.workspace }}/core' `
+            -BuildPath '${{ env.BUILD_PATH }}' `
+            -PayloadPath '${{ env.OUTPUT_PATH }}'
+
+      - name: Upload release payload
         uses: actions/upload-artifact@v4
         with:
-          path: ${{ steps.format_files.outputs.output_dir }}
-          name: delta # Use the static artifact name directly here
+          name: delta
+          path: ${{ env.OUTPUT_PATH }}
+          if-no-files-found: error
 
-  # --- Release Job ---
+      - name: Upload private symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: delta-symbols
+          path: ${{ env.SYMBOL_PATH }}
+          if-no-files-found: error
+
   release:
     permissions: write-all
-    needs: build # Depends on the build job finishing successfully
-    if: startsWith(github.ref, 'refs/tags/v') # Only run on tagged pushes (v*)
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-latest
 
     steps:
-      - name: Download Build Artifact
+      - name: Download release payload
         uses: actions/download-artifact@v4
         with:
-          # Use the output from the build job to get the artifact name
           name: ${{ needs.build.outputs.artifact_name }}
-          # Download into a specific folder for clarity
           path: ${{ github.workspace }}/release_package
+
+      - name: Download symbols
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.symbols_artifact_name }}
+          path: ${{ github.workspace }}/symbols
 
       - name: Setup NuGet CLI
         uses: NuGet/setup-nuget@v2
         with:
-          nuget-version: "latest"
+          nuget-version: latest
 
-      # --- Install Squirrel Tool via NuGet ---
-      - name: Install Squirrel.Windows Tool
+      - name: Install Squirrel.Windows tool
         id: install_squirrel
+        shell: pwsh
         run: |
-          $squirrelToolPath = "${{ github.workspace }}/squirrel-tool"
-          New-Item -ItemType Directory -Force -Path $squirrelToolPath
-          nuget install Clowd.Squirrel -OutputDirectory $squirrelToolPath -ExcludeVersion -NoCache -DirectDownload
-          # Find the tools directory robustly
-          $squirrelExeDir = Join-Path $squirrelToolPath "Squirrel.Windows\tools"
-          if (-not (Test-Path (Join-Path $squirrelExeDir "Squirrel.exe"))) {
-             Write-Warning "Squirrel.exe not found in expected path: $squirrelExeDir. Searching..."
-             $foundPath = Get-ChildItem -Path $squirrelToolPath -Recurse -Filter Squirrel.exe | Select-Object -First 1
-             if ($foundPath) {
-               $squirrelExeDir = $foundPath.DirectoryName
-               Write-Host "Found Squirrel.exe in: $squirrelExeDir"
-             } else {
-               Write-Error "Could not locate Squirrel.exe after NuGet install."
-               exit 1
-             }
+          $ErrorActionPreference = 'Stop'
+          $toolRoot = '${{ github.workspace }}/squirrel-tool'
+          New-Item -ItemType Directory -Force -Path $toolRoot | Out-Null
+          nuget install Clowd.Squirrel -OutputDirectory $toolRoot -ExcludeVersion -NoCache -DirectDownload
+
+          $squirrel = Get-ChildItem -LiteralPath $toolRoot -Recurse -File -Filter Squirrel.exe |
+            Select-Object -First 1
+          if (-not $squirrel) {
+            throw 'Could not locate Squirrel.exe after NuGet installation.'
           }
-          Write-Host "Adding $squirrelExeDir to PATH"
-          echo "$squirrelExeDir" >> $env:GITHUB_PATH
-          echo "squirrel_exe_dir=$squirrelExeDir" >> $env:GITHUB_OUTPUT
-        shell: pwsh
+          $squirrel.DirectoryName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      - name: Get Version from Tag
+      - name: Get version from tag
         id: get_version
+        shell: pwsh
         run: |
-          # Extract version number from the tag (e.g., refs/tags/v1.2.3 -> 1.2.3)
-          $version = $env:GITHUB_REF -replace '^refs/tags/v', ''
-          Write-Host "Extracted version: $version"
-          echo "version=$version" >> $env:GITHUB_OUTPUT
-        shell: pwsh
+          $version = '${{ github.ref_name }}' -replace '^v', ''
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
-      - name: Create NuGet Package Output Directory
-        run: mkdir ${{ github.workspace }}/nuget_output
+      - name: Build Squirrel release
         shell: pwsh
-
-      - name: Pack with NuGet
-        # Run nuget pack from the directory containing the downloaded artifact (which includes the nuspec)
         working-directory: ${{ github.workspace }}/release_package
         run: |
-          # Verify the nuspec file exists in the working directory
-          if (-not (Test-Path "${{ env.NUSPEC_FILE }}")) {
-            Write-Error "Nuspec file '${{ env.NUSPEC_FILE }}' not found in working directory '$pwd'."
-            exit 1
+          $ErrorActionPreference = 'Stop'
+          $nugetOutput = '${{ github.workspace }}/nuget_output'
+          $squirrelOutput = '${{ github.workspace }}/squirrel_release'
+          New-Item -ItemType Directory -Force -Path $nugetOutput, $squirrelOutput | Out-Null
+
+          if (-not (Test-Path -LiteralPath '${{ env.NUSPEC_FILE }}' -PathType Leaf)) {
+            throw 'Release payload does not contain the NuSpec file.'
           }
-          nuget pack ${{ env.NUSPEC_FILE }} -Version ${{ steps.get_version.outputs.version }} -OutputDirectory ${{ github.workspace }}/nuget_output -NoPackageAnalysis
-        shell: pwsh
+          nuget pack '${{ env.NUSPEC_FILE }}' `
+            -Version '${{ steps.get_version.outputs.version }}' `
+            -OutputDirectory $nugetOutput `
+            -NoPackageAnalysis
+          if ($LASTEXITCODE -ne 0) {
+            throw "NuGet pack failed with exit code $LASTEXITCODE."
+          }
 
-      - name: Create Squirrel Release Output Directory
-        run: mkdir ${{ github.workspace }}/squirrel_release
-        shell: pwsh
+          $package = Join-Path $nugetOutput '${{ env.PACKAGE_NAME }}.${{ steps.get_version.outputs.version }}.nupkg'
+          if (-not (Test-Path -LiteralPath $package -PathType Leaf)) {
+            throw "NuGet package was not produced: $package"
+          }
+          Squirrel releasify --package $package --releaseDir $squirrelOutput
+          if ($LASTEXITCODE -ne 0) {
+            throw "Squirrel releasify failed with exit code $LASTEXITCODE."
+          }
 
-      # --- Releasify Step ---
-      - name: Releasify with Squirrel
-        run: |
-          REM Verify Squirrel is in PATH (optional debug)
-          where Squirrel.exe
-
-          REM Define package and output paths clearly
-          set NUGET_PACKAGE_PATH=${{ github.workspace }}\nuget_output\${{ env.PACKAGE_NAME }}.${{ steps.get_version.outputs.version }}.nupkg
-          set SQUIRREL_RELEASE_DIR=${{ github.workspace }}\squirrel_release
-
-          REM Check if the nupkg file exists before running Squirrel
-          IF NOT EXIST "%NUGET_PACKAGE_PATH%" (
-            echo ERROR: NuGet package not found at %NUGET_PACKAGE_PATH%
-            dir ${{ github.workspace }}\nuget_output /b /s
-            exit /b 1
-          )
-
-          echo Releasifying %NUGET_PACKAGE_PATH% to %SQUIRREL_RELEASE_DIR%
-          Squirrel releasify --package "%NUGET_PACKAGE_PATH%" --releaseDir "%SQUIRREL_RELEASE_DIR%"
-        shell: cmd # Squirrel often works best in cmd
-
-      # --- Find Release Assets ---
-      - name: Find Release Assets
+      - name: Find release assets
         id: find_assets
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $releaseDir = "${{ github.workspace }}/squirrel_release"
-          Write-Host "Searching for assets in: $releaseDir"
-
-          # Find the Setup executable (allow for variations like AppNameSetup.exe)
-          $setupFile = Get-ChildItem -Path $releaseDir -Filter *.exe | Where-Object { $_.Name -match '^(Setup|.*Setup)\.exe$' } | Select-Object -First 1
-          if (-not $setupFile) {
-            Write-Host "Standard Setup*.exe not found. Looking for any .exe..."
-            $setupFile = Get-ChildItem -Path $releaseDir -Filter *.exe | Select-Object -First 1
+          $releaseDir = '${{ github.workspace }}/squirrel_release'
+          $setup = Get-ChildItem -LiteralPath $releaseDir -File -Filter '*Setup.exe' | Select-Object -First 1
+          $fullPackage = Get-ChildItem -LiteralPath $releaseDir -File -Filter '*-full.nupkg' | Select-Object -First 1
+          $releases = Join-Path $releaseDir 'RELEASES'
+          if (-not $setup -or -not $fullPackage -or -not (Test-Path -LiteralPath $releases -PathType Leaf)) {
+            throw 'Squirrel did not produce Setup.exe, RELEASES, and a full package.'
           }
-          if (-not $setupFile) {
-            Write-Error "Could not find any Setup executable (.exe) in $releaseDir"
-            Get-ChildItem -Path $releaseDir -Recurse | Select-Object FullName, Length # Debug output
-            exit 1
-          }
-          $setupExePath = $setupFile.FullName
-          $setupExeName = $setupFile.Name
-          Write-Host "Found Setup Executable: $setupExePath (Name: $setupExeName)"
-          echo "setup_exe_path=$setupExePath" >> $env:GITHUB_OUTPUT
-          echo "setup_exe_name=$setupExeName" >> $env:GITHUB_OUTPUT
 
-          # Find the RELEASES file
-          $releasesPath = Join-Path $releaseDir "RELEASES"
-          if (-not (Test-Path $releasesPath)) {
-            Write-Error "RELEASES file not found at $releasesPath"
-            Get-ChildItem -Path $releaseDir -Recurse | Select-Object FullName, Length # Debug output
-            exit 1
-          }
-          Write-Host "Found RELEASES file: $releasesPath"
-          echo "releases_path=$releasesPath" >> $env:GITHUB_OUTPUT
-          echo "releases_name=RELEASES" >> $env:GITHUB_OUTPUT # Name is static
+          $symbolsZip = Join-Path '${{ github.workspace }}' (
+            'R1Delta-${{ steps.get_version.outputs.version }}-symbols.zip'
+          )
+          Compress-Archive -Path '${{ github.workspace }}/symbols/*' -DestinationPath $symbolsZip -Force
 
-          # Find the full nupkg file
-          $fullNupkgFile = Get-ChildItem -Path $releaseDir -Filter *-full.nupkg | Select-Object -First 1
-          if (-not $fullNupkgFile) {
-            Write-Error "Could not find the full nupkg file (*-full.nupkg) in $releaseDir"
-            Get-ChildItem -Path $releaseDir -Recurse | Select-Object FullName, Length # Debug output
-            exit 1
-          }
-          $fullNupkgPath = $fullNupkgFile.FullName
-          $fullNupkgName = $fullNupkgFile.Name
-          Write-Host "Found Full Nupkg: $fullNupkgPath (Name: $fullNupkgName)"
-          echo "full_nupkg_path=$fullNupkgPath" >> $env:GITHUB_OUTPUT
-          echo "full_nupkg_name=$fullNupkgName" >> $env:GITHUB_OUTPUT
+          "setup_path=$($setup.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "setup_name=$($setup.Name)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "releases_path=$releases" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "package_path=$($fullPackage.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "package_name=$($fullPackage.Name)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "symbols_path=$symbolsZip" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "symbols_name=$([System.IO.Path]::GetFileName($symbolsZip))" |
+            Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
-          # Optional: Verify all outputs were set
-          Write-Host "Outputting variables:"
-          Write-Host " setup_exe_path: $(echo $env:GITHUB_OUTPUT | Select-String 'setup_exe_path=')"
-          Write-Host " setup_exe_name: $(echo $env:GITHUB_OUTPUT | Select-String 'setup_exe_name=')"
-          Write-Host " releases_path: $(echo $env:GITHUB_OUTPUT | Select-String 'releases_path=')"
-          Write-Host " releases_name: $(echo $env:GITHUB_OUTPUT | Select-String 'releases_name=')"
-          Write-Host " full_nupkg_path: $(echo $env:GITHUB_OUTPUT | Select-String 'full_nupkg_path=')"
-          Write-Host " full_nupkg_name: $(echo $env:GITHUB_OUTPUT | Select-String 'full_nupkg_name=')"
-
-      # Remove the old 'Check Releasify Output' step as the check is now part of 'Find Release Assets'
-
-      - name: Create GitHub Release
+      - name: Create GitHub release
         id: create_release
         uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ github.ref }} # Use the tag that triggered the workflow
-          release_name: R1Delta ${{ steps.get_version.outputs.version }} # e.g., R1Delta 1.4.9
-          draft: false # Set to true if you want to manually publish later
-          prerelease: false # Set to true if this is a pre-release
+          tag_name: ${{ github.ref_name }}
+          release_name: R1Delta ${{ env.DISPLAY_VERSION }}
+          draft: false
+          # Squirrel has no update channels in R1Delta. This must remain a
+          # normal release so existing clients consume its RELEASES index.
+          prerelease: false
 
-      # Remove the old 'Define Asset Paths' step
-
-      - name: Upload Setup Executable Asset
+      - name: Upload Setup executable
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ${{ steps.find_assets.outputs.setup_exe_path }}
-          asset_name: ${{ steps.find_assets.outputs.setup_exe_name }}
+          asset_path: ${{ steps.find_assets.outputs.setup_path }}
+          asset_name: ${{ steps.find_assets.outputs.setup_name }}
           asset_content_type: application/vnd.microsoft.portable-executable
 
-      - name: Upload RELEASES File Asset
+      - name: Upload RELEASES index
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ${{ steps.find_assets.outputs.releases_path }}
-          asset_name: ${{ steps.find_assets.outputs.releases_name }}
+          asset_name: RELEASES
           asset_content_type: text/plain
 
-      - name: Upload Full Nupkg Asset
+      - name: Upload full package
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ${{ steps.find_assets.outputs.full_nupkg_path }}
-          asset_name: ${{ steps.find_assets.outputs.full_nupkg_name }}
+          asset_path: ${{ steps.find_assets.outputs.package_path }}
+          asset_name: ${{ steps.find_assets.outputs.package_name }}
+          asset_content_type: application/zip
+
+      - name: Upload symbols
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ steps.find_assets.outputs.symbols_path }}
+          asset_name: ${{ steps.find_assets.outputs.symbols_name }}
           asset_content_type: application/zip

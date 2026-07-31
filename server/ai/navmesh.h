@@ -38,6 +38,7 @@ const int AINET_VERSION_NUMBER = 54;
 const int AINET_SCRIPT_VERSION_NUMBER = 21;
 const int PLACEHOLDER_CRC = 0;
 const int MAX_HULLS = 5;
+const int AINET_NODE_SAVE_MASK = 0x0FFFFFFF;
 
 #pragma pack(push, 1)
 struct CAI_NodeLink
@@ -119,20 +120,44 @@ struct CAI_NodeLinkDisk
 	uint8_t hulls[5];
 };
 #pragma pack(pop)
+
+#pragma pack(push, 1)
+struct CAI_TraverseNodeDisk
+{
+	float quat[4];
+	int index;
+};
+#pragma pack(pop)
+
+#pragma pack(push, 1)
+struct CAI_NetworkHullBitVec
+{
+	uint16_t size;
+	uint16_t numInts;
+	uint32_t inlineData;
+	uint32_t* pData;
+};
+#pragma pack(pop)
+
 #pragma pack(push, 1)
 struct CAI_Network
 {
 	char unk0[8];
 	int linkcount;
-	char unk1[84];
-	int zonecount;
-	char padidkanymoreman[16];
-	int unk5;
+	int unk1;
+	CAI_NetworkHullBitVec hullZoneBits[MAX_HULLS];
+	int zonecount[MAX_HULLS];
+	int scriptVersion;
 	int nodecount;
 	int unk5_fake;
 	CAI_Node** nodes;
 };
 #pragma pack(pop)
+static_assert(offsetof(CAI_Network, hullZoneBits) == 16);
+static_assert(offsetof(CAI_Network, zonecount) == 96);
+static_assert(offsetof(CAI_Network, scriptVersion) == 116);
+static_assert(offsetof(CAI_Network, nodecount) == 120);
+static_assert(offsetof(CAI_Network, nodes) == 128);
 
 #pragma pack(push, 1)
 struct UnkNodeStruct0
@@ -148,39 +173,77 @@ struct UnkNodeStruct0
 
 	char pad5[4];
 	int* unk2; // maps to unk5 on disk;
-	char pad1[16]; // pad to +48
+	__int64 unk2Capacity;
+	__int64 unk2Grow;
 	int unkcount0; // maps to unkcount0 on disk
 
 	char pad2[4]; // pad to +56
 	int* unk3;
-	char pad3[16]; // pad to +80
+	__int64 unk3Capacity;
+	__int64 unk3Grow;
 	int unkcount1;
 
-	char pad4[132];
+	char pad4[68];
+	float unk4;
 	char unk5;
+	char pad6[3];
 };
 #pragma pack(pop)
+static_assert(sizeof(UnkNodeStruct0) == 160);
+static_assert(offsetof(UnkNodeStruct0, unk1) == 5);
+static_assert(offsetof(UnkNodeStruct0, unk2) == 24);
+static_assert(offsetof(UnkNodeStruct0, unk2Capacity) == 32);
+static_assert(offsetof(UnkNodeStruct0, unk2Grow) == 40);
+static_assert(offsetof(UnkNodeStruct0, unkcount0) == 48);
+static_assert(offsetof(UnkNodeStruct0, unk3) == 56);
+static_assert(offsetof(UnkNodeStruct0, unk3Capacity) == 64);
+static_assert(offsetof(UnkNodeStruct0, unk3Grow) == 72);
+static_assert(offsetof(UnkNodeStruct0, unkcount1) == 80);
+static_assert(offsetof(UnkNodeStruct0, unk4) == 152);
+static_assert(offsetof(UnkNodeStruct0, unk5) == 156);
 
 #pragma pack(push, 1)
-struct UnkLinkStruct1
+struct UnkLinkStruct1Disk
 {
 	short unk0;
 	short unk1;
-	int unk2;
+	float unk2;
 	char unk3;
 	char unk4;
 	char unk5;
 };
 #pragma pack(pop)
 
+struct UnkLinkStruct1
+{
+	short unk0;
+	short unk1;
+	float unk2;
+	char unk3;
+	char unk4;
+	char unk5;
+	char pad0;
+};
+static_assert(sizeof(UnkLinkStruct1Disk) == 11);
+static_assert(sizeof(UnkLinkStruct1) == 12);
+
 typedef void (*CAI_NetworkManager__DelayedInitType)(__int64 a1);
 extern CAI_NetworkManager__DelayedInitType CAI_NetworkManager__DelayedInitOriginal;
+typedef void (*CAI_DynamicLink__InitDynamicLinksType)();
+extern CAI_DynamicLink__InitDynamicLinksType CAI_DynamicLink__InitDynamicLinksOriginal;
+typedef bool (*CAI_NetworkManager__OpenAINFileType)(__int64 unused, __int64 fileBuffer, const char* path);
+extern CAI_NetworkManager__OpenAINFileType CAI_NetworkManager__OpenAINFileOriginal;
+typedef void (*CAI_NetworkManager__LoadNavMeshType)(__int64 manager, __int64 fileBuffer, const char* path);
+extern CAI_NetworkManager__LoadNavMeshType CAI_NetworkManager__LoadNavMeshOriginal;
 typedef void (*CAI_NetworkManager__FixupHintsType)();
 extern CAI_NetworkManager__FixupHintsType CAI_NetworkManager__FixupHintsOriginal;
 typedef unsigned __int8 (*sub_363A50Type)(__int64 a1, int a2, int a3, int a4);
 extern sub_363A50Type sub_363A50Original;
 unsigned __int8 __fastcall sub_363A50(__int64 a1, int a2, int a3, int a4);
+bool __fastcall CAI_NetworkManager__OpenAINFile(__int64 unused, __int64 fileBuffer, const char* path);
+void __fastcall CAI_NetworkManager__LoadNavMesh(__int64 manager, __int64 fileBuffer, const char* path);
 void __fastcall CAI_NetworkManager__DelayedInit(__int64 a1);
+void CAI_DynamicLink__InitDynamicLinks();
 void __fastcall CAI_NetworkManager__FixupHints();
 void sub_364140(int node1, int node2, const char* pszFormat, ...);
 typedef void (*sub_36BC30Type)(__int64* a1);

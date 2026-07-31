@@ -39,6 +39,9 @@ typedef void* (*CreateInterfaceFn)(const char* pName, int* pReturnCode);
 typedef char(__fastcall* CServerGameDLL__DLLInitType)(void* thisptr, CreateInterfaceFn appSystemFactory,
 	CreateInterfaceFn physicsFactory, CreateInterfaceFn fileSystemFactory,
 	void* pGlobals);
+typedef char(__fastcall* CDedicatedServerAPI_ConnectType)(__int64 thisptr, CreateInterfaceFn factory);
+typedef int(__fastcall* CDedicatedServerAPI_InitType)(__int64 thisptr);
+typedef char(__fastcall* CDedicatedServerAPI_ModInitType)(__int64 thisptr, void* modInfo);
 extern CServerGameDLL__DLLInitType CServerGameDLL__DLLInitOriginal;
 struct CGlobalVarsServer2015 {
 	double realtime;                                       // 0x0000
@@ -77,6 +80,16 @@ char __fastcall CServerGameDLL__DLLInit(void* thisptr, CreateInterfaceFn appSyst
 	CreateInterfaceFn physicsFactory, CreateInterfaceFn fileSystemFactory,
 	CGlobalVarsServer2015* pGlobals);
 __int64 VStdLib_GetICVarFactory();
+void InitR1ODedicatedServerAPIHook(uintptr_t engineR1OBase);
+int GetR1ODedicatedBoundServerPort();
+void* GetR1ONativeFileSystem();
+void InitVStdLibICVarFactoryHook();
+void InstallR1OVPhysicsDeferredReleaseGuard(uintptr_t vphysicsBase);
+void InstallVPhysicsStaticBVHProbe(uintptr_t vphysicsBase);
+void InstallR1OTFOServerVPhysicsFormationProbe(uintptr_t serverLocalBase);
+void InstallR1OVPKFileSystemHooks(void* fileSystem);
+void SetR1OVPKClientFallbackActive(bool active);
+void InstallMaterialSystemDx11NullShaderResourceGuard(uintptr_t materialSystemBase);
 char __fastcall MatchRecvPropsToSendProps_R(__int64 a1, __int64 a2, __int64 pSendTable, __int64 a4);
 typedef char(*sub_1801C79A0Type)(__int64 a1, __int64 a2);
 extern sub_1801C79A0Type sub_1801C79A0Original;

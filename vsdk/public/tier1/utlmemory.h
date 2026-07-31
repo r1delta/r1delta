@@ -300,7 +300,7 @@ m_nAllocationCount(nInitAllocationCount), m_nGrowSize(nGrowSize)
 	{
 		UTLMEMORY_TRACK_ALLOC();
 		MEM_ALLOC_CREDIT_CLASS();
-		m_pMemory = (T*)malloc(m_nAllocationCount * sizeof(T));
+		m_pMemory = (T*)CreateGlobalMemAlloc()->Alloc(m_nAllocationCount * sizeof(T));
 	}
 }
 
@@ -377,7 +377,7 @@ void CUtlMemory<T, I>::Init(int nGrowSize /*= 0*/, int nInitSize /*= 0*/)
 	{
 		UTLMEMORY_TRACK_ALLOC();
 		MEM_ALLOC_CREDIT_CLASS();
-		m_pMemory = (T*)malloc(m_nAllocationCount * sizeof(T));
+		m_pMemory = (T*)CreateGlobalMemAlloc()->Alloc(m_nAllocationCount * sizeof(T));
 	}
 }
 
@@ -423,7 +423,7 @@ void CUtlMemory<T, I>::ConvertToGrowableMemory(int nGrowSize)
 		MEM_ALLOC_CREDIT_CLASS();
 
 		std::make_signed_t<std::size_t> nNumBytes = m_nAllocationCount * sizeof(T);
-		T* pMemory = (T*)malloc(nNumBytes);
+		T* pMemory = (T*)CreateGlobalMemAlloc()->Alloc(nNumBytes);
 		memcpy(pMemory, m_pMemory, nNumBytes);
 		m_pMemory = pMemory;
 	}
@@ -727,12 +727,12 @@ inline void CUtlMemory<T, I>::EnsureCapacity(int num)
 	if (m_pMemory)
 	{
 		MEM_ALLOC_CREDIT_CLASS();
-		m_pMemory = (T*)realloc(m_pMemory, m_nAllocationCount * sizeof(T));
+		m_pMemory = (T*)CreateGlobalMemAlloc()->Realloc(m_pMemory, m_nAllocationCount * sizeof(T));
 	}
 	else
 	{
 		MEM_ALLOC_CREDIT_CLASS();
-		m_pMemory = (T*)malloc(m_nAllocationCount * sizeof(T));
+		m_pMemory = (T*)CreateGlobalMemAlloc()->Alloc(m_nAllocationCount * sizeof(T));
 	}
 }
 
@@ -869,7 +869,8 @@ CUtlMemoryAligned<T, nAlignment>::CUtlMemoryAligned(int nGrowSize, int nInitAllo
 	{
 		UTLMEMORY_TRACK_ALLOC();
 		MEM_ALLOC_CREDIT_CLASS();
-		CUtlMemory<T>::m_pMemory = (T*)_aligned_malloc(nInitAllocationCount * sizeof(T), nAlignment);
+		CUtlMemory<T>::m_pMemory = (T*)CreateGlobalMemAlloc()->Alloc_Aligned(
+			nInitAllocationCount * sizeof(T), nAlignment);
 	}
 }
 
@@ -958,13 +959,17 @@ void CUtlMemoryAligned<T, nAlignment>::Grow(int num)
 	if (CUtlMemory<T>::m_pMemory)
 	{
 		MEM_ALLOC_CREDIT_CLASS();
-		CUtlMemory<T>::m_pMemory = (T*)MemAlloc_ReallocAligned(CUtlMemory<T>::m_pMemory, CUtlMemory<T>::m_nAllocationCount * sizeof(T), nAlignment);
+		CUtlMemory<T>::m_pMemory = (T*)CreateGlobalMemAlloc()->Realloc_Aligned(
+			CUtlMemory<T>::m_pMemory,
+			CUtlMemory<T>::m_nAllocationCount * sizeof(T),
+			nAlignment);
 		//Assert(CUtlMemory<T>::m_pMemory);
 	}
 	else
 	{
 		MEM_ALLOC_CREDIT_CLASS();
-		CUtlMemory<T>::m_pMemory = (T*)MemAlloc_AllocAligned(CUtlMemory<T>::m_nAllocationCount * sizeof(T), nAlignment);
+		CUtlMemory<T>::m_pMemory = (T*)CreateGlobalMemAlloc()->Alloc_Aligned(
+			CUtlMemory<T>::m_nAllocationCount * sizeof(T), nAlignment);
 		//Assert(CUtlMemory<T>::m_pMemory);
 	}
 }
@@ -995,12 +1000,16 @@ inline void CUtlMemoryAligned<T, nAlignment>::EnsureCapacity(int num)
 	if (CUtlMemory<T>::m_pMemory)
 	{
 		MEM_ALLOC_CREDIT_CLASS();
-		CUtlMemory<T>::m_pMemory = (T*)MemAlloc_ReallocAligned(CUtlMemory<T>::m_pMemory, CUtlMemory<T>::m_nAllocationCount * sizeof(T), nAlignment);
+		CUtlMemory<T>::m_pMemory = (T*)CreateGlobalMemAlloc()->Realloc_Aligned(
+			CUtlMemory<T>::m_pMemory,
+			CUtlMemory<T>::m_nAllocationCount * sizeof(T),
+			nAlignment);
 	}
 	else
 	{
 		MEM_ALLOC_CREDIT_CLASS();
-		CUtlMemory<T>::m_pMemory = (T*)MemAlloc_AllocAligned(CUtlMemory<T>::m_nAllocationCount * sizeof(T), nAlignment);
+		CUtlMemory<T>::m_pMemory = (T*)CreateGlobalMemAlloc()->Alloc_Aligned(
+			CUtlMemory<T>::m_nAllocationCount * sizeof(T), nAlignment);
 	}
 }
 
@@ -1016,7 +1025,7 @@ void CUtlMemoryAligned<T, nAlignment>::Purge()
 		if (CUtlMemory<T>::m_pMemory)
 		{
 			UTLMEMORY_TRACK_FREE();
-			MemAlloc_FreeAligned(CUtlMemory<T>::m_pMemory);
+			CreateGlobalMemAlloc()->Free_Aligned(CUtlMemory<T>::m_pMemory, nAlignment);
 			CUtlMemory<T>::m_pMemory = 0;
 		}
 		CUtlMemory<T>::m_nAllocationCount = 0;

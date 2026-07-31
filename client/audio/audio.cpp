@@ -1,17 +1,13 @@
-﻿// ogg_decoder.cpp
+// ogg_decoder.cpp
 // Drop–in replacement for the original WAV–based decoder.
-// Implements progressive decoding (with an enlarged initial decode buffer + background decoding),
-// asynchronous read with synchronous “just–in–time” decoding when needed,
-// and memory–allocation optimizations.
+// Implements progressive decoding with an enlarged initial decode buffer,
+// synchronous “just–in-time” decoding when needed, and memory-allocation optimizations.
 //
 // FIXES:
 // 1. MemoryBuffer lifetime issues are fixed by storing a persistent copy in the progressive template.
-// 2. A single shared OggVorbis_File is used for both background and synchronous decoding,
-//    preventing sample misalignment.
-// 3. A larger initial synchronous decode buffer is filled so that the handoff to the async thread
-//    doesn’t cause underruns.
-// 4. In the synchronous branch, if more samples are needed the code immediately decodes additional
-//    chunks rather than waiting, reducing the chance of buffer underruns.
+// 2. A single shared OggVorbis_File is used for synchronous decoding, preventing sample misalignment.
+// 3. A larger initial synchronous decode buffer is filled so playback starts with fewer underruns.
+// 4. If more samples are needed, the read path immediately decodes additional chunks.
 //
 // Note: This file is self–contained and must be compiled with the required libraries (e.g. vorbis).
 
@@ -29,7 +25,6 @@
 #include <cmath>
 #include <atomic>
 #include <condition_variable>
-#include <thread>
 #include <memory>
 #include <cstdio>
 #include <emmintrin.h>    // SSE2
@@ -85,38 +80,6 @@ public:
     char padding[0x260];
     int fwLevel;
 };
-
-// --------------------------------------------------------------------
-// Tier0 thread priority stubs (unchanged)
-// --------------------------------------------------------------------
-typedef int(__fastcall* ThreadGetPriorityFn)(std::uint64_t);
-typedef void(__fastcall* ThreadSetPriorityFn)(std::uint64_t, int);
-ThreadGetPriorityFn OriginalThreadGetPriority = nullptr;
-ThreadSetPriorityFn OriginalThreadSetPriority = nullptr;
-
-void LoadTier0Functions() {
-    HMODULE tier0Module = GetModuleHandleA("tier0_orig.dll");
-    OriginalThreadGetPriority = reinterpret_cast<ThreadGetPriorityFn>(
-        GetProcAddress(tier0Module, "ThreadGetPriority"));
-    OriginalThreadSetPriority = reinterpret_cast<ThreadSetPriorityFn>(
-        GetProcAddress(tier0Module, "ThreadSetPriority"));
-}
-
-extern "C" {
-    int __fastcall ThreadGetPriority(std::uint64_t threadId) {
-        if (!OriginalThreadGetPriority) {
-            LoadTier0Functions();
-        }
-        return OriginalThreadGetPriority(threadId);
-    }
-
-    void __fastcall ThreadSetPriority(std::uint64_t threadId, int priority) {
-        if (!OriginalThreadSetPriority) {
-            LoadTier0Functions();
-        }
-        OriginalThreadSetPriority(threadId, priority);
-    }
-}
 
 // --------------------------------------------------------------------
 // Core filesystem vtable–based function pointers (unchanged)
@@ -373,55 +336,18 @@ static std::vector<int16_t> DecodeChunk(OggVorbis_File* vf, int channels) {
 }
 
 // --------------------------------------------------------------------
-// Background decoder: continuously decode remaining chunks and add them to the template.
-// Runs in its own thread.
-// --------------------------------------------------------------------
-static void BackgroundDecodeThread(ProgressiveOpusTemplate* progTemplate, int channels) {
-    while (true) {
-        std::vector<int16_t> chunk;
-        {
-            SRWGuard decodeLock(&progTemplate->decodeMutex);
-            if (progTemplate->vf == nullptr) {
-                break;
-            }
-            chunk = DecodeChunk(progTemplate->vf, channels);
-        }
-        {
-            SRWGuard lock(&progTemplate->chunkMutex);
-            if (chunk.empty()) {
-                progTemplate->fullyDecoded = true;
-                //WakeAllConditionVariable(&progTemplate->chunkCV);
-                break;
-            }
-            progTemplate->pcmChunks.push_back(std::move(chunk));
-            progTemplate->decodedChunks.fetch_add(1, std::memory_order_relaxed);
-            //WakeAllConditionVariable(&progTemplate->chunkCV);
-        }
-    }
-    {
-        SRWGuard decodeLock(&progTemplate->decodeMutex);
-        if (progTemplate->vf) {
-            ov_clear(progTemplate->vf);
-            GlobalAllocator()->mi_free(progTemplate->vf, TAG_AUDIO, HEAP_DELTA);
-            progTemplate->vf = nullptr;
-        }
+static void CloseProgressiveDecoderLocked(ProgressiveOpusTemplate* progTemplate)
+{
+    if (progTemplate && progTemplate->vf) {
+        ov_clear(progTemplate->vf);
+        GlobalAllocator()->mi_free(progTemplate->vf, TAG_AUDIO, HEAP_DELTA);
+        progTemplate->vf = nullptr;
     }
 }
 
 // --------------------------------------------------------------------
-// Background decoder entry-point wrapper (new).
-// Bumps its own thread priority one notch to reduce underruns.
-// --------------------------------------------------------------------
-static void BackgroundDecodeWrapper(ProgressiveOpusTemplate* progTemplate, int channels) {
-    DWORD tid = GetCurrentThreadId();
-    int basePrio = ThreadGetPriority(tid);
-    ThreadSetPriority(tid, basePrio + 1);
-    BackgroundDecodeThread(progTemplate, channels);
-}
-
-// --------------------------------------------------------------------
-// Progressive decode: open an Ogg Vorbis file, decode a larger number of initial chunks,
-// and then launch a background thread to decode the remainder.
+// Progressive decode: open an Ogg Vorbis file and decode a larger number
+// of initial chunks. Remaining chunks are decoded synchronously on demand.
 // --------------------------------------------------------------------
 bool OpenOpusContext(const char* wavName, CBaseFileSystem* filesystem, const char* pathID) {
     ZoneScoped;
@@ -484,12 +410,10 @@ bool OpenOpusContext(const char* wavName, CBaseFileSystem* filesystem, const cha
 
         const size_t INITIAL_CHUNKS = 16; // increased from 8
         for (size_t i = 0; i < INITIAL_CHUNKS; i++) {
-            std::vector<int16_t> chunk;
-            {
-                chunk = DecodeChunk(progTemplate->vf, channels);
-            }
+            std::vector<int16_t> chunk = DecodeChunk(progTemplate->vf, channels);
             if (chunk.empty()) {
                 progTemplate->fullyDecoded = true;
+                CloseProgressiveDecoderLocked(progTemplate);
                 break;
             }
             progTemplate->pcmChunks.push_back(std::move(chunk));
@@ -497,9 +421,7 @@ bool OpenOpusContext(const char* wavName, CBaseFileSystem* filesystem, const cha
         }
     }
 
-    // Start an asynchronous worker thread with bumped priority.
-    std::thread bgThread(BackgroundDecodeWrapper, progTemplate, channels);
-    bgThread.detach();
+    // Remaining chunks are decoded by HandleOpusRead only when a read needs them.
 
     // Save the progressive template in the global cache.
     g_progressiveCache[wavName] = progTemplate;
@@ -651,21 +573,19 @@ __int64 HandleOpusRead(CBaseFileSystem* filesystem, FileAsyncRequest_t* request)
         SRWGuard decodeLock(&progTemplate->decodeMutex);
         SRWGuard lock(&progTemplate->chunkMutex);
         while (availableSamples < instance->readSampleIndex + samplesRequested && !progTemplate->fullyDecoded) {
-            std::vector<int16_t> newChunk;
-            {
-                if (progTemplate->vf == nullptr) {
-                    progTemplate->fullyDecoded = true;
-                    break;
-                }
-                newChunk = DecodeChunk(progTemplate->vf, progTemplate->channels);
+            if (progTemplate->vf == nullptr) {
+                progTemplate->fullyDecoded = true;
+                break;
             }
+
+            std::vector<int16_t> newChunk = DecodeChunk(progTemplate->vf, progTemplate->channels);
             if (!newChunk.empty()) {
                 progTemplate->pcmChunks.push_back(std::move(newChunk));
                 progTemplate->decodedChunks.fetch_add(1, std::memory_order_relaxed);
-                //WakeAllConditionVariable(&progTemplate->chunkCV);
             }
             else {
                 progTemplate->fullyDecoded = true;
+                CloseProgressiveDecoderLocked(progTemplate);
                 break;
             }
             availableSamples = GetTotalAvailableSamplesNoLock(progTemplate);

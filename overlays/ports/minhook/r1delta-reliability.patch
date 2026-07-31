@@ -1,0 +1,68 @@
+diff --git a/src/buffer.c b/src/buffer.c
+index 5b8c51f..4248e39 100644
+--- a/src/buffer.c
++++ b/src/buffer.c
+@@ -27,8 +27,11 @@
+ #include <windows.h>
+ #include "buffer.h"
+ 
+-// Size of each memory block. (= page size of VirtualAlloc)
+-#define MEMORY_BLOCK_SIZE 0x1000
++// Reserve one Windows allocation-granularity block per target region. A 4 KiB
++// block holds only 63 x64 trampolines and forces another address-sensitive
++// reservation as soon as a hook-heavy module crosses that boundary.
++// 64 KiB holds 1023 slots while preserving the existing slot allocator.
++#define MEMORY_BLOCK_SIZE 0x10000
+ 
+ // Max range for seeking a memory block. (= 1024MB)
+ #define MAX_MEMORY_RANGE 0x40000000
+diff --git a/src/hook.c b/src/hook.c
+index c36f8a6..df31e6f 100644
+--- a/src/hook.c
++++ b/src/hook.c
+@@ -86,8 +86,9 @@ typedef struct _FROZEN_THREADS
+ // Global Variables:
+ //-------------------------------------------------------------------------
+ 
+-// Spin lock flag for EnterSpinLock()/LeaveSpinLock().
+-volatile LONG g_isLocked = FALSE;
++// A statically initialized Windows lock avoids MinHook's old Sleep(0)/Sleep(1)
++// contention loop without changing its public API or trampoline semantics.
++static SRWLOCK g_hookLock = SRWLOCK_INIT;
+ 
+ // Private heap handle. If not NULL, this library is initialized.
+ HANDLE g_hHeap = NULL;
+@@ -476,31 +477,13 @@ static MH_STATUS EnableAllHooksLL(BOOL enable)
+ //-------------------------------------------------------------------------
+ static VOID EnterSpinLock(VOID)
+ {
+-    SIZE_T spinCount = 0;
+-
+-    // Wait until the flag is FALSE.
+-    while (InterlockedCompareExchange(&g_isLocked, TRUE, FALSE) != FALSE)
+-    {
+-        // No need to generate a memory barrier here, since InterlockedCompareExchange()
+-        // generates a full memory barrier itself.
+-
+-        // Prevent the loop from being too busy.
+-        if (spinCount < 32)
+-            Sleep(0);
+-        else
+-            Sleep(1);
+-
+-        spinCount++;
+-    }
++    AcquireSRWLockExclusive(&g_hookLock);
+ }
+ 
+ //-------------------------------------------------------------------------
+ static VOID LeaveSpinLock(VOID)
+ {
+-    // No need to generate a memory barrier here, since InterlockedExchange()
+-    // generates a full memory barrier itself.
+-
+-    InterlockedExchange(&g_isLocked, FALSE);
++    ReleaseSRWLockExclusive(&g_hookLock);
+ }
+ 
+ //-------------------------------------------------------------------------

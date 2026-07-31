@@ -31,22 +31,58 @@ void* SetPreCache_o = nullptr;
 __int64 __fastcall SetPreCache(__int64 a1, __int64 a2, char a3) {
     auto ret = reinterpret_cast<decltype(&SetPreCache)>(SetPreCache_o)(a1, a2, a3);
 
+    HMODULE engineR1O = GetModuleHandleA("engine_r1o.dll");
+    if (!engineR1O)
+        return ret;
+
     using sub_1800F5680_t = char(__fastcall*)(const char* a1, __int64 a2, void* a3, void* a4);
-    static auto sub_1800F5680 = sub_1800F5680_t(uintptr_t(GetModuleHandleA("engine_r1o.dll")) + 0xF5680);
+    static auto sub_1800F5680 = sub_1800F5680_t(uintptr_t(engineR1O) + 0xF5680);
 
-    static auto array_start = uintptr_t(GetModuleHandleA("engine_r1o.dll")) + 0x2555C00;
+    const uintptr_t array_start = uintptr_t(engineR1O) + 0x2555C00;
+    const uintptr_t class_ptr = static_cast<uintptr_t>(a1);
+    if (class_ptr < array_start)
+        return ret;
 
-    auto idx = (a1 - array_start) / 10064;
-    // assert that no mod and no more than 100...
+    const uintptr_t idx = (class_ptr - array_start) / 10064;
+    if (idx >= g_militia_bodies.size())
+        return ret;
+
     auto elem = &g_militia_bodies[idx];
     auto militia_exists = sub_1800F5680("bodymodel_militia", a2, &elem[0]->ptr, &elem[0]->big_size);
+    (*elem)[0].size = militia_exists ? 1 : 0;
 
+    auto armsmodel_imc_exists = false;
     if (!*(_QWORD*)(a1 + 488))
-        sub_1800F5680("armsmodel_imc", a2, PVOID(a1 + 472), PVOID(a1 + 488));
+        armsmodel_imc_exists = sub_1800F5680("armsmodel_imc", a2, PVOID(a1 + 472), PVOID(a1 + 488)) != 0;
 
     auto armsmodel_militia_exists = sub_1800F5680("armsmodel_militia", a2, &elem[1]->ptr, &elem[1]->big_size);
-    if (OriginalCCVar_FindVar(cvarinterface, "developer")->m_Value.m_nValue == 1)
-        Cbuf_AddText(0, "developer 1\n", 0);
+    (*elem)[1].size = armsmodel_militia_exists ? 1 : 0;
+
+    static int s_r1oSetPreCacheLogBudget = 12;
+    if (AreR1OFakeDediVerboseLogsEnabled()
+        && s_r1oSetPreCacheLogBudget-- > 0
+        && (militia_exists || armsmodel_imc_exists || armsmodel_militia_exists)) {
+        char buffer[256];
+        _snprintf_s(
+            buffer,
+            sizeof(buffer),
+            _TRUNCATE,
+            "R1Delta: SetPreCache captured Delta class models idx=%llu militiaBody=%d imcArms=%d militiaArms=%d\n",
+            static_cast<unsigned long long>(idx),
+            militia_exists ? 1 : 0,
+            armsmodel_imc_exists ? 1 : 0,
+            armsmodel_militia_exists ? 1 : 0);
+        OutputDebugStringA(buffer);
+    }
+
+    // The legacy Cbuf_AddText wrapper is bound to the R1/R1DS engine layouts. Keep
+    // the old developer requeue for non-R1O paths, but do not call it from R1O
+    // fake-dedi where there is no valid legacy engine_ds base.
+    if (!IsR1ODedicatedServer()) {
+        auto developer = (OriginalCCVar_FindVar && cvarinterface) ? OriginalCCVar_FindVar(cvarinterface, "developer") : nullptr;
+        if (developer && developer->m_Value.m_nValue == 1)
+            Cbuf_AddText(0, "developer 1\n", 0);
+    }
 
     return ret;
 }
@@ -83,6 +119,8 @@ void CHL2_Player_Precache(uintptr_t a1, uintptr_t a2) {
         using PrecacheModel_t = uintptr_t(__fastcall*)(const void*);
         auto PrecacheModel = PrecacheModel_t(server_mod + 0x3B6A40);
 
+        OutputDebugStringA("R1Delta: CHL2_Player_Precache running Delta pilot model precaches\n");
+
         // Precache weapon arm models
         PrecacheModel("models/weapons/arms/atlaspov.mdl");
         PrecacheModel("models/weapons/arms/atlaspov_cockpit2.mdl");
@@ -105,6 +143,20 @@ void CHL2_Player_Precache(uintptr_t a1, uintptr_t a2) {
         PrecacheModel("models/weapons/arms/pov_pilot_female_dm.mdl");
         PrecacheModel("models/weapons/arms/stryderpov.mdl");
         PrecacheModel("models/weapons/arms/stryderpov_cockpit.mdl");
+
+        // Precache base pilot body variants used by Delta scripts/loadouts. The
+        // setfile-driven loop below only covers item-system overrides once those
+        // records have been populated; these canonical player models must be
+        // available during CHL2_Player precache before UTIL_SetModel can run.
+        PrecacheModel("models/Humans/mcor_pilot/male_br/mcor_pilot_male_br.mdl");
+        PrecacheModel("models/Humans/imc_pilot/male_br/imc_pilot_male_br.mdl");
+        PrecacheModel("models/Humans/mcor_pilot/male_cq/mcor_pilot_male_cq.mdl");
+        PrecacheModel("models/humans/imc_pilot/male_cq/imc_pilot_male_cq.mdl");
+        PrecacheModel("models/Humans/mcor_pilot/male_dm/mcor_pilot_male_dm.mdl");
+        PrecacheModel("models/humans/imc_pilot/male_dm/imc_pilot_male_dm.mdl");
+        PrecacheModel("models/humans/pilot/female_br/pilot_female_br.mdl");
+        PrecacheModel("models/humans/pilot/female_cq/pilot_female_cq.mdl");
+        PrecacheModel("models/humans/pilot/female_dm/pilot_female_dm.mdl");
 
         // Precache militia body variants
         for (size_t i = 0; i < 100; i++) {

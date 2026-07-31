@@ -248,6 +248,8 @@ extern void      (*OriginalCCVar_CallGlobalChangeCallbacks)(uintptr_t thisptr, C
 extern void      (*OriginalCCVar_QueueMaterialThreadSetValue1)(uintptr_t thisptr, ConVarR1* pConVar, const char* pValue);
 extern void      (*OriginalCCVar_QueueMaterialThreadSetValue2)(uintptr_t thisptr, ConVarR1* pConVar, int nValue);
 extern void      (*OriginalCCVar_QueueMaterialThreadSetValue3)(uintptr_t thisptr, ConVarR1* pConVar, float flValue);
+extern int       (*OriginalCCvar__ProcessQueuedMaterialThreadConVarSets)(uintptr_t thisptr);
+extern void*     (*OriginalCCvar__FactoryInternalIterator)(uintptr_t thisptr);
 extern std::unordered_map<std::string, WVar*, HashStrings, std::equal_to<>> ccBaseMap;
 
 void CCVar_RegisterConCommand(uintptr_t thisptr, ConCommandBaseR1O* pCommandBase);
@@ -264,7 +266,9 @@ void CCVar_QueueMaterialThreadSetValue2(uintptr_t thisptr, ConVarR1O* pConVar, i
 void CCVar_QueueMaterialThreadSetValue3(uintptr_t thisptr, ConVarR1O* pConVar, float flValue);
 void CCvar__InstallGlobalChangeCallback(uintptr_t thisptr, void* func);
 void CCvar__RemoveGlobalChangeCallback(uintptr_t thisptr, void* func);
-__int64 CCvar__ProcessQueuedMaterialThreadConVarSets(__int64 a1);
+int CCvar__ProcessQueuedMaterialThreadConVarSets(uintptr_t thisptr);
+void* CCvar__FactoryInternalIterator(uintptr_t thisptr);
+ConVarR1O* RegisterR1ODediConVar(const char* name, const char* value, int flags, const char* helpString);
 
 class EditablePanel
 {
@@ -430,9 +434,13 @@ char CEngineVGui__Init(__int64 a1);
 // ConCommand/ConVar registration
 ConCommandR1* RegisterConCommand(const char* commandName, void (*callback)(const CCommand&), const char* helpString, int flags);
 ConVarR1* RegisterConVar(const char* name, const char* value, int flags, const char* helpString);
+ConCommandR1O* RegisterR1ODediConCommand(const char* name, void (*callback)(const CCommand&), const char* helpString, int flags);
+ConVarR1O* RegisterR1ODediConVar(const char* name, const char* value, int flags, const char* helpString);
+void RegisterR1ODediDeltaConVars();
 
 // Find command for searching commands/cvars
 void Find(const CCommand& args);
+bool PrintR1ODediFindResults(const char* search);
 
 // Recent host vars - tracks last used map/gamemode
 extern ConVarR1* host_mostRecentMapCvar;

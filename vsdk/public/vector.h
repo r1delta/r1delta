@@ -45,7 +45,7 @@
 //#include "tier0/threadtools.h"
 #include "vector2d.h"
 #include "math_pfns.h"
-//#include "tier0/memalloc.h"
+#include "memory.h"
 #include "vstdlib/random.h"
 // Uncomment this to add extra Asserts to check for NANs, uninitialized vecs, etc.
 //#define VECTOR_PARANOIA	1
@@ -53,30 +53,28 @@
 // Uncomment this to make sure we don't do anything slow with our vectors
 //#define VECTOR_NO_SLOW_OPERATIONS 1
 
-#include <malloc.h>
-
 inline void* MemAlloc_AllocAligned(size_t nSize, size_t alignment) {
-#if BUILD_DEBUG
-	return _aligned_malloc_dbg(nSize, alignment, __FILE__, __LINE__);
-#else
-	return _aligned_malloc(nSize, alignment);
-#endif
+	return CreateGlobalMemAlloc()->Alloc_Aligned(nSize, alignment);
 }
 
 inline void* MemAlloc_AllocAlignedFileLine(size_t nSize, size_t alignment, const char* pFileName, int nLine) {
-	return _aligned_malloc_dbg(nSize, alignment, pFileName, nLine);
+	(void)pFileName;
+	(void)nLine;
+	return CreateGlobalMemAlloc()->Alloc_Aligned(nSize, alignment);
+}
+
+inline void* MemAlloc_ReallocAligned(void* p, size_t nSize, size_t alignment) {
+	return CreateGlobalMemAlloc()->Realloc_Aligned(p, nSize, alignment);
 }
 
 inline void MemAlloc_FreeAligned(void* p) {
-#if BUILD_DEBUG
-	_aligned_free_dbg(p);
-#else
-	_aligned_free(p);
-#endif
+	CreateGlobalMemAlloc()->Free_Aligned(p, 16);
 }
 
 inline void MemAlloc_FreeAligned(void* p, const char* pFileName, int nLine) {
-	_aligned_free_dbg(p);
+	(void)pFileName;
+	(void)nLine;
+	CreateGlobalMemAlloc()->Free_Aligned(p, 16);
 }
 
 // Helper functions for the original function signatures

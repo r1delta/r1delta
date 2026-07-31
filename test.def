@@ -217,9 +217,9 @@ FreeThreadID=tier0_orig.FreeThreadID @215
 GetCPUInformation=tier0_orig.GetCPUInformation @216
 GetCallStack=tier0_orig.GetCallStack @217
 GetCallStack_Fast=tier0_orig.GetCallStack_Fast @218
-GetCurrentDate=tier0_orig.GetCurrentDate @219
-GetCurrentDayOfTheWeek=tier0_orig.GetCurrentDayOfTheWeek @220
-GetCurrentDayOfTheYear=tier0_orig.GetCurrentDayOfTheYear @221
+GetCurrentDate @219
+GetCurrentDayOfTheWeek @220
+GetCurrentDayOfTheYear @221
 GetFileAndLineFromAddress=tier0_orig.GetFileAndLineFromAddress @222
 GetMinidumpBreakRequested=tier0_orig.GetMinidumpBreakRequested @223
 GetModuleNameFromAddress=tier0_orig.GetModuleNameFromAddress @224
@@ -264,36 +264,36 @@ MemFreeScratch=tier0_orig.MemFreeScratch @262
 MinidumpSetUnhandledExceptionFunction=tier0_orig.MinidumpSetUnhandledExceptionFunction @263
 Msg=tier0_orig.Msg @264
 Plat_Alloc=tier0_orig.Plat_Alloc @265
-Plat_ConvertToLocalTime=tier0_orig.Plat_ConvertToLocalTime @266
+Plat_ConvertToLocalTime @266
 Plat_CreateWindow=tier0_orig.Plat_CreateWindow @267
 Plat_DebugString=tier0_orig.Plat_DebugString @268
 Plat_ExitProcess=tier0_orig.Plat_ExitProcess @269
 Plat_FastVerifyHardwareKey=tier0_orig.Plat_FastVerifyHardwareKey @270
-Plat_FloatTime=tier0_orig.Plat_FloatTime @271
+Plat_FloatTime @271
 Plat_Free=tier0_orig.Plat_Free @272
-Plat_GetClockStart=tier0_orig.Plat_GetClockStart @273
+Plat_GetClockStart @273
 Plat_GetCommandLine=tier0_orig.Plat_GetCommandLine @274
 Plat_GetCommandLineA=tier0_orig.Plat_GetCommandLineA @275
 Plat_GetDesktopResolution=tier0_orig.Plat_GetDesktopResolution @276
-Plat_GetLocalTime=tier0_orig.Plat_GetLocalTime @277
+Plat_GetLocalTime @277
 Plat_GetMemPageSize=tier0_orig.Plat_GetMemPageSize @278
 Plat_GetModuleFilename=tier0_orig.Plat_GetModuleFilename @279
 Plat_GetOSVersion=tier0_orig.Plat_GetOSVersion @280
 Plat_GetPagedPoolInfo=tier0_orig.Plat_GetPagedPoolInfo @281
 Plat_GetProcAddress=tier0_orig.Plat_GetProcAddress @282
 Plat_GetShellWindow=tier0_orig.Plat_GetShellWindow @283
-Plat_GetTimeString=tier0_orig.Plat_GetTimeString @284
+Plat_GetTimeString @284
 Plat_GetWindowClientSize=tier0_orig.Plat_GetWindowClientSize @285
-Plat_IsInBenchmarkMode=tier0_orig.Plat_IsInBenchmarkMode @286
+Plat_IsInBenchmarkMode @286
 Plat_IsInDebugSession=tier0_orig.Plat_IsInDebugSession @287
 Plat_IsInRenderToolMode=tier0_orig.Plat_IsInRenderToolMode @288
 Plat_IsInToolMode=tier0_orig.Plat_IsInToolMode @289
 Plat_IsWindowMinimized=tier0_orig.Plat_IsWindowMinimized @290
-Plat_MSTime=tier0_orig.Plat_MSTime @291
+Plat_MSTime @291
 Plat_MessageBox=tier0_orig.Plat_MessageBox @292
 Plat_Realloc=tier0_orig.Plat_Realloc @293
 Plat_ScreenToWindowCoords=tier0_orig.Plat_ScreenToWindowCoords @294
-Plat_SetBenchmarkMode=tier0_orig.Plat_SetBenchmarkMode @295
+Plat_SetBenchmarkMode @295
 Plat_SetRenderToolMode=tier0_orig.Plat_SetRenderToolMode @296
 Plat_SetToolMode=tier0_orig.Plat_SetToolMode @297
 Plat_SetWindowPos=tier0_orig.Plat_SetWindowPos @298
@@ -303,8 +303,8 @@ Plat_VerifyHardwareKey=tier0_orig.Plat_VerifyHardwareKey @301
 Plat_VerifyHardwareKeyDriver=tier0_orig.Plat_VerifyHardwareKeyDriver @302
 Plat_VerifyHardwareKeyPrompt=tier0_orig.Plat_VerifyHardwareKeyPrompt @303
 Plat_WindowToScreenCoords=tier0_orig.Plat_WindowToScreenCoords @304
-Plat_gmtime=tier0_orig.Plat_gmtime @305
-Plat_timegm=tier0_orig.Plat_timegm @306
+Plat_gmtime @305
+Plat_timegm @306
 Print_ClearClientTime=tier0_orig.Print_ClearClientTime @307
 Print_ClearServerTime=tier0_orig.Print_ClearServerTime @308
 Print_EnableTimePrefix=tier0_orig.Print_EnableTimePrefix @309
@@ -343,7 +343,7 @@ ThreadSetAffinity=tier0_orig.ThreadSetAffinity @341
 ThreadSetDebugName=tier0_orig.ThreadSetDebugName @342
 ThreadSetPriority=tier0_orig.ThreadSetPriority @343
 ThreadSleep=tier0_orig.ThreadSleep @344
-Timer_GetTimeUS=tier0_orig.Timer_GetTimeUS @345
+Timer_GetTimeUS @345
 TranslateStackInfo=tier0_orig.TranslateStackInfo @346
 UnitTestCount=tier0_orig.UnitTestCount @347
 UnitTestInstallTestCase=tier0_orig.UnitTestInstallTestCase @348
@@ -360,11 +360,11 @@ _Error_AlwaysSpewCallStack_Length=tier0_orig._Error_AlwaysSpewCallStack_Length @
 _ExitOnFatalAssert=tier0_orig._ExitOnFatalAssert @359
 _Warning_AlwaysSpewCallStack_Enable=tier0_orig._Warning_AlwaysSpewCallStack_Enable @360
 _Warning_AlwaysSpewCallStack_Length=tier0_orig._Warning_AlwaysSpewCallStack_Length @361
-g_ClockSpeed=tier0_orig.g_ClockSpeed @362
-g_ClockSpeedMicrosecondsMultiplier=tier0_orig.g_ClockSpeedMicrosecondsMultiplier @363
-g_ClockSpeedMillisecondsMultiplier=tier0_orig.g_ClockSpeedMillisecondsMultiplier @364
-g_ClockSpeedSecondsMultiplier=tier0_orig.g_ClockSpeedSecondsMultiplier @365
-g_dwClockSpeed=tier0_orig.g_dwClockSpeed @366
+g_ClockSpeed @362 DATA
+g_ClockSpeedMicrosecondsMultiplier @363 DATA
+g_ClockSpeedMillisecondsMultiplier @364 DATA
+g_ClockSpeedSecondsMultiplier @365 DATA
+g_dwClockSpeed @366 DATA
 g_nMiniProfilerFrame=tier0_orig.g_nMiniProfilerFrame @367
 g_pLastMiniProfiler=tier0_orig.g_pLastMiniProfiler @368
 g_pOtherMiniProfilers=tier0_orig.g_pOtherMiniProfilers @369

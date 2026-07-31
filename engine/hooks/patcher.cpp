@@ -45,6 +45,7 @@
 #include <winternl.h>  // For UNICODE_STRING.
 #include <fstream>
 #include <filesystem>
+#include <cwctype>
 #include <intrin.h>
 #include "memory.h"
 #include "filesystem.h"
@@ -222,7 +223,7 @@ bool ApplyPatch(const PatchInstruction& instruction, void* targetModuleBase) {
     // why the fuck do you even check a section if all you fucking do is use RVA from imagebase???
     if (!section_valid) {
         std::string errorMsg = "Invalid section name `" + instruction.sectionName + "`\nFile: " + instruction.fileName + "\nLine: " + std::to_string(instruction.lineNumber);
-        MessageBoxA(nullptr, errorMsg.c_str(), "Patcher Error", MB_OK);
+//        MessageBoxA(nullptr, errorMsg.c_str(), "Patcher Error", MB_OK);
         return false;
     }
 
@@ -242,7 +243,7 @@ bool ApplyPatch(const PatchInstruction& instruction, void* targetModuleBase) {
             else
             {
                 std::string errorMsg = "Original bytes do not match\nFile: " + instruction.fileName + "\nLine: " + std::to_string(instruction.lineNumber);
-                MessageBoxA(nullptr, errorMsg.c_str(), "Patcher Error", MB_OK);
+//                MessageBoxA(nullptr, errorMsg.c_str(), "Patcher Error", MB_OK);
                 return false;
             }
         }
@@ -254,6 +255,71 @@ bool ApplyPatch(const PatchInstruction& instruction, void* targetModuleBase) {
 }
 
 std::vector<PatchInstruction> patchInstructions;
+
+static bool PatchModuleEquals(const PatchInstruction& instruction, const char* moduleName) {
+    return _stricmp(instruction.moduleName.c_str(), moduleName) == 0;
+}
+
+static bool IsR1OServerCompatibilityPatch(const PatchInstruction& instruction) {
+    if (!PatchModuleEquals(instruction, "server.dll"))
+        return false;
+
+    switch (instruction.offset) {
+    case 0x8ce4b:  // R1 mdlcache vtable offset fix.
+    case 0x8ceba:
+    case 0x8cf59:
+    case 0x8cf8d:
+    case 0x20fda2:
+    case 0x2a09a2: // R1 material-system CWorld::Spawn workaround.
+    case 0x3e26fd: // R1 modelinfo interface offset fix.
+    case 0x6679ea: // R1 material-system reference fixups.
+    case 0x667a8f:
+    case 0x657b15:
+    case 0x7bfea8: // server_local.dll local interface export renames.
+    case 0x8077e0:
+    case 0x8082a0:
+    case 0x8085e8:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool ShouldMirrorServerPatchToR1OServerLocal(const PatchInstruction& instruction) {
+    return IsR1ODedicatedServer()
+        && PatchModuleEquals(instruction, "server.dll")
+        && !IsR1OServerCompatibilityPatch(instruction);
+}
+
+static bool ShouldKeepPatchInstruction(const PatchInstruction& instruction) {
+    if (!IsR1ODedicatedServer())
+        return true;
+
+    if (PatchModuleEquals(instruction, "engine_ds.dll"))
+        return false;
+
+    if (PatchModuleEquals(instruction, "engine_r1o.dll") &&
+        (instruction.offset == 0x1C6BA0 || instruction.offset == 0x1C6C00))
+        return false;
+
+    if (IsR1OServerCompatibilityPatch(instruction))
+        return false;
+
+    return true;
+}
+
+static void AddPatchInstruction(PatchInstruction instruction) {
+    if (!ShouldKeepPatchInstruction(instruction))
+        return;
+
+    if (ShouldMirrorServerPatchToR1OServerLocal(instruction)) {
+        PatchInstruction serverLocalInstruction = instruction;
+        serverLocalInstruction.moduleName = "server_local.dll";
+        patchInstructions.push_back(std::move(serverLocalInstruction));
+    }
+
+    patchInstructions.push_back(std::move(instruction));
+}
 
 void initialisePatchInstructions() {
     ZoneScoped;
@@ -268,27 +334,34 @@ void initialisePatchInstructions() {
     std::filesystem::path noOriginPatchFile = r1deltaBaseDir / "r1delta_noorigin.wpatch";
 
     // Parse the main patch file using its absolute path
-    patchInstructions = ParsePatchFile(mainPatchFile.string());
+    patchInstructions.clear();
+    std::vector<PatchInstruction> mainPatchInstructions = ParsePatchFile(mainPatchFile.string());
+    for (auto& instruction : mainPatchInstructions)
+        AddPatchInstruction(std::move(instruction));
 
-    // If it's a dedicated server, also load and apply instructions from its absolute path
+    // If it's a dedicated server, also load and apply instructions from its absolute path.
+    // R1O fake-dedi still needs dedicated.dll/server.dll DS patches, but must not
+    // mutate the old 2014 engine_ds.dll because that binary is not part of this path.
     if (IsDedicatedServer()) {
         std::vector<PatchInstruction> dedicatedServerPatchInstructions = ParsePatchFile(dsPatchFile.string());
-        patchInstructions.insert(patchInstructions.end(), dedicatedServerPatchInstructions.begin(), dedicatedServerPatchInstructions.end());
+        for (auto& instruction : dedicatedServerPatchInstructions)
+            AddPatchInstruction(std::move(instruction));
 
         // This check uses a relative path "vpk/..." - leave as is
         if (!std::filesystem::exists("vpk/englishserver_mp_common.bsp.pak000_dir.vpk")) {
             // These paths "vpk/..." are left relative as requested
-            patchInstructions.push_back(PatchInstruction("engine_ds.dll", "rdata", 0x422980, "vpk/server_", "vpk/client_\x00"));
-            patchInstructions.push_back(PatchInstruction("engine_ds.dll", "rdata", 0x4229A8, "%sserver_%s%s", "%sclient_%s%s\x00"));
-            patchInstructions.push_back(PatchInstruction("dedicated.dll", "rdata", 0x208E50, "vpk/server", "vpk/client"));
-            patchInstructions.push_back(PatchInstruction("dedicated.dll", "rdata", 0x205AC8, "vpk/server", "vpk/client"));
+            AddPatchInstruction(PatchInstruction("engine_ds.dll", "rdata", 0x422980, "vpk/server_", "vpk/client_\x00"));
+            AddPatchInstruction(PatchInstruction("engine_ds.dll", "rdata", 0x4229A8, "%sserver_%s%s", "%sclient_%s%s\x00"));
+            AddPatchInstruction(PatchInstruction("dedicated.dll", "rdata", 0x208E50, "vpk/server", "vpk/client"));
+            AddPatchInstruction(PatchInstruction("dedicated.dll", "rdata", 0x205AC8, "vpk/server", "vpk/client"));
         }
     }
 
     if (IsNoOrigin()) {
         // Load the no-origin patch file using its absolute path
         std::vector<PatchInstruction> noOriginPatchInstructions = ParsePatchFile(noOriginPatchFile.string());
-        patchInstructions.insert(patchInstructions.end(), noOriginPatchInstructions.begin(), noOriginPatchInstructions.end());
+        for (auto& instruction : noOriginPatchInstructions)
+            AddPatchInstruction(std::move(instruction));
     }
 }
 
@@ -304,7 +377,10 @@ instruction_compare_module_name(const PatchInstruction& ins, const PCUNICODE_STR
 
     auto p = basename->Buffer;
     for (size_t i = 0; i < len; i++) {
-        if (p[i] != ins.moduleName[i])
+        const wchar_t loaded = static_cast<wchar_t>(towlower(p[i]));
+        const wchar_t requested = static_cast<wchar_t>(
+            tolower(static_cast<unsigned char>(ins.moduleName[i])));
+        if (loaded != requested)
             return 0;
     }
 

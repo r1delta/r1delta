@@ -152,8 +152,26 @@ void Cbuf_AddText(int a1, const char* a2, unsigned int a3) {
 	}
 	Cbuf_AddTextOriginal(a1, a2, a3);
 }
-const char* outstr;
-bool isPrintingCVarDesc = false;
+static thread_local char* outstr = nullptr;
+static thread_local bool isPrintingCVarDesc = false;
+
+static void ClearCapturedConVarDescription()
+{
+	if (outstr) {
+		free(outstr);
+		outstr = nullptr;
+	}
+}
+
+static void CaptureConVarDescription(const char* description)
+{
+	if (!isPrintingCVarDesc || !description)
+		return;
+
+	ClearCapturedConVarDescription();
+	outstr = _strdup(description);
+}
+
 char* __fastcall sub_1804722E0(char* Destination, const char* a2, unsigned __int64 a3, __int64 a4)
 {
 	unsigned __int64 v6; // kr08_8
@@ -170,8 +188,7 @@ char* __fastcall sub_1804722E0(char* Destination, const char* a2, unsigned __int
 		return Destination;
 	result = strncat(Destination, a2, v7);
 	result[a3 - 1] = 0;
-	if (isPrintingCVarDesc)
-		outstr = _strdup(Destination);
+	CaptureConVarDescription(Destination);
 	return result;
 }
 typedef void (*ConVar_PrintDescriptionType)(const ConCommandBaseR1* pVar);
@@ -255,6 +272,22 @@ void ConVar_PrintDescription(const ConCommandBaseR1* pVar)
 	//}
 	//
 	//ConVar_AppendFlags(pVar, outstr, sizeof(outstr));
+	if (!pVar || !ConVar_PrintDescriptionOriginal)
+		return;
+
+	if (IsR1ODedicatedServer() && AreR1OFakeDediVerboseLogsEnabled()) {
+		char diagnostic[384];
+		_snprintf_s(
+			diagnostic,
+			sizeof(diagnostic),
+			_TRUNCATE,
+			"R1Delta: R1O recovered ConVar description name=%s help=%s\n",
+			pVar->m_pszName ? pVar->m_pszName : "<unnamed>",
+			pVar->m_pszHelpString ? pVar->m_pszHelpString : "");
+		OutputDebugStringA(diagnostic);
+	}
+
+	ClearCapturedConVarDescription();
 	isPrintingCVarDesc = true;
 	ConVar_PrintDescriptionOriginal(pVar);
 	isPrintingCVarDesc = false;
@@ -264,16 +297,187 @@ void ConVar_PrintDescription(const ConCommandBaseR1* pVar)
 	//if (lastCVarName)
 	//	free(lastCVarName);
 	//lastCVarName = _strdup(pVar->m_pszName);
+	const char* description = outstr
+		? outstr
+		: (pVar->m_pszName ? pVar->m_pszName : "<unnamed>");
 	const char* pStr = pVar->m_pszHelpString;
 	if (pStr && *pStr)
 	{
-		Msg("%-80s - %.80s\n", outstr, pStr);
+		Msg("%-80s - %.80s\n", description, pStr);
 	}
 	else
 	{
-		Msg("%-80s\n", outstr);
+		Msg("%-80s\n", description);
 	}
-	free((void*)outstr);
+	ClearCapturedConVarDescription();
+}
+
+namespace {
+
+using R1OConVarAppendFlagsType = void(__fastcall*)(const ConCommandBaseR1O*, char*);
+R1OConVarAppendFlagsType R1OConVarAppendFlagsOriginal = nullptr;
+bool s_R1OConsoleLoggingHooksInstalled = false;
+
+void __fastcall R1OConVarAppendFlags(const ConCommandBaseR1O* pVar, char* destination)
+{
+	if (R1OConVarAppendFlagsOriginal)
+		R1OConVarAppendFlagsOriginal(pVar, destination);
+	CaptureConVarDescription(destination);
+}
+
+bool R1OLoggingBytesMatch(uintptr_t address, const unsigned char* expected, size_t expectedSize)
+{
+	if (!address || !expected || !expectedSize)
+		return false;
+
+	MEMORY_BASIC_INFORMATION memory{};
+	if (!VirtualQuery(reinterpret_cast<const void*>(address), &memory, sizeof(memory))
+		|| memory.State != MEM_COMMIT
+		|| (memory.Protect & (PAGE_NOACCESS | PAGE_GUARD)))
+		return false;
+
+	const uintptr_t regionEnd = reinterpret_cast<uintptr_t>(memory.BaseAddress) + memory.RegionSize;
+	return address <= regionEnd
+		&& expectedSize <= regionEnd - address
+		&& memcmp(reinterpret_cast<const void*>(address), expected, expectedSize) == 0;
+}
+
+bool InstallCheckedR1OLoggingHook(
+	uintptr_t engineR1OBase,
+	uintptr_t rva,
+	const unsigned char* expected,
+	size_t expectedSize,
+	void* detour,
+	void** original,
+	const char* name)
+{
+	const uintptr_t target = engineR1OBase + rva;
+	if (!R1OLoggingBytesMatch(target, expected, expectedSize)) {
+		Warning(
+			"R1Delta: R1O console hook %s skipped: engine bytes did not match at rva=0x%llX\n",
+			name,
+			static_cast<unsigned long long>(rva));
+		return false;
+	}
+
+	const MH_STATUS createStatus = MH_CreateHook(
+		reinterpret_cast<void*>(target),
+		detour,
+		reinterpret_cast<LPVOID*>(original));
+	const MH_STATUS enableStatus =
+		(createStatus == MH_OK || createStatus == MH_ERROR_ALREADY_CREATED)
+		? MH_EnableHook(reinterpret_cast<void*>(target))
+		: createStatus;
+	const bool installed =
+		enableStatus == MH_OK
+		|| enableStatus == MH_ERROR_ENABLED
+		|| enableStatus == MH_ERROR_ALREADY_CREATED;
+
+	if (AreR1OFakeDediVerboseLogsEnabled()) {
+		char diagnostic[256];
+		_snprintf_s(
+			diagnostic,
+			sizeof(diagnostic),
+			_TRUNCATE,
+			"R1Delta: R1O console hook %s create=%d enable=%d target=%p original=%p\n",
+			name,
+			static_cast<int>(createStatus),
+			static_cast<int>(enableStatus),
+			reinterpret_cast<void*>(target),
+			original ? *original : nullptr);
+		OutputDebugStringA(diagnostic);
+	}
+
+	if (!installed) {
+		Warning(
+			"R1Delta: R1O console hook %s failed create=%d enable=%d rva=0x%llX\n",
+			name,
+			static_cast<int>(createStatus),
+			static_cast<int>(enableStatus),
+			static_cast<unsigned long long>(rva));
+	}
+	return installed;
+}
+
+} // namespace
+
+void InstallR1OConsoleLoggingHooks(uintptr_t engineR1OBase)
+{
+	if (!IsR1ODedicatedServer() || !engineR1OBase || s_R1OConsoleLoggingHooksInstalled)
+		return;
+
+	static constexpr unsigned char kStrippedNoOpPrefix[] = {
+		0x48, 0x89, 0x54, 0x24, 0x10, 0x4C, 0x89, 0x44,
+		0x24, 0x18, 0x4C, 0x89, 0x4C, 0x24, 0x20, 0xC3
+	};
+	static constexpr unsigned char kStatusFormatterPrefix[] = {
+		0x48, 0x89, 0x4C, 0x24, 0x08, 0x48, 0x89, 0x54,
+		0x24, 0x10, 0x4C, 0x89, 0x44, 0x24, 0x18, 0x4C,
+		0x89, 0x4C, 0x24, 0x20
+	};
+	static constexpr unsigned char kConVarPrintPrefix[] = {
+		0x40, 0x53, 0x57, 0xB8, 0x78, 0x10, 0x00, 0x00
+	};
+	static constexpr unsigned char kAppendFlagsPrefix[] = {
+		0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74,
+		0x24, 0x10, 0x48, 0x89, 0x7C, 0x24, 0x18, 0x41, 0x56
+	};
+
+	bool allInstalled = true;
+	// sub_180185910 (the status command) deliberately selects between two
+	// printers.  The stripped +0x185900 leaf is the local dedicated-console
+	// path.  +0x185860 is the intact remote-client path: it formats into the
+	// requesting client's output interface, which becomes svc_Print.  Hooking
+	// both leaves collapses remote status output into the server console.
+	allInstalled &= InstallCheckedR1OLoggingHook(
+		engineR1OBase, 0x185900,
+		kStrippedNoOpPrefix, sizeof(kStrippedNoOpPrefix),
+		reinterpret_cast<void*>(&Status_ConMsg), nullptr,
+		"status-local-console");
+	allInstalled &= InstallCheckedR1OLoggingHook(
+		engineR1OBase, 0x5CD80,
+		kStrippedNoOpPrefix, sizeof(kStrippedNoOpPrefix),
+		reinterpret_cast<void*>(&Status_ConMsg), nullptr,
+		"signon-state");
+	allInstalled &= InstallCheckedR1OLoggingHook(
+		engineR1OBase, 0xC7760,
+		kStatusFormatterPrefix, sizeof(kStatusFormatterPrefix),
+		reinterpret_cast<void*>(&Status_ConMsg), nullptr,
+		"status-formatter");
+	allInstalled &= InstallCheckedR1OLoggingHook(
+		engineR1OBase, 0x1DB720,
+		kStatusFormatterPrefix, sizeof(kStatusFormatterPrefix),
+		reinterpret_cast<void*>(&Status_ConMsg), nullptr,
+		"stripped-debug-formatter");
+	allInstalled &= InstallCheckedR1OLoggingHook(
+		engineR1OBase, 0x275C30,
+		kAppendFlagsPrefix, sizeof(kAppendFlagsPrefix),
+		reinterpret_cast<void*>(&R1OConVarAppendFlags),
+		reinterpret_cast<void**>(&R1OConVarAppendFlagsOriginal),
+		"convar-append-flags");
+	allInstalled &= InstallCheckedR1OLoggingHook(
+		engineR1OBase, 0x275DC0,
+		kConVarPrintPrefix, sizeof(kConVarPrintPrefix),
+		reinterpret_cast<void*>(&ConVar_PrintDescription),
+		reinterpret_cast<void**>(&ConVar_PrintDescriptionOriginal),
+		"convar-print-description");
+
+	s_R1OConsoleLoggingHooksInstalled = allInstalled;
+	if (allInstalled && AreR1OFakeDediVerboseLogsEnabled())
+		OutputDebugStringA("R1Delta: installed R1O status and ConVar description hooks\n");
+}
+
+bool PrintR1OConVarDescriptionByName(const char* name)
+{
+	if (!IsR1ODedicatedServer() || !name || !*name || !cvarinterface)
+		return false;
+
+	ConCommandBaseR1O* command = CCVar_FindCommandBase(cvarinterface, name);
+	if (!command)
+		return false;
+
+	ConVar_PrintDescription(reinterpret_cast<const ConCommandBaseR1*>(command));
+	return true;
 }
 
 
@@ -286,6 +490,78 @@ decltype(&DevWarning) DevWarningOriginal = nullptr;
 decltype(&ConColorMsg) ConColorMsgOriginal = nullptr;
 decltype(&ConDMsg) ConDMsgOriginal = nullptr;
 decltype(&COM_TimestampedLog) COM_TimestampedLogOriginal = nullptr;
+using OutputDebugStringAFn = void (WINAPI*)(LPCSTR);
+static OutputDebugStringAFn OutputDebugStringAOriginal = nullptr;
+
+bool AreR1OFakeDediVerboseLogsEnabled()
+{
+	// Keep R1O fake-dedi playable by default. Add either flag when debugging needs
+	// central R1O diagnostic output forwarding; hot-path budgets may still be
+	// compiled down separately while gameplay profiling is the priority.
+	static int cached = -1;
+	if (cached < 0) {
+		const char* cmdLine = GetCommandLineA();
+		cached = cmdLine && (strstr(cmdLine, "-r1o_fake_dedi_logs") || strstr(cmdLine, "-r1o_verbose_logs"));
+	}
+	return cached != 0;
+}
+
+static bool ContainsAnySevereLogToken(const char* text)
+{
+	return text
+		&& (strstr(text, "fatal")
+			|| strstr(text, "Fatal")
+			|| strstr(text, "FATAL")
+			|| strstr(text, "error")
+			|| strstr(text, "Error")
+			|| strstr(text, "ERROR")
+			|| strstr(text, "crash")
+			|| strstr(text, "Crash")
+			|| strstr(text, "CRASH")
+			|| strstr(text, "SERVER SCRIPT")
+			|| strstr(text, "SCRIPT ERROR")
+			|| strstr(text, "[r1delta_tier0_error]"));
+}
+
+bool ShouldSuppressR1OFakeDediLogText(const char* text)
+{
+	if (!IsR1ODedicatedServer() || AreR1OFakeDediVerboseLogsEnabled() || !text || !*text)
+		return false;
+
+	// Keep real failures visible; the slow path is the high-volume compatibility
+	// diagnostics, not rare fatal/error reports.
+	if (ContainsAnySevereLogToken(text))
+		return false;
+
+	return strstr(text, "R1Delta:")
+		|| strstr(text, "[r1delta_core]");
+}
+
+static bool ShouldSuppressR1OFakeDediLogFormat(const char* format, va_list args)
+{
+	if (!IsR1ODedicatedServer() || AreR1OFakeDediVerboseLogsEnabled() || !format)
+		return false;
+
+	if (strcmp(format, "%s") == 0 || strcmp(format, "%s\n") == 0) {
+		va_list argsCopy;
+		va_copy(argsCopy, args);
+		const char* text = va_arg(argsCopy, const char*);
+		va_end(argsCopy);
+		return ShouldSuppressR1OFakeDediLogText(text);
+	}
+
+	return ShouldSuppressR1OFakeDediLogText(format);
+}
+
+static void WINAPI OutputDebugStringAHook(LPCSTR text)
+{
+	if (ShouldSuppressR1OFakeDediLogText(text))
+		return;
+
+	if (OutputDebugStringAOriginal)
+		OutputDebugStringAOriginal(text);
+}
+
 #if 0
 char* SafeFormat(const char* format, va_list args) {
 	va_list args_copy;
@@ -337,8 +613,15 @@ void MsgHook(const char* pMsg, ...) {
 
 	va_list args;
 	va_start(args, pMsg);
+	if (ShouldSuppressR1OFakeDediLogFormat(pMsg, args)) {
+		va_end(args);
+		return;
+	}
 	char* formatted = SafeFormatArena(arena, pMsg, args);
 	va_end(args);
+
+	if (ShouldSuppressR1OFakeDediLogText(formatted))
+		return;
 
 	if (!IsDedicatedServer()) printf("%s", formatted);
 	if (MsgOriginal) {
@@ -354,10 +637,17 @@ void WarningHook(const char* pMsg, ...) {
 
 	va_list args;
 	va_start(args, pMsg);
+	if (ShouldSuppressR1OFakeDediLogFormat(pMsg, args)) {
+		va_end(args);
+		return;
+	}
 	char* formatted = SafeFormatArena(arena, pMsg, args);
 	va_end(args);
 
-	printf("%s", formatted);
+	if (ShouldSuppressR1OFakeDediLogText(formatted))
+		return;
+
+	if (!IsDedicatedServer()) printf("%s", formatted);
 	if (WarningOriginal) {
 		WarningOriginal("%s", formatted);
 	}
@@ -371,10 +661,17 @@ void Warning_SpewCallStackHook(int iMaxCallStackLength, const char* pMsg, ...) {
 
 	va_list args;
 	va_start(args, pMsg);
+	if (ShouldSuppressR1OFakeDediLogFormat(pMsg, args)) {
+		va_end(args);
+		return;
+	}
 	char* formatted = SafeFormatArena(arena, pMsg, args);
 	va_end(args);
 
-	printf("%s", formatted);
+	if (ShouldSuppressR1OFakeDediLogText(formatted))
+		return;
+
+	if (!IsDedicatedServer()) printf("%s", formatted);
 	if (Warning_SpewCallStackOriginal) {
 		Warning_SpewCallStackOriginal(iMaxCallStackLength, "%s", formatted);
 	}
@@ -388,10 +685,17 @@ void DevMsgHook(int level, const char* pMsg, ...) {
 
 	va_list args;
 	va_start(args, pMsg);
+	if (ShouldSuppressR1OFakeDediLogFormat(pMsg, args)) {
+		va_end(args);
+		return;
+	}
 	char* formatted = SafeFormatArena(arena, pMsg, args);
 	va_end(args);
 
-	printf("%s", formatted);
+	if (ShouldSuppressR1OFakeDediLogText(formatted))
+		return;
+
+	if (!IsDedicatedServer()) printf("%s", formatted);
 	if (DevMsgOriginal) {
 		DevMsgOriginal(level, "%s", formatted);
 	}
@@ -405,10 +709,17 @@ void DevWarningHook(int level, const char* pMsg, ...) {
 
 	va_list args;
 	va_start(args, pMsg);
+	if (ShouldSuppressR1OFakeDediLogFormat(pMsg, args)) {
+		va_end(args);
+		return;
+	}
 	char* formatted = SafeFormatArena(arena, pMsg, args);
 	va_end(args);
 
-	printf("%s", formatted);
+	if (ShouldSuppressR1OFakeDediLogText(formatted))
+		return;
+
+	if (!IsDedicatedServer()) printf("%s", formatted);
 	if (DevWarningOriginal) {
 		DevWarningOriginal(level, "%s", formatted);
 	}
@@ -422,10 +733,17 @@ void ConColorMsgHook(const Color* clr, const char* pMsg, ...) {
 
 	va_list args;
 	va_start(args, pMsg);
+	if (ShouldSuppressR1OFakeDediLogFormat(pMsg, args)) {
+		va_end(args);
+		return;
+	}
 	char* formatted = SafeFormatArena(arena, pMsg, args);
 	va_end(args);
 
-	printf("%s", formatted);
+	if (ShouldSuppressR1OFakeDediLogText(formatted))
+		return;
+
+	if (!IsDedicatedServer()) printf("%s", formatted);
 	if (ConColorMsgOriginal) {
 		ConColorMsgOriginal(*clr, "%s", formatted);
 	}
@@ -439,10 +757,17 @@ void ConDMsgHook(const char* pMsg, ...) {
 
 	va_list args;
 	va_start(args, pMsg);
+	if (ShouldSuppressR1OFakeDediLogFormat(pMsg, args)) {
+		va_end(args);
+		return;
+	}
 	char* formatted = SafeFormatArena(arena, pMsg, args);
 	va_end(args);
 
-	printf("%s", formatted);
+	if (ShouldSuppressR1OFakeDediLogText(formatted))
+		return;
+
+	if (!IsDedicatedServer()) printf("%s", formatted);
 	if (ConDMsgOriginal) {
 		ConDMsgOriginal("%s", formatted);
 	}
@@ -456,10 +781,17 @@ void COM_TimestampedLogHook(const char* pMsg, ...) {
 
 	va_list args;
 	va_start(args, pMsg);
+	if (ShouldSuppressR1OFakeDediLogFormat(pMsg, args)) {
+		va_end(args);
+		return;
+	}
 	char* formatted = SafeFormatArena(arena, pMsg, args);
 	va_end(args);
 
-	printf("%s", formatted);
+	if (ShouldSuppressR1OFakeDediLogText(formatted))
+		return;
+
+	if (!IsDedicatedServer()) printf("%s", formatted);
 	if (COM_TimestampedLogOriginal) {
 		COM_TimestampedLogOriginal("%s", formatted);
 	}
@@ -491,6 +823,8 @@ extern "C" __declspec(dllexport) void Error(const char* pMsg, ...) {
 	va_end(args);
 
 	printf("%s", formatted);
+	OutputDebugStringA("[r1delta_tier0_error] ");
+	OutputDebugStringA(formatted);
 
 	reinterpret_cast<WarningFn>(GetProcAddress(GetModuleHandleA("tier0_orig.dll"), "Error"))("%s", formatted);
 #endif
@@ -499,14 +833,32 @@ extern "C" __declspec(dllexport) void Error(const char* pMsg, ...) {
 void InitLoggingHooks()
 {
 	auto tier0 = GetModuleHandleA("tier0.dll");
-	MH_CreateHook((LPVOID)GetProcAddress(tier0, "Msg"), &MsgHook, reinterpret_cast<LPVOID*>(&MsgOriginal));
-	MH_CreateHook((LPVOID)GetProcAddress(tier0, "Warning"), &WarningHook, reinterpret_cast<LPVOID*>(&WarningOriginal));
-	MH_CreateHook((LPVOID)GetProcAddress(tier0, "Warning_SpewCallStack"), &Warning_SpewCallStackHook, reinterpret_cast<LPVOID*>(&Warning_SpewCallStackOriginal));
-	MH_CreateHook((LPVOID)GetProcAddress(tier0, "DevMsg"), &DevMsgHook, reinterpret_cast<LPVOID*>(&DevMsgOriginal));
-	MH_CreateHook((LPVOID)GetProcAddress(tier0, "DevWarning"), &DevWarningHook, reinterpret_cast<LPVOID*>(&DevWarningOriginal));
-	MH_CreateHook((LPVOID)GetProcAddress(tier0, "ConColorMsg"), &ConColorMsgHook, reinterpret_cast<LPVOID*>(&ConColorMsgOriginal));
-	MH_CreateHook((LPVOID)GetProcAddress(tier0, "ConDMsg"), &ConDMsgHook, reinterpret_cast<LPVOID*>(&ConDMsgOriginal));
-	MH_CreateHook((LPVOID)GetProcAddress(tier0, "COM_TimestampedLog"), &COM_TimestampedLogHook, reinterpret_cast<LPVOID*>(&COM_TimestampedLogOriginal));
+	auto createExportHook = [tier0](
+		const char* exportName,
+		LPVOID detour,
+		LPVOID* original)
+	{
+		if (LPVOID target = reinterpret_cast<LPVOID>(
+			GetProcAddress(tier0, exportName)))
+		{
+			MH_CreateHook(target, detour, original);
+		}
+	};
+
+	createExportHook("Msg", reinterpret_cast<LPVOID>(&MsgHook), reinterpret_cast<LPVOID*>(&MsgOriginal));
+	createExportHook("Warning", reinterpret_cast<LPVOID>(&WarningHook), reinterpret_cast<LPVOID*>(&WarningOriginal));
+	createExportHook("Warning_SpewCallStack", reinterpret_cast<LPVOID>(&Warning_SpewCallStackHook), reinterpret_cast<LPVOID*>(&Warning_SpewCallStackOriginal));
+	createExportHook("DevMsg", reinterpret_cast<LPVOID>(&DevMsgHook), reinterpret_cast<LPVOID*>(&DevMsgOriginal));
+	createExportHook("DevWarning", reinterpret_cast<LPVOID>(&DevWarningHook), reinterpret_cast<LPVOID*>(&DevWarningOriginal));
+	createExportHook("ConColorMsg", reinterpret_cast<LPVOID>(&ConColorMsgHook), reinterpret_cast<LPVOID*>(&ConColorMsgOriginal));
+	createExportHook("ConDMsg", reinterpret_cast<LPVOID>(&ConDMsgHook), reinterpret_cast<LPVOID*>(&ConDMsgOriginal));
+	createExportHook("COM_TimestampedLog", reinterpret_cast<LPVOID>(&COM_TimestampedLogHook), reinterpret_cast<LPVOID*>(&COM_TimestampedLogOriginal));
+
+	if (!OutputDebugStringAOriginal) {
+		HMODULE kernel32 = GetModuleHandleA("kernel32.dll");
+		if (kernel32)
+			MH_CreateHook((LPVOID)GetProcAddress(kernel32, "OutputDebugStringA"), &OutputDebugStringAHook, reinterpret_cast<LPVOID*>(&OutputDebugStringAOriginal));
+	}
 
 	MH_EnableHook(MH_ALL_HOOKS);
 }
@@ -521,8 +873,19 @@ void Status_ConMsg(const char* text, ...)
     vsprintf_s(formatted, text, list);
     va_end(list);
 
+	if (IsR1ODedicatedServer() && AreR1OFakeDediVerboseLogsEnabled()) {
+		char diagnostic[2304];
+		_snprintf_s(
+			diagnostic,
+			sizeof(diagnostic),
+			_TRUNCATE,
+			"R1Delta: R1O recovered console message: %s",
+			formatted);
+		OutputDebugStringA(diagnostic);
+	}
+
     auto endpos = strlen(formatted);
-    if (formatted[endpos - 1] == '\n')
+    if (endpos && formatted[endpos - 1] == '\n')
         formatted[endpos - 1] = '\0';
 
     Msg("%s\n", formatted);
@@ -573,12 +936,32 @@ void UTIL_LogPrintf(char* fmt, ...)
 {
     char tempString[1024];
     va_list params;
+    static int verboseLogBudget = 64;
 
     va_start(params, fmt);
     V_vsnprintf(tempString, 1024, fmt, params);
-    oUTIL_LogPrintf("%s", tempString);
+    va_end(params);
+
+    if (IsR1ODedicatedServer() &&
+        AreR1OFakeDediVerboseLogsEnabled() &&
+        verboseLogBudget > 0) {
+        --verboseLogBudget;
+        char diagnostic[1280];
+        _snprintf_s(
+            diagnostic,
+            sizeof(diagnostic),
+            _TRUNCATE,
+            "R1Delta: UTIL_LogPrintf hook invoked text=\"%.900s\"\n",
+            tempString);
+        OutputDebugStringA(diagnostic);
+    }
+
+    if (oUTIL_LogPrintf)
+        oUTIL_LogPrintf("%s", tempString);
     if (IsDedicatedServer())
         Msg("%s", tempString);
-    static auto UTIL_ClientPrintAll = (void(*)(unsigned int, char*))(G_server + 0x25D5B0);
-    UTIL_ClientPrintAll(2, tempString);
+    if (G_server) {
+        auto UTIL_ClientPrintAll = reinterpret_cast<void(*)(unsigned int, char*)>(G_server + 0x25D5B0);
+        UTIL_ClientPrintAll(2, tempString);
+    }
 }

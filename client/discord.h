@@ -37,8 +37,3 @@ extern int64 GetDiscordId();
 SQInteger SendDiscordUI(HSQUIRRELVM v);
 SQInteger SendDiscordClient(HSQUIRRELVM v);
 extern void DiscordAuthCommand(const CCommand& args);
-
-
-typedef void (*SetConvarString_t)(ConVarR1* var, const char* value);
-
-extern SetConvarString_t SetConvarStringOriginal;

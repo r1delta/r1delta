@@ -9,6 +9,7 @@
 #include "factory.h"
 
 #include <cstdio>
+#include <string>
 
 // Original function pointer
 void (*oCServerGameDLL_OnSayTextMsg)(void* pThis, int clientIndex, char* text, char isTeamChat) = nullptr;
@@ -57,33 +58,70 @@ static __int64 __fastcall UTIL_GetEntityByIndex_Chat(int iIndex)
 }
 
 void __fastcall CServerGameDLL_OnSayTextMsg(void* pThis, int clientIndex, char* text, char isTeamChat) {
+    if (IsR1ODedicatedServer() && AreR1OFakeDediVerboseLogsEnabled()) {
+        char diagnostic[512];
+        _snprintf_s(
+            diagnostic,
+            sizeof(diagnostic),
+            _TRUNCATE,
+            "R1Delta: CServerGameDLL_OnSayTextMsg hook invoked client=%d team=%d text=\"%.240s\"\n",
+            clientIndex,
+            static_cast<int>(isTeamChat),
+            text ? text : "");
+        OutputDebugStringA(diagnostic);
+    }
+
     // Call Squirrel callback if available
     auto r1sqvm = GetServerVMPtr();
-    if (r1sqvm) {
+    std::string callbackText;
+    bool callbackReturnedText = false;
+    if (r1sqvm &&
+        r1sqvm->sqvm &&
+        base_getroottable &&
+        sq_pushstring &&
+        sq_get_noerr &&
+        sq_gettype &&
+        sq_pushinteger &&
+        sq_pushbool &&
+        sq_call &&
+        sq_getstring &&
+        sq_gettop &&
+        sq_settop) {
         auto v = r1sqvm->sqvm;
+        const SQInteger originalTop = sq_gettop(r1sqvm, v);
 
         base_getroottable(v);
         sq_pushstring(v, "CodeCallback_OnClientChatMsg", -1);
         if (SQ_SUCCEEDED(sq_get_noerr(v, -2)) && sq_gettype(v, -1) == OT_CLOSURE) {
             base_getroottable(v);
             sq_pushinteger(r1sqvm, v, clientIndex);
-            sq_pushstring(v, text, -1);
+            sq_pushstring(v, text ? text : "", -1);
             sq_pushbool(r1sqvm, v, isTeamChat);
             if (SQ_SUCCEEDED(sq_call(v, 4, SQTrue, SQTrue))) {
-                if (sq_gettype(v, -1) == OT_STRING) sq_getstring(v, -1, (const SQChar**)&text);
-                sq_pop(v, 1);
+                const SQChar* returnedText = nullptr;
+                if (sq_gettype(v, -1) == OT_STRING &&
+                    SQ_SUCCEEDED(sq_getstring(v, -1, &returnedText)) &&
+                    returnedText) {
+                    callbackText.assign(returnedText);
+                    callbackReturnedText = true;
+                }
             }
-            sq_pop(v, 1);
         }
-        sq_pop(v, 1);
+
+        // Restore the VM stack exactly even when lookup or callback execution fails.
+        sq_settop(v, originalTop);
+        if (callbackReturnedText)
+            text = callbackText.data();
     }
 
     if (!text || !text[0]) return;
 
-    oCServerGameDLL_OnSayTextMsg(pThis, clientIndex, text, isTeamChat);
+    if (oCServerGameDLL_OnSayTextMsg)
+        oCServerGameDLL_OnSayTextMsg(pThis, clientIndex, text, isTeamChat);
 
     // Log chat messages on dedicated server
     if (IsDedicatedServer()) {
+
         // Get Player Entity
         CBasePlayer_Chat* pSenderEntity = (CBasePlayer_Chat*)UTIL_GetEntityByIndex_Chat(clientIndex);
 

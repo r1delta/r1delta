@@ -111,6 +111,7 @@
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <ForcedIncludeFiles>$(ProjectDir)engine\hooks\minhook_checked.h;%(ForcedIncludeFiles)</ForcedIncludeFiles>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -129,6 +130,7 @@
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <ForcedIncludeFiles>$(ProjectDir)engine\hooks\minhook_checked.h;%(ForcedIncludeFiles)</ForcedIncludeFiles>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -150,12 +152,13 @@
       <OmitFramePointers>false</OmitFramePointers>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <AdditionalIncludeDirectories>$(ProjectDir)thirdparty\eos\SDK\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ForcedIncludeFiles>$(ProjectDir)engine\hooks\minhook_checked.h;%(ForcedIncludeFiles)</ForcedIncludeFiles>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>Shlwapi.lib;winhttp.lib;Shell32.lib;Windowscodecs.lib;Psapi.lib;vstdlib.lib;tier0_orig.lib;bcrypt.lib;Ws2_32.lib;EOSSDK-Win64-Shipping.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Shlwapi.lib;winhttp.lib;Shell32.lib;Windowscodecs.lib;Psapi.lib;vstdlib.lib;tier0_orig.lib;ntdll.lib;bcrypt.lib;Ws2_32.lib;EOSSDK-Win64-Shipping.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ModuleDefinitionFile>test.def</ModuleDefinitionFile>
       <AdditionalLibraryDirectories>$(ProjectDir)thirdparty\eos\SDK\Lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
@@ -164,11 +167,12 @@
       </Command>
     </PreLinkEvent>
     <PreBuildEvent>
-      <Command>tskill r1delta &amp; exit 0</Command>
+      <Command Condition="'$(CI)'!='1'">tskill r1delta &amp; exit 0</Command>
     </PreBuildEvent>
     <PostBuildEvent>
       <Command>if exist "$(ProjectDir)thirdparty\eos\SDK\Bin\EOSSDK-Win64-Shipping.dll" copy /Y "$(ProjectDir)thirdparty\eos\SDK\Bin\EOSSDK-Win64-Shipping.dll" "$(OutDir)"
-if exist "$(ProjectDir)client\rendering\fonts\minecraft_default.png" copy /Y "$(ProjectDir)client\rendering\fonts\minecraft_default.png" "$(OutDir)"</Command>
+if exist "$(ProjectDir)client\rendering\fonts\minecraft_default.png" copy /Y "$(ProjectDir)client\rendering\fonts\minecraft_default.png" "$(OutDir)"
+if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cmake\bin\zstd.dll" copy /Y "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cmake\bin\zstd.dll" "$(OutDir)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -187,6 +191,7 @@ if exist "$(ProjectDir)client\rendering\fonts\minecraft_default.png" copy /Y "$(
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <AdditionalIncludeDirectories>$(ProjectDir)thirdparty\eos\SDK\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ForcedIncludeFiles>$(ProjectDir)engine\hooks\minhook_checked.h;%(ForcedIncludeFiles)</ForcedIncludeFiles>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -194,17 +199,20 @@ if exist "$(ProjectDir)client\rendering\fonts\minecraft_default.png" copy /Y "$(
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>Shlwapi.lib;winhttp.lib;Shell32.lib;Windowscodecs.lib;Psapi.lib;vstdlib.lib;tier0_orig.lib;bcrypt.lib;Ws2_32.lib;EOSSDK-Win64-Shipping.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Shlwapi.lib;winhttp.lib;Shell32.lib;Windowscodecs.lib;Psapi.lib;vstdlib.lib;tier0_orig.lib;ntdll.lib;bcrypt.lib;Ws2_32.lib;EOSSDK-Win64-Shipping.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ModuleDefinitionFile>test.def</ModuleDefinitionFile>
       <AdditionalLibraryDirectories>$(ProjectDir)thirdparty\eos\SDK\Lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <PostBuildEvent>
       <Command>if exist "$(ProjectDir)thirdparty\eos\SDK\Bin\EOSSDK-Win64-Shipping.dll" copy /Y "$(ProjectDir)thirdparty\eos\SDK\Bin\EOSSDK-Win64-Shipping.dll" "$(OutDir)"
-if exist "$(ProjectDir)client\rendering\fonts\minecraft_default.png" copy /Y "$(ProjectDir)client\rendering\fonts\minecraft_default.png" "$(OutDir)"</Command>
+if exist "$(ProjectDir)client\rendering\fonts\minecraft_default.png" copy /Y "$(ProjectDir)client\rendering\fonts\minecraft_default.png" "$(OutDir)"
+if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cmake\bin\zstd.dll" copy /Y "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cmake\bin\zstd.dll" "$(OutDir)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="engine\core\appsystem.h" />
+    <ClInclude Include="engine\core\player_resource_18.h" />
+    <ClInclude Include="engine\core\r1o_runtime_paths.h" />
     <ClInclude Include="engine\memory\arena.h" />
     <ClInclude Include="client\audio\audio.h" />
     <ClInclude Include="client\audio\audio_cache.h" />
@@ -214,6 +222,7 @@ if exist "$(ProjectDir)client\rendering\fonts\minecraft_default.png" copy /Y "$(
     <ClInclude Include="client\client.h" />
     <ClInclude Include="sdk\color.h" />
     <ClInclude Include="engine\compression.h" />
+    <ClInclude Include="engine\compression_stream.h" />
     <ClInclude Include="sdk\coordsize.h" />
     <ClInclude Include="engine\core\core.h" />
     <ClInclude Include="engine\logging\crashhandler.h" />
@@ -229,6 +238,9 @@ if exist "$(ProjectDir)client\rendering\fonts\minecraft_default.png" copy /Y "$(
     <ClInclude Include="engine\core\factory.h" />
     <ClInclude Include="engine\filesystem\filecache.h" />
     <ClInclude Include="engine\filesystem\filesystem.h" />
+    <ClInclude Include="engine\filesystem\r1o_vpk.h" />
+    <ClInclude Include="engine\filesystem\r1o_vpk_index_cache.h" />
+    <ClInclude Include="engine\filesystem\vpk_directory_repair.h" />
     <ClInclude Include="engine\core\framework.h" />
     <ClInclude Include="client\rendering\hudwarp.h" />
     <ClInclude Include="client\rendering\hudwarp_hooks.h" />
@@ -248,15 +260,19 @@ if exist "$(ProjectDir)client\rendering\fonts\minecraft_default.png" copy /Y "$(
     <ClInclude Include="client\localize.h" />
     <ClInclude Include="engine\logging\logging.h" />
     <ClInclude Include="engine\net\masterserver.h" />
+    <ClInclude Include="engine\net\script_error_telemetry.h" />
     <ClInclude Include="engine\mcp_server.h" />
     <ClInclude Include="engine\memory\memory.h" />
     <ClInclude Include="engine\vtable_remaps\model_info_vtable.h" />
     <ClInclude Include="server\ai\navmesh.h" />
     <ClInclude Include="sdk\netadr.h" />
     <ClInclude Include="engine\net\netchanwarnings.h" />
+    <ClInclude Include="engine\hooks\minhook_checked.h" />
     <ClInclude Include="engine\hooks\patcher.h" />
     <ClInclude Include="shared\persistentdata.h" />
+    <ClInclude Include="shared\persistentdata_codec.h" />
     <ClInclude Include="server\physics\physics.h" />
+    <ClInclude Include="server\server_usercmd.h" />
     <ClInclude Include="player.h" />
     <ClInclude Include="platform.h" />
     <ClInclude Include="client\predictionerror.h" />
@@ -326,11 +342,14 @@ if exist "$(ProjectDir)client\rendering\fonts\minecraft_default.png" copy /Y "$(
     <ClCompile Include="sdk\bitbuf.cpp" />
     <ClCompile Include="client\client.cpp" />
     <ClCompile Include="engine\compression.cpp" />
+    <ClCompile Include="engine\compression_stream.cpp" />
     <ClCompile Include="engine\logging\crashhandler.cpp" />
     <ClCompile Include="engine\cvar.cpp" />
     <ClCompile Include="engine\dedicated.cpp" />
     <ClCompile Include="client\discord.cpp" />
     <ClCompile Include="engine\core\dllmain.cpp" />
+    <ClCompile Include="engine\core\player_resource_18.cpp" />
+    <ClCompile Include="engine\core\r1o_runtime_paths.cpp" />
     <ClCompile Include="engine\vtable_remaps\engine_vtable.cpp" />
     <ClCompile Include="eos\eos_logging_manager.cpp" />
     <ClCompile Include="eos\eos_layer.cpp" />
@@ -338,6 +357,9 @@ if exist "$(ProjectDir)client\rendering\fonts\minecraft_default.png" copy /Y "$(
     <ClCompile Include="engine\core\factory.cpp" />
     <ClCompile Include="engine\filesystem\filecache.cpp" />
     <ClCompile Include="engine\filesystem\filesystem.cpp" />
+    <ClCompile Include="engine\filesystem\r1o_vpk.cpp" />
+    <ClCompile Include="engine\filesystem\r1o_vpk_index_cache.cpp" />
+    <ClCompile Include="engine\filesystem\vpk_directory_repair.cpp" />
     <ClCompile Include="engine\vtable_remaps\filesystem_vtable.cpp" />
     <ClCompile Include="eos\fake_ip_layer.cpp" />
     <ClCompile Include="engine\net\net_hooks.cpp" />
@@ -351,6 +373,7 @@ if exist "$(ProjectDir)client\rendering\fonts\minecraft_default.png" copy /Y "$(
     <ClCompile Include="shared\commands.cpp" />
     <ClCompile Include="client\localize.cpp" />
     <ClCompile Include="server\misc.cpp" />
+    <ClCompile Include="server\server_usercmd.cpp" />
     <ClCompile Include="engine\net\networking.cpp" />
     <ClCompile Include="server\physics\physics.cpp" />
     <ClCompile Include="player.cpp" />
@@ -359,14 +382,17 @@ if exist "$(ProjectDir)client\rendering\fonts\minecraft_default.png" copy /Y "$(
     <ClCompile Include="client\localchatwriter.cpp" />
     <ClCompile Include="engine\logging\logging.cpp" />
     <ClCompile Include="engine\net\masterserver.cpp" />
+    <ClCompile Include="engine\net\script_error_telemetry.cpp" />
     <ClCompile Include="engine\mcp_server.cpp" />
     <ClCompile Include="engine\memory\memory.cpp" />
     <ClCompile Include="engine\vtable_remaps\model_info_vtable.cpp" />
     <ClCompile Include="server\ai\navmesh.cpp" />
     <ClCompile Include="engine\net\netchanwarnings.cpp" />
     <ClCompile Include="sdk\newbitbuf.cpp" />
+    <ClCompile Include="engine\hooks\minhook_checked.cpp" />
     <ClCompile Include="engine\hooks\patcher.cpp" />
     <ClCompile Include="shared\persistentdata.cpp" />
+    <ClCompile Include="shared\persistentdata_codec.cpp" />
     <ClCompile Include="client\predictionerror.cpp" />
     <ClCompile Include="engine\security_fixes.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>

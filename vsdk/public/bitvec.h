@@ -13,6 +13,7 @@
 #include <limits.h>
 #include "tier0/dbg.h"
 #include "tier0/basetypes.h"
+#include "memory.h"
 #define Plat_FastMemset memset
 
 class CBitVecAccessor
@@ -481,7 +482,7 @@ inline void CVarBitVecBase<BITCOUNTTYPE>::Attach( uint32 *pBits, int numBits )
 	{
 		m_iBitStringStorage = *pBits;
 		m_pInt = &m_iBitStringStorage;
-		free( pBits );
+		CreateGlobalMemAlloc()->Free( pBits );
 	}
 }
 
@@ -502,9 +503,8 @@ inline bool CVarBitVecBase<BITCOUNTTYPE>::Detach( uint32 **ppBits, int *pNumBits
 	}
 	else
 	{
-		*ppBits = (uint32 *)malloc( sizeof(uint32) );
+		*ppBits = (uint32 *)CreateGlobalMemAlloc()->Alloc( sizeof(uint32) );
 		**ppBits = m_iBitStringStorage;
-		free( m_pInt );
 	}
 
 	memset( this, 0, sizeof( *this ) );
@@ -1316,7 +1316,7 @@ inline void CVarBitVecBase<BITCOUNTTYPE>::AllocInts( int numInts )
 		return;
 	}
 
-	m_pInt = (uint32 *)malloc( numInts * sizeof(int) );
+	m_pInt = (uint32 *)CreateGlobalMemAlloc()->Alloc( numInts * sizeof(int) );
 }
 
 
@@ -1338,7 +1338,7 @@ inline void CVarBitVecBase<BITCOUNTTYPE>::ReallocInts( int numInts )
 	{
 		if ( numInts != 1 )
 		{
-			m_pInt = ((uint32 *)malloc( numInts * sizeof(int) ));
+			m_pInt = ((uint32 *)CreateGlobalMemAlloc()->Alloc( numInts * sizeof(int) ));
 			*m_pInt = m_iBitStringStorage;
 		}
 
@@ -1348,12 +1348,12 @@ inline void CVarBitVecBase<BITCOUNTTYPE>::ReallocInts( int numInts )
 	if ( numInts == 1 )
 	{
 		m_iBitStringStorage = *m_pInt;
-		free( m_pInt );
+		CreateGlobalMemAlloc()->Free( m_pInt );
 		m_pInt = &m_iBitStringStorage;
 		return;
 	}
 
-	m_pInt = (uint32 *)realloc( m_pInt,  numInts * sizeof(int) );
+	m_pInt = (uint32 *)CreateGlobalMemAlloc()->Realloc( m_pInt, numInts * sizeof(int) );
 }
 
 
@@ -1365,7 +1365,7 @@ inline void CVarBitVecBase<BITCOUNTTYPE>::FreeInts( void )
 {
 	if ( m_numInts > 1 )
 	{
-		free( m_pInt );
+		CreateGlobalMemAlloc()->Free( m_pInt );
 	}
 	m_pInt = NULL;
 }

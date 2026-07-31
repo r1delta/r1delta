@@ -345,10 +345,42 @@ __int64 __fastcall HookedCBaseStateClientConnect(
     __int64* a10,
     int a11)
 {
+    static int s_connectLogBudget = 16;
+    if (s_connectLogBudget > 0) {
+        --s_connectLogBudget;
+        char msg[1024];
+        sprintf_s(
+            msg,
+            "R1Delta: HookedCBaseStateClientConnect this=%p public=%s private=%s players=%d join=%s a5=%d a6=%d a8=%d a10=%p a11=%d\n",
+            reinterpret_cast<void*>(a1),
+            public_ip ? public_ip : "<null>",
+            private_ip ? private_ip : "<null>",
+            num_players,
+            a9 ? a9 : "<null>",
+            static_cast<int>(a5),
+            a6,
+            a8,
+            reinterpret_cast<void*>(a10),
+            a11);
+        OutputDebugStringA(msg);
+    }
+
     static auto bUseOnlineAuth = OriginalCCVar_FindVar(cvarinterface, "delta_online_auth_enable");
 
-    if (bUseOnlineAuth->m_Value.m_nValue != 1)
-        return oCBaseStateClientConnect(a1, public_ip, private_ip, num_players, a5, a6, a7, a8, a9, a10, a11);
+    if (bUseOnlineAuth->m_Value.m_nValue != 1) {
+        static int s_connectBypassLogBudget = 16;
+        if (s_connectBypassLogBudget > 0) {
+            --s_connectBypassLogBudget;
+            OutputDebugStringA("R1Delta: HookedCBaseStateClientConnect bypassing online auth; calling original\n");
+        }
+        const __int64 result = oCBaseStateClientConnect(a1, public_ip, private_ip, num_players, a5, a6, a7, a8, a9, a10, a11);
+        if (s_connectBypassLogBudget > 0) {
+            char msg[128];
+            sprintf_s(msg, "R1Delta: HookedCBaseStateClientConnect original returned %lld\n", result);
+            OutputDebugStringA(msg);
+        }
+        return result;
+    }
 
     // Obtain the master server URL from the engine convars.
     auto ms_url = OriginalCCVar_FindVar(cvarinterface, "delta_ms_url")->m_Value.m_pszString;
@@ -388,7 +420,12 @@ __int64 __fastcall HookedCBaseStateClientConnect(
         }
     }
     cli.stop();
-    return oCBaseStateClientConnect(a1, public_ip, private_ip, num_players, a5, a6, a7, a8, a9, a10, a11);
+    OutputDebugStringA("R1Delta: HookedCBaseStateClientConnect online auth finished; calling original\n");
+    const __int64 originalResult = oCBaseStateClientConnect(a1, public_ip, private_ip, num_players, a5, a6, a7, a8, a9, a10, a11);
+    char msg[128];
+    sprintf_s(msg, "R1Delta: HookedCBaseStateClientConnect original returned %lld\n", originalResult);
+    OutputDebugStringA(msg);
+    return originalResult;
 }
 
 USERID_s* GetUserIDHook(__int64 base_client, USERID_s* id) {
@@ -444,9 +481,67 @@ const char* GetUserIDStringHook(USERID_s* id) {
 typedef __int64(__fastcall* CBaseClientState_SendConnectPacket_t)(__int64 a1, __int64 a2, unsigned int a3);
 CBaseClientState_SendConnectPacket_t CBaseClientState_SendConnectPacket_Original = nullptr;
 
+static bool IsNumericCString(const char* value)
+{
+    if (!value || !*value)
+        return false;
+
+    for (const char* p = value; *p; ++p) {
+        if (*p < '0' || *p > '9')
+            return false;
+    }
+
+    return true;
+}
+
+static void EnsurePlatformUserIdString(ConVarR1* id)
+{
+    if (!id)
+        return;
+
+    const bool hasUsableString = IsNumericCString(id->m_Value.m_pszString) && id->m_Value.m_StringLength >= 10;
+    if (hasUsableString)
+        return;
+
+    unsigned long long generated = 100000000000000000ULL;
+    generated += (static_cast<unsigned long long>(GetCurrentProcessId()) << 32) ^ GetTickCount64();
+    char value[32];
+    sprintf_s(value, "%llu", generated);
+
+    if (SetConvarStringOriginal)
+        SetConvarStringOriginal(id, value);
+    else
+        id->m_Value.m_pszString = _strdup(value);
+
+    id->m_Value.m_nValue = static_cast<int>(generated & 0x7FFFFFFF);
+
+    static int s_platformUserIdLogBudget = 8;
+    if (s_platformUserIdLogBudget > 0) {
+        --s_platformUserIdLogBudget;
+        char msg[256];
+        sprintf_s(msg, "R1Delta: forced platform_user_id string to %s before connect/userinfo serialization\n", value);
+        OutputDebugStringA(msg);
+    }
+}
+
 int64 CBaseClientState_SendConnectPacket(__int64 a1, __int64 a2, unsigned int a3) {
+    static int s_sendConnectLogBudget = 32;
+    if (s_sendConnectLogBudget > 0) {
+        --s_sendConnectLogBudget;
+        char msg[384];
+        sprintf_s(
+            msg,
+            "R1Delta: CBaseClientState_SendConnectPacket this=%p address=%p challenge=%u original=%p\n",
+            reinterpret_cast<void*>(a1),
+            reinterpret_cast<void*>(a2),
+            a3,
+            reinterpret_cast<void*>(CBaseClientState_SendConnectPacket_Original));
+        OutputDebugStringA(msg);
+    }
+
     static auto id = OriginalCCVar_FindVar(cvarinterface, "platform_user_id");
-    if (id->m_Value.m_nValue == 0) {
+    EnsurePlatformUserIdString(id);
+    if (id && id->m_Value.m_nValue == 0) {
         static std::random_device rd;
         static std::mt19937 gen(rd());
         std::uniform_int_distribution<> dist(0, 99999);

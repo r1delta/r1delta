@@ -1,0 +1,12 @@
+LIBRARY "CoherentUIGT"
+EXPORTS
+    ??0ILogHandler@LoggingGT@Coherent@@QEAA@XZ=CoherentILogHandlerCtor @3
+    ??0ResourceHandler@UIGT@Coherent@@QEAA@XZ=CoherentResourceHandlerCtor @5
+    ??1ILogHandler@LoggingGT@Coherent@@UEAA@XZ=CoherentILogHandlerDtor @17
+    ??1ResourceHandler@UIGT@Coherent@@UEAA@XZ=CoherentResourceHandlerDtor @20
+    ?DecodeURLString@UIGT@Coherent@@YAXPEBDPEADPEAI@Z=CoherentDecodeURLString @55
+    ?GetHeaderField@HTTPHeader@UIGT@Coherent@@SAPEBDW4FieldType@123@@Z=CoherentGetHeaderField @58
+    ?OnModifyHeaders@ResourceHandler@UIGT@Coherent@@UEAAXPEAVResourceRequestUIGT@23@@Z=CoherentResourceHandlerOnModifyHeaders @82
+    ?OnShouldLoadResourceRequest@ResourceHandler@UIGT@Coherent@@UEAAXPEBVResourceRequestUIGT@23@PEAVLoadResourceResponseUIGT@23@@Z=CoherentResourceHandlerOnShouldLoadResourceRequest @86
+    ?URLParse@UIGT@Coherent@@YA_NPEBDPEAUURLComponent@12@11@Z=CoherentURLParse @109
+    InitializeUIGTSystem=CoherentInitializeUIGTSystem @114

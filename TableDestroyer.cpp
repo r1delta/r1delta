@@ -38,6 +38,7 @@
 
 #include <Windows.h>
 #include <iostream>
+#include <stdio.h>
 #include "defs.h"
 #include "TableDestroyer.h"
 #include "load.h"
@@ -47,12 +48,26 @@ ServerClassInitFunc ServerClassInit_DT_LocalOriginal;
 ServerClassInitFunc ServerClassInit_DT_LocalPlayerExclusiveOriginal;
 ServerClassInitFunc ServerClassInit_DT_TitanSoulOriginal;
 
+static void LogTableDestroyer(const char* fmt, ...)
+{
+	char buffer[512];
+	va_list args;
+	va_start(args, fmt);
+	_vsnprintf_s(buffer, sizeof(buffer), _TRUNCATE, fmt, args);
+	va_end(args);
+	OutputDebugStringA(buffer);
+}
+
 void DestroySendProp(SendProp* sendTablePtr, int* sendTableLengthPtr, const char* propname) {
 	ZoneScoped;
 
 	for (int i = 0; i < *sendTableLengthPtr; ++i) {
 		//std::cout << "SendProp name: " << sendTablePtr[i].name << std::endl;
 		if (strcmp(sendTablePtr[i].name, propname) == 0) {
+			// Preserve the legacy R1Delta table mutation exactly for both normal and
+			// R1O paths. This copies the trailing slot after the live count as well;
+			// changing it to a bounded count-only shift altered flattened table state
+			// and caused normal-client prediction regressions.
 			size_t bytesToMove = (*sendTableLengthPtr - i) * sizeof(SendProp);
 			if (bytesToMove > 0) {
 				memmove(&sendTablePtr[i], &sendTablePtr[i + 1], bytesToMove);
@@ -123,6 +138,7 @@ void MoveSendProp(SendProp* sourceTablePtr, int* sourceTableLengthPtr, const cha
 
 void ServerClassInit_DT_BasePlayer() {
 	ZoneScoped;
+	LogTableDestroyer("R1Delta: TableDestroyer DT_BasePlayer enter server=%p\n", reinterpret_cast<void*>(G_server));
 	ServerClassInit_DT_BasePlayerOriginal();
 	ServerClassInit_DT_LocalOriginal();
 	void* serverPtr = (void*)G_server;
@@ -132,6 +148,14 @@ void ServerClassInit_DT_BasePlayer() {
 	int* DT_LocalLen = (int*)(((uintptr_t)serverPtr) + 0xE04B48);
 	SendProp* DT_LocalPlayerExclusive = (SendProp*)(((uintptr_t)serverPtr) + 0xE982C0);
 	int* DT_LocalPlayerExclusiveLen = (int*)(((uintptr_t)serverPtr) + 0xE04878);
+	LogTableDestroyer(
+		"R1Delta: TableDestroyer DT_BasePlayer before baseLen=%d localLen=%d localExclusiveLen=%d base=%p local=%p localExclusive=%p\n",
+		*DT_BasePlayerLen,
+		*DT_LocalLen,
+		*DT_LocalPlayerExclusiveLen,
+		DT_BasePlayer,
+		DT_Local,
+		DT_LocalPlayerExclusive);
 	DestroySendProp(DT_Local, DT_LocalLen, "m_bFireZooming");
 	DestroySendProp(DT_Local, DT_LocalLen, "m_titanBuildStarted");
 	DestroySendProp(DT_Local, DT_LocalLen, "m_titanDeployed");
@@ -148,9 +172,17 @@ void ServerClassInit_DT_BasePlayer() {
 	DestroySendProp(DT_Local, DT_LocalLen, "m_titanRespawnTime");
 	RenameSendProp(DT_BasePlayer, DT_BasePlayerLen, "m_titanRespawnTime", "m_nextTitanRespawnAvailable");
 	FindSendProp(DT_BasePlayer, *DT_BasePlayerLen, "m_nextTitanRespawnAvailable")->offset += FindSendProp(DT_LocalPlayerExclusive, *DT_LocalPlayerExclusiveLen, "m_Local")->offset;
+	LogTableDestroyer(
+		"R1Delta: TableDestroyer DT_BasePlayer after baseLen=%d localLen=%d localExclusiveLen=%d nextTitan=%p local=%p\n",
+		*DT_BasePlayerLen,
+		*DT_LocalLen,
+		*DT_LocalPlayerExclusiveLen,
+		FindSendProp(DT_BasePlayer, *DT_BasePlayerLen, "m_nextTitanRespawnAvailable"),
+		FindSendProp(DT_LocalPlayerExclusive, *DT_LocalPlayerExclusiveLen, "m_Local"));
 }
 
 void ServerClassInit_DT_Local() {
+	LogTableDestroyer("R1Delta: TableDestroyer DT_Local suppressed original=%p\n", reinterpret_cast<void*>(ServerClassInit_DT_LocalOriginal));
 	//ServerClassInit_DT_LocalOriginal();
 
 
@@ -158,15 +190,21 @@ void ServerClassInit_DT_Local() {
 }
 
 void ServerClassInit_DT_LocalPlayerExclusive() {
+	LogTableDestroyer("R1Delta: TableDestroyer DT_LocalPlayerExclusive enter server=%p\n", reinterpret_cast<void*>(G_server));
 	ServerClassInit_DT_LocalPlayerExclusiveOriginal();
 	void* serverPtr = (void*)G_server;
 	SendProp* DT_LocalPlayerExclusive = (SendProp*)(((uintptr_t)serverPtr) + 0xE982C0);
 	int* DT_LocalPlayerExclusiveLen = (int*)(((uintptr_t)serverPtr) + 0xE04878);
+	LogTableDestroyer(
+		"R1Delta: TableDestroyer DT_LocalPlayerExclusive len=%d table=%p\n",
+		*DT_LocalPlayerExclusiveLen,
+		DT_LocalPlayerExclusive);
 
 	//DestroySendProp(DT_LocalPlayerExclusive, DT_LocalPlayerExclusiveLen, "m_wallDangleDisableWeapon");
 }
 
 void ServerClassInit_DT_TitanSoul() {
+	LogTableDestroyer("R1Delta: TableDestroyer DT_TitanSoul enter server=%p\n", reinterpret_cast<void*>(G_server));
 	ServerClassInit_DT_TitanSoulOriginal();
 	void* serverPtr = (void*)G_server;
 	SendProp* DT_TitanSoul = (SendProp*)(((uintptr_t)serverPtr) + 0xEAB6C0);
@@ -177,7 +215,9 @@ void ServerClassInit_DT_TitanSoul() {
 	//DestroySendProp(DT_TitanSoul, DT_TitanSoulLen, "m_liveryColor2");
 	//DestroySendProp(DT_TitanSoul, DT_TitanSoulLen, "m_tierLevel");
 	// these are at the end so theres nothing after them
+	LogTableDestroyer("R1Delta: TableDestroyer DT_TitanSoul before len=%d table=%p\n", *DT_TitanSoulLen, DT_TitanSoul);
 	*DT_TitanSoulLen -= 5;
+	LogTableDestroyer("R1Delta: TableDestroyer DT_TitanSoul after len=%d\n", *DT_TitanSoulLen);
 }
 
 __int64 __fastcall CBaseEntity__SendProxy_CellOrigin(__int64 a1, _DWORD* a2, __int64 a3, float* a4)

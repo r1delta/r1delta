@@ -1,8 +1,9 @@
-﻿#pragma once
+#pragma once
 
 #include "core.h"
 
 #include "load.h"
+#include <cctype>
 #include <cstdlib>
 #include <crtdbg.h>	
 #include <new>
@@ -15,6 +16,7 @@
 #include <fstream>
 #include <filesystem>
 #include <array>
+#include <atomic>
 #include <intrin.h>
 #include "memory.h"
 #include "filesystem.h"
@@ -38,6 +40,7 @@
 
 #include <random>
 #include "masterserver.h"
+#include "script_error_telemetry.h"
 #include "shellapi.h"
 #include "discord.h"
 #include "r1d_version.h"
@@ -59,12 +62,9 @@ public:
 	}
 
 	void registerFunctions(void* vmPtr, ScriptContext context) {
-		typedef int64_t(*AddSquirrelRegType)(void*, SQFuncRegistrationInternal*);
-		AddSquirrelRegType AddSquirrelReg = reinterpret_cast<AddSquirrelRegType>(G_vscript + (IsDedicatedServer() ? 0x8E70 : 0x8E50));
-
 		for (const auto& func : m_functions) {
 			if (func->GetContext() == context) {
-				AddSquirrelReg(vmPtr, func->GetInternalReg());
+				AddSquirrelReg(reinterpret_cast<R1SquirrelVM*>(vmPtr), func->GetInternalReg());
 			}
 		}
 	}
@@ -147,11 +147,299 @@ sq_arrayappend_t sq_arrayappend;
 sq_throwerror_t sq_throwerror;
 sq_removetwo_t sq_removetwo;
 RunCallback_t RunCallback;
+CScriptManager__CreateNewVMType CScriptManager__CreateNewVMOriginal;
+
+void CSquirrelVM__PrintFunc1(void* m_hVM, const char* s, ...);
+void CSquirrelVM__PrintFunc2(void* m_hVM, const char* s, ...);
+void CSquirrelVM__PrintFunc3(void* m_hVM, const char* s, ...);
+
+namespace {
+
+using TfoAddSquirrelReg_t = int64_t(__fastcall*)(void*, void*, const char**);
+static TfoAddSquirrelReg_t g_R1OTfoAddSquirrelReg = nullptr;
+
+struct R1OTfoSQFuncRegistrationInternal {
+	const char* squirrelFuncName;
+	const char* cppFuncName;
+	const char* helpText;
+	const char* szTypeMask;
+	int nparamscheck;
+	int pad24;
+	const char* returnValueTypeText;
+	const char* argNamesText;
+	__int64 unk38;
+	char pad40[0x20];
+	void* pfnBinding;
+	void* pFunction;
+	__int64 flags;
+};
+static_assert(offsetof(R1OTfoSQFuncRegistrationInternal, pfnBinding) == 0x60);
+static_assert(offsetof(R1OTfoSQFuncRegistrationInternal, pFunction) == 0x68);
+static_assert(offsetof(R1OTfoSQFuncRegistrationInternal, flags) == 0x70);
+
+static std::vector<std::pair<SQFuncRegistrationInternal*, std::unique_ptr<R1OTfoSQFuncRegistrationInternal>>> g_R1OTfoRegAdapters;
+
+__int64 __fastcall R1OTfoSQNativeBinding(__int64 pFunction, __int64, __int64* args, __int64, __int64* ret)
+{
+	SQInteger result = 0;
+	if (pFunction && args)
+		result = reinterpret_cast<SQFUNCTION>(pFunction)(reinterpret_cast<HSQUIRRELVM>(args[0]));
+	if (ret)
+		*ret = result;
+	return result;
+}
+
+R1OTfoSQFuncRegistrationInternal* GetR1OTfoRegAdapter(SQFuncRegistrationInternal* reg)
+{
+	for (auto& entry : g_R1OTfoRegAdapters) {
+		if (entry.first == reg)
+			return entry.second.get();
+	}
+
+	auto adapter = std::make_unique<R1OTfoSQFuncRegistrationInternal>();
+	memset(adapter.get(), 0, sizeof(*adapter));
+	adapter->squirrelFuncName = reg->squirrelFuncName;
+	adapter->cppFuncName = reg->cppFuncName;
+	adapter->helpText = reg->helpText;
+	adapter->szTypeMask = reg->szTypeMask;
+	adapter->nparamscheck = static_cast<int>(reg->nparamscheck_probably);
+	adapter->returnValueTypeText = reg->returnValueTypeText;
+	adapter->argNamesText = reg->argNamesText;
+	adapter->unk38 = reg->UnkSeemsToAlwaysBe32;
+	adapter->pfnBinding = reinterpret_cast<void*>(&R1OTfoSQNativeBinding);
+	adapter->pFunction = reg->pFunction;
+	adapter->flags = 2;
+	R1OTfoSQFuncRegistrationInternal* result = adapter.get();
+	g_R1OTfoRegAdapters.emplace_back(reg, std::move(adapter));
+	return result;
+}
+
+int64_t __fastcall R1OTfoAddSquirrelRegWrapper(R1SquirrelVM* vm, SQFuncRegistrationInternal* reg)
+{
+	if (!g_R1OTfoAddSquirrelReg || !vm || !reg)
+		return 0;
+	auto adapter = GetR1OTfoRegAdapter(reg);
+	return g_R1OTfoAddSquirrelReg(vm, adapter, nullptr);
+}
+
+SQInteger R1OTfo_sq_gettop(R1SquirrelVM*, HSQUIRRELVM v)
+{
+	if (!v)
+		return 0;
+	auto base = reinterpret_cast<const unsigned char*>(v);
+	return *reinterpret_cast<const int*>(base + 0x50) - *reinterpret_cast<const int*>(base + 0x54);
+}
+
+SQRESULT R1OTfo_sq_getstackobj(R1SquirrelVM*, HSQUIRRELVM v, SQInteger idx, SQObject* out)
+{
+	if (!v || !out)
+		return SQ_ERROR;
+	auto base = reinterpret_cast<const unsigned char*>(v);
+	auto stack = *reinterpret_cast<const unsigned char* const*>(base + 0x30);
+	const int top = *reinterpret_cast<const int*>(base + 0x50);
+	const int stackBase = *reinterpret_cast<const int*>(base + 0x54);
+	const int slot = idx < 0 ? top + idx : stackBase + idx - 1;
+	if (!stack || slot < 0 || slot >= top)
+		return SQ_ERROR;
+	memcpy(out, stack + (static_cast<size_t>(slot) * sizeof(SQObject)), sizeof(SQObject));
+	return SQ_OK;
+}
+
+SQObjectType R1OTfo_sq_gettype(HSQUIRRELVM v, SQInteger idx)
+{
+	SQObject obj;
+	if (SQ_FAILED(R1OTfo_sq_getstackobj(nullptr, v, idx, &obj)))
+		return OT_NULL;
+	return obj._type;
+}
+
+SQRESULT R1OTfo_sq_getstring(HSQUIRRELVM v, SQInteger idx, const SQChar** out)
+{
+	if (!out)
+		return SQ_ERROR;
+	SQObject obj;
+	if (SQ_FAILED(R1OTfo_sq_getstackobj(nullptr, v, idx, &obj)) || obj._type != OT_STRING || !obj._unVal.pString)
+		return SQ_ERROR;
+
+	// TFO SQString layout matches the old launcher string pool: characters begin at +0x38.
+	*out = reinterpret_cast<const SQChar*>(reinterpret_cast<const unsigned char*>(obj._unVal.pString) + 0x38);
+	return SQ_OK;
+}
+
+SQRESULT R1OTfo_sq_getinteger(R1SquirrelVM*, HSQUIRRELVM v, SQInteger idx, SQInteger* out)
+{
+	if (!out)
+		return SQ_ERROR;
+	SQObject obj;
+	if (SQ_FAILED(R1OTfo_sq_getstackobj(nullptr, v, idx, &obj)) || (obj._type & SQOBJECT_NUMERIC) == 0)
+		return SQ_ERROR;
+	*out = obj._type == OT_FLOAT ? static_cast<SQInteger>(obj._unVal.fFloat) : obj._unVal.nInteger;
+	return SQ_OK;
+}
+
+SQRESULT R1OTfo_sq_getfloat(R1SquirrelVM*, HSQUIRRELVM v, SQInteger idx, SQFloat* out)
+{
+	if (!out)
+		return SQ_ERROR;
+	SQObject obj;
+	if (SQ_FAILED(R1OTfo_sq_getstackobj(nullptr, v, idx, &obj)) || (obj._type & SQOBJECT_NUMERIC) == 0)
+		return SQ_ERROR;
+	*out = obj._type == OT_FLOAT ? obj._unVal.fFloat : static_cast<SQFloat>(obj._unVal.nInteger);
+	return SQ_OK;
+}
+
+SQRESULT R1OTfo_sq_getbool(R1SquirrelVM*, HSQUIRRELVM v, SQInteger idx, SQBool* out)
+{
+	if (!out)
+		return SQ_ERROR;
+	SQObject obj;
+	if (SQ_FAILED(R1OTfo_sq_getstackobj(nullptr, v, idx, &obj)) || obj._type != OT_BOOL)
+		return SQ_ERROR;
+	*out = static_cast<SQBool>(obj._unVal.nInteger != 0);
+	return SQ_OK;
+}
+
+SQInteger R1OTfo_sq_getsize(R1SquirrelVM*, HSQUIRRELVM v, SQInteger idx)
+{
+	SQObject obj;
+	if (SQ_FAILED(R1OTfo_sq_getstackobj(nullptr, v, idx, &obj)))
+		return SQ_ERROR;
+	if (obj._type == OT_STRING && obj._unVal.pString)
+		return *reinterpret_cast<const int*>(reinterpret_cast<const unsigned char*>(obj._unVal.pString) + 0x28);
+	return SQ_ERROR;
+}
+
+uintptr_t g_R1OTfoLauncherBase = 0;
+
+using TfoSqPushNull_t = void(__fastcall*)(HSQUIRRELVM);
+using TfoSqPushString_t = void(__fastcall*)(HSQUIRRELVM, const SQChar*, SQInteger);
+using TfoSqPushInteger_t = void(__fastcall*)(HSQUIRRELVM, SQInteger);
+using TfoSqPushBool_t = void(__fastcall*)(HSQUIRRELVM, SQBool);
+using TfoSqPushFloat_t = void(__fastcall*)(HSQUIRRELVM, SQFloat);
+using TfoSqSetTop_t = void(__fastcall*)(HSQUIRRELVM, SQInteger);
+
+void R1OTfo_sq_pushnull(HSQUIRRELVM v)
+{
+    reinterpret_cast<TfoSqPushNull_t>(g_R1OTfoLauncherBase + 0x2BDD0)(v);
+}
+
+void R1OTfo_sq_pushstring(HSQUIRRELVM v, const SQChar* str, SQInteger len)
+{
+    reinterpret_cast<TfoSqPushString_t>(g_R1OTfoLauncherBase + 0x2BE30)(v, str, len);
+}
+
+void R1OTfo_sq_pushinteger(R1SquirrelVM*, HSQUIRRELVM v, SQInteger value)
+{
+    reinterpret_cast<TfoSqPushInteger_t>(g_R1OTfoLauncherBase + 0x2BF30)(v, value);
+}
+
+void R1OTfo_sq_pushbool(R1SquirrelVM*, HSQUIRRELVM v, SQBool value)
+{
+    reinterpret_cast<TfoSqPushBool_t>(g_R1OTfoLauncherBase + 0x2BF90)(v, value);
+}
+
+void R1OTfo_sq_pushfloat(R1SquirrelVM*, HSQUIRRELVM v, SQFloat value)
+{
+    reinterpret_cast<TfoSqPushFloat_t>(g_R1OTfoLauncherBase + 0x2C000)(v, value);
+}
+
+void R1OTfo_sq_settop(HSQUIRRELVM v, int top)
+{
+    reinterpret_cast<TfoSqSetTop_t>(g_R1OTfoLauncherBase + 0x2D270)(v, top);
+}
+
+void R1OTfo_sq_pop(HSQUIRRELVM v, SQInteger count)
+{
+	if (!v || count <= 0)
+		return;
+
+	const SQInteger currentTop = R1OTfo_sq_gettop(nullptr, v);
+	const SQInteger newTop = count < currentTop ? currentTop - count : 0;
+	R1OTfo_sq_settop(v, newTop);
+}
+
+CScriptManager__CreateNewVMType g_R1OTfoCreateNewVMOriginal = nullptr;
+uintptr_t g_R1OTfoPrintHooksLauncherBase = 0;
+
+struct R1OTfoImmediateHookResult {
+	MH_STATUS create;
+	MH_STATUS enable;
+};
+
+bool R1OTfoCreateStatusOk(MH_STATUS status)
+{
+	return status == MH_OK || status == MH_ERROR_ALREADY_CREATED;
+}
+
+bool R1OTfoEnableStatusOk(MH_STATUS status)
+{
+	return status == MH_OK || status == MH_ERROR_ENABLED;
+}
+
+R1OTfoImmediateHookResult InstallR1OTfoImmediateHook(uintptr_t target, void* detour, void** original)
+{
+	const MH_STATUS createStatus = MH_CreateHook(reinterpret_cast<void*>(target), detour, original);
+	const MH_STATUS enableStatus = R1OTfoCreateStatusOk(createStatus)
+		? MH_EnableHook(reinterpret_cast<void*>(target))
+		: createStatus;
+	return { createStatus, enableStatus };
+}
+
+bool R1OTfoImmediateHookInstalled(const R1OTfoImmediateHookResult& result)
+{
+	return R1OTfoCreateStatusOk(result.create) && R1OTfoEnableStatusOk(result.enable);
+}
+
+bool InstallR1OTfoPrintHooks(uintptr_t launcherBase)
+{
+	if (!launcherBase)
+		return false;
+	if (g_R1OTfoPrintHooksLauncherBase == launcherBase)
+		return true;
+
+	// TFO stores these by VM context in launcher+0x1FE40: 0=server, 1=client, else=UI.
+	const R1OTfoImmediateHookResult serverPrint = InstallR1OTfoImmediateHook(launcherBase + 0x254F0, reinterpret_cast<void*>(&::CSquirrelVM__PrintFunc1), nullptr);
+	const R1OTfoImmediateHookResult clientPrint = InstallR1OTfoImmediateHook(launcherBase + 0x255E0, reinterpret_cast<void*>(&::CSquirrelVM__PrintFunc2), nullptr);
+	const R1OTfoImmediateHookResult uiPrint = InstallR1OTfoImmediateHook(launcherBase + 0x256D0, reinterpret_cast<void*>(&::CSquirrelVM__PrintFunc3), nullptr);
+	const bool installed = R1OTfoImmediateHookInstalled(serverPrint)
+		&& R1OTfoImmediateHookInstalled(clientPrint)
+		&& R1OTfoImmediateHookInstalled(uiPrint);
+
+	if (installed)
+		g_R1OTfoPrintHooksLauncherBase = launcherBase;
+
+	if (AreR1OFakeDediVerboseLogsEnabled()) {
+		char hookLog[512];
+		_snprintf_s(
+			hookLog,
+			sizeof(hookLog),
+			_TRUNCATE,
+			"R1Delta: R1O TFO squirrel print hooks launcher=%p serverTarget=%p server=[%d,%d] clientTarget=%p client=[%d,%d] uiTarget=%p ui=[%d,%d] installed=%d\n",
+			reinterpret_cast<void*>(launcherBase),
+			reinterpret_cast<void*>(launcherBase + 0x254F0),
+			serverPrint.create,
+			serverPrint.enable,
+			reinterpret_cast<void*>(launcherBase + 0x255E0),
+			clientPrint.create,
+			clientPrint.enable,
+			reinterpret_cast<void*>(launcherBase + 0x256D0),
+			uiPrint.create,
+			uiPrint.enable,
+			installed);
+		OutputDebugStringA(hookLog);
+	}
+	return installed;
+}
+
+}
 sq_settop_t sq_settop;
 CSquirrelVM__RegisterGlobalConstantInt_t CSquirrelVM__RegisterGlobalConstantInt;
 CSquirrelVM__GetEntityFromInstance_t CSquirrelVM__GetEntityFromInstance;
 sq_GetEntityConstant_CBaseEntity_t sq_GetEntityConstant_CBaseEntity; // CLIENT
 AddSquirrelReg_t AddSquirrelReg;
+
+static bool RunR1OTfoScriptCode(R1SquirrelVM* vm, const char* code, const char* sourceName);
+static std::atomic<R1SquirrelVM*> s_R1OTfoPendingServerAutorunVm{ nullptr };
 //
 //const char* __fastcall Script_GetConVarString(const char* a1, __int64 a2, __int64 a3)
 //{
@@ -276,6 +564,9 @@ void* __fastcall CSquirrelVM__GetEntityFromInstance_Rebuild(__int64 a2, __int64 
 
 void* sq_getentity(HSQUIRRELVM v, SQInteger iStackPos)
 {
+	if (IsR1ODedicatedServer())
+		return nullptr;
+
 	SQObject obj;
 	sq_getstackobj(nullptr, v, iStackPos, &obj);
 	auto constant = (G_server + 0xD42040);
@@ -519,6 +810,8 @@ int GetMods(HSQUIRRELVM v) {
 
 
 void AddXp(HSQUIRRELVM v) {
+	if (IsR1ODedicatedServer())
+		return;
 
 	auto r1sqvm = GetServerVMPtr();
 	SQInteger xp;
@@ -534,6 +827,9 @@ void AddXp(HSQUIRRELVM v) {
 
 
 void SetGenSQ(HSQUIRRELVM v) {
+	if (IsR1ODedicatedServer())
+		return;
+
 	auto r1sqvm = GetServerVMPtr();
 	SQInteger gen;
 	sq_getinteger(r1sqvm, v, 1, &gen);
@@ -546,6 +842,9 @@ void SetGenSQ(HSQUIRRELVM v) {
 }
 
 void SetRanked(HSQUIRRELVM v) {
+	if (IsR1ODedicatedServer())
+		return;
+
 	auto r1sqvm = GetServerVMPtr();
 	SQBool ranked;
 	const void* player = sq_getentity(v, 2);
@@ -568,6 +867,11 @@ SQInteger Script_GetLoadingStatusText(HSQUIRRELVM v)
 
 SQInteger Script_IsDedicated(HSQUIRRELVM v)
 {
+	if (IsR1ODedicatedServer()) {
+		sq_pushbool(nullptr, v, IsDedicatedServer());
+		return 1;
+	}
+
 	auto r1sqvm = GetServerVMPtr();
 
 	sq_pushbool(r1sqvm, r1sqvm->sqvm, IsDedicatedServer());
@@ -576,6 +880,9 @@ SQInteger Script_IsDedicated(HSQUIRRELVM v)
 }
 
 SQInteger Script_Server_SetActiveBurnCardIndex(HSQUIRRELVM v) {
+	if (IsR1ODedicatedServer())
+		return 1;
+
 	const void* player = sq_getentity(v, 2);
 	if (!player) {
 		return sq_throwerror(v, "player is null");
@@ -593,6 +900,11 @@ SQInteger Script_Server_SetActiveBurnCardIndex(HSQUIRRELVM v) {
 }
 
 SQInteger Script_Server_GetActiveBurnCardIndex(HSQUIRRELVM v) {
+	if (IsR1ODedicatedServer()) {
+		sq_pushinteger(nullptr, v, 0);
+		return 1;
+	}
+
 	const void* player = sq_getentity(v, 2);
 	if (!player) {
 		return sq_throwerror(v, "player is null");
@@ -607,6 +919,11 @@ SQInteger Script_Server_GetActiveBurnCardIndex(HSQUIRRELVM v) {
 }
 
 SQInteger Script_ServerGetPlayerUserID(HSQUIRRELVM v) {
+	if (IsR1ODedicatedServer()) {
+		sq_pushinteger(nullptr, v, 0);
+		return 1;
+	}
+
 	void* player = sq_getentity(v, 2);
 	if (!player)
 	{
@@ -625,6 +942,11 @@ SQInteger Script_ServerGetPlayerUserID(HSQUIRRELVM v) {
 }
 
 SQInteger Script_ServerGetPlayerPlatformUserID(HSQUIRRELVM v) {
+	if (IsR1ODedicatedServer()) {
+		sq_pushstring(v, "0", -1);
+		return 1;
+	}
+
 	void* player = sq_getentity(v, 2);
 	if (!player)
 	{
@@ -638,6 +960,11 @@ SQInteger Script_ServerGetPlayerPlatformUserID(HSQUIRRELVM v) {
 
 SQInteger Script_ServerGetPlayerIp(HSQUIRRELVM v)
 {
+	if (IsR1ODedicatedServer()) {
+		sq_pushstring(v, "", -1);
+		return 1;
+	}
+
 	void* player = sq_getentity(v, 2);
 	if (!player)
 	{
@@ -889,6 +1216,9 @@ void SendChatMsg(CRecipientFilter* filter, int fromIndex, const char* msg, bool 
 
 
 int SendChatWrapper(HSQUIRRELVM v) {
+	if (IsR1ODedicatedServer())
+		return 0;
+
 	// args: this, entity player / bool = true (broadcast) / array of entities for multiple recipients, int fromPlayerIndex, string text, bool isTeam = false, bool isDead = false
 
 	static auto CRecipientFilter__AddAllPlayers = reinterpret_cast<void(*)(void*)>(G_server + 0x1E7BA0);
@@ -981,6 +1311,9 @@ static inline void SendShowMenuChunked(void* filter, uint16_t keysMask, int seco
 // --- one public function: SendShowMenu(recips, text, keysMask, seconds) ---
 int SendShowMenu(HSQUIRRELVM v)
 {
+	if (IsR1ODedicatedServer())
+		return 0;
+
 	// Expect: this + 4 args
 	if (sq_gettop(GetServerVMPtr(), v) != 5) return sq_throwerror(v, "usage: SendShowMenu(recips, text, keysMask, secondsToStayOpen)");
 
@@ -1032,24 +1365,83 @@ int SendShowMenu(HSQUIRRELVM v)
 
 
 void RunAutorunScripts(R1SquirrelVM* r1sqvm, const char* prefix) {
-	auto FindFirst = (const char*(__fastcall*)(uintptr_t thisptr, const char* searchString, uintptr_t* handle))(g_CVFileSystem->FindFirst);
-	auto FindNext = (const char* (__fastcall*)(uintptr_t thisptr, uintptr_t handle))(g_CVFileSystem->FindNext);
-	auto FindClose = (void(__fastcall*)(uintptr_t thisptr, uintptr_t handle))(g_CVFileSystem->FindClose);
+	if (!r1sqvm || !prefix)
+		return;
 
-	char search[128] = { 0 };
+	using FindFirstType = const char*(__fastcall*)(uintptr_t, const char*, uintptr_t*);
+	using FindNextType = const char*(__fastcall*)(uintptr_t, uintptr_t);
+	using FindCloseType = void(__fastcall*)(uintptr_t, uintptr_t);
+
+	uintptr_t fileSystemInterface = g_CVFileSystemInterface;
+	FindFirstType FindFirst = g_CVFileSystem
+		? reinterpret_cast<FindFirstType>(g_CVFileSystem->FindFirst)
+		: nullptr;
+	FindNextType FindNext = g_CVFileSystem
+		? reinterpret_cast<FindNextType>(g_CVFileSystem->FindNext)
+		: nullptr;
+	FindCloseType FindClose = g_CVFileSystem
+		? reinterpret_cast<FindCloseType>(g_CVFileSystem->FindClose)
+		: nullptr;
+
+	if (IsR1ODedicatedServer()) {
+		void* nativeFileSystem = GetR1ONativeFileSystem();
+		if (!nativeFileSystem)
+			return;
+		auto nativeVtable = *reinterpret_cast<uintptr_t**>(nativeFileSystem);
+		if (!nativeVtable)
+			return;
+
+		// TFO VFileSystem017 inserts four methods at slots 8-11.  Its native
+		// FindFirst/FindNext/FindClose methods therefore live at 32/33/35.
+		fileSystemInterface = reinterpret_cast<uintptr_t>(nativeFileSystem);
+		FindFirst = reinterpret_cast<FindFirstType>(nativeVtable[32]);
+		FindNext = reinterpret_cast<FindNextType>(nativeVtable[33]);
+		FindClose = reinterpret_cast<FindCloseType>(nativeVtable[35]);
+	}
+
+	if (!fileSystemInterface)
+		return;
+	if (!FindFirst || !FindNext || !FindClose)
+		return;
+
+	char search[MAX_PATH] = { 0 };
 	sprintf_s(search, "scripts/vscripts/autorun/%s", prefix);
 
-	char runFilename[128] = { 0 };
+	char runFilename[MAX_PATH] = { 0 };
 
 	uintptr_t handle = 0;
-	const char* filename = FindFirst(g_CVFileSystemInterface, search, &handle);
+	const char* filename = FindFirst(fileSystemInterface, search, &handle);
 	while (filename) {
 		sprintf_s(runFilename, "autorun/%s", filename);
-		sprintf_s(search, "scripts/vscripts/%s", runFilename);
-		Call<void, const char*, const char*>(r1sqvm, 20, search, runFilename);
-		filename = FindNext(g_CVFileSystemInterface, handle);
+		if (IsR1ODedicatedServer()) {
+			char escapedFilename[MAX_PATH * 2] = {};
+			size_t escapedLength = 0;
+			for (const char* source = runFilename;
+				*source && escapedLength + 2 < sizeof(escapedFilename);
+				++source) {
+				if (*source == '\\' || *source == '"')
+					escapedFilename[escapedLength++] = '\\';
+				escapedFilename[escapedLength++] = *source;
+			}
+			escapedFilename[escapedLength] = '\0';
+
+			char code[MAX_PATH * 2 + 64] = {};
+			_snprintf_s(
+				code,
+				sizeof(code),
+				_TRUNCATE,
+				"IncludeScript(\"%s\", getroottable())",
+				escapedFilename);
+			RunR1OTfoScriptCode(r1sqvm, code, runFilename);
+		}
+		else {
+			sprintf_s(search, "scripts/vscripts/%s", runFilename);
+			Call<void, const char*, const char*>(r1sqvm, 20, search, runFilename);
+		}
+		filename = FindNext(fileSystemInterface, handle);
 	}
-	FindClose(g_CVFileSystemInterface, handle);
+	if (handle)
+		FindClose(fileSystemInterface, handle);
 }
 
 uintptr_t(__fastcall *oOnCreateClientScriptVM)(uintptr_t);
@@ -1093,7 +1485,26 @@ int AutoCVar(HSQUIRRELVM v) {
 	const char* descCopy = _strdup(desc);
 
 	// if exists, bail
-	if (OriginalCCVar_FindVar(cvarinterface, actualKey)) return 0;
+	if (IsR1ODedicatedServer()) {
+		if (CCVar_FindVar(cvarinterface, actualKey)) {
+			free(actualKey);
+			free((void*)defaultValueCopy);
+			free((void*)descCopy);
+			return 0;
+		}
+		RegisterR1ODediConVar(actualKey, defaultValue, FCVAR_GAMEDLL, desc);
+		free(actualKey);
+		free((void*)defaultValueCopy);
+		free((void*)descCopy);
+		return 0;
+	}
+
+	if (OriginalCCVar_FindVar(cvarinterface, actualKey)) {
+		free(actualKey);
+		free((void*)defaultValueCopy);
+		free((void*)descCopy);
+		return 0;
+	}
 
 	// register cvar
 	ConVarR1* RegisterConVar(const char* name, const char* value, int flags, const char* helpString);
@@ -1103,6 +1514,7 @@ int AutoCVar(HSQUIRRELVM v) {
 		FCVAR_GAMEDLL,
 		descCopy
 	);
+	free(actualKey);
 
 	return 0;
 }
@@ -1174,6 +1586,9 @@ int TableToKeyValues(HSQUIRRELVM v, KeyValues* kv, int tableN) {
 }
 
 int SendMenu(HSQUIRRELVM v) {
+	if (IsR1ODedicatedServer())
+		return 0;
+
 	void* player = sq_getentity(v, 2);
 	if (!player) {
 		sq_throwerror(v, "Passed instance is not a valid entity");
@@ -1232,27 +1647,50 @@ __int64 __fastcall SQFinalize_Seatbelt(void* self) {
     return oSQFinalize(self);
 }
 
+using DedicatedScriptErrorHandlerFn = uint64_t(__fastcall*)(uintptr_t);
+static DedicatedScriptErrorHandlerFn s_DedicatedScriptErrorHandlerOriginal = nullptr;
+
+static uint64_t __fastcall DedicatedScriptErrorHandler(uintptr_t sqstate)
+{
+	ScriptErrorTelemetry::BeginErrorBlock(ScriptErrorTelemetry::VmContext::Server);
+	const uint64_t result = s_DedicatedScriptErrorHandlerOriginal(sqstate);
+	ScriptErrorTelemetry::EndErrorBlock(ScriptErrorTelemetry::VmContext::Server);
+	return result;
+}
+
 // Function to initialize all SQVM functions
 bool GetSQVMFuncs() {
+	ScriptErrorTelemetry::Initialize();
 	static bool initialized = false;
 	if (initialized) return true;
-	auto engine = IsDedicatedServer() ? G_engine_ds : G_engine;
-	g_pClientArray = (CBaseClient*)(engine + 0x2966340);
-	g_pClientArrayDS = (CBaseClientDS*)(engine + 0x1C89C48);
+	const bool r1oFakeDedi = IsR1ODedicatedServer();
+	const uintptr_t engine = MainEngineBase();
+	if (!r1oFakeDedi) {
+		g_pClientArray = (CBaseClient*)(G_engine + 0x2966340);
+		g_pClientArrayDS = (CBaseClientDS*)(G_engine_ds + 0x1C89C48);
+	}
+	else {
+		g_pClientArray = nullptr;
+		g_pClientArrayDS = nullptr;
+	}
 
 #if BUILD_DEBUG
 	if (!G_vscript) MessageBoxW(0, L"G_launcher is null in GetSQVMFuncs", L"ASSERT!!!", MB_ICONERROR | MB_OK);
 #endif
 
-	if (MH_CreateHook(reinterpret_cast<void*>((engine + (IsDedicatedServer() ? 0xAA4A0 : 0x14BB10))), &Hk_CHostState__State_GameShutdown, reinterpret_cast<void**>(&oGameShutDown)) != MH_OK) {
+	if (!r1oFakeDedi && engine && MH_CreateHook(reinterpret_cast<void*>((engine + (IsDedicatedServer() ? 0xAA4A0 : 0x14BB10))), &Hk_CHostState__State_GameShutdown, reinterpret_cast<void**>(&oGameShutDown)) != MH_OK) {
 			Msg("Failed to hook CHostState__State_GameShutdown\n");
 	}
 
 
-	MH_CreateHook((LPVOID)(G_launcher + 0x4D6D0), &SQFinalize_Seatbelt, (LPVOID*)&oSQFinalize);
+	if (!r1oFakeDedi)
+		MH_CreateHook((LPVOID)(G_launcher + 0x4D6D0), &SQFinalize_Seatbelt, (LPVOID*)&oSQFinalize);
 
 	uintptr_t baseAddress = G_vscript;
-	if (G_server) {
+	if (!r1oFakeDedi && G_server) {
+		if (IsDedicatedServer())
+			MH_CreateHook(reinterpret_cast<void*>(G_launcher + 0x3A5E0), &DedicatedScriptErrorHandler,
+				reinterpret_cast<void**>(&s_DedicatedScriptErrorHandlerOriginal));
 		if (MH_CreateHook(reinterpret_cast<void*>(G_server + 0x0050EA30), &CPlayer__SetXPRebuild, reinterpret_cast<void**>(&CPlayer__SetXPRebuildOrig)) != MH_OK) {
 			Msg("Failed to hook CPlayer__SetXPRebuild\n");
 		}
@@ -1264,6 +1702,7 @@ bool GetSQVMFuncs() {
 		}
 		MH_EnableHook(MH_ALL_HOOKS);
 	}
+	if (!r1oFakeDedi) {
 	sq_compile = reinterpret_cast<sq_compile_t>(baseAddress + (IsDedicatedServer() ? 0x14A50 : 0x14970));
 	sq_compilebuffer = reinterpret_cast<sq_compilebuffer_t>(baseAddress + (IsDedicatedServer() ? 0x1A6C0 : 0x1A5E0));
 	base_getroottable = reinterpret_cast<base_getroottable_t>(baseAddress + (IsDedicatedServer() ? 0x56520 : 0x56440));
@@ -1308,6 +1747,7 @@ bool GetSQVMFuncs() {
 	MH_CreateHook((LPVOID)(G_client + 0x2E4AD0), OnCreateUIScriptVM, (LPVOID*)&oOnCreateUIScriptVM);
 	if (G_server) MH_CreateHook((LPVOID)(G_server + 0x276600), OnCreateServerScriptVM, (LPVOID*)&oOnCreateServerScriptVM);
 	MH_EnableHook(MH_ALL_HOOKS);
+	}
 
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_CLIENT,
@@ -1457,10 +1897,10 @@ bool GetSQVMFuncs() {
 		SCRIPT_CONTEXT_CLIENT,
 		"AddDamageNumber",
 		(SQFUNCTION)Script_AddDamageNumber,
-		".ffffbi", // . this, f float, f float, f float, f float, b bool
-		7,
+		".ffffbbi",
+		8,
 		"void",
-		"float damage, float x, float y, float z, bool isCritical",
+		"float damage, float x, float y, float z, bool isCritical, bool isKillShot, int sourceID",
 		"Adds a floating damage number to the HUD."
 	);
 
@@ -1742,7 +2182,6 @@ void* lastvmptr = 0;
 void* fakevmptr;
 void* realvmptr = 0;
 typedef void* (*CScriptManager__CreateNewVMType)(__int64 a1, int a2, unsigned int a3);
-CScriptManager__CreateNewVMType CScriptManager__CreateNewVMOriginal;
 bool isServerScriptVM = false;
 
 void* CScriptManager__CreateNewVM(__int64 a1, int a2, unsigned int a3) {
@@ -1801,6 +2240,110 @@ void* CScriptManager__CreateNewVM(__int64 a1, int a2, unsigned int a3) {
 	}
 
 	return vmPtr;
+}
+
+void* CScriptManager__CreateNewVM_R1OTFO(__int64 a1, int a2, unsigned int a3) {
+	void* vmPtr = g_R1OTfoCreateNewVMOriginal ? g_R1OTfoCreateNewVMOriginal(a1, a2, a3) : nullptr;
+	if (!vmPtr)
+		return nullptr;
+
+	ScriptContext context;
+	switch (a3) {
+	case 0:
+		context = SCRIPT_CONTEXT_SERVER;
+		break;
+	case 1:
+		context = SCRIPT_CONTEXT_CLIENT;
+		break;
+	case 2:
+		context = SCRIPT_CONTEXT_UI;
+		break;
+	default:
+		if (AreR1OFakeDediVerboseLogsEnabled()) {
+			char unknownLog[256];
+			_snprintf_s(unknownLog, sizeof(unknownLog), _TRUNCATE, "R1Delta: R1O TFO CScriptManager::CreateNewVM unknown context=%u vm=%p\n", a3, vmPtr);
+			OutputDebugStringA(unknownLog);
+		}
+		return vmPtr;
+	}
+
+	GetSQVMFuncs();
+	if (AddSquirrelReg)
+		ScriptFunctionRegistry::getInstance().registerFunctions(vmPtr, context);
+	else if (AreR1OFakeDediVerboseLogsEnabled())
+		OutputDebugStringA("R1Delta: R1O TFO squirrel native registration skipped: AddSquirrelReg is null\n");
+
+	if (context == SCRIPT_CONTEXT_SERVER) {
+		realvmptr = vmPtr;
+		// The normal R1 autorun hook sits above CScriptManager::CreateNewVM,
+		// after the VM's root table and IncludeScript helper are ready.  R1O
+		// does not use that hook, so defer its server autorun pass to the first
+		// dedicated RunFrame after this VM has been fully initialized.
+		s_R1OTfoPendingServerAutorunVm.store(
+			reinterpret_cast<R1SquirrelVM*>(vmPtr),
+			std::memory_order_release);
+	}
+
+	if (AreR1OFakeDediVerboseLogsEnabled()) {
+		char vmLog[256];
+		_snprintf_s(vmLog, sizeof(vmLog), _TRUNCATE, "R1Delta: R1O TFO squirrel VM created context=%u vm=%p natives registered\n", a3, vmPtr);
+		OutputDebugStringA(vmLog);
+	}
+	return vmPtr;
+}
+
+bool InstallR1OTFOSquirrelHooks(uintptr_t launcherBase)
+{
+	if (!launcherBase)
+		return false;
+
+	g_R1OTfoLauncherBase = launcherBase;
+	auto addRegTarget = reinterpret_cast<TfoAddSquirrelReg_t>(launcherBase + 0x22900);
+	g_R1OTfoAddSquirrelReg = addRegTarget;
+	AddSquirrelReg = &R1OTfoAddSquirrelRegWrapper;
+	sq_gettop = &R1OTfo_sq_gettop;
+	sq_getstackobj = &R1OTfo_sq_getstackobj;
+	sq_gettype = &R1OTfo_sq_gettype;
+	sq_getstring = &R1OTfo_sq_getstring;
+	sq_getinteger = &R1OTfo_sq_getinteger;
+	sq_getfloat = &R1OTfo_sq_getfloat;
+	sq_getbool = &R1OTfo_sq_getbool;
+	sq_getsize = &R1OTfo_sq_getsize;
+	sq_throwerror = reinterpret_cast<sq_throwerror_t>(launcherBase + 0x2E720);
+	sq_pushnull = &R1OTfo_sq_pushnull;
+	sq_pushstring = &R1OTfo_sq_pushstring;
+	sq_pushinteger = &R1OTfo_sq_pushinteger;
+	sq_pushbool = &R1OTfo_sq_pushbool;
+	sq_pushfloat = &R1OTfo_sq_pushfloat;
+	sq_settop = &R1OTfo_sq_settop;
+	base_getroottable = reinterpret_cast<base_getroottable_t>(launcherBase + 0x2CE00);
+	sq_get = reinterpret_cast<sq_get_t>(launcherBase + 0x2DCC0);
+	sq_get_noerr = reinterpret_cast<sq_get_noerr_t>(launcherBase + 0x2DEC0);
+	sq_call = reinterpret_cast<sq_call_t>(launcherBase + 0x2E7B0);
+	sq_pop = &R1OTfo_sq_pop;
+
+	const R1OTfoImmediateHookResult printHooks = { MH_OK, InstallR1OTfoPrintHooks(launcherBase) ? MH_OK : MH_UNKNOWN };
+	const R1OTfoImmediateHookResult createNewVMHook = InstallR1OTfoImmediateHook(
+		launcherBase + 0x1C2A0,
+		reinterpret_cast<void*>(&CScriptManager__CreateNewVM_R1OTFO),
+		reinterpret_cast<void**>(&g_R1OTfoCreateNewVMOriginal));
+	if (AreR1OFakeDediVerboseLogsEnabled()) {
+		char hookLog[512];
+		_snprintf_s(
+			hookLog,
+			sizeof(hookLog),
+			_TRUNCATE,
+			"R1Delta: R1O TFO squirrel hooks launcher=%p createTarget=%p createStatus=%d enable=%d addReg=%p printInstalled=%d installed=%d\n",
+			reinterpret_cast<void*>(launcherBase),
+			reinterpret_cast<void*>(launcherBase + 0x1C2A0),
+			createNewVMHook.create,
+			createNewVMHook.enable,
+			reinterpret_cast<void*>(g_R1OTfoAddSquirrelReg),
+			R1OTfoImmediateHookInstalled(printHooks),
+			R1OTfoImmediateHookInstalled(createNewVMHook) && R1OTfoImmediateHookInstalled(printHooks));
+		OutputDebugStringA(hookLog);
+	}
+	return R1OTfoImmediateHookInstalled(createNewVMHook) && R1OTfoImmediateHookInstalled(printHooks);
 }
 
 
@@ -1935,21 +2478,24 @@ CSquirrelVM__SetValueExType CSquirrelVM__SetValueExOriginal;
 typedef __int64 (*CSquirrelVM__TranslateCallType)(__int64* a1);
 CSquirrelVM__TranslateCallType CSquirrelVM__TranslateCallOriginal;
 bool IsPointerFromServerDll(void* pointer) {
-	// Get the base address of "server.dll"
+	// G_server is populated from whichever shared server binary was loaded:
+	// server.dll on R1 or server_local.dll (with server.dll fallback) on R1O.
 	HMODULE hModule = (HMODULE)G_server;
 	if (!hModule) {
-		std::cerr << "Failed to get handle of server.dll\n";
+		std::cerr << "Failed to get the loaded server module base\n";
 		return false;
 	}
 
-	// Convert the HMODULE to a pointer for comparison
 	uintptr_t baseAddress = reinterpret_cast<uintptr_t>(hModule);
 	uintptr_t ptrAddress = reinterpret_cast<uintptr_t>(pointer);
+	const auto dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(baseAddress);
+	if (dos->e_magic != IMAGE_DOS_SIGNATURE)
+		return false;
+	const auto nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(baseAddress + dos->e_lfanew);
+	if (nt->Signature != IMAGE_NT_SIGNATURE)
+		return false;
+	const uintptr_t moduleSize = nt->OptionalHeader.SizeOfImage;
 
-	// Size of "server.dll" is 0xFB5000
-	const uintptr_t moduleSize = 0xFB5000;
-
-	// Check if the pointer is within the range of "server.dll"
 	return ptrAddress >= baseAddress && ptrAddress < (baseAddress + moduleSize);
 }
 bool hasRegisteredServerFuncs = false;
@@ -2083,6 +2629,19 @@ static bool g_serverLineIncomplete = false;
 static bool g_clientLineIncomplete = false;
 static bool g_uiLineIncomplete = false;
 
+static void EmitSquirrelPrint(const char* prefix, bool& lineIncomplete, const char* string)
+{
+	if (!lineIncomplete) {
+		Msg("%s %s", prefix, string);
+	}
+	else {
+		Msg("%s", string);
+	}
+
+	const size_t len = strlen(string);
+	lineIncomplete = !(len > 0 && string[len - 1] == '\n');
+}
+
 void CSquirrelVM__PrintFunc1(void* m_hVM, const char* s, ...)
 {
 	char string[2048];
@@ -2090,20 +2649,9 @@ void CSquirrelVM__PrintFunc1(void* m_hVM, const char* s, ...)
 
 	va_start(params, s);
 	vsnprintf(string, 2048, s, params);
-
-	// Check if string ends with newline
-	size_t len = strlen(string);
-	bool endsWithNewline = (len > 0 && string[len - 1] == '\n');
-
-	if (!g_serverLineIncomplete) {
-		Msg("[SERVER SCRIPT] %s", string);
-	}
-	else {
-		Msg("%s", string);
-	}
-
-	g_serverLineIncomplete = !endsWithNewline;
+	EmitSquirrelPrint("[SERVER SCRIPT]", g_serverLineIncomplete, string);
 	va_end(params);
+	ScriptErrorTelemetry::CapturePrint(ScriptErrorTelemetry::VmContext::Server, string);
 }
 
 void CSquirrelVM__PrintFunc2(void* m_hVM, const char* s, ...)
@@ -2113,19 +2661,9 @@ void CSquirrelVM__PrintFunc2(void* m_hVM, const char* s, ...)
 
 	va_start(params, s);
 	vsnprintf(string, 2048, s, params);
-
-	size_t len = strlen(string);
-	bool endsWithNewline = (len > 0 && string[len - 1] == '\n');
-
-	if (!g_clientLineIncomplete) {
-		Msg("[CLIENT SCRIPT] %s", string);
-	}
-	else {
-		Msg("%s", string);
-	}
-
-	g_clientLineIncomplete = !endsWithNewline;
+	EmitSquirrelPrint("[CLIENT SCRIPT]", g_clientLineIncomplete, string);
 	va_end(params);
+	ScriptErrorTelemetry::CapturePrint(ScriptErrorTelemetry::VmContext::Client, string);
 }
 
 void CSquirrelVM__PrintFunc3(void* m_hVM, const char* s, ...)
@@ -2135,48 +2673,220 @@ void CSquirrelVM__PrintFunc3(void* m_hVM, const char* s, ...)
 
 	va_start(params, s);
 	vsnprintf(string, 2048, s, params);
-
-	size_t len = strlen(string);
-	bool endsWithNewline = (len > 0 && string[len - 1] == '\n');
-
-	if (!g_uiLineIncomplete) {
-		Msg("[UI SCRIPT] %s", string);
-	}
-	else {
-		Msg("%s", string);
-	}
-
-	g_uiLineIncomplete = !endsWithNewline;
+	EmitSquirrelPrint("[UI SCRIPT]", g_uiLineIncomplete, string);
 	va_end(params);
+	ScriptErrorTelemetry::CapturePrint(ScriptErrorTelemetry::VmContext::Ui, string);
 }
 using SQCompileBufferFn = SQRESULT(*)(HSQUIRRELVM, const SQChar*, SQInteger, const SQChar*, SQBool);
 using BaseGetRootTableFn = __int64(*)(HSQUIRRELVM);
 using SQCallFn = SQRESULT(*)(HSQUIRRELVM, SQInteger, SQBool, SQBool);
+using R1OTfoSQCompileBufferFn = SQRESULT(*)(HSQUIRRELVM, void*, BufState*, const SQChar*, SQBool);
+using R1OTfoSQPushRootTableFn = __int64(*)(HSQUIRRELVM);
+using R1OTfoSQCallFn = SQRESULT(*)(HSQUIRRELVM, SQInteger, SQBool, SQBool);
+
+static bool RunR1OTfoScriptCode(R1SquirrelVM* vm, const char* code, const char* sourceName)
+{
+	if (!IsR1ODedicatedServer() || !vm || !vm->sqvm || !code || !*code || !G_launcher)
+		return false;
+
+	auto tfo_compilebuffer = reinterpret_cast<R1OTfoSQCompileBufferFn>(G_launcher + 0x2BBE0);
+	auto tfo_pushroottable = reinterpret_cast<R1OTfoSQPushRootTableFn>(G_launcher + 0x2CE00);
+	auto tfo_call = reinterpret_cast<R1OTfoSQCallFn>(G_launcher + 0x2E7B0);
+	if (!tfo_compilebuffer || !tfo_pushroottable || !tfo_call)
+		return false;
+
+	const SQInteger oldTop = sq_gettop ? sq_gettop(vm, vm->sqvm) : -1;
+	BufState state{ code, 0, static_cast<SQInteger>(strlen(code)) };
+	const char* compileSource = sourceName && *sourceName ? sourceName : "console";
+	const SQRESULT compileResult =
+		tfo_compilebuffer(vm->sqvm, nullptr, &state, compileSource, SQTrue);
+	SQRESULT callResult = SQ_ERROR;
+	if (SQ_SUCCEEDED(compileResult)) {
+		tfo_pushroottable(vm->sqvm);
+		callResult = tfo_call(vm->sqvm, 1, SQFalse, SQTrue);
+	}
+	if (oldTop >= 0 && sq_settop)
+		sq_settop(vm->sqvm, oldTop);
+
+	if (AreR1OFakeDediVerboseLogsEnabled()) {
+		char buffer[768];
+		_snprintf_s(
+			buffer,
+			sizeof(buffer),
+			_TRUNCATE,
+			"R1Delta: R1O script source=%s compile=%d call=%d code=%s\n",
+			compileSource,
+			static_cast<int>(compileResult),
+			static_cast<int>(callResult),
+			code);
+		OutputDebugStringA(buffer);
+	}
+	if (SQ_FAILED(compileResult))
+		Warning("R1O script compile failed for %s.\n", compileSource);
+	else if (SQ_FAILED(callResult))
+		Warning("R1O script call failed for %s.\n", compileSource);
+
+	return SQ_SUCCEEDED(compileResult) && SQ_SUCCEEDED(callResult);
+}
+
+bool RunR1OServerAutorunScriptsIfPending()
+{
+	if (!IsR1ODedicatedServer())
+		return false;
+
+	R1SquirrelVM* pendingVm =
+		s_R1OTfoPendingServerAutorunVm.load(std::memory_order_acquire);
+	if (!pendingVm || pendingVm != GetServerVMPtr())
+		return false;
+	if (!pendingVm->sqvm || !GetR1ONativeFileSystem())
+		return false;
+
+	RunAutorunScripts(pendingVm, "sv_*");
+	s_R1OTfoPendingServerAutorunVm.compare_exchange_strong(
+		pendingVm,
+		nullptr,
+		std::memory_order_acq_rel);
+	if (AreR1OFakeDediVerboseLogsEnabled())
+		OutputDebugStringA("R1Delta: completed R1O server autorun pass\n");
+	return true;
+}
+
+static bool CopyCommandCStringForR1O(const char* source, std::string& out, size_t maxLen = CCommand::COMMAND_MAX_LENGTH)
+{
+	if (!source)
+		return false;
+
+	out.clear();
+	for (size_t i = 0; i < maxLen; ++i) {
+		const char ch = source[i];
+		if (!ch)
+			return true;
+		out.push_back(ch);
+	}
+
+	return true;
+}
+
+static std::string GetScriptCodeFromCommand(const CCommand& args)
+{
+	if (!IsR1ODedicatedServer())
+		return args.ArgS();
+
+	std::string fullCommand;
+	std::string commandName;
+	CopyCommandCStringForR1O(args.GetCommandString(), fullCommand);
+	CopyCommandCStringForR1O(args.Arg(0), commandName, 128);
+
+	if (!fullCommand.empty() && !commandName.empty() && fullCommand.rfind(commandName, 0) == 0) {
+		size_t pos = commandName.length();
+		while (pos < fullCommand.length() && isspace(static_cast<unsigned char>(fullCommand[pos])))
+			++pos;
+		if (pos < fullCommand.length())
+			return fullCommand.substr(pos);
+	}
+
+	std::string code;
+	const int64_t argc = args.ArgC();
+	if (argc > 1 && argc <= CCommand::COMMAND_MAX_ARGC) {
+		for (int64_t i = 1; i < argc; ++i) {
+			std::string arg;
+			if (!CopyCommandCStringForR1O(args.Arg(static_cast<int>(i)), arg))
+				continue;
+			if (!code.empty())
+				code.push_back(' ');
+			code += arg;
+		}
+	}
+
+	if (!code.empty())
+		return code;
+
+	std::string argS;
+	CopyCommandCStringForR1O(args.ArgS(), argS);
+	return argS;
+}
 
 void run_script(const CCommand& args, R1SquirrelVM* (*GetVMPtr)())
 {
 	static auto fatal_script_errors = OriginalCCVar_FindVar(cvarinterface, "fatal_script_errors");
-	auto bak = fatal_script_errors->m_pParent->m_Value.m_nValue;
 	auto launcher = G_launcher;
-	SQCompileBufferFn sq_compilebuffer = reinterpret_cast<SQCompileBufferFn>(launcher + (IsDedicatedServer() ? 0x1A6C0 : 0x1A5E0));
-	BaseGetRootTableFn base_getroottable = reinterpret_cast<BaseGetRootTableFn>(launcher + (IsDedicatedServer() ? 0x56520 : 0x56440));
-	SQCallFn sq_call = reinterpret_cast<SQCallFn>(launcher + (IsDedicatedServer() ? 0x18D20 : 0x18C40));
 
-	std::string code = args.ArgS();
+	std::string code = GetScriptCodeFromCommand(args);
 	R1SquirrelVM* vm = GetVMPtr();
 	if (!vm) {
 		Warning("Can't run script code on a VM when that VM is not present.");
 		return;
 	}
-	fatal_script_errors->m_pParent->m_Value.m_nValue = 0;
+
+	auto fatalParent = fatal_script_errors ? fatal_script_errors->m_pParent : nullptr;
+	int bak = 0;
+	if (fatalParent)
+	{
+		bak = fatalParent->m_Value.m_nValue;
+		fatalParent->m_Value.m_nValue = 0;
+	}
+
+	ConVarR1O* fatalR1OParent = nullptr;
+	int r1oBak = 0;
+	if (IsR1ODedicatedServer())
+	{
+		ConVarR1O* fatalR1O = CCVar_FindVar(cvarinterface, "fatal_script_errors");
+		fatalR1OParent = fatalR1O && fatalR1O->m_pParent ? fatalR1O->m_pParent : fatalR1O;
+		if (fatalR1OParent)
+		{
+			r1oBak = fatalR1OParent->m_Value.m_nValue;
+			fatalR1OParent->m_Value.m_nValue = 0;
+		}
+	}
+
+	const auto restoreFatalScriptPolicy = [&]()
+	{
+		if (fatalParent)
+			fatalParent->m_Value.m_nValue = bak;
+		if (fatalR1OParent)
+			fatalR1OParent->m_Value.m_nValue = r1oBak;
+	};
+
+	if (IsR1ODedicatedServer())
+	{
+		if (!launcher || !vm->sqvm)
+		{
+			Warning("Can't run R1O script code without launcher and SQVM pointers.\n");
+			restoreFatalScriptPolicy();
+			return;
+		}
+
+		if (AreR1OFakeDediVerboseLogsEnabled()) {
+			char buffer[768];
+			_snprintf_s(
+				buffer,
+				sizeof(buffer),
+				_TRUNCATE,
+				"R1Delta: R1O script run enter vm=%p sqvm=%p oldTop=%lld code=%s\n",
+				vm,
+				vm->sqvm,
+				static_cast<long long>(sq_gettop ? sq_gettop(vm, vm->sqvm) : -1),
+				code.c_str());
+			OutputDebugStringA(buffer);
+		}
+		RunR1OTfoScriptCode(vm, code.c_str(), "console");
+		restoreFatalScriptPolicy();
+		return;
+	}
+
+	SQCompileBufferFn sq_compilebuffer = reinterpret_cast<SQCompileBufferFn>(launcher + (IsDedicatedServer() ? 0x1A6C0 : 0x1A5E0));
+	BaseGetRootTableFn base_getroottable = reinterpret_cast<BaseGetRootTableFn>(launcher + (IsDedicatedServer() ? 0x56520 : 0x56440));
+	SQCallFn sq_call = reinterpret_cast<SQCallFn>(launcher + (IsDedicatedServer() ? 0x18D20 : 0x18C40));
 
 	SQRESULT compileRes = sq_compilebuffer(vm->sqvm, code.c_str(), static_cast<SQInteger>(code.length()), "console", 1);
 	if (SQ_SUCCEEDED(compileRes))
 	{
 		base_getroottable(vm->sqvm);
 		SQRESULT callRes = sq_call(vm->sqvm, 1, SQFalse, SQTrue);
+		if (SQ_FAILED(callRes))
+			Warning("Script call failed for: %s\n", code.c_str());
 	}
-	fatal_script_errors->m_pParent->m_Value.m_nValue = bak;
+	restoreFatalScriptPolicy();
 }
 
 void script_cmd(const CCommand& args)

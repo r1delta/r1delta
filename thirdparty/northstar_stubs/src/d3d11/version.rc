@@ -1,0 +1,32 @@
+#include <windows.h>
+
+// forked from dxvk @ ecd7b67069a6e2a4b78a8a929fd287030d283ccb (2021-12-17)
+
+VS_VERSION_INFO    VERSIONINFO
+FILEVERSION        0,0,0,0
+PRODUCTVERSION     0,0,0,0
+FILEFLAGSMASK      VS_FFI_FILEFLAGSMASK
+FILEFLAGS          0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_DLL
+FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "080904b0"
+    BEGIN
+      VALUE "CompanyName",      "pg9182 (github.com/pg9182)"
+      VALUE "FileDescription",  "Direct3D 11 stub for Northstar"
+      VALUE "FileVersion",      "0.0.0.0"
+      VALUE "InternalName",     "D3D11.dll"
+      VALUE "LegalCopyright",   "zlib/libpng license"
+      VALUE "OriginalFilename", "D3D11.dll"
+      VALUE "ProductName",      "NorthstarStubs"
+      VALUE "ProductVersion",   "0.0.0.0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 1033, 1200
+  END
+END

@@ -92,16 +92,59 @@
 extern uint64_t g_PerformanceFrequency;
 
 extern int G_is_dedi;
+extern int G_is_r1o_dedi;
+extern uintptr_t G_engine;
+extern uintptr_t G_engine_ds;
+extern uintptr_t G_engine_r1o;
 
 #define IsDedicatedServer() (G_is_dedi)
+#define IsR1ODedicatedServer() (G_is_r1o_dedi)
+
+enum class R1DeltaEngineMode
+{
+    Client2015,
+    Dedicated2014,
+    R1OFakeDedicated2017,
+};
+
+__forceinline R1DeltaEngineMode GetR1DeltaEngineMode()
+{
+    if (IsR1ODedicatedServer())
+        return R1DeltaEngineMode::R1OFakeDedicated2017;
+    return IsDedicatedServer() ? R1DeltaEngineMode::Dedicated2014 : R1DeltaEngineMode::Client2015;
+}
+
+__forceinline bool UsesLegacyDedicatedEngine()
+{
+    return GetR1DeltaEngineMode() == R1DeltaEngineMode::Dedicated2014;
+}
+
+__forceinline uintptr_t MainEngineBase()
+{
+    switch (GetR1DeltaEngineMode())
+    {
+    case R1DeltaEngineMode::R1OFakeDedicated2017:
+        return G_engine_r1o;
+    case R1DeltaEngineMode::Dedicated2014:
+        return G_engine_ds;
+    case R1DeltaEngineMode::Client2015:
+    default:
+        return G_engine;
+    }
+}
 
 // Helper to check engine command line flags (uses tier0's Plat_GetCommandLineA instead of GetCommandLineW)
 // This ensures we check the command line as the engine sees it, after modifications by CCommandLine__CreateCmdLine hook
 __forceinline bool HasEngineCommandLineFlag(const char* flag) {
-    static auto Plat_GetCommandLineA = (const char* (*)())GetProcAddress(
-        GetModuleHandleA("tier0_orig.dll"),
-        "Plat_GetCommandLineA"
-    );
+    typedef const char* (*PlatGetCommandLineAFn)();
+    static PlatGetCommandLineAFn Plat_GetCommandLineA = nullptr;
+
+    if (!Plat_GetCommandLineA) {
+        Plat_GetCommandLineA = (PlatGetCommandLineAFn)GetProcAddress(
+            GetModuleHandleA("tier0_orig.dll"),
+            "Plat_GetCommandLineA"
+        );
+    }
 
     if (!Plat_GetCommandLineA) return false;
 
@@ -117,8 +160,7 @@ __forceinline bool IsNoConsole() {
     return !HasEngineCommandLineFlag("-allocconsole");
 }
 
-#define ENGINE_DLL_BASE (G_is_dedi ? G_engine_ds : G_engine)
-#define ENGINE_DLL_BASE_(dedi) ((dedi) ? G_engine_ds : G_engine)
+#define ENGINE_DLL_BASE (MainEngineBase())
 
 struct HashStrings
 {

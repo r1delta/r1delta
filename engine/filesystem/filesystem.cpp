@@ -240,9 +240,14 @@ int64_t __fastcall HookedHandleOpenRegularFile(int64_t a1, int64_t a2, char a3) 
 
 FileSystem_UpdateAddonSearchPathsType FileSystem_UpdateAddonSearchPathsTypeOriginal;
 bool done = false;
-__int64 __fastcall FileSystem_UpdateAddonSearchPaths(void* a1) {
-    FileCache::GetInstance().RequestManualRescan();
+void InvalidateAddonSearchCaches()
+{
+	FileCache::GetInstance().RequestManualRescan();
 	FastFileSystemHook::resetNonexistentCache();
+}
+
+__int64 __fastcall FileSystem_UpdateAddonSearchPaths(void* a1) {
+	InvalidateAddonSearchCaches();
     auto ret = FileSystem_UpdateAddonSearchPathsTypeOriginal(a1);
 
 	PDef::InitValidator();
@@ -320,6 +325,112 @@ int fs_sprintf_hook(char* Buffer, const char* Format, ...) {
 
 typedef __int64 (*AddVPKFileType)(IFileSystem* fileSystem, char* a2, char** a3, char a4, int a5, char a6);
 AddVPKFileType AddVPKFileOriginal;
+CPackFileParseDirectoryType CPackFileParseDirectoryOriginal;
+
+namespace {
+
+constexpr size_t kCPackFilePathCapacity = 0x104;
+constexpr size_t kCPackFileDirectoryBufferOffset = 0x300;
+constexpr size_t kCPackFileDirectorySizeOffset = 0x318;
+constexpr uintptr_t kClientCPackFileParseDirectoryRva = 0x6D450;
+bool s_VPKDirectoryLoadFlagRepairInstalled;
+
+}
+
+void __fastcall CPackFileParseDirectory(void* packFile)
+{
+	if (packFile) {
+		auto* const bytes = static_cast<uint8_t*>(packFile);
+		const char* const path = reinterpret_cast<const char*>(bytes);
+		const void* const pathEnd = memchr(path, 0, kCPackFilePathCapacity);
+
+		if (pathEnd) {
+			const size_t pathLength =
+				static_cast<const char*>(pathEnd) - path;
+			if (IsBrokenR1MapVPKDirectoryPath(path, pathLength)) {
+				uint8_t* tree = nullptr;
+				size_t treeSize = 0;
+				memcpy(
+					&tree,
+					bytes + kCPackFileDirectoryBufferOffset,
+					sizeof(tree));
+				memcpy(
+					&treeSize,
+					bytes + kCPackFileDirectorySizeOffset,
+					sizeof(treeSize));
+
+				const VPKDirectoryLoadFlagRepairResult repair =
+					RepairBrokenR1MapVPKDirectoryLoadFlags(tree, treeSize);
+				char message[512];
+				if (repair.valid) {
+					_snprintf_s(
+						message,
+						sizeof(message),
+						_TRUNCATE,
+						"R1Delta: normalized VPK directory load flags archive=%s entries=%zu chunks=%zu repairedEntries=%zu repairedChunks=%zu\n",
+						path,
+						repair.entryCount,
+						repair.chunkCount,
+						repair.repairedEntryCount,
+						repair.repairedChunkCount);
+				}
+				else {
+					_snprintf_s(
+						message,
+						sizeof(message),
+						_TRUNCATE,
+						"R1Delta: refused malformed VPK directory load-flag repair archive=%s treeSize=%zu\n",
+						path,
+						treeSize);
+				}
+				OutputDebugStringA(message);
+			}
+		}
+	}
+
+	CPackFileParseDirectoryOriginal(packFile);
+}
+
+bool InstallVPKDirectoryLoadFlagRepair(uintptr_t filesystemBase)
+{
+	if (s_VPKDirectoryLoadFlagRepairInstalled)
+		return true;
+	if (!filesystemBase || IsDedicatedServer())
+		return false;
+
+	void* const target = reinterpret_cast<void*>(
+		filesystemBase + kClientCPackFileParseDirectoryRva);
+	const unsigned char expectedPrologue[] = {
+		0x48, 0x8B, 0xC4,
+		0x55,
+		0x57,
+		0x48, 0x81, 0xEC, 0x78, 0x01, 0x00, 0x00,
+		0x48, 0x89, 0x58, 0x08,
+		0x4C, 0x89, 0x70, 0xE8
+	};
+	if (memcmp(target, expectedPrologue, sizeof(expectedPrologue)) != 0) {
+		Warning(
+			"R1Delta: VPK directory load-flag repair skipped; unexpected filesystem parser at %p\n",
+			target);
+		return false;
+	}
+
+	const MH_STATUS createStatus = MH_CreateHook(
+		target,
+		&CPackFileParseDirectory,
+		reinterpret_cast<LPVOID*>(&CPackFileParseDirectoryOriginal));
+	if (createStatus != MH_OK && createStatus != MH_ERROR_ALREADY_CREATED) {
+		Warning(
+			"R1Delta: VPK directory load-flag repair hook creation failed status=%d\n",
+			static_cast<int>(createStatus));
+		return false;
+	}
+
+	s_VPKDirectoryLoadFlagRepairInstalled = true;
+	OutputDebugStringA(
+		"R1Delta: VPK directory load-flag repair hook installed\n");
+	return true;
+}
 
 __int64 __fastcall AddVPKFile(IFileSystem* fileSystem, char* vpkPath, char** a3, char a4, int a5, char a6)
 {

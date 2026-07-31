@@ -16,6 +16,7 @@
 #include <nlohmann/json.hpp>
 #include "load.h"
 #include "cvar.h"
+#include "factory.h"
 #include "logging.h"
 #include "masterserver.h"
 #include "r1d_version.h"
@@ -66,7 +67,6 @@ struct HeartbeatInfo {
 // CVar Declarations
 // --------------------------------
 static ConVarR1O* delta_ms_url = nullptr;
-static ConVarR1O* hostport = nullptr;
 static ConVarR1O* host_map = nullptr;
 static ConVarR1O* hide_server = nullptr;
 static ConVarR1O* server_description = nullptr;
@@ -76,15 +76,46 @@ static ConVarR1O* server_description = nullptr;
 // --------------------------------
 void InitMasterServerCVars() {
     static bool initialized = false;
-    if (!initialized) {
+    if (!initialized || !delta_ms_url || !host_map || !hide_server || !server_description) {
         delta_ms_url = CCVar_FindVar(cvarinterface, "delta_ms_url");
-        hostport = CCVar_FindVar(cvarinterface, "hostport");
         host_map = CCVar_FindVar(cvarinterface, "host_map");
         hide_server = CCVar_FindVar(cvarinterface, "hide_server");
 		server_description = CCVar_FindVar(cvarinterface, "server_description");
         
         initialized = true;
     }
+}
+
+static bool IsMasterServerPortValid(int port)
+{
+    return port >= 1025 && port <= 0xFFFF;
+}
+
+static int ResolveMasterServerPort()
+{
+    if (IsR1ODedicatedServer()) {
+        const int boundPort = GetR1ODedicatedBoundServerPort();
+        if (IsMasterServerPortValid(boundPort))
+            return boundPort;
+    }
+
+    if (cvarinterface && OriginalCCVar_FindVar) {
+        if (ConVarR1* backingHostPort =
+                OriginalCCVar_FindVar(cvarinterface, "hostport")) {
+            const int port = backingHostPort->m_Value.m_nValue;
+            if (IsMasterServerPortValid(port))
+                return port;
+        }
+    }
+
+    if (ConVarR1O* wrappedHostPort =
+            CCVar_FindVar(cvarinterface, "hostport")) {
+        const int port = wrappedHostPort->m_Value.m_nValue;
+        if (IsMasterServerPortValid(port))
+            return port;
+    }
+
+    return 0;
 }
 
 namespace MasterServerClient {
@@ -116,17 +147,24 @@ namespace MasterServerClient {
     // --------------------------------
     bool SendServerHeartbeat(const HeartbeatInfo& heartbeat, bool isHibernating = false) {
         InitMasterServerCVars();
-        if (!delta_ms_url || !delta_ms_url->m_Value.m_pszString[0]) {
+        if (!delta_ms_url || !delta_ms_url->m_Value.m_pszString || !delta_ms_url->m_Value.m_pszString[0]) {
             Warning("MasterServerClient: delta_ms_url not set\n");
             return false;
         }
-        if (hide_server->m_Value.m_nValue == 1) {
+        if (hide_server && hide_server->m_Value.m_nValue == 1) {
             static bool hasWarned = false;
             if (!hasWarned) {
                 hasWarned = true;
                 Warning("hide_server is 1, ignoring master server heartbeat requests\n");
             }
             return true;
+        }
+
+        const int port = ResolveMasterServerPort();
+        if (!IsMasterServerPortValid(port)) {
+            Warning(
+                "MasterServerClient: Heartbeat skipped - no valid bound server port\n");
+            return false;
         }
 
         SRWGuard lock(&httpMutex);
@@ -137,12 +175,12 @@ namespace MasterServerClient {
         j["map_name"] = heartbeat.mapName;
         j["game_mode"] = heartbeat.gameMode;
         j["max_players"] = heartbeat.maxPlayers;
-        j["port"] = heartbeat.port;
+        j["port"] = port;
         auto auth_Var = CCVar_FindVar(cvarinterface, "delta_online_auth_enable");
-		j["has_auth"] = auth_Var->m_Value.m_nValue != 0;
+		j["has_auth"] = auth_Var && auth_Var->m_Value.m_nValue != 0;
         j["version"] = R1D_VERSION;
         auto password_var = CCVar_FindVar(cvarinterface, "sv_password");
-        if (password_var && password_var->m_Value.m_pszString[0]) {
+        if (password_var && password_var->m_Value.m_pszString && password_var->m_Value.m_pszString[0]) {
             j["has_password"] = true;
         }
         else {
@@ -161,6 +199,17 @@ namespace MasterServerClient {
                 pj["team"] = p.team;
                 j["players"].push_back(pj);
             }
+        }
+
+        if (IsR1ODedicatedServer() && AreR1OFakeDediVerboseLogsEnabled()) {
+            char diagnostic[192];
+            _snprintf_s(
+                diagnostic,
+                sizeof(diagnostic),
+                _TRUNCATE,
+                "R1Delta: R1O heartbeat using bound port %d\n",
+                port);
+            OutputDebugStringA(diagnostic);
         }
 
         auto res = httpClient->Post("/heartbeat", j.dump(), "application/json");
@@ -289,10 +338,13 @@ namespace MasterServerClient {
     // --------------------------------
     // On Shutdown
     // --------------------------------
-    void OnServerShutdown(int port) {
+    void OnServerShutdown() {
         StopHeartbeatThread();
         InitMasterServerCVars();
         if (!delta_ms_url) return;
+        const int port = ResolveMasterServerPort();
+        if (!IsMasterServerPortValid(port))
+            return;
         EnsureHttpClient(delta_ms_url->m_Value.m_pszString);
         std::string path = "/heartbeat/" + std::to_string(port);
         auto res = httpClient->Delete(path.c_str());
@@ -304,6 +356,237 @@ namespace MasterServerClient {
 // --------------------------------
 // Squirrel Interface
 // --------------------------------
+static bool MasterServerReadableProtect(DWORD protect)
+{
+    if (protect & (PAGE_GUARD | PAGE_NOACCESS))
+        return false;
+
+    protect &= 0xff;
+    return protect == PAGE_READONLY
+        || protect == PAGE_READWRITE
+        || protect == PAGE_WRITECOPY
+        || protect == PAGE_EXECUTE_READ
+        || protect == PAGE_EXECUTE_READWRITE
+        || protect == PAGE_EXECUTE_WRITECOPY;
+}
+
+static bool MasterServerReadableRange(const void* ptr, size_t size)
+{
+    if (!ptr || !size)
+        return false;
+
+    uintptr_t current = reinterpret_cast<uintptr_t>(ptr);
+    const uintptr_t end = current + size;
+    if (end < current)
+        return false;
+
+    while (current < end) {
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (!VirtualQuery(reinterpret_cast<const void*>(current), &mbi, sizeof(mbi)))
+            return false;
+        if (mbi.State != MEM_COMMIT || !MasterServerReadableProtect(mbi.Protect))
+            return false;
+
+        const uintptr_t regionEnd = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+        if (regionEnd <= current)
+            return false;
+        current = regionEnd < end ? regionEnd : end;
+    }
+
+    return true;
+}
+
+static std::string MasterServerReadSQString(const SQString* str)
+{
+    if (!str || !MasterServerReadableRange(str, 0x3A))
+        return {};
+
+    const unsigned char* base = reinterpret_cast<const unsigned char*>(str);
+    const int length = *reinterpret_cast<const int*>(base + 0x28);
+    const char* value = reinterpret_cast<const char*>(base + 0x38);
+
+    if (length >= 0 && length <= 8192 && MasterServerReadableRange(value, static_cast<size_t>(length) + 1))
+        return std::string(value, static_cast<size_t>(length));
+
+    std::string fallback;
+    fallback.reserve(64);
+    for (int i = 0; i < 8192; ++i) {
+        if (!MasterServerReadableRange(value + i, 1) || value[i] == '\0')
+            break;
+        fallback.push_back(value[i]);
+    }
+    return fallback;
+}
+
+static std::string MasterServerReadSQStringObject(const SQObject& obj)
+{
+    if (obj._type != OT_STRING)
+        return {};
+    return MasterServerReadSQString(obj._unVal.pString);
+}
+
+static bool MasterServerParsePlayerTable(const SQObject& obj, PlayerInfo& player)
+{
+    if (obj._type != OT_TABLE || !obj._unVal.pTable || !MasterServerReadableRange(obj._unVal.pTable, sizeof(SQTable)))
+        return false;
+
+    SQTable* table = obj._unVal.pTable;
+    const int nodeCount = table->_numOfNodes;
+    if (nodeCount <= 0 || nodeCount > 256 || !table->_nodes || !MasterServerReadableRange(table->_nodes, sizeof(SQTable::_HashNode) * static_cast<size_t>(nodeCount)))
+        return false;
+
+    bool parsedAny = false;
+    for (int i = 0; i < nodeCount; ++i) {
+        const auto& node = table->_nodes[i];
+        if (node.key._type != OT_STRING)
+            continue;
+
+        std::string key = MasterServerReadSQStringObject(node.key);
+        if (key.empty())
+            continue;
+
+        if (node.val._type == OT_STRING) {
+            std::string value = MasterServerReadSQStringObject(node.val);
+            if (key == "name") {
+                player.name = std::move(value);
+                parsedAny = true;
+            }
+        }
+        else if (node.val._type == OT_INTEGER) {
+            if (key == "gen") {
+                player.gen = static_cast<int>(node.val._unVal.nInteger);
+                parsedAny = true;
+            }
+            else if (key == "lvl") {
+                player.lvl = static_cast<int>(node.val._unVal.nInteger);
+                parsedAny = true;
+            }
+            else if (key == "team") {
+                player.team = static_cast<int>(node.val._unVal.nInteger);
+                parsedAny = true;
+            }
+        }
+    }
+
+    return parsedAny;
+}
+
+static bool MasterServerParsePlayersArray(const SQObject& obj, std::vector<PlayerInfo>& players)
+{
+    if (obj._type != OT_ARRAY || !obj._unVal.pArray || !MasterServerReadableRange(obj._unVal.pArray, sizeof(SQArray)))
+        return false;
+
+    SQArray* arr = obj._unVal.pArray;
+    const int usedSlots = arr->_usedSlots;
+    if (usedSlots < 0 || usedSlots > 128 || (usedSlots > 0 && (!arr->_values || !MasterServerReadableRange(arr->_values, sizeof(SQObject) * static_cast<size_t>(usedSlots)))))
+        return false;
+
+    players.clear();
+    for (int i = 0; i < usedSlots; ++i) {
+        PlayerInfo player{};
+        if (MasterServerParsePlayerTable(arr->_values[i], player))
+            players.push_back(std::move(player));
+    }
+    return true;
+}
+
+static bool MasterServerParseHeartbeatTable(const SQObject& obj, HeartbeatInfo& heartbeat)
+{
+    if (obj._type != OT_TABLE || !obj._unVal.pTable || !MasterServerReadableRange(obj._unVal.pTable, sizeof(SQTable)))
+        return false;
+
+    SQTable* table = obj._unVal.pTable;
+    const int nodeCount = table->_numOfNodes;
+    if (nodeCount <= 0 || nodeCount > 512 || !table->_nodes || !MasterServerReadableRange(table->_nodes, sizeof(SQTable::_HashNode) * static_cast<size_t>(nodeCount)))
+        return false;
+
+    bool parsedAny = false;
+    std::vector<PlayerInfo> players;
+    for (int i = 0; i < nodeCount; ++i) {
+        const auto& node = table->_nodes[i];
+        if (node.key._type != OT_STRING)
+            continue;
+
+        std::string key = MasterServerReadSQStringObject(node.key);
+        if (key.empty())
+            continue;
+
+        if (node.val._type == OT_STRING) {
+            std::string value = MasterServerReadSQStringObject(node.val);
+            if (key == "host_name") {
+                heartbeat.hostName = std::move(value);
+                parsedAny = true;
+            }
+            else if (key == "map_name") {
+                heartbeat.mapName = std::move(value);
+                parsedAny = true;
+            }
+            else if (key == "game_mode") {
+                heartbeat.gameMode = std::move(value);
+                parsedAny = true;
+            }
+            else if (key == "playlist") {
+                heartbeat.playlist = std::move(value);
+                parsedAny = true;
+            }
+            else if (key == "playlist_display_name") {
+                heartbeat.playlist_display_name = std::move(value);
+                parsedAny = true;
+            }
+        }
+        else if (node.val._type == OT_INTEGER) {
+            if (key == "max_players") {
+                heartbeat.maxPlayers = static_cast<int>(node.val._unVal.nInteger);
+                parsedAny = true;
+            }
+            else if (key == "has_auth") {
+                heartbeat.has_auth = node.val._unVal.nInteger != 0;
+                parsedAny = true;
+            }
+        }
+        else if (node.val._type == OT_ARRAY && key == "players") {
+            if (MasterServerParsePlayersArray(node.val, players)) {
+                heartbeat.players = std::move(players);
+                parsedAny = true;
+            }
+        }
+    }
+
+    return parsedAny;
+}
+
+static const char* MasterServerCVarString(const char* name, const char* fallback = "")
+{
+    if (!cvarinterface || !name)
+        return fallback;
+    ConVarR1O* var = CCVar_FindVar(cvarinterface, name);
+    if (!var || !var->m_Value.m_pszString)
+        return fallback;
+    return var->m_Value.m_pszString;
+}
+
+static int MasterServerCVarInt(const char* name, int fallback = 0)
+{
+    if (!cvarinterface || !name)
+        return fallback;
+    ConVarR1O* var = CCVar_FindVar(cvarinterface, name);
+    return var ? var->m_Value.m_nValue : fallback;
+}
+
+static void MasterServerFillHeartbeatFallbacks(HeartbeatInfo& heartbeat)
+{
+    if (heartbeat.hostName.empty())
+        heartbeat.hostName = MasterServerCVarString("hostname");
+    if (heartbeat.mapName.empty())
+        heartbeat.mapName = host_map && host_map->m_Value.m_pszString ? host_map->m_Value.m_pszString : "";
+    if (heartbeat.gameMode.empty())
+        heartbeat.gameMode = MasterServerCVarString("mp_gamemode");
+    if (heartbeat.playlist.empty())
+        heartbeat.playlist = MasterServerCVarString("playlist");
+    if (heartbeat.maxPlayers <= 0)
+        heartbeat.maxPlayers = MasterServerCVarInt("maxplayers");
+}
+
 SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
     InitMasterServerCVars();
     SQObject obj;
@@ -321,70 +604,16 @@ SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
         return 1;
     }
 
-    HeartbeatInfo heartbeat;
-    heartbeat.port = hostport->m_Value.m_nValue;
-	heartbeat.description = server_description->m_Value.m_pszString;
-    std::vector<PlayerInfo> players;
-
-    auto table = obj._unVal.pTable;
-    if (!table) {
-        Warning("GetServerHeartbeat: Table is null\n");
-        return 1;
+    HeartbeatInfo heartbeat{};
+    heartbeat.port = ResolveMasterServerPort();
+	heartbeat.description = server_description && server_description->m_Value.m_pszString ? server_description->m_Value.m_pszString : "";
+    const bool parsed = MasterServerParseHeartbeatTable(obj, heartbeat);
+    if (!parsed && IsR1ODedicatedServer()) {
+        static std::atomic<unsigned int> r1oHeartbeatFallbacks{0};
+        if (r1oHeartbeatFallbacks.fetch_add(1, std::memory_order_relaxed) == 0)
+            Warning("GetServerHeartbeat: R1O heartbeat table parse failed; using shared cvar fallbacks\n");
     }
-
-    for (int i = 0; i < table->_numOfNodes; i++) {
-        auto& node = table->_nodes[i];
-        if (node.key._type != OT_STRING) continue;
-        auto key = node.key._unVal.pString->_val;
-
-        switch (node.val._type) {
-        case OT_STRING: {
-            auto s = reinterpret_cast<SQString*>(node.val._unVal.pRefCounted);
-            if (!strcmp_static(key, "host_name")) heartbeat.hostName = s->_val;
-            if (!strcmp_static(key, "map_name")) heartbeat.mapName = s->_val;
-            if (!strcmp_static(key, "game_mode")) heartbeat.gameMode = s->_val;
-			if (!strcmp_static(key, "playlist")) heartbeat.playlist = s->_val;
-			if (!strcmp_static(key, "playlist_display_name")) heartbeat.playlist_display_name = s->_val;
-            if (!strcmp_static(key, "is_auth")) heartbeat.playlist = s->_val;
-            break;
-        }
-        case OT_INTEGER:
-            if (!strcmp_static(key, "max_players")) heartbeat.maxPlayers = node.val._unVal.nInteger;
-			if (!strcmp_static(key, "has_auth")) heartbeat.has_auth = node.val._unVal.nInteger;
-            break;
-        case OT_ARRAY:
-            if (!strcmp_static(key, "players")) {
-                auto arr = node.val._unVal.pArray;
-                if (arr) {
-                    for (int j = 0; j < arr->_usedSlots; j++) {
-                        if (arr->_values[j]._type != OT_TABLE) continue;
-                        auto ptable = arr->_values[j]._unVal.pTable;
-                        if (!ptable) continue;
-                        PlayerInfo pi;
-                        for (int k = 0; k < ptable->_numOfNodes; k++) {
-                            auto& pnode = ptable->_nodes[k];
-                            if (pnode.key._type != OT_STRING) continue;
-                            auto pkey = pnode.key._unVal.pString->_val;
-
-                            if (pnode.val._type == OT_STRING) {
-                                auto s2 = reinterpret_cast<SQString*>(pnode.val._unVal.pRefCounted);
-                                if (!strcmp_static(pkey, "name")) pi.name = s2->_val;
-                            }
-                            else if (pnode.val._type == OT_INTEGER) {
-                                if (!strcmp_static(pkey, "gen")) pi.gen = pnode.val._unVal.nInteger;
-                                if (!strcmp_static(pkey, "lvl")) pi.lvl = pnode.val._unVal.nInteger;
-                                if (!strcmp_static(pkey, "team")) pi.team = pnode.val._unVal.nInteger;
-                            }
-                        }
-                        players.push_back(pi);
-                    }
-                }
-            }
-            break;
-        }
-    }
-
-    heartbeat.players = std::move(players);
+    MasterServerFillHeartbeatFallbacks(heartbeat);
 
     // Update the last heartbeat time and data
     {
@@ -491,8 +720,9 @@ pCHostState__State_GameShutdown_t oGameShutDown;
 
 void Hk_CHostState__State_GameShutdown(void* thisptr) {
     InitMasterServerCVars();
-    if (strlen(host_map->m_Value.m_pszString) > 2) {
-        MasterServerClient::OnServerShutdown(hostport->m_Value.m_nValue);
+    if (host_map && host_map->m_Value.m_pszString &&
+        strlen(host_map->m_Value.m_pszString) > 2) {
+        MasterServerClient::OnServerShutdown();
         host_map->m_Value.m_StringLength = 0;
         host_map->m_Value.m_pszString[0] = '\0';
     }

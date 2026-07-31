@@ -56,6 +56,12 @@
 #include "load.h"
 #include "localize.h"
 #include "mcp_server.h"
+#include "r1d_version.h"
+#include "server_usercmd.h"
+
+void AddBotDummyConCommand(const CCommand& args);
+void script_cmd(const CCommand& args);
+
 void      (*OriginalCCVar_RegisterConCommand)(uintptr_t thisptr, ConCommandBaseR1* pCommandBase);
 void      (*OriginalCCVar_UnregisterConCommand)(uintptr_t thisptr, ConCommandBaseR1* pCommandBase);
 ConCommandBaseR1* (*OriginalCCVar_FindCommandBase)(uintptr_t thisptr, const char* name);
@@ -70,8 +76,124 @@ void      (*OriginalCCVar_CallGlobalChangeCallbacks)(uintptr_t thisptr, ConVarR1
 void      (*OriginalCCVar_QueueMaterialThreadSetValue1)(uintptr_t thisptr, ConVarR1* pConVar, const char* pValue);
 void      (*OriginalCCVar_QueueMaterialThreadSetValue2)(uintptr_t thisptr, ConVarR1* pConVar, int nValue);
 void      (*OriginalCCVar_QueueMaterialThreadSetValue3)(uintptr_t thisptr, ConVarR1* pConVar, float flValue);
+int       (*OriginalCCvar__ProcessQueuedMaterialThreadConVarSets)(uintptr_t thisptr);
+void*     (*OriginalCCvar__FactoryInternalIterator)(uintptr_t thisptr);
 uintptr_t cvarinterface;
 std::unordered_map<std::string, WVar*, HashStrings, std::equal_to<>> ccBaseMap;
+ConVarR1O* convertToR1O(ConVarR1* var);
+static std::vector<FnChangeCallback_t> s_R1OGlobalChangeCallbacks;
+static bool s_R1OCallingGlobalChangeCallbacks;
+static bool s_R1BackingGlobalChangeCallbackInstalled;
+
+static void InvokeR1OGlobalChangeCallbacks(ConVarR1O* var, const char* pOldString, float flOldValue)
+{
+	if (!IsR1ODedicatedServer() || !var || s_R1OGlobalChangeCallbacks.empty() || s_R1OCallingGlobalChangeCallbacks)
+		return;
+
+	ConVarR1O* parent = var->m_pParent ? var->m_pParent : var;
+	IConVar* iconVar = static_cast<IConVar*>(parent);
+	auto callbacks = s_R1OGlobalChangeCallbacks;
+
+	s_R1OCallingGlobalChangeCallbacks = true;
+	for (FnChangeCallback_t callback : callbacks) {
+		if (callback)
+			callback(iconVar, pOldString, flOldValue);
+	}
+	s_R1OCallingGlobalChangeCallbacks = false;
+}
+
+void GlobalChangeCallback(ConVarR1* var, const char* pOldValue);
+
+static void EnsureR1BackingGlobalChangeCallbackInstalled()
+{
+	if (s_R1BackingGlobalChangeCallbackInstalled || !OriginalCCvar__InstallGlobalChangeCallback || !cvarinterface)
+		return;
+
+	OriginalCCvar__InstallGlobalChangeCallback(cvarinterface, &GlobalChangeCallback);
+	s_R1BackingGlobalChangeCallbackInstalled = true;
+}
+
+static void CvarDebugMessageBox(const char* functionName)
+{
+//	MessageBoxA(nullptr, functionName, "R1Delta cvar debug", MB_OK | MB_ICONINFORMATION);
+}
+
+static ConVarR1* GetR1ConVarForR1O(ConVarR1O* pConVar)
+{
+	if (!pConVar || !pConVar->m_pszName)
+		return nullptr;
+
+	auto it = ccBaseMap.find(pConVar->m_pszName);
+	if (it == ccBaseMap.end() || !it->second || !it->second->r1ptr)
+		return nullptr;
+
+	return static_cast<ConVarR1*>(it->second->r1ptr);
+}
+
+static void DebugCVarFind(const char* functionName, const char* varName, const void* result)
+{
+	if (!varName || (IsR1ODedicatedServer() && !AreR1OFakeDediVerboseLogsEnabled()))
+		return;
+
+	if (strcmp(varName, "developer")
+		&& strcmp(varName, "sv_cheats")
+		&& strcmp(varName, "commentary")
+		&& strcmp(varName, "host_thread_mode"))
+		return;
+
+	char buffer[384];
+	_snprintf_s(
+		buffer,
+		sizeof(buffer),
+		_TRUNCATE,
+		"R1Delta: %s(%s) -> %p\n",
+		functionName ? functionName : "CCVar_FindVar",
+		varName,
+		result);
+	OutputDebugStringA(buffer);
+}
+
+static ConVarR1O* WrapFoundR1ConVar(const char* varName, ConVarR1* r1Var)
+{
+	if (!varName || !r1Var)
+		return nullptr;
+
+	auto converted = convertToR1O(r1Var);
+	ccBaseMap[varName] = new WVar{ converted, r1Var, true, false };
+	return converted;
+}
+
+
+static uintptr_t GetR1OTier1ModuleBase()
+{
+	if (IsR1ODedicatedServer()) {
+		if (G_engine_r1o)
+			return G_engine_r1o;
+		if (G_engine)
+			return G_engine;
+		return reinterpret_cast<uintptr_t>(GetModuleHandleA("engine_r1o.dll"));
+	}
+
+	return G_server;
+}
+
+static void* GetR1OConCommandVTable()
+{
+	const uintptr_t base = GetR1OTier1ModuleBase();
+	return reinterpret_cast<void*>(base + (IsR1ODedicatedServer() ? 0x57BDC8 : 0x9C75F0));
+}
+
+static void* GetR1OConVarVTable()
+{
+	const uintptr_t base = GetR1OTier1ModuleBase();
+	return reinterpret_cast<void*>(base + (IsR1ODedicatedServer() ? 0x57BE58 : 0x9C7680));
+}
+
+static void* GetR1OIConVarVTable()
+{
+	const uintptr_t base = GetR1OTier1ModuleBase();
+	return reinterpret_cast<void*>(base + (IsR1ODedicatedServer() ? 0x57BC30 : 0x9C74C0));
+}
 
 // HUD function pointers
 GetHudType GetHud;
@@ -82,6 +204,56 @@ CHudMenuSelectMenuItemType CHudMenuSelectMenuItem;
 bool ConCommandBaseR1OIsCVar(ConCommandBaseR1O* ptr) {
 	return !!((ConCommandR1O*)ptr)->unused2;
 }
+
+static bool IsR1ODediCommandRegistrationInteresting(const char* name)
+{
+	if (!name)
+		return false;
+
+	return !strcmp_static(name, "exec")
+		|| !strcmp_static(name, "stuffcmds")
+		|| !strcmp_static(name, "map")
+		|| !strcmp_static(name, "host_map")
+		|| !strcmp_static(name, "ss_map")
+		|| !strcmp_static(name, "changelevel")
+		|| !strcmp_static(name, "changelevel2")
+		|| !strcmp_static(name, "disconnect")
+		|| !strcmp_static(name, "developer")
+		|| !strcmp_static(name, "sv_cheats")
+		|| !strcmp_static(name, "commentary")
+		|| !strcmp_static(name, "host_thread_mode")
+		|| !strcmp_static(name, "ent_fire")
+		|| !strcmp_static(name, "bot_dummy")
+		|| !strcmp_static(name, "fatal_script_error_prompt")
+		|| !strcmp_static(name, "fatal_script_errors")
+		|| !strcmp_static(name, "fatal_script_errors_client")
+		|| !strcmp_static(name, "fatal_script_errors_server")
+		|| !strcmp_static(name, "script");
+}
+
+static bool IsR1OFatalScriptPolicyConVar(const char* name)
+{
+	if (!name)
+		return false;
+
+	return !strcmp_static(name, "fatal_script_error_prompt")
+		|| !strcmp_static(name, "fatal_script_errors")
+		|| !strcmp_static(name, "fatal_script_errors_client")
+		|| !strcmp_static(name, "fatal_script_errors_server");
+}
+
+static ConVarR1O* ExposeR1OFatalScriptPolicyConVar(const char* name, ConVarR1O* var)
+{
+	if (!IsR1ODedicatedServer() || !IsR1OFatalScriptPolicyConVar(name) || !var)
+		return var;
+
+	const int exposedFlags = ~(FCVAR_HIDDEN | FCVAR_DEVELOPMENTONLY);
+	var->m_nFlags &= exposedFlags;
+	ConVarR1O* parent = var->m_pParent ? var->m_pParent : var;
+	parent->m_nFlags &= exposedFlags;
+	return var;
+}
+
 ConCommandBaseR1O* convertToR1O(const ConCommandBaseR1* commandBase);
 ConCommandBaseR1O* convertToR1O(ConCommandBaseR1* commandBase);
 ConCommandBaseR1O* convertToR1OBase(ConCommandBaseR1* commandBase) {
@@ -106,10 +278,9 @@ ConCommandR1O* convertToR1O(ConCommandR1* command) {
 	if (!command)
 		return NULL;
 	ConCommandR1O* commandR1O = new ConCommandR1O;
-	void* ptr = (void*)(G_server + 0x9C75F0);
 
 	*static_cast<ConCommandBaseR1O*>(commandR1O) = *convertToR1OBase(static_cast<ConCommandBaseR1*>(command));
-	commandR1O->vtable = ptr;
+	commandR1O->vtable = GetR1OConCommandVTable();
 	commandR1O->unused = command->unused;
 	commandR1O->unused2 = command->unused2;
 	commandR1O->m_pCommandCallback = command->m_pCommandCallback;
@@ -128,9 +299,6 @@ ConVarR1O* convertToR1O(ConVarR1* var) {
 
 	*static_cast<ConCommandBaseR1O*>(varR1O) = *convertToR1OBase(static_cast<ConCommandBaseR1*>(var));
 	//varR1O->unk = varR1O->__vftable;
-	auto server = G_server;
-	void* ptr = (void*)(server + 0x9C7680);
-	void* ptr2 = (void*)(server + 0x9C74C0);
 
 	//char whatever[19 * 8];
 	//char whatever2[8 * 8];
@@ -142,8 +310,8 @@ ConVarR1O* convertToR1O(ConVarR1* var) {
 	//	ReadProcessMemory(GetCurrentProcess(), (void*)((uintptr_t)GetModuleHandleA("vstdlib.dll") + 0x057778), &whatever2, 8 * 8, &bytes);
 	//	WriteProcessMemory(GetCurrentProcess(), (void*)(server + 0x9C74C0), &whatever2, 8 * 8, &bytes);
 	//}
-	varR1O->vtable = ptr;//varR1O->vtable;
-	varR1O->__vftable = ptr2;
+	varR1O->vtable = GetR1OConVarVTable();
+	varR1O->__vftable = GetR1OIConVarVTable();
 
 	varR1O->m_pParent = varR1O;//convertToR1O(var->m_pParent);
 	varR1O->m_pszDefaultValue = var->m_pszDefaultValue;
@@ -240,6 +408,47 @@ ConCommandBaseR1O* convertToR1O(ConCommandBaseR1* commandBase) {
 
 
 void CCVar_RegisterConCommand(uintptr_t thisptr, ConCommandBaseR1O* pCommandBase) {
+	if (!pCommandBase || !pCommandBase->m_pszName)
+		return;
+
+	// TFO ships the complete fatal-script policy as native launcher ConVars,
+	// but marks the controls development-only/hidden. Preserve the native
+	// objects and callbacks; only expose the policy knobs on fake dedicated
+	// servers before mirroring them into the R1 ICvar backing store.
+	if (IsR1ODedicatedServer()
+		&& ConCommandBaseR1OIsCVar(pCommandBase)
+		&& IsR1OFatalScriptPolicyConVar(pCommandBase->m_pszName)) {
+		ExposeR1OFatalScriptPolicyConVar(
+			pCommandBase->m_pszName,
+			reinterpret_cast<ConVarR1O*>(pCommandBase));
+	}
+
+	if (IsR1ODedicatedServer() && AreR1OFakeDediVerboseLogsEnabled() && IsR1ODediCommandRegistrationInteresting(pCommandBase->m_pszName)) {
+		char buffer[384];
+		void* callback = nullptr;
+		int callbackFlags = 0;
+		if (!ConCommandBaseR1OIsCVar(pCommandBase))
+		{
+			auto command = reinterpret_cast<ConCommandR1O*>(pCommandBase);
+			callback = command->m_pCommandCallback;
+			callbackFlags = command->m_nCallbackFlags;
+		}
+		_snprintf_s(
+			buffer,
+			sizeof(buffer),
+			_TRUNCATE,
+			"R1Delta: CCVar_RegisterConCommand this=%p command=%p name=%s isCVar=%d flags=0x%X callback=%p callbackFlags=0x%X backing=%p\n",
+			reinterpret_cast<void*>(thisptr),
+			pCommandBase,
+			pCommandBase->m_pszName,
+			static_cast<int>(ConCommandBaseR1OIsCVar(pCommandBase)),
+			pCommandBase->m_nFlags,
+			callback,
+			callbackFlags,
+			reinterpret_cast<void*>(cvarinterface));
+		OutputDebugStringA(buffer);
+	}
+
 	if (!strcmp_static(pCommandBase->m_pszName, "toggleconsole"))
 		return;
 	if (!strcmp_static(pCommandBase->m_pszName, "hideconsole"))
@@ -265,14 +474,171 @@ void CCVar_UnregisterConCommand(uintptr_t thisptr, ConCommandBaseR1O* pCommandBa
 	return OriginalCCVar_UnregisterConCommand(cvarinterface, (ConCommandR1*)pCommandBase);
 }
 
+static ConCommandBaseR1O* WrapFoundR1CommandBase(const char* name, ConCommandBaseR1* r1CommandBase)
+{
+	if (!name || !r1CommandBase)
+		return nullptr;
+
+	auto existing = ccBaseMap.find(name);
+	if (existing != ccBaseMap.end() && existing->second && existing->second->r1optr)
+		return existing->second->r1optr;
+
+	ConVarR1* asVar = OriginalCCVar_FindVar2 ? const_cast<ConVarR1*>(OriginalCCVar_FindVar2(cvarinterface, name)) : nullptr;
+	ConCommandR1* asCommand = OriginalCCVar_FindCommand ? OriginalCCVar_FindCommand(cvarinterface, name) : nullptr;
+	const bool isCvar = asVar && static_cast<ConCommandBaseR1*>(asVar) == r1CommandBase;
+
+	ConCommandBaseR1O* wrapped = isCvar
+		? static_cast<ConCommandBaseR1O*>(convertToR1O(asVar))
+		: static_cast<ConCommandBaseR1O*>(convertToR1O(asCommand ? asCommand : reinterpret_cast<ConCommandR1*>(r1CommandBase)));
+	if (!wrapped)
+		return nullptr;
+
+	ccBaseMap[name] = new WVar{ wrapped, r1CommandBase, isCvar, false };
+	return wrapped;
+}
+
+static ConCommandBaseR1O* GetCommandReturnObject(WVar* entry)
+{
+	if (!entry || entry->is_cvar)
+		return nullptr;
+
+	// The R1O command buffer dispatch calls virtual methods on the object returned
+	// by ICvar::FindCommandBase. In fake-dedi mode those commands are registered
+	// into the backing R1 cvar system as converted ConCommandR1 objects; returning
+	// the original static R1O ConCommand makes dispatch report success but does not
+	// run command callbacks such as exec/stuffcmds/map. Return the real backing
+	// command object for commands, while FindVar continues to return wrapped cvars.
+	return reinterpret_cast<ConCommandBaseR1O*>(entry->r1ptr);
+}
+
+static ConCommandR1O* WrapFoundR1Command(const char* name, ConCommandR1* r1Command)
+{
+	ConCommandBaseR1O* wrapped = WrapFoundR1CommandBase(name, static_cast<ConCommandBaseR1*>(r1Command));
+	auto it = name ? ccBaseMap.find(name) : ccBaseMap.end();
+	if (!wrapped || it == ccBaseMap.end() || !it->second || it->second->is_cvar)
+		return nullptr;
+
+	return static_cast<ConCommandR1O*>(GetCommandReturnObject(it->second));
+}
+
+class R1OWrappedCVarIterator
+{
+public:
+	R1OWrappedCVarIterator()
+		: m_it(ccBaseMap.begin()), m_end(ccBaseMap.end())
+	{
+		AdvanceToValid();
+	}
+
+	virtual void SetFirst()
+	{
+		m_it = ccBaseMap.begin();
+		m_end = ccBaseMap.end();
+		AdvanceToValid();
+	}
+
+	virtual void Next()
+	{
+		if (m_it != m_end)
+			++m_it;
+		AdvanceToValid();
+	}
+
+	virtual bool IsValid()
+	{
+		return m_it != m_end;
+	}
+
+	virtual ConCommandBaseR1O* Get()
+	{
+		if (m_it == m_end || !m_it->second)
+			return nullptr;
+
+		return m_it->second->r1optr;
+	}
+
+private:
+	void AdvanceToValid()
+	{
+		while (m_it != m_end) {
+			WVar* entry = m_it->second;
+			if (entry && entry->r1optr && entry->r1optr->m_pszName)
+				break;
+			++m_it;
+		}
+	}
+
+	std::unordered_map<std::string, WVar*, HashStrings, std::equal_to<>>::iterator m_it;
+	std::unordered_map<std::string, WVar*, HashStrings, std::equal_to<>>::iterator m_end;
+};
+
+void* CCvar__FactoryInternalIterator(uintptr_t thisptr)
+{
+	if (!IsR1ODedicatedServer() || !OriginalCCvar__FactoryInternalIterator)
+		return OriginalCCvar__FactoryInternalIterator
+			? OriginalCCvar__FactoryInternalIterator(cvarinterface)
+			: nullptr;
+
+	const uintptr_t engineBase = MainEngineBase();
+	if (!engineBase)
+		return nullptr;
+
+	auto r1oMallocBase = reinterpret_cast<void* (*)(size_t)>(engineBase + 0x48509C);
+	void* memory = r1oMallocBase(sizeof(R1OWrappedCVarIterator));
+	if (!memory)
+		return nullptr;
+
+	return new (memory) R1OWrappedCVarIterator();
+}
+
 ConCommandBaseR1O* CCVar_FindCommandBase(uintptr_t thisptr, const char* name) {
-	//std::cout << __FUNCTION__ << ": " << name << std::endl;
-	return (ConCommandBaseR1O*)OriginalCCVar_FindCommandBase(cvarinterface, name);
+	ZoneScoped;
+	if (!IsR1ODedicatedServer())
+		return (ConCommandBaseR1O*)OriginalCCVar_FindCommandBase(cvarinterface, name);
+	if (!name)
+		return nullptr;
+
+	auto it = ccBaseMap.find(name);
+	if (it != ccBaseMap.end() && it->second) {
+		if (it->second->is_cvar && it->second->r1optr)
+			return ExposeR1OFatalScriptPolicyConVar(
+				name,
+				reinterpret_cast<ConVarR1O*>(it->second->r1optr));
+		if (!it->second->is_cvar && it->second->r1ptr)
+			return GetCommandReturnObject(it->second);
+	}
+
+	ConCommandBaseR1* ret = OriginalCCVar_FindCommandBase ? OriginalCCVar_FindCommandBase(cvarinterface, name) : nullptr;
+	ConCommandBaseR1O* wrapped = WrapFoundR1CommandBase(name, ret);
+	it = ccBaseMap.find(name);
+	return it != ccBaseMap.end() && it->second && !it->second->is_cvar
+		? GetCommandReturnObject(it->second)
+		: ExposeR1OFatalScriptPolicyConVar(name, reinterpret_cast<ConVarR1O*>(wrapped));
 }
 
 const ConCommandBaseR1O* CCVar_FindCommandBase2(uintptr_t thisptr, const char* name) {
-	//std::cout << __FUNCTION__ << ": " << name << std::endl;
-	return (ConCommandBaseR1O*)OriginalCCVar_FindCommandBase2(cvarinterface, name);
+	ZoneScoped;
+	if (!IsR1ODedicatedServer())
+		return (ConCommandBaseR1O*)OriginalCCVar_FindCommandBase2(cvarinterface, name);
+	if (!name)
+		return nullptr;
+
+	auto it = ccBaseMap.find(name);
+	if (it != ccBaseMap.end() && it->second) {
+		if (it->second->is_cvar && it->second->r1optr)
+			return ExposeR1OFatalScriptPolicyConVar(
+				name,
+				reinterpret_cast<ConVarR1O*>(it->second->r1optr));
+		if (!it->second->is_cvar && it->second->r1ptr)
+			return GetCommandReturnObject(it->second);
+	}
+
+	const ConCommandBaseR1* ret = OriginalCCVar_FindCommandBase2 ? OriginalCCVar_FindCommandBase2(cvarinterface, name) : nullptr;
+	ConCommandBaseR1O* wrapped = WrapFoundR1CommandBase(name, const_cast<ConCommandBaseR1*>(ret));
+	it = ccBaseMap.find(name);
+	return it != ccBaseMap.end() && it->second && !it->second->is_cvar
+		? GetCommandReturnObject(it->second)
+		: ExposeR1OFatalScriptPolicyConVar(name, reinterpret_cast<ConVarR1O*>(wrapped));
 }
 
 ConVarR1O* CCVar_FindVar(uintptr_t thisptr, const char* var_name) {
@@ -282,12 +648,15 @@ ConVarR1O* CCVar_FindVar(uintptr_t thisptr, const char* var_name) {
 	auto it = ccBaseMap.find(var_name);
 	ConVarR1O* r1optr = it == ccBaseMap.end() ? NULL : (ConVarR1O*)it->second->r1optr;
 	if (r1optr)
-		return r1optr;
+		return ExposeR1OFatalScriptPolicyConVar(var_name, r1optr);
 	auto ret = (ConVarR1*)(OriginalCCVar_FindVar2(cvarinterface, var_name));
-	if (!ret)
+	if (!ret) {
+		DebugCVarFind(__FUNCTION__, var_name, nullptr);
 		return nullptr;
-	ccBaseMap[var_name] = new WVar{ convertToR1O(ret), ret, true, false };
-	return (ConVarR1O*)(ccBaseMap[var_name]->r1optr);
+	}
+	ConVarR1O* wrapped = WrapFoundR1ConVar(var_name, ret);
+	DebugCVarFind(__FUNCTION__, var_name, wrapped);
+	return ExposeR1OFatalScriptPolicyConVar(var_name, wrapped);
 }
 static bool cvar_recursive = false;
 void GlobalChangeCallback(ConVarR1* var, const char* pOldValue) {
@@ -329,6 +698,9 @@ void GlobalChangeCallback(ConVarR1* var, const char* pOldValue) {
 			r1ovar->m_pParent->m_fnChangeCallbacks[i](r1ovar, pOldValue, atof(pOldValue));
 	}
 
+	const float oldFloat = pOldValue ? static_cast<float>(atof(pOldValue)) : 0.0f;
+	InvokeR1OGlobalChangeCallbacks(r1ovar, pOldValue, oldFloat);
+
 	//	if (it->second->is_r1o)
 	//		r1ovar->m_bHasMax
 	// unimplemented - impl r1o convar change callbacks
@@ -351,77 +723,151 @@ const ConVarR1O* CCVar_FindVar2(uintptr_t thisptr, const char* var_name) {
 	//}
 	if (!strcmp_static(var_name, "room_type")) // unused but crashes if NULL
 		var_name = "portal_funnel_debug";
-	static bool bDone = false;
-	if (!bDone) {
-		OriginalCCvar__InstallGlobalChangeCallback(cvarinterface, &GlobalChangeCallback);
-		bDone = true;
-	}
+	EnsureR1BackingGlobalChangeCallbackInstalled();
 	auto it = ccBaseMap.find(var_name);
 	ConVarR1O* r1optr = it == ccBaseMap.end() ? NULL : (ConVarR1O*)it->second->r1optr;
 	if (r1optr)
-		return r1optr;
+		return ExposeR1OFatalScriptPolicyConVar(var_name, r1optr);
 	auto ret = (ConVarR1*)(OriginalCCVar_FindVar2(cvarinterface, var_name));
-	if (!ret)
+	if (!ret) {
+		DebugCVarFind(__FUNCTION__, var_name, nullptr);
 		return nullptr;
-	ccBaseMap[var_name] = new WVar{ convertToR1O(ret), ret, true, false };
-	return (ConVarR1O*)(ccBaseMap[var_name]->r1optr);
+	}
+	ConVarR1O* wrapped = WrapFoundR1ConVar(var_name, ret);
+	DebugCVarFind(__FUNCTION__, var_name, wrapped);
+	return ExposeR1OFatalScriptPolicyConVar(var_name, wrapped);
 }
 
 ConCommandR1O* CCVar_FindCommand(uintptr_t thisptr, const char* name) {
-	//std::cout << __FUNCTION__ << ": " << name << std::endl;
-	return (ConCommandR1O*)((uintptr_t)OriginalCCVar_FindCommand(cvarinterface, name));
+	ZoneScoped;
+	if (!IsR1ODedicatedServer())
+		return (ConCommandR1O*)((uintptr_t)OriginalCCVar_FindCommand(cvarinterface, name));
+	if (!name)
+		return nullptr;
+
+	auto it = ccBaseMap.find(name);
+	if (it != ccBaseMap.end() && it->second && !it->second->is_cvar && it->second->r1ptr)
+		return static_cast<ConCommandR1O*>(GetCommandReturnObject(it->second));
+
+	ConCommandR1* ret = OriginalCCVar_FindCommand ? OriginalCCVar_FindCommand(cvarinterface, name) : nullptr;
+	return WrapFoundR1Command(name, ret);
 }
 
 const ConCommandR1O* CCVar_FindCommand2(uintptr_t thisptr, const char* name) {
-	//std::cout << __FUNCTION__ << ": " << name << std::endl;
-	return (ConCommandR1O*)((uintptr_t)OriginalCCVar_FindCommand2(cvarinterface, name));
+	ZoneScoped;
+	if (!IsR1ODedicatedServer())
+		return (ConCommandR1O*)((uintptr_t)OriginalCCVar_FindCommand2(cvarinterface, name));
+	if (!name)
+		return nullptr;
+
+	auto it = ccBaseMap.find(name);
+	if (it != ccBaseMap.end() && it->second && !it->second->is_cvar && it->second->r1ptr)
+		return static_cast<ConCommandR1O*>(GetCommandReturnObject(it->second));
+
+	const ConCommandR1* ret = OriginalCCVar_FindCommand2 ? OriginalCCVar_FindCommand2(cvarinterface, name) : nullptr;
+	return WrapFoundR1Command(name, const_cast<ConCommandR1*>(ret));
 }
 void CCVar_CallGlobalChangeCallbacks(uintptr_t thisptr, ConVarR1O* var, const char* pOldString, float flOldValue) {
 	// if this crashes YOU ARE NOT CALLING CVAR REGISTER FOR A DLL YOU SHOULD BE CALLING CVAR REGISTER FOR
-	ConVarR1* r1var = (ConVarR1*)(ccBaseMap[var->m_pszName]->r1ptr);
+	if (!var || !var->m_pszName)
+		return;
+
+	auto it = ccBaseMap.find(var->m_pszName);
+	if (it == ccBaseMap.end() || !it->second || !it->second->r1ptr) {
+		if (!OriginalCCVar_FindVar2 || !cvarinterface)
+			return;
+
+		ConVarR1* found = const_cast<ConVarR1*>(OriginalCCVar_FindVar2(cvarinterface, var->m_pszName));
+		if (!found)
+			return;
+
+		it = ccBaseMap.emplace(var->m_pszName, new WVar{ var, found, true, false }).first;
+	}
+
+	ConVarR1* r1var = static_cast<ConVarR1*>(it->second->r1ptr);
+	if (!r1var || !r1var->m_pParent)
+		return;
+
 	r1var->m_pParent->m_Value.m_fValue = var->m_Value.m_fValue;
 	r1var->m_pParent->m_Value.m_nValue = var->m_Value.m_nValue;
 	r1var->m_pParent->m_Value.m_pszString = var->m_Value.m_pszString;
 	r1var->m_pParent->m_Value.m_StringLength = var->m_Value.m_StringLength;
-	//OriginalCCVar_CallGlobalChangeCallbacks(cvarinterface, r1var, pOldString, flOldValue);
-	////delete r1Var;
+
+	// The fake-dedi path shares cvars through the backing R1 store, but R1O
+	// engine systems still own the replicated-cvar global callback. Notify
+	// those callbacks with the R1O IConVar subobject after synchronizing the
+	// backing value so runtime replicated changes enqueue normal net_SetConVar
+	// updates.
+	InvokeR1OGlobalChangeCallbacks(var, pOldString, flOldValue);
 }
 
 void CCVar_QueueMaterialThreadSetValue1(uintptr_t thisptr, ConVarR1O* pConVar, const char* pValue) {
-	//ConVarR1* r1Var = convertToR1(pConVar);
-	//OriginalCCVar_QueueMaterialThreadSetValue1(cvarinterface, r1Var, pValue);
-	////delete r1Var;
-	// cus broken
+	CvarDebugMessageBox(__FUNCTION__);
+	if (!IsR1ODedicatedServer())
+		return;
+	ConVarR1* r1Var = GetR1ConVarForR1O(pConVar);
+	if (!r1Var || !OriginalCCVar_QueueMaterialThreadSetValue1)
+		return;
+
+	OriginalCCVar_QueueMaterialThreadSetValue1(cvarinterface, r1Var, pValue);
 }
 
 void CCVar_QueueMaterialThreadSetValue2(uintptr_t thisptr, ConVarR1O* pConVar, int nValue) {
-	//ConVarR1* r1Var = convertToR1(pConVar);
-	//OriginalCCVar_QueueMaterialThreadSetValue2(cvarinterface, r1Var, nValue);
-	////delete r1Var;
-	// cus broken
+	CvarDebugMessageBox(__FUNCTION__);
+	if (!IsR1ODedicatedServer())
+		return;
+	ConVarR1* r1Var = GetR1ConVarForR1O(pConVar);
+	if (!r1Var || !OriginalCCVar_QueueMaterialThreadSetValue2)
+		return;
+
+	OriginalCCVar_QueueMaterialThreadSetValue2(cvarinterface, r1Var, nValue);
 }
 
 void CCVar_QueueMaterialThreadSetValue3(uintptr_t thisptr, ConVarR1O* pConVar, float flValue) {
-	//ConVarR1* r1Var = convertToR1(pConVar);
-	//OriginalCCVar_QueueMaterialThreadSetValue3(cvarinterface, r1Var, flValue);
-	////delete r1Var;
-	// cus broken
+	CvarDebugMessageBox(__FUNCTION__);
+	if (!IsR1ODedicatedServer())
+		return;
+	ConVarR1* r1Var = GetR1ConVarForR1O(pConVar);
+	if (!r1Var || !OriginalCCVar_QueueMaterialThreadSetValue3)
+		return;
+
+	OriginalCCVar_QueueMaterialThreadSetValue3(cvarinterface, r1Var, flValue);
 }
 
-void __fastcall CCvar__InstallGlobalChangeCallback( // cus broken
+void __fastcall CCvar__InstallGlobalChangeCallback(
 	uintptr_t thisptr,
 	void* func)
 {
+	CvarDebugMessageBox(__FUNCTION__);
+	if (!IsR1ODedicatedServer() || !func)
+		return;
+
+	EnsureR1BackingGlobalChangeCallbackInstalled();
+	auto callback = reinterpret_cast<FnChangeCallback_t>(func);
+	if (std::find(s_R1OGlobalChangeCallbacks.begin(), s_R1OGlobalChangeCallbacks.end(), callback) == s_R1OGlobalChangeCallbacks.end())
+		s_R1OGlobalChangeCallbacks.push_back(callback);
 }
 
-void __fastcall CCvar__RemoveGlobalChangeCallback( // cus broken
+void __fastcall CCvar__RemoveGlobalChangeCallback(
 	uintptr_t thisptr,
 	void* func)
 {
+	CvarDebugMessageBox(__FUNCTION__);
+	if (!IsR1ODedicatedServer())
+		return;
+
+	auto callback = reinterpret_cast<FnChangeCallback_t>(func);
+	s_R1OGlobalChangeCallbacks.erase(
+		std::remove(s_R1OGlobalChangeCallbacks.begin(), s_R1OGlobalChangeCallbacks.end(), callback),
+		s_R1OGlobalChangeCallbacks.end());
 }
-__int64 __fastcall CCvar__ProcessQueuedMaterialThreadConVarSets(__int64 a1)
+int __fastcall CCvar__ProcessQueuedMaterialThreadConVarSets(uintptr_t thisptr)
 {
-	return 0; // cus broken
+	CvarDebugMessageBox(__FUNCTION__);
+	if (!IsR1ODedicatedServer() || !OriginalCCvar__ProcessQueuedMaterialThreadConVarSets)
+		return 0;
+
+	return OriginalCCvar__ProcessQueuedMaterialThreadConVarSets(cvarinterface);
 }
 typedef char (*CEngineVGui__InitType)(__int64 a1);
 CEngineVGui__InitType CEngineVGui__InitOriginal;
@@ -658,6 +1104,130 @@ ConVarR1* RegisterConVar(const char* name, const char* value, int flags, const c
 	return newVar;
 }
 
+static ConVarR1O* CreateR1OConVarForWrappedRegistration(const char* name, const char* value, int flags, const char* helpString)
+{
+	ConVarR1O* newVar = reinterpret_cast<ConVarR1O*>(::operator new(sizeof(ConVarR1O)));
+	memset(newVar, 0, sizeof(ConVarR1O));
+	newVar->vtable = GetR1OConVarVTable();
+	newVar->m_pNext = nullptr;
+	newVar->m_bRegistered = false;
+	newVar->m_pszName = _strdup(name ? name : "");
+	newVar->m_pszHelpString = _strdup(helpString ? helpString : "");
+	newVar->m_nFlags = flags;
+	newVar->__vftable = GetR1OIConVarVTable();
+	newVar->m_pParent = newVar;
+	newVar->m_pszDefaultValue = _strdup(value ? value : "");
+	newVar->m_Value.m_pszString = _strdup(newVar->m_pszDefaultValue);
+	newVar->m_Value.m_StringLength = strlen(newVar->m_Value.m_pszString) + 1;
+	newVar->m_Value.m_fValue = static_cast<float>(atof(newVar->m_Value.m_pszString));
+	newVar->m_Value.m_nValue = atoi(newVar->m_Value.m_pszString);
+	newVar->m_bHasMin = false;
+	newVar->m_fMinVal = 0.0f;
+	newVar->m_bHasMax = false;
+	newVar->m_fMaxVal = 0.0f;
+	return newVar;
+}
+
+static __int64 __fastcall R1ODediConCommandPostCallbackNoop(__int64, __int64)
+{
+	return 0;
+}
+
+static void R1ODediDispatcherOwnedCommand(const CCommand&)
+{
+	Warning("R1Delta: R1O dedicated command dispatcher is unavailable.\n");
+}
+
+static ConCommandR1O* CreateR1OConCommandForWrappedRegistration(const char* name, void (*callback)(const CCommand&), int flags, const char* helpString)
+{
+	ConCommandR1O* newCommand = reinterpret_cast<ConCommandR1O*>(::operator new(sizeof(ConCommandR1O)));
+	memset(newCommand, 0, sizeof(ConCommandR1O));
+	newCommand->vtable = GetR1OConCommandVTable();
+	newCommand->m_pNext = nullptr;
+	newCommand->m_bRegistered = false;
+	newCommand->m_pszName = _strdup(name ? name : "");
+	newCommand->m_pszHelpString = _strdup(helpString ? helpString : "");
+	newCommand->m_nFlags = flags;
+	newCommand->unused = reinterpret_cast<void*>(&R1ODediConCommandPostCallbackNoop);
+	newCommand->unused2 = nullptr;
+	newCommand->m_pCommandCallback = reinterpret_cast<FnCommandCallback_t>(callback);
+	newCommand->m_pCompletionCallback = nullptr;
+	newCommand->m_nCallbackFlags = 0x02;
+	return newCommand;
+}
+
+ConCommandR1O* RegisterR1ODediConCommand(const char* name, void (*callback)(const CCommand&), const char* helpString, int flags)
+{
+	if (!IsR1ODedicatedServer() || !cvarinterface || !OriginalCCVar_RegisterConCommand || !name || !callback)
+		return nullptr;
+
+	if ((OriginalCCVar_FindCommand && OriginalCCVar_FindCommand(cvarinterface, name)) || ccBaseMap.find(name) != ccBaseMap.end())
+		return CCVar_FindCommand(cvarinterface, name);
+
+	ConCommandR1O* newCommand = CreateR1OConCommandForWrappedRegistration(name, callback, flags, helpString);
+	CCVar_RegisterConCommand(cvarinterface, newCommand);
+	return newCommand;
+}
+
+ConVarR1O* RegisterR1ODediConVar(const char* name, const char* value, int flags, const char* helpString)
+{
+	if (!IsR1ODedicatedServer() || !cvarinterface || !OriginalCCVar_RegisterConCommand || !OriginalCCVar_FindVar2 || !name)
+		return nullptr;
+	if (OriginalCCVar_FindVar2(cvarinterface, name) || ccBaseMap.find(name) != ccBaseMap.end())
+		return CCVar_FindVar(cvarinterface, name);
+
+	ConVarR1O* newVar = CreateR1OConVarForWrappedRegistration(name, value, flags, helpString);
+	CCVar_RegisterConCommand(cvarinterface, newVar);
+	return newVar;
+}
+
+void RegisterR1ODediDeltaConVars()
+{
+	if (!IsR1ODedicatedServer())
+		return;
+
+	EnsureR1BackingGlobalChangeCallbackInstalled();
+
+	static bool s_registered = false;
+	if (s_registered)
+		return;
+
+	RegisterR1ODediConVar("delta_ms_url", "ms.r1delta.net", FCVAR_CLIENTDLL, "Url for r1d masterserver");
+	RegisterR1ODediConVar("delta_server_auth_token", "", FCVAR_USERINFO | FCVAR_SERVER_CANNOT_QUERY | FCVAR_DONTRECORD | FCVAR_PROTECTED | FCVAR_HIDDEN, "Per-server auth token");
+	RegisterR1ODediConVar("delta_version", R1D_VERSION, FCVAR_USERINFO | FCVAR_DONTRECORD, "R1Delta version number");
+	RegisterR1ODediConVar("delta_skip_version_check", "0", FCVAR_GAMEDLL, "Skip version check for connecting clients (sets server to dev mode)");
+	RegisterR1ODediConVar("delta_online_auth_enable", "0", FCVAR_GAMEDLL, "Whether to use master server auth");
+	RegisterR1ODediConVar("delta_discord_username_sync", "0", FCVAR_GAMEDLL, "Controls if player names are synced with Discord");
+	RegisterR1ODediConVar("riff_floorislava", "0", FCVAR_HIDDEN, "Enable floor is lava mode");
+	RegisterR1ODediConVar("hide_server", "0", FCVAR_NONE, "Whether the server should be hidden from the master server");
+	RegisterR1ODediConVar("server_description", "", FCVAR_NONE, "Server description");
+	RegisterR1ODediConVar("delta_ui_server_filter", "0", FCVAR_NONE, "Script managed vgui filter convar");
+	RegisterR1ODediConVar("delta_autoBalanceTeams", "1", FCVAR_NONE, "Whether to autobalance teams on death/private match/lobby start. Managed by script");
+	RegisterR1ODediConVar("delta_useLegacyProgressBar", "0", FCVAR_ARCHIVE, "Whether or not to use the old loading bar");
+	RegisterR1ODediConVar("delta_return_to_lobby", "1", FCVAR_NONE, "Return to lobby after a game");
+	RegisterR1ODediConVar("delta_allow_empty_server", "1", FCVAR_NONE, "Allow matches with no players.");
+	RegisterR1ODediConVar("delta_skip_waiting_for_players", "0", FCVAR_NONE, "Skip waiting for players.");
+	RegisterR1ODediConVar("sv_banlist_autosave", "1", FCVAR_ARCHIVE, "Automatically save ban lists after modification commands.");
+	RegisterR1ODediConVar("bot_kick_on_death", "1", FCVAR_GAMEDLL | FCVAR_CHEAT, "Enable/disable bots getting kicked on death.");
+	RegisterR1ODediConCommand("bot_dummy", AddBotDummyConCommand, "Adds a bot.", FCVAR_GAMEDLL | FCVAR_CHEAT);
+	RegisterR1ODediConCommand("script", script_cmd, "Execute Squirrel code in server context", FCVAR_GAMEDLL | FCVAR_CHEAT);
+	RegisterR1ODediConCommand("find", R1ODediDispatcherOwnedCommand, "Find a command or convar.", FCVAR_NONE);
+	RegisterR1ODediConCommand("removeallids", R1ODediDispatcherOwnedCommand, "Remove all user IDs from the ban list.", FCVAR_NONE);
+	RegisterR1ODediConCommand("removeallips", R1ODediDispatcherOwnedCommand, "Remove all IPs from the ban list.", FCVAR_NONE);
+	RegisterR1ODediConVar("delta_vote_allowed", "1", FCVAR_GAMEDLL | FCVAR_REPLICATED, "Allow voting?");
+	RegisterR1ODediConVar("delta_vote_timer_duration", "12.0", FCVAR_GAMEDLL | FCVAR_REPLICATED, "How long to allow voting on an issue");
+	RegisterR1ODediConVar("delta_vote_failure_timer", "300.0", FCVAR_GAMEDLL | FCVAR_REPLICATED, "Vote failure cooldown");
+	RegisterR1ODediConVar("delta_vote_creation_timer", "150.0", FCVAR_GAMEDLL | FCVAR_REPLICATED, "Vote creation cooldown");
+	RegisterR1ODediConVar("delta_vote_holder_may_vote_no", "1", FCVAR_GAMEDLL | FCVAR_REPLICATED, "Vote holder may vote no");
+	RegisterR1ODediConVar("delta_vote_next_map", "", FCVAR_GAMEDLL | FCVAR_REPLICATED, "Next voted map.");
+	RegisterR1ODediConVar("delta_vote_next_mode", "", FCVAR_GAMEDLL | FCVAR_REPLICATED, "Next voted gamemode.");
+	RegisterServerUserCmdConVars();
+
+	s_registered = true;
+	if (AreR1OFakeDediVerboseLogsEnabled())
+		OutputDebugStringA("R1Delta: registered R1O fake-dedi Delta script ConVars\n");
+}
+
 // CVar iterator interface for finding commands/variables
 class ICVarIteratorInternal
 {
@@ -723,6 +1293,41 @@ void Find(const CCommand& args)
 	{
 		ConVar_PrintDescription(var);
 	}
+}
+
+bool PrintR1ODediFindResults(const char* search)
+{
+	if (!IsR1ODedicatedServer() || !search || !search[0] || !cvarinterface)
+		return false;
+
+	std::vector<ConCommandBaseR1*> matches;
+	typedef ICVarIteratorInternal* (__thiscall *FactoryInternalIterator_t)(void* cvar);
+	uintptr_t* vtable = *reinterpret_cast<uintptr_t**>(cvarinterface);
+	auto factoryInternalIterator =
+		vtable ? reinterpret_cast<FactoryInternalIterator_t>(vtable[40]) : nullptr;
+	ICVarIteratorInternal* it = factoryInternalIterator
+		? factoryInternalIterator(reinterpret_cast<void*>(cvarinterface))
+		: nullptr;
+	if (!it)
+		return false;
+
+	for (it->SetFirst(); it->IsValid(); it->Next())
+	{
+		ConCommandBaseR1* var = it->Get();
+		if (!var || !var->m_pszName || !var->m_pszHelpString)
+			continue;
+		if (!V_stristr(var->m_pszName, search) && !V_stristr(var->m_pszHelpString, search))
+			continue;
+		matches.push_back(var);
+	}
+
+	std::sort(matches.begin(), matches.end(), ConVarSortFunc);
+	for (const auto* var : matches) {
+		ConCommandBaseR1O* r1oVar = CCVar_FindCommandBase(cvarinterface, var->m_pszName);
+		if (r1oVar)
+			ConVar_PrintDescription(reinterpret_cast<const ConCommandBaseR1*>(r1oVar));
+	}
+	return true;
 }
 
 // ConVar change callbacks for recent host tracking

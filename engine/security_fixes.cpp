@@ -30,7 +30,106 @@ bool(__fastcall* oCNetChan___ProcessMessages)(CNetChan*, bf_read*);
 int(__fastcall* oCNetChan__ProcessPacketHeader)(CNetChan*, netpacket_s*);
 bool g_bInProcessMessageClient = false;
 static int g_recursiveBroadcastDepth = 0; // Counter for recursive calls
+static int g_clientProcessMessagesLogBudget = 128;
 constexpr int MAX_RECURSIVE_BROADCAST_DEPTH = 3;
+
+static bool ShouldUseClientProcessMessagesDebugPath()
+{
+	static bool parsed = false;
+	static bool enabled = false;
+	if (!parsed) {
+		parsed = true;
+		enabled = HasEngineCommandLineFlag("-r1o_client_debug_hooks");
+	}
+	return enabled;
+}
+
+static int PeekProcessMessagesNextId(bf_read* buf)
+{
+	if (!buf || buf->IsOverflowed() || buf->GetNumBitsLeft() < 6)
+		return -1;
+
+	const int startBit = buf->GetNumBitsRead();
+	const unsigned int id = buf->ReadUBitLong(6);
+	buf->Seek(startBit);
+	return static_cast<int>(id);
+}
+
+static void LogClientProcessMessages(const char* phase, CNetChan* netChan, bf_read* buf, bool result)
+{
+	if (IsDedicatedServer() || !ShouldUseClientProcessMessagesDebugPath() || g_clientProcessMessagesLogBudget <= 0)
+		return;
+
+	--g_clientProcessMessagesLogBudget;
+	if (!buf) {
+		char message[256];
+		_snprintf_s(
+			message,
+			sizeof(message),
+			_TRUNCATE,
+			"R1Delta: client CNetChan::_ProcessMessages %s netchan=%p buf=null result=%d budget=%d\n",
+			phase,
+			netChan,
+			static_cast<int>(result),
+			g_clientProcessMessagesLogBudget);
+		OutputDebugStringA(message);
+		return;
+	}
+
+	char message[384];
+	_snprintf_s(
+		message,
+		sizeof(message),
+		_TRUNCATE,
+		"R1Delta: client CNetChan::_ProcessMessages %s netchan=%p buf=%p bit=%d left=%d totalBytes=%d overflow=%d nextId=%d result=%d budget=%d\n",
+		phase,
+		netChan,
+		buf,
+		buf->GetNumBitsRead(),
+		buf->GetNumBitsLeft(),
+		buf->TotalBytesAvailable(),
+		static_cast<int>(buf->IsOverflowed()),
+		PeekProcessMessagesNextId(buf),
+		static_cast<int>(result),
+		g_clientProcessMessagesLogBudget);
+	OutputDebugStringA(message);
+}
+
+static bool TryAcceptClientZeroBitTail(CNetChan* netChan, bf_read* buf, bool result)
+{
+	if (IsDedicatedServer() || !ShouldUseClientProcessMessagesDebugPath() || result || !buf || buf->IsOverflowed())
+		return result;
+
+	const int left = buf->GetNumBitsLeft();
+	if (left <= 0 || left > 7)
+		return result;
+
+	const int startBit = buf->GetNumBitsRead();
+	bool allZero = true;
+	for (int i = 0; i < left; ++i) {
+		if (buf->ReadOneBit() != 0) {
+			allZero = false;
+			break;
+		}
+	}
+
+	if (!allZero) {
+		buf->Seek(startBit);
+		return result;
+	}
+
+	char message[256];
+	_snprintf_s(
+		message,
+		sizeof(message),
+		_TRUNCATE,
+		"R1Delta: client CNetChan::_ProcessMessages accepted zero bit tail netchan=%p startBit=%d tailBits=%d\n",
+		netChan,
+		startBit,
+		left);
+	OutputDebugStringA(message);
+	return true;
+}
 
 class ProcessMessageScope {
 public:
@@ -65,21 +164,33 @@ void* __fastcall CNetChan___dtor(CNetChan* a1, __int64 a2, __int64 a3) {
 }
 bool __fastcall CNetChan___ProcessMessages(CNetChan* thisptr, bf_read* buf) {
 	std::unique_ptr<ProcessMessageScope> scope;
+	if (!thisptr || !buf) {
+		LogClientProcessMessages("enter-null", thisptr, buf, false);
+		const bool result = TryAcceptClientZeroBitTail(thisptr, buf, oCNetChan___ProcessMessages(thisptr, buf));
+		LogClientProcessMessages("leave-null", thisptr, buf, result);
+		return result;
+	}
+
 	if ((*(uint8_t*)(((uintptr_t)thisptr) + 216) <= 0)) {
 		scope = std::make_unique<ProcessMessageScope>();
 	}
 
-	if (!thisptr || !buf)
-		return oCNetChan___ProcessMessages(thisptr, buf);
+	LogClientProcessMessages("enter", thisptr, buf, false);
 
-	if (buf->GetNumBitsRead() < 6 || buf->IsOverflowed()) // idfk tbh just move this to whenever a net message processes.
-		return oCNetChan___ProcessMessages(thisptr, buf);
+	if (buf->GetNumBitsRead() < 6 || buf->IsOverflowed()) { // idfk tbh just move this to whenever a net message processes.
+		const bool result = TryAcceptClientZeroBitTail(thisptr, buf, oCNetChan___ProcessMessages(thisptr, buf));
+		LogClientProcessMessages("leave-early-bitstate", thisptr, buf, result);
+		return result;
+	}
 
 	//static auto net_chan_limit_msec_ptr = OriginalCCVar_FindVar2(cvarinterface, "net_chan_limit_msec");
 	auto net_chan_limit_msec = cvar_net_chan_limit_msec->m_Value.m_fValue;
 
-	if (net_chan_limit_msec == 0.0f)
-		return oCNetChan___ProcessMessages(thisptr, buf);
+	if (net_chan_limit_msec == 0.0f) {
+		const bool result = TryAcceptClientZeroBitTail(thisptr, buf, oCNetChan___ProcessMessages(thisptr, buf));
+		LogClientProcessMessages("leave-no-limit", thisptr, buf, result);
+		return result;
+	}
 
 	// TODO(mrsteyk): m_flLastProcessingTime and m_flFinalProcessingTime for an object (probably unordered_map...).
 
@@ -96,7 +207,8 @@ bool __fastcall CNetChan___ProcessMessages(CNetChan* thisptr, bf_read* buf) {
 	QueryPerformanceCounter(&start);
     lastDeletedNetChan = NULL;
 	g_recursiveBroadcastDepth = 0; // Reset recursion counter before processing messages
-	const auto original = oCNetChan___ProcessMessages(thisptr, buf);
+	const auto original = TryAcceptClientZeroBitTail(thisptr, buf, oCNetChan___ProcessMessages(thisptr, buf));
+	LogClientProcessMessages("leave", thisptr, buf, original);
     // wndrr: we were deleted, bail out!
     if (lastDeletedNetChan == thisptr) {
         lastDeletedNetChan = NULL;
@@ -209,6 +321,66 @@ struct CLC_VoiceData {
 
 bool(__fastcall* oCGameClient__ProcessVoiceData)(void*, CLC_VoiceData*);
 
+static void R1OBroadcastVoiceDataAllTalk(
+	void* sender,
+	int byteCount,
+	char* voiceData,
+	uint64 xuid)
+{
+	if (!sender || !G_engine_r1o || byteCount <= 0 || !voiceData)
+		return;
+
+	alignas(16) unsigned char message[128] = {};
+	*reinterpret_cast<void**>(message) =
+		reinterpret_cast<void*>(G_engine_r1o + 0x532F08);
+
+	auto** senderVtable = *reinterpret_cast<void***>(sender);
+	using GetSenderIndexFn = int(__fastcall*)(void*);
+	const int senderIndex =
+		reinterpret_cast<GetSenderIndexFn>(senderVtable[14])(sender);
+
+	*reinterpret_cast<int*>(message + 32) = senderIndex;
+	*reinterpret_cast<unsigned int*>(message + 36) =
+		static_cast<unsigned int>(byteCount);
+	*reinterpret_cast<uint64*>(message + 40) = xuid;
+	*reinterpret_cast<__int64*>(message + 64) = -1;
+	*reinterpret_cast<char**>(message + 112) = voiceData;
+
+	const int clientCount =
+		*reinterpret_cast<int*>(G_engine_r1o + 0x265971C);
+	if (clientCount < 0 || clientCount > 128)
+		return;
+
+	constexpr uintptr_t clientArrayRva = 0x2659738;
+	constexpr uintptr_t clientStride = 0x2BB98;
+
+	using IsActiveFn = bool(__fastcall*)(void*);
+	using GetNetChannelFn = void*(__fastcall*)(void*);
+	using SendNetMessageFn =
+		bool(__fastcall*)(void*, void*, bool, bool, bool);
+
+	for (int index = 0; index < clientCount; ++index) {
+		void* recipient = reinterpret_cast<void*>(
+			G_engine_r1o + clientArrayRva
+			+ static_cast<uintptr_t>(index) * clientStride);
+		if (recipient == sender)
+			continue;
+
+		auto** recipientVtable = *reinterpret_cast<void***>(recipient);
+		if (!reinterpret_cast<IsActiveFn>(recipientVtable[32])(recipient))
+			continue;
+		if (!reinterpret_cast<GetNetChannelFn>(recipientVtable[18])(recipient))
+			continue;
+
+		reinterpret_cast<SendNetMessageFn>(recipientVtable[28])(
+			recipient,
+			message,
+			false,
+			false,
+			true);
+	}
+}
+
 bool __fastcall CGameClient__ProcessVoiceData(void* thisptr, CLC_VoiceData* msg) {
 	char voiceDataBuffer[32767];
 
@@ -219,8 +391,25 @@ bool __fastcall CGameClient__ProcessVoiceData(void* thisptr, CLC_VoiceData* msg)
 		return false;
 
 	auto SV_BroadcastVoiceData = reinterpret_cast<void(__cdecl*)(void*, int, char*, uint64)>(G_engine + 0xEE4D0);
-    if (IsDedicatedServer())
-        SV_BroadcastVoiceData = reinterpret_cast<void(__cdecl*)(void*, int, char*, uint64)>(G_engine_ds + 0x5FB80);
+	if (IsR1ODedicatedServer()) {
+		const ConVarR1* allTalk = OriginalCCVar_FindVar2
+			? OriginalCCVar_FindVar2(cvarinterface, "sv_alltalk")
+			: nullptr;
+		if (thisptr_shifted && allTalk && allTalk->m_Value.m_nValue != 0) {
+			R1OBroadcastVoiceDataAllTalk(
+				thisptr_shifted,
+				(bitsRead + 7) / 8,
+				voiceDataBuffer,
+				*reinterpret_cast<uint64*>(
+					reinterpret_cast<uintptr_t>(msg) + 0x88));
+			return true;
+		}
+		SV_BroadcastVoiceData =
+			reinterpret_cast<void(__cdecl*)(void*, int, char*, uint64)>(
+				G_engine_r1o + 0x152430);
+	}
+	else if (IsDedicatedServer())
+		SV_BroadcastVoiceData = reinterpret_cast<void(__cdecl*)(void*, int, char*, uint64)>(G_engine_ds + 0x5FB80);
 	if (thisptr_shifted)
 		SV_BroadcastVoiceData(thisptr_shifted, (bitsRead + 7) / 8, voiceDataBuffer, *reinterpret_cast<uint64*>(reinterpret_cast<uintptr_t>(msg) + 0x88));
 
@@ -994,13 +1183,38 @@ struct alignas(8) NET_SignOnState : INetMessage
 	int m_numServerPlayers;
 };
 
+static bool TryReadConnectionCompleteOrPreSignon(CNetChan* netChannel, bool* value)
+{
+	if (!netChannel || !value)
+		return false;
+
+	__try {
+		*value = netChannel->m_bConnectionComplete_OrPreSignon;
+		return true;
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) {
+		*value = false;
+		return false;
+	}
+}
+
 bool (*oNET_SignOnState__ReadFromBuffer)(NET_SignOnState* thisptr, bf_read& buffer);
 bool NET_SignOnState__ReadFromBuffer(NET_SignOnState* thisptr, bf_read& buffer)
 {
-	oNET_SignOnState__ReadFromBuffer(thisptr, buffer);
+	if (!thisptr || !oNET_SignOnState__ReadFromBuffer
+		|| !oNET_SignOnState__ReadFromBuffer(thisptr, buffer))
+		return false;
 
 	// Reject duplicate SIGNONSTATE_FULL messages when file transmission is active
-	if (thisptr->GetNetChannel()->m_bConnectionComplete_OrPreSignon && thisptr->m_nSignonState == SIGNONSTATE_FULL) {
+	CNetChan* netChannel = reinterpret_cast<CNetChan*>(thisptr->m_NetChannel);
+	bool connectionCompleteOrPreSignon = false;
+	if (!TryReadConnectionCompleteOrPreSignon(
+			netChannel,
+			&connectionCompleteOrPreSignon))
+		return false;
+
+	if (connectionCompleteOrPreSignon
+		&& thisptr->m_nSignonState == SIGNONSTATE_FULL) {
 		Warning("NET_SignOnState::ReadFromBuffer: blocked attempt at re-ACKing SIGNONSTATE_FULL\n");
 		return false;
 	}
@@ -1021,10 +1235,19 @@ struct alignas(8) NET_StringCmd : INetMessage
 bool (*oNET_StringCmd__ReadFromBuffer)(NET_StringCmd* thisptr, bf_read& buffer);
 bool NET_StringCmd__ReadFromBuffer(NET_StringCmd* thisptr, bf_read& buffer)
 {
-	oNET_StringCmd__ReadFromBuffer(thisptr, buffer);
+	if (!thisptr || !oNET_StringCmd__ReadFromBuffer
+		|| !oNET_StringCmd__ReadFromBuffer(thisptr, buffer))
+		return false;
 
 	// Block stringcmd from inactive client
-	if (!thisptr->GetNetChannel()->m_bConnectionComplete_OrPreSignon) {
+	CNetChan* netChannel = reinterpret_cast<CNetChan*>(thisptr->m_NetChannel);
+	bool connectionCompleteOrPreSignon = false;
+	if (!TryReadConnectionCompleteOrPreSignon(
+			netChannel,
+			&connectionCompleteOrPreSignon))
+		return false;
+
+	if (!connectionCompleteOrPreSignon) {
 		Warning("NET_StringCmd::ReadFromBuffer: blocked stringcmd from inactive client\n");
 		if (thisptr->m_szCommand)
 			thisptr->m_szCommand[0] = 0;
@@ -1033,6 +1256,61 @@ bool NET_StringCmd__ReadFromBuffer(NET_StringCmd* thisptr, bf_read& buffer)
 	}
 
 	return true;
+}
+
+void InstallR1ODedicatedSecurityHooks(uintptr_t engine_base)
+{
+	static bool installed = false;
+	if (installed || !IsR1ODedicatedServer() || !engine_base)
+		return;
+
+	struct HookSpec
+	{
+		uintptr_t rva;
+		void* detour;
+		void** original;
+		const char* name;
+	};
+
+	const HookSpec hooks[] = {
+		{ 0x1426D0, reinterpret_cast<void*>(&CGameClient__ProcessVoiceData),
+			reinterpret_cast<void**>(&oCGameClient__ProcessVoiceData),
+			"CGameClient::ProcessVoiceData" },
+		{ 0x1332B0, reinterpret_cast<void*>(&CBaseClient__IsSplitScreenUser),
+			nullptr,
+			"CBaseClient::IsSplitScreenUser" },
+		{ 0x13D280, reinterpret_cast<void*>(&HookedCBaseClientSetName),
+			reinterpret_cast<void**>(&CBaseClientSetNameOriginal),
+			"CBaseClient::SetName" },
+		{ 0x211110, reinterpret_cast<void*>(&NET_SignOnState__ReadFromBuffer),
+			reinterpret_cast<void**>(&oNET_SignOnState__ReadFromBuffer),
+			"NET_SignOnState::ReadFromBuffer" },
+		{ 0x20CF20, reinterpret_cast<void*>(&NET_StringCmd__ReadFromBuffer),
+			reinterpret_cast<void**>(&oNET_StringCmd__ReadFromBuffer),
+			"NET_StringCmd::ReadFromBuffer" },
+	};
+
+	bool allInstalled = true;
+	for (const HookSpec& hook : hooks) {
+		void* target = reinterpret_cast<void*>(engine_base + hook.rva);
+		MH_STATUS createStatus = MH_CreateHook(target, hook.detour, hook.original);
+		MH_STATUS enableStatus =
+			(createStatus == MH_OK || createStatus == MH_ERROR_ALREADY_CREATED)
+				? MH_EnableHook(target)
+				: createStatus;
+		if (enableStatus != MH_OK && enableStatus != MH_ERROR_ENABLED) {
+			allInstalled = false;
+			Warning(
+				"R1Delta: failed to install R1O dedicated %s security hook "
+				"(create=%d enable=%d target=%p)\n",
+				hook.name,
+				static_cast<int>(createStatus),
+				static_cast<int>(enableStatus),
+				target);
+		}
+	}
+
+	installed = allInstalled;
 }
 
 // Squirrel client command handler

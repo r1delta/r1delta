@@ -1,0 +1,8 @@
+LIBRARY GFSDK_TXAA.win64.dll
+EXPORTS
+    TxaaCloseDX @1
+    TxaaCloseGL @2
+    TxaaOpenDX @3
+    TxaaOpenGL @4
+    TxaaResolveDX @5
+    TxaaResolveGL @6

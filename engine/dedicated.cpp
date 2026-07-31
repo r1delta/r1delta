@@ -759,12 +759,779 @@ int __fastcall hook_CUtlBuffer_GetInt(__int64 buffer_struct_ptr) // a1 is the bu
 	}
 }
 char (*oCServerRemoteAccess__LookupStringValue__6B490)(__int64 a1, unsigned __int8* a2, __int64 a3);
+
+static bool CopyDedicatedCommandLineValue(
+	const char* token,
+	char* output,
+	size_t outputSize)
+{
+	if (!token || !*token || !output || outputSize == 0)
+		return false;
+
+	output[0] = '\0';
+	const char* commandLine = GetCommandLineA();
+	if (!commandLine)
+		return false;
+
+	const size_t tokenLength = strlen(token);
+	for (const char* scan = commandLine; *scan; ++scan) {
+		if (scan != commandLine && scan[-1] != ' ' && scan[-1] != '\t')
+			continue;
+		if (_strnicmp(scan, token, tokenLength) != 0)
+			continue;
+		if (scan[tokenLength] != ' ' && scan[tokenLength] != '\t')
+			continue;
+
+		const char* value = scan + tokenLength;
+		while (*value == ' ' || *value == '\t')
+			++value;
+		if (!*value)
+			return false;
+
+		const char terminator = *value == '"' ? '"' : '\0';
+		if (terminator)
+			++value;
+
+		size_t copied = 0;
+		while (value[copied]
+			&& (terminator
+				? value[copied] != terminator
+				: value[copied] != ' ' && value[copied] != '\t')
+			&& copied + 1 < outputSize) {
+			output[copied] = value[copied];
+			++copied;
+		}
+		output[copied] = '\0';
+		return copied != 0;
+	}
+
+	return false;
+}
+
+static uintptr_t GetDedicatedEngineModule();
+
+static const char* GetDedicatedCurrentPlaylist()
+{
+	if (IsR1ODedicatedServer()) {
+		const uintptr_t engineBase = GetDedicatedEngineModule();
+		if (engineBase) {
+			// TFO Playlist_SetPlaylist stores the selected playlist name in this
+			// fixed 256-byte buffer.  "launchplaylist" is a command rather than
+			// a ConVar in engine_r1o, so the ICvar lookup below cannot recover it.
+			const char* currentPlaylist =
+				reinterpret_cast<const char*>(engineBase + 0x2CC4A00);
+			if (*currentPlaylist)
+				return currentPlaylist;
+		}
+
+		if (cvarinterface) {
+			for (const char* cvarName : { "playlist", "launchplaylist" }) {
+				auto* playlist = OriginalCCVar_FindVar(cvarinterface, cvarName);
+				if (playlist
+					&& playlist->m_Value.m_pszString
+					&& *playlist->m_Value.m_pszString) {
+					return playlist->m_Value.m_pszString;
+				}
+			}
+		}
+
+		static char commandLinePlaylist[128];
+		return CopyDedicatedCommandLineValue(
+			"+launchplaylist",
+			commandLinePlaylist,
+			sizeof(commandLinePlaylist))
+			? commandLinePlaylist
+			: nullptr;
+	}
+
+	return G_engine_ds
+		? reinterpret_cast<char* (*)()>(G_engine_ds + 0xB8C40)()
+		: nullptr;
+}
+
+static uintptr_t GetDedicatedEngineModule()
+{
+	if (IsR1ODedicatedServer())
+		return G_engine_r1o
+			? G_engine_r1o
+			: reinterpret_cast<uintptr_t>(GetModuleHandleA("engine_r1o.dll"));
+
+	return G_engine_ds
+		? G_engine_ds
+		: reinterpret_cast<uintptr_t>(GetModuleHandleA("engine_ds.dll"));
+}
+
+static const char* GetDedicatedCurrentMap()
+{
+	if (cvarinterface) {
+		auto* map = OriginalCCVar_FindVar(cvarinterface, "host_map");
+		if (map && map->m_Value.m_pszString && *map->m_Value.m_pszString)
+			return map->m_Value.m_pszString;
+	}
+
+	static char commandLineMap[128];
+	return CopyDedicatedCommandLineValue(
+		"+map",
+		commandLineMap,
+		sizeof(commandLineMap))
+		? commandLineMap
+		: nullptr;
+}
+
+static int __fastcall R1OGetPlaylistMaxPlayers();
+
 char CServerRemoteAccess__LookupStringValue__6B490(__int64 a1, unsigned __int8* a2, __int64 a3) {
 	if (strcmp_static(a2, "launchplaylist") == 0) {
-		reinterpret_cast<__int64(*)(__int64, const char*)>(G_engine_ds + 0x3268F0)(a3, reinterpret_cast<char* (*)()>(G_engine_ds + 0xB8C40)());
+		const uintptr_t engineBase = GetDedicatedEngineModule();
+		const char* playlist = GetDedicatedCurrentPlaylist();
+		if (!engineBase || !playlist)
+			return false;
+
+		const uintptr_t setOutputStringRva = IsR1ODedicatedServer()
+			? 0x27AD00
+			: 0x3268F0;
+		reinterpret_cast<__int64(*)(__int64, const char*)>(
+			engineBase + setOutputStringRva)(a3, playlist);
 		return true;
 	}
-	return oCServerRemoteAccess__LookupStringValue__6B490(a1, a2, a3);
+	if (IsR1ODedicatedServer() && strcmp_static(a2, "maxplayers") == 0) {
+		const uintptr_t engineBase = GetDedicatedEngineModule();
+		const __int64 selectedPlaylist = engineBase
+			? *reinterpret_cast<const __int64*>(engineBase + 0x2CC48F0)
+			: 0;
+		if (engineBase && selectedPlaylist) {
+			char maxPlayers[16];
+			_snprintf_s(
+				maxPlayers,
+				sizeof(maxPlayers),
+				_TRUNCATE,
+				"%d",
+				R1OGetPlaylistMaxPlayers());
+			reinterpret_cast<__int64(*)(__int64, const char*)>(
+				engineBase + 0x27AD00)(a3, maxPlayers);
+			return true;
+		}
+	}
+	return oCServerRemoteAccess__LookupStringValue__6B490
+		? oCServerRemoteAccess__LookupStringValue__6B490(a1, a2, a3)
+		: false;
+}
+
+using R1OCreateListenSocketFn = bool(__fastcall*)(void*, const void*);
+static R1OCreateListenSocketFn R1OCreateListenSocketOriginal;
+
+using R1OGetPlaylistMaxPlayersFn = int(__fastcall*)();
+static R1OGetPlaylistMaxPlayersFn R1OGetPlaylistMaxPlayersOriginal;
+static uintptr_t s_R1OPlaylistEngineBase;
+
+static int __fastcall R1OGetPlaylistMaxPlayers()
+{
+	const int nativeResult = R1OGetPlaylistMaxPlayersOriginal
+		? R1OGetPlaylistMaxPlayersOriginal()
+		: 1;
+	const uintptr_t engineBase = s_R1OPlaylistEngineBase
+		? s_R1OPlaylistEngineBase
+		: GetDedicatedEngineModule();
+	if (!engineBase)
+		return nativeResult;
+
+	const __int64 selectedPlaylist =
+		*reinterpret_cast<const __int64*>(engineBase + 0x2CC48F0);
+	if (!selectedPlaylist)
+		return nativeResult;
+
+	using FindKeyFn = __int64(__fastcall*)(__int64, const char*, int);
+	using GetStringFn = const char* (__fastcall*)(__int64, const char*, const char*);
+	using ParseIntFn = int(__fastcall*)(const char*);
+	const auto findKey = reinterpret_cast<FindKeyFn>(engineBase + 0x2714F0);
+	const auto getString = reinterpret_cast<GetStringFn>(engineBase + 0x271AD0);
+	const auto parseInt = reinterpret_cast<ParseIntFn>(engineBase + 0x46BBC8);
+
+	const __int64 variables = findKey(selectedPlaylist, "vars", 0);
+	if (!variables)
+		return nativeResult;
+
+	// Keep the native TFO schema authoritative. R1's playlists use the older
+	// spaced spelling, so only consult it when the TFO key is absent.
+	if (findKey(variables, "max_players", 0))
+		return nativeResult;
+
+	const __int64 legacyMaxPlayers = findKey(variables, "max players", 0);
+	if (!legacyMaxPlayers)
+		return nativeResult;
+
+	const char* value = getString(legacyMaxPlayers, nullptr, "");
+	if (!value || !*value)
+		return nativeResult;
+
+	const int parsed = parseInt(value);
+	return parsed > 0 ? parsed : nativeResult;
+}
+
+void ApplyR1OPlaylistAfterServerAutorun(uintptr_t engineBase)
+{
+	if (!IsR1ODedicatedServer() || !engineBase)
+		return;
+
+	const char* currentPlaylist = GetDedicatedCurrentPlaylist();
+	if (!currentPlaylist || !*currentPlaylist)
+		return;
+
+	// launchplaylist is consumed while the R1O server is still being built.
+	// Playlist_SetPlaylist records the selection then, but its live-server
+	// max-client update is gated on server state >= active. Reapply the same
+	// selection after the per-map server VM and autorun pass exist; this is the
+	// same native path used by a later `playlist <name>` console command.
+	char playlistName[256];
+	strncpy_s(playlistName, currentPlaylist, _TRUNCATE);
+	using SetPlaylistFn = void(__fastcall*)(const char*);
+	reinterpret_cast<SetPlaylistFn>(engineBase + 0x1A22D0)(playlistName);
+
+	if (AreR1OFakeDediVerboseLogsEnabled()) {
+		const __int64 server =
+			*reinterpret_cast<const __int64*>(engineBase + 0x2659550);
+		const int maxPlayers = server
+			? *reinterpret_cast<const int*>(server + 460)
+			: 0;
+		Msg(
+			"R1Delta: reapplied R1O playlist after server autorun "
+			"name=%s maxplayers=%d\n",
+			playlistName,
+			maxPlayers);
+	}
+}
+
+void InstallR1OPlaylistCompatibilityHooks(uintptr_t engineBase)
+{
+	if (!IsR1ODedicatedServer() || !engineBase)
+		return;
+
+	static uintptr_t installedTarget;
+	const uintptr_t target = engineBase + 0x1A2900;
+	if (installedTarget == target)
+		return;
+
+	const MH_STATUS createStatus = MH_CreateHook(
+		reinterpret_cast<LPVOID>(target),
+		&R1OGetPlaylistMaxPlayers,
+		reinterpret_cast<LPVOID*>(&R1OGetPlaylistMaxPlayersOriginal));
+	if (createStatus != MH_OK && createStatus != MH_ERROR_ALREADY_CREATED) {
+		Warning(
+			"R1Delta: failed to create R1O playlist max-player compatibility hook (%d)\n",
+			static_cast<int>(createStatus));
+		return;
+	}
+
+	const MH_STATUS enableStatus =
+		MH_EnableHook(reinterpret_cast<LPVOID>(target));
+	if (enableStatus != MH_OK && enableStatus != MH_ERROR_ENABLED) {
+		Warning(
+			"R1Delta: failed to enable R1O playlist max-player compatibility hook (%d)\n",
+			static_cast<int>(enableStatus));
+		return;
+	}
+
+	s_R1OPlaylistEngineBase = engineBase;
+	installedTarget = target;
+}
+
+static bool __fastcall R1OCreateListenSocket(void* socketCreator, const void* desiredAddress)
+{
+	if (!socketCreator || !desiredAddress)
+		return false;
+
+	auto* const listenSocket = reinterpret_cast<SOCKET*>(
+		reinterpret_cast<uintptr_t>(socketCreator) + 40);
+	auto* const storedAddress = reinterpret_cast<unsigned char*>(
+		reinterpret_cast<uintptr_t>(socketCreator) + 48);
+
+	if (*listenSocket != 0 && *listenSocket != INVALID_SOCKET) {
+		closesocket(*listenSocket);
+		*listenSocket = INVALID_SOCKET;
+	}
+	memcpy(storedAddress, desiredAddress, 24);
+
+	const SOCKET socketHandle = socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
+	if (socketHandle == INVALID_SOCKET)
+		return false;
+	*listenSocket = socketHandle;
+
+	int enabled = 1;
+	u_long nonBlocking = 1;
+	int ipv6Only = 0;
+	if (setsockopt(
+			socketHandle,
+			SOL_SOCKET,
+			SO_REUSEADDR,
+			reinterpret_cast<const char*>(&enabled),
+			sizeof(enabled)) == SOCKET_ERROR
+		|| ioctlsocket(socketHandle, FIONBIO, &nonBlocking) == SOCKET_ERROR
+		|| setsockopt(
+			socketHandle,
+			IPPROTO_IPV6,
+			IPV6_V6ONLY,
+			reinterpret_cast<const char*>(&ipv6Only),
+			sizeof(ipv6Only)) == SOCKET_ERROR) {
+		const int error = WSAGetLastError();
+		closesocket(socketHandle);
+		*listenSocket = INVALID_SOCKET;
+		WSASetLastError(error);
+		return false;
+	}
+
+	sockaddr_in6 bindAddress{};
+	bindAddress.sin6_family = AF_INET6;
+	bindAddress.sin6_port = *reinterpret_cast<const unsigned short*>(
+		reinterpret_cast<const unsigned char*>(desiredAddress) + 20);
+	bindAddress.sin6_addr = in6addr_any;
+	if (!bindAddress.sin6_port
+		|| bind(
+			socketHandle,
+			reinterpret_cast<const sockaddr*>(&bindAddress),
+			sizeof(bindAddress)) == SOCKET_ERROR
+		|| listen(socketHandle, 2) == SOCKET_ERROR) {
+		const int error = WSAGetLastError();
+		closesocket(socketHandle);
+		*listenSocket = INVALID_SOCKET;
+		WSASetLastError(error);
+		return false;
+	}
+
+	if (AreR1OFakeDediVerboseLogsEnabled()) {
+		char buffer[192];
+		_snprintf_s(
+			buffer,
+			sizeof(buffer),
+			_TRUNCATE,
+			"R1Delta: R1O remote TCP listener bound port=%u socket=%llu\n",
+			static_cast<unsigned int>(ntohs(bindAddress.sin6_port)),
+			static_cast<unsigned long long>(socketHandle));
+		OutputDebugStringA(buffer);
+	}
+	return true;
+}
+
+bool EnsureR1ORconListenerForPort(uintptr_t engineBase, int port)
+{
+	if (!IsR1ODedicatedServer()
+		|| !engineBase
+		|| port <= 0
+		|| port > 0xFFFF) {
+		return false;
+	}
+
+	const uintptr_t rconServer = engineBase + 0x6D46D0;
+	auto* const listenSocket =
+		reinterpret_cast<SOCKET*>(rconServer + 48);
+	int existingSocketType = 0;
+	int existingBoundPort = 0;
+	bool existingListener = false;
+	if (*listenSocket != 0 && *listenSocket != INVALID_SOCKET) {
+		const SOCKET nativeSocket = *listenSocket;
+		int socketTypeLength = sizeof(existingSocketType);
+		sockaddr_storage boundAddress{};
+		int boundAddressLength = sizeof(boundAddress);
+		if (getsockopt(
+				nativeSocket,
+				SOL_SOCKET,
+				SO_TYPE,
+				reinterpret_cast<char*>(&existingSocketType),
+				&socketTypeLength) == 0
+			&& existingSocketType == SOCK_STREAM
+			&& getsockname(
+				nativeSocket,
+				reinterpret_cast<sockaddr*>(&boundAddress),
+				&boundAddressLength) == 0) {
+			if (boundAddress.ss_family == AF_INET6) {
+				existingBoundPort = ntohs(
+					reinterpret_cast<const sockaddr_in6*>(&boundAddress)->sin6_port);
+			}
+			else if (boundAddress.ss_family == AF_INET) {
+				existingBoundPort = ntohs(
+					reinterpret_cast<const sockaddr_in*>(&boundAddress)->sin_port);
+			}
+			existingListener = existingBoundPort > 0;
+		}
+	}
+	if (existingListener && existingBoundPort == port)
+		return true;
+
+	unsigned char desiredAddress[24]{};
+	*reinterpret_cast<unsigned short*>(desiredAddress + 20) =
+		htons(static_cast<unsigned short>(port));
+	return R1OCreateListenSocket(
+		reinterpret_cast<void*>(rconServer + 8),
+		desiredAddress);
+}
+
+void InstallR1ORemoteAccessHooks(uintptr_t engineBase)
+{
+	if (!IsR1ODedicatedServer() || !engineBase)
+		return;
+
+	using R1OWriteDataRequestFn =
+		void(__fastcall*)(__int64, __int64, int, void*, signed int);
+	using R1OReadIntFn = void(__fastcall*)(__int64, int*);
+	using R1OReadStringFn = void(__fastcall*)(__int64, unsigned char*, __int64);
+	using R1OAllocateReplyFn = int(__fastcall*)(__int64);
+	using R1OWriteIntFn = __int64(__fastcall*)(__int64, int);
+	using R1OWriteFormattedFn = __int64(__fastcall*)(__int64, const char*, ...);
+	using R1OWriteStringFn = __int64(__fastcall*)(__int64, const char*);
+
+	struct R1ORemoteAccessRequestContext {
+		bool active = false;
+		__int64 remoteAccess = 0;
+		__int64 networkListener = 0;
+		int listener = -1;
+		int requestId = 0;
+		int readIntCalls = 0;
+		__int64 inputBuffer = 0;
+	};
+
+	static R1OWriteDataRequestFn originalWriteDataRequest = nullptr;
+	static R1OReadIntFn originalReadInt = nullptr;
+	static thread_local R1ORemoteAccessRequestContext requestContext;
+
+	static const auto writePasswordReply =
+		[](uintptr_t moduleBase,
+			const R1ORemoteAccessRequestContext& context,
+			bool authenticated) {
+			if (!moduleBase || !context.remoteAccess || context.listener < 0)
+				return false;
+
+			const __int64 listenerStateArray =
+				*reinterpret_cast<__int64*>(context.remoteAccess + 64);
+			if (!listenerStateArray)
+				return false;
+
+			*reinterpret_cast<unsigned char*>(
+				listenerStateArray + 40LL * context.listener + 4) =
+				authenticated ? 1 : 0;
+
+			auto allocateReply = reinterpret_cast<R1OAllocateReplyFn>(
+				moduleBase + 0x15BBC0);
+			const int replyIndex = allocateReply(context.remoteAccess + 8);
+			if (replyIndex < 0)
+				return false;
+
+			const __int64 replyArray =
+				*reinterpret_cast<__int64*>(context.remoteAccess + 8);
+			if (!replyArray)
+				return false;
+
+			const __int64 reply = replyArray + 104LL * replyIndex;
+			*reinterpret_cast<int*>(reply + 88) = context.listener;
+
+			auto writeInt = reinterpret_cast<R1OWriteIntFn>(
+				moduleBase + 0x0D00A0);
+			auto writeFormatted = reinterpret_cast<R1OWriteFormattedFn>(
+				moduleBase + 0x27AFF0);
+			auto writeString = reinterpret_cast<R1OWriteStringFn>(
+				moduleBase + 0x27AD00);
+			const auto appendInt = [reply, writeInt, writeFormatted](int value) {
+				if ((*reinterpret_cast<unsigned char*>(reply + 41) & 1) != 0)
+					writeFormatted(reply, "%d", value);
+				else
+					writeInt(reply, value);
+			};
+
+			// This is the stock CServerRemoteAccess password reply:
+			// request id (or -1), response type 2, then two empty strings.
+			appendInt(authenticated ? context.requestId : -1);
+			appendInt(2);
+			writeString(reply, "");
+			writeString(reply, "");
+			return true;
+		};
+
+	static const auto readIntHook =
+		[](const __int64 buffer, int* value) {
+			originalReadInt(buffer, value);
+			if (!value
+				|| !requestContext.active
+				|| requestContext.readIntCalls >= 2) {
+				return;
+			}
+
+			if (!requestContext.inputBuffer)
+				requestContext.inputBuffer = buffer;
+			if (requestContext.inputBuffer != buffer)
+				return;
+
+			++requestContext.readIntCalls;
+			if (*reinterpret_cast<unsigned char*>(buffer + 40) != 0)
+				return;
+
+			if (requestContext.readIntCalls == 1) {
+				requestContext.requestId = *value;
+				return;
+			}
+			if (*value != 3)
+				return;
+
+			char suppliedPassword[512]{};
+			auto readString = reinterpret_cast<R1OReadStringFn>(
+				G_engine_r1o + 0x279D60);
+			readString(
+				buffer,
+				reinterpret_cast<unsigned char*>(suppliedPassword),
+				sizeof(suppliedPassword));
+			if (*reinterpret_cast<unsigned char*>(buffer + 40) != 0)
+				return;
+
+			const char* expectedPassword = "";
+			if (cvarinterface && OriginalCCVar_FindVar) {
+				if (auto* password =
+					OriginalCCVar_FindVar(cvarinterface, "rcon_password")) {
+					if (password->m_Value.m_pszString)
+						expectedPassword = password->m_Value.m_pszString;
+				}
+			}
+
+			const bool authenticated =
+				strcmp(suppliedPassword, expectedPassword) == 0;
+			const bool replyQueued = writePasswordReply(
+					G_engine_r1o,
+					requestContext,
+					authenticated);
+			if (!replyQueued) {
+				Warning(
+					"R1Delta: failed to queue R1O remote-access password reply\n");
+			}
+			if (AreR1OFakeDediVerboseLogsEnabled()) {
+				Msg(
+					"R1Delta: R1O remote-access auth listener=%d request=%d "
+					"authenticated=%d replyQueued=%d\n",
+					requestContext.listener,
+					requestContext.requestId,
+					authenticated ? 1 : 0,
+					replyQueued ? 1 : 0);
+			}
+
+			// Source/CS:GO-compatible clients append an optional user-id
+			// string to the PASS request. Consume it before returning a benign
+			// command type so the stripped TFO switch never sees case 3.
+			char userId[512]{};
+			readString(
+				buffer,
+				reinterpret_cast<unsigned char*>(userId),
+				sizeof(userId));
+			*value = 6;
+		};
+
+	static const auto writeDataRequestHook =
+		[](__int64 remoteAccess,
+			__int64 networkListener,
+			int listener,
+			void* data,
+			signed int dataSize) {
+			if (requestContext.active) {
+				originalWriteDataRequest(
+					remoteAccess,
+					networkListener,
+					listener,
+					data,
+					dataSize);
+				return;
+			}
+
+			const R1ORemoteAccessRequestContext previous = requestContext;
+			requestContext.active = true;
+			requestContext.remoteAccess = remoteAccess;
+			requestContext.networkListener = networkListener;
+			requestContext.listener = listener;
+			requestContext.requestId = 0;
+			requestContext.readIntCalls = 0;
+			requestContext.inputBuffer = 0;
+			if (AreR1OFakeDediVerboseLogsEnabled()) {
+				Msg(
+					"R1Delta: R1O remote-access request listener=%d bytes=%d\n",
+					listener,
+					dataSize);
+			}
+
+			originalWriteDataRequest(
+				remoteAccess,
+				networkListener,
+				listener,
+				data,
+				dataSize);
+			requestContext = previous;
+		};
+
+	static uintptr_t installedTarget = 0;
+	static uintptr_t installedListenSocketTarget = 0;
+	const uintptr_t listenSocketTarget = engineBase + 0x28B100;
+	if (installedListenSocketTarget != listenSocketTarget) {
+		const MH_STATUS listenCreateStatus = MH_CreateHook(
+			reinterpret_cast<LPVOID>(listenSocketTarget),
+			&R1OCreateListenSocket,
+			reinterpret_cast<LPVOID*>(&R1OCreateListenSocketOriginal));
+		if (listenCreateStatus != MH_OK
+			&& listenCreateStatus != MH_ERROR_ALREADY_CREATED) {
+			Warning(
+				"R1Delta: failed to create R1O remote TCP listener hook (%d)\n",
+				static_cast<int>(listenCreateStatus));
+			return;
+		}
+
+		const MH_STATUS listenEnableStatus =
+			MH_EnableHook(reinterpret_cast<LPVOID>(listenSocketTarget));
+		if (listenEnableStatus != MH_OK
+			&& listenEnableStatus != MH_ERROR_ENABLED) {
+			Warning(
+				"R1Delta: failed to enable R1O remote TCP listener hook (%d)\n",
+				static_cast<int>(listenEnableStatus));
+			return;
+		}
+		installedListenSocketTarget = listenSocketTarget;
+	}
+
+	const uintptr_t lookupTarget = engineBase + 0x15AFE0;
+	if (installedTarget == lookupTarget)
+		return;
+
+	const MH_STATUS createStatus = MH_CreateHook(
+		reinterpret_cast<LPVOID>(lookupTarget),
+		&CServerRemoteAccess__LookupStringValue__6B490,
+		reinterpret_cast<LPVOID*>(&oCServerRemoteAccess__LookupStringValue__6B490));
+	if (createStatus != MH_OK && createStatus != MH_ERROR_ALREADY_CREATED) {
+		Warning("R1Delta: failed to create R1O remote-access lookup hook (%d)\n",
+			static_cast<int>(createStatus));
+		return;
+	}
+
+	const MH_STATUS enableStatus =
+		MH_EnableHook(reinterpret_cast<LPVOID>(lookupTarget));
+	if (enableStatus != MH_OK && enableStatus != MH_ERROR_ENABLED) {
+		Warning("R1Delta: failed to enable R1O remote-access lookup hook (%d)\n",
+			static_cast<int>(enableStatus));
+		return;
+	}
+
+	const uintptr_t readIntTarget = engineBase + 0x159380;
+	const MH_STATUS readCreateStatus = MH_CreateHook(
+		reinterpret_cast<LPVOID>(readIntTarget),
+		reinterpret_cast<LPVOID>(+readIntHook),
+		reinterpret_cast<LPVOID*>(&originalReadInt));
+	if (readCreateStatus != MH_OK
+		&& readCreateStatus != MH_ERROR_ALREADY_CREATED) {
+		Warning(
+			"R1Delta: failed to create R1O remote-access CUtlBuffer read hook (%d)\n",
+			static_cast<int>(readCreateStatus));
+		return;
+	}
+
+	const MH_STATUS readEnableStatus =
+		MH_EnableHook(reinterpret_cast<LPVOID>(readIntTarget));
+	if (readEnableStatus != MH_OK && readEnableStatus != MH_ERROR_ENABLED) {
+		Warning(
+			"R1Delta: failed to enable R1O remote-access CUtlBuffer read hook (%d)\n",
+			static_cast<int>(readEnableStatus));
+		return;
+	}
+
+	const uintptr_t writeRequestTarget = engineBase + 0x15A0D0;
+	const MH_STATUS writeCreateStatus = MH_CreateHook(
+		reinterpret_cast<LPVOID>(writeRequestTarget),
+		reinterpret_cast<LPVOID>(+writeDataRequestHook),
+		reinterpret_cast<LPVOID*>(&originalWriteDataRequest));
+	if (writeCreateStatus != MH_OK
+		&& writeCreateStatus != MH_ERROR_ALREADY_CREATED) {
+		Warning(
+			"R1Delta: failed to create R1O remote-access request hook (%d)\n",
+			static_cast<int>(writeCreateStatus));
+		return;
+	}
+
+	const MH_STATUS writeEnableStatus =
+		MH_EnableHook(reinterpret_cast<LPVOID>(writeRequestTarget));
+	if (writeEnableStatus != MH_OK && writeEnableStatus != MH_ERROR_ENABLED) {
+		Warning(
+			"R1Delta: failed to enable R1O remote-access request hook (%d)\n",
+			static_cast<int>(writeEnableStatus));
+		return;
+	}
+
+	installedTarget = lookupTarget;
+	if (AreR1OFakeDediVerboseLogsEnabled()) {
+		OutputDebugStringA(
+			"R1Delta: installed R1O remote-access compatibility hooks\n");
+	}
+}
+
+void EnsureR1ONetConsoleInitialized(uintptr_t engineBase)
+{
+	if (!engineBase)
+		return;
+
+	auto** const manager =
+		reinterpret_cast<void**>(engineBase + 0x22EFDD0);
+	if (*manager) {
+		const auto managerAddress = reinterpret_cast<uintptr_t>(*manager);
+		auto* const listenSocket =
+			reinterpret_cast<SOCKET*>(managerAddress + 48);
+		const bool configured =
+			*reinterpret_cast<unsigned char*>(managerAddress + 360) != 0;
+		if (configured && *listenSocket == INVALID_SOCKET) {
+			reinterpret_cast<R1OCreateListenSocketFn>(
+				engineBase + 0x28B100)(
+					reinterpret_cast<void*>(managerAddress + 8),
+					reinterpret_cast<const void*>(managerAddress + 336));
+		}
+
+		static bool loggedExistingManager = false;
+		if (AreR1OFakeDediVerboseLogsEnabled() && !loggedExistingManager) {
+			loggedExistingManager = true;
+			Msg(
+				"R1Delta: existing R1O CNetConsoleMgr manager=%p "
+				"listenSocket=%lld configured=%d port=%u wsa=%d\n",
+				*manager,
+				static_cast<long long>(*listenSocket),
+				configured ? 1 : 0,
+				static_cast<unsigned int>(_byteswap_ushort(
+					*reinterpret_cast<unsigned short*>(
+						managerAddress + 356))),
+				WSAGetLastError());
+		}
+		return;
+	}
+
+	using EngineOperatorNewFn = void* (__fastcall*)(size_t);
+	using NetConsoleConstructorFn = void* (__fastcall*)(void*);
+	auto engineOperatorNew =
+		reinterpret_cast<EngineOperatorNewFn>(engineBase + 0x34B150);
+	auto constructNetConsole =
+		reinterpret_cast<NetConsoleConstructorFn>(engineBase + 0x1A0770);
+
+	void* storage = engineOperatorNew(0x980);
+	if (!storage) {
+		Warning("R1Delta: failed to allocate R1O CNetConsoleMgr\n");
+		return;
+	}
+
+	*manager = constructNetConsole(storage);
+	if (AreR1OFakeDediVerboseLogsEnabled()) {
+		Msg(
+			"R1Delta: initialized R1O CNetConsoleMgr manager=%p "
+			"listenSocket=%lld configured=%d port=%u wsa=%d\n",
+			*manager,
+			*manager
+				? static_cast<long long>(*reinterpret_cast<SOCKET*>(
+					reinterpret_cast<uintptr_t>(*manager) + 48))
+				: -1LL,
+			*manager
+				&& *reinterpret_cast<unsigned char*>(
+					reinterpret_cast<uintptr_t>(*manager) + 360)
+				? 1
+				: 0,
+			*manager
+				? static_cast<unsigned int>(_byteswap_ushort(
+					*reinterpret_cast<unsigned short*>(
+						reinterpret_cast<uintptr_t>(*manager) + 356)))
+				: 0,
+			WSAGetLastError());
+	}
 }
 typedef __int64(*Host_InitDedicatedType)(__int64 a1, __int64 a2, __int64 a3);
 Host_InitDedicatedType Host_InitDedicatedOriginal;
@@ -1058,54 +1825,212 @@ __int64 __fastcall AddSearchPathDedi(__int64 a1, const char* a2, __int64 a3, uns
 
 // Server info panel hook for dedicated server admin
 void (*oCServerInfoPanel__OnServerDataResponse_14730)(__int64 a1, const char* a2, const char* a3);
+
+void InstallAdminServerHooks(uintptr_t adminServerBase)
+{
+	if (!adminServerBase)
+		return;
+
+	static uintptr_t installedTarget = 0;
+	const uintptr_t target = adminServerBase + 0x14730;
+	if (installedTarget == target)
+		return;
+
+	const MH_STATUS createStatus = MH_CreateHook(
+		reinterpret_cast<LPVOID>(target),
+		&CServerInfoPanel__OnServerDataResponse_14730,
+		reinterpret_cast<LPVOID*>(&oCServerInfoPanel__OnServerDataResponse_14730));
+	if (createStatus != MH_OK && createStatus != MH_ERROR_ALREADY_CREATED) {
+		Warning(
+			"R1Delta: failed to create AdminServer response hook "
+			"(create=%d target=%p)\n",
+			static_cast<int>(createStatus),
+			reinterpret_cast<void*>(target));
+		return;
+	}
+
+	const MH_STATUS enableStatus =
+		MH_EnableHook(reinterpret_cast<LPVOID>(target));
+	if (enableStatus != MH_OK && enableStatus != MH_ERROR_ENABLED) {
+		Warning(
+			"R1Delta: failed to enable AdminServer response hook "
+			"(enable=%d target=%p)\n",
+			static_cast<int>(enableStatus),
+			reinterpret_cast<void*>(target));
+		return;
+	}
+
+	installedTarget = target;
+}
+
+static void* FindAdminServerConfigRow(
+	__int64 panel,
+	uintptr_t adminServer,
+	const char* variableName)
+{
+	if (!panel || !adminServer || !variableName || !*variableName)
+		return nullptr;
+
+	void* listPanel = *reinterpret_cast<void**>(panel + 720);
+	if (!listPanel)
+		return nullptr;
+
+	const uintptr_t listPanelVtable = *reinterpret_cast<uintptr_t*>(listPanel);
+	if (!listPanelVtable)
+		return nullptr;
+
+	using GetItemCountType = int(__fastcall*)(void*);
+	using GetItemType = void* (__fastcall*)(void*, int);
+	using GetKeyValuesNameType = const char* (__fastcall*)(void*);
+
+	const auto getItemCount =
+		*reinterpret_cast<GetItemCountType*>(listPanelVtable + 1960);
+	const auto getItem =
+		*reinterpret_cast<GetItemType*>(listPanelVtable + 1968);
+	const auto getKeyValuesName =
+		reinterpret_cast<GetKeyValuesNameType>(adminServer + 0x18EC0);
+	if (!getItemCount || !getItem || !getKeyValuesName)
+		return nullptr;
+
+	const int itemCount = getItemCount(listPanel);
+	if (itemCount < 0 || itemCount > 1024)
+		return nullptr;
+
+	for (int itemIndex = 0; itemIndex < itemCount; ++itemIndex) {
+		void* row = getItem(listPanel, itemIndex);
+		if (!row)
+			continue;
+
+		const char* rowName = getKeyValuesName(row);
+		if (rowName && _stricmp(rowName, variableName) == 0)
+			return row;
+	}
+
+	return nullptr;
+}
+
+static bool SetAdminServerConfigRowString(
+	__int64 panel,
+	uintptr_t adminServer,
+	const char* variableName,
+	const char* propertyName,
+	const char* value)
+{
+	void* row = FindAdminServerConfigRow(panel, adminServer, variableName);
+	if (!row)
+		return false;
+
+	using SetKeyValuesStringType =
+		void(__fastcall*)(void*, const char*, const char*);
+	const auto setKeyValuesString =
+		reinterpret_cast<SetKeyValuesStringType>(adminServer + 0x1B3A0);
+	setKeyValuesString(row, propertyName, value ? value : "");
+	return true;
+}
+
 void CServerInfoPanel__OnServerDataResponse_14730(__int64 a1, const char* a2, const char* a3) {
-	if (strcmp_static(a2, "maplist") == 0) {
-		static bool bDone = false;
-		if (!bDone) {
-			bDone = true;
-			reinterpret_cast<void(*)(__int64, const char*, const char*)>((uintptr_t(GetModuleHandleA("AdminServer.dll")) + 0xB310))((a1 - 704), "map", a3);
-		}
+	const uintptr_t adminServer = reinterpret_cast<uintptr_t>(GetModuleHandleA("AdminServer.dll"));
+	if (!adminServer || !a2 || !a3) {
+		if (oCServerInfoPanel__OnServerDataResponse_14730)
+			oCServerInfoPanel__OnServerDataResponse_14730(a1, a2, a3);
+		return;
+	}
+
+	if (IsR1ODedicatedServer() && AreR1OFakeDediVerboseLogsEnabled()) {
+		Msg(
+			"R1Delta: R1O AdminServer response name=\"%s\" length=%zu value=\"%.160s\"\n",
+			a2,
+			strlen(a3),
+			a3);
+	}
+
+	const __int64 panel = a1 - 704;
+
+	if (oCServerInfoPanel__OnServerDataResponse_14730)
+		oCServerInfoPanel__OnServerDataResponse_14730(a1, a2, a3);
+
+	if (strcmp_static(a2, "maplist") == 0 && *a3) {
+		SetAdminServerConfigRowString(
+			panel,
+			adminServer,
+			"map",
+			"stringlist",
+			a3);
+		const char* map = GetDedicatedCurrentMap();
+		if (map && *map)
+			SetAdminServerConfigRowString(
+				panel,
+				adminServer,
+				"map",
+				"value",
+				map);
 	}
 
 	if (strcmp_static(a2, "map") == 0 && strlen(a3) > 3) {
-		static bool bDone = false;
-		if (!bDone) {
-			bDone = true;
-			// Get the engine interface
-			void* ret = reinterpret_cast<void*>((reinterpret_cast<CreateInterfaceFn>(GetProcAddress(GetModuleHandleA("engine_ds.dll"), "CreateInterface"))("VENGINE_HLDS_API_VERSION002", 0)));
+		const uintptr_t engineBase = GetDedicatedEngineModule();
+		const auto factory = engineBase
+			? reinterpret_cast<CreateInterfaceFn>(
+				GetProcAddress(reinterpret_cast<HMODULE>(engineBase), "CreateInterface"))
+			: nullptr;
+		void* hldsApi = factory
+			? factory("VENGINE_HLDS_API_VERSION002", nullptr)
+			: nullptr;
 
-			// Prepare a string to hold all playlist names
-			std::string combined_playlists;
-			int v7 = 0;
-			// Get the total number of playlists
-			int playlist_count = (*(int(__fastcall**)(void*))(*(_QWORD*)ret + 152LL))(ret);
+		if (hldsApi) {
+			const uintptr_t vtable = *reinterpret_cast<uintptr_t*>(hldsApi);
+			const auto refreshPlaylists =
+				*reinterpret_cast<void(__fastcall**)(void*)>(vtable + 136);
+			const auto pumpPlaylists =
+				*reinterpret_cast<void(__fastcall**)(void*)>(vtable + 144);
+			const auto getPlaylistCount =
+				*reinterpret_cast<int(__fastcall**)(void*)>(vtable + 152);
+			const auto getPlaylistName =
+				*reinterpret_cast<const char* (__fastcall**)(void*, unsigned int)>(
+					vtable + 160);
 
-			// Check if there are any playlists to process to avoid issues with do-while on count 0
-			if (playlist_count > 0)
-			{
-				// Loop through all playlists
-				do
-				{
-					// Get the name of the current playlist
-					char* playlist = (*(char* (__fastcall**)(void*, _QWORD))(*(_QWORD*)ret + 160LL))(ret, (unsigned int)v7);
-					// Append the playlist name to the combined string
-					combined_playlists += playlist;
-					// Append a newline character
-					combined_playlists += '\n';
-					// Increment index
-					++v7;
-				} while (v7 < playlist_count); // Continue until all playlists are processed
+			refreshPlaylists(hldsApi);
+			int playlistCount = getPlaylistCount(hldsApi);
+			for (int attempt = 0;
+				playlistCount <= 0 && attempt < 64;
+				++attempt) {
+				pumpPlaylists(hldsApi);
+				playlistCount = getPlaylistCount(hldsApi);
 			}
 
-			// Call the target function once with the combined, newline-separated string
-			reinterpret_cast<void(*)(__int64, const char*, const char*)>((uintptr_t(GetModuleHandleA("AdminServer.dll")) + 0xB310))((a1 - 704), "launchplaylist", combined_playlists.c_str());
+			if (IsR1ODedicatedServer() && AreR1OFakeDediVerboseLogsEnabled()) {
+				Msg(
+					"R1Delta: R1O AdminServer HLDS playlist refresh count=%d api=%p\n",
+					playlistCount,
+					hldsApi);
+			}
 
+			if (playlistCount >= 0 && playlistCount <= 512) {
+				std::string combinedPlaylists;
+				for (int index = 0; index < playlistCount; ++index) {
+					const char* playlist = getPlaylistName(
+						hldsApi,
+						static_cast<unsigned int>(index));
+					if (!playlist || !*playlist)
+						continue;
+					combinedPlaylists += playlist;
+					combinedPlaylists += '\n';
+				}
+				SetAdminServerConfigRowString(
+					panel,
+					adminServer,
+					"launchplaylist",
+					"stringlist",
+					combinedPlaylists.c_str());
+			}
 		}
-		char* playlist = reinterpret_cast<char* (*)()>(G_engine_ds + 0xB8C40)();
-		if (playlist) {
-			reinterpret_cast<void(*)(__int64, const char*, const char*)>((uintptr_t(GetModuleHandleA("AdminServer.dll")) + 0xB200))(a1 - 704, "launchplaylist", playlist);
-		}
+
+		const char* playlist = GetDedicatedCurrentPlaylist();
+		if (playlist && *playlist)
+			SetAdminServerConfigRowString(
+				panel,
+				adminServer,
+				"launchplaylist",
+				"value",
+				playlist);
 	}
-
-	oCServerInfoPanel__OnServerDataResponse_14730(a1, a2, a3);
 }

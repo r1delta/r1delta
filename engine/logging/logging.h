@@ -12,6 +12,10 @@ extern "C" __declspec(dllimport) void ConColorMsg(const Color& clr, const char* 
 extern "C" __declspec(dllimport) void ConDMsg(const char* _Printf_format_string_ pMsg, ...);
 extern "C" __declspec(dllimport) void COM_TimestampedLog(const char* _Printf_format_string_ fmt, ...);
 void InitLoggingHooks();
+void InstallR1OConsoleLoggingHooks(uintptr_t engineR1OBase);
+bool PrintR1OConVarDescriptionByName(const char* name);
+bool AreR1OFakeDediVerboseLogsEnabled();
+bool ShouldSuppressR1OFakeDediLogText(const char* text);
 typedef void (*ConVar_PrintDescriptionType)(const ConCommandBaseR1* pVar);
 extern ConVar_PrintDescriptionType ConVar_PrintDescriptionOriginal;
 void ConVar_PrintDescription(const ConCommandBaseR1* pVar);

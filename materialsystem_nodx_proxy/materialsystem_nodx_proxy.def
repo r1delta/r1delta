@@ -1,0 +1,3 @@
+LIBRARY "materialsystem_nodx"
+EXPORTS
+    CreateInterface @1

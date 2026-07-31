@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <string>
 #include "defs.h"
 #include <vector>
@@ -348,6 +348,8 @@ private:
 typedef void* (*CScriptManager__CreateNewVMType)(__int64 a1, int a2, unsigned int a3);
 extern CScriptManager__CreateNewVMType CScriptManager__CreateNewVMOriginal;
 void* CScriptManager__CreateNewVM(__int64 a1, int a2, unsigned int a3);
+bool InstallR1OTFOSquirrelHooks(uintptr_t launcherBase);
+bool RunR1OServerAutorunScriptsIfPending();
 typedef __int64 (*CScriptVM__ctortype)(void* thisptr);
 extern CScriptVM__ctortype CScriptVM__ctororiginal;
 __int64 __fastcall CScriptVM__ctor(void* thisptr);

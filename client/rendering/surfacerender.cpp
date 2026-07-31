@@ -1,9 +1,11 @@
-﻿#include "surfacerender.h"
+#include "surfacerender.h"
 #include "vguisurface.h"
 #include "localize.h"
 #include "load.h"
 #include "squirrel.h"
 #include "engine/logging/logging.h"
+#include "script_error_telemetry.h"
+#include "persistentdata.h"
 
 #include "r1d_version.h"
 #include <vector>
@@ -25,6 +27,7 @@ struct DamageNumber_t
     Vector worldPos;
     float spawnTime;
     bool isCritical;
+    bool isKillShot;
     float batchWindow;
     int sourceID;
 };
@@ -113,6 +116,26 @@ ConVarR1* cvar_delta_damage_numbers_batching = nullptr;
 ConVarR1* cvar_delta_damage_numbers_batching_window = nullptr;
 ConVarR1* cvar_cl_showfps = nullptr;
 ConVarR1* cvar_cl_showpos = nullptr;
+
+static bool g_SurfaceRenderHooksInitialized = false;
+static bool g_WatermarkHudInitComplete = false;
+static bool g_WatermarkProgressBarUpdated = false;
+
+void MarkDeltaWatermarkProgressBarUpdated()
+{
+    g_WatermarkProgressBarUpdated = true;
+}
+
+static bool CanDrawDeltaWatermark()
+{
+    return g_SurfaceRenderHooksInitialized
+        && g_WatermarkHudInitComplete
+        && g_WatermarkProgressBarUpdated
+        && surface
+        && G_localizeIface
+        && cvar_delta_watermark
+        && cvar_delta_watermark->m_Value.m_nValue != 0;
+}
 
 extern ConCommandR1* RegisterConCommand(const char* commandName, void (*callback)(const CCommand&), const char* helpString, int flags);
 
@@ -366,9 +389,11 @@ static MsgWaitForMultipleObjectsFn oMsgWaitForMultipleObjects_WProf = nullptr;
 
 static __int64 WProf_Host_RunFrame(float time)
 {
+    PData_RunFrame();
     ++g_WProfileFrameDepth;
     const auto result = oHost_RunFrame(time);
     --g_WProfileFrameDepth;
+    PData_FinishPendingSave();
     return result;
 }
 
@@ -578,8 +603,7 @@ __int64 __fastcall sub_18028BEA0(__int64 a1, __int64 a2, double a3) {
     auto cl_showpos = GetClShowPosCvar();
     const bool wantsFps = cl_showfps && cl_showfps->m_Value.m_nValue == 1;
     const bool wantsPos = wantsFps && cl_showpos && cl_showpos->m_Value.m_nValue == 1;
-    bool isDrawing = wantsFps &&
-        cvar_delta_watermark && cvar_delta_watermark->m_Value.m_nValue >= 1;
+    bool isDrawing = wantsFps && CanDrawDeltaWatermark();
     g_bIsDrawingFPSPanel = isDrawing;
     // This static remembers what the last state was
     static bool wasDrawing = false;
@@ -618,10 +642,50 @@ static bool g_WatermarkTextureLoaded = false;
 static int g_WatermarkCharWidths[256] = {};
 static int g_WhiteTexture = -1;
 static size_t g_PrivateWorkingSetHighWaterBytes = 0;
+static vgui::HFont g_LegacyWatermarkFont = 0;
+static vgui::HFont g_LegacyWatermarkSmallFont = 0;
+static bool g_DeltaWatermarkModeOneFun = false;
+static constexpr int LegacyWatermarkBaseWide = 1024;
+static constexpr int LegacyWatermarkBaseTall = 768;
+
+static float LegacyWatermarkScale(int screenWidth, int screenHeight)
+{
+    if (screenWidth <= 0 || screenHeight <= 0)
+        return 1.0f;
+
+    const float horizontalScale = static_cast<float>(screenWidth) / LegacyWatermarkBaseWide;
+    const float verticalScale = static_cast<float>(screenHeight) / LegacyWatermarkBaseTall;
+    return std::min(horizontalScale, verticalScale);
+}
+
+static int ScaleLegacyWatermarkValue(int value, float scale)
+{
+    return std::max(1, static_cast<int>(std::lround(value * scale)));
+}
+
+static bool RollDeltaWatermarkModeOneFun()
+{
+    LARGE_INTEGER counter = {};
+    QueryPerformanceCounter(&counter);
+
+    uintptr_t entropy = static_cast<uintptr_t>(counter.QuadPart);
+    entropy ^= static_cast<uintptr_t>(GetTickCount64());
+    entropy ^= static_cast<uintptr_t>(GetCurrentProcessId()) << 17;
+    entropy ^= static_cast<uintptr_t>(GetCurrentThreadId()) << 29;
+    entropy ^= reinterpret_cast<uintptr_t>(&entropy);
+
+    entropy ^= entropy >> 33;
+    entropy *= static_cast<uintptr_t>(0xff51afd7ed558ccdULL);
+    entropy ^= entropy >> 33;
+    entropy *= static_cast<uintptr_t>(0xc4ceb9fe1a85ec53ULL);
+    entropy ^= entropy >> 33;
+
+    return entropy % 1000 == 0;
+}
 
 static const char* VersionWithoutPrefix()
 {
-    const char* version = R1D_VERSION;
+    const char* version = R1D_DISPLAY_VERSION;
     while (*version == 'v' || *version == 'V')
         ++version;
     return version;
@@ -1229,7 +1293,147 @@ static void DrawProfilerPie(int x, int y, int radius)
     }
 }
 
-void DrawWatermark() {
+static void DrawLegacyWatermark()
+{
+    int screenWidth, screenHeight;
+    surface->GetScreenSize(screenWidth, screenHeight);
+    const float scale = LegacyWatermarkScale(screenWidth, screenHeight);
+    const int fontTall = ScaleLegacyWatermarkValue(14, scale);
+    const int smallFontTall = ScaleLegacyWatermarkValue(12, scale);
+
+    if (!g_LegacyWatermarkFont) {
+        g_LegacyWatermarkFont = surface->CreateFont();
+        surface->SetFontGlyphSet(g_LegacyWatermarkFont, "Verdana", fontTall, 650, 0, 0, vgui::FONTFLAG_DROPSHADOW | vgui::FONTFLAG_ANTIALIAS);
+    }
+    if (!g_LegacyWatermarkSmallFont) {
+        g_LegacyWatermarkSmallFont = surface->CreateFont();
+        surface->SetFontGlyphSet(g_LegacyWatermarkSmallFont, "Verdana", smallFontTall, 100, 0, 0, vgui::FONTFLAG_DROPSHADOW | vgui::FONTFLAG_ANTIALIAS);
+    }
+
+    char ansiBuffer1[512];
+    snprintf(ansiBuffer1, sizeof(ansiBuffer1), "R1Delta %s", R1D_DISPLAY_VERSION);
+    wchar_t watermarkText1[512];
+    G_localizeIface->ConvertANSIToUnicode(ansiBuffer1, watermarkText1, sizeof(watermarkText1));
+
+    const char* urlString = "For testing purposes only.";
+    const char* secondData = urlString;
+    if (fpsStringData[0] != '\x00') {
+        secondData = fpsStringData;
+    }
+    wchar_t watermarkText2[4096];
+    G_localizeIface->ConvertANSIToUnicode(secondData, watermarkText2, sizeof(watermarkText2));
+
+    int text1Wide, text1Tall;
+    surface->GetTextSize(g_LegacyWatermarkFont, watermarkText1, text1Wide, text1Tall);
+
+    int maxLineWidth = text1Wide;
+    int totalTextHeight = text1Tall;
+    const int smallFontLineSpacing = ScaleLegacyWatermarkValue(1, scale);
+    const int headingGap = ScaleLegacyWatermarkValue(2, scale);
+
+    wchar_t watermarkText2Copy[4096];
+    wcsncpy_s(watermarkText2Copy, sizeof(watermarkText2Copy) / sizeof(wchar_t), watermarkText2, _TRUNCATE);
+
+    wchar_t* ctx = nullptr;
+    wchar_t* line = wcstok_s(watermarkText2Copy, L"\n", &ctx);
+    int numSmallFontLines = 0;
+
+    while (line) {
+        if (wcslen(line) == 0) {
+            line = wcstok_s(nullptr, L"\n", &ctx);
+            continue;
+        }
+
+        int lineWide, lineTall;
+        surface->GetTextSize(g_LegacyWatermarkSmallFont, line, lineWide, lineTall);
+
+        maxLineWidth = std::max(maxLineWidth, lineWide);
+        if (numSmallFontLines == 0) {
+            totalTextHeight += headingGap;
+        }
+        else {
+            totalTextHeight += smallFontLineSpacing;
+        }
+        totalTextHeight += lineTall;
+
+        numSmallFontLines++;
+        line = wcstok_s(nullptr, L"\n", &ctx);
+    }
+    maxLineWidth /= 2;
+
+    const int textPadding = ScaleLegacyWatermarkValue(5, scale);
+    int bgRectX0 = screenWidth - maxLineWidth - textPadding * 2;
+    int bgRectY0 = 0;
+    int bgRectX1 = screenWidth;
+    int bgRectY1 = totalTextHeight + textPadding;
+    bgRectX0 = std::max(0, bgRectX0);
+
+    surface->DrawSetColor(0, 0, 0, 120);
+    surface->DrawFilledRect(bgRectX0, bgRectY0, bgRectX1, bgRectY1);
+
+    int effectCounter = 1;
+    int fadeWidth = text1Wide - ScaleLegacyWatermarkValue(10, scale);
+    fadeWidth = std::max(ScaleLegacyWatermarkValue(50, scale), fadeWidth);
+    const int fadeTail = ScaleLegacyWatermarkValue(50, scale);
+    int fadeStartX = screenWidth - maxLineWidth - textPadding * 2 - fadeWidth;
+    fadeStartX = std::max(0, fadeStartX);
+
+    for (int i = fadeWidth; i > -fadeTail; --i)
+    {
+        int alpha = 120 - static_cast<int>(effectCounter * 2.0f / scale);
+        alpha = std::max(0, alpha);
+        surface->DrawSetColor(0, 0, 0, alpha);
+
+        int lineX0 = fadeStartX + i;
+        if (lineX0 < 0) continue;
+        if (lineX0 >= bgRectX0) continue;
+
+        int lineY0 = 0;
+        int lineX1 = lineX0 + 1;
+        int lineY1 = bgRectY1;
+        surface->DrawFilledRect(lineX0, lineY0, lineX1, lineY1);
+        effectCounter++;
+    }
+
+    surface->DrawSetTextFont(g_LegacyWatermarkFont);
+    surface->DrawSetTextColor(255, 128, 0, 255);
+    int text1X = screenWidth - text1Wide - textPadding;
+    int text1Y = textPadding / 2;
+    surface->DrawSetTextPos(text1X, text1Y);
+    surface->DrawPrintText(watermarkText1, wcslen(watermarkText1));
+
+    surface->DrawSetTextFont(g_LegacyWatermarkSmallFont);
+    surface->DrawSetTextColor(255, 128, 0, 220);
+
+    int currentY = text1Tall + headingGap;
+
+    ctx = nullptr;
+    line = wcstok_s(watermarkText2, L"\n", &ctx);
+
+    while (line) {
+        if (wcslen(line) == 0) {
+            line = wcstok_s(nullptr, L"\n", &ctx);
+            continue;
+        }
+
+        int lineWide, lineTall;
+        surface->GetTextSize(g_LegacyWatermarkSmallFont, line, lineWide, lineTall);
+
+        int lineX = screenWidth - lineWide - textPadding;
+
+        surface->DrawSetTextPos(lineX, currentY);
+        surface->DrawPrintText(line, wcslen(line));
+
+        currentY += lineTall + smallFontLineSpacing;
+
+        line = wcstok_s(nullptr, L"\n", &ctx);
+    }
+}
+
+static void DrawCurrentWatermark() {
+    if (!CanDrawDeltaWatermark())
+        return;
+
     int screenWidth, screenHeight;
     surface->GetScreenSize(screenWidth, screenHeight);
     g_WatermarkScale = MinecraftGuiScale(screenWidth, screenHeight);
@@ -1411,6 +1615,20 @@ void DrawWatermark() {
         DrawProfilerPie(screenWidth - pieRadius - 10 * unit, screenHeight - pieRadius * 2, pieRadius);
     }
 }
+
+void DrawWatermark() {
+    if (!CanDrawDeltaWatermark())
+        return;
+
+    const int watermarkMode = cvar_delta_watermark->m_Value.m_nValue;
+    if (watermarkMode == 1 && !g_DeltaWatermarkModeOneFun)
+    {
+        DrawLegacyWatermark();
+        return;
+    }
+
+    DrawCurrentWatermark();
+}
 void DrawDamageNumbers()
 {
     if (!cvar_delta_damage_numbers || !cvar_delta_damage_numbers->m_Value.m_nValue)
@@ -1463,7 +1681,8 @@ void DrawDamageNumbers()
                 // Also update the position to the new hit location
                 prevItem.worldPos = item.worldPos;
 
-                prevItem.isCritical = item.isCritical;
+                prevItem.isCritical = prevItem.isCritical || item.isCritical;
+                prevItem.isKillShot = prevItem.isKillShot || item.isKillShot;
 
                 g_DamageNumbers.erase(g_DamageNumbers.begin() + i);
                 continue;
@@ -1513,39 +1732,46 @@ void DrawDamageNumbers()
         // Set font
         surface->DrawSetTextFont(currentFont);
 
-        // Draw red outline by rendering text multiple times with offset
-        // Outline is always red (255, 0, 0)
+        // Draw the outline by rendering text multiple times with offset
         int outlineOffsets[][2] = {
             {-1, -1}, {0, -1}, {1, -1},
             {-1,  0},          {1,  0},
             {-1,  1}, {0,  1}, {1,  1}
         };
 
-        // Draw outline in red
-        surface->DrawSetTextColor(255, 0, 0, alpha);
+        if (item.isCritical)
+            surface->DrawSetTextColor(255, 128, 0, alpha);
+        else
+            surface->DrawSetTextColor(255, 0, 0, alpha);
         for (int j = 0; j < 8; j++)
         {
             surface->DrawSetTextPos(x + outlineOffsets[j][0], y + outlineOffsets[j][1]);
             surface->DrawPrintText(wBuf, wcslen(wBuf));
         }
 
-        // Draw main text
-        // Crits: black text, Non-crits: white text
-        if (item.isCritical)
-            surface->DrawSetTextColor(0, 0, 0, alpha);  // Black for crits
+        if (item.isKillShot)
+            surface->DrawSetTextColor(0, 0, 0, alpha);
         else
-            surface->DrawSetTextColor(255, 255, 255, alpha);  // White for non-crits
+            surface->DrawSetTextColor(255, 255, 255, alpha);
 
         surface->DrawSetTextPos(x, y);
         surface->DrawPrintText(wBuf, wcslen(wBuf));
     }
 }
 
-#define NUM_STATES 3
+constexpr size_t SCRIPT_ERROR_STATE_COUNT = static_cast<size_t>(ScriptErrorTelemetry::VmContext::Count);
 ConVarR1* cvar_delta_script_errors_notification = nullptr;
 vgui::HFont ScriptErrorNotificationFont = 0;
 vgui::HTexture ScriptErrorWarningTexture = 0;
-float LastScriptError[NUM_STATES] = { 0.f, 0.f, 0.f };
+
+struct DisplayedScriptError
+{
+    uint64_t sequence = 0;
+    float receivedAt = 0.0f;
+};
+
+std::array<DisplayedScriptError, SCRIPT_ERROR_STATE_COUNT> DisplayedScriptErrors{};
+
 void DrawScriptErrors() {
     if (!ScriptErrorNotificationFont) {
         ScriptErrorNotificationFont = surface->CreateFont();
@@ -1556,23 +1782,50 @@ void DrawScriptErrors() {
         surface->DrawSetTextureFile(ScriptErrorWarningTexture, "ui/menu/r1delta/error", 0, false);
     }
 
-    if (!cvar_delta_script_errors_notification->m_Value.m_nValue) return;
+    if (!cvar_delta_script_errors_notification || !cvar_delta_script_errors_notification->m_Value.m_nValue) return;
 
     int idealy = 32;
-    int height = 30;
-    float endTime = Plat_FloatTime() - 10;
-    float recent = Plat_FloatTime() - 0.5f;
+    constexpr int height = 30;
+    const float now = Plat_FloatTime();
+    const float endTime = now - 10.0f;
+    const float recent = now - 0.5f;
 
-    const wchar_t* ScriptErrorStates[NUM_STATES] = { L"Server", L"Client", L"UI" };
+    constexpr ScriptErrorTelemetry::VmContext contexts[SCRIPT_ERROR_STATE_COUNT] = {
+        ScriptErrorTelemetry::VmContext::Server,
+        ScriptErrorTelemetry::VmContext::Client,
+        ScriptErrorTelemetry::VmContext::Ui
+    };
+    const wchar_t* contextNames[SCRIPT_ERROR_STATE_COUNT] = { L"Server", L"Client", L"UI" };
 
-    for (size_t i = 0; i < NUM_STATES; i++) {
-        if (!LastScriptError[i]) continue;
+    for (size_t i = 0; i < SCRIPT_ERROR_STATE_COUNT; ++i) {
+        ScriptErrorTelemetry::NotificationSnapshot snapshot;
+        const bool hasSnapshot = ScriptErrorTelemetry::GetNotificationSnapshot(contexts[i], snapshot);
+        DisplayedScriptError& displayed = DisplayedScriptErrors[i];
+        if (hasSnapshot && snapshot.sequence != displayed.sequence) {
+            displayed.sequence = snapshot.sequence;
+            displayed.receivedAt = now;
+        }
+        if (displayed.receivedAt == 0.0f)
+            continue;
+        if (displayed.receivedAt < endTime) {
+            displayed.receivedAt = 0.0f;
+            continue;
+        }
 
         int x = 32;
         int y = idealy;
+        wchar_t text[128]{};
+        if (hasSnapshot && snapshot.sequence == displayed.sequence && snapshot.hasResult) {
+            wchar_t code[53]{};
+            for (size_t codeIndex = 0; codeIndex + 1 < sizeof(code) / sizeof(code[0]) && snapshot.code[codeIndex]; ++codeIndex)
+                code[codeIndex] = static_cast<unsigned char>(snapshot.code[codeIndex]);
+            swprintf_s(text, sizeof(text) / sizeof(text[0]), L"Internal %ls script error (#%ls%ls)",
+                contextNames[i], code, snapshot.isNew ? L"!" : L"");
+        }
+        else {
+            swprintf_s(text, sizeof(text) / sizeof(text[0]), L"Internal %ls script error", contextNames[i]);
+        }
 
-        wchar_t text[64] = { 0,0 };
-        wsprintf(text, L"Something is creating %ws script errors", ScriptErrorStates[i]);
         int textWidth, textHeight;
         surface->GetTextSize(ScriptErrorNotificationFont, text, textWidth, textHeight);
         int width = textWidth + 48;
@@ -1582,8 +1835,8 @@ void DrawScriptErrors() {
         surface->DrawSetColor(240, 240, 240, 255);
         surface->DrawFilledRect(x, y, x + width, y + height);
 
-        if (LastScriptError[i] > recent) {
-            surface->DrawSetColor(255, 200, 0, (LastScriptError[i] - recent) * 510);
+        if (displayed.receivedAt > recent) {
+            surface->DrawSetColor(255, 200, 0, static_cast<int>((displayed.receivedAt - recent) * 510.0f));
             surface->DrawFilledRect(x, y, x + width, y + height);
         }
 
@@ -1592,17 +1845,12 @@ void DrawScriptErrors() {
         surface->DrawSetTextPos(x + 34, y + 8);
         surface->DrawPrintText(text, wcslen(text));
 
-        surface->DrawSetColor(255, 255, 255, 150 + sinf(y + Plat_FloatTime() * 30) * 100);
+        surface->DrawSetColor(255, 255, 255, 150 + sinf(y + now * 30) * 100);
         surface->DrawSetTexture(ScriptErrorWarningTexture);
         surface->DrawTexturedRect(x + 6, y + 6, x + 6 + 16, y + 6 + 16);
 
         idealy += 40;
-
-        if (LastScriptError[i] < endTime) LastScriptError[i] = 0;
     }
-}
-void OnScriptError(ScriptContext state) {
-    LastScriptError[state] = Plat_FloatTime();
 }
 
 void (*oPaintTraverse)(uintptr_t thisptr, vgui::VPANEL panel, bool forceRepaint, bool allowForce);
@@ -1624,35 +1872,69 @@ void PaintTraverse(uintptr_t thisptr, vgui::VPANEL paintPanel, bool forceRepaint
 
     if (paintPanel == inGameRenderPanel)
     {
-        DrawWatermark();
+        if (CanDrawDeltaWatermark())
+            DrawWatermark();
         DrawDamageNumbers();
     }
     if (paintPanel == inGameRenderPanel || paintPanel == menuRenderPanel) DrawScriptErrors();
 }
 
+static int s_ClientScriptErrorDetailBudget = 32;
 uint64_t(*oOnClientScriptErrorHook)(uintptr_t sqstate);
 uint64_t OnClientScriptErrorHook(uintptr_t sqstate) {
     uintptr_t intobj = *(uintptr_t*)(sqstate + 0xE8);
     const char* stateName = (const char*)(intobj + 0x4174);
+    ScriptErrorTelemetry::VmContext context = ScriptErrorTelemetry::VmContext::Server;
+    if (stateName && stateName[0] == 'C')
+        context = ScriptErrorTelemetry::VmContext::Client;
+    else if (stateName && stateName[0] == 'U')
+        context = ScriptErrorTelemetry::VmContext::Ui;
+    ScriptErrorTelemetry::BeginErrorBlock(context);
 
-    ScriptContext state = SCRIPT_CONTEXT_SERVER;
-    if (stateName[0] == 'C') state = SCRIPT_CONTEXT_CLIENT;
-    if (stateName[0] == 'U') state = SCRIPT_CONTEXT_UI;
-    OnScriptError(state);
+    if (s_ClientScriptErrorDetailBudget > 0) {
+        --s_ClientScriptErrorDetailBudget;
+        const char* err = "<unknown>";
+        int stackTop = -1;
+        int stackBase = -1;
+        int errType = 0;
+        __try {
+            stackBase = *reinterpret_cast<int*>(sqstate + 84);
+            stackTop = *reinterpret_cast<int*>(sqstate + 80);
+            uintptr_t obj = *reinterpret_cast<uintptr_t*>(sqstate + 48) + 16ull * static_cast<unsigned int>(stackBase + 1);
+            errType = *reinterpret_cast<int*>(obj);
+            if (errType == 134217744)
+                err = reinterpret_cast<const char*>(*reinterpret_cast<uintptr_t*>(obj + 8) + 56ull);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            err = "<exception reading script error>";
+        }
 
-    return oOnClientScriptErrorHook(sqstate);
+        char buffer[1024];
+        _snprintf_s(buffer, sizeof(buffer), _TRUNCATE,
+            "R1Delta: client script error detail state=%s sqvm=%p intobj=%p top=%d base=%d errType=0x%x err=\"%s\" budget=%d\n",
+            stateName ? stateName : "<null>", reinterpret_cast<void*>(sqstate), reinterpret_cast<void*>(intobj),
+            stackTop, stackBase, errType, err ? err : "<null>", s_ClientScriptErrorDetailBudget);
+        OutputDebugStringA(buffer);
+    }
+
+    const uint64_t result = oOnClientScriptErrorHook(sqstate);
+    ScriptErrorTelemetry::EndErrorBlock(context);
+    return result;
 }
 
 void(*oOnScreenSizeChanged)(uintptr_t thisptr, int w, int h);
 void OnScreenSizeChanged(uintptr_t thisptr, int w, int h) {
     oOnScreenSizeChanged(thisptr, w, h);
+    g_LegacyWatermarkFont = g_LegacyWatermarkSmallFont = 0;
     ScriptErrorNotificationFont = DamageNumberFont = DamageNumberCritFont = 0;
 }
 
 __int64(*oCPluginHudMessage_ctor)(uintptr_t thisptr, uintptr_t panel);
 __int64 CPluginHudMessage_ctor(uintptr_t thisptr, uintptr_t ppanel) {
     auto engineVgui = ((void* (__fastcall*)())(G_engine + 0x21E670))();
-    return oCPluginHudMessage_ctor(thisptr, (*(__int64(__fastcall**)(void*, int))(*(_QWORD*)engineVgui + 8LL))(engineVgui, 5));
+    const __int64 result = oCPluginHudMessage_ctor(thisptr, (*(__int64(__fastcall**)(void*, int))(*(_QWORD*)engineVgui + 8LL))(engineVgui, 5));
+    g_WatermarkHudInitComplete = true;
+    return result;
 }
 
 extern ConVarR1* RegisterConVar(const char* name, const char* value, int flags, const char* helpString);
@@ -1667,6 +1949,7 @@ SQInteger Script_AddDamageNumber(HSQUIRRELVM v) {
     SQFloat damage;
     Vector pos;
     SQBool isCritical;
+    SQBool isKillShot;
     SQInteger sourceID = -1;
 
     // Arg 2: damage (float)
@@ -1683,8 +1966,12 @@ SQInteger Script_AddDamageNumber(HSQUIRRELVM v) {
     if (SQ_FAILED(sq_getbool(r1_vm, v, 6, &isCritical)))
         return sq_throwerror(v, "Invalid argument 5: expected bool isCritical");
 
-    // Arg 7: sourceID (optional int) - for batching
-    sq_getinteger(r1_vm, v, 7, &sourceID);
+    // Arg 7: isKillShot (bool)
+    if (SQ_FAILED(sq_getbool(r1_vm, v, 7, &isKillShot)))
+        return sq_throwerror(v, "Invalid argument 6: expected bool isKillShot");
+
+    // Arg 8: sourceID (optional int) - for batching
+    sq_getinteger(r1_vm, v, 8, &sourceID);
 
     // Block damage numbers at or very close to the origin (invalid position)
     const float EPSILON = 0.1f;
@@ -1697,6 +1984,7 @@ SQInteger Script_AddDamageNumber(HSQUIRRELVM v) {
     dmgNum.worldPos = pos;
     dmgNum.spawnTime = Plat_FloatTime();
     dmgNum.isCritical = isCritical != 0;
+    dmgNum.isKillShot = isKillShot != 0;
 
     // Set batching parameters
     dmgNum.batchWindow = cvar_delta_damage_numbers_batching && cvar_delta_damage_numbers_batching->m_Value.m_nValue
@@ -1715,6 +2003,9 @@ void FontSizeChangeCallback(IConVar* var, const char* pOldValue, float flOldValu
 }
 
 void SetupSurfaceRenderHooks() {
+    g_SurfaceRenderHooksInitialized = false;
+    g_WatermarkHudInitComplete = true;
+    g_DeltaWatermarkModeOneFun = false; //RollDeltaWatermarkModeOneFun();
     cvar_delta_watermark = RegisterConVar("delta_watermark", "1", FCVAR_GAMEDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Show R1Delta watermark with version information");
     cvar_delta_damage_numbers = RegisterConVar("delta_damage_numbers", "0", FCVAR_GAMEDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Show TF2-style floating damage numbers on hit.");
     cvar_delta_damage_numbers_lifetime = RegisterConVar("delta_damage_numbers_lifetime", "1.5", FCVAR_GAMEDLL, "How long damage numbers stay on screen.");
@@ -1744,9 +2035,12 @@ void SetupSurfaceRenderHooks() {
 
     // Initialize GetVectorInScreenSpace function pointer
     GetVectorInScreenSpace_ptr = reinterpret_cast<GetVectorInScreenSpace_t>(G_client + 0x0105170);
+
+    g_SurfaceRenderHooksInitialized = true;
 }
 
 void SetupSquirrelErrorNotificationHooks() {
+    ScriptErrorTelemetry::Initialize();
     cvar_delta_script_errors_notification = RegisterConVar("delta_script_errors_notification", "1", FCVAR_GAMEDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Show a notification whenever a script error occurs");
 
     auto launcher = (uintptr_t)GetModuleHandleA("launcher.dll");

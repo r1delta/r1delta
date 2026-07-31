@@ -850,8 +850,17 @@ namespace launcher_ex
                 return;
             }
 
-            // 7. Ensure VCPP Redistributables are installed
-            VisualCppInstaller.EnsureVisualCppRedistributables(); // Assuming this class exists and works in R1Delta namespace
+            // 7. Ensure the native runtime prerequisites are installed.
+            string prerequisiteError;
+            if (!NativePrerequisiteInstaller.EnsureNativePrerequisites(out prerequisiteError))
+            {
+                ShowError(
+                    prerequisiteError
+                    + "\n\nR1Delta was not launched because its native runtime prerequisites are incomplete.",
+                    "R1Delta Prerequisite Error");
+                Shutdown(1);
+                return;
+            }
 
             // 8. Force High Performance GPU (unchanged logic)
             IntPtr hNvApi = LoadLibraryW("nvapi64.dll"); // Attempt to load nvapi

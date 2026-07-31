@@ -1,0 +1,25 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "r1delta-script-errors",
+  "main": "src/index.js",
+  "compatibility_date": "2026-07-26",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "r1delta-script-errors",
+      "database_id": "8bd23459-519e-4a8d-8860-ddbb6b439223",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "REPORT_RATE_LIMIT",
+      "namespace_id": "7262601",
+      "simple": {
+        "limit": 60,
+        "period": 60
+      }
+    }
+  ]
+}

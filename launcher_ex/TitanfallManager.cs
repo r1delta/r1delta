@@ -1,4 +1,4 @@
-﻿// TitanfallManager.cs
+// TitanfallManager.cs
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -164,6 +164,7 @@ namespace R1Delta
     public static class TitanfallManager
     {
         internal const string ValidationFileRelativePath = @"vpk\client_mp_common.bsp.pak000_000.vpk";
+        private const int MaxVerificationDownloadPasses = 3;
 
         /// <summary>
         /// Tries to locate an existing valid Titanfall directory via registry or custom finder.
@@ -345,25 +346,35 @@ namespace R1Delta
                         Directory.CreateDirectory(dir);
 
                         bool needs = true;
-                        long currentSize = 0; // Track current size for initial progress
+                        long currentSize = 0;
                         if (File.Exists(dest))
                         {
                             try
                             {
                                 var fi = new FileInfo(dest);
-                                currentSize = fi.Length; // Store actual size
+                                currentSize = fi.Length;
                                 if (fi.Length == knownSize)
                                 {
-                                    if (knownSize == 0) // Empty files are always considered valid if size matches
+                                    if (knownSize == 0 || ComputeXxHash64(dest, externalCts) == expectedHash)
+                                    {
                                         needs = false;
-                                    else if (ComputeXxHash64(dest, externalCts) == expectedHash)
-                                        needs = false;
+                                    }
                                     else
-                                        Debug.WriteLine($"Checksum mismatch: {relPath}");
+                                    {
+                                        Debug.WriteLine($"Checksum mismatch, restarting cleanly: {relPath}");
+                                        DeleteDownloadArtifacts(dest);
+                                        currentSize = 0;
+                                    }
+                                }
+                                else if (fi.Length > knownSize)
+                                {
+                                    Debug.WriteLine($"Oversized file, restarting cleanly: {relPath} (Expected: {knownSize}, Got: {fi.Length})");
+                                    DeleteDownloadArtifacts(dest);
+                                    currentSize = 0;
                                 }
                                 else
                                 {
-                                    Debug.WriteLine($"Size mismatch: {relPath} (Expected: {knownSize}, Got: {fi.Length})");
+                                    Debug.WriteLine($"Resuming partial file: {relPath} ({fi.Length} / {knownSize})");
                                 }
                             }
                             catch (OperationCanceledException)
@@ -372,9 +383,14 @@ namespace R1Delta
                             }
                             catch (Exception ex)
                             {
-                                Debug.WriteLine($"Warning verifying {dest}: {ex.Message}");
-                                // Assume needs download if verification fails
+                                Debug.WriteLine($"Unable to validate existing file, restarting cleanly: {dest}: {ex.Message}");
+                                DeleteDownloadArtifacts(dest);
+                                currentSize = 0;
                             }
+                        }
+                        else
+                        {
+                            DeleteFileIfExists(dest + ".aria2");
                         }
 
                         fileTotalBytes[dest] = knownSize;
@@ -427,8 +443,11 @@ namespace R1Delta
             var token = linked.Token;
             var downloadedFilesTotal = toDownload.Sum(item => item.Size);
             var validationProgress = 0L;
+            var validatedFileBytes = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
             var validationWindow = Math.Max(1L, totalNeeded / 100L);
             var downloadCap = Math.Max(0L, totalNeeded - validationWindow);
+            var onePercentCeiling = totalNeeded / 100L + (totalNeeded % 100L == 0 ? 0L : 1L);
+            var preVerificationProgressCap = Math.Max(0L, totalNeeded - Math.Max(1L, onePercentCeiling));
 
             long ProjectProgress(long downloadedBytes, long validatedBytes)
             {
@@ -443,11 +462,9 @@ namespace R1Delta
             void ReportAggregateProgress(long rawOverallProgress, double speed)
             {
                 var projectedProgress = ProjectProgress(rawOverallProgress, validationProgress);
-                if (projectedProgress < maxReportedOverallProgress)
-                    return;
-
-                maxReportedOverallProgress = projectedProgress;
-                progressUI.ReportProgress(projectedProgress, totalNeeded, speed);
+                projectedProgress = Math.Min(projectedProgress, preVerificationProgressCap);
+                maxReportedOverallProgress = Math.Max(maxReportedOverallProgress, projectedProgress);
+                progressUI.ReportProgress(maxReportedOverallProgress, totalNeeded, Math.Max(0, speed));
                 lastUpdate = stopwatch.Elapsed.TotalSeconds;
             }
 
@@ -492,60 +509,129 @@ namespace R1Delta
                     }
                 };
 
-                var downloadRequests = toDownload.Select(item => new FastDownloadService.DownloadRequest
+                var pendingDownloads = toDownload.ToList();
+                for (var verificationPass = 1; verificationPass <= MaxVerificationDownloadPasses; verificationPass++)
                 {
-                    Url = item.Url,
-                    DestinationPath = item.Dest
-                }).ToList();
-
-                Debug.WriteLine($"Starting one aria2c batch for {downloadRequests.Count} files.");
-                await dl.DownloadFilesAsync(downloadRequests, token).ConfigureAwait(false);
-
-                lock (progressLock)
-                {
-                    foreach (var item in toDownload)
-                        fileReceivedBytes[item.Dest] = item.Size;
-
-                    overallProgress = fileReceivedBytes.Values.Sum();
-                    overallProgress = Clamp(overallProgress, 0, totalNeeded);
-                    ReportAggregateProgress(overallProgress, 0);
-                }
-
-                Debug.WriteLine("Downloads complete. Verifying downloaded files...");
-                foreach (var item in toDownload)
-                {
-                    token.ThrowIfCancellationRequested();
-
-                    var fi = new FileInfo(item.Dest);
-                    if (fi.Length != item.Size)
+                    var downloadRequests = pendingDownloads.Select(item => new FastDownloadService.DownloadRequest
                     {
-                        throw new IOException($"Size mismatch after download for {Path.GetFileName(item.Dest)}: expected {item.Size}, got {fi.Length}");
+                        Url = item.Url,
+                        DestinationPath = item.Dest
+                    }).ToList();
+
+                    Debug.WriteLine($"Starting aria2c batch for {downloadRequests.Count} files (verification pass {verificationPass}/{MaxVerificationDownloadPasses}).");
+                    await dl.DownloadFilesAsync(downloadRequests, token).ConfigureAwait(false);
+
+                    lock (progressLock)
+                    {
+                        foreach (var item in pendingDownloads)
+                            fileReceivedBytes[item.Dest] = item.Size;
+
+                        overallProgress = Clamp(fileReceivedBytes.Values.Sum(), 0, totalNeeded);
+                        ReportAggregateProgress(overallProgress, 0);
                     }
 
-                    if (item.Size > 0)
+                    Debug.WriteLine($"Downloads complete. Verifying pass {verificationPass}/{MaxVerificationDownloadPasses}...");
+                    var failedDownloads = new List<(string Url, string Dest, ulong Hash, long Size)>();
+                    var failureMessages = new List<string>();
+
+                    foreach (var item in pendingDownloads)
                     {
-                        var verifiedForFile = 0L;
-                        var actualHash = ComputeXxHash64(item.Dest, token, bytesRead =>
-                        {
-                            lock (progressLock)
-                            {
-                                var delta = bytesRead - verifiedForFile;
-                                if (delta <= 0)
-                                    return;
+                        token.ThrowIfCancellationRequested();
 
-                                verifiedForFile = bytesRead;
-                                validationProgress = Clamp(validationProgress + delta, 0, downloadedFilesTotal);
-                                ReportAggregateProgress(overallProgress, 0);
-                            }
-                        });
-
-                        if (actualHash != item.Hash)
+                        lock (progressLock)
                         {
-                            throw new IOException($"Checksum mismatch after download for {Path.GetFileName(item.Dest)}: expected {item.Hash:X}, got {actualHash:X}");
+                            if (validatedFileBytes.TryGetValue(item.Dest, out var previousValidated))
+                                validationProgress = Math.Max(0, validationProgress - previousValidated);
+                            validatedFileBytes[item.Dest] = 0;
                         }
+
+                        string failureMessage = null;
+                        try
+                        {
+                            if (!File.Exists(item.Dest))
+                            {
+                                failureMessage = $"{Path.GetFileName(item.Dest)} is missing after download";
+                            }
+                            else
+                            {
+                                var fi = new FileInfo(item.Dest);
+                                if (fi.Length != item.Size)
+                                {
+                                    failureMessage = $"{Path.GetFileName(item.Dest)} has size {fi.Length}, expected {item.Size}";
+                                }
+                                else if (item.Size > 0)
+                                {
+                                    var actualHash = ComputeXxHash64(item.Dest, token, bytesRead =>
+                                    {
+                                        lock (progressLock)
+                                        {
+                                            var previous = validatedFileBytes[item.Dest];
+                                            var delta = bytesRead - previous;
+                                            if (delta <= 0)
+                                                return;
+
+                                            validatedFileBytes[item.Dest] = bytesRead;
+                                            validationProgress = Clamp(validationProgress + delta, 0, downloadedFilesTotal);
+                                            ReportAggregateProgress(overallProgress, 0);
+                                        }
+                                    });
+
+                                    if (actualHash != item.Hash)
+                                        failureMessage = $"{Path.GetFileName(item.Dest)} checksum is {actualHash:X}, expected {item.Hash:X}";
+                                }
+                            }
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            throw;
+                        }
+                        catch (Exception ex)
+                        {
+                            failureMessage = $"{Path.GetFileName(item.Dest)} could not be verified: {ex.Message}";
+                        }
+
+                        if (failureMessage == null)
+                        {
+                            Debug.WriteLine($"Verified {Path.GetFileName(item.Dest)} OK.");
+                            continue;
+                        }
+
+                        failedDownloads.Add(item);
+                        failureMessages.Add(failureMessage);
+                        Debug.WriteLine($"Verification failed: {failureMessage}");
                     }
 
-                    Debug.WriteLine($"Verified {Path.GetFileName(item.Dest)} OK.");
+                    if (failedDownloads.Count == 0)
+                        break;
+
+                    foreach (var item in failedDownloads)
+                        DeleteDownloadArtifacts(item.Dest);
+
+                    if (verificationPass == MaxVerificationDownloadPasses)
+                    {
+                        throw new IOException($"Verification failed after {MaxVerificationDownloadPasses} download/verification passes: {string.Join("; ", failureMessages)}");
+                    }
+
+                    lock (progressLock)
+                    {
+                        foreach (var item in failedDownloads)
+                        {
+                            fileReceivedBytes[item.Dest] = 0;
+                            if (validatedFileBytes.TryGetValue(item.Dest, out var previousValidated))
+                            {
+                                validationProgress = Math.Max(0, validationProgress - previousValidated);
+                                validatedFileBytes[item.Dest] = 0;
+                            }
+                        }
+
+                        overallProgress = Clamp(fileReceivedBytes.Values.Sum(), 0, totalNeeded);
+                        history.Clear();
+                        RecordSpeedSample(overallProgress);
+                        ReportAggregateProgress(overallProgress, 0);
+                    }
+
+                    pendingDownloads = failedDownloads;
+                    Debug.WriteLine($"Retrying {pendingDownloads.Count} file(s) after clean verification repair.");
                 }
 
                 progressUI.ReportProgress(totalNeeded, totalNeeded, 0);
@@ -624,18 +710,16 @@ namespace R1Delta
             }
         }
 
-        private static void TryDeleteFile(string filePath)
+        private static void DeleteDownloadArtifacts(string filePath)
         {
-            if (string.IsNullOrEmpty(filePath)) return;
-            try
-            {
-                if (File.Exists(filePath))
-                    File.Delete(filePath);
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Warning: Failed to delete '{filePath}': {ex.Message}");
-            }
+            DeleteFileIfExists(filePath);
+            DeleteFileIfExists(filePath + ".aria2");
+        }
+
+        private static void DeleteFileIfExists(string filePath)
+        {
+            if (File.Exists(filePath))
+                File.Delete(filePath);
         }
 
         /// <summary>
