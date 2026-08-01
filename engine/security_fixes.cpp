@@ -1159,69 +1159,6 @@ void __fastcall HookedCBaseClientSetName(__int64 thisptr, const char* name)
 	CBaseClientSetNameOriginal(thisptr, sanitizedName);
 }
 
-// Sign-on state validation
-enum SIGNONSTATE : int {
-	SIGNONSTATE_NONE = 0,
-	SIGNONSTATE_CHALLENGE = 1,
-	SIGNONSTATE_CONNECTED = 2,
-	SIGNONSTATE_NEW = 3,
-	SIGNONSTATE_PRESPAWN = 4,
-	SIGNONSTATE_GETTING_DATA = 5,
-	SIGNONSTATE_SPAWN = 6,
-	SIGNONSTATE_FIRST_SNAP = 7,
-	SIGNONSTATE_FULL = 8,
-	SIGNONSTATE_CHANGELEVEL = 9,
-};
-
-struct alignas(8) NET_SignOnState : INetMessage
-{
-	bool m_bReliable;
-	void* m_NetChannel;
-	void* m_pMessageHandler;
-	SIGNONSTATE m_nSignonState;
-	int m_nSpawnCount;
-	int m_numServerPlayers;
-};
-
-static bool TryReadConnectionCompleteOrPreSignon(CNetChan* netChannel, bool* value)
-{
-	if (!netChannel || !value)
-		return false;
-
-	__try {
-		*value = netChannel->m_bConnectionComplete_OrPreSignon;
-		return true;
-	}
-	__except (EXCEPTION_EXECUTE_HANDLER) {
-		*value = false;
-		return false;
-	}
-}
-
-bool (*oNET_SignOnState__ReadFromBuffer)(NET_SignOnState* thisptr, bf_read& buffer);
-bool NET_SignOnState__ReadFromBuffer(NET_SignOnState* thisptr, bf_read& buffer)
-{
-	if (!thisptr || !oNET_SignOnState__ReadFromBuffer
-		|| !oNET_SignOnState__ReadFromBuffer(thisptr, buffer))
-		return false;
-
-	// Reject duplicate SIGNONSTATE_FULL messages when file transmission is active
-	CNetChan* netChannel = reinterpret_cast<CNetChan*>(thisptr->m_NetChannel);
-	bool connectionCompleteOrPreSignon = false;
-	if (!TryReadConnectionCompleteOrPreSignon(
-			netChannel,
-			&connectionCompleteOrPreSignon))
-		return false;
-
-	if (connectionCompleteOrPreSignon
-		&& thisptr->m_nSignonState == SIGNONSTATE_FULL) {
-		Warning("NET_SignOnState::ReadFromBuffer: blocked attempt at re-ACKing SIGNONSTATE_FULL\n");
-		return false;
-	}
-
-	return true;
-}
-
 void InstallR1ODedicatedSecurityHooks(uintptr_t engine_base)
 {
 	static bool installed = false;
@@ -1246,9 +1183,6 @@ void InstallR1ODedicatedSecurityHooks(uintptr_t engine_base)
 		{ 0x13D280, reinterpret_cast<void*>(&HookedCBaseClientSetName),
 			reinterpret_cast<void**>(&CBaseClientSetNameOriginal),
 			"CBaseClient::SetName" },
-		{ 0x211110, reinterpret_cast<void*>(&NET_SignOnState__ReadFromBuffer),
-			reinterpret_cast<void**>(&oNET_SignOnState__ReadFromBuffer),
-			"NET_SignOnState::ReadFromBuffer" },
 	};
 
 	bool allInstalled = true;
