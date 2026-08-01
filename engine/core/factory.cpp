@@ -77,6 +77,7 @@
 #include "logging.h"
 #include "vtable.h"
 #include "persistentdata.h"
+#include "persistentdata_slots.h"
 #include "precache.h"
 #include "squirrel.h"
 #include "commands.h"
@@ -88,6 +89,19 @@ CServerGameDLL__DLLInitType CServerGameDLL__DLLInitOriginal;
 CreateInterfaceFn oAppSystemFactory;
 CreateInterfaceFn oFileSystemFactory;
 CreateInterfaceFn oPhysicsFactory;
+static void* s_R1ONativeEngineServer022;
+
+void* GetR1ONativeEngineServer022()
+{
+	return s_R1ONativeEngineServer022;
+}
+
+static void* RememberR1ONativeEngineServer022(const char* name, void* interfacePointer)
+{
+	if (interfacePointer && name && !strcmp_static(name, "VEngineServer022"))
+		s_R1ONativeEngineServer022 = interfacePointer;
+	return interfacePointer;
+}
 
 void CNetworkStringTableContainer__SetTickCount(__int64 a1, char a2)
 {
@@ -604,7 +618,6 @@ using MaterialSystemDx11ResetD3DResourcePointersType = void(__fastcall*)();
 using MaterialSystemDx11FlushConstantBufferUpdatesType = __int64(__fastcall*)();
 using MaterialSystemDx11InitializeMaterialType = __int64(__fastcall*)(__int64 material, __int64 vmt, __int64 vmtPatches, __int64 context);
 using MaterialSystemDx11IsErrorMaterialType = __int64(__fastcall*)(__int64 material);
-using MaterialSystemDx11OnLevelShutdownType = void(__fastcall*)(void* materialSystem);
 static MaterialSystemDx11SelectShaderResourceType MaterialSystemDx11SelectShaderResourceOriginal;
 static MaterialSystemDx11SelectShaderStageResourceType MaterialSystemDx11SelectShaderStageResourceOriginal;
 static MaterialSystemDx11CreateInputLayoutType MaterialSystemDx11CreateInputLayoutOriginal;
@@ -613,7 +626,6 @@ static MaterialSystemDx11ResetD3DResourcePointersType MaterialSystemDx11ResetD3D
 static MaterialSystemDx11FlushConstantBufferUpdatesType MaterialSystemDx11FlushConstantBufferUpdatesOriginal;
 static MaterialSystemDx11InitializeMaterialType MaterialSystemDx11InitializeMaterialOriginal;
 static MaterialSystemDx11IsErrorMaterialType MaterialSystemDx11IsErrorMaterialOriginal;
-static MaterialSystemDx11OnLevelShutdownType MaterialSystemDx11OnLevelShutdownOriginal;
 static bool s_MaterialSystemDx11NullResourceGuardInstalled;
 static uintptr_t s_MaterialSystemDx11Base;
 static int s_MaterialSystemDx11NullResourceLogBudget = 8;
@@ -623,143 +635,7 @@ static int s_MaterialSystemDx11ConstantBufferLogBudget = 8;
 static int s_MaterialSystemDx11InputLayoutLogBudget = 8;
 static int s_MaterialSystemDx11MaterialInitLogBudget = 8;
 static std::recursive_mutex s_MaterialSystemDx11MaterialInitMutex;
-static std::mutex s_MaterialSystemDx11LevelShutdownMutex;
 static bool MaterialSystemDx11LooksLikeUserRange(uintptr_t address, size_t size);
-
-static bool MaterialSystemDx11IsCommittedReadableRange(const void* value, size_t size)
-{
-	if (!size)
-		return true;
-
-	uintptr_t current = reinterpret_cast<uintptr_t>(value);
-	if (!MaterialSystemDx11LooksLikeUserRange(current, size))
-		return false;
-
-	const uintptr_t end = current + size - 1;
-	while (current <= end) {
-		MEMORY_BASIC_INFORMATION mbi{};
-		if (!VirtualQuery(reinterpret_cast<const void*>(current), &mbi, sizeof(mbi)))
-			return false;
-
-		if (mbi.State != MEM_COMMIT || !IsReadableProtect(mbi.Protect))
-			return false;
-
-		const uintptr_t regionEnd = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
-		if (regionEnd <= current)
-			return false;
-
-		current = regionEnd;
-	}
-
-	return true;
-}
-
-static int MaterialSystemDx11LevelShutdownFenceExceptionFilter(EXCEPTION_POINTERS* info)
-{
-	if (!info || !info->ExceptionRecord || info->ExceptionRecord->ExceptionCode != EXCEPTION_ACCESS_VIOLATION)
-		return EXCEPTION_CONTINUE_SEARCH;
-	return EXCEPTION_EXECUTE_HANDLER;
-}
-
-static void MaterialSystemDx11LogLevelShutdownFence(
-	const char* result,
-	HRESULT createResult,
-	HRESULT waitResult,
-	ULONGLONG elapsedMs)
-{
-	char buffer[320];
-	_snprintf_s(
-		buffer,
-		sizeof(buffer),
-		_TRUNCATE,
-		"R1Delta: materialsystem_dx11 level-shutdown GPU fence result=%s create=0x%08lx wait=0x%08lx elapsed=%llums\n",
-		result,
-		static_cast<unsigned long>(createResult),
-		static_cast<unsigned long>(waitResult),
-		static_cast<unsigned long long>(elapsedMs));
-	OutputDebugStringA(buffer);
-}
-
-static void MaterialSystemDx11DrainGpuBeforeLevelShutdown()
-{
-	if (!s_MaterialSystemDx11Base || IsDedicatedServer())
-		return;
-
-	const ULONGLONG start = GetTickCount64();
-	HRESULT createResult = E_POINTER;
-	HRESULT waitResult = E_PENDING;
-	ID3D11Query* query = nullptr;
-	const char* result = "unavailable";
-
-	__try {
-		auto* deviceSlot = reinterpret_cast<ID3D11Device**>(s_MaterialSystemDx11Base + 0x290D88);
-		auto* contextSlot = reinterpret_cast<ID3D11DeviceContext**>(s_MaterialSystemDx11Base + 0x290D90);
-		if (!MaterialSystemDx11IsCommittedReadableRange(deviceSlot, sizeof(*deviceSlot))
-			|| !MaterialSystemDx11IsCommittedReadableRange(contextSlot, sizeof(*contextSlot))
-			|| !*deviceSlot
-			|| !*contextSlot
-			|| !MaterialSystemDx11IsCommittedReadableRange(*deviceSlot, sizeof(void*))
-			|| !MaterialSystemDx11IsCommittedReadableRange(*contextSlot, sizeof(void*))) {
-			result = "interfaces-unavailable";
-		}
-		else {
-			D3D11_QUERY_DESC desc{};
-			desc.Query = D3D11_QUERY_EVENT;
-			createResult = (*deviceSlot)->CreateQuery(&desc, &query);
-			if (FAILED(createResult) || !query) {
-				result = "create-failed";
-			}
-			else {
-				// The event is ordered after all commands already submitted to the
-				// immediate context. Waiting for it before level-shutdown callbacks
-				// prevents those callbacks from freeing resources still consumed by
-				// the NVIDIA worker thread.
-				(*contextSlot)->End(query);
-				(*contextSlot)->Flush();
-
-				constexpr ULONGLONG kFenceTimeoutMs = 2000;
-				do {
-					waitResult = (*contextSlot)->GetData(
-						query,
-						nullptr,
-						0,
-						D3D11_ASYNC_GETDATA_DONOTFLUSH);
-					if (waitResult != S_FALSE)
-						break;
-					SwitchToThread();
-				} while (GetTickCount64() - start < kFenceTimeoutMs);
-
-				result = waitResult == S_OK
-					? "complete"
-					: (waitResult == S_FALSE ? "timeout" : "wait-failed");
-			}
-		}
-	}
-	__except (MaterialSystemDx11LevelShutdownFenceExceptionFilter(GetExceptionInformation())) {
-		result = "access-violation";
-	}
-
-	if (query) {
-		__try {
-			query->Release();
-		}
-		__except (MaterialSystemDx11LevelShutdownFenceExceptionFilter(GetExceptionInformation())) {
-			result = "release-access-violation";
-		}
-	}
-
-	MaterialSystemDx11LogLevelShutdownFence(result, createResult, waitResult, GetTickCount64() - start);
-}
-
-static void __fastcall MaterialSystemDx11OnLevelShutdownGuard(void* materialSystem)
-{
-	if (!MaterialSystemDx11OnLevelShutdownOriginal)
-		return;
-
-	std::lock_guard<std::mutex> lock(s_MaterialSystemDx11LevelShutdownMutex);
-	MaterialSystemDx11DrainGpuBeforeLevelShutdown();
-	MaterialSystemDx11OnLevelShutdownOriginal(materialSystem);
-}
 
 static void MaterialSystemDx11LogMaterialInitGuard(const char* reason, __int64 material)
 {
@@ -1461,14 +1337,6 @@ void InstallMaterialSystemDx11NullShaderResourceGuard(uintptr_t materialSystemBa
 		0xB9, 0x01, 0x00, 0x00, 0x00,
 		0xB3, 0xFF
 	};
-	const unsigned char expectedOnLevelShutdownPrologue[] = {
-		0x48, 0x89, 0x74, 0x24, 0x10,
-		0x57,
-		0x48, 0x83, 0xEC, 0x20,
-		0x48, 0x63, 0xB9, 0x10, 0x09, 0x00, 0x00,
-		0x48, 0x8B, 0xF1,
-		0x48, 0x85, 0xFF
-	};
 	const bool materialInitInstalled = InstallMaterialSystemDx11CheckedHook(
 		materialSystemBase,
 		0x3AB60,
@@ -1533,16 +1401,7 @@ void InstallMaterialSystemDx11NullShaderResourceGuard(uintptr_t materialSystemBa
 		reinterpret_cast<void*>(&MaterialSystemDx11SelectShaderResourceGuard),
 		reinterpret_cast<void**>(&MaterialSystemDx11SelectShaderResourceOriginal),
 		"vertex");
-	const bool levelShutdownInstalled = InstallMaterialSystemDx11CheckedHook(
-		materialSystemBase,
-		0x4BE50,
-		expectedOnLevelShutdownPrologue,
-		sizeof(expectedOnLevelShutdownPrologue),
-		reinterpret_cast<void*>(&MaterialSystemDx11OnLevelShutdownGuard),
-		reinterpret_cast<void**>(&MaterialSystemDx11OnLevelShutdownOriginal),
-		"level-shutdown");
-
-	s_MaterialSystemDx11NullResourceGuardInstalled = materialInitInstalled || isErrorMaterialInstalled || resetInstalled || constantFlushInstalled || textureInstalled || inputLayoutInstalled || stageInstalled || vertexInstalled || levelShutdownInstalled;
+	s_MaterialSystemDx11NullResourceGuardInstalled = materialInitInstalled || isErrorMaterialInstalled || resetInstalled || constantFlushInstalled || textureInstalled || inputLayoutInstalled || stageInstalled || vertexInstalled;
 }
 
 static bool IsVPhysicsGuardNegativeStackIndexDisabled()
@@ -12666,6 +12525,28 @@ static char __fastcall R1ONetMessageProcess(__int64 message)
 {
 	R1ONetMessageProcessHook* hook = FindR1ONetMessageProcessHook(message);
 	const char* messageName = R1ONetMessageName(message);
+	const bool clientMove = IsR1ODedicatedServer()
+		&& messageName
+		&& !strcmp_static(messageName, "clc_Move");
+	const uintptr_t processVtable = message && IsReadableRange(reinterpret_cast<void*>(message), sizeof(uintptr_t))
+		? *reinterpret_cast<uintptr_t*>(message)
+		: 0;
+	const int moveBackupCommands = clientMove && IsReadableRange(reinterpret_cast<void*>(message + 32), sizeof(int))
+		? *reinterpret_cast<int*>(message + 32)
+		: -1;
+	const int moveNewCommands = clientMove && IsReadableRange(reinterpret_cast<void*>(message + 36), sizeof(int))
+		? *reinterpret_cast<int*>(message + 36)
+		: -1;
+	const int movePayloadBits = clientMove && IsReadableRange(reinterpret_cast<void*>(message + 40), sizeof(int))
+		? *reinterpret_cast<int*>(message + 40)
+		: -1;
+	const __int64 moveReader = clientMove ? message + 48 : 0;
+	const __int64 moveStartBit = moveReader ? R1OBitBufferCurrentBit(moveReader) : -1;
+	const int moveStartBitsLeft = moveReader ? R1OBitBufferGetNumBitsLeft(moveReader) : -1;
+	const int moveStartDataBits = moveReader ? R1OBitBufferIntField(moveReader, 16, -1) : -1;
+	const unsigned int moveStartOverflow = moveReader
+		? static_cast<unsigned int>(R1OBitBufferByteField(moveReader, 8, 0xff))
+		: 0xff;
 	const bool signonState = IsR1ODedicatedServer()
 		&& messageName
 		&& !strcmp_static(messageName, "net_SignonState");
@@ -12674,6 +12555,38 @@ static char __fastcall R1ONetMessageProcess(__int64 message)
 		LogR1OClientSlotSnapshot("before R1O net_SignonState process", true);
 	}
 	char result = hook && hook->original ? hook->original(message) : 0;
+	if (clientMove && !result) {
+		const __int64 moveEndBit = moveReader ? R1OBitBufferCurrentBit(moveReader) : -1;
+		const int moveEndBitsLeft = moveReader ? R1OBitBufferGetNumBitsLeft(moveReader) : -1;
+		const int moveEndDataBits = moveReader ? R1OBitBufferIntField(moveReader, 16, -1) : -1;
+		const unsigned int moveEndOverflow = moveReader
+			? static_cast<unsigned int>(R1OBitBufferByteField(moveReader, 8, 0xff))
+			: 0xff;
+		char moveFailureBuffer[768];
+		_snprintf_s(
+			moveFailureBuffer,
+			sizeof(moveFailureBuffer),
+			_TRUNCATE,
+			"R1Delta: R1O CLC_Move process failed msg=%p vtable=%p backup=%d new=%d total=%d payloadBits=%d reader=%p startBit=%lld endBit=%lld consumed=%lld startBitsLeft=%d endBitsLeft=%d startDataBits=%d endDataBits=%d startOverflow=%u endOverflow=%u\n",
+			reinterpret_cast<void*>(message),
+			reinterpret_cast<void*>(processVtable),
+			moveBackupCommands,
+			moveNewCommands,
+			moveBackupCommands >= 0 && moveNewCommands >= 0 ? moveBackupCommands + moveNewCommands : -1,
+			movePayloadBits,
+			reinterpret_cast<void*>(moveReader),
+			static_cast<long long>(moveStartBit),
+			static_cast<long long>(moveEndBit),
+			moveStartBit >= 0 && moveEndBit >= 0 ? static_cast<long long>(moveEndBit - moveStartBit) : -1LL,
+			moveStartBitsLeft,
+			moveEndBitsLeft,
+			moveStartDataBits,
+			moveEndDataBits,
+			moveStartOverflow,
+			moveEndOverflow);
+		OutputDebugStringA(moveFailureBuffer);
+		Warning("%s", moveFailureBuffer);
+	}
 	if (signonState) {
 		LogR1OSignonStateTrace("process-leave", message, 0, result);
 		LogR1OClientSlotSnapshot("after R1O net_SignonState process", true);
@@ -12770,25 +12683,68 @@ static void EnsureR1ONetMessageProcessHook(__int64 message)
 	OutputDebugStringA(buffer);
 }
 
-static int R1OPersistencePlayerSlotFromMessage(__int64 message)
+struct R1OPersistenceOwner
 {
-	if (!message || !engineR1O
-		|| !IsReadableRange(reinterpret_cast<void*>(message + 24), sizeof(void*)))
+	int playerSlot = -1;
+	PersistentDataState::SessionKey session;
+};
+
+static int R1OPersistencePlayerSlotFromNetChannel(__int64 netChannel)
+{
+	if (!netChannel || !engineR1O)
 		return -1;
 
-	const uintptr_t handler = reinterpret_cast<uintptr_t>(*reinterpret_cast<void**>(message + 24));
 	const int maxClients = R1OHookGlobalValue<int>(0x265971C, 0);
-	if (!handler || maxClients <= 0 || maxClients > 64)
+	if (maxClients <= 0 || maxClients > PersistentDataSlots::kMaximumSupportedClients)
 		return -1;
 
 	const uintptr_t clientArray = reinterpret_cast<uintptr_t>(engineR1O) + kR1OClientArrayRva;
 	for (int i = 0; i < maxClients; ++i) {
 		const uintptr_t client = clientArray + kR1OClientStride * static_cast<size_t>(i);
-		const uintptr_t fullClient = client - kR1OClientSubobjectOffset;
-		if (handler >= fullClient && handler < fullClient + kR1OClientStride)
+		if (!IsReadableRange(reinterpret_cast<void*>(client + kR1OClientNetChanOffset), sizeof(void*)))
+			continue;
+		if (*reinterpret_cast<__int64*>(client + kR1OClientNetChanOffset) == netChannel)
 			return i;
 	}
 	return -1;
+}
+
+static bool R1OResolvePersistenceOwner(__int64 message, R1OPersistenceOwner& owner)
+{
+	if (!message || !engineR1O
+		|| !IsReadableRange(reinterpret_cast<void*>(message + 24), sizeof(void*)))
+		return false;
+
+	const uintptr_t handler = reinterpret_cast<uintptr_t>(*reinterpret_cast<void**>(message + 24));
+	const int maxClients = R1OHookGlobalValue<int>(0x265971C, 0);
+	if (!handler || maxClients <= 0 || maxClients > PersistentDataSlots::kMaximumSupportedClients)
+		return false;
+
+	const uintptr_t clientArray = reinterpret_cast<uintptr_t>(engineR1O) + kR1OClientArrayRva;
+	for (int i = 0; i < maxClients; ++i) {
+		const uintptr_t client = clientArray + kR1OClientStride * static_cast<size_t>(i);
+		const uintptr_t fullClient = client - kR1OClientSubobjectOffset;
+		if (handler < fullClient || handler >= fullClient + kR1OClientStride)
+			continue;
+
+		if (!IsReadableRange(reinterpret_cast<void*>(client + kR1OClientNetChanOffset), sizeof(void*)))
+			return false;
+		const uintptr_t netChannel = reinterpret_cast<uintptr_t>(
+			*reinterpret_cast<void**>(client + kR1OClientNetChanOffset));
+		if (!netChannel)
+			return false;
+
+		int userId = -1;
+		R1OClientCommandIdentity identity = {};
+		if (ReadR1OClientCommandIdentity(i, &identity))
+			userId = identity.userId;
+
+		owner.playerSlot = i;
+		owner.session.netChannel = netChannel;
+		owner.session.userId = userId;
+		return true;
+	}
+	return false;
 }
 
 static bool __fastcall R1ONETSetConVarReadFromBuffer(__int64 message, __int64 bitBuffer)
@@ -12914,8 +12870,8 @@ static bool __fastcall R1ONETSetConVarReadFromBuffer(__int64 message, __int64 bi
 		}
 
 		const bool hasPersistentData = sawPackedPData || sawLegacyPData;
-		const int playerSlot = hasPersistentData ? R1OPersistencePlayerSlotFromMessage(message) : -1;
-		if (hasPersistentData && playerSlot < 0) {
+		R1OPersistenceOwner persistenceOwner;
+		if (hasPersistentData && !R1OResolvePersistenceOwner(message, persistenceOwner)) {
 			Warning("R1Delta: R1O NET_SetConVar could not resolve persistence owner\n");
 			return false;
 		}
@@ -12924,8 +12880,22 @@ static bool __fastcall R1ONETSetConVarReadFromBuffer(__int64 message, __int64 bi
 		for (NetMessageCvar_t& var : staged)
 			R1ONETSetConVarAddToTail(vector, &var);
 
+		if (hasPersistentData) {
+			const bool stored = sawPackedPData
+				? R1OReplacePersistentUserDataForPlayer(
+					persistenceOwner.playerSlot, persistenceOwner.session, staged)
+				: R1OMergePersistentUserDataForPlayer(
+					persistenceOwner.playerSlot, persistenceOwner.session, staged);
+			if (!stored) {
+				Warning(
+					"R1Delta: R1O NET_SetConVar failed to %s persistence for player slot %d\n",
+					sawPackedPData ? "replace" : "merge",
+					persistenceOwner.playerSlot);
+				return false;
+			}
+		}
+
 		if (sawPackedPData) {
-			R1OReplacePersistentUserDataForPlayer(playerSlot, staged);
 			static int packedPersistenceCommitLogBudget = 32;
 			if (packedPersistenceCommitLogBudget-- > 0) {
 				char messageBuffer[256];
@@ -12934,16 +12904,10 @@ static bool __fastcall R1ONETSetConVarReadFromBuffer(__int64 message, __int64 bi
 					sizeof(messageBuffer),
 					_TRUNCATE,
 					"R1Delta: R1O NET_SetConVar committed playerSlot=%d total=%zu encodedBytes=%zu\n",
-					playerSlot,
+					persistenceOwner.playerSlot,
 					staged.size(),
 					packedPData.size());
 				OutputDebugStringA(messageBuffer);
-			}
-		}
-		else if (sawLegacyPData) {
-			for (const NetMessageCvar_t& var : staged) {
-				if (strncmp(var.name, PERSIST_COMMAND" ", sizeof(PERSIST_COMMAND)) == 0)
-					R1OStorePersistentUserDataConVar(playerSlot, var.name, var.value);
 			}
 		}
 	}
@@ -13439,6 +13403,9 @@ static char __fastcall R1ONetChanProcessSpecialMessage(__int64 netChan, int id, 
 			startBit,
 			reason);
 		OutputDebugStringA(buffer);
+		const int playerSlot = R1OPersistencePlayerSlotFromNetChannel(netChan);
+		if (playerSlot >= 0)
+			R1OClearPersistentUserDataForPlayer(playerSlot);
 	}
 	const char result = R1ONetChanProcessSpecialMessageOriginal
 		? R1ONetChanProcessSpecialMessageOriginal(netChan, id, bitBuffer)
@@ -18724,7 +18691,7 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 		void* result = oAppSystemFactory(pName, pReturnCode);
 		DebugR1ODediFactoryResult("appsystem", pName, result, pReturnCode);
 		if (result)
-			return result;
+			return RememberR1ONativeEngineServer022(pName, result);
 
 		CreateInterfaceFn engineCreateInterface = R1OCreateInterfaceOriginal ? R1OCreateInterfaceOriginal : R1OCreateInterface;
 		if (!engineCreateInterface) {
@@ -18735,13 +18702,15 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 		result = engineCreateInterface(pName, pReturnCode);
 		DebugR1ODediFactoryResult("engine_r1o", pName, result, pReturnCode);
 		if (result)
-			return result;
+			return RememberR1ONativeEngineServer022(pName, result);
 
 		result = R1OTFOSupportModuleInterface(pName, pReturnCode);
 		if (result)
-			return result;
+			return RememberR1ONativeEngineServer022(pName, result);
 
-		return R1OQueryLoadedModuleFactories(pName, pReturnCode);
+		return RememberR1ONativeEngineServer022(
+			pName,
+			R1OQueryLoadedModuleFactories(pName, pReturnCode));
 	}
 
 	if (!strcmp_static(pName, "VEngineServer022")) {

@@ -143,6 +143,9 @@
     <ClInclude Include="engine\filesystem\r1o_vpk_index_cache.h">
       <Filter>engine\filesystem</Filter>
     </ClInclude>
+    <ClInclude Include="engine\filesystem\vpk_async_precache_fix.h">
+      <Filter>engine\filesystem</Filter>
+    </ClInclude>
     <ClInclude Include="engine\filesystem\vpk_directory_repair.h">
       <Filter>engine\filesystem</Filter>
     </ClInclude>
@@ -286,6 +289,15 @@
     <ClInclude Include="shared\persistentdata_codec.h">
       <Filter>shared</Filter>
     </ClInclude>
+	<ClInclude Include="shared\persistentdata_slots.h">
+	  <Filter>shared</Filter>
+	</ClInclude>
+	<ClInclude Include="shared\persistentdata_state.h">
+	  <Filter>shared</Filter>
+	</ClInclude>
+	<ClInclude Include="shared\persistentdata_transaction.h">
+	  <Filter>shared</Filter>
+	</ClInclude>
     <ClInclude Include="shared\squirrel.h">
       <Filter>shared</Filter>
     </ClInclude>
@@ -500,6 +512,9 @@
       <Filter>engine\filesystem</Filter>
     </ClCompile>
     <ClCompile Include="engine\filesystem\r1o_vpk_index_cache.cpp">
+      <Filter>engine\filesystem</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\filesystem\vpk_async_precache_fix.cpp">
       <Filter>engine\filesystem</Filter>
     </ClCompile>
     <ClCompile Include="engine\filesystem\vpk_directory_repair.cpp">

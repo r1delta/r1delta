@@ -1285,7 +1285,11 @@ void InstallR1ODedicatedSecurityHooks(uintptr_t engine_base)
 		{ 0x211110, reinterpret_cast<void*>(&NET_SignOnState__ReadFromBuffer),
 			reinterpret_cast<void**>(&oNET_SignOnState__ReadFromBuffer),
 			"NET_SignOnState::ReadFromBuffer" },
-		{ 0x20CF20, reinterpret_cast<void*>(&NET_StringCmd__ReadFromBuffer),
+		// NET_StringCmd vtable slot 4 is ReadFromBuffer at +0x20CF70.
+		// +0x20CF20 is slot 5 (WriteToBuffer); detouring that with the
+		// read-side validator made every server-to-client string command
+		// report failure after it had already written its payload.
+		{ 0x20CF70, reinterpret_cast<void*>(&NET_StringCmd__ReadFromBuffer),
 			reinterpret_cast<void**>(&oNET_StringCmd__ReadFromBuffer),
 			"NET_StringCmd::ReadFromBuffer" },
 	};

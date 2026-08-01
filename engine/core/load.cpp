@@ -1641,6 +1641,8 @@ void InitAddons() {
 	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x1752B0 : 0x6A420)), &ReadFileFromVPKHook, reinterpret_cast<LPVOID*>(&readFileFromVPK));
 	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x750F0 : 0x9C20)), &ReadFromCacheHook, reinterpret_cast<LPVOID*>(&readFromCache));
 	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x80BB0 : 0x16250)), &AddVPKFile, reinterpret_cast<LPVOID*>(&AddVPKFileOriginal));
+	if (!HasEngineCommandLineFlag("-r1delta_disable_vpk_async_precache_fix"))
+		InstallR1ClientVPKAsyncPrecacheFix(filesystem_stdio);
 	if (!HasEngineCommandLineFlag("-r1delta_disable_vpk_directory_repair"))
 		InstallVPKDirectoryLoadFlagRepair(filesystem_stdio);
 	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x1A1514 : 0x9AB70)), &fs_sprintf_hook, reinterpret_cast<LPVOID*>(NULL));
@@ -1980,6 +1982,18 @@ static bool ClientLooksLikeUserRange(uintptr_t address, size_t size)
 }
 
 static bool ClientIsReadableRange(const void* value, size_t size)
+{
+	if (!size)
+		return true;
+	return ClientLooksLikeUserRange(reinterpret_cast<uintptr_t>(value), size);
+}
+
+// Use this only when the caller is about to copy from storage whose lifetime or
+// allocation owner is not trusted.  Most client compatibility probes operate on
+// engine-owned objects and only need the cheap canonical-range/overflow check
+// above; putting VirtualQuery in that shared path makes class and netprop setup
+// issue thousands of kernel queries while a client joins.
+static bool ClientIsCommittedReadableRange(const void* value, size_t size)
 {
 	if (!size)
 		return true;
@@ -7220,7 +7234,7 @@ static __int64 __fastcall ClientNetReceivePacket(unsigned int frameTime, __int64
 
 	static int logBudget = 128;
 	PacketLogSnapshot snapshot{};
-	if (logBudget > 0 && packet && ClientIsReadableRange(reinterpret_cast<const void*>(packet), 116)) {
+	if (logBudget > 0 && packet && ClientIsCommittedReadableRange(reinterpret_cast<const void*>(packet), 116)) {
 		// NET_ReceivePacket owns the packet and may release or recycle its
 		// payload before returning. Capture diagnostics while the input lifetime
 		// is still valid; never inspect packet storage after the original call.
@@ -7230,7 +7244,7 @@ static __int64 __fastcall ClientNetReceivePacket(unsigned int frameTime, __int64
 			const unsigned char* payload = *reinterpret_cast<unsigned char**>(packet + 40);
 			if (payload && snapshot.length > 0 && snapshot.length <= 4096) {
 				const size_t bytesToCopy = static_cast<size_t>(snapshot.length < 16 ? snapshot.length : 16);
-				if (ClientIsReadableRange(payload, bytesToCopy)) {
+				if (ClientIsCommittedReadableRange(payload, bytesToCopy)) {
 					memcpy(snapshot.firstBytes, payload, bytesToCopy);
 					snapshot.valid = true;
 				}
@@ -9086,7 +9100,6 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		RegisterConVar("delta_online_auth_enable", "0", FCVAR_GAMEDLL, "Whether to use master server auth");
 		RegisterConVar("delta_discord_username_sync", "0", FCVAR_GAMEDLL, "Controls if player names are synced with Discord: 0=Off,1=Norm,2=Pomelo");
 		RegisterConVar("riff_floorislava", "0", FCVAR_HIDDEN, "Enable floor is lava mode");
-		RegisterConVar("hudwarp_use_gpu", "1", FCVAR_ARCHIVE,"Use GPU for HUD warp");
 		RegisterConVar("hudwarp_disable", "0", FCVAR_ARCHIVE, "GPU device to use for HUD warp");
 		RegisterConVar("hide_server", "0", FCVAR_NONE, "Whether the server should be hidden from the master server");
 		RegisterConVar("server_description", "", FCVAR_NONE, "Server description");
@@ -9390,6 +9403,8 @@ void __stdcall LoaderNotificationCallback(
 	}
 	if (string_equal_size(name, name_len, L"filesystem_stdio.dll")) {
 		G_filesystem_stdio = (uintptr_t)notification_data->Loaded.DllBase;
+		if (!HasEngineCommandLineFlag("-r1delta_disable_vpk_async_precache_fix"))
+			InstallR1ClientVPKAsyncPrecacheFix(G_filesystem_stdio);
 		// Map directory archives can be mounted before engine.dll reaches
 		// InitAddons, so install the in-memory directory repair at the same
 		// early boundary as the filesystem compression hooks.

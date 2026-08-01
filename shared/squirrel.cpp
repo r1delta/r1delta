@@ -475,6 +475,22 @@ SQInteger SquirrelNativeFunctionTest(HSQUIRRELVM v, __int64 a2, __int64 a3)
 typedef void (*CPlayer__Script_XP_Changed)(__int64 at);
 CPlayer__Script_XP_Changed CPlayer__Script_XP_ChangedOrig;
 
+bool R1OMarkTFOPlayerNetworkStateChanged(void* pPlayer)
+{
+	if (!IsR1ODedicatedServer() || !pPlayer || !CPlayer__Script_XP_ChangedOrig)
+		return false;
+
+	// TFO's native XPChanged callback marks the owning edict's network state
+	// dirty and then clears m_xp. Preserve the real value while using that exact
+	// native path as the generic player-entity dirtying primitive.
+	auto* xp = reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pPlayer) + 0x1834);
+	const int savedXP = *xp;
+	*xp = savedXP != 0 ? savedXP : 1;
+	CPlayer__Script_XP_ChangedOrig(reinterpret_cast<__int64>(pPlayer));
+	*xp = savedXP;
+	return true;
+}
+
 void __fastcall CPlayer__Script_XP_ChangedHook(__int64 a1) {
 	Msg("CPlayer__Script_XP_ChangedHook %x\n",a1);
 	CPlayer__Script_XP_ChangedOrig(a1);
@@ -909,6 +925,8 @@ SQInteger Script_Server_SetActiveBurnCardIndex(HSQUIRRELVM v) {
 
 	auto player_ptr = reinterpret_cast<__int64>(player);
 	*(int*)(player_ptr + 0x1A14) = index;
+	if (IsR1ODedicatedServer() && !R1OMarkTFOPlayerNetworkStateChanged(const_cast<void*>(player)))
+		return sq_throwerror(v, "failed to mark burn card state for replication");
 	return 0;
 }
 

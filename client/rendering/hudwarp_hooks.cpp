@@ -22,6 +22,16 @@ HudwarpProcess* hudwarpProcess;
 bool isRenderingHud = false;
 bool shouldUseGPUHudwarp = true;
 bool isHudwarpDisabled = false;
+
+// The Delta GPU HUD-warp path is disabled for the prerelease-3 line. Keep the
+// stock CPU HUD-warp path intact and only suppress installation of the hooks
+// that create and drive HudwarpProcess.
+// Re-enabling this needs a proper render-thread/device-lifetime audit first.
+static bool ShouldInstallGPUHudwarp()
+{
+	return false;
+}
+
 void SetupHudwarp()
 {
 	R1DAssert(!pDevice);
@@ -376,8 +386,7 @@ void __fastcall OnWindowSizeChanged(unsigned int w, unsigned int h, bool isInGam
 void SetupHudWarpHooks() {
 	R1DAssert(G_client);
 
-	// Check if -usegpuhudwarp command line argument is present
-	bool useGPUHudwarp = HasEngineCommandLineFlag("-usegpuhudwarp");
+	const bool useGPUHudwarp = ShouldInstallGPUHudwarp();
 
 	if (useGPUHudwarp) {
 		MH_CreateHook((void*)(G_client + 0x2AE630), &RenderHud_Hook, reinterpret_cast<LPVOID*>(&RenderHud));
@@ -393,10 +402,10 @@ char sub_180001CC0() {
 	return ret;
 }
 void SetupHudWarpMatSystemHooks() {
-	// Check if -usegpuhudwarp command line argument is present
-	bool useGPUHudwarp = HasEngineCommandLineFlag("-usegpuhudwarp");
+	const bool useGPUHudwarp = ShouldInstallGPUHudwarp();
 
-	// Always apply sub_180001CC0 hook
+	// Keep the independent GPU-enumeration safeguard: the original routine can
+	// report zero GPUs, which makes later material-system initialization fail.
 	MH_CreateHook((void*)(G_matsystem + 0x1CC0), &sub_180001CC0, reinterpret_cast<LPVOID*>(&osub_180001CC0));
 
 	// Only apply other hooks if -usegpuhudwarp is set
@@ -417,8 +426,7 @@ void SetupHudWarpMatSystemHooks() {
 }
 
 void SetupHudWarpVguiHooks() {
-	// Check if -usegpuhudwarp command line argument is present
-	bool useGPUHudwarp = HasEngineCommandLineFlag("-usegpuhudwarp");
+	const bool useGPUHudwarp = ShouldInstallGPUHudwarp();
 
 	if (useGPUHudwarp) {
 		uintptr_t vguimatsurfacedllBaseAddress = (uintptr_t)GetModuleHandleW(L"vguimatsurface.dll");

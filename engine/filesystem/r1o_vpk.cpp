@@ -265,34 +265,38 @@ static bool ParseDirectoryVPK(
 					|| !ReadMemoryValue(cursor, treeEnd, preloadSize)
 					|| !ReadMemoryValue(cursor, treeEnd, packIndex))
 					return false;
-				if (static_cast<size_t>(treeEnd - cursor) < preloadSize)
-					return false;
 
 				VPKEntry entry;
 				if (keepEntry) {
 					entry.dirPath = dirPath;
 					entry.packIndex = packIndex;
-					entry.preload.assign(cursor, cursor + preloadSize);
 				}
-				cursor += preloadSize;
 
 				for (;;) {
 					VPKChunk chunk;
-					uint16_t terminator{};
+					uint16_t chunkMarker{};
 					if (!ReadMemoryValue(cursor, treeEnd, chunk.flags)
 						|| !ReadMemoryValue(cursor, treeEnd, chunk.textureFlags)
 						|| !ReadMemoryValue(cursor, treeEnd, chunk.offset)
 						|| !ReadMemoryValue(cursor, treeEnd, chunk.compressedSize)
 						|| !ReadMemoryValue(cursor, treeEnd, chunk.decompressedSize)
-						|| !ReadMemoryValue(cursor, treeEnd, terminator)) {
+						|| !ReadMemoryValue(cursor, treeEnd, chunkMarker)) {
 						return false;
 					}
 
 					if (keepEntry)
 						entry.chunks.push_back(chunk);
-					if (terminator == kVPKChunkTerminator)
+					if (chunkMarker == kVPKChunkTerminator)
 						break;
+					if (chunkMarker != 0)
+						return false;
 				}
+
+				if (static_cast<size_t>(treeEnd - cursor) < preloadSize)
+					return false;
+				if (keepEntry)
+					entry.preload.assign(cursor, cursor + preloadSize);
+				cursor += preloadSize;
 
 				if (keepEntry)
 					parsedEntries.emplace_back(std::move(key), std::move(entry));

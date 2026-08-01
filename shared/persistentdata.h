@@ -5,6 +5,7 @@
 #include "cvar.h"
 #include "squirrel.h"
 #include "netchanwarnings.h"
+#include "persistentdata_state.h"
 #include <string>
 #include <vector>
 struct NetMessageCvar_t // sizeof=0x208
@@ -36,7 +37,15 @@ bool IsPackedPDataWireName(const char* name);
 bool DecodePackedPDataWire(const std::string& encoded, std::vector<NetMessageCvar_t>& output);
 __int64 CConVar__GetSplitScreenPlayerSlot(char* thisptr);
 void setinfopersist_cmd(const CCommand& args);
-bool R1OReplacePersistentUserDataForPlayer(int playerSlot, const std::vector<NetMessageCvar_t>& values);
+bool R1OReplacePersistentUserDataForPlayer(
+	int playerSlot,
+	PersistentDataState::SessionKey session,
+	const std::vector<NetMessageCvar_t>& values);
+bool R1OMergePersistentUserDataForPlayer(
+	int playerSlot,
+	PersistentDataState::SessionKey session,
+	const std::vector<NetMessageCvar_t>& values);
+void R1OClearPersistentUserDataForPlayer(int playerSlot);
 bool R1OStorePersistentUserDataConVar(int playerSlot, const char* name, const char* value);
 bool R1OGetPersistentUserDataConVar(int playerSlot, const char* name, std::string& value);
 
@@ -47,6 +56,7 @@ struct CBaseClientDS;
 extern CBaseClientDS* g_pClientArrayDS;
 extern void Script_XPChanged_Rebuild(void* pPlayer);
 extern void Script_GenChanged_Rebuild(void* pPlayer);
+bool R1OMarkTFOPlayerNetworkStateChanged(void* pPlayer);
 
 extern SQInteger Script_ClientGetPersistentData(HSQUIRRELVM v, __int64 a2, __int64 a3);
 

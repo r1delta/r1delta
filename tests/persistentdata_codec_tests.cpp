@@ -1,4 +1,7 @@
 #include "shared/persistentdata_codec.h"
+#include "shared/persistentdata_slots.h"
+#include "shared/persistentdata_state.h"
+#include "shared/persistentdata_transaction.h"
 
 #include <fstream>
 #include <iostream>
@@ -106,6 +109,90 @@ void TestProfileValidation()
 	Check(ValidateProfile(largeProfile, TestValidator), "accept complete profile beyond obsolete one-megabyte cap");
 }
 
+void TestPersistentPlayerSlots()
+{
+	using PersistentDataSlots::IsValidPlayerSlot;
+	using PersistentDataSlots::IsReplayPlayerSlot;
+	Check(!IsValidPlayerSlot(-1, 18), "reject negative player slot");
+	Check(IsValidPlayerSlot(0, 18), "accept first player slot");
+	Check(IsValidPlayerSlot(17, 18), "accept final 18-player slot");
+	Check(!IsValidPlayerSlot(18, 18), "reject replay slot after 18 players");
+	Check(IsReplayPlayerSlot(18), "identify replay slot");
+	Check(!IsReplayPlayerSlot(17), "do not identify final client as replay");
+	Check(!IsValidPlayerSlot(0, 0), "reject player slot before server initialization");
+	Check(!IsValidPlayerSlot(0, 65), "reject unsupported max-client count");
+}
+
+void TestProfileRecoverySelection()
+{
+	using PersistentDataTransaction::RecoveryAction;
+	using PersistentDataTransaction::SelectRecoveryAction;
+	Check(
+		SelectRecoveryAction(true, false) == RecoveryAction::CommitPrimary,
+		"commit a valid primary without a backup");
+	Check(
+		SelectRecoveryAction(true, true) == RecoveryAction::CommitPrimary,
+		"prefer a valid primary over an older backup");
+	Check(
+		SelectRecoveryAction(false, true) == RecoveryAction::RestoreBackup,
+		"restore a valid backup after an invalid save");
+	Check(
+		SelectRecoveryAction(false, false) == RecoveryAction::PreserveForRecovery,
+		"preserve evidence when neither transaction file validates");
+}
+
+void TestPersistentDataStateUpdates()
+{
+	using PersistentDataState::Merge;
+	using PersistentDataState::PlayerState;
+	using PersistentDataState::Replace;
+	using PersistentDataState::SessionKey;
+	using PersistentDataState::Values;
+
+	PlayerState state;
+	const SessionKey firstSession{ 0x1000, 4 };
+	Check(
+		Replace(state, firstSession, Values{ { "__ xp", "100" }, { "__ gen", "2" } }),
+		"accept a full persistent-data snapshot");
+	Check(state.values.size() == 2, "snapshot installs every persistent-data key");
+	Check(
+		Merge(state, firstSession, Values{ { "__ xp", "125" } }),
+		"accept a persistent-data delta");
+	Check(state.values.size() == 2, "delta preserves unrelated persistent-data keys");
+	Check(state.values["__ xp"] == "125", "delta replaces its named key");
+	Check(state.values["__ gen"] == "2", "delta retains the generation key");
+
+	Check(
+		Replace(state, firstSession, Values{ { "__ xp", "200" } }),
+		"accept a later full persistent-data snapshot");
+	Check(state.values.size() == 1, "later snapshot removes stale keys");
+	Check(state.values["__ xp"] == "200", "later snapshot installs current value");
+
+	PlayerState lateUserId;
+	Check(
+		Replace(lateUserId, SessionKey{ 0x2000, -1 }, Values{ { "__ xp", "300" } }),
+		"accept snapshot before userid assignment");
+	Check(
+		Merge(lateUserId, SessionKey{ 0x2000, 9 }, Values{ { "__ gen", "3" } }),
+		"promote userid on the same network session");
+	Check(lateUserId.values.size() == 2, "userid promotion does not discard the profile");
+
+	Check(
+		Merge(lateUserId, SessionKey{ 0x2000, 10 }, Values{ { "__ xp", "400" } }),
+		"accept a reused slot with a new userid");
+	Check(lateUserId.values.size() == 1, "new userid clears the reused slot before merging");
+	Check(lateUserId.values["__ xp"] == "400", "new userid receives only its own delta");
+
+	Check(
+		Merge(lateUserId, SessionKey{ 0x3000, 10 }, Values{ { "__ gen", "4" } }),
+		"accept a replacement network session");
+	Check(lateUserId.values.size() == 1, "new netchannel clears the previous session");
+	Check(lateUserId.values["__ gen"] == "4", "new netchannel receives only its own data");
+	Check(
+		!Merge(lateUserId, SessionKey{}, Values{ { "__ xp", "500" } }),
+		"reject updates without a network-session owner");
+}
+
 void TestProfileFile(const char* path)
 {
 	std::ifstream file(path, std::ios::binary);
@@ -124,6 +211,9 @@ int main(int argc, char** argv)
 	TestPackedRoundTrip();
 	TestPackedLimits();
 	TestProfileValidation();
+	TestPersistentPlayerSlots();
+	TestProfileRecoverySelection();
+	TestPersistentDataStateUpdates();
 	if (argc > 1)
 		TestProfileFile(argv[1]);
 

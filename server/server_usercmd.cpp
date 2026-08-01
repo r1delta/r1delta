@@ -317,18 +317,18 @@ void RegisterServerUserCmdConVars()
 
 	if (IsR1ODedicatedServer())
 	{
-		s_svMaxUserCmdProcessTicks = RegisterR1ODediConVar("sv_maxusrcmdprocessticks", "16",
+		s_svMaxUserCmdProcessTicks = RegisterR1ODediConVar("sv_maxusrcmdprocessticks", "300",
 			FCVAR_GAMEDLL | FCVAR_RELEASE,
-			"Maximum accumulated server ticks available for processing user commands (0 = unlimited).");
+			"Maximum accumulated server ticks available for processing user commands (0 = unlimited)."); // changed to 300 (5 seconds) because that was effectively r5's old value, and our usercmd system works different than normal source (and people were complaining of rubberbanding)
 		s_svMaxUserCmdProcessTicksWarning = RegisterR1ODediConVar("sv_maxusrcmdprocessticks_warning", "-1",
 			FCVAR_GAMEDLL | FCVAR_RELEASE,
 			"Minimum seconds between sustained usercmd budget warnings (-1 = disabled).");
 	}
 	else
 	{
-		s_svMaxUserCmdProcessTicks = RegisterConVar("sv_maxusrcmdprocessticks", "16",
+		s_svMaxUserCmdProcessTicks = RegisterConVar("sv_maxusrcmdprocessticks", "300",
 			FCVAR_GAMEDLL | FCVAR_RELEASE,
-			"Maximum accumulated server ticks available for processing user commands (0 = unlimited).");
+			"Maximum accumulated server ticks available for processing user commands (0 = unlimited)."); // see above
 		s_svMaxUserCmdProcessTicksWarning = RegisterConVar("sv_maxusrcmdprocessticks_warning", "-1",
 			FCVAR_GAMEDLL | FCVAR_RELEASE,
 			"Minimum seconds between sustained usercmd budget warnings (-1 = disabled).");

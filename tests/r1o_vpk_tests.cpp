@@ -98,9 +98,10 @@ void WriteBytes(const std::filesystem::path& path, const std::vector<uint8_t>& b
 void WriteArchive(
 	const std::filesystem::path& path,
 	const std::vector<EntrySpec>& entries,
-	std::vector<uint8_t>& pack)
+	std::vector<uint8_t>& pack,
+	const std::vector<uint8_t>& fixedTreePrefix = {})
 {
-	std::vector<uint8_t> tree;
+	std::vector<uint8_t> tree = fixedTreePrefix;
 	for (const EntrySpec& entry : entries) {
 		if (entry.preload.size() > std::numeric_limits<uint16_t>::max())
 			throw std::runtime_error("test preload is too large");
@@ -112,7 +113,6 @@ void WriteArchive(
 		Append(tree, uint32_t{});
 		Append(tree, static_cast<uint16_t>(entry.preload.size()));
 		Append(tree, kR1DDeltaPackIndex);
-		tree.insert(tree.end(), entry.preload.begin(), entry.preload.end());
 
 		const std::vector<uint8_t> encoded = EncodePayload(entry);
 		const uint64_t offset = pack.size();
@@ -127,6 +127,7 @@ void WriteArchive(
 			entry.declaredDecompressedSize.value_or(
 				static_cast<uint64_t>(entry.payload.size())));
 		Append(tree, kChunkTerminator);
+		tree.insert(tree.end(), entry.preload.begin(), entry.preload.end());
 
 		AppendString(tree, "");
 		AppendString(tree, "");
@@ -237,6 +238,20 @@ void TestCompressedAndPreloadEntry()
 	Check(R1OVPK_CloseFile(handle), "close compressed entry");
 }
 
+void TestFixedMultiChunkEntry()
+{
+	void* handle = R1OVPK_OpenFile("scripts/unit/multichunk.txt");
+	Check(handle != nullptr, "open fixed-byte multi-chunk entry");
+	if (!handle)
+		return;
+
+	const std::vector<uint8_t> data = ReadAll(handle);
+	Check(
+		std::string(data.begin(), data.end()) == "left-right",
+		"entry-level pack index applies to every chunk");
+	Check(R1OVPK_CloseFile(handle), "close fixed-byte multi-chunk entry");
+}
+
 void TestSeekTellAndRead()
 {
 	void* handle = R1OVPK_OpenFile("scripts/unit/hello.txt");
@@ -311,7 +326,7 @@ void TestIndexCache(const std::filesystem::path& root)
 
 	std::unordered_map<std::string, R1OVPKEntry> loaded;
 	Check(R1OVPK_LoadIndexCache(cachePath, rootKey, archives, loaded), "index cache reload");
-	Check(loaded.size() == 4, "index cache entry count");
+	Check(loaded.size() == 5, "index cache entry count");
 	const auto duplicate = loaded.find("scripts/unit/duplicate.txt");
 	Check(
 		duplicate != loaded.end()
@@ -514,7 +529,23 @@ void CreateFixture(const std::filesystem::path& root)
 	const std::filesystem::path vpk = root / "vpk";
 	std::filesystem::create_directories(vpk);
 	std::vector<uint8_t> pack;
-	std::vector<uint8_t> serverPack;
+	std::vector<uint8_t> serverPack{'l', 'e', 'f', 't', '-', 'r', 'i', 'g', 'h', 't'};
+
+	// Literal Titanfall directory-tree bytes, deliberately independent from
+	// WriteArchive. The 0x1337 pack index belongs to the entry, followed by two
+	// 30-byte chunk descriptors separated by 0x0000 and terminated by 0xFFFF.
+	// A parser that treats the separator as another pack index cannot read this.
+	const std::vector<uint8_t> fixedMultiChunkTree{
+		0x74, 0x78, 0x74, 0x00, 0x73, 0x63, 0x72, 0x69, 0x70, 0x74, 0x73, 0x2F,
+		0x75, 0x6E, 0x69, 0x74, 0x00, 0x6D, 0x75, 0x6C, 0x74, 0x69, 0x63, 0x68,
+		0x75, 0x6E, 0x6B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x37, 0x13,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00,
+	};
 
 	WriteArchive(
 		vpk / "client_unit.bsp.pak000_dir.vpk",
@@ -537,7 +568,8 @@ void CreateFixture(const std::filesystem::path& root)
 			{"txt", "scripts/unit", "badsize", {}, {'b', 'a', 'd'}, true, uint64_t{4}},
 			{"bin", " ", "root", {}, {0, 1, 2, 3}, false},
 		},
-		serverPack);
+		serverPack,
+		fixedMultiChunkTree);
 	WriteArchive(
 		vpk / "englishserver_ignored.bsp.pak000_dir.vpk.part",
 		{{"txt", "scripts/unit", "partial_download", {}, {'b', 'a', 'd'}, false}},
@@ -573,6 +605,7 @@ int main()
 		TestConcurrentCompressedFirstOpen();
 		TestLookupAndPrecedence();
 		TestCompressedAndPreloadEntry();
+		TestFixedMultiChunkEntry();
 		TestSeekTellAndRead();
 		TestRootEntryAndConcurrentOpens();
 		TestIndexCache(root);

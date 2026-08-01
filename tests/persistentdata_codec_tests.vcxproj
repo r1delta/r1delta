@@ -58,6 +58,9 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\shared\persistentdata_codec.h" />
+	<ClInclude Include="..\shared\persistentdata_slots.h" />
+	<ClInclude Include="..\shared\persistentdata_state.h" />
+	<ClInclude Include="..\shared\persistentdata_transaction.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

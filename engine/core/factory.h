@@ -83,6 +83,7 @@ __int64 VStdLib_GetICVarFactory();
 void InitR1ODedicatedServerAPIHook(uintptr_t engineR1OBase);
 int GetR1ODedicatedBoundServerPort();
 void* GetR1ONativeFileSystem();
+void* GetR1ONativeEngineServer022();
 void InitVStdLibICVarFactoryHook();
 void InstallR1OVPhysicsDeferredReleaseGuard(uintptr_t vphysicsBase);
 void InstallVPhysicsStaticBVHProbe(uintptr_t vphysicsBase);

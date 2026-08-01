@@ -36,6 +36,7 @@
  
 #include "vtable_tools.h"
 #include "filecache.h"
+#include "vpk_async_precache_fix.h"
 #include "vpk_directory_repair.h"
 
 #include <iostream>
