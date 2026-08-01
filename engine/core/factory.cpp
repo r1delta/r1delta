@@ -1061,15 +1061,29 @@ static bool MaterialSystemDx11MulSize(size_t a, size_t b, size_t* out)
 	return true;
 }
 
+static constexpr size_t MaterialSystemDx11TextureArraySize(unsigned int arraySize, int flags)
+{
+	// D3D11 cube textures use exactly six array slices. The original
+	// materialsystem replaces ArraySize with 6 for this flag; it does not
+	// multiply the caller's ArraySize by 6.
+	return (flags & 1) != 0 ? 6u : static_cast<size_t>(arraySize);
+}
+
+static_assert(MaterialSystemDx11TextureArraySize(1, 1) == 6);
+static_assert(MaterialSystemDx11TextureArraySize(6, 1) == 6);
+static_assert(MaterialSystemDx11TextureArraySize(4, 0) == 4);
+
 static size_t MaterialSystemDx11TextureSubresourceCount(int mipLevels, unsigned int arraySize, int flags)
 {
-	if (mipLevels <= 0 || !arraySize)
+	if (mipLevels <= 0)
+		return 0;
+
+	const size_t effectiveArraySize = MaterialSystemDx11TextureArraySize(arraySize, flags);
+	if (!effectiveArraySize)
 		return 0;
 
 	size_t count = 0;
-	if (!MaterialSystemDx11MulSize(static_cast<size_t>(mipLevels), static_cast<size_t>(arraySize), &count))
-		return 0;
-	if ((flags & 1) != 0 && !MaterialSystemDx11MulSize(count, 6, &count))
+	if (!MaterialSystemDx11MulSize(static_cast<size_t>(mipLevels), effectiveArraySize, &count))
 		return 0;
 	return count;
 }

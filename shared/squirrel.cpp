@@ -4,6 +4,7 @@
 
 #include "load.h"
 #include <cctype>
+#include <cstring>
 #include <cstdlib>
 #include <crtdbg.h>	
 #include <new>
@@ -1867,9 +1868,26 @@ bool GetSQVMFuncs() {
 
 	uintptr_t baseAddress = G_vscript;
 	if (G_server) {
-		if (!r1oFakeDedi && IsDedicatedServer())
-			MH_CreateHook(reinterpret_cast<void*>(G_launcher + 0x3A5E0), &DedicatedScriptErrorHandler,
-				reinterpret_cast<void**>(&s_DedicatedScriptErrorHandlerOriginal));
+		if (!r1oFakeDedi && IsDedicatedServer()) {
+			// dedicated+0x3A6C0 is the script-error handler entry. The old
+			// +0x3A5E0 target landed four bytes into the RIP-relative instruction
+			// at +0x3A5DC and corrupted the instruction when MinHook installed the
+			// detour.
+			constexpr uintptr_t kDedicatedScriptErrorHandlerRva = 0x3A6C0;
+			constexpr unsigned char kExpectedPrologue[] = {
+				0x40, 0x53, 0x55, 0x57, 0x41, 0x54, 0x41, 0x55,
+				0x41, 0x56, 0x41, 0x57, 0x48, 0x81, 0xEC, 0xD0
+			};
+			void* target = reinterpret_cast<void*>(G_launcher + kDedicatedScriptErrorHandlerRva);
+			if (std::memcmp(target, kExpectedPrologue, sizeof(kExpectedPrologue)) != 0) {
+				Warning("R1Delta: dedicated script-error handler prologue mismatch; telemetry hook not installed.\n");
+			} else {
+				const MH_STATUS status = MH_CreateHook(target, &DedicatedScriptErrorHandler,
+					reinterpret_cast<void**>(&s_DedicatedScriptErrorHandlerOriginal));
+				if (status != MH_OK && status != MH_ERROR_ALREADY_CREATED)
+					Warning("R1Delta: failed to create dedicated script-error telemetry hook (%s).\n", MH_StatusToString(status));
+			}
+		}
 
 		struct PlayerPersistenceHook {
 			uintptr_t target;
