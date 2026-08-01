@@ -1222,42 +1222,6 @@ bool NET_SignOnState__ReadFromBuffer(NET_SignOnState* thisptr, bf_read& buffer)
 	return true;
 }
 
-// String command validation
-struct alignas(8) NET_StringCmd : INetMessage
-{
-	bool m_bReliable;
-	void* m_NetChannel;
-	void* m_pMessageHandler;
-	char* m_szCommand;
-	char m_szCommandBuffer[1024];
-};
-
-bool (*oNET_StringCmd__ReadFromBuffer)(NET_StringCmd* thisptr, bf_read& buffer);
-bool NET_StringCmd__ReadFromBuffer(NET_StringCmd* thisptr, bf_read& buffer)
-{
-	if (!thisptr || !oNET_StringCmd__ReadFromBuffer
-		|| !oNET_StringCmd__ReadFromBuffer(thisptr, buffer))
-		return false;
-
-	// Block stringcmd from inactive client
-	CNetChan* netChannel = reinterpret_cast<CNetChan*>(thisptr->m_NetChannel);
-	bool connectionCompleteOrPreSignon = false;
-	if (!TryReadConnectionCompleteOrPreSignon(
-			netChannel,
-			&connectionCompleteOrPreSignon))
-		return false;
-
-	if (!connectionCompleteOrPreSignon) {
-		Warning("NET_StringCmd::ReadFromBuffer: blocked stringcmd from inactive client\n");
-		if (thisptr->m_szCommand)
-			thisptr->m_szCommand[0] = 0;
-		thisptr->m_szCommandBuffer[0] = 0;
-		return true;
-	}
-
-	return true;
-}
-
 void InstallR1ODedicatedSecurityHooks(uintptr_t engine_base)
 {
 	static bool installed = false;
@@ -1285,13 +1249,6 @@ void InstallR1ODedicatedSecurityHooks(uintptr_t engine_base)
 		{ 0x211110, reinterpret_cast<void*>(&NET_SignOnState__ReadFromBuffer),
 			reinterpret_cast<void**>(&oNET_SignOnState__ReadFromBuffer),
 			"NET_SignOnState::ReadFromBuffer" },
-		// NET_StringCmd vtable slot 4 is ReadFromBuffer at +0x20CF70.
-		// +0x20CF20 is slot 5 (WriteToBuffer); detouring that with the
-		// read-side validator made every server-to-client string command
-		// report failure after it had already written its payload.
-		{ 0x20CF70, reinterpret_cast<void*>(&NET_StringCmd__ReadFromBuffer),
-			reinterpret_cast<void**>(&oNET_StringCmd__ReadFromBuffer),
-			"NET_StringCmd::ReadFromBuffer" },
 	};
 
 	bool allInstalled = true;
