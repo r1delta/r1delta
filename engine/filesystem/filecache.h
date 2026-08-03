@@ -143,6 +143,7 @@ public:
     void UpdateCache(); // Starts the background update loop (or performs initial scan)
 
     void RequestManualRescan();
+    bool RefreshAddonSnapshotFromWorkingDirectory();
     void BeginAddonSearchPathUpdate();
     bool PublishAddonSearchPathSnapshot(const std::filesystem::path& newAddonRoot);
     bool EndAddonSearchPathUpdate();

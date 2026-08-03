@@ -1247,9 +1247,6 @@ void SendChatMsg(CRecipientFilter* filter, int fromIndex, const char* msg, bool 
 
 
 int SendChatWrapper(HSQUIRRELVM v) {
-	if (IsR1ODedicatedServer())
-		return 0;
-
 	// args: this, entity player / bool = true (broadcast) / array of entities for multiple recipients, int fromPlayerIndex, string text, bool isTeam = false, bool isDead = false
 
 	static auto CRecipientFilter__AddAllPlayers = reinterpret_cast<void(*)(void*)>(G_server + 0x1E7BA0);
@@ -2989,6 +2986,10 @@ bool RunR1OServerAutorunScriptsIfPending()
 		return false;
 	if (!pendingVm->sqvm || !GetR1ONativeFileSystem())
 		return false;
+	if (!FileCache::GetInstance().RefreshAddonSnapshotFromWorkingDirectory()) {
+		Warning("R1O server autorun could not refresh the working-directory addon snapshot.\n");
+		return false;
+	}
 
 	RunAutorunScripts(pendingVm, "sv_*");
 	s_R1OTfoPendingServerAutorunVm.compare_exchange_strong(

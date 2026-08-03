@@ -180,7 +180,7 @@ void FileCache::UpdateCache() {
                 WakeAllConditionVariable(&cacheCondition);
                 return;
             }
-            scanAddonRoot /= "r";
+            scanAddonRoot /= "r1";
             scanAddonRoot /= "addons";
             scanAddonRoot.make_preferred();
         }
@@ -217,6 +217,25 @@ void FileCache::RequestManualRescan()
         rescanState.RequestRescan();
     }
     WakeAllConditionVariable(&cacheCondition);
+}
+
+bool FileCache::RefreshAddonSnapshotFromWorkingDirectory()
+{
+    std::error_code ec;
+    std::filesystem::path addonPath = std::filesystem::current_path(ec);
+    if (ec) {
+        Warning("FileCache could not resolve the current working directory: %s\n", ec.message().c_str());
+        return false;
+    }
+
+    addonPath /= "r1";
+    addonPath /= "addons";
+    addonPath.make_preferred();
+
+    BeginAddonSearchPathUpdate();
+    const bool published = PublishAddonSearchPathSnapshot(addonPath);
+    const bool completed = EndAddonSearchPathUpdate();
+    return published && completed;
 }
 
 void FileCache::BeginAddonSearchPathUpdate()

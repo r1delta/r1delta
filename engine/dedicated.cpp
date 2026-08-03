@@ -32,6 +32,8 @@ void ConsoleOutputHook(void* thisptr, char* string) {
 
 #define VTABLE_UPDATE_FORCE 1
 
+static constexpr uintptr_t kUnhookableSVC_PersistenceBaselineSlotRva = 0x14A170;
+
 #if BUILD_DEBUG
 
 // NOTE(mrsteyk): this is intentionally slow to make you aware of what you are doing.
@@ -148,15 +150,18 @@ InitDedicatedVtables() {
 			OutputDebugStringA(buf);
 		}
 
+		if (!msg->offset_engine || !msg->offset_engine_ds)
+			continue;
+
 		auto dsVtable = engineDS + msg->offset_engine_ds;
 		auto vtable = engine + msg->offset_engine;
 
-		if (dsVtable && vtable) {
-			for (int i = 0; i < 14; ++i) {
-				LPVOID pTarget = ((LPVOID*)dsVtable)[i];
-				LPVOID pDetour = ((LPVOID*)vtable)[i];
-				MH_CreateHook(pTarget, pDetour, NULL);
-			}
+		for (int slot = 0; slot < 14; ++slot) {
+			LPVOID pTarget = ((LPVOID*)dsVtable)[slot];
+			LPVOID pDetour = ((LPVOID*)vtable)[slot];
+			if (pTarget == reinterpret_cast<LPVOID>(engineDS + kUnhookableSVC_PersistenceBaselineSlotRva))
+				continue;
+			MH_CreateHook(pTarget, pDetour, NULL);
 		}
 	}
 
@@ -1624,15 +1629,18 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 		}
 #endif
 
+		if (!msg->offset_engine || !msg->offset_engine_ds)
+			continue;
+
 		auto dsVtable = engineDS + msg->offset_engine_ds;
 		auto vtable = engine + msg->offset_engine;
 
-		if (dsVtable && vtable) {
-			for (int i = 0; i < 14; ++i) {
-				LPVOID pTarget = ((LPVOID*)dsVtable)[i];
-				LPVOID pDetour = ((LPVOID*)vtable)[i];
-				MH_CreateHook(pTarget, pDetour, NULL);
-			}
+		for (int slot = 0; slot < 14; ++slot) {
+			LPVOID pTarget = ((LPVOID*)dsVtable)[slot];
+			LPVOID pDetour = ((LPVOID*)vtable)[slot];
+			if (pTarget == reinterpret_cast<LPVOID>(engineDS + kUnhookableSVC_PersistenceBaselineSlotRva))
+				continue;
+			MH_CreateHook(pTarget, pDetour, NULL);
 		}
 	}
 
