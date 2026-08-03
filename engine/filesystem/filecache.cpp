@@ -1,5 +1,6 @@
 // filecache.cpp
 #include "filecache.h"
+#include "addonlist_state.h"
 #include <thread>   // For std::thread if UpdateCache runs in background
 #include <iostream> // For std::cerr (replace with Msg/Warning)
 
@@ -14,20 +15,18 @@ FileCache::FileCache() {
         // Handle error: Cannot proceed without executable path
         Warning("Failed to get executable directory! FileCache disabled.\n");
         // Potentially throw or set an error state
+        scanUnavailable = true;
         initialized.store(true, std::memory_order_release); // Prevent waits if unusable
         return;
     }
     r1deltaBasePath = executableDirectory / "r1delta";
     r1deltaBasePath.make_preferred();
     r1deltaBasePathHash = fnv1a_hash(r1deltaBasePath);
-    r1deltaAddonsPath = std::filesystem::current_path() / "r1" / "addons";
-    r1deltaAddonsPath.make_preferred();
 }
 
 
 void FileCache::ScanDirectory(const std::filesystem::path& directory,
-    std::unordered_set<std::size_t>& currentCache,
-    std::unordered_set<std::string, HashStrings, std::equal_to<>>* currentAddonsFolders) {
+    std::unordered_set<std::size_t>& currentCache) {
     ZoneScoped;
     std::error_code ec; // To check filesystem errors without exceptions
 
@@ -37,17 +36,11 @@ void FileCache::ScanDirectory(const std::filesystem::path& directory,
             // Log specific error if exists
             Warning("Error accessing directory '%s': %s\n", directory.string().c_str(), ec.message().c_str());
         }
-        else if (currentAddonsFolders || directory == r1deltaBasePath) {
+        else if (directory == r1deltaBasePath) {
             // Only warn if the primary base directories don't exist
             Msg("Directory '%s' not found for scanning.\n", directory.string().c_str());
         }
         return; // Don't try to iterate if it doesn't exist or isn't accessible
-    }
-
-
-    // Ensure the base addon directory itself is added if requested
-    if (currentAddonsFolders) {
-        currentAddonsFolders->insert(directory.string());
     }
 
 
@@ -67,19 +60,10 @@ void FileCache::ScanDirectory(const std::filesystem::path& directory,
             currentCache.insert(fnv1a_hash(normalizedPathString));
         }
         else if (entry.is_directory(ec) && !ec) {
-            // If we are scanning the top-level addons directory, add this subdirectory to the addon cache
-            if (currentAddonsFolders)
-            {
-                currentAddonsFolders->insert(normalizedPathString);
-                // Don't scan recursively into the addon folder itself here,
-                // UpdateCache will call ScanDirectory on it separately if needed.
-                // If you *want* to allow nested addon folders, remove this continue
-                // and the separate ScanDirectory call for addonsDir in UpdateCache might need adjustment.
-                // For the typical "flat" addons structure, this is usually correct.
-                // Scan its contents below.
-            }
-            // Always recurse into subdirectories
-            ScanDirectory(currentPath, currentCache, nullptr); // Don't pass addonsFolderCache down recursion
+            if (directory == r1deltaBasePath
+                && ::_stricmp(currentPath.filename().string().c_str(), "addons") == 0)
+                continue;
+            ScanDirectory(currentPath, currentCache);
         }
         else if (ec) {
             Warning("Error checking entry type for '%s': %s\n", normalizedPathString.c_str(), ec.message().c_str());
@@ -91,90 +75,232 @@ void FileCache::ScanDirectory(const std::filesystem::path& directory,
     }
 }
 
+void FileCache::BuildSnapshot(
+    const std::filesystem::path& scanAddonRoot,
+    std::unordered_set<std::size_t>& newCache,
+    std::vector<std::string>& newAddonsFolderCache) {
+    std::error_code ec;
+    std::filesystem::create_directories(scanAddonRoot, ec);
+    if (ec)
+        Warning("Could not create directory: %s: %s\n", scanAddonRoot.string().c_str(), ec.message().c_str());
+
+    ScanDirectory(r1deltaBasePath, newCache);
+
+    std::vector<AddonListState::Entry> addonStates;
+    const std::filesystem::path addonListPath = scanAddonRoot.parent_path() / "addonlist.txt";
+    if (!AddonListState::Load(addonListPath, addonStates)) {
+        Msg("Addon list '%s' is missing or invalid; addon replacements are disabled.\n",
+            addonListPath.string().c_str());
+        return;
+    }
+
+    for (const AddonListState::Entry& addon : addonStates) {
+        if (!addon.enabled)
+            continue;
+        if (!AddonListState::IsSafeDirectoryName(addon.name)) {
+            Warning("Ignoring unsafe addon directory name '%s'.\n", addon.name.c_str());
+            continue;
+        }
+
+        std::filesystem::path addonDirectory = scanAddonRoot / addon.name;
+        addonDirectory.make_preferred();
+        ec.clear();
+        if (!std::filesystem::is_directory(addonDirectory, ec)) {
+            if (ec)
+                Warning("Error accessing addon directory '%s': %s\n",
+                    addonDirectory.string().c_str(), ec.message().c_str());
+            continue;
+        }
+
+        newAddonsFolderCache.push_back(addonDirectory.string());
+        ScanDirectory(addonDirectory, newCache);
+    }
+}
+
+void FileCache::CommitSnapshot(
+    uint64_t generation,
+    std::unordered_set<std::size_t>&& newCache,
+    std::vector<std::string>&& newAddonsFolderCache) {
+    cache = std::move(newCache);
+    addonsFolderCache = std::move(newAddonsFolderCache);
+    publishedGeneration = generation;
+    addonsFolderCacheHashes.clear();
+    addonsFolderCacheHashes.reserve(addonsFolderCache.size());
+    for (const std::string& addonDirectory : addonsFolderCache)
+        addonsFolderCacheHashes.push_back(fnv1a_hash(addonDirectory));
+    initialized.store(true, std::memory_order_release);
+}
+
+bool FileCache::WaitForInitialPublication() {
+    AcquireSRWLockShared(&cacheMutex);
+    while (!initialized.load(std::memory_order_acquire)) {
+        SleepConditionVariableSRW(
+            &cacheCondition,
+            &cacheMutex,
+            INFINITE,
+            CONDITION_VARIABLE_LOCKMODE_SHARED);
+    }
+    const bool available = !scanUnavailable;
+    ReleaseSRWLockShared(&cacheMutex);
+    return available;
+}
+
 void FileCache::UpdateCache() {
-    // Ensure base paths are valid
     if (executableDirectory.empty()) {
         Warning("FileCache::UpdateCache called but executable directory is unknown. Aborting.\n");
-        initialized.store(true, std::memory_order_release); // Mark as "initialized" to unblock waiters, even though unusable
+        {
+            SRWGuard lock(&cacheMutex);
+            scanUnavailable = true;
+            initialized.store(true, std::memory_order_release);
+        }
         WakeAllConditionVariable(&cacheCondition);
         return;
     }
 
-    // Initial scan
-    bool firstScan = true;
     while (true) {
-        { // Scope for building new caches
-            ZoneScopedN("FileCache Rescan");
-            std::unordered_set<std::size_t> newCache;
-            std::unordered_set<std::string, HashStrings, std::equal_to<>> newAddonsFolderCache;
-
-            //Msg("Starting file cache scan...\n");
-
-            // Dedicated startup changes the working directory from the Delta
-            // executable directory to the installed game directory after this
-            // DLL and the cache thread have already started.  Resolve r1/addons
-            // for every scan so the addon-refresh rescan follows that change
-            // instead of remaining pinned to the launcher's directory.
-            std::filesystem::path addonRoot =
-                std::filesystem::current_path() / "r1" / "addons";
-            addonRoot.make_preferred();
-
-            // Create directories if they don't exist (optional, depends on desired behavior)
-            std::error_code ec;
-            std::filesystem::create_directories(addonRoot, ec);
-            if (ec) Warning("Could not create directory: %s: %s\n", addonRoot.string().c_str(), ec.message().c_str());
-
-
-            // Scan base r1delta directory (excluding addons)
-            ScanDirectory(r1deltaBasePath, newCache);
-
-            // Scan addons directory - this collects addon folders AND their files
-            ScanDirectory(addonRoot, newCache, &newAddonsFolderCache);
-
-            //Msg("File cache scan complete. Found %zu files, %zu addon folders.\n", newCache.size(), newAddonsFolderCache.size());
-
-            { // Lock scope for swapping caches
-                ZoneScopedN("FileCache update cacheMutex");
-                SRWGuard lock(&cacheMutex);
-                cache = std::move(newCache);
-                addonsFolderCache = std::move(newAddonsFolderCache);
-                r1deltaAddonsPath = std::move(addonRoot);
-                addonsFolderCacheHashes.clear();
-                for (const auto& k : addonsFolderCache)
-                {
-                    addonsFolderCacheHashes.push_back(fnv1a_hash(k));
-                }
-
-                // Set initialized only AFTER the first successful scan completes
-                if (firstScan) {
-                    initialized.store(true, std::memory_order_release);
-                    firstScan = false; // Don't notify on subsequent updates unless needed
-                }
-            } // Unlock mutex before notifying
-
-            // Notify waiters ONLY on the first scan completion
-            if (!firstScan) { // This means it was the first scan run
-                WakeAllConditionVariable(&cacheCondition);
-            }
-        } // End build scope
-
-
-        // Wait for manual rescan request
-        { // Lock scope for waiting
-            ZoneScopedN("FileCache Wait For Rescan");
-            
-            AcquireSRWLockExclusive(&cacheMutex);
-            while (!(initialized.load(std::memory_order_acquire) &&
-                manualRescanRequested.load(std::memory_order_acquire)))
-            {
+        std::filesystem::path scanAddonRoot;
+        uint64_t scanGeneration = 0;
+        {
+            SRWGuard lock(&cacheMutex);
+            while (rescanState.IsSuspended())
                 SleepConditionVariableSRW(&cacheCondition, &cacheMutex, INFINITE, 0);
-            }
-
-            // Reset the request flag *after* waking up
-            manualRescanRequested.store(false, std::memory_order_relaxed); // Relaxed is fine, protected by mutex
-            ReleaseSRWLockExclusive(&cacheMutex);
+            scanGeneration = rescanState.Generation();
+            scanAddonRoot = addonRoot;
         }
+        if (scanAddonRoot.empty()) {
+            std::error_code ec;
+            scanAddonRoot = std::filesystem::current_path(ec);
+            if (ec) {
+                Warning("FileCache could not resolve the current game root: %s\n", ec.message().c_str());
+                {
+                    SRWGuard lock(&cacheMutex);
+                    scanUnavailable = true;
+                    initialized.store(true, std::memory_order_release);
+                }
+                WakeAllConditionVariable(&cacheCondition);
+                return;
+            }
+            scanAddonRoot /= "r";
+            scanAddonRoot /= "addons";
+            scanAddonRoot.make_preferred();
+        }
+
+        ZoneScopedN("FileCache Rescan");
+        std::unordered_set<std::size_t> newCache;
+        std::vector<std::string> newAddonsFolderCache;
+        BuildSnapshot(scanAddonRoot, newCache, newAddonsFolderCache);
+
+        {
+            ZoneScopedN("FileCache update cacheMutex");
+            SRWGuard lock(&cacheMutex);
+            if (!rescanState.CanPublish(scanGeneration))
+                continue;
+            CommitSnapshot(
+                scanGeneration,
+                std::move(newCache),
+                std::move(newAddonsFolderCache));
+        }
+        WakeAllConditionVariable(&cacheCondition);
+
+        ZoneScopedN("FileCache Wait For Rescan");
+        AcquireSRWLockExclusive(&cacheMutex);
+        while (rescanState.CanPublish(scanGeneration))
+            SleepConditionVariableSRW(&cacheCondition, &cacheMutex, INFINITE, 0);
+        ReleaseSRWLockExclusive(&cacheMutex);
     }
+}
+
+void FileCache::RequestManualRescan()
+{
+    {
+        SRWGuard lock(&cacheMutex);
+        rescanState.RequestRescan();
+    }
+    WakeAllConditionVariable(&cacheCondition);
+}
+
+void FileCache::BeginAddonSearchPathUpdate()
+{
+    WaitForInitialPublication();
+    {
+        SRWGuard lock(&cacheMutex);
+        rescanState.BeginSearchPathUpdate();
+    }
+    WakeAllConditionVariable(&cacheCondition);
+}
+
+bool FileCache::PublishAddonSearchPathSnapshot(const std::filesystem::path& newAddonRoot)
+{
+    if (newAddonRoot.empty())
+        return false;
+
+    std::error_code ec;
+    std::filesystem::path scanAddonRoot = std::filesystem::absolute(newAddonRoot, ec);
+    if (ec)
+        return false;
+    scanAddonRoot = scanAddonRoot.lexically_normal();
+    scanAddonRoot.make_preferred();
+
+    uint64_t scanGeneration = 0;
+    bool suspended = false;
+    {
+        SRWGuard lock(&cacheMutex);
+        addonRoot = scanAddonRoot;
+        suspended = rescanState.IsSuspended();
+        if (suspended)
+            scanGeneration = rescanState.Generation();
+        else
+            rescanState.RequestRescan();
+    }
+    if (!suspended) {
+        WakeAllConditionVariable(&cacheCondition);
+        return false;
+    }
+
+    std::unordered_set<std::size_t> newCache;
+    std::vector<std::string> newAddonsFolderCache;
+    BuildSnapshot(scanAddonRoot, newCache, newAddonsFolderCache);
+
+    {
+        SRWGuard lock(&cacheMutex);
+        if (!rescanState.IsSuspended()
+            || rescanState.Generation() != scanGeneration)
+            return false;
+        CommitSnapshot(
+            scanGeneration,
+            std::move(newCache),
+            std::move(newAddonsFolderCache));
+    }
+    WakeAllConditionVariable(&cacheCondition);
+    return true;
+}
+
+bool FileCache::EndAddonSearchPathUpdate()
+{
+    uint64_t targetGeneration = 0;
+    AddonListState::SearchPathUpdateEnd completion;
+    {
+        SRWGuard lock(&cacheMutex);
+        completion = rescanState.EndSearchPathUpdate();
+        if (completion == AddonListState::SearchPathUpdateEnd::Outermost)
+            targetGeneration = rescanState.Generation();
+    }
+    if (completion == AddonListState::SearchPathUpdateEnd::Unmatched) {
+        Warning("FileCache addon search-path update completed without a matching begin.\n");
+        return false;
+    }
+    WakeAllConditionVariable(&cacheCondition);
+    if (completion == AddonListState::SearchPathUpdateEnd::Nested)
+        return false;
+
+    AcquireSRWLockExclusive(&cacheMutex);
+    while (!scanUnavailable && publishedGeneration < targetGeneration)
+        SleepConditionVariableSRW(&cacheCondition, &cacheMutex, INFINITE, 0);
+    const bool published = !scanUnavailable && publishedGeneration >= targetGeneration;
+    ReleaseSRWLockExclusive(&cacheMutex);
+    if (!published)
+        Warning("FileCache could not publish the final addon search-path generation.\n");
+    return published;
 }
 
 // filecache.cpp (continued)
@@ -183,13 +309,8 @@ bool FileCache::TryReplaceFile(const char* pszRelativeFilePath) {
     ZoneScoped;
 
     // Ensure cache is initialized and ready
-    if (!initialized.load(std::memory_order_acquire)) {
-        AcquireSRWLockShared(&cacheMutex);
-        do {
-            SleepConditionVariableSRW(&cacheCondition, &cacheMutex, INFINITE, CONDITION_VARIABLE_LOCKMODE_SHARED);
-        } while (!initialized.load(std::memory_order_acquire));
-        ReleaseSRWLockShared(&cacheMutex);
-    }
+    if (!initialized.load(std::memory_order_acquire) && !WaitForInitialPublication())
+        return false;
 
     // NOTE(mrsteyk): R1DAssert macro still evaluates the expression.
 #if BUILD_DEBUG
@@ -399,17 +520,24 @@ bool FileCache::TryReplaceFile(const char* pszRelativeFilePath) {
     return false; // Not found in any checked location
 }
 
+FileCache::ReadLease FileCache::AcquireReadLease() {
+    if (!initialized.load(std::memory_order_acquire) && !WaitForInitialPublication())
+        return ReadLease();
+    return ReadLease(this, &cacheMutex);
+}
+
 bool FileCache::ResolveReplacementFile(
+    const ReadLease& lease,
     const char* pszRelativeFilePath,
     char* pszResolvedPath,
     size_t resolvedPathSize) {
-    if (!pszRelativeFilePath || !pszRelativeFilePath[0]
+    if (lease.owner != this || !lease.lock
+        || !pszRelativeFilePath || !pszRelativeFilePath[0]
         || !pszResolvedPath || resolvedPathSize == 0) {
         return false;
     }
 
     pszResolvedPath[0] = '\0';
-
     std::filesystem::path relativePath(pszRelativeFilePath);
     relativePath = relativePath.lexically_normal();
     if (relativePath.empty() || relativePath.is_absolute()) {
@@ -445,39 +573,11 @@ bool FileCache::ResolveReplacementFile(
         return true;
     };
 
-    std::vector<std::filesystem::path> roots;
-    {
-        SRWGuardShared lock(&cacheMutex);
-        roots.push_back(r1deltaBasePath);
-        for (const std::string& addonDirectory : addonsFolderCache)
-            roots.emplace_back(addonDirectory);
-    }
-
-    // FileCache can be constructed before R1Delta_DS changes cwd to the
-    // installed game.  Resolve the live r1/addons tree as well as the latest
-    // completed cache snapshot so early autorun does not lose persistent
-    // addons while a requested rescan is still in flight.
-    std::error_code ec;
-    const std::filesystem::path liveAddonRoot =
-        std::filesystem::current_path(ec) / "r1" / "addons";
-    if (!ec) {
-        roots.push_back(liveAddonRoot);
-        for (const auto& entry : std::filesystem::directory_iterator(
-            liveAddonRoot,
-            std::filesystem::directory_options::skip_permission_denied,
-            ec)) {
-            if (ec)
-                break;
-            if (entry.is_directory(ec) && !ec)
-                roots.push_back(entry.path());
-            ec.clear();
-        }
-    }
-
-    for (const std::filesystem::path& root : roots) {
-        if (copyRegularFile(root)) {
+    if (copyRegularFile(r1deltaBasePath))
+        return true;
+    for (const std::string& addonDirectory : addonsFolderCache) {
+        if (copyRegularFile(addonDirectory))
             return true;
-        }
     }
     return false;
 }
@@ -491,17 +591,8 @@ std::vector<std::string> FileCache::FindReplacementFileNames(
         return results;
     }
 
-    if (!initialized.load(std::memory_order_acquire)) {
-        AcquireSRWLockShared(&cacheMutex);
-        do {
-            SleepConditionVariableSRW(
-                &cacheCondition,
-                &cacheMutex,
-                INFINITE,
-                CONDITION_VARIABLE_LOCKMODE_SHARED);
-        } while (!initialized.load(std::memory_order_acquire));
-        ReleaseSRWLockShared(&cacheMutex);
-    }
+    if (!initialized.load(std::memory_order_acquire) && !WaitForInitialPublication())
+        return results;
 
     std::filesystem::path relativeDirectory(pszRelativeDirectory);
     relativeDirectory = relativeDirectory.lexically_normal();
@@ -564,27 +655,7 @@ std::vector<std::string> FileCache::FindReplacementFileNames(
         SRWGuardShared lock(&cacheMutex);
         scanRoot(r1deltaBasePath);
         for (const std::string& addonDirectory : addonsFolderCache)
-            scanRoot(std::filesystem::path(addonDirectory));
-    }
-
-    // See ResolveReplacementFile: the dedicated launcher changes cwd after
-    // the cache thread starts.  Enumerate the live persistent addon root so
-    // startup autorun is correct even before the asynchronous rescan commits.
-    std::error_code ec;
-    const std::filesystem::path liveAddonRoot =
-        std::filesystem::current_path(ec) / "r1" / "addons";
-    if (!ec) {
-        scanRoot(liveAddonRoot);
-        for (const auto& entry : std::filesystem::directory_iterator(
-            liveAddonRoot,
-            std::filesystem::directory_options::skip_permission_denied,
-            ec)) {
-            if (ec)
-                break;
-            if (entry.is_directory(ec) && !ec)
-                scanRoot(entry.path());
-            ec.clear();
-        }
+            scanRoot(addonDirectory);
     }
 
     std::sort(

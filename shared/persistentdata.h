@@ -71,6 +71,9 @@ char ExecuteConfigFile(int configType);
 void PData_OnConsoleCommand(const char* str);
 void PData_RunFrame();
 void PData_FinishPendingSave();
+bool PData_PrepareForSchemaReload();
+void PData_ReconcilePersistentConVars();
+void InstallPersistentProfileWriterHook(uintptr_t engineBase);
 class PDataValidator;
 class PDef {
 private:

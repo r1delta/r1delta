@@ -236,6 +236,8 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="engine\vtable_remaps\engine_vtable.h" />
     <ClInclude Include="eos\fake_ip_layer.h" />
     <ClInclude Include="engine\core\factory.h" />
+    <ClInclude Include="engine\core\materialsystem_dx11_texture_upload.h" />
+    <ClInclude Include="engine\filesystem\addonlist_state.h" />
     <ClInclude Include="engine\filesystem\filecache.h" />
     <ClInclude Include="engine\filesystem\filesystem.h" />
     <ClInclude Include="engine\filesystem\r1o_vpk.h" />
@@ -359,6 +361,8 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="eos\eos_layer.cpp" />
     <ClCompile Include="eos\eos_network.cpp" />
     <ClCompile Include="engine\core\factory.cpp" />
+    <ClCompile Include="engine\core\materialsystem_dx11_texture_upload.cpp" />
+    <ClCompile Include="engine\filesystem\addonlist_state.cpp" />
     <ClCompile Include="engine\filesystem\filecache.cpp" />
     <ClCompile Include="engine\filesystem\filesystem.cpp" />
     <ClCompile Include="engine\filesystem\r1o_vpk.cpp" />

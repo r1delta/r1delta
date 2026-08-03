@@ -1890,27 +1890,81 @@ static bool g_bTimerActive = false;
 static double g_flLastCommandTime = 0.0;
 static constexpr double SAVE_DELAY = 5.0;
 static bool g_bRecursive = false;
-static bool g_bValidatedProfileReplay = false;
 static bool g_bSaveWritePending = false;
 static bool g_bSaveQueuedThisFrame = false;
 static bool g_bFinishSaveBeforeQuit = false;
+static bool g_bSchemaReloadPersistenceSafe = true;
+static bool g_bProfileReplayComplete = false;
+using NativeProfileWriterFn = char(__fastcall*)(unsigned int configType);
+static NativeProfileWriterFn g_NativeProfileWriterOriginal = nullptr;
 
-static bool ValidatePersistentProfileEntry(
-	std::string_view key,
-	std::string_view value,
-	void*)
+namespace {
+constexpr int kPersistentSchemaFlags =
+	FCVAR_PERSIST | FCVAR_ARCHIVE_PLAYERPROFILE | FCVAR_USERINFO;
+
+struct PersistentConVarBinding {
+	std::string logicalKey;
+	int conVarFlags = 0;
+	int parentFlags = 0;
+};
+
+std::unordered_map<std::string, PersistentConVarBinding> g_persistentConVarBindings;
+using PersistentValueSnapshot = std::unordered_map<
+	std::string, std::string, HashStrings, std::equal_to<>>;
+PersistentValueSnapshot g_pendingProfileValues;
+
+void ApplyPersistentSchemaFlags(
+	ConVarR1* conVar,
+	const PersistentConVarBinding& binding,
+	bool enabled)
 {
-	return IsValidUserInfo(key.data(), static_cast<int>(key.size()))
-		&& IsValidUserInfo(value.data(), static_cast<int>(value.size()))
-		&& PDef::IsValidKeyAndValue(std::string(key), std::string(value));
+	if (!conVar)
+		return;
+	conVar->m_nFlags = (conVar->m_nFlags & ~kPersistentSchemaFlags)
+		| (enabled ? binding.conVarFlags : 0);
+	ConVarR1* parent = conVar->m_pParent;
+	if (parent && parent != conVar) {
+		parent->m_nFlags = (parent->m_nFlags & ~kPersistentSchemaFlags)
+			| (enabled ? binding.parentFlags : 0);
+	}
 }
 
-static bool ValidateProfileContents(std::string_view contents)
+void RememberPersistentConVar(
+	const char* conVarName,
+	std::string_view logicalKey,
+	ConVarR1* conVar)
 {
-	return PersistentDataCodec::ValidateProfile(contents, ValidatePersistentProfileEntry);
+	if (!conVarName || !*conVarName || !conVar)
+		return;
+	auto [bindingIt, inserted] = g_persistentConVarBindings.try_emplace(conVarName);
+	PersistentConVarBinding& binding = bindingIt->second;
+	binding.logicalKey.assign(logicalKey);
+	const int conVarFlags = conVar->m_nFlags & kPersistentSchemaFlags;
+	ConVarR1* parent = conVar->m_pParent;
+	const int parentFlags = parent && parent != conVar
+		? parent->m_nFlags & kPersistentSchemaFlags
+		: 0;
+	if (inserted || conVarFlags)
+		binding.conVarFlags = conVarFlags;
+	if (inserted || parentFlags)
+		binding.parentFlags = parentFlags;
+	ApplyPersistentSchemaFlags(conVar, binding, true);
+}
 }
 
-static bool ReadValidProfileFile(const std::filesystem::path& path, std::string* contents = nullptr)
+static bool ValidateProfileContents(
+	std::string_view contents,
+	PersistentDataCodec::ProfileEntryValidator persistentValidator = nullptr,
+	void* validatorContext = nullptr)
+{
+	return PersistentDataCodec::ValidateProfile(contents, persistentValidator, validatorContext);
+}
+
+static bool ReadValidProfileFile(
+	const std::filesystem::path& path,
+	std::string* contents = nullptr,
+	PersistentDataCodec::ProfileEntryValidator persistentValidator = nullptr,
+	void* validatorContext = nullptr)
 {
 	std::error_code error;
 	if (!std::filesystem::is_regular_file(path, error) || error)
@@ -1922,7 +1976,7 @@ static bool ReadValidProfileFile(const std::filesystem::path& path, std::string*
 	std::string loaded(static_cast<size_t>(fileSize), '\0');
 	std::ifstream file(path, std::ios::binary);
 	if (!file.read(loaded.data(), static_cast<std::streamsize>(loaded.size()))
-		|| !ValidateProfileContents(loaded))
+		|| !ValidateProfileContents(loaded, persistentValidator, validatorContext))
 		return false;
 	if (contents)
 		*contents = std::move(loaded);
@@ -1943,6 +1997,45 @@ static bool ReplaceFileWithCopy(const std::filesystem::path& source, const std::
 	return true;
 }
 
+static bool ReplaceFileWithContents(
+	const std::filesystem::path& destination,
+	std::string_view contents)
+{
+	if (contents.empty() || contents.size() > PersistentDataCodec::MaxRawSize)
+		return false;
+	std::filesystem::path temporary = destination;
+	temporary += ".tmp";
+	DeleteFileW(temporary.c_str());
+	HANDLE file = CreateFileW(
+		temporary.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+		FILE_ATTRIBUTE_NORMAL, nullptr);
+	if (file == INVALID_HANDLE_VALUE)
+		return false;
+	DWORD written = 0;
+	const bool writeSucceeded = WriteFile(
+		file, contents.data(), static_cast<DWORD>(contents.size()), &written, nullptr) != FALSE
+		&& written == contents.size()
+		&& FlushFileBuffers(file) != FALSE;
+	CloseHandle(file);
+	if (!writeSucceeded
+		|| !MoveFileExW(temporary.c_str(), destination.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+		DeleteFileW(temporary.c_str());
+		return false;
+	}
+	return true;
+}
+
+static bool PreservePreviousPersistentEntries(
+	const std::filesystem::path& profile,
+	std::string_view current,
+	std::string_view previous)
+{
+	std::string merged;
+	if (!PersistentDataCodec::PreserveMissingPersistentEntries(current, previous, merged))
+		return false;
+	return merged == current || ReplaceFileWithContents(profile, merged);
+}
+
 static bool GetProfileTransactionPaths(
 	std::filesystem::path& profile,
 	std::filesystem::path& backup,
@@ -1959,8 +2052,100 @@ static bool GetProfileTransactionPaths(
 	return true;
 }
 
-static bool BeginProfileSaveTransaction()
+static bool CaptureCurrentPersistentValues(PersistentValueSnapshot& snapshot)
 {
+	snapshot.clear();
+	if (!OriginalCCVar_FindVar && !g_persistentConVarBindings.empty())
+		return false;
+	constexpr std::string_view prefix = PERSIST_COMMAND" ";
+	for (const auto& entry : g_persistentConVarBindings) {
+		const std::string& conVarName = entry.first;
+		ConVarR1* conVar = OriginalCCVar_FindVar
+			? OriginalCCVar_FindVar(cvarinterface, conVarName.c_str())
+			: nullptr;
+		if (!conVar || !(conVar->m_nFlags & kPersistentSchemaFlags))
+			continue;
+		if (conVarName.compare(0, prefix.size(), prefix) != 0)
+			return false;
+		const char* value = conVar->m_Value.m_pszString;
+		if (!value)
+			return false;
+		auto [it, inserted] = snapshot.try_emplace(
+			conVarName.substr(prefix.size()), value);
+		if (!inserted && it->second != value)
+			return false;
+	}
+	return true;
+}
+
+static bool MatchRequiredPersistentValue(
+	std::string_view key,
+	std::string_view value,
+	void* context)
+{
+	auto& remaining = *static_cast<PersistentValueSnapshot*>(context);
+	auto it = remaining.find(key);
+	if (it == remaining.end())
+		return true;
+	if (it->second != value)
+		return false;
+	remaining.erase(it);
+	return true;
+}
+
+static bool ProfileContainsPersistentValues(
+	const std::filesystem::path& profile,
+	const PersistentValueSnapshot& required)
+{
+	PersistentValueSnapshot remaining = required;
+	return ReadValidProfileFile(
+		profile, nullptr, MatchRequiredPersistentValue, &remaining)
+		&& remaining.empty();
+}
+
+void PData_ReconcilePersistentConVars()
+{
+	if (!OriginalCCVar_FindVar)
+		return;
+
+	size_t disabled = 0;
+	size_t reenabled = 0;
+	for (const auto& [conVarName, binding] : g_persistentConVarBindings) {
+		ConVarR1* conVar = OriginalCCVar_FindVar(cvarinterface, conVarName.c_str());
+		if (!conVar)
+			continue;
+		const bool wasEnabled = (conVar->m_nFlags & kPersistentSchemaFlags) != 0;
+		const char* value = conVar->m_Value.m_pszString;
+		const bool schemaEnabled = value
+			&& IsValidUserInfo(binding.logicalKey.c_str())
+			&& IsValidUserInfo(value)
+			&& PDef::IsValidKeyAndValue(binding.logicalKey, value);
+		const bool enabled = schemaEnabled
+			|| (!g_bSchemaReloadPersistenceSafe && wasEnabled);
+		ApplyPersistentSchemaFlags(conVar, binding, enabled);
+		if (wasEnabled && !enabled)
+			++disabled;
+		else if (!wasEnabled && enabled)
+			++reenabled;
+	}
+	if (disabled || reenabled) {
+		Msg("Reconciled persistent ConVars with active schema: disabled=%zu reenabled=%zu.\n",
+			disabled, reenabled);
+	}
+}
+
+static bool BeginProfileSaveTransaction(
+	const PersistentValueSnapshot* requiredValues = nullptr)
+{
+	PersistentValueSnapshot snapshot;
+	if (requiredValues)
+		snapshot = *requiredValues;
+	PData_ReconcilePersistentConVars();
+	if (!requiredValues && !CaptureCurrentPersistentValues(snapshot)) {
+		Warning("Could not capture current persistent values before profile save\n");
+		return false;
+	}
+
 	std::filesystem::path profile;
 	std::filesystem::path backup;
 	std::filesystem::path marker;
@@ -1997,6 +2182,7 @@ static bool BeginProfileSaveTransaction()
 		Warning("Failed to persist persistent-data save marker\n");
 		return false;
 	}
+	g_pendingProfileValues = std::move(snapshot);
 	return true;
 }
 
@@ -2010,8 +2196,21 @@ static void RecoverInterruptedProfileSave()
 
 	std::error_code error;
 	const bool interrupted = std::filesystem::exists(marker, error) && !error;
-	const bool primaryValid = ReadValidProfileFile(profile);
-	const bool backupValid = ReadValidProfileFile(backup);
+	std::string primaryContents;
+	std::string backupContents;
+	const bool primaryValid = ReadValidProfileFile(profile, &primaryContents);
+	const bool backupValid = ReadValidProfileFile(backup, &backupContents);
+	if (interrupted && primaryValid && backupValid
+		&& !PreservePreviousPersistentEntries(profile, primaryContents, backupContents)) {
+		if (ReplaceFileWithCopy(backup, profile)) {
+			DeleteFileW(marker.c_str());
+			Warning("Recovered the previous persistent-data profile after dormant-entry merge failed\n");
+		}
+		else {
+			Warning("Failed to preserve dormant persistent data or restore the previous profile\n");
+		}
+		return;
+	}
 	switch (PersistentDataTransaction::SelectRecoveryAction(primaryValid, backupValid)) {
 	case PersistentDataTransaction::RecoveryAction::CommitPrimary:
 		if (interrupted)
@@ -2053,7 +2252,7 @@ void setinfopersist_cmd(const CCommand& args) {
 			Warning("Invalid user info value %s. Only certain characters are allowed.\n", args.Arg(1));
 			return;
 		}
-		if (!g_bValidatedProfileReplay && !PDef::IsValidKeyAndValue(args.Arg(1), args.Arg(2))) {
+		if (!PDef::IsValidKeyAndValue(args.Arg(1), args.Arg(2))) {
 			Warning("PData key %s, value %s failed validation.\n", args.Arg(1), args.Arg(2));
 			return;
 		}
@@ -2111,6 +2310,11 @@ void setinfopersist_cmd(const CCommand& args) {
 		g_bNoSendConVar = previousNoSend;
 		*setinfo_cmd_flags = FCVAR_USERINFO;
 
+		RememberPersistentConVar(
+			modifiedKey,
+			args.Arg(1),
+			OriginalCCVar_FindVar(cvarinterface, modifiedKey));
+
 		if (valueChanged && !g_bRecursive) {
 			g_flLastCommandTime = Plat_FloatTime();
 			g_bTimerActive = true;
@@ -2157,7 +2361,7 @@ char ExecuteConfigFile(int configType) {
 
 	std::string validatedProfile;
 	if (configType == 1 && !ReadValidProfileFile(configPath, &validatedProfile)) {
-		Warning("Persistent-data profile failed complete-file validation\n");
+		Warning("Persistent-data profile failed structural validation\n");
 		return 0;
 	}
 	const uintmax_t fileSize = configType == 1
@@ -2189,10 +2393,10 @@ char ExecuteConfigFile(int configType) {
 	buffer[fileSize] = '\0';
 
 	g_bRecursive = true;
-	g_bValidatedProfileReplay = configType == 1;
 	Exec_CmdGuts(buffer, 1);
-	g_bValidatedProfileReplay = false;
 	g_bRecursive = false;
+	if (configType == 1)
+		g_bProfileReplayComplete = true;
 	return 1; // Success
 }
 
@@ -2217,14 +2421,14 @@ void PData_RunFrame()
 	g_bSaveQueuedThisFrame = true;
 }
 
-void PData_FinishPendingSave()
+static bool FinishPendingProfileSave()
 {
 	if (!g_bSaveWritePending || !g_CVFileSystem || !g_CVFileSystemInterface
 		|| !g_CVFileSystem->AsyncFinishAllWrites)
-		return;
+		return false;
 	if (g_bSaveQueuedThisFrame && !g_bFinishSaveBeforeQuit) {
 		g_bSaveQueuedThisFrame = false;
-		return;
+		return false;
 	}
 	g_bSaveQueuedThisFrame = false;
 
@@ -2235,17 +2439,27 @@ void PData_FinishPendingSave()
 	std::filesystem::path profile;
 	std::filesystem::path backup;
 	std::filesystem::path marker;
+	bool profileResolved = false;
 	if (GetProfileTransactionPaths(profile, backup, marker)) {
-		const bool primaryValid = ReadValidProfileFile(profile);
-		const bool backupValid = ReadValidProfileFile(backup);
+		std::string primaryContents;
+		std::string backupContents;
+		bool primaryValid = ReadValidProfileFile(profile, &primaryContents);
+		const bool backupValid = ReadValidProfileFile(backup, &backupContents);
+		if (primaryValid && backupValid
+			&& !PreservePreviousPersistentEntries(profile, primaryContents, backupContents)) {
+			Warning("Persistent-data save could not preserve dormant addon entries; restoring the previous profile\n");
+			primaryValid = false;
+		}
 		switch (PersistentDataTransaction::SelectRecoveryAction(primaryValid, backupValid)) {
 		case PersistentDataTransaction::RecoveryAction::CommitPrimary:
 			DeleteFileW(marker.c_str());
+			profileResolved = true;
 			break;
 		case PersistentDataTransaction::RecoveryAction::RestoreBackup:
 			if (ReplaceFileWithCopy(backup, profile)) {
 				DeleteFileW(marker.c_str());
 				Warning("Restored persistent data after a failed profile save\n");
+				profileResolved = true;
 				break;
 			}
 			Warning("Persistent-data backup restore failed; preserving all transaction files and scheduling a retry\n");
@@ -2259,8 +2473,133 @@ void PData_FinishPendingSave()
 			break;
 		}
 	}
+	const bool valuesDurable = profileResolved
+		&& ProfileContainsPersistentValues(profile, g_pendingProfileValues);
+	g_pendingProfileValues.clear();
 	g_bSaveWritePending = false;
 	g_bFinishSaveBeforeQuit = false;
+	if (valuesDurable) {
+		const bool reconcileRetainedFlags = !g_bSchemaReloadPersistenceSafe;
+		g_bSchemaReloadPersistenceSafe = true;
+		g_bProfileReplayComplete = true;
+		g_bTimerActive = false;
+		if (reconcileRetainedFlags)
+			PData_ReconcilePersistentConVars();
+	}
+	else {
+		g_bTimerActive = true;
+		g_flLastCommandTime = Plat_FloatTime();
+	}
+	return valuesDurable;
+}
+
+void PData_FinishPendingSave()
+{
+	FinishPendingProfileSave();
+}
+
+static char __fastcall NativeProfileWriterHook(unsigned int configType)
+{
+	if (!g_NativeProfileWriterOriginal)
+		return 0;
+	if (configType != 1)
+		return g_NativeProfileWriterOriginal(configType);
+
+	const bool ownsTransaction = !g_bSaveWritePending;
+	if (ownsTransaction) {
+		if (!BeginProfileSaveTransaction()) {
+			Warning("Refusing an unprotected native persistent-data profile write\n");
+			return 0;
+		}
+		g_bSaveWritePending = true;
+		g_bSaveQueuedThisFrame = false;
+	}
+
+	const char result = g_NativeProfileWriterOriginal(configType);
+	if (ownsTransaction || g_bFinishSaveBeforeQuit) {
+		g_bFinishSaveBeforeQuit = true;
+		FinishPendingProfileSave();
+	}
+	return result;
+}
+
+bool PData_PrepareForSchemaReload()
+{
+	if (!g_bProfileReplayComplete && g_persistentConVarBindings.empty()) {
+		g_bSchemaReloadPersistenceSafe = true;
+		return true;
+	}
+	if (!g_NativeProfileWriterOriginal) {
+		Warning("Persistent-data profile writer hook is unavailable; retaining live schema flags\n");
+		g_bSchemaReloadPersistenceSafe = false;
+		return false;
+	}
+
+	PersistentValueSnapshot requiredValues;
+	if (!CaptureCurrentPersistentValues(requiredValues)) {
+		Warning("Could not capture persistent values before schema reload; retaining live schema flags\n");
+		g_bSchemaReloadPersistenceSafe = false;
+		return false;
+	}
+	if (!g_bSaveWritePending) {
+		if (!BeginProfileSaveTransaction(&requiredValues)) {
+			Warning("Could not prepare persistent data before schema reload; retaining live schema flags\n");
+			g_bSchemaReloadPersistenceSafe = false;
+			return false;
+		}
+		g_bSaveWritePending = true;
+	}
+	else {
+		g_pendingProfileValues = std::move(requiredValues);
+	}
+	g_bSaveQueuedThisFrame = false;
+	g_bFinishSaveBeforeQuit = true;
+	g_NativeProfileWriterOriginal(1);
+	g_bSchemaReloadPersistenceSafe = FinishPendingProfileSave();
+	if (g_bSchemaReloadPersistenceSafe) {
+		g_bTimerActive = false;
+		return true;
+	}
+
+	g_bTimerActive = true;
+	g_flLastCommandTime = Plat_FloatTime();
+	Warning("Persistent-data pre-schema save did not complete; retaining live schema flags\n");
+	return false;
+}
+
+void InstallPersistentProfileWriterHook(uintptr_t engineBase)
+{
+	if (!engineBase || IsDedicatedServer() || IsR1ODedicatedServer()
+		|| g_NativeProfileWriterOriginal)
+		return;
+
+	void* target = reinterpret_cast<void*>(engineBase + 0x134850);
+	constexpr unsigned char expectedPrologue[] = {
+		0x40, 0x53, 0x48, 0x81, 0xEC, 0xA0, 0x04, 0x00, 0x00, 0x8B, 0xD9
+	};
+	if (memcmp(target, expectedPrologue, sizeof(expectedPrologue)) != 0) {
+		Warning("Persistent-data profile writer prologue mismatch at %p; hook not installed\n", target);
+		return;
+	}
+
+	const MH_STATUS createStatus = MH_CreateHook(
+		target,
+		reinterpret_cast<void*>(&NativeProfileWriterHook),
+		reinterpret_cast<void**>(&g_NativeProfileWriterOriginal));
+	if (createStatus != MH_OK) {
+		g_NativeProfileWriterOriginal = nullptr;
+		Warning("Failed to create persistent-data profile writer hook (%d)\n",
+			static_cast<int>(createStatus));
+		return;
+	}
+	const MH_STATUS enableStatus = MH_EnableHook(target);
+	if (enableStatus != MH_OK && enableStatus != MH_ERROR_ENABLED) {
+		const MH_STATUS removeStatus = MH_RemoveHook(target);
+		if (removeStatus == MH_OK || removeStatus == MH_ERROR_NOT_CREATED)
+			g_NativeProfileWriterOriginal = nullptr;
+		Warning("Failed to enable persistent-data profile writer hook (%d); remove status=%d\n",
+			static_cast<int>(enableStatus), static_cast<int>(removeStatus));
+	}
 }
 
 void PData_OnConsoleCommand(const char* str)

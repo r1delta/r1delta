@@ -98,6 +98,26 @@ void TestProfileValidation()
 	Check(!ValidateProfile("__ key \"rejected\"\n", TestValidator), "apply persistent value validator");
 	Check(ValidateProfile("rejected \"rejected\"\n", TestValidator), "schema validator does not reject regular cvars");
 
+	constexpr std::string_view disabledModProfile =
+		"__ key \"base-value\"\n"
+		"__ rejected \"disabled-mod-value\"\n"
+		"player_cvar \"1\"\n";
+	Check(!ValidateProfile(disabledModProfile, TestValidator), "active schema rejects disabled-mod key");
+	Check(ValidateProfile(disabledModProfile), "structure-only replay preserves valid entries across schema downgrade");
+	Check(!ValidateProfile("__ rejected unquoted\n"), "structure-only replay still rejects malformed commands");
+	std::string nulKey = "__ bad";
+	nulKey.push_back('\0');
+	nulKey += "key \"1\"\n";
+	Check(!ValidateProfile(nulKey), "structure-only replay rejects embedded NUL in key");
+	std::string nulValue = "__ key \"bad";
+	nulValue.push_back('\0');
+	nulValue += "value\"\n";
+	Check(!ValidateProfile(nulValue), "structure-only replay rejects embedded NUL in value");
+	std::string controlValue = "__ key \"bad";
+	controlValue.push_back('\x1f');
+	controlValue += "value\"\n";
+	Check(!ValidateProfile(controlValue), "structure-only replay rejects control bytes");
+
 	std::string largeProfile;
 	largeProfile.reserve(2 * 1024 * 1024);
 	const std::string largeValue(220, 'v');
@@ -107,6 +127,28 @@ void TestProfileValidation()
 	Check(largeProfile.size() > 1024 * 1024, "large profile exceeds obsolete one-megabyte cap");
 	Check(largeProfile.size() < PersistentDataCodec::MaxRawSize, "large profile remains within supported bound");
 	Check(ValidateProfile(largeProfile, TestValidator), "accept complete profile beyond obsolete one-megabyte cap");
+}
+
+void TestProfilePersistentPreservation()
+{
+	using PersistentDataCodec::PreserveMissingPersistentEntries;
+	const std::string current =
+		"__ base \"new-value\"\n"
+		"player_cvar \"2\"\n";
+	const std::string previous =
+		"__ base \"old-value\"\n"
+		"__ disabled_addon \"dormant-value\"\n"
+		"player_cvar \"1\"\n"
+		"removed_cvar \"1\"\n";
+	const std::string expected = current + "__ disabled_addon \"dormant-value\"\n";
+
+	std::string merged;
+	Check(PreserveMissingPersistentEntries(current, previous, merged), "merge structurally valid profiles");
+	Check(merged == expected, "preserve only missing persistent entries and prefer current values");
+	Check(PreserveMissingPersistentEntries(merged, previous, merged), "repeat persistent preservation");
+	Check(merged == expected, "persistent preservation is idempotent");
+	Check(!PreserveMissingPersistentEntries("__ broken unquoted\n", previous, merged), "reject malformed current profile during merge");
+	Check(!PreserveMissingPersistentEntries(current, "__ broken unquoted\n", merged), "reject malformed previous profile during merge");
 }
 
 void TestPersistentPlayerSlots()
@@ -211,6 +253,7 @@ int main(int argc, char** argv)
 	TestPackedRoundTrip();
 	TestPackedLimits();
 	TestProfileValidation();
+	TestProfilePersistentPreservation();
 	TestPersistentPlayerSlots();
 	TestProfileRecoverySelection();
 	TestPersistentDataStateUpdates();

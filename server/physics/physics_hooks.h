@@ -7,17 +7,7 @@
 // VPhysics critical section
 extern CRITICAL_SECTION g_vphysics_cs;
 
-// Entity physics hooks
-extern __int64 (*oCBaseEntity__VPhysicsInitNormal)(void* a1, unsigned int a2, unsigned int a3, char a4, __int64 a5);
-extern void (*oCBaseEntity__SetMoveType)(void* a1, __int64 a2, __int64 a3);
-extern void (*oCProjectile__PhysicsSimulate)(__int64 thisptr);
-extern void (*oCGrenadeFrag__ResolveFlyCollisionCustom)(__int64 a1, float* a2, float* a3);
-
-__int64 CBaseEntity__VPhysicsInitNormal(void* a1, unsigned int a2, unsigned int a3, char a4, __int64 a5);
-void CBaseEntity__SetMoveType(void* a1, __int64 a2, __int64 a3);
 __int64 __fastcall UTIL_GetEntityByIndex(int iIndex);
-void CProjectile__PhysicsSimulate(__int64 thisptr);
-void CGrenadeFrag__ResolveFlyCollisionCustom(__int64 a1, float* a2, float* a3);
 
 // VPhysics thread safety hooks
 extern __int64 (*o_sub_1032C0)(__int64, char);

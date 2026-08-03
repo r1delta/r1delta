@@ -478,42 +478,6 @@ int r1dc_decompress(
 
     return status;
 }
-int (*osub_180019350)(__int64 a1, char* a2, unsigned __int8* a3, unsigned int a4, char a5, int a6);
-#define PATHSEPARATOR(c) ((c) == '\\' || (c) == '/')
-void  V_StripFilename(char* path)
-{
-    int             length;
-
-    length = V_strlen(path) - 1;
-    if (length <= 0)
-        return;
-
-    while (length > 0 &&
-        !PATHSEPARATOR(path[length]))
-    {
-        length--;
-    }
-
-    path[length] = 0;
-}
-
-int sub_180019350(__int64 a1, char* a2, unsigned __int8* a3, unsigned int a4, char a5, int a6)
-{
-
-    if (V_stristr(a2, "PLATFORM") || *a2 == '.' || strlen(a2) < 3 || V_stristr((char*)a3, "EXECUTABLE_PATH")) {
-        //return 0;
-        //reinterpret_cast<void(*)(__int64 a1, char* a2, unsigned __int8* a3)>(G_filesystem_stdio + 0x16CB0)(a1, a2, a3);
-        
-
-        a2 = (char*)"\x00";
-    }
-    auto ret = osub_180019350(a1, a2, a3, a4, a5, a6);
-
-    //if (V_stristr((char*)a2, "PLATFORM") || V_stristr((char*)a3, "EXECUTABLE_PATH")) {
-    //    reinterpret_cast<void(*)(__int64 a1, unsigned __int8* a2)>(G_filesystem_stdio + 0x16EC0)(a1, a3);
-    //}
-    return ret;
-}
 // --------------------------------------------------------------------------
 // Hook setup
 // --------------------------------------------------------------------------
@@ -674,9 +638,6 @@ void InitCompressionHooks()
         MH_CreateHook(LPVOID(module + 0x23490),
             CFileAsyncReadJob_dtor,
             reinterpret_cast<LPVOID*>(&Original_CFileAsyncReadJob_dtor));
-        MH_CreateHook(LPVOID(module + 0x19350),
-            sub_180019350,
-            reinterpret_cast<LPVOID*>(&osub_180019350));
         s_clientFileHooksCreated = true;
     }
 

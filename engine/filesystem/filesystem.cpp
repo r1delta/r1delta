@@ -240,17 +240,31 @@ int64_t __fastcall HookedHandleOpenRegularFile(int64_t a1, int64_t a2, char a3) 
 
 FileSystem_UpdateAddonSearchPathsType FileSystem_UpdateAddonSearchPathsTypeOriginal;
 bool done = false;
-void InvalidateAddonSearchCaches()
+std::recursive_mutex addonSearchUpdateMutex;
+void BeginAddonSearchCacheUpdate()
 {
-	FileCache::GetInstance().RequestManualRescan();
+	addonSearchUpdateMutex.lock();
+	PData_PrepareForSchemaReload();
+	FileCache::GetInstance().BeginAddonSearchPathUpdate();
 	FastFileSystemHook::resetNonexistentCache();
 }
 
-__int64 __fastcall FileSystem_UpdateAddonSearchPaths(void* a1) {
-	InvalidateAddonSearchCaches();
-    auto ret = FileSystem_UpdateAddonSearchPathsTypeOriginal(a1);
+bool EndAddonSearchCacheUpdate()
+{
+	FastFileSystemHook::resetNonexistentCache();
+	const bool published = FileCache::GetInstance().EndAddonSearchPathUpdate();
+	if (published) {
+		PDef::InitValidator();
+		PData_ReconcilePersistentConVars();
+	}
+	addonSearchUpdateMutex.unlock();
+	return published;
+}
 
-	PDef::InitValidator();
+__int64 __fastcall FileSystem_UpdateAddonSearchPaths(void* a1) {
+	BeginAddonSearchCacheUpdate();
+    auto ret = FileSystem_UpdateAddonSearchPathsTypeOriginal(a1);
+	EndAddonSearchCacheUpdate();
 	return ret;
 }
 
@@ -572,4 +586,9 @@ void ReconcileAddonListFile(IFileSystem* pFileSystem, const char* pModPath)
 		free((void*)ptr);
 
 	g_pFileSystemStringsToCleanup.clear();
+
+	if (pModPath && *pModPath) {
+		std::filesystem::path addonRoot = std::filesystem::path(pModPath) / "addons";
+		FileCache::GetInstance().PublishAddonSearchPathSnapshot(addonRoot);
+	}
 }

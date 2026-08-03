@@ -13,13 +13,13 @@ env:
   BUILD_PATH: ${{ github.workspace }}/build
   OUTPUT_PATH: ${{ github.workspace }}/output
   SYMBOL_PATH: ${{ github.workspace }}/symbols
-  CORE_REF: 3375c0cd37857abe4dfe671ffec3faf52d8711cb
+  CORE_REF: 51916eb1e070991cf0dc2a161cb2580282e69bba
   VCPKG_BINARY_SOURCES: "clear;files,D:/a/r1delta/vcpkg,readwrite"
   BUILD_CONFIGURATION: Release
   MSBUILD_DEBUG_TYPE: pdbonly
   NUSPEC_FILE: R1Delta.nuspec
   PACKAGE_NAME: R1Delta
-  DISPLAY_VERSION: "3.0 prerelease 4"
+  DISPLAY_VERSION: "3.0 prerelease 5"
 
 permissions:
   contents: write
@@ -182,10 +182,12 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $projects = [ordered]@{
+            addonlist_state_tests = 'tests/addonlist_state_tests.vcxproj'
             compression_stream_tests = 'tests/compression_stream_tests.vcxproj'
             r1o_vpk_tests = 'tests/r1o_vpk_tests.vcxproj'
             vsdk_memalloc_tests = 'tests/vsdk_memalloc_tests.vcxproj'
             persistentdata_codec_tests = 'tests/persistentdata_codec_tests.vcxproj'
+            materialsystem_dx11_texture_upload_tests = 'tests/materialsystem_dx11_texture_upload_tests.vcxproj'
           }
 
           foreach ($entry in $projects.GetEnumerator()) {
@@ -206,10 +208,12 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $tests = @(
+            'addonlist_state_tests',
             'compression_stream_tests',
             'r1o_vpk_tests',
             'vsdk_memalloc_tests',
-            'persistentdata_codec_tests'
+            'persistentdata_codec_tests',
+            'materialsystem_dx11_texture_upload_tests'
           )
           foreach ($test in $tests) {
             $executable = Join-Path '${{ env.BUILD_PATH }}' "tests/$test/$test.exe"

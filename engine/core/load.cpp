@@ -8174,6 +8174,7 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 
 	if (!IsDedicatedServer()) {
 		MH_CreateHook((LPVOID)(G_engine + 0x1305E0), &ExecuteConfigFile, NULL);
+		InstallPersistentProfileWriterHook(G_engine);
 		MH_CreateHook((LPVOID)(engine_base + 0x21F9C0), &CEngineVGui__Init, reinterpret_cast<LPVOID*>(&CEngineVGui__InitOriginal));
 		MH_CreateHook((LPVOID)(engine_base + 0x21EB70), &CEngineVGui__HideGameUI, reinterpret_cast<LPVOID*>(&CEngineVGui__HideGameUIOriginal));
 		RegisterConCommand("toggleconsole", ToggleConsoleCommand, "Toggles the console", (1 << 17));
@@ -8918,20 +8919,11 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook((LPVOID)(server_base + 0x3A1EC0), &CBaseEntity__SendProxy_CellOrigin, reinterpret_cast<LPVOID*>(NULL));
 	MH_CreateHook((LPVOID)(server_base + 0x3A2020), &CBaseEntity__SendProxy_CellOriginXY, reinterpret_cast<LPVOID*>(NULL));
 	MH_CreateHook((LPVOID)(server_base + 0x3A2130), &CBaseEntity__SendProxy_CellOriginZ, reinterpret_cast<LPVOID*>(NULL));
-//	if (!IsR1ODedicatedServer()) {
-	//	MH_CreateHook((LPVOID)(server_base + 0x3C8B70), &CBaseEntity__VPhysicsInitNormal, reinterpret_cast<LPVOID*>(&oCBaseEntity__VPhysicsInitNormal)); DO NOT UNCOMMENT
-	//	MH_CreateHook((LPVOID)(server_base + 0x3B3200), &CBaseEntity__SetMoveType, reinterpret_cast<LPVOID*>(&oCBaseEntity__SetMoveType));
-//	}
-//	else {
-//		InstallR1OTFOServerVPhysicsFormationProbe(server_base);
-//	}
 	MH_CreateHook((LPVOID)(server_base + 0x4E2F30), &CPlayer_GetLevel, reinterpret_cast<LPVOID*>(NULL));
 	MH_CreateHook((LPVOID)(server_base + 0x1442D0), &CServerGameDLL_DLLShutdown, reinterpret_cast<LPVOID*>(NULL));
 	MH_CreateHook((LPVOID)(server_base + 0x1532A0), &WallrunMove_BlockForTitans, reinterpret_cast<LPVOID*>(&WallrunMove_BlockForTitans_Original));
 	MH_CreateHook((LPVOID)(server_base + 0x21B6B0), &HookedGetRankFunction, NULL);
 	MH_CreateHook((LPVOID)(server_base + 0x50B8B0), &HookedSetRankFunction, NULL);
-	if (!IsR1ODedicatedServer())
-		MH_CreateHook((LPVOID)(server_base + 0x410F60), &CGrenadeFrag__ResolveFlyCollisionCustom, reinterpret_cast<LPVOID*>(&oCGrenadeFrag__ResolveFlyCollisionCustom));
 
 	// do_server runs from the DLL notification after the earlier global
 	// MH_EnableHook call. Hooks created here must be enabled immediately.
@@ -9066,8 +9058,6 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook((LPVOID)(server_base + 0x3BE1A0), &CC_Ent_Create, reinterpret_cast<LPVOID*>(&oCC_Ent_Create));
 	MH_CreateHook((LPVOID)(server_base + 0x25E340), &DispatchSpawn, reinterpret_cast<LPVOID*>(&oDispatchSpawn));
 	MH_CreateHook((LPVOID)(server_base + 0x2820A0), &HandleSquirrelClientCommand, reinterpret_cast<LPVOID*>(&oHandleSquirrelClientCommand));
-	if (!IsR1ODedicatedServer())
-		MH_CreateHook((LPVOID)(server_base + 0x59F380), &CProjectile__PhysicsSimulate, reinterpret_cast<LPVOID*>(&oCProjectile__PhysicsSimulate));
 	//MH_CreateHook((LPVOID)(server_base + 0x364140), &DebugConnectMsg, reinterpret_cast<LPVOID*>(0));
 	if (IsR1ODedicatedServer()) {
 		OutputDebugStringA("R1Delta: deferring R1O fake-dedi cvar/concommand registration until wrapped cvar is ready\n");

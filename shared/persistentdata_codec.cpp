@@ -114,6 +114,15 @@ bool Base64Decode(std::string_view input, std::vector<uint8_t>& output)
 	return true;
 }
 
+bool ContainsUnsafeCommandByte(std::string_view text)
+{
+	for (unsigned char value : text) {
+		if (value < 0x20 || value == 0x7F)
+			return true;
+	}
+	return false;
+}
+
 bool ParseProfileLine(
 	std::string_view line,
 	std::string_view& identity,
@@ -132,14 +141,15 @@ bool ParseProfileLine(
 	if (nameEnd == std::string_view::npos || nameEnd == nameStart)
 		return false;
 	key = line.substr(nameStart, nameEnd - nameStart);
-	if (key.find_first_of(" \t\r\n\";") != std::string_view::npos)
+	if (ContainsUnsafeCommandByte(key)
+		|| key.find_first_of(" \t\r\n\";") != std::string_view::npos)
 		return false;
 
 	const size_t valueStart = nameEnd + 1;
 	if (valueStart + 1 >= line.size() || line[valueStart] != '"' || line.back() != '"')
 		return false;
 	value = line.substr(valueStart + 1, line.size() - valueStart - 2);
-	if (value.find('"') != std::string_view::npos)
+	if (ContainsUnsafeCommandByte(value) || value.find('"') != std::string_view::npos)
 		return false;
 	identity = persistent ? line.substr(0, nameEnd) : key;
 	return true;
@@ -255,6 +265,53 @@ bool ValidateProfile(
 			return false;
 		offset = lineEnd + 1;
 	}
+	return true;
+}
+
+bool PreserveMissingPersistentEntries(
+	std::string_view current,
+	std::string_view previous,
+	std::string& merged)
+{
+	if (!ValidateProfile(current) || !ValidateProfile(previous))
+		return false;
+
+	std::unordered_set<std::string> identities;
+	size_t offset = 0;
+	while (offset < current.size()) {
+		const size_t lineEnd = current.find('\n', offset);
+		std::string_view identity;
+		std::string_view key;
+		std::string_view value;
+		bool persistent = false;
+		if (lineEnd == std::string_view::npos
+			|| !ParseProfileLine(current.substr(offset, lineEnd - offset), identity, key, value, persistent))
+			return false;
+		identities.emplace(identity);
+		offset = lineEnd + 1;
+	}
+
+	std::string result(current);
+	offset = 0;
+	while (offset < previous.size()) {
+		const size_t lineEnd = previous.find('\n', offset);
+		std::string_view identity;
+		std::string_view key;
+		std::string_view value;
+		bool persistent = false;
+		if (lineEnd == std::string_view::npos
+			|| !ParseProfileLine(previous.substr(offset, lineEnd - offset), identity, key, value, persistent))
+			return false;
+		const size_t lineLength = lineEnd - offset + 1;
+		if (persistent && identities.emplace(identity).second) {
+			if (result.size() > MaxRawSize || MaxRawSize - result.size() < lineLength)
+				return false;
+			result.append(previous.substr(offset, lineLength));
+		}
+		offset = lineEnd + 1;
+	}
+
+	merged = std::move(result);
 	return true;
 }
 

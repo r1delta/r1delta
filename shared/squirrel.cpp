@@ -1430,24 +1430,33 @@ static bool RunR1OTfoAutorunFile(R1SquirrelVM* vm, const char* runFilename)
 		runFilename);
 
 	char resolvedPath[MAX_PATH] = {};
-	const bool hasReplacement = FileCache::GetInstance().ResolveReplacementFile(
-		scriptPath,
-		resolvedPath,
-		sizeof(resolvedPath));
+	bool hasReplacement = false;
+	HANDLE replacementFile = INVALID_HANDLE_VALUE;
+	{
+		auto lease = FileCache::GetInstance().AcquireReadLease();
+		hasReplacement = FileCache::GetInstance().ResolveReplacementFile(
+			lease,
+			scriptPath,
+			resolvedPath,
+			sizeof(resolvedPath));
+		if (hasReplacement) {
+			replacementFile = CreateFileA(
+				resolvedPath,
+				GENERIC_READ,
+				FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+				nullptr,
+				OPEN_EXISTING,
+				FILE_ATTRIBUTE_NORMAL,
+				nullptr);
+		}
+	}
 	const char* openPath = hasReplacement ? resolvedPath : scriptPath;
 	const char* pathId = hasReplacement ? nullptr : "GAME";
 
 	constexpr int64_t kMaxAutorunScriptBytes = 8 * 1024 * 1024;
 	std::string script;
 	if (hasReplacement) {
-		HANDLE file = CreateFileA(
-			resolvedPath,
-			GENERIC_READ,
-			FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-			nullptr,
-			OPEN_EXISTING,
-			FILE_ATTRIBUTE_NORMAL,
-			nullptr);
+		HANDLE file = replacementFile;
 		if (file == INVALID_HANDLE_VALUE) {
 			Warning("R1O autorun could not open %s (error %lu).\n", resolvedPath, GetLastError());
 			return false;

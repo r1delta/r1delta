@@ -35,6 +35,7 @@
 #include <WinSock2.h>
 #include <ws2tcpip.h>
 #include "core.h"
+#include "materialsystem_dx11_texture_upload.h"
 #include "r1o_runtime_paths.h"
 
 #include <MinHook.h>
@@ -42,6 +43,7 @@
 #include <new>
 #include <cctype>
 #include "windows.h"
+#include <dxgiformat.h>
 
 #include <iostream>
 #include "cvar.h"
@@ -61,9 +63,9 @@
 #include <string.h>
 #include <stdio.h>
 #include <set>
-#include <map>
 #include <mutex>
 #include <atomic>
+#include <memory>
 #include <string>
 #include <vector>
 #include <cmath>
@@ -609,17 +611,23 @@ static bool PatchModuleBytesIfMatch(uintptr_t moduleBase, uintptr_t rva, const u
 }
 
 using MaterialSystemDx11SelectShaderResourceType = void(__fastcall*)(int slot);
+using MaterialSystemDx11SelectTextureResourceType = int(__fastcall*)(int slot, short resourceHandle);
 using MaterialSystemDx11SelectShaderStageResourceType = char(__fastcall*)(unsigned int stage, unsigned int slot, unsigned char* shaderType);
 using MaterialSystemDx11CreateInputLayoutType = __int64(__fastcall*)(unsigned __int64 vertexFormat, __int64 streamFormat, __int64 shaderBytecodeProvider);
 using MaterialSystemDx11CreateTexture2DResourceType = __int64(__fastcall*)(__int64* texture, int width, int height, int format, int mipLevels, unsigned int arraySize, int flags, __int64 initialData);
+using MaterialSystemDx11QueueTextureUploadType = char(__fastcall*)(__int64 texture, __int64 initialData, int sourceFormat);
+using MaterialSystemDx11ExecuteTextureUploadType = __int64(__fastcall*)(__int64 texture, __int64 initialData, int sourceFormat, unsigned int depth, int frameCount, unsigned int flags);
 using MaterialSystemDx11ResetD3DResourcePointersType = void(__fastcall*)();
 using MaterialSystemDx11FlushConstantBufferUpdatesType = __int64(__fastcall*)();
 using MaterialSystemDx11InitializeMaterialType = __int64(__fastcall*)(__int64 material, __int64 vmt, __int64 vmtPatches, __int64 context);
 using MaterialSystemDx11IsErrorMaterialType = __int64(__fastcall*)(__int64 material);
 static MaterialSystemDx11SelectShaderResourceType MaterialSystemDx11SelectShaderResourceOriginal;
+static MaterialSystemDx11SelectTextureResourceType MaterialSystemDx11SelectTextureResourceOriginal;
 static MaterialSystemDx11SelectShaderStageResourceType MaterialSystemDx11SelectShaderStageResourceOriginal;
 static MaterialSystemDx11CreateInputLayoutType MaterialSystemDx11CreateInputLayoutOriginal;
 static MaterialSystemDx11CreateTexture2DResourceType MaterialSystemDx11CreateTexture2DResourceOriginal;
+static MaterialSystemDx11QueueTextureUploadType MaterialSystemDx11QueueTextureUploadOriginal;
+static MaterialSystemDx11ExecuteTextureUploadType MaterialSystemDx11ExecuteTextureUploadOriginal;
 static MaterialSystemDx11ResetD3DResourcePointersType MaterialSystemDx11ResetD3DResourcePointersOriginal;
 static MaterialSystemDx11FlushConstantBufferUpdatesType MaterialSystemDx11FlushConstantBufferUpdatesOriginal;
 static MaterialSystemDx11InitializeMaterialType MaterialSystemDx11InitializeMaterialOriginal;
@@ -632,6 +640,7 @@ static int s_MaterialSystemDx11ResetResourceLogBudget = 8;
 static int s_MaterialSystemDx11ConstantBufferLogBudget = 8;
 static int s_MaterialSystemDx11InputLayoutLogBudget = 8;
 static int s_MaterialSystemDx11MaterialInitLogBudget = 8;
+static std::atomic<int> s_MaterialSystemDx11TextureUploadLogBudget{ 16 };
 static std::recursive_mutex s_MaterialSystemDx11MaterialInitMutex;
 static bool MaterialSystemDx11LooksLikeUserRange(uintptr_t address, size_t size);
 
@@ -846,6 +855,60 @@ static bool MaterialSystemDx11ResolveShaderStageResource(unsigned int stage, uns
 	return MaterialSystemDx11SetShaderStageCache(stage, *shader, changed);
 }
 
+static void MaterialSystemDx11LogTextureHandleGuard(
+	const char* reason,
+	int slot,
+	short resourceHandle,
+	bool changed)
+{
+	if (s_MaterialSystemDx11NullResourceLogBudget <= 0)
+		return;
+
+	--s_MaterialSystemDx11NullResourceLogBudget;
+	char buffer[320];
+	_snprintf_s(
+		buffer,
+		sizeof(buffer),
+		_TRUNCATE,
+		"R1Delta: materialsystem_dx11 texture-handle guard reason=%s slot=%d handle=%d changed=%d\n",
+		reason,
+		slot,
+		static_cast<int>(resourceHandle),
+		changed ? 1 : 0);
+	OutputDebugStringA(buffer);
+}
+
+static int __fastcall MaterialSystemDx11SelectTextureResourceGuard(int slot, short resourceHandle)
+{
+	if (resourceHandle > 0)
+		return MaterialSystemDx11SelectTextureResourceOriginal
+			? MaterialSystemDx11SelectTextureResourceOriginal(slot, resourceHandle)
+			: 0;
+
+	constexpr int maxSamplerSlots = 16;
+	if (!s_MaterialSystemDx11Base || slot < 0 || slot >= maxSamplerSlots) {
+		MaterialSystemDx11LogTextureHandleGuard("invalid-slot", slot, resourceHandle, false);
+		return 0;
+	}
+
+	auto* resources = reinterpret_cast<void**>(s_MaterialSystemDx11Base + 0x298730);
+	auto* samplers = reinterpret_cast<void**>(s_MaterialSystemDx11Base + 0x2986B0);
+	auto* dirtySlotCount = reinterpret_cast<int*>(s_MaterialSystemDx11Base + 0x2987F0);
+	const bool changed = resources[slot] || samplers[slot];
+	resources[slot] = nullptr;
+	samplers[slot] = nullptr;
+	const int requiredSlotCount = slot + 1;
+	if (*dirtySlotCount < requiredSlotCount)
+		*dirtySlotCount = requiredSlotCount;
+
+	MaterialSystemDx11LogTextureHandleGuard(
+		resourceHandle ? "negative-handle" : "zero-handle",
+		slot,
+		resourceHandle,
+		changed);
+	return *dirtySlotCount;
+}
+
 static void MaterialSystemDx11BindVertexShaderIfChanged(void* shader, unsigned char shaderType, bool changed)
 {
 	if (!s_MaterialSystemDx11Base)
@@ -1045,11 +1108,9 @@ static __int64 __fastcall MaterialSystemDx11FlushConstantBufferUpdatesGuard()
 	}
 }
 
-struct MaterialSystemDx11TextureInitialDataEntry {
-	const void* sysMem;
-	unsigned int sysMemPitch;
-	unsigned int sysMemSlicePitch;
-};
+using MaterialSystemDx11TextureInitialDataEntry = r1delta::materialsystem_dx11::TextureInitialDataEntry;
+using MaterialSystemDx11OwnedTextureUpload = r1delta::materialsystem_dx11::OwnedTextureUpload;
+static r1delta::materialsystem_dx11::TextureUploadRegistry s_MaterialSystemDx11TextureUploads;
 
 static bool MaterialSystemDx11MulSize(size_t a, size_t b, size_t* out)
 {
@@ -1088,12 +1149,318 @@ static size_t MaterialSystemDx11TextureSubresourceCount(int mipLevels, unsigned 
 	return count;
 }
 
-static size_t MaterialSystemDx11RequiredInitialDataBytes(const MaterialSystemDx11TextureInitialDataEntry& entry)
+struct MaterialSystemDx11TextureFormatLayout {
+	size_t blockWidth;
+	size_t blockHeight;
+	size_t bytesPerBlock;
+};
+
+struct MaterialSystemDx11TextureMipLayout {
+	size_t rowBytes;
+	size_t rowCount;
+};
+
+static constexpr MaterialSystemDx11TextureFormatLayout MaterialSystemDx11GetTextureFormatLayout(int format)
 {
-	size_t required = entry.sysMemSlicePitch;
-	if (entry.sysMemPitch > required)
-		required = entry.sysMemPitch;
-	return required ? required : 1;
+	switch (static_cast<DXGI_FORMAT>(format)) {
+	case DXGI_FORMAT_R32G32B32A32_TYPELESS:
+	case DXGI_FORMAT_R32G32B32A32_FLOAT:
+	case DXGI_FORMAT_R32G32B32A32_UINT:
+	case DXGI_FORMAT_R32G32B32A32_SINT:
+		return { 1, 1, 16 };
+	case DXGI_FORMAT_R32G32B32_TYPELESS:
+	case DXGI_FORMAT_R32G32B32_FLOAT:
+	case DXGI_FORMAT_R32G32B32_UINT:
+	case DXGI_FORMAT_R32G32B32_SINT:
+		return { 1, 1, 12 };
+	case DXGI_FORMAT_R16G16B16A16_TYPELESS:
+	case DXGI_FORMAT_R16G16B16A16_FLOAT:
+	case DXGI_FORMAT_R16G16B16A16_UNORM:
+	case DXGI_FORMAT_R16G16B16A16_UINT:
+	case DXGI_FORMAT_R16G16B16A16_SNORM:
+	case DXGI_FORMAT_R16G16B16A16_SINT:
+	case DXGI_FORMAT_R32G32_TYPELESS:
+	case DXGI_FORMAT_R32G32_FLOAT:
+	case DXGI_FORMAT_R32G32_UINT:
+	case DXGI_FORMAT_R32G32_SINT:
+	case DXGI_FORMAT_R32G8X24_TYPELESS:
+	case DXGI_FORMAT_D32_FLOAT_S8X24_UINT:
+	case DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS:
+	case DXGI_FORMAT_X32_TYPELESS_G8X24_UINT:
+	case DXGI_FORMAT_Y416:
+		return { 1, 1, 8 };
+	case DXGI_FORMAT_R10G10B10A2_TYPELESS:
+	case DXGI_FORMAT_R10G10B10A2_UNORM:
+	case DXGI_FORMAT_R10G10B10A2_UINT:
+	case DXGI_FORMAT_R11G11B10_FLOAT:
+	case DXGI_FORMAT_R8G8B8A8_TYPELESS:
+	case DXGI_FORMAT_R8G8B8A8_UNORM:
+	case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+	case DXGI_FORMAT_R8G8B8A8_UINT:
+	case DXGI_FORMAT_R8G8B8A8_SNORM:
+	case DXGI_FORMAT_R8G8B8A8_SINT:
+	case DXGI_FORMAT_R16G16_TYPELESS:
+	case DXGI_FORMAT_R16G16_FLOAT:
+	case DXGI_FORMAT_R16G16_UNORM:
+	case DXGI_FORMAT_R16G16_UINT:
+	case DXGI_FORMAT_R16G16_SNORM:
+	case DXGI_FORMAT_R16G16_SINT:
+	case DXGI_FORMAT_R32_TYPELESS:
+	case DXGI_FORMAT_D32_FLOAT:
+	case DXGI_FORMAT_R32_FLOAT:
+	case DXGI_FORMAT_R32_UINT:
+	case DXGI_FORMAT_R32_SINT:
+	case DXGI_FORMAT_R24G8_TYPELESS:
+	case DXGI_FORMAT_D24_UNORM_S8_UINT:
+	case DXGI_FORMAT_R24_UNORM_X8_TYPELESS:
+	case DXGI_FORMAT_X24_TYPELESS_G8_UINT:
+	case DXGI_FORMAT_R9G9B9E5_SHAREDEXP:
+	case DXGI_FORMAT_B8G8R8A8_UNORM:
+	case DXGI_FORMAT_B8G8R8X8_UNORM:
+	case DXGI_FORMAT_R10G10B10_XR_BIAS_A2_UNORM:
+	case DXGI_FORMAT_B8G8R8A8_TYPELESS:
+	case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+	case DXGI_FORMAT_B8G8R8X8_TYPELESS:
+	case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB:
+	case DXGI_FORMAT_AYUV:
+	case DXGI_FORMAT_Y410:
+		return { 1, 1, 4 };
+	case DXGI_FORMAT_R8G8_TYPELESS:
+	case DXGI_FORMAT_R8G8_UNORM:
+	case DXGI_FORMAT_R8G8_UINT:
+	case DXGI_FORMAT_R8G8_SNORM:
+	case DXGI_FORMAT_R8G8_SINT:
+	case DXGI_FORMAT_R16_TYPELESS:
+	case DXGI_FORMAT_R16_FLOAT:
+	case DXGI_FORMAT_D16_UNORM:
+	case DXGI_FORMAT_R16_UNORM:
+	case DXGI_FORMAT_R16_UINT:
+	case DXGI_FORMAT_R16_SNORM:
+	case DXGI_FORMAT_R16_SINT:
+	case DXGI_FORMAT_B5G6R5_UNORM:
+	case DXGI_FORMAT_B5G5R5A1_UNORM:
+	case DXGI_FORMAT_A8P8:
+	case DXGI_FORMAT_B4G4R4A4_UNORM:
+		return { 1, 1, 2 };
+	case DXGI_FORMAT_R8_TYPELESS:
+	case DXGI_FORMAT_R8_UNORM:
+	case DXGI_FORMAT_R8_UINT:
+	case DXGI_FORMAT_R8_SNORM:
+	case DXGI_FORMAT_R8_SINT:
+	case DXGI_FORMAT_A8_UNORM:
+	case DXGI_FORMAT_AI44:
+	case DXGI_FORMAT_IA44:
+	case DXGI_FORMAT_P8:
+		return { 1, 1, 1 };
+	case DXGI_FORMAT_R1_UNORM:
+		return { 8, 1, 1 };
+	case DXGI_FORMAT_R8G8_B8G8_UNORM:
+	case DXGI_FORMAT_G8R8_G8B8_UNORM:
+	case DXGI_FORMAT_YUY2:
+		return { 2, 1, 4 };
+	case DXGI_FORMAT_Y210:
+	case DXGI_FORMAT_Y216:
+		return { 2, 1, 8 };
+	case DXGI_FORMAT_BC1_TYPELESS:
+	case DXGI_FORMAT_BC1_UNORM:
+	case DXGI_FORMAT_BC1_UNORM_SRGB:
+	case DXGI_FORMAT_BC4_TYPELESS:
+	case DXGI_FORMAT_BC4_UNORM:
+	case DXGI_FORMAT_BC4_SNORM:
+		return { 4, 4, 8 };
+	case DXGI_FORMAT_BC2_TYPELESS:
+	case DXGI_FORMAT_BC2_UNORM:
+	case DXGI_FORMAT_BC2_UNORM_SRGB:
+	case DXGI_FORMAT_BC3_TYPELESS:
+	case DXGI_FORMAT_BC3_UNORM:
+	case DXGI_FORMAT_BC3_UNORM_SRGB:
+	case DXGI_FORMAT_BC5_TYPELESS:
+	case DXGI_FORMAT_BC5_UNORM:
+	case DXGI_FORMAT_BC5_SNORM:
+	case DXGI_FORMAT_BC6H_TYPELESS:
+	case DXGI_FORMAT_BC6H_UF16:
+	case DXGI_FORMAT_BC6H_SF16:
+	case DXGI_FORMAT_BC7_TYPELESS:
+	case DXGI_FORMAT_BC7_UNORM:
+	case DXGI_FORMAT_BC7_UNORM_SRGB:
+		return { 4, 4, 16 };
+	default:
+		return { 0, 0, 0 };
+	}
+}
+
+static constexpr MaterialSystemDx11TextureMipLayout MaterialSystemDx11GetTextureMipLayout(
+	int format,
+	size_t width,
+	size_t height)
+{
+	const MaterialSystemDx11TextureFormatLayout layout = MaterialSystemDx11GetTextureFormatLayout(format);
+	if (!layout.bytesPerBlock || !width || !height)
+		return { 0, 0 };
+
+	const size_t blocksWide = (width + layout.blockWidth - 1) / layout.blockWidth;
+	const size_t blocksHigh = (height + layout.blockHeight - 1) / layout.blockHeight;
+	return { blocksWide * layout.bytesPerBlock, blocksHigh };
+}
+
+static_assert(MaterialSystemDx11GetTextureMipLayout(DXGI_FORMAT_R8G8B8A8_UNORM, 1024, 26).rowBytes == 4096);
+static_assert(MaterialSystemDx11GetTextureMipLayout(DXGI_FORMAT_R8G8B8A8_UNORM, 512, 336).rowBytes == 2048);
+static_assert(MaterialSystemDx11GetTextureMipLayout(DXGI_FORMAT_BC1_UNORM, 7, 7).rowBytes == 16);
+static_assert(MaterialSystemDx11GetTextureMipLayout(DXGI_FORMAT_BC1_UNORM, 7, 7).rowCount == 2);
+
+static bool MaterialSystemDx11IsReadablePageProtection(DWORD protect)
+{
+	if (protect & (PAGE_GUARD | PAGE_NOACCESS))
+		return false;
+
+	switch (protect & 0xFFu) {
+	case PAGE_READONLY:
+	case PAGE_READWRITE:
+	case PAGE_WRITECOPY:
+	case PAGE_EXECUTE_READ:
+	case PAGE_EXECUTE_READWRITE:
+	case PAGE_EXECUTE_WRITECOPY:
+		return true;
+	default:
+		return false;
+	}
+}
+
+static bool MaterialSystemDx11IsCommittedReadableRange(const void* ptr, size_t size)
+{
+	const uintptr_t start = reinterpret_cast<uintptr_t>(ptr);
+	if (!MaterialSystemDx11LooksLikeUserRange(start, size))
+		return false;
+
+	const uintptr_t end = start + size;
+	uintptr_t cursor = start;
+	while (cursor < end) {
+		MEMORY_BASIC_INFORMATION info{};
+		if (!VirtualQuery(reinterpret_cast<const void*>(cursor), &info, sizeof(info))
+			|| info.State != MEM_COMMIT
+			|| !MaterialSystemDx11IsReadablePageProtection(info.Protect)) {
+			return false;
+		}
+
+		const uintptr_t regionStart = reinterpret_cast<uintptr_t>(info.BaseAddress);
+		if (info.RegionSize > static_cast<size_t>(-1) - regionStart)
+			return false;
+		const uintptr_t regionEnd = regionStart + info.RegionSize;
+		if (regionEnd <= cursor)
+			return false;
+		cursor = regionEnd < end ? regionEnd : end;
+	}
+	return true;
+}
+
+static bool MaterialSystemDx11TryCopy(void* destination, const void* source, size_t size)
+{
+	__try {
+		memcpy(destination, source, size);
+		return true;
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) {
+		return false;
+	}
+}
+
+static void MaterialSystemDx11LogTextureUploadOwnership(
+	const char* reason,
+	const void* initialData,
+	size_t subresourceCount,
+	size_t payloadBytes)
+{
+	int budget = s_MaterialSystemDx11TextureUploadLogBudget.load(std::memory_order_relaxed);
+	while (budget > 0
+		&& !s_MaterialSystemDx11TextureUploadLogBudget.compare_exchange_weak(
+			budget,
+			budget - 1,
+			std::memory_order_relaxed)) {
+	}
+	if (budget <= 0)
+		return;
+
+	char buffer[256];
+	_snprintf_s(
+		buffer,
+		sizeof(buffer),
+		_TRUNCATE,
+		"R1Delta: materialsystem_dx11 texture upload ownership reason=%s data=%p subresources=%llu payloadBytes=%llu\n",
+		reason,
+		initialData,
+		static_cast<unsigned long long>(subresourceCount),
+		static_cast<unsigned long long>(payloadBytes));
+	OutputDebugStringA(buffer);
+}
+
+static bool MaterialSystemDx11TryGetQueuedTextureSubresourceCount(__int64 texture, size_t* subresourceCount)
+{
+	if (!subresourceCount)
+		return false;
+	*subresourceCount = 0;
+	if (!MaterialSystemDx11IsCommittedReadableRange(reinterpret_cast<const void*>(texture), 58))
+		return false;
+
+	__try {
+		auto* vtable = *reinterpret_cast<uintptr_t**>(texture);
+		if (!MaterialSystemDx11IsCommittedReadableRange(vtable, 27 * sizeof(uintptr_t)))
+			return false;
+
+		using IsCubeMapType = unsigned char(__fastcall*)(__int64 texture);
+		auto isCubeMap = reinterpret_cast<IsCubeMapType>(vtable[26]);
+		if (!MaterialSystemDx11IsCommittedReadableRange(reinterpret_cast<const void*>(isCubeMap), 1))
+			return false;
+
+		const size_t faceCount = isCubeMap(texture) ? 6u : 1u;
+		const size_t mipLevels = *reinterpret_cast<const unsigned short*>(texture + 54);
+		const size_t frameCount = *reinterpret_cast<const unsigned short*>(texture + 56);
+		size_t faceMipCount = 0;
+		return mipLevels
+			&& frameCount
+			&& MaterialSystemDx11MulSize(faceCount, mipLevels, &faceMipCount)
+			&& MaterialSystemDx11MulSize(faceMipCount, frameCount, subresourceCount);
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) {
+		return false;
+	}
+}
+
+static std::unique_ptr<MaterialSystemDx11OwnedTextureUpload> MaterialSystemDx11CopyQueuedTextureUpload(
+	__int64 texture,
+	__int64 initialData)
+{
+	constexpr size_t maxSubresourceCount = 16384;
+	constexpr size_t maxPayloadBytes = static_cast<size_t>(2) * 1024 * 1024 * 1024;
+
+	size_t subresourceCount = 0;
+	if (!initialData || !MaterialSystemDx11TryGetQueuedTextureSubresourceCount(texture, &subresourceCount)) {
+		MaterialSystemDx11LogTextureUploadOwnership("metadata-invalid", reinterpret_cast<const void*>(initialData), subresourceCount, 0);
+		return nullptr;
+	}
+
+	auto* sourceEntries = reinterpret_cast<const MaterialSystemDx11TextureInitialDataEntry*>(initialData);
+	auto copyResult = r1delta::materialsystem_dx11::CopyTextureUpload(
+		sourceEntries,
+		subresourceCount,
+		maxSubresourceCount,
+		maxPayloadBytes,
+		&MaterialSystemDx11IsCommittedReadableRange,
+		&MaterialSystemDx11TryCopy);
+	if (!copyResult.upload) {
+		MaterialSystemDx11LogTextureUploadOwnership(
+			r1delta::materialsystem_dx11::TextureUploadCopyErrorName(copyResult.error),
+			sourceEntries,
+			subresourceCount,
+			copyResult.payloadBytes);
+		return nullptr;
+	}
+
+	MaterialSystemDx11LogTextureUploadOwnership(
+		"copied",
+		copyResult.upload->entries.data(),
+		subresourceCount,
+		copyResult.payloadBytes);
+	return std::move(copyResult.upload);
 }
 
 static void MaterialSystemDx11LogTextureInitialDataGuard(
@@ -1106,7 +1473,7 @@ static void MaterialSystemDx11LogTextureInitialDataGuard(
 	int flags,
 	__int64 initialData,
 	size_t subresourceCount,
-	size_t zeroBytes)
+	size_t spanBytes)
 {
 	if (s_MaterialSystemDx11TextureInitialDataLogBudget <= 0)
 		return;
@@ -1117,7 +1484,7 @@ static void MaterialSystemDx11LogTextureInitialDataGuard(
 		buffer,
 		sizeof(buffer),
 		_TRUNCATE,
-		"R1Delta: materialsystem_dx11 texture initial-data guard reason=%s %dx%d fmt=%d mips=%d array=%u flags=0x%x data=%p subresources=%llu zeroBytes=%llu\n",
+		"R1Delta: materialsystem_dx11 texture initial-data guard reason=%s %dx%d fmt=%d mips=%d array=%u flags=0x%x data=%p subresources=%llu spanBytes=%llu\n",
 		reason,
 		width,
 		height,
@@ -1127,7 +1494,7 @@ static void MaterialSystemDx11LogTextureInitialDataGuard(
 		flags,
 		reinterpret_cast<void*>(initialData),
 		static_cast<unsigned long long>(subresourceCount),
-		static_cast<unsigned long long>(zeroBytes));
+		static_cast<unsigned long long>(spanBytes));
 	OutputDebugStringA(buffer);
 }
 
@@ -1140,7 +1507,6 @@ static bool MaterialSystemDx11PrepareSafeTextureInitialData(
 	int flags,
 	__int64 initialData,
 	std::vector<MaterialSystemDx11TextureInitialDataEntry>& safeEntries,
-	std::vector<unsigned char>& zeroData,
 	__int64* safeInitialData)
 {
 	if (safeInitialData)
@@ -1149,52 +1515,103 @@ static bool MaterialSystemDx11PrepareSafeTextureInitialData(
 		return false;
 
 	const size_t subresourceCount = MaterialSystemDx11TextureSubresourceCount(mipLevels, arraySize, flags);
-	if (!subresourceCount || subresourceCount > 16384)
+	if (width <= 0 || height <= 0 || !subresourceCount || subresourceCount > 16384) {
+		*safeInitialData = 0;
+		MaterialSystemDx11LogTextureInitialDataGuard("metadata-invalid", width, height, format, mipLevels, arraySize, flags, initialData, subresourceCount, 0);
+		return true;
+	}
+
+	if (!MaterialSystemDx11GetTextureFormatLayout(format).bytesPerBlock)
 		return false;
 
 	size_t entriesBytes = 0;
-	if (!MaterialSystemDx11MulSize(subresourceCount, sizeof(MaterialSystemDx11TextureInitialDataEntry), &entriesBytes))
-		return false;
+	if (!MaterialSystemDx11MulSize(subresourceCount, sizeof(MaterialSystemDx11TextureInitialDataEntry), &entriesBytes)) {
+		*safeInitialData = 0;
+		MaterialSystemDx11LogTextureInitialDataGuard("array-size-overflow", width, height, format, mipLevels, arraySize, flags, initialData, subresourceCount, 0);
+		return true;
+	}
 
 	auto* initialEntries = reinterpret_cast<const MaterialSystemDx11TextureInitialDataEntry*>(initialData);
-	if (!IsReadableRange(initialEntries, entriesBytes)) {
+	if (!MaterialSystemDx11IsCommittedReadableRange(initialEntries, entriesBytes)) {
 		*safeInitialData = 0;
-		MaterialSystemDx11LogTextureInitialDataGuard("array-unreadable", width, height, format, mipLevels, arraySize, flags, initialData, subresourceCount, 0);
+		MaterialSystemDx11LogTextureInitialDataGuard("array-unreadable", width, height, format, mipLevels, arraySize, flags, initialData, subresourceCount, entriesBytes);
 		return true;
 	}
 
-	safeEntries.assign(initialEntries, initialEntries + subresourceCount);
-	std::vector<unsigned char> invalidEntries(subresourceCount, 0);
+	safeEntries.resize(subresourceCount);
+	if (!MaterialSystemDx11TryCopy(safeEntries.data(), initialEntries, entriesBytes)) {
+		*safeInitialData = 0;
+		MaterialSystemDx11LogTextureInitialDataGuard("array-copy-fault", width, height, format, mipLevels, arraySize, flags, initialData, subresourceCount, entriesBytes);
+		return true;
+	}
+
 	bool changed = false;
-	size_t maxZeroBytes = 0;
+	size_t maxSpanBytes = 0;
 	for (size_t i = 0; i < subresourceCount; ++i) {
-		const size_t required = MaterialSystemDx11RequiredInitialDataBytes(safeEntries[i]);
-		if (!safeEntries[i].sysMem || !IsReadableRange(safeEntries[i].sysMem, required)) {
-			invalidEntries[i] = 1;
-			changed = true;
-			if (required > maxZeroBytes)
-				maxZeroBytes = required;
+		const size_t mip = i % static_cast<size_t>(mipLevels);
+		const size_t mipWidth = mip < sizeof(size_t) * CHAR_BIT ? (static_cast<size_t>(width) >> mip) : 0;
+		const size_t mipHeight = mip < sizeof(size_t) * CHAR_BIT ? (static_cast<size_t>(height) >> mip) : 0;
+		const MaterialSystemDx11TextureMipLayout layout = MaterialSystemDx11GetTextureMipLayout(
+			format,
+			mipWidth ? mipWidth : 1,
+			mipHeight ? mipHeight : 1);
+		if (!layout.rowBytes || !layout.rowCount || layout.rowBytes > UINT_MAX) {
+			*safeInitialData = 0;
+			MaterialSystemDx11LogTextureInitialDataGuard("layout-invalid", width, height, format, mipLevels, arraySize, flags, initialData, subresourceCount, 0);
+			return true;
 		}
-	}
 
-	if (!changed)
-		return false;
+		size_t pitch = safeEntries[i].sysMemPitch;
+		if (pitch < layout.rowBytes) {
+			size_t bgrPitch = 0;
+			size_t bgrSlicePitch = 0;
+			const bool isStockBgr888Conversion =
+				(format == DXGI_FORMAT_R8G8B8A8_UNORM || format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB)
+				&& MaterialSystemDx11MulSize(mipWidth ? mipWidth : 1, 3, &bgrPitch)
+				&& MaterialSystemDx11MulSize(bgrPitch, layout.rowCount, &bgrSlicePitch)
+				&& pitch == bgrPitch
+				&& safeEntries[i].sysMemSlicePitch == bgrSlicePitch;
+			if (!isStockBgr888Conversion) {
+				*safeInitialData = 0;
+				MaterialSystemDx11LogTextureInitialDataGuard("row-pitch-invalid", width, height, format, mipLevels, arraySize, flags, initialData, subresourceCount, layout.rowBytes);
+				return true;
+			}
 
-	constexpr size_t kMaxZeroTextureInitialDataBytes = 64 * 1024 * 1024;
-	if (!maxZeroBytes || maxZeroBytes > kMaxZeroTextureInitialDataBytes) {
-		*safeInitialData = 0;
-		MaterialSystemDx11LogTextureInitialDataGuard("entry-too-large", width, height, format, mipLevels, arraySize, flags, initialData, subresourceCount, maxZeroBytes);
-		return true;
-	}
+			pitch = layout.rowBytes;
+			safeEntries[i].sysMemPitch = static_cast<unsigned int>(pitch);
+			changed = true;
+		}
 
-	zeroData.assign(maxZeroBytes, 0);
-	for (size_t i = 0; i < subresourceCount; ++i) {
-		if (invalidEntries[i])
-			safeEntries[i].sysMem = zeroData.data();
+		size_t rowPrefixBytes = 0;
+		if (!MaterialSystemDx11MulSize(pitch, layout.rowCount - 1, &rowPrefixBytes)
+			|| layout.rowBytes > static_cast<size_t>(-1) - rowPrefixBytes) {
+			*safeInitialData = 0;
+			MaterialSystemDx11LogTextureInitialDataGuard("span-overflow", width, height, format, mipLevels, arraySize, flags, initialData, subresourceCount, 0);
+			return true;
+		}
+		const size_t spanBytes = rowPrefixBytes + layout.rowBytes;
+		if (!safeEntries[i].sysMem || !MaterialSystemDx11IsCommittedReadableRange(safeEntries[i].sysMem, spanBytes)) {
+			*safeInitialData = 0;
+			MaterialSystemDx11LogTextureInitialDataGuard("entry-unreadable", width, height, format, mipLevels, arraySize, flags, initialData, subresourceCount, spanBytes);
+			return true;
+		}
+
+		if (safeEntries[i].sysMemSlicePitch < spanBytes) {
+			if (spanBytes > UINT_MAX) {
+				*safeInitialData = 0;
+				MaterialSystemDx11LogTextureInitialDataGuard("slice-pitch-overflow", width, height, format, mipLevels, arraySize, flags, initialData, subresourceCount, spanBytes);
+				return true;
+			}
+			safeEntries[i].sysMemSlicePitch = static_cast<unsigned int>(spanBytes);
+			changed = true;
+		}
+		if (spanBytes > maxSpanBytes)
+			maxSpanBytes = spanBytes;
 	}
 
 	*safeInitialData = reinterpret_cast<__int64>(safeEntries.data());
-	MaterialSystemDx11LogTextureInitialDataGuard("entry-unreadable", width, height, format, mipLevels, arraySize, flags, initialData, subresourceCount, maxZeroBytes);
+	if (changed)
+		MaterialSystemDx11LogTextureInitialDataGuard("metadata-normalized", width, height, format, mipLevels, arraySize, flags, initialData, subresourceCount, maxSpanBytes);
 	return true;
 }
 
@@ -1212,11 +1629,64 @@ static __int64 __fastcall MaterialSystemDx11CreateTexture2DResourceGuard(
 		return 0;
 
 	std::vector<MaterialSystemDx11TextureInitialDataEntry> safeEntries;
-	std::vector<unsigned char> zeroData;
 	__int64 safeInitialData = initialData;
-	MaterialSystemDx11PrepareSafeTextureInitialData(width, height, format, mipLevels, arraySize, flags, initialData, safeEntries, zeroData, &safeInitialData);
+	MaterialSystemDx11PrepareSafeTextureInitialData(width, height, format, mipLevels, arraySize, flags, initialData, safeEntries, &safeInitialData);
 
 	return MaterialSystemDx11CreateTexture2DResourceOriginal(texture, width, height, format, mipLevels, arraySize, flags, safeInitialData);
+}
+
+static char __fastcall MaterialSystemDx11QueueTextureUploadGuard(
+	__int64 texture,
+	__int64 initialData,
+	int sourceFormat)
+{
+	if (!MaterialSystemDx11QueueTextureUploadOriginal || !MaterialSystemDx11ExecuteTextureUploadOriginal)
+		return 0;
+	if (!initialData)
+		return MaterialSystemDx11QueueTextureUploadOriginal(texture, initialData, sourceFormat);
+
+	auto upload = MaterialSystemDx11CopyQueuedTextureUpload(texture, initialData);
+	if (!upload)
+		return MaterialSystemDx11QueueTextureUploadOriginal(texture, initialData, sourceFormat);
+
+	const MaterialSystemDx11TextureInitialDataEntry* ownedInitialData = nullptr;
+	if (!s_MaterialSystemDx11TextureUploads.Register(std::move(upload), &ownedInitialData)) {
+		MaterialSystemDx11LogTextureUploadOwnership("registry-failed", ownedInitialData, 0, 0);
+		return MaterialSystemDx11QueueTextureUploadOriginal(texture, initialData, sourceFormat);
+	}
+
+	const char queued = MaterialSystemDx11QueueTextureUploadOriginal(
+		texture,
+		reinterpret_cast<__int64>(ownedInitialData),
+		sourceFormat);
+	if (!queued)
+		s_MaterialSystemDx11TextureUploads.Take(ownedInitialData);
+	return queued;
+}
+
+static __int64 __fastcall MaterialSystemDx11ExecuteTextureUploadGuard(
+	__int64 texture,
+	__int64 initialData,
+	int sourceFormat,
+	unsigned int depth,
+	int frameCount,
+	unsigned int flags)
+{
+	if (!MaterialSystemDx11ExecuteTextureUploadOriginal)
+		return 0;
+
+	auto upload = s_MaterialSystemDx11TextureUploads.Take(
+		reinterpret_cast<const MaterialSystemDx11TextureInitialDataEntry*>(initialData));
+	if (upload)
+		MaterialSystemDx11LogTextureUploadOwnership("worker-owned", upload->entries.data(), upload->entries.size(), 0);
+
+	return MaterialSystemDx11ExecuteTextureUploadOriginal(
+		texture,
+		initialData,
+		sourceFormat,
+		depth,
+		frameCount,
+		flags);
 }
 
 static bool InstallMaterialSystemDx11CheckedHook(
@@ -1243,9 +1713,10 @@ static bool InstallMaterialSystemDx11CheckedHook(
 	}
 
 	const MH_STATUS createStatus = MH_CreateHook(target, detour, original);
-	const MH_STATUS enableStatus = (createStatus == MH_OK || createStatus == MH_ERROR_ALREADY_CREATED)
-		? MH_EnableHook(target)
-		: createStatus;
+	const bool hasOriginal = original && *original;
+	const bool canEnable = createStatus == MH_OK
+		|| (createStatus == MH_ERROR_ALREADY_CREATED && hasOriginal);
+	const MH_STATUS enableStatus = canEnable ? MH_EnableHook(target) : createStatus;
 
 	char buffer[256];
 	_snprintf_s(
@@ -1260,7 +1731,7 @@ static bool InstallMaterialSystemDx11CheckedHook(
 		original ? *original : nullptr);
 	OutputDebugStringA(buffer);
 
-	return enableStatus == MH_OK || enableStatus == MH_ERROR_ENABLED;
+	return hasOriginal && (enableStatus == MH_OK || enableStatus == MH_ERROR_ENABLED);
 }
 
 void InstallMaterialSystemDx11NullShaderResourceGuard(uintptr_t materialSystemBase)
@@ -1330,6 +1801,33 @@ void InstallMaterialSystemDx11NullShaderResourceGuard(uintptr_t materialSystemBa
 		0x48, 0x8D, 0x6C, 0x24, 0xF0,
 		0x48, 0x81, 0xEC, 0x10, 0x01, 0x00, 0x00
 	};
+	const unsigned char expectedTextureUploadWorkerPrologue[] = {
+		0x48, 0x8B, 0xC4,
+		0x48, 0x89, 0x50, 0x10,
+		0x57,
+		0x41, 0x54,
+		0x48, 0x81, 0xEC, 0x08, 0x01, 0x00, 0x00,
+		0x48, 0x89, 0x70, 0x20,
+		0x4C, 0x89, 0x68, 0xE8,
+		0x4C, 0x89, 0x70, 0xE0,
+		0x4C, 0x89, 0x78, 0xD8
+	};
+	const unsigned char expectedTextureUploadQueuePrologue[] = {
+		0x40, 0x55,
+		0x57,
+		0x41, 0x54,
+		0x48, 0x83, 0xEC, 0x20,
+		0x41, 0x8B, 0xE8,
+		0x4C, 0x8B, 0xE2,
+		0x48, 0x8B, 0xF9
+	};
+	const unsigned char expectedTextureResourcePrologue[] = {
+		0x48, 0x89, 0x5C, 0x24, 0x08,
+		0x48, 0x89, 0x6C, 0x24, 0x10,
+		0x48, 0x89, 0x74, 0x24, 0x18,
+		0x57,
+		0x48, 0x83, 0xEC, 0x20
+	};
 	const unsigned char expectedStagePrologue[] = {
 		0x48, 0x89, 0x5C, 0x24, 0x08,
 		0x48, 0x89, 0x6C, 0x24, 0x10,
@@ -1389,6 +1887,34 @@ void InstallMaterialSystemDx11NullShaderResourceGuard(uintptr_t materialSystemBa
 		reinterpret_cast<void*>(&MaterialSystemDx11CreateTexture2DResourceGuard),
 		reinterpret_cast<void**>(&MaterialSystemDx11CreateTexture2DResourceOriginal),
 		"texture-initial-data");
+	const bool textureUploadWorkerInstalled = InstallMaterialSystemDx11CheckedHook(
+		materialSystemBase,
+		0x660B0,
+		expectedTextureUploadWorkerPrologue,
+		sizeof(expectedTextureUploadWorkerPrologue),
+		reinterpret_cast<void*>(&MaterialSystemDx11ExecuteTextureUploadGuard),
+		reinterpret_cast<void**>(&MaterialSystemDx11ExecuteTextureUploadOriginal),
+		"texture-upload-worker")
+		&& MaterialSystemDx11ExecuteTextureUploadOriginal;
+	const bool textureUploadOwnershipInstalled = textureUploadWorkerInstalled
+		&& MaterialSystemDx11ExecuteTextureUploadOriginal
+		&& InstallMaterialSystemDx11CheckedHook(
+		materialSystemBase,
+		0x68440,
+		expectedTextureUploadQueuePrologue,
+		sizeof(expectedTextureUploadQueuePrologue),
+		reinterpret_cast<void*>(&MaterialSystemDx11QueueTextureUploadGuard),
+		reinterpret_cast<void**>(&MaterialSystemDx11QueueTextureUploadOriginal),
+		"texture-upload-ownership")
+		&& MaterialSystemDx11QueueTextureUploadOriginal;
+	const bool textureResourceInstalled = InstallMaterialSystemDx11CheckedHook(
+		materialSystemBase,
+		0x140E0,
+		expectedTextureResourcePrologue,
+		sizeof(expectedTextureResourcePrologue),
+		reinterpret_cast<void*>(&MaterialSystemDx11SelectTextureResourceGuard),
+		reinterpret_cast<void**>(&MaterialSystemDx11SelectTextureResourceOriginal),
+		"texture-resource-handle");
 	const bool inputLayoutInstalled = InstallMaterialSystemDx11CheckedHook(
 		materialSystemBase,
 		0x1B020,
@@ -1413,7 +1939,7 @@ void InstallMaterialSystemDx11NullShaderResourceGuard(uintptr_t materialSystemBa
 		reinterpret_cast<void*>(&MaterialSystemDx11SelectShaderResourceGuard),
 		reinterpret_cast<void**>(&MaterialSystemDx11SelectShaderResourceOriginal),
 		"vertex");
-	s_MaterialSystemDx11NullResourceGuardInstalled = materialInitInstalled || isErrorMaterialInstalled || resetInstalled || constantFlushInstalled || textureInstalled || inputLayoutInstalled || stageInstalled || vertexInstalled;
+	s_MaterialSystemDx11NullResourceGuardInstalled = materialInitInstalled || isErrorMaterialInstalled || resetInstalled || constantFlushInstalled || textureInstalled || textureUploadWorkerInstalled || textureUploadOwnershipInstalled || textureResourceInstalled || inputLayoutInstalled || stageInstalled || vertexInstalled;
 }
 
 static bool IsVPhysicsGuardNegativeStackIndexDisabled()
@@ -1436,7 +1962,6 @@ static bool IsVPhysicsDiagnosticsEnabled()
 			"-r1delta_vphysics_bvh_patch_clear",
 			"-r1delta_vphysics_bvh_include_not_sim",
 			"-r1delta_vphysics_revive_on_collision_enable",
-			"-r1delta_vphysics_formation_probe",
 			"-r1delta_vphysics_force_selector_tick",
 			"-r1delta_vphysics_guard_page_trace",
 			"-r1delta_vphysics_defer_logs",
@@ -1489,21 +2014,6 @@ static bool IsVPhysicsReviveOnCollisionEnablePatchEnabled()
 
 		const char* commandLine = GetCommandLineA();
 		return commandLine && strstr(commandLine, "-r1delta_vphysics_revive_on_collision_enable") != nullptr;
-	}();
-	return enabled;
-}
-
-static bool IsVPhysicsFormationProbeEnabled()
-{
-	if (!IsR1ODedicatedServer())
-		return false;
-
-	static const bool enabled = []() {
-		if (HasEngineCommandLineFlag("-r1delta_vphysics_formation_probe"))
-			return true;
-
-		const char* commandLine = GetCommandLineA();
-		return commandLine && strstr(commandLine, "-r1delta_vphysics_formation_probe") != nullptr;
 	}();
 	return enabled;
 }
@@ -1694,38 +2204,6 @@ static uintptr_t s_VPhysicsManagerStackIndexOffset = 0x140100;
 static uintptr_t s_VPhysicsManagerCriticalSectionOffset = 0x140108;
 static bool s_VPhysicsManagerCriticalSectionIsPointer = true;
 static unsigned int s_VPhysicsExactMindistDeferBit = 8;
-
-struct VPhysicsFormationSnapshot {
-	uintptr_t entity;
-	uintptr_t wrapper;
-	uintptr_t ivpObject;
-	uintptr_t collide;
-	uintptr_t gameData;
-	unsigned int serial;
-	int solidTypeArg;
-	int solidFlagsArg;
-	int createAsleep;
-	int solidType;
-	int solidFlags;
-	int moveType;
-	int collisionGroup;
-	int physicsMode;
-	float mass;
-	unsigned int customBounds;
-	float boundsMins[3];
-	float boundsMaxs[3];
-	char className[96];
-	char modelName[160];
-	char solidName[160];
-	char surfaceProp[96];
-};
-
-using R1OTFOCBaseEntityVPhysicsInitNormalType = __int64(__fastcall*)(void* entity, unsigned int solidType, unsigned int solidFlags, char createAsleep, __int64 solid);
-static R1OTFOCBaseEntityVPhysicsInitNormalType R1OTFOCBaseEntityVPhysicsInitNormalOriginal;
-static bool s_R1OTFOServerVPhysicsFormationProbeInstalled;
-static unsigned int s_R1OTFOServerVPhysicsFormationSerial;
-static std::map<unsigned long long, VPhysicsFormationSnapshot> s_VPhysicsFormationByWrapper;
-static std::map<unsigned long long, VPhysicsFormationSnapshot> s_VPhysicsFormationByIVPObject;
 
 struct VPhysicsStaticBVHTreeState {
 	uintptr_t tree;
@@ -2528,49 +3006,6 @@ static float VPhysicsReadFloatOrDefault(uintptr_t address, float fallback)
 	return VPhysicsReadFloat(address, &value) ? value : fallback;
 }
 
-static const char* VPhysicsCopyReadableCString(char* out, size_t outSize, const char* value, const char* fallback)
-{
-	if (!out || !outSize)
-		return fallback ? fallback : "";
-
-	const char* safeFallback = fallback ? fallback : "";
-	out[0] = '\0';
-	if (!value) {
-		_snprintf_s(out, outSize, _TRUNCATE, "%s", safeFallback);
-		return out;
-	}
-
-	size_t i = 0;
-	__try {
-		for (; i + 1 < outSize; ++i) {
-			if (!IsReadableRange(value + i, 1)) {
-				_snprintf_s(out, outSize, _TRUNCATE, "%s", safeFallback);
-				return out;
-			}
-
-			out[i] = value[i];
-			if (out[i] == '\0')
-				return out;
-		}
-	}
-	__except (EXCEPTION_EXECUTE_HANDLER) {
-		_snprintf_s(out, outSize, _TRUNCATE, "%s", safeFallback);
-		return out;
-	}
-
-	out[i] = '\0';
-	return out;
-}
-
-static const char* VPhysicsReadStringToken(uintptr_t object, uintptr_t offset, char* out, size_t outSize, const char* fallback)
-{
-	uintptr_t value = 0;
-	if (!object || !VPhysicsReadPointer(object + offset, &value))
-		return VPhysicsCopyReadableCString(out, outSize, nullptr, fallback);
-
-	return VPhysicsCopyReadableCString(out, outSize, reinterpret_cast<const char*>(value), fallback);
-}
-
 static void VPhysicsReadVector3(uintptr_t address, float out[3])
 {
 	if (!out)
@@ -2592,110 +3027,6 @@ static unsigned int VPhysicsObjectSurfaceFlags(__int64 object)
 
 	unsigned int flags = 0;
 	return VPhysicsReadDword(surface, &flags) ? flags : 0;
-}
-
-static VPhysicsFormationSnapshot VPhysicsBuildFormationSnapshot(
-	uintptr_t entity,
-	__int64 physicsWrapper,
-	unsigned int solidTypeArg,
-	unsigned int solidFlagsArg,
-	char createAsleep,
-	__int64 solid)
-{
-	VPhysicsFormationSnapshot snapshot = {};
-	snapshot.entity = entity;
-	snapshot.wrapper = static_cast<uintptr_t>(physicsWrapper);
-	snapshot.serial = ++s_R1OTFOServerVPhysicsFormationSerial;
-	snapshot.solidTypeArg = static_cast<int>(solidTypeArg);
-	snapshot.solidFlagsArg = static_cast<int>(solidFlagsArg);
-	snapshot.createAsleep = createAsleep ? 1 : 0;
-	snapshot.solidType = VPhysicsReadWordOrDefault(entity + 514, 0xffffffffu);
-	snapshot.solidFlags = VPhysicsReadWordOrDefault(entity + 512, 0xffffffffu);
-	snapshot.moveType = VPhysicsReadIntOrDefault(entity + 444, -1) & 0xff;
-	snapshot.collisionGroup = VPhysicsReadIntOrDefault(entity + 588, -1);
-	snapshot.physicsMode = VPhysicsReadIntOrDefault(entity + 3276, -1);
-	snapshot.mass = VPhysicsReadFloatOrDefault(entity + 3280, 0.0f);
-	snapshot.customBounds = VPhysicsReadIntOrDefault(entity + 3284, -1);
-	VPhysicsReadVector3(entity + 3288, snapshot.boundsMins);
-	VPhysicsReadVector3(entity + 3300, snapshot.boundsMaxs);
-	VPhysicsReadStringToken(entity, 128, snapshot.className, sizeof(snapshot.className), "<no-class>");
-	VPhysicsReadStringToken(entity, 216, snapshot.modelName, sizeof(snapshot.modelName), "<no-model>");
-
-	if (solid && IsReadableRange(reinterpret_cast<void*>(solid), 0x658)) {
-		VPhysicsCopyReadableCString(snapshot.solidName, sizeof(snapshot.solidName), reinterpret_cast<const char*>(solid + 4), "<solid-invalid>");
-		VPhysicsCopyReadableCString(snapshot.surfaceProp, sizeof(snapshot.surfaceProp), reinterpret_cast<const char*>(solid + 1028), "<surface-invalid>");
-	}
-	else {
-		VPhysicsCopyReadableCString(snapshot.solidName, sizeof(snapshot.solidName), nullptr, solid ? "<solid-unreadable>" : "<solid-null>");
-		VPhysicsCopyReadableCString(snapshot.surfaceProp, sizeof(snapshot.surfaceProp), nullptr, solid ? "<surface-unreadable>" : "<surface-null>");
-	}
-
-	if (physicsWrapper && IsReadableRange(reinterpret_cast<void*>(physicsWrapper), 0x28)) {
-		snapshot.gameData = *reinterpret_cast<uintptr_t*>(physicsWrapper + 0x08);
-		snapshot.ivpObject = *reinterpret_cast<uintptr_t*>(physicsWrapper + 0x10);
-		snapshot.collide = *reinterpret_cast<uintptr_t*>(physicsWrapper + 0x18);
-	}
-
-	return snapshot;
-}
-
-static const VPhysicsFormationSnapshot* VPhysicsFindFormationForObject(__int64 object)
-{
-	if (!object)
-		return nullptr;
-
-	const auto found = s_VPhysicsFormationByIVPObject.find(static_cast<unsigned long long>(object));
-	return found != s_VPhysicsFormationByIVPObject.end() ? &found->second : nullptr;
-}
-
-static void VPhysicsRememberFormationSnapshot(const VPhysicsFormationSnapshot& snapshot)
-{
-	if (snapshot.wrapper)
-		s_VPhysicsFormationByWrapper[static_cast<unsigned long long>(snapshot.wrapper)] = snapshot;
-	if (snapshot.ivpObject)
-		s_VPhysicsFormationByIVPObject[static_cast<unsigned long long>(snapshot.ivpObject)] = snapshot;
-}
-
-static void VPhysicsFormatFormationContext(
-	const VPhysicsFormationSnapshot* snapshot,
-	char* out,
-	size_t outSize)
-{
-	if (!out || !outSize)
-		return;
-
-	if (!snapshot) {
-		_snprintf_s(out, outSize, _TRUNCATE, "formation=0");
-		return;
-	}
-
-	_snprintf_s(
-		out,
-		outSize,
-		_TRUNCATE,
-		"formation=1 serial=%u ent=%p wrapper=%p class=%s model=%s solidArg=%d/0x%x solidNow=%d/0x%x moveType=%d collisionGroup=%d physicsMode=%d mass=%.3f customBounds=%u mins=(%.3f %.3f %.3f) maxs=(%.3f %.3f %.3f) solidName=%s surface=%s",
-		snapshot->serial,
-		reinterpret_cast<void*>(snapshot->entity),
-		reinterpret_cast<void*>(snapshot->wrapper),
-		snapshot->className,
-		snapshot->modelName,
-		snapshot->solidTypeArg,
-		snapshot->solidFlagsArg,
-		snapshot->solidType,
-		snapshot->solidFlags,
-		snapshot->moveType,
-		snapshot->collisionGroup,
-		snapshot->physicsMode,
-		snapshot->mass,
-		snapshot->customBounds,
-		snapshot->boundsMins[0],
-		snapshot->boundsMins[1],
-		snapshot->boundsMins[2],
-		snapshot->boundsMaxs[0],
-		snapshot->boundsMaxs[1],
-		snapshot->boundsMaxs[2],
-		snapshot->solidName,
-		snapshot->surfaceProp);
 }
 
 static bool VPhysicsShouldLogSurfaceMissObject(unsigned int moveFlags, unsigned int surfaceFlags, int pairCount)
@@ -2770,15 +3101,12 @@ static void VPhysicsLogMovementObject(const char* phase, __int64 owner, __int64 
 	const unsigned long long key = VPhysicsMovementLogKey(phase, owner, object, moveFlags, surfaceFlags, syncStamp, active, pairCount);
 	if (!s_VPhysicsMovementLoggedKeys.insert(key).second)
 		return;
-
-	char formation[768];
-	VPhysicsFormatFormationContext(VPhysicsFindFormationForObject(object), formation, sizeof(formation));
 	char buffer[1408];
 	_snprintf_s(
 		buffer,
 		sizeof(buffer),
 		_TRUNCATE,
-		"VPHYSICS: movement phase=%s owner=%p object=%p tracked=%d active=%u moveFlags=0x%08x movementState=0x%02x surfaceFlags=0x%08x sync=%u pairs=%d core=%p group=%p key=0x%016llx %s\n",
+		"VPHYSICS: movement phase=%s owner=%p object=%p tracked=%d active=%u moveFlags=0x%08x movementState=0x%02x surfaceFlags=0x%08x sync=%u pairs=%d core=%p group=%p key=0x%016llx\n",
 		phase ? phase : "<unknown>",
 		reinterpret_cast<void*>(owner),
 		reinterpret_cast<void*>(object),
@@ -2791,8 +3119,7 @@ static void VPhysicsLogMovementObject(const char* phase, __int64 owner, __int64 
 		pairCount,
 		reinterpret_cast<void*>(core),
 		reinterpret_cast<void*>(group),
-		key,
-		formation);
+		key);
 	VPhysicsStaticBVHProbeLog(buffer);
 }
 
@@ -3171,25 +3498,9 @@ static VPhysicsCE300GateSnapshot VPhysicsBuildCE300GateSnapshot(__int64 mindist,
 	return gate;
 }
 
-static bool VPhysicsFormationLooksLikeTestObject(const VPhysicsFormationSnapshot* snapshot)
-{
-	if (!snapshot)
-		return false;
-
-	return strstr(snapshot->className, "grenade") != nullptr
-		|| strstr(snapshot->className, "projectile") != nullptr
-		|| strstr(snapshot->className, "prop_") != nullptr
-		|| strstr(snapshot->className, "pylon") != nullptr;
-}
-
 static bool VPhysicsShouldLogPairInit(__int64 objectA, __int64 objectB)
 {
 	if (VPhysicsIsTrackedSurfaceMissObject(objectA) || VPhysicsIsTrackedSurfaceMissObject(objectB))
-		return true;
-
-	if (VPhysicsFormationLooksLikeTestObject(VPhysicsFindFormationForObject(objectA)))
-		return true;
-	if (VPhysicsFormationLooksLikeTestObject(VPhysicsFindFormationForObject(objectB)))
 		return true;
 
 	const VPhysicsObjectSnapshot a = VPhysicsReadObjectSnapshot(objectA);
@@ -3382,13 +3693,8 @@ static __int64 __fastcall VPhysicsNewPairInitProbe(__int64 rangeData, __int64 pa
 	const unsigned long long key = VPhysicsPairInitLogKey(pair, objectA, objectB, before, after);
 	if (!s_VPhysicsNewPairInitLoggedKeys.insert(key).second)
 		return result;
-
-	char formationA[768];
-	char formationB[768];
 	char objectContextA[384];
 	char objectContextB[384];
-	VPhysicsFormatFormationContext(VPhysicsFindFormationForObject(objectA), formationA, sizeof(formationA));
-	VPhysicsFormatFormationContext(VPhysicsFindFormationForObject(objectB), formationB, sizeof(formationB));
 	VPhysicsFormatPairObjectContext(objectA, objectContextA, sizeof(objectContextA));
 	VPhysicsFormatPairObjectContext(objectB, objectContextB, sizeof(objectContextB));
 
@@ -3397,7 +3703,7 @@ static __int64 __fastcall VPhysicsNewPairInitProbe(__int64 rangeData, __int64 pa
 		buffer,
 		sizeof(buffer),
 		_TRUNCATE,
-		"VPHYSICS: newPairInit call=%llu range=%p pair=%p result=%p pairObj=%p/%p->%p/%p idx=%u/%u->%u/%u ctx=%p->%p distA=%.6f->%.6f distB=%.6f->%.6f posA=(%.3f %.3f %.3f)->(%.3f %.3f %.3f) posB=(%.3f %.3f %.3f)->(%.3f %.3f %.3f) key=0x%016llx A{%s} B{%s} formA{%s} formB{%s}\n",
+		"VPHYSICS: newPairInit call=%llu range=%p pair=%p result=%p pairObj=%p/%p->%p/%p idx=%u/%u->%u/%u ctx=%p->%p distA=%.6f->%.6f distB=%.6f->%.6f posA=(%.3f %.3f %.3f)->(%.3f %.3f %.3f) posB=(%.3f %.3f %.3f)->(%.3f %.3f %.3f) key=0x%016llx A{%s} B{%s}\n",
 		call,
 		reinterpret_cast<void*>(rangeData),
 		reinterpret_cast<void*>(pair),
@@ -3430,9 +3736,7 @@ static __int64 __fastcall VPhysicsNewPairInitProbe(__int64 rangeData, __int64 pa
 		after.positionB[2],
 		key,
 		objectContextA,
-		objectContextB,
-		formationA,
-		formationB);
+		objectContextB);
 	VPhysicsStaticBVHProbeLog(buffer);
 	return result;
 }
@@ -3521,13 +3825,8 @@ static void __fastcall VPhysicsUpdateExactMindistEventsProbe(__int64 mindist, in
 	const unsigned long long key = VPhysicsUpdateExactMindistLogKey(mindist, before, after, allowHullConversion, eventHint);
 	if (!s_VPhysicsUpdateExactMindistLoggedKeys.insert(key).second)
 		return;
-
-	char formationA[768];
-	char formationB[768];
 	char objectContextA[384];
 	char objectContextB[384];
-	VPhysicsFormatFormationContext(VPhysicsFindFormationForObject(static_cast<__int64>(before.objectA)), formationA, sizeof(formationA));
-	VPhysicsFormatFormationContext(VPhysicsFindFormationForObject(static_cast<__int64>(before.objectB)), formationB, sizeof(formationB));
 	VPhysicsFormatPairObjectContext(static_cast<__int64>(before.objectA), objectContextA, sizeof(objectContextA));
 	VPhysicsFormatPairObjectContext(static_cast<__int64>(before.objectB), objectContextB, sizeof(objectContextB));
 
@@ -3536,7 +3835,7 @@ static void __fastcall VPhysicsUpdateExactMindistEventsProbe(__int64 mindist, in
 		buffer,
 		sizeof(buffer),
 		_TRUNCATE,
-		"VPHYSICS: updateExactMindist call=%llu mindist=%p retRva=0x%llx tid=%lu allowHull=%d eventHint=%d forceSelectorTick=%d negStackGuard=%d/%llu savedStack=%d/0x%08x counterDirect=%d counterExpected=%u counterUnexpected=%d ceGate=%d ceFail=%u ceSlots=%u/%u ceObj=%p/%p ceCore=%p/%p ceMgr=%p ceStack=%d/0x%08x ceGates=%d/%d/%d/%d/%d/%d/%d ceLen=%.9g/0x%08x ceColl=%.9g/0x%08x ceHull=%.9g ceProj=%.9g/0x%08x ceWindow=%.9g/0x%08x ceRel=%.9g ceNorm=%.9g/%.9g ceRot=%.9g/%.9g ceRotDot=%.9g/%.9g ceDt=%.9g ceEnvStep=%.9g ceWorst=%.9g ceConst=%.9g/%.9g/%.9g readable=%d->%d env=%p->%p envCount=%u/%d->%u/%d envStep=%.6f now=%.6f next=%.6f eventQueue=%p->%p eventHeap=%p->%p eventDueRel=%.6f/%d->%.6f/%d eventDueAbs=%.6f->%.6f eventDueDelta=%.6f->%.6f obj=%p/%p->%p/%p flags=0x%08x->0x%08x collType=0x%02x->0x%02x sort=%u->%u func=%u->%u recalc=%u->%u status=%u->%u selector=%u->%u eventIndex=0x%x->0x%x len=%.6f->%.6f normal=(%.3f %.3f %.3f)->(%.3f %.3f %.3f) coreA=%p speedA=(%.3f %.3f %.3f) curA=%.3f maxRotA=%.3f rotA=(%.3f %.3f %.3f) coreB=%p speedB=(%.3f %.3f %.3f) curB=%.3f maxRotB=%.3f rotB=(%.3f %.3f %.3f) key=0x%016llx A{%s} B{%s} formA{%s} formB{%s}\n",
+		"VPHYSICS: updateExactMindist call=%llu mindist=%p retRva=0x%llx tid=%lu allowHull=%d eventHint=%d forceSelectorTick=%d negStackGuard=%d/%llu savedStack=%d/0x%08x counterDirect=%d counterExpected=%u counterUnexpected=%d ceGate=%d ceFail=%u ceSlots=%u/%u ceObj=%p/%p ceCore=%p/%p ceMgr=%p ceStack=%d/0x%08x ceGates=%d/%d/%d/%d/%d/%d/%d ceLen=%.9g/0x%08x ceColl=%.9g/0x%08x ceHull=%.9g ceProj=%.9g/0x%08x ceWindow=%.9g/0x%08x ceRel=%.9g ceNorm=%.9g/%.9g ceRot=%.9g/%.9g ceRotDot=%.9g/%.9g ceDt=%.9g ceEnvStep=%.9g ceWorst=%.9g ceConst=%.9g/%.9g/%.9g readable=%d->%d env=%p->%p envCount=%u/%d->%u/%d envStep=%.6f now=%.6f next=%.6f eventQueue=%p->%p eventHeap=%p->%p eventDueRel=%.6f/%d->%.6f/%d eventDueAbs=%.6f->%.6f eventDueDelta=%.6f->%.6f obj=%p/%p->%p/%p flags=0x%08x->0x%08x collType=0x%02x->0x%02x sort=%u->%u func=%u->%u recalc=%u->%u status=%u->%u selector=%u->%u eventIndex=0x%x->0x%x len=%.6f->%.6f normal=(%.3f %.3f %.3f)->(%.3f %.3f %.3f) coreA=%p speedA=(%.3f %.3f %.3f) curA=%.3f maxRotA=%.3f rotA=(%.3f %.3f %.3f) coreB=%p speedB=(%.3f %.3f %.3f) curB=%.3f maxRotB=%.3f rotB=(%.3f %.3f %.3f) key=0x%016llx A{%s} B{%s}\n",
 		call,
 		reinterpret_cast<void*>(mindist),
 		static_cast<unsigned long long>(returnRva),
@@ -3662,9 +3961,7 @@ static void __fastcall VPhysicsUpdateExactMindistEventsProbe(__int64 mindist, in
 		before.coreBRotationAxis[2],
 		key,
 		objectContextA,
-		objectContextB,
-		formationA,
-		formationB);
+		objectContextB);
 	VPhysicsStaticBVHProbeLog(buffer);
 }
 
@@ -3699,13 +3996,8 @@ static __int64 __fastcall VPhysicsUpdateExactMindistDeferredProbe(__int64 manage
 	const bool shouldLog = VPhysicsShouldLogMindist(before) || VPhysicsShouldLogMindist(after);
 	if (!shouldLog)
 		return result;
-
-	char formationA[768];
-	char formationB[768];
 	char objectContextA[384];
 	char objectContextB[384];
-	VPhysicsFormatFormationContext(VPhysicsFindFormationForObject(static_cast<__int64>(before.objectA ? before.objectA : after.objectA)), formationA, sizeof(formationA));
-	VPhysicsFormatFormationContext(VPhysicsFindFormationForObject(static_cast<__int64>(before.objectB ? before.objectB : after.objectB)), formationB, sizeof(formationB));
 	VPhysicsFormatPairObjectContext(static_cast<__int64>(before.objectA ? before.objectA : after.objectA), objectContextA, sizeof(objectContextA));
 	VPhysicsFormatPairObjectContext(static_cast<__int64>(before.objectB ? before.objectB : after.objectB), objectContextB, sizeof(objectContextB));
 
@@ -3714,7 +4006,7 @@ static __int64 __fastcall VPhysicsUpdateExactMindistDeferredProbe(__int64 manage
 		buffer,
 		sizeof(buffer),
 		_TRUNCATE,
-		"VPHYSICS: updateExactDeferred call=%llu retRva=0x%llx tid=%lu manager=%p mode=%d context=%p contextAllow=%u contextHint=%u result=%p queueCount=%u/%d->%u/%d queueIndex=0x%x->0x%x queueStack=%d/0x%08x->%d/0x%08x queueFirst=%p[%u/%u]->%p[%u/%u] queueLast=%p[%u/%u]->%p[%u/%u] mindist=%p readable=%d->%d env=%p->%p envCount=%u/%d->%u/%d flags=0x%08x->0x%08x status=%u->%u selector=%u->%u eventIndex=0x%x->0x%x len=%.9g->%.9g normal=(%.3f %.3f %.3f)->(%.3f %.3f %.3f) obj=%p/%p->%p/%p A{%s} B{%s} formA{%s} formB{%s}\n",
+		"VPHYSICS: updateExactDeferred call=%llu retRva=0x%llx tid=%lu manager=%p mode=%d context=%p contextAllow=%u contextHint=%u result=%p queueCount=%u/%d->%u/%d queueIndex=0x%x->0x%x queueStack=%d/0x%08x->%d/0x%08x queueFirst=%p[%u/%u]->%p[%u/%u] queueLast=%p[%u/%u]->%p[%u/%u] mindist=%p readable=%d->%d env=%p->%p envCount=%u/%d->%u/%d flags=0x%08x->0x%08x status=%u->%u selector=%u->%u eventIndex=0x%x->0x%x len=%.9g->%.9g normal=(%.3f %.3f %.3f)->(%.3f %.3f %.3f) obj=%p/%p->%p/%p A{%s} B{%s}\n",
 		call,
 		static_cast<unsigned long long>(returnRva),
 		static_cast<unsigned long>(threadId),
@@ -3776,9 +4068,7 @@ static __int64 __fastcall VPhysicsUpdateExactMindistDeferredProbe(__int64 manage
 		reinterpret_cast<void*>(after.objectA),
 		reinterpret_cast<void*>(after.objectB),
 		objectContextA,
-		objectContextB,
-		formationA,
-		formationB);
+		objectContextB);
 	VPhysicsStaticBVHProbeLog(buffer);
 	return result;
 }
@@ -3787,7 +4077,7 @@ static __int64 __fastcall VPhysicsDeferredFlushProbe(__int64 manager, int mask)
 {
 	VPhysicsMaybeArmGuardPageTrace(static_cast<uintptr_t>(manager), "deferredFlush");
 
-	if (!IsVPhysicsDeferredProbeLogEnabled() && !IsVPhysicsFormationProbeEnabled()) {
+	if (!IsVPhysicsDeferredProbeLogEnabled()) {
 		return VPhysicsDeferredFlushOriginal
 			? VPhysicsDeferredFlushOriginal(manager, mask)
 			: 0;
@@ -3909,15 +4199,10 @@ static __int64 __fastcall VPhysicsDoImpactProbe(__int64 mindist)
 	const VPhysicsTfoTlsScratchSnapshot tlsAfter = VPhysicsReadTfoTlsScratchSnapshot();
 	const VPhysicsObjectSnapshot objectAAfter = VPhysicsReadObjectSnapshot(static_cast<__int64>(after.objectA ? after.objectA : before.objectA));
 	const VPhysicsObjectSnapshot objectBAfter = VPhysicsReadObjectSnapshot(static_cast<__int64>(after.objectB ? after.objectB : before.objectB));
-
-	char formationA[768];
-	char formationB[768];
 	char objectContextA[384];
 	char objectContextB[384];
 	const __int64 objectA = static_cast<__int64>(before.objectA ? before.objectA : after.objectA);
 	const __int64 objectB = static_cast<__int64>(before.objectB ? before.objectB : after.objectB);
-	VPhysicsFormatFormationContext(VPhysicsFindFormationForObject(objectA), formationA, sizeof(formationA));
-	VPhysicsFormatFormationContext(VPhysicsFindFormationForObject(objectB), formationB, sizeof(formationB));
 	VPhysicsFormatPairObjectContext(objectA, objectContextA, sizeof(objectContextA));
 	VPhysicsFormatPairObjectContext(objectB, objectContextB, sizeof(objectContextB));
 
@@ -3926,7 +4211,7 @@ static __int64 __fastcall VPhysicsDoImpactProbe(__int64 mindist)
 		buffer,
 		sizeof(buffer),
 		_TRUNCATE,
-		"VPHYSICS: eventCallback call=%llu mindist=%p retRva=0x%llx result=%p tlsIdx=%u/%d tlsArray=%p/%d tlsBase=%p/%d slot=%p/%d scratch=%p/%d->%p/%d ref=%u->%u raw=%p->%p free=%p->%p begin=%p->%p end=%p->%p cap=%u->%u readable=%d->%d env=%p->%p envCount=%u/%d->%u/%d envStep=%.6f now=%.6f next=%.6f eventQueue=%p->%p eventHeap=%p->%p eventDueRel=%.6f/%d->%.6f/%d eventDueAbs=%.6f->%.6f eventDueDelta=%.6f->%.6f obj=%p/%p->%p/%p objAState=0x%02x->0x%02x objBState=0x%02x->0x%02x objAMove=0x%08x->0x%08x objBMove=0x%08x->0x%08x objASurface=0x%08x->0x%08x objBSurface=0x%08x->0x%08x objASync=%u->%u objBSync=%u->%u objAPairs=%d->%d objBPairs=%d->%d flags=0x%08x->0x%08x collType=0x%02x->0x%02x sort=%u->%u func=%u->%u recalc=%u->%u status=%u->%u selector=%u->%u eventIndex=0x%x->0x%x len=%.6f->%.6f normal=(%.3f %.3f %.3f)->(%.3f %.3f %.3f) coreA=%p->%p speedA=(%.3f %.3f %.3f)->(%.3f %.3f %.3f) curA=%.3f->%.3f maxRotA=%.3f->%.3f coreB=%p->%p speedB=(%.3f %.3f %.3f)->(%.3f %.3f %.3f) curB=%.3f->%.3f maxRotB=%.3f->%.3f A{%s} B{%s} formA{%s} formB{%s}\n",
+		"VPHYSICS: eventCallback call=%llu mindist=%p retRva=0x%llx result=%p tlsIdx=%u/%d tlsArray=%p/%d tlsBase=%p/%d slot=%p/%d scratch=%p/%d->%p/%d ref=%u->%u raw=%p->%p free=%p->%p begin=%p->%p end=%p->%p cap=%u->%u readable=%d->%d env=%p->%p envCount=%u/%d->%u/%d envStep=%.6f now=%.6f next=%.6f eventQueue=%p->%p eventHeap=%p->%p eventDueRel=%.6f/%d->%.6f/%d eventDueAbs=%.6f->%.6f eventDueDelta=%.6f->%.6f obj=%p/%p->%p/%p objAState=0x%02x->0x%02x objBState=0x%02x->0x%02x objAMove=0x%08x->0x%08x objBMove=0x%08x->0x%08x objASurface=0x%08x->0x%08x objBSurface=0x%08x->0x%08x objASync=%u->%u objBSync=%u->%u objAPairs=%d->%d objBPairs=%d->%d flags=0x%08x->0x%08x collType=0x%02x->0x%02x sort=%u->%u func=%u->%u recalc=%u->%u status=%u->%u selector=%u->%u eventIndex=0x%x->0x%x len=%.6f->%.6f normal=(%.3f %.3f %.3f)->(%.3f %.3f %.3f) coreA=%p->%p speedA=(%.3f %.3f %.3f)->(%.3f %.3f %.3f) curA=%.3f->%.3f maxRotA=%.3f->%.3f coreB=%p->%p speedB=(%.3f %.3f %.3f)->(%.3f %.3f %.3f) curB=%.3f->%.3f maxRotB=%.3f->%.3f A{%s} B{%s}\n",
 		call,
 		reinterpret_cast<void*>(mindist),
 		static_cast<unsigned long long>(returnRva),
@@ -4051,9 +4336,7 @@ static __int64 __fastcall VPhysicsDoImpactProbe(__int64 mindist)
 		before.coreBMaxSurfaceRotSpeed,
 		after.coreBMaxSurfaceRotSpeed,
 		objectContextA,
-		objectContextB,
-		formationA,
-		formationB);
+		objectContextB);
 	VPhysicsStaticBVHProbeLog(buffer);
 	return result;
 }
@@ -4079,13 +4362,8 @@ static void __fastcall VPhysicsExactToHullProbe(__int64 mindist, float hullTime0
 
 	const __int64 objectA = static_cast<__int64>(before.objectA ? before.objectA : after.objectA);
 	const __int64 objectB = static_cast<__int64>(before.objectB ? before.objectB : after.objectB);
-
-	char formationA[768];
-	char formationB[768];
 	char objectContextA[384];
 	char objectContextB[384];
-	VPhysicsFormatFormationContext(VPhysicsFindFormationForObject(objectA), formationA, sizeof(formationA));
-	VPhysicsFormatFormationContext(VPhysicsFindFormationForObject(objectB), formationB, sizeof(formationB));
 	VPhysicsFormatPairObjectContext(objectA, objectContextA, sizeof(objectContextA));
 	VPhysicsFormatPairObjectContext(objectB, objectContextB, sizeof(objectContextB));
 
@@ -4094,7 +4372,7 @@ static void __fastcall VPhysicsExactToHullProbe(__int64 mindist, float hullTime0
 		buffer,
 		sizeof(buffer),
 		_TRUNCATE,
-		"VPHYSICS: exactToHull call=%llu mindist=%p retRva=0x%llx hullIn=(%.6f %.6f) readable=%d->%d env=%p->%p envCount=%u/%d->%u/%d envStep=%.6f now=%.6f next=%.6f eventQueue=%p->%p eventHeap=%p->%p eventDueRel=%.6f/%d->%.6f/%d eventDueAbs=%.6f->%.6f eventDueDelta=%.6f->%.6f obj=%p/%p->%p/%p flags=0x%08x->0x%08x collType=0x%02x->0x%02x sort=%u->%u func=%u->%u recalc=%u->%u status=%u->%u selector=%u->%u collDist=%.6f/%d hullCheckLen=%.6f hullTimeLen=%.6f worstSpeed=%.6f eventIndex=0x%x->0x%x len=%.6f->%.6f normal=(%.3f %.3f %.3f)->(%.3f %.3f %.3f) A{%s} B{%s} formA{%s} formB{%s}\n",
+		"VPHYSICS: exactToHull call=%llu mindist=%p retRva=0x%llx hullIn=(%.6f %.6f) readable=%d->%d env=%p->%p envCount=%u/%d->%u/%d envStep=%.6f now=%.6f next=%.6f eventQueue=%p->%p eventHeap=%p->%p eventDueRel=%.6f/%d->%.6f/%d eventDueAbs=%.6f->%.6f eventDueDelta=%.6f->%.6f obj=%p/%p->%p/%p flags=0x%08x->0x%08x collType=0x%02x->0x%02x sort=%u->%u func=%u->%u recalc=%u->%u status=%u->%u selector=%u->%u collDist=%.6f/%d hullCheckLen=%.6f hullTimeLen=%.6f worstSpeed=%.6f eventIndex=0x%x->0x%x len=%.6f->%.6f normal=(%.3f %.3f %.3f)->(%.3f %.3f %.3f) A{%s} B{%s}\n",
 		call,
 		reinterpret_cast<void*>(mindist),
 		static_cast<unsigned long long>(returnRva),
@@ -4157,9 +4435,7 @@ static void __fastcall VPhysicsExactToHullProbe(__int64 mindist, float hullTime0
 		after.contactPlane[1],
 		after.contactPlane[2],
 		objectContextA,
-		objectContextB,
-		formationA,
-		formationB);
+		objectContextB);
 	VPhysicsStaticBVHProbeLog(buffer);
 }
 
@@ -4184,13 +4460,8 @@ static void __fastcall VPhysicsMindistEventProbe(__int64 mindist, float eventTim
 
 	const __int64 objectA = static_cast<__int64>(before.objectA ? before.objectA : after.objectA);
 	const __int64 objectB = static_cast<__int64>(before.objectB ? before.objectB : after.objectB);
-
-	char formationA[768];
-	char formationB[768];
 	char objectContextA[384];
 	char objectContextB[384];
-	VPhysicsFormatFormationContext(VPhysicsFindFormationForObject(objectA), formationA, sizeof(formationA));
-	VPhysicsFormatFormationContext(VPhysicsFindFormationForObject(objectB), formationB, sizeof(formationB));
 	VPhysicsFormatPairObjectContext(objectA, objectContextA, sizeof(objectContextA));
 	VPhysicsFormatPairObjectContext(objectB, objectContextB, sizeof(objectContextB));
 
@@ -4199,7 +4470,7 @@ static void __fastcall VPhysicsMindistEventProbe(__int64 mindist, float eventTim
 		buffer,
 		sizeof(buffer),
 		_TRUNCATE,
-		"VPHYSICS: mindistEvent call=%llu mindist=%p retRva=0x%llx eventTime=%.6f readable=%d->%d env=%p->%p envCount=%u/%d->%u/%d envStep=%.6f now=%.6f next=%.6f eventQueue=%p->%p eventHeap=%p->%p eventDueRel=%.6f/%d->%.6f/%d eventDueAbs=%.6f->%.6f eventDueDelta=%.6f->%.6f obj=%p/%p->%p/%p flags=0x%08x->0x%08x collType=0x%02x->0x%02x sort=%u->%u func=%u->%u recalc=%u->%u status=%u->%u selector=%u->%u eventIndex=0x%x->0x%x len=%.6f->%.6f normal=(%.3f %.3f %.3f)->(%.3f %.3f %.3f) A{%s} B{%s} formA{%s} formB{%s}\n",
+		"VPHYSICS: mindistEvent call=%llu mindist=%p retRva=0x%llx eventTime=%.6f readable=%d->%d env=%p->%p envCount=%u/%d->%u/%d envStep=%.6f now=%.6f next=%.6f eventQueue=%p->%p eventHeap=%p->%p eventDueRel=%.6f/%d->%.6f/%d eventDueAbs=%.6f->%.6f eventDueDelta=%.6f->%.6f obj=%p/%p->%p/%p flags=0x%08x->0x%08x collType=0x%02x->0x%02x sort=%u->%u func=%u->%u recalc=%u->%u status=%u->%u selector=%u->%u eventIndex=0x%x->0x%x len=%.6f->%.6f normal=(%.3f %.3f %.3f)->(%.3f %.3f %.3f) A{%s} B{%s}\n",
 		call,
 		reinterpret_cast<void*>(mindist),
 		static_cast<unsigned long long>(returnRva),
@@ -4256,9 +4527,7 @@ static void __fastcall VPhysicsMindistEventProbe(__int64 mindist, float eventTim
 		after.contactPlane[1],
 		after.contactPlane[2],
 		objectContextA,
-		objectContextB,
-		formationA,
-		formationB);
+		objectContextB);
 	VPhysicsStaticBVHProbeLog(buffer);
 }
 
@@ -4317,13 +4586,10 @@ static void VPhysicsLogCollisionApiCaller(const char* apiName, __int64 ovElement
 		callerRva = reinterpret_cast<uintptr_t>(retAddress) - reinterpret_cast<uintptr_t>(callerModule);
 		GetModuleFileNameA(callerModule, callerPath, sizeof(callerPath));
 	}
-
-	char formation[768];
-	VPhysicsFormatFormationContext(VPhysicsFindFormationForObject(object), formation, sizeof(formation));
 	char buffer[1536];
 	sprintf_s(
 		buffer,
-		"VPHYSICS: collisionApiCaller api=%s ov=%p object=%p ret=%p module=%p rva=0x%llx path=%s moveFlags=0x%08x surfaceFlags=0x%08x sync=%u pairs=%d key=0x%016llx %s\n",
+		"VPHYSICS: collisionApiCaller api=%s ov=%p object=%p ret=%p module=%p rva=0x%llx path=%s moveFlags=0x%08x surfaceFlags=0x%08x sync=%u pairs=%d key=0x%016llx\n",
 		apiName ? apiName : "<unknown>",
 		reinterpret_cast<void*>(ovElement),
 		reinterpret_cast<void*>(object),
@@ -4335,120 +4601,8 @@ static void VPhysicsLogCollisionApiCaller(const char* apiName, __int64 ovElement
 		surfaceFlags,
 		syncStamp,
 		pairCount,
-		static_cast<unsigned long long>(VPhysicsMovementLogKey(apiName, core, object, moveFlags, surfaceFlags, syncStamp, active, pairCount)),
-		formation);
+		static_cast<unsigned long long>(VPhysicsMovementLogKey(apiName, core, object, moveFlags, surfaceFlags, syncStamp, active, pairCount)));
 	VPhysicsStaticBVHProbeLog(buffer);
-}
-
-static __int64 __fastcall R1OTFOCBaseEntityVPhysicsInitNormalProbe(
-	void* entity,
-	unsigned int solidType,
-	unsigned int solidFlags,
-	char createAsleep,
-	__int64 solid)
-{
-	const uintptr_t entityAddress = reinterpret_cast<uintptr_t>(entity);
-	const uintptr_t beforePhysicsObject = entityAddress && IsReadableRange(reinterpret_cast<void*>(entityAddress + 600), sizeof(uintptr_t))
-		? *reinterpret_cast<uintptr_t*>(entityAddress + 600)
-		: 0;
-	const bool solidReadable = solid && IsReadableRange(reinterpret_cast<void*>(solid), 0x658);
-	const int solidIndex = solidReadable ? *reinterpret_cast<int*>(solid) : -1;
-	const uintptr_t params = solidReadable ? static_cast<uintptr_t>(solid + 1560) : 0;
-	const uintptr_t paramMassCenter = params && IsReadableRange(reinterpret_cast<void*>(params), sizeof(uintptr_t))
-		? *reinterpret_cast<uintptr_t*>(params)
-		: 0;
-	const float paramMass = VPhysicsReadFloatOrDefault(params + 8, 0.0f);
-	const float paramInertia = VPhysicsReadFloatOrDefault(params + 12, 0.0f);
-	const float paramDamping = VPhysicsReadFloatOrDefault(params + 16, 0.0f);
-	const float paramRotDamping = VPhysicsReadFloatOrDefault(params + 20, 0.0f);
-	const float paramVolume = VPhysicsReadFloatOrDefault(params + 48, 0.0f);
-	const float paramDrag = VPhysicsReadFloatOrDefault(params + 52, 0.0f);
-	const unsigned int paramEnableCollisions = params && IsReadableRange(reinterpret_cast<void*>(params + 56), 1)
-		? *reinterpret_cast<unsigned char*>(params + 56)
-		: 0xffffffffu;
-	const uintptr_t paramNamePtr = params && IsReadableRange(reinterpret_cast<void*>(params + 32), sizeof(uintptr_t))
-		? *reinterpret_cast<uintptr_t*>(params + 32)
-		: 0;
-	const uintptr_t paramGameData = params && IsReadableRange(reinterpret_cast<void*>(params + 40), sizeof(uintptr_t))
-		? *reinterpret_cast<uintptr_t*>(params + 40)
-		: 0;
-
-	__int64 result = R1OTFOCBaseEntityVPhysicsInitNormalOriginal
-		? R1OTFOCBaseEntityVPhysicsInitNormalOriginal(entity, solidType, solidFlags, createAsleep, solid)
-		: 0;
-
-	const uintptr_t afterPhysicsObject = entityAddress && IsReadableRange(reinterpret_cast<void*>(entityAddress + 600), sizeof(uintptr_t))
-		? *reinterpret_cast<uintptr_t*>(entityAddress + 600)
-		: 0;
-	VPhysicsFormationSnapshot snapshot = VPhysicsBuildFormationSnapshot(entityAddress, result, solidType, solidFlags, createAsleep, solid);
-	if (result)
-		VPhysicsRememberFormationSnapshot(snapshot);
-
-	const unsigned int objectMoveFlags = snapshot.ivpObject ? VPhysicsObjectDword(static_cast<__int64>(snapshot.ivpObject), 0xE0) : 0;
-	const unsigned int objectSurfaceFlags = snapshot.ivpObject ? VPhysicsObjectSurfaceFlags(static_cast<__int64>(snapshot.ivpObject)) : 0;
-	const unsigned int objectSync = snapshot.ivpObject ? VPhysicsObjectDword(static_cast<__int64>(snapshot.ivpObject), 0x100) : 0;
-	const unsigned int objectActive = snapshot.ivpObject ? VPhysicsObjectByte(static_cast<__int64>(snapshot.ivpObject), 0x104) : 0;
-	const int objectPairs = snapshot.ivpObject ? VPhysicsObjectPairCount(static_cast<__int64>(snapshot.ivpObject)) : -1;
-	char paramName[128];
-	VPhysicsCopyReadableCString(paramName, sizeof(paramName), reinterpret_cast<const char*>(paramNamePtr), "<param-name-null>");
-
-	char buffer[2048];
-	_snprintf_s(
-		buffer,
-		sizeof(buffer),
-		_TRUNCATE,
-		"VPHYSICS: formation serial=%u ent=%p class=%s model=%s result=%p beforePhys=%p afterPhys=%p wrapper=%p ivp=%p collide=%p gameData=%p solidArg=%u/0x%x createAsleep=%u solidNow=%d/0x%x moveType=%d collisionGroup=%d physicsMode=%d mass=%.3f customBounds=%u mins=(%.3f %.3f %.3f) maxs=(%.3f %.3f %.3f) solidPtr=%p solidReadable=%d solidIndex=%d solidName=%s surface=%s params=%p paramName=%s paramGameData=%p paramMass=%.3f paramInertia=%.3f paramDamping=%.3f paramRotDamping=%.3f paramVolume=%.3f paramDrag=%.3f paramEnableCollisions=%u paramMassCenter=%p ivpMoveFlags=0x%08x ivpState=0x%02x ivpSurfaceFlags=0x%08x ivpSync=%u ivpActive=%u ivpPairs=%d pieceCount=-1\n",
-		snapshot.serial,
-		reinterpret_cast<void*>(snapshot.entity),
-		snapshot.className,
-		snapshot.modelName,
-		reinterpret_cast<void*>(result),
-		reinterpret_cast<void*>(beforePhysicsObject),
-		reinterpret_cast<void*>(afterPhysicsObject),
-		reinterpret_cast<void*>(snapshot.wrapper),
-		reinterpret_cast<void*>(snapshot.ivpObject),
-		reinterpret_cast<void*>(snapshot.collide),
-		reinterpret_cast<void*>(snapshot.gameData),
-		solidType,
-		solidFlags,
-		createAsleep ? 1u : 0u,
-		snapshot.solidType,
-		snapshot.solidFlags,
-		snapshot.moveType,
-		snapshot.collisionGroup,
-		snapshot.physicsMode,
-		snapshot.mass,
-		snapshot.customBounds,
-		snapshot.boundsMins[0],
-		snapshot.boundsMins[1],
-		snapshot.boundsMins[2],
-		snapshot.boundsMaxs[0],
-		snapshot.boundsMaxs[1],
-		snapshot.boundsMaxs[2],
-		reinterpret_cast<void*>(solid),
-		solidReadable ? 1 : 0,
-		solidIndex,
-		snapshot.solidName,
-		snapshot.surfaceProp,
-		reinterpret_cast<void*>(params),
-		paramName,
-		reinterpret_cast<void*>(paramGameData),
-		paramMass,
-		paramInertia,
-		paramDamping,
-		paramRotDamping,
-		paramVolume,
-		paramDrag,
-		paramEnableCollisions,
-		reinterpret_cast<void*>(paramMassCenter),
-		objectMoveFlags,
-		objectMoveFlags & 0xff,
-		objectSurfaceFlags,
-		objectSync,
-		objectActive,
-		objectPairs);
-	VPhysicsStaticBVHProbeLog(buffer);
-	return result;
 }
 
 static bool VPhysicsStaticCandidatesHaveNonSelf(__int64 staticCandidates, __int64 object)
@@ -4515,40 +4669,6 @@ static bool VPhysicsHookOne(uintptr_t base, uintptr_t rva, void* detour, void** 
 	return installed;
 }
 
-void InstallR1OTFOServerVPhysicsFormationProbe(uintptr_t serverLocalBase)
-{
-	if (s_R1OTFOServerVPhysicsFormationProbeInstalled || !IsVPhysicsFormationProbeEnabled())
-		return;
-
-	if (!serverLocalBase) {
-		HMODULE module = GetModuleHandleA("server_local.dll");
-		if (!module && IsR1ODedicatedServer())
-			module = GetModuleHandleA("server.dll");
-		serverLocalBase = reinterpret_cast<uintptr_t>(module);
-	}
-	if (!serverLocalBase)
-		return;
-
-	const bool installed = VPhysicsHookOne(
-		serverLocalBase,
-		0x3C8B70,
-		reinterpret_cast<void*>(&R1OTFOCBaseEntityVPhysicsInitNormalProbe),
-		reinterpret_cast<void**>(&R1OTFOCBaseEntityVPhysicsInitNormalOriginal),
-		"server-vphysics-init-normal");
-	s_R1OTFOServerVPhysicsFormationProbeInstalled = installed;
-
-	char buffer[384];
-	_snprintf_s(
-		buffer,
-		sizeof(buffer),
-		_TRUNCATE,
-		"VPHYSICS: formation probe installed=%d serverBase=%p target=%p flag=-r1delta_vphysics_formation_probe\n",
-		installed ? 1 : 0,
-		reinterpret_cast<void*>(serverLocalBase),
-		reinterpret_cast<void*>(serverLocalBase + 0x3C8B70));
-	VPhysicsStaticBVHProbeLog(buffer);
-}
-
 static bool __fastcall VPhysicsCollisionFilterShouldCollideProbe(__int64 filter, __int64 object, __int64 candidate)
 {
 	bool result = false;
@@ -4564,14 +4684,12 @@ static bool __fastcall VPhysicsCollisionFilterShouldCollideProbe(__int64 filter,
 		const unsigned int candidateMoveFlags = VPhysicsObjectDword(candidate, 0xE0);
 		const unsigned int objectSurfaceFlags = VPhysicsObjectSurfaceFlags(object);
 		const unsigned int candidateSurfaceFlags = VPhysicsObjectSurfaceFlags(candidate);
-		char formation[768];
-		VPhysicsFormatFormationContext(VPhysicsFindFormationForObject(object), formation, sizeof(formation));
 		char buffer[1408];
 		_snprintf_s(
 			buffer,
 			sizeof(buffer),
 			_TRUNCATE,
-			"VPHYSICS: staticFilterShouldCollide call=%llu filter=%p object=%p candidate=%p result=%d objFlags=0x%08x candFlags=0x%08x objSurf=0x%08x candSurf=0x%08x objPairs=%d candPairs=%d %s\n",
+			"VPHYSICS: staticFilterShouldCollide call=%llu filter=%p object=%p candidate=%p result=%d objFlags=0x%08x candFlags=0x%08x objSurf=0x%08x candSurf=0x%08x objPairs=%d candPairs=%d\n",
 			s_VPhysicsStaticBVHActiveCall,
 			reinterpret_cast<void*>(filter),
 			reinterpret_cast<void*>(object),
@@ -4582,8 +4700,7 @@ static bool __fastcall VPhysicsCollisionFilterShouldCollideProbe(__int64 filter,
 			objectSurfaceFlags,
 			candidateSurfaceFlags,
 			VPhysicsObjectPairCount(object),
-			VPhysicsObjectPairCount(candidate),
-			formation);
+			VPhysicsObjectPairCount(candidate));
 		VPhysicsStaticBVHProbeLog(buffer);
 	}
 
@@ -4772,14 +4889,12 @@ static void VPhysicsLogStaticBVHSelfOnlyMiss(
 	uintptr_t firstCandidate = 0;
 	const bool haveFirstCandidate = VPhysicsPointerVectorElement(staticCandidates, 0, &firstCandidate);
 	const int pairCountAfter = VPhysicsObjectPairCount(object);
-	char formation[768];
-	VPhysicsFormatFormationContext(VPhysicsFindFormationForObject(object), formation, sizeof(formation));
 	char buffer[1408];
 	_snprintf_s(
 		buffer,
 		sizeof(buffer),
 		_TRUNCATE,
-		"VPHYSICS: staticFilterSelfOnly call=%llu range=%p object=%p trackedNew=%d firstCandidate=%p firstIsSelf=%d static=%d->%d output=%d->%d appended=%d start=%d->%d active=%u moveFlags=0x%08x surfaceFlags=0x%08x sync=%u pairs=%d->%d key=0x%016llx %s\n",
+		"VPHYSICS: staticFilterSelfOnly call=%llu range=%p object=%p trackedNew=%d firstCandidate=%p firstIsSelf=%d static=%d->%d output=%d->%d appended=%d start=%d->%d active=%u moveFlags=0x%08x surfaceFlags=0x%08x sync=%u pairs=%d->%d key=0x%016llx\n",
 		call,
 		reinterpret_cast<void*>(rangeData),
 		reinterpret_cast<void*>(object),
@@ -4799,8 +4914,7 @@ static void VPhysicsLogStaticBVHSelfOnlyMiss(
 		syncStamp,
 		pairCountBefore,
 		pairCountAfter,
-		key,
-		formation);
+		key);
 	VPhysicsStaticBVHProbeLog(buffer);
 }
 
@@ -4817,14 +4931,12 @@ static __int64 __fastcall VPhysicsExistingPairProbe(__int64* hashState, __int64 
 		const unsigned int candidateMoveFlags = VPhysicsObjectDword(candidate, 0xE0);
 		const unsigned int objectSurfaceFlags = VPhysicsObjectSurfaceFlags(object);
 		const unsigned int candidateSurfaceFlags = VPhysicsObjectSurfaceFlags(candidate);
-		char formation[768];
-		VPhysicsFormatFormationContext(VPhysicsFindFormationForObject(object), formation, sizeof(formation));
 		char buffer[1408];
 		_snprintf_s(
 			buffer,
 			sizeof(buffer),
 			_TRUNCATE,
-			"VPHYSICS: staticFilterExisting call=%llu object=%p candidate=%p result=%p duplicate=%d objFlags=0x%08x candFlags=0x%08x objSurf=0x%08x candSurf=0x%08x objPairs=%d candPairs=%d %s\n",
+			"VPHYSICS: staticFilterExisting call=%llu object=%p candidate=%p result=%p duplicate=%d objFlags=0x%08x candFlags=0x%08x objSurf=0x%08x candSurf=0x%08x objPairs=%d candPairs=%d\n",
 			s_VPhysicsStaticBVHActiveCall,
 			reinterpret_cast<void*>(object),
 			reinterpret_cast<void*>(candidate),
@@ -4835,8 +4947,7 @@ static __int64 __fastcall VPhysicsExistingPairProbe(__int64* hashState, __int64 
 			objectSurfaceFlags,
 			candidateSurfaceFlags,
 			VPhysicsObjectPairCount(object),
-			VPhysicsObjectPairCount(candidate),
-			formation);
+			VPhysicsObjectPairCount(candidate));
 		VPhysicsStaticBVHProbeLog(buffer);
 	}
 
@@ -4886,14 +4997,12 @@ static void __fastcall VPhysicsObjectPairUpdateProbe(__int64 rangeData, __int64 
 		^ (s_VPhysicsStaticBVHFilterCalls & 0xfffffllu);
 	const bool trackedNew = tracked && s_VPhysicsStaticBVHTrackedPairKeys.insert(trackedKey).second;
 	if (interesting || trackedNew || helperInvokedForTarget) {
-		char formation[768];
-		VPhysicsFormatFormationContext(VPhysicsFindFormationForObject(object), formation, sizeof(formation));
 		char buffer[1536];
 		_snprintf_s(
 			buffer,
 			sizeof(buffer),
 			_TRUNCATE,
-			"VPHYSICS: %s call=%llu phase=%s ret=%p retRva=0x%llx interesting=%d tracked=%d helperInvoked=%d range=%p object=%p output=%p active=%u->%u moveFlags=0x%08x->0x%08x surfaceFlags=0x%08x->0x%08x sync=%u->%u pairs=%d->%d helperCalls=%llu->%llu filterCalls=%llu->%llu key=0x%016llx %s\n",
+			"VPHYSICS: %s call=%llu phase=%s ret=%p retRva=0x%llx interesting=%d tracked=%d helperInvoked=%d range=%p object=%p output=%p active=%u->%u moveFlags=0x%08x->0x%08x surfaceFlags=0x%08x->0x%08x sync=%u->%u pairs=%d->%d helperCalls=%llu->%llu filterCalls=%llu->%llu key=0x%016llx\n",
 			trackedNew && !interesting ? "pairUpdateTracked" : (helperInvokedForTarget && !interesting ? "pairUpdateHelper" : "pairUpdate"),
 			call,
 			s_VPhysicsActiveMovementPhase ? s_VPhysicsActiveMovementPhase : "<none>",
@@ -4919,8 +5028,7 @@ static void __fastcall VPhysicsObjectPairUpdateProbe(__int64 rangeData, __int64 
 			s_VPhysicsStaticBVHHelperCalls,
 			filterCallsBefore,
 			s_VPhysicsStaticBVHFilterCalls,
-			trackedKey,
-			formation);
+			trackedKey);
 		VPhysicsStaticBVHProbeLog(buffer);
 	}
 }
@@ -4962,14 +5070,12 @@ static void __fastcall VPhysicsStaticBVHFilterProbe(__int64 rangeData, __int64 o
 	const bool familiarStaticStartup = moveFlags == 0x108 && (surfaceFlags == 0x1000 || surfaceFlags == 0x1008 || surfaceFlags == 0x10000);
 	const bool notable = activeTarget && staticAfter > 0 && appended <= 0 && (staticAfter >= 8 || !familiarStaticStartup);
 	if (notable) {
-		char formation[768];
-		VPhysicsFormatFormationContext(VPhysicsFindFormationForObject(object), formation, sizeof(formation));
 		char buffer[1280];
 		_snprintf_s(
 			buffer,
 			sizeof(buffer),
 			_TRUNCATE,
-			"VPHYSICS: staticFilter call=%llu notable=1 range=%p object=%p static=%d->%d output=%d->%d appended=%d start=%d->%d moveFlags=0x%08x surfaceFlags=0x%08x %s\n",
+			"VPHYSICS: staticFilter call=%llu notable=1 range=%p object=%p static=%d->%d output=%d->%d appended=%d start=%d->%d moveFlags=0x%08x surfaceFlags=0x%08x\n",
 			call,
 			reinterpret_cast<void*>(rangeData),
 			reinterpret_cast<void*>(object),
@@ -4981,8 +5087,7 @@ static void __fastcall VPhysicsStaticBVHFilterProbe(__int64 rangeData, __int64 o
 			startBefore,
 			startAfter,
 			moveFlags,
-			surfaceFlags,
-			formation);
+			surfaceFlags);
 		VPhysicsStaticBVHProbeLog(buffer);
 	}
 	VPhysicsLogStaticBVHSelfOnlyMiss(
@@ -5039,14 +5144,12 @@ static int __fastcall VPhysicsStaticBVHHelperProbe(__int64 rangeData, __int64 ob
 	const bool notable = VPhysicsShouldLogSurfaceMissObject(moveFlags, surfaceFlags, pairCount)
 		&& (result <= 0 || appended <= 0 || cleared || radius > 2048.0f || (treeState.rootReadable && !rootHit));
 	if (notable || trackedNew) {
-		char formation[768];
-		VPhysicsFormatFormationContext(VPhysicsFindFormationForObject(object), formation, sizeof(formation));
 		char buffer[2048];
 		_snprintf_s(
 			buffer,
 			sizeof(buffer),
 			_TRUNCATE,
-			"VPHYSICS: %s call=%llu flavor=%s notable=%d tracked=%d result=%d appended=%d before=%d after=%d cleared=%d valid=%u tree=%p nodes=%p objects=%p bounds=%p counts=%u/%u rootReadable=%d rootHit=%d rootDistSq=%.3f radiusSq=%.3f rootMin=(%.3f %.3f %.3f) rootMax=(%.3f %.3f %.3f) radius=%.3f center=(%.3f %.3f %.3f) range=%p object=%p ledges=%p active=%u moveFlags=0x%08x surfaceFlags=0x%08x sync=%u pairs=%d envReadable=%d treeReadable=%d countsReadable=%d %s\n",
+			"VPHYSICS: %s call=%llu flavor=%s notable=%d tracked=%d result=%d appended=%d before=%d after=%d cleared=%d valid=%u tree=%p nodes=%p objects=%p bounds=%p counts=%u/%u rootReadable=%d rootHit=%d rootDistSq=%.3f radiusSq=%.3f rootMin=(%.3f %.3f %.3f) rootMax=(%.3f %.3f %.3f) radius=%.3f center=(%.3f %.3f %.3f) range=%p object=%p ledges=%p active=%u moveFlags=0x%08x surfaceFlags=0x%08x sync=%u pairs=%d envReadable=%d treeReadable=%d countsReadable=%d\n",
 			trackedNew && !notable ? "staticHelperTracked" : "staticHelper",
 			call,
 			s_VPhysicsStaticBVHProbeFlavor ? s_VPhysicsStaticBVHProbeFlavor : "<unknown>",
@@ -5088,8 +5191,7 @@ static int __fastcall VPhysicsStaticBVHHelperProbe(__int64 rangeData, __int64 ob
 			pairCount,
 			treeState.envReadable ? 1 : 0,
 			treeState.treeHeaderReadable ? 1 : 0,
-			treeState.countsReadable ? 1 : 0,
-			formation);
+			treeState.countsReadable ? 1 : 0);
 		VPhysicsStaticBVHProbeLog(buffer);
 	}
 
@@ -15634,7 +15736,11 @@ static CreateInterfaceFn GetR1OTFOFileSystemFactory()
 	return s_R1OTFOFileSystemFactory;
 }
 
-static bool TryResolveR1ODediLooseReplacementPath(const char* fileName, char* outPath, size_t outPathSize)
+static bool TryResolveR1ODediLooseReplacementPath(
+	const FileCache::ReadLease& lease,
+	const char* fileName,
+	char* outPath,
+	size_t outPathSize)
 {
 	if (!fileName || !fileName[0] || !outPath || !outPathSize)
 		return false;
@@ -15721,7 +15827,7 @@ static bool TryResolveR1ODediLooseReplacementPath(const char* fileName, char* ou
 		if (!_stricmp(relative, "playlists.txt")
 			&& BuildR1ODediLooseModPath(relative, outPath, outPathSize))
 			return true;
-		if (FileCache::GetInstance().ResolveReplacementFile(relative, outPath, outPathSize))
+		if (FileCache::GetInstance().ResolveReplacementFile(lease, relative, outPath, outPathSize))
 			return true;
 	}
 
@@ -15746,12 +15852,16 @@ static bool IsAllowedR1ODediLooseVScriptReplacement(const char* fileName)
 	return true;
 }
 
-static bool NormalizeR1ODediLooseFileName(const char* fileName, char* outPath, size_t outPathSize)
+static bool NormalizeR1ODediLooseFileName(
+	const FileCache::ReadLease& lease,
+	const char* fileName,
+	char* outPath,
+	size_t outPathSize)
 {
 	if (!IsAllowedR1ODediLooseVScriptReplacement(fileName))
 		return false;
 
-	if (TryResolveR1ODediLooseReplacementPath(fileName, outPath, outPathSize))
+	if (TryResolveR1ODediLooseReplacementPath(lease, fileName, outPath, outPathSize))
 		return true;
 
 	if (!fileName || !outPath || !outPathSize)
@@ -15779,7 +15889,8 @@ static bool NormalizeR1ODediLooseFileName(const char* fileName, char* outPath, s
 		char* modRoot = strstr(normalizedAbs, "\\r1delta\\");
 		if (modRoot) {
 			const char* relative = modRoot + strlen("\\r1delta\\");
-			return FileCache::GetInstance().TryReplaceFile(relative) && BuildR1ODediLooseModPath(relative, outPath, outPathSize);
+			return FileCache::GetInstance().ResolveReplacementFile(
+				lease, relative, outPath, outPathSize);
 		}
 		const DWORD attributes = GetFileAttributesA(outPath);
 		return attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_DIRECTORY);
@@ -15845,15 +15956,18 @@ static void* OpenR1OVPKFallback(
 		return originalOpen(thisptr, fileName, options, pathId, flags);
 
 	char loosePath[MAX_PATH];
-	if (NormalizeR1ODediLooseFileName(fileName, loosePath, sizeof(loosePath))) {
-		void* looseHandle = originalOpen(thisptr, loosePath, options, nullptr, flags);
-		if (AreR1OFakeDediVerboseLogsEnabled() && IsR1ODediLooseOverridePath(fileName)) {
-			char buffer[512];
-			_snprintf_s(buffer, sizeof(buffer), _TRUNCATE, "R1Delta: R1O filesystem loose open override file=%s normalized=%s handle=%p\n", fileName, loosePath, looseHandle);
-			OutputDebugStringA(buffer);
+	{
+		auto lease = FileCache::GetInstance().AcquireReadLease();
+		if (NormalizeR1ODediLooseFileName(lease, fileName, loosePath, sizeof(loosePath))) {
+			void* looseHandle = originalOpen(thisptr, loosePath, options, nullptr, flags);
+			if (AreR1OFakeDediVerboseLogsEnabled() && IsR1ODediLooseOverridePath(fileName)) {
+				char buffer[512];
+				_snprintf_s(buffer, sizeof(buffer), _TRUNCATE, "R1Delta: R1O filesystem loose open override file=%s normalized=%s handle=%p\n", fileName, loosePath, looseHandle);
+				OutputDebugStringA(buffer);
+			}
+			if (looseHandle)
+				return looseHandle;
 		}
-		if (looseHandle)
-			return looseHandle;
 	}
 
 	if (void* handle = originalOpen(thisptr, fileName, options, pathId, flags)) {
@@ -15928,9 +16042,12 @@ static unsigned int __fastcall R1OBaseFileSystem_SizeByName(void* thisptr, const
 
 	char loosePath[MAX_PATH];
 	WIN32_FILE_ATTRIBUTE_DATA data;
-	if (NormalizeR1ODediLooseFileName(fileName, loosePath, sizeof(loosePath))
-		&& GetFileAttributesExA(loosePath, GetFileExInfoStandard, &data)) {
-		return data.nFileSizeHigh == 0 ? data.nFileSizeLow : invalidSize;
+	{
+		auto lease = FileCache::GetInstance().AcquireReadLease();
+		if (NormalizeR1ODediLooseFileName(lease, fileName, loosePath, sizeof(loosePath))
+			&& GetFileAttributesExA(loosePath, GetFileExInfoStandard, &data)) {
+			return data.nFileSizeHigh == 0 ? data.nFileSizeLow : invalidSize;
+		}
 	}
 
 	const unsigned int nativeSize = R1OBaseFileSystem_SizeByNameOriginal
@@ -15952,14 +16069,17 @@ static bool __fastcall R1OBaseFileSystem_FileExists(void* thisptr, const char* f
 		return result;
 
 	char loosePath[MAX_PATH];
-	result = NormalizeR1ODediLooseFileName(fileName, loosePath, sizeof(loosePath));
-	if (result && AreR1OFakeDediVerboseLogsEnabled() && IsR1ODediLooseOverridePath(fileName)) {
-		char buffer[512];
-		_snprintf_s(buffer, sizeof(buffer), _TRUNCATE, "R1Delta: R1O filesystem loose exists fallback file=%s normalized=%s\n", fileName, loosePath);
-		OutputDebugStringA(buffer);
+	{
+		auto lease = FileCache::GetInstance().AcquireReadLease();
+		result = NormalizeR1ODediLooseFileName(lease, fileName, loosePath, sizeof(loosePath));
+		if (result && AreR1OFakeDediVerboseLogsEnabled() && IsR1ODediLooseOverridePath(fileName)) {
+			char buffer[512];
+			_snprintf_s(buffer, sizeof(buffer), _TRUNCATE, "R1Delta: R1O filesystem loose exists fallback file=%s normalized=%s\n", fileName, loosePath);
+			OutputDebugStringA(buffer);
+		}
+		if (result)
+			return true;
 	}
-	if (result)
-		return true;
 
 	uint64_t size = 0;
 	return GetR1OVPKMemoryFileSize(fileName, &size);
@@ -15974,15 +16094,18 @@ static void* __fastcall R1OFileSystem_Open(void* thisptr, const char* fileName, 
 		return R1OFileSystem_OpenOriginal(thisptr, fileName, options, flags, pathId, unknown);
 
 	char loosePath[MAX_PATH];
-	if (NormalizeR1ODediLooseFileName(fileName, loosePath, sizeof(loosePath))) {
-		void* looseHandle = R1OFileSystem_OpenOriginal(thisptr, loosePath, options, flags, nullptr, unknown);
-		if (AreR1OFakeDediVerboseLogsEnabled() && IsR1ODediLooseOverridePath(fileName)) {
-			char buffer[512];
-			_snprintf_s(buffer, sizeof(buffer), _TRUNCATE, "R1Delta: R1O CVFileSystem loose open override file=%s normalized=%s handle=%p\n", fileName, loosePath, looseHandle);
-			OutputDebugStringA(buffer);
+	{
+		auto lease = FileCache::GetInstance().AcquireReadLease();
+		if (NormalizeR1ODediLooseFileName(lease, fileName, loosePath, sizeof(loosePath))) {
+			void* looseHandle = R1OFileSystem_OpenOriginal(thisptr, loosePath, options, flags, nullptr, unknown);
+			if (AreR1OFakeDediVerboseLogsEnabled() && IsR1ODediLooseOverridePath(fileName)) {
+				char buffer[512];
+				_snprintf_s(buffer, sizeof(buffer), _TRUNCATE, "R1Delta: R1O CVFileSystem loose open override file=%s normalized=%s handle=%p\n", fileName, loosePath, looseHandle);
+				OutputDebugStringA(buffer);
+			}
+			if (looseHandle)
+				return looseHandle;
 		}
-		if (looseHandle)
-			return looseHandle;
 	}
 
 	if (void* handle = R1OFileSystem_OpenOriginal(thisptr, fileName, options, flags, pathId, unknown)) {
@@ -17018,15 +17141,14 @@ __int64 __fastcall R1OFileSystem_LoadKeyValuesFile(void* fileSystem, const char*
 void __fastcall R1OFileSystem_RefreshSearchPaths(void* fileSystem)
 {
 	if (IsR1ODedicatedServer())
-		InvalidateAddonSearchCaches();
+		BeginAddonSearchCacheUpdate();
 
 	if (R1OFileSystem_RefreshSearchPathsOriginal)
 		R1OFileSystem_RefreshSearchPathsOriginal(fileSystem);
 
-	if (IsR1ODedicatedServer()) {
-		PDef::InitValidator();
-		if (AreR1OFakeDediVerboseLogsEnabled())
-			OutputDebugStringA("R1Delta: refreshed native R1O addon search paths\n");
+	if (IsR1ODedicatedServer() && EndAddonSearchCacheUpdate()
+		&& AreR1OFakeDediVerboseLogsEnabled()) {
+		OutputDebugStringA("R1Delta: refreshed native R1O addon search paths\n");
 	}
 }
 
@@ -17812,7 +17934,6 @@ char __fastcall R1OLoadServerLocalGameDLL(const char* dllName)
 
 	HookR1OTFOServerGameDLLInit(gameDll);
 	HookR1OTFOCBaseAnimatingSetSequence(serverLocal);
-	InstallR1OTFOServerVPhysicsFormationProbe(reinterpret_cast<uintptr_t>(serverLocal));
 
 	// CModAppSystemGroup's early startup path is wired around the LocalServer*
 	// globals even for the R1O client engine. Keep them populated until the

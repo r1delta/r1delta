@@ -104,6 +104,9 @@
     <ClInclude Include="engine\core\factory.h">
       <Filter>engine\core</Filter>
     </ClInclude>
+    <ClInclude Include="engine\core\materialsystem_dx11_texture_upload.h">
+      <Filter>engine\core</Filter>
+    </ClInclude>
     <ClInclude Include="engine\core\framework.h">
       <Filter>engine\core</Filter>
     </ClInclude>
@@ -131,6 +134,9 @@
       <Filter>engine</Filter>
     </ClInclude>
     <!-- engine\filesystem -->
+    <ClInclude Include="engine\filesystem\addonlist_state.h">
+      <Filter>engine\filesystem</Filter>
+    </ClInclude>
     <ClInclude Include="engine\filesystem\filecache.h">
       <Filter>engine\filesystem</Filter>
     </ClInclude>
@@ -478,6 +484,9 @@
     <ClCompile Include="engine\core\factory.cpp">
       <Filter>engine\core</Filter>
     </ClCompile>
+    <ClCompile Include="engine\core\materialsystem_dx11_texture_upload.cpp">
+      <Filter>engine\core</Filter>
+    </ClCompile>
     <ClCompile Include="engine\core\load.cpp">
       <Filter>engine\core</Filter>
     </ClCompile>
@@ -502,6 +511,9 @@
       <Filter>engine</Filter>
     </ClCompile>
     <!-- engine\filesystem -->
+    <ClCompile Include="engine\filesystem\addonlist_state.cpp">
+      <Filter>engine\filesystem</Filter>
+    </ClCompile>
     <ClCompile Include="engine\filesystem\filecache.cpp">
       <Filter>engine\filesystem</Filter>
     </ClCompile>

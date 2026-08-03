@@ -26,5 +26,9 @@ bool ValidateProfile(
 	std::string_view contents,
 	ProfileEntryValidator persistentValidator = nullptr,
 	void* validatorContext = nullptr);
+bool PreserveMissingPersistentEntries(
+	std::string_view current,
+	std::string_view previous,
+	std::string& merged);
 
 }

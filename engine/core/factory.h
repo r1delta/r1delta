@@ -87,7 +87,6 @@ void* GetR1ONativeEngineServer022();
 void InitVStdLibICVarFactoryHook();
 void InstallR1OVPhysicsDeferredReleaseGuard(uintptr_t vphysicsBase);
 void InstallVPhysicsStaticBVHProbe(uintptr_t vphysicsBase);
-void InstallR1OTFOServerVPhysicsFormationProbe(uintptr_t serverLocalBase);
 void InstallR1OVPKFileSystemHooks(void* fileSystem);
 void SetR1OVPKClientFallbackActive(bool active);
 void InstallMaterialSystemDx11NullShaderResourceGuard(uintptr_t materialSystemBase);

@@ -6,41 +6,13 @@
 #include "core.h"
 #include "load.h"
 #include "logging.h"
-#include "vector.h"
 #include "defs.h"
 #include "factory.h"
 
 #include <windows.h>
-#include <intrin.h>
-
-#pragma intrinsic(_ReturnAddress)
 
 // VPhysics critical section for thread safety
 CRITICAL_SECTION g_vphysics_cs;
-
-// Original function pointers
-__int64 (*oCBaseEntity__VPhysicsInitNormal)(void* a1, unsigned int a2, unsigned int a3, char a4, __int64 a5) = nullptr;
-void (*oCBaseEntity__SetMoveType)(void* a1, __int64 a2, __int64 a3) = nullptr;
-void (*oCProjectile__PhysicsSimulate)(__int64 thisptr) = nullptr;
-void (*oCGrenadeFrag__ResolveFlyCollisionCustom)(__int64 a1, float* a2, float* a3) = nullptr;
-
-__int64 CBaseEntity__VPhysicsInitNormal(void* a1, unsigned int a2, unsigned int a3, char a4, __int64 a5)
-{
-    if (uintptr_t(_ReturnAddress()) == (G_server + 0xB63FD))
-        return 0;
-    else
-        return oCBaseEntity__VPhysicsInitNormal(a1, a2, a3, a4, a5);
-}
-
-void CBaseEntity__SetMoveType(void* a1, __int64 a2, __int64 a3)
-{
-    if (uintptr_t(_ReturnAddress()) == (G_server + 0xB64EC))
-    {
-        a2 = 5;
-        a3 = 1;
-    }
-    return oCBaseEntity__SetMoveType(a1, a2, a3);
-}
 
 __int64 __fastcall UTIL_GetEntityByIndex(int iIndex)
 {
@@ -70,112 +42,6 @@ __int64 __fastcall UTIL_GetEntityByIndex(int iIndex)
     }
 
     return 0LL;
-}
-
-void CProjectile__PhysicsSimulate(__int64 thisptr)
-{
-    oCProjectile__PhysicsSimulate(thisptr);
-
-    // Only apply to specific projectile type (wingman knives?)
-    if (*(uintptr_t*)thisptr == (G_server + 0x8DA9D0)) {
-        // Get current velocity
-        Vector vecVelocity;
-        memcpy(&vecVelocity, reinterpret_cast<Vector* (*)(uintptr_t)>(G_server + 0x91B10)(thisptr), sizeof(Vector));
-
-        float flSpeed = vecVelocity.Length();
-
-        // Stop when velocity is very low
-        if (flSpeed < 5.f && vecVelocity.z) {
-            reinterpret_cast<Vector* (*)(uintptr_t)>(G_server + 0x3BB300)(thisptr)->Zero();
-            return;
-        }
-
-        // Calculate direction vector
-        Vector vecDirection;
-        if (flSpeed > 0.1f) {
-            vecDirection.x = vecVelocity.x / flSpeed;
-            vecDirection.y = vecVelocity.y / flSpeed;
-            vecDirection.z = vecVelocity.z / flSpeed;
-        }
-        else {
-            vecDirection.x = 0;
-            vecDirection.y = 0;
-            vecDirection.z = 1;
-        }
-
-        // Base rotation speed
-        float baseSpinRate = 8.0f;
-
-        // Make spin rate somewhat proportional to speed
-        float speedFactor = 500.f * (0.3f + 0.7f * (flSpeed / 1300.0f));
-        float spinRate = baseSpinRate * speedFactor;
-
-        // Set rotation primarily along the direction of travel
-        Vector angVelocity;
-        angVelocity.x = vecDirection.x * spinRate;
-        angVelocity.y = vecDirection.y * spinRate;
-        angVelocity.z = vecDirection.z * spinRate;
-
-        // Apply the new angular velocity each frame
-        reinterpret_cast<void(*)(__int64 thisptr, float, float, float)>(G_server + 0x3BB2A0)(thisptr,
-            angVelocity.x, angVelocity.y, angVelocity.z);
-    }
-}
-
-void CGrenadeFrag__ResolveFlyCollisionCustom(__int64 a1, float* a2, float* a3)
-{
-    float x = *(float*)(a1 + 636);
-    float y = *((float*)(a1 + 636) + 1);
-    float z = *(float*)(a1 + 644);
-
-    char trace[104];
-    Vector vel;
-    memcpy(trace, a2, sizeof(trace));
-    memcpy(&vel, a3, sizeof(vel));
-
-    static auto sub_4AA8E0 = reinterpret_cast<void(*)(__int64, __int64)>(G_server + 0x4AA8E0);
-
-    // Calculate speed squared
-    float speedSqr = x * x + y * y + z * z;
-
-    // If speed is below threshold (30*30), zero out velocity
-    if (speedSqr < 900.0f)
-    {
-        Vector zeroVel = Vector(0, 0, 0);
-        static auto CBaseEntity__SetAbsVelocity = reinterpret_cast<void(*)(__int64, Vector*)>(G_server + 0x3BA970);
-        CBaseEntity__SetAbsVelocity(a1, &zeroVel);
-        oCBaseEntity__SetMoveType((void*)a1, 0, 0);
-        return;
-    }
-
-    oCGrenadeFrag__ResolveFlyCollisionCustom(a1, (float*)&trace, (float*)&vel);
-
-    // Stop if on ground.
-    if (a2[10] > 0.9)  // Floor
-    {
-        static auto sub_1803B9B30 = reinterpret_cast<void(*)(__int64)>(G_server + 0x3b9b30);
-        if ((*(_DWORD*)(a1 + 352) & 0x1000LL) != 0)
-            sub_1803B9B30(a1);
-
-        // Get current velocity after bounce
-        Vector currVel = *(Vector*)(a1 + 636);
-
-        // Calculate speed squared
-        float speedSqr = currVel.x * currVel.x + currVel.y * currVel.y + currVel.z * currVel.z;
-
-        // If speed is below threshold (30*30), zero out velocity
-        if (speedSqr < 900.0f)
-        {
-            currVel = Vector(0, 0, 0);
-            static auto CBaseEntity__SetAbsVelocity = reinterpret_cast<void(*)(__int64, Vector*)>(G_server + 0x3BA970);
-            CBaseEntity__SetAbsVelocity(a1, &currVel);
-        }
-
-        // Set ground entity
-        auto ent = *(_QWORD*)((__int64)(a2)+96);
-        if ((*(unsigned __int8(__fastcall**)(__int64, __int64))(*(_QWORD*)a1 + 824LL))(a1, ent) && a2[10] == 1.0f)
-            sub_4AA8E0(a1, ent);
-    }
 }
 
 // VPhysics thread safety hooks
