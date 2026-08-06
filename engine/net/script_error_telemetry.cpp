@@ -108,6 +108,26 @@ struct Endpoint
     INTERNET_PORT port = INTERNET_DEFAULT_HTTPS_PORT;
 };
 
+// YY-Thunks links a WinHttpCloseHandle thunk (for targets below Windows 8) that
+// probes the handle as a WinHttpProxyResolver struct before delegating to the
+// real implementation. Wine's winhttp hands out small-integer handles, which the
+// probe dereferences and crashes on. Resolving the export directly bypasses the
+// thunk; the real winhttp implementation is authoritative about its own handles.
+// winhttp.dll is a load-time import, so the module is always present whenever an
+// HINTERNET exists.
+using WinHttpCloseHandleType = BOOL(WINAPI*)(HINTERNET);
+WinHttpCloseHandleType ResolveRealWinHttpCloseHandle()
+{
+    static const WinHttpCloseHandleType closeHandle = []() -> WinHttpCloseHandleType {
+        const HMODULE module = GetModuleHandleW(L"winhttp.dll");
+        if (!module)
+            return nullptr;
+        return reinterpret_cast<WinHttpCloseHandleType>(
+            GetProcAddress(module, "WinHttpCloseHandle"));
+    }();
+    return closeHandle;
+}
+
 class InternetHandle
 {
 public:
@@ -115,7 +135,12 @@ public:
     explicit InternetHandle(HINTERNET handle) : handle_(handle) {}
     ~InternetHandle()
     {
-        if (handle_)
+        if (!handle_)
+            return;
+        const WinHttpCloseHandleType realClose = ResolveRealWinHttpCloseHandle();
+        if (realClose)
+            realClose(handle_);
+        else
             WinHttpCloseHandle(handle_);
     }
 
