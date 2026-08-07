@@ -1202,12 +1202,15 @@ int64 UserMsgBegin_Wrapper(CRecipientFilter* filter, const char* name) {
 		Error("UserMessageBegin:  Unregistered message '%s'\n", name);
 	}
 	auto ServerCreateMessage = reinterpret_cast<int64 (*)(void*, CRecipientFilter*, int64, const char*, char)>(g_r1oCVEngineServerInterface[42]);
+	if (!ServerCreateMessage || !filter || !name)
+		return 0;
 	return ServerCreateMessage(g_r1oCVEngineServerInterface, filter, v6, name, 1);
 }
 
 void EndMessage() {
 	auto ServerEndMessage = reinterpret_cast<int64(*)(void*)>(g_r1oCVEngineServerInterface[43]);
-	ServerEndMessage(g_r1oCVEngineServerInterface);
+	if (ServerEndMessage)
+		ServerEndMessage(g_r1oCVEngineServerInterface);
 }
 
 void ConstructCRecipientFilter(void* a1)
@@ -1238,6 +1241,8 @@ void SendChatMsg(CRecipientFilter* filter, int fromIndex, const char* msg, bool 
 	static int64_t* activeMsg = reinterpret_cast<int64_t*>(G_server + 0xC31058);
 
 	*activeMsg = UserMsgBegin_Wrapper(filter, "SayText");
+	if (!*activeMsg)
+		return;
 	MessageWriteByte(*activeMsg, fromIndex, 8);
 	MessageWriteString(0, msg);
 	MessageWriteBool(team);
@@ -1313,6 +1318,8 @@ static inline void SendShowMenuRaw(void* filter, uint16_t keysMask, int secondsT
 	static int64_t* gActiveMsg = reinterpret_cast<int64_t*>(G_server + 0xC31058);
 
 	*gActiveMsg = UserMsgBegin_Wrapper((CRecipientFilter*)filter, "ShowMenu");
+	if (!*gActiveMsg)
+		return;
 	MessageWriteBits(*gActiveMsg, (int)(keysMask & 0xFFFF), 16);
 	MessageWriteBits(*gActiveMsg, (int)(secondsToStayOpen & 0xFF), 8);
 	MessageWriteBits(*gActiveMsg, needMore ? 1 : 0, 8);
