@@ -34,18 +34,15 @@ constexpr DWORD kExpectedSizeOfImage = 0x2116000;
 
 // The pack-store teardown at this RVA aborts pending work-thread tasks, polls
 // until the work-thread pool reports them done, then frees the pack store via
-// the memalloc Free vtable. The poll is counter-based (vstdlib WT_PollItemTask
-// compares per-thread submit/complete counters) and does not necessarily wait
-// for a callback that is currently executing. Our replacement worker reads the
-// pack store, so a teardown that runs while our worker is mid-invocation frees
-// the store out from under it - the stale-pack-entry UAF behind the datacache
-// DEP crash. Hold a shared lock across each worker invocation and make the
-// teardown take it exclusively, so the store is only freed when no worker is
-// reading it. A thread-local re-entrancy flag guards the case where the work
-// queue pumps our worker inline on the same thread that calls the drain.
+// the memalloc Free vtable. The poll is counter-based and may pump a worker or
+// invoke teardown inline. Hold a shared lock across the outer worker and make
+// ordinary teardown exclusive. A teardown invoked reentrantly is deferred until
+// the outer worker exits; running it immediately would free the store under the
+// same thread that is still using its entry slot.
 constexpr uintptr_t kPackStoreDrainRva = 0x71C80;
 SRWLOCK s_PrecacheWorkerLock = SRWLOCK_INIT;
-thread_local bool s_InPrecacheWorkerOnThisThread = false;
+thread_local unsigned int s_PrecacheWorkerDepth = 0;
+thread_local bool s_DeferredPackStoreDrain = false;
 using PackStoreDrainFn = void(__fastcall*)();
 PackStoreDrainFn s_PackStoreDrainOriginal = nullptr;
 
@@ -262,47 +259,45 @@ uintptr_t __fastcall R1ClientVPKAsyncPrecacheWorker(
 	void* /*taskContext*/,
 	uint32_t callbackIndex)
 {
-	// Guard the pack store against a concurrent teardown. If this thread is
-	// already inside a worker (the work queue can pump a callback inline while
-	// we are mid-invocation), skip the lock - the outer invocation already
-	// holds it for this thread.
-	const bool locked = !s_InPrecacheWorkerOnThisThread;
-	if (locked) {
-		s_InPrecacheWorkerOnThisThread = true;
+	// The work queue can pump another callback inline. The outermost worker
+	// owns the shared lock; nested workers inherit that protection.
+	const bool outermost = s_PrecacheWorkerDepth++ == 0;
+	if (outermost)
 		AcquireSRWLockShared(&s_PrecacheWorkerLock);
-	}
 
 	const uintptr_t result = RunAsyncPrecacheTask(callbackIndex);
 	_InterlockedDecrement(reinterpret_cast<volatile long*>(
 		s_FilesystemBase + kOutstandingWorkCountRva));
 
-	if (locked) {
+	if (--s_PrecacheWorkerDepth == 0) {
 		ReleaseSRWLockShared(&s_PrecacheWorkerLock);
-		s_InPrecacheWorkerOnThisThread = false;
+
+		// A drain invoked inline cannot take the exclusive lock without
+		// deadlocking against this thread's shared lock. Do not run it
+		// unprotected: defer it until the outer worker has fully stopped using
+		// the pack store, then serialize it against every other worker.
+		if (s_DeferredPackStoreDrain) {
+			s_DeferredPackStoreDrain = false;
+			AcquireSRWLockExclusive(&s_PrecacheWorkerLock);
+			if (s_PackStoreDrainOriginal)
+				s_PackStoreDrainOriginal();
+			ReleaseSRWLockExclusive(&s_PrecacheWorkerLock);
+		}
 	}
 	return result;
 }
 
-// Pack-store teardown barrier. The original drain polls the work-thread pool
-// and frees the pack store; we additionally take the worker lock exclusively
-// so no replacement worker is reading the store while it is freed. Because
-// worker and drain can run on the same thread (inline pumping), a re-entrant
-// drain while this thread holds the shared lock skips the exclusive wait.
 void __fastcall R1ClientVPKPackStoreDrainHook()
 {
-	const bool locked = !s_InPrecacheWorkerOnThisThread;
-	if (locked) {
-		s_InPrecacheWorkerOnThisThread = true;
-		AcquireSRWLockExclusive(&s_PrecacheWorkerLock);
+	if (s_PrecacheWorkerDepth != 0) {
+		s_DeferredPackStoreDrain = true;
+		return;
 	}
 
+	AcquireSRWLockExclusive(&s_PrecacheWorkerLock);
 	if (s_PackStoreDrainOriginal)
 		s_PackStoreDrainOriginal();
-
-	if (locked) {
-		ReleaseSRWLockExclusive(&s_PrecacheWorkerLock);
-		s_InPrecacheWorkerOnThisThread = false;
-	}
+	ReleaseSRWLockExclusive(&s_PrecacheWorkerLock);
 }
 
 }
