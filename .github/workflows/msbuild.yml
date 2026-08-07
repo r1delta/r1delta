@@ -13,13 +13,13 @@ env:
   BUILD_PATH: ${{ github.workspace }}/build
   OUTPUT_PATH: ${{ github.workspace }}/output
   SYMBOL_PATH: ${{ github.workspace }}/symbols
-  CORE_REF: 5ddf4d74892224b7f17a6ef24680291089dfd768
+  CORE_REF: 50d2208908c527a8f1302f2f7f841e3851f5232c
   VCPKG_BINARY_SOURCES: "clear;files,D:/a/r1delta/vcpkg,readwrite"
   BUILD_CONFIGURATION: Release
   MSBUILD_DEBUG_TYPE: pdbonly
   NUSPEC_FILE: R1Delta.nuspec
   PACKAGE_NAME: R1Delta
-  DISPLAY_VERSION: "3.0 prerelease 8"
+  DISPLAY_VERSION: "3.0 prerelease 9"
 
 permissions:
   contents: write
@@ -222,7 +222,14 @@ jobs:
             if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
               throw "Missing native test executable: $executable"
             }
-            & $executable
+            if ($test -eq 'allocator_delegation_tests') {
+              $gameNamedTest = Join-Path (Split-Path -Parent $executable) 'Titanfall.exe'
+              Copy-Item -LiteralPath $executable -Destination $gameNamedTest -Force
+              & $gameNamedTest
+            }
+            else {
+              & $executable
+            }
             if ($LASTEXITCODE -ne 0) {
               throw "$test failed with exit code $LASTEXITCODE."
             }

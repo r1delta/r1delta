@@ -25,7 +25,7 @@ struct RuntimeModuleSpec
     const char* expectedSha256;
 };
 
-constexpr std::array<RuntimeModuleSpec, 14> kRuntimeModules = {{
+constexpr std::array<RuntimeModuleSpec, 13> kRuntimeModules = {{
     { L"server_local.dll", L"server.dll", L"server_local.dll", true, 13758792, "50FAAD928E0715A51AD624D0A3EB8F00F7FFAD9E66258DC95C960F9D11FF41E4" },
     { L"GBClient.dll", L"gbclient.dll", L"GBClient.dll", true, 339784, "426E1811FB9B8DFEFAED33B946448D5D8D3DC667401CAF34B30350794FD319DD" },
     { L"datacache.dll", L"datacache.dll", L"datacache.dll", false, 534344, "94E851F8E3BE809907E1F22E974F974527F4F1F571B50CEDC69CBBCA93E38531" },

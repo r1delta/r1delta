@@ -632,6 +632,8 @@ static MaterialSystemDx11ResetD3DResourcePointersType MaterialSystemDx11ResetD3D
 static MaterialSystemDx11FlushConstantBufferUpdatesType MaterialSystemDx11FlushConstantBufferUpdatesOriginal;
 static MaterialSystemDx11InitializeMaterialType MaterialSystemDx11InitializeMaterialOriginal;
 static MaterialSystemDx11IsErrorMaterialType MaterialSystemDx11IsErrorMaterialOriginal;
+using MaterialSystemDx11BoolPropertyType = __int64(__fastcall*)(__int64 material);
+static MaterialSystemDx11BoolPropertyType MaterialSystemDx11PropertyGetterOriginal[5]{};
 static bool s_MaterialSystemDx11NullResourceGuardInstalled;
 static uintptr_t s_MaterialSystemDx11Base;
 static int s_MaterialSystemDx11NullResourceLogBudget = 8;
@@ -699,6 +701,23 @@ static __int64 __fastcall MaterialSystemDx11IsErrorMaterialGuard(__int64 materia
 		return 1;
 	}
 	return MaterialSystemDx11IsErrorMaterialOriginal(material);
+}
+
+template <size_t Index>
+static __int64 __fastcall MaterialSystemDx11BoolPropertyGuard(__int64 material)
+{
+	static_assert(Index < std::size(MaterialSystemDx11PropertyGetterOriginal));
+	MaterialSystemDx11BoolPropertyType const original = MaterialSystemDx11PropertyGetterOriginal[Index];
+	if (!original || !MaterialSystemDx11InitializeMaterialOriginal || !material)
+		return 0;
+
+	std::lock_guard<std::recursive_mutex> lock(s_MaterialSystemDx11MaterialInitMutex);
+	if ((*reinterpret_cast<unsigned short*>(material + 0x26) & 0x4u) == 0
+		&& !MaterialSystemDx11InitializeMaterialGuard(material, 0, 0, 0)) {
+		MaterialSystemDx11LogMaterialInitGuard("property-query-init-failed", material);
+		return 0;
+	}
+	return original(material);
 }
 
 static int MaterialSystemDx11NullResourceExceptionFilter(EXCEPTION_POINTERS* info)
@@ -1863,6 +1882,24 @@ void InstallMaterialSystemDx11NullShaderResourceGuard(uintptr_t materialSystemBa
 		reinterpret_cast<void*>(&MaterialSystemDx11IsErrorMaterialGuard),
 		reinterpret_cast<void**>(&MaterialSystemDx11IsErrorMaterialOriginal),
 		"material-is-error");
+	const uintptr_t materialPropertyRvas[] = { 0x3AFB0, 0x3B070, 0x3B0D0, 0x3B120 };
+	void* const materialPropertyGuards[] = {
+		reinterpret_cast<void*>(&MaterialSystemDx11BoolPropertyGuard<0>),
+		reinterpret_cast<void*>(&MaterialSystemDx11BoolPropertyGuard<1>),
+		reinterpret_cast<void*>(&MaterialSystemDx11BoolPropertyGuard<2>),
+		reinterpret_cast<void*>(&MaterialSystemDx11BoolPropertyGuard<3>)
+	};
+	bool materialPropertyGuardsInstalled = materialInitInstalled;
+	for (size_t index = 0; index < std::size(materialPropertyRvas); ++index) {
+		materialPropertyGuardsInstalled = InstallMaterialSystemDx11CheckedHook(
+			materialSystemBase,
+			materialPropertyRvas[index],
+			expectedIsErrorMaterialPrologue,
+			sizeof(expectedIsErrorMaterialPrologue),
+			materialPropertyGuards[index],
+			reinterpret_cast<void**>(&MaterialSystemDx11PropertyGetterOriginal[index]),
+			"material-property") && materialPropertyGuardsInstalled;
+	}
 	const bool resetInstalled = InstallMaterialSystemDx11CheckedHook(
 		materialSystemBase,
 		0x14B70,
@@ -1939,7 +1976,7 @@ void InstallMaterialSystemDx11NullShaderResourceGuard(uintptr_t materialSystemBa
 		reinterpret_cast<void*>(&MaterialSystemDx11SelectShaderResourceGuard),
 		reinterpret_cast<void**>(&MaterialSystemDx11SelectShaderResourceOriginal),
 		"vertex");
-	s_MaterialSystemDx11NullResourceGuardInstalled = materialInitInstalled || isErrorMaterialInstalled || resetInstalled || constantFlushInstalled || textureInstalled || textureUploadWorkerInstalled || textureUploadOwnershipInstalled || textureResourceInstalled || inputLayoutInstalled || stageInstalled || vertexInstalled;
+	s_MaterialSystemDx11NullResourceGuardInstalled = materialInitInstalled || isErrorMaterialInstalled || materialPropertyGuardsInstalled || resetInstalled || constantFlushInstalled || textureInstalled || textureUploadWorkerInstalled || textureUploadOwnershipInstalled || textureResourceInstalled || inputLayoutInstalled || stageInstalled || vertexInstalled;
 }
 
 static bool IsVPhysicsGuardNegativeStackIndexDisabled()

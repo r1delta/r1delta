@@ -14,6 +14,13 @@ bool Check(bool condition, const char* what)
     return condition;
 }
 
+using FnMiniDump = void(*)(unsigned int, EXCEPTION_POINTERS*, const char*);
+using SetMiniDumpFunctionFn = FnMiniDump(*)(FnMiniDump);
+
+void ProbeMiniDumpCallback(unsigned int, EXCEPTION_POINTERS*, const char*)
+{
+}
+
 } // namespace
 
 int main()
@@ -59,6 +66,17 @@ int main()
     passed &= Check(retail != nullptr, "retail CreateGlobalMemAlloc returned non-null");
     passed &= Check(ours == retail,
         "our tier0 forwards to the same retail allocator singleton");
+
+    auto setMiniDumpFunction = reinterpret_cast<SetMiniDumpFunctionFn>(
+        GetProcAddress(retailTier0, "SetMiniDumpFunction"));
+    passed &= Check(setMiniDumpFunction != nullptr,
+        "retail tier0 exports SetMiniDumpFunction");
+    if (setMiniDumpFunction) {
+        FnMiniDump previous = setMiniDumpFunction(&ProbeMiniDumpCallback);
+        passed &= Check(previous != nullptr,
+            "loading our tier0 initializes the retail minidump callback");
+        setMiniDumpFunction(previous);
+    }
 
     // Dump the retail allocator's vtable slots so we can compare its layout to
     // our IMemAlloc declaration. If the layouts differ, virtual dispatch on the

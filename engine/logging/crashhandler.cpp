@@ -879,9 +879,53 @@ void GetSystemInfoEnhanced(std::stringstream& ss)
     }
 }
 
+namespace
+{
+using FnMiniDump = void(*)(unsigned int, EXCEPTION_POINTERS*, const char*);
+using SetMiniDumpFunctionFn = FnMiniDump(*)(FnMiniDump);
+using MinidumpSetUnhandledExceptionFunctionFn = void(*)(FnMiniDump);
+
+void RetailMinidumpCallback(unsigned int, EXCEPTION_POINTERS* exceptionInfo, const char*)
+{
+    if (exceptionInfo)
+        CustomCrashHandler(exceptionInfo);
+}
+}
+
+void InstallRetailMinidumpCallbacks()
+{
+    HMODULE retailTier0 = GetModuleHandleW(L"tier0_orig.dll");
+    if (!retailTier0)
+        return;
+
+    auto setWriter = reinterpret_cast<SetMiniDumpFunctionFn>(
+        GetProcAddress(retailTier0, "SetMiniDumpFunction"));
+    auto setUnhandled = reinterpret_cast<MinidumpSetUnhandledExceptionFunctionFn>(
+        GetProcAddress(retailTier0, "MinidumpSetUnhandledExceptionFunction"));
+    FnMiniDump previousWriter = nullptr;
+    if (setWriter)
+        previousWriter = setWriter(&RetailMinidumpCallback);
+    if (setUnhandled)
+        setUnhandled(&RetailMinidumpCallback);
+
+    char buffer[224];
+    _snprintf_s(
+        buffer,
+        sizeof(buffer),
+        _TRUNCATE,
+        "R1Delta: retail minidump callbacks installed writer=%p unhandled=%p previous=%p\n",
+        reinterpret_cast<void*>(setWriter),
+        reinterpret_cast<void*>(setUnhandled),
+        reinterpret_cast<void*>(previousWriter));
+    OutputDebugStringA(buffer);
+
+    SetUnhandledExceptionFilter(CustomCrashHandler);
+}
+
 // Installation function to set up the exception handler
 void InstallExceptionHandler()
 {
     SetUnhandledExceptionFilter(CustomCrashHandler);
     AddVectoredExceptionHandler(1, (PVECTORED_EXCEPTION_HANDLER)CustomCrashHandler);
+    InstallRetailMinidumpCallbacks();
 }
