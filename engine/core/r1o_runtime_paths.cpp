@@ -33,7 +33,11 @@ constexpr std::array<RuntimeModuleSpec, 14> kRuntimeModules = {{
     { L"materialsystem_dx11.dll", L"materialsystem_dx11.dll", L"materialsystem_dx11.dll", false, 1946952, "DB3606606534783DF674E02451F9DA9B7C0E3F20DB6850E3AA381DE34D7AA4AB" },
     { L"GFSDK_SSAO.win64.dll", L"GFSDK_SSAO.win64.dll", L"GFSDK_SSAO.win64.dll", false, 979272, "D2D0AF1AEEBF448733A49D41F30814680AD5D1929FE4C9E170CD2BD27C6B37F9" },
     { L"GFSDK_TXAA.win64.dll", L"GFSDK_TXAA.win64.dll", L"GFSDK_TXAA.win64.dll", false, 106824, "5E7CC7694DF4463CC5D0F5402C952D2B0A57D2D21F054F5DFA46647ACF3D6D92" },
-    { L"BugTrap-x64.dll", L"BugTrap-x64.dll", L"BugTrap-x64.dll", false, 588616, "BAF01FD43A2499309A700428861E3CFEA837201B7DF14F24F2EC371B7C0747F2" },
+    // BugTrap-x64.dll is intentionally absent: the Nexon binary is not
+    // redistributable in the Wine dedicated image, and the stub built by the
+    // bugtrap_stub project (bin_delta) satisfies the static imports from
+    // materialsystem_dx11.dll and launcher.dll. Do not re-add a real-binary
+    // size/hash entry here or the layout validation will reject the stub.
     { L"vphysics.dll", L"vphysics.dll", L"vphysics.dll", false, 1670472, "229EB841628A677DFCC653D81F15C67F0D3D405F399BE1AF5024F17D61F6641B" },
     { L"inputsystem.dll", L"inputsystem.dll", L"inputsystem.dll", false, 250184, "B94CFCCC7D8786646D717A56CAA7448813F6CE19CB01CDC2327E9FB1F5AA4911" },
     { L"localize.dll", L"localize.dll", L"localize.dll", false, 250184, "F883A88F0C74719CAB96039E2C73521038135D40B5210FF2F479E326583D3EB4" },

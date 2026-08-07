@@ -42,7 +42,6 @@ function Assert-CoreRuntime {
     Assert-Condition (Test-Path -LiteralPath $manifestPath -PathType Leaf) "Missing bin_nexon/SHA256SUMS."
 
     $expectedNexonFiles = @(
-        'BugTrap-x64.dll',
         'datacache.dll',
         'filesystem_stdio.dll',
         'GFSDK_SSAO.win64.dll',
@@ -56,6 +55,7 @@ function Assert-CoreRuntime {
         'vphysics.dll'
     )
     $forbiddenNexonFiles = @(
+        'BugTrap-x64.dll',
         'GBClient.dll',
         'msvcp100.dll',
         'msvcr100.dll',
@@ -65,7 +65,6 @@ function Assert-CoreRuntime {
     $expectedManifestEntries = @(
         '../bin/server.dll',
         '../bin/gbclient.dll',
-        'BugTrap-x64.dll',
         'datacache.dll',
         'filesystem_stdio.dll',
         'GFSDK_SSAO.win64.dll',
