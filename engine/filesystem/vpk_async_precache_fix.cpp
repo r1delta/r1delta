@@ -32,6 +32,23 @@ constexpr uintptr_t kOutstandingWorkCountRva = 0x20FC678;
 constexpr DWORD kExpectedTimeDateStamp = 0x54874230;
 constexpr DWORD kExpectedSizeOfImage = 0x2116000;
 
+// The pack-store teardown at this RVA aborts pending work-thread tasks, polls
+// until the work-thread pool reports them done, then frees the pack store via
+// the memalloc Free vtable. The poll is counter-based (vstdlib WT_PollItemTask
+// compares per-thread submit/complete counters) and does not necessarily wait
+// for a callback that is currently executing. Our replacement worker reads the
+// pack store, so a teardown that runs while our worker is mid-invocation frees
+// the store out from under it - the stale-pack-entry UAF behind the datacache
+// DEP crash. Hold a shared lock across each worker invocation and make the
+// teardown take it exclusively, so the store is only freed when no worker is
+// reading it. A thread-local re-entrancy flag guards the case where the work
+// queue pumps our worker inline on the same thread that calls the drain.
+constexpr uintptr_t kPackStoreDrainRva = 0x71C80;
+SRWLOCK s_PrecacheWorkerLock = SRWLOCK_INIT;
+thread_local bool s_InPrecacheWorkerOnThisThread = false;
+using PackStoreDrainFn = void(__fastcall*)();
+PackStoreDrainFn s_PackStoreDrainOriginal = nullptr;
+
 uintptr_t s_FilesystemBase;
 bool s_AsyncPrecacheFixInstalled;
 
@@ -245,10 +262,47 @@ uintptr_t __fastcall R1ClientVPKAsyncPrecacheWorker(
 	void* /*taskContext*/,
 	uint32_t callbackIndex)
 {
+	// Guard the pack store against a concurrent teardown. If this thread is
+	// already inside a worker (the work queue can pump a callback inline while
+	// we are mid-invocation), skip the lock - the outer invocation already
+	// holds it for this thread.
+	const bool locked = !s_InPrecacheWorkerOnThisThread;
+	if (locked) {
+		s_InPrecacheWorkerOnThisThread = true;
+		AcquireSRWLockShared(&s_PrecacheWorkerLock);
+	}
+
 	const uintptr_t result = RunAsyncPrecacheTask(callbackIndex);
 	_InterlockedDecrement(reinterpret_cast<volatile long*>(
 		s_FilesystemBase + kOutstandingWorkCountRva));
+
+	if (locked) {
+		ReleaseSRWLockShared(&s_PrecacheWorkerLock);
+		s_InPrecacheWorkerOnThisThread = false;
+	}
 	return result;
+}
+
+// Pack-store teardown barrier. The original drain polls the work-thread pool
+// and frees the pack store; we additionally take the worker lock exclusively
+// so no replacement worker is reading the store while it is freed. Because
+// worker and drain can run on the same thread (inline pumping), a re-entrant
+// drain while this thread holds the shared lock skips the exclusive wait.
+void __fastcall R1ClientVPKPackStoreDrainHook()
+{
+	const bool locked = !s_InPrecacheWorkerOnThisThread;
+	if (locked) {
+		s_InPrecacheWorkerOnThisThread = true;
+		AcquireSRWLockExclusive(&s_PrecacheWorkerLock);
+	}
+
+	if (s_PackStoreDrainOriginal)
+		s_PackStoreDrainOriginal();
+
+	if (locked) {
+		ReleaseSRWLockExclusive(&s_PrecacheWorkerLock);
+		s_InPrecacheWorkerOnThisThread = false;
+	}
 }
 
 }
@@ -304,5 +358,40 @@ bool InstallR1ClientVPKAsyncPrecacheFix(uintptr_t filesystemBase)
 	s_AsyncPrecacheFixInstalled = true;
 	OutputDebugStringA(
 		"R1Delta: R1 client VPK async-precache worker replacement installed and enabled\n");
+
+	// Install the pack-store teardown barrier so the store cannot be freed
+	// while our worker is reading it.
+	void* const drainTarget = reinterpret_cast<void*>(
+		filesystemBase + kPackStoreDrainRva);
+	constexpr unsigned char expectedDrainPrologue[] = {
+		0x48, 0x83, 0xEC, 0x28 // sub rsp, 28h
+	};
+	if (memcmp(drainTarget, expectedDrainPrologue, sizeof(expectedDrainPrologue)) != 0) {
+		Warning(
+			"R1Delta: VPK pack-store drain barrier skipped; unexpected drain prologue at %p\n",
+			drainTarget);
+		return true;
+	}
+	const MH_STATUS drainCreateStatus = MH_CreateHook(
+		drainTarget,
+		&R1ClientVPKPackStoreDrainHook,
+		reinterpret_cast<LPVOID*>(&s_PackStoreDrainOriginal));
+	if (drainCreateStatus != MH_OK && drainCreateStatus != MH_ERROR_ALREADY_CREATED) {
+		Warning(
+			"R1Delta: VPK pack-store drain barrier creation failed status=%d\n",
+			static_cast<int>(drainCreateStatus));
+		return true;
+	}
+	const MH_STATUS drainEnableStatus = MH_EnableHook(drainTarget);
+	if (drainEnableStatus != MH_OK && drainEnableStatus != MH_ERROR_ENABLED) {
+		Warning(
+			"R1Delta: VPK pack-store drain barrier enable failed status=%d\n",
+			static_cast<int>(drainEnableStatus));
+	}
+	else {
+		OutputDebugStringA(
+			"R1Delta: R1 client VPK pack-store drain barrier installed and enabled\n");
+	}
+
 	return true;
 }

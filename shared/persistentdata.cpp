@@ -2045,6 +2045,19 @@ static bool GetProfileTransactionPaths(
 	if (!GetConfigPath(path, sizeof(path), 1))
 		return false;
 	profile = std::filesystem::path(path);
+	// Ensure the profile directory exists before the transaction creates its
+	// save marker there. On fresh installs nothing else creates this folder —
+	// the native profile writer would create it implicitly on write, but the
+	// transaction gates the native writer with a marker file first. Without
+	// this, every save attempt fails for first-time users and progression
+	// silently never persists.
+	std::error_code directoryError;
+	std::filesystem::create_directories(profile.parent_path(), directoryError);
+	if (directoryError) {
+		Warning("Could not create persistent-data profile directory '%s': %s\n",
+			profile.parent_path().string().c_str(), directoryError.message().c_str());
+		return false;
+	}
 	backup = profile;
 	backup += ".bak";
 	marker = profile;
