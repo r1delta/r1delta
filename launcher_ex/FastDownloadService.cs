@@ -67,7 +67,10 @@ public sealed class FastDownloadService : IDisposable
         var pending = requests;
         var latestErrors = new Dictionary<DownloadRequest, string>();
 
-        for (var attempt = 1; attempt <= MaxProcessAttempts; attempt++)
+        // Phase 1: aria2c. A process-termination failure no longer aborts the
+        // whole install; the remaining files fall through to the next stack.
+        var ariaFatal = false;
+        for (var attempt = 1; attempt <= MaxProcessAttempts && !ariaFatal; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (_disposed)
@@ -89,9 +92,11 @@ public sealed class FastDownloadService : IDisposable
             {
                 throw;
             }
-            catch (AriaProcessTerminationException)
+            catch (AriaProcessTerminationException ex)
             {
-                throw;
+                Debug.WriteLine($"[FastDownloadService] aria2c terminated abnormally on attempt {attempt}: {ex.Message}. Falling back to the next download stack.");
+                result = AttemptResult.FailAll(pending, ex.Message);
+                ariaFatal = true;
             }
             catch (Exception ex)
             {
@@ -106,12 +111,68 @@ public sealed class FastDownloadService : IDisposable
                 latestErrors[failure.Key] = failure.Value;
         }
 
+        // Phase 2: system curl.exe (uses a different resolver/TLS stack than aria2c).
+        if (pending.Count > 0)
+        {
+            Debug.WriteLine($"[FastDownloadService] aria2c left {pending.Count} file(s); retrying with system curl.");
+            AttemptResult curlResult;
+            try
+            {
+                curlResult = await RunCurlAttemptAsync(pending, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                curlResult = AttemptResult.FailAll(pending, ex.Message);
+            }
+
+            if (curlResult.Failures.Count == 0)
+                return;
+
+            pending = curlResult.Failures.Keys.ToList();
+            foreach (var failure in curlResult.Failures)
+                latestErrors[failure.Key] = failure.Value;
+        }
+
+        // Phase 3: in-process HttpClient (last resort; also distinct resolver/TLS behavior).
+        if (pending.Count > 0)
+        {
+            Debug.WriteLine($"[FastDownloadService] curl left {pending.Count} file(s); retrying with HttpClient.");
+            AttemptResult httpResult;
+            try
+            {
+                httpResult = await RunHttpClientAttemptAsync(pending, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                httpResult = AttemptResult.FailAll(pending, ex.Message);
+            }
+
+            if (httpResult.Failures.Count == 0)
+                return;
+
+            pending = httpResult.Failures.Keys.ToList();
+            foreach (var failure in httpResult.Failures)
+                latestErrors[failure.Key] = failure.Value;
+        }
+
         var details = string.Join(Environment.NewLine, pending.Select(request =>
         {
             latestErrors.TryGetValue(request, out var error);
-            return $"{Path.GetFileName(request.DestinationPath)}: {error ?? "unknown aria2 error"}";
+            return $"{Path.GetFileName(request.DestinationPath)}: {error ?? "unknown download error"}";
         }));
-        throw new DownloadException($"aria2c could not download {pending.Count} file(s) after {MaxProcessAttempts} attempts:{Environment.NewLine}{details}");
+        throw new DownloadException(
+            $"Could not download {pending.Count} file(s) with aria2c, curl, or HttpClient." + Environment.NewLine +
+            "This usually means your network is blocking the download domain (DNS filtering or ISP blocks)." + Environment.NewLine +
+            "Try again later, switch networks/DNS, or download the game files manually from the Google Drive mirror linked in the #help channel, then point the installer at that folder." + Environment.NewLine +
+            details);
     }
 
     private async Task<AttemptResult> RunAria2AttemptAsync(string aria2Path, IReadOnlyCollection<DownloadRequest> requests, int attempt, CancellationToken cancellationToken)
@@ -280,6 +341,197 @@ public sealed class FastDownloadService : IDisposable
         }
 
         return new AttemptResult(failures);
+    }
+
+    private static string ResolveCurlPath()
+    {
+        // Windows 10 1803+ ships curl.exe in System32. Prefer it so the fallback
+        // uses the OS resolver/TLS stack, which differs from aria2c's.
+        var candidates = new[]
+        {
+            Path.Combine(Environment.SystemDirectory, "curl.exe"),
+            "curl.exe"
+        };
+
+        foreach (var candidate in candidates)
+        {
+            try
+            {
+                if (File.Exists(candidate))
+                    return candidate;
+            }
+            catch
+            {
+                // Ignore probe failures; fall through to the next candidate.
+            }
+        }
+
+        return null;
+    }
+
+    private async Task<AttemptResult> RunCurlAttemptAsync(IReadOnlyCollection<DownloadRequest> requests, CancellationToken cancellationToken)
+    {
+        var curlPath = ResolveCurlPath();
+        if (string.IsNullOrEmpty(curlPath))
+            return AttemptResult.FailAll(requests, "system curl.exe was not found");
+
+        var failures = new Dictionary<DownloadRequest, string>();
+        foreach (var request in requests)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var destinationPath = Path.GetFullPath(request.DestinationPath);
+            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath));
+
+            var arguments = string.Join(" ", new[]
+            {
+                "--fail",
+                "--location",
+                "--retry", "3",
+                "--retry-delay", "2",
+                "--connect-timeout", "15",
+                "--max-time", "900",
+                "--continue-at", "-",
+                "--output", $"\"{destinationPath}\"",
+                $"\"{request.Url}\""
+            });
+
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = curlPath,
+                Arguments = arguments,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardError = true,
+                RedirectStandardOutput = true
+            };
+
+            try
+            {
+                using var process = new Process { StartInfo = startInfo };
+                if (!process.Start())
+                {
+                    failures[request] = "failed to start curl.exe";
+                    continue;
+                }
+
+                _activeProcess = process;
+                var stderrTask = DrainOutputAsync(process.StandardError, "curl-stderr");
+                var stdoutTask = DrainOutputAsync(process.StandardOutput, "curl-stdout");
+
+                var exited = await WaitForExitAsync(process, TimeSpan.FromMinutes(20), cancellationToken).ConfigureAwait(false);
+                if (!exited)
+                {
+                    KillProcess(process);
+                    failures[request] = "curl.exe timed out";
+                    continue;
+                }
+
+                var exitCode = process.ExitCode;
+                if (exitCode != 0)
+                {
+                    await Task.WhenAll(stderrTask, stdoutTask).ConfigureAwait(false);
+                    failures[request] = $"curl exited with code {exitCode}";
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                failures[request] = $"curl failed: {ex.Message}";
+            }
+        }
+
+        return new AttemptResult(failures);
+    }
+
+    private async Task<AttemptResult> RunHttpClientAttemptAsync(IReadOnlyCollection<DownloadRequest> requests, CancellationToken cancellationToken)
+    {
+        var failures = new Dictionary<DownloadRequest, string>();
+        using var client = new System.Net.Http.HttpClient(new System.Net.Http.HttpClientHandler());
+        client.Timeout = TimeSpan.FromMinutes(20);
+        client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "r1delta-installer/1.0");
+
+        foreach (var request in requests)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var destinationPath = Path.GetFullPath(request.DestinationPath);
+            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath));
+            var partialPath = destinationPath + ".part";
+
+            try
+            {
+                using var requestMessage = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get, request.Url);
+                long resumeFrom = 0;
+                if (File.Exists(partialPath))
+                {
+                    resumeFrom = new FileInfo(partialPath).Length;
+                    if (resumeFrom > 0)
+                        requestMessage.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(resumeFrom, null);
+                }
+
+                using var response = await client.SendAsync(requestMessage, System.Net.Http.HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+                if (!response.IsSuccessStatusCode)
+                {
+                    failures[request] = $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}";
+                    continue;
+                }
+
+                var mode = response.StatusCode == System.Net.HttpStatusCode.PartialContent
+                    ? FileMode.Append
+                    : FileMode.Create;
+                if (mode == FileMode.Create)
+                    resumeFrom = 0;
+
+                using var contentStream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
+                using var fileStream = new FileStream(partialPath, mode, FileAccess.Write, FileShare.None, 65536, useAsync: true);
+                var buffer = new byte[65536];
+                long received = resumeFrom;
+                var lastProgress = DateTime.UtcNow;
+                int bytesRead;
+                while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false)) > 0)
+                {
+                    await fileStream.WriteAsync(buffer, 0, bytesRead, cancellationToken).ConfigureAwait(false);
+                    received += bytesRead;
+
+                    var now = DateTime.UtcNow;
+                    if (now - lastProgress >= TimeSpan.FromMilliseconds(ProgressPollMs))
+                    {
+                        lastProgress = now;
+                        var total = response.Content.Headers.ContentLength ?? received;
+                        DownloadProgressChanged?.Invoke(request.DestinationPath, received, Math.Max(total, received));
+                    }
+                }
+
+                if (File.Exists(destinationPath))
+                    File.Delete(destinationPath);
+                File.Move(partialPath, destinationPath);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                failures[request] = $"HttpClient failed: {ex.Message}";
+            }
+        }
+
+        return new AttemptResult(failures);
+    }
+
+    private static async Task<bool> WaitForExitAsync(Process process, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        var waitTask = Task.Run(() => process.WaitForExit(), CancellationToken.None);
+        var winner = await Task.WhenAny(waitTask, Task.Delay(timeout, cancellationToken)).ConfigureAwait(false);
+        if (winner != waitTask)
+            return false;
+
+        await waitTask.ConfigureAwait(false);
+        return true;
     }
 
     public void Dispose()
