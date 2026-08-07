@@ -7650,6 +7650,47 @@ static bool PatchClientBytesIfMatch(uintptr_t moduleBase, uintptr_t rva, const u
 	return true;
 }
 
+// client.dll+0xF74F0 is PrecacheParticleSystem(const char* pParticleSystemName).
+// It looks up the particle system in g_pStringTableParticleEffectNames
+// (client.dll+0xBF52C8) by calling vtable[8] on that string table. The
+// datacache fires this as a release callback during shutdown, but the particle
+// effect name string table is already destroyed by then, so the global is NULL
+// and the vtable call AVs at client.dll+0xF7518. Guard: if the string table
+// global is NULL, skip the precache entirely (return 0 like the function's own
+// shutdown path does).
+typedef int(__cdecl* PrecacheParticleSystemFn)(const char* pParticleSystemName);
+static PrecacheParticleSystemFn oPrecacheParticleSystem = nullptr;
+static int __cdecl PrecacheParticleSystemGuard(const char* pParticleSystemName)
+{
+	if (!G_client)
+		return 0;
+	const __int64* stringTable = reinterpret_cast<const __int64*>(G_client + 0xBF52C8);
+	if (!*stringTable)
+		return 0;
+	return oPrecacheParticleSystem ? oPrecacheParticleSystem(pParticleSystemName) : 0;
+}
+
+static void InstallClientDatacacheCallbackGuard(uintptr_t clientBase)
+{
+	if (!clientBase || IsDedicatedServer())
+		return;
+
+	// Verify the expected prologue: push rbx; sub rsp,30h; mov rbx,rcx
+	constexpr unsigned char expectedPrologue[] = { 0x40, 0x53, 0x48, 0x83, 0xEC, 0x30 };
+	if (memcmp(reinterpret_cast<void*>(clientBase + 0xF74F0), expectedPrologue, sizeof(expectedPrologue)) != 0)
+		return;
+
+	const MH_STATUS status = MH_CreateHook(
+		reinterpret_cast<void*>(clientBase + 0xF74F0),
+		&PrecacheParticleSystemGuard,
+		reinterpret_cast<LPVOID*>(&oPrecacheParticleSystem));
+	if (status != MH_OK && status != MH_ERROR_ALREADY_CREATED) {
+		Warning("R1Delta: failed to create PrecacheParticleSystem string-table guard (%d)\n", static_cast<int>(status));
+		return;
+	}
+	MH_EnableHook(reinterpret_cast<void*>(clientBase + 0xF74F0));
+}
+
 static void PatchClientDynamicLodNoMatchSentinel(uintptr_t clientBase)
 {
 	if (!clientBase || IsDedicatedServer())
@@ -9517,6 +9558,7 @@ void __stdcall LoaderNotificationCallback(
 			G_client = (uintptr_t)notification_data->Loaded.DllBase;
 			PatchClientDynamicLodNoMatchSentinel(G_client);
 			InstallR1ClientPlayerResource18(G_client);
+			InstallClientDatacacheCallbackGuard(G_client);
 			InstallClientPlayerClassCompatibilityHooks(G_client);
 			if (ShouldInstallR1OClientDebugHooks()) {
 				InstallClientRenderableDrawModelHook(G_client);
