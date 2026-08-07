@@ -262,16 +262,27 @@ class CMimMemAlloc : public IMemAlloc {
     // blocks in a bounded ring before returning them to the heap, restoring that
     // reuse window. Disable with -r1delta_no_quarantine_frees if the memory
     // footprint is ever a problem.
-    static constexpr size_t QUARANTINE_ENTRIES = 256;
-    static constexpr size_t QUARANTINE_MAX_BYTES = 8ull << 20;
+    // Sized to hold ~5s of frees. Throughput measurements show the game frees
+    // on the order of 10-30 MB/s during streaming; 256 MiB / 2048 entries keeps
+    // freed blocks out of reuse for the full hold window even at peak load.
+    // RAM is not a constraint for this game (a stray 3 GB leak went unnoticed
+    // for six months), so prefer real protection over a tiny window.
+    static constexpr size_t QUARANTINE_ENTRIES = 2048;
+    static constexpr size_t QUARANTINE_MAX_BYTES = 256ull << 20;
     static constexpr size_t QUARANTINE_MAX_BLOCK_BYTES = 4ull << 20;
     static constexpr uint8_t QUARANTINE_POISON = 0xFD;
+    // Hold freed blocks at least this long before they may return to the heap.
+    // Long enough to span the async reads (texture upload, VPK precache) whose
+    // stale pointers cause the DEP/write-AV crashes; short enough that the
+    // 500ms incremental compact keeps working-set growth bounded.
+    static constexpr uint32_t QUARANTINE_HOLD_MS = 5000;
     struct quarantined_t
     {
         void* aligned;
         HANDLE heap;
         size_t size;
         uint16_t align_skip;
+        uint32_t freed_tick;
     };
     quarantined_t _quarantine[QUARANTINE_ENTRIES] = {};
     size_t _quarantine_next = 0;
@@ -426,6 +437,7 @@ public:
         victim.heap = heap;
         victim.size = size;
         victim.align_skip = align_skip;
+        victim.freed_tick = GetTickCount();
         _quarantine_bytes += size;
 
         ReleaseSRWLockExclusive(&_quarantine_lock);
@@ -961,7 +973,7 @@ public:
                 {
                     continue;
                 }
-                Msg(" * %s %zu, %.02f MB (overhead %.2f MB)\n", Mem_tag_to_cstring((EDeltaAllocTags)j), tag_count[j], (float)tag_mem[j] / (1 << 20), (float)(tag_count[j] * MEM_ALLOC_OVERHEAD) / (1 << 20));
+                Msg(" * %s %llu, %.02f MB (overhead %.2f MB)\n", Mem_tag_to_cstring((EDeltaAllocTags)j), (unsigned long long)tag_count[j], (float)tag_mem[j] / (1 << 20), (float)(tag_count[j] * MEM_ALLOC_OVERHEAD) / (1 << 20));
             }
 
             R1DAssert(HeapUnlock(heap));
@@ -1061,8 +1073,30 @@ public:
     }
 
     void CompactIncremental() override {
-        //mi_collect(false);
-        // not needed on mimalloc, causes hitches
+        // Called by the engine roughly every 500ms (mem_incremental_compact_rate).
+        // Return quarantined blocks whose hold period has elapsed so the
+        // working set stays bounded instead of the deferred frees eating RAM.
+        if (!_quarantine_enabled)
+            return;
+
+        const uint32_t now = GetTickCount();
+        AcquireSRWLockExclusive(&_quarantine_lock);
+        for (size_t i = 0; i < QUARANTINE_ENTRIES; ++i)
+        {
+            quarantined_t& e = _quarantine[i];
+            if (!e.aligned)
+                continue;
+
+            // Unsigned subtraction handles the 49.7-day GetTickCount wraparound
+            // correctly for hold periods far shorter than the wrap period.
+            if (uint32_t(now - e.freed_tick) < QUARANTINE_HOLD_MS)
+                continue;
+
+            _quarantine_bytes -= e.size;
+            HeapFree(e.heap, 0, (void*)(uintptr_t(e.aligned) - e.align_skip));
+            e.aligned = nullptr;
+        }
+        ReleaseSRWLockExclusive(&_quarantine_lock);
     }
 
     void OutOfMemory(size_t nBytesAttempted = 0) override {
