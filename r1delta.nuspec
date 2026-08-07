@@ -18,7 +18,7 @@
     <file src="r1delta.exe.config" target="lib\net462\" />
     <file src="R1Delta_DS.exe" target="lib\net462\" />
     <file src="tools\**\*.*" target="lib\net462\tools\" />
-    <file src="r1delta\**\*.*" target="lib\net462\r1delta\" />
+    <file src="r1delta\**\*" target="lib\net462\r1delta\" />
     <file src="Titanfall.exe" target="lib\net462\" />
   </files>
 </package>
