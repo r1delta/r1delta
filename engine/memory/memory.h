@@ -255,6 +255,29 @@ class CMimMemAlloc : public IMemAlloc {
     size_t free_lru_idx = 0;
     SRWLOCK free_lru_lock = SRWLOCK_INIT;
 #endif
+
+    // Deferred free quarantine. Windows LFH hands freed blocks straight back out,
+    // which turned latent use-after-frees into hard crashes; Valve's original
+    // memalloc deferred reuse, which let the same stale reads survive. Hold freed
+    // blocks in a bounded ring before returning them to the heap, restoring that
+    // reuse window. Disable with -r1delta_no_quarantine_frees if the memory
+    // footprint is ever a problem.
+    static constexpr size_t QUARANTINE_ENTRIES = 256;
+    static constexpr size_t QUARANTINE_MAX_BYTES = 8ull << 20;
+    static constexpr size_t QUARANTINE_MAX_BLOCK_BYTES = 4ull << 20;
+    static constexpr uint8_t QUARANTINE_POISON = 0xFD;
+    struct quarantined_t
+    {
+        void* aligned;
+        HANDLE heap;
+        size_t size;
+        uint16_t align_skip;
+    };
+    quarantined_t _quarantine[QUARANTINE_ENTRIES] = {};
+    size_t _quarantine_next = 0;
+    size_t _quarantine_bytes = 0;
+    SRWLOCK _quarantine_lock = SRWLOCK_INIT;
+    bool _quarantine_enabled = false;
     
     // idTech 7 heap allocator thing from TheGreatCircle.
     struct alloc_check_t {
@@ -359,6 +382,56 @@ public:
         return mi_malloc(nSize, tag, heap);
     }
 
+    // Poison the freed payload and hold the block in a bounded ring before it
+    // goes back to the heap. Returns true when the block is held (the caller
+    // must NOT HeapFree it), false when it should be freed immediately. This
+    // restores the deferred-reuse window Valve's old memalloc gave us; the LFH
+    // recycles blocks instantly, which turned latent use-after-frees into the
+    // DEP/write-AV crashes seen in the wild.
+    bool QuarantineBlock(void* aligned, HANDLE heap, size_t size, uint16_t align_skip)
+    {
+        if (!_quarantine_enabled)
+            return false;
+
+        if (size > QUARANTINE_MAX_BLOCK_BYTES)
+            return false;
+
+        // Stale reads now see a distinctive poison pattern instead of a live
+        // recycled object. Debug builds ran with poisoned frees for years
+        // without issue, so legitimate code does not depend on reading freed
+        // contents.
+        memset(aligned, QUARANTINE_POISON, size);
+
+        AcquireSRWLockExclusive(&_quarantine_lock);
+
+        const size_t slot = _quarantine_next;
+        _quarantine_next = (_quarantine_next + 1) % QUARANTINE_ENTRIES;
+
+        quarantined_t& victim = _quarantine[slot];
+        if (victim.aligned)
+        {
+            // Evict the oldest held block: it actually returns to the heap now.
+            _quarantine_bytes -= victim.size;
+            HeapFree(victim.heap, 0, (void*)(uintptr_t(victim.aligned) - victim.align_skip));
+            victim.aligned = nullptr;
+        }
+
+        if (_quarantine_bytes + size > QUARANTINE_MAX_BYTES)
+        {
+            ReleaseSRWLockExclusive(&_quarantine_lock);
+            return false;
+        }
+
+        victim.aligned = aligned;
+        victim.heap = heap;
+        victim.size = size;
+        victim.align_skip = align_skip;
+        _quarantine_bytes += size;
+
+        ReleaseSRWLockExclusive(&_quarantine_lock);
+        return true;
+    }
+
     void mi_free(void* aligned, EDeltaAllocTags tag = TAG_DEFAULT, EDeltaAllocHeaps heap = HEAP_DEFAULT)
     {
         ZoneScoped;
@@ -422,6 +495,7 @@ public:
 
                 // NOTE(mrsteyk): have 99.99% confidence that it will break hashing.
                 auto align_skip = check->align_skip;
+                const size_t block_size = check->size;
                 memset(check, 0, sizeof(*check));
                 *check2 = 0;
                 check = 0;
@@ -431,7 +505,8 @@ public:
                 AcquireSRWLockExclusive(&free_lru_lock);
 #endif
                 
-                R1DAssert(HeapFree(_heap, 0, (void*)(uintptr_t(aligned) - align_skip)));
+                if (!QuarantineBlock(aligned, _heap, block_size, align_skip))
+                    R1DAssert(HeapFree(_heap, 0, (void*)(uintptr_t(aligned) - align_skip)));
 
 #if HEAP_CHECK_ENABLED
                 free_e e;
@@ -697,6 +772,12 @@ public:
         ULONG HeapInformation = 2;
         HeapSetInformation(_heaps[HEAP_SYSTEM], HeapCompatibilityInformation, &HeapInformation, sizeof(HeapInformation));
 #endif
+
+        // Deferred-free quarantine is on by default: it restores the reuse
+        // window the old allocator had. The engine command line is fully
+        // formed by the time the first allocation routes through here.
+        const char* cmdLine = GetCommandLineA();
+        _quarantine_enabled = !(cmdLine && strstr(cmdLine, "-r1delta_no_quarantine_frees"));
     }
 
     void* Alloc(size_t nSize) override {
