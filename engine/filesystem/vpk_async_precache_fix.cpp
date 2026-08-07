@@ -40,11 +40,19 @@ constexpr DWORD kExpectedSizeOfImage = 0x2116000;
 // the outer worker exits; running it immediately would free the store under the
 // same thread that is still using its entry slot.
 constexpr uintptr_t kPackStoreDrainRva = 0x71C80;
+constexpr uintptr_t kPackStoreFreeRva = 0x386F0;
 SRWLOCK s_PrecacheWorkerLock = SRWLOCK_INIT;
 thread_local unsigned int s_PrecacheWorkerDepth = 0;
 thread_local bool s_DeferredPackStoreDrain = false;
+thread_local bool s_DeferredPackStoreFree = false;
+thread_local uintptr_t s_DeferredPackStoreFreePointer = 0;
+// True while this thread holds the exclusive lock and is running the original
+// drain/free; the free guard passes through in that window to avoid deadlock.
+thread_local bool s_PrecacheExclusiveHeld = false;
 using PackStoreDrainFn = void(__fastcall*)();
 PackStoreDrainFn s_PackStoreDrainOriginal = nullptr;
+using PackStoreFreeFn = void(__fastcall*)(void* store);
+PackStoreFreeFn s_PackStoreFreeOriginal = nullptr;
 
 uintptr_t s_FilesystemBase;
 bool s_AsyncPrecacheFixInstalled;
@@ -209,6 +217,36 @@ uintptr_t RunAsyncPrecacheTask(uint32_t callbackIndex)
 				kCompareResourceExtensionRva)(record->extension, "vtf"));
 		if (result != 0) {
 			void* const entry = reinterpret_cast<void*>(*entrySlot);
+
+			// Diagnostic (bounded): if *entrySlot is no longer a filesystem pack
+			// entry, its vtable points into a foreign module (e.g. datacache).
+			// This detects the stale-store/type-confusion window before the
+			// IsEntryReady dispatch that produces the datacache DEP crash.
+			static std::atomic<int> s_entryDiagBudget{ 16 };
+			if (s_entryDiagBudget > 0) {
+				const uintptr_t entryVtbl = *reinterpret_cast<uintptr_t*>(entry);
+				const HMODULE datacache = GetModuleHandleA("datacache.dll");
+				const uintptr_t dcBase = datacache ? reinterpret_cast<uintptr_t>(datacache) : 0;
+				const uintptr_t fsBase = s_FilesystemBase;
+				const bool foreign = dcBase &&
+					entryVtbl >= dcBase && entryVtbl < dcBase + 0x100000;
+				if (foreign || s_entryDiagBudget > 8) {
+					--s_entryDiagBudget;
+					char buffer[320];
+					_snprintf_s(buffer, sizeof(buffer), _TRUNCATE,
+						"R1Delta: vpk worker entry diag entry=%p vtbl=0x%llx packStore=%p "
+						"fs=0x%llx dc=0x%llx path=%s foreign=%d\n",
+						entry,
+						static_cast<unsigned long long>(entryVtbl),
+						packStore,
+						static_cast<unsigned long long>(fsBase),
+						static_cast<unsigned long long>(dcBase),
+						path,
+						foreign ? 1 : 0);
+					OutputDebugStringA(buffer);
+				}
+			}
+
 			const bool ready = VirtualFunction<IsEntryReadyFn>(entry, 0x58)(entry);
 			result = ready ? 1 : 0;
 			if (ready) {
@@ -255,6 +293,73 @@ uintptr_t RunAsyncPrecacheTask(uint32_t callbackIndex)
 	return reinterpret_cast<FinishFn>(handler->finish)(&context);
 }
 
+void __fastcall R1ClientVPKPackStoreFreeGuard(void* store)
+{
+	// The start-precache path (fs+0x74F30) frees the previous pack store
+	// directly through the memalloc Free wrapper when the outstanding-task
+	// counter reads zero, bypassing the drain hook. A worker that is mid-task
+	// (shared lock held) on another thread can therefore have its pack store
+	// freed out from under it. Serialize any store free against workers the
+	// same way the drain is serialized: exclusive lock, or defer when the free
+	// is invoked reentrantly from inside a worker.
+	if (!s_PackStoreFreeOriginal)
+		return;
+
+	const uintptr_t workItemIndices = *reinterpret_cast<uintptr_t*>(
+		s_FilesystemBase + kWorkItemIndicesRva);
+	if (reinterpret_cast<uintptr_t>(store) != workItemIndices) {
+		// Not the pack store: this is an unrelated allocation through the
+		// generic Free wrapper; pass through untouched.
+		s_PackStoreFreeOriginal(store);
+		return;
+	}
+
+	if (s_PrecacheExclusiveHeld) {
+		// This thread is already inside the drain's original free (the drain
+		// frees the store internally while holding our exclusive lock).
+		s_PackStoreFreeOriginal(store);
+		return;
+	}
+
+	static std::atomic<int> s_guardDiagBudget{ 8 };
+	if (s_guardDiagBudget > 0) {
+		--s_guardDiagBudget;
+		char buffer[256];
+		_snprintf_s(buffer, sizeof(buffer), _TRUNCATE,
+			"R1Delta: vpk free guard intercept store=%p depth=%u defer=%d\n",
+			store, s_PrecacheWorkerDepth, s_PrecacheWorkerDepth != 0 ? 1 : 0);
+		OutputDebugStringA(buffer);
+	}
+
+	if (s_PrecacheWorkerDepth != 0) {
+		s_DeferredPackStoreFree = true;
+		s_DeferredPackStoreFreePointer = reinterpret_cast<uintptr_t>(store);
+		return;
+	}
+
+	AcquireSRWLockExclusive(&s_PrecacheWorkerLock);
+	s_PrecacheExclusiveHeld = true;
+	s_PackStoreFreeOriginal(store);
+	s_PrecacheExclusiveHeld = false;
+	ReleaseSRWLockExclusive(&s_PrecacheWorkerLock);
+}
+
+void RunDeferredPackStoreFree()
+{
+	// A free deferred because it was invoked reentrantly inside a worker runs
+	// after the outer worker has fully stopped using the pack store, serialized
+	// against every other worker. Caller holds the exclusive lock. The pointer
+	// is the value captured at defer time: re-reading the global could free a
+	// newer store if start-precache has already replaced it.
+	if (!s_DeferredPackStoreFree)
+		return;
+	s_DeferredPackStoreFree = false;
+	const uintptr_t store = s_DeferredPackStoreFreePointer;
+	s_DeferredPackStoreFreePointer = 0;
+	if (s_PackStoreFreeOriginal && store)
+		s_PackStoreFreeOriginal(reinterpret_cast<void*>(store));
+}
+
 uintptr_t __fastcall R1ClientVPKAsyncPrecacheWorker(
 	void* /*taskContext*/,
 	uint32_t callbackIndex)
@@ -276,11 +381,19 @@ uintptr_t __fastcall R1ClientVPKAsyncPrecacheWorker(
 		// deadlocking against this thread's shared lock. Do not run it
 		// unprotected: defer it until the outer worker has fully stopped using
 		// the pack store, then serialize it against every other worker.
-		if (s_DeferredPackStoreDrain) {
+		if (s_DeferredPackStoreDrain || s_DeferredPackStoreFree) {
+			const bool hadDeferredDrain = s_DeferredPackStoreDrain;
 			s_DeferredPackStoreDrain = false;
 			AcquireSRWLockExclusive(&s_PrecacheWorkerLock);
-			if (s_PackStoreDrainOriginal)
+			s_PrecacheExclusiveHeld = true;
+			if (hadDeferredDrain && s_PackStoreDrainOriginal)
 				s_PackStoreDrainOriginal();
+			// The drain tears down the store itself (including the deferred
+			// free's pointer), so a deferred free is redundant once the drain
+			// has run. Run it only when no drain was deferred.
+			if (!hadDeferredDrain)
+				RunDeferredPackStoreFree();
+			s_PrecacheExclusiveHeld = false;
 			ReleaseSRWLockExclusive(&s_PrecacheWorkerLock);
 		}
 	}
@@ -295,11 +408,33 @@ void __fastcall R1ClientVPKPackStoreDrainHook()
 	}
 
 	AcquireSRWLockExclusive(&s_PrecacheWorkerLock);
+
+	// The engine's original drain polls the work-thread pool, but our worker
+	// executes the task callback synchronously inside that pump, so the poll can
+	// conclude "done" while a queued task still references the pack store. Wait
+	// for the outstanding-task counter to reach zero before freeing the store:
+	// with the exclusive lock held, no worker is mid-task, so any non-zero count
+	// is a queued-but-not-started task that must finish first. Bounded: a hung
+	// counter must not deadlock the drain forever.
+	auto* const outstanding = reinterpret_cast<volatile long*>(
+		s_FilesystemBase + kOutstandingWorkCountRva);
+	for (int spin = 0; spin < 200000 && *outstanding != 0; ++spin) {
+		YieldProcessor();
+	}
+	if (*outstanding != 0) {
+		char buffer[160];
+		_snprintf_s(buffer, sizeof(buffer), _TRUNCATE,
+			"R1Delta: vpk pack-store drain timed out waiting for %ld outstanding tasks\n",
+			*outstanding);
+		OutputDebugStringA(buffer);
+	}
+
+	s_PrecacheExclusiveHeld = true;
 	if (s_PackStoreDrainOriginal)
 		s_PackStoreDrainOriginal();
+	s_PrecacheExclusiveHeld = false;
 	ReleaseSRWLockExclusive(&s_PrecacheWorkerLock);
 }
-
 }
 
 bool InstallR1ClientVPKAsyncPrecacheFix(uintptr_t filesystemBase)
@@ -386,6 +521,43 @@ bool InstallR1ClientVPKAsyncPrecacheFix(uintptr_t filesystemBase)
 	else {
 		OutputDebugStringA(
 			"R1Delta: R1 client VPK pack-store drain barrier installed and enabled\n");
+	}
+
+	// The start-precache path frees the previous pack store directly through
+	// the memalloc Free wrapper when the outstanding-task counter reads zero,
+	// bypassing the drain barrier. Serialize those frees against workers too.
+	void* const freeTarget = reinterpret_cast<void*>(
+		filesystemBase + kPackStoreFreeRva);
+	constexpr unsigned char expectedFreePrologue[] = {
+		0x40,             // rex (push rbx)
+		0x53,             // push rbx
+		0x48, 0x83, 0xEC, 0x20 // sub rsp, 20h
+	};
+	if (memcmp(freeTarget, expectedFreePrologue, sizeof(expectedFreePrologue)) != 0) {
+		Warning(
+			"R1Delta: VPK pack-store free guard skipped; unexpected free prologue at %p\n",
+			freeTarget);
+		return true;
+	}
+	const MH_STATUS freeCreateStatus = MH_CreateHook(
+		freeTarget,
+		&R1ClientVPKPackStoreFreeGuard,
+		reinterpret_cast<LPVOID*>(&s_PackStoreFreeOriginal));
+	if (freeCreateStatus != MH_OK && freeCreateStatus != MH_ERROR_ALREADY_CREATED) {
+		Warning(
+			"R1Delta: VPK pack-store free guard creation failed status=%d\n",
+			static_cast<int>(freeCreateStatus));
+		return true;
+	}
+	const MH_STATUS freeEnableStatus = MH_EnableHook(freeTarget);
+	if (freeEnableStatus != MH_OK && freeEnableStatus != MH_ERROR_ENABLED) {
+		Warning(
+			"R1Delta: VPK pack-store free guard enable failed status=%d\n",
+			static_cast<int>(freeEnableStatus));
+	}
+	else {
+		OutputDebugStringA(
+			"R1Delta: R1 client VPK pack-store free guard installed and enabled\n");
 	}
 
 	return true;

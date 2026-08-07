@@ -465,10 +465,24 @@ extern "C" __declspec(dllexport) IMemAlloc * CreateGlobalMemAlloc() {
         IMemAlloc* const retail = ResolveRetailGlobalMemAlloc();
         if (retail) {
             g_pMemAllocSingleton = retail;
+            static bool logged = false;
+            if (!logged) {
+                logged = true;
+                char buffer[160];
+                _snprintf_s(buffer, sizeof(buffer), _TRUNCATE,
+                    "R1Delta: allocator delegation -> retail tier0_orig singleton %p\n",
+                    static_cast<void*>(retail));
+                OutputDebugStringA(buffer);
+            }
         } else {
             // NOTE(mrsteyk): if to move it out - it will break due to static initialisation order.
             static CMimMemAlloc mem;
             g_pMemAllocSingleton = &mem;
+            static bool logged = false;
+            if (!logged) {
+                logged = true;
+                OutputDebugStringA("R1Delta: allocator delegation FAILED - falling back to CMimMemAlloc\n");
+            }
         }
     }
     return g_pMemAllocSingleton;
