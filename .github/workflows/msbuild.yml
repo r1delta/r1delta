@@ -405,6 +405,17 @@ jobs:
             throw "Squirrel releasify failed with exit code $LASTEXITCODE."
           }
 
+          $fullPackage = Get-ChildItem -LiteralPath $squirrelOutput -File -Filter '*-full.nupkg' |
+            Select-Object -First 1
+          if (-not $fullPackage) {
+            throw 'Squirrel did not produce a full package for validation.'
+          }
+          $packageCheck = Join-Path '${{ github.workspace }}' 'packaged_payload_check'
+          Expand-Archive -LiteralPath $fullPackage.FullName -DestinationPath $packageCheck
+          & '${{ github.workspace }}/ci/verify_release_payload.ps1' `
+            -CorePath '${{ github.workspace }}/core' `
+            -PayloadPath (Join-Path $packageCheck 'lib/net462')
+
       - name: Find release assets
         id: find_assets
         shell: pwsh
