@@ -65,6 +65,41 @@ struct GenericMemoryStat_t
 	int value;
 };
 
+enum EDeltaAllocTags : uint8_t
+{
+    // Unsorted junk
+    TAG_DEFAULT = 0,
+    // Unsorted game junk
+    TAG_GAME,
+    // C++ junk with new.
+    TAG_NEW,
+
+    //-
+
+    // r1dc
+    TAG_COMPRESSION,
+    // audio.cpp
+    TAG_AUDIO,
+
+    TAG_COUNT,
+};
+static_assert(TAG_COUNT <= 256, "too many allocation tags!");
+
+enum EDeltaAllocHeaps : uint8_t
+{
+    HEAP_DEFAULT = 0xFF,
+    
+    // GPH
+    HEAP_SYSTEM = 0,
+    // Only for game allocations
+    HEAP_GAME,
+    // Only for us - R1Delta.
+    HEAP_DELTA,
+
+    HEAP_COUNT,
+};
+static_assert(HEAP_COUNT <= 256, "too many allocation heaps!");
+
 class IMemAlloc
 {
 public:
@@ -152,45 +187,29 @@ public:
 	virtual int GetGenericMemoryStats(GenericMemoryStat_t** ppMemoryStats) = 0;
 
 	virtual ~IMemAlloc() { };
-    virtual void* Alloc_Aligned(size_t nSize, size_t alignment) = 0;
-    virtual void* Realloc_Aligned(void* pMem, size_t nSize, size_t alignment) = 0;
-    virtual void Free_Aligned(void* pMem, size_t alignment) = 0;
+	// Retail R1 (tier0_orig) does not provide aligned slots beyond this point;
+	// its heap satisfies the required alignment natively (ASSERT_MEMALLOC_WILL_ALIGN).
+	// Keep these as non-virtual inline helpers routed through the supported base
+	// methods. CMimMemAlloc defines matching plain methods for its own path, but
+	// calls through an IMemAlloc* (including the retail singleton) always use
+	// these inline Alloc/Realloc/Free routes so we never read past the vtable.
+    inline void* Alloc_Aligned(size_t nSize, size_t alignment) { return Alloc(nSize); }
+    inline void* Realloc_Aligned(void* pMem, size_t nSize, size_t alignment) { return Realloc(pMem, nSize); }
+    inline void Free_Aligned(void* pMem, size_t alignment) { Free(pMem); }
+
+    // Forwarding helpers so existing GlobalAllocator()->mi_* call sites keep
+    // compiling while routing through the IMemAlloc interface. The retail
+    // allocator (tier0_orig.dll) does not provide these, so the tag/heap
+    // parameters are accepted for source compatibility and otherwise unused.
+    inline void* mi_malloc(size_t nSize, EDeltaAllocTags = TAG_DEFAULT, EDeltaAllocHeaps = HEAP_DEFAULT) { return Alloc(nSize); }
+    inline void* mi_malloc_aligned(size_t nSize, size_t alignment, EDeltaAllocTags = TAG_DEFAULT, EDeltaAllocHeaps = HEAP_DEFAULT) { return Alloc_Aligned(nSize, alignment); }
+    inline void mi_free(void* pMem, EDeltaAllocTags = TAG_DEFAULT, EDeltaAllocHeaps = HEAP_DEFAULT) { Free(pMem); }
+    inline void mi_free_aligned(void* pMem, size_t alignment, EDeltaAllocTags = TAG_DEFAULT, EDeltaAllocHeaps = HEAP_DEFAULT) { Free_Aligned(pMem, alignment); }
+    inline void mi_free_size(void* pMem, size_t, EDeltaAllocTags = TAG_DEFAULT, EDeltaAllocHeaps = HEAP_DEFAULT) { Free(pMem); }
+    inline void mi_free_size_aligned(void* pMem, size_t, size_t alignment, EDeltaAllocTags = TAG_DEFAULT, EDeltaAllocHeaps = HEAP_DEFAULT) { Free_Aligned(pMem, alignment); }
+    inline void* mi_realloc(void* pMem, size_t nSize, EDeltaAllocTags = TAG_DEFAULT, EDeltaAllocHeaps = HEAP_DEFAULT) { return Realloc(pMem, nSize); }
+    inline void* mi_realloc_aligned(void* pMem, size_t nSize, size_t alignment, EDeltaAllocTags = TAG_DEFAULT, EDeltaAllocHeaps = HEAP_DEFAULT) { return Realloc_Aligned(pMem, nSize, alignment); }
 };
-
-enum EDeltaAllocTags : uint8_t
-{
-    // Unsorted junk
-    TAG_DEFAULT = 0,
-    // Unsorted game junk
-    TAG_GAME,
-    // C++ junk with new.
-    TAG_NEW,
-
-    //-
-
-    // r1dc
-    TAG_COMPRESSION,
-    // audio.cpp
-    TAG_AUDIO,
-
-    TAG_COUNT,
-};
-static_assert(TAG_COUNT <= 256, "too many allocation tags!");
-
-enum EDeltaAllocHeaps : uint8_t
-{
-    HEAP_DEFAULT = 0xFF,
-    
-    // GPH
-    HEAP_SYSTEM = 0,
-    // Only for game allocations
-    HEAP_GAME,
-    // Only for us - R1Delta.
-    HEAP_DELTA,
-
-    HEAP_COUNT,
-};
-static_assert(HEAP_COUNT <= 256, "too many allocation heaps!");
 
 // Gated allocator provenance tracing for startup-memory investigations. The
 // implementation is allocation-free so it can safely run from the allocator
@@ -1171,7 +1190,7 @@ public:
     }
 
     ~CMimMemAlloc() override {}
-    void* Alloc_Aligned(size_t nSize, size_t alignment) override {
+    void* Alloc_Aligned(size_t nSize, size_t alignment) {
         if (nSize == 0) nSize = 1;
         
         void* p = mi_malloc_aligned(nSize, alignment, TAG_GAME, HEAP_GAME);
@@ -1193,7 +1212,7 @@ public:
         return p;
     }
 
-    void* Realloc_Aligned(void* pMem, size_t nSize, size_t alignment) override {
+    void* Realloc_Aligned(void* pMem, size_t nSize, size_t alignment) {
         if (nSize == 0) {
             Free_Aligned(pMem, alignment);
             return nullptr;
@@ -1215,7 +1234,7 @@ public:
         return p;
     }
 
-    void Free_Aligned(void* pMem, size_t alignment) override {
+    void Free_Aligned(void* pMem, size_t alignment) {
         mi_free_aligned(pMem, alignment, TAG_GAME, HEAP_GAME);
     }
 
@@ -1327,4 +1346,4 @@ void RegisterMsvcAllocatorFallbacks(
 extern IMemAlloc* g_pMemAllocSingleton;
 extern "C" __declspec(dllexport) IMemAlloc * CreateGlobalMemAlloc();
 
-CMimMemAlloc* GlobalAllocator();
+IMemAlloc* GlobalAllocator();

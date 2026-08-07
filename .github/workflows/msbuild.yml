@@ -188,6 +188,7 @@ jobs:
             vsdk_memalloc_tests = 'tests/vsdk_memalloc_tests.vcxproj'
             persistentdata_codec_tests = 'tests/persistentdata_codec_tests.vcxproj'
             materialsystem_dx11_texture_upload_tests = 'tests/materialsystem_dx11_texture_upload_tests.vcxproj'
+            allocator_delegation_tests = 'tests/allocator_delegation_tests.vcxproj'
           }
 
           foreach ($entry in $projects.GetEnumerator()) {
@@ -213,7 +214,8 @@ jobs:
             'r1o_vpk_tests',
             'vsdk_memalloc_tests',
             'persistentdata_codec_tests',
-            'materialsystem_dx11_texture_upload_tests'
+            'materialsystem_dx11_texture_upload_tests',
+            'allocator_delegation_tests'
           )
           foreach ($test in $tests) {
             $executable = Join-Path '${{ env.BUILD_PATH }}' "tests/$test/$test.exe"

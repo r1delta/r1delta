@@ -442,18 +442,41 @@ void DeltaMemoryTraceStats(const CCommand&)
 }
 
 IMemAlloc* g_pMemAllocSingleton = 0;
+
+// The retail tier0 (tier0_orig.dll) ships Valve's original memalloc, whose
+// deferred reuse is the behavior the game was built around. Forward the process
+// allocator to it instead of running our own heap/quarantine layer, which
+// changed allocation reuse and surfaced latent filesystem/material lifetime
+// bugs as hard crashes. CMimMemAlloc remains as a fallback only.
+static IMemAlloc* ResolveRetailGlobalMemAlloc()
+{
+    HMODULE retailTier0 = GetModuleHandleW(L"tier0_orig.dll");
+    if (!retailTier0)
+        return nullptr;
+
+    using CreateGlobalMemAllocFn = IMemAlloc* (WINAPI*)();
+    auto create = reinterpret_cast<CreateGlobalMemAllocFn>(
+        GetProcAddress(retailTier0, "CreateGlobalMemAlloc"));
+    return create ? create() : nullptr;
+}
+
 extern "C" __declspec(dllexport) IMemAlloc * CreateGlobalMemAlloc() {
     if (!g_pMemAllocSingleton) {
-        // NOTE(mrsteyk): if to move it out - it will break due to static initialisation order.
-        static CMimMemAlloc mem;
-        g_pMemAllocSingleton = &mem;
+        IMemAlloc* const retail = ResolveRetailGlobalMemAlloc();
+        if (retail) {
+            g_pMemAllocSingleton = retail;
+        } else {
+            // NOTE(mrsteyk): if to move it out - it will break due to static initialisation order.
+            static CMimMemAlloc mem;
+            g_pMemAllocSingleton = &mem;
+        }
     }
     return g_pMemAllocSingleton;
 }
 
-CMimMemAlloc* GlobalAllocator()
+IMemAlloc* GlobalAllocator()
 {
-    return (CMimMemAlloc*)CreateGlobalMemAlloc();
+    return CreateGlobalMemAlloc();
 }
 
 struct MsvcAllocatorFallbackRecord
@@ -560,19 +583,6 @@ void* __cdecl hkrealloc_base(void* Block, size_t Size)
     if (!Block)
         return hkmalloc_base(Size);
 
-    if (!GlobalAllocator()->IsOwnedAllocation(Block))
-    {
-        if (GlobalAllocator()->IsLikelyOwnedAllocation(Block))
-            return GlobalAllocator()->Realloc_Aligned(Block, Size, alignof(std::max_align_t) * 2);
-
-        MsvcAllocatorFallbackRecord fallback = {};
-        if (FindMsvcAllocatorFallback(_ReturnAddress(), &fallback) && fallback.reallocFn)
-            return fallback.reallocFn(Block, Size);
-
-        Warning("[MEM] Missing MSVC realloc fallback for foreign allocation %p from %p\n", Block, _ReturnAddress());
-        return nullptr;
-    }
-
     return CreateGlobalMemAlloc()->Realloc_Aligned(Block, Size, alignof(std::max_align_t) * 2);
 }
 
@@ -580,25 +590,6 @@ void __cdecl hkfree_base(void* Block)
 {
     if (!Block)
         return;
-
-    if (!GlobalAllocator()->IsOwnedAllocation(Block))
-    {
-        if (GlobalAllocator()->IsLikelyOwnedAllocation(Block))
-        {
-            GlobalAllocator()->Free_Aligned(Block, alignof(std::max_align_t) * 2);
-            return;
-        }
-
-        MsvcAllocatorFallbackRecord fallback = {};
-        if (FindMsvcAllocatorFallback(_ReturnAddress(), &fallback) && fallback.freeFn)
-        {
-            fallback.freeFn(Block);
-            return;
-        }
-
-        Warning("[MEM] Missing MSVC free fallback for foreign allocation %p from %p\n", Block, _ReturnAddress());
-        return;
-    }
 
     CreateGlobalMemAlloc()->Free_Aligned(Block, alignof(std::max_align_t) * 2);
 }
@@ -609,21 +600,6 @@ void* __cdecl hkrecalloc_base(void* Block, size_t Count, size_t Size)
         return nullptr;
 
     size_t const nTotal = Count * Size;
-    if (Block && !GlobalAllocator()->IsOwnedAllocation(Block))
-    {
-        if (GlobalAllocator()->IsLikelyOwnedAllocation(Block))
-            return GlobalAllocator()->Realloc_Aligned(Block, nTotal, alignof(std::max_align_t) * 2);
-
-        MsvcAllocatorFallbackRecord fallback = {};
-        if (FindMsvcAllocatorFallback(_ReturnAddress(), &fallback) && fallback.recallocFn)
-            return fallback.recallocFn(Block, Count, Size);
-        if (FindMsvcAllocatorFallback(_ReturnAddress(), &fallback) && fallback.reallocFn)
-            return fallback.reallocFn(Block, nTotal);
-
-        Warning("[MEM] Missing MSVC recalloc fallback for foreign allocation %p from %p\n", Block, _ReturnAddress());
-        return nullptr;
-    }
-
     void* const pMemOut = CreateGlobalMemAlloc()->Realloc_Aligned(Block, nTotal, alignof(std::max_align_t) * 2);
     if (pMemOut && !Block) {
         memset(pMemOut, 0, nTotal);
