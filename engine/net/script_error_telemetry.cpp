@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <charconv>
 #include <condition_variable>
 #include <cctype>
@@ -118,14 +119,21 @@ struct Endpoint
 using WinHttpCloseHandleType = BOOL(WINAPI*)(HINTERNET);
 WinHttpCloseHandleType ResolveRealWinHttpCloseHandle()
 {
-    static const WinHttpCloseHandleType closeHandle = []() -> WinHttpCloseHandleType {
-        const HMODULE module = GetModuleHandleW(L"winhttp.dll");
-        if (!module)
-            return nullptr;
-        return reinterpret_cast<WinHttpCloseHandleType>(
-            GetProcAddress(module, "WinHttpCloseHandle"));
-    }();
-    return closeHandle;
+    static std::atomic<WinHttpCloseHandleType> cached{nullptr};
+
+    auto fn = cached.load(std::memory_order_acquire);
+    if (fn)
+        return fn;
+
+    const HMODULE module = GetModuleHandleW(L"winhttp.dll");
+    if (!module)
+        return nullptr;
+
+    fn = reinterpret_cast<WinHttpCloseHandleType>(GetProcAddress(module, "WinHttpCloseHandle"));
+    if (fn)
+        cached.store(fn, std::memory_order_release);
+
+    return fn;
 }
 
 class InternetHandle

@@ -382,6 +382,19 @@ public sealed class FastDownloadService : IDisposable
 
             var destinationPath = Path.GetFullPath(request.DestinationPath);
             Directory.CreateDirectory(Path.GetDirectoryName(destinationPath));
+            var partialPath = destinationPath + ".part";
+
+            // Mirror HttpClient: always write to .part and atomically promote on success.
+            // If a truncated file was left at the final path by an older curl path,
+            // migrate it to .part so resume works and the final path is never left corrupt.
+            try
+            {
+                if (File.Exists(destinationPath) && !File.Exists(partialPath))
+                {
+                    try { File.Move(destinationPath, partialPath); } catch { }
+                }
+            }
+            catch { }
 
             var arguments = string.Join(" ", new[]
             {
@@ -392,7 +405,7 @@ public sealed class FastDownloadService : IDisposable
                 "--connect-timeout", "15",
                 "--max-time", "900",
                 "--continue-at", "-",
-                "--output", $"\"{destinationPath}\"",
+                "--output", $"\"{partialPath}\"",
                 $"\"{request.Url}\""
             });
 
@@ -406,9 +419,10 @@ public sealed class FastDownloadService : IDisposable
                 RedirectStandardOutput = true
             };
 
+            Process process = null;
             try
             {
-                using var process = new Process { StartInfo = startInfo };
+                process = new Process { StartInfo = startInfo };
                 if (!process.Start())
                 {
                     failures[request] = "failed to start curl.exe";
@@ -428,10 +442,22 @@ public sealed class FastDownloadService : IDisposable
                 }
 
                 var exitCode = process.ExitCode;
+                await Task.WhenAll(stderrTask, stdoutTask).ConfigureAwait(false);
                 if (exitCode != 0)
                 {
-                    await Task.WhenAll(stderrTask, stdoutTask).ConfigureAwait(false);
                     failures[request] = $"curl exited with code {exitCode}";
+                    continue;
+                }
+
+                try
+                {
+                    if (File.Exists(destinationPath))
+                        File.Delete(destinationPath);
+                    File.Move(partialPath, destinationPath);
+                }
+                catch (Exception ex)
+                {
+                    failures[request] = $"curl promote failed: {ex.Message}";
                 }
             }
             catch (OperationCanceledException)
@@ -441,6 +467,12 @@ public sealed class FastDownloadService : IDisposable
             catch (Exception ex)
             {
                 failures[request] = $"curl failed: {ex.Message}";
+            }
+            finally
+            {
+                if (process != null && ReferenceEquals(_activeProcess, process))
+                    _activeProcess = null;
+                process?.Dispose();
             }
         }
 

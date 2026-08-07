@@ -7688,7 +7688,10 @@ static void InstallClientDatacacheCallbackGuard(uintptr_t clientBase)
 		Warning("R1Delta: failed to create PrecacheParticleSystem string-table guard (%d)\n", static_cast<int>(status));
 		return;
 	}
-	MH_EnableHook(reinterpret_cast<void*>(clientBase + 0xF74F0));
+	const MH_STATUS enableStatus = MH_EnableHook(reinterpret_cast<void*>(clientBase + 0xF74F0));
+	if (enableStatus != MH_OK) {
+		Warning("R1Delta: failed to enable PrecacheParticleSystem string-table guard (%d)\n", static_cast<int>(enableStatus));
+	}
 }
 
 static void PatchClientDynamicLodNoMatchSentinel(uintptr_t clientBase)

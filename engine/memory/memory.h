@@ -1080,6 +1080,11 @@ public:
             return;
 
         const uint32_t now = GetTickCount();
+        struct pending_free_t { HANDLE heap; void* ptr; };
+        // Avoid 32 KiB stack allocation (2048 * 16): heap-allocate the pending list.
+        pending_free_t* pending = new pending_free_t[QUARANTINE_ENTRIES];
+        size_t pendingCount = 0;
+
         AcquireSRWLockExclusive(&_quarantine_lock);
         for (size_t i = 0; i < QUARANTINE_ENTRIES; ++i)
         {
@@ -1093,10 +1098,14 @@ public:
                 continue;
 
             _quarantine_bytes -= e.size;
-            HeapFree(e.heap, 0, (void*)(uintptr_t(e.aligned) - e.align_skip));
+            pending[pendingCount++] = { e.heap, (void*)(uintptr_t(e.aligned) - e.align_skip) };
             e.aligned = nullptr;
         }
         ReleaseSRWLockExclusive(&_quarantine_lock);
+
+        for (size_t i = 0; i < pendingCount; ++i)
+            HeapFree(pending[i].heap, 0, pending[i].ptr);
+        delete[] pending;
     }
 
     void OutOfMemory(size_t nBytesAttempted = 0) override {
