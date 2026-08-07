@@ -2,7 +2,6 @@
 
 #include <cstdint>
 
-// Verifies the R1 client filesystem image and intentionally preserves the
-// retail VPK async-precache worker. Reconstructing that worker outside the
-// filesystem module violates its pack-entry lifetime invariants.
+// Replaces the R1 client filesystem's VPK async-precache worker. The shipped
+// worker uses an uninitialized stack slot when its initial pack lookup misses.
 bool InstallR1ClientVPKAsyncPrecacheFix(uintptr_t filesystemBase);
