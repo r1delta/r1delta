@@ -15536,7 +15536,35 @@ static char __fastcall R1OSVCServerInfoWriteToBuffer(__int64 message, __int64 bi
 	if (!IsReadableCString(loadingUrl))
 		loadingUrl = "";
 
-	const int serverCount = *reinterpret_cast<int*>(message + 36);
+	int serverCount = *reinterpret_cast<int*>(message + 36);
+	// The native TFO signon validator (engine_r1o+0x13F2ED) compares every client
+	// ACK against CGameServer.m_nSpawnCount (server+0x1D0), but TFO's ServerInfo
+	// fill falls back to CGameServer.m_nMaxclients (+0x1CC) when its mode object
+	// is unavailable. If the two diverge, clients latch the wrong server count
+	// from this message, echo it in every signon ACK, and get force-retried
+	// forever. Publish the authoritative value the validator actually uses.
+	constexpr uintptr_t kR1OServerSpawnCountRva = 0x2659720; // qword_18265971C + 4
+	if (engineR1O) {
+		const int* authoritativeSpawnCount = reinterpret_cast<const int*>(
+			reinterpret_cast<uintptr_t>(engineR1O) + kR1OServerSpawnCountRva);
+		if (IsReadableRange(authoritativeSpawnCount, sizeof(int))
+			&& *authoritativeSpawnCount != serverCount) {
+			if (s_R1OServerInfoForceLogBudget > 0) {
+				--s_R1OServerInfoForceLogBudget;
+				char buffer[256];
+				_snprintf_s(
+					buffer,
+					sizeof(buffer),
+					_TRUNCATE,
+					"R1Delta: R1O SVC_ServerInfo corrected divergent server count fill=%d authoritative=%d\n",
+					serverCount,
+					*authoritativeSpawnCount);
+				OutputDebugStringA(buffer);
+				Warning("%s", buffer);
+			}
+			serverCount = *authoritativeSpawnCount;
+		}
+	}
 	const int unknownLong = *reinterpret_cast<int*>(message + 44);
 	const int mapCrc = *reinterpret_cast<int*>(message + 48);
 	const int clientCrc = *reinterpret_cast<int*>(message + 52);
@@ -18488,6 +18516,12 @@ void InitR1ODedicatedServerAPIHook(uintptr_t engineR1OBase) {
 		(LPVOID)(engineR1OBase + 0x142460),
 		&R1OCGameClientProcessClientInfo,
 		reinterpret_cast<LPVOID*>(&R1OCGameClientProcessClientInfoOriginal));
+	if (IsR1ODedicatedServer() && AreR1OFakeDediVerboseLogsEnabled()) {
+		s_R1OSignonStateTraceLogBudget = 4096;
+		s_R1OSignonStateHandlerLogBudget = 4096;
+		s_R1OClientInfoHandlerLogBudget = 1024;
+		s_R1OServerInfoForceLogBudget = 256;
+	}
 	R1OBFReadSeek = reinterpret_cast<R1OBFReadSeekType>(engineR1OBase + 0x27B260);
 	R1OBFReadString = reinterpret_cast<R1OBFReadStringType>(engineR1OBase + 0x27B3B0);
 
