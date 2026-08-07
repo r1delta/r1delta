@@ -47,6 +47,7 @@
 #pragma warning(pop)
 #include <filesystem>
 #include <string>
+#include <cstring>
 #include <mutex>
 #include <shared_mutex>
 
@@ -98,7 +99,37 @@ extern uintptr_t G_engine_ds;
 extern uintptr_t G_engine_r1o;
 
 #define IsDedicatedServer() (G_is_dedi)
-#define IsR1ODedicatedServer() (G_is_r1o_dedi)
+// Use Plat_GetCommandLineA (engine final command line) to detect -r1o_dedi from
+// the text-file buffer that CCommandLine__CreateCmdLine appends, mirroring
+// HasEngineCommandLineFlag. G_is_r1o_dedi is the fast cached bit set at DLL
+// load from GetCommandLineA; if it is 0 but the engine command line now
+// contains the flag, promote and cache it.
+inline bool IsR1ODedicatedServer() {
+    if (G_is_r1o_dedi)
+        return true;
+    if (!G_is_dedi)
+        return false;
+    // Check engine's Plat_GetCommandLineA dynamically - this is the final
+    // command line after CCommandLine__CreateCmdLine has appended
+    // g_r1delta_launch_args text. Retry lookup if tier0 not yet loaded.
+    typedef const char* (*PlatGetCommandLineAFn)();
+    static PlatGetCommandLineAFn plat = nullptr;
+    if (!plat) {
+        HMODULE tier0 = GetModuleHandleA("tier0_orig.dll");
+        if (tier0)
+            plat = reinterpret_cast<PlatGetCommandLineAFn>(GetProcAddress(tier0, "Plat_GetCommandLineA"));
+    }
+    if (!plat)
+        return false;
+    const char* cmd = plat();
+    if (!cmd)
+        return false;
+    if (strstr(cmd, "-r1o_dedi") || strstr(cmd, "-r1o_dedicated")) {
+        G_is_r1o_dedi = 1;
+        return true;
+    }
+    return false;
+}
 
 enum class R1DeltaEngineMode
 {
