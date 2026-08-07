@@ -289,6 +289,7 @@ class CMimMemAlloc : public IMemAlloc {
     size_t _quarantine_bytes = 0;
     SRWLOCK _quarantine_lock = SRWLOCK_INIT;
     bool _quarantine_enabled = false;
+    bool _quarantine_poison = false;
     
     // idTech 7 heap allocator thing from TheGreatCircle.
     struct alloc_check_t {
@@ -407,11 +408,11 @@ public:
         if (size > QUARANTINE_MAX_BLOCK_BYTES)
             return false;
 
-        // Stale reads now see a distinctive poison pattern instead of a live
-        // recycled object. Debug builds ran with poisoned frees for years
-        // without issue, so legitimate code does not depend on reading freed
-        // contents.
-        memset(aligned, QUARANTINE_POISON, size);
+        // Diagnostic-only poison (off by default): stale reads see a
+        // distinctive pattern instead of the old contents. Enable with
+        // -r1delta_quarantine_poison_frees when hunting UAFs locally.
+        if (_quarantine_poison)
+            memset(aligned, QUARANTINE_POISON, size);
 
         AcquireSRWLockExclusive(&_quarantine_lock);
 
@@ -790,6 +791,9 @@ public:
         // formed by the time the first allocation routes through here.
         const char* cmdLine = GetCommandLineA();
         _quarantine_enabled = !(cmdLine && strstr(cmdLine, "-r1delta_no_quarantine_frees"));
+        // Poisoned frees are a diagnostic, not shipping behavior: they turn
+        // latent UAF reads into wild-pointer crashes in unrelated modules.
+        _quarantine_poison = cmdLine && strstr(cmdLine, "-r1delta_quarantine_poison_frees");
     }
 
     void* Alloc(size_t nSize) override {
