@@ -5,7 +5,9 @@ param(
 
     [string] $BuildPath,
 
-    [string] $PayloadPath
+    [string] $PayloadPath,
+
+    [switch] $PackagedPayload
 )
 
 Set-StrictMode -Version Latest
@@ -286,7 +288,11 @@ function Assert-Payload {
     $payloadRoot = Get-NormalizedFullPath $Root
     Assert-Condition (Test-Path -LiteralPath $payloadRoot -PathType Container) "Payload path does not exist: $payloadRoot"
 
-    foreach ($fileName in @('R1Delta_DS.exe', 'r1delta.exe', 'r1delta.exe.config', 'Titanfall.exe', 'R1Delta.nuspec')) {
+    $requiredRootFiles = @('R1Delta_DS.exe', 'r1delta.exe', 'r1delta.exe.config', 'Titanfall.exe')
+    if (-not $PackagedPayload) {
+        $requiredRootFiles += 'R1Delta.nuspec'
+    }
+    foreach ($fileName in $requiredRootFiles) {
         Assert-Condition (Test-Path -LiteralPath (Join-Path $payloadRoot $fileName) -PathType Leaf) (
             "Release payload is missing $fileName."
         )
