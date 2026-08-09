@@ -509,6 +509,7 @@ extern CSquirrelVM__GetEntityFromInstance_t CSquirrelVM__GetEntityFromInstance;
 extern sq_GetEntityConstant_CBaseEntity_t sq_GetEntityConstant_CBaseEntity; // CLIENT
 extern AddSquirrelReg_t AddSquirrelReg;
 extern void* sq_getentity(HSQUIRRELVM v, SQInteger iStackPos);
+extern bool SendChatMessageToRecipient(void* recipient, int fromIndex, const char* message, bool team, bool dead);
 extern std::vector<std::string> modLocalization_files;
 
 #define REGISTER_SCRIPT_FUNCTION(context, name, func, typeMask, paramsCheck, returnType, argNames, helpText) \

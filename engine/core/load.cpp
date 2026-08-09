@@ -38,6 +38,7 @@
 
 #include "load.h"
 #include "player_resource_18.h"
+#include "ffa_targeting.h"
 #include "r1o_runtime_paths.h"
 #include <cstdlib>
 #include <cmath>
@@ -8214,7 +8215,8 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	if (installClientDebugHooks)
 		PatchClientStaticPropLodNoMatchSentinel(engine_base);
 
-	//MH_CreateHook((LPVOID)(engine_base + 0x0D2490), &ProcessConnectionlessPacketClient, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginalClient));
+	// Client connectionless traffic uses the stock R1 handler. Query limiting is
+	// disabled by default and must not be toggled around unrelated packet types.
 
 	if (!IsDedicatedServer()) {
 		MH_CreateHook((LPVOID)(G_engine + 0x1305E0), &ExecuteConfigFile, NULL);
@@ -9563,6 +9565,7 @@ void __stdcall LoaderNotificationCallback(
 			InstallR1ClientPlayerResource18(G_client);
 			InstallClientDatacacheCallbackGuard(G_client);
 			InstallClientPlayerClassCompatibilityHooks(G_client);
+			r1delta::ffa_targeting::InstallClientHooks(G_client);
 			if (ShouldInstallR1OClientDebugHooks()) {
 				InstallClientRenderableDrawModelHook(G_client);
 				ClientMaybeInstallViewSubHooks();
@@ -9609,6 +9612,10 @@ void __stdcall LoaderNotificationCallback(
 				MH_CreateHook((LPVOID)(G_localize + 0x3A40), &h_CLocalize__ReloadLocalizationFiles, (LPVOID*)&o_pCLocalize__ReloadLocalizationFiles);
 				MH_EnableHook(MH_ALL_HOOKS);
 				std::thread(DiscordThread).detach();
+		}
+		if (is_server || is_r1o_server_local) {
+			r1delta::ffa_targeting::InstallServerHooks(
+				reinterpret_cast<std::uintptr_t>(notification_data->Loaded.DllBase));
 		}
 		if (is_server || is_r1o_server_local) do_server(notification_data);
 		if (should_init_security_fixes && (is_client || is_server || is_r1o_server_local)) {

@@ -39,6 +39,7 @@
 #include "keyvalues.h"
 #include "persistentdata.h"
 #include "load.h"
+#include "ffa_targeting.h"
 
 #include <random>
 #include "masterserver.h"
@@ -1232,7 +1233,7 @@ void ConstructCRecipientFilter(void* a1)
 	*reinterpret_cast<uint16_t*>  (reinterpret_cast<uint8_t*>(a1) + 48) = 0;
 }
 
-void SendChatMsg(CRecipientFilter* filter, int fromIndex, const char* msg, bool team, bool dead)
+bool SendChatMsg(CRecipientFilter* filter, int fromIndex, const char* msg, bool team, bool dead)
 {
 	static auto MessageWriteByte = reinterpret_cast<void (*)(int64, int, int)>(G_server + 0x142FA0);
 	static auto MessageWriteString = reinterpret_cast<void (*)(int64,const char*)>(G_server + 0x663AF0);
@@ -1242,12 +1243,30 @@ void SendChatMsg(CRecipientFilter* filter, int fromIndex, const char* msg, bool 
 
 	*activeMsg = UserMsgBegin_Wrapper(filter, "SayText");
 	if (!*activeMsg)
-		return;
+		return false;
 	MessageWriteByte(*activeMsg, fromIndex, 8);
 	MessageWriteString(0, msg);
 	MessageWriteBool(team);
 	MessageWriteBool(dead);
 	EndMessage();
+	*activeMsg = 0;
+	return true;
+}
+
+bool SendChatMessageToRecipient(void* recipient, int fromIndex, const char* message, bool team, bool dead)
+{
+	if (!recipient)
+		return false;
+
+	static auto CRecipientFilter__AddRecipient = reinterpret_cast<void(*)(void*, void*)>(G_server + 0x1E7CB0);
+	static auto DestroyFilter = reinterpret_cast<void(*)(void*, bool)>(G_server + 0x1E78D0);
+
+	CRecipientFilter filter;
+	ConstructCRecipientFilter(&filter);
+	CRecipientFilter__AddRecipient(&filter, recipient);
+	const bool sent = SendChatMsg(&filter, fromIndex, message, team, dead);
+	DestroyFilter(&filter, false);
+	return sent;
 }
 
 
@@ -1635,6 +1654,7 @@ void RunAutorunScripts(R1SquirrelVM* r1sqvm, const char* prefix) {
 
 uintptr_t(__fastcall *oOnCreateClientScriptVM)(uintptr_t);
 uintptr_t OnCreateClientScriptVM(uintptr_t thisptr) {
+	r1delta::ffa_targeting::SetFfaBased(false);
 	auto ret = oOnCreateClientScriptVM(thisptr);
 	RunAutorunScripts(GetClientVMPtr(), "cl_*");
 	return ret;
@@ -1649,9 +1669,18 @@ bool OnCreateUIScriptVM() {
 
 uintptr_t(__fastcall *oOnCreateServerScriptVM)();
 uintptr_t OnCreateServerScriptVM() {
+	r1delta::ffa_targeting::SetFfaBased(false);
 	auto ret = oOnCreateServerScriptVM();
 	RunAutorunScripts(GetServerVMPtr(), "sv_*");
 	return ret;
+}
+
+SQInteger Script_SetFfaBased(HSQUIRRELVM v) {
+	SQBool enabled = SQFalse;
+	if (SQ_FAILED(sq_getbool(nullptr, v, 2, &enabled)))
+		return sq_throwerror(v, "FFA state must be a boolean");
+	r1delta::ffa_targeting::SetFfaBased(enabled != SQFalse);
+	return 0;
 }
 
 int AutoCVar(HSQUIRRELVM v) {
@@ -2361,6 +2390,26 @@ bool GetSQVMFuncs() {
 		"bool",
 		"",
 		"Returns whether the the server is dedicated or listen."
+	);
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_CLIENT,
+		"R1Delta_SetFFABased",
+		(SQFUNCTION)Script_SetFfaBased,
+		".b",
+		2,
+		"void",
+		"bool enabled",
+		"Synchronize native player relationship behavior with the replicated FFA state."
+	);
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER,
+		"R1Delta_SetFFABased",
+		(SQFUNCTION)Script_SetFfaBased,
+		".b",
+		2,
+		"void",
+		"bool enabled",
+		"Synchronize native player relationship behavior with the authoritative FFA state."
 	);
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_UI, // Available in client script contexts

@@ -165,21 +165,175 @@ namespace R1Delta
     {
         internal const string ValidationFileRelativePath = @"vpk\client_mp_common.bsp.pak000_000.vpk";
         private const int MaxVerificationDownloadPasses = 3;
+        internal const string ManagedInstallMarkerRelativePath = ".r1delta-managed-install";
+        internal const string ManagedInstallMarkerMagic = "R1DELTA_MANAGED_INSTALL_V1\r\n";
+        internal const string LegacyCompletedInstallVpkRelativePath = @"vpk\client_mp_delta_common.bsp.pak000_000.vpk";
+        private static readonly byte[] ManagedInstallMarkerBytes =
+            new System.Text.UTF8Encoding(false, true).GetBytes(ManagedInstallMarkerMagic);
+
+        internal readonly struct GameRootResolution
+        {
+            internal GameRootResolution(
+                bool succeeded,
+                bool isUsableDestination,
+                string resolvedRoot,
+                string selectedCandidate,
+                string childCandidate,
+                string message)
+            {
+                Succeeded = succeeded;
+                IsUsableDestination = isUsableDestination;
+                ResolvedRoot = resolvedRoot;
+                SelectedCandidate = selectedCandidate;
+                ChildCandidate = childCandidate;
+                Message = message;
+            }
+
+            internal bool Succeeded { get; }
+            internal bool IsUsableDestination { get; }
+            internal string ResolvedRoot { get; }
+            internal string SelectedCandidate { get; }
+            internal string ChildCandidate { get; }
+            internal string Message { get; }
+        }
+
+        /// <summary>
+        /// Resolves a selected directory to either that exact game root or its direct r1delta child.
+        /// No other descendants are considered.
+        /// </summary>
+        internal static GameRootResolution ResolveGameRoot(string selectedPath)
+        {
+            if (string.IsNullOrWhiteSpace(selectedPath))
+            {
+                return new GameRootResolution(
+                    false,
+                    false,
+                    null,
+                    selectedPath,
+                    null,
+                    $"The selected path is empty. Required marker: '{ValidationFileRelativePath}'. " +
+                    "No root candidates could be tested.");
+            }
+            string rawChildCandidate =
+                selectedPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) +
+                Path.DirectorySeparatorChar +
+                "r1delta";
+
+
+            string selectedCandidate;
+            string childCandidate;
+            string selectedMarker;
+            string childMarker;
+            try
+            {
+                selectedCandidate = Path.GetFullPath(selectedPath);
+                string selectedPathRoot = Path.GetPathRoot(selectedCandidate);
+                if (!string.Equals(selectedCandidate, selectedPathRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    selectedCandidate = selectedCandidate.TrimEnd(
+                        Path.DirectorySeparatorChar,
+                        Path.AltDirectorySeparatorChar);
+                }
+                childCandidate = Path.Combine(selectedCandidate, "r1delta");
+                selectedMarker = Path.Combine(selectedCandidate, ValidationFileRelativePath);
+                childMarker = Path.Combine(childCandidate, ValidationFileRelativePath);
+            }
+            catch (Exception ex) when (
+                ex is NotSupportedException ||
+                ex is System.Security.SecurityException ||
+                ex is ArgumentException ||
+                ex is PathTooLongException ||
+                ex is IOException)
+            {
+                return new GameRootResolution(
+                    false,
+                    false,
+                    null,
+                    selectedPath,
+                    rawChildCandidate,
+                    $"The selected path '{selectedPath}' is invalid: {ex.Message} " +
+                    $"Required marker: '{ValidationFileRelativePath}'. " +
+                    $"Candidates could not be tested: '{selectedPath}' and '{rawChildCandidate}'.");
+            }
+
+            return ResolveGameRootCandidates(
+                selectedCandidate,
+                childCandidate,
+                selectedMarker,
+                childMarker,
+                File.Exists(selectedMarker),
+                File.Exists(childMarker));
+        }
+
+        /// <summary>
+        /// Pure candidate decision: the same normalized candidates and marker observations always produce the same result.
+        /// </summary>
+        internal static GameRootResolution ResolveGameRootCandidates(
+            string selectedCandidate,
+            string childCandidate,
+            string selectedMarker,
+            string childMarker,
+            bool selectedIsValid,
+            bool childIsValid)
+        {
+            if (selectedIsValid && childIsValid)
+            {
+                return new GameRootResolution(
+                    false,
+                    false,
+                    null,
+                    selectedCandidate,
+                    childCandidate,
+                    $"The selected location is ambiguous because both candidates contain the required marker " +
+                    $"'{ValidationFileRelativePath}'. Tested candidates: '{selectedCandidate}' and '{childCandidate}'.");
+            }
+
+            if (selectedIsValid)
+            {
+                return new GameRootResolution(
+                    true,
+                    true,
+                    selectedCandidate,
+                    selectedCandidate,
+                    childCandidate,
+                    $"Resolved game root '{selectedCandidate}' using marker '{selectedMarker}'.");
+            }
+
+            if (childIsValid)
+            {
+                return new GameRootResolution(
+                    true,
+                    true,
+                    childCandidate,
+                    selectedCandidate,
+                    childCandidate,
+                    $"Resolved game root '{childCandidate}' using marker '{childMarker}'.");
+            }
+
+            return new GameRootResolution(
+                false,
+                true,
+                selectedCandidate,
+                selectedCandidate,
+                childCandidate,
+                $"The required marker '{ValidationFileRelativePath}' was not observed at either candidate. " +
+                $"Using '{selectedCandidate}' as a new or partial installation destination. " +
+                $"Tested candidates: '{selectedCandidate}' (marker '{selectedMarker}') and " +
+                $"'{childCandidate}' (marker '{childMarker}').");
+        }
 
         /// <summary>
         /// Tries to locate an existing valid Titanfall directory via registry or custom finder.
         /// </summary>
-        internal static string TryFindExistingValidPath(string originalLauncherDir, bool fullValidate)
+        internal static string TryFindExistingValidPath()
         {
-            // a) Registry
-            var registryPath = RegistryHelper.GetInstallPath();
-            if (ValidateGamePath(registryPath, originalLauncherDir))
+            var registryResolution = ResolveGameRoot(RegistryHelper.GetInstallPath());
+            if (registryResolution.Succeeded)
             {
-                Debug.WriteLine($"[TryFindExistingValidPath] Found via registry: {registryPath}");
-                return registryPath;
+                Debug.WriteLine($"[TryFindExistingValidPath] Found via registry: {registryResolution.ResolvedRoot}");
+                return registryResolution.ResolvedRoot;
             }
 
-            // b) TitanfallFinder
             var exePath = TitanfallFinder.TitanfallLocator.FindTitanfallOrR1Delta();
             string finderDir = null;
             if (!string.IsNullOrEmpty(exePath))
@@ -194,58 +348,324 @@ namespace R1Delta
                 }
             }
 
-            if (!string.IsNullOrEmpty(finderDir) &&
-                (!fullValidate || ValidateGamePath(finderDir, originalLauncherDir)))
+            var finderResolution = ResolveGameRoot(finderDir);
+            if (finderResolution.Succeeded)
             {
-                Debug.WriteLine($"[TryFindExistingValidPath] Found via finder: {finderDir}");
-                return finderDir;
+                Debug.WriteLine($"[TryFindExistingValidPath] Found via finder: {finderResolution.ResolvedRoot}");
+                return finderResolution.ResolvedRoot;
             }
 
             Debug.WriteLine("[TryFindExistingValidPath] No valid path found.");
             return null;
         }
 
-        /// <summary>
-        /// Validates that the given path points to a working Titanfall install.
-        /// </summary>
-        internal static bool ValidateGamePath(string path, string originalLauncherDir)
+
+        internal static bool TryNormalizeInstallRootPath(
+            string installDir,
+            out string normalizedRoot,
+            out string error)
         {
-            if (string.IsNullOrWhiteSpace(path))
+            normalizedRoot = null;
+            error = null;
+            if (string.IsNullOrWhiteSpace(installDir))
+            {
+                error = "The installation directory is empty.";
+                return false;
+            }
+
+            try
+            {
+                normalizedRoot = Path.GetFullPath(installDir);
+                string pathRoot = Path.GetPathRoot(normalizedRoot);
+                if (!string.Equals(normalizedRoot, pathRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    normalizedRoot = normalizedRoot.TrimEnd(
+                        Path.DirectorySeparatorChar,
+                        Path.AltDirectorySeparatorChar);
+                }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = $"The installation directory '{installDir}' is invalid: {ex.Message}";
+                return false;
+            }
+        }
+
+        private sealed class InstallOperationLease : IDisposable
+        {
+            private FileStream _lockStream;
+
+            internal InstallOperationLease(FileStream lockStream)
+            {
+                _lockStream = lockStream;
+            }
+
+            public void Dispose()
+            {
+                Interlocked.Exchange(ref _lockStream, null)?.Dispose();
+            }
+        }
+
+        internal static bool TryAcquireInstallOperationLease(
+            string installDir,
+            out IDisposable operationLease,
+            out string error)
+        {
+            operationLease = null;
+            if (!TryNormalizeInstallRootPath(installDir, out string normalizedRoot, out error))
                 return false;
 
             try
             {
-                var full = Path.GetFullPath(path);
-                if (!Directory.Exists(full))
+                Directory.CreateDirectory(normalizedRoot);
+                string lockPath = Path.Combine(normalizedRoot, ".r1delta-install-operation.lock");
+
+                FileStream lockStream;
+                try
                 {
-                    Debug.WriteLine($"[ValidateGamePath] Not found: {full}");
+                    lockStream = new FileStream(
+                        lockPath,
+                        FileMode.OpenOrCreate,
+                        FileAccess.ReadWrite,
+                        FileShare.None,
+                        4096,
+                        FileOptions.DeleteOnClose);
+                }
+                catch (IOException ex)
+                {
+                    error =
+                        $"Another setup, update, or uninstall operation may already be using '{normalizedRoot}'. " +
+                        $"Wait for it to finish and try again. ({ex.Message})";
                     return false;
                 }
 
-                var check = Path.Combine(full, ValidationFileRelativePath);
-                if (!File.Exists(check))
+                try
                 {
-                    Debug.WriteLine($"[ValidateGamePath] Missing file: {check}");
-                    return false;
+                    lockStream.SetLength(0);
+                    byte[] ownerBytes = System.Text.Encoding.UTF8.GetBytes(
+                        $"root={normalizedRoot}\r\nprocess={Process.GetCurrentProcess().Id}\r\n");
+                    lockStream.Write(ownerBytes, 0, ownerBytes.Length);
+                    lockStream.Flush(true);
+                    lockStream.Position = 0;
+                    operationLease = new InstallOperationLease(lockStream);
+                    return true;
                 }
-
-                Debug.WriteLine($"[ValidateGamePath] OK: {full}");
-                return true;
-            }
-            catch (Exception ex) when (
-                ex is NotSupportedException ||
-                ex is System.Security.SecurityException ||
-                ex is ArgumentException ||
-                ex is PathTooLongException ||
-                ex is IOException)
-            {
-                Debug.WriteLine($"[ValidateGamePath] Error validating '{path}': {ex.Message}");
-                return false;
+                catch
+                {
+                    lockStream.Dispose();
+                    throw;
+                }
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[ValidateGamePath] Unexpected for '{path}': {ex.GetType().Name} - {ex.Message}");
+                error = $"Could not acquire the install-operation lease for '{normalizedRoot}': {ex.Message}";
                 return false;
+            }
+        }
+
+
+        internal static bool TryGetManagedInstallMarkerPath(
+            string installDir,
+            out string markerPath,
+            out string error)
+        {
+            markerPath = null;
+            if (!TryNormalizeInstallRootPath(installDir, out string normalizedRoot, out error))
+                return false;
+
+            try
+            {
+                markerPath = Path.Combine(normalizedRoot, ManagedInstallMarkerRelativePath);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = $"Could not construct the managed-install marker path for '{normalizedRoot}': {ex.Message}";
+                return false;
+            }
+        }
+
+        internal static bool IsManagedInstallMarkerContent(string content)
+        {
+            return string.Equals(content, ManagedInstallMarkerMagic, StringComparison.Ordinal);
+        }
+
+        internal static bool HasValidManagedInstallOwnership(string installDir)
+        {
+            if (!TryGetManagedInstallMarkerPath(installDir, out string markerPath, out string error))
+            {
+                Debug.WriteLine($"[ManagedInstall] Ownership validation failed: {error}");
+                return false;
+            }
+
+            try
+            {
+                return HasExactManagedInstallMarkerAtPath(markerPath);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[ManagedInstall] Could not validate marker '{markerPath}': {ex.Message}");
+                return false;
+            }
+        }
+
+        internal static bool TryEnsureManagedInstallOwnership(string installDir, out string error)
+        {
+            error = null;
+            if (!TryNormalizeInstallRootPath(installDir, out string normalizedRoot, out error))
+                return false;
+
+            string markerPath;
+            try
+            {
+                markerPath = Path.Combine(normalizedRoot, ManagedInstallMarkerRelativePath);
+                Directory.CreateDirectory(normalizedRoot);
+            }
+            catch (Exception ex)
+            {
+                error = $"Could not prepare the managed-install marker in '{normalizedRoot}': {ex.Message}";
+                return false;
+            }
+
+            if (File.Exists(markerPath))
+            {
+                if (HasValidManagedInstallOwnership(normalizedRoot))
+                    return true;
+
+                error = $"The existing managed-install marker '{markerPath}' does not contain the expected R1Delta ownership value.";
+                return false;
+            }
+
+            string temporaryPath = markerPath + ".tmp." + Guid.NewGuid().ToString("N");
+            try
+            {
+                using (var stream = new FileStream(
+                    temporaryPath,
+                    FileMode.CreateNew,
+                    FileAccess.Write,
+                    FileShare.None,
+                    4096,
+                    FileOptions.WriteThrough))
+                {
+                    stream.Write(ManagedInstallMarkerBytes, 0, ManagedInstallMarkerBytes.Length);
+                    stream.Flush(true);
+                }
+
+                try
+                {
+                    File.Move(temporaryPath, markerPath);
+                }
+                catch (IOException) when (HasValidManagedInstallOwnership(normalizedRoot))
+                {
+                    // Another setup operation atomically installed the same valid marker.
+                }
+
+                if (!HasValidManagedInstallOwnership(normalizedRoot))
+                {
+                    error = $"The managed-install marker '{markerPath}' could not be verified after creation.";
+                    return false;
+                }
+
+                Debug.WriteLine($"[ManagedInstall] Durable ownership marker ready: {markerPath}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = $"Could not create the managed-install marker '{markerPath}': {ex.Message}";
+                return false;
+            }
+            finally
+            {
+                try
+                {
+                    if (File.Exists(temporaryPath))
+                        File.Delete(temporaryPath);
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[ManagedInstall] Could not remove temporary marker '{temporaryPath}': {ex.Message}");
+                }
+            }
+        }
+
+        internal static bool TryRemoveManagedInstallOwnership(string installDir, out string error)
+        {
+            error = null;
+            if (!TryGetManagedInstallMarkerPath(installDir, out string markerPath, out error))
+                return false;
+
+            try
+            {
+                if (!File.Exists(markerPath))
+                    return true;
+
+                if (!HasExactManagedInstallMarkerAtPath(markerPath))
+                {
+                    error = $"Refusing to remove malformed managed-install marker '{markerPath}'.";
+                    return false;
+                }
+
+                File.Delete(markerPath);
+                if (File.Exists(markerPath))
+                {
+                    error = $"The managed-install marker '{markerPath}' still exists after deletion.";
+                    return false;
+                }
+
+                Debug.WriteLine($"[ManagedInstall] Removed ownership marker: {markerPath}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = $"Could not remove the managed-install marker '{markerPath}': {ex.Message}";
+                return false;
+            }
+        }
+
+        internal static bool HasLegacyCompletedInstallProof(string installDir)
+        {
+            if (!TryNormalizeInstallRootPath(installDir, out string normalizedRoot, out string error))
+            {
+                Debug.WriteLine($"[ManagedInstall] Legacy proof validation failed: {error}");
+                return false;
+            }
+
+            try
+            {
+                return File.Exists(Path.Combine(normalizedRoot, LegacyCompletedInstallVpkRelativePath));
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[ManagedInstall] Could not validate legacy completion proof in '{normalizedRoot}': {ex.Message}");
+                return false;
+            }
+        }
+
+        internal static bool IsManagedCleanupAuthorized(bool hasValidMarker, bool hasLegacyCompletedInstallProof)
+        {
+            return hasValidMarker || hasLegacyCompletedInstallProof;
+        }
+
+        private static bool HasExactManagedInstallMarkerAtPath(string markerPath)
+        {
+            using (var stream = new FileStream(
+                markerPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                ManagedInstallMarkerBytes.Length,
+                FileOptions.SequentialScan))
+            {
+                if (stream.Length != ManagedInstallMarkerBytes.Length)
+                    return false;
+
+                for (int index = 0; index < ManagedInstallMarkerBytes.Length; index++)
+                {
+                    if (stream.ReadByte() != ManagedInstallMarkerBytes[index])
+                        return false;
+                }
+                return stream.ReadByte() == -1;
             }
         }
 
@@ -287,14 +707,19 @@ namespace R1Delta
                 return false;
             }
 
-            // Ensure installDir is an absolute, normalized path for FastDownloadService.
-            try
+            // Refuse to hand an unowned destination to a downloader. Setup creates
+            // and durably verifies the marker only after the user confirms.
+            if (!TryNormalizeInstallRootPath(installDir, out string normalizedInstallDir, out string pathError))
             {
-                installDir = Path.GetFullPath(installDir);
+                progressUI.ShowError($"Internal Error: {pathError}");
+                return false;
             }
-            catch (Exception ex)
+            installDir = normalizedInstallDir;
+
+            if (!HasValidManagedInstallOwnership(installDir))
             {
-                progressUI.ShowError($"Internal Error: Invalid installation directory '{installDir}': {ex.Message}");
+                progressUI.ShowError(
+                    $"Setup cannot download files because the R1Delta managed-install marker is missing or malformed in '{installDir}'.");
                 return false;
             }
 
@@ -316,9 +741,13 @@ namespace R1Delta
             const double rollingWindow = 5.0;
             double lastUpdate = -1;
             object progressLock = new object();
-            long overallProgress = 0; // Initialize overall progress
-            long maxReportedOverallProgress = -1; // Initialize max reported progress to ensure first report goes through
+            long overallProgress = 0;
             var totalManifestBytes = TitanfallFileList.s_fileList.Sum(file => file.Size);
+            var statusProgress = progressUI as IInstallProgressStatus;
+            statusProgress?.ReportStatus(new InstallProgressStatus
+            {
+                Phase = InstallProgressPhase.Preflight
+            });
             progressUI.ReportProgress(0, totalManifestBytes, 0.0);
 
             Debug.WriteLine($"Verifying existing files in: {installDir}");
@@ -430,7 +859,10 @@ namespace R1Delta
             if (!toDownload.Any())
             {
                 Debug.WriteLine("All files present and verified.");
-                // Ensure final progress is reported as 100%
+                statusProgress?.ReportStatus(new InstallProgressStatus
+                {
+                    Phase = InstallProgressPhase.Complete
+                });
                 progressUI.ReportProgress(totalNeeded, totalNeeded, 0.0);
                 EnsurePlaceholderVpkExists(installDir);
                 return true;
@@ -449,6 +881,12 @@ namespace R1Delta
             var onePercentCeiling = totalNeeded / 100L + (totalNeeded % 100L == 0 ? 0L : 1L);
             var preVerificationProgressCap = Math.Max(0L, totalNeeded - Math.Max(1L, onePercentCeiling));
 
+            var currentProgressPhase = InstallProgressPhase.Resume;
+            DownloadBackend? currentBackend = null;
+            var currentTransferPhase = DownloadTransferPhase.Preparing;
+            var currentAttempt = 0;
+            var phaseMaxReportedProgress = -1L;
+
             long ProjectProgress(long downloadedBytes, long validatedBytes)
             {
                 if (downloadedFilesTotal <= 0)
@@ -462,13 +900,44 @@ namespace R1Delta
             void ReportAggregateProgress(long rawOverallProgress, double speed)
             {
                 var projectedProgress = ProjectProgress(rawOverallProgress, validationProgress);
-                projectedProgress = Math.Min(projectedProgress, preVerificationProgressCap);
-                maxReportedOverallProgress = Math.Max(maxReportedOverallProgress, projectedProgress);
-                progressUI.ReportProgress(maxReportedOverallProgress, totalNeeded, Math.Max(0, speed));
+                if (currentProgressPhase != InstallProgressPhase.Verification)
+                    projectedProgress = Math.Min(projectedProgress, preVerificationProgressCap);
+                phaseMaxReportedProgress = phaseMaxReportedProgress < 0
+                    ? projectedProgress
+                    : Math.Max(phaseMaxReportedProgress, projectedProgress);
+                progressUI.ReportProgress(phaseMaxReportedProgress, totalNeeded, Math.Max(0, speed));
                 lastUpdate = stopwatch.Elapsed.TotalSeconds;
             }
 
-            ReportAggregateProgress(overallProgress, 0.0);
+            void BeginProgressPhase(
+                InstallProgressPhase phase,
+                DownloadBackend? backend = null,
+                DownloadTransferPhase transferPhase = DownloadTransferPhase.Preparing,
+                int attempt = 0,
+                int maxAttempts = 0,
+                int verificationPass = 0)
+            {
+                currentProgressPhase = phase;
+                currentBackend = backend;
+                currentTransferPhase = transferPhase;
+                currentAttempt = attempt;
+                phaseMaxReportedProgress = -1;
+                lastUpdate = -1;
+                history.Clear();
+                statusProgress?.ReportStatus(new InstallProgressStatus
+                {
+                    Phase = phase,
+                    Backend = backend,
+                    TransferPhase = transferPhase,
+                    Attempt = attempt,
+                    MaxAttempts = maxAttempts,
+                    VerificationPass = verificationPass,
+                    MaxVerificationPasses = MaxVerificationDownloadPasses
+                });
+                ReportAggregateProgress(overallProgress, 0);
+            }
+
+            BeginProgressPhase(InstallProgressPhase.Resume);
 
             void RecordSpeedSample(long rawOverallProgress)
             {
@@ -492,14 +961,32 @@ namespace R1Delta
             try
             {
                 using var dl = new FastDownloadService(installDir);
-                dl.DownloadProgressChanged += (destinationPath, got, total) =>
+                dl.DownloadProgressChanged += update =>
                 {
                     if (token.IsCancellationRequested) return;
 
                     lock (progressLock)
                     {
-                        var expectedSize = fileTotalBytes.TryGetValue(destinationPath, out var knownSize) ? knownSize : total;
-                        fileReceivedBytes[destinationPath] = Clamp(got, 0, expectedSize);
+                        var aggregatePhase = update.Backend == DownloadBackend.Aria2
+                            ? InstallProgressPhase.Download
+                            : InstallProgressPhase.Fallback;
+                        if (aggregatePhase != currentProgressPhase ||
+                            update.Backend != currentBackend ||
+                            update.Phase != currentTransferPhase ||
+                            update.Attempt != currentAttempt)
+                        {
+                            BeginProgressPhase(
+                                aggregatePhase,
+                                update.Backend,
+                                update.Phase,
+                                update.Attempt,
+                                update.MaxAttempts);
+                        }
+
+                        var expectedSize = fileTotalBytes.TryGetValue(update.DestinationPath, out var knownSize)
+                            ? knownSize
+                            : Math.Max(update.TotalBytes, update.BytesReceived);
+                        fileReceivedBytes[update.DestinationPath] = Clamp(update.BytesReceived, 0, expectedSize);
                         overallProgress = Clamp(fileReceivedBytes.Values.Sum(), 0, totalNeeded);
                         RecordSpeedSample(overallProgress);
 
@@ -510,8 +997,10 @@ namespace R1Delta
                 };
 
                 var pendingDownloads = toDownload.ToList();
+                var completedVerificationPass = 0;
                 for (var verificationPass = 1; verificationPass <= MaxVerificationDownloadPasses; verificationPass++)
                 {
+                    completedVerificationPass = verificationPass;
                     var downloadRequests = pendingDownloads.Select(item => new FastDownloadService.DownloadRequest
                     {
                         Url = item.Url,
@@ -528,6 +1017,13 @@ namespace R1Delta
 
                         overallProgress = Clamp(fileReceivedBytes.Values.Sum(), 0, totalNeeded);
                         ReportAggregateProgress(overallProgress, 0);
+                    }
+
+                    lock (progressLock)
+                    {
+                        BeginProgressPhase(
+                            InstallProgressPhase.Verification,
+                            verificationPass: verificationPass);
                     }
 
                     Debug.WriteLine($"Downloads complete. Verifying pass {verificationPass}/{MaxVerificationDownloadPasses}...");
@@ -625,15 +1121,22 @@ namespace R1Delta
                         }
 
                         overallProgress = Clamp(fileReceivedBytes.Values.Sum(), 0, totalNeeded);
-                        history.Clear();
+                        BeginProgressPhase(
+                            InstallProgressPhase.ChecksumRepair,
+                            verificationPass: verificationPass);
                         RecordSpeedSample(overallProgress);
-                        ReportAggregateProgress(overallProgress, 0);
                     }
 
                     pendingDownloads = failedDownloads;
                     Debug.WriteLine($"Retrying {pendingDownloads.Count} file(s) after clean verification repair.");
                 }
 
+                statusProgress?.ReportStatus(new InstallProgressStatus
+                {
+                    Phase = InstallProgressPhase.Complete,
+                    VerificationPass = completedVerificationPass,
+                    MaxVerificationPasses = MaxVerificationDownloadPasses
+                });
                 progressUI.ReportProgress(totalNeeded, totalNeeded, 0);
                 Debug.WriteLine("All downloads completed and verified successfully.");
                 EnsurePlaceholderVpkExists(installDir);
@@ -710,16 +1213,35 @@ namespace R1Delta
             }
         }
 
-        private static void DeleteDownloadArtifacts(string filePath)
+        internal static bool HasDownloadSidecars(string filePath)
         {
-            DeleteFileIfExists(filePath);
-            DeleteFileIfExists(filePath + ".aria2");
+            return GetDownloadSidecarPaths(filePath).Any(File.Exists);
         }
 
-        private static void DeleteFileIfExists(string filePath)
+        internal static int DeleteDownloadArtifacts(string filePath)
         {
-            if (File.Exists(filePath))
-                File.Delete(filePath);
+            var deleted = DeleteFileIfExists(filePath) ? 1 : 0;
+            foreach (var sidecarPath in GetDownloadSidecarPaths(filePath))
+            {
+                if (DeleteFileIfExists(sidecarPath))
+                    deleted++;
+            }
+            return deleted;
+        }
+
+        private static IEnumerable<string> GetDownloadSidecarPaths(string filePath)
+        {
+            yield return filePath + ".aria2";
+            yield return filePath + ".part";
+            yield return filePath + ".curl.partial";
+        }
+
+        private static bool DeleteFileIfExists(string filePath)
+        {
+            if (!File.Exists(filePath))
+                return false;
+            File.Delete(filePath);
+            return true;
         }
 
         /// <summary>
@@ -749,5 +1271,32 @@ namespace R1Delta
 
         /// <summary>Shows a modal or inline error message.</summary>
         void ShowError(string message);
+    }
+
+    public interface IInstallProgressStatus
+    {
+        void ReportStatus(InstallProgressStatus status);
+    }
+
+    public enum InstallProgressPhase
+    {
+        Preflight,
+        Resume,
+        Download,
+        Fallback,
+        Verification,
+        ChecksumRepair,
+        Complete
+    }
+
+    public sealed class InstallProgressStatus
+    {
+        public InstallProgressPhase Phase { get; set; }
+        public DownloadBackend? Backend { get; set; }
+        public DownloadTransferPhase TransferPhase { get; set; }
+        public int Attempt { get; set; }
+        public int MaxAttempts { get; set; }
+        public int VerificationPass { get; set; }
+        public int MaxVerificationPasses { get; set; }
     }
 }

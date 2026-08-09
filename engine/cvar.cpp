@@ -1104,20 +1104,37 @@ ConVarR1* RegisterConVar(const char* name, const char* value, int flags, const c
 	return newVar;
 }
 
+static void* AllocateR1OEngineOwnedMemory(size_t size)
+{
+	void* memory = hkmalloc_base(size);
+	if (!memory)
+		throw std::bad_alloc();
+	return memory;
+}
+
+static char* DuplicateR1OEngineOwnedString(const char* value)
+{
+	const char* source = value ? value : "";
+	const size_t size = strlen(source) + 1;
+	char* copy = static_cast<char*>(AllocateR1OEngineOwnedMemory(size));
+	memcpy(copy, source, size);
+	return copy;
+}
+
 static ConVarR1O* CreateR1OConVarForWrappedRegistration(const char* name, const char* value, int flags, const char* helpString)
 {
-	ConVarR1O* newVar = reinterpret_cast<ConVarR1O*>(::operator new(sizeof(ConVarR1O)));
+	ConVarR1O* newVar = reinterpret_cast<ConVarR1O*>(AllocateR1OEngineOwnedMemory(sizeof(ConVarR1O)));
 	memset(newVar, 0, sizeof(ConVarR1O));
 	newVar->vtable = GetR1OConVarVTable();
 	newVar->m_pNext = nullptr;
 	newVar->m_bRegistered = false;
-	newVar->m_pszName = _strdup(name ? name : "");
-	newVar->m_pszHelpString = _strdup(helpString ? helpString : "");
+	newVar->m_pszName = DuplicateR1OEngineOwnedString(name);
+	newVar->m_pszHelpString = DuplicateR1OEngineOwnedString(helpString);
 	newVar->m_nFlags = flags;
 	newVar->__vftable = GetR1OIConVarVTable();
 	newVar->m_pParent = newVar;
-	newVar->m_pszDefaultValue = _strdup(value ? value : "");
-	newVar->m_Value.m_pszString = _strdup(newVar->m_pszDefaultValue);
+	newVar->m_pszDefaultValue = DuplicateR1OEngineOwnedString(value);
+	newVar->m_Value.m_pszString = DuplicateR1OEngineOwnedString(newVar->m_pszDefaultValue);
 	newVar->m_Value.m_StringLength = strlen(newVar->m_Value.m_pszString) + 1;
 	newVar->m_Value.m_fValue = static_cast<float>(atof(newVar->m_Value.m_pszString));
 	newVar->m_Value.m_nValue = atoi(newVar->m_Value.m_pszString);
@@ -1140,13 +1157,13 @@ static void R1ODediDispatcherOwnedCommand(const CCommand&)
 
 static ConCommandR1O* CreateR1OConCommandForWrappedRegistration(const char* name, void (*callback)(const CCommand&), int flags, const char* helpString)
 {
-	ConCommandR1O* newCommand = reinterpret_cast<ConCommandR1O*>(::operator new(sizeof(ConCommandR1O)));
+	ConCommandR1O* newCommand = reinterpret_cast<ConCommandR1O*>(AllocateR1OEngineOwnedMemory(sizeof(ConCommandR1O)));
 	memset(newCommand, 0, sizeof(ConCommandR1O));
 	newCommand->vtable = GetR1OConCommandVTable();
 	newCommand->m_pNext = nullptr;
 	newCommand->m_bRegistered = false;
-	newCommand->m_pszName = _strdup(name ? name : "");
-	newCommand->m_pszHelpString = _strdup(helpString ? helpString : "");
+	newCommand->m_pszName = DuplicateR1OEngineOwnedString(name);
+	newCommand->m_pszHelpString = DuplicateR1OEngineOwnedString(helpString);
 	newCommand->m_nFlags = flags;
 	newCommand->unused = reinterpret_cast<void*>(&R1ODediConCommandPostCallbackNoop);
 	newCommand->unused2 = nullptr;

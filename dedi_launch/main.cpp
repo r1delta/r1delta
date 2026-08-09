@@ -221,9 +221,9 @@ bool PrependPathEnvironment(const char* gameInstallPath, const char* launcherExe
     size_t currentPathLen;
     errno_t err = _dupenv_s(&currentPath, &currentPathLen, "PATH");
     if (err != 0 || currentPath == nullptr) {
-        //currentPath = ""; // Treat as empty if retrieval fails
-        OutputDebugStringA("Warning: Failed to get current PATH environment variable.\n");
+        OutputDebugStringA("Warning: Failed to get current PATH environment variable; using only R1Delta paths.\n");
     }
+    const char* currentPathValue = currentPath != nullptr ? currentPath : "";
 
     // Construct paths to prepend
     char r1DeltaBinDelta[MAX_PATH];
@@ -244,7 +244,7 @@ bool PrependPathEnvironment(const char* gameInstallPath, const char* launcherExe
 
     // Calculate required buffer size for the new PATH
     // Size = len(delta) + len(bin) + len(retail) + len(r1retail) + len(current) + 5 separators + 1 null term
-    size_t requiredSize = strlen(r1DeltaBinDelta) + strlen(r1DeltaBin) + strlen(retailBin) + strlen(r1RetailBin) + strlen(currentPath) + 6;
+    size_t requiredSize = strlen(r1DeltaBinDelta) + strlen(r1DeltaBin) + strlen(retailBin) + strlen(r1RetailBin) + strlen(currentPathValue) + 6;
 
     // Allocate buffer for the new PATH string
     std::vector<char> newPathBuffer(requiredSize);
@@ -256,13 +256,13 @@ bool PrependPathEnvironment(const char* gameInstallPath, const char* launcherExe
         retailBin,
         r1RetailBin,
         // ".\\", // Add current directory (game dir)? Generally done by LoadLibrary search order anyway.
-        currentPath);
+        currentPathValue);
 
     // Set the new PATH environment variable
     if (_putenv_s("PATH", newPathBuffer.data()) != 0)
     {
         OutputDebugStringA("Error: Failed to set the PATH environment variable.\n");
-        if (currentPath != nullptr && currentPath[0] != '\0') free(currentPath); // Free memory allocated by _dupenv_s
+        free(currentPath); // Free memory allocated by _dupenv_s, including an allocated empty string.
         return false;
     }
 
@@ -274,7 +274,7 @@ bool PrependPathEnvironment(const char* gameInstallPath, const char* launcherExe
     OutputDebugStringA("  "); OutputDebugStringA(r1RetailBin); OutputDebugStringA("\n");
 
 
-    if (currentPath != nullptr && currentPath[0] != '\0') free(currentPath); // Free memory allocated by _dupenv_s
+    free(currentPath); // Free memory allocated by _dupenv_s, including an allocated empty string.
     return true;
 }
 bool g_suppressMessageBoxes = false;

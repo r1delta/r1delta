@@ -2,6 +2,7 @@
 
 #include <Windows.h>
 
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 
@@ -73,9 +74,9 @@ int main()
         "retail tier0 exports SetMiniDumpFunction");
     if (setMiniDumpFunction) {
         FnMiniDump previous = setMiniDumpFunction(&ProbeMiniDumpCallback);
-        passed &= Check(previous != nullptr,
-            "loading our tier0 initializes the retail minidump callback");
-        setMiniDumpFunction(previous);
+        FnMiniDump installed = setMiniDumpFunction(previous);
+        passed &= Check(installed == &ProbeMiniDumpCallback,
+            "retail minidump callback setter round-trips the installed callback");
     }
 
     // Dump the retail allocator's vtable slots so we can compare its layout to
@@ -136,6 +137,34 @@ int main()
             passed &= Check((reinterpret_cast<uintptr_t>(aligned) % 16) == 0,
                 "Alloc_Aligned is 16-byte aligned");
             singleton->Free_Aligned(aligned, 16);
+        }
+
+        constexpr size_t requestedMsvcAlignment = alignof(std::max_align_t) * 2;
+        const char initialValue[] = "";
+        char* conVarValue = static_cast<char*>(
+            singleton->Alloc_Aligned(sizeof(initialValue), requestedMsvcAlignment));
+        passed &= Check(conVarValue != nullptr,
+            "R1O ConVar initial string allocation returned non-null");
+        passed &= Check(
+            !conVarValue || (reinterpret_cast<uintptr_t>(conVarValue) % alignof(std::max_align_t)) == 0,
+            "R1O ConVar string allocation satisfies the allocator's guaranteed alignment");
+        if (conVarValue) {
+            std::memcpy(conVarValue, initialValue, sizeof(initialValue));
+            const char replacementValue[] = "replacement value longer than the initial buffer";
+            char* replacement = static_cast<char*>(
+                singleton->Alloc_Aligned(sizeof(replacementValue), requestedMsvcAlignment));
+            passed &= Check(replacement != nullptr,
+                "R1O ConVar replacement string allocation returned non-null");
+            if (replacement) {
+                singleton->Free_Aligned(conVarValue, requestedMsvcAlignment);
+                conVarValue = nullptr;
+                std::memcpy(replacement, replacementValue, sizeof(replacementValue));
+                passed &= Check(std::strcmp(replacement, replacementValue) == 0,
+                    "R1O ConVar replacement string preserved its value");
+                singleton->Free_Aligned(replacement, requestedMsvcAlignment);
+            }
+            if (conVarValue)
+                singleton->Free_Aligned(conVarValue, requestedMsvcAlignment);
         }
 
         // mi_* forwarding helpers must route through the interface.

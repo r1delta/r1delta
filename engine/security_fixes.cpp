@@ -2,6 +2,7 @@
 #include "engine_vtable.h"
 #include "netadr.h"
 #include "netchanwarnings.h"
+#include "ffa_targeting.h"
 
 #include "logging.h"
 #include "load.h"
@@ -321,6 +322,52 @@ struct CLC_VoiceData {
 
 bool(__fastcall* oCGameClient__ProcessVoiceData)(void*, CLC_VoiceData*);
 
+static bool TryReadVoiceSenderTeam(void* sender, int& team)
+{
+	if (!sender)
+		return false;
+
+	const std::uintptr_t teamOffset =
+		IsDedicatedServer() && !IsR1ODedicatedServer() ? 0x280 : 0x2F8;
+	const std::uintptr_t senderAddress = reinterpret_cast<std::uintptr_t>(sender);
+	if (senderAddress > UINTPTR_MAX - teamOffset)
+		return false;
+
+	const std::uintptr_t teamAddress = senderAddress + teamOffset;
+	MEMORY_BASIC_INFORMATION region = {};
+	if (VirtualQuery(
+			reinterpret_cast<const void*>(teamAddress),
+			&region,
+			sizeof(region)) != sizeof(region))
+		return false;
+
+	const DWORD access = region.Protect & 0xFF;
+	const bool readable =
+		access == PAGE_READONLY
+		|| access == PAGE_READWRITE
+		|| access == PAGE_WRITECOPY
+		|| access == PAGE_EXECUTE_READ
+		|| access == PAGE_EXECUTE_READWRITE
+		|| access == PAGE_EXECUTE_WRITECOPY;
+	if (region.State != MEM_COMMIT
+		|| (region.Protect & PAGE_GUARD) != 0
+		|| !readable)
+		return false;
+
+	const std::uintptr_t regionStart =
+		reinterpret_cast<std::uintptr_t>(region.BaseAddress);
+	if (region.RegionSize > UINTPTR_MAX - regionStart)
+		return false;
+	const std::uintptr_t regionEnd = regionStart + region.RegionSize;
+	if (teamAddress < regionStart
+		|| teamAddress > regionEnd
+		|| regionEnd - teamAddress < sizeof(team))
+		return false;
+
+	team = *reinterpret_cast<const int*>(teamAddress);
+	return true;
+}
+
 static void R1OBroadcastVoiceDataAllTalk(
 	void* sender,
 	int byteCount,
@@ -346,13 +393,14 @@ static void R1OBroadcastVoiceDataAllTalk(
 	*reinterpret_cast<__int64*>(message + 64) = -1;
 	*reinterpret_cast<char**>(message + 112) = voiceData;
 
-	const int clientCount =
-		*reinterpret_cast<int*>(G_engine_r1o + 0x265971C);
-	if (clientCount < 0 || clientCount > 128)
-		return;
-
+	constexpr int clientCapacity = 19;
 	constexpr uintptr_t clientArrayRva = 0x2659738;
 	constexpr uintptr_t clientStride = 0x2BB98;
+
+	const int clientCount =
+		*reinterpret_cast<int*>(G_engine_r1o + 0x265971C);
+	if (clientCount < 0 || clientCount > clientCapacity)
+		return;
 
 	using IsActiveFn = bool(__fastcall*)(void*);
 	using GetNetChannelFn = void*(__fastcall*)(void*);
@@ -390,12 +438,24 @@ bool __fastcall CGameClient__ProcessVoiceData(void* thisptr, CLC_VoiceData* msg)
 	if (msg->m_DataIn.IsOverflowed())
 		return false;
 
+	const ConVarR1* allTalk = OriginalCCVar_FindVar2
+		? OriginalCCVar_FindVar2(cvarinterface, "sv_alltalk")
+		: nullptr;
+	const bool allTalkEnabled =
+		allTalk && allTalk->m_Value.m_nValue != 0;
+
+	int senderTeam = 0;
+	if (r1delta::ffa_targeting::IsFfaBased()
+		&& TryReadVoiceSenderTeam(thisptr_shifted, senderTeam)
+		&& r1delta::ffa_targeting::ShouldSuppressGameplayVoice(
+			true,
+			allTalkEnabled,
+			senderTeam))
+		return true;
+
 	auto SV_BroadcastVoiceData = reinterpret_cast<void(__cdecl*)(void*, int, char*, uint64)>(G_engine + 0xEE4D0);
 	if (IsR1ODedicatedServer()) {
-		const ConVarR1* allTalk = OriginalCCVar_FindVar2
-			? OriginalCCVar_FindVar2(cvarinterface, "sv_alltalk")
-			: nullptr;
-		if (thisptr_shifted && allTalk && allTalk->m_Value.m_nValue != 0) {
+		if (thisptr_shifted && allTalkEnabled) {
 			R1OBroadcastVoiceDataAllTalk(
 				thisptr_shifted,
 				(bitsRead + 7) / 8,

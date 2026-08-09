@@ -194,15 +194,6 @@ ProcessConnectionlessPacketType ProcessConnectionlessPacketOriginalClient = null
 
 char __fastcall ProcessConnectionlessPacketClient(unsigned int* a1, netpacket_s* a2)
 {
-    static auto sv_limit_quires = CCVar_FindVar(cvarinterface, "sv_limit_queries");
-    static auto& sv_limit_queries_var = sv_limit_quires->m_Value.m_nValue;
-
-    if (sv_limit_queries_var == 1 && a2->pData[4] == 'N') {
-        sv_limit_queries_var = 0;
-    }
-    else if (sv_limit_queries_var == 0 && a2->pData[4] != 'N') {
-        sv_limit_queries_var = 1;
-    }
     return ProcessConnectionlessPacketOriginalClient(a1, a2);
 }
 

@@ -23,7 +23,7 @@ public sealed class FastDownloadService : IDisposable
     private bool _disposed;
     private Process _activeProcess;
 
-    public event Action<string, long, long> DownloadProgressChanged;
+    public event Action<DownloadProgressUpdate> DownloadProgressChanged;
 
     public FastDownloadService(string installRoot)
         : this(installRoot, DefaultNoProgressTimeout)
@@ -64,11 +64,14 @@ public sealed class FastDownloadService : IDisposable
                 throw new ArgumentException("A download request has no destination path.", nameof(files));
         }
 
+        foreach (var request in requests)
+            PreparePartialForBackend(request.DestinationPath, request.DestinationPath);
+
         var pending = requests;
         var latestErrors = new Dictionary<DownloadRequest, string>();
 
-        // Phase 1: aria2c. A process-termination failure no longer aborts the
-        // whole install; the remaining files fall through to the next stack.
+        // Phase 1: aria2c. A later backend is never started until the owned
+        // child has reached a confirmed exit state.
         var ariaFatal = false;
         for (var attempt = 1; attempt <= MaxProcessAttempts && !ariaFatal; attempt++)
         {
@@ -79,9 +82,12 @@ public sealed class FastDownloadService : IDisposable
             var retryDelaySeconds = RetryDelaysSeconds[attempt - 1];
             if (retryDelaySeconds > 0)
             {
+                ReportStatus(pending, DownloadBackend.Aria2, DownloadTransferPhase.RetryDelay, attempt, MaxProcessAttempts);
                 Debug.WriteLine($"[FastDownloadService] Retrying {pending.Count} failed file(s) in {retryDelaySeconds} seconds (attempt {attempt}/{MaxProcessAttempts}).");
                 await Task.Delay(TimeSpan.FromSeconds(retryDelaySeconds), cancellationToken).ConfigureAwait(false);
             }
+
+            ReportStatus(pending, DownloadBackend.Aria2, DownloadTransferPhase.Preparing, attempt, MaxProcessAttempts);
 
             AttemptResult result;
             try
@@ -92,11 +98,11 @@ public sealed class FastDownloadService : IDisposable
             {
                 throw;
             }
-            catch (AriaProcessTerminationException ex)
+            catch (AriaProcessTerminationException)
             {
-                Debug.WriteLine($"[FastDownloadService] aria2c terminated abnormally on attempt {attempt}: {ex.Message}. Falling back to the next download stack.");
-                result = AttemptResult.FailAll(pending, ex.Message);
-                ariaFatal = true;
+                // Advancing would allow another backend to write while aria2c
+                // may still own the destination.
+                throw;
             }
             catch (Exception ex)
             {
@@ -115,12 +121,17 @@ public sealed class FastDownloadService : IDisposable
         if (pending.Count > 0)
         {
             Debug.WriteLine($"[FastDownloadService] aria2c left {pending.Count} file(s); retrying with system curl.");
+            ReportStatus(pending, DownloadBackend.Curl, DownloadTransferPhase.Preparing, 1, 1);
             AttemptResult curlResult;
             try
             {
                 curlResult = await RunCurlAttemptAsync(pending, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (DownloadProcessTerminationException)
             {
                 throw;
             }
@@ -141,6 +152,7 @@ public sealed class FastDownloadService : IDisposable
         if (pending.Count > 0)
         {
             Debug.WriteLine($"[FastDownloadService] curl left {pending.Count} file(s); retrying with HttpClient.");
+            ReportStatus(pending, DownloadBackend.HttpClient, DownloadTransferPhase.Preparing, 1, 1);
             AttemptResult httpResult;
             try
             {
@@ -169,9 +181,8 @@ public sealed class FastDownloadService : IDisposable
             return $"{Path.GetFileName(request.DestinationPath)}: {error ?? "unknown download error"}";
         }));
         throw new DownloadException(
-            $"Could not download {pending.Count} file(s) with aria2c, curl, or HttpClient." + Environment.NewLine +
-            "This usually means your network is blocking the download domain (DNS filtering or ISP blocks)." + Environment.NewLine +
-            "Try again later, switch networks/DNS, or download the game files manually from the Google Drive mirror linked in the #help channel, then point the installer at that folder." + Environment.NewLine +
+            $"All configured download backends failed for {pending.Count} file(s): aria2c, curl, and HttpClient." + Environment.NewLine +
+            "Review the per-file errors below. You can retry later, try another connection, or use the manual game-file download linked in the #help channel and point the installer at that folder." + Environment.NewLine +
             details);
     }
 
@@ -244,7 +255,16 @@ public sealed class FastDownloadService : IDisposable
                     if (status == null)
                         continue;
 
-                    DownloadProgressChanged?.Invoke(request.DestinationPath, status.CompletedLength, Math.Max(status.TotalLength, status.CompletedLength));
+                    DownloadProgressChanged?.Invoke(new DownloadProgressUpdate(
+                        request.DestinationPath,
+                        status.CompletedLength,
+                        status.TotalLength,
+                        DownloadBackend.Aria2,
+                        string.Equals(status.Status, "complete", StringComparison.OrdinalIgnoreCase)
+                            ? DownloadTransferPhase.TransferComplete
+                            : DownloadTransferPhase.Downloading,
+                        attempt,
+                        MaxProcessAttempts));
 
                     if (status.CompletedLength > completedLengths[gid])
                     {
@@ -382,19 +402,8 @@ public sealed class FastDownloadService : IDisposable
 
             var destinationPath = Path.GetFullPath(request.DestinationPath);
             Directory.CreateDirectory(Path.GetDirectoryName(destinationPath));
-            var partialPath = destinationPath + ".part";
-
-            // Mirror HttpClient: always write to .part and atomically promote on success.
-            // If a truncated file was left at the final path by an older curl path,
-            // migrate it to .part so resume works and the final path is never left corrupt.
-            try
-            {
-                if (File.Exists(destinationPath) && !File.Exists(partialPath))
-                {
-                    try { File.Move(destinationPath, partialPath); } catch { }
-                }
-            }
-            catch { }
+            var partialPath = destinationPath + ".curl.partial";
+            PreparePartialForBackend(destinationPath, partialPath);
 
             var arguments = string.Join(" ", new[]
             {
@@ -420,6 +429,11 @@ public sealed class FastDownloadService : IDisposable
             };
 
             Process process = null;
+            Task<int> waitTask = null;
+            Task stderrTask = Task.CompletedTask;
+            Task stdoutTask = Task.CompletedTask;
+            CancellationTokenRegistration cancellationRegistration = default;
+            var processStarted = false;
             try
             {
                 process = new Process { StartInfo = startInfo };
@@ -429,23 +443,99 @@ public sealed class FastDownloadService : IDisposable
                     continue;
                 }
 
+                processStarted = true;
                 _activeProcess = process;
-                var stderrTask = DrainOutputAsync(process.StandardError, "curl-stderr");
-                var stdoutTask = DrainOutputAsync(process.StandardOutput, "curl-stdout");
-
-                var exited = await WaitForExitAsync(process, TimeSpan.FromMinutes(20), cancellationToken).ConfigureAwait(false);
-                if (!exited)
+                cancellationRegistration = cancellationToken.Register(() => KillProcess(process));
+                stderrTask = DrainOutputAsync(process.StandardError, "curl-stderr");
+                stdoutTask = DrainOutputAsync(process.StandardOutput, "curl-stdout");
+                waitTask = Task.Run(() =>
                 {
-                    KillProcess(process);
-                    failures[request] = "curl.exe timed out";
+                    process.WaitForExit();
+                    return process.ExitCode;
+                }, CancellationToken.None);
+
+                var lastLength = GetFileLength(partialPath);
+                var lastProgressUtc = DateTime.UtcNow;
+                var processDeadlineUtc = lastProgressUtc + TimeSpan.FromMinutes(20);
+                DownloadProgressChanged?.Invoke(new DownloadProgressUpdate(
+                    request.DestinationPath,
+                    lastLength,
+                    0,
+                    DownloadBackend.Curl,
+                    DownloadTransferPhase.Downloading,
+                    1,
+                    1));
+
+                string timeoutMessage = null;
+                while (!waitTask.IsCompleted)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    var delayTask = Task.Delay(ProgressPollMs, cancellationToken);
+                    var completedTask = await Task.WhenAny(waitTask, delayTask).ConfigureAwait(false);
+                    if (completedTask != waitTask)
+                        await delayTask.ConfigureAwait(false);
+
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var currentLength = GetFileLength(partialPath);
+                    if (currentLength != lastLength)
+                    {
+                        if (currentLength > lastLength)
+                            lastProgressUtc = DateTime.UtcNow;
+                        lastLength = currentLength;
+                        DownloadProgressChanged?.Invoke(new DownloadProgressUpdate(
+                            request.DestinationPath,
+                            currentLength,
+                            0,
+                            DownloadBackend.Curl,
+                            DownloadTransferPhase.Downloading,
+                            1,
+                            1));
+                    }
+
+                    var now = DateTime.UtcNow;
+                    if (now - lastProgressUtc >= _noProgressTimeout)
+                        timeoutMessage = $"curl made no byte progress for {(int)_noProgressTimeout.TotalSeconds} seconds";
+                    else if (now >= processDeadlineUtc)
+                        timeoutMessage = "curl.exe timed out after 20 minutes";
+
+                    if (timeoutMessage != null)
+                    {
+                        KillProcess(process);
+                        break;
+                    }
+                }
+
+                if (timeoutMessage != null)
+                {
+                    if (!await CompletesWithinAsync(waitTask, ProcessKillTimeoutMs).ConfigureAwait(false))
+                        throw new DownloadProcessTerminationException("curl.exe did not exit after timeout termination.");
+                    await waitTask.ConfigureAwait(false);
+                    failures[request] = timeoutMessage;
+                    DownloadProgressChanged?.Invoke(new DownloadProgressUpdate(
+                        request.DestinationPath,
+                        GetFileLength(partialPath),
+                        0,
+                        DownloadBackend.Curl,
+                        DownloadTransferPhase.Failed,
+                        1,
+                        1));
                     continue;
                 }
 
-                var exitCode = process.ExitCode;
+                var exitCode = await waitTask.ConfigureAwait(false);
                 await Task.WhenAll(stderrTask, stdoutTask).ConfigureAwait(false);
                 if (exitCode != 0)
                 {
                     failures[request] = $"curl exited with code {exitCode}";
+                    DownloadProgressChanged?.Invoke(new DownloadProgressUpdate(
+                        request.DestinationPath,
+                        GetFileLength(partialPath),
+                        0,
+                        DownloadBackend.Curl,
+                        DownloadTransferPhase.Failed,
+                        1,
+                        1));
                     continue;
                 }
 
@@ -454,6 +544,14 @@ public sealed class FastDownloadService : IDisposable
                     if (File.Exists(destinationPath))
                         File.Delete(destinationPath);
                     File.Move(partialPath, destinationPath);
+                    DownloadProgressChanged?.Invoke(new DownloadProgressUpdate(
+                        request.DestinationPath,
+                        GetFileLength(destinationPath),
+                        0,
+                        DownloadBackend.Curl,
+                        DownloadTransferPhase.TransferComplete,
+                        1,
+                        1));
                 }
                 catch (Exception ex)
                 {
@@ -464,12 +562,31 @@ public sealed class FastDownloadService : IDisposable
             {
                 throw;
             }
+            catch (DownloadProcessTerminationException)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 failures[request] = $"curl failed: {ex.Message}";
             }
             finally
             {
+                cancellationRegistration.Dispose();
+                if (processStarted && !process.HasExited)
+                    KillProcess(process);
+
+                if (waitTask != null)
+                {
+                    if (!await CompletesWithinAsync(waitTask, ProcessKillTimeoutMs).ConfigureAwait(false))
+                        throw new DownloadProcessTerminationException("curl.exe did not exit during attempt cleanup.");
+                    try { await waitTask.ConfigureAwait(false); }
+                    catch (Exception ex) { throw new DownloadProcessTerminationException("Failed while waiting for curl.exe to exit during attempt cleanup.", ex); }
+                }
+
+                try { await CompletesWithinAsync(Task.WhenAll(stderrTask, stdoutTask), ProcessKillTimeoutMs).ConfigureAwait(false); }
+                catch (Exception) { }
+
                 if (process != null && ReferenceEquals(_activeProcess, process))
                     _activeProcess = null;
                 process?.Dispose();
@@ -493,7 +610,16 @@ public sealed class FastDownloadService : IDisposable
             var destinationPath = Path.GetFullPath(request.DestinationPath);
             Directory.CreateDirectory(Path.GetDirectoryName(destinationPath));
             var partialPath = destinationPath + ".part";
+            PreparePartialForBackend(destinationPath, partialPath);
 
+            DownloadProgressChanged?.Invoke(new DownloadProgressUpdate(
+                request.DestinationPath,
+                GetFileLength(partialPath),
+                0,
+                DownloadBackend.HttpClient,
+                DownloadTransferPhase.Downloading,
+                1,
+                1));
             try
             {
                 using var requestMessage = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get, request.Url);
@@ -505,7 +631,10 @@ public sealed class FastDownloadService : IDisposable
                         requestMessage.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(resumeFrom, null);
                 }
 
-                using var response = await client.SendAsync(requestMessage, System.Net.Http.HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+                using var response = await SendHttpClientRequestWithIdleTimeoutAsync(
+                    client,
+                    requestMessage,
+                    cancellationToken).ConfigureAwait(false);
                 if (!response.IsSuccessStatusCode)
                 {
                     failures[request] = $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}";
@@ -523,9 +652,24 @@ public sealed class FastDownloadService : IDisposable
                 var buffer = new byte[65536];
                 long received = resumeFrom;
                 var lastProgress = DateTime.UtcNow;
-                int bytesRead;
-                while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false)) > 0)
+                while (true)
                 {
+                    int bytesRead;
+                    using var readTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    readTimeout.CancelAfter(_noProgressTimeout);
+                    try
+                    {
+                        bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length, readTimeout.Token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (readTimeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+                    {
+                        throw new TimeoutException(
+                            $"idle timeout: no response body bytes received for {_noProgressTimeout.TotalSeconds:g} seconds");
+                    }
+
+                    if (bytesRead == 0)
+                        break;
+
                     await fileStream.WriteAsync(buffer, 0, bytesRead, cancellationToken).ConfigureAwait(false);
                     received += bytesRead;
 
@@ -533,14 +677,31 @@ public sealed class FastDownloadService : IDisposable
                     if (now - lastProgress >= TimeSpan.FromMilliseconds(ProgressPollMs))
                     {
                         lastProgress = now;
-                        var total = response.Content.Headers.ContentLength ?? received;
-                        DownloadProgressChanged?.Invoke(request.DestinationPath, received, Math.Max(total, received));
+                        var remainingLength = response.Content.Headers.ContentLength ?? 0;
+                        var total = response.Content.Headers.ContentRange?.Length
+                            ?? (mode == FileMode.Append ? resumeFrom + remainingLength : remainingLength);
+                        DownloadProgressChanged?.Invoke(new DownloadProgressUpdate(
+                            request.DestinationPath,
+                            received,
+                            total,
+                            DownloadBackend.HttpClient,
+                            DownloadTransferPhase.Downloading,
+                            1,
+                            1));
                     }
                 }
 
                 if (File.Exists(destinationPath))
                     File.Delete(destinationPath);
                 File.Move(partialPath, destinationPath);
+                DownloadProgressChanged?.Invoke(new DownloadProgressUpdate(
+                    request.DestinationPath,
+                    GetFileLength(destinationPath),
+                    response.Content.Headers.ContentRange?.Length ?? response.Content.Headers.ContentLength ?? 0,
+                    DownloadBackend.HttpClient,
+                    DownloadTransferPhase.TransferComplete,
+                    1,
+                    1));
             }
             catch (OperationCanceledException)
             {
@@ -554,6 +715,27 @@ public sealed class FastDownloadService : IDisposable
 
         return new AttemptResult(failures);
     }
+    private async Task<System.Net.Http.HttpResponseMessage> SendHttpClientRequestWithIdleTimeoutAsync(
+        System.Net.Http.HttpClient client,
+        System.Net.Http.HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        using var headerTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        headerTimeout.CancelAfter(_noProgressTimeout);
+        try
+        {
+            return await client.SendAsync(
+                request,
+                System.Net.Http.HttpCompletionOption.ResponseHeadersRead,
+                headerTimeout.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (headerTimeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException(
+                $"idle timeout: no response headers received for {_noProgressTimeout.TotalSeconds:g} seconds");
+        }
+    }
+
 
     private static async Task<bool> WaitForExitAsync(Process process, TimeSpan timeout, CancellationToken cancellationToken)
     {
@@ -572,8 +754,35 @@ public sealed class FastDownloadService : IDisposable
         _disposed = true;
 
         var process = _activeProcess;
-        if (process != null)
+        if (process == null)
+            return;
+
+        try
+        {
+            if (process.HasExited)
+                return;
+
             KillProcess(process);
+            if (!process.WaitForExit(ProcessKillTimeoutMs))
+                throw new DownloadProcessTerminationException("The owned download process did not exit after it was terminated during disposal.");
+        }
+        catch (InvalidOperationException)
+        {
+            // The operation's normal cleanup already disposed the process.
+        }
+        catch (DownloadProcessTerminationException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new DownloadProcessTerminationException("Failed while waiting for the owned download process to exit during disposal.", ex);
+        }
+        finally
+        {
+            if (ReferenceEquals(_activeProcess, process))
+                _activeProcess = null;
+        }
     }
 
     private static string BuildAria2Arguments(int rpcPort, string rpcSecret)
@@ -751,6 +960,79 @@ public sealed class FastDownloadService : IDisposable
         return await Task.WhenAny(task, Task.Delay(timeoutMs)).ConfigureAwait(false) == task;
     }
 
+    private void ReportStatus(
+        IEnumerable<DownloadRequest> requests,
+        DownloadBackend backend,
+        DownloadTransferPhase phase,
+        int attempt,
+        int maxAttempts)
+    {
+        foreach (var request in requests)
+        {
+            DownloadProgressChanged?.Invoke(new DownloadProgressUpdate(
+                request.DestinationPath,
+                GetLargestPartialLength(request.DestinationPath),
+                0,
+                backend,
+                phase,
+                attempt,
+                maxAttempts));
+        }
+    }
+
+    private static void PreparePartialForBackend(string destinationPath, string backendPath)
+    {
+        destinationPath = Path.GetFullPath(destinationPath);
+        backendPath = Path.GetFullPath(backendPath);
+        var candidates = new[]
+        {
+            destinationPath,
+            destinationPath + ".part",
+            destinationPath + ".curl.partial"
+        };
+
+        var bestPath = candidates
+            .Where(File.Exists)
+            .OrderByDescending(GetFileLength)
+            .FirstOrDefault();
+        if (bestPath == null || string.Equals(bestPath, backendPath, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        if (File.Exists(backendPath))
+            File.Delete(backendPath);
+        File.Move(bestPath, backendPath);
+
+        var ariaControlPath = destinationPath + ".aria2";
+        if (File.Exists(ariaControlPath))
+            File.Delete(ariaControlPath);
+    }
+
+    private static long GetLargestPartialLength(string destinationPath)
+    {
+        destinationPath = Path.GetFullPath(destinationPath);
+        return new[]
+        {
+            destinationPath,
+            destinationPath + ".part",
+            destinationPath + ".curl.partial"
+        }
+        .Where(File.Exists)
+        .Select(GetFileLength)
+        .DefaultIfEmpty(0)
+        .Max();
+    }
+
+    private static long GetFileLength(string path)
+    {
+        try
+        {
+            return File.Exists(path) ? new FileInfo(path).Length : 0;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
     private static string ResolveAria2Path()
     {
         var baseDirectory = AppDomain.CurrentDomain.BaseDirectory;
@@ -831,6 +1113,12 @@ public sealed class FastDownloadService : IDisposable
         public AriaProcessTerminationException(string message, Exception innerException) : base(message, innerException) { }
     }
 
+    private sealed class DownloadProcessTerminationException : DownloadException
+    {
+        public DownloadProcessTerminationException(string message) : base(message) { }
+        public DownloadProcessTerminationException(string message, Exception innerException) : base(message, innerException) { }
+    }
+
     private sealed class AttemptResult
     {
         public AttemptResult(Dictionary<DownloadRequest, string> failures)
@@ -853,6 +1141,51 @@ public sealed class FastDownloadService : IDisposable
         public string Status { get; set; }
         public string ErrorMessage { get; set; }
     }
+}
+
+public enum DownloadBackend
+{
+    Aria2,
+    Curl,
+    HttpClient
+}
+
+public enum DownloadTransferPhase
+{
+    Preparing,
+    RetryDelay,
+    Downloading,
+    TransferComplete,
+    Failed
+}
+
+public readonly struct DownloadProgressUpdate
+{
+    public DownloadProgressUpdate(
+        string destinationPath,
+        long bytesReceived,
+        long totalBytes,
+        DownloadBackend backend,
+        DownloadTransferPhase phase,
+        int attempt,
+        int maxAttempts)
+    {
+        DestinationPath = destinationPath;
+        BytesReceived = Math.Max(0, bytesReceived);
+        TotalBytes = Math.Max(0, totalBytes);
+        Backend = backend;
+        Phase = phase;
+        Attempt = attempt;
+        MaxAttempts = maxAttempts;
+    }
+
+    public string DestinationPath { get; }
+    public long BytesReceived { get; }
+    public long TotalBytes { get; }
+    public DownloadBackend Backend { get; }
+    public DownloadTransferPhase Phase { get; }
+    public int Attempt { get; }
+    public int MaxAttempts { get; }
 }
 
 public class DownloadException : Exception

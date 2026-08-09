@@ -6,9 +6,58 @@ using System.Net;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Text;
 
 namespace launcher_ex
 {
+    public enum NativePrerequisiteStatus
+    {
+        Ready,
+        Failed,
+        RebootRequired
+    }
+
+    public sealed class NativePrerequisiteResult
+    {
+        private NativePrerequisiteResult(
+            NativePrerequisiteStatus status,
+            string message,
+            int? installerExitCode)
+        {
+            Status = status;
+            Message = message;
+            InstallerExitCode = installerExitCode;
+        }
+
+        public NativePrerequisiteStatus Status { get; }
+        public string Message { get; }
+        public int? InstallerExitCode { get; }
+
+        internal static NativePrerequisiteResult Ready(int? installerExitCode = null)
+        {
+            return new NativePrerequisiteResult(
+                NativePrerequisiteStatus.Ready,
+                null,
+                installerExitCode);
+        }
+
+        internal static NativePrerequisiteResult Failed(string message, int? installerExitCode = null)
+        {
+            return new NativePrerequisiteResult(
+                NativePrerequisiteStatus.Failed,
+                message,
+                installerExitCode);
+        }
+
+        internal static NativePrerequisiteResult RebootRequired(string message, int installerExitCode)
+        {
+            return new NativePrerequisiteResult(
+                NativePrerequisiteStatus.RebootRequired,
+                message,
+                installerExitCode);
+        }
+    }
+
     public static class NativePrerequisiteInstaller
     {
         private const string VisualCpp2010Url =
@@ -24,6 +73,113 @@ namespace launcher_ex
         private static readonly Version VisualCppV14MinimumVersion = new Version(14, 51, 0, 0);
         private static readonly Guid WinTrustActionGenericVerifyV2 =
             new Guid("00AAC56B-CD44-11d0-8CC2-00C04FC295EE");
+
+        internal sealed class RuntimeFileProbe
+        {
+            internal RuntimeFileProbe(
+                string checkedPath,
+                Version requiredVersion,
+                bool exists,
+                string rawVersion,
+                Version parsedVersion,
+                string readFailure)
+            {
+                CheckedPath = checkedPath;
+                RequiredVersion = requiredVersion;
+                Exists = exists;
+                RawVersion = rawVersion;
+                ParsedVersion = parsedVersion;
+                ReadFailure = readFailure;
+            }
+
+            public string CheckedPath { get; }
+            public Version RequiredVersion { get; }
+            public bool Exists { get; }
+            public string RawVersion { get; }
+            public Version ParsedVersion { get; }
+            public string ReadFailure { get; }
+
+            public bool MeetsRequirement
+            {
+                get
+                {
+                    if (!Exists || ReadFailure != null)
+                        return false;
+                    if (RequiredVersion == null)
+                        return true;
+                    return ParsedVersion != null && ParsedVersion >= RequiredVersion;
+                }
+            }
+
+            internal string Describe()
+            {
+                StringBuilder description = new StringBuilder();
+                description.Append("Path: ").Append(CheckedPath).AppendLine();
+
+                if (ReadFailure != null)
+                    description.Append("Observed state: unreadable (").Append(ReadFailure).AppendLine(")");
+                else if (!Exists)
+                    description.AppendLine("Observed state: missing");
+                else if (RequiredVersion == null)
+                    description.AppendLine("Observed state: present");
+                else if (ParsedVersion == null)
+                    description.AppendLine("Observed state: raw version is not parseable");
+                else if (ParsedVersion < RequiredVersion)
+                    description.AppendLine("Observed state: version is below the required minimum");
+                else
+                    description.AppendLine("Observed state: version meets the required minimum");
+
+                if (RequiredVersion != null)
+                {
+                    description.Append("Raw file version: ")
+                        .Append(string.IsNullOrEmpty(RawVersion) ? "<unavailable>" : "\"" + RawVersion + "\"")
+                        .AppendLine();
+                    description.Append("Parsed version: ")
+                        .Append(ParsedVersion == null ? "<unavailable>" : ParsedVersion.ToString())
+                        .AppendLine();
+                    description.Append("Required minimum: ").Append(RequiredVersion);
+                }
+
+                return description.ToString();
+            }
+        }
+
+        private sealed class PrerequisiteVerification
+        {
+            internal PrerequisiteVerification(RuntimeFileProbe[] probes)
+            {
+                Probes = probes;
+            }
+
+            internal RuntimeFileProbe[] Probes { get; }
+
+            internal bool IsSatisfied
+            {
+                get
+                {
+                    foreach (RuntimeFileProbe probe in Probes)
+                    {
+                        if (!probe.MeetsRequirement)
+                            return false;
+                    }
+
+                    return true;
+                }
+            }
+
+            internal string Describe()
+            {
+                StringBuilder description = new StringBuilder();
+                for (int index = 0; index < Probes.Length; index++)
+                {
+                    if (index != 0)
+                        description.AppendLine().AppendLine();
+                    description.Append(Probes[index].Describe());
+                }
+                return description.ToString();
+            }
+        }
+
 
         private enum WinTrustDataUiChoice : uint
         {
@@ -61,6 +217,26 @@ namespace launcher_ex
             public uint UiContext;
         }
 
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct RtlOsVersionInfoEx
+        {
+            public uint Size;
+            public uint MajorVersion;
+            public uint MinorVersion;
+            public uint BuildNumber;
+            public uint PlatformId;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+            public string ServicePack;
+            public ushort ServicePackMajor;
+            public ushort ServicePackMinor;
+            public ushort SuiteMask;
+            public byte ProductType;
+            public byte Reserved;
+        }
+
+        [DllImport("ntdll.dll", ExactSpelling = true, CharSet = CharSet.Unicode)]
+        private static extern int RtlGetVersion(ref RtlOsVersionInfoEx versionInformation);
+
         [DllImport("wintrust.dll", ExactSpelling = true, SetLastError = true)]
         private static extern uint WinVerifyTrust(
             IntPtr window,
@@ -70,74 +246,103 @@ namespace launcher_ex
         /// <summary>
         /// Ensures that the x64 VC++ 2010 SP1 and current v14 runtimes plus the
         /// legacy DirectX components required by the packaged native binaries are
-        /// installed. Returns false instead of launching the game with a partially
-        /// installed runtime.
+        /// installed. The result remains non-ready until every required file passes
+        /// verification.
         /// </summary>
-        public static bool EnsureNativePrerequisites(out string errorMessage)
+        public static NativePrerequisiteResult EnsureNativePrerequisites()
         {
-            errorMessage = null;
+            int? lastInstallerExitCode = null;
 
             try
             {
-                if (!HasVisualCpp2010Runtime())
+                PrerequisiteVerification visualCpp2010 = ProbeVisualCpp2010Runtime();
+                LogVerification("VC++ 2010", visualCpp2010);
+                if (!visualCpp2010.IsSatisfied)
                 {
-                    if (!DownloadInstallAndVerify(
-                            "Microsoft Visual C++ 2010 SP1 Redistributable (x64)",
-                            VisualCpp2010Url,
-                            VisualCpp2010Sha256,
-                            "/quiet /norestart",
-                            HasVisualCpp2010Runtime,
-                            out errorMessage))
-                        return false;
+                    NativePrerequisiteResult installResult = DownloadInstallAndVerify(
+                        "Microsoft Visual C++ 2010 SP1 Redistributable (x64)",
+                        VisualCpp2010Url,
+                        VisualCpp2010Sha256,
+                        "/quiet /norestart",
+                        visualCpp2010,
+                        ProbeVisualCpp2010Runtime);
+                    if (installResult.Status != NativePrerequisiteStatus.Ready)
+                        return installResult;
+                    lastInstallerExitCode = installResult.InstallerExitCode;
                 }
 
-                if (!HasVisualCppV14Runtime())
+                PrerequisiteVerification visualCppV14 = ProbeVisualCppV14Runtime();
+                LogVerification("VC++ v14", visualCppV14);
+                if (!visualCppV14.IsSatisfied)
                 {
-                    if (!DownloadInstallAndVerify(
-                            "Microsoft Visual C++ v14 Redistributable (x64)",
-                            VisualCppV14Url,
-                            null,
-                            "/quiet /norestart",
-                            HasVisualCppV14Runtime,
-                            out errorMessage))
-                        return false;
+                    NativePrerequisiteResult installResult = DownloadInstallAndVerify(
+                        "Microsoft Visual C++ v14 Redistributable (x64)",
+                        VisualCppV14Url,
+                        null,
+                        "/quiet /norestart",
+                        visualCppV14,
+                        ProbeVisualCppV14Runtime);
+                    if (installResult.Status != NativePrerequisiteStatus.Ready)
+                        return installResult;
+                    lastInstallerExitCode = installResult.InstallerExitCode;
                 }
 
-                if (!HasLegacyDirectXRuntime())
+                PrerequisiteVerification legacyDirectX = ProbeLegacyDirectXRuntime();
+                LogVerification("DirectX legacy", legacyDirectX);
+                if (!legacyDirectX.IsSatisfied)
                 {
-                    if (!DownloadInstallAndVerify(
-                            "Microsoft DirectX End-User Runtime (June 2010)",
-                            DirectXLegacyUrl,
-                            DirectXLegacySha256,
-                            "/Q",
-                            HasLegacyDirectXRuntime,
-                            out errorMessage))
-                        return false;
+                    NativePrerequisiteResult installResult = DownloadInstallAndVerify(
+                        "Microsoft DirectX End-User Runtime (June 2010)",
+                        DirectXLegacyUrl,
+                        DirectXLegacySha256,
+                        "/Q",
+                        legacyDirectX,
+                        ProbeLegacyDirectXRuntime);
+                    if (installResult.Status != NativePrerequisiteStatus.Ready)
+                        return installResult;
+                    lastInstallerExitCode = installResult.InstallerExitCode;
                 }
 
-                return true;
+                return NativePrerequisiteResult.Ready(lastInstallerExitCode);
             }
             catch (Exception error)
             {
-                errorMessage = "Could not verify the required Microsoft native runtimes.\n\n" + error.Message;
-                return false;
+                Debug.WriteLine("[Prerequisite] Verification failed with " + error.GetType().Name + ".");
+                return NativePrerequisiteResult.Failed(
+                    "Could not verify the required Microsoft native runtimes."
+                    + "\n\nObserved error type: " + error.GetType().Name + "."
+                    + "\n\n" + DescribeOperatingSystem());
             }
         }
 
-        private static bool HasVisualCpp2010Runtime()
+        private static PrerequisiteVerification ProbeVisualCpp2010Runtime()
         {
-            return FileVersionAtLeast(SystemRuntimePath("msvcr100.dll"), VisualCpp2010MinimumVersion)
-                && FileVersionAtLeast(SystemRuntimePath("msvcp100.dll"), VisualCpp2010MinimumVersion);
+            return new PrerequisiteVerification(
+                new[]
+                {
+                    ProbeRuntimeFile(SystemRuntimePath("msvcr100.dll"), VisualCpp2010MinimumVersion),
+                    ProbeRuntimeFile(SystemRuntimePath("msvcp100.dll"), VisualCpp2010MinimumVersion)
+                });
         }
 
-        private static bool HasVisualCppV14Runtime()
+        private static PrerequisiteVerification ProbeVisualCppV14Runtime()
         {
-            return FileVersionAtLeast(SystemRuntimePath("vcruntime140.dll"), VisualCppV14MinimumVersion)
-                && FileVersionAtLeast(SystemRuntimePath("vcruntime140_1.dll"), VisualCppV14MinimumVersion)
-                && FileVersionAtLeast(SystemRuntimePath("msvcp140.dll"), VisualCppV14MinimumVersion);
+            return new PrerequisiteVerification(
+                ProbeVisualCppV14RuntimeFiles(ProbeRuntimeFile));
         }
 
-        private static bool HasLegacyDirectXRuntime()
+        internal static RuntimeFileProbe[] ProbeVisualCppV14RuntimeFiles(
+            Func<string, Version, RuntimeFileProbe> runtimeProbe)
+        {
+            return new[]
+            {
+                runtimeProbe(SystemRuntimePath("vcruntime140.dll"), VisualCppV14MinimumVersion),
+                runtimeProbe(SystemRuntimePath("vcruntime140_1.dll"), VisualCppV14MinimumVersion),
+                runtimeProbe(SystemRuntimePath("msvcp140.dll"), VisualCppV14MinimumVersion)
+            };
+        }
+
+        private static PrerequisiteVerification ProbeLegacyDirectXRuntime()
         {
             string[] requiredFiles =
             {
@@ -147,25 +352,27 @@ namespace launcher_ex
                 "XInput1_3.dll",
                 "XAPOFX1_5.dll"
             };
-
             string[] systemDirectories =
             {
                 Environment.GetFolderPath(Environment.SpecialFolder.System),
                 Environment.GetFolderPath(Environment.SpecialFolder.SystemX86)
             };
+            RuntimeFileProbe[] probes = new RuntimeFileProbe[
+                requiredFiles.Length * systemDirectories.Length];
+            int probeIndex = 0;
 
             foreach (string directory in systemDirectories)
             {
-                if (string.IsNullOrEmpty(directory))
-                    return false;
                 foreach (string fileName in requiredFiles)
                 {
-                    if (!File.Exists(Path.Combine(directory, fileName)))
-                        return false;
+                    string path = string.IsNullOrEmpty(directory)
+                        ? fileName
+                        : Path.Combine(directory, fileName);
+                    probes[probeIndex++] = ProbeRuntimeFile(path, null);
                 }
             }
 
-            return true;
+            return new PrerequisiteVerification(probes);
         }
 
         private static string SystemRuntimePath(string fileName)
@@ -175,29 +382,89 @@ namespace launcher_ex
                 fileName);
         }
 
-        private static bool FileVersionAtLeast(string path, Version minimum)
+        internal static RuntimeFileProbe ProbeRuntimeFile(string path, Version requiredVersion)
         {
-            if (!File.Exists(path))
-                return false;
+            string checkedPath;
+            try
+            {
+                checkedPath = Path.GetFullPath(path);
+            }
+            catch (Exception error)
+            {
+                return new RuntimeFileProbe(
+                    path,
+                    requiredVersion,
+                    false,
+                    null,
+                    null,
+                    error.GetType().Name);
+            }
 
-            string rawVersion = FileVersionInfo.GetVersionInfo(path).FileVersion;
-            Version actual;
-            return Version.TryParse(rawVersion, out actual) && actual >= minimum;
+            try
+            {
+                File.GetAttributes(checkedPath);
+            }
+            catch (FileNotFoundException)
+            {
+                return new RuntimeFileProbe(checkedPath, requiredVersion, false, null, null, null);
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return new RuntimeFileProbe(checkedPath, requiredVersion, false, null, null, null);
+            }
+            catch (Exception error)
+            {
+                return new RuntimeFileProbe(
+                    checkedPath,
+                    requiredVersion,
+                    true,
+                    null,
+                    null,
+                    error.GetType().Name);
+            }
+
+            if (requiredVersion == null)
+                return new RuntimeFileProbe(checkedPath, null, true, null, null, null);
+
+            try
+            {
+                string rawVersion = FileVersionInfo.GetVersionInfo(checkedPath).FileVersion;
+                Version parsedVersion;
+                if (!Version.TryParse(rawVersion, out parsedVersion))
+                    parsedVersion = null;
+                return new RuntimeFileProbe(
+                    checkedPath,
+                    requiredVersion,
+                    true,
+                    rawVersion,
+                    parsedVersion,
+                    null);
+            }
+            catch (Exception error)
+            {
+                return new RuntimeFileProbe(
+                    checkedPath,
+                    requiredVersion,
+                    true,
+                    null,
+                    null,
+                    error.GetType().Name);
+            }
         }
 
-        private static bool DownloadInstallAndVerify(
+        private static NativePrerequisiteResult DownloadInstallAndVerify(
             string displayName,
             string url,
             string expectedSha256,
             string installerArguments,
-            Func<bool> isInstalled,
-            out string errorMessage)
+            PrerequisiteVerification beforeInstall,
+            Func<PrerequisiteVerification> verifyInstalled)
         {
-            errorMessage = null;
             string tempDirectory = Path.Combine(
                 Path.GetTempPath(),
                 "R1DeltaPrerequisite-" + Guid.NewGuid().ToString("N"));
             string installerPath = Path.Combine(tempDirectory, "installer.exe");
+            int? installerExitCode = null;
 
             try
             {
@@ -213,14 +480,20 @@ namespace launcher_ex
                 if (!string.IsNullOrEmpty(expectedSha256)
                     && !string.Equals(ComputeSha256(installerPath), expectedSha256, StringComparison.OrdinalIgnoreCase))
                 {
-                    errorMessage = displayName + " failed its SHA-256 integrity check. The downloaded installer was not run.";
-                    return false;
+                    return FailureWithFacts(
+                        displayName + " failed its SHA-256 integrity check. The downloaded installer was not run.",
+                        beforeInstall,
+                        "before installer launch",
+                        null);
                 }
 
                 if (!IsMicrosoftSigned(installerPath))
                 {
-                    errorMessage = displayName + " did not have a valid Microsoft Authenticode signature. The downloaded installer was not run.";
-                    return false;
+                    return FailureWithFacts(
+                        displayName + " did not have a valid Microsoft Authenticode signature. The downloaded installer was not run.",
+                        beforeInstall,
+                        "before installer launch",
+                        null);
                 }
 
                 using (Process process = new Process())
@@ -240,36 +513,49 @@ namespace launcher_ex
                     }
                     catch (Win32Exception error) when (error.NativeErrorCode == 1223)
                     {
-                        errorMessage = displayName + " is required, but its administrator prompt was cancelled.";
-                        return false;
+                        return FailureWithFacts(
+                            displayName + " is required, but its administrator prompt was cancelled.",
+                            beforeInstall,
+                            "before installer launch",
+                            null);
                     }
 
                     if (!process.WaitForExit(10 * 60 * 1000))
                     {
                         try { process.Kill(); } catch { }
-                        errorMessage = displayName + " did not finish within ten minutes.";
-                        return false;
+                        return FailureWithFacts(
+                            displayName + " did not finish within ten minutes.",
+                            beforeInstall,
+                            "before installer launch",
+                            null);
                     }
-
-                    if (process.ExitCode != 0 && process.ExitCode != 1638 && process.ExitCode != 3010)
-                    {
-                        errorMessage = displayName + " installation failed with exit code " + process.ExitCode + ".";
-                        return false;
-                    }
+                    installerExitCode = process.ExitCode;
                 }
 
-                if (!isInstalled())
-                {
-                    errorMessage = displayName + " completed, but its required runtime files are still unavailable. A Windows restart may be required.";
-                    return false;
-                }
+                PrerequisiteVerification afterInstall = verifyInstalled();
+                LogVerification(displayName + " after installer exit", afterInstall);
 
-                return true;
+                return EvaluateInstallerExit(
+                    displayName,
+                    installerExitCode.Value,
+                    afterInstall.Probes,
+                    DescribeOperatingSystem());
             }
             catch (Exception error)
             {
-                errorMessage = "Could not install " + displayName + ".\n\n" + error.Message;
-                return false;
+                Debug.WriteLine(
+                    "[Prerequisite] Could not install " + displayName + ": "
+                    + error.GetType().Name + ".");
+                string exitObservation = installerExitCode.HasValue
+                    ? "\nInstaller exit code: " + installerExitCode.Value + "."
+                    : string.Empty;
+                return FailureWithFacts(
+                    "Could not install " + displayName + "."
+                    + exitObservation
+                    + "\nObserved error type: " + error.GetType().Name + ".",
+                    beforeInstall,
+                    "before installer launch",
+                    installerExitCode);
             }
             finally
             {
@@ -280,9 +566,116 @@ namespace launcher_ex
                 }
                 catch (Exception cleanupError)
                 {
-                    Debug.WriteLine("Could not remove prerequisite temporary directory: " + cleanupError.Message);
+                    Debug.WriteLine(
+                        "[Prerequisite] Could not remove prerequisite temporary directory: "
+                        + cleanupError.GetType().Name + ".");
                 }
             }
+        }
+
+        internal static NativePrerequisiteResult EvaluateInstallerExit(
+            string displayName,
+            int installerExitCode,
+            RuntimeFileProbe[] observedFiles,
+            string operatingSystemDescription)
+        {
+            PrerequisiteVerification afterInstall =
+                new PrerequisiteVerification(observedFiles);
+
+            if (installerExitCode == 3010)
+            {
+                return NativePrerequisiteResult.RebootRequired(
+                    displayName + " installer exited with code 3010 (restart required)."
+                    + "\n\nObserved runtime files after installer exit:"
+                    + "\n" + afterInstall.Describe()
+                    + "\n\n" + operatingSystemDescription,
+                    installerExitCode);
+            }
+
+            if (installerExitCode != 0 && installerExitCode != 1638)
+            {
+                return FailureWithFacts(
+                    displayName + " installation failed with exit code "
+                    + installerExitCode + ".",
+                    afterInstall,
+                    "after installer exit",
+                    installerExitCode,
+                    operatingSystemDescription);
+            }
+
+            if (!afterInstall.IsSatisfied)
+            {
+                return FailureWithFacts(
+                    displayName + " installer exited with code " + installerExitCode
+                    + ", but prerequisite verification did not pass.",
+                    afterInstall,
+                    "after installer exit",
+                    installerExitCode,
+                    operatingSystemDescription);
+            }
+
+            return NativePrerequisiteResult.Ready(installerExitCode);
+        }
+
+        private static NativePrerequisiteResult FailureWithFacts(
+            string message,
+            PrerequisiteVerification verification,
+            string observationTime,
+            int? installerExitCode,
+            string operatingSystemDescription = null)
+        {
+            return NativePrerequisiteResult.Failed(
+                message
+                + "\n\nObserved runtime files " + observationTime + ":"
+                + "\n" + verification.Describe()
+                + "\n\n" + (operatingSystemDescription ?? DescribeOperatingSystem()),
+                installerExitCode);
+        }
+
+        internal static string DescribeOperatingSystem()
+        {
+            string versionDescription;
+            try
+            {
+                RtlOsVersionInfoEx version = new RtlOsVersionInfoEx
+                {
+                    Size = (uint)Marshal.SizeOf(typeof(RtlOsVersionInfoEx))
+                };
+                int status = RtlGetVersion(ref version);
+                if (status == 0)
+                {
+                    versionDescription =
+                        $"Microsoft Windows NT {version.MajorVersion}.{version.MinorVersion}.{version.BuildNumber}";
+                    if (!string.IsNullOrWhiteSpace(version.ServicePack))
+                        versionDescription += " " + version.ServicePack.Trim();
+                }
+                else
+                {
+                    versionDescription = $"unavailable (RtlGetVersion NTSTATUS 0x{status:X8})";
+                }
+            }
+            catch (Exception error) when (
+                error is DllNotFoundException ||
+                error is EntryPointNotFoundException ||
+                error is BadImageFormatException)
+            {
+                versionDescription = $"unavailable ({error.GetType().Name})";
+            }
+
+            return "Operating system version: " + versionDescription
+                + "\nOperating system architecture: "
+                + (Environment.Is64BitOperatingSystem ? "64-bit" : "32-bit")
+                + "\nLauncher process architecture: "
+                + (Environment.Is64BitProcess ? "64-bit" : "32-bit");
+        }
+
+        private static void LogVerification(
+            string displayName,
+            PrerequisiteVerification verification)
+        {
+            Debug.WriteLine(
+                "[Prerequisite] " + displayName + " verification:"
+                + Environment.NewLine + verification.Describe());
         }
 
         private static string ComputeSha256(string path)

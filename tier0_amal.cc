@@ -89,6 +89,7 @@
 #include "eos_network.cpp"
 #include "net_hooks.cpp"
 #include "load.cpp"
+#include "ffa_targeting.cpp"
 #include "logging.cpp"
 #include "memory.cpp"
 #include "masterserver.cpp"

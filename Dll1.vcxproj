@@ -250,6 +250,8 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="thirdparty\jwt\jwt_compact.h" />
     <ClInclude Include="sdk\keyvalues.h" />
     <ClInclude Include="engine\core\load.h" />
+    <ClInclude Include="engine\core\ffa_targeting.h" />
+    <ClInclude Include="engine\core\ffa_targeting_logic.h" />
     <ClInclude Include="engine\auth.h" />
     <ClInclude Include="server\ai\bot.h" />
     <ClInclude Include="server\chat.h" />
@@ -355,6 +357,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="client\discord.cpp" />
     <ClCompile Include="engine\core\dllmain.cpp" />
     <ClCompile Include="engine\core\player_resource_18.cpp" />
+    <ClCompile Include="engine\core\ffa_targeting.cpp" />
     <ClCompile Include="engine\core\r1o_runtime_paths.cpp" />
     <ClCompile Include="engine\vtable_remaps\engine_vtable.cpp" />
     <ClCompile Include="eos\eos_logging_manager.cpp" />
@@ -429,6 +432,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
   </ItemGroup>
   <ItemGroup>
     <MASM Include="NetChanFixes.asm" />
+    <MASM Include="FfaTargeting.asm" />
   </ItemGroup>
   <ItemGroup>
     <Natvis Include="base.natvis" />

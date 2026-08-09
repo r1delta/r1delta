@@ -56,6 +56,18 @@ namespace r1delta::materialsystem_dx11
 
 	const char* TextureUploadCopyErrorName(TextureUploadCopyError error);
 
+	class TextureLoadScratchBufferGate
+	{
+	public:
+		[[nodiscard]] std::unique_lock<std::mutex> Acquire()
+		{
+			return std::unique_lock<std::mutex>(mutex_);
+		}
+
+	private:
+		std::mutex mutex_;
+	};
+
 	class TextureUploadRegistry
 	{
 	public:

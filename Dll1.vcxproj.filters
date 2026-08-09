@@ -98,6 +98,12 @@
     <ClInclude Include="engine\core\player_resource_18.h">
       <Filter>engine\core</Filter>
     </ClInclude>
+    <ClInclude Include="engine\core\ffa_targeting.h">
+      <Filter>engine\core</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\core\ffa_targeting_logic.h">
+      <Filter>engine\core</Filter>
+    </ClInclude>
     <ClInclude Include="engine\core\core.h">
       <Filter>engine\core</Filter>
     </ClInclude>
@@ -478,6 +484,9 @@
     <ClCompile Include="engine\core\player_resource_18.cpp">
       <Filter>engine\core</Filter>
     </ClCompile>
+    <ClCompile Include="engine\core\ffa_targeting.cpp">
+      <Filter>engine\core</Filter>
+    </ClCompile>
     <ClCompile Include="engine\core\r1o_runtime_paths.cpp">
       <Filter>engine\core</Filter>
     </ClCompile>
@@ -724,6 +733,9 @@
   <ItemGroup>
     <MASM Include="NetChanFixes.asm">
       <Filter>engine\net</Filter>
+    </MASM>
+    <MASM Include="FfaTargeting.asm">
+      <Filter>engine\core</Filter>
     </MASM>
   </ItemGroup>
   <ItemGroup>

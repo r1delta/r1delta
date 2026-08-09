@@ -6,6 +6,7 @@
 #include "load.h"
 #include "logging.h"
 #include "squirrel.h"
+#include "ffa_targeting.h"
 #include "factory.h"
 
 #include <cstdio>
@@ -116,15 +117,27 @@ void __fastcall CServerGameDLL_OnSayTextMsg(void* pThis, int clientIndex, char* 
 
     if (!text || !text[0]) return;
 
-    if (oCServerGameDLL_OnSayTextMsg)
+    CBasePlayer_Chat* pSenderEntity =
+        reinterpret_cast<CBasePlayer_Chat*>(UTIL_GetEntityByIndex_Chat(clientIndex));
+    const bool isSenderDead = pSenderEntity && !pSenderEntity->IsAlive();
+
+    if (r1delta::ffa_targeting::ShouldRouteTeamChatToSenderOnly(
+            r1delta::ffa_targeting::IsFfaBased(),
+            isTeamChat != 0)) {
+        if (!pSenderEntity) {
+            Warning("R1Delta: dropping FFA team chat from unresolved sender index %d\n", clientIndex);
+            return;
+        }
+
+        if (!SendChatMessageToRecipient(pSenderEntity, clientIndex, text, true, isSenderDead))
+            Warning("R1Delta: failed to send FFA team chat to sender index %d\n", clientIndex);
+    }
+    else if (oCServerGameDLL_OnSayTextMsg) {
         oCServerGameDLL_OnSayTextMsg(pThis, clientIndex, text, isTeamChat);
+    }
 
     // Log chat messages on dedicated server
     if (IsDedicatedServer()) {
-
-        // Get Player Entity
-        CBasePlayer_Chat* pSenderEntity = (CBasePlayer_Chat*)UTIL_GetEntityByIndex_Chat(clientIndex);
-
         if (!pSenderEntity) {
             return;
         }
@@ -141,9 +154,6 @@ void __fastcall CServerGameDLL_OnSayTextMsg(void* pThis, int clientIndex, char* 
         if (!playerName) {
             playerName = "<Unknown>";
         }
-
-        // Check if Player is Dead
-        bool isSenderDead = !pSenderEntity->IsAlive();
 
         // Format the Output String
         char formattedMsg[1024];

@@ -993,11 +993,7 @@ void ApplyR1OPlaylistAfterServerAutorun(uintptr_t engineBase)
 	reinterpret_cast<SetPlaylistFn>(engineBase + 0x1A22D0)(playlistName);
 
 	if (AreR1OFakeDediVerboseLogsEnabled()) {
-		const __int64 server =
-			*reinterpret_cast<const __int64*>(engineBase + 0x2659550);
-		const int maxPlayers = server
-			? *reinterpret_cast<const int*>(server + 460)
-			: 0;
+		const int maxPlayers = R1OGetPlaylistMaxPlayers();
 		Msg(
 			"R1Delta: reapplied R1O playlist after server autorun "
 			"name=%s maxplayers=%d\n",

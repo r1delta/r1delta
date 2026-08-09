@@ -90,9 +90,10 @@ if "%debug%"=="1" set capnp_lib=capnp_debug.lib
 if "%release%"=="1" set capnp_lib=capnp_release.lib
 
 if "%tier0%"=="1" ml64.exe /c /nologo /Zi /Fo"NetChanFixes.obj" /Fl"" /W3 /errorReport:prompt /Ta..\NetChanFixes.asm
+if "%tier0%"=="1" ml64.exe /c /nologo /Zi /Fo"FfaTargeting.obj" /Fl"" /W3 /errorReport:prompt /Ta..\FfaTargeting.asm
 :: TODO(mrsteyk): crucify wanderer and Allusive for adding capnp this way.
 ::                FIX FIX FIX.
-if "%tier0%"=="1"    set built=1 && %compile% %tier0_sources% %compile_link%  NetChanFixes.obj ..\vstdlib.lib ..\tier0_orig.lib ..\packages\minhook.1.3.3\lib\native\lib\libMinHook-x64-v141-mt.lib %capnp_lib% %eos_sdk_lib% %link_dll% /DEF:..\test.def %out%tier0.dll || exit /b 1
+if "%tier0%"=="1"    set built=1 && %compile% %tier0_sources% %compile_link%  NetChanFixes.obj FfaTargeting.obj ..\vstdlib.lib ..\tier0_orig.lib ..\packages\minhook.1.3.3\lib\native\lib\libMinHook-x64-v141-mt.lib %capnp_lib% %eos_sdk_lib% %link_dll% /DEF:..\test.def %out%tier0.dll || exit /b 1
 if "%launcher%"=="1" set built=1 && %compile% ..\launch\main.cpp %compile_link% /STACK:0x7A1200 %out%r1delta.exe || exit /b 1
 
 if "%tier0%"=="1"    for %%I in (tier0.dll tier0.pdb) do copy /Y %%I "C:\Program Files\EA Games\Titanfall\bin\x64_retail\"

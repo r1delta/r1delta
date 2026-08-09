@@ -19,7 +19,7 @@ env:
   MSBUILD_DEBUG_TYPE: pdbonly
   NUSPEC_FILE: R1Delta.nuspec
   PACKAGE_NAME: R1Delta
-  DISPLAY_VERSION: "3.0 prerelease 9"
+  DISPLAY_VERSION: "3.0 prerelease 10"
 
 permissions:
   contents: write
@@ -189,6 +189,7 @@ jobs:
             persistentdata_codec_tests = 'tests/persistentdata_codec_tests.vcxproj'
             materialsystem_dx11_texture_upload_tests = 'tests/materialsystem_dx11_texture_upload_tests.vcxproj'
             allocator_delegation_tests = 'tests/allocator_delegation_tests.vcxproj'
+            ffa_targeting_tests = 'tests/ffa_targeting_tests.vcxproj'
           }
 
           foreach ($entry in $projects.GetEnumerator()) {
@@ -215,7 +216,8 @@ jobs:
             'vsdk_memalloc_tests',
             'persistentdata_codec_tests',
             'materialsystem_dx11_texture_upload_tests',
-            'allocator_delegation_tests'
+            'allocator_delegation_tests',
+            'ffa_targeting_tests'
           )
           foreach ($test in $tests) {
             $executable = Join-Path '${{ env.BUILD_PATH }}' "tests/$test/$test.exe"
@@ -234,6 +236,16 @@ jobs:
               throw "$test failed with exit code $LASTEXITCODE."
             }
           }
+
+      - name: Run launcher integration tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $launcherPath = Join-Path '${{ env.BUILD_PATH }}' 'r1delta.exe'
+          & '${{ github.workspace }}/tests/launcher_installer_integration_tests.ps1' `
+            -LauncherPath $launcherPath
+          & '${{ github.workspace }}/tests/fastdownload_httpclient_idle_tests.ps1' `
+            -LauncherPath $launcherPath
 
       - name: Install script-error service dependencies
         working-directory: script-error-service

@@ -8,6 +8,7 @@
 #include "localchatwriter.h"
 #include "localize.h"
 #include "squirrel.h"
+#include "ffa_targeting.h"
 #include "rendering/surfacerender.h"
 
 typedef void (*sub_18027F2C0Type)(__int64 a1, const char *a2, void *a3);
@@ -394,6 +395,7 @@ __int64 __fastcall CHudChat__FormatAndDisplayMessage_Hooked(
     player_info_t playerInfo = {};
 
     int myTeam = -1, theirTeam = -1;
+    bool isDistinctFfaPlayer = false;
     if (s_pEngineClient && !isAnonymous)
     {
         uintptr_t engineClientVtable = *(uintptr_t *)s_pEngineClient;
@@ -420,6 +422,8 @@ __int64 __fastcall CHudChat__FormatAndDisplayMessage_Hooked(
         {
             myTeam = (*(int(__fastcall **)(void *))(*(_QWORD *)me + 768LL))(me);
             theirTeam = (*(int(__fastcall **)(void *))(*(_QWORD *)them + 768LL))(them);
+            isDistinctFfaPlayer =
+                me != them && r1delta::ffa_targeting::IsFfaBased();
         }
     }
     const char *nameToUse = isAnonymous ? "" : (nameRetrievedSuccessfully ? playerInfo.szName : "?UNKNOWN?");
@@ -461,7 +465,9 @@ __int64 __fastcall CHudChat__FormatAndDisplayMessage_Hooked(
         else
         {
             int opposite = theirTeam == 2 ? 3 : 2;
-            playerNameColor = myTeam == opposite ? LocalChatWriter::EnemyTeamNameColor : LocalChatWriter::SameTeamNameColor;
+            playerNameColor = isDistinctFfaPlayer || myTeam == opposite
+                ? LocalChatWriter::EnemyTeamNameColor
+                : LocalChatWriter::SameTeamNameColor;
         }
     }
 

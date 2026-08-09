@@ -428,55 +428,104 @@ namespace launcher_ex
                             string gamePath = null;
                             try
                             {
-                                // Get the path where the launcher *thinks* the game files are
-                                gamePath = RegistryHelper.GetInstallPath(); // Assumes RegistryHelper exists in R1Delta namespace
+                                // Get and normalize the configured destination. This also
+                                // follows an existing direct r1delta child selected through
+                                // its parent directory.
+                                gamePath = RegistryHelper.GetInstallPath();
+                                var uninstallResolution = TitanfallManager.ResolveGameRoot(gamePath);
+                                if (uninstallResolution.IsUsableDestination)
+                                    gamePath = uninstallResolution.ResolvedRoot;
 
                                 if (!string.IsNullOrEmpty(gamePath) && Directory.Exists(gamePath))
                                 {
-                                    // Define the marker file path
-                                    string markerFileName = Path.Combine("vpk", "client_mp_delta_common.bsp.pak000_000.vpk"); // Relative path, only exists in Delta installs (not vanilla)
-                                    string fullMarkerPath = Path.Combine(gamePath, markerFileName);
+                                    bool hasManagedOwnership =
+                                        TitanfallManager.HasValidManagedInstallOwnership(gamePath);
+                                    bool hasLegacyCompletedInstall =
+                                        TitanfallManager.HasLegacyCompletedInstallProof(gamePath);
+                                    bool cleanupAuthorized =
+                                        TitanfallManager.IsManagedCleanupAuthorized(
+                                            hasManagedOwnership,
+                                            hasLegacyCompletedInstall);
 
-                                    Debug.WriteLine($"[Squirrel Uninstall] Checking for downloaded content marker: {fullMarkerPath}");
+                                    Debug.WriteLine(
+                                        $"[Squirrel Uninstall] Cleanup authorization for '{gamePath}': " +
+                                        $"managed marker={hasManagedOwnership}, " +
+                                        $"legacy delta VPK={hasLegacyCompletedInstall}, " +
+                                        $"authorized={cleanupAuthorized}");
 
-                                    // Check if the marker file exists
-                                    if (File.Exists(fullMarkerPath))
+                                    if (cleanupAuthorized)
                                     {
-                                        Debug.WriteLine($"[Squirrel Uninstall] Downloaded content marker found.");
+                                        string ownershipReason = hasManagedOwnership
+                                            ? "a valid R1Delta managed-download marker"
+                                            : "the legacy R1Delta delta VPK from a completed older download";
+                                        Debug.WriteLine(
+                                            $"[Squirrel Uninstall] Destructive cleanup authorized by {ownershipReason}.");
 
                                         // Ask the user for confirmation
                                         var result = MessageBox.Show(
-                                            $"R1Delta appears to have downloaded Titanfall game files to:\n\n{gamePath}\n\n" +
-                                            $"Do you want to delete these downloaded game files?\n\n" +
-                                            $"(This will NOT affect game installations managed by Steam/EA App.)",
-                                            "Delete Downloaded Game Files?",
+                                            $"R1Delta verified this folder using {ownershipReason}:\n\n{gamePath}\n\n" +
+                                            $"Do you want to delete the downloaded game files listed by this launcher?\n\n" +
+                                            $"Files outside the launcher's download list will be left in place.",
+                                            "Delete R1Delta Downloaded Files?",
                                             MessageBoxButton.YesNo,
                                             MessageBoxImage.Question);
 
                                         if (result == MessageBoxResult.Yes)
                                         {
-                                            Debug.WriteLine($"[Squirrel Uninstall] User confirmed deletion. Deleting files listed in TitanfallManager.s_fileList from {gamePath}...");
+                                            if (!TitanfallManager.TryAcquireInstallOperationLease(
+                                                gamePath,
+                                                out IDisposable operationLease,
+                                                out string leaseError))
+                                            {
+                                                Debug.WriteLine($"[Squirrel Uninstall] Cleanup lease denied: {leaseError}");
+                                                MessageBox.Show(
+                                                    leaseError,
+                                                    "R1Delta Files Are In Use",
+                                                    MessageBoxButton.OK,
+                                                    MessageBoxImage.Warning);
+                                                return;
+                                            }
+                                            using var heldOperationLease = operationLease;
+
+                                            hasManagedOwnership =
+                                                TitanfallManager.HasValidManagedInstallOwnership(gamePath);
+                                            hasLegacyCompletedInstall =
+                                                TitanfallManager.HasLegacyCompletedInstallProof(gamePath);
+                                            cleanupAuthorized =
+                                                TitanfallManager.IsManagedCleanupAuthorized(
+                                                    hasManagedOwnership,
+                                                    hasLegacyCompletedInstall);
+                                            if (!cleanupAuthorized)
+                                            {
+                                                Debug.WriteLine(
+                                                    "[Squirrel Uninstall] Cleanup authorization changed while waiting for confirmation; no files were deleted.");
+                                                MessageBox.Show(
+                                                    "R1Delta could no longer verify that this folder belongs to a completed managed download. No files were deleted.",
+                                                    "R1Delta Cleanup Cancelled",
+                                                    MessageBoxButton.OK,
+                                                    MessageBoxImage.Warning);
+                                                return;
+                                            }
+
+                                            ownershipReason = hasManagedOwnership
+                                                ? "a valid R1Delta managed-download marker"
+                                                : "the legacy R1Delta delta VPK from a completed older download";
+
+                                            Debug.WriteLine($"[Squirrel Uninstall] User confirmed deletion. Deleting managed files and download sidecars from {gamePath}...");
                                             int filesDeleted = 0;
                                             int errors = 0;
                                             List<string> errorDetails = new List<string>();
 
-                                            // Iterate through the list of files downloaded by your manager
-                                            // Assumes TitanfallManager and s_fileList exist in R1Delta namespace
                                             foreach (var fileInfo in TitanfallFileList.s_fileList)
                                             {
                                                 string fileToDelete = Path.Combine(gamePath, fileInfo.RelativePath);
                                                 try
                                                 {
-                                                    if (File.Exists(fileToDelete))
-                                                    {
-                                                        File.Delete(fileToDelete);
-                                                        filesDeleted++;
-                                                        Debug.WriteLine($"  Deleted: {fileToDelete}");
-                                                    }
-                                                    else
-                                                    {
-                                                        Debug.WriteLine($"  Skipped (already missing): {fileToDelete}");
-                                                    }
+                                                    int deletedForFile = TitanfallManager.DeleteDownloadArtifacts(fileToDelete);
+                                                    filesDeleted += deletedForFile;
+                                                    Debug.WriteLine(deletedForFile > 0
+                                                        ? $"  Deleted {deletedForFile} artifact(s) for: {fileToDelete}"
+                                                        : $"  Skipped (already missing): {fileToDelete}");
                                                 }
                                                 catch (IOException ioEx) // Catch specific IO errors
                                                 {
@@ -500,20 +549,16 @@ namespace launcher_ex
                                                     errorDetails.Add(errorMsg);
                                                 }
                                             }
-                                            // --- Delete the common VPK file as well ---
+                                            // Delete the common VPK and any downloader sidecars
+                                            // through the same authoritative artifact helper.
                                             string commonVpkPath = Path.Combine(gamePath, "vpk", "client_mp_common.bsp.pak000_000.vpk");
                                             try
                                             {
-                                                if (File.Exists(commonVpkPath))
-                                                {
-                                                    File.Delete(commonVpkPath);
-                                                    filesDeleted++;
-                                                    Debug.WriteLine($"  Deleted additional file: {commonVpkPath}");
-                                                }
-                                                else
-                                                {
-                                                    Debug.WriteLine($"  Skipped additional file (already missing): {commonVpkPath}");
-                                                }
+                                                int deletedForCommonVpk = TitanfallManager.DeleteDownloadArtifacts(commonVpkPath);
+                                                filesDeleted += deletedForCommonVpk;
+                                                Debug.WriteLine(deletedForCommonVpk > 0
+                                                    ? $"  Deleted {deletedForCommonVpk} additional artifact(s) for: {commonVpkPath}"
+                                                    : $"  Skipped additional file (already missing): {commonVpkPath}");
                                             }
                                             catch (Exception ex)
                                             {
@@ -522,11 +567,45 @@ namespace launcher_ex
                                                 Debug.WriteLine(errorMsg);
                                                 errorDetails.Add(errorMsg);
                                             }
+                                            bool markerRemoved = false;
+                                            if (hasManagedOwnership)
+                                            {
+                                                if (errors == 0)
+                                                {
+                                                    if (TitanfallManager.TryRemoveManagedInstallOwnership(
+                                                        gamePath,
+                                                        out string markerRemovalError))
+                                                    {
+                                                        markerRemoved = true;
+                                                    }
+                                                    else
+                                                    {
+                                                        errors++;
+                                                        string errorMsg =
+                                                            $"  ERROR removing managed-install marker: {markerRemovalError}";
+                                                        Debug.WriteLine(errorMsg);
+                                                        errorDetails.Add(errorMsg);
+                                                    }
+                                                }
+                                                else
+                                                {
+                                                    Debug.WriteLine(
+                                                        "[Squirrel Uninstall] Retaining managed-install marker because one or more file deletions failed.");
+                                                }
+                                            }
+
 
                                             Debug.WriteLine($"[Squirrel Uninstall] Deletion attempt complete. Files deleted: {filesDeleted}, Errors: {errors}");
 
                                             // Inform the user of the outcome
                                             string summaryMessage = $"Attempted to delete downloaded game files.\n\nFiles successfully deleted: {filesDeleted}\nErrors encountered: {errors}";
+                                            if (hasManagedOwnership)
+                                            {
+                                                summaryMessage += markerRemoved
+                                                    ? "\nManaged-install marker removed."
+                                                    : "\nManaged-install marker retained.";
+                                            }
+
                                             if (errors > 0)
                                             {
                                                 summaryMessage += "\n\nSome files could not be deleted (they might be in use or permissions may be required):\n" + string.Join("\n", errorDetails.Take(5)) + (errorDetails.Count > 5 ? "\n..." : "");
@@ -540,7 +619,9 @@ namespace launcher_ex
                                     }
                                     else
                                     {
-                                        Debug.WriteLine($"[Squirrel Uninstall] Downloaded content marker NOT found. Skipping deletion prompt.");
+                                        Debug.WriteLine(
+                                            "[Squirrel Uninstall] No valid managed-install marker or legacy completed-download delta VPK found. " +
+                                            "Manifest files and downloader sidecars alone do not authorize deletion; skipping deletion prompt.");
                                     }
                                 }
                                 else
@@ -741,25 +822,25 @@ namespace launcher_ex
                 string currentArgs = RegistryHelper.GetLaunchArguments();
                 string currentInstallPath = RegistryHelper.GetInstallPath();
 
-                // 3. Check if core VPK exists in the currently configured path
-                bool coreVpkExists = false;
-                string coreVpkFullPath = null;
-                if (!string.IsNullOrEmpty(currentInstallPath))
+                // 3. Resolve the configured path once before deciding whether setup is needed.
+                string configuredInstallPath = currentInstallPath;
+                var currentRootResolution = TitanfallManager.ResolveGameRoot(configuredInstallPath);
+                bool coreVpkExists = currentRootResolution.Succeeded;
+                if (coreVpkExists)
                 {
-                    try
+                    currentInstallPath = currentRootResolution.ResolvedRoot;
+                    if (!string.Equals(
+                        configuredInstallPath,
+                        currentInstallPath,
+                        StringComparison.OrdinalIgnoreCase))
                     {
-                        // Use the constant from TitanfallManager
-                        // Assumes TitanfallManager and ValidationFileRelativePath exist in R1Delta namespace
-                        coreVpkFullPath = Path.GetFullPath(Path.Combine(currentInstallPath, TitanfallManager.ValidationFileRelativePath));
-                        coreVpkExists = File.Exists(coreVpkFullPath);
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine($"[*] Error checking core VPK existence at '{currentInstallPath}': {ex.Message}");
-                        coreVpkExists = false; // Treat errors as VPK not existing
+                        RegistryHelper.SaveInstallPath(currentInstallPath);
+                        Debug.WriteLine($"[*] Persisted resolved direct-child game root: '{currentInstallPath}'.");
                     }
                 }
-                Debug.WriteLine($"[*] Current Install Path: '{currentInstallPath ?? "Not Set"}', Core VPK Exists: {coreVpkExists} (at '{coreVpkFullPath ?? "N/A"}')");
+                Debug.WriteLine(
+                    $"[*] Current Install Path: '{currentInstallPath ?? "Not Set"}', " +
+                    $"Core VPK Exists: {coreVpkExists}. {currentRootResolution.Message}");
 
                 // 4. Determine if Setup window is needed
                 bool needsSetup = f4Pressed || !coreVpkExists || currentShowSetupSetting;
@@ -810,22 +891,11 @@ namespace launcher_ex
                 }
                 else
                 {
-                    // Setup not needed, use existing settings
-                    Debug.WriteLine("[*] Skipping Setup Window based on settings and VPK check.");
-                    finalInstallPath = currentInstallPath; // Already validated by coreVpkExists check
-                    finalShowSetupSetting = currentShowSetupSetting; // Keep existing setting
-                    finalLaunchArgs += currentArgs; // Keep existing args
-
-                    // Sanity check: Ensure the path is still valid (it should be)
-                    // Assumes TitanfallManager and ValidateGamePath exist in R1Delta namespace
-                    if (!TitanfallManager.ValidateGamePath(finalInstallPath, originalLauncherExeDir))
-                    {
-                        ShowError($"The previously configured game path is no longer valid:\n{finalInstallPath}\n\nPlease restart the launcher. Setup will run again.");
-                        // Optionally clear the invalid path from registry?
-                        // RegistryHelper.SaveInstallPath("");
-                        Process.GetCurrentProcess().Kill(); // Use Shutdown
-                        return;
-                    }
+                    // Setup is not needed only when the configured path was resolved above.
+                    Debug.WriteLine("[*] Skipping Setup Window based on settings and resolved game root.");
+                    finalInstallPath = currentInstallPath;
+                    finalShowSetupSetting = currentShowSetupSetting;
+                    finalLaunchArgs += currentArgs;
                 }
             }
             catch (Exception ex)
@@ -851,13 +921,35 @@ namespace launcher_ex
             }
 
             // 7. Ensure the native runtime prerequisites are installed.
-            string prerequisiteError;
-            if (!NativePrerequisiteInstaller.EnsureNativePrerequisites(out prerequisiteError))
+            NativePrerequisiteResult prerequisiteResult =
+                NativePrerequisiteInstaller.EnsureNativePrerequisites();
+            if (prerequisiteResult.Status != NativePrerequisiteStatus.Ready)
             {
-                ShowError(
-                    prerequisiteError
-                    + "\n\nR1Delta was not launched because its native runtime prerequisites are incomplete.",
-                    "R1Delta Prerequisite Error");
+                Debug.WriteLine(
+                    "[Prerequisite] Startup stopped with status "
+                    + prerequisiteResult.Status
+                    + (prerequisiteResult.InstallerExitCode.HasValue
+                        ? " and installer exit code "
+                            + prerequisiteResult.InstallerExitCode.Value + "."
+                        : "."));
+
+                if (prerequisiteResult.Status == NativePrerequisiteStatus.RebootRequired)
+                {
+                    ShowWarning(
+                        prerequisiteResult.Message
+                        + "\n\nWindows reported that a restart is required."
+                        + "\nRestart Windows, then run R1Delta again."
+                        + "\n\nR1Delta was not launched.",
+                        "R1Delta Restart Required");
+                }
+                else
+                {
+                    ShowError(
+                        prerequisiteResult.Message
+                        + "\n\nR1Delta was not launched because its native runtime prerequisites are incomplete.",
+                        "R1Delta Prerequisite Error");
+                }
+
                 Shutdown(1);
                 return;
             }

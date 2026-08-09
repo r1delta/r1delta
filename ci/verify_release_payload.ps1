@@ -298,6 +298,11 @@ function Assert-Payload {
         )
     }
 
+    $aria2Path = Join-Path (Join-Path (Join-Path $payloadRoot 'tools') 'aria2') 'aria2c.exe'
+    Assert-Condition (Test-Path -LiteralPath $aria2Path -PathType Leaf) (
+        "Release payload is missing exact bundled downloader path tools/aria2/aria2c.exe."
+    )
+
     $deltaRoot = Join-Path $payloadRoot 'r1delta'
     Assert-CoreRuntime $deltaRoot
     foreach ($fileName in @('CoherentUIGT.dll', 'materialsystem_nodx.dll', 'tier0.dll', 'vaudio_speex.dll')) {

@@ -615,6 +615,7 @@ using MaterialSystemDx11SelectTextureResourceType = int(__fastcall*)(int slot, s
 using MaterialSystemDx11SelectShaderStageResourceType = char(__fastcall*)(unsigned int stage, unsigned int slot, unsigned char* shaderType);
 using MaterialSystemDx11CreateInputLayoutType = __int64(__fastcall*)(unsigned __int64 vertexFormat, __int64 streamFormat, __int64 shaderBytecodeProvider);
 using MaterialSystemDx11CreateTexture2DResourceType = __int64(__fastcall*)(__int64* texture, int width, int height, int format, int mipLevels, unsigned int arraySize, int flags, __int64 initialData);
+using MaterialSystemDx11LoadTextureType = __int64(__fastcall*)(__int64 texture, __int64* textureData);
 using MaterialSystemDx11QueueTextureUploadType = char(__fastcall*)(__int64 texture, __int64 initialData, int sourceFormat);
 using MaterialSystemDx11ExecuteTextureUploadType = __int64(__fastcall*)(__int64 texture, __int64 initialData, int sourceFormat, unsigned int depth, int frameCount, unsigned int flags);
 using MaterialSystemDx11ResetD3DResourcePointersType = void(__fastcall*)();
@@ -626,6 +627,7 @@ static MaterialSystemDx11SelectTextureResourceType MaterialSystemDx11SelectTextu
 static MaterialSystemDx11SelectShaderStageResourceType MaterialSystemDx11SelectShaderStageResourceOriginal;
 static MaterialSystemDx11CreateInputLayoutType MaterialSystemDx11CreateInputLayoutOriginal;
 static MaterialSystemDx11CreateTexture2DResourceType MaterialSystemDx11CreateTexture2DResourceOriginal;
+static MaterialSystemDx11LoadTextureType MaterialSystemDx11LoadTextureOriginal;
 static MaterialSystemDx11QueueTextureUploadType MaterialSystemDx11QueueTextureUploadOriginal;
 static MaterialSystemDx11ExecuteTextureUploadType MaterialSystemDx11ExecuteTextureUploadOriginal;
 static MaterialSystemDx11ResetD3DResourcePointersType MaterialSystemDx11ResetD3DResourcePointersOriginal;
@@ -644,6 +646,7 @@ static int s_MaterialSystemDx11InputLayoutLogBudget = 8;
 static int s_MaterialSystemDx11MaterialInitLogBudget = 8;
 static std::atomic<int> s_MaterialSystemDx11TextureUploadLogBudget{ 16 };
 static std::recursive_mutex s_MaterialSystemDx11MaterialInitMutex;
+static r1delta::materialsystem_dx11::TextureLoadScratchBufferGate s_MaterialSystemDx11TextureLoadGate;
 static bool MaterialSystemDx11LooksLikeUserRange(uintptr_t address, size_t size);
 
 static void MaterialSystemDx11LogMaterialInitGuard(const char* reason, __int64 material)
@@ -1654,6 +1657,15 @@ static __int64 __fastcall MaterialSystemDx11CreateTexture2DResourceGuard(
 	return MaterialSystemDx11CreateTexture2DResourceOriginal(texture, width, height, format, mipLevels, arraySize, flags, safeInitialData);
 }
 
+static __int64 __fastcall MaterialSystemDx11LoadTextureGuard(__int64 texture, __int64* textureData)
+{
+	if (!MaterialSystemDx11LoadTextureOriginal)
+		return 0;
+
+	auto scratchBufferLock = s_MaterialSystemDx11TextureLoadGate.Acquire();
+	return MaterialSystemDx11LoadTextureOriginal(texture, textureData);
+}
+
 static char __fastcall MaterialSystemDx11QueueTextureUploadGuard(
 	__int64 texture,
 	__int64 initialData,
@@ -1820,6 +1832,17 @@ void InstallMaterialSystemDx11NullShaderResourceGuard(uintptr_t materialSystemBa
 		0x48, 0x8D, 0x6C, 0x24, 0xF0,
 		0x48, 0x81, 0xEC, 0x10, 0x01, 0x00, 0x00
 	};
+	const unsigned char expectedTextureLoadPrologue[] = {
+		0x40, 0x53,
+		0x55,
+		0x56,
+		0x41, 0x54,
+		0x48, 0x81, 0xEC, 0x38, 0x09, 0x00, 0x00,
+		0x48, 0x8B, 0xF1,
+		0x48, 0x8B, 0xDA,
+		0x33, 0xED,
+		0x48, 0x8D, 0x4C, 0x24, 0x21
+	};
 	const unsigned char expectedTextureUploadWorkerPrologue[] = {
 		0x48, 0x8B, 0xC4,
 		0x48, 0x89, 0x50, 0x10,
@@ -1924,6 +1947,14 @@ void InstallMaterialSystemDx11NullShaderResourceGuard(uintptr_t materialSystemBa
 		reinterpret_cast<void*>(&MaterialSystemDx11CreateTexture2DResourceGuard),
 		reinterpret_cast<void**>(&MaterialSystemDx11CreateTexture2DResourceOriginal),
 		"texture-initial-data");
+	const bool textureLoadInstalled = InstallMaterialSystemDx11CheckedHook(
+		materialSystemBase,
+		0x6C340,
+		expectedTextureLoadPrologue,
+		sizeof(expectedTextureLoadPrologue),
+		reinterpret_cast<void*>(&MaterialSystemDx11LoadTextureGuard),
+		reinterpret_cast<void**>(&MaterialSystemDx11LoadTextureOriginal),
+		"texture-load-lifetime");
 	const bool textureUploadWorkerInstalled = InstallMaterialSystemDx11CheckedHook(
 		materialSystemBase,
 		0x660B0,
@@ -1976,7 +2007,7 @@ void InstallMaterialSystemDx11NullShaderResourceGuard(uintptr_t materialSystemBa
 		reinterpret_cast<void*>(&MaterialSystemDx11SelectShaderResourceGuard),
 		reinterpret_cast<void**>(&MaterialSystemDx11SelectShaderResourceOriginal),
 		"vertex");
-	s_MaterialSystemDx11NullResourceGuardInstalled = materialInitInstalled || isErrorMaterialInstalled || materialPropertyGuardsInstalled || resetInstalled || constantFlushInstalled || textureInstalled || textureUploadWorkerInstalled || textureUploadOwnershipInstalled || textureResourceInstalled || inputLayoutInstalled || stageInstalled || vertexInstalled;
+	s_MaterialSystemDx11NullResourceGuardInstalled = materialInitInstalled || isErrorMaterialInstalled || materialPropertyGuardsInstalled || resetInstalled || constantFlushInstalled || textureInstalled || textureLoadInstalled || textureUploadWorkerInstalled || textureUploadOwnershipInstalled || textureResourceInstalled || inputLayoutInstalled || stageInstalled || vertexInstalled;
 }
 
 static bool IsVPhysicsGuardNegativeStackIndexDisabled()

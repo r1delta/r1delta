@@ -1,4 +1,5 @@
 ﻿using System;
+using System.ComponentModel;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -23,9 +24,16 @@ using System.Windows.Media.Imaging;
 
 namespace launcher_ex
 {
-    public partial class SetupWindow : Window, IInstallProgress
+    public partial class SetupWindow : Window, IInstallProgress, IInstallProgressStatus
     {
         private CancellationTokenSource _cts;
+        private Task<bool> _activeSetupTask;
+        private Task _closeTask;
+        private bool _allowClose;
+        private InstallProgressStatus _installStatus = new InstallProgressStatus { Phase = InstallProgressPhase.Preflight };
+        private long _lastBytesDownloaded;
+        private long _lastTotalBytes;
+        private double _lastBytesPerSecond;
         public string SelectedPath { get; private set; } = string.Empty;
         public Action OnCancelRequested { get; set; }
 
@@ -63,9 +71,10 @@ namespace launcher_ex
             _originalLauncherDir = originalLauncherDir; // Store the passed directory
 
             OnCancelRequested = () => { _cts?.Cancel(); };
+            Closing += OnWindowClosing;
 
             // --- Use the new GetDefaultInstallPath logic ---
-            string defaultPath = GetDefaultInstallPath(false);
+            string defaultPath = GetDefaultInstallPath();
 
             // Ensure the potential default directory exists before assigning
             try
@@ -97,20 +106,12 @@ namespace launcher_ex
             PathTextBox.TextChanged += PathTextBox_TextChanged;
         }
 
-        private void UpdatePlayOrInstallButton(bool fullCheck = false)
+        private void UpdatePlayOrInstallButton()
         {
-            string installPath = PathTextBox.Text;
-            string foundPath = TitanfallManager.TryFindExistingValidPath(_originalLauncherDir, fullCheck);
-
-            bool isPlay = !string.IsNullOrEmpty(foundPath);
-
-            if (fullCheck)
-                isPlay = TitanfallManager.ValidateGamePath(installPath, _originalLauncherDir);
-
-            if (isPlay)
-                PlayOrInstallButton.Content = "Play";
-            else
-                PlayOrInstallButton.Content = "Install";
+            var resolution = TitanfallManager.ResolveGameRoot(PathTextBox.Text);
+            PlayOrInstallButton.Content = resolution.Succeeded
+                ? "Play"
+                : resolution.IsUsableDestination ? "Install" : "Select Game Folder";
         }
 
         private void Window_Loaded(object sender, RoutedEventArgs e) => ApplyTheme();
@@ -229,43 +230,24 @@ namespace launcher_ex
 
 
         // --- MODIFIED: Uses TitanfallManager's detection logic first ---
-        private string GetDefaultInstallPath(bool validateRegistry)
+        private string GetDefaultInstallPath()
         {
-            // --- Attempt to find existing valid path using the SAME logic as the manager ---
-            // Note: We pass the stored _originalLauncherDir here
-            // Use the registry path as the primary default if it's valid
-            string registryPath = RegistryHelper.GetInstallPath();
-            if ((!validateRegistry && registryPath != null ) || TitanfallManager.ValidateGamePath(registryPath, _originalLauncherDir))
+            var configuredResolution = TitanfallManager.ResolveGameRoot(RegistryHelper.GetInstallPath());
+            if (configuredResolution.IsUsableDestination)
             {
-                Debug.WriteLine($"[SetupWindow.GetDefaultInstallPath] Using registry path as default: {registryPath}");
-                return registryPath;
+                Debug.WriteLine($"[SetupWindow.GetDefaultInstallPath] Using configured destination: {configuredResolution.ResolvedRoot}");
+                return configuredResolution.ResolvedRoot;
             }
 
-            // Fallback to automatic detection (TitanfallFinder)
-            string foundPath = TitanfallManager.TryFindExistingValidPath(_originalLauncherDir, true); // Use full validation here
+            string foundPath = TitanfallManager.TryFindExistingValidPath();
             if (!string.IsNullOrEmpty(foundPath))
             {
-                Debug.WriteLine($"[SetupWindow.GetDefaultInstallPath] Using automatically detected valid path as default: {foundPath}");
+                Debug.WriteLine($"[SetupWindow.GetDefaultInstallPath] Using resolved game root: {foundPath}");
                 return foundPath;
             }
 
-            // --- Fallback logic if no valid path was automatically found ---
-            Debug.WriteLine("[SetupWindow.GetDefaultInstallPath] No existing valid path found. Generating fallback default path.");
-            try
-            {
-                string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-                if (!string.IsNullOrEmpty(localAppData))
-                {
-                    return Path.Combine(localAppData, "R1DeltaContent");
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[SetupWindow.GetDefaultInstallPath] Error getting LocalAppData: {ex.Message}");
-            }
-
-            // Final fallback
-            return @"C:\Games\R1Delta\Content"; // Or consider Path.GetPathRoot(Environment.SystemDirectory) + "Games\\..."
+            Debug.WriteLine("[SetupWindow.GetDefaultInstallPath] No existing valid path found.");
+            return string.Empty;
         }
 
 
@@ -275,7 +257,7 @@ namespace launcher_ex
         private void OnBrowseClicked(object sender, RoutedEventArgs e)
         {
             // ... (implementation unchanged)
-            var dialog = new CommonOpenFileDialog { IsFolderPicker = true, Title = "Select Titanfall Install/Download Folder" };
+            var dialog = new CommonOpenFileDialog { IsFolderPicker = true, Title = "Select Titanfall Game Folder" };
             // Try to start browsing from the current path or a known location
             string initialDir = PathTextBox.Text;
             try
@@ -300,15 +282,32 @@ namespace launcher_ex
             }
             catch { /* Ignore errors setting initial directory */ }
 
-            if (dialog.ShowDialog() == CommonFileDialogResult.Ok) { PathTextBox.Text = dialog.FileName; UpdatePlayOrInstallButton(true); }
+            if (dialog.ShowDialog() == CommonFileDialogResult.Ok)
+            {
+                var resolution = TitanfallManager.ResolveGameRoot(dialog.FileName);
+                if (!resolution.IsUsableDestination)
+                {
+                    MessageBox.Show(
+                        this,
+                        resolution.Message,
+                        "Invalid Game Folder",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                    return;
+                }
+
+                PathTextBox.Text = resolution.ResolvedRoot;
+                SelectedPath = resolution.ResolvedRoot;
+                UpdatePlayOrInstallButton();
+            }
 
         }
 
         private void PathTextBox_TextChanged(object sender, TextChangedEventArgs e)
         {
-            // ... (implementation unchanged)
             SelectedPath = PathTextBox.Text;
             UpdateInstructionsText();
+            UpdatePlayOrInstallButton();
         }
 
         private void UpdateInstructionsText()
@@ -318,7 +317,7 @@ namespace launcher_ex
 
             InstructionsTextBlock.Text = string.Empty;
 
-            Run initialText = new Run("To play, please point us to your Titanfall directory.\nDon't have the game? It'll be installed there instead.\r\n");
+            Run initialText = new Run("Select your Titanfall game folder, or its parent when the game is in the direct r1delta child.\r\n");
             initialText.FontSize = 10;
             string drivePath = string.Empty;
             string sizeAvailable = string.Empty;
@@ -371,13 +370,25 @@ namespace launcher_ex
         // --- MODIFIED OnPathOkClicked ---
         private async void OnPathOkClicked(object sender, RoutedEventArgs e)
         {
-            // --- 1. Basic Path Validation and Normalization ---
-            string path = PathTextBox.Text;
-            if (string.IsNullOrWhiteSpace(path)) { MessageBox.Show("Please select or enter a valid path.", "Invalid Path", MessageBoxButton.OK, MessageBoxImage.Warning); return; }
-            try { path = Path.GetFullPath(path); PathTextBox.Text = path; } catch (Exception ex) { MessageBox.Show($"The entered path is invalid: {ex.Message}", "Invalid Path", MessageBoxButton.OK, MessageBoxImage.Warning); return; }
+            // Resolve the typed path once. An existing exact/direct-child root can
+            // launch immediately; a normalized markerless root remains a valid
+            // new or partial installation destination.
+            var rootResolution = TitanfallManager.ResolveGameRoot(PathTextBox.Text);
+            if (!rootResolution.IsUsableDestination)
+            {
+                MessageBox.Show(
+                    this,
+                    rootResolution.Message,
+                    "Invalid Game Folder",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
 
-            // --- Update internal SelectedPath state ---
+            string path = rootResolution.ResolvedRoot;
+            PathTextBox.Text = path;
             SelectedPath = path;
+
             // Construct the absolute path to the forbidden subdirectory
             string forbiddenPath = Path.GetFullPath(Path.Combine(_originalLauncherDir, "r1delta"));
 
@@ -394,26 +405,7 @@ namespace launcher_ex
                 return; // Stop processing if the path is forbidden
             }
 
-            // --- 2. Use TitanfallManager's validation ---
-            bool pathLooksValidInitially = TitanfallManager.ValidateGamePath(path, _originalLauncherDir);
-            bool isExistingInstallation = false;
-            if (pathLooksValidInitially)
-            {
-                // Check if the key file *actually* exists to differentiate between
-                // a valid *existing* install and a valid *potential* install location.
-                // Use the constant defined in TitanfallManager
-                string fullKeyFilePath = Path.Combine(path, TitanfallManager.ValidationFileRelativePath);
-
-                try
-                {
-                    isExistingInstallation = File.Exists(fullKeyFilePath);
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"Error checking key file existence for '{path}': {ex.Message}");
-                    // Assume not existing if check fails
-                }
-            }
+            bool isExistingInstallation = rootResolution.Succeeded;
 
             // --- Show F4 Hint Message Box HERE if checkbox is checked ---
             // Determine the setting *before* potentially closing the window early
@@ -431,7 +423,7 @@ namespace launcher_ex
             }
 
             // --- 3. Handle Existing Installation Case (Shortcut) ---
-            if (pathLooksValidInitially && isExistingInstallation)
+            if (isExistingInstallation)
             {
                 Debug.WriteLine($"Path '{path}' validated as existing installation. Skipping download prompt.");
                 // --- Save Install Path to Registry (only path, not other settings) ---
@@ -467,19 +459,19 @@ namespace launcher_ex
 
             // --- 6. Start Download Process ---
             PathSelectionPanel.Visibility = Visibility.Collapsed; ProgressPanel.Visibility = Visibility.Visible; SetupTitleBarText.Text = "Setup in progress...";
-            _cts = new CancellationTokenSource(); bool success = false;
-            try
-            {
-                // --- Save Install Path to Registry BEFORE download starts ---
-                try { RegistryHelper.SaveInstallPath(SelectedPath); Debug.WriteLine($"Download started. Saved install path to registry: {SelectedPath}"); }
-                catch (Exception ex) { Debug.WriteLine($"Error saving path to registry (pre-download): {ex.Message}"); MessageBox.Show($"Could not save the selected path to the registry before downloading: {ex.Message}\nDownload will continue, but you might be prompted again later.", "Registry Save Warning", MessageBoxButton.OK, MessageBoxImage.Warning); }
+            var operationCts = new CancellationTokenSource();
+            _cts = operationCts;
+            var setupTask = RunSetupOperationAsync(operationCts);
+            _activeSetupTask = setupTask;
 
-                success = await TitanfallManager.DownloadAllFilesWithResume(SelectedPath, this, _cts.Token);
+            bool success = await setupTask;
+            if (ReferenceEquals(_activeSetupTask, setupTask))
+                _activeSetupTask = null;
 
-            }
-            catch (OperationCanceledException) { StatusText.Text = "Download canceled."; Debug.WriteLine("Download operation canceled by user."); success = false; } // Ensure success is false on cancel
-            catch (Exception ex) { Debug.WriteLine($"Unexpected error during download process: {ex}"); StatusText.Text = $"Error: {ex.Message}"; success = false; }
-            finally { _cts?.Dispose(); _cts = null; }
+            // A close/cancel request owns closing the dialog after the operation
+            // and all of its cleanup have finished.
+            if (_closeTask != null)
+                return;
 
             // --- 7. Set return properties and Close Window ---
             if (success)
@@ -494,17 +486,128 @@ namespace launcher_ex
             Close();
         }
 
-
-        private void OnCancelDownloadClicked(object sender, RoutedEventArgs e)
+        private async Task<bool> RunSetupOperationAsync(CancellationTokenSource operationCts)
         {
-            // ... (implementation unchanged)
-            var result = MessageBox.Show(this, "Are you sure you want to cancel the download?", "Confirm Cancellation", MessageBoxButton.YesNo, MessageBoxImage.Warning);
-            if (result == MessageBoxResult.Yes) { CancelButton.IsEnabled = false; StatusText.Text = "Canceling..."; OnCancelRequested?.Invoke(); }
+            // Return control to the click handler so task ownership is published
+            // before setup can display UI or start a child process.
+            await Task.Yield();
+
+            try
+            {
+                if (!TitanfallManager.TryAcquireInstallOperationLease(
+                    SelectedPath,
+                    out IDisposable operationLease,
+                    out string leaseError))
+                {
+                    Debug.WriteLine($"Could not acquire install-operation lease for '{SelectedPath}': {leaseError}");
+                    StatusText.Text = "Another install operation is already using this destination.";
+                    ShowError(leaseError);
+                    return false;
+                }
+                using var heldOperationLease = operationLease;
+
+                // The confirmation above is the ownership boundary. Create and
+                // durably verify it before persisting the path or starting download.
+                if (!TitanfallManager.TryEnsureManagedInstallOwnership(SelectedPath, out string markerError))
+                {
+                    Debug.WriteLine($"Could not establish managed-install ownership for '{SelectedPath}': {markerError}");
+                    StatusText.Text = "Setup could not mark the selected destination.";
+                    ShowError(
+                        $"Setup could not safely mark this folder as an R1Delta-managed download destination.\n\n" +
+                        $"{markerError}\n\nNo game files were downloaded.");
+                    return false;
+                }
+
+                // --- Save Install Path to Registry BEFORE download starts ---
+                try { RegistryHelper.SaveInstallPath(SelectedPath); Debug.WriteLine($"Download started. Saved install path to registry: {SelectedPath}"); }
+                catch (Exception ex) { Debug.WriteLine($"Error saving path to registry (pre-download): {ex.Message}"); MessageBox.Show($"Could not save the selected path to the registry before downloading: {ex.Message}\nDownload will continue, but you might be prompted again later.", "Registry Save Warning", MessageBoxButton.OK, MessageBoxImage.Warning); }
+
+                return await TitanfallManager.DownloadAllFilesWithResume(SelectedPath, this, operationCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                StatusText.Text = "Download canceled.";
+                Debug.WriteLine("Download operation canceled by user.");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Unexpected error during download process: {ex}");
+                StatusText.Text = $"Error: {ex.Message}";
+                return false;
+            }
+            finally
+            {
+                if (ReferenceEquals(_cts, operationCts))
+                    _cts = null;
+                operationCts.Dispose();
+            }
         }
 
-        private void OnCloseButtonClicked(object sender, RoutedEventArgs e)
+        private Task RequestCancelAndCloseAsync()
         {
-            Environment.Exit(0);
+            if (_closeTask != null)
+                return _closeTask;
+
+            var setupTask = _activeSetupTask;
+            if (setupTask == null)
+            {
+                _allowClose = true;
+                Close();
+                return Task.CompletedTask;
+            }
+
+            var result = MessageBox.Show(this, "Are you sure you want to cancel the download?", "Confirm Cancellation", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (result != MessageBoxResult.Yes)
+                return Task.CompletedTask;
+
+            CancelButton.IsEnabled = false;
+            StatusText.Text = "Canceling...";
+            OnCancelRequested?.Invoke();
+            _closeTask = FinishCancellationAndCloseAsync(setupTask);
+            return _closeTask;
+        }
+
+        private async Task FinishCancellationAndCloseAsync(Task setupTask)
+        {
+            try
+            {
+                await setupTask;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Setup cleanup failed while closing: {ex}");
+            }
+
+            _allowClose = true;
+            if (IsLoaded)
+                DialogResult = false;
+        }
+
+        private void OnWindowClosing(object sender, CancelEventArgs e)
+        {
+            if (_allowClose || _activeSetupTask == null)
+                return;
+
+            e.Cancel = true;
+            _ = RequestCancelAndCloseAsync();
+        }
+
+        private async void OnCancelDownloadClicked(object sender, RoutedEventArgs e)
+        {
+            await RequestCancelAndCloseAsync();
+        }
+
+        private async void OnCloseButtonClicked(object sender, RoutedEventArgs e)
+        {
+            if (_activeSetupTask == null)
+            {
+                _allowClose = true;
+                Close();
+                return;
+            }
+
+            await RequestCancelAndCloseAsync();
         }
 
         private void OnMinimizeButtonClicked(object sender, RoutedEventArgs e)
@@ -575,114 +678,145 @@ namespace launcher_ex
             return $"{bytes / GB:F1} GB";
         }
 
-        // IInstallProgress methods (Unchanged)
-        /// <summary>
-        /// Reports download progress to the UI, including size, speed, and ETA.
-        /// </summary>
-        /// <param name="bytesDownloaded">Total bytes downloaded so far for the entire operation.</param>
-        /// <param name="totalBytes">Total bytes expected for the entire operation.</param>
-        /// <param name="bytesPerSecond">Current calculated download speed.</param>
-        public void ReportProgress(long bytesDownloaded, long totalBytes, double bytesPerSecond)
+        public void ReportStatus(InstallProgressStatus status)
         {
-            // Ensure UI updates happen on the UI thread
-            if (!this.Dispatcher.CheckAccess())
+            if (status == null)
+                throw new ArgumentNullException(nameof(status));
+
+            if (!Dispatcher.CheckAccess())
             {
-                this.Dispatcher.Invoke(() => ReportProgress(bytesDownloaded, totalBytes, bytesPerSecond));
+                Dispatcher.Invoke(() => ReportStatus(status));
                 return;
             }
 
-            // Calculate Percentage
-            double percent = (totalBytes > 0) ? ((double)bytesDownloaded * 100.0 / totalBytes) : 0;
-            percent = Math.Max(0, Math.Min(100, percent)); // Clamp percentage
+            _installStatus = status;
+            RenderProgressStatus(_lastBytesDownloaded, _lastTotalBytes, _lastBytesPerSecond);
+        }
 
-            // Update Progress Bar
+        /// <summary>
+        /// Reports aggregate install progress. The current status phase determines
+        /// whether transfer speed/ETA or phase-specific work is displayed.
+        /// </summary>
+        public void ReportProgress(long bytesDownloaded, long totalBytes, double bytesPerSecond)
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.Invoke(() => ReportProgress(bytesDownloaded, totalBytes, bytesPerSecond));
+                return;
+            }
+
+            _lastBytesDownloaded = Math.Max(0, bytesDownloaded);
+            _lastTotalBytes = Math.Max(0, totalBytes);
+            _lastBytesPerSecond = Math.Max(0, bytesPerSecond);
+            RenderProgressStatus(_lastBytesDownloaded, _lastTotalBytes, _lastBytesPerSecond);
+        }
+
+        private void RenderProgressStatus(long bytesDownloaded, long totalBytes, double bytesPerSecond)
+        {
+            double percent = totalBytes > 0
+                ? (double)bytesDownloaded * 100.0 / totalBytes
+                : 0;
+            percent = Math.Max(0, Math.Min(100, percent));
             ProgressBar.Value = percent;
 
-            // Format Sizes
-            string downloadedSizeStr = FormatBytes(bytesDownloaded);
-            string totalSizeStr = (totalBytes > 0) ? FormatBytes(totalBytes) : "Unknown"; // Handle unknown total size case
+            string heading = GetPhaseHeading(_installStatus);
+            string progressDetail = totalBytes > 0
+                ? $"{percent:0.0}% ({FormatBytes(bytesDownloaded)} / {FormatBytes(totalBytes)})"
+                : $"{percent:0.0}%";
 
-            // Format Speed
-            string speedStr = FormatBytesPerSec(bytesPerSecond);
-
-            // Calculate and Format ETA
-            string etaStr = "--:--"; // Default ETA string
-            if (bytesPerSecond > 1 && totalBytes > 0 && bytesDownloaded < totalBytes) // Need speed, known total, and work remaining
+            bool activeTransfer =
+                (_installStatus.Phase == InstallProgressPhase.Download ||
+                 _installStatus.Phase == InstallProgressPhase.Fallback) &&
+                _installStatus.TransferPhase == DownloadTransferPhase.Downloading;
+            if (activeTransfer)
             {
-                long bytesRemaining = totalBytes - bytesDownloaded;
-                if (bytesRemaining > 0)
-                {
-                    double etaSeconds = bytesRemaining / bytesPerSecond;
-                    etaStr = FormatEta(TimeSpan.FromSeconds(etaSeconds));
-                }
+                string eta = "--:--";
+                if (bytesPerSecond > 1 && totalBytes > bytesDownloaded)
+                    eta = FormatEta(TimeSpan.FromSeconds((totalBytes - bytesDownloaded) / bytesPerSecond));
+                else if (totalBytes > 0 && bytesDownloaded >= totalBytes)
+                    eta = "Done";
+
+                StatusText.Text =
+                    $"{heading}: {progressDetail}\n" +
+                    $"Speed: {FormatBytesPerSec(bytesPerSecond)} | ETA: {eta}\n" +
+                    "Setup will launch the game automatically when complete.";
             }
-            else if (bytesDownloaded >= totalBytes && totalBytes > 0)
+            else
             {
-                etaStr = "Done"; // Or clear it if preferred
-            }
-            else if (bytesPerSecond <= 1 && bytesDownloaded < totalBytes) // Handle stalled downloads
-            {
-                etaStr = "Stalled";
+                StatusText.Text =
+                    $"{heading}: {progressDetail}\n" +
+                    "Setup will launch the game automatically when complete.";
             }
 
+            CancelButton.IsEnabled = _installStatus.Phase != InstallProgressPhase.Complete;
+        }
 
-            // Update Status Text Label
-            // Example format: Downloading... 55% (1.2 GB / 2.2 GB) - 15.3 MB/s - ETA: 1m 30s
-            StatusText.Text = string.Empty;
-            Run downloadingHeader = new Run($"Downloading: {percent:0}%\n\r");
-            downloadingHeader.FontSize = 14;
-            downloadingHeader.FontWeight = FontWeights.Bold;
-            StatusText.Inlines.Add(downloadingHeader);
-
-            Run openingParen1 = new Run("(");
-            openingParen1.FontSize = 8;
-            StatusText.Inlines.Add(openingParen1);
-            Run downloadedSizeRun = new Run(downloadedSizeStr);
-            downloadedSizeRun.FontSize = 8;
-            downloadedSizeRun.FontWeight = FontWeights.Bold;
-            StatusText.Inlines.Add(downloadedSizeRun);
-            Run separatorRun = new Run(" / ");
-            separatorRun.FontSize = 8;
-            StatusText.Inlines.Add(separatorRun);
-            Run totalSizeRun = new Run(totalSizeStr);
-            totalSizeRun.FontSize = 8;
-            totalSizeRun.FontWeight= FontWeights.Bold;
-            StatusText.Inlines.Add(totalSizeRun);
-            Run closingParen1 = new Run(") ");
-            closingParen1.FontSize = 8;
-            StatusText.Inlines.Add(closingParen1);
-            Run estimatedTimeLeftLeadup = new Run("Estimated time remaining is: ");
-            estimatedTimeLeftLeadup.FontSize = 8;
-            StatusText.Inlines.Add(estimatedTimeLeftLeadup);
-            Run estimatedTimeLeftRun = new Run(etaStr);
-            estimatedTimeLeftRun.FontSize = 8;
-            estimatedTimeLeftRun.FontWeight = FontWeights.Bold;
-            StatusText.Inlines.Add(estimatedTimeLeftRun);
-            Run speedLeadup = new Run(" at ");
-            speedLeadup.FontSize = 8;
-            StatusText.Inlines.Add(speedLeadup);
-            Run speedRun = new Run(speedStr);
-            speedRun.FontSize = 8;
-            speedRun.FontWeight = FontWeights.Bold;
-            StatusText.Inlines.Add(speedRun);
-            Run setupInfo = new Run("\nSetup will launch the game automatically when complete.");
-            setupInfo.FontSize = 6;
-            StatusText.Inlines.Add(setupInfo);
-            //StatusText.Text = $"Downloading: {percent:0}% ({downloadedSizeStr} / {totalSizeStr})\nSpeed: {speedStr} | ETA: {etaStr}\nSetup will launch the game automatically when complete.";
-
-            // Special case for completion
-            if (percent >= 100)
+        private static string GetPhaseHeading(InstallProgressStatus status)
+        {
+            switch (status.Phase)
             {
-                // make this use the progress bar in the future!!!
-                StatusText.Text = string.Empty;
-                Run downloadingDoneHead = new Run($"Download Complete ({totalSizeStr})");
-                downloadingDoneHead.FontSize = 14;
-                downloadingDoneHead.FontWeight = FontWeights.Bold;
-                StatusText.Inlines.Add(downloadingDoneHead);
-                Run validatingFilesTip = new Run("\nValidating downloaded files might take a while if you've downloaded this to a Hard Drive.");
-                validatingFilesTip.FontSize = 8;
-                StatusText.Inlines.Add(validatingFilesTip);
-                CancelButton.IsEnabled = false; // Disable cancel when done
+                case InstallProgressPhase.Preflight:
+                    return "Checking existing files";
+                case InstallProgressPhase.Resume:
+                    return "Preparing resumable files";
+                case InstallProgressPhase.Download:
+                    return GetTransferHeading("aria2", false, status);
+                case InstallProgressPhase.Fallback:
+                    return GetTransferHeading(GetBackendName(status.Backend), true, status);
+                case InstallProgressPhase.Verification:
+                    return status.VerificationPass > 0
+                        ? $"Verifying downloaded files (pass {status.VerificationPass}/{status.MaxVerificationPasses})"
+                        : "Verifying downloaded files";
+                case InstallProgressPhase.ChecksumRepair:
+                    return status.VerificationPass > 0
+                        ? $"Repairing files that failed verification (after pass {status.VerificationPass})"
+                        : "Repairing files that failed verification";
+                case InstallProgressPhase.Complete:
+                    return "Setup complete";
+                default:
+                    return "Setup in progress";
+            }
+        }
+
+        private static string GetTransferHeading(
+            string backendName,
+            bool isFallback,
+            InstallProgressStatus status)
+        {
+            string attempt = status.Attempt > 0 && status.MaxAttempts > 0
+                ? $" (attempt {status.Attempt}/{status.MaxAttempts})"
+                : string.Empty;
+            string transferName = isFallback ? backendName + " fallback" : backendName;
+
+            switch (status.TransferPhase)
+            {
+                case DownloadTransferPhase.Preparing:
+                    return $"Preparing {transferName} download{attempt}";
+                case DownloadTransferPhase.RetryDelay:
+                    return $"Waiting before retrying {transferName} download{attempt}";
+                case DownloadTransferPhase.Downloading:
+                    return $"Downloading with {transferName}{attempt}";
+                case DownloadTransferPhase.TransferComplete:
+                    return $"Finishing {transferName} transfer{attempt}";
+                case DownloadTransferPhase.Failed:
+                    return $"{transferName} download attempt failed{attempt}";
+                default:
+                    return $"{transferName} transfer{attempt}";
+            }
+        }
+
+        private static string GetBackendName(DownloadBackend? backend)
+        {
+            switch (backend)
+            {
+                case DownloadBackend.Curl:
+                    return "curl";
+                case DownloadBackend.HttpClient:
+                    return "HTTP";
+                case DownloadBackend.Aria2:
+                    return "aria2";
+                default:
+                    return "network";
             }
         }
 
