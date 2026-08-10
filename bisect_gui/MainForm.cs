@@ -146,7 +146,49 @@ namespace R1DeltaBisect
             Log("Fetching released builds...");
             try
             {
-                var builds = await Task.Run(() => FetchBuilds());
+                List<BuildInfo> builds = null;
+                string cachePath = Path.Combine(_cacheDir, "builds.json");
+                if (File.Exists(cachePath))
+                {
+                    try
+                    {
+                        var cached = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(cachePath));
+                        DateTime stamp = DateTime.Parse((string)cached["fetched"]);
+                        if (DateTime.UtcNow - stamp < TimeSpan.FromHours(24))
+                            builds = ((object[])cached["builds"]).Select(b =>
+                            {
+                                var d = (Dictionary<string, object>)b;
+                                return new BuildInfo
+                                {
+                                    Version = new Version((string)d["version"]),
+                                    Tag = (string)d["tag"],
+                                    Name = (string)d["name"],
+                                    Url = (string)d["url"]
+                                };
+                            }).ToList();
+                    }
+                    catch { }
+                }
+                if (builds == null)
+                {
+                    builds = await Task.Run(() => FetchBuilds());
+                    try
+                    {
+                        Directory.CreateDirectory(_cacheDir);
+                        File.WriteAllText(cachePath, new JavaScriptSerializer().Serialize(new Dictionary<string, object>
+                        {
+                            { "fetched", DateTime.UtcNow.ToString("o") },
+                            { "builds", builds.Select(b => new Dictionary<string, object>
+                                {
+                                    { "version", b.Version.ToString() },
+                                    { "tag", b.Tag },
+                                    { "name", b.Name },
+                                    { "url", b.Url }
+                                }).ToArray() }
+                        }));
+                    }
+                    catch { }
+                }
                 _builds.Clear();
                 _builds.AddRange(builds);
                 _runVersion.Items.Clear();
@@ -167,22 +209,136 @@ namespace R1DeltaBisect
             }
             catch (Exception ex)
             {
-                Log("FAILED to fetch builds: " + ex.Message);
-                _resultLabel.Text = "Could not reach GitHub: " + ex.Message;
+                Log("FAILED to fetch builds: " + Describe(ex));
+                _resultLabel.Text = "Could not fetch builds: " + Describe(ex);
             }
             _runButton.Enabled = _bisectButton.Enabled = _builds.Count > 0;
         }
 
+        private static string Describe(Exception ex)
+        {
+            string detail = ex.Message;
+            if (ex is WebException wex && wex.Response != null)
+            {
+                try
+                {
+                    using (var r = new StreamReader(wex.Response.GetResponseStream()))
+                    {
+                        string body = r.ReadToEnd();
+                        if (!string.IsNullOrWhiteSpace(body))
+                            detail += " | " + body;
+                    }
+                }
+                catch { }
+            }
+            return detail;
+        }
+
         private static List<BuildInfo> FetchBuilds()
         {
+            // Prefer sources that are not subject to the GitHub API rate limit
+            // (60 req/hr per IP). The asset URL for a full package is
+            // deterministic once the tag is known.
+            List<string> tags = FetchTagsViaGit();
+            if (tags == null || tags.Count == 0)
+                tags = FetchTagsViaHtml();
+            if (tags == null || tags.Count == 0)
+                tags = FetchTagsViaApi();
+
             var list = new List<BuildInfo>();
+            foreach (string tag in tags.Distinct().OrderBy(t => t))
+            {
+                var ver = new Version(tag.Substring(1));
+                if (ver < MinVersion)
+                    continue;
+                string name = "R1Delta-" + ver + "-full.nupkg";
+                list.Add(new BuildInfo
+                {
+                    Version = ver,
+                    Tag = tag,
+                    Name = name,
+                    Url = "https://github.com/" + Repo + "/releases/download/" + tag + "/" + name
+                });
+            }
+            list.Sort((x, y) => x.Version.CompareTo(y.Version));
+            return list;
+        }
+
+        private static List<string> FetchTagsViaGit()
+        {
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "git",
+                    Arguments = "ls-remote --tags https://github.com/" + Repo + ".git",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    CreateNoWindow = true
+                };
+                using (var p = Process.Start(psi))
+                {
+                    string output = p.StandardOutput.ReadToEnd();
+                    p.WaitForExit(30000);
+                    var tags = new List<string>();
+                    foreach (string line in output.Split('\n'))
+                    {
+                        int i = line.IndexOf("refs/tags/");
+                        if (i < 0)
+                            continue;
+                        string tag = line.Substring(i + "refs/tags/".Length).Trim();
+                        if (tag.EndsWith("^{}", StringComparison.Ordinal))
+                            continue;
+                        if (System.Text.RegularExpressions.Regex.IsMatch(tag, @"^v\d+\.\d+\.\d+$"))
+                            tags.Add(tag);
+                    }
+                    if (tags.Count > 0)
+                        return tags;
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        private static List<string> FetchTagsViaHtml()
+        {
+            try
+            {
+                var tags = new List<string>();
+                var re = new System.Text.RegularExpressions.Regex(
+                    @"/r1delta/r1delta/releases/tag/(v\d+\.\d+\.\d+)");
+                using (var wc = new WebClient())
+                {
+                    wc.Headers[HttpRequestHeader.UserAgent] = "curl/8.4.0";
+                    for (int page = 1; page <= 6; page++)
+                    {
+                        string html = wc.DownloadString("https://github.com/" + Repo + "/releases?page=" + page);
+                        bool any = false;
+                        foreach (System.Text.RegularExpressions.Match m in re.Matches(html))
+                        {
+                            tags.Add(m.Groups[1].Value);
+                            any = true;
+                        }
+                        if (!any)
+                            break;
+                    }
+                }
+                return tags.Count > 0 ? tags : null;
+            }
+            catch { }
+            return null;
+        }
+
+        private static List<string> FetchTagsViaApi()
+        {
+            var tags = new List<string>();
             int page = 1;
             using (var wc = new WebClient())
             {
-                wc.Headers[HttpRequestHeader.UserAgent] = "r1delta-bisect";
+                wc.Headers[HttpRequestHeader.UserAgent] = "curl/8.4.0";
                 while (true)
                 {
-                    string json = wc.DownloadString($"https://api.github.com/repos/{Repo}/releases?per_page=100&page={page}");
+                    string json = wc.DownloadString("https://api.github.com/repos/" + Repo + "/releases?per_page=100&page=" + page);
                     var arr = new JavaScriptSerializer().Deserialize<object[]>(json);
                     if (arr == null || arr.Length == 0)
                         break;
@@ -190,33 +346,15 @@ namespace R1DeltaBisect
                     {
                         var dict = (Dictionary<string, object>)item;
                         string tag = dict.TryGetValue("tag_name", out var t) ? t as string : null;
-                        if (tag == null || !System.Text.RegularExpressions.Regex.IsMatch(tag, @"^v\d+\.\d+\.\d+$"))
-                            continue;
-                        var ver = new Version(tag.Substring(1));
-                        if (ver < MinVersion)
-                            continue;
-                        var assets = dict.TryGetValue("assets", out var a) ? a as object[] : null;
-                        if (assets == null)
-                            continue;
-                        foreach (var assetObj in assets)
-                        {
-                            var asset = (Dictionary<string, object>)assetObj;
-                            string name = asset.TryGetValue("name", out var n) ? n as string : null;
-                            if (name != null && name.EndsWith("-full.nupkg", StringComparison.OrdinalIgnoreCase))
-                            {
-                                string url = asset.TryGetValue("browser_download_url", out var u) ? u as string : null;
-                                list.Add(new BuildInfo { Version = ver, Tag = tag, Name = name, Url = url });
-                                break;
-                            }
-                        }
+                        if (tag != null && System.Text.RegularExpressions.Regex.IsMatch(tag, @"^v\d+\.\d+\.\d+$"))
+                            tags.Add(tag);
                     }
                     if (arr.Length < 100)
                         break;
                     page++;
                 }
             }
-            list.Sort((x, y) => x.Version.CompareTo(y.Version));
-            return list;
+            return tags;
         }
 
         // ------------------------------------------------------- download / extract
@@ -235,7 +373,7 @@ namespace R1DeltaBisect
                     Log($"Downloading {info.Name} ...");
                     using (var wc = new WebClient())
                     {
-                        wc.Headers[HttpRequestHeader.UserAgent] = "r1delta-bisect";
+                        wc.Headers[HttpRequestHeader.UserAgent] = "curl/8.4.0";
                         wc.DownloadFile(info.Url, nupkg);
                     }
                 }

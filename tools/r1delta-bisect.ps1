@@ -48,28 +48,54 @@ function Write-Ok([string]$Message) { Write-Host "    $Message" -ForegroundColor
 function Write-Warn([string]$Message) { Write-Host "    $Message" -ForegroundColor Yellow }
 
 function Get-GitHubVersions {
-    $versions = @()
-    $page = 1
-    do {
-        $url = "https://api.github.com/repos/$repo/releases?per_page=100&page=$page"
-        $releases = Invoke-RestMethod -Uri $url -Headers @{ 'User-Agent' = 'r1delta-bisect' } -ErrorAction Stop
-        foreach ($r in $releases) {
-            $tag = $r.tag_name
-            if ($tag -notmatch '^v\d+\.\d+\.\d+$') { continue }
-            $ver = [version]($tag.Substring(1))
-            if ($ver -lt $minVersion) { continue }
-            $full = $r.assets | Where-Object { $_.name -like '*-full.nupkg' } | Select-Object -First 1
-            if ($full) {
-                $versions += [pscustomobject]@{
-                    Version = $ver
-                    Tag     = $tag
-                    Name    = $full.name
-                    Url     = $full.browser_download_url
-                }
-            }
+    # Prefer sources that are not subject to the GitHub API rate limit
+    # (60 req/hr per IP). The asset URL for a full package is deterministic
+    # once the tag is known.
+    $tags = @()
+    try {
+        $raw = & git ls-remote --tags "https://github.com/$repo.git" 2>$null
+        foreach ($line in $raw) {
+            if ($line -match 'refs/tags/(v\d+\.\d+\.\d+)$') { $tags += $Matches[1] }
         }
-        $page++
-    } while ($releases.Count -eq 100)
+    } catch { }
+    if ($tags.Count -eq 0) {
+        try {
+            $tags = @()
+            $re = [regex]'/r1delta/r1delta/releases/tag/(v\d+\.\d+\.\d+)'
+            for ($page = 1; $page -le 6; $page++) {
+                $html = (Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/$repo/releases?page=$page" -Headers @{ 'User-Agent' = 'curl/8.4.0' }).Content
+                $any = $false
+                foreach ($m in $re.Matches($html)) { $tags += $m.Groups[1].Value; $any = $true }
+                if (-not $any) { break }
+            }
+        } catch { }
+    }
+    if ($tags.Count -eq 0) {
+        try {
+            $page = 1
+            do {
+                $url = "https://api.github.com/repos/$repo/releases?per_page=100&page=$page"
+                $releases = Invoke-RestMethod -Uri $url -Headers @{ 'User-Agent' = 'curl/8.4.0' } -ErrorAction Stop
+                foreach ($r in $releases) {
+                    if ($r.tag_name -match '^v\d+\.\d+\.\d+$') { $tags += $r.tag_name }
+                }
+                $page++
+            } while ($releases.Count -eq 100)
+        } catch { }
+    }
+
+    $versions = @()
+    foreach ($tag in ($tags | Sort-Object -Unique)) {
+        $ver = [version]($tag.Substring(1))
+        if ($ver -lt $minVersion) { continue }
+        $name = "R1Delta-$ver-full.nupkg"
+        $versions += [pscustomobject]@{
+            Version = $ver
+            Tag     = $tag
+            Name    = $name
+            Url     = "https://github.com/$repo/releases/download/$tag/$name"
+        }
+    }
     return ($versions | Sort-Object Version -Unique)
 }
 
