@@ -538,10 +538,10 @@ namespace R1DeltaBisect
             return Process.Start(psi);
         }
 
-        private bool ProbeAlive(Process p, int seconds)
+        private bool ProbeAlive(Process p, int seconds, CancellationToken token)
         {
             if (_serverMode.Checked)
-                return ProbeServerAlive(seconds);
+                return ProbeServerAlive(seconds, token);
 
             // The launched exe may be a stub that chains to the real game
             // process, so p.HasExited is not a liveness signal. Kill leftovers
@@ -551,12 +551,14 @@ namespace R1DeltaBisect
 
             IntPtr hwnd = IntPtr.Zero;
             int waited = 0;
-            while (waited < seconds)
+            while (waited < seconds * 2)
             {
+                if (token.IsCancellationRequested)
+                    return false;
                 hwnd = FindWindow("Respawn001", null);
                 if (hwnd != IntPtr.Zero)
                     break;
-                System.Threading.Thread.Sleep(1000);
+                System.Threading.Thread.Sleep(500);
                 waited++;
             }
             if (hwnd == IntPtr.Zero)
@@ -564,23 +566,48 @@ namespace R1DeltaBisect
                 Log("  no Respawn001 window within " + seconds + "s -> BAD (did not finish loading)");
                 return false;
             }
-            Log("  Respawn001 window appeared; sending load command ...");
-            if (!SendLoadCommand(hwnd))
+            Log("  Respawn001 window appeared; waiting for the engine to settle ...");
+            for (int i = 0; i < 2; i++)
+            {
+                if (token.IsCancellationRequested)
+                    return false;
+                System.Threading.Thread.Sleep(500);
+            }
+
+            Log("  sending error_test ...");
+            if (!SendCommand(hwnd, "error_test"))
             {
                 Log("  WM_COPYDATA not processed within 5s -> BAD (hung)");
                 return false;
             }
-            Log("  load command accepted");
-            System.Threading.Thread.Sleep(5000);
-            return FindWindow("Respawn001", null) != IntPtr.Zero;
+            Log("  error_test accepted; waiting for the Engine Error dialog ...");
+            waited = 0;
+            while (waited < 30)
+            {
+                if (token.IsCancellationRequested)
+                    return false;
+                IntPtr dlg = FindEngineErrorDialog();
+                if (dlg != IntPtr.Zero)
+                {
+                    Log("  Engine Error dialog appeared -> GOOD");
+                    PostMessage(dlg, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+                    return true;
+                }
+                System.Threading.Thread.Sleep(500);
+                waited++;
+            }
+            Log("  no Engine Error dialog within 15s -> BAD");
+            return false;
         }
 
-        private bool ProbeServerAlive(int seconds)
+        private bool ProbeServerAlive(int seconds, CancellationToken token)
         {
             KillCacheGameProcesses();
             int waited = 0;
             while (waited < seconds)
             {
+                if (token.IsCancellationRequested)
+                    return false;
                 if (CacheGameProcesses().Any())
                     break;
                 System.Threading.Thread.Sleep(1000);
@@ -591,8 +618,39 @@ namespace R1DeltaBisect
                 Log("  no dedicated server process appeared within " + seconds + "s -> BAD");
                 return false;
             }
-            System.Threading.Thread.Sleep(seconds * 1000);
+            for (int i = 0; i < seconds; i++)
+            {
+                if (token.IsCancellationRequested)
+                    return false;
+                System.Threading.Thread.Sleep(1000);
+            }
             return CacheGameProcesses().Any();
+        }
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+        private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+        [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        private static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder lpString, int nMaxCount);
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+        private const uint WM_CLOSE = 0x0010;
+
+        private IntPtr FindEngineErrorDialog()
+        {
+            IntPtr found = IntPtr.Zero;
+            EnumWindows(delegate (IntPtr hwnd, IntPtr lParam)
+            {
+                var sb = new System.Text.StringBuilder(256);
+                GetWindowText(hwnd, sb, sb.Capacity);
+                if (sb.ToString().IndexOf("Engine Error", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    found = hwnd;
+                    return false;
+                }
+                return true;
+            }, IntPtr.Zero);
+            return found;
         }
 
         private IEnumerable<Process> CacheGameProcesses()
@@ -638,9 +696,8 @@ namespace R1DeltaBisect
         private const uint WM_COPYDATA = 0x004A;
         private const uint SMTO_ABORTIFHUNG = 0x0002;
 
-        private bool SendLoadCommand(IntPtr hwnd)
+        private bool SendCommand(IntPtr hwnd, string cmd)
         {
-            string cmd = "playlist private_match; map mp_lobby";
             byte[] bytes = Encoding.UTF8.GetBytes(cmd);
             IntPtr mem = System.Runtime.InteropServices.Marshal.AllocHGlobal(bytes.Length + 1);
             System.Runtime.InteropServices.Marshal.Copy(bytes, 0, mem, bytes.Length);
@@ -771,7 +828,12 @@ namespace R1DeltaBisect
                 try
                 {
                     var p = Launch(mid, gameDir);
-                    bool alive = ProbeAlive(p, (int)_probeSeconds.Value);
+                    bool alive = ProbeAlive(p, (int)_probeSeconds.Value, token);
+                    if (token.IsCancellationRequested)
+                    {
+                        Log("Bisect cancelled.");
+                        break;
+                    }
                     if (alive)
                     {
                         lo = mid.Version;

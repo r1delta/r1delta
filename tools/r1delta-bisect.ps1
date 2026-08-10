@@ -240,16 +240,35 @@ function Test-CandidateAlive($Info, $GameDir, [int]$Seconds) {
         if (-not ('R1DeltaBisect.Native' -as [type])) {
             Add-Type -TypeDefinition @'
 using System;
+using System.Text;
 using System.Runtime.InteropServices;
 namespace R1DeltaBisect {
     public static class Native {
         [StructLayout(LayoutKind.Sequential)]
         public struct COPYDATASTRUCT { public IntPtr dwData; public int cbData; public IntPtr lpData; }
+        public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
         [DllImport("user32.dll", SetLastError = true)]
         public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint msg, IntPtr wParam, ref COPYDATASTRUCT lParam, uint flags, uint timeout, out IntPtr result);
+        [DllImport("user32.dll")]
+        public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+        [DllImport("user32.dll")]
+        public static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+        public static IntPtr FindEngineErrorDialog() {
+            IntPtr found = IntPtr.Zero;
+            EnumWindows(delegate(IntPtr h, IntPtr l) {
+                StringBuilder sb = new StringBuilder(256);
+                GetWindowText(h, sb, sb.Capacity);
+                if (sb.ToString().IndexOf("Engine Error", StringComparison.OrdinalIgnoreCase) >= 0) { found = h; return false; }
+                return true;
+            }, IntPtr.Zero);
+            return found;
+        }
         public const uint WM_COPYDATA = 0x004A;
+        public const uint WM_CLOSE = 0x0010;
         public const uint SMTO_ABORTIFHUNG = 0x0002;
     }
 }
@@ -289,8 +308,10 @@ namespace R1DeltaBisect {
             return $false
         }
 
-        Write-Host "    Respawn001 window appeared; sending load command ..."
-        $cmd = 'playlist private_match; map mp_lobby'
+        Write-Host "    Respawn001 window appeared; waiting for the engine to settle ..."
+        Start-Sleep -Seconds 1
+
+        $cmd = 'error_test'
         $bytes = [System.Text.Encoding]::UTF8.GetBytes($cmd)
         $mem = [System.Runtime.InteropServices.Marshal]::AllocHGlobal($bytes.Length + 1)
         [System.Runtime.InteropServices.Marshal]::Copy($bytes, 0, $mem, $bytes.Length)
@@ -311,13 +332,21 @@ namespace R1DeltaBisect {
             [System.Runtime.InteropServices.Marshal]::FreeHGlobal($mem)
         }
 
-        Write-Ok "$($Info.Tag) accepted the load command"
-        Start-Sleep -Seconds 5
-        if ([R1DeltaBisect.Native]::FindWindow('Respawn001', $null) -eq [IntPtr]::Zero) {
-            Write-Warn "$($Info.Tag) window disappeared after accepting the command -> BAD"
+        Write-Ok "$($Info.Tag) accepted error_test; waiting for the Engine Error dialog ..."
+        $waited = 0
+        $dlg = [IntPtr]::Zero
+        while ($waited -lt 15) {
+            $dlg = [R1DeltaBisect.Native]::FindEngineErrorDialog()
+            if ($dlg -ne [IntPtr]::Zero) { break }
+            Start-Sleep -Seconds 1
+            $waited++
+        }
+        if ($dlg -eq [IntPtr]::Zero) {
+            Write-Warn "$($Info.Tag) no Engine Error dialog within 15s -> BAD"
             return $false
         }
-        Write-Ok "$($Info.Tag) loaded and responds -> GOOD"
+        [void][R1DeltaBisect.Native]::PostMessage($dlg, [R1DeltaBisect.Native]::WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero)
+        Write-Ok "$($Info.Tag) Engine Error dialog appeared -> GOOD"
         return $true
     }
     finally {
