@@ -59,13 +59,13 @@ namespace r1delta::materialsystem_dx11
 	class TextureLoadScratchBufferGate
 	{
 	public:
-		[[nodiscard]] std::unique_lock<std::mutex> Acquire()
+		[[nodiscard]] std::unique_lock<std::recursive_mutex> Acquire()
 		{
-			return std::unique_lock<std::mutex>(mutex_);
+			return std::unique_lock<std::recursive_mutex>(mutex_);
 		}
 
 	private:
-		std::mutex mutex_;
+		std::recursive_mutex mutex_;
 	};
 
 	class TextureUploadRegistry

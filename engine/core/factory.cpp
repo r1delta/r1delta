@@ -1662,7 +1662,17 @@ static __int64 __fastcall MaterialSystemDx11LoadTextureGuard(__int64 texture, __
 	if (!MaterialSystemDx11LoadTextureOriginal)
 		return 0;
 
-	auto scratchBufferLock = s_MaterialSystemDx11TextureLoadGate.Acquire();
+	std::unique_lock<std::recursive_mutex> scratchBufferLock;
+	try
+	{
+		scratchBufferLock = s_MaterialSystemDx11TextureLoadGate.Acquire();
+	}
+	catch (const std::system_error&)
+	{
+		// The gate is a scratch-buffer lifetime safety net. Never let a lock
+		// failure close the game; proceed unlocked (pre-gate behavior).
+		OutputDebugStringA("R1Delta: texture load gate lock failed; proceeding unlocked\n");
+	}
 	return MaterialSystemDx11LoadTextureOriginal(texture, textureData);
 }
 
