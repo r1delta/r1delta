@@ -308,8 +308,55 @@ namespace R1DeltaBisect {
             return $false
         }
 
-        Write-Host "    Respawn001 window appeared; waiting for the engine to settle ..."
-        Start-Sleep -Seconds 1
+        Write-Host "    Respawn001 window appeared; waiting 15s for the engine to initialize ..."
+        Start-Sleep -Seconds 15
+
+        $cmd = 'playlist private_match'
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($cmd)
+        $mem = [System.Runtime.InteropServices.Marshal]::AllocHGlobal($bytes.Length + 1)
+        [System.Runtime.InteropServices.Marshal]::Copy($bytes, 0, $mem, $bytes.Length)
+        [System.Runtime.InteropServices.Marshal]::WriteByte($mem, $bytes.Length, 0)
+        $cds = New-Object R1DeltaBisect.Native+COPYDATASTRUCT
+        $cds.dwData = [IntPtr]::Zero
+        $cds.cbData = $bytes.Length + 1
+        $cds.lpData = $mem
+        try {
+            $result = [IntPtr]::Zero
+            $ret = [R1DeltaBisect.Native]::SendMessageTimeout($hwnd, [R1DeltaBisect.Native]::WM_COPYDATA, [IntPtr]::Zero, [ref]$cds, [R1DeltaBisect.Native]::SMTO_ABORTIFHUNG, 5000, [ref]$result)
+            if ($ret -eq [IntPtr]::Zero) {
+                Write-Warn "$($Info.Tag) did not process playlist private_match within 5s -> BAD (hung)"
+                return $false
+            }
+        }
+        finally {
+            [System.Runtime.InteropServices.Marshal]::FreeHGlobal($mem)
+        }
+        Write-Ok "$($Info.Tag) accepted playlist private_match"
+
+        $cmd = 'map mp_lobby'
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($cmd)
+        $mem = [System.Runtime.InteropServices.Marshal]::AllocHGlobal($bytes.Length + 1)
+        [System.Runtime.InteropServices.Marshal]::Copy($bytes, 0, $mem, $bytes.Length)
+        [System.Runtime.InteropServices.Marshal]::WriteByte($mem, $bytes.Length, 0)
+        $cds = New-Object R1DeltaBisect.Native+COPYDATASTRUCT
+        $cds.dwData = [IntPtr]::Zero
+        $cds.cbData = $bytes.Length + 1
+        $cds.lpData = $mem
+        try {
+            $result = [IntPtr]::Zero
+            $ret = [R1DeltaBisect.Native]::SendMessageTimeout($hwnd, [R1DeltaBisect.Native]::WM_COPYDATA, [IntPtr]::Zero, [ref]$cds, [R1DeltaBisect.Native]::SMTO_ABORTIFHUNG, 5000, [ref]$result)
+            if ($ret -eq [IntPtr]::Zero) {
+                Write-Warn "$($Info.Tag) did not process map mp_lobby within 5s -> BAD (hung)"
+                return $false
+            }
+        }
+        finally {
+            [System.Runtime.InteropServices.Marshal]::FreeHGlobal($mem)
+        }
+        Write-Ok "$($Info.Tag) accepted map mp_lobby"
+
+        Write-Host "    commands accepted; waiting 15s for the map to settle ..."
+        Start-Sleep -Seconds 15
 
         $cmd = 'error_test'
         $bytes = [System.Text.Encoding]::UTF8.GetBytes($cmd)
@@ -324,7 +371,7 @@ namespace R1DeltaBisect {
             $result = [IntPtr]::Zero
             $ret = [R1DeltaBisect.Native]::SendMessageTimeout($hwnd, [R1DeltaBisect.Native]::WM_COPYDATA, [IntPtr]::Zero, [ref]$cds, [R1DeltaBisect.Native]::SMTO_ABORTIFHUNG, 5000, [ref]$result)
             if ($ret -eq [IntPtr]::Zero) {
-                Write-Warn "$($Info.Tag) did not process WM_COPYDATA within 5s -> BAD (hung)"
+                Write-Warn "$($Info.Tag) did not process error_test within 5s -> BAD (hung)"
                 return $false
             }
         }

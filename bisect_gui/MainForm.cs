@@ -566,13 +566,25 @@ namespace R1DeltaBisect
                 Log("  no Respawn001 window within " + seconds + "s -> BAD (did not finish loading)");
                 return false;
             }
-            Log("  Respawn001 window appeared; waiting for the engine to settle ...");
-            for (int i = 0; i < 2; i++)
+            Log("  Respawn001 window appeared; waiting 15s for the engine to initialize ...");
+            if (!SleepCancellable(15000, token))
+                return false;
+
+            Log("  sending playlist private_match ...");
+            if (!SendCommand(hwnd, "playlist private_match"))
             {
-                if (token.IsCancellationRequested)
-                    return false;
-                System.Threading.Thread.Sleep(500);
+                Log("  WM_COPYDATA not processed within 5s -> BAD (hung)");
+                return false;
             }
+            Log("  sending map mp_lobby ...");
+            if (!SendCommand(hwnd, "map mp_lobby"))
+            {
+                Log("  WM_COPYDATA not processed within 5s -> BAD (hung)");
+                return false;
+            }
+            Log("  commands accepted; waiting 15s for the map to settle ...");
+            if (!SleepCancellable(15000, token))
+                return false;
 
             Log("  sending error_test ...");
             if (!SendCommand(hwnd, "error_test"))
@@ -598,6 +610,19 @@ namespace R1DeltaBisect
             }
             Log("  no Engine Error dialog within 15s -> BAD");
             return false;
+        }
+
+        private bool SleepCancellable(int millis, CancellationToken token)
+        {
+            int elapsed = 0;
+            while (elapsed < millis)
+            {
+                if (token.IsCancellationRequested)
+                    return false;
+                System.Threading.Thread.Sleep(500);
+                elapsed += 500;
+            }
+            return true;
         }
 
         private bool ProbeServerAlive(int seconds, CancellationToken token)
