@@ -369,21 +369,88 @@ namespace R1DeltaBisect
             {
                 Directory.CreateDirectory(dest);
                 if (!File.Exists(nupkg))
-                {
-                    Log($"Downloading {info.Name} ...");
-                    using (var wc = new WebClient())
-                    {
-                        wc.Headers[HttpRequestHeader.UserAgent] = "curl/8.4.0";
-                        wc.DownloadFile(info.Url, nupkg);
-                    }
-                }
+                    DownloadPackage(info, nupkg);
                 Log($"Extracting {info.Name} ...");
                 if (Directory.Exists(extract))
                     Directory.Delete(extract, true);
-                ZipFile.ExtractToDirectory(nupkg, extract);
+                try
+                {
+                    ZipFile.ExtractToDirectory(nupkg, extract);
+                }
+                catch (InvalidDataException)
+                {
+                    // Corrupt cached copy; drop it and try once more.
+                    Log("Cached package is corrupt; re-downloading ...");
+                    try { File.Delete(nupkg); } catch { }
+                    DownloadPackage(info, nupkg);
+                    if (Directory.Exists(extract))
+                        Directory.Delete(extract, true);
+                    ZipFile.ExtractToDirectory(nupkg, extract);
+                }
                 Log($"Ready: {gameDir}");
             }
             return gameDir;
+        }
+
+        private void DownloadPackage(BuildInfo info, string nupkg)
+        {
+            int attempts = 0;
+            while (true)
+            {
+                attempts++;
+                string part = nupkg + ".part";
+                try
+                {
+                    using (var wc = new WebClient())
+                    {
+                        wc.Headers[HttpRequestHeader.UserAgent] = "curl/8.4.0";
+                        wc.DownloadFile(info.Url, part);
+                    }
+                    if (!IsValidZip(part))
+                        throw new InvalidDataException("downloaded file is not a valid ZIP (truncated download)");
+                    if (File.Exists(nupkg))
+                        File.Delete(nupkg);
+                    File.Move(part, nupkg);
+                    return;
+                }
+                catch (WebException wex)
+                {
+                    var resp = wex.Response as HttpWebResponse;
+                    if (resp != null && resp.StatusCode == HttpStatusCode.NotFound)
+                        throw new InvalidOperationException("No full package exists for " + info.Tag + " (" + info.Name + " not found).");
+                    if (attempts >= 3)
+                        throw;
+                    Log("Download attempt " + attempts + " failed (" + wex.Message + "); retrying ...");
+                    try { File.Delete(part); } catch { }
+                }
+                catch (InvalidDataException)
+                {
+                    if (attempts >= 3)
+                        throw;
+                    Log("Download attempt " + attempts + " produced an invalid ZIP; retrying ...");
+                    try { File.Delete(part); } catch { }
+                }
+            }
+        }
+
+        private bool IsValidZip(string path)
+        {
+            try
+            {
+                using (var fs = File.OpenRead(path))
+                {
+                    if (fs.Length < 4)
+                        return false;
+                    byte[] magic = new byte[4];
+                    fs.Read(magic, 0, 4);
+                    return magic[0] == 0x50 && magic[1] == 0x4B
+                        && (magic[2] == 0x03 || magic[2] == 0x05 || magic[2] == 0x07);
+                }
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private BuildInfo SelectedBuild(ComboBox box)
@@ -648,7 +715,17 @@ namespace R1DeltaBisect
                     break;
                 var mid = candidates[(candidates.Count - 1) / 2];
 
-                string gameDir = GetGameDir(mid);
+                string gameDir;
+                try
+                {
+                    gameDir = GetGameDir(mid);
+                }
+                catch (Exception ex)
+                {
+                    Log("  " + mid.Tag + " unavailable (" + ex.Message + "); excluding it from the search");
+                    _builds.RemoveAll(b => b.Tag == mid.Tag);
+                    continue;
+                }
                 Process p = null;
                 bool alive;
                 try

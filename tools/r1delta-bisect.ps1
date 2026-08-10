@@ -114,14 +114,59 @@ function Get-PackagePath($Info) {
         New-Item -ItemType Directory -Force -Path $dest | Out-Null
         if (-not (Test-Path $nupkg)) {
             Write-Step "Downloading $($Info.Name) ..."
-            Invoke-WebRequest -Uri $Info.Url -OutFile $nupkg -UseBasicParsing
+            $attempt = 0
+            while ($true) {
+                $attempt++
+                $part = "$nupkg.part"
+                try {
+                    Invoke-WebRequest -Uri $Info.Url -OutFile $part -UseBasicParsing
+                    if (-not (Test-ZipFile $part)) {
+                        throw "downloaded file is not a valid ZIP (truncated download)"
+                    }
+                    Move-Item -Force $part $nupkg
+                    break
+                }
+                catch {
+                    $is404 = $_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 404
+                    if ($is404) {
+                        throw "No full package exists for $($Info.Tag) ($($Info.Name) not found)."
+                    }
+                    if ($attempt -ge 3) { throw }
+                    Write-Warn "Download attempt $attempt failed ($($_.Exception.Message)); retrying ..."
+                    Remove-Item -Force $part -ErrorAction SilentlyContinue
+                }
+            }
         }
         Write-Step "Extracting $($Info.Name) ..."
         if (Test-Path $extract) { Remove-Item -Recurse -Force $extract }
-        Expand-Archive -Path $nupkg -DestinationPath $extract
+        try {
+            Expand-Archive -Path $nupkg -DestinationPath $extract
+        }
+        catch {
+            Write-Warn "Cached package is corrupt; re-downloading ..."
+            Remove-Item -Force $nupkg -ErrorAction SilentlyContinue
+            Invoke-WebRequest -Uri $Info.Url -OutFile $nupkg -UseBasicParsing
+            if (-not (Test-ZipFile $nupkg)) { throw "Re-download of $($Info.Tag) is not a valid ZIP." }
+            Expand-Archive -Path $nupkg -DestinationPath $extract
+        }
         Write-Ok "Extracted to $extract\lib\net462"
     }
     return (Join-Path $extract 'lib\net462')
+}
+
+function Test-ZipFile([string]$Path) {
+    try {
+        $fs = [System.IO.File]::OpenRead($Path)
+        try {
+            if ($fs.Length -lt 4) { return $false }
+            $magic = New-Object byte[] 4
+            [void]$fs.Read($magic, 0, 4)
+            return $magic[0] -eq 0x50 -and $magic[1] -eq 0x4B -and
+                ($magic[2] -eq 0x03 -or $magic[2] -eq 0x05 -or $magic[2] -eq 0x07)
+        }
+        finally { $fs.Dispose() }
+    }
+    catch { return $false }
 }
 
 function Get-ProfilePaths {
@@ -286,7 +331,14 @@ function Start-Bisect($Versions) {
             if ($candidates.Count -eq 0) { break }
             $mid = $candidates[[int][Math]::Floor(($candidates.Count - 1) / 2)]
 
-            $gameDir = Get-PackagePath $mid
+            try {
+                $gameDir = Get-PackagePath $mid
+            }
+            catch {
+                Write-Warn "  $($mid.Tag) unavailable ($($_.Exception.Message)); excluding it from the search"
+                $versions = $versions | Where-Object { $_.Tag -ne $mid.Tag }
+                continue
+            }
             if (Test-CandidateAlive $mid $gameDir $ProbeSeconds) {
                 $lo = $mid.Version; $loTag = $mid.Tag
                 Write-Ok "  -> new good bound: $loTag"
