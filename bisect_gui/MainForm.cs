@@ -335,26 +335,86 @@ namespace R1DeltaBisect
 
         private bool ProbeAlive(Process p, int seconds)
         {
-            System.Threading.Thread.Sleep(5000);
-            if (p.HasExited)
-                return false;
-            if (!_serverMode.Checked)
+            if (_serverMode.Checked)
             {
-                System.Threading.Thread.Sleep(3000);
-                try
-                {
-                    var titans = Process.GetProcessesByName("Titanfall");
-                    foreach (var t in titans)
-                    {
-                        if (!t.HasExited && (t.MainWindowTitle.IndexOf("crashed", StringComparison.OrdinalIgnoreCase) >= 0
-                            || t.MainWindowTitle.IndexOf("unfortunately", StringComparison.OrdinalIgnoreCase) >= 0))
-                            return false;
-                    }
-                }
-                catch { }
+                // Headless dedicated server: no window class to probe.
+                System.Threading.Thread.Sleep(seconds * 1000);
+                return !p.HasExited;
             }
-            System.Threading.Thread.Sleep(Math.Max(0, (seconds - 8) * 1000));
+
+            // Client: the engine registers its main window class as
+            // "Respawn001". Its appearance means the game finished loading and
+            // is pumping messages. Then confirm it processes commands by
+            // sending the private-match lobby load over WM_COPYDATA.
+            IntPtr hwnd = IntPtr.Zero;
+            int waited = 0;
+            while (waited < seconds)
+            {
+                if (p.HasExited)
+                    return false;
+                hwnd = FindWindow("Respawn001", null);
+                if (hwnd != IntPtr.Zero)
+                    break;
+                System.Threading.Thread.Sleep(1000);
+                waited++;
+            }
+            if (hwnd == IntPtr.Zero)
+            {
+                Log("  no Respawn001 window within " + seconds + "s -> BAD (did not finish loading)");
+                return false;
+            }
+            Log("  Respawn001 window appeared; sending load command ...");
+            if (!SendLoadCommand(hwnd))
+            {
+                Log("  WM_COPYDATA not processed within 5s -> BAD (hung)");
+                return false;
+            }
+            Log("  load command accepted");
+            System.Threading.Thread.Sleep(5000);
             return !p.HasExited;
+        }
+
+        [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        private static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+        private struct COPYDATASTRUCT
+        {
+            public IntPtr dwData;
+            public int cbData;
+            public IntPtr lpData;
+        }
+
+        [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+        private static extern IntPtr SendMessageTimeout(
+            IntPtr hWnd, uint msg, IntPtr wParam, ref COPYDATASTRUCT lParam, uint flags, uint timeout, out IntPtr result);
+
+        private const uint WM_COPYDATA = 0x004A;
+        private const uint SMTO_ABORTIFHUNG = 0x0002;
+
+        private bool SendLoadCommand(IntPtr hwnd)
+        {
+            string cmd = "playlist private_match; map mp_lobby";
+            byte[] bytes = Encoding.UTF8.GetBytes(cmd);
+            IntPtr mem = System.Runtime.InteropServices.Marshal.AllocHGlobal(bytes.Length + 1);
+            System.Runtime.InteropServices.Marshal.Copy(bytes, 0, mem, bytes.Length);
+            System.Runtime.InteropServices.Marshal.WriteByte(mem, bytes.Length, 0);
+            var cds = new COPYDATASTRUCT
+            {
+                dwData = IntPtr.Zero,
+                cbData = bytes.Length + 1,
+                lpData = mem
+            };
+            try
+            {
+                IntPtr result;
+                IntPtr r = SendMessageTimeout(hwnd, WM_COPYDATA, IntPtr.Zero, ref cds, SMTO_ABORTIFHUNG, 5000, out result);
+                return r != IntPtr.Zero;
+            }
+            finally
+            {
+                System.Runtime.InteropServices.Marshal.FreeHGlobal(mem);
+            }
         }
 
         private void RunSelectedVersion()

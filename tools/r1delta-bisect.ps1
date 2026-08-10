@@ -149,31 +149,84 @@ function Test-CandidateAlive($Info, $GameDir, [int]$Seconds) {
     Write-Step "Probing $($Info.Tag) ($($Info.Version)) ..."
     $p = Start-Process -FilePath $exe -ArgumentList $args -WorkingDirectory $GameDir -PassThru
     try {
-        Start-Sleep -Seconds 5
-        if ($p.HasExited) {
-            Write-Warn "$($Info.Tag) exited early (code $($p.ExitCode)) -> BAD"
+        if ($Server) {
+            Start-Sleep -Seconds $Seconds
+            if ($p.HasExited) {
+                Write-Warn "$($Info.Tag) exited -> BAD"
+                return $false
+            }
+            Write-Ok "$($Info.Tag) stayed alive for $Seconds s -> GOOD"
+            return $true
+        }
+
+        # Client: the engine registers its main window class as "Respawn001".
+        # Its appearance means loading finished and the message pump runs.
+        # Confirm it processes commands via WM_COPYDATA (private-match lobby).
+        if (-not ('R1DeltaBisect.Native' -as [type])) {
+            Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+namespace R1DeltaBisect {
+    public static class Native {
+        [StructLayout(LayoutKind.Sequential)]
+        public struct COPYDATASTRUCT { public IntPtr dwData; public int cbData; public IntPtr lpData; }
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint msg, IntPtr wParam, ref COPYDATASTRUCT lParam, uint flags, uint timeout, out IntPtr result);
+        public const uint WM_COPYDATA = 0x004A;
+        public const uint SMTO_ABORTIFHUNG = 0x0002;
+    }
+}
+'@
+        }
+
+        $hwnd = [IntPtr]::Zero
+        $waited = 0
+        while ($waited -lt $Seconds) {
+            if ($p.HasExited) {
+                Write-Warn "$($Info.Tag) exited early (code $($p.ExitCode)) -> BAD"
+                return $false
+            }
+            $hwnd = [R1DeltaBisect.Native]::FindWindow('Respawn001', $null)
+            if ($hwnd -ne [IntPtr]::Zero) { break }
+            Start-Sleep -Seconds 1
+            $waited++
+        }
+        if ($hwnd -eq [IntPtr]::Zero) {
+            Write-Warn "$($Info.Tag) showed no Respawn001 window within $Seconds s -> BAD (did not finish loading)"
             return $false
         }
 
-        # A crashed client shows the crash dialog while staying alive; treat a
-        # dialog/window whose title mentions a crash as BAD.
-        if (-not $Server) {
-            Start-Sleep -Seconds 3
-            $crashDialog = Get-Process -Name 'Titanfall' -ErrorAction SilentlyContinue |
-                ForEach-Object { $_.MainWindowTitle } |
-                Where-Object { $_ -match 'crashed|unfortunately|crash' }
-            if ($crashDialog) {
-                Write-Warn "$($Info.Tag) shows a crash dialog -> BAD"
+        Write-Host "    Respawn001 window appeared; sending load command ..."
+        $cmd = 'playlist private_match; map mp_lobby'
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($cmd)
+        $mem = [System.Runtime.InteropServices.Marshal]::AllocHGlobal($bytes.Length + 1)
+        [System.Runtime.InteropServices.Marshal]::Copy($bytes, 0, $mem, $bytes.Length)
+        [System.Runtime.InteropServices.Marshal]::WriteByte($mem, $bytes.Length, 0)
+        $cds = New-Object R1DeltaBisect.Native+COPYDATASTRUCT
+        $cds.dwData = [IntPtr]::Zero
+        $cds.cbData = $bytes.Length + 1
+        $cds.lpData = $mem
+        try {
+            $result = [IntPtr]::Zero
+            $ret = [R1DeltaBisect.Native]::SendMessageTimeout($hwnd, [R1DeltaBisect.Native]::WM_COPYDATA, [IntPtr]::Zero, [ref]$cds, [R1DeltaBisect.Native]::SMTO_ABORTIFHUNG, 5000, [ref]$result)
+            if ($ret -eq [IntPtr]::Zero) {
+                Write-Warn "$($Info.Tag) did not process WM_COPYDATA within 5s -> BAD (hung)"
                 return $false
             }
         }
+        finally {
+            [System.Runtime.InteropServices.Marshal]::FreeHGlobal($mem)
+        }
 
-        Start-Sleep -Seconds ($Seconds - 8)
+        Write-Ok "$($Info.Tag) accepted the load command"
+        Start-Sleep -Seconds 5
         if ($p.HasExited) {
-            Write-Warn "$($Info.Tag) exited after $Seconds s (code $($p.ExitCode)) -> BAD"
+            Write-Warn "$($Info.Tag) exited after accepting the command -> BAD"
             return $false
         }
-        Write-Ok "$($Info.Tag) stayed alive for $Seconds s -> GOOD"
+        Write-Ok "$($Info.Tag) loaded and responds -> GOOD"
         return $true
     }
     finally {
