@@ -212,27 +212,31 @@ function Get-ServerArgs($GameDir) {
     return @('-console', '-dev', '-novid', '-port', $Port, '+hostport', $Port, '+map', 'mp_airbase', '-game', $GameDir)
 }
 
+function Get-CacheGameProcesses {
+    Get-Process -ErrorAction SilentlyContinue | Where-Object {
+        try { $_.Path -and $_.Path.StartsWith($CacheDir, [System.StringComparison]::OrdinalIgnoreCase) } catch { $false }
+    }
+}
+
+function Stop-CacheGameProcesses {
+    Get-CacheGameProcesses | ForEach-Object {
+        try { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue } catch { }
+    }
+    Start-Sleep -Seconds 2
+}
+
 function Test-CandidateAlive($Info, $GameDir, [int]$Seconds) {
     $exe = if ($Server) { Join-Path $GameDir 'R1Delta_DS.exe' } else { Join-Path $GameDir 'Titanfall.exe' }
     $args = if ($Server) { Get-ServerArgs $GameDir } else { Get-ClientArgs $GameDir }
     if ($ExtraArgs) { $args += $ExtraArgs.Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries) }
 
     Write-Step "Probing $($Info.Tag) ($($Info.Version)) ..."
+    # The launched exe may be a stub that chains to the real game process, so
+    # the started process exiting is not a liveness signal. Kill leftovers from
+    # previous candidates first (only builds under our cache dir).
+    Stop-CacheGameProcesses
     $p = Start-Process -FilePath $exe -ArgumentList $args -WorkingDirectory $GameDir -PassThru
     try {
-        if ($Server) {
-            Start-Sleep -Seconds $Seconds
-            if ($p.HasExited) {
-                Write-Warn "$($Info.Tag) exited -> BAD"
-                return $false
-            }
-            Write-Ok "$($Info.Tag) stayed alive for $Seconds s -> GOOD"
-            return $true
-        }
-
-        # Client: the engine registers its main window class as "Respawn001".
-        # Its appearance means loading finished and the message pump runs.
-        # Confirm it processes commands via WM_COPYDATA (private-match lobby).
         if (-not ('R1DeltaBisect.Native' -as [type])) {
             Add-Type -TypeDefinition @'
 using System;
@@ -252,13 +256,29 @@ namespace R1DeltaBisect {
 '@
         }
 
+        if ($Server) {
+            $waited = 0
+            while ($waited -lt $Seconds) {
+                if (Get-CacheGameProcesses) { break }
+                Start-Sleep -Seconds 1
+                $waited++
+            }
+            if ($waited -ge $Seconds) {
+                Write-Warn "$($Info.Tag) showed no server process within $Seconds s -> BAD"
+                return $false
+            }
+            Start-Sleep -Seconds $Seconds
+            if (-not (Get-CacheGameProcesses)) {
+                Write-Warn "$($Info.Tag) server exited -> BAD"
+                return $false
+            }
+            Write-Ok "$($Info.Tag) server stayed alive -> GOOD"
+            return $true
+        }
+
         $hwnd = [IntPtr]::Zero
         $waited = 0
         while ($waited -lt $Seconds) {
-            if ($p.HasExited) {
-                Write-Warn "$($Info.Tag) exited early (code $($p.ExitCode)) -> BAD"
-                return $false
-            }
             $hwnd = [R1DeltaBisect.Native]::FindWindow('Respawn001', $null)
             if ($hwnd -ne [IntPtr]::Zero) { break }
             Start-Sleep -Seconds 1
@@ -293,16 +313,15 @@ namespace R1DeltaBisect {
 
         Write-Ok "$($Info.Tag) accepted the load command"
         Start-Sleep -Seconds 5
-        if ($p.HasExited) {
-            Write-Warn "$($Info.Tag) exited after accepting the command -> BAD"
+        if ([R1DeltaBisect.Native]::FindWindow('Respawn001', $null) -eq [IntPtr]::Zero) {
+            Write-Warn "$($Info.Tag) window disappeared after accepting the command -> BAD"
             return $false
         }
         Write-Ok "$($Info.Tag) loaded and responds -> GOOD"
         return $true
     }
     finally {
-        if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
-        Start-Sleep -Seconds 2
+        Stop-CacheGameProcesses
     }
 }
 

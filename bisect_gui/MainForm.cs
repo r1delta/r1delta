@@ -541,22 +541,18 @@ namespace R1DeltaBisect
         private bool ProbeAlive(Process p, int seconds)
         {
             if (_serverMode.Checked)
-            {
-                // Headless dedicated server: no window class to probe.
-                System.Threading.Thread.Sleep(seconds * 1000);
-                return !p.HasExited;
-            }
+                return ProbeServerAlive(seconds);
 
-            // Client: the engine registers its main window class as
-            // "Respawn001". Its appearance means the game finished loading and
-            // is pumping messages. Then confirm it processes commands by
-            // sending the private-match lobby load over WM_COPYDATA.
+            // The launched exe may be a stub that chains to the real game
+            // process, so p.HasExited is not a liveness signal. Kill leftovers
+            // from previous candidates first (only builds under our cache dir),
+            // then wait for the engine window class "Respawn001".
+            KillCacheGameProcesses();
+
             IntPtr hwnd = IntPtr.Zero;
             int waited = 0;
             while (waited < seconds)
             {
-                if (p.HasExited)
-                    return false;
                 hwnd = FindWindow("Respawn001", null);
                 if (hwnd != IntPtr.Zero)
                     break;
@@ -576,7 +572,52 @@ namespace R1DeltaBisect
             }
             Log("  load command accepted");
             System.Threading.Thread.Sleep(5000);
-            return !p.HasExited;
+            return FindWindow("Respawn001", null) != IntPtr.Zero;
+        }
+
+        private bool ProbeServerAlive(int seconds)
+        {
+            KillCacheGameProcesses();
+            int waited = 0;
+            while (waited < seconds)
+            {
+                if (CacheGameProcesses().Any())
+                    break;
+                System.Threading.Thread.Sleep(1000);
+                waited++;
+            }
+            if (waited >= seconds)
+            {
+                Log("  no dedicated server process appeared within " + seconds + "s -> BAD");
+                return false;
+            }
+            System.Threading.Thread.Sleep(seconds * 1000);
+            return CacheGameProcesses().Any();
+        }
+
+        private IEnumerable<Process> CacheGameProcesses()
+        {
+            var result = new List<Process>();
+            foreach (var proc in Process.GetProcesses())
+            {
+                try
+                {
+                    if (!proc.HasExited
+                        && proc.MainModule.FileName.StartsWith(_cacheDir, StringComparison.OrdinalIgnoreCase))
+                        result.Add(proc);
+                }
+                catch { }
+            }
+            return result;
+        }
+
+        private void KillCacheGameProcesses()
+        {
+            foreach (var proc in CacheGameProcesses())
+            {
+                try { proc.Kill(); } catch { }
+            }
+            System.Threading.Thread.Sleep(1500);
         }
 
         [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
@@ -631,6 +672,7 @@ namespace R1DeltaBisect
             {
                 BackupProfile();
                 string gameDir = GetGameDir(info);
+                KillCacheGameProcesses();
                 var p = Launch(info, gameDir);
                 _resultLabel.Text = "Launched " + info.Tag + ". Profile will be restored on exit.";
             }
@@ -726,33 +768,26 @@ namespace R1DeltaBisect
                     _builds.RemoveAll(b => b.Tag == mid.Tag);
                     continue;
                 }
-                Process p = null;
-                bool alive;
                 try
                 {
-                    p = Launch(mid, gameDir);
-                    alive = ProbeAlive(p, (int)_probeSeconds.Value);
+                    var p = Launch(mid, gameDir);
+                    bool alive = ProbeAlive(p, (int)_probeSeconds.Value);
+                    if (alive)
+                    {
+                        lo = mid.Version;
+                        loTag = mid.Tag;
+                        Log("  -> new GOOD bound: " + loTag);
+                    }
+                    else
+                    {
+                        hi = mid.Version;
+                        hiTag = mid.Tag;
+                        Log("  -> new BAD bound: " + hiTag);
+                    }
                 }
                 finally
                 {
-                    if (p != null && !p.HasExited)
-                    {
-                        try { p.Kill(); } catch { }
-                    }
-                    System.Threading.Thread.Sleep(2000);
-                }
-
-                if (alive)
-                {
-                    lo = mid.Version;
-                    loTag = mid.Tag;
-                    Log("  -> new GOOD bound: " + loTag);
-                }
-                else
-                {
-                    hi = mid.Version;
-                    hiTag = mid.Tag;
-                    Log("  -> new BAD bound: " + hiTag);
+                    KillCacheGameProcesses();
                 }
             }
 
