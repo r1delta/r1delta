@@ -1693,34 +1693,44 @@ int AutoCVar(HSQUIRRELVM v) {
 	constexpr size_t AUTOCVAR_PREFIX_SIZE = std::char_traits<char>::length(AUTOCVAR_PREFIX);
 
 	size_t size = AUTOCVAR_PREFIX_SIZE + strlen(key) + 1;
-	char* actualKey = (char*)malloc(size);
-	if (!actualKey) return -1;
-	strcpy_s(actualKey, size, AUTOCVAR_PREFIX);
-	strcat_s(actualKey, size, key);
-	actualKey[size - 1] = '\0';
+	// Build "autocvar_<key>" through the delegated allocator: the R1 ConVar
+	// stores the name pointer for its lifetime and the engine frees it with
+	// the delegated allocator, so a CRT buffer would be validated as foreign
+	// and abort inside tier0_orig's free check.
+	char* actualKey = static_cast<char*>(GlobalAllocator()->Alloc(size));
+	if (!actualKey)
+		return -1;
+	memcpy(actualKey, AUTOCVAR_PREFIX, AUTOCVAR_PREFIX_SIZE);
+	strcpy_s(actualKey + AUTOCVAR_PREFIX_SIZE, size - AUTOCVAR_PREFIX_SIZE, key);
 
-	const char* defaultValueCopy = _strdup(defaultValue);
-	const char* descCopy = _strdup(desc);
+	const char* defaultValueCopy = DuplicateDelegatedString(defaultValue);
+	const char* descCopy = DuplicateDelegatedString(desc);
+	if (!defaultValueCopy || !descCopy) {
+		GlobalAllocator()->Free(actualKey);
+		FreeDelegatedString(const_cast<char*>(defaultValueCopy));
+		FreeDelegatedString(const_cast<char*>(descCopy));
+		return -1;
+	}
 
 	// if exists, bail
 	if (IsR1ODedicatedServer()) {
 		if (CCVar_FindVar(cvarinterface, actualKey)) {
-			free(actualKey);
-			free((void*)defaultValueCopy);
-			free((void*)descCopy);
+			GlobalAllocator()->Free(actualKey);
+			FreeDelegatedString(const_cast<char*>(defaultValueCopy));
+			FreeDelegatedString(const_cast<char*>(descCopy));
 			return 0;
 		}
 		RegisterR1ODediConVar(actualKey, defaultValue, FCVAR_GAMEDLL, desc);
-		free(actualKey);
-		free((void*)defaultValueCopy);
-		free((void*)descCopy);
+		GlobalAllocator()->Free(actualKey);
+		FreeDelegatedString(const_cast<char*>(defaultValueCopy));
+		FreeDelegatedString(const_cast<char*>(descCopy));
 		return 0;
 	}
 
 	if (OriginalCCVar_FindVar(cvarinterface, actualKey)) {
-		free(actualKey);
-		free((void*)defaultValueCopy);
-		free((void*)descCopy);
+		GlobalAllocator()->Free(actualKey);
+		FreeDelegatedString(const_cast<char*>(defaultValueCopy));
+		FreeDelegatedString(const_cast<char*>(descCopy));
 		return 0;
 	}
 

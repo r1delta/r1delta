@@ -620,3 +620,19 @@ void* __cdecl hkrecalloc_base(void* Block, size_t Count, size_t Size)
     }
     return pMemOut;
 }
+
+char* DuplicateDelegatedString(const char* value)
+{
+    const char* source = value ? value : "";
+    const size_t size = strlen(source) + 1;
+    void* memory = hkmalloc_base(size);
+    if (!memory)
+        throw std::bad_alloc();
+    memcpy(memory, source, size);
+    return static_cast<char*>(memory);
+}
+
+void FreeDelegatedString(void* p)
+{
+    hkfree_base(p);
+}

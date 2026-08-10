@@ -1347,3 +1347,11 @@ extern IMemAlloc* g_pMemAllocSingleton;
 extern "C" __declspec(dllexport) IMemAlloc * CreateGlobalMemAlloc();
 
 IMemAlloc* GlobalAllocator();
+
+// Allocate/free strings that are handed to the R1/R1O engine and freed by the
+// engine's own allocator path (cvar values, search paths, autocvar storage).
+// The engine frees through the delegated retail allocator, so these MUST come
+// from that same allocator; CRT strdup/malloc buffers would be validated as
+// foreign blocks and abort inside tier0_orig's free check.
+char* DuplicateDelegatedString(const char* value);
+void FreeDelegatedString(void* p);

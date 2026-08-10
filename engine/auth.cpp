@@ -511,7 +511,7 @@ static void EnsurePlatformUserIdString(ConVarR1* id)
     if (SetConvarStringOriginal)
         SetConvarStringOriginal(id, value);
     else
-        id->m_Value.m_pszString = _strdup(value);
+        id->m_Value.m_pszString = DuplicateDelegatedString(value);
 
     id->m_Value.m_nValue = static_cast<int>(generated & 0x7FFFFFFF);
 

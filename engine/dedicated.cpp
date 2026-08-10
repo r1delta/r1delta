@@ -1819,7 +1819,7 @@ void InitDedicated()
 __int64 (*oAddSearchPathDedi)(__int64 a1, const char* a2, __int64 a3, unsigned int a4);
 __int64 __fastcall AddSearchPathDedi(__int64 a1, const char* a2, __int64 a3, unsigned int a4) {
 	if (!strcmp_static(a2, "r1delta")) {
-		auto a = _strdup((std::filesystem::path(GetExecutableDirectory()) / "r1delta").string().c_str());
+		auto a = DuplicateDelegatedString((std::filesystem::path(GetExecutableDirectory()) / "r1delta").string().c_str());
 		a2 = a;
 		auto ret = oAddSearchPathDedi(a1, a2, a3, a4);
 		return ret;
