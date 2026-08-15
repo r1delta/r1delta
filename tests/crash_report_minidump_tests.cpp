@@ -1,6 +1,7 @@
 #include "engine/logging/crash_report_minidump.h"
 
 #include <Windows.h>
+#include <DbgHelp.h>
 #include <zstd.h>
 
 #include <algorithm>
@@ -32,6 +33,39 @@ bool EndsWith(std::string_view text, std::string_view suffix)
 {
 	return text.size() >= suffix.size()
 		&& text.substr(text.size() - suffix.size()) == suffix;
+}
+
+bool HasMinidumpStream(
+	const std::vector<uint8_t>& dump,
+	MINIDUMP_STREAM_TYPE expectedStreamType)
+{
+	if (dump.size() < sizeof(MINIDUMP_HEADER))
+		return false;
+
+	MINIDUMP_HEADER header{};
+	memcpy(&header, dump.data(), sizeof(header));
+	if (header.Signature != MINIDUMP_SIGNATURE)
+		return false;
+
+	const size_t directoryOffset = header.StreamDirectoryRva;
+	const size_t streamCount = header.NumberOfStreams;
+	if (directoryOffset > dump.size()
+		|| streamCount > (dump.size() - directoryOffset) / sizeof(MINIDUMP_DIRECTORY))
+	{
+		return false;
+	}
+
+	for (size_t i = 0; i < streamCount; ++i)
+	{
+		MINIDUMP_DIRECTORY directory{};
+		memcpy(
+			&directory,
+			dump.data() + directoryOffset + i * sizeof(directory),
+			sizeof(directory));
+		if (directory.StreamType == static_cast<ULONG32>(expectedStreamType))
+			return true;
+	}
+	return false;
 }
 
 bool ParseSize(const std::string& section, const char* name, uint64_t& value)
@@ -231,9 +265,13 @@ void TestCurrentProcessMinidumpRoundTrip()
 	Check(capture.rawDump.size() >= 4
 		&& memcmp(capture.rawDump.data(), "MDMP", 4) == 0,
 		"captured bytes have the MDMP signature");
+	Check(HasMinidumpStream(capture.rawDump, MemoryInfoListStream),
+		"captured dump includes full memory information");
 	Check(!TemporaryDumpExists(capture.reportPath), "temporary dump is deleted after capture");
 	Check(capture.section.find("\nStatus: available\n") != std::string::npos,
 		"section reports available status");
+	Check(capture.section.find("\nAdditional-Flags: MiniDumpWithFullMemoryInfo\n") != std::string::npos,
+		"section reports full memory information");
 	Check(capture.section.find("\nCompression-Level: 19\n") != std::string::npos,
 		"section reports compression level 19");
 	Check(capture.section.find("\nContent-Checksum: enabled\n") != std::string::npos,
@@ -319,6 +357,8 @@ void TestUnavailableSectionAndCleanup()
 	Check(!available, "invalid capture produces unavailable status");
 	Check(section.find("\nStatus: unavailable\n") != std::string::npos,
 		"failure section reports unavailable");
+	Check(section.find("\nAdditional-Flags: MiniDumpWithFullMemoryInfo\n") != std::string::npos,
+		"failure section reports requested full memory information");
 	Check(section.find("\nRaw-Size: 0\n") != std::string::npos,
 		"failure section includes raw size");
 	Check(section.size() < 1024, "failure section is bounded");

@@ -17,6 +17,8 @@ namespace
 {
 
 constexpr size_t kMaximumDumpSize = 256u * 1024u * 1024u;
+constexpr MINIDUMP_TYPE kDumpType = static_cast<MINIDUMP_TYPE>(
+	MiniDumpNormal | MiniDumpWithFullMemoryInfo);
 constexpr size_t kTemporaryPathCapacity = 4096;
 
 volatile LONG g_temporaryFileSequence = 0;
@@ -85,6 +87,7 @@ void BuildUnavailableSection(
 	result.append(kSectionHeader);
 	result.append("\nStatus: unavailable\n");
 	result.append("Format: Windows MiniDumpNormal\n");
+	result.append("Additional-Flags: MiniDumpWithFullMemoryInfo\n");
 	result.append("Compression: Zstandard\n");
 	result.append("Compression-Level: 19\n");
 	result.append("Content-Checksum: enabled\n");
@@ -234,6 +237,7 @@ void BuildAvailableSection(
 	result.append(kSectionHeader);
 	result.append("\nStatus: available\n");
 	result.append("Format: Windows MiniDumpNormal\n");
+	result.append("Additional-Flags: MiniDumpWithFullMemoryInfo\n");
 	result.append("Compression: Zstandard\n");
 	result.append("Compression-Level: 19\n");
 	result.append("Content-Checksum: enabled\n");
@@ -284,7 +288,7 @@ bool CaptureAndBuildImpl(
 		GetCurrentProcess(),
 		GetCurrentProcessId(),
 		state->file,
-		MiniDumpNormal,
+		kDumpType,
 		&exceptionInformation,
 		nullptr,
 		nullptr))

@@ -155,12 +155,6 @@
     <ClInclude Include="engine\filesystem\r1o_vpk_index_cache.h">
       <Filter>engine\filesystem</Filter>
     </ClInclude>
-    <ClInclude Include="engine\filesystem\vpk_async_precache_entry.h">
-      <Filter>engine\filesystem</Filter>
-    </ClInclude>
-    <ClInclude Include="engine\filesystem\vpk_async_precache_fix.h">
-      <Filter>engine\filesystem</Filter>
-    </ClInclude>
     <ClInclude Include="engine\filesystem\vpk_directory_repair.h">
       <Filter>engine\filesystem</Filter>
     </ClInclude>
@@ -539,12 +533,6 @@
       <Filter>engine\filesystem</Filter>
     </ClCompile>
     <ClCompile Include="engine\filesystem\r1o_vpk_index_cache.cpp">
-      <Filter>engine\filesystem</Filter>
-    </ClCompile>
-    <ClCompile Include="engine\filesystem\vpk_async_precache_entry.cpp">
-      <Filter>engine\filesystem</Filter>
-    </ClCompile>
-    <ClCompile Include="engine\filesystem\vpk_async_precache_fix.cpp">
       <Filter>engine\filesystem</Filter>
     </ClCompile>
     <ClCompile Include="engine\filesystem\vpk_directory_repair.cpp">

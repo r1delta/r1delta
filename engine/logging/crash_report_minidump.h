@@ -19,6 +19,7 @@ inline constexpr char kUnavailableSection[] =
 	"=== R1Delta Crash Minidump v1 ===\n"
 	"Status: unavailable\n"
 	"Format: Windows MiniDumpNormal\n"
+	"Additional-Flags: MiniDumpWithFullMemoryInfo\n"
 	"Compression: Zstandard\n"
 	"Compression-Level: 19\n"
 	"Content-Checksum: enabled\n"

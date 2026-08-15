@@ -1632,8 +1632,6 @@ void InitAddons() {
 	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x1752B0 : 0x6A420)), &ReadFileFromVPKHook, reinterpret_cast<LPVOID*>(&readFileFromVPK));
 	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x750F0 : 0x9C20)), &ReadFromCacheHook, reinterpret_cast<LPVOID*>(&readFromCache));
 	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x80BB0 : 0x16250)), &AddVPKFile, reinterpret_cast<LPVOID*>(&AddVPKFileOriginal));
-	if (!HasEngineCommandLineFlag("-r1delta_disable_vpk_async_precache_fix"))
-		InstallR1ClientVPKAsyncPrecacheFix(filesystem_stdio);
 	if (!HasEngineCommandLineFlag("-r1delta_disable_vpk_directory_repair"))
 		InstallVPKDirectoryLoadFlagRepair(filesystem_stdio);
 	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x1A1514 : 0x9AB70)), &fs_sprintf_hook, reinterpret_cast<LPVOID*>(NULL));
@@ -9428,8 +9426,6 @@ void __stdcall LoaderNotificationCallback(
 	}
 	if (string_equal_size(name, name_len, L"filesystem_stdio.dll")) {
 		G_filesystem_stdio = (uintptr_t)notification_data->Loaded.DllBase;
-		if (!HasEngineCommandLineFlag("-r1delta_disable_vpk_async_precache_fix"))
-			InstallR1ClientVPKAsyncPrecacheFix(G_filesystem_stdio);
 		// Map directory archives can be mounted before engine.dll reaches
 		// InitAddons, so install the in-memory directory repair at the same
 		// early boundary as the filesystem compression hooks.
