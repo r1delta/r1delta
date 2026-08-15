@@ -15407,9 +15407,21 @@ static bool TryResolveR1ODediLooseReplacementPath(
 		const char* relative = candidates[i];
 		if (!relative || !relative[0])
 			continue;
-		if (!_stricmp(relative, "playlists.txt")
-			&& BuildR1ODediLooseModPath(relative, outPath, outPathSize))
-			return true;
+		if (!_stricmp(relative, "playlists.txt")) {
+			if (FileCache::GetInstance().ResolveReplacementFile(
+					lease,
+					relative,
+					outPath,
+					outPathSize,
+					FileCache::ResolveOrder::AddonsFirst))
+				return true;
+
+			// Keep the loose mod file available during early startup even if the
+			// addon cache could not publish a read lease.
+			if (BuildR1ODediLooseModPath(relative, outPath, outPathSize))
+				return true;
+			continue;
+		}
 		if (FileCache::GetInstance().ResolveReplacementFile(lease, relative, outPath, outPathSize))
 			return true;
 	}

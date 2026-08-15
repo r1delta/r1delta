@@ -85,6 +85,11 @@ private:
     bool WaitForInitialPublication();
 
 public:
+    enum class ResolveOrder {
+        BaseFirst,
+        AddonsFirst,
+    };
+
     class ReadLease {
         friend class FileCache;
         const FileCache* owner = nullptr;
@@ -136,7 +141,8 @@ public:
         const ReadLease& lease,
         const char* pszRelativeFilePath,
         char* pszResolvedPath,
-        size_t resolvedPathSize);
+        size_t resolvedPathSize,
+        ResolveOrder order = ResolveOrder::BaseFirst);
     std::vector<std::string> FindReplacementFileNames(
         const char* pszRelativeDirectory,
         const char* pszPattern);

@@ -549,7 +549,8 @@ bool FileCache::ResolveReplacementFile(
     const ReadLease& lease,
     const char* pszRelativeFilePath,
     char* pszResolvedPath,
-    size_t resolvedPathSize) {
+    size_t resolvedPathSize,
+    ResolveOrder order) {
     if (lease.owner != this || !lease.lock
         || !pszRelativeFilePath || !pszRelativeFilePath[0]
         || !pszResolvedPath || resolvedPathSize == 0) {
@@ -592,12 +593,20 @@ bool FileCache::ResolveReplacementFile(
         return true;
     };
 
+    const auto copyAddonFile = [&]() {
+        for (const std::string& addonDirectory : addonsFolderCache) {
+            if (copyRegularFile(addonDirectory))
+                return true;
+        }
+        return false;
+    };
+
+    if (order == ResolveOrder::AddonsFirst && copyAddonFile())
+        return true;
     if (copyRegularFile(r1deltaBasePath))
         return true;
-    for (const std::string& addonDirectory : addonsFolderCache) {
-        if (copyRegularFile(addonDirectory))
-            return true;
-    }
+    if (order == ResolveOrder::BaseFirst && copyAddonFile())
+        return true;
     return false;
 }
 
