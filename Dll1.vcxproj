@@ -226,6 +226,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="sdk\coordsize.h" />
     <ClInclude Include="engine\core\core.h" />
     <ClInclude Include="engine\logging\crashhandler.h" />
+    <ClInclude Include="engine\logging\crash_report_minidump.h" />
     <ClInclude Include="engine\cvar.h" />
     <ClInclude Include="engine\dedicated.h" />
     <ClInclude Include="client\discord.h" />
@@ -236,12 +237,13 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="engine\vtable_remaps\engine_vtable.h" />
     <ClInclude Include="eos\fake_ip_layer.h" />
     <ClInclude Include="engine\core\factory.h" />
-    <ClInclude Include="engine\core\materialsystem_dx11_texture_upload.h" />
+    <ClInclude Include="engine\core\materialsystem_dx11_texture_load_gate.h" />
     <ClInclude Include="engine\filesystem\addonlist_state.h" />
     <ClInclude Include="engine\filesystem\filecache.h" />
     <ClInclude Include="engine\filesystem\filesystem.h" />
     <ClInclude Include="engine\filesystem\r1o_vpk.h" />
     <ClInclude Include="engine\filesystem\r1o_vpk_index_cache.h" />
+    <ClInclude Include="engine\filesystem\vpk_async_precache_entry.h" />
     <ClInclude Include="engine\filesystem\vpk_async_precache_fix.h" />
     <ClInclude Include="engine\filesystem\vpk_directory_repair.h" />
     <ClInclude Include="engine\core\framework.h" />
@@ -259,6 +261,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="server\misc.h" />
     <ClInclude Include="engine\net\networking.h" />
     <ClInclude Include="server\physics\physics_hooks.h" />
+    <ClInclude Include="server\physics\vphysics_shutdown_guard.h" />
     <ClInclude Include="engine\precache.h" />
     <ClInclude Include="server\usermessages.h" />
     <ClInclude Include="client\localchatwriter.h" />
@@ -352,6 +355,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="engine\compression.cpp" />
     <ClCompile Include="engine\compression_stream.cpp" />
     <ClCompile Include="engine\logging\crashhandler.cpp" />
+    <ClCompile Include="engine\logging\crash_report_minidump.cpp" />
     <ClCompile Include="engine\cvar.cpp" />
     <ClCompile Include="engine\dedicated.cpp" />
     <ClCompile Include="client\discord.cpp" />
@@ -364,12 +368,12 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="eos\eos_layer.cpp" />
     <ClCompile Include="eos\eos_network.cpp" />
     <ClCompile Include="engine\core\factory.cpp" />
-    <ClCompile Include="engine\core\materialsystem_dx11_texture_upload.cpp" />
     <ClCompile Include="engine\filesystem\addonlist_state.cpp" />
     <ClCompile Include="engine\filesystem\filecache.cpp" />
     <ClCompile Include="engine\filesystem\filesystem.cpp" />
     <ClCompile Include="engine\filesystem\r1o_vpk.cpp" />
     <ClCompile Include="engine\filesystem\r1o_vpk_index_cache.cpp" />
+    <ClCompile Include="engine\filesystem\vpk_async_precache_entry.cpp" />
     <ClCompile Include="engine\filesystem\vpk_async_precache_fix.cpp" />
     <ClCompile Include="engine\filesystem\vpk_directory_repair.cpp" />
     <ClCompile Include="engine\vtable_remaps\filesystem_vtable.cpp" />
@@ -388,6 +392,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="server\server_usercmd.cpp" />
     <ClCompile Include="engine\net\networking.cpp" />
     <ClCompile Include="server\physics\physics.cpp" />
+    <ClCompile Include="server\physics\vphysics_shutdown_guard.cpp" />
     <ClCompile Include="player.cpp" />
     <ClCompile Include="engine\precache.cpp" />
     <ClCompile Include="server\usermessages.cpp" />

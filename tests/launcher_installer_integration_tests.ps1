@@ -9,6 +9,7 @@ $assembly = [System.Reflection.Assembly]::LoadFrom((Resolve-Path -LiteralPath $L
 $manager = $assembly.GetType('R1Delta.TitanfallManager', $true)
 $setupWindow = $assembly.GetType('launcher_ex.SetupWindow', $true)
 $statusInterface = $assembly.GetType('R1Delta.IInstallProgressStatus', $true)
+$registryHelper = $assembly.GetType('R1Delta.RegistryHelper', $true)
 $resolve = $manager.GetMethod('ResolveGameRoot', $binding)
 $hasSidecars = $manager.GetMethod('HasDownloadSidecars', $binding)
 $deleteArtifacts = $manager.GetMethod('DeleteDownloadArtifacts', $binding)
@@ -18,6 +19,11 @@ $removeOwnership = $manager.GetMethod('TryRemoveManagedInstallOwnership', $bindi
 $hasLegacyProof = $manager.GetMethod('HasLegacyCompletedInstallProof', $binding)
 $cleanupAuthorized = $manager.GetMethod('IsManagedCleanupAuthorized', $binding)
 $acquireLease = $manager.GetMethod('TryAcquireInstallOperationLease', $binding)
+$claimOneTimeWarning = $registryHelper.GetMethod('TryClaimOneTimeWarning', $binding)
+$buildWarningMutexName = $registryHelper.GetMethod('BuildPrerequisiteWarningClaimMutexName', $binding)
+$warningClaimVersion = [int]$registryHelper.GetField(
+    'PrerequisiteWarningClaimVersion',
+    $binding).GetRawConstantValue()
 
 function Assert-True([bool]$Condition, [string]$Message) {
     if (-not $Condition) {
@@ -37,6 +43,32 @@ function Get-Property($Object, [string]$Name) {
 $root = Join-Path ([System.IO.Path]::GetTempPath()) ('r1delta-installer-smoke-' + [Guid]::NewGuid().ToString('N'))
 try {
     New-Item -ItemType Directory -Path $root | Out-Null
+    $testSid = 'S-1-5-21-123-456-789-1001'
+    $warningMutexName = [string]$buildWarningMutexName.Invoke(
+        $null,
+        [object[]]@($testSid))
+    Assert-True (
+        $warningMutexName -eq ('Global\R1Delta.PrerequisiteWarningClaim.' + $testSid)
+    ) 'prerequisite-warning mutex is global and scoped to the current user SID'
+
+    $claimState = [System.Collections.Generic.List[int]]::new()
+    $claimState.Add(0)
+    $readClaim = [Func[int]] { return $claimState[0] }
+    $writeClaim = [Action[int]] { param([int]$version) $claimState[0] = $version }
+    $claimArgs = [object[]]@($warningClaimVersion, $readClaim, $writeClaim)
+    Assert-True ([bool]$claimOneTimeWarning.Invoke($null, $claimArgs)) 'first prerequisite-warning claim succeeds'
+    Assert-True ($claimState[0] -eq $warningClaimVersion) 'prerequisite-warning claim writes the current version marker'
+    Assert-True (-not [bool]$claimOneTimeWarning.Invoke($null, $claimArgs)) 'subsequent prerequisite-warning claim is suppressed'
+
+    $unpersistedClaimState = [System.Collections.Generic.List[int]]::new()
+    $unpersistedClaimState.Add(0)
+    $readUnpersistedClaim = [Func[int]] { return $unpersistedClaimState[0] }
+    $ignoreClaimWrite = [Action[int]] { param([int]$version) }
+    $unpersistedClaimArgs = [object[]]@(
+        $warningClaimVersion,
+        $readUnpersistedClaim,
+        $ignoreClaimWrite)
+    Assert-True (-not [bool]$claimOneTimeWarning.Invoke($null, $unpersistedClaimArgs)) 'unpersisted prerequisite-warning claim is not displayed'
 
     $empty = Get-Resolution ''
     Assert-True (-not (Get-Property $empty 'IsUsableDestination')) 'empty selection is rejected'

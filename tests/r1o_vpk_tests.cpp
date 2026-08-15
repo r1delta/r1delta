@@ -2,11 +2,13 @@
 #include "engine/filesystem/r1o_vpk.h"
 #include "engine/filesystem/r1o_vpk_index_cache.h"
 #include "engine/filesystem/vpk_directory_repair.h"
+#include "engine/filesystem/vpk_async_precache_entry.h"
 
 #include <Windows.h>
 #include <zstd.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <cstring>
@@ -51,6 +53,150 @@ void Check(bool condition, const char* name)
 		return;
 	++failures;
 	std::cerr << "FAILED: " << name << '\n';
+}
+
+__declspec(noinline) bool FakePrecacheEntryReady(void*)
+{
+	return true;
+}
+
+std::array<uintptr_t, 12> fakePendingVtable{};
+std::array<uintptr_t, 12> fakeCompletedVtable{};
+
+void TestAsyncPrecacheEntryInspection()
+{
+	const uintptr_t executableBase = reinterpret_cast<uintptr_t>(
+		GetModuleHandleW(nullptr));
+	const auto* const dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(
+		executableBase);
+	const auto* const nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(
+		executableBase + static_cast<uintptr_t>(dos->e_lfanew));
+
+	AsyncPrecacheModuleLayout layout{
+		executableBase,
+		nt->OptionalHeader.SizeOfImage,
+	};
+
+	fakePendingVtable.fill(0);
+	fakePendingVtable[0x58 / sizeof(uintptr_t)] =
+		reinterpret_cast<uintptr_t>(&FakePrecacheEntryReady);
+	uintptr_t entry = reinterpret_cast<uintptr_t>(fakePendingVtable.data());
+	AsyncPrecacheEntryInspection inspection =
+		InspectAsyncPrecacheEntry(&entry, layout);
+	Check(
+		inspection.kind == AsyncPrecacheEntryKind::Pending,
+		"filesystem executable readiness method accepted");
+	Check(
+		inspection.readinessTarget
+			== reinterpret_cast<uintptr_t>(&FakePrecacheEntryReady),
+		"readiness method target captured");
+
+	fakeCompletedVtable.fill(0);
+	entry = reinterpret_cast<uintptr_t>(fakeCompletedVtable.data());
+	inspection = InspectAsyncPrecacheEntry(&entry, layout);
+	Check(
+		inspection.kind == AsyncPrecacheEntryKind::CompletedValue,
+		"generic completed handler value bypasses readiness dispatch");
+
+	std::array<uintptr_t, 12> foreignVtable{};
+	foreignVtable[0x58 / sizeof(uintptr_t)] =
+		reinterpret_cast<uintptr_t>(&FakePrecacheEntryReady);
+	entry = reinterpret_cast<uintptr_t>(foreignVtable.data());
+	inspection = InspectAsyncPrecacheEntry(&entry, layout);
+	Check(
+		inspection.kind == AsyncPrecacheEntryKind::Invalid,
+		"foreign executable readiness method rejected");
+
+	fakePendingVtable[0x58 / sizeof(uintptr_t)] =
+		reinterpret_cast<uintptr_t>(fakePendingVtable.data());
+	entry = reinterpret_cast<uintptr_t>(fakePendingVtable.data());
+	inspection = InspectAsyncPrecacheEntry(&entry, layout);
+	Check(
+		inspection.kind == AsyncPrecacheEntryKind::CompletedValue,
+		"valid nonpending handler value routes to slot consumer");
+
+	Check(
+		InspectAsyncPrecacheEntry(nullptr, layout).kind
+			== AsyncPrecacheEntryKind::Invalid,
+		"null entry rejected");
+
+	void* const unreadable = VirtualAlloc(
+		nullptr,
+		0x1000,
+		MEM_RESERVE | MEM_COMMIT,
+		PAGE_NOACCESS);
+	Check(unreadable != nullptr, "allocate unreadable entry fixture");
+	if (unreadable) {
+		Check(
+			InspectAsyncPrecacheEntry(unreadable, layout).kind
+				== AsyncPrecacheEntryKind::Invalid,
+			"unreadable entry rejected");
+		VirtualFree(unreadable, 0, MEM_RELEASE);
+	}
+}
+
+void TestAsyncPrecacheEntryClaimsSerializeWorkers()
+{
+	constexpr int workerCount = 8;
+	constexpr int iterationCount = 200;
+	uintptr_t entrySlot{};
+	std::atomic<int> readyWorkers{};
+	std::atomic<bool> startWorkers{};
+	std::atomic<int> activeWorkers{};
+	std::atomic<int> maximumActiveWorkers{};
+	std::vector<std::thread> workers;
+	workers.reserve(workerCount);
+
+	for (int worker = 0; worker < workerCount; ++worker) {
+		workers.emplace_back([&]() {
+			readyWorkers.fetch_add(1, std::memory_order_release);
+			while (!startWorkers.load(std::memory_order_acquire))
+				std::this_thread::yield();
+
+			for (int iteration = 0; iteration < iterationCount; ++iteration) {
+				AsyncPrecacheEntryClaim claim(&entrySlot);
+				const int active =
+					activeWorkers.fetch_add(1, std::memory_order_acq_rel) + 1;
+				int maximum = maximumActiveWorkers.load(
+					std::memory_order_relaxed);
+				while (active > maximum
+					&& !maximumActiveWorkers.compare_exchange_weak(
+						maximum,
+						active,
+						std::memory_order_relaxed)) {
+				}
+				std::this_thread::yield();
+				activeWorkers.fetch_sub(1, std::memory_order_acq_rel);
+				claim.Release();
+				claim.Release();
+			}
+		});
+	}
+
+	while (readyWorkers.load(std::memory_order_acquire) != workerCount)
+		std::this_thread::yield();
+	startWorkers.store(true, std::memory_order_release);
+	for (std::thread& worker : workers)
+		worker.join();
+
+
+	{
+		AsyncPrecacheEntryClaim outerClaim(&entrySlot);
+		Check(outerClaim.Acquired(), "outer async entry claim acquired");
+		AsyncPrecacheEntryClaim nestedClaim(&entrySlot);
+		Check(
+			!nestedClaim.Acquired(),
+			"same-thread same-slot nested claim is deferred");
+	}
+
+	AsyncPrecacheEntryClaim missingSlotClaim(nullptr);
+	Check(
+		missingSlotClaim.Acquired(),
+		"stack-local missing entry needs no shared claim");
+	missingSlotClaim.Release();
+	Check(
+		maximumActiveWorkers.load(std::memory_order_relaxed) == 1,
+		"same-slot async workers are serialized");
 }
 
 template <typename T>
@@ -602,6 +748,8 @@ int main()
 		SetEnvironmentVariableA("R1DELTA_VPK_CACHE_DIR", cacheDirectory.c_str());
 		std::filesystem::current_path(root);
 
+		TestAsyncPrecacheEntryInspection();
+		TestAsyncPrecacheEntryClaimsSerializeWorkers();
 		TestConcurrentCompressedFirstOpen();
 		TestLookupAndPrecedence();
 		TestCompressedAndPreloadEntry();

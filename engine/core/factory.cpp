@@ -35,7 +35,7 @@
 #include <WinSock2.h>
 #include <ws2tcpip.h>
 #include "core.h"
-#include "materialsystem_dx11_texture_upload.h"
+#include "materialsystem_dx11_texture_load_gate.h"
 #include "r1o_runtime_paths.h"
 
 #include <MinHook.h>
@@ -43,7 +43,6 @@
 #include <new>
 #include <cctype>
 #include "windows.h"
-#include <dxgiformat.h>
 
 #include <iostream>
 #include "cvar.h"
@@ -611,25 +610,19 @@ static bool PatchModuleBytesIfMatch(uintptr_t moduleBase, uintptr_t rva, const u
 }
 
 using MaterialSystemDx11SelectShaderResourceType = void(__fastcall*)(int slot);
-using MaterialSystemDx11SelectTextureResourceType = int(__fastcall*)(int slot, short resourceHandle);
 using MaterialSystemDx11SelectShaderStageResourceType = char(__fastcall*)(unsigned int stage, unsigned int slot, unsigned char* shaderType);
 using MaterialSystemDx11CreateInputLayoutType = __int64(__fastcall*)(unsigned __int64 vertexFormat, __int64 streamFormat, __int64 shaderBytecodeProvider);
 using MaterialSystemDx11CreateTexture2DResourceType = __int64(__fastcall*)(__int64* texture, int width, int height, int format, int mipLevels, unsigned int arraySize, int flags, __int64 initialData);
 using MaterialSystemDx11LoadTextureType = __int64(__fastcall*)(__int64 texture, __int64* textureData);
-using MaterialSystemDx11QueueTextureUploadType = char(__fastcall*)(__int64 texture, __int64 initialData, int sourceFormat);
-using MaterialSystemDx11ExecuteTextureUploadType = __int64(__fastcall*)(__int64 texture, __int64 initialData, int sourceFormat, unsigned int depth, int frameCount, unsigned int flags);
 using MaterialSystemDx11ResetD3DResourcePointersType = void(__fastcall*)();
 using MaterialSystemDx11FlushConstantBufferUpdatesType = __int64(__fastcall*)();
 using MaterialSystemDx11InitializeMaterialType = __int64(__fastcall*)(__int64 material, __int64 vmt, __int64 vmtPatches, __int64 context);
 using MaterialSystemDx11IsErrorMaterialType = __int64(__fastcall*)(__int64 material);
 static MaterialSystemDx11SelectShaderResourceType MaterialSystemDx11SelectShaderResourceOriginal;
-static MaterialSystemDx11SelectTextureResourceType MaterialSystemDx11SelectTextureResourceOriginal;
 static MaterialSystemDx11SelectShaderStageResourceType MaterialSystemDx11SelectShaderStageResourceOriginal;
 static MaterialSystemDx11CreateInputLayoutType MaterialSystemDx11CreateInputLayoutOriginal;
 static MaterialSystemDx11CreateTexture2DResourceType MaterialSystemDx11CreateTexture2DResourceOriginal;
 static MaterialSystemDx11LoadTextureType MaterialSystemDx11LoadTextureOriginal;
-static MaterialSystemDx11QueueTextureUploadType MaterialSystemDx11QueueTextureUploadOriginal;
-static MaterialSystemDx11ExecuteTextureUploadType MaterialSystemDx11ExecuteTextureUploadOriginal;
 static MaterialSystemDx11ResetD3DResourcePointersType MaterialSystemDx11ResetD3DResourcePointersOriginal;
 static MaterialSystemDx11FlushConstantBufferUpdatesType MaterialSystemDx11FlushConstantBufferUpdatesOriginal;
 static MaterialSystemDx11InitializeMaterialType MaterialSystemDx11InitializeMaterialOriginal;
@@ -644,7 +637,6 @@ static int s_MaterialSystemDx11ResetResourceLogBudget = 8;
 static int s_MaterialSystemDx11ConstantBufferLogBudget = 8;
 static int s_MaterialSystemDx11InputLayoutLogBudget = 8;
 static int s_MaterialSystemDx11MaterialInitLogBudget = 8;
-static std::atomic<int> s_MaterialSystemDx11TextureUploadLogBudget{ 16 };
 static std::recursive_mutex s_MaterialSystemDx11MaterialInitMutex;
 static r1delta::materialsystem_dx11::TextureLoadScratchBufferGate s_MaterialSystemDx11TextureLoadGate;
 static bool MaterialSystemDx11LooksLikeUserRange(uintptr_t address, size_t size);
@@ -877,59 +869,6 @@ static bool MaterialSystemDx11ResolveShaderStageResource(unsigned int stage, uns
 	return MaterialSystemDx11SetShaderStageCache(stage, *shader, changed);
 }
 
-static void MaterialSystemDx11LogTextureHandleGuard(
-	const char* reason,
-	int slot,
-	short resourceHandle,
-	bool changed)
-{
-	if (s_MaterialSystemDx11NullResourceLogBudget <= 0)
-		return;
-
-	--s_MaterialSystemDx11NullResourceLogBudget;
-	char buffer[320];
-	_snprintf_s(
-		buffer,
-		sizeof(buffer),
-		_TRUNCATE,
-		"R1Delta: materialsystem_dx11 texture-handle guard reason=%s slot=%d handle=%d changed=%d\n",
-		reason,
-		slot,
-		static_cast<int>(resourceHandle),
-		changed ? 1 : 0);
-	OutputDebugStringA(buffer);
-}
-
-static int __fastcall MaterialSystemDx11SelectTextureResourceGuard(int slot, short resourceHandle)
-{
-	if (resourceHandle > 0)
-		return MaterialSystemDx11SelectTextureResourceOriginal
-			? MaterialSystemDx11SelectTextureResourceOriginal(slot, resourceHandle)
-			: 0;
-
-	constexpr int maxSamplerSlots = 16;
-	if (!s_MaterialSystemDx11Base || slot < 0 || slot >= maxSamplerSlots) {
-		MaterialSystemDx11LogTextureHandleGuard("invalid-slot", slot, resourceHandle, false);
-		return 0;
-	}
-
-	auto* resources = reinterpret_cast<void**>(s_MaterialSystemDx11Base + 0x298730);
-	auto* samplers = reinterpret_cast<void**>(s_MaterialSystemDx11Base + 0x2986B0);
-	auto* dirtySlotCount = reinterpret_cast<int*>(s_MaterialSystemDx11Base + 0x2987F0);
-	const bool changed = resources[slot] || samplers[slot];
-	resources[slot] = nullptr;
-	samplers[slot] = nullptr;
-	const int requiredSlotCount = slot + 1;
-	if (*dirtySlotCount < requiredSlotCount)
-		*dirtySlotCount = requiredSlotCount;
-
-	MaterialSystemDx11LogTextureHandleGuard(
-		resourceHandle ? "negative-handle" : "zero-handle",
-		slot,
-		resourceHandle,
-		changed);
-	return *dirtySlotCount;
-}
 
 static void MaterialSystemDx11BindVertexShaderIfChanged(void* shader, unsigned char shaderType, bool changed)
 {
@@ -1130,9 +1069,11 @@ static __int64 __fastcall MaterialSystemDx11FlushConstantBufferUpdatesGuard()
 	}
 }
 
-using MaterialSystemDx11TextureInitialDataEntry = r1delta::materialsystem_dx11::TextureInitialDataEntry;
-using MaterialSystemDx11OwnedTextureUpload = r1delta::materialsystem_dx11::OwnedTextureUpload;
-static r1delta::materialsystem_dx11::TextureUploadRegistry s_MaterialSystemDx11TextureUploads;
+struct MaterialSystemDx11TextureInitialDataEntry {
+	const void* sysMem;
+	unsigned int sysMemPitch;
+	unsigned int sysMemSlicePitch;
+};
 
 static bool MaterialSystemDx11MulSize(size_t a, size_t b, size_t* out)
 {
@@ -1171,318 +1112,12 @@ static size_t MaterialSystemDx11TextureSubresourceCount(int mipLevels, unsigned 
 	return count;
 }
 
-struct MaterialSystemDx11TextureFormatLayout {
-	size_t blockWidth;
-	size_t blockHeight;
-	size_t bytesPerBlock;
-};
-
-struct MaterialSystemDx11TextureMipLayout {
-	size_t rowBytes;
-	size_t rowCount;
-};
-
-static constexpr MaterialSystemDx11TextureFormatLayout MaterialSystemDx11GetTextureFormatLayout(int format)
+static size_t MaterialSystemDx11RequiredInitialDataBytes(const MaterialSystemDx11TextureInitialDataEntry& entry)
 {
-	switch (static_cast<DXGI_FORMAT>(format)) {
-	case DXGI_FORMAT_R32G32B32A32_TYPELESS:
-	case DXGI_FORMAT_R32G32B32A32_FLOAT:
-	case DXGI_FORMAT_R32G32B32A32_UINT:
-	case DXGI_FORMAT_R32G32B32A32_SINT:
-		return { 1, 1, 16 };
-	case DXGI_FORMAT_R32G32B32_TYPELESS:
-	case DXGI_FORMAT_R32G32B32_FLOAT:
-	case DXGI_FORMAT_R32G32B32_UINT:
-	case DXGI_FORMAT_R32G32B32_SINT:
-		return { 1, 1, 12 };
-	case DXGI_FORMAT_R16G16B16A16_TYPELESS:
-	case DXGI_FORMAT_R16G16B16A16_FLOAT:
-	case DXGI_FORMAT_R16G16B16A16_UNORM:
-	case DXGI_FORMAT_R16G16B16A16_UINT:
-	case DXGI_FORMAT_R16G16B16A16_SNORM:
-	case DXGI_FORMAT_R16G16B16A16_SINT:
-	case DXGI_FORMAT_R32G32_TYPELESS:
-	case DXGI_FORMAT_R32G32_FLOAT:
-	case DXGI_FORMAT_R32G32_UINT:
-	case DXGI_FORMAT_R32G32_SINT:
-	case DXGI_FORMAT_R32G8X24_TYPELESS:
-	case DXGI_FORMAT_D32_FLOAT_S8X24_UINT:
-	case DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS:
-	case DXGI_FORMAT_X32_TYPELESS_G8X24_UINT:
-	case DXGI_FORMAT_Y416:
-		return { 1, 1, 8 };
-	case DXGI_FORMAT_R10G10B10A2_TYPELESS:
-	case DXGI_FORMAT_R10G10B10A2_UNORM:
-	case DXGI_FORMAT_R10G10B10A2_UINT:
-	case DXGI_FORMAT_R11G11B10_FLOAT:
-	case DXGI_FORMAT_R8G8B8A8_TYPELESS:
-	case DXGI_FORMAT_R8G8B8A8_UNORM:
-	case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
-	case DXGI_FORMAT_R8G8B8A8_UINT:
-	case DXGI_FORMAT_R8G8B8A8_SNORM:
-	case DXGI_FORMAT_R8G8B8A8_SINT:
-	case DXGI_FORMAT_R16G16_TYPELESS:
-	case DXGI_FORMAT_R16G16_FLOAT:
-	case DXGI_FORMAT_R16G16_UNORM:
-	case DXGI_FORMAT_R16G16_UINT:
-	case DXGI_FORMAT_R16G16_SNORM:
-	case DXGI_FORMAT_R16G16_SINT:
-	case DXGI_FORMAT_R32_TYPELESS:
-	case DXGI_FORMAT_D32_FLOAT:
-	case DXGI_FORMAT_R32_FLOAT:
-	case DXGI_FORMAT_R32_UINT:
-	case DXGI_FORMAT_R32_SINT:
-	case DXGI_FORMAT_R24G8_TYPELESS:
-	case DXGI_FORMAT_D24_UNORM_S8_UINT:
-	case DXGI_FORMAT_R24_UNORM_X8_TYPELESS:
-	case DXGI_FORMAT_X24_TYPELESS_G8_UINT:
-	case DXGI_FORMAT_R9G9B9E5_SHAREDEXP:
-	case DXGI_FORMAT_B8G8R8A8_UNORM:
-	case DXGI_FORMAT_B8G8R8X8_UNORM:
-	case DXGI_FORMAT_R10G10B10_XR_BIAS_A2_UNORM:
-	case DXGI_FORMAT_B8G8R8A8_TYPELESS:
-	case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
-	case DXGI_FORMAT_B8G8R8X8_TYPELESS:
-	case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB:
-	case DXGI_FORMAT_AYUV:
-	case DXGI_FORMAT_Y410:
-		return { 1, 1, 4 };
-	case DXGI_FORMAT_R8G8_TYPELESS:
-	case DXGI_FORMAT_R8G8_UNORM:
-	case DXGI_FORMAT_R8G8_UINT:
-	case DXGI_FORMAT_R8G8_SNORM:
-	case DXGI_FORMAT_R8G8_SINT:
-	case DXGI_FORMAT_R16_TYPELESS:
-	case DXGI_FORMAT_R16_FLOAT:
-	case DXGI_FORMAT_D16_UNORM:
-	case DXGI_FORMAT_R16_UNORM:
-	case DXGI_FORMAT_R16_UINT:
-	case DXGI_FORMAT_R16_SNORM:
-	case DXGI_FORMAT_R16_SINT:
-	case DXGI_FORMAT_B5G6R5_UNORM:
-	case DXGI_FORMAT_B5G5R5A1_UNORM:
-	case DXGI_FORMAT_A8P8:
-	case DXGI_FORMAT_B4G4R4A4_UNORM:
-		return { 1, 1, 2 };
-	case DXGI_FORMAT_R8_TYPELESS:
-	case DXGI_FORMAT_R8_UNORM:
-	case DXGI_FORMAT_R8_UINT:
-	case DXGI_FORMAT_R8_SNORM:
-	case DXGI_FORMAT_R8_SINT:
-	case DXGI_FORMAT_A8_UNORM:
-	case DXGI_FORMAT_AI44:
-	case DXGI_FORMAT_IA44:
-	case DXGI_FORMAT_P8:
-		return { 1, 1, 1 };
-	case DXGI_FORMAT_R1_UNORM:
-		return { 8, 1, 1 };
-	case DXGI_FORMAT_R8G8_B8G8_UNORM:
-	case DXGI_FORMAT_G8R8_G8B8_UNORM:
-	case DXGI_FORMAT_YUY2:
-		return { 2, 1, 4 };
-	case DXGI_FORMAT_Y210:
-	case DXGI_FORMAT_Y216:
-		return { 2, 1, 8 };
-	case DXGI_FORMAT_BC1_TYPELESS:
-	case DXGI_FORMAT_BC1_UNORM:
-	case DXGI_FORMAT_BC1_UNORM_SRGB:
-	case DXGI_FORMAT_BC4_TYPELESS:
-	case DXGI_FORMAT_BC4_UNORM:
-	case DXGI_FORMAT_BC4_SNORM:
-		return { 4, 4, 8 };
-	case DXGI_FORMAT_BC2_TYPELESS:
-	case DXGI_FORMAT_BC2_UNORM:
-	case DXGI_FORMAT_BC2_UNORM_SRGB:
-	case DXGI_FORMAT_BC3_TYPELESS:
-	case DXGI_FORMAT_BC3_UNORM:
-	case DXGI_FORMAT_BC3_UNORM_SRGB:
-	case DXGI_FORMAT_BC5_TYPELESS:
-	case DXGI_FORMAT_BC5_UNORM:
-	case DXGI_FORMAT_BC5_SNORM:
-	case DXGI_FORMAT_BC6H_TYPELESS:
-	case DXGI_FORMAT_BC6H_UF16:
-	case DXGI_FORMAT_BC6H_SF16:
-	case DXGI_FORMAT_BC7_TYPELESS:
-	case DXGI_FORMAT_BC7_UNORM:
-	case DXGI_FORMAT_BC7_UNORM_SRGB:
-		return { 4, 4, 16 };
-	default:
-		return { 0, 0, 0 };
-	}
-}
-
-static constexpr MaterialSystemDx11TextureMipLayout MaterialSystemDx11GetTextureMipLayout(
-	int format,
-	size_t width,
-	size_t height)
-{
-	const MaterialSystemDx11TextureFormatLayout layout = MaterialSystemDx11GetTextureFormatLayout(format);
-	if (!layout.bytesPerBlock || !width || !height)
-		return { 0, 0 };
-
-	const size_t blocksWide = (width + layout.blockWidth - 1) / layout.blockWidth;
-	const size_t blocksHigh = (height + layout.blockHeight - 1) / layout.blockHeight;
-	return { blocksWide * layout.bytesPerBlock, blocksHigh };
-}
-
-static_assert(MaterialSystemDx11GetTextureMipLayout(DXGI_FORMAT_R8G8B8A8_UNORM, 1024, 26).rowBytes == 4096);
-static_assert(MaterialSystemDx11GetTextureMipLayout(DXGI_FORMAT_R8G8B8A8_UNORM, 512, 336).rowBytes == 2048);
-static_assert(MaterialSystemDx11GetTextureMipLayout(DXGI_FORMAT_BC1_UNORM, 7, 7).rowBytes == 16);
-static_assert(MaterialSystemDx11GetTextureMipLayout(DXGI_FORMAT_BC1_UNORM, 7, 7).rowCount == 2);
-
-static bool MaterialSystemDx11IsReadablePageProtection(DWORD protect)
-{
-	if (protect & (PAGE_GUARD | PAGE_NOACCESS))
-		return false;
-
-	switch (protect & 0xFFu) {
-	case PAGE_READONLY:
-	case PAGE_READWRITE:
-	case PAGE_WRITECOPY:
-	case PAGE_EXECUTE_READ:
-	case PAGE_EXECUTE_READWRITE:
-	case PAGE_EXECUTE_WRITECOPY:
-		return true;
-	default:
-		return false;
-	}
-}
-
-static bool MaterialSystemDx11IsCommittedReadableRange(const void* ptr, size_t size)
-{
-	const uintptr_t start = reinterpret_cast<uintptr_t>(ptr);
-	if (!MaterialSystemDx11LooksLikeUserRange(start, size))
-		return false;
-
-	const uintptr_t end = start + size;
-	uintptr_t cursor = start;
-	while (cursor < end) {
-		MEMORY_BASIC_INFORMATION info{};
-		if (!VirtualQuery(reinterpret_cast<const void*>(cursor), &info, sizeof(info))
-			|| info.State != MEM_COMMIT
-			|| !MaterialSystemDx11IsReadablePageProtection(info.Protect)) {
-			return false;
-		}
-
-		const uintptr_t regionStart = reinterpret_cast<uintptr_t>(info.BaseAddress);
-		if (info.RegionSize > static_cast<size_t>(-1) - regionStart)
-			return false;
-		const uintptr_t regionEnd = regionStart + info.RegionSize;
-		if (regionEnd <= cursor)
-			return false;
-		cursor = regionEnd < end ? regionEnd : end;
-	}
-	return true;
-}
-
-static bool MaterialSystemDx11TryCopy(void* destination, const void* source, size_t size)
-{
-	__try {
-		memcpy(destination, source, size);
-		return true;
-	}
-	__except (EXCEPTION_EXECUTE_HANDLER) {
-		return false;
-	}
-}
-
-static void MaterialSystemDx11LogTextureUploadOwnership(
-	const char* reason,
-	const void* initialData,
-	size_t subresourceCount,
-	size_t payloadBytes)
-{
-	int budget = s_MaterialSystemDx11TextureUploadLogBudget.load(std::memory_order_relaxed);
-	while (budget > 0
-		&& !s_MaterialSystemDx11TextureUploadLogBudget.compare_exchange_weak(
-			budget,
-			budget - 1,
-			std::memory_order_relaxed)) {
-	}
-	if (budget <= 0)
-		return;
-
-	char buffer[256];
-	_snprintf_s(
-		buffer,
-		sizeof(buffer),
-		_TRUNCATE,
-		"R1Delta: materialsystem_dx11 texture upload ownership reason=%s data=%p subresources=%llu payloadBytes=%llu\n",
-		reason,
-		initialData,
-		static_cast<unsigned long long>(subresourceCount),
-		static_cast<unsigned long long>(payloadBytes));
-	OutputDebugStringA(buffer);
-}
-
-static bool MaterialSystemDx11TryGetQueuedTextureSubresourceCount(__int64 texture, size_t* subresourceCount)
-{
-	if (!subresourceCount)
-		return false;
-	*subresourceCount = 0;
-	if (!MaterialSystemDx11IsCommittedReadableRange(reinterpret_cast<const void*>(texture), 58))
-		return false;
-
-	__try {
-		auto* vtable = *reinterpret_cast<uintptr_t**>(texture);
-		if (!MaterialSystemDx11IsCommittedReadableRange(vtable, 27 * sizeof(uintptr_t)))
-			return false;
-
-		using IsCubeMapType = unsigned char(__fastcall*)(__int64 texture);
-		auto isCubeMap = reinterpret_cast<IsCubeMapType>(vtable[26]);
-		if (!MaterialSystemDx11IsCommittedReadableRange(reinterpret_cast<const void*>(isCubeMap), 1))
-			return false;
-
-		const size_t faceCount = isCubeMap(texture) ? 6u : 1u;
-		const size_t mipLevels = *reinterpret_cast<const unsigned short*>(texture + 54);
-		const size_t frameCount = *reinterpret_cast<const unsigned short*>(texture + 56);
-		size_t faceMipCount = 0;
-		return mipLevels
-			&& frameCount
-			&& MaterialSystemDx11MulSize(faceCount, mipLevels, &faceMipCount)
-			&& MaterialSystemDx11MulSize(faceMipCount, frameCount, subresourceCount);
-	}
-	__except (EXCEPTION_EXECUTE_HANDLER) {
-		return false;
-	}
-}
-
-static std::unique_ptr<MaterialSystemDx11OwnedTextureUpload> MaterialSystemDx11CopyQueuedTextureUpload(
-	__int64 texture,
-	__int64 initialData)
-{
-	constexpr size_t maxSubresourceCount = 16384;
-	constexpr size_t maxPayloadBytes = static_cast<size_t>(2) * 1024 * 1024 * 1024;
-
-	size_t subresourceCount = 0;
-	if (!initialData || !MaterialSystemDx11TryGetQueuedTextureSubresourceCount(texture, &subresourceCount)) {
-		MaterialSystemDx11LogTextureUploadOwnership("metadata-invalid", reinterpret_cast<const void*>(initialData), subresourceCount, 0);
-		return nullptr;
-	}
-
-	auto* sourceEntries = reinterpret_cast<const MaterialSystemDx11TextureInitialDataEntry*>(initialData);
-	auto copyResult = r1delta::materialsystem_dx11::CopyTextureUpload(
-		sourceEntries,
-		subresourceCount,
-		maxSubresourceCount,
-		maxPayloadBytes,
-		&MaterialSystemDx11IsCommittedReadableRange,
-		&MaterialSystemDx11TryCopy);
-	if (!copyResult.upload) {
-		MaterialSystemDx11LogTextureUploadOwnership(
-			r1delta::materialsystem_dx11::TextureUploadCopyErrorName(copyResult.error),
-			sourceEntries,
-			subresourceCount,
-			copyResult.payloadBytes);
-		return nullptr;
-	}
-
-	MaterialSystemDx11LogTextureUploadOwnership(
-		"copied",
-		copyResult.upload->entries.data(),
-		subresourceCount,
-		copyResult.payloadBytes);
-	return std::move(copyResult.upload);
+	size_t required = entry.sysMemSlicePitch;
+	if (entry.sysMemPitch > required)
+		required = entry.sysMemPitch;
+	return required ? required : 1;
 }
 
 static void MaterialSystemDx11LogTextureInitialDataGuard(
@@ -1495,7 +1130,7 @@ static void MaterialSystemDx11LogTextureInitialDataGuard(
 	int flags,
 	__int64 initialData,
 	size_t subresourceCount,
-	size_t spanBytes)
+	size_t zeroBytes)
 {
 	if (s_MaterialSystemDx11TextureInitialDataLogBudget <= 0)
 		return;
@@ -1506,7 +1141,7 @@ static void MaterialSystemDx11LogTextureInitialDataGuard(
 		buffer,
 		sizeof(buffer),
 		_TRUNCATE,
-		"R1Delta: materialsystem_dx11 texture initial-data guard reason=%s %dx%d fmt=%d mips=%d array=%u flags=0x%x data=%p subresources=%llu spanBytes=%llu\n",
+		"R1Delta: materialsystem_dx11 texture initial-data guard reason=%s %dx%d fmt=%d mips=%d array=%u flags=0x%x data=%p subresources=%llu zeroBytes=%llu\n",
 		reason,
 		width,
 		height,
@@ -1516,7 +1151,7 @@ static void MaterialSystemDx11LogTextureInitialDataGuard(
 		flags,
 		reinterpret_cast<void*>(initialData),
 		static_cast<unsigned long long>(subresourceCount),
-		static_cast<unsigned long long>(spanBytes));
+		static_cast<unsigned long long>(zeroBytes));
 	OutputDebugStringA(buffer);
 }
 
@@ -1529,6 +1164,7 @@ static bool MaterialSystemDx11PrepareSafeTextureInitialData(
 	int flags,
 	__int64 initialData,
 	std::vector<MaterialSystemDx11TextureInitialDataEntry>& safeEntries,
+	std::vector<unsigned char>& zeroData,
 	__int64* safeInitialData)
 {
 	if (safeInitialData)
@@ -1537,103 +1173,52 @@ static bool MaterialSystemDx11PrepareSafeTextureInitialData(
 		return false;
 
 	const size_t subresourceCount = MaterialSystemDx11TextureSubresourceCount(mipLevels, arraySize, flags);
-	if (width <= 0 || height <= 0 || !subresourceCount || subresourceCount > 16384) {
-		*safeInitialData = 0;
-		MaterialSystemDx11LogTextureInitialDataGuard("metadata-invalid", width, height, format, mipLevels, arraySize, flags, initialData, subresourceCount, 0);
-		return true;
-	}
-
-	if (!MaterialSystemDx11GetTextureFormatLayout(format).bytesPerBlock)
+	if (!subresourceCount || subresourceCount > 16384)
 		return false;
 
 	size_t entriesBytes = 0;
-	if (!MaterialSystemDx11MulSize(subresourceCount, sizeof(MaterialSystemDx11TextureInitialDataEntry), &entriesBytes)) {
-		*safeInitialData = 0;
-		MaterialSystemDx11LogTextureInitialDataGuard("array-size-overflow", width, height, format, mipLevels, arraySize, flags, initialData, subresourceCount, 0);
-		return true;
-	}
+	if (!MaterialSystemDx11MulSize(subresourceCount, sizeof(MaterialSystemDx11TextureInitialDataEntry), &entriesBytes))
+		return false;
 
 	auto* initialEntries = reinterpret_cast<const MaterialSystemDx11TextureInitialDataEntry*>(initialData);
-	if (!MaterialSystemDx11IsCommittedReadableRange(initialEntries, entriesBytes)) {
+	if (!IsReadableRange(initialEntries, entriesBytes)) {
 		*safeInitialData = 0;
-		MaterialSystemDx11LogTextureInitialDataGuard("array-unreadable", width, height, format, mipLevels, arraySize, flags, initialData, subresourceCount, entriesBytes);
+		MaterialSystemDx11LogTextureInitialDataGuard("array-unreadable", width, height, format, mipLevels, arraySize, flags, initialData, subresourceCount, 0);
 		return true;
 	}
 
-	safeEntries.resize(subresourceCount);
-	if (!MaterialSystemDx11TryCopy(safeEntries.data(), initialEntries, entriesBytes)) {
-		*safeInitialData = 0;
-		MaterialSystemDx11LogTextureInitialDataGuard("array-copy-fault", width, height, format, mipLevels, arraySize, flags, initialData, subresourceCount, entriesBytes);
-		return true;
-	}
-
+	safeEntries.assign(initialEntries, initialEntries + subresourceCount);
+	std::vector<unsigned char> invalidEntries(subresourceCount, 0);
 	bool changed = false;
-	size_t maxSpanBytes = 0;
+	size_t maxZeroBytes = 0;
 	for (size_t i = 0; i < subresourceCount; ++i) {
-		const size_t mip = i % static_cast<size_t>(mipLevels);
-		const size_t mipWidth = mip < sizeof(size_t) * CHAR_BIT ? (static_cast<size_t>(width) >> mip) : 0;
-		const size_t mipHeight = mip < sizeof(size_t) * CHAR_BIT ? (static_cast<size_t>(height) >> mip) : 0;
-		const MaterialSystemDx11TextureMipLayout layout = MaterialSystemDx11GetTextureMipLayout(
-			format,
-			mipWidth ? mipWidth : 1,
-			mipHeight ? mipHeight : 1);
-		if (!layout.rowBytes || !layout.rowCount || layout.rowBytes > UINT_MAX) {
-			*safeInitialData = 0;
-			MaterialSystemDx11LogTextureInitialDataGuard("layout-invalid", width, height, format, mipLevels, arraySize, flags, initialData, subresourceCount, 0);
-			return true;
-		}
-
-		size_t pitch = safeEntries[i].sysMemPitch;
-		if (pitch < layout.rowBytes) {
-			size_t bgrPitch = 0;
-			size_t bgrSlicePitch = 0;
-			const bool isStockBgr888Conversion =
-				(format == DXGI_FORMAT_R8G8B8A8_UNORM || format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB)
-				&& MaterialSystemDx11MulSize(mipWidth ? mipWidth : 1, 3, &bgrPitch)
-				&& MaterialSystemDx11MulSize(bgrPitch, layout.rowCount, &bgrSlicePitch)
-				&& pitch == bgrPitch
-				&& safeEntries[i].sysMemSlicePitch == bgrSlicePitch;
-			if (!isStockBgr888Conversion) {
-				*safeInitialData = 0;
-				MaterialSystemDx11LogTextureInitialDataGuard("row-pitch-invalid", width, height, format, mipLevels, arraySize, flags, initialData, subresourceCount, layout.rowBytes);
-				return true;
-			}
-
-			pitch = layout.rowBytes;
-			safeEntries[i].sysMemPitch = static_cast<unsigned int>(pitch);
+		const size_t required = MaterialSystemDx11RequiredInitialDataBytes(safeEntries[i]);
+		if (!safeEntries[i].sysMem || !IsReadableRange(safeEntries[i].sysMem, required)) {
+			invalidEntries[i] = 1;
 			changed = true;
+			if (required > maxZeroBytes)
+				maxZeroBytes = required;
 		}
+	}
 
-		size_t rowPrefixBytes = 0;
-		if (!MaterialSystemDx11MulSize(pitch, layout.rowCount - 1, &rowPrefixBytes)
-			|| layout.rowBytes > static_cast<size_t>(-1) - rowPrefixBytes) {
-			*safeInitialData = 0;
-			MaterialSystemDx11LogTextureInitialDataGuard("span-overflow", width, height, format, mipLevels, arraySize, flags, initialData, subresourceCount, 0);
-			return true;
-		}
-		const size_t spanBytes = rowPrefixBytes + layout.rowBytes;
-		if (!safeEntries[i].sysMem || !MaterialSystemDx11IsCommittedReadableRange(safeEntries[i].sysMem, spanBytes)) {
-			*safeInitialData = 0;
-			MaterialSystemDx11LogTextureInitialDataGuard("entry-unreadable", width, height, format, mipLevels, arraySize, flags, initialData, subresourceCount, spanBytes);
-			return true;
-		}
+	if (!changed)
+		return false;
 
-		if (safeEntries[i].sysMemSlicePitch < spanBytes) {
-			if (spanBytes > UINT_MAX) {
-				*safeInitialData = 0;
-				MaterialSystemDx11LogTextureInitialDataGuard("slice-pitch-overflow", width, height, format, mipLevels, arraySize, flags, initialData, subresourceCount, spanBytes);
-				return true;
-			}
-			safeEntries[i].sysMemSlicePitch = static_cast<unsigned int>(spanBytes);
-			changed = true;
-		}
-		if (spanBytes > maxSpanBytes)
-			maxSpanBytes = spanBytes;
+	constexpr size_t kMaxZeroTextureInitialDataBytes = 64 * 1024 * 1024;
+	if (!maxZeroBytes || maxZeroBytes > kMaxZeroTextureInitialDataBytes) {
+		*safeInitialData = 0;
+		MaterialSystemDx11LogTextureInitialDataGuard("entry-too-large", width, height, format, mipLevels, arraySize, flags, initialData, subresourceCount, maxZeroBytes);
+		return true;
+	}
+
+	zeroData.assign(maxZeroBytes, 0);
+	for (size_t i = 0; i < subresourceCount; ++i) {
+		if (invalidEntries[i])
+			safeEntries[i].sysMem = zeroData.data();
 	}
 
 	*safeInitialData = reinterpret_cast<__int64>(safeEntries.data());
-	if (changed)
-		MaterialSystemDx11LogTextureInitialDataGuard("metadata-normalized", width, height, format, mipLevels, arraySize, flags, initialData, subresourceCount, maxSpanBytes);
+	MaterialSystemDx11LogTextureInitialDataGuard("entry-unreadable", width, height, format, mipLevels, arraySize, flags, initialData, subresourceCount, maxZeroBytes);
 	return true;
 }
 
@@ -1651,8 +1236,9 @@ static __int64 __fastcall MaterialSystemDx11CreateTexture2DResourceGuard(
 		return 0;
 
 	std::vector<MaterialSystemDx11TextureInitialDataEntry> safeEntries;
+	std::vector<unsigned char> zeroData;
 	__int64 safeInitialData = initialData;
-	MaterialSystemDx11PrepareSafeTextureInitialData(width, height, format, mipLevels, arraySize, flags, initialData, safeEntries, &safeInitialData);
+	MaterialSystemDx11PrepareSafeTextureInitialData(width, height, format, mipLevels, arraySize, flags, initialData, safeEntries, zeroData, &safeInitialData);
 
 	return MaterialSystemDx11CreateTexture2DResourceOriginal(texture, width, height, format, mipLevels, arraySize, flags, safeInitialData);
 }
@@ -1674,60 +1260,6 @@ static __int64 __fastcall MaterialSystemDx11LoadTextureGuard(__int64 texture, __
 		OutputDebugStringA("R1Delta: texture load gate lock failed; proceeding unlocked\n");
 	}
 	return MaterialSystemDx11LoadTextureOriginal(texture, textureData);
-}
-
-static char __fastcall MaterialSystemDx11QueueTextureUploadGuard(
-	__int64 texture,
-	__int64 initialData,
-	int sourceFormat)
-{
-	if (!MaterialSystemDx11QueueTextureUploadOriginal || !MaterialSystemDx11ExecuteTextureUploadOriginal)
-		return 0;
-	if (!initialData)
-		return MaterialSystemDx11QueueTextureUploadOriginal(texture, initialData, sourceFormat);
-
-	auto upload = MaterialSystemDx11CopyQueuedTextureUpload(texture, initialData);
-	if (!upload)
-		return MaterialSystemDx11QueueTextureUploadOriginal(texture, initialData, sourceFormat);
-
-	const MaterialSystemDx11TextureInitialDataEntry* ownedInitialData = nullptr;
-	if (!s_MaterialSystemDx11TextureUploads.Register(std::move(upload), &ownedInitialData)) {
-		MaterialSystemDx11LogTextureUploadOwnership("registry-failed", ownedInitialData, 0, 0);
-		return MaterialSystemDx11QueueTextureUploadOriginal(texture, initialData, sourceFormat);
-	}
-
-	const char queued = MaterialSystemDx11QueueTextureUploadOriginal(
-		texture,
-		reinterpret_cast<__int64>(ownedInitialData),
-		sourceFormat);
-	if (!queued)
-		s_MaterialSystemDx11TextureUploads.Take(ownedInitialData);
-	return queued;
-}
-
-static __int64 __fastcall MaterialSystemDx11ExecuteTextureUploadGuard(
-	__int64 texture,
-	__int64 initialData,
-	int sourceFormat,
-	unsigned int depth,
-	int frameCount,
-	unsigned int flags)
-{
-	if (!MaterialSystemDx11ExecuteTextureUploadOriginal)
-		return 0;
-
-	auto upload = s_MaterialSystemDx11TextureUploads.Take(
-		reinterpret_cast<const MaterialSystemDx11TextureInitialDataEntry*>(initialData));
-	if (upload)
-		MaterialSystemDx11LogTextureUploadOwnership("worker-owned", upload->entries.data(), upload->entries.size(), 0);
-
-	return MaterialSystemDx11ExecuteTextureUploadOriginal(
-		texture,
-		initialData,
-		sourceFormat,
-		depth,
-		frameCount,
-		flags);
 }
 
 static bool InstallMaterialSystemDx11CheckedHook(
@@ -1853,33 +1385,6 @@ void InstallMaterialSystemDx11NullShaderResourceGuard(uintptr_t materialSystemBa
 		0x33, 0xED,
 		0x48, 0x8D, 0x4C, 0x24, 0x21
 	};
-	const unsigned char expectedTextureUploadWorkerPrologue[] = {
-		0x48, 0x8B, 0xC4,
-		0x48, 0x89, 0x50, 0x10,
-		0x57,
-		0x41, 0x54,
-		0x48, 0x81, 0xEC, 0x08, 0x01, 0x00, 0x00,
-		0x48, 0x89, 0x70, 0x20,
-		0x4C, 0x89, 0x68, 0xE8,
-		0x4C, 0x89, 0x70, 0xE0,
-		0x4C, 0x89, 0x78, 0xD8
-	};
-	const unsigned char expectedTextureUploadQueuePrologue[] = {
-		0x40, 0x55,
-		0x57,
-		0x41, 0x54,
-		0x48, 0x83, 0xEC, 0x20,
-		0x41, 0x8B, 0xE8,
-		0x4C, 0x8B, 0xE2,
-		0x48, 0x8B, 0xF9
-	};
-	const unsigned char expectedTextureResourcePrologue[] = {
-		0x48, 0x89, 0x5C, 0x24, 0x08,
-		0x48, 0x89, 0x6C, 0x24, 0x10,
-		0x48, 0x89, 0x74, 0x24, 0x18,
-		0x57,
-		0x48, 0x83, 0xEC, 0x20
-	};
 	const unsigned char expectedStagePrologue[] = {
 		0x48, 0x89, 0x5C, 0x24, 0x08,
 		0x48, 0x89, 0x6C, 0x24, 0x10,
@@ -1965,34 +1470,6 @@ void InstallMaterialSystemDx11NullShaderResourceGuard(uintptr_t materialSystemBa
 		reinterpret_cast<void*>(&MaterialSystemDx11LoadTextureGuard),
 		reinterpret_cast<void**>(&MaterialSystemDx11LoadTextureOriginal),
 		"texture-load-lifetime");
-	const bool textureUploadWorkerInstalled = InstallMaterialSystemDx11CheckedHook(
-		materialSystemBase,
-		0x660B0,
-		expectedTextureUploadWorkerPrologue,
-		sizeof(expectedTextureUploadWorkerPrologue),
-		reinterpret_cast<void*>(&MaterialSystemDx11ExecuteTextureUploadGuard),
-		reinterpret_cast<void**>(&MaterialSystemDx11ExecuteTextureUploadOriginal),
-		"texture-upload-worker")
-		&& MaterialSystemDx11ExecuteTextureUploadOriginal;
-	const bool textureUploadOwnershipInstalled = textureUploadWorkerInstalled
-		&& MaterialSystemDx11ExecuteTextureUploadOriginal
-		&& InstallMaterialSystemDx11CheckedHook(
-		materialSystemBase,
-		0x68440,
-		expectedTextureUploadQueuePrologue,
-		sizeof(expectedTextureUploadQueuePrologue),
-		reinterpret_cast<void*>(&MaterialSystemDx11QueueTextureUploadGuard),
-		reinterpret_cast<void**>(&MaterialSystemDx11QueueTextureUploadOriginal),
-		"texture-upload-ownership")
-		&& MaterialSystemDx11QueueTextureUploadOriginal;
-	const bool textureResourceInstalled = InstallMaterialSystemDx11CheckedHook(
-		materialSystemBase,
-		0x140E0,
-		expectedTextureResourcePrologue,
-		sizeof(expectedTextureResourcePrologue),
-		reinterpret_cast<void*>(&MaterialSystemDx11SelectTextureResourceGuard),
-		reinterpret_cast<void**>(&MaterialSystemDx11SelectTextureResourceOriginal),
-		"texture-resource-handle");
 	const bool inputLayoutInstalled = InstallMaterialSystemDx11CheckedHook(
 		materialSystemBase,
 		0x1B020,
@@ -2017,7 +1494,7 @@ void InstallMaterialSystemDx11NullShaderResourceGuard(uintptr_t materialSystemBa
 		reinterpret_cast<void*>(&MaterialSystemDx11SelectShaderResourceGuard),
 		reinterpret_cast<void**>(&MaterialSystemDx11SelectShaderResourceOriginal),
 		"vertex");
-	s_MaterialSystemDx11NullResourceGuardInstalled = materialInitInstalled || isErrorMaterialInstalled || materialPropertyGuardsInstalled || resetInstalled || constantFlushInstalled || textureInstalled || textureLoadInstalled || textureUploadWorkerInstalled || textureUploadOwnershipInstalled || textureResourceInstalled || inputLayoutInstalled || stageInstalled || vertexInstalled;
+	s_MaterialSystemDx11NullResourceGuardInstalled = materialInitInstalled || isErrorMaterialInstalled || materialPropertyGuardsInstalled || resetInstalled || constantFlushInstalled || textureInstalled || textureLoadInstalled || inputLayoutInstalled || stageInstalled || vertexInstalled;
 }
 
 static bool IsVPhysicsGuardNegativeStackIndexDisabled()

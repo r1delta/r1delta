@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
     <ProjectConfiguration Include="Release|x64">
       <Configuration>Release</Configuration>
       <Platform>x64</Platform>
@@ -9,11 +13,17 @@
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
-    <ProjectGuid>{8A1082CB-4707-459C-A8DC-C15EDCF53F57}</ProjectGuid>
-    <RootNamespace>r1o_vpk_tests</RootNamespace>
+    <ProjectGuid>{A40AD19B-7317-4CA8-A5E4-6C4FBB01B3EB}</ProjectGuid>
+    <RootNamespace>crash_report_minidump_tests</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
@@ -23,29 +33,33 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings" />
   <ImportGroup Label="Shared" />
-  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+  <ImportGroup Label="PropertySheets" Condition="'$(Platform)'=='x64'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Label="Vcpkg">
     <VcpkgEnabled>false</VcpkgEnabled>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <OutDir>$(ProjectDir)..\.build\r1o_vpk_tests\</OutDir>
-    <IntDir>$(ProjectDir)..\.build\r1o_vpk_tests\obj\</IntDir>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <OutDir>$(ProjectDir)..\.build\crash_report_minidump_tests\Debug\</OutDir>
+    <IntDir>$(ProjectDir)..\.build\crash_report_minidump_tests\Debug\obj\</IntDir>
   </PropertyGroup>
-  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <OutDir>$(ProjectDir)..\.build\crash_report_minidump_tests\Release\</OutDir>
+    <IntDir>$(ProjectDir)..\.build\crash_report_minidump_tests\Release\obj\</IntDir>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Platform)'=='x64'">
     <ClCompile>
       <WarningLevel>Level4</WarningLevel>
       <SDLCheck>true</SDLCheck>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(ProjectDir)..;$(ProjectDir)..\engine;$(ProjectDir)..\engine\core;$(ProjectDir)..\engine\logging;$(ProjectDir)..\vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cmake\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>WIN32;_CONSOLE;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..;$(ProjectDir)..\engine;$(ProjectDir)..\vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cmake\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
-      <AdditionalDependencies>zstd.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>zstd.lib;dbghelp.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(ProjectDir)..\vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cmake\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <PostBuildEvent>
@@ -53,19 +67,11 @@
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="r1o_vpk_tests.cpp" />
-    <ClCompile Include="..\engine\core\r1o_runtime_paths.cpp" />
-    <ClCompile Include="..\engine\filesystem\r1o_vpk.cpp" />
-    <ClCompile Include="..\engine\filesystem\r1o_vpk_index_cache.cpp" />
-    <ClCompile Include="..\engine\filesystem\vpk_async_precache_entry.cpp" />
-    <ClCompile Include="..\engine\filesystem\vpk_directory_repair.cpp" />
+    <ClCompile Include="crash_report_minidump_tests.cpp" />
+    <ClCompile Include="..\engine\logging\crash_report_minidump.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\engine\core\r1o_runtime_paths.h" />
-    <ClInclude Include="..\engine\filesystem\r1o_vpk.h" />
-    <ClInclude Include="..\engine\filesystem\r1o_vpk_index_cache.h" />
-    <ClInclude Include="..\engine\filesystem\vpk_async_precache_entry.h" />
-    <ClInclude Include="..\engine\filesystem\vpk_directory_repair.h" />
+    <ClInclude Include="..\engine\logging\crash_report_minidump.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

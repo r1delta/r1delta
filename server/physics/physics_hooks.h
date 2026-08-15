@@ -16,17 +16,13 @@ extern __int64 (*o_sub_103120)(__int64, __int64, __int64, int);
 __int64 __fastcall sub_1032C0_hook(__int64 a1, char a2);
 __int64 __fastcall sub_103120_hook(__int64 a1, __int64 a2, __int64 a3, int a4);
 
-// VPhysics shutdown fix
-typedef void(__fastcall* sub_180100880_type)(uintptr_t);
-extern sub_180100880_type o_sub_100880;
-void __fastcall sub_100880_hook(uintptr_t a1);
+// R1 VPhysics level-shutdown recovery
+bool InstallR1VPhysicsShutdownGuard(uintptr_t vphysicsBase);
 
 // WallrunMove hook
 extern bool (*WallrunMove_BlockForTitans_Original)(__int64 a1, __int64 a2, __int64 a3);
 bool WallrunMove_BlockForTitans(__int64 a1, __int64 a2, __int64 a3);
 
-// Utility
-bool IsMemoryReadable(void* ptr, size_t size, DWORD protect_required_flags_oneof);
 
 // Initialization
 void InitPhysicsHooks();

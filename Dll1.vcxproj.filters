@@ -110,7 +110,7 @@
     <ClInclude Include="engine\core\factory.h">
       <Filter>engine\core</Filter>
     </ClInclude>
-    <ClInclude Include="engine\core\materialsystem_dx11_texture_upload.h">
+    <ClInclude Include="engine\core\materialsystem_dx11_texture_load_gate.h">
       <Filter>engine\core</Filter>
     </ClInclude>
     <ClInclude Include="engine\core\framework.h">
@@ -155,6 +155,9 @@
     <ClInclude Include="engine\filesystem\r1o_vpk_index_cache.h">
       <Filter>engine\filesystem</Filter>
     </ClInclude>
+    <ClInclude Include="engine\filesystem\vpk_async_precache_entry.h">
+      <Filter>engine\filesystem</Filter>
+    </ClInclude>
     <ClInclude Include="engine\filesystem\vpk_async_precache_fix.h">
       <Filter>engine\filesystem</Filter>
     </ClInclude>
@@ -173,6 +176,9 @@
     </ClInclude>
     <!-- engine\logging -->
     <ClInclude Include="engine\logging\crashhandler.h">
+      <Filter>engine\logging</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\logging\crash_report_minidump.h">
       <Filter>engine\logging</Filter>
     </ClInclude>
     <ClInclude Include="engine\logging\logging.h">
@@ -282,6 +288,9 @@
       <Filter>server\physics</Filter>
     </ClInclude>
     <ClInclude Include="server\physics\physics_hooks.h">
+      <Filter>server\physics</Filter>
+    </ClInclude>
+    <ClInclude Include="server\physics\vphysics_shutdown_guard.h">
       <Filter>server\physics</Filter>
     </ClInclude>
     <!-- server\ai -->
@@ -493,9 +502,6 @@
     <ClCompile Include="engine\core\factory.cpp">
       <Filter>engine\core</Filter>
     </ClCompile>
-    <ClCompile Include="engine\core\materialsystem_dx11_texture_upload.cpp">
-      <Filter>engine\core</Filter>
-    </ClCompile>
     <ClCompile Include="engine\core\load.cpp">
       <Filter>engine\core</Filter>
     </ClCompile>
@@ -535,6 +541,9 @@
     <ClCompile Include="engine\filesystem\r1o_vpk_index_cache.cpp">
       <Filter>engine\filesystem</Filter>
     </ClCompile>
+    <ClCompile Include="engine\filesystem\vpk_async_precache_entry.cpp">
+      <Filter>engine\filesystem</Filter>
+    </ClCompile>
     <ClCompile Include="engine\filesystem\vpk_async_precache_fix.cpp">
       <Filter>engine\filesystem</Filter>
     </ClCompile>
@@ -553,6 +562,9 @@
     </ClCompile>
     <!-- engine\logging -->
     <ClCompile Include="engine\logging\crashhandler.cpp">
+      <Filter>engine\logging</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\logging\crash_report_minidump.cpp">
       <Filter>engine\logging</Filter>
     </ClCompile>
     <ClCompile Include="engine\logging\logging.cpp">
@@ -653,6 +665,9 @@
     </ClCompile>
     <!-- server\physics -->
     <ClCompile Include="server\physics\physics.cpp">
+      <Filter>server\physics</Filter>
+    </ClCompile>
+    <ClCompile Include="server\physics\vphysics_shutdown_guard.cpp">
       <Filter>server\physics</Filter>
     </ClCompile>
     <!-- server\ai -->

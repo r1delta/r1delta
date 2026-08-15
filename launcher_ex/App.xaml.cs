@@ -1,5 +1,5 @@
 ﻿using Dark.Net;
-using R1Delta; // Assuming this namespace contains RegistryHelper and VisualCppInstaller
+using R1Delta;
 using Squirrel;
 using Squirrel.Sources;
 using System;
@@ -771,6 +771,22 @@ namespace launcher_ex
             // --- Continue with the rest of the startup logic ---
             DarkNet.Instance.SetCurrentProcessTheme(Theme.Auto);
 
+            if (RegistryHelper.TryClaimPrerequisiteWarning())
+            {
+                ShowWarning(
+                    "R1Delta no longer checks for or installs these native prerequisites."
+                    + "\n\nInstall them yourself if they are not already installed:"
+                    + "\n\nMicrosoft Visual C++ 2010 SP1 Redistributable (x64):"
+                    + "\nhttps://www.microsoft.com/en-us/download/details.aspx?id=26999"
+                    + "\n\nMicrosoft Visual C++ 2015-2022 Redistributable (x64):"
+                    + "\nhttps://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist"
+                    + "\n\nMicrosoft DirectX End-User Runtime (June 2010):"
+                    + "\nhttps://www.microsoft.com/en-us/download/details.aspx?id=8109"
+                    + "\n\nChoose OK to acknowledge this warning and continue."
+                    + "\nIt will not be shown again for this Windows account.",
+                    "R1Delta Native Prerequisite Notice");
+            }
+
             string originalLauncherExeDir;
             try
             {
@@ -920,49 +936,15 @@ namespace launcher_ex
                 return;
             }
 
-            // 7. Ensure the native runtime prerequisites are installed.
-            NativePrerequisiteResult prerequisiteResult =
-                NativePrerequisiteInstaller.EnsureNativePrerequisites();
-            if (prerequisiteResult.Status != NativePrerequisiteStatus.Ready)
-            {
-                Debug.WriteLine(
-                    "[Prerequisite] Startup stopped with status "
-                    + prerequisiteResult.Status
-                    + (prerequisiteResult.InstallerExitCode.HasValue
-                        ? " and installer exit code "
-                            + prerequisiteResult.InstallerExitCode.Value + "."
-                        : "."));
-
-                if (prerequisiteResult.Status == NativePrerequisiteStatus.RebootRequired)
-                {
-                    ShowWarning(
-                        prerequisiteResult.Message
-                        + "\n\nWindows reported that a restart is required."
-                        + "\nRestart Windows, then run R1Delta again."
-                        + "\n\nR1Delta was not launched.",
-                        "R1Delta Restart Required");
-                }
-                else
-                {
-                    ShowError(
-                        prerequisiteResult.Message
-                        + "\n\nR1Delta was not launched because its native runtime prerequisites are incomplete.",
-                        "R1Delta Prerequisite Error");
-                }
-
-                Shutdown(1);
-                return;
-            }
-
-            // 8. Force High Performance GPU (unchanged logic)
+            // 7. Force High Performance GPU (unchanged logic)
             IntPtr hNvApi = LoadLibraryW("nvapi64.dll"); // Attempt to load nvapi
             LoadLibraryW("TextShaping.dll"); // Load TextShaping
             // Optional: FreeLibrary(hNvApi); // Usually not needed, OS handles ref counting
 
-            // 9. Set ContentId environment variable (unchanged logic)
+            // 8. Set ContentId environment variable (unchanged logic)
             Environment.SetEnvironmentVariable("ContentId", "1025161");
 
-            // 10. Run audio installer if necessary. Uses Current Working Directory (now game dir).
+            // 9. Run audio installer if necessary. Uses Current Working Directory (now game dir).
             try
             {
                 if (RunAudioInstallerIfNecessary() != 0) // No longer needs path argument
@@ -979,14 +961,14 @@ namespace launcher_ex
                 return;
             }
 
-            // 11. Prepend required R1Delta directories (relative to original launcher dir) to PATH
+            // 10. Prepend required R1Delta directories (relative to original launcher dir) to PATH
             if (!PrependPath(finalInstallPath, originalLauncherExeDir))
             {
                 // Warning already shown in PrependPath, but continue execution
             }
 
 
-            // 13. Load the actual game launcher DLL (from original launcher dir)
+            // 11. Load the actual game launcher DLL (from original launcher dir)
             IntPtr hLauncherModule = IntPtr.Zero;
             IntPtr pLauncherMain = IntPtr.Zero;
             IntPtr hCoreModule = IntPtr.Zero; // Keep track of core module

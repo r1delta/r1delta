@@ -30,6 +30,70 @@ function Get-NormalizedFullPath {
     return [System.IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
 }
 
+function Get-ScriptFunctionBlock {
+    param(
+        [string] $Content,
+        [string] $Name
+    )
+
+    $pattern = '(?ms)^function\s+' +
+        [System.Text.RegularExpressions.Regex]::Escape($Name) +
+        '\s*\([^)]*\)\s*\{.*?(?=^function\s+|\z)'
+    $match = [System.Text.RegularExpressions.Regex]::Match($Content, $pattern)
+    Assert-Condition $match.Success "Missing script function: $Name"
+    return $match.Value
+}
+
+function Assert-ChargeCannonCleanup {
+    param([string] $Root)
+
+    $scriptPath = Join-Path $Root 'scripts\vscripts\weapons\mp_titanweapon_charge_cannon.nut'
+    Assert-Condition (Test-Path -LiteralPath $scriptPath -PathType Leaf) (
+        "CORE is missing the Charge Cannon weapon script."
+    )
+
+    $content = Get-Content -LiteralPath $scriptPath -Raw
+    $stopBlock = Get-ScriptFunctionBlock $content 'StopShoulderCannonFX'
+    Assert-Condition ($stopBlock -notmatch '\bStopFX\s*\(') (
+        "StopShoulderCannonFX must not issue a separate StopFX request."
+    )
+    Assert-Condition ($stopBlock -notmatch '\.Fire\s*\(\s*"Destroy"') (
+        "StopShoulderCannonFX must not enqueue a second Destroy input."
+    )
+    Assert-Condition ($stopBlock -notmatch '\bStopFX_DestroyImmediately\s*\(') (
+        "StopShoulderCannonFX must not issue a second immediate-destroy path."
+    )
+    Assert-Condition (
+        [regex]::Matches($stopBlock, '(?m)^\s*effect\.ClearParent\(\)\s*$').Count -eq 1
+    ) "StopShoulderCannonFX must detach the effect exactly once."
+    Assert-Condition (
+        [regex]::Matches($stopBlock, '(?m)^\s*effect\.Destroy\(\)\s*$').Count -eq 1
+    ) "StopShoulderCannonFX must destroy the effect exactly once."
+
+    foreach ($functionName in @('OnWeaponCustomActivityStart', 'FireChargeCannon')) {
+        $block = Get-ScriptFunctionBlock $content $functionName
+        foreach ($effectIndex in 1..2) {
+            $effectName = "self.s.shoulderChargeEffect$effectIndex"
+            $stopMatch = [regex]::Match(
+                $block,
+                'StopShoulderCannonFX\s*\(\s*' +
+                    [regex]::Escape($effectName) +
+                    '\s*\)'
+            )
+            $clearMatch = [regex]::Match(
+                $block,
+                [regex]::Escape($effectName) + '\s*=\s*null'
+            )
+            Assert-Condition $stopMatch.Success (
+                "$functionName must stop $effectName."
+            )
+            Assert-Condition ($clearMatch.Success -and $clearMatch.Index -gt $stopMatch.Index) (
+                "$functionName must clear $effectName after stopping it."
+            )
+        }
+    }
+}
+
 function Assert-CoreRuntime {
     param([string] $Root)
 
@@ -152,6 +216,8 @@ function Assert-CoreRuntime {
             "bin_nexon duplicates an identical CORE bin DLL: $($file.Name) == $($baseHashes[$hash])"
         )
     }
+
+    Assert-ChargeCannonCleanup $coreRoot
 }
 
 function Find-DumpBin {

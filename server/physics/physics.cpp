@@ -3,6 +3,7 @@
 
 #include "physics.h"
 #include "physics_hooks.h"
+#include "vphysics_shutdown_guard.h"
 #include "core.h"
 #include "load.h"
 #include "logging.h"
@@ -91,64 +92,130 @@ __int64 __fastcall sub_103120_hook(__int64 a1, __int64 a2, __int64 a3, int a4)
     return ret;
 }
 
-inline bool IsMemoryReadable(void* ptr, size_t size, DWORD protect_required_flags_oneof)
+namespace
 {
-    static SYSTEM_INFO sysInfo;
-    if (!sysInfo.dwPageSize)
-        GetSystemInfo(&sysInfo);
+r1delta::vphysics::ShutdownFunctions s_R1VPhysicsShutdownFunctions{};
+uintptr_t s_R1VPhysicsShutdownTarget{};
+volatile LONG s_R1VPhysicsShutdownLogBudget = 8;
 
-    MEMORY_BASIC_INFORMATION memInfo;
-
-    if (!VirtualQuery(ptr, &memInfo, sizeof(memInfo)))
-        return false;
-
-    if (memInfo.RegionSize < size)
-        return false;
-
-    return (memInfo.State & MEM_COMMIT) && !(memInfo.Protect & PAGE_NOACCESS) && (memInfo.Protect & protect_required_flags_oneof) != 0;
+void __fastcall DeleteR1VPhysicsCriticalSection(uintptr_t address)
+{
+    DeleteCriticalSection(reinterpret_cast<LPCRITICAL_SECTION>(address));
 }
 
-typedef void(__fastcall* sub_180100880_type)(uintptr_t);
-sub_180100880_type o_sub_100880 = nullptr;
-
-void __fastcall sub_100880_hook(uintptr_t a1)
+void __fastcall R1VPhysicsShutdownGuard(uintptr_t owner)
 {
-    uintptr_t vPhysicsBase = (uintptr_t)GetModuleHandleA("vphysics.dll");
-    static auto* sub_1800FFB50 = reinterpret_cast<__int64(*)(uintptr_t)>(vPhysicsBase + 0xFFB50);
-    static auto* sub_1800FF010 = reinterpret_cast<__int64(*)(uintptr_t)>(vPhysicsBase + 0xFF010);
-    static auto* sub_1800CA0B0 = reinterpret_cast<__int64(*)(uintptr_t)>(vPhysicsBase + 0xCA0B0);
-    void(__fastcall * **v2)(_QWORD, __int64);
-    __int64 v3;
-    sub_1800FFB50(a1);
-    sub_1800FF010(a1);
-    int i = 0;
-    while (*(__int16*)(a1 + 1310866))
+    const r1delta::vphysics::ShutdownResult result =
+        r1delta::vphysics::RunR1VPhysicsShutdown(
+            owner,
+            s_R1VPhysicsShutdownFunctions);
+    if (result.failure == r1delta::vphysics::ShutdownFailure::None
+        || InterlockedDecrement(&s_R1VPhysicsShutdownLogBudget) < 0)
     {
-        i++;
-        v2 = **(void(__fastcall*****)(_QWORD, __int64))(a1 + 1310872);
-        if (v2)
+        return;
+    }
+
+    Warning(
+        "R1Delta: VPhysics level-shutdown recovery stopped draining: %s "
+        "(detail=%p callbacks=%u storageReleased=%d criticalSectionDeleted=%d)\n",
+        r1delta::vphysics::ShutdownFailureText(result.failure),
+        reinterpret_cast<void*>(result.detail),
+        result.callbacksInvoked,
+        result.storageReleased ? 1 : 0,
+        result.criticalSectionDeleted ? 1 : 0);
+}
+}
+
+bool InstallR1VPhysicsShutdownGuard(uintptr_t vphysicsBase)
+{
+    if (!r1delta::vphysics::IsExpectedR1VPhysicsModule(vphysicsBase))
+    {
+        Warning(
+            "R1Delta: VPhysics level-shutdown guard refused module at %p; "
+            "expected mapped AMD64 image timestamp=0x%08X size=0x%X\n",
+            reinterpret_cast<void*>(vphysicsBase),
+            r1delta::vphysics::kR1VPhysicsTimeDateStamp,
+            r1delta::vphysics::kR1VPhysicsSizeOfImage);
+        return false;
+    }
+    const uintptr_t target =
+        vphysicsBase + r1delta::vphysics::kR1VPhysicsShutdownRva;
+    if (s_R1VPhysicsShutdownTarget)
+    {
+        if (s_R1VPhysicsShutdownTarget != target)
         {
-            if (*v2 && **v2)
-            {
-                // Always do memory readable check
-                if (!IsMemoryReadable(**v2, 8, PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY))
-                {
-                    break;
-                }
-                (**v2)((_QWORD)v2, 1i64);
-            }
+            Warning(
+                "R1Delta: VPhysics level-shutdown guard refused a second "
+                "module target at %p\n",
+                reinterpret_cast<void*>(target));
+            return false;
         }
+
+        const MH_STATUS enableStatus =
+            MH_EnableHook(reinterpret_cast<void*>(target));
+        return enableStatus == MH_OK || enableStatus == MH_ERROR_ENABLED;
     }
-    v3 = *(_QWORD*)(a1 + 1310872);
-    if (v3 != a1 + 1310880)
+
+    if (!r1delta::vphysics::HasExpectedR1VPhysicsShutdownCode(vphysicsBase))
     {
-        if (v3)
-            sub_1800CA0B0(v3);
-        *(_QWORD*)(a1 + 1310872) = 0i64;
-        *(__int16*)(a1 + 1310864) = 0;
+        Warning(
+            "R1Delta: VPhysics level-shutdown guard skipped; "
+            "expected executable code bytes did not match at %p\n",
+            reinterpret_cast<void*>(target));
+        return false;
     }
-    *(__int16*)(a1 + 1310866) = 0;
-    DeleteCriticalSection((LPCRITICAL_SECTION)(a1 + 8));
+
+    r1delta::vphysics::ShutdownFunctions functions{
+        reinterpret_cast<r1delta::vphysics::ShutdownStep>(
+            vphysicsBase + r1delta::vphysics::kR1VPhysicsPrepareQueueRva),
+        reinterpret_cast<r1delta::vphysics::ShutdownStep>(
+            vphysicsBase + r1delta::vphysics::kR1VPhysicsPrepareResourcesRva),
+        reinterpret_cast<r1delta::vphysics::ShutdownStep>(
+            vphysicsBase + r1delta::vphysics::kR1VPhysicsReleaseStorageRva),
+        &DeleteR1VPhysicsCriticalSection,
+    };
+
+    const MH_STATUS createStatus = MH_CreateHook(
+        reinterpret_cast<void*>(target),
+        &R1VPhysicsShutdownGuard,
+        nullptr);
+    if (createStatus != MH_OK)
+    {
+        Warning(
+            "R1Delta: VPhysics level-shutdown guard create failed "
+            "(status=%d target=%p)\n",
+            static_cast<int>(createStatus),
+            reinterpret_cast<void*>(target));
+        return false;
+    }
+
+    s_R1VPhysicsShutdownFunctions = functions;
+    s_R1VPhysicsShutdownTarget = target;
+    const MH_STATUS enableStatus =
+        MH_EnableHook(reinterpret_cast<void*>(target));
+    if (enableStatus == MH_OK || enableStatus == MH_ERROR_ENABLED)
+        return true;
+
+    Warning(
+        "R1Delta: VPhysics level-shutdown guard enable failed "
+        "(status=%d target=%p)\n",
+        static_cast<int>(enableStatus),
+        reinterpret_cast<void*>(target));
+    const MH_STATUS removeStatus =
+        MH_RemoveHook(reinterpret_cast<void*>(target));
+    if (removeStatus == MH_OK)
+    {
+        s_R1VPhysicsShutdownFunctions = {};
+        s_R1VPhysicsShutdownTarget = 0;
+    }
+    else
+    {
+        Warning(
+            "R1Delta: VPhysics level-shutdown guard rollback failed "
+            "(status=%d); retaining valid detour state for bulk enable\n",
+            static_cast<int>(removeStatus));
+    }
+    return false;
 }
 
 // WallrunMove hook - blocks titans from wallrunning (otherwise they try to)

@@ -30,6 +30,12 @@ namespace R1Delta
         private const string InstallPathValueName = "InstallPath";
         private const string ShowSetupOnLaunchValueName = "ShowSetupOnLaunch";
         private const string LaunchArgumentsValueName = "LaunchArguments";
+        internal const int PrerequisiteWarningClaimVersion = 1;
+        private const string PrerequisiteWarningClaimValueName =
+            "PrerequisiteWarningClaimVersion";
+        private const string PrerequisiteWarningClaimMutexNamePrefix =
+            @"Global\R1Delta.PrerequisiteWarningClaim.";
+        private const int PrerequisiteWarningClaimMutexTimeoutMilliseconds = 2000;
 
         public static string GetInstallPath()
         {
@@ -155,6 +161,119 @@ namespace R1Delta
             {
                 Debug.WriteLine($"Error writing registry key {RegistryBaseKey}\\{LaunchArgumentsValueName}: {ex.Message}");
             }
+        }
+
+        internal static bool TryClaimPrerequisiteWarning()
+        {
+            Mutex claimMutex = null;
+            bool mutexHeld = false;
+
+            try
+            {
+                using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+                string userSid = identity?.User?.Value;
+                if (string.IsNullOrWhiteSpace(userSid))
+                {
+                    Debug.WriteLine(
+                        "Could not claim the native prerequisite warning because the current user SID is unavailable.");
+                    return false;
+                }
+                claimMutex = new Mutex(
+                    false,
+                    BuildPrerequisiteWarningClaimMutexName(userSid));
+                try
+                {
+                    mutexHeld = claimMutex.WaitOne(
+                        PrerequisiteWarningClaimMutexTimeoutMilliseconds);
+                }
+                catch (AbandonedMutexException)
+                {
+                    mutexHeld = true;
+                }
+
+                if (!mutexHeld)
+                {
+                    Debug.WriteLine(
+                        "Could not claim the native prerequisite warning before the mutex timeout; it will not be displayed.");
+                    return false;
+                }
+
+                using var key = Registry.CurrentUser.CreateSubKey(RegistryBaseKey);
+                if (key == null)
+                {
+                    Debug.WriteLine(
+                        $"Could not claim the native prerequisite warning: HKCU\\{RegistryBaseKey} could not be opened or created.");
+                    return false;
+                }
+
+                bool writeAttempted = false;
+                bool claimed = TryClaimOneTimeWarning(
+                    PrerequisiteWarningClaimVersion,
+                    () =>
+                    {
+                        object value = key.GetValue(PrerequisiteWarningClaimValueName);
+                        return value is int version ? version : 0;
+                    },
+                    version =>
+                    {
+                        writeAttempted = true;
+                        key.SetValue(
+                            PrerequisiteWarningClaimValueName,
+                            version,
+                            RegistryValueKind.DWord);
+                    });
+                if (!claimed && writeAttempted)
+                {
+                    Debug.WriteLine(
+                        "Could not claim the native prerequisite warning; the persisted version did not match.");
+                }
+                return claimed;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine(
+                    $"Could not claim the native prerequisite warning; it will not be displayed: {ex.Message}");
+                return false;
+            }
+            finally
+            {
+                if (mutexHeld)
+                {
+                    try
+                    {
+                        claimMutex.ReleaseMutex();
+                    }
+                    catch (ApplicationException)
+                    {
+                    }
+                }
+                claimMutex?.Dispose();
+            }
+        }
+
+        internal static string BuildPrerequisiteWarningClaimMutexName(string userSid)
+        {
+            if (string.IsNullOrWhiteSpace(userSid))
+                throw new ArgumentException("A user SID is required.", nameof(userSid));
+
+            return PrerequisiteWarningClaimMutexNamePrefix + userSid;
+        }
+
+        internal static bool TryClaimOneTimeWarning(
+            int claimVersion,
+            Func<int> readClaimVersion,
+            Action<int> writeClaimVersion)
+        {
+            if (readClaimVersion == null)
+                throw new ArgumentNullException(nameof(readClaimVersion));
+            if (writeClaimVersion == null)
+                throw new ArgumentNullException(nameof(writeClaimVersion));
+
+            if (readClaimVersion() >= claimVersion)
+                return false;
+
+            writeClaimVersion(claimVersion);
+            return readClaimVersion() >= claimVersion;
         }
     }
 

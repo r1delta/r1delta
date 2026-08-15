@@ -177,7 +177,6 @@
       <Generator>MSBuild:Compile</Generator>
     </ApplicationDefinition>
     <Compile Include="FastDownloadService.cs" />
-    <Compile Include="redist.cs" />
     <Compile Include="TitanfallFileList.cs" />
     <Compile Include="TitanfallFinder.cs" />
     <Compile Include="TitanfallManager.cs" />

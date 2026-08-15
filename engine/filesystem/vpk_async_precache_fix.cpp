@@ -1,4 +1,5 @@
 #include "vpk_async_precache_fix.h"
+#include "vpk_async_precache_entry.h"
 
 #include "engine/core/core.h"
 #include "engine/logging/logging.h"
@@ -7,6 +8,7 @@
 #include <Windows.h>
 #include <intrin.h>
 
+#include <atomic>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -86,6 +88,16 @@ static_assert(offsetof(ResourceHandler, decode) == 0x18);
 static_assert(offsetof(ResourceHandler, finish) == 0x20);
 static_assert(offsetof(ResourceHandler, consumeLoadedEntry) == 0x28);
 
+struct ResourceEntrySlot
+{
+	volatile uintptr_t entry;
+	uint32_t unknown08;
+	volatile long lock;
+};
+
+static_assert(sizeof(ResourceEntrySlot) == 0x10);
+static_assert(offsetof(ResourceEntrySlot, lock) == 0x0C);
+
 struct AsyncRequestStorage
 {
 	int32_t state;
@@ -101,7 +113,7 @@ struct AsyncPrecacheContext
 {
 	uint8_t mode;
 	std::array<std::byte, 7> padding;
-	uintptr_t* entrySlot;
+	ResourceEntrySlot* entrySlot;
 	ResourceRecord* record;
 	uintptr_t decodedResource;
 	ResourceHandler* handler;
@@ -116,11 +128,11 @@ static_assert(offsetof(AsyncPrecacheContext, handler) == 0x20);
 static_assert(offsetof(AsyncPrecacheContext, request) == 0x28);
 
 using FindResourceHandlerFn = ResourceHandler* (__fastcall*)(ResourceRecord* record);
-using FindPackEntrySlotFn = uintptr_t* (__fastcall*)(void* packStore, const char* path);
+using FindPackEntrySlotFn = ResourceEntrySlot* (__fastcall*)(void* packStore, const char* path);
 using CompareResourceExtensionFn = int(__fastcall*)(const char* lhs, const char* rhs);
 using FormatPathFn = int(__cdecl*)(char* destination, size_t capacity, const char* format, ...);
 using IsEntryReadyFn = bool(__fastcall*)(void* entry);
-using ConsumeLoadedEntryFn = uintptr_t(__fastcall*)(uintptr_t* entrySlot, void* packStore);
+using ConsumeLoadedEntryFn = uintptr_t(__fastcall*)(ResourceEntrySlot* entrySlot, void* packStore);
 using FinishFn = uintptr_t(__fastcall*)(AsyncPrecacheContext* context);
 using AsyncDecodeCallbackFn = void(__fastcall*)(AsyncPrecacheContext* context);
 using PrepareAsyncRequestFn = void(__fastcall*)(
@@ -152,21 +164,62 @@ Function VirtualFunction(void* object, size_t byteOffset)
 		vtable[byteOffset / sizeof(uintptr_t)]);
 }
 
-bool IsExpectedR1ClientFileSystem(uintptr_t filesystemBase)
+class ResourceEntrySlotLock
 {
-	if (!filesystemBase)
+public:
+	explicit ResourceEntrySlotLock(ResourceEntrySlot* slot) noexcept
+		: slot_(slot)
+	{
+		while (_InterlockedCompareExchange(&slot_->lock, 1, 0) != 0)
+			YieldProcessor();
+	}
+
+	~ResourceEntrySlotLock()
+	{
+		_InterlockedExchange(&slot_->lock, 0);
+	}
+
+	ResourceEntrySlotLock(const ResourceEntrySlotLock&) = delete;
+	ResourceEntrySlotLock& operator=(const ResourceEntrySlotLock&) = delete;
+
+private:
+	ResourceEntrySlot* slot_;
+};
+
+bool IsExpectedModuleImage(
+	uintptr_t moduleBase,
+	DWORD expectedTimeDateStamp,
+	DWORD expectedSizeOfImage)
+{
+	if (!moduleBase)
 		return false;
 
-	const auto* const dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(filesystemBase);
+	const auto* const dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(moduleBase);
 	if (dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew <= 0)
 		return false;
 
 	const auto* const nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(
-		filesystemBase + static_cast<uintptr_t>(dos->e_lfanew));
+		moduleBase + static_cast<uintptr_t>(dos->e_lfanew));
 	return nt->Signature == IMAGE_NT_SIGNATURE
 		&& nt->FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64
-		&& nt->FileHeader.TimeDateStamp == kExpectedTimeDateStamp
-		&& nt->OptionalHeader.SizeOfImage == kExpectedSizeOfImage;
+		&& nt->FileHeader.TimeDateStamp == expectedTimeDateStamp
+		&& nt->OptionalHeader.SizeOfImage == expectedSizeOfImage;
+}
+
+bool IsExpectedR1ClientFileSystem(uintptr_t filesystemBase)
+{
+	return IsExpectedModuleImage(
+		filesystemBase,
+		kExpectedTimeDateStamp,
+		kExpectedSizeOfImage);
+}
+
+AsyncPrecacheModuleLayout GetAsyncPrecacheModuleLayout()
+{
+	return {
+		s_FilesystemBase,
+		kExpectedSizeOfImage,
+	};
 }
 
 uintptr_t RunAsyncPrecacheTask(uint32_t callbackIndex)
@@ -199,65 +252,98 @@ uintptr_t RunAsyncPrecacheTask(uint32_t callbackIndex)
 		packRecord.extension);
 	path[sizeof(path) - 1] = '\0';
 
-	// The retail function conditionally moves the lookup result over an
-	// uninitialized stack qword. On a miss it dereferences that indeterminate
-	// pointer. This local slot is the intended null-entry fallback and is the
-	// only semantic difference from the shipped callback.
-	uintptr_t missingEntry = 0;
-	uintptr_t* entrySlot = &missingEntry;
-	if (uintptr_t* const found =
-		ModuleFunction<FindPackEntrySlotFn>(kFindPackEntrySlotRva)(packStore, path)) {
-		entrySlot = found;
-	}
+	// The handler's finish callback uses both the pointer at +0x00 and the
+	// spin lock at +0x0C, including when the lookup misses.
+	ResourceEntrySlot missingEntry{};
+	ResourceEntrySlot* const sharedEntrySlot =
+		ModuleFunction<FindPackEntrySlotFn>(
+			kFindPackEntrySlotRva)(packStore, path);
+	ResourceEntrySlot* const entrySlot =
+		sharedEntrySlot ? sharedEntrySlot : &missingEntry;
+
+	// Native slot locks cannot span readiness/finish callbacks because those
+	// callbacks reacquire the same lock. Serialize replacement workers outside
+	// that lock so one cannot recycle another worker's pending snapshot. A
+	// stack-local miss slot has no shared generation and needs no claim.
+	AsyncPrecacheEntryClaim entryClaim(sharedEntrySlot);
+	if (!entryClaim.Acquired())
+		return 0;
 
 	uintptr_t result = 0;
-	if (*entrySlot) {
-		result = static_cast<uintptr_t>(
-			ModuleFunction<CompareResourceExtensionFn>(
-				kCompareResourceExtensionRva)(record->extension, "vtf"));
-		if (result != 0) {
-			void* const entry = reinterpret_cast<void*>(*entrySlot);
-
-			// Diagnostic (bounded): if *entrySlot is no longer a filesystem pack
-			// entry, its vtable points into a foreign module (e.g. datacache).
-			// This detects the stale-store/type-confusion window before the
-			// IsEntryReady dispatch that produces the datacache DEP crash.
-			static std::atomic<int> s_entryDiagBudget{ 16 };
-			if (s_entryDiagBudget > 0) {
-				const uintptr_t entryVtbl = *reinterpret_cast<uintptr_t*>(entry);
-				const HMODULE datacache = GetModuleHandleA("datacache.dll");
-				const uintptr_t dcBase = datacache ? reinterpret_cast<uintptr_t>(datacache) : 0;
-				const uintptr_t fsBase = s_FilesystemBase;
-				const bool foreign = dcBase &&
-					entryVtbl >= dcBase && entryVtbl < dcBase + 0x100000;
-				if (foreign || s_entryDiagBudget > 8) {
-					--s_entryDiagBudget;
-					char buffer[320];
-					_snprintf_s(buffer, sizeof(buffer), _TRUNCATE,
-						"R1Delta: vpk worker entry diag entry=%p vtbl=0x%llx packStore=%p "
-						"fs=0x%llx dc=0x%llx path=%s foreign=%d\n",
-						entry,
-						static_cast<unsigned long long>(entryVtbl),
-						packStore,
-						static_cast<unsigned long long>(fsBase),
-						static_cast<unsigned long long>(dcBase),
-						path,
-						foreign ? 1 : 0);
-					OutputDebugStringA(buffer);
-				}
-			}
-
-			const bool ready = VirtualFunction<IsEntryReadyFn>(entry, 0x58)(entry);
-			result = ready ? 1 : 0;
-			if (ready) {
-				result = reinterpret_cast<ConsumeLoadedEntryFn>(
-					handler->consumeLoadedEntry)(entrySlot, packStore);
+	uintptr_t existingEntry = 0;
+	AsyncPrecacheEntryInspection inspection;
+	{
+		ResourceEntrySlotLock slotLock(entrySlot);
+		existingEntry = entrySlot->entry;
+		if (existingEntry) {
+			result = static_cast<uintptr_t>(
+				ModuleFunction<CompareResourceExtensionFn>(
+					kCompareResourceExtensionRva)(record->extension, "vtf"));
+			if (result != 0) {
+				inspection = InspectAsyncPrecacheEntry(
+					reinterpret_cast<const void*>(existingEntry),
+					GetAsyncPrecacheModuleLayout());
 			}
 		}
+	}
 
-		if (*entrySlot)
+	bool consumeExisting = false;
+	if (existingEntry && result != 0) {
+		switch (inspection.kind) {
+		case AsyncPrecacheEntryKind::Pending: {
+			const bool ready = reinterpret_cast<IsEntryReadyFn>(
+				inspection.readinessTarget)(
+					reinterpret_cast<void*>(existingEntry));
+			result = ready ? 1 : 0;
+			consumeExisting = ready;
+			break;
+		}
+		case AsyncPrecacheEntryKind::CompletedValue:
+			// The handler owns every valid non-pending value in its slot. Its
+			// slot-5 consumer serializes, releases the decoded value, and clears
+			// the slot regardless of the value's concrete resource class.
+			result = 1;
+			consumeExisting = true;
+			break;
+		case AsyncPrecacheEntryKind::Invalid:
+			result = 0;
+			break;
+		}
+
+		static std::atomic<int> s_entryDiagBudget{ 16 };
+		if (inspection.kind != AsyncPrecacheEntryKind::Pending
+			&& s_entryDiagBudget.load(std::memory_order_relaxed) > 0
+			&& s_entryDiagBudget.fetch_sub(1, std::memory_order_relaxed) > 0) {
+			char buffer[384];
+			_snprintf_s(
+				buffer,
+				sizeof(buffer),
+				_TRUNCATE,
+				"R1Delta: vpk worker existing entry kind=%d entry=%p vtbl=0x%llx "
+				"readyTarget=0x%llx path=%s\n",
+				static_cast<int>(inspection.kind),
+				reinterpret_cast<void*>(existingEntry),
+				static_cast<unsigned long long>(inspection.vtable),
+				static_cast<unsigned long long>(inspection.readinessTarget),
+				path);
+			OutputDebugStringA(buffer);
+		}
+	}
+
+	if (consumeExisting) {
+		result = reinterpret_cast<ConsumeLoadedEntryFn>(
+			handler->consumeLoadedEntry)(entrySlot, packStore);
+	}
+
+	{
+		ResourceEntrySlotLock slotLock(entrySlot);
+		if (entrySlot->entry)
 			return result;
 	}
+
+	// Submit/finish can pump other slots inline. Release this slot's claim
+	// before that nested work to avoid cross-slot lock-order cycles.
+	entryClaim.Release();
 
 	void* const fileSystem = *reinterpret_cast<void**>(
 		s_FilesystemBase + kFileSystemInterfaceRva);

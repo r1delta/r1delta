@@ -14,6 +14,7 @@
 #include <mmsystem.h>
 #include "resource.h"
 #include "r1d_version.h"
+#include "crash_report_minidump.h"
 #pragma comment(lib, "winmm.lib")
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "dbghelp.lib")
@@ -138,6 +139,11 @@ LONG WINAPI CustomCrashHandler(EXCEPTION_POINTERS* exInfo)
     char filepath[MAX_PATH];
     sprintf_s(filename, "r1delta_crash_%lld_%lu.log", (long long)currentTime, pid);
     sprintf_s(filepath, "%s\\%s", crashesDir, filename);
+    std::string minidumpSection;
+    r1delta::logging::crash_report_minidump::BuildCrashReportMinidumpSection(
+        exInfo,
+        filepath,
+        minidumpSection);
     srand(time(NULL));
     std::stringstream crashLog;
     // Pick a random message from the array
@@ -203,10 +209,15 @@ LONG WINAPI CustomCrashHandler(EXCEPTION_POINTERS* exInfo)
         crashLog << "=== Steam Crash Comment ===" << std::endl;
         crashLog << (char*)(G_engine + 0x2291560) << std::endl;
     }
+    crashLog << std::endl;
     // Write crash log to file
     std::ofstream logFile(filepath);
     if (logFile.is_open()) {
         logFile << crashLog.str();
+        logFile.flush();
+        logFile << (minidumpSection.empty()
+            ? r1delta::logging::crash_report_minidump::kUnavailableSection
+            : minidumpSection);
         logFile.close();
         if (!IsDedicatedServer()) {
 

@@ -129,6 +129,7 @@
 #include "auth.h"
 #include "bot.h"
 #include "physics_hooks.h"
+#include "vphysics_shutdown_guard.h"
 #include "chat.h"
 #include "localize.h"
 #include "networking.h"
@@ -9503,12 +9504,22 @@ void __stdcall LoaderNotificationCallback(
 		InstallVPhysicsStaticBVHProbe(reinterpret_cast<uintptr_t>(notification_data->Loaded.DllBase));
 		if (IsR1ODedicatedServer())
 			InstallR1OVPhysicsDeferredReleaseGuard(reinterpret_cast<uintptr_t>(notification_data->Loaded.DllBase));
-		else
+		else {
 			InitPhysicsHooks();
+			if (GetR1DeltaEngineMode() == R1DeltaEngineMode::Client2015) {
+				const std::wstring fullPath(
+					notification_data->Loaded.FullDllName->Buffer,
+					notification_data->Loaded.FullDllName->Length / sizeof(wchar_t));
+				if (r1delta::vphysics::IsExpectedR1VPhysicsModulePath(fullPath.c_str()))
+					InstallR1VPhysicsShutdownGuard(reinterpret_cast<uintptr_t>(notification_data->Loaded.DllBase));
+				else
+					Warning(
+						"R1Delta: VPhysics level-shutdown guard refused module path '%ls'\n",
+						fullPath.c_str());
+			}
+		}
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x1032C0), &sub_1032C0_hook, reinterpret_cast<LPVOID*>(&o_sub_1032C0));
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x103120), &sub_103120_hook, reinterpret_cast<LPVOID*>(&o_sub_103120));
-		//CreateMiscHook(vphysicsdllBaseAddress, 0x100880, &sub_180100880, reinterpret_cast<LPVOID*>(&sub_180100880_org));
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x100880), &sub_100880_hook, reinterpret_cast<LPVOID*>(&o_sub_100880));
 
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0xFFFF), &sub_FFFF, reinterpret_cast<LPVOID*>(&ovphys_sub_FFFF));
 		MH_EnableHook(MH_ALL_HOOKS);
