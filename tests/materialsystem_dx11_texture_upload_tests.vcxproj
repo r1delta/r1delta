@@ -10,7 +10,7 @@
     <VCProjectVersion>17.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
     <ProjectGuid>{7F7B93D8-9945-4BC0-9071-143152571053}</ProjectGuid>
-    <RootNamespace>materialsystem_dx11_texture_load_gate_tests</RootNamespace>
+    <RootNamespace>materialsystem_dx11_texture_upload_tests</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -31,8 +31,8 @@
     <VcpkgEnabled>false</VcpkgEnabled>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <OutDir>$(ProjectDir)..\.build\materialsystem_dx11_texture_load_gate_tests\</OutDir>
-    <IntDir>$(ProjectDir)..\.build\materialsystem_dx11_texture_load_gate_tests\obj\</IntDir>
+    <OutDir>$(ProjectDir)..\.build\materialsystem_dx11_texture_upload_tests\</OutDir>
+    <IntDir>$(ProjectDir)..\.build\materialsystem_dx11_texture_upload_tests\obj\</IntDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -48,10 +48,11 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="materialsystem_dx11_texture_load_gate_tests.cpp" />
+    <ClCompile Include="materialsystem_dx11_texture_upload_tests.cpp" />
+    <ClCompile Include="..\engine\core\materialsystem_dx11_texture_upload.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\engine\core\materialsystem_dx11_texture_load_gate.h" />
+    <ClInclude Include="..\engine\core\materialsystem_dx11_texture_upload.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

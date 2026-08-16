@@ -13,7 +13,7 @@ env:
   BUILD_PATH: ${{ github.workspace }}/build
   OUTPUT_PATH: ${{ github.workspace }}/output
   SYMBOL_PATH: ${{ github.workspace }}/symbols
-  CORE_REF: 1c15217bbbfe97e509d552d79d9fc40622c15003
+  CORE_REF: 2e9a1235569a8dda67af208b890e743aa47b3709
   VCPKG_BINARY_SOURCES: "clear;files,D:/a/r1delta/vcpkg,readwrite"
   BUILD_CONFIGURATION: Release
   MSBUILD_DEBUG_TYPE: pdbonly
@@ -187,8 +187,8 @@ jobs:
             r1o_vpk_tests = 'tests/r1o_vpk_tests.vcxproj'
             vsdk_memalloc_tests = 'tests/vsdk_memalloc_tests.vcxproj'
             persistentdata_codec_tests = 'tests/persistentdata_codec_tests.vcxproj'
-            materialsystem_dx11_texture_load_gate_tests = 'tests/materialsystem_dx11_texture_load_gate_tests.vcxproj'
             crash_report_minidump_tests = 'tests/crash_report_minidump_tests.vcxproj'
+            materialsystem_dx11_texture_upload_tests = 'tests/materialsystem_dx11_texture_upload_tests.vcxproj'
             allocator_delegation_tests = 'tests/allocator_delegation_tests.vcxproj'
             ffa_targeting_tests = 'tests/ffa_targeting_tests.vcxproj'
           }
@@ -216,8 +216,8 @@ jobs:
             'r1o_vpk_tests',
             'vsdk_memalloc_tests',
             'persistentdata_codec_tests',
-            'materialsystem_dx11_texture_load_gate_tests',
             'crash_report_minidump_tests',
+            'materialsystem_dx11_texture_upload_tests',
             'allocator_delegation_tests',
             'ffa_targeting_tests'
           )
