@@ -181,6 +181,9 @@
     <ClInclude Include="engine\core\materialsystem_dx11_vtf_scratch.h">
       <Filter>engine\core</Filter>
     </ClInclude>
+    <ClInclude Include="engine\logging\cbuf_initialization_guard.h">
+      <Filter>engine\logging</Filter>
+    </ClInclude>
     <ClInclude Include="engine\logging\logging.h">
       <Filter>engine\logging</Filter>
     </ClInclude>

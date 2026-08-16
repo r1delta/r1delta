@@ -266,6 +266,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="server\usermessages.h" />
     <ClInclude Include="client\localchatwriter.h" />
     <ClInclude Include="client\localize.h" />
+    <ClInclude Include="engine\logging\cbuf_initialization_guard.h" />
     <ClInclude Include="engine\logging\logging.h" />
     <ClInclude Include="engine\net\masterserver.h" />
     <ClInclude Include="engine\net\script_error_telemetry.h" />

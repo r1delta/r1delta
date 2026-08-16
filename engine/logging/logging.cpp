@@ -1,4 +1,5 @@
 #include "logging.h"
+#include "cbuf_initialization_guard.h"
 #include <windows.h>
 #include "cvar.h"
 #include "bitbuf.h"
@@ -113,18 +114,19 @@ bool is_interesting_format(const char* format) {
 //}
 typedef void (*Cbuf_AddTextType)(int a1, const char* a2, unsigned int a3);
 Cbuf_AddTextType Cbuf_AddTextOriginal;
-static bool bDone = false;
+static bool s_consoleCommandsUnhidden = false;
 void Cbuf_AddText(int a1, const char* a2, unsigned int a3) {
 	if (IsDedicatedServer() && !Cbuf_AddTextOriginal)
 		Cbuf_AddTextOriginal = (Cbuf_AddTextType)(G_engine_ds + 0x72d70);
 	ZoneScoped;
 	ZoneText(a2, strlen(a2));
 	
-	if (!bDone) {
-		bDone = true;
-		OriginalCCVar_FindVar(cvarinterface, "cl_updaterate")->m_nFlags &= ~(FCVAR_HIDDEN | FCVAR_DEVELOPMENTONLY);
-		OriginalCCVar_FindCommand(cvarinterface, "help")->m_nFlags &= ~(FCVAR_HIDDEN | FCVAR_DEVELOPMENTONLY);
-	}
+	r1delta::logging::TryUnhideConsoleCommands(
+		s_consoleCommandsUnhidden,
+		cvarinterface,
+		OriginalCCVar_FindVar,
+		OriginalCCVar_FindCommand,
+		FCVAR_HIDDEN | FCVAR_DEVELOPMENTONLY);
 	PData_OnConsoleCommand(a2);
 	bool shouldLog = true;
 	if (a2 == nullptr || *a2 == '\0' || *a2 == '_' || strcmp_static(a2, "\n") == 0 || (a2[0] == 'r' && a2[1] == 'e' && a2[2] == 's' && a2[3] == 'e')) {
