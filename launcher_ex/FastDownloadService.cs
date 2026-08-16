@@ -14,7 +14,7 @@ public sealed class FastDownloadService : IDisposable
     private const int ProgressPollMs = 500;
     private const int RpcTimeoutMs = 2000;
     private const int ProcessShutdownTimeoutMs = 5000;
-    private const int ProcessKillTimeoutMs = 2000;
+    private const int ProcessKillTimeoutMs = 10000;
     private const int MaxProcessAttempts = 5;
     private static readonly int[] RetryDelaysSeconds = { 0, 2, 5, 10, 20 };
     private static readonly TimeSpan DefaultNoProgressTimeout = TimeSpan.FromSeconds(90);
@@ -209,7 +209,7 @@ public sealed class FastDownloadService : IDisposable
         using var cancellationRegistration = cancellationToken.Register(() => KillProcess(process));
         Task stdoutTask = Task.CompletedTask;
         Task stderrTask = Task.CompletedTask;
-        Task<int> waitTask = null;
+        Task waitTask = CreateProcessExitTask(process);
         var processStarted = false;
 
         try
@@ -222,11 +222,6 @@ public sealed class FastDownloadService : IDisposable
             _activeProcess = process;
             stdoutTask = DrainOutputAsync(process.StandardOutput, "stdout");
             stderrTask = DrainOutputAsync(process.StandardError, "stderr");
-            waitTask = Task.Run(() =>
-            {
-                process.WaitForExit();
-                return process.ExitCode;
-            }, CancellationToken.None);
 
             await WaitForRpcAsync(rpcPort, rpcSecret, waitTask, cancellationToken).ConfigureAwait(false);
 
@@ -246,7 +241,10 @@ public sealed class FastDownloadService : IDisposable
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (waitTask.IsCompleted)
-                    throw new DownloadException($"aria2c exited unexpectedly with code {await waitTask.ConfigureAwait(false)}.");
+                {
+                    await waitTask.ConfigureAwait(false);
+                    throw new DownloadException($"aria2c exited unexpectedly with code {process.ExitCode}.");
+                }
 
                 foreach (var gid in remaining.ToList())
                 {
@@ -298,17 +296,24 @@ public sealed class FastDownloadService : IDisposable
             }
 
             await ShutdownAria2Async(rpcPort, rpcSecret).ConfigureAwait(false);
-            if (!await CompletesWithinAsync(waitTask, ProcessShutdownTimeoutMs).ConfigureAwait(false))
+            var exitCode = await TryGetProcessExitCodeWithinAsync(
+                process,
+                waitTask,
+                ProcessShutdownTimeoutMs).ConfigureAwait(false);
+            if (!exitCode.HasValue)
             {
                 Debug.WriteLine("[FastDownloadService] aria2c did not exit after RPC shutdown; terminating it.");
                 KillProcess(process);
-                if (!await CompletesWithinAsync(waitTask, ProcessKillTimeoutMs).ConfigureAwait(false))
+                exitCode = await TryGetProcessExitCodeWithinAsync(
+                    process,
+                    waitTask,
+                    ProcessKillTimeoutMs).ConfigureAwait(false);
+                if (!exitCode.HasValue)
                     throw new AriaProcessTerminationException("aria2c did not exit after it was terminated.");
             }
 
-            var exitCode = await waitTask.ConfigureAwait(false);
-            if (exitCode != 0)
-                Debug.WriteLine($"[FastDownloadService] aria2c attempt {attempt} exited with code {exitCode} after reaching terminal download states.");
+            if (exitCode.Value != 0)
+                Debug.WriteLine($"[FastDownloadService] aria2c attempt {attempt} exited with code {exitCode.Value} after reaching terminal download states.");
         }
         catch (OperationCanceledException)
         {
@@ -344,13 +349,25 @@ public sealed class FastDownloadService : IDisposable
             if (processStarted && !process.HasExited)
                 KillProcess(process);
 
-            if (waitTask != null)
+            if (processStarted && waitTask != null)
             {
-                if (!await CompletesWithinAsync(waitTask, ProcessKillTimeoutMs).ConfigureAwait(false))
-                    throw new AriaProcessTerminationException("aria2c did not exit during attempt cleanup.");
-
-                try { await waitTask.ConfigureAwait(false); }
-                catch (Exception ex) { throw new AriaProcessTerminationException("Failed while waiting for aria2c to exit during attempt cleanup.", ex); }
+                try
+                {
+                    var cleanupExitCode = await TryGetProcessExitCodeWithinAsync(
+                        process,
+                        waitTask,
+                        ProcessKillTimeoutMs).ConfigureAwait(false);
+                    if (!cleanupExitCode.HasValue)
+                        throw new AriaProcessTerminationException("aria2c did not exit during attempt cleanup.");
+                }
+                catch (AriaProcessTerminationException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    throw new AriaProcessTerminationException("Failed while waiting for aria2c to exit during attempt cleanup.", ex);
+                }
             }
 
             try { await CompletesWithinAsync(Task.WhenAll(stdoutTask, stderrTask), ProcessKillTimeoutMs).ConfigureAwait(false); }
@@ -429,14 +446,15 @@ public sealed class FastDownloadService : IDisposable
             };
 
             Process process = null;
-            Task<int> waitTask = null;
+            Task waitTask = null;
             Task stderrTask = Task.CompletedTask;
             Task stdoutTask = Task.CompletedTask;
             CancellationTokenRegistration cancellationRegistration = default;
             var processStarted = false;
             try
             {
-                process = new Process { StartInfo = startInfo };
+                process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+                waitTask = CreateProcessExitTask(process);
                 if (!process.Start())
                 {
                     failures[request] = "failed to start curl.exe";
@@ -448,11 +466,6 @@ public sealed class FastDownloadService : IDisposable
                 cancellationRegistration = cancellationToken.Register(() => KillProcess(process));
                 stderrTask = DrainOutputAsync(process.StandardError, "curl-stderr");
                 stdoutTask = DrainOutputAsync(process.StandardOutput, "curl-stdout");
-                waitTask = Task.Run(() =>
-                {
-                    process.WaitForExit();
-                    return process.ExitCode;
-                }, CancellationToken.None);
 
                 var lastLength = GetFileLength(partialPath);
                 var lastProgressUtc = DateTime.UtcNow;
@@ -508,9 +521,12 @@ public sealed class FastDownloadService : IDisposable
 
                 if (timeoutMessage != null)
                 {
-                    if (!await CompletesWithinAsync(waitTask, ProcessKillTimeoutMs).ConfigureAwait(false))
+                    var timeoutExitCode = await TryGetProcessExitCodeWithinAsync(
+                        process,
+                        waitTask,
+                        ProcessKillTimeoutMs).ConfigureAwait(false);
+                    if (!timeoutExitCode.HasValue)
                         throw new DownloadProcessTerminationException("curl.exe did not exit after timeout termination.");
-                    await waitTask.ConfigureAwait(false);
                     failures[request] = timeoutMessage;
                     DownloadProgressChanged?.Invoke(new DownloadProgressUpdate(
                         request.DestinationPath,
@@ -523,7 +539,8 @@ public sealed class FastDownloadService : IDisposable
                     continue;
                 }
 
-                var exitCode = await waitTask.ConfigureAwait(false);
+                await waitTask.ConfigureAwait(false);
+                var exitCode = process.ExitCode;
                 await Task.WhenAll(stderrTask, stdoutTask).ConfigureAwait(false);
                 if (exitCode != 0)
                 {
@@ -576,12 +593,25 @@ public sealed class FastDownloadService : IDisposable
                 if (processStarted && !process.HasExited)
                     KillProcess(process);
 
-                if (waitTask != null)
+                if (processStarted && waitTask != null)
                 {
-                    if (!await CompletesWithinAsync(waitTask, ProcessKillTimeoutMs).ConfigureAwait(false))
-                        throw new DownloadProcessTerminationException("curl.exe did not exit during attempt cleanup.");
-                    try { await waitTask.ConfigureAwait(false); }
-                    catch (Exception ex) { throw new DownloadProcessTerminationException("Failed while waiting for curl.exe to exit during attempt cleanup.", ex); }
+                    try
+                    {
+                        var cleanupExitCode = await TryGetProcessExitCodeWithinAsync(
+                            process,
+                            waitTask,
+                            ProcessKillTimeoutMs).ConfigureAwait(false);
+                        if (!cleanupExitCode.HasValue)
+                            throw new DownloadProcessTerminationException("curl.exe did not exit during attempt cleanup.");
+                    }
+                    catch (DownloadProcessTerminationException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new DownloadProcessTerminationException("Failed while waiting for curl.exe to exit during attempt cleanup.", ex);
+                    }
                 }
 
                 try { await CompletesWithinAsync(Task.WhenAll(stderrTask, stdoutTask), ProcessKillTimeoutMs).ConfigureAwait(false); }
@@ -737,16 +767,6 @@ public sealed class FastDownloadService : IDisposable
     }
 
 
-    private static async Task<bool> WaitForExitAsync(Process process, TimeSpan timeout, CancellationToken cancellationToken)
-    {
-        var waitTask = Task.Run(() => process.WaitForExit(), CancellationToken.None);
-        var winner = await Task.WhenAny(waitTask, Task.Delay(timeout, cancellationToken)).ConfigureAwait(false);
-        if (winner != waitTask)
-            return false;
-
-        await waitTask.ConfigureAwait(false);
-        return true;
-    }
 
     public void Dispose()
     {
@@ -813,7 +833,7 @@ public sealed class FastDownloadService : IDisposable
         });
     }
 
-    private async Task WaitForRpcAsync(int rpcPort, string rpcSecret, Task<int> waitTask, CancellationToken cancellationToken)
+    private async Task WaitForRpcAsync(int rpcPort, string rpcSecret, Task waitTask, CancellationToken cancellationToken)
     {
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
         while (DateTime.UtcNow < deadline)
@@ -953,6 +973,49 @@ public sealed class FastDownloadService : IDisposable
         }
 
         await operation.ConfigureAwait(false);
+    }
+
+    private static Task CreateProcessExitTask(Process process)
+    {
+        if (process == null)
+            throw new ArgumentNullException(nameof(process));
+
+        var source = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        process.Exited += (sender, args) => source.TrySetResult(true);
+        return source.Task;
+    }
+
+    private static async Task<int?> TryGetProcessExitCodeWithinAsync(
+        Process process,
+        Task exitTask,
+        int timeoutMs)
+    {
+        if (process == null)
+            throw new ArgumentNullException(nameof(process));
+        if (exitTask == null)
+            throw new ArgumentNullException(nameof(exitTask));
+        if (timeoutMs <= 0)
+            throw new ArgumentOutOfRangeException(nameof(timeoutMs));
+
+        if (await CompletesWithinAsync(exitTask, timeoutMs).ConfigureAwait(false))
+        {
+            await exitTask.ConfigureAwait(false);
+            return process.ExitCode;
+        }
+
+        try
+        {
+            if (!process.HasExited)
+                return null;
+
+            process.WaitForExit();
+            return process.ExitCode;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
     }
 
     private static async Task<bool> CompletesWithinAsync(Task task, int timeoutMs)

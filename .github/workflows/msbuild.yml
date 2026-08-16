@@ -19,7 +19,7 @@ env:
   MSBUILD_DEBUG_TYPE: pdbonly
   NUSPEC_FILE: R1Delta.nuspec
   PACKAGE_NAME: R1Delta
-  DISPLAY_VERSION: "3.0 prerelease 20"
+  DISPLAY_VERSION: "3.0 prerelease 21"
 
 permissions:
   contents: write
@@ -253,6 +253,8 @@ jobs:
           & '${{ github.workspace }}/tests/launcher_installer_integration_tests.ps1' `
             -LauncherPath $launcherPath
           & '${{ github.workspace }}/tests/fastdownload_httpclient_idle_tests.ps1' `
+            -LauncherPath $launcherPath
+          & '${{ github.workspace }}/tests/fastdownload_process_cleanup_tests.ps1' `
             -LauncherPath $launcherPath
 
       - name: Install script-error service dependencies
