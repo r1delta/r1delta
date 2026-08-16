@@ -252,6 +252,87 @@ void TestAscii85Vectors()
 	}
 }
 
+void TestRegisterMemoryPreviews()
+{
+	const uint8_t printable[]{ 'H', 'e', 'l', 'l', 'o', '/', 'R', '1' };
+	Check(
+		FormatRegisterMemoryPreview(printable, sizeof(printable))
+			== "[hex: 48 65 6C 6C 6F 2F 52 31; ascii: \"Hello/R1\"]",
+		"printable register preview includes exact hex and ASCII");
+
+	const uint8_t embeddedNull[]{ 'A', 0x00, 'B', 0x00 };
+	Check(
+		FormatRegisterMemoryPreview(embeddedNull, sizeof(embeddedNull))
+			== "[hex: 41 00 42 00; ascii: \"A.B.\"]",
+		"embedded NUL bytes remain visible in register preview hex");
+
+	const uint8_t highBit[]{ 0x80, 0xC0, 0xFF };
+	Check(
+		FormatRegisterMemoryPreview(highBit, sizeof(highBit))
+			== "[hex: 80 C0 FF; ascii: \"...\"]",
+		"high-bit register preview bytes remain exact");
+
+	const uint8_t controls[]{ 0x09, 0x0A, 0x1F, 0x20, 0x7E, 0x7F };
+	Check(
+		FormatRegisterMemoryPreview(controls, sizeof(controls))
+			== "[hex: 09 0A 1F 20 7E 7F; ascii: \"... ~.\"]",
+		"control bytes are exact in hex and sanitized in ASCII");
+
+	const uint8_t reportedBytes[]{ 0x58, 0xC0, 0x35, 0x2F, 0x7F, 0x00, 0x00, 0x00 };
+	Check(
+		FormatRegisterMemoryPreview(reportedBytes, sizeof(reportedBytes))
+			== "[hex: 58 C0 35 2F 7F 00 00 00; ascii: \"X.5/....\"]",
+		"reported register bytes render losslessly");
+
+	uint8_t oversized[kRegisterMemoryPreviewBytes + 1]{};
+	for (size_t i = 0; i < sizeof(oversized); ++i)
+		oversized[i] = static_cast<uint8_t>(i);
+	Check(
+		FormatRegisterMemoryPreview(oversized, sizeof(oversized))
+			== "[hex: 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F; "
+				"ascii: \"................\"; truncated]",
+		"register preview is capped and marks truncation");
+
+	Check(
+		FormatRegisterMemoryPreview(nullptr, sizeof(reportedBytes)).empty(),
+		"null preview buffer is rejected");
+	Check(
+		ReadRegisterMemoryPreview(nullptr).empty(),
+		"null register address is not dereferenced");
+
+	void* unreadable = VirtualAlloc(
+		nullptr,
+		4096,
+		MEM_RESERVE | MEM_COMMIT,
+		PAGE_NOACCESS);
+	Check(unreadable != nullptr, "unreadable preview test page allocates");
+	if (unreadable)
+	{
+		Check(
+			ReadRegisterMemoryPreview(unreadable).empty(),
+			"unreadable register address produces no preview");
+		VirtualFree(unreadable, 0, MEM_RELEASE);
+	}
+
+	uint8_t* readable = static_cast<uint8_t*>(VirtualAlloc(
+		nullptr,
+		4096,
+		MEM_RESERVE | MEM_COMMIT,
+		PAGE_READWRITE));
+	Check(readable != nullptr, "readable preview test page allocates");
+	if (readable)
+	{
+		memset(readable, 0xAA, kRegisterMemoryPreviewBytes);
+		memcpy(readable, reportedBytes, sizeof(reportedBytes));
+		Check(
+			ReadRegisterMemoryPreview(readable)
+				== "[hex: 58 C0 35 2F 7F 00 00 00 AA AA AA AA AA AA AA AA; "
+					"ascii: \"X.5/............\"; truncated]",
+			"safe register memory read preserves the bounded sample");
+		VirtualFree(readable, 0, MEM_RELEASE);
+	}
+}
+
 void TestCurrentProcessMinidumpRoundTrip()
 {
 	CaptureResult capture;
@@ -373,6 +454,7 @@ void TestUnavailableSectionAndCleanup()
 int main()
 {
 	TestAscii85Vectors();
+	TestRegisterMemoryPreviews();
 	TestCurrentProcessMinidumpRoundTrip();
 	TestUnavailableSectionAndCleanup();
 

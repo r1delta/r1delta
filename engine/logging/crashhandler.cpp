@@ -35,7 +35,6 @@ std::string GetExceptionDescription(EXCEPTION_RECORD* record);
 void GetRegistersWithContent(CONTEXT* context, std::stringstream& ss);
 void DumpStackMemory(CONTEXT* context, std::stringstream& ss, size_t bytesToDump = 512);
 std::string GetModuleNameForAddress(HANDLE process, DWORD64 address);
-bool IsReadableMemory(LPCVOID address, SIZE_T size);
 std::string GetAddressContent(DWORD64 address);
 std::string GetWindowsVersionInfo();
 std::string GetLastErrorString(DWORD errorCode);
@@ -372,93 +371,11 @@ std::string GetModuleNameForAddress(HANDLE process, DWORD64 address)
     return "";
 }
 
-// Check if memory is readable
-bool IsReadableMemory(LPCVOID address, SIZE_T size)
-{
-    if (address == nullptr) return false;
-
-    MEMORY_BASIC_INFORMATION mbi;
-    if (VirtualQuery(address, &mbi, sizeof(mbi)) == 0) return false;
-
-    if (mbi.State != MEM_COMMIT) return false;
-    if (mbi.Protect == PAGE_NOACCESS || mbi.Protect == PAGE_GUARD) return false;
-
-    // Try to read the memory to absolutely confirm
-    __try {
-        volatile char test = *((char*)address);
-        return true;
-    }
-    __except (EXCEPTION_EXECUTE_HANDLER) {
-        return false;
-    }
-}
-
-// Check if buffer looks like a string
-bool LooksLikeString(const char* buffer, size_t length)
-{
-    if (length < 4) return false; // Too short to be useful
-
-    // Must contain mostly printable ASCII
-    int printable = 0;
-    int nulls = 0;
-
-    for (size_t i = 0; i < length; i++) {
-        char c = buffer[i];
-        if (c == 0) {
-            nulls++;
-            if (i > 0 && i < length - 1) return true; // Found null terminator not at edges
-        }
-        else if (c >= 32 && c <= 126) {
-            printable++;
-        }
-    }
-
-    return (double)printable / length > 0.7; // At least 70% printable chars
-}
-
-// Get content for an address
+// Get a bounded, lossless preview for readable memory.
 std::string GetAddressContent(DWORD64 address)
 {
-    if (!IsReadableMemory((LPCVOID)address, 64)) return "";
-
-    char buffer[65] = { 0 };
-    SIZE_T bytesRead = 0;
-
-    if (ReadProcessMemory(GetCurrentProcess(), (LPCVOID)address, buffer, 64, &bytesRead)) {
-        // Check if it's a readable string
-        if (LooksLikeString(buffer, bytesRead)) {
-            std::string result = "\"";
-            for (size_t i = 0; i < bytesRead && buffer[i] != 0; i++) {
-                char c = buffer[i];
-                if (c >= 32 && c <= 126) {
-                    result += c;
-                }
-                else {
-                    result += '.';
-                }
-
-                if (i >= 32) { // Don't display too much text
-                    result += "...\"";
-                    return result;
-                }
-            }
-            result += "\"";
-            return result;
-        }
-        else {
-            // Return hex representation of first few bytes
-            std::stringstream ss;
-            ss << "[";
-            for (size_t i = 0; i < (std::min)((size_t)16, bytesRead); i++) {
-                if (i > 0) ss << " ";
-                ss << std::hex << std::setw(2) << std::setfill('0')
-                    << (int)(unsigned char)buffer[i];
-            }
-            ss << "]";
-            return ss.str();
-        }
-    }
-    return "";
+    return r1delta::logging::crash_report_minidump::ReadRegisterMemoryPreview(
+        reinterpret_cast<const void*>(static_cast<uintptr_t>(address)));
 }
 
 // Helper function to get register values with content examination

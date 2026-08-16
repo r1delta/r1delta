@@ -9568,6 +9568,10 @@ void __stdcall LoaderNotificationCallback(
 
 		if (is_client) {
 			G_client = (uintptr_t)notification_data->Loaded.DllBase;
+			const std::wstring clientFullPath(
+				notification_data->Loaded.FullDllName->Buffer,
+				notification_data->Loaded.FullDllName->Length / sizeof(wchar_t));
+			InstallClientStudioHeaderLookupGuard(G_client, clientFullPath.c_str());
 			PatchClientDynamicLodNoMatchSentinel(G_client);
 			InstallR1ClientPlayerResource18(G_client);
 			InstallClientDatacacheCallbackGuard(G_client);

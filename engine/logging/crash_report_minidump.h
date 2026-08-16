@@ -12,6 +12,7 @@ namespace r1delta::logging::crash_report_minidump
 
 inline constexpr int kCompressionLevel = 19;
 inline constexpr size_t kAscii85LineWidth = 80;
+inline constexpr size_t kRegisterMemoryPreviewBytes = 16;
 inline constexpr char kSectionHeader[] = "=== R1Delta Crash Minidump v1 ===";
 inline constexpr char kBeginMarker[] = "-----BEGIN R1DELTA CRASH MINIDUMP v1-----";
 inline constexpr char kEndMarker[] = "-----END R1DELTA CRASH MINIDUMP v1-----";
@@ -31,6 +32,13 @@ inline constexpr char kUnavailableSection[] =
 	"Reason: minidump embedding failed\n"
 	"-----BEGIN R1DELTA CRASH MINIDUMP v1-----\n"
 	"-----END R1DELTA CRASH MINIDUMP v1-----";
+
+std::string FormatRegisterMemoryPreview(
+	const uint8_t* data,
+	size_t size,
+	bool truncated = false) noexcept;
+
+std::string ReadRegisterMemoryPreview(const void* address) noexcept;
 
 bool EncodeAscii85(const uint8_t* data, size_t size, std::string& encoded) noexcept;
 

@@ -402,6 +402,98 @@ bool CaptureAndBuildGuarded(
 
 } // namespace
 
+std::string FormatRegisterMemoryPreview(
+	const uint8_t* data,
+	size_t size,
+	bool truncated) noexcept
+{
+	try
+	{
+		if (!data || size == 0)
+			return {};
+
+		const size_t sampledSize = (std::min)(size, kRegisterMemoryPreviewBytes);
+		const bool wasTruncated = truncated || size > sampledSize;
+		constexpr char kHexDigits[] = "0123456789ABCDEF";
+
+		std::string result;
+		result.reserve(32 + sampledSize * 4);
+		result.append("[hex:");
+		for (size_t i = 0; i < sampledSize; ++i)
+		{
+			const uint8_t value = data[i];
+			result.push_back(' ');
+			result.push_back(kHexDigits[value >> 4]);
+			result.push_back(kHexDigits[value & 0x0F]);
+		}
+
+		result.append("; ascii: \"");
+		for (size_t i = 0; i < sampledSize; ++i)
+		{
+			const uint8_t value = data[i];
+			if (value == '"' || value == '\\')
+				result.push_back('\\');
+			if (value >= 0x20 && value <= 0x7E)
+				result.push_back(static_cast<char>(value));
+			else
+				result.push_back('.');
+		}
+		result.push_back('"');
+		if (wasTruncated)
+			result.append("; truncated");
+		result.push_back(']');
+		return result;
+	}
+	catch (...)
+	{
+		return {};
+	}
+}
+
+std::string ReadRegisterMemoryPreview(const void* address) noexcept
+{
+	if (!address)
+		return {};
+
+	MEMORY_BASIC_INFORMATION memory{};
+	if (VirtualQuery(address, &memory, sizeof(memory)) == 0
+		|| memory.State != MEM_COMMIT
+		|| (memory.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0)
+	{
+		return {};
+	}
+
+	const uintptr_t value = reinterpret_cast<uintptr_t>(address);
+	const uintptr_t regionBase = reinterpret_cast<uintptr_t>(memory.BaseAddress);
+	if (value < regionBase)
+		return {};
+	const uintptr_t offset = value - regionBase;
+	if (offset >= memory.RegionSize)
+		return {};
+
+	const size_t available = memory.RegionSize - static_cast<size_t>(offset);
+	const size_t requested = (std::min)(available, kRegisterMemoryPreviewBytes);
+	uint8_t sample[kRegisterMemoryPreviewBytes]{};
+	SIZE_T bytesRead = 0;
+	if (!ReadProcessMemory(
+		GetCurrentProcess(),
+		address,
+		sample,
+		requested,
+		&bytesRead)
+		&& bytesRead == 0)
+	{
+		return {};
+	}
+	if (bytesRead == 0 || bytesRead > requested)
+		return {};
+
+	return FormatRegisterMemoryPreview(
+		sample,
+		static_cast<size_t>(bytesRead),
+		available > static_cast<size_t>(bytesRead));
+}
+
 bool EncodeAscii85(const uint8_t* data, size_t size, std::string& encoded) noexcept
 {
 	try

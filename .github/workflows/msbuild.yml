@@ -13,13 +13,13 @@ env:
   BUILD_PATH: ${{ github.workspace }}/build
   OUTPUT_PATH: ${{ github.workspace }}/output
   SYMBOL_PATH: ${{ github.workspace }}/symbols
-  CORE_REF: 2e9a1235569a8dda67af208b890e743aa47b3709
+  CORE_REF: b1611ea5a0a565a7cbb04c26a905bffabc0bb6af
   VCPKG_BINARY_SOURCES: "clear;files,D:/a/r1delta/vcpkg,readwrite"
   BUILD_CONFIGURATION: Release
   MSBUILD_DEBUG_TYPE: pdbonly
   NUSPEC_FILE: R1Delta.nuspec
   PACKAGE_NAME: R1Delta
-  DISPLAY_VERSION: "3.0 prerelease 18"
+  DISPLAY_VERSION: "3.0 prerelease 19"
 
 permissions:
   contents: write
@@ -188,7 +188,9 @@ jobs:
             vsdk_memalloc_tests = 'tests/vsdk_memalloc_tests.vcxproj'
             persistentdata_codec_tests = 'tests/persistentdata_codec_tests.vcxproj'
             crash_report_minidump_tests = 'tests/crash_report_minidump_tests.vcxproj'
+            client_studio_header_guard_tests = 'tests/client_studio_header_guard_tests.vcxproj'
             materialsystem_dx11_texture_upload_tests = 'tests/materialsystem_dx11_texture_upload_tests.vcxproj'
+            materialsystem_dx11_vtf_scratch_tests = 'tests/materialsystem_dx11_vtf_scratch_tests.vcxproj'
             allocator_delegation_tests = 'tests/allocator_delegation_tests.vcxproj'
             ffa_targeting_tests = 'tests/ffa_targeting_tests.vcxproj'
           }
@@ -217,7 +219,9 @@ jobs:
             'vsdk_memalloc_tests',
             'persistentdata_codec_tests',
             'crash_report_minidump_tests',
+            'client_studio_header_guard_tests',
             'materialsystem_dx11_texture_upload_tests',
+            'materialsystem_dx11_vtf_scratch_tests',
             'allocator_delegation_tests',
             'ffa_targeting_tests'
           )

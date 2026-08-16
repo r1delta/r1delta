@@ -36,6 +36,7 @@
 #include <ws2tcpip.h>
 #include "core.h"
 #include "materialsystem_dx11_texture_upload.h"
+#include "materialsystem_dx11_vtf_scratch.h"
 #include "r1o_runtime_paths.h"
 
 #include <MinHook.h>
@@ -57,6 +58,7 @@
 #include "bitbuf.h"
 #include "defs.h"
 #include "factory.h"
+#include "client_studio_header_guard.h"
 #include "TableDestroyer.h"
 #include <DbgHelp.h>
 #include <string.h>
@@ -499,6 +501,10 @@ static void* R1OQueryLoadedModuleFactories(const char* name, int* returnCode);
 static HMODULE LoadR1OTFOSupportModule(const char* moduleName);
 static HMODULE LoadR1ODedicatedMaterialSystemProxy();
 static void DebugR1ODediFactoryResult(const char* source, const char* name, void* result, int* returnCode);
+static r1delta::client_studio_header::WrapperFunction s_ClientStudioHeaderWrapperOriginal;
+static r1delta::client_studio_header::LazyInitFunction s_ClientStudioHeaderLazyInit;
+static r1delta::client_studio_header::LookupFunction s_ClientStudioHeaderLookup;
+static bool s_ClientStudioHeaderLookupGuardInstalled;
 
 constexpr uintptr_t kR1OClientArrayRva = 0x2659738;
 constexpr size_t kR1OClientStride = 22387ull * sizeof(uintptr_t);
@@ -618,6 +624,18 @@ using MaterialSystemDx11ResetD3DResourcePointersType = void(__fastcall*)();
 using MaterialSystemDx11FlushConstantBufferUpdatesType = __int64(__fastcall*)();
 using MaterialSystemDx11InitializeMaterialType = __int64(__fastcall*)(__int64 material, __int64 vmt, __int64 vmtPatches, __int64 context);
 using MaterialSystemDx11IsErrorMaterialType = __int64(__fastcall*)(__int64 material);
+using MaterialSystemDx11VtfLoadType = __int64(__fastcall*)(__int64 texture, __int64* textureData);
+using MaterialSystemDx11VtfScratchPrepareType = __int64(__fastcall*)(
+	__int64 texture,
+	__int64 fileHandle,
+	__int64 requestedBytes,
+	__int64 utlBuffer);
+using MaterialSystemDx11UtlBufferSetExternalType = __int64(__fastcall*)(
+	__int64 utlBuffer,
+	void* memory,
+	__int64 capacity,
+	__int64 initialPut,
+	unsigned char flags);
 static MaterialSystemDx11SelectShaderResourceType MaterialSystemDx11SelectShaderResourceOriginal;
 static MaterialSystemDx11SelectShaderStageResourceType MaterialSystemDx11SelectShaderStageResourceOriginal;
 static MaterialSystemDx11CreateInputLayoutType MaterialSystemDx11CreateInputLayoutOriginal;
@@ -627,6 +645,9 @@ static MaterialSystemDx11ResetD3DResourcePointersType MaterialSystemDx11ResetD3D
 static MaterialSystemDx11FlushConstantBufferUpdatesType MaterialSystemDx11FlushConstantBufferUpdatesOriginal;
 static MaterialSystemDx11InitializeMaterialType MaterialSystemDx11InitializeMaterialOriginal;
 static MaterialSystemDx11IsErrorMaterialType MaterialSystemDx11IsErrorMaterialOriginal;
+static MaterialSystemDx11VtfLoadType MaterialSystemDx11VtfLoadOriginal;
+static MaterialSystemDx11VtfScratchPrepareType MaterialSystemDx11VtfScratchPrepareOriginal;
+static MaterialSystemDx11UtlBufferSetExternalType MaterialSystemDx11UtlBufferSetExternal;
 using MaterialSystemDx11BoolPropertyType = __int64(__fastcall*)(__int64 material);
 static MaterialSystemDx11BoolPropertyType MaterialSystemDx11PropertyGetterOriginal[5]{};
 static bool s_MaterialSystemDx11NullResourceGuardInstalled;
@@ -1316,6 +1337,94 @@ static __int64 __fastcall MaterialSystemDx11ExecuteTextureUploadGuard(
 }
 
 
+[[noreturn]] static void MaterialSystemDx11FailVtfScratch(
+	const char* reason,
+	r1delta::materialsystem_dx11::VtfScratchError error,
+	__int64 requestedBytes)
+{
+	char buffer[256];
+	_snprintf_s(
+		buffer,
+		sizeof(buffer),
+		_TRUNCATE,
+		"R1Delta: fatal materialsystem_dx11 VTF scratch failure reason=%s error=%d requested=%lld\n",
+		reason,
+		static_cast<int>(error),
+		static_cast<long long>(requestedBytes));
+	OutputDebugStringA(buffer);
+
+	const ULONG_PTR arguments[] = {
+		static_cast<ULONG_PTR>(error),
+		static_cast<ULONG_PTR>(requestedBytes),
+	};
+	RaiseException(0xE0421019, EXCEPTION_NONCONTINUABLE, static_cast<DWORD>(std::size(arguments)), arguments);
+	TerminateProcess(GetCurrentProcess(), 0xE0421019);
+	__assume(0);
+}
+
+static __int64 __fastcall MaterialSystemDx11VtfLoadGuard(
+	__int64 texture,
+	__int64* textureData)
+{
+	if (!MaterialSystemDx11VtfLoadOriginal) {
+		MaterialSystemDx11FailVtfScratch(
+			"missing-load-original",
+			r1delta::materialsystem_dx11::VtfScratchError::noActiveLoad,
+			0);
+	}
+
+	r1delta::materialsystem_dx11::VtfScratchLoadScope scope;
+	if (!scope.Entered()) {
+		MaterialSystemDx11FailVtfScratch(
+			"load-entry",
+			r1delta::materialsystem_dx11::VtfScratchError::allocationFailed,
+			0);
+	}
+
+	const __int64 result =
+		MaterialSystemDx11VtfLoadOriginal(texture, textureData);
+	if (!scope.Close()) {
+		MaterialSystemDx11FailVtfScratch(
+			"load-exit",
+			r1delta::materialsystem_dx11::VtfScratchError::noActiveLoad,
+			0);
+	}
+	return result;
+}
+
+static __int64 __fastcall MaterialSystemDx11PrepareVtfScratch(
+	__int64 texture,
+	__int64 fileHandle,
+	__int64 requestedBytes,
+	__int64 utlBuffer)
+{
+	(void)texture;
+	(void)fileHandle;
+	if (!MaterialSystemDx11UtlBufferSetExternal || !utlBuffer) {
+		MaterialSystemDx11FailVtfScratch(
+			"missing-buffer-binder",
+			r1delta::materialsystem_dx11::VtfScratchError::noActiveLoad,
+			requestedBytes);
+	}
+
+	const r1delta::materialsystem_dx11::VtfScratchBuffer scratch =
+		r1delta::materialsystem_dx11::PrepareThreadVtfScratch(requestedBytes);
+	if (!scratch) {
+		MaterialSystemDx11FailVtfScratch(
+			"prepare",
+			scratch.error,
+			requestedBytes);
+	}
+
+	MaterialSystemDx11UtlBufferSetExternal(
+		utlBuffer,
+		scratch.data,
+		static_cast<__int64>(scratch.capacity),
+		0,
+		8);
+	return static_cast<__int64>(scratch.capacity);
+}
+
 static bool InstallMaterialSystemDx11CheckedHook(
 	uintptr_t materialSystemBase,
 	uintptr_t rva,
@@ -1361,12 +1470,471 @@ static bool InstallMaterialSystemDx11CheckedHook(
 	return hasOriginal && (enableStatus == MH_OK || enableStatus == MH_ERROR_ENABLED);
 }
 
+static int __fastcall ClientStudioHeaderLookupGuard(void* entity, const char* name)
+{
+	return r1delta::client_studio_header::LookupWithNullGuard(
+		entity,
+		name,
+		s_ClientStudioHeaderLazyInit,
+		s_ClientStudioHeaderLookup);
+}
+
+static bool IsRvaInExecutableTextSection(
+	uintptr_t moduleBase,
+	const IMAGE_NT_HEADERS64* ntHeaders,
+	uintptr_t rva,
+	size_t byteCount)
+{
+	if (!moduleBase || !ntHeaders || !byteCount || rva > SIZE_MAX - byteCount)
+		return false;
+
+	const WORD sectionCount = ntHeaders->FileHeader.NumberOfSections;
+	if (!sectionCount || sectionCount > 96)
+		return false;
+
+	const IMAGE_SECTION_HEADER* const sections = IMAGE_FIRST_SECTION(ntHeaders);
+	if (!MaterialSystemDx11IsCommittedReadableRange(
+			sections,
+			sizeof(*sections) * sectionCount))
+		return false;
+
+	for (WORD index = 0; index < sectionCount; ++index) {
+		const IMAGE_SECTION_HEADER& section = sections[index];
+		if (memcmp(section.Name, ".text", sizeof(".text") - 1) != 0
+			|| !(section.Characteristics & IMAGE_SCN_MEM_EXECUTE))
+			continue;
+
+		const uintptr_t sectionStart = section.VirtualAddress;
+		const uintptr_t sectionSize = section.Misc.VirtualSize;
+		return rva >= sectionStart
+			&& rva - sectionStart <= sectionSize
+			&& byteCount <= sectionSize - (rva - sectionStart);
+	}
+
+	return false;
+}
+
+static bool HasExpectedStockMaterialSystemImage(
+	uintptr_t materialSystemBase,
+	DWORD* observedTimestamp,
+	DWORD* observedImageSize)
+{
+	if (observedTimestamp)
+		*observedTimestamp = 0;
+	if (observedImageSize)
+		*observedImageSize = 0;
+	if (!materialSystemBase)
+		return false;
+
+	MEMORY_BASIC_INFORMATION memory = {};
+	if (VirtualQuery(
+			reinterpret_cast<void*>(materialSystemBase),
+			&memory,
+			sizeof(memory)) != sizeof(memory)
+		|| memory.State != MEM_COMMIT
+		|| memory.Type != MEM_IMAGE
+		|| memory.BaseAddress != reinterpret_cast<void*>(materialSystemBase)
+		|| memory.AllocationBase != reinterpret_cast<void*>(materialSystemBase))
+		return false;
+
+	const auto* const dosHeader =
+		reinterpret_cast<const IMAGE_DOS_HEADER*>(materialSystemBase);
+	if (!MaterialSystemDx11IsCommittedReadableRange(dosHeader, sizeof(*dosHeader))
+		|| dosHeader->e_magic != IMAGE_DOS_SIGNATURE
+		|| dosHeader->e_lfanew <= 0
+		|| dosHeader->e_lfanew > 0x100000)
+		return false;
+
+	const auto* const ntHeaders = reinterpret_cast<const IMAGE_NT_HEADERS64*>(
+		materialSystemBase + static_cast<uintptr_t>(dosHeader->e_lfanew));
+	if (!MaterialSystemDx11IsCommittedReadableRange(ntHeaders, sizeof(*ntHeaders)))
+		return false;
+
+	if (observedTimestamp)
+		*observedTimestamp = ntHeaders->FileHeader.TimeDateStamp;
+	if (observedImageSize)
+		*observedImageSize = ntHeaders->OptionalHeader.SizeOfImage;
+
+	return ntHeaders->Signature == IMAGE_NT_SIGNATURE
+		&& ntHeaders->FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64
+		&& ntHeaders->FileHeader.TimeDateStamp
+			== r1delta::materialsystem_dx11::kExpectedMaterialSystemTimeDateStamp
+		&& ntHeaders->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC
+		&& ntHeaders->OptionalHeader.SizeOfImage
+			== r1delta::materialsystem_dx11::kExpectedMaterialSystemImageSize
+		&& IsRvaInExecutableTextSection(
+			materialSystemBase,
+			ntHeaders,
+			r1delta::materialsystem_dx11::kVtfLoadRva,
+			sizeof(r1delta::materialsystem_dx11::kExpectedVtfLoadPrologue))
+		&& IsRvaInExecutableTextSection(
+			materialSystemBase,
+			ntHeaders,
+			r1delta::materialsystem_dx11::kVtfScratchPrepareRva,
+			sizeof(r1delta::materialsystem_dx11::kExpectedVtfScratchPreparePrologue))
+		&& IsRvaInExecutableTextSection(
+			materialSystemBase,
+			ntHeaders,
+			r1delta::materialsystem_dx11::kUtlBufferSetExternalRva,
+			sizeof(r1delta::materialsystem_dx11::kExpectedUtlBufferSetExternalPrologue));
+}
+
+static bool MatchesMaterialSystemCode(
+	uintptr_t materialSystemBase,
+	uintptr_t rva,
+	const std::uint8_t* expected,
+	size_t expectedSize)
+{
+	const void* const address =
+		reinterpret_cast<const void*>(materialSystemBase + rva);
+	return MaterialSystemDx11IsCommittedReadableRange(address, expectedSize)
+		&& memcmp(address, expected, expectedSize) == 0;
+}
+
+static bool InstallMaterialSystemDx11VtfScratchHooks(uintptr_t materialSystemBase)
+{
+	DWORD timestamp = 0;
+	DWORD imageSize = 0;
+	if (!HasExpectedStockMaterialSystemImage(
+			materialSystemBase,
+			&timestamp,
+			&imageSize)) {
+		char buffer[256];
+		_snprintf_s(
+			buffer,
+			sizeof(buffer),
+			_TRUNCATE,
+			"R1Delta: refused materialsystem_dx11 VTF scratch hooks for unsupported image timestamp=0x%08lX size=0x%08lX\n",
+			static_cast<unsigned long>(timestamp),
+			static_cast<unsigned long>(imageSize));
+		OutputDebugStringA(buffer);
+		return false;
+	}
+
+	const bool bytesMatch = MatchesMaterialSystemCode(
+		materialSystemBase,
+		r1delta::materialsystem_dx11::kVtfLoadRva,
+		r1delta::materialsystem_dx11::kExpectedVtfLoadPrologue,
+		sizeof(r1delta::materialsystem_dx11::kExpectedVtfLoadPrologue))
+		&& MatchesMaterialSystemCode(
+			materialSystemBase,
+			r1delta::materialsystem_dx11::kVtfScratchPrepareRva,
+			r1delta::materialsystem_dx11::kExpectedVtfScratchPreparePrologue,
+			sizeof(r1delta::materialsystem_dx11::kExpectedVtfScratchPreparePrologue))
+		&& MatchesMaterialSystemCode(
+			materialSystemBase,
+			r1delta::materialsystem_dx11::kUtlBufferSetExternalRva,
+			r1delta::materialsystem_dx11::kExpectedUtlBufferSetExternalPrologue,
+			sizeof(r1delta::materialsystem_dx11::kExpectedUtlBufferSetExternalPrologue));
+	if (!bytesMatch) {
+		OutputDebugStringA(
+			"R1Delta: refused materialsystem_dx11 VTF scratch hooks because exact bytes did not match\n");
+		return false;
+	}
+
+	void* const loadTarget = reinterpret_cast<void*>(
+		materialSystemBase + r1delta::materialsystem_dx11::kVtfLoadRva);
+	void* const prepareTarget = reinterpret_cast<void*>(
+		materialSystemBase + r1delta::materialsystem_dx11::kVtfScratchPrepareRva);
+	MaterialSystemDx11UtlBufferSetExternal =
+		reinterpret_cast<MaterialSystemDx11UtlBufferSetExternalType>(
+			materialSystemBase + r1delta::materialsystem_dx11::kUtlBufferSetExternalRva);
+
+	const MH_STATUS loadCreateStatus = MH_CreateHook(
+		loadTarget,
+		reinterpret_cast<void*>(&MaterialSystemDx11VtfLoadGuard),
+		reinterpret_cast<void**>(&MaterialSystemDx11VtfLoadOriginal));
+	const bool loadHookCreated = loadCreateStatus == MH_OK;
+	const bool loadCreated =
+		loadHookCreated && MaterialSystemDx11VtfLoadOriginal;
+	MH_STATUS prepareCreateStatus = MH_UNKNOWN;
+	if (loadCreated) {
+		prepareCreateStatus = MH_CreateHook(
+			prepareTarget,
+			reinterpret_cast<void*>(&MaterialSystemDx11PrepareVtfScratch),
+			reinterpret_cast<void**>(&MaterialSystemDx11VtfScratchPrepareOriginal));
+	}
+	const bool prepareHookCreated = prepareCreateStatus == MH_OK;
+	const bool prepareCreated =
+		prepareHookCreated && MaterialSystemDx11VtfScratchPrepareOriginal;
+
+	MH_STATUS loadQueueStatus = MH_UNKNOWN;
+	MH_STATUS prepareQueueStatus = MH_UNKNOWN;
+	MH_STATUS applyStatus = MH_UNKNOWN;
+	if (loadCreated && prepareCreated) {
+		loadQueueStatus = MH_QueueEnableHook(loadTarget);
+		prepareQueueStatus = MH_QueueEnableHook(prepareTarget);
+		if (loadQueueStatus == MH_OK && prepareQueueStatus == MH_OK)
+			applyStatus = MH_ApplyQueued();
+	}
+
+	const bool installed =
+		loadCreated
+		&& prepareCreated
+		&& loadQueueStatus == MH_OK
+		&& prepareQueueStatus == MH_OK
+		&& applyStatus == MH_OK;
+	if (!installed) {
+		const MH_STATUS loadDisableQueueStatus = loadHookCreated
+			? MH_QueueDisableHook(loadTarget)
+			: MH_UNKNOWN;
+		const MH_STATUS prepareDisableQueueStatus = prepareHookCreated
+			? MH_QueueDisableHook(prepareTarget)
+			: MH_UNKNOWN;
+		const MH_STATUS cleanupApplyStatus =
+			(loadHookCreated || prepareHookCreated)
+				? MH_ApplyQueued()
+				: MH_UNKNOWN;
+		const MH_STATUS prepareDisableStatus = prepareHookCreated
+			? MH_DisableHook(prepareTarget)
+			: MH_UNKNOWN;
+		const MH_STATUS loadDisableStatus = loadHookCreated
+			? MH_DisableHook(loadTarget)
+			: MH_UNKNOWN;
+		const MH_STATUS prepareRemoveStatus = prepareHookCreated
+			? MH_RemoveHook(prepareTarget)
+			: MH_UNKNOWN;
+		const MH_STATUS loadRemoveStatus = loadHookCreated
+			? MH_RemoveHook(loadTarget)
+			: MH_UNKNOWN;
+		const bool cleanupConfirmed =
+			(!prepareHookCreated || prepareRemoveStatus == MH_OK)
+			&& (!loadHookCreated || loadRemoveStatus == MH_OK);
+
+		char cleanupBuffer[384];
+		_snprintf_s(
+			cleanupBuffer,
+			sizeof(cleanupBuffer),
+			_TRUNCATE,
+			"R1Delta: materialsystem_dx11 VTF hook cleanup loadQueue=%d prepareQueue=%d apply=%d loadDisable=%d prepareDisable=%d loadRemove=%d prepareRemove=%d confirmed=%d\n",
+			static_cast<int>(loadDisableQueueStatus),
+			static_cast<int>(prepareDisableQueueStatus),
+			static_cast<int>(cleanupApplyStatus),
+			static_cast<int>(loadDisableStatus),
+			static_cast<int>(prepareDisableStatus),
+			static_cast<int>(loadRemoveStatus),
+			static_cast<int>(prepareRemoveStatus),
+			cleanupConfirmed ? 1 : 0);
+		OutputDebugStringA(cleanupBuffer);
+		if (!cleanupConfirmed) {
+			MaterialSystemDx11FailVtfScratch(
+				"hook-cleanup",
+				r1delta::materialsystem_dx11::VtfScratchError::allocationFailed,
+				0);
+		}
+
+		MaterialSystemDx11VtfLoadOriginal = nullptr;
+		MaterialSystemDx11VtfScratchPrepareOriginal = nullptr;
+		MaterialSystemDx11UtlBufferSetExternal = nullptr;
+	}
+
+	char buffer[320];
+	_snprintf_s(
+		buffer,
+		sizeof(buffer),
+		_TRUNCATE,
+		"R1Delta: materialsystem_dx11 VTF TLS scratch hooks loadCreate=%d prepareCreate=%d loadQueue=%d prepareQueue=%d apply=%d installed=%d\n",
+		static_cast<int>(loadCreateStatus),
+		static_cast<int>(prepareCreateStatus),
+		static_cast<int>(loadQueueStatus),
+		static_cast<int>(prepareQueueStatus),
+		static_cast<int>(applyStatus),
+		installed ? 1 : 0);
+	OutputDebugStringA(buffer);
+	return installed;
+}
+
+static bool HasExpectedStockClientImage(
+	uintptr_t clientBase,
+	DWORD* observedTimestamp,
+	DWORD* observedImageSize)
+{
+	if (observedTimestamp)
+		*observedTimestamp = 0;
+	if (observedImageSize)
+		*observedImageSize = 0;
+	if (!clientBase)
+		return false;
+
+	MEMORY_BASIC_INFORMATION memory = {};
+	if (VirtualQuery(
+			reinterpret_cast<void*>(clientBase),
+			&memory,
+			sizeof(memory)) != sizeof(memory)
+		|| memory.State != MEM_COMMIT
+		|| memory.Type != MEM_IMAGE
+		|| memory.BaseAddress != reinterpret_cast<void*>(clientBase)
+		|| memory.AllocationBase != reinterpret_cast<void*>(clientBase))
+		return false;
+
+	const auto* const dosHeader = reinterpret_cast<const IMAGE_DOS_HEADER*>(clientBase);
+	if (!MaterialSystemDx11IsCommittedReadableRange(dosHeader, sizeof(*dosHeader))
+		|| dosHeader->e_magic != IMAGE_DOS_SIGNATURE
+		|| dosHeader->e_lfanew <= 0
+		|| dosHeader->e_lfanew > 0x100000)
+		return false;
+
+	const auto* const ntHeaders = reinterpret_cast<const IMAGE_NT_HEADERS64*>(
+		clientBase + static_cast<uintptr_t>(dosHeader->e_lfanew));
+	if (!MaterialSystemDx11IsCommittedReadableRange(ntHeaders, sizeof(*ntHeaders)))
+		return false;
+
+	if (observedTimestamp)
+		*observedTimestamp = ntHeaders->FileHeader.TimeDateStamp;
+	if (observedImageSize)
+		*observedImageSize = ntHeaders->OptionalHeader.SizeOfImage;
+
+	return ntHeaders->Signature == IMAGE_NT_SIGNATURE
+		&& ntHeaders->FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64
+		&& ntHeaders->FileHeader.TimeDateStamp
+			== r1delta::client_studio_header::kExpectedTimeDateStamp
+		&& ntHeaders->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC
+		&& ntHeaders->OptionalHeader.SizeOfImage
+			== r1delta::client_studio_header::kExpectedImageSize
+		&& IsRvaInExecutableTextSection(
+			clientBase,
+			ntHeaders,
+			r1delta::client_studio_header::kWrapperRva,
+			sizeof(r1delta::client_studio_header::kExpectedWrapperBytes))
+		&& IsRvaInExecutableTextSection(
+			clientBase,
+			ntHeaders,
+			r1delta::client_studio_header::kLazyInitRva,
+			sizeof(r1delta::client_studio_header::kExpectedLazyInitPrologue))
+		&& IsRvaInExecutableTextSection(
+			clientBase,
+			ntHeaders,
+			r1delta::client_studio_header::kLookupRva,
+			sizeof(r1delta::client_studio_header::kExpectedLookupPrologue));
+}
+
+static bool MatchesClientCode(
+	uintptr_t clientBase,
+	uintptr_t rva,
+	const std::uint8_t* expected,
+	size_t expectedSize)
+{
+	const void* const address = reinterpret_cast<const void*>(clientBase + rva);
+	return MaterialSystemDx11IsCommittedReadableRange(address, expectedSize)
+		&& memcmp(address, expected, expectedSize) == 0;
+}
+
+void InstallClientStudioHeaderLookupGuard(
+	uintptr_t clientBase,
+	const wchar_t* modulePath)
+{
+	const bool isClient2015 =
+		GetR1DeltaEngineMode() == R1DeltaEngineMode::Client2015;
+	if (!isClient2015 || s_ClientStudioHeaderLookupGuardInstalled)
+		return;
+
+	if (!r1delta::client_studio_header::ShouldInstall(isClient2015, modulePath)) {
+		OutputDebugStringA(
+			"R1Delta: client studio-header lookup guard refused non-stock module path\n");
+		return;
+	}
+
+	DWORD observedTimestamp = 0;
+	DWORD observedImageSize = 0;
+	if (!HasExpectedStockClientImage(
+			clientBase,
+			&observedTimestamp,
+			&observedImageSize)) {
+		char buffer[256];
+		_snprintf_s(
+			buffer,
+			sizeof(buffer),
+			_TRUNCATE,
+			"R1Delta: client studio-header lookup guard refused image "
+			"timestamp=0x%08lX size=0x%08lX\n",
+			static_cast<unsigned long>(observedTimestamp),
+			static_cast<unsigned long>(observedImageSize));
+		OutputDebugStringA(buffer);
+		return;
+	}
+
+	if (!MatchesClientCode(
+			clientBase,
+			r1delta::client_studio_header::kWrapperRva,
+			r1delta::client_studio_header::kExpectedWrapperBytes,
+			sizeof(r1delta::client_studio_header::kExpectedWrapperBytes))) {
+		OutputDebugStringA(
+			"R1Delta: client studio-header lookup guard refused wrapper byte mismatch "
+			"at RVA 0x5FF60\n");
+		return;
+	}
+	if (!MatchesClientCode(
+			clientBase,
+			r1delta::client_studio_header::kLazyInitRva,
+			r1delta::client_studio_header::kExpectedLazyInitPrologue,
+			sizeof(r1delta::client_studio_header::kExpectedLazyInitPrologue))) {
+		OutputDebugStringA(
+			"R1Delta: client studio-header lookup guard refused lazy-init byte mismatch "
+			"at RVA 0x5C3A0\n");
+		return;
+	}
+	if (!MatchesClientCode(
+			clientBase,
+			r1delta::client_studio_header::kLookupRva,
+			r1delta::client_studio_header::kExpectedLookupPrologue,
+			sizeof(r1delta::client_studio_header::kExpectedLookupPrologue))) {
+		OutputDebugStringA(
+			"R1Delta: client studio-header lookup guard refused lookup byte mismatch "
+			"at RVA 0x55F000\n");
+		return;
+	}
+
+	s_ClientStudioHeaderLazyInit =
+		reinterpret_cast<r1delta::client_studio_header::LazyInitFunction>(
+			clientBase + r1delta::client_studio_header::kLazyInitRva);
+	s_ClientStudioHeaderLookup =
+		reinterpret_cast<r1delta::client_studio_header::LookupFunction>(
+			clientBase + r1delta::client_studio_header::kLookupRva);
+	void* const target = reinterpret_cast<void*>(
+		clientBase + r1delta::client_studio_header::kWrapperRva);
+	const MH_STATUS createStatus = MH_CreateHook(
+		target,
+		reinterpret_cast<void*>(&ClientStudioHeaderLookupGuard),
+		reinterpret_cast<LPVOID*>(&s_ClientStudioHeaderWrapperOriginal));
+	const bool hasOriginal = s_ClientStudioHeaderWrapperOriginal != nullptr;
+	const bool canEnable = createStatus == MH_OK
+		|| (createStatus == MH_ERROR_ALREADY_CREATED && hasOriginal);
+	const MH_STATUS enableStatus = canEnable
+		? MH_EnableHook(target)
+		: createStatus;
+	s_ClientStudioHeaderLookupGuardInstalled = hasOriginal
+		&& (enableStatus == MH_OK || enableStatus == MH_ERROR_ENABLED);
+
+	if (!s_ClientStudioHeaderLookupGuardInstalled) {
+		if (createStatus == MH_OK)
+			MH_RemoveHook(target);
+		s_ClientStudioHeaderWrapperOriginal = nullptr;
+		s_ClientStudioHeaderLazyInit = nullptr;
+		s_ClientStudioHeaderLookup = nullptr;
+	}
+
+	char buffer[320];
+	_snprintf_s(
+		buffer,
+		sizeof(buffer),
+		_TRUNCATE,
+		"R1Delta: client studio-header lookup guard create=%d enable=%d "
+		"targetRva=0x5FF60 original=%p installed=%d\n",
+		static_cast<int>(createStatus),
+		static_cast<int>(enableStatus),
+		reinterpret_cast<void*>(s_ClientStudioHeaderWrapperOriginal),
+		s_ClientStudioHeaderLookupGuardInstalled ? 1 : 0);
+	OutputDebugStringA(buffer);
+}
+
 void InstallMaterialSystemDx11NullShaderResourceGuard(uintptr_t materialSystemBase)
 {
 	if (s_MaterialSystemDx11NullResourceGuardInstalled || !materialSystemBase)
 		return;
 
 	s_MaterialSystemDx11Base = materialSystemBase;
+	const bool vtfScratchInstalled =
+		InstallMaterialSystemDx11VtfScratchHooks(materialSystemBase);
 
 	const unsigned char expectedMaterialInitPrologue[] = {
 		0x40, 0x57,
@@ -1546,7 +2114,17 @@ void InstallMaterialSystemDx11NullShaderResourceGuard(uintptr_t materialSystemBa
 		reinterpret_cast<void*>(&MaterialSystemDx11SelectShaderResourceGuard),
 		reinterpret_cast<void**>(&MaterialSystemDx11SelectShaderResourceOriginal),
 		"vertex");
-	s_MaterialSystemDx11NullResourceGuardInstalled = materialInitInstalled || isErrorMaterialInstalled || materialPropertyGuardsInstalled || resetInstalled || constantFlushInstalled || textureUploadWorkerInstalled || textureUploadOwnershipInstalled || inputLayoutInstalled || stageInstalled || vertexInstalled;
+	s_MaterialSystemDx11NullResourceGuardInstalled = materialInitInstalled
+		|| isErrorMaterialInstalled
+		|| materialPropertyGuardsInstalled
+		|| resetInstalled
+		|| constantFlushInstalled
+		|| textureUploadWorkerInstalled
+		|| textureUploadOwnershipInstalled
+		|| vtfScratchInstalled
+		|| inputLayoutInstalled
+		|| stageInstalled
+		|| vertexInstalled;
 }
 
 static bool IsVPhysicsGuardNegativeStackIndexDisabled()

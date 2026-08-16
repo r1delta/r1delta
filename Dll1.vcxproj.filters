@@ -110,6 +110,9 @@
     <ClInclude Include="engine\core\factory.h">
       <Filter>engine\core</Filter>
     </ClInclude>
+    <ClInclude Include="engine\core\client_studio_header_guard.h">
+      <Filter>engine\core</Filter>
+    </ClInclude>
     <ClInclude Include="engine\core\framework.h">
       <Filter>engine\core</Filter>
     </ClInclude>
@@ -173,6 +176,9 @@
       <Filter>engine\logging</Filter>
     </ClInclude>
     <ClInclude Include="engine\core\materialsystem_dx11_texture_upload.h">
+      <Filter>engine\core</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\core\materialsystem_dx11_vtf_scratch.h">
       <Filter>engine\core</Filter>
     </ClInclude>
     <ClInclude Include="engine\logging\logging.h">
@@ -497,6 +503,9 @@
       <Filter>engine\core</Filter>
     </ClCompile>
     <ClCompile Include="engine\core\materialsystem_dx11_texture_upload.cpp">
+      <Filter>engine\core</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\core\materialsystem_dx11_vtf_scratch.cpp">
       <Filter>engine\core</Filter>
     </ClCompile>
     <ClCompile Include="engine\core\load.cpp">
