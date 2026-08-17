@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <new>
 #include <iostream>
 #include <thread>
 #include <vector>
@@ -19,6 +20,129 @@ namespace
 		if (!condition)
 			std::cerr << "FAILED: " << message << '\n';
 		return condition;
+	}
+
+	struct FakeDecoder
+	{
+		unsigned char marker = 0;
+	};
+
+	int decoderCreates = 0;
+	int decoderDestroys = 0;
+	int decoderDestroyFlags = 0;
+
+	void ResetFakeDecoderCounters()
+	{
+		decoderCreates = 0;
+		decoderDestroys = 0;
+		decoderDestroyFlags = 0;
+	}
+
+	void* CreateFakeDecoder()
+	{
+		++decoderCreates;
+		return new (std::nothrow) FakeDecoder;
+	}
+
+	void* FailFakeDecoderCreation()
+	{
+		++decoderCreates;
+		return nullptr;
+	}
+
+	void* DestroyFakeDecoder(void* decoder, unsigned char flags)
+	{
+		++decoderDestroys;
+		decoderDestroyFlags += flags;
+		delete static_cast<FakeDecoder*>(decoder);
+		return decoder;
+	}
+
+	bool TestNestedLoadsOwnDistinctDecoderObjects()
+	{
+		ResetFakeDecoderCounters();
+		FakeDecoder outerDecoder{ 0x5A };
+		void* decoderSlot = &outerDecoder;
+		bool passed = true;
+
+		VtfDecoderSlotScope outer(
+			1,
+			&decoderSlot,
+			CreateFakeDecoder,
+			DestroyFakeDecoder);
+		passed &= Check(outer.Entered() && !outer.Replaced(),
+			"outer load replaced the stock decoder");
+		passed &= Check(decoderSlot == &outerDecoder && decoderCreates == 0,
+			"outer load changed or allocated a decoder");
+
+		VtfDecoderSlotScope nested(
+			2,
+			&decoderSlot,
+			CreateFakeDecoder,
+			DestroyFakeDecoder);
+		passed &= Check(nested.Entered() && nested.Replaced(),
+			"recursive load did not replace the stock decoder");
+		void* const nestedDecoder = decoderSlot;
+		passed &= Check(nestedDecoder && nestedDecoder != &outerDecoder,
+			"recursive load reused its caller's decoder");
+		static_cast<FakeDecoder*>(nestedDecoder)->marker = 0xA5;
+		passed &= Check(outerDecoder.marker == 0x5A,
+			"recursive decoder mutation reached its caller");
+
+		VtfDecoderSlotScope recursive(
+			3,
+			&decoderSlot,
+			CreateFakeDecoder,
+			DestroyFakeDecoder);
+		passed &= Check(
+			recursive.Entered()
+				&& recursive.Replaced()
+				&& decoderSlot != nestedDecoder,
+			"third-level load reused its caller's decoder");
+		passed &= Check(recursive.Close() && decoderSlot == nestedDecoder,
+			"third-level load did not restore its caller's decoder");
+		passed &= Check(nested.Close() && decoderSlot == &outerDecoder,
+			"recursive load did not restore the stock decoder");
+		passed &= Check(outer.Close(),
+			"outer decoder scope did not close");
+		passed &= Check(
+			decoderCreates == 2
+				&& decoderDestroys == 2
+				&& decoderDestroyFlags == 2,
+			"recursive decoders were not destroyed exactly once");
+
+		VtfDecoderSlotScope noLoad(
+			0,
+			&decoderSlot,
+			CreateFakeDecoder,
+			DestroyFakeDecoder);
+		passed &= Check(
+			!noLoad.Entered()
+				&& noLoad.Error() == VtfScratchError::noActiveLoad,
+			"decoder scope accepted zero load depth");
+
+		VtfDecoderSlotScope invalidSlot(
+			2,
+			nullptr,
+			CreateFakeDecoder,
+			DestroyFakeDecoder);
+		passed &= Check(
+			!invalidSlot.Entered()
+				&& invalidSlot.Error() == VtfScratchError::invalidDecoderSlot,
+			"recursive decoder scope accepted a missing slot");
+
+		VtfDecoderSlotScope allocationFailure(
+			2,
+			&decoderSlot,
+			FailFakeDecoderCreation,
+			DestroyFakeDecoder);
+		passed &= Check(
+			!allocationFailure.Entered()
+				&& allocationFailure.Error()
+					== VtfScratchError::decoderAllocationFailed
+				&& decoderSlot == &outerDecoder,
+			"decoder allocation failure changed the stock slot");
+		return passed;
 	}
 
 	bool TestNestedLoadsOwnDistinctScratchFrames()
@@ -214,6 +338,7 @@ int main()
 	passed &= TestCapacityGrowthAndLargeBufferRetirement();
 	passed &= TestProductionThreadScopeHandlesRecursion();
 	passed &= TestConcurrentLoadsNeverShareOrSerializeScratch();
+	passed &= TestNestedLoadsOwnDistinctDecoderObjects();
 	if (!passed)
 		return EXIT_FAILURE;
 	std::cout << "All materialsystem DX11 VTF scratch tests passed\n";

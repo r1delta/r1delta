@@ -175,10 +175,10 @@
     <ClInclude Include="engine\logging\crash_report_minidump.h">
       <Filter>engine\logging</Filter>
     </ClInclude>
-    <ClInclude Include="engine\core\materialsystem_dx11_texture_upload.h">
+    <ClInclude Include="engine\core\materialsystem_dx11_vtf_scratch.h">
       <Filter>engine\core</Filter>
     </ClInclude>
-    <ClInclude Include="engine\core\materialsystem_dx11_vtf_scratch.h">
+    <ClInclude Include="engine\core\client_port_override.h">
       <Filter>engine\core</Filter>
     </ClInclude>
     <ClInclude Include="engine\logging\cbuf_initialization_guard.h">
@@ -503,9 +503,6 @@
       <Filter>engine\core</Filter>
     </ClCompile>
     <ClCompile Include="engine\core\factory.cpp">
-      <Filter>engine\core</Filter>
-    </ClCompile>
-    <ClCompile Include="engine\core\materialsystem_dx11_texture_upload.cpp">
       <Filter>engine\core</Filter>
     </ClCompile>
     <ClCompile Include="engine\core\materialsystem_dx11_vtf_scratch.cpp">

@@ -147,6 +147,81 @@ bool VtfScratchLoadScope::Close() noexcept
 	return ThreadContext().LeaveLoad();
 }
 
+VtfDecoderSlotScope::VtfDecoderSlotScope(
+	std::size_t loadDepth,
+	void** decoderSlot,
+	VtfDecoderCreateFunction createDecoder,
+	VtfDecoderDestroyFunction destroyDecoder) noexcept
+{
+	if (!loadDepth) {
+		error_ = VtfScratchError::noActiveLoad;
+		return;
+	}
+
+	if (loadDepth == 1) {
+		active_ = true;
+		return;
+	}
+
+	if (!decoderSlot || !createDecoder || !destroyDecoder) {
+		error_ = VtfScratchError::invalidDecoderSlot;
+		return;
+	}
+
+	void* const replacement = createDecoder();
+	if (!replacement) {
+		error_ = VtfScratchError::decoderAllocationFailed;
+		return;
+	}
+
+	decoderSlot_ = decoderSlot;
+	previousDecoder_ = *decoderSlot;
+	replacementDecoder_ = replacement;
+	destroyDecoder_ = destroyDecoder;
+	*decoderSlot_ = replacementDecoder_;
+	active_ = true;
+}
+
+VtfDecoderSlotScope::~VtfDecoderSlotScope()
+{
+	Close();
+}
+
+bool VtfDecoderSlotScope::Entered() const noexcept
+{
+	return active_;
+}
+
+bool VtfDecoderSlotScope::Replaced() const noexcept
+{
+	return replacementDecoder_ != nullptr;
+}
+
+VtfScratchError VtfDecoderSlotScope::Error() const noexcept
+{
+	return error_;
+}
+
+bool VtfDecoderSlotScope::Close() noexcept
+{
+	if (!active_)
+		return false;
+	active_ = false;
+
+	if (!replacementDecoder_)
+		return true;
+
+	if (*decoderSlot_ != replacementDecoder_) {
+		error_ = VtfScratchError::decoderSlotChanged;
+		return false;
+	}
+
+	*decoderSlot_ = previousDecoder_;
+	destroyDecoder_(replacementDecoder_, 1);
+	replacementDecoder_ = nullptr;
+	return true;
+}
+
 VtfScratchBuffer PrepareThreadVtfScratch(std::int64_t requestedBytes) noexcept
 {
 	return ThreadContext().Prepare(requestedBytes);

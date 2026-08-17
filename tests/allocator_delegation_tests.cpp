@@ -1,4 +1,5 @@
 #include "../engine/memory/memory.h"
+#include "../engine/core/client_port_override.h"
 
 #include <Windows.h>
 
@@ -21,12 +22,55 @@ using SetMiniDumpFunctionFn = FnMiniDump(*)(FnMiniDump);
 void ProbeMiniDumpCallback(unsigned int, EXCEPTION_POINTERS*, const char*)
 {
 }
+ConVarR1* capturedClientPort = nullptr;
+char capturedClientPortValue[16]{};
+int capturedClientPortCalls = 0;
+
+void CaptureClientPort(ConVarR1* variable, const char* value)
+{
+    capturedClientPort = variable;
+    ++capturedClientPortCalls;
+    strcpy_s(capturedClientPortValue, value);
+}
+
+bool TestClientPortUsesEngineSetter()
+{
+    using r1delta::client_port::ApplyOverride;
+
+    bool passed = true;
+    auto* const variable = reinterpret_cast<ConVarR1*>(0x1234);
+    passed &= Check(
+        ApplyOverride(variable, 27012, &CaptureClientPort),
+        "clientport override rejected a valid port");
+    passed &= Check(
+        capturedClientPort == variable
+            && capturedClientPortCalls == 1
+            && std::strcmp(capturedClientPortValue, "27012") == 0,
+        "clientport override did not delegate the decimal value to the engine setter");
+
+    passed &= Check(
+        ApplyOverride(variable, 65535, &CaptureClientPort)
+            && capturedClientPortCalls == 2
+            && std::strcmp(capturedClientPortValue, "65535") == 0,
+        "clientport override rejected the maximum valid port");
+    passed &= Check(
+        !ApplyOverride(variable, 0, &CaptureClientPort)
+            && !ApplyOverride(variable, 65536, &CaptureClientPort)
+            && !ApplyOverride(nullptr, 27012, &CaptureClientPort)
+            && !ApplyOverride(variable, 27012, nullptr)
+            && capturedClientPortCalls == 2,
+        "clientport override accepted invalid state or invoked the setter");
+    return passed;
+}
+
 
 } // namespace
 
 int main()
 {
     bool passed = true;
+    passed &= TestClientPortUsesEngineSetter();
+
 
     // Load the deployed binaries exactly as the game does: our tier0.dll
     // (bin_delta) plus the pristine retail tier0_orig.dll (bin). The engine
@@ -53,8 +97,9 @@ int main()
             GetProcAddress(retailTier0, "CreateGlobalMemAlloc"));
 
     if (!ourCreate || !retailCreate) {
-        std::printf("Allocator delegation tests skipped (deployed tier0 pair not staged)\n");
-        return 0;
+        std::printf("Allocator delegation integration tests skipped (deployed tier0 pair not staged)\n");
+        std::printf("%s\n", passed ? "All allocator boundary tests passed" : "Allocator boundary tests FAILED");
+        return passed ? 0 : 1;
     }
 
     IMemAlloc* ours = ourCreate();

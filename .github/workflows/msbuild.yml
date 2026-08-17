@@ -19,7 +19,7 @@ env:
   MSBUILD_DEBUG_TYPE: pdbonly
   NUSPEC_FILE: R1Delta.nuspec
   PACKAGE_NAME: R1Delta
-  DISPLAY_VERSION: "3.0 prerelease 21"
+  DISPLAY_VERSION: "3.0 prerelease 22"
 
 permissions:
   contents: write
@@ -190,7 +190,6 @@ jobs:
             crash_report_minidump_tests = 'tests/crash_report_minidump_tests.vcxproj'
             client_studio_header_guard_tests = 'tests/client_studio_header_guard_tests.vcxproj'
             cbuf_initialization_guard_tests = 'tests/cbuf_initialization_guard_tests.vcxproj'
-            materialsystem_dx11_texture_upload_tests = 'tests/materialsystem_dx11_texture_upload_tests.vcxproj'
             materialsystem_dx11_vtf_scratch_tests = 'tests/materialsystem_dx11_vtf_scratch_tests.vcxproj'
             allocator_delegation_tests = 'tests/allocator_delegation_tests.vcxproj'
             ffa_targeting_tests = 'tests/ffa_targeting_tests.vcxproj'
@@ -222,7 +221,6 @@ jobs:
             'crash_report_minidump_tests',
             'client_studio_header_guard_tests',
             'cbuf_initialization_guard_tests',
-            'materialsystem_dx11_texture_upload_tests',
             'materialsystem_dx11_vtf_scratch_tests',
             'allocator_delegation_tests',
             'ffa_targeting_tests'

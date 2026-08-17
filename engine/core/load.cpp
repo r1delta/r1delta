@@ -39,6 +39,7 @@
 #include "load.h"
 #include "player_resource_18.h"
 #include "ffa_targeting.h"
+#include "client_port_override.h"
 #include "r1o_runtime_paths.h"
 #include <cstdlib>
 #include <cmath>
@@ -1691,6 +1692,19 @@ typedef int (*GetRankFunctionType)(__int64);
 
 
 SetConvarString_t SetConvarStringOriginal;
+static bool ResolveSetConvarString()
+{
+	if (SetConvarStringOriginal)
+		return true;
+
+	const uintptr_t vstdlibBase = reinterpret_cast<uintptr_t>(GetModuleHandleA("vstdlib.dll"));
+	if (!vstdlibBase)
+		return false;
+
+	SetConvarStringOriginal = reinterpret_cast<SetConvarString_t>(vstdlibBase + 0x24DE0);
+	return true;
+}
+
 
 bool ShouldEnableMCP() {
 	static bool parsed = false;
@@ -7336,7 +7350,7 @@ static int ParseCommandLinePort(const char* token)
 
 static void ApplyClientPortOverride()
 {
-	if (!s_ClientNetConfigEngineBase || IsDedicatedServer())
+	if (!s_ClientNetConfigEngineBase || IsDedicatedServer() || !SetConvarStringOriginal)
 		return;
 
 	int port = ParseCommandLinePort("+clientport");
@@ -7345,15 +7359,10 @@ static void ApplyClientPortOverride()
 	if (!port)
 		return;
 
-	static char portString[16];
-	_snprintf_s(portString, sizeof(portString), _TRUNCATE, "%d", port);
-
 	// R1 2015 engine.dll: static ConVar clientport at RVA 0x30EF4E0.
 	ConVarR1* clientPort = reinterpret_cast<ConVarR1*>(s_ClientNetConfigEngineBase + 0x30EF4E0);
-	clientPort->m_Value.m_pszString = portString;
-	clientPort->m_Value.m_StringLength = static_cast<__int64>(strlen(portString));
-	clientPort->m_Value.m_fValue = static_cast<float>(port);
-	clientPort->m_Value.m_nValue = port;
+	if (!r1delta::client_port::ApplyOverride(clientPort, port, SetConvarStringOriginal))
+		return;
 
 	static int logBudget = 8;
 	if (logBudget > 0) {
@@ -7381,6 +7390,11 @@ static void InstallClientNetConfigPortHook(uintptr_t engineBase)
 {
 	if (s_ClientNetConfigHookInstalled || !engineBase || IsDedicatedServer())
 		return;
+	if (!ResolveSetConvarString()) {
+		OutputDebugStringA("R1Delta: refused client NET_Config port hook because the vstdlib ConVar setter is unavailable\n");
+		return;
+	}
+
 
 	s_ClientNetConfigEngineBase = engineBase;
 	void* target = reinterpret_cast<void*>(engineBase + 0x1F5220);
@@ -8915,8 +8929,7 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	LDR_DLL_LOADED_NOTIFICATION_DATA* ndata = GetModuleNotificationData(L"vstdlib");
 	doBinaryPatchForFile(*ndata);
 	FreeModuleNotificationData(ndata);
-	auto stb_lib = (uintptr_t)GetModuleHandleA("vstdlib.dll");
-	SetConvarStringOriginal = (SetConvarString_t)(stb_lib + 0x24DE0);
+	ResolveSetConvarString();
 	uintptr_t vTableAddr = server_base + 0x807220;
 
 	if (!IsR1ODedicatedServer()) {
