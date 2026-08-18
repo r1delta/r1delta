@@ -90,6 +90,7 @@ void InstallVPhysicsStaticBVHProbe(uintptr_t vphysicsBase);
 void InstallR1OVPKFileSystemHooks(void* fileSystem);
 void SetR1OVPKClientFallbackActive(bool active);
 void InstallMaterialSystemDx11NullShaderResourceGuard(uintptr_t materialSystemBase);
+void InstallMaterialSystemDx11ClientMaterialGuard(uintptr_t materialSystemBase);
 void InstallClientStudioHeaderLookupGuard(uintptr_t clientBase, const wchar_t* modulePath);
 char __fastcall MatchRecvPropsToSendProps_R(__int64 a1, __int64 a2, __int64 pSendTable, __int64 a4);
 typedef char(*sub_1801C79A0Type)(__int64 a1, __int64 a2);

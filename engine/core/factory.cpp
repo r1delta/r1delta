@@ -36,6 +36,7 @@
 #include <ws2tcpip.h>
 #include "core.h"
 #include "materialsystem_dx11_vtf_scratch.h"
+#include "materialsystem_dx11_material_guard.h"
 #include "r1o_runtime_paths.h"
 
 #include <MinHook.h>
@@ -619,7 +620,14 @@ using MaterialSystemDx11SelectShaderStageResourceType = char(__fastcall*)(unsign
 using MaterialSystemDx11CreateInputLayoutType = __int64(__fastcall*)(unsigned __int64 vertexFormat, __int64 streamFormat, __int64 shaderBytecodeProvider);
 using MaterialSystemDx11ResetD3DResourcePointersType = void(__fastcall*)();
 using MaterialSystemDx11FlushConstantBufferUpdatesType = __int64(__fastcall*)();
-using MaterialSystemDx11InitializeMaterialType = __int64(__fastcall*)(__int64 material, __int64 vmt, __int64 vmtPatches, __int64 context);
+using MaterialSystemDx11InitializeMaterialType =
+	r1delta::materialsystem_dx11::MaterialInitializeFunction;
+using MaterialSystemDx11SetupErrorShaderType =
+	r1delta::materialsystem_dx11::MaterialSetupErrorShaderFunction;
+using MaterialSystemDx11AlphaModulationType =
+	r1delta::materialsystem_dx11::MaterialAlphaModulationFunction;
+using MaterialSystemDx11ReflectivityType =
+	r1delta::materialsystem_dx11::MaterialReflectivityFunction;
 using MaterialSystemDx11IsErrorMaterialType = __int64(__fastcall*)(__int64 material);
 using MaterialSystemDx11VtfLoadType = __int64(__fastcall*)(__int64 texture, __int64* textureData);
 using MaterialSystemDx11VtfScratchPrepareType = __int64(__fastcall*)(
@@ -639,6 +647,9 @@ static MaterialSystemDx11CreateInputLayoutType MaterialSystemDx11CreateInputLayo
 static MaterialSystemDx11ResetD3DResourcePointersType MaterialSystemDx11ResetD3DResourcePointersOriginal;
 static MaterialSystemDx11FlushConstantBufferUpdatesType MaterialSystemDx11FlushConstantBufferUpdatesOriginal;
 static MaterialSystemDx11InitializeMaterialType MaterialSystemDx11InitializeMaterialOriginal;
+static MaterialSystemDx11SetupErrorShaderType MaterialSystemDx11SetupErrorShader;
+static MaterialSystemDx11AlphaModulationType MaterialSystemDx11AlphaModulationOriginal;
+static MaterialSystemDx11ReflectivityType MaterialSystemDx11ReflectivityOriginal;
 static MaterialSystemDx11IsErrorMaterialType MaterialSystemDx11IsErrorMaterialOriginal;
 static MaterialSystemDx11VtfLoadType MaterialSystemDx11VtfLoadOriginal;
 static MaterialSystemDx11VtfScratchPrepareType MaterialSystemDx11VtfScratchPrepareOriginal;
@@ -646,15 +657,15 @@ static MaterialSystemDx11UtlBufferSetExternalType MaterialSystemDx11UtlBufferSet
 static r1delta::materialsystem_dx11::VtfDecoderCreateFunction MaterialSystemDx11VtfDecoderCreate;
 static r1delta::materialsystem_dx11::VtfDecoderDestroyFunction MaterialSystemDx11VtfDecoderDestroy;
 using MaterialSystemDx11BoolPropertyType = __int64(__fastcall*)(__int64 material);
-static MaterialSystemDx11BoolPropertyType MaterialSystemDx11PropertyGetterOriginal[5]{};
+static MaterialSystemDx11BoolPropertyType MaterialSystemDx11PropertyGetterOriginal[4]{};
 static bool s_MaterialSystemDx11NullResourceGuardInstalled;
+static bool s_MaterialSystemDx11MaterialGuardInstalled;
 static uintptr_t s_MaterialSystemDx11Base;
 static int s_MaterialSystemDx11NullResourceLogBudget = 8;
 static int s_MaterialSystemDx11ResetResourceLogBudget = 8;
 static int s_MaterialSystemDx11ConstantBufferLogBudget = 8;
 static int s_MaterialSystemDx11InputLayoutLogBudget = 8;
 static int s_MaterialSystemDx11MaterialInitLogBudget = 8;
-static std::recursive_mutex s_MaterialSystemDx11MaterialInitMutex;
 static bool MaterialSystemDx11LooksLikeUserRange(uintptr_t address, size_t size);
 
 static void MaterialSystemDx11LogMaterialInitGuard(const char* reason, __int64 material)
@@ -663,15 +674,76 @@ static void MaterialSystemDx11LogMaterialInitGuard(const char* reason, __int64 m
 		return;
 
 	--s_MaterialSystemDx11MaterialInitLogBudget;
-	char buffer[256];
+	const auto state = r1delta::materialsystem_dx11::ReadMaterialContextState(
+		static_cast<uintptr_t>(material));
+	char buffer[512];
 	_snprintf_s(
 		buffer,
 		sizeof(buffer),
 		_TRUNCATE,
-		"R1Delta: materialsystem_dx11 material-init guard reason=%s material=%p\n",
+		"R1Delta: materialsystem_dx11 material-init guard reason=%s material=%p "
+		"marked=%d shader=%p proxyCount=%u render=%p context0=%p context1=%p "
+		"proxy=%p depth=%u\n",
 		reason,
-		reinterpret_cast<void*>(material));
+		reinterpret_cast<void*>(material),
+		state.markedInitialized ? 1 : 0,
+		reinterpret_cast<void*>(state.shader),
+		static_cast<unsigned int>(state.proxyCount),
+		reinterpret_cast<void*>(state.renderStateOwner),
+		reinterpret_cast<void*>(state.primaryContext),
+		reinterpret_cast<void*>(state.secondaryContext),
+		reinterpret_cast<void*>(state.proxyOwner),
+		r1delta::materialsystem_dx11::MaterialInitializationDepth());
 	OutputDebugStringA(buffer);
+}
+
+[[noreturn]] static void MaterialSystemDx11FailMaterialContext(
+	const char* reason,
+	__int64 material)
+{
+	constexpr DWORD kMaterialContextFailure = 0xE042101A;
+	const auto state = r1delta::materialsystem_dx11::ReadMaterialContextState(
+		static_cast<uintptr_t>(material));
+	char buffer[640];
+	_snprintf_s(
+		buffer,
+		sizeof(buffer),
+		_TRUNCATE,
+		"R1Delta: fatal materialsystem_dx11 material context reason=%s material=%p "
+		"marked=%d shader=%p proxyCount=%u render=%p context0=%p context1=%p "
+		"proxy=%p depth=%u\n",
+		reason,
+		reinterpret_cast<void*>(material),
+		state.markedInitialized ? 1 : 0,
+		reinterpret_cast<void*>(state.shader),
+		static_cast<unsigned int>(state.proxyCount),
+		reinterpret_cast<void*>(state.renderStateOwner),
+		reinterpret_cast<void*>(state.primaryContext),
+		reinterpret_cast<void*>(state.secondaryContext),
+		reinterpret_cast<void*>(state.proxyOwner),
+		r1delta::materialsystem_dx11::MaterialInitializationDepth());
+	OutputDebugStringA(buffer);
+
+	const ULONG_PTR arguments[] = {
+		reinterpret_cast<ULONG_PTR>(reason),
+		static_cast<ULONG_PTR>(material),
+		state.markedInitialized ? 1u : 0u,
+		static_cast<ULONG_PTR>(state.shader),
+		static_cast<ULONG_PTR>(state.proxyCount),
+		static_cast<ULONG_PTR>(state.renderStateOwner),
+		static_cast<ULONG_PTR>(state.primaryContext),
+		static_cast<ULONG_PTR>(state.secondaryContext),
+		static_cast<ULONG_PTR>(state.proxyOwner),
+		static_cast<ULONG_PTR>(
+			r1delta::materialsystem_dx11::MaterialInitializationDepth())
+	};
+	RaiseException(
+		kMaterialContextFailure,
+		EXCEPTION_NONCONTINUABLE,
+		static_cast<DWORD>(std::size(arguments)),
+		arguments);
+	TerminateProcess(GetCurrentProcess(), kMaterialContextFailure);
+	__assume(0);
 }
 
 static __int64 __fastcall MaterialSystemDx11InitializeMaterialGuard(
@@ -683,52 +755,123 @@ static __int64 __fastcall MaterialSystemDx11InitializeMaterialGuard(
 	if (!MaterialSystemDx11InitializeMaterialOriginal || !material)
 		return 0;
 
-	std::lock_guard<std::recursive_mutex> lock(s_MaterialSystemDx11MaterialInitMutex);
-	const __int64 result = MaterialSystemDx11InitializeMaterialOriginal(material, vmt, vmtPatches, context);
-	if (result)
-		return result;
-
-	const bool markedInitialized = (*reinterpret_cast<unsigned short*>(material + 0x26) & 0x4u) != 0;
-	const bool hasShader = *reinterpret_cast<uintptr_t*>(material + 0x10) != 0;
-	if (markedInitialized && hasShader) {
-		MaterialSystemDx11LogMaterialInitGuard("initialize-partial-proxies", material);
-		return 1;
+	std::lock_guard<std::recursive_mutex> lock(
+		r1delta::materialsystem_dx11::MaterialInitializationMutex());
+	__int64 result = 0;
+	{
+		r1delta::materialsystem_dx11::MaterialInitializationScope
+			initializationScope;
+		result = MaterialSystemDx11InitializeMaterialOriginal(
+			material,
+			vmt,
+			vmtPatches,
+			context);
 	}
 
-	*reinterpret_cast<unsigned short*>(material + 0x26) &= static_cast<unsigned short>(~0x4u);
-	MaterialSystemDx11LogMaterialInitGuard("initialize-failed", material);
-	return 0;
+	const auto state = r1delta::materialsystem_dx11::ReadMaterialContextState(
+		static_cast<uintptr_t>(material));
+	if (!result) {
+		MaterialSystemDx11LogMaterialInitGuard(
+			state.HasPristineOwners()
+				? "initialize-failed-pristine"
+				: "initialize-failed-partial-owner",
+			material);
+	}
+	else if (!state.IsUsable()) {
+		MaterialSystemDx11LogMaterialInitGuard(
+			"initialize-success-accessor-incomplete",
+			material);
+	}
+	return result;
 }
 
-static __int64 __fastcall MaterialSystemDx11IsErrorMaterialGuard(__int64 material)
+static __int64 __fastcall MaterialSystemDx11IsErrorMaterialGuard(
+	__int64 material)
 {
-	if (!MaterialSystemDx11IsErrorMaterialOriginal || !MaterialSystemDx11InitializeMaterialOriginal || !material)
-		return 1;
+	if (!MaterialSystemDx11IsErrorMaterialOriginal
+		|| !MaterialSystemDx11InitializeMaterialOriginal
+		|| !material) {
+		MaterialSystemDx11FailMaterialContext(
+			"is-error-missing-input",
+			material);
+	}
 
-	std::lock_guard<std::recursive_mutex> lock(s_MaterialSystemDx11MaterialInitMutex);
-	if ((*reinterpret_cast<unsigned short*>(material + 0x26) & 0x4u) == 0
-		&& !MaterialSystemDx11InitializeMaterialGuard(material, 0, 0, 0)) {
-		MaterialSystemDx11LogMaterialInitGuard("error-query-init-failed", material);
-		return 1;
+	std::lock_guard<std::recursive_mutex> lock(
+		r1delta::materialsystem_dx11::MaterialInitializationMutex());
+	if (!r1delta::materialsystem_dx11::EnsureMaterialContext(
+			static_cast<uintptr_t>(material),
+			&MaterialSystemDx11InitializeMaterialGuard,
+			MaterialSystemDx11SetupErrorShader)) {
+		MaterialSystemDx11LogMaterialInitGuard(
+			"error-query-init-failed",
+			material);
+		MaterialSystemDx11FailMaterialContext(
+			"is-error",
+			material);
 	}
 	return MaterialSystemDx11IsErrorMaterialOriginal(material);
 }
 
 template <size_t Index>
-static __int64 __fastcall MaterialSystemDx11BoolPropertyGuard(__int64 material)
+static __int64 __fastcall MaterialSystemDx11BoolPropertyGuard(
+	__int64 material)
 {
 	static_assert(Index < std::size(MaterialSystemDx11PropertyGetterOriginal));
-	MaterialSystemDx11BoolPropertyType const original = MaterialSystemDx11PropertyGetterOriginal[Index];
-	if (!original || !MaterialSystemDx11InitializeMaterialOriginal || !material)
-		return 0;
+	MaterialSystemDx11BoolPropertyType const original =
+		MaterialSystemDx11PropertyGetterOriginal[Index];
+	if (!original || !MaterialSystemDx11InitializeMaterialOriginal || !material) {
+		MaterialSystemDx11FailMaterialContext(
+			"property-missing-input",
+			material);
+	}
 
-	std::lock_guard<std::recursive_mutex> lock(s_MaterialSystemDx11MaterialInitMutex);
-	if ((*reinterpret_cast<unsigned short*>(material + 0x26) & 0x4u) == 0
-		&& !MaterialSystemDx11InitializeMaterialGuard(material, 0, 0, 0)) {
-		MaterialSystemDx11LogMaterialInitGuard("property-query-init-failed", material);
-		return 0;
+	std::lock_guard<std::recursive_mutex> lock(
+		r1delta::materialsystem_dx11::MaterialInitializationMutex());
+	if (!r1delta::materialsystem_dx11::EnsureMaterialContext(
+			static_cast<uintptr_t>(material),
+			&MaterialSystemDx11InitializeMaterialGuard,
+			MaterialSystemDx11SetupErrorShader)) {
+		MaterialSystemDx11LogMaterialInitGuard(
+			"property-query-init-failed",
+			material);
+		MaterialSystemDx11FailMaterialContext(
+			"property",
+			material);
 	}
 	return original(material);
+}
+
+static float __fastcall MaterialSystemDx11AlphaModulationGuard(
+	__int64 material)
+{
+	float result = 0.0f;
+	if (!r1delta::materialsystem_dx11::InvokeMaterialAlphaModulation(
+			static_cast<uintptr_t>(material),
+			&MaterialSystemDx11InitializeMaterialGuard,
+			MaterialSystemDx11AlphaModulationOriginal,
+			&result,
+			MaterialSystemDx11SetupErrorShader)) {
+		MaterialSystemDx11FailMaterialContext(
+			"alpha-modulation",
+			material);
+	}
+	return result;
+}
+
+static void __fastcall MaterialSystemDx11ReflectivityGuard(
+	__int64 material,
+	float* output)
+{
+	if (!r1delta::materialsystem_dx11::InvokeMaterialReflectivity(
+			static_cast<uintptr_t>(material),
+			&MaterialSystemDx11InitializeMaterialGuard,
+			MaterialSystemDx11ReflectivityOriginal,
+			output,
+			MaterialSystemDx11SetupErrorShader)) {
+		MaterialSystemDx11FailMaterialContext(
+			"reflectivity",
+			material);
+	}
 }
 
 static int MaterialSystemDx11NullResourceExceptionFilter(EXCEPTION_POINTERS* info)
@@ -1841,6 +1984,271 @@ void InstallClientStudioHeaderLookupGuard(
 	OutputDebugStringA(buffer);
 }
 
+void InstallMaterialSystemDx11ClientMaterialGuard(
+	uintptr_t materialSystemBase)
+{
+	using namespace r1delta::materialsystem_dx11;
+	if (s_MaterialSystemDx11MaterialGuardInstalled
+		|| !materialSystemBase
+		|| GetR1DeltaEngineMode() != R1DeltaEngineMode::Client2015)
+		return;
+
+	DWORD timestamp = 0;
+	DWORD imageSize = 0;
+	const bool expectedImage = HasExpectedStockMaterialSystemImage(
+		materialSystemBase,
+		&timestamp,
+		&imageSize);
+	const bool expectedCode = expectedImage
+		&& MatchesMaterialSystemCode(
+			materialSystemBase,
+			kMaterialSetupErrorShaderRva,
+			kExpectedMaterialSetupErrorShaderPrologue,
+			sizeof(kExpectedMaterialSetupErrorShaderPrologue))
+		&& MatchesMaterialSystemCode(
+			materialSystemBase,
+			kMaterialInitializeRva,
+			kExpectedMaterialInitializePrologue,
+			sizeof(kExpectedMaterialInitializePrologue))
+		&& MatchesMaterialSystemCode(
+			materialSystemBase,
+			kMaterialBoolPropertyRvas[0],
+			kExpectedMaterialProperty0Prologue,
+			sizeof(kExpectedMaterialProperty0Prologue))
+		&& MatchesMaterialSystemCode(
+			materialSystemBase,
+			kMaterialIsErrorRva,
+			kExpectedMaterialIsErrorPrologue,
+			sizeof(kExpectedMaterialIsErrorPrologue))
+		&& MatchesMaterialSystemCode(
+			materialSystemBase,
+			kMaterialBoolPropertyRvas[1],
+			kExpectedMaterialProperty1Prologue,
+			sizeof(kExpectedMaterialProperty1Prologue))
+		&& MatchesMaterialSystemCode(
+			materialSystemBase,
+			kMaterialBoolPropertyRvas[2],
+			kExpectedMaterialProperty2Prologue,
+			sizeof(kExpectedMaterialProperty2Prologue))
+		&& MatchesMaterialSystemCode(
+			materialSystemBase,
+			kMaterialBoolPropertyRvas[3],
+			kExpectedMaterialProperty3Prologue,
+			sizeof(kExpectedMaterialProperty3Prologue))
+		&& MatchesMaterialSystemCode(
+			materialSystemBase,
+			kMaterialAlphaModulationRva,
+			kExpectedMaterialAlphaModulationPrologue,
+			sizeof(kExpectedMaterialAlphaModulationPrologue))
+		&& MatchesMaterialSystemCode(
+			materialSystemBase,
+			kMaterialReflectivityRva,
+			kExpectedMaterialReflectivityPrologue,
+			sizeof(kExpectedMaterialReflectivityPrologue));
+	const auto* const alphaVtableEntry =
+		reinterpret_cast<const uintptr_t*>(
+			materialSystemBase + kMaterialAlphaVtableEntryRva);
+	const auto* const reflectivityVtableEntry =
+		reinterpret_cast<const uintptr_t*>(
+			materialSystemBase + kMaterialReflectivityVtableEntryRva);
+	const bool expectedVtable = expectedImage
+		&& MaterialSystemDx11IsCommittedReadableRange(
+			alphaVtableEntry,
+			sizeof(*alphaVtableEntry))
+		&& MaterialSystemDx11IsCommittedReadableRange(
+			reflectivityVtableEntry,
+			sizeof(*reflectivityVtableEntry))
+		&& *alphaVtableEntry
+			== materialSystemBase + kMaterialAlphaModulationRva
+		&& *reflectivityVtableEntry
+			== materialSystemBase + kMaterialReflectivityRva;
+	if (!expectedCode || !expectedVtable) {
+		char buffer[320];
+		_snprintf_s(
+			buffer,
+			sizeof(buffer),
+			_TRUNCATE,
+			"R1Delta: refused materialsystem_dx11 material guards "
+			"timestamp=0x%08lX size=0x%08lX code=%d vtable=%d\n",
+			static_cast<unsigned long>(timestamp),
+			static_cast<unsigned long>(imageSize),
+			expectedCode ? 1 : 0,
+			expectedVtable ? 1 : 0);
+		OutputDebugStringA(buffer);
+		return;
+	}
+
+	struct MaterialHook
+	{
+		uintptr_t rva;
+		void* detour;
+		void** original;
+		const char* name;
+	};
+	MaterialHook hooks[] = {
+		{
+			kMaterialInitializeRva,
+			reinterpret_cast<void*>(
+				&MaterialSystemDx11InitializeMaterialGuard),
+			reinterpret_cast<void**>(
+				&MaterialSystemDx11InitializeMaterialOriginal),
+			"initialize"
+		},
+		{
+			kMaterialIsErrorRva,
+			reinterpret_cast<void*>(
+				&MaterialSystemDx11IsErrorMaterialGuard),
+			reinterpret_cast<void**>(
+				&MaterialSystemDx11IsErrorMaterialOriginal),
+			"is-error"
+		},
+		{
+			kMaterialBoolPropertyRvas[0],
+			reinterpret_cast<void*>(
+				&MaterialSystemDx11BoolPropertyGuard<0>),
+			reinterpret_cast<void**>(
+				&MaterialSystemDx11PropertyGetterOriginal[0]),
+			"property-0"
+		},
+		{
+			kMaterialBoolPropertyRvas[1],
+			reinterpret_cast<void*>(
+				&MaterialSystemDx11BoolPropertyGuard<1>),
+			reinterpret_cast<void**>(
+				&MaterialSystemDx11PropertyGetterOriginal[1]),
+			"property-1"
+		},
+		{
+			kMaterialBoolPropertyRvas[2],
+			reinterpret_cast<void*>(
+				&MaterialSystemDx11BoolPropertyGuard<2>),
+			reinterpret_cast<void**>(
+				&MaterialSystemDx11PropertyGetterOriginal[2]),
+			"property-2"
+		},
+		{
+			kMaterialBoolPropertyRvas[3],
+			reinterpret_cast<void*>(
+				&MaterialSystemDx11BoolPropertyGuard<3>),
+			reinterpret_cast<void**>(
+				&MaterialSystemDx11PropertyGetterOriginal[3]),
+			"property-3"
+		},
+		{
+			kMaterialAlphaModulationRva,
+			reinterpret_cast<void*>(
+				&MaterialSystemDx11AlphaModulationGuard),
+			reinterpret_cast<void**>(
+				&MaterialSystemDx11AlphaModulationOriginal),
+			"alpha-modulation"
+		},
+		{
+			kMaterialReflectivityRva,
+			reinterpret_cast<void*>(
+				&MaterialSystemDx11ReflectivityGuard),
+			reinterpret_cast<void**>(
+				&MaterialSystemDx11ReflectivityOriginal),
+			"reflectivity"
+		}
+	};
+
+	MaterialSystemDx11SetupErrorShader =
+		reinterpret_cast<MaterialSystemDx11SetupErrorShaderType>(
+			materialSystemBase + kMaterialSetupErrorShaderRva);
+	size_t createdCount = 0;
+	for (size_t index = 0; index < std::size(hooks); ++index) {
+		void* const target =
+			reinterpret_cast<void*>(materialSystemBase + hooks[index].rva);
+		const MH_STATUS status = MH_CreateHook(
+			target,
+			hooks[index].detour,
+			hooks[index].original);
+		char buffer[256];
+		_snprintf_s(
+			buffer,
+			sizeof(buffer),
+			_TRUNCATE,
+			"R1Delta: materialsystem_dx11 material hook create "
+			"name=%s status=%d target=%p original=%p\n",
+			hooks[index].name,
+			static_cast<int>(status),
+			target,
+			*hooks[index].original);
+		OutputDebugStringA(buffer);
+		if (status != MH_OK)
+			break;
+		++createdCount;
+		if (!*hooks[index].original)
+			break;
+	}
+
+	size_t queuedCount = 0;
+	if (createdCount == std::size(hooks)) {
+		for (size_t index = 0; index < std::size(hooks); ++index) {
+			const MH_STATUS status = MH_QueueEnableHook(
+				reinterpret_cast<void*>(
+					materialSystemBase + hooks[index].rva));
+			if (status != MH_OK)
+				break;
+			++queuedCount;
+		}
+	}
+	const MH_STATUS applyStatus =
+		queuedCount == std::size(hooks)
+			? MH_ApplyQueued()
+			: MH_UNKNOWN;
+	const bool installed = createdCount == std::size(hooks)
+		&& queuedCount == std::size(hooks)
+		&& applyStatus == MH_OK;
+
+	char statusBuffer[320];
+	_snprintf_s(
+		statusBuffer,
+		sizeof(statusBuffer),
+		_TRUNCATE,
+		"R1Delta: materialsystem_dx11 material hook transaction "
+		"created=%zu/%zu queued=%zu/%zu apply=%d installed=%d\n",
+		createdCount,
+		std::size(hooks),
+		queuedCount,
+		std::size(hooks),
+		static_cast<int>(applyStatus),
+		installed ? 1 : 0);
+	OutputDebugStringA(statusBuffer);
+
+	if (!installed) {
+		for (size_t index = 0; index < createdCount; ++index) {
+			MH_QueueDisableHook(
+				reinterpret_cast<void*>(
+					materialSystemBase + hooks[index].rva));
+		}
+		if (createdCount)
+			MH_ApplyQueued();
+		for (size_t index = 0; index < createdCount; ++index) {
+			MH_DisableHook(
+				reinterpret_cast<void*>(
+					materialSystemBase + hooks[index].rva));
+		}
+
+		bool cleanupConfirmed = true;
+		for (size_t index = createdCount; index > 0; --index) {
+			const MH_STATUS removeStatus = MH_RemoveHook(
+				reinterpret_cast<void*>(
+					materialSystemBase + hooks[index - 1].rva));
+			cleanupConfirmed =
+				removeStatus == MH_OK && cleanupConfirmed;
+		}
+		for (MaterialHook& hook : hooks)
+			*hook.original = nullptr;
+		MaterialSystemDx11SetupErrorShader = nullptr;
+		if (!cleanupConfirmed)
+			MaterialSystemDx11FailMaterialContext("hook-cleanup", 0);
+		return;
+	}
+
+	s_MaterialSystemDx11MaterialGuardInstalled = true;
+}
+
 void InstallMaterialSystemDx11NullShaderResourceGuard(uintptr_t materialSystemBase)
 {
 	if (s_MaterialSystemDx11NullResourceGuardInstalled || !materialSystemBase)
@@ -1850,23 +2258,7 @@ void InstallMaterialSystemDx11NullShaderResourceGuard(uintptr_t materialSystemBa
 	const bool vtfScratchInstalled =
 		InstallMaterialSystemDx11VtfScratchHooks(materialSystemBase);
 
-	const unsigned char expectedMaterialInitPrologue[] = {
-		0x40, 0x57,
-		0x41, 0x55,
-		0x48, 0x83, 0xEC, 0x48,
-		0x48, 0x89, 0x5C, 0x24, 0x60,
-		0x48, 0x89, 0x6C, 0x24, 0x68,
-		0x48, 0x89, 0x74, 0x24, 0x70,
-		0x4C, 0x89, 0x64, 0x24, 0x40
-	};
-	const unsigned char expectedIsErrorMaterialPrologue[] = {
-		0x40, 0x53,
-		0x48, 0x83, 0xEC, 0x20,
-		0x0F, 0xB6, 0x41, 0x26,
-		0x48, 0x8B, 0xD9,
-		0xC0, 0xE8, 0x02,
-		0xA8, 0x01
-	};
+
 	const unsigned char expectedResetPrologue[] = {
 		0x48, 0x8B, 0x05, 0x81, 0x38, 0x28, 0x00,
 		0x33, 0xD2,
@@ -1915,40 +2307,6 @@ void InstallMaterialSystemDx11NullShaderResourceGuard(uintptr_t materialSystemBa
 		0xB9, 0x01, 0x00, 0x00, 0x00,
 		0xB3, 0xFF
 	};
-	const bool materialInitInstalled = InstallMaterialSystemDx11CheckedHook(
-		materialSystemBase,
-		0x3AB60,
-		expectedMaterialInitPrologue,
-		sizeof(expectedMaterialInitPrologue),
-		reinterpret_cast<void*>(&MaterialSystemDx11InitializeMaterialGuard),
-		reinterpret_cast<void**>(&MaterialSystemDx11InitializeMaterialOriginal),
-		"material-initialize");
-	const bool isErrorMaterialInstalled = materialInitInstalled && InstallMaterialSystemDx11CheckedHook(
-		materialSystemBase,
-		0x3B010,
-		expectedIsErrorMaterialPrologue,
-		sizeof(expectedIsErrorMaterialPrologue),
-		reinterpret_cast<void*>(&MaterialSystemDx11IsErrorMaterialGuard),
-		reinterpret_cast<void**>(&MaterialSystemDx11IsErrorMaterialOriginal),
-		"material-is-error");
-	const uintptr_t materialPropertyRvas[] = { 0x3AFB0, 0x3B070, 0x3B0D0, 0x3B120 };
-	void* const materialPropertyGuards[] = {
-		reinterpret_cast<void*>(&MaterialSystemDx11BoolPropertyGuard<0>),
-		reinterpret_cast<void*>(&MaterialSystemDx11BoolPropertyGuard<1>),
-		reinterpret_cast<void*>(&MaterialSystemDx11BoolPropertyGuard<2>),
-		reinterpret_cast<void*>(&MaterialSystemDx11BoolPropertyGuard<3>)
-	};
-	bool materialPropertyGuardsInstalled = materialInitInstalled;
-	for (size_t index = 0; index < std::size(materialPropertyRvas); ++index) {
-		materialPropertyGuardsInstalled = InstallMaterialSystemDx11CheckedHook(
-			materialSystemBase,
-			materialPropertyRvas[index],
-			expectedIsErrorMaterialPrologue,
-			sizeof(expectedIsErrorMaterialPrologue),
-			materialPropertyGuards[index],
-			reinterpret_cast<void**>(&MaterialSystemDx11PropertyGetterOriginal[index]),
-			"material-property") && materialPropertyGuardsInstalled;
-	}
 	const bool resetInstalled = InstallMaterialSystemDx11CheckedHook(
 		materialSystemBase,
 		0x14B70,
@@ -1989,10 +2347,7 @@ void InstallMaterialSystemDx11NullShaderResourceGuard(uintptr_t materialSystemBa
 		reinterpret_cast<void*>(&MaterialSystemDx11SelectShaderResourceGuard),
 		reinterpret_cast<void**>(&MaterialSystemDx11SelectShaderResourceOriginal),
 		"vertex");
-	s_MaterialSystemDx11NullResourceGuardInstalled = materialInitInstalled
-		|| isErrorMaterialInstalled
-		|| materialPropertyGuardsInstalled
-		|| resetInstalled
+	s_MaterialSystemDx11NullResourceGuardInstalled = resetInstalled
 		|| constantFlushInstalled
 		|| vtfScratchInstalled
 		|| inputLayoutInstalled
