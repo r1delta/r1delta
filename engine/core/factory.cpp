@@ -37,6 +37,7 @@
 #include "core.h"
 #include "materialsystem_dx11_vtf_scratch.h"
 #include "materialsystem_dx11_material_guard.h"
+#include "materialsystem_dx11_txaa_lifetime.h"
 #include "r1o_runtime_paths.h"
 
 #include <MinHook.h>
@@ -641,6 +642,14 @@ using MaterialSystemDx11UtlBufferSetExternalType = __int64(__fastcall*)(
 	__int64 capacity,
 	__int64 initialPut,
 	unsigned char flags);
+using MaterialSystemDx11TxaaQueuedResolveProducerType =
+	char(__fastcall*)(uintptr_t queuedContext);
+using MaterialSystemDx11TxaaQueueAllocateType = uintptr_t**(__fastcall*)(
+	uintptr_t executor,
+	uintptr_t payloadSize,
+	uintptr_t alignmentMask);
+using MaterialSystemDx11TxaaQueuePublishType =
+	char(__fastcall*)(uintptr_t commandEnd);
 static MaterialSystemDx11SelectShaderResourceType MaterialSystemDx11SelectShaderResourceOriginal;
 static MaterialSystemDx11SelectShaderStageResourceType MaterialSystemDx11SelectShaderStageResourceOriginal;
 static MaterialSystemDx11CreateInputLayoutType MaterialSystemDx11CreateInputLayoutOriginal;
@@ -654,12 +663,19 @@ static MaterialSystemDx11IsErrorMaterialType MaterialSystemDx11IsErrorMaterialOr
 static MaterialSystemDx11VtfLoadType MaterialSystemDx11VtfLoadOriginal;
 static MaterialSystemDx11VtfScratchPrepareType MaterialSystemDx11VtfScratchPrepareOriginal;
 static MaterialSystemDx11UtlBufferSetExternalType MaterialSystemDx11UtlBufferSetExternal;
+static MaterialSystemDx11TxaaQueuedResolveProducerType
+	MaterialSystemDx11TxaaQueuedResolveProducerOriginal;
+static MaterialSystemDx11TxaaQueueAllocateType
+	MaterialSystemDx11TxaaQueueAllocate;
+static MaterialSystemDx11TxaaQueuePublishType
+	MaterialSystemDx11TxaaQueuePublish;
 static r1delta::materialsystem_dx11::VtfDecoderCreateFunction MaterialSystemDx11VtfDecoderCreate;
 static r1delta::materialsystem_dx11::VtfDecoderDestroyFunction MaterialSystemDx11VtfDecoderDestroy;
 using MaterialSystemDx11BoolPropertyType = __int64(__fastcall*)(__int64 material);
 static MaterialSystemDx11BoolPropertyType MaterialSystemDx11PropertyGetterOriginal[4]{};
 static bool s_MaterialSystemDx11NullResourceGuardInstalled;
 static bool s_MaterialSystemDx11MaterialGuardInstalled;
+static bool s_MaterialSystemDx11TxaaLifetimeInstalled;
 static uintptr_t s_MaterialSystemDx11Base;
 static int s_MaterialSystemDx11NullResourceLogBudget = 8;
 static int s_MaterialSystemDx11ResetResourceLogBudget = 8;
@@ -1624,6 +1640,335 @@ static bool MatchesMaterialSystemCode(
 	return MaterialSystemDx11IsCommittedReadableRange(address, expectedSize)
 		&& memcmp(address, expected, expectedSize) == 0;
 }
+static bool MaterialSystemDx11ReadPointer(
+	uintptr_t address,
+	uintptr_t* value)
+{
+	if (!value
+		|| !MaterialSystemDx11IsCommittedReadableRange(
+			reinterpret_cast<const void*>(address),
+			sizeof(*value))) {
+		return false;
+	}
+
+	*value = *reinterpret_cast<const uintptr_t*>(address);
+	return true;
+}
+
+static uintptr_t MaterialSystemDx11VirtualFunction(
+	void* object,
+	size_t slot)
+{
+	uintptr_t vtable = 0;
+	if (!object
+		|| !MaterialSystemDx11ReadPointer(
+			reinterpret_cast<uintptr_t>(object),
+			&vtable)
+		|| !vtable
+		|| slot > (std::numeric_limits<uintptr_t>::max() - vtable)
+			/ sizeof(uintptr_t)) {
+		return 0;
+	}
+
+	uintptr_t function = 0;
+	if (!MaterialSystemDx11ReadPointer(
+			vtable + slot * sizeof(uintptr_t),
+			&function)) {
+		return 0;
+	}
+	return function;
+}
+
+[[noreturn]] static void MaterialSystemDx11FailTxaaLifetime(
+	const char* reason,
+	uintptr_t queueOrContext,
+	uintptr_t callbackArgument,
+	void* renderTargetView)
+{
+	constexpr DWORD kTxaaLifetimeFailure = 0xE042101B;
+	char buffer[384];
+	_snprintf_s(
+		buffer,
+		sizeof(buffer),
+		_TRUNCATE,
+		"R1Delta: fatal materialsystem_dx11 TXAA queued lifetime "
+		"reason=%s queueOrContext=%p callbackArgument=%p rtv=%p\n",
+		reason,
+		reinterpret_cast<void*>(queueOrContext),
+		reinterpret_cast<void*>(callbackArgument),
+		renderTargetView);
+	OutputDebugStringA(buffer);
+
+	const ULONG_PTR arguments[] = {
+		reinterpret_cast<ULONG_PTR>(reason),
+		static_cast<ULONG_PTR>(queueOrContext),
+		static_cast<ULONG_PTR>(callbackArgument),
+		reinterpret_cast<ULONG_PTR>(renderTargetView)
+	};
+	RaiseException(
+		kTxaaLifetimeFailure,
+		EXCEPTION_NONCONTINUABLE,
+		static_cast<DWORD>(std::size(arguments)),
+		arguments);
+	TerminateProcess(GetCurrentProcess(), kTxaaLifetimeFailure);
+	__assume(0);
+}
+
+
+static uintptr_t __fastcall MaterialSystemDx11ExecuteRetainedTxaaResolve(
+	uintptr_t queueState)
+{
+	using namespace r1delta::materialsystem_dx11;
+	if (!queueState
+		|| queueState > std::numeric_limits<uintptr_t>::max()
+			- kTxaaQueueCommandEndOffset - sizeof(uintptr_t)
+		|| !MaterialSystemDx11IsCommittedReadableRange(
+			reinterpret_cast<const void*>(
+				queueState + kTxaaQueueCurrentCommandOffset),
+			sizeof(uintptr_t) * 2)) {
+		MaterialSystemDx11FailTxaaLifetime(
+			"execute-queue-state",
+			queueState,
+			0,
+			nullptr);
+	}
+
+	auto* const command = *reinterpret_cast<TxaaQueuedResolveCommand**>(
+		queueState + kTxaaQueueCurrentCommandOffset);
+	if (!MaterialSystemDx11IsCommittedReadableRange(
+			command,
+			sizeof(*command))) {
+		MaterialSystemDx11FailTxaaLifetime(
+			"execute-command",
+			queueState,
+			0,
+			nullptr);
+	}
+
+	const auto expectedCallback =
+		reinterpret_cast<TxaaQueuedResolveCallback>(
+			s_MaterialSystemDx11Base + kTxaaQueuedResolveCallbackRva);
+	if (command->callback != expectedCallback || !command->argument) {
+		MaterialSystemDx11FailTxaaLifetime(
+			"execute-callback",
+			queueState,
+			command->argument,
+			command->renderTargetView);
+	}
+
+	TxaaReferenceFunction release = nullptr;
+	if (command->renderTargetView) {
+		const uintptr_t releaseAddress = MaterialSystemDx11VirtualFunction(
+			command->renderTargetView,
+			kComReleaseVirtualSlot);
+		if (!releaseAddress) {
+			MaterialSystemDx11FailTxaaLifetime(
+				"execute-release",
+				queueState,
+				command->argument,
+				command->renderTargetView);
+		}
+		release = reinterpret_cast<TxaaReferenceFunction>(releaseAddress);
+	}
+
+	return ExecuteTxaaQueuedResolve(queueState, release);
+}
+
+static char __fastcall MaterialSystemDx11QueueRetainedTxaaResolve(
+	uintptr_t queuedContext)
+{
+	using namespace r1delta::materialsystem_dx11;
+	if (!queuedContext
+		|| queuedContext > std::numeric_limits<uintptr_t>::max()
+			- static_cast<uintptr_t>(
+				kQueuedRenderContextHardwareContextOffset)
+		|| !MaterialSystemDx11TxaaQueueAllocate
+		|| !MaterialSystemDx11TxaaQueuePublish) {
+		MaterialSystemDx11FailTxaaLifetime(
+			"enqueue-state",
+			queuedContext,
+			0,
+			nullptr);
+	}
+
+	const auto* const callbackArgumentAddress =
+		reinterpret_cast<const uintptr_t*>(
+			queuedContext
+			+ static_cast<uintptr_t>(
+				kQueuedRenderContextHardwareContextOffset));
+	if (!MaterialSystemDx11IsCommittedReadableRange(
+			callbackArgumentAddress,
+			sizeof(*callbackArgumentAddress))
+		|| !*callbackArgumentAddress) {
+		MaterialSystemDx11FailTxaaLifetime(
+			"enqueue-callback-argument",
+			queuedContext,
+			0,
+			nullptr);
+	}
+	const uintptr_t callbackArgument = *callbackArgumentAddress;
+	const auto callback = reinterpret_cast<TxaaQueuedResolveCallback>(
+		s_MaterialSystemDx11Base + kTxaaQueuedResolveCallbackRva);
+
+	void* renderTargetView = nullptr;
+	if (!ReadTxaaRenderTargetView(
+			s_MaterialSystemDx11Base,
+			&MaterialSystemDx11ReadPointer,
+			&renderTargetView)) {
+		MaterialSystemDx11FailTxaaLifetime(
+			"enqueue-render-target",
+			queuedContext,
+			callbackArgument,
+			nullptr);
+	}
+
+	TxaaReferenceFunction addRef = nullptr;
+	if (renderTargetView) {
+		const uintptr_t addRefAddress = MaterialSystemDx11VirtualFunction(
+			renderTargetView,
+			kComAddRefVirtualSlot);
+		if (!addRefAddress) {
+			MaterialSystemDx11FailTxaaLifetime(
+				"enqueue-add-ref",
+				queuedContext,
+				callbackArgument,
+				renderTargetView);
+		}
+		addRef = reinterpret_cast<TxaaReferenceFunction>(addRefAddress);
+	}
+
+	uintptr_t** const writeCursor = MaterialSystemDx11TxaaQueueAllocate(
+		reinterpret_cast<uintptr_t>(
+			&MaterialSystemDx11ExecuteRetainedTxaaResolve),
+		sizeof(TxaaQueuedResolveCommand),
+		kTxaaQueueAlignmentMask);
+	if (!MaterialSystemDx11IsCommittedReadableRange(
+			writeCursor,
+			sizeof(*writeCursor))
+		|| !*writeCursor) {
+		MaterialSystemDx11FailTxaaLifetime(
+			"enqueue-allocate",
+			queuedContext,
+			callbackArgument,
+			renderTargetView);
+	}
+
+	auto* const command =
+		reinterpret_cast<TxaaQueuedResolveCommand*>(*writeCursor);
+	if (!MaterialSystemDx11IsCommittedReadableRange(
+			command,
+			sizeof(*command))
+		|| !RetainTxaaQueuedResolveCommand(
+			callback,
+			callbackArgument,
+			renderTargetView,
+			addRef,
+			command)) {
+		MaterialSystemDx11FailTxaaLifetime(
+			"enqueue-command",
+			queuedContext,
+			callbackArgument,
+			renderTargetView);
+	}
+
+	return MaterialSystemDx11TxaaQueuePublish(
+		reinterpret_cast<uintptr_t>(command + 1));
+}
+
+void InstallMaterialSystemDx11TxaaLifetimeGuard(
+	uintptr_t materialSystemBase)
+{
+	using namespace r1delta::materialsystem_dx11;
+	if (s_MaterialSystemDx11TxaaLifetimeInstalled
+		|| !materialSystemBase
+		|| GetR1DeltaEngineMode() != R1DeltaEngineMode::Client2015) {
+		return;
+	}
+
+	DWORD timestamp = 0;
+	DWORD imageSize = 0;
+	const bool expectedImage = HasExpectedStockMaterialSystemImage(
+		materialSystemBase,
+		&timestamp,
+		&imageSize);
+	const bool expectedCode = expectedImage
+		&& MatchesMaterialSystemCode(
+			materialSystemBase,
+			kTxaaQueuedResolveProducerRva,
+			kExpectedTxaaQueuedResolveProducerPrologue,
+			sizeof(kExpectedTxaaQueuedResolveProducerPrologue))
+		&& MatchesMaterialSystemCode(
+			materialSystemBase,
+			kTxaaQueuedResolveCallbackRva,
+			kExpectedTxaaQueuedResolveCallback,
+			sizeof(kExpectedTxaaQueuedResolveCallback))
+		&& MatchesMaterialSystemCode(
+			materialSystemBase,
+			kTxaaQueueAllocateRva,
+			kExpectedTxaaQueueAllocatePrologue,
+			sizeof(kExpectedTxaaQueueAllocatePrologue))
+		&& MatchesMaterialSystemCode(
+			materialSystemBase,
+			kTxaaQueuePublishRva,
+			kExpectedTxaaQueuePublishPrologue,
+			sizeof(kExpectedTxaaQueuePublishPrologue));
+	const auto* const vtableEntry = reinterpret_cast<const uintptr_t*>(
+		materialSystemBase + kTxaaQueuedResolveVtableEntryRva);
+	const bool expectedVtable = expectedImage
+		&& MaterialSystemDx11IsCommittedReadableRange(
+			vtableEntry,
+			sizeof(*vtableEntry))
+		&& *vtableEntry
+			== materialSystemBase + kTxaaQueuedResolveProducerRva;
+	if (!expectedCode || !expectedVtable) {
+		char buffer[320];
+		_snprintf_s(
+			buffer,
+			sizeof(buffer),
+			_TRUNCATE,
+			"R1Delta: refused materialsystem_dx11 TXAA lifetime guard "
+			"timestamp=0x%08lX size=0x%08lX code=%d vtable=%d\n",
+			static_cast<unsigned long>(timestamp),
+			static_cast<unsigned long>(imageSize),
+			expectedCode ? 1 : 0,
+			expectedVtable ? 1 : 0);
+		OutputDebugStringA(buffer);
+		return;
+	}
+
+	s_MaterialSystemDx11Base = materialSystemBase;
+	MaterialSystemDx11TxaaQueueAllocate =
+		reinterpret_cast<MaterialSystemDx11TxaaQueueAllocateType>(
+			materialSystemBase + kTxaaQueueAllocateRva);
+	MaterialSystemDx11TxaaQueuePublish =
+		reinterpret_cast<MaterialSystemDx11TxaaQueuePublishType>(
+			materialSystemBase + kTxaaQueuePublishRva);
+	const bool installed = InstallMaterialSystemDx11CheckedHook(
+		materialSystemBase,
+		kTxaaQueuedResolveProducerRva,
+		kExpectedTxaaQueuedResolveProducerPrologue,
+		sizeof(kExpectedTxaaQueuedResolveProducerPrologue),
+		reinterpret_cast<void*>(
+			&MaterialSystemDx11QueueRetainedTxaaResolve),
+		reinterpret_cast<void**>(
+			&MaterialSystemDx11TxaaQueuedResolveProducerOriginal),
+		"TXAA queued lifetime");
+	if (!installed) {
+		void* const target = reinterpret_cast<void*>(
+			materialSystemBase + kTxaaQueuedResolveProducerRva);
+		MH_DisableHook(target);
+		MH_RemoveHook(target);
+		MaterialSystemDx11TxaaQueuedResolveProducerOriginal = nullptr;
+		MaterialSystemDx11TxaaQueueAllocate = nullptr;
+		MaterialSystemDx11TxaaQueuePublish = nullptr;
+		return;
+	}
+
+	s_MaterialSystemDx11TxaaLifetimeInstalled = true;
+	OutputDebugStringA(
+		"R1Delta: materialsystem_dx11 TXAA queued lifetime guard installed\n");
+}
+
 
 static bool InstallMaterialSystemDx11VtfScratchHooks(uintptr_t materialSystemBase)
 {

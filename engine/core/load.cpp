@@ -9537,8 +9537,10 @@ void __stdcall LoaderNotificationCallback(
 		G_matsystem = (uintptr_t)notification_data->Loaded.DllBase;
 		if (!HasEngineCommandLineFlag("-r1delta_disable_material_guards")) {
 			InstallMaterialSystemDx11NullShaderResourceGuard(G_matsystem);
-			if (GetR1DeltaEngineMode() == R1DeltaEngineMode::Client2015)
+			if (GetR1DeltaEngineMode() == R1DeltaEngineMode::Client2015) {
+				InstallMaterialSystemDx11TxaaLifetimeGuard(G_matsystem);
 				InstallMaterialSystemDx11ClientMaterialGuard(G_matsystem);
+			}
 		}
 		if (!IsR1ODedicatedServer()) {
 			SetupHudWarpMatSystemHooks();
