@@ -8956,7 +8956,8 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		MH_CreateHook((LPVOID)(vscript_base + (legacyDedicated ? 0xB130 : 0xB110)), &CSquirrelVM__ReleaseValue, reinterpret_cast<LPVOID*>(&CSquirrelVM__ReleaseValueOriginal));
 		MH_CreateHook((LPVOID)(vscript_base + (legacyDedicated ? 0xA210 : 0xA1F0)), &CSquirrelVM__SetValue, reinterpret_cast<LPVOID*>(&CSquirrelVM__SetValueOriginal));
 		MH_CreateHook((LPVOID)(vscript_base + (legacyDedicated ? 0x9C60 : 0x9C40)), &CSquirrelVM__SetValueEx, reinterpret_cast<LPVOID*>(&CSquirrelVM__SetValueExOriginal));
-		MH_CreateHook((LPVOID)(vscript_base + (legacyDedicated ? 0xBE80 : 0xBE60)), &CSquirrelVM__TranslateCall, reinterpret_cast<LPVOID*>(&CSquirrelVM__TranslateCallOriginal));
+		if (!InstallScriptVariantReturnBridge(vscript_base, legacyDedicated))
+			Warning("R1Delta: failed to install the ScriptVariant return ABI bridge.\n");
 	}
 	InitVStdLibICVarFactoryHook();
 	// Listen, legacy dedicated, and R1O fake-dedicated modes all load the same

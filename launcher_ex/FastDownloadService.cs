@@ -111,6 +111,7 @@ public sealed class FastDownloadService : IDisposable
 
             if (result.Failures.Count == 0)
                 return;
+            ariaFatal = !result.RetryAllowed;
 
             pending = result.Failures.Keys.ToList();
             foreach (var failure in result.Failures)
@@ -194,6 +195,7 @@ public sealed class FastDownloadService : IDisposable
         var completedLengths = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
         var remaining = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var failures = new Dictionary<DownloadRequest, string>();
+        var retryAllowed = true;
 
         var startInfo = new ProcessStartInfo
         {
@@ -288,7 +290,8 @@ public sealed class FastDownloadService : IDisposable
                     foreach (var gid in remaining)
                         failures[gidMap[gid]] = timeoutMessage;
                     remaining.Clear();
-                    Debug.WriteLine($"[FastDownloadService] Restarting aria2c after {timeoutMessage}.");
+                    retryAllowed = false;
+                    Debug.WriteLine($"[FastDownloadService] Falling back from aria2c after {timeoutMessage}.");
                 }
 
                 if (remaining.Count > 0)
@@ -377,7 +380,7 @@ public sealed class FastDownloadService : IDisposable
                 _activeProcess = null;
         }
 
-        return new AttemptResult(failures);
+        return new AttemptResult(failures, retryAllowed);
     }
 
     private static string ResolveCurlPath()
@@ -1184,12 +1187,14 @@ public sealed class FastDownloadService : IDisposable
 
     private sealed class AttemptResult
     {
-        public AttemptResult(Dictionary<DownloadRequest, string> failures)
+        public AttemptResult(Dictionary<DownloadRequest, string> failures, bool retryAllowed = true)
         {
             Failures = failures;
+            RetryAllowed = retryAllowed;
         }
 
         public Dictionary<DownloadRequest, string> Failures { get; }
+        public bool RetryAllowed { get; }
 
         public static AttemptResult FailAll(IEnumerable<DownloadRequest> requests, string error)
         {

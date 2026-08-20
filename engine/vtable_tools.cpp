@@ -83,6 +83,38 @@ uintptr_t CreateFunction(void* func, void* real) {
 	return ret;
 }
 
+uintptr_t CreateFunctionIndirect(void* func, void** realSlot) {
+	if (!execMem) {
+		execMem = VirtualAlloc(NULL, EXEC_MEM_SIZE, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+		execCursor = (uint8_t*)execMem;
+	}
+	if (!execMem) return 0;
+
+	uintptr_t ret = (uintptr_t)InterlockedAdd64((volatile LONG64*)&execCursor, 32);
+	uint8_t* bytes = (uint8_t*)ret;
+	if (bytes >= ((uint8_t*)execMem + EXEC_MEM_SIZE)) {
+		R1DAssert(!"Unreachable");
+		return 0;
+	}
+
+	// mov rax, &real; mov rcx, [rax]. The thunk follows the current object
+	// pointer without rewriting executable memory when that object is recreated.
+	*bytes++ = 0x48;
+	*bytes++ = 0xB8;
+	*reinterpret_cast<uintptr_t*>(bytes) = reinterpret_cast<uintptr_t>(realSlot);
+	bytes += sizeof(uintptr_t);
+	*bytes++ = 0x48;
+	*bytes++ = 0x8B;
+	*bytes++ = 0x08;
+
+	*bytes++ = 0xFF;
+	*bytes++ = 0x25;
+	*reinterpret_cast<int32_t*>(bytes) = 0;
+	bytes += sizeof(int32_t);
+	*reinterpret_cast<uintptr_t*>(bytes) = reinterpret_cast<uintptr_t>(func);
+	return ret;
+}
+
 // Creates a callgate trampoline that checks the caller's return address to determine
 // which vtable index to use. If the caller is within [dll_start, dll_end], uses orig_idx.
 // Otherwise uses new_idx. This handles vtable mismatches where the object needs to be

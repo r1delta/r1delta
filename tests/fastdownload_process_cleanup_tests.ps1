@@ -164,6 +164,36 @@ try {
     Assert-True ([System.Linq.Enumerable]::SequenceEqual([byte[]](Get-Content -LiteralPath $destination -AsByteStream), $payload)) 'aria2 writes the expected payload'
     Assert-True ($null -eq $activeProcessField.GetValue($service)) 'aria2 cleanup releases active process ownership'
 
+    ([IDisposable]$service).Dispose()
+    $service = $null
+    $listener.Stop()
+    $listener = $null
+
+    $service = $constructor.Invoke([object[]]@([string]$root, [TimeSpan]::FromSeconds(1)))
+    $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+    $listener.Start()
+    $stallPort = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
+    $stallDestination = Join-Path $root 'aria2-stall.bin'
+    $stallRequests = New-RequestArray "http://127.0.0.1:$stallPort/stall.bin" $stallDestination
+    $stallAcceptTask = $listener.AcceptTcpClientAsync()
+    $stallAttemptTask = $ariaAttempt.Invoke(
+        $service,
+        [object[]]@([string]$aria2Path, [object]$stallRequests, 1, [System.Threading.CancellationToken]::None))
+
+    Assert-True $stallAcceptTask.Wait(10000) 'aria2 connects to the stalled download endpoint'
+    $client = $stallAcceptTask.GetAwaiter().GetResult()
+    $client.ReceiveTimeout = 5000
+    $stallHeaders = Read-HttpRequestHeaders $client.GetStream()
+    Assert-True ($stallHeaders -like 'GET /stall.bin HTTP/*') 'stalled endpoint receives the aria2 request'
+    Assert-True $stallAttemptTask.Wait(20000) 'aria2 no-progress attempt reaches its injected idle bound'
+    $stallResult = $stallAttemptTask.GetAwaiter().GetResult()
+    $stallFailures = $stallResult.GetType().GetProperty('Failures', $binding).GetValue($stallResult)
+    $retryAllowedProperty = $stallResult.GetType().GetProperty('RetryAllowed', $binding)
+    Assert-True ($stallFailures.Count -eq 1) 'aria2 no-progress attempt attributes the stalled request'
+    Assert-True ($null -ne $retryAllowedProperty) 'aria2 attempt result exposes retry policy'
+    Assert-True (-not [bool]$retryAllowedProperty.GetValue($stallResult)) 'aria2 no-progress attempt immediately enables fallback'
+    Assert-True ($null -eq $activeProcessField.GetValue($service)) 'stalled aria2 cleanup releases active process ownership'
+
     Write-Host 'All fast-download process cleanup tests passed.'
 }
 finally {

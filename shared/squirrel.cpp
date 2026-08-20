@@ -513,7 +513,7 @@ R1SquirrelVM* GetUIVMPtr() {
 	return *(R1SquirrelVM**)(G_client + 0x16C1FA8);
 }
 
-typedef __int64 (*CPlayer__SetXP)(__int64 a1,int a2);
+typedef void (*CPlayer__SetXP)(__int64 a1,int a2);
 
 CPlayer__SetXP CPlayer__SetXPRebuildOrig;
 void __fastcall CPlayer__SetXPRebuild(__int64 a1, int a2) {
@@ -637,7 +637,7 @@ struct AddonInfo {
 
 
 
-int UpdateAddons(HSQUIRRELVM v, SQInteger index, SQBool enabled) {
+int UpdateAddons(HSQUIRRELVM v) {
 	//const char* str = "thread void function() { wait 1 while(true) {  wait 1 } }"; 
 	//auto result = sq_compilebuffer(v, str, strlen(str), "console", SQTrue);
 	//if (result != -1)
@@ -665,13 +665,21 @@ int UpdateAddons(HSQUIRRELVM v, SQInteger index, SQBool enabled) {
 	KeyValues* kv = new KeyValues("AddonList");
 	kv_load_file_addr(kv, base_file_system, szAddOnListPath, nullptr, 0);
 	auto vm = GetUIVMPtr();
+	SQInteger index = 0;
+	SQBool enabled = SQFalse;
+	if (SQ_FAILED(sq_getinteger(vm, v, 2, &index))) {
+		kv->DeleteThis();
+		return sq_throwerror(v, "index must be an integer");
+	}
+	if (SQ_FAILED(sq_getbool(vm, v, 3, &enabled))) {
+		kv->DeleteThis();
+		return sq_throwerror(v, "enabled must be a bool");
+	}
 	std::cout << kv->GetString() << std::endl;
 	int i = 0; // Declare the iterator before the loop
 	for (KeyValues* subkey = kv->GetFirstValue(); subkey; subkey = subkey->GetNextValue(), ++i) {
 		const char* name = subkey->GetName();
 		bool value = subkey->GetInt(NULL, 0) != 0;
-		sq_getinteger(vm, v, i + 2 , &index);
-		sq_getbool(vm, v, i + 3, &enabled);
 		if (i == index) {
 			subkey->SetInt(NULL, enabled);
 			std::cout << "Updated: " << name << " to " << enabled << std::endl;
@@ -681,6 +689,7 @@ int UpdateAddons(HSQUIRRELVM v, SQInteger index, SQBool enabled) {
 	}
 	sq_pushinteger(vm, v, 1);
 	kv_write_file_addr(kv, base_file_system, szAddOnListPath);
+	kv->DeleteThis();
 	// Save the keyvalues to the file
 	return 1;
 }
@@ -775,7 +784,8 @@ int GetMods(HSQUIRRELVM v) {
 			V_strncpy(szAddonDirName, name, 60);
 		}
 		printf("Addon: %s\n", szAddonDirName);
-		if (load_addon_info_file(nullptr, &kv, name, bIsVPK)) {
+		KeyValues* loadedAddonInfo = nullptr;
+		if (load_addon_info_file(nullptr, &loadedAddonInfo, name, bIsVPK)) {
 			char image[260];
 			get_addon_image(nullptr, name, image, 260, bIsVPK);
 			snprintf(addoninfoFilename, 260, "%s%s%c%s%c%s", szModPath, "addons", '\\', szAddonDirName, '\\', "addoninfo.txt");
@@ -835,6 +845,7 @@ int GetMods(HSQUIRRELVM v) {
 			sq_pushstring(v, localization_str, strlen(localization_str));
 			sq_newslot(v, -3, 0);
 			sq_arrayappend(v, -2);
+			addoninfo->DeleteThis();
 			if (bIsVPK) {
 				char* pSemi = strrchr(szModPath, ';');
 				if (pSemi)
@@ -848,7 +859,10 @@ int GetMods(HSQUIRRELVM v) {
 				remove_file(file_system, tempFilename, 0);
 			}
 		}
+		if (loadedAddonInfo)
+			loadedAddonInfo->DeleteThis();
 	}
+	kv->DeleteThis();
 	return 1;
 }
 
@@ -1056,7 +1070,7 @@ SQInteger OpenDiscordURL(HSQUIRRELVM v) {
 	CloseHandle(pi.hProcess);
 	CloseHandle(pi.hThread);
 
-	return 1;
+	return 0;
 }
 
 size_t to_narrow(const wchar_t* src, char* dest, size_t dest_len) {
@@ -2142,7 +2156,7 @@ bool GetSQVMFuncs() {
 		(SQFUNCTION)Script_ServerGetPlayerUserID,
 		".I", // String
 		2,
-		"string",
+		"int",
 		"",
 		"Get player user id"
 	);
@@ -2197,7 +2211,7 @@ bool GetSQVMFuncs() {
 		(SQFUNCTION)GetMods,
 		".", // String
 		1,      // Expects 2 parameters
-		"table",    // Returns a string
+		"array",
 		"",
 		"Get installed mods"
 	);
@@ -2208,8 +2222,8 @@ bool GetSQVMFuncs() {
 		SCRIPT_CONTEXT_UI,
 		"GetAddonsPath",
 		(SQFUNCTION)GetAddonsPath,
-		".I", // String
-		2,      // Expects 2 parameters
+		"..",
+		2,
 		"string",    // Returns a string
 		"",
 		"Get path to addons and open it in explorer"
@@ -2433,6 +2447,7 @@ bool GetSQVMFuncs() {
 typedef __int64 (*CScriptVM__ctortype)(void* thisptr);
 CScriptVM__ctortype CScriptVM__ctororiginal;
 bool scriptflag = false;
+bool hasRegisteredServerFuncs = false;
 void __fastcall CScriptVM__SetTFOFlag(__int64 a1, char a2)
 {
 	scriptflag = a2;
@@ -2446,6 +2461,13 @@ void SetNewVTable(void* thisptr, uintptr_t* newVTable);
 
 constexpr size_t SQUIRREL_VM_VMT_SIZE = 122;
 
+struct FakeServerVM {
+	uintptr_t* vtable = nullptr;
+};
+
+static FakeServerVM g_fakeServerVm;
+static void* g_realServerVm = nullptr;
+
 // Implementation for creating a new vtable and inserting functions.
 void* CreateNewVTable(void* thisptr) {
 	// Original vtable can be obtained by dereferencing the this pointer.
@@ -2456,7 +2478,7 @@ void* CreateNewVTable(void* thisptr) {
 
 	// Copy the original vtable entries into the new vtable.
 	for (int i = 0; i < 120; ++i) {
-		newVTable[i] = CreateFunction((void*)originalVTable[i], thisptr);
+		newVTable[i] = CreateFunctionIndirect((void*)originalVTable[i], &g_realServerVm);
 	}
 
 	// Insert CScriptVM__SetTFOFlag and CScriptVM__GetTFOFlag between the 4th and 5th functions.
@@ -2466,19 +2488,32 @@ void* CreateNewVTable(void* thisptr) {
 	}
 
 	// Now, insert the new functions into the shifted positions.
-	newVTable[3] = CreateFunction((void*)CScriptVM__SetTFOFlag, thisptr);
-	newVTable[4] = CreateFunction((void*)CScriptVM__GetTFOFlag, thisptr);
+	newVTable[3] = CreateFunctionIndirect((void*)CScriptVM__SetTFOFlag, &g_realServerVm);
+	newVTable[4] = CreateFunctionIndirect((void*)CScriptVM__GetTFOFlag, &g_realServerVm);
 
 	// Update the vtable pointer of the CScriptVM object to the new vtable.
 	return newVTable;
 }
 
 
-void* lastvmptr = 0;
-void* fakevmptr;
-void* realvmptr = 0;
 typedef void* (*CScriptManager__CreateNewVMType)(__int64 a1, int a2, unsigned int a3);
 bool isServerScriptVM = false;
+
+static void OnServerVmCreated(void* vmPtr)
+{
+	g_realServerVm = vmPtr;
+	if (!g_fakeServerVm.vtable)
+		g_fakeServerVm.vtable = static_cast<uintptr_t*>(CreateNewVTable(vmPtr));
+}
+
+static void OnServerVmDestroyed()
+{
+	g_realServerVm = nullptr;
+	s_R1OTfoPendingServerAutorunVm.store(nullptr, std::memory_order_release);
+	s_R1OTfoServerAutorunBootstrapComplete.store(false, std::memory_order_release);
+	scriptflag = false;
+	hasRegisteredServerFuncs = true;
+}
 
 void* CScriptManager__CreateNewVM(__int64 a1, int a2, unsigned int a3) {
 	// Call the original function to maintain existing functionality
@@ -2519,20 +2554,10 @@ void* CScriptManager__CreateNewVM(__int64 a1, int a2, unsigned int a3) {
 
 	// Original functionality for server VM
 	if (context == SCRIPT_CONTEXT_SERVER) {
-		realvmptr = vmPtr;
-		if (!lastvmptr) {
-			fakevmptr = CreateNewVTable(vmPtr);
-			lastvmptr = vmPtr;
-		}
-		else if(vmPtr != lastvmptr) {
-			lastvmptr = vmPtr;
-			for (size_t i = 0; i < SQUIRREL_VM_VMT_SIZE; i++) {
-				UpdateRWXFunction(((void**)fakevmptr)[i], vmPtr);
-			}
-		}
+		OnServerVmCreated(vmPtr);
 
 		// Return the fake VM pointer for server context
-		return &fakevmptr;
+		return &g_fakeServerVm;
 	}
 
 	return vmPtr;
@@ -2570,7 +2595,7 @@ void* CScriptManager__CreateNewVM_R1OTFO(__int64 a1, int a2, unsigned int a3) {
 		OutputDebugStringA("R1Delta: R1O TFO squirrel native registration skipped: AddSquirrelReg is null\n");
 
 	if (context == SCRIPT_CONTEXT_SERVER) {
-		realvmptr = vmPtr;
+		g_realServerVm = vmPtr;
 		// The normal R1 autorun hook sits above CScriptManager::CreateNewVM,
 		// after the VM's root table and IncludeScript helper are ready.  R1O
 		// does not use that hook.  Leave this VM pending and reset its bootstrap
@@ -2650,18 +2675,16 @@ bool InstallR1OTFOSquirrelHooks(uintptr_t launcherBase)
 
 typedef void* (*CScriptVM__GetUnknownVMPtrType)();
 CScriptVM__GetUnknownVMPtrType CScriptVM__GetUnknownVMPtrOriginal;
+bool IsPointerFromServerDll(void* pointer);
 BOOL IsReturnAddressInServerDll(void* returnAddress) {
-	HMODULE module2;
-	BOOL check1 = GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCTSTR)returnAddress, &module2);
-	BOOL check2 = module2 == (HMODULE)G_server;
-	return check1 && check2;
+	return IsPointerFromServerDll(returnAddress);
 }
 
 void* CScriptVM__GetUnknownVMPtr()
 {
 	if (IsReturnAddressInServerDll(_ReturnAddress())) {
 		///std::cout << "returning addr to Server SCRIPT VM" << std::endl;
-		return &fakevmptr;
+		return &g_fakeServerVm;
 	}
 	return CScriptVM__GetUnknownVMPtrOriginal();
 }
@@ -2672,7 +2695,35 @@ __int64 __fastcall CScriptVM__ctor(void* thisptr) {
 	return ret;
 }
 
-void ConvertScriptVariant(ScriptVariant_t* variant, ConversionDirection direction) {
+enum class ScriptVariantABI {
+	R1,
+	R1O,
+};
+
+constexpr uint32_t R1D_SERVER_VARIANT_LAYOUT = 0x10;
+
+static bool R1OTypeToR1(int16& type)
+{
+	if (type <= 5)
+		return true;
+	if (type == 6) {
+		type = 0;
+		return false;
+	}
+	--type;
+	return true;
+}
+
+static void R1TypeToR1O(int16& type)
+{
+	if (type > 5)
+		++type;
+}
+
+bool ConvertScriptVariant(ScriptVariant_t* variant, ConversionDirection direction) {
+	if (!variant)
+		return false;
+
 	// Check if attempting to convert in the opposite direction of a previous conversion
 	if ((direction == R1_TO_R1O && (variant->m_flags & SV_CONVERTED_TO_R1)) ||
 		(direction == R1O_TO_R1 && (variant->m_flags & SV_CONVERTED_TO_R1O))) {
@@ -2682,21 +2733,18 @@ void ConvertScriptVariant(ScriptVariant_t* variant, ConversionDirection directio
 	else if ((direction == R1_TO_R1O && (variant->m_flags & SV_CONVERTED_TO_R1O)) ||
 		(direction == R1O_TO_R1 && (variant->m_flags & SV_CONVERTED_TO_R1))) {
 		// If already converted in this direction, exit to prevent double conversion
-		return;
+		return true;
 	}
 
-	if (variant->m_type > 5) {
-		if (direction == R1_TO_R1O) {
-			variant->m_type += 1;
-			variant->m_flags |= SV_CONVERTED_TO_R1O; // Set the flag for R1 to R1O conversion
-			//std::cout << "ConvertScriptVariant: converted variant " << static_cast<void*>(variant) << " to SV_CONVERTED_TO_R1O" << std::endl;
-		}
-		else {
-			variant->m_type -= 1;
-			variant->m_flags |= SV_CONVERTED_TO_R1; // Set the flag for R1O to R1 conversion
-			//std::cout << "ConvertScriptVariant: converted variant " << static_cast<void*>(variant) << " to SV_CONVERTED_TO_R1" << std::endl;
-		}
+	if (direction == R1_TO_R1O) {
+		R1TypeToR1O(variant->m_type);
+		variant->m_flags |= SV_CONVERTED_TO_R1O;
+		return true;
 	}
+
+	const bool supported = R1OTypeToR1(variant->m_type);
+	variant->m_flags |= SV_CONVERTED_TO_R1;
+	return supported;
 }
 
 
@@ -2711,40 +2759,41 @@ inline char* getDiagPrints(void* vm) {
 	return *reinterpret_cast<char**>(reinterpret_cast<uintptr_t>(vm) + DIAG_PRINTS_OFFSET);
 }
 
-__forceinline bool serverRunning(void* vmInstance) {
-	// If we're a dedicated server, we're obviously running.
+__forceinline bool IsServerActive() {
+	if (IsDedicatedServer())
+		return true;
+	return G_engine && *reinterpret_cast<int*>(G_engine + 0x2966168) != 0;
+}
+
+__forceinline bool UsesServerVariantLayout(void* vmInstance) {
+	if (!vmInstance || !IsServerActive())
+		return false;
+
 	if (IsDedicatedServer())
 		return true;
 
-	// ... but, if we're not running the listen server, then we're not.
-	// TODO(dr3murr): do we need this if we check !realvmptr? idk, most loads will be coming from mp_lobby listen server,
-	// and i don't know if we clear the pointer ever from there...	
-	if (*(int*)(G_engine + 0x2966168) == 0)
-		return false;
-	
-	// Check early-out conditions.
 	if (isServerScriptVM ||
-		vmInstance == realvmptr ||
-		vmInstance == fakevmptr ||
-		(realvmptr && vmInstance == *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(realvmptr) + sizeof(void*))))
+		vmInstance == g_realServerVm ||
+		vmInstance == &g_fakeServerVm ||
+		(g_realServerVm && vmInstance == *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(g_realServerVm) + sizeof(void*))))
 	{
 		return true;
 	}
 
 	// If we don't have a valid real VM pointer, the server isn't running.
-	if (!realvmptr)
+	if (!g_realServerVm)
 		return false;
 
 	// Compare diag prints pointers to verify if this VM is actually the server.
 	// The idea: if the diag prints (at offset DIAG_PRINTS_OFFSET) match, it's the server in disguise.
 	char* vmDiagPrints = getDiagPrints(vmInstance);
-	char* serverDiagPrints = getDiagPrints(static_cast<R1SquirrelVM*>(realvmptr)->sqvm);
+	char* serverDiagPrints = getDiagPrints(static_cast<R1SquirrelVM*>(g_realServerVm)->sqvm);
 
 	return vmDiagPrints && serverDiagPrints && (vmDiagPrints == serverDiagPrints);
 }
 
 
-const char* FieldTypeToString(int fieldType)
+const char* FieldTypeToString(int fieldType, ScriptVariantABI abi)
 {
 	static const std::map<int, const char*> typeMapServerRunning = {
 		{0, "void"}, {1, "float"}, {3, "Vector"}, {5, "int"},
@@ -2755,7 +2804,7 @@ const char* FieldTypeToString(int fieldType)
 		{6, "bool"}, {8, "char"}, {32, "string"}, {33, "handle"}
 	};
 
-	const auto& typeMap = serverRunning(NULL) ? typeMapServerRunning : typeMapServerNotRunning;
+	const auto& typeMap = abi == ScriptVariantABI::R1O ? typeMapServerRunning : typeMapServerNotRunning;
 	auto it = typeMap.find(fieldType);
 	if (it != typeMap.end()) {
 		return it->second;
@@ -2787,31 +2836,199 @@ bool IsPointerFromServerDll(void* pointer) {
 		return false;
 	}
 
-	uintptr_t baseAddress = reinterpret_cast<uintptr_t>(hModule);
-	uintptr_t ptrAddress = reinterpret_cast<uintptr_t>(pointer);
-	const auto dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(baseAddress);
-	if (dos->e_magic != IMAGE_DOS_SIGNATURE)
-		return false;
-	const auto nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(baseAddress + dos->e_lfanew);
-	if (nt->Signature != IMAGE_NT_SIGNATURE)
-		return false;
-	const uintptr_t moduleSize = nt->OptionalHeader.SizeOfImage;
+	const uintptr_t baseAddress = reinterpret_cast<uintptr_t>(hModule);
+	static std::atomic<uintptr_t> cachedBase{ 0 };
+	static std::atomic<uintptr_t> cachedEnd{ 0 };
+	uintptr_t endAddress = cachedEnd.load(std::memory_order_acquire);
+	if (cachedBase.load(std::memory_order_acquire) != baseAddress) {
+		const auto dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(baseAddress);
+		if (dos->e_magic != IMAGE_DOS_SIGNATURE)
+			return false;
+		const auto nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(baseAddress + dos->e_lfanew);
+		if (nt->Signature != IMAGE_NT_SIGNATURE)
+			return false;
+		endAddress = baseAddress + nt->OptionalHeader.SizeOfImage;
+		cachedEnd.store(endAddress, std::memory_order_release);
+		cachedBase.store(baseAddress, std::memory_order_release);
+	}
 
-	return ptrAddress >= baseAddress && ptrAddress < (baseAddress + moduleSize);
+	const uintptr_t ptrAddress = reinterpret_cast<uintptr_t>(pointer);
+	return ptrAddress >= baseAddress && ptrAddress < endAddress;
 }
-bool hasRegisteredServerFuncs = false;
+
+static void __fastcall NormalizeRegisteredReturnVariant(void* registration, ScriptVariant_t* returnVariant)
+{
+	if (!registration || !returnVariant)
+		return;
+	const uint32_t flags = *reinterpret_cast<const uint32_t*>(
+		reinterpret_cast<uintptr_t>(registration) + 0x70);
+	if (flags & R1D_SERVER_VARIANT_LAYOUT)
+		R1OTypeToR1(returnVariant->m_type);
+}
+
+static void* AllocateExecutableNear(uintptr_t target, size_t size)
+{
+	SYSTEM_INFO systemInfo = {};
+	GetSystemInfo(&systemInfo);
+	const uintptr_t granularity = systemInfo.dwAllocationGranularity;
+	const uintptr_t minAddress = reinterpret_cast<uintptr_t>(systemInfo.lpMinimumApplicationAddress);
+	const uintptr_t maxAddress = reinterpret_cast<uintptr_t>(systemInfo.lpMaximumApplicationAddress);
+	const uintptr_t reach = 0x70000000;
+	const uintptr_t low = target > reach ? (std::max)(minAddress, target - reach) : minAddress;
+	const uintptr_t high = (std::min)(maxAddress, target + reach);
+
+	auto scan = [&](uintptr_t begin, uintptr_t end) -> void* {
+		uintptr_t cursor = begin;
+		while (cursor < end) {
+			MEMORY_BASIC_INFORMATION info = {};
+			if (!VirtualQuery(reinterpret_cast<void*>(cursor), &info, sizeof(info)))
+				break;
+			const uintptr_t regionBase = reinterpret_cast<uintptr_t>(info.BaseAddress);
+			const uintptr_t regionEnd = regionBase + info.RegionSize;
+			if (info.State == MEM_FREE) {
+				const uintptr_t candidate = (regionBase + granularity - 1) & ~(granularity - 1);
+				if (candidate >= begin && candidate + size <= regionEnd && candidate + size <= end) {
+					if (void* allocation = VirtualAlloc(
+						reinterpret_cast<void*>(candidate), size,
+						MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE))
+						return allocation;
+				}
+			}
+			if (regionEnd <= cursor)
+				break;
+			cursor = regionEnd;
+		}
+		return nullptr;
+	};
+
+	if (void* allocation = scan(target, high))
+		return allocation;
+	return scan(low, target);
+}
+
+bool InstallScriptVariantReturnBridge(uintptr_t vscriptBase, bool legacyDedicated)
+{
+	if (!vscriptBase || IsR1ODedicatedServer())
+		return false;
+	static std::atomic<uintptr_t> installedBase{ 0 };
+	if (installedBase.load(std::memory_order_acquire) == vscriptBase)
+		return true;
+
+	const uintptr_t modeOffset = legacyDedicated ? 0x20 : 0;
+	auto* patchAddress = reinterpret_cast<uint8_t*>(vscriptBase + 0xC39B + modeOffset);
+	const uintptr_t resumeAddress = vscriptBase + 0xC3A6 + modeOffset;
+	const uintptr_t noReturnAddress = vscriptBase + 0xC60E + modeOffset;
+	constexpr uint8_t expected[] = {
+		0x41, 0x39, 0x74, 0x24, 0x38,
+		0x0F, 0x84, 0x68, 0x02, 0x00, 0x00
+	};
+	if (memcmp(patchAddress, expected, sizeof(expected)) != 0) {
+		Warning("R1Delta: ScriptVariant return bridge byte mismatch at %p.\n", patchAddress);
+		return false;
+	}
+
+	auto* stub = static_cast<uint8_t*>(AllocateExecutableNear(
+		reinterpret_cast<uintptr_t>(patchAddress), 64));
+	if (!stub) {
+		Warning("R1Delta: could not allocate a nearby ScriptVariant return bridge.\n");
+		return false;
+	}
+
+	uint8_t* out = stub;
+	auto emit8 = [&](uint8_t value) { *out++ = value; };
+	auto emit32 = [&](int32_t value) {
+		memcpy(out, &value, sizeof(value));
+		out += sizeof(value);
+	};
+	auto emit64 = [&](uintptr_t value) {
+		memcpy(out, &value, sizeof(value));
+		out += sizeof(value);
+	};
+	auto emitRelative = [&](uint8_t opcode, uintptr_t destination) -> bool {
+		emit8(opcode);
+		const intptr_t displacement = static_cast<intptr_t>(destination)
+			- reinterpret_cast<intptr_t>(out + sizeof(int32_t));
+		if (displacement < INT32_MIN || displacement > INT32_MAX)
+			return false;
+		emit32(static_cast<int32_t>(displacement));
+		return true;
+	};
+
+	// Preserve the original function's stack frame, provide Win64 shadow space,
+	// and pass r12 (registration) plus the return ScriptVariant at old rsp+30h.
+	const uint8_t prefix[] = {
+		0x48, 0x83, 0xEC, 0x20,
+		0x4C, 0x89, 0xE1,
+		0x48, 0x8D, 0x54, 0x24, 0x50,
+		0x48, 0xB8
+	};
+	memcpy(out, prefix, sizeof(prefix));
+	out += sizeof(prefix);
+	emit64(reinterpret_cast<uintptr_t>(&NormalizeRegisteredReturnVariant));
+	const uint8_t callAndRestore[] = {
+		0xFF, 0xD0,
+		0x48, 0x83, 0xC4, 0x20,
+		0x41, 0x39, 0x74, 0x24, 0x38,
+		0x0F, 0x84
+	};
+	memcpy(out, callAndRestore, sizeof(callAndRestore));
+	out += sizeof(callAndRestore);
+	const intptr_t noReturnDisplacement = static_cast<intptr_t>(noReturnAddress)
+		- reinterpret_cast<intptr_t>(out + sizeof(int32_t));
+	if (noReturnDisplacement < INT32_MIN || noReturnDisplacement > INT32_MAX) {
+		VirtualFree(stub, 0, MEM_RELEASE);
+		return false;
+	}
+	emit32(static_cast<int32_t>(noReturnDisplacement));
+	if (!emitRelative(0xE9, resumeAddress)) {
+		VirtualFree(stub, 0, MEM_RELEASE);
+		return false;
+	}
+
+	DWORD oldStubProtect = 0;
+	if (!VirtualProtect(stub, 64, PAGE_EXECUTE_READ, &oldStubProtect)) {
+		VirtualFree(stub, 0, MEM_RELEASE);
+		return false;
+	}
+	FlushInstructionCache(GetCurrentProcess(), stub, static_cast<SIZE_T>(out - stub));
+
+	uint8_t patch[sizeof(expected)] = { 0xE9 };
+	const intptr_t stubDisplacement = reinterpret_cast<intptr_t>(stub)
+		- reinterpret_cast<intptr_t>(patchAddress + 5);
+	if (stubDisplacement < INT32_MIN || stubDisplacement > INT32_MAX) {
+		VirtualFree(stub, 0, MEM_RELEASE);
+		return false;
+	}
+	const int32_t relativeStub = static_cast<int32_t>(stubDisplacement);
+	memcpy(patch + 1, &relativeStub, sizeof(relativeStub));
+	memset(patch + 5, 0x90, sizeof(patch) - 5);
+
+	DWORD oldProtect = 0;
+	if (!VirtualProtect(patchAddress, sizeof(patch), PAGE_EXECUTE_READWRITE, &oldProtect)) {
+		VirtualFree(stub, 0, MEM_RELEASE);
+		return false;
+	}
+	memcpy(patchAddress, patch, sizeof(patch));
+	FlushInstructionCache(GetCurrentProcess(), patchAddress, sizeof(patch));
+	DWORD ignored = 0;
+	if (!VirtualProtect(patchAddress, sizeof(patch), oldProtect, &ignored)) {
+		Warning("R1Delta: could not restore ScriptVariant bridge page protection.\n");
+		return false;
+	}
+	installedBase.store(vscriptBase, std::memory_order_release);
+	return true;
+}
 void __fastcall CSquirrelVM__RegisterFunctionGuts(__int64* a1, __int64 a2, const char** a3) {
 	//std::cout << "RegisterFunctionGuts called, server: " << (serverRunning ? "TRUE" : "FALSE") << std::endl;
 		
-	if (serverRunning(a1) && (*(_DWORD*)(a2 + 112) & 2) == 0 && (*(_DWORD*)(a2 + 112) & 16) == 0) { // Check if server is running
+	if (UsesServerVariantLayout(a1) && (*(_DWORD*)(a2 + 112) & 2) == 0 && (*(_DWORD*)(a2 + 112) & R1D_SERVER_VARIANT_LAYOUT) == 0) {
 		int argCount = *(_DWORD*)(a2 + 88); // Get the argument count
 		_DWORD* args = *(_DWORD**)(a2 + 64); // Get the pointer to arguments
-		*(_DWORD*)(a2 + 112) |= 16;
+		*(_DWORD*)(a2 + 112) |= R1D_SERVER_VARIANT_LAYOUT;
 		for (int i = 0; i < argCount; ++i) {
-			if (args[i] > 5) {
-				args[i] -= 1; // Subtract 1 from argument values above 5
-				//std::cout << "subtracted 1" << std::endl;
-			}
+			int16 type = static_cast<int16>(args[i]);
+			R1OTypeToR1(type);
+			args[i] = type;
 		}
 	}
 	/*
@@ -2832,41 +3049,13 @@ void __fastcall CSquirrelVM__RegisterFunctionGuts(__int64* a1, __int64 a2, const
 	//
 	CSquirrelVM__RegisterFunctionGutsOriginal(a1, a2, a3);
 }
-void __fastcall CSquirrelVM__TranslateCall(__int64* a1) {
-	auto vscript = G_vscript;
-	LPVOID address1 = (LPVOID)(vscript + (IsDedicatedServer() ? 0xc3cf : 0xC3AF));
-	LPVOID address2 = (LPVOID)(vscript + (IsDedicatedServer() ? 0xc7e4 : 0xC7C4));
-
-	char value1 = 0x21;
-	char data1[] = { 0x00, 0x07, 0x01, 0x07, 0x02, 0x07, 0x03, 0x07, 0x04, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x05, 0x06 };
-	char value2 = 0x20;
-	char data2[] = { 0x00, 0x07, 0x01, 0x07, 0x02, 0x03, 0x07, 0x04, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x05, 0x06 };
-
-	DWORD oldProtect;
-	static bool done = false;
-	if (!done) {
-		done = true;
-		VirtualProtect(address1, 1, PAGE_EXECUTE_READWRITE, &oldProtect);
-		VirtualProtect(address2, sizeof(data1), PAGE_EXECUTE_READWRITE, &oldProtect);
-	}
-
-
-	if (!serverRunning(a1)) {
-		*(char*)address1 = value2;
-		memcpy(address2, data2, sizeof(data2));
-		CSquirrelVM__TranslateCallOriginal(a1);
-		return;
-	}
-
-	*(char*)address1 = value1;
-	memcpy(address2, data1, sizeof(data1));
-	CSquirrelVM__TranslateCallOriginal(a1);
-
+__int64 __fastcall CSquirrelVM__TranslateCall(__int64* a1) {
+	return CSquirrelVM__TranslateCallOriginal(a1);
 }
 
 __int64 __fastcall CSquirrelVM__PushVariant(__int64* a1, ScriptVariant_t* a2)
 {
-	if (serverRunning(a1)) {
+	if (UsesServerVariantLayout(a1)) {
 		ConvertScriptVariant(a2, R1O_TO_R1);
 		//std::cout << __FUNCTION__ ": converted variant" << std::endl;
 	}
@@ -2878,27 +3067,27 @@ __int64 __fastcall CSquirrelVM__PushVariant(__int64* a1, ScriptVariant_t* a2)
 
 char __fastcall CSquirrelVM__ConvertToVariant(__int64* a1, __int64 a2, ScriptVariant_t* a3)
 {
-	bool ret = CSquirrelVM__ConvertToVariantOriginal(a1, a2, a3);
-	if (serverRunning(a1))
+	char ret = CSquirrelVM__ConvertToVariantOriginal(a1, a2, a3);
+	if (UsesServerVariantLayout(a1))
 		ConvertScriptVariant(a3, R1_TO_R1O);
 	return ret;
 }
 __int64 __fastcall CSquirrelVM__ReleaseValue(__int64* a1, ScriptVariant_t* a2)
 {
-	if (serverRunning(a1))
+	if (UsesServerVariantLayout(a1))
 		ConvertScriptVariant(a2, R1O_TO_R1);
 	return CSquirrelVM__ReleaseValueOriginal(a1, a2);
 }
 bool __fastcall CSquirrelVM__SetValue(__int64* a1, void* a2, unsigned int a3, ScriptVariant_t* a4)
 {
-	if (serverRunning(a1))
+	if (UsesServerVariantLayout(a1))
 		ConvertScriptVariant(a4, R1O_TO_R1);
 	return CSquirrelVM__SetValueOriginal(a1, a2, a3, a4);
 }
 
 bool __fastcall CSquirrelVM__SetValueEx(__int64* a1, __int64 a2, const char* a3, ScriptVariant_t* a4)
 {
-	if (serverRunning(a1))
+	if (UsesServerVariantLayout(a1))
 		ConvertScriptVariant(a4, R1O_TO_R1);
 	return CSquirrelVM__SetValueExOriginal(a1, a2, a3, a4);
 
@@ -2907,23 +3096,18 @@ typedef void (*CScriptManager__DestroyVMType)(void* a1, void* vmptr);
 CScriptManager__DestroyVMType CScriptManager__DestroyVMOriginal;
 
 __declspec(dllexport) R1SquirrelVM* GetServerVMPtr() {
-	return (R1SquirrelVM*)(realvmptr);
+	return static_cast<R1SquirrelVM*>(g_realServerVm);
 }
 void __fastcall CScriptManager__DestroyVM(void* a1, void* vmptr)
 {
-	//if (serverRunning(a1) || serverRunning(vmptr) || serverRunning(*(void**)vmptr) || serverRunning(*(void**)a1)) {
-	//	vmptr = realvmptr;
-	//	//std::cout << "set vm ptr" << std::endl;
-	//}
-	//else {
-	//	//std::cout << "did NOT set vm ptr" << std::endl;
-	//}
-	if (*((void**)vmptr) == fakevmptr) {
-		vmptr = realvmptr;
-		realvmptr = 0;
-		hasRegisteredServerFuncs = true;
+	if (vmptr == &g_fakeServerVm) {
+		vmptr = g_realServerVm;
+		OnServerVmDestroyed();
 	}
-	return CScriptManager__DestroyVMOriginal(a1, vmptr);
+	else if (vmptr && vmptr == g_realServerVm) {
+		OnServerVmDestroyed();
+	}
+	CScriptManager__DestroyVMOriginal(a1, vmptr);
 }
 // Track incomplete lines for each VM type
 static bool g_serverLineIncomplete = false;

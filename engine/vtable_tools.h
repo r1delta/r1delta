@@ -39,6 +39,7 @@
 
 void UpdateRWXFunction(void* rwxfunc, void* real);
 uintptr_t CreateFunction(void* func, void* real);
+uintptr_t CreateFunctionIndirect(void* func, void** realSlot);
 uintptr_t CreateCallgate(void* vftable, uintptr_t dll_start, uintptr_t dll_end,
                          int orig_idx, int new_idx);
 

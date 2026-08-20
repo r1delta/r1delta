@@ -119,16 +119,16 @@ static bool TryAcceptClientZeroBitTail(CNetChan* netChan, bf_read* buf, bool res
 		return result;
 	}
 
-	char message[256];
-	_snprintf_s(
-		message,
-		sizeof(message),
-		_TRUNCATE,
-		"R1Delta: client CNetChan::_ProcessMessages accepted zero bit tail netchan=%p startBit=%d tailBits=%d\n",
-		netChan,
-		startBit,
-		left);
-	OutputDebugStringA(message);
+	//char message[256];
+	//_snprintf_s(
+	//	message,
+	//	sizeof(message),
+	//	_TRUNCATE,
+	//	"R1Delta: client CNetChan::_ProcessMessages accepted zero bit tail netchan=%p startBit=%d tailBits=%d\n",
+	//	netChan,
+	//	startBit,
+	//	left);
+	//OutputDebugStringA(message);
 	return true;
 }
 

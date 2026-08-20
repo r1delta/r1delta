@@ -378,7 +378,8 @@ typedef bool (*CSquirrelVM__SetValueExType)(__int64* a1, __int64 a2, const char*
 extern CSquirrelVM__SetValueExType CSquirrelVM__SetValueExOriginal;
 typedef __int64 (*CSquirrelVM__TranslateCallType)(__int64* a1);
 extern CSquirrelVM__TranslateCallType CSquirrelVM__TranslateCallOriginal;
-void __fastcall CSquirrelVM__TranslateCall(__int64* a1);
+__int64 __fastcall CSquirrelVM__TranslateCall(__int64* a1);
+bool InstallScriptVariantReturnBridge(uintptr_t vscriptBase, bool legacyDedicated);
 void __fastcall CSquirrelVM__RegisterFunctionGuts(__int64* a1, __int64 a2, const char** a3);
 __int64 __fastcall CSquirrelVM__PushVariant(__int64* a1, ScriptVariant_t* a2);
 char __fastcall CSquirrelVM__ConvertToVariant(__int64* a1, __int64 a2, ScriptVariant_t* a3);

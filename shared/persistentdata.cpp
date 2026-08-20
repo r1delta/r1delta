@@ -2,12 +2,6 @@
 #include "filesystem.h" 
 
 
-// Helper to extract base name from a segment with possible array index
-static std::string getBaseArrayName(const std::string_view& segment) {
-    size_t bracketPos = segment.find('[');
-    return std::string(bracketPos == std::string::npos ? segment : segment.substr(0, bracketPos));
-}
-
 class PDef;
 
 #include <string>
@@ -27,11 +21,33 @@ class PDef;
 #include "factory.h"
 #include "load.h"
 // Network message handling
+#include <array>
 #include <unordered_map>
 #include <cstdint>
 #include <charconv>
 
 static std::unordered_map<int, PersistentDataState::PlayerState> s_R1OPersistentUserDataByPlayer;
+using NonR1OPersistentValueMap = std::unordered_map<
+	std::string, std::string, HashStrings, std::equal_to<>>;
+static std::array<NonR1OPersistentValueMap, PersistentDataSlots::kMaximumSupportedClients>
+	s_nonR1OPersistentUserDataByPlayer;
+static std::array<KeyValues*, PersistentDataSlots::kMaximumSupportedClients>
+	s_nonR1OPersistentUserDataConVarsByPlayer = {};
+
+static bool IsValidNonR1OPersistentUserDataSlot(int playerSlot)
+{
+	return playerSlot >= 0 && playerSlot < PersistentDataSlots::kMaximumSupportedClients;
+}
+
+static void RefreshNonR1OPersistentUserDataCache(int playerSlot, KeyValues* vars)
+{
+	if (!IsValidNonR1OPersistentUserDataSlot(playerSlot))
+		return;
+	if (s_nonR1OPersistentUserDataConVarsByPlayer[playerSlot] != vars) {
+		s_nonR1OPersistentUserDataConVarsByPlayer[playerSlot] = vars;
+		s_nonR1OPersistentUserDataByPlayer[playerSlot].clear();
+	}
+}
 
 namespace {
 constexpr const char* kPersistentDataDiagnosticFlag = "-r1delta_pdata_diag";
@@ -471,7 +487,7 @@ public:
 	bool processSegmentForArrays(std::string& currentBase, const std::string& segment) const;
 	// Main validation function
 	bool isValid(const std::string_view& key, const std::string_view& value) const;
-	std::string resolveArrayIndices(const std::string_view& key) const;
+	bool validateArrayIndices(const std::string_view& key) const;
 
 private:
 	friend class SchemaParser;
@@ -741,51 +757,80 @@ bool PDataValidator::processSegmentForArrays(std::string& currentBase, const std
 	return true;
 }
 
-std::string PDataValidator::resolveArrayIndices(const std::string_view& key) const {
+bool PDataValidator::validateArrayIndices(const std::string_view& key) const {
 	ZoneScoped;
 
-    std::vector<std::string> segments = splitOnDot(key);
-    std::string resolvedKey;
-    std::string currentValidationBase;  // Tracks the base name for validation
-    
-    for (const auto& segment : segments) {
-        // Get base name without any array indices for validation
-        std::string baseName = getBaseArrayName(segment);
-        
-        // Build the validation base with dot separators
-        if (!currentValidationBase.empty()) {
-            currentValidationBase += ".";
-        }
-        currentValidationBase += baseName;
+	const size_t firstBracketPos = key.find('[');
+	if (firstBracketPos == std::string_view::npos)
+		return true;
 
-        // Process array indices if present
-        size_t bracketPos = segment.find('[');
-        if (bracketPos != std::string::npos) {
-            std::string indexStr = segment.substr(bracketPos+1, segment.find(']')-bracketPos-1);
-            
-            // Validate using the accumulated base name without indices
-            if (!validateArrayAccess(currentValidationBase, indexStr)) {
-                Warning(__FUNCTION__ ": out of bound pdata array index %s for %s!\n", 
-                    indexStr.c_str(), currentValidationBase.c_str());
-                return "";
-            }
-        }
+	std::array<char, MAX_LENGTH> currentValidationBase = {};
+	size_t currentValidationBaseLength = 0;
+	const auto appendValidationBase = [&](std::string_view component) {
+		const size_t separatorLength = currentValidationBaseLength == 0 ? 0 : 1;
+		if (currentValidationBaseLength + separatorLength + component.size() >= currentValidationBase.size())
+			return false;
+		if (separatorLength)
+			currentValidationBase[currentValidationBaseLength++] = '.';
+		memcpy(currentValidationBase.data() + currentValidationBaseLength, component.data(), component.size());
+		currentValidationBaseLength += component.size();
+		currentValidationBase[currentValidationBaseLength] = '\0';
+		return true;
+	};
 
-        // Build resolved key with indices
-        if (!resolvedKey.empty()) {
-            resolvedKey += ".";
-        }
-        resolvedKey += segment;
-    }
-    
-    return resolvedKey;
+	size_t segmentStart = 0;
+	while (segmentStart < key.size()) {
+		const size_t nextDot = key.find('.', segmentStart);
+		const size_t segmentEnd = nextDot == std::string_view::npos ? key.size() : nextDot;
+		const size_t bracketPos = key.find('[', segmentStart);
+		const bool hasArrayIndex =
+			bracketPos != std::string_view::npos && bracketPos < segmentEnd;
+
+		if (segmentStart == segmentEnd)
+			return false;
+
+		if (!hasArrayIndex) {
+			if (!appendValidationBase(key.substr(segmentStart, segmentEnd - segmentStart)))
+				return false;
+		}
+		else {
+			if (bracketPos == segmentStart)
+				return false;
+			if (!appendValidationBase(key.substr(segmentStart, bracketPos - segmentStart)))
+				return false;
+
+			size_t cursor = bracketPos;
+			while (cursor < segmentEnd) {
+				if (key[cursor] != '[')
+					return false;
+				const size_t bracketEnd = key.find(']', cursor);
+				if (bracketEnd == std::string_view::npos || bracketEnd >= segmentEnd)
+					return false;
+
+				std::string_view index = key.substr(cursor + 1, bracketEnd - cursor - 1);
+				const std::string_view validationBase(
+					currentValidationBase.data(), currentValidationBaseLength);
+				if (!validateArrayAccess(validationBase, index)) {
+					Warning(__FUNCTION__ ": out of bound pdata array index %.*s for %s!\n",
+						static_cast<int>(index.size()), index.data(), currentValidationBase.data());
+					return false;
+				}
+				cursor = bracketEnd + 1;
+			}
+		}
+
+		if (segmentEnd == key.size())
+			return true;
+		segmentStart = segmentEnd + 1;
+	}
+
+	return false;
 }
 
 bool PDataValidator::isValid(const std::string_view& key, const std::string_view& value) const
 {
-    std::string resolvedKey = resolveArrayIndices(key);
-    if (resolvedKey.empty()) return false; // Invalid indices
-    std::vector<std::string> segments = splitOnDot(resolvedKey);
+	if (!validateArrayIndices(key)) return false;
+	std::vector<std::string> segments = splitOnDot(key);
     std::string baseKey;
     baseKey.reserve(key.size()); // rough
 
@@ -1094,7 +1139,7 @@ void PDef::InitValidator() {
 		return s_validator->isValid(key, value);
 	}
 
-	std::string PDef::ResolveKeyIndices(const std::string_view& key) {
+	bool PDef::ValidateKeyIndices(const std::string_view& key) {
 		// Initialize validator on first use
 		std::call_once(s_initFlag, InitValidator);
 
@@ -1102,7 +1147,7 @@ void PDef::InitValidator() {
 			Error("PData validator failed to initialize");
 		}
 		
-		return s_validator->resolveArrayIndices(key);
+		return s_validator->validateArrayIndices(key);
 	}
 
 
@@ -1443,12 +1488,13 @@ const char* hashUserInfoKeyArena(Arena* arena, const char* key)
 #ifdef HASH_USERINFO_KEYS
 # error NOT IMPLEMENTED
 #else
-	// First resolve array indices
-	std::string resolvedKey = PDef::ResolveKeyIndices(key);
+	// Validate array indices before copying the logical key into scratch storage.
+	if (!PDef::ValidateKeyIndices(key))
+		key = "";
 
 	// NOTE(mrsteyk): guarantee key length validity.
 	constexpr size_t MAX_LENGTH_DUP = MAX_LENGTH - sizeof(PERSIST_COMMAND);
-	auto len = resolvedKey.length();
+	auto len = strlen(key);
 	if (len > MAX_LENGTH_DUP)
 	{
 		R1DAssert(!"Bad stuff happened!");
@@ -1457,6 +1503,7 @@ const char* hashUserInfoKeyArena(Arena* arena, const char* key)
 
 	auto ret = (char*)arena_push(arena, len + 1);
 	memcpy(ret, key, len);
+	ret[len] = '\0';
 	// TODO(mrsteyk): debug only check?
 	//if (std::string(key) != std::string(ret))
 	if (key[len] != 0 || !!memcmp(ret, key, len))
@@ -1693,8 +1740,10 @@ SQInteger Script_ServerGetPersistentUserDataKVString(HSQUIRRELVM v) {
 
 	auto edict = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(pPlayer) + 64);
 	auto index = ((edict - reinterpret_cast<__int64>(pGlobalVarsServer->pEdicts)) / 56) - 1;
+	auto* vars = GetClientConVarsKV(index);
+	RefreshNonR1OPersistentUserDataCache(index, vars);
 
-	if (index == 18 || !GetClientConVarsKV(index)) {
+	if (index == 18 || !vars) {
 		//return sq_throwerror(v, "Client has NULL m_ConVars.");
 		//Msg("REPLAY on server tried to access persistent value: key=%s, hashedKey=%s, hashed=%s\n",
 		//	pKey, hashedKey.c_str(), "true");
@@ -1703,7 +1752,22 @@ SQInteger Script_ServerGetPersistentUserDataKVString(HSQUIRRELVM v) {
 		return 1;
 	}
 
-	const char* pResult = GetClientConVarsKV(index)->GetString(modifiedKey, pDefaultValue);
+	static constexpr char kMissingPersistentValue[] = "\x01";
+	const char* pResult = vars->GetString(modifiedKey, kMissingPersistentValue);
+	auto& playerValues = s_nonR1OPersistentUserDataByPlayer[index];
+	if (!pResult || std::strcmp(pResult, kMissingPersistentValue) == 0) {
+		auto cached = playerValues.find(std::string_view(modifiedKey));
+		if (cached != playerValues.end())
+			playerValues.erase(cached);
+		pResult = pDefaultValue;
+	}
+	else {
+		auto cached = playerValues.find(std::string_view(modifiedKey));
+		if (cached == playerValues.end())
+			playerValues.emplace(modifiedKey, pResult);
+		else
+			cached->second = pResult;
+	}
 	//Msg("Server accessing persistent value: key=%s, hashedKey=%s, value=%s, hashed=%s\n",
 	//	pKey, hashedKey.c_str(), pResult, "true");
 
@@ -1780,11 +1844,35 @@ SQInteger Script_ServerSetPersistentUserDataKVString(HSQUIRRELVM v) {
 	auto edict = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(pPlayer) + 64);
 
 	auto index = ((edict - reinterpret_cast<__int64>(pGlobalVarsServer->pEdicts)) / 56) - 1;
+	auto* vars = GetClientConVarsKV(index);
+	RefreshNonR1OPersistentUserDataCache(index, vars);
+	const bool isReplayPlayer = index == PersistentDataSlots::kReplayPlayerSlot;
+	bool shouldUpdate = vars != nullptr && !isReplayPlayer && IsValidNonR1OPersistentUserDataSlot(index);
+	if (shouldUpdate) {
+		auto& playerValues = s_nonR1OPersistentUserDataByPlayer[index];
+		static constexpr char kMissingPersistentValue[] = "\x01";
+		const char* currentValue = vars->GetString(modifiedKey, kMissingPersistentValue);
+		if (!currentValue || std::strcmp(currentValue, kMissingPersistentValue) == 0) {
+			auto existing = playerValues.find(std::string_view(modifiedKey));
+			if (existing != playerValues.end())
+				playerValues.erase(existing);
+		}
+		else {
+			auto existing = playerValues.find(std::string_view(modifiedKey));
+			if (existing == playerValues.end())
+				playerValues.emplace(modifiedKey, currentValue);
+			else if (existing->second != currentValue)
+				existing->second = currentValue;
+			if (std::strcmp(currentValue, pValue) == 0)
+				shouldUpdate = false;
+		}
+	}
 
-	if (!(!GetClientConVarsKV(index) || index == 18)) {
+	if (shouldUpdate) {
 		//return sq_throwerror(v, "Client has NULL m_ConVars.");
 		CVEngineServer_ClientCommand(0, edict, PERSIST_COMMAND" \"%s\" \"%s\"", hashedKey, pValue);
-		GetClientConVarsKV(index)->SetString(modifiedKey, pValue);
+		vars->SetString(modifiedKey, pValue);
+		s_nonR1OPersistentUserDataByPlayer[index][modifiedKey] = pValue;
 		//Msg("Server setting persistent value: key=%s, value=%s, hashed=%s\n",
 		//	pKey, pValue, "true");
 	}

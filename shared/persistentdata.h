@@ -82,5 +82,5 @@ private:
 public:
 	static void InitValidator();
 	static bool IsValidKeyAndValue(const std::string& key, const std::string& value);
-	static std::string ResolveKeyIndices(const std::string_view& key);
+	static bool ValidateKeyIndices(const std::string_view& key);
 };
