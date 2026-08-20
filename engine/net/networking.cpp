@@ -163,6 +163,87 @@ int32_t ReadConnectPacket2015AndWriteConnectPacket2014(bf_read& msg, bf_write& b
     return !buffer.IsOverflowed() ? lastChallenge : -1;
 }
 
+
+int32_t ReadConnectPacketXenonAndWriteConnectPacket2015(bf_read& msg, bf_write& buffer)
+{
+    ZoneScoped;
+    char type = msg.ReadByte();
+    Msg("ReadConnectPacketXenonAndWriteConnectPacket2015: type %c\n", type);
+    if (type != 'A')
+    {
+        return -1;
+    }
+
+    //buffer.WriteLong(-1);
+    buffer.WriteByte('A');
+
+    int version = msg.ReadLong();
+    Msg("ReadConnectPacket2015AndWriteConnectPacket2015: version %d\n", version);
+    buffer.WriteLong(1040); // 2015 version
+    auto hostVersion = msg.ReadLong();
+    buffer.WriteLong(hostVersion); // hostVersion
+    Msg("ReadConnectPacket2015AndWriteConnectPacket2015: hostVersion %d\n", hostVersion);
+    int32_t lastChallenge = msg.ReadLong();
+    buffer.WriteLong(lastChallenge); // challengeNr
+    buffer.WriteLong(msg.ReadLong()); // unknown 
+    buffer.WriteLong(msg.ReadLong()); // unknown1
+    auto platformUserId = msg.ReadLongLong();
+    buffer.WriteLongLong(platformUserId); // platformUserId
+    Msg("ReadConnectPacket2015AndWriteConnectPacket2015: platformUserId %lld\n", platformUserId);
+    char tempStr[256];
+    msg.ReadString(tempStr, sizeof(tempStr));
+    buffer.WriteString(tempStr); // name
+    msg.ReadString(tempStr, sizeof(tempStr));
+    buffer.WriteString(tempStr); // password
+
+    msg.ReadString(tempStr, sizeof(tempStr));
+    buffer.WriteString(tempStr); // unknown2
+
+    int unknownCount = msg.ReadByte();
+    buffer.WriteByte(unknownCount);
+    for (int i = 0; i < unknownCount; i++)
+    {
+        buffer.WriteLongLong(msg.ReadLongLong()); // unknown3
+    }
+
+    msg.ReadString(tempStr, sizeof(tempStr));
+    buffer.WriteString(tempStr); // serverFilter
+
+    buffer.WriteLong(msg.ReadLong()); // playlistVersionNumber
+    buffer.WriteLong(msg.ReadLong()); // persistenceVersionNumber
+    buffer.WriteLongLong(msg.ReadLongLong()); // persistenceHash
+
+    int numberOfPlayers = msg.ReadByte();
+    buffer.WriteByte(numberOfPlayers);
+    for (int i = 0; i < numberOfPlayers; i++)
+    {
+        // Read SplitPlayerConnect from 2015 packet
+        int type = msg.ReadUBitLong(6);
+        Msg("SplitPlayerConnect type: %d\n", type); // 0 = player, 1 = spectator, 2 = bot, 3 = server
+        int count = msg.ReadByte();
+        Msg("SplitPlayerConnect count: %d\n", count);
+        // Write SplitPlayerConnect to 2014 packet
+        buffer.WriteUBitLong(56, 6);
+        buffer.WriteByte(count);
+
+        for (int j = 0; j < count; j++)
+        {
+            msg.ReadString(tempStr, sizeof(tempStr));
+            buffer.WriteString(tempStr); // key
+
+            msg.ReadString(tempStr, sizeof(tempStr));
+            buffer.WriteString(tempStr); // value
+        }
+    }
+
+    buffer.WriteByte(msg.ReadByte()); // lowViolence 
+    auto id = msg.ReadByte();
+    buffer.WriteByte(id);
+
+    return !buffer.IsOverflowed() ? lastChallenge : -1;
+}
+
+
 // Dedicated server connectionless packet processor
 ProcessConnectionlessPacketType ProcessConnectionlessPacketOriginal = nullptr;
 static double lastReceived = 0.f;
@@ -194,6 +275,18 @@ ProcessConnectionlessPacketType ProcessConnectionlessPacketOriginalClient = null
 
 char __fastcall ProcessConnectionlessPacketClient(unsigned int* a1, netpacket_s* a2)
 {
+    char buffer[1200] = { 0 };
+    bf_write writer(reinterpret_cast<char*>(buffer), sizeof(buffer));
+    char type = ((char*)a2->pData + 4)[0];
+    if (((char*)a2->pData + 4)[0] == 'A' && ReadConnectPacketXenonAndWriteConnectPacket2015(a2->message, writer) != -1)
+    {
+        if (lastReceived == a2->received)
+            return false;
+        lastReceived = a2->received;
+        bf_read converted(reinterpret_cast<char*>(buffer), writer.GetNumBytesWritten());
+        a2->message = converted;
+        return ProcessConnectionlessPacketOriginalClient(a1, a2);
+    }
     return ProcessConnectionlessPacketOriginalClient(a1, a2);
 }
 
