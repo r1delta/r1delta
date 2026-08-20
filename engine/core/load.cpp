@@ -9535,6 +9535,8 @@ void __stdcall LoaderNotificationCallback(
 	}
 	else if (string_equal_size(name, name_len, L"materialsystem_dx11.dll")) {
 		G_matsystem = (uintptr_t)notification_data->Loaded.DllBase;
+		if (GetR1DeltaEngineMode() == R1DeltaEngineMode::Client2015)
+			InstallMaterialSystemDx11MultithreadProtection(G_matsystem);
 		if (!HasEngineCommandLineFlag("-r1delta_disable_material_guards")) {
 			InstallMaterialSystemDx11NullShaderResourceGuard(G_matsystem);
 			if (GetR1DeltaEngineMode() == R1DeltaEngineMode::Client2015) {

@@ -38,6 +38,7 @@
 #include "materialsystem_dx11_vtf_scratch.h"
 #include "materialsystem_dx11_material_guard.h"
 #include "materialsystem_dx11_txaa_lifetime.h"
+#include "materialsystem_dx11_multithread.h"
 #include "r1o_runtime_paths.h"
 
 #include <MinHook.h>
@@ -45,6 +46,7 @@
 #include <new>
 #include <cctype>
 #include "windows.h"
+#include <d3d11_4.h>
 
 #include <iostream>
 #include "cvar.h"
@@ -642,6 +644,7 @@ using MaterialSystemDx11UtlBufferSetExternalType = __int64(__fastcall*)(
 	__int64 capacity,
 	__int64 initialPut,
 	unsigned char flags);
+using MaterialSystemDx11CreateD3D11DeviceType = bool(__fastcall*)(__int64 adapter);
 using MaterialSystemDx11TxaaQueuedResolveProducerType =
 	char(__fastcall*)(uintptr_t queuedContext);
 using MaterialSystemDx11TxaaQueueAllocateType = uintptr_t**(__fastcall*)(
@@ -650,6 +653,8 @@ using MaterialSystemDx11TxaaQueueAllocateType = uintptr_t**(__fastcall*)(
 	uintptr_t alignmentMask);
 using MaterialSystemDx11TxaaQueuePublishType =
 	char(__fastcall*)(uintptr_t commandEnd);
+static MaterialSystemDx11CreateD3D11DeviceType
+	MaterialSystemDx11CreateD3D11DeviceOriginal;
 static MaterialSystemDx11SelectShaderResourceType MaterialSystemDx11SelectShaderResourceOriginal;
 static MaterialSystemDx11SelectShaderStageResourceType MaterialSystemDx11SelectShaderStageResourceOriginal;
 static MaterialSystemDx11CreateInputLayoutType MaterialSystemDx11CreateInputLayoutOriginal;
@@ -676,6 +681,7 @@ static MaterialSystemDx11BoolPropertyType MaterialSystemDx11PropertyGetterOrigin
 static bool s_MaterialSystemDx11NullResourceGuardInstalled;
 static bool s_MaterialSystemDx11MaterialGuardInstalled;
 static bool s_MaterialSystemDx11TxaaLifetimeInstalled;
+static bool s_MaterialSystemDx11MultithreadProtectionInstalled;
 static uintptr_t s_MaterialSystemDx11Base;
 static int s_MaterialSystemDx11NullResourceLogBudget = 8;
 static int s_MaterialSystemDx11ResetResourceLogBudget = 8;
@@ -683,6 +689,70 @@ static int s_MaterialSystemDx11ConstantBufferLogBudget = 8;
 static int s_MaterialSystemDx11InputLayoutLogBudget = 8;
 static int s_MaterialSystemDx11MaterialInitLogBudget = 8;
 static bool MaterialSystemDx11LooksLikeUserRange(uintptr_t address, size_t size);
+
+static long __fastcall MaterialSystemDx11QueryMultithreadInterface(
+	void* context,
+	void** multithreadInterface)
+{
+	return reinterpret_cast<ID3D11DeviceContext*>(context)->QueryInterface(
+		__uuidof(ID3D11Multithread),
+		multithreadInterface);
+}
+
+static int __fastcall MaterialSystemDx11SetMultithreadProtected(
+	void* multithreadInterface,
+	int enabled)
+{
+	return reinterpret_cast<ID3D11Multithread*>(
+		multithreadInterface)->SetMultithreadProtected(enabled);
+}
+
+static int __fastcall MaterialSystemDx11GetMultithreadProtected(
+	void* multithreadInterface)
+{
+	return reinterpret_cast<ID3D11Multithread*>(
+		multithreadInterface)->GetMultithreadProtected();
+}
+
+static unsigned long __fastcall MaterialSystemDx11ReleaseMultithreadInterface(
+	void* multithreadInterface)
+{
+	return reinterpret_cast<ID3D11Multithread*>(multithreadInterface)->Release();
+}
+
+static bool __fastcall MaterialSystemDx11CreateD3D11DeviceGuard(
+	__int64 adapter)
+{
+	using namespace r1delta::materialsystem_dx11;
+	if (!MaterialSystemDx11CreateD3D11DeviceOriginal
+		|| !MaterialSystemDx11CreateD3D11DeviceOriginal(adapter)) {
+		return false;
+	}
+
+	void* const context = *reinterpret_cast<void**>(
+		s_MaterialSystemDx11Base + kImmediateContextRva);
+	const MultithreadProtectionOperations operations = {
+		&MaterialSystemDx11QueryMultithreadInterface,
+		&MaterialSystemDx11SetMultithreadProtected,
+		&MaterialSystemDx11GetMultithreadProtected,
+		&MaterialSystemDx11ReleaseMultithreadInterface
+	};
+	const MultithreadProtectionReport report =
+		EnableMultithreadProtection(context, operations);
+
+	char buffer[256];
+	_snprintf_s(
+		buffer,
+		sizeof(buffer),
+		_TRUNCATE,
+		"R1Delta: materialsystem_dx11 D3D11 multithread protection "
+		"result=%d previous=%d context=%p\n",
+		static_cast<int>(report.result),
+		report.wasProtected ? 1 : 0,
+		context);
+	OutputDebugStringA(buffer);
+	return report.result == MultithreadProtectionResult::enabled;
+}
 
 static void MaterialSystemDx11LogMaterialInitGuard(const char* reason, __int64 material)
 {
@@ -1873,6 +1943,95 @@ static char __fastcall MaterialSystemDx11QueueRetainedTxaaResolve(
 
 	return MaterialSystemDx11TxaaQueuePublish(
 		reinterpret_cast<uintptr_t>(command + 1));
+}
+
+[[noreturn]] static void MaterialSystemDx11FailRenderThreadInvariant(
+	const char* reason,
+	DWORD timestamp,
+	DWORD imageSize)
+{
+	constexpr DWORD kRenderThreadInvariantFailure = 0xE042101B;
+	char buffer[320];
+	_snprintf_s(
+		buffer,
+		sizeof(buffer),
+		_TRUNCATE,
+		"R1Delta: fatal materialsystem_dx11 render-thread invariant "
+		"reason=%s timestamp=0x%08lx imageSize=0x%08lx\n",
+		reason,
+		static_cast<unsigned long>(timestamp),
+		static_cast<unsigned long>(imageSize));
+	OutputDebugStringA(buffer);
+
+	const ULONG_PTR arguments[] = {
+		reinterpret_cast<ULONG_PTR>(reason),
+		static_cast<ULONG_PTR>(timestamp),
+		static_cast<ULONG_PTR>(imageSize)
+	};
+	RaiseException(
+		kRenderThreadInvariantFailure,
+		EXCEPTION_NONCONTINUABLE,
+		static_cast<DWORD>(std::size(arguments)),
+		arguments);
+	__assume(0);
+}
+
+void InstallMaterialSystemDx11MultithreadProtection(
+	uintptr_t materialSystemBase)
+{
+	using namespace r1delta::materialsystem_dx11;
+	if (s_MaterialSystemDx11MultithreadProtectionInstalled
+		|| !materialSystemBase
+		|| GetR1DeltaEngineMode() != R1DeltaEngineMode::Client2015) {
+		return;
+	}
+
+	DWORD timestamp = 0;
+	DWORD imageSize = 0;
+	if (!HasExpectedStockMaterialSystemImage(
+			materialSystemBase,
+			&timestamp,
+			&imageSize)
+		|| kImmediateContextRva > imageSize - sizeof(void*)
+		|| !MaterialSystemDx11IsCommittedReadableRange(
+			reinterpret_cast<void*>(
+				materialSystemBase + kImmediateContextRva),
+			sizeof(void*))) {
+		MaterialSystemDx11FailRenderThreadInvariant(
+			"unexpected-image",
+			timestamp,
+			imageSize);
+	}
+
+	const bool framePointerPatched = PatchModuleBytesIfMatch(
+		materialSystemBase,
+		kDrawFramePointerRestoreRva,
+		kExpectedDrawFramePointerRestoreNop,
+		kRestoreDrawFramePointer,
+		sizeof(kRestoreDrawFramePointer),
+		"materialsystem draw frame-pointer restore");
+
+	s_MaterialSystemDx11Base = materialSystemBase;
+	const bool protectionHookInstalled =
+		InstallMaterialSystemDx11CheckedHook(
+			materialSystemBase,
+			kCreateD3D11DeviceRva,
+			kExpectedCreateD3D11DevicePrologue,
+			sizeof(kExpectedCreateD3D11DevicePrologue),
+			reinterpret_cast<void*>(
+				&MaterialSystemDx11CreateD3D11DeviceGuard),
+			reinterpret_cast<void**>(
+				&MaterialSystemDx11CreateD3D11DeviceOriginal),
+			"d3d11-multithread");
+	if (!framePointerPatched || !protectionHookInstalled) {
+		MaterialSystemDx11FailRenderThreadInvariant(
+			framePointerPatched
+				? "multithread-hook"
+				: "frame-pointer-patch",
+			timestamp,
+			imageSize);
+	}
+	s_MaterialSystemDx11MultithreadProtectionInstalled = true;
 }
 
 void InstallMaterialSystemDx11TxaaLifetimeGuard(

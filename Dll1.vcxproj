@@ -231,6 +231,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="engine\core\materialsystem_dx11_vtf_scratch.h" />
     <ClInclude Include="engine\core\materialsystem_dx11_material_guard.h" />
     <ClInclude Include="engine\core\materialsystem_dx11_txaa_lifetime.h" />
+    <ClInclude Include="engine\core\materialsystem_dx11_multithread.h" />
     <ClInclude Include="engine\cvar.h" />
     <ClInclude Include="engine\dedicated.h" />
     <ClInclude Include="client\discord.h" />
