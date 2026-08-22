@@ -4,6 +4,7 @@
 #include "physics.h"
 #include "physics_hooks.h"
 #include "vphysics_shutdown_guard.h"
+#include "vphysics_parallel_guard.h"
 #include "core.h"
 #include "load.h"
 #include "logging.h"
@@ -45,51 +46,187 @@ __int64 __fastcall UTIL_GetEntityByIndex(int iIndex)
     return 0LL;
 }
 
-// VPhysics thread safety hooks
-__int64 (*o_sub_1032C0)(__int64, char) = nullptr;
-__int64 (*o_sub_103120)(__int64, __int64, __int64, int) = nullptr;
-
-__int64 __fastcall sub_1032C0_hook(__int64 a1, char a2)
+namespace
 {
-    EnterCriticalSection(&g_vphysics_cs);
-    __int64 ret = o_sub_1032C0(a1, a2);
-    LeaveCriticalSection(&g_vphysics_cs);
-    return ret;
+using R1VPhysicsSequentialDispatcher =
+    __int64(__fastcall*)(__int64 manager);
+
+R1VPhysicsSequentialDispatcher s_R1VPhysicsSequentialDispatcherOriginal;
+uintptr_t s_R1VPhysicsSequentialDispatcherTarget;
+uintptr_t s_R1VPhysicsSequentialDispatcherBase;
+
+class R1VPhysicsCriticalSectionScope
+{
+public:
+    explicit R1VPhysicsCriticalSectionScope(CRITICAL_SECTION* criticalSection)
+        : m_criticalSection(criticalSection)
+    {
+        EnterCriticalSection(m_criticalSection);
+    }
+
+    ~R1VPhysicsCriticalSectionScope()
+    {
+        LeaveCriticalSection(m_criticalSection);
+    }
+
+    R1VPhysicsCriticalSectionScope(
+        const R1VPhysicsCriticalSectionScope&) = delete;
+    R1VPhysicsCriticalSectionScope& operator=(
+        const R1VPhysicsCriticalSectionScope&) = delete;
+
+private:
+    CRITICAL_SECTION* m_criticalSection;
+};
+
+[[noreturn]] void FailR1VPhysicsSequentialDispatcherInvariant(
+    const char* reason,
+    uintptr_t detail,
+    MH_STATUS status)
+{
+    constexpr DWORD kSequentialDispatcherInvariantFailure = 0xE042101C;
+    char buffer[320];
+    _snprintf_s(
+        buffer,
+        sizeof(buffer),
+        _TRUNCATE,
+        "R1Delta: fatal R1 VPhysics sequential-dispatch invariant "
+        "reason=%s detail=%p status=%d\n",
+        reason,
+        reinterpret_cast<void*>(detail),
+        static_cast<int>(status));
+    OutputDebugStringA(buffer);
+
+    const ULONG_PTR arguments[] = {
+        reinterpret_cast<ULONG_PTR>(reason),
+        static_cast<ULONG_PTR>(detail),
+        static_cast<ULONG_PTR>(status),
+    };
+    RaiseException(
+        kSequentialDispatcherInvariantFailure,
+        EXCEPTION_NONCONTINUABLE,
+        static_cast<DWORD>(std::size(arguments)),
+        arguments);
+    TerminateProcess(
+        GetCurrentProcess(),
+        kSequentialDispatcherInvariantFailure);
+    __assume(0);
 }
 
-__int64 __fastcall sub_103120_hook(__int64 a1, __int64 a2, __int64 a3, int a4)
+__int64 __fastcall R1VPhysicsSequentialDispatcherGuard(__int64 manager)
 {
-    EnterCriticalSection(&g_vphysics_cs);
-
-    // Get base address of vphysics.dll
-    static uintptr_t base = (uintptr_t)GetModuleHandleA("vphysics.dll");
-
-    // Calculate addresses of key memory locations
-    uintptr_t physics_pp_mindists_addr = base + 0x1EF1D0;
-    int* physics_pp_mindists = (int*)(physics_pp_mindists_addr + 0x5C);
-    uintptr_t qword_1801EF258_addr = base + 0x1EF258;
-    void** qword_1801EF258 = (void**)qword_1801EF258_addr;
-
-    // Check if we need to manually set the pointer (non-parallel path)
-    int needsManualSet = (*physics_pp_mindists == 0);
-
-    // Save original value and set our value if needed
-    void* original_value = NULL;
-    if (needsManualSet) {
-        original_value = *qword_1801EF258;
-        *qword_1801EF258 = (void*)(a1 + 0x100078);
+    using namespace r1delta::vphysics;
+    if (!s_R1VPhysicsSequentialDispatcherOriginal)
+    {
+        FailR1VPhysicsSequentialDispatcherInvariant(
+            "missing-original",
+            s_R1VPhysicsSequentialDispatcherTarget,
+            MH_UNKNOWN);
+    }
+    if (manager < 0x10000)
+    {
+        FailR1VPhysicsSequentialDispatcherInvariant(
+            "invalid-manager",
+            static_cast<uintptr_t>(manager),
+            MH_UNKNOWN);
     }
 
-    // Call original function
-    __int64 ret = o_sub_103120(a1, a2, a3, a4);
-
-    // Restore original value if we changed it
-    if (needsManualSet) {
-        *qword_1801EF258 = original_value;
+    R1VPhysicsCriticalSectionScope lock(&g_vphysics_cs);
+    auto* const parallelEnabled = reinterpret_cast<int*>(
+        s_R1VPhysicsSequentialDispatcherBase + kParallelEnabledRva);
+    auto* const workerPointer = reinterpret_cast<uintptr_t*>(
+        s_R1VPhysicsSequentialDispatcherBase
+        + kSequentialWorkerPointerRva);
+    ScopedSequentialDispatcherState state(
+        parallelEnabled,
+        workerPointer,
+        static_cast<uintptr_t>(manager));
+    if (!state.Entered())
+    {
+        FailR1VPhysicsSequentialDispatcherInvariant(
+            "state-entry",
+            static_cast<uintptr_t>(manager),
+            MH_UNKNOWN);
     }
 
-    LeaveCriticalSection(&g_vphysics_cs);
-    return ret;
+    return s_R1VPhysicsSequentialDispatcherOriginal(manager);
+}
+}
+
+void InstallR1VPhysicsSequentialDispatcherGuard(uintptr_t vphysicsBase)
+{
+    using namespace r1delta::vphysics;
+    const uintptr_t target =
+        vphysicsBase + kSequentialDispatcherRva;
+    if (!IsExpectedR1VPhysicsModule(vphysicsBase))
+    {
+        FailR1VPhysicsSequentialDispatcherInvariant(
+            "unexpected-image",
+            vphysicsBase,
+            MH_UNKNOWN);
+    }
+
+    if (s_R1VPhysicsSequentialDispatcherTarget)
+    {
+        if (s_R1VPhysicsSequentialDispatcherTarget != target)
+        {
+            FailR1VPhysicsSequentialDispatcherInvariant(
+                "second-target",
+                target,
+                MH_UNKNOWN);
+        }
+        const MH_STATUS enableStatus =
+            MH_EnableHook(reinterpret_cast<void*>(target));
+        if (enableStatus == MH_OK
+            || enableStatus == MH_ERROR_ENABLED)
+        {
+            return;
+        }
+        FailR1VPhysicsSequentialDispatcherInvariant(
+            "reenable",
+            target,
+            enableStatus);
+    }
+
+    if (memcmp(
+            reinterpret_cast<const void*>(target),
+            kSequentialDispatcherExpectedPrologue,
+            sizeof(kSequentialDispatcherExpectedPrologue)) != 0)
+    {
+        FailR1VPhysicsSequentialDispatcherInvariant(
+            "prologue",
+            target,
+            MH_UNKNOWN);
+    }
+
+    const MH_STATUS createStatus = MH_CreateHook(
+        reinterpret_cast<void*>(target),
+        &R1VPhysicsSequentialDispatcherGuard,
+        reinterpret_cast<void**>(
+            &s_R1VPhysicsSequentialDispatcherOriginal));
+    if (createStatus != MH_OK
+        || !s_R1VPhysicsSequentialDispatcherOriginal)
+    {
+        FailR1VPhysicsSequentialDispatcherInvariant(
+            "create",
+            target,
+            createStatus);
+    }
+
+    s_R1VPhysicsSequentialDispatcherBase = vphysicsBase;
+    s_R1VPhysicsSequentialDispatcherTarget = target;
+    const MH_STATUS enableStatus =
+        MH_EnableHook(reinterpret_cast<void*>(target));
+    if (enableStatus != MH_OK
+        && enableStatus != MH_ERROR_ENABLED)
+    {
+        FailR1VPhysicsSequentialDispatcherInvariant(
+            "enable",
+            target,
+            enableStatus);
+    }
+
+    OutputDebugStringA(
+        "R1Delta: R1 VPhysics sequential dispatcher guard installed\n");
 }
 
 namespace

@@ -91,17 +91,67 @@ bool TestRetailHookConstants()
 {
 	return Check(kCreateD3D11DeviceRva == 0x21F0, "unexpected create-device RVA")
 		&& Check(kImmediateContextRva == 0x290D90, "unexpected immediate-context RVA")
+		&& Check(kConstantBufferFlushRva == 0x184F0, "unexpected constant-buffer flush RVA")
 		&& Check(kDrawFramePointerRestoreRva == 0xCFF7, "unexpected frame-restore RVA")
 		&& Check(kDrawFramePointerOffsetFromRsp == 0xD1, "unexpected frame-pointer offset")
 		&& Check(sizeof(kExpectedCreateD3D11DevicePrologue) == 32, "unexpected create-device prologue size")
 		&& Check(kExpectedCreateD3D11DevicePrologue[0] == 0x4C, "unexpected create-device prologue start")
 		&& Check(kExpectedCreateD3D11DevicePrologue[31] == 0x89, "unexpected create-device prologue end")
+		&& Check(sizeof(kExpectedConstantBufferFlushPrologue) == 35, "unexpected constant-buffer prologue size")
+		&& Check(kExpectedConstantBufferFlushPrologue[0] == 0x48, "unexpected constant-buffer prologue start")
+		&& Check(kExpectedConstantBufferFlushPrologue[34] == 0x00, "unexpected constant-buffer prologue end")
 		&& Check(sizeof(kExpectedDrawFramePointerRestoreNop) == 9, "unexpected frame-restore NOP size")
 		&& Check(sizeof(kRestoreDrawFramePointer) == 9, "unexpected frame-restore patch size")
 		&& Check(kExpectedDrawFramePointerRestoreNop[0] == 0x66, "unexpected frame-restore NOP start")
 		&& Check(kRestoreDrawFramePointer[0] == 0x48, "unexpected frame-restore patch start")
 		&& Check(kRestoreDrawFramePointer[4] == 0xD1, "unexpected frame-restore displacement")
 		&& Check(kRestoreDrawFramePointer[8] == 0x90, "unexpected frame-restore patch padding");
+}
+
+bool TestConstantBufferExceptionFilter()
+{
+	return Check(
+			ShouldHandleConstantBufferException(
+				kAccessViolationExceptionCode,
+				0x136730,
+				0x28),
+			"prerelease-26 constant-buffer AV was rejected")
+		&& Check(
+			ShouldHandleConstantBufferException(
+				kAccessViolationExceptionCode,
+				0x1366E4,
+				0x10000),
+			"sibling memmove AV was rejected")
+		&& Check(
+			ShouldHandleConstantBufferException(
+				kAccessViolationExceptionCode,
+				kConstantBufferMemmoveStartRva,
+				0x10000),
+			"memmove range start was rejected")
+		&& Check(
+			!ShouldHandleConstantBufferException(
+				kAccessViolationExceptionCode,
+				kConstantBufferMemmoveEndRva,
+				0x10000),
+			"memmove range end was accepted")
+		&& Check(
+			ShouldHandleConstantBufferException(
+				kAccessViolationExceptionCode,
+				0x50000,
+				0xFFF8),
+			"near-null AV was rejected")
+		&& Check(
+			!ShouldHandleConstantBufferException(
+				kAccessViolationExceptionCode,
+				0x50000,
+				0x10000),
+			"unrelated AV was accepted")
+		&& Check(
+			!ShouldHandleConstantBufferException(
+				0xC0000094,
+				0x136730,
+				0x28),
+			"non-AV exception was accepted");
 }
 
 bool TestCrashFramePointerReconstruction()
@@ -195,6 +245,7 @@ bool TestMissingInputsFailClosed()
 int main()
 {
 	const bool passed = TestRetailHookConstants()
+		&& TestConstantBufferExceptionFilter()
 		&& TestCrashFramePointerReconstruction()
 		&& TestEnablesAndReleasesInterface()
 		&& TestAlreadyProtectedContextRemainsEnabled()

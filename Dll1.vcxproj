@@ -265,6 +265,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="engine\net\networking.h" />
     <ClInclude Include="server\physics\physics_hooks.h" />
     <ClInclude Include="server\physics\vphysics_shutdown_guard.h" />
+    <ClInclude Include="server\physics\vphysics_parallel_guard.h" />
     <ClInclude Include="engine\precache.h" />
     <ClInclude Include="server\usermessages.h" />
     <ClInclude Include="client\localchatwriter.h" />
@@ -296,6 +297,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="engine\security_fixes.h" />
     <ClInclude Include="engine\sendmoveclampfix.h" />
     <ClInclude Include="shared\squirrel.h" />
+    <ClInclude Include="shared\script_variant_abi.h" />
     <!-- Removed: steam.h -->
     <ClInclude Include="client\rendering\surfacerender.h" />
     <ClInclude Include="engine\sv_filter.h" />

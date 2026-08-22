@@ -8946,18 +8946,9 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	InstallServerUserCmdHooks(server_base);
 	//MH_CreateHook((LPVOID)(server_base + 0x364D00), &CAI_NetworkManager__LoadNavMesh, reinterpret_cast<LPVOID*>(&CAI_NetworkManager__LoadNavMeshOriginal));
 	if (!IsR1ODedicatedServer()) {
-		MH_CreateHook((LPVOID)(vscript_base + (legacyDedicated ? 0x6A80 : 0x6A60)), &CScriptVM__ctor, reinterpret_cast<LPVOID*>(&CScriptVM__ctororiginal));
 		MH_CreateHook((LPVOID)(vscript_base + (legacyDedicated ? 0x1210 : 0x1210)), &CScriptManager__CreateNewVM, reinterpret_cast<LPVOID*>(&CScriptManager__CreateNewVMOriginal));
 		MH_CreateHook((LPVOID)(vscript_base + (legacyDedicated ? 0x1640 : 0x1630)), &CScriptVM__GetUnknownVMPtr, reinterpret_cast<LPVOID*>(&CScriptVM__GetUnknownVMPtrOriginal));
 		MH_CreateHook((LPVOID)(vscript_base + (legacyDedicated ? 0x1600 : 0x15F0)), &CScriptManager__DestroyVM, reinterpret_cast<LPVOID*>(&CScriptManager__DestroyVMOriginal));
-		MH_CreateHook((LPVOID)(vscript_base + (legacyDedicated ? 0xCDD0 : 0xCDB0)), &CSquirrelVM__RegisterFunctionGuts, reinterpret_cast<LPVOID*>(&CSquirrelVM__RegisterFunctionGutsOriginal));
-		MH_CreateHook((LPVOID)(vscript_base + (legacyDedicated ? 0xD670 : 0xD650)), &CSquirrelVM__PushVariant, reinterpret_cast<LPVOID*>(&CSquirrelVM__PushVariantOriginal));
-		MH_CreateHook((LPVOID)(vscript_base + (legacyDedicated ? 0xD7D0 : 0xD7B0)), &CSquirrelVM__ConvertToVariant, reinterpret_cast<LPVOID*>(&CSquirrelVM__ConvertToVariantOriginal));
-		MH_CreateHook((LPVOID)(vscript_base + (legacyDedicated ? 0xB130 : 0xB110)), &CSquirrelVM__ReleaseValue, reinterpret_cast<LPVOID*>(&CSquirrelVM__ReleaseValueOriginal));
-		MH_CreateHook((LPVOID)(vscript_base + (legacyDedicated ? 0xA210 : 0xA1F0)), &CSquirrelVM__SetValue, reinterpret_cast<LPVOID*>(&CSquirrelVM__SetValueOriginal));
-		MH_CreateHook((LPVOID)(vscript_base + (legacyDedicated ? 0x9C60 : 0x9C40)), &CSquirrelVM__SetValueEx, reinterpret_cast<LPVOID*>(&CSquirrelVM__SetValueExOriginal));
-		if (!InstallScriptVariantReturnBridge(vscript_base, legacyDedicated))
-			Warning("R1Delta: failed to install the ScriptVariant return ABI bridge.\n");
 	}
 	InitVStdLibICVarFactoryHook();
 	// Listen, legacy dedicated, and R1O fake-dedicated modes all load the same
@@ -9520,16 +9511,20 @@ void __stdcall LoaderNotificationCallback(
 				const std::wstring fullPath(
 					notification_data->Loaded.FullDllName->Buffer,
 					notification_data->Loaded.FullDllName->Length / sizeof(wchar_t));
-				if (r1delta::vphysics::IsExpectedR1VPhysicsModulePath(fullPath.c_str()))
-					InstallR1VPhysicsShutdownGuard(reinterpret_cast<uintptr_t>(notification_data->Loaded.DllBase));
+				if (r1delta::vphysics::IsExpectedR1VPhysicsModulePath(fullPath.c_str())) {
+					InstallR1VPhysicsSequentialDispatcherGuard(
+						reinterpret_cast<uintptr_t>(
+							notification_data->Loaded.DllBase));
+					InstallR1VPhysicsShutdownGuard(
+						reinterpret_cast<uintptr_t>(
+							notification_data->Loaded.DllBase));
+				}
 				else
 					Warning(
-						"R1Delta: VPhysics level-shutdown guard refused module path '%ls'\n",
+						"R1Delta: required R1 VPhysics guards refused module path '%ls'\n",
 						fullPath.c_str());
 			}
 		}
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x1032C0), &sub_1032C0_hook, reinterpret_cast<LPVOID*>(&o_sub_1032C0));
-		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0x103120), &sub_103120_hook, reinterpret_cast<LPVOID*>(&o_sub_103120));
 
 		//MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("vphysics.dll") + 0xFFFF), &sub_FFFF, reinterpret_cast<LPVOID*>(&ovphys_sub_FFFF));
 		MH_EnableHook(MH_ALL_HOOKS);

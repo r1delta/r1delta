@@ -1256,23 +1256,28 @@ static void __fastcall MaterialSystemDx11ResetD3DResourcePointersGuard()
 
 static int MaterialSystemDx11ConstantBufferExceptionFilter(EXCEPTION_POINTERS* info)
 {
-	if (!info || !info->ExceptionRecord || info->ExceptionRecord->ExceptionCode != EXCEPTION_ACCESS_VIOLATION)
+	if (!info || !info->ExceptionRecord)
 		return EXCEPTION_CONTINUE_SEARCH;
 
-	if (info->ExceptionRecord->NumberParameters >= 2) {
-		const ULONG_PTR faultAddress = info->ExceptionRecord->ExceptionInformation[1];
-		if (faultAddress < 0x10000)
-			return EXCEPTION_EXECUTE_HANDLER;
+	const EXCEPTION_RECORD* const record = info->ExceptionRecord;
+	const uintptr_t faultAddress = record->NumberParameters >= 2
+		? static_cast<uintptr_t>(record->ExceptionInformation[1])
+		: std::numeric_limits<uintptr_t>::max();
+	uintptr_t exceptionRva = std::numeric_limits<uintptr_t>::max();
+	const uintptr_t exceptionAddress =
+		reinterpret_cast<uintptr_t>(record->ExceptionAddress);
+	if (s_MaterialSystemDx11Base
+		&& exceptionAddress >= s_MaterialSystemDx11Base) {
+		exceptionRva = exceptionAddress - s_MaterialSystemDx11Base;
 	}
 
-	if (s_MaterialSystemDx11Base) {
-		const uintptr_t exceptionAddress = reinterpret_cast<uintptr_t>(info->ExceptionRecord->ExceptionAddress);
-		if (exceptionAddress >= s_MaterialSystemDx11Base + 0x1364E0
-			&& exceptionAddress < s_MaterialSystemDx11Base + 0x136814)
-			return EXCEPTION_EXECUTE_HANDLER;
-	}
-
-	return EXCEPTION_CONTINUE_SEARCH;
+	return r1delta::materialsystem_dx11::
+		ShouldHandleConstantBufferException(
+			record->ExceptionCode,
+			exceptionRva,
+			faultAddress)
+		? EXCEPTION_EXECUTE_HANDLER
+		: EXCEPTION_CONTINUE_SEARCH;
 }
 
 static void MaterialSystemDx11ClearConstantBufferUpdateState()
@@ -2023,11 +2028,27 @@ void InstallMaterialSystemDx11MultithreadProtection(
 			reinterpret_cast<void**>(
 				&MaterialSystemDx11CreateD3D11DeviceOriginal),
 			"d3d11-multithread");
-	if (!framePointerPatched || !protectionHookInstalled) {
-		MaterialSystemDx11FailRenderThreadInvariant(
-			framePointerPatched
+	const bool constantBufferHookInstalled =
+		InstallMaterialSystemDx11CheckedHook(
+			materialSystemBase,
+			kConstantBufferFlushRva,
+			kExpectedConstantBufferFlushPrologue,
+			sizeof(kExpectedConstantBufferFlushPrologue),
+			reinterpret_cast<void*>(
+				&MaterialSystemDx11FlushConstantBufferUpdatesGuard),
+			reinterpret_cast<void**>(
+				&MaterialSystemDx11FlushConstantBufferUpdatesOriginal),
+			"constant-buffer");
+	if (!framePointerPatched
+		|| !protectionHookInstalled
+		|| !constantBufferHookInstalled) {
+		const char* const reason = !framePointerPatched
+			? "frame-pointer-patch"
+			: !protectionHookInstalled
 				? "multithread-hook"
-				: "frame-pointer-patch",
+				: "constant-buffer-hook";
+		MaterialSystemDx11FailRenderThreadInvariant(
+			reason,
 			timestamp,
 			imageSize);
 	}
@@ -2762,23 +2783,11 @@ void InstallMaterialSystemDx11NullShaderResourceGuard(uintptr_t materialSystemBa
 	const bool vtfScratchInstalled =
 		InstallMaterialSystemDx11VtfScratchHooks(materialSystemBase);
 
-
 	const unsigned char expectedResetPrologue[] = {
 		0x48, 0x8B, 0x05, 0x81, 0x38, 0x28, 0x00,
 		0x33, 0xD2,
 		0x48, 0x8B, 0x08,
 		0x48, 0x89, 0x91, 0xD0, 0x05, 0x00, 0x00
-	};
-	const unsigned char expectedConstantFlushPrologue[] = {
-		0x48, 0x89, 0x5C, 0x24, 0x08,
-		0x48, 0x89, 0x6C, 0x24, 0x10,
-		0x48, 0x89, 0x74, 0x24, 0x18,
-		0x48, 0x89, 0x7C, 0x24, 0x20,
-		0x41, 0x54,
-		0x41, 0x55,
-		0x41, 0x56,
-		0x48, 0x83, 0xEC, 0x40,
-		0xB8, 0x01, 0x00, 0x00, 0x00
 	};
 	const unsigned char expectedInputLayoutPrologue[] = {
 		0x48, 0x8B, 0xC4,
@@ -2819,14 +2828,6 @@ void InstallMaterialSystemDx11NullShaderResourceGuard(uintptr_t materialSystemBa
 		reinterpret_cast<void*>(&MaterialSystemDx11ResetD3DResourcePointersGuard),
 		reinterpret_cast<void**>(&MaterialSystemDx11ResetD3DResourcePointersOriginal),
 		"reset-resource");
-	const bool constantFlushInstalled = InstallMaterialSystemDx11CheckedHook(
-		materialSystemBase,
-		0x184F0,
-		expectedConstantFlushPrologue,
-		sizeof(expectedConstantFlushPrologue),
-		reinterpret_cast<void*>(&MaterialSystemDx11FlushConstantBufferUpdatesGuard),
-		reinterpret_cast<void**>(&MaterialSystemDx11FlushConstantBufferUpdatesOriginal),
-		"constant-buffer");
 	const bool inputLayoutInstalled = InstallMaterialSystemDx11CheckedHook(
 		materialSystemBase,
 		0x1B020,
@@ -2852,7 +2853,6 @@ void InstallMaterialSystemDx11NullShaderResourceGuard(uintptr_t materialSystemBa
 		reinterpret_cast<void**>(&MaterialSystemDx11SelectShaderResourceOriginal),
 		"vertex");
 	s_MaterialSystemDx11NullResourceGuardInstalled = resetInstalled
-		|| constantFlushInstalled
 		|| vtfScratchInstalled
 		|| inputLayoutInstalled
 		|| stageInstalled

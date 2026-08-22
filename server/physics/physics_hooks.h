@@ -9,12 +9,7 @@ extern CRITICAL_SECTION g_vphysics_cs;
 
 __int64 __fastcall UTIL_GetEntityByIndex(int iIndex);
 
-// VPhysics thread safety hooks
-extern __int64 (*o_sub_1032C0)(__int64, char);
-extern __int64 (*o_sub_103120)(__int64, __int64, __int64, int);
-
-__int64 __fastcall sub_1032C0_hook(__int64 a1, char a2);
-__int64 __fastcall sub_103120_hook(__int64 a1, __int64 a2, __int64 a3, int a4);
+void InstallR1VPhysicsSequentialDispatcherGuard(uintptr_t vphysicsBase);
 
 // R1 VPhysics level-shutdown recovery
 bool InstallR1VPhysicsShutdownGuard(uintptr_t vphysicsBase);

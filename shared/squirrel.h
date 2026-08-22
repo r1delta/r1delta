@@ -1,4 +1,5 @@
 #pragma once
+#include <cstddef>
 #include <string>
 #include "defs.h"
 #include <vector>
@@ -256,11 +257,11 @@ struct SQFuncRegistrationInternal {
 	const char* returnValueTypeText; //0x0028 
 	const char* argNamesText; //0x0030 
 
-	__int64 UnkSeemsToAlwaysBe32; //0x0038 
-	char pad_0x0040[0x20]; //0x0040 // CUtlVector of parameter types, can't be arsed to reverse this
-	void* pfnBinding; //0x0068 
-	void* pFunction; //0x0070 
-	__int64 flags; //0x0078 // if it's 2, then the CUtlVector mentioned above will not be used
+	__int64 UnkSeemsToAlwaysBe32; //0x0038 typed return field; text registrations use 32
+	char pad_0x0040[0x20]; //0x0040 CUtlVector of parameter field types
+	void* pfnBinding; //0x0060
+	void* pFunction; //0x0068
+	__int64 flags; //0x0070; bit 1 selects text/type-mask registration
 
 	SQFuncRegistrationInternal()
 	{
@@ -268,6 +269,11 @@ struct SQFuncRegistrationInternal {
 		this->UnkSeemsToAlwaysBe32 = 32;
 	}
 };
+
+static_assert(sizeof(SQFuncRegistrationInternal) == 0x78);
+static_assert(offsetof(SQFuncRegistrationInternal, pfnBinding) == 0x60);
+static_assert(offsetof(SQFuncRegistrationInternal, pFunction) == 0x68);
+static_assert(offsetof(SQFuncRegistrationInternal, flags) == 0x70);
 
 inline const char* empty_str = "";
 inline __int64 __fastcall SQFuncBindingFn(
@@ -351,41 +357,12 @@ void* CScriptManager__CreateNewVM(__int64 a1, int a2, unsigned int a3);
 bool InstallR1OTFOSquirrelHooks(uintptr_t launcherBase);
 void MarkR1OServerAutorunBootstrapComplete();
 bool RunR1OServerAutorunScriptsIfPending();
-typedef __int64 (*CScriptVM__ctortype)(void* thisptr);
-extern CScriptVM__ctortype CScriptVM__ctororiginal;
-__int64 __fastcall CScriptVM__ctor(void* thisptr);
 typedef void* (*CScriptVM__GetUnknownVMPtrType)();
 extern CScriptVM__GetUnknownVMPtrType CScriptVM__GetUnknownVMPtrOriginal;
 void* CScriptVM__GetUnknownVMPtr();
-typedef __int64 (*sub_180008AB0Type)(__int64 a1, void* a2, unsigned int* a3, unsigned int a4, __int64 a5, int* a6);
-extern sub_180008AB0Type sub_180008AB0Original;
-__int64 __fastcall sub_180008AB0(__int64 a1, void* a2, unsigned int* a3, unsigned int a4, __int64 a5, int* a6);
 typedef void (*CScriptManager__DestroyVMType)(void* a1, void* vmptr);
 extern CScriptManager__DestroyVMType CScriptManager__DestroyVMOriginal;
 void __fastcall CScriptManager__DestroyVM(void* a1, void* vmptr);
-struct ScriptVariant_t;
-typedef void (*CSquirrelVM__RegisterFunctionGutsType)(__int64* a1, __int64 a2, const char** a3);
-extern CSquirrelVM__RegisterFunctionGutsType CSquirrelVM__RegisterFunctionGutsOriginal;
-typedef __int64 (*CSquirrelVM__PushVariantType)(__int64* a1, ScriptVariant_t* a2);
-extern CSquirrelVM__PushVariantType CSquirrelVM__PushVariantOriginal;
-typedef char (*CSquirrelVM__ConvertToVariantType)(__int64* a1, __int64 a2, ScriptVariant_t* a3);
-extern CSquirrelVM__ConvertToVariantType CSquirrelVM__ConvertToVariantOriginal;
-typedef __int64 (*CSquirrelVM__ReleaseValueType)(__int64* a1, ScriptVariant_t* a2);
-extern CSquirrelVM__ReleaseValueType CSquirrelVM__ReleaseValueOriginal;
-typedef bool (*CSquirrelVM__SetValueType)(__int64* a1, void* a2, unsigned int a3, ScriptVariant_t* a4);
-extern CSquirrelVM__SetValueType CSquirrelVM__SetValueOriginal;
-typedef bool (*CSquirrelVM__SetValueExType)(__int64* a1, __int64 a2, const char* a3, ScriptVariant_t* a4);
-extern CSquirrelVM__SetValueExType CSquirrelVM__SetValueExOriginal;
-typedef __int64 (*CSquirrelVM__TranslateCallType)(__int64* a1);
-extern CSquirrelVM__TranslateCallType CSquirrelVM__TranslateCallOriginal;
-__int64 __fastcall CSquirrelVM__TranslateCall(__int64* a1);
-bool InstallScriptVariantReturnBridge(uintptr_t vscriptBase, bool legacyDedicated);
-void __fastcall CSquirrelVM__RegisterFunctionGuts(__int64* a1, __int64 a2, const char** a3);
-__int64 __fastcall CSquirrelVM__PushVariant(__int64* a1, ScriptVariant_t* a2);
-char __fastcall CSquirrelVM__ConvertToVariant(__int64* a1, __int64 a2, ScriptVariant_t* a3);
-__int64 __fastcall CSquirrelVM__ReleaseValue(__int64* a1, ScriptVariant_t* a2);
-bool __fastcall CSquirrelVM__SetValue(__int64* a1, void* a2, unsigned int a3, ScriptVariant_t* a4);
-bool __fastcall CSquirrelVM__SetValueEx(__int64* a1, __int64 a2, const char* a3, ScriptVariant_t* a4);
 __declspec(dllexport) R1SquirrelVM* GetServerVMPtr();
 __declspec(dllexport) R1SquirrelVM* GetClientVMPtr();
 __declspec(dllexport) R1SquirrelVM* GetUIVMPtr();
@@ -403,9 +380,6 @@ enum SVFlags_t
 {
 	SV_FREE = 0x01,
 	SV_IHAVENOFUCKINGCLUE = 0x02,
-	// Start from the most significant bit for the new flags
-	SV_CONVERTED_TO_R1 = 0x1000,
-	SV_CONVERTED_TO_R1O = 0x2000,
 };
 
 struct __declspec(align(8)) ScriptVariant_t
@@ -425,10 +399,10 @@ struct __declspec(align(8)) ScriptVariant_t
 	int16               m_flags;
 };
 
-typedef enum {
-	R1_TO_R1O,
-	R1O_TO_R1
-} ConversionDirection;
+static_assert(sizeof(ScriptVariant_t) == 0x10);
+static_assert(offsetof(ScriptVariant_t, m_type) == 0x08);
+static_assert(offsetof(ScriptVariant_t, m_flags) == 0x0A);
+
 
 typedef SQRESULT(*sq_compile_t)(HSQUIRRELVM, SQLEXREADFUNC, SQUserPointer, const SQChar*, SQBool);
 typedef SQRESULT(*sq_compilebuffer_t)(HSQUIRRELVM, const SQChar*, SQInteger, const SQChar*, SQBool);

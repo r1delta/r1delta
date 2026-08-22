@@ -302,6 +302,9 @@
     <ClInclude Include="server\physics\vphysics_shutdown_guard.h">
       <Filter>server\physics</Filter>
     </ClInclude>
+    <ClInclude Include="server\physics\vphysics_parallel_guard.h">
+      <Filter>server\physics</Filter>
+    </ClInclude>
     <!-- server\ai -->
     <ClInclude Include="server\ai\bot.h">
       <Filter>server\ai</Filter>
@@ -329,6 +332,9 @@
 	  <Filter>shared</Filter>
 	</ClInclude>
     <ClInclude Include="shared\squirrel.h">
+      <Filter>shared</Filter>
+    </ClInclude>
+    <ClInclude Include="shared\script_variant_abi.h">
       <Filter>shared</Filter>
     </ClInclude>
     <!-- sdk -->

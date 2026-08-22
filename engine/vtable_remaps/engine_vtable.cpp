@@ -16,6 +16,20 @@ bool FuncThatReturnsBool_Stub()
 	return false;
 }
 
+static void __fastcall LegacyDedicatedNoteMatchStateNoOp(
+	void*,
+	int,
+	int,
+	int,
+	int,
+	int,
+	int,
+	int,
+	int,
+	int)
+{
+}
+
 void Host_Error(const char* error, ...) {
 	// char string[1024];
 	va_list params;
@@ -233,7 +247,13 @@ void CVEngineServer::CreateR1OVTable()
 	g_r1oCVEngineServerInterface[154] = CreateFunction(((void*)CVEngineServer::UnkFunc56), (void*)g_CVEngineServerInterface);
 	g_r1oCVEngineServerInterface[155] = CreateFunction(((void*)CVEngineServer::DisconnectClient), (void*)g_CVEngineServerInterface);
 	g_r1oCVEngineServerInterface[156] = CreateFunction(((void*)CVEngineServer::UnkFunc58), (void*)g_CVEngineServerInterface);
-	g_r1oCVEngineServerInterface[157] = CreateFunction(((void*)CVEngineServer::UnkFunc59), (void*)g_CVEngineServerInterface);
+	void* noteMatchStateTarget = (void*)CVEngineServer::UnkFunc59;
+	if (IsDedicatedServer() && !IsR1ODedicatedServer())
+	{
+		// R1O slot 157 is NoteMatchState; R1 dedicated has no ABI-compatible target.
+		noteMatchStateTarget = (void*)&LegacyDedicatedNoteMatchStateNoOp;
+	}
+	g_r1oCVEngineServerInterface[157] = CreateFunction(noteMatchStateTarget, (void*)g_CVEngineServerInterface);
 	g_r1oCVEngineServerInterface[158] = CreateFunction(((void*)CVEngineServer::UnkFunc60), (void*)g_CVEngineServerInterface);
 	g_r1oCVEngineServerInterface[159] = CreateFunction(((void*)CVEngineServer::UnkFunc61), (void*)g_CVEngineServerInterface);
 	g_r1oCVEngineServerInterface[160] = CreateFunction(((void*)CVEngineServer::UnkFunc62), (void*)g_CVEngineServerInterface);

@@ -13,13 +13,13 @@ env:
   BUILD_PATH: ${{ github.workspace }}/build
   OUTPUT_PATH: ${{ github.workspace }}/output
   SYMBOL_PATH: ${{ github.workspace }}/symbols
-  CORE_REF: 0fb8636d050308d72fd4a3fbb5d5947449525118
+  CORE_REF: 6c1029d6640ef2d8bf73bc0fd3e3f3cacc2446d7
   VCPKG_BINARY_SOURCES: "clear;files,D:/a/r1delta/vcpkg,readwrite"
   BUILD_CONFIGURATION: Release
   MSBUILD_DEBUG_TYPE: pdbonly
   NUSPEC_FILE: R1Delta.nuspec
   PACKAGE_NAME: R1Delta
-  DISPLAY_VERSION: "3.0 prerelease 26"
+  DISPLAY_VERSION: "3.0 prerelease 27"
 
 permissions:
   contents: write
@@ -185,6 +185,7 @@ jobs:
             addonlist_state_tests = 'tests/addonlist_state_tests.vcxproj'
             compression_stream_tests = 'tests/compression_stream_tests.vcxproj'
             r1o_vpk_tests = 'tests/r1o_vpk_tests.vcxproj'
+            script_variant_abi_tests = 'tests/script_variant_abi_tests.vcxproj'
             vsdk_memalloc_tests = 'tests/vsdk_memalloc_tests.vcxproj'
             persistentdata_codec_tests = 'tests/persistentdata_codec_tests.vcxproj'
             crash_report_minidump_tests = 'tests/crash_report_minidump_tests.vcxproj'
@@ -194,6 +195,7 @@ jobs:
             materialsystem_dx11_material_guard_tests = 'tests/materialsystem_dx11_material_guard_tests.vcxproj'
             materialsystem_dx11_txaa_lifetime_tests = 'tests/materialsystem_dx11_txaa_lifetime_tests.vcxproj'
             materialsystem_dx11_multithread_tests = 'tests/materialsystem_dx11_multithread_tests.vcxproj'
+            vphysics_parallel_guard_tests = 'tests/vphysics_parallel_guard_tests.vcxproj'
             allocator_delegation_tests = 'tests/allocator_delegation_tests.vcxproj'
             ffa_targeting_tests = 'tests/ffa_targeting_tests.vcxproj'
           }
@@ -219,6 +221,7 @@ jobs:
             'addonlist_state_tests',
             'compression_stream_tests',
             'r1o_vpk_tests',
+            'script_variant_abi_tests',
             'vsdk_memalloc_tests',
             'persistentdata_codec_tests',
             'crash_report_minidump_tests',
@@ -228,6 +231,7 @@ jobs:
             'materialsystem_dx11_material_guard_tests',
             'materialsystem_dx11_txaa_lifetime_tests',
             'materialsystem_dx11_multithread_tests',
+            'vphysics_parallel_guard_tests',
             'allocator_delegation_tests',
             'ffa_targeting_tests'
           )

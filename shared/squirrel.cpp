@@ -40,6 +40,7 @@
 #include "persistentdata.h"
 #include "load.h"
 #include "ffa_targeting.h"
+#include "script_variant_abi.h"
 
 #include <random>
 #include "masterserver.h"
@@ -542,6 +543,7 @@ void __fastcall SetGen(__int64 a1, int a2) {
 	}
 }
 
+
 void* __fastcall CSquirrelVM__GetEntityFromInstance_Rebuild(__int64 a2, __int64 a3)
 {
 	__int64 result; // rax
@@ -617,7 +619,9 @@ void* sq_getentity(HSQUIRRELVM v, SQInteger iStackPos)
 	}
 
 	auto constant = (G_server + 0xD42040);
-	return CSquirrelVM__GetEntityFromInstance_Rebuild((__int64)(&obj), (__int64)((char**)constant));
+	return CSquirrelVM__GetEntityFromInstance_Rebuild(
+		reinterpret_cast<__int64>(&obj),
+		static_cast<__int64>(constant));
 }
 
 template <typename Return, typename ... Arguments>
@@ -2444,76 +2448,989 @@ bool GetSQVMFuncs() {
 }
 
 
-typedef __int64 (*CScriptVM__ctortype)(void* thisptr);
-CScriptVM__ctortype CScriptVM__ctororiginal;
-bool scriptflag = false;
-bool hasRegisteredServerFuncs = false;
-void __fastcall CScriptVM__SetTFOFlag(__int64 a1, char a2)
-{
-	scriptflag = a2;
-}
-char __fastcall CScriptVM__GetTFOFlag(__int64 a1)
-{
-	return scriptflag;
-}
-// Prototype for the function to update the vtable pointer of a CScriptVM object.
-void SetNewVTable(void* thisptr, uintptr_t* newVTable);
+using r1delta::script_variant::ABI;
 
-constexpr size_t SQUIRREL_VM_VMT_SIZE = 122;
+namespace {
 
-struct FakeServerVM {
+constexpr std::int32_t kMaxFunctionParameterCount = 4096;
+constexpr DWORD kFakeServerVmFailureCode = 0xE0425356;
+
+using FunctionDescriptorBytes = std::array<
+	unsigned char,
+	r1delta::script_variant::kFunctionDescriptorSize>;
+
+struct FakeServerVM
+{
 	uintptr_t* vtable = nullptr;
 };
 
+struct FunctionCallbackState
+{
+	void* binding = nullptr;
+	void* function = nullptr;
+};
+
+struct PersistentFunctionDescriptor
+{
+	alignas(void*) FunctionDescriptorBytes descriptor{};
+	std::vector<std::int32_t> parameters;
+	FunctionCallbackState callback;
+};
+
+struct PersistentClassDescriptor
+{
+	const void* source = nullptr;
+	void* originalFunctionBase = nullptr;
+	std::vector<FunctionDescriptorBytes> functions;
+	std::vector<std::vector<std::int32_t>> parameters;
+	std::vector<FunctionCallbackState> callbacks;
+	bool complete = false;
+};
+
+struct PackedVariantRecord
+{
+	std::int32_t index;
+	std::int32_t padding;
+	ScriptVariant_t value;
+};
+
+static_assert(sizeof(ScriptVariant_t)
+	== r1delta::script_variant::kScriptVariantSize);
+static_assert(offsetof(ScriptVariant_t, m_type)
+	== r1delta::script_variant::kScriptVariantTypeOffset);
+static_assert(offsetof(ScriptVariant_t, m_flags)
+	== r1delta::script_variant::kScriptVariantFlagsOffset);
+static_assert(sizeof(PackedVariantRecord) == 0x18);
+static_assert(offsetof(PackedVariantRecord, value) == 0x08);
+
 static FakeServerVM g_fakeServerVm;
 static void* g_realServerVm = nullptr;
+static void* g_R1OTfoServerVm = nullptr;
+static bool g_serverProxyFlag = false;
+static std::array<
+	uintptr_t,
+	r1delta::script_variant::kR1VtableSlotCount>
+	g_originalR1Destinations{};
+static bool g_haveOriginalR1Destinations = false;
+static std::map<const void*, std::unique_ptr<PersistentFunctionDescriptor>>
+	g_functionDescriptorClones;
+static std::map<const void*, std::unique_ptr<PersistentClassDescriptor>>
+	g_classDescriptorClones;
 
-// Implementation for creating a new vtable and inserting functions.
-void* CreateNewVTable(void* thisptr) {
-	// Original vtable can be obtained by dereferencing the this pointer.
-	uintptr_t* originalVTable = *(uintptr_t**)thisptr;
-
-	// Allocate memory for the new vtable with 122 entries (original 120 + 2 new).
-	uintptr_t* newVTable = new uintptr_t[SQUIRREL_VM_VMT_SIZE];
-
-	// Copy the original vtable entries into the new vtable.
-	for (int i = 0; i < 120; ++i) {
-		newVTable[i] = CreateFunctionIndirect((void*)originalVTable[i], &g_realServerVm);
-	}
-
-	// Insert CScriptVM__SetTFOFlag and CScriptVM__GetTFOFlag between the 4th and 5th functions.
-	// This involves shifting functions starting from the 4th position (index 3) to the right by 2 positions.
-	for (int i = 119; i >= 3; --i) {
-		newVTable[i + 2] = newVTable[i];
-	}
-
-	// Now, insert the new functions into the shifted positions.
-	newVTable[3] = CreateFunctionIndirect((void*)CScriptVM__SetTFOFlag, &g_realServerVm);
-	newVTable[4] = CreateFunctionIndirect((void*)CScriptVM__GetTFOFlag, &g_realServerVm);
-
-	// Update the vtable pointer of the CScriptVM object to the new vtable.
-	return newVTable;
+[[noreturn]] static void FailFakeServerVm(const char* reason)
+{
+	Warning(
+		"R1Delta: fatal fake server Squirrel VM ABI failure: %s\n",
+		reason ? reason : "unknown");
+	const ULONG_PTR arguments[] = {
+		reinterpret_cast<ULONG_PTR>(reason),
+	};
+	RaiseException(
+		kFakeServerVmFailureCode,
+		EXCEPTION_NONCONTINUABLE,
+		1,
+		arguments);
+	TerminateProcess(GetCurrentProcess(), kFakeServerVmFailureCode);
+	__assume(0);
 }
 
+static void ReportFakeServerAdapterFailure(
+	std::size_t sourceSlot,
+	const char* reason)
+{
+	Warning(
+		"R1Delta: fake server Squirrel VM source slot %zu rejected: %s\n",
+		sourceSlot,
+		reason ? reason : "unknown");
+}
 
-typedef void* (*CScriptManager__CreateNewVMType)(__int64 a1, int a2, unsigned int a3);
-bool isServerScriptVM = false;
+template <typename Function>
+static Function OriginalR1Slot(std::size_t sourceSlot)
+{
+	if (sourceSlot >= g_originalR1Destinations.size()
+		|| !g_originalR1Destinations[sourceSlot]) {
+		FailFakeServerVm("missing original R1 vtable destination");
+	}
+	return reinterpret_cast<Function>(
+		g_originalR1Destinations[sourceSlot]);
+}
+
+static bool ConvertVariantToR1(
+	const ScriptVariant_t* source,
+	ScriptVariant_t& destination)
+{
+	return source
+		&& r1delta::script_variant::ConvertVariant(
+			*source,
+			ABI::R1O,
+			ABI::R1,
+			destination);
+}
+
+static void ReleaseR1ScratchVariant(
+	void* realVm,
+	ScriptVariant_t& variant)
+{
+	using ReleaseValueFn = __int64(__fastcall*)(
+		void*,
+		ScriptVariant_t*);
+	OriginalR1Slot<ReleaseValueFn>(57)(realVm, &variant);
+}
+
+static bool TransferR1Output(
+	void* realVm,
+	ScriptVariant_t& source,
+	ScriptVariant_t* destination)
+{
+	if (!destination)
+		return false;
+	ScriptVariant_t converted{};
+	if (!r1delta::script_variant::ConvertVariant(
+			source,
+			ABI::R1,
+			ABI::R1O,
+			converted)) {
+		ReleaseR1ScratchVariant(realVm, source);
+		return false;
+	}
+	*destination = converted;
+	return true;
+}
+
+static bool ConvertFieldTypeToR1(
+	std::int32_t source,
+	std::int32_t& destination)
+{
+	if (source < (std::numeric_limits<std::int16_t>::min)()
+		|| source > (std::numeric_limits<std::int16_t>::max)()) {
+		return false;
+	}
+	std::int16_t converted{};
+	if (!r1delta::script_variant::ConvertType(
+			static_cast<std::int16_t>(source),
+			ABI::R1O,
+			ABI::R1,
+			converted)) {
+		return false;
+	}
+	destination = converted;
+	return true;
+}
+
+using DescriptorBindingFn = __int64(__fastcall*)(
+	void*,
+	void*,
+	ScriptVariant_t*,
+	__int64,
+	ScriptVariant_t*);
+
+static __int64 __fastcall ServerFunctionBindingAdapter(
+	void* callbackState,
+	void* context,
+	ScriptVariant_t* arguments,
+	__int64 argumentCount,
+	ScriptVariant_t* returnValue)
+{
+	auto* state = static_cast<FunctionCallbackState*>(callbackState);
+	if (!state || !state->binding || argumentCount < 0
+		|| argumentCount > kMaxFunctionParameterCount
+		|| (argumentCount && !arguments)) {
+		ReportFakeServerAdapterFailure(33, "invalid descriptor callback");
+		return 0;
+	}
+
+	std::vector<ScriptVariant_t> convertedArguments(
+		static_cast<std::size_t>(argumentCount));
+	for (__int64 i = 0; i < argumentCount; ++i) {
+		if (!r1delta::script_variant::ConvertVariant(
+				arguments[i],
+				ABI::R1,
+				ABI::R1O,
+				convertedArguments[static_cast<std::size_t>(i)])) {
+			ReportFakeServerAdapterFailure(
+				33,
+				"unsupported R1 callback argument type");
+			return 0;
+		}
+	}
+
+	ScriptVariant_t convertedReturn{};
+
+	const __int64 result =
+		reinterpret_cast<DescriptorBindingFn>(state->binding)(
+			state->function,
+			context,
+			convertedArguments.empty()
+				? nullptr
+				: convertedArguments.data(),
+			argumentCount,
+			returnValue ? &convertedReturn : nullptr);
+
+	if (returnValue) {
+		ScriptVariant_t r1Return{};
+		if (!r1delta::script_variant::ConvertVariant(
+				convertedReturn,
+				ABI::R1O,
+				ABI::R1,
+				r1Return)) {
+			ReportFakeServerAdapterFailure(
+				33,
+				"unsupported R1O callback return type");
+			return 0;
+		}
+		*returnValue = r1Return;
+	}
+	return result;
+}
+
+static bool CloneFunctionDescriptor(
+	const void* source,
+	FunctionDescriptorBytes& destination,
+	std::vector<std::int32_t>& parameterStorage,
+	FunctionCallbackState& callback)
+{
+	if (!source)
+		return false;
+
+	memcpy(
+		destination.data(),
+		source,
+		r1delta::script_variant::kFunctionDescriptorSize);
+	const auto sourceBytes =
+		static_cast<const unsigned char*>(source);
+	const std::uint64_t flags = *reinterpret_cast<const std::uint64_t*>(
+		sourceBytes
+			+ r1delta::script_variant::kFunctionDescriptorFlagsOffset);
+	if (!r1delta::script_variant::ShouldAdaptTypedRegistration(flags)) {
+		parameterStorage.clear();
+		callback = {};
+		return true;
+	}
+
+	const std::int32_t parameterCount =
+		*reinterpret_cast<const std::int32_t*>(
+			sourceBytes
+				+ r1delta::script_variant::
+					kFunctionDescriptorParameterCountOffset);
+	if (parameterCount < 0
+		|| parameterCount > kMaxFunctionParameterCount) {
+		return false;
+	}
+
+	callback.binding = *reinterpret_cast<void* const*>(
+		sourceBytes
+			+ r1delta::script_variant::kFunctionDescriptorBindingOffset);
+	callback.function = *reinterpret_cast<void* const*>(
+		sourceBytes
+			+ r1delta::script_variant::kFunctionDescriptorFunctionOffset);
+	if (!callback.binding) {
+		return false;
+	}
+	*reinterpret_cast<void**>(
+		destination.data()
+			+ r1delta::script_variant::kFunctionDescriptorBindingOffset) =
+		reinterpret_cast<void*>(&ServerFunctionBindingAdapter);
+	*reinterpret_cast<void**>(
+		destination.data()
+			+ r1delta::script_variant::kFunctionDescriptorFunctionOffset) =
+		&callback;
+
+	const auto* sourceParameters = *reinterpret_cast<
+		const std::int32_t* const*>(
+			sourceBytes
+				+ r1delta::script_variant::
+					kFunctionDescriptorParameterVectorBaseOffset);
+	if (parameterCount) {
+		if (!sourceParameters)
+			return false;
+		parameterStorage.resize(static_cast<std::size_t>(parameterCount));
+		for (std::int32_t i = 0; i < parameterCount; ++i) {
+			if (!ConvertFieldTypeToR1(
+					sourceParameters[i],
+					parameterStorage[static_cast<std::size_t>(i)])) {
+				return false;
+			}
+		}
+		*reinterpret_cast<std::int32_t**>(
+			destination.data()
+				+ r1delta::script_variant::
+					kFunctionDescriptorParameterVectorBaseOffset) =
+			parameterStorage.data();
+	}
+
+	const std::int32_t sourceReturnType =
+		*reinterpret_cast<const std::int32_t*>(
+			sourceBytes
+				+ r1delta::script_variant::
+					kFunctionDescriptorReturnTypeOffset);
+	std::int32_t convertedReturnType{};
+	if (!ConvertFieldTypeToR1(
+			sourceReturnType,
+			convertedReturnType)) {
+		return false;
+	}
+	*reinterpret_cast<std::int32_t*>(
+		destination.data()
+			+ r1delta::script_variant::
+				kFunctionDescriptorReturnTypeOffset) =
+		convertedReturnType;
+	return true;
+}
+
+static void* GetFunctionDescriptorClone(const void* source)
+{
+	if (!source)
+		return nullptr;
+	const auto existing = g_functionDescriptorClones.find(source);
+	if (existing != g_functionDescriptorClones.end())
+		return existing->second->descriptor.data();
+
+	auto clone = std::make_unique<PersistentFunctionDescriptor>();
+	if (!CloneFunctionDescriptor(
+			source,
+			clone->descriptor,
+			clone->parameters,
+			clone->callback)) {
+		return nullptr;
+	}
+	void* result = clone->descriptor.data();
+	g_functionDescriptorClones.emplace(source, std::move(clone));
+	return result;
+}
+
+static void* GetClassDescriptorClone(const void* source)
+{
+	if (!source)
+		return nullptr;
+	const auto existing = g_classDescriptorClones.find(source);
+	if (existing != g_classDescriptorClones.end()) {
+		return existing->second->complete
+			? const_cast<void*>(source)
+			: nullptr;
+	}
+
+	auto adapter = std::make_unique<PersistentClassDescriptor>();
+	adapter->source = source;
+	g_classDescriptorClones.emplace(source, std::move(adapter));
+	auto& stored = *g_classDescriptorClones.find(source)->second;
+
+	const auto* sourceBytes =
+		static_cast<const unsigned char*>(source);
+	const void* sourceBase = *reinterpret_cast<void* const*>(
+		sourceBytes + r1delta::script_variant::kClassDescriptorBaseOffset);
+	if (sourceBase && !GetClassDescriptorClone(sourceBase)) {
+		g_classDescriptorClones.erase(source);
+		return nullptr;
+	}
+
+	const std::int32_t functionCount =
+		*reinterpret_cast<const std::int32_t*>(
+			sourceBytes
+				+ r1delta::script_variant::kClassDescriptorFunctionCountOffset);
+	if (functionCount < 0
+		|| functionCount > kMaxFunctionParameterCount) {
+		g_classDescriptorClones.erase(source);
+		return nullptr;
+	}
+	const auto* sourceFunctions = *reinterpret_cast<
+		const unsigned char* const*>(
+			sourceBytes
+				+ r1delta::script_variant::
+					kClassDescriptorFunctionVectorBaseOffset);
+	stored.originalFunctionBase =
+		const_cast<unsigned char*>(sourceFunctions);
+	if (functionCount) {
+		if (!sourceFunctions) {
+			g_classDescriptorClones.erase(source);
+			return nullptr;
+		}
+		stored.functions.resize(static_cast<std::size_t>(functionCount));
+		stored.parameters.resize(static_cast<std::size_t>(functionCount));
+		stored.callbacks.resize(static_cast<std::size_t>(functionCount));
+		for (std::int32_t i = 0; i < functionCount; ++i) {
+			const auto index = static_cast<std::size_t>(i);
+			if (!CloneFunctionDescriptor(
+					sourceFunctions
+						+ index
+							* r1delta::script_variant::
+								kFunctionDescriptorSize,
+					stored.functions[index],
+					stored.parameters[index],
+					stored.callbacks[index])) {
+				g_classDescriptorClones.erase(source);
+				return nullptr;
+			}
+		}
+		auto* writableSource =
+			const_cast<unsigned char*>(sourceBytes);
+		*reinterpret_cast<FunctionDescriptorBytes**>(
+			writableSource
+				+ r1delta::script_variant::
+					kClassDescriptorFunctionVectorBaseOffset) =
+			stored.functions.data();
+	}
+	stored.complete = true;
+	return const_cast<void*>(source);
+}
+
+static __int64 __fastcall ExecuteFunctionAdapter(
+	void* realVm,
+	void* function,
+	ScriptVariant_t* arguments,
+	std::uint32_t argumentCount,
+	ScriptVariant_t* returnValue,
+	void* scope)
+{
+	using Function = __int64(__fastcall*)(
+		void*,
+		void*,
+		ScriptVariant_t*,
+		std::uint32_t,
+		ScriptVariant_t*,
+		void*);
+	if (argumentCount > kMaxFunctionParameterCount
+		|| (argumentCount && !arguments)) {
+		ReportFakeServerAdapterFailure(32, "invalid argument array");
+		if (returnValue)
+			*returnValue = {};
+		return -1;
+	}
+	std::vector<ScriptVariant_t> convertedArguments(argumentCount);
+	for (std::uint32_t i = 0; i < argumentCount; ++i) {
+		if (!ConvertVariantToR1(
+				&arguments[i],
+				convertedArguments[i])) {
+			ReportFakeServerAdapterFailure(
+				32,
+				"unsupported R1O argument type");
+			if (returnValue)
+				*returnValue = {};
+			return -1;
+		}
+	}
+	ScriptVariant_t convertedReturn{};
+	const __int64 result = OriginalR1Slot<Function>(32)(
+		realVm,
+		function,
+		convertedArguments.empty()
+			? nullptr
+			: convertedArguments.data(),
+		argumentCount,
+		returnValue ? &convertedReturn : nullptr,
+		scope);
+	if (result == -1 && returnValue)
+		*returnValue = {};
+	if (result != -1 && returnValue
+		&& !TransferR1Output(
+			realVm,
+			convertedReturn,
+			returnValue)) {
+		ReportFakeServerAdapterFailure(
+			32,
+			"unsupported R1 return type");
+		*returnValue = {};
+		return -1;
+	}
+	return result;
+}
+
+static __int64 __fastcall RegisterFunctionAdapter(
+	void* realVm,
+	const void* descriptor)
+{
+	using Function = __int64(__fastcall*)(void*, const void*);
+	void* clone = GetFunctionDescriptorClone(descriptor);
+	if (!clone) {
+		ReportFakeServerAdapterFailure(
+			33,
+			"could not clone function descriptor");
+		return 0;
+	}
+	return OriginalR1Slot<Function>(33)(realVm, clone);
+}
+
+static bool __fastcall RegisterClassAdapter(
+	void* realVm,
+	const void* descriptor)
+{
+	using Function = bool(__fastcall*)(void*, const void*);
+	void* clone = GetClassDescriptorClone(descriptor);
+	if (!clone) {
+		ReportFakeServerAdapterFailure(
+			34,
+			"could not clone class descriptor");
+		return false;
+	}
+	return OriginalR1Slot<Function>(34)(realVm, clone);
+}
+
+static void* __fastcall RegisterInstanceAdapter(
+	void* realVm,
+	const void* descriptor,
+	void* instance)
+{
+	using Function = void*(__fastcall*)(void*, const void*, void*);
+	void* clone = GetClassDescriptorClone(descriptor);
+	if (descriptor && !clone) {
+		ReportFakeServerAdapterFailure(
+			36,
+			"could not clone instance class descriptor");
+		return nullptr;
+	}
+	return OriginalR1Slot<Function>(36)(realVm, clone, instance);
+}
+
+static void* __fastcall GetInstanceValueAdapter(
+	void* realVm,
+	void* instance,
+	const void* expectedType)
+{
+	using Function = void*(__fastcall*)(void*, void*, const void*);
+	void* clone = GetClassDescriptorClone(expectedType);
+	if (expectedType && !clone) {
+		ReportFakeServerAdapterFailure(
+			41,
+			"could not clone expected class descriptor");
+		return nullptr;
+	}
+	return OriginalR1Slot<Function>(41)(realVm, instance, clone);
+}
+
+template <std::size_t SourceSlot>
+static __int64 CreateVariantOutputAdapter(
+	void* realVm,
+	ScriptVariant_t* output)
+{
+	using Function = __int64(__fastcall*)(void*, ScriptVariant_t*);
+	if (!output)
+		FailFakeServerVm("null mandatory variant output");
+	ScriptVariant_t scratch{};
+	const __int64 result =
+		OriginalR1Slot<Function>(SourceSlot)(realVm, &scratch);
+	if (!TransferR1Output(realVm, scratch, output))
+		FailFakeServerVm("could not translate mandatory variant output");
+	return result;
+}
+
+static bool __fastcall ArrayAppendAdapter(
+	void* realVm,
+	void* array,
+	const ScriptVariant_t* value)
+{
+	using Function = bool(__fastcall*)(
+		void*,
+		void*,
+		const ScriptVariant_t*);
+	ScriptVariant_t scratch{};
+	if (!ConvertVariantToR1(value, scratch)) {
+		ReportFakeServerAdapterFailure(
+			46,
+			"unsupported R1O array value type");
+		return false;
+	}
+	return OriginalR1Slot<Function>(46)(realVm, array, &scratch);
+}
+
+static bool __fastcall GetArrayValueAdapter(
+	void* realVm,
+	void* array,
+	std::int32_t index,
+	ScriptVariant_t* output)
+{
+	using Function = bool(__fastcall*)(
+		void*,
+		void*,
+		std::int32_t,
+		ScriptVariant_t*);
+	if (!output)
+		return false;
+	ScriptVariant_t scratch{};
+	const bool result =
+		OriginalR1Slot<Function>(48)(realVm, array, index, &scratch);
+	if (result && !TransferR1Output(realVm, scratch, output)) {
+		ReportFakeServerAdapterFailure(
+			48,
+			"unsupported R1 array output type");
+		return false;
+	}
+	return result;
+}
+
+static bool __fastcall SetArrayValueAdapter(
+	void* realVm,
+	void* array,
+	std::uint32_t index,
+	const ScriptVariant_t* value)
+{
+	using Function = bool(__fastcall*)(
+		void*,
+		void*,
+		std::uint32_t,
+		const ScriptVariant_t*);
+	ScriptVariant_t scratch{};
+	if (!ConvertVariantToR1(value, scratch)) {
+		ReportFakeServerAdapterFailure(
+			49,
+			"unsupported R1O array input type");
+		return false;
+	}
+	return OriginalR1Slot<Function>(49)(
+		realVm,
+		array,
+		index,
+		&scratch);
+}
+
+static bool __fastcall SetValueAdapter(
+	void* realVm,
+	void* scope,
+	const char* key,
+	const ScriptVariant_t* value)
+{
+	using Function = bool(__fastcall*)(
+		void*,
+		void*,
+		const char*,
+		const ScriptVariant_t*);
+	ScriptVariant_t scratch{};
+	if (!ConvertVariantToR1(value, scratch)) {
+		ReportFakeServerAdapterFailure(
+			50,
+			"unsupported R1O keyed input type");
+		return false;
+	}
+	return OriginalR1Slot<Function>(50)(
+		realVm,
+		scope,
+		key,
+		&scratch);
+}
+
+static bool __fastcall GetValueAdapter(
+	void* realVm,
+	void* scope,
+	const char* key,
+	ScriptVariant_t* output)
+{
+	using Function = bool(__fastcall*)(
+		void*,
+		void*,
+		const char*,
+		ScriptVariant_t*);
+	if (!output)
+		return false;
+	ScriptVariant_t scratch{};
+	const bool result =
+		OriginalR1Slot<Function>(56)(realVm, scope, key, &scratch);
+	if (result && !TransferR1Output(realVm, scratch, output)) {
+		ReportFakeServerAdapterFailure(
+			56,
+			"unsupported R1 keyed output type");
+		return false;
+	}
+	return result;
+}
+
+static __int64 __fastcall ReleaseValueAdapter(
+	void* realVm,
+	ScriptVariant_t* value)
+{
+	using Function = __int64(__fastcall*)(void*, ScriptVariant_t*);
+	ScriptVariant_t scratch{};
+	if (!ConvertVariantToR1(value, scratch)) {
+		ReportFakeServerAdapterFailure(
+			57,
+			"unsupported R1O release type");
+		return 0;
+	}
+	const __int64 result =
+		OriginalR1Slot<Function>(57)(realVm, &scratch);
+	ScriptVariant_t released{};
+	if (!r1delta::script_variant::ConvertVariant(
+			scratch,
+			ABI::R1,
+			ABI::R1O,
+			released)) {
+		FailFakeServerVm("could not propagate released variant state");
+	}
+	*value = released;
+	return result;
+}
+
+static bool __fastcall TransitiveVariantOutputAdapter(
+	void* realVm,
+	ScriptVariant_t* output,
+	void* argument3,
+	void* argument4)
+{
+	using Function = bool(__fastcall*)(
+		void*,
+		ScriptVariant_t*,
+		void*,
+		void*);
+	if (!output)
+		return false;
+	ScriptVariant_t scratch{};
+	const bool result = OriginalR1Slot<Function>(59)(
+		realVm,
+		&scratch,
+		argument3,
+		argument4);
+	if (result && !TransferR1Output(realVm, scratch, output)) {
+		ReportFakeServerAdapterFailure(
+			59,
+			"unsupported transitive R1 output type");
+		return false;
+	}
+	return result;
+}
+
+static bool __fastcall DirectVariantOutputAdapter(
+	void* realVm,
+	ScriptVariant_t* output,
+	void* argument3,
+	bool argument4)
+{
+	using Function = bool(__fastcall*)(
+		void*,
+		ScriptVariant_t*,
+		void*,
+		bool);
+	if (!output)
+		return false;
+	ScriptVariant_t scratch{};
+	const bool result = OriginalR1Slot<Function>(61)(
+		realVm,
+		&scratch,
+		argument3,
+		argument4);
+	if (result && !TransferR1Output(realVm, scratch, output)) {
+		ReportFakeServerAdapterFailure(
+			61,
+			"unsupported direct R1 output type");
+		return false;
+	}
+	return result;
+}
+
+static __int64 __fastcall PackedVariantArgumentsAdapter(
+	void* realVm,
+	void* argument2,
+	std::int32_t argument3,
+	void* argument4,
+	const ScriptVariant_t* optionalValue,
+	const PackedVariantRecord* records,
+	std::int32_t recordCount)
+{
+	using Function = __int64(__fastcall*)(
+		void*,
+		void*,
+		std::int32_t,
+		void*,
+		const ScriptVariant_t*,
+		const PackedVariantRecord*,
+		std::int32_t);
+	if (recordCount < 0 || recordCount > kMaxFunctionParameterCount
+		|| (recordCount && !records)) {
+		FailFakeServerVm("invalid packed variant record array");
+	}
+	ScriptVariant_t optionalScratch{};
+	const ScriptVariant_t* optionalR1 = nullptr;
+	if (optionalValue) {
+		if (!ConvertVariantToR1(optionalValue, optionalScratch))
+			FailFakeServerVm("unsupported optional packed variant type");
+		optionalR1 = &optionalScratch;
+	}
+	std::vector<PackedVariantRecord> convertedRecords(
+		static_cast<std::size_t>(recordCount));
+	for (std::int32_t i = 0; i < recordCount; ++i) {
+		const auto index = static_cast<std::size_t>(i);
+		convertedRecords[index] = records[index];
+		if (!ConvertVariantToR1(
+				&records[index].value,
+				convertedRecords[index].value)) {
+			FailFakeServerVm("unsupported packed record variant type");
+		}
+	}
+	return OriginalR1Slot<Function>(82)(
+		realVm,
+		argument2,
+		argument3,
+		argument4,
+		optionalR1,
+		convertedRecords.empty() ? nullptr : convertedRecords.data(),
+		recordCount);
+}
+
+static __int64 __fastcall FinalVariantArgumentAdapter(
+	void* realVm,
+	void* argument2,
+	void* argument3,
+	void* argument4,
+	void* argument5,
+	const ScriptVariant_t* value)
+{
+	using Function = __int64(__fastcall*)(
+		void*,
+		void*,
+		void*,
+		void*,
+		void*,
+		const ScriptVariant_t*);
+	ScriptVariant_t scratch{};
+	if (!ConvertVariantToR1(value, scratch))
+		FailFakeServerVm("unsupported final variant argument type");
+	return OriginalR1Slot<Function>(84)(
+		realVm,
+		argument2,
+		argument3,
+		argument4,
+		argument5,
+		&scratch);
+}
+
+static void __fastcall SetPerVmFlagAdapter(void*, bool value)
+{
+	g_serverProxyFlag = value;
+}
+
+static bool __fastcall GetPerVmFlagAdapter(void*)
+{
+	return g_serverProxyFlag;
+}
+
+static void* AdapterForSourceSlot(std::size_t sourceSlot)
+{
+	switch (sourceSlot) {
+	case 32: return reinterpret_cast<void*>(&ExecuteFunctionAdapter);
+	case 33: return reinterpret_cast<void*>(&RegisterFunctionAdapter);
+	case 34: return reinterpret_cast<void*>(&RegisterClassAdapter);
+	case 36: return reinterpret_cast<void*>(&RegisterInstanceAdapter);
+	case 41: return reinterpret_cast<void*>(&GetInstanceValueAdapter);
+	case 44:
+		return reinterpret_cast<void*>(&CreateVariantOutputAdapter<44>);
+	case 45:
+		return reinterpret_cast<void*>(&CreateVariantOutputAdapter<45>);
+	case 46: return reinterpret_cast<void*>(&ArrayAppendAdapter);
+	case 48: return reinterpret_cast<void*>(&GetArrayValueAdapter);
+	case 49: return reinterpret_cast<void*>(&SetArrayValueAdapter);
+	case 50: return reinterpret_cast<void*>(&SetValueAdapter);
+	case 52:
+		return reinterpret_cast<void*>(&CreateVariantOutputAdapter<52>);
+	case 53:
+		return reinterpret_cast<void*>(&CreateVariantOutputAdapter<53>);
+	case 56: return reinterpret_cast<void*>(&GetValueAdapter);
+	case 57: return reinterpret_cast<void*>(&ReleaseValueAdapter);
+	case 59:
+		return reinterpret_cast<void*>(&TransitiveVariantOutputAdapter);
+	case 61:
+		return reinterpret_cast<void*>(&DirectVariantOutputAdapter);
+	case 82: return reinterpret_cast<void*>(&PackedVariantArgumentsAdapter);
+	case 84: return reinterpret_cast<void*>(&FinalVariantArgumentAdapter);
+	default: return nullptr;
+	}
+}
+
+static uintptr_t* CreateFakeServerVtable()
+{
+	auto* vtable = new (std::nothrow) uintptr_t[
+		r1delta::script_variant::kTfoVtableSlotCount]{};
+	if (!vtable)
+		FailFakeServerVm("could not allocate fake vtable");
+
+	for (const auto& entry :
+		r1delta::script_variant::kVtableSlotInventory) {
+		void* destination = reinterpret_cast<void*>(
+			g_originalR1Destinations[entry.sourceSlot]);
+		if (entry.disposition
+			== r1delta::script_variant::SourceSlotDisposition::Adapter) {
+			destination = AdapterForSourceSlot(entry.sourceSlot);
+		}
+		if (!destination) {
+			delete[] vtable;
+			FailFakeServerVm("real R1 vtable destination is null");
+		}
+		const uintptr_t thunk =
+			CreateFunctionIndirect(destination, &g_realServerVm);
+		if (!thunk) {
+			delete[] vtable;
+			FailFakeServerVm("could not allocate vtable thunk");
+		}
+		vtable[entry.targetSlot] = thunk;
+	}
+
+	vtable[r1delta::script_variant::kTfoSetPerVmFlagSlot] =
+		CreateFunctionIndirect(
+			reinterpret_cast<void*>(&SetPerVmFlagAdapter),
+			&g_realServerVm);
+	vtable[r1delta::script_variant::kTfoGetPerVmFlagSlot] =
+		CreateFunctionIndirect(
+			reinterpret_cast<void*>(&GetPerVmFlagAdapter),
+			&g_realServerVm);
+	if (!vtable[r1delta::script_variant::kTfoSetPerVmFlagSlot]
+		|| !vtable[r1delta::script_variant::kTfoGetPerVmFlagSlot]) {
+		delete[] vtable;
+		FailFakeServerVm("could not allocate per-VM flag thunks");
+	}
+	return vtable;
+}
 
 static void OnServerVmCreated(void* vmPtr)
 {
+	if (!vmPtr)
+		FailFakeServerVm("null real VM");
+	if (g_realServerVm && g_realServerVm != vmPtr)
+		FailFakeServerVm("overlapping real server VMs");
+
+	auto* requestedDestinations = *reinterpret_cast<uintptr_t**>(vmPtr);
+	if (!requestedDestinations)
+		FailFakeServerVm("real VM has no vtable");
+
+	if (g_haveOriginalR1Destinations) {
+		if (r1delta::script_variant::VtableNeedsRecreation(
+				g_originalR1Destinations.data(),
+				requestedDestinations)) {
+			FailFakeServerVm(
+				"real VM vtable destinations changed on recreation");
+		}
+	}
+	else {
+		for (std::size_t slot = 0;
+			slot < g_originalR1Destinations.size();
+			++slot) {
+			g_originalR1Destinations[slot] =
+				requestedDestinations[slot];
+		}
+		g_haveOriginalR1Destinations = true;
+	}
+
+	g_serverProxyFlag = false;
 	g_realServerVm = vmPtr;
 	if (!g_fakeServerVm.vtable)
-		g_fakeServerVm.vtable = static_cast<uintptr_t*>(CreateNewVTable(vmPtr));
+		g_fakeServerVm.vtable = CreateFakeServerVtable();
 }
 
 static void OnServerVmDestroyed()
 {
+	for (auto& [source, adapter] : g_classDescriptorClones) {
+		if (!source || !adapter || !adapter->complete)
+			continue;
+		auto* writableSource = const_cast<unsigned char*>(
+			static_cast<const unsigned char*>(source));
+		*reinterpret_cast<void**>(
+			writableSource
+				+ r1delta::script_variant::
+					kClassDescriptorFunctionVectorBaseOffset) =
+			adapter->originalFunctionBase;
+	}
+	g_functionDescriptorClones.clear();
+	g_classDescriptorClones.clear();
+	g_serverProxyFlag = false;
 	g_realServerVm = nullptr;
-	s_R1OTfoPendingServerAutorunVm.store(nullptr, std::memory_order_release);
-	s_R1OTfoServerAutorunBootstrapComplete.store(false, std::memory_order_release);
-	scriptflag = false;
-	hasRegisteredServerFuncs = true;
 }
+
+} // namespace
+
 
 void* CScriptManager__CreateNewVM(__int64 a1, int a2, unsigned int a3) {
 	// Call the original function to maintain existing functionality
@@ -2595,7 +3512,7 @@ void* CScriptManager__CreateNewVM_R1OTFO(__int64 a1, int a2, unsigned int a3) {
 		OutputDebugStringA("R1Delta: R1O TFO squirrel native registration skipped: AddSquirrelReg is null\n");
 
 	if (context == SCRIPT_CONTEXT_SERVER) {
-		g_realServerVm = vmPtr;
+		g_R1OTfoServerVm = vmPtr;
 		// The normal R1 autorun hook sits above CScriptManager::CreateNewVM,
 		// after the VM's root table and IncludeScript helper are ready.  R1O
 		// does not use that hook.  Leave this VM pending and reset its bootstrap
@@ -2688,145 +3605,6 @@ void* CScriptVM__GetUnknownVMPtr()
 	}
 	return CScriptVM__GetUnknownVMPtrOriginal();
 }
-__int64 __fastcall CScriptVM__ctor(void* thisptr) {
-	__int64 ret = CScriptVM__ctororiginal(thisptr);
-	//if (isServerScriptVM)
-	//	realvmptr = thisptr;
-	return ret;
-}
-
-enum class ScriptVariantABI {
-	R1,
-	R1O,
-};
-
-constexpr uint32_t R1D_SERVER_VARIANT_LAYOUT = 0x10;
-
-static bool R1OTypeToR1(int16& type)
-{
-	if (type <= 5)
-		return true;
-	if (type == 6) {
-		type = 0;
-		return false;
-	}
-	--type;
-	return true;
-}
-
-static void R1TypeToR1O(int16& type)
-{
-	if (type > 5)
-		++type;
-}
-
-bool ConvertScriptVariant(ScriptVariant_t* variant, ConversionDirection direction) {
-	if (!variant)
-		return false;
-
-	// Check if attempting to convert in the opposite direction of a previous conversion
-	if ((direction == R1_TO_R1O && (variant->m_flags & SV_CONVERTED_TO_R1)) ||
-		(direction == R1O_TO_R1 && (variant->m_flags & SV_CONVERTED_TO_R1O))) {
-		// Clear the opposite flag
-		variant->m_flags &= ~(direction == R1_TO_R1O ? SV_CONVERTED_TO_R1 : SV_CONVERTED_TO_R1O);
-	}
-	else if ((direction == R1_TO_R1O && (variant->m_flags & SV_CONVERTED_TO_R1O)) ||
-		(direction == R1O_TO_R1 && (variant->m_flags & SV_CONVERTED_TO_R1))) {
-		// If already converted in this direction, exit to prevent double conversion
-		return true;
-	}
-
-	if (direction == R1_TO_R1O) {
-		R1TypeToR1O(variant->m_type);
-		variant->m_flags |= SV_CONVERTED_TO_R1O;
-		return true;
-	}
-
-	const bool supported = R1OTypeToR1(variant->m_type);
-	variant->m_flags |= SV_CONVERTED_TO_R1;
-	return supported;
-}
-
-
-
-// Function to check if server.dll is in the call stack
-// TODO(mrsteyk): performance
-// Helper constant for the diag prints offset.
-constexpr uintptr_t DIAG_PRINTS_OFFSET = 0xe8;
-
-// Optional helper to get the diag prints pointer from a VM.
-inline char* getDiagPrints(void* vm) {
-	return *reinterpret_cast<char**>(reinterpret_cast<uintptr_t>(vm) + DIAG_PRINTS_OFFSET);
-}
-
-__forceinline bool IsServerActive() {
-	if (IsDedicatedServer())
-		return true;
-	return G_engine && *reinterpret_cast<int*>(G_engine + 0x2966168) != 0;
-}
-
-__forceinline bool UsesServerVariantLayout(void* vmInstance) {
-	if (!vmInstance || !IsServerActive())
-		return false;
-
-	if (IsDedicatedServer())
-		return true;
-
-	if (isServerScriptVM ||
-		vmInstance == g_realServerVm ||
-		vmInstance == &g_fakeServerVm ||
-		(g_realServerVm && vmInstance == *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(g_realServerVm) + sizeof(void*))))
-	{
-		return true;
-	}
-
-	// If we don't have a valid real VM pointer, the server isn't running.
-	if (!g_realServerVm)
-		return false;
-
-	// Compare diag prints pointers to verify if this VM is actually the server.
-	// The idea: if the diag prints (at offset DIAG_PRINTS_OFFSET) match, it's the server in disguise.
-	char* vmDiagPrints = getDiagPrints(vmInstance);
-	char* serverDiagPrints = getDiagPrints(static_cast<R1SquirrelVM*>(g_realServerVm)->sqvm);
-
-	return vmDiagPrints && serverDiagPrints && (vmDiagPrints == serverDiagPrints);
-}
-
-
-const char* FieldTypeToString(int fieldType, ScriptVariantABI abi)
-{
-	static const std::map<int, const char*> typeMapServerRunning = {
-		{0, "void"}, {1, "float"}, {3, "Vector"}, {5, "int"},
-		{7, "bool"}, {9, "char"}, {33, "string"}, {34, "handle"}
-	};
-	static const std::map<int, const char*> typeMapServerNotRunning = {
-		{0, "void"}, {1, "float"}, {3, "Vector"}, {5, "int"},
-		{6, "bool"}, {8, "char"}, {32, "string"}, {33, "handle"}
-	};
-
-	const auto& typeMap = abi == ScriptVariantABI::R1O ? typeMapServerRunning : typeMapServerNotRunning;
-	auto it = typeMap.find(fieldType);
-	if (it != typeMap.end()) {
-		return it->second;
-	}
-	else {
-		return "<unknown>";
-	}
-}
-typedef void (*CSquirrelVM__RegisterFunctionGutsType)(__int64* a1, __int64 a2, const char** a3);
-CSquirrelVM__RegisterFunctionGutsType CSquirrelVM__RegisterFunctionGutsOriginal;
-typedef __int64 (*CSquirrelVM__PushVariantType)(__int64* a1, ScriptVariant_t* a2);
-CSquirrelVM__PushVariantType CSquirrelVM__PushVariantOriginal;
-typedef char (*CSquirrelVM__ConvertToVariantType)(__int64* a1, __int64 a2, ScriptVariant_t* a3);
-CSquirrelVM__ConvertToVariantType CSquirrelVM__ConvertToVariantOriginal;
-typedef __int64 (*CSquirrelVM__ReleaseValueType)(__int64* a1, ScriptVariant_t* a2);
-CSquirrelVM__ReleaseValueType CSquirrelVM__ReleaseValueOriginal;
-typedef bool (*CSquirrelVM__SetValueType)(__int64* a1, void* a2, unsigned int a3, ScriptVariant_t* a4);
-CSquirrelVM__SetValueType CSquirrelVM__SetValueOriginal;
-typedef bool (*CSquirrelVM__SetValueExType)(__int64* a1, __int64 a2, const char* a3, ScriptVariant_t* a4);
-CSquirrelVM__SetValueExType CSquirrelVM__SetValueExOriginal;
-typedef __int64 (*CSquirrelVM__TranslateCallType)(__int64* a1);
-CSquirrelVM__TranslateCallType CSquirrelVM__TranslateCallOriginal;
 bool IsPointerFromServerDll(void* pointer) {
 	// G_server is populated from whichever shared server binary was loaded:
 	// server.dll on R1 or server_local.dll (with server.dll fallback) on R1O.
@@ -2856,258 +3634,25 @@ bool IsPointerFromServerDll(void* pointer) {
 	return ptrAddress >= baseAddress && ptrAddress < endAddress;
 }
 
-static void __fastcall NormalizeRegisteredReturnVariant(void* registration, ScriptVariant_t* returnVariant)
-{
-	if (!registration || !returnVariant)
-		return;
-	const uint32_t flags = *reinterpret_cast<const uint32_t*>(
-		reinterpret_cast<uintptr_t>(registration) + 0x70);
-	if (flags & R1D_SERVER_VARIANT_LAYOUT)
-		R1OTypeToR1(returnVariant->m_type);
-}
 
-static void* AllocateExecutableNear(uintptr_t target, size_t size)
-{
-	SYSTEM_INFO systemInfo = {};
-	GetSystemInfo(&systemInfo);
-	const uintptr_t granularity = systemInfo.dwAllocationGranularity;
-	const uintptr_t minAddress = reinterpret_cast<uintptr_t>(systemInfo.lpMinimumApplicationAddress);
-	const uintptr_t maxAddress = reinterpret_cast<uintptr_t>(systemInfo.lpMaximumApplicationAddress);
-	const uintptr_t reach = 0x70000000;
-	const uintptr_t low = target > reach ? (std::max)(minAddress, target - reach) : minAddress;
-	const uintptr_t high = (std::min)(maxAddress, target + reach);
-
-	auto scan = [&](uintptr_t begin, uintptr_t end) -> void* {
-		uintptr_t cursor = begin;
-		while (cursor < end) {
-			MEMORY_BASIC_INFORMATION info = {};
-			if (!VirtualQuery(reinterpret_cast<void*>(cursor), &info, sizeof(info)))
-				break;
-			const uintptr_t regionBase = reinterpret_cast<uintptr_t>(info.BaseAddress);
-			const uintptr_t regionEnd = regionBase + info.RegionSize;
-			if (info.State == MEM_FREE) {
-				const uintptr_t candidate = (regionBase + granularity - 1) & ~(granularity - 1);
-				if (candidate >= begin && candidate + size <= regionEnd && candidate + size <= end) {
-					if (void* allocation = VirtualAlloc(
-						reinterpret_cast<void*>(candidate), size,
-						MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE))
-						return allocation;
-				}
-			}
-			if (regionEnd <= cursor)
-				break;
-			cursor = regionEnd;
-		}
-		return nullptr;
-	};
-
-	if (void* allocation = scan(target, high))
-		return allocation;
-	return scan(low, target);
-}
-
-bool InstallScriptVariantReturnBridge(uintptr_t vscriptBase, bool legacyDedicated)
-{
-	if (!vscriptBase || IsR1ODedicatedServer())
-		return false;
-	static std::atomic<uintptr_t> installedBase{ 0 };
-	if (installedBase.load(std::memory_order_acquire) == vscriptBase)
-		return true;
-
-	const uintptr_t modeOffset = legacyDedicated ? 0x20 : 0;
-	auto* patchAddress = reinterpret_cast<uint8_t*>(vscriptBase + 0xC39B + modeOffset);
-	const uintptr_t resumeAddress = vscriptBase + 0xC3A6 + modeOffset;
-	const uintptr_t noReturnAddress = vscriptBase + 0xC60E + modeOffset;
-	constexpr uint8_t expected[] = {
-		0x41, 0x39, 0x74, 0x24, 0x38,
-		0x0F, 0x84, 0x68, 0x02, 0x00, 0x00
-	};
-	if (memcmp(patchAddress, expected, sizeof(expected)) != 0) {
-		Warning("R1Delta: ScriptVariant return bridge byte mismatch at %p.\n", patchAddress);
-		return false;
-	}
-
-	auto* stub = static_cast<uint8_t*>(AllocateExecutableNear(
-		reinterpret_cast<uintptr_t>(patchAddress), 64));
-	if (!stub) {
-		Warning("R1Delta: could not allocate a nearby ScriptVariant return bridge.\n");
-		return false;
-	}
-
-	uint8_t* out = stub;
-	auto emit8 = [&](uint8_t value) { *out++ = value; };
-	auto emit32 = [&](int32_t value) {
-		memcpy(out, &value, sizeof(value));
-		out += sizeof(value);
-	};
-	auto emit64 = [&](uintptr_t value) {
-		memcpy(out, &value, sizeof(value));
-		out += sizeof(value);
-	};
-	auto emitRelative = [&](uint8_t opcode, uintptr_t destination) -> bool {
-		emit8(opcode);
-		const intptr_t displacement = static_cast<intptr_t>(destination)
-			- reinterpret_cast<intptr_t>(out + sizeof(int32_t));
-		if (displacement < INT32_MIN || displacement > INT32_MAX)
-			return false;
-		emit32(static_cast<int32_t>(displacement));
-		return true;
-	};
-
-	// Preserve the original function's stack frame, provide Win64 shadow space,
-	// and pass r12 (registration) plus the return ScriptVariant at old rsp+30h.
-	const uint8_t prefix[] = {
-		0x48, 0x83, 0xEC, 0x20,
-		0x4C, 0x89, 0xE1,
-		0x48, 0x8D, 0x54, 0x24, 0x50,
-		0x48, 0xB8
-	};
-	memcpy(out, prefix, sizeof(prefix));
-	out += sizeof(prefix);
-	emit64(reinterpret_cast<uintptr_t>(&NormalizeRegisteredReturnVariant));
-	const uint8_t callAndRestore[] = {
-		0xFF, 0xD0,
-		0x48, 0x83, 0xC4, 0x20,
-		0x41, 0x39, 0x74, 0x24, 0x38,
-		0x0F, 0x84
-	};
-	memcpy(out, callAndRestore, sizeof(callAndRestore));
-	out += sizeof(callAndRestore);
-	const intptr_t noReturnDisplacement = static_cast<intptr_t>(noReturnAddress)
-		- reinterpret_cast<intptr_t>(out + sizeof(int32_t));
-	if (noReturnDisplacement < INT32_MIN || noReturnDisplacement > INT32_MAX) {
-		VirtualFree(stub, 0, MEM_RELEASE);
-		return false;
-	}
-	emit32(static_cast<int32_t>(noReturnDisplacement));
-	if (!emitRelative(0xE9, resumeAddress)) {
-		VirtualFree(stub, 0, MEM_RELEASE);
-		return false;
-	}
-
-	DWORD oldStubProtect = 0;
-	if (!VirtualProtect(stub, 64, PAGE_EXECUTE_READ, &oldStubProtect)) {
-		VirtualFree(stub, 0, MEM_RELEASE);
-		return false;
-	}
-	FlushInstructionCache(GetCurrentProcess(), stub, static_cast<SIZE_T>(out - stub));
-
-	uint8_t patch[sizeof(expected)] = { 0xE9 };
-	const intptr_t stubDisplacement = reinterpret_cast<intptr_t>(stub)
-		- reinterpret_cast<intptr_t>(patchAddress + 5);
-	if (stubDisplacement < INT32_MIN || stubDisplacement > INT32_MAX) {
-		VirtualFree(stub, 0, MEM_RELEASE);
-		return false;
-	}
-	const int32_t relativeStub = static_cast<int32_t>(stubDisplacement);
-	memcpy(patch + 1, &relativeStub, sizeof(relativeStub));
-	memset(patch + 5, 0x90, sizeof(patch) - 5);
-
-	DWORD oldProtect = 0;
-	if (!VirtualProtect(patchAddress, sizeof(patch), PAGE_EXECUTE_READWRITE, &oldProtect)) {
-		VirtualFree(stub, 0, MEM_RELEASE);
-		return false;
-	}
-	memcpy(patchAddress, patch, sizeof(patch));
-	FlushInstructionCache(GetCurrentProcess(), patchAddress, sizeof(patch));
-	DWORD ignored = 0;
-	if (!VirtualProtect(patchAddress, sizeof(patch), oldProtect, &ignored)) {
-		Warning("R1Delta: could not restore ScriptVariant bridge page protection.\n");
-		return false;
-	}
-	installedBase.store(vscriptBase, std::memory_order_release);
-	return true;
-}
-void __fastcall CSquirrelVM__RegisterFunctionGuts(__int64* a1, __int64 a2, const char** a3) {
-	//std::cout << "RegisterFunctionGuts called, server: " << (serverRunning ? "TRUE" : "FALSE") << std::endl;
-		
-	if (UsesServerVariantLayout(a1) && (*(_DWORD*)(a2 + 112) & 2) == 0 && (*(_DWORD*)(a2 + 112) & R1D_SERVER_VARIANT_LAYOUT) == 0) {
-		int argCount = *(_DWORD*)(a2 + 88); // Get the argument count
-		_DWORD* args = *(_DWORD**)(a2 + 64); // Get the pointer to arguments
-		*(_DWORD*)(a2 + 112) |= R1D_SERVER_VARIANT_LAYOUT;
-		for (int i = 0; i < argCount; ++i) {
-			int16 type = static_cast<int16>(args[i]);
-			R1OTypeToR1(type);
-			args[i] = type;
-		}
-	}
-	/*
-	LPCVOID baseAddressDll = (LPCVOID)G_vscript;
-	LPCVOID address1 = (LPCVOID)((uintptr_t)(baseAddressDll)+0xCE27);
-	LPCVOID address2 = (LPCVOID)((uintptr_t)(baseAddressDll)+0xD3C0);
-	char value1 = 0x22;
-	char data1[] = { 0x00, 0x05, 0x01, 0x05, 0x00, 0x05, 0x02, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x03, 0x04, 0x04 };
-	WriteProcessMemory(GetCurrentProcess(), (LPVOID)address1, &value1, 1, NULL);
-	WriteProcessMemory(GetCurrentProcess(), (LPVOID)address2, data1, sizeof(data1), NULL);
-	//std::cout << __FUNCTION__ ": translated call" << std::endl;
-	CSquirrelVM__RegisterFunctionGutsOriginal(a1, a2, a3);
-	char value2 = 0x21;
-	char data2[] = { 0x00, 0x05, 0x01, 0x05, 0x00, 0x02, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x03, 0x04, 0x04 };
-	WriteProcessMemory(GetCurrentProcess(), (LPVOID)address1, &value2, 1, NULL);
-	WriteProcessMemory(GetCurrentProcess(), (LPVOID)address2, data2, sizeof(data2), NULL);
-	*/
-	//
-	CSquirrelVM__RegisterFunctionGutsOriginal(a1, a2, a3);
-}
-__int64 __fastcall CSquirrelVM__TranslateCall(__int64* a1) {
-	return CSquirrelVM__TranslateCallOriginal(a1);
-}
-
-__int64 __fastcall CSquirrelVM__PushVariant(__int64* a1, ScriptVariant_t* a2)
-{
-	if (UsesServerVariantLayout(a1)) {
-		ConvertScriptVariant(a2, R1O_TO_R1);
-		//std::cout << __FUNCTION__ ": converted variant" << std::endl;
-	}
-	else {
-		//std::cout << __FUNCTION__ ": did not convert variant" << std::endl;
-	}
-	return CSquirrelVM__PushVariantOriginal(a1, a2);
-}
-
-char __fastcall CSquirrelVM__ConvertToVariant(__int64* a1, __int64 a2, ScriptVariant_t* a3)
-{
-	char ret = CSquirrelVM__ConvertToVariantOriginal(a1, a2, a3);
-	if (UsesServerVariantLayout(a1))
-		ConvertScriptVariant(a3, R1_TO_R1O);
-	return ret;
-}
-__int64 __fastcall CSquirrelVM__ReleaseValue(__int64* a1, ScriptVariant_t* a2)
-{
-	if (UsesServerVariantLayout(a1))
-		ConvertScriptVariant(a2, R1O_TO_R1);
-	return CSquirrelVM__ReleaseValueOriginal(a1, a2);
-}
-bool __fastcall CSquirrelVM__SetValue(__int64* a1, void* a2, unsigned int a3, ScriptVariant_t* a4)
-{
-	if (UsesServerVariantLayout(a1))
-		ConvertScriptVariant(a4, R1O_TO_R1);
-	return CSquirrelVM__SetValueOriginal(a1, a2, a3, a4);
-}
-
-bool __fastcall CSquirrelVM__SetValueEx(__int64* a1, __int64 a2, const char* a3, ScriptVariant_t* a4)
-{
-	if (UsesServerVariantLayout(a1))
-		ConvertScriptVariant(a4, R1O_TO_R1);
-	return CSquirrelVM__SetValueExOriginal(a1, a2, a3, a4);
-
-}
-typedef void (*CScriptManager__DestroyVMType)(void* a1, void* vmptr);
 CScriptManager__DestroyVMType CScriptManager__DestroyVMOriginal;
 
-__declspec(dllexport) R1SquirrelVM* GetServerVMPtr() {
-	return static_cast<R1SquirrelVM*>(g_realServerVm);
-}
-void __fastcall CScriptManager__DestroyVM(void* a1, void* vmptr)
+__declspec(dllexport) R1SquirrelVM* GetServerVMPtr()
 {
-	if (vmptr == &g_fakeServerVm) {
-		vmptr = g_realServerVm;
+	return static_cast<R1SquirrelVM*>(
+		IsR1ODedicatedServer() ? g_R1OTfoServerVm : g_realServerVm);
+}
+
+void __fastcall CScriptManager__DestroyVM(void* manager, void* vmPtr)
+{
+	const bool destroyingServerVm =
+		vmPtr == &g_fakeServerVm
+		|| (vmPtr && vmPtr == g_realServerVm);
+	void* realVmPtr =
+		vmPtr == &g_fakeServerVm ? g_realServerVm : vmPtr;
+	CScriptManager__DestroyVMOriginal(manager, realVmPtr);
+	if (destroyingServerVm)
 		OnServerVmDestroyed();
-	}
-	else if (vmptr && vmptr == g_realServerVm) {
-		OnServerVmDestroyed();
-	}
-	CScriptManager__DestroyVMOriginal(a1, vmptr);
 }
 // Track incomplete lines for each VM type
 static bool g_serverLineIncomplete = false;
