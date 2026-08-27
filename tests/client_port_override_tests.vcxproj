@@ -9,8 +9,8 @@
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
-    <ProjectGuid>{7A87D911-041C-4498-A6E4-DF7DAF07D25D}</ProjectGuid>
-    <RootNamespace>materialsystem_dx11_multithread_tests</RootNamespace>
+    <ProjectGuid>{D3A2B187-668B-4A27-9F55-86DF53E47D49}</ProjectGuid>
+    <RootNamespace>client_port_override_tests</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -31,8 +31,8 @@
     <VcpkgEnabled>false</VcpkgEnabled>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <OutDir>$(ProjectDir)..\.build\materialsystem_dx11_multithread_tests\</OutDir>
-    <IntDir>$(ProjectDir)..\.build\materialsystem_dx11_multithread_tests\obj\</IntDir>
+    <OutDir>$(ProjectDir)..\.build\client_port_override_tests\</OutDir>
+    <IntDir>$(ProjectDir)..\.build\client_port_override_tests\obj\</IntDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -41,14 +41,15 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <PreprocessorDefinitions>WIN32;NDEBUG;BUILD_DEBUG=0;_CERT;_CONSOLE;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(ProjectDir)..;$(ProjectDir)..\engine\core;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)..;$(ProjectDir)..\engine;$(ProjectDir)..\engine\core;$(ProjectDir)..\vsdk;$(ProjectDir)..\vsdk\public;$(ProjectDir)..\vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cmake\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="materialsystem_dx11_multithread_tests.cpp" />
+    <ClCompile Include="client_port_override_tests.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets" />
 </Project>

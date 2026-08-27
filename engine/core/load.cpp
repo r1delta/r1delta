@@ -106,6 +106,7 @@
 #endif
 #include "vector.h"
 #include "hudwarp.h"
+#include "hudwarp_convars.h"
 #include "hudwarp_hooks.h"
 #include "surfacerender.h"
 #include "mcp_server.h"
@@ -319,9 +320,19 @@ static __int64 __fastcall CStaticPropMgrLoadStaticPropsNoop(__int64 staticPropMg
 	return 0;
 }
 
-static bool __fastcall CStaticPropMgrStaticPropDistanceTestNoop(__int64 staticPropMgr, int staticPropIndex, float* origin, float maxDistanceSquared)
+static bool __fastcall CStaticPropMgrStaticPropDistanceTestGuard(
+	__int64 staticPropMgr,
+	int staticPropIndex,
+	float* origin,
+	float maxDistanceSquared)
 {
-	return false;
+	if (!*reinterpret_cast<void**>(staticPropMgr + 0x38))
+		return false;
+	return CStaticPropMgrStaticPropDistanceTestOriginal(
+		staticPropMgr,
+		staticPropIndex,
+		origin,
+		maxDistanceSquared);
 }
 
 static bool InstallEngineCommandLineCheckedHook(
@@ -372,7 +383,7 @@ static bool InstallEngineCommandLineCheckedHook(
 
 static void InstallNoStaticPropsHook(uintptr_t engineBase)
 {
-	if (s_NoStaticPropsHookInstalled || !engineBase || !ShouldDisableStaticProps())
+	if (s_NoStaticPropsHookInstalled || !engineBase)
 		return;
 
 	const unsigned char expectedLevelInitPrologue[] = {
@@ -391,26 +402,51 @@ static void InstallNoStaticPropsHook(uintptr_t engineBase)
 		0xF3, 0x0F, 0x10, 0x2D, 0xA0, 0xCB, 0xFF, 0x02
 	};
 
-	const bool levelInitInstalled = InstallEngineCommandLineCheckedHook(
-		engineBase,
-		0x18FFD0,
-		expectedLevelInitPrologue,
-		sizeof(expectedLevelInitPrologue),
-		&CStaticPropMgrLoadStaticPropsNoop,
-		reinterpret_cast<void**>(&CStaticPropMgrLoadStaticPropsOriginal),
-		"-nostaticprops",
-		"CStaticPropMgr::LevelInit");
+	bool levelInitInstalled = true;
+	if (ShouldDisableStaticProps()) {
+		levelInitInstalled = InstallEngineCommandLineCheckedHook(
+			engineBase,
+			0x18FFD0,
+			expectedLevelInitPrologue,
+			sizeof(expectedLevelInitPrologue),
+			&CStaticPropMgrLoadStaticPropsNoop,
+			reinterpret_cast<void**>(&CStaticPropMgrLoadStaticPropsOriginal),
+			"-nostaticprops",
+			"CStaticPropMgr::LevelInit");
+	}
 	const bool distanceTestInstalled = InstallEngineCommandLineCheckedHook(
 		engineBase,
 		0x18DC10,
 		expectedDistanceTestPrologue,
 		sizeof(expectedDistanceTestPrologue),
-		&CStaticPropMgrStaticPropDistanceTestNoop,
+		&CStaticPropMgrStaticPropDistanceTestGuard,
 		reinterpret_cast<void**>(&CStaticPropMgrStaticPropDistanceTestOriginal),
-		"-nostaticprops",
+		"static-prop bounds",
 		"CStaticPropMgr::DistanceTest");
 
-	s_NoStaticPropsHookInstalled = levelInitInstalled || distanceTestInstalled;
+	if (!distanceTestInstalled
+		|| !CStaticPropMgrStaticPropDistanceTestOriginal) {
+		constexpr DWORD kStaticPropBoundsInvariantFailure = 0xE042101E;
+		const ULONG_PTR arguments[] = {
+			static_cast<ULONG_PTR>(distanceTestInstalled),
+			reinterpret_cast<ULONG_PTR>(
+				CStaticPropMgrStaticPropDistanceTestOriginal),
+		};
+		OutputDebugStringA(
+			"R1Delta: fatal static-prop distance guard installation failure\n");
+		RaiseException(
+			kStaticPropBoundsInvariantFailure,
+			EXCEPTION_NONCONTINUABLE,
+			static_cast<DWORD>(std::size(arguments)),
+			arguments);
+		TerminateProcess(
+			GetCurrentProcess(),
+			kStaticPropBoundsInvariantFailure);
+		__assume(0);
+	}
+
+	s_NoStaticPropsHookInstalled =
+		distanceTestInstalled && levelInitInstalled;
 }
 
 static void StripCollisionBSPClipBrushContents(__int64 collisionBspData)
@@ -9129,7 +9165,13 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		RegisterConVar("delta_online_auth_enable", "0", FCVAR_GAMEDLL, "Whether to use master server auth");
 		RegisterConVar("delta_discord_username_sync", "0", FCVAR_GAMEDLL, "Controls if player names are synced with Discord: 0=Off,1=Norm,2=Pomelo");
 		RegisterConVar("riff_floorislava", "0", FCVAR_HIDDEN, "Enable floor is lava mode");
-		RegisterConVar("hudwarp_disable", "0", FCVAR_ARCHIVE, "GPU device to use for HUD warp");
+		const auto hudwarpConVars = r1delta::hudwarp::RegisterRuntimeConVars<ConVarR1>(
+			[](const char* name, const char* value, int flags, const char* helpString) {
+				return RegisterConVar(name, value, flags, helpString);
+			},
+			FCVAR_ARCHIVE);
+		R1DAssert(hudwarpConVars.useGpu);
+		R1DAssert(hudwarpConVars.disable);
 		RegisterConVar("hide_server", "0", FCVAR_NONE, "Whether the server should be hidden from the master server");
 		RegisterConVar("server_description", "", FCVAR_NONE, "Server description");
 		RegisterConVar("delta_ui_server_filter", "0", FCVAR_NONE, "Script managed vgui filter convar");
@@ -9531,13 +9573,14 @@ void __stdcall LoaderNotificationCallback(
 	}
 	else if (string_equal_size(name, name_len, L"materialsystem_dx11.dll")) {
 		G_matsystem = (uintptr_t)notification_data->Loaded.DllBase;
-		if (GetR1DeltaEngineMode() == R1DeltaEngineMode::Client2015)
-			InstallMaterialSystemDx11MultithreadProtection(G_matsystem);
+		if (GetR1DeltaEngineMode() == R1DeltaEngineMode::Client2015) {
+			InstallMaterialSystemDx11RenderThreadGuards(G_matsystem);
+			InstallMaterialSystemDx11InputLayoutCacheGuard(G_matsystem);
+		}
 		if (!HasEngineCommandLineFlag("-r1delta_disable_material_guards")) {
 			InstallMaterialSystemDx11NullShaderResourceGuard(G_matsystem);
 			if (GetR1DeltaEngineMode() == R1DeltaEngineMode::Client2015) {
 				InstallMaterialSystemDx11TxaaLifetimeGuard(G_matsystem);
-				InstallMaterialSystemDx11ClientMaterialGuard(G_matsystem);
 			}
 		}
 		if (!IsR1ODedicatedServer()) {

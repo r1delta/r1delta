@@ -228,10 +228,11 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="engine\core\core.h" />
     <ClInclude Include="engine\logging\crashhandler.h" />
     <ClInclude Include="engine\logging\crash_report_minidump.h" />
+    <ClInclude Include="engine\logging\crash_report_memory_capture.h" />
     <ClInclude Include="engine\core\materialsystem_dx11_vtf_scratch.h" />
-    <ClInclude Include="engine\core\materialsystem_dx11_material_guard.h" />
     <ClInclude Include="engine\core\materialsystem_dx11_txaa_lifetime.h" />
-    <ClInclude Include="engine\core\materialsystem_dx11_multithread.h" />
+    <ClInclude Include="engine\core\materialsystem_dx11_render_thread.h" />
+    <ClInclude Include="engine\core\materialsystem_dx11_input_layout_cache.h" />
     <ClInclude Include="engine\cvar.h" />
     <ClInclude Include="engine\dedicated.h" />
     <ClInclude Include="client\discord.h" />
@@ -251,6 +252,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="engine\filesystem\vpk_directory_repair.h" />
     <ClInclude Include="engine\core\framework.h" />
     <ClInclude Include="client\rendering\hudwarp.h" />
+    <ClInclude Include="client\rendering\hudwarp_convars.h" />
     <ClInclude Include="client\rendering\hudwarp_hooks.h" />
     <ClInclude Include="thirdparty\jwt\jwt_compact.h" />
     <ClInclude Include="sdk\keyvalues.h" />
@@ -362,6 +364,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="engine\compression_stream.cpp" />
     <ClCompile Include="engine\logging\crashhandler.cpp" />
     <ClCompile Include="engine\logging\crash_report_minidump.cpp" />
+    <ClCompile Include="engine\logging\crash_report_memory_capture.cpp" />
     <ClCompile Include="engine\core\materialsystem_dx11_vtf_scratch.cpp" />
     <ClCompile Include="engine\cvar.cpp" />
     <ClCompile Include="engine\dedicated.cpp" />

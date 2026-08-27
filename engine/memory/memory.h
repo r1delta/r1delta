@@ -187,28 +187,12 @@ public:
 	virtual int GetGenericMemoryStats(GenericMemoryStat_t** ppMemoryStats) = 0;
 
 	virtual ~IMemAlloc() { };
-	// Retail R1 (tier0_orig) does not provide aligned slots beyond this point;
-	// its heap satisfies the required alignment natively (ASSERT_MEMALLOC_WILL_ALIGN).
-	// Keep these as non-virtual inline helpers routed through the supported base
-	// methods. CMimMemAlloc defines matching plain methods for its own path, but
-	// calls through an IMemAlloc* (including the retail singleton) always use
-	// these inline Alloc/Realloc/Free routes so we never read past the vtable.
-    inline void* Alloc_Aligned(size_t nSize, size_t alignment) { return Alloc(nSize); }
-    inline void* Realloc_Aligned(void* pMem, size_t nSize, size_t alignment) { return Realloc(pMem, nSize); }
-    inline void Free_Aligned(void* pMem, size_t alignment) { Free(pMem); }
-
-    // Forwarding helpers so existing GlobalAllocator()->mi_* call sites keep
-    // compiling while routing through the IMemAlloc interface. The retail
-    // allocator (tier0_orig.dll) does not provide these, so the tag/heap
-    // parameters are accepted for source compatibility and otherwise unused.
-    inline void* mi_malloc(size_t nSize, EDeltaAllocTags = TAG_DEFAULT, EDeltaAllocHeaps = HEAP_DEFAULT) { return Alloc(nSize); }
-    inline void* mi_malloc_aligned(size_t nSize, size_t alignment, EDeltaAllocTags = TAG_DEFAULT, EDeltaAllocHeaps = HEAP_DEFAULT) { return Alloc_Aligned(nSize, alignment); }
-    inline void mi_free(void* pMem, EDeltaAllocTags = TAG_DEFAULT, EDeltaAllocHeaps = HEAP_DEFAULT) { Free(pMem); }
-    inline void mi_free_aligned(void* pMem, size_t alignment, EDeltaAllocTags = TAG_DEFAULT, EDeltaAllocHeaps = HEAP_DEFAULT) { Free_Aligned(pMem, alignment); }
-    inline void mi_free_size(void* pMem, size_t, EDeltaAllocTags = TAG_DEFAULT, EDeltaAllocHeaps = HEAP_DEFAULT) { Free(pMem); }
-    inline void mi_free_size_aligned(void* pMem, size_t, size_t alignment, EDeltaAllocTags = TAG_DEFAULT, EDeltaAllocHeaps = HEAP_DEFAULT) { Free_Aligned(pMem, alignment); }
-    inline void* mi_realloc(void* pMem, size_t nSize, EDeltaAllocTags = TAG_DEFAULT, EDeltaAllocHeaps = HEAP_DEFAULT) { return Realloc(pMem, nSize); }
-    inline void* mi_realloc_aligned(void* pMem, size_t nSize, size_t alignment, EDeltaAllocTags = TAG_DEFAULT, EDeltaAllocHeaps = HEAP_DEFAULT) { return Realloc_Aligned(pMem, nSize, alignment); }
+	virtual void* Alloc_Aligned(size_t nSize, size_t alignment) = 0;
+	virtual void* Realloc_Aligned(
+		void* pMem,
+		size_t nSize,
+		size_t alignment) = 0;
+	virtual void Free_Aligned(void* pMem, size_t alignment) = 0;
 };
 
 // Gated allocator provenance tracing for startup-memory investigations. The
@@ -805,14 +789,10 @@ public:
         HeapSetInformation(_heaps[HEAP_SYSTEM], HeapCompatibilityInformation, &HeapInformation, sizeof(HeapInformation));
 #endif
 
-        // Deferred-free quarantine is on by default: it restores the reuse
-        // window the old allocator had. The engine command line is fully
-        // formed by the time the first allocation routes through here.
-        const char* cmdLine = GetCommandLineA();
-        _quarantine_enabled = !(cmdLine && strstr(cmdLine, "-r1delta_no_quarantine_frees"));
-        // Poisoned frees are a diagnostic, not shipping behavior: they turn
-        // latent UAF reads into wild-pointer crashes in unrelated modules.
-        _quarantine_poison = cmdLine && strstr(cmdLine, "-r1delta_quarantine_poison_frees");
+        // Quarantine and poison were diagnostic lifetime experiments. Keep the
+        // coherent allocator domain fast and surface ownership bugs directly.
+        _quarantine_enabled = false;
+        _quarantine_poison = false;
     }
 
     void* Alloc(size_t nSize) override {
@@ -1190,7 +1170,7 @@ public:
     }
 
     ~CMimMemAlloc() override {}
-    void* Alloc_Aligned(size_t nSize, size_t alignment) {
+    void* Alloc_Aligned(size_t nSize, size_t alignment) override {
         if (nSize == 0) nSize = 1;
         
         void* p = mi_malloc_aligned(nSize, alignment, TAG_GAME, HEAP_GAME);
@@ -1212,7 +1192,7 @@ public:
         return p;
     }
 
-    void* Realloc_Aligned(void* pMem, size_t nSize, size_t alignment) {
+    void* Realloc_Aligned(void* pMem, size_t nSize, size_t alignment) override {
         if (nSize == 0) {
             Free_Aligned(pMem, alignment);
             return nullptr;
@@ -1234,7 +1214,7 @@ public:
         return p;
     }
 
-    void Free_Aligned(void* pMem, size_t alignment) {
+    void Free_Aligned(void* pMem, size_t alignment) override {
         mi_free_aligned(pMem, alignment, TAG_GAME, HEAP_GAME);
     }
 
@@ -1346,12 +1326,9 @@ void RegisterMsvcAllocatorFallbacks(
 extern IMemAlloc* g_pMemAllocSingleton;
 extern "C" __declspec(dllexport) IMemAlloc * CreateGlobalMemAlloc();
 
-IMemAlloc* GlobalAllocator();
+CMimMemAlloc* GlobalAllocator();
 
-// Allocate/free strings that are handed to the R1/R1O engine and freed by the
-// engine's own allocator path (cvar values, search paths, autocvar storage).
-// The engine frees through the delegated retail allocator, so these MUST come
-// from that same allocator; CRT strdup/malloc buffers would be validated as
-// foreign blocks and abort inside tier0_orig's free check.
+// Allocate/free strings that are handed to the engine and released through
+// the process-wide allocator domain. CRT strdup/malloc buffers are foreign.
 char* DuplicateDelegatedString(const char* value);
 void FreeDelegatedString(void* p);

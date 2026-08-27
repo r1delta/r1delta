@@ -3,6 +3,8 @@
 #include <DbgHelp.h>
 #include <zstd.h>
 
+#include <atomic>
+#include <array>
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -18,10 +20,24 @@ namespace
 
 constexpr size_t kMaximumDumpSize = 256u * 1024u * 1024u;
 constexpr MINIDUMP_TYPE kDumpType = static_cast<MINIDUMP_TYPE>(
-	MiniDumpNormal | MiniDumpWithFullMemoryInfo);
+	MiniDumpNormal
+	| MiniDumpWithFullMemoryInfo
+	| MiniDumpWithThreadInfo
+	| MiniDumpWithProcessThreadData
+	| MiniDumpWithUnloadedModules);
 constexpr size_t kTemporaryPathCapacity = 4096;
 
 volatile LONG g_temporaryFileSequence = 0;
+
+struct CapturePayload
+{
+	BoundedMemoryRegionPlan memoryPlan{};
+	CrashCaptureManifest manifest{};
+	detail::CrashMemoryCaptureClaims memoryClaims{};
+	std::array<uint8_t, 4096> scanBuffer{};
+	std::atomic<size_t> nextMemoryRegion{ 0 };
+};
+std::atomic_flag g_minidumpWriteActive = ATOMIC_FLAG_INIT;
 
 enum class Failure
 {
@@ -42,6 +58,8 @@ struct CaptureState
 {
 	HANDLE file = INVALID_HANDLE_VALUE;
 	char path[kTemporaryPathCapacity]{};
+	CapturePayload* payload = nullptr;
+	bool ownsMinidumpWrite = false;
 };
 
 struct BuildMetrics
@@ -50,6 +68,65 @@ struct BuildMetrics
 	uint64_t compressedSize = 0;
 	uint64_t encodedSize = 0;
 };
+
+bool IsOptionalPlannedRead(
+	const CapturePayload& payload,
+	uint64_t address,
+	uint32_t size) noexcept
+{
+	if (size == 0 || address > std::numeric_limits<uint64_t>::max() - size)
+		return false;
+	const uint64_t end = address + size;
+	for (uint32_t i = 0; i < payload.manifest.header.memoryRegionCount; ++i)
+	{
+		const CrashCaptureMemoryRegion& region = payload.manifest.memoryRegions[i];
+		const uint64_t regionEnd = region.base + region.size;
+		if (address >= region.base && end <= regionEnd)
+			return true;
+	}
+	return false;
+}
+
+BOOL CALLBACK MinidumpCallback(
+	PVOID callbackParameter,
+	const PMINIDUMP_CALLBACK_INPUT input,
+	PMINIDUMP_CALLBACK_OUTPUT output)
+{
+	if (!callbackParameter || !input || !output)
+		return FALSE;
+
+	CapturePayload& payload = *static_cast<CapturePayload*>(callbackParameter);
+	if (input->CallbackType == MemoryCallback)
+	{
+		const size_t index =
+			payload.nextMemoryRegion.fetch_add(1, std::memory_order_relaxed);
+		if (index >= payload.manifest.header.memoryRegionCount)
+			return FALSE;
+		const CrashCaptureMemoryRegion& region =
+			payload.manifest.memoryRegions[index];
+		output->MemoryBase = region.base;
+		output->MemorySize = region.size;
+		return TRUE;
+	}
+	if (input->CallbackType == ReadMemoryFailureCallback)
+	{
+		if (!IsOptionalPlannedRead(
+				payload,
+				input->ReadMemoryFailure.Offset,
+				input->ReadMemoryFailure.Bytes))
+		{
+			return FALSE;
+		}
+		output->Status = S_OK;
+		return TRUE;
+	}
+	if (input->CallbackType == CancelCallback)
+	{
+		output->CheckCancel = FALSE;
+		output->Cancel = FALSE;
+	}
+	return TRUE;
+}
 
 const char* FailureText(Failure failure) noexcept
 {
@@ -87,7 +164,9 @@ void BuildUnavailableSection(
 	result.append(kSectionHeader);
 	result.append("\nStatus: unavailable\n");
 	result.append("Format: Windows MiniDumpNormal\n");
-	result.append("Additional-Flags: MiniDumpWithFullMemoryInfo\n");
+	result.append("Additional-Flags: ");
+	result.append(kAdditionalFlagsDescription);
+	result.push_back('\n');
 	result.append("Compression: Zstandard\n");
 	result.append("Compression-Level: 19\n");
 	result.append("Content-Checksum: enabled\n");
@@ -237,7 +316,9 @@ void BuildAvailableSection(
 	result.append(kSectionHeader);
 	result.append("\nStatus: available\n");
 	result.append("Format: Windows MiniDumpNormal\n");
-	result.append("Additional-Flags: MiniDumpWithFullMemoryInfo\n");
+	result.append("Additional-Flags: ");
+	result.append(kAdditionalFlagsDescription);
+	result.push_back('\n');
 	result.append("Compression: Zstandard\n");
 	result.append("Compression-Level: 19\n");
 	result.append("Content-Checksum: enabled\n");
@@ -280,21 +361,68 @@ bool CaptureAndBuildImpl(
 		return false;
 	}
 
+	state->payload = static_cast<CapturePayload*>(VirtualAlloc(
+		nullptr,
+		sizeof(CapturePayload),
+		MEM_RESERVE | MEM_COMMIT,
+		PAGE_READWRITE));
+
+	MINIDUMP_USER_STREAM_INFORMATION* userStreamInformation = nullptr;
+	MINIDUMP_CALLBACK_INFORMATION* callbackInformation = nullptr;
+	MINIDUMP_USER_STREAM userStream{};
+	MINIDUMP_USER_STREAM_INFORMATION userStreams{};
+	MINIDUMP_CALLBACK_INFORMATION callbacks{};
+	if (state->payload)
+	{
+		new (state->payload) CapturePayload{};
+		detail::BuildCrashCaptureMemory(
+			*exceptionPointers,
+			state->payload->memoryPlan,
+			state->payload->manifest,
+			state->payload->memoryClaims,
+			state->payload->scanBuffer.data(),
+			state->payload->scanBuffer.size());
+
+		userStream.Type = kCaptureManifestStreamType;
+		userStream.BufferSize = static_cast<ULONG>(sizeof(state->payload->manifest));
+		userStream.Buffer = &state->payload->manifest;
+		userStreams.UserStreamCount = 1;
+		userStreams.UserStreamArray = &userStream;
+		userStreamInformation = &userStreams;
+
+		callbacks.CallbackRoutine = &MinidumpCallback;
+		callbacks.CallbackParam = state->payload;
+		callbackInformation = &callbacks;
+	}
+
 	MINIDUMP_EXCEPTION_INFORMATION exceptionInformation{};
 	exceptionInformation.ThreadId = GetCurrentThreadId();
 	exceptionInformation.ExceptionPointers = exceptionPointers;
 	exceptionInformation.ClientPointers = FALSE;
-	if (!MiniDumpWriteDump(
+	if (g_minidumpWriteActive.test_and_set(std::memory_order_acquire))
+	{
+		*failure = Failure::MinidumpWrite;
+		*windowsError = ERROR_BUSY;
+		return false;
+	}
+	state->ownsMinidumpWrite = true;
+	const BOOL dumpWritten = MiniDumpWriteDump(
 		GetCurrentProcess(),
 		GetCurrentProcessId(),
 		state->file,
 		kDumpType,
 		&exceptionInformation,
-		nullptr,
-		nullptr))
+		userStreamInformation,
+		callbackInformation);
+	const DWORD dumpError = dumpWritten ? ERROR_SUCCESS : GetLastError();
+	if (state->payload)
+		detail::ReleaseCrashCaptureMemoryClaims(state->payload->memoryClaims);
+	g_minidumpWriteActive.clear(std::memory_order_release);
+	state->ownsMinidumpWrite = false;
+	if (!dumpWritten)
 	{
 		*failure = Failure::MinidumpWrite;
-		*windowsError = GetLastError();
+		*windowsError = dumpError;
 		return false;
 	}
 
@@ -385,10 +513,19 @@ bool CaptureAndBuildGuarded(
 		}
 		__finally
 		{
+			if (state.ownsMinidumpWrite)
+				g_minidumpWriteActive.clear(std::memory_order_release);
 			if (state.file != INVALID_HANDLE_VALUE)
 				CloseHandle(state.file);
 			if (state.path[0] != '\0')
 				DeleteFileA(state.path);
+			if (state.payload)
+			{
+				detail::ReleaseCrashCaptureMemoryClaims(
+					state.payload->memoryClaims);
+				state.payload->~CapturePayload();
+				VirtualFree(state.payload, 0, MEM_RELEASE);
+			}
 		}
 	}
 	__except (EXCEPTION_EXECUTE_HANDLER)
@@ -397,6 +534,7 @@ bool CaptureAndBuildGuarded(
 		*windowsError = GetExceptionCode();
 		result = false;
 	}
+
 	return result;
 }
 

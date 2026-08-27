@@ -13,13 +13,13 @@ env:
   BUILD_PATH: ${{ github.workspace }}/build
   OUTPUT_PATH: ${{ github.workspace }}/output
   SYMBOL_PATH: ${{ github.workspace }}/symbols
-  CORE_REF: 6c1029d6640ef2d8bf73bc0fd3e3f3cacc2446d7
+  CORE_REF: ef9daf920140b4c0d3d3b7e6a9313e77383bd9c2
   VCPKG_BINARY_SOURCES: "clear;files,D:/a/r1delta/vcpkg,readwrite"
   BUILD_CONFIGURATION: Release
   MSBUILD_DEBUG_TYPE: pdbonly
   NUSPEC_FILE: R1Delta.nuspec
   PACKAGE_NAME: R1Delta
-  DISPLAY_VERSION: "3.0 prerelease 27"
+  DISPLAY_VERSION: "3.0 prerelease 28"
 
 permissions:
   contents: write
@@ -192,11 +192,12 @@ jobs:
             client_studio_header_guard_tests = 'tests/client_studio_header_guard_tests.vcxproj'
             cbuf_initialization_guard_tests = 'tests/cbuf_initialization_guard_tests.vcxproj'
             materialsystem_dx11_vtf_scratch_tests = 'tests/materialsystem_dx11_vtf_scratch_tests.vcxproj'
-            materialsystem_dx11_material_guard_tests = 'tests/materialsystem_dx11_material_guard_tests.vcxproj'
             materialsystem_dx11_txaa_lifetime_tests = 'tests/materialsystem_dx11_txaa_lifetime_tests.vcxproj'
-            materialsystem_dx11_multithread_tests = 'tests/materialsystem_dx11_multithread_tests.vcxproj'
+            materialsystem_dx11_render_thread_tests = 'tests/materialsystem_dx11_render_thread_tests.vcxproj'
+            hudwarp_convar_tests = 'tests/hudwarp_convar_tests.vcxproj'
+            materialsystem_dx11_input_layout_cache_tests = 'tests/materialsystem_dx11_input_layout_cache_tests.vcxproj'
             vphysics_parallel_guard_tests = 'tests/vphysics_parallel_guard_tests.vcxproj'
-            allocator_delegation_tests = 'tests/allocator_delegation_tests.vcxproj'
+            client_port_override_tests = 'tests/client_port_override_tests.vcxproj'
             ffa_targeting_tests = 'tests/ffa_targeting_tests.vcxproj'
           }
 
@@ -228,11 +229,12 @@ jobs:
             'client_studio_header_guard_tests',
             'cbuf_initialization_guard_tests',
             'materialsystem_dx11_vtf_scratch_tests',
-            'materialsystem_dx11_material_guard_tests',
             'materialsystem_dx11_txaa_lifetime_tests',
-            'materialsystem_dx11_multithread_tests',
+            'materialsystem_dx11_render_thread_tests',
+            'hudwarp_convar_tests',
+            'materialsystem_dx11_input_layout_cache_tests',
             'vphysics_parallel_guard_tests',
-            'allocator_delegation_tests',
+            'client_port_override_tests',
             'ffa_targeting_tests'
           )
           foreach ($test in $tests) {
@@ -240,14 +242,7 @@ jobs:
             if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
               throw "Missing native test executable: $executable"
             }
-            if ($test -eq 'allocator_delegation_tests') {
-              $gameNamedTest = Join-Path (Split-Path -Parent $executable) 'Titanfall.exe'
-              Copy-Item -LiteralPath $executable -Destination $gameNamedTest -Force
-              & $gameNamedTest
-            }
-            else {
-              & $executable
-            }
+            & $executable
             if ($LASTEXITCODE -ne 0) {
               throw "$test failed with exit code $LASTEXITCODE."
             }

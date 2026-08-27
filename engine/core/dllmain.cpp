@@ -60,35 +60,35 @@
 #define mi_decl_new_nothrow(n)  [[nodiscard]] __declspec(allocator) __declspec(restrict)
 #endif
 
-void operator delete(void* p) noexcept { CreateGlobalMemAlloc()->Free(p); };
-void operator delete[](void* p) noexcept { CreateGlobalMemAlloc()->Free(p); };
+void operator delete(void* p) noexcept { GlobalAllocator()->mi_free(p, TAG_NEW, HEAP_DELTA); };
+void operator delete[](void* p) noexcept { GlobalAllocator()->mi_free(p, TAG_NEW, HEAP_DELTA); };
 
-void operator delete  (void* p, const std::nothrow_t&) noexcept { CreateGlobalMemAlloc()->Free(p); }
-void operator delete[](void* p, const std::nothrow_t&) noexcept { CreateGlobalMemAlloc()->Free(p); }
+void operator delete  (void* p, const std::nothrow_t&) noexcept { GlobalAllocator()->mi_free(p, TAG_NEW, HEAP_DELTA); }
+void operator delete[](void* p, const std::nothrow_t&) noexcept { GlobalAllocator()->mi_free(p, TAG_NEW, HEAP_DELTA); }
 
-mi_decl_new(n) void* operator new(std::size_t n) noexcept(false) { return CreateGlobalMemAlloc()->Alloc(n); }
-mi_decl_new(n) void* operator new[](std::size_t n) noexcept(false) { return CreateGlobalMemAlloc()->Alloc(n); }
+mi_decl_new(n) void* operator new(std::size_t n) noexcept(false) { return GlobalAllocator()->mi_malloc(n, TAG_NEW, HEAP_DELTA); }
+mi_decl_new(n) void* operator new[](std::size_t n) noexcept(false) { return GlobalAllocator()->mi_malloc(n, TAG_NEW, HEAP_DELTA); }
 
-mi_decl_new_nothrow(n) void* operator new  (std::size_t n, const std::nothrow_t& tag) noexcept { (void)(tag); return CreateGlobalMemAlloc()->Alloc(n); }
-mi_decl_new_nothrow(n) void* operator new[](std::size_t n, const std::nothrow_t& tag) noexcept { (void)(tag); return CreateGlobalMemAlloc()->Alloc(n); }
+mi_decl_new_nothrow(n) void* operator new  (std::size_t n, const std::nothrow_t& tag) noexcept { (void)(tag); return GlobalAllocator()->mi_malloc(n, TAG_NEW, HEAP_DELTA); }
+mi_decl_new_nothrow(n) void* operator new[](std::size_t n, const std::nothrow_t& tag) noexcept { (void)(tag); return GlobalAllocator()->mi_malloc(n, TAG_NEW, HEAP_DELTA); }
 
 #if (__cplusplus >= 201402L || _MSC_VER >= 1916)
-void operator delete  (void* p, std::size_t n) noexcept { CreateGlobalMemAlloc()->Free(p); };
-void operator delete[](void* p, std::size_t n) noexcept { CreateGlobalMemAlloc()->Free(p); };
+void operator delete  (void* p, std::size_t n) noexcept { GlobalAllocator()->mi_free_size(p, n, TAG_NEW, HEAP_DELTA); };
+void operator delete[](void* p, std::size_t n) noexcept { GlobalAllocator()->mi_free_size(p, n, TAG_NEW, HEAP_DELTA); };
 #endif
 
 #if (__cplusplus > 201402L || defined(__cpp_aligned_new))
-void operator delete  (void* p, std::align_val_t al) noexcept { CreateGlobalMemAlloc()->Free_Aligned(p, static_cast<size_t>(al)); }
-void operator delete[](void* p, std::align_val_t al) noexcept { CreateGlobalMemAlloc()->Free_Aligned(p, static_cast<size_t>(al)); }
-void operator delete  (void* p, std::size_t n, std::align_val_t al) noexcept { CreateGlobalMemAlloc()->Free_Aligned(p, static_cast<size_t>(al)); };
-void operator delete[](void* p, std::size_t n, std::align_val_t al) noexcept { CreateGlobalMemAlloc()->Free_Aligned(p, static_cast<size_t>(al)); };
-void operator delete  (void* p, std::align_val_t al, const std::nothrow_t&) noexcept { CreateGlobalMemAlloc()->Free_Aligned(p, static_cast<size_t>(al)); }
-void operator delete[](void* p, std::align_val_t al, const std::nothrow_t&) noexcept { CreateGlobalMemAlloc()->Free_Aligned(p, static_cast<size_t>(al)); }
+void operator delete  (void* p, std::align_val_t al) noexcept { GlobalAllocator()->mi_free_aligned(p, static_cast<size_t>(al), TAG_NEW, HEAP_DELTA); }
+void operator delete[](void* p, std::align_val_t al) noexcept { GlobalAllocator()->mi_free_aligned(p, static_cast<size_t>(al), TAG_NEW, HEAP_DELTA); }
+void operator delete  (void* p, std::size_t n, std::align_val_t al) noexcept { GlobalAllocator()->mi_free_size_aligned(p, n, static_cast<size_t>(al), TAG_NEW, HEAP_DELTA); };
+void operator delete[](void* p, std::size_t n, std::align_val_t al) noexcept { GlobalAllocator()->mi_free_size_aligned(p, n, static_cast<size_t>(al), TAG_NEW, HEAP_DELTA); };
+void operator delete  (void* p, std::align_val_t al, const std::nothrow_t&) noexcept { GlobalAllocator()->mi_free_aligned(p, static_cast<size_t>(al), TAG_NEW, HEAP_DELTA); }
+void operator delete[](void* p, std::align_val_t al, const std::nothrow_t&) noexcept { GlobalAllocator()->mi_free_aligned(p, static_cast<size_t>(al), TAG_NEW, HEAP_DELTA); }
 
-void* operator new  (std::size_t n, std::align_val_t al) noexcept(false) { return CreateGlobalMemAlloc()->Alloc_Aligned(n, static_cast<size_t>(al)); }
-void* operator new[](std::size_t n, std::align_val_t al) noexcept(false) { return CreateGlobalMemAlloc()->Alloc_Aligned(n, static_cast<size_t>(al)); }
-void* operator new  (std::size_t n, std::align_val_t al, const std::nothrow_t&) noexcept { return CreateGlobalMemAlloc()->Alloc_Aligned(n, static_cast<size_t>(al)); }
-void* operator new[](std::size_t n, std::align_val_t al, const std::nothrow_t&) noexcept { return CreateGlobalMemAlloc()->Alloc_Aligned(n, static_cast<size_t>(al)); }
+void* operator new  (std::size_t n, std::align_val_t al) noexcept(false) { return GlobalAllocator()->mi_malloc_aligned(n, static_cast<size_t>(al), TAG_NEW, HEAP_DELTA); }
+void* operator new[](std::size_t n, std::align_val_t al) noexcept(false) { return GlobalAllocator()->mi_malloc_aligned(n, static_cast<size_t>(al), TAG_NEW, HEAP_DELTA); }
+void* operator new  (std::size_t n, std::align_val_t al, const std::nothrow_t&) noexcept { return GlobalAllocator()->mi_malloc_aligned(n, static_cast<size_t>(al), TAG_NEW, HEAP_DELTA); }
+void* operator new[](std::size_t n, std::align_val_t al, const std::nothrow_t&) noexcept { return GlobalAllocator()->mi_malloc_aligned(n, static_cast<size_t>(al), TAG_NEW, HEAP_DELTA); }
 #endif
 #endif
 

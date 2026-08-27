@@ -1711,10 +1711,8 @@ int AutoCVar(HSQUIRRELVM v) {
 	constexpr size_t AUTOCVAR_PREFIX_SIZE = std::char_traits<char>::length(AUTOCVAR_PREFIX);
 
 	size_t size = AUTOCVAR_PREFIX_SIZE + strlen(key) + 1;
-	// Build "autocvar_<key>" through the delegated allocator: the R1 ConVar
-	// stores the name pointer for its lifetime and the engine frees it with
-	// the delegated allocator, so a CRT buffer would be validated as foreign
-	// and abort inside tier0_orig's free check.
+	// The R1 ConVar stores this pointer for its lifetime and releases it
+	// through the process-wide allocator, so a CRT buffer is foreign.
 	char* actualKey = static_cast<char*>(GlobalAllocator()->Alloc(size));
 	if (!actualKey)
 		return -1;

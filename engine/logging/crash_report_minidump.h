@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Windows.h>
+#include "crash_report_memory_capture.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -13,6 +13,9 @@ namespace r1delta::logging::crash_report_minidump
 inline constexpr int kCompressionLevel = 19;
 inline constexpr size_t kAscii85LineWidth = 80;
 inline constexpr size_t kRegisterMemoryPreviewBytes = 16;
+inline constexpr char kAdditionalFlagsDescription[] =
+	"MiniDumpWithFullMemoryInfo | MiniDumpWithThreadInfo | "
+	"MiniDumpWithProcessThreadData | MiniDumpWithUnloadedModules";
 inline constexpr char kSectionHeader[] = "=== R1Delta Crash Minidump v1 ===";
 inline constexpr char kBeginMarker[] = "-----BEGIN R1DELTA CRASH MINIDUMP v1-----";
 inline constexpr char kEndMarker[] = "-----END R1DELTA CRASH MINIDUMP v1-----";
@@ -20,7 +23,7 @@ inline constexpr char kUnavailableSection[] =
 	"=== R1Delta Crash Minidump v1 ===\n"
 	"Status: unavailable\n"
 	"Format: Windows MiniDumpNormal\n"
-	"Additional-Flags: MiniDumpWithFullMemoryInfo\n"
+	"Additional-Flags: MiniDumpWithFullMemoryInfo | MiniDumpWithThreadInfo | MiniDumpWithProcessThreadData | MiniDumpWithUnloadedModules\n"
 	"Compression: Zstandard\n"
 	"Compression-Level: 19\n"
 	"Content-Checksum: enabled\n"

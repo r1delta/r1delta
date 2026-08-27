@@ -1,4 +1,5 @@
 #include "hudwarp.h"
+#include "hudwarp_convars.h"
 #include "hudwarp_hooks.h"
 #include "load.h"
 
@@ -23,13 +24,11 @@ bool isRenderingHud = false;
 bool shouldUseGPUHudwarp = true;
 bool isHudwarpDisabled = false;
 
-// The Delta GPU HUD-warp path is disabled for the prerelease-3 line. Keep the
-// stock CPU HUD-warp path intact and only suppress installation of the hooks
-// that create and drive HudwarpProcess.
-// Re-enabling this needs a proper render-thread/device-lifetime audit first.
+// Install the GPU path by default. Runtime convars and gGPUHudwarpFailed still
+// select the CPU fallback when GPU processing is disabled or initialization fails.
 static bool ShouldInstallGPUHudwarp()
 {
-	return false;
+	return true;
 }
 
 void SetupHudwarp()
@@ -76,11 +75,11 @@ RenderHud_type RenderHud;
 void __fastcall RenderHud_Hook(__int64 a1, __int64 a2, __int64 a3)
 {
 	// Update state once per frame to prevent possible issues with one or neither applying
-	static ConVarR1* hudwarp_use_gpu = OriginalCCVar_FindVar(cvarinterface, "hudwarp_use_gpu");
+	static ConVarR1* hudwarp_use_gpu = OriginalCCVar_FindVar(cvarinterface, r1delta::hudwarp::kUseGpuConVarName);
 	shouldUseGPUHudwarp = hudwarp_use_gpu->m_Value.m_nValue == 1;
 
 
-	static ConVarR1* hudwarp_disable = OriginalCCVar_FindVar(cvarinterface, "hudwarp_disable");
+	static ConVarR1* hudwarp_disable = OriginalCCVar_FindVar(cvarinterface, r1delta::hudwarp::kDisableConVarName);
 	isHudwarpDisabled = hudwarp_disable->m_Value.m_nValue == 1;
 	QueueBeginEvent("HUD");
 	RenderHud(a1, a2, a3);
@@ -175,7 +174,7 @@ void __fastcall CMatSystemSurface__ApplyHudwarpSettings(void* thisptr, HudwarpSe
 	static ConVarR1* hudwarp_chopsize = OriginalCCVar_FindVar(cvarinterface, "hudwarp_chopsize");
 	unsigned int originalChopsize = hudwarp_chopsize->m_Value.m_nValue;
 
-	static ConVarR1* hudwarp_disable = OriginalCCVar_FindVar(cvarinterface, "hudwarp_disable");
+	static ConVarR1* hudwarp_disable = OriginalCCVar_FindVar(cvarinterface, r1delta::hudwarp::kDisableConVarName);
 	HudwarpSettings newSettings = *hudwarpSettings;
 	if (hudwarp_disable->m_Value.m_nValue == 1)
 	{
@@ -192,7 +191,7 @@ void __fastcall CMatSystemSurface__ApplyHudwarpSettings(void* thisptr, HudwarpSe
 	if (hudwarpProcess)
 		hudwarpProcess->UpdateSettings(&newSettings);
 
-	static ConVarR1* hudwarp_use_gpu = OriginalCCVar_FindVar(cvarinterface, "hudwarp_use_gpu");
+	static ConVarR1* hudwarp_use_gpu = OriginalCCVar_FindVar(cvarinterface, r1delta::hudwarp::kUseGpuConVarName);
 	// If using GPU hudwarp or hudwarp is disabled do this
 	// Replace chopsize, it gets set from the cvar in CMatSystemSurface__ApplyHudwarpSettings
 	if (hudwarp_use_gpu->m_Value.m_nValue || hudwarp_disable->m_Value.m_nValue == 1)
@@ -408,7 +407,7 @@ void SetupHudWarpMatSystemHooks() {
 	// report zero GPUs, which makes later material-system initialization fail.
 	MH_CreateHook((void*)(G_matsystem + 0x1CC0), &sub_180001CC0, reinterpret_cast<LPVOID*>(&osub_180001CC0));
 
-	// Only apply other hooks if -usegpuhudwarp is set
+	// Install the GPU processing hooks; runtime convars select GPU versus CPU.
 	if (useGPUHudwarp) {
 		uintptr_t sub_63D0_addr = G_matsystem + 0x63D0;
 		MH_CreateHook((void*)sub_63D0_addr, &sub_63D0, reinterpret_cast<LPVOID*>(&sub_63D0_org));

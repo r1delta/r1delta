@@ -175,13 +175,19 @@
     <ClInclude Include="engine\logging\crash_report_minidump.h">
       <Filter>engine\logging</Filter>
     </ClInclude>
+    <ClInclude Include="engine\logging\crash_report_memory_capture.h">
+      <Filter>engine\logging</Filter>
+    </ClInclude>
     <ClInclude Include="engine\core\materialsystem_dx11_vtf_scratch.h">
       <Filter>engine\core</Filter>
     </ClInclude>
-    <ClInclude Include="engine\core\materialsystem_dx11_material_guard.h">
+    <ClInclude Include="engine\core\materialsystem_dx11_render_thread.h">
       <Filter>engine\core</Filter>
     </ClInclude>
     <ClInclude Include="engine\core\materialsystem_dx11_txaa_lifetime.h">
+      <Filter>engine\core</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\core\materialsystem_dx11_input_layout_cache.h">
       <Filter>engine\core</Filter>
     </ClInclude>
     <ClInclude Include="engine\core\client_port_override.h">
@@ -268,6 +274,9 @@
     </ClInclude>
     <!-- client\rendering -->
     <ClInclude Include="client\rendering\hudwarp.h">
+      <Filter>client\rendering</Filter>
+    </ClInclude>
+    <ClInclude Include="client\rendering\hudwarp_convars.h">
       <Filter>client\rendering</Filter>
     </ClInclude>
     <ClInclude Include="client\rendering\hudwarp_hooks.h">
@@ -577,6 +586,9 @@
       <Filter>engine\logging</Filter>
     </ClCompile>
     <ClCompile Include="engine\logging\crash_report_minidump.cpp">
+      <Filter>engine\logging</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\logging\crash_report_memory_capture.cpp">
       <Filter>engine\logging</Filter>
     </ClCompile>
     <ClCompile Include="engine\logging\logging.cpp">

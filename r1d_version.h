@@ -10,7 +10,7 @@
 // Human-readable product label. Do not send this through delta_version or the
 // master-server compatibility field.
 #ifndef R1D_DISPLAY_VERSION
-#define R1D_DISPLAY_VERSION "3.0 prerelease 27"
+#define R1D_DISPLAY_VERSION "3.0 prerelease 28"
 #endif // !R1D_DISPLAY_VERSION
 
 #ifndef R1D_MINIMUM_VERSION

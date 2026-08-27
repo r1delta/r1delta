@@ -69,9 +69,11 @@
   <ItemGroup>
     <ClCompile Include="crash_report_minidump_tests.cpp" />
     <ClCompile Include="..\engine\logging\crash_report_minidump.cpp" />
+    <ClCompile Include="..\engine\logging\crash_report_memory_capture.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\engine\logging\crash_report_minidump.h" />
+    <ClInclude Include="..\engine\logging\crash_report_memory_capture.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

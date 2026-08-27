@@ -35,9 +35,11 @@ bool EndsWith(std::string_view text, std::string_view suffix)
 		&& text.substr(text.size() - suffix.size()) == suffix;
 }
 
-bool HasMinidumpStream(
+bool FindMinidumpStream(
 	const std::vector<uint8_t>& dump,
-	MINIDUMP_STREAM_TYPE expectedStreamType)
+	uint32_t expectedStreamType,
+	const uint8_t** streamData,
+	size_t* streamSize)
 {
 	if (dump.size() < sizeof(MINIDUMP_HEADER))
 		return false;
@@ -62,8 +64,119 @@ bool HasMinidumpStream(
 			&directory,
 			dump.data() + directoryOffset + i * sizeof(directory),
 			sizeof(directory));
-		if (directory.StreamType == static_cast<ULONG32>(expectedStreamType))
-			return true;
+		if (directory.StreamType != expectedStreamType)
+			continue;
+
+		const size_t offset = directory.Location.Rva;
+		const size_t size = directory.Location.DataSize;
+		if (offset > dump.size() || size > dump.size() - offset)
+			return false;
+		if (streamData)
+			*streamData = dump.data() + offset;
+		if (streamSize)
+			*streamSize = size;
+		return true;
+	}
+	return false;
+}
+
+bool HasMinidumpStream(
+	const std::vector<uint8_t>& dump,
+	uint32_t expectedStreamType)
+{
+	return FindMinidumpStream(
+		dump,
+		expectedStreamType,
+		nullptr,
+		nullptr);
+}
+
+bool ReadCapturedMemory(
+	const std::vector<uint8_t>& dump,
+	uint64_t address,
+	void* destination,
+	size_t size)
+{
+	const uint8_t* stream = nullptr;
+	size_t streamSize = 0;
+	if (FindMinidumpStream(dump, MemoryListStream, &stream, &streamSize)
+		&& streamSize >= offsetof(MINIDUMP_MEMORY_LIST, MemoryRanges))
+	{
+		uint32_t count = 0;
+		memcpy(&count, stream, sizeof(count));
+		const size_t descriptorsOffset = offsetof(MINIDUMP_MEMORY_LIST, MemoryRanges);
+		if (count <= (streamSize - descriptorsOffset) / sizeof(MINIDUMP_MEMORY_DESCRIPTOR))
+		{
+			for (uint32_t i = 0; i < count; ++i)
+			{
+				MINIDUMP_MEMORY_DESCRIPTOR descriptor{};
+				memcpy(
+					&descriptor,
+					stream + descriptorsOffset + i * sizeof(descriptor),
+					sizeof(descriptor));
+				if (address < descriptor.StartOfMemoryRange)
+					continue;
+				const uint64_t offset = address - descriptor.StartOfMemoryRange;
+				if (offset > descriptor.Memory.DataSize
+					|| size > descriptor.Memory.DataSize - static_cast<size_t>(offset))
+				{
+					continue;
+				}
+				const size_t dumpOffset =
+					static_cast<size_t>(descriptor.Memory.Rva) + static_cast<size_t>(offset);
+				if (dumpOffset > dump.size() || size > dump.size() - dumpOffset)
+					return false;
+				memcpy(destination, dump.data() + dumpOffset, size);
+				return true;
+			}
+		}
+	}
+
+	if (!FindMinidumpStream(dump, Memory64ListStream, &stream, &streamSize)
+		|| streamSize < offsetof(MINIDUMP_MEMORY64_LIST, MemoryRanges))
+	{
+		return false;
+	}
+
+	uint64_t rangeCount = 0;
+	uint64_t dataOffset = 0;
+	memcpy(&rangeCount, stream, sizeof(rangeCount));
+	memcpy(&dataOffset, stream + sizeof(rangeCount), sizeof(dataOffset));
+	const size_t descriptorsOffset = offsetof(MINIDUMP_MEMORY64_LIST, MemoryRanges);
+	if (rangeCount
+		> (streamSize - descriptorsOffset) / sizeof(MINIDUMP_MEMORY_DESCRIPTOR64))
+	{
+		return false;
+	}
+
+	for (uint64_t i = 0; i < rangeCount; ++i)
+	{
+		MINIDUMP_MEMORY_DESCRIPTOR64 descriptor{};
+		memcpy(
+			&descriptor,
+			stream + descriptorsOffset + static_cast<size_t>(i) * sizeof(descriptor),
+			sizeof(descriptor));
+		if (address >= descriptor.StartOfMemoryRange)
+		{
+			const uint64_t offset = address - descriptor.StartOfMemoryRange;
+			if (offset <= descriptor.DataSize && size <= descriptor.DataSize - offset)
+			{
+				if (dataOffset > dump.size()
+					|| offset > dump.size() - static_cast<size_t>(dataOffset)
+					|| size > dump.size() - static_cast<size_t>(dataOffset + offset))
+				{
+					return false;
+				}
+				memcpy(
+					destination,
+					dump.data() + static_cast<size_t>(dataOffset + offset),
+					size);
+				return true;
+			}
+		}
+		if (descriptor.DataSize > std::numeric_limits<uint64_t>::max() - dataOffset)
+			return false;
+		dataOffset += descriptor.DataSize;
 	}
 	return false;
 }
@@ -229,6 +342,112 @@ void CaptureCurrentProcessDump(CaptureResult& result)
 	g_captureResult = nullptr;
 }
 
+void TestBoundedMemoryRegionPlan()
+{
+	BoundedMemoryRegionPlan plan(0x4000);
+	Check(
+		plan.Add(0x1000, 0x1000, CrashMemoryRegionRegistered),
+		"first bounded region is accepted");
+	Check(
+		plan.Add(0x1800, 0x1000, CrashMemoryRegionRegisterPointer),
+		"overlapping bounded region is accepted");
+	Check(
+		plan.Add(0x2800, 0x800, CrashMemoryRegionStackPointer),
+		"adjacent bounded region is accepted");
+	Check(plan.Count() == 1, "overlapping and adjacent regions are merged");
+	Check(plan.PlannedBytes() == 0x2000, "merged region counts unique bytes");
+	if (plan.Count() == 1)
+	{
+		const CrashCaptureMemoryRegion& region = plan.Region(0);
+		Check(region.base == 0x1000, "merged region base is stable");
+		Check(region.size == 0x2000, "merged region size is stable");
+		Check(
+			region.sources
+				== (CrashMemoryRegionRegistered
+					| CrashMemoryRegionRegisterPointer
+					| CrashMemoryRegionStackPointer),
+			"merged region retains every source");
+	}
+
+	Check(
+		!plan.Add(0x5000, 0x3000, CrashMemoryRegionIndirectPointer),
+		"region exceeding byte budget is rejected");
+	Check(
+		!plan.Add(
+			std::numeric_limits<uint64_t>::max() - 1,
+			4,
+			CrashMemoryRegionIndirectPointer),
+		"overflowing region is rejected");
+	Check(plan.CandidateCount() == 5, "region candidate count is complete");
+	Check(plan.RejectedCount() == 2, "region rejection count is complete");
+
+	BoundedMemoryRegionPlan capacityPlan(std::numeric_limits<uint64_t>::max());
+	for (size_t i = 0; i < kMaximumAdditionalMemoryRegions; ++i)
+	{
+		Check(
+			capacityPlan.Add(
+				0x1000 + i * 0x2000,
+				0x1000,
+				CrashMemoryRegionRegistered),
+			"region within fixed capacity is accepted");
+	}
+	Check(
+		!capacityPlan.Add(
+			0x1000 + kMaximumAdditionalMemoryRegions * 0x2000,
+			0x1000,
+			CrashMemoryRegionRegistered),
+		"region beyond fixed capacity is rejected");
+	Check(
+		capacityPlan.Count() == kMaximumAdditionalMemoryRegions,
+		"fixed region capacity remains bounded");
+}
+
+void TestRegisteredMemoryClaimLifetime()
+{
+	void* page = VirtualAlloc(
+		nullptr,
+		4096,
+		MEM_RESERVE | MEM_COMMIT,
+		PAGE_READWRITE);
+	Check(page != nullptr, "claim lifetime page allocates");
+	if (!page)
+		return;
+
+	Check(
+		RegisterCrashMemoryRegion(
+			page,
+			4096,
+			CrashMemoryRegionPriority::Critical),
+		"claim lifetime region registers");
+
+	CONTEXT context{};
+	context.ContextFlags = CONTEXT_ALL;
+	EXCEPTION_RECORD record{};
+	EXCEPTION_POINTERS exceptionPointers{ &record, &context };
+	BoundedMemoryRegionPlan plan;
+	CrashCaptureManifest manifest{};
+	detail::CrashMemoryCaptureClaims claims{};
+	std::array<uint8_t, 4096> scratch{};
+	detail::BuildCrashCaptureMemory(
+		exceptionPointers,
+		plan,
+		manifest,
+		claims,
+		scratch.data(),
+		scratch.size());
+
+	Check(claims.count == 1, "capture claims registered storage");
+	Check(
+		!UnregisterCrashMemoryRegion(page),
+		"claimed storage cannot unregister during capture");
+	detail::ReleaseCrashCaptureMemoryClaims(claims);
+	Check(claims.count == 0, "capture claim release resets ownership");
+	Check(
+		UnregisterCrashMemoryRegion(page),
+		"registered storage unregisters after capture");
+	VirtualFree(page, 0, MEM_RELEASE);
+}
+
 void TestAscii85Vectors()
 {
 	const std::string known = "Hello, world!";
@@ -335,11 +554,36 @@ void TestRegisterMemoryPreviews()
 
 void TestCurrentProcessMinidumpRoundTrip()
 {
+	constexpr uint8_t sentinel[] = {
+		0x52, 0x31, 0x44, 0x2D, 0x42, 0x4F, 0x55, 0x4E,
+		0x44, 0x45, 0x44, 0x2D, 0x44, 0x55, 0x4D, 0x50,
+	};
+	constexpr size_t sentinelOffset = 0x180;
+	uint8_t* capturedRegion = static_cast<uint8_t*>(VirtualAlloc(
+		nullptr,
+		4096,
+		MEM_RESERVE | MEM_COMMIT,
+		PAGE_READWRITE));
+	Check(capturedRegion != nullptr, "registered capture page allocates");
+	if (capturedRegion)
+	{
+		memset(capturedRegion, 0xA5, 4096);
+		memcpy(capturedRegion + sentinelOffset, sentinel, sizeof(sentinel));
+		Check(
+			RegisterCrashMemoryRegion(
+				capturedRegion,
+				4096,
+				CrashMemoryRegionPriority::Critical),
+			"generic crash memory region registers");
+	}
+	WriteCrashBreadcrumb(0x43415054, 0x4D454D31, 0x1122334455667788, 0x8877665544332211);
 	CaptureResult capture;
 	capture.reportPath = MakeReportPath();
 	Check(!capture.reportPath.empty(), "temporary report path is available");
 	Check(!TemporaryDumpExists(capture.reportPath), "no temporary dump exists before capture");
 	CaptureCurrentProcessDump(capture);
+	if (capturedRegion)
+		Check(UnregisterCrashMemoryRegion(capturedRegion), "generic crash memory region unregisters");
 
 	Check(capture.available, "current-process minidump capture succeeds");
 	Check(!capture.rawDump.empty(), "current-process minidump is nonempty");
@@ -348,15 +592,91 @@ void TestCurrentProcessMinidumpRoundTrip()
 		"captured bytes have the MDMP signature");
 	Check(HasMinidumpStream(capture.rawDump, MemoryInfoListStream),
 		"captured dump includes full memory information");
+	Check(HasMinidumpStream(capture.rawDump, ThreadInfoListStream),
+		"captured dump includes extended thread information");
+	Check(HasMinidumpStream(capture.rawDump, kCaptureManifestStreamType),
+		"captured dump includes bounded capture manifest");
 	Check(!TemporaryDumpExists(capture.reportPath), "temporary dump is deleted after capture");
 	Check(capture.section.find("\nStatus: available\n") != std::string::npos,
 		"section reports available status");
-	Check(capture.section.find("\nAdditional-Flags: MiniDumpWithFullMemoryInfo\n") != std::string::npos,
-		"section reports full memory information");
+	const std::string expectedFlags =
+		std::string("\nAdditional-Flags: ") + kAdditionalFlagsDescription + "\n";
+	Check(capture.section.find(expectedFlags) != std::string::npos,
+		"section reports every requested metadata flag");
 	Check(capture.section.find("\nCompression-Level: 19\n") != std::string::npos,
 		"section reports compression level 19");
 	Check(capture.section.find("\nContent-Checksum: enabled\n") != std::string::npos,
 		"section reports content checksum");
+
+	const uint8_t* manifestData = nullptr;
+	size_t manifestSize = 0;
+	CrashCaptureManifest manifest{};
+	const bool hasManifest = FindMinidumpStream(
+		capture.rawDump,
+		kCaptureManifestStreamType,
+		&manifestData,
+		&manifestSize);
+	Check(hasManifest, "bounded capture manifest is readable");
+	Check(manifestSize == sizeof(manifest), "bounded capture manifest size matches");
+	if (hasManifest && manifestSize == sizeof(manifest))
+	{
+		memcpy(&manifest, manifestData, sizeof(manifest));
+		Check(manifest.header.magic == kCaptureManifestMagic, "capture manifest magic matches");
+		Check(manifest.header.version == kCaptureManifestVersion, "capture manifest version matches");
+		Check(manifest.header.manifestSize == sizeof(manifest), "capture manifest self-size matches");
+		Check(
+			manifest.header.memoryRegionCount <= kMaximumAdditionalMemoryRegions,
+			"capture manifest region count is bounded");
+		Check(
+			manifest.header.plannedMemoryBytes <= kAdditionalMemoryBudget,
+			"capture manifest byte budget is enforced");
+		Check(
+			manifest.header.candidateRegionCount >= manifest.header.memoryRegionCount,
+			"capture manifest candidate accounting is complete");
+
+		bool registeredRegionRecorded = false;
+		for (uint32_t i = 0; i < manifest.header.memoryRegionCount; ++i)
+		{
+			const CrashCaptureMemoryRegion& region = manifest.memoryRegions[i];
+			if (capturedRegion
+				&& reinterpret_cast<uintptr_t>(capturedRegion) >= region.base
+				&& reinterpret_cast<uintptr_t>(capturedRegion) < region.base + region.size
+				&& (region.sources & CrashMemoryRegionRegistered) != 0)
+			{
+				registeredRegionRecorded = true;
+			}
+		}
+		Check(registeredRegionRecorded, "registered memory appears in capture manifest");
+
+		bool breadcrumbRecorded = false;
+		for (uint32_t i = 0; i < manifest.header.breadcrumbCount; ++i)
+		{
+			const CrashBreadcrumb& breadcrumb = manifest.breadcrumbs[i];
+			if (breadcrumb.category == 0x43415054
+				&& breadcrumb.event == 0x4D454D31
+				&& breadcrumb.value1 == 0x1122334455667788
+				&& breadcrumb.value2 == 0x8877665544332211)
+			{
+				breadcrumbRecorded = true;
+			}
+		}
+		Check(breadcrumbRecorded, "generic breadcrumb appears in capture manifest");
+	}
+
+	if (capturedRegion)
+	{
+		std::array<uint8_t, sizeof(sentinel)> capturedSentinel{};
+		Check(
+			ReadCapturedMemory(
+				capture.rawDump,
+				reinterpret_cast<uintptr_t>(capturedRegion + sentinelOffset),
+				capturedSentinel.data(),
+				capturedSentinel.size()),
+			"registered memory bytes are present in minidump");
+		Check(
+			memcmp(capturedSentinel.data(), sentinel, sizeof(sentinel)) == 0,
+			"registered memory bytes remain exact");
+	}
 
 	uint64_t rawSize = 0;
 	uint64_t compressedSize = 0;
@@ -422,6 +742,8 @@ void TestCurrentProcessMinidumpRoundTrip()
 	Check(sectionOffset != std::string::npos && sectionOffset == textualReport.size(),
 		"minidump section follows textual report");
 	Check(EndsWith(completeReport, kEndMarker), "minidump END marker is at EOF");
+	if (capturedRegion)
+		VirtualFree(capturedRegion, 0, MEM_RELEASE);
 }
 
 void TestUnavailableSectionAndCleanup()
@@ -438,8 +760,10 @@ void TestUnavailableSectionAndCleanup()
 	Check(!available, "invalid capture produces unavailable status");
 	Check(section.find("\nStatus: unavailable\n") != std::string::npos,
 		"failure section reports unavailable");
-	Check(section.find("\nAdditional-Flags: MiniDumpWithFullMemoryInfo\n") != std::string::npos,
-		"failure section reports requested full memory information");
+	const std::string expectedFlags =
+		std::string("\nAdditional-Flags: ") + kAdditionalFlagsDescription + "\n";
+	Check(section.find(expectedFlags) != std::string::npos,
+		"failure section reports every requested metadata flag");
 	Check(section.find("\nRaw-Size: 0\n") != std::string::npos,
 		"failure section includes raw size");
 	Check(section.size() < 1024, "failure section is bounded");
@@ -453,6 +777,8 @@ void TestUnavailableSectionAndCleanup()
 
 int main()
 {
+	TestRegisteredMemoryClaimLifetime();
+	TestBoundedMemoryRegionPlan();
 	TestAscii85Vectors();
 	TestRegisterMemoryPreviews();
 	TestCurrentProcessMinidumpRoundTrip();

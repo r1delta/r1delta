@@ -9,8 +9,8 @@
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
-    <ProjectGuid>{5B3D770E-4C0A-4EF4-A7E3-6A714195E2CF}</ProjectGuid>
-    <RootNamespace>materialsystem_dx11_material_guard_tests</RootNamespace>
+    <ProjectGuid>{2CA521B6-C9AC-48D5-8786-CA2F4791EE55}</ProjectGuid>
+    <RootNamespace>hudwarp_convar_tests</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -31,8 +31,8 @@
     <VcpkgEnabled>false</VcpkgEnabled>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <OutDir>$(ProjectDir)..\.build\materialsystem_dx11_material_guard_tests\</OutDir>
-    <IntDir>$(ProjectDir)..\.build\materialsystem_dx11_material_guard_tests\obj\</IntDir>
+    <OutDir>$(ProjectDir)..\.build\hudwarp_convar_tests\</OutDir>
+    <IntDir>$(ProjectDir)..\.build\hudwarp_convar_tests\obj\</IntDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -41,14 +41,14 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <PreprocessorDefinitions>WIN32;NDEBUG;BUILD_DEBUG=0;_CERT;_CONSOLE;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(ProjectDir)..;$(ProjectDir)..\engine\core;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)..;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="materialsystem_dx11_material_guard_tests.cpp" />
+    <ClCompile Include="hudwarp_convar_tests.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>
