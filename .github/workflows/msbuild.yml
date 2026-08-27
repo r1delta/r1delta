@@ -19,7 +19,7 @@ env:
   MSBUILD_DEBUG_TYPE: pdbonly
   NUSPEC_FILE: R1Delta.nuspec
   PACKAGE_NAME: R1Delta
-  DISPLAY_VERSION: "3.0 prerelease 28"
+  DISPLAY_VERSION: "3.0 prerelease 29"
 
 permissions:
   contents: write
@@ -185,6 +185,7 @@ jobs:
             addonlist_state_tests = 'tests/addonlist_state_tests.vcxproj'
             compression_stream_tests = 'tests/compression_stream_tests.vcxproj'
             r1o_vpk_tests = 'tests/r1o_vpk_tests.vcxproj'
+            vpk_async_precache_tests = 'tests/vpk_async_precache_tests.vcxproj'
             script_variant_abi_tests = 'tests/script_variant_abi_tests.vcxproj'
             vsdk_memalloc_tests = 'tests/vsdk_memalloc_tests.vcxproj'
             persistentdata_codec_tests = 'tests/persistentdata_codec_tests.vcxproj'
@@ -222,6 +223,7 @@ jobs:
             'addonlist_state_tests',
             'compression_stream_tests',
             'r1o_vpk_tests',
+            'vpk_async_precache_tests',
             'script_variant_abi_tests',
             'vsdk_memalloc_tests',
             'persistentdata_codec_tests',

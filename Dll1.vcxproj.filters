@@ -158,6 +158,12 @@
     <ClInclude Include="engine\filesystem\vpk_directory_repair.h">
       <Filter>engine\filesystem</Filter>
     </ClInclude>
+    <ClInclude Include="engine\filesystem\vpk_async_precache_entry.h">
+      <Filter>engine\filesystem</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\filesystem\vpk_async_precache_fix.h">
+      <Filter>engine\filesystem</Filter>
+    </ClInclude>
     <!-- engine\memory -->
     <ClInclude Include="engine\memory\arena.h">
       <Filter>engine\memory</Filter>
@@ -569,6 +575,12 @@
       <Filter>engine\filesystem</Filter>
     </ClCompile>
     <ClCompile Include="engine\filesystem\vpk_directory_repair.cpp">
+      <Filter>engine\filesystem</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\filesystem\vpk_async_precache_entry.cpp">
+      <Filter>engine\filesystem</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\filesystem\vpk_async_precache_fix.cpp">
       <Filter>engine\filesystem</Filter>
     </ClCompile>
     <!-- engine\memory -->

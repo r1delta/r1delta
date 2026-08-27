@@ -250,6 +250,8 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="engine\filesystem\r1o_vpk.h" />
     <ClInclude Include="engine\filesystem\r1o_vpk_index_cache.h" />
     <ClInclude Include="engine\filesystem\vpk_directory_repair.h" />
+    <ClInclude Include="engine\filesystem\vpk_async_precache_entry.h" />
+    <ClInclude Include="engine\filesystem\vpk_async_precache_fix.h" />
     <ClInclude Include="engine\core\framework.h" />
     <ClInclude Include="client\rendering\hudwarp.h" />
     <ClInclude Include="client\rendering\hudwarp_convars.h" />
@@ -384,6 +386,8 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="engine\filesystem\r1o_vpk.cpp" />
     <ClCompile Include="engine\filesystem\r1o_vpk_index_cache.cpp" />
     <ClCompile Include="engine\filesystem\vpk_directory_repair.cpp" />
+    <ClCompile Include="engine\filesystem\vpk_async_precache_entry.cpp" />
+    <ClCompile Include="engine\filesystem\vpk_async_precache_fix.cpp" />
     <ClCompile Include="engine\vtable_remaps\filesystem_vtable.cpp" />
     <ClCompile Include="eos\fake_ip_layer.cpp" />
     <ClCompile Include="engine\net\net_hooks.cpp" />

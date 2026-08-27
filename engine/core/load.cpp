@@ -87,6 +87,7 @@
 #include "engine_vtable.h"
 #include "security_fixes.h"
 #include "r1o_vpk.h"
+#include "vpk_async_precache_fix.h"
 #include "server_usercmd.h"
 #include "commands.h"
 // steam.h removed - unused
@@ -1671,6 +1672,8 @@ void InitAddons() {
 	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x80BB0 : 0x16250)), &AddVPKFile, reinterpret_cast<LPVOID*>(&AddVPKFileOriginal));
 	if (!HasEngineCommandLineFlag("-r1delta_disable_vpk_directory_repair"))
 		InstallVPKDirectoryLoadFlagRepair(filesystem_stdio);
+	if (!HasEngineCommandLineFlag("-r1delta_disable_vpk_async_precache_fix"))
+		InstallR1ClientVPKAsyncPrecacheFix(filesystem_stdio);
 	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x1A1514 : 0x9AB70)), &fs_sprintf_hook, reinterpret_cast<LPVOID*>(NULL));
 	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x6EE10 : 0x02C30)), &CBaseFileSystem__FindFirst, reinterpret_cast<LPVOID*>(&oCBaseFileSystem__FindFirst));
 	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x86E00 : 0x1C4A0)), &CBaseFileSystem__FindNext, reinterpret_cast<LPVOID*>(&oCBaseFileSystem__FindNext));
@@ -9478,6 +9481,8 @@ void __stdcall LoaderNotificationCallback(
 		// early boundary as the filesystem compression hooks.
 		if (!HasEngineCommandLineFlag("-r1delta_disable_vpk_directory_repair"))
 			InstallVPKDirectoryLoadFlagRepair(G_filesystem_stdio);
+		if (!HasEngineCommandLineFlag("-r1delta_disable_vpk_async_precache_fix"))
+			InstallR1ClientVPKAsyncPrecacheFix(G_filesystem_stdio);
 		if (!IsR1ODedicatedServer())
 			InitCompressionHooks();
 		else
