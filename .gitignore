@@ -28,7 +28,7 @@
 
 # Executables
 *.exe
-!launcher_ex/tools/aria2/aria2c.exe
+!launcher_ex/tools/curl/curl.exe
 *.out
 *.app
 

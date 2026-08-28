@@ -15,7 +15,10 @@ $constructor = $serviceType.GetConstructor(
     $null)
 $createExitTask = $serviceType.GetMethod('CreateProcessExitTask', $binding)
 $tryGetExitCode = $serviceType.GetMethod('TryGetProcessExitCodeWithinAsync', $binding)
-$ariaAttempt = $serviceType.GetMethod('RunAria2AttemptAsync', $binding)
+$curlAttempt = $serviceType.GetMethod('RunCurlAttemptAsync', $binding)
+$buildCurlArguments = $serviceType.GetMethod('BuildCurlArguments', $binding)
+$resolveBundledCurl = $serviceType.GetMethod('ResolveBundledCurlPath', $binding)
+$downloadFiles = $serviceType.GetMethod('DownloadFilesAsync', $binding)
 $activeProcessField = $serviceType.GetField('_activeProcess', $binding)
 
 function Assert-True([bool]$Condition, [string]$Message) {
@@ -36,10 +39,15 @@ function New-CommandProcess([string]$Arguments) {
     return $process
 }
 
-function New-RequestArray([string]$Url, [string]$Destination) {
+function New-RequestArray(
+    [string]$Url,
+    [string]$Destination,
+    [long]$ExpectedSize = 0
+) {
     $request = [Activator]::CreateInstance($requestType)
     $requestType.GetProperty('Url').SetValue($request, $Url)
     $requestType.GetProperty('DestinationPath').SetValue($request, $Destination)
+    $requestType.GetProperty('ExpectedSize').SetValue($request, $ExpectedSize)
     $requests = [Array]::CreateInstance($requestType, 1)
     $requests.SetValue($request, 0)
     return ,$requests
@@ -124,31 +132,60 @@ try {
     }
 
     $launcherDirectory = Split-Path -Parent (Resolve-Path -LiteralPath $LauncherPath)
-    $aria2Path = Join-Path $launcherDirectory 'tools/aria2/aria2c.exe'
-    if (-not (Test-Path -LiteralPath $aria2Path -PathType Leaf)) {
-        $aria2Path = Join-Path (Split-Path -Parent $PSScriptRoot) 'launcher_ex/tools/aria2/aria2c.exe'
+    $curlPath = Join-Path $launcherDirectory 'tools/curl/curl.exe'
+    Assert-True (Test-Path -LiteralPath $curlPath -PathType Leaf) 'bundled static curl is available for lifecycle smoke'
+    $resolvedCurlPath = [string]$resolveBundledCurl.Invoke($null, $null)
+    Assert-True (
+        [System.IO.Path]::GetFullPath($resolvedCurlPath) -eq [System.IO.Path]::GetFullPath($curlPath)
+    ) 'launcher resolves only the hash-verified assembly-relative curl binary'
+    $curlVersion = (& $curlPath -V 2>&1) -join "`n"
+    Assert-True ($LASTEXITCODE -eq 0) 'bundled static curl reports its version'
+    Assert-True (
+        $curlVersion.Contains(' ECH ') -and $curlVersion.Contains(' HTTPSRR ')
+    ) 'bundled static curl reports ECH and HTTPS RR support'
+
+    $completeDestination = Join-Path $root 'complete-resume.bin'
+    $completePayload = [System.Text.Encoding]::UTF8.GetBytes('already complete curl partial')
+    [System.IO.File]::WriteAllBytes($completeDestination + '.curl.partial', $completePayload)
+    $completeRequests = New-RequestArray 'http://127.0.0.1:1/must-not-connect' $completeDestination $completePayload.Length
+    $completeService = $constructor.Invoke([object[]]@([string]$root, [TimeSpan]::FromSeconds(5)))
+    try {
+        $completeTask = $downloadFiles.Invoke(
+            $completeService,
+            [object[]]@([object]$completeRequests, [System.Threading.CancellationToken]::None))
+        Assert-True $completeTask.Wait(5000) 'complete curl partial is handled without a network request'
+        $null = $completeTask.GetAwaiter().GetResult()
     }
-    Assert-True (Test-Path -LiteralPath $aria2Path -PathType Leaf) 'bundled aria2c is available for lifecycle smoke'
+    finally {
+        ([IDisposable]$completeService).Dispose()
+    }
+    Assert-True ([System.Linq.Enumerable]::SequenceEqual([byte[]](Get-Content -LiteralPath $completeDestination -AsByteStream), $completePayload)) 'complete curl partial is promoted intact'
+    Assert-True (-not (Test-Path -LiteralPath ($completeDestination + '.curl.partial'))) 'complete curl partial sidecar is removed after promotion'
 
     $service = $constructor.Invoke([object[]]@([string]$root, [TimeSpan]::FromSeconds(5)))
     $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
     $listener.Start()
     $port = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
-    $destination = Join-Path $root 'aria2-smoke.bin'
-    $payload = [System.Text.Encoding]::UTF8.GetBytes('r1delta aria2 cleanup regression payload')
-    $requests = New-RequestArray "http://127.0.0.1:$port/payload.bin" $destination
+    $destination = Join-Path $root 'curl-smoke.bin'
+    $payload = [System.Text.Encoding]::UTF8.GetBytes('r1delta curl cleanup regression payload')
+    $requests = New-RequestArray "http://127.0.0.1:$port/payload.bin" $destination $payload.Length
+    $curlArguments = [string]$buildCurlArguments.Invoke(
+        $null,
+        [object[]]@($requests.GetValue(0), [string]($destination + '.curl.partial')))
+    Assert-True ($curlArguments -like '*--ech true*') 'curl command explicitly enables opportunistic ECH'
+    Assert-True ($curlArguments -like '*--ca-native*') 'curl command uses the Windows native CA store'
     $acceptTask = $listener.AcceptTcpClientAsync()
-    $attemptTask = $ariaAttempt.Invoke(
+    $attemptTask = $curlAttempt.Invoke(
         $service,
-        [object[]]@([string]$aria2Path, [object]$requests, 1, [System.Threading.CancellationToken]::None))
+        [object[]]@([string]$curlPath, [object]$requests, [System.Threading.CancellationToken]::None))
 
-    Assert-True $acceptTask.Wait(10000) 'aria2 connects to the local download endpoint'
+    Assert-True $acceptTask.Wait(10000) 'curl connects to the local download endpoint'
     $client = $acceptTask.GetAwaiter().GetResult()
     $client.ReceiveTimeout = 5000
     $client.SendTimeout = 5000
     $stream = $client.GetStream()
     $headers = Read-HttpRequestHeaders $stream
-    Assert-True ($headers -like 'GET /payload.bin HTTP/*') 'aria2 requests the expected local payload'
+    Assert-True ($headers -like 'GET /payload.bin HTTP/*') 'curl requests the expected local payload'
     $responseHeaders = [System.Text.Encoding]::ASCII.GetBytes(
         "HTTP/1.1 200 OK`r`nContent-Length: $($payload.Length)`r`nConnection: close`r`n`r`n")
     $stream.Write($responseHeaders, 0, $responseHeaders.Length)
@@ -157,12 +194,12 @@ try {
     $client.Dispose()
     $client = $null
 
-    Assert-True $attemptTask.Wait(20000) 'aria2 attempt completes including RPC shutdown and cleanup'
+    Assert-True $attemptTask.Wait(20000) 'curl attempt completes including process cleanup'
     $attemptResult = $attemptTask.GetAwaiter().GetResult()
     $failures = $attemptResult.GetType().GetProperty('Failures', $binding).GetValue($attemptResult)
-    Assert-True ($failures.Count -eq 0) 'successful aria2 transfer has no attributed failure'
-    Assert-True ([System.Linq.Enumerable]::SequenceEqual([byte[]](Get-Content -LiteralPath $destination -AsByteStream), $payload)) 'aria2 writes the expected payload'
-    Assert-True ($null -eq $activeProcessField.GetValue($service)) 'aria2 cleanup releases active process ownership'
+    Assert-True ($failures.Count -eq 0) 'successful curl transfer has no attributed failure'
+    Assert-True ([System.Linq.Enumerable]::SequenceEqual([byte[]](Get-Content -LiteralPath $destination -AsByteStream), $payload)) 'curl writes the expected payload'
+    Assert-True ($null -eq $activeProcessField.GetValue($service)) 'curl cleanup releases active process ownership'
 
     ([IDisposable]$service).Dispose()
     $service = $null
@@ -173,26 +210,82 @@ try {
     $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
     $listener.Start()
     $stallPort = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
-    $stallDestination = Join-Path $root 'aria2-stall.bin'
+    $stallDestination = Join-Path $root 'curl-stall.bin'
     $stallRequests = New-RequestArray "http://127.0.0.1:$stallPort/stall.bin" $stallDestination
     $stallAcceptTask = $listener.AcceptTcpClientAsync()
-    $stallAttemptTask = $ariaAttempt.Invoke(
+    $stallAttemptTask = $curlAttempt.Invoke(
         $service,
-        [object[]]@([string]$aria2Path, [object]$stallRequests, 1, [System.Threading.CancellationToken]::None))
+        [object[]]@([string]$curlPath, [object]$stallRequests, [System.Threading.CancellationToken]::None))
 
-    Assert-True $stallAcceptTask.Wait(10000) 'aria2 connects to the stalled download endpoint'
+    Assert-True $stallAcceptTask.Wait(10000) 'curl connects to the stalled download endpoint'
     $client = $stallAcceptTask.GetAwaiter().GetResult()
     $client.ReceiveTimeout = 5000
     $stallHeaders = Read-HttpRequestHeaders $client.GetStream()
-    Assert-True ($stallHeaders -like 'GET /stall.bin HTTP/*') 'stalled endpoint receives the aria2 request'
-    Assert-True $stallAttemptTask.Wait(20000) 'aria2 no-progress attempt reaches its injected idle bound'
+    Assert-True ($stallHeaders -like 'GET /stall.bin HTTP/*') 'stalled endpoint receives the curl request'
+    Assert-True $stallAttemptTask.Wait(20000) 'curl no-progress attempt reaches its injected idle bound'
     $stallResult = $stallAttemptTask.GetAwaiter().GetResult()
     $stallFailures = $stallResult.GetType().GetProperty('Failures', $binding).GetValue($stallResult)
-    $retryAllowedProperty = $stallResult.GetType().GetProperty('RetryAllowed', $binding)
-    Assert-True ($stallFailures.Count -eq 1) 'aria2 no-progress attempt attributes the stalled request'
-    Assert-True ($null -ne $retryAllowedProperty) 'aria2 attempt result exposes retry policy'
-    Assert-True (-not [bool]$retryAllowedProperty.GetValue($stallResult)) 'aria2 no-progress attempt immediately enables fallback'
-    Assert-True ($null -eq $activeProcessField.GetValue($service)) 'stalled aria2 cleanup releases active process ownership'
+    Assert-True ($stallFailures.Count -eq 1) 'curl no-progress attempt attributes the stalled request'
+    Assert-True ($null -eq $activeProcessField.GetValue($service)) 'stalled curl cleanup releases active process ownership'
+
+    $client.Dispose()
+    $client = $null
+    $listener.Stop()
+    $listener = $null
+    ([IDisposable]$service).Dispose()
+    $service = $constructor.Invoke([object[]]@([string]$root, [TimeSpan]::FromSeconds(30)))
+
+    $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+    $listener.Start()
+    $fallbackPort = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
+    $fallbackDestination = Join-Path $root 'httpclient-fallback.bin'
+    $fallbackPayload = [System.Text.Encoding]::UTF8.GetBytes('r1delta HttpClient fallback payload')
+    $fallbackRequests = New-RequestArray "http://127.0.0.1:$fallbackPort/fallback.bin" $fallbackDestination $fallbackPayload.Length
+    $downloadTask = $downloadFiles.Invoke(
+        $service,
+        [object[]]@([object]$fallbackRequests, [System.Threading.CancellationToken]::None))
+
+    for ($requestNumber = 1; $requestNumber -le 5; $requestNumber++) {
+        $fallbackAcceptTask = $listener.AcceptTcpClientAsync()
+        if (-not $fallbackAcceptTask.Wait(15000)) {
+            if ($downloadTask.IsCompleted) {
+                try {
+                    $null = $downloadTask.GetAwaiter().GetResult()
+                }
+                catch {
+                    throw "FAILED: fallback request $requestNumber was not received; download task failed: $($_.Exception)"
+                }
+                throw "FAILED: fallback request $requestNumber was not received; download task completed without the expected request"
+            }
+            throw "FAILED: fallback request $requestNumber was not received; download task remains incomplete"
+        }
+        Write-Host "PASS: fallback endpoint accepts request $requestNumber"
+        $client = $fallbackAcceptTask.GetAwaiter().GetResult()
+        $client.ReceiveTimeout = 5000
+        $client.SendTimeout = 5000
+        $fallbackStream = $client.GetStream()
+        $fallbackHeaders = Read-HttpRequestHeaders $fallbackStream
+        Assert-True ($fallbackHeaders -like 'GET /fallback.bin HTTP/*') "fallback request $requestNumber targets the expected payload"
+        if ($requestNumber -le 4) {
+            $fallbackResponse = [System.Text.Encoding]::ASCII.GetBytes(
+                "HTTP/1.1 503 Service Unavailable`r`nContent-Length: 0`r`nConnection: close`r`n`r`n")
+            $fallbackStream.Write($fallbackResponse, 0, $fallbackResponse.Length)
+        }
+        else {
+            $fallbackResponse = [System.Text.Encoding]::ASCII.GetBytes(
+                "HTTP/1.1 200 OK`r`nContent-Length: $($fallbackPayload.Length)`r`nConnection: close`r`n`r`n")
+            $fallbackStream.Write($fallbackResponse, 0, $fallbackResponse.Length)
+            $fallbackStream.Write($fallbackPayload, 0, $fallbackPayload.Length)
+        }
+        $fallbackStream.Flush()
+        $client.Dispose()
+        $client = $null
+    }
+
+    Assert-True $downloadTask.Wait(30000) 'HttpClient fallback completes after curl exhausts its retries'
+    $null = $downloadTask.GetAwaiter().GetResult()
+    Assert-True ([System.Linq.Enumerable]::SequenceEqual([byte[]](Get-Content -LiteralPath $fallbackDestination -AsByteStream), $fallbackPayload)) 'HttpClient fallback promotes the expected payload'
+    Assert-True ($null -eq $activeProcessField.GetValue($service)) 'fallback begins only after curl process ownership is released'
 
     Write-Host 'All fast-download process cleanup tests passed.'
 }

@@ -760,7 +760,7 @@ namespace launcher_ex
                 case InstallProgressPhase.Resume:
                     return "Preparing resumable files";
                 case InstallProgressPhase.Download:
-                    return GetTransferHeading("aria2", false, status);
+                    return GetTransferHeading(GetBackendName(status.Backend), false, status);
                 case InstallProgressPhase.Fallback:
                     return GetTransferHeading(GetBackendName(status.Backend), true, status);
                 case InstallProgressPhase.Verification:
@@ -792,8 +792,6 @@ namespace launcher_ex
             {
                 case DownloadTransferPhase.Preparing:
                     return $"Preparing {transferName} download{attempt}";
-                case DownloadTransferPhase.RetryDelay:
-                    return $"Waiting before retrying {transferName} download{attempt}";
                 case DownloadTransferPhase.Downloading:
                     return $"Downloading with {transferName}{attempt}";
                 case DownloadTransferPhase.TransferComplete:
@@ -813,8 +811,6 @@ namespace launcher_ex
                     return "curl";
                 case DownloadBackend.HttpClient:
                     return "HTTP";
-                case DownloadBackend.Aria2:
-                    return "aria2";
                 default:
                     return "network";
             }

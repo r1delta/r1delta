@@ -8,7 +8,6 @@ using System.Runtime.InteropServices; // For P/Invokes if ever needed again
 using System.Threading;
 using System.Windows;                // For MessageBox – consider abstracting UI interactions
 using System.Threading.Tasks;
-using Newtonsoft.Json;               // If resume manifest is used later
 using K4os.Hash.xxHash;
 using launcher_ex;                   // For IInstallProgress, SetupWindow
 // using Monitor.Core.Utilities;     // Not used directly here
@@ -16,8 +15,6 @@ using System.Reflection;
 using Microsoft.Win32;
 using Dark.Net;
 
-// Assuming FastDownloadService class exists and handles downloads
-// using FastDownloadService;        // Or whatever namespace it's in
 
 namespace R1Delta
 {
@@ -1086,7 +1083,7 @@ namespace R1Delta
 
                     lock (progressLock)
                     {
-                        var aggregatePhase = update.Backend == DownloadBackend.Aria2
+                        var aggregatePhase = update.Backend == DownloadBackend.Curl
                             ? InstallProgressPhase.Download
                             : InstallProgressPhase.Fallback;
                         if (aggregatePhase != currentProgressPhase ||
@@ -1123,10 +1120,11 @@ namespace R1Delta
                     var downloadRequests = pendingDownloads.Select(item => new FastDownloadService.DownloadRequest
                     {
                         Url = item.Url,
-                        DestinationPath = item.Dest
+                        DestinationPath = item.Dest,
+                        ExpectedSize = item.Size
                     }).ToList();
 
-                    Debug.WriteLine($"Starting aria2c batch for {downloadRequests.Count} files (verification pass {verificationPass}/{MaxVerificationDownloadPasses}).");
+                    Debug.WriteLine($"Starting bundled curl batch for {downloadRequests.Count} files (verification pass {verificationPass}/{MaxVerificationDownloadPasses}).");
                     await dl.DownloadFilesAsync(downloadRequests, token).ConfigureAwait(false);
 
                     lock (progressLock)

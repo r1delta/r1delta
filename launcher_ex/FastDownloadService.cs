@@ -3,20 +3,15 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Net;
-using System.Net.Sockets;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
-using Newtonsoft.Json.Linq;
 
 public sealed class FastDownloadService : IDisposable
 {
     private const int ProgressPollMs = 500;
-    private const int RpcTimeoutMs = 2000;
-    private const int ProcessShutdownTimeoutMs = 5000;
     private const int ProcessKillTimeoutMs = 10000;
-    private const int MaxProcessAttempts = 5;
-    private static readonly int[] RetryDelaysSeconds = { 0, 2, 5, 10, 20 };
+    private const string BundledCurlSha256 = "589c8e4d297b4831c82adf0261fc1ca57ce59d663b91b4106d2ee7dff3972648";
     private static readonly TimeSpan DefaultNoProgressTimeout = TimeSpan.FromSeconds(90);
 
     private readonly TimeSpan _noProgressTimeout;
@@ -50,10 +45,6 @@ public sealed class FastDownloadService : IDisposable
         if (requests.Count == 0)
             return;
 
-        var aria2Path = ResolveAria2Path();
-        if (string.IsNullOrEmpty(aria2Path))
-            throw new FileNotFoundException("Bundled aria2c.exe was not found. Reinstall the launcher and try again.");
-
         foreach (var request in requests)
         {
             if (request == null)
@@ -62,71 +53,40 @@ public sealed class FastDownloadService : IDisposable
                 throw new ArgumentException("A download request has no URL.", nameof(files));
             if (string.IsNullOrWhiteSpace(request.DestinationPath))
                 throw new ArgumentException("A download request has no destination path.", nameof(files));
+            if (request.ExpectedSize < 0)
+                throw new ArgumentOutOfRangeException(nameof(files), "A download request has a negative expected size.");
         }
 
+        var pending = new List<DownloadRequest>();
         foreach (var request in requests)
-            PreparePartialForBackend(request.DestinationPath, request.DestinationPath);
+        {
+            DeleteOversizedDownloadArtifacts(request);
+            var partialPath = Path.GetFullPath(request.DestinationPath) + ".curl.partial";
+            PreparePartialForBackend(request.DestinationPath, partialPath);
+            if (!TryPromoteCompletePartial(request, partialPath, DownloadBackend.Curl))
+                pending.Add(request);
+        }
 
-        var pending = requests;
+        if (pending.Count == 0)
+            return;
+
         var latestErrors = new Dictionary<DownloadRequest, string>();
 
-        // Phase 1: aria2c. A later backend is never started until the owned
-        // child has reached a confirmed exit state.
-        var ariaFatal = false;
-        for (var attempt = 1; attempt <= MaxProcessAttempts && !ariaFatal; attempt++)
+        ReportStatus(pending, DownloadBackend.Curl, DownloadTransferPhase.Preparing, 1, 1);
+        AttemptResult curlResult;
+        var curlPath = ResolveBundledCurlPath();
+        if (string.IsNullOrEmpty(curlPath))
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (_disposed)
-                throw new ObjectDisposedException(nameof(FastDownloadService));
-
-            var retryDelaySeconds = RetryDelaysSeconds[attempt - 1];
-            if (retryDelaySeconds > 0)
-            {
-                ReportStatus(pending, DownloadBackend.Aria2, DownloadTransferPhase.RetryDelay, attempt, MaxProcessAttempts);
-                Debug.WriteLine($"[FastDownloadService] Retrying {pending.Count} failed file(s) in {retryDelaySeconds} seconds (attempt {attempt}/{MaxProcessAttempts}).");
-                await Task.Delay(TimeSpan.FromSeconds(retryDelaySeconds), cancellationToken).ConfigureAwait(false);
-            }
-
-            ReportStatus(pending, DownloadBackend.Aria2, DownloadTransferPhase.Preparing, attempt, MaxProcessAttempts);
-
-            AttemptResult result;
-            try
-            {
-                result = await RunAria2AttemptAsync(aria2Path, pending, attempt, cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (AriaProcessTerminationException)
-            {
-                // Advancing would allow another backend to write while aria2c
-                // may still own the destination.
-                throw;
-            }
-            catch (Exception ex)
-            {
-                result = AttemptResult.FailAll(pending, ex.Message);
-            }
-
-            if (result.Failures.Count == 0)
-                return;
-            ariaFatal = !result.RetryAllowed;
-
-            pending = result.Failures.Keys.ToList();
-            foreach (var failure in result.Failures)
-                latestErrors[failure.Key] = failure.Value;
+            curlResult = AttemptResult.FailAll(
+                pending,
+                "bundled ECH-enabled curl.exe is missing or failed its integrity check");
+            ReportStatus(pending, DownloadBackend.Curl, DownloadTransferPhase.Failed, 1, 1);
         }
-
-        // Phase 2: system curl.exe (uses a different resolver/TLS stack than aria2c).
-        if (pending.Count > 0)
+        else
         {
-            Debug.WriteLine($"[FastDownloadService] aria2c left {pending.Count} file(s); retrying with system curl.");
-            ReportStatus(pending, DownloadBackend.Curl, DownloadTransferPhase.Preparing, 1, 1);
-            AttemptResult curlResult;
             try
             {
-                curlResult = await RunCurlAttemptAsync(pending, cancellationToken).ConfigureAwait(false);
+                curlResult = await RunCurlAttemptAsync(curlPath, pending, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -140,40 +100,50 @@ public sealed class FastDownloadService : IDisposable
             {
                 curlResult = AttemptResult.FailAll(pending, ex.Message);
             }
-
-            if (curlResult.Failures.Count == 0)
-                return;
-
-            pending = curlResult.Failures.Keys.ToList();
-            foreach (var failure in curlResult.Failures)
-                latestErrors[failure.Key] = failure.Value;
         }
 
-        // Phase 3: in-process HttpClient (last resort; also distinct resolver/TLS behavior).
-        if (pending.Count > 0)
+        if (curlResult.Failures.Count == 0)
+            return;
+
+        pending = new List<DownloadRequest>();
+        foreach (var failure in curlResult.Failures)
         {
-            Debug.WriteLine($"[FastDownloadService] curl left {pending.Count} file(s); retrying with HttpClient.");
-            ReportStatus(pending, DownloadBackend.HttpClient, DownloadTransferPhase.Preparing, 1, 1);
-            AttemptResult httpResult;
-            try
-            {
-                httpResult = await RunHttpClientAttemptAsync(pending, cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                httpResult = AttemptResult.FailAll(pending, ex.Message);
-            }
+            var partialPath = Path.GetFullPath(failure.Key.DestinationPath) + ".curl.partial";
+            if (TryPromoteCompletePartial(failure.Key, partialPath, DownloadBackend.Curl))
+                continue;
 
-            if (httpResult.Failures.Count == 0)
-                return;
+            pending.Add(failure.Key);
+            latestErrors[failure.Key] = $"curl: {failure.Value}";
+        }
 
-            pending = httpResult.Failures.Keys.ToList();
-            foreach (var failure in httpResult.Failures)
-                latestErrors[failure.Key] = failure.Value;
+        if (pending.Count == 0)
+            return;
+
+        Debug.WriteLine($"[FastDownloadService] Bundled curl left {pending.Count} file(s); retrying with HttpClient.");
+        ReportStatus(pending, DownloadBackend.HttpClient, DownloadTransferPhase.Preparing, 1, 1);
+        AttemptResult httpResult;
+        try
+        {
+            httpResult = await RunHttpClientAttemptAsync(pending, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            httpResult = AttemptResult.FailAll(pending, ex.Message);
+        }
+
+        if (httpResult.Failures.Count == 0)
+            return;
+
+        pending = httpResult.Failures.Keys.ToList();
+        foreach (var failure in httpResult.Failures)
+        {
+            latestErrors.TryGetValue(failure.Key, out var curlError);
+            latestErrors[failure.Key] =
+                $"{curlError ?? "curl: unknown download error"}; HttpClient: {failure.Value}";
         }
 
         var details = string.Join(Environment.NewLine, pending.Select(request =>
@@ -182,238 +152,70 @@ public sealed class FastDownloadService : IDisposable
             return $"{Path.GetFileName(request.DestinationPath)}: {error ?? "unknown download error"}";
         }));
         throw new DownloadException(
-            $"All configured download backends failed for {pending.Count} file(s): aria2c, curl, and HttpClient." + Environment.NewLine +
+            $"All configured download backends failed for {pending.Count} file(s): bundled ECH-enabled curl and HttpClient." + Environment.NewLine +
             "Review the per-file errors below. You can retry later, try another connection, or use the manual game-file download linked in the #help channel and point the installer at that folder." + Environment.NewLine +
             details);
     }
 
-    private async Task<AttemptResult> RunAria2AttemptAsync(string aria2Path, IReadOnlyCollection<DownloadRequest> requests, int attempt, CancellationToken cancellationToken)
+    internal static string ResolveBundledCurlPath()
     {
-        var rpcPort = GetFreeTcpPort();
-        var rpcSecret = Guid.NewGuid().ToString("N");
-        var gidMap = new Dictionary<string, DownloadRequest>(StringComparer.OrdinalIgnoreCase);
-        var completedLengths = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
-        var remaining = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var failures = new Dictionary<DownloadRequest, string>();
-        var retryAllowed = true;
+        var launcherDirectory = Path.GetDirectoryName(typeof(FastDownloadService).Assembly.Location);
+        if (string.IsNullOrEmpty(launcherDirectory))
+            return null;
 
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = aria2Path,
-            Arguments = BuildAria2Arguments(rpcPort, rpcSecret),
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardError = true,
-            RedirectStandardOutput = true
-        };
-
-        using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-        using var cancellationRegistration = cancellationToken.Register(() => KillProcess(process));
-        Task stdoutTask = Task.CompletedTask;
-        Task stderrTask = Task.CompletedTask;
-        Task waitTask = CreateProcessExitTask(process);
-        var processStarted = false;
-
+        var curlPath = Path.Combine(launcherDirectory, "tools", "curl", "curl.exe");
         try
         {
-            Debug.WriteLine($"[FastDownloadService] Starting aria2c attempt {attempt}/{MaxProcessAttempts} for {requests.Count} file(s).");
-            if (!process.Start())
-                throw new DownloadException("Failed to start aria2c.");
+            if (!File.Exists(curlPath))
+                return null;
 
-            processStarted = true;
-            _activeProcess = process;
-            stdoutTask = DrainOutputAsync(process.StandardOutput, "stdout");
-            stderrTask = DrainOutputAsync(process.StandardError, "stderr");
-
-            await WaitForRpcAsync(rpcPort, rpcSecret, waitTask, cancellationToken).ConfigureAwait(false);
-
-            foreach (var request in requests)
+            using var stream = new FileStream(curlPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var sha256 = SHA256.Create();
+            var actualHash = BitConverter.ToString(sha256.ComputeHash(stream))
+                .Replace("-", string.Empty)
+                .ToLowerInvariant();
+            if (!string.Equals(actualHash, BundledCurlSha256, StringComparison.Ordinal))
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var gid = Guid.NewGuid().ToString("N").Substring(0, 16);
-                request.Gid = gid;
-                gidMap[gid] = request;
-                completedLengths[gid] = 0;
-                remaining.Add(gid);
-                await AddDownloadAsync(rpcPort, rpcSecret, request).ConfigureAwait(false);
+                Debug.WriteLine(
+                    $"[FastDownloadService] Refusing bundled curl.exe with unexpected SHA-256 {actualHash}.");
+                return null;
             }
 
-            var lastProgressUtc = DateTime.UtcNow;
-            while (remaining.Count > 0)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (waitTask.IsCompleted)
-                {
-                    await waitTask.ConfigureAwait(false);
-                    throw new DownloadException($"aria2c exited unexpectedly with code {process.ExitCode}.");
-                }
-
-                foreach (var gid in remaining.ToList())
-                {
-                    var request = gidMap[gid];
-                    var status = await TellStatusAsync(rpcPort, rpcSecret, gid).ConfigureAwait(false);
-                    if (status == null)
-                        continue;
-
-                    DownloadProgressChanged?.Invoke(new DownloadProgressUpdate(
-                        request.DestinationPath,
-                        status.CompletedLength,
-                        status.TotalLength,
-                        DownloadBackend.Aria2,
-                        string.Equals(status.Status, "complete", StringComparison.OrdinalIgnoreCase)
-                            ? DownloadTransferPhase.TransferComplete
-                            : DownloadTransferPhase.Downloading,
-                        attempt,
-                        MaxProcessAttempts));
-
-                    if (status.CompletedLength > completedLengths[gid])
-                    {
-                        completedLengths[gid] = status.CompletedLength;
-                        lastProgressUtc = DateTime.UtcNow;
-                    }
-
-                    if (string.Equals(status.Status, "complete", StringComparison.OrdinalIgnoreCase))
-                    {
-                        remaining.Remove(gid);
-                    }
-                    else if (string.Equals(status.Status, "error", StringComparison.OrdinalIgnoreCase) ||
-                             string.Equals(status.Status, "removed", StringComparison.OrdinalIgnoreCase))
-                    {
-                        failures[request] = status.ErrorMessage ?? status.Status;
-                        remaining.Remove(gid);
-                    }
-                }
-
-                if (remaining.Count > 0 && DateTime.UtcNow - lastProgressUtc >= _noProgressTimeout)
-                {
-                    var timeoutMessage = $"no download progress for {(int)_noProgressTimeout.TotalSeconds} seconds";
-                    foreach (var gid in remaining)
-                        failures[gidMap[gid]] = timeoutMessage;
-                    remaining.Clear();
-                    retryAllowed = false;
-                    Debug.WriteLine($"[FastDownloadService] Falling back from aria2c after {timeoutMessage}.");
-                }
-
-                if (remaining.Count > 0)
-                    await Task.Delay(ProgressPollMs, cancellationToken).ConfigureAwait(false);
-            }
-
-            await ShutdownAria2Async(rpcPort, rpcSecret).ConfigureAwait(false);
-            var exitCode = await TryGetProcessExitCodeWithinAsync(
-                process,
-                waitTask,
-                ProcessShutdownTimeoutMs).ConfigureAwait(false);
-            if (!exitCode.HasValue)
-            {
-                Debug.WriteLine("[FastDownloadService] aria2c did not exit after RPC shutdown; terminating it.");
-                KillProcess(process);
-                exitCode = await TryGetProcessExitCodeWithinAsync(
-                    process,
-                    waitTask,
-                    ProcessKillTimeoutMs).ConfigureAwait(false);
-                if (!exitCode.HasValue)
-                    throw new AriaProcessTerminationException("aria2c did not exit after it was terminated.");
-            }
-
-            if (exitCode.Value != 0)
-                Debug.WriteLine($"[FastDownloadService] aria2c attempt {attempt} exited with code {exitCode.Value} after reaching terminal download states.");
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (AriaProcessTerminationException)
-        {
-            throw;
+            return curlPath;
         }
         catch (Exception ex)
         {
-            var attributedFailure = false;
-            foreach (var gid in remaining)
-            {
-                failures[gidMap[gid]] = ex.Message;
-                attributedFailure = true;
-            }
-
-            foreach (var request in requests)
-            {
-                if (!gidMap.ContainsValue(request))
-                {
-                    failures[request] = ex.Message;
-                    attributedFailure = true;
-                }
-            }
-
-            if (!attributedFailure && failures.Count == 0)
-                throw new DownloadException($"aria2c lifecycle failure: {ex.Message}", ex);
+            Debug.WriteLine($"[FastDownloadService] Failed to verify bundled curl.exe: {ex.Message}");
+            return null;
         }
-        finally
-        {
-            if (processStarted && !process.HasExited)
-                KillProcess(process);
-
-            if (processStarted && waitTask != null)
-            {
-                try
-                {
-                    var cleanupExitCode = await TryGetProcessExitCodeWithinAsync(
-                        process,
-                        waitTask,
-                        ProcessKillTimeoutMs).ConfigureAwait(false);
-                    if (!cleanupExitCode.HasValue)
-                        throw new AriaProcessTerminationException("aria2c did not exit during attempt cleanup.");
-                }
-                catch (AriaProcessTerminationException)
-                {
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    throw new AriaProcessTerminationException("Failed while waiting for aria2c to exit during attempt cleanup.", ex);
-                }
-            }
-
-            try { await CompletesWithinAsync(Task.WhenAll(stdoutTask, stderrTask), ProcessKillTimeoutMs).ConfigureAwait(false); }
-            catch (Exception) { }
-
-            if (ReferenceEquals(_activeProcess, process))
-                _activeProcess = null;
-        }
-
-        return new AttemptResult(failures, retryAllowed);
     }
 
-    private static string ResolveCurlPath()
+    private static string BuildCurlArguments(DownloadRequest request, string partialPath)
     {
-        // Windows 10 1803+ ships curl.exe in System32. Prefer it so the fallback
-        // uses the OS resolver/TLS stack, which differs from aria2c's.
-        var candidates = new[]
+        return string.Join(" ", new[]
         {
-            Path.Combine(Environment.SystemDirectory, "curl.exe"),
-            "curl.exe"
-        };
-
-        foreach (var candidate in candidates)
-        {
-            try
-            {
-                if (File.Exists(candidate))
-                    return candidate;
-            }
-            catch
-            {
-                // Ignore probe failures; fall through to the next candidate.
-            }
-        }
-
-        return null;
+            "--fail",
+            "--location",
+            "--ech", "true",
+            "--ca-native",
+            "--no-progress-meter",
+            "--show-error",
+            "--retry", "3",
+            "--retry-all-errors",
+            "--retry-delay", "2",
+            "--connect-timeout", "15",
+            "--max-time", "900",
+            "--continue-at", "-",
+            "--user-agent", "\"r1delta-installer/1.0\"",
+            "--output", $"\"{partialPath}\"",
+            $"\"{request.Url}\""
+        });
     }
 
-    private async Task<AttemptResult> RunCurlAttemptAsync(IReadOnlyCollection<DownloadRequest> requests, CancellationToken cancellationToken)
+    private async Task<AttemptResult> RunCurlAttemptAsync(string curlPath, IReadOnlyCollection<DownloadRequest> requests, CancellationToken cancellationToken)
     {
-        var curlPath = ResolveCurlPath();
-        if (string.IsNullOrEmpty(curlPath))
-            return AttemptResult.FailAll(requests, "system curl.exe was not found");
+        if (string.IsNullOrWhiteSpace(curlPath) || !File.Exists(curlPath))
+            return AttemptResult.FailAll(requests, "bundled curl.exe was not found");
 
         var failures = new Dictionary<DownloadRequest, string>();
         foreach (var request in requests)
@@ -425,18 +227,7 @@ public sealed class FastDownloadService : IDisposable
             var partialPath = destinationPath + ".curl.partial";
             PreparePartialForBackend(destinationPath, partialPath);
 
-            var arguments = string.Join(" ", new[]
-            {
-                "--fail",
-                "--location",
-                "--retry", "3",
-                "--retry-delay", "2",
-                "--connect-timeout", "15",
-                "--max-time", "900",
-                "--continue-at", "-",
-                "--output", $"\"{partialPath}\"",
-                $"\"{request.Url}\""
-            });
+            var arguments = BuildCurlArguments(request, partialPath);
 
             var startInfo = new ProcessStartInfo
             {
@@ -680,48 +471,52 @@ public sealed class FastDownloadService : IDisposable
                 if (mode == FileMode.Create)
                     resumeFrom = 0;
 
-                using var contentStream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
-                using var fileStream = new FileStream(partialPath, mode, FileAccess.Write, FileShare.None, 65536, useAsync: true);
-                var buffer = new byte[65536];
-                long received = resumeFrom;
-                var lastProgress = DateTime.UtcNow;
-                while (true)
+                using (var contentStream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
+                using (var fileStream = new FileStream(partialPath, mode, FileAccess.Write, FileShare.None, 65536, useAsync: true))
                 {
-                    int bytesRead;
-                    using var readTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                    readTimeout.CancelAfter(_noProgressTimeout);
-                    try
+                    var buffer = new byte[65536];
+                    long received = resumeFrom;
+                    var lastProgress = DateTime.UtcNow;
+                    while (true)
                     {
-                        bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length, readTimeout.Token).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException) when (readTimeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
-                    {
-                        throw new TimeoutException(
-                            $"idle timeout: no response body bytes received for {_noProgressTimeout.TotalSeconds:g} seconds");
+                        int bytesRead;
+                        using var readTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                        readTimeout.CancelAfter(_noProgressTimeout);
+                        try
+                        {
+                            bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length, readTimeout.Token).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException) when (readTimeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+                        {
+                            throw new TimeoutException(
+                                $"idle timeout: no response body bytes received for {_noProgressTimeout.TotalSeconds:g} seconds");
+                        }
+
+                        if (bytesRead == 0)
+                            break;
+
+                        await fileStream.WriteAsync(buffer, 0, bytesRead, cancellationToken).ConfigureAwait(false);
+                        received += bytesRead;
+
+                        var now = DateTime.UtcNow;
+                        if (now - lastProgress >= TimeSpan.FromMilliseconds(ProgressPollMs))
+                        {
+                            lastProgress = now;
+                            var remainingLength = response.Content.Headers.ContentLength ?? 0;
+                            var total = response.Content.Headers.ContentRange?.Length
+                                ?? (mode == FileMode.Append ? resumeFrom + remainingLength : remainingLength);
+                            DownloadProgressChanged?.Invoke(new DownloadProgressUpdate(
+                                request.DestinationPath,
+                                received,
+                                total,
+                                DownloadBackend.HttpClient,
+                                DownloadTransferPhase.Downloading,
+                                1,
+                                1));
+                        }
                     }
 
-                    if (bytesRead == 0)
-                        break;
-
-                    await fileStream.WriteAsync(buffer, 0, bytesRead, cancellationToken).ConfigureAwait(false);
-                    received += bytesRead;
-
-                    var now = DateTime.UtcNow;
-                    if (now - lastProgress >= TimeSpan.FromMilliseconds(ProgressPollMs))
-                    {
-                        lastProgress = now;
-                        var remainingLength = response.Content.Headers.ContentLength ?? 0;
-                        var total = response.Content.Headers.ContentRange?.Length
-                            ?? (mode == FileMode.Append ? resumeFrom + remainingLength : remainingLength);
-                        DownloadProgressChanged?.Invoke(new DownloadProgressUpdate(
-                            request.DestinationPath,
-                            received,
-                            total,
-                            DownloadBackend.HttpClient,
-                            DownloadTransferPhase.Downloading,
-                            1,
-                            1));
-                    }
+                    await fileStream.FlushAsync(cancellationToken).ConfigureAwait(false);
                 }
 
                 if (File.Exists(destinationPath))
@@ -808,175 +603,6 @@ public sealed class FastDownloadService : IDisposable
         }
     }
 
-    private static string BuildAria2Arguments(int rpcPort, string rpcSecret)
-    {
-        return string.Join(" ", new[]
-        {
-            "--continue=true",
-            "--allow-overwrite=true",
-            "--auto-file-renaming=false",
-            "--file-allocation=none",
-            "--max-concurrent-downloads=4",
-            "--max-connection-per-server=2",
-            "--split=2",
-            "--min-split-size=16M",
-            "--async-dns=false",
-            "--retry-wait=2",
-            "--max-tries=8",
-            "--timeout=30",
-            "--connect-timeout=15",
-            "--summary-interval=1",
-            "--download-result=hide",
-            "--console-log-level=warn",
-            "--enable-rpc=true",
-            "--rpc-listen-all=false",
-            "--rpc-listen-port=" + rpcPort,
-            "--rpc-secret=" + rpcSecret,
-            "--check-certificate=true"
-        });
-    }
-
-    private async Task WaitForRpcAsync(int rpcPort, string rpcSecret, Task waitTask, CancellationToken cancellationToken)
-    {
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
-        while (DateTime.UtcNow < deadline)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (waitTask.IsCompleted)
-                throw new DownloadException("aria2c exited before the RPC server started.");
-
-            try
-            {
-                await CallRpcAsync(rpcPort, rpcSecret, "aria2.getVersion", new JArray()).ConfigureAwait(false);
-                return;
-            }
-            catch (WebException)
-            {
-                await Task.Delay(100, cancellationToken).ConfigureAwait(false);
-            }
-        }
-
-        throw new TimeoutException("Timed out waiting for aria2c RPC server to start.");
-    }
-
-    private async Task AddDownloadAsync(int rpcPort, string rpcSecret, DownloadRequest request)
-    {
-        var destinationPath = Path.GetFullPath(request.DestinationPath);
-        var directory = Path.GetDirectoryName(destinationPath);
-        if (string.IsNullOrEmpty(directory))
-            throw new IOException($"Failed to determine destination directory for '{destinationPath}'.");
-
-        Directory.CreateDirectory(directory);
-
-        var options = new JObject
-        {
-            ["gid"] = request.Gid,
-            ["dir"] = directory,
-            ["out"] = Path.GetFileName(destinationPath)
-        };
-
-        var parameters = new JArray
-        {
-            new JArray(request.Url),
-            options
-        };
-
-        await CallRpcAsync(rpcPort, rpcSecret, "aria2.addUri", parameters).ConfigureAwait(false);
-    }
-
-    private async Task<Aria2Status> TellStatusAsync(int rpcPort, string rpcSecret, string gid)
-    {
-        var parameters = new JArray
-        {
-            gid,
-            new JArray("completedLength", "totalLength", "status", "errorMessage")
-        };
-
-        var result = await CallRpcAsync(rpcPort, rpcSecret, "aria2.tellStatus", parameters).ConfigureAwait(false);
-        if (result == null)
-            return null;
-
-        return new Aria2Status
-        {
-            CompletedLength = ParseAria2Length((string)result["completedLength"]),
-            TotalLength = ParseAria2Length((string)result["totalLength"]),
-            Status = (string)result["status"],
-            ErrorMessage = (string)result["errorMessage"]
-        };
-    }
-
-    private async Task ShutdownAria2Async(int rpcPort, string rpcSecret)
-    {
-        try
-        {
-            await CallRpcAsync(rpcPort, rpcSecret, "aria2.shutdown", new JArray()).ConfigureAwait(false);
-        }
-        catch (WebException)
-        {
-        }
-    }
-
-    private async Task<JToken> CallRpcAsync(int rpcPort, string rpcSecret, string method, JArray parameters)
-    {
-        var allParameters = new JArray { "token:" + rpcSecret };
-        foreach (var parameter in parameters)
-            allParameters.Add(parameter);
-
-        var requestJson = new JObject
-        {
-            ["jsonrpc"] = "2.0",
-            ["id"] = "r1delta",
-            ["method"] = method,
-            ["params"] = allParameters
-        }.ToString(Newtonsoft.Json.Formatting.None);
-
-        var request = (HttpWebRequest)WebRequest.Create($"http://127.0.0.1:{rpcPort}/jsonrpc");
-        request.Method = "POST";
-        request.ContentType = "application/json";
-        request.Timeout = 2000;
-        request.ReadWriteTimeout = 2000;
-
-        using (var requestStream = await AwaitRpcAsync(request.GetRequestStreamAsync(), request).ConfigureAwait(false))
-        using (var writer = new StreamWriter(requestStream))
-        {
-            await AwaitRpcAsync(writer.WriteAsync(requestJson), request).ConfigureAwait(false);
-        }
-
-        using (var response = (HttpWebResponse)await AwaitRpcAsync(request.GetResponseAsync(), request).ConfigureAwait(false))
-        using (var responseStream = response.GetResponseStream())
-        using (var reader = new StreamReader(responseStream))
-        {
-            var responseJson = await AwaitRpcAsync(reader.ReadToEndAsync(), request).ConfigureAwait(false);
-            var responseObject = JObject.Parse(responseJson);
-            var error = responseObject["error"];
-            if (error != null)
-                throw new DownloadException((string)error["message"] ?? $"aria2 RPC call failed: {method}");
-
-            return responseObject["result"];
-        }
-    }
-
-    private static async Task<T> AwaitRpcAsync<T>(Task<T> operation, HttpWebRequest request)
-    {
-        if (await Task.WhenAny(operation, Task.Delay(RpcTimeoutMs)).ConfigureAwait(false) != operation)
-        {
-            request.Abort();
-            throw new WebException("Timed out waiting for aria2 RPC.", WebExceptionStatus.Timeout);
-        }
-
-        return await operation.ConfigureAwait(false);
-    }
-
-    private static async Task AwaitRpcAsync(Task operation, HttpWebRequest request)
-    {
-        if (await Task.WhenAny(operation, Task.Delay(RpcTimeoutMs)).ConfigureAwait(false) != operation)
-        {
-            request.Abort();
-            throw new WebException("Timed out waiting for aria2 RPC.", WebExceptionStatus.Timeout);
-        }
-
-        await operation.ConfigureAwait(false);
-    }
 
     private static Task CreateProcessExitTask(Process process)
     {
@@ -1073,6 +699,84 @@ public sealed class FastDownloadService : IDisposable
             File.Delete(ariaControlPath);
     }
 
+    private static void DeleteOversizedDownloadArtifacts(DownloadRequest request)
+    {
+        if (request.ExpectedSize <= 0)
+            return;
+
+        var destinationPath = Path.GetFullPath(request.DestinationPath);
+        var deletedOversizedArtifact = false;
+        foreach (var candidatePath in new[]
+        {
+            destinationPath,
+            destinationPath + ".part",
+            destinationPath + ".curl.partial"
+        })
+        {
+            if (File.Exists(candidatePath) && new FileInfo(candidatePath).Length > request.ExpectedSize)
+            {
+                File.Delete(candidatePath);
+                deletedOversizedArtifact = true;
+            }
+        }
+
+        if (deletedOversizedArtifact)
+        {
+            var ariaControlPath = destinationPath + ".aria2";
+            if (File.Exists(ariaControlPath))
+                File.Delete(ariaControlPath);
+        }
+    }
+
+    private bool TryPromoteCompletePartial(
+        DownloadRequest request,
+        string partialPath,
+        DownloadBackend backend)
+    {
+        if (request.ExpectedSize <= 0 ||
+            GetFileLength(partialPath) != request.ExpectedSize)
+        {
+            return false;
+        }
+
+        var destinationPath = Path.GetFullPath(request.DestinationPath);
+        try
+        {
+            if (File.Exists(destinationPath))
+                File.Delete(destinationPath);
+            File.Move(partialPath, destinationPath);
+
+            foreach (var stalePath in new[]
+            {
+                destinationPath + ".part",
+                destinationPath + ".curl.partial",
+                destinationPath + ".aria2"
+            })
+            {
+                if (File.Exists(stalePath))
+                    File.Delete(stalePath);
+            }
+
+            DownloadProgressChanged?.Invoke(new DownloadProgressUpdate(
+                request.DestinationPath,
+                request.ExpectedSize,
+                request.ExpectedSize,
+                backend,
+                DownloadTransferPhase.TransferComplete,
+                1,
+                1));
+            Debug.WriteLine(
+                $"[FastDownloadService] Promoted complete partial without issuing an at-EOF range: {request.DestinationPath}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine(
+                $"[FastDownloadService] Could not promote complete partial '{partialPath}': {ex.Message}");
+            return false;
+        }
+    }
+
     private static long GetLargestPartialLength(string destinationPath)
     {
         destinationPath = Path.GetFullPath(destinationPath);
@@ -1099,46 +803,6 @@ public sealed class FastDownloadService : IDisposable
             return 0;
         }
     }
-    private static string ResolveAria2Path()
-    {
-        var baseDirectory = AppDomain.CurrentDomain.BaseDirectory;
-        var candidates = new[]
-        {
-            Path.Combine(baseDirectory, "tools", "aria2", "aria2c.exe"),
-            Path.Combine(baseDirectory, "aria2c.exe"),
-            Path.Combine(Environment.CurrentDirectory, "launcher_ex", "tools", "aria2", "aria2c.exe"),
-            Path.Combine(Environment.CurrentDirectory, "tools", "aria2", "aria2c.exe")
-        };
-
-        foreach (var candidate in candidates)
-        {
-            if (File.Exists(candidate))
-                return candidate;
-        }
-
-        return null;
-    }
-
-    private static long ParseAria2Length(string value)
-    {
-        if (long.TryParse(value, out var result) && result > 0)
-            return result;
-        return 0;
-    }
-
-    private static int GetFreeTcpPort()
-    {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        try
-        {
-            return ((IPEndPoint)listener.LocalEndpoint).Port;
-        }
-        finally
-        {
-            listener.Stop();
-        }
-    }
 
     private static async Task DrainOutputAsync(StreamReader reader, string streamName)
     {
@@ -1146,7 +810,7 @@ public sealed class FastDownloadService : IDisposable
         while ((line = await reader.ReadLineAsync().ConfigureAwait(false)) != null)
         {
             if (line.Length > 0)
-                Debug.WriteLine($"[aria2c:{streamName}] {line}");
+                Debug.WriteLine($"[download-process:{streamName}] {line}");
         }
     }
 
@@ -1162,7 +826,7 @@ public sealed class FastDownloadService : IDisposable
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"[FastDownloadService] Failed to kill aria2c: {ex.Message}");
+            Debug.WriteLine($"[FastDownloadService] Failed to kill the owned download process: {ex.Message}");
         }
     }
 
@@ -1170,14 +834,9 @@ public sealed class FastDownloadService : IDisposable
     {
         public string Url { get; set; }
         public string DestinationPath { get; set; }
-        public string Gid { get; set; }
+        public long ExpectedSize { get; set; }
     }
 
-    private sealed class AriaProcessTerminationException : DownloadException
-    {
-        public AriaProcessTerminationException(string message) : base(message) { }
-        public AriaProcessTerminationException(string message, Exception innerException) : base(message, innerException) { }
-    }
 
     private sealed class DownloadProcessTerminationException : DownloadException
     {
@@ -1187,14 +846,12 @@ public sealed class FastDownloadService : IDisposable
 
     private sealed class AttemptResult
     {
-        public AttemptResult(Dictionary<DownloadRequest, string> failures, bool retryAllowed = true)
+        public AttemptResult(Dictionary<DownloadRequest, string> failures)
         {
             Failures = failures;
-            RetryAllowed = retryAllowed;
         }
 
         public Dictionary<DownloadRequest, string> Failures { get; }
-        public bool RetryAllowed { get; }
 
         public static AttemptResult FailAll(IEnumerable<DownloadRequest> requests, string error)
         {
@@ -1202,18 +859,10 @@ public sealed class FastDownloadService : IDisposable
         }
     }
 
-    private sealed class Aria2Status
-    {
-        public long CompletedLength { get; set; }
-        public long TotalLength { get; set; }
-        public string Status { get; set; }
-        public string ErrorMessage { get; set; }
-    }
 }
 
 public enum DownloadBackend
 {
-    Aria2,
     Curl,
     HttpClient
 }
@@ -1221,7 +870,6 @@ public enum DownloadBackend
 public enum DownloadTransferPhase
 {
     Preparing,
-    RetryDelay,
     Downloading,
     TransferComplete,
     Failed

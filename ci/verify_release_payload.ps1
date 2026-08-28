@@ -300,9 +300,28 @@ function Assert-Payload {
         )
     }
 
+    $curlPath = Join-Path (Join-Path (Join-Path $payloadRoot 'tools') 'curl') 'curl.exe'
+    Assert-Condition (Test-Path -LiteralPath $curlPath -PathType Leaf) (
+        "Release payload is missing exact bundled downloader path tools/curl/curl.exe."
+    )
+    $curlSha256 = (Get-FileHash -LiteralPath $curlPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    Assert-Condition (
+        $curlSha256 -eq '589c8e4d297b4831c82adf0261fc1ca57ce59d663b91b4106d2ee7dff3972648'
+    ) "Release payload contains an unexpected tools/curl/curl.exe binary: $curlSha256"
+    $curlRoot = Split-Path -Parent $curlPath
+    foreach ($relativeNoticePath in @(
+        'LICENSE.static-curl.txt',
+        'licenses\curl',
+        'licenses\openssl'
+    )) {
+        $noticePath = Join-Path $curlRoot $relativeNoticePath
+        Assert-Condition (Test-Path -LiteralPath $noticePath -PathType Leaf) (
+            "Release payload is missing bundled curl notice $relativeNoticePath."
+        )
+    }
     $aria2Path = Join-Path (Join-Path (Join-Path $payloadRoot 'tools') 'aria2') 'aria2c.exe'
-    Assert-Condition (Test-Path -LiteralPath $aria2Path -PathType Leaf) (
-        "Release payload is missing exact bundled downloader path tools/aria2/aria2c.exe."
+    Assert-Condition (-not (Test-Path -LiteralPath $aria2Path)) (
+        "Release payload still contains the retired tools/aria2/aria2c.exe downloader."
     )
 
     $deltaRoot = Join-Path $payloadRoot 'r1delta'

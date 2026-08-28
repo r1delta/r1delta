@@ -129,9 +129,11 @@ LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
 NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-aria2:
-R1Delta launcher bundles aria2 1.37.0 for Windows x64 as a separate command-line
-download utility. aria2 is licensed under the GNU General Public License,
-version 2 or later, with the OpenSSL exception. The bundled license files are
-included in launcher_ex/tools/aria2, and source is available from:
-https://github.com/aria2/aria2/releases/tag/release-1.37.0
+static-curl and curl:
+R1Delta launcher bundles the static-curl 8.21.0 Windows x86_64 curl executable
+as a separate command-line download utility. This build uses libcurl with
+OpenSSL 4 and ECH support. The static-curl build scripts are MIT-licensed, and
+curl uses the curl license. The bundled license files are included in
+launcher_ex/tools/curl, and source is available from:
+https://github.com/stunnel/static-curl/releases/tag/8.21.0
+https://github.com/curl/curl/tree/curl-8_21_0
