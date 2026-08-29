@@ -92,6 +92,10 @@ using ReleaseHeldShaderResourceFunction =
 	}
 
 	void* const shaderResource = shaderResources[slot];
+	void* const previousHold = heldShaderResources[slot];
+	if (shaderResource == previousHold)
+		return true;
+
 	void* replacementHold = nullptr;
 	const bool accepted = !shaderResource
 		|| (tryHold(shaderResource, &replacementHold)
@@ -99,7 +103,6 @@ using ReleaseHeldShaderResourceFunction =
 	if (!accepted)
 		shaderResources[slot] = nullptr;
 
-	void* const previousHold = heldShaderResources[slot];
 	heldShaderResources[slot] = replacementHold;
 	if (previousHold)
 		releaseHeld(previousHold);

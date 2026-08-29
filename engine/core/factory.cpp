@@ -1133,21 +1133,13 @@ static bool MaterialSystemDx11TryHoldShaderResource(
 	if (!heldShaderResource)
 		return false;
 	*heldShaderResource = nullptr;
-	if (!MaterialSystemDx11IsCommittedReadableRange(
-			shaderResource,
-			sizeof(void*))) {
+	if (!MaterialSystemDx11LooksLikeUserPointer(
+			reinterpret_cast<uintptr_t>(shaderResource))) {
 		return false;
 	}
 
 	auto* const view =
 		static_cast<ID3D11ShaderResourceView*>(shaderResource);
-	void** const vtable = *reinterpret_cast<void***>(view);
-	if (!MaterialSystemDx11IsCommittedReadableRange(
-			vtable,
-			sizeof(void*) * 8)) {
-		return false;
-	}
-
 	bool viewHeld = false;
 	ID3D11Resource* resource = nullptr;
 	__try {
@@ -1211,11 +1203,6 @@ static bool MaterialSystemDx11HoldPendingShaderResource(
 
 	auto** const shaderResources = reinterpret_cast<void**>(
 		s_MaterialSystemDx11Base + kPendingShaderResourcesRva);
-	if (!MaterialSystemDx11IsCommittedReadableRange(
-			shaderResources,
-			sizeof(void*) * kPendingShaderResourceCapacity)) {
-		return false;
-	}
 
 	void* const candidate = shaderResources[slot];
 	const bool accepted = ReplacePendingShaderResourceHold(
