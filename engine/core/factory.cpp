@@ -623,6 +623,17 @@ using MaterialSystemDx11SelectShaderStageResourceType = char(__fastcall*)(unsign
 using MaterialSystemDx11CreateInputLayoutType = __int64(__fastcall*)(unsigned __int64 vertexFormat, __int64 streamFormat, __int64 shaderBytecodeProvider);
 using MaterialSystemDx11ResetD3DResourcePointersType = void(__fastcall*)();
 using MaterialSystemDx11FlushConstantBufferUpdatesType = __int64(__fastcall*)();
+using MaterialSystemDx11FlushShaderResourcesType = unsigned __int64(__fastcall*)();
+using MaterialSystemDx11ShaderResourceSingleProducerType =
+	__int64(__fastcall*)(int slot, __int16 textureHandle);
+using MaterialSystemDx11ShaderResourceIndexedProducerType =
+	__int64(__fastcall*)(int slot, __int16 textureHandle, unsigned __int16 index);
+using MaterialSystemDx11ShaderResourceArrayProducerType =
+	void(__fastcall*)(__int64 textureHandles, std::uint64_t count);
+using MaterialSystemDx11ShaderResourceMaskedArrayProducerType =
+	void(__fastcall*)(__int64 textureHandles, std::uint64_t count, __int64 samplerMask);
+using MaterialSystemDx11ShaderResourceDirectProducerType =
+	bool(__fastcall*)(int slot, __int64 shaderResource, int useDepthSampler);
 using MaterialSystemDx11VtfLoadType = __int64(__fastcall*)(__int64 texture, __int64* textureData);
 using MaterialSystemDx11VtfScratchPrepareType = __int64(__fastcall*)(
 	__int64 texture,
@@ -650,6 +661,17 @@ static MaterialSystemDx11SelectShaderStageResourceType MaterialSystemDx11SelectS
 static MaterialSystemDx11CreateInputLayoutType MaterialSystemDx11CreateInputLayoutOriginal;
 static MaterialSystemDx11ResetD3DResourcePointersType MaterialSystemDx11ResetD3DResourcePointersOriginal;
 static MaterialSystemDx11FlushConstantBufferUpdatesType MaterialSystemDx11FlushConstantBufferUpdatesOriginal;
+static MaterialSystemDx11FlushShaderResourcesType MaterialSystemDx11FlushShaderResourcesOriginal;
+static MaterialSystemDx11ShaderResourceSingleProducerType
+	MaterialSystemDx11ShaderResourceSingleProducerOriginal;
+static MaterialSystemDx11ShaderResourceIndexedProducerType
+	MaterialSystemDx11ShaderResourceIndexedProducerOriginal;
+static MaterialSystemDx11ShaderResourceArrayProducerType
+	MaterialSystemDx11ShaderResourceArrayProducerOriginal;
+static MaterialSystemDx11ShaderResourceMaskedArrayProducerType
+	MaterialSystemDx11ShaderResourceMaskedArrayProducerOriginal;
+static MaterialSystemDx11ShaderResourceDirectProducerType
+	MaterialSystemDx11ShaderResourceDirectProducerOriginal;
 static MaterialSystemDx11VtfLoadType MaterialSystemDx11VtfLoadOriginal;
 static MaterialSystemDx11VtfScratchPrepareType MaterialSystemDx11VtfScratchPrepareOriginal;
 static MaterialSystemDx11UtlBufferSetExternalType MaterialSystemDx11UtlBufferSetExternal;
@@ -672,6 +694,9 @@ static int s_MaterialSystemDx11NullResourceLogBudget = 8;
 static int s_MaterialSystemDx11ResetResourceLogBudget = 8;
 static int s_MaterialSystemDx11ConstantBufferLogBudget = 8;
 static int s_MaterialSystemDx11InputLayoutLogBudget = 8;
+static int s_MaterialSystemDx11ShaderResourceLogBudget = 8;
+static void* s_MaterialSystemDx11HeldShaderResources[
+	r1delta::materialsystem_dx11::kPendingShaderResourceCapacity] = {};
 static bool MaterialSystemDx11LooksLikeUserRange(uintptr_t address, size_t size);
 
 
@@ -1077,6 +1102,240 @@ static bool MaterialSystemDx11IsCommittedReadableRange(const void* ptr, size_t s
 		cursor = regionEnd < end ? regionEnd : end;
 	}
 	return true;
+}
+static int MaterialSystemDx11ShaderResourceExceptionFilter(
+	EXCEPTION_POINTERS* info)
+{
+	return info
+		&& info->ExceptionRecord
+		&& info->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION
+		? EXCEPTION_EXECUTE_HANDLER
+		: EXCEPTION_CONTINUE_SEARCH;
+}
+
+static void MaterialSystemDx11SafeRelease(IUnknown* object)
+{
+	if (!object)
+		return;
+
+	__try {
+		object->Release();
+	}
+	__except (MaterialSystemDx11ShaderResourceExceptionFilter(
+			GetExceptionInformation())) {
+	}
+}
+
+static bool MaterialSystemDx11TryHoldShaderResource(
+	void* shaderResource,
+	void** heldShaderResource)
+{
+	if (!heldShaderResource)
+		return false;
+	*heldShaderResource = nullptr;
+	if (!MaterialSystemDx11IsCommittedReadableRange(
+			shaderResource,
+			sizeof(void*))) {
+		return false;
+	}
+
+	auto* const view =
+		static_cast<ID3D11ShaderResourceView*>(shaderResource);
+	void** const vtable = *reinterpret_cast<void***>(view);
+	if (!MaterialSystemDx11IsCommittedReadableRange(
+			vtable,
+			sizeof(void*) * 8)) {
+		return false;
+	}
+
+	bool viewHeld = false;
+	ID3D11Resource* resource = nullptr;
+	__try {
+		view->AddRef();
+		viewHeld = true;
+		view->GetResource(&resource);
+	}
+	__except (MaterialSystemDx11ShaderResourceExceptionFilter(
+			GetExceptionInformation())) {
+		MaterialSystemDx11SafeRelease(resource);
+		if (viewHeld)
+			MaterialSystemDx11SafeRelease(view);
+		return false;
+	}
+
+	if (!resource) {
+		MaterialSystemDx11SafeRelease(view);
+		return false;
+	}
+
+	MaterialSystemDx11SafeRelease(resource);
+	*heldShaderResource = view;
+	return true;
+}
+
+static void MaterialSystemDx11ReleaseHeldShaderResource(
+	void* heldShaderResource)
+{
+	MaterialSystemDx11SafeRelease(
+		static_cast<IUnknown*>(heldShaderResource));
+}
+
+static void MaterialSystemDx11LogShaderResourceGuard(
+	std::size_t slot,
+	void* shaderResource)
+{
+	if (s_MaterialSystemDx11ShaderResourceLogBudget <= 0)
+		return;
+
+	--s_MaterialSystemDx11ShaderResourceLogBudget;
+	char buffer[256];
+	_snprintf_s(
+		buffer,
+		sizeof(buffer),
+		_TRUNCATE,
+		"R1Delta: materialsystem_dx11 rejected zombie "
+		"shader resource slot=%llu view=%p\n",
+		static_cast<unsigned long long>(slot),
+		shaderResource);
+	OutputDebugStringA(buffer);
+}
+
+static bool MaterialSystemDx11HoldPendingShaderResource(
+	std::size_t slot)
+{
+	using namespace r1delta::materialsystem_dx11;
+	if (!s_MaterialSystemDx11Base
+		|| slot >= kPendingShaderResourceCapacity) {
+		return false;
+	}
+
+	auto** const shaderResources = reinterpret_cast<void**>(
+		s_MaterialSystemDx11Base + kPendingShaderResourcesRva);
+	if (!MaterialSystemDx11IsCommittedReadableRange(
+			shaderResources,
+			sizeof(void*) * kPendingShaderResourceCapacity)) {
+		return false;
+	}
+
+	void* const candidate = shaderResources[slot];
+	const bool accepted = ReplacePendingShaderResourceHold(
+		shaderResources,
+		s_MaterialSystemDx11HeldShaderResources,
+		kPendingShaderResourceCapacity,
+		slot,
+		&MaterialSystemDx11TryHoldShaderResource,
+		&MaterialSystemDx11ReleaseHeldShaderResource);
+	if (!accepted)
+		MaterialSystemDx11LogShaderResourceGuard(slot, candidate);
+	return accepted;
+}
+
+static void MaterialSystemDx11HoldPendingShaderResourceRange(
+	std::size_t count)
+{
+	using namespace r1delta::materialsystem_dx11;
+	const std::size_t boundedCount = ClampShaderResourceCount(count);
+	for (std::size_t slot = 0; slot < boundedCount; ++slot)
+		MaterialSystemDx11HoldPendingShaderResource(slot);
+}
+
+static __int64 __fastcall
+MaterialSystemDx11ShaderResourceSingleProducerGuard(
+	int slot,
+	__int16 textureHandle)
+{
+	if (!MaterialSystemDx11ShaderResourceSingleProducerOriginal)
+		return 0;
+	const __int64 result =
+		MaterialSystemDx11ShaderResourceSingleProducerOriginal(
+			slot,
+			textureHandle);
+	MaterialSystemDx11HoldPendingShaderResource(
+		static_cast<std::size_t>(slot));
+	return result;
+}
+
+static __int64 __fastcall
+MaterialSystemDx11ShaderResourceIndexedProducerGuard(
+	int slot,
+	__int16 textureHandle,
+	unsigned __int16 index)
+{
+	if (!MaterialSystemDx11ShaderResourceIndexedProducerOriginal)
+		return 0;
+	const __int64 result =
+		MaterialSystemDx11ShaderResourceIndexedProducerOriginal(
+			slot,
+			textureHandle,
+			index);
+	MaterialSystemDx11HoldPendingShaderResource(
+		static_cast<std::size_t>(slot));
+	return result;
+}
+
+static void __fastcall
+MaterialSystemDx11ShaderResourceArrayProducerGuard(
+	__int64 textureHandles,
+	std::uint64_t count)
+{
+	if (!MaterialSystemDx11ShaderResourceArrayProducerOriginal)
+		return;
+	MaterialSystemDx11ShaderResourceArrayProducerOriginal(
+		textureHandles,
+		count);
+	MaterialSystemDx11HoldPendingShaderResourceRange(
+		static_cast<std::size_t>(count));
+}
+
+static void __fastcall
+MaterialSystemDx11ShaderResourceMaskedArrayProducerGuard(
+	__int64 textureHandles,
+	std::uint64_t count,
+	__int64 samplerMask)
+{
+	if (!MaterialSystemDx11ShaderResourceMaskedArrayProducerOriginal)
+		return;
+	MaterialSystemDx11ShaderResourceMaskedArrayProducerOriginal(
+		textureHandles,
+		count,
+		samplerMask);
+	MaterialSystemDx11HoldPendingShaderResourceRange(
+		static_cast<std::size_t>(count));
+}
+
+static bool __fastcall
+MaterialSystemDx11ShaderResourceDirectProducerGuard(
+	int slot,
+	__int64 shaderResource,
+	int useDepthSampler)
+{
+	if (!MaterialSystemDx11ShaderResourceDirectProducerOriginal)
+		return false;
+	const bool result =
+		MaterialSystemDx11ShaderResourceDirectProducerOriginal(
+			slot,
+			shaderResource,
+			useDepthSampler);
+	MaterialSystemDx11HoldPendingShaderResource(
+		static_cast<std::size_t>(slot));
+	return result;
+}
+
+static unsigned __int64 __fastcall
+MaterialSystemDx11FlushShaderResourcesGuard()
+{
+	if (!MaterialSystemDx11FlushShaderResourcesOriginal)
+		return 0;
+
+	const unsigned __int64 result =
+		MaterialSystemDx11FlushShaderResourcesOriginal();
+	for (void*& heldShaderResource :
+		s_MaterialSystemDx11HeldShaderResources) {
+		MaterialSystemDx11ReleaseHeldShaderResource(
+			heldShaderResource);
+		heldShaderResource = nullptr;
+	}
+	return result;
 }
 
 static void** MaterialSystemDx11CurrentVtfDecoderSlot()
@@ -1859,11 +2118,90 @@ void InstallMaterialSystemDx11RenderThreadGuards(
 			reinterpret_cast<void**>(
 				&MaterialSystemDx11FlushConstantBufferUpdatesOriginal),
 			"constant-buffer");
-	if (!framePointerPatched || !constantBufferHookInstalled) {
+	const bool shaderResourceHookInstalled =
+		InstallMaterialSystemDx11CheckedHook(
+			materialSystemBase,
+			kShaderResourceFlushRva,
+			kExpectedShaderResourceFlushPrologue,
+			sizeof(kExpectedShaderResourceFlushPrologue),
+			reinterpret_cast<void*>(
+				&MaterialSystemDx11FlushShaderResourcesGuard),
+			reinterpret_cast<void**>(
+				&MaterialSystemDx11FlushShaderResourcesOriginal),
+			"shader-resource");
+	const bool singleShaderResourceProducerInstalled =
+		InstallMaterialSystemDx11CheckedHook(
+			materialSystemBase,
+			kShaderResourceSingleProducerRva,
+			kExpectedShaderResourceSingleProducerPrologue,
+			sizeof(kExpectedShaderResourceSingleProducerPrologue),
+			reinterpret_cast<void*>(
+				&MaterialSystemDx11ShaderResourceSingleProducerGuard),
+			reinterpret_cast<void**>(
+				&MaterialSystemDx11ShaderResourceSingleProducerOriginal),
+			"shader-resource-single-producer");
+	const bool indexedShaderResourceProducerInstalled =
+		InstallMaterialSystemDx11CheckedHook(
+			materialSystemBase,
+			kShaderResourceIndexedProducerRva,
+			kExpectedShaderResourceIndexedProducerPrologue,
+			sizeof(kExpectedShaderResourceIndexedProducerPrologue),
+			reinterpret_cast<void*>(
+				&MaterialSystemDx11ShaderResourceIndexedProducerGuard),
+			reinterpret_cast<void**>(
+				&MaterialSystemDx11ShaderResourceIndexedProducerOriginal),
+			"shader-resource-indexed-producer");
+	const bool arrayShaderResourceProducerInstalled =
+		InstallMaterialSystemDx11CheckedHook(
+			materialSystemBase,
+			kShaderResourceArrayProducerRva,
+			kExpectedShaderResourceArrayProducerPrologue,
+			sizeof(kExpectedShaderResourceArrayProducerPrologue),
+			reinterpret_cast<void*>(
+				&MaterialSystemDx11ShaderResourceArrayProducerGuard),
+			reinterpret_cast<void**>(
+				&MaterialSystemDx11ShaderResourceArrayProducerOriginal),
+			"shader-resource-array-producer");
+	const bool maskedArrayShaderResourceProducerInstalled =
+		InstallMaterialSystemDx11CheckedHook(
+			materialSystemBase,
+			kShaderResourceMaskedArrayProducerRva,
+			kExpectedShaderResourceMaskedArrayProducerPrologue,
+			sizeof(kExpectedShaderResourceMaskedArrayProducerPrologue),
+			reinterpret_cast<void*>(
+				&MaterialSystemDx11ShaderResourceMaskedArrayProducerGuard),
+			reinterpret_cast<void**>(
+				&MaterialSystemDx11ShaderResourceMaskedArrayProducerOriginal),
+			"shader-resource-masked-array-producer");
+	const bool directShaderResourceProducerInstalled =
+		InstallMaterialSystemDx11CheckedHook(
+			materialSystemBase,
+			kShaderResourceDirectProducerRva,
+			kExpectedShaderResourceDirectProducerPrologue,
+			sizeof(kExpectedShaderResourceDirectProducerPrologue),
+			reinterpret_cast<void*>(
+				&MaterialSystemDx11ShaderResourceDirectProducerGuard),
+			reinterpret_cast<void**>(
+				&MaterialSystemDx11ShaderResourceDirectProducerOriginal),
+			"shader-resource-direct-producer");
+	const bool shaderResourceProducerHooksInstalled =
+		singleShaderResourceProducerInstalled
+		&& indexedShaderResourceProducerInstalled
+		&& arrayShaderResourceProducerInstalled
+		&& maskedArrayShaderResourceProducerInstalled
+		&& directShaderResourceProducerInstalled;
+	if (!framePointerPatched
+		|| !constantBufferHookInstalled
+		|| !shaderResourceHookInstalled
+		|| !shaderResourceProducerHooksInstalled) {
 		MaterialSystemDx11FailRenderThreadInvariant(
 			!framePointerPatched
 				? "frame-pointer-patch"
-				: "constant-buffer-hook",
+				: !constantBufferHookInstalled
+					? "constant-buffer-hook"
+					: !shaderResourceHookInstalled
+						? "shader-resource-hook"
+						: "shader-resource-producer-hooks",
 			timestamp,
 			imageSize);
 	}
