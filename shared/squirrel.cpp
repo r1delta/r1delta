@@ -1214,22 +1214,51 @@ struct CRecipientFilter {
 	char pad[58];
 };
 
+static uintptr_t GetUserMessageEngineMethod(size_t index, void** engineServer)
+{
+	if (!engineServer)
+		return 0;
+
+	if (IsR1ODedicatedServer()) {
+		// R1O hands server_local.dll a native TFO-layout VEngineServer022.  Use
+		// that exact interface here, just as the persistence delivery path does;
+		// the legacy compatibility vtable is not the live R1O server interface.
+		void* nativeEngineServer = GetR1ONativeEngineServer022();
+		if (!nativeEngineServer)
+			return 0;
+
+		auto vtable = *reinterpret_cast<uintptr_t* const*>(nativeEngineServer);
+		if (!vtable)
+			return 0;
+
+		*engineServer = nativeEngineServer;
+		return vtable[index];
+	}
+
+	*engineServer = g_r1oCVEngineServerInterface;
+	return g_r1oCVEngineServerInterface[index];
+}
+
 int64 UserMsgBegin_Wrapper(CRecipientFilter* filter, const char* name) {
 	auto UserMsgBegin = reinterpret_cast<int (*)(CRecipientFilter*, const char**)>(G_server + 0x629910);
 	auto v6 = UserMsgBegin(0, &name);
 	if (v6 == -1) {
 		Error("UserMessageBegin:  Unregistered message '%s'\n", name);
 	}
-	auto ServerCreateMessage = reinterpret_cast<int64 (*)(void*, CRecipientFilter*, int64, const char*, char)>(g_r1oCVEngineServerInterface[42]);
-	if (!ServerCreateMessage || !filter || !name)
+	void* engineServer = nullptr;
+	auto ServerCreateMessage = reinterpret_cast<int64 (*)(void*, CRecipientFilter*, int64, const char*, char)>(
+		GetUserMessageEngineMethod(42, &engineServer));
+	if (!ServerCreateMessage || !engineServer || !filter || !name)
 		return 0;
-	return ServerCreateMessage(g_r1oCVEngineServerInterface, filter, v6, name, 1);
+	return ServerCreateMessage(engineServer, filter, v6, name, 1);
 }
 
 void EndMessage() {
-	auto ServerEndMessage = reinterpret_cast<int64(*)(void*)>(g_r1oCVEngineServerInterface[43]);
-	if (ServerEndMessage)
-		ServerEndMessage(g_r1oCVEngineServerInterface);
+	void* engineServer = nullptr;
+	auto ServerEndMessage = reinterpret_cast<int64(*)(void*)>(
+		GetUserMessageEngineMethod(43, &engineServer));
+	if (ServerEndMessage && engineServer)
+		ServerEndMessage(engineServer);
 }
 
 void ConstructCRecipientFilter(void* a1)
