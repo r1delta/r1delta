@@ -855,6 +855,131 @@ DEFINE_CLIENT_VALUE_HOOK(
 
 #undef DEFINE_CLIENT_VALUE_HOOK
 
+constexpr std::uintptr_t kClientGameResourcesGlobalRva = 0xBECA50;
+constexpr std::uintptr_t kClientGameResourcesResolverRva = 0xCEAC0;
+constexpr std::size_t kSquirrelGetterSelfIndexOffset = 0xCC;
+
+void* ResolveSquirrelGameResources() noexcept
+{
+    auto* global = reinterpret_cast<void**>(s_ClientBase + kClientGameResourcesGlobalRva);
+    if (!global)
+        return nullptr;
+    void* outer = nullptr;
+    std::memcpy(&outer, global, sizeof(outer));
+    if (!outer)
+        return nullptr;
+    return static_cast<unsigned char*>(outer) + kClientGameResourcesOffset;
+}
+
+int __fastcall SquirrelGetterFallback(void* self, std::size_t vfuncOffset) noexcept
+{
+    if (!self)
+        return 0;
+    void* gameResources = ResolveSquirrelGameResources();
+    if (!gameResources)
+        return 0;
+    int playerIndex = 0;
+    std::memcpy(
+        &playerIndex,
+        static_cast<unsigned char*>(self) + kSquirrelGetterSelfIndexOffset,
+        sizeof(playerIndex));
+    if (playerIndex < 0 || playerIndex > kLastExtendedPlayerIndex)
+        return 0;
+    void** vtable = nullptr;
+    std::memcpy(&vtable, gameResources, sizeof(vtable));
+    if (!vtable)
+        return 0;
+    void* target = nullptr;
+    std::memcpy(
+        &target,
+        reinterpret_cast<unsigned char*>(vtable) + vfuncOffset,
+        sizeof(target));
+    if (!target)
+        return 0;
+    auto method = reinterpret_cast<int(__fastcall*)(void*, int)>(target);
+    return method(gameResources, playerIndex);
+}
+
+#define DEFINE_SQUIRREL_GETTER(name, vfuncOffset)                       \
+    int __fastcall name(void* self)                                     \
+    {                                                                   \
+        return SquirrelGetterFallback(self, vfuncOffset);               \
+    }
+
+DEFINE_SQUIRREL_GETTER(SquirrelGetter50, 0x50)
+DEFINE_SQUIRREL_GETTER(SquirrelGetter58, 0x58)
+DEFINE_SQUIRREL_GETTER(SquirrelGetter60, 0x60)
+DEFINE_SQUIRREL_GETTER(SquirrelGetter48, 0x48)
+DEFINE_SQUIRREL_GETTER(SquirrelGetter78, 0x78)
+DEFINE_SQUIRREL_GETTER(SquirrelGetter80, 0x80)
+DEFINE_SQUIRREL_GETTER(SquirrelGetter88, 0x88)
+DEFINE_SQUIRREL_GETTER(SquirrelGetter90, 0x90)
+DEFINE_SQUIRREL_GETTER(SquirrelGetter98, 0x98)
+
+#undef DEFINE_SQUIRREL_GETTER
+
+bool InstallSquirrelGetterHook(
+    std::uintptr_t moduleBase,
+    std::uintptr_t rva,
+    void* detour,
+    const char* description)
+{
+    auto* target = reinterpret_cast<unsigned char*>(moduleBase + rva);
+    constexpr unsigned char kHeader[] = {
+        0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xD9, 0xE8};
+    constexpr unsigned char kIndexLoad[] = {
+        0x8B, 0x93, 0xCC, 0x00, 0x00, 0x00};
+    constexpr unsigned char kNullDeref[] = {0x4C, 0x8B, 0x00};
+    if (!IsReadableRange(target, 32)
+        || std::memcmp(target, kHeader, sizeof(kHeader)) != 0)
+    {
+        PlayerResourceLog(
+            "R1Delta: refusing player-resource hook '%s' at RVA 0x%llX: "
+            "unexpected binary revision\n",
+            description,
+            static_cast<unsigned long long>(rva));
+        return false;
+    }
+    std::int32_t rel = 0;
+    std::memcpy(&rel, target + sizeof(kHeader), sizeof(rel));
+    const auto callTarget = reinterpret_cast<std::uintptr_t>(target)
+        + sizeof(kHeader) + sizeof(rel) + static_cast<std::intptr_t>(rel);
+    if (callTarget != moduleBase + kClientGameResourcesResolverRva
+        || std::memcmp(target + 14, kIndexLoad, sizeof(kIndexLoad)) != 0
+        || std::memcmp(target + 20, kNullDeref, sizeof(kNullDeref)) != 0)
+    {
+        PlayerResourceLog(
+            "R1Delta: refusing player-resource hook '%s' at RVA 0x%llX: "
+            "unexpected binary revision\n",
+            description,
+            static_cast<unsigned long long>(rva));
+        return false;
+    }
+    const MH_STATUS createStatus = MH_CreateHook(target, detour, nullptr);
+    if (createStatus != MH_OK)
+    {
+        PlayerResourceLog(
+            "R1Delta: failed to create player-resource hook '%s' at RVA "
+            "0x%llX: MinHook status %d\n",
+            description,
+            static_cast<unsigned long long>(rva),
+            static_cast<int>(createStatus));
+        return false;
+    }
+    const MH_STATUS enableStatus = MH_EnableHook(target);
+    if (enableStatus != MH_OK && enableStatus != MH_ERROR_ENABLED)
+    {
+        PlayerResourceLog(
+            "R1Delta: failed to enable player-resource hook '%s' at RVA "
+            "0x%llX: MinHook status %d\n",
+            description,
+            static_cast<unsigned long long>(rva),
+            static_cast<int>(enableStatus));
+        return false;
+    }
+    return true;
+}
+
 bool PatchServerFieldReferences(
     std::uintptr_t serverBase,
     const char* fieldName,
@@ -1129,6 +1254,32 @@ bool InstallR1ClientPlayerResource18(std::uintptr_t clientBase)
             sizeof(expectedValue),
             hook.detour,
             hook.original,
+            hook.name);
+    }
+
+    struct SquirrelGetterHook
+    {
+        std::uintptr_t rva;
+        void* detour;
+        const char* name;
+    };
+    const SquirrelGetterHook squirrelGetterHooks[] = {
+        {0x7D110, reinterpret_cast<void*>(&SquirrelGetter50), "SquirrelIntGetter+0x50"},
+        {0x7D140, reinterpret_cast<void*>(&SquirrelGetter58), "SquirrelIntGetter+0x58"},
+        {0x7D170, reinterpret_cast<void*>(&SquirrelGetter60), "SquirrelIntGetter+0x60"},
+        {0x7D1A0, reinterpret_cast<void*>(&SquirrelGetter48), "SquirrelIntGetter+0x48"},
+        {0x7D1D0, reinterpret_cast<void*>(&SquirrelGetter78), "SquirrelIntGetter+0x78"},
+        {0x7D200, reinterpret_cast<void*>(&SquirrelGetter80), "SquirrelIntGetter+0x80"},
+        {0x7D230, reinterpret_cast<void*>(&SquirrelGetter88), "SquirrelIntGetter+0x88"},
+        {0x7D260, reinterpret_cast<void*>(&SquirrelGetter90), "SquirrelIntGetter+0x90"},
+        {0x7D290, reinterpret_cast<void*>(&SquirrelGetter98), "SquirrelIntGetter+0x98"},
+    };
+    for (const auto& hook : squirrelGetterHooks)
+    {
+        ok &= InstallSquirrelGetterHook(
+            clientBase,
+            hook.rva,
+            hook.detour,
             hook.name);
     }
 

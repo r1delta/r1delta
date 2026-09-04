@@ -23,6 +23,8 @@ typedef struct USERID_s
 
 // Public IP cache
 extern std::string G_public_ip;
+bool UsesProcessUniquePlatformUserId();
+void EnsurePlatformUserIdString(ConVarR1* id);
 
 // Auth callbacks
 void Shared_OnLocalAuthFailure();
@@ -87,6 +89,9 @@ extern GetUserID_t GetUserIDOriginal;
 
 USERID_s* GetUserIDHook(__int64 base_client, USERID_s* id);
 const char* GetUserIDStringHook(USERID_s* id);
+typedef const char* (__fastcall* R1OGetNetworkIDString_t)(__int64 base_client);
+extern R1OGetNetworkIDString_t R1OGetNetworkIDStringOriginal;
+const char* __fastcall R1OGetNetworkIDStringHook(__int64 base_client);
 
 // SendConnectPacket hook
 typedef __int64(__fastcall* CBaseClientState_SendConnectPacket_t)(__int64 a1, __int64 a2, unsigned int a3);

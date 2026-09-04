@@ -288,6 +288,15 @@
     <ClInclude Include="client\rendering\hudwarp_hooks.h">
       <Filter>client\rendering</Filter>
     </ClInclude>
+    <ClInclude Include="client\rendering\antilag.h">
+      <Filter>client\rendering</Filter>
+    </ClInclude>
+    <ClInclude Include="client\rendering\gpu_latency.h">
+      <Filter>client\rendering</Filter>
+    </ClInclude>
+    <ClInclude Include="client\rendering\reflex.h">
+      <Filter>client\rendering</Filter>
+    </ClInclude>
     <ClInclude Include="client\rendering\surfacerender.h">
       <Filter>client\rendering</Filter>
     </ClInclude>
@@ -681,6 +690,12 @@
       <Filter>client\rendering</Filter>
     </ClCompile>
     <ClCompile Include="client\rendering\hudwarp_hooks.cpp">
+      <Filter>client\rendering</Filter>
+    </ClCompile>
+    <ClCompile Include="client\rendering\antilag.cpp">
+      <Filter>client\rendering</Filter>
+    </ClCompile>
+    <ClCompile Include="client\rendering\reflex.cpp">
       <Filter>client\rendering</Filter>
     </ClCompile>
     <ClCompile Include="client\rendering\surfacerender.cpp">

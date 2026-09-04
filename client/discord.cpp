@@ -184,6 +184,10 @@ void HandleDiscordUserReady() {
 		std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 	}
 	auto platform_user_id_var = OriginalCCVar_FindVar(cvarinterface, "platform_user_id");
+	if (UsesProcessUniquePlatformUserId()) {
+		EnsurePlatformUserIdString(platform_user_id_var);
+		return;
+	}
 	if (result != discord::Result::Ok) {
 		Msg("Discord: Failed to get current user %d \n", result);
 		SetConvarStringOriginal(platform_user_id_var, std::to_string(std::rand()).c_str());

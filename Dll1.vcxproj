@@ -256,6 +256,10 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="client\rendering\hudwarp.h" />
     <ClInclude Include="client\rendering\hudwarp_convars.h" />
     <ClInclude Include="client\rendering\hudwarp_hooks.h" />
+    <ClInclude Include="client\rendering\antilag.h" />
+    <ClInclude Include="client\rendering\gpu_latency.h" />
+    <ClInclude Include="thirdparty\fidelityfx\ffx_antilag2_dx11.h" />
+    <ClInclude Include="client\rendering\reflex.h" />
     <ClInclude Include="thirdparty\jwt\jwt_compact.h" />
     <ClInclude Include="sdk\keyvalues.h" />
     <ClInclude Include="engine\core\load.h" />
@@ -393,6 +397,8 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="engine\net\net_hooks.cpp" />
     <ClCompile Include="client\rendering\hudwarp.cpp" />
     <ClCompile Include="client\rendering\hudwarp_hooks.cpp" />
+    <ClCompile Include="client\rendering\antilag.cpp" />
+    <ClCompile Include="client\rendering\reflex.cpp" />
     <ClCompile Include="sdk\keyvalues.cpp" />
     <ClCompile Include="engine\core\load.cpp" />
     <ClCompile Include="engine\auth.cpp" />

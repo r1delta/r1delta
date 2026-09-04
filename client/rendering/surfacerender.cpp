@@ -6,6 +6,8 @@
 #include "engine/logging/logging.h"
 #include "script_error_telemetry.h"
 #include "persistentdata.h"
+#include "antilag.h"
+#include "reflex.h"
 
 #include "r1d_version.h"
 #include <vector>
@@ -14,6 +16,8 @@
 #include <algorithm> // for std::max
 #include <chrono>
 #include <cmath>
+#include <atomic>
+#include <cstring>
 #include <wincodec.h>
 #include <psapi.h>
 
@@ -198,6 +202,8 @@ static uint64_t g_WProfileFrameIndex = 0;
 static double g_WProfileLastFrameMs = 0.0;
 static double g_WProfileAverageFrameMs = 0.0;
 static thread_local int g_WProfileFrameDepth = 0;
+static std::atomic<bool> g_WProfileEnabled{false};
+static SRWLOCK g_WProfileLock = SRWLOCK_INIT;
 
 static uint32_t WProfileHashEntry(const char* categoryName)
 {
@@ -248,21 +254,15 @@ static WProfileEntry* WProfileFindOrAdd(const char* categoryName)
 
 static void WProfileRecord(const char* categoryName, double elapsedMs)
 {
+    if (!g_WProfileEnabled.load(std::memory_order_relaxed))
+        return;
+
+    SRWGuard profileGuard(&g_WProfileLock);
     auto* entry = WProfileFindOrAdd(categoryName);
     if (!entry)
         return;
 
     entry->pendingMs += elapsedMs;
-}
-
-static const WProfileEntry* WProfileFindCategory(const char* categoryName)
-{
-    for (const auto& entry : g_WProfileEntries)
-    {
-        if (!_stricmp(entry.categoryName, categoryName))
-            return &entry;
-    }
-    return nullptr;
 }
 
 static int WProfilePercentTenths(double ms, double totalMs)
@@ -301,6 +301,7 @@ static void WProfileUpdateDisplaySamples()
 
 static void WProfileBeginFrame(double frameMs)
 {
+    SRWGuard profileGuard(&g_WProfileLock);
     ++g_WProfileFrameIndex;
     double profiledMs = 0.0;
     for (auto& entry : g_WProfileEntries)
@@ -326,10 +327,15 @@ static void WProfileBeginFrame(double frameMs)
 struct WProfileScope
 {
     const char* categoryName;
+    bool enabled;
     std::chrono::high_resolution_clock::time_point start;
 
     WProfileScope(const char* dllName, uintptr_t rva, const char* categoryName)
-        : categoryName(categoryName), start(std::chrono::high_resolution_clock::now())
+        : categoryName(categoryName),
+          enabled(g_WProfileEnabled.load(std::memory_order_relaxed)),
+          start(enabled
+              ? std::chrono::high_resolution_clock::now()
+              : std::chrono::high_resolution_clock::time_point{})
     {
         (void)dllName;
         (void)rva;
@@ -337,6 +343,9 @@ struct WProfileScope
 
     ~WProfileScope()
     {
+        if (!enabled)
+            return;
+
         const auto end = std::chrono::high_resolution_clock::now();
         const auto elapsed = std::chrono::duration<double, std::milli>(end - start).count();
         WProfileRecord(categoryName, elapsed);
@@ -389,17 +398,23 @@ static MsgWaitForMultipleObjectsFn oMsgWaitForMultipleObjects_WProf = nullptr;
 
 static __int64 WProf_Host_RunFrame(float time)
 {
+    ReflexBeginSimulation();
     PData_RunFrame();
-    ++g_WProfileFrameDepth;
+    const bool profile = g_WProfileEnabled.load(std::memory_order_relaxed);
+    if (profile)
+        ++g_WProfileFrameDepth;
     const auto result = oHost_RunFrame(time);
-    --g_WProfileFrameDepth;
+    if (profile)
+        --g_WProfileFrameDepth;
     PData_FinishPendingSave();
+    ReflexOnEngineFrameComplete();
     return result;
 }
 
 static void WINAPI WProf_Sleep(DWORD milliseconds)
 {
-    if (g_WProfileFrameDepth <= 0)
+    if (g_WProfileFrameDepth <= 0
+        || !g_WProfileEnabled.load(std::memory_order_relaxed))
     {
         oSleep_WProf(milliseconds);
         return;
@@ -414,7 +429,8 @@ static void WINAPI WProf_Sleep(DWORD milliseconds)
 
 static DWORD WINAPI WProf_MsgWaitForMultipleObjects(DWORD count, const HANDLE* handles, BOOL waitAll, DWORD milliseconds, DWORD wakeMask)
 {
-    if (g_WProfileFrameDepth <= 0)
+    if (g_WProfileFrameDepth <= 0
+        || !g_WProfileEnabled.load(std::memory_order_relaxed))
         return oMsgWaitForMultipleObjects_WProf(count, handles, waitAll, milliseconds, wakeMask);
 
     const auto start = std::chrono::high_resolution_clock::now();
@@ -427,9 +443,12 @@ static DWORD WINAPI WProf_MsgWaitForMultipleObjects(DWORD count, const HANDLE* h
 
 static void WProf_CEngine_Frame(void* engine)
 {
-    ++g_WProfileFrameDepth;
+    const bool profile = g_WProfileEnabled.load(std::memory_order_relaxed);
+    if (profile)
+        ++g_WProfileFrameDepth;
     oCEngine_Frame(engine);
-    --g_WProfileFrameDepth;
+    if (profile)
+        --g_WProfileFrameDepth;
 }
 
 static void WProf__Host_RunFrame_Input(float accumulatedExtraSamples, bool finalTick)
@@ -470,6 +489,7 @@ static __int64 WProf_NET_SendQueuedPackets()
 
 static __int64 WProf_Host_RunFrame_Render()
 {
+    ReflexEndSimulationAndBeginRenderSubmit();
     WPROF("engine.dll", 0x133100, "render");
     return oHost_RunFrame_Render();
 }
@@ -551,20 +571,160 @@ static void CreateWProfileHook(uintptr_t engineBase, uintptr_t rva, void* hook, 
     MH_CreateHook(reinterpret_cast<void*>(engineBase + rva), hook, original);
 }
 
+static bool CreateCheckedWProfileHook(
+    uintptr_t engineBase,
+    uintptr_t rva,
+    const unsigned char* expected,
+    size_t expectedSize,
+    void* hook,
+    void** original,
+    const char* name)
+{
+    void* const target = reinterpret_cast<void*>(engineBase + rva);
+    if (memcmp(target, expected, expectedSize) != 0)
+    {
+        char message[256]{};
+        snprintf(
+            message,
+            sizeof(message),
+            "[r1delta_wprofile] skipped %s at RVA 0x%llX: unexpected binary revision\n",
+            name,
+            static_cast<unsigned long long>(rva));
+        OutputDebugStringA(message);
+        return false;
+    }
+
+    const MH_STATUS createStatus = MH_CreateHook(target, hook, original);
+    if ((createStatus != MH_OK && createStatus != MH_ERROR_ALREADY_CREATED)
+        || !original
+        || !*original)
+    {
+        return false;
+    }
+
+    const MH_STATUS enableStatus = MH_EnableHook(target);
+    return enableStatus == MH_OK || enableStatus == MH_ERROR_ENABLED;
+}
+
+static bool InstallHostFrameTimeFloorRemoval(uintptr_t engineBase)
+{
+    static bool installed = false;
+    if (installed)
+        return true;
+
+    struct PatchSpec
+    {
+        uintptr_t rva;
+        const char* name;
+    };
+    static constexpr PatchSpec patches[] = {
+        { 0x132B94, "scaled frame-time floor" },
+        { 0x132BFC, "unscaled frame-time floor" },
+    };
+    static constexpr unsigned char expectedContext[] = {
+        0xF2, 0x0F, 0x5A, 0xDA, 0x0F, 0x14, 0xDB, 0x0F,
+        0x5A, 0xC3, 0x66, 0x0F, 0x2F, 0xC1, 0x76, 0x06,
+        0x0F, 0x14, 0xDB, 0x0F, 0x5A, 0xCB, 0xF2, 0x0F,
+    };
+    constexpr size_t branchOffsetInContext = 14;
+    static constexpr unsigned char expectedBranch[] = { 0x76, 0x06 };
+    static constexpr unsigned char replacement[] = { 0x90, 0x90 };
+
+    for (const PatchSpec& patch : patches)
+    {
+        const void* const context = reinterpret_cast<const void*>(
+            engineBase + patch.rva - branchOffsetInContext);
+        if (std::memcmp(context, expectedContext, sizeof(expectedContext)) != 0)
+        {
+            char message[256]{};
+            snprintf(
+                message,
+                sizeof(message),
+                "[r1delta_timing] skipped %s at engine RVA 0x%llX: unexpected binary revision\n",
+                patch.name,
+                static_cast<unsigned long long>(patch.rva));
+            OutputDebugStringA(message);
+            return false;
+        }
+    }
+
+    auto* const patchStart = reinterpret_cast<unsigned char*>(engineBase + patches[0].rva);
+    constexpr size_t patchSpan = patches[1].rva + sizeof(replacement) - patches[0].rva;
+    DWORD oldProtect = 0;
+    if (!VirtualProtect(patchStart, patchSpan, PAGE_EXECUTE_READWRITE, &oldProtect))
+    {
+        OutputDebugStringA("[r1delta_timing] failed to make Host_AccumulateTime writable\n");
+        return false;
+    }
+
+    // Both branches preserve the historical 100 ms upper bound. Falling through
+    // only removes the 1 ms lower bound so simulation time remains real frame time.
+    for (const PatchSpec& patch : patches)
+        std::memcpy(reinterpret_cast<void*>(engineBase + patch.rva), replacement, sizeof(replacement));
+
+    const bool flushed = FlushInstructionCache(GetCurrentProcess(), patchStart, patchSpan) != FALSE;
+    DWORD ignoredProtect = 0;
+    const bool restored = VirtualProtect(patchStart, patchSpan, oldProtect, &ignoredProtect) != FALSE;
+    if (!flushed || !restored)
+    {
+        DWORD rollbackProtect = 0;
+        if (VirtualProtect(patchStart, patchSpan, PAGE_EXECUTE_READWRITE, &rollbackProtect))
+        {
+            for (const PatchSpec& patch : patches)
+                std::memcpy(reinterpret_cast<void*>(engineBase + patch.rva),
+                    expectedBranch, sizeof(expectedBranch));
+            FlushInstructionCache(GetCurrentProcess(), patchStart, patchSpan);
+            DWORD rollbackIgnored = 0;
+            VirtualProtect(patchStart, patchSpan, oldProtect, &rollbackIgnored);
+        }
+        OutputDebugStringA("[r1delta_timing] failed to publish Host_AccumulateTime floor removal\n");
+        return false;
+    }
+
+    installed = true;
+    OutputDebugStringA("[r1delta_timing] removed the 1 ms Host_AccumulateTime floor\n");
+    return true;
+}
+
+
 static void SetupEngineWProfileHooks()
 {
     const uintptr_t engineBase = reinterpret_cast<uintptr_t>(GetModuleHandleA("engine.dll"));
     if (!engineBase)
         return;
+    InstallHostFrameTimeFloorRemoval(engineBase);
 
-    CreateWProfileHook(engineBase, 0x135A00, &WProf_Host_RunFrame, reinterpret_cast<void**>(&oHost_RunFrame));
+    static constexpr unsigned char kHostRunFrameExpected[] = {
+        0x48, 0x83, 0xEC, 0x48,
+        0x80, 0x3D, 0x07, 0x1F, 0x79, 0x02, 0x00,
+    };
+    CreateCheckedWProfileHook(
+        engineBase,
+        0x135A00,
+        kHostRunFrameExpected,
+        sizeof(kHostRunFrameExpected),
+        &WProf_Host_RunFrame,
+        reinterpret_cast<void**>(&oHost_RunFrame),
+        "host frame");
     CreateWProfileHook(engineBase, 0x131320, &WProf__Host_RunFrame_Input, reinterpret_cast<void**>(&o_Host_RunFrame_Input));
     CreateWProfileHook(engineBase, 0x0F0010, &WProf__Host_RunFrame_Server, reinterpret_cast<void**>(&o_Host_RunFrame_Server));
     CreateWProfileHook(engineBase, 0x131480, &WProf__Host_RunFrame_Client, reinterpret_cast<void**>(&o_Host_RunFrame_Client));
     CreateWProfileHook(engineBase, 0x1057C0, &WProf_Cbuf_Execute, reinterpret_cast<void**>(&oCbuf_Execute_WProf));
     CreateWProfileHook(engineBase, 0x1F31B0, &WProf_NET_RunFrame, reinterpret_cast<void**>(&oNET_RunFrame));
     CreateWProfileHook(engineBase, 0x1F4B70, &WProf_NET_SendQueuedPackets, reinterpret_cast<void**>(&oNET_SendQueuedPackets));
-    CreateWProfileHook(engineBase, 0x133100, &WProf_Host_RunFrame_Render, reinterpret_cast<void**>(&oHost_RunFrame_Render));
+    static constexpr unsigned char kHostRunFrameRenderExpected[] = {
+        0x40, 0x53,
+        0x48, 0x83, 0xEC, 0x20,
+        0x48, 0x8B, 0x05, 0xAB, 0x33, 0xD9, 0x02,
+    };
+    CreateCheckedWProfileHook(
+        engineBase,
+        0x133100,
+        kHostRunFrameRenderExpected,
+        sizeof(kHostRunFrameRenderExpected),
+        &WProf_Host_RunFrame_Render,
+        reinterpret_cast<void**>(&oHost_RunFrame_Render),
+        "host render");
     CreateWProfileHook(engineBase, 0x1A5F70, &WProf_VCR_EnterPausedState, reinterpret_cast<void**>(&oVCR_EnterPausedState));
     CreateWProfileHook(engineBase, 0x036F40, &WProf_ClientDLL_Update, reinterpret_cast<void**>(&oClientDLL_Update));
     CreateWProfileHook(engineBase, 0x132550, &WProf_CJob_Execute, reinterpret_cast<void**>(&oCJob_Execute));
@@ -1087,6 +1247,7 @@ static void DrawLagometer(int x, int y, int wide, int tall)
 
 static void DrawProfilerPie(int x, int y, int radius)
 {
+    SRWGuard profileGuard(&g_WProfileLock);
     WProfileUpdateDisplaySamples();
 
     double profiledMs = 0.0;
@@ -1431,6 +1592,9 @@ static void DrawLegacyWatermark()
 }
 
 static void DrawCurrentWatermark() {
+    const bool showHeavyDebug =
+        cvar_delta_watermark && cvar_delta_watermark->m_Value.m_nValue == 2;
+    g_WProfileEnabled.store(showHeavyDebug, std::memory_order_relaxed);
     if (!CanDrawDeltaWatermark())
         return;
 
@@ -1448,7 +1612,7 @@ static void DrawCurrentWatermark() {
     if (!cvar_delta_watermark->m_Value.m_nValue) return;
 
     const double now = Plat_FloatTime();
-    if (g_LastWatermarkTime > 0.0)
+    if (g_LastWatermarkTime > 0.0 && showHeavyDebug)
     {
         const double frameMs = (now - g_LastWatermarkTime) * 1000.0;
         WProfileBeginFrame(frameMs);
@@ -1463,7 +1627,6 @@ static void DrawCurrentWatermark() {
     const bool wantsPos = wantsFps && clShowPos && clShowPos->m_Value.m_nValue == 1;
     const bool hasCapturedFpsText = HasCapturedFpsText();
     const bool showDebug = wantsFps;
-    const bool showHeavyDebug = cvar_delta_watermark && cvar_delta_watermark->m_Value.m_nValue == 2;
     char header[512];
     char firstFpsLine[128] = {};
     int clientDelayTicks = -1;
@@ -2002,11 +2165,27 @@ void FontSizeChangeCallback(IConVar* var, const char* pOldValue, float flOldValu
 
 }
 
+static void WatermarkModeChangeCallback(
+    void* var,
+    const char* oldValue,
+    float oldFloatValue)
+{
+    (void)var;
+    (void)oldValue;
+    (void)oldFloatValue;
+    g_WProfileEnabled.store(
+        cvar_delta_watermark
+            && cvar_delta_watermark->m_Value.m_nValue == 2,
+        std::memory_order_relaxed);
+}
+
 void SetupSurfaceRenderHooks() {
     g_SurfaceRenderHooksInitialized = false;
     g_WatermarkHudInitComplete = true;
     g_DeltaWatermarkModeOneFun = false; //RollDeltaWatermarkModeOneFun();
     cvar_delta_watermark = RegisterConVar("delta_watermark", "1", FCVAR_GAMEDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Show R1Delta watermark with version information");
+    RegisterReflexConVars();
+    RegisterAntiLagConVars();
     cvar_delta_damage_numbers = RegisterConVar("delta_damage_numbers", "0", FCVAR_GAMEDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Show TF2-style floating damage numbers on hit.");
     cvar_delta_damage_numbers_lifetime = RegisterConVar("delta_damage_numbers_lifetime", "1.5", FCVAR_GAMEDLL, "How long damage numbers stay on screen.");
     cvar_delta_damage_numbers_size = RegisterConVar("delta_damage_numbers_size", "32", FCVAR_GAMEDLL, "Font size for normal damage numbers.");
@@ -2014,6 +2193,8 @@ void SetupSurfaceRenderHooks() {
     cvar_delta_damage_numbers_batching = RegisterConVar("delta_damage_numbers_batching", "1", FCVAR_GAMEDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Batch damage numbers from the same source within a time window.");
     cvar_delta_damage_numbers_batching_window = RegisterConVar("delta_damage_numbers_batching_window", "3", FCVAR_GAMEDLL, "Time window for batching damage numbers (seconds).");
     RegisterConCommand("delta_toggle_debug", DeltaToggleDebugCommand, "Cycle R1Delta debug overlay modes.", FCVAR_CLIENTDLL);
+    cvar_delta_watermark->m_fnChangeCallbacks.AddToTail(
+        static_cast<FnChangeCallback_t>(WatermarkModeChangeCallback));
     cvar_delta_damage_numbers_size->m_fnChangeCallbacks.AddToTail((FnChangeCallback_t)FontSizeChangeCallback);
     cvar_delta_damage_numbers_crit_size->m_fnChangeCallbacks.AddToTail((FnChangeCallback_t)FontSizeChangeCallback);
 

@@ -97,6 +97,7 @@
 #include "audio.h"
 #include "audio_device.h"
 #include "audio_cache.h"
+#include "reflex.h"
 #include <nlohmann/json.hpp>
 #include "shellapi.h"
 //#define JWT
@@ -8205,10 +8206,7 @@ void Host_InitHook(bool a1) {
 	Host_InitOriginal(a1);
 	OriginalCCVar_FindVar(cvarinterface, "sv_alltalk")->m_nFlags |= FCVAR_REPLICATED;
 	auto user_id = OriginalCCVar_FindVar(cvarinterface, "platform_user_id");
-	if (user_id->m_Value.m_StringLength < 10) {
-		std::srand(std::time(0));
-		SetConvarStringOriginal(OriginalCCVar_FindVar(cvarinterface, "platform_user_id"), std::to_string(std::rand()).c_str());
-	}
+	EnsurePlatformUserIdString(user_id);
 	user_id->m_nFlags |= FCVAR_DEVELOPMENTONLY;
 
 	MCPServer::InstallEchoCommandFix();
@@ -8233,6 +8231,7 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 {
 	G_engine = (uintptr_t)notification_data->Loaded.DllBase;
 	auto engine_base = G_engine;
+	SetupReflexEngineHooks(engine_base);
 	if (!IsDedicatedServer())
 		InstallNoStaticPropsHook(engine_base);
 	if (!IsDedicatedServer())
@@ -9046,11 +9045,27 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		"server chat",
 		"CServerGameDLL_OnSayTextMsg");
 	
-	if (IsDedicatedServer() && !IsR1ODedicatedServer()) {
+	if (IsR1ODedicatedServer()) {
+		const unsigned char expectedR1OGetNetworkIDStringPrologue[] = {
+			0x48, 0x89, 0x5C, 0x24, 0x08, 0x57, 0x48, 0x83,
+			0xEC, 0x40, 0x48, 0x8B, 0x01, 0x48, 0x8D, 0x3D,
+			0x24, 0xBB, 0x41, 0x00, 0x48, 0x8B, 0xD9, 0x48
+		};
+		InstallEngineCommandLineCheckedHook(
+			G_engine_r1o,
+			0x140CA0,
+			expectedR1OGetNetworkIDStringPrologue,
+			sizeof(expectedR1OGetNetworkIDStringPrologue),
+			reinterpret_cast<void*>(&R1OGetNetworkIDStringHook),
+			reinterpret_cast<void**>(&R1OGetNetworkIDStringOriginal),
+			"TFO authentication",
+			"CBaseClient::GetNetworkIDString");
+	}
+	else if (IsDedicatedServer()) {
 		MH_CreateHook((LPVOID)(G_engine_ds + 0x45EB0), &GetUserIDStringHook, reinterpret_cast<LPVOID*>(&GetUserIDStringOriginal));
 		MH_CreateHook((LPVOID)(G_engine_ds + 0x46080), &GetUserIDHook, reinterpret_cast<LPVOID*>(&GetUserIDOriginal));
 	}
-	else if (!IsDedicatedServer()) {
+	else {
 		MH_CreateHook((LPVOID)(engine_base_spec + 0xD5260), &GetUserIDStringHook, reinterpret_cast<LPVOID*>(&GetUserIDStringOriginal));
 		MH_CreateHook((LPVOID)(engine_base_spec + 0xD5430), &GetUserIDHook, reinterpret_cast<LPVOID*>(&GetUserIDOriginal));
 	}
@@ -9588,6 +9603,7 @@ void __stdcall LoaderNotificationCallback(
 				InstallMaterialSystemDx11TxaaLifetimeGuard(G_matsystem);
 			}
 		}
+		SetupReflexMaterialSystemHooks(G_matsystem);
 		if (!IsR1ODedicatedServer()) {
 			SetupHudWarpMatSystemHooks();
 			MH_EnableHook(MH_ALL_HOOKS);

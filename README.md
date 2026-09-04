@@ -13,6 +13,8 @@ To get started, go to the [releases page](https://github.com/r1delta/r1delta/rel
 
 If you're having issues please open an issue or join the [discord](https://discord.gg/zbFCcSM5t7)
 
+NVIDIA Reflex and AMD Radeon Anti-Lag 2 are enabled automatically on supported GPUs. Launch with `-r1delta_disable_gpu_low_latency` to prevent both integrations from initializing.
+
 For developers and contributors, keep reading below.
 
 ## Hosting a server

@@ -15,9 +15,15 @@
 namespace
 {
 constexpr uintptr_t kPlayerPhysicsSimulateRva = 0x4FABF0;
+constexpr uintptr_t kDetermineSimulationTicksRva = 0x4FA6D0;
+constexpr uintptr_t kCommandTimePolicyRva = 0xC31018;
+constexpr size_t kUsesCommandFrameTimeVtableOffset = 0x630;
 constexpr uintptr_t kPlayerMoveRunCommandRva = 0x514F00;
 constexpr size_t kUserCmdFrameTimeOffset = 160;
 constexpr size_t kPlayerFlagsOffset = 360;
+constexpr size_t kCommandContextCommandCountOffset = 24;
+constexpr size_t kUserCmdSize = 308;
+constexpr int kMaximumUserCmdsPerBatch = 62;
 constexpr size_t kPlayerAccumulatedFrameTimeOffset = 7036;
 constexpr size_t kPlayerMoveTypeOffset = 0x1BC;
 constexpr size_t kPlayerFrameTimeReferenceOffset = 7040;
@@ -43,15 +49,15 @@ public:
 
 		if (maxProcessTicks <= 0 || intervalPerTick <= 0.0f)
 		{
-			m_movementTimeRemaining = 0.0f;
+			m_processingTimeRemaining = 0.0f;
 			return true;
 		}
 
 		const double maximum = static_cast<double>(maxProcessTicks) * intervalPerTick;
 		const float maximumTime = maximum >= FLT_MAX ? FLT_MAX : static_cast<float>(maximum);
-		m_movementTimeRemaining += intervalPerTick;
-		if (m_movementTimeRemaining > maximumTime)
-			m_movementTimeRemaining = maximumTime;
+		m_processingTimeRemaining += intervalPerTick;
+		if (m_processingTimeRemaining > maximumTime)
+			m_processingTimeRemaining = maximumTime;
 		return true;
 	}
 
@@ -59,27 +65,27 @@ public:
 	{
 		if (maxProcessTicks <= 0 || requiredTime <= 0.0f)
 			return true;
-		if (m_movementTimeRemaining <= 0.0f)
+		if (m_processingTimeRemaining <= 0.0f)
 			return false;
-		if (requiredTime > m_movementTimeRemaining + FLT_EPSILON)
+		if (requiredTime > m_processingTimeRemaining + FLT_EPSILON)
 		{
-			m_movementTimeRemaining = 0.0f;
+			m_processingTimeRemaining = 0.0f;
 			return false;
 		}
 
-		m_movementTimeRemaining -= requiredTime;
-		if (m_movementTimeRemaining < 0.0f)
-			m_movementTimeRemaining = 0.0f;
+		m_processingTimeRemaining -= requiredTime;
+		if (m_processingTimeRemaining < 0.0f)
+			m_processingTimeRemaining = 0.0f;
 		return true;
 	}
 
 	constexpr float Remaining() const
 	{
-		return m_movementTimeRemaining;
+		return m_processingTimeRemaining;
 	}
 
 private:
-	float m_movementTimeRemaining = 0.0f;
+	float m_processingTimeRemaining = 0.0f;
 	int m_lastGrantedTick = INT_MIN;
 };
 
@@ -104,7 +110,32 @@ constexpr bool ValidateUserCmdProcessingBudget()
 		return false;
 	return budget.Consume(16, 0.0f) && budget.Consume(0, 1000.0f);
 }
-static_assert(ValidateUserCmdProcessingBudget());
+
+constexpr float ResolveUserCmdProcessingTime(float commandFrameTime, float intervalPerTick)
+{
+	return commandFrameTime != 0.0f ? commandFrameTime : intervalPerTick;
+}
+
+static_assert(ResolveUserCmdProcessingTime(0.002f, 0.01f) == 0.002f);
+static_assert(ResolveUserCmdProcessingTime(0.0f, 0.01f) == 0.01f);
+
+constexpr unsigned int SimulationTimeToTicks(float simulationTime, float intervalPerTick)
+{
+	return simulationTime > 0.0f && intervalPerTick > 0.0f
+		? static_cast<unsigned int>((simulationTime / intervalPerTick) + 0.5f)
+		: 0;
+}
+
+
+constexpr bool ValidateQueuedSimulationTime()
+{
+	float simulationTime = 0.0f;
+	for (int i = 0; i < 17; ++i)
+		simulationTime += 0.001f;
+	return SimulationTimeToTicks(simulationTime, 1.0f / 60.0f) == 1;
+}
+
+static_assert(ValidateQueuedSimulationTime());
 
 constexpr float ApplyPausedNoclipFrameTime(bool paused, unsigned char moveType,
 	bool cheatsEnabled, bool noclipDuringPause, float intervalPerTick, float selectedFrameTime)
@@ -116,7 +147,14 @@ constexpr float ApplyPausedNoclipFrameTime(bool paused, unsigned char moveType,
 
 static_assert(ApplyPausedNoclipFrameTime(true, kMoveTypeNoclip, true, true, 0.01f, 0.0f) == 0.01f);
 static_assert(ApplyPausedNoclipFrameTime(true, kMoveTypeNoclip, false, true, 0.01f, 0.0f) == 0.0f);
-static_assert(ApplyPausedNoclipFrameTime(true, 2, true, true, 0.01f, 0.0f) == 0.0f);
+
+constexpr bool ShouldProcessUserCmdLifecycle(float processingTime, float movementFrameTime)
+{
+	return processingTime <= 0.0f || movementFrameTime != 0.0f;
+}
+
+static_assert(ShouldProcessUserCmdLifecycle(0.001f, 0.001f));
+static_assert(!ShouldProcessUserCmdLifecycle(0.001f, 0.0f));
 
 struct UserCmdProcessingState
 {
@@ -136,9 +174,11 @@ void* s_svMaxUserCmdProcessTicksWarning = nullptr;
 using PlayerPhysicsSimulateType = void(__fastcall*)(uintptr_t player);
 using PlayerMoveRunCommandType = __int64(__fastcall*)(uintptr_t playerMove, uintptr_t player,
 	uintptr_t userCmd, uintptr_t moveHelper);
+using DetermineSimulationTicksType = unsigned int(__fastcall*)(uintptr_t player, uintptr_t commandContext);
 
 PlayerPhysicsSimulateType s_playerPhysicsSimulateOriginal = nullptr;
 PlayerMoveRunCommandType s_playerMoveRunCommandOriginal = nullptr;
+DetermineSimulationTicksType s_determineSimulationTicksOriginal = nullptr;
 
 int GetConVarInt(void* conVar, int fallback)
 {
@@ -275,6 +315,59 @@ float GetEffectiveUserCmdFrameTime(uintptr_t player, uintptr_t userCmd)
 		frameTime);
 }
 
+float GetUserCmdProcessingTime(uintptr_t userCmd)
+{
+	// Budget command-declared time before retail's movement-only pause/clamp.
+	// Those paths can zero gpGlobals->frametime while still running PostThink and,
+	// for a nonzero command delta, advancing the player's fractional command clock.
+	const float commandFrameTime = *reinterpret_cast<float*>(userCmd + kUserCmdFrameTimeOffset);
+	return ResolveUserCmdProcessingTime(commandFrameTime, pGlobalVarsServer->interval_per_tick);
+}
+
+bool UsesCommandFrameTimeBatching()
+{
+	const uintptr_t policy = *reinterpret_cast<uintptr_t*>(s_serverBase + kCommandTimePolicyRva);
+	if (!policy)
+		return false;
+	const uintptr_t vtable = *reinterpret_cast<uintptr_t*>(policy);
+	if (!vtable)
+		return false;
+	const auto usesCommandFrameTime = *reinterpret_cast<bool(__fastcall**)(uintptr_t)>(
+		vtable + kUsesCommandFrameTimeVtableOffset);
+	return usesCommandFrameTime && usesCommandFrameTime(policy);
+}
+
+unsigned int __fastcall DetermineSimulationTicks(uintptr_t player, uintptr_t commandContext)
+{
+	if (!commandContext || !pGlobalVarsServer || !UsesCommandFrameTimeBatching())
+		return s_determineSimulationTicksOriginal(player, commandContext);
+
+	const int commandCount = *reinterpret_cast<int*>(commandContext + kCommandContextCommandCountOffset);
+	const uintptr_t commands = *reinterpret_cast<uintptr_t*>(commandContext);
+	const float intervalPerTick = pGlobalVarsServer->interval_per_tick;
+	if (!commands || commandCount <= 0 || commandCount > kMaximumUserCmdsPerBatch
+		|| !std::isfinite(intervalPerTick) || intervalPerTick <= 0.0f)
+	{
+		return s_determineSimulationTicksOriginal(player, commandContext);
+	}
+
+	float simulationTime = 0.0f;
+
+	// Preserve each command's declared sub-tick time when deriving the batch tick-base advance.
+	for (int commandIndex = 0; commandIndex < commandCount; ++commandIndex)
+	{
+		const float commandFrameTime = *reinterpret_cast<float*>(
+			commands + static_cast<size_t>(commandIndex) * kUserCmdSize + kUserCmdFrameTimeOffset);
+		if (!std::isfinite(commandFrameTime) || commandFrameTime < 0.0f)
+			return s_determineSimulationTicksOriginal(player, commandContext);
+		simulationTime += commandFrameTime;
+		if (!std::isfinite(simulationTime))
+			return s_determineSimulationTicksOriginal(player, commandContext);
+	}
+
+	return SimulationTimeToTicks(simulationTime, intervalPerTick);
+}
+
 void __fastcall PlayerPhysicsSimulate(uintptr_t player)
 {
 	if (player && pGlobalVarsServer)
@@ -292,10 +385,12 @@ __int64 __fastcall PlayerMoveRunCommand(uintptr_t playerMove, uintptr_t player,
 	if (!player || !userCmd || !pGlobalVarsServer || IsFakeClient(player))
 		return s_playerMoveRunCommandOriginal(playerMove, player, userCmd, moveHelper);
 
-	const float requiredTime = GetEffectiveUserCmdFrameTime(player, userCmd);
+	const float requiredTime = GetUserCmdProcessingTime(userCmd);
 	UserCmdProcessingState& state = FindUserCmdState(player);
+	const float movementFrameTime = GetEffectiveUserCmdFrameTime(player, userCmd);
 	if (!std::isfinite(requiredTime) || requiredTime < 0.0f
-		|| !ConsumeUserCmdProcessingTime(state, GetMaxUserCmdProcessTicks(), requiredTime))
+		|| !ConsumeUserCmdProcessingTime(state, GetMaxUserCmdProcessTicks(), requiredTime)
+		|| !ShouldProcessUserCmdLifecycle(requiredTime, movementFrameTime))
 	{
 		RecordDroppedUserCmd(state, player, requiredTime);
 		return 0;
@@ -333,6 +428,7 @@ void RegisterServerUserCmdConVars()
 			FCVAR_GAMEDLL | FCVAR_RELEASE,
 			"Minimum seconds between sustained usercmd budget warnings (-1 = disabled).");
 	}
+
 }
 
 void InstallServerUserCmdHooks(uintptr_t serverBase)
@@ -349,13 +445,20 @@ void InstallServerUserCmdHooks(uintptr_t serverBase)
 		0x48, 0x8B, 0xC4, 0x48, 0x89, 0x58, 0x08, 0x48,
 		0x89, 0x70, 0x10, 0x48, 0x89, 0x78, 0x18, 0x55
 	};
+	static constexpr unsigned char determineSimulationTicksPrologue[] = {
+		0x48, 0x89, 0x5C, 0x24, 0x08, 0x57, 0x48, 0x83,
+		0xEC, 0x20, 0x48, 0x8B, 0xD9, 0x48, 0x8B, 0xFA
+	};
 
 	const uintptr_t physicsSimulate = serverBase + kPlayerPhysicsSimulateRva;
 	const uintptr_t runCommand = serverBase + kPlayerMoveRunCommandRva;
+	const uintptr_t determineSimulationTicks = serverBase + kDetermineSimulationTicksRva;
 	if (!MatchesBytes(physicsSimulate, physicsSimulatePrologue, sizeof(physicsSimulatePrologue))
-		|| !MatchesBytes(runCommand, runCommandPrologue, sizeof(runCommandPrologue)))
+		|| !MatchesBytes(runCommand, runCommandPrologue, sizeof(runCommandPrologue))
+		|| !MatchesBytes(determineSimulationTicks, determineSimulationTicksPrologue,
+			sizeof(determineSimulationTicksPrologue)))
 	{
-		Warning("R1Delta: server usercmd budget hooks skipped due to server.dll version mismatch\n");
+		Warning("R1Delta: server usercmd timing hooks skipped due to server.dll version mismatch\n");
 		return;
 	}
 
@@ -363,19 +466,48 @@ void InstallServerUserCmdHooks(uintptr_t serverBase)
 		&PlayerPhysicsSimulate, reinterpret_cast<LPVOID*>(&s_playerPhysicsSimulateOriginal));
 	const MH_STATUS runCommandStatus = MH_CreateHook(reinterpret_cast<LPVOID>(runCommand),
 		&PlayerMoveRunCommand, reinterpret_cast<LPVOID*>(&s_playerMoveRunCommandOriginal));
-	if (physicsStatus != MH_OK || runCommandStatus != MH_OK)
+	const MH_STATUS determineStatus = MH_CreateHook(reinterpret_cast<LPVOID>(determineSimulationTicks),
+		&DetermineSimulationTicks, reinterpret_cast<LPVOID*>(&s_determineSimulationTicksOriginal));
+	if (physicsStatus != MH_OK || runCommandStatus != MH_OK || determineStatus != MH_OK)
 	{
 		if (physicsStatus == MH_OK)
 			MH_RemoveHook(reinterpret_cast<LPVOID>(physicsSimulate));
 		if (runCommandStatus == MH_OK)
 			MH_RemoveHook(reinterpret_cast<LPVOID>(runCommand));
+		if (determineStatus == MH_OK)
+			MH_RemoveHook(reinterpret_cast<LPVOID>(determineSimulationTicks));
 		s_playerPhysicsSimulateOriginal = nullptr;
 		s_playerMoveRunCommandOriginal = nullptr;
-		Warning("R1Delta: failed to install server usercmd budget hooks (physics=%d runcommand=%d)\n",
-			physicsStatus, runCommandStatus);
+		s_determineSimulationTicksOriginal = nullptr;
+		Warning("R1Delta: failed to install server usercmd hooks "
+			"(physics=%d runcommand=%d determine=%d)\n",
+			physicsStatus, runCommandStatus, determineStatus);
 		return;
 	}
 
 	s_serverBase = serverBase;
+	const MH_STATUS physicsEnableStatus = MH_EnableHook(reinterpret_cast<LPVOID>(physicsSimulate));
+	const MH_STATUS runCommandEnableStatus = MH_EnableHook(reinterpret_cast<LPVOID>(runCommand));
+	const MH_STATUS determineEnableStatus = MH_EnableHook(reinterpret_cast<LPVOID>(determineSimulationTicks));
+	if ((physicsEnableStatus != MH_OK && physicsEnableStatus != MH_ERROR_ENABLED)
+		|| (runCommandEnableStatus != MH_OK && runCommandEnableStatus != MH_ERROR_ENABLED)
+		|| (determineEnableStatus != MH_OK && determineEnableStatus != MH_ERROR_ENABLED))
+	{
+		MH_DisableHook(reinterpret_cast<LPVOID>(physicsSimulate));
+		MH_DisableHook(reinterpret_cast<LPVOID>(runCommand));
+		MH_DisableHook(reinterpret_cast<LPVOID>(determineSimulationTicks));
+		MH_RemoveHook(reinterpret_cast<LPVOID>(physicsSimulate));
+		MH_RemoveHook(reinterpret_cast<LPVOID>(runCommand));
+		MH_RemoveHook(reinterpret_cast<LPVOID>(determineSimulationTicks));
+		s_playerPhysicsSimulateOriginal = nullptr;
+		s_playerMoveRunCommandOriginal = nullptr;
+		s_determineSimulationTicksOriginal = nullptr;
+		s_serverBase = 0;
+		Warning("R1Delta: failed to enable server usercmd hooks "
+			"(physics=%d runcommand=%d determine=%d)\n",
+			physicsEnableStatus, runCommandEnableStatus, determineEnableStatus);
+		return;
+	}
+
 	installed = true;
 }

@@ -2,6 +2,8 @@
 #include "hudwarp_convars.h"
 #include "hudwarp_hooks.h"
 #include "load.h"
+#include "antilag.h"
+#include "reflex.h"
 
 // ID3DUserDefinedAnnotation
 #include <d3d11_1.h>
@@ -95,12 +97,16 @@ char __fastcall sub_63D0(HWND a1, unsigned int a2, __int64 a3)
 {
 	// Initialization of DirectX swapchain and related device/context setup
 	auto ret = sub_63D0_org(a1, a2, a3);
+	if (!ret)
+		return ret;
 
 	// Capture render thread ID for thread safety
 	gRenderThreadId = GetCurrentThreadId();
 
-	// Init GPU Hudwarp
+	// Init GPU Hudwarp and the independent Reflex device state.
 	SetupHudwarp();
+	ReflexOnDeviceReady(pDevice);
+	AntiLagOnDeviceReady(pDevice);
 
 	return ret;
 }

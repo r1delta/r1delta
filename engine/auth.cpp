@@ -181,6 +181,8 @@ GetUserIDString_t GetUserIDStringOriginal = nullptr;
 
 typedef USERID_s* (*GetUserID_t)(__int64 base_client, USERID_s* id);
 GetUserID_t GetUserIDOriginal = nullptr;
+R1OGetNetworkIDString_t R1OGetNetworkIDStringOriginal = nullptr;
+
 extern bool g_inside_WriteDataRequest;
 
 // Hooked client connection function.
@@ -475,9 +477,38 @@ const char* GetUserIDStringHook(USERID_s* id) {
     sprintf(buffer, "%lld", id->snowflake);
     return buffer;
 }
+const char* __fastcall R1OGetNetworkIDStringHook(__int64 base_client)
+{
+    const char* original = R1OGetNetworkIDStringOriginal
+        ? R1OGetNetworkIDStringOriginal(base_client)
+        : "UNKNOWN";
+    if (!base_client || (original && _stricmp(original, "UNKNOWN") != 0))
+        return original;
+
+    // R1O stores the parsed C2S_CONNECT platform_user_id on CGameClient.
+    // Its retail USERID formatter only recognizes HLTV/replay IDs, so human
+    // clients otherwise surface as UNKNOWN.
+    // The virtual CBaseClient subobject begins eight bytes into the owner used
+    // by ProcessClientInfo, whose platform ID field is at owner+0x2B8B8.
+    constexpr uintptr_t kR1OPlatformUserIdOffset = 0x2B8B0;
+    const uint64_t platformUserId =
+        *reinterpret_cast<const uint64_t*>(base_client + kR1OPlatformUserIdOffset);
+    if (platformUserId == 0)
+        return original;
+
+    thread_local char platformUserIdString[32];
+    _snprintf_s(
+        platformUserIdString,
+        sizeof(platformUserIdString),
+        _TRUNCATE,
+        "%llu",
+        static_cast<unsigned long long>(platformUserId));
+    return platformUserIdString;
+}
+
 
 // CBaseClientState::SendConnectPacket hook
-// Generates a random platform_user_id if none is set
+// Ensures platform_user_id is a valid string before connect serialization.
 typedef __int64(__fastcall* CBaseClientState_SendConnectPacket_t)(__int64 a1, __int64 a2, unsigned int a3);
 CBaseClientState_SendConnectPacket_t CBaseClientState_SendConnectPacket_Original = nullptr;
 
@@ -494,32 +525,49 @@ static bool IsNumericCString(const char* value)
     return true;
 }
 
-static void EnsurePlatformUserIdString(ConVarR1* id)
+bool UsesProcessUniquePlatformUserId()
+{
+    return HasEngineCommandLineFlag("-multiple")
+        || HasEngineCommandLineFlag("-allowmultiple");
+}
+
+void EnsurePlatformUserIdString(ConVarR1* id)
 {
     if (!id)
         return;
 
-    const bool hasUsableString = IsNumericCString(id->m_Value.m_pszString) && id->m_Value.m_StringLength >= 10;
-    if (hasUsableString)
+    const char* current = id->m_Value.m_pszString;
+    const size_t currentLength = current ? strlen(current) : 0;
+    const bool numericString = currentLength >= 10 && IsNumericCString(current);
+
+    const bool processUnique = UsesProcessUniquePlatformUserId();
+    if (!processUnique && numericString)
         return;
 
-    unsigned long long generated = 100000000000000000ULL;
-    generated += (static_cast<unsigned long long>(GetCurrentProcessId()) << 32) ^ GetTickCount64();
+    unsigned long long generated = 0;
+    if (processUnique) {
+        static const unsigned long long processUserId = GenerateSyntheticPlatformUserId();
+        generated = processUserId;
+    }
+    else {
+        generated = GenerateSyntheticPlatformUserId();
+    }
+
     char value[32];
-    sprintf_s(value, "%llu", generated);
-
-    if (SetConvarStringOriginal)
+    _snprintf_s(value, sizeof(value), _TRUNCATE, "%llu", generated);
+    if (!current || strcmp(current, value) != 0)
         SetConvarStringOriginal(id, value);
-    else
-        id->m_Value.m_pszString = DuplicateDelegatedString(value);
-
     id->m_Value.m_nValue = static_cast<int>(generated & 0x7FFFFFFF);
 
     static int s_platformUserIdLogBudget = 8;
     if (s_platformUserIdLogBudget > 0) {
         --s_platformUserIdLogBudget;
         char msg[256];
-        sprintf_s(msg, "R1Delta: forced platform_user_id string to %s before connect/userinfo serialization\n", value);
+        sprintf_s(
+            msg,
+            "R1Delta: selected %s platform_user_id %s before connect/userinfo serialization\n",
+            processUnique ? "per-process" : "fallback",
+            value);
         OutputDebugStringA(msg);
     }
 }

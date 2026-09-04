@@ -32,6 +32,7 @@ extern NET_SetConVar__ReadFromBufferType NET_SetConVar__ReadFromBufferOriginal;
 
 bool __fastcall NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer);
 bool __fastcall NET_SetConVar__WriteToBuffer(NET_SetConVar* thisptr, bf_write& buffer);
+unsigned long long GenerateSyntheticPlatformUserId();
 bool SafePrefixConVarName(char* name, size_t nameBufferSize, const char* prefix);
 bool IsPackedPDataWireName(const char* name);
 bool DecodePackedPDataWire(const std::string& encoded, std::vector<NetMessageCvar_t>& output);

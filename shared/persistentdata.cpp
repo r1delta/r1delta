@@ -26,6 +26,24 @@ class PDef;
 #include <cstdint>
 #include <charconv>
 
+namespace {
+constexpr unsigned long long kSyntheticPlatformUserIdBase = 9000000000000000000ULL;
+constexpr unsigned long long kSyntheticPlatformUserIdSpan = 10000000000000000ULL;
+static_assert(
+	kSyntheticPlatformUserIdBase + kSyntheticPlatformUserIdSpan - 1
+		<= 9223372036854775807ULL);
+}
+
+unsigned long long GenerateSyntheticPlatformUserId()
+{
+	const unsigned long long processEntropy =
+		(static_cast<unsigned long long>(GetCurrentProcessId()) << 32)
+		^ GetTickCount64();
+	return kSyntheticPlatformUserIdBase
+		+ processEntropy % kSyntheticPlatformUserIdSpan;
+}
+
+
 static std::unordered_map<int, PersistentDataState::PlayerState> s_R1OPersistentUserDataByPlayer;
 using NonR1OPersistentValueMap = std::unordered_map<
 	std::string, std::string, HashStrings, std::equal_to<>>;
@@ -1279,9 +1297,7 @@ bool NET_SetConVar__WriteToBuffer(NET_SetConVar* thisptr, bf_write& buffer) {
 				strncpy_s(fallback, sizeof(fallback), platformUserId->m_Value.m_pszString, _TRUNCATE);
 			}
 			else {
-				const unsigned long long generated =
-					100000000000000000ULL
-					+ ((static_cast<unsigned long long>(GetCurrentProcessId()) << 32) ^ GetTickCount64());
+				const unsigned long long generated = GenerateSyntheticPlatformUserId();
 				_snprintf_s(fallback, sizeof(fallback), _TRUNCATE, "%llu", generated);
 				if (platformUserId) {
 					if (SetConvarStringOriginal)

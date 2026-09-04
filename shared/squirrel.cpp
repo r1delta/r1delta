@@ -987,19 +987,18 @@ SQInteger Script_ServerGetPlayerUserID(HSQUIRRELVM v) {
 }
 
 SQInteger Script_ServerGetPlayerPlatformUserID(HSQUIRRELVM v) {
-	if (IsR1ODedicatedServer()) {
-		sq_pushstring(v, "0", -1);
-		return 1;
-	}
-
 	void* player = sq_getentity(v, 2);
 	if (!player)
 	{
 		return sq_throwerror(v, "player is null");
 	}
-	auto serverVm = GetServerVMPtr();
-	auto uid = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(player) + 0x1448);
-	sq_pushstring(v, std::to_string(uid).c_str(), -1);
+
+	const uint64_t uid = *reinterpret_cast<const uint64_t*>(
+		reinterpret_cast<uintptr_t>(player) + 0x1448);
+	char uidString[32];
+	_snprintf_s(uidString, sizeof(uidString), _TRUNCATE, "%llu",
+		static_cast<unsigned long long>(uid));
+	sq_pushstring(v, uidString, -1);
 	return 1;
 }
 
