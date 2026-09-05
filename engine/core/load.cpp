@@ -8231,6 +8231,12 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 {
 	G_engine = (uintptr_t)notification_data->Loaded.DllBase;
 	auto engine_base = G_engine;
+	const std::wstring engineFullPath(
+		notification_data->Loaded.FullDllName->Buffer,
+		notification_data->Loaded.FullDllName->Length / sizeof(wchar_t));
+	InstallClientBrushMaterialCountGuard(
+		engine_base,
+		engineFullPath.c_str());
 	SetupReflexEngineHooks(engine_base);
 	if (!IsDedicatedServer())
 		InstallNoStaticPropsHook(engine_base);

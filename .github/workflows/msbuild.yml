@@ -191,6 +191,7 @@ jobs:
             persistentdata_codec_tests = 'tests/persistentdata_codec_tests.vcxproj'
             crash_report_minidump_tests = 'tests/crash_report_minidump_tests.vcxproj'
             client_studio_header_guard_tests = 'tests/client_studio_header_guard_tests.vcxproj'
+            client_brush_material_guard_tests = 'tests/client_brush_material_guard_tests.vcxproj'
             cbuf_initialization_guard_tests = 'tests/cbuf_initialization_guard_tests.vcxproj'
             materialsystem_dx11_vtf_scratch_tests = 'tests/materialsystem_dx11_vtf_scratch_tests.vcxproj'
             materialsystem_dx11_txaa_lifetime_tests = 'tests/materialsystem_dx11_txaa_lifetime_tests.vcxproj'
@@ -229,6 +230,7 @@ jobs:
             'persistentdata_codec_tests',
             'crash_report_minidump_tests',
             'client_studio_header_guard_tests',
+            'client_brush_material_guard_tests',
             'cbuf_initialization_guard_tests',
             'materialsystem_dx11_vtf_scratch_tests',
             'materialsystem_dx11_txaa_lifetime_tests',

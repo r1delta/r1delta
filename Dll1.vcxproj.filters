@@ -113,6 +113,9 @@
     <ClInclude Include="engine\core\client_studio_header_guard.h">
       <Filter>engine\core</Filter>
     </ClInclude>
+    <ClInclude Include="engine\core\client_brush_material_guard.h">
+      <Filter>engine\core</Filter>
+    </ClInclude>
     <ClInclude Include="engine\core\framework.h">
       <Filter>engine\core</Filter>
     </ClInclude>

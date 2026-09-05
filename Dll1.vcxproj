@@ -244,6 +244,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="eos\fake_ip_layer.h" />
     <ClInclude Include="engine\core\factory.h" />
     <ClInclude Include="engine\core\client_studio_header_guard.h" />
+    <ClInclude Include="engine\core\client_brush_material_guard.h" />
     <ClInclude Include="engine\filesystem\addonlist_state.h" />
     <ClInclude Include="engine\filesystem\filecache.h" />
     <ClInclude Include="engine\filesystem\filesystem.h" />

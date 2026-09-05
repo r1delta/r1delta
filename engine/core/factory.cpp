@@ -62,6 +62,7 @@
 #include "defs.h"
 #include "factory.h"
 #include "client_studio_header_guard.h"
+#include "client_brush_material_guard.h"
 #include "TableDestroyer.h"
 #include <DbgHelp.h>
 #include <string.h>
@@ -508,6 +509,10 @@ static r1delta::client_studio_header::WrapperFunction s_ClientStudioHeaderWrappe
 static r1delta::client_studio_header::LazyInitFunction s_ClientStudioHeaderLazyInit;
 static r1delta::client_studio_header::LookupFunction s_ClientStudioHeaderLookup;
 static bool s_ClientStudioHeaderLookupGuardInstalled;
+static r1delta::client_brush_material::MaterialCountFunction
+	s_ClientBrushMaterialCountOriginal;
+static bool s_ClientBrushMaterialCountGuardInstalled;
+static std::atomic<int> s_ClientBrushMaterialCountGuardLogBudget{8};
 
 constexpr uintptr_t kR1OClientArrayRva = 0x2659738;
 constexpr size_t kR1OClientStride = 22387ull * sizeof(uintptr_t);
@@ -1540,6 +1545,82 @@ static int __fastcall ClientStudioHeaderLookupGuard(void* entity, const char* na
 		name,
 		s_ClientStudioHeaderLazyInit,
 		s_ClientStudioHeaderLookup);
+}
+
+static int __fastcall ClientBrushMaterialCountGuard(const void* model)
+{
+	if (!model || !s_ClientBrushMaterialCountOriginal)
+		return 0;
+
+	bool unavailable = false;
+	bool readFault = false;
+	std::int32_t modelType = 0;
+	std::int32_t firstSurface = 0;
+	std::int32_t surfaceCount = 0;
+	const void* shared = nullptr;
+	const void* surfaceTable = nullptr;
+	__try {
+		unavailable =
+			r1delta::client_brush_material::ShouldReturnNoMaterials(model);
+		if (unavailable) {
+			modelType = r1delta::client_brush_material::ReadField<std::int32_t>(
+				model,
+				r1delta::client_brush_material::kModelTypeOffset);
+			firstSurface =
+				r1delta::client_brush_material::ReadField<std::int32_t>(
+					model,
+					r1delta::client_brush_material::kModelFirstSurfaceOffset);
+			surfaceCount =
+				r1delta::client_brush_material::ReadField<std::int32_t>(
+					model,
+					r1delta::client_brush_material::kModelSurfaceCountOffset);
+			shared = r1delta::client_brush_material::ReadField<const void*>(
+				model,
+				r1delta::client_brush_material::kModelSharedDataOffset);
+			if (shared) {
+				surfaceTable =
+					r1delta::client_brush_material::ReadField<const void*>(
+						shared,
+						r1delta::client_brush_material::
+							kSharedSurfaceTableOffset);
+			}
+		}
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) {
+		readFault = true;
+		unavailable = true;
+	}
+
+	if (!unavailable)
+		return s_ClientBrushMaterialCountOriginal(model);
+
+	int budget = s_ClientBrushMaterialCountGuardLogBudget.load(
+		std::memory_order_relaxed);
+	while (budget > 0
+		&& !s_ClientBrushMaterialCountGuardLogBudget.compare_exchange_weak(
+			budget,
+			budget - 1,
+			std::memory_order_relaxed)) {
+	}
+	if (budget > 0) {
+		char buffer[384];
+		_snprintf_s(
+			buffer,
+			sizeof(buffer),
+			_TRUNCATE,
+			"R1Delta: unavailable client brush material lookup: "
+			"model=%p type=%d shared=%p surfaces=%p first=%d count=%d "
+			"readFault=%d\n",
+			model,
+			modelType,
+			shared,
+			surfaceTable,
+			firstSurface,
+			surfaceCount,
+			readFault ? 1 : 0);
+		OutputDebugStringA(buffer);
+	}
+	return 0;
 }
 
 static bool IsRvaInExecutableTextSection(
@@ -2710,6 +2791,157 @@ void InstallClientStudioHeaderLookupGuard(
 		static_cast<int>(enableStatus),
 		reinterpret_cast<void*>(s_ClientStudioHeaderWrapperOriginal),
 		s_ClientStudioHeaderLookupGuardInstalled ? 1 : 0);
+	OutputDebugStringA(buffer);
+}
+
+static bool HasExpectedStockEngineImage(
+	uintptr_t engineBase,
+	DWORD* observedTimestamp,
+	DWORD* observedImageSize)
+{
+	if (observedTimestamp)
+		*observedTimestamp = 0;
+	if (observedImageSize)
+		*observedImageSize = 0;
+	if (!engineBase)
+		return false;
+
+	MEMORY_BASIC_INFORMATION memory = {};
+	if (VirtualQuery(
+			reinterpret_cast<void*>(engineBase),
+			&memory,
+			sizeof(memory)) != sizeof(memory)
+		|| memory.State != MEM_COMMIT
+		|| memory.Type != MEM_IMAGE
+		|| memory.BaseAddress != reinterpret_cast<void*>(engineBase)
+		|| memory.AllocationBase != reinterpret_cast<void*>(engineBase))
+		return false;
+
+	const auto* const dosHeader =
+		reinterpret_cast<const IMAGE_DOS_HEADER*>(engineBase);
+	if (!MaterialSystemDx11IsCommittedReadableRange(
+			dosHeader,
+			sizeof(*dosHeader))
+		|| dosHeader->e_magic != IMAGE_DOS_SIGNATURE
+		|| dosHeader->e_lfanew <= 0
+		|| dosHeader->e_lfanew > 0x100000)
+		return false;
+
+	const auto* const ntHeaders =
+		reinterpret_cast<const IMAGE_NT_HEADERS64*>(
+			engineBase + static_cast<uintptr_t>(dosHeader->e_lfanew));
+	if (!MaterialSystemDx11IsCommittedReadableRange(
+			ntHeaders,
+			sizeof(*ntHeaders)))
+		return false;
+
+	if (observedTimestamp)
+		*observedTimestamp = ntHeaders->FileHeader.TimeDateStamp;
+	if (observedImageSize)
+		*observedImageSize = ntHeaders->OptionalHeader.SizeOfImage;
+
+	return ntHeaders->Signature == IMAGE_NT_SIGNATURE
+		&& ntHeaders->FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64
+		&& ntHeaders->FileHeader.TimeDateStamp
+			== r1delta::client_brush_material::kExpectedTimeDateStamp
+		&& ntHeaders->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC
+		&& ntHeaders->OptionalHeader.SizeOfImage
+			== r1delta::client_brush_material::kExpectedImageSize
+		&& IsRvaInExecutableTextSection(
+			engineBase,
+			ntHeaders,
+			r1delta::client_brush_material::kMaterialCountRva,
+			sizeof(
+				r1delta::client_brush_material::
+					kExpectedMaterialCountPrologue));
+}
+
+void InstallClientBrushMaterialCountGuard(
+	uintptr_t engineBase,
+	const wchar_t* modulePath)
+{
+	const bool isClient2015 =
+		GetR1DeltaEngineMode() == R1DeltaEngineMode::Client2015;
+	if (!isClient2015 || s_ClientBrushMaterialCountGuardInstalled)
+		return;
+
+	if (!r1delta::client_brush_material::ShouldInstall(
+			isClient2015,
+			modulePath)) {
+		OutputDebugStringA(
+			"R1Delta: client brush-material guard refused non-stock "
+			"engine module path\n");
+		return;
+	}
+
+	DWORD observedTimestamp = 0;
+	DWORD observedImageSize = 0;
+	if (!HasExpectedStockEngineImage(
+			engineBase,
+			&observedTimestamp,
+			&observedImageSize)) {
+		char buffer[256];
+		_snprintf_s(
+			buffer,
+			sizeof(buffer),
+			_TRUNCATE,
+			"R1Delta: client brush-material guard refused engine image "
+			"timestamp=0x%08lX size=0x%08lX\n",
+			static_cast<unsigned long>(observedTimestamp),
+			static_cast<unsigned long>(observedImageSize));
+		OutputDebugStringA(buffer);
+		return;
+	}
+
+	void* const target = reinterpret_cast<void*>(
+		engineBase + r1delta::client_brush_material::kMaterialCountRva);
+	if (!MaterialSystemDx11IsCommittedReadableRange(
+			target,
+			sizeof(
+				r1delta::client_brush_material::
+					kExpectedMaterialCountPrologue))
+		|| memcmp(
+			target,
+			r1delta::client_brush_material::kExpectedMaterialCountPrologue,
+			sizeof(
+				r1delta::client_brush_material::
+					kExpectedMaterialCountPrologue)) != 0) {
+		OutputDebugStringA(
+			"R1Delta: client brush-material guard refused byte mismatch "
+			"at engine RVA 0xB9A80\n");
+		return;
+	}
+
+	const MH_STATUS createStatus = MH_CreateHook(
+		target,
+		reinterpret_cast<void*>(&ClientBrushMaterialCountGuard),
+		reinterpret_cast<LPVOID*>(&s_ClientBrushMaterialCountOriginal));
+	const bool hasOriginal = s_ClientBrushMaterialCountOriginal != nullptr;
+	const bool canEnable = createStatus == MH_OK
+		|| (createStatus == MH_ERROR_ALREADY_CREATED && hasOriginal);
+	const MH_STATUS enableStatus = canEnable
+		? MH_EnableHook(target)
+		: createStatus;
+	s_ClientBrushMaterialCountGuardInstalled = hasOriginal
+		&& (enableStatus == MH_OK || enableStatus == MH_ERROR_ENABLED);
+
+	if (!s_ClientBrushMaterialCountGuardInstalled) {
+		if (createStatus == MH_OK)
+			MH_RemoveHook(target);
+		s_ClientBrushMaterialCountOriginal = nullptr;
+	}
+
+	char buffer[320];
+	_snprintf_s(
+		buffer,
+		sizeof(buffer),
+		_TRUNCATE,
+		"R1Delta: client brush-material guard create=%d enable=%d "
+		"targetRva=0xB9A80 original=%p installed=%d\n",
+		static_cast<int>(createStatus),
+		static_cast<int>(enableStatus),
+		reinterpret_cast<void*>(s_ClientBrushMaterialCountOriginal),
+		s_ClientBrushMaterialCountGuardInstalled ? 1 : 0);
 	OutputDebugStringA(buffer);
 }
 

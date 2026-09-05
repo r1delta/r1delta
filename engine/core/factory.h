@@ -95,6 +95,7 @@ void InstallMaterialSystemDx11RenderThreadGuards(uintptr_t materialSystemBase);
 void InstallMaterialSystemDx11InputLayoutCacheGuard(
 	uintptr_t materialSystemBase);
 void InstallClientStudioHeaderLookupGuard(uintptr_t clientBase, const wchar_t* modulePath);
+void InstallClientBrushMaterialCountGuard(uintptr_t engineBase, const wchar_t* modulePath);
 char __fastcall MatchRecvPropsToSendProps_R(__int64 a1, __int64 a2, __int64 pSendTable, __int64 a4);
 typedef char(*sub_1801C79A0Type)(__int64 a1, __int64 a2);
 extern sub_1801C79A0Type sub_1801C79A0Original;
