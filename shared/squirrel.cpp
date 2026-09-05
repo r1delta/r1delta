@@ -1700,7 +1700,7 @@ void RunAutorunScripts(R1SquirrelVM* r1sqvm, const char* prefix) {
 
 uintptr_t(__fastcall *oOnCreateClientScriptVM)(uintptr_t);
 uintptr_t OnCreateClientScriptVM(uintptr_t thisptr) {
-	r1delta::ffa_targeting::SetFfaBased(false);
+	r1delta::ffa_targeting::SetClientFfaBased(false);
 	auto ret = oOnCreateClientScriptVM(thisptr);
 	RunAutorunScripts(GetClientVMPtr(), "cl_*");
 	return ret;
@@ -1715,17 +1715,25 @@ bool OnCreateUIScriptVM() {
 
 uintptr_t(__fastcall *oOnCreateServerScriptVM)();
 uintptr_t OnCreateServerScriptVM() {
-	r1delta::ffa_targeting::SetFfaBased(false);
+	r1delta::ffa_targeting::SetServerFfaBased(false);
 	auto ret = oOnCreateServerScriptVM();
 	RunAutorunScripts(GetServerVMPtr(), "sv_*");
 	return ret;
 }
 
-SQInteger Script_SetFfaBased(HSQUIRRELVM v) {
+SQInteger Script_SetClientFfaBased(HSQUIRRELVM v) {
 	SQBool enabled = SQFalse;
 	if (SQ_FAILED(sq_getbool(nullptr, v, 2, &enabled)))
 		return sq_throwerror(v, "FFA state must be a boolean");
-	r1delta::ffa_targeting::SetFfaBased(enabled != SQFalse);
+	r1delta::ffa_targeting::SetClientFfaBased(enabled != SQFalse);
+	return 0;
+}
+
+SQInteger Script_SetServerFfaBased(HSQUIRRELVM v) {
+	SQBool enabled = SQFalse;
+	if (SQ_FAILED(sq_getbool(nullptr, v, 2, &enabled)))
+		return sq_throwerror(v, "FFA state must be a boolean");
+	r1delta::ffa_targeting::SetServerFfaBased(enabled != SQFalse);
 	return 0;
 }
 
@@ -2448,7 +2456,7 @@ bool GetSQVMFuncs() {
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_CLIENT,
 		"R1Delta_SetFFABased",
-		(SQFUNCTION)Script_SetFfaBased,
+		(SQFUNCTION)Script_SetClientFfaBased,
 		".b",
 		2,
 		"void",
@@ -2458,7 +2466,7 @@ bool GetSQVMFuncs() {
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_SERVER,
 		"R1Delta_SetFFABased",
-		(SQFUNCTION)Script_SetFfaBased,
+		(SQFUNCTION)Script_SetServerFfaBased,
 		".b",
 		2,
 		"void",

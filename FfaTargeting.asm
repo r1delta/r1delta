@@ -12,7 +12,8 @@ extern R1DeltaResolveFfaClientRelation : proc
 extern R1DeltaResolveLiveFfaClientRelation : proc
 extern R1DeltaResolveLiveFfaServerRelation : proc
 extern R1DeltaIsValidFfaObserverTarget : proc
-extern g_R1DeltaFfaBased : dword
+extern g_R1DeltaClientFfaBased : dword
+extern g_R1DeltaServerFfaBased : dword
 extern g_R1DeltaClientSmartAmmoAccept : qword
 extern g_R1DeltaClientSmartAmmoReject : qword
 extern g_R1DeltaClientMinimapContinue : qword
@@ -63,7 +64,7 @@ endm
 .code
 
 R1DeltaClientSmartAmmoFfaBridge proc
-	cmp dword ptr [g_R1DeltaFfaBased], 0
+	cmp dword ptr [g_R1DeltaClientFfaBased], 0
 	je client_smart_ammo_native
 
 	SAVE_VOLATILES
@@ -93,7 +94,7 @@ client_smart_ammo_accept:
 R1DeltaClientSmartAmmoFfaBridge endp
 
 R1DeltaClientMinimapFfaBridge proc
-	cmp dword ptr [g_R1DeltaFfaBased], 0
+	cmp dword ptr [g_R1DeltaClientFfaBased], 0
 	je client_minimap_continue
 
 	SAVE_VOLATILES
@@ -124,7 +125,7 @@ R1DeltaClientMinimapFfaBridge endp
 
 
 R1DeltaClientMinimapVisibilityFfaBridge proc
-	cmp dword ptr [g_R1DeltaFfaBased], 0
+	cmp dword ptr [g_R1DeltaClientFfaBased], 0
 	je client_minimap_visibility_native
 	lea ecx, [rax+0Eh]
 	jmp client_minimap_visibility_shift
@@ -137,7 +138,7 @@ client_minimap_visibility_shift:
 R1DeltaClientMinimapVisibilityFfaBridge endp
 
 R1DeltaClientMinimapDefaultVisibilityFfaBridge proc
-	cmp dword ptr [g_R1DeltaFfaBased], 0
+	cmp dword ptr [g_R1DeltaClientFfaBased], 0
 	je client_minimap_default_visibility_native
 
 	SAVE_VOLATILES
@@ -165,7 +166,7 @@ client_minimap_default_visibility_hostile_jump:
 R1DeltaClientMinimapDefaultVisibilityFfaBridge endp
 
 R1DeltaServerSmartAmmoFfaBridge proc
-	cmp dword ptr [g_R1DeltaFfaBased], 0
+	cmp dword ptr [g_R1DeltaServerFfaBased], 0
 	je server_smart_ammo_native
 
 	SAVE_VOLATILES
@@ -199,7 +200,7 @@ R1DeltaServerObserverInitialFfaBridge proc
 	mov eax, dword ptr [rbx+47Ch]
 	cmp dword ptr [r12+47Ch], eax
 	je server_observer_initial_accept
-	cmp dword ptr [g_R1DeltaFfaBased], 0
+	cmp dword ptr [g_R1DeltaServerFfaBased], 0
 	je server_observer_initial_reject
 
 	SAVE_VOLATILES
@@ -221,7 +222,7 @@ R1DeltaServerObserverCycleFfaBridge proc
 	mov eax, dword ptr [rbx+47Ch]
 	cmp dword ptr [rsi+47Ch], eax
 	je server_observer_cycle_accept
-	cmp dword ptr [g_R1DeltaFfaBased], 0
+	cmp dword ptr [g_R1DeltaServerFfaBased], 0
 	je server_observer_cycle_reject
 
 	SAVE_VOLATILES

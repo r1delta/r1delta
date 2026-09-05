@@ -423,7 +423,7 @@ __int64 __fastcall CHudChat__FormatAndDisplayMessage_Hooked(
             myTeam = (*(int(__fastcall **)(void *))(*(_QWORD *)me + 768LL))(me);
             theirTeam = (*(int(__fastcall **)(void *))(*(_QWORD *)them + 768LL))(them);
             isDistinctFfaPlayer =
-                me != them && r1delta::ffa_targeting::IsFfaBased();
+                me != them && r1delta::ffa_targeting::IsClientFfaBased();
         }
     }
     const char *nameToUse = isAnonymous ? "" : (nameRetrievedSuccessfully ? playerInfo.szName : "?UNKNOWN?");

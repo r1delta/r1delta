@@ -22,7 +22,8 @@ void R1DeltaServerSmartAmmoFfaBridge();
 void R1DeltaServerObserverInitialFfaBridge();
 void R1DeltaServerObserverCycleFfaBridge();
 
-volatile LONG g_R1DeltaFfaBased = FALSE;
+volatile LONG g_R1DeltaClientFfaBased = FALSE;
+volatile LONG g_R1DeltaServerFfaBased = FALSE;
 std::uintptr_t g_R1DeltaClientSmartAmmoAccept = 0;
 std::uintptr_t g_R1DeltaClientSmartAmmoReject = 0;
 std::uintptr_t g_R1DeltaClientMinimapContinue = 0;
@@ -648,7 +649,7 @@ extern "C" unsigned char __fastcall R1DeltaResolveFfaClientRelation(
 	void* first,
 	void* second)
 {
-	const bool ffaBased = r1delta::ffa_targeting::IsFfaBased();
+	const bool ffaBased = r1delta::ffa_targeting::IsClientFfaBased();
 	const bool hooksReady = InterlockedCompareExchange(
 		&g_R1DeltaClientHooksReady,
 		FALSE,
@@ -674,7 +675,7 @@ extern "C" unsigned char __fastcall R1DeltaResolveLiveFfaClientRelation(
 	void* first,
 	void* second)
 {
-	const bool ffaBased = r1delta::ffa_targeting::IsFfaBased();
+	const bool ffaBased = r1delta::ffa_targeting::IsClientFfaBased();
 	const bool hooksReady = InterlockedCompareExchange(
 		&g_R1DeltaClientHooksReady,
 		FALSE,
@@ -706,7 +707,7 @@ extern "C" unsigned char __fastcall R1DeltaResolveLiveFfaServerRelation(
 	void* first,
 	void* second)
 {
-	const bool ffaBased = r1delta::ffa_targeting::IsFfaBased();
+	const bool ffaBased = r1delta::ffa_targeting::IsServerFfaBased();
 	const bool hooksReady = InterlockedCompareExchange(
 		&g_R1DeltaServerHooksReady,
 		FALSE,
@@ -738,7 +739,7 @@ extern "C" unsigned char __fastcall R1DeltaIsValidFfaObserverTarget(
 	void* observer,
 	void* candidate)
 {
-	const bool ffaBased = r1delta::ffa_targeting::IsFfaBased();
+	const bool ffaBased = r1delta::ffa_targeting::IsServerFfaBased();
 	const bool hooksReady = InterlockedCompareExchange(
 		&g_R1DeltaServerHooksReady,
 		FALSE,
@@ -774,14 +775,26 @@ extern "C" unsigned char __fastcall R1DeltaIsValidFfaObserverTarget(
 
 namespace r1delta::ffa_targeting
 {
-void SetFfaBased(bool enabled) noexcept
+void SetClientFfaBased(bool enabled) noexcept
 {
-	InterlockedExchange(&g_R1DeltaFfaBased, enabled ? TRUE : FALSE);
+	InterlockedExchange(&g_R1DeltaClientFfaBased, enabled ? TRUE : FALSE);
 }
 
-bool IsFfaBased() noexcept
+void SetServerFfaBased(bool enabled) noexcept
 {
-	return InterlockedCompareExchange(&g_R1DeltaFfaBased, FALSE, FALSE) != FALSE;
+	InterlockedExchange(&g_R1DeltaServerFfaBased, enabled ? TRUE : FALSE);
+}
+
+bool IsClientFfaBased() noexcept
+{
+	return InterlockedCompareExchange(
+		&g_R1DeltaClientFfaBased, FALSE, FALSE) != FALSE;
+}
+
+bool IsServerFfaBased() noexcept
+{
+	return InterlockedCompareExchange(
+		&g_R1DeltaServerFfaBased, FALSE, FALSE) != FALSE;
 }
 
 bool InstallClientHooks(std::uintptr_t clientBase)

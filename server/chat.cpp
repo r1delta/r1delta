@@ -122,7 +122,7 @@ void __fastcall CServerGameDLL_OnSayTextMsg(void* pThis, int clientIndex, char* 
     const bool isSenderDead = pSenderEntity && !pSenderEntity->IsAlive();
 
     if (r1delta::ffa_targeting::ShouldRouteTeamChatToSenderOnly(
-            r1delta::ffa_targeting::IsFfaBased(),
+            r1delta::ffa_targeting::IsServerFfaBased(),
             isTeamChat != 0)) {
         if (!pSenderEntity) {
             Warning("R1Delta: dropping FFA team chat from unresolved sender index %d\n", clientIndex);

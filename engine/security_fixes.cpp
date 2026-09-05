@@ -445,7 +445,7 @@ bool __fastcall CGameClient__ProcessVoiceData(void* thisptr, CLC_VoiceData* msg)
 		allTalk && allTalk->m_Value.m_nValue != 0;
 
 	int senderTeam = 0;
-	if (r1delta::ffa_targeting::IsFfaBased()
+	if (r1delta::ffa_targeting::IsServerFfaBased()
 		&& TryReadVoiceSenderTeam(thisptr_shifted, senderTeam)
 		&& r1delta::ffa_targeting::ShouldSuppressGameplayVoice(
 			true,

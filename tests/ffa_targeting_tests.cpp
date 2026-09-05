@@ -651,7 +651,8 @@ bool RunRuntimePredicateTests()
     SetServerObserverTargetState(secondServer, 0, true);
     SetServerObserverTargetState(serverUnownedNpc, 0, true);
 
-    r1delta::ffa_targeting::SetFfaBased(false);
+    r1delta::ffa_targeting::SetClientFfaBased(false);
+    r1delta::ffa_targeting::SetServerFfaBased(false);
     passed &= Check(R1DeltaResolveLiveFfaClientRelation(
         &firstClient, &secondClient) == kNativeRelation,
         "client smart-ammo relation is native outside FFA");
@@ -662,7 +663,15 @@ bool RunRuntimePredicateTests()
         &firstServer, &secondServer) == 0,
         "observer predicate is disabled outside FFA");
 
-    r1delta::ffa_targeting::SetFfaBased(true);
+    r1delta::ffa_targeting::SetServerFfaBased(true);
+    r1delta::ffa_targeting::SetClientFfaBased(false);
+    passed &= Check(R1DeltaResolveLiveFfaClientRelation(
+        &firstClient, &secondClient) == kNativeRelation,
+        "client VM reset leaves client smart ammo outside FFA");
+    passed &= Check(R1DeltaResolveLiveFfaServerRelation(
+        &firstServer, &secondServer) == kHostileRelation,
+        "client VM reset preserves server FFA smart ammo state");
+    r1delta::ffa_targeting::SetClientFfaBased(true);
     passed &= Check(R1DeltaResolveFfaClientRelation(
         &firstClient, &secondClient) == kHostileRelation,
         "client minimap resolves distinct direct player owners as hostile");
@@ -761,7 +770,8 @@ bool RunRuntimePredicateTests()
         &firstServer, &secondServer) == 0,
         "FFA observer rejects inactive targets");
 
-    r1delta::ffa_targeting::SetFfaBased(false);
+    r1delta::ffa_targeting::SetClientFfaBased(false);
+    r1delta::ffa_targeting::SetServerFfaBased(false);
     VirtualFree(clientImage, 0, MEM_RELEASE);
     VirtualFree(serverImage, 0, MEM_RELEASE);
     return passed;
