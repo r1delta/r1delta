@@ -1135,6 +1135,7 @@ static bool MaterialSystemDx11TryHoldShaderResource(
 	void* shaderResource,
 	void** heldShaderResource)
 {
+	using namespace r1delta::materialsystem_dx11;
 	if (!heldShaderResource)
 		return false;
 	*heldShaderResource = nullptr;
@@ -1150,7 +1151,10 @@ static bool MaterialSystemDx11TryHoldShaderResource(
 	__try {
 		view->AddRef();
 		viewHeld = true;
-		view->GetResource(&resource);
+		// GetResource dereferences the runtime's backing wrapper before it can
+		// report a torn-down view. Inspect the same field while the view is held.
+		if (ShaderResourceHasBackingObject(view))
+			view->GetResource(&resource);
 	}
 	__except (MaterialSystemDx11ShaderResourceExceptionFilter(
 			GetExceptionInformation())) {
@@ -1169,6 +1173,8 @@ static bool MaterialSystemDx11TryHoldShaderResource(
 	*heldShaderResource = view;
 	return true;
 }
+
+
 
 static void MaterialSystemDx11ReleaseHeldShaderResource(
 	void* heldShaderResource)

@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 
 namespace r1delta::materialsystem_dx11
@@ -19,6 +20,7 @@ inline constexpr std::uintptr_t kPendingShaderResourcesRva = 0x298730;
 inline constexpr std::uintptr_t kPendingShaderResourceCountRva = 0x2987F0;
 inline constexpr std::uintptr_t kPreviousShaderResourceCountRva = 0x2987F4;
 inline constexpr std::size_t kPendingShaderResourceCapacity = 24;
+inline constexpr std::size_t kShaderResourceBackingObjectOffset = 0xA0;
 
 inline constexpr std::uint8_t kExpectedShaderResourceFlushPrologue[] = {
 	0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x8B, 0x0D,
@@ -74,6 +76,21 @@ using ReleaseHeldShaderResourceFunction =
 		? count
 		: kPendingShaderResourceCapacity;
 }
+[[nodiscard]] inline bool ShaderResourceHasBackingObject(
+	const void* shaderResource) noexcept
+{
+	if (!shaderResource)
+		return false;
+
+	void* backingObject = nullptr;
+	std::memcpy(
+		&backingObject,
+		static_cast<const std::byte*>(shaderResource)
+			+ kShaderResourceBackingObjectOffset,
+		sizeof(backingObject));
+	return backingObject != nullptr;
+}
+
 
 [[nodiscard]] inline bool ReplacePendingShaderResourceHold(
 	void** shaderResources,

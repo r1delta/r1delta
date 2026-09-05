@@ -59,6 +59,9 @@ bool TestRetailHookConstants()
 			kPendingShaderResourceCapacity == 24,
 			"unexpected pending shader-resource capacity")
 		&& Check(
+			kShaderResourceBackingObjectOffset == 0xA0,
+			"unexpected shader-resource backing-object offset")
+		&& Check(
 			sizeof(kExpectedShaderResourceFlushPrologue) == 32,
 			"unexpected shader-resource flush prologue size")
 		&& Check(
@@ -179,6 +182,17 @@ bool TestConstantBufferExceptionFilter()
 }
 bool TestShaderResourceOwnership()
 {
+	struct FakeShaderResource {
+		std::byte prefix[kShaderResourceBackingObjectOffset];
+		void* backingObject{};
+	};
+	static_assert(
+		offsetof(FakeShaderResource, backingObject)
+			== kShaderResourceBackingObjectOffset);
+	FakeShaderResource liveShaderResource{};
+	liveShaderResource.backingObject = reinterpret_cast<void*>(1);
+	FakeShaderResource tornDownShaderResource{};
+
 	void* shaderResources[] = {
 		reinterpret_cast<void*>(1),
 		reinterpret_cast<void*>(2),
@@ -215,7 +229,16 @@ bool TestShaderResourceOwnership()
 		&TryHoldShaderResourceForTest,
 		&ReleaseShaderResourceForTest);
 
-	return Check(validAccepted, "valid shader resource was rejected")
+	return Check(
+			ShaderResourceHasBackingObject(&liveShaderResource),
+			"live shader-resource backing object was rejected")
+		&& Check(
+			!ShaderResourceHasBackingObject(&tornDownShaderResource),
+			"torn-down shader-resource backing object was accepted")
+		&& Check(
+			!ShaderResourceHasBackingObject(nullptr),
+			"null shader resource was accepted")
+		&& Check(validAccepted, "valid shader resource was rejected")
 		&& Check(!zombieAccepted, "zombie shader resource was accepted")
 		&& Check(nullAccepted, "null shader resource was rejected")
 		&& Check(
