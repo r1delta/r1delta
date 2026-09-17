@@ -9,6 +9,7 @@
 namespace r1delta::vpk_async_precache
 {
 constexpr std::uintptr_t kAsyncPrecacheWorkerRva = 0x74D50;
+constexpr std::uintptr_t kStartPrecacheRva = 0x74F30;
 constexpr std::uintptr_t kFindResourceHandlerRva = 0x71350;
 constexpr std::uintptr_t kFindPackEntrySlotRva = 0x746B0;
 constexpr std::uintptr_t kCompareResourceExtensionRva = 0x4AFD0;
@@ -37,6 +38,15 @@ inline constexpr std::array<std::uint8_t, 24> kExpectedWorkerPrologue{
 	0x48, 0x89, 0x7C, 0x24, 0x20,
 	0x41, 0x54,
 	0x48, 0x81, 0xEC, 0xD0, 0x01, 0x00, 0x00
+};
+// "VPK start precache" dereferences its pack-store argument at
+// store+0x230/store+0x240 with no null check.
+inline constexpr std::array<std::uint8_t, 17> kExpectedStartPrecachePrologue{
+	0x48, 0x8B, 0xC4,
+	0x53,
+	0x41, 0x57,
+	0x48, 0x81, 0xEC, 0x68, 0x01, 0x00, 0x00,
+	0x48, 0x89, 0x68, 0x08
 };
 
 struct ResourceRecord

@@ -278,6 +278,12 @@
     <ClInclude Include="client\audio\audio_cache.h">
       <Filter>client\audio</Filter>
     </ClInclude>
+    <ClInclude Include="client\audio\audio_source.h">
+      <Filter>client\audio</Filter>
+    </ClInclude>
+    <ClInclude Include="client\audio\audio_hook_profile.h">
+      <Filter>client\audio</Filter>
+    </ClInclude>
     <ClInclude Include="client\audio\audio_device.h">
       <Filter>client\audio</Filter>
     </ClInclude>
@@ -680,6 +686,9 @@
     </ClCompile>
     <!-- client\audio -->
     <ClCompile Include="client\audio\audio.cpp">
+      <Filter>client\audio</Filter>
+    </ClCompile>
+    <ClCompile Include="client\audio\audio_source.cpp">
       <Filter>client\audio</Filter>
     </ClCompile>
     <ClCompile Include="client\audio\audio_cache.cpp">

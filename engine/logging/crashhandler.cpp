@@ -854,6 +854,14 @@ void InstallRetailMinidumpCallbacks()
 void InstallExceptionHandler()
 {
     SetUnhandledExceptionFilter(CustomCrashHandler);
-    AddVectoredExceptionHandler(1, (PVECTORED_EXCEPTION_HANDLER)CustomCrashHandler);
+    // Do NOT register CustomCrashHandler as a first-chance vectored handler.
+    // Vectored handlers run before frame-based SEH, and this handler reports and
+    // calls TerminateProcess for access violations, so a vectored registration
+    // killed the process before any of the __try/__except guards in
+    // engine/core/factory.cpp and engine/core/load.cpp could recover the fault
+    // (for example the constant-buffer flush guard, which already accepted the
+    // exact fault, or the shader-resource and VPK guards). Reporting therefore
+    // stays owned by the unhandled pass: a fault a guard recovers continues,
+    // and everything else still produces the same report it always did.
     InstallRetailMinidumpCallbacks();
 }

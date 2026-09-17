@@ -1,9 +1,8 @@
-// Audio cache hooks for R1Delta
 #pragma once
-
 #include <cstdint>
 
-// Audio cache hook for missing valkyrie sounds
-typedef __int64* (*GetAcacheHk_t)(const char*);
-extern GetAcacheHk_t GetAcacheOriginal;
-__int64* GetAcacheHk(const char* wav_path);
+// Client2015 only; verifies the exact R1 engine image and every target prologue.
+bool InstallR1AudioCacheHooks(std::uintptr_t engineBase);
+// Call after native cvar initialization. Rebuild uses native sound_reboot's
+// stop/drain/destroy boundary, then rescans overrides and reloads manifests.
+void RegisterR1AudioCacheCommands();

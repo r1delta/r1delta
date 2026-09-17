@@ -12,6 +12,7 @@
 #include "masterserver.h"
 #include "auth.h"
 #include <nlohmann/json.hpp>
+#include <atomic>
 
 // Define for discord auth stuff.
 #define DISCORD
@@ -19,7 +20,9 @@
 // Global buffer for localized map display name (used by watermark)
 char g_cl_MapDisplayName[128] = "main menu";
 
-static bool is_discord_running = false;
+static std::atomic<bool> is_discord_running{false};
+// Only DiscordThread and its SDK callbacks may access the core.
+static discord::Core* core = nullptr;
 
 bool parseAndValidateIpOctets(const char* ip_part, size_t ip_len, unsigned int& o1, unsigned int& o2, unsigned int& o3, unsigned int& o4) {
 	// Ensure the ip_part doesn't contain invalid characters (like another ':')
@@ -196,15 +199,6 @@ void HandleDiscordUserReady() {
 	SetConvarStringOriginal(platform_user_id_var, std::to_string(user.GetId()).c_str());
 }
 
-int64 GetDiscordId() {
-	discord::User user;
-	auto result = core->UserManager().GetCurrentUser(&user);
-	if (result != discord::Result::Ok) {
-		Msg("Discord: Failed to get current user %d \n", result);
-		return 0;
-	}
-	return user.GetId();
-}
 
 DiscordCommandQueue g_DiscordCommandQueue;
 void DiscordAuthCommand(const CCommand& args) {
@@ -283,9 +277,16 @@ void DiscordThread() {
 	
 	while (true) {
 		core->RunCallbacks();
-		DiscordCommandType cmd;
+		DiscordCommand cmd;
 		while (g_DiscordCommandQueue.GetNextCommand(cmd)) {
-			switch (cmd) {
+			if (auto* activity = std::get_if<discord::Activity>(&cmd)) {
+				core->ActivityManager().UpdateActivity(*activity, [](discord::Result result) {
+					if (result != discord::Result::Ok)
+						Msg("Discord: Failed to update activity: %d\n", result);
+				});
+				continue;
+			}
+			switch (std::get<DiscordCommandType>(cmd)) {
 			case DiscordCommandType::AUTH:
 				ProcessDiscordAuth();
 				break;
@@ -393,14 +394,7 @@ SQInteger SendDiscordUI(HSQUIRRELVM v)
 		activity.GetParty().SetId("R1Delta");
 		activity.GetParty().SetPrivacy(discord::ActivityPartyPrivacy::Private);
 	}
-	core->ActivityManager().UpdateActivity(activity, [](discord::Result result) {
-		if (result != discord::Result::Ok) {
-			Msg("Discord: Failed to update activity: %d\n", result);
-		}
-		else {
-			Msg("Discord: Activity updated successfully\n");
-		}
-		});
+	g_DiscordCommandQueue.AddActivity(activity);
 
 
 	return 1;
@@ -427,7 +421,7 @@ SQInteger SendDiscordClient(HSQUIRRELVM v)
 	}
 
 	auto table = obj._unVal.pTable;
-	PresenceInfo presence;
+	PresenceInfo presence{};
 	SQBool init;
 	sq_getbool(nullptr, v, 3, &init);
 	if (!table) {
@@ -507,14 +501,7 @@ SQInteger SendDiscordClient(HSQUIRRELVM v)
 
  
 
-	core->ActivityManager().UpdateActivity(activity, [](discord::Result result) {
-		if (result != discord::Result::Ok) {
-			Msg("Discord: Failed to update activity: %d\n", result);
-		}
-		//else {
-		//	Msg("Discord: Activity updated successfully\n");
-		//}
-		});
+	g_DiscordCommandQueue.AddActivity(activity);
 
 	
 

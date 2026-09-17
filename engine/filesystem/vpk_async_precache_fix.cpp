@@ -438,6 +438,37 @@ std::uintptr_t __fastcall R1ClientVPKAsyncPrecacheWorker(
 	--s_workerThreadState.depth;
 	return initial.value;
 }
+
+using StartPrecacheFn = std::uintptr_t(__fastcall*)(
+	void* packStore,
+	std::uint32_t mode,
+	const char* archive);
+StartPrecacheFn s_startPrecacheOriginal{};
+bool s_startPrecacheHookCreated{};
+
+// The 2015 client/listen "VPK start precache" publishes the pack-store and mode
+// globals and submits the precache work items. It reads the store's record
+// count and record array unconditionally, so a caller that passes null (the
+// map's client archive never opened, for example a mod or map whose directory
+// VPK is absent) faults at filesystem_stdio+0x74FDF. Report the producer and
+// leave the previous precache generation untouched instead of faulting; the
+// caller learns about the missing content through its own load failure.
+std::uintptr_t __fastcall R1ClientVPKStartPrecache(
+	void* packStore,
+	std::uint32_t mode,
+	const char* archive)
+{
+	if (!packStore) {
+		Warning(
+			"R1Delta: VPK start precache skipped a null pack store "
+			"(mode=%u archive=%s caller=%p); the map client archive is unavailable\n",
+			mode,
+			archive ? archive : "<null>",
+			_ReturnAddress());
+		return 0;
+	}
+	return s_startPrecacheOriginal(packStore, mode, archive);
+}
 }
 
 bool InstallR1ClientVPKAsyncPrecacheFix(std::uintptr_t filesystemBase)
@@ -502,8 +533,55 @@ bool InstallR1ClientVPKAsyncPrecacheFix(std::uintptr_t filesystemBase)
 		return false;
 	}
 
+	void* const startPrecacheTarget = reinterpret_cast<void*>(
+		filesystemBase + kStartPrecacheRva);
+	if (!IsExactExecutableTarget(
+			filesystemBase,
+			startPrecacheTarget,
+			kExpectedStartPrecachePrologue.size())
+		|| std::memcmp(
+			startPrecacheTarget,
+			kExpectedStartPrecachePrologue.data(),
+			kExpectedStartPrecachePrologue.size()) != 0) {
+		Warning(
+			"R1Delta: VPK start-precache null-store guard skipped; target/prologue "
+			"at %p does not match the exact executable entry\n",
+			startPrecacheTarget);
+		return false;
+	}
+
+	const MH_STATUS startCreateStatus = MH_CreateHook(
+		startPrecacheTarget,
+		&R1ClientVPKStartPrecache,
+		reinterpret_cast<LPVOID*>(&s_startPrecacheOriginal));
+	if (startCreateStatus == MH_OK) {
+		s_startPrecacheHookCreated = true;
+	}
+	else if (startCreateStatus == MH_ERROR_ALREADY_CREATED
+		&& !s_startPrecacheHookCreated) {
+		Warning(
+			"R1Delta: VPK start-precache target is already owned by an unrelated "
+			"hook\n");
+		return false;
+	}
+	else if (startCreateStatus != MH_ERROR_ALREADY_CREATED) {
+		Warning(
+			"R1Delta: VPK start-precache hook creation failed status=%d\n",
+			static_cast<int>(startCreateStatus));
+		return false;
+	}
+
+	const MH_STATUS startEnableStatus = MH_EnableHook(startPrecacheTarget);
+	if (startEnableStatus != MH_OK && startEnableStatus != MH_ERROR_ENABLED) {
+		Warning(
+			"R1Delta: VPK start-precache hook enable failed status=%d\n",
+			static_cast<int>(startEnableStatus));
+		return false;
+	}
+
 	s_asyncPrecacheFixInstalled = true;
 	OutputDebugStringA(
-		"R1Delta: exact R1 retail VPK async-precache worker replacement installed and enabled\n");
+		"R1Delta: exact R1 retail VPK async-precache worker replacement and "
+		"start-precache null-store guard installed and enabled\n");
 	return true;
 }

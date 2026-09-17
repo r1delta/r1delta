@@ -77,6 +77,7 @@ extern __int64(*HandleOpenRegularFileOriginal)(__int64 a1, __int64 a2, char a3);
 extern __int64 __fastcall HookedHandleOpenRegularFile(__int64 a1, __int64 a2, char a3);
 extern FileSystem_UpdateAddonSearchPathsType FileSystem_UpdateAddonSearchPathsTypeOriginal;
 __int64 __fastcall FileSystem_UpdateAddonSearchPaths(void* a1);
+void InvalidateFileSystemNegativePathCache();
 void BeginAddonSearchCacheUpdate();
 bool EndAddonSearchCacheUpdate();
 void StartFileCacheThread();

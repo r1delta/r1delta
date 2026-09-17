@@ -21,7 +21,6 @@
 
 #include "MinHook.h"
 #include <zstd.h>
-#include "audio.h"
 #include "load.h"
 #include "logging.h"
 
@@ -495,7 +494,6 @@ struct CompressionHookSpec
 };
 
 bool s_compressionHooksInstalled = false;
-bool s_clientFileHooksCreated = false;
 
 bool IsSuccessfulMinHookStatus(MH_STATUS status) noexcept
 {
@@ -630,16 +628,6 @@ void InitCompressionHooks()
 
     s_compressionHooksInstalled = true;
 
-    if (!dedicated && !s_clientFileHooksCreated)
-    {
-        MH_CreateHook(LPVOID(module + 0x23860),
-            Hooked_CBaseFileSystem__SyncRead,
-            reinterpret_cast<LPVOID*>(&Original_CBaseFileSystem__SyncRead));
-        MH_CreateHook(LPVOID(module + 0x23490),
-            CFileAsyncReadJob_dtor,
-            reinterpret_cast<LPVOID*>(&Original_CFileAsyncReadJob_dtor));
-        s_clientFileHooksCreated = true;
-    }
 
     // Preserve the original initialization point's behavior for unrelated
     // hooks that may have been queued immediately before this call.

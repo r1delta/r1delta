@@ -38,21 +38,11 @@
 #include "load.h"
 #include "logging.h"
 #include "core.h"
-#include "MinHook.h"
 
 // Global instances
 MMNotificationClient g_mmNotificationClient{};
 IMMDeviceEnumerator* g_mmDeviceEnumerator = nullptr;
 
-// Sound restart function pointer
-typedef void(__cdecl* Snd_Restart_DirectSound_t)();
-static Snd_Restart_DirectSound_t Snd_Restart_DirectSound = nullptr;
-
-// S_Init/S_Shutdown hook originals
-typedef void(__cdecl* S_Init_t)();
-typedef void(__cdecl* S_Shutdown_t)();
-static S_Init_t oS_Init = nullptr;
-static S_Shutdown_t oS_Shutdown = nullptr;
 
 HRESULT STDMETHODCALLTYPE MMNotificationClient::QueryInterface(REFIID riid, VOID** ppvInterface)
 {
@@ -84,10 +74,18 @@ HRESULT STDMETHODCALLTYPE MMNotificationClient::OnDefaultDeviceChanged(EDataFlow
 
 void Init_MMNotificationClient()
 {
+    if (g_mmDeviceEnumerator) return;
     HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL,
                                    __uuidof(IMMDeviceEnumerator), (void**)&g_mmDeviceEnumerator);
-    if (SUCCEEDED(hr)) {
-        g_mmDeviceEnumerator->RegisterEndpointNotificationCallback(&g_mmNotificationClient);
+    if (FAILED(hr)) {
+        Warning("R1Delta audio: device notification enumerator failed (0x%08lx)\n", static_cast<unsigned long>(hr));
+        return;
+    }
+    hr = g_mmDeviceEnumerator->RegisterEndpointNotificationCallback(&g_mmNotificationClient);
+    if (FAILED(hr)) {
+        g_mmDeviceEnumerator->Release();
+        g_mmDeviceEnumerator = nullptr;
+        Warning("R1Delta audio: device notification registration failed (0x%08lx)\n", static_cast<unsigned long>(hr));
     }
 }
 
@@ -103,30 +101,9 @@ void Deinit_MMNotificationClient()
 void ConCommand_sound_reboot_xaudio(const CCommand& args)
 {
     Msg("Restarting XAudio...\n");
-    Snd_Restart_DirectSound();
+    // Use the full native lifecycle; +15AF0 recreates voices inline and bypasses
+    // the verified filter-capable S_Init and notification ownership hooks.
+    reinterpret_cast<__int64 (*)()>(G_engine + 0x118C0)();
     Msg("Restarted XAudio...\n");
 }
 
-static void S_Init_Hook()
-{
-    oS_Init();
-    bool g_bNoSound = *reinterpret_cast<bool*>(G_engine + 0x20144E4);
-    if (!g_bNoSound)
-        Init_MMNotificationClient();
-}
-
-static void S_Shutdown_Hook()
-{
-    oS_Shutdown();
-    bool g_bNoSound = *reinterpret_cast<bool*>(G_engine + 0x20144E4);
-    if (!g_bNoSound)
-        Deinit_MMNotificationClient();
-}
-
-void Setup_MMNotificationClient()
-{
-    MH_CreateHook((LPVOID)(G_engine + 0xEA00), &S_Init_Hook, reinterpret_cast<LPVOID*>(&oS_Init));
-    MH_CreateHook((LPVOID)(G_engine + 0x114B0), &S_Shutdown_Hook, reinterpret_cast<LPVOID*>(&oS_Shutdown));
-    Snd_Restart_DirectSound = reinterpret_cast<Snd_Restart_DirectSound_t>(G_engine + 0x15AF0);
-    MH_EnableHook(MH_ALL_HOOKS);
-}

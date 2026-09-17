@@ -8210,6 +8210,8 @@ void Host_InitHook(bool a1) {
 	user_id->m_nFlags |= FCVAR_DEVELOPMENTONLY;
 
 	MCPServer::InstallEchoCommandFix();
+	if (!IsDedicatedServer())
+		RegisterR1AudioCacheCommands();
 
 	// Initialize MCP server only if -usemcp argument is present
 	if (ShouldEnableMCP())
@@ -8298,7 +8300,8 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		RegisterConCommand("slot10", Slot10Command, "Select menu slot 10", 0);
 		MH_CreateHook((LPVOID)(G_engine + 0x2A200), &CBaseClientState_SendConnectPacket, reinterpret_cast<LPVOID*>(&CBaseClientState_SendConnectPacket_Original));
 		//g_pLogAudio = RegisterConVar("fs_log_audio", "0", FCVAR_NONE, "Log audio file reads");
-		MH_CreateHook((LPVOID)(G_engine + 0xAE00), &GetAcacheHk, reinterpret_cast<LPVOID*>(&GetAcacheOriginal));
+		if (!InstallR1AudioCacheHooks(G_engine))
+			Error("R1Delta: required native audio metadata hooks could not be installed\n");
 		// InitSteamHooks(); // Removed - steam.cpp was unused
 		InitAddons();
 
@@ -9504,6 +9507,9 @@ void __stdcall LoaderNotificationCallback(
 			InstallVPKDirectoryLoadFlagRepair(G_filesystem_stdio);
 		if (!HasEngineCommandLineFlag("-r1delta_disable_vpk_async_precache_fix"))
 			InstallR1ClientVPKAsyncPrecacheFix(G_filesystem_stdio);
+		if (GetR1DeltaEngineMode() == R1DeltaEngineMode::Client2015
+			&& !InstallR1AudioReadHooks(G_filesystem_stdio))
+			Error("R1Delta: required native audio streaming hooks could not be installed\n");
 		if (!IsR1ODedicatedServer())
 			InitCompressionHooks();
 		else
@@ -9673,7 +9679,6 @@ void __stdcall LoaderNotificationCallback(
 			}
 			InitClient();
 			SetupHudWarpHooks();
-			Setup_MMNotificationClient();
 			SetupLocalizeIface();
 			typedef bool(__fastcall* o_pCLocalise__AddFile_t)(void*, const char*, const char*, bool);
 			o_pCLocalise__AddFile = (o_pCLocalise__AddFile_t)(G_localize + 0x7760);

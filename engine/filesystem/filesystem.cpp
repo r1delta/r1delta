@@ -241,17 +241,22 @@ int64_t __fastcall HookedHandleOpenRegularFile(int64_t a1, int64_t a2, char a3) 
 FileSystem_UpdateAddonSearchPathsType FileSystem_UpdateAddonSearchPathsTypeOriginal;
 bool done = false;
 std::recursive_mutex addonSearchUpdateMutex;
+void InvalidateFileSystemNegativePathCache()
+{
+	FastFileSystemHook::resetNonexistentCache();
+}
+
 void BeginAddonSearchCacheUpdate()
 {
 	addonSearchUpdateMutex.lock();
 	PData_PrepareForSchemaReload();
 	FileCache::GetInstance().BeginAddonSearchPathUpdate();
-	FastFileSystemHook::resetNonexistentCache();
+	InvalidateFileSystemNegativePathCache();
 }
 
 bool EndAddonSearchCacheUpdate()
 {
-	FastFileSystemHook::resetNonexistentCache();
+	InvalidateFileSystemNegativePathCache();
 	const bool published = FileCache::GetInstance().EndAddonSearchPathUpdate();
 	if (published) {
 		PDef::InitValidator();

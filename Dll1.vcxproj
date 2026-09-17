@@ -217,6 +217,8 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="engine\memory\arena.h" />
     <ClInclude Include="client\audio\audio.h" />
     <ClInclude Include="client\audio\audio_cache.h" />
+    <ClInclude Include="client\audio\audio_source.h" />
+    <ClInclude Include="client\audio\audio_hook_profile.h" />
     <ClInclude Include="client\audio\audio_device.h" />
     <ClInclude Include="beardbgon.h" />
     <ClInclude Include="sdk\bitbuf.h" />
@@ -364,6 +366,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="engine\memory\arena.cpp" />
     <ClCompile Include="client\audio\audio.cpp" />
     <ClCompile Include="client\audio\audio_cache.cpp" />
+    <ClCompile Include="client\audio\audio_source.cpp" />
     <ClCompile Include="client\audio\audio_device.cpp" />
     <ClCompile Include="sdk\bitbuf.cpp" />
     <ClCompile Include="client\client.cpp" />

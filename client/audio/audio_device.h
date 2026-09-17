@@ -64,12 +64,9 @@ public:
 extern MMNotificationClient g_mmNotificationClient;
 extern IMMDeviceEnumerator* g_mmDeviceEnumerator;
 
-// Initialization/cleanup functions
+// Called by the single verified native audio lifecycle owner.
 void Init_MMNotificationClient();
 void Deinit_MMNotificationClient();
-
-// Setup hooks for S_Init/S_Shutdown to automatically manage device notifications
-void Setup_MMNotificationClient();
 
 // Console command to manually restart XAudio
 class CCommand;
