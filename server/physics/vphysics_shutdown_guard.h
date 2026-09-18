@@ -42,6 +42,21 @@ inline constexpr std::uintptr_t kShutdownQueueInlineStorageOffset = 0x1400A0;
 inline constexpr std::size_t kShutdownOwnerFixtureSize =
 	kShutdownQueueInlineStorageOffset + sizeof(std::uintptr_t);
 
+// Every queued object stores its queue slot in an int; -1 means "not queued". The destructor
+// unregisters with `storage[index]->slot = -1; storage[index] = 0;` and never revalidates, so a
+// stale index makes it write through the dead-slot sentinel this queue uses for compacted slots
+// (0xFFFFFFFFABABABAB) and fault at vphysics+0x100BEE inside the object destructor.
+inline constexpr std::int32_t kShutdownQueueIndexNone = -1;
+inline constexpr std::uintptr_t kShutdownQueueObjectIndexOffset = 0x120;
+inline constexpr std::uintptr_t kShutdownQueueObjectOwnerLinkOffset = 0xAA;
+inline constexpr std::uintptr_t kShutdownQueueOwnerLinkContextOffset = 0x30;
+inline constexpr std::uintptr_t kShutdownQueueOwnerFromContextOffset = 0x20;
+inline constexpr std::uintptr_t kR1VPhysicsQueueObjectDestructorRva = 0x100AD0;
+inline constexpr std::uint8_t kR1VPhysicsQueueObjectDestructorExpectedPrologue[] = {
+	0x40, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8D,
+	0x05, 0x5B, 0x11, 0x0A, 0x00,
+};
+
 enum class ShutdownFailure
 {
 	None,
@@ -75,6 +90,19 @@ struct ShutdownResult
 	bool criticalSectionDeleted{};
 };
 
+// Outcome of revalidating one queued object's slot index before its destructor unregisters it.
+struct QueueIndexState
+{
+	std::int32_t index{ kShutdownQueueIndexNone };
+	std::uint16_t count{};
+	std::uintptr_t owner{};
+	std::uintptr_t slot{};
+	bool resolved{};
+	bool repaired{};
+};
+
+[[nodiscard]] QueueIndexState RepairR1VPhysicsQueueIndex(
+	std::uintptr_t object) noexcept;
 [[nodiscard]] bool HasExpectedR1VPhysicsHeaders(std::uintptr_t moduleBase) noexcept;
 [[nodiscard]] bool IsExpectedR1VPhysicsModule(std::uintptr_t moduleBase) noexcept;
 [[nodiscard]] bool IsExpectedR1VPhysicsModulePath(const wchar_t* modulePath) noexcept;

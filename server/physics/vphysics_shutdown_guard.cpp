@@ -417,6 +417,67 @@ ShutdownResult RunR1VPhysicsShutdown(
 	return result;
 }
 
+QueueIndexState RepairR1VPhysicsQueueIndex(std::uintptr_t object) noexcept
+{
+	QueueIndexState state{};
+	std::int32_t index{};
+	if (!object
+		|| !ReadValue(object + kShutdownQueueObjectIndexOffset, index)
+		|| index == kShutdownQueueIndexNone)
+	{
+		// Not queued: the destructor's own fast path already skips the unregister block.
+		return state;
+	}
+	state.index = index;
+
+	// Resolve the queue owner exactly like the destructor does. If any link is unreadable the
+	// destructor faults on the same chain before it ever reaches the slot, so leave it untouched.
+	std::uintptr_t ownerLink{};
+	std::uintptr_t context{};
+	std::uintptr_t owner{};
+	if (!ReadValue(object + kShutdownQueueObjectOwnerLinkOffset, ownerLink)
+		|| !ownerLink
+		|| !ReadValue(ownerLink + kShutdownQueueOwnerLinkContextOffset, context)
+		|| !context
+		|| !ReadValue(context + kShutdownQueueOwnerFromContextOffset, owner)
+		|| !owner)
+	{
+		return state;
+	}
+	state.owner = owner;
+
+	std::uint16_t count{};
+	std::uintptr_t storage{};
+	if (!ReadValue(owner + kShutdownQueueCountOffset, count)
+		|| !ReadValue(owner + kShutdownQueueStorageOffset, storage))
+	{
+		return state;
+	}
+	state.count = count;
+	state.resolved = true;
+
+	std::uintptr_t slot{};
+	if (index >= 0
+		&& index < static_cast<std::int32_t>(count)
+		&& storage
+		&& ReadValue(
+			storage
+				+ sizeof(std::uintptr_t) * static_cast<std::uintptr_t>(index),
+			slot))
+	{
+		state.slot = slot;
+		if (slot == object)
+			return state; // queue and object agree: keep retail behaviour untouched
+	}
+
+	// Slot disagrees (or is the compacted dead-slot sentinel): restore "not queued" so the
+	// destructor skips its unregister block instead of writing through a dead slot, and so the
+	// live object that actually owns that slot cannot have its index corrupted.
+	if (WriteValue(object + kShutdownQueueObjectIndexOffset, kShutdownQueueIndexNone))
+		state.repaired = true;
+	return state;
+}
+
 const char* ShutdownFailureText(ShutdownFailure failure) noexcept
 {
 	switch (failure)

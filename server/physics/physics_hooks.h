@@ -14,6 +14,9 @@ void InstallR1VPhysicsSequentialDispatcherGuard(uintptr_t vphysicsBase);
 // R1 VPhysics level-shutdown recovery
 bool InstallR1VPhysicsShutdownGuard(uintptr_t vphysicsBase);
 
+// R1 VPhysics queued-object queue-index repair (vphysics+0x100BEE crash cluster)
+bool InstallR1VPhysicsQueueIndexGuard(uintptr_t vphysicsBase);
+
 // WallrunMove hook
 extern bool (*WallrunMove_BlockForTitans_Original)(__int64 a1, __int64 a2, __int64 a3);
 bool WallrunMove_BlockForTitans(__int64 a1, __int64 a2, __int64 a3);

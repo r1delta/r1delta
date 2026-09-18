@@ -355,6 +355,118 @@ bool InstallR1VPhysicsShutdownGuard(uintptr_t vphysicsBase)
     return false;
 }
 
+namespace
+{
+using R1VPhysicsQueueObjectDestructor = __int64(__fastcall*)(uintptr_t object);
+R1VPhysicsQueueObjectDestructor s_R1VPhysicsQueueObjectDestructorOriginal = nullptr;
+uintptr_t s_R1VPhysicsQueueObjectDestructorTarget = 0;
+volatile LONG s_R1VPhysicsQueueIndexRepairLogBudget = 8;
+
+__int64 __fastcall R1VPhysicsQueueObjectDestructorGuard(uintptr_t object)
+{
+    const r1delta::vphysics::QueueIndexState state =
+        r1delta::vphysics::RepairR1VPhysicsQueueIndex(object);
+    if (state.repaired
+        && InterlockedDecrement(&s_R1VPhysicsQueueIndexRepairLogBudget) >= 0)
+    {
+        Warning(
+            "R1Delta: VPhysics queued-object index desync repaired "
+            "(object=%p staleIndex=%d count=%u slot=%p owner=%p)\n",
+            reinterpret_cast<void*>(object),
+            static_cast<int>(state.index),
+            static_cast<unsigned>(state.count),
+            reinterpret_cast<void*>(state.slot),
+            reinterpret_cast<void*>(state.owner));
+    }
+    return s_R1VPhysicsQueueObjectDestructorOriginal(object);
+}
+}
+
+bool InstallR1VPhysicsQueueIndexGuard(uintptr_t vphysicsBase)
+{
+    if (!r1delta::vphysics::IsExpectedR1VPhysicsModule(vphysicsBase))
+    {
+        Warning(
+            "R1Delta: VPhysics queued-object index guard refused module at %p; "
+            "expected mapped AMD64 image timestamp=0x%08X size=0x%X\n",
+            reinterpret_cast<void*>(vphysicsBase),
+            r1delta::vphysics::kR1VPhysicsTimeDateStamp,
+            r1delta::vphysics::kR1VPhysicsSizeOfImage);
+        return false;
+    }
+
+    const uintptr_t target = vphysicsBase
+        + r1delta::vphysics::kR1VPhysicsQueueObjectDestructorRva;
+    if (s_R1VPhysicsQueueObjectDestructorTarget)
+    {
+        if (s_R1VPhysicsQueueObjectDestructorTarget != target)
+        {
+            Warning(
+                "R1Delta: VPhysics queued-object index guard refused a second "
+                "module target at %p\n",
+                reinterpret_cast<void*>(target));
+            return false;
+        }
+
+        const MH_STATUS enableStatus =
+            MH_EnableHook(reinterpret_cast<void*>(target));
+        return enableStatus == MH_OK || enableStatus == MH_ERROR_ENABLED;
+    }
+
+    if (memcmp(
+            reinterpret_cast<const void*>(target),
+            r1delta::vphysics::
+                kR1VPhysicsQueueObjectDestructorExpectedPrologue,
+            sizeof(r1delta::vphysics::
+                kR1VPhysicsQueueObjectDestructorExpectedPrologue)) != 0)
+    {
+        Warning(
+            "R1Delta: VPhysics queued-object index guard skipped; "
+            "expected destructor prologue did not match at %p\n",
+            reinterpret_cast<void*>(target));
+        return false;
+    }
+
+    const MH_STATUS createStatus = MH_CreateHook(
+        reinterpret_cast<void*>(target),
+        &R1VPhysicsQueueObjectDestructorGuard,
+        reinterpret_cast<void**>(
+            &s_R1VPhysicsQueueObjectDestructorOriginal));
+    if (createStatus != MH_OK || !s_R1VPhysicsQueueObjectDestructorOriginal)
+    {
+        Warning(
+            "R1Delta: VPhysics queued-object index guard create failed "
+            "(status=%d target=%p)\n",
+            static_cast<int>(createStatus),
+            reinterpret_cast<void*>(target));
+        return false;
+    }
+
+    s_R1VPhysicsQueueObjectDestructorTarget = target;
+    const MH_STATUS enableStatus =
+        MH_EnableHook(reinterpret_cast<void*>(target));
+    if (enableStatus == MH_OK || enableStatus == MH_ERROR_ENABLED)
+    {
+        OutputDebugStringA(
+            "R1Delta: R1 VPhysics queued-object index guard installed\n");
+        return true;
+    }
+
+    Warning(
+        "R1Delta: VPhysics queued-object index guard enable failed "
+        "(status=%d target=%p)\n",
+        static_cast<int>(enableStatus),
+        reinterpret_cast<void*>(target));
+    const MH_STATUS removeStatus =
+        MH_RemoveHook(reinterpret_cast<void*>(target));
+    if (removeStatus == MH_OK)
+    {
+        s_R1VPhysicsQueueObjectDestructorOriginal = nullptr;
+        s_R1VPhysicsQueueObjectDestructorTarget = 0;
+    }
+    return false;
+}
+
 // WallrunMove hook - blocks titans from wallrunning (otherwise they try to)
 bool (*WallrunMove_BlockForTitans_Original)(__int64 a1, __int64 a2, __int64 a3) = nullptr;
 

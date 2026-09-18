@@ -9592,6 +9592,9 @@ void __stdcall LoaderNotificationCallback(
 					InstallR1VPhysicsShutdownGuard(
 						reinterpret_cast<uintptr_t>(
 							notification_data->Loaded.DllBase));
+					InstallR1VPhysicsQueueIndexGuard(
+						reinterpret_cast<uintptr_t>(
+							notification_data->Loaded.DllBase));
 				}
 				else
 					Warning(
