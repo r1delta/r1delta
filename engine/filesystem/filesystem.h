@@ -78,6 +78,8 @@ extern __int64 __fastcall HookedHandleOpenRegularFile(__int64 a1, __int64 a2, ch
 extern FileSystem_UpdateAddonSearchPathsType FileSystem_UpdateAddonSearchPathsTypeOriginal;
 __int64 __fastcall FileSystem_UpdateAddonSearchPaths(void* a1);
 void InvalidateFileSystemNegativePathCache();
+// True when the mounted content set ships the generated-audio (Ogg) delta VPK.
+bool HasR1DeltaContent();
 void BeginAddonSearchCacheUpdate();
 bool EndAddonSearchCacheUpdate();
 void StartFileCacheThread();

@@ -90,6 +90,8 @@ void Rebuild(const CCommand&) {
 void Stats(const CCommand&) { ReportR1AudioSources(); }
 }
 
+bool R1AudioUsesGeneratedContent() { return HasR1DeltaContent(); }
+
 bool InstallR1AudioCacheHooks(std::uintptr_t engineBase) {
     if (GetR1DeltaEngineMode() != R1DeltaEngineMode::Client2015) return false;
     if (s_installed) return s_engine == engineBase;

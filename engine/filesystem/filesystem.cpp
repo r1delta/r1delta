@@ -289,6 +289,11 @@ static bool file_exists(const char* path)
 	return false;
 }
 
+bool HasR1DeltaContent()
+{
+	return file_exists("vpk/client_mp_delta_common.bsp.pak000_000.vpk");
+}
+
 // Our modified hook.
 int fs_sprintf_hook(char* Buffer, const char* Format, ...) {
 	ZoneScoped;

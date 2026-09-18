@@ -8300,8 +8300,10 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		RegisterConCommand("slot10", Slot10Command, "Select menu slot 10", 0);
 		MH_CreateHook((LPVOID)(G_engine + 0x2A200), &CBaseClientState_SendConnectPacket, reinterpret_cast<LPVOID*>(&CBaseClientState_SendConnectPacket_Original));
 		//g_pLogAudio = RegisterConVar("fs_log_audio", "0", FCVAR_NONE, "Log audio file reads");
-		if (!InstallR1AudioCacheHooks(G_engine))
-			Error("R1Delta: required native audio metadata hooks could not be installed\n");
+		if (R1AudioUsesGeneratedContent()) {
+			if (!InstallR1AudioCacheHooks(G_engine))
+				Error("R1Delta: required native audio metadata hooks could not be installed\n");
+		}
 		if (GetR1DeltaEngineMode() == R1DeltaEngineMode::Client2015) {
 			// Cache installation validates the original reboot bytes before this detour.
 			if (!InstallR1AudioDeviceHooks(G_engine))
@@ -9515,6 +9517,7 @@ void __stdcall LoaderNotificationCallback(
 		if (!HasEngineCommandLineFlag("-r1delta_disable_vpk_async_precache_fix"))
 			InstallR1ClientVPKAsyncPrecacheFix(G_filesystem_stdio);
 		if (GetR1DeltaEngineMode() == R1DeltaEngineMode::Client2015
+			&& R1AudioUsesGeneratedContent()
 			&& !InstallR1AudioReadHooks(G_filesystem_stdio))
 			Error("R1Delta: required native audio streaming hooks could not be installed\n");
 		if (!IsR1ODedicatedServer())
