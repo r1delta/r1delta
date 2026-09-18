@@ -1239,6 +1239,11 @@ void RegisterR1ODediDeltaConVars()
 	RegisterR1ODediConVar("delta_vote_next_map", "", FCVAR_GAMEDLL | FCVAR_REPLICATED, "Next voted map.");
 	RegisterR1ODediConVar("delta_vote_next_mode", "", FCVAR_GAMEDLL | FCVAR_REPLICATED, "Next voted gamemode.");
 	RegisterServerUserCmdConVars();
+	// The CServerGameDLL__DLLInit detour is only installed on the R1 path
+	// (load.cpp gates it), so the InitializeRecentHostVars() call inside it
+	// never runs on R1O. Same server.dll, different bring-up flow: initialize
+	// recent-host tracking from this R1O cvar registration path instead.
+	InitializeRecentHostVars();
 
 	s_registered = true;
 	if (AreR1OFakeDediVerboseLogsEnabled())
@@ -1351,28 +1356,51 @@ bool PrintR1ODediFindResults(const char* search)
 ConVarR1* host_mostRecentMapCvar = nullptr;
 ConVarR1* host_mostRecentGamemodeCvar = nullptr;
 
+// Writes the new value of a recent-host convar into its R1O store. The R1O
+// command buffer cannot be used here: changelevel clears pending buffer text
+// before it executes, and legacy semantics store the pre-transition value.
+static void SetRecentHostVar(const char* name, const char* value)
+{
+    auto it = ccBaseMap.find(name);
+    if (it == ccBaseMap.end() || !it->second || !it->second->r1optr)
+        return;
+    auto* parent = static_cast<ConVarR1O*>(it->second->r1optr);
+    parent = parent->m_pParent ? parent->m_pParent : parent;
+    const char* source = value ? value : "";
+    if (parent->m_Value.m_pszString && strcmp(parent->m_Value.m_pszString, source) == 0)
+        return;
+    char* owned = DuplicateR1OEngineOwnedString(source);
+    parent->m_Value.m_pszString = owned;
+    parent->m_Value.m_StringLength = static_cast<__int64>(strlen(owned) + 1);
+    parent->m_Value.m_fValue = static_cast<float>(atof(owned));
+    parent->m_Value.m_nValue = atoi(owned);
+}
+
 void GamemodeChangeCallback(IConVar* var_iconvar, const char* pOldValue, float flOldValue)
 {
-    auto Cbuf_AddText2 = (Cbuf_AddTextType)(IsDedicatedServer() ? (G_engine_ds + 0x72d70) : (G_engine + 0x102D50));
-
-    ConVarR1* gamemodeCvar = OriginalCCVar_FindVar(cvarinterface, "mp_gamemode");
     const char* newValue = pOldValue;
+    if (IsR1ODedicatedServer())
+    {
+        // Legacy semantics store the previous value, not the new one.
+        SetRecentHostVar("host_mostRecentGamemode", newValue ? newValue : "");
+        return;
+    }
     char command[256];
     snprintf(command, sizeof(command), "host_mostRecentGamemode \"%s\"\n", newValue ? newValue : "");
-    Cbuf_AddText2(0, command, 0);
+    {
+        auto Cbuf_AddText2 = (Cbuf_AddTextType)(IsDedicatedServer() ? (G_engine_ds + 0x72d70) : (G_engine + 0x102D50));
+        Cbuf_AddText2(0, command, 0);
+    }
 }
 
 void HostMapChangeCallback(IConVar* var_iconvar, const char* pOldValue, float flOldValue)
 {
-    auto Cbuf_AddText2 = (Cbuf_AddTextType)(IsDedicatedServer() ? (G_engine_ds + 0x72d70) : (G_engine + 0x102D50));
-
     const char* newValue = pOldValue;
 
     // Check if the value is valid and not the lobby map
     if (newValue && newValue[0] != '\0' && strcmp_static(newValue, "mp_lobby.bsp") != 0)
     {
         char mapNameToStore[256];
-        char command[256 + 30];
 
         strncpy(mapNameToStore, newValue, sizeof(mapNameToStore) - 1);
         mapNameToStore[sizeof(mapNameToStore) - 1] = '\0';
@@ -1387,13 +1415,50 @@ void HostMapChangeCallback(IConVar* var_iconvar, const char* pOldValue, float fl
             mapNameToStore[len - suffixLen] = '\0';
         }
 
+        if (IsR1ODedicatedServer())
+        {
+            SetRecentHostVar("host_mostRecentMap", mapNameToStore);
+            return;
+        }
+        char command[256 + 30];
         snprintf(command, sizeof(command), "host_mostRecentMap \"%s\"\n", mapNameToStore);
-        Cbuf_AddText2(0, command, 0);
+        {
+            auto Cbuf_AddText2 = (Cbuf_AddTextType)(IsDedicatedServer() ? (G_engine_ds + 0x72d70) : (G_engine + 0x102D50));
+            Cbuf_AddText2(0, command, 0);
+        }
     }
 }
 
+static void RecentHostChangeCallback(void* var, const char* oldValue, float oldFloat)
+{
+    const auto* conVar = static_cast<const ConVarR1O*>(static_cast<const IConVar*>(var));
+    if (!conVar || !conVar->m_pszName)
+        return;
+    if (strcmp_static(conVar->m_pszName, "mp_gamemode") == 0)
+        GamemodeChangeCallback(nullptr, oldValue, oldFloat);
+    else if (strcmp_static(conVar->m_pszName, "host_map") == 0)
+        HostMapChangeCallback(nullptr, oldValue, oldFloat);
+}
+
+
+
 void InitializeRecentHostVars()
 {
+    if (IsR1ODedicatedServer())
+    {
+        RegisterR1ODediConVar("host_mostRecentGamemode", "", FCVAR_HIDDEN,
+            "Stores the last gamemode set via mp_gamemode.");
+        RegisterR1ODediConVar("host_mostRecentMap", "", FCVAR_HIDDEN,
+            "Stores the last map set via host_map, excluding mp_lobby.");
+        // The fake-dedi engine dispatches convar changes through its global
+        // change callback (not the R1O objects' own callback vectors, which
+        // only fire for engine-set convars like host_map), so observe both
+        // names there and route them to the same two callbacks as the R1 path.
+        CCvar__InstallGlobalChangeCallback(cvarinterface,
+            reinterpret_cast<void*>(&RecentHostChangeCallback));
+        return;
+    }
+
     host_mostRecentGamemodeCvar = RegisterConVar(
         "host_mostRecentGamemode",
         "",
