@@ -4,6 +4,7 @@
 #include "load.h"
 #include <MinHook.h>
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -60,7 +61,12 @@ std::int64_t SyncRead(void* filesystem, FileAsyncRequest* request) {
     if (result == R1AudioReadResult::NotManaged)
         error = "native audio stream has no generated source record; refusing to interpret physical-file bytes as canonical PCM";
     const int status = result == R1AudioReadResult::Success ? 0 : -4; // FSASYNC_ERR_READING.
-    if (status) Warning("R1Delta audio read '%s' at %lld: %s\n", request->filename, request->offset, error.c_str());
+    if (status) {
+        // The stream scheduler retries failing reads; keep logging off the hot path.
+        static std::atomic<unsigned> s_readFailureBudget{ 8 };
+        if (s_readFailureBudget.fetch_sub(1, std::memory_order_relaxed) > 0)
+            Warning("R1Delta audio read '%s' at %lld: %s\n", request->filename, request->offset, error.c_str());
+    }
     // Exact +1F200 helper owns callback locking, request-copy semantics, and
     // native buffer release flags. Never substitute padded silence/full success.
     s_callback(filesystem, request, request->data, static_cast<std::int64_t>(got), status);

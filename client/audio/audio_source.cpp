@@ -426,6 +426,11 @@ struct Entry {
     SourceInfo info;
     std::string sourcePath;
     std::vector<std::int16_t> prefix;
+    // The generated path used to reopen and reparse the source, and seek a fresh
+    // decoder, on every stream read. Keep one decoder per source instead; reads of
+    // the same source serialize on decoderMutex, different sources stay parallel.
+    std::mutex decoderMutex;
+    std::unique_ptr<Decoder> decoder;
 };
 std::mutex g_sourcesMutex;
 std::unordered_map<std::string, std::shared_ptr<Entry>> g_sources;
@@ -456,9 +461,9 @@ std::shared_ptr<Entry> LoadEntry(const std::string& name) {
         const bool chooseOgg = ogg.handle && (!wave.handle || SourcePriority(ogg, oggName) <= SourcePriority(wave, name));
         entry->sourcePath = chooseOgg ? oggName : name;
     }
-    auto decoder = std::make_unique<Decoder>(entry->sourcePath);
-    if (!decoder->file.handle) Fail("selected audio source disappeared while loading metadata");
-    entry->info = decoder->info;
+    entry->decoder = std::make_unique<Decoder>(entry->sourcePath);
+    if (!entry->decoder->file.handle) Fail("selected audio source disappeared while loading metadata");
+    entry->info = entry->decoder->info;
     if (entry->info.vorbis && !entry->info.loopSpecified) {
         // A transcoded Ogg cannot recreate discarded loop metadata. Recover it
         // only from the actual corresponding WAV, never another sound record.
@@ -481,7 +486,7 @@ std::shared_ptr<Entry> LoadEntry(const std::string& name) {
     record.duration = static_cast<float>(double(frames) / kMixerRate);
     record.loop = entry->info.loop;
     entry->prefix.resize(static_cast<std::size_t>((std::min)(frames, std::uint64_t(kPrefetchFrames))) * entry->info.channels);
-    decoder->Canonical(0, entry->prefix.size() / entry->info.channels, entry->prefix.data());
+    entry->decoder->Canonical(0, entry->prefix.size() / entry->info.channels, entry->prefix.data());
     record.prefetch = entry->prefix.data();
     record.streamOffset = frames > kPrefetchFrames ? entry->prefix.size() * sizeof(std::int16_t) : 0;
     return entry;
@@ -496,14 +501,23 @@ R1AudioCacheRecord* FindR1AudioSource(const char* input) {
     std::string name;
     try {
         name = CanonicalName(input);
-        std::lock_guard<std::mutex> lock(g_sourcesMutex);
         if (!g_fileSystem) Fail("native filesystem is not initialized");
-        const auto existing = g_sources.find(name);
-        if (existing != g_sources.end()) return &existing->second->record;
-        if (g_errors.find(name) != g_errors.end()) return nullptr;
+        {
+            std::lock_guard<std::mutex> lock(g_sourcesMutex);
+            const auto existing = g_sources.find(name);
+            if (existing != g_sources.end()) return &existing->second->record;
+            if (g_errors.find(name) != g_errors.end()) return nullptr;
+        }
+        // Build metadata outside the registry lock: opening and decoding a source
+        // must not block lookups and stream reads for every other sound.
         auto entry = LoadEntry(name);
         auto* record = &entry->record;
-        g_sources.emplace(name, std::move(entry));
+        {
+            std::lock_guard<std::mutex> lock(g_sourcesMutex);
+            const auto existing = g_sources.find(name);
+            if (existing != g_sources.end()) return &existing->second->record;
+            g_sources.emplace(name, std::move(entry));
+        }
         return record;
     } catch (const std::exception& error) {
         Warning("R1Delta audio metadata '%s': %s\n", input ? input : "<null>", error.what());
@@ -533,13 +547,12 @@ R1AudioReadResult ReadR1AudioSource(const char* filename, const char* pathID,
         if (offset > totalBytes || offset % frameBytes || bytes % frameBytes || (!destination && bytes))
             Fail("canonical PCM read is unaligned, outside EOF, or has no destination buffer");
         const auto count = static_cast<std::size_t>((std::min)(std::uint64_t(bytes), totalBytes - offset));
-        Decoder decoder(entry->sourcePath);
-        if (!decoder.file.handle) Fail("cached source was removed; run r1delta_audio_rebuild");
-        const auto& now = decoder.info;
-        const auto& old = entry->info;
-        if (now.frames != old.frames || now.rate != old.rate || now.channels != old.channels || now.format != old.format || now.bits != old.bits || now.dataOffset != old.dataOffset)
-            Fail("source metadata changed while cached; run r1delta_audio_rebuild");
-        decoder.Canonical(offset / frameBytes, count / frameBytes, static_cast<std::int16_t*>(destination));
+        std::lock_guard<std::mutex> decodeLock(entry->decoderMutex);
+        if (!entry->decoder) {
+            entry->decoder = std::make_unique<Decoder>(entry->sourcePath);
+            if (!entry->decoder->file.handle) Fail("cached source was removed; run r1delta_audio_rebuild");
+        }
+        entry->decoder->Canonical(offset / frameBytes, count / frameBytes, static_cast<std::int16_t*>(destination));
         bytesRead = count;
         return R1AudioReadResult::Success;
     } catch (const std::exception& exception) {
