@@ -929,7 +929,7 @@ SQInteger Script_IsDedicated(HSQUIRRELVM v)
 
 	auto r1sqvm = GetServerVMPtr();
 
-	sq_pushbool(r1sqvm, r1sqvm->sqvm, IsDedicatedServer());
+	sq_pushbool(r1sqvm, v, IsDedicatedServer());
 
 	return 1;
 }

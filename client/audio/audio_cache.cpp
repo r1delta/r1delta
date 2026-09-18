@@ -17,8 +17,8 @@ bool s_commands = false;
 bool s_rescanOnInitialize = false;
 // The native audio critical section is recursive. Protect the complete four
 // borrowed-record consumers, not just the lookup that returns their pointer.
-// The native mixer already takes this same lock; sound_reboot below holds it
-// across stop/drain/destroy/reinitialize/manifest reload.
+// The native mixer takes this same lock. The device lifecycle's sound_reboot
+// detour owns it across stop/drain/destroy/reinitialize/manifest reload.
 class AudioScope {
     CRITICAL_SECTION* section;
 public:
@@ -80,10 +80,10 @@ std::int64_t Start(int a, int b, unsigned c, const float* d, const float* e, uns
 }
 void Rebuild(const CCommand&) {
     if (!s_installed || GetR1DeltaEngineMode() != R1DeltaEngineMode::Client2015) return;
-    AudioScope lock;
     s_rescanOnInitialize = true;
     // The exact native sound_reboot owner (+118C0) does shutdown, S_Init,
     // metadata init, streaming buffer init, then +A880 reloads game_sounds_manifest.
+    // Its detour registers/unregisters notifications outside the audio lock.
     reinterpret_cast<void (*)()>(s_engine + 0x118C0)();
     Msg("R1Delta audio: stopped/drained sounds, discarded generated metadata, and reloaded game_sounds manifests; subsequent lookups rebuild from GAME assets\n");
 }

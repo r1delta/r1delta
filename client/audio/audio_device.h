@@ -40,6 +40,7 @@
 #pragma once
 
 #include <mmdeviceapi.h>
+#include <cstdint>
 
 // MMNotificationClient - Handles audio device change notifications
 class MMNotificationClient : public IMMNotificationClient {
@@ -60,13 +61,8 @@ public:
     HRESULT STDMETHODCALLTYPE OnPropertyValueChanged(LPCWSTR pwstrDeviceId, const PROPERTYKEY key) override { return S_OK; }
 };
 
-// Global instances
-extern MMNotificationClient g_mmNotificationClient;
-extern IMMDeviceEnumerator* g_mmDeviceEnumerator;
-
-// Called by the single verified native audio lifecycle owner.
-void Init_MMNotificationClient();
-void Deinit_MMNotificationClient();
+// Client2015 only, installed before the first native audio initialization.
+bool InstallR1AudioDeviceHooks(std::uintptr_t engineBase);
 
 // Console command to manually restart XAudio
 class CCommand;

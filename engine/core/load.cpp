@@ -8302,6 +8302,13 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		//g_pLogAudio = RegisterConVar("fs_log_audio", "0", FCVAR_NONE, "Log audio file reads");
 		if (!InstallR1AudioCacheHooks(G_engine))
 			Error("R1Delta: required native audio metadata hooks could not be installed\n");
+		if (GetR1DeltaEngineMode() == R1DeltaEngineMode::Client2015) {
+			// Cache installation validates the original reboot bytes before this detour.
+			if (!InstallR1AudioDeviceHooks(G_engine))
+				Error("R1Delta: required native audio notification hooks could not be installed\n");
+			else
+				RegisterConCommand("sound_reboot_xaudio", ConCommand_sound_reboot_xaudio, "Restart native audio after changing the default output device.", 0);
+		}
 		// InitSteamHooks(); // Removed - steam.cpp was unused
 		InitAddons();
 

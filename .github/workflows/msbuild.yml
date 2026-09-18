@@ -13,13 +13,13 @@ env:
   BUILD_PATH: ${{ github.workspace }}/build
   OUTPUT_PATH: ${{ github.workspace }}/output
   SYMBOL_PATH: ${{ github.workspace }}/symbols
-  CORE_REF: c6974027aba74db1f680ec337d6392d5774746ad
+  CORE_REF: cdec226524f1ecee476d490603662f06d00a2a3a
   VCPKG_BINARY_SOURCES: "clear;files,D:/a/r1delta/vcpkg,readwrite"
   BUILD_CONFIGURATION: Release
   MSBUILD_DEBUG_TYPE: pdbonly
   NUSPEC_FILE: R1Delta.nuspec
   PACKAGE_NAME: R1Delta
-  DISPLAY_VERSION: "3.0 prerelease 34"
+  DISPLAY_VERSION: "3.0 prerelease 35"
 
 permissions:
   contents: write
