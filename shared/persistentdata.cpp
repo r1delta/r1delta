@@ -1,6 +1,27 @@
-#include "core.h"
-#include "filesystem.h" 
+// Persistent data ("pdata") for R1Delta.
+//
+// Ownership model
+// ---------------
+// * The CLIENT owns a player's persistent data. It keeps every value in an
+//   in-memory store (ClientStore below), mirrors valid entries into "__ <key>"
+//   FCVAR_USERINFO convars so the engine replicates them to servers, and writes
+//   the store to its own file (profile/persistent_data.txt) atomically with a
+//   checksum trailer and a .bak of the previous generation. The file is read
+//   exactly once per process; nothing ever re-applies older on-disk values over
+//   newer in-memory ones, so map changes and profile.cfg reloads cannot roll
+//   progression back.
+//
+// * SERVERS only write by sending "__ key value" string commands. Each write
+//   stays pending (see persistentdata_state.h) until the client echoes it back,
+//   which makes writes survive the reliable-stream clear that happens when the
+//   engine reconnects clients on changelevel.
+//
+// * The wire format is unchanged from earlier builds (packed "_r1dp1" chunks or
+//   legacy high-bit names) plus an optional "_r1dpfull" marker that tells the
+//   server a message is a complete snapshot rather than a delta.
 
+#include "core.h"
+#include "filesystem.h"
 
 class PDef;
 
@@ -14,17 +35,30 @@ class PDef;
 #include "persistentdata_codec.h"
 #include "persistentdata_slots.h"
 #include "persistentdata_state.h"
-#include "persistentdata_transaction.h"
+#include "persistentdata_store.h"
 #include "logging.h"
 #include "squirrel.h"
 #include "keyvalues.h"
 #include "factory.h"
 #include "load.h"
-// Network message handling
 #include <array>
 #include <unordered_map>
+#include <unordered_set>
 #include <cstdint>
 #include <charconv>
+#include <shlobj.h>
+#include <filesystem>
+#include <iostream>
+#include <fstream>
+#include <map>
+#include <variant>
+#include <optional>
+#include <sstream>
+#include <cctype>
+#include <regex>
+#include <limits>
+#include <zstd.h>
+#include "tctx.h"
 
 namespace {
 constexpr unsigned long long kSyntheticPlatformUserIdBase = 9000000000000000000ULL;
@@ -43,29 +77,15 @@ unsigned long long GenerateSyntheticPlatformUserId()
 		+ processEntropy % kSyntheticPlatformUserIdSpan;
 }
 
-
-static std::unordered_map<int, PersistentDataState::PlayerState> s_R1OPersistentUserDataByPlayer;
-using NonR1OPersistentValueMap = std::unordered_map<
-	std::string, std::string, HashStrings, std::equal_to<>>;
-static std::array<NonR1OPersistentValueMap, PersistentDataSlots::kMaximumSupportedClients>
-	s_nonR1OPersistentUserDataByPlayer;
-static std::array<KeyValues*, PersistentDataSlots::kMaximumSupportedClients>
-	s_nonR1OPersistentUserDataConVarsByPlayer = {};
-
-static bool IsValidNonR1OPersistentUserDataSlot(int playerSlot)
-{
-	return playerSlot >= 0 && playerSlot < PersistentDataSlots::kMaximumSupportedClients;
-}
-
-static void RefreshNonR1OPersistentUserDataCache(int playerSlot, KeyValues* vars)
-{
-	if (!IsValidNonR1OPersistentUserDataSlot(playerSlot))
-		return;
-	if (s_nonR1OPersistentUserDataConVarsByPlayer[playerSlot] != vars) {
-		s_nonR1OPersistentUserDataConVarsByPlayer[playerSlot] = vars;
-		s_nonR1OPersistentUserDataByPlayer[playerSlot].clear();
-	}
-}
+// Constants
+constexpr size_t MAX_LENGTH = 254;
+constexpr char kPersistPrefix[] = PERSIST_COMMAND" ";
+constexpr size_t kPersistPrefixLength = sizeof(kPersistPrefix) - 1;
+// Marker entry a client appends when a NET_SetConVar carries its complete
+// persistent data set. Names starting with '_' are stripped for vanilla
+// servers, and older R1Delta servers ignore it as an unknown userinfo convar.
+constexpr char kFullSnapshotMarker[] = "_r1dpfull";
+bool g_bNoSendConVar = false;
 
 namespace {
 constexpr const char* kPersistentDataDiagnosticFlag = "-r1delta_pdata_diag";
@@ -89,9 +109,7 @@ void LogPersistentDataDiagnostic(
 	const char* stage,
 	int playerSlot,
 	const char* name,
-	const char* value,
-	bool found,
-	size_t entryCount)
+	const char* value)
 {
 	if (!PersistentDataDiagnosticsEnabled() || !IsPersistentDataDiagnosticKey(name))
 		return;
@@ -101,361 +119,44 @@ void LogPersistentDataDiagnostic(
 		message,
 		sizeof(message),
 		_TRUNCATE,
-		"R1Delta: pdata-diag stage=%s playerSlot=%d found=%d entries=%zu name=\"%s\" value=\"%s\"\n",
+		"R1Delta: pdata-diag stage=%s playerSlot=%d name=\"%s\" value=\"%s\"\n",
 		stage ? stage : "unknown",
 		playerSlot,
-		found ? 1 : 0,
-		entryCount,
 		name ? name : "",
 		value ? value : "");
 	OutputDebugStringA(message);
 }
+
+bool IsPersistentConVarName(const char* name)
+{
+	return name && strncmp(name, kPersistPrefix, kPersistPrefixLength) == 0;
 }
 
-static bool IsR1OPersistentPlayerSlot(int playerSlot)
+// Builds "__ <key>" into `out`. Returns false for keys that are too long.
+bool MakePersistConVarName(const char* key, char* out, size_t outSize)
 {
-	return IsR1ODedicatedServer()
-		&& pGlobalVarsServer
-		&& PersistentDataSlots::IsValidPlayerSlot(playerSlot, pGlobalVarsServer->maxClients);
-}
-
-static const char* R1OPersistKeyPrefix()
-{
-	return PERSIST_COMMAND" ";
-}
-
-static bool IsR1OPersistentUserDataName(const char* name)
-{
-	return name && strncmp(name, R1OPersistKeyPrefix(), strlen(R1OPersistKeyPrefix())) == 0;
-}
-
-static PersistentDataState::Values R1OCollectPersistentUserData(
-	const std::vector<NetMessageCvar_t>& values)
-{
-	PersistentDataState::Values collected;
-	for (const NetMessageCvar_t& var : values) {
-		if (IsR1OPersistentUserDataName(var.name))
-			collected.insert_or_assign(var.name, var.value);
-	}
-	return collected;
-}
-
-bool R1OReplacePersistentUserDataForPlayer(
-	int playerSlot,
-	PersistentDataState::SessionKey session,
-	const std::vector<NetMessageCvar_t>& values)
-{
-	if (!IsR1OPersistentPlayerSlot(playerSlot))
+	const size_t keyLength = strlen(key);
+	if (keyLength == 0 || kPersistPrefixLength + keyLength >= outSize
+		|| kPersistPrefixLength + keyLength > MAX_LENGTH)
 		return false;
-
-	PersistentDataState::Values replacement = R1OCollectPersistentUserData(values);
-	const size_t entryCount = replacement.size();
-	for (const auto& entry : replacement) {
-			LogPersistentDataDiagnostic(
-				"server-snapshot",
-				playerSlot,
-				entry.first.c_str(),
-				entry.second.c_str(),
-				true,
-				entryCount);
-	}
-	return PersistentDataState::Replace(
-		s_R1OPersistentUserDataByPlayer[playerSlot], session, std::move(replacement));
-}
-
-bool R1OMergePersistentUserDataForPlayer(
-	int playerSlot,
-	PersistentDataState::SessionKey session,
-	const std::vector<NetMessageCvar_t>& values)
-{
-	if (!IsR1OPersistentPlayerSlot(playerSlot))
-		return false;
-
-	PersistentDataState::Values updates = R1OCollectPersistentUserData(values);
-	auto& state = s_R1OPersistentUserDataByPlayer[playerSlot];
-	if (!PersistentDataState::Merge(state, session, std::move(updates)))
-		return false;
-
-	for (const NetMessageCvar_t& var : values) {
-		if (IsR1OPersistentUserDataName(var.name)) {
-			LogPersistentDataDiagnostic(
-				"server-delta",
-				playerSlot,
-				var.name,
-				var.value,
-				true,
-				state.values.size());
-		}
-	}
+	memcpy(out, kPersistPrefix, kPersistPrefixLength);
+	memcpy(out + kPersistPrefixLength, key, keyLength + 1);
 	return true;
 }
+}
 
-void R1OClearPersistentUserDataForPlayer(int playerSlot)
+bool IsValidUserInfo(const char* value, int length)
 {
-	if (playerSlot >= 0 && playerSlot < PersistentDataSlots::kMaximumSupportedClients)
-		s_R1OPersistentUserDataByPlayer.erase(playerSlot);
+	if (!value)
+		return false;
+	const size_t len = (length == -1) ? strlen(value) : static_cast<size_t>(length);
+	return PersistentDataStore::IsSafeToken(std::string_view(value, len), MAX_LENGTH);
 }
 
-bool R1OStorePersistentUserDataConVar(int playerSlot, const char* name, const char* value)
+bool IsPDataFullSnapshotMarker(const char* name)
 {
-	if (!IsR1OPersistentPlayerSlot(playerSlot)
-		|| !IsR1OPersistentUserDataName(name) || !value)
-		return false;
-	s_R1OPersistentUserDataByPlayer[playerSlot].values[name] = value;
-	return true;
+	return name && strcmp(name, kFullSnapshotMarker) == 0;
 }
-
-bool R1OGetPersistentUserDataConVar(int playerSlot, const char* name, std::string& value)
-{
-	if (!IsR1OPersistentPlayerSlot(playerSlot)
-		|| !IsR1OPersistentUserDataName(name))
-		return false;
-	const auto player = s_R1OPersistentUserDataByPlayer.find(playerSlot);
-	if (player == s_R1OPersistentUserDataByPlayer.end())
-		return false;
-	const auto found = player->second.values.find(name);
-	if (found == player->second.values.end()) {
-		LogPersistentDataDiagnostic(
-			"server-lookup",
-			playerSlot,
-			name,
-			nullptr,
-			false,
-			player->second.values.size());
-		return false;
-	}
-	value = found->second;
-	LogPersistentDataDiagnostic(
-		"server-lookup",
-		playerSlot,
-		name,
-		value.c_str(),
-		true,
-		player->second.values.size());
-	return true;
-}
-
-static const char* R1OFindPersistentUserDataConVar(int playerSlot, const char* name, const char* defaultValue)
-{
-	static thread_local std::string value;
-	return R1OGetPersistentUserDataConVar(playerSlot, name, value) ? value.c_str() : defaultValue;
-}
-
-static void* R1OGetEntityFromScriptArgument(HSQUIRRELVM vm, SQInteger index)
-{
-	return sq_getentity(vm, index);
-}
-
-struct R1OPersistentPlayerContext
-{
-	int playerSlot = -1;
-	uintptr_t edict = 0;
-};
-
-static bool R1OResolvePersistentPlayer(void* entity, R1OPersistentPlayerContext& context)
-{
-	if (!entity || !pGlobalVarsServer || !pGlobalVarsServer->pEdicts)
-		return false;
-
-	__try {
-		const uintptr_t edict = *reinterpret_cast<const uintptr_t*>(
-			reinterpret_cast<uintptr_t>(entity) + 0x40);
-		const uintptr_t firstEdict = reinterpret_cast<uintptr_t>(pGlobalVarsServer->pEdicts);
-		if (edict < firstEdict + 56)
-			return false;
-		const uintptr_t delta = edict - firstEdict;
-		if (delta % 56 != 0)
-			return false;
-		const int playerSlot = static_cast<int>(delta / 56) - 1;
-		if (playerSlot < 0 || playerSlot >= PersistentDataSlots::kMaximumSupportedClients)
-			return false;
-		context.playerSlot = playerSlot;
-		context.edict = edict;
-		static int ownerLogBudget = 8;
-		if (IsR1OPersistentPlayerSlot(playerSlot)
-			&& ownerLogBudget > 0
-			&& AreR1OFakeDediVerboseLogsEnabled()) {
-			--ownerLogBudget;
-			char message[192];
-			_snprintf_s(
-				message,
-				sizeof(message),
-				_TRUNCATE,
-				"R1Delta: R1O persistence script owner playerSlot=%d entity=%p\n",
-				playerSlot,
-				entity);
-			OutputDebugStringA(message);
-		}
-		return true;
-	}
-	__except (EXCEPTION_EXECUTE_HANDLER) {
-		return false;
-	}
-}
-
-static int R1OPlayerSlotFromEntity(void* entity)
-{
-	R1OPersistentPlayerContext context;
-	return R1OResolvePersistentPlayer(entity, context)
-		&& IsR1OPersistentPlayerSlot(context.playerSlot)
-		? context.playerSlot
-		: -1;
-}
-
-static bool R1OSendPersistentUserDataCommand(
-	const R1OPersistentPlayerContext& player,
-	const char* hashedKey,
-	const char* value)
-{
-	if (!player.edict || !hashedKey || !value)
-		return false;
-
-	// Use the exact native interface that R1OFactory handed to server_local.dll.
-	// dedicated.dll's app-system factory does not expose this interface in fake
-	// dedicated mode. ClientCommand is slot 37 in VEngineServer022.
-	void* engineServer = GetR1ONativeEngineServer022();
-	if (!engineServer)
-		return false;
-	const auto vtable = *reinterpret_cast<uintptr_t* const*>(engineServer);
-	if (!vtable || !vtable[37])
-		return false;
-
-	using ClientCommandFn = void(__fastcall*)(void*, uintptr_t, const char*, ...);
-	const auto clientCommand = reinterpret_cast<ClientCommandFn>(vtable[37]);
-	clientCommand(
-		engineServer,
-		player.edict,
-		PERSIST_COMMAND" \"%s\" \"%s\"",
-		hashedKey,
-		value);
-	static int deliveryLogBudget = 16;
-	if (deliveryLogBudget > 0 && AreR1OFakeDediVerboseLogsEnabled()) {
-		--deliveryLogBudget;
-		char message[256];
-		_snprintf_s(
-			message,
-			sizeof(message),
-			_TRUNCATE,
-			"R1Delta: R1O persistence client update playerSlot=%d key=%s\n",
-			player.playerSlot,
-			hashedKey);
-		OutputDebugStringA(message);
-	}
-	return true;
-}
-
-static bool ParseR1OPersistentInteger(const std::string& value, int& result)
-{
-	if (value.empty())
-		return false;
-	const char* begin = value.data();
-	const char* end = begin + value.size();
-	const auto parsed = std::from_chars(begin, end, result);
-	return parsed.ec == std::errc() && parsed.ptr == end;
-}
-
-#include <shlobj.h>
-#include <filesystem>
-#include <iostream>
-#include <fstream>
-#include <string>
-#include <vector>
-#include <map>
-#include <unordered_map>
-#include <variant>
-#include <optional>
-#include <fstream>
-#include <sstream>
-#include <cctype>
-#include <iostream>
-#include <regex>
-#include <limits>
-#include <zstd.h>
-#include "load.h"
-#include "tctx.h"
-
-//#define HASH_USERINFO_KEYS
-// Constants
-constexpr size_t MAX_LENGTH = 254;
-constexpr const char* INVALID_CHARS = "{}()':;`\"\n";
-bool g_bNoSendConVar = false;
-
-// TODO(mrsteyk): this shit must be checked in validator too, no?
-// Utility functions
-bool IsValidUserInfo(const char* value, int length) {
-	if (!value || !*value) return false; // Null or empty check
-
-	size_t len = (length == -1) ? strlen(value) : length;
-	if (len > MAX_LENGTH) return false;
-
-	// For values: Only allow 0-9, -, ., and a-zA-Z for pdata_null
-	// For keys: Only allow a-z, A-Z, 0-9, _, ., and [] for array indices
-	for (size_t i = 0; i < len; i++) {
-		char c = value[i];
-
-		// Basic ASCII printable range
-		if (c < 32 || c > 126) return false;
-
-		// Explicitly denied characters that could cause problems:
-		switch (c) {
-		case '"':  // String termination
-		case '\\': // Escapes
-		case '{':  // Code blocks/JSON
-		case '}':
-		case '\'': // String delimiters
-		case '`':
-		case ';':  // Command separators
-		case '/':
-		case '*':
-		case '<':  // XML/HTML
-		case '>':
-		case '&':  // Shell
-		case '|':
-		case '$':
-		case '!':
-		case '?':
-		case '+':  // URL encoding
-		case '%':
-		case '\n': // Any whitespace except regular space
-		case '\r':
-		case '\t':
-		case '\v':
-		case '\f':
-			return false;
-	}
-}
-
-	return true;
-}
-std::string hashUserInfoKey(const std::string& key) {
-#ifdef HASH_USERINFO_KEYS
-	// Hash the key
-	std::size_t hash = std::hash<std::string>{}(key);
-
-	// Convert to base36
-	const char base36Chars[] = "0123456789abcdefghijklmnopqrstuvwxyz";
-	std::string result;
-
-	do {
-		result.push_back(base36Chars[hash % 36]);
-		hash /= 36;
-	} while (hash > 0);
-
-	// Reverse the string to get the correct order
-	std::reverse(result.begin(), result.end());
-
-	// Truncate to maximum allowed length if necessary
-	constexpr size_t MAX_KEY_LENGTH = 254 - sizeof(PERSIST_COMMAND);
-	if (result.length() > MAX_KEY_LENGTH) {
-		result = result.substr(0, MAX_KEY_LENGTH);
-	}
-
-	return result;
-#else
-	return key;
-#endif
-}
-
 
 // ConVar handling
 __int64 CConVar__GetSplitScreenPlayerSlot(char* fakethisptr) {
@@ -1172,13 +873,28 @@ void PDef::InitValidator() {
 std::unique_ptr<PDataValidator> PDef::s_validator;
 std::once_flag PDef::s_initFlag;
 
+//-----------------------------------------------------------------------------
+// Wire format
+//-----------------------------------------------------------------------------
+
 namespace {
 constexpr uint32_t kPackedPDataMinEntries = 32;
 
-bool IsPersistentConVarName(const char* name)
+bool IsSchemaValidPersistentConVar(const NetMessageCvar_t& var)
 {
-	constexpr char prefix[] = PERSIST_COMMAND" ";
-	return name && strncmp(name, prefix, sizeof(prefix) - 1) == 0;
+	const char* key = var.name + kPersistPrefixLength;
+	return IsValidUserInfo(key) && IsValidUserInfo(var.value)
+		&& PDef::IsValidKeyAndValue(key, var.value);
+}
+
+void WarnDroppedPersistentEntry(const char* where, const char* key, const char* value)
+{
+	static int budget = 32;
+	if (budget <= 0)
+		return;
+	--budget;
+	Warning("R1Delta: %s dropped persistent data entry that fails the active schema: key=%s value=%s\n",
+		where, key ? key : "", value ? value : "");
 }
 
 struct PackedPDataPayload {
@@ -1193,23 +909,12 @@ bool BuildPackedPDataPayload(const NET_SetConVar* message, PackedPDataPayload& p
 
 	std::vector<PersistentDataCodec::Entry> entries;
 	entries.reserve(message->m_ConVars.Count());
-	const size_t prefixLength = sizeof(PERSIST_COMMAND" ") - 1;
 	for (int i = 0; i < message->m_ConVars.Count(); ++i) {
 		const NetMessageCvar_t& var = message->m_ConVars[i];
 		if (!IsPersistentConVarName(var.name))
 			continue;
-		LogPersistentDataDiagnostic(
-			"client-pack",
-			-1,
-			var.name,
-			var.value,
-			true,
-			entries.size() + 1);
-
-		const char* key = var.name + prefixLength;
-		if (!PDef::IsValidKeyAndValue(key, var.value))
-			return false;
-		entries.push_back({ key, var.value });
+		LogPersistentDataDiagnostic("client-pack", -1, var.name, var.value);
+		entries.push_back({ var.name + kPersistPrefixLength, var.value });
 	}
 
 	if (entries.size() < kPackedPDataMinEntries
@@ -1235,34 +940,67 @@ bool DecodePackedPDataWire(const std::string& encoded, std::vector<NetMessageCva
 	decoded.reserve(entries.size());
 	for (const PersistentDataCodec::Entry& entry : entries) {
 		NetMessageCvar_t var = {};
-		if (entry.key.size() >= sizeof(var.name) || entry.value.size() >= sizeof(var.value))
+		if (entry.key.size() + kPersistPrefixLength >= sizeof(var.name)
+			|| entry.value.size() >= sizeof(var.value))
 			return false;
-		memcpy(var.name, entry.key.c_str(), entry.key.size() + 1);
-		if (!SafePrefixConVarName(var.name, sizeof(var.name), PERSIST_COMMAND" "))
-			return false;
+		memcpy(var.name, kPersistPrefix, kPersistPrefixLength);
+		memcpy(var.name + kPersistPrefixLength, entry.key.c_str(), entry.key.size() + 1);
 		memcpy(var.value, entry.value.c_str(), entry.value.size() + 1);
-		if (!PDef::IsValidKeyAndValue(var.name + sizeof(PERSIST_COMMAND" ") - 1, var.value))
-			return false;
+		// One entry the server's schema does not know (e.g. a client-side mod)
+		// must not throw away the rest of the player's data.
+		if (!IsSchemaValidPersistentConVar(var)) {
+			WarnDroppedPersistentEntry("packed decode", entry.key.c_str(), entry.value.c_str());
+			continue;
+		}
 		decoded.push_back(var);
 	}
 	output = std::move(decoded);
 	return true;
 }
+
+static size_t ClientPersistentConVarCount();
+
 bool NET_SetConVar__WriteToBuffer(NET_SetConVar* thisptr, bf_write& buffer) {
 	const int startBit = buffer.GetNumBitsWritten();
 	if (g_bNoSendConVar) {
 		buffer.WriteByte(0);
 		return !buffer.IsOverflowed();
 	}
+	bool vanilla = false;
 	if (!IsDedicatedServer()) {
 		auto var = OriginalCCVar_FindVar(cvarinterface, "net_secure");
-		const bool vanilla = var && var->m_Value.m_nValue == 1;
+		vanilla = var && var->m_Value.m_nValue == 1;
 		if (vanilla) {
 			for (int i = thisptr->m_ConVars.Count() - 1; i >= 0; --i) {
 				if (thisptr->m_ConVars[i].name[0] == '_')
 					thisptr->m_ConVars.Remove(i);
 			}
 		}
+	}
+
+	// Entries that fail the active schema (data kept for a mod that is not
+	// loaded right now) stay on disk but are not sent; a server would reject
+	// them.
+	size_t persistentCount = 0;
+	bool hasMarker = false;
+	for (int i = thisptr->m_ConVars.Count() - 1; i >= 0; --i) {
+		NetMessageCvar_t& var = thisptr->m_ConVars[i];
+		if (IsPDataFullSnapshotMarker(var.name)) {
+			hasMarker = true;
+			continue;
+		}
+		if (!IsPersistentConVarName(var.name))
+			continue;
+		++persistentCount;
+		if (!IsSchemaValidPersistentConVar(var))
+			thisptr->m_ConVars.Remove(i);
+	}
+	if (!vanilla && !hasMarker && !IsDedicatedServer() && persistentCount > 0
+		&& persistentCount >= ClientPersistentConVarCount()) {
+		NetMessageCvar_t marker = {};
+		strcpy_s(marker.name, sizeof(marker.name), kFullSnapshotMarker);
+		strcpy_s(marker.value, sizeof(marker.value), "1");
+		thisptr->m_ConVars.AddToTail(marker);
 	}
 
 	PackedPDataPayload packed;
@@ -1309,10 +1047,9 @@ bool NET_SetConVar__WriteToBuffer(NET_SetConVar* thisptr, bf_write& buffer) {
 		}
 
 		if (IsPersistentConVarName(var.name)) {
-			constexpr size_t prefixLength = sizeof(PERSIST_COMMAND" ") - 1;
 			char modifiedName[sizeof(var.name)] = {};
-			modifiedName[0] = static_cast<char>(static_cast<unsigned char>(var.name[prefixLength]) | 0x80);
-			strcpy_s(modifiedName + 1, sizeof(modifiedName) - 1, var.name + prefixLength + 1);
+			modifiedName[0] = static_cast<char>(static_cast<unsigned char>(var.name[kPersistPrefixLength]) | 0x80);
+			strcpy_s(modifiedName + 1, sizeof(modifiedName) - 1, var.name + kPersistPrefixLength + 1);
 			buffer.WriteString(modifiedName);
 		}
 		else {
@@ -1347,9 +1084,10 @@ bool NET_SetConVar__WriteToBuffer(NET_SetConVar* thisptr, bf_write& buffer) {
 			msg,
 			sizeof(msg),
 			_TRUNCATE,
-			"R1Delta: NET_SetConVar write count=%u original=%d packedEntries=%u packedChunks=%u startBit=%d endBit=%d result=%d\n",
+			"R1Delta: NET_SetConVar write count=%u original=%d persistent=%zu packedEntries=%u packedChunks=%u startBit=%d endBit=%d result=%d\n",
 			numvars,
 			thisptr->m_ConVars.Count(),
+			persistentCount,
 			packed.entryCount,
 			chunkCount,
 			startBit,
@@ -1359,6 +1097,7 @@ bool NET_SetConVar__WriteToBuffer(NET_SetConVar* thisptr, bf_write& buffer) {
 	}
 	return result;
 }
+
 bool SafePrefixConVarName(char* name, size_t nameBufferSize, const char* prefix) {
 	const size_t prefixLen = strlen(prefix);
 	const size_t nameLen = strlen(name);
@@ -1369,14 +1108,12 @@ bool SafePrefixConVarName(char* name, size_t nameBufferSize, const char* prefix)
 		return false;
 	}
 
-	// Move the existing name to make room for prefix (including null terminator)
 	memmove(name + prefixLen, name, nameLen + 1);
-
-	// Copy the prefix
 	memcpy(name, prefix, prefixLen);
-
 	return true;
 }
+
+static int NativeServerSlotFromMessageHandler(const void* handler);
 
 bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 	uint32_t numvars;
@@ -1397,6 +1134,7 @@ bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 	std::string packedPData;
 	bool sawPackedPData = false;
 	bool sawLegacyPData = false;
+	bool sawFullSnapshotMarker = false;
 	size_t decodedPersistentCount = 0;
 	for (uint32_t i = 0; i < numvars; i++) {
 		NetMessageCvar_t var;
@@ -1418,33 +1156,31 @@ bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 			continue;
 		}
 
-		// Check if this is a persistent data convar by checking the high bit
+		if (IsPDataFullSnapshotMarker(var.name)) {
+			sawFullSnapshotMarker = true;
+			continue;
+		}
+
+		// Persistent data convars are sent with the high bit set on the first character.
 		if (static_cast<unsigned char>(var.name[0]) & 0x80) {
 			sawLegacyPData = true;
-			// Clear the high bit for validation
 			var.name[0] &= 0x7F;
-
-			// Create string views for validation without the prefix
-			std::string nameStr(var.name);
-			std::string valueStr(var.value);
-
-			if (!PDef::IsValidKeyAndValue(nameStr, valueStr)) {
-				Warning("Invalid persistent data convar: key=%s value=%s\n", var.name, var.value);
-				return false;
-			}
 
 			if (!SafePrefixConVarName(var.name, sizeof(var.name), PERSIST_COMMAND" ")) {
 				Warning("Failed to prefix persistent data convar\n");
 				return false;
 			}
+			if (!IsSchemaValidPersistentConVar(var)) {
+				WarnDroppedPersistentEntry("legacy read", var.name + kPersistPrefixLength, var.value);
+				continue;
+			}
 		}
 		else {
 			// Skip networkid_force CVar case-insensitively
 			if (::_stricmp(var.name, "networkid_force") == 0) {
-				continue; // Skip this CVar
+				continue;
 			}
 
-			// Check if convar exists and has FCVAR_USERINFO flag
 			int flags = 0;
 			if (OriginalCCVar_FindVar) {
 				if (auto* cvar = OriginalCCVar_FindVar(cvarinterface, var.name))
@@ -1475,6 +1211,12 @@ bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 
 	if (buffer.IsOverflowed())
 		return false;
+
+	// Server side: reconcile against writes the client has not acknowledged yet.
+	const int playerSlot = NativeServerSlotFromMessageHandler(thisptr->m_pMessageHandler);
+	if (playerSlot >= 0)
+		PData_ServerReconcileIncoming(playerSlot, nullptr, staged, sawFullSnapshotMarker);
+
 	thisptr->m_ConVars.RemoveAll();
 	thisptr->m_ConVars.EnsureCapacity(static_cast<int>(staged.size()));
 	for (const NetMessageCvar_t& var : staged)
@@ -1488,48 +1230,18 @@ bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 				message,
 				sizeof(message),
 				_TRUNCATE,
-				"R1Delta: NET_SetConVar decoded packedEntries=%zu total=%zu encodedBytes=%zu\n",
+				"R1Delta: NET_SetConVar decoded packedEntries=%zu total=%zu encodedBytes=%zu full=%d slot=%d\n",
 				decodedPersistentCount,
 				staged.size(),
-				packedPData.size());
+				packedPData.size(),
+				static_cast<int>(sawFullSnapshotMarker),
+				playerSlot);
 			OutputDebugStringA(message);
 		}
 	}
 	return true;
 }
-const char* hashUserInfoKeyArena(Arena* arena, const char* key)
-{
-	ZoneScoped;
 
-#ifdef HASH_USERINFO_KEYS
-# error NOT IMPLEMENTED
-#else
-	// Validate array indices before copying the logical key into scratch storage.
-	if (!PDef::ValidateKeyIndices(key))
-		key = "";
-
-	// NOTE(mrsteyk): guarantee key length validity.
-	constexpr size_t MAX_LENGTH_DUP = MAX_LENGTH - sizeof(PERSIST_COMMAND);
-	auto len = strlen(key);
-	if (len > MAX_LENGTH_DUP)
-	{
-		R1DAssert(!"Bad stuff happened!");
-		len = MAX_LENGTH_DUP;
-	}
-
-	auto ret = (char*)arena_push(arena, len + 1);
-	memcpy(ret, key, len);
-	ret[len] = '\0';
-	// TODO(mrsteyk): debug only check?
-	//if (std::string(key) != std::string(ret))
-	if (key[len] != 0 || !!memcmp(ret, key, len))
-	{
-		R1DAssert(!"in != out");
-		Msg("hashUserInfoKeyArena: in: %s out %s\n", key, ret);
-	}
-	return ret;
-#endif
-}
 // Squirrel VM functions
 SQInteger Script_ClientGetPersistentData(HSQUIRRELVM v) {
 	if (sq_gettop(nullptr, v) != 3) {
@@ -1549,37 +1261,14 @@ SQInteger Script_ClientGetPersistentData(HSQUIRRELVM v) {
 		return sq_throwerror(v, "Invalid user info key or default value.");
 	}
 
-	auto arena = tctx.get_arena_for_scratch();
-	auto temp = TempArena(arena);
-
-	auto hashedKey = hashUserInfoKeyArena(arena, key);
-	auto hashedKey_len = strlen(hashedKey);
-	size_t varName_size = hashedKey_len + sizeof(PERSIST_COMMAND) + 1;
-	auto varName = (char*)arena_push(arena, varName_size);
-	memcpy(varName, PERSIST_COMMAND" ", sizeof(PERSIST_COMMAND));
-	memcpy(varName + sizeof(PERSIST_COMMAND), hashedKey, hashedKey_len);
-	varName[sizeof(PERSIST_COMMAND) + hashedKey_len] = '\0';
-	
-	// NOTE(mrsteyk): hashed key can't be invalid, that must be a guarantee of hashUserInfoKey(Arena) given a valid key.
-	//                -1 cuz null terminator.
-	R1DAssert(IsValidUserInfo(varName, varName_size - 1));
-
-	auto var = OriginalCCVar_FindVar(cvarinterface, varName);
-
-	if (!var) {
-		//Warning("Client couldn't find persistent value: key=%s, hashedKey=%s, hashed=%s\n",
-		//    key, hashedKey.c_str(), "true");
-
-		sq_pushstring(v, defaultValue, -1);
-	}
-	else {
-		//Msg("Client accessing persistent value: key=%s, hashedKey=%s, value=%s, hashed=%s\n",
-		//    key, hashedKey.c_str(), var->m_Value.m_pszString, "true");
-		sq_pushstring(v, var->m_Value.m_pszString, -1);
-	}
-
+	char name[CCommand::COMMAND_MAX_LENGTH];
+	ConVarR1* var = PDef::ValidateKeyIndices(key) && MakePersistConVarName(key, name, sizeof(name))
+		? OriginalCCVar_FindVar(cvarinterface, name)
+		: nullptr;
+	sq_pushstring(v, var && var->m_Value.m_pszString ? var->m_Value.m_pszString : defaultValue, -1);
 	return 1;
 }
+
 struct CBaseClient
 {
 	_BYTE gap0[1040];
@@ -1594,313 +1283,534 @@ struct CBaseClientDS
 	char pad[215712];
 };
 static_assert(sizeof(CBaseClientDS) == 216640);
+
+//-----------------------------------------------------------------------------
+// Server side
+//-----------------------------------------------------------------------------
+
 CBaseClient* g_pClientArray;
 CBaseClientDS* g_pClientArrayDS;
 
+namespace {
 
+std::array<PersistentDataState::PlayerState, PersistentDataSlots::kMaximumSupportedClients> g_serverPlayers;
 
+// R1O fake dedicated servers have no engine-side userinfo table for clients,
+// so they keep a full mirror of every player's data.
+bool ServerKeepsMirror()
+{
+	return IsR1ODedicatedServer();
+}
 
-KeyValues* GetClientConVarsKV(short index) {
-	if (index < 0 || IsR1ODedicatedServer())
+bool IsServerPlayerSlot(int playerSlot)
+{
+	return pGlobalVarsServer
+		&& PersistentDataSlots::IsValidPlayerSlot(playerSlot, pGlobalVarsServer->maxClients);
+}
+
+uintptr_t NativeClientBase(int playerSlot)
+{
+	if (playerSlot < 0 || playerSlot >= PersistentDataSlots::kMaximumSupportedClients
+		|| IsR1ODedicatedServer())
+		return 0;
+	if (IsDedicatedServer())
+		return g_pClientArrayDS ? reinterpret_cast<uintptr_t>(&g_pClientArrayDS[playerSlot]) : 0;
+	return g_pClientArray ? reinterpret_cast<uintptr_t>(&g_pClientArray[playerSlot]) : 0;
+}
+
+// IClient lives at +8 in CBaseClient on both engine builds (see sv_filter.h).
+constexpr size_t kNativeIClientOffset = 8;
+constexpr size_t kIClientGetUserIdIndex = 120 / sizeof(void*);
+constexpr size_t kIClientGetNetChannelIndex = 144 / sizeof(void*);
+
+bool ReadNativeClientSession(uintptr_t clientBase, uintptr_t& netChannel, int& userId)
+{
+	__try {
+		void* client = reinterpret_cast<void*>(clientBase + kNativeIClientOffset);
+		const uintptr_t* vtable = *reinterpret_cast<uintptr_t* const*>(client);
+		if (!vtable)
+			return false;
+		using GetNetChannelFn = void* (__fastcall*)(void*);
+		using GetUserIdFn = int(__fastcall*)(void*);
+		netChannel = reinterpret_cast<uintptr_t>(
+			reinterpret_cast<GetNetChannelFn>(vtable[kIClientGetNetChannelIndex])(client));
+		userId = netChannel
+			? reinterpret_cast<GetUserIdFn>(vtable[kIClientGetUserIdIndex])(client)
+			: -1;
+		return true;
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) {
+		return false;
+	}
+}
+
+bool ResolveServerSession(int playerSlot, PersistentDataState::SessionKey& session)
+{
+	session = {};
+	if (!IsServerPlayerSlot(playerSlot))
+		return false;
+	if (IsR1ODedicatedServer())
+		return R1OResolvePersistenceSessionForSlot(playerSlot, session) && session.IsValid();
+
+	const uintptr_t clientBase = NativeClientBase(playerSlot);
+	uintptr_t netChannel = 0;
+	int userId = -1;
+	if (!clientBase || !ReadNativeClientSession(clientBase, netChannel, userId))
+		return false;
+	session.netChannel = netChannel;
+	session.userId = userId;
+	return session.IsValid();
+}
+
+// Returns the player's state bound to its current connection, or nullptr for
+// slots without a real client (bots, empty slots).
+PersistentDataState::PlayerState* BindServerPlayer(int playerSlot)
+{
+	PersistentDataState::SessionKey session;
+	if (!ResolveServerSession(playerSlot, session))
 		return nullptr;
-	if (IsDedicatedServer()) {
-		if (!g_pClientArrayDS)
-			return nullptr;
-		return g_pClientArrayDS[index].m_ConVars;
+	PersistentDataState::PlayerState& state = g_serverPlayers[playerSlot];
+	if (!PersistentDataState::BeginSession(state, session))
+		return nullptr;
+	return &state;
+}
+
+uintptr_t EdictForPlayerSlot(int playerSlot)
+{
+	if (!pGlobalVarsServer || !pGlobalVarsServer->pEdicts)
+		return 0;
+	return reinterpret_cast<uintptr_t>(pGlobalVarsServer->pEdicts)
+		+ static_cast<uintptr_t>(playerSlot + 1) * 56;
+}
+
+using ClientCommandFn = void(__fastcall*)(void*, uintptr_t, const char*, ...);
+
+bool SendPersistentCommandToClient(int playerSlot, const char* key, const char* value)
+{
+	const uintptr_t edict = EdictForPlayerSlot(playerSlot);
+	if (!edict || !key || !value)
+		return false;
+
+	if (IsR1ODedicatedServer()) {
+		// Use the exact native interface that R1OFactory handed to server_local.dll.
+		// dedicated.dll's app-system factory does not expose this interface in fake
+		// dedicated mode. ClientCommand is slot 37 in VEngineServer022.
+		void* engineServer = GetR1ONativeEngineServer022();
+		if (!engineServer)
+			return false;
+		const auto vtable = *reinterpret_cast<uintptr_t* const*>(engineServer);
+		if (!vtable || !vtable[37])
+			return false;
+		reinterpret_cast<ClientCommandFn>(vtable[37])(
+			engineServer, edict, PERSIST_COMMAND" \"%s\" \"%s\"", key, value);
+		return true;
+	}
+
+	static ClientCommandFn clientCommand = nullptr;
+	if (!clientCommand) {
+		clientCommand = IsDedicatedServer()
+			? reinterpret_cast<ClientCommandFn>(G_engine_ds + 0x6F030)
+			: reinterpret_cast<ClientCommandFn>(G_engine + 0xFE7F0);
+	}
+	clientCommand(nullptr, edict, PERSIST_COMMAND" \"%s\" \"%s\"", key, value);
+	return true;
+}
+
+void SendResends(int playerSlot, PersistentDataState::PlayerState& state, double now)
+{
+	if (state.pending.empty())
+		return;
+	const PersistentDataState::EntryList due = PersistentDataState::CollectResends(state, now);
+	for (const auto& [name, value] : due) {
+		if (!IsPersistentConVarName(name.c_str()))
+			continue;
+		LogPersistentDataDiagnostic("server-resend", playerSlot, name.c_str(), value.c_str());
+		SendPersistentCommandToClient(playerSlot, name.c_str() + kPersistPrefixLength, value.c_str());
+	}
+}
+
+void ServiceServerPlayers(bool throttle)
+{
+	if (!pGlobalVarsServer)
+		return;
+	const double now = Plat_FloatTime();
+	static double lastService = 0.0;
+	if (throttle && now - lastService < 0.25)
+		return;
+	lastService = now;
+
+	const int maxClients = (std::min)(
+		pGlobalVarsServer->maxClients, PersistentDataSlots::kMaximumSupportedClients);
+	for (int slot = 0; slot < maxClients; ++slot) {
+		PersistentDataState::PlayerState& state = g_serverPlayers[slot];
+		if (state.pending.empty())
+			continue;
+		// Never deliver a write to whoever occupies the slot now unless it is
+		// the same connection the write was made for.
+		// A slot that cannot be resolved right now (e.g. mid-changelevel) keeps
+		// its pending writes; a different connection wipes them in BeginSession.
+		PersistentDataState::SessionKey session;
+		if (!ResolveServerSession(slot, session)
+			|| !PersistentDataState::BeginSession(state, session))
+			continue;
+		SendResends(slot, state, now);
+	}
+}
+
+KeyValues* GetClientConVarsKV(int index)
+{
+	if (index < 0 || index >= PersistentDataSlots::kMaximumSupportedClients || IsR1ODedicatedServer())
+		return nullptr;
+	if (IsDedicatedServer())
+		return g_pClientArrayDS ? g_pClientArrayDS[index].m_ConVars : nullptr;
+	return g_pClientArray ? g_pClientArray[index].m_ConVars : nullptr;
+}
+
+int NativePlayerSlotFromEntity(const void* player)
+{
+	if (!player || !pGlobalVarsServer || !pGlobalVarsServer->pEdicts)
+		return -1;
+	const auto edict = *reinterpret_cast<const __int64*>(reinterpret_cast<uintptr_t>(player) + 64);
+	return static_cast<int>(((edict - reinterpret_cast<__int64>(pGlobalVarsServer->pEdicts)) / 56) - 1);
+}
+
+struct ServerPlayerRef
+{
+	int playerSlot = -1;
+	bool replay = false;
+};
+
+bool ResolveScriptPlayer(HSQUIRRELVM v, ServerPlayerRef& player, const char*& error)
+{
+	void* entity = sq_getentity(v, 2);
+	if (!entity) {
+		error = "player is null";
+		return false;
+	}
+	if (!IsR1ODedicatedServer()) {
+		player.playerSlot = NativePlayerSlotFromEntity(entity);
+		player.replay = PersistentDataSlots::IsReplayPlayerSlot(player.playerSlot);
+		return true;
+	}
+
+	if (!pGlobalVarsServer || !pGlobalVarsServer->pEdicts) {
+		error = "player is not backed by a valid edict";
+		return false;
+	}
+	__try {
+		const uintptr_t edict = *reinterpret_cast<const uintptr_t*>(
+			reinterpret_cast<uintptr_t>(entity) + 0x40);
+		const uintptr_t firstEdict = reinterpret_cast<uintptr_t>(pGlobalVarsServer->pEdicts);
+		if (edict < firstEdict + 56 || (edict - firstEdict) % 56 != 0) {
+			error = "player is not backed by a valid edict";
+			return false;
+		}
+		player.playerSlot = static_cast<int>((edict - firstEdict) / 56) - 1;
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) {
+		error = "player is not backed by a valid edict";
+		return false;
+	}
+	player.replay = PersistentDataSlots::IsReplayPlayerSlot(player.playerSlot);
+	if (!player.replay && !IsServerPlayerSlot(player.playerSlot)) {
+		error = "player is not an active client";
+		return false;
+	}
+	return true;
+}
+
+// Reads what the server should consider the player's current value.
+bool ServerReadPersistent(int playerSlot, const char* name, std::string& value)
+{
+	if (!IsServerPlayerSlot(playerSlot) || PersistentDataSlots::IsReplayPlayerSlot(playerSlot))
+		return false;
+
+	PersistentDataState::PlayerState* state = BindServerPlayer(playerSlot);
+	if (!state && ServerKeepsMirror())
+		state = &g_serverPlayers[playerSlot]; // bot or not-yet-bound slot: best effort
+	if (state) {
+		if (const std::string* found = PersistentDataState::Find(*state, name)) {
+			value = *found;
+			LogPersistentDataDiagnostic("server-read", playerSlot, name, value.c_str());
+			return true;
+		}
+	}
+	if (ServerKeepsMirror())
+		return false;
+
+	KeyValues* vars = GetClientConVarsKV(playerSlot);
+	if (!vars)
+		return false;
+	static constexpr char kMissing[] = "\x01";
+	const char* result = vars->GetString(name, kMissing);
+	if (!result || strcmp(result, kMissing) == 0)
+		return false;
+	value = result;
+	LogPersistentDataDiagnostic("server-read", playerSlot, name, result);
+	return true;
+}
+
+void ServerWritePersistent(int playerSlot, const char* key, const char* name, const char* value)
+{
+	if (!IsServerPlayerSlot(playerSlot) || PersistentDataSlots::IsReplayPlayerSlot(playerSlot))
+		return;
+
+	KeyValues* vars = ServerKeepsMirror() ? nullptr : GetClientConVarsKV(playerSlot);
+	if (!ServerKeepsMirror() && !vars)
+		return;
+
+	std::string clientValue;
+	bool haveClientValue = false;
+	if (vars) {
+		static constexpr char kMissing[] = "\x01";
+		const char* current = vars->GetString(name, kMissing);
+		if (current && strcmp(current, kMissing) != 0) {
+			clientValue = current;
+			haveClientValue = true;
+		}
+	}
+
+	const double now = Plat_FloatTime();
+	PersistentDataState::PlayerState* state = BindServerPlayer(playerSlot);
+	bool mustSend;
+	if (state) {
+		mustSend = PersistentDataState::RecordServerWrite(
+			*state, name, value, haveClientValue ? &clientValue : nullptr, now, ServerKeepsMirror());
 	}
 	else {
-		if (!g_pClientArray)
-			return nullptr;
-		return g_pClientArray[index].m_ConVars;
+		// No real connection behind the slot (bot). Keep the old best-effort
+		// behaviour without delivery tracking.
+		PersistentDataState::PlayerState& unbound = g_serverPlayers[playerSlot];
+		if (ServerKeepsMirror()) {
+			auto& slotValue = unbound.values[name];
+			mustSend = slotValue != value;
+			slotValue = value;
+		}
+		else {
+			mustSend = !haveClientValue || clientValue != value;
+		}
 	}
+
+	LogPersistentDataDiagnostic("server-write", playerSlot, name, value);
+	if (!mustSend)
+		return;
+	if (vars)
+		vars->SetString(name, value);
+	if (!SendPersistentCommandToClient(playerSlot, key, value))
+		Warning("R1Delta: failed to send persistent data update to player slot %d\n", playerSlot);
+}
+
+// Builds the "__ key" name for a script-supplied key. Keys with out-of-range
+// array indices are rejected here instead of producing a bogus name.
+bool BuildScriptPersistName(const char* key, char* out, size_t outSize)
+{
+	if (!PDef::ValidateKeyIndices(key))
+		return false;
+	return MakePersistConVarName(key, out, outSize);
+}
+
+}
+
+bool PData_ServerReconcileIncoming(
+	int playerSlot,
+	const PersistentDataState::SessionKey* sessionOverride,
+	std::vector<NetMessageCvar_t>& staged,
+	bool fullSnapshot)
+{
+	if (!IsServerPlayerSlot(playerSlot))
+		return false;
+
+	PersistentDataState::SessionKey session;
+	if (sessionOverride)
+		session = *sessionOverride;
+	else if (!ResolveServerSession(playerSlot, session))
+		return false;
+
+	PersistentDataState::PlayerState& state = g_serverPlayers[playerSlot];
+	if (!PersistentDataState::BeginSession(state, session))
+		return false;
+
+	std::vector<size_t> indices;
+	PersistentDataState::EntryList entries;
+	for (size_t i = 0; i < staged.size(); ++i) {
+		if (!IsPersistentConVarName(staged[i].name))
+			continue;
+		indices.push_back(i);
+		entries.emplace_back(staged[i].name, staged[i].value);
+	}
+	if (entries.empty() && state.pending.empty() && !(fullSnapshot && ServerKeepsMirror()))
+		return true;
+
+	PersistentDataState::ApplyClientUpdate(state, entries, fullSnapshot, ServerKeepsMirror());
+
+	for (size_t i = 0; i < entries.size(); ++i) {
+		const std::string& name = entries[i].first;
+		const std::string& value = entries[i].second;
+		if (i < indices.size()) {
+			NetMessageCvar_t& var = staged[indices[i]];
+			if (value != var.value)
+				strncpy_s(var.value, sizeof(var.value), value.c_str(), _TRUNCATE);
+			LogPersistentDataDiagnostic(fullSnapshot ? "server-snapshot" : "server-delta",
+				playerSlot, var.name, var.value);
+			continue;
+		}
+		NetMessageCvar_t var = {};
+		if (name.size() >= sizeof(var.name) || value.size() >= sizeof(var.value))
+			continue;
+		memcpy(var.name, name.c_str(), name.size() + 1);
+		memcpy(var.value, value.c_str(), value.size() + 1);
+		staged.push_back(var);
+	}
+
+	SendResends(playerSlot, state, Plat_FloatTime());
+	return true;
+}
+
+void R1OClearPersistentUserDataForPlayer(int playerSlot)
+{
+	if (playerSlot >= 0 && playerSlot < PersistentDataSlots::kMaximumSupportedClients)
+		PersistentDataState::Reset(g_serverPlayers[playerSlot]);
+}
+
+bool R1OGetPersistentUserDataConVar(int playerSlot, const char* name, std::string& value)
+{
+	return IsR1ODedicatedServer() && IsPersistentConVarName(name)
+		&& ServerReadPersistent(playerSlot, name, value);
+}
+
+void PData_ServerRunFrame()
+{
+	ServiceServerPlayers(false);
+}
+
+static bool ParsePersistentInteger(const std::string& value, int& result)
+{
+	if (value.empty())
+		return false;
+	const char* begin = value.data();
+	const char* end = begin + value.size();
+	const auto parsed = std::from_chars(begin, end, result);
+	return parsed.ec == std::errc() && parsed.ptr == end;
+}
+
+static void RebuildNetworkedPersistentInt(void* pPlayer, const char* name, uintptr_t offset, int minValue, int maxValue)
+{
+	if (IsR1ODedicatedServer()) {
+		std::string value;
+		int parsed = 0;
+		if (!ServerReadPersistent(NativePlayerSlotFromEntity(pPlayer), name, value)
+			|| !ParsePersistentInteger(value, parsed))
+			return;
+		parsed = (std::max)(minValue, (std::min)(maxValue, parsed));
+		if (!R1OMarkTFOPlayerNetworkStateChanged(pPlayer)) {
+			Warning("Failed to mark R1O player %s for replication\n", name);
+			return;
+		}
+		*reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pPlayer) + offset) = parsed;
+		return;
+	}
+
+	std::string value;
+	int parsed = 0;
+	if (!ServerReadPersistent(NativePlayerSlotFromEntity(pPlayer), name, value)
+		|| !ParsePersistentInteger(value, parsed) || parsed == 0)
+		return;
+	parsed = (std::max)(minValue, (std::min)(maxValue, parsed));
+	int& networked = *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pPlayer) + offset);
+	if (networked != parsed)
+		networked = parsed;
 }
 
 void Script_XPChanged_Rebuild(void* pPlayer) {
-	if (IsR1ODedicatedServer()) {
-		const int playerSlot = R1OPlayerSlotFromEntity(pPlayer);
-		std::string value;
-		int xp = 0;
-		if (playerSlot < 0
-			|| !R1OGetPersistentUserDataConVar(playerSlot, PERSIST_COMMAND" xp", value)
-			|| !ParseR1OPersistentInteger(value, xp))
-			return;
-		if (!R1OMarkTFOPlayerNetworkStateChanged(pPlayer)) {
-			Warning("Failed to mark R1O player XP for replication\n");
-			return;
-		}
-		*reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pPlayer) + 0x1834) = xp;
-		return;
-	}
-
-	auto edict = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(pPlayer) + 64);
-	auto index = ((edict - reinterpret_cast<__int64>(pGlobalVarsServer->pEdicts)) / 56) - 1;
-
-	auto vars = GetClientConVarsKV(index);
-
-	if (!vars) {
-		return;
-	}
-
-	auto var = vars->GetInt(PERSIST_COMMAND" xp",0);
-	auto netValue = *reinterpret_cast<int*>(reinterpret_cast<__int64>(pPlayer) + 0x1834);
-	if (var == 0)
-		return;
-
-	if (var == netValue)
-		return;
-
-	*reinterpret_cast<int*>(reinterpret_cast<__int64>(pPlayer) + 0x1834) = var;
+	RebuildNetworkedPersistentInt(pPlayer, PERSIST_COMMAND" xp", 0x1834,
+		(std::numeric_limits<int>::min)(), (std::numeric_limits<int>::max)());
 }
-
 
 void Script_GenChanged_Rebuild(void* pPlayer) {
-	if (IsR1ODedicatedServer()) {
-		const int playerSlot = R1OPlayerSlotFromEntity(pPlayer);
-		std::string value;
-		int generation = 0;
-		if (playerSlot < 0
-			|| !R1OGetPersistentUserDataConVar(playerSlot, PERSIST_COMMAND" gen", value)
-			|| !ParseR1OPersistentInteger(value, generation))
-			return;
-		generation = (std::max)(0, (std::min)(9, generation));
-		if (!R1OMarkTFOPlayerNetworkStateChanged(pPlayer)) {
-			Warning("Failed to mark R1O player generation for replication\n");
-			return;
-		}
-		*reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pPlayer) + 0x183C) = generation;
-		return;
-	}
-
-	auto edict = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(pPlayer) + 64);
-	auto index = ((edict - reinterpret_cast<__int64>(pGlobalVarsServer->pEdicts)) / 56) - 1;
-
-	auto vars = GetClientConVarsKV(index);
-
-	if (!vars) {
-		return;
-	}
-
-	auto var = vars->GetInt(PERSIST_COMMAND" gen", 0);
-
-	auto netValue = *reinterpret_cast<int*>(reinterpret_cast<__int64>(pPlayer) + 0x183C);
-
-	if (var == 0)
-		return;
-
-	if (var == netValue)
-		return;
-
-	*reinterpret_cast<int*>(reinterpret_cast<__int64>(pPlayer) + 0x183C) = var;
-	auto netValueAfter = *reinterpret_cast<int*>(reinterpret_cast<__int64>(pPlayer) + 0x183C);
-
+	RebuildNetworkedPersistentInt(pPlayer, PERSIST_COMMAND" gen", 0x183C, 0, 9);
 }
 
-
-
 SQInteger Script_ServerGetPersistentUserDataKVString(HSQUIRRELVM v) {
-	if (IsR1ODedicatedServer()) {
-		void* entity = R1OGetEntityFromScriptArgument(v, 2);
-		if (!entity)
-			return sq_throwerror(v, "player is null");
-		R1OPersistentPlayerContext player;
-		if (!R1OResolvePersistentPlayer(entity, player))
-			return sq_throwerror(v, "player is not backed by a valid edict");
-		const char* pKey, * pDefaultValue;
-		if (SQ_FAILED(sq_getstring(v, 3, &pKey)) || SQ_FAILED(sq_getstring(v, 4, &pDefaultValue)))
-			return sq_throwerror(v, "Expected key and default string parameters");
-		if (!IsValidUserInfo(pKey) || !IsValidUserInfo(pDefaultValue))
-			return sq_throwerror(v, "Invalid user info key or default value.");
-		if (PersistentDataSlots::IsReplayPlayerSlot(player.playerSlot)) {
-			sq_pushstring(v, pDefaultValue, -1);
-			return 1;
-		}
-		if (!IsR1OPersistentPlayerSlot(player.playerSlot))
-			return sq_throwerror(v, "player is not an active client");
+	ServerPlayerRef player;
+	const char* error = nullptr;
+	if (!ResolveScriptPlayer(v, player, error))
+		return sq_throwerror(v, error);
 
-		auto arena = tctx.get_arena_for_scratch();
-		auto temp = TempArena(arena);
-		auto hashedKey = hashUserInfoKeyArena(arena, pKey);
-		auto hashedKey_len = strlen(hashedKey);
-		size_t modifiedKey_size = hashedKey_len + sizeof(PERSIST_COMMAND) + 1;
-		auto modifiedKey = (char*)arena_push(arena, modifiedKey_size);
-		memcpy(modifiedKey, PERSIST_COMMAND" ", sizeof(PERSIST_COMMAND));
-		memcpy(modifiedKey + sizeof(PERSIST_COMMAND), hashedKey, hashedKey_len);
-		modifiedKey[sizeof(PERSIST_COMMAND) + hashedKey_len] = '\0';
-		sq_pushstring(v, R1OFindPersistentUserDataConVar(player.playerSlot, modifiedKey, pDefaultValue), -1);
-		return 1;
-	}
-	const void* pPlayer = sq_getentity(v, 2);
-	if (!pPlayer) {
-		return sq_throwerror(v, "player is null");
-	}
-
-	const char* pKey, * pDefaultValue;
-	sq_getstring(v, 3, &pKey);
-	sq_getstring(v, 4, &pDefaultValue);
-	if (!IsValidUserInfo(pKey) || !IsValidUserInfo(pDefaultValue)) {
+	const char* pKey = nullptr;
+	const char* pDefaultValue = nullptr;
+	if (SQ_FAILED(sq_getstring(v, 3, &pKey)) || SQ_FAILED(sq_getstring(v, 4, &pDefaultValue)))
+		return sq_throwerror(v, "Expected key and default string parameters");
+	if (!IsValidUserInfo(pKey) || !IsValidUserInfo(pDefaultValue))
 		return sq_throwerror(v, "Invalid user info key or default value.");
-	}
 
-	auto arena = tctx.get_arena_for_scratch();
-	auto temp = TempArena(arena);
+	ServiceServerPlayers(true);
 
-	auto hashedKey = hashUserInfoKeyArena(arena, pKey);
-	auto hashedKey_len = strlen(hashedKey);
-	size_t modifiedKey_size = hashedKey_len + sizeof(PERSIST_COMMAND) + 1;
-	auto modifiedKey = (char*)arena_push(arena, modifiedKey_size);
-	memcpy(modifiedKey, PERSIST_COMMAND" ", sizeof(PERSIST_COMMAND));
-	memcpy(modifiedKey + sizeof(PERSIST_COMMAND), hashedKey, hashedKey_len);
-	modifiedKey[sizeof(PERSIST_COMMAND) + hashedKey_len] = '\0';
-
-	R1DAssert(IsValidUserInfo(modifiedKey));
-
-	auto edict = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(pPlayer) + 64);
-	auto index = ((edict - reinterpret_cast<__int64>(pGlobalVarsServer->pEdicts)) / 56) - 1;
-	auto* vars = GetClientConVarsKV(index);
-	RefreshNonR1OPersistentUserDataCache(index, vars);
-
-	if (index == 18 || !vars) {
-		//return sq_throwerror(v, "Client has NULL m_ConVars.");
-		//Msg("REPLAY on server tried to access persistent value: key=%s, hashedKey=%s, hashed=%s\n",
-		//	pKey, hashedKey.c_str(), "true");
-
-		sq_pushstring(v, pDefaultValue, -1); // I HATE REPLAY
+	char name[CCommand::COMMAND_MAX_LENGTH];
+	std::string value;
+	if (!player.replay
+		&& BuildScriptPersistName(pKey, name, sizeof(name))
+		&& ServerReadPersistent(player.playerSlot, name, value)) {
+		sq_pushstring(v, value.c_str(), -1);
 		return 1;
 	}
-
-	static constexpr char kMissingPersistentValue[] = "\x01";
-	const char* pResult = vars->GetString(modifiedKey, kMissingPersistentValue);
-	auto& playerValues = s_nonR1OPersistentUserDataByPlayer[index];
-	if (!pResult || std::strcmp(pResult, kMissingPersistentValue) == 0) {
-		auto cached = playerValues.find(std::string_view(modifiedKey));
-		if (cached != playerValues.end())
-			playerValues.erase(cached);
-		pResult = pDefaultValue;
-	}
-	else {
-		auto cached = playerValues.find(std::string_view(modifiedKey));
-		if (cached == playerValues.end())
-			playerValues.emplace(modifiedKey, pResult);
-		else
-			cached->second = pResult;
-	}
-	//Msg("Server accessing persistent value: key=%s, hashedKey=%s, value=%s, hashed=%s\n",
-	//	pKey, hashedKey.c_str(), pResult, "true");
-
-	sq_pushstring(v, pResult, -1);
+	sq_pushstring(v, pDefaultValue, -1);
 	return 1;
 }
 
 SQInteger Script_ServerSetPersistentUserDataKVString(HSQUIRRELVM v) {
-	if (IsR1ODedicatedServer()) {
-		void* entity = R1OGetEntityFromScriptArgument(v, 2);
-		if (!entity)
-			return sq_throwerror(v, "player is null");
-		R1OPersistentPlayerContext player;
-		if (!R1OResolvePersistentPlayer(entity, player))
-			return sq_throwerror(v, "player is not backed by a valid edict");
-		const char* pKey, * pValue;
-		if (SQ_FAILED(sq_getstring(v, 3, &pKey)) || SQ_FAILED(sq_getstring(v, 4, &pValue)))
-			return sq_throwerror(v, "Expected key and value string parameters");
-		if (!IsValidUserInfo(pKey) || !IsValidUserInfo(pValue))
-			return sq_throwerror(v, "Invalid user info key or value.");
-		if (PersistentDataSlots::IsReplayPlayerSlot(player.playerSlot)) {
-			sq_pushstring(v, pValue, -1);
-			return 1;
-		}
-		if (!IsR1OPersistentPlayerSlot(player.playerSlot))
-			return sq_throwerror(v, "player is not an active client");
+	ServerPlayerRef player;
+	const char* error = nullptr;
+	if (!ResolveScriptPlayer(v, player, error))
+		return sq_throwerror(v, error);
 
-		auto arena = tctx.get_arena_for_scratch();
-		auto temp = TempArena(arena);
-		auto hashedKey = hashUserInfoKeyArena(arena, pKey);
-		auto hashedKey_len = strlen(hashedKey);
-		size_t modifiedKey_size = hashedKey_len + sizeof(PERSIST_COMMAND) + 1;
-		auto modifiedKey = (char*)arena_push(arena, modifiedKey_size);
-		memcpy(modifiedKey, PERSIST_COMMAND" ", sizeof(PERSIST_COMMAND));
-		memcpy(modifiedKey + sizeof(PERSIST_COMMAND), hashedKey, hashedKey_len);
-		modifiedKey[sizeof(PERSIST_COMMAND) + hashedKey_len] = '\0';
-		if (!R1OSendPersistentUserDataCommand(player, hashedKey, pValue))
-			return sq_throwerror(v, "failed to send persistent data update to client");
-		if (!R1OStorePersistentUserDataConVar(player.playerSlot, modifiedKey, pValue))
-			return sq_throwerror(v, "failed to store persistent data");
-		sq_pushstring(v, pValue, -1);
-		return 1;
-	}
-	static void (*CVEngineServer_ClientCommand)(__int64 a1, __int64 a2, const char* a3, ...) = 0;
-	if (!CVEngineServer_ClientCommand && !IsDedicatedServer())
-		CVEngineServer_ClientCommand = decltype(CVEngineServer_ClientCommand)(G_engine + 0xFE7F0);
-	else if (!CVEngineServer_ClientCommand)
-		CVEngineServer_ClientCommand = decltype(CVEngineServer_ClientCommand)(G_engine_ds + 0x6F030);
-	const void* pPlayer = sq_getentity(v, 2);
-	if (!pPlayer) {
-		return sq_throwerror(v, "player is null");
-	}
-
-	auto arena = tctx.get_arena_for_scratch();
-	auto temp = TempArena(arena);
-
-	const char* pKey, * pValue;
-	sq_getstring(v, 3, &pKey);
-	sq_getstring(v, 4, &pValue);
-	if (!IsValidUserInfo(pKey) || !IsValidUserInfo(pValue)) {
+	const char* pKey = nullptr;
+	const char* pValue = nullptr;
+	if (SQ_FAILED(sq_getstring(v, 3, &pKey)) || SQ_FAILED(sq_getstring(v, 4, &pValue)))
+		return sq_throwerror(v, "Expected key and value string parameters");
+	if (!IsValidUserInfo(pKey) || !IsValidUserInfo(pValue))
 		return sq_throwerror(v, "Invalid user info key or value.");
+
+	ServiceServerPlayers(true);
+
+	char name[CCommand::COMMAND_MAX_LENGTH];
+	if (player.replay) {
+		// Replay entity: nothing to persist.
 	}
-	
-	auto hashedKey = hashUserInfoKeyArena(arena, pKey);
-	auto hashedKey_len = strlen(hashedKey);
-	size_t modifiedKey_size = hashedKey_len + sizeof(PERSIST_COMMAND) + 1;
-	auto modifiedKey = (char*)arena_push(arena, modifiedKey_size);
-	memcpy(modifiedKey, PERSIST_COMMAND" ", sizeof(PERSIST_COMMAND));
-	memcpy(modifiedKey + sizeof(PERSIST_COMMAND), hashedKey, hashedKey_len);
-	modifiedKey[sizeof(PERSIST_COMMAND) + hashedKey_len] = '\0';
-
-	R1DAssert(IsValidUserInfo(modifiedKey));
-
-	auto edict = *reinterpret_cast<__int64*>(reinterpret_cast<__int64>(pPlayer) + 64);
-
-	auto index = ((edict - reinterpret_cast<__int64>(pGlobalVarsServer->pEdicts)) / 56) - 1;
-	auto* vars = GetClientConVarsKV(index);
-	RefreshNonR1OPersistentUserDataCache(index, vars);
-	const bool isReplayPlayer = index == PersistentDataSlots::kReplayPlayerSlot;
-	bool shouldUpdate = vars != nullptr && !isReplayPlayer && IsValidNonR1OPersistentUserDataSlot(index);
-	if (shouldUpdate) {
-		auto& playerValues = s_nonR1OPersistentUserDataByPlayer[index];
-		static constexpr char kMissingPersistentValue[] = "\x01";
-		const char* currentValue = vars->GetString(modifiedKey, kMissingPersistentValue);
-		if (!currentValue || std::strcmp(currentValue, kMissingPersistentValue) == 0) {
-			auto existing = playerValues.find(std::string_view(modifiedKey));
-			if (existing != playerValues.end())
-				playerValues.erase(existing);
-		}
-		else {
-			auto existing = playerValues.find(std::string_view(modifiedKey));
-			if (existing == playerValues.end())
-				playerValues.emplace(modifiedKey, currentValue);
-			else if (existing->second != currentValue)
-				existing->second = currentValue;
-			if (std::strcmp(currentValue, pValue) == 0)
-				shouldUpdate = false;
-		}
-	}
-
-	if (shouldUpdate) {
-		//return sq_throwerror(v, "Client has NULL m_ConVars.");
-		CVEngineServer_ClientCommand(0, edict, PERSIST_COMMAND" \"%s\" \"%s\"", hashedKey, pValue);
-		vars->SetString(modifiedKey, pValue);
-		s_nonR1OPersistentUserDataByPlayer[index][modifiedKey] = pValue;
-		//Msg("Server setting persistent value: key=%s, value=%s, hashed=%s\n",
-		//	pKey, pValue, "true");
+	else if (!BuildScriptPersistName(pKey, name, sizeof(name))) {
+		static int budget = 16;
+		if (budget-- > 0)
+			Warning("R1Delta: ignoring persistent data write with invalid key %s\n", pKey);
 	}
 	else {
-		//Msg("Trying to set persistent value on REPLAY on server: key=%s, hashedKey=%s, value=%s, hashed=%s\n",
-		//	pKey, hashedKey.c_str(), pValue, "true");
+		ServerWritePersistent(player.playerSlot, pKey, name, pValue);
 	}
 
 	sq_pushstring(v, pValue, -1);
 	return 1;
 }
 
+static int NativeServerSlotFromMessageHandler(const void* handler)
+{
+	if (!handler || IsR1ODedicatedServer() || !pGlobalVarsServer)
+		return -1;
+	const uintptr_t address = reinterpret_cast<uintptr_t>(handler);
+	uintptr_t base = 0;
+	size_t stride = 0;
+	if (IsDedicatedServer()) {
+		base = reinterpret_cast<uintptr_t>(g_pClientArrayDS);
+		stride = sizeof(CBaseClientDS);
+	}
+	else {
+		base = reinterpret_cast<uintptr_t>(g_pClientArray);
+		stride = sizeof(CBaseClient);
+	}
+	const int maxClients = (std::min)(
+		pGlobalVarsServer->maxClients, PersistentDataSlots::kMaximumSupportedClients);
+	if (!base || maxClients <= 0 || address < base
+		|| address >= base + stride * static_cast<size_t>(maxClients))
+		return -1;
+	return static_cast<int>((address - base) / stride);
+}
 bool IsValidServerCommand(const char* cmd)
 {
 	bool in_string = false;
@@ -1989,699 +1899,477 @@ char __fastcall GetConfigPath(char* outPath, size_t outPathSize, int configType)
 	return 1;
 }
 
-
-static bool g_bTimerActive = false;
-static double g_flLastCommandTime = 0.0;
-static constexpr double SAVE_DELAY = 5.0;
-static bool g_bRecursive = false;
-static bool g_bSaveWritePending = false;
-static bool g_bSaveQueuedThisFrame = false;
-static bool g_bFinishSaveBeforeQuit = false;
-static bool g_bSchemaReloadPersistenceSafe = true;
-static bool g_bProfileReplayComplete = false;
-using NativeProfileWriterFn = char(__fastcall*)(unsigned int configType);
-static NativeProfileWriterFn g_NativeProfileWriterOriginal = nullptr;
+//-----------------------------------------------------------------------------
+// Client side: the persistent data store
+//-----------------------------------------------------------------------------
 
 namespace {
-constexpr int kPersistentSchemaFlags =
-	FCVAR_PERSIST | FCVAR_ARCHIVE_PLAYERPROFILE | FCVAR_USERINFO;
 
-struct PersistentConVarBinding {
-	std::string logicalKey;
-	int conVarFlags = 0;
-	int parentFlags = 0;
+// "__ <key>" convars are replicated to servers (USERINFO) but deliberately NOT
+// FCVAR_ARCHIVE_PLAYERPROFILE: profile.cfg no longer carries persistent data.
+constexpr int kPersistentConVarFlags = FCVAR_PERSIST_MASK & ~FCVAR_ARCHIVE_PLAYERPROFILE;
+
+constexpr double kSaveDebounceSeconds = 1.0;
+constexpr double kSaveMaxDelaySeconds = 5.0;
+constexpr double kSaveRetrySeconds = 2.0;
+
+struct ClientStore
+{
+	bool loaded = false;
+	bool disabled = false;
+	PersistentDataStore::Entries entries;
+	// Names of the "__ key" convars created so far. Used to recognise a
+	// NET_SetConVar that carries the complete data set.
+	std::unordered_set<std::string> conVarNames;
+
+	bool dirty = false;
+	double firstDirtyTime = 0.0;
+	double lastChangeTime = 0.0;
+	double retryTime = 0.0;
+	bool reportedSaveFailure = false;
+
+	std::filesystem::path path;
 };
 
-std::unordered_map<std::string, PersistentConVarBinding> g_persistentConVarBindings;
-using PersistentValueSnapshot = std::unordered_map<
-	std::string, std::string, HashStrings, std::equal_to<>>;
-PersistentValueSnapshot g_pendingProfileValues;
-
-void ApplyPersistentSchemaFlags(
-	ConVarR1* conVar,
-	const PersistentConVarBinding& binding,
-	bool enabled)
+// Intentionally leaked: the final flush runs from atexit, after which static
+// destructors may already have run.
+ClientStore& Store()
 {
-	if (!conVar)
-		return;
-	conVar->m_nFlags = (conVar->m_nFlags & ~kPersistentSchemaFlags)
-		| (enabled ? binding.conVarFlags : 0);
-	ConVarR1* parent = conVar->m_pParent;
-	if (parent && parent != conVar) {
-		parent->m_nFlags = (parent->m_nFlags & ~kPersistentSchemaFlags)
-			| (enabled ? binding.parentFlags : 0);
-	}
+	static ClientStore* store = new ClientStore();
+	return *store;
 }
 
-void RememberPersistentConVar(
-	const char* conVarName,
-	std::string_view logicalKey,
-	ConVarR1* conVar)
+std::filesystem::path WithSuffix(const std::filesystem::path& path, const wchar_t* suffix)
 {
-	if (!conVarName || !*conVarName || !conVar)
-		return;
-	auto [bindingIt, inserted] = g_persistentConVarBindings.try_emplace(conVarName);
-	PersistentConVarBinding& binding = bindingIt->second;
-	binding.logicalKey.assign(logicalKey);
-	const int conVarFlags = conVar->m_nFlags & kPersistentSchemaFlags;
-	ConVarR1* parent = conVar->m_pParent;
-	const int parentFlags = parent && parent != conVar
-		? parent->m_nFlags & kPersistentSchemaFlags
-		: 0;
-	if (inserted || conVarFlags)
-		binding.conVarFlags = conVarFlags;
-	if (inserted || parentFlags)
-		binding.parentFlags = parentFlags;
-	ApplyPersistentSchemaFlags(conVar, binding, true);
-}
+	std::filesystem::path result = path;
+	result += suffix;
+	return result;
 }
 
-static bool ValidateProfileContents(
-	std::string_view contents,
-	PersistentDataCodec::ProfileEntryValidator persistentValidator = nullptr,
-	void* validatorContext = nullptr)
-{
-	return PersistentDataCodec::ValidateProfile(contents, persistentValidator, validatorContext);
-}
-
-static bool ReadValidProfileFile(
-	const std::filesystem::path& path,
-	std::string* contents = nullptr,
-	PersistentDataCodec::ProfileEntryValidator persistentValidator = nullptr,
-	void* validatorContext = nullptr)
+bool ReadWholeFile(const std::filesystem::path& path, std::string& contents, size_t maxSize)
 {
 	std::error_code error;
 	if (!std::filesystem::is_regular_file(path, error) || error)
 		return false;
-	const uintmax_t fileSize = std::filesystem::file_size(path, error);
-	if (error || !fileSize || fileSize > PersistentDataCodec::MaxRawSize)
+	const uintmax_t size = std::filesystem::file_size(path, error);
+	if (error || size > maxSize)
 		return false;
-
-	std::string loaded(static_cast<size_t>(fileSize), '\0');
 	std::ifstream file(path, std::ios::binary);
-	if (!file.read(loaded.data(), static_cast<std::streamsize>(loaded.size()))
-		|| !ValidateProfileContents(loaded, persistentValidator, validatorContext))
+	if (!file)
 		return false;
-	if (contents)
-		*contents = std::move(loaded);
+	contents.assign(static_cast<size_t>(size), '\0');
+	if (size && !file.read(contents.data(), static_cast<std::streamsize>(size)))
+		return false;
 	return true;
 }
 
-static bool ReplaceFileWithCopy(const std::filesystem::path& source, const std::filesystem::path& destination)
+bool WriteFileDurably(const std::filesystem::path& path, std::string_view contents)
 {
-	std::filesystem::path temporary = destination;
-	temporary += ".tmp";
-	DeleteFileW(temporary.c_str());
-	if (!CopyFileW(source.c_str(), temporary.c_str(), FALSE))
-		return false;
-	if (!MoveFileExW(temporary.c_str(), destination.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-		DeleteFileW(temporary.c_str());
-		return false;
-	}
-	return true;
-}
-
-static bool ReplaceFileWithContents(
-	const std::filesystem::path& destination,
-	std::string_view contents)
-{
-	if (contents.empty() || contents.size() > PersistentDataCodec::MaxRawSize)
-		return false;
-	std::filesystem::path temporary = destination;
-	temporary += ".tmp";
-	DeleteFileW(temporary.c_str());
 	HANDLE file = CreateFileW(
-		temporary.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
-		FILE_ATTRIBUTE_NORMAL, nullptr);
+		path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
 	if (file == INVALID_HANDLE_VALUE)
 		return false;
 	DWORD written = 0;
-	const bool writeSucceeded = WriteFile(
-		file, contents.data(), static_cast<DWORD>(contents.size()), &written, nullptr) != FALSE
+	const bool ok = WriteFile(file, contents.data(), static_cast<DWORD>(contents.size()), &written, nullptr) != FALSE
 		&& written == contents.size()
 		&& FlushFileBuffers(file) != FALSE;
 	CloseHandle(file);
-	if (!writeSucceeded
-		|| !MoveFileExW(temporary.c_str(), destination.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-		DeleteFileW(temporary.c_str());
-		return false;
-	}
-	return true;
+	if (!ok)
+		DeleteFileW(path.c_str());
+	return ok;
 }
 
-static bool PreservePreviousPersistentEntries(
-	const std::filesystem::path& profile,
-	std::string_view current,
-	std::string_view previous)
-{
-	std::string merged;
-	if (!PersistentDataCodec::PreserveMissingPersistentEntries(current, previous, merged))
-		return false;
-	return merged == current || ReplaceFileWithContents(profile, merged);
-}
-
-static bool GetProfileTransactionPaths(
-	std::filesystem::path& profile,
-	std::filesystem::path& backup,
-	std::filesystem::path& marker)
+bool GetProfileDirectory(std::filesystem::path& directory)
 {
 	char path[MAX_PATH * 4] = {};
 	if (!GetConfigPath(path, sizeof(path), 1))
 		return false;
-	profile = std::filesystem::path(path);
-	// Ensure the profile directory exists before the transaction creates its
-	// save marker there. On fresh installs nothing else creates this folder —
-	// the native profile writer would create it implicitly on write, but the
-	// transaction gates the native writer with a marker file first. Without
-	// this, every save attempt fails for first-time users and progression
-	// silently never persists.
-	std::error_code directoryError;
-	std::filesystem::create_directories(profile.parent_path(), directoryError);
-	if (directoryError) {
-		Warning("Could not create persistent-data profile directory '%s': %s\n",
-			profile.parent_path().string().c_str(), directoryError.message().c_str());
-		return false;
-	}
-	backup = profile;
-	backup += ".bak";
-	marker = profile;
-	marker += ".saving";
+	directory = std::filesystem::path(path).parent_path();
 	return true;
 }
 
-static bool CaptureCurrentPersistentValues(PersistentValueSnapshot& snapshot)
+// Atomically replaces the store file. The previous generation is kept as .bak.
+// A crash at any point leaves either the old file, or the new file as .tmp
+// (which LoadStoreFile picks up).
+bool SaveStoreNow(bool quiet)
 {
-	snapshot.clear();
-	if (!OriginalCCVar_FindVar && !g_persistentConVarBindings.empty())
+	ClientStore& store = Store();
+	if (!store.loaded || store.disabled || store.path.empty())
 		return false;
-	constexpr std::string_view prefix = PERSIST_COMMAND" ";
-	for (const auto& entry : g_persistentConVarBindings) {
-		const std::string& conVarName = entry.first;
-		ConVarR1* conVar = OriginalCCVar_FindVar
-			? OriginalCCVar_FindVar(cvarinterface, conVarName.c_str())
-			: nullptr;
-		if (!conVar || !(conVar->m_nFlags & kPersistentSchemaFlags))
-			continue;
-		if (conVarName.compare(0, prefix.size(), prefix) != 0)
-			return false;
-		const char* value = conVar->m_Value.m_pszString;
-		if (!value)
-			return false;
-		auto [it, inserted] = snapshot.try_emplace(
-			conVarName.substr(prefix.size()), value);
-		if (!inserted && it->second != value)
-			return false;
-	}
-	return true;
-}
 
-static bool MatchRequiredPersistentValue(
-	std::string_view key,
-	std::string_view value,
-	void* context)
-{
-	auto& remaining = *static_cast<PersistentValueSnapshot*>(context);
-	auto it = remaining.find(key);
-	if (it == remaining.end())
+	const std::string contents = PersistentDataStore::Serialize(store.entries);
+	const std::filesystem::path temporary = WithSuffix(store.path, L".tmp");
+	const std::filesystem::path backup = WithSuffix(store.path, L".bak");
+
+	bool ok = WriteFileDurably(temporary, contents);
+	if (ok) {
+		std::error_code error;
+		if (std::filesystem::exists(store.path, error))
+			MoveFileExW(store.path.c_str(), backup.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+		ok = MoveFileExW(temporary.c_str(), store.path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != FALSE;
+	}
+
+	if (ok) {
+		store.dirty = false;
+		store.reportedSaveFailure = false;
 		return true;
-	if (it->second != value)
-		return false;
-	remaining.erase(it);
-	return true;
+	}
+
+	store.retryTime = Plat_FloatTime() + kSaveRetrySeconds;
+	if (!quiet && !store.reportedSaveFailure) {
+		store.reportedSaveFailure = true;
+		Warning("R1Delta: failed to save persistent data to %s (error %lu); will keep retrying\n",
+			store.path.string().c_str(), GetLastError());
+	}
+	return false;
 }
 
-static bool ProfileContainsPersistentValues(
-	const std::filesystem::path& profile,
-	const PersistentValueSnapshot& required)
-{
-	PersistentValueSnapshot remaining = required;
-	return ReadValidProfileFile(
-		profile, nullptr, MatchRequiredPersistentValue, &remaining)
-		&& remaining.empty();
-}
+enum class LoadResult { Missing, Loaded, Recovered };
 
-void PData_ReconcilePersistentConVars()
+// Picks the newest trustworthy copy: the primary file, else a .tmp left by a
+// save interrupted between its two renames, else the previous generation.
+// If none is intact, salvages the damaged copy with the most entries.
+LoadResult LoadStoreFile(const std::filesystem::path& path, PersistentDataStore::Entries& entries,
+	std::filesystem::path& loadedFrom)
 {
-	if (!OriginalCCVar_FindVar)
-		return;
+	const std::filesystem::path candidates[] = {
+		path, WithSuffix(path, L".tmp"), WithSuffix(path, L".bak"),
+	};
 
-	size_t disabled = 0;
-	size_t reenabled = 0;
-	for (const auto& [conVarName, binding] : g_persistentConVarBindings) {
-		ConVarR1* conVar = OriginalCCVar_FindVar(cvarinterface, conVarName.c_str());
-		if (!conVar)
+	PersistentDataStore::Entries salvage;
+	std::filesystem::path salvageFrom;
+	bool anyPresent = false;
+	for (const auto& candidate : candidates) {
+		std::string contents;
+		if (!ReadWholeFile(candidate, contents, PersistentDataStore::MaxFileSize))
 			continue;
-		const bool wasEnabled = (conVar->m_nFlags & kPersistentSchemaFlags) != 0;
-		const char* value = conVar->m_Value.m_pszString;
-		const bool schemaEnabled = value
-			&& IsValidUserInfo(binding.logicalKey.c_str())
-			&& IsValidUserInfo(value)
-			&& PDef::IsValidKeyAndValue(binding.logicalKey, value);
-		const bool enabled = schemaEnabled
-			|| (!g_bSchemaReloadPersistenceSafe && wasEnabled);
-		ApplyPersistentSchemaFlags(conVar, binding, enabled);
-		if (wasEnabled && !enabled)
-			++disabled;
-		else if (!wasEnabled && enabled)
-			++reenabled;
+		anyPresent = true;
+		PersistentDataStore::Entries parsed;
+		const auto status = PersistentDataStore::Parse(contents, parsed);
+		if (status == PersistentDataStore::ParseStatus::Valid) {
+			entries = std::move(parsed);
+			loadedFrom = candidate;
+			return candidate == path ? LoadResult::Loaded : LoadResult::Recovered;
+		}
+		Warning("R1Delta: persistent data file %s is damaged (%zu entries readable)\n",
+			candidate.string().c_str(), parsed.size());
+		if (parsed.size() > salvage.size()) {
+			salvage = std::move(parsed);
+			salvageFrom = candidate;
+		}
 	}
-	if (disabled || reenabled) {
-		Msg("Reconciled persistent ConVars with active schema: disabled=%zu reenabled=%zu.\n",
-			disabled, reenabled);
+
+	if (!salvage.empty()) {
+		entries = std::move(salvage);
+		loadedFrom = salvageFrom;
+		return LoadResult::Recovered;
 	}
+	if (anyPresent)
+		Warning("R1Delta: no readable persistent data file found; starting from the legacy profile\n");
+	return LoadResult::Missing;
 }
 
-static bool BeginProfileSaveTransaction(
-	const PersistentValueSnapshot* requiredValues = nullptr)
+bool ReadLegacyProfileEntries(const std::filesystem::path& profile, PersistentDataStore::Entries& entries,
+	std::filesystem::file_time_type* modified)
 {
-	PersistentValueSnapshot snapshot;
-	if (requiredValues)
-		snapshot = *requiredValues;
-	PData_ReconcilePersistentConVars();
-	if (!requiredValues && !CaptureCurrentPersistentValues(snapshot)) {
-		Warning("Could not capture current persistent values before profile save\n");
+	std::string contents;
+	if (!ReadWholeFile(profile, contents, PersistentDataStore::MaxFileSize))
 		return false;
+	PersistentDataStore::ExtractLegacyProfileEntries(contents, entries);
+	if (entries.empty())
+		return false;
+	if (modified) {
+		std::error_code error;
+		*modified = std::filesystem::last_write_time(profile, error);
+		if (error)
+			*modified = std::filesystem::file_time_type::min();
 	}
-
-	std::filesystem::path profile;
-	std::filesystem::path backup;
-	std::filesystem::path marker;
-	if (!GetProfileTransactionPaths(profile, backup, marker))
-		return false;
-
-	std::error_code error;
-	const bool profileExists = std::filesystem::exists(profile, error) && !error;
-	if (profileExists && !ReadValidProfileFile(profile)) {
-		Warning("Refusing to overwrite invalid persistent-data profile\n");
-		return false;
-	}
-	if (profileExists && !ReplaceFileWithCopy(profile, backup)) {
-		Warning("Failed to create persistent-data backup before save\n");
-		return false;
-	}
-
-	HANDLE markerHandle = CreateFileW(
-		marker.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS,
-		FILE_ATTRIBUTE_NORMAL, nullptr);
-	if (markerHandle == INVALID_HANDLE_VALUE) {
-		Warning("Failed to create persistent-data save marker\n");
-		return false;
-	}
-	const char markerContents[] = "R1Delta persistent-data save in progress\n";
-	DWORD written = 0;
-	const bool markerWritten = WriteFile(
-		markerHandle, markerContents, sizeof(markerContents) - 1, &written, nullptr) != FALSE
-		&& written == sizeof(markerContents) - 1
-		&& FlushFileBuffers(markerHandle) != FALSE;
-	CloseHandle(markerHandle);
-	if (!markerWritten) {
-		DeleteFileW(marker.c_str());
-		Warning("Failed to persist persistent-data save marker\n");
-		return false;
-	}
-	g_pendingProfileValues = std::move(snapshot);
 	return true;
 }
 
-static void RecoverInterruptedProfileSave()
+// Creates or updates the "__ key" userinfo convar through the engine's setinfo
+// implementation, with persistent flags patched in for the call.
+bool SetPersistentConVar(const char* key, const char* value)
 {
-	std::filesystem::path profile;
-	std::filesystem::path backup;
-	std::filesystem::path marker;
-	if (!GetProfileTransactionPaths(profile, backup, marker))
-		return;
+	auto engine = G_engine;
+	auto setinfo_cmd = reinterpret_cast<void(*)(const CCommand&)>(engine + 0x5B520);
+	auto setinfo_cmd_flags = reinterpret_cast<int*>(engine + 0x05B5FF);
+	void(*ccommand_constructor)(CCommand* thisptr, int nArgC, const char** ppArgV) =
+		decltype(ccommand_constructor)(engine + 0x4806F0);
 
-	std::error_code error;
-	const bool interrupted = std::filesystem::exists(marker, error) && !error;
-	std::string primaryContents;
-	std::string backupContents;
-	const bool primaryValid = ReadValidProfileFile(profile, &primaryContents);
-	const bool backupValid = ReadValidProfileFile(backup, &backupContents);
-	if (interrupted && primaryValid && backupValid
-		&& !PreservePreviousPersistentEntries(profile, primaryContents, backupContents)) {
-		if (ReplaceFileWithCopy(backup, profile)) {
-			DeleteFileW(marker.c_str());
-			Warning("Recovered the previous persistent-data profile after dormant-entry merge failed\n");
-		}
-		else {
-			Warning("Failed to preserve dormant persistent data or restore the previous profile\n");
-		}
-		return;
+	char name[CCommand::COMMAND_MAX_LENGTH];
+	if (!MakePersistConVarName(key, name, sizeof(name)))
+		return false;
+
+	static bool setInfoFlagsWritable = false;
+	if (!setInfoFlagsWritable) {
+		DWORD oldProtection = 0;
+		setInfoFlagsWritable = VirtualProtect(
+			setinfo_cmd_flags, sizeof(int), PAGE_EXECUTE_READWRITE, &oldProtection) != FALSE;
 	}
-	switch (PersistentDataTransaction::SelectRecoveryAction(primaryValid, backupValid)) {
-	case PersistentDataTransaction::RecoveryAction::CommitPrimary:
-		if (interrupted)
-			DeleteFileW(marker.c_str());
-		return;
-	case PersistentDataTransaction::RecoveryAction::RestoreBackup:
-		if (ReplaceFileWithCopy(backup, profile)) {
-			DeleteFileW(marker.c_str());
-			Warning("Recovered persistent data from the last completed profile save\n");
-		}
-		else {
-			Warning("Failed to recover interrupted persistent-data save\n");
-		}
-		return;
-	case PersistentDataTransaction::RecoveryAction::PreserveForRecovery:
-		if (interrupted)
-			Warning("Interrupted persistent-data save has no valid recovery copy; preserving all files\n");
-		return;
+	if (!setInfoFlagsWritable) {
+		Warning("Failed to enable persistent setinfo flags\n");
+		return false;
 	}
+
+	const char* argv[] = { "setinfo", name, value };
+	char commandMemory[sizeof(CCommand)];
+	CCommand* command = reinterpret_cast<CCommand*>(commandMemory);
+	ccommand_constructor(command, 3, argv);
+	*setinfo_cmd_flags = kPersistentConVarFlags;
+	setinfo_cmd(*command);
+	*setinfo_cmd_flags = FCVAR_USERINFO;
+	command->~CCommand();
+
+	Store().conVarNames.insert(name);
+	return true;
 }
 
+bool IsSchemaValidEntry(const std::string& key, const std::string& value)
+{
+	return IsValidUserInfo(key.c_str()) && IsValidUserInfo(value.c_str())
+		&& PDef::IsValidKeyAndValue(key, value);
+}
+
+// Mirrors store entries into convars. Entries the active schema rejects (e.g.
+// data for a mod that is not loaded) stay dormant in the store and on disk.
+size_t ApplyStoreToConVars()
+{
+	size_t dormant = 0;
+	for (const auto& [key, value] : Store().entries) {
+		if (!IsSchemaValidEntry(key, value)) {
+			++dormant;
+			continue;
+		}
+		char name[CCommand::COMMAND_MAX_LENGTH];
+		ConVarR1* existing = MakePersistConVarName(key.c_str(), name, sizeof(name))
+			? OriginalCCVar_FindVar(cvarinterface, name)
+			: nullptr;
+		if (existing && existing->m_Value.m_pszString && value == existing->m_Value.m_pszString) {
+			Store().conVarNames.insert(name);
+			continue;
+		}
+		SetPersistentConVar(key.c_str(), value.c_str());
+	}
+	return dormant;
+}
+
+void MarkStoreDirty()
+{
+	ClientStore& store = Store();
+	const double now = Plat_FloatTime();
+	if (!store.dirty)
+		store.firstDirtyTime = now;
+	store.dirty = true;
+	store.lastChangeTime = now;
+}
+
+bool EnsureStoreLoaded()
+{
+	ClientStore& store = Store();
+	if (store.loaded)
+		return !store.disabled;
+	store.loaded = true;
+	if (IsDedicatedServer() || IsR1ODedicatedServer()) {
+		store.disabled = true;
+		return false;
+	}
+
+	std::filesystem::path directory;
+	if (!GetProfileDirectory(directory)) {
+		Warning("R1Delta: could not resolve the profile directory; persistent data will not be saved\n");
+		store.disabled = true;
+		return false;
+	}
+	std::error_code error;
+	std::filesystem::create_directories(directory, error);
+	store.path = directory / "persistent_data.txt";
+	const std::filesystem::path profile = directory / "profile.cfg";
+
+	std::filesystem::path loadedFrom;
+	const LoadResult result = LoadStoreFile(store.path, store.entries, loadedFrom);
+	bool changed = false;
+	if (result == LoadResult::Recovered) {
+		Warning("R1Delta: recovered persistent data from %s\n", loadedFrom.string().c_str());
+		// Keep whatever is at the primary path for manual recovery before it
+		// gets replaced.
+		if (std::filesystem::exists(store.path, error) && loadedFrom != store.path)
+			CopyFileW(store.path.c_str(), WithSuffix(store.path, L".corrupt").c_str(), FALSE);
+		changed = true;
+	}
+
+	// Migration from builds that kept persistent data in profile.cfg. Builds
+	// with this store never write "__" lines to profile.cfg, so any such lines
+	// newer than the store came from an older build and are imported.
+	PersistentDataStore::Entries legacy;
+	std::filesystem::file_time_type profileTime{};
+	const bool haveLegacy = ReadLegacyProfileEntries(profile, legacy, &profileTime)
+		|| (result == LoadResult::Missing
+			&& ReadLegacyProfileEntries(WithSuffix(profile, L".bak"), legacy, &profileTime));
+	if (haveLegacy) {
+		bool import = result == LoadResult::Missing;
+		if (!import) {
+			const auto storeTime = std::filesystem::last_write_time(loadedFrom, error);
+			import = !error && profileTime > storeTime;
+		}
+		if (import && result != LoadResult::Missing) {
+			// Only happens after running an older build in between; keep the
+			// store as it was in case that build started from an empty profile.
+			CopyFileW(loadedFrom.c_str(), WithSuffix(store.path, L".pre-import").c_str(), FALSE);
+		}
+		if (import) {
+			for (auto& [key, value] : legacy)
+				store.entries.insert_or_assign(key, std::move(value));
+			changed = true;
+			Msg("R1Delta: imported %zu persistent data entries from the legacy profile\n", legacy.size());
+		}
+	}
+
+	const size_t dormant = ApplyStoreToConVars();
+	Msg("R1Delta: loaded %zu persistent data entries (%zu inactive under the current schema)\n",
+		store.entries.size(), dormant);
+
+	std::atexit([] { PData_Flush(true); });
+
+	if (changed) {
+		MarkStoreDirty();
+		SaveStoreNow(false);
+	}
+	return true;
+}
+
+}
+
+static size_t ClientPersistentConVarCount()
+{
+	const ClientStore& store = Store();
+	return store.loaded ? store.conVarNames.size() : 0;
+}
+
+void PData_Flush(bool quiet)
+{
+	ClientStore& store = Store();
+	if (store.loaded && !store.disabled && store.dirty)
+		SaveStoreNow(quiet);
+}
+
+void PData_OnSchemaReloaded()
+{
+	ClientStore& store = Store();
+	if (!store.loaded || store.disabled)
+		return;
+	// Entries for a mod that just became active get their convars back.
+	ApplyStoreToConVars();
+}
 
 // Command handling
 void setinfopersist_cmd(const CCommand& args) {
-	auto engine = G_engine;
-	auto setinfo_cmd = decltype(&setinfopersist_cmd)(engine + 0x5B520);
-	auto setinfo_cmd_flags = (int*)(engine + 0x05B5FF);
-	void(*ccommand_constructor)(CCommand * thisptr, int nArgC, const char** ppArgV) = decltype(ccommand_constructor)(engine + 0x4806F0);
-
-	auto arena = tctx.get_arena_for_scratch();
-	auto temp = TempArena(arena);
-
 	if (args.ArgC() >= 3) {
-		if (!IsValidUserInfo(args.Arg(1))) {
-			Warning("Invalid user info key %s. Only certain characters are allowed.\n", args.Arg(1));
+		const char* key = args.Arg(1);
+		const char* value = args.Arg(2);
+		if (!IsValidUserInfo(key)) {
+			Warning("Invalid user info key %s. Only certain characters are allowed.\n", key);
 			return;
 		}
-		if (!IsValidUserInfo(args.Arg(2))) {
-			Warning("Invalid user info value %s. Only certain characters are allowed.\n", args.Arg(1));
+		if (!IsValidUserInfo(value)) {
+			Warning("Invalid user info value %s. Only certain characters are allowed.\n", value);
 			return;
 		}
-		if (!PDef::IsValidKeyAndValue(args.Arg(1), args.Arg(2))) {
-			Warning("PData key %s, value %s failed validation.\n", args.Arg(1), args.Arg(2));
-			return;
-		}
-
-		// Check current value before setting
-		const char* hashedKey = hashUserInfoKeyArena(arena, args.Arg(1));
-		auto hashedKey_len = strlen(hashedKey);
-		// NOTE(mrsteyk): null terminator included by sizeof
-		size_t fullVarName_size = sizeof(PERSIST_COMMAND) + 1 + hashedKey_len;
-		auto fullVarName = (char*)arena_push(arena, fullVarName_size);
-		memcpy(fullVarName, PERSIST_COMMAND" ", sizeof(PERSIST_COMMAND));
-		memcpy(fullVarName + sizeof(PERSIST_COMMAND), hashedKey, hashedKey_len);
-		auto existingVar = OriginalCCVar_FindVar(cvarinterface, fullVarName);
-		bool valueChanged = true;  // Default to true if var doesn't exist
-
-		if (existingVar) {
-			valueChanged = (strcmp(existingVar->m_Value.m_pszString, args.Arg(2)) != 0);
-		}
-
-		// Check for "nosend" argument, or if the convar does not exist
-		bool noSend = (args.ArgC() >= 4 && strcmp_static(args.Arg(3), "nosend") == 0);
-		bool shouldHash = !noSend && (existingVar == nullptr);
-		if (args.ArgC() >= 4 && strcmp_static(args.Arg(3), "forcehash") == 0)
-			noSend = shouldHash = true;
-
-		size_t newArgv_size = noSend ? args.ArgC() - 1 : args.ArgC();
-		auto newArgv = (const char**)arena_push(arena, sizeof(const char*) * newArgv_size);
-		newArgv[0] = args.Arg(0);
-		char modifiedKey[CCommand::COMMAND_MAX_LENGTH];
-		snprintf(modifiedKey, sizeof(modifiedKey), "%s %s", PERSIST_COMMAND, shouldHash ? hashUserInfoKey(args.Arg(1)).c_str() : args.Arg(1));
-		newArgv[1] = modifiedKey;
-
-		std::copy(args.ArgV() + 2, args.ArgV() + newArgv_size, newArgv + 2);
-
-		char commandMemory[sizeof(CCommand)];
-		CCommand* pCommand = reinterpret_cast<CCommand*>(commandMemory);
-		ccommand_constructor(pCommand, newArgv_size, newArgv);
-
-		static bool setInfoFlagsWritable = false;
-		if (!setInfoFlagsWritable) {
-			DWORD oldProtection = 0;
-			setInfoFlagsWritable = VirtualProtect(
-				setinfo_cmd_flags, sizeof(int), PAGE_EXECUTE_READWRITE, &oldProtection) != FALSE;
-		}
-		if (!setInfoFlagsWritable) {
-			Warning("Failed to enable persistent setinfo flags\n");
-			pCommand->~CCommand();
+		if (!PDef::IsValidKeyAndValue(key, value)) {
+			Warning("PData key %s, value %s failed validation.\n", key, value);
 			return;
 		}
 
-		*setinfo_cmd_flags = FCVAR_PERSIST_MASK;
+		EnsureStoreLoaded();
+
+		// "nosend" updates the local value without replicating it right away.
+		const bool noSend = args.ArgC() >= 4
+			&& (strcmp_static(args.Arg(3), "nosend") == 0 || strcmp_static(args.Arg(3), "forcehash") == 0);
 		const bool previousNoSend = g_bNoSendConVar;
 		g_bNoSendConVar = noSend;
-		setinfo_cmd(*pCommand);
+		const bool applied = SetPersistentConVar(key, value);
 		g_bNoSendConVar = previousNoSend;
-		*setinfo_cmd_flags = FCVAR_USERINFO;
+		if (!applied)
+			return;
 
-		RememberPersistentConVar(
-			modifiedKey,
-			args.Arg(1),
-			OriginalCCVar_FindVar(cvarinterface, modifiedKey));
-
-		if (valueChanged && !g_bRecursive) {
-			g_flLastCommandTime = Plat_FloatTime();
-			g_bTimerActive = true;
+		ClientStore& store = Store();
+		if (!store.disabled) {
+			auto [it, inserted] = store.entries.try_emplace(key, value);
+			if (inserted || it->second != value) {
+				it->second = value;
+				MarkStoreDirty();
+			}
 		}
-
-		pCommand->~CCommand();
 	}
 	else if (args.ArgC() == 2) {
-		auto hashedKey = hashUserInfoKeyArena(arena, args.Arg(1));
-		char modifiedKey[CCommand::COMMAND_MAX_LENGTH];
-		snprintf(modifiedKey, sizeof(modifiedKey), "%s %s", PERSIST_COMMAND, hashedKey);
-		auto hVar = OriginalCCVar_FindVar(cvarinterface, modifiedKey);
-		if (hVar)
-			ConVar_PrintDescription(hVar);
-		else {
-			auto result = OriginalCCVar_FindVar(cvarinterface, args.GetCommandString());
-			if (result)
-				ConVar_PrintDescription(result);
-		}
+		char name[CCommand::COMMAND_MAX_LENGTH];
+		ConVarR1* var = MakePersistConVarName(args.Arg(1), name, sizeof(name))
+			? OriginalCCVar_FindVar(cvarinterface, name)
+			: nullptr;
+		if (!var)
+			var = OriginalCCVar_FindVar(cvarinterface, args.GetCommandString());
+		if (var)
+			ConVar_PrintDescription(var);
 	}
 	else {
-		setinfo_cmd(args);
+		Msg("Usage: " PERSIST_COMMAND " <key> <value> [nosend]\n");
 	}
 }
 
 char ExecuteConfigFile(int configType) {
 	if (OriginalCCVar_FindVar && OriginalCCVar_FindVar(cvarinterface, "cl_fovScale"))
 		OriginalCCVar_FindVar(cvarinterface, "cl_fovScale")->m_fMaxVal = 1.7f;
-	constexpr size_t MAX_PATH_LENGTH = 1024;
-	constexpr size_t MAX_BUFFER_SIZE = PersistentDataCodec::MaxRawSize;
 
-	char pathBuffer[MAX_PATH_LENGTH];
-	if (!GetConfigPath(pathBuffer, MAX_PATH_LENGTH, configType)) {
-		return 0; // Failed to get config path
-	}
-
-	std::filesystem::path configPath(pathBuffer);
-	if (configType == 1)
-		RecoverInterruptedProfileSave();
-
-	if (!std::filesystem::exists(configPath)) {
-		return 0; // Config file doesn't exist
-	}
-
-	std::string validatedProfile;
-	if (configType == 1 && !ReadValidProfileFile(configPath, &validatedProfile)) {
-		Warning("Persistent-data profile failed structural validation\n");
+	char pathBuffer[1024];
+	if (!GetConfigPath(pathBuffer, sizeof(pathBuffer), configType))
 		return 0;
-	}
-	const uintmax_t fileSize = configType == 1
-		? validatedProfile.size()
-		: std::filesystem::file_size(configPath);
-	if (fileSize == 0 || fileSize > MAX_BUFFER_SIZE) {
-		return 0; // File is empty or too large
-	}
 
-	auto arena = tctx.get_arena_for_scratch();
-	auto temp = TempArena(arena);
+	// Persistent data comes from the store, never from profile.cfg. Loading it
+	// here keeps it available at the same point in startup as before.
+	if (configType == 1)
+		EnsureStoreLoaded();
 
-	// NOTE(mrsteyk): buffer is already ZeroMemory'd
-	char* buffer = static_cast<char*>(arena_push(arena, fileSize + 1)); // +1 for null terminator
-	if (!buffer) {
-		return 0; // Memory allocation failed
-	}
+	std::string contents;
+	if (!ReadWholeFile(std::filesystem::path(pathBuffer), contents, PersistentDataStore::MaxFileSize)
+		|| contents.empty())
+		return 0;
+	if (configType == 1)
+		contents = PersistentDataStore::StripPersistentLines(contents);
+
 	auto engine = G_engine;
 	void* (*Exec_CmdGuts)(const char* commands, char bUseExecuteCommand) = decltype(Exec_CmdGuts)(engine + 0x01059A0);
-
-	if (configType == 1) {
-		memcpy(buffer, validatedProfile.data(), validatedProfile.size());
-	}
-	else {
-		std::ifstream file(configPath, std::ios::binary);
-		if (!file.read(buffer, static_cast<std::streamsize>(fileSize)))
-			return 0;
-	}
-	buffer[fileSize] = '\0';
-
-	g_bRecursive = true;
-	Exec_CmdGuts(buffer, 1);
-	g_bRecursive = false;
-	if (configType == 1)
-		g_bProfileReplayComplete = true;
-	return 1; // Success
+	Exec_CmdGuts(contents.c_str(), 1);
+	return 1;
 }
-
-
 
 void PData_RunFrame()
 {
-	if (g_bRecursive || g_bSaveWritePending || !g_bTimerActive || !Cbuf_AddTextOriginal)
-		return;
+	PData_ServerRunFrame();
 
-	const double currentTime = Plat_FloatTime();
-	if (currentTime - g_flLastCommandTime < SAVE_DELAY)
+	ClientStore& store = Store();
+	if (!store.dirty || store.disabled)
 		return;
-	if (!BeginProfileSaveTransaction()) {
-		g_flLastCommandTime = currentTime;
+	const double now = Plat_FloatTime();
+	if (now < store.retryTime)
 		return;
-	}
-
-	Cbuf_AddTextOriginal(0, "savePlayerConfig\n", 0);
-	g_bTimerActive = false;
-	g_bSaveWritePending = true;
-	g_bSaveQueuedThisFrame = true;
+	if (now - store.lastChangeTime >= kSaveDebounceSeconds
+		|| now - store.firstDirtyTime >= kSaveMaxDelaySeconds)
+		SaveStoreNow(false);
 }
 
-static bool FinishPendingProfileSave()
-{
-	if (!g_bSaveWritePending || !g_CVFileSystem || !g_CVFileSystemInterface
-		|| !g_CVFileSystem->AsyncFinishAllWrites)
-		return false;
-	if (g_bSaveQueuedThisFrame && !g_bFinishSaveBeforeQuit) {
-		g_bSaveQueuedThisFrame = false;
-		return false;
-	}
-	g_bSaveQueuedThisFrame = false;
+using NativeProfileWriterFn = char(__fastcall*)(unsigned int configType);
+static NativeProfileWriterFn g_NativeProfileWriterOriginal = nullptr;
 
-	using AsyncFinishAllWritesFn = void(__fastcall*)(void* fileSystem);
-	reinterpret_cast<AsyncFinishAllWritesFn>(g_CVFileSystem->AsyncFinishAllWrites)(
-		reinterpret_cast<void*>(g_CVFileSystemInterface));
-
-	std::filesystem::path profile;
-	std::filesystem::path backup;
-	std::filesystem::path marker;
-	bool profileResolved = false;
-	if (GetProfileTransactionPaths(profile, backup, marker)) {
-		std::string primaryContents;
-		std::string backupContents;
-		bool primaryValid = ReadValidProfileFile(profile, &primaryContents);
-		const bool backupValid = ReadValidProfileFile(backup, &backupContents);
-		if (primaryValid && backupValid
-			&& !PreservePreviousPersistentEntries(profile, primaryContents, backupContents)) {
-			Warning("Persistent-data save could not preserve dormant addon entries; restoring the previous profile\n");
-			primaryValid = false;
-		}
-		switch (PersistentDataTransaction::SelectRecoveryAction(primaryValid, backupValid)) {
-		case PersistentDataTransaction::RecoveryAction::CommitPrimary:
-			DeleteFileW(marker.c_str());
-			profileResolved = true;
-			break;
-		case PersistentDataTransaction::RecoveryAction::RestoreBackup:
-			if (ReplaceFileWithCopy(backup, profile)) {
-				DeleteFileW(marker.c_str());
-				Warning("Restored persistent data after a failed profile save\n");
-				profileResolved = true;
-				break;
-			}
-			Warning("Persistent-data backup restore failed; preserving all transaction files and scheduling a retry\n");
-			g_bTimerActive = true;
-			g_flLastCommandTime = Plat_FloatTime();
-			break;
-		case PersistentDataTransaction::RecoveryAction::PreserveForRecovery:
-			Warning("Persistent-data profile save produced no valid recovery copy; preserving all transaction files and scheduling a retry\n");
-			g_bTimerActive = true;
-			g_flLastCommandTime = Plat_FloatTime();
-			break;
-		}
-	}
-	const bool valuesDurable = profileResolved
-		&& ProfileContainsPersistentValues(profile, g_pendingProfileValues);
-	g_pendingProfileValues.clear();
-	g_bSaveWritePending = false;
-	g_bFinishSaveBeforeQuit = false;
-	if (valuesDurable) {
-		const bool reconcileRetainedFlags = !g_bSchemaReloadPersistenceSafe;
-		g_bSchemaReloadPersistenceSafe = true;
-		g_bProfileReplayComplete = true;
-		g_bTimerActive = false;
-		if (reconcileRetainedFlags)
-			PData_ReconcilePersistentConVars();
-	}
-	else {
-		g_bTimerActive = true;
-		g_flLastCommandTime = Plat_FloatTime();
-	}
-	return valuesDurable;
-}
-
-void PData_FinishPendingSave()
-{
-	FinishPendingProfileSave();
-}
-
+// The engine writes profile.cfg on shutdown and when settings change; use it
+// as an extra flush point for the store.
 static char __fastcall NativeProfileWriterHook(unsigned int configType)
 {
-	if (!g_NativeProfileWriterOriginal)
-		return 0;
-	if (configType != 1)
-		return g_NativeProfileWriterOriginal(configType);
-
-	const bool ownsTransaction = !g_bSaveWritePending;
-	if (ownsTransaction) {
-		if (!BeginProfileSaveTransaction()) {
-			Warning("Refusing an unprotected native persistent-data profile write\n");
-			return 0;
-		}
-		g_bSaveWritePending = true;
-		g_bSaveQueuedThisFrame = false;
-	}
-
-	const char result = g_NativeProfileWriterOriginal(configType);
-	if (ownsTransaction || g_bFinishSaveBeforeQuit) {
-		g_bFinishSaveBeforeQuit = true;
-		FinishPendingProfileSave();
-	}
+	const char result = g_NativeProfileWriterOriginal
+		? g_NativeProfileWriterOriginal(configType)
+		: 0;
+	if (configType == 1)
+		PData_Flush(false);
 	return result;
-}
-
-bool PData_PrepareForSchemaReload()
-{
-	if (!g_bProfileReplayComplete && g_persistentConVarBindings.empty()) {
-		g_bSchemaReloadPersistenceSafe = true;
-		return true;
-	}
-	if (!g_NativeProfileWriterOriginal) {
-		Warning("Persistent-data profile writer hook is unavailable; retaining live schema flags\n");
-		g_bSchemaReloadPersistenceSafe = false;
-		return false;
-	}
-
-	PersistentValueSnapshot requiredValues;
-	if (!CaptureCurrentPersistentValues(requiredValues)) {
-		Warning("Could not capture persistent values before schema reload; retaining live schema flags\n");
-		g_bSchemaReloadPersistenceSafe = false;
-		return false;
-	}
-	if (!g_bSaveWritePending) {
-		if (!BeginProfileSaveTransaction(&requiredValues)) {
-			Warning("Could not prepare persistent data before schema reload; retaining live schema flags\n");
-			g_bSchemaReloadPersistenceSafe = false;
-			return false;
-		}
-		g_bSaveWritePending = true;
-	}
-	else {
-		g_pendingProfileValues = std::move(requiredValues);
-	}
-	g_bSaveQueuedThisFrame = false;
-	g_bFinishSaveBeforeQuit = true;
-	g_NativeProfileWriterOriginal(1);
-	g_bSchemaReloadPersistenceSafe = FinishPendingProfileSave();
-	if (g_bSchemaReloadPersistenceSafe) {
-		g_bTimerActive = false;
-		return true;
-	}
-
-	g_bTimerActive = true;
-	g_flLastCommandTime = Plat_FloatTime();
-	Warning("Persistent-data pre-schema save did not complete; retaining live schema flags\n");
-	return false;
 }
 
 void InstallPersistentProfileWriterHook(uintptr_t engineBase)
@@ -2719,22 +2407,22 @@ void InstallPersistentProfileWriterHook(uintptr_t engineBase)
 	}
 }
 
+static bool IsCommandWord(const char* command, const char* word)
+{
+	const size_t length = strlen(word);
+	return _strnicmp(command, word, length) == 0
+		&& (command[length] == '\0' || isspace(static_cast<unsigned char>(command[length])) || command[length] == ';');
+}
+
 void PData_OnConsoleCommand(const char* str)
 {
-	if (g_bRecursive)
+	if (!str)
 		return;
-
 	const char* command = str;
-	while (command && (*command == ' ' || *command == '\t' || *command == '\r' || *command == '\n'))
+	while (*command == ' ' || *command == '\t' || *command == '\r' || *command == '\n')
 		++command;
-	if (command && g_bTimerActive) {
-		const bool quitCommand =
-			(_strnicmp(command, "quit", 4) == 0 && (command[4] == '\0' || isspace(static_cast<unsigned char>(command[4]))))
-			|| (_strnicmp(command, "exit", 4) == 0 && (command[4] == '\0' || isspace(static_cast<unsigned char>(command[4]))));
-		if (quitCommand) {
-			g_flLastCommandTime = Plat_FloatTime() - SAVE_DELAY;
-			g_bFinishSaveBeforeQuit = true;
-		}
-	}
-	PData_RunFrame();
+	// Save before anything that can end the session or the process.
+	if (IsCommandWord(command, "quit") || IsCommandWord(command, "exit")
+		|| IsCommandWord(command, "disconnect"))
+		PData_Flush(false);
 }

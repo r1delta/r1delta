@@ -18,17 +18,6 @@ struct Entry {
 	std::string value;
 };
 
-using ProfileEntryValidator = bool(*)(std::string_view key, std::string_view value, void* context);
-
 bool Encode(const std::vector<Entry>& entries, std::string& encoded);
 bool Decode(std::string_view encoded, std::vector<Entry>& entries);
-bool ValidateProfile(
-	std::string_view contents,
-	ProfileEntryValidator persistentValidator = nullptr,
-	void* validatorContext = nullptr);
-bool PreserveMissingPersistentEntries(
-	std::string_view current,
-	std::string_view previous,
-	std::string& merged);
-
 }
