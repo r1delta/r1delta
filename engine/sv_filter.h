@@ -21,6 +21,7 @@
 #include "bitbuf.h"
 #include "public/tier1/utlbuffer.h"
 #include "netadr.h"
+#include "p2p/p2p_identity.h"
 #define IBannablePlayerPointer  void*
 
 // Forward declaration
@@ -673,9 +674,23 @@ private:
 
         PruneExpiredBans();
 
+        // Players on EOS / iroh / tailcat / TURN (fake addresses) or on a
+        // LAN / Tailscale address are also checked against the public IP the
+        // master server attested for them, so a banned IP cannot rejoin by
+        // switching transport.
+        netadr_t attested;
+        bool haveAttested = false;
+        uint32_t attestedIp = 0;
+        if (p2p::LookupIdentityIpv4(reinterpret_cast<const uint8_t*>(&adr.GetIP()), attestedIp)) {
+            char ipText[16];
+            snprintf(ipText, sizeof(ipText), "%u.%u.%u.%u", (attestedIp >> 24) & 0xFF, (attestedIp >> 16) & 0xFF,
+                (attestedIp >> 8) & 0xFF, attestedIp & 0xFF);
+            haveAttested = attested.SetFromString(ipText, false);
+        }
+
         for (const auto& entry : m_vecIpBans) {
             // Compare only the address part, ignore port
-            if (entry.address.CompareAdr(adr)) {
+            if (entry.address.CompareAdr(adr) || (haveAttested && entry.address.CompareAdr(attested))) {
                 // Found a match, check if expired
                 if (entry.expireTime == FLT_MAX || entry.expireTime > GetCurrentTimeInternal()) {
                     return true; // Active ban found

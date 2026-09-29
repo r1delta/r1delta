@@ -52,6 +52,8 @@
     <ClCompile Include="..\p2p\p2p_protocol.cpp" />
     <ClCompile Include="..\p2p\stun.cpp" />
     <ClCompile Include="..\p2p\upnp_codec.cpp" />
+    <ClCompile Include="..\p2p\p2p_identity.cpp" />
+    <ClCompile Include="..\p2p\p2p_crypto_win.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

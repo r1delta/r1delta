@@ -9,14 +9,17 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <thread>
 #include <unordered_map>
 #include <vector>
 
 #include "logging.h"
 #include "p2p_eos_bridge.h"
+#include "p2p_identity.h"
 #include "p2p_log.h"
 #include "p2p_mux.h"
 #include "p2p_netinfo.h"
@@ -142,6 +145,8 @@ struct Session
     Clock::time_point started;
     Clock::time_point firstAnswer{};
     bool overlayOnly = false;
+    std::vector<uint8_t> identity; // master-attested identity token for this server
+    uint64_t expectedTag = 0;      // PONG server tag of the listed server (0 = don't check)
 };
 
 std::mutex g_mutex;
@@ -150,6 +155,8 @@ std::atomic<uint64_t> g_generation{ 0 };
 std::unordered_map<std::string, json> g_transports;
 std::string g_lastSummary;
 uint64_t g_activeOverlayPeer = 0; // overlay route of the current/last connection
+std::map<Id16, uint8_t> g_identityAcks; // token nonce -> IdentityVerdict
+std::set<Ipv6Bytes> g_eosIdentityStarted;
 
 std::shared_ptr<Session> CurrentSession()
 {
@@ -186,6 +193,7 @@ struct MasterInfo
     Ipv4Endpoint rendezvous;
     Ipv4Endpoint serverMapped;
     std::vector<Ipv4Endpoint> lan;
+    std::vector<uint8_t> identity;
 };
 
 MasterInfo QueryMaster(const std::string& msUrl, const std::string& target)
@@ -220,6 +228,8 @@ MasterInfo QueryMaster(const std::string& msUrl, const std::string& target)
         if (r.contains("server_mapped") && r["server_mapped"].is_string())
             if (auto ep = Ipv4Endpoint::Parse(r["server_mapped"].get<std::string>()))
                 info.serverMapped = *ep;
+        if (r.contains("identity") && r["identity"].is_string())
+            HexToBytes(r["identity"].get<std::string>(), info.identity);
         if (r.contains("lan") && r["lan"].is_array())
             for (const auto& l : r["lan"])
                 if (l.is_string())
@@ -231,6 +241,59 @@ MasterInfo QueryMaster(const std::string& msUrl, const std::string& target)
         info.ok = false;
     }
     return info;
+}
+
+// Identity token for a server reached by an overlay address (/nat/attest).
+std::vector<uint8_t> RequestIdentity(const std::string& msUrl, const std::string& target)
+{
+    std::vector<uint8_t> token;
+    if (msUrl.empty())
+        return token;
+    try
+    {
+        httplib::Client cli(msUrl);
+        cli.set_connection_timeout(2, 0);
+        cli.set_read_timeout(2, 0);
+        cli.set_address_family(AF_INET); // the token carries our IPv4
+        cli.set_follow_location(true);
+        const json body = { { "target", target } };
+        auto res = cli.Post("/nat/attest", body.dump(), "application/json");
+        if (res && res->status == 200)
+        {
+            const json r = json::parse(res->body);
+            if (r.contains("identity") && r["identity"].is_string())
+                HexToBytes(r["identity"].get<std::string>(), token);
+        }
+        else
+        {
+            Debug("master /nat/attest failed (%d)\n", res ? res->status : -1);
+        }
+    }
+    catch (...)
+    {
+        token.clear();
+    }
+    return token;
+}
+
+bool TokenNonce(const std::vector<uint8_t>& token, Id16& nonce)
+{
+    IdentityToken parsed;
+    if (!ParseIdentityToken(token.data(), token.size(), parsed))
+        return false;
+    nonce = parsed.nonce;
+    return true;
+}
+
+bool TakeIdentityAck(const Id16& nonce, uint8_t& verdict)
+{
+    std::lock_guard lock(g_mutex);
+    auto it = g_identityAcks.find(nonce);
+    if (it == g_identityAcks.end())
+        return false;
+    verdict = it->second;
+    g_identityAcks.erase(it);
+    return true;
 }
 
 std::string JsonString(const json& j, const char* key)
@@ -256,7 +319,9 @@ void BuildCandidates(Session& s, const Ipv4Endpoint& server, const MasterInfo& i
     s.candidates.back().udp = server;
     s.candidates.back().state = CandState::Probing;
 
-    if (info.serverMapped.Valid() && info.serverMapped != server)
+    // A punched hole only exists for the socket that registered it; when we
+    // probe from a private socket it would not carry the engine's traffic.
+    if (info.serverMapped.Valid() && info.serverMapped != server && !s.ownsSocket)
     {
         AddCandidate(s, Kind::Punch, info.serverMapped.ToString());
         s.candidates.back().udp = info.serverMapped;
@@ -393,25 +458,29 @@ void PrepareOverlay(std::shared_ptr<Session> session, size_t index, Settings set
     // Stays Preparing until the plugin reports the connection as up.
 }
 
-void SendPing(Session& s, Candidate& c, const Clock::time_point now)
+// Sends a control packet to the server over one candidate route.
+void SendControl(Session& s, const Candidate& c, const std::vector<uint8_t>& pkt)
 {
-    c.lastPing = now;
-    const auto ping = BuildPing(c.probeId, NowMicros());
     switch (c.kind)
     {
     case Kind::Eos:
-        eos_bridge::SendTo(c.eosAddress, ping.data(), ping.size(), Route::Client);
+        eos_bridge::SendTo(c.eosAddress, pkt.data(), pkt.size(), Route::Client);
         break;
     case Kind::Iroh:
     case Kind::Tailcat:
-        SendToPeer(c.muxId, ping.data(), ping.size());
+        SendToPeer(c.muxId, pkt.data(), pkt.size());
         break;
     default:
-        if (c.kind == Kind::Punch && s.haveTicket)
-            RealSendTo(s.socket, BuildPunch(s.ticket, 0), c.udp);
-        RealSendTo(s.socket, ping, c.udp);
+        RealSendTo(s.socket, pkt, c.udp);
         break;
     }
+}
+
+void SendPing(Session& s, const Candidate& c)
+{
+    if (c.kind == Kind::Punch && s.haveTicket)
+        RealSendTo(s.socket, BuildPunch(s.ticket, 0), c.udp);
+    SendControl(s, c, BuildPing(c.probeId, NowMicros()));
 }
 
 void PollOwnSocket(Session& s)
@@ -498,28 +567,48 @@ void RunSession(std::shared_ptr<Session> s, Settings settings, std::string fallb
         if (eosCandidate)
             eos_bridge::PollControl(Route::Client);
 
-        std::lock_guard lock(s->mutex);
-
-        // Register our client-socket mapping with the rendezvous so the
-        // master can tell the server where to punch.
-        if (s->haveTicket && s->rendezvous.Valid() && registerSends < 4 &&
-            now - lastRegister > std::chrono::milliseconds(200))
+        // Plugin calls can block and PONGs are handled on the engine thread
+        // under s->mutex, so no FFI call is made while holding it.
+        std::vector<std::pair<size_t, uint64_t>> statusQueries;
         {
-            RealSendTo(s->socket, BuildCliRegister(s->ticket), s->rendezvous);
-            lastRegister = now;
-            ++registerSends;
+            std::lock_guard lock(s->mutex);
+            for (size_t i = 0; i < s->candidates.size(); ++i)
+            {
+                const auto& c = s->candidates[i];
+                if ((c.kind == Kind::Iroh || c.kind == Kind::Tailcat) && c.pluginHandle && c.state != CandState::Failed)
+                    statusQueries.emplace_back(i, c.pluginHandle);
+            }
+        }
+        std::vector<std::pair<size_t, PluginBackend::Status>> statuses;
+        for (const auto& [index, handle] : statusQueries)
+        {
+            Kind kind;
+            {
+                std::lock_guard lock(s->mutex);
+                kind = s->candidates[index].kind;
+            }
+            statuses.emplace_back(index, (kind == Kind::Iroh ? IrohPlugin() : TailcatPlugin()).PeerStatus(handle));
         }
 
-        bool allDone = true;
-        bool waitingForPreferred = false;
-        for (auto& c : s->candidates)
+        std::vector<Candidate> toPing;
+        bool sendRegister = false;
+        bool finished = false;
         {
-            if (c.kind == Kind::Eos)
-                eosCandidate = true;
-            if ((c.kind == Kind::Iroh || c.kind == Kind::Tailcat) && c.pluginHandle && c.state != CandState::Failed)
+            std::lock_guard lock(s->mutex);
+
+            // Register our client-socket mapping with the rendezvous so the
+            // master can tell the server where to punch.
+            if (s->haveTicket && s->rendezvous.Valid() && registerSends < 4 &&
+                now - lastRegister > std::chrono::milliseconds(200))
             {
-                PluginBackend& plugin = c.kind == Kind::Iroh ? IrohPlugin() : TailcatPlugin();
-                const auto st = plugin.PeerStatus(c.pluginHandle);
+                sendRegister = true;
+                lastRegister = now;
+                ++registerSends;
+            }
+
+            for (const auto& [index, st] : statuses)
+            {
+                auto& c = s->candidates[index];
                 if (st.state == "connected" && c.state == CandState::Preparing)
                     c.state = CandState::Probing;
                 else if (st.state == "failed" || st.state == "closed")
@@ -529,33 +618,55 @@ void RunSession(std::shared_ptr<Session> s, Settings settings, std::string fallb
                 }
                 c.relay = st.path == "relay";
             }
-            if (c.state == CandState::Probing || (c.state == CandState::Answered && c.answers < kWantedAnswers))
+
+            bool allDone = true;
+            bool waitingForPreferred = false;
+            for (auto& c : s->candidates)
             {
-                if (now - c.lastPing >= kPingInterval)
-                    SendPing(*s, c, now);
+                if (c.kind == Kind::Eos)
+                    eosCandidate = true;
+                if (c.state == CandState::Probing || (c.state == CandState::Answered && c.answers < kWantedAnswers))
+                {
+                    if (now - c.lastPing >= kPingInterval)
+                    {
+                        c.lastPing = now;
+                        toPing.push_back(c);
+                    }
+                }
+                const bool done = c.state == CandState::Failed || (c.state == CandState::Answered && c.answers >= kWantedAnswers);
+                allDone &= done;
+                if (!done && c.state != CandState::Answered && !settings.prefer.empty() && settings.prefer == KindName(c.kind))
+                    waitingForPreferred = true;
             }
-            const bool done = c.state == CandState::Failed || (c.state == CandState::Answered && c.answers >= kWantedAnswers);
-            allDone &= done;
-            if (!done && c.state != CandState::Answered && !settings.prefer.empty() && settings.prefer == KindName(c.kind))
-                waitingForPreferred = true;
+
+            // Once something answered, give slower routes a short grace period
+            // rather than the full timeout: a path that is not even up by then
+            // will not beat the one we already have. A route forced through
+            // delta_p2p_prefer is always waited for.
+            const bool graceOver = s->firstAnswer.time_since_epoch().count() != 0 &&
+                                   now - s->firstAnswer > kGraceAfterFirstAnswer && !s->overlayOnly && !waitingForPreferred;
+            finished = allDone || graceOver || now >= deadline;
         }
 
-        // Once something answered, give slower routes a short grace period
-        // rather than the full timeout: a path that is not even up by then
-        // will not beat the one we already have. A route forced through
-        // delta_p2p_prefer is always waited for.
-        const bool graceOver = s->firstAnswer.time_since_epoch().count() != 0 &&
-                               now - s->firstAnswer > kGraceAfterFirstAnswer && !s->overlayOnly && !waitingForPreferred;
-        if (allDone || graceOver || now >= deadline)
+        if (sendRegister)
+            RealSendTo(s->socket, BuildCliRegister(s->ticket), s->rendezvous);
+        for (const auto& c : toPing)
+            SendPing(*s, c);
+        if (finished)
             break;
     }
 
     if (!StillCurrent(s))
     {
-        std::lock_guard lock(s->mutex);
-        for (auto& c : s->candidates)
-            if (c.muxId)
-                ClosePeer(c.muxId);
+        std::vector<uint64_t> peers;
+        {
+            std::lock_guard lock(s->mutex);
+            for (auto& c : s->candidates)
+                if (c.muxId)
+                    peers.push_back(c.muxId);
+        }
+        for (uint64_t id : peers)
+            ClosePeer(id);
         if (s->ownsSocket)
             closesocket(s->socket);
         return;
@@ -564,6 +675,8 @@ void RunSession(std::shared_ptr<Session> s, Settings settings, std::string fallb
     // Pick the winner.
     std::string command;
     std::string summary;
+    size_t bestIndex = SIZE_MAX;
+    std::vector<uint64_t> losers;
     {
         std::lock_guard lock(s->mutex);
         const Candidate* best = nullptr;
@@ -599,7 +712,7 @@ void RunSession(std::shared_ptr<Session> s, Settings settings, std::string fallb
         }
         for (const auto& c : s->candidates)
             if (c.muxId && &c != best)
-                ClosePeer(c.muxId);
+                losers.push_back(c.muxId);
         if (s->ownsSocket)
             closesocket(s->socket);
         if (best && best->muxId)
@@ -607,6 +720,56 @@ void RunSession(std::shared_ptr<Session> s, Settings settings, std::string fallb
             std::lock_guard globalLock(g_mutex);
             g_activeOverlayPeer = best->muxId;
         }
+        if (best)
+            bestIndex = static_cast<size_t>(best - s->candidates.data());
+    }
+
+    for (uint64_t id : losers)
+        ClosePeer(id);
+
+    // Present our master-attested identity over the chosen route before the
+    // engine connects: servers drop overlay/EOS traffic from peers that have
+    // not identified, and ban on the attested address.
+    if (bestIndex != SIZE_MAX && !s->identity.empty())
+    {
+        Id16 nonce{};
+        TokenNonce(s->identity, nonce);
+        const auto identify = BuildIdentify(s->identity);
+        Candidate chosen;
+        {
+            std::lock_guard lock(s->mutex);
+            chosen = s->candidates[bestIndex];
+            if (chosen.kind == Kind::Eos)
+            {
+                std::lock_guard globalLock(g_mutex);
+                g_eosIdentityStarted.insert(chosen.eosAddress);
+            }
+        }
+        const auto until = Clock::now() + std::chrono::milliseconds(1500);
+        Clock::time_point lastSend{};
+        uint8_t verdict = 0xFF;
+        while (Clock::now() < until && StillCurrent(s))
+        {
+            if (Clock::now() - lastSend > std::chrono::milliseconds(200))
+            {
+                SendControl(*s, chosen, identify);
+                lastSend = Clock::now();
+            }
+            std::this_thread::sleep_for(kLoopStep);
+            PollEngineSocket(Route::Client);
+            PollOwnSocket(*s);
+            PumpBackends();
+            if (chosen.kind == Kind::Eos)
+                eos_bridge::PollControl(Route::Client);
+            if (TakeIdentityAck(nonce, verdict))
+                break;
+        }
+        if (verdict == static_cast<uint8_t>(IdentityVerdict::Accepted))
+            summary += "  identity accepted by the server\n";
+        else if (verdict != 0xFF)
+            summary += std::string("  server rejected our identity: ") + IdentityVerdictName(static_cast<IdentityVerdict>(verdict)) + "\n";
+        else
+            summary += "  no identity acknowledgement (older server?)\n";
     }
 
     {
@@ -716,6 +879,8 @@ void ConnectBest(const std::string& targetIn)
             s->haveTicket = info.haveTicket;
             s->ticket = info.ticket;
             s->rendezvous = info.rendezvous;
+            s->identity = info.identity;
+            s->expectedTag = ServerTagFor(target);
             BuildCandidates(*s, server, info, transports.is_object() ? transports : json::object(), settings);
         }
         RunSession(s, settings, target);
@@ -735,9 +900,14 @@ void ConnectOverlay(Backend backend, const std::string& address, uint16_t port)
     }
     settings.connectTimeoutMs = 20000; // overlay bootstrap can take a while
     std::thread([backend, address, port, settings] {
+        // Same names the server registers as identity targets.
+        const std::string target = backend == Backend::Iroh ? "iroh:" + address.substr(0, address.find('|'))
+                                                            : "tailcat:" + address;
+        std::vector<uint8_t> identity = RequestIdentity(settings.masterServerUrl, target);
         auto s = NewSession(std::string(BackendName(backend)) + " " + address.substr(0, 16) + "...", port);
         {
             std::lock_guard lock(s->mutex);
+            s->identity = std::move(identity);
             s->overlayOnly = true;
             AddCandidate(*s, backend == Backend::Iroh ? Kind::Iroh : Kind::Tailcat, address.substr(0, 16) + "...");
             s->candidates.back().remote = address;
@@ -746,11 +916,18 @@ void ConnectOverlay(Backend backend, const std::string& address, uint16_t port)
     }).detach();
 }
 
-void ClientOnPong(uint64_t probeId, uint64_t timestampUs, const char* via)
+void ClientOnPong(uint64_t probeId, uint64_t timestampUs, const char* via, uint64_t serverTag)
 {
     auto s = CurrentSession();
     if (!s || (probeId >> 8) != s->generation)
         return;
+    // A different server that happens to live at a probed LAN / Tailscale
+    // address answers with its own tag.
+    if (s->expectedTag != 0 && serverTag != 0 && serverTag != s->expectedTag)
+    {
+        Debug("ignoring pong from a different server via %s\n", via);
+        return;
+    }
     const size_t index = static_cast<size_t>(probeId & 0xFF);
     const uint64_t now = NowMicros();
     if (timestampUs > now)
@@ -776,7 +953,7 @@ void ClientOnRegisterAck(const RegisterAck& ack, const Ipv4Endpoint& from)
     if (!s)
         return;
     std::lock_guard lock(s->mutex);
-    if (from != s->rendezvous || s->candidates.size() >= kMaxCandidates)
+    if (from != s->rendezvous || s->candidates.size() >= kMaxCandidates || s->ownsSocket)
         return;
     Debug("rendezvous sees this client at %s\n", ack.observed.ToString().c_str());
     // The master may learn the server mapping later than our HTTP query.
@@ -797,7 +974,7 @@ void ClientOnPunch(const Id16& ticket, const Ipv4Endpoint& from)
     if (!s)
         return;
     std::lock_guard lock(s->mutex);
-    if (!s->haveTicket || ticket != s->ticket || s->candidates.size() >= kMaxCandidates)
+    if (!s->haveTicket || ticket != s->ticket || s->candidates.size() >= kMaxCandidates || s->ownsSocket)
         return;
     if (!s->serverPunched)
         Debug("server punched through from %s\n", from.ToString().c_str());
@@ -810,6 +987,47 @@ void ClientOnPunch(const Id16& ticket, const Ipv4Endpoint& from)
     AddCandidate(*s, Kind::Punch, from.ToString());
     s->candidates.back().udp = from;
     s->candidates.back().state = CandState::Probing;
+}
+
+void ClientOnIdentifyAck(const Id16& nonce, uint8_t verdict)
+{
+    std::lock_guard lock(g_mutex);
+    if (g_identityAcks.size() > 256)
+        g_identityAcks.clear();
+    g_identityAcks[nonce] = verdict;
+}
+
+void EnsureEosIdentity(const Ipv6Bytes& address)
+{
+    {
+        std::lock_guard lock(g_mutex);
+        if (!g_eosIdentityStarted.insert(address).second)
+            return;
+    }
+    std::thread([address] {
+        // 3ffe:<14 bytes> encodes ProductUserId 0002<14 bytes> (fake_ip_layer.cpp).
+        static const char kHex[] = "0123456789abcdef";
+        std::string puid = "0002";
+        for (size_t i = 2; i < address.size(); ++i)
+        {
+            puid += kHex[address[i] >> 4];
+            puid += kHex[address[i] & 0xF];
+        }
+        const std::vector<uint8_t> token = RequestIdentity(GetSettings().masterServerUrl, "eos:" + puid);
+        Id16 nonce{};
+        if (!TokenNonce(token, nonce))
+            return;
+        const auto identify = BuildIdentify(token);
+        uint8_t verdict = 0xFF;
+        for (int i = 0; i < 20 && verdict == 0xFF; ++i)
+        {
+            eos_bridge::SendTo(address, identify.data(), identify.size(), Route::Client);
+            for (int j = 0; j < 25 && !TakeIdentityAck(nonce, verdict); ++j)
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        if (verdict != 0xFF && verdict != static_cast<uint8_t>(IdentityVerdict::Accepted))
+            Log("EOS server rejected our identity: %s\n", IdentityVerdictName(static_cast<IdentityVerdict>(verdict)));
+    }).detach();
 }
 
 std::string ClientDescribe()

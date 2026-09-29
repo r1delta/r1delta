@@ -154,12 +154,13 @@ std::vector<uint8_t> BuildPing(uint64_t probeId, uint64_t timestampUs)
     return b;
 }
 
-std::vector<uint8_t> BuildPong(uint64_t probeId, uint64_t timestampUs, uint8_t flags)
+std::vector<uint8_t> BuildPong(uint64_t probeId, uint64_t timestampUs, uint8_t flags, uint64_t serverTag)
 {
     auto b = Header(PacketType::Pong);
     AppendU64(b, probeId);
     AppendU64(b, timestampUs);
     b.push_back(flags);
+    AppendU64(b, serverTag);
     return b;
 }
 
@@ -183,6 +184,10 @@ bool ParsePunchRequest(const ParsedControl& pkt, PunchRequest& out)
     if (pkt.type != PacketType::PunchRequest || pkt.payloadSize < 22)
         return false;
     std::memcpy(out.ticket.data(), pkt.payload, 16);
+    std::memcpy(out.signedPart.data(), pkt.payload, out.signedPart.size());
+    out.haveMac = pkt.payloadSize >= 38;
+    if (out.haveMac)
+        std::memcpy(out.mac.data(), pkt.payload + 22, out.mac.size());
     return ReadEndpoint(pkt.payload + 16, pkt.payloadSize - 16, out.client);
 }
 
@@ -203,6 +208,7 @@ bool ParsePingPong(const ParsedControl& pkt, PingPong& out)
     out.probeId = ReadU64(pkt.payload);
     out.timestampUs = ReadU64(pkt.payload + 8);
     out.flags = (pkt.type == PacketType::Pong && pkt.payloadSize >= 17) ? pkt.payload[16] : 0;
+    out.serverTag = (pkt.type == PacketType::Pong && pkt.payloadSize >= 25) ? ReadU64(pkt.payload + 17) : 0;
     return true;
 }
 

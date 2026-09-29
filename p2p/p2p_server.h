@@ -24,4 +24,7 @@ void ServerOnPunchRequest(const PunchRequest& req, const Ipv4Endpoint& from);
 
 std::string ServerDescribe();
 
+// Tag this server puts in PONGs (hash of its list key), 0 until known.
+uint64_t ServerPongTag();
+
 } // namespace p2p

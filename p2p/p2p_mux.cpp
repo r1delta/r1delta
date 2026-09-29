@@ -1,5 +1,7 @@
 #include "p2p_mux.h"
 
+#include "p2p_identity.h"
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -8,6 +10,7 @@
 #include <deque>
 #include <map>
 #include <mutex>
+#include <thread>
 #include <unordered_map>
 
 namespace p2p
@@ -21,6 +24,9 @@ constexpr uint16_t kIncomingPeerPort = 37005;
 // so peers that stopped carrying game traffic are closed explicitly.
 constexpr auto kPeerIdleTimeout = std::chrono::seconds(120);
 constexpr auto kReapInterval = std::chrono::seconds(5);
+// Overlay addresses are public: bound what strangers can make us hold.
+constexpr size_t kMaxIncomingPeersPerBackend = 256;
+constexpr auto kIdentifyGrace = std::chrono::seconds(20);
 
 std::atomic<SendToFn> g_realSendTo{ nullptr };
 std::atomic<RecvFromFn> g_realRecvFrom{ nullptr };
@@ -45,6 +51,7 @@ struct Peer
     uint16_t nextMessageId = 1;
     Reassembler reassembler;
     std::chrono::steady_clock::time_point lastActivity = std::chrono::steady_clock::now();
+    std::chrono::steady_clock::time_point created = std::chrono::steady_clock::now();
 };
 
 struct Queued
@@ -63,6 +70,22 @@ uint64_t g_nextPeerId = 1;
 
 std::mutex g_pumpMutex;
 std::chrono::steady_clock::time_point g_lastReap{};
+
+// Plugin teardown (QUIC close, WireGuard/magicsock shutdown) can block; never
+// do it on the engine thread.
+void CloseAsync(OverlayBackend* backend, uint64_t handle)
+{
+    std::thread([backend, handle] { backend->Close(handle); }).detach();
+}
+
+size_t IncomingPeerCountLocked(Backend kind)
+{
+    size_t n = 0;
+    for (const auto& [id, peer] : g_peers)
+        if (peer.route == Route::Server && peer.backend->Kind() == kind)
+            ++n;
+    return n;
+}
 
 size_t RouteIndex(Route route)
 {
@@ -313,7 +336,8 @@ void ClosePeer(uint64_t muxId)
         g_byHandle.erase({ backend->Kind(), handle });
         g_peers.erase(it);
     }
-    backend->Close(handle);
+    Identities().Forget(EncodeOverlayAddress(backend->Kind(), muxId));
+    CloseAsync(backend, handle);
 }
 
 bool PeerAddress(uint64_t muxId, Ipv6Bytes& addr, uint16_t& port)
@@ -446,6 +470,7 @@ void PumpBackends()
                 {
                     if (found != g_byHandle.end())
                     {
+                        Identities().Forget(EncodeOverlayAddress(kind, found->second));
                         g_peers.erase(found->second);
                         g_byHandle.erase(found);
                     }
@@ -455,6 +480,11 @@ void PumpBackends()
                 {
                     if (!(flags & kPeerIncoming))
                         return; // stale outgoing peer we already closed
+                    if (IncomingPeerCountLocked(kind) >= kMaxIncomingPeersPerBackend)
+                    {
+                        CloseAsync(backend, handle);
+                        return;
+                    }
                     Peer peer;
                     peer.id = g_nextPeerId++;
                     peer.backend = backend;
@@ -462,6 +492,9 @@ void PumpBackends()
                     peer.route = Route::Server;
                     peer.port = kIncomingPeerPort;
                     found = g_byHandle.emplace(std::make_pair(kind, handle), peer.id).first;
+                    uint32_t trustedIp = 0;
+                    if (backend->TrustedPeerIpv4(handle, trustedIp))
+                        Identities().Trust(EncodeOverlayAddress(kind, peer.id), trustedIp);
                     g_peers.emplace(peer.id, std::move(peer));
                 }
                 Peer& peer = g_peers[found->second];
@@ -479,11 +512,20 @@ void PumpBackends()
                 }
             }
 
+            const Ipv6Bytes fakeAddress = EncodeOverlayAddress(kind, muxId);
             ControlContext ctx;
             ctx.route = route;
             ctx.via = BackendName(kind);
+            ctx.source = fakeAddress;
+            ctx.haveSource = true;
             ctx.reply = [muxId](const std::vector<uint8_t>& reply) { SendToPeer(muxId, reply.data(), reply.size()); };
             if (TryConsumeControl(payload.data(), payload.size(), ctx))
+                return;
+
+            // Game traffic from a peer that connected to us must carry a
+            // master-attested identity (IDENTIFY) first, so bans cannot be
+            // dodged by switching transport.
+            if (route == Route::Server && ShouldDropUnidentified(fakeAddress.data()))
                 return;
 
             std::lock_guard lock(g_mutex);
@@ -502,9 +544,14 @@ void PumpBackends()
     std::vector<uint64_t> idle;
     {
         std::lock_guard lock(g_mutex);
-        for (const auto& [id, peer] : g_peers)
-            if (now - peer.lastActivity > kPeerIdleTimeout)
+        for (auto& [id, peer] : g_peers)
+        {
+            peer.reassembler.Expire(now);
+            const bool neverIdentified = peer.route == Route::Server && now - peer.created > kIdentifyGrace &&
+                                         ShouldDropUnidentified(EncodeOverlayAddress(peer.backend->Kind(), id).data());
+            if (now - peer.lastActivity > kPeerIdleTimeout || neverIdentified)
                 idle.push_back(id);
+        }
     }
     for (uint64_t id : idle)
         ClosePeer(id);
@@ -514,6 +561,7 @@ bool PopQueued(Route route, char* buf, int len, sockaddr* from, int* fromlen, in
 {
     if (route == Route::Unknown)
         return false;
+    OnEngineThreadTick();
     auto& q = g_queues[RouteIndex(route)];
     {
         std::lock_guard lock(g_mutex);
@@ -553,7 +601,16 @@ bool ConsumeUdpControl(SOCKET s, Route route, const uint8_t* data, int len, cons
     ctx.route = route;
     ctx.via = "udp";
     ctx.viaEngineUdp = true;
-    FromSockaddr(from, fromlen, ctx.udpFrom);
+    if (FromSockaddr(from, fromlen, ctx.udpFrom))
+    {
+        ctx.source = MappedIpv4(ctx.udpFrom.ip);
+        ctx.haveSource = true;
+    }
+    else if (from && from->sa_family == AF_INET6 && fromlen >= static_cast<int>(sizeof(sockaddr_in6)))
+    {
+        std::memcpy(ctx.source.data(), &reinterpret_cast<const sockaddr_in6*>(from)->sin6_addr, ctx.source.size());
+        ctx.haveSource = true;
+    }
 
     sockaddr_storage replyTo{};
     const int replyLen = std::min<int>(fromlen, static_cast<int>(sizeof(replyTo)));

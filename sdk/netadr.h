@@ -34,6 +34,7 @@ public:
     }
 
     inline void SetIP(IN6_ADDR* inAdr) { adr = *inAdr; }
+    inline const IN6_ADDR& GetIP(void) const { return adr; }
     inline void SetPort(uint16_t newport) { port = newport; }
     inline void SetType(netadrtype_t newtype) { type = newtype; }
     inline netadrtype_t GetType(void) const { return type; }

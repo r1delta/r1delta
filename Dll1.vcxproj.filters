@@ -402,6 +402,9 @@
     <ClInclude Include="p2p\p2p_eos_bridge.h">
       <Filter>p2p</Filter>
     </ClInclude>
+    <ClInclude Include="p2p\p2p_identity.h">
+      <Filter>p2p</Filter>
+    </ClInclude>
     <ClInclude Include="p2p\p2p_log.h">
       <Filter>p2p</Filter>
     </ClInclude>
@@ -817,6 +820,12 @@
       <Filter>p2p</Filter>
     </ClCompile>
     <ClCompile Include="p2p\p2p_connect.cpp">
+      <Filter>p2p</Filter>
+    </ClCompile>
+    <ClCompile Include="p2p\p2p_crypto_win.cpp">
+      <Filter>p2p</Filter>
+    </ClCompile>
+    <ClCompile Include="p2p\p2p_identity.cpp">
       <Filter>p2p</Filter>
     </ClCompile>
     <ClCompile Include="p2p\p2p_mux.cpp">

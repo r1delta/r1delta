@@ -44,6 +44,7 @@ bool ParseTurnUrl(const std::string& url, std::string& host, uint16_t& port);
 class TurnClient final : public OverlayBackend
 {
 public:
+    ~TurnClient() override;
     // Starts (or restarts, when credentials changed) the allocation thread.
     void Start(const TurnCredentials& creds);
     void Stop();
@@ -62,6 +63,11 @@ public:
     size_t MaxDatagram(uint64_t) override { return 1400; }
     void Pump(const BackendSink& sink) override;
     void Close(uint64_t) override {}
+    bool TrustedPeerIpv4(uint64_t handle, uint32_t& ip) override
+    {
+        ip = PeerFor(handle).ip;
+        return ip != 0;
+    }
 
     static uint64_t HandleFor(const Ipv4Endpoint& peer) { return (static_cast<uint64_t>(peer.ip) << 16) | peer.port; }
     static Ipv4Endpoint PeerFor(uint64_t handle)
@@ -94,8 +100,8 @@ private:
 
     struct Permission
     {
-        std::chrono::steady_clock::time_point refreshedAt{};
-        bool confirmed = false;
+        std::chrono::steady_clock::time_point requestedAt{};
+        std::chrono::steady_clock::time_point confirmedAt{};
     };
 
     struct Channel
@@ -142,7 +148,9 @@ private:
     std::string m_lastError;
     std::map<stun::TxId, Pending> m_pending;
     std::map<uint32_t, Permission> m_permissions;
-    std::set<uint32_t> m_wantedPermissions;
+    // IPs we want to accept traffic from, with when they last mattered
+    // (asked for by the master, or sent us data). Unused ones expire.
+    std::map<uint32_t, std::chrono::steady_clock::time_point> m_wantedPermissions;
     std::map<uint64_t, Channel> m_channels; // by peer handle
     std::map<uint16_t, uint64_t> m_channelPeers;
     uint16_t m_nextChannel = stun::kMinChannel;

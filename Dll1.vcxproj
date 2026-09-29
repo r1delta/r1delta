@@ -242,6 +242,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="p2p\p2p.h" />
     <ClInclude Include="p2p\p2p_connect.h" />
     <ClInclude Include="p2p\p2p_eos_bridge.h" />
+    <ClInclude Include="p2p\p2p_identity.h" />
     <ClInclude Include="p2p\p2p_log.h" />
     <ClInclude Include="p2p\p2p_mux.h" />
     <ClInclude Include="p2p\p2p_netinfo.h" />
@@ -402,6 +403,8 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="eos\eos_logging_manager.cpp" />
     <ClCompile Include="p2p\p2p.cpp" />
     <ClCompile Include="p2p\p2p_connect.cpp" />
+    <ClCompile Include="p2p\p2p_crypto_win.cpp" />
+    <ClCompile Include="p2p\p2p_identity.cpp" />
     <ClCompile Include="p2p\p2p_mux.cpp" />
     <ClCompile Include="p2p\p2p_netinfo.cpp" />
     <ClCompile Include="p2p\p2p_plugin.cpp" />

@@ -19,6 +19,9 @@ constexpr int kMaxAttempts = 6;
 constexpr auto kPermissionRefresh = std::chrono::seconds(240); // permissions live 300s
 constexpr auto kChannelRefresh = std::chrono::seconds(480);    // channels live 600s
 constexpr size_t kMaxIncoming = 4096;
+constexpr auto kPermissionUnusedExpiry = std::chrono::minutes(10);
+constexpr auto kPermissionRetry = std::chrono::seconds(5);
+constexpr size_t kMaxWantedPermissions = 1024;
 constexpr const char* kSoftware = "R1Delta";
 
 std::string Trim(const std::string& s)
@@ -105,12 +108,21 @@ void TurnClient::Stop()
     std::thread t;
     {
         std::lock_guard lock(m_mutex);
-        if (!m_running.exchange(false))
-            return;
+        m_running.store(false);
+        // The thread may have exited on its own (DNS / socket failure) and
+        // still be joinable; always reap it so a new one can be assigned.
         t = std::move(m_thread);
     }
     if (t.joinable())
         t.join();
+}
+
+TurnClient::~TurnClient()
+{
+    // Static destruction at process exit: never block or terminate here.
+    m_running.store(false);
+    if (m_thread.joinable())
+        m_thread.detach();
 }
 
 void TurnClient::Permit(uint32_t ip)
@@ -118,7 +130,9 @@ void TurnClient::Permit(uint32_t ip)
     if (!ip)
         return;
     std::lock_guard lock(m_mutex);
-    m_wantedPermissions.insert(ip);
+    if (m_wantedPermissions.size() >= kMaxWantedPermissions && !m_wantedPermissions.count(ip))
+        return;
+    m_wantedPermissions[ip] = Clock::now();
 }
 
 std::optional<Ipv4Endpoint> TurnClient::Relayed() const
@@ -219,7 +233,7 @@ void TurnClient::SendPermissions(const std::vector<uint32_t>& ips)
     {
         Pending p;
         p.permitIp = ip;
-        m_permissions[ip].refreshedAt = Clock::now();
+        m_permissions[ip].requestedAt = Clock::now();
         SendRequest(stun::kCreatePermission, p);
     }
 }
@@ -388,13 +402,21 @@ void TurnClient::Tick()
         SendRefresh(600);
     }
 
-    // New and expiring permissions.
+    // New and expiring permissions; forget IPs nobody asked for lately.
     std::vector<uint32_t> toPermit;
-    for (uint32_t ip : m_wantedPermissions)
+    for (auto it = m_wantedPermissions.begin(); it != m_wantedPermissions.end();)
     {
-        auto it = m_permissions.find(ip);
-        if (it == m_permissions.end() || now - it->second.refreshedAt > kPermissionRefresh)
-            toPermit.push_back(ip);
+        if (now - it->second > kPermissionUnusedExpiry)
+        {
+            m_permissions.erase(it->first);
+            it = m_wantedPermissions.erase(it);
+            continue;
+        }
+        const Permission& perm = m_permissions[it->first];
+        const bool fresh = perm.confirmedAt.time_since_epoch().count() != 0 && now - perm.confirmedAt < kPermissionRefresh;
+        if (!fresh && now - perm.requestedAt > kPermissionRetry)
+            toPermit.push_back(it->first);
+        ++it;
     }
     if (!toPermit.empty())
         SendPermissions(toPermit);
@@ -430,7 +452,10 @@ void TurnClient::HandleDatagram(const uint8_t* data, size_t size)
             return;
         if (m_incoming.size() >= kMaxIncoming)
             m_incoming.pop_front();
-        m_incoming.emplace_back(PeerFor(it->second), std::vector<uint8_t>(payload, payload + payloadSize));
+        const Ipv4Endpoint peer = PeerFor(it->second);
+        if (auto wanted = m_wantedPermissions.find(peer.ip); wanted != m_wantedPermissions.end())
+            wanted->second = Clock::now();
+        m_incoming.emplace_back(peer, std::vector<uint8_t>(payload, payload + payloadSize));
         return;
     }
 
@@ -447,6 +472,8 @@ void TurnClient::HandleDatagram(const uint8_t* data, size_t size)
             return;
         if (m_incoming.size() >= kMaxIncoming)
             m_incoming.pop_front();
+        if (auto wanted = m_wantedPermissions.find(peer.ip); wanted != m_wantedPermissions.end())
+            wanted->second = Clock::now();
         m_incoming.emplace_back(peer, std::vector<uint8_t>(d, d + n));
 
         // Bind a channel so subsequent traffic uses 4-byte ChannelData headers.
@@ -540,7 +567,7 @@ void TurnClient::HandleResponse(const stun::Message& msg)
         }
         break;
     case stun::kCreatePermission:
-        m_permissions[pending.permitIp].confirmed = true;
+        m_permissions[pending.permitIp].confirmedAt = Clock::now();
         break;
     case stun::kChannelBind:
     {

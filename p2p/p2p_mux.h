@@ -73,6 +73,9 @@ public:
     virtual size_t MaxDatagram(uint64_t handle) = 0;
     virtual void Pump(const BackendSink& sink) = 0;
     virtual void Close(uint64_t handle) = 0;
+    // Real IPv4 of a peer as observed by trusted infrastructure (the TURN
+    // relay); such peers need no identity token.
+    virtual bool TrustedPeerIpv4(uint64_t /*handle*/, uint32_t& /*ip*/) { return false; }
 };
 
 // Backends live for the whole process; the mux does not own them.
@@ -95,6 +98,8 @@ struct ControlContext
     const char* via = "udp";  // transport the packet arrived on
     bool viaEngineUdp = false; // arrived on an engine UDP socket
     Ipv4Endpoint udpFrom;      // sender when viaEngineUdp && IPv4
+    Ipv6Bytes source{};        // sender as the engine sees it (fake or ::ffff:v4)
+    bool haveSource = false;
     std::function<void(const std::vector<uint8_t>&)> reply;
 };
 
@@ -125,6 +130,9 @@ void InjectForEngine(Route route, const sockaddr* from, int fromlen, const uint8
 
 // Pulls pending datagrams out of every backend.
 void PumpBackends();
+
+// Called on the engine thread from the recvfrom hook (implemented in p2p.cpp).
+void OnEngineThreadTick();
 
 // Reads whatever is waiting on the engine socket of `route` (used while the
 // client is probing and the engine may not be polling). Control packets are

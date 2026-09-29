@@ -18,7 +18,9 @@
 #include "eos_threading.h"
 #include "logging.h"
 #include "r1d_version.h"
+#include "p2p/p2p_connect.h"
 #include "p2p/p2p_eos_bridge.h"
+#include "p2p/p2p_identity.h"
 #include "p2p/p2p_mux.h"
 
 #pragma intrinsic(_ReturnAddress)
@@ -247,6 +249,8 @@ bool ConsumeEosControl(eos::FakeIpLayer* layer, const eos::PendingPacket& packet
                     ? socketRoute
                     : (eos::IsServerNetContext() ? p2p::Route::Server : p2p::Route::Client);
     ctx.via = "eos";
+    std::memcpy(ctx.source.data(), &packet.sender.address, ctx.source.size());
+    ctx.haveSource = true;
     const eos::FakeEndpoint sender = packet.sender;
     const eos::PacketRoute replyRoute = ToEosRoute(ctx.route);
     ctx.reply = [layer, sender, replyRoute](const std::vector<uint8_t>& reply) {
@@ -297,6 +301,15 @@ int WSAAPI HookedSendTo(SOCKET socketHandle,
     }
 
     const eos::PacketRoute route = DetermineSocketRoute(socketHandle);
+    if (route == eos::PacketRoute::Client)
+    {
+        // We are the client of this EOS peer: never treat its replies as an
+        // unidentified inbound player, and prove our identity to it.
+        p2p::Ipv6Bytes address;
+        std::memcpy(address.data(), &endpoint.address, address.size());
+        p2p::Identities().MarkOutgoing(address);
+        p2p::EnsureEosIdentity(address);
+    }
     const bool sent = layer->SendToPeer(endpoint,
                                         reinterpret_cast<const uint8_t*>(buffer),
                                         static_cast<size_t>(length),
@@ -345,6 +358,12 @@ int WSAAPI HookedRecvFrom(SOCKET socketHandle,
             if (ConsumeEosControl(layer, packet, p2pRoute))
                 continue;
 
+            // Players joining over EOS must have presented a master-attested
+            // identity (IP bans apply across transports).
+            if (p2pRoute != p2p::Route::Client &&
+                p2p::ShouldDropUnidentified(reinterpret_cast<const uint8_t*>(&packet.sender.address)))
+                continue;
+
             const int copyLength = static_cast<int>(std::min<size_t>(static_cast<size_t>(length), packet.payload.size()));
             if (buffer && copyLength > 0)
             {
@@ -360,21 +379,35 @@ int WSAAPI HookedRecvFrom(SOCKET socketHandle,
         }
     }
 
-    const int received = g_realRecvFrom
-        ? g_realRecvFrom(socketHandle, buffer, length, flags, from, fromLen)
-        : SOCKET_ERROR;
+    if (!g_realRecvFrom)
+        return SOCKET_ERROR;
 
     // Hole-punching / rendezvous / ping control packets never reach the
-    // engine. Report "no more data" rather than reading again, in case the
-    // socket is blocking.
-    if (received > 0 && p2pRoute != p2p::Route::Unknown &&
-        p2p::ConsumeUdpControl(socketHandle, p2pRoute, reinterpret_cast<const uint8_t*>(buffer), received, from,
-                               fromLen ? *fromLen : 0))
+    // engine. After consuming one, keep reading while more data is queued so
+    // a stream of control packets cannot stall the engine's receive loop; a
+    // zero-timeout select guarantees we never block, even on a blocking socket.
+    const int fromLenIn = fromLen ? *fromLen : 0;
+    for (int consumed = 0; consumed < 64; ++consumed)
     {
-        WSASetLastError(WSAEWOULDBLOCK);
-        return SOCKET_ERROR;
+        if (fromLen)
+            *fromLen = fromLenIn;
+        const int received = g_realRecvFrom(socketHandle, buffer, length, flags, from, fromLen);
+        if (received <= 0 || p2pRoute == p2p::Route::Unknown ||
+            !p2p::ConsumeUdpControl(socketHandle, p2pRoute, reinterpret_cast<const uint8_t*>(buffer), received, from,
+                                    fromLen ? *fromLen : 0))
+        {
+            return received;
+        }
+
+        fd_set readSet;
+        FD_ZERO(&readSet);
+        FD_SET(socketHandle, &readSet);
+        timeval noWait{ 0, 0 };
+        if (select(0, &readSet, nullptr, nullptr, &noWait) <= 0)
+            break;
     }
-    return received;
+    WSASetLastError(WSAEWOULDBLOCK);
+    return SOCKET_ERROR;
 }
 
 int WSAAPI HookedCloseSocket(SOCKET s)

@@ -35,11 +35,13 @@ enum class PacketType : uint8_t
     SrvRegister = 0x01,  // server -> master: token[16]
     RegisterAck = 0x02,  // master -> peer: observed addr, flags, [server addr]
     CliRegister = 0x03,  // client -> master: ticket[16]
-    PunchRequest = 0x04, // master -> server: ticket[16], client addr
+    PunchRequest = 0x04, // master -> server: ticket[16], client addr, mac[16]
     Punch = 0x05,        // peer <-> peer: ticket[16], role
     Ping = 0x06,         // client -> server: probe id, timestamp
-    Pong = 0x07,         // server -> client: probe id, timestamp, flags
+    Pong = 0x07,         // server -> client: probe id, timestamp, flags, server tag
     PunchReqAck = 0x08,  // server -> master: ticket[16], client addr
+    Identify = 0x09,     // client -> server (any route): identity token (p2p_identity.h)
+    IdentifyAck = 0x0A,  // server -> client: token nonce[16], verdict
 };
 
 using Id16 = std::array<uint8_t, 16>;
@@ -76,7 +78,10 @@ std::vector<uint8_t> BuildCliRegister(const Id16& ticket);
 std::vector<uint8_t> BuildPunch(const Id16& ticket, uint8_t role);
 std::vector<uint8_t> BuildPunchReqAck(const Id16& ticket, const Ipv4Endpoint& client);
 std::vector<uint8_t> BuildPing(uint64_t probeId, uint64_t timestampUs);
-std::vector<uint8_t> BuildPong(uint64_t probeId, uint64_t timestampUs, uint8_t flags);
+// serverTag: first 8 bytes of SHA-256 of the server's list key ("ip:port"),
+// so a client can tell which server answered (0 = unknown).
+std::vector<uint8_t> BuildPong(uint64_t probeId, uint64_t timestampUs, uint8_t flags, uint64_t serverTag = 0);
+uint64_t ServerTagFor(const std::string& listKey);
 
 struct RegisterAck
 {
@@ -89,6 +94,11 @@ struct PunchRequest
 {
     Id16 ticket{};
     Ipv4Endpoint client; // port 0 == "permission only"
+    // HMAC-SHA256(server token, first 22 payload bytes), truncated. Proves the
+    // request comes from the master server, not a spoofed source address.
+    std::array<uint8_t, 16> mac{};
+    bool haveMac = false;
+    std::array<uint8_t, 22> signedPart{};
 };
 bool ParsePunchRequest(const ParsedControl& pkt, PunchRequest& out);
 bool ParseTicket(const ParsedControl& pkt, Id16& out); // Punch / PunchReqAck / CliRegister
@@ -97,7 +107,8 @@ struct PingPong
 {
     uint64_t probeId = 0;
     uint64_t timestampUs = 0;
-    uint8_t flags = 0; // pong only
+    uint8_t flags = 0;      // pong only
+    uint64_t serverTag = 0; // pong only
 };
 bool ParsePingPong(const ParsedControl& pkt, PingPong& out);
 
@@ -156,6 +167,7 @@ public:
     // Returns true and fills out when a full datagram is available.
     bool Push(const uint8_t* frame, size_t size, std::vector<uint8_t>& out, Clock::time_point now = Clock::now());
     size_t PendingCount() const { return m_pending.size(); }
+    void Expire(Clock::time_point now);
 
 private:
     struct Pending
@@ -166,8 +178,6 @@ private:
         std::vector<std::vector<uint8_t>> chunks;
         std::vector<bool> have;
     };
-    void Expire(Clock::time_point now);
-
     std::map<uint16_t, Pending> m_pending;
 };
 

@@ -1,7 +1,12 @@
 #include "p2p.h"
 
 #include <cstdarg>
+#include <algorithm>
+#include <chrono>
 #include <cstdio>
+#include <ctime>
+#include <mutex>
+#include <unordered_map>
 #include <cstdlib>
 #include <string>
 
@@ -9,6 +14,7 @@
 #include "cvar.h"
 #include "logging.h"
 #include "p2p_connect.h"
+#include "p2p_identity.h"
 #include "p2p_log.h"
 #include "p2p_mux.h"
 #include "p2p_server.h"
@@ -33,6 +39,8 @@ ConVarR1* g_prefer = nullptr;
 ConVarR1* g_irohRelay = nullptr;
 ConVarR1* g_tailcatDerpMap = nullptr;
 ConVarR1* g_debug = nullptr;
+ConVarR1* g_requireIdentity = nullptr;
+ConVarR1* g_identityKey = nullptr;
 
 int IntValue(const ConVarR1* var, int fallback)
 {
@@ -62,6 +70,7 @@ uint16_t ParsePort(const char* text, uint16_t fallback)
 
 void ConnectCommand(const CCommand& args)
 {
+    RefreshSettings();
     if (args.ArgC() < 2)
     {
         Msg("usage: delta_connect <ip:port>\n");
@@ -72,6 +81,7 @@ void ConnectCommand(const CCommand& args)
 
 void ConnectIrohCommand(const CCommand& args)
 {
+    RefreshSettings();
     if (args.ArgC() < 2)
     {
         Msg("usage: delta_connect_iroh <iroh address> [game port]\n");
@@ -82,6 +92,7 @@ void ConnectIrohCommand(const CCommand& args)
 
 void ConnectTailcatCommand(const CCommand& args)
 {
+    RefreshSettings();
     if (args.ArgC() < 2)
     {
         Msg("usage: delta_connect_tailcat <tailcat address> [game port]\n");
@@ -92,12 +103,50 @@ void ConnectTailcatCommand(const CCommand& args)
 
 void StatusCommand(const CCommand&)
 {
+    RefreshSettings();
     std::string out = "Server transports:\n" + ServerDescribe();
     out += "Engine sockets: client " + std::string(GetEngineSocket(Route::Client) != INVALID_SOCKET ? "seen" : "not seen") +
            ", server " + (GetEngineSocket(Route::Server) != INVALID_SOCKET ? "seen" : "not seen") + "; overlay peers " +
            std::to_string(PeerCount()) + "\n";
     out += "Last connection attempt:\n" + ClientDescribe();
     Msg("%s", out.c_str());
+}
+
+// Pings arrive on the public game port and may carry spoofed sources, so
+// answers are rate limited per source IP (and globally).
+bool AllowPong(uint32_t ip)
+{
+    struct Bucket
+    {
+        double tokens = 0;
+        std::chrono::steady_clock::time_point last{};
+    };
+    static std::mutex mutex;
+    static std::unordered_map<uint32_t, Bucket> buckets;
+    static Bucket global;
+    constexpr double kPerIpRate = 20, kPerIpBurst = 40, kGlobalRate = 2000, kGlobalBurst = 4000;
+    const auto now = std::chrono::steady_clock::now();
+    auto take = [&](Bucket& b, double rate, double burst) {
+        if (b.last.time_since_epoch().count() == 0)
+            b.tokens = burst;
+        else
+            b.tokens = std::min(burst, b.tokens + std::chrono::duration<double>(now - b.last).count() * rate);
+        b.last = now;
+        if (b.tokens < 1)
+            return false;
+        b.tokens -= 1;
+        return true;
+    };
+    std::lock_guard lock(mutex);
+    if (buckets.size() > 8192)
+        buckets.clear();
+    return take(buckets[ip], kPerIpRate, kPerIpBurst) && take(global, kGlobalRate, kGlobalBurst);
+}
+
+std::string Ipv4ToStringCompat(uint32_t ip)
+{
+    const std::string s = Ipv4Endpoint{ ip, 0 }.ToString();
+    return s.substr(0, s.rfind(':'));
 }
 
 } // namespace
@@ -124,7 +173,15 @@ void Debug(const char* fmt, ...)
     Msg("[P2P] %s", buf);
 }
 
-Settings GetSettings()
+std::mutex g_settingsMutex;
+Settings g_settings = [] {
+    Settings s;
+    s.enable = false; // until Initialize has registered the convars
+    return s;
+}();
+std::chrono::steady_clock::time_point g_settingsRefreshed{};
+
+Settings ReadSettingsFromConVars()
 {
     Settings s;
     s.enable = g_enable && IntValue(g_enable, 1) != 0;
@@ -145,8 +202,36 @@ Settings GetSettings()
     s.irohRelayUrl = StringValue(g_irohRelay);
     s.tailcatDerpMapUrl = StringValue(g_tailcatDerpMap);
     s.masterServerUrl = MasterServerUrl();
+    s.requireIdentity = IntValue(g_requireIdentity, 1);
+    s.identityPublicKeyHex = StringValue(g_identityKey);
+    if (s.identityPublicKeyHex.empty())
+        s.identityPublicKeyHex = kDefaultIdentityPublicKeyHex;
     s.debug = IntValue(g_debug, 0) != 0;
     return s;
+}
+
+Settings GetSettings()
+{
+    std::lock_guard lock(g_settingsMutex);
+    return g_settings;
+}
+
+void RefreshSettings()
+{
+    Settings fresh = ReadSettingsFromConVars();
+    std::lock_guard lock(g_settingsMutex);
+    g_settings = std::move(fresh);
+    g_settingsRefreshed = std::chrono::steady_clock::now();
+}
+
+void OnEngineThreadTick()
+{
+    {
+        std::lock_guard lock(g_settingsMutex);
+        if (std::chrono::steady_clock::now() - g_settingsRefreshed < std::chrono::seconds(1))
+            return;
+    }
+    RefreshSettings();
 }
 
 void HandleControl(const ParsedControl& pkt, const ControlContext& ctx)
@@ -158,15 +243,16 @@ void HandleControl(const ParsedControl& pkt, const ControlContext& ctx)
         // Only game servers answer; the reply goes back over the transport
         // the ping arrived on, which is what the client is measuring.
         PingPong pp;
-        if (ctx.route == Route::Server && ctx.reply && ParsePingPong(pkt, pp))
-            ctx.reply(BuildPong(pp.probeId, pp.timestampUs, 0));
+        if (ctx.route == Route::Server && ctx.reply && ParsePingPong(pkt, pp) &&
+            (!ctx.viaEngineUdp || AllowPong(ctx.udpFrom.ip)))
+            ctx.reply(BuildPong(pp.probeId, pp.timestampUs, 0, ServerPongTag()));
         break;
     }
     case PacketType::Pong:
     {
         PingPong pp;
         if (ctx.route == Route::Client && ParsePingPong(pkt, pp))
-            ClientOnPong(pp.probeId, pp.timestampUs, ctx.via);
+            ClientOnPong(pp.probeId, pp.timestampUs, ctx.via, pp.serverTag);
         break;
     }
     case PacketType::RegisterAck:
@@ -185,6 +271,32 @@ void HandleControl(const ParsedControl& pkt, const ControlContext& ctx)
         PunchRequest req;
         if (ctx.route == Route::Server && ctx.viaEngineUdp && ParsePunchRequest(pkt, req))
             ServerOnPunchRequest(req, ctx.udpFrom);
+        break;
+    }
+    case PacketType::Identify:
+    {
+        if (ctx.route != Route::Server || !ctx.haveSource || !ctx.reply)
+            break;
+        const int64_t now = static_cast<int64_t>(std::time(nullptr));
+        uint32_t ip = 0;
+        const IdentityVerdict verdict = Identities().Present(pkt.payload, pkt.payloadSize, ctx.source, now, &ip);
+        IdentityToken token;
+        Id16 nonce{};
+        if (ParseIdentityToken(pkt.payload, pkt.payloadSize, token))
+            nonce = token.nonce;
+        ctx.reply(BuildIdentifyAck(nonce, verdict));
+        if (verdict == IdentityVerdict::Accepted)
+            Debug("peer via %s identified as %s\n", ctx.via, Ipv4ToStringCompat(ip).c_str());
+        else
+            Log("rejected identity from a peer via %s: %s\n", ctx.via, IdentityVerdictName(verdict));
+        break;
+    }
+    case PacketType::IdentifyAck:
+    {
+        Id16 nonce;
+        IdentityVerdict verdict;
+        if (ctx.route == Route::Client && ParseIdentifyAck(pkt, nonce, verdict))
+            ClientOnIdentifyAck(nonce, static_cast<uint8_t>(verdict));
         break;
     }
     case PacketType::Punch:
@@ -207,7 +319,10 @@ void Initialize()
     initialized = true;
 
     if (IsR1ODedicatedServer())
+    {
+        RefreshSettings(); // no convars registered: everything stays disabled
         return; // the R1O fake dedicated server registers its cvars differently; keep it on the legacy path
+    }
 
     g_enable = RegisterConVar("delta_p2p_enable", "1", FCVAR_NONE,
                               "Enable NAT traversal and alternative transports (EOS, iroh, tailcat, TURN, hole punching, UPnP)");
@@ -224,11 +339,16 @@ void Initialize()
     g_irohRelay = RegisterConVar("delta_p2p_iroh_relay_url", "", FCVAR_NONE, "Custom iroh relay URL (default: n0 public relays)");
     g_tailcatDerpMap = RegisterConVar("delta_p2p_tailcat_derpmap_url", "", FCVAR_NONE, "Custom tailcat DERP map URL (default: tailcat.dev)");
     g_debug = RegisterConVar("delta_p2p_debug", "0", FCVAR_NONE, "Verbose NAT traversal logging");
+    g_requireIdentity = RegisterConVar("delta_p2p_require_identity", "1", FCVAR_NONE,
+                                       "Servers only accept EOS/iroh/tailcat players that present a master-server attested IP (so IP bans apply on every transport): 0 = off, 1 = when the master server supports it, 2 = always");
+    g_identityKey = RegisterConVar("delta_p2p_identity_pubkey", "", FCVAR_NONE,
+                                   "Hex X||Y of the master server's P-256 identity key (empty = official master server)");
 
     RegisterConCommand("delta_connect", ConnectCommand, "Connect to a server using the lowest-latency route (direct, hole punched, LAN, Tailscale, EOS, iroh, tailcat, TURN)", FCVAR_NONE);
     RegisterConCommand("delta_connect_iroh", ConnectIrohCommand, "Connect to a server by its iroh address", FCVAR_NONE);
     RegisterConCommand("delta_connect_tailcat", ConnectTailcatCommand, "Connect to a server by its tailcat address", FCVAR_NONE);
     RegisterConCommand("delta_p2p_status", StatusCommand, "Show NAT traversal / transport status", FCVAR_NONE);
+    RefreshSettings();
 }
 
 void AddHeartbeatFields(nlohmann::json& heartbeat, int port)

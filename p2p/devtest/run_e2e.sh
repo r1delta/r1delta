@@ -35,7 +35,13 @@ cp "$P2P/plugins/iroh/target/release/libr1delta_iroh.so" "$WORK/plugins/"
 g++ -std=c++20 -O1 -g -Wall -Wno-unknown-pragmas -include "$HERE/win_compat.h" -I"$HERE/shim_include" \
     -I"$HERE/stub_include" -I"$HDR" -I"$P2P" "$HERE/fake_engine.cpp" "$P2P"/p2p.cpp "$P2P"/p2p_mux.cpp \
     "$P2P"/p2p_plugin.cpp "$P2P"/p2p_turn.cpp "$P2P"/p2p_server.cpp "$P2P"/p2p_connect.cpp \
-    "$P2P"/p2p_protocol.cpp "$P2P"/stun.cpp "$P2P"/upnp_codec.cpp -o "$WORK/fake_engine" -ldl -lpthread
+    "$P2P"/p2p_protocol.cpp "$P2P"/stun.cpp "$P2P"/upnp_codec.cpp "$P2P"/p2p_identity.cpp "$HERE/crypto_openssl.cpp" \
+    -Wno-deprecated-declarations -o "$WORK/fake_engine" -ldl -lpthread -lcrypto
+
+# Identity attestation key (test only) and its public X||Y for the game side.
+openssl ecparam -name prime256v1 -genkey -noout -out "$WORK/attest.pem" 2>/dev/null
+IDENTITY_PUB="$(openssl ec -in "$WORK/attest.pem" -pubout -outform DER 2>/dev/null | tail -c 64 | od -An -tx1 | tr -d ' \n')"
+export P2P_delta_p2p_identity_pubkey="$IDENTITY_PUB"
 
 # --- infrastructure ------------------------------------------------------
 turnserver -n --listening-ip="$IP" --listening-port=3478 --relay-ip="$IP" --min-port=49000 --max-port=49200 \
@@ -60,7 +66,7 @@ DERPMAP="$(sed -n 's/^DERPMAP //p' "$WORK/derp.out")"
 
 (cd "$WORK" && exec env MS_TOKEN=x JWT_DISCORD_SECRET=x CLIENT_ID=x CLIENT_SECRET=x REDIRECT_URI=x PORT=8080 \
     RENDEZVOUS_LISTEN="$IP:37999" RENDEZVOUS_PUBLIC_ADDR="$IP:37999" \
-    CF_TURN_KEY_ID=key CF_TURN_API_TOKEN=token CF_TURN_API_URL="http://127.0.0.1:8099/%s" \
+    CF_TURN_KEY_ID=key CF_TURN_API_TOKEN=token CF_TURN_API_URL="http://127.0.0.1:8099/%s" ATTEST_KEY_FILE="$WORK/attest.pem" \
     ./masterserver > "$WORK/master.log" 2>&1) & PIDS+=($!)
 for _ in $(seq 50); do curl -s "http://$IP:8080/servers" >/dev/null && break; sleep 0.2; done
 if ! grep -q "Rendezvous listening" "$WORK/master.log"; then echo "master server failed to start:"; cat "$WORK/master.log"; exit 1; fi
@@ -96,6 +102,21 @@ if "$WORK/fake_engine" client "$IP" 37150 "$MASTER" "$IP:37016" > "$WORK/client_
 else
     echo "    legacy fallback failed"; fail=1
 fi
+
+run_expect() { # <name> <expect ok|fail> <server port> <client port> [env...]
+    local name="$1" expect="$2" sport="$3" cport="$4"; shift 4
+    echo "=== $name (expect $expect)"
+    if env "$@" "$WORK/fake_engine" client "$IP" "$cport" "$MASTER" "$IP:$sport" > "$WORK/client_$cport.log" 2>&1; then got=ok; else got=fail; fi
+    grep -E "RESULT|identity|connecting via" "$WORK/client_$cport.log" | sed 's/^/    /'
+    if [ "$got" != "$expect" ]; then echo "    UNEXPECTED: got $got"; fail=1; fi
+}
+run_expect "manual iroh connect with identity" ok 37015 37160 FAKE_CONNECT_OVERLAY=iroh WAIT_TRANSPORTS=iroh
+run_expect "manual iroh connect without identity token" fail 37015 37161 FAKE_CONNECT_OVERLAY=iroh WAIT_TRANSPORTS=iroh FAKE_TOKEN_MS_URL=http://127.0.0.1:1
+
+echo "=== starting a second NAT'd server that bans $IP"
+FAKE_NAT=1 FAKE_BANNED_IP="$IP" "$WORK/fake_engine" server "$IP" 37017 "$MASTER" > "$WORK/banning_server.log" 2>&1 & PIDS+=($!)
+run_expect "banned player over iroh" fail 37017 37170 WAIT_TRANSPORTS=iroh,turn P2P_delta_p2p_prefer=iroh P2P_delta_p2p_connect_timeout_ms=8000
+run_expect "banned player over turn" fail 37017 37171 WAIT_TRANSPORTS=iroh,turn P2P_delta_p2p_prefer=turn P2P_delta_p2p_connect_timeout_ms=8000
 
 echo "=== master server NAT log"
 grep -E "\[NAT\]|\[Validation\] (Successfully|Validation failed)" "$WORK/master.log" | head -20 | sed 's/^/    /'

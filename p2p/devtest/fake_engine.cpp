@@ -12,6 +12,10 @@
 //   P2P_<cvar name>=value   overrides a delta_p2p_* convar default
 //   FAKE_NAT=1              port-restricted NAT emulation on the game socket
 //   R1P_PLUGIN_DIR          directory holding the iroh / tailcat plugins
+//   FAKE_BANNED_IP=a.b.c.d  server: emulate an IP ban (checked like sv_filter.h,
+//                           i.e. against the socket address and the attested IP)
+//   FAKE_TOKEN_MS_URL=url   client: master used for identity tokens (bogus = none)
+//   FAKE_CONNECT_OVERLAY=iroh|tailcat  client: manual overlay connect by address
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
@@ -29,6 +33,7 @@
 
 #include "../p2p.h"
 #include "../p2p_eos_bridge.h"
+#include "../p2p_identity.h"
 #include "../p2p_mux.h"
 #include "../p2p_netinfo.h"
 #include "../p2p_upnp.h"
@@ -166,6 +171,31 @@ struct Engine
         return n;
     }
 
+    // Filter_ShouldDiscard stand-in: the socket address or the attested IP.
+    bool Banned(const sockaddr_storage& from) const
+    {
+        const char* banned = std::getenv("FAKE_BANNED_IP");
+        if (!banned)
+            return false;
+        uint32_t bannedIp = 0;
+        inet_pton(AF_INET, banned, &bannedIp);
+        bannedIp = ntohl(bannedIp);
+        p2p::Ipv6Bytes addr{};
+        if (from.ss_family == AF_INET)
+        {
+            const uint32_t ip = ntohl(reinterpret_cast<const sockaddr_in*>(&from)->sin_addr.s_addr);
+            if (ip == bannedIp)
+                return true;
+            addr = p2p::MappedIpv4(ip);
+        }
+        else
+        {
+            std::memcpy(addr.data(), &reinterpret_cast<const sockaddr_in6*>(&from)->sin6_addr, addr.size());
+        }
+        uint32_t attested = 0;
+        return p2p::LookupIdentityIpv4(addr.data(), attested) && attested == bannedIp;
+    }
+
     int Send(const void* data, int len, const sockaddr* to, int tolen)
     {
         int handled = 0;
@@ -264,6 +294,10 @@ int RunServer(const std::string& ip, uint16_t port, const std::string& master)
         }
         if (pkt.rfind("GAME:", 0) == 0)
         {
+            // Only game traffic is subject to the emulated ban: in this test
+            // the master server shares the banned IP.
+            if (engine.Banned(from))
+                continue;
             const std::string resp = "ECHO:" + pkt.substr(5);
             engine.Send(resp.data(), static_cast<int>(resp.size()), reinterpret_cast<sockaddr*>(&from), fromLen);
             if (++echoes % 20 == 1)
@@ -321,7 +355,36 @@ int RunClient(const std::string& ip, uint16_t port, const std::string& master, c
         return 1;
     }
 
-    RunCommand("delta_connect", { target });
+    if (const char* tokenMs = std::getenv("FAKE_TOKEN_MS_URL"))
+        g_cvars["delta_ms_url"]->m_Value.m_pszString = strdup(tokenMs);
+    if (const char* overlay = std::getenv("FAKE_CONNECT_OVERLAY"))
+    {
+        // Manual overlay connect by address, like delta_connect_iroh.
+        const std::string kind = overlay;
+        std::string addr;
+        auto res = cli.Get("/servers");
+        for (const auto& entry : json::parse(res->body))
+        {
+            if (entry.value("ip", "") + ":" + std::to_string(entry.value("port", 0)) != target)
+                continue;
+            if (kind == "iroh")
+            {
+                const auto& ir = entry["transports"]["iroh"];
+                addr = ir.value("id", "") + "|" + ir.value("relay", "") + "|";
+                if (ir.contains("addrs"))
+                    addr += ir["addrs"][0].get<std::string>();
+            }
+            else
+            {
+                addr = entry["transports"]["tailcat"].value("addr", "");
+            }
+        }
+        RunCommand(kind == "iroh" ? "delta_connect_iroh" : "delta_connect_tailcat", { addr, target.substr(target.rfind(':') + 1) });
+    }
+    else
+    {
+        RunCommand("delta_connect", { target });
+    }
 
     // Emulate the engine's per-frame socket polling while waiting.
     std::string address;

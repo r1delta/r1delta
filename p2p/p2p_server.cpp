@@ -9,6 +9,7 @@
 #include <thread>
 
 #include "p2p_eos_bridge.h"
+#include "p2p_identity.h"
 #include "p2p_log.h"
 #include "p2p_mux.h"
 #include "p2p_netinfo.h"
@@ -49,6 +50,7 @@ struct ServerState
     std::string tailcatAddress; // "tc..."
     std::string status[4];      // eos, iroh, tailcat, rendezvous (for delta_p2p_status)
 
+    std::string publicIp; // as seen by the master server
     Ipv4Endpoint rendezvous;
     Id16 token{};
     bool haveToken = false;
@@ -59,6 +61,8 @@ struct ServerState
 
     std::thread serviceThread;
 };
+
+std::atomic<uint64_t> g_pongTag{ 0 };
 
 ServerState& State()
 {
@@ -328,9 +332,26 @@ void ServerHandleHeartbeatResponse(const std::string& body)
     auto& st = State();
     bool registerNow = false;
     uint32_t rendezvousIp = 0;
+    std::vector<std::string> targets;
     {
         std::lock_guard lock(st.mutex);
         st.lastHeartbeat = Clock::now();
+        if (r.contains("public_ip") && r["public_ip"].is_string())
+            st.publicIp = r["public_ip"].get<std::string>();
+
+        // Every name a client may have been given for this server; identity
+        // tokens must name one of them.
+        if (!st.publicIp.empty())
+        {
+            targets.push_back(st.publicIp + ":" + std::to_string(st.port));
+            g_pongTag.store(ServerTagFor(targets.back()));
+        }
+        if (!st.irohAddress.empty())
+            targets.push_back("iroh:" + st.irohAddress.substr(0, st.irohAddress.find('|')));
+        if (!st.tailcatAddress.empty())
+            targets.push_back("tailcat:" + st.tailcatAddress);
+        if (!st.eosPuid.empty())
+            targets.push_back("eos:" + st.eosPuid);
         if (r.contains("rendezvous") && r["rendezvous"].is_string())
         {
             if (auto ep = Ipv4Endpoint::Parse(r["rendezvous"].get<std::string>()))
@@ -353,6 +374,18 @@ void ServerHandleHeartbeatResponse(const std::string& body)
             SendRegister();
         rendezvousIp = st.rendezvous.ip;
     }
+
+    P256PublicKey key;
+    if (ParsePublicKeyHex(settings.identityPublicKeyHex, key))
+        Identities().SetPublicKey(key);
+    else
+        Log("delta_p2p_identity_pubkey is not a valid P-256 key; identities cannot be verified\n");
+    Identities().SetServerTargets(targets);
+    const bool masterIssuesIdentities = r.value("identity", false);
+    const bool enforce = settings.requireIdentity >= 2 || (settings.requireIdentity == 1 && masterIssuesIdentities);
+    if (enforce != IdentityEnforced())
+        Log("Identity %s for EOS/iroh/tailcat players\n", enforce ? "required" : "not required");
+    SetIdentityEnforcement(enforce);
 
     if (settings.serverTurn && r.contains("turn") && r["turn"].is_object())
     {
@@ -401,8 +434,11 @@ void ServerOnPunchRequest(const PunchRequest& req, const Ipv4Endpoint& from)
     const Settings settings = GetSettings();
     {
         std::lock_guard lock(st.mutex);
-        if (from != st.rendezvous)
+        if (from != st.rendezvous || !st.haveToken || !req.haveMac)
             return; // only the master server may ask us to punch
+        const auto mac = HmacSha256(st.token.data(), st.token.size(), req.signedPart.data(), req.signedPart.size());
+        if (!ConstantTimeEqual(mac.data(), req.mac.data(), req.mac.size()))
+            return;
         const SOCKET s = GetEngineSocket(Route::Server);
         if (s != INVALID_SOCKET)
             RealSendTo(s, BuildPunchReqAck(req.ticket, req.client), st.rendezvous);
@@ -418,6 +454,11 @@ void ServerOnPunchRequest(const PunchRequest& req, const Ipv4Endpoint& from)
     if (Turn().Running())
         Turn().Permit(req.client.ip);
     Debug("Punch request for %s\n", req.client.ToString().c_str());
+}
+
+uint64_t ServerPongTag()
+{
+    return g_pongTag.load();
 }
 
 std::string ServerDescribe()
@@ -441,6 +482,8 @@ std::string ServerDescribe()
                            : "inactive " + mapping.error) +
            "\n";
     out += "  turn:       " + Turn().Describe() + "\n";
+    out += "  identity:   " + std::string(IdentityEnforced() ? "required" : "not required") + ", " +
+           std::to_string(Identities().Size()) + " identified peers\n";
     const LocalAddresses local = GetLocalAddresses();
     out += "  tailscale:  ";
     for (uint32_t ip : local.tailscale)

@@ -1,6 +1,7 @@
 #include "../p2p/p2p_protocol.h"
 #include "../p2p/stun.h"
 #include "../p2p/upnp_codec.h"
+#include "../p2p/p2p_identity.h"
 
 #include <cstdio>
 #include <cstring>
@@ -164,7 +165,7 @@ void TestControlPackets()
                              0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
                              1, 2, 3, 4, 0x13, 0x88 });
     PunchRequest pr;
-    Check(ParseControl(req.data(), req.size(), pc) && ParsePunchRequest(pc, pr), "punch request parses");
+    Check(ParseControl(req.data(), req.size(), pc) && ParsePunchRequest(pc, pr) && !pr.haveMac, "punch request parses");
     Check(pr.client.ToString() == "1.2.3.4:5000" && pr.ticket[15] == 15, "punch request fields");
 
     const auto ack = Bytes({ 0xFF, 0xFF, 0xFF, 0xFF, 'R', '1', 'N', 'X', 1, 0x02,
@@ -297,6 +298,72 @@ void TestUpnp()
     const auto e = ParseNatPmpResponse(extResp, sizeof(extResp));
     Check(e && e->externalIp == 0xCB007109u, "natpmp external address");
 }
+
+void TestIdentity()
+{
+    using namespace p2p;
+    const auto e = Sha256(nullptr, 0);
+    Check(Hex(e.data(), 32) == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "sha256 empty");
+    const std::string abc = "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
+    const auto h = Sha256(reinterpret_cast<const uint8_t*>(abc.data()), abc.size());
+    Check(Hex(h.data(), 32) == "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1", "sha256 two blocks");
+
+    const std::string jefe = "Jefe", what = "what do ya want for nothing?";
+    const auto mac = HmacSha256(reinterpret_cast<const uint8_t*>(jefe.data()), jefe.size(),
+                                reinterpret_cast<const uint8_t*>(what.data()), what.size());
+    Check(Hex(mac.data(), 32) == "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843", "hmac-sha256 rfc4231 #2");
+
+    P256PublicKey defaultKey;
+    Check(ParsePublicKeyHex(kDefaultIdentityPublicKeyHex, defaultKey), "default identity key parses");
+
+    // Vector produced by the master server's signing code with a test-only key.
+    P256PublicKey key;
+    Check(ParsePublicKeyHex("4ff841ed51da467d1330208eeb759f793c670ffb0437868083a3c65601f0d4fa"
+                            "4f1adb950eff900d7e9b1e9864d08f0510ac0165dbb79419b78a65c43cba66bc", key), "test key parses");
+    std::vector<uint8_t> token;
+    Check(HexToBytes("5231494401cb00712d00000000713fb30000112233445566778899aabbccddeeff308fa6b4b73b759ab781fccadf8e5e1cc55c0266725105b3bc4e44ebebeaeef6ff940254394ff90fc423f8f90e8e0ea758e9ad08f91a48ba39eb3863e366c6a559d4174e5f77eca0b7bcb3861da7c41beec2f5895f790e58ada37ddd94a61e3b", token), "token hex");
+    IdentityToken parsed;
+    Check(ParseIdentityToken(token.data(), token.size(), parsed), "token parses");
+    Check(parsed.ip == 0xCB00712Du && parsed.expires == 1900000000ull && parsed.nonce[1] == 0x11, "token fields");
+    Check(parsed.targetHash == TargetHash("198.51.100.7:37015"), "token target hash");
+    Check(VerifyP256(key, parsed.digest, parsed.signature), "token signature verifies");
+    Check(!VerifyP256(defaultKey, parsed.digest, parsed.signature), "token rejected under another key");
+    auto tampered = parsed;
+    tampered.digest[0] ^= 1;
+    Check(!VerifyP256(key, tampered.digest, parsed.signature), "tampered token rejected");
+
+    IdentityTable table;
+    const Ipv6Bytes peerA = EncodeOverlayAddress(Backend::Iroh, 7);
+    const Ipv6Bytes peerB = EncodeOverlayAddress(Backend::Tailcat, 9);
+    const int64_t now = 1899999000;
+    Check(table.Present(token.data(), token.size(), peerA, now) == IdentityVerdict::NoKey, "no key -> rejected");
+    table.SetPublicKey(key);
+    table.SetServerTargets({ "iroh:someotherserver" });
+    Check(table.Present(token.data(), token.size(), peerA, now) == IdentityVerdict::WrongServer, "wrong server rejected");
+    table.SetServerTargets({ "198.51.100.7:37015", "iroh:abc" });
+    Check(table.Present(token.data(), token.size(), peerA, 1900001000) == IdentityVerdict::Expired, "expired rejected");
+    uint32_t ip = 0;
+    Check(table.Present(token.data(), token.size(), peerA, now, &ip) == IdentityVerdict::Accepted && ip == 0xCB00712Du, "valid token accepted");
+    Check(table.Present(token.data(), token.size(), peerA, now) == IdentityVerdict::Accepted, "same peer may re-present");
+    Check(table.Present(token.data(), token.size(), peerB, now) == IdentityVerdict::Replayed, "replay from another peer rejected");
+    Check(table.Lookup(peerA, ip) && ip == 0xCB00712Du && !table.Lookup(peerB, ip), "lookup");
+    auto bad = token;
+    bad[20] ^= 0x40; // nonce byte: signature no longer matches
+    Check(table.Present(bad.data(), bad.size(), peerB, now) == IdentityVerdict::BadSignature, "bad signature rejected");
+    Check(table.Present(token.data(), token.size() - 1, peerB, now) == IdentityVerdict::Malformed, "short token rejected");
+
+    const auto identify = BuildIdentify(token);
+    ParsedControl pc;
+    Check(ParseControl(identify.data(), identify.size(), pc) && pc.type == PacketType::Identify && pc.payloadSize == token.size(), "identify packet");
+    const auto ack = BuildIdentifyAck(parsed.nonce, IdentityVerdict::Replayed);
+    Id16 nonce;
+    IdentityVerdict verdict;
+    Check(ParseControl(ack.data(), ack.size(), pc) && ParseIdentifyAck(pc, nonce, verdict) && nonce == parsed.nonce &&
+          verdict == IdentityVerdict::Replayed, "identify ack");
+
+    uint32_t mapped = 0;
+    Check(IsMappedIpv4(MappedIpv4(0xC0A80105u).data(), &mapped) && mapped == 0xC0A80105u, "mapped ipv4");
+}
 } // namespace
 
 int main()
@@ -308,6 +375,7 @@ int main()
     TestControlPackets();
     TestOverlayAddressAndFraming();
     TestUpnp();
+    TestIdentity();
     std::printf("%s\n", g_failures == 0 ? "p2p codec tests passed" : "p2p codec tests FAILED");
     return g_failures == 0 ? 0 : 1;
 }
