@@ -52,6 +52,9 @@
     <Filter Include="eos">
       <UniqueIdentifier>{e1b2c3d4-e5f6-7890-abcd-ef1234567890}</UniqueIdentifier>
     </Filter>
+    <Filter Include="p2p">
+      <UniqueIdentifier>{18b372f0-aaf3-4a90-98f3-7f4eacd87e56}</UniqueIdentifier>
+    </Filter>
     <Filter Include="thirdparty">
       <UniqueIdentifier>{7118953e-fe40-446a-b35b-5d417b6e18ab}</UniqueIdentifier>
     </Filter>
@@ -388,6 +391,52 @@
     </ClInclude>
     <ClInclude Include="sdk\vector.h">
       <Filter>sdk</Filter>
+    </ClInclude>
+    <!-- p2p -->
+    <ClInclude Include="p2p\p2p.h">
+      <Filter>p2p</Filter>
+    </ClInclude>
+    <ClInclude Include="p2p\p2p_connect.h">
+      <Filter>p2p</Filter>
+    </ClInclude>
+    <ClInclude Include="p2p\p2p_eos_bridge.h">
+      <Filter>p2p</Filter>
+    </ClInclude>
+    <ClInclude Include="p2p\p2p_log.h">
+      <Filter>p2p</Filter>
+    </ClInclude>
+    <ClInclude Include="p2p\p2p_mux.h">
+      <Filter>p2p</Filter>
+    </ClInclude>
+    <ClInclude Include="p2p\p2p_netinfo.h">
+      <Filter>p2p</Filter>
+    </ClInclude>
+    <ClInclude Include="p2p\p2p_plugin.h">
+      <Filter>p2p</Filter>
+    </ClInclude>
+    <ClInclude Include="p2p\p2p_protocol.h">
+      <Filter>p2p</Filter>
+    </ClInclude>
+    <ClInclude Include="p2p\p2p_server.h">
+      <Filter>p2p</Filter>
+    </ClInclude>
+    <ClInclude Include="p2p\p2p_settings.h">
+      <Filter>p2p</Filter>
+    </ClInclude>
+    <ClInclude Include="p2p\p2p_turn.h">
+      <Filter>p2p</Filter>
+    </ClInclude>
+    <ClInclude Include="p2p\p2p_upnp.h">
+      <Filter>p2p</Filter>
+    </ClInclude>
+    <ClInclude Include="p2p\stun.h">
+      <Filter>p2p</Filter>
+    </ClInclude>
+    <ClInclude Include="p2p\upnp_codec.h">
+      <Filter>p2p</Filter>
+    </ClInclude>
+    <ClInclude Include="p2p\plugins\r1p_plugin.h">
+      <Filter>p2p</Filter>
     </ClInclude>
     <!-- eos -->
     <ClInclude Include="eos\eos_layer.h">
@@ -762,6 +811,40 @@
     </ClCompile>
     <ClCompile Include="sdk\newbitbuf.cpp">
       <Filter>sdk</Filter>
+    </ClCompile>
+    <!-- p2p -->
+    <ClCompile Include="p2p\p2p.cpp">
+      <Filter>p2p</Filter>
+    </ClCompile>
+    <ClCompile Include="p2p\p2p_connect.cpp">
+      <Filter>p2p</Filter>
+    </ClCompile>
+    <ClCompile Include="p2p\p2p_mux.cpp">
+      <Filter>p2p</Filter>
+    </ClCompile>
+    <ClCompile Include="p2p\p2p_netinfo.cpp">
+      <Filter>p2p</Filter>
+    </ClCompile>
+    <ClCompile Include="p2p\p2p_plugin.cpp">
+      <Filter>p2p</Filter>
+    </ClCompile>
+    <ClCompile Include="p2p\p2p_protocol.cpp">
+      <Filter>p2p</Filter>
+    </ClCompile>
+    <ClCompile Include="p2p\p2p_server.cpp">
+      <Filter>p2p</Filter>
+    </ClCompile>
+    <ClCompile Include="p2p\p2p_turn.cpp">
+      <Filter>p2p</Filter>
+    </ClCompile>
+    <ClCompile Include="p2p\p2p_upnp.cpp">
+      <Filter>p2p</Filter>
+    </ClCompile>
+    <ClCompile Include="p2p\stun.cpp">
+      <Filter>p2p</Filter>
+    </ClCompile>
+    <ClCompile Include="p2p\upnp_codec.cpp">
+      <Filter>p2p</Filter>
     </ClCompile>
     <!-- eos -->
     <ClCompile Include="eos\eos_layer.cpp">

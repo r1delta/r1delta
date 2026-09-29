@@ -20,6 +20,7 @@
 #include "logging.h"
 #include "masterserver.h"
 #include "r1d_version.h"
+#include "p2p/p2p.h"
 
 using json = nlohmann::json;
 
@@ -46,6 +47,7 @@ struct ServerInfo {
 	std::string description;
 	std::string playlist;
 	std::string playlist_display_name;
+    std::string transports; // comma separated alternative transports (eos, iroh, tailcat, tailscale, turn)
     std::vector<PlayerInfo> players;
 };
 
@@ -212,6 +214,9 @@ namespace MasterServerClient {
             OutputDebugStringA(diagnostic);
         }
 
+        // Alternative transports (EOS, iroh, tailcat, TURN) + NAT traversal info.
+        p2p::AddHeartbeatFields(j, port);
+
         auto res = httpClient->Post("/heartbeat", j.dump(), "application/json");
         if (!res || (res->status != 200 && res->status != 429)) {
 
@@ -220,6 +225,8 @@ namespace MasterServerClient {
             IsValidHeartBeat.store(false, std::memory_order_release);
             return false;
         }
+        if (res->status == 200)
+            p2p::OnHeartbeatResponse(res->body);
         IsValidHeartBeat.store(true, std::memory_order_release);
         return true;
     }
@@ -305,6 +312,15 @@ namespace MasterServerClient {
 				si.playlist = sj["playlist"];
 				si.playlist_display_name = sj["playlist_display_name"];
 				si.version = sj["version"];
+                // Optional NAT traversal data from newer master servers.
+                p2p::OnServerListEntry(sj);
+                if (auto transportsIt = sj.find("transports"); transportsIt != sj.end() && transportsIt->is_object()) {
+                    for (auto it = transportsIt->begin(); it != transportsIt->end(); ++it) {
+                        if (!si.transports.empty())
+                            si.transports += ",";
+                        si.transports += it.key();
+                    }
+                }
                 for (auto& pj : sj["players"]) {
                     PlayerInfo pi;
                     pi.name = pj["name"];
@@ -694,6 +710,7 @@ SQInteger PollServerList(HSQUIRRELVM v) {
             sq_pushstring_lit(v, "playlist"); sq_pushstring_std(v, s.playlist); sq_newslot(v, -3, 0);
             sq_pushstring_lit(v, "playlist_display_name"); sq_pushstring_std(v, s.playlist_display_name); sq_newslot(v, -3, 0);
             sq_pushstring_lit(v, "version"); sq_pushstring_std(v, s.version); sq_newslot(v, -3, 0);
+            sq_pushstring_lit(v, "transports"); sq_pushstring_std(v, s.transports); sq_newslot(v, -3, 0);
             sq_pushstring_lit(v, "players");
             sq_newarray(v, 0);
             for (auto& p : s.players) {

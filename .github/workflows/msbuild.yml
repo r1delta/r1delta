@@ -13,7 +13,7 @@ env:
   BUILD_PATH: ${{ github.workspace }}/build
   OUTPUT_PATH: ${{ github.workspace }}/output
   SYMBOL_PATH: ${{ github.workspace }}/symbols
-  CORE_REF: cdec226524f1ecee476d490603662f06d00a2a3a
+  CORE_REF: 584ed6a919940c8be7d045887aff6a69f52a7f58
   VCPKG_BINARY_SOURCES: "clear;files,D:/a/r1delta/vcpkg,readwrite"
   BUILD_CONFIGURATION: Release
   MSBUILD_DEBUG_TYPE: pdbonly
@@ -177,6 +177,50 @@ jobs:
             Move-Item -LiteralPath $source -Destination (Join-Path $stubPath $fileName)
           }
 
+      - name: Build iroh transport plugin
+        shell: pwsh
+        working-directory: p2p/plugins/iroh
+        env:
+          # Static CRT: the plugin must not add runtime prerequisites.
+          RUSTFLAGS: -C target-feature=+crt-static
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo build --release --locked
+          if ($LASTEXITCODE -ne 0) {
+            throw "iroh plugin build failed with exit code $LASTEXITCODE."
+          }
+          Copy-Item -LiteralPath 'target/release/r1delta_iroh.dll' -Destination '${{ env.BUILD_PATH }}/'
+
+      - name: Set up Go for the tailcat transport plugin
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: p2p/plugins/tailcat/go.mod
+          cache-dependency-path: p2p/plugins/tailcat/go.sum
+
+      - name: Build tailcat transport plugin
+        shell: pwsh
+        working-directory: p2p/plugins/tailcat
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Get-Command gcc -ErrorAction SilentlyContinue)) {
+            if (Test-Path 'C:\mingw64\bin\gcc.exe') {
+              $env:PATH = "C:\mingw64\bin;$env:PATH"
+            } else {
+              choco install mingw -y --no-progress
+              $env:PATH = "C:\ProgramData\mingw64\mingw64\bin;$env:PATH"
+            }
+          }
+          $env:CGO_ENABLED = '1'
+          $env:CC = 'gcc'
+          $out = Join-Path $env:RUNNER_TEMP 'tailcat-plugin'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          go build -buildmode=c-shared -trimpath -ldflags '-s -w' -o (Join-Path $out 'r1delta_tailcat.dll') .
+          if ($LASTEXITCODE -ne 0) {
+            throw "tailcat plugin build failed with exit code $LASTEXITCODE."
+          }
+          # Only the DLL ships; cgo also emits a header next to it.
+          Copy-Item -LiteralPath (Join-Path $out 'r1delta_tailcat.dll') -Destination '${{ env.BUILD_PATH }}/'
+
       - name: Build native regression tests
         shell: pwsh
         run: |
@@ -201,6 +245,7 @@ jobs:
             vphysics_parallel_guard_tests = 'tests/vphysics_parallel_guard_tests.vcxproj'
             client_port_override_tests = 'tests/client_port_override_tests.vcxproj'
             ffa_targeting_tests = 'tests/ffa_targeting_tests.vcxproj'
+            p2p_codec_tests = 'tests/p2p_codec_tests.vcxproj'
           }
 
           foreach ($entry in $projects.GetEnumerator()) {
@@ -239,7 +284,8 @@ jobs:
             'materialsystem_dx11_input_layout_cache_tests',
             'vphysics_parallel_guard_tests',
             'client_port_override_tests',
-            'ffa_targeting_tests'
+            'ffa_targeting_tests',
+            'p2p_codec_tests'
           )
           foreach ($test in $tests) {
             $executable = Join-Path '${{ env.BUILD_PATH }}' "tests/$test/$test.exe"

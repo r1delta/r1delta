@@ -11,6 +11,7 @@
 #include "sv_filter.h"
 #include "mcp_server.h"
 #include "eos_network.h"
+#include "p2p/p2p.h"
 #include "net_hooks.h"
 #pragma intrinsic(_ReturnAddress)
 
@@ -1662,6 +1663,7 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 		Msg("EOS: Initialization skipped or failed\n");
 	}
 	net_hooks::Initialize();
+	p2p::Initialize();
 
 	OriginalCCVar_FindVar(cvarinterface, "sv_alltalk")->m_nFlags |= FCVAR_REPLICATED;
 
