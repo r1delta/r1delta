@@ -44,6 +44,16 @@ ParseStatus Parse(std::string_view contents, Entries& entries);
 // lines are skipped instead of discarding the whole profile.
 size_t ExtractLegacyProfileEntries(std::string_view profile, Entries& entries);
 
+// Archived convar that only builds with this store register. Its presence in
+// profile.cfg means the "__" lines there are this build's own write-only
+// mirror; its absence means an older build wrote the file.
+constexpr char ProfileOwnerConVar[] = "delta_pdata_store";
+bool ProfileHasOwnerMarker(std::string_view profile);
+
+// Copies legacy entries over the store and returns how many were added or
+// changed (0 means the legacy profile is just the mirror of the store).
+size_t MergeLegacyEntries(Entries& store, const Entries& legacy);
+
 // Returns profile.cfg with every persistent-data line removed. Profile
 // settings are still executed by the engine, but persistent data is never
 // re-applied from profile.cfg once the store owns it.

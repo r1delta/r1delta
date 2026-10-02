@@ -9,7 +9,9 @@
 //   checksum trailer and a .bak of the previous generation. The file is read
 //   exactly once per process; nothing ever re-applies older on-disk values over
 //   newer in-memory ones, so map changes and profile.cfg reloads cannot roll
-//   progression back.
+//   progression back. profile.cfg still receives a copy of the data so older
+//   builds keep working after a downgrade, but this build never reads it back
+//   except to pick up changes an older build made.
 //
 // * SERVERS only write by sending "__ key value" string commands. Each write
 //   stays pending (see persistentdata_state.h) until the client echoes it back,
@@ -1905,9 +1907,13 @@ char __fastcall GetConfigPath(char* outPath, size_t outPathSize, int configType)
 
 namespace {
 
-// "__ <key>" convars are replicated to servers (USERINFO) but deliberately NOT
-// FCVAR_ARCHIVE_PLAYERPROFILE: profile.cfg no longer carries persistent data.
-constexpr int kPersistentConVarFlags = FCVAR_PERSIST_MASK & ~FCVAR_ARCHIVE_PLAYERPROFILE;
+// "__ <key>" convars are replicated to servers (USERINFO) and archived to
+// profile.cfg (FCVAR_ARCHIVE_PLAYERPROFILE). The profile.cfg copy is write-only
+// from this build's point of view: it exists so an older build (rollback or
+// downgrade) still finds current data. It is stripped whenever profile.cfg is
+// executed and only imported when an older build changed it (see
+// EnsureStoreLoaded).
+constexpr int kPersistentConVarFlags = FCVAR_PERSIST_MASK;
 
 constexpr double kSaveDebounceSeconds = 1.0;
 constexpr double kSaveMaxDelaySeconds = 5.0;
@@ -2069,22 +2075,38 @@ LoadResult LoadStoreFile(const std::filesystem::path& path, PersistentDataStore:
 	return LoadResult::Missing;
 }
 
-bool ReadLegacyProfileEntries(const std::filesystem::path& profile, PersistentDataStore::Entries& entries,
-	std::filesystem::file_time_type* modified)
+struct LegacyProfile
+{
+	PersistentDataStore::Entries entries;
+	std::filesystem::file_time_type modified{};
+	bool ownerMarker = false;
+};
+
+bool ReadLegacyProfile(const std::filesystem::path& profile, LegacyProfile& legacy)
 {
 	std::string contents;
 	if (!ReadWholeFile(profile, contents, PersistentDataStore::MaxFileSize))
 		return false;
-	PersistentDataStore::ExtractLegacyProfileEntries(contents, entries);
-	if (entries.empty())
+	PersistentDataStore::ExtractLegacyProfileEntries(contents, legacy.entries);
+	if (legacy.entries.empty())
 		return false;
-	if (modified) {
-		std::error_code error;
-		*modified = std::filesystem::last_write_time(profile, error);
-		if (error)
-			*modified = std::filesystem::file_time_type::min();
-	}
+	legacy.ownerMarker = PersistentDataStore::ProfileHasOwnerMarker(contents);
+	std::error_code error;
+	legacy.modified = std::filesystem::last_write_time(profile, error);
+	if (error)
+		legacy.modified = std::filesystem::file_time_type::min();
 	return true;
+}
+
+// Sets the archived marker convar so the next profile.cfg write records that
+// its "__" lines are this build's mirror.
+void MarkProfileOwner()
+{
+	ConVarR1* owner = OriginalCCVar_FindVar
+		? OriginalCCVar_FindVar(cvarinterface, PersistentDataStore::ProfileOwnerConVar)
+		: nullptr;
+	if (owner && SetConvarStringOriginal)
+		SetConvarStringOriginal(owner, "1");
 }
 
 // Creates or updates the "__ key" userinfo convar through the engine's setinfo
@@ -2198,32 +2220,35 @@ bool EnsureStoreLoaded()
 		changed = true;
 	}
 
-	// Migration from builds that kept persistent data in profile.cfg. Builds
-	// with this store never write "__" lines to profile.cfg, so any such lines
-	// newer than the store came from an older build and are imported.
-	PersistentDataStore::Entries legacy;
-	std::filesystem::file_time_type profileTime{};
-	const bool haveLegacy = ReadLegacyProfileEntries(profile, legacy, &profileTime)
-		|| (result == LoadResult::Missing
-			&& ReadLegacyProfileEntries(WithSuffix(profile, L".bak"), legacy, &profileTime));
+	// profile.cfg also carries a write-only mirror of the data for older
+	// builds. Import from it on the first run after upgrading (no store yet),
+	// or when an older build ran in between: the file then lacks the owner
+	// marker, is newer than the store, and differs from it.
+	LegacyProfile legacy;
+	const bool haveLegacy = ReadLegacyProfile(profile, legacy)
+		|| (result == LoadResult::Missing && ReadLegacyProfile(WithSuffix(profile, L".bak"), legacy));
 	if (haveLegacy) {
 		bool import = result == LoadResult::Missing;
-		if (!import) {
+		if (!import && !legacy.ownerMarker) {
 			const auto storeTime = std::filesystem::last_write_time(loadedFrom, error);
-			import = !error && profileTime > storeTime;
-		}
-		if (import && result != LoadResult::Missing) {
-			// Only happens after running an older build in between; keep the
-			// store as it was in case that build started from an empty profile.
-			CopyFileW(loadedFrom.c_str(), WithSuffix(store.path, L".pre-import").c_str(), FALSE);
+			import = !error && legacy.modified > storeTime;
 		}
 		if (import) {
-			for (auto& [key, value] : legacy)
-				store.entries.insert_or_assign(key, std::move(value));
-			changed = true;
-			Msg("R1Delta: imported %zu persistent data entries from the legacy profile\n", legacy.size());
+			PersistentDataStore::Entries merged = store.entries;
+			const size_t imported = PersistentDataStore::MergeLegacyEntries(merged, legacy.entries);
+			if (imported) {
+				if (result != LoadResult::Missing) {
+					// Keep the store as it was, in case the older build changed
+					// something it should not have.
+					CopyFileW(loadedFrom.c_str(), WithSuffix(store.path, L".pre-import").c_str(), FALSE);
+				}
+				store.entries = std::move(merged);
+				changed = true;
+				Msg("R1Delta: imported %zu persistent data entries from profile.cfg\n", imported);
+			}
 		}
 	}
+	MarkProfileOwner();
 
 	const size_t dormant = ApplyStoreToConVars();
 	Msg("R1Delta: loaded %zu persistent data entries (%zu inactive under the current schema)\n",
@@ -2364,6 +2389,8 @@ static NativeProfileWriterFn g_NativeProfileWriterOriginal = nullptr;
 // as an extra flush point for the store.
 static char __fastcall NativeProfileWriterHook(unsigned int configType)
 {
+	if (configType == 1 && Store().loaded && !Store().disabled)
+		MarkProfileOwner();
 	const char result = g_NativeProfileWriterOriginal
 		? g_NativeProfileWriterOriginal(configType)
 		: 0;

@@ -258,6 +258,35 @@ size_t ExtractLegacyProfileEntries(std::string_view profile, Entries& entries)
 	return extracted;
 }
 
+bool ProfileHasOwnerMarker(std::string_view profile)
+{
+	const std::string_view name = ProfileOwnerConVar;
+	bool found = false;
+	ForEachLine(profile, [&](std::string_view line, bool) {
+		line = TrimLeft(line);
+		if (line.substr(0, name.size()) == name
+			&& line.size() > name.size() && IsLineSpace(line[name.size()]))
+			found = true;
+	});
+	return found;
+}
+
+size_t MergeLegacyEntries(Entries& store, const Entries& legacy)
+{
+	size_t changed = 0;
+	for (const auto& [key, value] : legacy) {
+		auto [it, inserted] = store.try_emplace(key, value);
+		if (inserted) {
+			++changed;
+		}
+		else if (it->second != value) {
+			it->second = value;
+			++changed;
+		}
+	}
+	return changed;
+}
+
 std::string StripPersistentLines(std::string_view profile)
 {
 	std::string output;

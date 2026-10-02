@@ -9699,6 +9699,7 @@ void __stdcall LoaderNotificationCallback(
 			SetupSquirrelErrorNotificationHooks();
 			SetupChatWriter();
 			RegisterConVar("delta_enable_ads_sway", "1", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Enable/disable viewmodel ads sway.");
+			RegisterConVar("delta_pdata_store", "0", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE | FCVAR_HIDDEN, "Internal: marks profile.cfg persistent data as a mirror of persistent_data.txt. Do not change.");
 			RegisterConCommand("+toggleFullscreenMap", toggleFullscreenMap_cmd, "Toggles the fullscreen map.", FCVAR_CLIENTDLL);
 			RegisterConVar("cl_hold_to_rodeo_enable", "0", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "0: Automatic rodeo. 1: Hold to rodeo ALL titans. 2: Hold to rodeo friendlies, automatically rodeo hostile titans.");
 			RegisterConVar("delta_improved_colorblind", "0", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Allows certain other things to change color depending on your colorblind setting.");

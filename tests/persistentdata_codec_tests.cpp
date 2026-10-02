@@ -189,6 +189,24 @@ void TestLegacyProfileMigration()
 		"__not_persistent \"1\"\n",
 		"strip every persistent-data line and keep everything else");
 	Check(StripPersistentLines("__ xp \"1\"") == "", "strip unterminated final persistent line");
+
+	Check(ProfileHasOwnerMarker("cl_fovScale \"1\"\ndelta_pdata_store \"1\"\n__ xp \"1\"\n"),
+		"detect the owner marker written by this build");
+	Check(!ProfileHasOwnerMarker(profile), "older profile has no owner marker");
+	Check(!ProfileHasOwnerMarker("delta_pdata_store_other \"1\"\n"), "marker match is exact");
+}
+
+void TestLegacyMerge()
+{
+	using namespace PersistentDataStore;
+	Entries store{ { "xp", "500" }, { "gen", "2" }, { "dormant.mod", "1" } };
+	Check(MergeLegacyEntries(store, Entries{ { "xp", "500" }, { "gen", "2" } }) == 0,
+		"an unchanged mirror imports nothing");
+	Check(store.size() == 3, "mirror without dormant entries keeps them");
+	Check(MergeLegacyEntries(store, Entries{ { "xp", "600" }, { "ranked.gems", "3" } }) == 2,
+		"older-build changes are counted");
+	Check(store["xp"] == "600" && store["ranked.gems"] == "3" && store["gen"] == "2",
+		"older-build changes are merged over the store");
 }
 
 void TestPersistentPlayerSlots()
@@ -363,6 +381,7 @@ int main()
 	TestStoreDetectsDamage();
 	TestStoreRejectsUnsafeTokens();
 	TestLegacyProfileMigration();
+	TestLegacyMerge();
 	TestPersistentPlayerSlots();
 	TestSessionBinding();
 	TestServerWriteSurvivesReconnectSnapshot();
