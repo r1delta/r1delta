@@ -173,6 +173,28 @@ See `masterserver2/NAT.md`. Summary: heartbeats may carry `transports` and
 the reachability result and (for unreachable servers) Cloudflare TURN
 credentials. Validation tries direct UDP, then the rendezvous mapping, then
 the TURN relay; a server is listed if any path answers.
+Registration and hole-punch packets use the engine's bound game socket. On
+Windows dual-stack IPv6 sockets, IPv4 destinations are encoded as IPv4-mapped
+IPv6 socket addresses; sending an IPv4 socket address directly fails.
+
+Heartbeats use HTTP; the master stores overlay addresses without loading EOS,
+iroh or tailcat. Those transports run on the game server and joining client.
+The master does not currently validate overlay-only reachability; advertising
+an overlay listener alone does not make a server eligible for listing.
+
+## Discord joins
+
+Listed-server invites retain the canonical master-server address even when the
+current connection uses a punched endpoint or an overlay. Accepting the invite
+runs `delta_connect` again, allowing the joining client to select its own route.
+Standalone iroh and tailcat invites carry portable transport metadata, never
+the process-local `3ffd::/16` peer address. EOS `3ffe::/16` addresses remain
+portable. Secrets exceeding Discord's 127-byte limit are not advertised;
+long standalone tailcat addresses require joining through a listed server.
+Invite parsing rejects command delimiters and malformed endpoints.
+
+EOS initialization is deferred and does not depend on the numeric release
+version. An initialization failure remains nonfatal.
 
 ## Convars
 

@@ -5,9 +5,10 @@
 #include <algorithm>
 #include <windows.h>
 #include <tlhelp32.h>
-#include "vtable_tools.h"
 #include "netadr.h"
-#include <regex>
+#include "../p2p/p2p_invite.h"
+#include "../p2p/p2p_mux.h"
+#include "../p2p/p2p_connect.h"
 #include "httplib.h"
 #include "masterserver.h"
 #include "auth.h"
@@ -24,123 +25,27 @@ static std::atomic<bool> is_discord_running{false};
 // Only DiscordThread and its SDK callbacks may access the core.
 static discord::Core* core = nullptr;
 
-bool parseAndValidateIpOctets(const char* ip_part, size_t ip_len, unsigned int& o1, unsigned int& o2, unsigned int& o3, unsigned int& o4) {
-	// Ensure the ip_part doesn't contain invalid characters (like another ':')
-	// or start/end with '.' or have consecutive '..'
-	if (ip_len == 0 || ip_part[0] == '.' || ip_part[ip_len - 1] == '.') {
-		return false;
-	}
-	for (size_t i = 0; i < ip_len; ++i) {
-		if (!(isdigit(ip_part[i]) || ip_part[i] == '.')) {
-			return false; // Invalid character
-		}
-		if (i > 0 && ip_part[i] == '.' && ip_part[i - 1] == '.') {
-			return false; // Consecutive dots
-		}
-	}
-
-	int chars_consumed = 0;
-	// Use sscanf on the specific IP part. %n checks if the whole IP part was consumed.
-	// Need a temporary buffer if ip_part is not null-terminated correctly
-	// (e.g., if using strncpy without manual termination). Using std::string is safer.
-	std::string ip_str(ip_part, ip_len); // Create a null-terminated string
-
-	if (sscanf(ip_str.c_str(), "%3u.%3u.%3u.%3u%n", &o1, &o2, &o3, &o4, &chars_consumed) != 4) {
-		return false; // Didn't parse exactly 4 numbers
-	}
-
-	// Ensure the *entire* IP part string was consumed by sscanf
-	if (static_cast<size_t>(chars_consumed) != ip_str.length()) {
-		return false; // Extra characters found within or after the IP part
-	}
-
-	// Check numeric ranges
-	return (o1 <= 255 && o2 <= 255 && o3 <= 255 && o4 <= 255);
-}
-
-
-bool isIpPortValid(const char* address) {
-	if (!address || address[0] == '\0') {
-		return false;
-	}
-
-	const char* colon_ptr = strrchr(address, ':'); // Find the *last* colon
-	const char* ip_part_start = address;
-	size_t ip_part_len = 0;
-	unsigned int o1, o2, o3, o4; // For IP octets
-	unsigned long port = 0;      // For port number
-
-	if (colon_ptr != nullptr) {
-		// Potential IP:Port format
-		ip_part_len = colon_ptr - address;
-		const char* port_part_start = colon_ptr + 1;
-		size_t port_part_len = strlen(port_part_start);
-
-		if (ip_part_len == 0 || port_part_len == 0) {
-			return false; // IP or Port part is empty (e.g., ":123" or "1.2.3.4:")
-		}
-
-		// Validate IP Part
-		if (!parseAndValidateIpOctets(ip_part_start, ip_part_len, o1, o2, o3, o4)) {
-			return false;
-		}
-
-		// Validate Port Part
-		char* endptr;
-		errno = 0; // Reset errno before calling strtoul
-		port = strtoul(port_part_start, &endptr, 10);
-
-		// Check for conversion errors (non-digit chars, overflow, underflow)
-		if (errno != 0 || *endptr != '\0' || port_part_start == endptr) {
-			// errno check handles overflow/underflow
-			// *endptr != '\0' checks if the entire port string was consumed
-			// port_part_start == endptr checks if any digits were converted at all
-			return false;
-		}
-
-		// Check port range (standard ports are 1-65535)
-		if (port == 0 || port > 65535) { // Port 0 is often reserved/invalid for connections
-			return false;
-		}
-
-		// If we reach here, both IP and Port are valid
-		return true;
-
-	}
-	else {
-		// No colon found, treat the whole string as an IP address
-		ip_part_len = strlen(address);
-		if (ip_part_len == 0) return false; // Should have been caught earlier, but good practice
-
-		// Validate the entire string as just an IP
-		return parseAndValidateIpOctets(ip_part_start, ip_part_len, o1, o2, o3, o4);
-	}
-}
-
-
 void HandleDiscordJoin(const char* secret) {
-
-	// do somethign with it
-	// make sure secret is a valid ipv4 adress
-	Msg("Discord: Join secret: %s\n", secret);
-	if (!isIpPortValid(secret)) {
-		Msg("Discord: Invalid secret: %s\n", secret);
+	if (!secret) {
+		Msg("Discord: Invalid null join secret.\n");
 		return;
 	}
-	//remove all ;
-	std::string secretStr(secret);
-	secretStr.erase(std::remove(secretStr.begin(), secretStr.end(), ';'), secretStr.end());
-	// remove all \n
-	secretStr.erase(std::remove(secretStr.begin(), secretStr.end(), '\n'), secretStr.end());
-	// remove all \r
-	secretStr.erase(std::remove(secretStr.begin(), secretStr.end(), '\r'), secretStr.end());
-	// remove all \t
-	secretStr.erase(std::remove(secretStr.begin(), secretStr.end(), '\t'), secretStr.end());
-	// remove all \"
-	secretStr.erase(std::remove(secretStr.begin(), secretStr.end(), '\"'), secretStr.end());
-
-	Cbuf_AddText(0, ("disconnect;connect " + std::string(secretStr)).c_str(), 0);
-	return;
+	const size_t length = strnlen_s(secret, 128);
+	if (length == 0 || length >= 128) {
+		Msg("Discord: Invalid or oversized join secret (maximum 127 bytes).\n");
+		return;
+	}
+	const auto target = p2p::ParseInviteTarget(std::string_view(secret, length));
+	if (!target) {
+		Msg("Discord: Invalid join secret.\n");
+		return;
+	}
+	const std::string command = p2p::InviteConnectCommand(*target);
+	if (command.empty()) {
+		Msg("Discord: Unsupported join target.\n");
+		return;
+	}
+	Cbuf_AddText(0, command.c_str(), 0);
 }
 
 void HandleDiscordJoinRequest(const discord::User request) {
@@ -313,35 +218,73 @@ struct PresenceInfo {
 
 
 std::string CreateDiscordSecret() {
+	if (!GetBaseClient)
+		return {};
 	auto base_client = GetBaseClient(-1);
-	if (!base_client) {
-		return "";
-	}
-	auto net_chan = *(uintptr_t*)((uintptr_t)(base_client) + 0x20);
-	auto ns_addr = (netadr_t*)(net_chan + 0xE4);
-	auto port = htons(ns_addr->GetPort());
-	std::string ip = CallVFunc<char*>(0x1, (void*)net_chan);
-	if (!ns_addr) {
-		return "";
-	}
-	if (ip.empty()) {
-		return "";
-	}
-	if (ip.compare("0:ffff::") == 0) {
-		if (!MasterServerClient::IsValidHeartBeat.load()) {
-			return "";
+	if (!base_client)
+		return {};
+	const auto net_chan = *reinterpret_cast<const uintptr_t*>(
+		reinterpret_cast<uintptr_t>(base_client) + 0x20);
+	if (!net_chan)
+		return {};
+	const auto* ns_addr = reinterpret_cast<const netadr_t*>(net_chan + 0xE4);
+	const auto& nativeIp = ns_addr->GetIP();
+	const uint16_t port = ntohs(ns_addr->GetPort());
+	p2p::Ipv6Bytes address{};
+	memcpy(address.data(), &nativeIp, address.size());
+	const p2p::Ipv6Bytes listenSentinel{ 0, 0, 0xff, 0xff };
+	const bool localHost = ns_addr->IsLoopback()
+		|| IN6_IS_ADDR_LOOPBACK(&nativeIp)
+		|| address == listenSentinel;
+	std::string secret;
+	if (localHost) {
+		if (!MasterServerClient::IsValidHeartBeat.load())
+			return {};
+		int hostPort = port;
+		if (!hostPort && cvarinterface && OriginalCCVar_FindVar) {
+			if (const auto* host_port = OriginalCCVar_FindVar(cvarinterface, "hostport"))
+				hostPort = host_port->m_Value.m_nValue;
 		}
-		auto port = ns_addr->GetPort();
-		if (!port) {
-			auto host_port = CCVar_FindVar(cvarinterface, "hostport");
-			port = host_port->m_Value.m_nValue;
+		if (hostPort <= 0 || hostPort > 65535)
+			return {};
+		// Validate the public address independently: no endpoint or command payload.
+		const auto publicTarget = p2p::ParseInviteTarget(G_public_ip);
+		if (!publicTarget || publicTarget->route != p2p::InviteRoute::Server
+			|| publicTarget->address != G_public_ip || G_public_ip.find(':') != std::string::npos)
+			return {};
+		secret = std::format("{}:{}", G_public_ip, hostPort);
+	} else {
+		if (ns_addr->GetType() != netadrtype_t::NA_IP || !port)
+			return {};
+		secret = p2p::ClientInviteTarget(address, port);
+		if (secret.empty()) {
+			if (address[0] == 0x3f && address[1] == 0xfd) {
+				secret = p2p::PeerInviteTarget(address, port);
+				if (secret.empty()) {
+					Msg("Discord: No portable invite for this live overlay peer; target unavailable, unsupported, or exceeds 127 bytes.\n");
+					return {};
+				}
+			} else if (IN6_IS_ADDR_V4MAPPED(&nativeIp)) {
+				char ipv4[INET_ADDRSTRLEN]{};
+				if (!inet_ntop(AF_INET, address.data() + 12, ipv4, sizeof(ipv4)))
+					return {};
+				secret = std::format("{}:{}", ipv4, port);
+			} else if (address[0] == 0x3f && address[1] == 0xfe) {
+				secret = p2p::FormatIpv6Connect(address, port);
+			} else {
+				return {};
+			}
 		}
-		std::string public_ip = G_public_ip;
-		return std::format("{}:{}", public_ip, port);
 	}
-	
-	return std::format("{}:{}", ip, port);
-
+	if (secret.size() > 127) {
+		Msg("Discord: Portable invite exceeds Discord's 127-byte limit; not advertising.\n");
+		return {};
+	}
+	if (!p2p::ParseInviteTarget(secret)) {
+		Msg("Discord: Invalid portable invite target; not advertising.\n");
+		return {};
+	}
+	return secret;
 }
 
 void DoDiscordAuth()

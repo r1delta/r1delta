@@ -34,70 +34,6 @@ constexpr char kDeploymentId[] = "45505f63034c418eb057f6ba3065f99e";
 constexpr char kProductName[] = "r1delta";
 constexpr char kProductVersion[] = "1.18.1.2";
 
-struct Version
-{
-    int major = 0;
-    int minor = 0;
-    int patch = 0;
-};
-
-bool ParseVersion(const char* versionStr, Version& out)
-{
-    if (!versionStr)
-        return false;
-
-    // Skip leading 'v' if present
-    const char* ptr = versionStr;
-    if (*ptr == 'v' || *ptr == 'V')
-        ++ptr;
-
-    char* end = nullptr;
-    out.major = static_cast<int>(strtol(ptr, &end, 10));
-    if (end == ptr || *end != '.')
-        return false;
-
-    ptr = end + 1;
-    out.minor = static_cast<int>(strtol(ptr, &end, 10));
-    if (end == ptr || *end != '.')
-        return false;
-
-    ptr = end + 1;
-    out.patch = static_cast<int>(strtol(ptr, &end, 10));
-    if (end == ptr)
-        return false;
-
-    return true;
-}
-
-bool IsVersionAtLeast(const Version& version, int major, int minor, int patch)
-{
-    if (version.major > major)
-        return true;
-    if (version.major < major)
-        return false;
-    if (version.minor > minor)
-        return true;
-    if (version.minor < minor)
-        return false;
-    return version.patch >= patch;
-}
-
-bool ShouldEnableEOS()
-{
-    const char* versionStr = R1D_VERSION;
-
-    // Enable in dev builds
-    if (strcmp(versionStr, "dev") == 0)
-        return true;
-
-    Version version{};
-    if (!ParseVersion(versionStr, version))
-        return false;
-
-    // Enable for version >= 3.0.0
-    return IsVersionAtLeast(version, 3, 0, 0);
-}
-
 using SendToFn = int (WSAAPI*)(SOCKET, const char*, int, int, const sockaddr*, int);
 using RecvFromFn = int (WSAAPI*)(SOCKET, char*, int, int, sockaddr*, int*);
 using CloseSocketFn = int (WSAAPI*)(SOCKET);
@@ -568,8 +504,7 @@ bool EnsureEosInitialized()
 bool InitializeNetworking()
 {
     // The socket hooks are shared by EOS and the p2p transports (hole
-    // punching, iroh, tailcat, TURN), so they are installed regardless of
-    // whether EOS itself is enabled for this build.
+    // punching, iroh, tailcat, TURN).
     if (!InstallSocketHooks())
     {
         Error("EOS: Failed to install socket hooks\n");
@@ -579,15 +514,8 @@ bool InitializeNetworking()
     // The EOS SDK's own sockets bypass the hooks.
     p2p::RegisterForeignModule(GetModuleHandleA("EOSSDK-Win64-Shipping.dll"));
 
-    // Check if EOS should be enabled based on version
-    g_eosEnabled = ShouldEnableEOS();
-    if (!g_eosEnabled)
-    {
-        Msg("EOS: Disabled for version %s (requires >= 3.0.0 or dev)\n", R1D_VERSION);
-        return true;
-    }
-
-    Msg("EOS: Hooks installed for version %s, will initialize on first fakeip packet\n", R1D_VERSION);
+    g_eosEnabled = true;
+    Msg("EOS: Transport available for version %s; initialization is deferred until requested\n", R1D_VERSION);
     return true;
 }
 

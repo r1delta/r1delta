@@ -48,6 +48,7 @@ struct Peer
     uint64_t handle = 0;
     Route route = Route::Unknown;
     uint16_t port = 0;
+    std::string inviteTarget;
     uint16_t nextMessageId = 1;
     Reassembler reassembler;
     std::chrono::steady_clock::time_point lastActivity = std::chrono::steady_clock::now();
@@ -189,6 +190,22 @@ int RealSendTo(SOCKET s, const std::vector<uint8_t>& data, const Ipv4Endpoint& t
 {
     if (s == INVALID_SOCKET || !to.Valid())
         return SOCKET_ERROR;
+    sockaddr_storage local{};
+    int localLength = sizeof(local);
+    if (getsockname(s, reinterpret_cast<sockaddr*>(&local), &localLength) == SOCKET_ERROR)
+        return SOCKET_ERROR;
+    if (local.ss_family == AF_INET6)
+    {
+        sockaddr_in6 sa{};
+        sa.sin6_family = AF_INET6;
+        sa.sin6_port = htons(to.port);
+        auto* bytes = reinterpret_cast<uint8_t*>(&sa.sin6_addr);
+        bytes[10] = 0xFF;
+        bytes[11] = 0xFF;
+        const uint32_t address = htonl(to.ip);
+        std::memcpy(bytes + 12, &address, sizeof(address));
+        return RealSendTo(s, data.data(), static_cast<int>(data.size()), reinterpret_cast<const sockaddr*>(&sa), sizeof(sa));
+    }
     const sockaddr_in sa = ToSockaddr(to);
     return RealSendTo(s, data.data(), static_cast<int>(data.size()), reinterpret_cast<const sockaddr*>(&sa), sizeof(sa));
 }
@@ -349,6 +366,28 @@ bool PeerAddress(uint64_t muxId, Ipv6Bytes& addr, uint16_t& port)
     addr = EncodeOverlayAddress(it->second.backend->Kind(), muxId);
     port = it->second.port;
     return true;
+}
+
+void SetPeerInviteTarget(uint64_t muxId, std::string target)
+{
+    std::lock_guard lock(g_mutex);
+    auto it = g_peers.find(muxId);
+    if (it != g_peers.end() && it->second.route == Route::Client)
+        it->second.inviteTarget = std::move(target);
+}
+
+std::string PeerInviteTarget(const Ipv6Bytes& address, uint16_t port)
+{
+    Backend backend;
+    uint64_t id;
+    if (!DecodeOverlayAddress(address, backend, id))
+        return {};
+    std::lock_guard lock(g_mutex);
+    auto it = g_peers.find(id);
+    if (it == g_peers.end() || it->second.route != Route::Client
+        || it->second.backend->Kind() != backend || it->second.port != port)
+        return {};
+    return it->second.inviteTarget;
 }
 
 size_t PeerCount()

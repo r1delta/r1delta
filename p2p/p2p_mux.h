@@ -87,6 +87,10 @@ uint64_t AddOutgoingPeer(Backend backend, uint64_t handle, uint16_t port);
 void ClosePeer(uint64_t muxId);
 bool SendToPeer(uint64_t muxId, const uint8_t* data, size_t size);
 bool PeerAddress(uint64_t muxId, Ipv6Bytes& addr, uint16_t& port);
+// Portable Discord invite target associated with a live outgoing peer.
+// The backend/address/port must still match; closing the peer removes it.
+void SetPeerInviteTarget(uint64_t muxId, std::string target);
+std::string PeerInviteTarget(const Ipv6Bytes& address, uint16_t port);
 size_t PeerCount();
 
 // ---------------------------------------------------------------------------

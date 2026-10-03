@@ -2,6 +2,7 @@
 #include "../p2p/stun.h"
 #include "../p2p/upnp_codec.h"
 #include "../p2p/p2p_identity.h"
+#include "../p2p/p2p_invite.h"
 
 #include <cstdio>
 #include <cstring>
@@ -364,6 +365,78 @@ void TestIdentity()
     uint32_t mapped = 0;
     Check(IsMappedIpv4(MappedIpv4(0xC0A80105u).data(), &mapped) && mapped == 0xC0A80105u, "mapped ipv4");
 }
+
+void TestInvites()
+{
+    using namespace p2p;
+    const auto legacy = ParseInviteTarget("203.0.113.7");
+    Check(legacy && legacy->route == InviteRoute::Server && legacy->port == 0 &&
+          InviteConnectCommand(*legacy) == "disconnect;delta_connect 203.0.113.7\n", "legacy bare IPv4 invite");
+    const auto server = ParseInviteTarget("203.0.113.7:65535");
+    Check(server && server->port == 65535 && InviteConnectCommand(*server) ==
+          "disconnect;delta_connect 203.0.113.7:65535\n", "legacy explicit port invite");
+    const auto eos = ParseInviteTarget("[3ffe::1234:abcd]:37015");
+    Check(eos && eos->route == InviteRoute::Eos && InviteConnectCommand(*eos) ==
+          "disconnect;delta_connect [3ffe::1234:abcd]:37015\n", "portable EOS invite");
+
+    const std::string id(64, 'a');
+    const std::string raw = id + "|https://r.example/|127.0.0.1:1,[::1]:65535";
+    const auto encoded = EncodeOverlayInvite(Backend::Iroh, raw, 37015);
+    const auto iroh = ParseInviteTarget(encoded);
+    Check(iroh && iroh->address == raw && iroh->port == 37015 &&
+          InviteConnectCommand(*iroh) == "disconnect;delta_connect_iroh \"" + raw + "\" 37015\n",
+          "iroh preserves relay and direct endpoint metadata");
+    const std::string fqdnRelay = id + "|https://use1-1.relay.n0.iroh.link./|";
+    const auto fqdnInvite = ParseInviteTarget(EncodeOverlayInvite(Backend::Iroh, fqdnRelay, 27015));
+    Check(fqdnInvite && fqdnInvite->address == fqdnRelay,
+          "iroh accepts absolute DNS relay names emitted by the plugin");
+    const auto minimal = ParseInviteTarget("r1di1|iroh|1|" + id);
+    Check(minimal && minimal->port == 1, "overlay minimum port");
+    Check(ParseInviteTarget("r1di1|iroh|65535|" + id).has_value(), "overlay maximum port");
+    Check(ParseInviteTarget("r1di1|iroh|37015|" + id + "||").has_value(), "iroh empty optional metadata");
+    const auto tailcat = ParseInviteTarget("r1di1|tailcat|37015|tcomFwWCAB");
+    Check(tailcat && InviteConnectCommand(*tailcat) ==
+          "disconnect;delta_connect_tailcat \"tcomFwWCAB\" 37015\n", "tailcat URL-safe address command");
+
+    // A valid relay path supplies the exact Discord SDK boundary without truncation.
+    const std::string prefix = "r1di1|iroh|1|" + id + "|https://r.example/";
+    const std::string boundary = prefix + std::string(127 - prefix.size(), 'x');
+    const auto atLimit = ParseInviteTarget(boundary);
+    Check(atLimit && EncodeOverlayInvite(Backend::Iroh, atLimit->address, 1) == boundary,
+          "127-byte invite round trip");
+    Check(!ParseInviteTarget(boundary + "x") && atLimit &&
+          EncodeOverlayInvite(Backend::Iroh, atLimit->address + "x", 1).empty(),
+          "128-byte invite rejected rather than truncated");
+
+    const std::vector<std::string> invalid = {
+        "", "1.2.3", "256.2.3.4", "1.2.3.4:0", "1.2.3.4:65536", "1.2.3.4:999999999999",
+        " 1.2.3.4", "1.2.3.4\n", "1.2.3.4;quit", "1.2.3.4\\quit", "1.2.3.4\"",
+        "[3ffd:1::5]:37015", "[2001:db8::1]:37015", "[3ffe:::1]:37015", "[3ffe::1]:0",
+        "r1di1|eos|1|x", "r1di1|iroh", "r1di1|iroh|0|" + id, "r1di1|iroh|65536|" + id,
+        "r1di1|iroh|-1|" + id, "r1di1|iroh|1|" + id.substr(1),
+        "r1di1|iroh|1|" + id + "|garbage", "r1di1|iroh|1|" + id + "|https://",
+        "r1di1|iroh|1|" + id + "|https://r.example|bad:3",
+        "r1di1|iroh|1|" + id + "||127.0.0.1:1,",
+        "r1di1|iroh|1|" + id + "|||", "r1di1|tailcat|1|tc", "r1di1|tailcat|1|tcA",
+        "r1di1|tailcat|1|tcAB+C", "r1di1|tailcat|1|tcAB=="
+    };
+    for (const auto& secret : invalid) Check(!ParseInviteTarget(secret), "malformed invite rejected");
+    for (char injected : std::string("\r\n\t ;\"\\"))
+        Check(!ParseInviteTarget("r1di1|iroh|1|" + id + injected), "overlay command injection rejected");
+    Check(!ParseInviteTarget(std::string("1.2.3.4\0:1", 10)), "embedded NUL rejected");
+    Check(InviteConnectCommand({InviteRoute::Iroh, id + ";quit", 1}).empty(),
+          "forged overlay target cannot bypass command validation");
+    Check(InviteConnectCommand({InviteRoute::Server, "1.2.3.4;quit", 0}).empty(),
+          "forged server target cannot bypass command validation");
+    Check(InviteConnectCommand({InviteRoute::Eos, "[3ffd:1::5]:1", 1}).empty(),
+          "forged local peer target rejected");
+    Check(InviteConnectCommand({InviteRoute::Server, "1.2.3.4:1", 2}).empty(),
+          "forged target port mismatch rejected");
+    Check(!ParseInviteTarget("r1di1|iroh|1|" + id + "||[3ffd:1::5]:1"),
+          "process-local endpoint cannot be an iroh direct hint");
+    Check(EncodeOverlayInvite(Backend::Turn, id, 1).empty() &&
+          EncodeOverlayInvite(Backend::Iroh, id, 0).empty(), "unsupported and zero-port encoding rejected");
+}
 } // namespace
 
 int main()
@@ -376,6 +449,7 @@ int main()
     TestOverlayAddressAndFraming();
     TestUpnp();
     TestIdentity();
+    TestInvites();
     std::printf("%s\n", g_failures == 0 ? "p2p codec tests passed" : "p2p codec tests FAILED");
     return g_failures == 0 ? 0 : 1;
 }

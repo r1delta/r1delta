@@ -2067,8 +2067,8 @@ LoadResult LoadStoreFile(const std::filesystem::path& path, PersistentDataStore:
 			loadedFrom = candidate;
 			return candidate == path ? LoadResult::Loaded : LoadResult::Recovered;
 		}
-		Warning("R1Delta: persistent data file %s is damaged (%zu entries readable)\n",
-			candidate.string().c_str(), parsed.size());
+		Warning("R1Delta: persistent data file %s is damaged (%u entries readable)\n",
+			candidate.string().c_str(), static_cast<unsigned>(parsed.size()));
 		if (parsed.size() > salvage.size()) {
 			salvage = std::move(parsed);
 			salvageFrom = candidate;
@@ -2254,15 +2254,15 @@ bool EnsureStoreLoaded()
 				}
 				store.entries = std::move(merged);
 				changed = true;
-				Msg("R1Delta: imported %zu persistent data entries from profile.cfg\n", imported);
+				Msg("R1Delta: imported %u persistent data entries from profile.cfg\n", static_cast<unsigned>(imported));
 			}
 		}
 	}
 	MarkProfileOwner();
 
 	const size_t dormant = ApplyStoreToConVars();
-	Msg("R1Delta: loaded %zu persistent data entries (%zu inactive under the current schema)\n",
-		store.entries.size(), dormant);
+	Msg("R1Delta: loaded %u persistent data entries (%u inactive under the current schema)\n",
+		static_cast<unsigned>(store.entries.size()), static_cast<unsigned>(dormant));
 
 	std::atexit([] { PData_Flush(true); });
 

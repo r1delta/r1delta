@@ -21,6 +21,7 @@
 #include "p2p_eos_bridge.h"
 #include "p2p_identity.h"
 #include "p2p_log.h"
+#include "p2p_invite.h"
 #include "p2p_mux.h"
 #include "p2p_netinfo.h"
 #include "p2p_plugin.h"
@@ -147,6 +148,9 @@ struct Session
     bool overlayOnly = false;
     std::vector<uint8_t> identity; // master-attested identity token for this server
     uint64_t expectedTag = 0;      // PONG server tag of the listed server (0 = don't check)
+    Ipv6Bytes inviteAddress{};
+    uint16_t invitePort = 0;
+    std::string inviteTarget;
 };
 
 std::mutex g_mutex;
@@ -679,6 +683,10 @@ void RunSession(std::shared_ptr<Session> s, Settings settings, std::string fallb
     std::string summary;
     size_t bestIndex = SIZE_MAX;
     std::vector<uint64_t> losers;
+    Ipv6Bytes inviteAddress{};
+    uint16_t invitePort = 0;
+    std::string inviteTarget;
+    uint64_t invitePeer = 0;
     {
         std::lock_guard lock(s->mutex);
         const Candidate* best = nullptr;
@@ -702,11 +710,23 @@ void RunSession(std::shared_ptr<Session> s, Settings settings, std::string fallb
         {
             command = "connect " + best->ConnectAddress(s->serverPort);
             summary += std::string("  -> connecting via ") + KindName(best->kind) + " (" + best->ConnectAddress(s->serverPort) + ")\n";
+            inviteAddress = IsUdpKind(best->kind) ? MappedIpv4(best->udp.ip)
+                : best->kind == Kind::Eos ? best->eosAddress
+                : EncodeOverlayAddress(best->kind == Kind::Iroh ? Backend::Iroh : Backend::Tailcat, best->muxId);
+            invitePort = IsUdpKind(best->kind) ? best->udp.port
+                : best->kind == Kind::Eos ? best->eosPort : s->serverPort;
+            inviteTarget = s->overlayOnly
+                ? EncodeOverlayInvite(best->kind == Kind::Iroh ? Backend::Iroh : Backend::Tailcat, best->remote, s->serverPort)
+                : s->target;
+            invitePeer = best->muxId;
         }
         else if (!fallbackTarget.empty())
         {
             command = "connect " + fallbackTarget;
             summary += "  -> no path answered, falling back to a plain connect\n";
+            inviteAddress = MappedIpv4(s->candidates.front().udp.ip);
+            invitePort = s->serverPort;
+            inviteTarget = s->target;
         }
         else
         {
@@ -787,6 +807,15 @@ void RunSession(std::shared_ptr<Session> s, Settings settings, std::string fallb
     Log("%s", summary.c_str());
     if (!command.empty() && StillCurrent(s))
     {
+        {
+            std::lock_guard lock(s->mutex);
+            s->inviteAddress = inviteAddress;
+            s->invitePort = invitePort;
+            if (invitePeer)
+                SetPeerInviteTarget(invitePeer, std::move(inviteTarget));
+            else
+                s->inviteTarget = std::move(inviteTarget);
+        }
         command += "\n";
         Cbuf_AddText(0, command.c_str(), 0);
     }
@@ -886,6 +915,14 @@ void ConnectBest(const std::string& targetIn)
                 closesocket(s->socket);
             // Unlisted server, master unreachable, or a server build that
             // would not answer our pings: behave exactly like "connect".
+            if (!StillCurrent(s))
+                return;
+            {
+                std::lock_guard lock(s->mutex);
+                s->inviteAddress = MappedIpv4(server.ip);
+                s->invitePort = server.port;
+                s->inviteTarget = target;
+            }
             Log("%s does not advertise p2p routes; connecting directly\n", target.c_str());
             Cbuf_AddText(0, ("connect " + target + "\n").c_str(), 0);
             return;
@@ -937,6 +974,20 @@ void ConnectOverlay(Backend backend, const std::string& address, uint16_t port)
         }
         RunSession(s, settings, "");
     }).detach();
+}
+
+std::string ClientInviteTarget(const Ipv6Bytes& address, uint16_t port)
+{
+    if (IsOverlayAddress(address.data()))
+        return PeerInviteTarget(address, port);
+    auto session = CurrentSession();
+    if (!session)
+        return {};
+    std::lock_guard lock(session->mutex);
+    if (session->generation != g_generation.load() || session->invitePort != port
+        || session->inviteAddress != address)
+        return {};
+    return session->inviteTarget;
 }
 
 void ClientOnPong(uint64_t probeId, uint64_t timestampUs, const char* via, uint64_t serverTag)

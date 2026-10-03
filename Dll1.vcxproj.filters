@@ -420,6 +420,9 @@
     <ClInclude Include="p2p\p2p_protocol.h">
       <Filter>p2p</Filter>
     </ClInclude>
+    <ClInclude Include="p2p\p2p_invite.h">
+      <Filter>p2p</Filter>
+    </ClInclude>
     <ClInclude Include="p2p\p2p_server.h">
       <Filter>p2p</Filter>
     </ClInclude>
@@ -841,6 +844,9 @@
       <Filter>p2p</Filter>
     </ClCompile>
     <ClCompile Include="p2p\p2p_protocol.cpp">
+      <Filter>p2p</Filter>
+    </ClCompile>
+    <ClCompile Include="p2p\p2p_invite.cpp">
       <Filter>p2p</Filter>
     </ClCompile>
     <ClCompile Include="p2p\p2p_server.cpp">

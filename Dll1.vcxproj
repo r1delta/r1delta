@@ -248,6 +248,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="p2p\p2p_netinfo.h" />
     <ClInclude Include="p2p\p2p_plugin.h" />
     <ClInclude Include="p2p\p2p_protocol.h" />
+    <ClInclude Include="p2p\p2p_invite.h" />
     <ClInclude Include="p2p\p2p_server.h" />
     <ClInclude Include="p2p\p2p_settings.h" />
     <ClInclude Include="p2p\p2p_turn.h" />
@@ -409,6 +410,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="p2p\p2p_netinfo.cpp" />
     <ClCompile Include="p2p\p2p_plugin.cpp" />
     <ClCompile Include="p2p\p2p_protocol.cpp" />
+    <ClCompile Include="p2p\p2p_invite.cpp" />
     <ClCompile Include="p2p\p2p_server.cpp" />
     <ClCompile Include="p2p\p2p_turn.cpp" />
     <ClCompile Include="p2p\p2p_upnp.cpp" />
