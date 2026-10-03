@@ -271,6 +271,17 @@ function Assert-BuildOutputs {
     $forbiddenNames = @(
         Get-ChildItem -LiteralPath $buildRoot -Recurse -File |
             Where-Object {
+                # MSBuild copies this signed .NET Framework facade for netstandard
+                # dependencies; its name does not indicate a debug runtime.
+                if ($_.Name -ieq 'System.Diagnostics.Debug.dll') {
+                    $assembly = [System.Reflection.AssemblyName]::GetAssemblyName($_.FullName)
+                    if (
+                        $assembly.Name -eq 'System.Diagnostics.Debug' -and
+                        [System.BitConverter]::ToString($assembly.GetPublicKeyToken()) -eq 'B0-3F-5F-7F-11-D5-0A-3A'
+                    ) {
+                        return $false
+                    }
+                }
                 (
                     $_.Extension -in @('.dll', '.exe') -and
                     $_.Name -match '(?i)(?:^|[._-])debug(?:[._-]|$)|\.(?:locked|pre(?:_|\.))'

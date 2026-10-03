@@ -16,6 +16,7 @@ If you're having issues please open an issue or join the [discord](https://disco
 ### 3.0 prerelease 38
 
 - Server-browser joins use `delta_connect` to select an advertised direct, hole-punched, or overlay route. Optional iroh and tailcat plugins ship with the client; Cloudflare TURN is disabled by default.
+- Offline LAN joins use ordinary `connect ip:port` with `delta_online_auth_enable 0` on both ends (the default). An unavailable optional EOS backend disables EOS routes without terminating direct-IP/LAN play.
 - Progression writes remain pending until acknowledged by the client. The client uses a dedicated persistent-data store with atomic primary/backup replacement rather than relying on `profile.cfg` for durability.
 - Filesystem negative-cache mutations and invalidation are serialized; replacement-path lookup uses bounded per-call stack scratch instead of TLS arenas. This is speculative hardening for the intermittent material-load corruption, not a confirmed diagnosis of that crash.
 

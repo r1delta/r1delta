@@ -556,7 +556,7 @@ bool EnsureEosInitialized()
 
     if (!layer.Initialize(kProductId, kSandboxId, kDeploymentId, kProductName, kProductVersion))
     {
-        Error("EOS: Failed to initialize networking layer\n");
+        Warning("EOS: Optional networking layer unavailable; EOS routes disabled, direct IP/LAN remains available\n");
         g_lazyInitSuccess = false;
         return false;
     }
