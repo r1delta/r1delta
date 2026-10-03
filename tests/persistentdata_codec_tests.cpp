@@ -305,6 +305,33 @@ void TestOlderEchoDoesNotAcknowledgeNewerWrite()
 	Check(state.pending.empty(), "echo of the newest write acknowledges it");
 }
 
+void TestDuplicateReportsCannotReplacePendingWrite()
+{
+	using namespace PersistentDataState;
+	for (bool fullSnapshot : { false, true }) {
+		for (bool keepMirror : { false, true }) {
+			PlayerState state;
+			BeginSession(state, SessionKey{ 0x1000, 3 });
+			RecordServerWrite(state, "__ xp", "300", nullptr, 0.0, keepMirror);
+
+			EntryList reports{ { "__ xp", "300" }, { "__ xp", "100" } };
+			ApplyClientUpdate(state, reports, fullSnapshot, keepMirror);
+			Check(reports[0].second == "300" && reports[1].second == "300",
+				"an early acknowledgement cannot expose a later stale report");
+			Check(state.pending.count("__ xp") == 1 && *Find(state, "__ xp") == "300",
+				"the last stale report keeps the write pending");
+
+			EntryList acknowledged{ { "__ xp", "100" }, { "__ xp", "300" } };
+			ApplyClientUpdate(state, acknowledged, fullSnapshot, keepMirror);
+			Check(acknowledged[0].second == "300" && acknowledged[1].second == "300",
+				"every duplicate report is reconciled before acknowledging");
+			Check(state.pending.empty(), "the last current report acknowledges the write");
+			if (keepMirror)
+				Check(*Find(state, "__ xp") == "300", "the mirror retains the acknowledged value");
+		}
+	}
+}
+
 void TestRedundantWritesAreNotSent()
 {
 	using namespace PersistentDataState;
@@ -387,6 +414,7 @@ int main()
 	TestServerWriteSurvivesReconnectSnapshot();
 	TestSnapshotMissingPendingKeyIsAppended();
 	TestOlderEchoDoesNotAcknowledgeNewerWrite();
+	TestDuplicateReportsCannotReplacePendingWrite();
 	TestRedundantWritesAreNotSent();
 	TestTimedResendBackoff();
 	TestMirrorKeepsFullDataSet();

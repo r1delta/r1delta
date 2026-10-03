@@ -210,11 +210,13 @@ eos::PacketRoute DetermineSocketRoute(SOCKET socketHandle)
     const uint16_t port = GetLocalSocketPort(socketHandle);
     const eos::PacketRoute route = ClassifySocketRoute(port);
 
+    // An unbound socket can be observed before its game port is assigned.
+    // Do not freeze that classification, or it never becomes a game socket.
+    if (route != eos::PacketRoute::All)
     {
         std::lock_guard lock(g_socketRouteMutex);
         g_socketRoutes[socketHandle] = route;
     }
-
     return route;
 }
 
@@ -341,6 +343,14 @@ int WSAAPI HookedRecvFrom(SOCKET socketHandle,
 
     const eos::PacketRoute desiredRoute = DetermineSocketRoute(socketHandle);
     const p2p::Route p2pRoute = ToP2pRoute(desiredRoute);
+    if (p2pRoute == p2p::Route::Unknown || !buffer || length <= 0 ||
+        (from && (!fromLen || *fromLen < static_cast<int>(sizeof(sockaddr_in)))))
+    {
+        return g_realRecvFrom
+            ? g_realRecvFrom(socketHandle, buffer, length, flags, from, fromLen)
+            : SOCKET_ERROR;
+    }
+
     p2p::NoteEngineSocket(socketHandle, p2pRoute);
 
     // Datagrams from overlay transports (iroh, tailcat, TURN) and packets the
@@ -439,12 +449,34 @@ bool InstallSocketHooks()
     if (!g_sendToTarget || !g_recvFromTarget || !g_closeSocketTarget)
         return false;
 
+    LPVOID created[3]{};
+    size_t createdCount = 0;
+    auto rollback = [&] {
+        for (size_t i = 0; i < createdCount; ++i)
+        {
+            MH_DisableHook(created[i]);
+            MH_RemoveHook(created[i]);
+        }
+        g_realSendTo = nullptr;
+        g_realRecvFrom = nullptr;
+        g_realCloseSocket = nullptr;
+    };
+
     if (MH_CreateHook(g_sendToTarget, &HookedSendTo, reinterpret_cast<LPVOID*>(&g_realSendTo)) != MH_OK)
         return false;
+    created[createdCount++] = g_sendToTarget;
     if (MH_CreateHook(g_recvFromTarget, &HookedRecvFrom, reinterpret_cast<LPVOID*>(&g_realRecvFrom)) != MH_OK)
+    {
+        rollback();
         return false;
+    }
+    created[createdCount++] = g_recvFromTarget;
     if (MH_CreateHook(g_closeSocketTarget, &HookedCloseSocket, reinterpret_cast<LPVOID*>(&g_realCloseSocket)) != MH_OK)
+    {
+        rollback();
         return false;
+    }
+    created[createdCount++] = g_closeSocketTarget;
 
     const MH_STATUS sendStatus = MH_EnableHook(g_sendToTarget);
     const MH_STATUS recvStatus = MH_EnableHook(g_recvFromTarget);
@@ -453,6 +485,7 @@ bool InstallSocketHooks()
         (recvStatus != MH_OK && recvStatus != MH_ERROR_ENABLED) ||
         (closeStatus != MH_OK && closeStatus != MH_ERROR_ENABLED))
     {
+        rollback();
         return false;
     }
 

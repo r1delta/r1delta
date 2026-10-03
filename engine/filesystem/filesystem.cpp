@@ -147,7 +147,7 @@ private:
 	static SRWLOCK cacheMutex;
 	static Arena* trieArena;
 
-	static Trie* lookup(Trie** map, FFSS key) {
+	static Trie* lookup(Trie** map, FFSS key, bool populate) {
 		ZoneScoped;
 
 		for (uint64_t h = hash64(key); *map; h <<= TRIE_BITS) {
@@ -156,24 +156,17 @@ private:
 			}
 			map = &(*map)->child[h >> (64 - TRIE_BITS)];
 		}
-		Trie* ret;
-		{
-			ZoneScopedN("lookup>allocation");
-
-			ReleaseSRWLockShared(&cacheMutex);
-			AcquireSRWLockExclusive(&cacheMutex);
-			*map = (Trie*)arena_push(trieArena, sizeof(Trie));
-			char* ptr = (char*)arena_push(trieArena, key.len + 1);
-			memcpy(ptr, key.ptr, key.len);
-			(*map)->key = { .ptr = ptr, .len = key.len };
-			ret = *map;
-			ReleaseSRWLockExclusive(&cacheMutex);
-			AcquireSRWLockShared(&cacheMutex);
-		}
+		if (!populate)
+			return nullptr;
+		Trie* ret = (Trie*)arena_push(trieArena, sizeof(Trie));
+		char* ptr = (char*)arena_push(trieArena, key.len + 1);
+		memcpy(ptr, key.ptr, key.len);
+		ret->key = { .ptr = ptr, .len = key.len };
+		*map = ret;
 		return ret;
 	}
 
-	static bool checkAndCachePath(const char* fullPath) {
+	static bool checkAndCachePath(const char* fullPath, bool populate, bool& known) {
 		ZoneScoped;
 
 		const char* part = fullPath;
@@ -185,7 +178,11 @@ private:
 				i++;
 			}
 			if (i < part_len) i++; // Skip the separator
-			Trie* node = lookup(&root, { .ptr = part, .len = i });
+			Trie* node = lookup(&root, { .ptr = part, .len = i }, populate);
+			if (!node || (!node->value.checked && !populate)) {
+				known = false;
+				return true;
+			}
 			if (!node->value.checked) {
 				ZoneScopedN("checkAndCachePath make node");
 				DWORD attributes = GetFileAttributesA(node->key.ptr);
@@ -207,11 +204,17 @@ public:
 		//	if (*path++ == '.') dot_count++;
 		//if (dot_count > 2) return false;
 
-		AcquireSRWLockShared(&cacheMutex);
-		auto ret = !checkAndCachePath(path);
-		ReleaseSRWLockShared(&cacheMutex);
-		
-		return ret;
+		bool known = true;
+		{
+			SRWGuardShared lock(&cacheMutex);
+			const bool exists = checkAndCachePath(path, false, known);
+			if (known)
+				return !exists;
+		}
+		// Never retain a trie slot across a lock upgrade: another reader may
+		// insert it, and an addon rescan can clear the entire arena meanwhile.
+		SRWGuard lock(&cacheMutex);
+		return !checkAndCachePath(path, true, known);
 	}
 	static void resetNonexistentCache() {
 		ZoneScoped;

@@ -155,23 +155,27 @@ inline void ApplyClientUpdate(
 		reported.reserve(entries.size());
 
 	for (auto& [key, value] : entries) {
-		if (fullSnapshot)
-			reported.emplace(key, true);
 		const auto pending = state.pending.find(key);
-		if (pending == state.pending.end())
-			continue;
-		if (pending->second.value == value) {
-			// The client has applied the write.
-			state.pending.erase(pending);
+		if (pending == state.pending.end()) {
+			if (fullSnapshot)
+				reported.insert_or_assign(key, false);
 			continue;
 		}
+		// A batch may contain the same key more than once. The engine keeps
+		// the last value, so only that report can acknowledge the write.
+		// Keep the pending write alive until every entry has been reconciled.
+		const bool acknowledged = pending->second.value == value;
+		reported.insert_or_assign(key, acknowledged);
 		value = pending->second.value;
-		if (fullSnapshot) {
-			// A full snapshot follows a (re)connect, which discards anything
-			// that was still queued on the old reliable stream.
+		if (fullSnapshot && !acknowledged) {
 			pending->second.resendNow = true;
 			pending->second.timedResends = 0;
 		}
+	}
+
+	for (const auto& [key, acknowledged] : reported) {
+		if (acknowledged)
+			state.pending.erase(key);
 	}
 
 	if (fullSnapshot) {

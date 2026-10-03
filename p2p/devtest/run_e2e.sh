@@ -73,6 +73,9 @@ if ! grep -q "Rendezvous listening" "$WORK/master.log"; then echo "master server
 
 export R1P_PLUGIN_DIR="$WORK/plugins"
 export P2P_delta_p2p_tailcat_derpmap_url="$DERPMAP"
+# This harness uses only local coturn and its mock credential API, not live
+# Cloudflare. Opt in explicitly now that production TURN defaults off.
+export P2P_delta_p2p_server_turn=1
 MASTER="http://$IP:8080"
 
 FAKE_NAT=1 "$WORK/fake_engine" server "$IP" 37015 "$MASTER" > "$WORK/server.log" 2>&1 & PIDS+=($!)

@@ -28,7 +28,7 @@ static double g_last_retry_time = 0.0;
 static const double RETRY_DELAY = 15.0;
 
 const char* CNetChan__GetAddress(CNetChan* thisptr) {
-    const netadr_t adr(std::string(oCNetChan__GetAddress(thisptr)).c_str());
+    const netadr_t adr(oCNetChan__GetAddress(thisptr));
     // Players connected through EOS / iroh / tailcat / TURN report the IP the
     // master server attested for them, so status, addip and ban kicks work
     // the same on every transport.

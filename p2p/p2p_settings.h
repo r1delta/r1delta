@@ -16,7 +16,7 @@ struct Settings
     bool serverEos = true;
     bool serverIroh = true;
     bool serverTailcat = true;
-    bool serverTurn = true;
+    bool serverTurn = false;
     int punchSpray = 2;
 
     // Client side

@@ -1528,8 +1528,8 @@ bool ServerReadPersistent(int playerSlot, const char* name, std::string& value)
 		return false;
 
 	PersistentDataState::PlayerState* state = BindServerPlayer(playerSlot);
-	if (!state && ServerKeepsMirror())
-		state = &g_serverPlayers[playerSlot]; // bot or not-yet-bound slot: best effort
+	if (!state && ServerKeepsMirror() && !g_serverPlayers[playerSlot].session.IsValid())
+		state = &g_serverPlayers[playerSlot]; // a bot's unbound mirror, never a previous connection
 	if (state) {
 		if (const std::string* found = PersistentDataState::Find(*state, name)) {
 			value = *found;
@@ -1583,6 +1583,11 @@ void ServerWritePersistent(int playerSlot, const char* key, const char* name, co
 		// No real connection behind the slot (bot). Keep the old best-effort
 		// behaviour without delivery tracking.
 		PersistentDataState::PlayerState& unbound = g_serverPlayers[playerSlot];
+		// An unresolved previously bound slot can be between maps or already
+		// occupied by a bot. Preserve pending writes, but do not read or alter
+		// the previous connection's profile through an unbound player.
+		if (unbound.session.IsValid())
+			return;
 		if (ServerKeepsMirror()) {
 			auto& slotValue = unbound.values[name];
 			mustSend = slotValue != value;
@@ -1994,9 +1999,9 @@ bool GetProfileDirectory(std::filesystem::path& directory)
 	return true;
 }
 
-// Atomically replaces the store file. The previous generation is kept as .bak.
-// A crash at any point leaves either the old file, or the new file as .tmp
-// (which LoadStoreFile picks up).
+// Atomically replaces the store file, preserving the previous generation as
+// .bak in the same operation. A failed replacement keeps the complete .tmp
+// for recovery; it must not bypass a failed backup by overwriting the primary.
 bool SaveStoreNow(bool quiet)
 {
 	ClientStore& store = Store();
@@ -2010,9 +2015,14 @@ bool SaveStoreNow(bool quiet)
 	bool ok = WriteFileDurably(temporary, contents);
 	if (ok) {
 		std::error_code error;
-		if (std::filesystem::exists(store.path, error))
-			MoveFileExW(store.path.c_str(), backup.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
-		ok = MoveFileExW(temporary.c_str(), store.path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != FALSE;
+		const bool primaryExists = std::filesystem::exists(store.path, error);
+		if (error)
+			ok = false;
+		else if (primaryExists)
+			ok = ReplaceFileW(store.path.c_str(), temporary.c_str(), backup.c_str(),
+				0, nullptr, nullptr) != FALSE;
+		else
+			ok = MoveFileExW(temporary.c_str(), store.path.c_str(), MOVEFILE_WRITE_THROUGH) != FALSE;
 	}
 
 	if (ok) {
@@ -2032,8 +2042,8 @@ bool SaveStoreNow(bool quiet)
 
 enum class LoadResult { Missing, Loaded, Recovered };
 
-// Picks the newest trustworthy copy: the primary file, else a .tmp left by a
-// save interrupted between its two renames, else the previous generation.
+// Picks the committed trustworthy copy: the primary file, else a .tmp left by
+// an interrupted replacement, else the previous generation.
 // If none is intact, salvages the damaged copy with the most entries.
 LoadResult LoadStoreFile(const std::filesystem::path& path, PersistentDataStore::Entries& entries,
 	std::filesystem::path& loadedFrom)

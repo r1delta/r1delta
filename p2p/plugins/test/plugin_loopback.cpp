@@ -3,9 +3,13 @@
 //   plugin_loopback <plugin.so> server <port>          prints "ADDR <addr>" then echoes
 //   plugin_loopback <plugin.so> client <addr> <port>   sends datagrams, expects echoes
 //
-// Used on Linux to validate plugins before they ship as Windows DLLs.
+// Used on Linux and Windows to validate plugin datagram round trips.
 
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <dlfcn.h>
+#endif
 
 #include <chrono>
 #include <cstdio>
@@ -37,7 +41,11 @@ struct Api
 template <typename T>
 bool Load(void* lib, const char* name, T& out)
 {
+#ifdef _WIN32
+    out = reinterpret_cast<T>(GetProcAddress(static_cast<HMODULE>(lib), name));
+#else
     out = reinterpret_cast<T>(dlsym(lib, name));
+#endif
     if (!out)
         std::fprintf(stderr, "missing export %s\n", name);
     return out != nullptr;
@@ -60,10 +68,18 @@ int main(int argc, char** argv)
         std::fprintf(stderr, "usage: %s <plugin> server <port> | client <addr> <port>\n", argv[0]);
         return 2;
     }
+#ifdef _WIN32
+    void* lib = LoadLibraryA(argv[1]);
+#else
     void* lib = dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);
+#endif
     if (!lib)
     {
+#ifdef _WIN32
+        std::fprintf(stderr, "LoadLibrary failed: %lu\n", GetLastError());
+#else
         std::fprintf(stderr, "dlopen: %s\n", dlerror());
+#endif
         return 2;
     }
     Api api{};

@@ -190,7 +190,7 @@ Settings ReadSettingsFromConVars()
     s.serverEos = IntValue(g_serverEos, 1) != 0;
     s.serverIroh = IntValue(g_serverIroh, 1) != 0;
     s.serverTailcat = IntValue(g_serverTailcat, 1) != 0;
-    s.serverTurn = IntValue(g_serverTurn, 1) != 0;
+    s.serverTurn = IntValue(g_serverTurn, 0) != 0;
     s.punchSpray = IntValue(g_punchSpray, 2);
     s.connectTimeoutMs = IntValue(g_connectTimeout, 2500);
     if (s.connectTimeoutMs < 300)
@@ -331,7 +331,7 @@ void Initialize()
     g_serverEos = RegisterConVar("delta_p2p_server_eos", "1", FCVAR_NONE, "Servers log into EOS and advertise their ProductUserId");
     g_serverIroh = RegisterConVar("delta_p2p_server_iroh", "1", FCVAR_NONE, "Servers accept connections over iroh (needs r1delta_iroh.dll)");
     g_serverTailcat = RegisterConVar("delta_p2p_server_tailcat", "1", FCVAR_NONE, "Servers accept connections over tailcat (needs r1delta_tailcat.dll)");
-    g_serverTurn = RegisterConVar("delta_p2p_server_turn", "1", FCVAR_NONE, "Servers that are not directly reachable relay through Cloudflare TURN when the master server provides credentials");
+    g_serverTurn = RegisterConVar("delta_p2p_server_turn", "0", FCVAR_NONE, "Opt in to Cloudflare TURN when the master server provides credentials (disabled for this rollout)");
     g_punchSpray = RegisterConVar("delta_p2p_punch_spray", "2", FCVAR_NONE, "Extra ports above the client's mapped port to punch (sequential NAT port prediction)");
     g_connectTimeout = RegisterConVar("delta_p2p_connect_timeout_ms", "2500", FCVAR_ARCHIVE, "How long delta_connect probes routes before connecting");
     g_relayPenalty = RegisterConVar("delta_p2p_relay_penalty_ms", "20", FCVAR_ARCHIVE, "Latency handicap applied to relayed routes (TURN, iroh/tailcat relays) when choosing");

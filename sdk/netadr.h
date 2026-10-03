@@ -167,6 +167,17 @@ public:
                 SetPort(uint16_t(htons(uint16_t(atoi(&pchColon[1])))));
             }
         }
+        else if (strchr(pszAddress, '.') && strchr(pszAddress, ':') == strrchr(pszAddress, ':'))
+        {
+            // Plain IPv4 endpoints (including CNetChan::GetAddress output).
+            // Leave unbracketed IPv6 alone.
+            char* portStart = strchr(pszAddress, ':');
+            if (portStart)
+            {
+                *portStart = '\0';
+                SetPort(uint16_t(htons(uint16_t(atoi(portStart + 1)))));
+            }
+        }
 
         if (!strchr(pszAddress, ':'))
         {

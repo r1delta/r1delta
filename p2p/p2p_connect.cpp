@@ -537,6 +537,8 @@ std::string FormatSummary(const Session& s, const Candidate* chosen, double elap
 
 void RunSession(std::shared_ptr<Session> s, Settings settings, std::string fallbackTarget)
 {
+    // Master lookup / attestation is not part of the route-probe timeout.
+    s->started = Clock::now();
     const auto deadline = s->started + std::chrono::milliseconds(settings.connectTimeoutMs);
 
     // Kick off overlay preparation.
@@ -713,8 +715,6 @@ void RunSession(std::shared_ptr<Session> s, Settings settings, std::string fallb
         for (const auto& c : s->candidates)
             if (c.muxId && &c != best)
                 losers.push_back(c.muxId);
-        if (s->ownsSocket)
-            closesocket(s->socket);
         if (best && best->muxId)
         {
             std::lock_guard globalLock(g_mutex);
@@ -772,12 +772,20 @@ void RunSession(std::shared_ptr<Session> s, Settings settings, std::string fallb
             summary += "  no identity acknowledgement (older server?)\n";
     }
 
+    // Keep a private probe socket alive through IDENTIFY and its ACK. Closing
+    // it before that exchange sends on an invalid (potentially reused) handle.
+    if (s->ownsSocket)
+    {
+        closesocket(s->socket);
+        s->socket = INVALID_SOCKET;
+    }
+
     {
         std::lock_guard lock(g_mutex);
         g_lastSummary = summary;
     }
     Log("%s", summary.c_str());
-    if (!command.empty())
+    if (!command.empty() && StillCurrent(s))
     {
         command += "\n";
         Cbuf_AddText(0, command.c_str(), 0);
@@ -844,6 +852,8 @@ void ConnectBest(const std::string& targetIn)
     auto server = Ipv4Endpoint::Parse(target);
     if (!settings.enable || !server)
     {
+        ++g_generation;
+        ReleaseActiveOverlay();
         // Hostnames, IPv6 literals and fake addresses go straight to the engine.
         Cbuf_AddText(0, ("connect " + target + "\n").c_str(), 0);
         return;
@@ -861,11 +871,19 @@ void ConnectBest(const std::string& targetIn)
     }
 
     Log("Finding the best route to %s...\n", target.c_str());
-    std::thread([target, server = *server, cached, settings] {
+    auto s = NewSession(target, server->port);
+    std::thread([s, target, server = *server, cached, settings] {
         const MasterInfo info = QueryMaster(settings.masterServerUrl, target);
+        if (!StillCurrent(s))
+        {
+            if (s->ownsSocket)
+                closesocket(s->socket);
+            return;
+        }
         if (!info.ok || !info.p2p)
         {
-            ReleaseActiveOverlay();
+            if (s->ownsSocket)
+                closesocket(s->socket);
             // Unlisted server, master unreachable, or a server build that
             // would not answer our pings: behave exactly like "connect".
             Log("%s does not advertise p2p routes; connecting directly\n", target.c_str());
@@ -873,7 +891,6 @@ void ConnectBest(const std::string& targetIn)
             return;
         }
         const json transports = info.transports.is_object() ? info.transports : cached;
-        auto s = NewSession(target, server.port);
         {
             std::lock_guard lock(s->mutex);
             s->haveTicket = info.haveTicket;
@@ -899,12 +916,18 @@ void ConnectOverlay(Backend backend, const std::string& address, uint16_t port)
         return;
     }
     settings.connectTimeoutMs = 20000; // overlay bootstrap can take a while
-    std::thread([backend, address, port, settings] {
+    auto s = NewSession(std::string(BackendName(backend)) + " " + address.substr(0, 16) + "...", port);
+    std::thread([s, backend, address, port, settings] {
         // Same names the server registers as identity targets.
         const std::string target = backend == Backend::Iroh ? "iroh:" + address.substr(0, address.find('|'))
                                                             : "tailcat:" + address;
         std::vector<uint8_t> identity = RequestIdentity(settings.masterServerUrl, target);
-        auto s = NewSession(std::string(BackendName(backend)) + " " + address.substr(0, 16) + "...", port);
+        if (!StillCurrent(s))
+        {
+            if (s->ownsSocket)
+                closesocket(s->socket);
+            return;
+        }
         {
             std::lock_guard lock(s->mutex);
             s->identity = std::move(identity);

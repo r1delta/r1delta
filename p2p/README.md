@@ -177,8 +177,11 @@ the TURN relay; a server is listed if any path answers.
 ## Convars
 
 Server: `delta_p2p_server_upnp`, `delta_p2p_server_punch`,
-`delta_p2p_server_eos`, `delta_p2p_server_iroh`, `delta_p2p_server_tailcat`,
-`delta_p2p_server_turn`, `delta_p2p_punch_spray` (all default on / 2).
+`delta_p2p_server_eos`, `delta_p2p_server_iroh`, `delta_p2p_server_tailcat`
+(default on), `delta_p2p_punch_spray` (2). `delta_p2p_server_turn` defaults
+to **0** for this rollout: Cloudflare TURN remains optional and requires
+explicit server opt-in plus master-side credentials. No Cloudflare keys are
+provisioned by this release.
 
 Client: `delta_p2p_connect_timeout_ms` (2500), `delta_p2p_relay_penalty_ms`
 (20), `delta_p2p_prefer` (empty).
@@ -197,6 +200,11 @@ Server identities for iroh/tailcat are persisted under
   vectors, hashes, control packets, fragmentation, UPnP/NAT-PMP parsing.
 * `plugins/test/run_loopback.sh <plugin.so>`: two processes exchanging
   datagrams through a plugin via its C ABI (Linux).
+  The same `plugins/test/plugin_loopback.cpp` also builds with MSVC on Windows:
+  `cl /std:c++17 /EHsc /O2 /DNOMINMAX plugin_loopback.cpp`. Run
+  `plugin_loopback.exe <plugin.dll> server 37015`, then in a second process
+  `plugin_loopback.exe <plugin.dll> client <printed ADDR> 37015`.
+  It verifies payload-preserving echoes and oversized-datagram rejection.
 * `devtest/run_e2e.sh <masterserver2 dir>`: the real p2p sources under a
   POSIX shim with a fake engine, against the real master server, coturn, a
   local DERP relay and both plugins. The fake server sits behind an emulated

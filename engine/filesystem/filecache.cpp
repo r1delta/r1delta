@@ -5,7 +5,7 @@
 #include <iostream> // For std::cerr (replace with Msg/Warning)
 
 #include "logging.h"
-#include "tctx.h"
+#include <array>
 
 FileCache::FileCache() {
     cacheMutex = SRWLOCK_INIT;
@@ -357,7 +357,6 @@ bool FileCache::TryReplaceFile(const char* pszRelativeFilePath) {
     //                also please stop using Gemini to rewrite everything, it's annoying.
     bool found_null = false;
     size_t pszRelativeFilePath_len = 0;
-    size_t pszRelativeFilePath_parts = 1;
     {
         ZoneScopedN("TryReplaceFile>260+Null Check");
         for (size_t i = 0; i < 260; ++i)
@@ -367,10 +366,6 @@ bool FileCache::TryReplaceFile(const char* pszRelativeFilePath) {
                 found_null = true;
                 pszRelativeFilePath_len = i;
                 break;
-            }
-            else if (pszRelativeFilePath[i] == '/' || pszRelativeFilePath[i] == '\\')
-            {
-                pszRelativeFilePath_parts++;
             }
             // NOTE(mrsteyk): do not handle unicode in replacement names.
             else if (!isprint((unsigned char)pszRelativeFilePath[i])) // if (pszRelativeFilePath[i] < 0)
@@ -388,14 +383,14 @@ bool FileCache::TryReplaceFile(const char* pszRelativeFilePath) {
         return false;
     }
 
-    Arena* arena = tctx.get_arena_for_scratch();
-    TempArena temp = TempArena(arena);
 
     struct S8 {
         const char* ptr;
         size_t size;
     };
-    S8* path_parts = (S8*)arena_push(arena, sizeof(*path_parts) * pszRelativeFilePath_parts);
+    // At most 130 nonempty components fit in a native 259-byte path.
+    // Keep lookup scratch on this call's stack, not the DLL's TLS arenas.
+    std::array<S8, MAX_PATH / 2 + 1> path_parts;
     size_t path_parts_idx = 0;
 
     const char* path_part_curr = pszRelativeFilePath;
@@ -447,14 +442,9 @@ bool FileCache::TryReplaceFile(const char* pszRelativeFilePath) {
         return false;
     }
     
-    size_t path_size = path_parts_idx;
-    for (size_t i = 0; i < path_parts_idx; ++i)
-    {
-        path_size += path_parts[i].size;
-    }
 #if BUILD_DEBUG
     // NOTE(mrsteyk): remove conversion middleman.
-    wchar_t* path = (wchar_t*)arena_push(arena, sizeof(wchar_t) * path_size);
+    wchar_t path[MAX_PATH];
     size_t path_idx = 0;
     for (size_t i = 0; i < path_parts_idx; ++i)
     {
