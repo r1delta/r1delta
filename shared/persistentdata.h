@@ -36,19 +36,24 @@ unsigned long long GenerateSyntheticPlatformUserId();
 bool SafePrefixConVarName(char* name, size_t nameBufferSize, const char* prefix);
 bool IsPackedPDataWireName(const char* name);
 bool DecodePackedPDataWire(const std::string& encoded, std::vector<NetMessageCvar_t>& output);
+bool IsPDataFullSnapshotMarker(const char* name);
 __int64 CConVar__GetSplitScreenPlayerSlot(char* thisptr);
 void setinfopersist_cmd(const CCommand& args);
-bool R1OReplacePersistentUserDataForPlayer(
+
+// Server: reconciles the persistent values a client just reported against the
+// server's unacknowledged writes (rewrites stale values in `staged`, appends
+// missing ones for full snapshots, resends lost writes). `session` may be null
+// to resolve it from the engine's client table.
+bool PData_ServerReconcileIncoming(
 	int playerSlot,
-	PersistentDataState::SessionKey session,
-	const std::vector<NetMessageCvar_t>& values);
-bool R1OMergePersistentUserDataForPlayer(
-	int playerSlot,
-	PersistentDataState::SessionKey session,
-	const std::vector<NetMessageCvar_t>& values);
+	const PersistentDataState::SessionKey* session,
+	std::vector<NetMessageCvar_t>& staged,
+	bool fullSnapshot);
+void PData_ServerRunFrame();
 void R1OClearPersistentUserDataForPlayer(int playerSlot);
-bool R1OStorePersistentUserDataConVar(int playerSlot, const char* name, const char* value);
 bool R1OGetPersistentUserDataConVar(int playerSlot, const char* name, std::string& value);
+// Implemented in factory.cpp.
+bool R1OResolvePersistenceSessionForSlot(int playerSlot, PersistentDataState::SessionKey& session);
 
 bool IsValidUserInfo(const char* value, int length = -1);
 struct CBaseClient;
@@ -69,11 +74,11 @@ typedef char (*CBaseClientState__InternalProcessStringCmdType)(void* thisptr, vo
 extern CBaseClientState__InternalProcessStringCmdType CBaseClientState__InternalProcessStringCmdOriginal;
 char CBaseClientState__InternalProcessStringCmd(void* thisptr, void* msg, bool bIsHLTV);
 char ExecuteConfigFile(int configType);
+// Client: persistent data store lifecycle.
 void PData_OnConsoleCommand(const char* str);
 void PData_RunFrame();
-void PData_FinishPendingSave();
-bool PData_PrepareForSchemaReload();
-void PData_ReconcilePersistentConVars();
+void PData_Flush(bool quiet = false);
+void PData_OnSchemaReloaded();
 void InstallPersistentProfileWriterHook(uintptr_t engineBase);
 class PDataValidator;
 class PDef {

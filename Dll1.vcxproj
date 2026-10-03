@@ -313,7 +313,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="shared\persistentdata_codec.h" />
 	<ClInclude Include="shared\persistentdata_slots.h" />
 	<ClInclude Include="shared\persistentdata_state.h" />
-	<ClInclude Include="shared\persistentdata_transaction.h" />
+	<ClInclude Include="shared\persistentdata_store.h" />
     <ClInclude Include="server\physics\physics.h" />
     <ClInclude Include="server\server_usercmd.h" />
     <ClInclude Include="player.h" />
@@ -461,6 +461,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="engine\hooks\patcher.cpp" />
     <ClCompile Include="shared\persistentdata.cpp" />
     <ClCompile Include="shared\persistentdata_codec.cpp" />
+    <ClCompile Include="shared\persistentdata_store.cpp" />
     <ClCompile Include="client\predictionerror.cpp" />
     <ClCompile Include="engine\security_fixes.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>

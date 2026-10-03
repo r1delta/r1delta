@@ -13918,6 +13918,31 @@ static int R1OPersistencePlayerSlotFromNetChannel(__int64 netChannel)
 	return -1;
 }
 
+bool R1OResolvePersistenceSessionForSlot(int playerSlot, PersistentDataState::SessionKey& session)
+{
+	session = {};
+	if (!engineR1O)
+		return false;
+	const int maxClients = R1OHookGlobalValue<int>(0x265971C, 0);
+	if (playerSlot < 0 || playerSlot >= maxClients
+		|| maxClients > PersistentDataSlots::kMaximumSupportedClients)
+		return false;
+
+	const uintptr_t client = reinterpret_cast<uintptr_t>(engineR1O) + kR1OClientArrayRva
+		+ kR1OClientStride * static_cast<size_t>(playerSlot);
+	if (!IsReadableRange(reinterpret_cast<void*>(client + kR1OClientNetChanOffset), sizeof(void*)))
+		return false;
+	session.netChannel = reinterpret_cast<uintptr_t>(
+		*reinterpret_cast<void**>(client + kR1OClientNetChanOffset));
+	if (!session.netChannel)
+		return false;
+
+	R1OClientCommandIdentity identity = {};
+	if (ReadR1OClientCommandIdentity(playerSlot, &identity))
+		session.userId = identity.userId;
+	return true;
+}
+
 static bool R1OResolvePersistenceOwner(__int64 message, R1OPersistenceOwner& owner)
 {
 	if (!message || !engineR1O
@@ -13985,6 +14010,7 @@ static bool __fastcall R1ONETSetConVarReadFromBuffer(__int64 message, __int64 bi
 	std::string packedPData;
 	bool sawPackedPData = false;
 	bool sawLegacyPData = false;
+	bool sawFullSnapshotMarker = false;
 	for (uint32_t i = 0; i < count; ++i) {
 		NetMessageCvar_t var = {};
 		const bool readName = R1OBFReadString
@@ -14023,15 +14049,21 @@ static bool __fastcall R1ONETSetConVarReadFromBuffer(__int64 message, __int64 bi
 			continue;
 		}
 
+		if (IsPDataFullSnapshotMarker(var.name)) {
+			sawFullSnapshotMarker = true;
+			continue;
+		}
+
 		if (static_cast<unsigned char>(var.name[0]) & 0x80) {
 			sawLegacyPData = true;
 			var.name[0] = static_cast<char>(static_cast<unsigned char>(var.name[0]) & 0x7F);
 
-			std::string nameStr(var.name);
-			std::string valueStr(var.value);
-			if (!PDef::IsValidKeyAndValue(nameStr, valueStr)) {
-				Warning("Invalid persistent data convar: key=%s value=%s\n", var.name, var.value);
-				return false;
+			// Skip (don't reject the whole message for) entries the active
+			// schema does not know.
+			if (!IsValidUserInfo(var.name) || !IsValidUserInfo(var.value)
+				|| !PDef::IsValidKeyAndValue(var.name, var.value)) {
+				Warning("Ignoring invalid persistent data convar: key=%s value=%s\n", var.name, var.value);
+				continue;
 			}
 
 			if (!SafePrefixConVarName(var.name, sizeof(var.name), PERSIST_COMMAND" ")) {
@@ -14078,31 +14110,23 @@ static bool __fastcall R1ONETSetConVarReadFromBuffer(__int64 message, __int64 bi
 			return false;
 		}
 
-		const bool hasPersistentData = sawPackedPData || sawLegacyPData;
+		const bool hasPersistentData = sawPackedPData || sawLegacyPData || sawFullSnapshotMarker;
 		R1OPersistenceOwner persistenceOwner;
-		if (hasPersistentData && !R1OResolvePersistenceOwner(message, persistenceOwner)) {
-			Warning("R1Delta: R1O NET_SetConVar could not resolve persistence owner\n");
-			return false;
+		if (hasPersistentData) {
+			// Reconcile before the engine sees the values so stale snapshots
+			// (e.g. the one sent after a changelevel reconnect) cannot undo
+			// writes the client has not acknowledged yet.
+			if (!R1OResolvePersistenceOwner(message, persistenceOwner)
+				|| !PData_ServerReconcileIncoming(
+					persistenceOwner.playerSlot, &persistenceOwner.session, staged, sawFullSnapshotMarker)) {
+				Warning("R1Delta: R1O NET_SetConVar could not reconcile persistence for player slot %d\n",
+					persistenceOwner.playerSlot);
+			}
 		}
 
 		*reinterpret_cast<int*>(vector + 24) = 0;
 		for (NetMessageCvar_t& var : staged)
 			R1ONETSetConVarAddToTail(vector, &var);
-
-		if (hasPersistentData) {
-			const bool stored = sawPackedPData
-				? R1OReplacePersistentUserDataForPlayer(
-					persistenceOwner.playerSlot, persistenceOwner.session, staged)
-				: R1OMergePersistentUserDataForPlayer(
-					persistenceOwner.playerSlot, persistenceOwner.session, staged);
-			if (!stored) {
-				Warning(
-					"R1Delta: R1O NET_SetConVar failed to %s persistence for player slot %d\n",
-					sawPackedPData ? "replace" : "merge",
-					persistenceOwner.playerSlot);
-				return false;
-			}
-		}
 
 		if (sawPackedPData) {
 			static int packedPersistenceCommitLogBudget = 32;

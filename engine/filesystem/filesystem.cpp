@@ -249,7 +249,6 @@ void InvalidateFileSystemNegativePathCache()
 void BeginAddonSearchCacheUpdate()
 {
 	addonSearchUpdateMutex.lock();
-	PData_PrepareForSchemaReload();
 	FileCache::GetInstance().BeginAddonSearchPathUpdate();
 	InvalidateFileSystemNegativePathCache();
 }
@@ -260,7 +259,7 @@ bool EndAddonSearchCacheUpdate()
 	const bool published = FileCache::GetInstance().EndAddonSearchPathUpdate();
 	if (published) {
 		PDef::InitValidator();
-		PData_ReconcilePersistentConVars();
+		PData_OnSchemaReloaded();
 	}
 	addonSearchUpdateMutex.unlock();
 	return published;

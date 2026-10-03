@@ -364,7 +364,7 @@
 	<ClInclude Include="shared\persistentdata_state.h">
 	  <Filter>shared</Filter>
 	</ClInclude>
-	<ClInclude Include="shared\persistentdata_transaction.h">
+	<ClInclude Include="shared\persistentdata_store.h">
 	  <Filter>shared</Filter>
 	</ClInclude>
     <ClInclude Include="shared\squirrel.h">
@@ -800,6 +800,9 @@
       <Filter>shared</Filter>
     </ClCompile>
     <ClCompile Include="shared\persistentdata_codec.cpp">
+      <Filter>shared</Filter>
+    </ClCompile>
+    <ClCompile Include="shared\persistentdata_store.cpp">
       <Filter>shared</Filter>
     </ClCompile>
     <ClCompile Include="shared\squirrel.cpp">

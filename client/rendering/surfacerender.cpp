@@ -406,7 +406,6 @@ static __int64 WProf_Host_RunFrame(float time)
     const auto result = oHost_RunFrame(time);
     if (profile)
         --g_WProfileFrameDepth;
-    PData_FinishPendingSave();
     ReflexOnEngineFrameComplete();
     return result;
 }
