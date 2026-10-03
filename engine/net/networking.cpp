@@ -8,6 +8,7 @@
 #include "netadr.h"
 #include "bitbuf.h"
 #include "compression.h"
+#include "p2p/p2p_identity.h"
 
 #include <intrin.h>
 #pragma intrinsic(_ReturnAddress)
@@ -27,7 +28,20 @@ static double g_last_retry_time = 0.0;
 static const double RETRY_DELAY = 15.0;
 
 const char* CNetChan__GetAddress(CNetChan* thisptr) {
-    return (netadr_t(std::string(oCNetChan__GetAddress(thisptr)).c_str())).GetAddressString();
+    const netadr_t adr(std::string(oCNetChan__GetAddress(thisptr)).c_str());
+    // Players connected through EOS / iroh / tailcat / TURN report the IP the
+    // master server attested for them, so status, addip and ban kicks work
+    // the same on every transport.
+    uint32_t attestedIp = 0;
+    if (p2p::LookupIdentityIpv4(reinterpret_cast<const uint8_t*>(&adr.GetIP()), attestedIp)) {
+        static thread_local char s[4][16];
+        static thread_local int slot = 0;
+        char* out = s[(slot++) % 4];
+        snprintf(out, sizeof(s[0]), "%u.%u.%u.%u", (attestedIp >> 24) & 0xFF, (attestedIp >> 16) & 0xFF,
+            (attestedIp >> 8) & 0xFF, attestedIp & 0xFF);
+        return out;
+    }
+    return adr.GetAddressString();
 }
 
 // AllTalk fix - makes sv_alltalk work on dedicated and listen servers

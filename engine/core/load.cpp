@@ -115,6 +115,7 @@
 #include "localchatwriter.h"
 #include "discord.h"
 #include "eos_network.h"
+#include "p2p/p2p.h"
 #include "net_hooks.h"
 #define DISCORDPP_IMPLEMENTATION
 #ifdef DISCORD
@@ -8224,6 +8225,7 @@ void Host_InitHook(bool a1) {
 		Msg("EOS: Initialization skipped or failed\n");
 	}
 	net_hooks::Initialize();
+	p2p::Initialize();
 
 	return;
 }

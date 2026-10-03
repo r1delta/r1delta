@@ -29,7 +29,8 @@ bool g_hookInstalled = false;
 std::unordered_set<addrinfo*> g_customAllocations;
 std::mutex g_allocationMutex;
 
-constexpr uint16_t kFakeIpv6Prefix = 0x3FFE;
+constexpr uint16_t kFakeIpv6Prefix = 0x3FFE;        // EOS peers
+constexpr uint16_t kOverlayFakeIpv6Prefix = 0x3FFD; // p2p overlay peers (iroh, tailcat, TURN)
 
 bool TryParseFakeIPv6(const char* nodeName, in6_addr& outAddr)
 {
@@ -39,7 +40,8 @@ bool TryParseFakeIPv6(const char* nodeName, in6_addr& outAddr)
     if (InetPtonA(AF_INET6, nodeName, &outAddr) != 1)
         return false;
 
-    return ntohs(outAddr.u.Word[0]) == kFakeIpv6Prefix;
+    const uint16_t prefix = ntohs(outAddr.u.Word[0]);
+    return prefix == kFakeIpv6Prefix || prefix == kOverlayFakeIpv6Prefix;
 }
 
 u_short ParseServicePort(PCSTR serviceName)

@@ -1,12 +1,16 @@
 #include "eos_network.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstring>
 #include <mutex>
+#include <string>
 #include <unordered_map>
+#include <vector>
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <intrin.h>
 
 #include "MinHook.h"
 #include "core.h"
@@ -14,6 +18,12 @@
 #include "eos_threading.h"
 #include "logging.h"
 #include "r1d_version.h"
+#include "p2p/p2p_connect.h"
+#include "p2p/p2p_eos_bridge.h"
+#include "p2p/p2p_identity.h"
+#include "p2p/p2p_mux.h"
+
+#pragma intrinsic(_ReturnAddress)
 
 namespace
 {
@@ -99,6 +109,7 @@ LPVOID g_sendToTarget = nullptr;
 LPVOID g_recvFromTarget = nullptr;
 LPVOID g_closeSocketTarget = nullptr;
 bool g_hooksInstalled = false;
+bool g_eosEnabled = false;
 std::mutex g_socketRouteMutex;
 std::unordered_map<SOCKET, eos::PacketRoute> g_socketRoutes;
 
@@ -207,6 +218,47 @@ eos::PacketRoute DetermineSocketRoute(SOCKET socketHandle)
     return route;
 }
 
+p2p::Route ToP2pRoute(eos::PacketRoute route)
+{
+    switch (route)
+    {
+    case eos::PacketRoute::Client: return p2p::Route::Client;
+    case eos::PacketRoute::Server: return p2p::Route::Server;
+    default: return p2p::Route::Unknown;
+    }
+}
+
+eos::PacketRoute ToEosRoute(p2p::Route route)
+{
+    switch (route)
+    {
+    case p2p::Route::Client: return eos::PacketRoute::Client;
+    case p2p::Route::Server: return eos::PacketRoute::Server;
+    default: return eos::PacketRoute::All;
+    }
+}
+
+// Handles R1NX control packets (pings from delta_connect) that arrived over
+// EOS. Returns true if the packet was consumed.
+bool ConsumeEosControl(eos::FakeIpLayer* layer, const eos::PendingPacket& packet, p2p::Route socketRoute)
+{
+    if (packet.payload.size() < p2p::kNatHeaderSize || packet.payload[0] != 0xFF)
+        return false;
+    p2p::ControlContext ctx;
+    ctx.route = socketRoute != p2p::Route::Unknown
+                    ? socketRoute
+                    : (eos::IsServerNetContext() ? p2p::Route::Server : p2p::Route::Client);
+    ctx.via = "eos";
+    std::memcpy(ctx.source.data(), &packet.sender.address, ctx.source.size());
+    ctx.haveSource = true;
+    const eos::FakeEndpoint sender = packet.sender;
+    const eos::PacketRoute replyRoute = ToEosRoute(ctx.route);
+    ctx.reply = [layer, sender, replyRoute](const std::vector<uint8_t>& reply) {
+        layer->SendToPeer(sender, reply.data(), reply.size(), replyRoute);
+    };
+    return p2p::TryConsumeControl(packet.payload.data(), packet.payload.size(), ctx);
+}
+
 int WSAAPI HookedSendTo(SOCKET socketHandle,
                         const char* buffer,
                         int length,
@@ -214,8 +266,20 @@ int WSAAPI HookedSendTo(SOCKET socketHandle,
                         const sockaddr* destAddr,
                         int destLen)
 {
+    if (p2p::IsForeignCaller(_ReturnAddress()))
+    {
+        return g_realSendTo
+            ? g_realSendTo(socketHandle, buffer, length, flags, destAddr, destLen)
+            : SOCKET_ERROR;
+    }
+
+    // iroh / tailcat / TURN peers live in 3ffd::/16.
+    int overlayResult = 0;
+    if (p2p::HandleSendTo(buffer, length, destAddr, destLen, &overlayResult))
+        return overlayResult;
+
     eos::FakeEndpoint endpoint{};
-    if (!buffer || length <= 0 || !ExtractFakeEndpoint(destAddr, endpoint))
+    if (!g_eosEnabled || !buffer || length <= 0 || !ExtractFakeEndpoint(destAddr, endpoint))
     {
         return g_realSendTo
             ? g_realSendTo(socketHandle, buffer, length, flags, destAddr, destLen)
@@ -237,6 +301,15 @@ int WSAAPI HookedSendTo(SOCKET socketHandle,
     }
 
     const eos::PacketRoute route = DetermineSocketRoute(socketHandle);
+    if (route == eos::PacketRoute::Client)
+    {
+        // We are the client of this EOS peer: never treat its replies as an
+        // unidentified inbound player, and prove our identity to it.
+        p2p::Ipv6Bytes address;
+        std::memcpy(address.data(), &endpoint.address, address.size());
+        p2p::Identities().MarkOutgoing(address);
+        p2p::EnsureEosIdentity(address);
+    }
     const bool sent = layer->SendToPeer(endpoint,
                                         reinterpret_cast<const uint8_t*>(buffer),
                                         static_cast<size_t>(length),
@@ -257,13 +330,40 @@ int WSAAPI HookedRecvFrom(SOCKET socketHandle,
                           sockaddr* from,
                           int* fromLen)
 {
+    // Sockets owned by the EOS SDK or the overlay plugins must never be
+    // handed engine datagrams.
+    if (p2p::IsForeignCaller(_ReturnAddress()))
+    {
+        return g_realRecvFrom
+            ? g_realRecvFrom(socketHandle, buffer, length, flags, from, fromLen)
+            : SOCKET_ERROR;
+    }
+
+    const eos::PacketRoute desiredRoute = DetermineSocketRoute(socketHandle);
+    const p2p::Route p2pRoute = ToP2pRoute(desiredRoute);
+    p2p::NoteEngineSocket(socketHandle, p2pRoute);
+
+    // Datagrams from overlay transports (iroh, tailcat, TURN) and packets the
+    // delta_connect prober read off this socket.
+    int queuedResult = 0;
+    if (p2p::PopQueued(p2pRoute, buffer, length, from, fromLen, &queuedResult))
+        return queuedResult;
+
     auto* layer = eos::EosLayer::Instance().GetFakeIpLayer();
     if (layer)
     {
         eos::PendingPacket packet;
-        const eos::PacketRoute desiredRoute = DetermineSocketRoute(socketHandle);
-        if (layer->PopPacket(desiredRoute, packet))
+        while (layer->PopPacket(desiredRoute, packet))
         {
+            if (ConsumeEosControl(layer, packet, p2pRoute))
+                continue;
+
+            // Players joining over EOS must have presented a master-attested
+            // identity (IP bans apply across transports).
+            if (p2pRoute != p2p::Route::Client &&
+                p2p::ShouldDropUnidentified(reinterpret_cast<const uint8_t*>(&packet.sender.address)))
+                continue;
+
             const int copyLength = static_cast<int>(std::min<size_t>(static_cast<size_t>(length), packet.payload.size()));
             if (buffer && copyLength > 0)
             {
@@ -279,9 +379,35 @@ int WSAAPI HookedRecvFrom(SOCKET socketHandle,
         }
     }
 
-    return g_realRecvFrom
-        ? g_realRecvFrom(socketHandle, buffer, length, flags, from, fromLen)
-        : SOCKET_ERROR;
+    if (!g_realRecvFrom)
+        return SOCKET_ERROR;
+
+    // Hole-punching / rendezvous / ping control packets never reach the
+    // engine. After consuming one, keep reading while more data is queued so
+    // a stream of control packets cannot stall the engine's receive loop; a
+    // zero-timeout select guarantees we never block, even on a blocking socket.
+    const int fromLenIn = fromLen ? *fromLen : 0;
+    for (int consumed = 0; consumed < 64; ++consumed)
+    {
+        if (fromLen)
+            *fromLen = fromLenIn;
+        const int received = g_realRecvFrom(socketHandle, buffer, length, flags, from, fromLen);
+        if (received <= 0 || p2pRoute == p2p::Route::Unknown ||
+            !p2p::ConsumeUdpControl(socketHandle, p2pRoute, reinterpret_cast<const uint8_t*>(buffer), received, from,
+                                    fromLen ? *fromLen : 0))
+        {
+            return received;
+        }
+
+        fd_set readSet;
+        FD_ZERO(&readSet);
+        FD_SET(socketHandle, &readSet);
+        timeval noWait{ 0, 0 };
+        if (select(0, &readSet, nullptr, nullptr, &noWait) <= 0)
+            break;
+    }
+    WSASetLastError(WSAEWOULDBLOCK);
+    return SOCKET_ERROR;
 }
 
 int WSAAPI HookedCloseSocket(SOCKET s)
@@ -290,6 +416,7 @@ int WSAAPI HookedCloseSocket(SOCKET s)
         std::lock_guard lock(g_socketRouteMutex);
         g_socketRoutes.erase(s);
     }
+    p2p::ForgetSocket(s);
     return g_realCloseSocket ? g_realCloseSocket(s) : 0;
 }
 
@@ -329,6 +456,7 @@ bool InstallSocketHooks()
         return false;
     }
 
+    p2p::SetRealSocketFunctions(g_realSendTo, g_realRecvFrom);
     g_hooksInstalled = true;
     return true;
 }
@@ -357,6 +485,7 @@ void RemoveSocketHooks()
         g_closeSocketTarget = nullptr;
     }
 
+    p2p::SetRealSocketFunctions(nullptr, nullptr);
     g_realSendTo = nullptr;
     g_realRecvFrom = nullptr;
     g_realCloseSocket = nullptr;
@@ -405,18 +534,24 @@ bool EnsureEosInitialized()
 
 bool InitializeNetworking()
 {
-    // Check if EOS should be enabled based on version
-    if (!ShouldEnableEOS())
-    {
-        Msg("EOS: Disabled for version %s (requires >= 3.0.0 or dev)\n", R1D_VERSION);
-        return true;
-    }
-
-    // Only install hooks - EOS initialization will happen lazily when needed
+    // The socket hooks are shared by EOS and the p2p transports (hole
+    // punching, iroh, tailcat, TURN), so they are installed regardless of
+    // whether EOS itself is enabled for this build.
     if (!InstallSocketHooks())
     {
         Error("EOS: Failed to install socket hooks\n");
         return false;
+    }
+
+    // The EOS SDK's own sockets bypass the hooks.
+    p2p::RegisterForeignModule(GetModuleHandleA("EOSSDK-Win64-Shipping.dll"));
+
+    // Check if EOS should be enabled based on version
+    g_eosEnabled = ShouldEnableEOS();
+    if (!g_eosEnabled)
+    {
+        Msg("EOS: Disabled for version %s (requires >= 3.0.0 or dev)\n", R1D_VERSION);
+        return true;
     }
 
     Msg("EOS: Hooks installed for version %s, will initialize on first fakeip packet\n", R1D_VERSION);
@@ -487,3 +622,79 @@ FakeEndpoint GetLocalFakeEndpoint()
 }
 
 } // namespace eos
+
+namespace p2p::eos_bridge
+{
+
+bool EnsureInitialized()
+{
+    return g_eosEnabled && eos::EnsureEosInitialized() && eos::IsReady();
+}
+
+bool IsReady()
+{
+    return g_eosEnabled && eos::IsReady();
+}
+
+std::string LocalProductUserId()
+{
+    EOS_ProductUserId user = eos::GetLocalProductUserId();
+    if (!user)
+        return {};
+    char buffer[EOS_PRODUCTUSERID_MAX_LENGTH + 1]{};
+    int32_t length = static_cast<int32_t>(sizeof(buffer));
+    {
+        eos::SdkLock lock(eos::GetSdkMutex());
+        if (EOS_ProductUserId_ToString(user, buffer, &length) != EOS_EResult::EOS_Success)
+            return {};
+    }
+    std::string normalized;
+    for (int32_t i = 0; i < length && buffer[i]; ++i)
+    {
+        const char c = static_cast<char>(std::tolower(static_cast<unsigned char>(buffer[i])));
+        if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))
+            normalized.push_back(c);
+    }
+    return normalized.size() == 32 ? normalized : std::string();
+}
+
+bool RegisterPeer(const std::string& productUserId, Ipv6Bytes& outAddress, uint16_t& outPort)
+{
+    eos::FakeEndpoint endpoint{};
+    if (!eos::RegisterPeerByString(productUserId.c_str(), "r1delta", 0, &endpoint))
+        return false;
+    std::memcpy(outAddress.data(), &endpoint.address, outAddress.size());
+    outPort = eos::GetPretendRemotePort();
+    if (outPort == 0)
+        outPort = endpoint.port;
+    return true;
+}
+
+bool SendTo(const Ipv6Bytes& address, const uint8_t* data, size_t size, Route route)
+{
+    auto* layer = eos::EosLayer::Instance().GetFakeIpLayer();
+    if (!layer)
+        return false;
+    eos::FakeEndpoint endpoint{};
+    std::memcpy(&endpoint.address, address.data(), address.size());
+    return layer->SendToPeer(endpoint, data, size, ToEosRoute(route));
+}
+
+void PollControl(Route route)
+{
+    auto* layer = eos::EosLayer::Instance().GetFakeIpLayer();
+    if (!layer || route == Route::Unknown)
+        return;
+    eos::PendingPacket packet;
+    for (int i = 0; i < 256 && layer->PopPacket(ToEosRoute(route), packet); ++i)
+    {
+        if (ConsumeEosControl(layer, packet, route))
+            continue;
+        sockaddr_in6 from{};
+        int fromLen = sizeof(from);
+        WriteSockaddrForFakeEndpoint(packet.sender, reinterpret_cast<sockaddr*>(&from), &fromLen);
+        InjectForEngine(route, reinterpret_cast<sockaddr*>(&from), fromLen, packet.payload.data(), packet.payload.size());
+    }
+}
+
+} // namespace p2p::eos_bridge
