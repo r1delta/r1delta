@@ -26,7 +26,8 @@ void ConnectOverlay(Backend backend, const std::string& address, uint16_t port);
 std::string ClientInviteTarget(const Ipv6Bytes& address, uint16_t port);
 
 // Control packets for the client route.
-void ClientOnPong(uint64_t probeId, uint64_t timestampUs, const char* via, uint64_t serverTag);
+void ClientOnPong(uint64_t probeId, uint64_t timestampUs, const char* via, uint64_t serverTag,
+                  bool viaEngineUdp, const Ipv4Endpoint& udpFrom);
 void ClientOnRegisterAck(const RegisterAck& ack, const Ipv4Endpoint& from);
 void ClientOnPunch(const Id16& ticket, const Ipv4Endpoint& from);
 void ClientOnIdentifyAck(const Id16& nonce, uint8_t verdict);

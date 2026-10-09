@@ -9335,6 +9335,8 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 
 	if (!IsR1ODedicatedServer())
 		security_fixes_server(engine_base, server_base);
+	if (IsDedicatedServer() && !IsR1ODedicatedServer())
+		PlaylistLoader_Init(); // dynamic playlist buffers (detours the engine_ds playlists.txt loader)
 	R1DAssert(MH_EnableHook(MH_ALL_HOOKS) == MH_OK);
 	//std::cout << "did hooks" << std::endl;
 }

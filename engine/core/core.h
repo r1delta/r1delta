@@ -98,6 +98,9 @@ extern uintptr_t G_engine;
 extern uintptr_t G_engine_ds;
 extern uintptr_t G_engine_r1o;
 
+// engine/playlist_loader.cpp: dynamic playlist buffers (detours the engine_ds playlists.txt loader)
+void PlaylistLoader_Init();
+
 #define IsDedicatedServer() (G_is_dedi)
 // Use Plat_GetCommandLineA (engine final command line) to detect -r1o_dedi from
 // the text-file buffer that CCommandLine__CreateCmdLine appends, mirroring

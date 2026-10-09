@@ -196,6 +196,19 @@ Invite parsing rejects command delimiters and malformed endpoints.
 EOS initialization is deferred and does not depend on the numeric release
 version. An initialization failure remains nonfatal.
 
+## Route probing
+
+`delta_connect` gives every advertised route the same 750 ms measurement
+window from its first probe and scores the median RTT plus a small route
+bias, a relay penalty and 25 ms per missing sample. Hole-punch assistance
+(the rendezvous register that makes the server punch toward us) is only
+sent after the direct window closes and only from the engine's own socket,
+so `direct` always means reachability without our help; the assisted path
+is measured and reported as `punch`. A probe run from a private socket
+(used when the engine has not created its client socket yet) never asks
+for punches and only accepts answers that arrived over the transport
+being probed.
+
 ## Convars
 
 Server: `delta_p2p_server_upnp`, `delta_p2p_server_punch`,

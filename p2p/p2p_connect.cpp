@@ -9,6 +9,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <cstring>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -36,9 +37,12 @@ using Clock = std::chrono::steady_clock;
 using json = nlohmann::json;
 
 constexpr auto kPingInterval = std::chrono::milliseconds(150);
-constexpr auto kGraceAfterFirstAnswer = std::chrono::milliseconds(300);
+// Every route gets the same measurement window from its first probe, so a
+// transport that takes longer to bootstrap is not discarded before it answers.
+constexpr auto kCandidateWindow = std::chrono::milliseconds(750);
 constexpr auto kLoopStep = std::chrono::milliseconds(10);
 constexpr int kWantedAnswers = 3;
+constexpr double kLossPenaltyMs = 25.0; // score penalty per missing sample
 constexpr size_t kMaxCandidates = 64; // probe ids carry the index in 8 bits
 
 enum class Kind
@@ -107,8 +111,9 @@ struct Candidate
 
     CandState state = CandState::Preparing;
     bool relay = false;
-    double rttMs = -1;
+    double samples[kWantedAnswers] = {};
     int answers = 0;
+    Clock::time_point firstPing{};
     Clock::time_point lastPing{};
     uint64_t muxId = 0;
     uint64_t pluginHandle = 0;
@@ -130,6 +135,21 @@ struct Candidate
     }
 };
 
+// Median RTT over the collected samples; for two samples the higher one wins
+// so a single lucky low ping cannot hide a jittery route.
+double MedianRtt(const Candidate& c)
+{
+    if (c.answers <= 0)
+        return -1;
+    double a = c.samples[0];
+    double b = c.answers > 1 ? c.samples[1] : a;
+    double d = c.answers > 2 ? c.samples[2] : b;
+    if (a > b) std::swap(a, b);
+    if (b > d) std::swap(b, d);
+    if (a > b) std::swap(a, b);
+    return b;
+}
+
 struct Session
 {
     std::mutex mutex;
@@ -144,7 +164,6 @@ struct Session
     bool ownsSocket = false;
     bool serverPunched = false;
     Clock::time_point started;
-    Clock::time_point firstAnswer{};
     bool overlayOnly = false;
     std::vector<uint8_t> identity; // master-attested identity token for this server
     uint64_t expectedTag = 0;      // PONG server tag of the listed server (0 = don't check)
@@ -325,10 +344,14 @@ void BuildCandidates(Session& s, const Ipv4Endpoint& server, const MasterInfo& i
 
     // A punched hole only exists for the socket that registered it; when we
     // probe from a private socket it would not carry the engine's traffic.
-    if (info.serverMapped.Valid() && info.serverMapped != server && !s.ownsSocket)
+    // Even when the mapping equals the listed address the post-register path
+    // is punched reachability rather than direct, so it is probed as its own
+    // candidate after the direct window.
+    if (!s.ownsSocket)
     {
-        AddCandidate(s, Kind::Punch, info.serverMapped.ToString());
-        s.candidates.back().udp = info.serverMapped;
+        const Ipv4Endpoint target = info.serverMapped.Valid() ? info.serverMapped : server;
+        AddCandidate(s, Kind::Punch, target.ToString());
+        s.candidates.back().udp = target;
         s.candidates.back().state = CandState::Probing;
     }
     for (const auto& lan : info.lan)
@@ -524,8 +547,9 @@ std::string FormatSummary(const Session& s, const Candidate* chosen, double elap
         std::string result;
         if (c.state == CandState::Answered)
         {
-            char rtt[64];
-            std::snprintf(rtt, sizeof(rtt), "%.1f ms%s", c.rttMs, c.relay ? " (relayed)" : "");
+            char rtt[96];
+            std::snprintf(rtt, sizeof(rtt), "%.1f ms median, %d/%d samples%s", MedianRtt(c), c.answers,
+                          kWantedAnswers, c.relay ? " (relayed)" : "");
             result = rtt;
         }
         else if (c.state == CandState::Failed)
@@ -603,8 +627,13 @@ void RunSession(std::shared_ptr<Session> s, Settings settings, std::string fallb
             std::lock_guard lock(s->mutex);
 
             // Register our client-socket mapping with the rendezvous so the
-            // master can tell the server where to punch.
-            if (s->haveTicket && s->rendezvous.Valid() && registerSends < 4 &&
+            // master can tell the server where to punch. Punching is
+            // assistance: it opens the server's NAT toward us and would make
+            // "direct" probes pass on a path we created. Let the direct family
+            // have its measurement window first, and never ask the server to
+            // punch toward a throwaway probe socket that dies at hand-off.
+            const bool assistanceReady = !s->ownsSocket && now - s->started >= kCandidateWindow;
+            if (assistanceReady && s->haveTicket && s->rendezvous.Valid() && registerSends < 4 &&
                 now - lastRegister > std::chrono::milliseconds(200))
             {
                 sendRegister = true;
@@ -626,32 +655,41 @@ void RunSession(std::shared_ptr<Session> s, Settings settings, std::string fallb
             }
 
             bool allDone = true;
-            bool waitingForPreferred = false;
             for (auto& c : s->candidates)
             {
                 if (c.kind == Kind::Eos)
                     eosCandidate = true;
+                const bool windowOver =
+                    c.firstPing.time_since_epoch().count() != 0 && now - c.firstPing >= kCandidateWindow;
+                if (windowOver && c.state == CandState::Probing)
+                {
+                    c.state = CandState::Failed;
+                    c.note = "no answer";
+                }
                 if (c.state == CandState::Probing || (c.state == CandState::Answered && c.answers < kWantedAnswers))
                 {
-                    if (now - c.lastPing >= kPingInterval)
+                    // The punched path only opens after the register goes out;
+                    // start the punch window there instead of failing it early.
+                    const bool punchWaiting = c.kind == Kind::Punch && s->haveTicket && s->rendezvous.Valid() &&
+                                             registerSends == 0;
+                    if (!punchWaiting && !windowOver && now - c.lastPing >= kPingInterval)
                     {
+                        if (c.firstPing.time_since_epoch().count() == 0)
+                            c.firstPing = now;
                         c.lastPing = now;
                         toPing.push_back(c);
                     }
                 }
-                const bool done = c.state == CandState::Failed || (c.state == CandState::Answered && c.answers >= kWantedAnswers);
+                const bool done = c.state == CandState::Failed ||
+                                  (c.state == CandState::Answered && (c.answers >= kWantedAnswers || windowOver));
                 allDone &= done;
-                if (!done && c.state != CandState::Answered && !settings.prefer.empty() && settings.prefer == KindName(c.kind))
-                    waitingForPreferred = true;
             }
 
-            // Once something answered, give slower routes a short grace period
-            // rather than the full timeout: a path that is not even up by then
-            // will not beat the one we already have. A route forced through
-            // delta_p2p_prefer is always waited for.
-            const bool graceOver = s->firstAnswer.time_since_epoch().count() != 0 &&
-                                   now - s->firstAnswer > kGraceAfterFirstAnswer && !s->overlayOnly && !waitingForPreferred;
-            finished = allDone || graceOver || now >= deadline;
+            // Every route gets kCandidateWindow to produce samples; the probe
+            // ends once all had their window or the overall deadline expires.
+            // Overlay routes that are still bootstrapping keep the session
+            // open instead of losing to whoever answered first.
+            finished = allDone || now >= deadline;
         }
 
         if (sendRegister)
@@ -695,7 +733,8 @@ void RunSession(std::shared_ptr<Session> s, Settings settings, std::string fallb
         {
             if (c.state != CandState::Answered)
                 continue;
-            double score = c.rttMs + KindBiasMs(c.kind) + (c.relay ? settings.relayPenaltyMs : 0);
+            double score = MedianRtt(c) + KindBiasMs(c.kind) + (c.relay ? settings.relayPenaltyMs : 0) +
+                           (kWantedAnswers - c.answers) * kLossPenaltyMs;
             if (!settings.prefer.empty() && settings.prefer == KindName(c.kind))
                 score = -1; // forced by delta_p2p_prefer
             if (score < bestScore)
@@ -990,7 +1029,8 @@ std::string ClientInviteTarget(const Ipv6Bytes& address, uint16_t port)
     return session->inviteTarget;
 }
 
-void ClientOnPong(uint64_t probeId, uint64_t timestampUs, const char* via, uint64_t serverTag)
+void ClientOnPong(uint64_t probeId, uint64_t timestampUs, const char* via, uint64_t serverTag,
+                  bool viaEngineUdp, const Ipv4Endpoint& udpFrom)
 {
     auto s = CurrentSession();
     if (!s || (probeId >> 8) != s->generation)
@@ -1013,11 +1053,18 @@ void ClientOnPong(uint64_t probeId, uint64_t timestampUs, const char* via, uint6
     auto& c = s->candidates[index];
     if (c.state == CandState::Failed)
         return;
+    // Only credit a PONG that arrived over its candidate's own transport: the
+    // same probe id could otherwise be satisfied by a packet that rode in on a
+    // different queue (mux overlay, EOS, or the raw engine socket).
+    const bool udpKind = IsUdpKind(c.kind);
+    if (udpKind != viaEngineUdp)
+        return;
+    if (udpKind ? !(udpFrom == c.udp) : (!via || std::strcmp(via, KindName(c.kind)) != 0))
+        return;
     c.state = CandState::Answered;
-    c.rttMs = c.answers == 0 ? rtt : std::min(c.rttMs, rtt);
+    if (c.answers < kWantedAnswers)
+        c.samples[c.answers] = rtt;
     ++c.answers;
-    if (s->firstAnswer.time_since_epoch().count() == 0)
-        s->firstAnswer = Clock::now();
     Debug("pong from %s via %s: %.1f ms\n", KindName(c.kind), via, rtt);
 }
 

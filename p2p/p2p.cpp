@@ -252,7 +252,7 @@ void HandleControl(const ParsedControl& pkt, const ControlContext& ctx)
     {
         PingPong pp;
         if (ctx.route == Route::Client && ParsePingPong(pkt, pp))
-            ClientOnPong(pp.probeId, pp.timestampUs, ctx.via, pp.serverTag);
+            ClientOnPong(pp.probeId, pp.timestampUs, ctx.via, pp.serverTag, ctx.viaEngineUdp, ctx.udpFrom);
         break;
     }
     case PacketType::RegisterAck:

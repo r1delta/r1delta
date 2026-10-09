@@ -389,6 +389,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="client\client.cpp" />
     <ClCompile Include="engine\compression.cpp" />
     <ClCompile Include="engine\compression_stream.cpp" />
+    <ClCompile Include="engine\playlist_loader.cpp" />
     <ClCompile Include="engine\logging\crashhandler.cpp" />
     <ClCompile Include="engine\logging\crash_report_minidump.cpp" />
     <ClCompile Include="engine\logging\crash_report_memory_capture.cpp" />
