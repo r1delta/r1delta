@@ -294,13 +294,15 @@ static bool file_exists(const char* path)
 // Helper: a real content file rather than a zero-byte placeholder. The
 // launcher creates empty placeholder VPKs when the real ones are missing,
 // and a placeholder must not be mistaken for generated-audio content.
+// The size probe must be 64-bit: ftell's long overflows on the 12.5GB
+// delta VPK and returns -1, which made every real install look empty.
 static bool file_nonempty(const char* path)
 {
 	FILE* f = fopen(path, "rb");
 	if (!f)
 		return false;
-	fseek(f, 0, SEEK_END);
-	const long size = ftell(f);
+	_fseeki64(f, 0, SEEK_END);
+	const __int64 size = _ftelli64(f);
 	fclose(f);
 	return size > 0;
 }
