@@ -1475,7 +1475,7 @@ static void DrawLegacyWatermark()
     wchar_t watermarkText1[512];
     G_localizeIface->ConvertANSIToUnicode(ansiBuffer1, watermarkText1, sizeof(watermarkText1));
 
-    const char* urlString = "For testing purposes only.";
+    const char* urlString = "Release candidate 1";
     const char* secondData = urlString;
     if (fpsStringData[0] != '\x00') {
         secondData = fpsStringData;
@@ -1556,11 +1556,31 @@ static void DrawLegacyWatermark()
     }
 
     surface->DrawSetTextFont(g_LegacyWatermarkFont);
-    surface->DrawSetTextColor(255, 255, 255, 255);
+    // Each space-separated token of the title is drawn in one of the four
+    // Microsoft-logo colors, in order.
+    const unsigned char titleColors[4][3] = {
+        {255, 0, 0}, {0, 128, 0}, {0, 0, 255}, {255, 255, 0}};
+    wchar_t titleTokens[512];
+    wcsncpy_s(titleTokens, sizeof(titleTokens) / sizeof(wchar_t), watermarkText1, _TRUNCATE);
     int text1X = screenWidth - text1Wide - textPadding;
     int text1Y = textPadding / 2;
-    surface->DrawSetTextPos(text1X, text1Y);
-    surface->DrawPrintText(watermarkText1, wcslen(watermarkText1));
+    int tokenX = text1X;
+    int colorIndex = 0;
+    wchar_t* tokenCtx = nullptr;
+    for (wchar_t* token = wcstok_s(titleTokens, L" ", &tokenCtx); token;
+         token = wcstok_s(nullptr, L" ", &tokenCtx))
+    {
+        const unsigned char* color = titleColors[colorIndex % 4];
+        surface->DrawSetTextColor(color[0], color[1], color[2], 255);
+        surface->DrawSetTextPos(tokenX, text1Y);
+        surface->DrawPrintText(token, wcslen(token));
+
+        int tokenWide = 0, tokenTall = 0, spaceWide = 0, spaceTall = 0;
+        surface->GetTextSize(g_LegacyWatermarkFont, token, tokenWide, tokenTall);
+        surface->GetTextSize(g_LegacyWatermarkFont, L" ", spaceWide, spaceTall);
+        tokenX += tokenWide + spaceWide;
+        ++colorIndex;
+    }
 
     surface->DrawSetTextFont(g_LegacyWatermarkSmallFont);
     surface->DrawSetTextColor(255, 255, 255, 220);
