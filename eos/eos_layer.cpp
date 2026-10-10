@@ -224,6 +224,26 @@ bool EosLayer::Initialize(const char* productId,
     }
 
     m_fakeIpLayer = std::make_unique<FakeIpLayer>(m_p2pHandle, nullptr);
+    m_fakeIpLayer->SetReauthHandler([this]() {
+        // The poll loop stops once the cached login is rejected; keep trying so
+        // a transient auth outage does not leave EOS P2P dead for the session.
+        for (int attempt = 1;; ++attempt)
+        {
+            if (LoginWithDeviceId())
+            {
+                const auto user = m_localUser.load(std::memory_order_acquire);
+                if (user)
+                {
+                    m_fakeIpLayer->SetLocalUser(user);
+                    Msg("R1Delta EOS: P2P re-authenticated\n");
+                    return;
+                }
+            }
+            if (attempt <= 3 || attempt % 20 == 0)
+                Warning("R1Delta EOS: P2P re-authentication attempt %d failed\n", attempt);
+            Sleep(15000);
+        }
+    });
 
     if (!CreateDeviceId())
     {

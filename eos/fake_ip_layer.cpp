@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <thread>
 #include <utility>
 
 #include "core.h"
@@ -409,6 +410,26 @@ void FakeIpLayer::PumpIncoming()
             SdkLock lock(GetSdkMutex());
             sizeResult = EOS_P2P_GetNextReceivedPacketSize(m_p2pHandle, &sizeOpts, &packetSize);
         }
+        if (sizeResult == EOS_EResult::EOS_InvalidAuth)
+        {
+            // The cached login expired: the SDK rejects the handle and warns
+            // on every poll, which would repeat at frame rate. Drop the handle
+            // so polling stops, warn once, and log in again in the background.
+            m_localUser.store(nullptr, std::memory_order_release);
+            if (!m_authExpiredWarned)
+            {
+                m_authExpiredWarned = true;
+                Warning("R1Delta EOS: P2P login expired; re-authenticating\n");
+            }
+            if (m_reauth && !m_reauthRunning.exchange(true))
+            {
+                std::thread([this] {
+                    m_reauth();
+                    m_reauthRunning.store(false, std::memory_order_release);
+                }).detach();
+            }
+            return;
+        }
         if (sizeResult != EOS_EResult::EOS_Success)
             break;
 
@@ -516,8 +537,14 @@ bool FakeIpLayer::PopPacket(PacketRoute desiredRoute, PendingPacket& outPacket)
 
 void FakeIpLayer::SetLocalUser(EOS_ProductUserId localUser)
 {
+    m_authExpiredWarned = false;
     m_localUser.store(localUser, std::memory_order_release);
     UpdateLocalEndpoint();
+}
+
+void FakeIpLayer::SetReauthHandler(std::function<void()> handler)
+{
+    m_reauth = std::move(handler);
 }
 
 void FakeIpLayer::UpdateLocalEndpoint()

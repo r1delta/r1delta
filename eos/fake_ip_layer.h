@@ -7,6 +7,7 @@
 #include <atomic>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -73,6 +74,9 @@ public:
     bool PopPacket(PendingPacket& outPacket) { return PopPacket(PacketRoute::All, outPacket); }
 
     void SetLocalUser(EOS_ProductUserId localUser);
+    // Invoked on a worker thread when the cached EOS login is rejected, so the
+    // owner can log in again and publish the new handle with SetLocalUser.
+    void SetReauthHandler(std::function<void()> handler);
     void Clear();
     FakeEndpoint GetLocalEndpoint() const { return m_localEndpoint; }
 
@@ -101,6 +105,10 @@ private:
 
     EOS_HP2P m_p2pHandle = nullptr;
     std::atomic<EOS_ProductUserId> m_localUser;
+
+    std::function<void()> m_reauth;
+    std::atomic<bool> m_reauthRunning{ false };
+    bool m_authExpiredWarned = false;
 
     mutable std::mutex m_bindingsMutex;
     mutable std::unordered_map<std::string, PeerBinding> m_peerBindings;
