@@ -7,10 +7,11 @@
 #define R1D_VERSION "dev"
 #endif // !R1D_VERSION
 
-// Human-readable product label. Do not send this through delta_version or the
-// master-server compatibility field.
+// Human-readable product label. Release CI replaces this with the workflow
+// DISPLAY_VERSION pin (for example, "v3.11 for Workgroups"). Do not send this
+// through delta_version or the master-server compatibility field.
 #ifndef R1D_DISPLAY_VERSION
-#define R1D_DISPLAY_VERSION "v3.141592653"
+#define R1D_DISPLAY_VERSION "dev"
 #endif // !R1D_DISPLAY_VERSION
 
 #ifndef R1D_MINIMUM_VERSION

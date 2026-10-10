@@ -99,14 +99,10 @@ jobs:
           if ($displayVersions.Count -ne 1) {
             throw "r1d_version.h contains $($displayVersions.Count) display-version definitions; expected exactly one."
           }
-          if ($displayVersions[0].Groups[1].Value -ne '${{ env.DISPLAY_VERSION }}') {
-            throw (
-              "r1d_version.h display version '$($displayVersions[0].Groups[1].Value)' " +
-              "does not match workflow DISPLAY_VERSION '${{ env.DISPLAY_VERSION }}'."
-            )
-          }
 
+          $display = '${{ env.DISPLAY_VERSION }}'
           $updated = $content -replace '#define\s+R1D_VERSION\s+".*"', "#define R1D_VERSION `"$tag`""
+          $updated = $updated -replace '#define\s+R1D_DISPLAY_VERSION\s+".*"', "#define R1D_DISPLAY_VERSION `"$display`""
           Set-Content -LiteralPath $header -Value $updated
 
           if (-not (Select-String -LiteralPath $header -Quiet -Pattern (
@@ -114,8 +110,10 @@ jobs:
           ))) {
             throw 'The compatibility version was not stamped into r1d_version.h.'
           }
-          if (-not $updated.Contains($displayVersions[0].Value)) {
-            throw 'The independent display version was changed while stamping the compatibility version.'
+          if (-not (Select-String -LiteralPath $header -Quiet -Pattern (
+            '#define\s+R1D_DISPLAY_VERSION\s+"' + [regex]::Escape($display) + '"'
+          ))) {
+            throw 'The display version was not stamped into r1d_version.h.'
           }
 
       - name: Export GitHub Actions cache environment variables
