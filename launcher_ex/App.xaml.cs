@@ -123,7 +123,7 @@ namespace launcher_ex
                 {
                     var creator = new ProcessStartInfo(
                         "cmd.exe",
-                        "/c if exist \"" + junction + "\" rmdir \"" + junction + "\" & mklink /J \"" + junction + "\" \"" + full + "\" >nul")
+                        "/c (if exist \"" + junction + "\" rmdir \"" + junction + "\") & mklink /J \"" + junction + "\" \"" + full + "\" >nul")
                     {
                         CreateNoWindow = true,
                         UseShellExecute = false
