@@ -291,9 +291,23 @@ static bool file_exists(const char* path)
 	return false;
 }
 
+// Helper: a real content file rather than a zero-byte placeholder. The
+// launcher creates empty placeholder VPKs when the real ones are missing,
+// and a placeholder must not be mistaken for generated-audio content.
+static bool file_nonempty(const char* path)
+{
+	FILE* f = fopen(path, "rb");
+	if (!f)
+		return false;
+	fseek(f, 0, SEEK_END);
+	const long size = ftell(f);
+	fclose(f);
+	return size > 0;
+}
+
 bool HasR1DeltaContent()
 {
-	return file_exists("vpk/client_mp_delta_common.bsp.pak000_000.vpk");
+	return file_nonempty("vpk/client_mp_delta_common.bsp.pak000_000.vpk");
 }
 
 // Our modified hook.
