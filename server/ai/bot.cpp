@@ -22,6 +22,70 @@ __int64 __fastcall CPortal_Player__ChangeTeam(__int64 thisptr, unsigned int inde
     return oCPortal_Player__ChangeTeam(thisptr, index);
 }
 
+bool CreateDummyBot(int teamIndex, const char* name, char* outName, size_t outNameSize)
+{
+    botTeamIndex = teamIndex;
+
+    // Use the requested name, or generate a sequential one. 32 bytes matches the engine's name limit.
+    char botName[32];
+    if (name && name[0])
+        snprintf(botName, sizeof(botName), "%s", name);
+    else
+        snprintf(botName, sizeof(botName), "Bot%02d", g_botCounter);
+
+    const char* serverModuleName = IsR1ODedicatedServer() ? "server_local.dll" : "server.dll";
+    HMODULE serverModule = GetModuleHandleA(serverModuleName);
+    if (!serverModule && IsR1ODedicatedServer())
+    {
+        serverModuleName = "server.dll";
+        serverModule = GetModuleHandleA(serverModuleName);
+    }
+    if (!serverModule)
+    {
+        Warning("Failed to get handle for %s\n", serverModuleName);
+        return false;
+    }
+
+    typedef CPluginBotManager* (*CreateInterfaceFn)(const char* name, int* returnCode);
+    CreateInterfaceFn CreateInterface = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(serverModule, "CreateInterface"));
+    if (!CreateInterface)
+    {
+        Warning("Failed to get CreateInterface function from %s\n", serverModuleName);
+        return false;
+    }
+
+    int returnCode = 0;
+    CPluginBotManager* pBotManager = CreateInterface("BotManager001", &returnCode);
+    if (!pBotManager)
+    {
+        Warning("Failed to retrieve BotManager001 interface\n");
+        return false;
+    }
+
+    isCreatingBot = true;
+    __int64 pBot = pBotManager->CreateBot(botName);
+    isCreatingBot = false;
+
+    if (!pBot)
+    {
+        Warning("Failed to create dummy bot with name: %s\n", botName);
+        return false;
+    }
+
+    // Increment counter only if bot creation was successful
+    g_botCounter++;
+
+    typedef void (*ClientFullyConnectedFn)(__int64 thisptr, __int64 entity);
+    ClientFullyConnectedFn CServerGameClients_ClientFullyConnected = (ClientFullyConnectedFn)(G_server + 0x1499E0);
+    CServerGameClients_ClientFullyConnected(0, pBot);
+
+    if (outName && outNameSize)
+        snprintf(outName, outNameSize, "%s", botName);
+
+    Msg("Dummy bot '%s' has been successfully created and assigned to team %d.\n", botName, teamIndex);
+    return true;
+}
+
 void AddBotDummyConCommand(const CCommand& args)
 {
     // Expected usage: bot_dummy -team <team index>
@@ -55,59 +119,5 @@ void AddBotDummyConCommand(const CCommand& args)
         return;
     }
 
-    botTeamIndex = teamIndex;
-
-    // Generate sequential bot name
-    char botName[16]; // Buffer for "BotXX" + null terminator
-    snprintf(botName, sizeof(botName), "Bot%02d", g_botCounter);
-
-    const char* serverModuleName = IsR1ODedicatedServer() ? "server_local.dll" : "server.dll";
-    HMODULE serverModule = GetModuleHandleA(serverModuleName);
-    if (!serverModule && IsR1ODedicatedServer())
-    {
-        serverModuleName = "server.dll";
-        serverModule = GetModuleHandleA(serverModuleName);
-    }
-    if (!serverModule)
-    {
-        Warning("Failed to get handle for %s\n", serverModuleName);
-        return;
-    }
-
-    typedef CPluginBotManager* (*CreateInterfaceFn)(const char* name, int* returnCode);
-    CreateInterfaceFn CreateInterface = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(serverModule, "CreateInterface"));
-    if (!CreateInterface)
-    {
-        Warning("Failed to get CreateInterface function from %s\n", serverModuleName);
-        return;
-    }
-
-    int returnCode = 0;
-    CPluginBotManager* pBotManager = CreateInterface("BotManager001", &returnCode);
-    if (!pBotManager)
-    {
-        Warning("Failed to retrieve BotManager001 interface\n");
-        return;
-    }
-
-    isCreatingBot = true;
-    __int64 pBot = pBotManager->CreateBot(botName);
-    isCreatingBot = false;
-
-    if (!pBot)
-    {
-        Warning("Failed to create dummy bot with name: %s\n", botName);
-        return;
-    }
-    else
-    {
-        // Increment counter only if bot creation was successful
-        g_botCounter++;
-    }
-
-    typedef void (*ClientFullyConnectedFn)(__int64 thisptr, __int64 entity);
-    ClientFullyConnectedFn CServerGameClients_ClientFullyConnected = (ClientFullyConnectedFn)(G_server + 0x1499E0);
-    CServerGameClients_ClientFullyConnected(0, pBot);
-
-    Msg("Dummy bot '%s' has been successfully created and assigned to team %d.\n", botName, teamIndex);
+    CreateDummyBot(teamIndex, nullptr, nullptr, 0);
 }

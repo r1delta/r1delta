@@ -58,6 +58,7 @@
 #include "mcp_server.h"
 #include "r1d_version.h"
 #include "server_usercmd.h"
+#include "bot_control.h"
 
 void AddBotDummyConCommand(const CCommand& args);
 void script_cmd(const CCommand& args);
@@ -1239,6 +1240,7 @@ void RegisterR1ODediDeltaConVars()
 	RegisterR1ODediConVar("delta_vote_next_map", "", FCVAR_GAMEDLL | FCVAR_REPLICATED, "Next voted map.");
 	RegisterR1ODediConVar("delta_vote_next_mode", "", FCVAR_GAMEDLL | FCVAR_REPLICATED, "Next voted gamemode.");
 	RegisterServerUserCmdConVars();
+	RegisterBotControlConVars();
 	// The CServerGameDLL__DLLInit detour is only installed on the R1 path
 	// (load.cpp gates it), so the InitializeRecentHostVars() call inside it
 	// never runs on R1O. Same server.dll, different bring-up flow: initialize

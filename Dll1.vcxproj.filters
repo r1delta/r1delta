@@ -345,6 +345,9 @@
     <ClInclude Include="server\ai\bot.h">
       <Filter>server\ai</Filter>
     </ClInclude>
+    <ClInclude Include="server\ai\bot_control.h">
+      <Filter>server\ai</Filter>
+    </ClInclude>
     <ClInclude Include="server\ai\navmesh.h">
       <Filter>server\ai</Filter>
     </ClInclude>
@@ -790,6 +793,9 @@
     </ClCompile>
     <!-- server\ai -->
     <ClCompile Include="server\ai\bot.cpp">
+      <Filter>server\ai</Filter>
+    </ClCompile>
+    <ClCompile Include="server\ai\bot_control.cpp">
       <Filter>server\ai</Filter>
     </ClCompile>
     <ClCompile Include="server\ai\navmesh.cpp">

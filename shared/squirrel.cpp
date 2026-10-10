@@ -51,6 +51,7 @@
 #include "client.h"
 #include "surfacerender.h"
 #include "localize.h"
+#include "bot_control.h"
 
 #pragma intrinsic(_ReturnAddress)
 
@@ -2476,6 +2477,97 @@ bool GetSQVMFuncs() {
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_UI, // Available in client script contexts
 		"SquirrelNativeFunctionTest", (SQFUNCTION)SquirrelNativeFunctionTest, ".sifb", 0, "string", "string text, int a2, float a3, bool a4", "Test registering and calling native function in Squirrel.");
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER,
+		"BotSetInput",
+		(SQFUNCTION)Script_BotSetInput,
+		".Iffffi",
+		7,
+		"void",
+		"entity bot, float forward, float side, float pitch, float yaw, int buttons",
+		"Set the movement, view angles and held buttons written into a bot's usercmds."
+	);
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER,
+		"BotPressButtons",
+		(SQFUNCTION)Script_BotPressButtons,
+		".Ii",
+		3,
+		"void",
+		"entity bot, int buttons",
+		"Press buttons for a single usercmd (jump, melee, offhands)."
+	);
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER,
+		"BotClearInput",
+		(SQFUNCTION)Script_BotClearInput,
+		".I",
+		2,
+		"void",
+		"entity bot",
+		"Stop overriding a bot's usercmds."
+	);
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER,
+		"BotCreate",
+		(SQFUNCTION)Script_BotCreate,
+		".is",
+		3,
+		"string",
+		"int team, string name",
+		"Create a bot player on a team with the given name (empty = BotNN). Returns its name, or an empty string on failure."
+	);
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER,
+		"BotGetDebugInfo",
+		(SQFUNCTION)Script_BotGetDebugInfo,
+		".I",
+		2,
+		"string",
+		"entity bot",
+		"Usercmd injection counters for a bot (debugging)."
+	);
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER,
+		"NavGetNodeCount",
+		(SQFUNCTION)Script_NavGetNodeCount,
+		".",
+		1,
+		"int",
+		"",
+		"Number of nodes in the loaded AI node graph."
+	);
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER,
+		"NavGetNodePosition",
+		(SQFUNCTION)Script_NavGetNodePosition,
+		".i",
+		2,
+		"array",
+		"int index",
+		"Position of an AI node as [x, y, z]."
+	);
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER,
+		"NavFindPath",
+		(SQFUNCTION)Script_NavFindPath,
+		".ffffffi",
+		8,
+		"array",
+		"float sx, float sy, float sz, float ex, float ey, float ez, int hull",
+		"A* path over the AI node graph as a flat [x0, y0, z0, x1, ...] array (empty if unreachable)."
+	);
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER,
+		"NavFindPathPilot",
+		(SQFUNCTION)Script_NavFindPathPilot,
+		".ffffffiff",
+		10,
+		"array",
+		"float sx, float sy, float sz, float ex, float ey, float ez, int hull, float maxRise, float maxGap",
+		"Like NavFindPath, but NPC traverse links (climbs, long jumps) are only used where a pilot can follow: at most maxRise up and maxGap across."
+	);
 
 	initialized = true;
 	return true;

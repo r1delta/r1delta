@@ -1,5 +1,6 @@
 #include "server_usercmd.h"
 
+#include "bot_control.h"
 #include "core.h"
 #include "cvar.h"
 #include "factory.h"
@@ -382,8 +383,33 @@ void __fastcall PlayerPhysicsSimulate(uintptr_t player)
 __int64 __fastcall PlayerMoveRunCommand(uintptr_t playerMove, uintptr_t player,
 	uintptr_t userCmd, uintptr_t moveHelper)
 {
-	if (!player || !userCmd || !pGlobalVarsServer || IsFakeClient(player))
+	if (!player || !userCmd || !pGlobalVarsServer)
 		return s_playerMoveRunCommandOriginal(playerMove, player, userCmd, moveHelper);
+
+	if (IsFakeClient(player))
+	{
+		BotControl_ApplyToUserCmd(player, userCmd);
+
+		// Same frame time retail RunCommand will integrate movement with (0 = the bot can't move).
+		// Bots get their commands from the server itself, so their accumulated command time can run
+		// ahead of the frame time clamp's clock and every command ends up with zero movement time.
+		// Pull it back to the clamp clock so the command moves.
+		const float frameTimeBefore = GetEffectiveUserCmdFrameTime(player, userCmd);
+		float frameTimeAfter = frameTimeBefore;
+		const bool paused = *reinterpret_cast<unsigned char*>(player + kPlayerPausedOffset) != 0;
+		if (frameTimeBefore == 0.0f && !paused)
+		{
+			const float baseTime = *reinterpret_cast<float*>(s_serverBase + kClampFrameTimeBaseRva);
+			float& accumulated = *reinterpret_cast<float*>(player + kPlayerAccumulatedFrameTimeOffset);
+			if (accumulated > baseTime)
+				accumulated = baseTime;
+			frameTimeAfter = GetEffectiveUserCmdFrameTime(player, userCmd);
+		}
+		BotControl_RecordMoveDebug(player, frameTimeBefore, frameTimeAfter);
+		return s_playerMoveRunCommandOriginal(playerMove, player, userCmd, moveHelper);
+	}
+
+	BotControl_DebugDumpUserCmd(player, userCmd);
 
 	const float requiredTime = GetUserCmdProcessingTime(userCmd);
 	UserCmdProcessingState& state = FindUserCmdState(player);

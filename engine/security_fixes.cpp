@@ -744,6 +744,21 @@ void CL_CopyExistingEntity(CEntityReadInfo& u) {
 		return;
 	}
 
+	// The frame the entity is delta'd from (u + 0x10; read by CL_ParsePacketEntities as the "from"
+	// frame, so the m_pTo name above doesn't match R1) keeps per entity an offset into the client's
+	// packed-entity buffer at +0x3c. -1 means no stored state: the original reads buffer + 0xFFFFFFFF
+	// and crashes in engine+0x1D6F60 (seen while a dead human spectates bots).
+	const uintptr_t fromFrame = *reinterpret_cast<const uintptr_t*>(reinterpret_cast<uintptr_t>(&u) + 0x10);
+	if (fromFrame) {
+		const int packedOffset = *reinterpret_cast<const int*>(fromFrame + 0x3C + u.m_nNewEntity * 4);
+		if (packedOffset < 0) {
+			Warning("R1Delta: CL_CopyExistingEntity: entity %d has no stored state in frame %p (offset %d, oldEntity %d, updateType %d)\n",
+				u.m_nNewEntity, reinterpret_cast<void*>(fromFrame), packedOffset, u.m_nOldEntity, u.m_UpdateType);
+			Host_Error("CL_CopyExistingEntity: entity %d has no stored state.\n", u.m_nNewEntity);
+			return;
+		}
+	}
+
 	return oCL_CopyExistingEntity(u);
 }
 
