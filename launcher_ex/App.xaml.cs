@@ -97,7 +97,11 @@ namespace launcher_ex
             try
             {
                 var full = Path.GetFullPath(path);
-                if (full.All(c => c < 128))
+                // R1DELTA_FORCE_ASCII_LAUNCH=1 forces the junction for ASCII
+                // installs too, so the mechanism can be verified on any
+                // machine (and used as a diagnostic for suspected path bugs).
+                var force = Environment.GetEnvironmentVariable("R1DELTA_FORCE_ASCII_LAUNCH") == "1";
+                if (!force && full.All(c => c < 128))
                     return full;
 
                 var digest = new StringBuilder(16);
