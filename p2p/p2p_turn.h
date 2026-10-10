@@ -49,6 +49,11 @@ public:
     void Start(const TurnCredentials& creds);
     void Stop();
     bool Running() const { return m_running.load(); }
+    // When relayed peer traffic last arrived (epoch if never).
+    std::chrono::steady_clock::time_point LastIncoming() const
+    {
+        return std::chrono::steady_clock::time_point(std::chrono::steady_clock::duration(m_lastIncoming.load()));
+    }
 
     // Installs a permission so the given IPv4 address may send to us.
     void Permit(uint32_t ip);
@@ -129,6 +134,7 @@ private:
     std::thread m_thread;
     std::atomic<bool> m_running{ false };
     std::atomic<uint64_t> m_generation{ 0 };
+    std::atomic<std::chrono::steady_clock::rep> m_lastIncoming{ 0 };
     TurnCredentials m_creds;
     // Rotated credentials from the master server; applied on the next
     // allocation so live relayed connections are not cut.

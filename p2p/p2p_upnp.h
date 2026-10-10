@@ -39,6 +39,7 @@ private:
     std::atomic<bool> m_running{ false };
     uint16_t m_port = 0;
     PortMappingStatus m_status;
+    uint32_t m_renewSeconds = 0; // half the lease the gateway actually granted
     std::string m_upnpControlUrl;
     std::string m_upnpServiceType;
 };

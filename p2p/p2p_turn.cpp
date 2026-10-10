@@ -456,6 +456,7 @@ void TurnClient::HandleDatagram(const uint8_t* data, size_t size)
         if (auto wanted = m_wantedPermissions.find(peer.ip); wanted != m_wantedPermissions.end())
             wanted->second = Clock::now();
         m_incoming.emplace_back(peer, std::vector<uint8_t>(payload, payload + payloadSize));
+        m_lastIncoming.store(Clock::now().time_since_epoch().count());
         return;
     }
 
@@ -475,6 +476,7 @@ void TurnClient::HandleDatagram(const uint8_t* data, size_t size)
         if (auto wanted = m_wantedPermissions.find(peer.ip); wanted != m_wantedPermissions.end())
             wanted->second = Clock::now();
         m_incoming.emplace_back(peer, std::vector<uint8_t>(d, d + n));
+        m_lastIncoming.store(Clock::now().time_since_epoch().count());
 
         // Bind a channel so subsequent traffic uses 4-byte ChannelData headers.
         const uint64_t handle = HandleFor(peer);

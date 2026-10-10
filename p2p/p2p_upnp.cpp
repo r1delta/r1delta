@@ -5,6 +5,7 @@
 
 #include <httplib.h>
 
+#include <algorithm>
 #include <chrono>
 #include <set>
 #include <vector>
@@ -216,6 +217,7 @@ bool PortMapper::TryUpnp(uint16_t port, uint32_t localIp)
     m_status.externalIp = externalIp;
     m_status.externalPort = port;
     m_status.error.clear();
+    m_renewSeconds = kLeaseSeconds / 2;
     return true;
 }
 
@@ -281,6 +283,9 @@ bool PortMapper::TryNatPmp(uint16_t port, uint32_t lifetime)
     m_status.externalPort = mapped->mappedPort;
     m_status.externalIp = external && external->result == 0 ? Ipv4ToString(external->externalIp) : "";
     m_status.error.clear();
+    // RFC 6886: the gateway may grant a shorter lifetime than requested.
+    const uint32_t granted = mapped->lifetime ? (std::min)(mapped->lifetime, lifetime) : lifetime;
+    m_renewSeconds = (std::max)(granted / 2, uint32_t{ 30 });
     return true;
 }
 
@@ -345,10 +350,20 @@ void PortMapper::Run(uint16_t port)
                         status.externalIp.c_str(), status.externalPort);
                 announced = true;
                 failures = 0;
-                nextAttempt = std::chrono::steady_clock::now() + std::chrono::seconds(kLeaseSeconds / 2);
+                uint32_t renew;
+                {
+                    std::lock_guard lock(m_mutex);
+                    renew = m_renewSeconds;
+                }
+                nextAttempt = std::chrono::steady_clock::now() + std::chrono::seconds(renew);
             }
             else
             {
+                {
+                    // Don't keep advertising a mapping the router no longer holds.
+                    std::lock_guard lock(m_mutex);
+                    m_status.active = false;
+                }
                 if (failures == 0)
                     Log("Could not forward UDP port %u automatically: %s\n", port, status.error.c_str());
                 ++failures;

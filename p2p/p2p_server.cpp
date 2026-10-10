@@ -187,9 +187,12 @@ void ServiceLoop()
                     ++it;
             }
 
-            if (Turn().Running() && now - st.lastHeartbeat > kTurnIdleShutdown)
+            // A master outage alone must not cut players already on the relay;
+            // release only once nobody has used it for the same period.
+            if (Turn().Running() && now - st.lastHeartbeat > kTurnIdleShutdown &&
+                now - Turn().LastIncoming() > kTurnIdleShutdown)
             {
-                Log("TURN: no heartbeat for a while, releasing relay\n");
+                Log("TURN: no heartbeat or relayed traffic for a while, releasing relay\n");
                 std::thread([] { Turn().Stop(); }).detach();
             }
         }

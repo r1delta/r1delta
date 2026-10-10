@@ -676,6 +676,10 @@ void PollEngineSocket(Route route)
         timeval tv{ 0, 0 };
         if (select(0, &readSet, nullptr, nullptr, &tv) <= 0)
             return;
+        // The engine may have closed this socket and Windows may have reused
+        // the handle for something else; don't steal that socket's datagrams.
+        if (GetEngineSocket(route) != s)
+            return;
         sockaddr_storage from{};
         int fromLen = sizeof(from);
         const int n = RealRecvFrom(s, buf.data(), static_cast<int>(buf.size()), reinterpret_cast<sockaddr*>(&from), &fromLen);

@@ -1061,10 +1061,12 @@ void ClientOnPong(uint64_t probeId, uint64_t timestampUs, const char* via, uint6
         return;
     if (udpKind ? !(udpFrom == c.udp) : (!via || std::strcmp(via, KindName(c.kind)) != 0))
         return;
+    // Pings still in flight when the third answer lands would otherwise push
+    // answers past kWantedAnswers and turn the loss penalty into a bonus.
+    if (c.answers >= kWantedAnswers)
+        return;
     c.state = CandState::Answered;
-    if (c.answers < kWantedAnswers)
-        c.samples[c.answers] = rtt;
-    ++c.answers;
+    c.samples[c.answers++] = rtt;
     Debug("pong from %s via %s: %.1f ms\n", KindName(c.kind), via, rtt);
 }
 

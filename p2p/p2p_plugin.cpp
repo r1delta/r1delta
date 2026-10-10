@@ -78,6 +78,7 @@ bool PluginBackend::Load()
         Log("%s plugin ABI %d != %d; transport disabled\n", BackendName(m_kind), m_abiVersion(), R1P_ABI_VERSION);
         return false;
     }
+    m_abiOk.store(true);
     return true;
 }
 
@@ -160,7 +161,9 @@ PluginBackend::Status PluginBackend::PeerStatus(uint64_t handle)
 
 void PluginBackend::PumpLogs()
 {
-    if (!m_pollLog)
+    // The service thread pumps logs regardless of load state; never call into
+    // a DLL whose exports or ABI did not check out.
+    if (!m_abiOk.load())
         return;
     char line[1024];
     for (int i = 0; i < 64 && m_pollLog(line, sizeof(line)) == R1P_GOT; ++i)

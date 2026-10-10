@@ -54,6 +54,7 @@ private:
     std::wstring m_dllName;
     std::mutex m_initMutex;
     std::atomic<bool> m_ready{ false };
+    std::atomic<bool> m_abiOk{ false }; // exports resolved and ABI matches
     bool m_loadAttempted = false;
     HMODULE m_module = nullptr;
 
