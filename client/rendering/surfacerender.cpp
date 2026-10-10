@@ -1556,14 +1556,14 @@ static void DrawLegacyWatermark()
     }
 
     surface->DrawSetTextFont(g_LegacyWatermarkFont);
-    surface->DrawSetTextColor(255, 128, 0, 255);
+    surface->DrawSetTextColor(255, 255, 255, 255);
     int text1X = screenWidth - text1Wide - textPadding;
     int text1Y = textPadding / 2;
     surface->DrawSetTextPos(text1X, text1Y);
     surface->DrawPrintText(watermarkText1, wcslen(watermarkText1));
 
     surface->DrawSetTextFont(g_LegacyWatermarkSmallFont);
-    surface->DrawSetTextColor(255, 128, 0, 220);
+    surface->DrawSetTextColor(255, 255, 255, 220);
 
     int currentY = text1Tall + headingGap;
 
