@@ -110,28 +110,48 @@ namespace launcher_ex
                     foreach (var b in sha.ComputeHash(Encoding.UTF8.GetBytes(full.ToUpperInvariant())))
                         digest.Append(b.ToString("x2"));
                 }
-                var junction = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Temp",
-                    "r1delta_" + digest.ToString().Substring(0, 16));
-
-                if (Directory.Exists(junction))
+                var name = "r1delta_" + digest.ToString().Substring(0, 16);
+                // The junction must sit on an ASCII, user-writable path — but
+                // never in a temp directory: recursive "system cleaners" that
+                // do not check FILE_ATTRIBUTE_REPARSE_POINT follow the link and
+                // delete the real install through it. %ProgramData% is ASCII
+                // for every username and is not a cleanup target; %WINDIR%\Temp
+                // is the fallback for images that lock ProgramData down.
+                var roots = new[]
                 {
-                    if ((File.GetAttributes(junction) & FileAttributes.ReparsePoint) == 0)
-                        return full; // occupied by a real directory: leave it alone
-                }
-                else
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "R1Delta", "launch"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Temp"),
+                };
+                foreach (var root in roots)
                 {
-                    var creator = new ProcessStartInfo(
-                        "cmd.exe",
-                        "/c (if exist \"" + junction + "\" rmdir \"" + junction + "\") & mklink /J \"" + junction + "\" \"" + full + "\" >nul")
+                    var junction = Path.Combine(root, name);
+                    if (Directory.Exists(junction))
                     {
-                        CreateNoWindow = true,
-                        UseShellExecute = false
-                    };
-                    using (var proc = Process.Start(creator))
-                        proc?.WaitForExit(5000);
+                        if ((File.GetAttributes(junction) & FileAttributes.ReparsePoint) != 0)
+                            return junction;
+                        continue; // occupied by a real directory: leave it alone
+                    }
+                    try
+                    {
+                        Directory.CreateDirectory(root);
+                        var creator = new ProcessStartInfo(
+                            "cmd.exe",
+                            "/c (if exist \"" + junction + "\" rmdir \"" + junction + "\") & mklink /J \"" + junction + "\" \"" + full + "\" >nul")
+                        {
+                            CreateNoWindow = true,
+                            UseShellExecute = false
+                        };
+                        using (var proc = Process.Start(creator))
+                            proc?.WaitForExit(5000);
+                    }
+                    catch
+                    {
+                        // try the next root
+                    }
+                    if (Directory.Exists(junction))
+                        return junction;
                 }
-                return Directory.Exists(junction) ? junction : full;
+                return full;
             }
             catch
             {
