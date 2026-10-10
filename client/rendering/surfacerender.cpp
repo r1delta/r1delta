@@ -1475,7 +1475,7 @@ static void DrawLegacyWatermark()
     wchar_t watermarkText1[512];
     G_localizeIface->ConvertANSIToUnicode(ansiBuffer1, watermarkText1, sizeof(watermarkText1));
 
-    const char* urlString = "Release candidate 1";
+    const char* urlString = "Release candidate 2";
     const char* secondData = urlString;
     if (fpsStringData[0] != '\x00') {
         secondData = fpsStringData;
@@ -1556,10 +1556,10 @@ static void DrawLegacyWatermark()
     }
 
     surface->DrawSetTextFont(g_LegacyWatermarkFont);
-    // Each space-separated token of the title is drawn in one of the four
-    // Microsoft-logo colors, in order.
+    // Each space-separated token of the title is drawn in the watermark
+    // color; all tokens are white.
     const unsigned char titleColors[4][3] = {
-        {255, 0, 0}, {0, 128, 0}, {0, 0, 255}, {255, 255, 0}};
+        {255, 255, 255}, {255, 255, 255}, {255, 255, 255}, {255, 255, 255}};
     wchar_t titleTokens[512];
     wcsncpy_s(titleTokens, sizeof(titleTokens) / sizeof(wchar_t), watermarkText1, _TRUNCATE);
     int text1X = screenWidth - text1Wide - textPadding;
