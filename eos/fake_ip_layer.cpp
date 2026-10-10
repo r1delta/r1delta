@@ -223,8 +223,9 @@ bool FakeIpLayer::EncodeProductId(const std::string& productId, FakeEndpoint& en
     std::memcpy(endpoint.address.u.Byte + 2, bytes.data() + 2, 14);
 
     uint16_t hostPort = GetClientPortFromCvar();
-    int ss_state = IsDedicatedServer() ? 2 : (*(int*)(G_engine + 0x2966168));
-    if (!(ss_state > 0)) {
+    // Host state (server_state_t): > 0 means a local server is running.
+    int host_state = IsDedicatedServer() ? 2 : (*(int*)(G_engine + 0x2966168));
+    if (!(host_state > 0)) {
         hostPort = GetHostPortFromCvar();
     }
     
@@ -605,8 +606,9 @@ bool IsServerNetContext()
     if (!G_engine)
         return false;
 
-    auto* ssState = reinterpret_cast<int*>(G_engine + 0x2966168);
-    return ssState && *ssState > 0;
+    // Host state (server_state_t): > 0 means a local server is running.
+    auto* hostState = reinterpret_cast<int*>(G_engine + 0x2966168);
+    return hostState && *hostState > 0;
 }
 
 uint16_t GetPretendRemotePort()

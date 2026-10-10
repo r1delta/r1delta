@@ -69,10 +69,36 @@ __int64 CNetChan__SendDatagramLISTEN_Part2_Hook(__int64 thisptr, unsigned int le
     if ((*(uint8_t*)(((uintptr_t)thisptr) + 216) > 0))
         return original_fn(thisptr, length, SendToResult);
 
+    // The engine's own "sent packet - %d bytes" print in the CNetChan send
+    // path fires constantly during the hang and never during healthy play:
+    // byte +16256 is set while the connection is still in progress (it is a
+    // netchan state flag, not a convar). The hang is exactly that window with
+    // a frozen byte count, so gate the breaker on the same condition as the
+    // print; outside it (healthy play) the breaker can never misfire.
+    if (*reinterpret_cast<uint8_t*>(thisptr + 16256) == 0) {
+        g_last_packet_size = -1;
+        return original_fn(thisptr, length, SendToResult);
+    }
+
+    // Never fire while the host state is ss_active (server_state_t == 2 at
+    // G_engine+0x2966168, cf. the same field in CL_Retry_f): a running
+    // game/server has healthy same-size traffic and a forced retry there
+    // would disrupt it.
+    if (*reinterpret_cast<int*>(G_engine + 0x2966168) == 2) {
+        g_last_packet_size = -1;
+        return original_fn(thisptr, length, SendToResult);
+    }
+
     // The signon flow streams the same small packets at about ten a second
     // (signonstate 8 among them); tripping there aborts a healthy signon, so
-    // never fire while the client is in signonstate 8.
-    if (*reinterpret_cast<int*>(G_engine + 0x2966168) == 8) {
+    // never fire while the client is in signonstate 8. The client signon
+    // state is the +116 field of the client state object GetBaseClient(-1)
+    // returns (engine.dll+0x5F470); G_engine+0x2966168 is the host state
+    // (server_state_t, 2 == ss_active) and can never equal 8.
+    typedef char* (__fastcall* GetBaseClientFn)(int slot);
+    const auto base_client = reinterpret_cast<GetBaseClientFn>(G_engine + 0x5F470)(-1);
+    if (base_client &&
+        *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(base_client) + 116) == 8) {
         // Restart the window so the signon stream cannot trip it right after.
         g_last_packet_size = -1;
         return original_fn(thisptr, length, SendToResult);
