@@ -86,6 +86,54 @@ namespace launcher_ex
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern IntPtr LocalFree(IntPtr hMem);
 
+        // The game resolves paths through ANSI APIs (fopen-class opens and the
+        // LoadLibraryA PATH search), which cannot represent non-ASCII Windows
+        // usernames: script and content loading fails for those players while
+        // DLLs (loaded through Unicode APIs) keep working. Give the game ASCII
+        // views of the same directories through junctions in %WINDIR%\Temp;
+        // junctions need no admin.
+        private static string EnsureAsciiLaunchPath(string path)
+        {
+            try
+            {
+                var full = Path.GetFullPath(path);
+                if (full.All(c => c < 128))
+                    return full;
+
+                var digest = new StringBuilder(16);
+                using (var sha = System.Security.Cryptography.SHA256.Create())
+                {
+                    foreach (var b in sha.ComputeHash(Encoding.UTF8.GetBytes(full.ToUpperInvariant())))
+                        digest.Append(b.ToString("x2"));
+                }
+                var junction = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Temp",
+                    "r1delta_" + digest.ToString().Substring(0, 16));
+
+                if (Directory.Exists(junction))
+                {
+                    if ((File.GetAttributes(junction) & FileAttributes.ReparsePoint) == 0)
+                        return full; // occupied by a real directory: leave it alone
+                }
+                else
+                {
+                    var creator = new ProcessStartInfo(
+                        "cmd.exe",
+                        "/c if exist \"" + junction + "\" rmdir \"" + junction + "\" & mklink /J \"" + junction + "\" \"" + full + "\" >nul")
+                    {
+                        CreateNoWindow = true,
+                        UseShellExecute = false
+                    };
+                    using (var proc = Process.Start(creator))
+                        proc?.WaitForExit(5000);
+                }
+                return Directory.Exists(junction) ? junction : full;
+            }
+            catch
+            {
+                return path;
+            }
+        }
 
         // --- Constants ---
         private const uint LOAD_WITH_ALTERED_SEARCH_PATH = 0x00000008;
@@ -962,7 +1010,7 @@ namespace launcher_ex
             }
 
             // 10. Prepend required R1Delta directories (relative to original launcher dir) to PATH
-            if (!PrependPath(finalInstallPath, originalLauncherExeDir))
+            if (!PrependPath(EnsureAsciiLaunchPath(finalInstallPath), EnsureAsciiLaunchPath(originalLauncherExeDir)))
             {
                 // Warning already shown in PrependPath, but continue execution
             }
@@ -977,12 +1025,12 @@ namespace launcher_ex
             Environment.SetEnvironmentVariable("FROM_DELTA_LAUNCHER", "1");
             try
             {
-                var launcherDllPathFull = Path.GetFullPath(originalLauncherExeDir);
+                var launcherDllPathFull = EnsureAsciiLaunchPath(originalLauncherExeDir);
                 var fullExePath = Path.Combine(launcherDllPathFull,"Titanfall.exe");
                 var psi = new ProcessStartInfo
                 {
                     FileName = fullExePath,
-                    WorkingDirectory = finalInstallPath,
+                    WorkingDirectory = EnsureAsciiLaunchPath(finalInstallPath),
                     UseShellExecute = false,
                     Arguments = finalLaunchArgs,
                 };
