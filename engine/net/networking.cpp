@@ -20,11 +20,13 @@ __int64 (*oCNetChan__SendDatagramLISTEN_Part2)(__int64 thisptr, unsigned int len
 CL_Retry_fType CL_Retry_fOriginal = nullptr;
 SVC_ServerInfo__WriteToBufferType SVC_ServerInfo__WriteToBufferOriginal = nullptr;
 
-// Retry circuit breaker state
-static int g_consecutive_packets = 0;
-static const int PACKET_THRESHOLD = 1500;
-static const int PACKET_SIZE = 16;
+// Retry circuit breaker state: a wedged netchan spams one packet size
+// continuously (about ten packets a second), while healthy traffic keeps
+// changing size. More than STUCK_DELAY seconds of one size means stuck.
+static int g_last_packet_size = -1;
+static double g_same_size_since = 0.0;
 static double g_last_retry_time = 0.0;
+static const double STUCK_DELAY = 10.0;
 static const double RETRY_DELAY = 15.0;
 
 const char* CNetChan__GetAddress(CNetChan* thisptr) {
@@ -67,31 +69,28 @@ __int64 CNetChan__SendDatagramLISTEN_Part2_Hook(__int64 thisptr, unsigned int le
     if ((*(uint8_t*)(((uintptr_t)thisptr) + 216) > 0))
         return original_fn(thisptr, length, SendToResult);
 
-    // Check packet size
-    if (length == PACKET_SIZE) {
-        g_consecutive_packets++;
-    }
-    else {
-        g_consecutive_packets = 0;
+    // The signon flow streams the same small packets at about ten a second
+    // (signonstate 8 among them); tripping there aborts a healthy signon, so
+    // never fire while the client is in signonstate 8.
+    if (*reinterpret_cast<int*>(G_engine + 0x2966168) == 8) {
+        // Restart the window so the signon stream cannot trip it right after.
+        g_last_packet_size = -1;
+        return original_fn(thisptr, length, SendToResult);
     }
 
-    // Check conditions for retry
-    bool should_retry = false;
-
-    // Check packet threshold
-    if (g_consecutive_packets > PACKET_THRESHOLD) {
-        should_retry = true;
+    const double current_time = Plat_FloatTime();
+    if (static_cast<int>(length) != g_last_packet_size) {
+        g_last_packet_size = static_cast<int>(length);
+        g_same_size_since = current_time;
+    }
+    else if (current_time - g_same_size_since > STUCK_DELAY &&
+             current_time - g_last_retry_time >= RETRY_DELAY) {
         Warning("Circuit breaker tripped due to packets!\n");
-    }
-
-    // Handle retry if needed
-    if (should_retry) {
-        double current_time = Plat_FloatTime();
-        if (current_time - g_last_retry_time >= RETRY_DELAY) {
-            Cbuf_AddText(0, "retry\n", 0);
-            g_consecutive_packets = 0;
-            g_last_retry_time = current_time;
-        }
+        // Call the handler directly: "retry" through the console resolves via
+        // the alias table, so a user alias silently disabled this.
+        CL_Retry_f();
+        g_same_size_since = current_time;
+        g_last_retry_time = current_time;
     }
 
     return original_fn(thisptr, length, SendToResult);
