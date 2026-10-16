@@ -577,10 +577,12 @@ void* __cdecl hkrealloc_base(void* Block, size_t Size)
             return fallback.reallocFn(Block, Size);
         }
 
-        Warning(
-            "[MEM] Missing MSVC realloc fallback for foreign allocation %p from %p\n",
-            Block,
-            _ReturnAddress());
+        if (!IsCrashHandlerActive()) {
+            Warning(
+                "[MEM] Missing MSVC realloc fallback for foreign allocation %p from %p\n",
+                Block,
+                _ReturnAddress());
+        }
         return nullptr;
     }
 
@@ -612,10 +614,14 @@ void __cdecl hkfree_base(void* Block)
             return;
         }
 
-        Warning(
-            "[MEM] Missing MSVC free fallback for foreign allocation %p from %p\n",
-            Block,
-            _ReturnAddress());
+        // While the crash handler runs, teardown frees memory this shim never handed out, and
+        // each warning would allocate a message inside a dying process; stay silent instead.
+        if (!IsCrashHandlerActive()) {
+            Warning(
+                "[MEM] Missing MSVC free fallback for foreign allocation %p from %p\n",
+                Block,
+                _ReturnAddress());
+        }
         return;
     }
 
@@ -650,10 +656,12 @@ void* __cdecl hkrecalloc_base(void* Block, size_t Count, size_t Size)
             return fallback.reallocFn(Block, nTotal);
         }
 
-        Warning(
-            "[MEM] Missing MSVC recalloc fallback for foreign allocation %p from %p\n",
-            Block,
-            _ReturnAddress());
+        if (!IsCrashHandlerActive()) {
+            Warning(
+                "[MEM] Missing MSVC recalloc fallback for foreign allocation %p from %p\n",
+                Block,
+                _ReturnAddress());
+        }
         return nullptr;
     }
 

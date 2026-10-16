@@ -1,6 +1,7 @@
 // MCP Server Implementation - Core server, protocol handling, and transport
 #include "mcp_server.h"
 #include "core.h"
+#include "crash_report_context.h"
 #include "logging.h"
 #include "cvar.h"
 #include "squirrel.h"
@@ -407,6 +408,7 @@ BuildNutSignatureIndex(const std::filesystem::path& root,
     std::mutex outMx;
 
     auto worker = [&] {
+        RegisterR1DeltaThread("McpScriptWorker");
         std::string text;
         std::unordered_map<std::string, NutSignatureRecord> local;
         local.reserve(128);
@@ -564,6 +566,11 @@ Server& Server::GetInstance() {
 }
 
 void Server::CaptureConsoleOutput(const char* msg) {
+    // A crash handler that reaches this line allocates inside a dying process, and each
+    // allocation that the allocator shim cannot attribute produces another warning line: the
+    // capture pipeline has to stop the moment the handler starts.
+    if (IsCrashHandlerActive())
+        return;
     m_outputCapture.AddLine(msg);
 }
 
@@ -1269,6 +1276,7 @@ void Server::StartStdio() {
     m_running = true;
 
     m_serverThread = std::make_unique<std::thread>([this]() {
+        RegisterR1DeltaThread("McpStdioServer");
         StdioLoop();
     });
 
@@ -1327,6 +1335,7 @@ void Server::StartHTTP(int port) {
     SetupHTTPRoutes();
 
     m_serverThread = std::make_unique<std::thread>([this]() {
+        RegisterR1DeltaThread("McpHttpServer");
         Msg("Starting MCP Server on port %d (Streamable HTTP)...\n", m_port);
         m_running = true;
 

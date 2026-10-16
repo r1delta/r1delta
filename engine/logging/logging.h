@@ -1,5 +1,6 @@
 #pragma once
 #include <stdarg.h>
+#include <string>
 #include "cvar.h"
 
 extern "C" __declspec(dllimport) void Msg(const char* _Printf_format_string_ pMsg, ...);
@@ -13,6 +14,17 @@ extern "C" __declspec(dllimport) void ConDMsg(const char* _Printf_format_string_
 extern "C" __declspec(dllimport) void COM_TimestampedLog(const char* _Printf_format_string_ fmt, ...);
 void InitLoggingHooks();
 void InstallR1OConsoleLoggingHooks(uintptr_t engineR1OBase);
+
+// One-line subsystem state for crash reports (defined in client/discord.cpp and
+// client/culling/region_cull.cpp). These read only state the modules own — cached atomics and
+// string constants — because the crash handler runs on the faulting thread and must not walk
+// the engine's cvar table or otherwise call into engine code.
+std::string GetDiscordCrashStateLine();
+std::string GetRegionCullCrashStateLine();
+
+// Defined in engine/hooks/minhook_checked.cpp and engine/filesystem/filecache.cpp.
+std::string GetHookStateReportText();
+std::string GetEnabledAddonsReportText();
 bool PrintR1OConVarDescriptionByName(const char* name);
 bool AreR1OFakeDediVerboseLogsEnabled();
 bool ShouldSuppressR1OFakeDediLogText(const char* text);

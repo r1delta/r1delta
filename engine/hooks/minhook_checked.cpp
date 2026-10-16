@@ -5,16 +5,27 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <string>
 
 namespace
 {
 constexpr size_t kMaxTrackedHooks = 4096;
+
+// Kept in step with the crash report's wording. A hook that was created but never enabled is
+// the interesting one: it means a feature is silently absent from the run.
+enum TrackedHookState : std::uint8_t
+{
+    kHookCreated = 0,
+    kHookCreateFailed = 1,
+    kHookEnableFailed = 2,
+};
 
 struct TrackedHook
 {
     LPVOID target;
     const char* sourceFile;
     int sourceLine;
+    std::uint8_t state;
 };
 
 SRWLOCK g_trackedHooksLock = SRWLOCK_INIT;
@@ -143,7 +154,7 @@ void ReportStatus(
     }
 }
 
-void TrackHook(LPVOID target, const char* sourceFile, int sourceLine)
+void TrackHook(LPVOID target, const char* sourceFile, int sourceLine, std::uint8_t state)
 {
     AcquireSRWLockExclusive(&g_trackedHooksLock);
 
@@ -151,6 +162,9 @@ void TrackHook(LPVOID target, const char* sourceFile, int sourceLine)
     {
         if (g_trackedHooks[i].target == target)
         {
+            // A hook can move between states after it is first seen: an enable failure must
+            // not be erased by a later successful enable, and vice versa for a retry.
+            g_trackedHooks[i].state = state;
             ReleaseSRWLockExclusive(&g_trackedHooksLock);
             return;
         }
@@ -159,7 +173,7 @@ void TrackHook(LPVOID target, const char* sourceFile, int sourceLine)
     if (g_trackedHookCount < kMaxTrackedHooks)
     {
         g_trackedHooks[g_trackedHookCount++] =
-            TrackedHook{target, sourceFile, sourceLine};
+            TrackedHook{target, sourceFile, sourceLine, state};
         ReleaseSRWLockExclusive(&g_trackedHooksLock);
         return;
     }
@@ -172,6 +186,20 @@ void TrackHook(LPVOID target, const char* sourceFile, int sourceLine)
         sourceFile,
         sourceLine,
         "tracked-hook capacity exhausted");
+}
+
+void UpdateTrackedHookState(LPVOID target, std::uint8_t state)
+{
+    AcquireSRWLockExclusive(&g_trackedHooksLock);
+    for (size_t i = 0; i < g_trackedHookCount; ++i)
+    {
+        if (g_trackedHooks[i].target == target)
+        {
+            g_trackedHooks[i].state = state;
+            break;
+        }
+    }
+    ReleaseSRWLockExclusive(&g_trackedHooksLock);
 }
 
 void UntrackHook(LPVOID target)
@@ -236,9 +264,12 @@ MH_STATUS WINAPI R1D_MH_CreateHook(
 {
     const MH_STATUS status = RawCreateHook(target, detour, original);
     if (status == MH_OK || status == MH_ERROR_ALREADY_CREATED)
-        TrackHook(target, sourceFile, sourceLine);
+        TrackHook(target, sourceFile, sourceLine, kHookCreated);
     else
+    {
+        TrackHook(target, sourceFile, sourceLine, kHookCreateFailed);
         ReportStatus("create failed", target, status, sourceFile, sourceLine);
+    }
     return status;
 }
 
@@ -263,8 +294,15 @@ MH_STATUS WINAPI R1D_MH_EnableHook(
     const MH_STATUS status = RawEnableHook(target);
     if (target != MH_ALL_HOOKS)
     {
-        if (!IsEnableSuccess(status))
+        if (IsEnableSuccess(status))
+        {
+            UpdateTrackedHookState(target, kHookCreated);
+        }
+        else
+        {
+            UpdateTrackedHookState(target, kHookEnableFailed);
             ReportStatus("enable failed", target, status, sourceFile, sourceLine);
+        }
         return status;
     }
 
@@ -296,6 +334,7 @@ MH_STATUS WINAPI R1D_MH_EnableHook(
         if (targetStatus != MH_ERROR_ENABLED)
         {
             recoveryStatus = targetStatus;
+            UpdateTrackedHookState(hooks[i].target, kHookEnableFailed);
             ReportStatus(
                 "bulk recovery failed",
                 hooks[i].target,
@@ -365,4 +404,112 @@ MH_STATUS WINAPI R1D_MH_ApplyQueued(const char* sourceFile, int sourceLine)
     if (status != MH_OK)
         ReportStatus("apply queued failed", MH_ALL_HOOKS, status, sourceFile, sourceLine);
     return status;
+}
+
+// Crash-report text: which hooks were installed and which failed. Hook state is sampled under
+// a try-lock, so a thread that is mid-create degrades this section instead of stalling the
+// crash handler.
+std::string GetHookStateReportText()
+{
+    constexpr size_t kSampleCapacity = 192;
+    constexpr size_t kMaxInstalledListed = 40;
+
+    struct Sample
+    {
+        LPVOID target;
+        const char* sourceFile;
+        int sourceLine;
+        std::uint8_t state;
+    };
+
+    Sample sample[kSampleCapacity]{};
+    size_t sampled = 0;
+    size_t created = 0;
+    size_t createFailed = 0;
+    size_t enableFailed = 0;
+    size_t tracked = 0;
+
+    if (!TryAcquireSRWLockShared(&g_trackedHooksLock))
+        return "R1Delta hooks: table busy (another thread is creating a hook)\n";
+
+    tracked = g_trackedHookCount;
+    for (size_t i = 0; i < g_trackedHookCount; ++i)
+    {
+        switch (g_trackedHooks[i].state)
+        {
+        case kHookCreateFailed: ++createFailed; break;
+        case kHookEnableFailed: ++enableFailed; break;
+        default: ++created; break;
+        }
+
+        // Failures first: they are what a report is read for.
+        if (g_trackedHooks[i].state != kHookCreated && sampled < kSampleCapacity)
+        {
+            sample[sampled].target = g_trackedHooks[i].target;
+            sample[sampled].sourceFile = g_trackedHooks[i].sourceFile;
+            sample[sampled].sourceLine = g_trackedHooks[i].sourceLine;
+            sample[sampled].state = g_trackedHooks[i].state;
+            ++sampled;
+        }
+    }
+
+    if (created <= kMaxInstalledListed)
+    {
+        for (size_t i = 0; i < g_trackedHookCount && sampled < kSampleCapacity; ++i)
+        {
+            if (g_trackedHooks[i].state != kHookCreated)
+                continue;
+            sample[sampled].target = g_trackedHooks[i].target;
+            sample[sampled].sourceFile = g_trackedHooks[i].sourceFile;
+            sample[sampled].sourceLine = g_trackedHooks[i].sourceLine;
+            sample[sampled].state = g_trackedHooks[i].state;
+            ++sampled;
+        }
+    }
+
+    ReleaseSRWLockShared(&g_trackedHooksLock);
+
+    char header[192]{};
+    std::snprintf(
+        header,
+        sizeof(header),
+        "R1Delta hooks: created=%zu createFailed=%zu enableFailed=%zu tracked=%zu\n",
+        created,
+        createFailed,
+        enableFailed,
+        tracked);
+
+    std::string result = header;
+    if (createFailed == 0 && enableFailed == 0)
+        result += "  (no hook installation failures)\n";
+
+    for (size_t i = 0; i < sampled; ++i)
+    {
+        char target[MAX_PATH + 48]{};
+        DescribeTarget(sample[i].target, target, sizeof(target));
+
+        const char* state = sample[i].state == kHookCreateFailed ? "create failed"
+            : sample[i].state == kHookEnableFailed ? "enable failed"
+            : "installed";
+
+        char line[MAX_PATH + 192]{};
+        std::snprintf(
+            line,
+            sizeof(line),
+            "  [%s] %s  %s:%d\n",
+            state,
+            target,
+            sample[i].sourceFile != nullptr ? sample[i].sourceFile : "<unknown>",
+            sample[i].sourceLine);
+        result += line;
+    }
+
+    if (created > kMaxInstalledListed)
+    {
+        char note[96]{};
+        std::snprintf(note, sizeof(note), "  (%zu installed hooks not listed)\n", created);
+        result += note;
+    }
+
+    return result;
 }

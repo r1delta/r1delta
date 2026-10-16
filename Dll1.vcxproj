@@ -231,6 +231,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="engine\logging\crashhandler.h" />
     <ClInclude Include="engine\logging\crash_report_minidump.h" />
     <ClInclude Include="engine\logging\crash_report_memory_capture.h" />
+    <ClInclude Include="engine\logging\crash_report_context.h" />
     <ClInclude Include="engine\core\materialsystem_dx11_vtf_scratch.h" />
     <ClInclude Include="engine\core\materialsystem_dx11_txaa_lifetime.h" />
     <ClInclude Include="engine\core\materialsystem_dx11_render_thread.h" />
@@ -328,6 +329,8 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="shared\script_variant_abi.h" />
     <!-- Removed: steam.h -->
     <ClInclude Include="client\rendering\surfacerender.h" />
+    <ClInclude Include="client\culling\region_cull.h" />
+    <ClInclude Include="client\culling\region_cull_core.h" />
     <ClInclude Include="engine\sv_filter.h" />
     <ClInclude Include="TableDestroyer.h" />
     <ClInclude Include="engine\memory\tctx.h" />
@@ -385,6 +388,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="client\audio\audio_cache.cpp" />
     <ClCompile Include="client\audio\audio_source.cpp" />
     <ClCompile Include="client\audio\audio_device.cpp" />
+    <ClCompile Include="client\culling\region_cull.cpp" />
     <ClCompile Include="sdk\bitbuf.cpp" />
     <ClCompile Include="client\client.cpp" />
     <ClCompile Include="engine\compression.cpp" />
@@ -393,6 +397,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="engine\logging\crashhandler.cpp" />
     <ClCompile Include="engine\logging\crash_report_minidump.cpp" />
     <ClCompile Include="engine\logging\crash_report_memory_capture.cpp" />
+    <ClCompile Include="engine\logging\crash_report_context.cpp" />
     <ClCompile Include="engine\core\materialsystem_dx11_vtf_scratch.cpp" />
     <ClCompile Include="engine\cvar.cpp" />
     <ClCompile Include="engine\dedicated.cpp" />

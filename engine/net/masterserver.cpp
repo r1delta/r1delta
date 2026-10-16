@@ -1,4 +1,5 @@
 #pragma once
+#include "crash_report_context.h"
 #include <cstdlib>
 #include <crtdbg.h>
 #include <new>
@@ -71,6 +72,7 @@ struct HeartbeatInfo {
 static ConVarR1O* delta_ms_url = nullptr;
 static ConVarR1O* host_map = nullptr;
 static ConVarR1O* hide_server = nullptr;
+static ConVarR1O* delta_ui_server_public = nullptr;
 static ConVarR1O* server_description = nullptr;
 
 // --------------------------------
@@ -86,6 +88,30 @@ void InitMasterServerCVars() {
         
         initialized = true;
     }
+    // Independent of the block above: the UI channel only exists on a client, and its absence
+    // on a dedicated host has to stay meaningful rather than triggering the re-lookup path.
+    if (!delta_ui_server_public)
+        delta_ui_server_public = CCVar_FindVar(cvarinterface, "delta_ui_server_public");
+}
+
+// Two channels, one writer each: `hide_server` carries the operator's or user's own choice
+// (console, cfg, VGUI dedicated admin config) and script never writes it, while
+// `delta_ui_server_public` carries the in-game visibility toggle's choice. Either one being
+// "public" publishes the server, and the UI channel can be revoked in the states where a
+// UI-chosen public lobby must not be listed. A dedicated host only ever consults the operator
+// channel: nothing a client UI does may change whether a dedicated server is listed.
+static bool IsServerVisibilityHidden() {
+    InitMasterServerCVars();
+
+    if (IsDedicatedServer())
+        return !(hide_server && hide_server->m_Value.m_nValue == 0);
+
+    if (hide_server && hide_server->m_Value.m_nValue == 0)
+        return false;   // explicit console/cfg choice wins, always
+    if (delta_ui_server_public && delta_ui_server_public->m_Value.m_nValue == 1)
+        return false;
+
+    return true;
 }
 
 static bool IsMasterServerPortValid(int port)
@@ -153,11 +179,11 @@ namespace MasterServerClient {
             Warning("MasterServerClient: delta_ms_url not set\n");
             return false;
         }
-        if (hide_server && hide_server->m_Value.m_nValue == 1) {
+        if (IsServerVisibilityHidden()) {
             static bool hasWarned = false;
             if (!hasWarned) {
                 hasWarned = true;
-                Warning("hide_server is 1, ignoring master server heartbeat requests\n");
+                Warning("server visibility is hidden; ignoring master server heartbeat requests\n");
             }
             return true;
         }
@@ -248,6 +274,7 @@ namespace MasterServerClient {
         std::this_thread::sleep_for(std::chrono::seconds(delayDist(gen)));
         
         std::thread([]{
+            RegisterR1DeltaThread("MasterServerHeartbeat");
             while (heartbeatThreadRunning.load(std::memory_order_acquire)) {
                 HeartbeatInfo currentHeartbeat;
                 bool isHibernating = false;
@@ -654,6 +681,7 @@ SQInteger DispatchServerListReq(HSQUIRRELVM v) {
     }
 
     std::thread([]() {
+        RegisterR1DeltaThread("MasterServerListFetch");
         MasterServerClient::GetServerList();
     }).detach();
 

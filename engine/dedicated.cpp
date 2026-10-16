@@ -1,4 +1,5 @@
 #include "core.h"
+#include "crash_report_context.h"
 #include "dedicated.h"
 #include <intrin.h>
 #include <filesystem>
@@ -25,9 +26,12 @@ void ConsoleOutputHook(void* thisptr, char* string) {
 		ConsoleOutputOriginal(thisptr, string);
 	}
 
-	// Report the message to MCP server if it's enabled
-	if (ShouldEnableMCP() && string && *string) {
-		MCPServer::Server::GetInstance().CaptureConsoleOutput(string);
+	// Report the message to the MCP server (when enabled) and to the crash-report ring
+	if (string && *string) {
+		RecordConsoleTailLine(string);
+		InitWatchedConvarsSnapshot();  // no-op once the convar snapshot is resolved
+		if (ShouldEnableMCP())
+			MCPServer::Server::GetInstance().CaptureConsoleOutput(string);
 	}
 }
 

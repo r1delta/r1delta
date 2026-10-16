@@ -10,6 +10,8 @@
 #include <vector>
 #include "core.h"
 #include "load.h"
+#include "logging.h"
+#include "crash_report_context.h"
 #include <shellapi.h>
 #include <mmsystem.h>
 #include "resource.h"
@@ -19,6 +21,7 @@
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "dbghelp.lib")
 #pragma comment(lib, "psapi.lib")
+#pragma comment(lib, "version.lib")
 const char* g_CrashMessages[] = {
     "// Northstar has cras- oh wait, wrong line.",
    // "// Disconnect: Disconnect: Authentication Failed..",
@@ -39,10 +42,312 @@ std::string GetAddressContent(DWORD64 address);
 std::string GetWindowsVersionInfo();
 std::string GetLastErrorString(DWORD errorCode);
 
+// File version of a loaded module, read from its version resource. Empty when the file is
+// unreadable or carries no version resource. Triage otherwise has to recover driver and
+// overlay versions from the minidump by hand.
+std::string GetModuleFileVersion(const char* path)
+{
+    if (!path || !*path)
+        return {};
+
+    DWORD ignored = 0;
+    const DWORD size = GetFileVersionInfoSizeA(path, &ignored);
+    // Version blocks are small; anything large is not a version resource worth stalling the
+    // crash handler for. The module enumeration also stops on an aggregate time budget.
+    if (size == 0 || size > 512u * 1024u)
+        return {};
+
+    std::vector<char> buffer(size);
+    if (!GetFileVersionInfoA(path, 0, size, buffer.data()))
+        return {};
+
+    VS_FIXEDFILEINFO* info = nullptr;
+    UINT length = 0;
+    if (!VerQueryValueA(buffer.data(), "\\", reinterpret_cast<LPVOID*>(&info), &length)
+        || !info || length < sizeof(VS_FIXEDFILEINFO) || info->dwSignature != 0xFEEF04BD)
+        return {};
+
+    char text[64];
+    sprintf_s(text, "%u.%u.%u.%u",
+        HIWORD(info->dwFileVersionMS), LOWORD(info->dwFileVersionMS),
+        HIWORD(info->dwFileVersionLS), LOWORD(info->dwFileVersionLS));
+    return text;
+}
+
 typedef NTSTATUS(WINAPI* RtlGetVersionPtr)(PRTL_OSVERSIONINFOW);
+
+// Stage tracing for the crash handler itself. A dedicated crash once left the handler spinning
+// in allocator warnings instead of writing a report, and a debugger cannot observe it: the
+// handler steps aside (EXCEPTION_CONTINUE_SEARCH) whenever one is attached, so the process
+// terminates before the loop is visible. These lines go to crash\r1delta_crash_trace.txt
+// through Win32 only, truncated per crash, so the last line names the stage that never
+// returned. Six small appends during a crash are cheap enough to keep permanently.
+void CrashTraceStage(const char* stage)
+{
+    static HANDLE traceFile = INVALID_HANDLE_VALUE;
+    static bool initialised = false;
+
+    if (!initialised) {
+        char modulePath[MAX_PATH] = {};
+        DWORD length = GetModuleFileNameA(nullptr, modulePath, MAX_PATH);
+        char* separator = length ? strrchr(modulePath, '\\') : nullptr;
+        if (separator) separator[1] = '\0';
+
+        char directory[MAX_PATH];
+        sprintf_s(directory, "%scrash", modulePath);
+        CreateDirectoryA(directory, nullptr);
+
+        char tracePath[MAX_PATH];
+        sprintf_s(tracePath, "%s\\r1delta_crash_trace.txt", directory);
+        traceFile = CreateFileA(tracePath, GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+                                CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (traceFile == INVALID_HANDLE_VALUE)
+            return;   // not marked initialised: the next stage tries again
+        initialised = true;
+    }
+
+    if (traceFile == INVALID_HANDLE_VALUE)
+        return;
+
+    char line[192];
+    const int written = sprintf_s(line, "[%lu] %s\r\n", GetTickCount(), stage);
+    DWORD ignored = 0;
+    if (written > 0)
+        WriteFile(traceFile, line, static_cast<DWORD>(written), &ignored, nullptr);
+}
+
+#define CRASH_TRACE(stage) CrashTraceStage(stage)
+
+// --- Crash-report context ----------------------------------------------------------------
+// Everything below runs inside the crash handler on the faulting thread: no locks another
+// thread can hold, no calls into engine code that could be the faulting subsystem, and every
+// pointer taken from engine state is read under a guard.
+
+struct GpuDescription {
+    std::string model;
+    unsigned long long vramBytes = 0;
+};
+
+bool QueryPrimaryGpuDescription(GpuDescription& out)
+{
+    HKEY key = nullptr;
+    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE,
+        "SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}\\0000",
+        0, KEY_READ, &key) != ERROR_SUCCESS)
+        return false;
+
+    char description[256] = {};
+    DWORD size = sizeof(description);
+    if (RegQueryValueExA(key, "DriverDesc", nullptr, nullptr, reinterpret_cast<LPBYTE>(description), &size) == ERROR_SUCCESS)
+        out.model = description;
+
+    // HardwareInformation.qwMemorySize is a REG_QWORD; reading it as a DWORD reports 0 for
+    // cards with more than 4 GB of dedicated memory.
+    unsigned long long vramBytes = 0;
+    size = sizeof(vramBytes);
+    if (RegQueryValueExA(key, "HardwareInformation.qwMemorySize", nullptr, nullptr, reinterpret_cast<LPBYTE>(&vramBytes), &size) == ERROR_SUCCESS)
+        out.vramBytes = vramBytes;
+
+    RegCloseKey(key);
+    return !out.model.empty();
+}
+
+// Reads a NUL-terminated string out of engine memory without letting a bad pointer take the
+// crash handler down with it (implemented in engine/logging/crash_report_context.cpp).
+
+// The engine string at that offset is a multi-line block ("Map: x\nGame: y\nBuild: n\n..."),
+// so reports need one token per line: take the value of the "Map:" field, else the first
+// non-empty line.
+std::string GetCurrentMapForReport()
+{
+    if (!G_engine) return "-";
+
+    char text[256];
+    if (!TryReadEngineString(static_cast<uintptr_t>(G_engine) + 0x2291560, text, sizeof(text)))
+        return "-";
+
+    const char* cursor = text;
+    while (*cursor != '\0') {
+        const char* lineEnd = cursor;
+        while (*lineEnd != '\0' && *lineEnd != '\n' && *lineEnd != '\r') ++lineEnd;
+
+        const std::size_t lineLength = static_cast<std::size_t>(lineEnd - cursor);
+        if (lineLength != 0) {
+            if (lineLength > 4 && _strnicmp(cursor, "Map:", 4) == 0) {
+                const char* value = cursor + 4;
+                while (value < lineEnd && (*value == ' ' || *value == '\t')) ++value;
+                const std::string map(value, static_cast<std::size_t>(lineEnd - value));
+                return map.empty() ? "-" : map;
+            }
+            return std::string(cursor, lineLength);
+        }
+
+        if (*lineEnd == '\r' && *(lineEnd + 1) == '\n') ++lineEnd;
+        cursor = (*lineEnd == '\0') ? lineEnd : lineEnd + 1;
+    }
+    return "-";
+}
+
+const char* GetRuntimeModeLabel()
+{
+    if (G_is_dedi) return G_is_r1o_dedi ? "r1o-dedi" : "legacy-dedi";
+    if (G_client) return "client";
+    return "unknown";
+}
+
+DWORD GetProcessThreadCount()
+{
+    const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) return 0;
+
+    DWORD count = 0;
+    const DWORD pid = GetCurrentProcessId();
+    THREADENTRY32 entry = {};
+    entry.dwSize = sizeof(entry);
+    if (Thread32First(snapshot, &entry)) {
+        do {
+            if (entry.th32OwnerProcessID == pid) ++count;
+        } while (Thread32Next(snapshot, &entry));
+    }
+    CloseHandle(snapshot);
+    return count;
+}
+
+// "module.dll+0x1A2B3F" — the form triage greps for and can look up in a symbol file. Built
+// from a Toolhelp snapshot rather than the dbghelp module table, because the summary line is
+// written before the symbol handler is initialized.
+std::string GetModuleRelativeAddress(DWORD64 address)
+{
+    const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, GetCurrentProcessId());
+    if (snapshot != INVALID_HANDLE_VALUE) {
+        // Same trick the module dump uses: the tchar macros map MODULEENTRY32 to the wide
+        // variant, and module names here are plain ASCII.
+#undef MODULEENTRY32
+#undef Module32First
+#undef Module32Next
+        MODULEENTRY32 module = {};
+        module.dwSize = sizeof(module);
+        if (Module32First(snapshot, &module)) {
+            do {
+                const DWORD64 base = reinterpret_cast<DWORD64>(module.modBaseAddr);
+                if (address >= base && address < base + module.modBaseSize) {
+                    char offset[32];
+                    sprintf_s(offset, "+0x%llX", static_cast<unsigned long long>(address - base));
+                    std::string result = module.szModule;
+                    result += offset;
+                    CloseHandle(snapshot);
+                    return result;
+                }
+            } while (Module32Next(snapshot, &module));
+        }
+        CloseHandle(snapshot);
+    }
+
+    char raw[32];
+    sprintf_s(raw, "0x%llX", address);
+    return raw;
+}
+
+std::string GetGraphicsDriverForReport()
+{
+    static const char* const kDriverModules[] = {
+        "nvwgf2umx.dll", "nvldumdx.dll", "nvwgf2um.dll",
+        "atidxx64.dll", "amdxc64.dll",
+        "igd10iumd64.dll", "igdumdim64.dll", "igvk64.dll",
+    };
+
+    for (const char* moduleName : kDriverModules) {
+        const HMODULE module = GetModuleHandleA(moduleName);
+        if (!module) continue;
+
+        char path[MAX_PATH];
+        if (!GetModuleFileNameA(module, path, MAX_PATH)) continue;
+
+        const std::string version = GetModuleFileVersion(path);
+        return std::string(moduleName) + (version.empty() ? " (no version resource)" : " " + version);
+    }
+    return "-";
+}
+
+// Process-side resource counters. The system section above reports machine totals; these are
+// what the crashing process itself held, which is what the memory-pressure crash families need.
+std::string GetProcessCountersText()
+{
+    std::stringstream ss;
+
+    PROCESS_MEMORY_COUNTERS_EX memory = {};
+    memory.cb = sizeof(memory);
+    if (GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory), sizeof(memory))) {
+        ss << "Working Set: " << (memory.WorkingSetSize / (1024 * 1024)) << " MB"
+           << " (peak " << (memory.PeakWorkingSetSize / (1024 * 1024)) << " MB)"
+           << ", Private: " << (memory.PrivateUsage / (1024 * 1024)) << " MB"
+           << ", Pagefile: " << (memory.PagefileUsage / (1024 * 1024)) << " MB" << std::endl;
+    }
+    else {
+        ss << "Working Set: [unavailable]" << std::endl;
+    }
+
+    DWORD handles = 0;
+    if (GetProcessHandleCount(GetCurrentProcess(), &handles))
+        ss << "Handle Count: " << handles << std::endl;
+
+    const DWORD gdiObjects = GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS);
+    const DWORD userObjects = GetGuiResources(GetCurrentProcess(), GR_USEROBJECTS);
+    if (gdiObjects != 0 || userObjects != 0)
+        ss << "GDI Objects: " << gdiObjects << ", USER Objects: " << userObjects << std::endl;
+
+    MEMORYSTATUSEX status = {};
+    status.dwLength = sizeof(status);
+    if (GlobalMemoryStatusEx(&status)) {
+        ss << "System Memory: " << status.dwMemoryLoad << "% used, "
+           << ((status.ullTotalPhys - status.ullAvailPhys) / (1024ull * 1024ull)) << " of "
+           << (status.ullTotalPhys / (1024ull * 1024ull)) << " MB physical, commit "
+           << ((status.ullTotalPageFile - status.ullAvailPageFile) / (1024ull * 1024ull)) << " of "
+           << (status.ullTotalPageFile / (1024ull * 1024ull)) << " MB" << std::endl;
+    }
+
+    return ss.str();
+}
+
+// One grep-able line so a corpus of reports can be bucketed without parsing the sections.
+std::string BuildCrashSummaryLine(EXCEPTION_POINTERS* exInfo)
+{
+    GpuDescription gpu;
+    QueryPrimaryGpuDescription(gpu);
+    const std::string map = GetCurrentMapForReport();
+    const std::string driver = GetGraphicsDriverForReport();
+    const std::string fault = GetModuleRelativeAddress(
+        reinterpret_cast<DWORD64>(exInfo->ExceptionRecord->ExceptionAddress));
+
+    char line[1024];
+    sprintf_s(line,
+        "SUMMARY: version=%s commit=%s mode=%s map=%s uptime=%llus threads=%lu gpu=\"%s\" driver=\"%s\" fault=%s tid=%lu",
+        R1D_VERSION,
+        (R1D_COMMIT[0] != '\0' ? R1D_COMMIT : "unknown"),
+        GetRuntimeModeLabel(),
+        map.c_str(),
+        GetProcessUptimeSeconds(),
+        static_cast<unsigned long>(GetProcessThreadCount()),
+        (gpu.model.empty() ? "unknown" : gpu.model.c_str()),
+        driver.c_str(),
+        fault.c_str(),
+        static_cast<unsigned long>(GetCurrentThreadId()));
+    return line;
+}
 // Global crash handler function
 LONG WINAPI CustomCrashHandler(EXCEPTION_POINTERS* exInfo)
 {
+    // Before anything else: everything that would log, allocate or feed console/MCP pipelines
+    // during teardown has to stand down, or one crash turns into a storm of warnings and
+    // allocations that hangs the handler (seen in dedicated crashes). A second entry (a fault
+    // inside the handler itself) returns immediately rather than recursing.
+    static std::atomic<bool> handling{ false };
+    if (handling.exchange(true, std::memory_order_acq_rel))
+        return EXCEPTION_EXECUTE_HANDLER;
+
+    SetCrashHandlerActive();
+    CRASH_TRACE("handler entry");
+
     if (IsDebuggerPresent())
         return EXCEPTION_CONTINUE_SEARCH;
     // Capture GetLastError as early as possible
@@ -139,10 +444,23 @@ LONG WINAPI CustomCrashHandler(EXCEPTION_POINTERS* exInfo)
     sprintf_s(filename, "r1delta_crash_%lld_%lu.log", (long long)currentTime, pid);
     sprintf_s(filepath, "%s\\%s", crashesDir, filename);
     std::string minidumpSection;
+    CRASH_TRACE("minidump build start");
     r1delta::logging::crash_report_minidump::BuildCrashReportMinidumpSection(
         exInfo,
         filepath,
         minidumpSection);
+    CRASH_TRACE("minidump build done");
+
+    // Safety net: the minidump section carries the dump, and every section below it can still
+    // fail (a provider fault or an allocation failure) before the real write happens. Writing it
+    // first means the dump survives that, and the final write truncates this placeholder.
+    {
+        std::ofstream emergency(filepath);
+        if (emergency.is_open()) {
+            emergency << minidumpSection;
+            emergency.flush();
+        }
+    }
     srand(time(NULL));
     std::stringstream crashLog;
     // Pick a random message from the array
@@ -161,7 +479,8 @@ LONG WINAPI CustomCrashHandler(EXCEPTION_POINTERS* exInfo)
     crashLog << "=== Crash Report ===" << std::endl;
     crashLog << "Timestamp: " << currentTime << " (" << timeStr << ")" << std::endl;
     crashLog << "Process ID: " << pid << std::endl;
-    crashLog << "Build Date: " << __DATE__ << " " << __TIME__ << std::endl << std::endl;;
+    crashLog << "Build Date: " << __DATE__ << " " << __TIME__ << std::endl;
+    crashLog << BuildCrashSummaryLine(exInfo) << std::endl << std::endl;
     // Add last error info
     crashLog << "=== Last Error Info ===" << std::endl;
     crashLog << "Error Code: " << lastError << " (0x" << std::hex << lastError << ")" << std::dec << std::endl;
@@ -206,10 +525,48 @@ LONG WINAPI CustomCrashHandler(EXCEPTION_POINTERS* exInfo)
 
     if (G_engine) {
         crashLog << "=== Steam Crash Comment ===" << std::endl;
-        crashLog << (char*)(G_engine + 0x2291560) << std::endl;
+        char steamComment[512];
+        if (TryReadEngineString(static_cast<uintptr_t>(G_engine) + 0x2291560, steamComment, sizeof(steamComment)))
+            crashLog << steamComment << std::endl;
+        else
+            crashLog << "(unreadable)" << std::endl;
     }
     crashLog << std::endl;
+
+    // R1Delta's own view of the run. The Steam comment above depends on engine state and comes
+    // out empty in exactly the crashes where the engine is already gone.
+    crashLog << "=== R1Delta State ===" << std::endl;
+    crashLog << "Runtime Mode: " << GetRuntimeModeLabel() << std::endl;
+    crashLog << "Current Map: " << GetCurrentMapForReport() << std::endl;
+    crashLog << "Graphics Driver: " << GetGraphicsDriverForReport() << std::endl;
+
+    const unsigned long faultingThread = GetCurrentThreadId();
+    const char* faultingThreadName = GetR1DeltaThreadName(faultingThread);
+    crashLog << "Faulting Thread: " << faultingThread << " ("
+             << (faultingThreadName != nullptr ? faultingThreadName : "unregistered: main or engine-owned")
+             << ") of " << GetProcessThreadCount() << " threads" << std::endl;
+
+    crashLog << "Named R1Delta Threads:" << std::endl;
+    crashLog << GetR1DeltaThreadCensusText();
+    crashLog << GetDiscordCrashStateLine() << std::endl;
+    crashLog << GetRegionCullCrashStateLine() << std::endl;
+    crashLog << GetLetterboxHookStateLine() << std::endl;
+    crashLog << GetProcessCountersText();
+    crashLog << "Watched Convars:" << std::endl << GetWatchedConvarsText() << std::endl;
+
+    crashLog << "=== Hooks ===" << std::endl;
+    crashLog << GetHookStateReportText() << std::endl;
+
+    crashLog << "=== Addons ===" << std::endl;
+    crashLog << GetEnabledAddonsReportText() << std::endl;
+
+    crashLog << "=== Recent Content Files (last " << kRecentFileSlots << ") ===" << std::endl;
+    crashLog << GetRecentFilesText() << std::endl;
+
+    crashLog << "=== Recent Console (last " << kConsoleTailSlots << " lines) ===" << std::endl;
+    crashLog << GetConsoleTailText() << std::endl;
     // Write crash log to file
+    CRASH_TRACE("report write start");
     std::ofstream logFile(filepath);
     if (logFile.is_open()) {
         logFile << crashLog.str();
@@ -218,6 +575,7 @@ LONG WINAPI CustomCrashHandler(EXCEPTION_POINTERS* exInfo)
             ? r1delta::logging::crash_report_minidump::kUnavailableSection
             : minidumpSection);
         logFile.close();
+        CRASH_TRACE("report write done");
         if (!IsDedicatedServer()) {
 
             char cmdLine[1024];
@@ -273,6 +631,7 @@ LONG WINAPI CustomCrashHandler(EXCEPTION_POINTERS* exInfo)
     // Terminate the process
     TerminateProcess(GetCurrentProcess(), 1);
 
+    CRASH_TRACE("handler exit");
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
@@ -681,20 +1040,31 @@ void GetLoadedModules(std::stringstream& ss)
 
     HANDLE process = GetCurrentProcess();
     int moduleCount = 0;
+    // Version resources are read from disk per module; on a slow or unavailable path that can
+    // stall the handler, so the lookups stop once the budget is spent and the rest of the list
+    // still gets written.
+    const ULONGLONG versionBudgetDeadline = GetTickCount64() + 750ull;
 
     do {
         MODULEINFO moduleInfo;
+        const std::string fileVersion = GetTickCount64() < versionBudgetDeadline
+            ? GetModuleFileVersion(me32.szExePath)
+            : std::string();
         if (GetModuleInformation(process, me32.hModule, &moduleInfo, sizeof(moduleInfo))) {
             ss << "[" << std::setw(2) << moduleCount++ << "] "
                 << me32.szModule << " (Base: 0x" << std::hex << (ULONG_PTR)me32.hModule
                 << ", Size: 0x" << moduleInfo.SizeOfImage
                 << ", Region: 0x" << (ULONG_PTR)me32.hModule << " - 0x"
-                << (ULONG_PTR)me32.hModule + moduleInfo.SizeOfImage << ")" << std::dec << std::endl;
+                << (ULONG_PTR)me32.hModule + moduleInfo.SizeOfImage << ")"
+                << ", Version: " << (fileVersion.empty() ? "-" : fileVersion)
+                << std::dec << std::endl;
         }
         else {
             ss << "[" << std::setw(2) << moduleCount++ << "] "
                 << me32.szModule << " (Base: 0x" << std::hex << (ULONG_PTR)me32.hModule
-                << ", Size: Unknown)" << std::dec << std::endl;
+                << ", Size: Unknown)"
+                << ", Version: " << (fileVersion.empty() ? "-" : fileVersion)
+                << std::dec << std::endl;
         }
     } while (Module32Next(hModuleSnap, &me32));
 
@@ -764,23 +1134,12 @@ void GetSystemInfoEnhanced(std::stringstream& ss)
         ss << "Disk Free Space (" << driveLetter << "): " << freeBytesAvailable.QuadPart / (1024 * 1024 * 1024) << " GB" << std::endl;
     }
 
-    // Try to get GPU info from registry
-    HKEY hKeyDisplay;
-    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}\\0000", 0, KEY_READ, &hKeyDisplay) == ERROR_SUCCESS) {
-        char gpuDesc[256];
-        DWORD bufSize = sizeof(gpuDesc);
-        if (RegQueryValueExA(hKeyDisplay, "DriverDesc", NULL, NULL, (LPBYTE)gpuDesc, &bufSize) == ERROR_SUCCESS) {
-            ss << "GPU Model: " << gpuDesc << std::endl;
-        }
-
-        // Try to get video memory info
-        DWORD dedicatedVideoMemory = 0;
-        bufSize = sizeof(dedicatedVideoMemory);
-        if (RegQueryValueExA(hKeyDisplay, "HardwareInformation.qwMemorySize", NULL, NULL, (LPBYTE)&dedicatedVideoMemory, &bufSize) == ERROR_SUCCESS) {
-            ss << "VRAM: " << dedicatedVideoMemory / (1024 * 1024) << " MB" << std::endl;
-        }
-
-        RegCloseKey(hKeyDisplay);
+    // GPU identity and dedicated video memory from the display class registry key
+    GpuDescription gpu;
+    if (QueryPrimaryGpuDescription(gpu)) {
+        ss << "GPU Model: " << gpu.model << std::endl;
+        if (gpu.vramBytes != 0)
+            ss << "VRAM: " << (gpu.vramBytes / (1024ull * 1024ull)) << " MB" << std::endl;
     }
     else {
         ss << "GPU Model: [Unable to retrieve GPU information]" << std::endl;
@@ -805,6 +1164,14 @@ void GetSystemInfoEnhanced(std::stringstream& ss)
         }
         CloseHandle(hExe);
     }
+
+    // Provenance that is otherwise only visible in a debugger or the launcher's log: the
+    // PEB command line is empty when the launcher injected its arguments internally.
+    const char* launchArgs = GetR1DeltaLaunchArgs();
+    ss << "R1Delta Compatibility Version: " << R1D_VERSION
+       << " (commit " << (R1D_COMMIT[0] != '\0' ? R1D_COMMIT : "unknown") << ")" << std::endl;
+    ss << "R1Delta Launch Args: " << ((launchArgs && *launchArgs) ? launchArgs : "(none)") << std::endl;
+    ss << "Process Command Line: " << GetCommandLineA() << std::endl;
 }
 
 namespace

@@ -2,6 +2,7 @@
 
 #include "core.h"
 #include "cvar.h"
+#include "crash_report_context.h"
 #include "logging.h"
 
 #include <Windows.h>
@@ -1082,6 +1083,7 @@ private:
 
     void WorkerLoop()
     {
+        RegisterR1DeltaThread("ScriptErrorTelemetry");
         for (;;) {
             Report report;
             {

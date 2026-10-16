@@ -1475,7 +1475,7 @@ static void DrawLegacyWatermark()
     wchar_t watermarkText1[512];
     G_localizeIface->ConvertANSIToUnicode(ansiBuffer1, watermarkText1, sizeof(watermarkText1));
 
-    const char* urlString = "Release candidate 2";
+    const char* urlString = "Release candidate 3";
     const char* secondData = urlString;
     if (fpsStringData[0] != '\x00') {
         secondData = fpsStringData;

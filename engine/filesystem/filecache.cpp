@@ -5,6 +5,7 @@
 #include <iostream> // For std::cerr (replace with Msg/Warning)
 
 #include "logging.h"
+#include "crash_report_context.h"
 #include <array>
 
 FileCache::FileCache() {
@@ -383,6 +384,10 @@ bool FileCache::TryReplaceFile(const char* pszRelativeFilePath) {
         return false;
     }
 
+    // Crash-report breadcrumb: the engine asks here for every content path it is about to
+    // open, so the ring shows what the game was loading when it died.
+    RecordRecentFileOpen(pszRelativeFilePath);
+
 
     struct S8 {
         const char* ptr;
@@ -527,6 +532,38 @@ bool FileCache::TryReplaceFile(const char* pszRelativeFilePath) {
     } // Release shared lock
 
     return false; // Not found in any checked location
+}
+
+bool FileCache::TrySnapshotEnabledAddons(std::vector<std::string>& out) const {
+    if (!TryAcquireSRWLockShared(&cacheMutex))
+        return false;
+    out = addonsFolderCache;
+    ReleaseSRWLockShared(&cacheMutex);
+    return true;
+}
+
+// Crash-report text: which content addons the run had enabled. Read under a try-lock so a
+// background rescan cannot stall the crash handler.
+std::string GetEnabledAddonsReportText() {
+    std::vector<std::string> addons;
+    if (!FileCache::GetInstance().TrySnapshotEnabledAddons(addons))
+        return "R1Delta addons: cache busy (background scan in progress)\n";
+
+    if (addons.empty())
+        return "R1Delta addons: none enabled\n";
+
+    constexpr std::size_t kMaxListed = 20;
+    const std::size_t listed = addons.size() < kMaxListed ? addons.size() : kMaxListed;
+
+    std::string result = "R1Delta addons: " + std::to_string(addons.size()) + " enabled\n";
+    for (std::size_t i = 0; i < listed; ++i) {
+        result += "  ";
+        result += addons[i];
+        result += '\n';
+    }
+    if (addons.size() > listed)
+        result += "  ... " + std::to_string(addons.size() - listed) + " more\n";
+    return result;
 }
 
 FileCache::ReadLease FileCache::AcquireReadLease() {

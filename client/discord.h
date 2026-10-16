@@ -1,4 +1,6 @@
-#pragma once  
+#pragma once
+
+#include <string>  
 #include <discord-game-sdk/discord.h>  
 #include "logging.h"  
 #include "squirrel.h"
@@ -40,6 +42,8 @@ struct DiscordCommandQueue {
 };
 
 extern void DiscordThread();
+extern void DiscordStatusCommand(const CCommand& args);
+extern std::string GetDiscordStatusLine();
 SQInteger SendDiscordUI(HSQUIRRELVM v);
 SQInteger SendDiscordClient(HSQUIRRELVM v);
 extern void DiscordAuthCommand(const CCommand& args);

@@ -33,6 +33,7 @@
 // =========-----===--------==------------------------==++********#*#####**#######*########%%
 
 #include "core.h"
+#include "crash_report_context.h"
 
 #include "filesystem.h"
 #include <iostream>
@@ -97,7 +98,10 @@ std::atomic_flag threadStarted = ATOMIC_FLAG_INIT;
 
 void StartFileCacheThread() {
     if (!threadStarted.test_and_set()) {
-        std::thread([]() { FileCache::GetInstance().UpdateCache(); }).detach();
+        std::thread([]() {
+            RegisterR1DeltaThread("FileCacheScan");
+            FileCache::GetInstance().UpdateCache();
+        }).detach();
     }
 }
 class FastFileSystemHook {

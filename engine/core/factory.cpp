@@ -11897,7 +11897,21 @@ static __int64 __fastcall R1OCbuf_Dispatch(__int64 context, __int64 command, int
 				Status_ConMsg("%s: native R1O IP ban list updated for \"%s\" (%d total).\n", nameCopy, ipTarget, after.count);
 			}
 			else {
-				Status_ConMsg("%s: native R1O IP ban list was unchanged for \"%s\".\n", nameCopy, ipTarget);
+				// Something re-issues addip/banip for addresses the native list cannot hold (a
+				// bot or replay client normalizes to ":"), and one line per attempt flooded the
+				// console. Report an unchanged result only for a target that normalizes to a real
+				// address, and at most once every few seconds for the same target.
+				static char lastUnchangedIpTarget[64] = {};
+				static DWORD lastUnchangedIpTick = 0;
+				const DWORD now = GetTickCount();
+				const bool repeatedTarget = lastUnchangedIpTarget[0] != '\0'
+					&& _stricmp(lastUnchangedIpTarget, ipTarget) == 0
+					&& (now - lastUnchangedIpTick) < 5000u;
+				if (hasNormalizedIpTarget && !repeatedTarget) {
+					_snprintf_s(lastUnchangedIpTarget, sizeof(lastUnchangedIpTarget), _TRUNCATE, "%s", ipTarget);
+					lastUnchangedIpTick = now;
+					Status_ConMsg("%s: native R1O IP ban list was unchanged for \"%s\".\n", nameCopy, ipTarget);
+				}
 			}
 		}
 	}
@@ -17861,6 +17875,7 @@ static void* R1OWrappedCVarInterface(const char* name, int* returnCode)
 	OriginalCCVar_FindCommandBase = reinterpret_cast<decltype(OriginalCCVar_FindCommandBase)>(r1vtable[13]);
 	OriginalCCVar_FindCommandBase2 = reinterpret_cast<decltype(OriginalCCVar_FindCommandBase2)>(r1vtable[14]);
 	OriginalCCVar_FindVar = reinterpret_cast<decltype(OriginalCCVar_FindVar)>(r1vtable[15]);
+	PublishCvarInterface();
 	OriginalCCVar_FindVar2 = reinterpret_cast<decltype(OriginalCCVar_FindVar2)>(r1vtable[16]);
 	OriginalCCVar_FindCommand = reinterpret_cast<decltype(OriginalCCVar_FindCommand)>(r1vtable[17]);
 	OriginalCCVar_FindCommand2 = reinterpret_cast<decltype(OriginalCCVar_FindCommand2)>(r1vtable[18]);
@@ -20118,6 +20133,8 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 		OriginalCCVar_FindCommandBase = reinterpret_cast<decltype(OriginalCCVar_FindCommandBase)>(r1vtable[13]);
 		OriginalCCVar_FindCommandBase2 = reinterpret_cast<decltype(OriginalCCVar_FindCommandBase2)>(r1vtable[14]);
 		OriginalCCVar_FindVar = reinterpret_cast<decltype(OriginalCCVar_FindVar)>(r1vtable[15]);
+		PublishCvarInterface();
+	PublishCvarInterface();
 		OriginalCCVar_FindVar2 = reinterpret_cast<decltype(OriginalCCVar_FindVar2)>(r1vtable[16]);
 		OriginalCCVar_FindCommand = reinterpret_cast<decltype(OriginalCCVar_FindCommand)>(r1vtable[17]);
 		OriginalCCVar_FindCommand2 = reinterpret_cast<decltype(OriginalCCVar_FindCommand2)>(r1vtable[18]);

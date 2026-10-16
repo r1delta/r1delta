@@ -13,13 +13,13 @@ env:
   BUILD_PATH: ${{ github.workspace }}/build
   OUTPUT_PATH: ${{ github.workspace }}/output
   SYMBOL_PATH: ${{ github.workspace }}/symbols
-  CORE_REF: 23210b066251b426f68d0addd04bee2881ed7094
+  CORE_REF: 121629a0deb2c9858f5b239aecd016218a7800b0
   VCPKG_BINARY_SOURCES: "clear;files,D:/a/r1delta/vcpkg,readwrite"
   BUILD_CONFIGURATION: Release
   MSBUILD_DEBUG_TYPE: pdbonly
   NUSPEC_FILE: R1Delta.nuspec
   PACKAGE_NAME: R1Delta
-  DISPLAY_VERSION: "v3.141592653"
+  DISPLAY_VERSION: "v3.-1"
 
 permissions:
   contents: write
@@ -78,6 +78,27 @@ jobs:
             '${{ github.workspace }}/vcpkg/downloads'
           )) {
             New-Item -ItemType Directory -Force -Path $path | Out-Null
+          }
+
+      - name: Stamp source revision into r1d_version.h
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $header = '${{ github.workspace }}/r1d_version.h'
+          $content = Get-Content -LiteralPath $header -Raw
+          $definitions = [regex]::Matches($content, '(?m)^\s*#define\s+R1D_COMMIT\s+"([^"]*)"\s*$')
+          if ($definitions.Count -ne 1) {
+            throw "r1d_version.h contains $($definitions.Count) source-revision definitions; expected exactly one."
+          }
+
+          $sha = '${{ github.sha }}'
+          $updated = $content -replace '(?m)^(#define\s+R1D_COMMIT\s+)".*"', ('$1"' + $sha + '"')
+          Set-Content -LiteralPath $header -Value $updated
+
+          if (-not (Select-String -LiteralPath $header -Quiet -Pattern (
+            '#define\s+R1D_COMMIT\s+"' + [regex]::Escape($sha) + '"'
+          ))) {
+            throw 'The source revision was not stamped into r1d_version.h.'
           }
 
       - name: Inject Git tag into compatibility version
@@ -244,6 +265,7 @@ jobs:
             client_port_override_tests = 'tests/client_port_override_tests.vcxproj'
             ffa_targeting_tests = 'tests/ffa_targeting_tests.vcxproj'
             p2p_codec_tests = 'tests/p2p_codec_tests.vcxproj'
+            region_cull_tests = 'tests/region_cull_tests.vcxproj'
           }
 
           foreach ($entry in $projects.GetEnumerator()) {
@@ -283,7 +305,8 @@ jobs:
             'vphysics_parallel_guard_tests',
             'client_port_override_tests',
             'ffa_targeting_tests',
-            'p2p_codec_tests'
+            'p2p_codec_tests',
+            'region_cull_tests'
           )
           foreach ($test in $tests) {
             $executable = Join-Path '${{ env.BUILD_PATH }}' "tests/$test/$test.exe"

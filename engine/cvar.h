@@ -221,6 +221,14 @@ union callbackunion
 };
 extern uintptr_t cvarinterface;
 
+// The cvar interface and the vstdlib entry points it needs are assigned by several init paths
+// while other threads (the Discord worker, the master-server heartbeat) poll for readiness.
+// Every assignment site calls PublishCvarInterface() once its pointers are in place, and readers
+// wait on IsCvarInterfacePublished(), which establishes the happens-before edge instead of
+// racing plain globals.
+void PublishCvarInterface();
+bool IsCvarInterfacePublished();
+
 /* 268 */
 union completionunion
 {

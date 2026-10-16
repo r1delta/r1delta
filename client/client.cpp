@@ -10,6 +10,7 @@
 #include "squirrel.h"
 #include "ffa_targeting.h"
 #include "rendering/surfacerender.h"
+#include "culling/region_cull.h"
 
 typedef void (*sub_18027F2C0Type)(__int64 a1, const char *a2, void *a3);
 sub_18027F2C0Type sub_18027F2C0Original;
@@ -789,6 +790,8 @@ void InitClient()
     // MH_CreateHook((LPVOID)(client + 0x47FED0), &WeaponSprayFunction2, reinterpret_cast<LPVOID*>(&oWeaponSprayFunction2));
     MH_CreateHook((LPVOID)(client + 0x3C5830), &LoadingProgress__SetupControlStates, reinterpret_cast<LPVOID *>(&oLoadingProgress__SetupControlStates));
     MH_CreateHook((LPVOID)(client + 0x689A70), &vgui__PHandle__Get_Hook, reinterpret_cast<LPVOID *>(&vgui__PHandle__Get_Original));
+
+    InitRegionCullHooks();
 
     if (IsNoOrigin())
 

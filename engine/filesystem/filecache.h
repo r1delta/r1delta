@@ -137,6 +137,11 @@ public:
     //bool FileExists(const std::string& filePath); // Checks exact absolute path match
     bool TryReplaceFile(const char* pszRelativeFilePath); // Checks relative paths in specific locations
     ReadLease AcquireReadLease();
+
+    // Crash-report accessor: copies the enabled addon directories without blocking. Returns
+    // false while the cache lock is held (background scan in progress), because a crash report
+    // must not stall waiting for another thread.
+    bool TrySnapshotEnabledAddons(std::vector<std::string>& out) const;
     bool ResolveReplacementFile(
         const ReadLease& lease,
         const char* pszRelativeFilePath,

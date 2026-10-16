@@ -118,6 +118,12 @@ static bool s_consoleCommandsUnhidden = false;
 void Cbuf_AddText(int a1, const char* a2, unsigned int a3) {
 	if (IsDedicatedServer() && !Cbuf_AddTextOriginal)
 		Cbuf_AddTextOriginal = (Cbuf_AddTextType)(G_engine_ds + 0x72d70);
+	if (!Cbuf_AddTextOriginal) {
+		// Reachable before the engine hooks are created: the Discord SDK can deliver a join
+		// callback from its own thread while the client is still initialising.
+		Warning("R1Delta: Cbuf_AddText is not installed yet; dropping command\n");
+		return;
+	}
 	ZoneScoped;
 	ZoneText(a2, strlen(a2));
 	
@@ -967,3 +973,4 @@ void UTIL_LogPrintf(char* fmt, ...)
         UTIL_ClientPrintAll(2, tempString);
     }
 }
+

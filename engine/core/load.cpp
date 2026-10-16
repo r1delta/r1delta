@@ -1743,6 +1743,8 @@ static bool ResolveSetConvarString()
 		return false;
 
 	SetConvarStringOriginal = reinterpret_cast<SetConvarString_t>(vstdlibBase + 0x24DE0);
+	if (cvarinterface && OriginalCCVar_FindVar)
+		PublishCvarInterface();
 	return true;
 }
 
@@ -8287,6 +8289,7 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		RegisterConCommand("toggleconsole", ToggleConsoleCommand, "Toggles the console", (1 << 17));
 		RegisterConCommand("clear", ClearConsoleCommand, "Clears the console", (1 << 17));
 		RegisterConCommand("delta_start_discord_auth", DiscordAuthCommand, "Starts the discord auth process", 0);
+		RegisterConCommand("r1delta_discord_status", DiscordStatusCommand, "Report the Discord integration state (cvar gate, platform_user_id)", 0);
 		RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
 
 		// Register slot commands
@@ -9210,7 +9213,18 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 			FCVAR_ARCHIVE);
 		R1DAssert(hudwarpConVars.useGpu);
 		R1DAssert(hudwarpConVars.disable);
-		RegisterConVar("hide_server", "0", FCVAR_NONE, "Whether the server should be hidden from the master server");
+		// A client starts hidden: nothing is listed unless someone opts in, and because the
+		// convar cannot be set before it exists, any later cfg or console value is an explicit
+		// choice that wins. Legacy dedicated keeps the visible default it always had.
+		RegisterConVar("hide_server", IsDedicatedServer() ? "0" : "1", FCVAR_NONE,
+			"Whether the server should be hidden from the master server");
+		if (!IsDedicatedServer()) {
+			// The in-game visibility toggle owns this channel; hide_server stays the
+			// operator/user channel and script never writes it. Either channel saying "public"
+			// publishes the server.
+			RegisterConVar("delta_ui_server_public", "0", FCVAR_NONE,
+				"Set by the visibility toggle; a UI-chosen public server is listed until the host returns to the front-end lobby or training");
+		}
 		RegisterConVar("server_description", "", FCVAR_NONE, "Server description");
 		RegisterConVar("delta_ui_server_filter", "0", FCVAR_NONE, "Script managed vgui filter convar");
 		RegisterConVar("delta_autoBalanceTeams", "1", FCVAR_NONE, "Whether to autobalance teams on death/private match/lobby start. Managed by script");

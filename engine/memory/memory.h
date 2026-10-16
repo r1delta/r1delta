@@ -35,6 +35,7 @@
 #pragma once
 
 #include "core.h"
+#include "crash_report_context.h"
 
 #include "framework.h"
 #include <concurrent_unordered_map.h>
@@ -477,7 +478,10 @@ public:
 
         if (!TryGetAllocationCheck(aligned, nullptr))
         {
-            Warning("[MEM] Ignoring FREE for foreign allocation at %p\n", aligned);
+            // See hkfree_base: a crash handler must not allocate warnings about foreign frees.
+            if (!IsCrashHandlerActive())
+                if (!IsCrashHandlerActive())
+                Warning("[MEM] Ignoring FREE for foreign allocation at %p\n", aligned);
             return;
         }
 

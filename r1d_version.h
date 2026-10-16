@@ -17,3 +17,9 @@
 #ifndef R1D_MINIMUM_VERSION
 #define R1D_MINIMUM_VERSION "v2.4.7"
 #endif // !R1D_MINIMUM_VERSION
+
+// Source revision the binary was built from. Release and CI builds stamp the GitHub SHA so a
+// crash report identifies its exact source tree; local builds leave it empty.
+#ifndef R1D_COMMIT
+#define R1D_COMMIT ""
+#endif // !R1D_COMMIT

@@ -35,6 +35,7 @@
 // =========-----===--------==------------------------==++********#*#####**#######*########%%
 
 #include "core.h"
+#include "crash_report_context.h"
 #include "r1o_runtime_paths.h"
 #include <MinHook.h>
 #include "load.h"
@@ -562,16 +563,116 @@ nvapi_stuff()
 }
 
 static int skip_dllmain = -1;
-bool Plat_IsInToolMode() {
-		static HMODULE matsystem = 0;
-		if (!matsystem) {
-			matsystem = GetModuleHandleA("materialsystem_dx11.dll");
-			return false;
+
+// Letterbox removal: test.def forwards tier0!Plat_IsInToolMode to tier0_orig, so
+// materialsystem_dx11 asks tier0_orig whether the process is in tool mode, and tool mode is
+// what makes it skip the letterbox bars. This detour answers "yes" — but only when the call
+// comes out of materialsystem_dx11 itself, because other consumers of the same export (the
+// engine's tools-mode branches, render tool mode) must keep the real answer. It is opt-in
+// behind -r1delta_no_letterbox: forcing tool mode on everything was implicated in crashes, so
+// the default path stays untouched and calls straight through.
+typedef bool (*PlatIsInToolModeFn)();
+static PlatIsInToolModeFn Plat_IsInToolModeOriginal = nullptr;
+
+// Durable evidence for the crash report: with the flag on and materialsystem asking, this is
+// how a report shows the hack was live in that run. The console line alone is not enough — an
+// early line has usually been pushed out of the report's console tail.
+static std::atomic<bool> g_letterboxHookInstalled{ false };
+static std::atomic<unsigned long long> g_letterboxQueries{ 0 };
+static std::atomic<unsigned long long> g_letterboxToolModeAnswers{ 0 };
+
+static bool IsCallerMaterialsystem()
+{
+	static HMODULE matsystem = nullptr;
+	if (!matsystem)
+		matsystem = GetModuleHandleA("materialsystem_dx11.dll");
+	if (!matsystem)
+		return false;
+
+	HMODULE caller = nullptr;
+	if (!GetModuleHandleExA(
+		GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+		reinterpret_cast<LPCSTR>(_ReturnAddress()),
+		&caller))
+		return false;
+
+	return caller == matsystem;
+}
+
+// Exact-token command line match. HasEngineCommandLineFlag uses substring search, which would
+// also match a longer option or a "-r1delta_no_letterbox=0" value, and an opt-in has to be an
+// opt-in.
+static bool HasExactCommandLineFlag(const char* flag)
+{
+	static HMODULE tier0 = nullptr;
+	if (!tier0)
+		tier0 = GetModuleHandleA("tier0_orig.dll");
+	if (!tier0)
+		return false;
+
+	static const char* (*platGetCommandLine)() = nullptr;
+	if (!platGetCommandLine)
+		platGetCommandLine = reinterpret_cast<const char* (*)()>(GetProcAddress(tier0, "Plat_GetCommandLineA"));
+	if (!platGetCommandLine)
+		return false;
+
+	const char* commandLine = platGetCommandLine();
+	if (!commandLine)
+		return false;
+
+	const size_t flagLength = strlen(flag);
+	for (const char* cursor = commandLine; (cursor = strstr(cursor, flag)) != nullptr; cursor += flagLength) {
+		const bool startsToken = cursor == commandLine || cursor[-1] == ' ' || cursor[-1] == '\t';
+		const char next = cursor[flagLength];
+		const bool endsToken = next == '\0' || next == ' ' || next == '\t';
+		if (startsToken && endsToken)
+			return true;
+	}
+	return false;
+}
+
+bool Plat_IsInToolModeDetour()
+{
+	// The launcher's injected arguments only reach the engine command line once
+	// CCommandLine__CreateCmdLine has run, and materialsystem can ask before that, so a "not
+	// enabled" answer is only cached if nothing asked yet: an early call must not freeze the
+	// opt-in off for the rest of the run.
+	static std::atomic<int> enabled{ -1 };   // -1 unknown, 0 off, 1 on
+	static bool reportedFirstCall = false;
+
+	g_letterboxQueries.fetch_add(1, std::memory_order_relaxed);
+
+	int state = enabled.load(std::memory_order_relaxed);
+	if (state < 0) {
+		state = HasExactCommandLineFlag("-r1delta_no_letterbox") ? 1 : 0;
+		if (state == 1)
+			enabled.store(state, std::memory_order_relaxed);
+	}
+
+	if (state == 1 && IsCallerMaterialsystem())
+	{
+		g_letterboxToolModeAnswers.fetch_add(1, std::memory_order_relaxed);
+		if (!reportedFirstCall)
+		{
+			reportedFirstCall = true;
+			Msg("R1Delta: materialsystem asked Plat_IsInToolMode; answering tool mode for -r1delta_no_letterbox\n");
 		}
-		HMODULE module2;
-		BOOL check1 = GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCTSTR)_ReturnAddress(), &module2);
-		BOOL check2 = module2 == (HMODULE)matsystem;
-		return check1 && check2;
+		return true;
+	}
+
+	return Plat_IsInToolModeOriginal != nullptr ? Plat_IsInToolModeOriginal() : false;
+}
+
+// Crash-report line: whether the letterbox detour is installed and what it answered.
+std::string GetLetterboxHookStateLine()
+{
+	char line[192];
+	sprintf_s(line, "R1Delta letterbox: hook=%s queries=%llu toolModeAnswers=%llu flag=%s",
+		g_letterboxHookInstalled.load(std::memory_order_relaxed) ? "installed" : "absent",
+		g_letterboxQueries.load(std::memory_order_relaxed),
+		g_letterboxToolModeAnswers.load(std::memory_order_relaxed),
+		HasEngineCommandLineFlag("-r1delta_no_letterbox") ? "-r1delta_no_letterbox" : "(none)");
+	return line;
 }
 
 
@@ -596,6 +697,11 @@ extern "C" __declspec(dllexport) void SetR1DeltaLaunchArgs(const char* args)
 		g_r1delta_launch_args.clear(); // Safe operation
 		OutputDebugStringA("[r1delta_core] Launch args cleared (null passed).\n");
 	}
+}
+
+const char* GetR1DeltaLaunchArgs()
+{
+	return g_r1delta_launch_args.c_str();
 }
 
 // --- Modified CCommandLine__CreateCmdLine hook (No exceptions, no env var) ---
@@ -970,6 +1076,10 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 	case DLL_PROCESS_ATTACH: {
 		skip_dllmain = 0;
 
+		// DllMain runs on the process's primary thread, which is the thread the crash report
+		// labels as the main thread; every other named thread registers itself on entry.
+		RegisterR1DeltaThread("MainThread");
+
 		if (!IsDedicatedServer() && !IsNoConsole())
 		{
 			AllocConsole();
@@ -1030,8 +1140,29 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 		}
 		MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("tier0_orig.dll"), "GetCPUInformation"), &GetCPUInformationDet, reinterpret_cast<LPVOID*>(&GetCPUInformationOriginal));
 		MH_CreateHook((LPVOID)(((uintptr_t)GetModuleHandleA("tier0_orig.dll"))+0x03500), &CCommandLine__CreateCmdLine, reinterpret_cast<LPVOID*>(&CCommandLine__CreateCmdLine_Original));
-//		if (!IsDedicatedServer())
-//			MH_CreateHook((LPVOID)GetProcAddress(GetModuleHandleA("tier0_orig.dll"), "Plat_IsInToolMode"), &GetCPUInformationDet, reinterpret_cast<LPVOID*>(NULL));
+		if (!IsDedicatedServer()) {
+			// Letterbox removal: test.def forwards this export, so materialsystem's import
+			// resolves to tier0_orig's function and hooking it here intercepts those calls. The
+			// detour decides from the launch flag, so installing it without the flag is inert.
+			void* platIsInToolMode = reinterpret_cast<void*>(
+				GetProcAddress(GetModuleHandleA("tier0_orig.dll"), "Plat_IsInToolMode"));
+			if (platIsInToolMode) {
+				const MH_STATUS toolModeHookStatus = MH_CreateHook(
+					platIsInToolMode,
+					&Plat_IsInToolModeDetour,
+					reinterpret_cast<LPVOID*>(&Plat_IsInToolModeOriginal));
+				if (toolModeHookStatus != MH_OK && toolModeHookStatus != MH_ERROR_ALREADY_CREATED) {
+					Warning("R1Delta: Plat_IsInToolMode hook creation failed status=%d; -r1delta_no_letterbox will not work\n",
+						static_cast<int>(toolModeHookStatus));
+				}
+				else {
+					g_letterboxHookInstalled.store(true, std::memory_order_relaxed);
+				}
+			}
+			else {
+				Warning("R1Delta: tier0_orig!Plat_IsInToolMode is missing; -r1delta_no_letterbox will not work\n");
+			}
+		}
 		MH_EnableHook(MH_ALL_HOOKS);
 
 		initialisePatchInstructions();

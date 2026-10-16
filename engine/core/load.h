@@ -108,6 +108,13 @@ extern uintptr_t G_engine;
 extern uintptr_t G_engine_ds;
 extern uintptr_t G_engine_r1o;
 extern uintptr_t G_client;
+
+// Arguments the launcher injected through SetR1DeltaLaunchArgs (crash-report provenance).
+extern const char* GetR1DeltaLaunchArgs();
+
+// Letterbox removal state for crash reports: detour installed, queries answered for
+// materialsystem, and whether -r1delta_no_letterbox was present.
+std::string GetLetterboxHookStateLine();
 extern uintptr_t G_matsystem;
 extern uintptr_t G_localize;
 struct ConVarR1;

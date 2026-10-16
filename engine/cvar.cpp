@@ -33,6 +33,21 @@
 // =========-----===--------==------------------------==++********#*#####**#######*########%%
 
 #include "core.h"
+#include "crash_report_context.h"
+
+namespace {
+std::atomic<bool> g_cvarInterfacePublished{ false };
+}
+
+void PublishCvarInterface()
+{
+    g_cvarInterfacePublished.store(true, std::memory_order_release);
+}
+
+bool IsCvarInterfacePublished()
+{
+    return g_cvarInterfacePublished.load(std::memory_order_acquire);
+}
 
 #include <MinHook.h>
 #include <cstdlib>
@@ -925,8 +940,11 @@ void Con_ColorPrintf(const SourceColor* clr, char* fmt, ...)
 
 	ZoneText(pMessage, len);
 
-	// Capture for MCP server
-	MCPServer::Server::GetInstance().CaptureConsoleOutput(pMessage);
+	// Capture for the MCP server and for crash reports
+	if (!IsCrashHandlerActive())   // before Server::GetInstance(): its construction allocates
+		MCPServer::Server::GetInstance().CaptureConsoleOutput(pMessage);
+	RecordConsoleTailLine(pMessage);
+	InitWatchedConvarsSnapshot();  // no-op once the convar snapshot is resolved
 
 	// Print the message with color
 	(*staticGameConsole)->m_pConsole->m_pConsolePanel->ColorPrint(*clr, pMessage);

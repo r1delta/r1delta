@@ -1,5 +1,6 @@
 #include "r1o_vpk.h"
 #include "r1o_vpk_index_cache.h"
+#include "crash_report_context.h"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -344,7 +345,10 @@ static void ParseDirectoryBatch(
 	workers.reserve(workerCount > 0 ? workerCount - 1 : 0);
 	for (size_t i = 1; i < workerCount; ++i) {
 		try {
-			workers.emplace_back(worker);
+			workers.emplace_back([&worker]() {
+				RegisterR1DeltaThread("R1OVpkParseWorker");
+				worker();
+			});
 		}
 		catch (const std::system_error&) {
 			break;

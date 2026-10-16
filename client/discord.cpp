@@ -1,4 +1,5 @@
 #include "discord.h"
+#include "crash_report_context.h"
 #include <thread>
 #include <chrono>
 #include <string>
@@ -24,6 +25,71 @@ char g_cl_MapDisplayName[128] = "main menu";
 static std::atomic<bool> is_discord_running{false};
 // Only DiscordThread and its SDK callbacks may access the core.
 static discord::Core* core = nullptr;
+
+// The SDK delivers OnCurrentUserUpdate from the first RunCallbacks call on a machine where
+// Discord is already signed in, which can be before the engine has handed over the cvar
+// interface and its trampolines (factory.cpp installs those from the app-system factory,
+// while DiscordThread starts from the client.dll load notification). Calling an unset
+// trampoline executes address 0, so every path that touches cvar state waits for the
+// interface first.
+static bool CvarInterfaceReady() {
+	return IsCvarInterfacePublished() && SetConvarStringOriginal;
+}
+
+static bool WaitForCvarInterface(std::chrono::milliseconds timeout) {
+	const auto deadline = std::chrono::steady_clock::now() + timeout;
+	while (!CvarInterfaceReady()) {
+		if (std::chrono::steady_clock::now() >= deadline)
+			return false;
+		std::this_thread::sleep_for(std::chrono::milliseconds(5));
+	}
+	return true;
+}
+
+// Set when the user-ready callback arrived before the cvar interface existed; the Discord
+// thread retries the update from its callback loop.
+static std::atomic<bool> platform_user_id_pending{false};
+// Milliseconds DiscordThread spent waiting for the cvar interface (-1 = not started yet).
+static std::atomic<long long> discord_cvar_wait_ms{-1};
+
+// Console probe for crash reports: says whether the Discord path reached its cvar state and
+// what platform_user_id ended up as, without needing the startup console window.
+std::string GetDiscordStatusLine() {
+	const bool ready = CvarInterfaceReady();
+	const char* platformId = "unavailable (cvar interface not ready)";
+	if (ready) {
+		auto* var = OriginalCCVar_FindVar(cvarinterface, "platform_user_id");
+		if (!var)
+			platformId = "(convar missing)";
+		else
+			platformId = var->m_Value.m_pszString ? var->m_Value.m_pszString : "(empty string)";
+	}
+	char line[512];
+	sprintf_s(line, "R1Delta discord: running=%d cvarReady=%d waitedMs=%lld pending=%d platform_user_id=%s",
+		is_discord_running.load() ? 1 : 0,
+		ready ? 1 : 0,
+		discord_cvar_wait_ms.load(),
+		platform_user_id_pending.load() ? 1 : 0,
+		platformId);
+	return line;
+}
+
+void DiscordStatusCommand(const CCommand&)
+{
+	Msg("%s\n", GetDiscordStatusLine().c_str());
+}
+
+// Crash-report variant: identical cached state without the platform_user_id lookup, so the
+// crash handler never calls into the engine's cvar table.
+std::string GetDiscordCrashStateLine() {
+	char line[256];
+	sprintf_s(line, "R1Delta discord: running=%d cvarReady=%d waitedMs=%lld pending=%d",
+		is_discord_running.load() ? 1 : 0,
+		CvarInterfaceReady() ? 1 : 0,
+		discord_cvar_wait_ms.load(),
+		platform_user_id_pending.load() ? 1 : 0);
+	return line;
+}
 
 void HandleDiscordJoin(const char* secret) {
 	if (!secret) {
@@ -85,13 +151,14 @@ bool IsDiscordProcessRunning() {
 	return false;
 }
 
-void HandleDiscordUserReady() {
+void UpdatePlatformUserId() {
 	discord::User user;
 	auto result = core->UserManager().GetCurrentUser(&user);
-	if (!cvarinterface) {
-		std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-	}
 	auto platform_user_id_var = OriginalCCVar_FindVar(cvarinterface, "platform_user_id");
+	if (!platform_user_id_var) {
+		Warning("Discord: platform_user_id convar is missing; skipping update\n");
+		return;
+	}
 	if (UsesProcessUniquePlatformUserId()) {
 		EnsurePlatformUserIdString(platform_user_id_var);
 		return;
@@ -102,6 +169,18 @@ void HandleDiscordUserReady() {
 		return;
 	}
 	SetConvarStringOriginal(platform_user_id_var, std::to_string(user.GetId()).c_str());
+}
+
+void HandleDiscordUserReady() {
+	if (!CvarInterfaceReady()) {
+		if (!WaitForCvarInterface(std::chrono::milliseconds(500)))
+			platform_user_id_pending.store(true);
+	}
+	if (!CvarInterfaceReady()) {
+		Warning("Discord: cvar interface is not ready yet; platform_user_id update deferred\n");
+		return;
+	}
+	UpdatePlatformUserId();
 }
 
 
@@ -134,7 +213,18 @@ void ProcessDiscordAuth() {
 			Msg("Discord: Failed to auth: %d\n", discordResult);
 			return;
 		}
-		auto ms_url = OriginalCCVar_FindVar(cvarinterface, "delta_ms_url")->m_Value.m_pszString;
+		if (!CvarInterfaceReady()) {
+			Warning("Discord: cvar interface is not ready; aborting auth token exchange\n");
+			return;
+		}
+		auto* msUrlVar = OriginalCCVar_FindVar(cvarinterface, "delta_ms_url");
+		auto* errorVar = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token_failed_reason");
+		auto* authVar = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token");
+		if (!msUrlVar || !errorVar || !authVar) {
+			Warning("Discord: auth convars are missing; aborting auth token exchange\n");
+			return;
+		}
+		auto ms_url = msUrlVar->m_Value.m_pszString;
 		httplib::Client cli(ms_url);
 		cli.set_connection_timeout(2, 0);
 		cli.set_follow_location(true);
@@ -148,22 +238,32 @@ void ProcessDiscordAuth() {
 		catch (const std::exception& e) {
 			return;
 		}
-		auto errorVar = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token_failed_reason");
 		if (j.contains("error")) {
 			SetConvarStringOriginal(errorVar, j["error"].get<std::string>().c_str());
 			return;
 		}
 		auto token_j = j["token"].get<std::string>();
-		auto v = OriginalCCVar_FindVar(cvarinterface, "delta_persistent_master_auth_token");
-		SetConvarStringOriginal(v, token_j.c_str());
+		SetConvarStringOriginal(authVar, token_j.c_str());
 		SetConvarStringOriginal(errorVar, "");
 		Msg("Discord: Successfully authenticated\n");
 		});
 }
 
 void DiscordThread() {
+	RegisterR1DeltaThread("DiscordThread");
 	GetBaseClient = (GetBaseClientFunc)(G_engine + 0x5F470);
 	G_public_ip = get_public_ip();
+	// Do not start delivering callbacks before the cvar interface exists: the user-ready
+	// handler needs its trampolines, and the SDK can fire it on the first RunCallbacks.
+	const auto cvarWaitStart = std::chrono::steady_clock::now();
+	const bool cvarReadyAtStart = WaitForCvarInterface(std::chrono::milliseconds(30000));
+	const long long cvarWaitMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+		std::chrono::steady_clock::now() - cvarWaitStart).count();
+	discord_cvar_wait_ms.store(cvarWaitMs);
+	if (!cvarReadyAtStart)
+		Warning("Discord: cvar interface did not appear within 30s; callbacks will defer until it does\n");
+	else if (cvarWaitMs > 0)
+		Msg("Discord: waited %lld ms for the cvar interface before starting callbacks\n", cvarWaitMs);
 	auto result = discord::Core::Create(DISCORD_APPLICATION_ID, DiscordCreateFlags_NoRequireDiscord, &core);
 	if (!IsDiscordProcessRunning()) {
 		Msg("Discord: Discord not running.\n");
@@ -182,6 +282,10 @@ void DiscordThread() {
 	
 	while (true) {
 		core->RunCallbacks();
+		if (platform_user_id_pending.load() && CvarInterfaceReady()) {
+			platform_user_id_pending.store(false);
+			UpdatePlatformUserId();
+		}
 		DiscordCommand cmd;
 		while (g_DiscordCommandQueue.GetNextCommand(cmd)) {
 			if (auto* activity = std::get_if<discord::Activity>(&cmd)) {

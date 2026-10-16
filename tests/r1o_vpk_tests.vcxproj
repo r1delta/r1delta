@@ -54,6 +54,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="r1o_vpk_tests.cpp" />
+    <ClCompile Include="crash_report_context_stub.cpp" />
     <ClCompile Include="..\engine\core\r1o_runtime_paths.cpp" />
     <ClCompile Include="..\engine\filesystem\r1o_vpk.cpp" />
     <ClCompile Include="..\engine\filesystem\r1o_vpk_index_cache.cpp" />
