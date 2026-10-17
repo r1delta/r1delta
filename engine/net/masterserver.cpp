@@ -108,7 +108,7 @@ static bool IsServerVisibilityHidden() {
 
     if (hide_server && hide_server->m_Value.m_nValue == 0)
         return false;   // explicit console/cfg choice wins, always
-    if (delta_ui_server_public && delta_ui_server_public->m_Value.m_nValue == 1)
+    if (delta_ui_server_public && delta_ui_server_public->m_Value.m_nValue != 0)
         return false;
 
     return true;
