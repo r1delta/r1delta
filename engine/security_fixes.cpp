@@ -1096,6 +1096,24 @@ security_fixes_init()
     cvar_net_maxpacketdrop = RegisterConVar("net_maxpacketdrop", "net_maxpacketdrop", 0, "Ignore any packets with the sequence number more than this ahead (0 == no limit)");
 }
 
+// A hook target must be a committed executable page before MinHook is handed it. A dedicated host
+// does not load the client engine, so offsets written for the client engine have to be validated
+// instead of assumed.
+static bool TargetIsExecutable(uintptr_t address)
+{
+	if (!address)
+		return false;
+
+	MEMORY_BASIC_INFORMATION info = {};
+	if (VirtualQuery(reinterpret_cast<LPCVOID>(address), &info, sizeof(info)) == 0)
+		return false;
+	if (info.State != MEM_COMMIT)
+		return false;
+
+	const DWORD executable = PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
+	return (info.Protect & executable) != 0;
+}
+
 void
 security_fixes_engine(uintptr_t engine_base)
 {
@@ -1125,8 +1143,18 @@ security_fixes_engine(uintptr_t engine_base)
 void
 security_fixes_server(uintptr_t engine_base, uintptr_t server_base)
 {
+	// This one is resolved against the engine base, which is only the client engine. A dedicated
+	// host loads engine_r1o.dll / the retail engine instead, so the target collapses to a bare RVA
+	// and MinHook rejects it - and that rejection used to be swallowed while the rest of this batch
+	// was still enabled, which is what put this process on a heap address. Validate first, skip
+	// loudly, and never hand a non-executable address to the hook engine.
 	//MH_CreateHook((LPVOID)(engine_base + 0xD4E30), &CBaseClient__ProcessSignonState, reinterpret_cast<LPVOID*>(&oCBaseClient__ProcessSignonState));
-	MH_CreateHook((LPVOID)(engine_base + 0xD1EC0), &CBaseClient__IsSplitScreenUser, reinterpret_cast<LPVOID*>(NULL));
+	uintptr_t splitScreenUser = engine_base + 0xD1EC0;
+	if (engine_base && TargetIsExecutable(splitScreenUser))
+		MH_CreateHook((LPVOID)splitScreenUser, &CBaseClient__IsSplitScreenUser, reinterpret_cast<LPVOID*>(NULL));
+	else
+		Warning("R1Delta: skipping CBaseClient::IsSplitScreenUser hook: engine base %p does not carry it in this engine flavour (target %p).\n",
+			(LPVOID)engine_base, (LPVOID)splitScreenUser);
 	if (!IsDedicatedServer())
 		MH_CreateHook((LPVOID)(engine_base + 0xcb6f0), &SV_BroadcastMessageWithFilterLISTEN, reinterpret_cast<LPVOID*>(&oSV_BroadcastMessageWithFilterLISTEN));
 	// make listen server host party lead

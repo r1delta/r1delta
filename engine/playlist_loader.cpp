@@ -10,6 +10,7 @@
 // static buffer so the engine's direct readers (the remote-playlist paths) keep working.
 
 #include "core.h"
+#include "logging.h"
 
 #include <cstdint>
 #include <cstring>
@@ -83,7 +84,33 @@ static void* (*oPlaylistRawPtr)();
 static unsigned (*oPlaylistRawSize)();
 static char (*oPlaylistCompressed)(void** outPtr, int* outSize);
 
+static char PlaylistLoader_LoadCustom(void* ctx);
+
+// The file system object this loader reads through is not necessarily initialised when the loader
+// is called. The VGUI gameserver enters it from its own start-up path, where the reader it hands
+// over to reaches a pointer that has not been set yet, and reading there is a wild call. The stock
+// loader is the correct answer in that state, so probe our path and hand over to the original the
+// moment it faults, once per session.
+static bool s_loaderUnavailable = false;
+
 static char __fastcall PlaylistLoader_Detour(void* ctx)
+{
+	if (s_loaderUnavailable)
+		return oPlaylistLoader ? oPlaylistLoader(ctx) : 0;
+
+	__try
+	{
+		return PlaylistLoader_LoadCustom(ctx);
+	}
+	__except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH)
+	{
+		s_loaderUnavailable = true;
+		Warning("R1Delta: the file system is not ready for the dynamic playlist loader here; falling back to the engine's own loader for this session.\n");
+		return oPlaylistLoader ? oPlaylistLoader(ctx) : 0;
+	}
+}
+
+static char PlaylistLoader_LoadCustom(void* ctx)
 {
 	// the stock path handling: playlists.txt, or -playlistFile <path>
 	const char* path = "playlists.txt";
