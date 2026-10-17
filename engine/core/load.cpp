@@ -40,6 +40,7 @@
 #include "player_resource_18.h"
 #include "ffa_targeting.h"
 #include "client_port_override.h"
+#include "account_hold.h"
 #include "r1o_runtime_paths.h"
 #include <cstdlib>
 #include <cmath>
@@ -6573,6 +6574,95 @@ static void ClientAppendDisconnectDiagnostic(const char* text)
 	CloseHandle(file);
 }
 
+// A P2P connect can time out while the map is loading, and the server keeps holding the account id
+// that connection joined with. The next attempt on a different route is then refused with "Player's
+// account is already on the server" because the held entry is never trumped, and the client is stuck
+// with no way to tell the server it moved. Recognise that kick and answer with an account id the
+// server cannot be holding, then let the engine retry.
+//
+// Both id generators produce a non-negative decimal string (a Discord snowflake, or the numeric
+// fallback), so flipping the sign yields a value neither of them can produce while staying a plain
+// number, and it is trivially reversible: the account is the id with the sign back. A repeated
+// refusal walks one step further so the same value is never re-offered.
+static constexpr int kAccountHoldAttemptLimit = 3;
+static constexpr unsigned long long kAccountHoldCooldownMs = 5000;
+static constexpr unsigned long long kAccountHoldAttemptWindowMs = 600000;
+static int s_accountHoldAttempts = 0;
+static unsigned long long s_accountHoldLastAttemptMs = 0;
+
+static bool AccountHoldRecoveryEnabled()
+{
+	// Look this up with the same finder the engine-side readers use for the convars this file
+	// registers: RegisterConVar lands in the engine's table, and the vstdlib finder that reaches
+	// engine convars like platform_user_id does not see it.
+	static void* enabled = nullptr;
+	static bool resolved = false;
+	if (!resolved && cvarinterface)
+	{
+		resolved = true;
+		enabled = CCVar_FindVar(cvarinterface, "r1delta_account_hold_fix");
+	}
+	return !enabled || reinterpret_cast<ConVarR1O*>(enabled)->m_Value.m_nValue != 0;
+}
+
+static bool DeriveReleasedAccountId(const char* id, long long* out)
+{
+	return R1DeltaDeriveReleasedAccountId(id, out);
+}
+
+static void RecoverFromHeldAccount(const char* reason)
+{
+	if (!AccountHoldRecoveryEnabled())
+		return;
+
+	const unsigned long long now = GetTickCount64();
+	if (s_accountHoldLastAttemptMs && now - s_accountHoldLastAttemptMs > kAccountHoldAttemptWindowMs)
+		s_accountHoldAttempts = 0;   // the cap is per episode, not per session
+	if (s_accountHoldAttempts >= kAccountHoldAttemptLimit
+		|| (s_accountHoldLastAttemptMs && now - s_accountHoldLastAttemptMs < kAccountHoldCooldownMs))
+	{
+		Msg("R1Delta: account id is still held by the server (%s); not retrying again yet.\n", reason ? reason : "");
+		return;
+	}
+
+	auto* var = cvarinterface ? OriginalCCVar_FindVar(cvarinterface, "platform_user_id") : nullptr;
+	const char* current = var && var->m_Value.m_pszString ? var->m_Value.m_pszString : nullptr;
+	long long next = 0;
+	if (!DeriveReleasedAccountId(current, &next))
+	{
+		Warning("R1Delta: account hold recovery skipped: platform_user_id is \"%s\", not a numeric id.\n",
+			current ? current : "<null>");
+		return;
+	}
+
+	++s_accountHoldAttempts;
+	s_accountHoldLastAttemptMs = now;
+	Msg("R1Delta: server still holds account \"%s\" (%s); retrying as \"%lld\".\n",
+		current, reason ? reason : "", next);
+
+	char command[64];
+	_snprintf_s(command, sizeof(command), _TRUNCATE, "platform_user_id %lld\n", next);
+	Cbuf_AddText(0, command, 0);
+	Cbuf_AddText(0, "retry\n", 0);
+}
+
+static void AccountHoldStatusCommand(const CCommand&)
+{
+	Msg("R1Delta account hold: enabled=%d hook=%d attempts=%d lastAttemptMs=%llu\n",
+		AccountHoldRecoveryEnabled() ? 1 : 0,
+		s_COMExplainDisconnectionHookInstalled ? 1 : 0,
+		s_accountHoldAttempts,
+		s_accountHoldLastAttemptMs);
+}
+
+static bool ReasonIsHeldAccount(const char* reason)
+{
+	if (!reason || !*reason)
+		return false;
+	return strstr(reason, "already on the server") != nullptr
+		|| strstr(reason, "AccountAlreadyOnServer") != nullptr;
+}
+
 static __int64 COMExplainDisconnectionHook(__int64 eventKind, const char* format, ...)
 {
 	char reason[1024] = {};
@@ -6596,6 +6686,9 @@ static __int64 COMExplainDisconnectionHook(__int64 eventKind, const char* format
 	OutputDebugStringA(buffer);
 	ClientAppendDisconnectDiagnostic(buffer);
 
+	if (ReasonIsHeldAccount(reason))
+		RecoverFromHeldAccount(reason);
+
 	return s_COMExplainDisconnectionOriginal
 		? s_COMExplainDisconnectionOriginal(eventKind, "%s", reason)
 		: 0;
@@ -6603,7 +6696,7 @@ static __int64 COMExplainDisconnectionHook(__int64 eventKind, const char* format
 
 static void InstallCOMExplainDisconnectionHook(uintptr_t engineBase)
 {
-	if (!ShouldInstallR1OClientDebugHooks() || s_COMExplainDisconnectionHookInstalled || !engineBase || IsDedicatedServer())
+	if (s_COMExplainDisconnectionHookInstalled || !engineBase || IsDedicatedServer())
 		return;
 
 	void* target = reinterpret_cast<void*>(engineBase + 0x117240);
@@ -6623,6 +6716,10 @@ static void InstallCOMExplainDisconnectionHook(uintptr_t engineBase)
 		target,
 		reinterpret_cast<void*>(s_COMExplainDisconnectionOriginal));
 	OutputDebugStringA(buffer);
+	Msg("R1Delta: account-hold recovery status=%d target=%p original=%p\n",
+		static_cast<int>(status),
+		target,
+		reinterpret_cast<void*>(s_COMExplainDisconnectionOriginal));
 }
 
 static const char* ClientSignonStateBufferString(__int64 message, ptrdiff_t bufferOffset, ptrdiff_t lengthOffset, char* out, size_t outSize)
@@ -8250,6 +8347,9 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		InstallNoClipBrushesHook(engine_base);
 	if (!IsDedicatedServer() && !Cbuf_AddTextOriginal)
 		Cbuf_AddTextOriginal = reinterpret_cast<Cbuf_AddTextType>(engine_base + 0x102D50);
+	// Account-hold recovery needs this hook on every client, not only under the debug flag: a held
+	// account id after a P2P timeout otherwise leaves the client unable to rejoin on another route.
+	InstallCOMExplainDisconnectionHook(engine_base);
 	const bool installClientDebugHooks = !IsDedicatedServer() && ShouldInstallR1OClientDebugHooks();
 	MH_CreateHook((LPVOID)(engine_base + 0x1FDA50), &CLC_Move__ReadFromBuffer, reinterpret_cast<LPVOID*>(&CLC_Move__ReadFromBufferOriginal));
 	MH_CreateHook((LPVOID)(engine_base + 0x1F6F10), &CLC_Move__WriteToBuffer, reinterpret_cast<LPVOID*>(&CLC_Move__WriteToBufferOriginal));
@@ -9224,6 +9324,9 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 			// publishes the server.
 			RegisterConVar("delta_ui_server_public", "0", FCVAR_NONE,
 				"Set by the visibility toggle; a UI-chosen public server is listed until the host returns to the front-end lobby or training");
+			RegisterConVar("r1delta_account_hold_fix", "1", FCVAR_ARCHIVE,
+				"When the server refuses a join because it still holds our account id after a P2P timeout, rejoin with a derived id and retry (0 disables)");
+			RegisterConCommand("r1delta_account_status", AccountHoldStatusCommand, "Account-hold recovery state", FCVAR_NONE);
 		}
 		RegisterConVar("server_description", "", FCVAR_NONE, "Server description");
 		RegisterConVar("delta_ui_server_filter", "0", FCVAR_NONE, "Script managed vgui filter convar");
