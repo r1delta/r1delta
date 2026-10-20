@@ -15,5 +15,6 @@ SQInteger GetServerHeartbeat(HSQUIRRELVM v);
 namespace MasterServerClient {
     void StartHeartbeatThread();
     void StopHeartbeatThread();
+    bool IsHostedServerHidden();
     extern std::atomic<bool> IsValidHeartBeat; // Changed to extern and atomic
 }

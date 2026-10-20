@@ -31,7 +31,9 @@ Instructions on how to run the dedicated server on Docker are [here](https://gis
 
 The master server will not show your server if it can't be connected to publicly, so make sure to port-forward 27015 (and onwards if you're running multiple servers, 27016 etc) if you want it to be listed. 
 
-If you want to make a friends-only server and hide it from the server browser you should put `hide_server 1` into the console, you can then give out your ip and port for a direct connect (in the style of ip:port) or use Discord game invites, just note that you'll still need to port-forward if your friends are going to connect over the internet. You can also set `sv_password` if you'd like to password protect your server but keep it on the server browser, just keep in mind this *will* leak your server's IP.
+A listen server starts hidden from the server browser. To list it, press "Show Server" in the private match lobby or put `hide_server 0` into the console, and use "Hide Server" or `hide_server 1` to take it back down. The choice lasts between rounds of the same private match and goes back to hidden when you leave, so every new server you host starts hidden again. A dedicated server is listed unless you set `hide_server 1`, and keeps that setting.
+
+To play with friends on a hidden server, give out your ip and port for a direct connect (in the style of ip:port) or use Discord game invites, just note that you'll still need to port-forward if your friends are going to connect over the internet. You can also set `sv_password` if you'd like to password protect your server but keep it on the server browser, just keep in mind this *will* leak your server's IP.
 
 # Building From Source
 1. [Install vcpkg and run vcpkg integrate install](https://learn.microsoft.com/en-us/vcpkg/get_started/get-started-msbuild)
