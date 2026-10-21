@@ -288,6 +288,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="engine\core\ffa_targeting_logic.h" />
     <ClInclude Include="engine\auth.h" />
     <ClInclude Include="server\ai\bot.h" />
+    <ClInclude Include="server\ai\bot_control.h" />
     <ClInclude Include="server\chat.h" />
     <ClInclude Include="shared\commands.h" />
     <ClInclude Include="server\misc.h" />
@@ -444,6 +445,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="engine\core\load.cpp" />
     <ClCompile Include="engine\auth.cpp" />
     <ClCompile Include="server\ai\bot.cpp" />
+    <ClCompile Include="server\ai\bot_control.cpp" />
     <ClCompile Include="server\chat.cpp" />
     <ClCompile Include="shared\commands.cpp" />
     <ClCompile Include="client\localize.cpp" />

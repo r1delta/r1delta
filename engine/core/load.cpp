@@ -134,6 +134,7 @@
 #include "precache.h"
 #include "auth.h"
 #include "bot.h"
+#include "bot_control.h"
 #include "physics_hooks.h"
 #include "vphysics_shutdown_guard.h"
 #include "chat.h"
@@ -9291,6 +9292,7 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	}
 	else {
 		RegisterServerUserCmdConVars();
+		RegisterBotControlConVars();
 		RegisterConCommand("updatescriptdata", updatescriptdata_cmd, "Dumps the script data in the AI node graph to disk", FCVAR_CHEAT);
 		RegisterConCommand("verifyain", verifyain_cmd, "Reads the .ain file from disk, compares its nodes & links to in-memory data, logs differences.", FCVAR_CHEAT);
 		RegisterConCommand("updateain", updateain_cmd, "Runs the reconstructed AIN full build, then writes a generated .ain dump without replacing the source file.", FCVAR_CHEAT);
@@ -9306,6 +9308,9 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		RegisterConVar("delta_online_auth_enable", "0", FCVAR_GAMEDLL, "Whether to use master server auth");
 		RegisterConVar("delta_discord_username_sync", "0", FCVAR_GAMEDLL, "Controls if player names are synced with Discord: 0=Off,1=Norm,2=Pomelo");
 		RegisterConVar("riff_floorislava", "0", FCVAR_HIDDEN, "Enable floor is lava mode");
+		// Private match settings menu (pilot bots), sent to the lobby as UpdatePrivateMatchSetting.
+		RegisterConVar("pm_bot_count", "0", FCVAR_HIDDEN, "Private match: number of pilot bots (0-10). Managed by script");
+		RegisterConVar("pm_bot_lethality", "0", FCVAR_HIDDEN, "Private match: pilot bot lethality setting index. Managed by script");
 		const auto hudwarpConVars = r1delta::hudwarp::RegisterRuntimeConVars<ConVarR1>(
 			[](const char* name, const char* value, int flags, const char* helpString) {
 				return RegisterConVar(name, value, flags, helpString);
