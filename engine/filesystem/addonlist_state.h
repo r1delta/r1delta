@@ -14,7 +14,14 @@ struct Entry {
 };
 
 bool Parse(std::string_view contents, std::vector<Entry>& entries);
-bool Load(const std::filesystem::path& path, std::vector<Entry>& entries);
+
+enum class LoadResult {
+	Loaded,
+	// No addonlist.txt: the engine deletes it when no addons are installed.
+	Missing,
+	Invalid,
+};
+LoadResult Load(const std::filesystem::path& path, std::vector<Entry>& entries);
 bool IsEnabled(const std::vector<Entry>& entries, std::string_view name);
 bool IsSafeDirectoryName(std::string_view name);
 

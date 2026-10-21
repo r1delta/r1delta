@@ -89,8 +89,13 @@ void FileCache::BuildSnapshot(
 
     std::vector<AddonListState::Entry> addonStates;
     const std::filesystem::path addonListPath = scanAddonRoot.parent_path() / "addonlist.txt";
-    if (!AddonListState::Load(addonListPath, addonStates)) {
-        Msg("Addon list '%s' is missing or invalid; addon replacements are disabled.\n",
+    switch (AddonListState::Load(addonListPath, addonStates)) {
+    case AddonListState::LoadResult::Loaded:
+        break;
+    case AddonListState::LoadResult::Missing:
+        return;
+    case AddonListState::LoadResult::Invalid:
+        Warning("Addon list '%s' could not be parsed; addon file replacements are disabled until it is fixed.\n",
             addonListPath.string().c_str());
         return;
     }

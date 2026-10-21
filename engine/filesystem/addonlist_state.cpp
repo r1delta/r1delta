@@ -187,20 +187,23 @@ bool Parse(std::string_view contents, std::vector<Entry>& entries)
 	return true;
 }
 
-bool Load(const std::filesystem::path& path, std::vector<Entry>& entries)
+LoadResult Load(const std::filesystem::path& path, std::vector<Entry>& entries)
 {
 	std::error_code error;
-	if (!std::filesystem::is_regular_file(path, error) || error)
-		return false;
+	const std::filesystem::file_status status = std::filesystem::status(path, error);
+	if (status.type() == std::filesystem::file_type::not_found)
+		return LoadResult::Missing;
+	if (error || status.type() != std::filesystem::file_type::regular)
+		return LoadResult::Invalid;
 	const uintmax_t fileSize = std::filesystem::file_size(path, error);
 	if (error || !fileSize || fileSize > MaxAddonListSize)
-		return false;
+		return LoadResult::Invalid;
 
 	std::string contents(static_cast<size_t>(fileSize), '\0');
 	std::ifstream file(path, std::ios::binary);
 	if (!file.read(contents.data(), static_cast<std::streamsize>(contents.size())))
-		return false;
-	return Parse(contents, entries);
+		return LoadResult::Invalid;
+	return Parse(contents, entries) ? LoadResult::Loaded : LoadResult::Invalid;
 }
 
 bool IsEnabled(const std::vector<Entry>& entries, std::string_view name)

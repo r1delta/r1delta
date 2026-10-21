@@ -34,6 +34,7 @@
 
 #include "core.h"
 #include "crash_report_context.h"
+#include "audio_device.h"
 
 #include "filesystem.h"
 #include <iostream>
@@ -276,6 +277,7 @@ __int64 __fastcall FileSystem_UpdateAddonSearchPaths(void* a1) {
 	BeginAddonSearchCacheUpdate();
     auto ret = FileSystem_UpdateAddonSearchPathsTypeOriginal(a1);
 	EndAddonSearchCacheUpdate();
+	RebuildR1AudioForAddonChange();
 	return ret;
 }
 

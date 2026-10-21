@@ -1,5 +1,6 @@
 #include "engine/filesystem/addonlist_state.h"
 
+#include <fstream>
 #include <iostream>
 #include <string_view>
 #include <vector>
@@ -118,6 +119,29 @@ void TestRescanTransactions()
 	Check(!state.CanPublish(completed), "manual rescan invalidates prior generation");
 }
 
+void TestLoadDistinguishesMissingFromInvalid()
+{
+	using AddonListState::LoadResult;
+	const std::filesystem::path directory = std::filesystem::temp_directory_path() / "r1delta_addonlist_state_tests";
+	std::filesystem::remove_all(directory);
+	std::filesystem::create_directories(directory);
+	const std::filesystem::path list = directory / "addonlist.txt";
+	std::vector<AddonListState::Entry> entries;
+
+	// The engine deletes addonlist.txt when no addons are installed.
+	Check(AddonListState::Load(list, entries) == LoadResult::Missing, "report absent addonlist as missing");
+	std::ofstream(list, std::ios::binary) << "AddonList { Mod 1 }";
+	Check(AddonListState::Load(list, entries) == LoadResult::Loaded && entries.size() == 1, "load a valid addonlist");
+	std::ofstream(list, std::ios::binary) << "AddonList { Mod }";
+	Check(AddonListState::Load(list, entries) == LoadResult::Invalid, "report malformed addonlist as invalid");
+	std::ofstream(list, std::ios::binary).flush();
+	Check(AddonListState::Load(list, entries) == LoadResult::Invalid, "report empty addonlist as invalid");
+	std::filesystem::remove(list);
+	std::filesystem::create_directory(list);
+	Check(AddonListState::Load(list, entries) == LoadResult::Invalid, "report non-file addonlist as invalid");
+	std::filesystem::remove_all(directory);
+}
+
 }
 
 int main()
@@ -127,6 +151,7 @@ int main()
 	TestMalformedInput();
 	TestSafeDirectoryNames();
 	TestRescanTransactions();
+	TestLoadDistinguishesMissingFromInvalid();
 
 	if (failures) {
 		std::cerr << failures << " addonlist-state test(s) failed\n";

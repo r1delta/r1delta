@@ -67,3 +67,10 @@ bool InstallR1AudioDeviceHooks(std::uintptr_t engineBase);
 // Console command to manually restart XAudio
 class CCommand;
 void ConCommand_sound_reboot_xaudio(const CCommand& args);
+
+// Call after addon search paths change. The sound alias table (and, with
+// generated content, wave metadata) is built once from the mounted files, so
+// it describes the previous addon set, and fails sound-table parity on join,
+// until audio is rebuilt. No-op before the first manifest load; refuses while
+// connected, where alias indices are already on the wire.
+void RebuildR1AudioForAddonChange();

@@ -247,3 +247,19 @@ void ConCommand_sound_reboot_xaudio(const CCommand& args)
     Msg("Restarted XAudio...\n");
 }
 
+void RebuildR1AudioForAddonChange()
+{
+    if (!s_installed || GetR1DeltaEngineMode() != R1DeltaEngineMode::Client2015) return;
+    // FileSystem_LoadSearchPaths mounts addons before game_sounds_manifest loads.
+    if (*reinterpret_cast<const int*>(s_engine + 0x1A0DBC4) <= 0) return;
+    // m_nSignonState of the base local client state; 0 = not connected.
+    if (*reinterpret_cast<const int*>(s_engine + 0x797070 + 29 * sizeof(int)) != 0) {
+        Warning("R1Delta audio: addon search paths changed while connected; sounds keep the previous addon set until sound_reboot runs after disconnecting\n");
+        return;
+    }
+    // The verified native reboot owner stops/drains, reinitializes and reloads
+    // game_sounds_manifest from the search paths the caller just published.
+    reinterpret_cast<LifecycleFn>(s_engine + 0x118C0)();
+    Msg("R1Delta audio: rebuilt sounds for the new addon set\n");
+}
+
