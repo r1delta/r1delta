@@ -72,7 +72,6 @@ struct HeartbeatInfo {
 static ConVarR1O* delta_ms_url = nullptr;
 static ConVarR1O* host_map = nullptr;
 static ConVarR1O* hide_server = nullptr;
-static ConVarR1O* delta_ui_server_public = nullptr;
 static ConVarR1O* server_description = nullptr;
 
 // --------------------------------
@@ -88,30 +87,16 @@ void InitMasterServerCVars() {
         
         initialized = true;
     }
-    // Independent of the block above: the UI channel only exists on a client, and its absence
-    // on a dedicated host has to stay meaningful rather than triggering the re-lookup path.
-    if (!delta_ui_server_public)
-        delta_ui_server_public = CCVar_FindVar(cvarinterface, "delta_ui_server_public");
 }
 
-// Two channels, one writer each: `hide_server` carries the operator's or user's own choice
-// (console, cfg, VGUI dedicated admin config) and script never writes it, while
-// `delta_ui_server_public` carries the in-game visibility toggle's choice. Either one being
-// "public" publishes the server, and the UI channel can be revoked in the states where a
-// UI-chosen public lobby must not be listed. A dedicated host only ever consults the operator
-// channel: nothing a client UI does may change whether a dedicated server is listed.
+// `hide_server` is the only visibility control. Console, cfg, the dedicated admin config and
+// the private match Show/Hide button all write it, and the latest write wins. A dedicated
+// server keeps its value for its whole life; a client-hosted server is reset to hidden when
+// it shuts down (see Hk_CHostState__State_GameShutdown), which `map`, `reload` and
+// `disconnect` go through but `changelevel` between rounds does not.
 static bool IsServerVisibilityHidden() {
     InitMasterServerCVars();
-
-    if (IsDedicatedServer())
-        return !(hide_server && hide_server->m_Value.m_nValue == 0);
-
-    if (hide_server && hide_server->m_Value.m_nValue == 0)
-        return false;   // explicit console/cfg choice wins, always
-    if (delta_ui_server_public && delta_ui_server_public->m_Value.m_nValue != 0)
-        return false;
-
-    return true;
+    return !(hide_server && hide_server->m_Value.m_nValue == 0);
 }
 
 static bool IsMasterServerPortValid(int port)
@@ -154,8 +139,22 @@ namespace MasterServerClient {
     static std::unique_ptr<httplib::Client> httpClient;
     static HeartbeatInfo lastHeartbeat;
     static std::atomic<bool> heartbeatThreadRunning{false};
+    // Bumped on every start and stop, so a thread left over from the previous map exits instead
+    // of running alongside the new one, and never sends after the shutdown delist.
+    static std::atomic<uint32_t> heartbeatThreadGeneration{0};
+    // Whether the master server currently has an entry for us, so hiding knows to delist.
+    static std::atomic<bool> listedOnMaster{false};
     static std::atomic<std::chrono::system_clock::time_point> lastHeartbeatTime{std::chrono::system_clock::now()};
     std::atomic<bool> IsValidHeartBeat{ false };
+
+    static bool IsCurrentHeartbeatThread(uint32_t generation) {
+        return heartbeatThreadRunning.load(std::memory_order_acquire)
+            && heartbeatThreadGeneration.load(std::memory_order_acquire) == generation;
+    }
+
+    bool IsHostedServerHidden() {
+        return IsServerVisibilityHidden();
+    }
 
     // --------------------------------
     // Internal: Ensures httpClient is valid
@@ -173,19 +172,11 @@ namespace MasterServerClient {
     // --------------------------------
     // Heartbeat
     // --------------------------------
-    bool SendServerHeartbeat(const HeartbeatInfo& heartbeat, bool isHibernating = false) {
+    bool SendServerHeartbeat(const HeartbeatInfo& heartbeat, bool isHibernating, uint32_t generation) {
         InitMasterServerCVars();
         if (!delta_ms_url || !delta_ms_url->m_Value.m_pszString || !delta_ms_url->m_Value.m_pszString[0]) {
             Warning("MasterServerClient: delta_ms_url not set\n");
             return false;
-        }
-        if (IsServerVisibilityHidden()) {
-            static bool hasWarned = false;
-            if (!hasWarned) {
-                hasWarned = true;
-                Warning("server visibility is hidden; ignoring master server heartbeat requests\n");
-            }
-            return true;
         }
 
         const int port = ResolveMasterServerPort();
@@ -196,6 +187,10 @@ namespace MasterServerClient {
         }
 
         SRWGuard lock(&httpMutex);
+        // Checked under the lock the delists also take: a heartbeat that lost the race with a
+        // shutdown or a hide must not re-list the server after it was removed.
+        if (!IsCurrentHeartbeatThread(generation) || IsServerVisibilityHidden())
+            return false;
         EnsureHttpClient(delta_ms_url->m_Value.m_pszString);
 
         json j;
@@ -254,55 +249,94 @@ namespace MasterServerClient {
         if (res->status == 200)
             p2p::OnHeartbeatResponse(res->body);
         IsValidHeartBeat.store(true, std::memory_order_release);
+        listedOnMaster.store(true, std::memory_order_release);
         return true;
+    }
+
+    // Removes our entry from the master server. Returns false only when a request was sent
+    // and did not succeed; with no master URL or no bound port there is nothing to remove.
+    static bool SendServerDelist() {
+        InitMasterServerCVars();
+        if (!delta_ms_url || !delta_ms_url->m_Value.m_pszString || !delta_ms_url->m_Value.m_pszString[0])
+            return true;
+        const int port = ResolveMasterServerPort();
+        if (!IsMasterServerPortValid(port))
+            return true;
+
+        SRWGuard lock(&httpMutex);
+        EnsureHttpClient(delta_ms_url->m_Value.m_pszString);
+        listedOnMaster.store(false, std::memory_order_release);
+        IsValidHeartBeat.store(false, std::memory_order_release);
+        std::string path = "/heartbeat/" + std::to_string(port);
+        auto res = httpClient->Delete(path.c_str());
+        return res && res->status == 200;
     }
 
     // --------------------------------
     // Heartbeat Thread
     // --------------------------------
     void StartHeartbeatThread() {
-        if (heartbeatThreadRunning.load(std::memory_order_acquire)) {
+        if (heartbeatThreadRunning.exchange(true, std::memory_order_acq_rel)) {
             return; // Thread is already running
         }
+        const uint32_t generation = heartbeatThreadGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
 
-        heartbeatThreadRunning.store(true, std::memory_order_release);
-        
-        // Start with a random delay (1-3 seconds) to avoid flooding the master server
-        std::random_device rd;
-        std::mt19937 gen(rd());
-        std::uniform_int_distribution<> delayDist(1, 3);
-        std::this_thread::sleep_for(std::chrono::seconds(delayDist(gen)));
-        
-        std::thread([]{
+        std::thread([generation]{
             RegisterR1DeltaThread("MasterServerHeartbeat");
-            while (heartbeatThreadRunning.load(std::memory_order_acquire)) {
-                HeartbeatInfo currentHeartbeat;
-                bool isHibernating = false;
-                
-                {
-                    SRWGuard lock(&heartbeatMutex);
-                    currentHeartbeat = lastHeartbeat;
-                    
-                    // Check if server is hibernating (no heartbeat for 60 seconds)
-                    auto now = std::chrono::system_clock::now();
-                    auto lastTime = lastHeartbeatTime.load(std::memory_order_acquire);
-                    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - lastTime).count();
-                    
-                    if (elapsed > 60) {
-                        isHibernating = true;
-                        // Clear player list during hibernation
-                        currentHeartbeat.players.clear();
-                    }
+            std::random_device rd;
+            std::mt19937 gen(rd());
+            std::uniform_int_distribution<> delayDist(1, 3);
+            std::uniform_int_distribution<> waitDist(5, 7);
+
+            // Start with a random delay (1-3 seconds) to avoid flooding the master server.
+            // Waited out here rather than on the calling thread, which is the server's.
+            auto nextHeartbeat = std::chrono::steady_clock::now() + std::chrono::seconds(delayDist(gen));
+            bool wasHidden = IsServerVisibilityHidden();
+            Msg("MasterServerClient: server is %s\n", wasHidden ? "hidden" : "public");
+
+            // Visibility is polled far more often than heartbeats are sent, so showing or
+            // hiding the server reaches the master server right away instead of at the next
+            // heartbeat or after the master's 90 second expiry.
+            while (IsCurrentHeartbeatThread(generation)) {
+                const bool hidden = IsServerVisibilityHidden();
+                if (hidden != wasHidden) {
+                    Msg("MasterServerClient: server is now %s\n", hidden ? "hidden" : "public");
+                    wasHidden = hidden;
+                    if (!hidden)
+                        nextHeartbeat = std::chrono::steady_clock::now();
                 }
-                
-                // Send the heartbeat
-                SendServerHeartbeat(currentHeartbeat, isHibernating);
-                
-                // Wait 5-7 seconds before next heartbeat
-                std::random_device rd;
-                std::mt19937 gen(rd());
-                std::uniform_int_distribution<> waitDist(5, 7);
-                std::this_thread::sleep_for(std::chrono::seconds(waitDist(gen)));
+
+                if (hidden) {
+                    if (listedOnMaster.load(std::memory_order_acquire) && !SendServerDelist())
+                        Warning("MasterServerClient: Delist after hiding failed\n");
+                }
+                else if (std::chrono::steady_clock::now() >= nextHeartbeat) {
+                    HeartbeatInfo currentHeartbeat;
+                    bool isHibernating = false;
+
+                    {
+                        SRWGuard lock(&heartbeatMutex);
+                        currentHeartbeat = lastHeartbeat;
+
+                        // Check if server is hibernating (no heartbeat for 60 seconds)
+                        auto now = std::chrono::system_clock::now();
+                        auto lastTime = lastHeartbeatTime.load(std::memory_order_acquire);
+                        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - lastTime).count();
+
+                        if (elapsed > 60) {
+                            isHibernating = true;
+                            // Clear player list during hibernation
+                            currentHeartbeat.players.clear();
+                        }
+                    }
+
+                    SendServerHeartbeat(currentHeartbeat, isHibernating, generation);
+
+                    // Wait 5-7 seconds before next heartbeat
+                    nextHeartbeat = std::chrono::steady_clock::now() + std::chrono::seconds(waitDist(gen));
+                }
+
+                std::this_thread::sleep_for(std::chrono::milliseconds(250));
             }
         }).detach();
     }
@@ -376,6 +410,7 @@ namespace MasterServerClient {
     // --------------------------------
     void StopHeartbeatThread() {
         heartbeatThreadRunning.store(false, std::memory_order_release);
+        heartbeatThreadGeneration.fetch_add(1, std::memory_order_acq_rel);
     }
 
     // --------------------------------
@@ -383,15 +418,7 @@ namespace MasterServerClient {
     // --------------------------------
     void OnServerShutdown() {
         StopHeartbeatThread();
-        InitMasterServerCVars();
-        if (!delta_ms_url) return;
-        const int port = ResolveMasterServerPort();
-        if (!IsMasterServerPortValid(port))
-            return;
-        EnsureHttpClient(delta_ms_url->m_Value.m_pszString);
-        std::string path = "/heartbeat/" + std::to_string(port);
-        auto res = httpClient->Delete(path.c_str());
-        if (!res || res->status != 200)
+        if (!SendServerDelist())
             Warning("MasterServerClient: Shutdown notification failed\n");
     }
 } // namespace MasterServerClient
@@ -770,6 +797,18 @@ void Hk_CHostState__State_GameShutdown(void* thisptr) {
         MasterServerClient::OnServerShutdown();
         host_map->m_Value.m_StringLength = 0;
         host_map->m_Value.m_pszString[0] = '\0';
+
+        // A server a client was hosting has ended, so the next one starts hidden. This runs
+        // for `map`, `reload` and `disconnect` but not for `changelevel`, so a private match
+        // keeps its visibility between rounds and loses it once the host leaves. Only here,
+        // where a map was actually running: a value set while no server is up (the main menu,
+        // an autoexec) is meant for the server about to start. Set through the engine so the
+        // change callbacks keep the R1Delta-side copy in sync, the same as a console set.
+        if (!IsDedicatedServer() && SetConvarStringOriginal && OriginalCCVar_FindVar) {
+            ConVarR1* hideServer = OriginalCCVar_FindVar(cvarinterface, "hide_server");
+            if (hideServer && hideServer->m_Value.m_nValue != 1)
+                SetConvarStringOriginal(hideServer, "1");
+        }
     }
     oGameShutDown(thisptr);
 }

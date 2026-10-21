@@ -9319,17 +9319,13 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 			FCVAR_ARCHIVE);
 		R1DAssert(hudwarpConVars.useGpu);
 		R1DAssert(hudwarpConVars.disable);
-		// A client starts hidden: nothing is listed unless someone opts in, and because the
-		// convar cannot be set before it exists, any later cfg or console value is an explicit
-		// choice that wins. Legacy dedicated keeps the visible default it always had.
+		// The one visibility control, written by the console, cfgs and the private match
+		// Show/Hide button alike. A client-hosted server starts hidden and is reset to hidden
+		// when it shuts down (a new map, reload or disconnect, but not changelevel between
+		// rounds). Legacy dedicated keeps the visible default it always had.
 		RegisterConVar("hide_server", IsDedicatedServer() ? "0" : "1", FCVAR_NONE,
 			"Whether the server should be hidden from the master server");
 		if (!IsDedicatedServer()) {
-			// The in-game visibility toggle owns this channel; hide_server stays the
-			// operator/user channel and script never writes it. Either channel saying "public"
-			// publishes the server.
-			RegisterConVar("delta_ui_server_public", "0", FCVAR_NONE,
-				"Set by the visibility toggle; a UI-chosen public server is listed until the host returns to the front-end lobby or training");
 			RegisterConVar("r1delta_account_hold_fix", "1", FCVAR_ARCHIVE,
 				"When the server refuses a join because it still holds our account id after a P2P timeout, rejoin with a derived id and retry (0 disables)");
 			RegisterConCommand("r1delta_account_status", AccountHoldStatusCommand, "Account-hold recovery state", FCVAR_NONE);

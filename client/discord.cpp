@@ -342,7 +342,9 @@ std::string CreateDiscordSecret() {
 		|| address == listenSentinel;
 	std::string secret;
 	if (localHost) {
-		if (!MasterServerClient::IsValidHeartBeat.load())
+		// A hidden server never heartbeats, and invites are how friends find one, so only a
+		// server that is meant to be listed has to have reached the master server first.
+		if (!MasterServerClient::IsValidHeartBeat.load() && !MasterServerClient::IsHostedServerHidden())
 			return {};
 		int hostPort = port;
 		if (!hostPort && cvarinterface && OriginalCCVar_FindVar) {
