@@ -8,6 +8,7 @@
 #include "cvar.h"
 #include "defs.h"
 #include "sv_filter.h"
+#include "soundscript_parity.h"
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
@@ -347,6 +348,9 @@ __int64 __fastcall HookedCBaseStateClientConnect(
     __int64* a10,
     int a11)
 {
+    // Before the signon NET_SetConVar, which carries every userinfo convar.
+    SoundScriptParity_ClientConnecting();
+
     static int s_connectLogBudget = 16;
     if (s_connectLogBudget > 0) {
         --s_connectLogBudget;

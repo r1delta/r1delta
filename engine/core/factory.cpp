@@ -58,6 +58,7 @@
 #include "filesystem.h"
 #include "r1o_vpk.h"
 #include "script_error_telemetry.h"
+#include "soundscript_parity.h"
 #include "bitbuf.h"
 #include "defs.h"
 #include "factory.h"
@@ -14025,6 +14026,7 @@ static bool __fastcall R1ONETSetConVarReadFromBuffer(__int64 message, __int64 bi
 	bool sawPackedPData = false;
 	bool sawLegacyPData = false;
 	bool sawFullSnapshotMarker = false;
+	SoundScriptUpload soundScripts;
 	for (uint32_t i = 0; i < count; ++i) {
 		NetMessageCvar_t var = {};
 		const bool readName = R1OBFReadString
@@ -14049,6 +14051,9 @@ static bool __fastcall R1ONETSetConVarReadFromBuffer(__int64 message, __int64 bi
 			Warning("%s", buffer);
 			return false;
 		}
+
+		if (soundScripts.Accept(var.name, var.value))
+			continue;
 
 		if (IsPackedPDataWireName(var.name)) {
 			constexpr size_t maxPackedPDataSize = 4 * 1024 * 1024;
@@ -14141,6 +14146,13 @@ static bool __fastcall R1ONETSetConVarReadFromBuffer(__int64 message, __int64 bi
 		*reinterpret_cast<int*>(vector + 24) = 0;
 		for (NetMessageCvar_t& var : staged)
 			R1ONETSetConVarAddToTail(vector, &var);
+
+		if (soundScripts.present) {
+			R1OPersistenceOwner soundScriptOwner;
+			SoundScriptParity_ServerCheck(
+				R1OResolvePersistenceOwner(message, soundScriptOwner) ? soundScriptOwner.playerSlot : -1,
+				soundScripts);
+		}
 
 		if (sawPackedPData) {
 			static int packedPersistenceCommitLogBudget = 32;

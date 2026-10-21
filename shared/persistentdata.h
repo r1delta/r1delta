@@ -49,6 +49,10 @@ bool PData_ServerReconcileIncoming(
 	const PersistentDataState::SessionKey* session,
 	std::vector<NetMessageCvar_t>& staged,
 	bool fullSnapshot);
+// Server: sends one client a console command over its netchannel
+// (IVEngineServer::ClientCommand -> svc_StringCmd). The client only runs
+// commands IsValidServerCommand accepts.
+bool SendServerCommandToClient(int playerSlot, const char* command);
 void PData_ServerRunFrame();
 void R1OClearPersistentUserDataForPlayer(int playerSlot);
 bool R1OGetPersistentUserDataConVar(int playerSlot, const char* name, std::string& value);

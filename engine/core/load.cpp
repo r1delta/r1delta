@@ -42,6 +42,8 @@
 #include "client_port_override.h"
 #include "account_hold.h"
 #include "r1o_runtime_paths.h"
+#include "legacy_ds_sound_tables.h"
+#include "soundscript_parity.h"
 #include <cstdlib>
 #include <cmath>
 #include <new>
@@ -9301,6 +9303,10 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		RegisterConVar("delta_server_auth_token", "", FCVAR_USERINFO | FCVAR_SERVER_CANNOT_QUERY | FCVAR_DONTRECORD | FCVAR_PROTECTED | FCVAR_HIDDEN, "Per-server auth token");
 		RegisterConVar("delta_version", R1D_VERSION, FCVAR_USERINFO | FCVAR_DONTRECORD, "R1Delta version number");
 		RegisterConVar("delta_skip_version_check", "0", FCVAR_GAMEDLL, "Skip version check for connecting clients (sets server to dev mode)");
+		RegisterConVar("delta_soundtable_check", "1", FCVAR_GAMEDLL, "Clients whose sound scripts differ from this server's disconnect (0 = they only get a warning)");
+		// ConVar construction runs engine.dll's CRT, so not from its load notification.
+		if (!IsDedicatedServer())
+			SoundScriptParity_RegisterClient();
 		RegisterConVar("delta_persistent_master_auth_token", "DEFAULT", FCVAR_ARCHIVE | FCVAR_SERVER_CANNOT_QUERY | FCVAR_DONTRECORD | FCVAR_PROTECTED | FCVAR_HIDDEN, "Persistent master server authentication token");
 		RegisterConVar("delta_persistent_master_auth_token_failed_reason", "", FCVAR_ARCHIVE | FCVAR_SERVER_CANNOT_QUERY | FCVAR_DONTRECORD | FCVAR_PROTECTED | FCVAR_HIDDEN, "Persistent master server authentication token");
 		RegisterConVar("delta_online_auth_enable", "0", FCVAR_GAMEDLL, "Whether to use master server auth");
@@ -9697,6 +9703,9 @@ void __stdcall LoaderNotificationCallback(
 		G_engine_ds = (uintptr_t)notification_data->Loaded.DllBase;
 		if (IsR1ODedicatedServer())
 			return;
+		// Before the dedicated engine's first sound-script load: its tables cap
+		// at 16,628 aliases, which truncates the current set.
+		InstallLegacyDSSoundTableExpansion(G_engine_ds);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x433C0), &ProcessConnectionlessPacketDedi, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x30FE20), &StringCompare_AllTalkHookDedi, reinterpret_cast<LPVOID*>(&oStringCompare_AllTalkHookDedi));
 		MH_EnableHook(MH_ALL_HOOKS);

@@ -367,6 +367,12 @@
 	<ClInclude Include="shared\persistentdata_store.h">
 	  <Filter>shared</Filter>
 	</ClInclude>
+    <ClInclude Include="shared\soundscript_parity.h">
+      <Filter>shared</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\core\legacy_ds_sound_tables.h">
+      <Filter>engine\core</Filter>
+    </ClInclude>
     <ClInclude Include="shared\squirrel.h">
       <Filter>shared</Filter>
     </ClInclude>
@@ -807,6 +813,12 @@
     </ClCompile>
     <ClCompile Include="shared\persistentdata_store.cpp">
       <Filter>shared</Filter>
+    </ClCompile>
+    <ClCompile Include="shared\soundscript_parity.cpp">
+      <Filter>shared</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\core\legacy_ds_sound_tables.cpp">
+      <Filter>engine\core</Filter>
     </ClCompile>
     <ClCompile Include="shared\squirrel.cpp">
       <Filter>shared</Filter>

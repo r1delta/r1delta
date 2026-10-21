@@ -38,6 +38,7 @@ class PDef;
 #include "persistentdata_slots.h"
 #include "persistentdata_state.h"
 #include "persistentdata_store.h"
+#include "soundscript_parity.h"
 #include "logging.h"
 #include "squirrel.h"
 #include "keyvalues.h"
@@ -968,6 +969,21 @@ bool NET_SetConVar__WriteToBuffer(NET_SetConVar* thisptr, bf_write& buffer) {
 		buffer.WriteByte(0);
 		return !buffer.IsOverflowed();
 	}
+	// The client's signon message (every userinfo convar) carries the
+	// sound-script marker; its bucket hashes ride along with it.
+	{
+		bool carriesMarker = false;
+		for (int i = 0; i < thisptr->m_ConVars.Count() && !carriesMarker; ++i)
+			carriesMarker = strcmp(thisptr->m_ConVars[i].name, kSoundScriptMarkerConVar) == 0;
+		SoundScriptUploadChunk chunks[kSoundScriptUploadChunks];
+		const int chunkCount = SoundScriptParity_ClientUploadChunks(carriesMarker, chunks);
+		for (int i = 0; i < chunkCount; ++i) {
+			NetMessageCvar_t entry = {};
+			strcpy_s(entry.name, sizeof(entry.name), chunks[i].name);
+			strcpy_s(entry.value, sizeof(entry.value), chunks[i].value);
+			thisptr->m_ConVars.AddToTail(entry);
+		}
+	}
 	bool vanilla = false;
 	if (!IsDedicatedServer()) {
 		auto var = OriginalCCVar_FindVar(cvarinterface, "net_secure");
@@ -1138,6 +1154,7 @@ bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 	bool sawLegacyPData = false;
 	bool sawFullSnapshotMarker = false;
 	size_t decodedPersistentCount = 0;
+	SoundScriptUpload soundScripts;
 	for (uint32_t i = 0; i < numvars; i++) {
 		NetMessageCvar_t var;
 		if (!buffer.ReadString(var.name, sizeof(var.name)) ||
@@ -1145,6 +1162,9 @@ bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 			Warning("Failed to read convar %d/%d\n", i, numvars);
 			return false;
 		}
+
+		if (soundScripts.Accept(var.name, var.value))
+			continue;
 
 		if (IsPackedPDataWireName(var.name)) {
 			const size_t chunkLength = strlen(var.value);
@@ -1223,6 +1243,7 @@ bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 	thisptr->m_ConVars.EnsureCapacity(static_cast<int>(staged.size()));
 	for (const NetMessageCvar_t& var : staged)
 		thisptr->m_ConVars.AddToTail(var);
+	SoundScriptParity_ServerCheck(playerSlot, soundScripts);
 
 	if (sawPackedPData) {
 		static int packedDecodeLogBudget = 32;
@@ -1385,37 +1406,14 @@ uintptr_t EdictForPlayerSlot(int playerSlot)
 		+ static_cast<uintptr_t>(playerSlot + 1) * 56;
 }
 
-using ClientCommandFn = void(__fastcall*)(void*, uintptr_t, const char*, ...);
-
 bool SendPersistentCommandToClient(int playerSlot, const char* key, const char* value)
 {
-	const uintptr_t edict = EdictForPlayerSlot(playerSlot);
-	if (!edict || !key || !value)
+	if (!key || !value)
 		return false;
-
-	if (IsR1ODedicatedServer()) {
-		// Use the exact native interface that R1OFactory handed to server_local.dll.
-		// dedicated.dll's app-system factory does not expose this interface in fake
-		// dedicated mode. ClientCommand is slot 37 in VEngineServer022.
-		void* engineServer = GetR1ONativeEngineServer022();
-		if (!engineServer)
-			return false;
-		const auto vtable = *reinterpret_cast<uintptr_t* const*>(engineServer);
-		if (!vtable || !vtable[37])
-			return false;
-		reinterpret_cast<ClientCommandFn>(vtable[37])(
-			engineServer, edict, PERSIST_COMMAND" \"%s\" \"%s\"", key, value);
-		return true;
-	}
-
-	static ClientCommandFn clientCommand = nullptr;
-	if (!clientCommand) {
-		clientCommand = IsDedicatedServer()
-			? reinterpret_cast<ClientCommandFn>(G_engine_ds + 0x6F030)
-			: reinterpret_cast<ClientCommandFn>(G_engine + 0xFE7F0);
-	}
-	clientCommand(nullptr, edict, PERSIST_COMMAND" \"%s\" \"%s\"", key, value);
-	return true;
+	// Same 1024-byte bound the engine's ClientCommand formats into.
+	char command[1024];
+	_snprintf_s(command, sizeof(command), _TRUNCATE, PERSIST_COMMAND" \"%s\" \"%s\"", key, value);
+	return SendServerCommandToClient(playerSlot, command);
 }
 
 void SendResends(int playerSlot, PersistentDataState::PlayerState& state, double now)
@@ -1616,6 +1614,38 @@ bool BuildScriptPersistName(const char* key, char* out, size_t outSize)
 	return MakePersistConVarName(key, out, outSize);
 }
 
+}
+
+using ClientCommandFn = void(__fastcall*)(void*, uintptr_t, const char*, ...);
+
+bool SendServerCommandToClient(int playerSlot, const char* command)
+{
+	const uintptr_t edict = EdictForPlayerSlot(playerSlot);
+	if (!edict || !command)
+		return false;
+
+	if (IsR1ODedicatedServer()) {
+		// Use the exact native interface that R1OFactory handed to server_local.dll.
+		// dedicated.dll's app-system factory does not expose this interface in fake
+		// dedicated mode. ClientCommand is slot 37 in VEngineServer022.
+		void* engineServer = GetR1ONativeEngineServer022();
+		if (!engineServer)
+			return false;
+		const auto vtable = *reinterpret_cast<uintptr_t* const*>(engineServer);
+		if (!vtable || !vtable[37])
+			return false;
+		reinterpret_cast<ClientCommandFn>(vtable[37])(engineServer, edict, "%s", command);
+		return true;
+	}
+
+	static ClientCommandFn clientCommand = nullptr;
+	if (!clientCommand) {
+		clientCommand = IsDedicatedServer()
+			? reinterpret_cast<ClientCommandFn>(G_engine_ds + 0x6F030)
+			: reinterpret_cast<ClientCommandFn>(G_engine + 0xFE7F0);
+	}
+	clientCommand(nullptr, edict, "%s", command);
+	return true;
 }
 
 bool PData_ServerReconcileIncoming(
@@ -1836,6 +1866,8 @@ bool IsValidServerCommand(const char* cmd)
 
 	return
 		!memcmp(cmd, PERSIST_COMMAND, sizeof(PERSIST_COMMAND) - 1) // Persistent data set
+		|| (!strncmp(cmd, kSoundScriptCommand, sizeof(kSoundScriptCommand) - 1) // Sound-script parity reply
+			&& cmd[sizeof(kSoundScriptCommand) - 1] == ' ')
 		|| !strcmp_static(cmd + 1, "remote_view"); // [-+]remote_view
 }
 
