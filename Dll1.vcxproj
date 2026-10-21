@@ -317,7 +317,10 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
 	<ClInclude Include="shared\persistentdata_state.h" />
 	<ClInclude Include="shared\persistentdata_store.h" />
     <ClInclude Include="shared\soundscript_parity.h" />
+    <ClInclude Include="shared\script_sync_parity.h" />
+    <ClInclude Include="shared\parity_common.h" />
     <ClInclude Include="engine\core\legacy_ds_sound_tables.h" />
+    <ClInclude Include="client\ui_script_failure.h" />
     <ClInclude Include="server\physics\physics.h" />
     <ClInclude Include="server\server_usercmd.h" />
     <ClInclude Include="player.h" />
@@ -473,7 +476,10 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="shared\persistentdata_codec.cpp" />
     <ClCompile Include="shared\persistentdata_store.cpp" />
     <ClCompile Include="shared\soundscript_parity.cpp" />
+    <ClCompile Include="shared\script_sync_parity.cpp" />
+    <ClCompile Include="shared\parity_common.cpp" />
     <ClCompile Include="engine\core\legacy_ds_sound_tables.cpp" />
+    <ClCompile Include="client\ui_script_failure.cpp" />
     <ClCompile Include="client\predictionerror.cpp" />
     <ClCompile Include="engine\security_fixes.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>

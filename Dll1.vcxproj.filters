@@ -367,6 +367,15 @@
 	<ClInclude Include="shared\persistentdata_store.h">
 	  <Filter>shared</Filter>
 	</ClInclude>
+    <ClInclude Include="client\ui_script_failure.h">
+      <Filter>client</Filter>
+    </ClInclude>
+    <ClInclude Include="shared\script_sync_parity.h">
+      <Filter>shared</Filter>
+    </ClInclude>
+    <ClInclude Include="shared\parity_common.h">
+      <Filter>shared</Filter>
+    </ClInclude>
     <ClInclude Include="shared\soundscript_parity.h">
       <Filter>shared</Filter>
     </ClInclude>
@@ -812,6 +821,15 @@
       <Filter>shared</Filter>
     </ClCompile>
     <ClCompile Include="shared\persistentdata_store.cpp">
+      <Filter>shared</Filter>
+    </ClCompile>
+    <ClCompile Include="client\ui_script_failure.cpp">
+      <Filter>client</Filter>
+    </ClCompile>
+    <ClCompile Include="shared\script_sync_parity.cpp">
+      <Filter>shared</Filter>
+    </ClCompile>
+    <ClCompile Include="shared\parity_common.cpp">
       <Filter>shared</Filter>
     </ClCompile>
     <ClCompile Include="shared\soundscript_parity.cpp">

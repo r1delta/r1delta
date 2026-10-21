@@ -3,6 +3,7 @@
 #include "cvar.h"
 #include "load.h"
 #include "logging.h"
+#include "parity_common.h"
 #include "persistentdata.h"
 #include "legacy_ds_sound_tables.h"
 #include <algorithm>
@@ -32,11 +33,6 @@ constexpr TableLayout kEngineLayout{ 0x10FEBC0, 0x1A0DBC4, 0x1A0DBC0 };    // en
 constexpr TableLayout kEngineDsLayout{ 0xD52BE0, 0x15713E4, 0x15713E0 };   // engine_ds.dll (2014)
 constexpr TableLayout kEngineR1OLayout{ 0x6F9110, 0x18836F4, 0x18836F0 };  // engine_r1o.dll
 
-// Client engine.dll: COM_ExplainDisconnection and Host_Disconnect, the pair
-// retail's own sound-script check (CClientState +0x76700) uses.
-constexpr std::uintptr_t kExplainDisconnectionRva = 0x117240;
-constexpr std::uintptr_t kHostDisconnectRva = 0x137160;
-
 constexpr int kHashesPerChunk = kSoundScriptBuckets / kSoundScriptUploadChunks;
 static_assert(kHashesPerChunk * 8 < sizeof(SoundScriptUploadChunk::value), "bucket chunk does not fit a convar value");
 
@@ -44,10 +40,6 @@ static_assert(kHashesPerChunk * 8 < sizeof(SoundScriptUploadChunk::value), "buck
 // handful of buckets; beyond this the verdict lists counts only.
 constexpr int kMaxNamedBuckets = 8;
 constexpr std::size_t kMaxNamesPerBucket = 1024;
-// svc_StringCmd is formatted into 1024 bytes and executed as one CCommand (511).
-constexpr std::size_t kMaxNamesPayload = 400;
-// COM_ExplainDisconnection formats into a 256-byte buffer.
-constexpr std::size_t kMaxReason = 250;
 
 struct LocalTable {
 	const unsigned char* records = nullptr;
@@ -163,78 +155,8 @@ int HexDigit(char c) {
 	return -1;
 }
 
-// Names travel inside one quoted, space-separated command argument.
-bool IsPlainNameChar(unsigned char c) {
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
-		|| c == '_' || c == '.' || c == '-' || c == '/';
-}
-
-void AppendEncodedName(std::string& out, const char* name) {
-	static const char kHex[] = "0123456789ABCDEF";
-	for (const unsigned char* c = reinterpret_cast<const unsigned char*>(name); *c; ++c) {
-		if (IsPlainNameChar(*c)) {
-			out.push_back(static_cast<char>(*c));
-			continue;
-		}
-		out.push_back('%');
-		out.push_back(kHex[*c >> 4]);
-		out.push_back(kHex[*c & 15]);
-	}
-}
-
-bool DecodeName(const char* begin, const char* end, std::string& out) {
-	out.clear();
-	for (const char* c = begin; c < end; ++c) {
-		if (*c != '%') {
-			out.push_back(*c);
-			continue;
-		}
-		if (end - c < 3 || HexDigit(c[1]) < 0 || HexDigit(c[2]) < 0)
-			return false;
-		out.push_back(static_cast<char>(HexDigit(c[1]) * 16 + HexDigit(c[2])));
-		c += 2;
-	}
-	return !out.empty();
-}
-
 bool NameLess(const std::string& a, const std::string& b) {
 	return _stricmp(a.c_str(), b.c_str()) < 0;
-}
-
-// --- Server ------------------------------------------------------------------
-
-bool ServerEnforcesParity() {
-	constexpr char kName[] = "delta_soundtable_check";
-	// R1O registers it as an R1O convar; R1 modes own the R1 convar itself.
-	if (IsR1ODedicatedServer()) {
-		const ConVarR1O* check = CCVar_FindVar(cvarinterface, kName);
-		return !check || check->m_Value.m_nValue != 0;
-	}
-	const ConVarR1* check = OriginalCCVar_FindVar(cvarinterface, kName);
-	return !check || check->m_Value.m_nValue != 0;
-}
-
-void SendNames(int playerSlot, int bucket, const std::vector<const char*>& names) {
-	std::string payload;
-	auto flush = [&]() {
-		if (payload.empty())
-			return;
-		char command[CCommand::COMMAND_MAX_LENGTH];
-		_snprintf_s(command, sizeof(command), _TRUNCATE, "%s names %d \"%s\"", kSoundScriptCommand, bucket, payload.c_str());
-		SendServerCommandToClient(playerSlot, command);
-		payload.clear();
-	};
-	std::string encoded;
-	for (const char* name : names) {
-		encoded.clear();
-		AppendEncodedName(encoded, name);
-		if (!payload.empty() && payload.size() + 1 + encoded.size() > kMaxNamesPayload)
-			flush();
-		if (!payload.empty())
-			payload.push_back(' ');
-		payload += encoded;
-	}
-	flush();
 }
 
 // --- Client ------------------------------------------------------------------
@@ -248,27 +170,12 @@ struct ClientState {
 };
 ClientState g_client;
 
-std::string QuotedList(const std::vector<std::string>& names, std::size_t budget) {
-	std::string out;
-	std::size_t shown = 0;
-	for (const std::string& name : names) {
-		const std::string item = (shown ? ", \"" : "\"") + name + "\"";
-		if (shown && out.size() + item.size() > budget)
-			break;
-		out += item;
-		++shown;
-	}
-	if (shown < names.size())
-		out += " and " + std::to_string(names.size() - shown) + " more";
-	return out;
-}
-
 void PrintNames(const char* heading, const std::vector<std::string>& names) {
 	if (names.empty())
 		return;
-	Warning("%s (%zu):\n", heading, names.size());
+	Parity::Report(true, "%s (%zu):\n", heading, names.size());
 	for (const std::string& name : names)
-		Msg("    %s\n", name.c_str());
+		Parity::Report(false, "    %s\n", name.c_str());
 }
 
 void ClientVerdict(const CCommand& args) {
@@ -327,16 +234,16 @@ void ClientVerdict(const CCommand& args) {
 	std::set_difference(theirs.begin(), theirs.end(), mine.begin(), mine.end(), std::back_inserter(serverOnly), NameLess);
 
 	const char* lead = enforce ? "Client/server sounds do not match, disconnecting" : "Client/server sounds do not match";
-	char reason[kMaxReason + 1] = {};
+	char reason[Parity::kMaxReason + 1] = {};
 	if (!clientOnly.empty() || !serverOnly.empty()) {
 		const std::size_t budget = clientOnly.empty() || serverOnly.empty() ? 150 : 70;
 		std::string detail;
 		if (!clientOnly.empty())
-			detail += "you have " + QuotedList(clientOnly, budget) + " that the server doesn't have";
+			detail += "you have " + Parity::QuotedList(clientOnly, budget) + " that the server doesn't have";
 		if (!serverOnly.empty()) {
 			if (!detail.empty())
 				detail += "; ";
-			detail += "the server has " + QuotedList(serverOnly, budget) + " that your client doesn't have";
+			detail += "the server has " + Parity::QuotedList(serverOnly, budget) + " that your client doesn't have";
 		}
 		_snprintf_s(reason, sizeof(reason), _TRUNCATE, "%s (%s)", lead, detail.c_str());
 	}
@@ -350,8 +257,8 @@ void ClientVerdict(const CCommand& args) {
 			lead, local.aliases, server.aliases);
 	}
 
-	Warning("R1Delta sound scripts: %s\n", reason);
-	Warning("R1Delta sound scripts: client %d aliases (crc %08x), server %d aliases (crc %08x)\n",
+	Parity::Report(true, "R1Delta sound scripts: %s\n", reason);
+	Parity::Report(true, "R1Delta sound scripts: client %d aliases (crc %08x), server %d aliases (crc %08x)\n",
 		local.aliases, local.engineCrc, server.aliases, server.engineCrc);
 	PrintNames("Sounds only on this client", clientOnly);
 	PrintNames("Sounds only on the server", serverOnly);
@@ -359,12 +266,8 @@ void ClientVerdict(const CCommand& args) {
 		Warning("R1Delta sound scripts: %d of %d differing name groups were not listed\n",
 			differingBuckets - listedCount, differingBuckets);
 
-	if (!enforce)
-		return;
-	using ExplainDisconnectionFn = __int64(__fastcall*)(__int64, const char*, ...);
-	using HostDisconnectFn = void(__fastcall*)(bool);
-	reinterpret_cast<ExplainDisconnectionFn>(G_engine + kExplainDisconnectionRva)(1, "%s\n", reason);
-	reinterpret_cast<HostDisconnectFn>(G_engine + kHostDisconnectRva)(true);
+	if (enforce)
+		Parity::DisconnectWithReason(reason);
 }
 
 void SoundScriptCommand(const CCommand& args) {
@@ -375,14 +278,9 @@ void SoundScriptCommand(const CCommand& args) {
 		const int bucket = atoi(args.Arg(2));
 		if (bucket < 0 || bucket >= kSoundScriptBuckets)
 			return;
-		std::string name;
-		for (const char* c = args.Arg(3); *c;) {
-			const char* end = strchr(c, ' ');
-			if (!end)
-				end = c + strlen(c);
-			if (g_client.serverNames.size() < kMaxNamedBuckets * kMaxNamesPerBucket && DecodeName(c, end, name))
-				g_client.serverNames.emplace_back(bucket, name);
-			c = *end ? end + 1 : end;
+		for (std::string& name : Parity::DecodeNameList(args.Arg(3), kMaxNamesPerBucket)) {
+			if (g_client.serverNames.size() < kMaxNamedBuckets * kMaxNamesPerBucket)
+				g_client.serverNames.emplace_back(bucket, std::move(name));
 		}
 	}
 	else if (strcmp(verb, "done") == 0 && args.ArgC() == 6) {
@@ -474,13 +372,15 @@ void SoundScriptParity_ServerCheck(int playerSlot, const SoundScriptUpload& uplo
 	for (std::size_t i = 0; i < named.size(); ++i) {
 		if (names[i].size() > kMaxNamesPerBucket)
 			continue;
-		SendNames(playerSlot, named[i], names[i]);
+		char prefix[64];
+		_snprintf_s(prefix, sizeof(prefix), _TRUNCATE, "%s names %d", kSoundScriptCommand, named[i]);
+		Parity::SendEncodedNames(playerSlot, prefix, names[i]);
 		if (!listed.empty())
 			listed.push_back(',');
 		listed += std::to_string(named[i]);
 	}
 
-	const bool enforce = ServerEnforcesParity();
+	const bool enforce = Parity::ServerConVarEnabled("delta_soundtable_check");
 	char fingerprint[64];
 	FormatFingerprint(local, fingerprint, sizeof(fingerprint));
 	char command[CCommand::COMMAND_MAX_LENGTH];
@@ -488,7 +388,7 @@ void SoundScriptParity_ServerCheck(int playerSlot, const SoundScriptUpload& uplo
 		kSoundScriptCommand, enforce ? 1 : 0, fingerprint, differing, listed.c_str());
 	SendServerCommandToClient(playerSlot, command);
 
-	Warning("R1Delta sound scripts: client in slot %d does not match this server (client %d aliases, server %d; %s)%s\n",
+	Parity::Report(true, "R1Delta sound scripts: client in slot %d does not match this server (client %d aliases, server %d; %s)%s\n",
 		playerSlot, remote.aliases, local.aliases,
 		remote.set == local.set ? "same aliases in a different order"
 			: (std::to_string(differing) + " name group(s) differ").c_str(),

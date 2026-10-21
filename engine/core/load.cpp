@@ -44,6 +44,8 @@
 #include "r1o_runtime_paths.h"
 #include "legacy_ds_sound_tables.h"
 #include "soundscript_parity.h"
+#include "script_sync_parity.h"
+#include "ui_script_failure.h"
 #include <cstdlib>
 #include <cmath>
 #include <new>
@@ -8352,6 +8354,8 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	// Account-hold recovery needs this hook on every client, not only under the debug flag: a held
 	// account id after a P2P timeout otherwise leaves the client unable to rejoin on another route.
 	InstallCOMExplainDisconnectionHook(engine_base);
+	if (!IsDedicatedServer())
+		InstallUiScriptFailureDialog(engine_base);
 	const bool installClientDebugHooks = !IsDedicatedServer() && ShouldInstallR1OClientDebugHooks();
 	MH_CreateHook((LPVOID)(engine_base + 0x1FDA50), &CLC_Move__ReadFromBuffer, reinterpret_cast<LPVOID*>(&CLC_Move__ReadFromBufferOriginal));
 	MH_CreateHook((LPVOID)(engine_base + 0x1F6F10), &CLC_Move__WriteToBuffer, reinterpret_cast<LPVOID*>(&CLC_Move__WriteToBufferOriginal));
@@ -9304,9 +9308,12 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		RegisterConVar("delta_version", R1D_VERSION, FCVAR_USERINFO | FCVAR_DONTRECORD, "R1Delta version number");
 		RegisterConVar("delta_skip_version_check", "0", FCVAR_GAMEDLL, "Skip version check for connecting clients (sets server to dev mode)");
 		RegisterConVar("delta_soundtable_check", "1", FCVAR_GAMEDLL, "Clients whose sound scripts differ from this server's disconnect (0 = they only get a warning)");
+		RegisterConVar("delta_scriptsync_check", "1", FCVAR_GAMEDLL, "Clients whose remote functions, server/entity vars or registered strings differ from this server's disconnect (0 = they only get a warning)");
 		// ConVar construction runs engine.dll's CRT, so not from its load notification.
-		if (!IsDedicatedServer())
+		if (!IsDedicatedServer()) {
 			SoundScriptParity_RegisterClient();
+			ScriptSyncParity_RegisterClient();
+		}
 		RegisterConVar("delta_persistent_master_auth_token", "DEFAULT", FCVAR_ARCHIVE | FCVAR_SERVER_CANNOT_QUERY | FCVAR_DONTRECORD | FCVAR_PROTECTED | FCVAR_HIDDEN, "Persistent master server authentication token");
 		RegisterConVar("delta_persistent_master_auth_token_failed_reason", "", FCVAR_ARCHIVE | FCVAR_SERVER_CANNOT_QUERY | FCVAR_DONTRECORD | FCVAR_PROTECTED | FCVAR_HIDDEN, "Persistent master server authentication token");
 		RegisterConVar("delta_online_auth_enable", "0", FCVAR_GAMEDLL, "Whether to use master server auth");

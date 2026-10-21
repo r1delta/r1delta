@@ -51,6 +51,11 @@
 #include "client.h"
 #include "surfacerender.h"
 #include "localize.h"
+#include "script_sync_parity.h"
+
+// shared/script_sync_parity.cpp
+SQInteger Script_ScriptSyncPublishServer(HSQUIRRELVM v);
+SQInteger Script_ScriptSyncPublishClient(HSQUIRRELVM v);
 
 #pragma intrinsic(_ReturnAddress)
 
@@ -2108,6 +2113,28 @@ bool GetSQVMFuncs() {
 		"void",
 		"entity|array|bool recipients, string text, int keysMask, int secondsToStayOpen",
 		"Send ShowMenu (CS:S/EP2) with automatic chunking and full keys mask."
+	);
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER,
+		"ScriptSyncPublish",
+		(SQFUNCTION)Script_ScriptSyncPublishServer,
+		".ssss",
+		5,
+		"void",
+		"string remoteFunctions, string serverVars, string entityVars, string registeredStrings",
+		"R1Delta: publish this VM's newline-separated registration-order lists for the client parity check"
+	);
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_CLIENT,
+		"ScriptSyncPublish",
+		(SQFUNCTION)Script_ScriptSyncPublishClient,
+		".ssss",
+		5,
+		"void",
+		"string remoteFunctions, string serverVars, string entityVars, string registeredStrings",
+		"R1Delta: publish this VM's newline-separated registration-order lists for the server parity check"
 	);
 
 

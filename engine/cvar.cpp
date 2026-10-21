@@ -1231,6 +1231,7 @@ void RegisterR1ODediDeltaConVars()
 	RegisterR1ODediConVar("delta_server_auth_token", "", FCVAR_USERINFO | FCVAR_SERVER_CANNOT_QUERY | FCVAR_DONTRECORD | FCVAR_PROTECTED | FCVAR_HIDDEN, "Per-server auth token");
 	RegisterR1ODediConVar("delta_version", R1D_VERSION, FCVAR_USERINFO | FCVAR_DONTRECORD, "R1Delta version number");
 	RegisterR1ODediConVar("delta_soundtable_check", "1", FCVAR_GAMEDLL, "Clients whose sound scripts differ from this server's disconnect (0 = they only get a warning)");
+	RegisterR1ODediConVar("delta_scriptsync_check", "1", FCVAR_GAMEDLL, "Clients whose remote functions, server/entity vars or registered strings differ from this server's disconnect (0 = they only get a warning)");
 	RegisterR1ODediConVar("delta_skip_version_check", "0", FCVAR_GAMEDLL, "Skip version check for connecting clients (sets server to dev mode)");
 	RegisterR1ODediConVar("delta_online_auth_enable", "0", FCVAR_GAMEDLL, "Whether to use master server auth");
 	RegisterR1ODediConVar("delta_discord_username_sync", "0", FCVAR_GAMEDLL, "Controls if player names are synced with Discord");

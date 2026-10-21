@@ -59,6 +59,7 @@
 #include "r1o_vpk.h"
 #include "script_error_telemetry.h"
 #include "soundscript_parity.h"
+#include "script_sync_parity.h"
 #include "bitbuf.h"
 #include "defs.h"
 #include "factory.h"
@@ -14148,10 +14149,10 @@ static bool __fastcall R1ONETSetConVarReadFromBuffer(__int64 message, __int64 bi
 			R1ONETSetConVarAddToTail(vector, &var);
 
 		if (soundScripts.present) {
-			R1OPersistenceOwner soundScriptOwner;
-			SoundScriptParity_ServerCheck(
-				R1OResolvePersistenceOwner(message, soundScriptOwner) ? soundScriptOwner.playerSlot : -1,
-				soundScripts);
+			R1OPersistenceOwner parityOwner;
+			const int paritySlot = R1OResolvePersistenceOwner(message, parityOwner) ? parityOwner.playerSlot : -1;
+			SoundScriptParity_ServerCheck(paritySlot, soundScripts);
+			ScriptSyncParity_ServerPush(paritySlot);
 		}
 
 		if (sawPackedPData) {

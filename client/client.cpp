@@ -11,6 +11,7 @@
 #include "ffa_targeting.h"
 #include "rendering/surfacerender.h"
 #include "culling/region_cull.h"
+#include "script_sync_parity.h"
 
 typedef void (*sub_18027F2C0Type)(__int64 a1, const char *a2, void *a3);
 sub_18027F2C0Type sub_18027F2C0Original;
@@ -792,6 +793,9 @@ void InitClient()
     MH_CreateHook((LPVOID)(client + 0x689A70), &vgui__PHandle__Get_Hook, reinterpret_cast<LPVOID *>(&vgui__PHandle__Get_Original));
 
     InitRegionCullHooks();
+    // client.dll answers a remote-function checksum mismatch with an endless
+    // "retry"; route it to the script-sync check instead.
+    ScriptSyncParity_InstallClientRetryRedirect(client);
 
     if (IsNoOrigin())
 

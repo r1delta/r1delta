@@ -39,6 +39,7 @@ class PDef;
 #include "persistentdata_state.h"
 #include "persistentdata_store.h"
 #include "soundscript_parity.h"
+#include "script_sync_parity.h"
 #include "logging.h"
 #include "squirrel.h"
 #include "keyvalues.h"
@@ -969,14 +970,16 @@ bool NET_SetConVar__WriteToBuffer(NET_SetConVar* thisptr, bf_write& buffer) {
 		buffer.WriteByte(0);
 		return !buffer.IsOverflowed();
 	}
-	// The client's signon message (every userinfo convar) carries the
-	// sound-script marker; its bucket hashes ride along with it.
+	// The client's signon message carries the sound-script marker; its bucket
+	// hashes ride along with it, and a new signon restarts the script-sync check.
 	{
 		bool carriesMarker = false;
 		for (int i = 0; i < thisptr->m_ConVars.Count() && !carriesMarker; ++i)
 			carriesMarker = strcmp(thisptr->m_ConVars[i].name, kSoundScriptMarkerConVar) == 0;
 		SoundScriptUploadChunk chunks[kSoundScriptUploadChunks];
 		const int chunkCount = SoundScriptParity_ClientUploadChunks(carriesMarker, chunks);
+		if (carriesMarker)
+			ScriptSyncParity_ClientSignon();
 		for (int i = 0; i < chunkCount; ++i) {
 			NetMessageCvar_t entry = {};
 			strcpy_s(entry.name, sizeof(entry.name), chunks[i].name);
@@ -1243,7 +1246,10 @@ bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 	thisptr->m_ConVars.EnsureCapacity(static_cast<int>(staged.size()));
 	for (const NetMessageCvar_t& var : staged)
 		thisptr->m_ConVars.AddToTail(var);
-	SoundScriptParity_ServerCheck(playerSlot, soundScripts);
+	if (soundScripts.present) {
+		SoundScriptParity_ServerCheck(playerSlot, soundScripts);
+		ScriptSyncParity_ServerPush(playerSlot);
+	}
 
 	if (sawPackedPData) {
 		static int packedDecodeLogBudget = 32;
@@ -1868,6 +1874,8 @@ bool IsValidServerCommand(const char* cmd)
 		!memcmp(cmd, PERSIST_COMMAND, sizeof(PERSIST_COMMAND) - 1) // Persistent data set
 		|| (!strncmp(cmd, kSoundScriptCommand, sizeof(kSoundScriptCommand) - 1) // Sound-script parity reply
 			&& cmd[sizeof(kSoundScriptCommand) - 1] == ' ')
+		|| (!strncmp(cmd, kScriptSyncCommand, sizeof(kScriptSyncCommand) - 1) // Script-sync parity lists
+			&& cmd[sizeof(kScriptSyncCommand) - 1] == ' ')
 		|| !strcmp_static(cmd + 1, "remote_view"); // [-+]remote_view
 }
 
