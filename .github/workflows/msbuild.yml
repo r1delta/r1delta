@@ -13,7 +13,7 @@ env:
   BUILD_PATH: ${{ github.workspace }}/build
   OUTPUT_PATH: ${{ github.workspace }}/output
   SYMBOL_PATH: ${{ github.workspace }}/symbols
-  CORE_REF: 0dff84a3b897222e47d3f6a904776d6eb90ac165
+  CORE_REF: 316993bd0142e706ea5386943530f2b8d2c711dd
   VCPKG_BINARY_SOURCES: "clear;files,D:/a/r1delta/vcpkg,readwrite"
   BUILD_CONFIGURATION: Release
   MSBUILD_DEBUG_TYPE: pdbonly
