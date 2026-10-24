@@ -119,6 +119,9 @@
     <ClInclude Include="engine\core\client_brush_material_guard.h">
       <Filter>engine\core</Filter>
     </ClInclude>
+    <ClInclude Include="engine\core\datacache_header_ownership.h">
+      <Filter>engine\core</Filter>
+    </ClInclude>
     <ClInclude Include="engine\core\framework.h">
       <Filter>engine\core</Filter>
     </ClInclude>
@@ -162,6 +165,9 @@
       <Filter>engine\filesystem</Filter>
     </ClInclude>
     <ClInclude Include="engine\filesystem\vpk_directory_repair.h">
+      <Filter>engine\filesystem</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\filesystem\shared_particle_materials.h">
       <Filter>engine\filesystem</Filter>
     </ClInclude>
     <ClInclude Include="engine\filesystem\vpk_async_precache_entry.h">
@@ -307,6 +313,15 @@
       <Filter>client\rendering</Filter>
     </ClInclude>
     <ClInclude Include="client\rendering\reflex.h">
+      <Filter>client\rendering</Filter>
+    </ClInclude>
+    <ClInclude Include="client\rendering\material_resource_ownership.h">
+      <Filter>client\rendering</Filter>
+    </ClInclude>
+    <ClInclude Include="client\rendering\graphics_flight_recorder.h">
+      <Filter>client\rendering</Filter>
+    </ClInclude>
+    <ClInclude Include="client\rendering\graphics_flight_recorder_storage.h">
       <Filter>client\rendering</Filter>
     </ClInclude>
     <ClInclude Include="client\rendering\surfacerender.h">
@@ -620,6 +635,9 @@
     <ClCompile Include="engine\core\factory.cpp">
       <Filter>engine\core</Filter>
     </ClCompile>
+    <ClCompile Include="engine\core\datacache_header_ownership.cpp">
+      <Filter>engine\core</Filter>
+    </ClCompile>
     <ClCompile Include="engine\core\materialsystem_dx11_vtf_scratch.cpp">
       <Filter>engine\core</Filter>
     </ClCompile>
@@ -663,6 +681,9 @@
       <Filter>engine\filesystem</Filter>
     </ClCompile>
     <ClCompile Include="engine\filesystem\vpk_directory_repair.cpp">
+      <Filter>engine\filesystem</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\filesystem\shared_particle_materials.cpp">
       <Filter>engine\filesystem</Filter>
     </ClCompile>
     <ClCompile Include="engine\filesystem\vpk_async_precache_entry.cpp">
@@ -778,6 +799,15 @@
       <Filter>client\rendering</Filter>
     </ClCompile>
     <ClCompile Include="client\rendering\reflex.cpp">
+      <Filter>client\rendering</Filter>
+    </ClCompile>
+    <ClCompile Include="client\rendering\material_resource_ownership.cpp">
+      <Filter>client\rendering</Filter>
+    </ClCompile>
+    <ClCompile Include="client\rendering\graphics_flight_recorder.cpp">
+      <Filter>client\rendering</Filter>
+    </ClCompile>
+    <ClCompile Include="client\rendering\graphics_flight_recorder_hooks.cpp">
       <Filter>client\rendering</Filter>
     </ClCompile>
     <ClCompile Include="client\rendering\surfacerender.cpp">

@@ -100,6 +100,40 @@ static std::vector<FnChangeCallback_t> s_R1OGlobalChangeCallbacks;
 static bool s_R1OCallingGlobalChangeCallbacks;
 static bool s_R1BackingGlobalChangeCallbackInstalled;
 
+void AssignConVarString(CVValue_t& value, const char* source)
+{
+	// Each ConVar owns m_pszString: the native ChangeStringValue reuses or
+	// replaces it and the destructor frees it. Values mirrored between the R1 and
+	// R1O objects are therefore copied into storage owned by the destination;
+	// sharing the source pointer made two destructors free one buffer at quit.
+	const char* text = source ? source : "";
+	if (value.m_pszString == text)
+		return;
+	const size_t size = strlen(text) + 1;
+	if (value.m_pszString && value.m_StringLength >= static_cast<__int64>(size)) {
+		memcpy(value.m_pszString, text, size);
+		return;
+	}
+	char* owned = DuplicateDelegatedString(text);
+	FreeDelegatedString(value.m_pszString);
+	value.m_pszString = owned;
+	value.m_StringLength = static_cast<__int64>(size);
+}
+
+static void CopyConVarValue(CVValue_t& destination, const CVValue_t& source)
+{
+	AssignConVarString(destination, source.m_pszString);
+	destination.m_fValue = source.m_fValue;
+	destination.m_nValue = source.m_nValue;
+}
+
+static CVValue_t PrivateConVarValueCopy(const CVValue_t& source)
+{
+	CVValue_t copy{};
+	CopyConVarValue(copy, source);
+	return copy;
+}
+
 static void InvokeR1OGlobalChangeCallbacks(ConVarR1O* var, const char* pOldString, float flOldValue)
 {
 	if (!IsR1ODedicatedServer() || !var || s_R1OGlobalChangeCallbacks.empty() || s_R1OCallingGlobalChangeCallbacks)
@@ -330,7 +364,7 @@ ConVarR1O* convertToR1O(ConVarR1* var) {
 
 	varR1O->m_pParent = varR1O;//convertToR1O(var->m_pParent);
 	varR1O->m_pszDefaultValue = var->m_pszDefaultValue;
-	varR1O->m_Value = var->m_Value;
+	varR1O->m_Value = PrivateConVarValueCopy(var->m_Value);
 	varR1O->m_bHasMin = var->m_bHasMin;
 	varR1O->m_fMinVal = var->m_fMinVal;
 	varR1O->m_bHasMax = var->m_bHasMax;
@@ -399,7 +433,7 @@ ConVarR1* convertToR1(ConVarR1O* varR1O) {
 	var->__vftable = ptr2;
 	var->m_pParent = var; //convertToR1(varR1O->m_pParent);
 	var->m_pszDefaultValue = varR1O->m_pszDefaultValue;
-	var->m_Value = varR1O->m_Value;
+	var->m_Value = PrivateConVarValueCopy(varR1O->m_Value);
 	var->m_bHasMin = varR1O->m_bHasMin;
 	var->m_fMinVal = varR1O->m_fMinVal;
 	var->m_bHasMax = varR1O->m_bHasMax;
@@ -487,6 +521,38 @@ void CCVar_RegisterConCommand(uintptr_t thisptr, ConCommandBaseR1O* pCommandBase
 
 void CCVar_UnregisterConCommand(uintptr_t thisptr, ConCommandBaseR1O* pCommandBase) {
 	return OriginalCCVar_UnregisterConCommand(cvarinterface, (ConCommandR1*)pCommandBase);
+}
+
+void (*OriginalCCvar__UnregisterConCommands)(uintptr_t thisptr, int dllIdentifier);
+
+// Slot 9 of the TFO tier1 ConCommandBase, ConCommand and ConVar vtables is
+// GetDLLIdentifier in both shipped TFO modules (server.dll and engine_r1o.dll).
+static int GetR1OCommandDLLIdentifier(ConCommandBaseR1O* command)
+{
+	using GetDLLIdentifierFn = int(__fastcall*)(ConCommandBaseR1O*);
+	return static_cast<GetDLLIdentifierFn*>(command->vtable)[9](command);
+}
+
+void CCVar_UnregisterConCommands(uintptr_t thisptr, int dllIdentifier)
+{
+	// A TFO module's ConVar_Unregister runs from its shutdown, before the module
+	// is unloaded. Adapter entries whose R1O object reports that module (its
+	// static command objects and wrappers built on its vtables) die with it, as
+	// do the backing R1 registrations that borrow its name and help strings.
+	// The backing objects stay allocated because R1 child ConVars may still
+	// point at them as their parent.
+	for (auto it = ccBaseMap.begin(); it != ccBaseMap.end();) {
+		WVar* entry = it->second;
+		if (!entry || !entry->r1optr || GetR1OCommandDLLIdentifier(entry->r1optr) != dllIdentifier) {
+			++it;
+			continue;
+		}
+		if (entry->is_r1o && entry->r1ptr)
+			OriginalCCVar_UnregisterConCommand(cvarinterface, entry->r1ptr);
+		delete entry;
+		it = ccBaseMap.erase(it);
+	}
+	OriginalCCvar__UnregisterConCommands(cvarinterface, dllIdentifier);
 }
 
 static ConCommandBaseR1O* WrapFoundR1CommandBase(const char* name, ConCommandBaseR1* r1CommandBase)
@@ -703,10 +769,7 @@ void GlobalChangeCallback(ConVarR1* var, const char* pOldValue) {
 	if (it == ccBaseMap.end())
 		return;
 	ConVarR1O* r1ovar = ((ConVarR1O*)it->second->r1optr);
-	r1ovar->m_pParent->m_Value.m_fValue = var->m_Value.m_fValue;
-	r1ovar->m_pParent->m_Value.m_nValue = var->m_Value.m_nValue;
-	r1ovar->m_pParent->m_Value.m_pszString = var->m_Value.m_pszString;
-	r1ovar->m_pParent->m_Value.m_StringLength = var->m_Value.m_StringLength;
+	CopyConVarValue(r1ovar->m_pParent->m_Value, var->m_Value);
 	for (int i = 0; i < r1ovar->m_pParent->m_fnChangeCallbacks.Count(); ++i)
 	{
 		if (r1ovar->m_pParent->m_fnChangeCallbacks[i])
@@ -803,10 +866,7 @@ void CCVar_CallGlobalChangeCallbacks(uintptr_t thisptr, ConVarR1O* var, const ch
 	if (!r1var || !r1var->m_pParent)
 		return;
 
-	r1var->m_pParent->m_Value.m_fValue = var->m_Value.m_fValue;
-	r1var->m_pParent->m_Value.m_nValue = var->m_Value.m_nValue;
-	r1var->m_pParent->m_Value.m_pszString = var->m_Value.m_pszString;
-	r1var->m_pParent->m_Value.m_StringLength = var->m_Value.m_StringLength;
+	CopyConVarValue(r1var->m_pParent->m_Value, var->m_Value);
 
 	// The fake-dedi path shares cvars through the backing R1 store, but R1O
 	// engine systems still own the replicated-cvar global callback. Notify
@@ -1389,11 +1449,9 @@ static void SetRecentHostVar(const char* name, const char* value)
     const char* source = value ? value : "";
     if (parent->m_Value.m_pszString && strcmp(parent->m_Value.m_pszString, source) == 0)
         return;
-    char* owned = DuplicateR1OEngineOwnedString(source);
-    parent->m_Value.m_pszString = owned;
-    parent->m_Value.m_StringLength = static_cast<__int64>(strlen(owned) + 1);
-    parent->m_Value.m_fValue = static_cast<float>(atof(owned));
-    parent->m_Value.m_nValue = atoi(owned);
+    AssignConVarString(parent->m_Value, source);
+    parent->m_Value.m_fValue = static_cast<float>(atof(parent->m_Value.m_pszString));
+    parent->m_Value.m_nValue = atoi(parent->m_Value.m_pszString);
 }
 
 void GamemodeChangeCallback(IConVar* var_iconvar, const char* pOldValue, float flOldValue)

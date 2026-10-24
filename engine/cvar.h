@@ -253,6 +253,7 @@ extern const ConCommandR1* (*OriginalCCVar_FindCommand2)(uintptr_t thisptr, cons
 extern void      (*OriginalCCvar__InstallGlobalChangeCallback)(uintptr_t thisptr, void* func);
 extern void      (*OriginalCCvar__RemoveGlobalChangeCallback)(uintptr_t thisptr, void* func);
 extern void      (*OriginalCCVar_CallGlobalChangeCallbacks)(uintptr_t thisptr, ConVarR1* var, const char* pOldString, float flOldValue);
+extern void      (*OriginalCCvar__UnregisterConCommands)(uintptr_t thisptr, int dllIdentifier);
 extern void      (*OriginalCCVar_QueueMaterialThreadSetValue1)(uintptr_t thisptr, ConVarR1* pConVar, const char* pValue);
 extern void      (*OriginalCCVar_QueueMaterialThreadSetValue2)(uintptr_t thisptr, ConVarR1* pConVar, int nValue);
 extern void      (*OriginalCCVar_QueueMaterialThreadSetValue3)(uintptr_t thisptr, ConVarR1* pConVar, float flValue);
@@ -269,6 +270,9 @@ const ConVarR1O* CCVar_FindVar2(uintptr_t thisptr, const char* var_name);
 ConCommandR1O* CCVar_FindCommand(uintptr_t thisptr, const char* name);
 const ConCommandR1O* CCVar_FindCommand2(uintptr_t thisptr, const char* name);
 void CCVar_CallGlobalChangeCallbacks(uintptr_t thisptr, ConVarR1O* var, const char* pOldString, float flOldValue);
+void CCVar_UnregisterConCommands(uintptr_t thisptr, int dllIdentifier);
+// Copies text into storage owned by this ConVar value (reusing it when large enough).
+void AssignConVarString(CVValue_t& value, const char* source);
 void CCVar_QueueMaterialThreadSetValue1(uintptr_t thisptr, ConVarR1O* pConVar, const char* pValue);
 void CCVar_QueueMaterialThreadSetValue2(uintptr_t thisptr, ConVarR1O* pConVar, int nValue);
 void CCVar_QueueMaterialThreadSetValue3(uintptr_t thisptr, ConVarR1O* pConVar, float flValue);

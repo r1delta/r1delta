@@ -6,3 +6,4 @@
 void SetupHudWarpHooks();
 void SetupHudWarpMatSystemHooks();
 void SetupHudWarpVguiHooks();
+void ShutdownHudwarp();

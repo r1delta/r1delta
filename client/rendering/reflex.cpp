@@ -1,6 +1,8 @@
 #include "reflex.h"
 #include "antilag.h"
 #include "gpu_latency.h"
+#include "hudwarp_hooks.h"
+#include "graphics_flight_recorder.h"
 
 #include "core.h"
 #include "cvar.h"
@@ -407,6 +409,20 @@ char __fastcall ReflexDispatchInputEvent(std::int32_t* inputEvent)
 
 std::int64_t ReflexPresentFrame()
 {
+    r1delta::graphics_flight_recorder::FrameBoundary(true);
+    const auto materialBase = s_materialSystemBase.load(std::memory_order_acquire);
+    if (materialBase) {
+        // Borrow only the native device address; never retain it for diagnostics.
+        static ID3D11Device* lastRecordedDevice = nullptr;
+        auto* const currentDevice = *reinterpret_cast<ID3D11Device**>(
+            materialBase + 0x290D88);
+        if (currentDevice != lastRecordedDevice) {
+            r1delta::graphics_flight_recorder::ResetBoundary(
+                r1delta::graphics_flight_recorder::EventKind::DeviceReady,
+                reinterpret_cast<std::uintptr_t>(currentDevice));
+            lastRecordedDevice = currentDevice;
+        }
+    }
     if (!s_device.load(std::memory_order_acquire))
     {
         const std::uintptr_t materialSystemBase =
@@ -432,6 +448,7 @@ std::int64_t ReflexPresentFrame()
 
     if (mark)
         SetMarker(device, NvLatencyMarkerType::PresentEnd, frameId);
+    r1delta::graphics_flight_recorder::FrameBoundary(false);
     return result;
 }
 
@@ -460,6 +477,7 @@ std::int64_t ReflexMaterialShutdown()
     s_activeFrameId.store(0, std::memory_order_release);
     s_lastSubmittedFrameId.store(0, std::memory_order_release);
     s_submittedRead.store(s_submittedWrite.load(std::memory_order_acquire), std::memory_order_release);
+    ShutdownHudwarp();
     return s_originalMaterialShutdown();
 }
 } // namespace
@@ -509,8 +527,7 @@ void SetupReflexEngineHooks(std::uintptr_t engineBase)
 void SetupReflexMaterialSystemHooks(std::uintptr_t materialSystemBase)
 {
     if (!materialSystemBase
-        || GetR1DeltaEngineMode() != R1DeltaEngineMode::Client2015
-        || r1delta::gpu_latency::IsDisabled())
+        || GetR1DeltaEngineMode() != R1DeltaEngineMode::Client2015)
     {
         return;
     }
@@ -530,6 +547,8 @@ void SetupReflexMaterialSystemHooks(std::uintptr_t materialSystemBase)
         0x74, 0x0B,
     };
 
+    // Presentation is also the passive recorder's frame boundary. Keep the
+    // wrapper when SDK low latency is disabled; its SDK calls remain gated.
     InstallCheckedHook(
         materialSystemBase,
         0x5C90,

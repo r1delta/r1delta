@@ -175,11 +175,9 @@ void BaseModUI__LoadingProgress__PaintBackground(__int64* thisptr)
         OriginalCCVar_FindVar(cvarinterface, "model_defaultFadeDistMin")->m_nFlags = 0;
         OriginalCCVar_FindVar(cvarinterface, "model_defaultFadeDistScale")->m_nFlags = 0;
         if (auto cl_cmdrate = OriginalCCVar_FindVar(cvarinterface, "cl_cmdrate")) {
-            static char cl_cmdrate_value[] = "9999";
             cl_cmdrate->m_Value.m_nValue = 9999;
             cl_cmdrate->m_Value.m_fValue = 9999.0f;
-            cl_cmdrate->m_Value.m_pszString = cl_cmdrate_value;
-            cl_cmdrate->m_Value.m_StringLength = 4;
+            AssignConVarString(cl_cmdrate->m_Value, "9999");
         }
         Cbuf_AddText(0, "rese;mat_rimlightnearstrength 0.5; mat_rimlightfarstrength 15;model_fadeRangeFraction 0.9;r_lod_switch_scale 5;model_defaultFadeDistMin 50000000000;model_defaultFadeDistScale 50000000;cl_cmdrate 9999\n", 0);
     }

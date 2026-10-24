@@ -6,10 +6,44 @@
 namespace {
 
 constexpr uint16_t kChunkTerminator = 0xFFFF;
-constexpr uint32_t kLoadCache = 0x100;
-constexpr uint32_t kLoadAlternateCache = 0x400;
+constexpr uint32_t kEntryVisible = 0x100;
+constexpr uint32_t kAlternatePrecacheClass = 0x400;
 constexpr size_t kChunkMetadataSizeAfterLoadFlagsBeforeTerminator =
 	sizeof(uint16_t) + sizeof(uint64_t) * 3;
+
+char AsciiLower(char value)
+{
+	return value >= 'A' && value <= 'Z'
+		? static_cast<char>(value + ('a' - 'A'))
+		: value;
+}
+
+bool EndsWithInsensitive(std::string_view value, std::string_view suffix)
+{
+	if (value.size() < suffix.size())
+		return false;
+
+	const size_t offset = value.size() - suffix.size();
+	for (size_t i = 0; i < suffix.size(); ++i) {
+		if (AsciiLower(value[offset + i]) != AsciiLower(suffix[i]))
+			return false;
+	}
+	return true;
+}
+
+bool IsStudioModelComponent(
+	std::string_view extension,
+	std::string_view filename)
+{
+	if (extension.size() != 3)
+		return false;
+
+	return EndsWithInsensitive(extension, "mdl")
+		|| EndsWithInsensitive(extension, "phy")
+		|| EndsWithInsensitive(extension, "vvd")
+		|| (EndsWithInsensitive(extension, "vtx")
+			&& EndsWithInsensitive(filename, ".dx11"));
+}
 
 template <typename T>
 bool ReadValue(const uint8_t* tree, size_t treeSize, size_t& cursor, T& value)
@@ -25,7 +59,7 @@ bool ReadNullString(
 	const uint8_t* tree,
 	size_t treeSize,
 	size_t& cursor,
-	bool& empty)
+	std::string_view& value)
 {
 	if (!tree || cursor >= treeSize)
 		return false;
@@ -35,7 +69,8 @@ bool ReadNullString(
 		return false;
 
 	const size_t end = static_cast<const uint8_t*>(terminator) - tree;
-	empty = end == cursor;
+	value = std::string_view(
+		reinterpret_cast<const char*>(tree + cursor), end - cursor);
 	cursor = end + 1;
 	return true;
 }
@@ -58,26 +93,26 @@ VPKDirectoryLoadFlagRepairResult ParseDirectoryTree(
 	size_t cursor = 0;
 
 	for (;;) {
-		bool extensionEmpty = false;
-		if (!ReadNullString(tree, treeSize, cursor, extensionEmpty))
+		std::string_view extension;
+		if (!ReadNullString(tree, treeSize, cursor, extension))
 			return result;
-		if (extensionEmpty) {
+		if (extension.empty()) {
 			result.valid = RemainingBytesAreZero(tree, treeSize, cursor);
 			return result;
 		}
 
 		for (;;) {
-			bool directoryEmpty = false;
-			if (!ReadNullString(tree, treeSize, cursor, directoryEmpty))
+			std::string_view directory;
+			if (!ReadNullString(tree, treeSize, cursor, directory))
 				return result;
-			if (directoryEmpty)
+			if (directory.empty())
 				break;
 
 			for (;;) {
-				bool filenameEmpty = false;
-				if (!ReadNullString(tree, treeSize, cursor, filenameEmpty))
+				std::string_view filename;
+				if (!ReadNullString(tree, treeSize, cursor, filename))
 					return result;
-				if (filenameEmpty)
+				if (filename.empty())
 					break;
 
 				uint32_t crc = 0;
@@ -91,10 +126,8 @@ VPKDirectoryLoadFlagRepairResult ParseDirectoryTree(
 				(void)crc;
 				(void)packIndex;
 
-				if (cursor > treeSize || treeSize - cursor < preloadSize)
-					return result;
-				cursor += preloadSize;
-
+				const bool repairModelVisibility =
+					applyRepair && IsStudioModelComponent(extension, filename);
 				bool repairedEntry = false;
 				for (;;) {
 					const size_t loadFlagsOffset = cursor;
@@ -109,14 +142,21 @@ VPKDirectoryLoadFlagRepairResult ParseDirectoryTree(
 					}
 					cursor += kChunkMetadataSizeAfterLoadFlagsBeforeTerminator;
 
-					if ((loadFlags & kLoadAlternateCache) != 0) {
+					const bool alternateClass =
+						(loadFlags & kAlternatePrecacheClass) != 0;
+					const bool inactiveModel =
+						repairModelVisibility && loadFlags == 0x001;
+					if (alternateClass || inactiveModel) {
 						repairedEntry = true;
 						++result.repairedChunkCount;
 						if (applyRepair) {
-							// The affected archives use the alternate-cache bit with
-							// the inverse of the normal map cache bit. Equivalent
-							// entries in all healthy map archives use this mapping.
-							loadFlags ^= kLoadCache | kLoadAlternateCache;
+							// The legacy class encoding inverts visibility. Bare
+							// inactive model records in the same original trees
+							// also lack visibility, unlike their healthy copies.
+							if (alternateClass)
+								loadFlags ^= kEntryVisible | kAlternatePrecacheClass;
+							else
+								loadFlags |= kEntryVisible;
 							memcpy(
 								tree + loadFlagsOffset,
 								&loadFlags,
@@ -132,32 +172,16 @@ VPKDirectoryLoadFlagRepairResult ParseDirectoryTree(
 						break;
 				}
 
+				if (cursor > treeSize || treeSize - cursor < preloadSize)
+					return result;
+				cursor += preloadSize;
+
 				if (repairedEntry)
 					++result.repairedEntryCount;
 				++result.entryCount;
 			}
 		}
 	}
-}
-
-char AsciiLower(char value)
-{
-	return value >= 'A' && value <= 'Z'
-		? static_cast<char>(value + ('a' - 'A'))
-		: value;
-}
-
-bool EndsWithInsensitive(std::string_view value, std::string_view suffix)
-{
-	if (value.size() < suffix.size())
-		return false;
-
-	const size_t offset = value.size() - suffix.size();
-	for (size_t i = 0; i < suffix.size(); ++i) {
-		if (AsciiLower(value[offset + i]) != AsciiLower(suffix[i]))
-			return false;
-	}
-	return true;
 }
 
 }
@@ -190,6 +214,9 @@ VPKDirectoryLoadFlagRepairResult RepairBrokenR1MapVPKDirectoryLoadFlags(
 	uint8_t* tree,
 	size_t treeSize)
 {
+	// Only original trees containing the legacy class encoding may restore
+	// bare inactive model records. After normalization, 0x501 becomes 0x001;
+	// repeating the repair must not make those intentionally old entries live.
 	VPKDirectoryLoadFlagRepairResult validation =
 		ParseDirectoryTree(tree, treeSize, false);
 	if (!validation.valid || validation.repairedChunkCount == 0)

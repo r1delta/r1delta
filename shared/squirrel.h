@@ -3,6 +3,9 @@
 #include <string>
 #include "defs.h"
 #include <vector>
+
+class CCommand;
+
 enum ScriptContext
 {
 	SCRIPT_CONTEXT_SERVER,

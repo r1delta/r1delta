@@ -20,6 +20,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 bool AreR1OFakeDediVerboseLogsEnabled()
@@ -405,16 +406,18 @@ struct RepairChunkSpec {
 
 std::vector<uint8_t> BuildRepairDirectoryTree(
 	const std::vector<RepairChunkSpec>& chunks,
-	const std::vector<uint8_t>& preload = {})
+	const std::vector<uint8_t>& preload = {},
+	const char* extension = "vmt",
+	const char* filename = "asset",
+	const char* directory = "materials/test")
 {
 	std::vector<uint8_t> tree;
-	AppendString(tree, "vmt");
-	AppendString(tree, "materials/test");
-	AppendString(tree, "asset");
+	AppendString(tree, extension);
+	AppendString(tree, directory);
+	AppendString(tree, filename);
 	Append(tree, uint32_t{0x12345678});
 	Append(tree, static_cast<uint16_t>(preload.size()));
 	Append(tree, kR1DDeltaPackIndex);
-	tree.insert(tree.end(), preload.begin(), preload.end());
 	for (size_t index = 0; index < chunks.size(); ++index) {
 		const RepairChunkSpec& chunk = chunks[index];
 		Append(tree, chunk.loadFlags);
@@ -428,6 +431,7 @@ std::vector<uint8_t> BuildRepairDirectoryTree(
 				? kChunkTerminator
 				: uint16_t{});
 	}
+	tree.insert(tree.end(), preload.begin(), preload.end());
 	AppendString(tree, "");
 	AppendString(tree, "");
 	AppendString(tree, "");
@@ -437,18 +441,12 @@ std::vector<uint8_t> BuildRepairDirectoryTree(
 
 uint32_t ReadRepairChunkFlags(const std::vector<uint8_t>& tree, size_t chunkIndex)
 {
-	const size_t stringsAndCrc =
-		strlen("vmt") + 1
-		+ strlen("materials/test") + 1
-		+ strlen("asset") + 1
-		+ sizeof(uint32_t);
-	uint16_t preloadSize = 0;
-	memcpy(
-		&preloadSize,
-		tree.data() + stringsAndCrc,
-		sizeof(preloadSize));
-	const size_t chunkStart =
-		stringsAndCrc + sizeof(uint16_t) + sizeof(uint16_t) + preloadSize;
+	size_t chunkStart = 0;
+	for (int stringIndex = 0; stringIndex < 3; ++stringIndex) {
+		chunkStart += strlen(
+			reinterpret_cast<const char*>(tree.data() + chunkStart)) + 1;
+	}
+	chunkStart += sizeof(uint32_t) + sizeof(uint16_t) + sizeof(uint16_t);
 	const size_t chunkStride =
 		sizeof(uint32_t) + sizeof(uint16_t) + sizeof(uint64_t) * 3
 		+ sizeof(uint16_t);
@@ -523,7 +521,113 @@ void TestDirectoryLoadFlagRepair()
 		"rejected tree is not partially changed");
 	Check(
 		ReadRepairChunkFlags(original, 0) == 0x401,
-		"repair fixture starts with alternate-cache flags");
+		"repair fixture starts with legacy precache-class flags");
+}
+
+void TestDirectoryModelVisibilityRepair()
+{
+	const std::pair<const char*, const char*> components[] = {
+		{"mdl", "asset"},
+		{"phy", "asset"},
+		{"vvd", "asset"},
+		{"vtx", "asset.dx11"},
+		{"VTX", "ASSET.DX11"},
+	};
+	for (const auto& component : components) {
+		std::vector<uint8_t> tree = BuildRepairDirectoryTree(
+			{{0x001}, {0x501}, {0x100001}}, {},
+			component.first, component.second, "models/test");
+		const auto repair = RepairBrokenR1MapVPKDirectoryLoadFlags(
+			tree.data(), tree.size());
+		Check(repair.valid && repair.entryCount == 1 && repair.chunkCount == 3,
+			"legacy model component tree validates");
+		Check(repair.repairedEntryCount == 1 && repair.repairedChunkCount == 2,
+			"legacy model visibility and class repairs are counted");
+		Check(ReadRepairChunkFlags(tree, 0) == 0x101,
+			"original inactive model component becomes visible");
+		Check(ReadRepairChunkFlags(tree, 1) == 0x001,
+			"legacy active alternate-class component becomes old");
+		Check(ReadRepairChunkFlags(tree, 2) == 0x100001,
+			"only bare inactive model flags gain visibility");
+
+		const std::vector<uint8_t> normalized = tree;
+		const auto repeated = RepairBrokenR1MapVPKDirectoryLoadFlags(
+			tree.data(), tree.size());
+		Check(repeated.valid && repeated.repairedChunkCount == 0
+				&& repeated.repairedEntryCount == 0 && tree == normalized,
+			"repeated repair does not reactivate generated old model records");
+
+		std::vector<uint8_t> healthy = BuildRepairDirectoryTree(
+			{{0x001}, {0x101}}, {},
+			component.first, component.second, "models/test");
+		const std::vector<uint8_t> original = healthy;
+		const auto unchanged = RepairBrokenR1MapVPKDirectoryLoadFlags(
+			healthy.data(), healthy.size());
+		Check(unchanged.valid && unchanged.repairedChunkCount == 0
+				&& healthy == original,
+			"inactive model without original legacy-class metadata is preserved");
+	}
+
+	const std::pair<const char*, const char*> nonModels[] = {
+		{"vmt", "asset"},
+		{"vtf", "asset"},
+		{"txt", "asset"},
+		{"vtx", "asset.dx90"},
+		{"vtx", "asset"},
+	};
+	for (const auto& nonModel : nonModels) {
+		std::vector<uint8_t> tree = BuildRepairDirectoryTree(
+			{{0x001}, {0x401}}, {}, nonModel.first, nonModel.second);
+		const auto repair = RepairBrokenR1MapVPKDirectoryLoadFlags(
+			tree.data(), tree.size());
+		Check(repair.valid && repair.repairedChunkCount == 1
+				&& ReadRepairChunkFlags(tree, 0) == 0x001,
+			"legacy tree does not promote inactive non-model records");
+	}
+
+	// The legacy marker can occur in a later entry/extension, after an
+	// inactive model has already been visited by the validation pass.
+	std::vector<uint8_t> mixed = BuildRepairDirectoryTree(
+		{{0x001}}, {}, "mdl", "asset", "models/test");
+	mixed.resize(mixed.size() - 2); // Remove the extension terminator and padding.
+	const auto legacyMaterial = BuildRepairDirectoryTree({{0x401}});
+	mixed.insert(mixed.end(), legacyMaterial.begin(), legacyMaterial.end());
+	const auto mixedRepair = RepairBrokenR1MapVPKDirectoryLoadFlags(
+		mixed.data(), mixed.size());
+	Check(mixedRepair.valid && mixedRepair.entryCount == 2
+			&& mixedRepair.repairedEntryCount == 2
+			&& mixedRepair.repairedChunkCount == 2
+			&& ReadRepairChunkFlags(mixed, 0) == 0x101,
+		"later legacy metadata enables model repair across the complete tree");
+
+	// Independent native-layout fixture: CRC/preload-size/pack, two chunk
+	// descriptors, 0xFFFF, THEN three preload bytes. Do not use the builder,
+	// so it cannot share a misplaced-preload assumption with the parser.
+	const std::vector<uint8_t> fixedPreloadTree{
+		0x6D, 0x64, 0x6C, 0x00, 0x6D, 0x00, 0x61, 0x00, 0x78, 0x56, 0x34, 0x12, 0x03, 0x00, 0x37, 0x13,
+		0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x20, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x01, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x30, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF,
+		0x70, 0x72, 0x65, 0x00, 0x00, 0x00,
+	};
+	std::vector<uint8_t> expected = fixedPreloadTree;
+	expected[17] = 0x01; // First chunk 0x001 -> 0x101.
+	expected[49] = 0x00; // Second chunk 0x501 -> 0x001.
+	std::vector<uint8_t> withPreload = fixedPreloadTree;
+	const auto preloadRepair = RepairBrokenR1MapVPKDirectoryLoadFlags(
+		withPreload.data(), withPreload.size());
+	Check(preloadRepair.valid && preloadRepair.repairedChunkCount == 2
+			&& withPreload == expected,
+		"native preload placement preserves every byte except repaired flags");
+
+	std::vector<uint8_t> truncatedPreload(
+		fixedPreloadTree.begin(), fixedPreloadTree.begin() + 82);
+	const auto originalTruncated = truncatedPreload;
+	const auto rejected = RepairBrokenR1MapVPKDirectoryLoadFlags(
+		truncatedPreload.data(), truncatedPreload.size());
+	Check(!rejected.valid && truncatedPreload == originalTruncated,
+		"truncated trailing preload rejects without any partial repair");
 }
 
 void CreateFixture(const std::filesystem::path& root)
@@ -613,6 +717,7 @@ int main()
 		TestIndexCache(root);
 		TestRuntimePathValidation(root);
 		TestDirectoryLoadFlagRepair();
+		TestDirectoryModelVisibilityRepair();
 
 		std::filesystem::current_path(original);
 		std::filesystem::remove_all(root);

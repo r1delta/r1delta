@@ -55,6 +55,23 @@ void SetupHudwarp()
 	}
 }
 
+void ShutdownHudwarp()
+{
+	delete hudwarpProcess;
+	hudwarpProcess = nullptr;
+	if (PIX)
+	{
+		PIX->Release();
+		PIX = nullptr;
+	}
+	pDevice = nullptr;
+	ppID3D11DeviceContext = nullptr;
+	QueueXEvent_materials = nullptr;
+	gRenderThreadId = 0;
+	isRenderingHud = false;
+	gGPUHudwarpFailed = false;
+}
+
 
 void QueueBeginEvent(const char* markerName)
 {

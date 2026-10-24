@@ -1,3 +1,4 @@
+#include "../engine/filesystem/shared_particle_materials.h"
 #include "../engine/filesystem/vpk_async_precache_entry.h"
 
 #include <Windows.h>
@@ -18,6 +19,7 @@
 namespace
 {
 using namespace r1delta::vpk_async_precache;
+using r1delta::shared_particle_materials::LookupResource;
 using namespace std::chrono_literals;
 
 bool Check(bool condition, const char* message)
@@ -474,6 +476,182 @@ bool TestBoundedFifoOverflowContract()
 	}
 	return Check(queue.Empty(), "deferred queue was not empty after replay");
 }
+
+constexpr std::array<const char*, 2> kSharedParticleMaterialPaths{
+	"materials/particle/star_max01.vmt",
+	"materials/particle/smoke/sniper_trail_add_ob6.vmt"
+};
+
+bool TestSharedParticleMaterialPathScope()
+{
+	std::array<ResourceLookup, 2> canonical{};
+	for (std::size_t i = 0; i < canonical.size(); ++i) {
+		if (!Check(LookupResource(kSharedParticleMaterialPaths[i], canonical[i]),
+			"canonical shared particle material was not found")
+			|| !Check(canonical[i].record && canonical[i].node,
+				"shared particle material did not publish a native resource")) {
+			return false;
+		}
+	}
+	const struct
+	{
+		const char* path;
+		std::size_t materialIndex;
+	} variants[]{
+		{ "MATERIALS/PARTICLE/STAR_MAX01.VMT", 0 },
+		{ "materials\\particle\\star_max01.vmt", 0 },
+		{ "MaTeRiAlS\\PaRtIcLe/StAr_MaX01.VmT", 0 },
+		{ "MATERIALS/PARTICLE/SMOKE/SNIPER_TRAIL_ADD_OB6.VMT", 1 },
+		{ "materials\\particle\\smoke\\sniper_trail_add_ob6.vmt", 1 },
+		{ "MaTeRiAlS/PaRtIcLe\\SmOkE/SnIpEr_TrAiL_AdD_Ob6.VmT", 1 }
+	};
+	for (const auto& variant : variants) {
+		ResourceLookup result{};
+		const auto& expected = canonical[variant.materialIndex];
+		if (!Check(LookupResource(variant.path, result),
+			"case/slash-equivalent shared particle path was rejected")
+			|| !Check(result.record == expected.record && result.node == expected.node,
+				"path variant did not borrow the canonical resource")) {
+			return false;
+		}
+	}
+	const char* misses[]{
+		nullptr,
+		"",
+		"particle/star_max01.vmt",
+		"/materials/particle/star_max01.vmt",
+		"./materials/particle/star_max01.vmt",
+		"prefix/materials/particle/star_max01.vmt",
+		"materials//particle/star_max01.vmt",
+		"materials/particle/./star_max01.vmt",
+		"materials/particle/smoke/../star_max01.vmt",
+		"materials\\particle\\smoke\\..\\star_max01.vmt",
+		"materials/particle/star_max01",
+		"materials/particle/star_max01.vmt.bak",
+		"materials/particle/star_max01.vmt/",
+		"materials/particle/star_max01.vmt ",
+		"materials/particle/star_max010.vmt",
+		"materials/particle/star_max01.vtf",
+		"particle/smoke/sniper_trail_add_ob6.vmt",
+		"materials/particle/sniper_trail_add_ob6.vmt",
+		"materials/particle/smoke/sniper_trail_add_ob6.vmtx",
+		"materials/particle/smoke/sniper_trail_add_ob60.vmt",
+		"materials/particle/smoke/../smoke/sniper_trail_add_ob6.vmt",
+		"materials\\particle\\smoke\\..\\smoke\\sniper_trail_add_ob6.vmt",
+		"materials/particle/smoke/unrelated.vmt"
+	};
+	for (const char* path : misses) {
+		ResourceLookup result{};
+		if (!Check(!LookupResource(path, result),
+			"shared particle material provider accepted an out-of-scope path")
+			|| !Check(!result.record && !result.node,
+				"failed shared particle lookup published a resource")) {
+			return false;
+		}
+	}
+	return true;
+}
+
+// The caller holds the native node lock, as matsys does while reading its
+// borrowed external buffer. Snapshot bytes only to detect later scratch reuse.
+bool CopyLockedSharedMaterialBuffer(
+	const ResourceLookup& resource,
+	std::vector<char>& bytes)
+{
+	const auto* text = reinterpret_cast<const char*>(resource.node->entry);
+	if (!Check(text != nullptr, "shared material node has no raw text"))
+		return false;
+	const std::size_t length = std::strlen(text);
+	if (!Check(resource.record->asyncReadArgument == length,
+		"shared material length includes a terminator or truncates raw text")) {
+		return false;
+	}
+	const std::size_t capacity = length + 2;
+	if (!Check(text[capacity - 2] == '\0' && text[capacity - 1] == '\0',
+		"shared material native buffer capacity lacks two trailing NULs")) {
+		return false;
+	}
+	bytes.assign(text, text + capacity);
+	return true;
+}
+
+bool TestSharedParticleMaterialBorrowedBufferLifetime()
+{
+	ResourceLookup first{};
+	if (!Check(LookupResource(kSharedParticleMaterialPaths[0], first),
+		"first shared material lookup failed")
+		|| !Check(first.record && first.node, "first shared material borrow is incomplete")
+		|| !Check(InterlockedCompareExchange(&first.node->lock, 1, 0) == 0,
+			"native consumer could not lock the first shared material")) {
+		return false;
+	}
+	const auto* firstText = reinterpret_cast<const char*>(first.node->entry);
+	std::vector<char> firstBytes;
+	if (!CopyLockedSharedMaterialBuffer(first, firstBytes)) {
+		InterlockedExchange(&first.node->lock, 0);
+		return false;
+	}
+
+	ResourceLookup second{};
+	const char* secondText{};
+	std::vector<char> secondBytes;
+	bool secondRead = false;
+	// A joined worker provides a deterministic handoff, not a timing race. The
+	// first consumer retains its lock and borrow throughout both lookups.
+	std::thread otherConsumer([&] {
+		ResourceLookup same{};
+		if (!Check(LookupResource(kSharedParticleMaterialPaths[0], same),
+			"shared material lookup failed while its native consumer held the lock")
+			|| !Check(same.record == first.record && same.node == first.node,
+				"shared material borrow depends on the requesting thread")
+			|| !Check(LookupResource(kSharedParticleMaterialPaths[1], second),
+				"second shared material lookup failed")
+			|| !Check(second.record && second.node,
+				"second shared material borrow is incomplete")
+			|| !Check(InterlockedCompareExchange(&second.node->lock, 1, 0) == 0,
+				"second material cannot be consumed while the first is locked")) {
+			return;
+		}
+		secondText = reinterpret_cast<const char*>(second.node->entry);
+		secondRead = CopyLockedSharedMaterialBuffer(second, secondBytes);
+		InterlockedExchange(&second.node->lock, 0);
+	});
+	otherConsumer.join();
+	const bool retained = secondRead
+		&& Check(first.record != second.record && first.node != second.node
+			&& firstText != secondText,
+			"different shared materials reused borrowed resource storage")
+		&& Check(InterlockedCompareExchange(&first.node->lock, 1, 1) == 1,
+			"a lookup reset a shared material's active native consumer lock")
+		&& Check(first.record->asyncReadArgument == firstBytes.size() - 2,
+			"another lookup changed the first borrowed material's buffer length")
+		&& Check(first.node->entry == reinterpret_cast<std::uintptr_t>(firstText),
+			"another lookup replaced the first borrowed material's raw data")
+		&& Check(std::memcmp(firstText, firstBytes.data(), firstBytes.size()) == 0,
+			"another lookup overwrote the first borrowed material's buffer");
+	InterlockedExchange(&first.node->lock, 0);
+	if (!retained)
+		return false;
+
+	ResourceLookup again{};
+	if (!Check(LookupResource(kSharedParticleMaterialPaths[1], again),
+		"shared material lookup failed after the borrowing thread exited")
+		|| !Check(again.record == second.record && again.node == second.node,
+			"shared material storage did not survive the borrowing thread")
+		|| !Check(InterlockedCompareExchange(&again.node->lock, 1, 0) == 0,
+			"native consumer could not reacquire the second shared material")) {
+		return false;
+	}
+	const bool secondRetained =
+		Check(again.record->asyncReadArgument == secondBytes.size() - 2,
+			"second shared material did not retain its own buffer length")
+		&& Check(again.node->entry == reinterpret_cast<std::uintptr_t>(secondText),
+			"second shared material did not retain its borrowed raw data")
+		&& Check(std::memcmp(secondText, secondBytes.data(), secondBytes.size()) == 0,
+			"second borrowed buffer changed after its native consumer released it");
+	InterlockedExchange(&again.node->lock, 0);
+	return secondRetained;
+}
 }
 
 int main()
@@ -487,7 +665,9 @@ int main()
 		&& TestDifferentKeyParallelism()
 		&& TestGenerationAddressDistinction()
 		&& TestNestedTryDeferAndAccountingModel()
-		&& TestBoundedFifoOverflowContract();
+		&& TestBoundedFifoOverflowContract()
+		&& TestSharedParticleMaterialPathScope()
+		&& TestSharedParticleMaterialBorrowedBufferLifetime();
 	if (!passed)
 		return EXIT_FAILURE;
 	std::cout << "vpk_async_precache_tests passed\n";

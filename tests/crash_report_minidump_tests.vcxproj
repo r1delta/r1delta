@@ -54,7 +54,7 @@
       <SDLCheck>true</SDLCheck>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <PreprocessorDefinitions>WIN32;_CONSOLE;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;_CONSOLE;NOMINMAX;R1DELTA_GRAPHICS_FLIGHT_RECORDER_TESTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(ProjectDir)..;$(ProjectDir)..\engine;$(ProjectDir)..\vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cmake\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
@@ -68,12 +68,16 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="crash_report_minidump_tests.cpp" />
+    <ClCompile Include="graphics_flight_recorder_tests.cpp" />
+    <ClCompile Include="..\client\rendering\graphics_flight_recorder.cpp" />
     <ClCompile Include="..\engine\logging\crash_report_minidump.cpp" />
     <ClCompile Include="..\engine\logging\crash_report_memory_capture.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\engine\logging\crash_report_minidump.h" />
     <ClInclude Include="..\engine\logging\crash_report_memory_capture.h" />
+    <ClInclude Include="..\client\rendering\graphics_flight_recorder.h" />
+    <ClInclude Include="..\client\rendering\graphics_flight_recorder_storage.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

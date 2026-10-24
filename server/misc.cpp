@@ -67,11 +67,3 @@ const char* GetBuildNo() {
 
     return buffer;
 }
-
-// Shutdown hook
-__int64 __fastcall CServerGameDLL_DLLShutdown(__int64 a1, void*** a2, __int64 a3)
-{
-    Msg("Shutting down\n");
-    TerminateProcess(GetCurrentProcess(), 0);
-    return 0;
-}

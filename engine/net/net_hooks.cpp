@@ -26,8 +26,11 @@ LPVOID g_getAddrInfoTarget = nullptr;
 LPVOID g_freeAddrInfoTarget = nullptr;
 bool g_hookInstalled = false;
 
-std::unordered_set<addrinfo*> g_customAllocations;
-std::mutex g_allocationMutex;
+// freeaddrinfo stays detoured until the process is gone, and EOSSDK's own DLL
+// detach releases addrinfo lists after tier0's static destructors have run.
+// This state is therefore heap-lifetime and reclaimed with the process.
+std::unordered_set<addrinfo*>& g_customAllocations = *new std::unordered_set<addrinfo*>();
+std::mutex& g_allocationMutex = *new std::mutex();
 
 constexpr uint16_t kFakeIpv6Prefix = 0x3FFE;        // EOS peers
 constexpr uint16_t kOverlayFakeIpv6Prefix = 0x3FFD; // p2p overlay peers (iroh, tailcat, TURN)

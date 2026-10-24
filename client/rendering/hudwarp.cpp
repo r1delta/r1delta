@@ -2,6 +2,7 @@
 #include "load.h"
 #include <d3dcompiler.h>
 #pragma comment(lib, "d3dcompiler.lib")
+#include <wrl/client.h>
 
 // Ported from TFORevive by Barnaby
 
@@ -42,29 +43,21 @@ bool CompileShader(const char* szShader, const char* szEntrypoint, const char* s
 	return true;
 }
 
-ID3D11VertexShader* pVertexShader;
-ID3D11PixelShader* pPixelShader;
 
 #define MAINVP 0
 D3D11_VIEWPORT viewport{ 0 };
 
 HudwarpProcess::HudwarpProcess(ID3D11Device* pDevice, ID3D11DeviceContext** ppID3D11DeviceContext) : m_pDevice(pDevice), m_pContext(*ppID3D11DeviceContext)
 {
-	// Initialize shaders
-	ID3D10Blob* pBlob = nullptr;
-
-	// Create vertex shader
-	if (!pVertexShader)
+	// Each device instance owns its shaders and their compilation buffer.
+	Microsoft::WRL::ComPtr<ID3D10Blob> pBlob;
+	if (!CompileShader(hudwarpShader, "VS", "vs_5_0", pBlob.GetAddressOf()))
 	{
-		if (!CompileShader(hudwarpShader, "VS", "vs_5_0", &pBlob))
-		{
-			gGPUHudwarpFailed = true;
-			return;
-		}
-
-		HRESULT hr = pDevice->CreateVertexShader(pBlob->GetBufferPointer(), pBlob->GetBufferSize(), nullptr, &pVertexShader);
-		CHECK_D3D_HRESULT(hr, "CreateVertexShader failed");
+		gGPUHudwarpFailed = true;
+		return;
 	}
+	HRESULT hr = pDevice->CreateVertexShader(pBlob->GetBufferPointer(), pBlob->GetBufferSize(), nullptr, &m_pVertexShader);
+	CHECK_D3D_HRESULT(hr, "CreateVertexShader failed");
 
 	// Define/create the input layout for the vertex shader
 	D3D11_INPUT_ELEMENT_DESC layout[2] = {
@@ -73,35 +66,19 @@ HudwarpProcess::HudwarpProcess(ID3D11Device* pDevice, ID3D11DeviceContext** ppID
 	};
 	UINT numElements = 2;
 
-	HRESULT hr = pDevice->CreateInputLayout(layout, numElements, pBlob->GetBufferPointer(), pBlob->GetBufferSize(), &m_pVertexLayout);
+	hr = pDevice->CreateInputLayout(layout, numElements, pBlob->GetBufferPointer(), pBlob->GetBufferSize(), &m_pVertexLayout);
 	CHECK_D3D_HRESULT(hr, "CreateInputLayout failed");
 
 	// Create pixel shader
-	if (!pPixelShader)
+	pBlob.Reset();
+	if (!CompileShader(hudwarpShader, "PS", "ps_5_0", pBlob.GetAddressOf()))
 	{
-		// Release the blob from VS compilation before reusing
-		if (pBlob)
-		{
-			pBlob->Release();
-			pBlob = nullptr;
-		}
-
-		if (!CompileShader(hudwarpShader, "PS", "ps_5_0", &pBlob))
-		{
-			gGPUHudwarpFailed = true;
-			return;
-		}
-
-		hr = pDevice->CreatePixelShader(pBlob->GetBufferPointer(), pBlob->GetBufferSize(), nullptr, &pPixelShader);
-		CHECK_D3D_HRESULT(hr, "CreatePixelShader failed");
+		gGPUHudwarpFailed = true;
+		return;
 	}
-
-	// Release the blob when done
-	if (pBlob)
-	{
-		pBlob->Release();
-		pBlob = nullptr;
-	}
+	hr = pDevice->CreatePixelShader(pBlob->GetBufferPointer(), pBlob->GetBufferSize(), nullptr, &m_pPixelShader);
+	CHECK_D3D_HRESULT(hr, "CreatePixelShader failed");
+	pBlob.Reset();
 
 	auto resolution = reinterpret_cast<unsigned int*>(G_matsystem + 0x290DD8);
 	m_width = resolution[0];
@@ -290,7 +267,10 @@ HudwarpProcess::~HudwarpProcess()
 	if (m_pIndexBuffer) m_pIndexBuffer->Release();
 	if (m_pConstantBuffer) m_pConstantBuffer->Release();
 	if (m_pCWcullMode) m_pCWcullMode->Release();
-	// Note: pVertexShader and pPixelShader are global and shared, don't release here
+	if (m_pVertexShader) m_pVertexShader->Release();
+	if (m_pPixelShader) m_pPixelShader->Release();
+	if (m_pOriginalRenderTargetView) m_pOriginalRenderTargetView->Release();
+	if (m_pOriginalDepthStencilView) m_pOriginalDepthStencilView->Release();
 }
 
 void HudwarpProcess::Resize(unsigned int w, unsigned int h)
@@ -433,8 +413,8 @@ void HudwarpProcess::Finish()
 	m_pContext->OMSetRenderTargets(1, &m_pOriginalRenderTargetView, NULL);
 
 	// Set the shaders
-	m_pContext->VSSetShader(pVertexShader, 0, 0);
-	m_pContext->PSSetShader(pPixelShader, 0, 0);
+	m_pContext->VSSetShader(m_pVertexShader, 0, 0);
+	m_pContext->PSSetShader(m_pPixelShader, 0, 0);
 
 	// Setup vertices and indices
 	UINT stride = sizeof(Vertex);

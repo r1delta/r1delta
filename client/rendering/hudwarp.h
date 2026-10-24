@@ -32,6 +32,8 @@ public:
 private:
 	ID3D11Device* m_pDevice;
 	ID3D11DeviceContext* m_pContext;
+	ID3D11VertexShader* m_pVertexShader = nullptr;
+	ID3D11PixelShader* m_pPixelShader = nullptr;
 	ID3D11Texture2D* m_pRenderTexture = NULL;
 	ID3D11RenderTargetView* m_pRenderTargetView = NULL;
 	ID3D11ShaderResourceView* m_pShaderResourceView = NULL;

@@ -78,6 +78,15 @@ struct ResourceEntryNode
 	std::uint32_t unknown14;
 };
 
+// Native FindResource (filesystem vslot +0x2F8) lends a record and resource
+// node. Consumers lock the node and read record+0x20 as the decoded byte length.
+struct ResourceLookup
+{
+	std::array<std::byte, 8> opaque;
+	const ResourceRecord* record;
+	ResourceEntryNode* node;
+};
+
 struct AsyncRequestStorage
 {
 	std::int32_t state;
@@ -107,6 +116,9 @@ static_assert(offsetof(ResourceHandler, consumeLoadedEntry) == 0x28);
 static_assert(sizeof(ResourceEntryNode) == 0x18);
 static_assert(offsetof(ResourceEntryNode, lock) == 0x0C);
 static_assert(offsetof(ResourceEntryNode, recordIndex) == 0x10);
+static_assert(sizeof(ResourceLookup) == 0x18);
+static_assert(offsetof(ResourceLookup, record) == 0x08);
+static_assert(offsetof(ResourceLookup, node) == 0x10);
 static_assert(sizeof(AsyncRequestStorage) == 0x50);
 static_assert(offsetof(AsyncRequestStorage, tail) == 0x40);
 static_assert(sizeof(AsyncPrecacheContext) == 0x30);

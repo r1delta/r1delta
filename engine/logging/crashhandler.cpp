@@ -17,6 +17,7 @@
 #include "resource.h"
 #include "r1d_version.h"
 #include "crash_report_minidump.h"
+#include "client/rendering/graphics_flight_recorder.h"
 #pragma comment(lib, "winmm.lib")
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "dbghelp.lib")
@@ -380,6 +381,9 @@ LONG WINAPI CustomCrashHandler(EXCEPTION_POINTERS* exInfo)
     }
     if (!cont)
         return EXCEPTION_CONTINUE_SEARCH;
+    // Seal diagnostic publications before sound, minidump work, or delays. A
+    // faulting/interrupted graphics writer is marked incomplete, never waited on.
+    r1delta::graphics_flight_recorder::Freeze();
     if (!IsDedicatedServer()) {
         // Get the handle to THIS DLL module
         HMODULE hModule;
@@ -553,6 +557,8 @@ LONG WINAPI CustomCrashHandler(EXCEPTION_POINTERS* exInfo)
     crashLog << GetLetterboxHookStateLine() << std::endl;
     crashLog << GetProcessCountersText();
     crashLog << "Watched Convars:" << std::endl << GetWatchedConvarsText() << std::endl;
+
+    r1delta::graphics_flight_recorder::WriteReport(crashLog);
 
     crashLog << "=== Hooks ===" << std::endl;
     crashLog << GetHookStateReportText() << std::endl;

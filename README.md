@@ -13,22 +13,6 @@ To get started, go to the [releases page](https://github.com/r1delta/r1delta/rel
 
 If you're having issues please open an issue or join the [discord](https://discord.gg/zbFCcSM5t7)
 
-### R1Delta 2000
-
-- Joining a server whose sound scripts, remote functions, server/entity vars or registered strings differ from yours now disconnects with the names that differ (for example `you have "X" that the server doesn't have; the server has "Y"...`) instead of crashing, playing the wrong sounds or reconnecting forever. The full lists are printed to the console.
-- The legacy dedicated server loads the full sound-alias set (it used to stop at 16,628 aliases), so its sound scripts match clients again.
-- A sound event naming an alias one past the client's table is dropped instead of crashing (`engine.dll+0x471C50`).
-- A compile error in a menu (UI) script shows a dialog with the error: fix the script and press Retry to reload the menus, or Cancel to quit, instead of a black screen.
-
-### 3.0 prerelease 38
-
-- Server-browser joins use `delta_connect` to select an advertised direct, hole-punched, or overlay route. Optional iroh and tailcat plugins ship with the client; Cloudflare TURN is disabled by default.
-- Offline LAN joins use ordinary `connect ip:port` with `delta_online_auth_enable 0` on both ends (the default). An unavailable optional EOS backend disables EOS routes without terminating direct-IP/LAN play.
-- Progression writes remain pending until acknowledged by the client. The client uses a dedicated persistent-data store with atomic primary/backup replacement rather than relying on `profile.cfg` for durability.
-- Filesystem negative-cache mutations and invalidation are serialized; replacement-path lookup uses bounded per-call stack scratch instead of TLS arenas. This is speculative hardening for the intermittent material-load corruption, not a confirmed diagnosis of that crash.
-
-NVIDIA Reflex and AMD Radeon Anti-Lag 2 are enabled automatically on supported GPUs. Launch with `-r1delta_disable_gpu_low_latency` to prevent both integrations from initializing.
-
 For developers and contributors, keep reading below.
 
 ## Hosting a server
@@ -38,11 +22,7 @@ Instructions on how to run the dedicated server on Docker are [here](https://gis
 
 The master server will not show your server if it can't be connected to publicly, so make sure to port-forward 27015 (and onwards if you're running multiple servers, 27016 etc) if you want it to be listed. 
 
-A listen server starts hidden from the server browser. To list it, press "Show Server" in the private match lobby or put `hide_server 0` into the console, and use "Hide Server" or `hide_server 1` to take it back down. The choice lasts between rounds of the same private match and goes back to hidden when you leave, so every new server you host starts hidden again. A dedicated server is listed unless you set `hide_server 1`, and keeps that setting.
-
-To play with friends on a hidden server, give out your ip and port for a direct connect (in the style of ip:port) or use Discord game invites, just note that you'll still need to port-forward if your friends are going to connect over the internet. You can also set `sv_password` if you'd like to password protect your server but keep it on the server browser, just keep in mind this *will* leak your server's IP.
-
-Clients whose content differs from the server's are disconnected with the names of the differing sounds (`delta_soundtable_check`) or remote functions, server/entity vars and registered strings (`delta_scriptsync_check`). Set either to `0` in `server.cfg` to keep such clients connected with a console warning instead; for example, a mod that only appends new sounds is playable without them.
+If you want to make a friends-only server and hide it from the server browser you should put `hide_server 1` into the console, you can then give out your ip and port for a direct connect (in the style of ip:port) or use Discord game invites, just note that you'll still need to port-forward if your friends are going to connect over the internet. You can also set `sv_password` if you'd like to password protect your server but keep it on the server browser, just keep in mind this *will* leak your server's IP.
 
 # Building From Source
 1. [Install vcpkg and run vcpkg integrate install](https://learn.microsoft.com/en-us/vcpkg/get_started/get-started-msbuild)

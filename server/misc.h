@@ -30,6 +30,3 @@ extern ConVarR1* host_mostRecentGamemodeCvar;
 void GamemodeChangeCallback(IConVar* var_iconvar, const char* pOldValue, float flOldValue);
 void HostMapChangeCallback(IConVar* var_iconvar, const char* pOldValue, float flOldValue);
 void InitializeRecentHostVars();
-
-// Shutdown hook
-__int64 __fastcall CServerGameDLL_DLLShutdown(__int64 a1, void*** a2, __int64 a3);

@@ -37,6 +37,7 @@
 #include "audio_device.h"
 
 #include "filesystem.h"
+#include "shared_particle_materials.h"
 #include <iostream>
 #include <unordered_set>
 #include <string>
@@ -69,6 +70,41 @@ IFileSystem* g_CBaseFileSystemInterface;
 uintptr_t g_r1oCVFileSystemInterface[173];
 uintptr_t g_r1oCBaseFileSystemInterface[17];
 
+namespace
+{
+// Published before the checked cache hook is enabled, then immutable.
+bool s_clientSharedParticleMaterialsEnabled;
+}
+
+bool InitializeClientSharedParticleMaterials(uintptr_t filesystemBase)
+{
+	if (GetR1DeltaEngineMode() != R1DeltaEngineMode::Client2015)
+		return false;
+
+	const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(filesystemBase);
+	if (!filesystemBase || dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew <= 0) {
+		Error("R1Delta: unsupported filesystem image for shared particle materials\n");
+		return false;
+	}
+	const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(
+		filesystemBase + dos->e_lfanew);
+	const unsigned char lookupPrologue[] = {
+		0x40, 0x53, 0x48, 0x81, 0xEC, 0x40, 0x02, 0x00, 0x00
+	};
+	if (nt->Signature != IMAGE_NT_SIGNATURE
+		|| nt->FileHeader.Machine != IMAGE_FILE_MACHINE_AMD64
+		|| nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC
+		|| nt->FileHeader.TimeDateStamp != 0x54874230
+		|| nt->OptionalHeader.SizeOfImage != 0x2116000
+		|| memcmp(reinterpret_cast<void*>(filesystemBase + 0x9C20),
+			lookupPrologue, sizeof(lookupPrologue)) != 0) {
+		Error("R1Delta: unsupported native resource lookup for shared particle materials\n");
+		return false;
+	}
+	s_clientSharedParticleMaterialsEnabled = true;
+	return true;
+}
+
 bool V_IsAbsolutePath(const char* pStr) {
     if (!(pStr[0] && pStr[1]))
         return false;
@@ -83,7 +119,16 @@ bool ReadFromCacheHook(IFileSystem* filesystem, char* path, void* result) {
     if (FileCache::GetInstance().TryReplaceFile(path))
         return false;
 
-    return readFromCache(filesystem, path, result);
+    if (readFromCache(filesystem, path, result))
+        return true;
+    if (!s_clientSharedParticleMaterialsEnabled)
+        return false;
+
+    // Native/map VPKs and FileCache replacements retain precedence. Only the
+    // two canonical common-particle dependencies missing from those mounts
+    // are supplied here, using the native borrowed-resource contract.
+    return r1delta::shared_particle_materials::LookupResource(
+        path, *static_cast<r1delta::vpk_async_precache::ResourceLookup*>(result));
 }
 
 FileHandle_t ReadFileFromVPKHook(VPKData* vpkInfo, __int64* b, char* filename) {

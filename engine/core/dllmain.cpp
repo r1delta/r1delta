@@ -699,6 +699,15 @@ extern "C" __declspec(dllexport) void SetR1DeltaLaunchArgs(const char* args)
 	}
 }
 
+// Called by the R1Delta launchers after the engine's main entry point returns:
+// engine and game modules have completed their native shutdown, but every
+// worker thread is still alive and the loader lock is not held. Services that
+// join threads or wait on SDK workers must stop here, never in DLL detach.
+extern "C" __declspec(dllexport) void R1DeltaShutdownProcessServices()
+{
+	eos::ShutdownNetworking();
+}
+
 const char* GetR1DeltaLaunchArgs()
 {
 	return g_r1delta_launch_args.c_str();
@@ -1210,7 +1219,13 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 	case DLL_THREAD_DETACH:
 		break;
 	case DLL_PROCESS_DETACH:
-		eos::ShutdownNetworking();
+		// Process termination (lpReserved != nullptr): every other thread has been
+		// terminated while possibly holding locks, and modules carrying detours
+		// (server, client, engine) were already unloaded, so neither waiting on
+		// workers nor restoring their bytes is valid. R1DeltaShutdownProcessServices
+		// performs the orderly service teardown before exit.
+		if (lpReserved != nullptr)
+			break;
 		MH_DisableHook(MH_ALL_HOOKS);
 		MH_Uninitialize();
 		break;

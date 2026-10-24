@@ -130,8 +130,12 @@ std::recursive_mutex& GetSdkMutex()
 
 EosLayer& EosLayer::Instance()
 {
-    static EosLayer instance;
-    return instance;
+    // Heap-lifetime: a static destructor would run Shutdown under the loader
+    // lock at process exit, after the SDK and pump threads were terminated, and
+    // EOS_Platform_Release then waits forever. R1DeltaShutdownProcessServices
+    // releases the platform in an orderly way before the process exits.
+    static EosLayer* const instance = new EosLayer();
+    return *instance;
 }
 
 EosLayer::~EosLayer()

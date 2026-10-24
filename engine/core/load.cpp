@@ -93,6 +93,7 @@
 #include "security_fixes.h"
 #include "r1o_vpk.h"
 #include "vpk_async_precache_fix.h"
+#include "datacache_header_ownership.h"
 #include "server_usercmd.h"
 #include "commands.h"
 // steam.h removed - unused
@@ -115,6 +116,8 @@
 #include "hudwarp.h"
 #include "hudwarp_convars.h"
 #include "hudwarp_hooks.h"
+#include "material_resource_ownership.h"
+#include "graphics_flight_recorder.h"
 #include "surfacerender.h"
 #include "mcp_server.h"
 #include "localchatwriter.h"
@@ -1675,7 +1678,17 @@ void InitAddons() {
 		MH_CreateHook((LPVOID)(engine_base_spec + (IsDedicatedServer() ? 0x950E0 : 0x1272B0)), &ReconcileAddonListFile, reinterpret_cast<LPVOID*>(&oReconcileAddonListFile));
 	}
 	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x1752B0 : 0x6A420)), &ReadFileFromVPKHook, reinterpret_cast<LPVOID*>(&readFileFromVPK));
-	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x750F0 : 0x9C20)), &ReadFromCacheHook, reinterpret_cast<LPVOID*>(&readFromCache));
+	const bool clientSharedMaterials = InitializeClientSharedParticleMaterials(filesystem_stdio);
+	void* const readCacheTarget = reinterpret_cast<void*>(
+		filesystem_stdio + (IsDedicatedServer() ? 0x750F0 : 0x9C20));
+	const MH_STATUS readCacheStatus = MH_CreateHook(
+		readCacheTarget, &ReadFromCacheHook, reinterpret_cast<LPVOID*>(&readFromCache));
+	if (clientSharedMaterials) {
+		if (readCacheStatus != MH_OK || !readFromCache
+			|| MH_EnableHook(readCacheTarget) != MH_OK) {
+			Error("R1Delta: failed to enable native shared particle-material lookup\n");
+		}
+	}
 	MH_CreateHook((LPVOID)(filesystem_stdio + (IsDedicatedServer() ? 0x80BB0 : 0x16250)), &AddVPKFile, reinterpret_cast<LPVOID*>(&AddVPKFileOriginal));
 	if (!HasEngineCommandLineFlag("-r1delta_disable_vpk_directory_repair"))
 		InstallVPKDirectoryLoadFlagRepair(filesystem_stdio);
@@ -9137,7 +9150,6 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	MH_CreateHook((LPVOID)(server_base + 0x3A2020), &CBaseEntity__SendProxy_CellOriginXY, reinterpret_cast<LPVOID*>(NULL));
 	MH_CreateHook((LPVOID)(server_base + 0x3A2130), &CBaseEntity__SendProxy_CellOriginZ, reinterpret_cast<LPVOID*>(NULL));
 	MH_CreateHook((LPVOID)(server_base + 0x4E2F30), &CPlayer_GetLevel, reinterpret_cast<LPVOID*>(NULL));
-	MH_CreateHook((LPVOID)(server_base + 0x1442D0), &CServerGameDLL_DLLShutdown, reinterpret_cast<LPVOID*>(NULL));
 	MH_CreateHook((LPVOID)(server_base + 0x1532A0), &WallrunMove_BlockForTitans, reinterpret_cast<LPVOID*>(&WallrunMove_BlockForTitans_Original));
 	MH_CreateHook((LPVOID)(server_base + 0x21B6B0), &HookedGetRankFunction, NULL);
 	MH_CreateHook((LPVOID)(server_base + 0x50B8B0), &HookedSetRankFunction, NULL);
@@ -9669,6 +9681,8 @@ void __stdcall LoaderNotificationCallback(
 			MH_EnableHook(MH_ALL_HOOKS);
 	}
 	else if (string_equal_size(name, name_len, L"datacache.dll")) {
+		InstallClientDataCacheHeaderOwnership(
+			reinterpret_cast<uintptr_t>(notification_data->Loaded.DllBase));
 		if (IsR1ODedicatedServer()) {
 			HookCreateInterfaceExport((uintptr_t)notification_data->Loaded.DllBase, "datacache", &DataCacheCreateInterfaceHook, &DataCacheCreateInterfaceOriginal);
 			MH_EnableHook(MH_ALL_HOOKS);
@@ -9751,6 +9765,7 @@ void __stdcall LoaderNotificationCallback(
 	}
 	else if (string_equal_size(name, name_len, L"materialsystem_dx11.dll")) {
 		G_matsystem = (uintptr_t)notification_data->Loaded.DllBase;
+		InstallGraphicsFlightRecorder(G_matsystem);
 		if (GetR1DeltaEngineMode() == R1DeltaEngineMode::Client2015) {
 			InstallMaterialSystemDx11RenderThreadGuards(G_matsystem);
 			InstallMaterialSystemDx11InputLayoutCacheGuard(G_matsystem);
@@ -9761,6 +9776,7 @@ void __stdcall LoaderNotificationCallback(
 				InstallMaterialSystemDx11TxaaLifetimeGuard(G_matsystem);
 			}
 		}
+		InstallMaterialResourceOwnership(G_matsystem);
 		SetupReflexMaterialSystemHooks(G_matsystem);
 		if (!IsR1ODedicatedServer()) {
 			SetupHudWarpMatSystemHooks();

@@ -939,6 +939,18 @@ SQInteger Script_IsDedicated(HSQUIRRELVM v)
 	return 1;
 }
 
+SQInteger Script_ConVarExists(HSQUIRRELVM v)
+{
+	const char* name = nullptr;
+	if (SQ_FAILED(sq_getstring(v, 2, &name)))
+		return sq_throwerror(v, "ConVarExists requires a string name");
+	if (!IsCvarInterfacePublished() || !cvarinterface || !OriginalCCVar_FindVar2)
+		return sq_throwerror(v, "The native convar registry is unavailable");
+	const bool exists = OriginalCCVar_FindVar2(cvarinterface, name) != nullptr;
+	sq_pushbool(nullptr, v, exists);
+	return 1;
+}
+
 SQInteger Script_Server_SetActiveBurnCardIndex(HSQUIRRELVM v) {
 	const void* player = sq_getentity(v, 2);
 	if (!player)
@@ -2069,6 +2081,11 @@ bool GetSQVMFuncs() {
 	MH_CreateHook((LPVOID)(G_client + 0x2E4AD0), OnCreateUIScriptVM, (LPVOID*)&oOnCreateUIScriptVM);
 	if (G_server) MH_CreateHook((LPVOID)(G_server + 0x276600), OnCreateServerScriptVM, (LPVOID*)&oOnCreateServerScriptVM);
 	MH_EnableHook(MH_ALL_HOOKS);
+	}
+
+	for (const auto context : { SCRIPT_CONTEXT_CLIENT, SCRIPT_CONTEXT_SERVER, SCRIPT_CONTEXT_UI }) {
+		REGISTER_SCRIPT_FUNCTION(context, "ConVarExists", Script_ConVarExists, ".s", 2, "bool",
+			"string name", "Returns whether a native convar exists without creating it.");
 	}
 
 	REGISTER_SCRIPT_FUNCTION(

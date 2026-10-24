@@ -1,4 +1,5 @@
 #include "engine/logging/crash_report_minidump.h"
+#include "client/rendering/graphics_flight_recorder_storage.h"
 
 #include <Windows.h>
 #include <DbgHelp.h>
@@ -13,6 +14,8 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+int RunGraphicsFlightRecorderTests();
 
 namespace
 {
@@ -342,6 +345,71 @@ void CaptureCurrentProcessDump(CaptureResult& result)
 	g_captureResult = nullptr;
 }
 
+void CheckGraphicsRecorderCapture(const std::vector<uint8_t>& dump, const CrashCaptureManifest& manifest)
+{
+	namespace graphics = r1delta::graphics_flight_recorder::detail;
+	const auto& storage = graphics::StorageForTests();
+	const auto& history = graphics::HistoryForTests();
+	const auto registered = [&](const void* address, size_t size)
+	{
+		const auto base = reinterpret_cast<uintptr_t>(address);
+		for (uint32_t i = 0; i < manifest.header.memoryRegionCount; ++i)
+		{
+			const auto& region = manifest.memoryRegions[i];
+			if ((region.sources & CrashMemoryRegionRegistered) && base >= region.base
+				&& base - region.base <= region.size && size <= region.size - (base - region.base))
+			{
+				return true;
+			}
+		}
+		return false;
+	};
+	Check(registered(&storage, sizeof(storage)) && registered(&history, sizeof(history)),
+		"both graphics recorder regions are covered by the existing capture manifest");
+
+	graphics::LayoutHeader layout{};
+	const bool hasLayout = ReadCapturedMemory(dump, reinterpret_cast<uintptr_t>(&storage), &layout, sizeof(layout));
+	Check(hasLayout && layout.magic == graphics::kMagic && layout.version == graphics::kVersion
+		&& layout.layoutSize == sizeof(layout) && layout.headerSize == sizeof(graphics::RawHeader)
+		&& layout.storageSize == sizeof(storage) && layout.eventSlotSize == sizeof(graphics::EventSlot)
+		&& layout.resourceSlotSize == sizeof(graphics::ResourceSlot)
+		&& layout.resourcesOffset == offsetof(graphics::RawStorage, resources)
+		&& layout.coverageOffset == offsetof(graphics::RawStorage, coverage)
+		&& layout.historyAddress == reinterpret_cast<uintptr_t>(&history)
+		&& layout.historySize == sizeof(history),
+		"captured recorder header identifies its raw version, sizes and cross-region layout");
+	graphics::HistoryHeader historyHeader{};
+	Check(ReadCapturedMemory(dump, reinterpret_cast<uintptr_t>(&history), &historyHeader, sizeof(historyHeader))
+		&& historyHeader.magic == graphics::kMagic && historyHeader.version == graphics::kVersion
+		&& historyHeader.storageSize == sizeof(history)
+		&& historyHeader.lifecycleOffset == offsetof(graphics::HistoryStorage, lifecycle)
+		&& historyHeader.submissionsOffset == offsetof(graphics::HistoryStorage, submissions)
+		&& historyHeader.boundariesOffset == offsetof(graphics::HistoryStorage, boundaries),
+		"captured history header locates each independently bounded ring");
+
+	graphics::EventData coverage{};
+	std::array<uint64_t, graphics::EventWords + 1> rawCoverage{};
+	const bool hasCoverage = ReadCapturedMemory(dump, reinterpret_cast<uintptr_t>(&storage.coverage),
+		rawCoverage.data(), sizeof(rawCoverage));
+	Check(graphics::ReadSlot(storage.coverage, coverage) == graphics::ReadResult::Complete && hasCoverage
+		&& (rawCoverage[0] & graphics::kSealed) && !(rawCoverage[0] & graphics::kBusy)
+		&& std::equal(coverage.begin(), coverage.end(), rawCoverage.begin() + 1),
+		"minidump preserves complete graphics event publication and scalar payloads exactly");
+
+	bool interruptedCaptured = false;
+	for (const auto& slot : history.submissions)
+	{
+		if ((slot.stamp.load() & (graphics::kSealed | graphics::kBusy)) != (graphics::kSealed | graphics::kBusy))
+			continue;
+		uint64_t capturedStamp = 0;
+		interruptedCaptured = ReadCapturedMemory(dump, reinterpret_cast<uintptr_t>(&slot),
+			&capturedStamp, sizeof(capturedStamp))
+			&& (capturedStamp & (graphics::kSealed | graphics::kBusy)) == (graphics::kSealed | graphics::kBusy);
+		break;
+	}
+	Check(interruptedCaptured, "minidump retains interrupted-writer invalidity for offline readers");
+}
+
 void TestBoundedMemoryRegionPlan()
 {
 	BoundedMemoryRegionPlan plan(0x4000);
@@ -661,6 +729,7 @@ void TestCurrentProcessMinidumpRoundTrip()
 			}
 		}
 		Check(breadcrumbRecorded, "generic breadcrumb appears in capture manifest");
+		CheckGraphicsRecorderCapture(capture.rawDump, manifest);
 	}
 
 	if (capturedRegion)
@@ -781,6 +850,7 @@ int main()
 	TestBoundedMemoryRegionPlan();
 	TestAscii85Vectors();
 	TestRegisterMemoryPreviews();
+	g_failures += RunGraphicsFlightRecorderTests();
 	TestCurrentProcessMinidumpRoundTrip();
 	TestUnavailableSectionAndCleanup();
 

@@ -39,6 +39,7 @@
 #include "materialsystem_dx11_txaa_lifetime.h"
 #include "materialsystem_dx11_render_thread.h"
 #include "materialsystem_dx11_input_layout_cache.h"
+#include "../../client/rendering/graphics_flight_recorder.h"
 #include "r1o_runtime_paths.h"
 
 #include <MinHook.h>
@@ -704,6 +705,14 @@ static int s_MaterialSystemDx11InputLayoutLogBudget = 8;
 static int s_MaterialSystemDx11ShaderResourceLogBudget = 8;
 static void* s_MaterialSystemDx11HeldShaderResources[
 	r1delta::materialsystem_dx11::kPendingShaderResourceCapacity] = {};
+// These identities follow the native render-thread pending slots, not COM
+// ownership. Preserve the generation selected by the producer until submission.
+struct GraphicsPendingIdentity {
+	std::uintptr_t key = 0;
+	std::uint64_t generation = 0;
+};
+static GraphicsPendingIdentity s_GraphicsPendingIdentities[
+	r1delta::materialsystem_dx11::kPendingShaderResourceCapacity]{};
 static bool MaterialSystemDx11LooksLikeUserRange(uintptr_t address, size_t size);
 
 
@@ -1206,7 +1215,7 @@ static void MaterialSystemDx11LogShaderResourceGuard(
 }
 
 static bool MaterialSystemDx11HoldPendingShaderResource(
-	std::size_t slot)
+	std::size_t slot, std::int16_t textureHandle, std::uintptr_t producerRva)
 {
 	using namespace r1delta::materialsystem_dx11;
 	if (!s_MaterialSystemDx11Base
@@ -1218,6 +1227,10 @@ static bool MaterialSystemDx11HoldPendingShaderResource(
 		s_MaterialSystemDx11Base + kPendingShaderResourcesRva);
 
 	void* const candidate = shaderResources[slot];
+	const std::uintptr_t key = GraphicsFlightRecorderTextureKey(textureHandle);
+	const std::uint64_t generation =
+		r1delta::graphics_flight_recorder::ResourceGeneration(key);
+	s_GraphicsPendingIdentities[slot] = {key, generation};
 	const bool accepted = ReplacePendingShaderResourceHold(
 		shaderResources,
 		s_MaterialSystemDx11HeldShaderResources,
@@ -1227,16 +1240,25 @@ static bool MaterialSystemDx11HoldPendingShaderResource(
 		&MaterialSystemDx11ReleaseHeldShaderResource);
 	if (!accepted)
 		MaterialSystemDx11LogShaderResourceGuard(slot, candidate);
+	r1delta::graphics_flight_recorder::Record(
+		r1delta::graphics_flight_recorder::EventKind::ShaderResourcePending,
+		key, generation, reinterpret_cast<std::uintptr_t>(shaderResources[slot]),
+		slot | (static_cast<std::uint64_t>(
+			static_cast<std::uint16_t>(textureHandle)) << 32),
+		producerRva, reinterpret_cast<std::uintptr_t>(candidate));
 	return accepted;
 }
 
 static void MaterialSystemDx11HoldPendingShaderResourceRange(
-	std::size_t count)
+	std::size_t count, std::int64_t textureHandles, std::uintptr_t producerRva)
 {
 	using namespace r1delta::materialsystem_dx11;
 	const std::size_t boundedCount = ClampShaderResourceCount(count);
-	for (std::size_t slot = 0; slot < boundedCount; ++slot)
-		MaterialSystemDx11HoldPendingShaderResource(slot);
+	for (std::size_t slot = 0; slot < boundedCount; ++slot) {
+		const auto handle = reinterpret_cast<const std::int16_t*>(
+			textureHandles)[slot];
+		MaterialSystemDx11HoldPendingShaderResource(slot, handle, producerRva);
+	}
 }
 
 static __int64 __fastcall
@@ -1251,7 +1273,7 @@ MaterialSystemDx11ShaderResourceSingleProducerGuard(
 			slot,
 			textureHandle);
 	MaterialSystemDx11HoldPendingShaderResource(
-		static_cast<std::size_t>(slot));
+		static_cast<std::size_t>(slot), textureHandle, 0x140E0);
 	return result;
 }
 
@@ -1269,7 +1291,7 @@ MaterialSystemDx11ShaderResourceIndexedProducerGuard(
 			textureHandle,
 			index);
 	MaterialSystemDx11HoldPendingShaderResource(
-		static_cast<std::size_t>(slot));
+		static_cast<std::size_t>(slot), textureHandle, 0x14220);
 	return result;
 }
 
@@ -1284,7 +1306,7 @@ MaterialSystemDx11ShaderResourceArrayProducerGuard(
 		textureHandles,
 		count);
 	MaterialSystemDx11HoldPendingShaderResourceRange(
-		static_cast<std::size_t>(count));
+		static_cast<std::size_t>(count), textureHandles, 0x142D0);
 }
 
 static void __fastcall
@@ -1300,7 +1322,7 @@ MaterialSystemDx11ShaderResourceMaskedArrayProducerGuard(
 		count,
 		samplerMask);
 	MaterialSystemDx11HoldPendingShaderResourceRange(
-		static_cast<std::size_t>(count));
+		static_cast<std::size_t>(count), textureHandles, 0x14490);
 }
 
 static bool __fastcall
@@ -1317,7 +1339,7 @@ MaterialSystemDx11ShaderResourceDirectProducerGuard(
 			shaderResource,
 			useDepthSampler);
 	MaterialSystemDx11HoldPendingShaderResource(
-		static_cast<std::size_t>(slot));
+		static_cast<std::size_t>(slot), 0, 0x145A0);
 	return result;
 }
 
@@ -1326,6 +1348,23 @@ MaterialSystemDx11FlushShaderResourcesGuard()
 {
 	if (!MaterialSystemDx11FlushShaderResourcesOriginal)
 		return 0;
+	using namespace r1delta::graphics_flight_recorder;
+	using namespace r1delta::materialsystem_dx11;
+	const auto currentCount = *reinterpret_cast<const unsigned int*>(
+		s_MaterialSystemDx11Base + kPendingShaderResourceCountRva);
+	const auto previousCount = *reinterpret_cast<const unsigned int*>(
+		s_MaterialSystemDx11Base + kPreviousShaderResourceCountRva);
+	const auto count = ClampShaderResourceCount(
+		(currentCount > previousCount) ? currentCount : previousCount);
+	auto* const views = reinterpret_cast<void* const*>(
+		s_MaterialSystemDx11Base + kPendingShaderResourcesRva);
+	for (std::size_t slot = 0; slot < count; ++slot) {
+		const auto identity = s_GraphicsPendingIdentities[slot];
+		Record(EventKind::ShaderResourceSubmit, identity.key,
+			identity.generation, reinterpret_cast<std::uintptr_t>(views[slot]),
+			slot, kShaderResourceFlushRva,
+			currentCount | (static_cast<std::uint64_t>(previousCount) << 32));
+	}
 
 	const unsigned __int64 result =
 		MaterialSystemDx11FlushShaderResourcesOriginal();
@@ -1335,6 +1374,8 @@ MaterialSystemDx11FlushShaderResourcesGuard()
 			heldShaderResource);
 		heldShaderResource = nullptr;
 	}
+	for (auto& identity : s_GraphicsPendingIdentities)
+		identity = {};
 	return result;
 }
 
@@ -1451,8 +1492,16 @@ static __int64 __fastcall MaterialSystemDx11VtfLoadGuard(
 			static_cast<__int64>(loadDepth));
 	}
 
+	r1delta::graphics_flight_recorder::Record(
+		r1delta::graphics_flight_recorder::EventKind::VtfLoadBegin,
+		static_cast<std::uintptr_t>(texture), 0,
+		reinterpret_cast<std::uintptr_t>(textureData), loadDepth);
 	const __int64 result =
 		MaterialSystemDx11VtfLoadOriginal(texture, textureData);
+	r1delta::graphics_flight_recorder::Record(
+		r1delta::graphics_flight_recorder::EventKind::VtfLoadEnd,
+		static_cast<std::uintptr_t>(texture), 0,
+		static_cast<std::uint64_t>(result), loadDepth);
 	if (!decoderScope.Close()) {
 		MaterialSystemDx11FailVtfScratch(
 			"decoder-exit",
@@ -1896,6 +1945,11 @@ static uintptr_t __fastcall MaterialSystemDx11ExecuteRetainedTxaaResolve(
 		}
 		release = reinterpret_cast<TxaaReferenceFunction>(releaseAddress);
 	}
+	r1delta::graphics_flight_recorder::Record(
+		r1delta::graphics_flight_recorder::EventKind::TxaaExecute, 0, 0,
+		reinterpret_cast<std::uintptr_t>(command),
+		reinterpret_cast<std::uintptr_t>(command->renderTargetView),
+		command->argument, queueState);
 
 	return ExecuteTxaaQueuedResolve(queueState, release);
 }
@@ -1996,6 +2050,11 @@ static char __fastcall MaterialSystemDx11QueueRetainedTxaaResolve(
 			callbackArgument,
 			renderTargetView);
 	}
+	r1delta::graphics_flight_recorder::Record(
+		r1delta::graphics_flight_recorder::EventKind::TxaaQueued, 0, 0,
+		reinterpret_cast<std::uintptr_t>(command),
+		reinterpret_cast<std::uintptr_t>(renderTargetView),
+		callbackArgument, queuedContext);
 
 	return MaterialSystemDx11TxaaQueuePublish(
 		reinterpret_cast<uintptr_t>(command + 1));
@@ -6844,6 +6903,44 @@ void InstallVPhysicsStaticBVHProbe(uintptr_t vphysicsBase)
 	}
 
 	VPhysicsStaticBVHProbeLog("VPHYSICS: requested but no known R1/TFO helper bytes matched\n");
+}
+
+static void(__fastcall* R1OShutdownVideoPlaybackOriginal)();
+
+static void __fastcall R1OShutdownVideoPlayback()
+{
+	// The headless runtime does not connect VBik001. The shared native entry
+	// assumes that video service exists even when it was never initialized.
+	const auto engineBase = reinterpret_cast<uintptr_t>(engineR1O);
+	if (*reinterpret_cast<void**>(engineBase + 0x22FB6C8))
+		R1OShutdownVideoPlaybackOriginal();
+}
+
+static void InstallR1OOptionalVideoShutdown(uintptr_t engineBase)
+{
+	if (!IsR1ODedicatedServer() || !engineBase || R1OShutdownVideoPlaybackOriginal)
+		return;
+	constexpr unsigned char expected[] = {
+		0x40, 0x53, 0x48, 0x83, 0xEC, 0x30, 0x48, 0xC7,
+		0x44, 0x24, 0x20, 0xFE, 0xFF, 0xFF, 0xFF, 0x48,
+		0x8D, 0x1D, 0x6A, 0xFA, 0x2D, 0x02, 0x48, 0x89,
+		0x5C, 0x24, 0x40, 0x48, 0x8B, 0xCB
+	};
+	auto* target = reinterpret_cast<void*>(engineBase + 0x4FB70);
+	if (memcmp(target, expected, sizeof(expected)) != 0) {
+		Warning("R1Delta: unsupported headless video shutdown profile.\n");
+		return;
+	}
+	const MH_STATUS create = MH_CreateHook(target,
+		reinterpret_cast<void*>(&R1OShutdownVideoPlayback),
+		reinterpret_cast<void**>(&R1OShutdownVideoPlaybackOriginal));
+	const MH_STATUS enable = create == MH_OK ? MH_EnableHook(target) : create;
+	if (create != MH_OK || enable != MH_OK) {
+		if (create == MH_OK)
+			MH_RemoveHook(target);
+		R1OShutdownVideoPlaybackOriginal = nullptr;
+		Warning("R1Delta: headless video shutdown hook failed (create=%d enable=%d).\n", create, enable);
+	}
 }
 
 static void PatchR1ORenderOnlyDedicatedHelpers(uintptr_t engineBase)
@@ -17883,7 +17980,7 @@ static void* R1OWrappedCVarInterface(const char* name, int* returnCode)
 	uintptr_t oCCvar__AllocateDLLIdentifier = r1vtable[8];
 	OriginalCCVar_RegisterConCommand = reinterpret_cast<decltype(OriginalCCVar_RegisterConCommand)>(r1vtable[9]);
 	OriginalCCVar_UnregisterConCommand = reinterpret_cast<decltype(OriginalCCVar_UnregisterConCommand)>(r1vtable[10]);
-	uintptr_t oCCvar__UnregisterConCommands = r1vtable[11];
+	OriginalCCvar__UnregisterConCommands = reinterpret_cast<decltype(OriginalCCvar__UnregisterConCommands)>(r1vtable[11]);
 	uintptr_t oCCvar__GetCommandLineValue = r1vtable[12];
 	OriginalCCVar_FindCommandBase = reinterpret_cast<decltype(OriginalCCVar_FindCommandBase)>(r1vtable[13]);
 	OriginalCCVar_FindCommandBase2 = reinterpret_cast<decltype(OriginalCCVar_FindCommandBase2)>(r1vtable[14]);
@@ -17932,7 +18029,7 @@ static void* R1OWrappedCVarInterface(const char* name, int* returnCode)
 		r1ovtable[10] = CreateFunction(CCVar__GetSomeFlag, reinterpret_cast<void*>(cvarinterface));
 		r1ovtable[11] = CreateFunction(CCVar_RegisterConCommand, reinterpret_cast<void*>(cvarinterface));
 		r1ovtable[12] = CreateFunction(CCVar_UnregisterConCommand, reinterpret_cast<void*>(cvarinterface));
-		r1ovtable[13] = CreateFunction(reinterpret_cast<void*>(oCCvar__UnregisterConCommands), reinterpret_cast<void*>(cvarinterface));
+		r1ovtable[13] = CreateFunction(CCVar_UnregisterConCommands, reinterpret_cast<void*>(cvarinterface));
 		r1ovtable[14] = CreateFunction(reinterpret_cast<void*>(oCCvar__GetCommandLineValue), reinterpret_cast<void*>(cvarinterface));
 		r1ovtable[15] = CreateFunction(CCVar_FindCommandBase, reinterpret_cast<void*>(cvarinterface));
 		r1ovtable[16] = CreateFunction(CCVar_FindCommandBase2, reinterpret_cast<void*>(cvarinterface));
@@ -19300,6 +19397,7 @@ void InitR1ODedicatedServerAPIHook(uintptr_t engineR1OBase) {
 	InstallR1OIdleFrameSleepCompatibility();
 	InstallR1OConsoleLoggingHooks(engineR1OBase);
 	InstallR1OSetPreCacheHook();
+	InstallR1OOptionalVideoShutdown(engineR1OBase);
 	PatchR1ORenderOnlyDedicatedHelpers(engineR1OBase);
 	PatchR1OStaticPropRenderInventory(engineR1OBase);
 	PatchR1OConnectPlatformValidation(engineR1OBase);
@@ -20135,7 +20233,7 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 		uintptr_t oCCvar__AllocateDLLIdentifier = r1vtable[8];
 		OriginalCCVar_RegisterConCommand = reinterpret_cast<decltype(OriginalCCVar_RegisterConCommand)>(r1vtable[9]);
 		OriginalCCVar_UnregisterConCommand = reinterpret_cast<decltype(OriginalCCVar_UnregisterConCommand)>(r1vtable[10]);
-		uintptr_t oCCvar__UnregisterConCommands = r1vtable[11];
+		OriginalCCvar__UnregisterConCommands = reinterpret_cast<decltype(OriginalCCvar__UnregisterConCommands)>(r1vtable[11]);
 		uintptr_t oCCvar__GetCommandLineValue = r1vtable[12];
 		//uintptr_t CCvar__FindCommandBase = r1vtable[13];
 		//uintptr_t CCvar__FindCommandBase2 = r1vtable[14];
@@ -20190,7 +20288,7 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 			CreateFunction(CCVar__GetSomeFlag, (void*)cvarinterface),
 			CreateFunction(CCVar_RegisterConCommand, (void*)cvarinterface),
 			CreateFunction(CCVar_UnregisterConCommand, (void*)cvarinterface),
-			CreateFunction((void*)oCCvar__UnregisterConCommands, (void*)cvarinterface),
+			CreateFunction(CCVar_UnregisterConCommands, (void*)cvarinterface),
 			CreateFunction((void*)oCCvar__GetCommandLineValue, (void*)cvarinterface),
 			CreateFunction(CCVar_FindCommandBase, (void*)cvarinterface),
 			CreateFunction(CCVar_FindCommandBase2, (void*)cvarinterface),

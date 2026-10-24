@@ -474,5 +474,20 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     // It will be unloaded when the process exits naturally.
 
     OutputDebugStringA("DedicatedMain returned. Exiting.\n");
+
+    // The engine has finished its native shutdown; stop R1Delta's process
+    // services while their worker threads still exist and no loader lock is held.
+    using ShutdownProcessServices_t = void (*)();
+    HMODULE coreModule = GetModuleHandleW(L"tier0.dll");
+    auto shutdownServices = coreModule
+        ? reinterpret_cast<ShutdownProcessServices_t>(GetProcAddress(coreModule, "R1DeltaShutdownProcessServices"))
+        : nullptr;
+    if (!shutdownServices)
+    {
+        fprintf(stderr, "Fatal Error: tier0.dll does not export R1DeltaShutdownProcessServices.\n");
+        fflush(stderr);
+        return 1;
+    }
+    shutdownServices();
     return result;
 }

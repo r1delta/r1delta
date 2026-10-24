@@ -451,6 +451,9 @@ bool EnsureStartedFromLauncher()
 	return true;
 }
 
+using ShutdownProcessServices_t = void (*)();
+static ShutdownProcessServices_t ShutdownProcessServices;
+
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine, int nCmdShow)
 {
 	 //AllocConsole();
@@ -539,17 +542,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine,
 		}
 		using SetR1DeltaLaunchArgs_t = void(__stdcall*)(const char*);
 		auto SetArgs = reinterpret_cast<SetR1DeltaLaunchArgs_t>(GetProcAddress(hCoreModule, "SetR1DeltaLaunchArgs"));
+		ShutdownProcessServices = reinterpret_cast<ShutdownProcessServices_t>(GetProcAddress(hCoreModule, "R1DeltaShutdownProcessServices"));
 
-		if (!SetArgs)
+		if (!SetArgs || !ShutdownProcessServices)
 		{
 			MessageBoxA(
 				GetForegroundWindow(),
-				"Failed to load SetR1DeltaLaunchArgs function.\nThe game cannot continue and has to exit.",
+				"Failed to load the R1Delta core exports.\nThe game cannot continue and has to exit.",
 				"R1Delta Launcher Error",
 				0);
 			return 1;
 		}
-
 		SetArgs(lpCmdLine);
 
 		SetMitigationPolicies();
@@ -569,6 +572,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine,
 	}
 
 
-	return ((int(/*__fastcall*/ *)(HINSTANCE, HINSTANCE, LPSTR, int))LauncherMain)(
+	const int engineResult = ((int(/*__fastcall*/ *)(HINSTANCE, HINSTANCE, LPSTR, int))LauncherMain)(
 		0, 0, nullptr, 1); // the parameters aren't really used anyways
+	// The engine has finished its native shutdown; stop R1Delta's process
+	// services while their worker threads still exist and no loader lock is held.
+	ShutdownProcessServices();
+	return engineResult;
 }

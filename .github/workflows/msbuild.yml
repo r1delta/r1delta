@@ -19,7 +19,7 @@ env:
   MSBUILD_DEBUG_TYPE: pdbonly
   NUSPEC_FILE: R1Delta.nuspec
   PACKAGE_NAME: R1Delta
-  DISPLAY_VERSION: "2000"
+  DISPLAY_VERSION: "XP Professional"
 
 permissions:
   contents: write

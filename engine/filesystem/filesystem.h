@@ -64,6 +64,8 @@ FileHandle_t ReadFileFromVPKHook(VPKData* vpkInfo, __int64* b, char* filename);
 typedef bool (*ReadFromCacheType)(IFileSystem* filesystem, char* path, void* result);
 extern ReadFromCacheType readFromCache;
 bool ReadFromCacheHook(IFileSystem* filesystem, char* path, void* result);
+// Validates the exact Client2015 resource ABI before its lookup hook is created.
+bool InitializeClientSharedParticleMaterials(uintptr_t filesystemBase);
 
 typedef FileHandle_t(*ReadFileFromFilesystemType)(
 	IFileSystem* filesystem, const char* pPath, const char* pOptions, __int64 a4, unsigned __int32 a5, void* a6);
