@@ -1,4 +1,5 @@
 #include "r1o_vpk.h"
+#include "r2port_provider.h"
 #include "r1o_vpk_index_cache.h"
 #include "crash_report_context.h"
 #include "../r2port/lzham/lzhamdecomp/lzham_decomp.h"
@@ -43,6 +44,7 @@ using VPKParsedEntry = std::pair<std::string, VPKEntry>;
 struct VPKMemoryFile {
 	std::shared_ptr<const std::vector<uint8_t>> data;
 	uint64_t position{};
+	std::string tracePath;
 };
 
 struct ZstdApi {
@@ -78,6 +80,49 @@ static bool ReadValue(std::ifstream& stream, T& out)
 {
 	return ReadExact(stream, &out, sizeof(out));
 }
+
+static bool ReadVPKHeader(
+	std::ifstream& stream,
+	const std::filesystem::path& path,
+	uint32_t& marker,
+	uint16_t& major,
+	uint16_t& minor,
+	uint32_t& treeSize,
+	uint32_t& embeddedChunkSize,
+	uint64_t& headerSize)
+{
+	if (!ReadValue(stream, marker) || !ReadValue(stream, major)
+		|| !ReadValue(stream, minor) || !ReadValue(stream, treeSize))
+		return false;
+
+	headerSize = 12;
+	if (major >= 2) {
+		if (!ReadValue(stream, embeddedChunkSize))
+			return false;
+		headerSize += sizeof(embeddedChunkSize);
+	}
+
+	if (major == 2 && minor >= 1) {
+		std::error_code error;
+		const uint64_t fileSize = std::filesystem::file_size(path, error);
+		const uint64_t compactHeaderSize = headerSize
+			+ static_cast<uint64_t>(treeSize) + embeddedChunkSize;
+		const bool compactTitanfallHeader = !error && fileSize == compactHeaderSize;
+		if (!compactTitanfallHeader) {
+			uint32_t archiveMd5SectionSize{};
+			uint32_t otherMd5SectionSize{};
+			uint32_t signatureSectionSize{};
+			if (!ReadValue(stream, archiveMd5SectionSize)
+				|| !ReadValue(stream, otherMd5SectionSize)
+				|| !ReadValue(stream, signatureSectionSize))
+				return false;
+			headerSize += sizeof(archiveMd5SectionSize)
+				+ sizeof(otherMd5SectionSize) + sizeof(signatureSectionSize);
+		}
+	}
+	return true;
+}
+
 
 template <typename T>
 static bool ReadMemoryValue(const uint8_t*& cursor, const uint8_t* end, T& out)
@@ -219,22 +264,9 @@ static bool ParseDirectoryVPK(
 	uint16_t minor{};
 	uint32_t treeSize{};
 	uint32_t embeddedChunkSize{};
-	if (!ReadValue(stream, marker) || !ReadValue(stream, major) || !ReadValue(stream, minor)
-		|| !ReadValue(stream, treeSize))
-		return false;
-	if (major >= 2 && !ReadValue(stream, embeddedChunkSize))
-		return false;
-
-	uint32_t archiveMd5SectionSize{};
-	uint32_t otherMd5SectionSize{};
-	uint32_t signatureSectionSize{};
-	if (major == 2 && minor >= 1
-		&& (!ReadValue(stream, archiveMd5SectionSize)
-			|| !ReadValue(stream, otherMd5SectionSize)
-			|| !ReadValue(stream, signatureSectionSize)))
-		return false;
-
-	if (marker != kVPKHeaderMagic || (major != 1 && major != 2)
+	uint64_t headerSize{};
+	if (!ReadVPKHeader(stream, path, marker, major, minor, treeSize, embeddedChunkSize, headerSize)
+		|| marker != kVPKHeaderMagic || (major != 1 && major != 2)
 		|| (major == 2 && minor > 3)
 		|| treeSize > static_cast<uint32_t>(std::numeric_limits<int>::max()))
 		return false;
@@ -566,29 +598,17 @@ static bool GetEmbeddedVPKChunkOffset(
 	uint16_t minor{};
 	uint32_t treeSize{};
 	uint32_t embeddedChunkSize{};
-	if (!ReadValue(directory, marker)
-		|| !ReadValue(directory, major)
-		|| !ReadValue(directory, minor)
-		|| !ReadValue(directory, treeSize))
-		return false;
-
-	uint64_t headerSize = 12;
-	if (major >= 2) {
-		if (!ReadValue(directory, embeddedChunkSize))
-			return false;
-		headerSize += sizeof(embeddedChunkSize);
-	}
-	if (major == 2 && minor >= 1) {
-		uint32_t archiveMd5SectionSize{};
-		uint32_t otherMd5SectionSize{};
-		uint32_t signatureSectionSize{};
-		if (!ReadValue(directory, archiveMd5SectionSize)
-			|| !ReadValue(directory, otherMd5SectionSize)
-			|| !ReadValue(directory, signatureSectionSize))
-			return false;
-		headerSize += sizeof(archiveMd5SectionSize) * 3;
-	}
-	if (marker != kVPKHeaderMagic || (major != 1 && major != 2)
+	uint64_t headerSize{};
+	if (!ReadVPKHeader(
+			directory,
+			entry.dirPath,
+			marker,
+			major,
+			minor,
+			treeSize,
+			embeddedChunkSize,
+			headerSize)
+		|| marker != kVPKHeaderMagic || (major != 1 && major != 2)
 		|| (major == 2 && minor > 3))
 		return false;
 
@@ -812,68 +832,120 @@ static VPKMemoryFile* FindOpenFile(void* handle)
 
 bool R1OVPK_HasFile(const char* relativeResourcePath)
 {
-	return FindEntry(relativeResourcePath) != nullptr;
+	const bool found = FindEntry(relativeResourcePath) != nullptr;
+	r2port::TraceFilesystemCall("R1OVPK_HasFile", relativeResourcePath, nullptr,
+		0, found ? "true" : "false");
+	return found;
 }
 
 bool R1OVPK_GetFileSize(const char* relativeResourcePath, uint64_t* size)
 {
-	if (!size)
+	if (!size) {
+		r2port::TraceFilesystemCall("R1OVPK_GetFileSize", relativeResourcePath,
+			nullptr, 0, "invalid-size-output");
 		return false;
-
+	}
 	const VPKEntry* entry = FindEntry(relativeResourcePath);
-	if (!entry)
-		return false;
-
-	return EntryDecompressedSize(*entry, *size);
+	const bool found = entry && EntryDecompressedSize(*entry, *size);
+	char detail[64]{};
+	if (r2port::FilesystemTraceEnabled())
+		_snprintf_s(detail, sizeof(detail), _TRUNCATE, "bytes=%llu",
+			static_cast<unsigned long long>(found ? *size : 0));
+	r2port::TraceFilesystemCall("R1OVPK_GetFileSize", relativeResourcePath,
+		nullptr, 0, found ? "found" : "miss", detail);
+	return found;
 }
+
 bool R1OVPK_HasDirectoryVPKFile(const char* directoryVPK, const char* relativeResourcePath)
 {
-	if (!relativeResourcePath || !relativeResourcePath[0])
-		return false;
-	const auto index = LoadExternalVPKIndex(directoryVPK);
-	if (!index)
-		return false;
-	return index->find(NormalizeResourcePath(relativeResourcePath)) != index->end();
+	const auto index = relativeResourcePath && relativeResourcePath[0]
+		? LoadExternalVPKIndex(directoryVPK)
+		: std::shared_ptr<const ExternalVPKIndex>{};
+	const bool found = index
+		&& index->find(NormalizeResourcePath(relativeResourcePath)) != index->end();
+	r2port::TraceFilesystemCall("R1OVPK_HasDirectoryVPKFile", relativeResourcePath,
+		directoryVPK, 0, found ? "true" : "false");
+	return found;
 }
 
 bool R1OVPK_GetDirectoryVPKFileSize(
 	const char* directoryVPK, const char* relativeResourcePath, uint64_t* size)
 {
-	if (!size || !relativeResourcePath || !relativeResourcePath[0])
+	if (!size || !relativeResourcePath || !relativeResourcePath[0]) {
+		r2port::TraceFilesystemCall("R1OVPK_GetDirectoryVPKFileSize",
+			relativeResourcePath, directoryVPK, 0, "invalid-arguments");
 		return false;
+	}
 	const auto index = LoadExternalVPKIndex(directoryVPK);
-	if (!index)
+	if (!index) {
+		r2port::TraceFilesystemCall("R1OVPK_GetDirectoryVPKFileSize",
+			relativeResourcePath, directoryVPK, 0, "index-miss");
 		return false;
+	}
 	const auto found = index->find(NormalizeResourcePath(relativeResourcePath));
-	return found != index->end() && EntryDecompressedSize(found->second, *size);
+	const bool success = found != index->end() && EntryDecompressedSize(found->second, *size);
+	char detail[64]{};
+	if (r2port::FilesystemTraceEnabled())
+		_snprintf_s(detail, sizeof(detail), _TRUNCATE, "bytes=%llu",
+			static_cast<unsigned long long>(success ? *size : 0));
+	r2port::TraceFilesystemCall("R1OVPK_GetDirectoryVPKFileSize",
+		relativeResourcePath, directoryVPK, 0, success ? "found" : "miss", detail);
+	return success;
 }
 
 std::shared_ptr<const std::vector<uint8_t>> R1OVPK_ReadDirectoryVPKFile(
 	const char* directoryVPK, const char* relativeResourcePath)
 {
-	if (!relativeResourcePath || !relativeResourcePath[0])
+	if (!relativeResourcePath || !relativeResourcePath[0]) {
+		r2port::TraceFilesystemCall("R1OVPK_ReadDirectoryVPKFile",
+			relativeResourcePath, directoryVPK, 0, "invalid-path");
 		return {};
+	}
 	const auto index = LoadExternalVPKIndex(directoryVPK);
-	if (!index)
+	if (!index) {
+		r2port::TraceFilesystemCall("R1OVPK_ReadDirectoryVPKFile",
+			relativeResourcePath, directoryVPK, 0, "index-miss");
 		return {};
+	}
 	const auto found = index->find(NormalizeResourcePath(relativeResourcePath));
-	if (found == index->end())
+	if (found == index->end()) {
+		r2port::TraceFilesystemCall("R1OVPK_ReadDirectoryVPKFile",
+			relativeResourcePath, directoryVPK, 0, "entry-miss");
 		return {};
+	}
 	std::vector<uint8_t> bytes;
-	if (!ReadEntry(found->second, bytes))
+	if (!ReadEntry(found->second, bytes)) {
+		r2port::TraceFilesystemCall("R1OVPK_ReadDirectoryVPKFile",
+			relativeResourcePath, directoryVPK, 0, "read-failed");
 		return {};
+	}
+	char detail[64]{};
+	if (r2port::FilesystemTraceEnabled())
+		_snprintf_s(detail, sizeof(detail), _TRUNCATE, "bytes=%zu", bytes.size());
+	r2port::TraceFilesystemCall("R1OVPK_ReadDirectoryVPKFile",
+		relativeResourcePath, directoryVPK, 0, "read", detail);
 	return std::make_shared<const std::vector<uint8_t>>(std::move(bytes));
 }
 
-void* R1OVPK_OpenMemoryFile(std::shared_ptr<const std::vector<uint8_t>> data)
+void* R1OVPK_OpenMemoryFile(
+	std::shared_ptr<const std::vector<uint8_t>> data, const char* tracePath)
 {
-	if (!data)
+	if (!data) {
+		r2port::TraceFilesystemCall("R1OVPK_OpenMemoryFile", tracePath, nullptr,
+			0, "null-data");
 		return nullptr;
+	}
 	auto file = std::make_unique<VPKMemoryFile>();
 	file->data = std::move(data);
+	if (r2port::FilesystemTraceEnabled() && tracePath)
+		file->tracePath = tracePath;
 	void* handle = file.get();
-	std::lock_guard<std::mutex> lock(g_openFilesMutex);
-	g_openFiles.emplace(handle, std::move(file));
+	{
+		std::lock_guard<std::mutex> lock(g_openFilesMutex);
+		g_openFiles.emplace(handle, std::move(file));
+	}
+	r2port::TraceFilesystemCall("R1OVPK_OpenMemoryFile", tracePath, nullptr,
+		0, "memory-handle");
 	return handle;
 }
 
@@ -881,144 +953,246 @@ void* R1OVPK_OpenFile(const char* relativeResourcePath)
 {
 	std::string normalizedPath;
 	const VPKEntry* entry = FindEntry(relativeResourcePath, &normalizedPath);
-	if (!entry)
+	if (!entry) {
+		r2port::TraceFilesystemCall("R1OVPK_OpenFile", relativeResourcePath,
+			nullptr, 0, "miss");
 		return nullptr;
-
+	}
 	auto data = LoadEntry(normalizedPath, *entry);
-	if (!data)
+	if (!data) {
+		r2port::TraceFilesystemCall("R1OVPK_OpenFile", relativeResourcePath,
+			nullptr, 0, "read-failed");
 		return nullptr;
-
+	}
 	auto file = std::make_unique<VPKMemoryFile>();
 	file->data = std::move(data);
+	if (r2port::FilesystemTraceEnabled())
+		file->tracePath = normalizedPath;
 	void* handle = file.get();
-
-	std::lock_guard<std::mutex> lock(g_openFilesMutex);
-	g_openFiles.emplace(handle, std::move(file));
+	{
+		std::lock_guard<std::mutex> lock(g_openFilesMutex);
+		g_openFiles.emplace(handle, std::move(file));
+	}
+	r2port::TraceFilesystemCall("R1OVPK_OpenFile", relativeResourcePath,
+		nullptr, 0, "memory-handle");
 	return handle;
 }
 
 bool R1OVPK_ReadFile(void* handle, void* output, int bytesToRead, int* bytesRead)
 {
-	std::lock_guard<std::mutex> lock(g_openFilesMutex);
-	VPKMemoryFile* file = FindOpenFile(handle);
-	if (!file)
-		return false;
-
-	if (bytesRead)
-		*bytesRead = 0;
-	if (!output || bytesToRead <= 0 || file->position >= file->data->size())
-		return true;
-
-	const size_t available = file->data->size() - static_cast<size_t>(file->position);
-	const size_t count = std::min(available, static_cast<size_t>(bytesToRead));
-	memcpy(output, file->data->data() + file->position, count);
-	file->position += count;
-	if (bytesRead)
-		*bytesRead = static_cast<int>(count);
+	std::string tracePath;
+	int count = 0;
+	{
+		std::lock_guard<std::mutex> lock(g_openFilesMutex);
+		VPKMemoryFile* file = FindOpenFile(handle);
+		if (!file)
+			return false;
+		if (r2port::FilesystemTraceEnabled())
+			tracePath = file->tracePath;
+		if (bytesRead)
+			*bytesRead = 0;
+		if (output && bytesToRead > 0 && file->position < file->data->size()) {
+			const size_t available = file->data->size() - static_cast<size_t>(file->position);
+			count = static_cast<int>(std::min(available, static_cast<size_t>(bytesToRead)));
+			memcpy(output, file->data->data() + file->position, static_cast<size_t>(count));
+			file->position += static_cast<size_t>(count);
+			if (bytesRead)
+				*bytesRead = count;
+		}
+	}
+	char detail[80]{};
+	if (r2port::FilesystemTraceEnabled())
+		_snprintf_s(detail, sizeof(detail), _TRUNCATE, "requested=%d read=%d", bytesToRead, count);
+	r2port::TraceFilesystemCall("R1OVPK_ReadFile", tracePath.c_str(), nullptr,
+		0, "handled", detail);
 	return true;
 }
 
 bool R1OVPK_CloseFile(void* handle)
 {
-	std::lock_guard<std::mutex> lock(g_openFilesMutex);
-	return g_openFiles.erase(handle) != 0;
+	std::string tracePath;
+	bool closed = false;
+	{
+		std::lock_guard<std::mutex> lock(g_openFilesMutex);
+		const auto found = g_openFiles.find(handle);
+		if (found != g_openFiles.end()) {
+			if (r2port::FilesystemTraceEnabled())
+				tracePath = found->second->tracePath;
+			g_openFiles.erase(found);
+			closed = true;
+		}
+	}
+	r2port::TraceFilesystemCall("R1OVPK_CloseFile", tracePath.c_str(), nullptr,
+		0, closed ? "closed" : "not-owned");
+	return closed;
 }
 
 bool R1OVPK_SeekFile(void* handle, int offset, int origin)
 {
-	std::lock_guard<std::mutex> lock(g_openFilesMutex);
-	VPKMemoryFile* file = FindOpenFile(handle);
-	if (!file)
-		return false;
-
-	int64_t base = 0;
-	switch (origin) {
-	case 0:
-		break;
-	case 1:
-		base = static_cast<int64_t>(file->position);
-		break;
-	case 2:
-		base = static_cast<int64_t>(file->data->size());
-		break;
-	default:
-		return true;
+	std::string tracePath;
+	uint64_t position = 0;
+	bool handled = false;
+	{
+		std::lock_guard<std::mutex> lock(g_openFilesMutex);
+		VPKMemoryFile* file = FindOpenFile(handle);
+		if (!file)
+			return false;
+		if (r2port::FilesystemTraceEnabled())
+			tracePath = file->tracePath;
+		int64_t base = 0;
+		switch (origin) {
+		case 0:
+			break;
+		case 1:
+			base = static_cast<int64_t>(file->position);
+			break;
+		case 2:
+			base = static_cast<int64_t>(file->data->size());
+			break;
+		default:
+			handled = true;
+			position = file->position;
+			break;
+		}
+		if (!handled) {
+			const int64_t result = base + static_cast<int64_t>(offset);
+			file->position = result > 0 ? static_cast<uint64_t>(result) : 0;
+			position = file->position;
+			handled = true;
+		}
 	}
-
-	const int64_t position = base + static_cast<int64_t>(offset);
-	file->position = position > 0 ? static_cast<uint64_t>(position) : 0;
-	return true;
+	char detail[96]{};
+	if (r2port::FilesystemTraceEnabled())
+		_snprintf_s(detail, sizeof(detail), _TRUNCATE,
+			"offset=%d origin=%d position=%llu", offset, origin,
+			static_cast<unsigned long long>(position));
+	r2port::TraceFilesystemCall("R1OVPK_SeekFile", tracePath.c_str(), nullptr,
+		static_cast<int64_t>(origin), handled ? "handled" : "miss", detail);
+	return handled;
 }
 
 bool R1OVPK_TellFile(void* handle, uint64_t* position)
 {
-	std::lock_guard<std::mutex> lock(g_openFilesMutex);
-	VPKMemoryFile* file = FindOpenFile(handle);
-	if (!file)
-		return false;
-	if (position)
-		*position = file->position;
+	std::string tracePath;
+	uint64_t current = 0;
+	{
+		std::lock_guard<std::mutex> lock(g_openFilesMutex);
+		VPKMemoryFile* file = FindOpenFile(handle);
+		if (!file)
+			return false;
+		if (r2port::FilesystemTraceEnabled())
+			tracePath = file->tracePath;
+		current = file->position;
+		if (position)
+			*position = current;
+	}
+	char detail[64]{};
+	if (r2port::FilesystemTraceEnabled())
+		_snprintf_s(detail, sizeof(detail), _TRUNCATE, "position=%llu",
+			static_cast<unsigned long long>(current));
+	r2port::TraceFilesystemCall("R1OVPK_TellFile", tracePath.c_str(), nullptr,
+		0, "handled", detail);
 	return true;
 }
 
 bool R1OVPK_SizeFile(void* handle, uint64_t* size)
 {
-	std::lock_guard<std::mutex> lock(g_openFilesMutex);
-	VPKMemoryFile* file = FindOpenFile(handle);
-	if (!file)
-		return false;
-	if (size)
-		*size = file->data->size();
+	std::string tracePath;
+	uint64_t fileSize = 0;
+	{
+		std::lock_guard<std::mutex> lock(g_openFilesMutex);
+		VPKMemoryFile* file = FindOpenFile(handle);
+		if (!file)
+			return false;
+		if (r2port::FilesystemTraceEnabled())
+			tracePath = file->tracePath;
+		fileSize = file->data->size();
+		if (size)
+			*size = fileSize;
+	}
+	char detail[64]{};
+	if (r2port::FilesystemTraceEnabled())
+		_snprintf_s(detail, sizeof(detail), _TRUNCATE, "bytes=%llu",
+			static_cast<unsigned long long>(fileSize));
+	r2port::TraceFilesystemCall("R1OVPK_SizeFile", tracePath.c_str(), nullptr,
+		0, "handled", detail);
 	return true;
 }
 
 bool R1OVPK_IsFileOk(void* handle, bool* isOk)
 {
-	std::lock_guard<std::mutex> lock(g_openFilesMutex);
-	VPKMemoryFile* file = FindOpenFile(handle);
-	if (!file)
-		return false;
-	if (isOk)
-		*isOk = true;
+	std::string tracePath;
+	{
+		std::lock_guard<std::mutex> lock(g_openFilesMutex);
+		VPKMemoryFile* file = FindOpenFile(handle);
+		if (!file)
+			return false;
+		if (r2port::FilesystemTraceEnabled())
+			tracePath = file->tracePath;
+		if (isOk)
+			*isOk = true;
+	}
+	r2port::TraceFilesystemCall("R1OVPK_IsFileOk", tracePath.c_str(), nullptr,
+		0, "handled", "isOk=true");
 	return true;
 }
 
 bool R1OVPK_IsEndOfFile(void* handle, bool* isEndOfFile)
 {
-	std::lock_guard<std::mutex> lock(g_openFilesMutex);
-	VPKMemoryFile* file = FindOpenFile(handle);
-	if (!file)
-		return false;
-	if (isEndOfFile)
-		*isEndOfFile = file->position >= file->data->size();
+	std::string tracePath;
+	bool endOfFile = false;
+	{
+		std::lock_guard<std::mutex> lock(g_openFilesMutex);
+		VPKMemoryFile* file = FindOpenFile(handle);
+		if (!file)
+			return false;
+		if (r2port::FilesystemTraceEnabled())
+			tracePath = file->tracePath;
+		endOfFile = file->position >= file->data->size();
+		if (isEndOfFile)
+			*isEndOfFile = endOfFile;
+	}
+	r2port::TraceFilesystemCall("R1OVPK_IsEndOfFile", tracePath.c_str(), nullptr,
+		0, "handled", endOfFile ? "eof=true" : "eof=false");
 	return true;
 }
 
 bool R1OVPK_ReadLine(void* handle, char* output, int maxChars, char** result)
 {
-	std::lock_guard<std::mutex> lock(g_openFilesMutex);
-	VPKMemoryFile* file = FindOpenFile(handle);
-	if (!file)
-		return false;
-
-	if (result)
-		*result = nullptr;
-	if (!output || maxChars <= 0)
-		return true;
-
-	output[0] = '\0';
-	if (file->position >= file->data->size())
-		return true;
-
+	std::string tracePath;
 	int count = 0;
-	while (count + 1 < maxChars && file->position < file->data->size()) {
-		const char c = static_cast<char>((*file->data)[static_cast<size_t>(file->position++)]);
-		output[count++] = c;
-		if (c == '\n')
-			break;
+	bool atEnd = false;
+	{
+		std::lock_guard<std::mutex> lock(g_openFilesMutex);
+		VPKMemoryFile* file = FindOpenFile(handle);
+		if (!file)
+			return false;
+		if (r2port::FilesystemTraceEnabled())
+			tracePath = file->tracePath;
+
+		if (result)
+			*result = nullptr;
+		if (output && maxChars > 0) {
+			output[0] = '\0';
+			if (file->position < file->data->size()) {
+				while (count + 1 < maxChars && file->position < file->data->size()) {
+					const char c = static_cast<char>((*file->data)[static_cast<size_t>(file->position++)]);
+					output[count++] = c;
+					if (c == '\n')
+						break;
+				}
+				output[count] = '\0';
+				if (result)
+					*result = output;
+			}
+		}
+		atEnd = file->position >= file->data->size();
 	}
-	output[count] = '\0';
-	if (result)
-		*result = output;
+	char detail[80]{};
+	if (r2port::FilesystemTraceEnabled())
+		_snprintf_s(detail, sizeof(detail), _TRUNCATE,
+			"maxChars=%d read=%d eof=%d", maxChars, count, atEnd ? 1 : 0);
+	r2port::TraceFilesystemCall("R1OVPK_ReadLine", tracePath.c_str(), nullptr,
+		0, "handled", detail);
 	return true;
 }

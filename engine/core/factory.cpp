@@ -17242,19 +17242,35 @@ static void* OpenR2PortMemoryFile(const char* fileName)
 {
 	if (!IsReadableCString(fileName))
 		return nullptr;
-	return R1OVPK_OpenMemoryFile(r2port::ReadAll(fileName));
+	const auto data = r2port::ReadAll(fileName);
+	void* handle = R1OVPK_OpenMemoryFile(data, fileName);
+	char detail[96]{};
+	_snprintf_s(detail, sizeof(detail), _TRUNCATE, "bytes=%zu", data ? data->size() : 0);
+	r2port::TraceFilesystemCall("R2Port::OpenMemoryFile", fileName, nullptr, 0,
+		handle ? "memory-handle" : "miss", detail);
+	return handle;
 }
 
 static bool GetR2PortMemoryFileSize(const char* fileName, uint64_t* size)
 {
-	if (!size || !ShouldUseR1OVPKMemoryFileFallback() || !IsReadableCString(fileName))
+	if (!IsReadableCString(fileName))
 		return false;
+	if (!size || !ShouldUseR1OVPKMemoryFileFallback()) {
+		r2port::TraceFilesystemCall("R2Port::Size", fileName, nullptr, 0, "skipped");
+		return false;
+	}
 	const auto providerSize = r2port::Size(fileName);
+	char detail[96]{};
+	_snprintf_s(detail, sizeof(detail), _TRUNCATE, "bytes=%llu",
+		static_cast<unsigned long long>(providerSize.value_or(0)));
+	r2port::TraceFilesystemCall("R2Port::Size", fileName, nullptr, 0,
+		providerSize ? "found" : "miss", detail);
 	if (!providerSize)
 		return false;
 	*size = *providerSize;
 	return true;
 }
+
 
 static bool ShouldUseR1OVPKMemoryFileFallback()
 {
@@ -17272,16 +17288,25 @@ static void* OpenR1OVPKFallback(
 {
 	if (IsReadableCString(fileName))
 		r2port::ObserveMapFilePath(fileName);
-	if (!originalOpen)
+	if (!originalOpen) {
+		r2port::TraceFilesystemCall("R1OBaseFileSystem::Open", fileName, pathId,
+			flags, "no-original", options);
 		return nullptr;
-	if (!IsReadOnlyFileOpen(options) || !IsReadableCString(fileName))
-		return originalOpen(thisptr, fileName, options, pathId, flags);
+	}
+	if (!IsReadOnlyFileOpen(options) || !IsReadableCString(fileName)) {
+		void* handle = originalOpen(thisptr, fileName, options, pathId, flags);
+		r2port::TraceFilesystemCall("R1OBaseFileSystem::Open", fileName, pathId,
+			flags, handle ? "native-handle" : "native-miss", options);
+		return handle;
+	}
 
 	if (ShouldUseR1OVPKMemoryFileFallback()) {
 		char loosePath[MAX_PATH];
 		auto lease = FileCache::GetInstance().AcquireReadLease();
 		if (NormalizeR1ODediLooseFileName(lease, fileName, loosePath, sizeof(loosePath))) {
 			void* looseHandle = originalOpen(thisptr, loosePath, options, nullptr, flags);
+			r2port::TraceFilesystemCall("R1OBaseFileSystem::OpenLoose", fileName, pathId,
+				flags, looseHandle ? "handle" : "miss", loosePath);
 			if (AreR1OFakeDediVerboseLogsEnabled() && IsR1ODediLooseOverridePath(fileName)) {
 				char buffer[512];
 				_snprintf_s(buffer, sizeof(buffer), _TRUNCATE, "R1Delta: R1O filesystem loose open override file=%s normalized=%s handle=%p\n", fileName, loosePath, looseHandle);
@@ -17292,11 +17317,14 @@ static void* OpenR1OVPKFallback(
 		}
 	}
 
-	if (void* handle = originalOpen(thisptr, fileName, options, pathId, flags))
-		return handle;
+	void* nativeHandle = originalOpen(thisptr, fileName, options, pathId, flags);
+	r2port::TraceFilesystemCall("R1OBaseFileSystem::OpenNative", fileName, pathId,
+		flags, nativeHandle ? "handle" : "miss", options);
+	if (nativeHandle)
+		return nativeHandle;
 	if (ShouldUseR1OVPKMemoryFileFallback()) {
-		if (void* handle = OpenR1OVPKMemoryFile(fileName))
-			return handle;
+		if (void* vpkHandle = OpenR1OVPKMemoryFile(fileName))
+			return vpkHandle;
 	}
 	return ShouldUseR1OVPKMemoryFileFallback()
 		? OpenR2PortMemoryFile(fileName)
@@ -17362,10 +17390,20 @@ static unsigned int __fastcall R1OBaseFileSystem_SizeByName(void* thisptr, const
 	if (IsReadableCString(fileName))
 		r2port::ObserveMapFilePath(fileName);
 	const unsigned int invalidSize = static_cast<unsigned int>(-1);
+	const auto traced = [&](unsigned int value, const char* source) {
+		if (r2port::FilesystemTraceEnabled()) {
+			char detail[80]{};
+			_snprintf_s(detail, sizeof(detail), _TRUNCATE, "source=%s size=%u",
+				source, value);
+			r2port::TraceFilesystemCall("R1OBaseFileSystem::SizeByName", fileName,
+				pathId, 0, value == invalidSize ? "miss" : "found", detail);
+		}
+		return value;
+	};
 	if (!ShouldUseR1OVPKMemoryFileFallback() || !IsReadableCString(fileName)) {
-		return R1OBaseFileSystem_SizeByNameOriginal
+		return traced(R1OBaseFileSystem_SizeByNameOriginal
 			? R1OBaseFileSystem_SizeByNameOriginal(thisptr, fileName, pathId)
-			: invalidSize;
+			: invalidSize, "native-only");
 	}
 
 	char loosePath[MAX_PATH];
@@ -17374,7 +17412,8 @@ static unsigned int __fastcall R1OBaseFileSystem_SizeByName(void* thisptr, const
 		auto lease = FileCache::GetInstance().AcquireReadLease();
 		if (NormalizeR1ODediLooseFileName(lease, fileName, loosePath, sizeof(loosePath))
 			&& GetFileAttributesExA(loosePath, GetFileExInfoStandard, &data)) {
-			return data.nFileSizeHigh == 0 ? data.nFileSizeLow : invalidSize;
+			const unsigned int size = data.nFileSizeHigh == 0 ? data.nFileSizeLow : invalidSize;
+			return traced(size, "loose");
 		}
 	}
 
@@ -17382,21 +17421,24 @@ static unsigned int __fastcall R1OBaseFileSystem_SizeByName(void* thisptr, const
 		? R1OBaseFileSystem_SizeByNameOriginal(thisptr, fileName, pathId)
 		: invalidSize;
 	if (nativeSize != invalidSize)
-		return nativeSize;
+		return traced(nativeSize, "native");
 	uint64_t size = 0;
-
 	if (GetR1OVPKMemoryFileSize(fileName, &size))
-		return static_cast<unsigned int>(size);
-	return GetR2PortMemoryFileSize(fileName, &size)
-		? static_cast<unsigned int>(size)
-		: nativeSize;
+		return traced(static_cast<unsigned int>(size), "r1o-vpk");
+	if (GetR2PortMemoryFileSize(fileName, &size))
+		return traced(static_cast<unsigned int>(size), "r2-provider");
+	return traced(nativeSize, "miss");
 }
 
 static bool __fastcall R1OBaseFileSystem_FileExists(void* thisptr, const char* fileName, const char* pathId)
 {
 	if (IsReadableCString(fileName))
 		r2port::ObserveMapFilePath(fileName);
-	bool result = R1OBaseFileSystem_FileExistsOriginal ? R1OBaseFileSystem_FileExistsOriginal(thisptr, fileName, pathId) : false;
+	bool result = R1OBaseFileSystem_FileExistsOriginal
+		? R1OBaseFileSystem_FileExistsOriginal(thisptr, fileName, pathId)
+		: false;
+	r2port::TraceFilesystemCall("R1OBaseFileSystem::FileExists[native]", fileName,
+		pathId, 0, result ? "true" : "false");
 	if (result || !ShouldUseR1OVPKMemoryFileFallback() || !IsReadableCString(fileName))
 		return result;
 
@@ -17409,52 +17451,84 @@ static bool __fastcall R1OBaseFileSystem_FileExists(void* thisptr, const char* f
 			_snprintf_s(buffer, sizeof(buffer), _TRUNCATE, "R1Delta: R1O filesystem loose exists fallback file=%s normalized=%s\n", fileName, loosePath);
 			OutputDebugStringA(buffer);
 		}
-		if (result)
+		if (result) {
+			r2port::TraceFilesystemCall("R1OBaseFileSystem::FileExists[loose]", fileName,
+				pathId, 0, "true", loosePath);
 			return true;
+		}
 	}
 	uint64_t size = 0;
-
-	if (GetR1OVPKMemoryFileSize(fileName, &size))
+	if (GetR1OVPKMemoryFileSize(fileName, &size)) {
+		r2port::TraceFilesystemCall("R1OBaseFileSystem::FileExists[r1o-vpk]", fileName,
+			pathId, 0, "true");
 		return true;
-	return r2port::Exists(fileName);
+	}
+	result = r2port::Exists(fileName);
+	r2port::TraceFilesystemCall("R1OBaseFileSystem::FileExists[r2-provider]", fileName,
+		pathId, 0, result ? "true" : "false");
+	return result;
 }
+
 
 static const char* (__fastcall* R1OTFOFileSystem_FindFirstOriginal)(void*, __int64, __int64);
 static const char* (__fastcall* R1OTFOFileSystem_FindNextOriginal)(void*, unsigned __int16);
 
 static const char* __fastcall R1OTFOFileSystem_FindFirst(void* thisptr, __int64 pattern, __int64 handleOut)
 {
-	const char* result = R1OTFOFileSystem_FindFirstOriginal
+	const char* path = reinterpret_cast<const char*>(pattern);
+	const char* nativeResult = R1OTFOFileSystem_FindFirstOriginal
 		? R1OTFOFileSystem_FindFirstOriginal(thisptr, pattern, handleOut)
 		: nullptr;
-	return R2PortAppendFindFirstResult(
-		reinterpret_cast<const char*>(pattern),
-		reinterpret_cast<uint16_t*>(handleOut),
-		result);
+	r2port::TraceFilesystemCall("VFileSystem017::FindFirst[native]", path, nullptr,
+		0, nativeResult ? nativeResult : "<end>");
+	const char* result = R2PortAppendFindFirstResult(
+		path, reinterpret_cast<uint16_t*>(handleOut), nativeResult);
+	r2port::TraceFilesystemCall("VFileSystem017::FindFirst[final]", path, nullptr,
+		0, result ? result : "<end>");
+	return result;
 }
 
 static const char* __fastcall R1OTFOFileSystem_FindNext(void* thisptr, unsigned __int16 handle)
 {
-	const char* result = R1OTFOFileSystem_FindNextOriginal
+	const std::string pattern = r2port::FilesystemTraceEnabled()
+		? R2PortFindPattern(handle)
+		: std::string{};
+	const char* nativeResult = R1OTFOFileSystem_FindNextOriginal
 		? R1OTFOFileSystem_FindNextOriginal(thisptr, handle)
 		: nullptr;
-	return R2PortAppendFindNextResult(handle, result);
+	const char* tracePath = !pattern.empty() ? pattern.c_str() : nativeResult;
+	r2port::TraceFilesystemCall("VFileSystem017::FindNext[native]", tracePath,
+		nullptr, 0, nativeResult ? nativeResult : "<end>");
+	const char* result = R2PortAppendFindNextResult(handle, nativeResult);
+	r2port::TraceFilesystemCall("VFileSystem017::FindNext[final]", tracePath,
+		nullptr, 0, result ? result : "<end>");
+	return result;
 }
+
 static void* __fastcall R1OFileSystem_Open(void* thisptr, const char* fileName, const char* options, int flags, const char* pathId, __int64 unknown)
 {
 	if (IsReadableCString(fileName))
 		r2port::ObserveMapFilePath(fileName);
-	if (!R1OFileSystem_OpenOriginal)
+	if (!R1OFileSystem_OpenOriginal) {
+		r2port::TraceFilesystemCall("R1OFileSystem::Open", fileName, pathId,
+			flags, "no-original", options);
 		return nullptr;
+	}
 
-	if (!ShouldUseR1OVPKMemoryFileFallback() || !IsReadOnlyFileOpen(options) || !IsReadableCString(fileName))
-		return R1OFileSystem_OpenOriginal(thisptr, fileName, options, flags, pathId, unknown);
+	if (!ShouldUseR1OVPKMemoryFileFallback() || !IsReadOnlyFileOpen(options) || !IsReadableCString(fileName)) {
+		void* handle = R1OFileSystem_OpenOriginal(thisptr, fileName, options, flags, pathId, unknown);
+		r2port::TraceFilesystemCall("R1OFileSystem::Open[native-only]", fileName,
+			pathId, flags, handle ? "native-handle" : "native-miss", options);
+		return handle;
+	}
 
 	char loosePath[MAX_PATH];
 	{
 		auto lease = FileCache::GetInstance().AcquireReadLease();
 		if (NormalizeR1ODediLooseFileName(lease, fileName, loosePath, sizeof(loosePath))) {
 			void* looseHandle = R1OFileSystem_OpenOriginal(thisptr, loosePath, options, flags, nullptr, unknown);
+			r2port::TraceFilesystemCall("R1OFileSystem::Open[loose]", fileName,
+				pathId, flags, looseHandle ? "handle" : "miss", loosePath);
 			if (AreR1OFakeDediVerboseLogsEnabled() && IsR1ODediLooseOverridePath(fileName)) {
 				char buffer[512];
 				_snprintf_s(buffer, sizeof(buffer), _TRUNCATE, "R1Delta: R1O CVFileSystem loose open override file=%s normalized=%s handle=%p\n", fileName, loosePath, looseHandle);
@@ -17465,10 +17539,13 @@ static void* __fastcall R1OFileSystem_Open(void* thisptr, const char* fileName, 
 		}
 	}
 
-	if (void* handle = R1OFileSystem_OpenOriginal(thisptr, fileName, options, flags, pathId, unknown))
-		return handle;
-	if (void* handle = OpenR1OVPKMemoryFile(fileName))
-		return handle;
+	void* nativeHandle = R1OFileSystem_OpenOriginal(thisptr, fileName, options, flags, pathId, unknown);
+	r2port::TraceFilesystemCall("R1OFileSystem::Open[native]", fileName,
+		pathId, flags, nativeHandle ? "handle" : "miss", options);
+	if (nativeHandle)
+		return nativeHandle;
+	if (void* vpkHandle = OpenR1OVPKMemoryFile(fileName))
+		return vpkHandle;
 	return OpenR2PortMemoryFile(fileName);
 }
 
@@ -17606,9 +17683,14 @@ static void* __fastcall R1BaseFileSystem_Open(void* thisptr, const char* fileNam
 	void* handle = R1BaseFileSystem_OpenOriginal
 		? R1BaseFileSystem_OpenOriginal(thisptr, fileName, options, pathId)
 		: nullptr;
+	r2port::TraceFilesystemCall("CBaseFileSystem::Open[native]", fileName, pathId,
+		0, handle ? "handle" : "miss", options);
 	if (handle || !IsReadOnlyFileOpen(options) || !IsReadableCString(fileName))
 		return handle;
-	return OpenR2PortMemoryFile(fileName);
+	handle = OpenR2PortMemoryFile(fileName);
+	r2port::TraceFilesystemCall("CBaseFileSystem::Open[r2-provider]", fileName,
+		pathId, 0, handle ? "handle" : "miss", options);
+	return handle;
 }
 
 static void __fastcall R1BaseFileSystem_Close(void* thisptr, void* handle)
@@ -17655,9 +17737,21 @@ static unsigned int __fastcall R1BaseFileSystem_SizeByName(void* thisptr, const 
 	const unsigned int nativeSize = R1BaseFileSystem_SizeByNameOriginal
 		? R1BaseFileSystem_SizeByNameOriginal(thisptr, fileName, pathId)
 		: invalidSize;
+	char detail[96]{};
+	if (r2port::FilesystemTraceEnabled()) {
+		_snprintf_s(detail, sizeof(detail), _TRUNCATE, "bytes=%u", nativeSize);
+		r2port::TraceFilesystemCall("CBaseFileSystem::SizeByName[native]", fileName,
+			pathId, 0, nativeSize == invalidSize ? "miss" : "found", detail);
+	}
 	if (nativeSize != invalidSize || !IsReadableCString(fileName))
 		return nativeSize;
 	const auto providerSize = r2port::Size(fileName);
+	if (r2port::FilesystemTraceEnabled()) {
+		_snprintf_s(detail, sizeof(detail), _TRUNCATE, "bytes=%llu",
+			static_cast<unsigned long long>(providerSize.value_or(0)));
+		r2port::TraceFilesystemCall("CBaseFileSystem::SizeByName[r2-provider]", fileName,
+			pathId, 0, providerSize ? "found" : "miss", detail);
+	}
 	return providerSize && *providerSize <= std::numeric_limits<unsigned int>::max()
 		? static_cast<unsigned int>(*providerSize)
 		: invalidSize;
@@ -17667,11 +17761,26 @@ static bool __fastcall R1BaseFileSystem_FileExists(void* thisptr, const char* fi
 {
 	if (IsReadableCString(fileName))
 		r2port::ObserveMapFilePath(fileName);
-	if (R1BaseFileSystem_FileExistsOriginal
-		&& R1BaseFileSystem_FileExistsOriginal(thisptr, fileName, pathId))
-		return true;
-	return IsReadableCString(fileName) && r2port::Exists(fileName);
+	bool exists = R1BaseFileSystem_FileExistsOriginal
+		&& R1BaseFileSystem_FileExistsOriginal(thisptr, fileName, pathId);
+	r2port::TraceFilesystemCall("CBaseFileSystem::FileExists[native]", fileName,
+		pathId, 0, exists ? "true" : "false");
+	if (exists || !IsReadableCString(fileName))
+		return exists;
+	exists = r2port::Exists(fileName);
+	r2port::TraceFilesystemCall("CBaseFileSystem::FileExists[r2-provider]", fileName,
+		pathId, 0, exists ? "true" : "false");
+	return exists;
 }
+
+bool R2PortNativeFileExists(const char* fileName)
+{
+	return IsReadableCString(fileName)
+		&& R1BaseFileSystem_FileExistsOriginal
+		&& R1BaseFileSystem_FileExistsOriginal(g_CBaseFileSystemInterface, fileName, "GAME");
+}
+
+
 
 static void InstallR1BaseFileSystemProviderHooks(void* baseFileSystem)
 {

@@ -39,6 +39,7 @@
 #include "filesystem.h"
 #include "shared_particle_materials.h"
 #include "r2port_provider.h"
+#include "r2_map_provider.h"
 #include <iostream>
 #include <unordered_set>
 #include <cstdint>
@@ -136,13 +137,50 @@ bool ReadFromCacheHook(IFileSystem* filesystem, char* path, void* result) {
         path, *static_cast<r1delta::vpk_async_precache::ResourceLookup*>(result));
 }
 
+static bool MountR2MapCache(const std::filesystem::path& root)
+{
+    static std::mutex mutex;
+    static std::unordered_set<std::string> mountedPaths;
+    const std::string path = root.string();
+    std::lock_guard<std::mutex> lock(mutex);
+    if (mountedPaths.find(path) != mountedPaths.end())
+        return true;
+    if (!g_CVFileSystem || !g_CVFileSystemInterface || !g_CVFileSystem->AddSearchPath)
+        return false;
+
+    using AddSearchPathFn = void(__fastcall*)(void*, const char*, const char*, int);
+    const auto addSearchPath = reinterpret_cast<AddSearchPathFn>(g_CVFileSystem->AddSearchPath);
+    addSearchPath(reinterpret_cast<void*>(g_CVFileSystemInterface), path.c_str(), "GAME", 1);
+    mountedPaths.insert(path);
+    r2port::TraceFilesystemCall("AddSearchPath[R2-cache]", path.c_str(), "GAME", 1, "mounted");
+    return true;
+}
+
 FileHandle_t ReadFileFromVPKHook(VPKData* vpkInfo, __int64* b, char* filename) {
     if (FileCache::GetInstance().TryReplaceFile(filename)) {
         *b = -1;
+        r2port::TraceFilesystemCall("ReadFileFromVPKHook", filename, nullptr, 0,
+            "file-cache-replacement");
         return b;
     }
 
-    return readFileFromVPK(vpkInfo, b, filename);
+    FileHandle_t handle = readFileFromVPK(vpkInfo, b, filename);
+    const int32_t nativeStatus = b ? *reinterpret_cast<const int32_t*>(b) : 0;
+    if (nativeStatus == -1 && filename && !R2PortNativeFileExists(filename)) {
+        const std::filesystem::path cacheRoot = r2port::MaterializeMapCacheFile(filename);
+        if (!cacheRoot.empty() && MountR2MapCache(cacheRoot)) {
+            char detail[MAX_PATH]{};
+            _snprintf_s(detail, sizeof(detail), _TRUNCATE, "cache=%s", cacheRoot.string().c_str());
+            r2port::TraceFilesystemCall("ReadFileFromVPKHook", filename, "GAME", 0,
+                "r2-provider-materialized", detail);
+        }
+    }
+    char detail[64]{};
+    if (r2port::FilesystemTraceEnabled() && b)
+        _snprintf_s(detail, sizeof(detail), _TRUNCATE, "native-status=%d", nativeStatus);
+    r2port::TraceFilesystemCall("ReadFileFromVPKHook", filename, nullptr, 0,
+        handle ? "handle" : "miss", detail);
+    return handle;
 }
 
 std::atomic_flag threadStarted = ATOMIC_FLAG_INIT;
@@ -445,6 +483,8 @@ void __fastcall CPackFileParseDirectory(void* packFile)
 		if (pathEnd) {
 			const size_t pathLength =
 				static_cast<const char*>(pathEnd) - path;
+			r2port::TraceFilesystemCall("CPackFileParseDirectory[enter]", path,
+				nullptr, 0, "parse");
 			if (IsBrokenR1MapVPKDirectoryPath(path, pathLength)) {
 				uint8_t* tree = nullptr;
 				size_t treeSize = 0;
@@ -547,6 +587,8 @@ bool InstallVPKDirectoryLoadFlagRepair(uintptr_t filesystemBase)
 __int64 __fastcall AddVPKFile(IFileSystem* fileSystem, char* vpkPath, char** a3, char a4, int a5, char a6)
 {
 	ZoneScoped;
+	const bool trace = r2port::FilesystemTraceEnabled();
+	const std::string requestedPath = trace && vpkPath ? vpkPath : "";
 
 	// Check if the path contains "_dir"
 	if (strstr(vpkPath, "_dir") != NULL)
@@ -598,7 +640,17 @@ __int64 __fastcall AddVPKFile(IFileSystem* fileSystem, char* vpkPath, char** a3,
 	{
 		ZoneScopedN("AddVPKFileOriginal");
 		// Finally, call the original function.
-		return AddVPKFileOriginal(fileSystem, vpkPath, a3, a4, a5, a6);
+		const __int64 result = AddVPKFileOriginal(fileSystem, vpkPath, a3, a4, a5, a6);
+		if (trace) {
+			char detail[256]{};
+			_snprintf_s(detail, sizeof(detail), _TRUNCATE,
+				"result=%lld a4=%d a6=%d finalPath=%s",
+				static_cast<long long>(result), static_cast<int>(a4),
+				static_cast<int>(a6), vpkPath ? vpkPath : "<null>");
+			r2port::TraceFilesystemCall("AddVPKFile", requestedPath.c_str(),
+				nullptr, a5, "returned", detail);
+		}
+		return result;
 	}
 }
 
@@ -640,6 +692,7 @@ std::vector<const char*> g_pFileSystemStringsToCleanup = { 0 };
 struct ProviderFindState {
 	std::vector<std::string> paths;
 	size_t nextPath{};
+	std::string pattern;
 };
 std::mutex g_providerFindMutex;
 std::unordered_map<uint16_t, ProviderFindState> g_providerFindStates;
@@ -673,20 +726,22 @@ const char* R2PortAppendFindFirstResult(const char* pattern, uint16_t* handle, c
 		return PreserveFindResult(result);
 
 	const uint16_t handleValue = *handle;
-	{
+	auto paths = GetProviderMapFindResults(pattern);
+	const bool hasProviderResults = !paths.empty();
+	const bool trace = r2port::FilesystemTraceEnabled();
+	if (hasProviderResults || trace) {
 		std::lock_guard<std::mutex> lock(g_providerFindMutex);
 		g_providerFindStates.erase(handleValue);
+		if (g_providerFindStates.size() < 64 || g_providerFindStates.contains(handleValue)) {
+			ProviderFindState state;
+			state.paths = std::move(paths);
+			if (trace && pattern)
+				state.pattern = pattern;
+			g_providerFindStates.insert_or_assign(handleValue, std::move(state));
+		}
 	}
-
-	auto paths = GetProviderMapFindResults(pattern);
-	if (paths.empty())
+	if (!hasProviderResults)
 		return PreserveFindResult(result);
-
-	{
-		std::lock_guard<std::mutex> lock(g_providerFindMutex);
-		if (g_providerFindStates.size() < 64 || g_providerFindStates.contains(handleValue))
-			g_providerFindStates.insert_or_assign(handleValue, ProviderFindState{ std::move(paths), 0 });
-	}
 	return result ? PreserveFindResult(result) : R2PortAppendFindNextResult(handleValue, nullptr);
 }
 
@@ -712,19 +767,43 @@ const char* R2PortAppendFindNextResult(uint16_t handle, const char* result)
 	return PreserveFindResult(providerFindResult.c_str());
 }
 
+std::string R2PortFindPattern(unsigned __int16 handle)
+{
+	std::lock_guard<std::mutex> lock(g_providerFindMutex);
+	const auto found = g_providerFindStates.find(handle);
+	return found == g_providerFindStates.end() ? std::string{} : found->second.pattern;
+}
+
+
+
 const char* CBaseFileSystem__FindFirst(CBaseFileSystem* thisptr, __int64 a2, __int64 a3)
 {
-	const char* result = oCBaseFileSystem__FindFirst(thisptr, a2, a3);
-	return R2PortAppendFindFirstResult(
-		reinterpret_cast<const char*>(a2),
+	const char* pattern = reinterpret_cast<const char*>(a2);
+	const char* nativeResult = oCBaseFileSystem__FindFirst(thisptr, a2, a3);
+	r2port::TraceFilesystemCall("CBaseFileSystem::FindFirst[native]", pattern,
+		nullptr, 0, nativeResult ? nativeResult : "<end>");
+	const char* result = R2PortAppendFindFirstResult(
+		pattern,
 		reinterpret_cast<uint16_t*>(a3),
-		result);
+		nativeResult);
+	r2port::TraceFilesystemCall("CBaseFileSystem::FindFirst[final]", pattern,
+		nullptr, 0, result ? result : "<end>");
+	return result;
 }
 
 const char* CBaseFileSystem__FindNext(CBaseFileSystem* thisptr, unsigned __int16 a2)
 {
-	const char* result = oCBaseFileSystem__FindNext(thisptr, a2);
-	return R2PortAppendFindNextResult(a2, result);
+	const std::string pattern = r2port::FilesystemTraceEnabled()
+		? R2PortFindPattern(a2)
+		: std::string{};
+	const char* nativeResult = oCBaseFileSystem__FindNext(thisptr, a2);
+	const char* tracePath = !pattern.empty() ? pattern.c_str() : nativeResult;
+	r2port::TraceFilesystemCall("CBaseFileSystem::FindNext[native]", tracePath,
+		nullptr, 0, nativeResult ? nativeResult : "<end>");
+	const char* result = R2PortAppendFindNextResult(a2, nativeResult);
+	r2port::TraceFilesystemCall("CBaseFileSystem::FindNext[final]", tracePath,
+		nullptr, 0, result ? result : "<end>");
+	return result;
 }
 
 void ReconcileAddonListFile(IFileSystem* pFileSystem, const char* pModPath)

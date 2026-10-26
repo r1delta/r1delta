@@ -30,6 +30,11 @@ public:
 bool RegisterMapPatchSource(std::shared_ptr<MapPatchSource> source);
 std::filesystem::path GetR2MapPatchDirectory();
 void ObserveMapFilePath(std::string_view path);
+// Materializes one allowlisted BSP or entity into the keyed disk fallback.
+// Returns the search-path root on success; empty means the file was unavailable.
+std::filesystem::path MaterializeMapCacheFile(std::string_view path);
+void ClearMapCache();
+
 void InstallR2MapProvider();
 
 } // namespace r2port

@@ -4,13 +4,22 @@
 #include <cctype>
 #include <chrono>
 #include <condition_variable>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <iterator>
 #include <list>
 #include <mutex>
 #include <shared_mutex>
 #include <unordered_map>
-
 #include <unordered_set>
+
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <Windows.h>
+
+#include "logging.h"
 namespace r2port {
 namespace {
 
@@ -308,6 +317,62 @@ void SetActiveMap(std::string_view mapName)
     g_cache.clear();
     g_lru.clear();
     g_cachedBytes = 0;
+}
+
+bool FilesystemTraceEnabled()
+{
+    static const bool enabled = []() {
+        const char* value = std::getenv("R1DELTA_R2PORT_TRACE_FS");
+        return value && value[0] == '1' && value[1] == '\0';
+    }();
+    return enabled;
+}
+
+void TraceFilesystemCall(
+    const char* functionName,
+    const char* path,
+    const char* pathId,
+    int64_t flags,
+    const char* result,
+    const char* detail)
+{
+    if (!FilesystemTraceEnabled() || !path)
+        return;
+
+    const std::string_view pathView(path);
+    const auto contains = [pathView](std::string_view needle) {
+        if (needle.size() > pathView.size())
+            return false;
+        for (size_t start = 0; start + needle.size() <= pathView.size(); ++start) {
+            size_t i = 0;
+            for (; i < needle.size(); ++i) {
+                if (std::tolower(static_cast<unsigned char>(pathView[start + i]))
+                    != std::tolower(static_cast<unsigned char>(needle[i])))
+                    break;
+            }
+            if (i == needle.size())
+                return true;
+        }
+        return false;
+    };
+    if (!contains("mp_lf_stacks") && !contains("mp_glitch")
+        && !contains(".bsp") && !contains(".ent") && !contains(".ain")
+        && !contains("maps/") && !contains("maps\\") && !contains("graphs"))
+        return;
+
+    char buffer[2048]{};
+    _snprintf_s(buffer, sizeof(buffer), _TRUNCATE,
+        "R1Delta: R2Port FS trace fn=%s path=%s pathId=%s flags=0x%llX detail=%s result=%s\n",
+        functionName ? functionName : "<unknown>",
+        path,
+        pathId ? pathId : "<none>",
+        static_cast<unsigned long long>(flags),
+        detail ? detail : "<none>",
+        result ? result : "<none>");
+    static std::mutex outputMutex;
+    std::lock_guard<std::mutex> lock(outputMutex);
+    OutputDebugStringA(buffer);
+    Msg("%s", buffer);
 }
 
 } // namespace r2port

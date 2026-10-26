@@ -872,6 +872,53 @@ std::filesystem::path FindGameContentDirectory()
     return {};
 }
 
+std::string MapPackageFingerprint(const std::shared_ptr<MapState>& state)
+{
+    if (!state || state->directoryVpk.empty() || !IsRegularFile(state->directoryVpk))
+        return {};
+
+    std::vector<std::filesystem::path> packages{ state->directoryVpk };
+    const std::string chunkPrefix = "client_" + state->mapName + ".bsp.pak000_";
+    std::error_code error;
+    for (const auto& entry : std::filesystem::directory_iterator(state->directoryVpk.parent_path(), error)) {
+        if (error)
+            break;
+        const std::string name = entry.path().filename().string();
+        if (name.compare(0, chunkPrefix.size(), chunkPrefix) == 0
+            && name.size() >= 4 && name.compare(name.size() - 4, 4, ".vpk") == 0)
+            packages.push_back(entry.path());
+    }
+    std::sort(packages.begin(), packages.end());
+
+    std::string metadata;
+    for (const auto& package : packages) {
+        error.clear();
+        const auto size = std::filesystem::file_size(package, error);
+        if (error)
+            return {};
+        const auto modified = std::filesystem::last_write_time(package, error);
+        if (error)
+            return {};
+        metadata.append(package.filename().string());
+        metadata.push_back('|');
+        metadata.append(std::to_string(size));
+        metadata.push_back('|');
+        metadata.append(std::to_string(modified.time_since_epoch().count()));
+        metadata.push_back('\n');
+    }
+
+    const auto digest = p2p::Sha256(
+        reinterpret_cast<const uint8_t*>(metadata.data()), metadata.size());
+    constexpr char hex[] = "0123456789abcdef";
+    std::string fingerprint;
+    fingerprint.reserve(digest.size() * 2);
+    for (const uint8_t byte : digest) {
+        fingerprint.push_back(hex[byte >> 4]);
+        fingerprint.push_back(hex[byte & 0x0f]);
+    }
+    return fingerprint;
+}
+
 } // namespace
 
 bool RegisterMapPatchSource(std::shared_ptr<MapPatchSource> source)
@@ -889,6 +936,69 @@ std::filesystem::path GetR2MapPatchDirectory()
     const auto gameDirectory = FindGameContentDirectory();
     return gameDirectory.empty() ? std::filesystem::path{} : gameDirectory / "r2port";
 }
+std::filesystem::path MaterializeMapCacheFile(std::string_view path)
+{
+    const auto normalized = NormalizeProviderPath(path);
+    if (!normalized)
+        return {};
+    const auto request = ParseMapRequest(*normalized);
+    if (!request || request->kind == MapRequest::Kind::AiGraph)
+        return {};
+
+    const auto state = GetMapState(request->mapName);
+    const std::string fingerprint = MapPackageFingerprint(state);
+    if (fingerprint.empty())
+        return {};
+    const auto gameDirectory = FindGameContentDirectory();
+    if (gameDirectory.empty())
+        return {};
+
+    const FileBytes data = ReadAll(*normalized);
+    if (!data)
+        return {};
+
+    const std::filesystem::path root = gameDirectory / "r2port_cache"
+        / (state->mapName + "-" + fingerprint);
+    const std::filesystem::path destination = root / std::filesystem::path(*normalized);
+    std::error_code error;
+    std::filesystem::create_directories(destination.parent_path(), error);
+    if (error)
+        return {};
+
+    const std::filesystem::path temporary = destination.string()
+        + ".tmp." + std::to_string(GetCurrentThreadId());
+    {
+        std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+        if (!output || data->size() > static_cast<size_t>(std::numeric_limits<std::streamsize>::max()))
+            return {};
+        output.write(reinterpret_cast<const char*>(data->data()),
+            static_cast<std::streamsize>(data->size()));
+        output.close();
+        if (!output) {
+            std::filesystem::remove(temporary, error);
+            return {};
+        }
+    }
+
+    std::filesystem::remove(destination, error);
+    error.clear();
+    std::filesystem::rename(temporary, destination, error);
+    if (error) {
+        std::filesystem::remove(temporary, error);
+        return {};
+    }
+    return root;
+}
+
+void ClearMapCache()
+{
+    const auto gameDirectory = FindGameContentDirectory();
+    if (gameDirectory.empty())
+        return;
+    std::error_code error;
+    std::filesystem::remove_all(gameDirectory / "r2port_cache", error);
+}
+
 void ObserveMapFilePath(std::string_view path)
 {
     const auto normalized = NormalizeProviderPath(path);

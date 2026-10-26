@@ -43,6 +43,7 @@
 #include "account_hold.h"
 #include "r1o_runtime_paths.h"
 #include "r2_map_provider.h"
+#include "r2port_provider.h"
 #include "legacy_ds_sound_tables.h"
 #include "soundscript_parity.h"
 #include "script_sync_parity.h"
@@ -1613,6 +1614,7 @@ __int64 FileSystem_AddLoadedSearchPath(
 	char* Source,
 	char a6)
 {
+	const char* const requestedPath = a4;
 	const char* suffix = "r1delta";
 	const size_t suffix_len = 7; // strlen("r1delta")
 
@@ -1665,7 +1667,18 @@ __int64 FileSystem_AddLoadedSearchPath(
 	// else: result_a4 remains nullptr (the default action is to nullify)
 
 	// Call the original function with the final result_a4 value
-	return oFileSystem_AddLoadedSearchPath(a1, a2, a3, result_a4, Source, a6);
+	const __int64 result = oFileSystem_AddLoadedSearchPath(a1, a2, a3, result_a4, Source, a6);
+	if (r2port::FilesystemTraceEnabled()) {
+		char detail[256]{};
+		_snprintf_s(detail, sizeof(detail), _TRUNCATE,
+			"result=%lld finalPath=%s source=%s",
+			static_cast<long long>(result),
+			result_a4 ? result_a4 : "<null>",
+			Source ? Source : "<null>");
+		r2port::TraceFilesystemCall("FileSystem_AddLoadedSearchPath",
+			requestedPath, Source, static_cast<int64_t>(a6), "returned", detail);
+	}
+	return result;
 }
 
 void InitAddons() {
@@ -6674,6 +6687,13 @@ static void AccountHoldStatusCommand(const CCommand&)
 		s_accountHoldLastAttemptMs);
 }
 
+static void R2PortClearCacheCommand(const CCommand&)
+{
+	r2port::ClearMapCache();
+	Msg("R1Delta: removed the R2 map fallback cache under r2port_cache.\n");
+}
+
+
 static bool ReasonIsHeldAccount(const char* reason)
 {
 	if (!reason || !*reason)
@@ -8412,6 +8432,8 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		RegisterConCommand("delta_start_discord_auth", DiscordAuthCommand, "Starts the discord auth process", 0);
 		RegisterConCommand("r1delta_discord_status", DiscordStatusCommand, "Report the Discord integration state (cvar gate, platform_user_id)", 0);
 		RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
+		RegisterConCommand("r2port_clear_cache", R2PortClearCacheCommand,
+			"Remove the cached R2 map BSP and entity files.", FCVAR_NONE);
 
 		// Register slot commands
 		RegisterConCommand("slot1", Slot1Command, "Select menu slot 1", 0);
@@ -9311,6 +9333,8 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	}
 	else {
 		RegisterServerUserCmdConVars();
+		RegisterConCommand("r2port_clear_cache", R2PortClearCacheCommand,
+			"Remove the cached R2 map BSP and entity files.", FCVAR_NONE);
 		RegisterConCommand("updatescriptdata", updatescriptdata_cmd, "Dumps the script data in the AI node graph to disk", FCVAR_CHEAT);
 		RegisterConCommand("verifyain", verifyain_cmd, "Reads the .ain file from disk, compares its nodes & links to in-memory data, logs differences.", FCVAR_CHEAT);
 		RegisterConCommand("updateain", updateain_cmd, "Runs the reconstructed AIN full build, then writes a generated .ain dump without replacing the source file.", FCVAR_CHEAT);

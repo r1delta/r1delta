@@ -30,5 +30,13 @@ std::vector<std::string> Enumerate(std::string_view pattern);
 
 // Keeps only recently used provider data, and discards it when a new provider map is opened.
 void SetActiveMap(std::string_view mapName);
+bool FilesystemTraceEnabled();
+void TraceFilesystemCall(
+    const char* functionName,
+    const char* path,
+    const char* pathId,
+    int64_t flags,
+    const char* result,
+    const char* detail = nullptr);
 
 } // namespace r2port

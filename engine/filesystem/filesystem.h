@@ -91,6 +91,9 @@ __int64 __fastcall AddVPKFile(IFileSystem* fileSystem, char* a2, char** a3, char
 typedef void (*CPackFileParseDirectoryType)(void* packFile);
 extern CPackFileParseDirectoryType CPackFileParseDirectoryOriginal;
 void __fastcall CPackFileParseDirectory(void* packFile);
+bool R2PortNativeFileExists(const char* fileName);
+
+std::string R2PortFindPattern(unsigned __int16 handle);
 bool InstallVPKDirectoryLoadFlagRepair(uintptr_t filesystemBase);
 typedef void (*CBaseFileSystem__CSearchPath__SetPathType)(void* thisptr, __int16* id);
 extern CBaseFileSystem__CSearchPath__SetPathType CBaseFileSystem__CSearchPath__SetPathOriginal;
