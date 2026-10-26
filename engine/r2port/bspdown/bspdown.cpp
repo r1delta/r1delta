@@ -150,6 +150,19 @@ void convertWorldLights(Ctx& c) {
         for (size_t i = 0; i < n; i++) std::memcpy(&out[i * 100], &l[i * rec], 100);
         l.swap(out);
     }
+    if (c.opt.worldLightFlagBit2) {
+        size_t set = 0;
+        for (size_t i = 0; i < n; i++) {
+            int32_t flags;
+            std::memcpy(&flags, &l[i * 100 + 88], 4);
+            if (flags != 0 && !(flags & 2)) {
+                flags |= 2;
+                std::memcpy(&l[i * 100 + 88], &flags, 4);
+                set++;
+            }
+        }
+        c.say("[rule 8] world lights flags: set bit 0x2 on %zu of %zu lights with non-zero flags (stock R1 maps have it on every light except the sun/sky entries, R2 never sets it; meaning unknown, default off, enable with --worldlight-flag2)", set, n);
+    }
     c.say("[rule 8] world lights (0x36): %zu lights, lump version %u (%zu byte records) -> version 1 (100 byte records); trailing %zu bytes per record dropped",
           n, c.version[L_WORLDLIGHTS], rec, rec - 100);
     c.version[L_WORLDLIGHTS] = 1;

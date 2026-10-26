@@ -6,8 +6,8 @@
 // <map>/c<x>_<y>_<z>[.hdr] per 0x2A entry (x,y,z = the three int32 of the entry), then
 // <map>/cubemapdefault, then engine/defaultcubemap. This stage decodes the BC6H array and writes
 // the files R1 looks for into a rebuilt store-only zip:
-//   c<x>_<y>_<z>.hdr.vtf  RGBA16161616F 32x32, 6 faces, 6 mips (header bytes copied from the stock R1 file)
-//   c<x>_<y>_<z>.vtf      DXT5 32x32, 6 faces, 6 mips (tone mapped: clamp to 1, sRGB encode)
+//   c<x>_<y>_<z>.hdr.vtf  RGBA8888 64x64, 6 faces, 7 mips, stock R1 header (flags 0x620c), alpha = scale
+//   c<x>_<y>_<z>.vtf      DXT5 32x32, 6 faces, 6 mips (linear value/4, alpha 255)
 //   cubemapdefault(.hdr).vtf  the average of all cubemaps
 // Face slots need no remapping: seam matching of the R2 faces and of stock R1 cubemaps
 // (mp_rise) produces the identical face/edge adjacency graph (see README.txt).
@@ -28,13 +28,13 @@ namespace detail {
 
 namespace {
 
-constexpr uint8_t kHdrVtfHeader[88] = {
-    0x56, 0x54, 0x46, 0x00, 0x07, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x58, 0x00, 0x00, 0x00,
-    0x20, 0x00, 0x20, 0x00, 0x00, 0x60, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x80, 0x3F, 0x00, 0x00, 0x80, 0x3F, 0x00, 0x00, 0x80, 0x3F, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x80, 0x3F, 0x18, 0x00, 0x00, 0x00, 0x06, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x01,
-    0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x30, 0x00, 0x00, 0x00, 0x58, 0x00, 0x00, 0x00,
+constexpr uint8_t kHdr8VtfHeader[96] = {
+    0x56, 0x54, 0x46, 0x00, 0x07, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x60, 0x00, 0x00, 0x00,
+    0x40, 0x00, 0x40, 0x00, 0x0C, 0x62, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0xEC, 0xD1, 0xB9, 0x3E, 0xD4, 0x60, 0xA8, 0x3E, 0x07, 0x8B, 0x86, 0x3E, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x80, 0x3F, 0x00, 0x00, 0x00, 0x00, 0x07, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x01,
+    0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x30, 0x00, 0x00, 0x00, 0x60, 0x00, 0x00, 0x00, 0x43, 0x52, 0x43, 0x02, 0x9A, 0x6E, 0x24, 0x3B,
 };
 constexpr uint8_t kLdrVtfHeader[88] = {
     0x56, 0x54, 0x46, 0x00, 0x07, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x58, 0x00, 0x00, 0x00,
@@ -161,34 +161,6 @@ Face boxDown(const Face& f, int n2) {
     return o;
 }
 
-uint16_t toHalf(float v) {
-    uint32_t b;
-    std::memcpy(&b, &v, 4);
-    uint32_t sign = (b >> 16) & 0x8000u;
-    int32_t exp = (int32_t)((b >> 23) & 0xFF) - 127 + 15;
-    uint32_t mant = b & 0x7FFFFFu;
-    if (((b >> 23) & 0xFF) == 0xFF) return (uint16_t)(sign | 0x7C00u | (mant ? 0x200u : 0));
-    if (exp >= 31) return (uint16_t)(sign | 0x7C00u);
-    if (exp <= 0) {
-        if (exp < -10) return (uint16_t)sign;
-        mant |= 0x800000u;
-        uint32_t shift = (uint32_t)(14 - exp);
-        uint32_t h = mant >> shift;
-        if ((mant >> (shift - 1)) & 1) h++;
-        return (uint16_t)(sign | h);
-    }
-    uint32_t h = sign | ((uint32_t)exp << 10) | (mant >> 13);
-    if (mant & 0x1000u) h++;
-    return (uint16_t)h;
-}
-
-uint8_t srgb8(float v) {
-    if (!(v > 0)) return 0;
-    if (v >= 1) return 255;
-    float s = v <= 0.0031308f ? 12.92f * v : 1.055f * std::pow(v, 1.0f / 2.4f) - 0.055f;
-    return (uint8_t)std::min(255.0f, std::floor(s * 255.0f + 0.5f));
-}
-
 // BC3 block: alpha 255 (a0 = a1 = 255, all indices 0). Colour: endpoints start at the bounding box
 // and are refined with a few least squares iterations over the nearest-palette assignment.
 void encodeBC3(const uint8_t px[16][3], uint8_t* out) {
@@ -283,37 +255,35 @@ struct CubeSet {
     Face face[6];  // 32x32 linear
 };
 
-// Mip chain of a 32x32 cube (frames = 1), smallest mip first, mip data ordered face 0..5.
-Bytes buildHdrVtf(const CubeSet& cs) {
-    Bytes out(kHdrVtfHeader, kHdrVtfHeader + sizeof(kHdrVtfHeader));
-    std::vector<Face> cur(6);
-    for (int f = 0; f < 6; f++) cur[f] = cs.face[f];
-    std::vector<std::vector<Face>> mips;  // mips[0] = 32x32
-    mips.push_back(cur);
-    while (cur[0].n > 1) {
-        std::vector<Face> nx(6);
-        for (int f = 0; f < 6; f++) nx[f] = boxDown(cur[f], cur[f].n / 2);
-        mips.push_back(nx);
-        cur = nx;
+// Stock R1 HDR cubemap encoding (RGBA8888, 64x64, 6 faces, 7 mips, flags 0x620c): the R1 pixel
+// shaders (vertexlit_and_unlit_generic_ps50, lightmappedgeneric_ps50) sample the cube and compute
+//   env = rgb * (alpha * 3.984375 + 0.015625) = rgb * (alphaByte + 1) / 64
+// (rgb unorm, no sRGB read: the engine only reads sRGB for VTF flag 0x80000, see README rule 13).
+// Per pixel: alpha = smallest byte with (alpha + 1) / 64 >= max channel, at least 4 like the stock
+// files; rgb = value / scale. Values above 4.0 (alpha 255) are clamped.
+struct EncodeStats {
+    size_t clamped = 0, pixels = 0;
+};
+
+void encodePixel(const float* v, uint8_t* out, EncodeStats* st) {
+    float mx = std::max(v[0], std::max(v[1], v[2]));
+    if (!(mx > 0)) mx = 0;
+    int a = (int)std::ceil(64.0 * mx - 1e-9) - 1;
+    a = std::max(4, std::min(255, a));
+    float s = (float)(a + 1) / 64.0f;
+    if (st) {
+        st->pixels++;
+        if (mx > s * 1.0001f) st->clamped++;
     }
-    for (size_t m = mips.size(); m-- > 0;)
-        for (int f = 0; f < 6; f++) {
-            const Face& fc = mips[m][f];
-            for (int i = 0; i < fc.n * fc.n; i++) {
-                for (int c = 0; c < 3; c++) {
-                    float v = fc.rgb[(size_t)i * 3 + c];
-                    if (!(v > 0)) v = 0;
-                    if (v > 65000.0f) v = 65000.0f;
-                    w16(out, toHalf(v));
-                }
-                w16(out, 0x3C00);  // alpha 1.0
-            }
-        }
-    return out;
+    for (int c = 0; c < 3; c++) {
+        float t = v[c] / s;
+        t = t < 0 ? 0 : (t > 1 ? 1 : t);
+        out[c] = (uint8_t)std::floor(t * 255.0f + 0.5f);
+    }
+    out[3] = (uint8_t)a;
 }
 
-Bytes buildLdrVtf(const CubeSet& cs) {
-    Bytes out(kLdrVtfHeader, kLdrVtfHeader + sizeof(kLdrVtfHeader));
+std::vector<std::vector<Face>> mipChain(const CubeSet& cs) {
     std::vector<Face> cur(6);
     for (int f = 0; f < 6; f++) cur[f] = cs.face[f];
     std::vector<std::vector<Face>> mips;
@@ -324,6 +294,42 @@ Bytes buildLdrVtf(const CubeSet& cs) {
         mips.push_back(nx);
         cur = nx;
     }
+    return mips;
+}
+
+Bytes buildHdrVtf(const CubeSet& cs, EncodeStats* st) {
+    Bytes out(kHdr8VtfHeader, kHdr8VtfHeader + sizeof(kHdr8VtfHeader));
+    std::vector<std::vector<Face>> mips = mipChain(cs);
+    // reflectivity = mean of (rgb/255)^2.2 over mip 0 (matches the stock files exactly), data CRC resource
+    double refl[3] = {0, 0, 0};
+    Bytes data;
+    for (size_t m = mips.size(); m-- > 0;)
+        for (int f = 0; f < 6; f++) {
+            const Face& fc = mips[m][f];
+            for (int i = 0; i < fc.n * fc.n; i++) {
+                uint8_t px[4];
+                encodePixel(&fc.rgb[(size_t)i * 3], px, m == 0 ? st : nullptr);
+                data.insert(data.end(), px, px + 4);
+                if (m == 0)
+                    for (int c = 0; c < 3; c++) refl[c] += std::pow(px[c] / 255.0, 2.2);
+            }
+        }
+    float rf[3];
+    for (int c = 0; c < 3; c++) rf[c] = (float)(refl[c] / (6.0 * mips[0][0].n * mips[0][0].n));
+    std::memcpy(&out[0x20], rf, 12);
+    uint32_t crc = crc32(data.data(), data.size());
+    std::memcpy(&out[0x5C], &crc, 4);
+    out.insert(out.end(), data.begin(), data.end());
+    return out;
+}
+
+// LDR DXT5 variant (stock R1 ships black placeholders here): linear rgb = value / 4 with alpha 255,
+// which the shader decode (alpha 255 -> x4) turns back into the value; values above 4 clamp.
+Bytes buildLdrVtf(const CubeSet& cs) {
+    Bytes out(kLdrVtfHeader, kLdrVtfHeader + sizeof(kLdrVtfHeader));
+    CubeSet c32;
+    for (int f = 0; f < 6; f++) c32.face[f] = boxDown(cs.face[f], 32);
+    std::vector<std::vector<Face>> mips = mipChain(c32);
     for (size_t m = mips.size(); m-- > 0;)
         for (int f = 0; f < 6; f++) {
             const Face& fc = mips[m][f];
@@ -334,7 +340,10 @@ Bytes buildLdrVtf(const CubeSet& cs) {
                     for (int j = 0; j < 4; j++)
                         for (int i = 0; i < 4; i++) {
                             int x = std::min(bx * 4 + i, fc.n - 1), y = std::min(by * 4 + j, fc.n - 1);
-                            for (int c = 0; c < 3; c++) px[j * 4 + i][c] = srgb8(fc.rgb[((size_t)y * fc.n + x) * 3 + c]);
+                            for (int c = 0; c < 3; c++) {
+                                float t = fc.rgb[((size_t)y * fc.n + x) * 3 + c] / 4.0f;
+                                px[j * 4 + i][c] = (uint8_t)std::floor(std::min(1.0f, std::max(0.0f, t)) * 255.0f + 0.5f);
+                            }
                         }
                     uint8_t blk[16];
                     encodeBC3(px, blk);
@@ -384,7 +393,7 @@ void convertCubemaps(Ctx& c) {
     uint32_t nres = r32(d, 0x44);
     if (verMaj != 7 || verMin != 5) throw Error("cubemaps.hdr.vtf: VTF version " + std::to_string(verMaj) + "." + std::to_string(verMin) + ", expected 7.5");
     if (fmt != 66) throw Error("cubemaps.hdr.vtf: image format " + std::to_string(fmt) + ", expected 66 (BC6H)");
-    if (w != h || w < 32 || (w & (w - 1)) || mips == 0) throw Error("cubemaps.hdr.vtf: unsupported size " + std::to_string(w) + "x" + std::to_string(h));
+    if (w != h || w < 64 || (w & (w - 1)) || mips == 0) throw Error("cubemaps.hdr.vtf: unsupported size " + std::to_string(w) + "x" + std::to_string(h));
     if (frames != nCube)
         throw Error("cubemaps.hdr.vtf has " + std::to_string(frames) + " frames but cubemaps (0x2A) has " + std::to_string(nCube) + " entries");
     size_t start = hdrSize;
@@ -402,8 +411,10 @@ void convertCubemaps(Ctx& c) {
     size_t trailing = d.size() - (off0 + msize[0] * frames * 6);
 
     std::vector<CubeSet> cubes(frames);
-    std::vector<std::array<double, 6>> lumTable(frames);
+    std::vector<std::array<double, 6>> lumTable(frames), relErr(frames);
     size_t neg = 0, nonfinite = 0;
+    const float scale = c.opt.cubemapScale;
+    if (!(scale > 0)) throw Error("cubemapScale must be > 0");
     for (uint32_t f = 0; f < frames; f++)
         for (int fc = 0; fc < 6; fc++) {
             const uint8_t* blk = &d[off0 + ((size_t)f * 6 + fc) * msize[0]];
@@ -429,13 +440,14 @@ void convertCubemaps(Ctx& c) {
                 lsum += 0.2126 * big.rgb[i] + 0.7152 * big.rgb[i + 1] + 0.0722 * big.rgb[i + 2];
             }
             lumTable[f][fc] = lsum / ((double)w * w);
-            cubes[f].face[fc] = boxDown(big, 32);
+            cubes[f].face[fc] = boxDown(big, 64);
+            for (float& v : cubes[f].face[fc].rgb) v *= scale;
         }
     // average cube for cubemapdefault
     CubeSet avg;
     for (int fc = 0; fc < 6; fc++) {
-        avg.face[fc].n = 32;
-        avg.face[fc].rgb.assign(32 * 32 * 3, 0.0f);
+        avg.face[fc].n = 64;
+        avg.face[fc].rgb.assign(64 * 64 * 3, 0.0f);
         for (uint32_t f = 0; f < frames; f++)
             for (size_t i = 0; i < avg.face[fc].rgb.size(); i++) avg.face[fc].rgb[i] += cubes[f].face[fc].rgb[i] / frames;
     }
@@ -449,7 +461,8 @@ void convertCubemaps(Ctx& c) {
         return true;
     };
     add(dir + "cubemapdefault.vtf", buildLdrVtf(avg));
-    add(dir + "cubemapdefault.hdr.vtf", buildHdrVtf(avg));
+    EncodeStats est;
+    add(dir + "cubemapdefault.hdr.vtf", buildHdrVtf(avg, nullptr));
     size_t dup = 0;
     for (uint32_t f = 0; f < frames; f++) {
         int32_t o[3];
@@ -457,7 +470,28 @@ void convertCubemaps(Ctx& c) {
         char nm[96];
         std::snprintf(nm, sizeof(nm), "c%d_%d_%d", o[0], o[1], o[2]);
         bool a = add(dir + nm + ".vtf", buildLdrVtf(cubes[f]));
-        bool b = add(dir + nm + ".hdr.vtf", buildHdrVtf(cubes[f]));
+        Bytes hv = buildHdrVtf(cubes[f], &est);
+        // validation: decode mip 0 with the R1 shader formula and compare with the (scaled) R2 value
+        {
+            size_t mip0 = sizeof(kHdr8VtfHeader);
+            for (int n = 32; n >= 1; n /= 2) mip0 += (size_t)6 * n * n * 4;
+            for (int fc = 0; fc < 6; fc++) {
+                double err = 0, ref = 0;
+                const Face& fa = cubes[f].face[fc];
+                for (int i = 0; i < 64 * 64; i++) {
+                    const uint8_t* px = &hv[mip0 + ((size_t)fc * 64 * 64 + i) * 4];
+                    double sc = (px[3] + 1) / 64.0;
+                    for (int k = 0; k < 3; k++) {
+                        double dec = px[k] / 255.0 * sc;
+                        double r = std::min((double)fa.rgb[(size_t)i * 3 + k], 4.0);
+                        err += std::fabs(dec - r);
+                        ref += r;
+                    }
+                }
+                relErr[f][fc] = ref > 0 ? err / ref : 0;
+            }
+        }
+        bool b = add(dir + nm + ".hdr.vtf", std::move(hv));
         if (!a || !b) dup++;
     }
     // keep other stored entries of the R2 pakfile (none in any map seen)
@@ -474,11 +508,14 @@ void convertCubemaps(Ctx& c) {
           w, h, frames, (unsigned)mips, start, trailing, out.size(), nCube, dir.c_str(), src->data.size(), zl.size());
     if (dup) c.say("[rule 13] warning: %zu cubemaps share an origin with an earlier entry, their files were not written twice", dup);
     if (!kept.empty()) c.say("[rule 13] other R2 pakfile entries kept:%s", kept.c_str());
-    c.say("[rule 13] per file: c<x>_<y>_<z>.hdr.vtf = RGBA16F 32x32 x6 faces x6 mips (alpha 1.0, 8x8 box downsample of the 256 mip), c<x>_<y>_<z>.vtf = DXT5 (clamp to 1, sRGB); cubemapdefault = average of all %zu cubemaps; %zu negative and %zu non-finite BC6H values clamped to 0", nCube, neg, nonfinite);
+    c.say("[rule 13] per file: c<x>_<y>_<z>.hdr.vtf = RGBA8888 64x64 x6 faces x7 mips, header flags 0x620c, stock R1 encoding rgb * (alpha + 1) / 64 (alpha >= 4), values = R2 BC6H * %g (4x4 box of the 256 mip, 2x2 box mips); c<x>_<y>_<z>.vtf = DXT5 32x32 (linear value/4, alpha 255); cubemapdefault(.hdr).vtf = average of all %zu cubemaps; %zu negative and %zu non-finite BC6H values clamped to 0; %zu of %zu mip 0 pixels above the encodable 4.0 clamped",
+          (double)scale, nCube, neg, nonfinite, est.clamped, est.pixels);
     for (uint32_t f = 0; f < frames && f < 12; f++) {
         int32_t o[3];
         std::memcpy(o, &cml[(size_t)f * 16], 12);
-        c.say("[rule 13]   c%d_%d_%d face mean luminance (slot 0..5, R2 order = R1 order, no remap): %.3f %.3f %.3f %.3f %.3f %.3f", o[0], o[1], o[2], lumTable[f][0], lumTable[f][1], lumTable[f][2], lumTable[f][3], lumTable[f][4], lumTable[f][5]);
+        c.say("[rule 13]   c%d_%d_%d R2 face mean luminance (slot 0..5, no face remap): %.3f %.3f %.3f %.3f %.3f %.3f | mean rel. error of the R1 decode vs scaled R2 (%%): %.2f %.2f %.2f %.2f %.2f %.2f", o[0], o[1], o[2],
+              lumTable[f][0], lumTable[f][1], lumTable[f][2], lumTable[f][3], lumTable[f][4], lumTable[f][5],
+              100 * relErr[f][0], 100 * relErr[f][1], 100 * relErr[f][2], 100 * relErr[f][3], 100 * relErr[f][4], 100 * relErr[f][5]);
     }
     if (frames > 12) c.say("[rule 13]   ... %u more cubemaps not listed", frames - 12);
 }

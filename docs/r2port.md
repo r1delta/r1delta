@@ -9,6 +9,7 @@ The `VFileSystem017` `FindFirst`/`FindNext` wrappers (vtable slots 30/31) append
 R1O fake-dedicated mode obtains the TFO `VFileSystem017` through `R1OTFOFileSystemInterface`. Its existing TFO filesystem hooks preserve native lookup and established dedicated loose-file and R1 VPK fallbacks; the R2 provider is consulted last. The same provider is registered for `maps/` files and the `vpk/e*.bsp*` map-list query. Hooks on `VFileSystem017` `FindFirst`/`FindNext` (vtable slots 30/31) append package-name entries for allowlisted R2 BSPs after native results. Point existence and size checks use the provider after existing fallbacks.
 
 The map provider is limited to the 20 allowlisted R2-only maps. It reads only the map BSP and five entity files from the matching `englishclient_<map>.bsp.pak000_dir.vpk`; the BSP is downgraded in memory. AI graphs and BSP lump overrides are optional patch-provided files. The provider does not expose R2 `.bsp_lump` files or names that R1 could treat as `_l_<N>.lmp` overrides.
+The converter repacks the cubemaps into the BSP using R1 encoding. The provider uses the library's default `bspdown::Options`: cubemap scale `1/6` and world-light flag bit 2 disabled.
 
 `GetR2MapPatchDirectory()` identifies `<gamedir>/r2port`, where a later patch adapter can read `<map>.patch` files. The `MapPatchSource` interface supplies optional lump and virtual-file overrides only when the patch's SHA-256 matches the exact source BSP; no patch serialization or patch data is registered yet.
 

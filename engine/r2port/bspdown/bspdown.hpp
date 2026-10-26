@@ -69,6 +69,12 @@ struct Options {
     // Rule 13: write per-cubemap textures (c<x>_<y>_<z>[.hdr].vtf, cubemapdefault) into the pakfile.
     bool cubemapFiles = true;
 
+    // Rule 13: multiplier applied to the R2 BC6H cubemap values before the R1 encoding.
+    float cubemapScale = 1.0f / 6.0f;
+
+    // World light flags: stock R1 lights carry bit 0x2 (R2 never sets it); set it on lights with non-zero flags.
+    bool worldLightFlagBit2 = false;
+
     // Drop lumps R1 never reads (0x04..0x07, 0x37, 0x7A). They are large
     // (about 2 MB on eden) and cannot be interpreted by R1.
     bool dropR2OnlyLumps = true;
