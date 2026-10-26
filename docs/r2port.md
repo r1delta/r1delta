@@ -42,4 +42,6 @@ powershell -ExecutionPolicy Bypass -File .build\run-in-r2.ps1 -Mode Listen -Map 
 powershell -ExecutionPolicy Bypass -File .build\run-in-r2.ps1 -Mode Dedicated -Map mp_box -Port 27050 -Seconds 60 -FatalScriptErrors -Cdb
 ```
 
+The harness adds `-allowmultiple` to every Client and Listen launch.
+
 Pass `-Root r2dev` explicitly when desired. The agent launcher is `S:\game\r2dev\r1delta.exe`; its client/listen and dedicated executables are `S:\game\r2dev\Titanfall.exe` and `S:\game\r2dev\R1Delta_DS.exe`. You can play directly from the user root `S:\game\r2` (`r1delta.exe`, `Titanfall.exe`, or `R1Delta_DS.exe`). Only the lead may target `r2`, after authorizing it and confirming the user game is closed; agents must leave that root alone.
