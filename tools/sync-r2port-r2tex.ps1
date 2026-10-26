@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 
 $source = 'C:\Users\r3muxd\tmp\r2port\r2tex'
 $destination = Join-Path $PSScriptRoot '..\engine\r2port\r2tex'
-$files = @('r2tex.cpp', 'r2tex.hpp', 'rtech_decode.inc', 'bcdec.h', 'THIRD_PARTY_NOTICES.txt')
+$files = @('r2tex.cpp', 'r2tex.hpp', 'rtech_decode.inc', 'bcdec.h', 'THIRD_PARTY_NOTICES.txt', 'API.md')
 $originHeader = "// Origin: $source. R2 texture conversion library bundled with r1delta under GPL-3.0.`r`n// Local adaptation: family cache size is configurable with a 256 MiB default.`r`n"
 $utf8 = [System.Text.UTF8Encoding]::new($false)
 

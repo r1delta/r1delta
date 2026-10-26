@@ -761,8 +761,11 @@ bool buildIndex(Database& db, std::string& error) {
 }
 
 bool loadIndex(Database& db, std::string& error, bool& cacheHit) {
-    cacheHit = cacheMatches(db.cacheFile, db, error);
-    if (cacheHit) return true;
+    cacheHit = false;
+    if (cacheMatches(db.cacheFile, db, error)) {
+        cacheHit = true;
+        return true;
+    }
     error.clear();
     if (!buildIndex(db, error)) return false;
     std::string saveError;
@@ -979,7 +982,7 @@ bool decodeMip(std::uint16_t fmt, std::uint32_t w, std::uint32_t h,
                 bcdec_bc7(block, rgba.data(), 16);
             } else if (fmt == 10 || fmt == 11) {
                 std::array<float, 48> rgb{};
-                bcdec_bc6h_float(block, rgb.data(), static_cast<int>(4 * 3 * sizeof(float)), fmt == 11 ? 1 : 0);
+                bcdec_bc6h_float(block, rgb.data(), 4 * 3, fmt == 11 ? 1 : 0);
                 for (std::size_t p = 0; p < 16; ++p) {
                     rgba[p * 4 + 0] = toneMapHdr(rgb[p * 3 + 0]);
                     rgba[p * 4 + 1] = toneMapHdr(rgb[p * 3 + 1]);
@@ -1025,7 +1028,8 @@ bool isNormalName(std::string_view name) {
 }
 
 bool convertTextureWithDb(const std::shared_ptr<Database>& db, const AssetRecord& record,
-                          std::vector<std::uint8_t>& vtf, std::string& error) {
+                          const TextureOptions& options, std::vector<std::uint8_t>& vtf,
+                          std::string& error) {
     auto family = db->getFamily(db->paks[record.pakIndex].family, error);
     if (!family) return false;
     std::vector<std::uint8_t> header;
@@ -1116,16 +1120,28 @@ bool convertTextureWithDb(const std::shared_ptr<Database>& db, const AssetRecord
 
     std::uint16_t imageFormat = 0xffff;
     std::uint32_t flags = isNormalName(record.name) ? 0x80u : 0u;
-    std::vector<ImageMip> converted(count);
-    for (std::uint32_t m = 0; m < count; ++m) {
-        if (images[m].bytes.empty()) { error = "missing mip " + std::to_string(m); return false; }
-        std::uint16_t thisFormat = 0xffff;
-        std::uint32_t thisFlags = flags;
-        if (!decodeMip(format, images[m].width, images[m].height, images[m].bytes.data(), images[m].bytes.size(),
-                       thisFormat, thisFlags, converted[m], error)) return false;
-        if (imageFormat == 0xffff) imageFormat = thisFormat;
-        else if (imageFormat != thisFormat) { error = "inconsistent converted mip format"; return false; }
-        flags |= thisFlags;
+    const bool passBc7 = (format == 12 || format == 13) && options.bc7Passthrough;
+    const bool passBc6h = (format == 10 || format == 11) && options.bc6hPassthrough;
+    std::vector<ImageMip> converted;
+    if (passBc7 || passBc6h) {
+        imageFormat = passBc7 ? 67 : 66;
+        if (passBc7) {
+            flags |= 0x2000u;
+            if (format == 13) flags |= 0x80000u;
+        }
+        converted = std::move(images);
+    } else {
+        converted.resize(count);
+        for (std::uint32_t m = 0; m < count; ++m) {
+            if (images[m].bytes.empty()) { error = "missing mip " + std::to_string(m); return false; }
+            std::uint16_t thisFormat = 0xffff;
+            std::uint32_t thisFlags = flags;
+            if (!decodeMip(format, images[m].width, images[m].height, images[m].bytes.data(), images[m].bytes.size(),
+                           thisFormat, thisFlags, converted[m], error)) return false;
+            if (imageFormat == 0xffff) imageFormat = thisFormat;
+            else if (imageFormat != thisFormat) { error = "inconsistent converted mip format"; return false; }
+            flags |= thisFlags;
+        }
     }
     std::uint64_t totalSize = 0x58;
     for (const auto& mip : converted) {
@@ -1154,6 +1170,129 @@ bool convertTextureWithDb(const std::shared_ptr<Database>& db, const AssetRecord
     return true;
 }
 
+bool expandLayerMaskVtf(std::vector<std::uint8_t>& vtf, bool invert, std::string& error) {
+    if (vtf.size() < 0x58 || std::memcmp(vtf.data(), "VTF\0", 4) != 0) {
+        error = "invalid source VTF for layer mask";
+        return false;
+    }
+    const std::uint32_t width = u16(vtf.data() + 0x10);
+    const std::uint32_t height = u16(vtf.data() + 0x12);
+    const std::uint32_t mipCount = vtf[0x38];
+    const std::uint32_t format = u32(vtf.data() + 0x34);
+    const std::uint32_t sourceOffset = u32(vtf.data() + 0x54);
+    if (!width || !height || !mipCount || mipCount > 32 || sourceOffset < 0x58 ||
+        sourceOffset > vtf.size()) {
+        error = "invalid source VTF dimensions for layer mask";
+        return false;
+    }
+
+    std::uint64_t outputSize = 0x58;
+    for (std::uint32_t m = mipCount; m-- > 0;) {
+        const std::uint64_t w = std::max(1u, width >> m);
+        const std::uint64_t h = std::max(1u, height >> m);
+        if (w > (std::numeric_limits<std::size_t>::max() - outputSize) / (h * 4)) {
+            error = "expanded layer mask is too large";
+            return false;
+        }
+        outputSize += w * h * 4;
+    }
+    if (outputSize > std::numeric_limits<std::size_t>::max()) {
+        error = "expanded layer mask is too large";
+        return false;
+    }
+    std::vector<std::uint8_t> expanded(static_cast<std::size_t>(outputSize), 0);
+    std::memcpy(expanded.data(), vtf.data(), 0x58);
+    put32(expanded.data() + 0x14, u32(vtf.data() + 0x14) & 0x0cu);
+    putI32(expanded.data() + 0x34, 0);
+    put32(expanded.data() + 0x54, 0x58);
+
+    std::size_t input = sourceOffset;
+    std::size_t output = 0x58;
+    for (std::uint32_t m = mipCount; m-- > 0;) {
+        const std::uint32_t w = std::max(1u, width >> m);
+        const std::uint32_t h = std::max(1u, height >> m);
+        const std::uint32_t blocksX = (w + 3) / 4;
+        const std::uint32_t blocksY = (h + 3) / 4;
+        std::size_t sourceBlockBytes = 0;
+        if (format == 35) sourceBlockBytes = 8;
+        else if (format == 13) sourceBlockBytes = 8;
+        else if (format == 14 || format == 15 || format == 34) sourceBlockBytes = 16;
+        std::size_t mipSourceBytes = 0;
+        if (sourceBlockBytes) {
+            if (static_cast<std::uint64_t>(blocksX) * blocksY >
+                std::numeric_limits<std::size_t>::max() / sourceBlockBytes) {
+                error = "layer mask mip size overflow";
+                return false;
+            }
+            mipSourceBytes = static_cast<std::size_t>(blocksX) * blocksY * sourceBlockBytes;
+        } else if (format == 0 || format == 8) {
+            const std::size_t pixelBytes = format == 0 ? 4 : 3;
+            if (static_cast<std::uint64_t>(w) * h >
+                std::numeric_limits<std::size_t>::max() / pixelBytes) {
+                error = "layer mask mip size overflow";
+                return false;
+            }
+            mipSourceBytes = static_cast<std::size_t>(w) * h * pixelBytes;
+        } else {
+            error = "layer mask source VTF format " + std::to_string(format) + " is unsupported";
+            return false;
+        }
+        if (input > vtf.size() || mipSourceBytes > vtf.size() - input) {
+            error = "truncated source VTF layer mask mip";
+            return false;
+        }
+        if (format == 0 || format == 8) {
+            const std::size_t pixelBytes = format == 0 ? 4 : 3;
+            for (std::uint32_t y = 0; y < h; ++y) {
+                for (std::uint32_t x = 0; x < w; ++x) {
+                    const std::size_t p = static_cast<std::size_t>(y) * w + x;
+                    const std::uint8_t value = vtf[input + p * pixelBytes + (format == 0 ? 0 : 2)];
+                    const std::uint8_t mask = invert ? static_cast<std::uint8_t>(255u - value) : value;
+                    std::uint8_t* dst = expanded.data() + output + p * 4;
+                    dst[0] = mask; dst[1] = mask; dst[2] = 0; dst[3] = 255;
+                }
+            }
+        } else {
+            std::array<std::uint8_t, 64> rgba{};
+            std::array<std::uint8_t, 32> rg{};
+            std::array<std::uint8_t, 16> r{};
+            for (std::uint32_t by = 0; by < blocksY; ++by) {
+                for (std::uint32_t bx = 0; bx < blocksX; ++bx) {
+                    const std::uint8_t* block = vtf.data() + input +
+                        (static_cast<std::size_t>(by) * blocksX + bx) * sourceBlockBytes;
+                    if (format == 35) bcdec_bc4(block, r.data(), 4, 0);
+                    else if (format == 34) bcdec_bc5(block, rg.data(), 8, 0);
+                    else if (format == 13) bcdec_bc1(block, rgba.data(), 16);
+                    else if (format == 14) bcdec_bc2(block, rgba.data(), 16);
+                    else bcdec_bc3(block, rgba.data(), 16);
+                    for (std::uint32_t py = 0; py < 4 && by * 4 + py < h; ++py) {
+                        for (std::uint32_t px = 0; px < 4 && bx * 4 + px < w; ++px) {
+                            const std::size_t local = static_cast<std::size_t>(py) * 4 + px;
+                            const std::uint8_t value = format == 35 ? r[local] :
+                                format == 34 ? rg[local * 2] : rgba[local * 4];
+                            const std::uint8_t mask = invert ? static_cast<std::uint8_t>(255u - value) : value;
+                            const std::size_t pixel = static_cast<std::size_t>(by * 4 + py) * w + bx * 4 + px;
+                            std::uint8_t* dst = expanded.data() + output + pixel * 4;
+                            dst[0] = mask; dst[1] = mask; dst[2] = 0; dst[3] = 255;
+                        }
+                    }
+                }
+            }
+        }
+        input += mipSourceBytes;
+        output += static_cast<std::size_t>(w) * h * 4;
+    }
+    vtf = std::move(expanded);
+    return true;
+}
+
+std::string layerMaskName(std::uint64_t guid, TextureTransform transform) {
+    std::ostringstream name;
+    name << "r2tex/layer_masks/" << std::hex << std::setw(16) << std::setfill('0') << guid
+         << (transform == TextureTransform::maskRg ? "_rg" : "_rg_inv");
+    return name.str();
+}
+
 bool surfaceKnown(const std::string& p) {
     static const std::set<std::string> names = {
         "default", "concrete", "metal", "dirt", "grass", "wood", "glass", "plastic", "rock", "sand",
@@ -1176,7 +1315,7 @@ void addVmtParam(std::ostringstream& out, const char* key, const std::string& va
 }
 
 bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view requested,
-                           Material& material, std::string& error) {
+                           const MaterialOptions& options, Material& material, std::string& error) {
     const std::string name = cleanAssetName(requested, true);
     if (!validAssetName(name)) { error = "invalid material path"; return false; }
     if (name == "tools/toolsskybox" || name.find("tools/sky") == 0) {
@@ -1238,61 +1377,105 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
         usedSlots.emplace(slot, tex);
         return true;
     };
-
     const bool tools = name.rfind("tools/", 0) == 0;
-    const bool noDrawTool = tools && (name.find("nodraw") != std::string::npos || name.find("clip") != std::string::npos ||
-                                      name.find("trigger") != std::string::npos || name.find("blockbullets") != std::string::npos ||
-                                      name.find("lightprobe") != std::string::npos || name.find("windowhint") != std::string::npos);
-    const std::string shader = std::strcmp(variant, "gen") == 0 ? "UnlitGeneric" :
+    const bool unlit = std::strcmp(variant, "gen") == 0 || shaderSet.find("unlit") != std::string::npos;
+    const std::string shader = unlit ? "UnlitGeneric" :
         (std::strcmp(variant, "wld") == 0 ? "LightmappedGeneric" : "VertexLitGeneric");
+    const bool lightmapped = shader == "LightmappedGeneric";
+    const std::array<std::size_t, 4> layerSlots = {22, 23, 24, 26};
+    const bool hasLayerSlots = lightmapped && std::any_of(layerSlots.begin(), layerSlots.end(),
+        [&](std::size_t slot) { return slot < slotGuids.size() && slotGuids[slot] != 0; });
+    const bool layersOff = hasLayerSlots && options.layerMode == LayerMode::layersOff;
+    material.usesLayers = hasLayerSlots;
     if (!tools) {
-        use(0); use(1); use(3); use(4);
-        use(14); use(15); use(22);
-        use(23); use(24); use(26);
+        use(0);
+        if (!layersOff) {
+            use(1); use(3); use(4); use(14); use(15);
+            if (lightmapped) {
+                use(22); use(23); use(24); use(26);
+            }
+        }
         if (usedSlots.find(0) == usedSlots.end()) { error = "material has no resolvable base texture: " + name; return false; }
     }
 
-    const std::uint32_t glue = u32(header.data() + 0xc0);
-    const std::uint32_t blend = u32(header.data() + 0x50);
-    const std::uint16_t raster = u16(header.data() + 0x50 + 0x16);
-    const bool cut = shaderSet.find("cut") != std::string::npos || (glue & 1u) != 0;
-    const bool translucent = shaderSet.find("trans") != std::string::npos || (glue & 2u) != 0 || (blend & 2u) != 0;
-    const bool decal = name.find("/decal/") != std::string::npos || shaderSet.find("decal") != std::string::npos || (raster & 0x10u) != 0;
+    // dxState[1] is the material draw state. R2 stores D3D blend factors minus one.
+    const std::uint32_t blend = u32(header.data() + 0x70);
+    const std::uint16_t depth = u16(header.data() + 0x70 + 0x14);
+    const std::uint16_t raster = u16(header.data() + 0x70 + 0x16);
+    const bool cut = shaderSet.find("cut") != std::string::npos;
+    const bool blendEnabled = (blend & 0x2u) != 0;
+    const std::uint32_t sourceBlend = ((blend >> 2u) & 0x1fu) + 1u;
+    const std::uint32_t destinationBlend = ((blend >> 7u) & 0x1fu) + 1u;
+    constexpr std::uint32_t kBlendOne = 2;
+    constexpr std::uint32_t kBlendInvSrcAlpha = 6;
+    const bool additive = blendEnabled && sourceBlend == kBlendOne && destinationBlend == kBlendOne;
+    const bool premultipliedAlpha = blendEnabled &&
+        sourceBlend == kBlendOne && destinationBlend == kBlendInvSrcAlpha;
+    const bool translucent = !additive &&
+        (shaderSet.find("trans") != std::string::npos || blendEnabled);
+    const bool rasterDecalPreset = (raster & 0x70u) == 0x10u;
+    const bool overlayDepthState = (depth & 0x17u) == 0x07u;
+    const bool overlayProfile = premultipliedAlpha &&
+        shaderSet.find("trans") != std::string::npos &&
+        overlayDepthState && rasterDecalPreset;
+    // Map this observed R2 surface-overlay profile to R1's $decal parameter.
+    const bool decal = name.find("/decal/") != std::string::npos ||
+        shaderSet.find("decal") != std::string::npos || overlayProfile;
     const bool glass = name.find("glass") != std::string::npos || surface == "glass";
 
+    const bool vertexLit = shader == "VertexLitGeneric";
     std::ostringstream out;
+    std::set<std::size_t> referencedSlots;
     out << '\"' << shader << "\"\n{\n";
     const std::string safeSurface = surfaceKnown(surface) ? surface : "default";
     addVmtParam(out, "$surfaceprop", safeSurface);
-    if (noDrawTool) {
-        addVmtParam(out, "%compilenodraw", "1");
-    } else if (tools) {
+    if (tools) {
         addVmtParam(out, "%compilenodraw", "1");
     } else {
         auto param = [&](std::size_t slot, const char* key) {
             auto it = usedSlots.find(slot);
-            if (it != usedSlots.end()) addVmtParam(out, key, vmtTextureName(it->second));
+            if (it != usedSlots.end()) {
+                addVmtParam(out, key, vmtTextureName(it->second));
+                referencedSlots.insert(slot);
+            }
         };
-        param(0, "$basetexture"); param(1, "$bumpmap");
-        if (usedSlots.find(3) != usedSlots.end()) {
-            param(3, "$reflectiontint"); param(3, "$reflectiontintshininess");
+        param(0, "$basetexture");
+        if (!unlit) param(1, "$bumpmap");
+        if (!unlit && usedSlots.find(3) != usedSlots.end()) {
+            param(3, "$reflectiontint");
+            param(3, "$reflectiontintshininess");
             addVmtParam(out, "$reflectiontintcolor", "1");
             addVmtParam(out, "$envmaptint", "[1 1 1]");
         }
-        if (usedSlots.find(4) != usedSlots.end()) {
-            addVmtParam(out, "$selfillum", "1"); param(4, "$selfIllumMask");
+        if (vertexLit && usedSlots.find(4) != usedSlots.end()) {
+            addVmtParam(out, "$selfillum", "1");
+            param(4, "$selfIllumMask");
         }
-        param(14, "$detailColor"); param(15, "$detailNormal");
-        if (usedSlots.find(14) != usedSlots.end() || usedSlots.find(15) != usedSlots.end()) addVmtParam(out, "$detailScale", "1");
-        param(22, "$blendModulateTexture"); param(23, "$baseTexture2"); param(24, "$bumpmap2");
-        param(26, "$reflectionTint2");
-        if (cut) { addVmtParam(out, "$alphatest", "1"); addVmtParam(out, "$alphaTestReference", "0.5"); }
+        param(14, "$detailColor");
+        if (!unlit) param(15, "$detailNormal");
+        if (referencedSlots.find(14) != referencedSlots.end() ||
+            referencedSlots.find(15) != referencedSlots.end())
+            addVmtParam(out, "$detailScale", "[1 1]");
+        if (lightmapped) {
+            if (options.layerMode == LayerMode::maskRg || options.layerMode == LayerMode::maskRgInv) {
+                auto mask = usedSlots.find(22);
+                if (mask != usedSlots.end())
+                    mask->second = layerMaskName(slotGuids[22],
+                        options.layerMode == LayerMode::maskRg ? TextureTransform::maskRg : TextureTransform::maskRgInv);
+            }
+            param(22, "$blendModulateTexture");
+            param(23, "$baseTexture2");
+            param(24, "$bumpmap2");
+            param(26, "$reflectionTint2");
+        }
+        if (cut) { addVmtParam(out, "$alphatest", "1"); addVmtParam(out, "$alphaTestReference", "0.7"); }
+        if (additive) addVmtParam(out, "$additive", "1");
         else if (translucent || glass) addVmtParam(out, "$translucent", "1");
         if (decal) addVmtParam(out, "$decal", "1");
-        if (glass || usedSlots.find(3) != usedSlots.end()) addVmtParam(out, "$envmap", "env_cubemap");
+        if (glass || (!unlit && usedSlots.find(3) != usedSlots.end())) addVmtParam(out, "$envmap", "env_cubemap");
         if (shaderSet.find("vcolt") != std::string::npos) addVmtParam(out, "$vertexcolor", "1");
-        if (shaderSet.find("vcola") != std::string::npos || shaderSet.find("vcolt") != std::string::npos) addVmtParam(out, "$vertexalpha", "1");
-        if ((raster & 0x02u) || (raster & 0x10u) || (raster & 0x20u)) addVmtParam(out, "$nocull", "1");
+        if (shaderSet.find("vcola") != std::string::npos) addVmtParam(out, "$vertexalpha", "1");
+        if ((raster & 0x06u) == 0x02u) addVmtParam(out, "$nocull", "1");
     }
     out << "}\n";
 
@@ -1301,35 +1484,41 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
     material.textures.clear();
     for (const auto& pair : usedSlots) {
         const std::size_t slot = pair.first;
-        if (slot >= slotGuids.size()) continue;
-        material.textures.push_back(TextureRef{slotGuids[slot], pair.second, static_cast<std::uint32_t>(slot)});
+        if (slot >= slotGuids.size() || referencedSlots.find(slot) == referencedSlots.end()) continue;
+        TextureRef texture;
+        texture.guid = slotGuids[slot];
+        texture.name = pair.second;
+        texture.slot = static_cast<std::uint32_t>(slot);
+        if (slot == 22 && (options.layerMode == LayerMode::maskRg || options.layerMode == LayerMode::maskRgInv)) {
+            texture.transform = options.layerMode == LayerMode::maskRg ?
+                TextureTransform::maskRg : TextureTransform::maskRgInv;
+        }
+        material.textures.push_back(std::move(texture));
     }
     return true;
 }
 
-bool parseBspNames(const std::uint8_t* bsp, std::size_t bspSize,
+bool parseBspNames(const std::uint8_t* data, std::size_t byteCount,
                    std::vector<std::string>& names, std::string& error) {
-    names.clear();
+    if (!data && byteCount) { error = "null BSP buffer"; return false; }
     constexpr std::size_t headerBytes = 16 + 128 * 16;
-    if (!bsp || bspSize < headerBytes || std::memcmp(bsp, "rBSP", 4) != 0) {
+    if (byteCount < headerBytes || !data || std::memcmp(data, "rBSP", 4) != 0) {
         error = "not a Titanfall Respawn BSP";
         return false;
     }
-    const std::uint32_t version = u32(bsp + 4);
-    const std::uint32_t lumpCount = u32(bsp + 12);
+    const std::uint32_t version = u32(data + 4);
+    const std::uint32_t lumpCount = u32(data + 12);
     if (version < 29 || version > 0x10000 || lumpCount != 127) {
         error = "unsupported Respawn BSP header";
         return false;
     }
     struct Lump { std::uint32_t offset, length; } lumps[128]{};
     for (std::uint32_t i = 0; i < 128; ++i) {
-        const std::uint8_t* p = bsp + 16 + i * 16;
-        lumps[i] = { u32(p), u32(p + 4) };
-        if (lumps[i].offset > bspSize || lumps[i].length > bspSize - lumps[i].offset) {
-            if (lumps[i].length) {
-                error = "BSP lump outside file";
-                return false;
-            }
+        const std::uint8_t* p = data + 16 + i * 16;
+        lumps[i] = {u32(p), u32(p + 4)};
+        if (lumps[i].offset > byteCount || lumps[i].length > byteCount - lumps[i].offset) {
+            error = "BSP lump outside file";
+            return false;
         }
     }
     const Lump td = lumps[kBspTextureData];
@@ -1339,45 +1528,37 @@ bool parseBspNames(const std::uint8_t* bsp, std::size_t bspSize,
         error = "invalid BSP texture lump sizes";
         return false;
     }
-    const std::uint8_t* stringBytes = bsp + stringData.offset;
+    const std::uint8_t* stringBytes = data + stringData.offset;
     const std::uint32_t tableCount = stringTable.length / 4;
     std::vector<std::uint32_t> offsets(tableCount);
     for (std::uint32_t i = 0; i < tableCount; ++i)
-        offsets[i] = u32(bsp + stringTable.offset + i * 4);
+        offsets[i] = u32(data + stringTable.offset + i * 4);
     std::set<std::string> unique;
     const std::uint32_t recordCount = td.length / 36;
     for (std::uint32_t i = 0; i < recordCount; ++i) {
-        const std::int32_t index = static_cast<std::int32_t>(u32(bsp + td.offset + i * 36 + 12));
-        if (index < 0 || static_cast<std::uint32_t>(index) >= tableCount)
-            continue;
+        const std::int32_t index = static_cast<std::int32_t>(u32(data + td.offset + i * 36 + 12));
+        if (index < 0 || static_cast<std::uint32_t>(index) >= tableCount) continue;
         const std::uint32_t offset = offsets[static_cast<std::uint32_t>(index)];
-        if (offset >= stringData.length)
-            continue;
+        if (offset >= stringData.length) continue;
         const char* start = reinterpret_cast<const char*>(stringBytes + offset);
-        const std::size_t available = stringData.length - offset;
-        const void* end = std::memchr(start, 0, available);
-        if (!end)
-            continue;
-        const std::size_t length = static_cast<const char*>(end) - start;
-        if (!length || length > 4096)
-            continue;
-        std::string name(start, length);
+        const std::size_t avail = stringData.length - offset;
+        const void* end = std::memchr(start, 0, avail);
+        if (!end) continue;
+        const std::size_t nameSize = static_cast<const char*>(end) - start;
+        if (!nameSize || nameSize > 4096) continue;
+        std::string name(start, nameSize);
         name = cleanAssetName(name, true);
-        if (validAssetName(name))
-            unique.insert(std::move(name));
+        if (validAssetName(name)) unique.insert(std::move(name));
     }
     names.assign(unique.begin(), unique.end());
-    if (names.empty()) {
-        error = "BSP contains no material names";
-        return false;
-    }
+    if (names.empty()) { error = "BSP contains no material names"; return false; }
+    error.clear();
     return true;
 }
 
 bool parseBspNames(const fs::path& path, std::vector<std::string>& names, std::string& error) {
     std::vector<std::uint8_t> bytes;
-    if (!readWholeFile(path, bytes, error))
-        return false;
+    if (!readWholeFile(path, bytes, error)) return false;
     return parseBspNames(bytes.data(), bytes.size(), names, error);
 }
 
@@ -1389,10 +1570,13 @@ void SetFamilyCacheLimitMiB(std::uint32_t megabytes) noexcept {
     gFamilyCacheLimit.store(static_cast<std::size_t>(boundedMiB) * 1024ull * 1024ull,
                             std::memory_order_relaxed);
 }
+bool Open(const std::filesystem::path& installDir, const std::filesystem::path& cacheDir, std::string* error) {
+    return Open(installDir, cacheDir, error, nullptr);
+}
+
 bool Open(const std::filesystem::path& installDir, const std::filesystem::path& cacheDir,
           std::string* error, bool* cacheHit) {
-    if (cacheHit)
-        *cacheHit = false;
+    if (cacheHit) *cacheHit = false;
     std::lock_guard<std::mutex> openLock(g_openMutex);
     try {
         auto db = std::make_shared<Database>();
@@ -1401,11 +1585,10 @@ bool Open(const std::filesystem::path& installDir, const std::filesystem::path& 
         db->cacheFile = cacheDir / L"r2tex.index";
         std::string why;
         if (!enumeratePaks(*db, why)) { if (error) *error = why; return false; }
-        bool usedCache{};
-        if (!loadIndex(*db, why, usedCache)) { if (error) *error = why; return false; }
+        bool hit = false;
+        if (!loadIndex(*db, why, hit)) { if (error) *error = why; return false; }
         g_database = std::move(db);
-        if (cacheHit)
-            *cacheHit = usedCache;
+        if (cacheHit) *cacheHit = hit;
         if (error) error->clear();
         return true;
     } catch (const std::exception& e) {
@@ -1415,6 +1598,11 @@ bool Open(const std::filesystem::path& installDir, const std::filesystem::path& 
 }
 
 bool ConvertTexture(std::uint64_t guid, std::vector<std::uint8_t>& vtf, std::string* error) {
+    return ConvertTexture(guid, vtf, TextureOptions{}, error);
+}
+
+bool ConvertTexture(std::uint64_t guid, std::vector<std::uint8_t>& vtf,
+                    const TextureOptions& options, std::string* error) {
     vtf.clear();
     try {
         auto db = getDatabase();
@@ -1422,7 +1610,7 @@ bool ConvertTexture(std::uint64_t guid, std::vector<std::uint8_t>& vtf, std::str
         const AssetRecord* record = findRecord(*db, guid, kTxtr);
         if (!record) { if (error) *error = "unresolved texture GUID"; return false; }
         std::string why;
-        const bool result = convertTextureWithDb(db, *record, vtf, why);
+        const bool result = convertTextureWithDb(db, *record, options, vtf, why);
         if (!result && error) *error = why;
         else if (error) error->clear();
         return result;
@@ -1434,26 +1622,82 @@ bool ConvertTexture(std::uint64_t guid, std::vector<std::uint8_t>& vtf, std::str
 }
 
 bool ConvertTexture(std::string_view name, std::vector<std::uint8_t>& vtf, std::string* error) {
+    return ConvertTexture(name, vtf, TextureOptions{}, error);
+}
+
+bool ConvertTexture(std::string_view name, std::vector<std::uint8_t>& vtf,
+                    const TextureOptions& options, std::string* error) {
     const std::string cleaned = cleanAssetName(name, true);
     if (!validAssetName(cleaned)) { vtf.clear(); if (error) *error = "invalid texture path"; return false; }
     const std::uint64_t guid = textureGuid(cleaned);
-    if (!ConvertTexture(guid, vtf, error)) {
+    if (!ConvertTexture(guid, vtf, options, error)) {
         if (error && !error->empty()) *error = "texture " + cleaned + ": " + *error;
         return false;
     }
     return true;
 }
 
+bool ConvertTexture(const TextureRef& texture, std::vector<std::uint8_t>& vtf, std::string* error) {
+    return ConvertTexture(texture, vtf, TextureOptions{}, error);
+}
+
+bool ConvertTexture(const TextureRef& texture, std::vector<std::uint8_t>& vtf,
+                    const TextureOptions& options, std::string* error) {
+    if (texture.transform == TextureTransform::none)
+        return ConvertTexture(texture.guid, vtf, options, error);
+    vtf.clear();
+    try {
+        auto db = getDatabase();
+        if (!db) { if (error) *error = "r2tex::Open has not succeeded"; return false; }
+        const AssetRecord* record = findRecord(*db, texture.guid, kTxtr);
+        if (!record) { if (error) *error = "unresolved texture GUID"; return false; }
+        TextureOptions decodeOptions = options;
+        decodeOptions.bc7Passthrough = false;
+        decodeOptions.bc6hPassthrough = false;
+        std::string why;
+        if (!convertTextureWithDb(db, *record, decodeOptions, vtf, why)) {
+            if (error) *error = why;
+            return false;
+        }
+        const bool invert = texture.transform == TextureTransform::maskRgInv;
+        if (texture.transform != TextureTransform::maskRg && !invert) {
+            vtf.clear();
+            if (error) *error = "unsupported texture transform";
+            return false;
+        }
+        if (!expandLayerMaskVtf(vtf, invert, why)) {
+            vtf.clear();
+            if (error) *error = why;
+            return false;
+        }
+        if (error) error->clear();
+        return true;
+    } catch (const std::exception& e) {
+        vtf.clear();
+        if (error) *error = e.what();
+        return false;
+    }
+}
+
 bool ConvertMaterial(std::string_view name, Material& material, std::string* error) {
+    return ConvertMaterial(name, material, MaterialOptions{}, error);
+}
+
+bool ConvertMaterial(std::string_view name, Material& material,
+                     const MaterialOptions& options, std::string* error) {
     material = Material{};
     try {
         auto db = getDatabase();
         if (!db) { if (error) *error = "r2tex::Open has not succeeded"; return false; }
         std::string why;
-        const bool result = convertMaterialWithDb(db, name, material, why);
-        if (!result && error) *error = why;
-        else if (error) error->clear();
-        return result;
+        const bool result = convertMaterialWithDb(db, name, options, material, why);
+        if (!result) {
+            if (error) *error = why;
+            material = Material{};
+            return false;
+        }
+        if (error) error->clear();
+        return true;
     } catch (const std::exception& e) {
         if (error) *error = e.what();
         material = Material{};
@@ -1461,8 +1705,7 @@ bool ConvertMaterial(std::string_view name, Material& material, std::string* err
     }
 }
 
-bool ListMapMaterials(const std::filesystem::path& bspPath, std::vector<std::string>& names,
-                      std::string* error) {
+bool ListMapMaterials(const std::filesystem::path& bspPath, std::vector<std::string>& names, std::string* error) {
     names.clear();
     std::string why;
     try {
@@ -1476,12 +1719,12 @@ bool ListMapMaterials(const std::filesystem::path& bspPath, std::vector<std::str
     }
 }
 
-bool ListMapMaterials(const std::uint8_t* bspData, std::size_t bspSize,
+bool ListMapMaterials(const std::uint8_t* bspBytes, std::size_t size,
                       std::vector<std::string>& names, std::string* error) {
     names.clear();
     std::string why;
     try {
-        if (!parseBspNames(bspData, bspSize, names, why)) { if (error) *error = why; return false; }
+        if (!parseBspNames(bspBytes, size, names, why)) { if (error) *error = why; return false; }
         if (error) error->clear();
         return true;
     } catch (const std::exception& e) {
