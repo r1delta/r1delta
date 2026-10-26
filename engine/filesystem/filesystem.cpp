@@ -38,14 +38,19 @@
 
 #include "filesystem.h"
 #include "shared_particle_materials.h"
+#include "r2port_provider.h"
 #include <iostream>
 #include <unordered_set>
+#include <cstdint>
 #include <string>
 #include <filesystem>
 #include <mutex>
 #include <atomic>
 #include <condition_variable>
 #include <thread>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 #include <chrono>
 #include <Windows.h>
 #include <intrin.h>
@@ -632,25 +637,75 @@ const char* (*oCBaseFileSystem__FindFirst)(CBaseFileSystem* thisptr, __int64 a2,
 const char* (*oCBaseFileSystem__FindNext)(CBaseFileSystem* thisptr, unsigned __int16 a2);
 bool g_bIsInReconcileAddonListFile;
 std::vector<const char*> g_pFileSystemStringsToCleanup = { 0 };
+struct ProviderFindState {
+	std::vector<std::string> paths;
+	size_t nextPath{};
+};
+std::mutex g_providerFindMutex;
+std::unordered_map<uint16_t, ProviderFindState> g_providerFindStates;
+
+std::vector<std::string> GetProviderMapFindResults(const char* pattern)
+{
+	const auto normalizedPattern = r2port::NormalizeProviderPath(pattern ? pattern : "");
+	if (!normalizedPattern || *normalizedPattern != "maps/*.bsp")
+		return {};
+
+	std::vector<std::string> results;
+	for (const std::string& path : r2port::Enumerate(pattern)) {
+		const size_t slash = path.find_last_of('/');
+		results.emplace_back(slash == std::string::npos ? path : path.substr(slash + 1));
+	}
+	return results;
+}
+
+const char* PreserveFindResult(const char* result)
+{
+	if (!g_bIsInReconcileAddonListFile || !result)
+		return result;
+	const char* copy = _strdup(result);
+	g_pFileSystemStringsToCleanup.push_back(copy);
+	return copy;
+}
+
 const char* CBaseFileSystem__FindFirst(CBaseFileSystem* thisptr, __int64 a2, __int64 a3)
 {
-	const char* oret = oCBaseFileSystem__FindFirst(thisptr, a2, a3);
-	if (g_bIsInReconcileAddonListFile && oret) {
-		const char* trueret = _strdup(oret);
-		g_pFileSystemStringsToCleanup.push_back(trueret);
-		return trueret;
+	const char* result = oCBaseFileSystem__FindFirst(thisptr, a2, a3);
+	if (result && a3) {
+		const uint16_t handle = *reinterpret_cast<const uint16_t*>(a3);
+		{
+			std::lock_guard<std::mutex> lock(g_providerFindMutex);
+			g_providerFindStates.erase(handle);
+		}
+
+		if (auto paths = GetProviderMapFindResults(reinterpret_cast<const char*>(a2)); !paths.empty()) {
+			std::lock_guard<std::mutex> lock(g_providerFindMutex);
+			if (g_providerFindStates.size() < 64 || g_providerFindStates.contains(handle))
+				g_providerFindStates.insert_or_assign(handle, ProviderFindState{ std::move(paths), 0 });
+		}
 	}
-	return oret;
+	return PreserveFindResult(result);
 }
+
 const char* CBaseFileSystem__FindNext(CBaseFileSystem* thisptr, unsigned __int16 a2)
 {
-	const char* oret = oCBaseFileSystem__FindNext(thisptr, a2);
-	if (g_bIsInReconcileAddonListFile && oret) {
-		const char* trueret = _strdup(oret);
-		g_pFileSystemStringsToCleanup.push_back(trueret);
-		return trueret;
+	const char* result = oCBaseFileSystem__FindNext(thisptr, a2);
+	if (result)
+		return PreserveFindResult(result);
+	std::string resultName;
+	{
+		std::lock_guard<std::mutex> lock(g_providerFindMutex);
+		const auto found = g_providerFindStates.find(a2);
+		if (found == g_providerFindStates.end())
+			return nullptr;
+		if (found->second.nextPath >= found->second.paths.size()) {
+			g_providerFindStates.erase(found);
+			return nullptr;
+		}
+		resultName = found->second.paths[found->second.nextPath++];
 	}
-	return oret;
+	thread_local std::string providerFindResult;
+	providerFindResult = std::move(resultName);
+	return PreserveFindResult(providerFindResult.c_str());
 }
 
 void ReconcileAddonListFile(IFileSystem* pFileSystem, const char* pModPath)

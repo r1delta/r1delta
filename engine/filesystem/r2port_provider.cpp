@@ -1,0 +1,313 @@
+﻿#include "r2port_provider.h"
+
+#include <algorithm>
+#include <cctype>
+#include <chrono>
+#include <condition_variable>
+#include <iterator>
+#include <list>
+#include <mutex>
+#include <shared_mutex>
+#include <unordered_map>
+
+#include <unordered_set>
+namespace r2port {
+namespace {
+
+constexpr size_t kMaximumCachedBytes = 220ull * 1024 * 1024;
+constexpr auto kCacheIdleLifetime = std::chrono::minutes(30);
+
+struct Registration {
+    std::string prefix;
+    std::shared_ptr<FileProvider> provider;
+};
+
+struct CacheRecord {
+    FileBytes data;
+    size_t bytes{};
+    std::chrono::steady_clock::time_point lastUse;
+    std::list<std::string>::iterator lruPosition;
+};
+
+struct PendingRead {
+    std::condition_variable ready;
+    bool complete{};
+    FileBytes data;
+    uint64_t generation{};
+};
+
+std::shared_mutex g_providerMutex;
+std::vector<Registration> g_providers;
+std::mutex g_cacheMutex;
+std::unordered_map<std::string, CacheRecord> g_cache;
+std::unordered_map<std::string, std::shared_ptr<PendingRead>> g_pendingReads;
+std::list<std::string> g_lru;
+size_t g_cachedBytes{};
+uint64_t g_cacheGeneration{};
+std::string g_activeMap;
+
+bool MatchesPrefix(std::string_view path, std::string_view prefix)
+{
+    return path.size() >= prefix.size() && path.substr(0, prefix.size()) == prefix;
+}
+bool BelongsToActiveMap(std::string_view path)
+{
+	if (g_activeMap.empty())
+		return false;
+	const std::string mapPrefix = "maps/" + g_activeMap;
+	if (path.size() > mapPrefix.size() && path.substr(0, mapPrefix.size()) == mapPrefix) {
+		const char boundary = path[mapPrefix.size()];
+		if (boundary == '.' || boundary == '_' || boundary == '/')
+			return true;
+	}
+	const std::string graphPrefix = "maps/graphs/" + g_activeMap + ".ain";
+	if (path == graphPrefix)
+		return true;
+	const std::string materialPrefix = "materials/maps/" + g_activeMap + "/";
+	return path.size() >= materialPrefix.size()
+		&& path.substr(0, materialPrefix.size()) == materialPrefix;
+}
+
+
+void RemoveCachedFile(const std::unordered_map<std::string, CacheRecord>::iterator& found)
+{
+    g_cachedBytes -= found->second.bytes;
+    g_lru.erase(found->second.lruPosition);
+    g_cache.erase(found);
+}
+
+void PruneCache(std::chrono::steady_clock::time_point now)
+{
+    while (!g_lru.empty()) {
+        const auto found = g_cache.find(g_lru.front());
+        if (found == g_cache.end()) {
+            g_lru.pop_front();
+            continue;
+        }
+        const bool expired = now - found->second.lastUse >= kCacheIdleLifetime;
+        if (!expired && g_cachedBytes <= kMaximumCachedBytes)
+            break;
+        RemoveCachedFile(found);
+    }
+}
+
+FileBytes ReadFromProviders(std::string_view normalizedPath)
+{
+    std::shared_lock<std::shared_mutex> lock(g_providerMutex);
+    for (const Registration& registration : g_providers) {
+        if (!MatchesPrefix(normalizedPath, registration.prefix))
+            continue;
+        try {
+            if (FileBytes data = registration.provider->Read(normalizedPath))
+                return data;
+        }
+        catch (...) {
+            // A provider failure behaves like a miss so other providers can answer.
+        }
+    }
+    return {};
+}
+
+} // namespace
+
+std::optional<std::string> NormalizeProviderPath(std::string_view path)
+{
+    if (path.empty() || path.front() == '/' || path.front() == '\\')
+        return std::nullopt;
+
+    std::string normalized;
+    normalized.reserve(path.size());
+    size_t segmentStart = 0;
+    for (size_t i = 0; i <= path.size(); ++i) {
+        if (i != path.size() && path[i] != '/' && path[i] != '\\') {
+            if (path[i] == ':')
+                return std::nullopt;
+            continue;
+        }
+
+        const std::string_view segment = path.substr(segmentStart, i - segmentStart);
+        segmentStart = i + 1;
+        if (segment.empty() || segment == ".")
+            continue;
+        if (segment == "..")
+            return std::nullopt;
+        if (!normalized.empty())
+            normalized.push_back('/');
+        for (const unsigned char c : segment)
+            normalized.push_back(static_cast<char>(std::tolower(c)));
+    }
+    if (normalized.empty())
+        return std::nullopt;
+    return normalized;
+}
+
+bool RegisterProvider(std::string_view prefix, std::shared_ptr<FileProvider> provider)
+{
+    if (!provider)
+        return false;
+    auto normalized = NormalizeProviderPath(prefix);
+    if (!normalized)
+        return false;
+    normalized->push_back('/');
+
+    std::unique_lock<std::shared_mutex> lock(g_providerMutex);
+    g_providers.push_back({ std::move(*normalized), std::move(provider) });
+    return true;
+}
+
+bool Exists(std::string_view path)
+{
+    const auto normalized = NormalizeProviderPath(path);
+    if (!normalized)
+        return false;
+
+    std::shared_lock<std::shared_mutex> lock(g_providerMutex);
+    for (const Registration& registration : g_providers) {
+        if (!MatchesPrefix(*normalized, registration.prefix))
+            continue;
+        try {
+            if (registration.provider->Exists(*normalized))
+                return true;
+        }
+        catch (...) {
+        }
+    }
+    return false;
+}
+
+std::optional<uint64_t> Size(std::string_view path)
+{
+    const auto normalized = NormalizeProviderPath(path);
+    if (!normalized)
+        return std::nullopt;
+
+    bool hasMatchingProvider = false;
+    {
+        std::shared_lock<std::shared_mutex> lock(g_providerMutex);
+        for (const Registration& registration : g_providers) {
+            if (!MatchesPrefix(*normalized, registration.prefix))
+                continue;
+            hasMatchingProvider = true;
+            try {
+                if (auto size = registration.provider->Size(*normalized))
+                    return size;
+            }
+            catch (...) {
+            }
+        }
+    }
+    if (hasMatchingProvider) {
+        if (const FileBytes data = ReadAll(*normalized))
+            return static_cast<uint64_t>(data->size());
+    }
+    return std::nullopt;
+}
+
+
+FileBytes ReadAll(std::string_view path)
+{
+    auto normalized = NormalizeProviderPath(path);
+    if (!normalized)
+        return {};
+
+    const auto now = std::chrono::steady_clock::now();
+    std::shared_ptr<PendingRead> pending;
+    bool isLoader = false;
+    {
+        std::unique_lock<std::mutex> lock(g_cacheMutex);
+        PruneCache(now);
+        const auto cached = g_cache.find(*normalized);
+        if (cached != g_cache.end()) {
+            cached->second.lastUse = now;
+            g_lru.splice(g_lru.end(), g_lru, cached->second.lruPosition);
+            return cached->second.data;
+        }
+
+        const auto active = g_pendingReads.find(*normalized);
+        if (active != g_pendingReads.end()) {
+            pending = active->second;
+        }
+        else {
+            pending = std::make_shared<PendingRead>();
+            pending->generation = g_cacheGeneration;
+            g_pendingReads.emplace(*normalized, pending);
+            isLoader = true;
+        }
+
+        if (!isLoader) {
+            pending->ready.wait(lock, [&pending]() { return pending->complete; });
+            return pending->data;
+        }
+    }
+
+    FileBytes data = ReadFromProviders(*normalized);
+    {
+        std::lock_guard<std::mutex> lock(g_cacheMutex);
+        pending->data = data;
+        pending->complete = true;
+        const auto active = g_pendingReads.find(*normalized);
+        if (active != g_pendingReads.end() && active->second == pending)
+            g_pendingReads.erase(active);
+
+        if (data && data->size() <= kMaximumCachedBytes
+            && (pending->generation == g_cacheGeneration || BelongsToActiveMap(*normalized))) {
+            g_lru.push_back(*normalized);
+            const auto lruPosition = std::prev(g_lru.end());
+            const auto [entry, inserted] = g_cache.emplace(
+                *normalized,
+                CacheRecord{ data, data->size(), std::chrono::steady_clock::now(), lruPosition });
+            if (inserted) {
+                g_cachedBytes += entry->second.bytes;
+                PruneCache(std::chrono::steady_clock::now());
+            }
+            else {
+                g_lru.erase(lruPosition);
+            }
+        }
+    }
+    pending->ready.notify_all();
+    return data;
+}
+std::vector<std::string> Enumerate(std::string_view pattern)
+{
+    const auto normalized = NormalizeProviderPath(pattern);
+    if (!normalized)
+        return {};
+
+    std::vector<std::string> paths;
+    std::unordered_set<std::string> seen;
+    std::shared_lock<std::shared_mutex> lock(g_providerMutex);
+    for (const Registration& registration : g_providers) {
+        if (!MatchesPrefix(*normalized, registration.prefix))
+            continue;
+        try {
+            for (std::string& candidate : registration.provider->Enumerate(*normalized)) {
+                auto path = NormalizeProviderPath(candidate);
+                if (!path || !MatchesPrefix(*path, registration.prefix) || !seen.insert(*path).second)
+                    continue;
+                paths.push_back(std::move(*path));
+            }
+        }
+        catch (...) {
+        }
+    }
+    return paths;
+}
+
+void SetActiveMap(std::string_view mapName)
+{
+    std::string normalized;
+    if (const auto path = NormalizeProviderPath(mapName))
+        normalized = *path;
+
+    std::lock_guard<std::mutex> lock(g_cacheMutex);
+    if (normalized == g_activeMap)
+        return;
+    g_activeMap = std::move(normalized);
+    ++g_cacheGeneration;
+    g_cache.clear();
+    g_lru.clear();
+    g_cachedBytes = 0;
+}
+
+} // namespace r2port

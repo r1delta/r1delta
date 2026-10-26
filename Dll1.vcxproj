@@ -151,14 +151,14 @@
       <LanguageStandard>stdcpp20</LanguageStandard>
       <OmitFramePointers>false</OmitFramePointers>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
-      <AdditionalIncludeDirectories>$(ProjectDir)thirdparty\eos\SDK\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)engine\r2port\lzham\include;$(ProjectDir)engine\r2port\lzham\lzhamdecomp;$(ProjectDir)thirdparty\eos\SDK\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <ForcedIncludeFiles>$(ProjectDir)engine\hooks\minhook_checked.h;%(ForcedIncludeFiles)</ForcedIncludeFiles>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>Shlwapi.lib;winhttp.lib;Shell32.lib;Windowscodecs.lib;Psapi.lib;vstdlib.lib;tier0_orig.lib;ntdll.lib;bcrypt.lib;Ws2_32.lib;EOSSDK-Win64-Shipping.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Advapi32.lib;Shlwapi.lib;winhttp.lib;Shell32.lib;Windowscodecs.lib;Psapi.lib;vstdlib.lib;tier0_orig.lib;ntdll.lib;bcrypt.lib;Ws2_32.lib;EOSSDK-Win64-Shipping.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ModuleDefinitionFile>test.def</ModuleDefinitionFile>
       <AdditionalLibraryDirectories>$(ProjectDir)thirdparty\eos\SDK\Lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
@@ -190,7 +190,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
-      <AdditionalIncludeDirectories>$(ProjectDir)thirdparty\eos\SDK\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)engine\r2port\lzham\include;$(ProjectDir)engine\r2port\lzham\lzhamdecomp;$(ProjectDir)thirdparty\eos\SDK\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <ForcedIncludeFiles>$(ProjectDir)engine\hooks\minhook_checked.h;%(ForcedIncludeFiles)</ForcedIncludeFiles>
     </ClCompile>
     <Link>
@@ -199,7 +199,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>Shlwapi.lib;winhttp.lib;Shell32.lib;Windowscodecs.lib;Psapi.lib;vstdlib.lib;tier0_orig.lib;ntdll.lib;bcrypt.lib;Ws2_32.lib;EOSSDK-Win64-Shipping.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Advapi32.lib;Shlwapi.lib;winhttp.lib;Shell32.lib;Windowscodecs.lib;Psapi.lib;vstdlib.lib;tier0_orig.lib;ntdll.lib;bcrypt.lib;Ws2_32.lib;EOSSDK-Win64-Shipping.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ModuleDefinitionFile>test.def</ModuleDefinitionFile>
       <AdditionalLibraryDirectories>$(ProjectDir)thirdparty\eos\SDK\Lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
@@ -271,6 +271,36 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="engine\filesystem\filesystem.h" />
     <ClInclude Include="engine\filesystem\r1o_vpk.h" />
     <ClInclude Include="engine\filesystem\r1o_vpk_index_cache.h" />
+    <ClInclude Include="engine\filesystem\r2port_provider.h" />
+    <ClInclude Include="engine\filesystem\r2_map_provider.h" />
+    <ClInclude Include="engine\r2port\bspdown\bspdown.hpp" />
+    <ClInclude Include="engine\r2port\bspdown\internal.hpp" />
+    <ClInclude Include="engine\r2port\bspdown\bcdec.h" />
+    <ClInclude Include="engine\r2port\lzham\lzham_compat.h" />
+    <ClInclude Include="engine\r2port\lzham\include\lzham.h" />
+    <ClInclude Include="engine\r2port\lzham\include\lzham_exports.inc" />
+    <ClInclude Include="engine\r2port\lzham\include\lzham_static_lib.h" />
+    <ClInclude Include="engine\r2port\lzham\include\lzham_dynamic_lib.h" />
+    <ClInclude Include="engine\r2port\lzham\include\zlib.h" />
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_decomp.h" />
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_assert.h" />
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_checksum.h" />
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_config.h" />
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_core.h" />
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_helpers.h" />
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_huffman_codes.h" />
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_lzdecompbase.h" />
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_math.h" />
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_mem.h" />
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_platform.h" />
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_polar_codes.h" />
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_prefix_coding.h" />
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_symbol_codec.h" />
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_timer.h" />
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_traits.h" />
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_types.h" />
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_utils.h" />
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_vector.h" />
     <ClInclude Include="engine\filesystem\vpk_directory_repair.h" />
     <ClInclude Include="engine\filesystem\shared_particle_materials.h" />
     <ClInclude Include="engine\filesystem\vpk_async_precache_entry.h" />
@@ -445,6 +475,54 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="engine\filesystem\shared_particle_materials.cpp" />
     <ClCompile Include="engine\filesystem\vpk_async_precache_entry.cpp" />
     <ClCompile Include="engine\filesystem\vpk_async_precache_fix.cpp" />
+    <ClCompile Include="engine\filesystem\r2port_provider.cpp" />
+    <ClCompile Include="engine\filesystem\r2_map_provider.cpp" />
+    <ClCompile Include="engine\r2port\bspdown\bspdown.cpp" />
+    <ClCompile Include="engine\r2port\bspdown\tricoll.cpp" />
+    <ClCompile Include="engine\r2port\bspdown\collision.cpp" />
+    <ClCompile Include="engine\r2port\bspdown\sprp.cpp" />
+    <ClCompile Include="engine\r2port\bspdown\meshclip.cpp" />
+    <ClCompile Include="engine\r2port\bspdown\tangents.cpp" />
+    <ClCompile Include="engine\r2port\bspdown\physics.cpp">
+      <ObjectFileName>$(IntDir)r2bsp_physics.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\bspdown\cubemaps.cpp" />
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_assert.cpp">
+      <ForcedIncludeFiles>$(ProjectDir)engine\r2port\lzham\lzham_compat.h</ForcedIncludeFiles>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_checksum.cpp">
+      <ForcedIncludeFiles>$(ProjectDir)engine\r2port\lzham\lzham_compat.h</ForcedIncludeFiles>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_huffman_codes.cpp">
+      <ForcedIncludeFiles>$(ProjectDir)engine\r2port\lzham\lzham_compat.h</ForcedIncludeFiles>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_lzdecompbase.cpp">
+      <ForcedIncludeFiles>$(ProjectDir)engine\r2port\lzham\lzham_compat.h</ForcedIncludeFiles>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_lzdecomp.cpp">
+      <ForcedIncludeFiles>$(ProjectDir)engine\r2port\lzham\lzham_compat.h</ForcedIncludeFiles>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_mem.cpp">
+      <ForcedIncludeFiles>$(ProjectDir)engine\r2port\lzham\lzham_compat.h</ForcedIncludeFiles>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_platform.cpp">
+      <ForcedIncludeFiles>$(ProjectDir)engine\r2port\lzham\lzham_compat.h</ForcedIncludeFiles>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_polar_codes.cpp">
+      <ForcedIncludeFiles>$(ProjectDir)engine\r2port\lzham\lzham_compat.h</ForcedIncludeFiles>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_prefix_coding.cpp">
+      <ForcedIncludeFiles>$(ProjectDir)engine\r2port\lzham\lzham_compat.h</ForcedIncludeFiles>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_symbol_codec.cpp">
+      <ForcedIncludeFiles>$(ProjectDir)engine\r2port\lzham\lzham_compat.h</ForcedIncludeFiles>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_timer.cpp">
+      <ForcedIncludeFiles>$(ProjectDir)engine\r2port\lzham\lzham_compat.h</ForcedIncludeFiles>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_vector.cpp">
+      <ForcedIncludeFiles>$(ProjectDir)engine\r2port\lzham\lzham_compat.h</ForcedIncludeFiles>
+    </ClCompile>
     <ClCompile Include="engine\vtable_remaps\filesystem_vtable.cpp" />
     <ClCompile Include="eos\fake_ip_layer.cpp" />
     <ClCompile Include="engine\net\net_hooks.cpp" />

@@ -16,6 +16,15 @@
     <Filter Include="engine\filesystem">
       <UniqueIdentifier>{a1b2c3d4-e5f6-7890-abcd-ef1234567893}</UniqueIdentifier>
     </Filter>
+    <Filter Include="engine\r2port">
+      <UniqueIdentifier>{a2b2c3d4-e5f6-7890-abcd-ef1234567890}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="engine\r2port\bspdown">
+      <UniqueIdentifier>{a2b2c3d4-e5f6-7890-abcd-ef1234567891}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="engine\r2port\lzham">
+      <UniqueIdentifier>{a2b2c3d4-e5f6-7890-abcd-ef1234567892}</UniqueIdentifier>
+    </Filter>
     <Filter Include="engine\memory">
       <UniqueIdentifier>{a1b2c3d4-e5f6-7890-abcd-ef1234567894}</UniqueIdentifier>
     </Filter>
@@ -160,6 +169,96 @@
     </ClInclude>
     <ClInclude Include="engine\filesystem\r1o_vpk.h">
       <Filter>engine\filesystem</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\filesystem\r2port_provider.h">
+      <Filter>engine\filesystem</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\filesystem\r2_map_provider.h">
+      <Filter>engine\filesystem</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\bspdown\bspdown.hpp">
+      <Filter>engine\r2port\bspdown</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\bspdown\internal.hpp">
+      <Filter>engine\r2port\bspdown</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\bspdown\bcdec.h">
+      <Filter>engine\r2port\bspdown</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\include\lzham.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzham_compat.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\include\lzham_exports.inc">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\include\lzham_static_lib.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\include\lzham_dynamic_lib.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\include\zlib.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_decomp.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_assert.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_checksum.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_config.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_core.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_helpers.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_huffman_codes.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_lzdecompbase.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_math.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_mem.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_platform.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_polar_codes.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_prefix_coding.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_symbol_codec.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_timer.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_traits.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_types.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_utils.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_vector.h">
+      <Filter>engine\r2port\lzham</Filter>
     </ClInclude>
     <ClInclude Include="engine\filesystem\r1o_vpk_index_cache.h">
       <Filter>engine\filesystem</Filter>
@@ -676,6 +775,72 @@
     </ClCompile>
     <ClCompile Include="engine\filesystem\r1o_vpk.cpp">
       <Filter>engine\filesystem</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\filesystem\r2port_provider.cpp">
+      <Filter>engine\filesystem</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\filesystem\r2_map_provider.cpp">
+      <Filter>engine\filesystem</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\bspdown\bspdown.cpp">
+      <Filter>engine\r2port\bspdown</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\bspdown\tricoll.cpp">
+      <Filter>engine\r2port\bspdown</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\bspdown\collision.cpp">
+      <Filter>engine\r2port\bspdown</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\bspdown\sprp.cpp">
+      <Filter>engine\r2port\bspdown</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\bspdown\meshclip.cpp">
+      <Filter>engine\r2port\bspdown</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\bspdown\tangents.cpp">
+      <Filter>engine\r2port\bspdown</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\bspdown\physics.cpp">
+      <Filter>engine\r2port\bspdown</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\bspdown\cubemaps.cpp">
+      <Filter>engine\r2port\bspdown</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_assert.cpp">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_checksum.cpp">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_huffman_codes.cpp">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_lzdecompbase.cpp">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_lzdecomp.cpp">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_mem.cpp">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_platform.cpp">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_polar_codes.cpp">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_prefix_coding.cpp">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_symbol_codec.cpp">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_timer.cpp">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_vector.cpp">
+      <Filter>engine\r2port\lzham</Filter>
     </ClCompile>
     <ClCompile Include="engine\filesystem\r1o_vpk_index_cache.cpp">
       <Filter>engine\filesystem</Filter>
