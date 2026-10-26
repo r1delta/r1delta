@@ -19,6 +19,9 @@
     <Filter Include="engine\r2port">
       <UniqueIdentifier>{a2b2c3d4-e5f6-7890-abcd-ef1234567890}</UniqueIdentifier>
     </Filter>
+    <Filter Include="engine\r2port\modelconv">
+      <UniqueIdentifier>{a2b2c3d4-e5f6-7890-abcd-ef1234567893}</UniqueIdentifier>
+    </Filter>
     <Filter Include="engine\r2port\r2tex">
       <UniqueIdentifier>{b9d9e727-7f95-4a1d-ae29-7629ae937720}</UniqueIdentifier>
     </Filter>
@@ -181,6 +184,12 @@
     </ClInclude>
     <ClInclude Include="engine\filesystem\r2_map_patch_source.h">
       <Filter>engine\filesystem</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\filesystem\r2_model_provider.h">
+      <Filter>engine\filesystem</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\modelconv\modelconv.hpp">
+      <Filter>engine\r2port\modelconv</Filter>
     </ClInclude>
     <ClInclude Include="engine\filesystem\r2_material_provider.h">
       <Filter>engine\filesystem</Filter>
@@ -808,6 +817,12 @@
     </ClCompile>
     <ClCompile Include="engine\filesystem\r2_map_patch_source.cpp">
       <Filter>engine\filesystem</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\filesystem\r2_model_provider.cpp">
+      <Filter>engine\filesystem</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\modelconv\modelconv.cpp">
+      <Filter>engine\r2port\modelconv</Filter>
     </ClCompile>
     <ClCompile Include="engine\filesystem\r2_material_provider.cpp">
       <Filter>engine\filesystem</Filter>

@@ -25,6 +25,7 @@
 #include "logging.h"
 #include <filesystem>
 #include "r2_map_provider.h"
+#include "r2_model_provider.h"
 namespace r2port {
 namespace {
 
@@ -987,8 +988,10 @@ void LogProviderReadMetrics(const char* phase)
         static_cast<unsigned long long>(g_providerCallbackMaxUs.load(std::memory_order_relaxed) / 1000),
         static_cast<unsigned long long>(g_providerSlowCallbackCount.load(std::memory_order_relaxed)));
     LogProviderMessage(message);
-    if (phase && std::strcmp(phase, "manual") == 0)
+    if (phase && std::strcmp(phase, "manual") == 0) {
         LogUniqueMaterialMisses();
+        LogR2ModelProviderMetrics(phase);
+    }
 }
 
 bool FilesystemTraceEnabled()

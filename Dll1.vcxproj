@@ -275,6 +275,8 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="engine\filesystem\r2_map_provider.h" />
     <ClInclude Include="engine\filesystem\r2_map_patch_source.h" />
     <ClInclude Include="engine\filesystem\r2_material_provider.h" />
+    <ClInclude Include="engine\filesystem\r2_model_provider.h" />
+    <ClInclude Include="engine\r2port\modelconv\modelconv.hpp" />
     <ClInclude Include="engine\filesystem\r1_map_pack_material_provider.h" />
     <ClInclude Include="engine\r2port\bspdown\bspdown.hpp" />
     <ClInclude Include="engine\r2port\bspdown\internal.hpp" />
@@ -486,6 +488,8 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="engine\filesystem\r2_map_provider.cpp" />
     <ClCompile Include="engine\filesystem\r2_map_patch_source.cpp" />
     <ClCompile Include="engine\filesystem\r2_material_provider.cpp" />
+    <ClCompile Include="engine\filesystem\r2_model_provider.cpp" />
+    <ClCompile Include="engine\r2port\modelconv\modelconv.cpp" />
     <ClCompile Include="engine\filesystem\r1_map_pack_material_provider.cpp" />
     <ClCompile Include="engine\r2port\r2tex\r2tex.cpp">
       <ObjectFileName>$(IntDir)r2tex.obj</ObjectFileName>
