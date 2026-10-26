@@ -150,9 +150,9 @@ static bool MountR2MapCache(const std::filesystem::path& root)
 
     using AddSearchPathFn = void(__fastcall*)(void*, const char*, const char*, int);
     const auto addSearchPath = reinterpret_cast<AddSearchPathFn>(g_CVFileSystem->AddSearchPath);
-    addSearchPath(reinterpret_cast<void*>(g_CVFileSystemInterface), path.c_str(), "GAME", 1);
+    addSearchPath(reinterpret_cast<void*>(g_CVFileSystemInterface), path.c_str(), "GAME", 0);
     mountedPaths.insert(path);
-    r2port::TraceFilesystemCall("AddSearchPath[R2-cache]", path.c_str(), "GAME", 1, "mounted");
+    r2port::TraceFilesystemCall("AddSearchPath[R2-cache]", path.c_str(), "GAME", 0, "mounted-tail");
     return true;
 }
 

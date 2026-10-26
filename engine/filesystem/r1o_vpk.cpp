@@ -250,6 +250,14 @@ static void AddEntry(const std::string& key, VPKEntry&& entry)
 		g_entries.emplace(key, std::move(entry));
 }
 
+static bool VPKParseFailure(const std::filesystem::path& path, const char* reason)
+{
+	const std::string pathText = path.string();
+	r2port::TraceFilesystemCall("R1OVPK_ParseDirectoryVPK", pathText.c_str(),
+		nullptr, 0, "parse-failed", reason);
+	return false;
+}
+
 static bool ParseDirectoryVPK(
 	const std::filesystem::path& path,
 	std::vector<VPKParsedEntry>& parsedEntries,
@@ -257,7 +265,7 @@ static bool ParseDirectoryVPK(
 {
 	std::ifstream stream(path, std::ios::binary);
 	if (!stream)
-		return false;
+		return VPKParseFailure(path, "open");
 
 	uint32_t marker{};
 	uint16_t major{};
@@ -269,13 +277,13 @@ static bool ParseDirectoryVPK(
 		|| marker != kVPKHeaderMagic || (major != 1 && major != 2)
 		|| (major == 2 && minor > 3)
 		|| treeSize > static_cast<uint32_t>(std::numeric_limits<int>::max()))
-		return false;
+		return VPKParseFailure(path, "header");
 	if (!treeSize)
 		return true;
 
 	std::vector<uint8_t> tree(treeSize);
 	if (!ReadExact(stream, tree.data(), tree.size()))
-		return false;
+		return VPKParseFailure(path, "tree-read");
 
 	const std::string dirPath = path.string();
 	const uint8_t* cursor = tree.data();
@@ -286,25 +294,24 @@ static bool ParseDirectoryVPK(
 
 	for (;;) {
 		if (!ReadNullString(cursor, treeEnd, extension))
-			return false;
+			return VPKParseFailure(path, "extension-string");
 		if (extension.empty()) {
 			while (cursor < treeEnd && *cursor == 0)
 				++cursor;
-			return cursor == treeEnd;
+			return cursor == treeEnd || VPKParseFailure(path, "tree-trailing-data");
 		}
+
 
 		for (;;) {
 			if (!ReadNullString(cursor, treeEnd, directory))
-				return false;
+				return VPKParseFailure(path, "directory-string");
 			if (directory.empty())
 				break;
-
 			for (;;) {
 				if (!ReadNullString(cursor, treeEnd, filename))
-					return false;
+					return VPKParseFailure(path, "filename-string");
 				if (filename.empty())
 					break;
-
 				std::string key;
 				if (directory == " ")
 					key = filename + "." + extension;
@@ -319,8 +326,7 @@ static bool ParseDirectoryVPK(
 				if (!ReadMemoryValue(cursor, treeEnd, crc)
 					|| !ReadMemoryValue(cursor, treeEnd, preloadSize)
 					|| !ReadMemoryValue(cursor, treeEnd, packIndex))
-					return false;
-
+					return VPKParseFailure(path, "entry-header");
 				VPKEntry entry;
 				if (keepEntry) {
 					entry.dirPath = dirPath;
@@ -336,19 +342,17 @@ static bool ParseDirectoryVPK(
 						|| !ReadMemoryValue(cursor, treeEnd, chunk.compressedSize)
 						|| !ReadMemoryValue(cursor, treeEnd, chunk.decompressedSize)
 						|| !ReadMemoryValue(cursor, treeEnd, chunkMarker)) {
-						return false;
+						return VPKParseFailure(path, "chunk-header");
 					}
 
 					if (keepEntry)
 						entry.chunks.push_back(chunk);
 					if (chunkMarker == kVPKChunkTerminator)
 						break;
-					if (chunkMarker != 0)
-						return false;
 				}
 
 				if (static_cast<size_t>(treeEnd - cursor) < preloadSize)
-					return false;
+					return VPKParseFailure(path, "preload-size");
 				if (keepEntry)
 					entry.preload.assign(cursor, cursor + preloadSize);
 				cursor += preloadSize;

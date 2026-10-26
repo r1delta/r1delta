@@ -17775,9 +17775,17 @@ static bool __fastcall R1BaseFileSystem_FileExists(void* thisptr, const char* fi
 
 bool R2PortNativeFileExists(const char* fileName)
 {
-	return IsReadableCString(fileName)
-		&& R1BaseFileSystem_FileExistsOriginal
-		&& R1BaseFileSystem_FileExistsOriginal(g_CBaseFileSystemInterface, fileName, "GAME");
+	if (!IsReadableCString(fileName) || !R1BaseFileSystem_FileExistsOriginal)
+		return false;
+
+	thread_local bool checkingNativeExistence = false;
+	if (checkingNativeExistence)
+		return true;
+	checkingNativeExistence = true;
+	const bool exists = R1BaseFileSystem_FileExistsOriginal(
+		g_CBaseFileSystemInterface, fileName, "GAME");
+	checkingNativeExistence = false;
+	return exists;
 }
 
 

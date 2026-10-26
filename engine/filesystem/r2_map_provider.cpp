@@ -782,8 +782,10 @@ public:
         const auto request = ParseMapRequest(normalizedPath);
         if (!request)
             return std::nullopt;
-        if (request->kind == MapRequest::Kind::Bsp)
-            return std::nullopt;
+        if (request->kind == MapRequest::Kind::Bsp) {
+            const FileBytes bsp = ReadConvertedBsp(*request);
+            return bsp ? std::optional<uint64_t>(bsp->size()) : std::nullopt;
+        }
         if (request->kind == MapRequest::Kind::AiGraph)
             return std::nullopt;
 
