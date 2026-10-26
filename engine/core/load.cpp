@@ -42,6 +42,7 @@
 #include "client_port_override.h"
 #include "account_hold.h"
 #include "r1o_runtime_paths.h"
+#include "r2_map_provider.h"
 #include "legacy_ds_sound_tables.h"
 #include "soundscript_parity.h"
 #include "script_sync_parity.h"
@@ -1671,6 +1672,7 @@ void InitAddons() {
 	static bool done = false;
 	if (done) return;
 	done = true;
+	r2port::InstallR2MapProvider();
 	auto engine_base_spec = ENGINE_DLL_BASE;
 	auto filesystem_stdio = IsDedicatedServer() ? G_vscript : G_filesystem_stdio;
 	if (!IsR1ODedicatedServer()) {
