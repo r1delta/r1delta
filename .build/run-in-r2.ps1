@@ -220,13 +220,13 @@ function Start-R2Game {
         'Client' {
             $executable = Join-Path $Root 'Titanfall.exe'
             $workingDirectory = $ClientWorkingDirectory
-            $gameArgs = @('-allowmultiple', '-console', '-dev', '-novid', '-windowed', '-noborder')
+            $gameArgs = @('-multiple', '-allowmultiple', '-console', '-dev', '-novid', '-windowed', '-noborder')
             if ($ClientPort -gt 0) { $gameArgs += @('+clientport', [string] $ClientPort) }
         }
         'Listen' {
             $executable = Join-Path $Root 'Titanfall.exe'
             $workingDirectory = $ClientWorkingDirectory
-            $gameArgs = @('-allowmultiple', '-console', '-dev', '-novid', '-windowed', '-noborder', '+map', $Map)
+            $gameArgs = @('-multiple', '-allowmultiple', '-console', '-dev', '-novid', '-windowed', '-noborder', '+map', $Map)
             if ($ClientPort -gt 0) { $gameArgs += @('+clientport', [string] $ClientPort) }
         }
         'Dedicated' {
