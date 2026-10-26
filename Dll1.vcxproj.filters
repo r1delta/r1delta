@@ -19,6 +19,9 @@
     <Filter Include="engine\r2port">
       <UniqueIdentifier>{a2b2c3d4-e5f6-7890-abcd-ef1234567890}</UniqueIdentifier>
     </Filter>
+    <Filter Include="engine\r2port\r2tex">
+      <UniqueIdentifier>{b9d9e727-7f95-4a1d-ae29-7629ae937720}</UniqueIdentifier>
+    </Filter>
     <Filter Include="engine\r2port\bspdown">
       <UniqueIdentifier>{a2b2c3d4-e5f6-7890-abcd-ef1234567891}</UniqueIdentifier>
     </Filter>
@@ -176,6 +179,9 @@
     <ClInclude Include="engine\filesystem\r2_map_provider.h">
       <Filter>engine\filesystem</Filter>
     </ClInclude>
+    <ClInclude Include="engine\filesystem\r2_material_provider.h">
+      <Filter>engine\filesystem</Filter>
+    </ClInclude>
     <ClInclude Include="engine\r2port\bspdown\bspdown.hpp">
       <Filter>engine\r2port\bspdown</Filter>
     </ClInclude>
@@ -184,6 +190,15 @@
     </ClInclude>
     <ClInclude Include="engine\r2port\bspdown\bcdec.h">
       <Filter>engine\r2port\bspdown</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\r2tex\r2tex.hpp">
+      <Filter>engine\r2port\r2tex</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\r2tex\bcdec.h">
+      <Filter>engine\r2port\r2tex</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\r2tex\rtech_decode.inc">
+      <Filter>engine\r2port\r2tex</Filter>
     </ClInclude>
     <ClInclude Include="engine\r2port\lzham\include\lzham.h">
       <Filter>engine\r2port\lzham</Filter>
@@ -781,6 +796,12 @@
     </ClCompile>
     <ClCompile Include="engine\filesystem\r2_map_provider.cpp">
       <Filter>engine\filesystem</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\filesystem\r2_material_provider.cpp">
+      <Filter>engine\filesystem</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\r2tex\r2tex.cpp">
+      <Filter>engine\r2port\r2tex</Filter>
     </ClCompile>
     <ClCompile Include="engine\r2port\bspdown\bspdown.cpp">
       <Filter>engine\r2port\bspdown</Filter>

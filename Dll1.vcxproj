@@ -273,9 +273,13 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="engine\filesystem\r1o_vpk_index_cache.h" />
     <ClInclude Include="engine\filesystem\r2port_provider.h" />
     <ClInclude Include="engine\filesystem\r2_map_provider.h" />
+    <ClInclude Include="engine\filesystem\r2_material_provider.h" />
     <ClInclude Include="engine\r2port\bspdown\bspdown.hpp" />
     <ClInclude Include="engine\r2port\bspdown\internal.hpp" />
     <ClInclude Include="engine\r2port\bspdown\bcdec.h" />
+    <ClInclude Include="engine\r2port\r2tex\r2tex.hpp" />
+    <ClInclude Include="engine\r2port\r2tex\bcdec.h" />
+    <ClInclude Include="engine\r2port\r2tex\rtech_decode.inc" />
     <ClInclude Include="engine\r2port\lzham\lzham_compat.h" />
     <ClInclude Include="engine\r2port\lzham\include\lzham.h" />
     <ClInclude Include="engine\r2port\lzham\include\lzham_exports.inc" />
@@ -477,6 +481,11 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="engine\filesystem\vpk_async_precache_fix.cpp" />
     <ClCompile Include="engine\filesystem\r2port_provider.cpp" />
     <ClCompile Include="engine\filesystem\r2_map_provider.cpp" />
+    <ClCompile Include="engine\filesystem\r2_material_provider.cpp" />
+    <ClCompile Include="engine\r2port\r2tex\r2tex.cpp">
+      <ObjectFileName>$(IntDir)r2tex.obj</ObjectFileName>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+    </ClCompile>
     <ClCompile Include="engine\r2port\bspdown\bspdown.cpp" />
     <ClCompile Include="engine\r2port\bspdown\tricoll.cpp" />
     <ClCompile Include="engine\r2port\bspdown\collision.cpp" />

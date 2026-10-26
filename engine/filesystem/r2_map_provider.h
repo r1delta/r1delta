@@ -29,6 +29,7 @@ public:
 // Patch adapters read <gamedir>\\r2port\\<map>.patch once its data format is defined.
 bool RegisterMapPatchSource(std::shared_ptr<MapPatchSource> source);
 std::filesystem::path GetR2MapPatchDirectory();
+std::filesystem::path GetR2InstallDirectory();
 void ObserveMapFilePath(std::string_view path);
 // Materializes one allowlisted BSP or entity into the keyed disk fallback.
 // Returns the search-path root on success; empty means the file was unavailable.

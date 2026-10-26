@@ -1,5 +1,6 @@
 #include "engine/logging/logging.h"
 #include "r2_map_provider.h"
+#include "r2_material_provider.h"
 
 #include "engine/filesystem/r1o_vpk.h"
 #include "engine/r2port/bspdown/bspdown.hpp"
@@ -804,17 +805,28 @@ public:
         const auto request = ParseMapRequest(normalizedPath);
         if (!request)
             return {};
-        if (request->kind == MapRequest::Kind::Bsp)
-            return ReadConvertedBsp(*request);
-        if (request->kind == MapRequest::Kind::AiGraph)
-            return ReadMapPatchFile(*request);
+        if (request->kind == MapRequest::Kind::Bsp) {
+            FileBytes data = ReadConvertedBsp(*request);
+            if (data)
+                StartR2MaterialProvider();
+            return data;
+        }
+        if (request->kind == MapRequest::Kind::AiGraph) {
+            FileBytes data = ReadMapPatchFile(*request);
+            if (data)
+                StartR2MaterialProvider();
+            return data;
+        }
 
         const auto state = GetMapState(request->mapName);
         if (state->directoryVpk.empty() || !IsRegularFile(state->directoryVpk))
             return {};
         const std::string package = state->directoryVpk.string();
         const std::string path(request->packagePath);
-        return R1OVPK_ReadDirectoryVPKFile(package.c_str(), path.c_str());
+        FileBytes data = R1OVPK_ReadDirectoryVPKFile(package.c_str(), path.c_str());
+        if (data)
+            StartR2MaterialProvider();
+        return data;
     }
     std::vector<std::string> Enumerate(std::string_view normalizedPattern) override
     {
@@ -938,6 +950,11 @@ std::filesystem::path GetR2MapPatchDirectory()
     const auto gameDirectory = FindGameContentDirectory();
     return gameDirectory.empty() ? std::filesystem::path{} : gameDirectory / "r2port";
 }
+std::filesystem::path GetR2InstallDirectory()
+{
+    return R2InstallDirectory();
+}
+
 std::filesystem::path MaterializeMapCacheFile(std::string_view path)
 {
     const auto normalized = NormalizeProviderPath(path);
@@ -1018,6 +1035,7 @@ void ObserveMapFilePath(std::string_view path)
 void InstallR2MapProvider()
 {
     std::call_once(g_providerInstallOnce, []() {
+        RegisterR2MaterialProvider();
         auto provider = std::make_shared<R2MapProvider>();
         RegisterProvider("maps", provider);
         RegisterProvider("vpk", std::move(provider));

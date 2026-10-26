@@ -36,6 +36,7 @@
 #include "crash_report_context.h"
 #include "r2_map_provider.h"
 
+#include "r2_material_provider.h"
 
 namespace {
 std::atomic<bool> g_cvarInterfacePublished{ false };
@@ -1290,6 +1291,7 @@ void RegisterR1ODediDeltaConVars()
 		return;
 
 	EnsureR1BackingGlobalChangeCallbackInstalled();
+	r2port::RegisterR2TextureCacheConVar();
 
 	static bool s_registered = false;
 	if (s_registered)
