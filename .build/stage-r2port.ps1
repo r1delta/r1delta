@@ -20,7 +20,27 @@ foreach ($name in @('d3d11.dll','GFSDK_SSAO.win64.dll','GFSDK_TXAA.win64.dll')) 
   $path = Join-Path $build $name
   if (Test-Path -LiteralPath $path) { Move-Item -LiteralPath $path -Destination $stubs -Force }
 }
-& (Join-Path $code 'ci\verify_release_payload.ps1') -CorePath 'S:\game\r1delta' -BuildPath $build
+# CORE may contain non-runtime analysis databases. Keep the shared verifier unchanged
+# by passing it a temporary mirror of the runtime files only.
+$verifyCore = Join-Path $env:TEMP ("r2port-core-verify-" + [Guid]::NewGuid().ToString('N'))
+try {
+  foreach ($directory in @('bin', 'bin_nexon')) {
+    New-Item -ItemType Directory -Path (Join-Path $verifyCore $directory) -Force | Out-Null
+  }
+  foreach ($directory in @('bin', 'bin_nexon')) {
+    $sourceDirectory = Join-Path 'S:\game\r1delta' $directory
+    $targetDirectory = Join-Path $verifyCore $directory
+    Get-ChildItem -LiteralPath $sourceDirectory -File |
+      Where-Object { $_.Extension -in @('.dll', '.exe') } |
+      ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $targetDirectory $_.Name)
+      }
+  }
+  Copy-Item -LiteralPath 'S:\game\r1delta\bin_nexon\SHA256SUMS' -Destination (Join-Path $verifyCore 'bin_nexon\SHA256SUMS')
+  & (Join-Path $code 'ci\verify_release_payload.ps1') -CorePath $verifyCore -BuildPath $build
+} finally {
+  if (Test-Path -LiteralPath $verifyCore) { Remove-Item -LiteralPath $verifyCore -Recurse -Force }
+}
 New-Item -ItemType Directory -Path $runtimeDelta -Force | Out-Null
 
 function Copy-RuntimeFile([string] $source, [string] $destinationDirectory) {
