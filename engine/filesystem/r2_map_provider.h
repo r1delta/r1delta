@@ -16,17 +16,23 @@ using BspSha256 = std::array<uint8_t, 32>;
 struct MapPatch {
     BspSha256 sourceBspSha256{};
     std::unordered_map<uint32_t, FileBytes> lumpOverrides;
-    // Keys are normalized game-search paths such as maps/graphs/<map>.ain.
-    std::unordered_map<std::string, FileBytes> fileOverrides;
 };
 
 class MapPatchSource {
 public:
     virtual ~MapPatchSource() = default;
-    virtual std::shared_ptr<const MapPatch> LoadPatch(std::string_view mapName) = 0;
+    virtual std::shared_ptr<const MapPatch> LoadPatch(
+        std::string_view mapName, const BspSha256& sourceBspSha256) = 0;
+    // Optional file override for formats bound to the converted BSP or live map state.
+    virtual FileBytes LoadFileOverride(
+        std::string_view, std::string_view,
+        const BspSha256&, const BspSha256&, std::int32_t, std::int32_t)
+    {
+        return {};
+    }
 };
 
-// Patch adapters read <gamedir>\\r2port\\<map>.patch once its data format is defined.
+// Patch files live under <gamedir>\\r2port\\patches.
 bool RegisterMapPatchSource(std::shared_ptr<MapPatchSource> source);
 std::filesystem::path GetR2MapPatchDirectory();
 std::filesystem::path GetR2InstallDirectory();

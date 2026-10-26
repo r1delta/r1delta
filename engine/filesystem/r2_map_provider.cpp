@@ -1,6 +1,9 @@
 #include "engine/logging/logging.h"
 #include "r2_map_provider.h"
 #include "r2_material_provider.h"
+#include "engine/core/factory.h"
+#include "engine/cvar.h"
+#include "r2_map_patch_source.h"
 
 #include "engine/filesystem/r1o_vpk.h"
 #include "engine/r2port/bspdown/bspdown.hpp"
@@ -100,6 +103,14 @@ struct MapState {
     BspSha256 patchSourceHash{};
     bool patchLoaded{};
     std::shared_ptr<const MapPatch> patch;
+    std::mutex filePatchMutex;
+    bool filePatchLoaded{};
+    uint64_t filePatchGeneration{};
+    BspSha256 filePatchSourceHash{};
+    BspSha256 filePatchConvertedHash{};
+    std::int32_t filePatchMapVersion{};
+    std::int32_t filePatchDeveloperValue{};
+    FileBytes aiGraphFile;
 };
 
 std::once_flag g_installDiscoveryOnce;
@@ -519,7 +530,7 @@ std::shared_ptr<const MapPatch> GetMatchingPatch(
     state->patch.reset();
     for (const auto& source : sources) {
         try {
-            auto patch = source->LoadPatch(state->mapName);
+            auto patch = source->LoadPatch(state->mapName, sourceHash);
             if (patch && patch->sourceBspSha256 == sourceHash) {
                 state->patch = std::move(patch);
                 break;
@@ -652,10 +663,28 @@ void LogServedMap(const std::shared_ptr<MapState>& state, size_t bspSize, uint64
     OutputDebugStringA(buffer);
 }
 
+FileBytes ReadConvertedBsp(const MapRequest& request);
+
+int CurrentDeveloperValue()
+{
+    if (!IsCvarInterfacePublished() || !cvarinterface)
+        return -1;
+    if (IsR1ODedicatedServer()) {
+        if (ConVarR1O* developer = CCVar_FindVar(cvarinterface, "developer"))
+            return developer->m_Value.m_nValue;
+    }
+    else if (OriginalCCVar_FindVar) {
+        if (ConVarR1* developer = OriginalCCVar_FindVar(cvarinterface, "developer"))
+            return developer->m_Value.m_nValue;
+    }
+    return -1;
+}
+
 FileBytes ReadMapPatchFile(const MapRequest& request)
 {
     const auto state = GetMapState(request.mapName);
-    if (!HavePatchSources() || !EnsureSourceHash(state))
+    if (request.kind != MapRequest::Kind::AiGraph
+        || !HavePatchSources() || !EnsureSourceHash(state))
         return {};
 
     BspSha256 sourceHash{};
@@ -665,19 +694,45 @@ FileBytes ReadMapPatchFile(const MapRequest& request)
             return {};
         sourceHash = state->sourceHash;
     }
-    const auto patch = GetMatchingPatch(state, sourceHash);
-    if (!patch)
+
+    const std::string bspPath = "maps/" + state->mapName + ".bsp";
+    const MapRequest bspRequest{ request.mapName, MapRequest::Kind::Bsp, bspPath };
+    const FileBytes converted = ReadConvertedBsp(bspRequest);
+    if (!converted)
         return {};
-    const auto found = patch->fileOverrides.find(std::string(request.packagePath));
-    const FileBytes result = found == patch->fileOverrides.end() ? FileBytes{} : found->second;
-    {
-        std::lock_guard<std::mutex> conversionLock(state->conversionMutex);
-        if (!state->conversionLoading) {
-            std::lock_guard<std::mutex> sourceLock(state->sourceMutex);
-            state->sourceBsp.reset();
+    const BspSha256 convertedHash = p2p::Sha256(converted->data(), converted->size());
+    const std::int32_t mapVersion = pGlobalVarsServer ? pGlobalVarsServer->mapversion : 0;
+    const std::int32_t developerValue = CurrentDeveloperValue();
+    if (mapVersion <= 0 || developerValue < 0)
+        return {};
+
+    auto [sources, generation] = PatchSourcesSnapshot();
+    std::lock_guard<std::mutex> lock(state->filePatchMutex);
+    if (state->filePatchLoaded && state->filePatchGeneration == generation
+        && state->filePatchSourceHash == sourceHash
+        && state->filePatchConvertedHash == convertedHash
+        && state->filePatchMapVersion == mapVersion
+        && state->filePatchDeveloperValue == developerValue)
+        return state->aiGraphFile;
+
+    state->filePatchLoaded = true;
+    state->filePatchGeneration = generation;
+    state->filePatchSourceHash = sourceHash;
+    state->filePatchConvertedHash = convertedHash;
+    state->filePatchMapVersion = mapVersion;
+    state->filePatchDeveloperValue = developerValue;
+    state->aiGraphFile.reset();
+    for (const auto& source : sources) {
+        try {
+            state->aiGraphFile = source->LoadFileOverride(request.mapName, request.packagePath,
+                sourceHash, convertedHash, mapVersion, developerValue);
+            if (state->aiGraphFile)
+                break;
+        }
+        catch (...) {
         }
     }
-    return result;
+    return state->aiGraphFile;
 }
 
 FileBytes ReadConvertedBsp(const MapRequest& request)
@@ -714,8 +769,18 @@ FileBytes ReadConvertedBsp(const MapRequest& request)
 
                 if (const auto patch = GetMatchingPatch(state, sourceHash)) {
                     std::vector<uint8_t> patched;
-                    if (ReplacePatchedLumps(converted, *patch, patched))
+                    if (ReplacePatchedLumps(converted, *patch, patched)) {
                         converted = std::move(patched);
+                        const auto physics = patch->lumpOverrides.find(0x1D);
+                        if (physics != patch->lumpOverrides.end() && physics->second) {
+                            char message[256]{};
+                            _snprintf_s(message, sizeof(message), _TRUNCATE,
+                                "R1Delta: R2 map physics patch applied map=%s lump=0x1D bytes=%zu\n",
+                                state->mapName.c_str(), physics->second->size());
+                            Msg("%s", message);
+                            OutputDebugStringA(message);
+                        }
+                    }
                 }
             }
         }
@@ -1036,10 +1101,10 @@ void InstallR2MapProvider()
 {
     std::call_once(g_providerInstallOnce, []() {
         RegisterR2MaterialProvider();
+        InstallR2MapPatchSource();
         auto provider = std::make_shared<R2MapProvider>();
         RegisterProvider("maps", provider);
         RegisterProvider("vpk", std::move(provider));
     });
 }
-
 } // namespace r2port
