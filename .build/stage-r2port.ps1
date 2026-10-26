@@ -1,4 +1,4 @@
-# Superseded for permanent R2-port tests: use .build\r2-root.ps1 -Stage.
+# Superseded for per-root tests: use .build\r2-root.ps1 -Stage -Root r2-<agent>; never stage into the user's S:\game\r2 play root.
 $ErrorActionPreference = 'Stop'
 $code = 'C:\Users\r3muxd\tmp\r1delta-r2port'
 $build = Join-Path $code '.build\release'

@@ -1,4 +1,5 @@
-# Superseded for permanent R2-port tests: no unstage is needed; use .build\r2-root.ps1 -Reset only to recreate S:\game\r2.
+# Superseded for per-root tests: no unstage is needed; use .build\r2-root.ps1 -Reset -Root r2-<agent> only to recreate an agent root.
+# Never reset or unstage the user's S:\game\r2 play root.
 $ErrorActionPreference = 'Stop'
 # Restores every runtime file that stage-r2port.ps1 replaced, from its '.pre-r2port-backup' copy.
 # Files that did not exist before staging (no backup) are left alone.

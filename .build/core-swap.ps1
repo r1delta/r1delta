@@ -1,4 +1,5 @@
-# Superseded for permanent R2-port tests: the pinned CORE lives in S:\game\r2\r1delta; use .build\r2-root.ps1.
+# Superseded for per-root tests: each agent has an independent pinned CORE; use .build\r2-root.ps1 -Create/-Reset -Root r2-<agent>.
+# Do not use this legacy swap flow against the user's S:\game\r2 play root.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]

@@ -14,45 +14,63 @@ The converter repacks the cubemaps into the BSP using R1 encoding. The provider 
 The R2 material provider starts opening/building the RPak index on a background thread when the filesystem provider is registered, before a map request. A cold index logs that its first-use build may take several seconds; the completed index is persisted under `<gamedir>/r2port/cache/<R2-install-fingerprint>`, where the fingerprint includes the R2 root and each RPak name, size, and modification time. After map prefetch identifies material and texture paths, the provider records them in a read-mostly hash table protected by a shared mutex; unknown names return a miss without touching the RPak index or conversion queue. Known-path opens wait at most 20 ms for an asset conversion, then return a miss if the work is not ready.
 
 After the converted BSP is served, the provider queues BSP material-name parsing and VMT/VTF conversion on a worker pool capped at four threads, with a one-worker minimum and `cores - 2` workers when that is between one and four. Its queue is capped at 8192 jobs and generated-file LRU at 16 MiB; the decoded RPak family cache defaults to 256 MiB and is configurable with `r2port_tex_cache_mb`. R1 remains first and the provider does not activate for stock R1 maps. Startup, index, callback, conversion, and signon timings, plus material/texture provider hits and misses, are logged with steady-clock timestamps; callbacks over 250 ms log a warning.
-The VPK hook checks the provider's read-mostly name index before issuing its extra native filesystem existence probe, so unrelated misses do not trigger another disk lookup. Set `R1DELTA_R2PORT_TRACE_MISSES=1` to log up to 100 exact unique missed material paths and aggregate request call, unique-name, average-time, and maximum-time counts.
+The VPK hook checks the provider's read-mostly name index before issuing its extra native filesystem existence probe, so unrelated misses do not trigger another disk lookup. `R1DELTA_R2PORT_TRACE_MISSES` accepts one or more comma-, semicolon-, or pipe-separated path substrings; it records aggregate counts for all material requests and tracks paths only when they match. `R1DELTA_R2PORT_TRACE_FS` uses the same path-substring filter and records up to 4096 matching filesystem calls in a bounded ring without per-call logging. Values such as `0`, `1`, `false`, `true`, `all`, and `*` do not enable tracing. Run `r2port_dump_stats` to print provider counters and the captured trace; normal runs leave both traces disabled.
 
 `<gamedir>/r2port/patches` may contain `<map>.r2patch` physics patches and `<map>.ain.r2patch` AI-graph packages. Physics patches replace lump `0x1D` only when their SHA-256 matches the exact source R2 BSP; AI graphs are matched against the converted BSP after any physics replacement. The provider supplies the live map version and a zero CRC only when `developer` is 0, because the developer-mode entity CRC path is not reproduced. Missing, malformed, or mismatched packages fall back to the converter's physics stub and no AI graph.
 
 When the engine's VPK read path reports a miss before an ordinary filesystem open, the provider writes only that requested BSP or entity file to `<gamedir>/r2port_cache/<map>-<package-fingerprint>/maps/` and adds the fingerprinted directory as a tail `GAME` search path, after R1 paths. The fingerprint is SHA-256 over the matching R2 directory VPK and chunk-file names, sizes, and modification times. Before materializing, the hook checks the original R1 filesystem so existing R1 files continue to win. The cache stays under `<gamedir>` because the engine mounts it as a `GAME` search path; it contains only generated BSP and entity files and is removable with `r2port_clear_cache`.
 
-## Test root
+## Master server policy
 
-`S:\game\r2` is the user's permanent play root. Agents use `S:\game\r2dev` so their staging and test windows never write into the user's tree. Both roots use the pinned CORE release commit and require no per-window stage/unstage or CORE swap.
+R2 map servers are not advertised in this branch. The heartbeat POST, delist DELETE, and heartbeat sender are disabled. The client server-list GET remains for browsing, and the `/server-token` request remains for client authentication; it only obtains a token and does not publish server metadata. Revert the broadcast-disable commit before shipping if master publication is approved.
 
-Create, stage, and verify the agent root with:
+## Test roots
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .build\r2-root.ps1 -Create -Root r2dev
-powershell -ExecutionPolicy Bypass -File .build\r2-root.ps1 -Stage -Root r2dev
-powershell -ExecutionPolicy Bypass -File .build\r2-root.ps1 -Verify -Root r2dev
-```
+The user's `S:\game\r2` is their separate play tree; they can launch it directly through `S:\game\r2\r1delta.exe`, with `S:\game\r2\r1delta` beside it. Agents MUST NOT stage, reset, or run tests from it. Agents also do not modify `S:\game\mp` or `S:\game\r1delta`. `S:\game\r2dev` is the golden template and staging reference; agents do not launch tests from it.
 
-Both scripts default to `-Root r2dev`. `-Status -Root r2dev` reports the layout and private disk use; `-Reset -Root r2dev` recreates only the agent root. If an existing agent root still has shared writable CORE directories, use `-Repair -Root r2dev`; it preserves the staged launch files and `bin_delta` while making the writable directories private. `-Stage` keeps a one-time `.pre-r2port-backup` beside each existing file it replaces; reset removes those backups with the selected root. `-Verify` rejects unsafe reparse targets and probes temporary writes in the agent's writable paths.
+Agent roots:
 
-The launch-root `bin`, `r1`, and `tools` directories are junctions; root files are hardlinks except executables replaced by staging. The CORE checkout keeps pinned scripts, resources, and maps locally, has a private `bin_delta` copy, and keeps writable `bin`, `materials`, `models`, `sound`, `cfg`, `config`, and `admin` directories private. `shaders`, `r2port`, `r2port\cache`, and `r2port_cache` are local write locations. The independent clone keeps `core.autocrlf=false` so checked-out bytes match the pinned blobs. Only unchanged `bin_nexon` and `vgui` content may be shared read-only from the original CORE tree. `crash` and `crashes` are real directories.
+- `r2-provider` for ProviderHook
+- `r2-texlib` for TexLib
+- `r2-shader` shared by ShaderLab and RootBuilder
+- `r2-lead` for the lead
 
-To create the user's play root from scratch, the lead may run these commands only after confirming no process is using `S:\game\r2`:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .build\r2-root.ps1 -Create -Root r2
-powershell -ExecutionPolicy Bypass -File .build\r2-root.ps1 -Stage -Root r2
-powershell -ExecutionPolicy Bypass -File .build\r2-root.ps1 -Verify -Root r2
-```
-
-`-Reset -Root r2` removes and recreates that root; use it only when the user's game is closed and the lead explicitly authorizes it. Stage the new build afterward. The user can play from `S:\game\r2` directly by running `r1delta.exe`, `Titanfall.exe`, or `R1Delta_DS.exe` there.
-
-Launch the agent root directly or use the path-owned harness (which defaults to `r2dev`):
+Create, stage, and verify an agent root from the pinned template:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .build\run-in-r2.ps1 -Mode Client
-powershell -ExecutionPolicy Bypass -File .build\run-in-r2.ps1 -Mode Listen -Map mp_box
-powershell -ExecutionPolicy Bypass -File .build\run-in-r2.ps1 -Mode Dedicated -Map mp_box -Port 27050 -Seconds 60 -FatalScriptErrors -Cdb
+powershell -ExecutionPolicy Bypass -File .build\r2-root.ps1 -Create -Root r2-provider -From r2dev
+powershell -ExecutionPolicy Bypass -File .build\r2-root.ps1 -Stage -Root r2-provider
+powershell -ExecutionPolicy Bypass -File .build\r2-root.ps1 -Verify -Root r2-provider
+powershell -ExecutionPolicy Bypass -File .build\r2-root.ps1 -Status -Root r2-provider
 ```
 
-The harness adds `-multiple -allowmultiple` to every Client and Listen launch. The agent executables are `S:\game\r2dev\r1delta.exe`, `S:\game\r2dev\Titanfall.exe`, and `S:\game\r2dev\R1Delta_DS.exe`. Pass `-Root r2` only for lead-authorized tests; agents must leave the user's root alone.
+Use `-Reset -Root <agent-root>` to remove and recreate only that agent root, then run `-Stage` again before launching. Use `-Remove -Root <agent-root>` to delete one agent root safely, `-List` to report all roots, and `-Status -Root <agent-root>` to show its creation time, private payload MiB, shared hardlink MiB, and running process count. Creation is refused when `C:` has less than 3 GiB free. `r2dev` is template-only; `-Create`, `-Reset`, and `-Remove` do not operate on it.
+
+Each launch root has root files hardlinked from `S:\game\mp`, `bin`/`r1`/`tools` junctions like `mp`, and private real `crash`/`crashes` directories. Each CORE is an independent clone pinned to `316993bd0142e706ea5386943530f2b8d2c711dd` with `core.autocrlf=false`; `scripts`, `resource`, and `maps` are private checkouts, while `bin_delta` and staged executables are private copies. Large existing CORE content under `bin`, `materials`, `models`, `sound`, `cfg`, `config`, `admin`, `bin_nexon`, and `vgui` is in real directories whose existing files are hardlinks to the template. Hardlinks share disk blocks and file metadata, not directory entries: agents may add files or unlink their own link, but MUST NOT open an existing hardlinked file for writing. Fixture installers unlink the agent root's file before replacing it and restore the original from `r2dev` on removal. Runtime additions and fixture directories are locally excluded from Git status; tracked files are still checked against pinned Git blobs. `-Verify` checks layout, hardlink identities, sample blob hashes, private write probes, and absence of IDA databases.
+
+`-Stage -Root <agent-root>` updates only that root and refuses while a process is running from the same root; other agent roots may stay active. There is no shared `GAME.lock` or stage/unstage/core-swap flow for agent runs. `-Remove` unlinks hardlinks and removes junctions without following them.
+
+Run clients or servers with the assigned owner and root. Host/client UDP ports are allocated from the owner's ranges; MCP TCP is allocated and reserved when `-McpPort` is supplied. Explicit port parameters must be in the owner's ranges. The registry at `C:\Users\r3muxd\tmp\r2port\runs\` detects port collisions across concurrent runs. Roots are isolated from each other, but loose fixtures affect every run from the same root.
+
+| Owner | Root | MCP TCP | Host/server UDP | Client UDP |
+|---|---|---:|---:|---:|
+| ProviderHook | `r2-provider` | 8760-8769 | 27060-27069 | 27090-27099 |
+| TexLib | `r2-texlib` | 8780-8789 | 27080-27089 | 27080-27089 |
+| ShaderLab | `r2-shader` | 8770-8779 | 27070-27079 | 27070-27079 |
+| RootBuilder | `r2-shader` | 8790-8799 | 27110-27119 | 27110-27119 |
+| Lead | `r2-lead` | — | 27050-27059 | 27050-27059 |
+
+Headless dedicated map/script check (default hidden window, at most 180 seconds):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .build\run-in-r2.ps1 -Owner RootBuilder -Root r2-shader -Mode Dedicated -Map mp_box -Seconds 15 -FatalScriptErrors
+```
+
+For a client that starts at the menu and receives its first map command over MCP, use `-Mode Client` without `+map`; MCP clients omit `-console` by default and start minimized. Example:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .build\run-in-r2.ps1 -Owner ProviderHook -Root r2-provider -Mode Client -McpPort 8760 -WindowStyle Minimized -Seconds 180 -FatalScriptErrors -GameArguments @('-w','1280','-h','720','+r_blurmenubg','0','+r_drawvgui','0')
+```
+
+`run-in-r2.ps1` identifies and stops only processes whose executable path is under the selected root (accepting its `S:` and physical `C:` aliases), adds `-multiple -allowmultiple` for client/listen launches, and caps a run at 180 seconds. `-NoConsole` overrides the mode default; `-WindowStyle` accepts `Normal`, `Minimized`, or `Hidden` (client/listen default minimized, dedicated default hidden). Use the legacy dedicated server for short map/script checks; the stock `mp_box` baseline is a 15-20 second check, once per staged build. Use client UI only when rendered frames are required.
 
