@@ -203,11 +203,27 @@ void AddCandidate(std::vector<std::filesystem::path>& candidates,
         candidates.emplace_back(error ? path : normalized);
 }
 
+bool HasCommonClientVpkDirectory(const std::filesystem::path& vpkDirectory)
+{
+    constexpr std::string_view suffix = "client_mp_common.bsp.pak000_dir.vpk";
+    std::error_code error;
+    std::filesystem::directory_iterator item(vpkDirectory, error);
+    const std::filesystem::directory_iterator end;
+    for (; !error && item != end; item.increment(error)) {
+        if (!IsRegularFile(item->path()))
+            continue;
+        const std::string filename = LowerAscii(item->path().filename().string());
+        if (filename.size() >= suffix.size()
+            && filename.compare(filename.size() - suffix.size(), suffix.size(), suffix) == 0)
+            return true;
+    }
+    return false;
+}
 bool IsValidR2Install(const std::filesystem::path& root)
 {
     if (root.empty()
         || !IsRegularFile(root / "bin" / "x64_retail" / "rtech_game.dll")
-        || !IsRegularFile(root / "vpk" / "client_mp_common.bsp.pak000_dir.vpk")
+        || !HasCommonClientVpkDirectory(root / "vpk")
         || !IsRegularFile(root / "vpk" / "client_mp_common.bsp.pak000_000.vpk")
         || IsRegularFile(root / "r1" / "gameinfo.txt"))
         return false;
