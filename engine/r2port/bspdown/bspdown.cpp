@@ -153,15 +153,16 @@ void convertWorldLights(Ctx& c) {
     if (c.opt.worldLightFlagBit2) {
         size_t set = 0;
         for (size_t i = 0; i < n; i++) {
-            int32_t flags;
+            int32_t flags, type;
             std::memcpy(&flags, &l[i * 100 + 88], 4);
-            if (flags != 0 && !(flags & 2)) {
+            std::memcpy(&type, &l[i * 100 + 52], 4);
+            if ((type == 1 || type == 2) && !(flags & 2)) {
                 flags |= 2;
                 std::memcpy(&l[i * 100 + 88], &flags, 4);
                 set++;
             }
         }
-        c.say("[rule 8] world lights flags: set bit 0x2 on %zu of %zu lights with non-zero flags (stock R1 maps have it on every light except the sun/sky entries, R2 never sets it; meaning unknown, default off, enable with --worldlight-flag2)", set, n);
+        c.say("[rule 8] world lights flags: set bit 0x2 on %zu of %zu lights (point and spot lights only: stock R1 maps have it on every type 1/2 light and on none of the type 3/5 sun/sky entries, R2 never sets it; effect unknown, default off, enable with --worldlight-flag2)", set, n);
     }
     c.say("[rule 8] world lights (0x36): %zu lights, lump version %u (%zu byte records) -> version 1 (100 byte records); trailing %zu bytes per record dropped",
           n, c.version[L_WORLDLIGHTS], rec, rec - 100);
@@ -218,6 +219,7 @@ std::vector<uint8_t> DowngradeBsp(const uint8_t* data, size_t size, const Option
     convertPhysics(c);
     convertPhysicsTriangles(c);
     convertCubemaps(c);
+    convertShadow(c);
     reportResidualBounds(c);
 
     if (c.opt.dropR2OnlyLumps) {

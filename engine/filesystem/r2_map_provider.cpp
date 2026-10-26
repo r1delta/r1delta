@@ -76,7 +76,12 @@ constexpr uint32_t kGameLump = 0x23;
 
 // Folded into the on-disk cache fingerprint together with entity_rewrite::kRewriteVersion.
 // Bump when the vendored bspdown converter or the provider's BSP post-processing changes output.
-constexpr uint32_t kConvertedBspCacheVersion = 1;
+constexpr uint32_t kConvertedBspCacheVersion = 2;
+
+// Multiplier applied to the R2 BC6H cubemap values before the R1 encoding (bspdown rule 13). 1/6 is a
+// placeholder until the real value is derived; changing it changes every converted BSP, so bump
+// kConvertedBspCacheVersion with it.
+constexpr float kCubemapScale = 1.0f / 6.0f;
 
 struct BspLumpHeader {
     uint32_t offset;
@@ -1000,6 +1005,20 @@ FileBytes ReadMapPatchFile(const MapRequest& request)
     return state->aiGraphFile;
 }
 
+// The options the provider converts with. They equal bspdown's own defaults, which is also what the
+// bspdown.exe command line uses without flags, so the provider and the CLI produce the same BSP;
+// they are spelled out so a change of a library default cannot silently change what the game loads.
+bspdown::Options R2ConverterOptions()
+{
+    bspdown::Options options;
+    options.cubemapScale = kCubemapScale;
+    options.worldLightFlagBit2 = false;
+    options.keepPropFlag10 = false;     // rule 16: clear static prop flag 0x10 (R1 reads it as "shadow caster only, not drawn")
+    options.csmRebase = false;          // rule 17: shadow data options stay off
+    options.emptyShadowMeshes = false;
+    return options;
+}
+
 FileBytes ReadConvertedBsp(const MapRequest& request)
 {
     const auto state = GetMapState(request.mapName);
@@ -1027,7 +1046,7 @@ FileBytes ReadConvertedBsp(const MapRequest& request)
             }
             if (source) {
                 const auto started = std::chrono::steady_clock::now();
-                bspdown::Options options;
+                const bspdown::Options options = R2ConverterOptions();
                 bspdown::Report report;
                 converted = bspdown::DowngradeBsp(source->data(), source->size(), options, &report);
                 RewriteConvertedBspEntities(state->mapName, converted);

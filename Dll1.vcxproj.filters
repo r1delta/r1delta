@@ -860,6 +860,9 @@
     <ClCompile Include="engine\r2port\bspdown\cubemaps.cpp">
       <Filter>engine\r2port\bspdown</Filter>
     </ClCompile>
+    <ClCompile Include="engine\r2port\bspdown\shadow.cpp">
+      <Filter>engine\r2port\bspdown</Filter>
+    </ClCompile>
     <ClCompile Include="engine\r2port\entity_rewrite.cpp">
       <Filter>engine\r2port</Filter>
     </ClCompile>

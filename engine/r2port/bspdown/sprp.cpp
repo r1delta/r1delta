@@ -100,6 +100,14 @@ Bytes convertSprp(Ctx& c, const Bytes& payload) {
     appendRaw(res, numProps);
     appendRaw(res, unk1);
     appendRaw(res, unk2);
+    std::vector<uint32_t> modelCount(numModels ? numModels : 1, 0);
+    for (uint32_t k = 0; k < numProps; k++) {
+        uint16_t mn;
+        std::memcpy(&mn, &payload[o + (size_t)k * sizeof(PropR2) + 0x1C], 2);
+        if (mn < numModels) modelCount[mn]++;
+    }
+    const auto pm = c.opt.props;
+    size_t hidden = 0, flag10Cleared = 0;
     size_t badScale = 0, modelOob = 0;
     res.reserve(res.size() + (size_t)numProps * sizeof(PropR1));
     for (uint32_t k = 0; k < numProps; k++) {
@@ -122,6 +130,18 @@ Bytes convertSprp(Ctx& c, const Bytes& payload) {
         q.scale = p.scale;
         q.collisionAdd = p.collisionAdd;
         q.collisionRemove = p.collisionRemove;
+        {
+            bool hide = pm == Options::PropMode::HideAll ||
+                        (pm == Options::PropMode::HideScatter && p.modelName < numModels && modelCount[p.modelName] >= c.opt.scatterMinCount);
+            if (hide) {
+                q.scale = 0.0001f;
+                hidden++;
+            }
+            if (!c.opt.keepPropFlag10 && (q.flags & 0x10) && !(q.flags & 0x40)) {
+                q.flags &= (uint8_t)~0x10;
+                flag10Cleared++;
+            }
+        }
         if (p.modelName >= numModels) modelOob++;
         if (!(p.scale > 0.0f)) badScale++;
         appendRaw(res, q);
@@ -132,6 +152,11 @@ Bytes convertSprp(Ctx& c, const Bytes& payload) {
           numModels, numProps, numUnk3, unk1, unk2);
     c.say("[rule 5] sprp defaults for fields R2 lacks: first_leaf 0, num_leaves 0, fade_distance_max = fade_distance_min = R2 value at +0x24, forced_fade_scale 1.0, cpu/gpu level 0,0,0,0, disable_x360 0 (what every stock R1 prop has, except the fade distance: R1 stores -1 or a large value)");
     c.say("[rule 5] collision_flags_add/remove copied unchanged (R2 bit meanings, see rule 9); %zu props have a non-positive scale", badScale);
+    c.say("[rule 16] prop flag bit 0x10: %s on %zu of %u props (R1 reads it as 'not drawn in the main pass, shadow caster only'; kept on props that also carry 0x40, the stock R1 vista combination 0x54)",
+          c.opt.keepPropFlag10 ? "kept (--keep-prop-flag10)" : "cleared", flag10Cleared, numProps);
+    if (pm != Options::PropMode::Keep)
+        c.say("[rule 16] diagnostic prop variant (%s): %zu props scaled to 0.0001; prop count and order unchanged (object reference lumps index props); scatter threshold %u instances",
+              pm == Options::PropMode::HideAll ? "hide-all" : "hide-scatter", hidden, c.opt.scatterMinCount);
     return res;
 }
 

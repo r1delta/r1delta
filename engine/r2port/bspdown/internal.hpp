@@ -243,6 +243,7 @@ void convertTricoll(Ctx& c);
 void convertStaticProps(Ctx& c);
 void convertVertexFrames(Ctx& c);  // rule 11, runs after convertMeshes
 void convertCubemaps(Ctx& c);  // rule 13
+void convertShadow(Ctx& c);  // rule 17, shadow environments / CSM tree / shadow meshes
 void convertPhysics(Ctx& c);  // rule 12
 void convertPhysicsTriangles(Ctx& c);  // rule 14, header-count-aware all-absent table
 bool physicsHasWorldSolids(const Bytes& lump, std::string* why);

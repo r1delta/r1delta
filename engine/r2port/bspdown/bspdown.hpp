@@ -81,6 +81,29 @@ struct Options {
 
     // R1 aborts map load above this many world lights.
     uint32_t maxWorldLights = 4064;
+
+    // Rule 16: static prop flag bit 0x10. R2 sets it on 14,138 of the 16,183 mp_glitch props (Source NO_SHADOW meaning). The R1 loader
+    // (sub_18018B710) stores (flags & 0x10) == 0 at prop+58 and the prop drawers (sub_18018D7A0 / sub_18018F1D0) draw a prop in the main
+    // pass only when that is 1, in the shadow pass always: in R1 the bit means "shadow caster only, not drawn". Default: clear the bit.
+    // keepPropFlag10 = true copies it unchanged (the behaviour before rule 16).
+    bool keepPropFlag10 = false;
+
+    // Diagnostic variants (default keeps all props):
+    //   HideScatter:  props of models with at least scatterMinCount instances get scale 0.0001
+    //                 (prop count and indices stay valid: object reference lumps index props)
+    //   HideAll:      every prop gets scale 0.0001
+    enum class PropMode { Keep, HideScatter, HideAll };
+    PropMode props = PropMode::Keep;
+    uint32_t scatterMinCount = 500;
+
+    // Rule 17: shadow data (lumps 0x05, 0x63, 0x64, 0x7C..0x7F). R2 stores one or more shadow environments
+    // (lump 0x05) with their CSM aabb nodes / object refs / shadow meshes concatenated; R1 has no such table and
+    // starts the CSM tree at node 0 and the shadow meshes at 0.
+    //   csmRebase:    keep only the last (real) environment: nodes, object refs, shadow meshes and their indices
+    //                 are rebased so the root is node 0 (default off)
+    //   emptyShadowMeshes: write lumps 0x7C..0x7F empty (default off)
+    bool csmRebase = false;
+    bool emptyShadowMeshes = false;
 };
 
 // Per-rule human readable report. One entry per line.
