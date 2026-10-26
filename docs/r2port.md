@@ -19,3 +19,24 @@ After the converted BSP is served, the provider queues BSP material-name parsing
 
 When the engine's VPK read path reports a miss before an ordinary filesystem open, the provider writes only that requested BSP or entity file to `<gamedir>/r2port_cache/<map>-<package-fingerprint>/maps/` and adds the fingerprinted directory as a tail `GAME` search path, after R1 paths. The fingerprint is SHA-256 over the matching R2 directory VPK and chunk-file names, sizes, and modification times. Before materializing, the hook checks the original R1 filesystem so existing R1 files continue to win. The cache stays under `<gamedir>` because the engine mounts it as a `GAME` search path; it contains only generated BSP and entity files and is removable with `r2port_clear_cache`.
 
+## Test root
+
+Use the permanent `S:\game\r2` installation for R2-port work. It has a pinned, independent CORE checkout; it does not stage into or swap files in the shared `S:\game` runtime. Create and stage it with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .build\r2-root.ps1 -Create
+powershell -ExecutionPolicy Bypass -File .build\r2-root.ps1 -Stage
+powershell -ExecutionPolicy Bypass -File .build\r2-root.ps1 -Verify
+```
+
+`-Status` reports the layout and private disk use. `-Reset` recreates only `S:\game\r2`. The root `bin`, `r1`, and `tools` directories and unchanged large CORE directories are junctions; CORE directories that differ from the source are private checkouts. Launch-root files are hardlinks except executables replaced by staging. The pinned scripts, resources, maps, and `bin_delta` copy are local; `crash` and `crashes` are real directories.
+
+Launch from the permanent root directly, or use the bounded/path-owned harness:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .build\run-in-r2.ps1 -Mode Client
+powershell -ExecutionPolicy Bypass -File .build\run-in-r2.ps1 -Mode Listen -Map mp_box
+powershell -ExecutionPolicy Bypass -File .build\run-in-r2.ps1 -Mode Dedicated -Map mp_box -Port 27050 -Seconds 60 -FatalScriptErrors -Cdb
+```
+
+The launcher is `S:\game\r2\r1delta.exe`; client/listen and dedicated executables are `S:\game\r2\Titanfall.exe` and `S:\game\r2\R1Delta_DS.exe`. No stage/unstage or CORE swap is needed per window. You can play from `S:\game\r2` directly.

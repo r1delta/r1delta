@@ -1,3 +1,4 @@
+# Superseded for permanent R2-port tests: use .build\r2-root.ps1 -Stage.
 $ErrorActionPreference = 'Stop'
 $code = 'C:\Users\r3muxd\tmp\r1delta-r2port'
 $build = Join-Path $code '.build\release'
