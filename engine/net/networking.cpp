@@ -9,6 +9,10 @@
 #include "bitbuf.h"
 #include "compression.h"
 #include "p2p/p2p_identity.h"
+#include "engine/filesystem/r2port_provider.h"
+#include "engine/filesystem/r2_material_provider.h"
+
+#include <string>
 
 #include <intrin.h>
 #pragma intrinsic(_ReturnAddress)
@@ -68,6 +72,28 @@ __int64 CNetChan__SendDatagramLISTEN_Part2_Hook(__int64 thisptr, unsigned int le
     // Make sure this is a client netchan
     if ((*(uint8_t*)(((uintptr_t)thisptr) + 216) > 0))
         return original_fn(thisptr, length, SendToResult);
+    typedef char* (__fastcall* GetBaseClientFn)(int slot);
+    const auto base_client = reinterpret_cast<GetBaseClientFn>(G_engine + 0x5F470)(-1);
+    const int signon_state = base_client
+        ? *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(base_client) + 116) : -1;
+    static int last_logged_signon_state = -1;
+    if (base_client && signon_state != last_logged_signon_state) {
+        const std::string map_name = r2port::ActiveMapName();
+        if (!map_name.empty()) {
+            char message[768]{};
+            _snprintf_s(message, sizeof(message), _TRUNCATE,
+                "R1Delta: R2 client signon map=%s state=%d plat-time=%.3f map-elapsed-ms=%llu\n",
+                map_name.c_str(), signon_state, Plat_FloatTime(),
+                static_cast<unsigned long long>(r2port::ActiveMapElapsedMilliseconds()));
+            Msg("%s", message);
+            OutputDebugStringA(message);
+            if (signon_state == 8) {
+                r2port::LogProviderReadMetrics("signon-full");
+                r2port::LogR2TextureProviderMetrics("signon-full");
+            }
+        }
+        last_logged_signon_state = signon_state;
+    }
 
     // The engine's own "sent packet - %d bytes" print in the CNetChan send
     // path fires constantly during the hang and never during healthy play:
@@ -95,10 +121,8 @@ __int64 CNetChan__SendDatagramLISTEN_Part2_Hook(__int64 thisptr, unsigned int le
     // state is the +116 field of the client state object GetBaseClient(-1)
     // returns (engine.dll+0x5F470); G_engine+0x2966168 is the host state
     // (server_state_t, 2 == ss_active) and can never equal 8.
-    typedef char* (__fastcall* GetBaseClientFn)(int slot);
-    const auto base_client = reinterpret_cast<GetBaseClientFn>(G_engine + 0x5F470)(-1);
-    if (base_client &&
-        *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(base_client) + 116) == 8) {
+
+    if (base_client && signon_state == 8) {
         // Restart the window so the signon stream cannot trip it right after.
         g_last_packet_size = -1;
         return original_fn(thisptr, length, SendToResult);
@@ -112,6 +136,18 @@ __int64 CNetChan__SendDatagramLISTEN_Part2_Hook(__int64 thisptr, unsigned int le
     else if (current_time - g_same_size_since > STUCK_DELAY &&
              current_time - g_last_retry_time >= RETRY_DELAY) {
         Warning("Circuit breaker tripped due to packets!\n");
+        const std::string map_name = r2port::ActiveMapName();
+        if (!map_name.empty()) {
+            char message[768]{};
+            _snprintf_s(message, sizeof(message), _TRUNCATE,
+                "R1Delta: R2 load circuit-breaker map=%s plat-time=%.3f map-elapsed-ms=%llu\n",
+                map_name.c_str(), current_time,
+                static_cast<unsigned long long>(r2port::ActiveMapElapsedMilliseconds()));
+            Msg("%s", message);
+            OutputDebugStringA(message);
+        }
+        r2port::LogProviderReadMetrics("circuit-breaker");
+        r2port::LogR2TextureProviderMetrics("circuit-breaker");
         // Call the handler directly: "retry" through the console resolves via
         // the alias table, so a user alias silently disabled this.
         CL_Retry_f();

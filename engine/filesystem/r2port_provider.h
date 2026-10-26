@@ -28,8 +28,11 @@ std::optional<uint64_t> Size(std::string_view path);
 FileBytes ReadAll(std::string_view path);
 std::vector<std::string> Enumerate(std::string_view pattern);
 
-// Keeps only recently used provider data, and discards it when a new provider map is opened.
+// Resets the shared cache and timing window when map loading starts.
 void SetActiveMap(std::string_view mapName);
+std::string ActiveMapName();
+std::uint64_t ActiveMapElapsedMilliseconds();
+void LogProviderReadMetrics(const char* phase);
 bool FilesystemTraceEnabled();
 void TraceFilesystemCall(
     const char* functionName,

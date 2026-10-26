@@ -2,6 +2,7 @@
 // Local adaptation: family cache size is configurable with a 256 MiB default.
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -23,10 +24,12 @@ struct Material {
 };
 
 // Opens an R2 install and loads or builds the persistent asset index under cacheDir.
+// The optional cacheHit output is true only when an existing index matched the install.
 // The global database is immutable after Open; concurrent conversion calls are supported.
 bool Open(const std::filesystem::path& installDir,
           const std::filesystem::path& cacheDir,
-          std::string* error = nullptr);
+          std::string* error = nullptr,
+          bool* cacheHit = nullptr);
 
 void SetFamilyCacheLimitMiB(std::uint32_t megabytes) noexcept;
 
@@ -39,9 +42,13 @@ bool ConvertTexture(std::string_view name, std::vector<std::uint8_t>& vtf,
 bool ConvertMaterial(std::string_view name, Material& material,
                      std::string* error = nullptr);
 
-// Reads the BSP texture-data name table. The optional R2 .stbsp is a mip-usage
-// prioritization table, not a complete material/texture manifest, so it is not merged.
+// Reads the BSP texture-data name table from a file or in-memory BSP image.
+// The optional R2 .stbsp is a mip-usage prioritization table, not a complete
+// material/texture manifest, so it is not merged.
 bool ListMapMaterials(const std::filesystem::path& bspPath,
+                      std::vector<std::string>& names,
+                      std::string* error = nullptr);
+bool ListMapMaterials(const std::uint8_t* bspData, std::size_t bspSize,
                       std::vector<std::string>& names,
                       std::string* error = nullptr);
 

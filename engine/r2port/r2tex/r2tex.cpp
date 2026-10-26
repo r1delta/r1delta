@@ -760,8 +760,9 @@ bool buildIndex(Database& db, std::string& error) {
     return true;
 }
 
-bool loadIndex(Database& db, std::string& error) {
-    if (cacheMatches(db.cacheFile, db, error)) return true;
+bool loadIndex(Database& db, std::string& error, bool& cacheHit) {
+    cacheHit = cacheMatches(db.cacheFile, db, error);
+    if (cacheHit) return true;
     error.clear();
     if (!buildIndex(db, error)) return false;
     std::string saveError;
@@ -1306,48 +1307,78 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
     return true;
 }
 
-bool parseBspNames(const fs::path& path, std::vector<std::string>& names, std::string& error) {
-    std::vector<std::uint8_t> bytes;
-    if (!readWholeFile(path, bytes, error)) return false;
+bool parseBspNames(const std::uint8_t* bsp, std::size_t bspSize,
+                   std::vector<std::string>& names, std::string& error) {
+    names.clear();
     constexpr std::size_t headerBytes = 16 + 128 * 16;
-    if (bytes.size() < headerBytes || std::memcmp(bytes.data(), "rBSP", 4) != 0) { error = "not a Titanfall Respawn BSP"; return false; }
-    const std::uint32_t version = u32(bytes.data() + 4);
-    const std::uint32_t lumpCount = u32(bytes.data() + 12);
-    if (version < 29 || version > 0x10000 || lumpCount != 127) { error = "unsupported Respawn BSP header"; return false; }
+    if (!bsp || bspSize < headerBytes || std::memcmp(bsp, "rBSP", 4) != 0) {
+        error = "not a Titanfall Respawn BSP";
+        return false;
+    }
+    const std::uint32_t version = u32(bsp + 4);
+    const std::uint32_t lumpCount = u32(bsp + 12);
+    if (version < 29 || version > 0x10000 || lumpCount != 127) {
+        error = "unsupported Respawn BSP header";
+        return false;
+    }
     struct Lump { std::uint32_t offset, length; } lumps[128]{};
     for (std::uint32_t i = 0; i < 128; ++i) {
-        const std::uint8_t* p = bytes.data() + 16 + i * 16;
-        lumps[i] = {u32(p), u32(p + 4)};
-        if (lumps[i].offset > bytes.size() || lumps[i].length > bytes.size() - lumps[i].offset) {
-            if (lumps[i].length) { error = "BSP lump outside file"; return false; }
+        const std::uint8_t* p = bsp + 16 + i * 16;
+        lumps[i] = { u32(p), u32(p + 4) };
+        if (lumps[i].offset > bspSize || lumps[i].length > bspSize - lumps[i].offset) {
+            if (lumps[i].length) {
+                error = "BSP lump outside file";
+                return false;
+            }
         }
     }
-    const Lump td = lumps[kBspTextureData], stringData = lumps[kBspTextureNameData], stringTable = lumps[kBspTextureNameTable];
-    if (td.length % 36 || stringTable.length % 4) { error = "invalid BSP texture lump sizes"; return false; }
-    const std::uint8_t* stringBytes = bytes.data() + stringData.offset;
+    const Lump td = lumps[kBspTextureData];
+    const Lump stringData = lumps[kBspTextureNameData];
+    const Lump stringTable = lumps[kBspTextureNameTable];
+    if (td.length % 36 || stringTable.length % 4) {
+        error = "invalid BSP texture lump sizes";
+        return false;
+    }
+    const std::uint8_t* stringBytes = bsp + stringData.offset;
     const std::uint32_t tableCount = stringTable.length / 4;
     std::vector<std::uint32_t> offsets(tableCount);
-    for (std::uint32_t i = 0; i < tableCount; ++i) offsets[i] = u32(bytes.data() + stringTable.offset + i * 4);
+    for (std::uint32_t i = 0; i < tableCount; ++i)
+        offsets[i] = u32(bsp + stringTable.offset + i * 4);
     std::set<std::string> unique;
     const std::uint32_t recordCount = td.length / 36;
     for (std::uint32_t i = 0; i < recordCount; ++i) {
-        const std::int32_t index = static_cast<std::int32_t>(u32(bytes.data() + td.offset + i * 36 + 12));
-        if (index < 0 || static_cast<std::uint32_t>(index) >= tableCount) continue;
+        const std::int32_t index = static_cast<std::int32_t>(u32(bsp + td.offset + i * 36 + 12));
+        if (index < 0 || static_cast<std::uint32_t>(index) >= tableCount)
+            continue;
         const std::uint32_t offset = offsets[static_cast<std::uint32_t>(index)];
-        if (offset >= stringData.length) continue;
+        if (offset >= stringData.length)
+            continue;
         const char* start = reinterpret_cast<const char*>(stringBytes + offset);
-        const std::size_t avail = stringData.length - offset;
-        const void* end = std::memchr(start, 0, avail);
-        if (!end) continue;
-        const std::size_t size = static_cast<const char*>(end) - start;
-        if (!size || size > 4096) continue;
-        std::string name(start, size);
+        const std::size_t available = stringData.length - offset;
+        const void* end = std::memchr(start, 0, available);
+        if (!end)
+            continue;
+        const std::size_t length = static_cast<const char*>(end) - start;
+        if (!length || length > 4096)
+            continue;
+        std::string name(start, length);
         name = cleanAssetName(name, true);
-        if (validAssetName(name)) unique.insert(std::move(name));
+        if (validAssetName(name))
+            unique.insert(std::move(name));
     }
     names.assign(unique.begin(), unique.end());
-    if (names.empty()) { error = "BSP contains no material names"; return false; }
+    if (names.empty()) {
+        error = "BSP contains no material names";
+        return false;
+    }
     return true;
+}
+
+bool parseBspNames(const fs::path& path, std::vector<std::string>& names, std::string& error) {
+    std::vector<std::uint8_t> bytes;
+    if (!readWholeFile(path, bytes, error))
+        return false;
+    return parseBspNames(bytes.data(), bytes.size(), names, error);
 }
 
 } // namespace
@@ -1358,7 +1389,10 @@ void SetFamilyCacheLimitMiB(std::uint32_t megabytes) noexcept {
     gFamilyCacheLimit.store(static_cast<std::size_t>(boundedMiB) * 1024ull * 1024ull,
                             std::memory_order_relaxed);
 }
-bool Open(const std::filesystem::path& installDir, const std::filesystem::path& cacheDir, std::string* error) {
+bool Open(const std::filesystem::path& installDir, const std::filesystem::path& cacheDir,
+          std::string* error, bool* cacheHit) {
+    if (cacheHit)
+        *cacheHit = false;
     std::lock_guard<std::mutex> openLock(g_openMutex);
     try {
         auto db = std::make_shared<Database>();
@@ -1367,8 +1401,11 @@ bool Open(const std::filesystem::path& installDir, const std::filesystem::path& 
         db->cacheFile = cacheDir / L"r2tex.index";
         std::string why;
         if (!enumeratePaks(*db, why)) { if (error) *error = why; return false; }
-        if (!loadIndex(*db, why)) { if (error) *error = why; return false; }
+        bool usedCache{};
+        if (!loadIndex(*db, why, usedCache)) { if (error) *error = why; return false; }
         g_database = std::move(db);
+        if (cacheHit)
+            *cacheHit = usedCache;
         if (error) error->clear();
         return true;
     } catch (const std::exception& e) {
@@ -1424,11 +1461,27 @@ bool ConvertMaterial(std::string_view name, Material& material, std::string* err
     }
 }
 
-bool ListMapMaterials(const std::filesystem::path& bspPath, std::vector<std::string>& names, std::string* error) {
+bool ListMapMaterials(const std::filesystem::path& bspPath, std::vector<std::string>& names,
+                      std::string* error) {
     names.clear();
     std::string why;
     try {
         if (!parseBspNames(bspPath, names, why)) { if (error) *error = why; return false; }
+        if (error) error->clear();
+        return true;
+    } catch (const std::exception& e) {
+        if (error) *error = e.what();
+        names.clear();
+        return false;
+    }
+}
+
+bool ListMapMaterials(const std::uint8_t* bspData, std::size_t bspSize,
+                      std::vector<std::string>& names, std::string* error) {
+    names.clear();
+    std::string why;
+    try {
+        if (!parseBspNames(bspData, bspSize, names, why)) { if (error) *error = why; return false; }
         if (error) error->clear();
         return true;
     } catch (const std::exception& e) {

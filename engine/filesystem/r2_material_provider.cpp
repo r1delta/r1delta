@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <deque>
 #include <list>
 #include <memory>
 #include <mutex>
@@ -184,26 +185,46 @@ class R2MaterialProvider final : public FileProvider {
 public:
     ~R2MaterialProvider() override
     {
-        if (m_worker.joinable())
-            m_worker.join();
+        Stop();
     }
 
-    void Start()
+    void StartIndex()
+    {
+        bool failed = false;
+        {
+            std::lock_guard<std::mutex> lock(m_stateMutex);
+            if (m_state != State::Cold)
+                return;
+            m_state = State::Opening;
+            try {
+                m_indexWorker = std::thread([this]() { Initialize(); });
+            }
+            catch (...) {
+                m_state = State::Failed;
+                failed = true;
+            }
+        }
+        if (failed) {
+            m_stateChanged.notify_all();
+            LogR2TextureMessage("R1Delta: R2 texture provider could not start its index worker\n");
+        }
+    }
+
+    void Activate()
     {
         m_activated.store(true, std::memory_order_release);
-        std::unique_lock<std::mutex> lock(m_stateMutex);
-        if (m_state != State::Cold)
-            return;
+        StartIndex();
+    }
 
-        m_state = State::Opening;
-        try {
-            m_worker = std::thread([this]() { Initialize(); });
+    void PrefetchMapMaterials(std::string_view mapName, FileBytes bspData)
+    {
+        Activate();
+        {
+            std::lock_guard<std::mutex> lock(m_metricsMutex);
+            m_activeMap.assign(mapName);
         }
-        catch (...) {
-            m_state = State::Failed;
-            lock.unlock();
-            m_stateChanged.notify_all();
-        }
+        if (QueueMapMaterials(std::string(mapName), std::move(bspData)))
+            m_prefetchedMapCount.fetch_add(1, std::memory_order_relaxed);
     }
 
     bool Exists(std::string_view normalizedPath) override
@@ -221,12 +242,72 @@ public:
     {
         if (!m_activated.load(std::memory_order_acquire))
             return {};
+
         std::string assetName;
         bool materialFile{};
-        if (!ParseMaterialPath(normalizedPath, assetName, materialFile) || !WaitUntilReady())
+        if (!ParseMaterialPath(normalizedPath, assetName, materialFile))
             return {};
 
-        return ReadOrConvert(std::string(normalizedPath), assetName, materialFile);
+        const auto started = std::chrono::steady_clock::now();
+        FileBytes data;
+        if (WaitUntilReadyFor(std::chrono::milliseconds(10))) {
+            data = ReadOrSchedule(std::string(normalizedPath), assetName, materialFile);
+        }
+        else {
+            m_indexWaitMisses.fetch_add(1, std::memory_order_relaxed);
+        }
+        RecordProviderRead(normalizedPath, materialFile, started);
+        return data;
+    }
+
+    void LogMetrics(const char* phase)
+    {
+        std::string mapName;
+        {
+            std::lock_guard<std::mutex> lock(m_metricsMutex);
+            mapName = m_activeMap;
+        }
+
+        std::size_t queued{};
+        std::size_t active{};
+        {
+            std::lock_guard<std::mutex> lock(m_cacheMutex);
+            queued = m_workQueue.size();
+            active = m_activeWork;
+        }
+
+        State state;
+        {
+            std::lock_guard<std::mutex> lock(m_stateMutex);
+            state = m_state;
+        }
+        const char* stateName = state == State::Ready ? "ready"
+            : state == State::Failed ? "failed"
+            : state == State::Opening ? "opening" : "cold";
+        const auto qpcMilliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        char message[1024]{};
+        _snprintf_s(message, sizeof(message), _TRUNCATE,
+            "R1Delta: R2 texture timing phase=%s map=%s steady-ms=%lld index-state=%s index-cache=%s index-ms=%llu reads=%llu materials=%llu textures=%llu prefetch-bsp=%llu prefetch-vmt=%llu prefetch-vtf=%llu index-wait-misses=%llu conversions=%llu conversion-total-ms=%llu conversion-max-ms=%llu callbacks-total-ms=%llu callbacks-max-ms=%llu queued=%zu active=%zu workers=%u queue-full=%llu\n",
+            phase ? phase : "<unknown>", mapName.empty() ? "<none>" : mapName.c_str(),
+            static_cast<long long>(qpcMilliseconds), stateName,
+            m_indexCacheHit.load(std::memory_order_relaxed) ? "warm" : "cold",
+            static_cast<unsigned long long>(m_indexElapsedMs.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(m_providerReadCount.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(m_materialReadCount.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(m_textureReadCount.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(m_prefetchedMapCount.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(m_prefetchedMaterialCount.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(m_prefetchedTextureCount.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(m_indexWaitMisses.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(m_conversionCount.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(m_conversionTotalUs.load(std::memory_order_relaxed) / 1000),
+            static_cast<unsigned long long>(m_conversionMaxUs.load(std::memory_order_relaxed) / 1000),
+            static_cast<unsigned long long>(m_providerReadTotalUs.load(std::memory_order_relaxed) / 1000),
+            static_cast<unsigned long long>(m_providerReadMaxUs.load(std::memory_order_relaxed) / 1000),
+            queued, active, m_workerCount.load(std::memory_order_relaxed),
+            static_cast<unsigned long long>(m_queueFullCount.load(std::memory_order_relaxed)));
+        LogR2TextureMessage(message);
     }
 
 private:
@@ -244,11 +325,26 @@ private:
         FileBytes bytes;
     };
 
+    struct WorkItem {
+        std::string path;
+        std::string assetName;
+        bool materialFile{};
+        bool prefetch{};
+        std::shared_ptr<PendingRead> pending;
+        std::string mapName;
+        FileBytes bspData;
+        bool mapMaterials{};
+    };
+
+    static constexpr std::size_t kMaximumQueuedAssets = 8192;
+    static constexpr std::chrono::milliseconds kConversionWait{ 20 };
+
     void Initialize() noexcept
     {
         const auto start = std::chrono::steady_clock::now();
         std::string errorMessage;
         bool opened{};
+        bool cacheHit{};
         std::filesystem::path r2Install;
         std::filesystem::path cacheDirectory;
         try {
@@ -260,8 +356,15 @@ private:
                 r2Install = installRoot / "r2";
                 cacheDirectory = R2TextureCacheDirectory(r2Install, errorMessage);
                 if (!cacheDirectory.empty()) {
+                    std::error_code cacheError;
+                    const bool cacheExists = std::filesystem::is_regular_file(
+                        cacheDirectory / "r2tex.index", cacheError);
+                    if (!cacheExists) {
+                        LogR2TextureMessage(
+                            "R1Delta: R2 texture index cache is cold; building it in the background, first use may take several seconds\n");
+                    }
                     r2tex::SetFamilyCacheLimitMiB(g_cacheLimitMiB.load(std::memory_order_relaxed));
-                    opened = r2tex::Open(r2Install, cacheDirectory, &errorMessage);
+                    opened = r2tex::Open(r2Install, cacheDirectory, &errorMessage, &cacheHit);
                 }
             }
         }
@@ -274,11 +377,15 @@ private:
 
         const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - start).count();
+        m_indexCacheHit.store(cacheHit, std::memory_order_relaxed);
+        m_indexElapsedMs.store(static_cast<std::uint64_t>(std::max<std::int64_t>(elapsed, 0)),
+            std::memory_order_relaxed);
         char message[1536]{};
         if (opened) {
             _snprintf_s(message, sizeof(message), _TRUNCATE,
-                "R1Delta: R2 texture provider index ready install=%s cache=%s time=%lld ms family-cache=%u MiB\n",
+                "R1Delta: R2 texture provider index ready install=%s cache=%s source=%s time=%lld ms family-cache=%u MiB\n",
                 r2Install.string().c_str(), cacheDirectory.string().c_str(),
+                cacheHit ? "warm" : "built",
                 static_cast<long long>(elapsed),
                 g_cacheLimitMiB.load(std::memory_order_relaxed));
         }
@@ -294,85 +401,298 @@ private:
             m_state = opened ? State::Ready : State::Failed;
         }
         m_stateChanged.notify_all();
+        if (opened)
+            StartWorkers();
     }
 
-    bool WaitUntilReady()
+    void StartWorkers() noexcept
     {
-        std::unique_lock<std::mutex> lock(m_stateMutex);
-        m_stateChanged.wait(lock, [this]() {
-            return m_state == State::Ready || m_state == State::Failed;
-        });
-        return m_state == State::Ready;
-    }
-
-    FileBytes ReadOrConvert(
-        const std::string& path, const std::string& assetName, bool materialFile)
-    {
-        std::shared_ptr<PendingRead> pending;
+        const unsigned int cores = std::thread::hardware_concurrency();
+        const unsigned int workerLimit = cores > 2 ? cores - 2 : 1;
+        const unsigned int workerCount = std::max(1u, std::min(4u, workerLimit));
         {
-            std::unique_lock<std::mutex> lock(m_cacheMutex);
-            const auto cached = m_cache.find(path);
-            if (cached != m_cache.end()) {
-                m_lru.splice(m_lru.begin(), m_lru, cached->second.lruPosition);
-                return cached->second.bytes;
-            }
-
-            const auto pendingRead = m_pendingReads.find(path);
-            if (pendingRead != m_pendingReads.end()) {
-                pending = pendingRead->second;
-                pending->ready.wait(lock, [&pending]() { return pending->complete; });
-                return pending->bytes;
-            }
-
-            pending = std::make_shared<PendingRead>();
-            m_pendingReads.emplace(path, pending);
+            std::lock_guard<std::mutex> lock(m_cacheMutex);
+            if (m_stopping)
+                return;
         }
 
-        FileBytes data;
         try {
-            if (materialFile) {
-                r2tex::Material material;
-                if (r2tex::ConvertMaterial(assetName, material) && !material.vmt.empty()) {
-                    std::vector<std::uint8_t> bytes(material.vmt.begin(), material.vmt.end());
-                    data = std::make_shared<const std::vector<std::uint8_t>>(std::move(bytes));
-                }
-            }
-            else {
-                std::vector<std::uint8_t> bytes;
-                if (r2tex::ConvertTexture(assetName, bytes) && !bytes.empty())
-                    data = std::make_shared<const std::vector<std::uint8_t>>(std::move(bytes));
-            }
+            m_workers.reserve(workerCount);
+            for (unsigned int i = 0; i < workerCount; ++i)
+                m_workers.emplace_back([this]() { WorkerLoop(); });
         }
         catch (...) {
         }
+        m_workerCount.store(static_cast<unsigned int>(m_workers.size()), std::memory_order_relaxed);
+        if (m_workers.empty())
+            LogR2TextureMessage("R1Delta: R2 texture provider could not create a conversion worker\n");
+    }
 
-        {
-            std::lock_guard<std::mutex> lock(m_cacheMutex);
-            if (data) {
-                try {
-                    CacheLocked(path, data);
-                }
-                catch (...) {
-                }
-            }
-            pending->bytes = data;
-            pending->complete = true;
-            m_pendingReads.erase(path);
+    bool WaitUntilReadyFor(std::chrono::milliseconds timeout)
+    {
+        std::unique_lock<std::mutex> lock(m_stateMutex);
+        if (m_state == State::Cold || m_state == State::Opening) {
+            m_stateChanged.wait_for(lock, timeout, [this]() {
+                return m_state == State::Ready || m_state == State::Failed;
+            });
         }
-        pending->ready.notify_all();
+        return m_state == State::Ready;
+    }
 
-        if (data) {
-            std::atomic<bool>& logged = materialFile ? m_loggedMaterial : m_loggedTexture;
-            bool expected = false;
-            if (logged.compare_exchange_strong(expected, true, std::memory_order_relaxed)) {
-                char message[1024]{};
+    FileBytes ReadOrSchedule(std::string path, const std::string& assetName, bool materialFile)
+    {
+        std::unique_lock<std::mutex> lock(m_cacheMutex);
+        const auto cached = m_cache.find(path);
+        if (cached != m_cache.end()) {
+            m_lru.splice(m_lru.begin(), m_lru, cached->second.lruPosition);
+            return cached->second.bytes;
+        }
+
+        std::shared_ptr<PendingRead> pending;
+        const auto existing = m_pendingReads.find(path);
+        if (existing != m_pendingReads.end()) {
+            pending = existing->second;
+            PromoteQueuedPathLocked(path);
+        }
+        else {
+            if (m_stopping || m_workQueue.size() >= kMaximumQueuedAssets) {
+                m_queueFullCount.fetch_add(1, std::memory_order_relaxed);
+                return {};
+            }
+            pending = std::make_shared<PendingRead>();
+            m_pendingReads.emplace(path, pending);
+            m_workQueue.push_front(WorkItem{ std::move(path), assetName, materialFile, false, pending });
+            m_workAvailable.notify_one();
+        }
+
+        if (!pending->complete)
+            pending->ready.wait_for(lock, kConversionWait, [&pending]() { return pending->complete; });
+        return pending->complete ? pending->bytes : FileBytes{};
+    }
+
+    bool QueuePrefetchPath(std::string path)
+    {
+        const auto normalized = NormalizeProviderPath(path);
+        if (!normalized)
+            return false;
+        std::string assetName;
+        bool materialFile{};
+        if (!ParseMaterialPath(*normalized, assetName, materialFile))
+            return false;
+
+        std::lock_guard<std::mutex> lock(m_cacheMutex);
+        if (m_stopping || m_cache.find(*normalized) != m_cache.end()
+            || m_pendingReads.find(*normalized) != m_pendingReads.end()
+            || m_workQueue.size() >= kMaximumQueuedAssets)
+            return false;
+
+        auto pending = std::make_shared<PendingRead>();
+        m_pendingReads.emplace(*normalized, pending);
+        m_workQueue.push_back(WorkItem{
+            *normalized, std::move(assetName), materialFile, true, std::move(pending) });
+        if (materialFile)
+            m_prefetchedMaterialCount.fetch_add(1, std::memory_order_relaxed);
+        else
+            m_prefetchedTextureCount.fetch_add(1, std::memory_order_relaxed);
+        m_workAvailable.notify_one();
+        return true;
+    }
+
+    bool QueueMapMaterials(std::string mapName, FileBytes bspData)
+    {
+        if (!bspData)
+            return false;
+        std::lock_guard<std::mutex> lock(m_cacheMutex);
+        if (m_stopping || m_workQueue.size() >= kMaximumQueuedAssets) {
+            m_queueFullCount.fetch_add(1, std::memory_order_relaxed);
+            return false;
+        }
+        WorkItem item;
+        item.mapName = std::move(mapName);
+        item.bspData = std::move(bspData);
+        item.mapMaterials = true;
+        item.prefetch = true;
+        m_workQueue.push_front(std::move(item));
+        m_workAvailable.notify_one();
+        return true;
+    }
+
+    void PrefetchMaterialFilesFromBsp(const WorkItem& item)
+    {
+        try {
+            std::vector<std::string> materials;
+            std::string error;
+            if (!r2tex::ListMapMaterials(
+                    item.bspData->data(), item.bspData->size(), materials, &error)) {
+                char message[768]{};
                 _snprintf_s(message, sizeof(message), _TRUNCATE,
-                    "R1Delta: R2 texture provider served first %s path=%s bytes=%zu\n",
-                    materialFile ? "material" : "texture", path.c_str(), data->size());
+                    "R1Delta: R2 texture prefetch could not read map materials map=%s error=%s\n",
+                    item.mapName.c_str(), error.c_str());
                 LogR2TextureMessage(message);
+                return;
             }
+
+            std::size_t queued = 0;
+            for (const std::string& material : materials) {
+                std::string path = "materials/";
+                path.append(material);
+                path.append(".vmt");
+                if (QueuePrefetchPath(std::move(path)))
+                    ++queued;
+            }
+            char message[768]{};
+            _snprintf_s(message, sizeof(message), _TRUNCATE,
+                "R1Delta: R2 texture prefetch queued map=%s material-names=%zu queued-vmt=%zu\n",
+                item.mapName.c_str(), materials.size(), queued);
+            LogR2TextureMessage(message);
         }
-        return data;
+        catch (...) {
+            LogR2TextureMessage(
+                "R1Delta: R2 texture prefetch failed while parsing BSP materials\n");
+        }
+    }
+
+    void PromoteQueuedPathLocked(const std::string& path)
+    {
+        const auto queued = std::find_if(m_workQueue.begin(), m_workQueue.end(),
+            [&path](const WorkItem& item) { return item.path == path; });
+        if (queued == m_workQueue.end() || queued == m_workQueue.begin())
+            return;
+        WorkItem item = std::move(*queued);
+        m_workQueue.erase(queued);
+        m_workQueue.push_front(std::move(item));
+        m_workAvailable.notify_one();
+    }
+
+    FileBytes ConvertAsset(const WorkItem& item, std::vector<std::string>& dependencies)
+    {
+        try {
+            if (item.materialFile) {
+                r2tex::Material material;
+                if (!r2tex::ConvertMaterial(item.assetName, material) || material.vmt.empty())
+                    return {};
+                std::vector<std::uint8_t> bytes(material.vmt.begin(), material.vmt.end());
+                dependencies.reserve(material.textures.size());
+                for (const r2tex::TextureRef& texture : material.textures) {
+                    if (texture.name.empty())
+                        continue;
+                    std::string path = "materials/";
+                    path.append(texture.name);
+                    path.append(".vtf");
+                    dependencies.push_back(std::move(path));
+                }
+                return std::make_shared<const std::vector<std::uint8_t>>(std::move(bytes));
+            }
+
+            std::vector<std::uint8_t> bytes;
+            if (r2tex::ConvertTexture(item.assetName, bytes) && !bytes.empty())
+                return std::make_shared<const std::vector<std::uint8_t>>(std::move(bytes));
+        }
+        catch (...) {
+        }
+        return {};
+    }
+
+    void WorkerLoop()
+    {
+        for (;;) {
+            WorkItem item;
+            {
+                std::unique_lock<std::mutex> lock(m_cacheMutex);
+                m_workAvailable.wait(lock, [this]() {
+                    return m_stopping || !m_workQueue.empty();
+                });
+                if (m_stopping)
+                    return;
+                item = std::move(m_workQueue.front());
+                m_workQueue.pop_front();
+                ++m_activeWork;
+            }
+
+            if (item.mapMaterials) {
+                PrefetchMaterialFilesFromBsp(item);
+                std::lock_guard<std::mutex> lock(m_cacheMutex);
+                if (m_activeWork)
+                    --m_activeWork;
+                continue;
+            }
+
+            const auto conversionStart = std::chrono::steady_clock::now();
+            std::vector<std::string> dependencies;
+            FileBytes data = ConvertAsset(item, dependencies);
+            const auto conversionUs = static_cast<std::uint64_t>(
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now() - conversionStart).count());
+            m_conversionCount.fetch_add(1, std::memory_order_relaxed);
+            m_conversionTotalUs.fetch_add(conversionUs, std::memory_order_relaxed);
+            std::uint64_t previousMax = m_conversionMaxUs.load(std::memory_order_relaxed);
+            while (conversionUs > previousMax
+                && !m_conversionMaxUs.compare_exchange_weak(
+                    previousMax, conversionUs, std::memory_order_relaxed)) {
+            }
+
+            {
+                std::lock_guard<std::mutex> lock(m_cacheMutex);
+                if (data) {
+                    try {
+                        CacheLocked(item.path, data);
+                    }
+                    catch (...) {
+                    }
+                }
+                const auto pendingRead = m_pendingReads.find(item.path);
+                if (pendingRead != m_pendingReads.end() && pendingRead->second == item.pending)
+                    m_pendingReads.erase(pendingRead);
+                item.pending->bytes = data;
+                item.pending->complete = true;
+                if (m_activeWork)
+                    --m_activeWork;
+            }
+            item.pending->ready.notify_all();
+
+            if (data) {
+                std::atomic<bool>& logged = item.materialFile ? m_loggedMaterial : m_loggedTexture;
+                bool expected = false;
+                if (logged.compare_exchange_strong(expected, true, std::memory_order_relaxed)) {
+                    char message[1024]{};
+                    _snprintf_s(message, sizeof(message), _TRUNCATE,
+                        "R1Delta: R2 texture provider served first %s path=%s bytes=%zu\n",
+                        item.materialFile ? "material" : "texture",
+                        item.path.c_str(), data->size());
+                    LogR2TextureMessage(message);
+                }
+            }
+            for (std::string& dependency : dependencies)
+                QueuePrefetchPath(std::move(dependency));
+        }
+    }
+
+    void RecordProviderRead(
+        std::string_view path,
+        bool materialFile,
+        std::chrono::steady_clock::time_point started)
+    {
+        const auto signedElapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - started).count();
+        const auto elapsedUs = static_cast<std::uint64_t>(std::max<std::int64_t>(signedElapsed, 0));
+        m_providerReadCount.fetch_add(1, std::memory_order_relaxed);
+        (materialFile ? m_materialReadCount : m_textureReadCount).fetch_add(
+            1, std::memory_order_relaxed);
+        m_providerReadTotalUs.fetch_add(elapsedUs, std::memory_order_relaxed);
+        std::uint64_t previousMax = m_providerReadMaxUs.load(std::memory_order_relaxed);
+        while (elapsedUs > previousMax
+            && !m_providerReadMaxUs.compare_exchange_weak(
+                previousMax, elapsedUs, std::memory_order_relaxed)) {
+        }
+        if (elapsedUs <= 250000)
+            return;
+
+        char message[1024]{};
+        _snprintf_s(message, sizeof(message), _TRUNCATE,
+            "R1Delta: WARNING slow R2 texture provider callback path=%.*s elapsed=%llu ms\n",
+            static_cast<int>(std::min<std::size_t>(path.size(), 700)), path.data(),
+            static_cast<unsigned long long>(elapsedUs / 1000));
+        LogR2TextureMessage(message);
     }
 
     void CacheLocked(const std::string& path, const FileBytes& data)
@@ -399,16 +719,71 @@ private:
             m_lru.pop_front();
     }
 
+    void Stop()
+    {
+        std::deque<WorkItem> cancelled;
+        {
+            std::lock_guard<std::mutex> lock(m_cacheMutex);
+            if (m_stopping)
+                return;
+            m_stopping = true;
+            cancelled.swap(m_workQueue);
+            for (WorkItem& item : cancelled) {
+                if (!item.pending)
+                    continue;
+                const auto pendingRead = m_pendingReads.find(item.path);
+                if (pendingRead != m_pendingReads.end() && pendingRead->second == item.pending)
+                    m_pendingReads.erase(pendingRead);
+                item.pending->bytes.reset();
+                item.pending->complete = true;
+            }
+        }
+        for (WorkItem& item : cancelled) {
+            if (item.pending)
+                item.pending->ready.notify_all();
+        }
+        m_workAvailable.notify_all();
+        if (m_indexWorker.joinable())
+            m_indexWorker.join();
+        for (std::thread& worker : m_workers) {
+            if (worker.joinable())
+                worker.join();
+        }
+    }
+
     std::atomic<bool> m_activated{};
     std::mutex m_stateMutex;
     std::condition_variable m_stateChanged;
-    State m_state{State::Cold};
-    std::thread m_worker;
+    State m_state{ State::Cold };
+    std::thread m_indexWorker;
+    std::vector<std::thread> m_workers;
+    std::atomic<unsigned int> m_workerCount{};
     std::mutex m_cacheMutex;
+    std::condition_variable m_workAvailable;
     std::unordered_map<std::string, CachedFile> m_cache;
     std::unordered_map<std::string, std::shared_ptr<PendingRead>> m_pendingReads;
     std::list<std::string> m_lru;
+    std::deque<WorkItem> m_workQueue;
     std::size_t m_cachedBytes{};
+    std::size_t m_activeWork{};
+    bool m_stopping{};
+    std::mutex m_metricsMutex;
+    std::string m_activeMap;
+    std::atomic<bool> m_indexCacheHit{};
+    std::atomic<std::uint64_t> m_indexElapsedMs{};
+    std::atomic<std::uint64_t> m_providerReadCount{};
+    std::atomic<std::uint64_t> m_materialReadCount{};
+    std::atomic<std::uint64_t> m_textureReadCount{};
+    std::atomic<std::uint64_t> m_providerReadTotalUs{};
+    std::atomic<std::uint64_t> m_providerReadMaxUs{};
+    std::atomic<std::uint64_t> m_conversionCount{};
+    std::atomic<std::uint64_t> m_conversionTotalUs{};
+    std::atomic<std::uint64_t> m_conversionMaxUs{};
+    std::atomic<std::uint64_t> m_prefetchedMaterialCount{};
+    std::atomic<std::uint64_t> m_prefetchedTextureCount{};
+    std::atomic<std::uint64_t> m_prefetchedMapCount{};
+    std::atomic<std::uint64_t> m_indexWaitMisses{};
+    std::atomic<std::uint64_t> m_queueFullCount{};
     std::atomic<bool> m_loggedMaterial{};
     std::atomic<bool> m_loggedTexture{};
 };
@@ -420,8 +795,10 @@ void RegisterR2MaterialProvider()
 {
     std::call_once(g_providerRegistration, []() {
         auto provider = std::make_shared<R2MaterialProvider>();
-        if (RegisterProvider("materials", provider))
+        if (RegisterProvider("materials", provider)) {
             g_materialProvider = std::move(provider);
+            g_materialProvider->StartIndex();
+        }
     });
 }
 
@@ -453,7 +830,19 @@ void RegisterR2TextureCacheConVar()
 void StartR2MaterialProvider()
 {
     if (g_materialProvider)
-        g_materialProvider->Start();
+        g_materialProvider->Activate();
+}
+
+void PrefetchR2MapMaterials(std::string_view mapName, FileBytes bspData)
+{
+    if (g_materialProvider)
+        g_materialProvider->PrefetchMapMaterials(mapName, std::move(bspData));
+}
+
+void LogR2TextureProviderMetrics(const char* phase)
+{
+    if (g_materialProvider)
+        g_materialProvider->LogMetrics(phase);
 }
 
 } // namespace r2port

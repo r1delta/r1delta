@@ -2,6 +2,7 @@
 #include "r2_map_provider.h"
 #include "r2_material_provider.h"
 #include "engine/core/factory.h"
+#include "engine/core/core.h"
 #include "engine/cvar.h"
 #include "r2_map_patch_source.h"
 
@@ -654,13 +655,19 @@ void LogServedMap(const std::shared_ptr<MapState>& state, size_t bspSize, uint64
         }
     }
 
+    const auto steadyMilliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
     char buffer[768]{};
     _snprintf_s(buffer, sizeof(buffer), _TRUNCATE,
-        "R1Delta: R2 map provider served map=%s bsp=maps/%s.bsp entities=%s converted=%llu ms bytes=%zu\n",
+        "R1Delta: R2 map provider served map=%s bsp=maps/%s.bsp entities=%s converted=%llu ms map-elapsed-ms=%llu steady-ms=%lld bytes=%zu\n",
         state->mapName.c_str(), state->mapName.c_str(), entities.empty() ? "none" : entities.c_str(),
-        static_cast<unsigned long long>(conversionMs), bspSize);
+        static_cast<unsigned long long>(conversionMs),
+        static_cast<unsigned long long>(ActiveMapElapsedMilliseconds()),
+        static_cast<long long>(steadyMilliseconds), bspSize);
     Msg("%s", buffer);
     OutputDebugStringA(buffer);
+    LogProviderReadMetrics("map-bsp-served");
+    LogR2TextureProviderMetrics("map-bsp-served");
 }
 
 FileBytes ReadConvertedBsp(const MapRequest& request);
@@ -738,6 +745,7 @@ FileBytes ReadMapPatchFile(const MapRequest& request)
 FileBytes ReadConvertedBsp(const MapRequest& request)
 {
     const auto state = GetMapState(request.mapName);
+    SetActiveMap(state->mapName);
     std::unique_lock<std::mutex> lock(state->conversionMutex);
     while (state->conversionLoading)
         state->conversionReady.wait(lock);
@@ -819,7 +827,6 @@ FileBytes ReadConvertedBsp(const MapRequest& request)
     state->conversionReady.notify_all();
 
     if (result) {
-        SetActiveMap(state->mapName);
         LogServedMap(state, result->size(), conversionMs);
     }
     return result;
@@ -872,13 +879,13 @@ public:
             return {};
         if (request->kind == MapRequest::Kind::Bsp) {
             FileBytes data = ReadConvertedBsp(*request);
-            if (data)
-                StartR2MaterialProvider();
+            if (data && !IsDedicatedServer())
+                PrefetchR2MapMaterials(request->mapName, data);
             return data;
         }
         if (request->kind == MapRequest::Kind::AiGraph) {
             FileBytes data = ReadMapPatchFile(*request);
-            if (data)
+            if (data && !IsDedicatedServer())
                 StartR2MaterialProvider();
             return data;
         }
@@ -889,7 +896,7 @@ public:
         const std::string package = state->directoryVpk.string();
         const std::string path(request->packagePath);
         FileBytes data = R1OVPK_ReadDirectoryVPKFile(package.c_str(), path.c_str());
-        if (data)
+        if (data && !IsDedicatedServer())
             StartR2MaterialProvider();
         return data;
     }
