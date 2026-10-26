@@ -235,6 +235,21 @@ function Copy-DirectoryContents([string] $Source, [string] $Destination) {
 
 function Copy-FileAtomically([string] $Source, [string] $DestinationDirectory) {
     $destination = Join-Path $DestinationDirectory (Split-Path -Leaf $Source)
+    $backup = "$destination.pre-r2port-backup"
+    if (Test-Path -LiteralPath $destination) {
+        if (-not (Test-Path -LiteralPath $destination -PathType Leaf)) { throw "Cannot stage over a non-file target: $destination" }
+        if (Test-Path -LiteralPath $backup) {
+            if (-not (Test-Path -LiteralPath $backup -PathType Leaf)) { throw "Existing pre-stage backup is not a file: $backup" }
+        } else {
+            $backupTemporary = "$backup.$([Guid]::NewGuid().ToString('N')).r1dstaging"
+            try {
+                Copy-Item -LiteralPath $destination -Destination $backupTemporary
+                Move-Item -LiteralPath $backupTemporary -Destination $backup
+            } finally {
+                if (Test-Path -LiteralPath $backupTemporary -PathType Leaf) { Remove-Item -LiteralPath $backupTemporary -Force }
+            }
+        }
+    }
     $temporary = "$destination.$([Guid]::NewGuid().ToString('N')).r1dstaging"
     try {
         Copy-Item -LiteralPath $Source -Destination $temporary -Force
@@ -686,7 +701,7 @@ function Stage-R2Root {
         $source = Join-Path $BuildRoot $name
         if (Test-Path -LiteralPath $source -PathType Leaf) { Copy-FileAtomically $source $Root }
     }
-    Write-Host "Staged Release DLL/PNG payload into $binDelta and Release executables into $Root by copy-then-move."
+    Write-Host "Staged Release DLL/PNG payload into $binDelta and Release executables into $Root by copy-then-move; original targets are preserved once as .pre-r2port-backup."
 }
 
 function Get-PrivatePayloadBytes([string] $Path) {
