@@ -146,7 +146,8 @@ bool ValidateAinV54Body(const std::uint8_t* bytes, std::size_t size)
             return false;
         std::size_t linkMemberCount{};
         if (!ReadCount(bytes, size, offset, sizeof(std::int16_t), linkMemberCount)
-            || !SkipRecords(offset, size, linkMemberCount, sizeof(std::int16_t) + 1))
+            || !SkipRecords(offset, size, linkMemberCount, sizeof(std::int16_t))
+            || !SkipRecords(offset, size, 1, 1))
             return false;
     }
 
