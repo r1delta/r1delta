@@ -256,7 +256,7 @@ public:
         else {
             m_indexWaitMisses.fetch_add(1, std::memory_order_relaxed);
         }
-        RecordProviderRead(normalizedPath, materialFile, started);
+        RecordProviderRead(normalizedPath, materialFile, static_cast<bool>(data), started);
         return data;
     }
 
@@ -288,7 +288,7 @@ public:
             std::chrono::steady_clock::now().time_since_epoch()).count();
         char message[1024]{};
         _snprintf_s(message, sizeof(message), _TRUNCATE,
-            "R1Delta: R2 texture timing phase=%s map=%s steady-ms=%lld index-state=%s index-cache=%s index-ms=%llu reads=%llu materials=%llu textures=%llu prefetch-bsp=%llu prefetch-vmt=%llu prefetch-vtf=%llu index-wait-misses=%llu conversions=%llu conversion-total-ms=%llu conversion-max-ms=%llu callbacks-total-ms=%llu callbacks-max-ms=%llu queued=%zu active=%zu workers=%u queue-full=%llu\n",
+            "R1Delta: R2 texture timing phase=%s map=%s steady-ms=%lld index-state=%s index-cache=%s index-ms=%llu reads=%llu materials=%llu textures=%llu material-served=%llu material-misses=%llu texture-served=%llu texture-misses=%llu prefetch-bsp=%llu prefetch-vmt=%llu prefetch-vtf=%llu index-wait-misses=%llu conversions=%llu conversion-total-ms=%llu conversion-max-ms=%llu callbacks-total-ms=%llu callbacks-max-ms=%llu queued=%zu active=%zu workers=%u queue-full=%llu\n",
             phase ? phase : "<unknown>", mapName.empty() ? "<none>" : mapName.c_str(),
             static_cast<long long>(qpcMilliseconds), stateName,
             m_indexCacheHit.load(std::memory_order_relaxed) ? "warm" : "cold",
@@ -296,6 +296,10 @@ public:
             static_cast<unsigned long long>(m_providerReadCount.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(m_materialReadCount.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(m_textureReadCount.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(m_materialServedCount.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(m_materialMissCount.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(m_textureServedCount.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(m_textureMissCount.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(m_prefetchedMapCount.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(m_prefetchedMaterialCount.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(m_prefetchedTextureCount.load(std::memory_order_relaxed)),
@@ -670,6 +674,7 @@ private:
     void RecordProviderRead(
         std::string_view path,
         bool materialFile,
+        bool served,
         std::chrono::steady_clock::time_point started)
     {
         const auto signedElapsed = std::chrono::duration_cast<std::chrono::microseconds>(
@@ -678,6 +683,12 @@ private:
         m_providerReadCount.fetch_add(1, std::memory_order_relaxed);
         (materialFile ? m_materialReadCount : m_textureReadCount).fetch_add(
             1, std::memory_order_relaxed);
+        if (materialFile)
+            (served ? m_materialServedCount : m_materialMissCount).fetch_add(
+                1, std::memory_order_relaxed);
+        else
+            (served ? m_textureServedCount : m_textureMissCount).fetch_add(
+                1, std::memory_order_relaxed);
         m_providerReadTotalUs.fetch_add(elapsedUs, std::memory_order_relaxed);
         std::uint64_t previousMax = m_providerReadMaxUs.load(std::memory_order_relaxed);
         while (elapsedUs > previousMax
@@ -774,6 +785,10 @@ private:
     std::atomic<std::uint64_t> m_providerReadCount{};
     std::atomic<std::uint64_t> m_materialReadCount{};
     std::atomic<std::uint64_t> m_textureReadCount{};
+    std::atomic<std::uint64_t> m_materialServedCount{};
+    std::atomic<std::uint64_t> m_materialMissCount{};
+    std::atomic<std::uint64_t> m_textureServedCount{};
+    std::atomic<std::uint64_t> m_textureMissCount{};
     std::atomic<std::uint64_t> m_providerReadTotalUs{};
     std::atomic<std::uint64_t> m_providerReadMaxUs{};
     std::atomic<std::uint64_t> m_conversionCount{};
