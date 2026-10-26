@@ -32,7 +32,19 @@ powershell -ExecutionPolicy Bypass -File .build\r2-root.ps1 -Stage -Root r2dev
 powershell -ExecutionPolicy Bypass -File .build\r2-root.ps1 -Verify -Root r2dev
 ```
 
-Both scripts default to `-Root r2dev`. `-Status -Root r2dev` reports the layout and private disk use; `-Reset -Root r2dev` recreates only the agent root. The launch-root `bin`, `r1`, and `tools` directories are junctions; root files are hardlinks except executables replaced by staging. The CORE checkout keeps the pinned scripts, resources, and maps locally, plus a private `bin_delta` copy. Unchanged CORE directories are junctions; to limit disk use, `r2dev` reuses the pinned `bin` and `materials` directories under `r2`. `crash` and `crashes` are real directories.
+Both scripts default to `-Root r2dev`. `-Status -Root r2dev` reports the layout and private disk use; `-Reset -Root r2dev` recreates only the agent root. If an existing agent root still has shared writable CORE directories, use `-Repair -Root r2dev`; it preserves the staged launch files and `bin_delta` while making the writable directories private. `-Verify` rejects unsafe reparse targets and probes temporary writes in the agent's writable paths.
+
+The launch-root `bin`, `r1`, and `tools` directories are junctions; root files are hardlinks except executables replaced by staging. The CORE checkout keeps pinned scripts, resources, and maps locally, has a private `bin_delta` copy, and keeps writable `bin`, `materials`, `models`, `sound`, `cfg`, `config`, and `admin` directories private. `shaders`, `r2port`, `r2port\cache`, and `r2port_cache` are local write locations. The independent clone keeps `core.autocrlf=false` so checked-out bytes match the pinned blobs. Only unchanged `bin_nexon` and `vgui` content may be shared read-only from the original CORE tree. `crash` and `crashes` are real directories.
+
+To create the user's play root from scratch, the lead may run these commands only after confirming no process is using `S:\game\r2`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .build\r2-root.ps1 -Create -Root r2
+powershell -ExecutionPolicy Bypass -File .build\r2-root.ps1 -Stage -Root r2
+powershell -ExecutionPolicy Bypass -File .build\r2-root.ps1 -Verify -Root r2
+```
+
+`-Reset -Root r2` removes and recreates that root; use it only when the user's game is closed and the lead explicitly authorizes it. Stage the new build afterward. The user can play from `S:\game\r2` directly by running `r1delta.exe`, `Titanfall.exe`, or `R1Delta_DS.exe` there.
 
 Launch the agent root directly or use the path-owned harness (which defaults to `r2dev`):
 
@@ -42,6 +54,5 @@ powershell -ExecutionPolicy Bypass -File .build\run-in-r2.ps1 -Mode Listen -Map 
 powershell -ExecutionPolicy Bypass -File .build\run-in-r2.ps1 -Mode Dedicated -Map mp_box -Port 27050 -Seconds 60 -FatalScriptErrors -Cdb
 ```
 
-The harness adds `-multiple -allowmultiple` to every Client and Listen launch.
+The harness adds `-multiple -allowmultiple` to every Client and Listen launch. The agent executables are `S:\game\r2dev\r1delta.exe`, `S:\game\r2dev\Titanfall.exe`, and `S:\game\r2dev\R1Delta_DS.exe`. Pass `-Root r2` only for lead-authorized tests; agents must leave the user's root alone.
 
-Pass `-Root r2dev` explicitly when desired. The agent launcher is `S:\game\r2dev\r1delta.exe`; its client/listen and dedicated executables are `S:\game\r2dev\Titanfall.exe` and `S:\game\r2dev\R1Delta_DS.exe`. You can play directly from the user root `S:\game\r2` (`r1delta.exe`, `Titanfall.exe`, or `R1Delta_DS.exe`). Only the lead may target `r2`, after authorizing it and confirming the user game is closed; agents must leave that root alone.

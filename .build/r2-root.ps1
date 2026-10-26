@@ -7,6 +7,7 @@ param(
     [switch] $Create,
     [switch] $Verify,
     [switch] $Reset,
+    [switch] $Repair,
     [switch] $Stage,
     [switch] $Status
 )
@@ -28,6 +29,10 @@ $LockPath = 'C:\Users\r3muxd\tmp\r2port\GAME.lock'
 $GraphSourceRoot = 'C:\Users\r3muxd\tmp\r2port\ainconv\out'
 $LargeCoreDirectories = @('bin', 'bin_nexon', 'materials', 'models', 'sound', 'vgui', 'cfg', 'config', 'admin')
 $AlwaysCheckoutDirectories = @('scripts', 'resource', 'maps')
+$ReadOnlySharedCoreDirectories = @('bin_nexon', 'vgui')
+$R2DevPrivateCoreDirectories = @('bin', 'materials', 'models', 'sound', 'cfg', 'config', 'admin')
+$R2DevRequiredRealDirectories = @('bin', 'materials', 'models', 'shaders', 'maps', 'scripts', 'resource', 'sound', 'cfg', 'config', 'admin')
+$R2DevWriteProbeDirectories = @('bin', 'bin_delta', 'materials', 'models', 'shaders', 'maps', 'scripts', 'resource', 'sound', 'cfg', 'config', 'admin', 'r2port', 'r2port\cache', 'r2port_cache')
 $SampleBlobPaths = @(
     'GameInfo.txt',
     'playlists.txt',
@@ -39,9 +44,9 @@ $StubNames = @('d3d11.dll', 'GFSDK_SSAO.win64.dll', 'GFSDK_TXAA.win64.dll')
 $RootExecutables = @('Titanfall.exe', 'R1Delta_DS.exe', 'r1delta.exe')
 $script:MutationLockToken = $null
 
-$selectedModes = @($Create, $Verify, $Reset, $Stage, $Status | Where-Object { $_ }).Count
+$selectedModes = @($Create, $Verify, $Reset, $Repair, $Stage, $Status | Where-Object { $_ }).Count
 if ($selectedModes -ne 1) {
-    throw 'Select exactly one of -Create, -Verify, -Reset, -Stage, or -Status.'
+    throw 'Select exactly one of -Create, -Verify, -Reset, -Repair, -Stage, or -Status.'
 }
 
 function Invoke-Git([string] $Directory, [string[]] $GitArgs) {
@@ -167,32 +172,24 @@ function Remove-TreeEntry([string] $Path) {
 }
 
 function Get-CoreShareTarget([string] $Name) {
-    if ($RootName -eq 'r2dev' -and $Name -in @('bin', 'materials')) {
-        $reusedDirectory = Join-Path $ReusablePinnedCoreRoot $Name
-        if (Test-Path -LiteralPath $reusedDirectory -PathType Container) {
-            $item = Get-Item -LiteralPath $reusedDirectory -Force
-            if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-                throw "Refusing to share a non-real pinned CORE directory from r2: $reusedDirectory"
-            }
-            return $reusedDirectory
-        }
-    }
     return Join-Path $SourceCoreRoot $Name
 }
 
 function Get-CoreDirectoryPlan {
     $shared = [System.Collections.Generic.List[string]]::new()
     $checkout = [System.Collections.Generic.List[string]]::new()
+    $empty = [System.Collections.Generic.List[string]]::new()
     foreach ($name in $LargeCoreDirectories) {
-        if (-not (Test-Path -LiteralPath (Join-Path $SourceCoreRoot $name) -PathType Container)) { continue }
-        if ($RootName -eq 'r2dev' -and $name -in @('bin', 'materials') -and
-            (Test-Path -LiteralPath (Join-Path $ReusablePinnedCoreRoot $name) -PathType Container)) {
-            $shared.Add($name)
+        $tree = @(Invoke-Git $SourceCoreRoot @('ls-tree', '-d', '--name-only', $Pin, '--', $name))
+        if ($RootName -eq 'r2dev' -and $name -in $R2DevPrivateCoreDirectories) {
+            if ($tree -contains $name) { $checkout.Add($name) } else { $empty.Add($name) }
             continue
         }
-        $tree = @(Invoke-Git $SourceCoreRoot @('ls-tree', '-d', '--name-only', $Pin, '--', $name))
+        if (-not (Test-Path -LiteralPath (Join-Path $SourceCoreRoot $name) -PathType Container)) { continue }
         if ($tree -notcontains $name) {
-            if ($name -eq 'config' -and @(Get-ChildItem -LiteralPath (Join-Path $SourceCoreRoot $name) -Force).Count -eq 0) {
+            if ($name -in $ReadOnlySharedCoreDirectories) {
+                $shared.Add($name)
+            } elseif ($name -eq 'config' -and @(Get-ChildItem -LiteralPath (Join-Path $SourceCoreRoot $name) -Force).Count -eq 0) {
                 $shared.Add($name)
             }
             continue
@@ -201,7 +198,7 @@ function Get-CoreDirectoryPlan {
         $untracked = @(Invoke-Git $SourceCoreRoot @('ls-files', '--others', '--exclude-standard', '--', $name))
         if ($diff.Count -eq 0 -and $untracked.Count -eq 0) { $shared.Add($name) } else { $checkout.Add($name) }
     }
-    return [pscustomobject]@{ Shared = @($shared.ToArray()); Checkout = @($checkout.ToArray()) }
+    return [pscustomobject]@{ Shared = @($shared.ToArray()); Checkout = @($checkout.ToArray()); Empty = @($empty.ToArray()) }
 }
 
 function Get-RootStageNames {
@@ -284,7 +281,6 @@ function New-R2Root {
         try { Invoke-Git $CoreRoot @('rev-parse', '--verify', "${Pin}^{commit}") | Out-Null } catch { $available = $false }
         if (-not $available) { Invoke-Git $CoreRoot @('fetch', '--no-tags', $SourceCoreRoot, $Pin) | Out-Null }
         Invoke-Git $CoreRoot @('checkout', '--detach', $Pin) | Out-Null
-        Invoke-Git $CoreRoot @('config', '--local', 'core.autocrlf', 'input') | Out-Null
 
         foreach ($name in $plan.Shared) {
             $destination = Join-Path $CoreRoot $name
@@ -292,6 +288,21 @@ function New-R2Root {
                 Remove-TreeEntry $destination
             }
             New-DirectoryJunction $destination (Get-CoreShareTarget $name)
+        }
+
+        foreach ($name in $plan.Empty) {
+            $destination = Join-Path $CoreRoot $name
+            if (-not (Test-Path -LiteralPath $destination -PathType Container)) {
+                New-Item -ItemType Directory -Path $destination | Out-Null
+            }
+        }
+        if ($RootName -eq 'r2dev') {
+            foreach ($name in $R2DevRequiredRealDirectories) {
+                $destination = Join-Path $CoreRoot $name
+                if (-not (Test-Path -LiteralPath $destination -PathType Container)) {
+                    New-Item -ItemType Directory -Path $destination | Out-Null
+                }
+            }
         }
 
         $binDeltaSource = Join-Path $SourceCoreRoot 'bin_delta'
@@ -324,7 +335,71 @@ function New-R2Root {
 
     Write-Host "Created $Root with CORE pin $Pin."
     Write-Host "CORE directories shared by junction: $(if ($plan.Shared.Count) { $plan.Shared -join ', ' } else { 'none' })."
-    if ($plan.Checkout.Count) { Write-Host "Changed large directories checked out privately: $($plan.Checkout -join ', ')." }
+    if ($plan.Checkout.Count) { Write-Host "Large CORE directories checked out privately: $($plan.Checkout -join ', ')." }
+}
+
+function Repair-R2DevRoot {
+    if ($RootName -ne 'r2dev') { throw '-Repair is restricted to the agent-only r2dev root.' }
+    Assert-R2Idle
+    Assert-RealDirectory $Root
+    Assert-RealDirectory $CoreRoot
+    $head = @(Invoke-Git $CoreRoot @('rev-parse', 'HEAD'))
+    if ($head.Count -ne 1 -or $head[0] -ne $Pin) { throw "Cannot repair a CORE checkout at '$($head -join ',')'; expected $Pin." }
+    Invoke-Git $CoreRoot @('config', '--local', 'core.autocrlf', 'false') | Out-Null
+    $plan = Get-CoreDirectoryPlan
+
+    $directoriesToRecreate = @($R2DevPrivateCoreDirectories) + @($plan.Checkout) + @($plan.Shared) | Select-Object -Unique
+    foreach ($name in $directoriesToRecreate) {
+        $destination = Join-Path $CoreRoot $name
+        if (-not (Test-Path -LiteralPath $destination)) { continue }
+        $item = Get-Item -LiteralPath $destination -Force
+        if (-not $item.PSIsContainer) { throw "Expected a directory in the pinned CORE checkout: $destination" }
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            Remove-TreeEntry $destination
+            continue
+        }
+        if ($name -in $R2DevPrivateCoreDirectories -or $name -in $plan.Checkout) {
+            $status = @(Invoke-Git $CoreRoot @('status', '--porcelain', '--untracked-files=all', '--', $name))
+            $worktreeDiff = @(Invoke-Git $CoreRoot @('diff', '--name-only', '--', $name))
+            $indexDiff = @(Invoke-Git $CoreRoot @('diff', '--cached', '--name-only', '--', $name))
+            $unexpected = [System.Collections.Generic.List[string]]::new()
+            foreach ($line in $status) {
+                $state = $line.Substring(0, 2)
+                if ($state -eq ' D' -or ($state -eq ' M' -and $worktreeDiff.Count -eq 0 -and $indexDiff.Count -eq 0)) { continue }
+                $unexpected.Add($line)
+            }
+            if ($unexpected.Count -ne 0) { throw "Refusing to overwrite changed private directory $destination`: $($unexpected -join '; ')" }
+        } elseif (@(Get-ChildItem -LiteralPath $destination -Force).Count -ne 0) {
+            throw "Refusing to replace populated local content with a shared junction: $destination"
+        } else {
+            Remove-TreeEntry $destination
+        }
+    }
+
+    $sparsePaths = @($AlwaysCheckoutDirectories) + @($plan.Checkout)
+    Invoke-Git $CoreRoot (@('sparse-checkout', 'set', '--cone') + $sparsePaths) | Out-Null
+    if ($plan.Checkout.Count -gt 0) {
+        Invoke-Git $CoreRoot (@('restore', '--source', $Pin, '--worktree', '--') + @($plan.Checkout)) | Out-Null
+        Invoke-Git $CoreRoot (@('add', '--update', '--') + @($plan.Checkout)) | Out-Null
+    }
+    foreach ($name in $plan.Empty) {
+        $destination = Join-Path $CoreRoot $name
+        if (-not (Test-Path -LiteralPath $destination -PathType Container)) {
+            New-Item -ItemType Directory -Path $destination | Out-Null
+        }
+    }
+    foreach ($name in $R2DevRequiredRealDirectories) {
+        $destination = Join-Path $CoreRoot $name
+        if (-not (Test-Path -LiteralPath $destination -PathType Container)) {
+            New-Item -ItemType Directory -Path $destination | Out-Null
+        }
+    }
+    foreach ($name in $plan.Shared) {
+        New-DirectoryJunction (Join-Path $CoreRoot $name) (Get-CoreShareTarget $name)
+    }
+    Add-LocalExclude $CoreRoot @('/bin_delta/', '/maps/graphs/mp_glitch.ain', '/maps/graphs/mp_lf_stacks.ain', '/r2port/cache/', '/r2port_cache/')
+    Assert-PinnedCheckout
+    Write-Host "Repaired $Root to use private writable CORE directories."
 }
 
 function Get-LinkType($Item) {
@@ -354,6 +429,117 @@ function Assert-RealDirectory([string] $Path) {
     }
 }
 
+function Assert-R2DevSafeReparsePoints {
+    $physicalGameRoot = 'C:\Users\r3muxd\newr1root3\game'
+    $protectedR2Roots = @(
+        [IO.Path]::GetFullPath((Join-Path $GameRoot 'r2')).TrimEnd('\'),
+        [IO.Path]::GetFullPath((Join-Path $physicalGameRoot 'r2')).TrimEnd('\')
+    )
+    $sourceCoreRoots = @(
+        [IO.Path]::GetFullPath($SourceCoreRoot).TrimEnd('\'),
+        [IO.Path]::GetFullPath((Join-Path $physicalGameRoot 'r1delta')).TrimEnd('\')
+    )
+    $corePrefix = [IO.Path]::GetFullPath($CoreRoot).TrimEnd('\') + '\'
+    $pending = [System.Collections.Generic.Stack[string]]::new()
+    $pending.Push($Root)
+    while ($pending.Count -gt 0) {
+        $directory = $pending.Pop()
+        foreach ($item in Get-ChildItem -LiteralPath $directory -Force) {
+            if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                $targetProperty = $item.PSObject.Properties['Target']
+                if ($null -eq $targetProperty -or @($targetProperty.Value).Count -eq 0) {
+                    throw "Cannot resolve reparse-point target during r2dev verification: $($item.FullName)"
+                }
+                foreach ($targetValue in @($targetProperty.Value)) {
+                    $rawTarget = [string] $targetValue
+                    $targetPath = if ([IO.Path]::IsPathRooted($rawTarget)) { $rawTarget } else { Join-Path $item.DirectoryName $rawTarget }
+                    $target = [IO.Path]::GetFullPath($targetPath).TrimEnd('\')
+                    $underProtectedR2 = $false
+                    foreach ($protectedRoot in $protectedR2Roots) {
+                        if ($target.Equals($protectedRoot, [StringComparison]::OrdinalIgnoreCase) -or
+                            $target.StartsWith($protectedRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
+                            $underProtectedR2 = $true
+                            break
+                        }
+                    }
+                    if ($underProtectedR2) {
+                        throw "r2dev reparse point targets the user's r2 tree: $($item.FullName) -> $target"
+                    }
+
+                    $sourceRelative = $null
+                    foreach ($sourceRoot in $sourceCoreRoots) {
+                        if ($target.Equals($sourceRoot, [StringComparison]::OrdinalIgnoreCase)) {
+                            $sourceRelative = ''
+                            break
+                        }
+                        $sourcePrefix = $sourceRoot + '\'
+                        if ($target.StartsWith($sourcePrefix, [StringComparison]::OrdinalIgnoreCase)) {
+                            $sourceRelative = $target.Substring($sourcePrefix.Length)
+                            break
+                        }
+                    }
+                    if ($null -ne $sourceRelative) {
+                        $insideCore = $item.FullName.StartsWith($corePrefix, [StringComparison]::OrdinalIgnoreCase)
+                        $relativeEntry = if ($insideCore) { $item.FullName.Substring($corePrefix.Length).TrimEnd('\') } else { '' }
+                        $allowed = $insideCore -and $relativeEntry -in $ReadOnlySharedCoreDirectories -and
+                            $sourceRelative.Equals($relativeEntry, [StringComparison]::OrdinalIgnoreCase)
+                        if (-not $allowed) {
+                            throw "r2dev reparse point targets writable source CORE content: $($item.FullName) -> $target"
+                        }
+                    }
+                }
+                continue
+            }
+            if ($item.PSIsContainer) { $pending.Push($item.FullName) }
+        }
+    }
+}
+
+function Test-R2DevWritablePaths {
+    $rootPrefix = [IO.Path]::GetFullPath($Root).TrimEnd('\') + '\'
+    $userCoreRoots = @($SourceCoreRoot, $ReusablePinnedCoreRoot)
+    foreach ($relativePath in $R2DevWriteProbeDirectories) {
+        $createdDirectories = [System.Collections.Generic.List[string]]::new()
+        $directory = $CoreRoot
+        foreach ($part in $relativePath.Split('\')) {
+            $directory = Join-Path $directory $part
+            if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
+                New-Item -ItemType Directory -Path $directory | Out-Null
+                $createdDirectories.Add($directory)
+            }
+            Assert-RealDirectory $directory
+        }
+
+        $markerName = ".r2dev-writecheck-$([Guid]::NewGuid().ToString('N')).tmp"
+        $marker = Join-Path $directory $markerName
+        try {
+            foreach ($userCoreRoot in $userCoreRoots) {
+                $otherMarker = Join-Path (Join-Path $userCoreRoot $relativePath) $markerName
+                if (Test-Path -LiteralPath $otherMarker) { throw "Write-test marker unexpectedly exists outside r2dev: $otherMarker" }
+            }
+            [IO.File]::WriteAllText($marker, [Guid]::NewGuid().ToString('N'))
+            if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) { throw "Write test did not create $marker." }
+            $writtenPath = [IO.Path]::GetFullPath($marker)
+            if (-not $writtenPath.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+                throw "Write test escaped r2dev: $writtenPath"
+            }
+            foreach ($userCoreRoot in $userCoreRoots) {
+                $otherMarker = Join-Path (Join-Path $userCoreRoot $relativePath) $markerName
+                if (Test-Path -LiteralPath $otherMarker) { throw "Write test reached another CORE tree: $otherMarker" }
+            }
+        } finally {
+            if (Test-Path -LiteralPath $marker) { Remove-Item -LiteralPath $marker -Force }
+            for ($index = $createdDirectories.Count - 1; $index -ge 0; $index--) {
+                $createdDirectory = $createdDirectories[$index]
+                if ((Get-ChildItem -LiteralPath $createdDirectory -Force | Measure-Object).Count -eq 0) {
+                    [IO.Directory]::Delete($createdDirectory, $false)
+                }
+            }
+        }
+    }
+    Write-Host "Verified isolated temporary writes in $($R2DevWriteProbeDirectories.Count) r2dev paths."
+}
+
 function Assert-PinnedCheckout {
     if (-not (Test-Path -LiteralPath $Root -PathType Container)) { throw "R2 launch root does not exist: $Root" }
     Assert-RealDirectory $Root
@@ -366,7 +552,7 @@ function Assert-PinnedCheckout {
     $head = @(Invoke-Git $CoreRoot @('rev-parse', 'HEAD'))
     if ($head.Count -ne 1 -or $head[0] -ne $Pin) { throw "CORE HEAD is '$($head -join ',')', expected pinned commit $Pin." }
     $autocrlf = @(Invoke-Git $CoreRoot @('config', '--local', '--get', 'core.autocrlf'))
-    if ($autocrlf.Count -ne 1 -or $autocrlf[0] -ne 'input') { throw "CORE clone core.autocrlf is '$($autocrlf -join ',')', expected input after a raw-byte checkout with autocrlf=false." }
+    if ($autocrlf.Count -ne 1 -or $autocrlf[0] -ne 'false') { throw "CORE clone core.autocrlf is '$($autocrlf -join ',')', expected false to preserve the pinned raw bytes." }
     $commonDir = @(Invoke-Git $CoreRoot @('rev-parse', '--git-common-dir'))
     $commonPath = [IO.Path]::GetFullPath((Join-Path $CoreRoot $commonDir[0]))
     $corePrefix = [IO.Path]::GetFullPath($CoreRoot).TrimEnd('\') + '\'
@@ -377,6 +563,10 @@ function Assert-PinnedCheckout {
     $plan = Get-CoreDirectoryPlan
     foreach ($name in $plan.Shared) { Assert-Junction (Join-Path $CoreRoot $name) (Get-CoreShareTarget $name) }
     foreach ($name in $plan.Checkout) { Assert-RealDirectory (Join-Path $CoreRoot $name) }
+    foreach ($name in $plan.Empty) { Assert-RealDirectory (Join-Path $CoreRoot $name) }
+    if ($RootName -eq 'r2dev') {
+        foreach ($name in $R2DevRequiredRealDirectories) { Assert-RealDirectory (Join-Path $CoreRoot $name) }
+    }
     foreach ($name in $GraphNames) {
         $source = Join-Path $GraphSourceRoot $name
         $target = Join-Path $CoreRoot "maps\graphs\$name"
@@ -411,9 +601,13 @@ function Assert-PinnedCheckout {
     foreach ($name in @('Titanfall.exe', 'R1Delta_DS.exe', 'r1delta.exe', 'r1delta.exe.config')) {
         if (-not (Test-Path -LiteralPath (Join-Path $Root $name) -PathType Leaf)) { throw "Launch root is missing $name. Run -Stage after creating the root." }
     }
+    if ($RootName -eq 'r2dev') {
+        Assert-R2DevSafeReparsePoints
+        Test-R2DevWritablePaths
+    }
     $status = @(Invoke-Git $CoreRoot @('status', '--porcelain', '--untracked-files=all'))
     if ($status.Count -ne 0) { throw "Pinned CORE clone is not clean: $($status -join '; ')" }
-    Write-Host "Verified ${Root}: independent clean CORE clone at $Pin; checkout was made with core.autocrlf=false and blob hashes match; local autocrlf=input keeps shared worktrees clean; test graphs installed."
+    Write-Host "Verified ${Root}: independent clean CORE clone at $Pin; core.autocrlf=false and blob hashes match the pinned raw bytes; test graphs installed."
     Write-Host "Shared CORE directories: $(if ($plan.Shared.Count) { $plan.Shared -join ', ' } else { 'none' })."
 }
 
@@ -535,8 +729,8 @@ function Show-R2Status {
 }
 
 try {
-    if ($Create -or $Reset -or $Stage) {
-        $purpose = if ($Create) { "Create permanent $RootName root" } elseif ($Reset) { "Reset permanent $RootName root" } else { "Stage permanent $RootName root" }
+    if ($Create -or $Reset -or $Repair -or $Stage) {
+        $purpose = if ($Create) { "Create permanent $RootName root" } elseif ($Reset) { "Reset permanent $RootName root" } elseif ($Repair) { "Repair permanent $RootName root" } else { "Stage permanent $RootName root" }
         Acquire-MutationLock $purpose
     }
     if ($Create) {
@@ -553,6 +747,8 @@ try {
             Remove-TreeEntry $Root
         }
         New-R2Root
+    } elseif ($Repair) {
+        Repair-R2DevRoot
     } elseif ($Stage) {
         Stage-R2Root
     } elseif ($Verify) {
