@@ -17418,6 +17418,27 @@ static bool __fastcall R1OBaseFileSystem_FileExists(void* thisptr, const char* f
 	return r2port::Exists(fileName);
 }
 
+static const char* (__fastcall* R1OTFOFileSystem_FindFirstOriginal)(void*, __int64, __int64);
+static const char* (__fastcall* R1OTFOFileSystem_FindNextOriginal)(void*, unsigned __int16);
+
+static const char* __fastcall R1OTFOFileSystem_FindFirst(void* thisptr, __int64 pattern, __int64 handleOut)
+{
+	const char* result = R1OTFOFileSystem_FindFirstOriginal
+		? R1OTFOFileSystem_FindFirstOriginal(thisptr, pattern, handleOut)
+		: nullptr;
+	return R2PortAppendFindFirstResult(
+		reinterpret_cast<const char*>(pattern),
+		reinterpret_cast<uint16_t*>(handleOut),
+		result);
+}
+
+static const char* __fastcall R1OTFOFileSystem_FindNext(void* thisptr, unsigned __int16 handle)
+{
+	const char* result = R1OTFOFileSystem_FindNextOriginal
+		? R1OTFOFileSystem_FindNextOriginal(thisptr, handle)
+		: nullptr;
+	return R2PortAppendFindNextResult(handle, result);
+}
 static void* __fastcall R1OFileSystem_Open(void* thisptr, const char* fileName, const char* options, int flags, const char* pathId, __int64 unknown)
 {
 	if (IsReadableCString(fileName))
@@ -17700,6 +17721,16 @@ static void HookR1OTFOFileSystemOpen(void* fileSystem)
 	if (!IsReadableRange(vtable, sizeof(void*) * 78))
 		return;
 
+	const bool findFirstExecutable = IsExecutableFileSystemTarget(vtable[30]);
+	const bool findNextExecutable = IsExecutableFileSystemTarget(vtable[31]);
+	const bool findFirst = findFirstExecutable && HookR1OTFOFileSystemMethod(
+		vtable[30],
+		reinterpret_cast<void*>(&R1OTFOFileSystem_FindFirst),
+		reinterpret_cast<LPVOID*>(&R1OTFOFileSystem_FindFirstOriginal));
+	const bool findNext = findNextExecutable && HookR1OTFOFileSystemMethod(
+		vtable[31],
+		reinterpret_cast<void*>(&R1OTFOFileSystem_FindNext),
+		reinterpret_cast<LPVOID*>(&R1OTFOFileSystem_FindNextOriginal));
 	const bool setBufferSize = HookR1OTFOFileSystemMethod(vtable[25], reinterpret_cast<void*>(&R1OFileSystem_SetBufferSize), reinterpret_cast<LPVOID*>(&R1OFileSystem_SetBufferSizeOriginal));
 	const bool isOk = HookR1OTFOFileSystemMethod(vtable[26], reinterpret_cast<void*>(&R1OFileSystem_IsOk), reinterpret_cast<LPVOID*>(&R1OFileSystem_IsOkOriginal));
 	const bool endOfFile = HookR1OTFOFileSystemMethod(vtable[27], reinterpret_cast<void*>(&R1OFileSystem_EndOfFile), reinterpret_cast<LPVOID*>(&R1OFileSystem_EndOfFileOriginal));
@@ -17708,14 +17739,18 @@ static void HookR1OTFOFileSystemOpen(void* fileSystem)
 	const bool readEx = HookR1OTFOFileSystemMethod(vtable[77], reinterpret_cast<void*>(&R1OFileSystem_ReadEx), reinterpret_cast<LPVOID*>(&R1OFileSystem_ReadExOriginal));
 	s_R1OFileSystemHooksInstalled = setBufferSize && isOk && endOfFile && readLine && open && readEx;
 
-	char buffer[384];
+	char buffer[448];
 	_snprintf_s(
 		buffer,
 		sizeof(buffer),
 		_TRUNCATE,
-		"R1Delta: R1O TFO VFileSystem017 memory VPK hooks fs=%p vtable=%p setBufferSize=%d isOk=%d eof=%d readLine=%d open=%d readEx=%d installed=%d\n",
+		"R1Delta: R1O TFO VFileSystem017 memory VPK hooks fs=%p vtable=%p findFirst=%d/%d findNext=%d/%d setBufferSize=%d isOk=%d eof=%d readLine=%d open=%d readEx=%d installed=%d\n",
 		fileSystem,
 		vtable,
+		findFirst ? 1 : 0,
+		findFirstExecutable ? 1 : 0,
+		findNext ? 1 : 0,
+		findNextExecutable ? 1 : 0,
 		setBufferSize ? 1 : 0,
 		isOk ? 1 : 0,
 		endOfFile ? 1 : 0,

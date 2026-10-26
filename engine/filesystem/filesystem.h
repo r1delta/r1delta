@@ -308,4 +308,6 @@ extern const char* (*oCBaseFileSystem__FindFirst)(CBaseFileSystem* thisptr, __in
 extern const char* (*oCBaseFileSystem__FindNext)(CBaseFileSystem* thisptr, unsigned __int16 a2); 
 const char* CBaseFileSystem__FindFirst(CBaseFileSystem* thisptr, __int64 a2, __int64 a3);
 const char* CBaseFileSystem__FindNext(CBaseFileSystem* thisptr, unsigned __int16 a2);
+const char* R2PortAppendFindFirstResult(const char* pattern, uint16_t* handle, const char* result);
+const char* R2PortAppendFindNextResult(uint16_t handle, const char* result);
 void ReconcileAddonListFile(IFileSystem* pFileSystem, const char* pModPath);

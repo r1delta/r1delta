@@ -800,7 +800,9 @@ public:
     }
     std::vector<std::string> Enumerate(std::string_view normalizedPattern) override
     {
-        if (normalizedPattern != "maps/*.bsp")
+        const bool mapPattern = normalizedPattern == "maps/*.bsp";
+        const bool fakeDediPackagePattern = normalizedPattern == "vpk/e*.bsp*";
+        if (!mapPattern && !fakeDediPackagePattern)
             return {};
 
         std::vector<std::string> paths;
@@ -808,10 +810,15 @@ public:
             const auto state = GetMapState(mapName);
             if (state->directoryVpk.empty() || !IsRegularFile(state->directoryVpk))
                 continue;
+
             const std::string package = state->directoryVpk.string();
             const std::string bspPath = "maps/" + state->mapName + ".bsp";
-            if (R1OVPK_HasDirectoryVPKFile(package.c_str(), bspPath.c_str()))
+            if (!R1OVPK_HasDirectoryVPKFile(package.c_str(), bspPath.c_str()))
+                continue;
+            if (mapPattern)
                 paths.push_back(bspPath);
+            else
+                paths.push_back("vpk/" + state->directoryVpk.filename().string());
         }
         return paths;
     }
@@ -883,7 +890,9 @@ void ObserveMapFilePath(std::string_view path)
 void InstallR2MapProvider()
 {
     std::call_once(g_providerInstallOnce, []() {
-        RegisterProvider("maps", std::make_shared<R2MapProvider>());
+        auto provider = std::make_shared<R2MapProvider>();
+        RegisterProvider("maps", provider);
+        RegisterProvider("vpk", std::move(provider));
     });
 }
 
