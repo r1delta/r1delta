@@ -5,6 +5,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using Microsoft.Win32;
 
 namespace TitanfallFinder
@@ -357,11 +358,7 @@ namespace TitanfallFinder
         private static string TryFindViaSteamMethod()
         {
             // Try 64-bit registry then 32-bit for Steam InstallPath
-            string steamPath = Registry.GetValue(@"HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\Valve\Steam",
-                                                 "InstallPath", null) as string
-                               ??
-                               Registry.GetValue(@"HKEY_LOCAL_MACHINE\SOFTWARE\Valve\Steam",
-                                                 "InstallPath", null) as string;
+            string steamPath = GetSteamInstallPath();
 
             if (string.IsNullOrEmpty(steamPath) || !Directory.Exists(steamPath))
                 return null;
@@ -393,6 +390,15 @@ namespace TitanfallFinder
             }
 
             return null;
+        }
+
+        private static string GetSteamInstallPath()
+        {
+            return Registry.GetValue(@"HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\Valve\Steam",
+                                     "InstallPath", null) as string
+                   ??
+                   Registry.GetValue(@"HKEY_LOCAL_MACHINE\SOFTWARE\Valve\Steam",
+                                     "InstallPath", null) as string;
         }
 
         private static List<string> ParseLibraryFolders(string libraryFoldersFile)
@@ -698,6 +704,372 @@ namespace TitanfallFinder
             {
                 byte[] hash = md5.ComputeHash(stream);
                 return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+            }
+        }
+
+        // =============================================================
+        // Titanfall 2
+        // =============================================================
+        // Titanfall 2 is a different game from the one FindTitanfallOrR1Delta looks for, so it has
+        // its own candidate sources, Steam library reader and validator; nothing is shared with that finder.
+        private const string Titanfall2SteamAppId = "1237970";
+        private const string Titanfall2EnvironmentVariable = "R1DELTA_TITANFALL2_PATH";
+
+        // Product GUID the EA installer registers Titanfall 2 under (Uninstall and Respawn\Titanfall2).
+        private const string Titanfall2EaProductGuid = "{4BD80373-FEE7-45B6-8249-6E8E98717405}";
+
+        // The EA installer writes a mangled trademark sign, so the display name can be "TitanfallT 2".
+        private static readonly Regex Titanfall2DisplayName =
+            new Regex(@"^Titanfall\S{0,3}\s*2\b", RegexOptions.IgnoreCase);
+
+        private static readonly RegistryView[] RegistryViews = { RegistryView.Registry64, RegistryView.Registry32 };
+
+        private static readonly string[] Titanfall2FolderNames = { "Titanfall2", "Titanfall 2" };
+
+        // Parent folders tried on every drive, mirroring the layouts in TryKnownFixedPaths.
+        private static readonly string[] Titanfall2KnownParents =
+        {
+            "",
+            "Games",
+            @"Games\EA",
+            "EA Games",
+            @"Program Files\EA Games",
+            @"Program Files (x86)\Origin Games",
+            @"Program Files (x86)\Steam\steamapps\common",
+            @"SteamLibrary\steamapps\common"
+        };
+
+        /// <summary>
+        /// Finds a complete Titanfall 2 install and returns its root directory, or null.
+        /// The search order is shared with the engine's R2 map provider (DiscoverR2Install in
+        /// engine/filesystem/r2_map_provider.cpp) and documented in docs/r2port.md; change both together:
+        ///   1. manualPath (a root directory, or a file inside it; the launcher has no saved setting yet)
+        ///   2. the R1DELTA_TITANFALL2_PATH environment variable
+        ///      Both are explicit choices: if one does not validate, null is returned instead of
+        ///      falling back to some other install. The engine has no manualPath.
+        ///   3. HKLM\SOFTWARE\Respawn\Titanfall2 "Install Dir" (64-bit then 32-bit view)
+        ///   4. Uninstall entries: the EA product GUID, "Steam App 1237970", or a display name that reads Titanfall 2
+        ///   5. Steam: root from the registry, libraries from libraryfolders.vdf, appmanifest_1237970.acf
+        ///      installdir, then common\Titanfall2 and common\Titanfall 2
+        ///   6. Titanfall2 / "Titanfall 2" under well-known parent folders on every fixed or removable drive
+        /// Every candidate must pass the install validator.
+        /// </summary>
+        public static string FindTitanfall2(string manualPath = null)
+        {
+            debugLog.Clear();
+
+            if (!string.IsNullOrWhiteSpace(manualPath))
+                return ValidateTitanfall2Candidate("ManualPath", NormalizeInstallRoot(manualPath));
+
+            string envPath = Environment.GetEnvironmentVariable(Titanfall2EnvironmentVariable);
+            if (!string.IsNullOrWhiteSpace(envPath))
+                return ValidateTitanfall2Candidate(Titanfall2EnvironmentVariable, NormalizeInstallRoot(envPath));
+
+            var sources = new List<Tuple<string, Func<IEnumerable<string>>>>
+            {
+                Tuple.Create<string, Func<IEnumerable<string>>>("Titanfall2Registry", FindTitanfall2ViaRegistry),
+                Tuple.Create<string, Func<IEnumerable<string>>>("Titanfall2Uninstall", FindTitanfall2ViaUninstallRegistry),
+                Tuple.Create<string, Func<IEnumerable<string>>>("Titanfall2Steam", FindTitanfall2ViaSteam),
+                Tuple.Create<string, Func<IEnumerable<string>>>("Titanfall2KnownPaths", FindTitanfall2ViaKnownPaths)
+            };
+
+            var tested = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var source in sources)
+            {
+                List<string> paths;
+                try
+                {
+                    paths = source.Item2().ToList();
+                }
+                catch (Exception ex)
+                {
+                    debugLog.AppendLine(source.Item1 + " ERROR: " + ex.Message);
+                    continue;
+                }
+
+                foreach (string path in paths)
+                {
+                    string root = NormalizeInstallRoot(path);
+                    if (root == null || !tested.Add(root))
+                        continue;
+
+                    string validated = ValidateTitanfall2Candidate(source.Item1, root);
+                    if (validated != null)
+                        return validated;
+                }
+            }
+
+            return null;
+        }
+
+        private static IEnumerable<string> FindTitanfall2ViaRegistry()
+        {
+            // Written by the EA installer, and kept up to date by EA app/Origin when the install is moved.
+            return ReadLocalMachineStrings(@"SOFTWARE\Respawn\Titanfall2", "Install Dir");
+        }
+
+        private static IEnumerable<string> FindTitanfall2ViaUninstallRegistry()
+        {
+            const string uninstallPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
+            string steamKeyName = "Steam App " + Titanfall2SteamAppId;
+
+            foreach (RegistryView view in RegistryViews)
+            {
+                using (RegistryKey hklm = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view))
+                using (RegistryKey uninstall = hklm.OpenSubKey(uninstallPath))
+                {
+                    if (uninstall == null)
+                        continue;
+
+                    foreach (string name in uninstall.GetSubKeyNames())
+                    {
+                        using (RegistryKey key = uninstall.OpenSubKey(name))
+                        {
+                            if (key == null)
+                                continue;
+
+                            string displayName = key.GetValue("DisplayName") as string;
+                            bool known = name.Equals(Titanfall2EaProductGuid, StringComparison.OrdinalIgnoreCase) ||
+                                         name.Equals(steamKeyName, StringComparison.OrdinalIgnoreCase);
+                            if (!known && (displayName == null || !Titanfall2DisplayName.IsMatch(displayName)))
+                                continue;
+
+                            string location = key.GetValue("InstallLocation") as string;
+                            if (!string.IsNullOrWhiteSpace(location))
+                                yield return location;
+                        }
+                    }
+                }
+            }
+        }
+
+        private static IEnumerable<string> FindTitanfall2ViaSteam()
+        {
+            // Steam roots, then every library listed in their libraryfolders.vdf. Registry locations,
+            // value names and vdf formats match the engine's DiscoverR2Install.
+            var libraries = new List<string>();
+            foreach (string steamRoot in ReadTitanfall2SteamRoots())
+            {
+                libraries.Add(steamRoot);
+                libraries.AddRange(ReadSteamLibraryPaths(Path.Combine(steamRoot, "steamapps", "libraryfolders.vdf")));
+            }
+
+            foreach (string library in libraries)
+            {
+                string steamApps = Path.Combine(library, "steamapps");
+                string common = Path.Combine(steamApps, "common");
+
+                // The manifest names the real folder; the default names cover a deleted manifest.
+                string manifest = Path.Combine(steamApps, "appmanifest_" + Titanfall2SteamAppId + ".acf");
+                List<string> manifestTokens = ReadVdfTokens(manifest);
+                for (int i = 0; i + 1 < manifestTokens.Count; i++)
+                {
+                    if (manifestTokens[i] == "installdir")
+                    {
+                        yield return Path.Combine(common, manifestTokens[i + 1]);
+                        break;
+                    }
+                }
+
+                foreach (string folderName in Titanfall2FolderNames)
+                    yield return Path.Combine(common, folderName);
+            }
+        }
+
+        private static IEnumerable<string> ReadTitanfall2SteamRoots()
+        {
+            var locations = new[]
+            {
+                Tuple.Create(RegistryHive.LocalMachine, @"SOFTWARE\Valve\Steam"),
+                Tuple.Create(RegistryHive.LocalMachine, @"SOFTWARE\WOW6432Node\Valve\Steam"),
+                Tuple.Create(RegistryHive.CurrentUser, @"Software\Valve\Steam")
+            };
+
+            foreach (var location in locations)
+            {
+                foreach (string valueName in new[] { "InstallPath", "SteamPath" })
+                {
+                    foreach (RegistryView view in RegistryViews)
+                    {
+                        string value = null;
+                        using (RegistryKey hive = RegistryKey.OpenBaseKey(location.Item1, view))
+                        using (RegistryKey key = hive.OpenSubKey(location.Item2))
+                            value = key?.GetValue(valueName) as string;
+                        if (!string.IsNullOrWhiteSpace(value))
+                            yield return value;
+                    }
+                }
+            }
+        }
+
+        private static List<string> ReadVdfTokens(string file)
+        {
+            var tokens = new List<string>();
+            if (!File.Exists(file))
+                return tokens;
+
+            foreach (Match match in Regex.Matches(File.ReadAllText(file), "\"((?:[^\"\\\\]|\\\\.)*)\""))
+                tokens.Add(match.Groups[1].Value.Replace("\\\\", "\\").Replace("\\\"", "\""));
+            return tokens;
+        }
+
+        // Both libraryfolders.vdf layouts: "path" "D:\\Lib" entries and the older "1" "D:\\Lib" entries.
+        private static List<string> ReadSteamLibraryPaths(string libraryFoldersFile)
+        {
+            var libraries = new List<string>();
+            List<string> tokens = ReadVdfTokens(libraryFoldersFile);
+            for (int i = 0; i + 1 < tokens.Count; i++)
+            {
+                string key = tokens[i];
+                string value = tokens[i + 1];
+                bool legacyNumericEntry = key.Length > 0 && key.All(char.IsDigit) && value.Length > 2 && value[1] == ':';
+                if (key == "path" || legacyNumericEntry)
+                {
+                    libraries.Add(value);
+                    i++;
+                }
+            }
+            return libraries;
+        }
+
+        private static IEnumerable<string> FindTitanfall2ViaKnownPaths()
+        {
+            foreach (DriveInfo drive in DriveInfo.GetDrives())
+            {
+                // Skip network and optical drives so a dead share cannot stall the search.
+                if (drive.DriveType != DriveType.Fixed && drive.DriveType != DriveType.Removable)
+                    continue;
+                if (!drive.IsReady)
+                    continue;
+
+                foreach (string parent in Titanfall2KnownParents)
+                {
+                    foreach (string folderName in Titanfall2FolderNames)
+                        yield return Path.Combine(drive.RootDirectory.FullName, parent, folderName);
+                }
+            }
+        }
+
+        private static IEnumerable<string> ReadLocalMachineStrings(string subKeyPath, string valueName)
+        {
+            foreach (RegistryView view in RegistryViews)
+            {
+                using (RegistryKey hklm = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view))
+                using (RegistryKey key = hklm.OpenSubKey(subKeyPath))
+                {
+                    string value = key?.GetValue(valueName) as string;
+                    if (!string.IsNullOrWhiteSpace(value))
+                        yield return value;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Turns a directory, or a file inside the install, into a trimmed full directory path.
+        /// Returns null when the text is not a usable path.
+        /// </summary>
+        private static string NormalizeInstallRoot(string path)
+        {
+            try
+            {
+                string full = Path.GetFullPath(path.Trim().Trim('"'));
+                if (File.Exists(full))
+                    full = Path.GetDirectoryName(full);
+
+                string pathRoot = Path.GetPathRoot(full);
+                if (!string.Equals(full, pathRoot, StringComparison.OrdinalIgnoreCase))
+                    full = full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                return full;
+            }
+            catch (Exception ex) when (
+                ex is NotSupportedException ||
+                ex is System.Security.SecurityException ||
+                ex is ArgumentException ||
+                ex is PathTooLongException)
+            {
+                debugLog.AppendLine($"Not a usable path '{path}': {ex.Message}");
+                return null;
+            }
+        }
+
+        private static string ValidateTitanfall2Candidate(string method, string root)
+        {
+            if (root == null)
+                return null;
+
+            if (ValidateTitanfall2Root(root, out string validationReport))
+            {
+                debugLog.AppendLine($"Candidate from {method} validated:");
+                debugLog.AppendLine($"  => {root}");
+                debugLog.AppendLine(validationReport);
+                return root;
+            }
+
+            debugLog.AppendLine($"Candidate from {method} did NOT validate:");
+            debugLog.AppendLine($"  => {root}");
+            debugLog.AppendLine(validationReport);
+            return null;
+        }
+
+        // Titanfall and R1Delta share most of their layout with Titanfall 2 (bin\x64_retail, vpk\ with the
+        // same file names), so those files cannot tell them apart. rtech_game.dll and the r2 rpaks exist
+        // only in Titanfall 2, and r1\gameinfo.txt (the marker ValidateCandidateExe requires) only in
+        // Titanfall/R1Delta, which keeps the two validators exclusive.
+        private static bool ValidateTitanfall2Root(string root, out string validationReport)
+        {
+            StringBuilder report = new StringBuilder();
+
+            if (!Directory.Exists(root))
+            {
+                report.AppendLine("Directory not found: " + root);
+                validationReport = report.ToString();
+                return false;
+            }
+
+            if (File.Exists(Path.Combine(root, "r1", "gameinfo.txt")))
+            {
+                report.AppendLine("Has r1\\gameinfo.txt, so this is Titanfall or R1Delta");
+                validationReport = report.ToString();
+                return false;
+            }
+
+            // Wildcards: the vpk directory file is prefixed with the install language, and the rpak set varies.
+            // The numbered vpk data file separates a full install from a partial one.
+            var requirements = new[]
+            {
+                Tuple.Create(@"bin\x64_retail", "rtech_game.dll"),
+                Tuple.Create(@"r2\paks\Win64", "*.rpak"),
+                Tuple.Create("vpk", "*client_mp_common.bsp.pak000_dir.vpk"),
+                Tuple.Create("vpk", "client_mp_common.bsp.pak000_000.vpk")
+            };
+
+            bool valid = true;
+            foreach (var requirement in requirements)
+            {
+                if (!HasMatchingFile(Path.Combine(root, requirement.Item1), requirement.Item2))
+                {
+                    report.AppendLine($"Missing {requirement.Item1}\\{requirement.Item2}");
+                    valid = false;
+                }
+            }
+
+            if (valid)
+                report.AppendLine("Validation PASSED for Titanfall 2: " + root);
+            validationReport = report.ToString();
+            return valid;
+        }
+
+        private static bool HasMatchingFile(string directory, string pattern)
+        {
+            try
+            {
+                return Directory.Exists(directory) && Directory.EnumerateFiles(directory, pattern).Any();
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                // Dangling junctions report as existing, then fail to enumerate.
+                debugLog.AppendLine($"Cannot list '{directory}': {ex.Message}");
+                return false;
             }
         }
 

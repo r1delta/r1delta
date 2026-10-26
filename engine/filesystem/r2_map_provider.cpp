@@ -213,18 +213,6 @@ std::vector<std::string> ReadVdfTokens(const std::filesystem::path& path)
     return tokens;
 }
 
-void AddCandidate(std::vector<std::filesystem::path>& candidates,
-    std::unordered_set<std::string>& seen, const std::filesystem::path& path)
-{
-    if (path.empty())
-        return;
-    std::error_code error;
-    const std::filesystem::path normalized = std::filesystem::absolute(path, error).lexically_normal();
-    const std::string value = LowerAscii((error ? path : normalized).string());
-    if (seen.insert(value).second)
-        candidates.emplace_back(error ? path : normalized);
-}
-
 bool HasCommonClientVpkDirectory(const std::filesystem::path& vpkDirectory)
 {
     constexpr std::string_view suffix = "client_mp_common.bsp.pak000_dir.vpk";
@@ -265,29 +253,102 @@ bool IsValidR2Install(const std::filesystem::path& root)
     return false;
 }
 
-std::filesystem::path DiscoverR2Install()
+std::string TrimInstallText(std::string value)
 {
-    char environmentPath[MAX_PATH]{};
-    const DWORD environmentLength = GetEnvironmentVariableA(
-        "R1DELTA_TITANFALL2_PATH", environmentPath, static_cast<DWORD>(std::size(environmentPath)));
-    if (environmentLength && environmentLength < std::size(environmentPath)
-        && IsValidR2Install(environmentPath))
-        return std::filesystem::path(environmentPath);
+    const auto isTrim = [](unsigned char c) { return std::isspace(c) != 0 || c == '"'; };
+    while (!value.empty() && isTrim(static_cast<unsigned char>(value.back())))
+        value.pop_back();
+    size_t first = 0;
+    while (first < value.size() && isTrim(static_cast<unsigned char>(value[first])))
+        ++first;
+    return value.substr(first);
+}
 
-    std::vector<std::filesystem::path> candidates;
-    std::unordered_set<std::string> seen;
-    for (const char* keyPath : {
-        "SOFTWARE\\Respawn\\Titanfall2",
-        "SOFTWARE\\WOW6432Node\\Respawn\\Titanfall2",
-    }) {
-        for (REGSAM view : { KEY_WOW64_64KEY, KEY_WOW64_32KEY }) {
-            const std::string install = ReadRegistryString(HKEY_LOCAL_MACHINE, keyPath, "Install Dir", view);
-            if (!install.empty())
-                AddCandidate(candidates, seen, install);
+// Turns a directory, or a file inside the install, into a trimmed absolute directory path.
+std::filesystem::path NormalizeInstallRoot(const std::string& text)
+{
+    const std::string trimmed = TrimInstallText(text);
+    if (trimmed.empty())
+        return {};
+    std::error_code error;
+    std::filesystem::path full = std::filesystem::absolute(trimmed, error).lexically_normal();
+    if (error)
+        return {};
+    if (IsRegularFile(full))
+        full = full.parent_path();
+    while (full.has_relative_path() && (full.native().back() == L'\\' || full.native().back() == L'/'))
+        full = full.native().substr(0, full.native().size() - 1);
+    return full;
+}
+
+// Mirrors the launcher's ^Titanfall\S{0,3}\s*2\b (case-insensitive). The EA installer writes a mangled
+// trademark sign, so the display name can be "TitanfallT 2".
+bool IsTitanfall2DisplayName(const std::string& name)
+{
+    constexpr std::string_view prefix = "titanfall";
+    if (name.size() < prefix.size() + 1 || LowerAscii(name.substr(0, prefix.size())) != prefix)
+        return false;
+    const auto isSpace = [](char c) { return std::isspace(static_cast<unsigned char>(c)) != 0; };
+    for (size_t skipped = 0; skipped <= 3; ++skipped) {
+        size_t position = prefix.size();
+        bool ok = true;
+        for (size_t i = 0; i < skipped; ++i, ++position) {
+            if (position >= name.size() || isSpace(name[position])) {
+                ok = false;
+                break;
+            }
         }
+        if (!ok)
+            continue;
+        while (position < name.size() && isSpace(name[position]))
+            ++position;
+        if (position >= name.size() || name[position] != '2')
+            continue;
+        ++position;
+        if (position == name.size()
+            || !(std::isalnum(static_cast<unsigned char>(name[position])) || name[position] == '_'))
+            return true;
     }
+    return false;
+}
 
-    std::vector<std::filesystem::path> steamRoots;
+std::vector<std::string> ReadInstallStringsFromUninstallEntries()
+{
+    constexpr const char* uninstallPath = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall";
+    constexpr std::string_view eaProductGuid = "{4bd80373-fee7-45b6-8249-6e8e98717405}";
+    constexpr std::string_view steamKeyName = "steam app 1237970";
+
+    std::vector<std::string> locations;
+    for (REGSAM view : { KEY_WOW64_64KEY, KEY_WOW64_32KEY }) {
+        HKEY uninstall{};
+        if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, uninstallPath, 0, KEY_READ | view, &uninstall) != ERROR_SUCCESS)
+            continue;
+        for (DWORD index = 0;; ++index) {
+            char name[512]{};
+            DWORD nameLength = static_cast<DWORD>(std::size(name));
+            const LONG status = RegEnumKeyExA(uninstall, index, name, &nameLength, nullptr, nullptr, nullptr, nullptr);
+            if (status == ERROR_NO_MORE_ITEMS)
+                break;
+            if (status != ERROR_SUCCESS)
+                continue;
+
+            const std::string subKey = std::string(uninstallPath) + "\\" + name;
+            const std::string lowerName = LowerAscii(name);
+            const bool known = lowerName == eaProductGuid || lowerName == steamKeyName;
+            if (!known && !IsTitanfall2DisplayName(ReadRegistryString(HKEY_LOCAL_MACHINE, subKey.c_str(), "DisplayName", view)))
+                continue;
+            std::string location = ReadRegistryString(HKEY_LOCAL_MACHINE, subKey.c_str(), "InstallLocation", view);
+            if (!TrimInstallText(location).empty())
+                locations.push_back(std::move(location));
+        }
+        RegCloseKey(uninstall);
+    }
+    return locations;
+}
+
+std::vector<std::filesystem::path> ReadSteamRoots()
+{
+    std::vector<std::filesystem::path> roots;
     for (const auto& registryLocation : {
         std::pair{ HKEY_LOCAL_MACHINE, "SOFTWARE\\Valve\\Steam" },
         std::pair{ HKEY_LOCAL_MACHINE, "SOFTWARE\\WOW6432Node\\Valve\\Steam" },
@@ -297,46 +358,60 @@ std::filesystem::path DiscoverR2Install()
             for (REGSAM view : { KEY_WOW64_64KEY, KEY_WOW64_32KEY }) {
                 const std::string steam = ReadRegistryString(
                     registryLocation.first, registryLocation.second, valueName, view);
-                if (!steam.empty()) {
-                    steamRoots.emplace_back(steam);
-                    AddCandidate(candidates, seen,
-                        std::filesystem::path(steam) / "steamapps" / "common" / "Titanfall2");
-                }
+                if (!TrimInstallText(steam).empty())
+                    roots.emplace_back(steam);
             }
         }
     }
+    return roots;
+}
 
-    std::vector<std::filesystem::path> steamLibraries;
-    for (const auto& steam : steamRoots) {
-        steamLibraries.push_back(steam);
-        const auto libraries = ReadVdfTokens(steam / "steamapps" / "libraryfolders.vdf");
-        for (size_t i = 0; i + 1 < libraries.size(); ++i) {
-            if (libraries[i] == "path") {
-                steamLibraries.emplace_back(libraries[i + 1]);
-                ++i;
-            }
-            else if (!libraries[i].empty() && std::all_of(libraries[i].begin(), libraries[i].end(),
-                [](unsigned char c) { return std::isdigit(c) != 0; })
-                && libraries[i + 1].size() > 2 && libraries[i + 1][1] == ':') {
-                steamLibraries.emplace_back(libraries[i + 1]);
-                ++i;
-            }
+// Both libraryfolders.vdf layouts: "path" "D:\\Lib" entries and the older "1" "D:\\Lib" entries.
+std::vector<std::filesystem::path> ReadSteamLibraryPaths(const std::filesystem::path& libraryFolders)
+{
+    std::vector<std::filesystem::path> libraries;
+    const auto tokens = ReadVdfTokens(libraryFolders);
+    for (size_t i = 0; i + 1 < tokens.size(); ++i) {
+        const bool legacyNumericEntry = !tokens[i].empty()
+            && std::all_of(tokens[i].begin(), tokens[i].end(), [](unsigned char c) { return std::isdigit(c) != 0; })
+            && tokens[i + 1].size() > 2 && tokens[i + 1][1] == ':';
+        if (tokens[i] == "path" || legacyNumericEntry) {
+            libraries.emplace_back(tokens[i + 1]);
+            ++i;
         }
     }
+    return libraries;
+}
 
-    for (const auto& library : steamLibraries) {
+std::vector<std::string> SteamInstallCandidates()
+{
+    std::vector<std::filesystem::path> libraries;
+    for (const auto& steamRoot : ReadSteamRoots()) {
+        libraries.push_back(steamRoot);
+        for (auto& library : ReadSteamLibraryPaths(steamRoot / "steamapps" / "libraryfolders.vdf"))
+            libraries.push_back(std::move(library));
+    }
+
+    std::vector<std::string> candidates;
+    for (const auto& library : libraries) {
         const std::filesystem::path steamApps = library / "steamapps";
-        AddCandidate(candidates, seen, steamApps / "common" / "Titanfall2");
+        const std::filesystem::path common = steamApps / "common";
+        // The manifest names the real folder; the default names cover a deleted manifest.
         const auto manifest = ReadVdfTokens(steamApps / "appmanifest_1237970.acf");
         for (size_t i = 0; i + 1 < manifest.size(); ++i) {
             if (manifest[i] == "installdir") {
-                AddCandidate(candidates, seen, steamApps / "common" / manifest[i + 1]);
+                candidates.push_back((common / manifest[i + 1]).string());
                 break;
             }
         }
+        candidates.push_back((common / "Titanfall2").string());
+        candidates.push_back((common / "Titanfall 2").string());
     }
+    return candidates;
+}
 
-    const DWORD drives = GetLogicalDrives();
+std::vector<std::string> KnownFolderCandidates()
+{
     constexpr std::array<const char*, 8> knownParents = {
         "",
         "Games",
@@ -351,10 +426,14 @@ std::filesystem::path DiscoverR2Install()
         "Titanfall2",
         "Titanfall 2",
     };
+
+    std::vector<std::string> candidates;
+    const DWORD drives = GetLogicalDrives();
     for (unsigned int index = 0; index < 26; ++index) {
         if ((drives & (1u << index)) == 0)
             continue;
         char rootName[] = { static_cast<char>('A' + index), ':', '\\', '\0' };
+        // Skip network and optical drives so a dead share cannot stall the search.
         const UINT driveType = GetDriveTypeA(rootName);
         if (driveType != DRIVE_FIXED && driveType != DRIVE_REMOVABLE)
             continue;
@@ -364,26 +443,93 @@ std::filesystem::path DiscoverR2Install()
         const std::filesystem::path drive(rootName);
         for (const char* parent : knownParents) {
             for (const char* folder : installFolders)
-                AddCandidate(candidates, seen, drive / parent / folder);
+                candidates.push_back((drive / parent / folder).string());
         }
     }
+    return candidates;
+}
 
-    for (const auto& candidate : candidates) {
-        if (IsValidR2Install(candidate))
-            return candidate;
+std::vector<std::string> RespawnRegistryCandidates()
+{
+    std::vector<std::string> installs;
+    for (REGSAM view : { KEY_WOW64_64KEY, KEY_WOW64_32KEY }) {
+        std::string install = ReadRegistryString(
+            HKEY_LOCAL_MACHINE, "SOFTWARE\\Respawn\\Titanfall2", "Install Dir", view);
+        if (!TrimInstallText(install).empty())
+            installs.push_back(std::move(install));
     }
+    return installs;
+}
+
+// Finds the player's own Titanfall 2 install. The search order is shared with the launcher
+// (TitanfallLocator.FindTitanfall2 in launcher_ex/TitanfallFinder.cs) and documented in
+// docs/r2port.md; change all three together:
+//   1. R1DELTA_TITANFALL2_PATH. Explicit: when set and not a valid install the search stops,
+//      it does not fall back to another install. (The launcher also takes a manual path first.)
+//   2. HKLM\SOFTWARE\Respawn\Titanfall2 "Install Dir" (64-bit then 32-bit view)
+//   3. Uninstall entries: the EA product GUID, "Steam App 1237970", or a display name that reads Titanfall 2
+//   4. Steam: root from the registry, libraries from libraryfolders.vdf, appmanifest_1237970.acf
+//      installdir, then common\Titanfall2 and common\Titanfall 2
+//   5. Titanfall2 / "Titanfall 2" under well-known parent folders on every fixed or removable drive
+// Every candidate must pass IsValidR2Install. foundVia names the source of the result, or the
+// environment variable when it was set and rejected.
+std::filesystem::path DiscoverR2Install(std::string& foundVia)
+{
+    char environmentPath[32768]{};
+    const DWORD environmentLength = GetEnvironmentVariableA(
+        "R1DELTA_TITANFALL2_PATH", environmentPath, static_cast<DWORD>(std::size(environmentPath)));
+    if (environmentLength) {
+        foundVia = "R1DELTA_TITANFALL2_PATH";
+        if (environmentLength >= std::size(environmentPath))
+            return {};
+        const auto root = NormalizeInstallRoot(environmentPath);
+        return IsValidR2Install(root) ? root : std::filesystem::path{};
+    }
+
+    struct Source {
+        const char* name;
+        std::vector<std::string> (*candidates)();
+    };
+    const std::array<Source, 4> sources = { {
+        { "HKLM Respawn\\Titanfall2", RespawnRegistryCandidates },
+        { "Uninstall entries", ReadInstallStringsFromUninstallEntries },
+        { "Steam libraries", SteamInstallCandidates },
+        { "known folders", KnownFolderCandidates },
+    } };
+
+    std::unordered_set<std::string> tested;
+    for (const Source& source : sources) {
+        for (const std::string& candidate : source.candidates()) {
+            const auto root = NormalizeInstallRoot(candidate);
+            if (root.empty() || !tested.insert(LowerAscii(root.string())).second)
+                continue;
+            if (IsValidR2Install(root)) {
+                foundVia = source.name;
+                return root;
+            }
+        }
+    }
+    foundVia.clear();
     return {};
 }
 
 const std::filesystem::path& R2InstallDirectory()
 {
     std::call_once(g_installDiscoveryOnce, []() {
-        g_r2InstallDirectory = DiscoverR2Install();
+        std::string foundVia;
+        g_r2InstallDirectory = DiscoverR2Install(foundVia);
         char buffer[MAX_PATH * 2]{};
-        _snprintf_s(buffer, sizeof(buffer), _TRUNCATE,
-            "R1Delta: R2 map provider install discovery %s%s\n",
-            g_r2InstallDirectory.empty() ? "found no valid install" : "found ",
-            g_r2InstallDirectory.empty() ? "" : g_r2InstallDirectory.string().c_str());
+        if (g_r2InstallDirectory.empty() && !foundVia.empty())
+            _snprintf_s(buffer, sizeof(buffer), _TRUNCATE,
+                "R1Delta: R2 map provider install discovery: %s is set but is not a valid Titanfall 2 install\n",
+                foundVia.c_str());
+        else if (g_r2InstallDirectory.empty())
+            _snprintf_s(buffer, sizeof(buffer), _TRUNCATE,
+                "R1Delta: R2 map provider install discovery found no valid install\n");
+        else
+            _snprintf_s(buffer, sizeof(buffer), _TRUNCATE,
+                "R1Delta: R2 map provider install discovery found %s via %s\n",
+                g_r2InstallDirectory.string().c_str(), foundVia.c_str());
         Msg("%s", buffer);
         OutputDebugStringA(buffer);
     });
