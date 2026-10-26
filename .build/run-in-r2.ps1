@@ -1,5 +1,9 @@
 [CmdletBinding()]
 param(
+    [Alias('Root')]
+    [ValidateSet('r2', 'r2dev')]
+    [string] $RootName = 'r2dev',
+
     [ValidateSet('Client', 'Dedicated', 'Listen')]
     [string] $Mode = 'Client',
 
@@ -18,7 +22,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$Root = 'S:\game\r2'
+$Root = Join-Path 'S:\game' $RootName
 $CoreRoot = Join-Path $Root 'r1delta'
 $LockPath = 'C:\Users\r3muxd\tmp\r2port\GAME.lock'
 $CdbPath = 'C:\Program Files\WindowsApps\Microsoft.WinDbg_1.2603.20001.0_x64__8wekyb3d8bbwe\amd64\cdb.exe'
@@ -38,7 +42,7 @@ function Get-ProcessById([int] $ProcessId) {
 
 function Get-R2Processes {
     $rootPrefix = [IO.Path]::GetFullPath($Root).TrimEnd('\') + '\'
-    $physicalPrefix = 'C:\Users\r3muxd\newr1root3\game\r2\'
+    $physicalPrefix = (Join-Path 'C:\Users\r3muxd\newr1root3\game' $RootName).TrimEnd('\') + '\'
     return @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
         if (-not $_.ExecutablePath) { return $false }
         $path = [IO.Path]::GetFullPath($_.ExecutablePath)
@@ -51,7 +55,7 @@ function Assert-R2Idle {
     $running = @(Get-R2Processes)
     if ($running.Count -ne 0) {
         $listing = ($running | ForEach-Object { "pid=$($_.ProcessId) path=$($_.ExecutablePath)" }) -join '; '
-        throw "Refusing to start a second game from S:\game\r2: $listing"
+        throw "Refusing to start a second game from ${Root}: $listing"
     }
 }
 
@@ -182,7 +186,7 @@ function Test-R2ExecutablePath([string] $Candidate, [string] $Expected) {
     $expectedPath = [IO.Path]::GetFullPath($Expected)
     if ($candidatePath.Equals($expectedPath, [StringComparison]::OrdinalIgnoreCase)) { return $true }
     $rootPrefix = [IO.Path]::GetFullPath($Root).TrimEnd('\') + '\'
-    $physicalPrefix = 'C:\Users\r3muxd\newr1root3\game\r2\'
+    $physicalPrefix = (Join-Path 'C:\Users\r3muxd\newr1root3\game' $RootName).TrimEnd('\') + '\'
     $underRoot = $candidatePath.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase) -or
         $candidatePath.StartsWith($physicalPrefix, [StringComparison]::OrdinalIgnoreCase)
     return $underRoot -and [IO.Path]::GetFileName($candidatePath).Equals([IO.Path]::GetFileName($expectedPath), [StringComparison]::OrdinalIgnoreCase)

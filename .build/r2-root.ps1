@@ -1,5 +1,9 @@
 [CmdletBinding()]
 param(
+    [Alias('Root')]
+    [ValidateSet('r2', 'r2dev')]
+    [string] $RootName = 'r2dev',
+
     [switch] $Create,
     [switch] $Verify,
     [switch] $Reset,
@@ -14,8 +18,9 @@ $CodeRoot = Split-Path -Parent $PSScriptRoot
 $GameRoot = 'S:\game'
 $SourceLaunchRoot = Join-Path $GameRoot 'mp'
 $SourceCoreRoot = Join-Path $GameRoot 'r1delta'
-$Root = Join-Path $GameRoot 'r2'
+$Root = Join-Path $GameRoot $RootName
 $CoreRoot = Join-Path $Root 'r1delta'
+$ReusablePinnedCoreRoot = Join-Path (Join-Path $GameRoot 'r2') 'r1delta'
 $Pin = '316993bd0142e706ea5386943530f2b8d2c711dd'
 $BuildRoot = Join-Path $PSScriptRoot 'release'
 $VerifyScript = Join-Path $CodeRoot 'ci\verify_release_payload.ps1'
@@ -60,7 +65,7 @@ function Get-ProcessById([int] $ProcessId) {
 
 function Get-R2Processes {
     $rootPrefix = [IO.Path]::GetFullPath($Root).TrimEnd('\') + '\'
-    $physicalPrefix = 'C:\Users\r3muxd\newr1root3\game\r2\'
+    $physicalPrefix = (Join-Path 'C:\Users\r3muxd\newr1root3\game' $RootName).TrimEnd('\') + '\'
     return @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
         if (-not $_.ExecutablePath) { return $false }
         $path = [IO.Path]::GetFullPath($_.ExecutablePath)
@@ -73,7 +78,7 @@ function Assert-R2Idle {
     $running = @(Get-R2Processes)
     if ($running.Count -ne 0) {
         $listing = ($running | ForEach-Object { "pid=$($_.ProcessId) path=$($_.ExecutablePath)" }) -join '; '
-        throw "Refusing to modify S:\game\r2 while processes from that root are running: $listing"
+        throw "Refusing to modify $Root while processes from that root are running: $listing"
     }
 }
 
@@ -161,11 +166,30 @@ function Remove-TreeEntry([string] $Path) {
     [IO.Directory]::Delete($item.FullName, $false)
 }
 
+function Get-CoreShareTarget([string] $Name) {
+    if ($RootName -eq 'r2dev' -and $Name -in @('bin', 'materials')) {
+        $reusedDirectory = Join-Path $ReusablePinnedCoreRoot $Name
+        if (Test-Path -LiteralPath $reusedDirectory -PathType Container) {
+            $item = Get-Item -LiteralPath $reusedDirectory -Force
+            if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "Refusing to share a non-real pinned CORE directory from r2: $reusedDirectory"
+            }
+            return $reusedDirectory
+        }
+    }
+    return Join-Path $SourceCoreRoot $Name
+}
+
 function Get-CoreDirectoryPlan {
     $shared = [System.Collections.Generic.List[string]]::new()
     $checkout = [System.Collections.Generic.List[string]]::new()
     foreach ($name in $LargeCoreDirectories) {
         if (-not (Test-Path -LiteralPath (Join-Path $SourceCoreRoot $name) -PathType Container)) { continue }
+        if ($RootName -eq 'r2dev' -and $name -in @('bin', 'materials') -and
+            (Test-Path -LiteralPath (Join-Path $ReusablePinnedCoreRoot $name) -PathType Container)) {
+            $shared.Add($name)
+            continue
+        }
         $tree = @(Invoke-Git $SourceCoreRoot @('ls-tree', '-d', '--name-only', $Pin, '--', $name))
         if ($tree -notcontains $name) {
             if ($name -eq 'config' -and @(Get-ChildItem -LiteralPath (Join-Path $SourceCoreRoot $name) -Force).Count -eq 0) {
@@ -267,7 +291,7 @@ function New-R2Root {
             if (Test-Path -LiteralPath $destination) {
                 Remove-TreeEntry $destination
             }
-            New-DirectoryJunction $destination (Join-Path $SourceCoreRoot $name)
+            New-DirectoryJunction $destination (Get-CoreShareTarget $name)
         }
 
         $binDeltaSource = Join-Path $SourceCoreRoot 'bin_delta'
@@ -351,7 +375,7 @@ function Assert-PinnedCheckout {
     }
 
     $plan = Get-CoreDirectoryPlan
-    foreach ($name in $plan.Shared) { Assert-Junction (Join-Path $CoreRoot $name) (Join-Path $SourceCoreRoot $name) }
+    foreach ($name in $plan.Shared) { Assert-Junction (Join-Path $CoreRoot $name) (Get-CoreShareTarget $name) }
     foreach ($name in $plan.Checkout) { Assert-RealDirectory (Join-Path $CoreRoot $name) }
     foreach ($name in $GraphNames) {
         $source = Join-Path $GraphSourceRoot $name
@@ -393,6 +417,33 @@ function Assert-PinnedCheckout {
     Write-Host "Shared CORE directories: $(if ($plan.Shared.Count) { $plan.Shared -join ', ' } else { 'none' })."
 }
 
+function New-ReleaseVerificationMirror([string] $Destination) {
+    New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+    $sourcePrefix = [IO.Path]::GetFullPath($BuildRoot).TrimEnd('\') + '\'
+    foreach ($item in Get-ChildItem -LiteralPath $BuildRoot -Recurse -Force) {
+        $relativePath = $item.FullName.Substring($sourcePrefix.Length)
+        if ($item.PSIsContainer) {
+            New-Item -ItemType Directory -Path (Join-Path $Destination $relativePath) -Force | Out-Null
+            continue
+        }
+        if (-not $relativePath.Contains('\') -and $StubNames -contains $item.Name) { continue }
+        $target = Join-Path $Destination $relativePath
+        $targetParent = Split-Path -Parent $target
+        if (-not (Test-Path -LiteralPath $targetParent -PathType Container)) {
+            New-Item -ItemType Directory -Path $targetParent -Force | Out-Null
+        }
+        New-Item -ItemType HardLink -Path $target -Target $item.FullName | Out-Null
+    }
+    $verificationStubRoot = Join-Path $Destination 'r1o_stubs'
+    New-Item -ItemType Directory -Path $verificationStubRoot -Force | Out-Null
+    foreach ($name in $StubNames) {
+        $rootStub = Join-Path $BuildRoot $name
+        if (Test-Path -LiteralPath $rootStub -PathType Leaf) {
+            Copy-Item -LiteralPath $rootStub -Destination (Join-Path $verificationStubRoot $name) -Force
+        }
+    }
+}
+
 function Stage-R2Root {
     Assert-R2Idle
     Assert-RealDirectory $Root
@@ -401,6 +452,7 @@ function Stage-R2Root {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required staging input is missing: $path" }
     }
     $verifyCore = Join-Path $env:TEMP ("r2port-core-verify-" + [Guid]::NewGuid().ToString('N'))
+    $verifyBuild = Join-Path $env:TEMP ("r2port-build-verify-" + [Guid]::NewGuid().ToString('N'))
     try {
         foreach ($directory in @('bin', 'bin_nexon')) {
             New-Item -ItemType Directory -Path (Join-Path $verifyCore $directory) -Force | Out-Null
@@ -413,9 +465,11 @@ function Stage-R2Root {
                 ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $targetDirectory $_.Name) }
         }
         Copy-Item -LiteralPath (Join-Path (Join-Path $CoreRoot 'bin_nexon') 'SHA256SUMS') -Destination (Join-Path (Join-Path $verifyCore 'bin_nexon') 'SHA256SUMS')
-        & $VerifyScript -CorePath $verifyCore -BuildPath $BuildRoot
+        New-ReleaseVerificationMirror $verifyBuild
+        & $VerifyScript -CorePath $verifyCore -BuildPath $verifyBuild
     } finally {
         if (Test-Path -LiteralPath $verifyCore) { Remove-Item -LiteralPath $verifyCore -Recurse -Force }
+        if (Test-Path -LiteralPath $verifyBuild) { Remove-Item -LiteralPath $verifyBuild -Recurse -Force }
     }
 
     $binDelta = Join-Path $CoreRoot 'bin_delta'
@@ -429,6 +483,8 @@ function Stage-R2Root {
     New-Item -ItemType Directory -Path $stubDestination -Force | Out-Null
     foreach ($name in $StubNames) {
         $source = Join-Path $stubSource $name
+        $rootStub = Join-Path $BuildRoot $name
+        if (Test-Path -LiteralPath $rootStub -PathType Leaf) { $source = $rootStub }
         if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Missing R1O graphics stub: $source" }
         Copy-FileAtomically $source $stubDestination
     }
@@ -480,7 +536,7 @@ function Show-R2Status {
 
 try {
     if ($Create -or $Reset -or $Stage) {
-        $purpose = if ($Create) { 'Create permanent R2-port root' } elseif ($Reset) { 'Reset permanent R2-port root' } else { 'Stage permanent R2-port root' }
+        $purpose = if ($Create) { "Create permanent $RootName root" } elseif ($Reset) { "Reset permanent $RootName root" } else { "Stage permanent $RootName root" }
         Acquire-MutationLock $purpose
     }
     if ($Create) {

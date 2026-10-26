@@ -4,16 +4,17 @@
 
 For client, listen-server, and legacy dedicated modes, `R1OFactory` receives the native `VFileSystem017` and its `IBaseFileSystem` object. The R2 integration hooks the base-filesystem `FileExists`, size-by-name, and `Open` methods. Each calls the original R1 filesystem first and consults the provider only on a miss. Provider opens return shared memory-file handles; the hooked read, close, seek, tell, and size methods handle those while delegating ordinary handles to R1.
 
-The `VFileSystem017` `FindFirst`/`FindNext` wrappers (vtable slots 30/31) append allowlisted R2 BSP names after native R1 results. The base-filesystem hooks cover direct existence, size, and open checks, while map startup can first try its VPK reader and only then reach the normal search path.
+The VPK read hook serves generated `.vmt` and `.vtf` files through the R1O memory-handle layer only after the native R1 VPK and filesystem report a miss. Map BSP/entity requests still use the documented materialization fallback so launch-time map validation sees them.
 
 R1O fake-dedicated mode obtains the TFO `VFileSystem017` through `R1OTFOFileSystemInterface`. Its existing TFO filesystem hooks preserve native lookup and established dedicated loose-file and R1 VPK fallbacks; the R2 provider is consulted last. The same provider is registered for `maps/` files and the `vpk/e*.bsp*` map-list query. Hooks on `VFileSystem017` `FindFirst`/`FindNext` (vtable slots 30/31) append package-name entries for allowlisted R2 BSPs after native results. Point existence and size checks use the provider after existing fallbacks.
 
 The map provider is limited to the 20 allowlisted R2-only maps. It reads only the map BSP and five entity files from the matching `englishclient_<map>.bsp.pak000_dir.vpk`; the BSP is downgraded in memory. AI graphs and BSP lump overrides are optional patch-provided files. The provider does not expose R2 `.bsp_lump` files or names that R1 could treat as `_l_<N>.lmp` overrides.
 The converter repacks the cubemaps into the BSP using R1 encoding. The provider uses the library's default `bspdown::Options`: cubemap scale `1/6` and world-light flag bit 2 disabled.
 
-The R2 material provider starts opening/building the RPak index on a background thread when the filesystem provider is registered, before a map request. A cold index logs that its first-use build may take several seconds; the completed index is persisted under `<gamedir>/r2port/cache/<R2-install-fingerprint>`, where the fingerprint includes the R2 root and each RPak name, size, and modification time. Material-provider callbacks wait at most 10 ms for the index and 20 ms for an asset conversion, then return a miss if the work is not ready.
+The R2 material provider starts opening/building the RPak index on a background thread when the filesystem provider is registered, before a map request. A cold index logs that its first-use build may take several seconds; the completed index is persisted under `<gamedir>/r2port/cache/<R2-install-fingerprint>`, where the fingerprint includes the R2 root and each RPak name, size, and modification time. After map prefetch identifies material and texture paths, the provider records them in a read-mostly hash table protected by a shared mutex; unknown names return a miss without touching the RPak index or conversion queue. Known-path opens wait at most 20 ms for an asset conversion, then return a miss if the work is not ready.
 
 After the converted BSP is served, the provider queues BSP material-name parsing and VMT/VTF conversion on a worker pool capped at four threads, with a one-worker minimum and `cores - 2` workers when that is between one and four. Its queue is capped at 8192 jobs and generated-file LRU at 16 MiB; the decoded RPak family cache defaults to 256 MiB and is configurable with `r2port_tex_cache_mb`. R1 remains first and the provider does not activate for stock R1 maps. Startup, index, callback, conversion, and signon timings, plus material/texture provider hits and misses, are logged with steady-clock timestamps; callbacks over 250 ms log a warning.
+The VPK hook checks the provider's read-mostly name index before issuing its extra native filesystem existence probe, so unrelated misses do not trigger another disk lookup. Set `R1DELTA_R2PORT_TRACE_MISSES=1` to log up to 100 exact unique missed material paths and aggregate request call, unique-name, average-time, and maximum-time counts.
 
 `<gamedir>/r2port/patches` may contain `<map>.r2patch` physics patches and `<map>.ain.r2patch` AI-graph packages. Physics patches replace lump `0x1D` only when their SHA-256 matches the exact source R2 BSP; AI graphs are matched against the converted BSP after any physics replacement. The provider supplies the live map version and a zero CRC only when `developer` is 0, because the developer-mode entity CRC path is not reproduced. Missing, malformed, or mismatched packages fall back to the converter's physics stub and no AI graph.
 
@@ -21,17 +22,19 @@ When the engine's VPK read path reports a miss before an ordinary filesystem ope
 
 ## Test root
 
-Use the permanent `S:\game\r2` installation for R2-port work. It has a pinned, independent CORE checkout; it does not stage into or swap files in the shared `S:\game` runtime. Create and stage it with:
+`S:\game\r2` is the user's permanent play root. Agents use `S:\game\r2dev` so their staging and test windows never write into the user's tree. Both roots use the pinned CORE release commit and require no per-window stage/unstage or CORE swap.
+
+Create, stage, and verify the agent root with:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .build\r2-root.ps1 -Create
-powershell -ExecutionPolicy Bypass -File .build\r2-root.ps1 -Stage
-powershell -ExecutionPolicy Bypass -File .build\r2-root.ps1 -Verify
+powershell -ExecutionPolicy Bypass -File .build\r2-root.ps1 -Create -Root r2dev
+powershell -ExecutionPolicy Bypass -File .build\r2-root.ps1 -Stage -Root r2dev
+powershell -ExecutionPolicy Bypass -File .build\r2-root.ps1 -Verify -Root r2dev
 ```
 
-`-Status` reports the layout and private disk use. `-Reset` recreates only `S:\game\r2`. The root `bin`, `r1`, and `tools` directories and unchanged large CORE directories are junctions; CORE directories that differ from the source are private checkouts. Launch-root files are hardlinks except executables replaced by staging. The pinned scripts, resources, maps, and `bin_delta` copy are local; `crash` and `crashes` are real directories.
+Both scripts default to `-Root r2dev`. `-Status -Root r2dev` reports the layout and private disk use; `-Reset -Root r2dev` recreates only the agent root. The launch-root `bin`, `r1`, and `tools` directories are junctions; root files are hardlinks except executables replaced by staging. The CORE checkout keeps the pinned scripts, resources, and maps locally, plus a private `bin_delta` copy. Unchanged CORE directories are junctions; to limit disk use, `r2dev` reuses the pinned `bin` and `materials` directories under `r2`. `crash` and `crashes` are real directories.
 
-Launch from the permanent root directly, or use the bounded/path-owned harness:
+Launch the agent root directly or use the path-owned harness (which defaults to `r2dev`):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .build\run-in-r2.ps1 -Mode Client
@@ -39,4 +42,4 @@ powershell -ExecutionPolicy Bypass -File .build\run-in-r2.ps1 -Mode Listen -Map 
 powershell -ExecutionPolicy Bypass -File .build\run-in-r2.ps1 -Mode Dedicated -Map mp_box -Port 27050 -Seconds 60 -FatalScriptErrors -Cdb
 ```
 
-The launcher is `S:\game\r2\r1delta.exe`; client/listen and dedicated executables are `S:\game\r2\Titanfall.exe` and `S:\game\r2\R1Delta_DS.exe`. No stage/unstage or CORE swap is needed per window. You can play from `S:\game\r2` directly.
+Pass `-Root r2dev` explicitly when desired. The agent launcher is `S:\game\r2dev\r1delta.exe`; its client/listen and dedicated executables are `S:\game\r2dev\Titanfall.exe` and `S:\game\r2dev\R1Delta_DS.exe`. You can play directly from the user root `S:\game\r2` (`r1delta.exe`, `Titanfall.exe`, or `R1Delta_DS.exe`). Only the lead may target `r2`, after authorizing it and confirming the user game is closed; agents must leave that root alone.
