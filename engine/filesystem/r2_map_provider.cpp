@@ -1,6 +1,7 @@
 #include "engine/logging/logging.h"
 #include "r2_map_provider.h"
 #include "r2_material_provider.h"
+#include "r2_model_provider.h"
 #include "r1_map_pack_material_provider.h"
 #include "engine/core/factory.h"
 #include "engine/core/core.h"
@@ -669,6 +670,7 @@ void LogServedMap(const std::shared_ptr<MapState>& state, size_t bspSize, uint64
     OutputDebugStringA(buffer);
     LogProviderReadMetrics("map-bsp-served");
     LogR2TextureProviderMetrics("map-bsp-served");
+    LogR2ModelProviderMetrics("map-bsp-served");
 }
 
 FileBytes ReadConvertedBsp(const MapRequest& request);
@@ -887,6 +889,8 @@ public:
             FileBytes data = ReadConvertedBsp(*request);
             if (data && !IsDedicatedServer())
                 PrefetchR2MapMaterials(request->mapName, data);
+            if (data)
+                PrefetchR2MapModels(request->mapName, data);
             return data;
         }
         if (request->kind == MapRequest::Kind::AiGraph) {
@@ -930,6 +934,74 @@ public:
         }
         return paths;
     }
+};
+
+// Serves the material files the active R2 map's own directory VPK carries: assets that only
+// entity keys name (cloudmask textures, color-correction .raw files) and a few map-specific VMT
+// and VTF files. R1 content and the RPak material provider are consulted first.
+class R2MapPackFileProvider final : public FileProvider {
+public:
+    bool MayContain(std::string_view normalizedPath) const override
+    {
+        return !PackageFor(normalizedPath).empty();
+    }
+
+    // The answer only changes when the active map does, and that invalidates the miss cache.
+    bool CanCacheMisses() const override { return true; }
+
+    bool Exists(std::string_view normalizedPath) override { return MayContain(normalizedPath); }
+
+    std::optional<uint64_t> Size(std::string_view normalizedPath) override
+    {
+        const std::string package = PackageFor(normalizedPath);
+        if (package.empty())
+            return std::nullopt;
+        const std::string path(normalizedPath);
+        uint64_t size{};
+        return R1OVPK_GetDirectoryVPKFileSize(package.c_str(), path.c_str(), &size)
+            ? std::optional<uint64_t>(size) : std::nullopt;
+    }
+
+    FileBytes Read(std::string_view normalizedPath) override
+    {
+        const std::string package = PackageFor(normalizedPath);
+        if (package.empty())
+            return {};
+        const std::string path(normalizedPath);
+        FileBytes data = R1OVPK_ReadDirectoryVPKFile(package.c_str(), path.c_str());
+        if (data && !m_loggedFirst.test_and_set(std::memory_order_relaxed)) {
+            char message[512]{};
+            _snprintf_s(message, sizeof(message), _TRUNCATE,
+                "R1Delta: R2 map pack served first material file path=%s bytes=%zu\n",
+                path.c_str(), data->size());
+            Msg("%s", message);
+            OutputDebugStringA(message);
+        }
+        return data;
+    }
+
+private:
+    // Returns the active map's directory VPK when it holds the file, otherwise empty.
+    std::string PackageFor(std::string_view path) const
+    {
+        const bool wanted = path.size() > 4
+            && (path.substr(path.size() - 4) == ".vtf" || path.substr(path.size() - 4) == ".vmt"
+                || path.substr(path.size() - 4) == ".raw");
+        if (!wanted)
+            return {};
+        const std::string map = ActiveMapName();
+        if (!IsAllowlistedMap(map))
+            return {};
+        const std::filesystem::path package = DirectoryVpkForMap(map);
+        if (package.empty() || !IsRegularFile(package))
+            return {};
+        std::string packageName = package.string();
+        const std::string pathText(path);
+        return R1OVPK_HasDirectoryVPKFile(packageName.c_str(), pathText.c_str())
+            ? packageName : std::string{};
+    }
+
+    mutable std::atomic_flag m_loggedFirst = ATOMIC_FLAG_INIT;
 };
 
 std::filesystem::path FindGameContentDirectoryFrom(std::filesystem::path path)
@@ -1033,6 +1105,11 @@ std::filesystem::path GetR2InstallDirectory()
     return R2InstallDirectory();
 }
 
+bool IsR2PortMap(std::string_view mapName)
+{
+    return IsAllowlistedMap(mapName);
+}
+
 std::filesystem::path MaterializeMapCacheFile(std::string_view path)
 {
     const auto normalized = NormalizeProviderPath(path);
@@ -1115,9 +1192,11 @@ void InstallR2MapProvider()
     std::call_once(g_providerInstallOnce, []() {
         RegisterR2MaterialProvider();
         RegisterR1MapPackMaterialProvider();
+        RegisterR2ModelProvider();
         InstallR2MapPatchSource();
         auto provider = std::make_shared<R2MapProvider>();
         RegisterProvider("maps", provider);
+        RegisterProvider("materials", std::make_shared<R2MapPackFileProvider>());
         RegisterProvider("vpk", std::move(provider));
     });
 }

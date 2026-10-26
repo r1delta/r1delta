@@ -310,6 +310,19 @@ public:
         }
     }
 
+    // Marks the materials of a served model as known and converts them in the background, so
+    // they are ready before R1 resolves the model's textures.
+    void PrefetchModelMaterials(const std::vector<std::string>& materialNames)
+    {
+        Activate();
+        for (const std::string& name : materialNames) {
+            std::string path = "materials/";
+            path.append(name);
+            path.append(".vmt");
+            QueuePrefetchPath(std::move(path));
+        }
+    }
+
     bool MayContain(std::string_view normalizedPath) const override
     {
         if (!m_activated.load(std::memory_order_acquire)
@@ -631,23 +644,40 @@ private:
         if (!ParseMaterialPath(*normalized, assetName, materialFile))
             return false;
 
-        std::lock_guard<std::mutex> lock(m_cacheMutex);
-        if (m_stopping || m_cache.find(*normalized) != m_cache.end()
-            || m_pendingReads.find(*normalized) != m_pendingReads.end()
-            || m_workQueue.size() >= kMaximumQueuedAssets)
-            return false;
-
-        auto pending = std::make_shared<PendingRead>();
-        AddKnownPath(*normalized);
-        m_pendingReads.emplace(*normalized, pending);
-        m_workQueue.push_back(WorkItem{
-            *normalized, std::move(assetName), materialFile, true, std::move(pending) });
-        if (materialFile)
-            m_prefetchedMaterialCount.fetch_add(1, std::memory_order_relaxed);
-        else
-            m_prefetchedTextureCount.fetch_add(1, std::memory_order_relaxed);
-        m_workAvailable.notify_one();
-        return true;
+        // A path that is already cached or in flight still has to be known again after a map
+        // change cleared the known set, together with the textures its VMT refers to.
+        std::vector<std::string> knownDependencies;
+        {
+            std::lock_guard<std::mutex> lock(m_cacheMutex);
+            if (m_stopping)
+                return false;
+            if (m_cache.find(*normalized) != m_cache.end()
+                || m_pendingReads.find(*normalized) != m_pendingReads.end()) {
+                AddKnownPath(*normalized);
+                const auto dependencies = m_materialDependencies.find(*normalized);
+                if (dependencies != m_materialDependencies.end())
+                    knownDependencies = dependencies->second;
+            }
+            else if (m_workQueue.size() >= kMaximumQueuedAssets) {
+                return false;
+            }
+            else {
+                auto pending = std::make_shared<PendingRead>();
+                AddKnownPath(*normalized);
+                m_pendingReads.emplace(*normalized, pending);
+                m_workQueue.push_back(WorkItem{
+                    *normalized, std::move(assetName), materialFile, true, std::move(pending) });
+                if (materialFile)
+                    m_prefetchedMaterialCount.fetch_add(1, std::memory_order_relaxed);
+                else
+                    m_prefetchedTextureCount.fetch_add(1, std::memory_order_relaxed);
+                m_workAvailable.notify_one();
+                return true;
+            }
+        }
+        for (std::string& dependency : knownDependencies)
+            QueuePrefetchPath(std::move(dependency));
+        return false;
     }
 
     bool QueueMapMaterials(std::string mapName, FileBytes bspData)
@@ -879,6 +909,8 @@ private:
             {
                 std::lock_guard<std::mutex> lock(m_cacheMutex);
                 if (data) {
+                    if (item.materialFile && !dependencies.empty())
+                        m_materialDependencies[item.path] = dependencies;
                     try {
                         CacheLocked(item.path, data);
                     }
@@ -1016,6 +1048,7 @@ private:
     std::mutex m_cacheMutex;
     std::condition_variable m_workAvailable;
     std::unordered_map<std::string, CachedFile> m_cache;
+    std::unordered_map<std::string, std::vector<std::string>> m_materialDependencies;
     std::unordered_map<std::string, std::shared_ptr<PendingRead>> m_pendingReads;
     std::list<std::string> m_lru;
     std::deque<WorkItem> m_workQueue;
@@ -1100,6 +1133,12 @@ void PrefetchR2MapMaterials(std::string_view mapName, FileBytes bspData)
 {
     if (g_materialProvider)
         g_materialProvider->PrefetchMapMaterials(mapName, std::move(bspData));
+}
+
+void PrefetchR2ModelMaterials(const std::vector<std::string>& materialNames)
+{
+    if (g_materialProvider)
+        g_materialProvider->PrefetchModelMaterials(materialNames);
 }
 
 void LogR2TextureProviderMetrics(const char* phase)
