@@ -496,6 +496,7 @@ static R1OFileSystem_IsOkType R1OFileSystem_IsOkOriginal;
 static R1OFileSystem_EndOfFileType R1OFileSystem_EndOfFileOriginal;
 static R1OFileSystem_ReadLineType R1OFileSystem_ReadLineOriginal;
 static bool s_R1OFileSystemHooksInstalled;
+static bool s_R2PortFileEnumerationHooksInstalled;
 static bool s_R1OVPKMemoryFilesEnabled;
 static thread_local unsigned int s_R1OVPKClientFallbackDepth;
 static bool ShouldUseR1OVPKMemoryFileFallback();
@@ -17554,6 +17555,40 @@ static bool IsExecutableFileSystemTarget(void* target)
 		|| protection == PAGE_EXECUTE_WRITECOPY;
 }
 
+static bool InstallR2PortFileEnumerationHooks(void* fileSystem)
+{
+	if (s_R2PortFileEnumerationHooksInstalled
+		|| !fileSystem
+		|| !IsReadableRange(fileSystem, sizeof(void*)))
+		return s_R2PortFileEnumerationHooksInstalled;
+
+	auto vtable = *reinterpret_cast<void***>(fileSystem);
+	if (!IsReadableRange(vtable, sizeof(void*) * 32))
+		return false;
+
+	const bool findFirstExecutable = IsExecutableFileSystemTarget(vtable[30]);
+	const bool findNextExecutable = IsExecutableFileSystemTarget(vtable[31]);
+	const bool findFirst = findFirstExecutable && HookR1OTFOFileSystemMethod(
+		vtable[30],
+		reinterpret_cast<void*>(&R1OTFOFileSystem_FindFirst),
+		reinterpret_cast<LPVOID*>(&R1OTFOFileSystem_FindFirstOriginal));
+	const bool findNext = findNextExecutable && HookR1OTFOFileSystemMethod(
+		vtable[31],
+		reinterpret_cast<void*>(&R1OTFOFileSystem_FindNext),
+		reinterpret_cast<LPVOID*>(&R1OTFOFileSystem_FindNextOriginal));
+	s_R2PortFileEnumerationHooksInstalled = findFirst && findNext;
+
+	char buffer[320];
+	_snprintf_s(buffer, sizeof(buffer), _TRUNCATE,
+		"R1Delta: R2 provider VFileSystem017 enumeration hooks fs=%p vtable=%p findFirst=%d/%d findNext=%d/%d installed=%d\n",
+		fileSystem, vtable, findFirst ? 1 : 0, findFirstExecutable ? 1 : 0,
+		findNext ? 1 : 0, findNextExecutable ? 1 : 0,
+		s_R2PortFileEnumerationHooksInstalled ? 1 : 0);
+	OutputDebugStringA(buffer);
+	return s_R2PortFileEnumerationHooksInstalled;
+}
+
+
 static int __fastcall R1BaseFileSystem_Read(void* thisptr, void* output, int bytesToRead, void* handle)
 {
 	int result = 0;
@@ -20375,6 +20410,7 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 
 		g_CBaseFileSystemInterface = (IFileSystem*)(((uintptr_t)oFileSystemFactory(pName, pReturnCode)) + 8);
 		r2port::InstallR2MapProvider();
+		InstallR2PortFileEnumerationHooks(reinterpret_cast<void*>(g_CVFileSystemInterface));
 		InstallR1BaseFileSystemProviderHooks(g_CBaseFileSystemInterface);
 		g_CVFileSystem = new CVFileSystem((*(uintptr_t**)(g_CVFileSystemInterface)));
 

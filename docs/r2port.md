@@ -4,7 +4,7 @@
 
 For client, listen-server, and legacy dedicated modes, `R1OFactory` receives the native `VFileSystem017` and its `IBaseFileSystem` object. The R2 integration hooks the base-filesystem `FileExists`, size-by-name, and `Open` methods. Each calls the original R1 filesystem first and consults the provider only on a miss. Provider opens return shared memory-file handles; the hooked read, close, seek, tell, and size methods handle those while delegating ordinary handles to R1.
 
-The native `maps/*.bsp` directory listing continues through R1 `FindFirst`/`FindNext`; the existing wrappers append allowlisted R2 BSP names only after R1 has returned its first result. Map validation, playlist checks, and direct size/existence queries use the original-first base-filesystem hooks above.
+The `VFileSystem017` `FindFirst`/`FindNext` wrappers (vtable slots 30/31) append allowlisted R2 BSP names after native R1 results. Map validation, playlist checks, and direct size/existence queries use the original-first base-filesystem hooks above.
 
 R1O fake-dedicated mode obtains the TFO `VFileSystem017` through `R1OTFOFileSystemInterface`. Its existing TFO filesystem hooks preserve native lookup and established dedicated loose-file and R1 VPK fallbacks; the R2 provider is consulted last. The same provider is registered for `maps/` files and the `vpk/e*.bsp*` map-list query. Hooks on `VFileSystem017` `FindFirst`/`FindNext` (vtable slots 30/31) append package-name entries for allowlisted R2 BSPs after native results. Point existence and size checks use the provider after existing fallbacks.
 
