@@ -567,7 +567,7 @@ function Start-R2Game {
         if ($Cdb) {
             if (-not (Test-Path -LiteralPath $CdbPath -PathType Leaf)) { throw "CDB not found: $CdbPath" }
             if (-not (Test-Path -LiteralPath $CdbCommandFile -PathType Leaf)) { throw "CDB command file not found: $CdbCommandFile" }
-            $debuggerArgs = @('-G', '-cf', $CdbCommandFile, '-logo', $logPath, $executable) + $gameArgs
+            $debuggerArgs = @('-g', '-G', '-cf', $CdbCommandFile, '-logo', $logPath, $executable) + $gameArgs
             $launcher = Start-Process -FilePath $CdbPath -ArgumentList (ConvertTo-ArgumentString $debuggerArgs) -WorkingDirectory $workingDirectory -WindowStyle Hidden -PassThru
             $script:OwnedLauncherPid = [int] $launcher.Id
             $script:ExpectedLauncherPath = [IO.Path]::GetFullPath($CdbPath)
