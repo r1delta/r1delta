@@ -10,6 +10,7 @@
 
 #include "engine/filesystem/r1o_vpk.h"
 #include "engine/r2port/bspdown/bspdown.hpp"
+#include "engine/r2port/entity_rewrite.h"
 #include "p2p/p2p_identity.h"
 
 #ifndef NOMINMAX
@@ -73,6 +74,10 @@ constexpr size_t kBspHeaderSize = 0x810;
 constexpr uint32_t kBspLumpCount = 128;
 constexpr uint32_t kGameLump = 0x23;
 
+// Folded into the on-disk cache fingerprint together with entity_rewrite::kRewriteVersion.
+// Bump when the vendored bspdown converter or the provider's BSP post-processing changes output.
+constexpr uint32_t kConvertedBspCacheVersion = 1;
+
 struct BspLumpHeader {
     uint32_t offset;
     uint32_t length;
@@ -114,6 +119,8 @@ struct MapState {
     std::int32_t filePatchMapVersion{};
     std::int32_t filePatchDeveloperValue{};
     FileBytes aiGraphFile;
+    std::mutex entityMutex;
+    std::unordered_map<std::string, FileBytes> entityFiles;
 };
 
 std::once_flag g_installDiscoveryOnce;
@@ -545,23 +552,14 @@ std::shared_ptr<const MapPatch> GetMatchingPatch(
     return state->patch;
 }
 
-bool ReplacePatchedLumps(
+using LumpReplacements = std::array<const FileBytes*, kBspLumpCount>;
+
+bool ReplaceLumps(
     const std::vector<uint8_t>& input,
-    const MapPatch& patch,
+    const LumpReplacements& replacements,
     std::vector<uint8_t>& output)
 {
     if (input.size() < kBspHeaderSize)
-        return false;
-
-    std::array<const FileBytes*, kBspLumpCount> replacements{};
-    bool anyReplacement = false;
-    for (const auto& [lumpId, data] : patch.lumpOverrides) {
-        if ((lumpId == 0x1D || lumpId == 0x46) && data && lumpId < replacements.size()) {
-            replacements[lumpId] = &data;
-            anyReplacement = true;
-        }
-    }
-    if (!anyReplacement)
         return false;
 
     std::array<BspLumpHeader, kBspLumpCount> oldHeaders{};
@@ -634,6 +632,117 @@ bool ReplacePatchedLumps(
         }
     }
     return true;
+}
+
+bool ReplacePatchedLumps(
+    const std::vector<uint8_t>& input,
+    const MapPatch& patch,
+    std::vector<uint8_t>& output)
+{
+    LumpReplacements replacements{};
+    bool anyReplacement = false;
+    for (const auto& [lumpId, data] : patch.lumpOverrides) {
+        if ((lumpId == 0x1D || lumpId == 0x46) && data && lumpId < replacements.size()) {
+            replacements[lumpId] = &data;
+            anyReplacement = true;
+        }
+    }
+    return anyReplacement && ReplaceLumps(input, replacements, output);
+}
+
+void LogEntityRewrite(const char* what, std::string_view mapName,
+    const entity_rewrite::RewriteReport& report, size_t bytesIn, size_t bytesOut)
+{
+    char buffer[512]{};
+    _snprintf_s(buffer, sizeof(buffer), _TRUNCATE,
+        "R1Delta: R2 entity rewrite map=%.*s %s entities=%llu->%llu renamed-classnames=%llu eden-space-nodes=%llu "
+        "ctf-team-keys=%llu dropped-script-mover-lightweight=%llu dropped-light-environment-volume=%llu "
+        "bytes=%zu->%zu version=%u\n",
+        static_cast<int>(mapName.size()), mapName.data(), what,
+        static_cast<unsigned long long>(report.entitiesIn),
+        static_cast<unsigned long long>(report.entitiesOut),
+        static_cast<unsigned long long>(report.renamedClassnames),
+        static_cast<unsigned long long>(report.renamedEdenSpaceNodes),
+        static_cast<unsigned long long>(report.renamedCtfTeamKeys),
+        static_cast<unsigned long long>(report.droppedScriptMoverLightweight),
+        static_cast<unsigned long long>(report.droppedLightEnvironmentVolume),
+        bytesIn, bytesOut, entity_rewrite::kRewriteVersion);
+    Msg("%s", buffer);
+    OutputDebugStringA(buffer);
+}
+
+// Applies the R2 -> R1 entity text rules to the converted BSP's entity lump (lump 0), where the
+// CTF flag spawnpoints live. Leaves the BSP untouched when no rule matches.
+void RewriteConvertedBspEntities(std::string_view mapName, std::vector<uint8_t>& bsp)
+{
+    if (bsp.size() < kBspHeaderSize)
+        return;
+    BspLumpHeader header{};
+    std::memcpy(&header, bsp.data() + 16, sizeof(header));
+    if (!header.length || header.offset > bsp.size() || header.length > bsp.size() - header.offset)
+        return;
+
+    const std::string_view text(reinterpret_cast<const char*>(bsp.data()) + header.offset, header.length);
+    entity_rewrite::RewriteReport report;
+    std::string rewritten = entity_rewrite::RewriteEntityLump(text, { mapName, false }, &report);
+    if (rewritten == text)
+        return;
+
+    const FileBytes replacement = std::make_shared<const std::vector<uint8_t>>(
+        rewritten.begin(), rewritten.end());
+    LumpReplacements replacements{};
+    replacements[0] = &replacement;
+    std::vector<uint8_t> output;
+    if (!ReplaceLumps(bsp, replacements, output))
+        return;
+    LogEntityRewrite("bsp-lump=0", mapName, report, header.length, replacement->size());
+    bsp = std::move(output);
+}
+
+// Reads one of the map's five partition entity files from the R2 package and applies the same
+// rules. The result is cached per map so Size() and Read() agree and the rewrite runs once.
+FileBytes ReadEntityFile(const MapRequest& request, const std::shared_ptr<MapState>& state)
+{
+    const std::string path(request.packagePath);
+    std::lock_guard<std::mutex> lock(state->entityMutex);
+    if (const auto found = state->entityFiles.find(path); found != state->entityFiles.end())
+        return found->second;
+    if (state->directoryVpk.empty() || !IsRegularFile(state->directoryVpk))
+        return {};
+
+    const std::string package = state->directoryVpk.string();
+    FileBytes data = R1OVPK_ReadDirectoryVPKFile(package.c_str(), path.c_str());
+    if (!data)
+        return {};
+
+    try {
+        const std::string_view text(reinterpret_cast<const char*>(data->data()), data->size());
+        entity_rewrite::RewriteReport report;
+        std::string rewritten = entity_rewrite::RewriteEntityLump(text, { request.mapName, false }, &report);
+        if (report.unknownConstructs) {
+            char buffer[384]{};
+            _snprintf_s(buffer, sizeof(buffer), _TRUNCATE,
+                "R1Delta: R2 entity rewrite map=%s file=%s could not parse the entity text; serving it unchanged\n",
+                state->mapName.c_str(), path.c_str());
+            Msg("%s", buffer);
+            OutputDebugStringA(buffer);
+        }
+        else if (rewritten != text) {
+            const size_t bytesIn = data->size();
+            data = std::make_shared<const std::vector<uint8_t>>(rewritten.begin(), rewritten.end());
+            LogEntityRewrite(path.c_str(), request.mapName, report, bytesIn, data->size());
+        }
+    }
+    catch (const std::exception& error) {
+        char buffer[512]{};
+        _snprintf_s(buffer, sizeof(buffer), _TRUNCATE,
+            "R1Delta: R2 entity rewrite map=%s file=%s failed (%s); serving it unchanged\n",
+            state->mapName.c_str(), path.c_str(), error.what());
+        Msg("%s", buffer);
+        OutputDebugStringA(buffer);
+    }
+    state->entityFiles.emplace(path, data);
+    return data;
 }
 
 void LogServedMap(const std::shared_ptr<MapState>& state, size_t bspSize, uint64_t conversionMs)
@@ -775,6 +884,7 @@ FileBytes ReadConvertedBsp(const MapRequest& request)
                 bspdown::Options options;
                 bspdown::Report report;
                 converted = bspdown::DowngradeBsp(source->data(), source->size(), options, &report);
+                RewriteConvertedBspEntities(state->mapName, converted);
                 conversionMs = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now() - started).count());
 
@@ -870,14 +980,8 @@ public:
         if (request->kind == MapRequest::Kind::AiGraph)
             return std::nullopt;
 
-        const auto state = GetMapState(request->mapName);
-        if (state->directoryVpk.empty() || !IsRegularFile(state->directoryVpk))
-            return std::nullopt;
-        const std::string package = state->directoryVpk.string();
-        const std::string path(request->packagePath);
-        uint64_t size{};
-        return R1OVPK_GetDirectoryVPKFileSize(package.c_str(), path.c_str(), &size)
-            ? std::optional<uint64_t>(size) : std::nullopt;
+        const FileBytes entities = ReadEntityFile(*request, GetMapState(request->mapName));
+        return entities ? std::optional<uint64_t>(entities->size()) : std::nullopt;
     }
 
     FileBytes Read(std::string_view normalizedPath) override
@@ -901,11 +1005,7 @@ public:
         }
 
         const auto state = GetMapState(request->mapName);
-        if (state->directoryVpk.empty() || !IsRegularFile(state->directoryVpk))
-            return {};
-        const std::string package = state->directoryVpk.string();
-        const std::string path(request->packagePath);
-        FileBytes data = R1OVPK_ReadDirectoryVPKFile(package.c_str(), path.c_str());
+        FileBytes data = ReadEntityFile(*request, state);
         if (data && !IsDedicatedServer())
             StartR2MaterialProvider();
         return data;
@@ -1070,6 +1170,11 @@ std::string MapPackageFingerprint(const std::shared_ptr<MapState>& state)
         metadata.append(std::to_string(modified.time_since_epoch().count()));
         metadata.push_back('\n');
     }
+    metadata.append("entity-rewrite|");
+    metadata.append(std::to_string(entity_rewrite::kRewriteVersion));
+    metadata.append("\nconverted-bsp|");
+    metadata.append(std::to_string(kConvertedBspCacheVersion));
+    metadata.push_back('\n');
 
     const auto digest = p2p::Sha256(
         reinterpret_cast<const uint8_t*>(metadata.data()), metadata.size());
@@ -1135,6 +1240,24 @@ std::filesystem::path MaterializeMapCacheFile(std::string_view path)
         / (state->mapName + "-" + fingerprint);
     const std::filesystem::path destination = root / std::filesystem::path(*normalized);
     std::error_code error;
+
+    // A different fingerprint (new VPK, entity rewrite version or converter version) means the
+    // older generated files for this map are stale and are never mounted again; drop them.
+    {
+        const std::string mapPrefix = state->mapName + "-";
+        std::error_code cleanupError;
+        for (const auto& entry : std::filesystem::directory_iterator(root.parent_path(), cleanupError)) {
+            if (cleanupError)
+                break;
+            const std::string name = entry.path().filename().string();
+            if (name.size() == mapPrefix.size() + fingerprint.size()
+                && name.compare(0, mapPrefix.size(), mapPrefix) == 0
+                && name != root.filename().string()) {
+                std::error_code removeError;
+                std::filesystem::remove_all(entry.path(), removeError);
+            }
+        }
+    }
     std::filesystem::create_directories(destination.parent_path(), error);
     if (error)
         return {};
