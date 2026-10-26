@@ -6694,6 +6694,12 @@ static void R2PortClearCacheCommand(const CCommand&)
 	Msg("R1Delta: removed the R2 map fallback cache under r2port_cache.\n");
 }
 
+static void R2PortDumpStatsCommand(const CCommand&)
+{
+	r2port::LogProviderReadMetrics("manual");
+	r2port::DumpFilesystemTrace();
+}
+
 
 static bool ReasonIsHeldAccount(const char* reason)
 {
@@ -8438,6 +8444,8 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
 		RegisterConCommand("r2port_clear_cache", R2PortClearCacheCommand,
 			"Remove the cached R2 map BSP and entity files.", FCVAR_NONE);
+		RegisterConCommand("r2port_dump_stats", R2PortDumpStatsCommand,
+			"Dump R2 provider counters and filtered filesystem trace.", FCVAR_NONE);
 
 		// Register slot commands
 		RegisterConCommand("slot1", Slot1Command, "Select menu slot 1", 0);
@@ -9339,6 +9347,8 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		RegisterServerUserCmdConVars();
 		RegisterConCommand("r2port_clear_cache", R2PortClearCacheCommand,
 			"Remove the cached R2 map BSP and entity files.", FCVAR_NONE);
+		RegisterConCommand("r2port_dump_stats", R2PortDumpStatsCommand,
+			"Dump R2 provider counters and filtered filesystem trace.", FCVAR_NONE);
 		RegisterConCommand("updatescriptdata", updatescriptdata_cmd, "Dumps the script data in the AI node graph to disk", FCVAR_CHEAT);
 		RegisterConCommand("verifyain", verifyain_cmd, "Reads the .ain file from disk, compares its nodes & links to in-memory data, logs differences.", FCVAR_CHEAT);
 		RegisterConCommand("updateain", updateain_cmd, "Runs the reconstructed AIN full build, then writes a generated .ain dump without replacing the source file.", FCVAR_CHEAT);

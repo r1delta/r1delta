@@ -40,8 +40,10 @@
 #include "shared_particle_materials.h"
 #include "r2port_provider.h"
 #include "r2_map_provider.h"
+#include "r1o_vpk.h"
 #include <iostream>
 #include <unordered_set>
+#include <cstring>
 #include <cstdint>
 #include <string>
 #include <filesystem>
@@ -166,13 +168,31 @@ FileHandle_t ReadFileFromVPKHook(VPKData* vpkInfo, __int64* b, char* filename) {
 
     FileHandle_t handle = readFileFromVPK(vpkInfo, b, filename);
     const int32_t nativeStatus = b ? *reinterpret_cast<const int32_t*>(b) : 0;
-    if (nativeStatus == -1 && filename && !R2PortNativeFileExists(filename)) {
-        const std::filesystem::path cacheRoot = r2port::MaterializeMapCacheFile(filename);
-        if (!cacheRoot.empty() && MountR2MapCache(cacheRoot)) {
-            char detail[MAX_PATH]{};
-            _snprintf_s(detail, sizeof(detail), _TRUNCATE, "cache=%s", cacheRoot.string().c_str());
-            r2port::TraceFilesystemCall("ReadFileFromVPKHook", filename, "GAME", 0,
-                "r2-provider-materialized", detail);
+    // The VPK lookup result is an out-struct the caller inspects (*b == -1 means "not in a VPK,
+    // try the file system"); the returned pointer is never a usable file handle. Provider
+    // materials and textures are therefore answered by the Open hooks, not here. Only map
+    // package files are materialized from this hook.
+    const bool materialRequest = filename
+        && (_strnicmp(filename, "materials/", 10) == 0 || _strnicmp(filename, "materials\\", 10) == 0);
+    if (nativeStatus == -1 && filename && !materialRequest) {
+        const bool probingNativeExistence = R2PortNativeFileExistsProbeActive();
+        const bool providerMayContain = !probingNativeExistence && r2port::MayContain(filename);
+        if (r2port::FilesystemTraceEnabled()) {
+            const char* result = probingNativeExistence
+                ? "native-existence-probe"
+                : providerMayContain ? "may-contain" : "not-in-provider";
+            r2port::TraceFilesystemCall("ReadFileFromVPKHook[provider-preflight]",
+                filename, nullptr, 0, result);
+        }
+        const bool nativeExists = providerMayContain && R2PortNativeFileExists(filename);
+        if (providerMayContain && !nativeExists) {
+            const std::filesystem::path cacheRoot = r2port::MaterializeMapCacheFile(filename);
+            if (!cacheRoot.empty() && MountR2MapCache(cacheRoot)) {
+                char detail[MAX_PATH]{};
+                _snprintf_s(detail, sizeof(detail), _TRUNCATE, "cache=%s", cacheRoot.string().c_str());
+                r2port::TraceFilesystemCall("ReadFileFromVPKHook", filename, "GAME", 0,
+                    "r2-provider-materialized", detail);
+            }
         }
     }
     char detail[64]{};

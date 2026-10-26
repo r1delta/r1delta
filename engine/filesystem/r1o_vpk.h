@@ -4,11 +4,14 @@
 #include <stdint.h>
 #include <memory>
 #include <vector>
+#include <string>
 
 bool R1OVPK_HasFile(const char* relativeResourcePath);
 bool R1OVPK_GetFileSize(const char* relativeResourcePath, uint64_t* size);
 bool R1OVPK_HasDirectoryVPKFile(const char* directoryVPK, const char* relativeResourcePath);
 bool R1OVPK_GetDirectoryVPKFileSize(const char* directoryVPK, const char* relativeResourcePath, uint64_t* size);
+bool R1OVPK_EnumerateDirectoryVPKFiles(
+    const char* directoryVPK, std::vector<std::string>* relativeResourcePaths);
 std::shared_ptr<const std::vector<uint8_t>> R1OVPK_ReadDirectoryVPKFile(
 	const char* directoryVPK, const char* relativeResourcePath);
 void* R1OVPK_OpenMemoryFile(std::shared_ptr<const std::vector<uint8_t>> data, const char* tracePath = nullptr);

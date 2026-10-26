@@ -1285,6 +1285,12 @@ static void R1ODediClearMapCacheCommand(const CCommand&)
 	Msg("R1Delta: removed the R2 map fallback cache under r2port_cache.\n");
 }
 
+static void R1ODediDumpProviderStatsCommand(const CCommand&)
+{
+	r2port::LogProviderReadMetrics("manual");
+	r2port::DumpFilesystemTrace();
+}
+
 void RegisterR1ODediDeltaConVars()
 {
 	if (!IsR1ODedicatedServer())
@@ -1323,6 +1329,8 @@ void RegisterR1ODediDeltaConVars()
 	RegisterR1ODediConCommand("removeallips", R1ODediDispatcherOwnedCommand, "Remove all IPs from the ban list.", FCVAR_NONE);
 	RegisterR1ODediConCommand("r2port_clear_cache", R1ODediClearMapCacheCommand,
 		"Remove the cached R2 map BSP and entity files.", FCVAR_NONE);
+	RegisterR1ODediConCommand("r2port_dump_stats", R1ODediDumpProviderStatsCommand,
+		"Dump R2 provider counters and filtered filesystem trace.", FCVAR_NONE);
 	RegisterR1ODediConVar("delta_vote_allowed", "1", FCVAR_GAMEDLL | FCVAR_REPLICATED, "Allow voting?");
 	RegisterR1ODediConVar("delta_vote_timer_duration", "12.0", FCVAR_GAMEDLL | FCVAR_REPLICATED, "How long to allow voting on an issue");
 	RegisterR1ODediConVar("delta_vote_failure_timer", "300.0", FCVAR_GAMEDLL | FCVAR_REPLICATED, "Vote failure cooldown");

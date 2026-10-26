@@ -897,6 +897,37 @@ bool R1OVPK_GetDirectoryVPKFileSize(
 	return success;
 }
 
+bool R1OVPK_EnumerateDirectoryVPKFiles(
+	const char* directoryVPK, std::vector<std::string>* relativeResourcePaths)
+{
+	if (!relativeResourcePaths) {
+		r2port::TraceFilesystemCall("R1OVPK_EnumerateDirectoryVPKFiles",
+			directoryVPK, nullptr, 0, "invalid-output");
+		return false;
+	}
+
+	const auto index = LoadExternalVPKIndex(directoryVPK);
+	if (!index) {
+		r2port::TraceFilesystemCall("R1OVPK_EnumerateDirectoryVPKFiles",
+			directoryVPK, nullptr, 0, "index-miss");
+		return false;
+	}
+
+	std::vector<std::string> paths;
+	paths.reserve(index->size());
+	for (const auto& entry : *index)
+		paths.push_back(entry.first);
+	std::sort(paths.begin(), paths.end());
+	relativeResourcePaths->swap(paths);
+
+	char detail[64]{};
+	if (r2port::FilesystemTraceEnabled())
+		_snprintf_s(detail, sizeof(detail), _TRUNCATE, "entries=%zu", index->size());
+	r2port::TraceFilesystemCall("R1OVPK_EnumerateDirectoryVPKFiles",
+		directoryVPK, nullptr, 0, "enumerated", detail);
+	return true;
+}
+
 std::shared_ptr<const std::vector<uint8_t>> R1OVPK_ReadDirectoryVPKFile(
 	const char* directoryVPK, const char* relativeResourcePath)
 {
@@ -941,7 +972,7 @@ void* R1OVPK_OpenMemoryFile(
 	}
 	auto file = std::make_unique<VPKMemoryFile>();
 	file->data = std::move(data);
-	if (r2port::FilesystemTraceEnabled() && tracePath)
+	if (r2port::FilesystemTracePathMatches(tracePath))
 		file->tracePath = tracePath;
 	void* handle = file.get();
 	{
@@ -970,7 +1001,7 @@ void* R1OVPK_OpenFile(const char* relativeResourcePath)
 	}
 	auto file = std::make_unique<VPKMemoryFile>();
 	file->data = std::move(data);
-	if (r2port::FilesystemTraceEnabled())
+	if (r2port::FilesystemTracePathMatches(normalizedPath.c_str()))
 		file->tracePath = normalizedPath;
 	void* handle = file.get();
 	{

@@ -92,6 +92,7 @@ typedef void (*CPackFileParseDirectoryType)(void* packFile);
 extern CPackFileParseDirectoryType CPackFileParseDirectoryOriginal;
 void __fastcall CPackFileParseDirectory(void* packFile);
 bool R2PortNativeFileExists(const char* fileName);
+bool R2PortNativeFileExistsProbeActive();
 
 std::string R2PortFindPattern(unsigned __int16 handle);
 bool InstallVPKDirectoryLoadFlagRepair(uintptr_t filesystemBase);

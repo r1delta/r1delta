@@ -1,6 +1,7 @@
 #include "engine/logging/logging.h"
 #include "r2_map_provider.h"
 #include "r2_material_provider.h"
+#include "r1_map_pack_material_provider.h"
 #include "engine/core/factory.h"
 #include "engine/core/core.h"
 #include "engine/cvar.h"
@@ -834,6 +835,11 @@ FileBytes ReadConvertedBsp(const MapRequest& request)
 
 class R2MapProvider final : public FileProvider {
 public:
+    bool MayContain(std::string_view normalizedPath) const override
+    {
+        return ParseMapRequest(normalizedPath).has_value();
+    }
+
     bool Exists(std::string_view normalizedPath) override
     {
         const auto request = ParseMapRequest(normalizedPath);
@@ -1108,6 +1114,7 @@ void InstallR2MapProvider()
 {
     std::call_once(g_providerInstallOnce, []() {
         RegisterR2MaterialProvider();
+        RegisterR1MapPackMaterialProvider();
         InstallR2MapPatchSource();
         auto provider = std::make_shared<R2MapProvider>();
         RegisterProvider("maps", provider);

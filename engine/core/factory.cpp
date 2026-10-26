@@ -17238,9 +17238,15 @@ static bool GetR1OVPKMemoryFileSize(const char* fileName, uint64_t* size)
 		return false;
 	return R1OVPK_GetFileSize(fileName, size);
 }
+// The native existence probe re-enters VPK hooks, so keep its lookup R1-only.
+static bool IsR2PortProviderFallbackEnabled()
+{
+	return !R2PortNativeFileExistsProbeActive();
+}
+
 static void* OpenR2PortMemoryFile(const char* fileName)
 {
-	if (!IsReadableCString(fileName))
+	if (!IsReadableCString(fileName) || !IsR2PortProviderFallbackEnabled())
 		return nullptr;
 	const auto data = r2port::ReadAll(fileName);
 	void* handle = R1OVPK_OpenMemoryFile(data, fileName);
@@ -17251,11 +17257,13 @@ static void* OpenR2PortMemoryFile(const char* fileName)
 	return handle;
 }
 
+
 static bool GetR2PortMemoryFileSize(const char* fileName, uint64_t* size)
 {
 	if (!IsReadableCString(fileName))
 		return false;
-	if (!size || !ShouldUseR1OVPKMemoryFileFallback()) {
+	if (!size || !ShouldUseR1OVPKMemoryFileFallback()
+		|| !IsR2PortProviderFallbackEnabled()) {
 		r2port::TraceFilesystemCall("R2Port::Size", fileName, nullptr, 0, "skipped");
 		return false;
 	}
@@ -17425,6 +17433,8 @@ static unsigned int __fastcall R1OBaseFileSystem_SizeByName(void* thisptr, const
 	uint64_t size = 0;
 	if (GetR1OVPKMemoryFileSize(fileName, &size))
 		return traced(static_cast<unsigned int>(size), "r1o-vpk");
+	if (R2PortNativeFileExistsProbeActive())
+		return traced(nativeSize, "native-probe");
 	if (GetR2PortMemoryFileSize(fileName, &size))
 		return traced(static_cast<unsigned int>(size), "r2-provider");
 	return traced(nativeSize, "miss");
@@ -17463,6 +17473,12 @@ static bool __fastcall R1OBaseFileSystem_FileExists(void* thisptr, const char* f
 			pathId, 0, "true");
 		return true;
 	}
+	if (R2PortNativeFileExistsProbeActive()) {
+		r2port::TraceFilesystemCall("R1OBaseFileSystem::FileExists[r2-provider]",
+			fileName, pathId, 0, "native-probe-suppressed");
+		return false;
+	}
+
 	result = r2port::Exists(fileName);
 	r2port::TraceFilesystemCall("R1OBaseFileSystem::FileExists[r2-provider]", fileName,
 		pathId, 0, result ? "true" : "false");
@@ -17745,6 +17761,8 @@ static unsigned int __fastcall R1BaseFileSystem_SizeByName(void* thisptr, const 
 	}
 	if (nativeSize != invalidSize || !IsReadableCString(fileName))
 		return nativeSize;
+	if (R2PortNativeFileExistsProbeActive())
+		return invalidSize;
 	const auto providerSize = r2port::Size(fileName);
 	if (r2port::FilesystemTraceEnabled()) {
 		_snprintf_s(detail, sizeof(detail), _TRUNCATE, "bytes=%llu",
@@ -17767,24 +17785,50 @@ static bool __fastcall R1BaseFileSystem_FileExists(void* thisptr, const char* fi
 		pathId, 0, exists ? "true" : "false");
 	if (exists || !IsReadableCString(fileName))
 		return exists;
+	if (R2PortNativeFileExistsProbeActive()) {
+		r2port::TraceFilesystemCall("CBaseFileSystem::FileExists[r2-provider]",
+			fileName, pathId, 0, "native-probe-suppressed");
+		return false;
+	}
+
 	exists = r2port::Exists(fileName);
 	r2port::TraceFilesystemCall("CBaseFileSystem::FileExists[r2-provider]", fileName,
 		pathId, 0, exists ? "true" : "false");
 	return exists;
 }
 
+static thread_local unsigned int g_R2PortNativeExistenceProbeDepth{};
+
+struct R2PortNativeExistenceProbeScope final {
+	R2PortNativeExistenceProbeScope() { ++g_R2PortNativeExistenceProbeDepth; }
+	~R2PortNativeExistenceProbeScope() { --g_R2PortNativeExistenceProbeDepth; }
+};
+
+bool R2PortNativeFileExistsProbeActive()
+{
+	return g_R2PortNativeExistenceProbeDepth != 0;
+}
+
 bool R2PortNativeFileExists(const char* fileName)
 {
-	if (!IsReadableCString(fileName) || !R1BaseFileSystem_FileExistsOriginal)
+	const bool readableName = IsReadableCString(fileName);
+	if (!readableName || !R1BaseFileSystem_FileExistsOriginal) {
+		if (readableName)
+			r2port::TraceFilesystemCall("R2PortNativeFileExists", fileName,
+				"GAME", 0, "filesystem-unavailable");
 		return false;
+	}
 
-	thread_local bool checkingNativeExistence = false;
-	if (checkingNativeExistence)
-		return true;
-	checkingNativeExistence = true;
+	if (g_R2PortNativeExistenceProbeDepth != 0) {
+		r2port::TraceFilesystemCall("R2PortNativeFileExists", fileName,
+			"GAME", 0, "recursive-skipped");
+		return false;
+	}
+	R2PortNativeExistenceProbeScope probeScope;
 	const bool exists = R1BaseFileSystem_FileExistsOriginal(
 		g_CBaseFileSystemInterface, fileName, "GAME");
-	checkingNativeExistence = false;
+	r2port::TraceFilesystemCall("R2PortNativeFileExists", fileName,
+		"GAME", 0, exists ? "true" : "false");
 	return exists;
 }
 
@@ -17820,6 +17864,99 @@ static void InstallR1BaseFileSystemProviderHooks(void* baseFileSystem)
 	_snprintf_s(buffer, sizeof(buffer), _TRUNCATE,
 		"R1Delta: R2 provider base filesystem hooks basefs=%p vtable=%p installed=%d\n",
 		baseFileSystem, vtable, s_R1BaseFileSystemHooksInstalled ? 1 : 0);
+	OutputDebugStringA(buffer);
+}
+
+using R1FileSystem_FlushType = void(__fastcall*)(void* thisptr, void* handle);
+static R1FileSystem_FlushType R1FileSystem_FlushOriginal;
+static bool s_R1FileSystemHandleHooksInstalled;
+
+static void __fastcall R1FileSystem_Flush(void* thisptr, void* handle)
+{
+	bool isOk = false;
+	if (R1OVPK_IsFileOk(handle, &isOk))
+		return;
+	if (R1FileSystem_FlushOriginal)
+		R1FileSystem_FlushOriginal(thisptr, handle);
+}
+
+using R1FileSystem_OpenType = void*(__fastcall*)(void* thisptr, const char* fileName, const char* options, int flags, const char* pathId, __int64 unknown);
+static R1FileSystem_OpenType R1FileSystem_OpenOriginal;
+
+// IFileSystem::Open (the pathId overload): R1 opens textures through this entry, not the base
+// Open, so a provider file has to be answered here as well.
+static void* __fastcall R1FileSystem_Open(void* thisptr, const char* fileName, const char* options, int flags, const char* pathId, __int64 unknown)
+{
+	if (IsReadableCString(fileName))
+		r2port::ObserveMapFilePath(fileName);
+	void* handle = R1FileSystem_OpenOriginal
+		? R1FileSystem_OpenOriginal(thisptr, fileName, options, flags, pathId, unknown)
+		: nullptr;
+	r2port::TraceFilesystemCall("IFileSystem::Open[native]", fileName, pathId,
+		flags, handle ? "handle" : "miss", options);
+	if (handle || !IsReadOnlyFileOpen(options) || !IsReadableCString(fileName))
+		return handle;
+	handle = OpenR2PortMemoryFile(fileName);
+	r2port::TraceFilesystemCall("IFileSystem::Open[r2-provider]", fileName,
+		pathId, flags, handle ? "handle" : "miss", options);
+	return handle;
+}
+
+// R1's native IFileSystem entry points that take a FileHandle_t. The provider hands out
+// in-memory handles that native code must never dereference, so every one of these has to
+// answer for them before the original runs. Slots are for the stock R1 filesystem_stdio.dll
+// (build stamp 0x54874230); the R1O TFO layout has two extra slots earlier and is hooked
+// separately.
+static void InstallR1FileSystemHandleHooks(void* fileSystem)
+{
+	if (s_R1FileSystemHandleHooksInstalled
+		|| !fileSystem
+		|| !IsReadableRange(fileSystem, sizeof(void*) * 2))
+		return;
+
+	auto vtable = *reinterpret_cast<void***>(fileSystem);
+	auto baseVtable = *reinterpret_cast<void***>(reinterpret_cast<char*>(fileSystem) + sizeof(void*));
+	if (!IsReadableRange(vtable, sizeof(void*) * 76) || !IsReadableRange(baseVtable, sizeof(void*) * 9))
+		return;
+
+	HMODULE module{};
+	if (!GetModuleHandleExA(
+			GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+			reinterpret_cast<LPCSTR>(vtable[75]), &module)
+		|| !module)
+		return;
+	const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(module);
+	const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(
+		reinterpret_cast<const char*>(module) + dos->e_lfanew);
+	if (dos->e_magic != IMAGE_DOS_SIGNATURE || nt->Signature != IMAGE_NT_SIGNATURE
+		|| nt->FileHeader.TimeDateStamp != 0x54874230
+		|| nt->OptionalHeader.SizeOfImage != 0x2116000) {
+		OutputDebugStringA("R1Delta: R2 provider IFileSystem handle hooks skipped: unrecognized filesystem module\n");
+		return;
+	}
+	const unsigned int slots[] = { 23, 24, 25, 26, 74, 75 };
+	for (unsigned int slot : slots) {
+		if (!IsExecutableFileSystemTarget(vtable[slot]))
+			return;
+	}
+	if (!IsExecutableFileSystemTarget(baseVtable[8]))
+		return;
+
+	const bool setBufferSize = HookR1OTFOFileSystemMethod(vtable[23], reinterpret_cast<void*>(&R1OFileSystem_SetBufferSize), reinterpret_cast<LPVOID*>(&R1OFileSystem_SetBufferSizeOriginal));
+	const bool isOk = HookR1OTFOFileSystemMethod(vtable[24], reinterpret_cast<void*>(&R1OFileSystem_IsOk), reinterpret_cast<LPVOID*>(&R1OFileSystem_IsOkOriginal));
+	const bool endOfFile = HookR1OTFOFileSystemMethod(vtable[25], reinterpret_cast<void*>(&R1OFileSystem_EndOfFile), reinterpret_cast<LPVOID*>(&R1OFileSystem_EndOfFileOriginal));
+	const bool readLine = HookR1OTFOFileSystemMethod(vtable[26], reinterpret_cast<void*>(&R1OFileSystem_ReadLine), reinterpret_cast<LPVOID*>(&R1OFileSystem_ReadLineOriginal));
+	const bool readEx = HookR1OTFOFileSystemMethod(vtable[75], reinterpret_cast<void*>(&R1OFileSystem_ReadEx), reinterpret_cast<LPVOID*>(&R1OFileSystem_ReadExOriginal));
+	const bool flush = HookR1OTFOFileSystemMethod(baseVtable[8], reinterpret_cast<void*>(&R1FileSystem_Flush), reinterpret_cast<LPVOID*>(&R1FileSystem_FlushOriginal));
+	const bool open = HookR1OTFOFileSystemMethod(vtable[74], reinterpret_cast<void*>(&R1FileSystem_Open), reinterpret_cast<LPVOID*>(&R1FileSystem_OpenOriginal));
+	s_R1FileSystemHandleHooksInstalled = setBufferSize && isOk && endOfFile && readLine && readEx && flush && open;
+
+	char buffer[384];
+	_snprintf_s(buffer, sizeof(buffer), _TRUNCATE,
+		"R1Delta: R2 provider IFileSystem handle hooks fs=%p setBufferSize=%d isOk=%d eof=%d readLine=%d readEx=%d flush=%d open=%d installed=%d\n",
+		fileSystem, setBufferSize ? 1 : 0, isOk ? 1 : 0, endOfFile ? 1 : 0,
+		readLine ? 1 : 0, readEx ? 1 : 0, flush ? 1 : 0, open ? 1 : 0,
+		s_R1FileSystemHandleHooksInstalled ? 1 : 0);
 	OutputDebugStringA(buffer);
 }
 
@@ -20529,6 +20666,7 @@ void* R1OFactory(const char* pName, int* pReturnCode) {
 		r2port::InstallR2MapProvider();
 		InstallR2PortFileEnumerationHooks(reinterpret_cast<void*>(g_CVFileSystemInterface));
 		InstallR1BaseFileSystemProviderHooks(g_CBaseFileSystemInterface);
+		InstallR1FileSystemHandleHooks(reinterpret_cast<void*>(g_CVFileSystemInterface));
 		g_CVFileSystem = new CVFileSystem((*(uintptr_t**)(g_CVFileSystemInterface)));
 
 		g_CBaseFileSystem = new CBaseFileSystem((*(uintptr_t**)(g_CVFileSystemInterface + 8)));

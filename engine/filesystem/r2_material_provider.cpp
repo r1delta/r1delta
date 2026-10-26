@@ -20,10 +20,13 @@
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
+#include <cstring>
 #include <deque>
 #include <list>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -44,6 +47,7 @@ ConVarR1* g_nativeCacheCvar{};
 ConVarR1O* g_r1oCacheCvar{};
 std::shared_ptr<class R2MaterialProvider> g_materialProvider;
 std::once_flag g_providerRegistration;
+std::atomic_flag g_loggedAmbientOcclusionVmt = ATOMIC_FLAG_INIT;
 
 void LogR2TextureMessage(const char* message)
 {
@@ -167,6 +171,72 @@ bool ParseMaterialPath(std::string_view path, std::string& assetName, bool& mate
     return false;
 }
 
+bool IsMaterialOrTextureRequestPath(std::string_view path)
+{
+    constexpr std::string_view prefix = "materials/";
+    if (path.size() <= prefix.size() + 4 || path.substr(0, prefix.size()) != prefix)
+        return false;
+    const std::string_view extension = path.substr(path.size() - 4);
+    return extension == ".vmt" || extension == ".vtf";
+}
+
+// Bump when the r2tex library or the VMT/VTF output it produces changes: converted files are
+// persisted per R2 install fingerprint and revision.
+constexpr std::string_view kConvertedCacheRevision = "1";
+
+bool ReadWholeFile(const std::filesystem::path& path, std::vector<std::uint8_t>& bytes)
+{
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    if (!file)
+        return false;
+    const std::streamoff size = file.tellg();
+    if (size < 0 || size > (1ll << 30))
+        return false;
+    bytes.resize(static_cast<std::size_t>(size));
+    file.seekg(0);
+    if (size > 0 && !file.read(reinterpret_cast<char*>(bytes.data()), size))
+        return false;
+    return true;
+}
+
+// Writes through a unique temporary name and renames it into place, so a reader or a crash
+// never observes a partial file.
+bool WriteFileAtomic(const std::filesystem::path& target, const void* data, std::size_t size)
+{
+    std::filesystem::path temporary = target;
+    temporary += ".tmp" + std::to_string(GetCurrentProcessId()) + "." + std::to_string(GetCurrentThreadId());
+    {
+        std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
+        if (!file)
+            return false;
+        file.write(static_cast<const char*>(data), static_cast<std::streamsize>(size));
+        file.close();
+        if (!file) {
+            std::error_code ignored;
+            std::filesystem::remove(temporary, ignored);
+            return false;
+        }
+    }
+    if (!MoveFileExW(temporary.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+        std::error_code ignored;
+        std::filesystem::remove(temporary, ignored);
+        return false;
+    }
+    return true;
+}
+
+std::uint64_t KnownPathHash(std::string_view path)
+{
+    std::uint64_t hash = 14695981039346656037ull;
+    for (const unsigned char character : path) {
+        hash ^= character;
+        hash *= 1099511628211ull;
+    }
+    return hash;
+}
+
+using KnownPathBuckets = std::unordered_map<std::uint64_t, std::vector<std::string>>;
+
 void RefreshR2TextureCacheLimit(void*, const char*, float)
 {
     int megabytes = static_cast<int>(kDefaultR2TextureCacheMiB);
@@ -205,7 +275,6 @@ public:
             }
         }
         if (failed) {
-            m_stateChanged.notify_all();
             LogR2TextureMessage("R1Delta: R2 texture provider could not start its index worker\n");
         }
     }
@@ -219,12 +288,42 @@ public:
     void PrefetchMapMaterials(std::string_view mapName, FileBytes bspData)
     {
         Activate();
+        bool changed = false;
         {
             std::lock_guard<std::mutex> lock(m_metricsMutex);
-            m_activeMap.assign(mapName);
+            changed = m_activeMap != mapName;
+            if (changed) {
+                m_activeMap.assign(mapName);
+                m_mapMaterialsQueued = false;
+            }
+            if (m_mapMaterialsQueued)
+                return;
+            m_mapMaterialsQueued = true;
         }
+        if (changed)
+            ClearKnownPaths();
         if (QueueMapMaterials(std::string(mapName), std::move(bspData)))
             m_prefetchedMapCount.fetch_add(1, std::memory_order_relaxed);
+        else {
+            std::lock_guard<std::mutex> lock(m_metricsMutex);
+            m_mapMaterialsQueued = false;
+        }
+    }
+
+    bool MayContain(std::string_view normalizedPath) const override
+    {
+        if (!m_activated.load(std::memory_order_acquire)
+            || m_state.load(std::memory_order_acquire) != State::Ready
+            || !IsMaterialOrTextureRequestPath(normalizedPath))
+            return false;
+        std::shared_lock<std::shared_mutex> lock(m_knownPathsMutex);
+        return ContainsKnownPath(m_knownPaths, normalizedPath);
+    }
+
+    bool CanCacheMisses() const override
+    {
+        return m_activated.load(std::memory_order_acquire)
+            && m_state.load(std::memory_order_acquire) == State::Ready;
     }
 
     bool Exists(std::string_view normalizedPath) override
@@ -240,7 +339,8 @@ public:
 
     FileBytes Read(std::string_view normalizedPath) override
     {
-        if (!m_activated.load(std::memory_order_acquire))
+        if (!m_activated.load(std::memory_order_acquire)
+            || m_state.load(std::memory_order_acquire) != State::Ready)
             return {};
 
         std::string assetName;
@@ -249,16 +349,25 @@ public:
             return {};
 
         const auto started = std::chrono::steady_clock::now();
-        FileBytes data;
-        if (WaitUntilReadyFor(std::chrono::milliseconds(10))) {
-            data = ReadOrSchedule(std::string(normalizedPath), assetName, materialFile);
-        }
-        else {
-            m_indexWaitMisses.fetch_add(1, std::memory_order_relaxed);
+        FileBytes data = ReadOrSchedule(std::string(normalizedPath), assetName, materialFile);
+        if (data
+            && FilesystemTracePathMatches(normalizedPath)
+            && normalizedPath == "materials/world/atmosphere/ambient_occlusion.vmt"
+            && !g_loggedAmbientOcclusionVmt.test_and_set(std::memory_order_relaxed)) {
+            std::string message = "R1Delta: R2 served material VMT path=";
+            message.append(normalizedPath.data(), normalizedPath.size());
+            message.append(" bytes=");
+            message.append(std::to_string(data->size()));
+            message.push_back('\n');
+            message.append(reinterpret_cast<const char*>(data->data()), data->size());
+            if (message.empty() || message.back() != '\n')
+                message.push_back('\n');
+            LogR2TextureMessage(message.c_str());
         }
         RecordProviderRead(normalizedPath, materialFile, static_cast<bool>(data), started);
         return data;
     }
+
 
     void LogMetrics(const char* phase)
     {
@@ -286,9 +395,9 @@ public:
             : state == State::Opening ? "opening" : "cold";
         const auto qpcMilliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count();
-        char message[1024]{};
+        char message[1536]{};
         _snprintf_s(message, sizeof(message), _TRUNCATE,
-            "R1Delta: R2 texture timing phase=%s map=%s steady-ms=%lld index-state=%s index-cache=%s index-ms=%llu reads=%llu materials=%llu textures=%llu material-served=%llu material-misses=%llu texture-served=%llu texture-misses=%llu prefetch-bsp=%llu prefetch-vmt=%llu prefetch-vtf=%llu index-wait-misses=%llu conversions=%llu conversion-total-ms=%llu conversion-max-ms=%llu callbacks-total-ms=%llu callbacks-max-ms=%llu queued=%zu active=%zu workers=%u queue-full=%llu\n",
+            "R1Delta: R2 texture timing phase=%s map=%s steady-ms=%lld index-state=%s index-cache=%s index-ms=%llu reads=%llu materials=%llu textures=%llu material-served=%llu material-misses=%llu texture-served=%llu texture-misses=%llu prefetch-bsp=%llu prefetch-vmt=%llu prefetch-vtf=%llu conversions=%llu conversion-total-ms=%llu conversion-max-ms=%llu callbacks-total-ms=%llu callbacks-max-ms=%llu queued=%zu active=%zu workers=%u queue-full=%llu disk-hits=%llu disk-load-ms=%llu disk-stores=%llu\n",
             phase ? phase : "<unknown>", mapName.empty() ? "<none>" : mapName.c_str(),
             static_cast<long long>(qpcMilliseconds), stateName,
             m_indexCacheHit.load(std::memory_order_relaxed) ? "warm" : "cold",
@@ -303,14 +412,16 @@ public:
             static_cast<unsigned long long>(m_prefetchedMapCount.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(m_prefetchedMaterialCount.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(m_prefetchedTextureCount.load(std::memory_order_relaxed)),
-            static_cast<unsigned long long>(m_indexWaitMisses.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(m_conversionCount.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(m_conversionTotalUs.load(std::memory_order_relaxed) / 1000),
             static_cast<unsigned long long>(m_conversionMaxUs.load(std::memory_order_relaxed) / 1000),
             static_cast<unsigned long long>(m_providerReadTotalUs.load(std::memory_order_relaxed) / 1000),
             static_cast<unsigned long long>(m_providerReadMaxUs.load(std::memory_order_relaxed) / 1000),
             queued, active, m_workerCount.load(std::memory_order_relaxed),
-            static_cast<unsigned long long>(m_queueFullCount.load(std::memory_order_relaxed)));
+            static_cast<unsigned long long>(m_queueFullCount.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(m_diskHitCount.load(std::memory_order_relaxed)),
+            static_cast<unsigned long long>(m_diskLoadTotalUs.load(std::memory_order_relaxed) / 1000),
+            static_cast<unsigned long long>(m_diskStoreCount.load(std::memory_order_relaxed)));
         LogR2TextureMessage(message);
     }
 
@@ -340,8 +451,53 @@ private:
         bool mapMaterials{};
     };
 
+    static bool ContainsKnownPath(const KnownPathBuckets& knownPaths, std::string_view path)
+    {
+        const auto found = knownPaths.find(KnownPathHash(path));
+        if (found == knownPaths.end())
+            return false;
+        return std::find_if(found->second.begin(), found->second.end(),
+            [path](const std::string& candidate) {
+                return std::string_view(candidate) == path;
+            }) != found->second.end();
+    }
+
+    void AddKnownPath(std::string_view path)
+    {
+        std::unique_lock<std::shared_mutex> lock(m_knownPathsMutex);
+        auto& bucket = m_knownPaths[KnownPathHash(path)];
+        if (!ContainsKnownPath(m_knownPaths, path)) {
+            bucket.emplace_back(path);
+            r2port::InvalidateMissCache();
+        }
+    }
+
+    void RemoveKnownPath(std::string_view path)
+    {
+        std::unique_lock<std::shared_mutex> lock(m_knownPathsMutex);
+        const auto bucket = m_knownPaths.find(KnownPathHash(path));
+        if (bucket == m_knownPaths.end())
+            return;
+        auto& names = bucket->second;
+        names.erase(std::remove_if(names.begin(), names.end(),
+            [path](const std::string& candidate) {
+                return std::string_view(candidate) == path;
+            }), names.end());
+        if (names.empty())
+            m_knownPaths.erase(bucket);
+    }
+
+    void ClearKnownPaths()
+    {
+        std::unique_lock<std::shared_mutex> lock(m_knownPathsMutex);
+        m_knownPaths.clear();
+        r2port::InvalidateMissCache();
+    }
+
     static constexpr std::size_t kMaximumQueuedAssets = 8192;
-    static constexpr std::chrono::milliseconds kConversionWait{ 20 };
+    // A known path is always queued on the worker pool, and a missed open leaves R1 with its
+    // error texture for the rest of the map, so a read waits for the conversion to finish.
+    static constexpr std::chrono::milliseconds kConversionWait{ 60000 };
 
     void Initialize() noexcept
     {
@@ -360,6 +516,7 @@ private:
                 r2Install = installRoot / "r2";
                 cacheDirectory = R2TextureCacheDirectory(r2Install, errorMessage);
                 if (!cacheDirectory.empty()) {
+                    m_convertedRoot = cacheDirectory / "converted" / std::string(kConvertedCacheRevision);
                     std::error_code cacheError;
                     const bool cacheExists = std::filesystem::is_regular_file(
                         cacheDirectory / "r2tex.index", cacheError);
@@ -404,7 +561,6 @@ private:
             std::lock_guard<std::mutex> lock(m_stateMutex);
             m_state = opened ? State::Ready : State::Failed;
         }
-        m_stateChanged.notify_all();
         if (opened)
             StartWorkers();
     }
@@ -432,16 +588,6 @@ private:
             LogR2TextureMessage("R1Delta: R2 texture provider could not create a conversion worker\n");
     }
 
-    bool WaitUntilReadyFor(std::chrono::milliseconds timeout)
-    {
-        std::unique_lock<std::mutex> lock(m_stateMutex);
-        if (m_state == State::Cold || m_state == State::Opening) {
-            m_stateChanged.wait_for(lock, timeout, [this]() {
-                return m_state == State::Ready || m_state == State::Failed;
-            });
-        }
-        return m_state == State::Ready;
-    }
 
     FileBytes ReadOrSchedule(std::string path, const std::string& assetName, bool materialFile)
     {
@@ -459,7 +605,8 @@ private:
             PromoteQueuedPathLocked(path);
         }
         else {
-            if (m_stopping || m_workQueue.size() >= kMaximumQueuedAssets) {
+            if (m_stopping || m_workerCount.load(std::memory_order_relaxed) == 0
+                || m_workQueue.size() >= kMaximumQueuedAssets) {
                 m_queueFullCount.fetch_add(1, std::memory_order_relaxed);
                 return {};
             }
@@ -491,6 +638,7 @@ private:
             return false;
 
         auto pending = std::make_shared<PendingRead>();
+        AddKnownPath(*normalized);
         m_pendingReads.emplace(*normalized, pending);
         m_workQueue.push_back(WorkItem{
             *normalized, std::move(assetName), materialFile, true, std::move(pending) });
@@ -568,6 +716,82 @@ private:
         m_workAvailable.notify_one();
     }
 
+    FileBytes LoadConvertedFile(const WorkItem& item, std::vector<std::string>& dependencies) const
+    {
+        const std::filesystem::path file = ConvertedFilePath(item.path);
+        if (file.empty())
+            return {};
+        try {
+            std::vector<std::uint8_t> bytes;
+            if (!ReadWholeFile(file, bytes) || bytes.empty())
+                return {};
+            if (item.materialFile) {
+                std::filesystem::path dependencyFile = file;
+                dependencyFile += ".deps";
+                std::vector<std::uint8_t> dependencyBytes;
+                if (!ReadWholeFile(dependencyFile, dependencyBytes))
+                    return {};
+                std::size_t begin = 0;
+                while (begin < dependencyBytes.size()) {
+                    std::size_t end = begin;
+                    while (end < dependencyBytes.size() && dependencyBytes[end] != '\n')
+                        ++end;
+                    if (end > begin)
+                        dependencies.emplace_back(
+                            reinterpret_cast<const char*>(dependencyBytes.data()) + begin, end - begin);
+                    begin = end + 1;
+                }
+            }
+            else if (bytes.size() < 4 || std::memcmp(bytes.data(), "VTF\0", 4) != 0) {
+                return {};
+            }
+            return std::make_shared<const std::vector<std::uint8_t>>(std::move(bytes));
+        }
+        catch (...) {
+            dependencies.clear();
+            return {};
+        }
+    }
+
+    void StoreConvertedFile(
+        const WorkItem& item, const FileBytes& data, const std::vector<std::string>& dependencies)
+    {
+        const std::filesystem::path file = ConvertedFilePath(item.path);
+        if (file.empty() || !data || data->empty())
+            return;
+        try {
+            std::error_code error;
+            std::filesystem::create_directories(file.parent_path(), error);
+            if (error)
+                return;
+            if (item.materialFile) {
+                std::string dependencyText;
+                for (const std::string& dependency : dependencies) {
+                    dependencyText.append(dependency);
+                    dependencyText.push_back('\n');
+                }
+                std::filesystem::path dependencyFile = file;
+                dependencyFile += ".deps";
+                if (!WriteFileAtomic(dependencyFile, dependencyText.data(), dependencyText.size()))
+                    return;
+            }
+            if (WriteFileAtomic(file, data->data(), data->size()))
+                m_diskStoreCount.fetch_add(1, std::memory_order_relaxed);
+        }
+        catch (...) {
+        }
+    }
+
+    std::filesystem::path ConvertedFilePath(std::string_view path) const
+    {
+        if (m_convertedRoot.empty() || path.empty() || path.front() == '/'
+            || path.find("..") != std::string_view::npos
+            || path.find(':') != std::string_view::npos
+            || path.find('\\') != std::string_view::npos)
+            return {};
+        return m_convertedRoot / std::filesystem::path(std::string(path));
+    }
+
     FileBytes ConvertAsset(const WorkItem& item, std::vector<std::string>& dependencies)
     {
         try {
@@ -623,18 +847,35 @@ private:
 
             const auto conversionStart = std::chrono::steady_clock::now();
             std::vector<std::string> dependencies;
-            FileBytes data = ConvertAsset(item, dependencies);
+            bool fromDisk = false;
+            FileBytes data = LoadConvertedFile(item, dependencies);
+            if (data)
+                fromDisk = true;
+            else
+                data = ConvertAsset(item, dependencies);
             const auto conversionUs = static_cast<std::uint64_t>(
                 std::chrono::duration_cast<std::chrono::microseconds>(
                     std::chrono::steady_clock::now() - conversionStart).count());
-            m_conversionCount.fetch_add(1, std::memory_order_relaxed);
-            m_conversionTotalUs.fetch_add(conversionUs, std::memory_order_relaxed);
-            std::uint64_t previousMax = m_conversionMaxUs.load(std::memory_order_relaxed);
-            while (conversionUs > previousMax
-                && !m_conversionMaxUs.compare_exchange_weak(
-                    previousMax, conversionUs, std::memory_order_relaxed)) {
+            if (fromDisk) {
+                m_diskHitCount.fetch_add(1, std::memory_order_relaxed);
+                m_diskLoadTotalUs.fetch_add(conversionUs, std::memory_order_relaxed);
+            }
+            else {
+                m_conversionCount.fetch_add(1, std::memory_order_relaxed);
+                m_conversionTotalUs.fetch_add(conversionUs, std::memory_order_relaxed);
+                std::uint64_t previousMax = m_conversionMaxUs.load(std::memory_order_relaxed);
+                while (conversionUs > previousMax
+                    && !m_conversionMaxUs.compare_exchange_weak(
+                        previousMax, conversionUs, std::memory_order_relaxed)) {
+                }
             }
 
+            // Register the VMT's textures as known before its reader resumes: R1 opens them
+            // as soon as the VMT parses, and an unknown path is a cached miss.
+            if (data) {
+                for (const std::string& dependency : dependencies)
+                    QueuePrefetchPath(dependency);
+            }
             {
                 std::lock_guard<std::mutex> lock(m_cacheMutex);
                 if (data) {
@@ -653,6 +894,10 @@ private:
                     --m_activeWork;
             }
             item.pending->ready.notify_all();
+            if (!data)
+                RemoveKnownPath(item.path);
+            if (data && !fromDisk)
+                StoreConvertedFile(item, data, dependencies);
 
             if (data) {
                 std::atomic<bool>& logged = item.materialFile ? m_loggedMaterial : m_loggedTexture;
@@ -666,8 +911,6 @@ private:
                     LogR2TextureMessage(message);
                 }
             }
-            for (std::string& dependency : dependencies)
-                QueuePrefetchPath(std::move(dependency));
         }
     }
 
@@ -763,9 +1006,10 @@ private:
     }
 
     std::atomic<bool> m_activated{};
+    mutable std::shared_mutex m_knownPathsMutex;
+    KnownPathBuckets m_knownPaths;
     std::mutex m_stateMutex;
-    std::condition_variable m_stateChanged;
-    State m_state{ State::Cold };
+    std::atomic<State> m_state{ State::Cold };
     std::thread m_indexWorker;
     std::vector<std::thread> m_workers;
     std::atomic<unsigned int> m_workerCount{};
@@ -780,6 +1024,7 @@ private:
     bool m_stopping{};
     std::mutex m_metricsMutex;
     std::string m_activeMap;
+    bool m_mapMaterialsQueued{};
     std::atomic<bool> m_indexCacheHit{};
     std::atomic<std::uint64_t> m_indexElapsedMs{};
     std::atomic<std::uint64_t> m_providerReadCount{};
@@ -797,8 +1042,11 @@ private:
     std::atomic<std::uint64_t> m_prefetchedMaterialCount{};
     std::atomic<std::uint64_t> m_prefetchedTextureCount{};
     std::atomic<std::uint64_t> m_prefetchedMapCount{};
-    std::atomic<std::uint64_t> m_indexWaitMisses{};
     std::atomic<std::uint64_t> m_queueFullCount{};
+    std::atomic<std::uint64_t> m_diskHitCount{};
+    std::atomic<std::uint64_t> m_diskLoadTotalUs{};
+    std::atomic<std::uint64_t> m_diskStoreCount{};
+    std::filesystem::path m_convertedRoot;
     std::atomic<bool> m_loggedMaterial{};
     std::atomic<bool> m_loggedTexture{};
 };

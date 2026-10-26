@@ -185,6 +185,9 @@
     <ClInclude Include="engine\filesystem\r2_material_provider.h">
       <Filter>engine\filesystem</Filter>
     </ClInclude>
+    <ClInclude Include="engine\filesystem\r1_map_pack_material_provider.h">
+      <Filter>engine\filesystem</Filter>
+    </ClInclude>
     <ClInclude Include="engine\r2port\bspdown\bspdown.hpp">
       <Filter>engine\r2port\bspdown</Filter>
     </ClInclude>
@@ -807,6 +810,9 @@
       <Filter>engine\filesystem</Filter>
     </ClCompile>
     <ClCompile Include="engine\filesystem\r2_material_provider.cpp">
+      <Filter>engine\filesystem</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\filesystem\r1_map_pack_material_provider.cpp">
       <Filter>engine\filesystem</Filter>
     </ClCompile>
     <ClCompile Include="engine\r2port\r2tex\r2tex.cpp">
