@@ -1687,7 +1687,6 @@ void InitAddons() {
 	if (done) return;
 	done = true;
 	r2port::InstallR2MapProvider();
-	r2port::RegisterR2TextureCacheConVar();
 	auto engine_base_spec = ENGINE_DLL_BASE;
 	auto filesystem_stdio = IsDedicatedServer() ? G_vscript : G_filesystem_stdio;
 	if (!IsR1ODedicatedServer()) {
@@ -8345,6 +8344,9 @@ static void InstallClientLightProbeBlendHook(uintptr_t engineBase)
 
 void Host_InitHook(bool a1) {
 	Host_InitOriginal(a1);
+	// InitAddons runs from a DLL loader notification; register after Host_Init.
+	if (!IsR1ODedicatedServer())
+		r2port::RegisterR2TextureCacheConVar();
 	OriginalCCVar_FindVar(cvarinterface, "sv_alltalk")->m_nFlags |= FCVAR_REPLICATED;
 	auto user_id = OriginalCCVar_FindVar(cvarinterface, "platform_user_id");
 	EnsurePlatformUserIdString(user_id);
