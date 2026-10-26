@@ -42,6 +42,7 @@ enum Lump : uint32_t {
     L_TRICOLL_TRIS = 0x42,
     L_TRICOLL_NODES = 0x44,
     L_TRICOLL_HDR = 0x45,
+    L_PHYSICSTRIS = 0x46,
     L_VTX_UNLIT = 0x47,
     L_VTX_LITFLAT = 0x48,
     L_VTX_LITBUMP = 0x49,
@@ -243,6 +244,7 @@ void convertStaticProps(Ctx& c);
 void convertVertexFrames(Ctx& c);  // rule 11, runs after convertMeshes
 void convertCubemaps(Ctx& c);  // rule 13
 void convertPhysics(Ctx& c);  // rule 12
+void convertPhysicsTriangles(Ctx& c);  // rule 14, header-count-aware all-absent table
 bool physicsHasWorldSolids(const Bytes& lump, std::string* why);
 void convertMeshes(Ctx& c);  // clipping, cubemap split, model/mesh bounds
 void convertCollisionGrid(Ctx& c);

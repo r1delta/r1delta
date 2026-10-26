@@ -1,5 +1,5 @@
 // Origin: C:\Users\r3muxd\tmp\r2port\bspdown. Bundled in r1delta under GPL-3.0.
-// Rule 7 (render mesh clipping, model and mesh bounds) and rule 10 (cubemap per sort).
+// Rules 7 (render mesh clipping and bounds), 10 (cubemaps), and 15 (no-draw render geometry).
 //
 // Render data model (bsp_tool respawn/titanfall.py, verified against the files):
 //   Meshes (0x50, 28 bytes)  first index, triangle count, first_vertex = smallest
@@ -23,8 +23,8 @@
 // triangle, and the result is written as a new vertex block at the end of the
 // vertex lump with its own material sort (vertex indices are 16 bit, relative to
 // the sort's offset, so the block must start at offset 0 of a sort).
-// Meshes entirely outside, and TOOLS/TOOLSSKYBOX meshes with any vertex outside,
-// keep their slot (object reference lumps index meshes) but get 0 triangles.
+// Meshes outside the clip limit are emptied; skybox tool meshes outside it are also emptied.
+// Rule 15 empties non-sky tools and SKIP-flagged meshes but keeps their mesh slots and sorts.
 #include "internal.hpp"
 
 #include <algorithm>
@@ -100,12 +100,33 @@ std::string materialName(const MeshState& s, size_t sortIdx) {
     return std::string(p, n);
 }
 
-bool isSkyboxTool(std::string n) {
+std::string normalizedMaterialName(std::string n) {
     for (auto& ch : n) {
         if (ch == '\\') ch = '/';
         ch = (char)std::tolower((unsigned char)ch);
     }
+    return n;
+}
+
+bool isSkyboxTool(const std::string& n) {
     return n == "tools/toolsskybox";
+}
+
+bool isToolMaterial(const std::string& n) {
+    return n.rfind("tools/", 0) == 0;
+}
+
+bool isSkyRelatedMesh(const MeshR2& m, const std::string& n) {
+    // Bit 0x2 is named SKY_2D in the flag table, but R2 uses it on the
+    // non-sky tools/toolsblocklight meshes as well. Preserve only SKY (0x4)
+    // or an explicitly sky-named tool material.
+    return (m.flags & 0x00000004u) != 0 ||
+        (n.rfind("tools/", 0) == 0 && n.find("sky") != std::string::npos);
+}
+
+bool shouldRemoveNoDrawMesh(const MeshR2& m, const std::string& n) {
+    if (isSkyRelatedMesh(m, n)) return false;
+    return isToolMaterial(n) || (m.flags & 0x00020000u) != 0;
 }
 
 struct VertexAccess {
@@ -295,11 +316,64 @@ void convertMeshes(Ctx& c) {
     for (size_t i = 0; i < s.meshes.size(); i++) {
         if (s.meshes[i].materialSort >= s.sorts.size()) throw Error("mesh " + std::to_string(i) + ": material sort index out of range");
     }
+    std::vector<std::string> materialNames(s.sorts.size());
+    std::vector<uint8_t> materialNameReady(s.sorts.size(), 0);
+    auto materialForSort = [&](size_t si) -> const std::string& {
+        if (!materialNameReady[si]) {
+            materialNames[si] = normalizedMaterialName(materialName(s, si));
+            materialNameReady[si] = 1;
+        }
+        return materialNames[si];
+    };
 
     std::vector<uint8_t> ownSort(s.meshes.size(), 0);
     std::vector<MeshLog> log;
     size_t nClipped = 0, nEmptied = 0, nSkyDropped = 0, trisClipped = 0, trisDropped = 0, trisIn = 0, newVertsTotal = 0;
     size_t clipCubemapOverride = 0;
+    size_t nNoDrawMeshes = 0, nNoDrawTris = 0;
+    size_t nNoDrawToolMeshes = 0, nNoDrawToolTris = 0;
+    size_t nNoDrawSkipMeshes = 0, nNoDrawSkipTris = 0;
+    std::map<std::string, std::pair<size_t, size_t>> noDrawByMaterial;
+    for (size_t mi = 0; mi < s.meshes.size(); mi++) {
+        MeshR2& m = s.meshes[mi];
+        if (!m.numTriangles) continue;
+        const std::string& mat = materialForSort(m.materialSort);
+        if (!shouldRemoveNoDrawMesh(m, mat)) continue;
+        if ((uint64_t)m.firstMeshIndex + 3ull * m.numTriangles > s.idx.size())
+            throw Error("mesh " + std::to_string(mi) + ": no-draw index range exceeds lump 0x4F");
+        nNoDrawMeshes++;
+        nNoDrawTris += m.numTriangles;
+        if (isToolMaterial(mat)) {
+            nNoDrawToolMeshes++;
+            nNoDrawToolTris += m.numTriangles;
+        }
+        if (m.flags & 0x00020000u) {
+            nNoDrawSkipMeshes++;
+            nNoDrawSkipTris += m.numTriangles;
+        }
+        auto& count = noDrawByMaterial[mat];
+        count.first++;
+        count.second += m.numTriangles;
+        m.numTriangles = 0;
+        m.firstVertex = 0;
+        m.numVertices = 0;
+        MeshBounds& mb = s.bounds[mi];
+        for (int a = 0; a < 3; a++) {
+            mb.origin[a] = 0;
+            mb.extents[a] = 0;
+        }
+        mb.radius = 0;
+        mb.tanYaw = 0;
+    }
+
+    // ---- non-drawing render meshes
+    if (nNoDrawMeshes)
+        c.say("[rule 15] emptied %zu non-drawing meshes / %zu triangles: tools/* %zu/%zu, SKIP-flagged %zu/%zu; sky meshes retained; collision lumps untouched",
+              nNoDrawMeshes, nNoDrawTris, nNoDrawToolMeshes, nNoDrawToolTris,
+              nNoDrawSkipMeshes, nNoDrawSkipTris);
+    for (const auto& kv : noDrawByMaterial)
+        c.say("[rule 15]   '%s': %zu meshes, %zu triangles", kv.first.c_str(), kv.second.first, kv.second.second);
+
 
     // ---- clip world meshes
     for (size_t mi = world0; mi < world0 + worldN; mi++) {
@@ -321,7 +395,7 @@ void convertMeshes(Ctx& c) {
         trisIn += m.numTriangles;
         if (!any) continue;
 
-        std::string mat = materialName(s, m.materialSort);
+        const std::string& mat = materialForSort(m.materialSort);
         MeshLog lg{mi, mat, "clipped", m.numTriangles, 0, 0, 0, 0};
         MeshBounds& mb = s.bounds[mi];
         const int cubemap = m.cubemap;
@@ -618,6 +692,30 @@ void convertMeshes(Ctx& c) {
         }
         if (bad) throw Error("internal error: " + std::to_string(bad) + " world meshes still have vertices beyond the clip limit");
     }
+    // Rebuild render indices from active meshes. This removes dead tool/skip
+    // triangles, preserves each mesh slot, and keeps R1's 6-index alignment.
+    const size_t nIdxBeforeCompact = s.idx.size();
+    std::vector<uint16_t> compactIdx;
+    compactIdx.reserve(s.idx.size());
+    for (MeshR2& m : s.meshes) {
+        if (!m.numTriangles) {
+            m.firstMeshIndex = 0;
+            continue;
+        }
+        if ((uint64_t)m.firstMeshIndex + 3ull * m.numTriangles > s.idx.size())
+            throw Error("active mesh index range exceeds lump 0x4F before compaction");
+        while (compactIdx.size() % 6) compactIdx.push_back(0);
+        const size_t start = m.firstMeshIndex;
+        const size_t count = 3ull * m.numTriangles;
+        m.firstMeshIndex = (uint32_t)compactIdx.size();
+        compactIdx.insert(compactIdx.end(), s.idx.begin() + start, s.idx.begin() + start + count);
+        if (m.numTriangles & 1) {
+            const uint16_t last = compactIdx.back();
+            compactIdx.insert(compactIdx.end(), 3, last);
+        }
+    }
+    s.idx.swap(compactIdx);
+
     for (auto& m : s.meshes) m.cubemap = 0;  // R1 reads bytes 10..11 as one uint16 vertex type
     c.lump[L_MESHES] = pack(s.meshes);
     c.lump[L_MESHBOUNDS] = pack(s.bounds);
@@ -645,6 +743,8 @@ void convertMeshes(Ctx& c) {
         c.say("[rule 10] cubemap per material sort (none): %zu sorts set to -1 (plain material names, no patch materials needed); mesh cubemap byte cleared (R1 reads it as part of the vertex type)", sortsSetNone);
     else
         c.say("[rule 10] cubemap per material sort (keep): sorts keep the R2 value, mesh cubemap byte cleared");
+    c.say("[rule 15] mesh index lump compacted %zu -> %zu entries; mesh slots and material-sort IDs retained",
+          nIdxBeforeCompact, s.idx.size());
     (void)nOrigMeshes;
     (void)clipCubemapOverride;
 }

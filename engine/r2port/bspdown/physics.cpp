@@ -207,5 +207,26 @@ void convertPhysics(Ctx& c) {
           why.c_str(), old, sizeof(kStub));
 }
 
+
+// Rule 14: write the R1 virtual-tricoll table with no precomputed blobs.
+void convertPhysicsTriangles(Ctx& c) {
+    const Bytes& headers = c.lump[L_TRICOLL_HDR];
+    if (headers.size() % 44)
+        throw Error("tricoll headers (0x45): size is not a multiple of 44 bytes");
+    const size_t count = headers.size() / 44;
+    if (count > 0xFFFF)
+        throw Error("tricoll headers (0x45): count exceeds the 16-bit physics-triangles table limit");
+    Bytes table;
+    table.reserve(2 + count * 2);
+    appendRaw(table, static_cast<uint16_t>(count));
+    for (size_t i = 0; i < count; ++i) appendRaw(table, static_cast<uint16_t>(0xFFFF));
+    c.lump[L_PHYSICSTRIS].swap(table);
+    c.present[L_PHYSICSTRIS] = true;
+    c.version[L_PHYSICSTRIS] = 0;
+    c.fourCC[L_PHYSICSTRIS] = 0;
+    c.say("[rule 14] physics triangles (0x46): wrote %zu all-absent entries (0xFFFF), matching %zu tricoll headers (0x45)",
+          count, count);
+}
+
 }  // namespace detail
 }  // namespace bspdown
