@@ -38,7 +38,7 @@ Use
   bspdown.exe <in_r2.bsp> <out_r1.bsp> [--limit 16376] [--rtl-bytes 1..4] [--no-remap-contents]
               [--keep-prop-flag10] [--props keep|hide-scatter|hide-all] [--scatter-min N]
               [--csm-rebase] [--empty-shadow-meshes] [--worldlight-flag2]
-              [--cubemaps none|split|keep] [--keep-r2-lumps] [--no-grid-pad] [--quiet]
+              [--cubemaps none|split|keep] [--keep-r2-lumps] [--grid-size N] [--no-grid-pad] [--quiet]
   The per-rule report is printed to stdout. Exit status 1 and a message on stderr when the
   input cannot be converted.
 
@@ -377,9 +377,10 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
     and over 2M random persistent-list rays per extent in +-18000 / +-32768 (dense lattice +-32768 step 2048: 1,185,921 rays per extent,
     17 extents, all clean); rays reaching beyond +-35200 can still leave scratch entries at the border (40000: 1414..1804 per 38416
     lattice rays) and bring the old failure back for hulls 300..497 (logs: out\gp\gp_sim_*.txt).
-    Limits: hull extents of about 250..497 keep reading stale list entries when a band has 4 cells; with the padding these are in-table indices
-    left by earlier traces, so the walker visits the wrong cells (not a crash, but those hull traces can miss geometry). Fixing that needs a
-    cell size whose rectangle threshold (0.7071 * size) is below the hull extents, or an engine patch of sub_18010BE50.
+    Limits (found on mp_lf_traffic, which still crashed with this padding: AV at cell 101 * 100 + 25, a stale slot): the unwritten
+    band slots hold arbitrary stack data, including scratch entries of earlier traces whose rays reached beyond +-35200 (the AIN
+    builder's rays do), so padding cannot make every stale read safe. Rule 19 removes the cause for the hulls the walker is
+    used with. Rule 18 stays as an extra margin when the grid is not re-binned (--grid-size 0) and is skipped when the cell list limit forbids it.
     Checker: sizes, the exact 0x56 rule, the walker's range arithmetic (numpy, float32) for the extreme rays of +-18000 and +-32768
     with hull extent 0.7071 * size - 0.0625 (>= 3 and >= 2 whole cells from every border), 16384 list fit, padding cells empty,
     each R2 cell at its world position with count <= R2's, and with --unpadded <bsp of the same input converted with --no-grid-pad>:
@@ -387,6 +388,26 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
     Other position-indexed data: none. The R1 loaders/walkers that take a position use trees (CSM / cell AABB trees 0x63, 0x77, light probe
     tree 0x67, tricoll BVH 0x44) walked by plane/box tests, which resolve any position; grid fields (+0x70/0x74/0x78 of the collision data)
     are read only by the walker and by the model-cell lookups sub_180106DC0 / sub_180090DD0, which use nx * ny from the loaded header.
+
+19. Collision grid re-binning to cell size 256 [R1 sub_18010BE50, simulation analysis\gp_walker.cpp, check_bspdown.py]. The walker's
+    band path loses cells for bands of >= 4 cells (it writes 3 entries and advances by n; slots 3..n-1 are read unwritten). That needs a
+    hull half extent between about 0.354 * cell size and the rectangle-path threshold 0.7071 * cell size - 0.0625: 250..497 for the
+    R2 size 704 (the mp_lf_* / colony02 / thaw AIN sweeps), 94..181 for 256 (stock R1; stock gameplay hulls are smaller, big
+    flyer hulls take the rectangle path). Simulation (analysis\gp_sim_s256_traffic.txt, rays +-60000, lattice step 6000, 194,481 rays per
+    extent): with 256 cells no unwritten slot is read for hull extents <= 91 and >= 181 (0 counted-OOB, 0 band >= 4); extents
+    100..180 still read 136..14,732 unwritten slots. With 704 the window is 250..497.
+    The converter re-bins lumps 0x55/0x56/0x57/0x58 after rule 4: every geoset goes into each new cell its AABB touches (candidates come
+    from the old cells overlapping the new cell, so R2's assignment is only refined), the geoset pool is re-emitted per cell (16 bit
+    start index; pools measured 2.8k (lf_stacks) to 21k (eden), the converter stops above 65535); the grid covers only the content (like
+    stock R1 grids), at most 16383 world cells (the walker's list holds 16384 entries and the rectangle path lists every cell): the cell
+    size grows in steps of 16 until that holds (mp_thaw: 272). Straddle groups:
+    in R2 data one group id is shared by a bundle of different geosets duplicated together in several cells (mp_lf_meadow group 121 has
+    two objects), which is only correct while all members share their cells; after re-binning every distinct object (resolved
+    primitive words, contents, bounds) that lies in >= 2 cells gets its own group, others 0, ids dense 1..N, Grid.num_straddle_groups = N + 1.
+    Model cells copy their geosets (group 0). Primitive lumps 0x59/0x5A/0x5B are unchanged. Option: --grid-size <units> (default 256, 0 = keep 704).
+    Checker (with --reference <same input converted with --grid-size 0 --no-grid-pad>): size rule, 16383 cell limit, pool < 65536, no entry
+    outside its cell, groups = one object each spanning >= 2 cells, dense ids, model cells identical, set of world objects identical, and 5400
+    walker-style range queries (rays and hull extents 0..800) in which the new grid finds every object the reference grid finds.
 
 Results
 -------

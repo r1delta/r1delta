@@ -88,6 +88,9 @@ struct Options {
     // (R1's grid walker reads the cell table at stale out-of-grid indices when a trace reaches the grid border).
     bool gridPad = true;
 
+    // Rule 19: cell size the collision grid is re-binned to (R2 uses 704, R1 stock maps 256). 0 keeps the R2 size.
+    float gridCellSize = 256.0f;
+
     // Rule 16: static prop flag bit 0x10. R2 sets it on 14,138 of the 16,183 mp_glitch props (Source NO_SHADOW meaning). The R1 loader
     // (sub_18018B710) stores (flags & 0x10) == 0 at prop+58 and the prop drawers (sub_18018D7A0 / sub_18018F1D0) draw a prop in the main
     // pass only when that is 1, in the shadow pass always: in R1 the bit means "shadow caster only, not drawn". Default: clear the bit.

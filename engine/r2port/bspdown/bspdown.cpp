@@ -213,6 +213,7 @@ std::vector<uint8_t> DowngradeBsp(const uint8_t* data, size_t size, const Option
     convertLightProbeRefs(c);
     convertTricoll(c);
     convertCollisionGrid(c);
+    regridCollision(c);
     padCollisionGrid(c);
     convertStaticProps(c);
     convertMeshes(c);

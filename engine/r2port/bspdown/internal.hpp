@@ -249,6 +249,7 @@ void convertPhysicsTriangles(Ctx& c);  // rule 14, header-count-aware all-absent
 bool physicsHasWorldSolids(const Bytes& lump, std::string* why);
 void convertMeshes(Ctx& c);  // clipping, cubemap split, model/mesh bounds
 void convertCollisionGrid(Ctx& c);
+void regridCollision(Ctx& c);  // rule 19, runs right after convertCollisionGrid
 void padCollisionGrid(Ctx& c);  // rule 18, runs right after convertCollisionGrid
 void reportResidualBounds(Ctx& c);
 

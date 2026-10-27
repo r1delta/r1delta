@@ -393,6 +393,198 @@ void convertCollisionGrid(Ctx& c) {
     }
 }
 
+// Rule 19: re-bin the world grid to a smaller cell size (default 256, the R1 stock size).
+//
+// R1's walker (sub_18010BE50) builds its cell list in bands of n cells but writes only the first 3 cells of each
+// band ({first, first + s, first + 2 s}) and then advances by n. For n >= 4 the slots 3..n-1 keep the stack
+// garbage of earlier calls and are read as cell indices (crash on mp_colony02, mp_lf_* with the R2 size 704: the
+// garbage is a scratch entry of an earlier trace at the grid border, e.g. 101 * 100 + 25 on a 100 x 100 grid).
+// n >= 4 needs a hull half extent above about 0.354 * cell size and below the rectangle path threshold
+// 0.7071 * cell size - 0.0625, so no padding of the grid can remove it for hulls in that window; the window for
+// size 704 is 250..497, for size 256 (R1 stock) 90..181. Re-binning to 256 makes the walker behave on R2 maps
+// the way it does on stock maps.
+// Each geoset is put in every new cell its AABB touches (taken from the old cells that overlap the new cell, so
+// R2's assignment is only refined). Cell ranges are contiguous in the geoset pool, therefore the pool is
+// re-emitted per cell. Straddle groups: in R2 data one group id is shared by a bundle of different geosets that
+// are duplicated together in several cells (mp_lf_meadow group 121: two objects in cells 97 and 117); the walker
+// skips a whole group in later cells once an earlier cell stamped it, which is only right while all members have
+// the same cells. After re-binning the members have different footprints, so every distinct object (resolved
+// primitive words, contents, bounds) gets its own group id when it lies in 2 or more new cells, else 0.
+// Ids are renumbered 1..N in pool order of the first copy.
+void regridCollision(Ctx& c) {
+    double S1 = c.opt.gridCellSize;
+    if (!(S1 > 0.0)) {
+        c.say("[rule 19] collision grid re-binning disabled (--grid-size 0): R2 cell size kept");
+        return;
+    }
+    Grid grid;
+    if (c.lump[L_CMGRID].size() != sizeof(Grid)) throw Error("cm grid (0x55): size is " + std::to_string(c.lump[L_CMGRID].size()) + ", expected 28");
+    std::memcpy(&grid, c.lump[L_CMGRID].data(), sizeof(grid));
+    std::vector<GridCell> cells = view<GridCell>(c.lump[L_CMCELLS], "cm grid cells (0x56)");
+    std::vector<GeoSet> gs = view<GeoSet>(c.lump[L_CMGEOSETS], "cm geosets (0x57)");
+    std::vector<Bounds16> gb = view<Bounds16>(c.lump[L_CMGEOBOUNDS], "cm geoset bounds (0x58)");
+    std::vector<uint32_t> prims = view<uint32_t>(c.lump[L_CMPRIMS], "cm primitives (0x59)");
+    const size_t nModels = c.lump[L_MODELS].size() / sizeof(Model);
+    const int64_t nx = grid.numCells[0], ny = grid.numCells[1];
+    const double S0 = grid.scale;
+    if (S1 == S0) {
+        c.say("[rule 19] collision grid cell size already %g", S1);
+        return;
+    }
+    if ((int64_t)cells.size() != nx * ny + (int64_t)nModels) throw Error("cm grid cells (0x56): size mismatch before re-binning");
+    // AABBs
+    std::vector<std::array<int, 4>> box(gs.size());
+    for (size_t g = 0; g < gs.size(); g++) {
+        int lo[3], hi[3];
+        boundsToAabb(gb[g], lo, hi);
+        box[g] = {lo[0], lo[1], hi[0], hi[1]};
+    }
+    // extent of the content: all geosets referenced by world cells. If the grid would not fit the walker's 16384 entry
+    // list (rectangle path of a big hull lists every cell) the cell size grows in steps of 16 until it does.
+    const double kEps = 0.5;
+    const double requestedS1 = S1;
+    int64_t X0, Y0, X1, Y1, NX, NY;
+    for (;;) {
+        X0 = INT64_MAX; Y0 = INT64_MAX; X1 = INT64_MIN; Y1 = INT64_MIN;  // new cell index range (inclusive)
+        for (int64_t i = 0; i < nx * ny; i++)
+            for (uint32_t k = cells[i].firstGeoSet; k < (uint32_t)cells[i].firstGeoSet + cells[i].numGeoSets; k++) {
+                if (k >= gs.size()) throw Error("cm grid cell geoset range exceeds the pool before re-binning");
+                X0 = std::min<int64_t>(X0, (int64_t)std::floor((box[k][0] - kEps) / S1));
+                Y0 = std::min<int64_t>(Y0, (int64_t)std::floor((box[k][1] - kEps) / S1));
+                X1 = std::max<int64_t>(X1, (int64_t)std::floor((box[k][2] + kEps) / S1));
+                Y1 = std::max<int64_t>(Y1, (int64_t)std::floor((box[k][3] + kEps) / S1));
+            }
+        if (X1 < X0) {
+            c.say("[rule 19] collision grid has no content, cell size kept");
+            return;
+        }
+        NX = X1 - X0 + 1;
+        NY = Y1 - Y0 + 1;
+        if (NX * NY + 1 <= 16384) break;
+        S1 += 16.0;
+        if (S1 > S0) throw Error("cm grid re-binning: no cell size up to the R2 size fits R1's 16384 entry walker list");
+    }
+    if (S1 != requestedS1) c.say("[rule 19] cell size %g gives more than 16383 world cells (R1's walker list holds 16384 entries), using %g", requestedS1, S1);
+
+    // per new cell: ordered set of identities
+    std::vector<std::map<uint64_t, uint32_t>> bucket((size_t)(NX * NY));
+    // identity of an object: resolved primitive words + contents index + bounds (copies of one object point at different pool ranges)
+    std::map<std::vector<uint32_t>, uint32_t> canonIds;
+    std::vector<uint32_t> canon(gs.size());
+    for (size_t g = 0; g < gs.size(); g++) {
+        std::vector<uint32_t> key;
+        key.push_back(gs[g].numPrimitives);
+        key.push_back(gs[g].primitive & 0xFF);
+        if (gs[g].numPrimitives == 1) {
+            key.push_back(gs[g].primitive);
+        } else {
+            const uint32_t idx = (gs[g].primitive >> 8) & 0xFFFF;
+            if ((uint64_t)idx + gs[g].numPrimitives > prims.size()) throw Error("cm geoset " + std::to_string(g) + ": primitive range exceeds the pool before re-binning");
+            for (uint32_t k = 0; k < gs[g].numPrimitives; k++) key.push_back(prims[idx + k]);
+        }
+        const uint32_t* bw = reinterpret_cast<const uint32_t*>(&gb[g]);
+        for (int k = 0; k < 4; k++) key.push_back(bw[k]);
+        canon[g] = canonIds.emplace(key, (uint32_t)canonIds.size()).first->second;
+    }
+    auto identOf = [&](uint32_t g) { return (uint64_t)canon[g]; };
+    for (int64_t yi = 0; yi < ny; yi++)
+        for (int64_t xi = 0; xi < nx; xi++) {
+            const GridCell& oc = cells[(size_t)(yi * nx + xi)];
+            if (!oc.numGeoSets) continue;
+            const double rx0 = (xi + grid.cellOffset[0]) * S0, rx1 = rx0 + S0, ry0 = (yi + grid.cellOffset[1]) * S0, ry1 = ry0 + S0;
+            for (uint32_t g = oc.firstGeoSet; g < (uint32_t)oc.firstGeoSet + oc.numGeoSets; g++) {
+                if (g >= gs.size()) throw Error("cm grid cell geoset range exceeds the pool before re-binning");
+                // new cells touched by the AABB, restricted to the old cell's rect (+ margin); fall back to the whole AABB
+                double ax0 = std::max<double>(box[g][0], rx0 - kEps), ax1 = std::min<double>(box[g][2], rx1 + kEps);
+                double ay0 = std::max<double>(box[g][1], ry0 - kEps), ay1 = std::min<double>(box[g][3], ry1 + kEps);
+                if (ax0 > ax1 || ay0 > ay1) { ax0 = box[g][0]; ax1 = box[g][2]; ay0 = box[g][1]; ay1 = box[g][3]; }
+                const int64_t cx0 = (int64_t)std::floor((ax0 - kEps) / S1), cx1 = (int64_t)std::floor((ax1 + kEps) / S1);
+                const int64_t cy0 = (int64_t)std::floor((ay0 - kEps) / S1), cy1 = (int64_t)std::floor((ay1 + kEps) / S1);
+                const uint64_t id = identOf(g);
+                for (int64_t cy = std::max(cy0, Y0); cy <= std::min(cy1, Y1); cy++)
+                    for (int64_t cx = std::max(cx0, X0); cx <= std::min(cx1, X1); cx++) {
+                        auto& m = bucket[(size_t)((cy - Y0) * NX + (cx - X0))];
+                        auto it = m.find(id);
+                        if (it == m.end()) m.emplace(id, g);
+                        else it->second = std::min(it->second, g);
+                    }
+            }
+        }
+    // group assignment: identities present in >= 2 new cells get a group
+    std::map<uint64_t, uint32_t> cellCount, firstRep;
+    for (auto& m : bucket)
+        for (auto& kv : m) {
+            cellCount[kv.first]++;
+            auto it = firstRep.find(kv.first);
+            if (it == firstRep.end()) firstRep.emplace(kv.first, kv.second);
+            else it->second = std::min(it->second, kv.second);
+        }
+    std::vector<std::pair<uint32_t, uint64_t>> multi;  // (representative geoset, identity)
+    for (auto& kv : cellCount)
+        if (kv.second >= 2) multi.push_back({firstRep[kv.first], kv.first});
+    std::sort(multi.begin(), multi.end());
+    std::map<uint64_t, uint16_t> newGroup;
+    if (multi.size() > 0xFFFE) throw Error("cm grid re-binning: " + std::to_string(multi.size()) + " straddle groups exceed 16 bits");
+    for (auto& p : multi) newGroup[p.second] = (uint16_t)(newGroup.size() + 1);
+
+    // emit pool
+    std::vector<GeoSet> ngs;
+    std::vector<Bounds16> ngb;
+    std::vector<GridCell> ncells((size_t)(NX * NY) + nModels);
+    auto emit = [&](uint32_t g, uint64_t id, bool useGroups) {
+        GeoSet e = gs[g];
+        if (useGroups) {
+            auto it = newGroup.find(id);
+            e.straddleGroup = it == newGroup.end() ? 0 : it->second;
+        } else {
+            e.straddleGroup = 0;
+        }
+        ngs.push_back(e);
+        ngb.push_back(gb[g]);
+    };
+    size_t maxPer = 0;
+    for (size_t ci = 0; ci < bucket.size(); ci++) {
+        std::vector<std::pair<uint32_t, uint64_t>> order;
+        for (auto& kv : bucket[ci]) order.push_back({kv.second, kv.first});
+        std::sort(order.begin(), order.end());
+        if (ngs.size() > 0xFFFF) throw Error("cm grid re-binning: geoset pool exceeds 16 bit cell indices");
+        ncells[ci].firstGeoSet = (uint16_t)ngs.size();
+        ncells[ci].numGeoSets = (uint16_t)order.size();
+        maxPer = std::max(maxPer, order.size());
+        if (order.size() > 0xFFFF) throw Error("cm grid re-binning: cell geoset count exceeds 16 bits");
+        for (auto& o : order) emit(o.first, o.second, true);
+    }
+    // model cells: copy their geosets (groups dropped: a model walk lists one cell only)
+    for (size_t m = 0; m < nModels; m++) {
+        const GridCell& oc = cells[(size_t)(nx * ny) + m];
+        if (ngs.size() > 0xFFFF) throw Error("cm grid re-binning: geoset pool exceeds 16 bit cell indices");
+        ncells[(size_t)(NX * NY) + m].firstGeoSet = (uint16_t)ngs.size();
+        ncells[(size_t)(NX * NY) + m].numGeoSets = oc.numGeoSets;
+        for (uint32_t g = oc.firstGeoSet; g < (uint32_t)oc.firstGeoSet + oc.numGeoSets; g++) {
+            if (g >= gs.size()) throw Error("cm model cell geoset range exceeds the pool before re-binning");
+            emit(g, 0, false);
+        }
+    }
+    if (ngs.size() > 0xFFFF) throw Error("cm grid re-binning: geoset pool " + std::to_string(ngs.size()) + " exceeds 16 bit cell indices; use a larger --grid-size");
+    // empty cells: start 0 like an empty cell of stock maps is not required (count 0); keep {0,0}
+    const size_t oldGeosets = gs.size();
+    const double oldS = grid.scale;
+    const int oldOffX = grid.cellOffset[0], oldOffY = grid.cellOffset[1];
+    grid.scale = (float)S1;
+    grid.cellOffset[0] = (int32_t)X0;
+    grid.cellOffset[1] = (int32_t)Y0;
+    grid.numCells[0] = (int32_t)NX;
+    grid.numCells[1] = (int32_t)NY;
+    grid.numStraddleGroups = (int32_t)newGroup.size() + 1;
+    c.lump[L_CMGRID] = Bytes((const uint8_t*)&grid, (const uint8_t*)&grid + sizeof(grid));
+    c.lump[L_CMCELLS] = pack(ncells);
+    c.lump[L_CMGEOSETS] = pack(ngs);
+    c.lump[L_CMGEOBOUNDS] = pack(ngb);
+    c.say("[rule 19] collision grid re-binned: cell size %g -> %g, offset (%d,%d) count (%lld,%lld) -> offset (%d,%d) count (%lld,%lld), %lld -> %lld world cells; geoset pool %zu -> %zu (max %zu per cell); straddle groups %zu, Grid.num_straddle_groups -> %d",
+          oldS, S1, oldOffX, oldOffY, (long long)nx, (long long)ny, grid.cellOffset[0], grid.cellOffset[1], (long long)NX, (long long)NY, (long long)(nx * ny), (long long)(NX * NY), oldGeosets, ngs.size(), maxPer,
+          newGroup.size(), grid.numStraddleGroups);
+}
+
 // Rule 18: pad the world grid with empty cells (README.txt rule 18 has the full analysis).
 //
 // R1's walker (sub_18010BE50) turns a ray/hull into a list of cell indices on a 16384 entry stack
@@ -450,7 +642,10 @@ void padCollisionGrid(Ctx& c) {
             break;
         }
     }
-    if (!fits) throw Error("cm grid: padding to +-" + std::to_string((int)kGridReach[2]) + " needs more cells than R1's 16384 entry walker list holds (cell size " + std::to_string(sc) + ")");
+    if (!fits) {
+        c.say("[rule 18] collision grid padding skipped: +-%d around the origin needs more than R1's 16384 entry walker list holds at cell size %g (grid stays %lld x %lld)", (int)kGridReach[2], sc, (long long)oldNx, (long long)oldNy);
+        return;
+    }
 
     std::vector<GridCell> out((size_t)(newN[0] * newN[1]) + nModels);  // value-initialised: {0, 0} = empty cell
     const int64_t dx = grid.cellOffset[0] - newOff[0], dy = grid.cellOffset[1] - newOff[1];

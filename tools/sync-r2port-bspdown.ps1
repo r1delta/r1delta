@@ -40,3 +40,12 @@ foreach ($file in $sourceFiles + $toolSourceFiles + $verbatimFiles) {
     }
     [System.IO.File]::WriteAllBytes((Join-Path $destination $file), $bytes)
 }
+
+# Analysis harnesses kept next to the converter (not built): walker replica for rule 18/19, cubemap clipping study.
+$analysisFiles = @('gp_walker.cpp', 'gp_run.py', 'cubeclip.py')
+New-Item -ItemType Directory -Force -Path (Join-Path $destination 'analysis') | Out-Null
+foreach ($file in $analysisFiles) {
+    $sourcePath = Join-Path (Join-Path $source 'analysis') $file
+    if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw "Analysis file is missing: $sourcePath" }
+    Copy-Item -LiteralPath $sourcePath -Destination (Join-Path (Join-Path $destination 'analysis') $file) -Force
+}

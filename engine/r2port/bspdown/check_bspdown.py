@@ -191,7 +191,117 @@ def walker_range_margin(sc, ox, oy, nx, ny, reach, ext):
     return int(lox), int(nx - 1 - hix), int(loy), int(ny - 1 - hiy)
 
 
-def check_grid_padding(C, r2, r1, g2, g1, cells, nmodels, grid_pad, unpadded):
+def obj_key(gs, gb, i, pr):
+    """Canonical identity of a geoset entry: resolved primitive words (copies of one object may point at different pool ranges),
+    unique-contents index, bounds."""
+    n, w = int(gs[i][1]), int(gs[i][2])
+    prims = (w,) if n == 1 else tuple(int(x) for x in pr[((w >> 8) & 0xFFFF):((w >> 8) & 0xFFFF) + n])
+    return (prims, w & 0xFF, tuple(int(v) for v in gb[i]))
+
+
+def check_grid_regrid(C, r1, g1, cells, nmodels, grid_size, reference):
+    """Rule 19: every object of the reference grid (same input converted with --grid-size 0 --no-grid-pad) is found in the new grid by
+    a walker-style rectangle range query exactly when it was found in the reference grid, with the same straddle-group semantics."""
+    print("== collision grid re-binning (rule 19)")
+    sc = float(g1[0]); ox, oy, nx, ny = int(g1[1]), int(g1[2]), int(g1[3]), int(g1[4])
+    C.ok(sc >= grid_size and (sc - grid_size) % 16 == 0, "cell size %g is the requested %g (+16 steps only when the world cells would not fit the walker list)" % (sc, grid_size))
+    C.ok(nx * ny + 1 <= 16384, "world cells + model cell fit the walker's 16384 entry list (%d x %d = %d)" % (nx, ny, nx * ny + 1))
+    C.ok(len(cells) == nx * ny + nmodels, "cell table size == 4 * (nx*ny + models), the R1 loader's exact check")
+    gs = r1.arr(0x57, "<u2,<u2,<u4"); gb = r1.arr(0x58, "<8i2"); prn = r1.arr(0x59, "<u4")
+    npool = len(gs)
+    C.ok(npool <= 65535, "geoset pool %d fits the 16 bit cell start index" % npool)
+    first = np.array([int(c[0]) for c in cells]); num = np.array([int(c[1]) for c in cells])
+    lo, hi = bounds_aabb(gb) if npool else (np.zeros((0, 3)), np.zeros((0, 3)))
+    # structural: every entry's AABB touches its cell (no spurious entries), objects in several cells carry a group, groups identical
+    spurious = 0
+    cells_of = {}
+    grp_obj = {}
+    for ci in range(nx * ny):
+        if not num[ci]:
+            continue
+        cx, cy = ci % nx + ox, ci // nx + oy
+        x0, x1, y0, y1 = cx * sc - 1.0, (cx + 1) * sc + 1.0, cy * sc - 1.0, (cy + 1) * sc + 1.0
+        for g in range(first[ci], first[ci] + num[ci]):
+            if lo[g, 0] > x1 or hi[g, 0] < x0 or lo[g, 1] > y1 or hi[g, 1] < y0:
+                spurious += 1
+            k = obj_key(gs, gb, g, prn)
+            ident = ("g", int(gs[g][0])) if gs[g][0] else ("o", k)
+            cells_of.setdefault(ident, set()).add(ci)
+            if gs[g][0]:
+                grp_obj.setdefault(int(gs[g][0]), set()).add(k)
+    C.ok(spurious == 0, "every geoset entry touches the cell it is listed in (%d spurious)" % spurious)
+    C.ok(all(len(v) == 1 for v in grp_obj.values()), "all copies sharing a straddle group are the same object (%d groups)" % len(grp_obj))
+    multi_ungrouped = sum(1 for k, v in cells_of.items() if k[0] == "o" and len(v) > 1)
+    C.ok(multi_ungrouped == 0, "an ungrouped (group 0) object lies in one cell only (%d violations)" % multi_ungrouped)
+    C.ok(all(len(v) >= 2 for k, v in cells_of.items() if k[0] == "g"), "every straddle group spans at least 2 cells")
+    sg = np.array([int(x[0]) for x in gs]); nz = sg[sg != 0]
+    # model cells: groups irrelevant
+    ngr = int(g1[5])
+    C.ok(ngr == (int(nz.max()) + 1 if len(nz) else 1), "num_straddle_groups == max id + 1 (%d)" % ngr)
+    C.ok(len(set(nz.tolist())) == (int(nz.max()) if len(nz) else 0), "straddle group ids dense 1..N (%d)" % len(set(nz.tolist())))
+    # equivalence with the reference grid by queries
+    if not reference:
+        print("  note  no --reference file: query equivalence with the --grid-size 0 conversion not checked")
+        return
+    u = Bsp(reference)
+    gu = u.arr(0x55, "<f4,<i4,<i4,<i4,<i4,<i4,<i4")[0]
+    cu = u.arr(0x56, "<u2,<u2"); gsu = u.arr(0x57, "<u2,<u2,<u4"); gbu = u.arr(0x58, "<8i2")
+    sc0, ox0, oy0, nx0, ny0 = float(gu[0]), int(gu[1]), int(gu[2]), int(gu[3]), int(gu[4])
+    lou, hiu = bounds_aabb(gbu); pru = u.arr(0x59, "<u4")
+    C.ok(bytes(u.raw(0x59)) == bytes(r1.raw(0x59)) and bytes(u.raw(0x5A)) == bytes(r1.raw(0x5A)) and bytes(u.raw(0x5B)) == bytes(r1.raw(0x5B)),
+         "primitive pool, primitive bounds, unique contents identical to the reference")
+    # model cells: same objects
+    mod_ok = True
+    for m in range(nmodels):
+        a = [obj_key(gsu, gbu, g, pru) for g in range(cu[nx0 * ny0 + m][0], cu[nx0 * ny0 + m][0] + cu[nx0 * ny0 + m][1])]
+        b = [obj_key(gs, gb, g, prn) for g in range(first[nx * ny + m], first[nx * ny + m] + num[nx * ny + m])]
+        mod_ok &= (a == b)
+    C.ok(mod_ok, "model cells hold the same geosets in the same order (%d models)" % nmodels)
+    # content: all objects of the reference grid occur in the new grid and vice versa
+    objs_ref = set(); 
+    for ci in range(nx0 * ny0):
+        for g in range(cu[ci][0], cu[ci][0] + cu[ci][1]):
+            objs_ref.add(obj_key(gsu, gbu, g, pru))
+    objs_new = set(obj_key(gs, gb, g, prn) for ci in range(nx * ny) for g in range(first[ci], first[ci] + num[ci]))
+    C.ok(objs_ref == objs_new, "the set of world objects is identical (%d)" % len(objs_ref))
+    # walker style range queries (float64 arithmetic of the same formulas), hull extents of the AIN sweeps and a few small ones
+    rng = np.random.default_rng(12345)
+    exts = [0.0, 16.0, 40.0, 60.0, 120.0, 200.0, 300.0, 500.0, 800.0]
+    def found(cells_a, gs_a, gb_a, pr_a, lo_a, hi_a, s_, ox_, oy_, nx_, ny_, qx0, qx1, qy0, qy1):
+        cx0 = max(int(np.floor(qx0 / s_)) - ox_, 0); cx1 = min(int(np.floor(qx1 / s_)) - ox_, nx_ - 1)
+        cy0 = max(int(np.floor(qy0 / s_)) - oy_, 0); cy1 = min(int(np.floor(qy1 / s_)) - oy_, ny_ - 1)
+        out = set()
+        for cy in range(cy0, cy1 + 1):
+            for cx in range(cx0, cx1 + 1):
+                f, n = cells_a[cy * nx_ + cx]
+                for g in range(f, f + n):
+                    if lo_a[g, 0] <= qx1 and hi_a[g, 0] >= qx0 and lo_a[g, 1] <= qy1 and hi_a[g, 1] >= qy0:
+                        out.add(obj_key(gs_a, gb_a, g, pr_a))
+        return out
+    ext_xy = max(abs(float(lo[:, :2].min())) if npool else 0, float(hi[:, :2].max()) if npool else 0, 1000.0)
+    bad = 0; nq = 0; extra = 0
+    for ext in exts:
+        for _ in range(600):
+            a = rng.uniform(-ext_xy * 1.3, ext_xy * 1.3, 2); b = a + rng.normal(0, 1, 2) * rng.choice([50.0, 800.0, 6000.0])
+            qx0 = min(a[0], b[0]) - ext - 0.03125; qx1 = max(a[0], b[0]) + ext + 0.03125
+            qy0 = min(a[1], b[1]) - ext - 0.03125; qy1 = max(a[1], b[1]) + ext + 0.03125
+            fr = found(cu, gsu, gbu, pru, lou, hiu, sc0, ox0, oy0, nx0, ny0, qx0, qx1, qy0, qy1)
+            fn = found(cells, gs, gb, prn, lo, hi, sc, ox, oy, nx, ny, qx0, qx1, qy0, qy1)
+            nq += 1
+            if fr - fn:
+                bad += 1
+            if fn - fr:
+                extra += 1
+    C.ok(bad == 0, "%d range queries (rays + hull extents 0..800): the new grid finds every object the reference grid finds (%d queries miss one)" % (nq, bad))
+    print("  note  %d of %d queries find additional objects whose AABB touches the query but that the R2 cell lists did not hold in the reference grid" % (extra, nq))
+    # a group is visited once per query: the objects of a group are found through any of its cells
+    print("  note  geoset pool %d (reference %d), cells %d x %d (reference %d x %d at %g)" % (npool, len(gsu), nx, ny, nx0, ny0, sc0))
+
+
+def check_grid_padding(C, r2, r1, g2, g1, cells, nmodels, grid_pad, unpadded, grid_size=0.0):
+    if float(g1[0]) != float(g2[0]):
+        check_grid_regrid(C, r1, g1, cells, nmodels, float(grid_size), unpadded)
+        return
     print("== collision grid padding (rule 18)")
     sc = float(g1[0]); ox, oy, nx, ny = int(g1[1]), int(g1[2]), int(g1[3]), int(g1[4])
     ox2, oy2, nx2, ny2 = int(g2[1]), int(g2[2]), int(g2[3]), int(g2[4])
@@ -268,7 +378,7 @@ def check_grid_padding(C, r2, r1, g2, g1, cells, nmodels, grid_pad, unpadded):
 
 def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", physics="stub", cubemap_scale=4.0,
           props="keep", scatter_min=500, csm_rebase=False, empty_shadow=False, wl_flag2=False, keep_flag10=False,
-          grid_pad=True, unpadded=None):
+          grid_pad=True, unpadded=None, grid_size=0.0):
     C = Checker()
     r2 = Bsp(in_path)
     r1 = Bsp(out_path)
@@ -370,7 +480,7 @@ def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", ph
     pr = r1.arr(0x59, "<u4")
     pb = r1.arr(0x5A, "<8i2")
     uc = r1.arr(0x5B, "<u4")
-    C.ok(g1[0] == g2[0], "grid scale unchanged (%g; R1 stock maps use 256)" % g1[0])
+    C.ok(g1[0] == g2[0] if grid_size == 0 else (g1[0] >= grid_size and (g1[0] - grid_size) % 16 == 0 and g1[0] <= g2[0]), "grid cell size %g (R2 %g, requested %g, +16 steps when the grid would exceed the walker list; R1 stock maps use 256)" % (g1[0], g2[0], grid_size))
     C.ok(len(cells) == int(g1[3]) * int(g1[4]) + nmodels, "cell count == nx*ny + models (%d)" % len(cells))
     C.ok(len(gs) == len(gb), "geoset and geoset bounds parallel (%d)" % len(gs))
     C.ok(len(pr) == len(pb), "primitive and primitive bounds parallel (%d)" % len(pr))
@@ -428,7 +538,7 @@ def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", ph
         C.ok(not out_mask.any(), "no grid cell lies completely outside the limit")
     part = int((((cx < -L) | (cx + sc > L))[None, :] | ((cy < -L) | (cy + sc > L))[:, None]).sum()) - int(out_mask.sum())
     print("  note  %d grid cells straddle the limit (cell size %g cannot be cut)" % (part, sc))
-    check_grid_padding(C, r2, r1, g2, g1, cells, nmodels, grid_pad, unpadded)
+    check_grid_padding(C, r2, r1, g2, g1, cells, nmodels, grid_pad, unpadded, grid_size)
     # R2 counts for the report
     gs2 = r2.arr(0x57, "<u2,<u2,<u4")
     print("  note  geosets %d -> %d, primitives %d -> %d, straddle %d -> %d" % (len(gs2), len(gs), len(r2.raw(0x59)) // 4, len(pr), g2[5], g1[5]))
@@ -891,8 +1001,9 @@ if __name__ == "__main__":
     ap.add_argument("--worldlight-flag2", action="store_true")
     ap.add_argument("--keep-prop-flag10", action="store_true")
     ap.add_argument("--no-grid-pad", action="store_true", help="rule 18 disabled in the converter")
-    ap.add_argument("--unpadded", help="the same input converted with --no-grid-pad: per-cell equality check for rule 18")
+    ap.add_argument("--grid-size", type=float, default=256.0, help="rule 19 cell size given to the converter (0 = R2 size kept)")
+    ap.add_argument("--reference", "--unpadded", dest="reference", help="the same input converted with --grid-size 0 --no-grid-pad: equivalence checks for rules 18 / 19")
     a = ap.parse_args()
     sys.exit(1 if check(a.r2, a.r1, a.limit, a.rtl_bytes, not a.no_bsp_tool, a.cubemaps, a.physics, a.cubemap_scale,
                         a.props, a.scatter_min, a.csm_rebase, a.empty_shadow_meshes, a.worldlight_flag2, a.keep_prop_flag10,
-                        not a.no_grid_pad, a.unpadded) else 0)
+                        not a.no_grid_pad, a.reference, a.grid_size) else 0)
