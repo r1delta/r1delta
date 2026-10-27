@@ -652,6 +652,49 @@ std::size_t MoveDummyLightEnvironmentFirst(std::string& text)
     return dummies;
 }
 
+// R1's light_environment (server CEnvLight::KeyValue) takes the sun elevation from the "pitch" key; R2 also writes "angles" whose first
+// component is the same elevation with the opposite sign (mp_glitch: pitch -43.8026, angles 43.8026 73.2871 ...). The arena
+// environments of mp_coliseum and mp_coliseum_column have "angles" 22.4887 -143.639 ... but no "pitch" key, which left the cascade sun
+// horizontal (the whole arena in shadow). Adds "pitch" = -angles[0] to every light_environment that lacks it.
+std::size_t AddMissingLightEnvironmentPitch(std::string& text)
+{
+    std::size_t added = 0;
+    std::string out;
+    out.reserve(text.size() + 64);
+    bool inQuote = false;
+    std::size_t open = std::string::npos, cursor = 0;
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        const char c = text[i];
+        if (c == '"') inQuote = !inQuote;
+        else if (!inQuote && c == '{') open = i;
+        else if (!inQuote && c == '}' && open != std::string::npos) {
+            const std::string_view body(text.data() + open, i + 1 - open);
+            if (body.find("\"classname\" \"light_environment\"") != std::string_view::npos
+                && body.find("\"pitch\"") == std::string_view::npos) {
+                const std::size_t key = body.find("\"angles\" \"");
+                if (key != std::string_view::npos) {
+                    char* end = nullptr;
+                    const double elevation = std::strtod(body.data() + key + 10, &end);
+                    if (end != body.data() + key + 10) {
+                        char line[64];
+                        std::snprintf(line, sizeof(line), "\"pitch\" \"%g\"\n", -elevation);
+                        out.append(text, cursor, i - cursor);
+                        out.append(line);
+                        cursor = i;
+                        ++added;
+                    }
+                }
+            }
+            open = std::string::npos;
+        }
+    }
+    if (!added)
+        return 0;
+    out.append(text, cursor, std::string::npos);
+    text = std::move(out);
+    return added;
+}
+
 } // namespace
 
 Error::Error(std::size_t offset, const std::string& message)
@@ -766,6 +809,7 @@ std::string RewriteEntityLump(std::string_view input,
 
     AppendRange(output, input, appendCursor, input.size());
     MoveDummyLightEnvironmentFirst(output);
+    AddMissingLightEnvironmentPitch(output);
     return output;
 }
 
