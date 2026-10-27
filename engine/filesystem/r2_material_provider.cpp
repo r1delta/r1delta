@@ -183,7 +183,7 @@ bool IsMaterialOrTextureRequestPath(std::string_view path)
 
 // Bump when the r2tex library or the VMT/VTF output it produces changes: converted files are
 // persisted per R2 install fingerprint and revision.
-constexpr std::string_view kConvertedCacheRevision = "11";
+constexpr std::string_view kConvertedCacheRevision = "12";
 
 bool ReadWholeFile(const std::filesystem::path& path, std::vector<std::uint8_t>& bytes)
 {
@@ -934,7 +934,9 @@ private:
                 const bool forModel = item.assetName.compare(0, modelPrefix.size(), modelPrefix) == 0;
                 const std::string sourceName = forModel ? item.assetName.substr(modelPrefix.size()) : item.assetName;
                 r2tex::Material material;
-                if (!r2tex::ConvertMaterial(sourceName, material) || material.vmt.empty())
+                r2tex::MaterialOptions materialOptions;
+                materialOptions.forModel = forModel;
+                if (!r2tex::ConvertMaterial(sourceName, material, materialOptions) || material.vmt.empty())
                     return {};
                 if (forModel) {
                     static constexpr std::string_view world = "\"LightmappedGeneric\"";
