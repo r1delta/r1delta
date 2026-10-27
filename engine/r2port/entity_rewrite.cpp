@@ -1,10 +1,13 @@
 #include "entity_rewrite.h"
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <cctype>
 #include <map>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace r2port::entity_rewrite {
 namespace {
@@ -53,6 +56,9 @@ struct EntityView {
     std::size_t duplicateTeamNumberAliasOffset = 0;
     bool hasEditorClass = false;
     bool hasScriptName = false;
+    bool hasOrigin = false;
+    std::string_view origin;
+    Span originSpan;
 };
 
 enum class TokenKind {
@@ -384,6 +390,10 @@ bool ScanEntityLump(std::string_view input,
                 if (!entity.hasTeamNumberAlias)
                     entity.teamNumberAliasKeySpan = key.text;
                 entity.hasTeamNumberAlias = true;
+            } else if (keyText == "origin") {
+                entity.hasOrigin = true;
+                entity.origin = valueText;
+                entity.originSpan = value.text;
             } else if (keyText == "editorclass") {
                 entity.hasEditorClass = true;
                 entity.editorClass = valueText;
@@ -686,6 +696,72 @@ bool AnalyzeEntityLump(std::string_view input,
     if (error)
         error->clear();
     return true;
+}
+
+std::string RaiseFlagSpawnOrigins(std::string_view input, double units, std::uint64_t* raised)
+{
+    if (raised)
+        *raised = 0;
+
+    struct Replacement {
+        Span span;
+        std::string text;
+    };
+    std::vector<Replacement> replacements;
+    ParseFailure failure;
+    const bool parsed = ScanEntityLump(
+        input,
+        false,
+        [](const EntityView&, std::string_view, std::string_view) {},
+        [&](const EntityView& entity) {
+            if (entity.classname != "info_spawnpoint_flag" || !entity.hasOrigin)
+                return;
+            // "x y z": keep the x and y text as written, only z changes.
+            const std::string origin(entity.origin);
+            std::size_t tokenBegin[3]{};
+            std::size_t tokenEnd[3]{};
+            std::size_t position = 0;
+            for (int token = 0; token < 3; ++token) {
+                while (position < origin.size() && std::isspace(static_cast<unsigned char>(origin[position])))
+                    ++position;
+                if (position >= origin.size())
+                    return;
+                tokenBegin[token] = position;
+                while (position < origin.size() && !std::isspace(static_cast<unsigned char>(origin[position])))
+                    ++position;
+                tokenEnd[token] = position;
+            }
+            while (position < origin.size() && std::isspace(static_cast<unsigned char>(origin[position])))
+                ++position;
+            if (position != origin.size())
+                return;
+
+            const std::string z = origin.substr(tokenBegin[2], tokenEnd[2] - tokenBegin[2]);
+            char* parsedEnd = nullptr;
+            const double value = std::strtod(z.c_str(), &parsedEnd);
+            if (parsedEnd != z.c_str() + z.size())
+                return;
+            char formatted[64]{};
+            std::snprintf(formatted, sizeof(formatted), "%.9g", value + units);
+            replacements.push_back({entity.originSpan,
+                origin.substr(0, tokenBegin[2]) + formatted});
+        },
+        failure);
+    if (!parsed || replacements.empty())
+        return std::string(input);
+
+    std::string output;
+    output.reserve(input.size() + replacements.size() * 8);
+    std::size_t cursor = 0;
+    for (const Replacement& replacement : replacements) {
+        AppendRange(output, input, cursor, replacement.span.begin);
+        output.append(replacement.text);
+        cursor = replacement.span.end;
+    }
+    AppendRange(output, input, cursor, input.size());
+    if (raised)
+        *raised = replacements.size();
+    return output;
 }
 
 } // namespace r2port::entity_rewrite

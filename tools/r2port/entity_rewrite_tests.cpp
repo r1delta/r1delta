@@ -224,6 +224,63 @@ void TestStrictFailureAndPermissiveFallback()
     Check(report.unknownConstructs == 1, "permissive fallback did not report unknown syntax");
 }
 
+void TestRaiseFlagSpawnOrigins()
+{
+    const std::string input =
+        "{\n\"TeamNum\" \"2\"\n\"origin\" \"308.41 -1782.69 -0.000796557\"\n\"classname\" \"info_spawnpoint_flag\"\n}\n"
+        "{\n\"origin\" \"269.31 2139.71 0.000612214\"\n\"TeamNum\" \"3\"\n\"classname\" \"info_spawnpoint_flag\"\n}\n"
+        "{\n\"origin\" \"1 2 3\"\n\"classname\" \"info_spawnpoint_human\"\n}\n"
+        "{\n\"classname\" \"info_spawnpoint_flag\"\n\"origin\" \"bad\"\n}\n";
+    std::uint64_t raised = 0;
+    const std::string output = r2port::entity_rewrite::RaiseFlagSpawnOrigins(input, 8.0, &raised);
+    Check(raised == 2, "only the two well-formed flag origins are raised");
+    Check(Has(output, "\"origin\" \"308.41 -1782.69 7.99920344\""), "first flag z is not raised by 8");
+    Check(Has(output, "\"origin\" \"269.31 2139.71 8.00061221\""), "second flag z is not raised by 8");
+    Check(Has(output, "\"origin\" \"1 2 3\""), "non-flag origin must not change");
+    Check(Has(output, "\"origin\" \"bad\""), "malformed origin must not change");
+    Check(r2port::entity_rewrite::RaiseFlagSpawnOrigins("{ \"classname\" ", 8.0, &raised) == "{ \"classname\" " && raised == 0,
+          "unparseable text is returned unchanged");
+}
+
+// Entity files must come out byte-exact apart from the rewritten spans: CRLF text stays CRLF, and the
+// real light_environment block is never dropped, reordered or edited (only light_environment_volume goes).
+void TestByteExactOutputAndLightEnvironment()
+{
+    const std::string head = "ENTITIES01\r\n";
+    const std::string lightEnvironment =
+        "{\r\n\"classname\" \"light_environment\"\r\n\"_light\" \"255 240 200 600\"\r\n\"angles\" \"-50 30 0\"\r\n}";
+    const std::string volume = "{\r\n\"classname\" \"light_environment_volume\"\r\n\"origin\" \"0 0 0\"\r\n}";
+    const std::string tail =
+        "{\r\n\"classname\" \"env_fog_controller\"\r\n\"fogcolor\" \"1 2 3\"\r\n}\r\n"
+        "{\r\n\"classname\" \"info_spawnpoint_flag\"\r\n\"teamnumber\" \"2\"\r\n\"origin\" \"1 2 0\"\r\n}\r\n";
+    const std::string input = head + lightEnvironment + "\r\n" + volume + "\r\n" + tail;
+
+    const std::string output = RewriteEntityLump(input, {"mp_glitch", false});
+    std::string expected = input;
+    expected.erase(expected.find(volume), volume.size());
+    const std::size_t teamKey = expected.find("\"teamnumber\"");
+    Check(teamKey != std::string::npos, "test input is missing the teamnumber key");
+    expected.replace(teamKey + 1, 10, "TeamNum");
+    Check(output == expected, "rewrite output is not byte-exact outside the rewritten spans");
+
+    for (std::size_t i = 0; i < output.size(); ++i) {
+        if (output[i] == '\n')
+            Check(i > 0 && output[i - 1] == '\r', "a bare LF appeared in CRLF text");
+    }
+    const std::size_t first = output.find(lightEnvironment);
+    Check(first != std::string::npos && first < output.find("env_fog_controller"),
+          "the light_environment block moved or changed");
+    Check(output.find("light_environment_volume") == std::string::npos, "the light_environment_volume was kept");
+
+    // Raising the flag origin keeps everything else byte-exact too.
+    std::uint64_t raised = 0;
+    const std::string lifted = r2port::entity_rewrite::RaiseFlagSpawnOrigins(output, 8.0, &raised);
+    std::string expectedLifted = output;
+    const std::size_t origin = expectedLifted.find("\"1 2 0\"");
+    expectedLifted.replace(origin, 7, "\"1 2 8\"");
+    Check(raised == 1 && lifted == expectedLifted, "flag origin raise is not byte-exact");
+}
+
 } // namespace
 
 int main()
@@ -231,9 +288,11 @@ int main()
     try {
         TestRulesAndIdempotence();
         TestSpawnModesAndAnalysis();
+        TestRaiseFlagSpawnOrigins();
         TestCtfTeamKeyFallback();
         TestMapFeatures();
         TestStrictFailureAndPermissiveFallback();
+        TestByteExactOutputAndLightEnvironment();
     } catch (const std::exception& exception) {
         std::cerr << "entity rewrite test failed: " << exception.what() << '\n';
         return 1;

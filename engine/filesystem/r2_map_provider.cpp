@@ -76,7 +76,11 @@ constexpr uint32_t kGameLump = 0x23;
 
 // Folded into the on-disk cache fingerprint together with entity_rewrite::kRewriteVersion.
 // Bump when the vendored bspdown converter or the provider's BSP post-processing changes output.
-constexpr uint32_t kConvertedBspCacheVersion = 2;
+constexpr uint32_t kConvertedBspCacheVersion = 3;
+
+// Raised onto the z of every info_spawnpoint_flag origin in lump 0 (see entity_rewrite::RaiseFlagSpawnOrigins).
+// The R1 server drops the spawnpoint back to the floor; one that starts inside solid is removed.
+constexpr double kFlagSpawnLift = 8.0;
 
 // Multiplier applied to the R2 BC6H cubemap values before the R1 encoding (bspdown rule 13). 1/6 is a
 // placeholder until the real value is derived; changing it changes every converted BSP, so bump
@@ -801,13 +805,13 @@ bool ReplacePatchedLumps(
 }
 
 void LogEntityRewrite(const char* what, std::string_view mapName,
-    const entity_rewrite::RewriteReport& report, size_t bytesIn, size_t bytesOut)
+    const entity_rewrite::RewriteReport& report, size_t bytesIn, size_t bytesOut, uint64_t flagOriginsRaised = 0)
 {
     char buffer[512]{};
     _snprintf_s(buffer, sizeof(buffer), _TRUNCATE,
         "R1Delta: R2 entity rewrite map=%.*s %s entities=%llu->%llu renamed-classnames=%llu eden-space-nodes=%llu "
         "ctf-team-keys=%llu dropped-script-mover-lightweight=%llu dropped-light-environment-volume=%llu "
-        "bytes=%zu->%zu version=%u\n",
+        "flag-origins-raised=%llu bytes=%zu->%zu version=%u\n",
         static_cast<int>(mapName.size()), mapName.data(), what,
         static_cast<unsigned long long>(report.entitiesIn),
         static_cast<unsigned long long>(report.entitiesOut),
@@ -816,6 +820,7 @@ void LogEntityRewrite(const char* what, std::string_view mapName,
         static_cast<unsigned long long>(report.renamedCtfTeamKeys),
         static_cast<unsigned long long>(report.droppedScriptMoverLightweight),
         static_cast<unsigned long long>(report.droppedLightEnvironmentVolume),
+        static_cast<unsigned long long>(flagOriginsRaised),
         bytesIn, bytesOut, entity_rewrite::kRewriteVersion);
     Msg("%s", buffer);
     OutputDebugStringA(buffer);
@@ -835,6 +840,8 @@ void RewriteConvertedBspEntities(std::string_view mapName, std::vector<uint8_t>&
     const std::string_view text(reinterpret_cast<const char*>(bsp.data()) + header.offset, header.length);
     entity_rewrite::RewriteReport report;
     std::string rewritten = entity_rewrite::RewriteEntityLump(text, { mapName, false }, &report);
+    std::uint64_t raised = 0;
+    rewritten = entity_rewrite::RaiseFlagSpawnOrigins(rewritten, kFlagSpawnLift, &raised);
     if (rewritten == text)
         return;
 
@@ -845,7 +852,7 @@ void RewriteConvertedBspEntities(std::string_view mapName, std::vector<uint8_t>&
     std::vector<uint8_t> output;
     if (!ReplaceLumps(bsp, replacements, output))
         return;
-    LogEntityRewrite("bsp-lump=0", mapName, report, header.length, replacement->size());
+    LogEntityRewrite("bsp-lump=0", mapName, report, header.length, replacement->size(), raised);
     bsp = std::move(output);
 }
 

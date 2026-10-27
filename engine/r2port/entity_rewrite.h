@@ -127,4 +127,13 @@ bool AnalyzeEntityLump(std::string_view input,
                        bool strict = true,
                        std::string* error = nullptr);
 
+// R2 authors info_spawnpoint_flag origins on the floor (z within a unit of it). The R1 server drops a
+// flag spawnpoint to the floor but removes one whose origin is already inside solid, and the converted
+// collision can put the floor a unit above the R2 origin (mp_lf_stacks: z 0.0006 against a floor at
+// 1.03, so one of its two flags disappeared). This raises the z of every info_spawnpoint_flag origin by
+// `units`; the engine snaps the spawnpoint back down. Unlike RewriteEntityLump it is NOT idempotent:
+// apply it once to the R2 source text. Text it cannot parse is returned unchanged. `raised`, when
+// given, receives the number of origins changed.
+std::string RaiseFlagSpawnOrigins(std::string_view input, double units, std::uint64_t* raised = nullptr);
+
 } // namespace r2port::entity_rewrite
