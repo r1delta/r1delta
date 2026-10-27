@@ -548,6 +548,8 @@ function Start-R2Game {
         }
     }
     if ($script:SelectedPorts.Contains('McpTcp')) { $gameArgs += @('-usemcp', '+mcp_start_http', [string] $script:SelectedPorts['McpTcp']) }
+    # Default for every agent launch: 60 fps cap and no modal message boxes (the engine adds -nosound -nomouse and the cl_mouse cvars itself in background mode).
+    $gameArgs += @('+fps_max', '60', '-nomessagebox')
     if ($FatalScriptErrors) { $gameArgs += @('+fatal_script_errors', '1') }
     if ($GameArguments.Count -gt 0) { $gameArgs += $GameArguments }
     if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) { throw "Missing game executable: $executable" }
@@ -558,6 +560,9 @@ function Start-R2Game {
     $oldPath = $env:PATH
     $oldFromLauncher = $env:FROM_DELTA_LAUNCHER
     $env:FROM_DELTA_LAUNCHER = '1'
+    # Background test mode (docs/r2port.md): the window never takes focus, input or topmost, fps is capped, and no modal box or notepad appears.
+    $oldBackground = $env:R1DELTA_BACKGROUND
+    $env:R1DELTA_BACKGROUND = '1'
     $env:PATH = "$CoreRoot\bin_delta;$CoreRoot\bin;$ClientWorkingDirectory\bin\x64_retail;$ClientWorkingDirectory\r1\bin\x64_retail;$oldPath"
     $logPath = ''
     try {
@@ -623,6 +628,7 @@ function Start-R2Game {
         if ($Cdb -and $logPath) { Write-Host "CDB log: $logPath" }
         $env:PATH = $oldPath
         if ($null -eq $oldFromLauncher) { Remove-Item Env:\FROM_DELTA_LAUNCHER -ErrorAction SilentlyContinue } else { $env:FROM_DELTA_LAUNCHER = $oldFromLauncher }
+        if ($null -eq $oldBackground) { Remove-Item Env:\R1DELTA_BACKGROUND -ErrorAction SilentlyContinue } else { $env:R1DELTA_BACKGROUND = $oldBackground }
     }
 }
 

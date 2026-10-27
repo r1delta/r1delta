@@ -9,6 +9,7 @@
 #include <fstream>
 #include <vector>
 #include "core.h"
+#include "background_mode.h"
 #include "load.h"
 #include "logging.h"
 #include "crash_report_context.h"
@@ -384,7 +385,7 @@ LONG WINAPI CustomCrashHandler(EXCEPTION_POINTERS* exInfo)
     // Seal diagnostic publications before sound, minidump work, or delays. A
     // faulting/interrupted graphics writer is marked incomplete, never waited on.
     r1delta::graphics_flight_recorder::Freeze();
-    if (!IsDedicatedServer()) {
+    if (!IsDedicatedServer() && !r1delta::background::IsActive()) {
         // Get the handle to THIS DLL module
         HMODULE hModule;
         if (GetModuleHandleExA(
@@ -582,7 +583,8 @@ LONG WINAPI CustomCrashHandler(EXCEPTION_POINTERS* exInfo)
             : minidumpSection);
         logFile.close();
         CRASH_TRACE("report write done");
-        if (!IsDedicatedServer()) {
+        // Background test mode: the crash log is written above, but nothing pops up (no notepad, no sound).
+        if (!IsDedicatedServer() && !r1delta::background::IsActive()) {
 
             char cmdLine[1024];
             sprintf_s(cmdLine, "notepad.exe \"%s\"", filepath);  // Build command line with the file path

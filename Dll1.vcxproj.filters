@@ -212,6 +212,9 @@
     <ClInclude Include="engine\r2port\entity_rewrite.h">
       <Filter>engine\r2port</Filter>
     </ClInclude>
+    <ClInclude Include="engine\core\background_mode.h">
+      <Filter>engine\core</Filter>
+    </ClInclude>
     <ClInclude Include="engine\r2port\r2tex\r2tex.hpp">
       <Filter>engine\r2port\r2tex</Filter>
     </ClInclude>
@@ -862,6 +865,9 @@
     </ClCompile>
     <ClCompile Include="engine\r2port\bspdown\shadow.cpp">
       <Filter>engine\r2port\bspdown</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\core\background_mode.cpp">
+      <Filter>engine\core</Filter>
     </ClCompile>
     <ClCompile Include="engine\r2port\entity_rewrite.cpp">
       <Filter>engine\r2port</Filter>

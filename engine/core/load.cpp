@@ -69,6 +69,7 @@
 #include "factory.h"
 #include "core.h"
 #include "load.h"
+#include "background_mode.h"
 #include "patcher.h"
 #include "MinHook.h"
 #include "TableDestroyer.h"
@@ -8446,6 +8447,7 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 			"Remove the cached R2 map BSP and entity files.", FCVAR_NONE);
 		RegisterConCommand("r2port_dump_stats", R2PortDumpStatsCommand,
 			"Dump R2 provider counters and filtered filesystem trace.", FCVAR_NONE);
+		r1delta::background::RegisterSelfTestCommand();
 
 		// Register slot commands
 		RegisterConCommand("slot1", Slot1Command, "Select menu slot 1", 0);

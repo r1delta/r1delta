@@ -36,6 +36,7 @@
 
 #include "core.h"
 #include "crash_report_context.h"
+#include "background_mode.h"
 #include "r1o_runtime_paths.h"
 #include <MinHook.h>
 #include "load.h"
@@ -115,6 +116,8 @@ using LoadLibraryExAType = HMODULE(WINAPI*)(LPCSTR, HANDLE, DWORD);
 using LoadLibraryExWType = HMODULE(WINAPI*)(LPCWSTR, HANDLE, DWORD);
 using MessageBoxAType = int(WINAPI*)(HWND, LPCSTR, LPCSTR, UINT);
 using MessageBoxWType = int(WINAPI*)(HWND, LPCWSTR, LPCWSTR, UINT);
+using MessageBoxExAType = int(WINAPI*)(HWND, LPCSTR, LPCSTR, UINT, WORD);
+using MessageBoxExWType = int(WINAPI*)(HWND, LPCWSTR, LPCWSTR, UINT, WORD);
 using SetUnhandledExceptionFilterType = LPTOP_LEVEL_EXCEPTION_FILTER(WINAPI*)(LPTOP_LEVEL_EXCEPTION_FILTER);
 
 static LoadLibraryAType LoadLibraryAOriginal;
@@ -123,6 +126,8 @@ static LoadLibraryExAType LoadLibraryExAOriginal;
 static LoadLibraryExWType LoadLibraryExWOriginal;
 static MessageBoxAType MessageBoxAOriginal;
 static MessageBoxWType MessageBoxWOriginal;
+static MessageBoxExAType MessageBoxExAOriginal;
+static MessageBoxExWType MessageBoxExWOriginal;
 static SetUnhandledExceptionFilterType SetUnhandledExceptionFilterOriginal;
 
 static bool IsBugTrapModuleNameA(LPCSTR name)
@@ -181,6 +186,9 @@ static int WINAPI MessageBoxAHook(HWND hwnd, LPCSTR text, LPCSTR caption, UINT t
 		OutputDebugStringA("[r1delta_core] Suppressed TitanFall-Online stale-process MessageBoxA.\n");
 		return IDOK;
 	}
+	int suppressed = 0;
+	if (r1delta::background::TrySuppressMessageBoxA(text, caption, type, suppressed))
+		return suppressed;
 	return MessageBoxAOriginal(hwnd, text, caption, type);
 }
 
@@ -190,7 +198,26 @@ static int WINAPI MessageBoxWHook(HWND hwnd, LPCWSTR text, LPCWSTR caption, UINT
 		OutputDebugStringA("[r1delta_core] Suppressed TitanFall-Online stale-process MessageBoxW.\n");
 		return IDOK;
 	}
+	int suppressed = 0;
+	if (r1delta::background::TrySuppressMessageBoxW(text, caption, type, suppressed))
+		return suppressed;
 	return MessageBoxWOriginal(hwnd, text, caption, type);
+}
+
+static int WINAPI MessageBoxExAHook(HWND hwnd, LPCSTR text, LPCSTR caption, UINT type, WORD languageId)
+{
+	int suppressed = 0;
+	if (r1delta::background::TrySuppressMessageBoxA(text, caption, type, suppressed))
+		return suppressed;
+	return MessageBoxExAOriginal(hwnd, text, caption, type, languageId);
+}
+
+static int WINAPI MessageBoxExWHook(HWND hwnd, LPCWSTR text, LPCWSTR caption, UINT type, WORD languageId)
+{
+	int suppressed = 0;
+	if (r1delta::background::TrySuppressMessageBoxW(text, caption, type, suppressed))
+		return suppressed;
+	return MessageBoxExWOriginal(hwnd, text, caption, type, languageId);
 }
 
 static LPTOP_LEVEL_EXCEPTION_FILTER WINAPI SetUnhandledExceptionFilterHook(LPTOP_LEVEL_EXCEPTION_FILTER filter)
@@ -213,6 +240,8 @@ static void InstallCrashOwnershipHooks()
 	if (user32) {
 		MH_CreateHook(GetProcAddress(user32, "MessageBoxA"), &MessageBoxAHook, reinterpret_cast<LPVOID*>(&MessageBoxAOriginal));
 		MH_CreateHook(GetProcAddress(user32, "MessageBoxW"), &MessageBoxWHook, reinterpret_cast<LPVOID*>(&MessageBoxWOriginal));
+		MH_CreateHook(GetProcAddress(user32, "MessageBoxExA"), &MessageBoxExAHook, reinterpret_cast<LPVOID*>(&MessageBoxExAOriginal));
+		MH_CreateHook(GetProcAddress(user32, "MessageBoxExW"), &MessageBoxExWHook, reinterpret_cast<LPVOID*>(&MessageBoxExWOriginal));
 	}
 }
 
@@ -824,6 +853,10 @@ void CCommandLine__CreateCmdLine(void* thisptr, char* commandline) {
 		OutputDebugStringA("[r1delta_core] Appended -nosound for R1O fake dedicated server.\n");
 	}
 
+	// Background test mode implies a fixed set of engine switches (no-op unless R1DELTA_BACKGROUND or
+	// -r1delta_background is set).
+	r1delta::background::AppendEngineArguments(finalCmdLineStr);
+
 	// Check if -novid is already present to avoid duplication
 	bool novidPresent = (strstr(finalCmdLineStr.c_str(), "-novid") != nullptr);
 	if (!novidPresent) {
@@ -1142,6 +1175,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 		MH_Initialize();
 		LoadLibraryA("user32.dll");
 		InstallCrashOwnershipHooks();
+		r1delta::background::InstallHooks();
 		LoadLibraryA("shell32.dll");
 		if (!IsDedicatedServer()) {
 			//MigrateOldSaveLocation();
@@ -1173,6 +1207,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 			}
 		}
 		MH_EnableHook(MH_ALL_HOOKS);
+		r1delta::background::StartCvarWatchdog();
 
 		initialisePatchInstructions();
 
