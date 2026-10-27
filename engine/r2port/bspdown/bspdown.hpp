@@ -83,12 +83,12 @@ struct Options {
     //   pair is moved to indices 0/1 and every light index stored in other lumps is remapped.
     // rtlConvert: decode the R2 real-time light lump (9 bytes per texel + 0x7A palettes) and write the R1 layout (4 slots of
     //   world light index - 1). false: all 0xFF (no real-time lights), the behaviour before rule 20.
-    // rtlMinWeight: R2 stores a visibility weight (0..255) per slot, R1 has none; slots below this weight are not listed.
+    // rtlMinWeight: R2 stores an sRGB encoded visibility (0..255; quarter steps 0, 137, 187, 224, 255 = 0, .25, .5, .75, 1) per slot, R1 has none; slots below this byte are not listed (187 = at least half visible).
     // pbrLights: R2 lights with flag 0x20 (_pbr_falloff) and without 0x4 carry a luminous intensity (about 392x the usual unit) and
     //   R1 evaluates lights without 0x4 as a reciprocal polynomial; true rewrites them to the R1 fade-polynomial form.
     bool collapseEnvs = true;
     bool rtlConvert = true;
-    int rtlMinWeight = 64;
+    int rtlMinWeight = 187;
     bool pbrLights = true;
 
     // Drop lumps R1 never reads (0x04..0x07, 0x37, 0x7A). They are large

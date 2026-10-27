@@ -38,7 +38,7 @@ static void usage(const char* a0) {
                  "  --worldlight-flag2     set world light flag bit 0x2 like stock R1 lights (default off, untested)\n"
                  "  --no-collapse-envs     rule 20: keep all light_environment sky ambient/sun pairs in the world lights (default keeps the last pair only)\n"
                  "  --no-rtl               rule 20: write the real-time light lump as 0xFF (default converts the R2 lump)\n"
-                 "  --rtl-min-weight <n>   rule 20: minimum R2 visibility weight (0..255) for a real-time light slot (default 64)\n"
+                 "  --rtl-min-weight <n>   rule 20: minimum R2 visibility weight (0..255) for a real-time light slot (default 187 = half visibility)\n"
                  "  --pbr-lights <keep|convert>  rule 20: R2 flag 0x20 lights (default convert to the R1 fade polynomial form)\n"
                  "  --props <keep|hide-scatter|hide-all>  rule 16 diagnostics: scale props to 0.0001 for models with >= --scatter-min\n"
                  "                         instances / for every prop (default keep)\n"

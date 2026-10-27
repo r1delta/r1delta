@@ -382,7 +382,7 @@ def check_grid_padding(C, r2, r1, g2, g1, cells, nmodels, grid_pad, unpadded, gr
         print("  note  no --unpadded file given: per-cell equality against the unpadded conversion not checked")
 
 
-LIGHT_OPT = {"collapse": True, "rtl": True, "min_weight": 64, "pbr": True}
+LIGHT_OPT = {"collapse": True, "rtl": True, "min_weight": 187, "pbr": True}
 
 
 def expected_lighting(r2, wl_flag2):
@@ -1137,7 +1137,7 @@ if __name__ == "__main__":
     ap.add_argument("--worldlight-flag2", action="store_true")
     ap.add_argument("--no-collapse-envs", action="store_true", help="rule 20 disabled in the converter")
     ap.add_argument("--no-rtl", action="store_true", help="rule 20 RTL conversion disabled in the converter")
-    ap.add_argument("--rtl-min-weight", type=int, default=64)
+    ap.add_argument("--rtl-min-weight", type=int, default=187)
     ap.add_argument("--pbr-lights", choices=("keep", "convert"), default="convert")
     ap.add_argument("--keep-prop-flag10", action="store_true")
     ap.add_argument("--no-grid-pad", action="store_true", help="rule 18 disabled in the converter")

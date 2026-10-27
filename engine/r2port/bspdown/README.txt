@@ -443,7 +443,7 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
        126 byte records of 63 uint16, entry = world index - E. Slot 0 of the first palette column is reserved for the sun.
        R1 layout: 4 bytes per texel, byte = world index - v1, 0xFF = none, ascending, at most 4 (R1 stock mp_rise: byte 0 = the sun never occurs, 68 % of
        texels empty, so the sun is NOT in the R1 list). Conversion: per texel keep the slots that are point/spot lights with flag 0x8 and weight >=
-       --rtl-min-weight (default 64); the sun slot and baked lights are dropped; bytes above 254 do not exist: if the real-time group needs more than
+       --rtl-min-weight (default 187: B is stored sRGB, 187 = 0.5 visibility, the R2 baker writes quarter steps 137/187/224); the sun slot and baked lights are dropped; bytes above 254 do not exist: if the real-time group needs more than
        255 slots (glitch 338, wargames 260 flagged lights) the group is reordered by total visibility weight and the least used lights are dropped
        (glitch: 11,079 of 885,554 slots). R1 has no per-texel visibility weight; the R2 shadowing is only kept as the omitted entries.
        --no-rtl restores the 0xFF fill.
