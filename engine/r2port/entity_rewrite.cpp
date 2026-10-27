@@ -541,6 +541,49 @@ void CountSpawnModes(const EntityView& entity,
         CountSpawnMode(entity, kSpawnModeRules[index], counts[index]);
 }
 
+// R2 script_ref entities carry keys such as "NPC_Titan" (editor class info_pve_guard_spawn / info_atcoop_*). The R1
+// engine pools key strings case-insensitively, so the first spelling wins and every later npc_titan/npc_spectre reports
+// GetClassname() == "NPC_Titan": level.SpawnActions["npc_titan"] (case-sensitive) misses, titans get no soul and no spawn
+// callbacks. R1 never reads these keys, so they are lowered in place (same length) in the entity text just appended
+// to `output` starting at `entityBegin`.
+bool IsNpcKey(std::string_view key)
+{
+    if (key.size() <= 4 || key.compare(0, 4, "NPC_") != 0)
+        return false;
+    for (std::size_t index = 4; index < key.size(); ++index) {
+        const unsigned char ch = static_cast<unsigned char>(key[index]);
+        if (!(std::isalnum(ch) || ch == '_'))
+            return false;
+    }
+    return true;
+}
+
+std::uint64_t LowerNpcKeys(std::string& output, std::size_t entityBegin)
+{
+    const std::string_view text(output.data() + entityBegin, output.size() - entityBegin);
+    if (text.find("\"NPC_") == std::string_view::npos)
+        return 0;
+
+    std::uint64_t lowered = 0;
+    Scanner scanner(text);
+    Token token;
+    ParseFailure failure;
+    if (!scanner.Next(token, failure) || token.kind != TokenKind::Open)
+        return 0;
+    for (;;) {
+        if (!scanner.Next(token, failure) || token.kind != TokenKind::Quoted)
+            return lowered;
+        const Span key = token.text;
+        if (!scanner.Next(token, failure) || (token.kind != TokenKind::Quoted && token.kind != TokenKind::Bare))
+            return lowered;
+        if (!IsNpcKey(text.substr(key.begin, key.end - key.begin)))
+            continue;
+        for (std::size_t index = key.begin; index < key.end; ++index)
+            output[entityBegin + index] = static_cast<char>(std::tolower(static_cast<unsigned char>(output[entityBegin + index])));
+        ++lowered;
+    }
+}
+
 } // namespace
 
 Error::Error(std::size_t offset, const std::string& message)
@@ -597,6 +640,7 @@ std::string RewriteEntityLump(std::string_view input,
             std::string renamedEffect;
             std::size_t patchCount = 0;
             AppendRange(output, input, appendCursor, entity.begin);
+            const std::size_t entityOutputBegin = output.size();
 
             if (entity.classname == "prop_dynamic_lightweight") {
                 patches[patchCount++] = {entity.classnameSpan, "prop_dynamic"};
@@ -639,6 +683,7 @@ std::string RewriteEntityLump(std::string_view input,
             }
             AppendRange(output, input, patchCursor, entity.end);
             appendCursor = entity.end;
+            result.loweredNpcKeys += LowerNpcKeys(output, entityOutputBegin);
             ++result.entitiesOut;
         },
         failure);

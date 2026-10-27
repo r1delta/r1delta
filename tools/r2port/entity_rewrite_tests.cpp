@@ -308,6 +308,23 @@ void TestEffectNameRename()
     Check(plain.renamedEffectNames == 0 && !Has(untouched, "r2p_"), "no mapper must leave effect_name untouched");
 }
 
+void TestNpcKeyLowering()
+{
+    const std::string input =
+        "{\n\"classname\" \"script_ref\"\n\"NPC_Titan\" \"1\"\n\"NPC_SuperSpectre\" \"2\"\n\"origin\" \"0 0 0\"\n\"NPC_Grunt\" \"NPC_Titan\"\n}\n"
+        "{\n\"classname\" \"info_target\"\n\"targetname\" \"NPC_Titan\"\n\"npc_stalker\" \"1\"\n\"NPC_x y\" \"1\"\n}\n";
+    RewriteReport report;
+    const std::string output = RewriteEntityLump(input, RewriteOptions{ "mp_test", false, nullptr }, &report);
+    Check(report.loweredNpcKeys == 3, "NPC key count is wrong");
+    Check(Has(output, "\"npc_titan\" \"1\"") && Has(output, "\"npc_superspectre\" \"2\"") && Has(output, "\"npc_grunt\" \"NPC_Titan\""),
+          "NPC keys were not lowered (values must stay unchanged)");
+    Check(Has(output, "\"targetname\" \"NPC_Titan\"") && Has(output, "\"NPC_x y\""), "a value or a non-identifier key changed");
+    Check(output.size() == input.size(), "lowering must not change the length");
+    RewriteReport again;
+    Check(RewriteEntityLump(output, RewriteOptions{ "mp_test", false, nullptr }, &again) == output && again.loweredNpcKeys == 0,
+          "NPC key lowering is not idempotent");
+}
+
 } // namespace
 
 int main()
@@ -321,6 +338,7 @@ int main()
         TestStrictFailureAndPermissiveFallback();
         TestByteExactOutputAndLightEnvironment();
         TestEffectNameRename();
+        TestNpcKeyLowering();
     } catch (const std::exception& exception) {
         std::cerr << "entity rewrite test failed: " << exception.what() << '\n';
         return 1;

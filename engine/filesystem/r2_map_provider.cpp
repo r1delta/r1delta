@@ -976,11 +976,11 @@ bool ReplacePatchedLumps(
 void LogEntityRewrite(const char* what, std::string_view mapName,
     const entity_rewrite::RewriteReport& report, size_t bytesIn, size_t bytesOut, uint64_t flagOriginsRaised = 0)
 {
-    char buffer[512]{};
+    char buffer[640]{};
     _snprintf_s(buffer, sizeof(buffer), _TRUNCATE,
         "R1Delta: R2 entity rewrite map=%.*s %s entities=%llu->%llu renamed-classnames=%llu eden-space-nodes=%llu "
         "ctf-team-keys=%llu dropped-script-mover-lightweight=%llu dropped-light-environment-volume=%llu "
-        "flag-origins-raised=%llu bytes=%zu->%zu version=%u\n",
+        "npc-keys-lowered=%llu flag-origins-raised=%llu bytes=%zu->%zu version=%u\n",
         static_cast<int>(mapName.size()), mapName.data(), what,
         static_cast<unsigned long long>(report.entitiesIn),
         static_cast<unsigned long long>(report.entitiesOut),
@@ -989,6 +989,7 @@ void LogEntityRewrite(const char* what, std::string_view mapName,
         static_cast<unsigned long long>(report.renamedCtfTeamKeys),
         static_cast<unsigned long long>(report.droppedScriptMoverLightweight),
         static_cast<unsigned long long>(report.droppedLightEnvironmentVolume),
+        static_cast<unsigned long long>(report.loweredNpcKeys),
         static_cast<unsigned long long>(flagOriginsRaised),
         bytesIn, bytesOut, entity_rewrite::kRewriteVersion);
     Msg("%s", buffer);
