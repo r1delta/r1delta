@@ -289,6 +289,17 @@ bool ResolveShaderFile(const char* requestedPath, std::string& absolutePath)
     return true;
 }
 
+bool HasShaderPixelFile(const char* name)
+{
+    if (!name)
+        return false;
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (!g_built)
+        BuildAllLocked(false);
+    const auto found = g_entries.find(name);
+    return found != g_entries.end() && found->second.hasPixel;
+}
+
 void RebuildAllShaders()
 {
     {

@@ -70,6 +70,9 @@ cbuffer CBufModelInstance : register(b3)
 #ifndef R2_XFORM
 #define R2_XFORM 0
 #endif
+#ifndef R2_VNORMAL
+#define R2_VNORMAL 0
+#endif
 
 struct R2VSIn
 {
@@ -78,6 +81,9 @@ struct R2VSIn
     float4 color : COLOR0;
 #endif
     float2 uv : TEXCOORD0;
+#if R2_VNORMAL
+    uint4 normal : NORMAL;
+#endif
 };
 
 struct R2VSOut
@@ -93,6 +99,10 @@ R2VSOut R2StandardVS(R2VSIn i)
 {
     R2VSOut o;
     o.uv = i.uv;
+    float3 normalBias = float3(0.0, 0.0, 0.0);
+#if R2_VNORMAL
+    normalBias = float3(i.normal.xyz & 255) * 1e-9;   // keeps every component "used" so the loader requests the vertex normal
+#endif
 #if R2_VCOLOR
     o.color = i.color;
 #else
@@ -112,6 +122,7 @@ R2VSOut R2StandardVS(R2VSIn i)
     o.objRel = float3(0.0, 0.0, 0.0);
     o.camRel = float4(i.pos, 0.0);
 #endif
+    o.objRel += normalBias;
     return o;
 }
 
@@ -196,9 +207,58 @@ float4 PSMain(R2VSOut i) : SV_Target
 }
 )HLSL";
 
+// Pixel-shader replacement for R1 UnlitTwoTexture static combo 0x110 (fresnel + $addlayers, opaque, no fog; selected
+// through r2_shader_override.cpp id 1). It reproduces that stock combo's code (dyn 0, disassembled from
+// unlittwotexture_ps40.vcs) with one change: layer 2 is a TextureCube at t1 sampled along the camera-relative position
+// (TEXCOORD7) instead of a 2D texture at the layer-2 UV. Inputs and resources must stay identical to the stock combo:
+// TEXCOORD0.xy + TEXCOORD1.zw in one register, TEXCOORD3 (vertex normal), TEXCOORD7 (camera-relative position), COLOR0.
+inline constexpr const char kUtDomeSource[] = R"HLSL(
+cbuffer CBufUnlitTwoTexture : register(b0)
+{
+    float4 u[9];   // [3].x colorUpperBound, [4] layerColor1, [5] layerColor2, [7] fresnel bias/scale 1,2, [8].xy sharpness
+};
+cbuffer CBufModelInstance : register(b3)
+{
+    float4 m[4];   // [3] diffuseModulation
+};
+struct TonemapElement { float c_lightScale; uint c_historyPos; float c_hist[10]; };
+StructuredBuffer<TonemapElement> tonemapGlobals : register(t16);
+Texture2D<float4> BaseTexture : register(t0);
+SamplerState BaseTextureSampler : register(s0);
+TextureCube<float4> SkyCube : register(t1);
+SamplerState SkySampler : register(s1);
+
+struct PSIn
+{
+    float2 uv1 : TEXCOORD0;
+    float2 uv2 : TEXCOORD1;
+    float3 normal : TEXCOORD3;
+    float3 pos : TEXCOORD7;
+    float4 color : COLOR0;
+};
+
+float4 PSMain(PSIn i) : SV_Target
+{
+    const float3 view = normalize(i.pos);
+    float f = saturate(1.0 - dot(i.normal, -view));
+    f *= f;
+    const float2 sharp = float2(u[8].x, u[8].y);
+    const float2 curve = (float2(1.0, 1.0) - sharp + sharp * f) * f;
+    const float2 strength = float2(u[7].y, u[7].w) * curve + float2(u[7].x, u[7].z);
+
+    float4 l2 = SkyCube.Sample(SkySampler, view) * u[5] * strength.y;
+    float4 l1 = BaseTexture.Sample(BaseTextureSampler, i.uv1) * u[4] * strength.x;
+    float3 rgb = l1.rgb * l1.a + l2.rgb * l2.a;
+    rgb *= min(m[3].xyz, u[3].xxx);
+    rgb *= i.color.rgb;
+    return float4(rgb * tonemapGlobals[0].c_lightScale, 1.0);
+}
+)HLSL";
+
 inline constexpr EmbeddedShader kEmbeddedShaders[] = {
     { "r2_probe", kProbeSource },
     { "r2_dome", kDomeSource },
+    { "r2_ut_dome", kUtDomeSource },
 };
 
 } // namespace r2port::shaders

@@ -16,6 +16,9 @@ namespace r2port::shaders {
 // Builds the cache on first use. Returns true and the absolute file path when a custom shader file exists for it.
 bool ResolveShaderFile(const char* requestedPath, std::string& absolutePath);
 
+// True when the cache holds a built pixel shader `<name>_ps40.vcs` for `name` (builds the cache on first use).
+bool HasShaderPixelFile(const char* name);
+
 // Recompiles every shader, ignoring the up-to-date check, and prints the result. A material that already loaded a
 // shader keeps the old bytes until the map (or the material system) reloads; use new shader names while iterating.
 void RebuildAllShaders();

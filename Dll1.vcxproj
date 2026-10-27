@@ -285,6 +285,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="engine\r2port\bspdown\internal.hpp" />
     <ClInclude Include="engine\r2port\bspdown\bcdec.h" />
     <ClInclude Include="engine\r2port\patch\r2patch_reader.h" />
+    <ClInclude Include="engine\r2port\shaders\r2_shader_override.h" />
     <ClInclude Include="engine\r2port\entity_rewrite.h" />
     <ClInclude Include="engine\core\background_mode.h" />
     <ClInclude Include="engine\r2port\r2tex\r2tex.hpp" />
@@ -507,6 +508,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="engine\r2port\bspdown\collision.cpp" />
     <ClCompile Include="engine\r2port\bspdown\sprp.cpp" />
     <ClCompile Include="engine\r2port\bspdown\meshclip.cpp" />
+    <ClCompile Include="engine\r2port\shaders\r2_shader_override.cpp" />
     <ClCompile Include="engine\r2port\bspdown\tangents.cpp" />
     <ClCompile Include="engine\r2port\bspdown\physics.cpp">
       <ObjectFileName>$(IntDir)r2bsp_physics.obj</ObjectFileName>
