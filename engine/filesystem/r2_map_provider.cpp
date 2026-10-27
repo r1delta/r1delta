@@ -19,6 +19,8 @@
 #endif
 #include <Windows.h>
 #include <ShlObj.h>
+#include <bcrypt.h>
+#pragma comment(lib, "bcrypt.lib")
 
 #include <algorithm>
 #include <array>
@@ -125,6 +127,11 @@ struct MapState {
     FileBytes aiGraphFile;
     std::mutex entityMutex;
     std::unordered_map<std::string, FileBytes> entityFiles;
+    // Converted-BSP disk cache (see ConvertedBspCacheFile): key file path, resolved once.
+    std::mutex bspCacheMutex;
+    bool bspCacheKeyTried{};
+    std::filesystem::path bspCacheFile;
+    const char* bspCacheStatus{ "off" };
 };
 
 std::once_flag g_installDiscoveryOnce;
@@ -605,6 +612,162 @@ std::shared_ptr<MapState> GetMapState(std::string_view mapName)
     return state;
 }
 
+std::string MapPackageFingerprint(const std::shared_ptr<MapState>& state);
+
+// SHA-256 through CNG (SHA-NI where the CPU has it): about 70 ms for a 150 MB BSP against 520 ms for
+// p2p::Sha256, which copies the whole image into a std::vector and hashes it in scalar code. Same digest.
+BspSha256 Sha256Fast(const uint8_t* data, size_t size)
+{
+    BCRYPT_ALG_HANDLE algorithm{};
+    BCRYPT_HASH_HANDLE hash{};
+    BspSha256 digest{};
+    bool ok = BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0) == 0
+        && BCryptCreateHash(algorithm, &hash, nullptr, 0, nullptr, 0, 0) == 0;
+    size_t offset = 0;
+    while (ok && offset < size) {
+        const ULONG chunk = static_cast<ULONG>(std::min<size_t>(size - offset, 1u << 30));
+        ok = BCryptHashData(hash, const_cast<PUCHAR>(data + offset), chunk, 0) == 0;
+        offset += chunk;
+    }
+    ok = ok && BCryptFinishHash(hash, digest.data(), static_cast<ULONG>(digest.size()), 0) == 0;
+    if (hash)
+        BCryptDestroyHash(hash);
+    if (algorithm)
+        BCryptCloseAlgorithmProvider(algorithm, 0);
+    return ok ? digest : p2p::Sha256(data, size);
+}
+
+// ---- converted-BSP disk cache -----------------------------------------------------------------------
+// DowngradeBsp output (before the lump-0 entity rewrite and the physics patch, which depend on runtime
+// state and run on every load) plus the SHA-256 of the R2 source BSP the patch sources match against.
+// The file name carries MapPackageFingerprint: the R2 directory VPK and chunk names, sizes and mtimes,
+// entity_rewrite::kRewriteVersion and kConvertedBspCacheVersion. Nothing is rebuilt unless one changes.
+// A hit skips the VPK read (LZHAM), the SHA-256 and bspdown.
+constexpr char kBspCacheMagic[8] = { 'R', '2', 'B', 'S', 'P', 'C', 'H', '1' };
+
+#pragma pack(push, 1)
+struct BspCacheHeader {
+    char magic[8];
+    uint32_t cacheVersion;
+    uint32_t entityRewriteVersion;
+    uint64_t convertedSize;
+    uint8_t sourceSha256[32];
+};
+#pragma pack(pop)
+
+std::filesystem::path ConvertedBspCacheFile(const std::shared_ptr<MapState>& state)
+{
+    std::lock_guard<std::mutex> lock(state->bspCacheMutex);
+    char disabled[8]{};
+    if (GetEnvironmentVariableA("R2PORT_BSP_CACHE", disabled, sizeof(disabled)) && disabled[0] == '0')
+        return {};   // measurement switch: R2PORT_BSP_CACHE=0 turns the converted-BSP cache off
+    if (!state->bspCacheKeyTried) {
+        state->bspCacheKeyTried = true;
+        const std::string fingerprint = MapPackageFingerprint(state);
+        const std::filesystem::path root = GetR2MapPatchDirectory();
+        if (!fingerprint.empty() && !root.empty())
+            state->bspCacheFile = root / "bsp_cache" / (state->mapName + "-" + fingerprint + ".r2bsp");
+    }
+    return state->bspCacheFile;
+}
+
+// Reads the cache file. With `converted` null only the header is read (the source hash for patch lookup).
+bool LoadConvertedBspCache(const std::shared_ptr<MapState>& state, BspSha256& sourceHash,
+    std::vector<uint8_t>* converted)
+{
+    const std::filesystem::path file = ConvertedBspCacheFile(state);
+    if (file.empty())
+        return false;
+    try {
+        std::ifstream input(file, std::ios::binary);
+        if (!input)
+            return false;
+        BspCacheHeader header{};
+        input.read(reinterpret_cast<char*>(&header), sizeof(header));
+        if (!input || std::memcmp(header.magic, kBspCacheMagic, sizeof(header.magic)) != 0
+            || header.cacheVersion != kConvertedBspCacheVersion
+            || header.entityRewriteVersion != entity_rewrite::kRewriteVersion
+            || header.convertedSize < kBspHeaderSize || header.convertedSize > (1ull << 31))
+            return false;
+        std::error_code error;
+        const auto fileSize = std::filesystem::file_size(file, error);
+        if (error || fileSize != sizeof(header) + header.convertedSize)
+            return false;
+        if (converted) {
+            converted->resize(static_cast<size_t>(header.convertedSize));
+            input.read(reinterpret_cast<char*>(converted->data()), static_cast<std::streamsize>(converted->size()));
+            if (!input) {
+                converted->clear();
+                return false;
+            }
+        }
+        std::memcpy(sourceHash.data(), header.sourceSha256, sizeof(header.sourceSha256));
+        return true;
+    }
+    catch (...) {
+        if (converted)
+            converted->clear();
+        return false;
+    }
+}
+
+void StoreConvertedBspCache(const std::shared_ptr<MapState>& state, const BspSha256& sourceHash,
+    const std::vector<uint8_t>& converted)
+{
+    const std::filesystem::path file = ConvertedBspCacheFile(state);
+    if (file.empty())
+        return;
+    try {
+        std::error_code error;
+        std::filesystem::create_directories(file.parent_path(), error);
+        if (error)
+            return;
+        BspCacheHeader header{};
+        std::memcpy(header.magic, kBspCacheMagic, sizeof(header.magic));
+        header.cacheVersion = kConvertedBspCacheVersion;
+        header.entityRewriteVersion = entity_rewrite::kRewriteVersion;
+        header.convertedSize = converted.size();
+        std::memcpy(header.sourceSha256, sourceHash.data(), sizeof(header.sourceSha256));
+
+        std::filesystem::path temporary = file;
+        temporary += ".tmp" + std::to_string(GetCurrentProcessId()) + "." + std::to_string(GetCurrentThreadId());
+        {
+            std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+            if (!output)
+                return;
+            output.write(reinterpret_cast<const char*>(&header), sizeof(header));
+            output.write(reinterpret_cast<const char*>(converted.data()), static_cast<std::streamsize>(converted.size()));
+            output.close();
+            if (!output) {
+                std::filesystem::remove(temporary, error);
+                return;
+            }
+        }
+        if (!MoveFileExW(temporary.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+            std::filesystem::remove(temporary, error);
+            return;
+        }
+        state->bspCacheStatus = "stored";
+
+        // Fingerprints of older VPKs / converter versions are never read again.
+        const std::string prefix = state->mapName + "-";
+        const std::string keep = file.filename().string();
+        for (const auto& entry : std::filesystem::directory_iterator(file.parent_path(), error)) {
+            if (error)
+                break;
+            const std::string name = entry.path().filename().string();
+            if (name != keep && name.compare(0, prefix.size(), prefix) == 0
+                && name.size() > 6 && name.compare(name.size() - 6, 6, ".r2bsp") == 0
+                && name.size() == prefix.size() + 64 + 6) {
+                std::error_code removeError;
+                std::filesystem::remove(entry.path(), removeError);
+            }
+        }
+    }
+    catch (...) {
+    }
+}
+
 bool EnsureSourceBsp(const std::shared_ptr<MapState>& state)
 {
     std::unique_lock<std::mutex> lock(state->sourceMutex);
@@ -632,7 +795,7 @@ bool EnsureSourceBsp(const std::shared_ptr<MapState>& state)
 
     BspSha256 hash{};
     if (source)
-        hash = p2p::Sha256(source->data(), source->size());
+        hash = Sha256Fast(source->data(), source->size());
 
     lock.lock();
     if (source) {
@@ -659,6 +822,16 @@ bool EnsureSourceHash(const std::shared_ptr<MapState>& state)
             state->sourceReady.wait(lock);
         if (state->hashReady)
             return true;
+    }
+    // The converted-BSP cache carries the source hash: no VPK read and no SHA-256 on a warm launch.
+    BspSha256 cachedHash{};
+    if (LoadConvertedBspCache(state, cachedHash, nullptr)) {
+        std::lock_guard<std::mutex> lock(state->sourceMutex);
+        if (!state->hashReady) {
+            state->sourceHash = cachedHash;
+            state->hashReady = true;
+        }
+        return true;
     }
     return EnsureSourceBsp(state);
 }
@@ -923,11 +1096,11 @@ void LogServedMap(const std::shared_ptr<MapState>& state, size_t bspSize, uint64
         std::chrono::steady_clock::now().time_since_epoch()).count();
     char buffer[768]{};
     _snprintf_s(buffer, sizeof(buffer), _TRUNCATE,
-        "R1Delta: R2 map provider served map=%s bsp=maps/%s.bsp entities=%s converted=%llu ms map-elapsed-ms=%llu steady-ms=%lld bytes=%zu\n",
+        "R1Delta: R2 map provider served map=%s bsp=maps/%s.bsp entities=%s converted=%llu ms map-elapsed-ms=%llu steady-ms=%lld bytes=%zu bsp-cache=%s\n",
         state->mapName.c_str(), state->mapName.c_str(), entities.empty() ? "none" : entities.c_str(),
         static_cast<unsigned long long>(conversionMs),
         static_cast<unsigned long long>(ActiveMapElapsedMilliseconds()),
-        static_cast<long long>(steadyMilliseconds), bspSize);
+        static_cast<long long>(steadyMilliseconds), bspSize, state->bspCacheStatus);
     Msg("%s", buffer);
     OutputDebugStringA(buffer);
     LogProviderReadMetrics("map-bsp-served");
@@ -1075,36 +1248,52 @@ FileBytes ReadConvertedBsp(const MapRequest& request)
     std::vector<uint8_t> converted;
     uint64_t conversionMs = 0;
     try {
-        if (EnsureSourceBsp(state)) {
+        BspSha256 sourceHash{};
+        bool haveConverted = false;
+        const auto started = std::chrono::steady_clock::now();
+        if (LoadConvertedBspCache(state, sourceHash, &converted)) {
+            {
+                std::lock_guard<std::mutex> sourceLock(state->sourceMutex);
+                state->sourceHash = sourceHash;
+                state->hashReady = true;
+            }
+            RewriteConvertedBspEntities(state->mapName, converted);
+            state->bspCacheStatus = "hit";
+            haveConverted = true;
+        }
+        else if (EnsureSourceBsp(state)) {
             FileBytes source;
-            BspSha256 sourceHash{};
             {
                 std::lock_guard<std::mutex> sourceLock(state->sourceMutex);
                 source = state->sourceBsp;
                 sourceHash = state->sourceHash;
             }
             if (source) {
-                const auto started = std::chrono::steady_clock::now();
+                state->bspCacheStatus = "miss";
                 const bspdown::Options options = R2ConverterOptions();
                 bspdown::Report report;
                 converted = bspdown::DowngradeBsp(source->data(), source->size(), options, &report);
+                StoreConvertedBspCache(state, sourceHash, converted);
                 RewriteConvertedBspEntities(state->mapName, converted);
-                conversionMs = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now() - started).count());
+                haveConverted = true;
+            }
+        }
+        conversionMs = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - started).count());
 
-                if (const auto patch = GetMatchingPatch(state, sourceHash)) {
-                    std::vector<uint8_t> patched;
-                    if (ReplacePatchedLumps(converted, *patch, patched)) {
-                        converted = std::move(patched);
-                        const auto physics = patch->lumpOverrides.find(0x1D);
-                        if (physics != patch->lumpOverrides.end() && physics->second) {
-                            char message[256]{};
-                            _snprintf_s(message, sizeof(message), _TRUNCATE,
-                                "R1Delta: R2 map physics patch applied map=%s lump=0x1D bytes=%zu\n",
-                                state->mapName.c_str(), physics->second->size());
-                            Msg("%s", message);
-                            OutputDebugStringA(message);
-                        }
+        if (haveConverted) {
+            if (const auto patch = GetMatchingPatch(state, sourceHash)) {
+                std::vector<uint8_t> patched;
+                if (ReplacePatchedLumps(converted, *patch, patched)) {
+                    converted = std::move(patched);
+                    const auto physics = patch->lumpOverrides.find(0x1D);
+                    if (physics != patch->lumpOverrides.end() && physics->second) {
+                        char message[256]{};
+                        _snprintf_s(message, sizeof(message), _TRUNCATE,
+                            "R1Delta: R2 map physics patch applied map=%s lump=0x1D bytes=%zu\n",
+                            state->mapName.c_str(), physics->second->size());
+                        Msg("%s", message);
+                        OutputDebugStringA(message);
                     }
                 }
             }
@@ -1145,6 +1334,17 @@ FileBytes ReadConvertedBsp(const MapRequest& request)
 
     if (result) {
         LogServedMap(state, result->size(), conversionMs);
+        char hashFlag[8]{};
+        if (GetEnvironmentVariableA("R2PORT_LOG_HASHES", hashFlag, sizeof(hashFlag)) && hashFlag[0] != '0') {
+            const BspSha256 digest = Sha256Fast(result->data(), result->size());
+            char text[160]{};
+            int length = _snprintf_s(text, sizeof(text), _TRUNCATE, "R1Delta: R2 map provider served-hash map=%s sha256=", state->mapName.c_str());
+            for (const uint8_t byte : digest)
+                length += _snprintf_s(text + length, sizeof(text) - length, _TRUNCATE, "%02x", byte);
+            _snprintf_s(text + length, sizeof(text) - length, _TRUNCATE, " bytes=%zu\n", result->size());
+            Msg("%s", text);
+            OutputDebugStringA(text);
+        }
     }
     return result;
 }
@@ -1378,6 +1578,9 @@ std::string MapPackageFingerprint(const std::shared_ptr<MapState>& state)
     metadata.append(std::to_string(entity_rewrite::kRewriteVersion));
     metadata.append("\nconverted-bsp|");
     metadata.append(std::to_string(kConvertedBspCacheVersion));
+    metadata.push_back('\n');
+    metadata.append("bspdown-variant|");
+    metadata.append(R2ConverterVariantString());
     metadata.push_back('\n');
 
     const auto digest = p2p::Sha256(
