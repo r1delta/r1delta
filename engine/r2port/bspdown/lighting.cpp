@@ -252,8 +252,8 @@ void convertLighting(Ctx& c) {
             fl &= ~(int32_t)(kFlagPbr | kFlagUnknown40);
             // Client sub_1800FCE60 keeps a 256 entry table (stack buffer + word_18150BFE0, 512 bytes) indexed by the GPU slot of every
             // light with flag 0x8 and without 0x10; a slot above 255 overflows it into the client's .data (ConVar objects). Stock R1
-            // maps keep every real-time light at slot <= 254 (the RTL byte limit). Lights that cannot be addressed by an RTL byte lose 0x8.
-            if ((t == 1 || t == 2) && (fl & (int32_t)kFlagRealtime) && k >= (size_t)v1 + 255) {
+            // maps keep every real-time light at slot <= 254 (the RTL byte limit). The table index is the array index or the GPU slot depending on the base pointer the caller passes, so the conservative limit is array index <= 254. Lights beyond lose 0x8.
+            if ((t == 1 || t == 2) && (fl & (int32_t)kFlagRealtime) && k >= 255) {
                 fl &= ~(int32_t)kFlagRealtime;
                 rtlFlagCleared++;
             }
@@ -270,7 +270,7 @@ void convertLighting(Ctx& c) {
     c.say("[rule 8] world lights (0x36): %zu lights, lump version %u -> version 1 (100 byte records, trailing %zu bytes dropped)", nOld, srcVersion, rec - kRec);
     c.say("[rule 20] world light layout: R2 had %zu sky ambient + %zu sun entries; R1 array = %zu entries before the local lights (%s), %zu lights total, R1 base v1 = %d",
           E, S, head, collapsed ? "last (real) environment kept, dummy skybox pairs dropped" : "unchanged", order.size(), v1);
-    c.say("[rule 20] world light flags: sun/ambient flags cleared on %llu records (R1 stock 0); PBR lights (0x20, no 0x4) rewritten to the fade polynomial form with intensity x 2/d50^2: %llu; bits 0x20/0x40 cleared; bit 0x2 set on %llu; flag 0x8 cleared on %llu lights at GPU slot > 254 (client 256 entry real-time light table)",
+    c.say("[rule 20] world light flags: sun/ambient flags cleared on %llu records (R1 stock 0); PBR lights (0x20, no 0x4) rewritten to the fade polynomial form with intensity x 2/d50^2: %llu; bits 0x20/0x40 cleared; bit 0x2 set on %llu; flag 0x8 cleared on %llu lights at array index > 254 (client 256 entry real-time light table)",
           (unsigned long long)sunFlagsCleared, (unsigned long long)pbrConverted, (unsigned long long)flag2, (unsigned long long)rtlFlagCleared);
 
     // --- light probes: static light indices ------------------------------------------------------------------------------------------

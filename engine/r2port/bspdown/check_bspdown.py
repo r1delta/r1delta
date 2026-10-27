@@ -494,7 +494,7 @@ def expected_lighting(r2, wl_flag2):
                 inten[k] = (inten[k] * scale).astype(np.float32)
                 f |= 4
             f &= ~(0x20 | 0x40)
-            if t in (1, 2) and (f & 8) and k >= v1 + 255:
+            if t in (1, 2) and (f & 8) and k >= 255:
                 f &= ~8
             if wl_flag2 and t in (1, 2):
                 f |= 2
