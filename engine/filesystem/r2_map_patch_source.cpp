@@ -169,10 +169,9 @@ void WriteU32(std::vector<std::uint8_t>& bytes, std::size_t offset, std::uint32_
 }
 
 FileBytes ReadAinPatch(const std::filesystem::path& patchPath, std::string_view mapName,
-                       const BspSha256& sourceBspSha256, std::int32_t mapVersion,
-                       std::int32_t developerValue)
+                       const BspSha256& sourceBspSha256, std::int32_t mapVersion)
 {
-    if (mapVersion <= 0 || developerValue != 0)
+    if (mapVersion <= 0)
         return {};
 
     const std::vector<std::uint8_t> patch = ReadPatchFile(patchPath, kMaximumPatchFileBytes);
@@ -209,12 +208,14 @@ FileBytes ReadAinPatch(const std::filesystem::path& patchPath, std::string_view 
     std::vector<std::uint8_t> ain(12 + body.size());
     WriteU32(ain, 0, kAinVersion);
     WriteU32(ain, 4, static_cast<std::uint32_t>(mapVersion));
+    // CRC 0: the engine compares it with a CRC over the BSP lumps and the AI node entity text when developer > 0,
+    // which the converted map cannot match; the server hook (r2port_ain_hook.cpp) accepts the package instead.
     WriteU32(ain, 8, 0);
     std::copy(body.begin(), body.end(), ain.begin() + 12);
 
     char message[512]{};
     std::snprintf(message, sizeof(message),
-        "R1Delta: R2 map patch served map=%.*s file=maps/graphs/%.*s.ain bytes=%zu mapversion=%d developer=0\n",
+        "R1Delta: R2 map patch served map=%.*s file=maps/graphs/%.*s.ain bytes=%zu mapversion=%d\n",
         static_cast<int>(mapName.size()), mapName.data(),
         static_cast<int>(mapName.size()), mapName.data(), ain.size(), mapVersion);
     Msg("%s", message);
@@ -249,7 +250,7 @@ public:
 
     FileBytes LoadFileOverride(std::string_view mapName, std::string_view normalizedPath,
         const BspSha256& sourceBspSha256,
-        std::int32_t mapVersion, std::int32_t developerValue) override
+        std::int32_t mapVersion) override
     {
         const std::string expectedPath = "maps/graphs/" + std::string(mapName) + ".ain";
         if (normalizedPath != expectedPath)
@@ -260,7 +261,7 @@ public:
             return {};
         const std::filesystem::path directory = root / "patches";
         return ReadAinPatch(directory / (std::string(mapName) + ".ain.r2patch"), mapName,
-            sourceBspSha256, mapVersion, developerValue);
+            sourceBspSha256, mapVersion);
     }
 };
 

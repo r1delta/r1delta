@@ -203,6 +203,9 @@
     <ClInclude Include="engine\core\r2port_particles_hook.h">
       <Filter>engine\core</Filter>
     </ClInclude>
+    <ClInclude Include="engine\core\r2port_ain_hook.h">
+      <Filter>engine\core</Filter>
+    </ClInclude>
     <ClInclude Include="engine\r2port\particles\dmx.hpp">
       <Filter>engine\r2port\particles</Filter>
     </ClInclude>
@@ -870,6 +873,9 @@
       <Filter>engine\filesystem</Filter>
     </ClCompile>
     <ClCompile Include="engine\core\r2port_particles_hook.cpp">
+      <Filter>engine\core</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\core\r2port_ain_hook.cpp">
       <Filter>engine\core</Filter>
     </ClCompile>
     <ClCompile Include="engine\r2port\particles\dmx.cpp">

@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
@@ -125,7 +126,6 @@ struct MapState {
     uint64_t filePatchGeneration{};
     BspSha256 filePatchSourceHash{};
     std::int32_t filePatchMapVersion{};
-    std::int32_t filePatchDeveloperValue{};
     FileBytes aiGraphFile;
     std::mutex entityMutex;
     std::unordered_map<std::string, FileBytes> entityFiles;
@@ -1113,20 +1113,7 @@ void LogServedMap(const std::shared_ptr<MapState>& state, size_t bspSize, uint64
 
 FileBytes ReadConvertedBsp(const MapRequest& request);
 
-int CurrentDeveloperValue()
-{
-    if (!IsCvarInterfacePublished() || !cvarinterface)
-        return -1;
-    if (IsR1ODedicatedServer()) {
-        if (ConVarR1O* developer = CCVar_FindVar(cvarinterface, "developer"))
-            return developer->m_Value.m_nValue;
-    }
-    else if (OriginalCCVar_FindVar) {
-        if (ConVarR1* developer = OriginalCCVar_FindVar(cvarinterface, "developer"))
-            return developer->m_Value.m_nValue;
-    }
-    return -1;
-}
+std::atomic<bool> g_ainPackageServed{ false };
 
 FileBytes ReadMapPatchFile(const MapRequest& request)
 {
@@ -1144,28 +1131,25 @@ FileBytes ReadMapPatchFile(const MapRequest& request)
     }
 
     const std::int32_t mapVersion = pGlobalVarsServer ? pGlobalVarsServer->mapversion : 0;
-    const std::int32_t developerValue = CurrentDeveloperValue();
-    if (mapVersion <= 0 || developerValue < 0)
+    if (mapVersion <= 0)
         return {};
 
     auto [sources, generation] = PatchSourcesSnapshot();
     std::lock_guard<std::mutex> lock(state->filePatchMutex);
     if (state->filePatchLoaded && state->filePatchGeneration == generation
         && state->filePatchSourceHash == sourceHash
-        && state->filePatchMapVersion == mapVersion
-        && state->filePatchDeveloperValue == developerValue)
+        && state->filePatchMapVersion == mapVersion)
         return state->aiGraphFile;
 
     state->filePatchLoaded = true;
     state->filePatchGeneration = generation;
     state->filePatchSourceHash = sourceHash;
     state->filePatchMapVersion = mapVersion;
-    state->filePatchDeveloperValue = developerValue;
     state->aiGraphFile.reset();
     for (const auto& source : sources) {
         try {
             state->aiGraphFile = source->LoadFileOverride(request.mapName, request.packagePath,
-                sourceHash, mapVersion, developerValue);
+                sourceHash, mapVersion);
             if (state->aiGraphFile)
                 break;
         }
@@ -1429,6 +1413,8 @@ public:
         }
         if (request->kind == MapRequest::Kind::AiGraph) {
             FileBytes data = ReadMapPatchFile(*request);
+            if (data)
+                g_ainPackageServed = true;
             if (data && !IsDedicatedServer())
                 StartR2MaterialProvider();
             return data;
@@ -1641,6 +1627,11 @@ std::filesystem::path GetR2MapPatchDirectory()
 std::filesystem::path GetR2InstallDirectory()
 {
     return R2InstallDirectory();
+}
+
+bool ConsumeServedAinPackage()
+{
+    return g_ainPackageServed.exchange(false);
 }
 
 bool IsR2PortMap(std::string_view mapName)

@@ -40,6 +40,7 @@
 #include "player_resource_18.h"
 #include "ffa_targeting.h"
 #include "r2port_particles_hook.h"
+#include "r2port_ain_hook.h"
 #include "client_port_override.h"
 #include "account_hold.h"
 #include "r1o_runtime_paths.h"
@@ -9939,6 +9940,8 @@ void __stdcall LoaderNotificationCallback(
 				MH_EnableHook(MH_ALL_HOOKS);
 				std::thread(DiscordThread).detach();
 		}
+		if (is_server)
+			InstallServerAinCrcGuard(reinterpret_cast<std::uintptr_t>(notification_data->Loaded.DllBase));
 		if (is_server || is_r1o_server_local) {
 			r1delta::ffa_targeting::InstallServerHooks(
 				reinterpret_cast<std::uintptr_t>(notification_data->Loaded.DllBase));
