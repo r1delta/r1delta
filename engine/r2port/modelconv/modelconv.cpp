@@ -778,12 +778,15 @@ void ValidateVTX(std::span<const std::uint8_t> vtx, std::span<const std::uint8_t
 }
 
 std::int32_t AppendMappedBone(std::span<const std::uint8_t> source, std::size_t sourceIndex,
-                              std::vector<std::uint8_t>& output, std::int32_t destinationIndex) {
+                              std::vector<std::uint8_t>& output, std::int32_t destinationIndex, bool degraded) {
     const Bone53 in = ReadObject<Bone53>(source, sourceIndex, "R2 bone");
-    Require(in.procedureType == 0, "unsupported procedural bone; static conversion accepts only ordinary bones");
+    Require(degraded || in.procedureType == 0, "unsupported procedural bone; static conversion accepts only ordinary bones");
     Bone52 out{};
     out.parent = in.parent;
-    std::copy(std::begin(in.boneController), std::end(in.boneController), std::begin(out.boneController));
+    if (degraded)
+        std::fill(std::begin(out.boneController), std::end(out.boneController), -1);
+    else
+        std::copy(std::begin(in.boneController), std::end(in.boneController), std::begin(out.boneController));
     out.position = in.position;
     out.quaternion = in.quaternion;
     out.rotation = in.rotation;
@@ -793,7 +796,7 @@ std::int32_t AppendMappedBone(std::span<const std::uint8_t> source, std::size_t 
     out.scale = in.scale;
     out.scaleScale = in.scaleScale;
     out.alignment = in.alignment;
-    out.flags = in.flags;
+    out.flags = degraded ? (in.flags & ~0x4) : in.flags;   // BONE_ALWAYS_PROCEDURAL needs procedure data
     out.procedureType = 0;
     out.procedureIndex = 0;
     out.physicsBone = in.physicsBone;
@@ -893,11 +896,35 @@ void AppendMappedTextures(std::span<const std::uint8_t> source, const Header53& 
 // R1's client-side animating entities index sequence 0 unconditionally, so the converted model
 // keeps the one-frame @ref pose and the ref sequence instead of dropping them.
 void AppendMappedStaticAnimation(std::span<const std::uint8_t> source, const Header53& in,
-                                 std::vector<std::uint8_t>& output, Header52& out) {
+                                 std::vector<std::uint8_t>& output, Header52& out, bool degraded) {
     const auto animSource = static_cast<std::size_t>(in.localAnimIndex);
     const auto seqSource = static_cast<std::size_t>(in.localSeqIndex);
-    const auto anim = ReadObject<AnimDesc53>(source, animSource, "R2 reference animation");
-    const auto seq = ReadObject<Sequence53>(source, seqSource, "R2 static reference sequence");
+    AnimDesc53 anim{};
+    Sequence53 seq{};
+    // Empty one-frame animation data: a record whose bone byte is 0xff ends the list.
+    std::uint8_t sentinel[8]{};
+    if (!degraded) {
+        anim = ReadObject<AnimDesc53>(source, animSource, "R2 reference animation");
+        seq = ReadObject<Sequence53>(source, seqSource, "R2 static reference sequence");
+        const auto dataSource = RelativeAbsolute(animSource, anim.animIndex, "R2 reference animation data");
+        const auto available = std::min<std::size_t>(sizeof(sentinel), source.size() - static_cast<std::size_t>(dataSource));
+        std::memcpy(sentinel, source.data() + dataSource, available);
+    } else {
+        // The model has real animations (or a non-empty reference pose). R1 gets the same one-frame
+        // empty @ref animation and `ref` sequence as a static prop: with no per-bone data every bone
+        // takes its own rest position and rotation from the bone record, i.e. the bind pose.
+        anim.fps = 30.0f;
+        anim.numFrames = 1;
+        sentinel[4] = 0xff;
+        seq.flags = 0x80000;
+        seq.activity = -1;
+        seq.bbMin = in.hullMin;
+        seq.bbMax = in.hullMax;
+        seq.numBlends = 1;
+        seq.groupSize[0] = seq.groupSize[1] = 1;
+        seq.paramIndex[0] = seq.paramIndex[1] = -1;
+        seq.fadeInTime = seq.fadeOutTime = 0.2f;
+    }
 
     const auto animDestination = static_cast<std::size_t>(AppendZeroBytes(output, sizeof(AnimDesc52)));
     const auto seqDestination = static_cast<std::size_t>(AppendZeroBytes(output, sizeof(Sequence52)));
@@ -906,11 +933,6 @@ void AppendMappedStaticAnimation(std::span<const std::uint8_t> source, const Hea
     out.numLocalSeq = 1;
     out.localSeqIndex = static_cast<std::int32_t>(seqDestination);
 
-    // Empty one-frame animation data: a record whose bone byte is 0xff ends the list.
-    std::uint8_t sentinel[8]{};
-    const auto dataSource = RelativeAbsolute(animSource, anim.animIndex, "R2 reference animation data");
-    const auto available = std::min<std::size_t>(sizeof(sentinel), source.size() - static_cast<std::size_t>(dataSource));
-    std::memcpy(sentinel, source.data() + dataSource, available);
     const auto dataDestination = AppendBytes(output, sentinel, sizeof(sentinel));
 
     AnimDesc52 animOut{};
@@ -965,9 +987,11 @@ void AppendMappedStaticAnimation(std::span<const std::uint8_t> source, const Hea
 
     WriteObject(output, seqDestination, seqOut);
     StoreRelativeString(output, seqDestination, offsetof(Sequence52, labelIndex),
-                        SourceRecordString(source, seqSource, seq.labelIndex, "R2 sequence label"));
+                        degraded ? std::string("ref")
+                                 : SourceRecordString(source, seqSource, seq.labelIndex, "R2 sequence label"));
     StoreRelativeString(output, seqDestination, offsetof(Sequence52, activityNameIndex),
-                        SourceRecordString(source, seqSource, seq.activityNameIndex, "R2 sequence activity name", false));
+                        degraded ? std::string()
+                                 : SourceRecordString(source, seqSource, seq.activityNameIndex, "R2 sequence activity name", false));
 }
 void AppendMappedAttachments(std::span<const std::uint8_t> source, std::int32_t sourceIndex,
                              std::int32_t count, std::vector<std::uint8_t>& output,
@@ -1101,7 +1125,7 @@ std::int32_t LinearBoneByteExtent(std::span<const std::uint8_t> source, std::int
 
 void AppendMappedSecondaryHeader(std::span<const std::uint8_t> source, const Header53& in,
                                  std::vector<std::uint8_t>& output, Header52& out,
-                                 std::size_t hdr2Offset, Header2R1& hdr2) {
+                                 std::size_t hdr2Offset, Header2R1& hdr2, bool degraded) {
     hdr2.numSrcBoneTransform = in.numSrcBoneTransform;
     hdr2.illumPositionAttachmentIndex = in.illumPositionAttachmentIndex;
     hdr2.numBoneFlexDrivers = 0;
@@ -1124,7 +1148,7 @@ void AppendMappedSecondaryHeader(std::span<const std::uint8_t> source, const Hea
     } else {
         hdr2.srcBoneTransformIndex = 0;
     }
-    if (in.linearBoneIndex != 0) {
+    if (in.linearBoneIndex != 0 && !degraded) {
         const auto linear = ReadObject<LinearBone>(source, in.linearBoneIndex, "R2 linear-bone header");
         const auto extent = LinearBoneByteExtent(source, in.linearBoneIndex, linear);
         Require(Range(source.size(), in.linearBoneIndex, static_cast<std::uint64_t>(extent)), "R2 linear-bone block is outside the MDL");
@@ -1133,7 +1157,24 @@ void AppendMappedSecondaryHeader(std::span<const std::uint8_t> source, const Hea
     } else {
         hdr2.linearBoneIndex = 0;
     }
-    if (in.perTriIndex != 0) {
+    // Animated R2 models carry per-triangle collision blocks of other versions; R1 reads version 2
+    // only, so a degraded model without a valid block simply has no per-triangle collision.
+    bool keepPerTri = in.perTriIndex != 0;
+    if (degraded && keepPerTri) {
+        try {
+            keepPerTri = in.perTriNodeCount >= 0 && in.perTriLeafCount >= 0 && in.perTriVertCount >= 0 &&
+                ReadObject<PerTriHeader>(source, in.perTriIndex, "R2 per-triangle collision header").version == 2 &&
+                Range(source.size(), in.perTriIndex, sizeof(PerTriHeader) +
+                    static_cast<std::uint64_t>(in.perTriNodeCount) * 0x14u +
+                    static_cast<std::uint64_t>(in.perTriLeafCount) * 0x70u +
+                    static_cast<std::uint64_t>(in.perTriVertCount) * 6u);
+        } catch (const ConvertFailure&) {
+            keepPerTri = false;
+        }
+    }
+    if (degraded && !keepPerTri) {
+        hdr2.perTriIndex = 0;
+    } else if (in.perTriIndex != 0) {
         Require(in.perTriNodeCount >= 0 && in.perTriLeafCount >= 0 && in.perTriVertCount >= 0,
                 "per-triangle collision counts are negative");
         const auto pertri = ReadObject<PerTriHeader>(source, in.perTriIndex, "R2 per-triangle collision header");
@@ -1164,6 +1205,20 @@ void AppendMappedSecondaryHeader(std::span<const std::uint8_t> source, const Hea
     const auto modelNameOffset = AppendString(output, modelName);
     hdr2.nameIndex = static_cast<std::int32_t>(modelNameOffset - hdr2Offset);
     out.studioHdr2Index = static_cast<std::int32_t>(hdr2Offset);
+}
+
+// Subset requirements that still apply when the animation data is dropped.
+void CheckR2DegradedSubset(const Header53& hdr) {
+    const auto flags = static_cast<std::uint32_t>(hdr.flags);
+    Require((flags & kStudioExtraWeightsOrFlexes) == 0, "unsupported extra bone weights or flex flag in R2 MDL");
+    Require((flags & kStudioSubdivisionSurface) == 0, "unsupported subdivision-surface mesh data");
+    Require(hdr.numBodyParts > 0, "model has no bodyparts");
+    Require(hdr.numBones >= 0 && hdr.numBones <= 256, "R2 bone count is outside the supported 0..256 range");
+    Require(hdr.numTextures >= 0 && hdr.numTextures <= 168,
+            "R1 texture count exceeds the loader limit of 168");
+    Require(hdr.numSkinRef >= 0 && hdr.numSkinFamilies >= 0, "skin-table counts are negative");
+    if (hdr.numSkinFamilies != 0)
+        Require(hdr.numSkinRef != 0, "skin families are present without skin references");
 }
 
 void CheckR2StaticSubset(const Header53& hdr, std::span<const std::uint8_t> source) {
@@ -1230,6 +1285,15 @@ void CheckR2StaticSubset(const Header53& hdr, std::span<const std::uint8_t> sour
     if (hdr.numSkinFamilies != 0)
         Require(hdr.numSkinRef != 0, "skin families are present without skin references");
 }
+
+bool IsStaticReferenceLayout(const Header53& hdr, std::span<const std::uint8_t> source) {
+    try {
+        CheckR2StaticSubset(hdr, source);
+        return true;
+    } catch (const ConvertFailure&) {
+        return false;
+    }
+}
 Header52 ConvertHeader(const Header53& in) {
     Header52 out{};
     out.id = kIDST;
@@ -1286,7 +1350,13 @@ bool ConvertModelR2ToR1(const ModelInput& input, ModelOutput& output, std::strin
         const auto sourceMDL = input.mdl.first(static_cast<std::size_t>(in.length));
         Require(in.nameOffset != 0, "R2 MDL has a null internal model-name offset");
         (void)SourceGlobalString(sourceMDL, in.nameOffset, "R2 model name");
-        CheckR2StaticSubset(in, sourceMDL);
+        // A model with real animations (or a non-empty reference pose) is degraded to its bind pose
+        // instead of being refused: see IsStaticReferenceLayout / AppendMappedStaticAnimation.
+        const bool degraded = !IsStaticReferenceLayout(in, sourceMDL);
+        if (degraded)
+            CheckR2DegradedSubset(in);
+        else
+            CheckR2StaticSubset(in, sourceMDL);
         Require(in.keyValueSize >= 0, "R2 keyvalue data size is negative");
         if (in.keyValueSize != 0)
             Require(Range(static_cast<std::size_t>(in.length), in.keyValueIndex, static_cast<std::uint64_t>(in.keyValueSize)),
@@ -1328,7 +1398,7 @@ bool ConvertModelR2ToR1(const ModelInput& input, ModelOutput& output, std::strin
                 Require(sourceBone.parent == -1 || (sourceBone.parent >= 0 && sourceBone.parent < in.numBones),
                         "R2 bone parent index is outside the bone array");
                 AppendMappedBone(sourceMDL, sourceOffset, mdl,
-                    static_cast<std::int32_t>(destination + static_cast<std::size_t>(i) * sizeof(Bone52)));
+                    static_cast<std::int32_t>(destination + static_cast<std::size_t>(i) * sizeof(Bone52)), degraded);
             }
         } else {
             outHdr.boneIndex = 0;
@@ -1336,7 +1406,7 @@ bool ConvertModelR2ToR1(const ModelInput& input, ModelOutput& output, std::strin
 
         AppendMappedHitboxes(sourceMDL, in, mdl, outHdr);
         AppendMappedTextures(sourceMDL, in, mdl, outHdr);
-        AppendMappedStaticAnimation(sourceMDL, in, mdl, outHdr);
+        AppendMappedStaticAnimation(sourceMDL, in, mdl, outHdr, degraded);
         AppendMappedAttachments(sourceMDL, in.localAttachmentIndex, in.numLocalAttachments, mdl, outHdr);
         AppendMappedBodyParts(sourceMDL, in, mdl, outHdr);
 
@@ -1356,7 +1426,7 @@ bool ConvertModelR2ToR1(const ModelInput& input, ModelOutput& output, std::strin
             outHdr.keyValueSize = 0;
         }
 
-        AppendMappedSecondaryHeader(sourceMDL, in, mdl, outHdr, hdr2Offset, outHdr2);
+        AppendMappedSecondaryHeader(sourceMDL, in, mdl, outHdr, hdr2Offset, outHdr2, degraded);
         WriteObject(mdl, hdr2Offset, outHdr2);
         outHdr.length = static_cast<std::int32_t>(mdl.size());
         WriteObject(mdl, 0, outHdr);
