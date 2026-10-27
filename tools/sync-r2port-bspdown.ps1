@@ -32,7 +32,8 @@ foreach ($file in $sourceFiles + $toolSourceFiles + $verbatimFiles) {
     }
 
     $bytes = [System.IO.File]::ReadAllBytes($sourcePath)
-    if ($verbatimFiles -notcontains $file) {
+    $alreadyHeaded = $bytes.Length -ge 10 -and [System.Text.Encoding]::UTF8.GetString($bytes, 0, 10) -eq '// Origin:'
+    if ($verbatimFiles -notcontains $file -and -not $alreadyHeaded) {
         $header = [System.Text.Encoding]::UTF8.GetBytes($originHeader)
         $combined = [byte[]]::new($header.Length + $bytes.Length)
         [System.Buffer]::BlockCopy($header, 0, $combined, 0, $header.Length)

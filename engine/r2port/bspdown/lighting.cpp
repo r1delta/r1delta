@@ -116,8 +116,21 @@ void convertLighting(Ctx& c) {
     std::vector<int32_t> order;  // new index -> old index
     bool collapsed = false;
     if (c.opt.collapseEnvs && prefixClean && (E > 1 || S > 1)) {
-        if (E) order.push_back((int32_t)(E - 1));
-        if (S) order.push_back((int32_t)(E + S - 1));
+        // The real environment is not always the last one: on mp_coliseum / mp_coliseum_column the arena environment is slot 0 and the
+        // dummy skybox environment (sun exactly 3 3 3, direction -0.33544 0.52557 -0.78183, the compiler's template) is slot 1. Keep the
+        // last environment whose sun is not that template; with none (or E != S), the last pair as before.
+        size_t real = E ? E - 1 : 0, realSun = S ? S - 1 : 0;
+        if (E == S) {
+            for (size_t i = E; i-- > 0;) {
+                const Light& sun = old[E + i];
+                const bool dummy = std::fabs(sun.f(kOffIntensity) - 3.0f) < 1e-3f && std::fabs(sun.f(kOffIntensity + 4) - 3.0f) < 1e-3f &&
+                                   std::fabs(sun.f(kOffIntensity + 8) - 3.0f) < 1e-3f && std::fabs(sun.f(24) + 0.33544f) < 2e-3f &&
+                                   std::fabs(sun.f(28) - 0.52557f) < 2e-3f && std::fabs(sun.f(32) + 0.78183f) < 2e-3f;
+                if (!dummy) { real = realSun = i; break; }
+            }
+        }
+        if (E) order.push_back((int32_t)real);
+        if (S) order.push_back((int32_t)(E + realSun));
         collapsed = true;
     } else {
         for (size_t i = 0; i < E + S; i++) order.push_back((int32_t)i);
