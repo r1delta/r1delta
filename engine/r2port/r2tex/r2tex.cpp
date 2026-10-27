@@ -1503,6 +1503,9 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
     const bool hasLayerSlots = lightmapped && std::any_of(layerSlots.begin(), layerSlots.end(),
         [&](std::size_t slot) { return slot < slotGuids.size() && slotGuids[slot] != 0; });
     const bool layersOff = hasLayerSlots && options.layerMode == LayerMode::layersOff;
+    // `current` (the default) expands the single-channel R2 layer mask (slot 22, BC4 red only) to R=G=mask: R1's
+    // $blendModulateTexture reads red AND green. `redOnly` keeps the old unexpanded mapping.
+    const LayerMode effMode = options.layerMode == LayerMode::current ? LayerMode::maskRg : options.layerMode;
     material.usesLayers = hasLayerSlots;
     if (!tools) {
         use(0);
@@ -1593,11 +1596,11 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
             referencedSlots.find(15) != referencedSlots.end())
             addVmtParam(out, "$detailScale", "[1 1]");
         if (lightmapped) {
-            if (options.layerMode == LayerMode::maskRg || options.layerMode == LayerMode::maskRgInv) {
+            if (effMode == LayerMode::maskRg || effMode == LayerMode::maskRgInv) {
                 auto mask = usedSlots.find(22);
                 if (mask != usedSlots.end())
                     mask->second = layerMaskName(slotGuids[22],
-                        options.layerMode == LayerMode::maskRg ? TextureTransform::maskRg : TextureTransform::maskRgInv);
+                        effMode == LayerMode::maskRg ? TextureTransform::maskRg : TextureTransform::maskRgInv);
             }
             param(22, "$blendModulateTexture");
             param(23, "$baseTexture2");
@@ -1619,7 +1622,12 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
         // A layered R2 material uses vertex alpha as the layer blend weight. Once its layers are removed (layers-off),
         // R1 would multiply that graded alpha into the opaque surface and dither it: the mp_glitch ground shimmered
         // (metric 2.5..3.9) with "$vertexcolor 1" and not (0.0) without it.
-        if (shaderSet.find("vcolt") != std::string::npos && !layersOff) addVmtParam(out, "$vertexcolor", "1");
+        // World (BSP) materials that are opaque and have no second layer: their vertex colour is white (rgb 255 on all of
+        // mp_eden's) while the vertex alpha can be graded (33 such materials, 343k vertices over 21 maps), and R1 reads that
+        // alpha as dithered opacity. Drop $vertexcolor there; `models/` materials keep it (baked tint, rgb about 110).
+        const bool whiteVertexWorld = lightmapped && !hasLayerSlots && opaqueAlbedo && name.rfind("world/", 0) == 0;
+        if (shaderSet.find("vcolt") != std::string::npos && !layersOff && !whiteVertexWorld)
+            addVmtParam(out, "$vertexcolor", "1");
         if (shaderSet.find("vcola") != std::string::npos) addVmtParam(out, "$vertexalpha", "1");
         if ((raster & 0x06u) == 0x02u) addVmtParam(out, "$nocull", "1");
     }
@@ -1635,8 +1643,8 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
         texture.guid = slotGuids[slot];
         texture.name = pair.second;
         texture.slot = static_cast<std::uint32_t>(slot);
-        if (slot == 22 && (options.layerMode == LayerMode::maskRg || options.layerMode == LayerMode::maskRgInv)) {
-            texture.transform = options.layerMode == LayerMode::maskRg ?
+        if (slot == 22 && (effMode == LayerMode::maskRg || effMode == LayerMode::maskRgInv)) {
+            texture.transform = effMode == LayerMode::maskRg ?
                 TextureTransform::maskRg : TextureTransform::maskRgInv;
         }
         if (opaqueAlbedo && (slot == 0 || slot == 23)) texture.transform = TextureTransform::opaqueAlpha;

@@ -20,10 +20,11 @@ enum class TextureTransform : std::uint8_t {
 };
 
 enum class LayerMode : std::uint8_t {
-    current,
+    current,      // default: layer mask expanded to R=G=mask (same output as maskRg)
     layersOff,
     maskRg,
-    maskRgInv
+    maskRgInv,
+    redOnly       // legacy mapping: slot 22 passed through unexpanded (red only)
 };
 
 struct TextureRef {
