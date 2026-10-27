@@ -2144,8 +2144,8 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
             addVmtParam(out, "$reflectiontintcolor", "1");
             {
                 // Model (VertexLitGeneric) materials over-reflect in R1 (prop brightness conv/R2 1.75 at mat_envmap_scale 2, LightVerify):
-                // R2TEX_MODEL_ENVTINT (float, default 1) scales the tint of model materials only; world brushes keep [1 1 1].
-                double k = 1.0;
+                // R2TEX_MODEL_ENVTINT (float, default 0.25) scales the tint of model materials only; world brushes keep [1 1 1].
+                double k = 0.25;   // measured with LightVerify on mp_glitch: prop brightness conv/R2 1.82 at 1, 1.56 at 0.25
                 if (vertexLit) if (const char* e = std::getenv("R2TEX_MODEL_ENVTINT")) k = std::clamp(std::atof(e), 0.0, 4.0);
                 char tint[48];
                 std::snprintf(tint, sizeof(tint), "[%g %g %g]", k, k, k);
