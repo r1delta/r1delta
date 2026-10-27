@@ -382,7 +382,7 @@ def check_grid_padding(C, r2, r1, g2, g1, cells, nmodels, grid_pad, unpadded, gr
         print("  note  no --unpadded file given: per-cell equality against the unpadded conversion not checked")
 
 
-LIGHT_OPT = {"collapse": True, "rtl": True, "min_weight": 187, "pbr": True, "sun_alpha": True, "sky_scale": 1.0, "sun_scale": 1.0, "pbr_scale": 1.0}
+LIGHT_OPT = {"collapse": True, "rtl": True, "min_weight": 187, "pbr": True, "sun_alpha": True, "sky_scale": 0.45, "sun_scale": 1.0, "pbr_scale": 1.0}
 
 
 def expected_lighting(r2, wl_flag2):
@@ -1170,7 +1170,7 @@ if __name__ == "__main__":
     ap.add_argument("--rtl-min-weight", type=int, default=187)
     ap.add_argument("--no-sun-alpha", action="store_true", help="rule 21 disabled in the converter")
     ap.add_argument("--pbr-lights", choices=("keep", "convert"), default="convert")
-    ap.add_argument("--sky-ambient-scale", type=float, default=1.0, help="rule 20e")
+    ap.add_argument("--sky-ambient-scale", type=float, default=0.45, help="rule 20e")
     ap.add_argument("--sun-scale", type=float, default=1.0, help="rule 20e")
     ap.add_argument("--pbr-scale", type=float, default=1.0, help="rule 20e")
     ap.add_argument("--keep-prop-flag10", action="store_true")

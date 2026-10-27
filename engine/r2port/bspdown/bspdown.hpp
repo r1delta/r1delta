@@ -92,11 +92,15 @@ struct Options {
     bool pbrLights = true;
     // Rule 20e (LightVerify, mp_glitch / mp_lf_stacks measured against original R2 frames, glitchlight\ROUND3.md): linear multipliers on the
     //   intensity of the kept light records. The R1 shaders add sky ambient (type 5) and sun (type 3) with a different weighting than the R2 ones
-    //   (R1 world PS: lmEnergy + bumpSkyWeight*skyColor + shadow*cloud*N.L*sunColor), so equal numbers over-light the shadows.
-    //   skyAmbientScale: multiplies the type 5 records (GPU sky constant and CPU prop ambient, both then times mat_sky_scale).
-    //   sunScale: multiplies the type 3 records (times mat_sun_scale).
-    //   pbrScale: extra multiplier on the PBR (flag 0x20) lights after the 2/d50^2 rewrite.
-    float skyAmbientScale = 1.0f;
+    //   (R1 world PS: lmEnergy + bumpSkyWeight*skyColor + shadow*cloud*N.L*sunColor), so equal numbers over-light the shadows (blue/lilac
+    //   shadows: ground shadow luminance 86 vs 59 in R2 at the mp_glitch spawn).
+    //   skyAmbientScale: multiplies the type 5 records (GPU sky constant and CPU prop ambient, both then times mat_sky_scale). 0.45 puts the
+    //     shadow luminance and the whole frame within a few percent of R2 on mp_glitch and mp_lf_stacks with mat_sky_scale 1.6 (user config);
+    //     0.35 gave the same numbers, 1.0 left ground +29 %, walls +7 %.
+    //   sunScale: multiplies the type 3 records (times mat_sun_scale). 1.0: 1.25 changed no class by more than 2 % and made mp_lf_stacks worse.
+    //   pbrScale: extra multiplier on the PBR (flag 0x20) lights after the 2/d50^2 rewrite. 1.0: 0.01 .. 4 changes the world by < 3 % (those
+    //     lights are baked) and the CPU-lit gun by 8 % (no flare-up near the light).
+    float skyAmbientScale = 0.45f;
     float sunScale = 1.0f;
     float pbrScale = 1.0f;
 

@@ -41,7 +41,7 @@ static void usage(const char* a0) {
                  "  --rtl-min-weight <n>   rule 20: minimum R2 visibility weight (0..255) for a real-time light slot (default 187 = half visibility)\n"
                  "  --no-sun-alpha         rule 21: keep lightmap plane B alpha 255 (default writes the baked sun visibility from the R2 RTL sun slot)\n"
                  "  --pbr-lights <keep|convert>  rule 20: R2 flag 0x20 lights (default convert to the R1 fade polynomial form)\n"
-                 "  --sky-ambient-scale <x>  rule 20e: multiplier on the kept sky ambient (type 5) light intensity (default 1)\n"
+                 "  --sky-ambient-scale <x>  rule 20e: multiplier on the kept sky ambient (type 5) light intensity (default 0.45)\n"
                  "  --sun-scale <x>        rule 20e: multiplier on the kept sun (type 3) light intensity (default 1)\n"
                  "  --pbr-scale <x>        rule 20e: extra multiplier on the PBR (flag 0x20) lights after the 2/d50^2 rewrite (default 1)\n"
                  "  --props <keep|hide-scatter|hide-all>  rule 16 diagnostics: scale props to 0.0001 for models with >= --scatter-min\n"

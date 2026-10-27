@@ -459,8 +459,17 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
     d) PBR lights. R2 entity _pbr_falloff 1 = world light flag 0x20 (no 0x4); the compiled intensity is brightness/255 * 1e5 (the two blue
        glitch point lights: 1e5, radius 500, d50 150; probe references to them: 937). R1 evaluates lights without flag 0x4 as 1 / (c + l d + q d^2)
        (sub_1800A4FD0), which is unbounded near the radius. Rewrite: set flag 0x4 and multiply the intensity by 2 / d50^2 where d50 is the
-       distance at which c + l d + q d^2 = 0.5 (the inverse-square irradiance I/d50^2 equals I' * 0.5 there). Provisional: the shape inside d50 is
-       not calibrated against R2 renders. Flags 0x20 and 0x40 are cleared. --pbr-lights keep leaves the records alone.
+       distance at which c + l d + q d^2 = 0.5 (the inverse-square irradiance I/d50^2 equals I' * 0.5 there). Flags 0x20 and 0x40 are cleared.
+       --pbr-lights keep leaves the records alone. Calibration (LightVerify, ROUND3.md): the 0x20 lights are baked into the lightmap, so the world
+       does not respond to the scale (--pbr-scale 0.01 .. 4: < 3 % on the world, +8 % on the CPU-lit gun, no flare-up from 25 to 300 units);
+       the 2/d50^2 rewrite stays (scale 1).
+    e) Sky ambient / sun scale (rule 20e). The R1 world PS adds the sky ambient with the lightmap plane B bent-sky weight and the sun with
+       shadow*cloud*N.L; with the unscaled R2 numbers the shadows of mp_glitch and mp_lf_stacks are too bright and blue (spawn ground shadow
+       luminance 86 vs 59 in R2, R/G 0.94/1.0 vs 1.26, sun-lit patch correct) and the whole frame is 1.22 (stacks) / 1.32 ground (glitch) of R2.
+       --sky-ambient-scale <x> multiplies the kept type 5 record (default 0.45, so mat_sky_scale 1.6 of the shipped config gives 0.72 effective:
+       ground 1.32 -> 1.17, wall 1.07 -> 1.01, whole frame 1.02 -> 1.00 on mp_glitch; stacks 1.22 -> 1.08 together with the model envmap tint),
+       --sun-scale <x> the type 3 record (default 1: 1.25 changed no class by more than 2 % and made stacks worse), --pbr-scale <x> see d).
+       Env switch of the engine: sky-scale=<f>, sun-scale=<f>, pbr-scale=<f> in R1DELTA_R2PORT_BSPDOWN. Checker: LIGHT_OPT sky/sun/pbr scale.
 21. Lightmap plane B alpha = baked sun visibility (lump 0x62; lighting.cpp) [R1 lightmappedgeneric_ps50 asm in shaderlab\LIGHTING.md /
     out\evidence\r1_lightmappedgeneric_ps50_blob750.asm lines 31-34, 80-99; data on R1 mp_rise / mp_box vs R2 maps]. The R1 world PS computes
     the sun shadow term as  shadow = lerp(1 - lm1.a, CSM_PCF, cascade_coverage)  (lm1 = plane B; r2.x = 1 - lm1.a). Outside the cascades and
