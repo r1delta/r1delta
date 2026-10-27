@@ -328,6 +328,37 @@ BOOL CALLBACK PostActivateToOwnWindow(HWND window, LPARAM)
     return TRUE;
 }
 
+// Result of one guarded cvar read. The watchdog also runs while the game shuts down, when client.dll (which owns most
+// ConVar objects) is already unmapped and the cvar list still points into it: the lookup then faults. A fault means the
+// cvar system is gone, so the thread stops.
+enum class CvarCheck { Matches, Differs, Missing, Gone };
+
+CvarCheck CheckFloatCvar(const char* name, float wanted)
+{
+    __try {
+        ConVarR1* variable = OriginalCCVar_FindVar(cvarinterface, name);
+        if (!variable)
+            return CvarCheck::Missing;
+        return variable->m_Value.m_fValue != wanted ? CvarCheck::Differs : CvarCheck::Matches;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        return CvarCheck::Gone;
+    }
+}
+
+CvarCheck CheckIntCvar(const char* name, int wanted)
+{
+    __try {
+        ConVarR1* variable = OriginalCCVar_FindVar(cvarinterface, name);
+        if (!variable)
+            return CvarCheck::Missing;
+        return variable->m_Value.m_nValue != wanted ? CvarCheck::Differs : CvarCheck::Matches;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        return CvarCheck::Gone;
+    }
+}
+
 DWORD WINAPI CvarWatchdogMain(LPVOID)
 {
     for (unsigned tick = 0;; ++tick) {
@@ -337,18 +368,16 @@ DWORD WINAPI CvarWatchdogMain(LPVOID)
             continue;
 
         char commands[256]{};
-        const auto enforceFloat = [&](const char* name, float wanted, const char* command) {
-            ConVarR1* variable = OriginalCCVar_FindVar(cvarinterface, name);
-            if (variable && variable->m_Value.m_fValue != wanted)
-                AppendCommand(commands, sizeof(commands), command);
-        };
-        const auto enforceInt = [&](const char* name, int wanted, const char* command) {
-            ConVarR1* variable = OriginalCCVar_FindVar(cvarinterface, name);
-            if (variable && variable->m_Value.m_nValue != wanted)
-                AppendCommand(commands, sizeof(commands), command);
-        };
-        enforceFloat("fps_max", 60.0f, "fps_max 60\n");
-        enforceInt("mat_vsync", 0, "mat_vsync 0\n");
+        const CvarCheck fps = CheckFloatCvar("fps_max", 60.0f);
+        if (fps == CvarCheck::Gone)
+            return 0;
+        if (fps == CvarCheck::Differs)
+            AppendCommand(commands, sizeof(commands), "fps_max 60\n");
+        const CvarCheck vsync = CheckIntCvar("mat_vsync", 0);
+        if (vsync == CvarCheck::Gone)
+            return 0;
+        if (vsync == CvarCheck::Differs)
+            AppendCommand(commands, sizeof(commands), "mat_vsync 0\n");
         if (commands[0])
             Cbuf_AddText(0, commands, 0);
     }
