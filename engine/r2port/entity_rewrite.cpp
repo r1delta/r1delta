@@ -677,7 +677,8 @@ std::size_t AddMissingLightEnvironmentPitch(std::string& text)
                     const double elevation = std::strtod(body.data() + key + 10, &end);
                     if (end != body.data() + key + 10) {
                         char line[64];
-                        std::snprintf(line, sizeof(line), "\"pitch\" \"%g\"\n", -elevation);
+                        std::snprintf(line, sizeof(line), "\"pitch\" \"%g\"%s", -elevation,
+                            body.find("\r\n") != std::string_view::npos ? "\r\n" : "\n");
                         out.append(text, cursor, i - cursor);
                         out.append(line);
                         cursor = i;
