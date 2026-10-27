@@ -224,6 +224,9 @@
     <ClInclude Include="engine\r2port\shaders\r2_shader_cache.h">
       <Filter>engine\r2port\shaders</Filter>
     </ClInclude>
+    <ClInclude Include="engine\r2port\shaders\r2_shader_override.h">
+      <Filter>engine\r2port\shaders</Filter>
+    </ClInclude>
     <ClInclude Include="engine\r2port\shaders\r2_shader_compiler.h">
       <Filter>engine\r2port\shaders</Filter>
     </ClInclude>
@@ -244,9 +247,6 @@
     </ClInclude>
     <ClInclude Include="engine\r2port\entity_rewrite.h">
       <Filter>engine\r2port</Filter>
-    </ClInclude>
-    <ClInclude Include="engine\r2port\shaders\r2_shader_override.h">
-      <Filter>engine\r2port\shaders</Filter>
     </ClInclude>
     <ClInclude Include="engine\core\background_mode.h">
       <Filter>engine\core</Filter>
@@ -887,6 +887,9 @@
     <ClCompile Include="engine\r2port\shaders\r2_shader_cache.cpp">
       <Filter>engine\r2port\shaders</Filter>
     </ClCompile>
+    <ClCompile Include="engine\r2port\shaders\r2_shader_override.cpp">
+      <Filter>engine\r2port\shaders</Filter>
+    </ClCompile>
     <ClCompile Include="engine\r2port\shaders\r2_shader_compiler.cpp">
       <Filter>engine\r2port\shaders</Filter>
     </ClCompile>
@@ -922,9 +925,6 @@
     </ClCompile>
     <ClCompile Include="engine\r2port\bspdown\lighting.cpp">
       <Filter>engine\r2port\bspdown</Filter>
-    </ClCompile>
-    <ClCompile Include="engine\r2port\shaders\r2_shader_override.cpp">
-      <Filter>engine\r2port\shaders</Filter>
     </ClCompile>
     <ClCompile Include="engine\core\background_mode.cpp">
       <Filter>engine\core</Filter>

@@ -46,8 +46,8 @@
 #include "r2_map_provider.h"
 #include "r2port_provider.h"
 #include "engine/r2port/shaders/r2_shader_cache.h"
-#include "r2_material_provider.h"
 #include "engine/r2port/shaders/r2_shader_override.h"
+#include "r2_material_provider.h"
 #include "legacy_ds_sound_tables.h"
 #include "soundscript_parity.h"
 #include "script_sync_parity.h"
@@ -9836,8 +9836,8 @@ void __stdcall LoaderNotificationCallback(
 			}
 		}
 		InstallMaterialResourceOwnership(G_matsystem);
-		SetupReflexMaterialSystemHooks(G_matsystem);
 		r2port::shaders::InstallShaderOverrides(G_matsystem);
+		SetupReflexMaterialSystemHooks(G_matsystem);
 		if (!IsR1ODedicatedServer()) {
 			SetupHudWarpMatSystemHooks();
 			MH_EnableHook(MH_ALL_HOOKS);
