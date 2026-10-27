@@ -922,8 +922,27 @@ private:
         return m_convertedRoot / std::filesystem::path(std::string(path));
     }
 
+    // Logs one line per failed conversion (the r2tex error string, or the exception text), at most
+    // kMaxFailureLogs per session so a bad pak cannot flood the console.
+    static void LogConvertFailure(const WorkItem& item, const char* what)
+    {
+        constexpr unsigned kMaxFailureLogs = 200;
+        static std::atomic<unsigned> logged{0};
+        const unsigned index = logged.fetch_add(1, std::memory_order_relaxed);
+        if (index >= kMaxFailureLogs)
+            return;
+        char message[1024]{};
+        _snprintf_s(message, sizeof(message), _TRUNCATE,
+            "R1Delta: R2 texture provider conversion failed %s asset=%s error=%s%s\n",
+            item.materialFile ? "material" : "texture", item.assetName.c_str(),
+            what && *what ? what : "<no error string>",
+            index + 1 == kMaxFailureLogs ? " (further failures not logged)" : "");
+        LogR2TextureMessage(message);
+    }
+
     FileBytes ConvertAsset(const WorkItem& item, std::vector<std::string>& dependencies)
     {
+        std::string error;
         try {
             if (item.materialFile) {
                 // Converted models name their materials "r2m/<R2 material>" (see modelconv): the same
@@ -936,8 +955,10 @@ private:
                 r2tex::Material material;
                 r2tex::MaterialOptions materialOptions;
                 materialOptions.forModel = forModel;
-                if (!r2tex::ConvertMaterial(sourceName, material, materialOptions) || material.vmt.empty())
+                if (!r2tex::ConvertMaterial(sourceName, material, materialOptions, &error) || material.vmt.empty()) {
+                    LogConvertFailure(item, error.c_str());
                     return {};
+                }
                 if (forModel) {
                     static constexpr std::string_view world = "\"LightmappedGeneric\"";
                     const std::size_t at = material.vmt.find(world);
@@ -958,10 +979,15 @@ private:
             }
 
             std::vector<std::uint8_t> bytes;
-            if (r2tex::ConvertTexture(item.assetName, bytes) && !bytes.empty())
+            if (r2tex::ConvertTexture(item.assetName, bytes, &error) && !bytes.empty())
                 return std::make_shared<const std::vector<std::uint8_t>>(std::move(bytes));
+            LogConvertFailure(item, error.c_str());
+        }
+        catch (const std::exception& exception) {
+            LogConvertFailure(item, exception.what());
         }
         catch (...) {
+            LogConvertFailure(item, "unknown exception");
         }
         return {};
     }
