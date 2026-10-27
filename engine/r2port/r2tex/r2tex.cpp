@@ -2457,11 +2457,28 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
             param(24, "$bumpmap2");
             param(26, "$reflectionTint2");
         }
+        // R2 world/signs/beacon_screens/* sheets are UnlitGeneric overlays drawn over a real screen (mp_complex3 crane-room
+        // tablets: crane_room_monitor_console_static, beacon_crane_screens underneath). The converted overlay came out as a
+        // blown-out white, mirror-like panel that hid the screen and flickered against it: (1) it carried $envmap env_cubemap
+        // (an unlit glass material has no business reflecting the sky; the same flat-white blow-out the kodai fake-screen
+        // note above describes), (2) its R2 diffuse tint 2.0 added on top of the lit screen (additive, 2 x white UI strips
+        // read as a milky sheet; tint 1 keeps the cyan UI crisp like R2), (3) it lies coplanar with the screen and needs the
+        // decal polygon offset. Verified on mp_complex3 (-5052.56 -64.18 648.55): blown white -> cyan holo UI as R2.
+        const bool screenOverlay = unlit && name.rfind("world/signs/beacon_screens/", 0) == 0;
         {
             // $color: R2 diffuse tint (constant buffer) times the baked mean of a flat sheet texture; $alpha: R2 opacity
             // (blended draw states only) times the flat sheet alpha mean.
             double color[3] = {materialTint[0], materialTint[1], materialTint[2]};
             double alpha = blendEnabled ? materialOpacity : 1.0;
+            if (screenOverlay)
+                for (double& c : color) c = std::min(c, 1.0);
+            // mp_complex3 cypress leaves (tree_cypress_tall_leaves_01) in the building shadows are lit by ambient only, R2 also
+            // lights them through its leaf translucency, which R1 lacks; the blue haze then dominates the leaf pixels and the
+            // trees read blue (more so with distance). Mean leaf-pixel RGB, R2 / R1 gain 1.0 / R1 gain 1.5, same camera:
+            // user spot (-1217 -1493 632) 15.7 15.7 25.0 / 12.6 13.0 24.2 / 17.8 19.2 27.3; 450 units 18.3 20.4 29.8 / 11.4 12.2
+            // 23.0 / 18.7 20.2 27.3; 2200 units 53.6 55.3 57.6 / 45.3 45.0 46.4 / 52.5 52.9 51.2. Measured on this material only.
+            if (foliageCavity && name.find("tree_cypress_tall_leaves") != std::string::npos)
+                for (double& c : color) c *= 1.5;
             if (softCloudSheet) alpha *= softCloudAlpha;
             if (flatSheet.ok) {
                 for (int i = 0; i < 3; ++i) color[i] *= flatSheet.rgb[i];
@@ -2482,8 +2499,8 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
         if (additive) addVmtParam(out, "$additive", "1");
         else if (translucent || glass) addVmtParam(out, "$translucent", "1");
         if (godray) addVmtParam(out, "$translucent", "1");
-        if (decal) addVmtParam(out, "$decal", "1");
-        if (glass || (!unlit && !foliageNoEnv && usedSlots.find(3) != usedSlots.end())) addVmtParam(out, "$envmap", "env_cubemap");
+        if (decal || screenOverlay) addVmtParam(out, "$decal", "1");
+        if ((glass && !unlit) || (!unlit && !foliageNoEnv && usedSlots.find(3) != usedSlots.end())) addVmtParam(out, "$envmap", "env_cubemap");
         // A layered R2 material uses vertex alpha as the layer blend weight. Once its layers are removed (layers-off),
         // R1 would multiply that graded alpha into the opaque surface and dither it: the mp_glitch ground shimmered
         // (metric 2.5..3.9) with "$vertexcolor 1" and not (0.0) without it.

@@ -1455,6 +1455,11 @@ public:
 // Serves the material files the active R2 map's own directory VPK carries: assets that only
 // entity keys name (cloudmask textures, color-correction .raw files) and a few map-specific VMT
 // and VTF files. R1 content and the RPak material provider are consulted first.
+// Converted models name every material "r2m/<R2 material>" (modelconv). Materials that exist only as a
+// loose VMT in the map pack (not as an rpak matl), e.g. models/holo_screens/hammond_marvins_01 on
+// mp_complex3, never resolve in the RPak provider, so the model drew R1's magenta error checker. For a
+// "materials/r2m/<x>.vmt" request the pack's "materials/<x>.vmt" is served instead; a world shader in it
+// is relabelled VertexLitGeneric, as the RPak provider does for models.
 class R2MapPackFileProvider final : public FileProvider {
 public:
     bool MayContain(std::string_view normalizedPath) const override
@@ -1469,10 +1474,14 @@ public:
 
     std::optional<uint64_t> Size(std::string_view normalizedPath) override
     {
-        const std::string package = PackageFor(normalizedPath);
+        std::string path;
+        const std::string package = PackageFor(normalizedPath, path);
         if (package.empty())
             return std::nullopt;
-        const std::string path(normalizedPath);
+        if (IsModelNamespaceMaterial(normalizedPath)) {
+            const FileBytes data = Read(normalizedPath);
+            return data ? std::optional<uint64_t>(data->size()) : std::nullopt;
+        }
         uint64_t size{};
         return R1OVPK_GetDirectoryVPKFileSize(package.c_str(), path.c_str(), &size)
             ? std::optional<uint64_t>(size) : std::nullopt;
@@ -1480,16 +1489,25 @@ public:
 
     FileBytes Read(std::string_view normalizedPath) override
     {
-        const std::string package = PackageFor(normalizedPath);
+        std::string path;
+        const std::string package = PackageFor(normalizedPath, path);
         if (package.empty())
             return {};
-        const std::string path(normalizedPath);
         FileBytes data = R1OVPK_ReadDirectoryVPKFile(package.c_str(), path.c_str());
+        if (data && IsModelNamespaceMaterial(normalizedPath)) {
+            std::string text(reinterpret_cast<const char*>(data->data()), data->size());
+            static constexpr std::string_view world = "\"LightmappedGeneric\"";
+            const std::size_t at = text.find(world);
+            if (at != std::string::npos && text.find('{') > at) {
+                text.replace(at, world.size(), "\"VertexLitGeneric\"");
+                data = std::make_shared<const std::vector<uint8_t>>(text.begin(), text.end());
+            }
+        }
         if (data && !m_loggedFirst.test_and_set(std::memory_order_relaxed)) {
             char message[512]{};
             _snprintf_s(message, sizeof(message), _TRUNCATE,
-                "R1Delta: R2 map pack served first material file path=%s bytes=%zu\n",
-                path.c_str(), data->size());
+                "R1Delta: R2 map pack served first material file path=%s pack=%s bytes=%zu\n",
+                std::string(normalizedPath).c_str(), path.c_str(), data->size());
             Msg("%s", message);
             OutputDebugStringA(message);
         }
@@ -1497,8 +1515,17 @@ public:
     }
 
 private:
-    // Returns the active map's directory VPK when it holds the file, otherwise empty.
-    std::string PackageFor(std::string_view path) const
+    static bool IsModelNamespaceMaterial(std::string_view path)
+    {
+        constexpr std::string_view prefix = "materials/r2m/";
+        return path.size() > prefix.size() + 4 && path.compare(0, prefix.size(), prefix) == 0
+            && path.substr(path.size() - 4) == ".vmt";
+    }
+
+    // Returns the active map's directory VPK when it holds the file, otherwise empty. packPath receives
+    // the path to read inside the pack (the request itself, or for an r2m/ model material the same
+    // name without the namespace).
+    std::string PackageFor(std::string_view path, std::string& packPath) const
     {
         const bool wanted = path.size() > 4
             && (path.substr(path.size() - 4) == ".vtf" || path.substr(path.size() - 4) == ".vmt"
@@ -1512,9 +1539,17 @@ private:
         if (package.empty() || !IsRegularFile(package))
             return {};
         std::string packageName = package.string();
-        const std::string pathText(path);
-        return R1OVPK_HasDirectoryVPKFile(packageName.c_str(), pathText.c_str())
+        packPath.assign(path);
+        if (IsModelNamespaceMaterial(path))
+            packPath = "materials/" + std::string(path.substr(std::string_view("materials/r2m/").size()));
+        return R1OVPK_HasDirectoryVPKFile(packageName.c_str(), packPath.c_str())
             ? packageName : std::string{};
+    }
+
+    std::string PackageFor(std::string_view path) const
+    {
+        std::string packPath;
+        return PackageFor(path, packPath);
     }
 
     mutable std::atomic_flag m_loggedFirst = ATOMIC_FLAG_INIT;
