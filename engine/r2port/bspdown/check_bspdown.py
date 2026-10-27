@@ -206,6 +206,12 @@ def check_grid_regrid(C, r1, g1, cells, nmodels, grid_size, reference):
     sc = float(g1[0]); ox, oy, nx, ny = int(g1[1]), int(g1[2]), int(g1[3]), int(g1[4])
     C.ok(sc >= grid_size and (sc - grid_size) % 16 == 0, "cell size %g is the requested %g (+16 steps only when the world cells would not fit the walker list)" % (sc, grid_size))
     C.ok(nx * ny + 1 <= 16384, "world cells + model cell fit the walker's 16384 entry list (%d x %d = %d)" % (nx, ny, nx * ny + 1))
+    # The walker writes 3 entries per band of n cells and advances by n; slots 3..n-1 are unwritten stack data (n >= 4 needs a hull
+    # half extent above ~0.3536 * size, rectangle path from 0.7071 * size - 0.0625). Every hull in use must be outside that window.
+    lowlim, highlim = 0.3536 * sc - 0.1, 0.70710677 * sc - 0.0625
+    hulls = {16: "player", 38: "AIN drop", 60: "titan / AIN drop", 65: "AIN drop", 325: "AIN callback sweep", 500: "margin", 700: "margin"}
+    badh = {h: n for h, n in hulls.items() if lowlim < h < highlim}
+    C.ok(not badh, "no hull half extent in use (%s) lies in the unwritten-slot window %.0f..%.0f" % (", ".join("%d %s" % kv for kv in hulls.items()), lowlim, highlim), str(badh))
     C.ok(len(cells) == nx * ny + nmodels, "cell table size == 4 * (nx*ny + models), the R1 loader's exact check")
     gs = r1.arr(0x57, "<u2,<u2,<u4"); gb = r1.arr(0x58, "<8i2"); prn = r1.arr(0x59, "<u4")
     npool = len(gs)
@@ -480,7 +486,7 @@ def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", ph
     pr = r1.arr(0x59, "<u4")
     pb = r1.arr(0x5A, "<8i2")
     uc = r1.arr(0x5B, "<u4")
-    C.ok(g1[0] == g2[0] if grid_size == 0 else (g1[0] >= grid_size and (g1[0] - grid_size) % 16 == 0 and g1[0] <= g2[0]), "grid cell size %g (R2 %g, requested %g, +16 steps when the grid would exceed the walker list; R1 stock maps use 256)" % (g1[0], g2[0], grid_size))
+    C.ok(g1[0] == g2[0] if grid_size == 0 else (g1[0] >= grid_size and (g1[0] - grid_size) % 16 == 0), "grid cell size %g (R2 %g, requested %g, +16 steps when the grid would exceed the walker list)" % (g1[0], g2[0], grid_size))
     C.ok(len(cells) == int(g1[3]) * int(g1[4]) + nmodels, "cell count == nx*ny + models (%d)" % len(cells))
     C.ok(len(gs) == len(gb), "geoset and geoset bounds parallel (%d)" % len(gs))
     C.ok(len(pr) == len(pb), "primitive and primitive bounds parallel (%d)" % len(pr))
@@ -1001,7 +1007,7 @@ if __name__ == "__main__":
     ap.add_argument("--worldlight-flag2", action="store_true")
     ap.add_argument("--keep-prop-flag10", action="store_true")
     ap.add_argument("--no-grid-pad", action="store_true", help="rule 18 disabled in the converter")
-    ap.add_argument("--grid-size", type=float, default=256.0, help="rule 19 cell size given to the converter (0 = R2 size kept)")
+    ap.add_argument("--grid-size", type=float, default=2048.0, help="rule 19 cell size given to the converter (0 = R2 size kept)")
     ap.add_argument("--reference", "--unpadded", dest="reference", help="the same input converted with --grid-size 0 --no-grid-pad: equivalence checks for rules 18 / 19")
     a = ap.parse_args()
     sys.exit(1 if check(a.r2, a.r1, a.limit, a.rtl_bytes, not a.no_bsp_tool, a.cubemaps, a.physics, a.cubemap_scale,

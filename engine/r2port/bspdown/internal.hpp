@@ -191,6 +191,7 @@ struct Ctx {
     bool present[128] = {};
     uint32_t origOffset[128] = {};
     bool gameLumpNeedsRebase = false;
+    bool gridRegridded = false;  // rule 19 re-binned the collision grid (rule 18 padding is then not applied)
 
     // Collected hard failures; thrown together by throwIfFailed().
     std::vector<std::string> failures;

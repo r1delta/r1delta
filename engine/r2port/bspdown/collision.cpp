@@ -393,7 +393,7 @@ void convertCollisionGrid(Ctx& c) {
     }
 }
 
-// Rule 19: re-bin the world grid to a smaller cell size (default 256, the R1 stock size).
+// Rule 19: re-bin the world grid to cell size 2048 (see README rule 19 for why neither 704 nor 256 is safe).
 //
 // R1's walker (sub_18010BE50) builds its cell list in bands of n cells but writes only the first 3 cells of each
 // band ({first, first + s, first + 2 s}) and then advances by n. For n >= 4 the slots 3..n-1 keep the stack
@@ -571,6 +571,7 @@ void regridCollision(Ctx& c) {
     const double oldS = grid.scale;
     const int oldOffX = grid.cellOffset[0], oldOffY = grid.cellOffset[1];
     grid.scale = (float)S1;
+    c.gridRegridded = true;
     grid.cellOffset[0] = (int32_t)X0;
     grid.cellOffset[1] = (int32_t)Y0;
     grid.numCells[0] = (int32_t)NX;
@@ -607,6 +608,10 @@ constexpr int64_t kWalkerListCap = 16384;  // entries of the walker's stack list
 }  // namespace
 
 void padCollisionGrid(Ctx& c) {
+    if (c.gridRegridded) {
+        c.say("[rule 18] collision grid padding not applied: the grid was re-binned (rule 19), traces cannot read unwritten walker slots");
+        return;
+    }
     if (!c.opt.gridPad) {
         c.say("[rule 18] collision grid padding disabled (--no-grid-pad)");
         return;

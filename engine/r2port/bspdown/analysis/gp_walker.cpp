@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <random>
+#include <string>
 #include <vector>
 
 static int ftoi(float x) {  // cvttss2si
@@ -49,7 +50,8 @@ struct Walker {
     int oobCountedWritten = 0;  // ... that this call wrote
     int oobScratch = 0;      // written beyond the final count (scratch), outside the table
     int maxBand = 0;
-    int path = 0;  // 0 skipped, 1 rect, 2 line, 3 2x2, 4 ymajor, 5 xmajor
+    int path = 0;
+    int wmax = 0, prevMax = LIST_CAP;  // 0 skipped, 1 rect, 2 line, 3 2x2, 4 ymajor, 5 xmajor
 
     Walker() { memset(list, 0, sizeof(list)); }
 
@@ -57,11 +59,13 @@ struct Walker {
         if (k < 0 || k >= LIST_CAP) { overflow = true; return; }
         list[k] = (int32_t)v;
         written[k] = 1;
+        if (k > wmax) wmax = (int)k;
     }
 
     // returns list count (including the model cell)
     void walk(const GridInfo& g, const Ray& r, int a2 = 0) {
-        memset(written, 0, sizeof(written));
+        memset(written, 0, (size_t)(prevMax + 8 < LIST_CAP ? prevMax + 8 : LIST_CAP));
+        wmax = 0;
         count = 0; overflow = false; staleReads = oobCounted = oobCountedWritten = oobScratch = 0; maxBand = 0; path = 0;
         int64_t r8 = 0;
         if (a2 == 0) {
@@ -199,10 +203,11 @@ struct Walker {
             if (bad) { oobCounted++; if (written[k]) oobCountedWritten++; }
         }
         // scratch: entries written beyond count (the 2 slots after each band)
-        for (int64_t k = r8; k < LIST_CAP; k++) {
+        for (int64_t k = r8; k <= wmax && k < LIST_CAP; k++) {
             if (!written[k]) continue;
             if (list[k] < 0 || list[k] >= T) oobScratch++;
         }
+        prevMax = wmax;
     }
 };
 
@@ -218,6 +223,50 @@ int main(int argc, char** argv) {
            g.offX * g.scale, (g.offX + g.dimX) * g.scale, g.offY * g.scale, (g.offY + g.dimY) * g.scale);
     static Walker W;
     const float exts[] = {0.f, 16.f, 32.f, 40.f, 60.f, 64.f, 80.f, 88.f, 90.f, 91.f, 100.f, 120.f, 150.f, 180.f, 181.f, 182.f, 200.f, 250.f, 300.f, 350.f, 400.f, 450.f, 480.f, 497.f, 498.f, 600.f};
+    if (argc > 12 && std::string(argv[11]) == "file") {
+        FILE* f = fopen(argv[12], "r");
+        double a[7]; long long i = 0, bad = 0;
+        memset(W.list, 0, sizeof(W.list));
+        while (fscanf(f, "%lf %lf %lf %lf %lf %lf %lf", a, a + 1, a + 2, a + 3, a + 4, a + 5, a + 6) == 7) {
+            Ray r{};
+            r.start[0] = (float)a[0]; r.start[1] = (float)a[1]; r.start[2] = (float)a[2];
+            r.end[0] = (float)a[3]; r.end[1] = (float)a[4]; r.end[2] = (float)a[5];
+            for (int k = 0; k < 3; k++) r.delta[k] = (float)(a[3 + k] - a[k]);
+            r.ext[0] = r.ext[1] = (float)a[6]; r.ext[2] = 36;
+            W.walk(g, r);
+            if (getenv("DUMPCELL")) { int want = atoi(getenv("DUMPCELL")); bool has = false; for (int64_t k = 0; k < W.count; k++) if (W.list[k] == want) has = true;
+                if (has) { printf("ray %lld start (%g,%g) end (%g,%g) ext %g path %d band %d list:", i, a[0], a[1], a[3], a[4], a[6], W.path, W.maxBand); for (int64_t k = 0; k < W.count && k < 60; k++) printf(" %d%s", W.list[k], W.written[k] ? "" : "?"); printf("\n"); } }
+            if (W.oobCounted || W.staleReads) { bad++; printf("ray %lld: start (%g,%g) delta (%g,%g) ext %g path %d count %lld band %d stale %d oob %d\n", i, a[0], a[1], r.delta[0], r.delta[1], a[6], W.path, (long long)W.count, W.maxBand, W.staleReads, W.oobCounted); }
+            i++;
+        }
+        printf("%lld rays, %lld with stale/out-of-table reads\n", i, bad);
+        return 0;
+    }
+    if (argc > 11 && std::string(argv[11]) == "local") {
+        std::mt19937 rng(seed);
+        float x0 = g.offX * g.scale - 2000, x1 = (g.offX + g.dimX) * g.scale + 2000, y0 = g.offY * g.scale - 2000, y1 = (g.offY + g.dimY) * g.scale + 2000;
+        std::uniform_real_distribution<float> UX(x0, x1), UY(y0, y1), UL(0.f, 1.f);
+        const float lens[] = {1.f, 30.f, 200.f, 1000.f, 4000.f, 20000.f};
+        for (float ext : {0.f, 16.f, 24.f, 32.f, 40.f, 60.f, 90.f}) {
+            for (float len : lens) {
+                long long bad = 0, n = 300000; int shown = 0;
+                memset(W.list, 0, sizeof(W.list));
+                for (long long i = 0; i < n; i++) {
+                    Ray r{};
+                    r.start[0] = UX(rng); r.start[1] = UY(rng);
+                    float a = UL(rng) * 6.2831853f, l = UL(rng) * len;
+                    r.delta[0] = std::cos(a) * l; r.delta[1] = std::sin(a) * l;
+                    if (i % 7 == 0) r.delta[0] = 0; if (i % 11 == 0) r.delta[1] = 0;
+                    r.end[0] = r.start[0] + r.delta[0]; r.end[1] = r.start[1] + r.delta[1];
+                    r.ext[0] = r.ext[1] = ext; r.ext[2] = 36;
+                    W.walk(g, r);
+                    if (W.oobCounted) { bad++; if (shown++ < 2) printf("   sample ext %g len %g: start (%g,%g) delta (%g,%g) path %d count %lld band %d stale %d\n", ext, len, r.start[0], r.start[1], r.delta[0], r.delta[1], W.path, (long long)W.count, W.maxBand, W.staleReads); }
+                }
+                printf("local ext %5.0f len %6.0f: %lld rays, %lld read out-of-table cells\n", ext, len, n, bad);
+            }
+        }
+        return 0;
+    }
     // ---- 1. lattice sweep: all (start, end) pairs on a coarse lattice, fresh list (zero stale), per extent
     {
         std::vector<float> pts;

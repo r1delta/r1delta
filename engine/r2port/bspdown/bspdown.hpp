@@ -89,7 +89,9 @@ struct Options {
     bool gridPad = true;
 
     // Rule 19: cell size the collision grid is re-binned to (R2 uses 704, R1 stock maps 256). 0 keeps the R2 size.
-    float gridCellSize = 256.0f;
+    // The walker (sub_18010BE50) reads unwritten stack slots for hull half extents between 0.354 * size and 0.7071 * size,
+    // so the window must not contain the hulls in use (player 16, AIN 38/60/65/325): 2048 gives 724..1448.
+    float gridCellSize = 2048.0f;
 
     // Rule 16: static prop flag bit 0x10. R2 sets it on 14,138 of the 16,183 mp_glitch props (Source NO_SHADOW meaning). The R1 loader
     // (sub_18018B710) stores (flags & 0x10) == 0 at prop+58 and the prop drawers (sub_18018D7A0 / sub_18018F1D0) draw a prop in the main
