@@ -16,7 +16,10 @@ enum class TextureTransform : std::uint8_t {
     maskRg,
     maskRgInv,
     // Albedo of an opaque material with its alpha forced to 255 (R2 stores non-opacity data in albedo alpha).
-    opaqueAlpha
+    opaqueAlpha,
+    // Albedo (guid) with its alpha multiplied by the R2 opacity map (slot 13, second guid in the synthetic name
+    // r2tex/opamerge/<albedo guid>_<opacity guid>); RGBA8 output.
+    opacityMerge
 };
 
 enum class LayerMode : std::uint8_t {
