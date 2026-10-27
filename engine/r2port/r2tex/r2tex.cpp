@@ -2330,6 +2330,11 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
         shaderSet.find("vcolt") == std::string::npos && !(foliageEnv && std::atof(foliageEnv) == 0.0) &&
         usedSlots.find(0) != usedSlots.end() && usedSlots.find(12) != usedSlots.end() &&
         slotGuids.size() > 12 && slotGuids[0] && slotGuids[12] && !slotGuids[11];   // an AO map (slot 11) means the set already has its own occlusion
+    // Other alpha-tested grass/foliage cards without the cavity bake (grass_brown_long_01, grass_desert_01, grass_high_02, ground plants,
+    // weeds ...): same reasoning, no $envmap. mp_lf_traffic: the cube reflection made the dry straw white-lavender (R2 golden); without it
+    // the straw colour matches R2.
+    const bool foliageNoEnv = foliageCavity || (!tools && cut && (shader == "VertexLitGeneric" || options.forModel) &&
+        (surface == "grass" || name.find("foliage") != std::string::npos));
     const char* normalsEnv = std::getenv("R2TEX_NORMALS");   // default on; "0" passes the R2 BC5/slope texture through unchanged
     const bool normalRepack = !tools && !(normalsEnv && normalsEnv[0] == '0');
     if (tools) {
@@ -2362,7 +2367,7 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
         if (!unlit) param(1, "$bumpmap");
         // Foliage (cavity bake) emits no env reflection: R2 occludes foliage specular with the cavity map, R1 has no such term and
         // the cube reflection on up-facing cards is a pale blue sheen (homestead grass B/G 1.47x R2; hue 1.10x without it).
-        if (!unlit && !foliageCavity && usedSlots.find(3) != usedSlots.end()) {
+        if (!unlit && !foliageNoEnv && usedSlots.find(3) != usedSlots.end()) {
             param(3, "$reflectiontint");
             param(3, "$reflectiontintshininess");
             addVmtParam(out, "$reflectiontintcolor", "1");
@@ -2423,7 +2428,7 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
         else if (translucent || glass) addVmtParam(out, "$translucent", "1");
         if (godray) addVmtParam(out, "$translucent", "1");
         if (decal) addVmtParam(out, "$decal", "1");
-        if (glass || (!unlit && !foliageCavity && usedSlots.find(3) != usedSlots.end())) addVmtParam(out, "$envmap", "env_cubemap");
+        if (glass || (!unlit && !foliageNoEnv && usedSlots.find(3) != usedSlots.end())) addVmtParam(out, "$envmap", "env_cubemap");
         // A layered R2 material uses vertex alpha as the layer blend weight. Once its layers are removed (layers-off),
         // R1 would multiply that graded alpha into the opaque surface and dither it: the mp_glitch ground shimmered
         // (metric 2.5..3.9) with "$vertexcolor 1" and not (0.0) without it.
