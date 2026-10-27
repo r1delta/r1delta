@@ -582,7 +582,9 @@ private:
     {
         const unsigned int cores = std::thread::hardware_concurrency();
         const unsigned int workerLimit = cores > 2 ? cores - 2 : 1;
-        const unsigned int workerCount = std::max(1u, std::min(4u, workerLimit));
+        // A cold map load is bound by conversion throughput (hundreds of files on the first load of a map)
+        // and the loading screen absorbs it, so use most cores; r2tex loads each rpak family under its own lock.
+        const unsigned int workerCount = std::max(1u, std::min(12u, workerLimit));
         {
             std::lock_guard<std::mutex> lock(m_cacheMutex);
             if (m_stopping)
