@@ -27,6 +27,9 @@ inline constexpr const char kLmgPbrSource[] =
 // r = gloss, g = AO, b = cavity (sampled with the base UV). Two-layer materials add $baseTexture2 t11, $bumpmap2 t12,
 // $reflectionTint2 t13 and $blendModulateTexture t15 (r, g = stock blend range); their packed gloss lives in the blend
 // texture, b = layer 1 and a = layer 2 (AO and cavity are not carried for two layers).
+#ifndef R2_SPEC_SRGB
+#define R2_SPEC_SRGB 1
+#endif
 #ifndef R2_STATIC
 #define R2_STATIC 0
 #endif
@@ -234,9 +237,10 @@ float4 PSMain(PSIn i
 
     float3 nts = bumpTexture.Sample(bumpSampler, i.uv.xy).xyz * cb0[9].yzw + cb0[10].xyz;
     float4 rt = reflectionTintTexture.Sample(reflectionTintSampler, i.uv.xy);
-#if !R2_NEUTRAL
+#if !R2_NEUTRAL && R2_SPEC_SRGB
     // R2 stores F0 reflectance (a dielectric is about 0.03..0.04, the _spc mean of stone is 8/255) but the converted
     // texture carries the source sRGB flag, so the sampler returned the sRGB decode; encode it back to the stored value.
+    // (Define R2_SPEC_SRGB 0 if r2tex stops flagging the _spc textures as sRGB.)
     rt.rgb = (rt.rgb <= 0.0031308) ? rt.rgb * 12.92 : 1.055 * pow(rt.rgb, 1.0 / 2.4) - 0.055;
 #endif
     float3 f0 = (rt.x + cb0[3].w * (rt.xyz - rt.x)) * cb0[2].xyz;
@@ -264,8 +268,10 @@ float4 PSMain(PSIn i
     }
 #endif
     float4 rt2 = reflectionTintTexture2.Sample(reflectionTintSampler2, i.uv.xy);
-#if !R2_NEUTRAL
+#if !R2_NEUTRAL && R2_SPEC_SRGB
     rt2.rgb = (rt2.rgb <= 0.0031308) ? rt2.rgb * 12.92 : 1.055 * pow(rt2.rgb, 1.0 / 2.4) - 0.055;
+#endif
+#if !R2_NEUTRAL
     gloss = lerp(bm.z, bm.w, blend);
 #endif
     f0 = lerp(f0, (rt2.x + cb0[16].w * (rt2.xyz - rt2.x)) * cb0[15].xyz, blend);
