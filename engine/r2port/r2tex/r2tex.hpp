@@ -14,7 +14,9 @@ namespace r2tex {
 enum class TextureTransform : std::uint8_t {
     none,
     maskRg,
-    maskRgInv
+    maskRgInv,
+    // Albedo of an opaque material with its alpha forced to 255 (R2 stores non-opacity data in albedo alpha).
+    opaqueAlpha
 };
 
 enum class LayerMode : std::uint8_t {

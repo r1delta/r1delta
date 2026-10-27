@@ -1293,6 +1293,59 @@ std::string layerMaskName(std::uint64_t guid, TextureTransform transform) {
     return name.str();
 }
 
+// R2 albedo textures (BC7 in particular) carry non-opacity data in the alpha channel. R1 reads the base texture alpha of
+// an opaque lightmapped/vertex-lit material as screen-door (dithered) transparency, which flickers every frame: this is the
+// "shimmer" (heat-mirage wobble, ghost shadow copies; gone with csm_enabled 0 + mat_global_lighting 1). Materials that
+// are not translucent, additive or alpha-tested therefore reference an alias whose alpha is forced to 255.
+constexpr const char* kOpaqueAlbedoPrefix = "r2tex/opaque/";
+
+std::string opaqueAlbedoName(const std::string& textureName) {
+    return std::string(kOpaqueAlbedoPrefix) + cleanAssetName(textureName, true);
+}
+
+bool forceOpaqueVtf(std::vector<std::uint8_t>& vtf, std::string& error) {
+    if (vtf.size() < 0x58 || std::memcmp(vtf.data(), "VTF\0", 4) != 0) {
+        error = "invalid source VTF for opaque albedo";
+        return false;
+    }
+    const std::uint32_t width = u16(vtf.data() + 0x10);
+    const std::uint32_t height = u16(vtf.data() + 0x12);
+    const std::uint32_t mipCount = vtf[0x38];
+    const std::uint32_t format = u32(vtf.data() + 0x34);
+    std::size_t offset = u32(vtf.data() + 0x54);
+    if (!width || !height || !mipCount || mipCount > 32 || offset < 0x58 || offset > vtf.size()) {
+        error = "invalid source VTF dimensions for opaque albedo";
+        return false;
+    }
+    if (format != 0 && format != 14 && format != 15) return true;  // no alpha channel to clear
+    for (std::uint32_t m = mipCount; m-- > 0;) {
+        const std::uint32_t w = std::max(1u, width >> m);
+        const std::uint32_t h = std::max(1u, height >> m);
+        std::size_t mipBytes;
+        if (format == 0) mipBytes = static_cast<std::size_t>(w) * h * 4;
+        else mipBytes = static_cast<std::size_t>((w + 3) / 4) * ((h + 3) / 4) * 16;
+        if (offset > vtf.size() || mipBytes > vtf.size() - offset) {
+            error = "truncated source VTF opaque albedo mip";
+            return false;
+        }
+        std::uint8_t* mip = vtf.data() + offset;
+        if (format == 0) {
+            for (std::size_t p = 3; p < mipBytes; p += 4) mip[p] = 255;
+        } else {
+            for (std::size_t block = 0; block < mipBytes; block += 16) {
+                if (format == 14) {
+                    std::memset(mip + block, 0xff, 8);  // DXT3: sixteen 4 bit alpha values
+                } else {
+                    mip[block] = 255; mip[block + 1] = 255;  // DXT5: alpha0 == alpha1 == 255, all indices 0
+                    std::memset(mip + block + 2, 0, 6);
+                }
+            }
+        }
+        offset += mipBytes;
+    }
+    return true;
+}
+
 bool surfaceKnown(const std::string& p) {
     static const std::set<std::string> names = {
         "default", "concrete", "metal", "dirt", "grass", "wood", "glass", "plastic", "rock", "sand",
@@ -1314,6 +1367,52 @@ void addVmtParam(std::ostringstream& out, const char* key, const std::string& va
     out << "\t\"" << key << "\" \"" << value << "\"\n";
 }
 
+// R2 "world/atmosphere" additive sheets (godray_*, atmosphere_*) multiply a nearly flat cloud-noise texture
+// (RGB about 0.66, alpha about 0.16) into per-vertex colour and alpha. R1's UnlitGeneric additive blend reads
+// the texture alpha as the beam intensity, so any moment where the texture is not resident (a white,
+// alpha 1 placeholder, or half uploaded data) turns the beams into hard, saturated cards or rainbow noise.
+// When the texture is flat enough, bake its mean into $color/$alpha and drop the texture dependency.
+struct FlatSheet {
+    bool ok = false;
+    double rgb[3] = {1.0, 1.0, 1.0};
+    double alpha = 1.0;
+};
+
+FlatSheet flatSheetStats(const std::shared_ptr<Database>& db, const AssetRecord& texture) {
+    FlatSheet flat;
+    std::vector<std::uint8_t> vtf;
+    std::string why;
+    if (!convertTextureWithDb(db, texture, TextureOptions{}, vtf, why) || vtf.size() < 0x40) return flat;
+    if (std::memcmp(vtf.data(), "VTF\0", 4) != 0) return flat;
+    const std::uint32_t headerSize = u32(vtf.data() + 12);
+    const std::uint32_t width = u16(vtf.data() + 16);
+    const std::uint32_t height = u16(vtf.data() + 18);
+    const std::uint32_t frames = u16(vtf.data() + 24);
+    const std::uint32_t format = u32(vtf.data() + 0x34);
+    // Only the plain RGBA8888 layout is decoded; the top mip is the last image in the file.
+    if (format != 0 || frames != 1 || !width || !height || headerSize >= vtf.size()) return flat;
+    const std::size_t topBytes = static_cast<std::size_t>(width) * height * 4u;
+    if (vtf.size() < topBytes + headerSize) return flat;
+    const std::uint8_t* top = vtf.data() + vtf.size() - topBytes;
+    double sum[4] = {0, 0, 0, 0};
+    int low[4] = {255, 255, 255, 255}, high[4] = {0, 0, 0, 0};
+    for (std::size_t i = 0; i < topBytes; i += 4)
+        for (int c = 0; c < 4; ++c) {
+            sum[c] += top[i + c];
+            low[c] = std::min<int>(low[c], top[i + c]);
+            high[c] = std::max<int>(high[c], top[i + c]);
+        }
+    const double pixels = static_cast<double>(topBytes / 4u);
+    for (int c = 0; c < 4; ++c) {
+        // Flat means every pixel stays within 0.12 of the mean on every channel.
+        const double mean = sum[c] / pixels;
+        if (mean - low[c] > 30.6 || high[c] - mean > 30.6) return flat;
+        if (c < 3) flat.rgb[c] = mean / 255.0; else flat.alpha = mean / 255.0;
+    }
+    flat.ok = true;
+    return flat;
+}
+
 bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view requested,
                            const MaterialOptions& options, Material& material, std::string& error) {
     const std::string name = cleanAssetName(requested, true);
@@ -1321,6 +1420,24 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
     if (name == "tools/toolsskybox" || name.find("tools/sky") == 0) {
         error = "sky compile tool material is not emitted as a VMT; use the map sky setting";
         return false;
+    }
+    // Map-pack materials that the rpaks do not carry and that R1 cannot draw as authored. The R2 VMT of the
+    // arena border dome (mp_coliseum, mp_coliseum_column) is an UnlitTwoTexture whose $texture2 is the
+    // skies/skycube cube map. R1's UnlitTwoTexture binds $texture2 as a 2D texture, so the sky layer comes
+    // out empty and only the blue scan-line layer remains; a raw skies/skycube.vtf also samples as blown-out
+    // white through $envmap. UnlitGeneric with the map's own env_cubemap draws the sky through the
+    // scan-lines instead. The scan-line texture is a plain VTF that the map-pack provider already serves.
+    if (name == "world/test/kodai_fake_screen_01_world") {
+        material = Material{};
+        material.name = name;
+        material.vmt =
+            "\"UnlitGeneric\"\n{\n"
+            "\t\"$basetexture\" \"effects\\dev_scanline_small_mip\"\n"
+            "\t\"$color\" \"[0.45 0.9 1.5]\"\n"
+            "\t\"$envmap\" \"env_cubemap\"\n"
+            "\t\"$envmaptint\" \"[0.25 0.3 0.4]\"\n"
+            "}\n";
+        return true;
     }
     const char* variants[] = {"wld", "fix", "skn", "gen"};
     const AssetRecord* record = nullptr;
@@ -1389,11 +1506,12 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
     material.usesLayers = hasLayerSlots;
     if (!tools) {
         use(0);
-        if (!layersOff) {
-            use(1); use(3); use(4); use(14); use(15);
-            if (lightmapped) {
-                use(22); use(23); use(24); use(26);
-            }
+        // layers-off removes only the second layer (slots 22/23/24/26). The normal, specular, emissive and detail
+        // slots must stay: a lightmapped material without $bumpmap runs a shader permutation that does not match
+        // bumped lightmap data and shimmers in the sun/light shadow paths.
+        use(1); use(3); use(4); use(14); use(15);
+        if (lightmapped && !layersOff) {
+            use(22); use(23); use(24); use(26);
         }
         if (usedSlots.find(0) == usedSlots.end()) { error = "material has no resolvable base texture: " + name; return false; }
     }
@@ -1423,15 +1541,33 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
         shaderSet.find("decal") != std::string::npos || overlayProfile;
     const bool glass = name.find("glass") != std::string::npos || surface == "glass";
 
+    // Additive atmosphere sheets with a flat texture: bake the texture mean into constants (see flatSheetStats).
+    FlatSheet flatSheet;
+    if (!tools && unlit && additive && name.rfind("world/atmosphere/", 0) == 0 &&
+        shaderSet.find("vcola") != std::string::npos) {
+        const auto slot0 = usedSlots.find(0);
+        if (slot0 != usedSlots.end() && slotGuids[0])
+            if (const AssetRecord* texture = findRecord(*db, slotGuids[0], kTxtr))
+                flatSheet = flatSheetStats(db, *texture);
+    }
     const bool vertexLit = shader == "VertexLitGeneric";
     std::ostringstream out;
     std::set<std::size_t> referencedSlots;
     out << '\"' << shader << "\"\n{\n";
     const std::string safeSurface = surfaceKnown(surface) ? surface : "default";
     addVmtParam(out, "$surfaceprop", safeSurface);
+    const bool opaqueAlbedo = !tools && !additive && !translucent && !glass && !cut &&
+        shaderSet.find("vcola") == std::string::npos;
     if (tools) {
         addVmtParam(out, "%compilenodraw", "1");
     } else {
+        // Opaque materials must not see R2's non-opacity albedo alpha (see forceOpaqueVtf).
+        if (opaqueAlbedo) {
+            for (const std::size_t albedoSlot : {std::size_t(0), std::size_t(23)}) {
+                auto albedo = usedSlots.find(albedoSlot);
+                if (albedo != usedSlots.end()) albedo->second = opaqueAlbedoName(albedo->second);
+            }
+        }
         auto param = [&](std::size_t slot, const char* key) {
             auto it = usedSlots.find(slot);
             if (it != usedSlots.end()) {
@@ -1439,7 +1575,7 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
                 referencedSlots.insert(slot);
             }
         };
-        param(0, "$basetexture");
+        if (!flatSheet.ok) param(0, "$basetexture");
         if (!unlit) param(1, "$bumpmap");
         if (!unlit && usedSlots.find(3) != usedSlots.end()) {
             param(3, "$reflectiontint");
@@ -1468,12 +1604,22 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
             param(24, "$bumpmap2");
             param(26, "$reflectionTint2");
         }
+        if (flatSheet.ok) {
+            char text[96];
+            std::snprintf(text, sizeof(text), "[%.3f %.3f %.3f]", flatSheet.rgb[0], flatSheet.rgb[1], flatSheet.rgb[2]);
+            addVmtParam(out, "$color", text);
+            std::snprintf(text, sizeof(text), "%.3f", flatSheet.alpha);
+            addVmtParam(out, "$alpha", text);
+        }
         if (cut) { addVmtParam(out, "$alphatest", "1"); addVmtParam(out, "$alphaTestReference", "0.7"); }
         if (additive) addVmtParam(out, "$additive", "1");
         else if (translucent || glass) addVmtParam(out, "$translucent", "1");
         if (decal) addVmtParam(out, "$decal", "1");
         if (glass || (!unlit && usedSlots.find(3) != usedSlots.end())) addVmtParam(out, "$envmap", "env_cubemap");
-        if (shaderSet.find("vcolt") != std::string::npos) addVmtParam(out, "$vertexcolor", "1");
+        // A layered R2 material uses vertex alpha as the layer blend weight. Once its layers are removed (layers-off),
+        // R1 would multiply that graded alpha into the opaque surface and dither it: the mp_glitch ground shimmered
+        // (metric 2.5..3.9) with "$vertexcolor 1" and not (0.0) without it.
+        if (shaderSet.find("vcolt") != std::string::npos && !layersOff) addVmtParam(out, "$vertexcolor", "1");
         if (shaderSet.find("vcola") != std::string::npos) addVmtParam(out, "$vertexalpha", "1");
         if ((raster & 0x06u) == 0x02u) addVmtParam(out, "$nocull", "1");
     }
@@ -1493,6 +1639,7 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
             texture.transform = options.layerMode == LayerMode::maskRg ?
                 TextureTransform::maskRg : TextureTransform::maskRgInv;
         }
+        if (opaqueAlbedo && (slot == 0 || slot == 23)) texture.transform = TextureTransform::opaqueAlpha;
         material.textures.push_back(std::move(texture));
     }
     return true;
@@ -1629,6 +1776,31 @@ bool ConvertTexture(std::string_view name, std::vector<std::uint8_t>& vtf,
                     const TextureOptions& options, std::string* error) {
     const std::string cleaned = cleanAssetName(name, true);
     if (!validAssetName(cleaned)) { vtf.clear(); if (error) *error = "invalid texture path"; return false; }
+    // Synthetic names emitted by ConvertMaterial: opaque albedo aliases and expanded layer masks.
+    if (cleaned.rfind(kOpaqueAlbedoPrefix, 0) == 0) {
+        const std::string original = cleaned.substr(std::strlen(kOpaqueAlbedoPrefix));
+        if (!validAssetName(original)) { vtf.clear(); if (error) *error = "invalid texture path"; return false; }
+        TextureRef ref;
+        ref.guid = textureGuid(original); ref.name = original; ref.transform = TextureTransform::opaqueAlpha;
+        return ConvertTexture(ref, vtf, options, error);
+    }
+    constexpr const char* kLayerMaskPrefix = "r2tex/layer_masks/";
+    if (cleaned.rfind(kLayerMaskPrefix, 0) == 0) {
+        const std::string rest = cleaned.substr(std::strlen(kLayerMaskPrefix));
+        const bool inverse = rest.size() == 16 + 7 && rest.compare(16, 7, "_rg_inv") == 0;
+        if ((rest.size() == 16 + 3 && rest.compare(16, 3, "_rg") == 0) || inverse) {
+            char* end = nullptr;
+            const std::string hex = rest.substr(0, 16);
+            const std::uint64_t guid = std::strtoull(hex.c_str(), &end, 16);
+            if (end == hex.c_str() + 16) {
+                TextureRef ref;
+                ref.guid = guid; ref.name = cleaned;
+                ref.transform = inverse ? TextureTransform::maskRgInv : TextureTransform::maskRg;
+                return ConvertTexture(ref, vtf, options, error);
+            }
+        }
+        vtf.clear(); if (error) *error = "invalid layer mask texture path"; return false;
+    }
     const std::uint64_t guid = textureGuid(cleaned);
     if (!ConvertTexture(guid, vtf, options, error)) {
         if (error && !error->empty()) *error = "texture " + cleaned + ": " + *error;
@@ -1660,6 +1832,15 @@ bool ConvertTexture(const TextureRef& texture, std::vector<std::uint8_t>& vtf,
             return false;
         }
         const bool invert = texture.transform == TextureTransform::maskRgInv;
+        if (texture.transform == TextureTransform::opaqueAlpha) {
+            if (!forceOpaqueVtf(vtf, why)) {
+                vtf.clear();
+                if (error) *error = why;
+                return false;
+            }
+            if (error) error->clear();
+            return true;
+        }
         if (texture.transform != TextureTransform::maskRg && !invert) {
             vtf.clear();
             if (error) *error = "unsupported texture transform";
