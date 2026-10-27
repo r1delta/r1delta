@@ -59,13 +59,14 @@ struct BuiltShader {
     bool hasPixel{};
     bool hasVertex{};
     std::vector<std::uint8_t> pixelVcs;   // <name>_ps40.vcs
-    std::vector<std::uint8_t> vertexVcs;  // <name>_vs40.vcs (static combos 0..3: bit 0 vertex colour, bit 1 transform)
+    std::vector<std::uint8_t> vertexVcs;       // <name>_vs40.vcs: single static combo 0 (R2_XFORM=1, R2_VCOLOR=0)
+    std::vector<std::uint8_t> vertexColorVcs;  // <name>_vcol_vs40.vcs: same with R2_VCOLOR=1 (use with $vertexshader "<name>_vcol")
     std::string error;                    // empty on success; compiler text otherwise
 };
 
 // Compiles `source` (entry points PSMain and, when present, VSMain or the R2_STANDARD_VS macro) with
-// ps_4_0 / vs_4_0, links the pair and wraps both as VCS. The vertex shader is compiled once per static combo with
-// R2_VCOLOR / R2_XFORM defined so one source serves every `$vertexcolor` / `$vertexTransform` setting.
+// ps_4_0 / vs_4_0, links the pair and wraps both as VCS. screenspace_general always asks a custom vertex shader for
+// static combo 0, so each vertex file holds that one combo; see BuildShader for the two variants.
 BuiltShader BuildShader(std::string_view name, std::string_view source, IncludeResolver includes);
 
 // Checks that every pixel-shader input is produced by the vertex shader (same semantic and index,

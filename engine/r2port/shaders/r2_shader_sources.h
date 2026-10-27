@@ -18,8 +18,8 @@
 //   b2  CBufCommonPerCamera, b3 CBufModelInstance: bound for model/brush draws; the stock vertexTransform
 //       vertex shader reads them, ours does the same
 //   t0..t3 / s0..s3: $basetexture, $texture1, $texture2, $texture3
-// Vertex-shader static combos follow the stock default VS: bit 0 = vertex colour ($vertexcolor),
-// bit 1 = $vertexTransform. The compiler defines R2_VCOLOR and R2_XFORM per combo.
+// A custom `$vertexshader` always runs as static combo 0 (the engine only varies the combo for the stock default VS),
+// so the vertex file is the R2_XFORM=1 build; `$vertexshader "<name>_vcol"` selects the R2_VCOLOR=1 build (COLOR0 input).
 
 namespace r2port::shaders {
 

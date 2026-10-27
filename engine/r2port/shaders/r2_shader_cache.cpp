@@ -26,7 +26,7 @@ namespace r2port::shaders {
 namespace {
 
 // Bump when the compiler flags, combo layout or VCS container change: it is part of every source hash.
-constexpr std::string_view kCacheRevision = "r2shader-1";
+constexpr std::string_view kCacheRevision = "r2shader-2";
 
 struct Entry {
     std::string name;
@@ -37,6 +37,7 @@ struct Entry {
     std::string error;
     std::filesystem::path pixelPath;
     std::filesystem::path vertexPath;
+    std::filesystem::path vertexColorPath;
 };
 
 std::mutex g_mutex;
@@ -150,6 +151,7 @@ void BuildOne(const Source& source, bool force)
     entry.fromDisk = source.fromDisk;
     entry.pixelPath = g_cacheDirectory / (source.name + "_ps40.vcs");
     entry.vertexPath = g_cacheDirectory / (source.name + "_vs40.vcs");
+    entry.vertexColorPath = g_cacheDirectory / (source.name + "_vcol_vs40.vcs");
     const std::filesystem::path hashPath = g_cacheDirectory / (source.name + ".hash");
     const std::string hash = HashText(SourceHash(source.text));
 
@@ -166,6 +168,7 @@ void BuildOne(const Source& source, bool force)
     // Remove stale output first so a failed build can never leave an old shader behind.
     std::filesystem::remove(entry.pixelPath, ec);
     std::filesystem::remove(entry.vertexPath, ec);
+    std::filesystem::remove(entry.vertexColorPath, ec);
     std::filesystem::remove(hashPath, ec);
 
     const BuiltShader built = BuildShader(source.name, source.text, &ResolveInclude);
@@ -183,8 +186,11 @@ void BuildOne(const Source& source, bool force)
         entry.hasPixel = entry.error.empty();
     }
     if (entry.error.empty() && built.hasVertex) {
-        const std::string problem = ValidateVcs(built.vertexVcs, 4);
-        if (!problem.empty() || !WriteBytes(entry.vertexPath, built.vertexVcs))
+        std::string problem = ValidateVcs(built.vertexVcs, 1);
+        if (problem.empty())
+            problem = ValidateVcs(built.vertexColorVcs, 1);
+        if (!problem.empty() || !WriteBytes(entry.vertexPath, built.vertexVcs)
+            || !WriteBytes(entry.vertexColorPath, built.vertexColorVcs))
             entry.error = problem.empty() ? "could not write the vertex shader file" : "vertex VCS invalid: " + problem;
         entry.hasVertex = entry.error.empty();
     }
@@ -193,6 +199,7 @@ void BuildOne(const Source& source, bool force)
         entry.hasVertex = false;
         std::filesystem::remove(entry.pixelPath, ec);
         std::filesystem::remove(entry.vertexPath, ec);
+        std::filesystem::remove(entry.vertexColorPath, ec);
         LogLoud(source.name.c_str(), entry.error);
     }
     else {
@@ -262,6 +269,12 @@ bool ResolveShaderFile(const char* requestedPath, std::string& absolutePath)
     else
         return false;
     stem.resize(stem.size() - 5);
+    // `<name>_vcol` is the vertex-colour variant of the vertex shader `<name>`.
+    bool vertexColor = false;
+    if (!pixel && stem.size() > 5 && stem.compare(stem.size() - 5, 5, "_vcol") == 0) {
+        vertexColor = true;
+        stem.resize(stem.size() - 5);
+    }
 
     std::lock_guard<std::mutex> lock(g_mutex);
     if (!g_built)
@@ -272,7 +285,7 @@ bool ResolveShaderFile(const char* requestedPath, std::string& absolutePath)
     const Entry& entry = found->second;
     if (!(pixel ? entry.hasPixel : entry.hasVertex))
         return false;
-    absolutePath = (pixel ? entry.pixelPath : entry.vertexPath).string();
+    absolutePath = (pixel ? entry.pixelPath : vertexColor ? entry.vertexColorPath : entry.vertexPath).string();
     return true;
 }
 

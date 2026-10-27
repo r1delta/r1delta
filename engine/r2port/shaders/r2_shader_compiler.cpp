@@ -280,31 +280,33 @@ BuiltShader BuildShader(std::string_view name, std::string_view source, IncludeR
     }
 
     if (wantsVertex) {
-        std::vector<std::vector<std::uint8_t>> combos;
-        for (int combo = 0; combo < 4; ++combo) {
+        // screenspace_general requests static combo 0 for every custom `$vertexshader` (the stock default VS picks
+        // 0..3 from $vertexcolor / $vertexTransform; sub_18002B110 zeroes the VS combo when a name is given), so a
+        // custom VS always runs transformed: combo 0 = R2_XFORM. A second file `<name>_vcol` adds the COLOR0 input.
+        for (int variant = 0; variant < 2; ++variant) {
             CompileRequest request;
             request.sourceName = std::string(name) + ".hlsl";
             request.source = source;
             request.entry = "VSMain";
             request.profile = "vs_4_0";
             request.includes = includes;
-            request.macros.push_back({ "R2_VCOLOR", (combo & 1) ? "1" : "0" });
-            request.macros.push_back({ "R2_XFORM", (combo & 2) ? "1" : "0" });
+            request.macros.push_back({ "R2_VCOLOR", variant ? "1" : "0" });
+            request.macros.push_back({ "R2_XFORM", "1" });
             CompileResult result = CompileHlsl(request);
             if (!result.ok) {
-                built.error = "vertex shader combo " + std::to_string(combo) + ": " + result.messages;
+                built.error = std::string(variant ? "vertex shader (vertex colour)" : "vertex shader") + ": " + result.messages;
                 return built;
             }
             if (wantsPixel) {
                 const std::string link = CheckVertexPixelLinkage(result.dxbc, pixelDxbc);
                 if (!link.empty()) {
-                    built.error = "vertex combo " + std::to_string(combo) + " does not link to the pixel shader: " + link;
+                    built.error = std::string(variant ? "vertex shader (vertex colour)" : "vertex shader")
+                        + " does not link to the pixel shader: " + link;
                     return built;
                 }
             }
-            combos.push_back(std::move(result.dxbc));
+            (variant ? built.vertexColorVcs : built.vertexVcs) = BuildVcs({ result.dxbc }, true);
         }
-        built.vertexVcs = BuildVcs(combos, true);
         built.hasVertex = true;
     }
     return built;

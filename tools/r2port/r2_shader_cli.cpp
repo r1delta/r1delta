@@ -46,9 +46,12 @@ bool Build(const std::filesystem::path& outDir, const std::string& name, const s
             built.pixelVcs.size(), problem.c_str());
     }
     if (built.hasVertex) {
-        const std::string problem = ValidateVcs(built.vertexVcs, 4);
-        ok = ok && problem.empty() && WriteFile(outDir / (name + "_vs40.vcs"), built.vertexVcs);
-        std::printf("%s %s_vs40.vcs %zu bytes %s\n", problem.empty() ? "ok  " : "BAD ", name.c_str(),
+        std::string problem = ValidateVcs(built.vertexVcs, 1);
+        if (problem.empty())
+            problem = ValidateVcs(built.vertexColorVcs, 1);
+        ok = ok && problem.empty() && WriteFile(outDir / (name + "_vs40.vcs"), built.vertexVcs)
+            && WriteFile(outDir / (name + "_vcol_vs40.vcs"), built.vertexColorVcs);
+        std::printf("%s %s_vs40.vcs + _vcol %zu bytes %s\n", problem.empty() ? "ok  " : "BAD ", name.c_str(),
             built.vertexVcs.size(), problem.c_str());
     }
     return ok;
