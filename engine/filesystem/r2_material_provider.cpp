@@ -285,9 +285,25 @@ public:
         StartIndex();
     }
 
+    // The first launch (or the first after the R2 install changed) builds the rpak index, which takes
+    // tens of seconds. A material or texture request that arrives before it is ready is a miss, and R1
+    // keeps the error material/texture it got for the rest of the map (the whole world turned into the
+    // magenta checker on the first load of mp_lf_deck). So once an R2 map is being loaded, block every
+    // provider question until the index is ready or has failed.
+    void WaitForIndex() const
+    {
+        if (m_state.load(std::memory_order_acquire) != State::Opening)
+            return;
+        std::unique_lock<std::mutex> lock(m_stateMutex);
+        m_stateChanged.wait_for(lock, kIndexWait, [this]() {
+            return m_state.load(std::memory_order_acquire) != State::Opening;
+        });
+    }
+
     void PrefetchMapMaterials(std::string_view mapName, FileBytes bspData)
     {
         Activate();
+        WaitForIndex();
         bool changed = false;
         {
             std::lock_guard<std::mutex> lock(m_metricsMutex);
@@ -326,8 +342,10 @@ public:
     bool MayContain(std::string_view normalizedPath) const override
     {
         if (!m_activated.load(std::memory_order_acquire)
-            || m_state.load(std::memory_order_acquire) != State::Ready
             || !IsMaterialOrTextureRequestPath(normalizedPath))
+            return false;
+        WaitForIndex();
+        if (m_state.load(std::memory_order_acquire) != State::Ready)
             return false;
         std::shared_lock<std::shared_mutex> lock(m_knownPathsMutex);
         return ContainsKnownPath(m_knownPaths, normalizedPath);
@@ -352,8 +370,10 @@ public:
 
     FileBytes Read(std::string_view normalizedPath) override
     {
-        if (!m_activated.load(std::memory_order_acquire)
-            || m_state.load(std::memory_order_acquire) != State::Ready)
+        if (!m_activated.load(std::memory_order_acquire))
+            return {};
+        WaitForIndex();
+        if (m_state.load(std::memory_order_acquire) != State::Ready)
             return {};
 
         std::string assetName;
@@ -511,6 +531,8 @@ private:
     // A known path is always queued on the worker pool, and a missed open leaves R1 with its
     // error texture for the rest of the map, so a read waits for the conversion to finish.
     static constexpr std::chrono::milliseconds kConversionWait{ 60000 };
+    // Longest a request waits for a cold index build (first launch); a build takes tens of seconds.
+    static constexpr std::chrono::milliseconds kIndexWait{ 300000 };
 
     void Initialize() noexcept
     {
@@ -576,6 +598,7 @@ private:
         }
         if (opened)
             StartWorkers();
+        m_stateChanged.notify_all();
     }
 
     void StartWorkers() noexcept
@@ -1055,7 +1078,8 @@ private:
     std::atomic<bool> m_activated{};
     mutable std::shared_mutex m_knownPathsMutex;
     KnownPathBuckets m_knownPaths;
-    std::mutex m_stateMutex;
+    mutable std::mutex m_stateMutex;
+    mutable std::condition_variable m_stateChanged;
     std::atomic<State> m_state{ State::Cold };
     std::thread m_indexWorker;
     std::vector<std::thread> m_workers;
