@@ -382,7 +382,181 @@ def check_grid_padding(C, r2, r1, g2, g1, cells, nmodels, grid_pad, unpadded, gr
         print("  note  no --unpadded file given: per-cell equality against the unpadded conversion not checked")
 
 
-LIGHT_OPT = {"collapse": True, "rtl": True, "min_weight": 187, "pbr": True, "sun_alpha": True, "sky_scale": 0.45, "sun_scale": 1.0, "pbr_scale": 1.0}
+def quantize_rtl_visibility(bsp, lights, ids, weights, minimum, linear):
+    """Independent atlas-footprint oracle: B is cone*visibility, not visibility alone."""
+    minimum = max(0, min(255, int(minimum)))
+    ids[(ids >= 0) & (weights == 0)] = -1
+    types = np.ascontiguousarray(lights[:, 52:56]).view("<i4").ravel()
+    valid = ids >= 0
+    safe = np.maximum(ids, 0)
+    ids[valid & (types[safe] == 1) & (weights < minimum)] = -1
+    weak = valid & (types[safe] == 2) & (weights < minimum)
+    active = np.flatnonzero(weak.any(axis=1))
+    if not len(active):
+        return {"needed": 0, "centres": 0, "borders": 0, "unreachable": 0, "aliases": 0, "disagreements": 0}
+    bit = np.array((1, 2, 4, 8), np.uint8)
+    masks = (weak[active] * bit).sum(axis=1).astype(np.uint8)
+    lookup = np.full(len(ids), -1, np.int32)
+    lookup[active] = np.arange(len(active))
+    all_keep, any_keep = masks.copy(), np.zeros(len(active), np.uint8)
+    coverage = np.zeros(len(active), np.uint8)
+    unassigned = np.zeros(len(active), bool)
+    aliases = np.zeros(len(active), bool)
+    last_mesh = np.full(len(active), -1, np.int64)
+    first_mesh = last_mesh.copy()
+    best_distance = np.full(len(active), np.inf)
+    best_any, best_all = any_keep.copy(), all_keep.copy()
+    best_position = np.zeros((len(active), 3), np.float32)
+    first_position = best_position.copy()
+    best_alias = aliases.copy()
+    mesh_dtype = np.dtype({"names": ["first", "triangles", "sort", "flags"],
+                          "formats": ["<u4", "<u2", "<u2", "<u4"], "offsets": [0, 4, 22, 24], "itemsize": 28})
+    sort_dtype = np.dtype({"names": ["page", "offset"], "formats": ["<i2", "<i4"], "offsets": [2, 8], "itemsize": 12})
+    meshes = bsp.arr(0x50, mesh_dtype)
+    sorts = bsp.arr(0x52, sort_dtype)
+    indices = np.frombuffer(bsp.raw(0x4F).tobytes(), "<u2")
+    positions = np.frombuffer(bsp.raw(3).tobytes(), "<f4").reshape(-1, 3)
+    vertices = [np.frombuffer(bsp.raw(lump).tobytes(), np.uint8).reshape(-1, stride)
+                for lump, stride in ((0x48, 36), (0x49, 44))]
+    layout, first = [], 0
+    for kind, w, h in bsp.arr(0x53, "<u4,<u2,<u2"):
+        if kind == 1:
+            w, h = int(w), int(h)
+            grid = lookup[first:first + w * h].reshape(h, w)
+            layout.append((first, w, h, grid))
+            first += w * h
+        else:
+            layout.append(None)
+    f = np.ascontiguousarray(lights).view("<f4").reshape(-1, 25)
+    widths = (f[:, 15] - f[:, 16]).astype(np.float64)
+    scale = np.full(len(lights), 100000.0)
+    smooth = (f[:, 17] > 0.5) & (widths >= 1e-10)
+    scale[smooth] = 1.0 / widths[smooth]
+    selector = np.clip(f[:, 17].astype(np.float64) - 1, 0, 1)
+    threshold = linear[minimum]
+    affected_meshes = np.zeros(len(meshes), bool)
+    for mi, mesh in enumerate(meshes):
+        fmt = (int(mesh["flags"]) >> 9) & 3
+        if fmt > 1 or not mesh["triangles"]:
+            continue
+        sort = sorts[int(mesh["sort"])]
+        page = int(sort["page"])
+        if page < 0 or layout[page] is None:
+            continue
+        first, w, h, grid = layout[page]
+        if not np.any(grid >= 0):
+            continue
+        jj = indices[int(mesh["first"]):int(mesh["first"]) + int(mesh["triangles"]) * 3].astype(np.int64) + int(sort["offset"])
+        records = vertices[fmt][jj]
+        position_ids = records[:, :4].copy().view("<u4").ravel().reshape(-1, 3)
+        triangle_uv = records[:, 20:28].copy().view("<f4").reshape(-1, 3, 2).astype(np.float64) * (w, h)
+        touched = []
+        for uv, pi in zip(triangle_uv, position_ids):
+            if not np.isfinite(uv).all():
+                raise ValueError("RTL visibility: non-finite lightmap UV")
+            low, high = uv.min(axis=0), uv.max(axis=0)
+            if high[0] < 0 or high[1] < 0 or low[0] >= w or low[1] >= h:
+                continue
+            lo = np.floor(np.clip(low, (0, 0), (w - 1, h - 1))).astype(int)
+            hi = np.floor(np.clip(high, (0, 0), (w - 1, h - 1))).astype(int)
+            yy, xx = np.nonzero(grid[lo[1]:hi[1] + 1, lo[0]:hi[0] + 1] >= 0)
+            if not len(xx):
+                continue
+            xx, yy = xx + lo[0], yy + lo[1]
+            si = grid[yy, xx]
+            centres = np.column_stack((xx + 0.5, yy + 0.5))
+            a, b, c = uv
+            determinant = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1])
+            orientation = -1.0 if determinant < 0 else 1.0
+            intersects = np.ones(len(si), bool)
+            for k in range(3):
+                edge = uv[(k + 1) % 3] - uv[k]
+                delta = centres - uv[k]
+                side = orientation * (edge[0] * delta[:, 1] - edge[1] * delta[:, 0])
+                intersects &= side + 0.5 * np.abs(edge).sum() >= -1e-9
+            if not intersects.any():
+                continue
+            si, centres = si[intersects], centres[intersects]
+            world = positions[pi].astype(np.float64)
+            if not np.isfinite(world).all():
+                raise ValueError("RTL visibility: non-finite world position")
+            if abs(determinant) < 1e-12:
+                cross = np.cross(world[1] - world[0], world[2] - world[0])
+                if np.dot(cross, cross) > 1e-12:
+                    unassigned[si] = True
+                continue
+            delta = centres - c
+            u = ((b[1] - c[1]) * delta[:, 0] + (c[0] - b[0]) * delta[:, 1]) / determinant
+            v = ((c[1] - a[1]) * delta[:, 0] + (a[0] - c[0]) * delta[:, 1]) / determinant
+            bary = np.column_stack((u, v, 1 - u - v))
+            distance = np.zeros(len(si))
+            border = bary.min(axis=1) < -1e-8
+            if border.any():
+                distance[border] = np.inf
+                for k in range(3):
+                    nk = (k + 1) % 3
+                    edge = uv[nk] - uv[k]
+                    length2 = np.dot(edge, edge)
+                    t = np.clip(((centres - uv[k]) @ edge) / length2, 0, 1) if length2 else np.zeros(len(si))
+                    gap = centres - uv[k] - t[:, None] * edge
+                    d2 = (gap * gap).sum(axis=1)
+                    better = border & (d2 < distance)
+                    bary[better] = 0
+                    bary[better, k] = 1 - t[better]
+                    bary[better, nk] = t[better]
+                    distance[better] = d2[better]
+            p = bary @ world
+            keep = np.zeros(len(si), np.uint8)
+            for s in range(4):
+                has = (masks[si] & (1 << s)) != 0
+                li = ids[active[si[has]], s]
+                delta = p[has] - f[li, :3]
+                cosine = (delta * f[li, 6:9]).sum(axis=1) / np.sqrt(np.maximum((delta * delta).sum(axis=1), 1.0))
+                cone = np.clip((cosine - f[li, 16]) * scale[li], 0, 1)
+                cone += selector[li] * (cone * cone - cone)
+                yes = linear[weights[active[si[has]], s]] >= threshold * cone
+                keep[np.flatnonzero(has)[yes]] |= np.uint8(1 << s)
+            new = last_mesh[si] != mi
+            best_distance[si[new]] = np.inf
+            last_mesh[si[new]] = mi
+            touched.extend(si[new].tolist())
+            closer = distance < best_distance[si] - 1e-9
+            tie = np.abs(distance - best_distance[si]) <= 1e-9
+            ci, ti = si[closer], si[tie]
+            best_distance[ci] = distance[closer]
+            best_any[ci] = best_all[ci] = keep[closer]
+            best_position[ci] = p[closer].astype(np.float32)
+            best_alias[ci] = False
+            best_any[ti] |= keep[tie]
+            best_all[ti] &= keep[tie]
+            best_alias[ti] |= ((best_position[ti].astype(np.float64) - p[tie].astype(np.float32)) ** 2).sum(axis=1) > 0.0001
+        ti = np.array(touched, np.int64)
+        if not len(ti):
+            continue
+        fresh = first_mesh[ti] < 0
+        first_mesh[ti[fresh]] = mi
+        first_position[ti[fresh]] = best_position[ti[fresh]]
+        aliases[ti] |= ((first_position[ti].astype(np.float64) - best_position[ti]) ** 2).sum(axis=1) > 0.0001
+        aliases[ti] |= best_alias[ti]
+        affected_meshes[mi] |= bool(aliases[ti].any())
+        affected_meshes[first_mesh[ti[aliases[ti]]]] = True
+        coverage[ti] |= np.where(best_distance[ti] == 0, 1, 2).astype(np.uint8)
+        any_keep[ti] |= best_any[ti]
+        all_keep[ti] &= best_all[ti]
+    if unassigned.any():
+        raise ValueError("RTL visibility: reachable texels have non-invertible UVs, no visibility fallback")
+    for s in range(4):
+        reject = ((masks & (1 << s)) != 0) & ((coverage == 0) | ((all_keep & (1 << s)) == 0))
+        ids[active[reject], s] = -1
+    return {"needed": len(active), "centres": int(((coverage & 1) != 0).sum()),
+            "borders": int(((coverage != 0) & ((coverage & 1) == 0)).sum()),
+            "unreachable": int((coverage == 0).sum()), "aliases": int(aliases.sum()),
+            "affected_meshes": int(affected_meshes.sum()),
+            "disagreements": sum(int(((((any_keep ^ all_keep) & (1 << s)) != 0) & (coverage != 0)).sum()) for s in range(4))}
+
+
+RTL_VISIBILITY_CUTOFF = 187  # fixed sRGB static-visibility cutoff of rule 20 (about half visible), applied after cone normalization
+LIGHT_OPT = {"collapse": True, "rtl": True, "pbr": True, "sun_alpha": True, "sky_scale": 0.45, "sun_scale": 1.0, "pbr_scale": 1.0}
 
 
 def expected_lighting(r2, wl_flag2):
@@ -432,6 +606,7 @@ def expected_lighting(r2, wl_flag2):
     if have:
         npal = len(pal) // 63
         tex_old = np.full((texels, 4), -1, np.int64)
+        source_weights = np.empty((texels, 4), np.uint8)
         off = 0
         t0 = 0
         skyoff = 0
@@ -440,6 +615,7 @@ def expected_lighting(r2, wl_flag2):
             m = w * h
             A = rb[off:off + 4 * m].view("<u4")
             B = rb[off + 4 * m:off + 8 * m].reshape(m, 4)
+            source_weights[t0:t0 + m] = B
             off += 9 * m
             sel = (A >> 24).astype(np.int64)
             skyB = np.frombuffer(sky, np.uint8)[skyoff + 4 * m:skyoff + 8 * m].reshape(m, 4) if sun_alpha else None
@@ -458,9 +634,7 @@ def expected_lighting(r2, wl_flag2):
                     ok &= ~sm
                 okk = ok.copy()
                 okk[ok] = ((ty[wo[ok]] == 1) | (ty[wo[ok]] == 2)) & ((fl[wo[ok]] & 8) != 0)
-                okk &= wt >= LIGHT_OPT["min_weight"]
                 tex_old[t0:t0 + m, s] = np.where(okk, wo, -1)
-                usage += np.bincount(wo[okk], weights=linear_visibility[wt[okk]], minlength=n)
             t0 += m
     flagged_pos = [k for k in range(head, len(order)) if ty[order[k]] in (1, 2) and (fl[order[k]] & 8)]
     source_intensity = np.ascontiguousarray(raw[:, 12:24]).view("<f4").reshape(-1, 3)
@@ -485,6 +659,13 @@ def expected_lighting(r2, wl_flag2):
 
     reordered = False
     do_rtl = bool(LIGHT_OPT["rtl"] and have)
+    visibility_info = None
+    if do_rtl:
+        visibility_info = quantize_rtl_visibility(r2, raw, tex_old, source_weights,
+                                                   RTL_VISIBILITY_CUTOFF, linear_visibility)
+        for s in range(4):
+            retained = tex_old[:, s] >= 0
+            usage += np.bincount(tex_old[retained, s], weights=linear_visibility[source_weights[retained, s]], minlength=n)
     if do_rtl and flagged_pos and flagged_pos[-1] - v1 > 254:
         ids = [order[p] for p in flagged_pos]
         for i in ids:
@@ -547,7 +728,7 @@ def expected_lighting(r2, wl_flag2):
         nwv = np.where((slot >= 0) & (nwv >= 0) & (nwv <= 254) & final_realtime, nwv, 255)
         nwv.sort(axis=1)  # 255 (none) last, ascending
         rtl_out = nwv.astype(np.uint8).tobytes()
-    return out.tobytes(), bytes(pr), rtl_out, {"E": E, "S": S, "head": head, "v1": v1, "reordered": reordered, "sky": bytes(sky), "sun_alpha": sun_alpha}
+    return out.tobytes(), bytes(pr), rtl_out, {"E": E, "S": S, "head": head, "v1": v1, "reordered": reordered, "sky": bytes(sky), "sun_alpha": sun_alpha, "visibility": visibility_info}
 
 
 def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", physics="stub", cubemap_scale=4.0,
@@ -587,7 +768,7 @@ def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", ph
     k = len(rtl) / max(texels, 1)
     elw, elp, elr, einfo = expected_lighting(r2, wl_flag2)
     if elr is not None:
-        C.ok(len(rtl) == texels * 4 and bytes(rtl) == elr, "RTL lump = independent decode of R2 9 byte texels (4 bytes per texel, slot = world index - %d, min weight %d, %s)" % (einfo["v1"], LIGHT_OPT["min_weight"], "reordered by contribution potential" if einfo["reordered"] else "original order"))
+        C.ok(len(rtl) == texels * 4 and bytes(rtl) == elr, "RTL lump = independent decode of R2 9 byte texels (4 bytes per texel, slot = world index - %d, min weight %d, %s)" % (einfo["v1"], RTL_VISIBILITY_CUTOFF, "reordered by contribution potential" if einfo["reordered"] else "original order"))
         C.ok(1 <= k <= 4, "RTL bytes per texel in 1..4 (%.2f)" % k)
     else:
         C.ok(len(rtl) == texels * rtl_bytes or (len(rtl) == 0 and len(r2.raw(0x69)) == 0), "RTL lump %d bytes = %d per texel" % (len(rtl), rtl_bytes))
@@ -1202,7 +1383,6 @@ if __name__ == "__main__":
     ap.add_argument("--worldlight-flag2", action="store_true")
     ap.add_argument("--no-collapse-envs", action="store_true", help="rule 20 disabled in the converter")
     ap.add_argument("--no-rtl", action="store_true", help="rule 20 RTL conversion disabled in the converter")
-    ap.add_argument("--rtl-min-weight", type=int, default=187)
     ap.add_argument("--no-sun-alpha", action="store_true", help="rule 21 disabled in the converter")
     ap.add_argument("--pbr-lights", choices=("keep", "convert"), default="convert")
     ap.add_argument("--sky-ambient-scale", type=float, default=0.45, help="rule 20e")
@@ -1213,7 +1393,7 @@ if __name__ == "__main__":
     ap.add_argument("--grid-size", type=float, default=2048.0, help="rule 19 cell size given to the converter (0 = R2 size kept)")
     ap.add_argument("--reference", "--unpadded", dest="reference", help="the same input converted with --grid-size 0 --no-grid-pad: equivalence checks for rules 18 / 19")
     a = ap.parse_args()
-    LIGHT_OPT.update(collapse=not a.no_collapse_envs, rtl=not a.no_rtl, min_weight=a.rtl_min_weight, sun_alpha=not a.no_sun_alpha, pbr=(a.pbr_lights == "convert"),
+    LIGHT_OPT.update(collapse=not a.no_collapse_envs, rtl=not a.no_rtl, sun_alpha=not a.no_sun_alpha, pbr=(a.pbr_lights == "convert"),
                      sky_scale=a.sky_ambient_scale, sun_scale=a.sun_scale, pbr_scale=a.pbr_scale)
     sys.exit(1 if check(a.r2, a.r1, a.limit, a.rtl_bytes, not a.no_bsp_tool, a.cubemaps, a.physics, a.cubemap_scale,
                         a.props, a.scatter_min, a.csm_rebase, a.empty_shadow_meshes, a.worldlight_flag2, a.keep_prop_flag10,

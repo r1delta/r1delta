@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace bspdown {
 namespace detail {
@@ -23,6 +24,8 @@ namespace {
 
 constexpr size_t kRec = 100;
 constexpr size_t kOffType = 52, kOffFlags = 88, kOffIntensity = 12, kOffRadius = 72, kOffC = 76, kOffL = 80, kOffQ = 84;
+// sRGB-encoded static-visibility cutoff of rule 20 (about half visible), applied after spotlight-cone normalization.
+constexpr int kRtlVisibilityCutoff = 187;
 constexpr uint32_t kFlagFade = 0x4, kFlagRealtime = 0x8, kFlagPbr = 0x20, kFlagUnknown40 = 0x40, kFlagBit2 = 0x2;
 
 struct Light {
@@ -61,6 +64,287 @@ float pbrIntensityScale(const Light& L, float scale) {
 }
 
 uint32_t rdU32(const uint8_t* p) { uint32_t v; std::memcpy(&v, p, 4); return v; }
+
+// The native local B texture contains cone * visibility. R1 evaluates the cone
+// analytically but has only a binary light list. Compare B >= threshold * cone;
+// never divide by a small cone or interpret every small B as a blocked light.
+double rtlSpotCone(const Light& light, const std::array<double, 3>& p) {
+    double delta[3], distance2 = 0, dot = 0;
+    for (int k = 0; k < 3; ++k) {
+        delta[k] = p[k] - light.f(4 * k);
+        distance2 += delta[k] * delta[k];
+        dot += delta[k] * light.f(24 + 4 * k);
+    }
+    const double width = light.f(60) - light.f(64);
+    const double exponent = light.f(68);
+    const double scale = exponent <= 0.5 || width < 1e-10 ? 100000.0 : 1.0 / width;
+    const double cosine = dot / std::sqrt(std::max(distance2, 1.0));
+    const double cone = std::clamp((cosine - light.f(64)) * scale, 0.0, 1.0);
+    const double selector = std::clamp(exponent - 1.0, 0.0, 1.0);
+    return cone + selector * (cone * cone - cone);
+}
+
+void quantizeRtlVisibility(Ctx& c, const std::vector<Light>& lights, std::vector<uint16_t>& ids,
+                           const double linear[256], std::vector<double>& usage,
+                           uint64_t& rejected, uint64_t& accepted) {
+    constexpr uint32_t none = uint32_t(-1);
+    struct Page {
+        size_t first = 0, rtlOffset = 0;
+        uint32_t width = 0, height = 0;
+        bool needed = false;
+    };
+    struct Sample {
+        uint32_t texel = 0, currentMesh = none, firstMesh = none;
+        uint8_t weak = 0, anyKeep = 0, allKeep = 0;
+        uint8_t bestAny = 0, bestAll = 0, coverage = 0;
+        bool alias = false, bestAlias = false, unassigned = false;
+        double bestDistance = 0;
+        Vec3 bestPosition{}, firstPosition{};
+    };
+    const Bytes& headers = c.lump[L_LMHDR];
+    const Bytes& rtl = c.lump[L_LMRTL];
+    const int minimum = kRtlVisibilityCutoff;
+    const double threshold = linear[minimum];
+    std::vector<Page> pages(headers.size() / 8);
+    std::vector<Sample> samples;
+    size_t first = 0, rtlOffset = 0;
+    for (size_t h = 0; h < pages.size(); ++h) {
+        if (rdU32(&headers[h * 8]) != 1) continue;
+        uint16_t width, height;
+        std::memcpy(&width, &headers[h * 8 + 4], 2);
+        std::memcpy(&height, &headers[h * 8 + 6], 2);
+        pages[h] = {first, rtlOffset, width, height};
+        const size_t count = size_t(width) * height;
+        const uint8_t* weights = &rtl[rtlOffset + 4 * count];
+        for (size_t t = 0; t < count; ++t) {
+            Sample sample;
+            sample.texel = (uint32_t)(first + t); // a 32-bit BSP lump has fewer than 2^32 / 9 texels
+            for (int s = 0; s < 4; ++s) {
+                uint16_t& id = ids[(first + t) * 4 + s];
+                if (id == 0xFFFF) continue;
+                if (!weights[t * 4 + s]) { id = 0xFFFF; ++rejected; continue; }
+                if (weights[t * 4 + s] >= minimum) continue;
+                if (lights[id].type() == 2) sample.weak |= uint8_t(1u << s);
+                else { id = 0xFFFF; ++rejected; }
+            }
+            if (sample.weak) {
+                sample.allKeep = sample.weak;
+                samples.push_back(sample);
+                pages[h].needed = true;
+            }
+        }
+        first += count;
+        rtlOffset += count * 9;
+    }
+    if (!samples.empty()) {
+        const Bytes& meshes = c.lump[L_MESHES];
+        const Bytes& sorts = c.lump[L_SORTS];
+        const Bytes& indices = c.lump[L_MESHIDX];
+        const Bytes& positions = c.lump[L_VERTICES];
+        if (meshes.size() % sizeof(MeshR2) || sorts.size() % sizeof(Sort) ||
+            indices.size() % 2 || positions.size() % sizeof(Vec3))
+            throw Error("RTL visibility: malformed mesh/sort/index/position lump");
+        std::vector<uint32_t> byTexel(ids.size() / 4, none);
+        for (size_t i = 0; i < samples.size(); ++i) byTexel[samples[i].texel] = (uint32_t)i;
+        std::vector<uint32_t> touched;
+        std::vector<uint8_t> aliasMeshes(meshes.size() / sizeof(MeshR2), 0);
+        const auto different = [](const Vec3& a, const Vec3& b) {
+            const double x = double(a.x) - b.x, y = double(a.y) - b.y, z = double(a.z) - b.z;
+            return x * x + y * y + z * z > 0.0001; // distinguish receivers, not floating-point seams
+        };
+        for (size_t mi = 0; mi < meshes.size() / sizeof(MeshR2); ++mi) {
+            MeshR2 mesh;
+            std::memcpy(&mesh, &meshes[mi * sizeof(mesh)], sizeof(mesh));
+            const uint32_t format = (mesh.flags >> 9) & 3;
+            if (format > 1 || !mesh.numTriangles) continue;
+            if (mesh.materialSort >= sorts.size() / sizeof(Sort))
+                throw Error("RTL visibility: mesh material sort out of range");
+            Sort sort;
+            std::memcpy(&sort, &sorts[mesh.materialSort * sizeof(sort)], sizeof(sort));
+            if (sort.lightmapHeader < 0) continue;
+            if ((size_t)sort.lightmapHeader >= pages.size())
+                throw Error("RTL visibility: lightmap header out of range");
+            const Page& page = pages[sort.lightmapHeader];
+            if (!page.needed) continue;
+            const uint32_t stride = format ? 44 : 36;
+            const Bytes& vertices = c.lump[format ? L_VTX_LITBUMP : L_VTX_LITFLAT];
+            if (vertices.size() % stride || sort.vertexOffset < 0 ||
+                (uint64_t(mesh.firstMeshIndex) + uint64_t(mesh.numTriangles) * 3) * 2 > indices.size())
+                throw Error("RTL visibility: invalid vertex/index range");
+            const size_t pageCount = size_t(page.width) * page.height;
+            const uint8_t* weights = &rtl[page.rtlOffset + 4 * pageCount];
+            touched.clear();
+            for (size_t tri = 0; tri < mesh.numTriangles; ++tri) {
+                uint16_t local[3];
+                std::memcpy(local, &indices[(size_t(mesh.firstMeshIndex) + tri * 3) * 2], sizeof(local));
+                const uint8_t* records[3];
+                double uv[3][2];
+                for (int k = 0; k < 3; ++k) {
+                    const size_t vertex = size_t(sort.vertexOffset) + local[k];
+                    if (vertex >= vertices.size() / stride)
+                        throw Error("RTL visibility: mesh vertex out of range");
+                    records[k] = &vertices[vertex * stride];
+                    float texcoord[2];
+                    std::memcpy(texcoord, records[k] + 20, sizeof(texcoord));
+                    uv[k][0] = double(texcoord[0]) * page.width;
+                    uv[k][1] = double(texcoord[1]) * page.height;
+                    if (!std::isfinite(uv[k][0]) || !std::isfinite(uv[k][1]))
+                        throw Error("RTL visibility: non-finite lightmap UV");
+                }
+                const double minX = std::min({uv[0][0], uv[1][0], uv[2][0]});
+                const double maxX = std::max({uv[0][0], uv[1][0], uv[2][0]});
+                const double minY = std::min({uv[0][1], uv[1][1], uv[2][1]});
+                const double maxY = std::max({uv[0][1], uv[1][1], uv[2][1]});
+                if (maxX < 0 || maxY < 0 || minX >= page.width || minY >= page.height) continue;
+                const int x0 = (int)std::floor(std::clamp(minX, 0.0, double(page.width - 1)));
+                const int x1 = (int)std::floor(std::clamp(maxX, 0.0, double(page.width - 1)));
+                const int y0 = (int)std::floor(std::clamp(minY, 0.0, double(page.height - 1)));
+                const int y1 = (int)std::floor(std::clamp(maxY, 0.0, double(page.height - 1)));
+                const double determinant = (uv[1][1] - uv[2][1]) * (uv[0][0] - uv[2][0]) +
+                                           (uv[2][0] - uv[1][0]) * (uv[0][1] - uv[2][1]);
+                const double orientation = determinant < 0 ? -1.0 : 1.0;
+                Vec3 world[3];
+                bool worldLoaded = false;
+                for (int y = y0; y <= y1; ++y) for (int x = x0; x <= x1; ++x) {
+                    const uint32_t index = byTexel[page.first + size_t(y) * page.width + x];
+                    if (index == none) continue;
+                    Sample& sample = samples[index];
+                    const double px = x + 0.5, py = y + 0.5;
+                    // Integer Load can sample exactly those texel squares touched by the UV triangle.
+                    // SAT uses the square axes (the bounding box above) and the three triangle edges.
+                    bool intersects = true;
+                    for (int k = 0; k < 3; ++k) {
+                        const int next = (k + 1) % 3;
+                        const double ex = uv[next][0] - uv[k][0], ey = uv[next][1] - uv[k][1];
+                        const double side = orientation * (ex * (py - uv[k][1]) - ey * (px - uv[k][0]));
+                        if (side + 0.5 * (std::fabs(ex) + std::fabs(ey)) < -1e-9) intersects = false;
+                    }
+                    if (!intersects) continue;
+                    if (!worldLoaded) {
+                        for (int k = 0; k < 3; ++k) {
+                            const uint32_t pi = rdU32(records[k]);
+                            if (pi >= positions.size() / sizeof(Vec3))
+                                throw Error("RTL visibility: position index out of range");
+                            std::memcpy(&world[k], &positions[size_t(pi) * sizeof(Vec3)], sizeof(Vec3));
+                            if (!std::isfinite(world[k].x) || !std::isfinite(world[k].y) || !std::isfinite(world[k].z))
+                                throw Error("RTL visibility: non-finite world position");
+                        }
+                        worldLoaded = true;
+                    }
+                    if (std::fabs(determinant) < 1e-12) {
+                        const double ax = double(world[1].x) - world[0].x, ay = double(world[1].y) - world[0].y, az = double(world[1].z) - world[0].z;
+                        const double bx = double(world[2].x) - world[0].x, by = double(world[2].y) - world[0].y, bz = double(world[2].z) - world[0].z;
+                        const double nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx;
+                        if (nx * nx + ny * ny + nz * nz > 1e-12) sample.unassigned = true;
+                        continue; // zero-area world triangles have no rasterized receiver
+                    }
+                    double bary[3];
+                    bary[0] = ((uv[1][1] - uv[2][1]) * (px - uv[2][0]) + (uv[2][0] - uv[1][0]) * (py - uv[2][1])) / determinant;
+                    bary[1] = ((uv[2][1] - uv[0][1]) * (px - uv[2][0]) + (uv[0][0] - uv[2][0]) * (py - uv[2][1])) / determinant;
+                    bary[2] = 1.0 - bary[0] - bary[1];
+                    double distance = 0;
+                    if (std::min({bary[0], bary[1], bary[2]}) < -1e-8) {
+                        // A sampled border texel need not have its centre inside the chart. Use the
+                        // nearest point of this UV triangle, not an arbitrary dilation/neighbor fill.
+                        distance = std::numeric_limits<double>::infinity();
+                        for (int k = 0; k < 3; ++k) {
+                            const int next = (k + 1) % 3;
+                            const double ex = uv[next][0] - uv[k][0], ey = uv[next][1] - uv[k][1];
+                            const double length2 = ex * ex + ey * ey;
+                            const double t = length2 ? std::clamp(((px - uv[k][0]) * ex + (py - uv[k][1]) * ey) / length2, 0.0, 1.0) : 0;
+                            const double dx = px - uv[k][0] - t * ex, dy = py - uv[k][1] - t * ey;
+                            if (dx * dx + dy * dy < distance) {
+                                distance = dx * dx + dy * dy;
+                                bary[0] = bary[1] = bary[2] = 0;
+                                bary[k] = 1.0 - t;
+                                bary[next] = t;
+                            }
+                        }
+                    }
+                    std::array<double, 3> p{};
+                    for (int k = 0; k < 3; ++k) {
+                        p[0] += bary[k] * world[k].x;
+                        p[1] += bary[k] * world[k].y;
+                        p[2] += bary[k] * world[k].z;
+                    }
+                    const Vec3 position{(float)p[0], (float)p[1], (float)p[2]};
+                    uint8_t keep = 0;
+                    const size_t localTexel = sample.texel - page.first;
+                    for (int s = 0; s < 4; ++s) if (sample.weak & (1u << s)) {
+                        const uint16_t id = ids[size_t(sample.texel) * 4 + s];
+                        if (linear[weights[localTexel * 4 + s]] >= threshold * rtlSpotCone(lights[id], p))
+                            keep |= uint8_t(1u << s);
+                    }
+                    if (sample.currentMesh != mi) {
+                        sample.currentMesh = (uint32_t)mi;
+                        sample.bestDistance = std::numeric_limits<double>::infinity();
+                        touched.push_back(index);
+                    }
+                    if (distance < sample.bestDistance - 1e-9) {
+                        sample.bestDistance = distance;
+                        sample.bestAny = sample.bestAll = keep;
+                        sample.bestPosition = position;
+                        sample.bestAlias = false;
+                    } else if (std::fabs(distance - sample.bestDistance) <= 1e-9) {
+                        sample.bestAny |= keep;
+                        sample.bestAll &= keep;
+                        sample.bestAlias |= different(sample.bestPosition, position);
+                    }
+                }
+            }
+            for (uint32_t index : touched) {
+                Sample& sample = samples[index];
+                if (sample.firstMesh == none) {
+                    sample.firstMesh = (uint32_t)mi;
+                    sample.firstPosition = sample.bestPosition;
+                } else if (different(sample.firstPosition, sample.bestPosition)) sample.alias = true;
+                sample.alias |= sample.bestAlias;
+                if (sample.alias) {
+                    aliasMeshes[mi] = 1;
+                    aliasMeshes[sample.firstMesh] = 1;
+                }
+                sample.coverage |= sample.bestDistance == 0 ? 1 : 2;
+                sample.anyKeep |= sample.bestAny;
+                sample.allKeep &= sample.bestAll; // equivalent to the maximum receiver cone: never favor the leakier alias
+            }
+        }
+        uint64_t centres = 0, borders = 0, unreachable = 0, unassigned = 0, aliases = 0, disagreements = 0;
+        uint64_t rescued = 0, rejectedShadow = 0, unreachableSlots = 0;
+        for (const Sample& sample : samples) {
+            if (sample.unassigned) ++unassigned;
+            if (sample.coverage & 1) ++centres;
+            else if (sample.coverage) ++borders;
+            else ++unreachable;
+            if (sample.alias) ++aliases;
+            for (int s = 0; s < 4; ++s) if (sample.weak & (1u << s)) {
+                if (sample.coverage && ((sample.anyKeep ^ sample.allKeep) & (1u << s))) ++disagreements;
+                if (sample.coverage && (sample.allKeep & (1u << s))) ++rescued;
+                else {
+                    ids[size_t(sample.texel) * 4 + s] = 0xFFFF;
+                    ++rejected;
+                    if (sample.coverage) ++rejectedShadow;
+                    else ++unreachableSlots;
+                }
+            }
+        }
+        c.say("[rule 20 visibility] %zu weak-spot texels: %llu centre-covered, %llu sampled chart-border footprints, %llu unreachable; %llu aliased texels across %zu meshes, %llu disagreeing slot decisions (maximum-cone conservative intersection); %llu reachable but unassigned degenerate-UV texels; %llu cone-tail slots rescued, %llu shadow slots rejected, %llu unreachable slots cleared",
+              samples.size(), (unsigned long long)centres, (unsigned long long)borders, (unsigned long long)unreachable,
+              (unsigned long long)aliases, (size_t)std::count(aliasMeshes.begin(), aliasMeshes.end(), uint8_t(1)),
+              (unsigned long long)disagreements, (unsigned long long)unassigned, (unsigned long long)rescued,
+              (unsigned long long)rejectedShadow, (unsigned long long)unreachableSlots);
+        if (unassigned)
+            throw Error("RTL visibility: reachable spotlight texels have non-invertible lightmap UVs; refusing an unquantified visibility fallback");
+    }
+    for (const Page& page : pages) {
+        if (!page.width || !page.height) continue;
+        const size_t count = size_t(page.width) * page.height;
+        const uint8_t* weights = &rtl[page.rtlOffset + 4 * count];
+        for (size_t t = 0; t < count; ++t) for (int s = 0; s < 4; ++s) {
+            const uint16_t id = ids[(page.first + t) * 4 + s];
+            if (id != 0xFFFF) { usage[id] += linear[weights[t * 4 + s]]; ++accepted; }
+        }
+    }
+}
 
 }  // namespace
 
@@ -185,7 +469,7 @@ void convertLighting(Ctx& c) {
         const size_t npal = pal.size() / 126;
         std::vector<uint16_t> palette(pal.size() / 2);
         std::memcpy(palette.data(), pal.data(), pal.size());
-        texLights.assign((size_t)texels * 4, 0xFFFF);
+        if (doRtl) texLights.assign((size_t)texels * 4, 0xFFFF);
         size_t off = 0, tex = 0, skyOff = 0;
         for (auto& pg : pages) {
             const size_t n = (size_t)pg.first * pg.second;
@@ -216,16 +500,15 @@ void convertLighting(Ctx& c) {
                         continue;
                     }
                     if ((L.type() != 1 && L.type() != 2) || !(L.flags() & (int32_t)kFlagRealtime)) { droppedKind++; continue; }
-                    // Local B includes the spotlight cone as well as occlusion. The conservative contribution cutoff
-                    // stays configurable: accepting every nonzero B would promote genuine partial shadow to full light.
-                    if ((int)w < c.opt.rtlMinWeight) { droppedLowWeight++; continue; }
+                    if (!doRtl) continue;
                     texLights[tex * 4 + s] = (uint16_t)wo;
-                    usage[wo] += linearVisibility[w];
-                    usedSlots++;
                 }
             }
         }
     }
+
+    if (doRtl)
+        quantizeRtlVisibility(c, old, texLights, linearVisibility, usage, droppedLowWeight, usedSlots);
 
     // --- real-time lights occupy a contiguous group; the RTL byte limits it to 255 slots ---------------------------------------------
     std::vector<size_t> flaggedPos;  // positions in 'order' of real-time point/spot lights
@@ -239,7 +522,7 @@ void convertLighting(Ctx& c) {
         const size_t lastSlot = flaggedPos.back() - (size_t)v1;
         if (lastSlot > 254) {
             // Rank contribution potential, not raw sRGB byte coverage. Distance/facing are evaluated by the shader;
-            // this score preserves the most visible light energy without rasterizing the BSP during conversion.
+            // Rank the retained authored energy; geometry-dependent visibility has already been quantized above.
             for (size_t p : flaggedPos) {
                 const size_t i = (size_t)order[p];
                 const Light& L = old[i];
@@ -370,9 +653,9 @@ void convertLighting(Ctx& c) {
         entries += ns;
     }
     rtl.swap(outRtl);
-    c.say("[rule 20] real-time lights (0x69): R2 9 bytes/texel (A: 4 x 6 bit palette slot + 8 bit palette id, B: 4 x authored contribution weight, C: count) + %zu palettes of 63 -> R1 4 bytes/texel = world light index - %d; %llu texels lit, %llu entries (%llu R2 slots used, %llu below contribution weight %d, %llu not point/spot or not flagged 0x8 (sun, baked), %llu bad refs, %llu outside the retained RTL table)%s",
+    c.say("[rule 20] real-time lights (0x69): R2 9 bytes/texel (A: 4 x 6 bit palette slot + 8 bit palette id, B: 4 x authored contribution weight, C: count) + %zu palettes of 63 -> R1 4 bytes/texel = world light index - %d; %llu texels lit, %llu entries (%llu R2 slots used, %llu rejected by visibility threshold %d / atlas coverage, %llu not point/spot or not flagged 0x8 (sun, baked), %llu bad refs, %llu outside the retained RTL table)%s",
           pal.size() / 126, v1, (unsigned long long)litTexels, (unsigned long long)entries, (unsigned long long)usedSlots,
-          (unsigned long long)droppedLowWeight, c.opt.rtlMinWeight, (unsigned long long)droppedKind, (unsigned long long)badRefs, (unsigned long long)overflow,
+          (unsigned long long)droppedLowWeight, kRtlVisibilityCutoff, (unsigned long long)droppedKind, (unsigned long long)badRefs, (unsigned long long)overflow,
           reordered ? "; real-time group reordered by contribution potential to fit the retained RTL table" : "");
 }
 

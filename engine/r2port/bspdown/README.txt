@@ -30,9 +30,14 @@ Files
 Build
 -----
   g++ (MSYS2 ucrt64, C++17):
-    g++ -std=c++17 -O2 -Wall -Wextra -o bspdown.exe main.cpp bspdown.cpp tricoll.cpp collision.cpp sprp.cpp meshclip.cpp tangents.cpp physics.cpp cubemaps.cpp shadow.cpp lighting.cpp
+    g++ -std=c++17 -O2 -Wall -Wextra -o bspdown.exe main.cpp bspdown.cpp tricoll.cpp collision.cpp sprp.cpp meshclip.cpp tangents.cpp physics.cpp cubemaps.cpp shadow.cpp lighting.cpp vcalpha.cpp
   MSVC (VS 2022 or later, x64): run build_msvc.bat  (cl /std:c++17 /O2 /EHsc ...)
   Both were built and produce byte identical output on mp_lf_deck.
+  Focused RTL fixtures (build instead of main.cpp and lighting.cpp, then run check_rtl_visibility.exe):
+    g++ -std=c++17 -O2 -Wall -Wextra -o check_rtl_visibility.exe check_rtl_visibility.cpp bspdown.cpp tricoll.cpp collision.cpp sprp.cpp meshclip.cpp tangents.cpp physics.cpp cubemaps.cpp shadow.cpp vcalpha.cpp
+  This exercises the production quantizer, including zero/tiny cones, sampled chart borders, unreachable texels, conservative atlas aliases,
+  non-invertible UV refusal, header indexing, point controls, and final world-index boundaries 254/255/256. The numpy checker separately
+  reconstructs the same source footprints and compares the complete lighting lumps byte-for-byte.
 
 Use
 ---
@@ -457,15 +462,22 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
     c) Real-time lights (lump 0x69, 9 bytes per type-1 lightmap texel; lightbaker docs/TF2_LIGHTMAP_AND_SHADOW_NOTES.md "Recovered RTL packing",
        verified here: per mesh, light at palette index + E is within radius of the mesh box for 88.7 % of pairs, <= 42 % at any other offset).
        Layout per type-1 page in header order: A plane (w*h uint32 LE: bits 0..23 four 6 bit slots, 63 = unused, bits 24..31 palette id;
-       0xFFFFFFFF = none), B plane (w*h x 4 bytes: visibility weight per slot), C plane (w*h bytes: candidate count). Palette = lump 0x7A,
+       0xFFFFFFFF = none), B plane (w*h x 4 bytes: authored cone * static visibility per local slot), C plane (w*h bytes: candidate count). Palette = lump 0x7A,
        126 byte records of 63 uint16, entry = world index - E. Slot 0 of the first palette column is reserved for the sun.
        R1 layout: four unsigned index bytes per texel, byte = world index - v1, 0xFF terminates the list, at most four lights.
        The R1 shader point-loads this integer texture at floor(lightmapUV * pageSize) and indexes HardwareLight[byte + 32] (t18, stride 96).
        It has no per-texel weight channel, interpolation, per-mesh palette or second index namespace. Stock R1 lists need not be ascending;
        the converter emits them ascending with all sentinels last. Stock rise references slots 1..239, never sun slot 0; box is all 0xFF.
-       Conversion keeps point/spot slots with flag 0x8 and B >= --rtl-min-weight (default 187, approximately half visibility after sRGB decode;
-       quarter steps are 137/187/224). 187 is a source visibility threshold, NOT a weight written into the R1 texel. Sun/baked entries are dropped.
-       On overflow, stable-sort the existing real-time positions by contribution potential: sum(linear-sRGB visibility over accepted texels)
+       Conversion keeps only point/spot slots with flag 0x8. B=0 is always absent. Point-light B is thresholded directly.
+       For spotlights, R1 evaluates the analytic cone itself, so compare linear(B) >= linear(187) * cone at the native luxel receiver
+       (fixed cutoff 187, approximately half STATIC visibility; quarter steps are 137/187/224). This avoids dividing by a zero/tiny cone. It rescues visible
+       cone tails without turning genuine low-visibility shadows into fully lit texels, unlike an unconditional B>0/min1 conversion.
+       Receiver reconstruction uses the shared native mesh/sort/index/vertex layouts before mesh clipping: luxel centres are (x+.5,y+.5). Because
+       R1 point-loads floor(UV*size), a chart-border texel is reachable exactly when its texel square intersects a source triangle. For those footprints
+       use the nearest triangle point, not arbitrary gutter dilation. Multiple surface aliases use the maximum cone / conservative intersection;
+       report alias/disagreement counts. Unreachable weak-spot slots are explicitly cleared and counted; reachable non-invertible UVs are a hard error.
+       There is no min1 fallback. No weight is written into the R1 texel; Sun/baked entries are dropped and fractional visibility remains binary.
+       On overflow, stable-sort the existing real-time positions by contribution potential: sum(linear-sRGB authored B over accepted texels)
        times luminance of the final converted light intensity (including the PBR intensity scale). This is not exact geometry-weighted irradiance.
        The conservative client-table bound still clears flag 0x8 at world-array indices >= 255. Emission checks the FINAL flags too, not merely
        the byte range, so it cannot reference one of those cleared lights (including array index 255, whose byte would otherwise fit).
@@ -473,9 +485,11 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
        Missing fractional visibility remains a representation limit; --no-rtl restores the 0xFF fill. Detailed shader formulas, dropped-light
        coverage and measured profiles are in lightref\RTL-RESULTS.md.
     d) PBR lights. R2 entity _pbr_falloff 1 = world light flag 0x20 (no 0x4); the compiled intensity is brightness/255 * 1e5 (the two blue
-       glitch point lights: 1e5, radius 500, d50 150; probe references to them: 937). R1 evaluates lights without flag 0x4 as 1 / (c + l d + q d^2)
-       (sub_1800A4FD0), which is unbounded near the radius. Rewrite: set flag 0x4 and multiply the intensity by 2 / d50^2 where d50 is the
-       distance at which c + l d + q d^2 = 0.5 (the inverse-square irradiance I/d50^2 equals I' * 0.5 there). Flags 0x20 and 0x40 are cleared.
+       glitch point lights: 1e5, radius 500, d50 150; probe references to them: 937). R1 CPU helpers evaluate lights without flag 0x4 as reciprocal
+       attenuation (sub_1800A4FD0); the world GPU instead always uses a radius-normalized quadratic, independently of flag 0x4.
+       The existing rewrite sets 0x4 and scales intensity by 2/d50^2: a one-distance inverse-square approximation, not an exact R2 GPU mapping.
+       d50 is the positive root of c+l*d+q*d^2=.5. R2's (sat(1-(d/R)^4))^2/(d^2+1) cannot equal R1's constrained quadratic at every distance.
+       Flags 0x20 and 0x40 are cleared; the approximation is retained rather than claiming a global gain fixes the falloff shape.
        --pbr-lights keep leaves the records alone. Calibration (LightVerify, ROUND3.md): glitch lights 438/445 at (2351,1426,351)/(2556,1492,369)
        have flag 0x20 WITHOUT 0x8, so their blue pools are baked into the lightmap and are not evidence of RTL response (--pbr-scale 0.01 .. 4:
        < 3% world change, +8% on the CPU-lit gun). Other 0x20 lights DO carry 0x8 (including wargames court spots); those require RTL validation.
@@ -498,7 +512,7 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
     Rule: for every texel whose R2 RTL palette lists a type-3 light (always channel R; mp_glitch 733,289 of 2,649,413 covered texels), plane B
     alpha = 255 - round(255 * srgb_to_linear(B / 255)) (R2 creates RTL plane B as an sRGB texture, R1 plane B alpha is linear); all other texels
     keep 255 (R2 skips the sun there). mp_glitch: 524,530 texels fully lit, 126,881 partial. Option --no-sun-alpha keeps 255.
-    Checker: independent numpy model of all three lumps, byte exact (check_bspdown.py, options --no-collapse-envs --no-rtl --rtl-min-weight
+    Checker: independent numpy model of all three lumps, byte exact (check_bspdown.py, options --no-collapse-envs --no-rtl
     --pbr-lights).
 22. Opaque vertex alpha for vertex-tinted, single-layer world materials (vcalpha.cpp). R2's `vcolt` shader uses mesh RGB as tint but ignores
     alpha when the material has no `vcola` token or second layer; R1's opaque LightmappedGeneric reads that vertex alpha as dithered opacity.
