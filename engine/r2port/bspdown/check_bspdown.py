@@ -1070,14 +1070,26 @@ def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", ph
     C.ok(int(sum(int(x[1]) for x in sm1)) * 3 == len(si1), "shadow mesh triangle counts address exactly the %d shadow indices" % len(si1))
     if csm_rebase and len(env2) >= 2:
         e = env2[-1]; fn, fr, fm = int(e[0]), int(e[1]), int(e[2])
-        C.ok(len(n1) == len(n2) - fn and len(r1r) == int(e[4]) - fr and (empty_shadow or len(sm1) == len(sm2) - fm), "csm rebase: %d nodes, %d refs, %d shadow meshes after dropping %d / %d / %d leading entries" % (len(n1), len(r1r), len(sm1), fn, fr, fm))
+        nmesh_all = len(r2.raw(0x50)) // 28
+        nprops = int(np.frombuffer(bytes(r2.raw(0x7B)[12:16]), "<u4")[0])
+        obj_total = nmesh_all + nprops
+        rr_old = r2r[fr:int(e[4])]
+        keep = rr_old < obj_total
+        pref = np.concatenate([[0], np.cumsum(keep)]).astype(np.int64)
+        C.ok(len(n1) == len(n2) - fn and len(r1r) == int(keep.sum()) and (empty_shadow or len(sm1) == len(sm2) - fm), "csm rebase: %d nodes, %d refs (%d dropped beyond meshes + props = %d), %d shadow meshes after dropping %d / %d / %d leading entries" % (len(n1), len(r1r), int((~keep).sum()), obj_total, len(sm1), fn, fr, fm))
         exp = n2[fn:].copy()
         nc = exp[:, 12]
         fc = np.ascontiguousarray(exp[:, 28:30]).view("<u2").ravel().astype(np.int64)
         fc2 = np.where(nc > 0, fc - fn, fc).astype(np.uint16)
         exp[:, 28:30] = fc2.view("u1").reshape(-1, 2)
-        C.ok(bool((n1 == exp).all()), "csm rebase: node array = R2 nodes from the last environment on, child indices lowered by %d" % fn)
-        C.ok(bool((r1r == r2r[fr:int(e[4])]).all()), "csm rebase: object references unchanged")
+        f0 = np.ascontiguousarray(exp[:, 30:32]).view("<u2").ravel().astype(np.int64) - fr
+        own = exp[:, 13].astype(np.int64)
+        tot = np.ascontiguousarray(exp[:, 14:16]).view("<u2").ravel().astype(np.int64)
+        exp[:, 30:32] = pref[f0].astype(np.uint16).view("u1").reshape(-1, 2)
+        exp[:, 13] = (pref[f0 + own] - pref[f0]).astype(np.uint8)
+        exp[:, 14:16] = (pref[f0 + tot] - pref[f0]).astype(np.uint16).view("u1").reshape(-1, 2)
+        C.ok(bool((n1 == exp).all()), "csm rebase: node array = R2 nodes from the last environment on, child indices lowered by %d, object ranges re-derived after dropping out-of-range refs" % fn)
+        C.ok(bool((r1r == rr_old[keep]).all()), "csm rebase: object references = R2 refs in range")
         root = n1[0].copy(); mins = np.ascontiguousarray(root[0:12]).view("<f4"); maxs = np.ascontiguousarray(root[16:28]).view("<f4")
         C.ok(bool((mins < maxs).all()) and int(root[12]) > 0, "csm rebase: node 0 is a real root (mins < maxs, %d children, %d total refs)" % (int(root[12]), int(np.ascontiguousarray(root[14:16]).view("<u2")[0])))
         drop_idx = int(sum(int(x[1]) for x in sm2[:fm])) * 3

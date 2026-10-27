@@ -111,6 +111,47 @@ void convertShadow(Ctx& c) {
             Bytes ii(idxB.begin() + dropIdx * 2, idxB.end());
             c.say("[rule 17] csm rebase: last environment first=(node %u, ref %u, mesh %u) last=(%d, %d, %d); dropped %u leading node(s), %u leading ref(s), %u leading shadow mesh(es) with %zu indices; %zu nodes' child indices lowered by %u",
                   fn, fr, fm, e.last[0], e.last[1], e.last[2], fn, fr, fm, dropIdx, fixedChild, fn);
+            // Object references beyond meshes + props (34 on mp_glitch, 25 on mp_lf_stacks; they sit in ordinary play-area leaves) name
+            // objects R1 does not have: R1 would index past its prop array. Drop them and re-derive every node's ref ranges.
+            {
+                const size_t nMeshesAll = c.lump[L_MESHES].size() / 28;
+                uint32_t nProps = 0;
+                if (c.lump[L_LEVELINFO].size() >= 16) std::memcpy(&nProps, &c.lump[L_LEVELINFO][12], 4);
+                const size_t objTotal = nMeshesAll + nProps;
+                const size_t n = rr.size() / 2;
+                std::vector<uint32_t> prefix(n + 1, 0);
+                size_t dropped = 0;
+                for (size_t i = 0; i < n; i++) {
+                    uint16_t v;
+                    std::memcpy(&v, &rr[i * 2], 2);
+                    bool keep = v < objTotal;
+                    prefix[i + 1] = prefix[i] + (keep ? 1u : 0u);
+                    if (!keep) dropped++;
+                }
+                if (dropped) {
+                    Bytes kept;
+                    kept.reserve((n - dropped) * 2);
+                    for (size_t i = 0; i < n; i++)
+                        if (prefix[i + 1] != prefix[i]) kept.insert(kept.end(), rr.begin() + i * 2, rr.begin() + i * 2 + 2);
+                    for (size_t i = 0; i < nn.size() / 32; i++) {
+                        CsmNode nd;
+                        std::memcpy(&nd, &nn[i * 32], 32);
+                        const size_t f = nd.firstObjRef;
+                        const size_t own = nd.numObjRefs, tot = nd.totalObjRefs;
+                        if (f + tot > n || f + own > n) c.fail("[rule 17] csm node %zu: ref range [%zu, +%zu) outside the reference pool", i, f, tot);
+                        else {
+                            nd.firstObjRef = (uint16_t)prefix[f];
+                            nd.numObjRefs = (uint8_t)(prefix[f + own] - prefix[f]);
+                            nd.totalObjRefs = (uint16_t)(prefix[f + tot] - prefix[f]);
+                        }
+                        std::memcpy(&nn[i * 32], &nd, 32);
+                    }
+                    c.throwIfFailed("rule 17");
+                    rr = std::move(kept);
+                }
+                c.say("[rule 17] csm rebase: object space = %zu meshes + %u props = %zu; %zu of %zu object references named objects beyond it and were dropped",
+                      nMeshesAll, nProps, objTotal, dropped, n);
+            }
             nodesB = std::move(nn);
             refsB = std::move(rr);
             meshB = std::move(mm);

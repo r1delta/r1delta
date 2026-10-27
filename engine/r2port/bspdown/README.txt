@@ -335,6 +335,15 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
     (12 byte vertices, 20 byte alpha vertices, u16 indices relative to the mesh's vertex offset, 12 byte meshes); they have their own
     vertex arrays, so rules 7/11/15 do not affect them. Checker: recomputes the rebase independently.
 
+    UPDATE (LightRef): with --csm-rebase, object references >= meshes + static props (levelinfo word 3) are dropped (mp_glitch 34 of 1322,
+    mp_lf_stacks 25 of 1548; they are in ordinary play-area leaves and name objects R1 does not have; R1 would index past its prop array) and
+    every node's (firstObjRef, numObjRefs, totalObjRefs) is re-derived by prefix sums. Why the rebase is the correct R1 reading: the "CSM PVS aabbs"
+    / "CSM PVS obj refs" tree (loader sub_1800B2540) is the visibility set of objects (render meshes + props) that are drawn into the cascades; R1 starts
+    at node 0 = R2's empty dummy, so without the rebase no tree object (props, alpha meshes) ever casts; the world shadow meshes (0x7C..0x7F) are drawn
+    unculled by sub_1800A1730 regardless of the tree. Winding, vertex-on-render-vertex coincidence (100 %), mesh record semantics (vertexOffset, numTriangles,
+    opaque, sort; indices relative to vertexOffset, consecutive per mesh) and the 12 byte vertex format are identical in R1 stock (mp_rise, mp_box) and R2
+    maps, so the shadow geometry itself needs no conversion. Level info 0x7B words 4..6 = sun direction (same as the real world light normal).
+
 18. Collision grid padding [R1 sub_18010BE50 / sub_180108710 / sub_180109B10 (IDA copy), data, simulation analysis\gp_walker.cpp]. Crash fixed:
     6 converted maps (mp_colony02, mp_lf_meadow, mp_lf_township, mp_lf_traffic, mp_lf_uma, mp_thaw) access-violated in the world grid
     walker (engine+0x10c5d0 / +0x10c7b0) during the AIN builder's script sweeps; captured on colony02: cell index 0x881 = 2177 =

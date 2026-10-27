@@ -77,7 +77,7 @@ constexpr uint32_t kGameLump = 0x23;
 
 // Folded into the on-disk cache fingerprint together with entity_rewrite::kRewriteVersion.
 // Bump when the vendored bspdown converter or the provider's BSP post-processing changes output.
-constexpr uint32_t kConvertedBspCacheVersion = 11;
+constexpr uint32_t kConvertedBspCacheVersion = 12;
 
 // Raised onto the z of every info_spawnpoint_flag origin in lump 0 (see entity_rewrite::RaiseFlagSpawnOrigins).
 // The R1 server drops the spawnpoint back to the floor; one that starts inside solid is removed.
@@ -1004,6 +1004,49 @@ FileBytes ReadMapPatchFile(const MapRequest& request)
 // provider and the CLI produce the same BSP. The converter owns the scale; the provider does not override it.
 // The other options are spelled out so a change of a library default cannot silently change what the
 // game loads.
+// Diagnostic converter variants: R1DELTA_R2PORT_BSPDOWN is a comma separated token list that flips one option each
+// (A/B runs without a rebuild). Unknown tokens are logged and ignored. The raw string is part of the converted-BSP
+// cache key (MapPackageFingerprint) so variants never share a cache file.
+const std::string& R2ConverterVariantString()
+{
+    static const std::string variant = [] {
+        char buffer[512]{};
+        const DWORD length = GetEnvironmentVariableA("R1DELTA_R2PORT_BSPDOWN", buffer, sizeof(buffer));
+        return length && length < sizeof(buffer) ? std::string(buffer, length) : std::string();
+    }();
+    return variant;
+}
+
+void ApplyConverterVariant(bspdown::Options& options, const std::string& variant)
+{
+    size_t begin = 0;
+    while (begin <= variant.size()) {
+        size_t end = variant.find(',', begin);
+        if (end == std::string::npos)
+            end = variant.size();
+        std::string token = variant.substr(begin, end - begin);
+        begin = end + 1;
+        token.erase(std::remove_if(token.begin(), token.end(), [](unsigned char c) { return std::isspace(c) != 0; }), token.end());
+        if (token.empty())
+            continue;
+        if (token == "csm-rebase") options.csmRebase = true;
+        else if (token == "empty-shadow-meshes") options.emptyShadowMeshes = true;
+        else if (token == "no-sun-alpha") options.lightmapSunAlpha = false;
+        else if (token == "no-rtl") options.rtlConvert = false;
+        else if (token == "no-collapse-envs") options.collapseEnvs = false;
+        else if (token == "pbr-keep") options.pbrLights = false;
+        else if (token == "flag2") options.worldLightFlagBit2 = true;
+        else if (token == "props-keep10") options.keepPropFlag10 = true;
+        else {
+            char message[256]{};
+            _snprintf_s(message, sizeof(message), _TRUNCATE,
+                "R1Delta: R2 converter variant token '%s' ignored (unknown)\n", token.c_str());
+            Msg("%s", message);
+            OutputDebugStringA(message);
+        }
+    }
+}
+
 bspdown::Options R2ConverterOptions()
 {
     bspdown::Options options;
@@ -1011,6 +1054,7 @@ bspdown::Options R2ConverterOptions()
     options.keepPropFlag10 = false;     // rule 16: clear static prop flag 0x10 (R1 reads it as "shadow caster only, not drawn")
     options.csmRebase = false;          // rule 17: shadow data options stay off
     options.emptyShadowMeshes = false;
+    ApplyConverterVariant(options, R2ConverterVariantString());
     return options;
 }
 
