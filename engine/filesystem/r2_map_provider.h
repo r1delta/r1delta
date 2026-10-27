@@ -45,6 +45,10 @@ void ObserveMapFilePath(std::string_view path);
 // Materializes one allowlisted BSP or entity into the keyed disk fallback.
 // Returns the search-path root on success; empty means the file was unavailable.
 std::filesystem::path MaterializeMapCacheFile(std::string_view path);
+// True when `path` names the copy MaterializeMapCacheFile already wrote for the current converter fingerprint. That copy is
+// provider output, not a native game file: it must never suppress the provider Read that starts the map's material and
+// model prefetch.
+bool IsMaterializedMapCopy(std::string_view path);
 void ClearMapCache();
 
 void InstallR2MapProvider();

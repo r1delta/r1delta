@@ -184,7 +184,11 @@ FileHandle_t ReadFileFromVPKHook(VPKData* vpkInfo, __int64* b, char* filename) {
             r2port::TraceFilesystemCall("ReadFileFromVPKHook[provider-preflight]",
                 filename, nullptr, 0, result);
         }
-        const bool nativeExists = providerMayContain && R2PortNativeFileExists(filename);
+        // The copy a previous load materialized is mounted on the GAME path, so the native probe finds it. It is the
+        // provider's own output, and skipping the provider Read for it skipped the material and model prefetch of every
+        // reload of a map (the first world material with an unknown VMT then crashed in IsErrorMaterial).
+        const bool nativeExists = providerMayContain && !r2port::IsMaterializedMapCopy(filename)
+            && R2PortNativeFileExists(filename);
         if (providerMayContain && !nativeExists) {
             const std::filesystem::path cacheRoot = r2port::MaterializeMapCacheFile(filename);
             if (!cacheRoot.empty() && MountR2MapCache(cacheRoot)) {

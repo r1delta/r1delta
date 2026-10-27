@@ -1746,6 +1746,26 @@ std::filesystem::path MaterializeMapCacheFile(std::string_view path)
     return root;
 }
 
+bool IsMaterializedMapCopy(std::string_view path)
+{
+    const auto normalized = NormalizeProviderPath(path);
+    if (!normalized)
+        return false;
+    const auto request = ParseMapRequest(*normalized);
+    if (!request || request->kind == MapRequest::Kind::AiGraph)
+        return false;
+    const auto state = GetMapState(request->mapName);
+    const std::string fingerprint = MapPackageFingerprint(state);
+    const auto gameDirectory = FindGameContentDirectory();
+    if (fingerprint.empty() || gameDirectory.empty())
+        return false;
+    std::error_code error;
+    return std::filesystem::is_regular_file(
+        gameDirectory / "r2port_cache" / (state->mapName + "-" + fingerprint)
+            / std::filesystem::path(*normalized),
+        error);
+}
+
 void ClearMapCache()
 {
     const auto gameDirectory = FindGameContentDirectory();
