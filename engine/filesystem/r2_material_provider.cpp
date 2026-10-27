@@ -828,9 +828,22 @@ private:
     {
         try {
             if (item.materialFile) {
+                // Converted models name their materials "r2m/<R2 material>" (see modelconv): the same
+                // R2 material also exists as a world material, and R1 crashes in studiorender/d3d11 when
+                // a studio mesh is drawn with a world shader (LightmappedGeneric). Convert the R2
+                // material and force the model shader.
+                constexpr std::string_view modelPrefix = "r2m/";
+                const bool forModel = item.assetName.compare(0, modelPrefix.size(), modelPrefix) == 0;
+                const std::string sourceName = forModel ? item.assetName.substr(modelPrefix.size()) : item.assetName;
                 r2tex::Material material;
-                if (!r2tex::ConvertMaterial(item.assetName, material) || material.vmt.empty())
+                if (!r2tex::ConvertMaterial(sourceName, material) || material.vmt.empty())
                     return {};
+                if (forModel) {
+                    static constexpr std::string_view world = "\"LightmappedGeneric\"";
+                    const std::size_t at = material.vmt.find(world);
+                    if (at != std::string::npos && material.vmt.find('{') > at)
+                        material.vmt.replace(at, world.size(), "\"VertexLitGeneric\"");
+                }
                 std::vector<std::uint8_t> bytes(material.vmt.begin(), material.vmt.end());
                 dependencies.reserve(material.textures.size());
                 for (const r2tex::TextureRef& texture : material.textures) {

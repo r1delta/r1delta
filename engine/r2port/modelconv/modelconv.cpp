@@ -23,6 +23,7 @@ constexpr std::int32_t kIDSV = 0x56534449;
 constexpr std::int32_t kIDCV = 0x56434449;
 constexpr std::int32_t kModelVersionR1 = 52;
 constexpr std::int32_t kModelVersionR2 = 53;
+constexpr std::string_view kModelMaterialDirectory = "r2m\\";
 constexpr std::int32_t kVertexVersion = 4;
 constexpr std::int32_t kVertexColorVersion = 1;
 constexpr std::int32_t kOptimizedModelVersion = 7;
@@ -867,21 +868,27 @@ void AppendMappedTextures(std::span<const std::uint8_t> source, const Header53& 
                                 SourceRecordString(source, srcOffset, src.nameIndex, "texture name"));
         }
     }
+    // Every material of a converted model is renamed into the "r2m/" namespace so the provider can
+    // serve it with a model shader (an R2 world material is LightmappedGeneric, which crashes R1's
+    // studio renderer on entities) without clobbering the world material of the same name.
     if (in.numCdTextures == 0) {
-        out.cdTextureIndex = 0;
+        const auto destination = AppendZeroBytes(output, sizeof(TextureDir));
+        out.cdTextureIndex = destination;
+        out.numCdTextures = 1;
+        WriteObject(output, static_cast<std::size_t>(destination), AppendString(output, std::string(kModelMaterialDirectory)));
     } else {
         CheckArray(source, in.cdTextureIndex, in.numCdTextures, sizeof(TextureDir), "R2 texture-directory array");
         const auto destination = AppendZeroBytes(output, static_cast<std::size_t>(in.numCdTextures) * sizeof(TextureDir));
         out.cdTextureIndex = destination;
         for (std::int32_t i = 0; i < in.numCdTextures; ++i) {
             const auto src = ReadObject<TextureDir>(source, in.cdTextureIndex + static_cast<std::int64_t>(i) * sizeof(TextureDir), "R2 texture directory");
-            const auto text = SourceGlobalString(source, src.nameIndex, "texture-directory name");
-            const auto stringOffset = AppendString(output, text);
+            auto text = SourceGlobalString(source, src.nameIndex, "texture-directory name");
+            while (!text.empty() && (text.front() == '/' || text.front() == '\\')) text.erase(text.begin());
+            const auto stringOffset = AppendString(output, std::string(kModelMaterialDirectory) + text);
             WriteObject(output, static_cast<std::size_t>(destination) + static_cast<std::size_t>(i) * sizeof(TextureDir), stringOffset);
         }
     }
 }
-
 
 // R1's client-side animating entities index sequence 0 unconditionally, so the converted model
 // keeps the one-frame @ref pose and the ref sequence instead of dropping them.
@@ -1418,6 +1425,7 @@ bool ListModelMaterials(std::span<const std::uint8_t> r2Mdl, std::vector<std::st
                 }
                 while (!name.empty() && name.front() == '/') name.erase(name.begin());
                 if (name.empty()) continue;
+                name.insert(0, "r2m/");
                 bool seen = false;
                 for (const auto& existing : names) seen = seen || existing == name;
                 if (!seen) names.push_back(std::move(name));

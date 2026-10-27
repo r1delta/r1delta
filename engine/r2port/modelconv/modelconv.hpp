@@ -37,9 +37,10 @@ struct ModelOutput {
 // error contains a specific reason and output is cleared.
 bool ConvertModelR2ToR1(const ModelInput& input, ModelOutput& output, std::string& error);
 
-// Lists the material names an R2 MDL v53 refers to: each texture name joined with every
-// texture directory, forward slashes, no leading slash, case preserved, de-duplicated. The caller
-// resolves them under materials/ with a .vmt extension.
+// Lists the materials a converted model refers to, as R1 resolves them: "r2m/" + each texture name joined
+// with every texture directory, forward slashes, case preserved, de-duplicated (the converter renames all
+// model materials into the r2m/ namespace). The caller resolves them under materials/ with a .vmt
+// extension; the R2 material is the name without the r2m/ prefix.
 bool ListModelMaterials(std::span<const std::uint8_t> r2Mdl, std::vector<std::string>& names, std::string& error);
 
 // Checks structural bounds and the matching MDL/VVD/VTX/VVC checksums expected
