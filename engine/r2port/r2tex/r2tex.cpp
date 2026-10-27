@@ -1590,7 +1590,7 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
     // $envmap of env_cubemap (or the raw sky cube) blows the whole dome out to flat white and $envmaptint has no
     // effect, and $translucent/$additive scan-lines are invisible, so the closest safe look is the scan-line layer
     // alone in R2's layer colour (0.3 0.6 1.0). The scan-line texture is a plain VTF that the map-pack provider serves.
-    // Shader track (env R2TEX_SHADERS=1, needs the engine's r2port shader override, engine/r2port/shaders/
+    // Shader track (default on, env R2TEX_SHADERS=0 turns it off; needs the engine's r2port shader override, engine/r2port/shaders/
     // r2_shader_override.cpp): the three materials keep the R2 UnlitTwoTexture VMT (layer colours, $addlayers and the
     // fresnel terms are R1 parameters too) and add `$godrayMinFadeDist 7701`, the opt-in marker for the engine's pixel
     // shader override `r2_ut_dome`, which samples `$texture2` as a cube map along the view direction. `$nofog 1` is
@@ -1601,8 +1601,8 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
         name == "skies/boomtowncubemap_desert") {
         material = Material{};
         material.name = name;
-        const char* shadersEnv = std::getenv("R2TEX_SHADERS");
-        if (shadersEnv && shadersEnv[0] && shadersEnv[0] != '0') {
+        const char* shadersEnv = std::getenv("R2TEX_SHADERS");   // default on; "0" restores the scan-line-only stand-in
+        if (!(shadersEnv && shadersEnv[0] == '0')) {
             const char* cube = name == "world/test/kodai_fake_screen_01_world" ? "skies\\skycube"
                 : name == "skies/boomtowncubemap_grave" ? "skies\\graveCubemap_" : "skies\\boomtownCubemap_desert_";
             material.vmt =
