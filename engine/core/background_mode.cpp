@@ -44,6 +44,26 @@ bool CommandLineHas(const char* flag)
     return commandLine && std::strstr(commandLine, flag) != nullptr;
 }
 
+// An agent root carries an empty r1delta_background.flag next to the game executable (.build\r2-root.ps1 creates
+// it for the agent roots only), so every launch from that root is a background launch whatever script started it.
+// Only the executable's own directory is checked: the working directory is shared (C:\whatever) and must not switch
+// anybody's launch into background mode.
+bool MarkerFileExists()
+{
+    char path[MAX_PATH]{};
+    const DWORD length = GetModuleFileNameA(nullptr, path, static_cast<DWORD>(sizeof(path)));
+    if (!length || length >= sizeof(path))
+        return false;
+    char* slash = std::strrchr(path, '\\');
+    if (!slash)
+        return false;
+    *slash = '\0';
+    if (std::strlen(path) + std::strlen("\\r1delta_background.flag") >= sizeof(path))
+        return false;
+    std::strcat(path, "\\r1delta_background.flag");
+    return GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES;
+}
+
 std::string NarrowForLog(LPCWSTR text)
 {
     if (!text)
@@ -394,7 +414,7 @@ bool IsActive()
 {
     int state = g_active.load(std::memory_order_relaxed);
     if (state < 0) {
-        state = (EnvironmentFlagSet("R1DELTA_BACKGROUND") || CommandLineHas("-r1delta_background")) ? 1 : 0;
+        state = (EnvironmentFlagSet("R1DELTA_BACKGROUND") || CommandLineHas("-r1delta_background") || MarkerFileExists()) ? 1 : 0;
         g_active.store(state, std::memory_order_relaxed);
     }
     return state == 1;
@@ -493,7 +513,9 @@ void AppendEngineArguments(std::string& commandLine)
             commandLine += ' ';
         commandLine += text;
     };
-    appendIfMissing("-nosound", "-nosound");
+    // Background windows are silent unless R1DELTA_BACKGROUND_SOUND=1 (e.g. to test audio on purpose).
+    if (!EnvironmentFlagSet("R1DELTA_BACKGROUND_SOUND"))
+        appendIfMissing("-nosound", "-nosound");
     appendIfMissing("-nomouse", "-nomouse");
     appendIfMissing("-nomessagebox", "-nomessagebox");
     appendIfMissing("+cl_mouseenable", "+cl_mouseenable 0");

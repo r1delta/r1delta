@@ -739,6 +739,15 @@ function Add-LocalExclude([string] $Core, [string[]] $Patterns) {
 # Agent root construction (shared by -Create, -Reset, and -Repair; never overwrites an existing file)
 # ---------------------------------------------------------------------------
 
+# Background test mode marker (docs/r2port.md): an empty r1delta_background.flag next to Titanfall.exe makes every
+# launch from the root a background launch (off-screen, silent, no focus, no message boxes), whatever script starts it.
+# Agent roots only; never the template and never the user's own r2 root.
+function Ensure-BackgroundFlag {
+    if ($AgentRootNames -notcontains $RootName -or $RootName -eq $TemplateName) { return }
+    $flag = Join-Path $Root 'r1delta_background.flag'
+    if (-not (Test-Path -LiteralPath $flag -PathType Leaf)) { New-Item -ItemType File -Path $flag | Out-Null }
+}
+
 function Install-RootSkeleton {
     $stageNames = @(Get-RootStageNames)
     $linked = 0
@@ -755,6 +764,7 @@ function Install-RootSkeleton {
         $path = Join-Path $Root $name
         if (-not (Test-EntryExists $path)) { New-Item -ItemType Directory -Path $path | Out-Null }
     }
+    Ensure-BackgroundFlag
     return $linked
 }
 
@@ -1115,6 +1125,7 @@ function New-ReleaseVerificationMirror([string] $Destination) {
 
 function Stage-R2Root {
     Assert-R2Idle
+    Ensure-BackgroundFlag
     Assert-RealDirectory $Root
     Assert-RealDirectory $CoreRoot
     foreach ($name in @('bin', 'bin_nexon')) { [void] (Get-RealCoreDirectory $CoreRoot $name) }
