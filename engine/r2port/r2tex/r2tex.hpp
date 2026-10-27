@@ -55,6 +55,8 @@ bool ListTextureInfo(std::vector<TextureInfo>& out, std::string* error = nullptr
 
 struct MaterialOptions {
     LayerMode layerMode = LayerMode::current;
+    // The caller serves this material to a converted model (r2m/ prefix) and re-labels its shader VertexLitGeneric.
+    bool forModel = false;
 };
 struct TextureOptions {
     // Preserve source BC7 blocks in VTF 7.5 format 67. Disabled by default;
