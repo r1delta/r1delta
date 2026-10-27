@@ -784,6 +784,10 @@ std::once_flag g_modelProviderRegistration;
 void RegisterR2ModelProvider()
 {
     std::call_once(g_modelProviderRegistration, []() {
+        // Differential switch for crash triage: R1DELTA_R2PORT_NO_MODELS=1 serves no R2 models.
+        char disabled[8]{};
+        if (GetEnvironmentVariableA("R1DELTA_R2PORT_NO_MODELS", disabled, sizeof(disabled)) && disabled[0] == '1')
+            return;
         auto provider = std::make_shared<R2ModelProvider>();
         if (RegisterProvider("models", provider))
             g_modelProvider = std::move(provider);
