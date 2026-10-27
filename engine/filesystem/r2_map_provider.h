@@ -23,10 +23,10 @@ public:
     virtual ~MapPatchSource() = default;
     virtual std::shared_ptr<const MapPatch> LoadPatch(
         std::string_view mapName, const BspSha256& sourceBspSha256) = 0;
-    // Optional file override for formats bound to the converted BSP or live map state.
+    // Optional file override for formats bound to the source R2 BSP hash or live map state.
     virtual FileBytes LoadFileOverride(
         std::string_view, std::string_view,
-        const BspSha256&, const BspSha256&, std::int32_t, std::int32_t)
+        const BspSha256&, std::int32_t, std::int32_t)
     {
         return {};
     }

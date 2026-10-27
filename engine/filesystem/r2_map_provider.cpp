@@ -120,7 +120,6 @@ struct MapState {
     bool filePatchLoaded{};
     uint64_t filePatchGeneration{};
     BspSha256 filePatchSourceHash{};
-    BspSha256 filePatchConvertedHash{};
     std::int32_t filePatchMapVersion{};
     std::int32_t filePatchDeveloperValue{};
     FileBytes aiGraphFile;
@@ -965,12 +964,6 @@ FileBytes ReadMapPatchFile(const MapRequest& request)
         sourceHash = state->sourceHash;
     }
 
-    const std::string bspPath = "maps/" + state->mapName + ".bsp";
-    const MapRequest bspRequest{ request.mapName, MapRequest::Kind::Bsp, bspPath };
-    const FileBytes converted = ReadConvertedBsp(bspRequest);
-    if (!converted)
-        return {};
-    const BspSha256 convertedHash = p2p::Sha256(converted->data(), converted->size());
     const std::int32_t mapVersion = pGlobalVarsServer ? pGlobalVarsServer->mapversion : 0;
     const std::int32_t developerValue = CurrentDeveloperValue();
     if (mapVersion <= 0 || developerValue < 0)
@@ -980,7 +973,6 @@ FileBytes ReadMapPatchFile(const MapRequest& request)
     std::lock_guard<std::mutex> lock(state->filePatchMutex);
     if (state->filePatchLoaded && state->filePatchGeneration == generation
         && state->filePatchSourceHash == sourceHash
-        && state->filePatchConvertedHash == convertedHash
         && state->filePatchMapVersion == mapVersion
         && state->filePatchDeveloperValue == developerValue)
         return state->aiGraphFile;
@@ -988,14 +980,13 @@ FileBytes ReadMapPatchFile(const MapRequest& request)
     state->filePatchLoaded = true;
     state->filePatchGeneration = generation;
     state->filePatchSourceHash = sourceHash;
-    state->filePatchConvertedHash = convertedHash;
     state->filePatchMapVersion = mapVersion;
     state->filePatchDeveloperValue = developerValue;
     state->aiGraphFile.reset();
     for (const auto& source : sources) {
         try {
             state->aiGraphFile = source->LoadFileOverride(request.mapName, request.packagePath,
-                sourceHash, convertedHash, mapVersion, developerValue);
+                sourceHash, mapVersion, developerValue);
             if (state->aiGraphFile)
                 break;
         }

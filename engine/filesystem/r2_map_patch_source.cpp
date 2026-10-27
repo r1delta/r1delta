@@ -27,7 +27,7 @@ namespace {
 constexpr std::uint64_t kMaximumPhysicsLumpBytes = 256ull * 1024 * 1024;
 constexpr std::size_t kMaximumPatchFileBytes = 256ull * 1024 * 1024;
 constexpr std::uint32_t kMaximumAinBodyBytes = 64u * 1024 * 1024;
-constexpr std::uint32_t kAinFormatVersion = 1;
+constexpr std::uint32_t kAinFormatVersion = 2;
 constexpr std::uint32_t kAinVersion = 54;
 
 std::vector<std::uint8_t> ReadPatchFile(const std::filesystem::path& path, std::size_t maximumBytes)
@@ -169,7 +169,7 @@ void WriteU32(std::vector<std::uint8_t>& bytes, std::size_t offset, std::uint32_
 }
 
 FileBytes ReadAinPatch(const std::filesystem::path& patchPath, std::string_view mapName,
-                       const BspSha256& convertedBspSha256, std::int32_t mapVersion,
+                       const BspSha256& sourceBspSha256, std::int32_t mapVersion,
                        std::int32_t developerValue)
 {
     if (mapVersion <= 0 || developerValue != 0)
@@ -191,7 +191,7 @@ FileBytes ReadAinPatch(const std::filesystem::path& patchPath, std::string_view 
         || headerLength < fixedHeaderSize + mapNameLength || headerLength > patch.size()
         || uncompressedLength == 0 || uncompressedLength > kMaximumAinBodyBytes
         || compressedLength != patch.size() - headerLength
-        || std::memcmp(patch.data() + 20, convertedBspSha256.data(), convertedBspSha256.size()) != 0
+        || std::memcmp(patch.data() + 20, sourceBspSha256.data(), sourceBspSha256.size()) != 0
         || std::memcmp(patch.data() + fixedHeaderSize, mapName.data(), mapNameLength) != 0)
         return {};
 
@@ -248,7 +248,7 @@ public:
     }
 
     FileBytes LoadFileOverride(std::string_view mapName, std::string_view normalizedPath,
-        const BspSha256&, const BspSha256& convertedBspSha256,
+        const BspSha256& sourceBspSha256,
         std::int32_t mapVersion, std::int32_t developerValue) override
     {
         const std::string expectedPath = "maps/graphs/" + std::string(mapName) + ".ain";
@@ -260,7 +260,7 @@ public:
             return {};
         const std::filesystem::path directory = root / "patches";
         return ReadAinPatch(directory / (std::string(mapName) + ".ain.r2patch"), mapName,
-            convertedBspSha256, mapVersion, developerValue);
+            sourceBspSha256, mapVersion, developerValue);
     }
 };
 
