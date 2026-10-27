@@ -248,7 +248,7 @@ void TestByteExactOutputAndLightEnvironment()
 {
     const std::string head = "ENTITIES01\r\n";
     const std::string lightEnvironment =
-        "{\r\n\"classname\" \"light_environment\"\r\n\"_light\" \"255 240 200 600\"\r\n\"angles\" \"-50 30 0\"\r\n\"pitch\" \"50\"\r\n}";
+        "{\r\n\"classname\" \"light_environment\"\r\n\"_light\" \"255 240 200 600\"\r\n\"angles\" \"-50 30 0\"\r\n}";
     const std::string volume = "{\r\n\"classname\" \"light_environment_volume\"\r\n\"origin\" \"0 0 0\"\r\n}";
     const std::string tail =
         "{\r\n\"classname\" \"env_fog_controller\"\r\n\"fogcolor\" \"1 2 3\"\r\n}\r\n"
@@ -308,23 +308,6 @@ void TestEffectNameRename()
     Check(plain.renamedEffectNames == 0 && !Has(untouched, "r2p_"), "no mapper must leave effect_name untouched");
 }
 
-// A light_environment without a pitch key gets pitch = -angles[0] (R1 takes the sun elevation from "pitch"), in the text's own
-// newline style; a block that already has one is left alone.
-void TestLightEnvironmentPitch()
-{
-    const std::string input =
-        "{\r\n\"classname\" \"light_environment\"\r\n\"angles\" \"22.5 -143.6 0\"\r\n}\r\n"
-        "{\r\n\"classname\" \"light_environment\"\r\n\"angles\" \"10 0 0\"\r\n\"pitch\" \"-10\"\r\n}\r\n";
-    const std::string output = RewriteEntityLump(input, RewriteOptions{ "mp_test", false, nullptr });
-    Check(Has(output, "\"angles\" \"22.5 -143.6 0\"\r\n\"pitch\" \"-22.5\"\r\n}"), "missing pitch was not inserted with CRLF");
-    for (std::size_t i = 0; i < output.size(); ++i)
-        if (output[i] == '\n')
-            Check(i > 0 && output[i - 1] == '\r', "a bare LF appeared in CRLF text");
-    Check(output.find("\"pitch\"") != output.rfind("\"pitch\""), "expected two pitch keys");
-    Check(Has(output, "\"pitch\" \"-10\"\r\n}"), "an existing pitch changed");
-    Check(RewriteEntityLump(output, RewriteOptions{ "mp_test", false, nullptr }) == output, "pitch insertion is not idempotent");
-}
-
 void TestNpcKeyLowering()
 {
     const std::string input =
@@ -356,7 +339,6 @@ int main()
         TestByteExactOutputAndLightEnvironment();
         TestEffectNameRename();
         TestNpcKeyLowering();
-        TestLightEnvironmentPitch();
     } catch (const std::exception& exception) {
         std::cerr << "entity rewrite test failed: " << exception.what() << '\n';
         return 1;

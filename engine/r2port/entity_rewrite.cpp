@@ -584,118 +584,6 @@ std::uint64_t LowerNpcKeys(std::string& output, std::size_t entityBegin)
     }
 }
 
-// R1 takes the cascade shadow sun direction (and cloud offset) from the LAST light_environment entity it parses, and the world
-// sun the converter keeps is the real environment's. Every R2 map also carries a template "dummy" skybox light_environment (sun
-// 3 3 3, angles 51.4284 122.548 1.30448, _light 255 255 255 765). Most maps list it first; mp_coliseum and mp_coliseum_column list
-// it last, which made the cascades use the dummy direction. Moves the dummy blocks in front of the first light_environment so the
-// real environment is always parsed last. Text is a sequence of {...} blocks; quotes are honoured when matching braces.
-std::size_t MoveDummyLightEnvironmentFirst(std::string& text)
-{
-    struct Block { std::size_t begin, end; bool lightEnvironment, dummy; };
-    std::vector<Block> blocks;
-    bool inQuote = false;
-    std::size_t open = std::string::npos;
-    for (std::size_t i = 0; i < text.size(); ++i) {
-        const char c = text[i];
-        if (c == '"') inQuote = !inQuote;
-        else if (!inQuote && c == '{') open = i;
-        else if (!inQuote && c == '}' && open != std::string::npos) {
-            const std::string_view body(text.data() + open, i + 1 - open);
-            Block block{ open, i + 1, false, false };
-            block.lightEnvironment = body.find("\"classname\" \"light_environment\"") != std::string_view::npos;
-            block.dummy = block.lightEnvironment
-                && body.find("\"angles\" \"51.4284 122.548 1.30448\"") != std::string_view::npos
-                && body.find("\"_light\" \"255 255 255 765\"") != std::string_view::npos;
-            blocks.push_back(block);
-            open = std::string::npos;
-        }
-    }
-    std::size_t firstLight = std::string::npos, firstReal = std::string::npos, dummies = 0;
-    for (const Block& block : blocks) {
-        if (!block.lightEnvironment) continue;
-        if (firstLight == std::string::npos) firstLight = block.begin;
-        if (!block.dummy && firstReal == std::string::npos) firstReal = block.begin;
-        if (block.dummy) ++dummies;
-    }
-    // Nothing to do without a real environment, without a dummy, or when every dummy already precedes the first real one.
-    if (firstReal == std::string::npos || !dummies)
-        return 0;
-    bool misordered = false;
-    for (const Block& block : blocks)
-        if (block.dummy && block.begin > firstReal) misordered = true;
-    if (!misordered)
-        return 0;
-
-    std::string moved;
-    std::string out;
-    out.reserve(text.size() + 2);
-    std::size_t cursor = 0;
-    for (const Block& block : blocks) {
-        if (!block.dummy) continue;
-        moved.append(text, block.begin, block.end - block.begin);
-        moved.push_back('\n');
-    }
-    for (const Block& block : blocks) {
-        if (block.begin == firstLight) {
-            out.append(text, cursor, block.begin - cursor);
-            out.append(moved);
-            cursor = block.begin;
-        }
-        if (block.dummy) {
-            out.append(text, cursor, block.begin - cursor);
-            cursor = block.end;
-            if (cursor < text.size() && text[cursor] == '\n') ++cursor;
-        }
-    }
-    out.append(text, cursor, std::string::npos);
-    text = std::move(out);
-    return dummies;
-}
-
-// R1's light_environment (server CEnvLight::KeyValue) takes the sun elevation from the "pitch" key; R2 also writes "angles" whose first
-// component is the same elevation with the opposite sign (mp_glitch: pitch -43.8026, angles 43.8026 73.2871 ...). The arena
-// environments of mp_coliseum and mp_coliseum_column have "angles" 22.4887 -143.639 ... but no "pitch" key, which left the cascade sun
-// horizontal (the whole arena in shadow). Adds "pitch" = -angles[0] to every light_environment that lacks it.
-std::size_t AddMissingLightEnvironmentPitch(std::string& text)
-{
-    std::size_t added = 0;
-    std::string out;
-    out.reserve(text.size() + 64);
-    bool inQuote = false;
-    std::size_t open = std::string::npos, cursor = 0;
-    for (std::size_t i = 0; i < text.size(); ++i) {
-        const char c = text[i];
-        if (c == '"') inQuote = !inQuote;
-        else if (!inQuote && c == '{') open = i;
-        else if (!inQuote && c == '}' && open != std::string::npos) {
-            const std::string_view body(text.data() + open, i + 1 - open);
-            if (body.find("\"classname\" \"light_environment\"") != std::string_view::npos
-                && body.find("\"pitch\"") == std::string_view::npos) {
-                const std::size_t key = body.find("\"angles\" \"");
-                if (key != std::string_view::npos) {
-                    char* end = nullptr;
-                    const double elevation = std::strtod(body.data() + key + 10, &end);
-                    if (end != body.data() + key + 10) {
-                        char line[64];
-                        std::snprintf(line, sizeof(line), "\"pitch\" \"%g\"%s", -elevation,
-                            body.find("\r\n") != std::string_view::npos ? "\r\n" : "\n");
-                        out.append(text, cursor, i - cursor);
-                        out.append(line);
-                        cursor = i;
-                        ++added;
-                    }
-                }
-            }
-            open = std::string::npos;
-        }
-    }
-    if (!added)
-        return 0;
-    out.append(text, cursor, std::string::npos);
-    text = std::move(out);
-    return added;
-}
-
 } // namespace
 
 Error::Error(std::size_t offset, const std::string& message)
@@ -809,8 +697,6 @@ std::string RewriteEntityLump(std::string_view input,
     }
 
     AppendRange(output, input, appendCursor, input.size());
-    MoveDummyLightEnvironmentFirst(output);
-    AddMissingLightEnvironmentPitch(output);
     return output;
 }
 
