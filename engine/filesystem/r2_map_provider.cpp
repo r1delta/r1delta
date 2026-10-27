@@ -76,7 +76,7 @@ constexpr uint32_t kGameLump = 0x23;
 
 // Folded into the on-disk cache fingerprint together with entity_rewrite::kRewriteVersion.
 // Bump when the vendored bspdown converter or the provider's BSP post-processing changes output.
-constexpr uint32_t kConvertedBspCacheVersion = 5;
+constexpr uint32_t kConvertedBspCacheVersion = 6;
 
 // Raised onto the z of every info_spawnpoint_flag origin in lump 0 (see entity_rewrite::RaiseFlagSpawnOrigins).
 // The R1 server drops the spawnpoint back to the floor; one that starts inside solid is removed.

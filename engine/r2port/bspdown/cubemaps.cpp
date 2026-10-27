@@ -443,13 +443,16 @@ void convertCubemaps(Ctx& c) {
             cubes[f].face[fc] = boxDown(big, 64);
             for (float& v : cubes[f].face[fc].rgb) v *= scale;
         }
-    // average cube for cubemapdefault
+    // average cube for cubemapdefault: the mean of what R1 will decode for the individual cubemaps, i.e. of the
+    // values clamped to the encodable 4.0 (a mean of the unclamped values brightens every texel where one cube
+    // clips; on the lf_* maps that made the default up to 13% brighter than the mean of the cubes it replaces)
     CubeSet avg;
     for (int fc = 0; fc < 6; fc++) {
         avg.face[fc].n = 64;
         avg.face[fc].rgb.assign(64 * 64 * 3, 0.0f);
         for (uint32_t f = 0; f < frames; f++)
-            for (size_t i = 0; i < avg.face[fc].rgb.size(); i++) avg.face[fc].rgb[i] += cubes[f].face[fc].rgb[i] / frames;
+            for (size_t i = 0; i < avg.face[fc].rgb.size(); i++)
+                avg.face[fc].rgb[i] += std::min(cubes[f].face[fc].rgb[i], 4.0f) / frames;
     }
 
     std::vector<ZipFile> out;

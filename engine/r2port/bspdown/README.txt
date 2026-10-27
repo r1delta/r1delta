@@ -225,7 +225,7 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
     pakfile holds one file, materials/maps/<map>/cubemaps.hdr.vtf. The pakfile is rebuilt (store
     only, DOS date/time 0, version 10, the 32 byte "XZP1 0" end comment like the stock R1 pakfile;
     deterministic) with, for every 0x2A entry, c<x>_<y>_<z>.hdr.vtf and c<x>_<y>_<z>.vtf, plus
-    cubemapdefault.vtf / .hdr.vtf (average of all cubemaps). Names use the int32 origins verbatim
+    cubemapdefault.vtf / .hdr.vtf (average of the clamped cubemaps). Names use the int32 origins verbatim
     (c-12919_12458_13006). R2's cubemaps.hdr.vtf is dropped; other stored entries would be kept (none
     exist). Lump 0x2A is untouched, every sort cubemap stays -1 (no patch VMTs).
     R2 source parse (confirmed on all maps run): VTF 7.5, header 104 bytes + resource table (0x30 = image
@@ -263,6 +263,18 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
     (mat_force_tonemap_scale 1) the converted map reached 69 % of the stock R1 brightness with 1/6 and 86 % with 4
     (4 is also the largest factor that keeps R2 values up to 1.0 encodable: stock alpha 255 -> 4.0; about 1 % of the
     brightest mip 0 pixels of the main cube clamp). Use --cubemap-scale 1/6 to get the old output.
+    CLIPPING at scale 4 (measured with analysis\cubeclip.py: convert at --cubemap-scale 0.125, rescale; max R2 value 2.6 to 9.0,
+    most maps below 5.2; mip 0 pixels with any channel above 4.0 / energy kept by the clamp, scale 2 | 3 | 4):
+    glitch 0.03 | 3.8 | 12.3 % (95.6 % kept at 4; sky slot 4: 58 % of its texels clip, 90 % of its luminance kept),
+    colony02 0.4 | 0.8 | 1.6 % (94 % kept), eden 1.7 | 2.8 | 5.1 % (95 %; ground slot 5: 16 %, 79 % kept), thaw 0.2 | 0.6 | 1.8 % (98 %),
+    lf_meadow 0.7 | 4.5 | 9.9 % (88 %), lf_stacks 2.5 | 10.5 | 19.2 % (90.5 %), lf_township 0.7 | 4.5 | 11.5 % (88 %),
+    lf_traffic 1.0 | 7.7 | 16.7 % (89 %), lf_uma 0.9 | 3.7 | 6.9 % (91 %). Clipping is concentrated on the sky face (slot 4)
+    and the values only overshoot to about 5.2, so the hard per-channel clamp at 4.0 keeps 88 to 98 % of the luminance
+    energy; scaling a cubemap down so its maximum fits (what a per cube scale would do) keeps less (about 80 % for
+    max 5.0), and a soft knee only lowers the values between the knee and 4.0, so the clamp is kept.
+    The default cube is the mean of the CLAMPED cubemaps (what R1 decodes for them); the mean of the unclamped
+    values made it 4.8 to 13 % brighter than that mean on seven maps (eden, colony02, meadow, stacks, township, traffic,
+    uma) and failed the checker's 3 % default-cube test.
     VALIDATION (cubemaps.cpp prints it, check_bspdown.py recomputes it from the output with the R1 formula against
     an independent BC6H decode * scale): mean relative error of the decoded RGBA8888 vs the scaled R2 box
     filtered values, per face, mp_glitch, slots 0..5 (%): cube 0: 0.16 0.15 0.15 0.16 0.11 0.26; cube 1: 0.19 0.18
