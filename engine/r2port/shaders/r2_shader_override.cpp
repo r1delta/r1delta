@@ -140,7 +140,7 @@ struct LmgSeen {
 std::atomic<std::uint32_t> s_lmgSeenCount{0};
 LmgSeen s_lmgSeen[4096];
 
-int LmgEligible(const unsigned char* params, __int64 a4, bool needPacked);
+int LmgEligible(const unsigned char* params, __int64 a4, bool needPacked, int* staticIndex);
 
 void LmgLogState(__int64 a3, __int64 a4, const unsigned char* params)
 {
@@ -177,7 +177,7 @@ void LmgLogState(__int64 a3, __int64 a4, const unsigned char* params)
         ParamDword(params, 372), ParamDword(params, 376), ParamDword(params, 380), ParamDword(params, 384),
         ParamDword(params, 388), ParamDword(params, 392),
         static_cast<double>(*reinterpret_cast<const float*>(params + 396)), static_cast<double>(*reinterpret_cast<const float*>(params + 400)),
-        LmgEligible(params, a4, false), LmgEligible(params, a4, true));
+        LmgEligible(params, a4, false, nullptr), LmgEligible(params, a4, true, nullptr));
     LmgLog(line);
 }
 
@@ -222,8 +222,11 @@ void LmgRefreshBypass()
 
 std::atomic<std::uint32_t> s_lmgReasonSeen{0};
 
-// 0 = eligible, otherwise the reason code of the first failed condition (logged in log mode).
-int LmgEligible(const unsigned char* params, __int64 a4, bool needPacked)
+// 0 = eligible, otherwise the reason code of the first failed condition (logged in log mode). On success *staticIndex is
+// the static combo of our pixel file: 0 single layer, 1 single layer + detail UV, 2 two layers, 3 two layers + detail UV,
+// 4 two layers + detail UV + detail normals. Single-layer materials carry their packed gloss/AO/cavity in $detailColor (t4),
+// two-layer materials in the b / a channels of $blendModulateTexture (t15) and must say so with `$treesway 7701`.
+int LmgEligible(const unsigned char* params, __int64 a4, bool needPacked, int* staticIndex)
 {
     const char* pixelName = *reinterpret_cast<const char* const*>(a4 + 24);
     const char* vertexName = *reinterpret_cast<const char* const*>(a4 + 32);
@@ -236,20 +239,40 @@ int LmgEligible(const unsigned char* params, __int64 a4, bool needPacked)
     const std::uint64_t format = *reinterpret_cast<const std::uint64_t*>(a4 + 16);
     if (format & 0x800000)   // godray adds COLOR1
         return 3;
-    // vertex shader combo (a4+76 / 2) = 2 * bump + 3 * detail + 6 * x: tangent and binormal outputs need the bump bit
+    // vertex shader combo (a4+76 / 2) = 2 * bump + 3 * detail + 6 * x, x = v20 + 2 * v37 + 4 * v21 + 8 * v23 + 16 * v45 + 32 * v52:
+    // tangent and binormal outputs need the bump bit; v23 turns TEXCOORD1 into a float4, v45 / v52 add COLOR1
     const std::uint32_t vertexCombo = *reinterpret_cast<const std::uint32_t*>(a4 + 76) / 2;
     if (vertexCombo % 6 != 2 && vertexCombo % 6 != 5)
         return 4;
+    if ((vertexCombo / 6) & (8 | 16 | 32))
+        return 3;
+    const bool detailUv = vertexCombo % 6 == 5;
     if (!ParamPointer(params, 32) || !ParamPointer(params, 304) || !ParamPointer(params, 232))
         return 5;
-    if (ParamPointer(params, 96) || ParamPointer(params, 88) || ParamPointer(params, 104) || ParamPointer(params, 240)
-        || ParamPointer(params, 320) || ParamPointer(params, 328) || ParamPointer(params, 336))
+    const bool layered = ParamPointer(params, 240) || ParamPointer(params, 320) || ParamPointer(params, 328) || ParamPointer(params, 336);
+    if (layered && !(ParamPointer(params, 240) && ParamPointer(params, 320) && ParamPointer(params, 328) && ParamPointer(params, 336)))
+        return 6;
+    if (ParamPointer(params, 96) || ParamPointer(params, 104))
+        return 6;
+    const bool detailNormal = ParamPointer(params, 88) && ParamDword(params, 116) != 0;
+    if (ParamPointer(params, 88) && !layered)
+        return 6;
+    if (detailNormal && !detailUv)
         return 6;
     if (ParamDword(params, 0) & 0x10)   // $vertexcolor takes another stock static combo that was not compared
         return 7;
-    const bool packed = ParamPointer(params, 80) != 0 && ParamDword(params, 112) != 0;
-    if (needPacked ? !packed : ParamPointer(params, 80) != 0)
+    const bool detailColor = ParamPointer(params, 80) != 0 && ParamDword(params, 112) != 0;
+    if (layered) {
+        if (ParamPointer(params, 80))   // t4 is the second detail normal / unused here
+            return 8;
+        if (needPacked && static_cast<int>(ParamDword(params, 24)) != kLmgMarkerValue)
+            return 8;
+    }
+    else if (needPacked ? !detailColor : ParamPointer(params, 80) != 0) {
         return 8;
+    }
+    if (staticIndex)
+        *staticIndex = layered ? (detailNormal ? 4 : detailUv ? 3 : 2) : (detailUv ? 1 : 0);
     return 0;
 }
 
@@ -274,7 +297,8 @@ __int64 __fastcall LmgHook(__int64 a1, __int64* a2, __int64 a3, __int64 a4)
     const bool debug = s_lmgMode == LmgMode::Debug;
     const bool mark = s_lmgMode == LmgMode::Mark;
     const bool neutral = s_lmgMode == LmgMode::Neutral || mark;
-    const int reason = LmgEligible(params, a4, !(neutral || (debug && s_lmgDebugNoPack)) || (neutral && s_lmgNeutralPacked));
+    int staticIndex = 0;
+    const int reason = LmgEligible(params, a4, !(neutral || (debug && s_lmgDebugNoPack)) || (neutral && s_lmgNeutralPacked), &staticIndex);
     if (reason != 0) {
         if (s_lmgLogEnabled && !(s_lmgReasonSeen.fetch_or(1u << reason) & (1u << reason))) {
             char line[128];
@@ -291,9 +315,8 @@ __int64 __fastcall LmgHook(__int64 a1, __int64* a2, __int64 a3, __int64 a4)
         return result;
     }
     *reinterpret_cast<const char**>(a4 + 24) = debug ? s_lmgDebugPixel : mark ? "r2_lmg_mark_ps40" : neutral ? "r2_lmg_neutral_ps40" : "r2_lmg_pbr_ps40";
-    // static combo 1 = vertex-shader combos with the extra TEXCOORD1.xy detail output (a requested combo id is static index * 12 dynamic combos)
-    const std::uint32_t staticIndex = (*reinterpret_cast<const std::uint32_t*>(a4 + 76) / 2) % 6 == 5 ? 1u : 0u;
-    *reinterpret_cast<std::uint32_t*>(a4 + 72) = staticIndex * kLmgDynamicCombos;
+    // requested combo id = static index * 12 dynamic combos; static index from LmgEligible (see the table in the HLSL)
+    *reinterpret_cast<std::uint32_t*>(a4 + 72) = static_cast<std::uint32_t>(staticIndex) * kLmgDynamicCombos;
     const int applied = s_lmgApplied.fetch_add(1, std::memory_order_relaxed);
     if (applied == 0)
         Msg("R1Delta: R2 LightmappedGeneric override active (%s)\n", shaderName);

@@ -125,11 +125,26 @@ struct Source {
 std::vector<Source> CollectSources(const std::filesystem::path& r2portDirectory)
 {
     std::map<std::string, Source> byName;
-    // the LightmappedGeneric replacement shaders are many ps_5_0 records each: only build them when the feature is on
+    // the LightmappedGeneric replacement shaders are many ps_5_0 records each: only build the one the env switch asks for
+    // (R2_LMG_PBR = 1 / all / dbgN / neutral / mark, see r2_shader_override.cpp)
     char lmgMode[48] = {};
-    const bool lmgEnabled = GetEnvironmentVariableA("R2_LMG_PBR", lmgMode, sizeof(lmgMode)) != 0 && lmgMode[0] && std::strcmp(lmgMode, "0") != 0;
+    const bool lmgSet = GetEnvironmentVariableA("R2_LMG_PBR", lmgMode, sizeof(lmgMode)) != 0 && lmgMode[0] && std::strcmp(lmgMode, "0") != 0;
+    auto wanted = [&](const char* shaderName) {
+        if (std::strncmp(shaderName, "r2_lmg_", 7) != 0)
+            return true;
+        if (!lmgSet)
+            return false;
+        const char* kind = shaderName + 7;
+        if (std::strcmp(kind, "pbr") == 0)
+            return lmgMode[0] == '1' || std::strncmp(lmgMode, "all", 3) == 0 || std::strncmp(lmgMode, "log", 3) == 0;
+        if (std::strcmp(kind, "neutral") == 0)
+            return std::strncmp(lmgMode, "neutral", 7) == 0;
+        if (std::strcmp(kind, "mark") == 0)
+            return std::strncmp(lmgMode, "mark", 4) == 0;
+        return std::strncmp(lmgMode, "dbg", 3) == 0 && lmgMode[3] == kind[3];   // r2_lmg_dbgN
+    };
     for (const EmbeddedShader& shader : kEmbeddedShaders) {
-        if (!lmgEnabled && std::strncmp(shader.name, "r2_lmg_", 7) == 0)
+        if (!wanted(shader.name))
             continue;
         std::string text = shader.source;
         if (shader.define)

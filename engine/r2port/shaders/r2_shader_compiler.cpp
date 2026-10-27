@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <future>
 #include <string>
 #include <deque>
 #include <utility>
@@ -317,7 +318,7 @@ std::string CheckVertexPixelLinkage(
 // Pixel shaders that replace a stock static combo with several dynamic combos mark themselves with this line; the
 // compiler then builds one ps_5_0 record per dynamic index (see BuildPixelVcsDynamic) with the macros the source names
 // there: `// R2_PS_DYNAMIC <dynamic count> <static count>` (R2_LIGHTS = d % 2, R2_SHADOW = (d / 2) % 3, R2_FOGB = (d / 2) / 3,
-// R2_TC1 = static index).
+// R2_STATIC = static index).
 constexpr std::string_view kDynamicMarker = "// R2_PS_DYNAMIC ";
 
 BuiltShader BuildShader(std::string_view name, std::string_view source, IncludeResolver includes)
@@ -333,7 +334,7 @@ BuiltShader BuildShader(std::string_view name, std::string_view source, IncludeR
 
     const std::size_t marker = source.find(kDynamicMarker);
     if (marker != std::string_view::npos && wantsPixel && !wantsVertex) {
-        // "// R2_PS_DYNAMIC <dynamic count> <static count>": static combo s defines R2_TC1 = s
+        // "// R2_PS_DYNAMIC <dynamic count> <static count>": static combo s defines R2_STATIC = s
         const std::string spec(source.substr(marker + kDynamicMarker.size(), 16));
         int count = 0;
         int statics = 1;
@@ -342,28 +343,38 @@ BuiltShader BuildShader(std::string_view name, std::string_view source, IncludeR
             built.error = "bad R2_PS_DYNAMIC line";
             return built;
         }
-        std::vector<std::vector<std::vector<std::uint8_t>>> combos;
+        std::vector<std::vector<std::vector<std::uint8_t>>> combos(static_cast<std::size_t>(statics));
+        std::vector<std::vector<CompileResult>> results(static_cast<std::size_t>(statics));
+        std::vector<std::future<void>> jobs;
         for (int staticCombo = 0; staticCombo < statics; ++staticCombo) {
-            std::vector<std::vector<std::uint8_t>> records;
+            results[static_cast<std::size_t>(staticCombo)].resize(static_cast<std::size_t>(count));
             for (int dynamic = 0; dynamic < count; ++dynamic) {
-                CompileRequest request;
-                request.sourceName = std::string(name) + ".hlsl";
-                request.source = source;
-                request.entry = "PSMain";
-                request.profile = "ps_5_0";
-                request.includes = includes;
-                request.macros.push_back({ "R2_TC1", std::to_string(staticCombo) });
-                request.macros.push_back({ "R2_LIGHTS", std::to_string(dynamic % 2) });
-                request.macros.push_back({ "R2_SHADOW", std::to_string((dynamic / 2) % 3) });
-                request.macros.push_back({ "R2_FOGB", std::to_string((dynamic / 2) / 3) });
-                CompileResult result = CompileHlsl(request);
+                jobs.push_back(std::async(std::launch::async, [&, staticCombo, dynamic]() {
+                    CompileRequest request;
+                    request.sourceName = std::string(name) + ".hlsl";
+                    request.source = source;
+                    request.entry = "PSMain";
+                    request.profile = "ps_5_0";
+                    request.includes = includes;
+                    request.macros.push_back({ "R2_STATIC", std::to_string(staticCombo) });
+                    request.macros.push_back({ "R2_LIGHTS", std::to_string(dynamic % 2) });
+                    request.macros.push_back({ "R2_SHADOW", std::to_string((dynamic / 2) % 3) });
+                    request.macros.push_back({ "R2_FOGB", std::to_string((dynamic / 2) / 3) });
+                    results[static_cast<std::size_t>(staticCombo)][static_cast<std::size_t>(dynamic)] = CompileHlsl(request);
+                }));
+            }
+        }
+        for (auto& job : jobs)
+            job.get();
+        for (int staticCombo = 0; staticCombo < statics; ++staticCombo) {
+            for (int dynamic = 0; dynamic < count; ++dynamic) {
+                CompileResult& result = results[static_cast<std::size_t>(staticCombo)][static_cast<std::size_t>(dynamic)];
                 if (!result.ok) {
                     built.error = "pixel shader (static " + std::to_string(staticCombo) + " dynamic " + std::to_string(dynamic) + "): " + result.messages;
                     return built;
                 }
-                records.push_back(std::move(result.dxbc));
+                combos[static_cast<std::size_t>(staticCombo)].push_back(std::move(result.dxbc));
             }
-            combos.push_back(std::move(records));
         }
         built.pixelVcs = BuildPixelVcsDynamic(combos);
         built.hasPixel = true;
