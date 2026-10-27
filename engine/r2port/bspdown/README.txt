@@ -452,6 +452,17 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
        (sub_1800A4FD0), which is unbounded near the radius. Rewrite: set flag 0x4 and multiply the intensity by 2 / d50^2 where d50 is the
        distance at which c + l d + q d^2 = 0.5 (the inverse-square irradiance I/d50^2 equals I' * 0.5 there). Provisional: the shape inside d50 is
        not calibrated against R2 renders. Flags 0x20 and 0x40 are cleared. --pbr-lights keep leaves the records alone.
+21. Lightmap plane B alpha = baked sun visibility (lump 0x62; lighting.cpp) [R1 lightmappedgeneric_ps50 asm in shaderlab\LIGHTING.md /
+    out\evidence\r1_lightmappedgeneric_ps50_blob750.asm lines 31-34, 80-99; data on R1 mp_rise / mp_box vs R2 maps]. The R1 world PS computes
+    the sun shadow term as  shadow = lerp(1 - lm1.a, CSM_PCF, cascade_coverage)  (lm1 = plane B; r2.x = 1 - lm1.a). Outside the cascades and
+    whenever CSM is off or not running, the sun on the world is (1 - alpha) * N.L * sunColor * cloud. R1 compilers bake the sun visibility
+    into plane B alpha (stock mp_rise: 89 % of texels 255 = shadowed, 6 % 0 = sunlit, graded between; mp_box 70 % 255, 28 % 0). R2 writes 255 on
+    EVERY texel (mp_glitch / mp_lf_stacks: 100 %), because the R2 world PS takes that visibility from the RTL B weight of the sun slot
+    (lightbaker README: "RTL-B keeps the measured sun visibility ... outside cascades"). Converted maps therefore had (1 - alpha) = 0
+    everywhere: no sun wherever CSM does not supply it, and none at all if CSM is not active.
+    Rule: for every texel whose R2 RTL palette lists a type-3 light (always channel R; mp_glitch 733,289 of 2,649,413 covered texels), plane B
+    alpha = 255 - round(255 * srgb_to_linear(B / 255)) (R2 creates RTL plane B as an sRGB texture, R1 plane B alpha is linear); all other texels
+    keep 255 (R2 skips the sun there). mp_glitch: 524,530 texels fully lit, 126,881 partial. Option --no-sun-alpha keeps 255.
     Checker: independent numpy model of all three lumps, byte exact (check_bspdown.py, options --no-collapse-envs --no-rtl --rtl-min-weight
     --pbr-lights).
 

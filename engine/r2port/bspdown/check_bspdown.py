@@ -382,7 +382,7 @@ def check_grid_padding(C, r2, r1, g2, g1, cells, nmodels, grid_pad, unpadded, gr
         print("  note  no --unpadded file given: per-cell equality against the unpadded conversion not checked")
 
 
-LIGHT_OPT = {"collapse": True, "rtl": True, "min_weight": 187, "pbr": True}
+LIGHT_OPT = {"collapse": True, "rtl": True, "min_weight": 187, "pbr": True, "sun_alpha": True}
 
 
 def expected_lighting(r2, wl_flag2):
@@ -416,11 +416,15 @@ def expected_lighting(r2, wl_flag2):
     have = LIGHT_OPT["rtl"] and len(rtl2) and texels and len(rtl2) == texels * 9 and len(pal) and len(r2.raw(0x7A)) % 126 == 0
     usage = np.zeros(n, np.float64)
     tex_old = None
+    sky = bytearray(r2.raw(0x62).tobytes())
+    sun_alpha = bool(LIGHT_OPT["sun_alpha"] and have and len(sky) == texels * 8)
+    lut = np.array([255 - int(np.floor(255.0 * (v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4) + 0.5)) for v in (np.arange(256) / 255.0)], np.uint8)
     if have:
         npal = len(pal) // 63
         tex_old = np.full((texels, 4), -1, np.int64)
         off = 0
         t0 = 0
+        skyoff = 0
         rb = np.frombuffer(rtl2.tobytes(), np.uint8)
         for w, h in pages:
             m = w * h
@@ -428,6 +432,8 @@ def expected_lighting(r2, wl_flag2):
             B = rb[off + 4 * m:off + 8 * m].reshape(m, 4)
             off += 9 * m
             sel = (A >> 24).astype(np.int64)
+            skyB = np.frombuffer(sky, np.uint8)[skyoff + 4 * m:skyoff + 8 * m].reshape(m, 4) if sun_alpha else None
+            skyoff += 8 * m
             for s in range(4):
                 slot = ((A >> (6 * s)) & 63).astype(np.int64)
                 ok = (A != 0xFFFFFFFF) & (slot != 63) & (sel < npal)
@@ -435,6 +441,11 @@ def expected_lighting(r2, wl_flag2):
                 wo[ok] = pal[sel[ok] * 63 + slot[ok]].astype(np.int64) + E
                 ok &= wo < n
                 wt = B[:, s].astype(np.int64)
+                if sun_alpha:
+                    sm = ok.copy()
+                    sm[ok] = ty[wo[ok]] == 3
+                    skyB[sm, 3] = lut[wt[sm]]
+                    ok &= ~sm
                 okk = ok.copy()
                 okk[ok] = ((ty[wo[ok]] == 1) | (ty[wo[ok]] == 2)) & ((fl[wo[ok]] & 8) != 0)
                 okk &= wt >= LIGHT_OPT["min_weight"]
@@ -510,7 +521,7 @@ def expected_lighting(r2, wl_flag2):
         nwv = np.where((slot >= 0) & (nwv >= 0) & (nwv <= 254), nwv, 255)
         nwv.sort(axis=1)  # 255 (none) last, ascending
         rtl_out = nwv.astype(np.uint8).tobytes()
-    return out.tobytes(), bytes(pr), rtl_out, {"E": E, "S": S, "head": head, "v1": v1, "reordered": reordered}
+    return out.tobytes(), bytes(pr), rtl_out, {"E": E, "S": S, "head": head, "v1": v1, "reordered": reordered, "sky": bytes(sky), "sun_alpha": sun_alpha}
 
 
 def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", physics="stub", cubemap_scale=4.0,
@@ -566,6 +577,7 @@ def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", ph
     C.ok(bool((a1 == a2[:, :16]).all()), "light probe refs equal first 16 bytes of R2 records")
     for i in (0x66, 0x67):
         C.ok(bytes(r1.raw(i)[:4096]) == bytes(r2.raw(i)[:4096]) and len(r1.raw(i)) == len(r2.raw(i)), "lump %#x unchanged" % i)
+    C.ok(bytes(r1.raw(0x62)) == einfo["sky"], "lightmap 0x62 = R2 with plane B alpha = 255 - 255 * linear(RTL sun slot visibility) on texels with a sun entry%s" % (" (rule 21)" if einfo["sun_alpha"] else " (unchanged)"))
     C.ok(bytes(r1.raw(0x65)) == elp, "light probes (0x65) = R2 probes with static light slots remapped (R2 world - %d -> R1 world - %d)" % (einfo["E"], einfo["v1"]))
 
     # ---- world lights
@@ -1040,7 +1052,7 @@ def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", ph
     # ---- lump passthrough for the lumps that must be identical
     print("== pass-through lumps")
     same = []
-    for i in (0x00, 0x01, 0x02, 0x0E if False else 0x18, 0x24, 0x2A, 0x2B, 0x2C, 0x53, 0x5C, 0x5D, 0x5E, 0x5F, 0x62, 0x63 if False else (0x64 if not csm_rebase else 0x00), 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F, 0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x78, 0x7B, 0x7C, 0x7D, 0x7E, 0x7F):
+    for i in (0x00, 0x01, 0x02, 0x0E if False else 0x18, 0x24, 0x2A, 0x2B, 0x2C, 0x53, 0x5C, 0x5D, 0x5E, 0x5F, 0x63 if False else (0x64 if not csm_rebase else 0x00), 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F, 0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x78, 0x7B, 0x7C, 0x7D, 0x7E, 0x7F):
         if i in (0x7C, 0x7D, 0x7E, 0x7F) and (csm_rebase or empty_shadow) and not (i in (0x7C, 0x7D) and csm_rebase and not empty_shadow):
             continue
         a = r1.raw(i); b = r2.raw(i)
@@ -1138,13 +1150,14 @@ if __name__ == "__main__":
     ap.add_argument("--no-collapse-envs", action="store_true", help="rule 20 disabled in the converter")
     ap.add_argument("--no-rtl", action="store_true", help="rule 20 RTL conversion disabled in the converter")
     ap.add_argument("--rtl-min-weight", type=int, default=187)
+    ap.add_argument("--no-sun-alpha", action="store_true", help="rule 21 disabled in the converter")
     ap.add_argument("--pbr-lights", choices=("keep", "convert"), default="convert")
     ap.add_argument("--keep-prop-flag10", action="store_true")
     ap.add_argument("--no-grid-pad", action="store_true", help="rule 18 disabled in the converter")
     ap.add_argument("--grid-size", type=float, default=2048.0, help="rule 19 cell size given to the converter (0 = R2 size kept)")
     ap.add_argument("--reference", "--unpadded", dest="reference", help="the same input converted with --grid-size 0 --no-grid-pad: equivalence checks for rules 18 / 19")
     a = ap.parse_args()
-    LIGHT_OPT.update(collapse=not a.no_collapse_envs, rtl=not a.no_rtl, min_weight=a.rtl_min_weight, pbr=(a.pbr_lights == "convert"))
+    LIGHT_OPT.update(collapse=not a.no_collapse_envs, rtl=not a.no_rtl, min_weight=a.rtl_min_weight, sun_alpha=not a.no_sun_alpha, pbr=(a.pbr_lights == "convert"))
     sys.exit(1 if check(a.r2, a.r1, a.limit, a.rtl_bytes, not a.no_bsp_tool, a.cubemaps, a.physics, a.cubemap_scale,
                         a.props, a.scatter_min, a.csm_rebase, a.empty_shadow_meshes, a.worldlight_flag2, a.keep_prop_flag10,
                         not a.no_grid_pad, a.reference, a.grid_size) else 0)

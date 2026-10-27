@@ -91,6 +91,12 @@ struct Options {
     int rtlMinWeight = 187;
     bool pbrLights = true;
 
+    // Rule 21: lightmap plane B alpha (lump 0x62). The R1 world pixel shader (lightmappedgeneric_ps50) uses (1 - plane B alpha) as the sun
+    // shadow term wherever the CSM cascades do not cover the pixel (and everywhere when CSM is off). R1 compilers bake the sun visibility
+    // there (stock mp_rise: 89 % of texels 255 = shadowed, 6 % 0 = sunlit, graded in between); R2 writes 255 everywhere and keeps the
+    // visibility in the real-time-light B weight of the sun slot. true: write 255 - 255*linear(sun visibility) from the R2 RTL sun slot.
+    bool lightmapSunAlpha = true;
+
     // Drop lumps R1 never reads (0x04..0x07, 0x37, 0x7A). They are large
     // (about 2 MB on eden) and cannot be interpreted by R1.
     bool dropR2OnlyLumps = true;

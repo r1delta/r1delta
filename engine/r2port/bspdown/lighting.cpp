@@ -149,17 +149,28 @@ void convertLighting(Ctx& c) {
     std::vector<uint16_t> texLights;  // 4 old world indices per texel (0xFFFF none)
     std::vector<uint64_t> usage(nOld, 0);
     uint64_t droppedLowWeight = 0, droppedKind = 0, usedSlots = 0, badRefs = 0;
+    const bool sunAlpha = c.opt.lightmapSunAlpha && haveR2Rtl && c.lump[L_LMSKY].size() == (size_t)texels * 8;
+    uint64_t sunTexels = 0, sunLit = 0, sunPartial = 0;
+    // lookup: R2 stores the sun visibility byte sRGB encoded (texture created with the sRGB flag), R1 plane B alpha is linear
+    uint8_t sunAlphaOf[256];
+    for (int i = 0; i < 256; i++) {
+        double x = i / 255.0;
+        double lin = x <= 0.04045 ? x / 12.92 : std::pow((x + 0.055) / 1.055, 2.4);
+        sunAlphaOf[i] = (uint8_t)(255 - (int)std::lround(255.0 * lin));
+    }
     if (haveR2Rtl) {
         const size_t npal = pal.size() / 126;
         std::vector<uint16_t> palette(pal.size() / 2);
         std::memcpy(palette.data(), pal.data(), pal.size());
         texLights.assign((size_t)texels * 4, 0xFFFF);
-        size_t off = 0, tex = 0;
+        size_t off = 0, tex = 0, skyOff = 0;
         for (auto& pg : pages) {
             const size_t n = (size_t)pg.first * pg.second;
             const uint8_t* A = &rtl[off];
             const uint8_t* B = A + 4 * n;
             off += 9 * n;
+            uint8_t* skyB = sunAlpha ? &c.lump[L_LMSKY][skyOff + 4 * n] : nullptr;
+            skyOff += 8 * n;
             for (size_t t = 0; t < n; t++, tex++) {
                 uint32_t a = rdU32(A + 4 * t);
                 if (a == 0xFFFFFFFFu) continue;
@@ -172,6 +183,15 @@ void convertLighting(Ctx& c) {
                     size_t wo = (size_t)palette[sel * 63 + slot] + E;
                     if (wo >= nOld) { badRefs++; continue; }
                     const Light& L = old[wo];
+                    if (sunAlpha && L.type() == 3) {
+                        // R1 world PS: outside the cascades / without CSM the sun shadow term is (1 - plane B alpha); R2 keeps that
+                        // baked sun visibility in the RTL B weight of the sun slot (the plane B alpha is 255 everywhere in R2).
+                        uint8_t al = sunAlphaOf[w];
+                        skyB[4 * t + 3] = al;
+                        sunTexels++;
+                        if (al == 0) sunLit++; else if (al != 255) sunPartial++;
+                        continue;
+                    }
                     if ((L.type() != 1 && L.type() != 2) || !(L.flags() & (int32_t)kFlagRealtime)) { droppedKind++; continue; }
                     if ((int)w < c.opt.rtlMinWeight) { droppedLowWeight++; continue; }
                     texLights[tex * 4 + s] = (uint16_t)wo;
@@ -273,6 +293,11 @@ void convertLighting(Ctx& c) {
         c.say("[rule 20] light probes (0x65): %llu probes, static light slots remapped from 'world - %zu' (R2) to 'world - %d' (R1 reads stored + %d): %llu slots, %llu dropped (dummy environment sun)",
               (unsigned long long)n, E, v1, v1, (unsigned long long)remapped, (unsigned long long)dropped);
     }
+
+    // --- lightmap plane B alpha (baked sun visibility outside the cascades) ---------------------------------------------------------
+    if (sunAlpha)
+        c.say("[rule 21] lightmap plane B alpha (0x62): R2 has 255 everywhere; R1 world PS uses shadow = (1 - alpha) outside the CSM cascades. Set from the R2 RTL sun slot visibility (sRGB -> linear) on %llu texels with a sun entry: %llu fully lit (alpha 0), %llu partial; all other texels keep 255 (no sun)",
+              (unsigned long long)sunTexels, (unsigned long long)sunLit, (unsigned long long)sunPartial);
 
     // --- real-time lights ----------------------------------------------------------------------------------------------------------
     if (!haveR2Rtl) {

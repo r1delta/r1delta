@@ -39,6 +39,7 @@ static void usage(const char* a0) {
                  "  --no-collapse-envs     rule 20: keep all light_environment sky ambient/sun pairs in the world lights (default keeps the last pair only)\n"
                  "  --no-rtl               rule 20: write the real-time light lump as 0xFF (default converts the R2 lump)\n"
                  "  --rtl-min-weight <n>   rule 20: minimum R2 visibility weight (0..255) for a real-time light slot (default 187 = half visibility)\n"
+                 "  --no-sun-alpha         rule 21: keep lightmap plane B alpha 255 (default writes the baked sun visibility from the R2 RTL sun slot)\n"
                  "  --pbr-lights <keep|convert>  rule 20: R2 flag 0x20 lights (default convert to the R1 fade polynomial form)\n"
                  "  --props <keep|hide-scatter|hide-all>  rule 16 diagnostics: scale props to 0.0001 for models with >= --scatter-min\n"
                  "                         instances / for every prop (default keep)\n"
@@ -89,6 +90,7 @@ int main(int argc, char** argv) {
         else if (a == "--cubemap-scale" && i + 1 < argc) opt.cubemapScale = (float)std::atof(argv[++i]);
         else if (a == "--worldlight-flag2") opt.worldLightFlagBit2 = true;
         else if (a == "--no-collapse-envs") opt.collapseEnvs = false;
+        else if (a == "--no-sun-alpha") opt.lightmapSunAlpha = false;
         else if (a == "--no-rtl") opt.rtlConvert = false;
         else if (a == "--rtl-min-weight" && i + 1 < argc) opt.rtlMinWeight = std::atoi(argv[++i]);
         else if (a == "--pbr-lights" && i + 1 < argc) {
