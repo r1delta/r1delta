@@ -825,6 +825,7 @@ void AppendMappedHitboxes(std::span<const std::uint8_t> source, const Header53& 
         WriteObject(output, dstSetOffset, dstSet);
         StoreRelativeString(output, dstSetOffset, offsetof(HitboxSet, nameIndex),
                             SourceRecordString(source, srcSetOffset, srcSet.nameIndex, "hitbox-set name"));
+        dstSet.nameIndex = ReadObject<std::int32_t>(output, dstSetOffset + offsetof(HitboxSet, nameIndex), "hitbox-set name offset");
         if (srcSet.numHitboxes == 0) continue;
         const auto dstBoxesOffset = AppendZeroBytes(output, static_cast<std::size_t>(srcSet.numHitboxes) * sizeof(Hitbox52));
         dstSet.hitboxIndex = static_cast<std::int32_t>(dstBoxesOffset - dstSetOffset);
