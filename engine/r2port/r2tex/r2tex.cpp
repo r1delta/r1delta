@@ -1575,19 +1575,21 @@ bool mergeOpacityVtf(std::vector<std::uint8_t>& albedo, const std::vector<std::u
 }
 
 // R2 foliage (shader sets with Cav and Cut and no Vcolt: grass, ground plants, bushes, leaf cards) carries a cavity map in
-// slot 12 that, for these sets, occludes the lit colour (a tuft bake: dark roots, light tips; every foliage material of the
-// 20 maps that has Cut also has Cav). R2 also draws the cut-out with alpha-to-coverage, which keeps the mean blade coverage
-// at every mip level. R1 has neither: its alpha test (0.7) loses more blades with each mip (mp_glitch glitch_amber_grass_01:
-// 28 % of the texels pass at mip 0, 9 % at mip 4, so distant lawn is sparse pale speckle) and the unoccluded tufts light up
-// 1.5 to 3 times brighter than R2's. Measured on mp_glitch (LightVerify prop class, 14 spots, auto exposure): median conv/R2
-// 1.58 with the coverage mips only, 1.45 / 1.39 / 1.34 / 1.34 for cavity^k with k 0.5 / 1 / 1.5 / 2 (baseline 1.55); the
-// gain flattens from k 1.5 on, which is the default. The bake multiplies albedo by cavity^k and rebuilds the mip chain with
-// premultiplied box filtering and an alpha gain that keeps the share of texels at or above the alpha-test reference
-// constant. Output is RGBA8 (same header as the albedo, flags kept).
+// slot 12 (a tuft bake: dark roots, light tips; every foliage material of the 20 maps that has Cut also has Cav, and the grass
+// materials of different maps share one cavity texture). R2 also draws the cut-out with alpha-to-coverage, which keeps the mean
+// blade coverage at every mip level. R1 has neither: its alpha test (0.7) loses more blades with each mip (mp_glitch
+// glitch_amber_grass_01: 28 % of the texels pass at mip 0, 9 % at mip 4, so distant lawn is sparse pale speckle), the unoccluded
+// tufts light up 1.5 to 3 times brighter than R2's (grass pixels conv/R2 luminance on mp_glitch 1.78, mp_homestead 1.54), and the
+// cube reflection adds a pale blue sheen (homestead grass B/G 1.30x R2). The bake multiplies albedo by cavity^k and rebuilds the
+// mip chain with premultiplied box filtering and an alpha gain that keeps the share of texels at or above the alpha-test
+// reference constant; ConvertMaterial also drops the env reflection of these materials. Output is RGBA8 (same header as the
+// albedo, flags kept). k is a calibration, not an R2 constant: mp_glitch grass wants a multiplier of about 0.55 (k 1.0 gives
+// 1.10, k 0.5 gives 1.21 with the env sheen), mp_homestead about 0.73 (k 0.5 without env gives 0.74, k 1.5 gives 0.38); the
+// default sits between the two.
 constexpr float kFoliageAlphaRef = 0.7f;
 
 float foliageCavityExponent() {
-    float k = 1.5f;
+    float k = 0.4f;
     if (const char* e = std::getenv("R2TEX_FOLIAGE_CAV")) k = std::clamp(static_cast<float>(std::atof(e)), 0.0f, 4.0f);
     return k;
 }
@@ -2276,7 +2278,9 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
         };
         if (!flatSheet.ok) param(0, "$basetexture");
         if (!unlit) param(1, "$bumpmap");
-        if (!unlit && usedSlots.find(3) != usedSlots.end()) {
+        // Foliage (cavity bake) emits no env reflection: R2 occludes foliage specular with the cavity map, R1 has no such term and
+        // the cube reflection on up-facing cards is a pale blue sheen (homestead grass B/G 1.47x R2; hue 1.10x without it).
+        if (!unlit && !foliageCavity && usedSlots.find(3) != usedSlots.end()) {
             param(3, "$reflectiontint");
             param(3, "$reflectiontintshininess");
             addVmtParam(out, "$reflectiontintcolor", "1");
@@ -2336,7 +2340,7 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
         else if (translucent || glass) addVmtParam(out, "$translucent", "1");
         if (godray) addVmtParam(out, "$translucent", "1");
         if (decal) addVmtParam(out, "$decal", "1");
-        if (glass || (!unlit && usedSlots.find(3) != usedSlots.end())) addVmtParam(out, "$envmap", "env_cubemap");
+        if (glass || (!unlit && !foliageCavity && usedSlots.find(3) != usedSlots.end())) addVmtParam(out, "$envmap", "env_cubemap");
         // A layered R2 material uses vertex alpha as the layer blend weight. Once its layers are removed (layers-off),
         // R1 would multiply that graded alpha into the opaque surface and dither it: the mp_glitch ground shimmered
         // (metric 2.5..3.9) with "$vertexcolor 1" and not (0.0) without it.
