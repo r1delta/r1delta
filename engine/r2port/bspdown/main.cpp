@@ -41,6 +41,9 @@ static void usage(const char* a0) {
                  "  --rtl-min-weight <n>   rule 20: minimum R2 visibility weight (0..255) for a real-time light slot (default 187 = half visibility)\n"
                  "  --no-sun-alpha         rule 21: keep lightmap plane B alpha 255 (default writes the baked sun visibility from the R2 RTL sun slot)\n"
                  "  --pbr-lights <keep|convert>  rule 20: R2 flag 0x20 lights (default convert to the R1 fade polynomial form)\n"
+                 "  --sky-ambient-scale <x>  rule 20e: multiplier on the kept sky ambient (type 5) light intensity (default 1)\n"
+                 "  --sun-scale <x>        rule 20e: multiplier on the kept sun (type 3) light intensity (default 1)\n"
+                 "  --pbr-scale <x>        rule 20e: extra multiplier on the PBR (flag 0x20) lights after the 2/d50^2 rewrite (default 1)\n"
                  "  --props <keep|hide-scatter|hide-all>  rule 16 diagnostics: scale props to 0.0001 for models with >= --scatter-min\n"
                  "                         instances / for every prop (default keep)\n"
                  "  --keep-prop-flag10     rule 16: copy the R2 prop flag bit 0x10 (R1: 'not drawn, shadow caster only'); default clears it\n"
@@ -93,6 +96,9 @@ int main(int argc, char** argv) {
         else if (a == "--no-sun-alpha") opt.lightmapSunAlpha = false;
         else if (a == "--no-rtl") opt.rtlConvert = false;
         else if (a == "--rtl-min-weight" && i + 1 < argc) opt.rtlMinWeight = std::atoi(argv[++i]);
+        else if (a == "--sky-ambient-scale" && i + 1 < argc) opt.skyAmbientScale = (float)std::atof(argv[++i]);
+        else if (a == "--sun-scale" && i + 1 < argc) opt.sunScale = (float)std::atof(argv[++i]);
+        else if (a == "--pbr-scale" && i + 1 < argc) opt.pbrScale = (float)std::atof(argv[++i]);
         else if (a == "--pbr-lights" && i + 1 < argc) {
             std::string v = argv[++i];
             if (v == "keep") opt.pbrLights = false;

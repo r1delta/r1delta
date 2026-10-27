@@ -382,7 +382,7 @@ def check_grid_padding(C, r2, r1, g2, g1, cells, nmodels, grid_pad, unpadded, gr
         print("  note  no --unpadded file given: per-cell equality against the unpadded conversion not checked")
 
 
-LIGHT_OPT = {"collapse": True, "rtl": True, "min_weight": 187, "pbr": True, "sun_alpha": True}
+LIGHT_OPT = {"collapse": True, "rtl": True, "min_weight": 187, "pbr": True, "sun_alpha": True, "sky_scale": 1.0, "sun_scale": 1.0, "pbr_scale": 1.0}
 
 
 def expected_lighting(r2, wl_flag2):
@@ -475,6 +475,9 @@ def expected_lighting(r2, wl_flag2):
         f = int(ofl[k])
         if t in (3, 5):
             f = 0
+            g = np.float32(LIGHT_OPT["sky_scale"] if t == 5 else LIGHT_OPT["sun_scale"])
+            if g != np.float32(1.0):
+                inten[k] = (inten[k] * g).astype(np.float32)
         else:
             if LIGHT_OPT["pbr"] and (f & 0x20) and not (f & 4):
                 c_, l_, q_ = [float(x) for x in cl[k]]
@@ -490,7 +493,7 @@ def expected_lighting(r2, wl_flag2):
                         cands = [r for r in ((-l_ - sq) / (2 * q_), (-l_ + sq) / (2 * q_)) if r > 0]
                         best = min(cands) if cands else 0.0
                 d50 = np.float32(best) if best > 0 else (np.float32(rad[k]) / np.float32(3.0) if rad[k] > 0 else np.float32(100.0))
-                scale = np.float32(2.0) / (d50 * d50)
+                scale = np.float32(LIGHT_OPT["pbr_scale"]) * np.float32(2.0) / (d50 * d50)
                 inten[k] = (inten[k] * scale).astype(np.float32)
                 f |= 4
             f &= ~(0x20 | 0x40)
@@ -1167,12 +1170,16 @@ if __name__ == "__main__":
     ap.add_argument("--rtl-min-weight", type=int, default=187)
     ap.add_argument("--no-sun-alpha", action="store_true", help="rule 21 disabled in the converter")
     ap.add_argument("--pbr-lights", choices=("keep", "convert"), default="convert")
+    ap.add_argument("--sky-ambient-scale", type=float, default=1.0, help="rule 20e")
+    ap.add_argument("--sun-scale", type=float, default=1.0, help="rule 20e")
+    ap.add_argument("--pbr-scale", type=float, default=1.0, help="rule 20e")
     ap.add_argument("--keep-prop-flag10", action="store_true")
     ap.add_argument("--no-grid-pad", action="store_true", help="rule 18 disabled in the converter")
     ap.add_argument("--grid-size", type=float, default=2048.0, help="rule 19 cell size given to the converter (0 = R2 size kept)")
     ap.add_argument("--reference", "--unpadded", dest="reference", help="the same input converted with --grid-size 0 --no-grid-pad: equivalence checks for rules 18 / 19")
     a = ap.parse_args()
-    LIGHT_OPT.update(collapse=not a.no_collapse_envs, rtl=not a.no_rtl, min_weight=a.rtl_min_weight, sun_alpha=not a.no_sun_alpha, pbr=(a.pbr_lights == "convert"))
+    LIGHT_OPT.update(collapse=not a.no_collapse_envs, rtl=not a.no_rtl, min_weight=a.rtl_min_weight, sun_alpha=not a.no_sun_alpha, pbr=(a.pbr_lights == "convert"),
+                     sky_scale=a.sky_ambient_scale, sun_scale=a.sun_scale, pbr_scale=a.pbr_scale)
     sys.exit(1 if check(a.r2, a.r1, a.limit, a.rtl_bytes, not a.no_bsp_tool, a.cubemaps, a.physics, a.cubemap_scale,
                         a.props, a.scatter_min, a.csm_rebase, a.empty_shadow_meshes, a.worldlight_flag2, a.keep_prop_flag10,
                         not a.no_grid_pad, a.reference, a.grid_size) else 0)

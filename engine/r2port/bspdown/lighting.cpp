@@ -239,12 +239,15 @@ void convertLighting(Ctx& c) {
             // upload copies the record and 0x10 would ask for a shadow slot.
             if (fl) sunFlagsCleared++;
             fl = 0;
+            const float gain = t == 5 ? c.opt.skyAmbientScale : c.opt.sunScale;
+            if (gain != 1.0f)
+                for (int ch = 0; ch < 3; ch++) L.setF(kOffIntensity + 4 * ch, L.f(kOffIntensity + 4 * ch) * gain);
         } else {
             if (c.opt.pbrLights && (fl & (int32_t)kFlagPbr) && !(fl & (int32_t)kFlagFade)) {
                 float d50 = halfDistance(L);
                 float radius = L.f(kOffRadius);
                 if (d50 <= 0) d50 = radius > 0 ? radius / 3.0f : 100.0f;
-                const float scale = 2.0f / (d50 * d50);  // I / d50^2 (inverse square) == I' * 0.5 (R1 polynomial) at d50
+                const float scale = c.opt.pbrScale * 2.0f / (d50 * d50);  // I / d50^2 (inverse square) == I' * 0.5 (R1 polynomial) at d50
                 for (int ch = 0; ch < 3; ch++) L.setF(kOffIntensity + 4 * ch, L.f(kOffIntensity + 4 * ch) * scale);
                 fl |= (int32_t)kFlagFade;
                 pbrConverted++;

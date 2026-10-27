@@ -25,6 +25,8 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <chrono>
@@ -1191,6 +1193,28 @@ const std::string& R2ConverterVariantString()
     return variant;
 }
 
+// key=value tokens: sky-scale, sun-scale, pbr-scale (rule 20 light scales), cube-scale (rule 13). The value must be a finite
+// number >= 0.
+bool ApplyConverterScaleToken(bspdown::Options& options, const std::string& token)
+{
+    const size_t equals = token.find('=');
+    if (equals == std::string::npos || equals + 1 >= token.size())
+        return false;
+    const std::string key = token.substr(0, equals);
+    const std::string text = token.substr(equals + 1);
+    char* parsedEnd = nullptr;
+    const double value = std::strtod(text.c_str(), &parsedEnd);
+    if (parsedEnd != text.c_str() + text.size() || !std::isfinite(value) || value < 0.0)
+        return false;
+    const float scale = static_cast<float>(value);
+    if (key == "sky-scale") options.skyAmbientScale = scale;
+    else if (key == "sun-scale") options.sunScale = scale;
+    else if (key == "pbr-scale") options.pbrScale = scale;
+    else if (key == "cube-scale") options.cubemapScale = scale;
+    else return false;
+    return true;
+}
+
 void ApplyConverterVariant(bspdown::Options& options, const std::string& variant)
 {
     size_t begin = 0;
@@ -1211,10 +1235,11 @@ void ApplyConverterVariant(bspdown::Options& options, const std::string& variant
         else if (token == "pbr-keep") options.pbrLights = false;
         else if (token == "flag2") options.worldLightFlagBit2 = true;
         else if (token == "props-keep10") options.keepPropFlag10 = true;
+        else if (ApplyConverterScaleToken(options, token)) {}
         else {
             char message[256]{};
             _snprintf_s(message, sizeof(message), _TRUNCATE,
-                "R1Delta: R2 converter variant token '%s' ignored (unknown)\n", token.c_str());
+                "R1Delta: R2 converter variant token '%s' ignored (unknown or bad value)\n", token.c_str());
             Msg("%s", message);
             OutputDebugStringA(message);
         }

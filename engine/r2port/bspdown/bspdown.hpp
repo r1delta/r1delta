@@ -90,6 +90,15 @@ struct Options {
     bool rtlConvert = true;
     int rtlMinWeight = 187;
     bool pbrLights = true;
+    // Rule 20e (LightVerify, mp_glitch / mp_lf_stacks measured against original R2 frames, glitchlight\ROUND3.md): linear multipliers on the
+    //   intensity of the kept light records. The R1 shaders add sky ambient (type 5) and sun (type 3) with a different weighting than the R2 ones
+    //   (R1 world PS: lmEnergy + bumpSkyWeight*skyColor + shadow*cloud*N.L*sunColor), so equal numbers over-light the shadows.
+    //   skyAmbientScale: multiplies the type 5 records (GPU sky constant and CPU prop ambient, both then times mat_sky_scale).
+    //   sunScale: multiplies the type 3 records (times mat_sun_scale).
+    //   pbrScale: extra multiplier on the PBR (flag 0x20) lights after the 2/d50^2 rewrite.
+    float skyAmbientScale = 1.0f;
+    float sunScale = 1.0f;
+    float pbrScale = 1.0f;
 
     // Rule 21: lightmap plane B alpha (lump 0x62). The R1 world pixel shader (lightmappedgeneric_ps50) uses (1 - plane B alpha) as the sun
     // shadow term wherever the CSM cascades do not cover the pixel (and everywhere when CSM is off). R1 compilers bake the sun visibility
