@@ -250,7 +250,9 @@ float4 PSMain(PSIn i) : SV_Target
     const float2 strength = float2(u[7].y, u[7].w) * curve + float2(u[7].x, u[7].z);
 
     float4 l2 = SkyCube.Sample(SkySampler, view) * u[5] * strength.y;
-    float4 l1 = BaseTexture.Sample(BaseTextureSampler, i.uv1) * u[4] * strength.x;
+    // The scan-line layer is sampled at its average (mip bias 12): R2 shows no stripes at gameplay distance (mp_lf_* glass
+    // dome, close up), R1 drew them as moire.
+    float4 l1 = BaseTexture.SampleBias(BaseTextureSampler, i.uv1, 12.0) * u[4] * strength.x;
     float3 rgb = l1.rgb * l1.a + l2.rgb * l2.a;
     rgb *= min(m[3].xyz, u[3].xxx);
     rgb *= i.color.rgb;

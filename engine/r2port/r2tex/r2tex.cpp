@@ -2058,6 +2058,21 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
     // required by the override. R1 clamps $fresnelsharpness to 0..1, so R2's sharpness 5 becomes 1.
     // The override opts in only when the engine hook is present; without it the marker is inert and the cube is bound
     // as an unused 2D texture.
+    // models/kodai/kodai_fake_screen_alpha (map-pack material of the mp_lf_* fake-sky shell models, converted models rename it
+    // r2m/models/kodai/...): the rpaks do not carry it, so it came out as the R1 error texture, drawn as a thin pink/grey seam
+    // line along every cell edge of the glass dome (mp_lf_meadow, stacks, deck, uma ...). R2 draws these seams as a black
+    // additive layer (layer 1 colour 0.1 over $texture2 effects\black), i.e. nothing visible.
+    if (name == "models/kodai/kodai_fake_screen_alpha") {
+        material = Material{};
+        material.name = name;
+        material.vmt =
+            "\"UnlitGeneric\"\n{\n"
+            "\t\"$surfaceprop\" \"glass\"\n"
+            "\t\"$basetexture\" \"effects\\black\"\n"
+            "\t\"$additive\" \"1\"\n"
+            "}\n";
+        return true;
+    }
     if (name == "world/test/kodai_fake_screen_01_world" || name == "skies/boomtowncubemap_grave" ||
         name == "skies/boomtowncubemap_desert") {
         material = Material{};
