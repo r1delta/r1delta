@@ -70,7 +70,9 @@ struct Options {
     bool cubemapFiles = true;
 
     // Rule 13: multiplier applied to the R2 BC6H cubemap values before the R1 encoding.
-    float cubemapScale = 1.0f / 6.0f;
+    // 4.0 is the largest factor that keeps R2 values up to 1.0 inside the R1 encodable range (alpha 255 -> 4.0);
+    // it was chosen by in-game comparison on mp_wargames (README "Rosetta" section), the old 1/6 left the map 30% darker.
+    float cubemapScale = 4.0f;
 
     // World light flags: stock R1 lights carry bit 0x2 (R2 never sets it); set it on lights with non-zero flags.
     bool worldLightFlagBit2 = false;

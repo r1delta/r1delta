@@ -255,14 +255,13 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
     0x4000 (stock ships black placeholders here): linear value/4 with alpha 255. cubemapdefault.hdr.vtf uses the
     same encoding of the average cube (stock: black F16 placeholder; the default is only used when a
     cubemap file is missing).
-    EXPOSURE (--cubemap-scale, default 1/6): R1 decodes with c_envMapLightScale and the engine's own units, R2's
-    BC6H values are in R2's units. Measured on the nearest cubemaps of R2 and R1 versions of the same
-    map: mean luminance R2/R1 = 8.5 (mp_rise, 0.376 vs 0.044; face means 0.19..0.71 vs 0.027..0.054) and 2.4
-    (mp_angel_city, 0.154 vs 0.064); R2/R1 cube-to-lightmap luminance ratio on rise 3.3 vs 0.31 (lightmaps
-    have the same statistics in R1 and R2: same rgb/alpha histograms, decoded mean 0.14 vs 0.11, so lightmap
-    units are shared). The geometric mean of 8.5, 2.4 and 10.6 is 6.0, hence the default factor 1/6 (R2
-    values scaled down so the decoded mean is about 0.05, the stock R1 level). This is calibrated on two
-    map pairs, not derived; use --cubemap-scale 1 for the raw R2 values.
+    EXPOSURE (--cubemap-scale, default 4): R1 decodes with c_envMapLightScale and the engine's own units, R2's BC6H values are in R2's
+    units. The earlier default 1/6 was an empirical fit on mp_rise / mp_angel_city (R2/R1 cube luminance 8.5, 2.4, 10.6). The mp_wargames
+    rosetta test (rosetta\ROSETTA.md) shows the ratio is map dependent (R2/R1 = 0.57 at the same origin on mp_wargames, face ratios
+    R1/R2 3.7 2.4 2.3 2.8 1.24 0.43), so no exact constant exists. In game on mp_wargames at fixed exposure
+    (mat_force_tonemap_scale 1) the converted map reached 69 % of the stock R1 brightness with 1/6 and 86 % with 4
+    (4 is also the largest factor that keeps R2 values up to 1.0 encodable: stock alpha 255 -> 4.0; about 1 % of the
+    brightest mip 0 pixels of the main cube clamp). Use --cubemap-scale 1/6 to get the old output.
     VALIDATION (cubemaps.cpp prints it, check_bspdown.py recomputes it from the output with the R1 formula against
     an independent BC6H decode * scale): mean relative error of the decoded RGBA8888 vs the scaled R2 box
     filtered values, per face, mp_glitch, slots 0..5 (%): cube 0: 0.16 0.15 0.15 0.16 0.11 0.26; cube 1: 0.19 0.18

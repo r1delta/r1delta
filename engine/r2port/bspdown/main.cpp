@@ -34,7 +34,7 @@ static void usage(const char* a0) {
                  "  --cubemaps <mode>      sort cubemap handling: none (default, all -1), split (R1 semantics, needs patch\n"
                  "                         materials maps/<map>/<material>_<x>_<y>_<z>), keep (R2 value 0)\n"
                  "  --physics <stub|none>  lump 0x1D: stub (default, replaces a lump without world solids) or none (keep input)\n"
-                 "  --cubemap-scale <x>    multiplier for the R2 cubemap values (default 0.16667)\n"
+                 "  --cubemap-scale <x>    multiplier for the R2 cubemap values (default 4)\n"
                  "  --worldlight-flag2     set world light flag bit 0x2 like stock R1 lights (default off, untested)\n"
                  "  --props <keep|hide-scatter|hide-all>  rule 16 diagnostics: scale props to 0.0001 for models with >= --scatter-min\n"
                  "                         instances / for every prop (default keep)\n"

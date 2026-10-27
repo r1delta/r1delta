@@ -76,16 +76,11 @@ constexpr uint32_t kGameLump = 0x23;
 
 // Folded into the on-disk cache fingerprint together with entity_rewrite::kRewriteVersion.
 // Bump when the vendored bspdown converter or the provider's BSP post-processing changes output.
-constexpr uint32_t kConvertedBspCacheVersion = 3;
+constexpr uint32_t kConvertedBspCacheVersion = 4;
 
 // Raised onto the z of every info_spawnpoint_flag origin in lump 0 (see entity_rewrite::RaiseFlagSpawnOrigins).
 // The R1 server drops the spawnpoint back to the floor; one that starts inside solid is removed.
 constexpr double kFlagSpawnLift = 8.0;
-
-// Multiplier applied to the R2 BC6H cubemap values before the R1 encoding (bspdown rule 13). 1/6 is a
-// placeholder until the real value is derived; changing it changes every converted BSP, so bump
-// kConvertedBspCacheVersion with it.
-constexpr float kCubemapScale = 1.0f / 6.0f;
 
 struct BspLumpHeader {
     uint32_t offset;
@@ -1003,13 +998,14 @@ FileBytes ReadMapPatchFile(const MapRequest& request)
     return state->aiGraphFile;
 }
 
-// The options the provider converts with. They equal bspdown's own defaults, which is also what the
-// bspdown.exe command line uses without flags, so the provider and the CLI produce the same BSP;
-// they are spelled out so a change of a library default cannot silently change what the game loads.
+// The options the provider converts with. Everything not set here (notably the cubemap scale, rule 13)
+// is bspdown's own default, which is also what the bspdown.exe command line uses without flags, so the
+// provider and the CLI produce the same BSP. The converter owns the scale; the provider does not override it.
+// The other options are spelled out so a change of a library default cannot silently change what the
+// game loads.
 bspdown::Options R2ConverterOptions()
 {
     bspdown::Options options;
-    options.cubemapScale = kCubemapScale;
     options.worldLightFlagBit2 = false;
     options.keepPropFlag10 = false;     // rule 16: clear static prop flag 0x10 (R1 reads it as "shadow caster only, not drawn")
     options.csmRebase = false;          // rule 17: shadow data options stay off
