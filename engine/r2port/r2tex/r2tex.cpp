@@ -1097,7 +1097,8 @@ bool isNormalName(std::string_view name) {
     return n.size() >= 4 && (n.rfind("_nml") == n.size() - 4 || n.rfind("_normal") == n.size() - 7 || n.rfind("_bump") == n.size() - 5);
 }
 
-bool addMipChain(std::vector<std::uint8_t>& vtf);
+bool addMipChain(std::vector<std::uint8_t>& vtf, std::string_view textureName);
+void encodeBc1Block(const std::uint8_t (&px)[16][3], std::uint8_t* out);
 
 bool convertTextureWithDb(const std::shared_ptr<Database>& db, const AssetRecord& record,
                           const TextureOptions& options, std::vector<std::uint8_t>& vtf,
@@ -1239,7 +1240,7 @@ bool convertTextureWithDb(const std::shared_ptr<Database>& db, const AssetRecord
         std::memcpy(vtf.data() + outOffset, bytes.data(), bytes.size());
         outOffset += bytes.size();
     }
-    return addMipChain(vtf);
+    return addMipChain(vtf, record.name);
 }
 
 bool expandLayerMaskVtf(std::vector<std::uint8_t>& vtf, bool invert, std::string& error) {
@@ -1561,7 +1562,17 @@ bool mergeOpacityVtf(std::vector<std::uint8_t>& albedo, const std::vector<std::u
 // R1 renders large single-mip textures as garbage (the mp_glitch training_r2 sky vista, a 2048x2048 DXT1 with one mip,
 // came out as rainbow arches; with a full chain the same texels render correctly). R2 stores such textures (skies, vistas)
 // with only mip 0. Expand them to an RGBA8 texture with a complete box-filtered chain.
-bool addMipChain(std::vector<std::uint8_t>& vtf) {
+bool addMipChain(std::vector<std::uint8_t>& vtf, std::string_view textureName) {
+    // Color textures only: normal, opacity, mask, gloss and specular maps keep their single mip (a box filter would
+    // de-normalize or blur their channel packing).
+    static const char* const kSkip[] = {"_nml", "_normal", "_bump", "_opa", "_msk", "_bm", "_gls", "_spc", "_exp", "_ilm", "_cav", "_ao"};
+    {
+        const std::string lowered = lowerAscii(std::string(textureName));
+        for (const char* suffix : kSkip) {
+            const std::size_t n = std::strlen(suffix);
+            if (lowered.size() >= n && lowered.compare(lowered.size() - n, n, suffix) == 0) return true;
+        }
+    }
     VtfView view;
     if (!parseVtfView(vtf, view) || view.mipCount != 1 || std::max(view.width, view.height) < 16) return true;
     if (view.format != 0 && view.format != 13 && view.format != 14 && view.format != 15) return true;
@@ -1591,6 +1602,41 @@ bool addMipChain(std::vector<std::uint8_t>& vtf) {
             }
         chain.push_back(std::move(next)); dims.emplace_back(nw, nh);
     }
+    if (view.format == 13) {
+        // DXT1 source: keep the original top mip bytes, re-encode the smaller mips as DXT1 (11x smaller than RGBA8).
+        const std::size_t topBytes = vtfMipBytes(13, w, h);
+        std::size_t total = 0x58;
+        for (std::size_t m = 0; m < chain.size(); ++m)
+            total += m == 0 ? topBytes : vtfMipBytes(13, dims[m].first, dims[m].second);
+        std::vector<std::uint8_t> out(total, 0);
+        std::memcpy(out.data(), vtf.data(), 0x58);
+        out[0x38] = static_cast<std::uint8_t>(chain.size());
+        put32(out.data() + 0x54, 0x58);
+        std::size_t at = 0x58;
+        for (std::size_t m = chain.size(); m-- > 0;) {
+            const std::uint32_t mw = dims[m].first, mh = dims[m].second;
+            if (m == 0) {
+                std::memcpy(out.data() + at, vtf.data() + view.dataOffset, topBytes);
+                at += topBytes;
+                continue;
+            }
+            const std::uint32_t bx = (mw + 3) / 4, by = (mh + 3) / 4;
+            for (std::uint32_t y = 0; y < by; ++y)
+                for (std::uint32_t x = 0; x < bx; ++x) {
+                    std::uint8_t block[16][3];
+                    for (int py = 0; py < 4; ++py)
+                        for (int px = 0; px < 4; ++px) {
+                            const std::uint32_t sx = std::min(mw - 1, x * 4 + px), sy = std::min(mh - 1, y * 4 + py);
+                            const std::uint8_t* s = &chain[m][(static_cast<std::size_t>(sy) * mw + sx) * 4];
+                            block[py * 4 + px][0] = s[0]; block[py * 4 + px][1] = s[1]; block[py * 4 + px][2] = s[2];
+                        }
+                    encodeBc1Block(block, out.data() + at + (static_cast<std::size_t>(y) * bx + x) * 8);
+                }
+            at += static_cast<std::size_t>(bx) * by * 8;
+        }
+        vtf = std::move(out);
+        return true;
+    }
     std::size_t total = 0x58;
     for (const auto& m : chain) total += m.size();
     std::vector<std::uint8_t> out(total, 0);
@@ -1603,6 +1649,145 @@ bool addMipChain(std::vector<std::uint8_t>& vtf) {
         std::memcpy(out.data() + at, chain[i].data(), chain[i].size());
         at += chain[i].size();
     }
+    vtf = std::move(out);
+    return true;
+}
+
+// R2 normal maps (material slots 1 and 24) store x/y slopes, as BC5 RG or in the R1 DXT1 layout: n = normalize(float3(rg * 2.867661
+// - 1.439453, 1)) (the blue channel is ignored). R1's pixel shaders read a unit normal from RGB (stock R1 *_nml are DXT1 RGB with VTF
+// flag 0x80). A BC5 source arrives in R1 with B = 0 and lights every bumped surface wrong (measured on mp_glitch: the whole world
+// shaded dark and blue; the repacked texture lights it neutrally). Every mip is re-encoded as unit-normal DXT1, green not flipped
+// (R1 and R2 normals of the same stock asset correlate +0.95 on both channels).
+constexpr const char* kNormalMapPrefix = "r2tex/nrm/";
+
+std::string normalMapName(const std::string& textureName) {
+    return std::string(kNormalMapPrefix) + cleanAssetName(textureName, true);
+}
+
+// Encodes 16 RGB texels (row-major 4x4) as one DXT1 four-colour block: principal axis fit, then nearest palette entry.
+void encodeBc1Block(const std::uint8_t (&px)[16][3], std::uint8_t* out) {
+    float mean[3] = {0, 0, 0};
+    for (const auto& p : px) for (int c = 0; c < 3; ++c) mean[c] += p[c];
+    for (float& m : mean) m /= 16.0f;
+    float cov[3][3] = {};
+    for (const auto& p : px) {
+        const float d[3] = {p[0] - mean[0], p[1] - mean[1], p[2] - mean[2]};
+        for (int a = 0; a < 3; ++a) for (int b = 0; b < 3; ++b) cov[a][b] += d[a] * d[b];
+    }
+    float axis[3] = {cov[0][0] + 1e-3f, cov[1][1] + 1e-3f, cov[2][2] + 1e-3f};
+    for (int it = 0; it < 6; ++it) {
+        float next[3] = {};
+        for (int a = 0; a < 3; ++a) for (int b = 0; b < 3; ++b) next[a] += cov[a][b] * axis[b];
+        const float len = std::sqrt(next[0] * next[0] + next[1] * next[1] + next[2] * next[2]);
+        if (len < 1e-6f) break;
+        for (int a = 0; a < 3; ++a) axis[a] = next[a] / len;
+    }
+    float tmin = 0, tmax = 0;
+    for (const auto& p : px) {
+        const float t = (p[0] - mean[0]) * axis[0] + (p[1] - mean[1]) * axis[1] + (p[2] - mean[2]) * axis[2];
+        tmin = std::min(tmin, t); tmax = std::max(tmax, t);
+    }
+    auto q565 = [](const float* c) {
+        const int r = std::clamp(static_cast<int>(c[0] * 31.0f / 255.0f + 0.5f), 0, 31);
+        const int g = std::clamp(static_cast<int>(c[1] * 63.0f / 255.0f + 0.5f), 0, 63);
+        const int b = std::clamp(static_cast<int>(c[2] * 31.0f / 255.0f + 0.5f), 0, 31);
+        return static_cast<std::uint16_t>((r << 11) | (g << 5) | b);
+    };
+    float hi[3], lo[3];
+    for (int c = 0; c < 3; ++c) { hi[c] = mean[c] + axis[c] * tmax; lo[c] = mean[c] + axis[c] * tmin; }
+    auto expand = [](std::uint16_t c, int* o) {
+        const int r = (c >> 11) & 31, g = (c >> 5) & 63, b = c & 31;
+        o[0] = (r << 3) | (r >> 2); o[1] = (g << 2) | (g >> 4); o[2] = (b << 3) | (b >> 2);
+    };
+    std::uint16_t c0 = 0, c1 = 0;
+    std::uint32_t indices = 0, bestIndices = 0;
+    std::uint16_t bestC0 = 0, bestC1 = 0;
+    long bestError = std::numeric_limits<long>::max();
+    // Pass 0 fits along the principal axis; passes 1 and 2 refit both endpoints by least squares to the previous assignment.
+    for (int pass = 0; pass < 3; ++pass) {
+        c0 = q565(hi); c1 = q565(lo);
+        if (c0 < c1) std::swap(c0, c1);
+        int pal[4][3];
+        expand(c0, pal[0]); expand(c1, pal[1]);
+        for (int c = 0; c < 3; ++c) { pal[2][c] = (2 * pal[0][c] + pal[1][c]) / 3; pal[3][c] = (pal[0][c] + 2 * pal[1][c]) / 3; }
+        indices = 0;
+        long error = 0;
+        int index[16];
+        for (int i = 0; i < 16; ++i) {
+            int best = 0, bestDistance = std::numeric_limits<int>::max();
+            if (c0 != c1) {
+                for (int k = 0; k < 4; ++k) {
+                    int distance = 0;
+                    for (int c = 0; c < 3; ++c) { const int d = px[i][c] - pal[k][c]; distance += d * d; }
+                    if (distance < bestDistance) { bestDistance = distance; best = k; }
+                }
+            } else {
+                bestDistance = 0;
+                for (int c = 0; c < 3; ++c) { const int d = px[i][c] - pal[0][c]; bestDistance += d * d; }
+            }
+            index[i] = best; error += bestDistance;
+            indices |= static_cast<std::uint32_t>(best) << (2 * i);
+        }
+        if (error < bestError) { bestError = error; bestIndices = indices; bestC0 = c0; bestC1 = c1; }
+        if (error == 0 || pass == 2) break;
+        // Least squares: texel ~ a * E0 + (1 - a) * E1 with a = 1, 0, 2/3, 1/3 for indices 0, 1, 2, 3.
+        float aa = 0, bb = 0, ab = 0, ya[3] = {}, yb[3] = {};
+        static const float weight[4] = {1.0f, 0.0f, 2.0f / 3.0f, 1.0f / 3.0f};
+        for (int i = 0; i < 16; ++i) {
+            const float a = weight[index[i]], b = 1.0f - a;
+            aa += a * a; bb += b * b; ab += a * b;
+            for (int c = 0; c < 3; ++c) { ya[c] += a * px[i][c]; yb[c] += b * px[i][c]; }
+        }
+        const float det = aa * bb - ab * ab;
+        if (std::fabs(det) < 1e-4f) break;
+        for (int c = 0; c < 3; ++c) {
+            hi[c] = std::clamp((ya[c] * bb - yb[c] * ab) / det, 0.0f, 255.0f);
+            lo[c] = std::clamp((yb[c] * aa - ya[c] * ab) / det, 0.0f, 255.0f);
+        }
+    }
+    out[0] = static_cast<std::uint8_t>(bestC0 & 255); out[1] = static_cast<std::uint8_t>(bestC0 >> 8);
+    out[2] = static_cast<std::uint8_t>(bestC1 & 255); out[3] = static_cast<std::uint8_t>(bestC1 >> 8);
+    for (int i = 0; i < 4; ++i) out[4 + i] = static_cast<std::uint8_t>(bestIndices >> (8 * i));
+}
+
+bool convertNormalVtf(std::vector<std::uint8_t>& vtf, std::string& error) {
+    VtfView view;
+    if (!parseVtfView(vtf, view) || u16(vtf.data() + 0x18) != 1) { error = "invalid source VTF for normal map"; return false; }
+    if (view.format != 0 && view.format != 13 && view.format != 14 && view.format != 15 && view.format != 34) {
+        error = "normal map: unsupported VTF format " + std::to_string(view.format);
+        return false;
+    }
+    std::vector<std::vector<std::uint8_t>> mips(view.mipCount);
+    std::vector<std::uint8_t> level;
+    for (std::uint32_t m = 0; m < view.mipCount; ++m) {
+        std::uint32_t w = 0, h = 0;
+        if (!decodeVtfMip(vtf, view, m, level, w, h)) { error = "normal map: mip decode failed"; return false; }
+        std::vector<std::uint8_t> rgb(static_cast<std::size_t>(w) * h * 3);
+        for (std::size_t i = 0, n = static_cast<std::size_t>(w) * h; i < n; ++i) {
+            const float sx = level[i * 4] * (2.867661f / 255.0f) - 1.439453f;
+            const float sy = level[i * 4 + 1] * (2.867661f / 255.0f) - 1.439453f;
+            const float inv = 1.0f / std::sqrt(sx * sx + sy * sy + 1.0f);
+            rgb[i * 3] = static_cast<std::uint8_t>(std::clamp((sx * inv * 0.5f + 0.5f) * 255.0f + 0.5f, 0.0f, 255.0f));
+            rgb[i * 3 + 1] = static_cast<std::uint8_t>(std::clamp((sy * inv * 0.5f + 0.5f) * 255.0f + 0.5f, 0.0f, 255.0f));
+            rgb[i * 3 + 2] = static_cast<std::uint8_t>(std::clamp((inv * 0.5f + 0.5f) * 255.0f + 0.5f, 0.0f, 255.0f));
+        }
+        const std::uint32_t bx = (w + 3) / 4, by = (h + 3) / 4;
+        mips[m].resize(static_cast<std::size_t>(bx) * by * 8);
+        for (std::uint32_t y = 0; y < by; ++y)
+            for (std::uint32_t x = 0; x < bx; ++x) {
+                std::uint8_t block[16][3];
+                for (std::uint32_t py = 0; py < 4; ++py)
+                    for (std::uint32_t px = 0; px < 4; ++px) {
+                        const std::uint32_t sx = std::min(w - 1, x * 4 + px), sy = std::min(h - 1, y * 4 + py);
+                        std::memcpy(block[py * 4 + px], &rgb[(static_cast<std::size_t>(sy) * w + sx) * 3], 3);
+                    }
+                encodeBc1Block(block, &mips[m][(static_cast<std::size_t>(y) * bx + x) * 8]);
+            }
+    }
+    std::vector<std::uint8_t> out(vtf.begin(), vtf.begin() + view.dataOffset);
+    put32(out.data() + 0x14, (u32(out.data() + 0x14) | 0x80u) & ~0x80000u);   // NORMAL, not sRGB
+    putI32(out.data() + 0x34, 13);
+    for (std::uint32_t m = view.mipCount; m-- > 0;) out.insert(out.end(), mips[m].begin(), mips[m].end());
     vtf = std::move(out);
     return true;
 }
@@ -1924,6 +2109,8 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
     const bool opacityMap = !tools && shaderSet.find("opam") != std::string::npos &&
         (translucent || additive || cut) && usedSlots.find(0) != usedSlots.end() &&
         usedSlots.find(13) != usedSlots.end() && slotGuids[0] && slotGuids[13];
+    const char* normalsEnv = std::getenv("R2TEX_NORMALS");   // default on; "0" passes the R2 BC5/slope texture through unchanged
+    const bool normalRepack = !tools && !(normalsEnv && normalsEnv[0] == '0');
     if (tools) {
         addVmtParam(out, "%compilenodraw", "1");
     } else {
@@ -1935,6 +2122,13 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
             }
         }
         if (opacityMap) usedSlots[0] = opacityMergeName(slotGuids[0], slotGuids[13]);
+        // Slot 1 and 24 normal maps are re-encoded as R1 unit-normal DXT1 (see convertNormalVtf); R2TEX_NORMALS=0 keeps the raw R2 texture.
+        if (normalRepack) {
+            for (const std::size_t normalSlot : {std::size_t(1), std::size_t(24)}) {
+                auto normal = usedSlots.find(normalSlot);
+                if (normal != usedSlots.end()) normal->second = normalMapName(normal->second);
+            }
+        }
         auto param = [&](std::size_t slot, const char* key) {
             auto it = usedSlots.find(slot);
             if (it != usedSlots.end()) {
@@ -2027,6 +2221,7 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
         }
         if (opaqueAlbedo && (slot == 0 || slot == 23)) texture.transform = TextureTransform::opaqueAlpha;
         if (opacityMap && slot == 0) texture.transform = TextureTransform::opacityMerge;
+        if (normalRepack && (slot == 1 || slot == 24)) texture.transform = TextureTransform::normalRgb;
         material.textures.push_back(std::move(texture));
     }
     return true;
@@ -2171,6 +2366,13 @@ bool ConvertTexture(std::string_view name, std::vector<std::uint8_t>& vtf,
         ref.guid = textureGuid(original); ref.name = original; ref.transform = TextureTransform::opaqueAlpha;
         return ConvertTexture(ref, vtf, options, error);
     }
+    if (cleaned.rfind(kNormalMapPrefix, 0) == 0) {
+        const std::string original = cleaned.substr(std::strlen(kNormalMapPrefix));
+        if (!validAssetName(original)) { vtf.clear(); if (error) *error = "invalid texture path"; return false; }
+        TextureRef ref;
+        ref.guid = textureGuid(original); ref.name = original; ref.transform = TextureTransform::normalRgb;
+        return ConvertTexture(ref, vtf, options, error);
+    }
     if (cleaned.rfind(kOpacityMergePrefix, 0) == 0) {
         TextureRef ref;
         std::uint64_t opacityGuid = 0;
@@ -2240,6 +2442,15 @@ bool ConvertTexture(const TextureRef& texture, std::vector<std::uint8_t>& vtf,
                 !mergeOpacityVtf(vtf, opacityVtf, why)) {
                 vtf.clear();
                 if (error) *error = opacityRecord ? why : "unresolved opacity texture GUID";
+                return false;
+            }
+            if (error) error->clear();
+            return true;
+        }
+        if (texture.transform == TextureTransform::normalRgb) {
+            if (!convertNormalVtf(vtf, why)) {
+                vtf.clear();
+                if (error) *error = why;
                 return false;
             }
             if (error) error->clear();
@@ -2328,6 +2539,10 @@ bool FamilyOfTexture(std::string_view name, std::uint32_t& family) {
             const std::string original = cleaned.substr(std::strlen(kOpaqueAlbedoPrefix));
             if (!validAssetName(original)) return false;
             guid = textureGuid(original);
+        } else if (cleaned.rfind(kNormalMapPrefix, 0) == 0) {
+            const std::string original = cleaned.substr(std::strlen(kNormalMapPrefix));
+            if (!validAssetName(original)) return false;
+            guid = textureGuid(original);
         } else if (cleaned.rfind(kOpacityMergePrefix, 0) == 0) {
             std::uint64_t opacityGuid = 0;
             if (!parseOpacityMergeName(cleaned, guid, opacityGuid)) return false;
@@ -2358,6 +2573,34 @@ bool IsFamilyResident(std::uint32_t family) {
         const auto db = getDatabase();
         return db && db->isFamilyResident(family);
     } catch (...) {
+        return false;
+    }
+}
+
+bool ListTextureInfo(std::vector<TextureInfo>& out, std::string* error) {
+    out.clear();
+    try {
+        auto db = getDatabase();
+        if (!db) { if (error) *error = "r2tex::Open has not succeeded"; return false; }
+        for (const auto& pair : db->assets) {
+            const AssetRecord& record = pair.second;
+            if (record.type != kTxtr) continue;
+            if (const char* filter = std::getenv("R2TEX_SCAN_FILTER"))
+                if (*filter && record.name.find(filter) == std::string::npos) continue;
+            std::string why;
+            auto family = db->getFamily(db->paks[record.pakIndex].family, why);
+            std::vector<std::uint8_t> header;
+            if (!family || !readAssetHeader(*db, record, family, header, why) || header.size() < 0x38) continue;
+            TextureInfo info;
+            info.name = record.name;
+            info.width = u16(header.data() + 0x10); info.height = u16(header.data() + 0x12);
+            info.format = u16(header.data() + 0x16);
+            info.mips = header[0x1d] + header[0x21] + header[0x22];
+            out.push_back(std::move(info));
+        }
+        return true;
+    } catch (const std::exception& e) {
+        if (error) *error = e.what();
         return false;
     }
 }

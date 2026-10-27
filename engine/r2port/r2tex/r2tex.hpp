@@ -19,7 +19,9 @@ enum class TextureTransform : std::uint8_t {
     opaqueAlpha,
     // Albedo (guid) with its alpha multiplied by the R2 opacity map (slot 13, second guid in the synthetic name
     // r2tex/opamerge/<albedo guid>_<opacity guid>); RGBA8 output.
-    opacityMerge
+    opacityMerge,
+    // Normal map (slots 1/24) re-encoded from R2 slopes to R1 unit-normal DXT1 (synthetic name r2tex/nrm/<texture name>).
+    normalRgb
 };
 
 enum class LayerMode : std::uint8_t {
@@ -43,6 +45,13 @@ struct Material {
     std::vector<TextureRef> textures;
     bool usesLayers = false;
 };
+
+// Texture header facts of every R2 texture in the index (analysis).
+struct TextureInfo {
+    std::string name;
+    std::uint32_t width = 0, height = 0, format = 0, mips = 0;
+};
+bool ListTextureInfo(std::vector<TextureInfo>& out, std::string* error = nullptr);
 
 struct MaterialOptions {
     LayerMode layerMode = LayerMode::current;

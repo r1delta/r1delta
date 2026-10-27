@@ -183,7 +183,7 @@ bool IsMaterialOrTextureRequestPath(std::string_view path)
 
 // Bump when the r2tex library or the VMT/VTF output it produces changes: converted files are
 // persisted per R2 install fingerprint and revision.
-constexpr std::string_view kConvertedCacheRevision = "6";
+constexpr std::string_view kConvertedCacheRevision = "7";
 
 bool ReadWholeFile(const std::filesystem::path& path, std::vector<std::uint8_t>& bytes)
 {
