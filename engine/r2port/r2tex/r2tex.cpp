@@ -2343,11 +2343,12 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
     // Translucent (not additive) atmosphere cloud sheets with the alpha distance fade (Adf/Aef; mp_forwardbase_kodai beacon_clouds): R2 fades
     // them against scene depth, so in the open sky they are all but invisible; R1 has no such fade and draws them at full vertex alpha, which showed
     // as an orange dust wall behind the cliffs and a fan of hard orange rays across the whole sky (mp_forwardbase_kodai, R2 frames show none of it).
-    // Measured in game (kodai, 7 spots, cache VMT edit): $alpha 0.3 still leaves the fan, 0 gives the R2 sky (sky patch 47,42,75 vs R2 47,46,95; before 98,70,78).
-    // R2TEX_SOFT_CLOUD_ALPHA overrides the 0.05 default.
+    // The Kodai cloud sheet matched R2 only at alpha 0: 0.3 still leaves the orange ray fan. Keep the small general
+    // reduction for other ADF sheets, but remove this sheet's R1-only open-sky contribution by default.
+    // R2TEX_SOFT_CLOUD_ALPHA is an explicit calibration override for either case.
     const bool softCloudSheet = !tools && unlit && translucent && !additive && name.rfind("world/atmosphere/", 0) == 0 &&
         shaderSet.find("adf") != std::string::npos;
-    double softCloudAlpha = 0.05;
+    double softCloudAlpha = name == "world/atmosphere/beacon_clouds" ? 0.0 : 0.05;
     if (const char* e = std::getenv("R2TEX_SOFT_CLOUD_ALPHA")) softCloudAlpha = std::clamp(std::atof(e), 0.0, 1.0);
     // Flat-textured sheets: bake the texture mean into constants (see flatSheetStats).
     FlatSheet flatSheet;

@@ -409,12 +409,34 @@ void convertCubemaps(Ctx& c) {
     for (int m = mips - 1; m > 0; m--) off0 += msize[m] * frames * 6;
     if (off0 + msize[0] * frames * 6 > d.size()) throw Error("cubemaps.hdr.vtf: image data is smaller than the header says");
     size_t trailing = d.size() - (off0 + msize[0] * frames * 6);
+    // Rule 13b: the CMA resource (R2 per-cubemap multiplier array: u32 byte count, then one float per frame)
+    std::vector<float> cma;
+    for (uint32_t i = 0; i < nres && 0x50 + 8 * (size_t)i + 8 <= d.size(); i++) {
+        const uint8_t* tag = &d[0x50 + 8 * (size_t)i];
+        if (tag[0] == 'C' && tag[1] == 'M' && tag[2] == 'A') {
+            size_t o = r32(d, 0x50 + 8 * (size_t)i + 4);
+            if (o + 4 <= d.size()) {
+                uint32_t nb = r32(d, o);
+                size_t n = std::min<size_t>(nb / 4, (d.size() - o - 4) / 4);
+                cma.resize(n);
+                if (n) std::memcpy(cma.data(), &d[o + 4], n * 4);
+            }
+        }
+    }
 
     std::vector<CubeSet> cubes(frames);
     std::vector<std::array<double, 6>> lumTable(frames), relErr(frames);
     size_t neg = 0, nonfinite = 0;
     const float scale = c.opt.cubemapScale;
     if (!(scale > 0)) throw Error("cubemapScale must be > 0");
+    std::vector<float> cubeScale(frames, scale);
+    size_t cmaUsed = 0;
+    if (c.opt.cubemapCmaGain > 0)
+        for (uint32_t f = 0; f < frames; f++)
+            if (f < cma.size() && std::isfinite(cma[f]) && cma[f] > 0) {
+                cubeScale[f] = std::min(scale, std::max(c.opt.cubemapMinScale, c.opt.cubemapCmaGain * cma[f]));
+                cmaUsed++;
+            }
     for (uint32_t f = 0; f < frames; f++)
         for (int fc = 0; fc < 6; fc++) {
             const uint8_t* blk = &d[off0 + ((size_t)f * 6 + fc) * msize[0]];
@@ -441,7 +463,7 @@ void convertCubemaps(Ctx& c) {
             }
             lumTable[f][fc] = lsum / ((double)w * w);
             cubes[f].face[fc] = boxDown(big, 64);
-            for (float& v : cubes[f].face[fc].rgb) v *= scale;
+            for (float& v : cubes[f].face[fc].rgb) v *= cubeScale[f];
         }
     // average cube for cubemapdefault: the mean of what R1 will decode for the individual cubemaps, i.e. of the
     // values clamped to the encodable 4.0 (a mean of the unclamped values brightens every texel where one cube
@@ -467,12 +489,15 @@ void convertCubemaps(Ctx& c) {
     EncodeStats est;
     add(dir + "cubemapdefault.hdr.vtf", buildHdrVtf(avg, nullptr));
     size_t dup = 0;
+    std::vector<Bytes> ldrBytes(frames), hdrBytes(frames);
     for (uint32_t f = 0; f < frames; f++) {
         int32_t o[3];
         std::memcpy(o, &cml[(size_t)f * 16], 12);
         char nm[96];
         std::snprintf(nm, sizeof(nm), "c%d_%d_%d", o[0], o[1], o[2]);
-        bool a = add(dir + nm + ".vtf", buildLdrVtf(cubes[f]));
+        Bytes lv = buildLdrVtf(cubes[f]);
+        ldrBytes[f] = lv;
+        bool a = add(dir + nm + ".vtf", std::move(lv));
         Bytes hv = buildHdrVtf(cubes[f], &est);
         // validation: decode mip 0 with the R1 shader formula and compare with the (scaled) R2 value
         {
@@ -494,8 +519,106 @@ void convertCubemaps(Ctx& c) {
                 relErr[f][fc] = ref > 0 ? err / ref : 0;
             }
         }
+        hdrBytes[f] = hv;
         bool b = add(dir + nm + ".hdr.vtf", std::move(hv));
         if (!a || !b) dup++;
+    }
+    // Rule 13c: extra samples so that the nearest-sample lookup of R1 reproduces the R2 per-probe cubemap assignment.
+    Bytes newCml;
+    size_t extraCount = 0;
+    double accBefore = 0, accAfter = 0;
+    if (c.opt.cubemapAssignMax > 0 && c.probeRefCube.size() * 3 == c.probeRefPos.size() && !c.probeRefCube.empty() && frames > 1) {
+        std::vector<std::array<float, 3>> proto;
+        std::vector<uint32_t> protoLabel;
+        for (uint32_t f = 0; f < frames; f++) {
+            int32_t o[3];
+            std::memcpy(o, &cml[(size_t)f * 16], 12);
+            proto.push_back({(float)o[0], (float)o[1], (float)o[2]});
+            protoLabel.push_back(f);
+        }
+        auto nearestLabel = [&](const float* p) {
+            double best = 1e300;
+            uint32_t lab = 0;
+            for (size_t i = 0; i < proto.size(); i++) {
+                double dx = p[0] - proto[i][0], dy = p[1] - proto[i][1], dz = p[2] - proto[i][2];
+                double dd = dx * dx + dy * dy + dz * dz;
+                if (dd < best) {
+                    best = dd;
+                    lab = protoLabel[i];
+                }
+            }
+            return lab;
+        };
+        const size_t nref = c.probeRefCube.size();
+        const float cellSize = c.opt.cubemapAssignCell >= 16.0f ? c.opt.cubemapAssignCell : 256.0f;
+        struct Cell {
+            std::map<int32_t, std::pair<uint32_t, std::array<double, 3>>> byLabel;
+            uint32_t total = 0;
+        };
+        std::map<std::array<int, 3>, Cell> cells;
+        size_t counted = 0, okBefore = 0;
+        for (size_t i = 0; i < nref; i++) {
+            int32_t lab = c.probeRefCube[i];
+            if (lab < 1 || (uint32_t)lab >= frames) continue;  // 0 = the sky box cube, not a play space assignment
+            const float* p = &c.probeRefPos[i * 3];
+            if (!std::isfinite(p[0]) || !std::isfinite(p[1]) || !std::isfinite(p[2])) continue;
+            counted++;
+            if (nearestLabel(p) == (uint32_t)lab) okBefore++;
+            std::array<int, 3> key = {(int)std::floor(p[0] / cellSize), (int)std::floor(p[1] / cellSize), (int)std::floor(p[2] / cellSize)};
+            Cell& cell = cells[key];
+            auto& e = cell.byLabel[lab];
+            e.first++;
+            for (int k = 0; k < 3; k++) e.second[k] += p[k];
+            cell.total++;
+        }
+        std::vector<std::pair<uint32_t, const Cell*>> order;
+        for (const auto& kv : cells)
+            if (kv.second.total >= 8) order.push_back({kv.second.total, &kv.second});
+        std::sort(order.begin(), order.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+        for (const auto& oc : order) {
+            if ((int)extraCount >= c.opt.cubemapAssignMax) break;
+            const Cell& cell = *oc.second;
+            int32_t bestLab = 0;
+            uint32_t bestN = 0;
+            for (const auto& lv : cell.byLabel)
+                if (lv.second.first > bestN) {
+                    bestN = lv.second.first;
+                    bestLab = lv.first;
+                }
+            const auto& e = cell.byLabel.at(bestLab);
+            float cen[3] = {(float)(e.second[0] / e.first), (float)(e.second[1] / e.first), (float)(e.second[2] / e.first)};
+            if (nearestLabel(cen) == (uint32_t)bestLab) continue;
+            int32_t o[3] = {(int32_t)std::lround(cen[0]), (int32_t)std::lround(cen[1]), (int32_t)std::lround(cen[2])};
+            for (;;) {  // the name c<x>_<y>_<z> must be unique
+                bool clash = false;
+                for (const auto& pr : proto)
+                    if ((int32_t)pr[0] == o[0] && (int32_t)pr[1] == o[1] && (int32_t)pr[2] == o[2]) clash = true;
+                if (!clash) break;
+                o[0]++;
+            }
+            proto.push_back({(float)o[0], (float)o[1], (float)o[2]});
+            protoLabel.push_back((uint32_t)bestLab);
+            char nm[96];
+            std::snprintf(nm, sizeof(nm), "c%d_%d_%d", o[0], o[1], o[2]);
+            add(dir + nm + ".vtf", ldrBytes[bestLab]);
+            add(dir + nm + ".hdr.vtf", hdrBytes[bestLab]);
+            uint8_t rec[16];
+            std::memcpy(rec, o, 12);
+            std::memcpy(rec + 12, &cml[(size_t)bestLab * 16 + 12], 4);
+            if (newCml.empty()) newCml = cml;
+            newCml.insert(newCml.end(), rec, rec + 16);
+            extraCount++;
+        }
+        size_t okAfter = 0;
+        for (size_t i = 0; i < nref; i++) {
+            int32_t lab = c.probeRefCube[i];
+            if (lab < 1 || (uint32_t)lab >= frames) continue;
+            const float* p = &c.probeRefPos[i * 3];
+            if (!std::isfinite(p[0]) || !std::isfinite(p[1]) || !std::isfinite(p[2])) continue;
+            if (nearestLabel(p) == (uint32_t)lab) okAfter++;
+        }
+        accBefore = counted ? (double)okBefore / counted : 0;
+        accAfter = counted ? (double)okAfter / counted : 0;
     }
     // keep other stored entries of the R2 pakfile (none in any map seen)
     std::string kept;
@@ -521,6 +644,14 @@ void convertCubemaps(Ctx& c) {
               100 * relErr[f][0], 100 * relErr[f][1], 100 * relErr[f][2], 100 * relErr[f][3], 100 * relErr[f][4], 100 * relErr[f][5]);
     }
     if (frames > 12) c.say("[rule 13]   ... %u more cubemaps not listed", frames - 12);
+    c.say("[rule 13b] per-cubemap scale = clamp(%g x CMA, %g, %g) from the R2 CMA resource (%zu of %u cubemaps have one): %s", (double)c.opt.cubemapCmaGain, (double)c.opt.cubemapMinScale, (double)scale, cmaUsed, frames,
+          [&] { std::string s; for (uint32_t f = 0; f < frames && f < 12; f++) { char b[48]; std::snprintf(b, sizeof(b), "%s%.3g", f ? " " : "", (double)cubeScale[f]); s += b; } return s; }().c_str());
+    if (extraCount) {
+        c.lump[L_CUBEMAPS] = std::move(newCml);
+        c.say("[rule 13c] %zu extra cubemap samples (copies of the R2 assigned cube) so that nearest-sample selection matches the R2 probe ref cubemap for %.1f %% of the refs (was %.1f %%); %zu cubemaps total", extraCount, 100 * accAfter, 100 * accBefore, frames + extraCount);
+    } else if (c.opt.cubemapAssignMax > 0) {
+        c.say("[rule 13c] no extra cubemap samples needed or no probe refs (nearest-sample agreement %.1f %%)", 100 * accBefore);
+    }
 }
 
 }  // namespace detail

@@ -401,7 +401,16 @@ def expected_lighting(r2, wl_flag2):
         S += 1
     clean = not bool(np.any((ty[E + S:] == 5) | (ty[E + S:] == 3)))
     if LIGHT_OPT["collapse"] and clean and (E > 1 or S > 1):
-        order = ([E - 1] if E else []) + ([E + S - 1] if S else [])
+        ambient_slot, sun_slot = max(E - 1, 0), max(S - 1, 0)
+        if E == S:
+            for slot in reversed(range(E)):
+                sun = raw[E + slot].view("<f4")
+                template = (np.all(np.abs(sun[3:6] - 3.0) < 1e-3)
+                            and np.all(np.abs(sun[6:9] - (-0.33544, 0.52557, -0.78183)) < 2e-3))
+                if not template:
+                    ambient_slot = sun_slot = slot
+                    break
+        order = ([ambient_slot] if E else []) + ([E + sun_slot] if S else [])
     else:
         order = list(range(E + S))
     head = len(order)
@@ -418,7 +427,8 @@ def expected_lighting(r2, wl_flag2):
     tex_old = None
     sky = bytearray(r2.raw(0x62).tobytes())
     sun_alpha = bool(LIGHT_OPT["sun_alpha"] and have and len(sky) == texels * 8)
-    lut = np.array([255 - int(np.floor(255.0 * (v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4) + 0.5)) for v in (np.arange(256) / 255.0)], np.uint8)
+    linear_visibility = np.array([v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4 for v in (np.arange(256) / 255.0)])
+    lut = (255 - np.floor(255.0 * linear_visibility + 0.5)).astype(np.uint8)
     if have:
         npal = len(pal) // 63
         tex_old = np.full((texels, 4), -1, np.int64)
@@ -450,13 +460,36 @@ def expected_lighting(r2, wl_flag2):
                 okk[ok] = ((ty[wo[ok]] == 1) | (ty[wo[ok]] == 2)) & ((fl[wo[ok]] & 8) != 0)
                 okk &= wt >= LIGHT_OPT["min_weight"]
                 tex_old[t0:t0 + m, s] = np.where(okk, wo, -1)
-                usage += np.bincount(wo[okk], weights=wt[okk].astype(np.float64), minlength=n)
+                usage += np.bincount(wo[okk], weights=linear_visibility[wt[okk]], minlength=n)
             t0 += m
     flagged_pos = [k for k in range(head, len(order)) if ty[order[k]] in (1, 2) and (fl[order[k]] & 8)]
+    source_intensity = np.ascontiguousarray(raw[:, 12:24]).view("<f4").reshape(-1, 3)
+    source_attenuation = np.ascontiguousarray(raw[:, 76:88]).view("<f4").reshape(-1, 3)
+    source_radius = np.ascontiguousarray(raw[:, 72:76]).view("<f4").ravel()
+
+    def pbr_intensity_scale(i):
+        c_, l_, q_ = [float(x) for x in source_attenuation[i]]
+        best = 0.0
+        cc = c_ - 0.5
+        if abs(q_) < 1e-12:
+            if abs(l_) > 1e-12:
+                best = -cc / l_
+        else:
+            disc = l_ * l_ - 4 * q_ * cc
+            if disc >= 0:
+                sq = disc ** 0.5
+                cands = [r for r in ((-l_ - sq) / (2 * q_), (-l_ + sq) / (2 * q_)) if r > 0]
+                best = min(cands) if cands else 0.0
+        d50 = np.float32(best) if best > 0 else (source_radius[i] / np.float32(3.0) if source_radius[i] > 0 else np.float32(100.0))
+        return np.float32(LIGHT_OPT["pbr_scale"]) * np.float32(2.0) / (d50 * d50)
+
     reordered = False
     do_rtl = bool(LIGHT_OPT["rtl"] and have)
     if do_rtl and flagged_pos and flagged_pos[-1] - v1 > 254:
         ids = [order[p] for p in flagged_pos]
+        for i in ids:
+            scale = pbr_intensity_scale(i) if LIGHT_OPT["pbr"] and (fl[i] & 0x20) and not (fl[i] & 4) else 1.0
+            usage[i] *= float(scale) * sum(float(c) * w for c, w in zip(source_intensity[i], (0.2126, 0.7152, 0.0722)))
         ids = sorted(ids, key=lambda i: -usage[i])  # python sort is stable
         for p, i in zip(flagged_pos, ids):
             order[p] = i
@@ -468,8 +501,6 @@ def expected_lighting(r2, wl_flag2):
     oty = ty[order]
     ofl = fl[order].copy()
     inten = np.ascontiguousarray(out[:, 12:24]).view("<f4").reshape(-1, 3).copy()
-    cl = np.ascontiguousarray(out[:, 76:88]).view("<f4").reshape(-1, 3)
-    rad = np.ascontiguousarray(out[:, 72:76]).view("<f4").ravel()
     for k in range(len(order)):
         t = oty[k]
         f = int(ofl[k])
@@ -480,20 +511,7 @@ def expected_lighting(r2, wl_flag2):
                 inten[k] = (inten[k] * g).astype(np.float32)
         else:
             if LIGHT_OPT["pbr"] and (f & 0x20) and not (f & 4):
-                c_, l_, q_ = [float(x) for x in cl[k]]
-                best = 0.0
-                cc = c_ - 0.5
-                if abs(q_) < 1e-12:
-                    if abs(l_) > 1e-12:
-                        best = -cc / l_
-                else:
-                    disc = l_ * l_ - 4 * q_ * cc
-                    if disc >= 0:
-                        sq = disc ** 0.5
-                        cands = [r for r in ((-l_ - sq) / (2 * q_), (-l_ + sq) / (2 * q_)) if r > 0]
-                        best = min(cands) if cands else 0.0
-                d50 = np.float32(best) if best > 0 else (np.float32(rad[k]) / np.float32(3.0) if rad[k] > 0 else np.float32(100.0))
-                scale = np.float32(LIGHT_OPT["pbr_scale"]) * np.float32(2.0) / (d50 * d50)
+                scale = pbr_intensity_scale(order[k])
                 inten[k] = (inten[k] * scale).astype(np.float32)
                 f |= 4
             f &= ~(0x20 | 0x40)
@@ -523,8 +541,10 @@ def expected_lighting(r2, wl_flag2):
     rtl_out = None
     if do_rtl:
         slot = tex_old.copy()
-        nwv = np.where(slot >= 0, new_of[np.clip(slot, 0, n - 1)] - v1, -1)
-        nwv = np.where((slot >= 0) & (nwv >= 0) & (nwv <= 254), nwv, 255)
+        world = np.where(slot >= 0, new_of[np.clip(slot, 0, n - 1)], -1)
+        nwv = world - v1
+        final_realtime = (ofl[np.clip(world, 0, len(order) - 1)] & 8) != 0
+        nwv = np.where((slot >= 0) & (nwv >= 0) & (nwv <= 254) & final_realtime, nwv, 255)
         nwv.sort(axis=1)  # 255 (none) last, ascending
         rtl_out = nwv.astype(np.uint8).tobytes()
     return out.tobytes(), bytes(pr), rtl_out, {"E": E, "S": S, "head": head, "v1": v1, "reordered": reordered, "sky": bytes(sky), "sun_alpha": sun_alpha}
@@ -567,7 +587,7 @@ def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", ph
     k = len(rtl) / max(texels, 1)
     elw, elp, elr, einfo = expected_lighting(r2, wl_flag2)
     if elr is not None:
-        C.ok(len(rtl) == texels * 4 and bytes(rtl) == elr, "RTL lump = independent decode of R2 9 byte texels (4 bytes per texel, slot = world index - %d, min weight %d, %s)" % (einfo["v1"], LIGHT_OPT["min_weight"], "reordered by use" if einfo["reordered"] else "original order"))
+        C.ok(len(rtl) == texels * 4 and bytes(rtl) == elr, "RTL lump = independent decode of R2 9 byte texels (4 bytes per texel, slot = world index - %d, min weight %d, %s)" % (einfo["v1"], LIGHT_OPT["min_weight"], "reordered by contribution potential" if einfo["reordered"] else "original order"))
         C.ok(1 <= k <= 4, "RTL bytes per texel in 1..4 (%.2f)" % k)
     else:
         C.ok(len(rtl) == texels * rtl_bytes or (len(rtl) == 0 and len(r2.raw(0x69)) == 0), "RTL lump %d bytes = %d per texel" % (len(rtl), rtl_bytes))
@@ -591,6 +611,21 @@ def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", ph
     w1 = r1.arr(0x36, np.dtype([("v", "u1", 100)]))["v"]
     C.ok(bytes(r1.raw(0x36)) == elw, "world lights = rule 20 model (%d R2 sky ambient + %d sun entries, %d head entries, v1 %d, %d lights)" % (einfo["E"], einfo["S"], einfo["head"], einfo["v1"], len(w1)))
     C.ok(len(w1) <= 4064, "world light count <= 4064")
+    final_types = np.ascontiguousarray(w1[:, 52:56]).view("<i4").ravel()
+    final_flags = np.ascontiguousarray(w1[:, 88:92]).view("<i4").ravel()
+    local = (final_types == 1) | (final_types == 2)
+    C.ok(not bool(np.any((final_flags[255:] & 8) & local[255:])),
+         "final local lights at indices 255/256 and beyond have flag 0x8 cleared")
+    if len(rtl) == texels * 4:
+        packed = np.frombuffer(rtl, np.uint8).reshape(-1, 4)
+        refs = np.unique(packed)
+        refs = refs[refs != 255].astype(np.int64) + einfo["v1"]
+        in_range = bool(np.all(refs < len(w1)))
+        enabled = in_range and bool(np.all(local[refs] & ((final_flags[refs] & 8) != 0)))
+        C.ok(enabled and bool(np.all(refs < 255)),
+             "every emitted RTL byte resolves to a FINAL flag-0x8 point/spot below conservative index 255")
+        holes = (np.cumsum(packed == 255, axis=1) != 0) & (packed != 255)
+        C.ok(not bool(np.any(holes)), "RTL lists terminate at the first 0xFF without later references")
     if len(w1) >= 2 and einfo["head"] == 2:
         t1 = np.ascontiguousarray(w1[:, 52:56]).view("<i4").ravel()
         C.ok(int(t1[0]) == 5 and int(t1[1]) == 3, "R1 layout: light[0] is the sky ambient (type 5), light[1] the sun (type 3)")

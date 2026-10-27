@@ -74,6 +74,22 @@ struct Options {
     // it was chosen by in-game comparison on mp_wargames (README "Rosetta" section), the old 1/6 left the map 30% darker.
     float cubemapScale = 4.0f;
 
+    // Rule 13b: per-cubemap scale from the R2 cubemap multiplier array (resource CMA of cubemaps.hdr.vtf, one float per cubemap
+    // frame, the shader constant R2's materialsystem uploads per cubemap: the stored cubes are exposure normalised, mp_forwardbase_kodai
+    // 5.0 3.26 2.34 8.89 0.88 0.86, mp_glitch 1.3, mp_lf_stacks 0.7). scale = clamp(cubemapCmaGain * CMA, cubemapMinScale, cubemapScale);
+    // cubemapScale stays the upper bound, so maps whose CMA is large (night maps, mp_wargames 27..187) keep exactly the old scale 4.
+    // cubemapCmaGain 0 = one global scale (the behaviour before rule 13b).
+    float cubemapCmaGain = 1.0f;
+    float cubemapMinScale = 0.25f;
+
+    // Rule 13c: R1 picks the cubemap of a dynamic model (viewmodel, props without a prop cubemap) and of every world sort (all -1) as the
+    // sample nearest to the origin; R2 assigns a cubemap to every light probe ref (lump 0x68 trailing int32; mp_forwardbase_kodai: 77 % of the
+    // refs use the one outdoor cube 4, nearest-sample picks cubes 1/3/5 there, 3.5x darker or brighter, neutral or orange: the viewmodel
+    // colour flipped between white and orange while running). Up to cubemapAssignMax extra samples (copies of an existing cube) are added
+    // where the nearest existing sample disagrees with the majority R2 assignment of a cubemapAssignCell sized cell. 0 = off.
+    int cubemapAssignMax = 96;
+    float cubemapAssignCell = 256.0f;
+
     // World light flags: stock R1 lights carry bit 0x2 (R2 never sets it); set it on lights with non-zero flags.
     bool worldLightFlagBit2 = false;
 

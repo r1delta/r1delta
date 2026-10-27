@@ -126,10 +126,12 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
    not right). Round trip: all mapped fields identical; first_leaf/num_leaves/disable_x360 differ
    because R1 stock props hold unread garbage there (hex 'ffff', '0900', ...).
 
-6. Light probe refs 0x68: 20 -> 16 bytes (trailing int32 dropped; non-zero in about 99.9% of R2
-   records, always 0 in R1, unknown meaning). Probes 0x65 (48), tree 0x67 (8), static prop
-   indices 0x66 (4): same sizes in R1/R2, copied. R1 adds 32 to a probe's light index when its
-   weight byte is non-zero (sub_1800B0B30); whether R2's indices mean the same is unknown.
+6. Light probe refs 0x68: R2 records are 20 bytes; R1 consumes 16, so the trailing int32 is dropped (non-zero in
+   about 99.9% of R2 refs, always 0 in R1). Rule 13c uses that trailing value as the R2 cubemap-frame label when
+   comparing R1 nearest-sample lookup with R2 assignments; this is a working interpretation, not established by
+   the record layout alone. See rule 13c's measured agreement in the map report. Probes 0x65 (48), tree 0x67 (8),
+   static prop indices 0x66 (4): same sizes in R1/R2, copied. R1 adds 32 to a probe's light index when its weight
+   byte is non-zero (sub_1800B0B30); whether R2's light indices mean the same is unknown.
 
 7. Bounds [R1: Init-time fatal check in sub_1801B0F90, +-1 padding in sub_1800BB700].
    Render meshes of model 0 with any vertex beyond +-limit: triangles clipped against the box
@@ -257,13 +259,20 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
     0x4000 (stock ships black placeholders here): linear value/4 with alpha 255. cubemapdefault.hdr.vtf uses the
     same encoding of the average cube (stock: black F16 placeholder; the default is only used when a
     cubemap file is missing).
-    EXPOSURE (--cubemap-scale, default 4): R1 decodes with c_envMapLightScale and the engine's own units, R2's BC6H values are in R2's
-    units. The earlier default 1/6 was an empirical fit on mp_rise / mp_angel_city (R2/R1 cube luminance 8.5, 2.4, 10.6). The mp_wargames
-    rosetta test (rosetta\ROSETTA.md) shows the ratio is map dependent (R2/R1 = 0.57 at the same origin on mp_wargames, face ratios
-    R1/R2 3.7 2.4 2.3 2.8 1.24 0.43), so no exact constant exists. In game on mp_wargames at fixed exposure
-    (mat_force_tonemap_scale 1) the converted map reached 69 % of the stock R1 brightness with 1/6 and 86 % with 4
-    (4 is also the largest factor that keeps R2 values up to 1.0 encodable: stock alpha 255 -> 4.0; about 1 % of the
-    brightest mip 0 pixels of the main cube clamp). Use --cubemap-scale 1/6 to get the old output.
+    EXPOSURE (--cubemap-scale, default 4; --cubemap-cma-gain, default 1; --cubemap-min-scale, default 0.25): R1 decodes with
+    c_envMapLightScale and the engine's own units; R2 BC6H values use R2 units. Rule 13b applies clamp(gain * CMA,
+    min-scale, cubemap-scale) per frame; cubemap-scale remains the upper bound. Missing/non-positive CMA keeps the
+    global scale; gain 0 disables per-frame scaling. Kodai's six R2 CMA values are 5.00, 3.26, 2.34, 8.89, 0.88,
+    0.86, hence default frame scales 4, 3.26, 2.34, 4, 0.88, 0.86. The earlier global 1/6 fit was empirical on
+    mp_rise / mp_angel_city (R2/R1 cube luminance 8.5, 2.4, 10.6). The mp_wargames rosetta test
+    (rosetta\ROSETTA.md) shows a map-dependent ratio (R2/R1 = 0.57 at the same origin; face ratios R1/R2 3.7, 2.4,
+    2.3, 2.8, 1.24, 0.43), so no global constant fits all maps. At fixed exposure (mat_force_tonemap_scale 1), its
+    converted brightness was 69 % of stock R1 with global 1/6 and 86 % with global 4; use --cubemap-cma-gain 0
+    --cubemap-scale 1/6 to reproduce the old global 1/6 output.
+    Rule 13c uses the 0x68 probe positions and trailing values (interpreted as R2 cubemap-frame labels; see the
+    rule 6 caveat) to compare R2 assignments with R1 nearest-sample lookup. It appends up to 96 samples by default,
+    copying an existing cube into cells whose majority label disagrees with the nearest sample; the report records
+    before/after agreement. --cubemap-assign-max 0 disables this approximation.
     CLIPPING at scale 4 (measured with analysis\cubeclip.py: convert at --cubemap-scale 0.125, rescale; max R2 value 2.6 to 9.0,
     most maps below 5.2; mip 0 pixels with any channel above 4.0 / energy kept by the clamp, scale 2 | 3 | 4):
     glitch 0.03 | 3.8 | 12.3 % (95.6 % kept at 4; sky slot 4: 58 % of its texels clip, 90 % of its luminance kept),
@@ -450,19 +459,27 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
        Layout per type-1 page in header order: A plane (w*h uint32 LE: bits 0..23 four 6 bit slots, 63 = unused, bits 24..31 palette id;
        0xFFFFFFFF = none), B plane (w*h x 4 bytes: visibility weight per slot), C plane (w*h bytes: candidate count). Palette = lump 0x7A,
        126 byte records of 63 uint16, entry = world index - E. Slot 0 of the first palette column is reserved for the sun.
-       R1 layout: 4 bytes per texel, byte = world index - v1, 0xFF = none, ascending, at most 4 (R1 stock mp_rise: byte 0 = the sun never occurs, 68 % of
-       texels empty, so the sun is NOT in the R1 list). Conversion: per texel keep the slots that are point/spot lights with flag 0x8 and weight >=
-       --rtl-min-weight (default 187: B is stored sRGB, 187 = 0.5 visibility, the R2 baker writes quarter steps 137/187/224); the sun slot and baked lights are dropped; bytes above 254 do not exist: if the real-time group needs more than
-       255 slots (glitch 338, wargames 260 flagged lights) the group is reordered by total visibility weight and the least used lights are dropped
-       (glitch: 11,079 of 885,554 slots). R1 has no per-texel visibility weight; the R2 shadowing is only kept as the omitted entries.
-       --no-rtl restores the 0xFF fill.
+       R1 layout: four unsigned index bytes per texel, byte = world index - v1, 0xFF terminates the list, at most four lights.
+       The R1 shader point-loads this integer texture at floor(lightmapUV * pageSize) and indexes HardwareLight[byte + 32] (t18, stride 96).
+       It has no per-texel weight channel, interpolation, per-mesh palette or second index namespace. Stock R1 lists need not be ascending;
+       the converter emits them ascending with all sentinels last. Stock rise references slots 1..239, never sun slot 0; box is all 0xFF.
+       Conversion keeps point/spot slots with flag 0x8 and B >= --rtl-min-weight (default 187, approximately half visibility after sRGB decode;
+       quarter steps are 137/187/224). 187 is a source visibility threshold, NOT a weight written into the R1 texel. Sun/baked entries are dropped.
+       On overflow, stable-sort the existing real-time positions by contribution potential: sum(linear-sRGB visibility over accepted texels)
+       times luminance of the final converted light intensity (including the PBR intensity scale). This is not exact geometry-weighted irradiance.
+       The conservative client-table bound still clears flag 0x8 at world-array indices >= 255. Emission checks the FINAL flags too, not merely
+       the byte range, so it cannot reference one of those cleared lights (including array index 255, whose byte would otherwise fit).
+       Glitch retains 96.42% of this incident-color potential versus 93.65% with raw-usage ranking at the same bound; wargames loses no entries.
+       Missing fractional visibility remains a representation limit; --no-rtl restores the 0xFF fill. Detailed shader formulas, dropped-light
+       coverage and measured profiles are in lightref\RTL-RESULTS.md.
     d) PBR lights. R2 entity _pbr_falloff 1 = world light flag 0x20 (no 0x4); the compiled intensity is brightness/255 * 1e5 (the two blue
        glitch point lights: 1e5, radius 500, d50 150; probe references to them: 937). R1 evaluates lights without flag 0x4 as 1 / (c + l d + q d^2)
        (sub_1800A4FD0), which is unbounded near the radius. Rewrite: set flag 0x4 and multiply the intensity by 2 / d50^2 where d50 is the
        distance at which c + l d + q d^2 = 0.5 (the inverse-square irradiance I/d50^2 equals I' * 0.5 there). Flags 0x20 and 0x40 are cleared.
-       --pbr-lights keep leaves the records alone. Calibration (LightVerify, ROUND3.md): the 0x20 lights are baked into the lightmap, so the world
-       does not respond to the scale (--pbr-scale 0.01 .. 4: < 3 % on the world, +8 % on the CPU-lit gun, no flare-up from 25 to 300 units);
-       the 2/d50^2 rewrite stays (scale 1).
+       --pbr-lights keep leaves the records alone. Calibration (LightVerify, ROUND3.md): glitch lights 438/445 at (2351,1426,351)/(2556,1492,369)
+       have flag 0x20 WITHOUT 0x8, so their blue pools are baked into the lightmap and are not evidence of RTL response (--pbr-scale 0.01 .. 4:
+       < 3% world change, +8% on the CPU-lit gun). Other 0x20 lights DO carry 0x8 (including wargames court spots); those require RTL validation.
+       The current 2/d50^2 rewrite is a one-distance approximation, not an exact mapping of R2's inverse-square falloff into R1's polynomial.
     e) Sky ambient / sun scale (rule 20e). The R1 world PS adds the sky ambient with the lightmap plane B bent-sky weight and the sun with
        shadow*cloud*N.L; with the unscaled R2 numbers the shadows of mp_glitch and mp_lf_stacks are too bright and blue (spawn ground shadow
        luminance 86 vs 59 in R2, R/G 0.94/1.0 vs 1.26, sun-lit patch correct) and the whole frame is 1.22 (stacks) / 1.32 ground (glitch) of R2.
@@ -483,6 +500,13 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
     keep 255 (R2 skips the sun there). mp_glitch: 524,530 texels fully lit, 126,881 partial. Option --no-sun-alpha keeps 255.
     Checker: independent numpy model of all three lumps, byte exact (check_bspdown.py, options --no-collapse-envs --no-rtl --rtl-min-weight
     --pbr-lights).
+22. Opaque vertex alpha for vertex-tinted, single-layer world materials (vcalpha.cpp). R2's `vcolt` shader uses mesh RGB as tint but ignores
+    alpha when the material has no `vcola` token or second layer; R1's opaque LightmappedGeneric reads that vertex alpha as dithered opacity.
+    For the 15 explicit world materials with this combination and graded vertex alpha, set the per-vertex alpha byte to 255 for referenced
+    mesh vertices. Other material/vertex bytes are untouched. Keep the target list in sync with r2tex.cpp's vertex-tint allowlist, which emits
+    `$vertexcolor 1` only for measured RGB-tinted world materials. The BWC beacon_metal_panel_grey_02_vc wall has RGB (139,57,57) and alpha
+    135; its old cap0 noise metric was 1.47 with vertex color enabled/source alpha, versus 0.76 without vertex color. The rule avoids using
+    R1-only opacity for these surfaces.
 
 Results
 -------

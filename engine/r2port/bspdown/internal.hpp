@@ -193,6 +193,10 @@ struct Ctx {
     bool gameLumpNeedsRebase = false;
     bool gridRegridded = false;  // rule 19 re-binned the collision grid (rule 18 padding is then not applied)
 
+    // Rule 13c: R2 light probe refs (lump 0x68, 20 byte records) as (origin xyz, cubemap index); filled by convertLightProbeRefs before it
+    // drops the trailing int32, read by convertCubemaps.
+    std::vector<float> probeRefPos;
+    std::vector<int32_t> probeRefCube;
     // Collected hard failures; thrown together by throwIfFailed().
     std::vector<std::string> failures;
 

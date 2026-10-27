@@ -67,11 +67,15 @@ void convertLightProbeRefs(Ctx& c) {
     size_t n = l.size() / 20;
     Bytes out(n * 16);
     uint64_t nonzero = 0;
+    c.probeRefPos.resize(n * 3);
+    c.probeRefCube.resize(n);
     for (size_t i = 0; i < n; i++) {
         std::memcpy(&out[i * 16], &l[i * 20], 16);
         int32_t unk;
         std::memcpy(&unk, &l[i * 20 + 16], 4);
         if (unk != 0) nonzero++;
+        std::memcpy(&c.probeRefPos[i * 3], &l[i * 20], 12);
+        c.probeRefCube[i] = unk;
     }
     l.swap(out);
     c.say("[rule 6] light probe refs (0x68): %zu records 20 -> 16 bytes; dropped trailing int32 (non-zero in %llu records)", n, (unsigned long long)nonzero);

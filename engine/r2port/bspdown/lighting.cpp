@@ -53,6 +53,13 @@ float halfDistance(const Light& L) {
     return best > 0 ? (float)best : 0.0f;
 }
 
+float pbrIntensityScale(const Light& L, float scale) {
+    float d50 = halfDistance(L);
+    const float radius = L.f(kOffRadius);
+    if (d50 <= 0) d50 = radius > 0 ? radius / 3.0f : 100.0f;
+    return scale * 2.0f / (d50 * d50);
+}
+
 uint32_t rdU32(const uint8_t* p) { uint32_t v; std::memcpy(&v, p, 4); return v; }
 
 }  // namespace
@@ -160,16 +167,18 @@ void convertLighting(Ctx& c) {
     const Bytes& pal = c.lump[L_R2_RTLPAGES];
     const bool haveR2Rtl = !rtl.empty() && texels && rtl.size() == texels * 9 && pal.size() % 126 == 0 && !pal.empty();
     std::vector<uint16_t> texLights;  // 4 old world indices per texel (0xFFFF none)
-    std::vector<uint64_t> usage(nOld, 0);
+    std::vector<double> usage(nOld, 0);
     const bool doRtl = c.opt.rtlConvert && haveR2Rtl;
     uint64_t droppedLowWeight = 0, droppedKind = 0, usedSlots = 0, badRefs = 0;
     const bool sunAlpha = c.opt.lightmapSunAlpha && haveR2Rtl && c.lump[L_LMSKY].size() == (size_t)texels * 8;
     uint64_t sunTexels = 0, sunLit = 0, sunPartial = 0;
     // lookup: R2 stores the sun visibility byte sRGB encoded (texture created with the sRGB flag), R1 plane B alpha is linear
     uint8_t sunAlphaOf[256];
+    double linearVisibility[256];
     for (int i = 0; i < 256; i++) {
         double x = i / 255.0;
         double lin = x <= 0.04045 ? x / 12.92 : std::pow((x + 0.055) / 1.055, 2.4);
+        linearVisibility[i] = lin;
         sunAlphaOf[i] = (uint8_t)(255 - (int)std::lround(255.0 * lin));
     }
     if (haveR2Rtl) {
@@ -207,9 +216,11 @@ void convertLighting(Ctx& c) {
                         continue;
                     }
                     if ((L.type() != 1 && L.type() != 2) || !(L.flags() & (int32_t)kFlagRealtime)) { droppedKind++; continue; }
+                    // Local B includes the spotlight cone as well as occlusion. The conservative contribution cutoff
+                    // stays configurable: accepting every nonzero B would promote genuine partial shadow to full light.
                     if ((int)w < c.opt.rtlMinWeight) { droppedLowWeight++; continue; }
                     texLights[tex * 4 + s] = (uint16_t)wo;
-                    usage[wo] += w;
+                    usage[wo] += linearVisibility[w];
                     usedSlots++;
                 }
             }
@@ -227,6 +238,15 @@ void convertLighting(Ctx& c) {
         // slot of the k-th flagged light = flaggedPos[k] - v1 (it must stay <= 254)
         const size_t lastSlot = flaggedPos.back() - (size_t)v1;
         if (lastSlot > 254) {
+            // Rank contribution potential, not raw sRGB byte coverage. Distance/facing are evaluated by the shader;
+            // this score preserves the most visible light energy without rasterizing the BSP during conversion.
+            for (size_t p : flaggedPos) {
+                const size_t i = (size_t)order[p];
+                const Light& L = old[i];
+                const bool pbr = c.opt.pbrLights && (L.flags() & (int32_t)kFlagPbr) && !(L.flags() & (int32_t)kFlagFade);
+                const float scale = pbr ? pbrIntensityScale(L, c.opt.pbrScale) : 1.0f;
+                usage[i] *= scale * (0.2126 * L.f(kOffIntensity) + 0.7152 * L.f(kOffIntensity + 4) + 0.0722 * L.f(kOffIntensity + 8));
+            }
             std::vector<int32_t> ids;
             for (size_t p : flaggedPos) ids.push_back(order[p]);
             std::stable_sort(ids.begin(), ids.end(), [&](int32_t a, int32_t b) { return usage[a] > usage[b]; });
@@ -257,10 +277,7 @@ void convertLighting(Ctx& c) {
                 for (int ch = 0; ch < 3; ch++) L.setF(kOffIntensity + 4 * ch, L.f(kOffIntensity + 4 * ch) * gain);
         } else {
             if (c.opt.pbrLights && (fl & (int32_t)kFlagPbr) && !(fl & (int32_t)kFlagFade)) {
-                float d50 = halfDistance(L);
-                float radius = L.f(kOffRadius);
-                if (d50 <= 0) d50 = radius > 0 ? radius / 3.0f : 100.0f;
-                const float scale = c.opt.pbrScale * 2.0f / (d50 * d50);  // I / d50^2 (inverse square) == I' * 0.5 (R1 polynomial) at d50
+                const float scale = pbrIntensityScale(L, c.opt.pbrScale);  // match inverse-square intensity at d50
                 for (int ch = 0; ch < 3; ch++) L.setF(kOffIntensity + 4 * ch, L.f(kOffIntensity + 4 * ch) * scale);
                 fl |= (int32_t)kFlagFade;
                 pbrConverted++;
@@ -340,7 +357,9 @@ void convertLighting(Ctx& c) {
             if (wo == 0xFFFF) continue;
             int32_t nw = newOf[wo];
             int slot = nw - v1;
-            if (nw < 0 || slot < 0 || slot > 254) { overflow++; continue; }
+            // Use the final table, including conservative flag clearing at array index 255. A byte may fit
+            // while its world-light record is no longer real-time; never emit that inconsistent reference.
+            if (nw < 0 || slot < 0 || slot > 254 || !(rdU32(&wl[(size_t)nw * kRec + kOffFlags]) & kFlagRealtime)) { overflow++; continue; }
             slots[ns++] = (uint8_t)slot;
         }
         if (!ns) continue;
@@ -351,10 +370,10 @@ void convertLighting(Ctx& c) {
         entries += ns;
     }
     rtl.swap(outRtl);
-    c.say("[rule 20] real-time lights (0x69): R2 9 bytes/texel (A: 4 x 6 bit palette slot + 8 bit palette id, B: 4 x visibility weight, C: count) + %zu palettes of 63 -> R1 4 bytes/texel = world light index - %d; %llu texels lit, %llu entries (%llu R2 slots used, %llu below weight %d, %llu not point/spot or not flagged 0x8 (sun, baked), %llu bad refs, %llu beyond slot 254)%s",
+    c.say("[rule 20] real-time lights (0x69): R2 9 bytes/texel (A: 4 x 6 bit palette slot + 8 bit palette id, B: 4 x authored contribution weight, C: count) + %zu palettes of 63 -> R1 4 bytes/texel = world light index - %d; %llu texels lit, %llu entries (%llu R2 slots used, %llu below contribution weight %d, %llu not point/spot or not flagged 0x8 (sun, baked), %llu bad refs, %llu outside the retained RTL table)%s",
           pal.size() / 126, v1, (unsigned long long)litTexels, (unsigned long long)entries, (unsigned long long)usedSlots,
           (unsigned long long)droppedLowWeight, c.opt.rtlMinWeight, (unsigned long long)droppedKind, (unsigned long long)badRefs, (unsigned long long)overflow,
-          reordered ? "; real-time group reordered by use to fit 255 slots" : "");
+          reordered ? "; real-time group reordered by contribution potential to fit the retained RTL table" : "");
 }
 
 }  // namespace detail
