@@ -45,6 +45,7 @@ static void usage(const char* a0) {
                  "  --no-cubemap-files     keep the R2 pakfile (do not write per-cubemap VTFs)\n"
                  "                         (the R2 pakfile only has one BC6H cubemaps.hdr.vtf)\n"
                  "  --keep-r2-lumps        keep lumps 0x04-0x07, 0x37, 0x7A in the output\n"
+                 "  --no-grid-pad          rule 18: do not pad the collision grid with empty cells (default pads to +-32768 + 3 cells)\n"
                  "  --quiet                do not print the per-rule report\n",
                  a0);
 }
@@ -98,6 +99,7 @@ int main(int argc, char** argv) {
         else if (a == "--empty-shadow-meshes") opt.emptyShadowMeshes = true;
         else if (a == "--no-cubemap-files") opt.cubemapFiles = false;
         else if (a == "--keep-r2-lumps") opt.dropR2OnlyLumps = false;
+        else if (a == "--no-grid-pad") opt.gridPad = false;
         else if (a == "--quiet") quiet = true;
         else {
             usage(argv[0]);

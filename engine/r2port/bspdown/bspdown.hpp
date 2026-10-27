@@ -84,6 +84,10 @@ struct Options {
     // R1 aborts map load above this many world lights.
     uint32_t maxWorldLights = 4064;
 
+    // Rule 18: pad the collision grid (lumps 0x55/0x56) with empty cells so it covers +-32768 plus 3 cells around the origin
+    // (R1's grid walker reads the cell table at stale out-of-grid indices when a trace reaches the grid border).
+    bool gridPad = true;
+
     // Rule 16: static prop flag bit 0x10. R2 sets it on 14,138 of the 16,183 mp_glitch props (Source NO_SHADOW meaning). The R1 loader
     // (sub_18018B710) stores (flags & 0x10) == 0 at prop+58 and the prop drawers (sub_18018D7A0 / sub_18018F1D0) draw a prop in the main
     // pass only when that is 1, in the shadow pass always: in R1 the bit means "shadow caster only, not drawn". Default: clear the bit.

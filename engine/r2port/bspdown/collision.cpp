@@ -393,6 +393,84 @@ void convertCollisionGrid(Ctx& c) {
     }
 }
 
+// Rule 18: pad the world grid with empty cells (README.txt rule 18 has the full analysis).
+//
+// R1's walker (sub_18010BE50) turns a ray/hull into a list of cell indices on a 16384 entry stack
+// array that is never cleared. For a non rectangle-path hull (extent < 0.7071 * cell size) it
+// writes per band of n cells 3 entries {first, first + s, first + 2 s} (s = one row or column step
+// in travel direction) and advances by n: the slots after the band are scratch that reach up to
+// 2 rows/columns past the clamped cell range (index up to dimX * (dimY + 2) - 1, or negative), and
+// for n >= 4 the slots from the 4th on keep whatever earlier traces left. The consuming loop reads
+// cells[list[k]] for all k < count. The table has exactly dimX * dimY + numModels entries (R1 loader
+// sub_180109B10), so a stale entry like 47 * 46 + 15 on a 46 x 46 grid reads garbage {start, count}
+// (mp_colony02: marker index 10530 with 620 markers -> access violation at engine+0x10c5d0).
+// R2 grids are sized to the geometry, so traces reach the border rows. Padding with empty {0,0}
+// cells so that the grid covers +-(32768 + 3 cells) keeps the clamped range of every trace with
+// endpoints in +-32768 at least 2 cells inside the grid: no scratch or counted index leaves the
+// table. An empty cell is skipped by its count (start is only used for pointer arithmetic).
+namespace {
+constexpr double kGridReach[] = {32768.0, 24576.0, 18000.0};  // tried in order until the cell list fits
+constexpr int kGridGuardCells = 3;
+constexpr int64_t kWalkerListCap = 16384;  // entries of the walker's stack list (rectangle path fills all cells + model cell)
+}  // namespace
+
+void padCollisionGrid(Ctx& c) {
+    if (!c.opt.gridPad) {
+        c.say("[rule 18] collision grid padding disabled (--no-grid-pad)");
+        return;
+    }
+    if (c.lump[L_CMGRID].size() != sizeof(Grid)) throw Error("cm grid (0x55): size is " + std::to_string(c.lump[L_CMGRID].size()) + ", expected 28");
+    Grid grid;
+    std::memcpy(&grid, c.lump[L_CMGRID].data(), sizeof(grid));
+    std::vector<GridCell> cells = view<GridCell>(c.lump[L_CMCELLS], "cm grid cells (0x56)");
+    const size_t nModels = c.lump[L_MODELS].size() / sizeof(Model);
+    const int64_t oldNx = grid.numCells[0], oldNy = grid.numCells[1];
+    if (oldNx <= 0 || oldNy <= 0) throw Error("cm grid (0x55): non-positive cell counts");
+    if (!(grid.scale > 0.0f)) throw Error("cm grid (0x55): non-positive cell size");
+    if ((int64_t)cells.size() != oldNx * oldNy + (int64_t)nModels)
+        throw Error("cm grid cells (0x56): " + std::to_string(cells.size()) + " cells, expected " + std::to_string(oldNx * oldNy) + " world cells + " + std::to_string(nModels) + " model cells");
+
+    const double sc = grid.scale;
+    int64_t newOff[2] = {grid.cellOffset[0], grid.cellOffset[1]}, newN[2] = {oldNx, oldNy};
+    double usedReach = 0;
+    bool fits = false;
+    for (double reach : kGridReach) {
+        const int64_t half = (int64_t)std::ceil(reach / sc) + kGridGuardCells;
+        int64_t lo[2], n[2];
+        for (int a = 0; a < 2; a++) {
+            const int64_t curLo = grid.cellOffset[a], curHi = grid.cellOffset[a] + grid.numCells[a];
+            lo[a] = std::min<int64_t>(curLo, -half);
+            n[a] = std::max<int64_t>(curHi, half) - lo[a];
+        }
+        if (n[0] * n[1] + 1 <= kWalkerListCap) {
+            newOff[0] = lo[0]; newOff[1] = lo[1];
+            newN[0] = n[0]; newN[1] = n[1];
+            usedReach = reach;
+            fits = true;
+            break;
+        }
+    }
+    if (!fits) throw Error("cm grid: padding to +-" + std::to_string((int)kGridReach[2]) + " needs more cells than R1's 16384 entry walker list holds (cell size " + std::to_string(sc) + ")");
+
+    std::vector<GridCell> out((size_t)(newN[0] * newN[1]) + nModels);  // value-initialised: {0, 0} = empty cell
+    const int64_t dx = grid.cellOffset[0] - newOff[0], dy = grid.cellOffset[1] - newOff[1];
+    for (int64_t y = 0; y < oldNy; y++)
+        for (int64_t x = 0; x < oldNx; x++) out[(size_t)((y + dy) * newN[0] + x + dx)] = cells[(size_t)(y * oldNx + x)];
+    for (size_t m = 0; m < nModels; m++) out[(size_t)(newN[0] * newN[1]) + m] = cells[(size_t)(oldNx * oldNy) + m];
+
+    const int oldOffX = grid.cellOffset[0], oldOffY = grid.cellOffset[1];
+    grid.cellOffset[0] = (int32_t)newOff[0];
+    grid.cellOffset[1] = (int32_t)newOff[1];
+    grid.numCells[0] = (int32_t)newN[0];
+    grid.numCells[1] = (int32_t)newN[1];
+    c.lump[L_CMCELLS] = pack(out);
+    c.lump[L_CMGRID] = Bytes((const uint8_t*)&grid, (const uint8_t*)&grid + sizeof(grid));
+    c.say("[rule 18] collision grid padded with empty cells (reach +-%g + %d guard cells): offset (%d,%d) count (%lld,%lld) -> offset (%d,%d) count (%d,%d), %lld -> %lld world cells, extent x [%g, %g) y [%g, %g); model cells now start at index %lld",
+          usedReach, kGridGuardCells, oldOffX, oldOffY, (long long)oldNx, (long long)oldNy, grid.cellOffset[0], grid.cellOffset[1], grid.numCells[0], grid.numCells[1], (long long)(oldNx * oldNy),
+          (long long)(newN[0] * newN[1]), grid.cellOffset[0] * sc, (grid.cellOffset[0] + grid.numCells[0]) * sc, grid.cellOffset[1] * sc, (grid.cellOffset[1] + grid.numCells[1]) * sc,
+          (long long)(newN[0] * newN[1]));
+}
+
 namespace {
 
 // Count float AABB records (mins at minOff, maxs at maxOff, 3 floats each) that

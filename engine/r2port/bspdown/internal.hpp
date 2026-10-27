@@ -249,6 +249,7 @@ void convertPhysicsTriangles(Ctx& c);  // rule 14, header-count-aware all-absent
 bool physicsHasWorldSolids(const Bytes& lump, std::string* why);
 void convertMeshes(Ctx& c);  // clipping, cubemap split, model/mesh bounds
 void convertCollisionGrid(Ctx& c);
+void padCollisionGrid(Ctx& c);  // rule 18, runs right after convertCollisionGrid
 void reportResidualBounds(Ctx& c);
 
 // Contents remap (README.txt rule 9). Returns the R1 value for an R2 value.

@@ -10,7 +10,7 @@ Files
   bspdown.hpp        public API (DowngradeBsp, Options, Report, Error)
   bspdown.cpp        driver, header/lump layout, rules 1, 2, 6, 8 (small lumps)
   tricoll.cpp        rule 3  (bevel stream 11 bit -> 10 bit)
-  collision.cpp      rules 4, 7 (collision part), 9 (contents)
+  collision.cpp      rules 4, 7 (collision part), 9 (contents), 18 (grid padding)
   sprp.cpp           rule 5  (static props v13 -> v12)
   meshclip.cpp       rules 7 (render mesh clipping, bounds), 10 (cubemap per sort), 15 (no-draw meshes)
   physics.cpp       rules 12 (world-collision placeholder) and 14 (all-absent 0x46 table)
@@ -38,7 +38,7 @@ Use
   bspdown.exe <in_r2.bsp> <out_r1.bsp> [--limit 16376] [--rtl-bytes 1..4] [--no-remap-contents]
               [--keep-prop-flag10] [--props keep|hide-scatter|hide-all] [--scatter-min N]
               [--csm-rebase] [--empty-shadow-meshes] [--worldlight-flag2]
-              [--cubemaps none|split|keep] [--keep-r2-lumps] [--quiet]
+              [--cubemaps none|split|keep] [--keep-r2-lumps] [--no-grid-pad] [--quiet]
   The per-rule report is printed to stdout. Exit status 1 and a message on stderr when the
   input cannot be converted.
 
@@ -143,7 +143,8 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
    triangles and a zero-size bounds box. World mesh bounds that still exceed are recomputed.
    Model mins/maxs are clamped to the limit. Collision: primitives entirely outside are removed,
    bounds of the others clamped, grid rows/columns lying completely outside are removed (done on
-   mp_crashsite3), cells that straddle the limit are kept (cell size 704 cannot be cut).
+   mp_crashsite3), cells that straddle the limit are kept (cell size 704 cannot be cut). Rule 18 then
+   pads the grid with empty cells, so the final grid does extend beyond the limit (those cells are empty).
    NOT clipped: tricoll geometry and brushes (BVH nodes and bevels would need rebuilding),
    float AABB records 0x77/0x63/0x79 (stock R1 maps contain +-inf and beyond-limit records
    there), portal/occluder/shadow vertices. The full 20-map audit found no out-of-limit brush
@@ -320,6 +321,60 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
     and lowers child indices; --empty-shadow-meshes writes 0x7C..0x7F empty. Shadow mesh vertex/index/mesh record formats are the same in R1 and R2
     (12 byte vertices, 20 byte alpha vertices, u16 indices relative to the mesh's vertex offset, 12 byte meshes); they have their own
     vertex arrays, so rules 7/11/15 do not affect them. Checker: recomputes the rebase independently.
+
+18. Collision grid padding [R1 sub_18010BE50 / sub_180108710 / sub_180109B10 (IDA copy), data, simulation analysis\gp_walker.cpp]. Crash fixed:
+    6 converted maps (mp_colony02, mp_lf_meadow, mp_lf_township, mp_lf_traffic, mp_lf_uma, mp_thaw) access-violated in the world grid
+    walker (engine+0x10c5d0 / +0x10c7b0) during the AIN builder's script sweeps; captured on colony02: cell index 0x881 = 2177 =
+    47*46+15 read from the walker's list on a 46 x 46 grid whose 0x56 table has 2122 entries.
+    Lump layout. 0x55 = 7 dwords: cell size (float, 704.0 in every R2 map, 256.0 in stock R1), cell offset x, y (in cells; world
+    cell = floor(coordinate / size) - offset), cell count x, y, straddle-group (marker) count, first brush plane. The loader
+    stores the size at +0x60 and 1/size at +0x64 of the collision data, offsets +0x68/+0x6C, counts +0x70/+0x74, marker count
+    +0x80 (sizes the per-ray visited array, 4 bytes per group; the geoset's first u16 is its group, 0 = none), first brush plane
+    +0xD0. 0x56 = {u16 first geoset, u16 count} per cell; the loader accepts only a size of exactly 4 * (numModels + nx * ny) and
+    leaves the table unset otherwise (no limit on nx, ny). World cell (ix, iy) is entry iy * nx + ix, model m is entry nx * ny + m.
+    An empty cell has count 0; the walker skips it by count and uses the start only for pointer arithmetic (stock mp_rise: all
+    7619 empty cells carry start 45244, mp_box varies). Stock numbers: mp_rise size 256, offset (-37,-51), count (97,113), 2262 marker
+    groups, first brush plane 627, 114 models, 11075 entries; mp_box 256, (-62,-62), (76,80), 102, 36, 2 models, 6082 entries.
+    Stock R1 grids cover the content, not the whole +-16384 world (mp_rise x [-9472, 15360) y [-13056, 15872)); R2 grids are
+    sized the same way (colony02 46 x 46 from -16192, glitch 42 x 43, eden 42 x 44, lf_stacks/township/traffic/uma 25 x 10,
+    meadow 20 x 21, thaw 46 x 46).
+    Walker. The walker (a2 == 0) computes the cell range of the ray box widened by the hull extent, clamps it to
+    [0, nx) x [0, ny), and fills a 16384 entry stack list: rectangle fill when the hull extent is >= 0.7071 * size - 0.0625
+    (or the ray has no xy length), else for every row/column a "band" of n cells around the ray, written as 3 entries {first,
+    first + s, first + 2 s} (s = one step in travel direction) and advanced by n. So (a) the 2 slots after a band are scratch
+    entries that sit up to 2 rows/columns beyond the clamped range (index up to nx * (ny + 2) - 1 at the +y border, negative at
+    -y), and (b) for n >= 4 the slots from the 4th on are never written and keep the entries of earlier traces (the list is
+    not cleared). The consuming loop reads cells[list[k]] for every k < count. n >= 4 needs a hull half extent above about 0.354 * the
+    cell size (diagonal ray, 2 * (0.5 + 1.414 * extent / size) > 2) and below the rectangle threshold 0.7071 * size, i.e. about
+    250..497 with the R2 size 704 (a 256 grid would send those hulls down the rectangle path). The AIN hull sizes were not
+    captured [INFERENCE: a hull in that range, e.g. dropship/droppod, is swept]; an earlier trace that touched the border rows
+    leaves entries like 47 * 46 + x behind. Cell 2177 of a table of 2122 entries returned garbage {start, count} -> geoset
+    -> straddle group 10530 >> 620 markers -> access violation. Reproduced with analysis\gp_walker.cpp (a port of the
+    list construction; 2,000,000 random rays per hull extent with a persistent stale list, colony02 grid, rays in +-18000):
+    0 reads outside the table for hull extents <= 250 and >= 498, 311..5273 for 300..497 (first one after 94..2214 rays); the
+    offending entries are stale slots of the form row -1 or row 47 (e.g. 2167 = 47 * 46 + 5, "not written this call"), the shape of the capture.
+    Rule. The grid is padded with empty {0,0} cells on all four sides to offset min(old, -N), count max(old end, N) - offset,
+    N = ceil(32768 / size) + 3 = 50 (extent +-35200 for size 704): the walker's range of any ray whose endpoints (and hull box)
+    lie in +-32768 stays at least 2 whole cells inside the grid, so no counted or scratch index leaves [0, nx * ny) (which is
+    also what the clamp needs: stale entries only ever come from earlier traces). 0x57..0x5B are unchanged, the model cells keep their
+    order and move to the end of the larger table, the 0x56 size rule above holds (nx * ny + models). The cell count is limited by the
+    walker's 16384 entry list (rectangle fill of a huge hull covers the whole grid): reach 32768, else 24576, else 18000 is
+    chosen, the converter fails when even that does not fit (never for 704 cells: 100 x 100). Option: --no-grid-pad.
+    Result: colony02 table 2122 -> 10006 entries, +31,536 bytes per map (+4 * 7884). Simulation with the padded grid: 0 out-of-table
+    reads and 0 out-of-table scratch entries for every hull extent 0..600 over all (start, end) lattice rays in +-18000 and in +-32768
+    and over 2M random persistent-list rays per extent in +-18000 / +-32768 (dense lattice +-32768 step 2048: 1,185,921 rays per extent,
+    17 extents, all clean); rays reaching beyond +-35200 can still leave scratch entries at the border (40000: 1414..1804 per 38416
+    lattice rays) and bring the old failure back for hulls 300..497 (logs: out\gp\gp_sim_*.txt).
+    Limits: hull extents of about 250..497 keep reading stale list entries when a band has 4 cells; with the padding these are in-table indices
+    left by earlier traces, so the walker visits the wrong cells (not a crash, but those hull traces can miss geometry). Fixing that needs a
+    cell size whose rectangle threshold (0.7071 * size) is below the hull extents, or an engine patch of sub_18010BE50.
+    Checker: sizes, the exact 0x56 rule, the walker's range arithmetic (numpy, float32) for the extreme rays of +-18000 and +-32768
+    with hull extent 0.7071 * size - 0.0625 (>= 3 and >= 2 whole cells from every border), 16384 list fit, padding cells empty,
+    each R2 cell at its world position with count <= R2's, and with --unpadded <bsp of the same input converted with --no-grid-pad>:
+    every unpadded cell at the same world position with identical {first, count}, identical model cells and lumps 0x57..0x5B.
+    Other position-indexed data: none. The R1 loaders/walkers that take a position use trees (CSM / cell AABB trees 0x63, 0x77, light probe
+    tree 0x67, tricoll BVH 0x44) walked by plane/box tests, which resolve any position; grid fields (+0x70/0x74/0x78 of the collision data)
+    are read only by the walker and by the model-cell lookups sub_180106DC0 / sub_180090DD0, which use nx * ny from the loaded header.
 
 Results
 -------

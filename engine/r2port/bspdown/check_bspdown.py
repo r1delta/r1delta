@@ -173,8 +173,102 @@ def walk_bevels(bsp, hdr, tris, starts, words, bits):
 
 # ---------------------------------------------------------------------------
 
+def walker_range_margin(sc, ox, oy, nx, ny, reach, ext):
+    """Independent numpy re-implementation of the cell range arithmetic at the top of the R1 grid walker (sub_18010BE50,
+    float32, floor via trunc + sign fix) for the extreme rays of a box [-reach, reach]^2 and hull half extent ext. Returns the
+    unclamped (xlo, xhi, ylo, yhi) of the extreme rays minus the grid borders: (xlo - 0, nx - 1 - xhi, ylo - 0, ny - 1 - yhi),
+    i.e. how many whole cells the range stays away from the border on each side."""
+    f = np.float32
+    inv = f(1.0) / f(sc)
+    c = f(0.03125)
+    def cell(v, off):
+        t = np.floor(v.astype(np.float32)).astype(np.int64)
+        return t - off
+    lox = cell(((f(-reach) - f(ext)) - c) * inv, ox)
+    hix = cell(((f(ext) + f(reach)) + c) * inv, ox)
+    loy = cell(((f(-reach) - f(ext)) - c) * inv, oy)
+    hiy = cell(((f(ext) + f(reach)) + c) * inv, oy)
+    return int(lox), int(nx - 1 - hix), int(loy), int(ny - 1 - hiy)
+
+
+def check_grid_padding(C, r2, r1, g2, g1, cells, nmodels, grid_pad, unpadded):
+    print("== collision grid padding (rule 18)")
+    sc = float(g1[0]); ox, oy, nx, ny = int(g1[1]), int(g1[2]), int(g1[3]), int(g1[4])
+    ox2, oy2, nx2, ny2 = int(g2[1]), int(g2[2]), int(g2[3]), int(g2[4])
+    num = np.array([int(c[1]) for c in cells], dtype=np.int64)
+    first = np.array([int(c[0]) for c in cells], dtype=np.int64)
+    if not grid_pad:
+        print("  note  padding disabled (--no-grid-pad): grid left as rules 4 / 7 produced it (%d x %d)" % (nx, ny))
+        return
+    # 1. geometry. The walker writes 3 cells {first, first+s, first+2s} per band (s = one row/column step), so every cell it can
+    #    write, counted or scratch, lies within 2 cells of a cell of its clamped range. A range at least 2 whole cells inside the
+    #    grid on every side therefore never produces an index outside [0, nx*ny). Hulls wider than 0.7071 * cell size take the
+    #    rectangle path (clamped, no scratch); the widest band-path hull has extent 0.7071 * scale - 0.0625.
+    ext_max = sc * 0.70710677 - 0.0625
+    mg = walker_range_margin(sc, ox, oy, nx, ny, 18000.0, ext_max)
+    C.ok(min(mg) >= 3, "walker cell range of rays inside +-18000 with hull extent %.1f stays >= 3 whole cells from every grid border (margins -x %d +x %d -y %d +y %d)" % ((ext_max,) + mg))
+    half32 = int(np.ceil(32768.0 / sc)) + 3
+    if (2 * half32) ** 2 + 1 <= 16384:
+        mg = walker_range_margin(sc, ox, oy, nx, ny, 32768.0, ext_max)
+        C.ok(min(mg) >= 2, "walker cell range of rays inside +-32768 (COORD_EXTENT) stays >= 2 whole cells from every grid border (margins -x %d +x %d -y %d +y %d)" % mg)
+    C.ok(nx * ny + 1 <= 16384, "world cells + model cell fit the walker's 16384 entry list (%d)" % (nx * ny + 1))
+    C.ok(len(cells) == nx * ny + nmodels, "cell table size == 4 * (nx*ny + models), the R1 loader's exact check")
+    # 2. content: every R2 cell sits at the same world position and the padding is empty
+    win = np.zeros((ny, nx), bool)
+    for y in range(ny2):
+        yy = y + oy2 - oy
+        if 0 <= yy < ny:
+            xs = np.arange(nx2) + ox2 - ox
+            xs = xs[(xs >= 0) & (xs < nx)]
+            win[yy, xs] = True
+    wnum = num[:nx * ny].reshape(ny, nx)
+    wfirst = first[:nx * ny].reshape(ny, nx)
+    C.ok(not (wnum[~win] != 0).any(), "every cell outside the R2 grid window is empty (%d cells)" % int((~win).sum()))
+    c2 = r2.arr(0x56, "<u2,<u2")
+    n2 = np.array([int(c[1]) for c in c2[:nx2 * ny2]], dtype=np.int64).reshape(ny2, nx2)
+    sub = np.zeros((ny2, nx2), bool)
+    r1n = np.zeros((ny2, nx2), np.int64)
+    for y in range(ny2):
+        yy = y + oy2 - oy
+        if not (0 <= yy < ny):
+            continue
+        for x in range(nx2):
+            xx = x + ox2 - ox
+            if 0 <= xx < nx:
+                sub[y, x] = True
+                r1n[y, x] = wnum[yy, xx]
+    C.ok(bool((r1n[sub] <= n2[sub]).all()), "each R2 cell keeps at most its R2 geosets at its world position (rule 4 only removes)")
+    C.ok(bool(((n2[sub] == 0) <= (r1n[sub] == 0)).all()), "cells empty in R2 are empty in R1")
+    # 3. against the same conversion without padding
+    if unpadded:
+        u = Bsp(unpadded)
+        gu = u.arr(0x55, "<f4,<i4,<i4,<i4,<i4,<i4,<i4")[0]
+        cu = u.arr(0x56, "<u2,<u2")
+        uox, uoy, unx, uny = int(gu[1]), int(gu[2]), int(gu[3]), int(gu[4])
+        C.ok(gu[0] == g1[0] and gu[5] == g1[5] and gu[6] == g1[6], "scale, straddle group count, first brush plane equal the unpadded output")
+        same = True
+        for y in range(uny):
+            yy = y + uoy - oy
+            row = cu[y * unx:(y + 1) * unx]
+            base = yy * nx + (uox - ox)
+            got = cells[base:base + unx]
+            if not (0 <= yy < ny) or not (np.array_equal(row["f0"], got["f0"]) and np.array_equal(row["f1"], got["f1"])):
+                same = False
+                break
+        C.ok(same and ox <= uox and oy <= uoy and ox + nx >= uox + unx and oy + ny >= uoy + uny, "all %d unpadded cells appear at the same world position with identical {first,num}" % (unx * uny))
+        tail_ok = np.array_equal(cu[unx * uny:], cells[nx * ny:])
+        C.ok(tail_ok, "model cells (%d) identical to the unpadded output" % nmodels)
+        for lump in (0x57, 0x58, 0x59, 0x5A, 0x5B):
+            C.ok(bytes(u.raw(lump)) == bytes(r1.raw(lump)), "lump %#x identical to the unpadded output" % lump)
+        # R1 loader size rule on both
+        C.ok(len(cu) == unx * uny + nmodels, "unpadded cell table size rule")
+    else:
+        print("  note  no --unpadded file given: per-cell equality against the unpadded conversion not checked")
+
+
 def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", physics="stub", cubemap_scale=4.0,
-          props="keep", scatter_min=500, csm_rebase=False, empty_shadow=False, wl_flag2=False, keep_flag10=False):
+          props="keep", scatter_min=500, csm_rebase=False, empty_shadow=False, wl_flag2=False, keep_flag10=False,
+          grid_pad=True, unpadded=None):
     C = Checker()
     r2 = Bsp(in_path)
     r1 = Bsp(out_path)
@@ -319,17 +413,26 @@ def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", ph
     C.ok(bool((lo >= -L - 1).all() and (hi <= L + 1).all()), "geoset bounds inside +-%g" % L, "min %.0f max %.0f" % (lo.min() if len(lo) else 0, hi.max() if len(hi) else 0))
     lo, hi = bounds_aabb(pb) if len(pb) else (np.zeros((0, 3)), np.zeros((0, 3)))
     C.ok(bool((lo >= -L - 1).all() and (hi <= L + 1).all()), "primitive bounds inside +-%g" % L)
-    # grid extents: cells that lie completely outside must not exist
+    # grid extents. Without rule 18 cells that lie completely outside the limit must not exist; with it they exist
+    # (padding) but must be empty.
     sc = float(g1[0]); ox, oy, nx, ny = int(g1[1]), int(g1[2]), int(g1[3]), int(g1[4])
-    out_of = [(x, y) for y in range(ny) for x in range(nx)
-              if (x + ox) * sc + sc <= -L or (x + ox) * sc >= L or (y + oy) * sc + sc <= -L or (y + oy) * sc >= L]
-    C.ok(not out_of, "no grid cell lies completely outside the limit")
-    part = sum(1 for y in range(ny) for x in range(nx)
-               if (x + ox) * sc < -L or (x + ox) * sc + sc > L or (y + oy) * sc < -L or (y + oy) * sc + sc > L)
+    cx = (np.arange(nx) + ox) * sc
+    cy = (np.arange(ny) + oy) * sc
+    outx = (cx + sc <= -L) | (cx >= L)
+    outy = (cy + sc <= -L) | (cy >= L)
+    out_mask = (outy[:, None] | outx[None, :])
+    world_num = num[:nx * ny].reshape(ny, nx)
+    if grid_pad:
+        C.ok(not (world_num[out_mask] != 0).any(), "cells completely outside the limit are empty (%d of them, padding)" % int(out_mask.sum()))
+    else:
+        C.ok(not out_mask.any(), "no grid cell lies completely outside the limit")
+    part = int((((cx < -L) | (cx + sc > L))[None, :] | ((cy < -L) | (cy + sc > L))[:, None]).sum()) - int(out_mask.sum())
     print("  note  %d grid cells straddle the limit (cell size %g cannot be cut)" % (part, sc))
+    check_grid_padding(C, r2, r1, g2, g1, cells, nmodels, grid_pad, unpadded)
     # R2 counts for the report
     gs2 = r2.arr(0x57, "<u2,<u2,<u4")
     print("  note  geosets %d -> %d, primitives %d -> %d, straddle %d -> %d" % (len(gs2), len(gs), len(r2.raw(0x59)) // 4, len(pr), g2[5], g1[5]))
+
 
     # ---- sprp
     print("== sprp game lump")
@@ -787,6 +890,9 @@ if __name__ == "__main__":
     ap.add_argument("--empty-shadow-meshes", action="store_true")
     ap.add_argument("--worldlight-flag2", action="store_true")
     ap.add_argument("--keep-prop-flag10", action="store_true")
+    ap.add_argument("--no-grid-pad", action="store_true", help="rule 18 disabled in the converter")
+    ap.add_argument("--unpadded", help="the same input converted with --no-grid-pad: per-cell equality check for rule 18")
     a = ap.parse_args()
     sys.exit(1 if check(a.r2, a.r1, a.limit, a.rtl_bytes, not a.no_bsp_tool, a.cubemaps, a.physics, a.cubemap_scale,
-                        a.props, a.scatter_min, a.csm_rebase, a.empty_shadow_meshes, a.worldlight_flag2, a.keep_prop_flag10) else 0)
+                        a.props, a.scatter_min, a.csm_rebase, a.empty_shadow_meshes, a.worldlight_flag2, a.keep_prop_flag10,
+                        not a.no_grid_pad, a.unpadded) else 0)
