@@ -145,9 +145,10 @@ void convertLighting(Ctx& c) {
     }
     Bytes& rtl = c.lump[L_LMRTL];
     const Bytes& pal = c.lump[L_R2_RTLPAGES];
-    const bool haveR2Rtl = c.opt.rtlConvert && !rtl.empty() && texels && rtl.size() == texels * 9 && pal.size() % 126 == 0 && !pal.empty();
+    const bool haveR2Rtl = !rtl.empty() && texels && rtl.size() == texels * 9 && pal.size() % 126 == 0 && !pal.empty();
     std::vector<uint16_t> texLights;  // 4 old world indices per texel (0xFFFF none)
     std::vector<uint64_t> usage(nOld, 0);
+    const bool doRtl = c.opt.rtlConvert && haveR2Rtl;
     uint64_t droppedLowWeight = 0, droppedKind = 0, usedSlots = 0, badRefs = 0;
     const bool sunAlpha = c.opt.lightmapSunAlpha && haveR2Rtl && c.lump[L_LMSKY].size() == (size_t)texels * 8;
     uint64_t sunTexels = 0, sunLit = 0, sunPartial = 0;
@@ -209,7 +210,7 @@ void convertLighting(Ctx& c) {
         if ((L.type() == 1 || L.type() == 2) && (L.flags() & (int32_t)kFlagRealtime)) flaggedPos.push_back(k);
     }
     size_t reordered = 0;
-    if (haveR2Rtl && !flaggedPos.empty()) {
+    if (doRtl && !flaggedPos.empty()) {
         // slot of the k-th flagged light = flaggedPos[k] - v1 (it must stay <= 254)
         const size_t lastSlot = flaggedPos.back() - (size_t)v1;
         if (lastSlot > 254) {
@@ -227,7 +228,7 @@ void convertLighting(Ctx& c) {
         throw Error("world lights (0x36): " + std::to_string(order.size()) + " lights, R1 aborts above " + std::to_string(c.opt.maxWorldLights));
 
     // --- write the light array ---------------------------------------------------------------------------------------------------------
-    uint64_t pbrConverted = 0, sunFlagsCleared = 0, flag2 = 0;
+    uint64_t pbrConverted = 0, sunFlagsCleared = 0, flag2 = 0, rtlFlagCleared = 0;
     Bytes out(order.size() * kRec);
     for (size_t k = 0; k < order.size(); k++) {
         Light L = old[order[k]];
@@ -249,6 +250,13 @@ void convertLighting(Ctx& c) {
                 pbrConverted++;
             }
             fl &= ~(int32_t)(kFlagPbr | kFlagUnknown40);
+            // Client sub_1800FCE60 keeps a 256 entry table (stack buffer + word_18150BFE0, 512 bytes) indexed by the GPU slot of every
+            // light with flag 0x8 and without 0x10; a slot above 255 overflows it into the client's .data (ConVar objects). Stock R1
+            // maps keep every real-time light at slot <= 254 (the RTL byte limit). Lights that cannot be addressed by an RTL byte lose 0x8.
+            if ((t == 1 || t == 2) && (fl & (int32_t)kFlagRealtime) && k >= (size_t)v1 + 255) {
+                fl &= ~(int32_t)kFlagRealtime;
+                rtlFlagCleared++;
+            }
             if (c.opt.worldLightFlagBit2 && (t == 1 || t == 2) && !(fl & (int32_t)kFlagBit2)) {
                 fl |= (int32_t)kFlagBit2;
                 flag2++;
@@ -262,8 +270,8 @@ void convertLighting(Ctx& c) {
     c.say("[rule 8] world lights (0x36): %zu lights, lump version %u -> version 1 (100 byte records, trailing %zu bytes dropped)", nOld, srcVersion, rec - kRec);
     c.say("[rule 20] world light layout: R2 had %zu sky ambient + %zu sun entries; R1 array = %zu entries before the local lights (%s), %zu lights total, R1 base v1 = %d",
           E, S, head, collapsed ? "last (real) environment kept, dummy skybox pairs dropped" : "unchanged", order.size(), v1);
-    c.say("[rule 20] world light flags: sun/ambient flags cleared on %llu records (R1 stock 0); PBR lights (0x20, no 0x4) rewritten to the fade polynomial form with intensity x 2/d50^2: %llu; bits 0x20/0x40 cleared; bit 0x2 set on %llu",
-          (unsigned long long)sunFlagsCleared, (unsigned long long)pbrConverted, (unsigned long long)flag2);
+    c.say("[rule 20] world light flags: sun/ambient flags cleared on %llu records (R1 stock 0); PBR lights (0x20, no 0x4) rewritten to the fade polynomial form with intensity x 2/d50^2: %llu; bits 0x20/0x40 cleared; bit 0x2 set on %llu; flag 0x8 cleared on %llu lights at GPU slot > 254 (client 256 entry real-time light table)",
+          (unsigned long long)sunFlagsCleared, (unsigned long long)pbrConverted, (unsigned long long)flag2, (unsigned long long)rtlFlagCleared);
 
     // --- light probes: static light indices ------------------------------------------------------------------------------------------
     {
@@ -300,7 +308,7 @@ void convertLighting(Ctx& c) {
               (unsigned long long)sunTexels, (unsigned long long)sunLit, (unsigned long long)sunPartial);
 
     // --- real-time lights ----------------------------------------------------------------------------------------------------------
-    if (!haveR2Rtl) {
+    if (!doRtl) {
         if (c.opt.rtlConvert && !rtl.empty())
             c.say("[rule 20] real-time lights: input is not 9 bytes/texel with 126 byte palettes (%zu bytes, %zu texels, %zu palette bytes); falling back to 0xFF fill", rtl.size(), (size_t)texels, pal.size());
         convertRealTimeLightsFill(c);

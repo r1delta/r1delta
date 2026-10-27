@@ -413,7 +413,7 @@ def expected_lighting(r2, wl_flag2):
     texels = sum(w * h for w, h in pages)
     rtl2 = r2.raw(0x69)
     pal = np.frombuffer(r2.raw(0x7A).tobytes(), "<u2") if len(r2.raw(0x7A)) else np.zeros(0, "<u2")
-    have = LIGHT_OPT["rtl"] and len(rtl2) and texels and len(rtl2) == texels * 9 and len(pal) and len(r2.raw(0x7A)) % 126 == 0
+    have = len(rtl2) and texels and len(rtl2) == texels * 9 and len(pal) and len(r2.raw(0x7A)) % 126 == 0
     usage = np.zeros(n, np.float64)
     tex_old = None
     sky = bytearray(r2.raw(0x62).tobytes())
@@ -454,7 +454,8 @@ def expected_lighting(r2, wl_flag2):
             t0 += m
     flagged_pos = [k for k in range(head, len(order)) if ty[order[k]] in (1, 2) and (fl[order[k]] & 8)]
     reordered = False
-    if have and flagged_pos and flagged_pos[-1] - v1 > 254:
+    do_rtl = bool(LIGHT_OPT["rtl"] and have)
+    if do_rtl and flagged_pos and flagged_pos[-1] - v1 > 254:
         ids = [order[p] for p in flagged_pos]
         ids = sorted(ids, key=lambda i: -usage[i])  # python sort is stable
         for p, i in zip(flagged_pos, ids):
@@ -493,6 +494,8 @@ def expected_lighting(r2, wl_flag2):
                 inten[k] = (inten[k] * scale).astype(np.float32)
                 f |= 4
             f &= ~(0x20 | 0x40)
+            if t in (1, 2) and (f & 8) and k >= v1 + 255:
+                f &= ~8
             if wl_flag2 and t in (1, 2):
                 f |= 2
         ofl[k] = f
@@ -515,7 +518,7 @@ def expected_lighting(r2, wl_flag2):
                 pa[i, 0x24 + 2 * s:0x26 + 2 * s] = np.frombuffer(np.int16(nw - v1).tobytes(), np.uint8)
     # RTL
     rtl_out = None
-    if have:
+    if do_rtl:
         slot = tex_old.copy()
         nwv = np.where(slot >= 0, new_of[np.clip(slot, 0, n - 1)] - v1, -1)
         nwv = np.where((slot >= 0) & (nwv >= 0) & (nwv <= 254), nwv, 255)
