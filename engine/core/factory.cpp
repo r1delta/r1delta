@@ -60,6 +60,7 @@
 #include "r1o_vpk.h"
 #include "r2_map_provider.h"
 #include "r2port_provider.h"
+#include "engine/r2port/shaders/r2_shader_cache.h"
 #include "script_error_telemetry.h"
 #include "soundscript_parity.h"
 #include "script_sync_parity.h"
@@ -17703,6 +17704,18 @@ static void* __fastcall R1BaseFileSystem_Open(void* thisptr, const char* fileNam
 		0, handle ? "handle" : "miss", options);
 	if (handle || !IsReadOnlyFileOpen(options) || !IsReadableCString(fileName))
 		return handle;
+	// Custom shaders (r2port/shaders): the file is a real file under r2port/shadercache, opened by absolute path
+	// so the loader's PLATFORM path id does not matter and no memory handle reaches the buffer-alloc calls.
+	std::string shaderPath;
+	if (r2port::shaders::ResolveShaderFile(fileName, shaderPath)) {
+		handle = R1BaseFileSystem_OpenOriginal
+			? R1BaseFileSystem_OpenOriginal(thisptr, shaderPath.c_str(), options, nullptr)
+			: nullptr;
+		r2port::TraceFilesystemCall("CBaseFileSystem::Open[r2-shader]", fileName,
+			pathId, 0, handle ? "handle" : "miss", shaderPath.c_str());
+		if (handle)
+			return handle;
+	}
 	handle = OpenR2PortMemoryFile(fileName);
 	r2port::TraceFilesystemCall("CBaseFileSystem::Open[r2-provider]", fileName,
 		pathId, 0, handle ? "handle" : "miss", options);

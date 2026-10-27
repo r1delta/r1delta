@@ -44,6 +44,7 @@
 #include "r1o_runtime_paths.h"
 #include "r2_map_provider.h"
 #include "r2port_provider.h"
+#include "engine/r2port/shaders/r2_shader_cache.h"
 #include "r2_material_provider.h"
 #include "legacy_ds_sound_tables.h"
 #include "soundscript_parity.h"
@@ -6701,6 +6702,16 @@ static void R2PortDumpStatsCommand(const CCommand&)
 	r2port::DumpFilesystemTrace();
 }
 
+static void R2PortShadersCommand(const CCommand&)
+{
+	r2port::shaders::PrintShaderStatus();
+}
+
+static void R2PortShadersRebuildCommand(const CCommand&)
+{
+	r2port::shaders::RebuildAllShaders();
+}
+
 
 static bool ReasonIsHeldAccount(const char* reason)
 {
@@ -8447,6 +8458,10 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 			"Remove the cached R2 map BSP and entity files.", FCVAR_NONE);
 		RegisterConCommand("r2port_dump_stats", R2PortDumpStatsCommand,
 			"Dump R2 provider counters and filtered filesystem trace.", FCVAR_NONE);
+		RegisterConCommand("r2port_shaders", R2PortShadersCommand,
+			"List the R2 port custom shaders and their build state.", FCVAR_NONE);
+		RegisterConCommand("r2port_shaders_rebuild", R2PortShadersRebuildCommand,
+			"Recompile all R2 port custom shaders (embedded plus r2port/shaders/*.hlsl).", FCVAR_NONE);
 		r1delta::background::RegisterSelfTestCommand();
 
 		// Register slot commands
