@@ -106,4 +106,15 @@ bool ListMapMaterials(const std::uint8_t* bspBytes,
                       std::vector<std::string>& names,
                       std::string* error = nullptr);
 
+// Package family (the unit r2tex decodes and caches) that holds the asset a request will convert. False when
+// the name does not resolve; the request then misses or is cheap. Safe to call from any thread after Open.
+bool FamilyOfMaterial(std::string_view name, std::uint32_t& family);
+// Accepts the synthetic names ConvertMaterial emits (r2tex/opaque/, r2tex/opamerge/, r2tex/layer_masks/).
+bool FamilyOfTexture(std::string_view name, std::uint32_t& family);
+// True while the family's decoded paks are in the cache (a conversion in it needs no RTech decode).
+bool IsFamilyResident(std::uint32_t family);
+// Package families decoded since the process started (RTech decode + file read), and the wall time spent in them
+// summed over threads. A converted map should load each family it touches once.
+void GetFamilyLoadStats(std::uint64_t& loads, std::uint64_t& microseconds);
+
 } // namespace r2tex

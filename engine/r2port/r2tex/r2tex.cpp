@@ -20,6 +20,7 @@
 #include <list>
 #include <map>
 #include <mutex>
+#include <thread>
 #include <set>
 #include <sstream>
 #include <unordered_map>
@@ -520,6 +521,9 @@ struct CacheEntry {
     std::shared_ptr<Family> family;
     std::list<std::uint32_t>::iterator age;
 };
+std::atomic<std::uint64_t> gFamilyLoadCount{0};
+std::atomic<std::uint64_t> gFamilyLoadMicroseconds{0};
+
 struct Database {
     fs::path installDir;
     fs::path pakDir;
@@ -535,6 +539,11 @@ struct Database {
     std::size_t familyBytes = 0;
 
     std::unordered_map<std::uint32_t, std::shared_ptr<std::mutex>> familyLoadLocks;
+
+    bool isFamilyResident(std::uint32_t id) {
+        std::lock_guard<std::mutex> lock(familyMutex);
+        return families.find(id) != families.end();
+    }
 
     // Loads one family. The decode of its paks (the expensive part) runs under a per-family lock, not
     // under familyMutex, so workers needing different families load them in parallel.
@@ -561,6 +570,7 @@ struct Database {
                 return found->second.family;
             }
         }
+        const auto familyLoadStart = std::chrono::steady_clock::now();
         auto family = std::make_shared<Family>();
         family->id = id;
         std::uint32_t maxPages = 0;
@@ -581,6 +591,9 @@ struct Database {
             }
         }
         if (family->paks.empty()) { error = "cannot load any pak in family " + familyNames[id]; return {}; }
+        gFamilyLoadCount.fetch_add(1, std::memory_order_relaxed);
+        gFamilyLoadMicroseconds.fetch_add(static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - familyLoadStart).count()), std::memory_order_relaxed);
         std::lock_guard<std::mutex> lock(familyMutex);
         lru.push_front(id);
         families.emplace(id, CacheEntry{family, lru.begin()});
@@ -727,9 +740,15 @@ bool saveIndex(const fs::path& path, const Database& db, std::string& error) {
 bool buildIndex(Database& db, std::string& error) {
     const auto begin = std::chrono::steady_clock::now();
     db.assets.clear();
-    for (std::uint32_t familyId = 0; familyId < db.familyMembers.size(); ++familyId) {
-        auto family = db.getFamily(familyId, error);
-        if (!family) continue;
+    const std::uint32_t familyCount = static_cast<std::uint32_t>(db.familyMembers.size());
+    using AssetMap = decltype(db.assets);
+    // Scans one family into `out`. Within a family the patch rule below decides replacements; across
+    // families the lowest family id wins (a key found in an earlier family is never replaced), which is
+    // exactly what the merge step reproduces when families are scanned concurrently.
+    auto scanFamily = [&](std::uint32_t familyId, AssetMap& out) {
+        std::string familyError;
+        auto family = db.getFamily(familyId, familyError);
+        if (!family) return;
         for (const auto& pakPtr : family->paks) {
             const PakData& pak = *pakPtr;
             for (std::uint32_t ai = 0; ai < pak.header.numAssets; ++ai) {
@@ -752,9 +771,9 @@ bool buildIndex(Database& db, std::string& error) {
                 record.headerSize = asset.headerSize;
                 record.name = name;
                 const AssetKey key{record.guid, record.type};
-                auto found = db.assets.find(key);
-                if (found == db.assets.end()) {
-                    db.assets.emplace(key, std::move(record));
+                auto found = out.find(key);
+                if (found == out.end()) {
+                    out.emplace(key, std::move(record));
                 } else {
                     const auto& oldPak = db.paks[found->second.pakIndex];
                     const auto& newPak = db.paks[record.pakIndex];
@@ -770,8 +789,38 @@ bool buildIndex(Database& db, std::string& error) {
                 }
             }
         }
-        std::cerr << "index: scanned family " << (familyId + 1) << "/" << db.familyMembers.size()
-                  << " (" << db.familyNames[familyId] << ")\r";
+    };
+    // The scan is dominated by RTech-decoding every family and families are independent, so it runs on a
+    // few threads. The index file is written in (type, guid) order, so the result does not depend on the
+    // thread count. R2TEX_INDEX_THREADS overrides the default (1 = the old sequential scan).
+    unsigned scanThreads = std::clamp(std::thread::hardware_concurrency() / 4u, 2u, 6u);
+    if (const char* threadsEnv = std::getenv("R2TEX_INDEX_THREADS")) {
+        const int requested = std::atoi(threadsEnv);
+        if (requested > 0) scanThreads = static_cast<unsigned>(std::min(requested, 32));
+    }
+    scanThreads = std::min<unsigned>(scanThreads, std::max<std::uint32_t>(familyCount, 1u));
+    if (scanThreads <= 1) {
+        for (std::uint32_t familyId = 0; familyId < familyCount; ++familyId) {
+            scanFamily(familyId, db.assets);
+            std::cerr << "index: scanned family " << (familyId + 1) << "/" << familyCount
+                      << " (" << db.familyNames[familyId] << ")\r";
+        }
+    } else {
+        std::vector<AssetMap> locals(familyCount);
+        std::atomic<std::uint32_t> nextFamily{0};
+        std::vector<std::thread> pool;
+        pool.reserve(scanThreads);
+        for (unsigned t = 0; t < scanThreads; ++t)
+            pool.emplace_back([&]() {
+                for (;;) {
+                    const std::uint32_t id = nextFamily.fetch_add(1, std::memory_order_relaxed);
+                    if (id >= familyCount) return;
+                    try { scanFamily(id, locals[id]); } catch (...) { locals[id].clear(); }
+                }
+            });
+        for (auto& worker : pool) worker.join();
+        for (auto& local : locals)
+            for (auto& entry : local) db.assets.emplace(entry.first, std::move(entry.second));
     }
     std::cerr << "\n";
     if (db.assets.empty()) { error = "no txtr/matl assets indexed"; return false; }
@@ -1048,6 +1097,8 @@ bool isNormalName(std::string_view name) {
     return n.size() >= 4 && (n.rfind("_nml") == n.size() - 4 || n.rfind("_normal") == n.size() - 7 || n.rfind("_bump") == n.size() - 5);
 }
 
+bool addMipChain(std::vector<std::uint8_t>& vtf);
+
 bool convertTextureWithDb(const std::shared_ptr<Database>& db, const AssetRecord& record,
                           const TextureOptions& options, std::vector<std::uint8_t>& vtf,
                           std::string& error) {
@@ -1188,7 +1239,7 @@ bool convertTextureWithDb(const std::shared_ptr<Database>& db, const AssetRecord
         std::memcpy(vtf.data() + outOffset, bytes.data(), bytes.size());
         outOffset += bytes.size();
     }
-    return true;
+    return addMipChain(vtf);
 }
 
 bool expandLayerMaskVtf(std::vector<std::uint8_t>& vtf, bool invert, std::string& error) {
@@ -1507,6 +1558,55 @@ bool mergeOpacityVtf(std::vector<std::uint8_t>& albedo, const std::vector<std::u
     return true;
 }
 
+// R1 renders large single-mip textures as garbage (the mp_glitch training_r2 sky vista, a 2048x2048 DXT1 with one mip,
+// came out as rainbow arches; with a full chain the same texels render correctly). R2 stores such textures (skies, vistas)
+// with only mip 0. Expand them to an RGBA8 texture with a complete box-filtered chain.
+bool addMipChain(std::vector<std::uint8_t>& vtf) {
+    VtfView view;
+    if (!parseVtfView(vtf, view) || view.mipCount != 1 || std::max(view.width, view.height) < 16) return true;
+    if (view.format != 0 && view.format != 13 && view.format != 14 && view.format != 15) return true;
+    if (u16(vtf.data() + 0x18) != 1 || (u32(vtf.data() + 0x14) & (0x100u | 0x4000u)) != 0) return true;  // frames, NOMIP, ENVMAP
+    std::vector<std::uint8_t> level;
+    std::uint32_t w = 0, h = 0;
+    if (!decodeVtfMip(vtf, view, 0, level, w, h)) return true;
+    std::vector<std::vector<std::uint8_t>> chain;
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> dims;
+    chain.push_back(std::move(level)); dims.emplace_back(w, h);
+    while (dims.back().first > 1 || dims.back().second > 1) {
+        const auto [pw, ph] = dims.back();
+        const std::uint32_t nw = std::max(1u, pw / 2), nh = std::max(1u, ph / 2);
+        std::vector<std::uint8_t> next(static_cast<std::size_t>(nw) * nh * 4);
+        const auto& prev = chain.back();
+        for (std::uint32_t y = 0; y < nh; ++y)
+            for (std::uint32_t x = 0; x < nw; ++x) {
+                const std::uint32_t x0 = std::min(pw - 1, x * 2), x1 = std::min(pw - 1, x * 2 + 1);
+                const std::uint32_t y0 = std::min(ph - 1, y * 2), y1 = std::min(ph - 1, y * 2 + 1);
+                for (int c = 0; c < 4; ++c) {
+                    const unsigned sum = prev[(static_cast<std::size_t>(y0) * pw + x0) * 4 + c] +
+                                         prev[(static_cast<std::size_t>(y0) * pw + x1) * 4 + c] +
+                                         prev[(static_cast<std::size_t>(y1) * pw + x0) * 4 + c] +
+                                         prev[(static_cast<std::size_t>(y1) * pw + x1) * 4 + c];
+                    next[(static_cast<std::size_t>(y) * nw + x) * 4 + c] = static_cast<std::uint8_t>((sum + 2) / 4);
+                }
+            }
+        chain.push_back(std::move(next)); dims.emplace_back(nw, nh);
+    }
+    std::size_t total = 0x58;
+    for (const auto& m : chain) total += m.size();
+    std::vector<std::uint8_t> out(total, 0);
+    std::memcpy(out.data(), vtf.data(), 0x58);
+    putI32(out.data() + 0x34, 0);
+    out[0x38] = static_cast<std::uint8_t>(chain.size());
+    put32(out.data() + 0x54, 0x58);
+    std::size_t at = 0x58;
+    for (std::size_t i = chain.size(); i-- > 0;) {
+        std::memcpy(out.data() + at, chain[i].data(), chain[i].size());
+        at += chain[i].size();
+    }
+    vtf = std::move(out);
+    return true;
+}
+
 bool surfaceKnown(const std::string& p) {
     static const std::set<std::string> names = {
         "default", "concrete", "metal", "dirt", "grass", "wood", "glass", "plastic", "rock", "sand",
@@ -1737,8 +1837,19 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
                      blend, depth, raster, constantsSize);
         for (std::size_t i = 0; i < constants.size(); ++i) std::fprintf(stderr, "%s%.5g", i ? "," : "", constants[i]);
         std::fprintf(stderr, "\n");
-        for (std::size_t slot = 0; slot < slotGuids.size(); ++slot)
-            if (slotGuids[slot]) std::fprintf(stderr, "matslot|%s|%zu|%s\n", name.c_str(), slot, texName(slot).c_str());
+        for (std::size_t slot = 0; slot < slotGuids.size(); ++slot) {
+            if (!slotGuids[slot]) continue;
+            unsigned tw = 0, th = 0, tf = 0, tm = 0;
+            if (const AssetRecord* tex = findRecord(*db, slotGuids[slot], kTxtr)) {
+                std::vector<std::uint8_t> th_; std::string ignoredError;
+                auto texFamily = db->getFamily(db->paks[tex->pakIndex].family, ignoredError);
+                if (texFamily && readAssetHeader(*db, *tex, texFamily, th_, ignoredError) && th_.size() >= 0x38) {
+                    tw = u16(th_.data() + 0x10); th = u16(th_.data() + 0x12); tf = u16(th_.data() + 0x16);
+                    tm = th_[0x1d] + th_[0x21] + th_[0x22];
+                }
+            }
+            std::fprintf(stderr, "matslot|%s|%zu|%s|%u|%u|%u|%u\n", name.c_str(), slot, texName(slot).c_str(), tw, th, tf, tm);
+        }
     }
     double materialTint[3] = {1.0, 1.0, 1.0};
     double materialOpacity = 1.0;
@@ -2185,6 +2296,68 @@ bool ConvertMaterial(std::string_view name, Material& material,
     } catch (const std::exception& e) {
         if (error) *error = e.what();
         material = Material{};
+        return false;
+    }
+}
+
+bool FamilyOfMaterial(std::string_view name, std::uint32_t& family) {
+    try {
+        const auto db = getDatabase();
+        if (!db) return false;
+        const std::string cleaned = cleanAssetName(name, true);
+        if (!validAssetName(cleaned)) return false;
+        for (const char* variant : {"wld", "fix", "skn", "gen"}) {
+            if (const AssetRecord* record = findRecord(*db, materialGuid(cleaned, variant), kMatl)) {
+                family = db->paks[record->pakIndex].family;
+                return true;
+            }
+        }
+    } catch (...) {
+    }
+    return false;
+}
+
+bool FamilyOfTexture(std::string_view name, std::uint32_t& family) {
+    try {
+        const auto db = getDatabase();
+        if (!db) return false;
+        const std::string cleaned = cleanAssetName(name, true);
+        if (!validAssetName(cleaned)) return false;
+        std::uint64_t guid = 0;
+        if (cleaned.rfind(kOpaqueAlbedoPrefix, 0) == 0) {
+            const std::string original = cleaned.substr(std::strlen(kOpaqueAlbedoPrefix));
+            if (!validAssetName(original)) return false;
+            guid = textureGuid(original);
+        } else if (cleaned.rfind(kOpacityMergePrefix, 0) == 0) {
+            std::uint64_t opacityGuid = 0;
+            if (!parseOpacityMergeName(cleaned, guid, opacityGuid)) return false;
+        } else if (cleaned.rfind("r2tex/layer_masks/", 0) == 0) {
+            const std::string hex = cleaned.substr(std::strlen("r2tex/layer_masks/"), 16);
+            char* end = nullptr;
+            guid = std::strtoull(hex.c_str(), &end, 16);
+            if (hex.size() != 16 || end != hex.c_str() + 16) return false;
+        } else {
+            guid = textureGuid(cleaned);
+        }
+        if (const AssetRecord* record = findRecord(*db, guid, kTxtr)) {
+            family = db->paks[record->pakIndex].family;
+            return true;
+        }
+    } catch (...) {
+    }
+    return false;
+}
+
+void GetFamilyLoadStats(std::uint64_t& loads, std::uint64_t& microseconds) {
+    loads = gFamilyLoadCount.load(std::memory_order_relaxed);
+    microseconds = gFamilyLoadMicroseconds.load(std::memory_order_relaxed);
+}
+
+bool IsFamilyResident(std::uint32_t family) {
+    try {
+        const auto db = getDatabase();
+        return db && db->isFamilyResident(family);
+    } catch (...) {
         return false;
     }
 }
