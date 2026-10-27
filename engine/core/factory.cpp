@@ -17905,8 +17905,8 @@ static void* __fastcall R1FileSystem_Open(void* thisptr, const char* fileName, c
 // R1's native IFileSystem entry points that take a FileHandle_t. The provider hands out
 // in-memory handles that native code must never dereference, so every one of these has to
 // answer for them before the original runs. Slots are for the stock R1 filesystem_stdio.dll
-// (build stamp 0x54874230); the R1O TFO layout has two extra slots earlier and is hooked
-// separately.
+// and the identical code inside the stock dedicated.dll (build stamps checked below); the R1O
+// TFO layout has two extra slots earlier and is hooked separately.
 static void InstallR1FileSystemHandleHooks(void* fileSystem)
 {
 	if (s_R1FileSystemHandleHooksInstalled
@@ -17928,9 +17928,19 @@ static void InstallR1FileSystemHandleHooks(void* fileSystem)
 	const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(module);
 	const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(
 		reinterpret_cast<const char*>(module) + dos->e_lfanew);
-	if (dos->e_magic != IMAGE_DOS_SIGNATURE || nt->Signature != IMAGE_NT_SIGNATURE
-		|| nt->FileHeader.TimeDateStamp != 0x54874230
-		|| nt->OptionalHeader.SizeOfImage != 0x2116000) {
+	// filesystem_stdio.dll (client/listen) and dedicated.dll (legacy dedicated server, which
+	// links the same filesystem code into its own image) share one vtable layout: the
+	// SetBufferSize/IsOk/EndOfFile/ReadLine/Open/ReadEx slots decompile identically in both.
+	constexpr DWORD kStockFileSystemStdioStamp = 0x54874230;
+	constexpr DWORD kStockFileSystemStdioImageSize = 0x2116000;
+	constexpr DWORD kStockDedicatedStamp = 0x54874282;
+	constexpr DWORD kStockDedicatedImageSize = 0x23A2000;
+	const bool recognized = dos->e_magic == IMAGE_DOS_SIGNATURE && nt->Signature == IMAGE_NT_SIGNATURE
+		&& ((nt->FileHeader.TimeDateStamp == kStockFileSystemStdioStamp
+				&& nt->OptionalHeader.SizeOfImage == kStockFileSystemStdioImageSize)
+			|| (nt->FileHeader.TimeDateStamp == kStockDedicatedStamp
+				&& nt->OptionalHeader.SizeOfImage == kStockDedicatedImageSize));
+	if (!recognized) {
 		OutputDebugStringA("R1Delta: R2 provider IFileSystem handle hooks skipped: unrecognized filesystem module\n");
 		return;
 	}
