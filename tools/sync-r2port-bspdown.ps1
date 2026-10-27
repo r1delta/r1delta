@@ -15,7 +15,8 @@ $sourceFiles = @(
     'tangents.cpp',
     'physics.cpp',
     'cubemaps.cpp',
-    'shadow.cpp'
+    'shadow.cpp',
+    'lighting.cpp'
 )
 # Vendored for the command-line tool and its checks; not part of Dll1.vcxproj.
 # main.cpp is the bspdown.exe driver (build_msvc.bat), check_bspdown.py (with its frame_check.py helper) verifies the output, README.txt lists the rules.

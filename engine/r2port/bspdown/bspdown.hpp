@@ -77,6 +77,20 @@ struct Options {
     // World light flags: stock R1 lights carry bit 0x2 (R2 never sets it); set it on lights with non-zero flags.
     bool worldLightFlagBit2 = false;
 
+    // Rule 20: world lights, light probe light indices and real-time lights (lumps 0x36, 0x65, 0x69), see README.txt.
+    // collapseEnvs: R2 maps carry one sky-ambient/sun pair per light_environment (a dummy skybox environment first, the real one last).
+    //   R1 supports exactly one pair at the start of the array ([ambient, sun, locals...]); the dummy pairs are dropped, the real (last)
+    //   pair is moved to indices 0/1 and every light index stored in other lumps is remapped.
+    // rtlConvert: decode the R2 real-time light lump (9 bytes per texel + 0x7A palettes) and write the R1 layout (4 slots of
+    //   world light index - 1). false: all 0xFF (no real-time lights), the behaviour before rule 20.
+    // rtlMinWeight: R2 stores a visibility weight (0..255) per slot, R1 has none; slots below this weight are not listed.
+    // pbrLights: R2 lights with flag 0x20 (_pbr_falloff) and without 0x4 carry a luminous intensity (about 392x the usual unit) and
+    //   R1 evaluates lights without 0x4 as a reciprocal polynomial; true rewrites them to the R1 fade-polynomial form.
+    bool collapseEnvs = true;
+    bool rtlConvert = true;
+    int rtlMinWeight = 64;
+    bool pbrLights = true;
+
     // Drop lumps R1 never reads (0x04..0x07, 0x37, 0x7A). They are large
     // (about 2 MB on eden) and cannot be interpreted by R1.
     bool dropR2OnlyLumps = true;

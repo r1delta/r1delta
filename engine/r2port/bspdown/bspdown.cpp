@@ -60,41 +60,6 @@ void Ctx::throwIfFailed(const char* stage) {
     throw Error(m);
 }
 
-// ---------------------------------------------------------------------------
-// Rule 2: real time lights, 9 bytes per texel in R2.
-// R1 (Mod_LoadLightmapDataRealTimeLights) requires the size to be a whole
-// number (1..4) of bytes per texel over all lightmap headers of type 1, and
-// treats 0xFF as "no light". The R2 texel layout is not understood (the file
-// in the VPK has 8 bytes per texel, the copy embedded in the BSP has 9), so the
-// output carries no light assignments.
-void convertRealTimeLights(Ctx& c) {
-    const Bytes& hdr = c.lump[L_LMHDR];
-    if (hdr.size() % 8) throw Error("lightmap headers (0x53): size is not a multiple of 8");
-    uint64_t texels = 0;
-    for (size_t i = 0; i < hdr.size() / 8; i++) {
-        uint32_t type;
-        uint16_t w, h;
-        std::memcpy(&type, &hdr[i * 8], 4);
-        std::memcpy(&w, &hdr[i * 8 + 4], 2);
-        std::memcpy(&h, &hdr[i * 8 + 6], 2);
-        if (type == 1) texels += (uint64_t)w * h;
-    }
-    Bytes& rtl = c.lump[L_LMRTL];
-    size_t inLen = rtl.size();
-    if (inLen == 0) {
-        c.say("[rule 2] real-time lights: input lump empty, output empty (R1 treats an empty lump as no data)");
-        return;
-    }
-    if (texels == 0) throw Error("real-time lights (0x69): lump present but no type-1 lightmap headers");
-    int bpt = c.opt.rtlBytesPerTexel;
-    if (bpt < 1 || bpt > 4) throw Error("rtlBytesPerTexel must be 1..4");
-    c.say("[rule 2] real-time lights: %llu type-1 texels, input %zu bytes (%.2f per texel), output %llu bytes (%d per texel) filled with 0xFF",
-          (unsigned long long)texels, inLen, (double)inLen / (double)texels, (unsigned long long)(texels * bpt), bpt);
-    if (inLen != texels * 9)
-        c.say("[rule 2] note: input size is not 9 bytes per texel (expected %llu)", (unsigned long long)(texels * 9));
-    rtl.assign((size_t)(texels * bpt), 0xFF);
-}
-
 // Rule 6: light probe refs, 20 -> 16 bytes (drop the trailing int32).
 void convertLightProbeRefs(Ctx& c) {
     Bytes& l = c.lump[L_LPREFS];
@@ -124,50 +89,6 @@ void convertLightProbeRefs(Ctx& c) {
           c.lump[L_LIGHTPROBES].size() / 48, c.lump[L_LPTREE].size() / 8, c.lump[L_SPLPINDICES].size() / 4);
 }
 
-// Rule 8a: world lights. R1 requires lump version 1 and 100 byte records
-// (count = length / 100) and aborts the map above 4064 lights. R2 uses
-// version 2 (108 bytes) or 3 (112 bytes); the first 100 bytes are the R1 record.
-void convertWorldLights(Ctx& c) {
-    Bytes& l = c.lump[L_WORLDLIGHTS];
-    if (l.empty()) {
-        c.version[L_WORLDLIGHTS] = 1;
-        return;
-    }
-    size_t rec;
-    switch (c.version[L_WORLDLIGHTS]) {
-        case 1: rec = 100; break;
-        case 2: rec = 108; break;
-        case 3: rec = 112; break;
-        default: throw Error("world lights (0x36): unknown lump version " + std::to_string(c.version[L_WORLDLIGHTS]));
-    }
-    if (l.size() % rec)
-        throw Error("world lights (0x36): size " + std::to_string(l.size()) + " is not a multiple of " + std::to_string(rec) + " for lump version " + std::to_string(c.version[L_WORLDLIGHTS]));
-    size_t n = l.size() / rec;
-    if (n > c.opt.maxWorldLights)
-        throw Error("world lights (0x36): " + std::to_string(n) + " lights, R1 aborts above " + std::to_string(c.opt.maxWorldLights));
-    if (rec != 100) {
-        Bytes out(n * 100);
-        for (size_t i = 0; i < n; i++) std::memcpy(&out[i * 100], &l[i * rec], 100);
-        l.swap(out);
-    }
-    if (c.opt.worldLightFlagBit2) {
-        size_t set = 0;
-        for (size_t i = 0; i < n; i++) {
-            int32_t flags, type;
-            std::memcpy(&flags, &l[i * 100 + 88], 4);
-            std::memcpy(&type, &l[i * 100 + 52], 4);
-            if ((type == 1 || type == 2) && !(flags & 2)) {
-                flags |= 2;
-                std::memcpy(&l[i * 100 + 88], &flags, 4);
-                set++;
-            }
-        }
-        c.say("[rule 8] world lights flags: set bit 0x2 on %zu of %zu lights (point and spot lights only: stock R1 maps have it on every type 1/2 light and on none of the type 3/5 sun/sky entries, R2 never sets it; effect unknown, default off, enable with --worldlight-flag2)", set, n);
-    }
-    c.say("[rule 8] world lights (0x36): %zu lights, lump version %u (%zu byte records) -> version 1 (100 byte records); trailing %zu bytes per record dropped",
-          n, c.version[L_WORLDLIGHTS], rec, rec - 100);
-    c.version[L_WORLDLIGHTS] = 1;
-}
 
 }  // namespace detail
 
@@ -208,8 +129,7 @@ std::vector<uint8_t> DowngradeBsp(const uint8_t* data, size_t size, const Option
 
     // Order matters: tricoll and meshes read lumps that the collision and
     // bounds stages then reuse.
-    convertWorldLights(c);
-    convertRealTimeLights(c);
+    convertLighting(c);
     convertLightProbeRefs(c);
     convertTricoll(c);
     convertCollisionGrid(c);

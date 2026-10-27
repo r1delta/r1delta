@@ -237,9 +237,9 @@ void appendRaw(Bytes& b, const T& v) {
 }
 
 // Stages. Each reads and writes Ctx::lump.
-void convertRealTimeLights(Ctx& c);
+void convertLighting(Ctx& c);  // rule 20 (+ rules 2, 8a): world lights, probe light indices, real-time lights
+void convertRealTimeLightsFill(Ctx& c);  // rule 2 fallback: 0xFF fill
 void convertLightProbeRefs(Ctx& c);
-void convertWorldLights(Ctx& c);
 void convertTricoll(Ctx& c);
 void convertStaticProps(Ctx& c);
 void convertVertexFrames(Ctx& c);  // rule 11, runs after convertMeshes

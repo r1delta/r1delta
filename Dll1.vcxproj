@@ -525,6 +525,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     </ClCompile>
     <ClCompile Include="engine\r2port\bspdown\cubemaps.cpp" />
     <ClCompile Include="engine\r2port\bspdown\shadow.cpp" />
+    <ClCompile Include="engine\r2port\bspdown\lighting.cpp" />
     <ClCompile Include="engine\r2port\entity_rewrite.cpp" />
     <ClCompile Include="engine\core\background_mode.cpp" />
     <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_assert.cpp">

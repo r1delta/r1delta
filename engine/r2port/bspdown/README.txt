@@ -15,6 +15,7 @@ Files
   meshclip.cpp       rules 7 (render mesh clipping, bounds), 10 (cubemap per sort), 15 (no-draw meshes)
   physics.cpp       rules 12 (world-collision placeholder) and 14 (all-absent 0x46 table)
   shadow.cpp         rule 17 (shadow environments / CSM tree / shadow meshes, options only)
+  lighting.cpp       rule 20 (world lights, probe light indices, real-time lights)
   main.cpp           CLI
   internal.hpp       shared structs
   check_bspdown.py   invariant checker (independent numpy implementation)
@@ -29,7 +30,7 @@ Files
 Build
 -----
   g++ (MSYS2 ucrt64, C++17):
-    g++ -std=c++17 -O2 -Wall -Wextra -o bspdown.exe main.cpp bspdown.cpp tricoll.cpp collision.cpp sprp.cpp meshclip.cpp tangents.cpp physics.cpp cubemaps.cpp shadow.cpp
+    g++ -std=c++17 -O2 -Wall -Wextra -o bspdown.exe main.cpp bspdown.cpp tricoll.cpp collision.cpp sprp.cpp meshclip.cpp tangents.cpp physics.cpp cubemaps.cpp shadow.cpp lighting.cpp
   MSVC (VS 2022 or later, x64): run build_msvc.bat  (cl /std:c++17 /O2 /EHsc ...)
   Both were built and produce byte identical output on mp_lf_deck.
 
@@ -418,6 +419,41 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
     of the known set (16..700) inside the unwritten-slot window, no entry outside its cell, groups = one object each spanning >= 2 cells,
     dense ids, model cells identical, set of world objects identical, and 5400 walker-style range queries (rays and hull extents 0..800)
     in which the new grid finds every object the reference grid finds.
+
+20. Lighting: world lights, probe light indices, real-time lights (lighting.cpp; replaces the 0xFF RTL fill of rule 2 and the plain 100 byte
+    truncation of rule 8a) [R1 engine IDA sub_1800AD260, sub_1800A32B0, sub_18008F550, sub_1800A6D80, sub_1800B0B30, sub_1800A4FD0;
+    lightbaker scene.cpp / baker.cpp / probes.cpp (MIT) for the R2 side; data on R2 mp_glitch / mp_rise / mp_wargames / mp_lf_stacks and
+    R1 mp_rise; full evidence: lightref\FINDINGS.md].
+    a) Array layout. R2: [sky ambient x E][sun x E][realtime spots][realtime points][baked spots][baked points], E = number of
+       light_environment entities (2 on every R2 map: index 0 = dummy skybox environment, last = the real one). R1 expects
+       [sky ambient][sun][...]: the CPU light path (sub_18008F550, props/models) uses light[0] as the ambient only if its type is 5 and light[1]
+       as the sun (must be type 3); the GPU constants (sub_1800A32B0) take the LAST type 3 / type 5 entry; the GPU light upload (sub_1800A6D80)
+       sends lights[v1..n) with v1 = (light[0].type == 5), slot = world index - v1, trailing type-0 lights trimmed.
+       Rule: keep only the last ambient and the last sun (the real environment) at indices 0/1, drop the dummy pairs (--no-collapse-envs keeps the R2 order).
+       Sun/ambient flags are set to 0 (R1 stock; R2 uses 0x18 on the sun).
+    b) Probe light indices (lump 0x65, 4 x int16 at +0x24, weights 4 x u8 at +0x20). R2 stores world index - E, R1 resolves
+       world index = stored + v1 (the loader adds 32 when the weight is non-zero, consumers subtract 32 - v1). Without the fix every
+       probe-lit prop gets the PREVIOUS array entry (numeric check, mp_glitch: R2 rule +2 puts 97.5 % of the referenced lights within their
+       radius of the probe, the R1 rule +1 only 30.3 %; stock R1 rise with +1: 95.3 %). Output: stored' = new world index - v1; entries pointing
+       at a dropped (dummy) light get weight 0 / index -1.
+    c) Real-time lights (lump 0x69, 9 bytes per type-1 lightmap texel; lightbaker docs/TF2_LIGHTMAP_AND_SHADOW_NOTES.md "Recovered RTL packing",
+       verified here: per mesh, light at palette index + E is within radius of the mesh box for 88.7 % of pairs, <= 42 % at any other offset).
+       Layout per type-1 page in header order: A plane (w*h uint32 LE: bits 0..23 four 6 bit slots, 63 = unused, bits 24..31 palette id;
+       0xFFFFFFFF = none), B plane (w*h x 4 bytes: visibility weight per slot), C plane (w*h bytes: candidate count). Palette = lump 0x7A,
+       126 byte records of 63 uint16, entry = world index - E. Slot 0 of the first palette column is reserved for the sun.
+       R1 layout: 4 bytes per texel, byte = world index - v1, 0xFF = none, ascending, at most 4 (R1 stock mp_rise: byte 0 = the sun never occurs, 68 % of
+       texels empty, so the sun is NOT in the R1 list). Conversion: per texel keep the slots that are point/spot lights with flag 0x8 and weight >=
+       --rtl-min-weight (default 64); the sun slot and baked lights are dropped; bytes above 254 do not exist: if the real-time group needs more than
+       255 slots (glitch 338, wargames 260 flagged lights) the group is reordered by total visibility weight and the least used lights are dropped
+       (glitch: 11,079 of 885,554 slots). R1 has no per-texel visibility weight; the R2 shadowing is only kept as the omitted entries.
+       --no-rtl restores the 0xFF fill.
+    d) PBR lights. R2 entity _pbr_falloff 1 = world light flag 0x20 (no 0x4); the compiled intensity is brightness/255 * 1e5 (the two blue
+       glitch point lights: 1e5, radius 500, d50 150; probe references to them: 937). R1 evaluates lights without flag 0x4 as 1 / (c + l d + q d^2)
+       (sub_1800A4FD0), which is unbounded near the radius. Rewrite: set flag 0x4 and multiply the intensity by 2 / d50^2 where d50 is the
+       distance at which c + l d + q d^2 = 0.5 (the inverse-square irradiance I/d50^2 equals I' * 0.5 there). Provisional: the shape inside d50 is
+       not calibrated against R2 renders. Flags 0x20 and 0x40 are cleared. --pbr-lights keep leaves the records alone.
+    Checker: independent numpy model of all three lumps, byte exact (check_bspdown.py, options --no-collapse-envs --no-rtl --rtl-min-weight
+    --pbr-lights).
 
 Results
 -------

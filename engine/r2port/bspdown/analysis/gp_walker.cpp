@@ -222,7 +222,7 @@ int main(int argc, char** argv) {
     printf("grid scale %g off (%d,%d) dims (%d,%d) models %d cells %lld extent x [%g,%g) y [%g,%g)\n", g.scale, g.offX, g.offY, g.dimX, g.dimY, g.numModels, (long long)g.tableSize(),
            g.offX * g.scale, (g.offX + g.dimX) * g.scale, g.offY * g.scale, (g.offY + g.dimY) * g.scale);
     static Walker W;
-    const float exts[] = {0.f, 16.f, 32.f, 40.f, 60.f, 64.f, 80.f, 88.f, 90.f, 91.f, 100.f, 120.f, 150.f, 180.f, 181.f, 182.f, 200.f, 250.f, 300.f, 350.f, 400.f, 450.f, 480.f, 497.f, 498.f, 600.f};
+    const float exts[] = {700.f, 800.f, 1000.f, 1400.f, 1500.f, 0.f, 16.f, 32.f, 40.f, 60.f, 64.f, 80.f, 88.f, 90.f, 91.f, 100.f, 120.f, 150.f, 180.f, 181.f, 182.f, 200.f, 250.f, 300.f, 350.f, 400.f, 450.f, 480.f, 497.f, 498.f, 600.f};
     if (argc > 12 && std::string(argv[11]) == "file") {
         FILE* f = fopen(argv[12], "r");
         double a[7]; long long i = 0, bad = 0;

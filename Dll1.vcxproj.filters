@@ -920,6 +920,9 @@
     <ClCompile Include="engine\r2port\bspdown\shadow.cpp">
       <Filter>engine\r2port\bspdown</Filter>
     </ClCompile>
+    <ClCompile Include="engine\r2port\bspdown\lighting.cpp">
+      <Filter>engine\r2port\bspdown</Filter>
+    </ClCompile>
     <ClCompile Include="engine\r2port\shaders\r2_shader_override.cpp">
       <Filter>engine\r2port\shaders</Filter>
     </ClCompile>

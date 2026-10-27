@@ -382,6 +382,137 @@ def check_grid_padding(C, r2, r1, g2, g1, cells, nmodels, grid_pad, unpadded, gr
         print("  note  no --unpadded file given: per-cell equality against the unpadded conversion not checked")
 
 
+LIGHT_OPT = {"collapse": True, "rtl": True, "min_weight": 64, "pbr": True}
+
+
+def expected_lighting(r2, wl_flag2):
+    """Independent numpy model of rule 20: returns (world lights bytes, probes bytes, rtl bytes or None, info dict)."""
+    v2 = r2.lumps[0x36][2]
+    rec = {1: 100, 2: 108, 3: 112}[v2]
+    raw = np.frombuffer(r2.raw(0x36).tobytes(), np.uint8).reshape(-1, rec)[:, :100].copy()
+    n = len(raw)
+    ty = np.ascontiguousarray(raw[:, 52:56]).view("<i4").ravel()
+    fl = np.ascontiguousarray(raw[:, 88:92]).view("<i4").ravel()
+    E = 0
+    while E < n and ty[E] == 5:
+        E += 1
+    S = 0
+    while E + S < n and ty[E + S] == 3:
+        S += 1
+    clean = not bool(np.any((ty[E + S:] == 5) | (ty[E + S:] == 3)))
+    if LIGHT_OPT["collapse"] and clean and (E > 1 or S > 1):
+        order = ([E - 1] if E else []) + ([E + S - 1] if S else [])
+    else:
+        order = list(range(E + S))
+    head = len(order)
+    order += list(range(E + S, n))
+    v1 = 1 if (order and ty[order[0]] == 5) else 0
+    # RTL decode
+    hd = r2.arr(0x53, "<u4,<u2,<u2")
+    pages = [(int(w), int(h)) for t, w, h in hd if t == 1]
+    texels = sum(w * h for w, h in pages)
+    rtl2 = r2.raw(0x69)
+    pal = np.frombuffer(r2.raw(0x7A).tobytes(), "<u2") if len(r2.raw(0x7A)) else np.zeros(0, "<u2")
+    have = LIGHT_OPT["rtl"] and len(rtl2) and texels and len(rtl2) == texels * 9 and len(pal) and len(r2.raw(0x7A)) % 126 == 0
+    usage = np.zeros(n, np.float64)
+    tex_old = None
+    if have:
+        npal = len(pal) // 63
+        tex_old = np.full((texels, 4), -1, np.int64)
+        off = 0
+        t0 = 0
+        rb = np.frombuffer(rtl2.tobytes(), np.uint8)
+        for w, h in pages:
+            m = w * h
+            A = rb[off:off + 4 * m].view("<u4")
+            B = rb[off + 4 * m:off + 8 * m].reshape(m, 4)
+            off += 9 * m
+            sel = (A >> 24).astype(np.int64)
+            for s in range(4):
+                slot = ((A >> (6 * s)) & 63).astype(np.int64)
+                ok = (A != 0xFFFFFFFF) & (slot != 63) & (sel < npal)
+                wo = np.zeros(m, np.int64)
+                wo[ok] = pal[sel[ok] * 63 + slot[ok]].astype(np.int64) + E
+                ok &= wo < n
+                wt = B[:, s].astype(np.int64)
+                okk = ok.copy()
+                okk[ok] = ((ty[wo[ok]] == 1) | (ty[wo[ok]] == 2)) & ((fl[wo[ok]] & 8) != 0)
+                okk &= wt >= LIGHT_OPT["min_weight"]
+                tex_old[t0:t0 + m, s] = np.where(okk, wo, -1)
+                usage += np.bincount(wo[okk], weights=wt[okk].astype(np.float64), minlength=n)
+            t0 += m
+    flagged_pos = [k for k in range(head, len(order)) if ty[order[k]] in (1, 2) and (fl[order[k]] & 8)]
+    reordered = False
+    if have and flagged_pos and flagged_pos[-1] - v1 > 254:
+        ids = [order[p] for p in flagged_pos]
+        ids = sorted(ids, key=lambda i: -usage[i])  # python sort is stable
+        for p, i in zip(flagged_pos, ids):
+            order[p] = i
+        reordered = True
+    new_of = np.full(n, -1, np.int64)
+    for k, o in enumerate(order):
+        new_of[o] = k
+    out = raw[order].copy()
+    oty = ty[order]
+    ofl = fl[order].copy()
+    inten = np.ascontiguousarray(out[:, 12:24]).view("<f4").reshape(-1, 3).copy()
+    cl = np.ascontiguousarray(out[:, 76:88]).view("<f4").reshape(-1, 3)
+    rad = np.ascontiguousarray(out[:, 72:76]).view("<f4").ravel()
+    for k in range(len(order)):
+        t = oty[k]
+        f = int(ofl[k])
+        if t in (3, 5):
+            f = 0
+        else:
+            if LIGHT_OPT["pbr"] and (f & 0x20) and not (f & 4):
+                c_, l_, q_ = [float(x) for x in cl[k]]
+                best = 0.0
+                cc = c_ - 0.5
+                if abs(q_) < 1e-12:
+                    if abs(l_) > 1e-12:
+                        best = -cc / l_
+                else:
+                    disc = l_ * l_ - 4 * q_ * cc
+                    if disc >= 0:
+                        sq = disc ** 0.5
+                        cands = [r for r in ((-l_ - sq) / (2 * q_), (-l_ + sq) / (2 * q_)) if r > 0]
+                        best = min(cands) if cands else 0.0
+                d50 = np.float32(best) if best > 0 else (np.float32(rad[k]) / np.float32(3.0) if rad[k] > 0 else np.float32(100.0))
+                scale = np.float32(2.0) / (d50 * d50)
+                inten[k] = (inten[k] * scale).astype(np.float32)
+                f |= 4
+            f &= ~(0x20 | 0x40)
+            if wl_flag2 and t in (1, 2):
+                f |= 2
+        ofl[k] = f
+    out[:, 12:24] = inten.view("u1").reshape(-1, 12)
+    out[:, 88:92] = ofl.astype("<i4").view("u1").reshape(-1, 4)
+    # probes
+    pr = bytearray(r2.raw(0x65).tobytes())
+    pa = np.frombuffer(pr, np.uint8).reshape(-1, 48)
+    for i in range(len(pa)):
+        for s in range(4):
+            if pa[i, 0x20 + s] == 0:
+                continue
+            idx = int(np.frombuffer(pa[i, 0x24 + 2 * s:0x26 + 2 * s].tobytes(), "<i2")[0])
+            wo = idx + E
+            nw = int(new_of[wo]) if (idx >= 0 and wo < n) else -1
+            if nw < 0:
+                pa[i, 0x20 + s] = 0
+                pa[i, 0x24 + 2 * s:0x26 + 2 * s] = np.frombuffer(np.int16(-1).tobytes(), np.uint8)
+            else:
+                pa[i, 0x24 + 2 * s:0x26 + 2 * s] = np.frombuffer(np.int16(nw - v1).tobytes(), np.uint8)
+    # RTL
+    rtl_out = None
+    if have:
+        slot = tex_old.copy()
+        nwv = np.where(slot >= 0, new_of[np.clip(slot, 0, n - 1)] - v1, -1)
+        nwv = np.where((slot >= 0) & (nwv >= 0) & (nwv <= 254), nwv, 255)
+        nwv.sort(axis=1)  # 255 (none) last, ascending
+        rtl_out = nwv.astype(np.uint8).tobytes()
+    return out.tobytes(), bytes(pr), rtl_out, {"E": E, "S": S, "head": head, "v1": v1, "reordered": reordered}
+
+
 def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", physics="stub", cubemap_scale=4.0,
           props="keep", scatter_min=500, csm_rebase=False, empty_shadow=False, wl_flag2=False, keep_flag10=False,
           grid_pad=True, unpadded=None, grid_size=0.0):
@@ -417,10 +548,15 @@ def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", ph
     C.ok(len(r1.raw(0x62)) == 8 * texels, "sky lightmap size == 8 * type-1 texels (%d)" % texels)
     rtl = r1.raw(0x69)
     k = len(rtl) / max(texels, 1)
-    C.ok(len(rtl) == texels * rtl_bytes or (len(rtl) == 0 and len(r2.raw(0x69)) == 0), "RTL lump %d bytes = %d per texel" % (len(rtl), rtl_bytes))
-    C.ok(1 <= k <= 4 or len(rtl) == 0, "RTL bytes per texel in 1..4 (%.2f)" % k)
-    if len(rtl):
-        C.ok(bool((np.frombuffer(rtl[:1 << 20].tobytes(), dtype=np.uint8) == 255).all()), "RTL first MiB is 0xFF (no light assignments)")
+    elw, elp, elr, einfo = expected_lighting(r2, wl_flag2)
+    if elr is not None:
+        C.ok(len(rtl) == texels * 4 and bytes(rtl) == elr, "RTL lump = independent decode of R2 9 byte texels (4 bytes per texel, slot = world index - %d, min weight %d, %s)" % (einfo["v1"], LIGHT_OPT["min_weight"], "reordered by use" if einfo["reordered"] else "original order"))
+        C.ok(1 <= k <= 4, "RTL bytes per texel in 1..4 (%.2f)" % k)
+    else:
+        C.ok(len(rtl) == texels * rtl_bytes or (len(rtl) == 0 and len(r2.raw(0x69)) == 0), "RTL lump %d bytes = %d per texel" % (len(rtl), rtl_bytes))
+        C.ok(1 <= k <= 4 or len(rtl) == 0, "RTL bytes per texel in 1..4 (%.2f)" % k)
+        if len(rtl):
+            C.ok(bool((np.frombuffer(rtl[:1 << 20].tobytes(), dtype=np.uint8) == 255).all()), "RTL first MiB is 0xFF (no light assignments)")
 
     # ---- light probe refs
     print("== light probes")
@@ -428,24 +564,18 @@ def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", ph
     a1 = r1.arr(0x68, np.dtype([("v", "u1", 16)]))["v"]
     C.ok(len(a1) == len(a2), "light probe ref count kept (%d)" % len(a1))
     C.ok(bool((a1 == a2[:, :16]).all()), "light probe refs equal first 16 bytes of R2 records")
-    for i in (0x65, 0x66, 0x67):
+    for i in (0x66, 0x67):
         C.ok(bytes(r1.raw(i)[:4096]) == bytes(r2.raw(i)[:4096]) and len(r1.raw(i)) == len(r2.raw(i)), "lump %#x unchanged" % i)
+    C.ok(bytes(r1.raw(0x65)) == elp, "light probes (0x65) = R2 probes with static light slots remapped (R2 world - %d -> R1 world - %d)" % (einfo["E"], einfo["v1"]))
 
     # ---- world lights
     print("== world lights")
-    v2 = r2.lumps[0x36][2]
-    rec = {1: 100, 2: 108, 3: 112}[v2]
-    w2 = r2.arr(0x36, np.dtype([("v", "u1", rec)]))["v"]
     w1 = r1.arr(0x36, np.dtype([("v", "u1", 100)]))["v"]
-    exp_w = w2[:, :100].copy()
-    if wl_flag2:
-        # rule 8 option: bit 0x2 set on point (1) and spot (2) lights
-        ty = np.ascontiguousarray(exp_w[:, 52:56]).view("<i4").ravel()
-        fl_ = np.ascontiguousarray(exp_w[:, 88:92]).view("<i4").ravel().copy()
-        fl_[(ty == 1) | (ty == 2)] |= 2
-        exp_w[:, 88:92] = fl_.view("u1").reshape(-1, 4)
-    C.ok(len(w1) == len(w2) and bool((w1 == exp_w).all()), "world lights = first 100 bytes of each R2 record%s (%d lights)" % (", flag bit 0x2 set on type 1/2 lights (--worldlight-flag2)" if wl_flag2 else "", len(w1)))
+    C.ok(bytes(r1.raw(0x36)) == elw, "world lights = rule 20 model (%d R2 sky ambient + %d sun entries, %d head entries, v1 %d, %d lights)" % (einfo["E"], einfo["S"], einfo["head"], einfo["v1"], len(w1)))
     C.ok(len(w1) <= 4064, "world light count <= 4064")
+    if len(w1) >= 2 and einfo["head"] == 2:
+        t1 = np.ascontiguousarray(w1[:, 52:56]).view("<i4").ravel()
+        C.ok(int(t1[0]) == 5 and int(t1[1]) == 3, "R1 layout: light[0] is the sky ambient (type 5), light[1] the sun (type 3)")
 
     # ---- tricoll
     print("== tricoll")
@@ -1005,11 +1135,16 @@ if __name__ == "__main__":
     ap.add_argument("--csm-rebase", action="store_true")
     ap.add_argument("--empty-shadow-meshes", action="store_true")
     ap.add_argument("--worldlight-flag2", action="store_true")
+    ap.add_argument("--no-collapse-envs", action="store_true", help="rule 20 disabled in the converter")
+    ap.add_argument("--no-rtl", action="store_true", help="rule 20 RTL conversion disabled in the converter")
+    ap.add_argument("--rtl-min-weight", type=int, default=64)
+    ap.add_argument("--pbr-lights", choices=("keep", "convert"), default="convert")
     ap.add_argument("--keep-prop-flag10", action="store_true")
     ap.add_argument("--no-grid-pad", action="store_true", help="rule 18 disabled in the converter")
     ap.add_argument("--grid-size", type=float, default=2048.0, help="rule 19 cell size given to the converter (0 = R2 size kept)")
     ap.add_argument("--reference", "--unpadded", dest="reference", help="the same input converted with --grid-size 0 --no-grid-pad: equivalence checks for rules 18 / 19")
     a = ap.parse_args()
+    LIGHT_OPT.update(collapse=not a.no_collapse_envs, rtl=not a.no_rtl, min_weight=a.rtl_min_weight, pbr=(a.pbr_lights == "convert"))
     sys.exit(1 if check(a.r2, a.r1, a.limit, a.rtl_bytes, not a.no_bsp_tool, a.cubemaps, a.physics, a.cubemap_scale,
                         a.props, a.scatter_min, a.csm_rebase, a.empty_shadow_meshes, a.worldlight_flag2, a.keep_prop_flag10,
                         not a.no_grid_pad, a.reference, a.grid_size) else 0)

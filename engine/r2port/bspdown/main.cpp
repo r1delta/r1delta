@@ -36,6 +36,10 @@ static void usage(const char* a0) {
                  "  --physics <stub|none>  lump 0x1D: stub (default, replaces a lump without world solids) or none (keep input)\n"
                  "  --cubemap-scale <x>    multiplier for the R2 cubemap values (default 4)\n"
                  "  --worldlight-flag2     set world light flag bit 0x2 like stock R1 lights (default off, untested)\n"
+                 "  --no-collapse-envs     rule 20: keep all light_environment sky ambient/sun pairs in the world lights (default keeps the last pair only)\n"
+                 "  --no-rtl               rule 20: write the real-time light lump as 0xFF (default converts the R2 lump)\n"
+                 "  --rtl-min-weight <n>   rule 20: minimum R2 visibility weight (0..255) for a real-time light slot (default 64)\n"
+                 "  --pbr-lights <keep|convert>  rule 20: R2 flag 0x20 lights (default convert to the R1 fade polynomial form)\n"
                  "  --props <keep|hide-scatter|hide-all>  rule 16 diagnostics: scale props to 0.0001 for models with >= --scatter-min\n"
                  "                         instances / for every prop (default keep)\n"
                  "  --keep-prop-flag10     rule 16: copy the R2 prop flag bit 0x10 (R1: 'not drawn, shadow caster only'); default clears it\n"
@@ -84,6 +88,18 @@ int main(int argc, char** argv) {
         }
         else if (a == "--cubemap-scale" && i + 1 < argc) opt.cubemapScale = (float)std::atof(argv[++i]);
         else if (a == "--worldlight-flag2") opt.worldLightFlagBit2 = true;
+        else if (a == "--no-collapse-envs") opt.collapseEnvs = false;
+        else if (a == "--no-rtl") opt.rtlConvert = false;
+        else if (a == "--rtl-min-weight" && i + 1 < argc) opt.rtlMinWeight = std::atoi(argv[++i]);
+        else if (a == "--pbr-lights" && i + 1 < argc) {
+            std::string v = argv[++i];
+            if (v == "keep") opt.pbrLights = false;
+            else if (v == "convert") opt.pbrLights = true;
+            else {
+                usage(argv[0]);
+                return 2;
+            }
+        }
         else if (a == "--props" && i + 1 < argc) {
             std::string v = argv[++i];
             if (v == "keep") opt.props = bspdown::Options::PropMode::Keep;
