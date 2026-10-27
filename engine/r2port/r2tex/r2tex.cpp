@@ -533,14 +533,33 @@ struct Database {
     std::list<std::uint32_t> lru;
     std::size_t familyBytes = 0;
 
+    std::unordered_map<std::uint32_t, std::shared_ptr<std::mutex>> familyLoadLocks;
+
+    // Loads one family. The decode of its paks (the expensive part) runs under a per-family lock, not
+    // under familyMutex, so workers needing different families load them in parallel.
     std::shared_ptr<Family> getFamily(std::uint32_t id, std::string& error) {
-        std::lock_guard<std::mutex> lock(familyMutex);
-        auto found = families.find(id);
-        if (found != families.end()) {
-            lru.splice(lru.begin(), lru, found->second.age);
-            return found->second.family;
+        std::shared_ptr<std::mutex> loadLock;
+        {
+            std::lock_guard<std::mutex> lock(familyMutex);
+            auto found = families.find(id);
+            if (found != families.end()) {
+                lru.splice(lru.begin(), lru, found->second.age);
+                return found->second.family;
+            }
+            if (id >= familyMembers.size()) { error = "invalid package family"; return {}; }
+            auto& slot = familyLoadLocks[id];
+            if (!slot) slot = std::make_shared<std::mutex>();
+            loadLock = slot;
         }
-        if (id >= familyMembers.size()) { error = "invalid package family"; return {}; }
+        std::lock_guard<std::mutex> loading(*loadLock);
+        {
+            std::lock_guard<std::mutex> lock(familyMutex);
+            auto found = families.find(id);
+            if (found != families.end()) {
+                lru.splice(lru.begin(), lru, found->second.age);
+                return found->second.family;
+            }
+        }
         auto family = std::make_shared<Family>();
         family->id = id;
         std::uint32_t maxPages = 0;
@@ -561,6 +580,7 @@ struct Database {
             }
         }
         if (family->paks.empty()) { error = "cannot load any pak in family " + familyNames[id]; return {}; }
+        std::lock_guard<std::mutex> lock(familyMutex);
         lru.push_front(id);
         families.emplace(id, CacheEntry{family, lru.begin()});
         familyBytes += family->bytes;
