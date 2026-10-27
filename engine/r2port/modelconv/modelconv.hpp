@@ -31,6 +31,9 @@ struct ModelOutput {
     std::vector<std::uint8_t> vtx;
     std::vector<std::uint8_t> vvc;
     std::vector<std::uint8_t> phy;
+    // Human-readable account of the animation outcome ("animated: ..." or "bind pose only: reason");
+    // empty for plain static models. Informational only.
+    std::string note;
 };
 
 // Converts the bounded static subset supported by this library. On failure,

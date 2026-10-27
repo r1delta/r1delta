@@ -10,6 +10,9 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <cmath>
+#include <map>
+#include <string>
 #include <limits>
 #include <stdexcept>
 #include <string_view>
@@ -993,6 +996,666 @@ void AppendMappedStaticAnimation(std::span<const std::uint8_t> source, const Hea
                         degraded ? std::string()
                                  : SourceRecordString(source, seqSource, seq.activityNameIndex, "R2 sequence activity name", false));
 }
+
+// ---------------------------------------------------------------------------------------------
+// Real animation conversion: R2 (v53) RLE bone animation -> R1 (v52) RLE bone animation.
+//   R2 record: float posscale, u8 bone, u8 flags, 2 pad, then 24 data bytes {rot 8, pos 6, scale 6, s32 next}.
+//   R1 record: u8 bone, u8 flags, s16 next, then packed data in the order rot, pos, scale.
+// Animated channels are Source RLE runs (u8 valid, u8 total, s16 values[valid]) addressed by a valueptr
+// {s16 offset[3]} whose offsets are relative to the valueptr itself. Offsets 0 mean "axis not animated".
+// Position runs are scaled by the R2 record's posscale and by the R1 bone's positionScale.
+// ---------------------------------------------------------------------------------------------
+constexpr std::uint8_t kR2Delta = 0x01, kR2RawPos = 0x02, kR2RawRot = 0x04, kR2RawScale = 0x08, kR2NoRot = 0x10;
+constexpr std::uint8_t kR1RawPos = 0x01, kR1RawRot48 = 0x02, kR1AnimPos = 0x04, kR1AnimRot = 0x08,
+                       kR1Delta = 0x10, kR1RawRot64 = 0x20, kR1RawScale = 0x40, kR1AnimScale = 0x80;
+constexpr std::size_t kR2RecordSize = 32;
+constexpr std::uint32_t kAnimFlagFrameAnim = 0x40;
+constexpr std::uint32_t kAnimFlagsCopied = 0x20027;    // looping, snap, delta, allzeros, first-in-v52 bit
+constexpr std::uint32_t kSeqFlagsCopied = 0x000a4d3f;  // looping..allzeros, realtime, hidden, override, world, v52 bits
+
+enum class Channel : std::uint8_t { None, Raw, Track };
+
+struct AnimAxis {
+    bool present = false;
+    std::vector<std::int16_t> values;
+    bool operator==(const AnimAxis&) const = default;
+};
+struct AnimRecord {
+    std::uint8_t bone = 0;
+    bool delta = false;
+    float posScale = 0.0f;   // R2 only: scale of this record's position track (R1 keeps it in the bone)
+    Channel rotKind = Channel::None, posKind = Channel::None, scaleKind = Channel::None;
+    std::uint8_t rawRot[8]{}, rawPos[6]{}, rawScale[6]{};
+    bool rawRot48 = false;   // R1 only: raw rotation is a Quaternion48 (6 bytes) instead of a Quaternion64
+    AnimAxis rot[3], pos[3], scale[3];
+};
+using AnimBlock = std::vector<AnimRecord>;
+
+float HalfToFloat(std::uint16_t h) {
+    const int sign = (h >> 15) & 1;
+    const int exponent = (h >> 10) & 31;
+    const int mantissa = h & 1023;
+    float value;
+    if (exponent == 0) value = std::ldexp(static_cast<float>(mantissa) / 1024.0f, -14);
+    else if (exponent == 31) value = std::numeric_limits<float>::infinity();
+    else value = std::ldexp(1.0f + static_cast<float>(mantissa) / 1024.0f, exponent - 15);
+    return sign ? -value : value;
+}
+
+// Number of frames stored in each data block of an animation. Without sections there is one block.
+// With sections (frames per section = sf): floor(n/sf) blocks of sf+1 frames (one frame of overlap), one block
+// with the remaining frames, and one block with the final frame.
+std::vector<std::int32_t> AnimBlockFrames(std::int32_t numFrames, std::int32_t sectionFrames) {
+    if (sectionFrames == 0) return {numFrames};
+    std::vector<std::int32_t> frames;
+    const auto full = numFrames / sectionFrames;
+    for (std::int32_t i = 0; i < full; ++i) frames.push_back(sectionFrames + 1);
+    frames.push_back(numFrames - full * sectionFrames);
+    frames.push_back(1);
+    return frames;
+}
+
+std::vector<std::int16_t> ReadRunTrack(std::span<const std::uint8_t> bytes, std::int64_t start,
+                                       std::int32_t frames, std::string_view label) {
+    std::vector<std::int16_t> values;
+    values.reserve(static_cast<std::size_t>(frames));
+    std::int64_t position = start;
+    while (static_cast<std::int32_t>(values.size()) < frames) {
+        Require(Range(bytes.size(), position, 2), std::string(label) + " animation run header is outside the MDL");
+        const auto valid = bytes[static_cast<std::size_t>(position)];
+        const auto total = bytes[static_cast<std::size_t>(position) + 1];
+        Require(valid >= 1 && total >= valid, std::string(label) + " animation run header is invalid");
+        Require(Range(bytes.size(), position + 2, static_cast<std::uint64_t>(valid) * 2),
+                std::string(label) + " animation run values are outside the MDL");
+        std::int16_t run[255];
+        std::memcpy(run, bytes.data() + position + 2, static_cast<std::size_t>(valid) * 2);
+        for (std::uint32_t k = 0; k < total && static_cast<std::int32_t>(values.size()) < frames; ++k)
+            values.push_back(k < valid ? run[k] : run[valid - 1]);
+        position += 2 + static_cast<std::int64_t>(valid) * 2;
+    }
+    return values;
+}
+
+// Reads three axis tracks addressed by the valueptr at ptrOffset.
+void ReadValuePtr(std::span<const std::uint8_t> bytes, std::int64_t ptrOffset, std::int32_t frames,
+                  AnimAxis (&axes)[3], bool& any, std::string_view label) {
+    any = false;
+    std::int16_t offsets[3];
+    Require(Range(bytes.size(), ptrOffset, 6), std::string(label) + " value pointer is outside the MDL");
+    std::memcpy(offsets, bytes.data() + ptrOffset, 6);
+    for (int axis = 0; axis < 3; ++axis) {
+        Require(offsets[axis] >= 0, std::string(label) + " value pointer offset is negative");
+        axes[axis] = {};
+        if (offsets[axis] == 0 || frames <= 0) continue;
+        axes[axis].present = true;
+        axes[axis].values = ReadRunTrack(bytes, ptrOffset + offsets[axis], frames, label);
+        any = true;
+    }
+}
+
+AnimBlock ParseR2Block(std::span<const std::uint8_t> source, std::int64_t blockOffset, std::int32_t frames,
+                       std::int32_t numBones) {
+    AnimBlock block;
+    std::int64_t offset = blockOffset;
+    for (std::size_t guard = 0; guard < kMaxRecords; ++guard) {
+        Require(Range(source.size(), offset, kR2RecordSize), "R2 animation record is outside the MDL");
+        const auto base = static_cast<std::size_t>(offset);
+        float posScale;
+        std::memcpy(&posScale, source.data() + base, 4);
+        const auto bone = source[base + 4];
+        const auto flags = source[base + 5];
+        if (bone == 0xff) break;   // end-of-list sentinel used by the empty reference animation
+        Require((flags & ~0x1fu) == 0, "R2 animation record has unsupported flags");
+        Require(bone < numBones, "R2 animation record references an invalid bone");
+        AnimRecord record;
+        record.bone = bone;
+        record.delta = (flags & kR2Delta) != 0;
+        record.posScale = posScale;
+        const auto data = offset + 8;
+        bool any = false;
+        if (flags & kR2RawRot) {
+            record.rotKind = Channel::Raw;
+            std::memcpy(record.rawRot, source.data() + base + 8, 8);
+        } else if (!(flags & kR2NoRot)) {
+            ReadValuePtr(source, data, frames, record.rot, any, "R2 rotation");
+            record.rotKind = Channel::Track;
+        }
+        if (flags & kR2RawPos) {
+            record.posKind = Channel::Raw;
+            std::memcpy(record.rawPos, source.data() + base + 16, 6);
+        } else {
+            ReadValuePtr(source, data + 8, frames, record.pos, any, "R2 position");
+            if (any) record.posKind = Channel::Track;
+        }
+        if (flags & kR2RawScale) {
+            record.scaleKind = Channel::Raw;
+            std::memcpy(record.rawScale, source.data() + base + 22, 6);
+        } else {
+            ReadValuePtr(source, data + 14, frames, record.scale, any, "R2 scale");
+            if (any) record.scaleKind = Channel::Track;
+        }
+        std::int32_t next;
+        std::memcpy(&next, source.data() + base + 28, 4);
+        block.push_back(std::move(record));
+        if (next == 0) break;
+        Require(next > 0, "R2 animation record chain goes backwards");
+        offset += next;
+    }
+    return block;
+}
+
+// Source RLE encoder: constant stretches of three or more frames become (1, n); everything else is literal.
+void AppendRuns(std::vector<std::uint8_t>& output, const std::vector<std::int16_t>& v) {
+    const auto n = v.size();
+    std::size_t i = 0;
+    auto emit = [&](std::size_t valid, std::size_t total, std::size_t from) {
+        output.push_back(static_cast<std::uint8_t>(valid));
+        output.push_back(static_cast<std::uint8_t>(total));
+        for (std::size_t k = 0; k < valid; ++k) {
+            const auto value = static_cast<std::uint16_t>(v[from + k]);
+            output.push_back(static_cast<std::uint8_t>(value & 0xff));
+            output.push_back(static_cast<std::uint8_t>(value >> 8));
+        }
+    };
+    auto runAt = [&](std::size_t at, std::size_t cap) {
+        std::size_t r = 1;
+        while (at + r < n && r < cap && v[at + r] == v[at]) ++r;
+        return r;
+    };
+    while (i < n) {
+        const auto r = runAt(i, 255);
+        if (r >= 3) {
+            emit(1, r, i);
+            i += r;
+            continue;
+        }
+        std::size_t j = i;
+        while (j < n && j - i < 255) {
+            if (j > i && runAt(j, 3) >= 3) break;
+            ++j;
+        }
+        emit(j - i, j - i, i);
+        i = j;
+    }
+}
+
+// Writes one R1 record chain; returns the absolute offset of the block start.
+std::int32_t AppendR1Block(std::vector<std::uint8_t>& output, const AnimBlock& block) {
+    AppendAlignment(output, 4);
+    const auto blockStart = static_cast<std::int32_t>(output.size());
+    if (block.empty()) {
+        const std::uint8_t empty[4]{0, 0, 0, 0};   // bone 0, no flags, no next: leaves every bone at its default
+        output.insert(output.end(), empty, empty + 4);
+    }
+    for (std::size_t index = 0; index < block.size(); ++index) {
+        const auto& rec = block[index];
+        const auto recStart = output.size();
+        std::uint8_t flags = 0;
+        if (rec.delta) flags |= kR1Delta;
+        if (rec.rotKind == Channel::Raw) flags |= rec.rawRot48 ? kR1RawRot48 : kR1RawRot64;
+        else if (rec.rotKind == Channel::Track) flags |= kR1AnimRot;
+        if (rec.posKind == Channel::Raw) flags |= kR1RawPos;
+        else if (rec.posKind == Channel::Track) flags |= kR1AnimPos;
+        if (rec.scaleKind == Channel::Raw) flags |= kR1RawScale;
+        else if (rec.scaleKind == Channel::Track) flags |= kR1AnimScale;
+        output.push_back(rec.bone);
+        output.push_back(flags);
+        output.push_back(0);
+        output.push_back(0);
+        std::size_t ptrAt[3] = {0, 0, 0};
+        const AnimAxis* axes[3] = {rec.rot, rec.pos, rec.scale};
+        const Channel kinds[3] = {rec.rotKind, rec.posKind, rec.scaleKind};
+        for (int c = 0; c < 3; ++c) {
+            if (kinds[c] == Channel::None) continue;
+            if (kinds[c] == Channel::Raw) {
+                const std::uint8_t* raw = c == 0 ? rec.rawRot : c == 1 ? rec.rawPos : rec.rawScale;
+                const std::size_t size = c == 0 ? (rec.rawRot48 ? 6 : 8) : 6;
+                output.insert(output.end(), raw, raw + size);
+            } else {
+                ptrAt[c] = output.size();
+                output.insert(output.end(), 6, 0);
+            }
+        }
+        for (int c = 0; c < 3; ++c) {
+            if (kinds[c] != Channel::Track) continue;
+            for (int axis = 0; axis < 3; ++axis) {
+                if (!axes[c][axis].present) continue;
+                const auto trackAt = output.size();
+                const auto relative = static_cast<std::int64_t>(trackAt) - static_cast<std::int64_t>(ptrAt[c]);
+                Require(relative > 0 && relative <= 32767, "animation record is too large for 16-bit track offsets");
+                const auto stored = static_cast<std::int16_t>(relative);
+                std::memcpy(output.data() + ptrAt[c] + static_cast<std::size_t>(axis) * 2, &stored, 2);
+                AppendRuns(output, axes[c][axis].values);
+            }
+        }
+        if (index + 1 < block.size()) {
+            const auto size = output.size() - recStart;
+            Require(size <= 32767, "animation record is too large for a 16-bit next offset");
+            const auto next = static_cast<std::int16_t>(size);
+            std::memcpy(output.data() + recStart + 2, &next, 2);
+        }
+    }
+    // The RLE reader may look one value past the last run of a track; keep that inside the MDL.
+    output.insert(output.end(), 4, 0);
+    return blockStart;
+}
+
+AnimBlock ParseR1Block(std::span<const std::uint8_t> mdl, std::int64_t blockOffset, std::int32_t frames,
+                       std::int32_t numBones) {
+    AnimBlock block;
+    std::int64_t offset = blockOffset;
+    for (std::size_t guard = 0; guard < kMaxRecords; ++guard) {
+        Require(Range(mdl.size(), offset, 4), "R1 animation record is outside the MDL");
+        const auto base = static_cast<std::size_t>(offset);
+        const auto bone = mdl[base];
+        const auto flags = mdl[base + 1];
+        std::int16_t next;
+        std::memcpy(&next, mdl.data() + base + 2, 2);
+        Require(bone < numBones, "R1 animation record references an invalid bone");
+        Require(next >= 0, "R1 animation record chain goes backwards");
+        AnimRecord record;
+        record.bone = bone;
+        record.delta = (flags & kR1Delta) != 0;
+        auto position = offset + 4;
+        bool any = false;
+        if (flags & kR1RawRot48) {
+            Require(Range(mdl.size(), position, 6), "R1 raw rotation is outside the MDL");
+            record.rotKind = Channel::Raw; record.rawRot48 = true;
+            std::memcpy(record.rawRot, mdl.data() + position, 6);
+            position += 6;
+        } else if (flags & kR1RawRot64) {
+            Require(Range(mdl.size(), position, 8), "R1 raw rotation is outside the MDL");
+            record.rotKind = Channel::Raw;
+            std::memcpy(record.rawRot, mdl.data() + position, 8);
+            position += 8;
+        } else if (flags & kR1AnimRot) {
+            ReadValuePtr(mdl, position, frames, record.rot, any, "R1 rotation");
+            record.rotKind = Channel::Track;
+            position += 6;
+        }
+        if (flags & kR1RawPos) {
+            Require(Range(mdl.size(), position, 6), "R1 raw position is outside the MDL");
+            record.posKind = Channel::Raw;
+            std::memcpy(record.rawPos, mdl.data() + position, 6);
+            position += 6;
+        } else if (flags & kR1AnimPos) {
+            ReadValuePtr(mdl, position, frames, record.pos, any, "R1 position");
+            record.posKind = Channel::Track;
+            position += 6;
+        }
+        if (flags & kR1RawScale) {
+            Require(Range(mdl.size(), position, 6), "R1 raw scale is outside the MDL");
+            record.scaleKind = Channel::Raw;
+            std::memcpy(record.rawScale, mdl.data() + position, 6);
+            position += 6;
+        } else if (flags & kR1AnimScale) {
+            ReadValuePtr(mdl, position, frames, record.scale, any, "R1 scale");
+            record.scaleKind = Channel::Track;
+            position += 6;
+        }
+        block.push_back(std::move(record));
+        if (next == 0) break;
+        offset += next;
+    }
+    return block;
+}
+
+bool SameRecord(const AnimRecord& a, const AnimRecord& b) {
+    if (a.bone != b.bone || a.delta != b.delta || a.rotKind != b.rotKind || a.posKind != b.posKind ||
+        a.scaleKind != b.scaleKind)
+        return false;
+    if (a.rotKind == Channel::Raw && std::memcmp(a.rawRot, b.rawRot, a.rawRot48 ? 6 : 8) != 0) return false;
+    if (a.posKind == Channel::Raw && std::memcmp(a.rawPos, b.rawPos, 6) != 0) return false;
+    if (a.scaleKind == Channel::Raw && std::memcmp(a.rawScale, b.rawScale, 6) != 0) return false;
+    for (int axis = 0; axis < 3; ++axis)
+        if (!(a.rot[axis] == b.rot[axis]) || !(a.pos[axis] == b.pos[axis]) || !(a.scale[axis] == b.scale[axis]))
+            return false;
+    return true;
+}
+
+struct ConvertedAnim {
+    std::int32_t source = 0;
+    std::string name;
+    AnimDesc53 desc{};
+    std::vector<std::int32_t> frames;   // frames stored per block
+    std::vector<AnimBlock> blocks;
+};
+
+struct ConvertedSeq {
+    std::int32_t source = 0;
+    std::int32_t animation = 0;   // index into the converted animation list
+    std::string label;
+    Sequence53 desc{};
+    std::vector<float> weights;
+};
+
+void CheckAnimSupported(std::span<const std::uint8_t> source, std::size_t animOffset, const AnimDesc53& anim) {
+    Require(anim.fps > 0.0f && anim.numFrames >= 1, "animation has no frames or a non-positive frame rate");
+    // Movement and frame-movement data only drive entity motion (NPC locomotion, scripted sequences); the bone
+    // pose does not depend on it, so it is dropped and the animation flag that announces it is cleared.
+    Require(anim.numIkRules == 0 && anim.ikRuleIndex == 0, "animation has IK rules");
+    Require(anim.numLocalHierarchy == 0 && anim.localHierarchyIndex == 0, "animation has local hierarchy data");
+    Require((static_cast<std::uint32_t>(anim.flags) & kAnimFlagFrameAnim) == 0, "animation uses the frame-anim layout");
+    Require(anim.sectionFrames >= 0 && (anim.sectionFrames == 0) == (anim.sectionIndex == 0),
+            "animation section table is inconsistent");
+    (void)source;
+    (void)animOffset;
+}
+
+// Returns the note describing the converted animation set. Throws ConvertFailure when the model cannot be
+// converted; the caller then falls back to the bind-pose-only animation.
+std::string AppendConvertedAnimations(std::span<const std::uint8_t> source, const Header53& in,
+                                      std::vector<std::uint8_t>& output, Header52& out) {
+    Require(in.numLocalAnim >= 1 && in.numLocalSeq >= 1, "model has no animations or sequences");
+    Require(static_cast<std::size_t>(in.numLocalAnim) <= 4096 && static_cast<std::size_t>(in.numLocalSeq) <= 4096,
+            "model has too many animations or sequences");
+    CheckArray(source, in.localAnimIndex, in.numLocalAnim, sizeof(AnimDesc53), "R2 animation description");
+    CheckArray(source, in.localSeqIndex, in.numLocalSeq, sizeof(Sequence53), "R2 sequence description");
+    const auto numBones = in.numBones;
+
+    // 1. Which sequences (and the animations they select) can be converted.
+    std::vector<ConvertedSeq> seqs;
+    std::vector<std::string> dropped;
+    std::vector<std::string> animProblem(static_cast<std::size_t>(in.numLocalAnim));
+    for (std::int32_t a = 0; a < in.numLocalAnim; ++a) {
+        const auto offset = static_cast<std::size_t>(in.localAnimIndex) + static_cast<std::size_t>(a) * sizeof(AnimDesc53);
+        try {
+            CheckAnimSupported(source, offset, ReadObject<AnimDesc53>(source, offset, "R2 animation"));
+        } catch (const ConvertFailure& failure) {
+            animProblem[static_cast<std::size_t>(a)] = failure.what();
+        }
+    }
+    for (std::int32_t s = 0; s < in.numLocalSeq; ++s) {
+        const auto offset = static_cast<std::size_t>(in.localSeqIndex) + static_cast<std::size_t>(s) * sizeof(Sequence53);
+        std::string label = "#" + std::to_string(s);
+        try {
+            const auto seq = ReadObject<Sequence53>(source, offset, "R2 sequence");
+            label = SourceRecordString(source, offset, seq.labelIndex, "R2 sequence label");
+            Require(seq.numBlends == 1 && seq.groupSize[0] == 1 && seq.groupSize[1] == 1,
+                    "sequence blends several animations");
+            Require(seq.numIkRules == 0 && seq.numIkLocks == 0, "sequence has IK rules or locks");
+            Require(seq.numAutoLayers == 0, "sequence has auto layers");
+            // Blend movement arrays are likewise dropped.
+            const auto selector = ArrayOffset(source, offset, seq.animIndexIndex, 1, sizeof(std::int16_t),
+                                              "R2 sequence animation index");
+            const auto anim = ReadObject<std::int16_t>(source, selector, "R2 sequence animation index");
+            Require(anim >= 0 && anim < in.numLocalAnim, "sequence selects an invalid animation");
+            Require(animProblem[static_cast<std::size_t>(anim)].empty(),
+                    "animation: " + animProblem[static_cast<std::size_t>(anim)]);
+            ConvertedSeq converted;
+            converted.source = s;
+            converted.animation = anim;
+            converted.label = label;
+            converted.desc = seq;
+            converted.weights.assign(static_cast<std::size_t>(numBones), 1.0f);
+            if (seq.weightListIndex != 0 && numBones > 0) {
+                const auto weightsSource = ArrayOffset(source, offset, seq.weightListIndex, numBones,
+                                                       sizeof(float), "R2 sequence weight list");
+                std::memcpy(converted.weights.data(), source.data() + weightsSource,
+                            converted.weights.size() * sizeof(float));
+            }
+            seqs.push_back(std::move(converted));
+        } catch (const ConvertFailure& failure) {
+            if (s == 0) throw ConvertFailure("reference sequence: " + std::string(failure.what()));
+            dropped.push_back(label + " (" + failure.what() + ")");
+        }
+    }
+    Require(!seqs.empty() && seqs.front().source == 0, "reference sequence was not converted");
+
+    // 2. Parse the used animations.
+    std::vector<std::int32_t> remap(static_cast<std::size_t>(in.numLocalAnim), -1);
+    std::vector<ConvertedAnim> anims;
+    for (auto& seq : seqs) {
+        if (remap[static_cast<std::size_t>(seq.animation)] < 0) {
+            remap[static_cast<std::size_t>(seq.animation)] = 0;   // placeholder, final order assigned below
+        }
+    }
+    for (std::int32_t a = 0; a < in.numLocalAnim; ++a) {
+        if (remap[static_cast<std::size_t>(a)] < 0) continue;
+        const auto animOffset = static_cast<std::size_t>(in.localAnimIndex) + static_cast<std::size_t>(a) * sizeof(AnimDesc53);
+        ConvertedAnim anim;
+        anim.source = a;
+        anim.desc = ReadObject<AnimDesc53>(source, animOffset, "R2 animation");
+        anim.name = SourceRecordString(source, animOffset, anim.desc.nameIndex, "R2 animation name");
+        anim.frames = AnimBlockFrames(anim.desc.numFrames, anim.desc.sectionFrames);
+        try {
+            if (anim.desc.sectionFrames != 0) {
+                const auto sectionCount = static_cast<std::int32_t>(anim.frames.size());
+                const auto table = ArrayOffset(source, animOffset, anim.desc.sectionIndex, sectionCount,
+                                               sizeof(std::int32_t), "R2 animation section table");
+                for (std::int32_t i = 0; i < sectionCount; ++i) {
+                    const auto relative = ReadObject<std::int32_t>(source, table + static_cast<std::int64_t>(i) * 4,
+                                                                   "R2 animation section");
+                    anim.blocks.push_back(ParseR2Block(source, RelativeAbsolute(animOffset, relative, "R2 section data"),
+                                                       anim.frames[static_cast<std::size_t>(i)], numBones));
+                }
+            } else if (anim.desc.animIndex != 0) {
+                anim.blocks.push_back(ParseR2Block(source, RelativeAbsolute(animOffset, anim.desc.animIndex, "R2 animation data"),
+                                                   anim.desc.numFrames, numBones));
+            } else {
+                anim.blocks.emplace_back();
+            }
+        } catch (const ConvertFailure& failure) {
+            if (anim.source == seqs.front().animation) throw ConvertFailure("reference " + std::string(failure.what()));
+            // Drop the sequences that use this animation.
+            std::vector<ConvertedSeq> kept;
+            for (auto& seq : seqs) {
+                if (seq.animation == a) dropped.push_back(seq.label + " (" + failure.what() + ")");
+                else kept.push_back(std::move(seq));
+            }
+            seqs = std::move(kept);
+            remap[static_cast<std::size_t>(a)] = -1;
+            continue;
+        }
+        anims.push_back(std::move(anim));
+    }
+    // R1 keeps one position scale per bone. Where animations disagree, step 3 re-quantizes to the largest scale;
+    // animations that would lose more than 0.1 units of position precision that way are refused.
+    for (int pass = 0; pass < 8; ++pass) {
+        std::vector<float> scale(static_cast<std::size_t>(numBones), 0.0f);
+        std::vector<bool> mixed(static_cast<std::size_t>(numBones), false);
+        for (const auto& anim : anims)
+            for (const auto& block : anim.blocks)
+                for (const auto& rec : block) {
+                    if (rec.posKind != Channel::Track || !(rec.posScale > 0.0f)) continue;
+                    auto& current = scale[rec.bone];
+                    if (current > 0.0f && std::fabs(rec.posScale - current) > 1e-6f * current) mixed[rec.bone] = true;
+                    current = std::max(current, rec.posScale);
+                }
+        std::vector<std::int32_t> bad;
+        for (const auto& anim : anims) {
+            bool refuse = false;
+            for (const auto& block : anim.blocks)
+                for (const auto& rec : block)
+                    if (rec.posKind == Channel::Track && rec.posScale > 0.0f && mixed[rec.bone] &&
+                        rec.posScale != scale[rec.bone] && scale[rec.bone] > 0.2f)
+                        refuse = true;
+            if (refuse) bad.push_back(anim.source);
+        }
+        if (bad.empty()) break;
+        for (const auto badSource : bad) {
+            Require(badSource != seqs.front().animation,
+                    "reference position tracks need a coarser shared scale than one R1 bone can hold");
+            anims.erase(std::remove_if(anims.begin(), anims.end(),
+                            [&](const ConvertedAnim& anim) { return anim.source == badSource; }), anims.end());
+            std::vector<ConvertedSeq> kept;
+            for (auto& seq : seqs) {
+                if (seq.animation == badSource) dropped.push_back(seq.label + " (position tracks need a coarser shared scale than one R1 bone can hold)");
+                else kept.push_back(std::move(seq));
+            }
+            seqs = std::move(kept);
+        }
+    }
+    // The reference sequence selects animation 0, as in every R1 model.
+    {
+        const auto reference = std::find_if(anims.begin(), anims.end(),
+            [&](const ConvertedAnim& anim) { return anim.source == seqs.front().animation; });
+        Require(reference != anims.end(), "reference animation was not converted");
+        std::rotate(anims.begin(), reference, reference + 1);
+    }
+    for (std::size_t i = 0; i < anims.size(); ++i) remap[static_cast<std::size_t>(anims[i].source)] = static_cast<std::int32_t>(i);
+    for (auto& seq : seqs) seq.animation = remap[static_cast<std::size_t>(seq.animation)];
+
+    // 3. R1 keeps the position scale in the bone. Bones whose position tracks share one record scale use it
+    //    unchanged; otherwise the largest scale wins and the smaller ones are re-quantized.
+    std::vector<float> bonePosScale(static_cast<std::size_t>(numBones), 0.0f);
+    std::vector<bool> boneRequantize(static_cast<std::size_t>(numBones), false);
+    std::vector<bool> boneAnimatedPos(static_cast<std::size_t>(numBones), false);
+    for (auto& anim : anims)
+        for (auto& block : anim.blocks)
+            for (auto& rec : block) {
+                if (rec.posKind != Channel::Track) continue;
+                if (!(rec.posScale > 0.0f)) { rec.posKind = Channel::None; continue; }   // zero scale: position is the default
+                const auto bone = static_cast<std::size_t>(rec.bone);
+                auto& current = bonePosScale[bone];
+                if (!boneAnimatedPos[bone]) { boneAnimatedPos[bone] = true; current = rec.posScale; continue; }
+                if (std::fabs(rec.posScale - current) > 1e-6f * current) boneRequantize[bone] = true;
+                current = std::max(current, rec.posScale);
+            }
+    std::vector<Bone53> sourceBones(static_cast<std::size_t>(numBones));
+    for (std::int32_t i = 0; i < numBones; ++i)
+        sourceBones[static_cast<std::size_t>(i)] = ReadObject<Bone53>(
+            source, static_cast<std::size_t>(in.boneIndex) + static_cast<std::size_t>(i) * sizeof(Bone53), "R2 bone");
+    for (auto& anim : anims)
+        for (auto& block : anim.blocks)
+            for (auto& rec : block) {
+                const auto bone = static_cast<std::size_t>(rec.bone);
+                if (rec.posKind == Channel::Track && boneRequantize[bone] && rec.posScale != bonePosScale[bone]) {
+                    const auto ratio = static_cast<double>(rec.posScale) / static_cast<double>(bonePosScale[bone]);
+                    for (auto& axis : rec.pos)
+                        for (auto& value : axis.values)
+                            value = static_cast<std::int16_t>(std::clamp<long>(std::lround(static_cast<double>(value) * ratio),
+                                                                               -32768, 32767));
+                }
+                if (rec.rotKind == Channel::Raw) rec.rawRot48 = false;
+                if (rec.scaleKind == Channel::Raw && !rec.delta) {
+                    const auto& base = sourceBones[bone].scale;
+                    std::uint16_t halves[3];
+                    std::memcpy(halves, rec.rawScale, 6);
+                    bool isDefault = true;
+                    for (int k = 0; k < 3; ++k)
+                        if (std::fabs(HalfToFloat(halves[k]) - base.v[k]) > 1e-3f) isDefault = false;
+                    if (isDefault) rec.scaleKind = Channel::None;
+                }
+                if (rec.scaleKind == Channel::Track) {
+                    bool animated = false;
+                    for (auto& axis : rec.scale) animated = animated || axis.present;
+                    if (!animated) rec.scaleKind = Channel::None;
+                }
+            }
+
+    // 4. Write animation descriptions, sequence descriptions, then their data.
+    const auto animCount = static_cast<std::int32_t>(anims.size());
+    const auto seqCount = static_cast<std::int32_t>(seqs.size());
+    const auto animTable = AppendZeroBytes(output, static_cast<std::size_t>(animCount) * sizeof(AnimDesc52));
+    const auto seqTable = AppendZeroBytes(output, static_cast<std::size_t>(seqCount) * sizeof(Sequence52));
+    out.numLocalAnim = animCount;
+    out.localAnimIndex = animTable;
+    out.numLocalSeq = seqCount;
+    out.localSeqIndex = seqTable;
+
+    std::size_t blockCount = 0;
+    for (std::int32_t a = 0; a < animCount; ++a) {
+        const auto& anim = anims[static_cast<std::size_t>(a)];
+        const auto descOffset = static_cast<std::size_t>(animTable) + static_cast<std::size_t>(a) * sizeof(AnimDesc52);
+        AnimDesc52 desc{};
+        desc.basePtr = -static_cast<std::int32_t>(descOffset);
+        desc.fps = anim.desc.fps;
+        auto flags = static_cast<std::uint32_t>(anim.desc.flags) & kAnimFlagsCopied;
+        desc.flags = static_cast<std::int32_t>(flags);
+        desc.numFrames = anim.desc.numFrames;
+        desc.sectionFrames = anim.desc.sectionFrames;
+        std::vector<std::int32_t> blockOffsets;
+        for (const auto& block : anim.blocks) {
+            blockOffsets.push_back(AppendR1Block(output, block));
+            ++blockCount;
+        }
+        if (anim.desc.sectionFrames != 0) {
+            AppendAlignment(output, 4);
+            const auto tableOffset = AppendZeroBytes(output, blockOffsets.size() * 8);
+            for (std::size_t i = 0; i < blockOffsets.size(); ++i) {
+                const std::int32_t entry[2] = {0, blockOffsets[i] - static_cast<std::int32_t>(descOffset)};
+                std::memcpy(output.data() + tableOffset + i * 8, entry, 8);
+            }
+            desc.sectionIndex = tableOffset - static_cast<std::int32_t>(descOffset);
+        }
+        desc.animIndex = blockOffsets.front() - static_cast<std::int32_t>(descOffset);
+        WriteObject(output, descOffset, desc);
+        StoreRelativeString(output, descOffset, offsetof(AnimDesc52, nameIndex), anim.name);
+    }
+
+    for (std::int32_t s = 0; s < seqCount; ++s) {
+        const auto& seq = seqs[static_cast<std::size_t>(s)];
+        const auto descOffset = static_cast<std::size_t>(seqTable) + static_cast<std::size_t>(s) * sizeof(Sequence52);
+        Sequence52 desc{};
+        desc.basePtr = -static_cast<std::int32_t>(descOffset);
+        desc.flags = static_cast<std::int32_t>(static_cast<std::uint32_t>(seq.desc.flags) & kSeqFlagsCopied);
+        desc.activity = -1;
+        desc.bbMin = seq.desc.bbMin;
+        desc.bbMax = seq.desc.bbMax;
+        desc.numBlends = 1;
+        desc.groupSize[0] = desc.groupSize[1] = 1;
+        desc.paramIndex[0] = desc.paramIndex[1] = -1;
+        desc.paramStart[0] = seq.desc.paramStart[0]; desc.paramStart[1] = seq.desc.paramStart[1];
+        desc.paramEnd[0] = seq.desc.paramEnd[0]; desc.paramEnd[1] = seq.desc.paramEnd[1];
+        desc.paramParent = seq.desc.paramParent;
+        desc.fadeInTime = seq.desc.fadeInTime;
+        desc.fadeOutTime = seq.desc.fadeOutTime;
+        desc.localEntryNode = 0;
+        desc.localExitNode = 0;
+        desc.entryPhase = seq.desc.entryPhase;
+        desc.exitPhase = seq.desc.exitPhase;
+        desc.lastFrame = seq.desc.lastFrame;
+        desc.cyclePoseIndex = seq.desc.cyclePoseIndex;
+        const std::int16_t blend = static_cast<std::int16_t>(seq.animation);
+        const auto blendOffset = AppendBytes(output, &blend, sizeof(blend), 2);
+        desc.animIndexIndex = blendOffset - static_cast<std::int32_t>(descOffset);
+        const auto weightsOffset = AppendBytes(output, seq.weights.data(), seq.weights.size() * sizeof(float));
+        desc.weightListIndex = weightsOffset - static_cast<std::int32_t>(descOffset);
+        WriteObject(output, descOffset, desc);
+        StoreRelativeString(output, descOffset, offsetof(Sequence52, labelIndex), seq.label);
+        StoreRelativeString(output, descOffset, offsetof(Sequence52, activityNameIndex), std::string());
+    }
+
+    // 5. Re-read what was written and compare with what was meant to be written.
+    for (std::int32_t a = 0; a < animCount; ++a) {
+        const auto& anim = anims[static_cast<std::size_t>(a)];
+        const auto descOffset = static_cast<std::size_t>(animTable) + static_cast<std::size_t>(a) * sizeof(AnimDesc52);
+        const auto desc = ReadObject<AnimDesc52>(output, descOffset, "R1 animation");
+        for (std::size_t b = 0; b < anim.blocks.size(); ++b) {
+            std::int32_t relative = desc.animIndex;
+            if (desc.sectionIndex != 0) {
+                const auto entry = ReadObject<std::int32_t>(output, static_cast<std::size_t>(desc.sectionIndex) + descOffset + b * 8 + 4,
+                                                            "R1 animation section");
+                relative = entry;
+            }
+            const auto parsed = ParseR1Block(output, static_cast<std::int64_t>(descOffset) + relative, anim.frames[b], numBones);
+            Require(anim.blocks[b].empty() ? parsed.size() == 1 : parsed.size() == anim.blocks[b].size(),
+                    "internal error: converted animation record count differs");
+            for (std::size_t r = 0; r < anim.blocks[b].size(); ++r)
+                Require(SameRecord(anim.blocks[b][r], parsed[r]), "internal error: converted animation record differs from its source");
+        }
+    }
+
+    // 6. R1 reads the position scale from the bone; the bone array was written earlier.
+    for (std::int32_t bone = 0; bone < numBones; ++bone) {
+        if (!boneAnimatedPos[static_cast<std::size_t>(bone)]) continue;
+        const auto offset = static_cast<std::size_t>(out.boneIndex) + static_cast<std::size_t>(bone) * sizeof(Bone52) +
+                            offsetof(Bone52, positionScale);
+        const float scale = bonePosScale[static_cast<std::size_t>(bone)];
+        const Vec3 value{{scale, scale, scale}};
+        WriteObject(output, offset, value);
+    }
+
+    std::string note = "animated: " + std::to_string(animCount) + " animations, " + std::to_string(seqCount) + " sequences";
+    if (!dropped.empty()) {
+        note += "; dropped " + std::to_string(dropped.size()) + ":";
+        for (std::size_t i = 0; i < dropped.size() && i < 6; ++i) note += (i ? ", " : " ") + dropped[i];
+        if (dropped.size() > 6) note += ", ...";
+    }
+    (void)blockCount;
+    return note;
+}
 void AppendMappedAttachments(std::span<const std::uint8_t> source, std::int32_t sourceIndex,
                              std::int32_t count, std::vector<std::uint8_t>& output,
                              Header52& out) {
@@ -1406,7 +2069,20 @@ bool ConvertModelR2ToR1(const ModelInput& input, ModelOutput& output, std::strin
 
         AppendMappedHitboxes(sourceMDL, in, mdl, outHdr);
         AppendMappedTextures(sourceMDL, in, mdl, outHdr);
-        AppendMappedStaticAnimation(sourceMDL, in, mdl, outHdr, degraded);
+        if (degraded) {
+            const auto savedSize = mdl.size();
+            const Header52 savedHeader = outHdr;
+            try {
+                output.note = AppendConvertedAnimations(sourceMDL, in, mdl, outHdr);
+            } catch (const ConvertFailure& failure) {
+                mdl.resize(savedSize);
+                outHdr = savedHeader;
+                AppendMappedStaticAnimation(sourceMDL, in, mdl, outHdr, true);
+                output.note = std::string("bind pose only: ") + failure.what();
+            }
+        } else {
+            AppendMappedStaticAnimation(sourceMDL, in, mdl, outHdr, false);
+        }
         AppendMappedAttachments(sourceMDL, in.localAttachmentIndex, in.numLocalAttachments, mdl, outHdr);
         AppendMappedBodyParts(sourceMDL, in, mdl, outHdr);
 
@@ -1520,29 +2196,48 @@ bool VerifyModelR1(const ModelOutput& model, std::string& error) {
         Require(hdr.length >= static_cast<std::int32_t>(sizeof(Header52)) &&
                 static_cast<std::size_t>(hdr.length) == mdl.size(),
                 "R1 MDL length does not match the output buffer");
-        Require(hdr.numLocalAnim == 1 && hdr.numLocalSeq == 1,
-                "R1 output must contain exactly the static reference animation and sequence");
+        Require(hdr.numLocalAnim >= 1 && hdr.numLocalSeq >= 1 && hdr.numLocalAnim <= 4096 && hdr.numLocalSeq <= 4096,
+                "R1 output needs at least the reference animation and sequence");
         CheckArray(mdl, hdr.localAnimIndex, hdr.numLocalAnim, sizeof(AnimDesc52), "R1 animation description");
         CheckArray(mdl, hdr.localSeqIndex, hdr.numLocalSeq, sizeof(Sequence52), "R1 sequence description");
-        {
-            const auto animOffset = static_cast<std::size_t>(hdr.localAnimIndex);
-            const auto anim = ReadObject<AnimDesc52>(mdl, animOffset, "R1 reference animation");
+        for (std::int32_t a = 0; a < hdr.numLocalAnim; ++a) {
+            const auto animOffset = static_cast<std::size_t>(hdr.localAnimIndex) + static_cast<std::size_t>(a) * sizeof(AnimDesc52);
+            const auto anim = ReadObject<AnimDesc52>(mdl, animOffset, "R1 animation");
             (void)SourceRecordString(mdl, animOffset, anim.nameIndex, "R1 animation name");
-            Require(anim.numFrames == 1 && anim.numMovements == 0 && anim.numIkRules == 0 &&
-                    anim.sectionIndex == 0 && anim.animIndex != 0,
-                    "R1 reference animation is not a single-frame static pose");
-            Require(Range(mdl.size(), RelativeAbsolute(animOffset, anim.animIndex, "R1 animation data"), 8),
-                    "R1 reference animation data is outside the MDL");
-            const auto seqOffset = static_cast<std::size_t>(hdr.localSeqIndex);
-            const auto seq = ReadObject<Sequence52>(mdl, seqOffset, "R1 reference sequence");
+            Require(anim.numFrames >= 1 && anim.fps > 0.0f, "R1 animation has no frames or a non-positive frame rate");
+            Require(anim.numMovements == 0 && anim.numIkRules == 0 && anim.numLocalHierarchy == 0 && anim.animBlock == 0,
+                    "R1 animation has unsupported movement, IK, hierarchy, or block data");
+            Require(anim.animIndex != 0, "R1 animation has no data");
+            Require(anim.sectionFrames >= 0 && (anim.sectionFrames == 0) == (anim.sectionIndex == 0),
+                    "R1 animation section table is inconsistent");
+            const auto frames = AnimBlockFrames(anim.numFrames, anim.sectionFrames);
+            if (anim.sectionFrames == 0) {
+                const auto blockOffset = RelativeAbsolute(animOffset, anim.animIndex, "R1 animation data");
+                (void)ParseR1Block(mdl, blockOffset, anim.numFrames, hdr.numBones);
+            } else {
+                const auto table = ArrayOffset(mdl, animOffset, anim.sectionIndex, static_cast<std::int32_t>(frames.size()),
+                                               8, "R1 animation section table");
+                for (std::size_t i = 0; i < frames.size(); ++i) {
+                    const auto entry = ReadObject<std::array<std::int32_t, 2>>(mdl, table + static_cast<std::int64_t>(i) * 8,
+                                                                               "R1 animation section");
+                    Require(entry[0] == 0, "R1 animation section uses an animation block");
+                    (void)ParseR1Block(mdl, RelativeAbsolute(animOffset, entry[1], "R1 section data"), frames[i], hdr.numBones);
+                }
+            }
+        }
+        for (std::int32_t s = 0; s < hdr.numLocalSeq; ++s) {
+            const auto seqOffset = static_cast<std::size_t>(hdr.localSeqIndex) + static_cast<std::size_t>(s) * sizeof(Sequence52);
+            const auto seq = ReadObject<Sequence52>(mdl, seqOffset, "R1 sequence");
             (void)SourceRecordString(mdl, seqOffset, seq.labelIndex, "R1 sequence label");
             Require(seq.numBlends == 1 && seq.groupSize[0] == 1 && seq.groupSize[1] == 1 && seq.numEvents == 0 &&
                     seq.numIkRules == 0 && seq.numAutoLayers == 0 && seq.numIkLocks == 0,
-                    "R1 reference sequence is not a single static blend");
+                    "R1 sequence is not a single event-free blend");
             const auto blendOffset = ArrayOffset(mdl, seqOffset, seq.animIndexIndex, 1, sizeof(std::int16_t),
                                                  "R1 sequence animation index");
-            Require(ReadObject<std::int16_t>(mdl, blendOffset, "R1 sequence animation index") == 0,
-                    "R1 reference sequence does not select the reference animation");
+            const auto selected = ReadObject<std::int16_t>(mdl, blendOffset, "R1 sequence animation index");
+            Require(selected >= 0 && selected < hdr.numLocalAnim, "R1 sequence selects an invalid animation");
+            if (s == 0)
+                Require(selected == 0, "R1 reference sequence does not select the reference animation");
             (void)ArrayOffset(mdl, seqOffset, seq.weightListIndex, hdr.numBones, sizeof(float), "R1 sequence weight list");
         }
         Require(hdr.numBoneControllers == 0 && hdr.numIkChains == 0 &&
