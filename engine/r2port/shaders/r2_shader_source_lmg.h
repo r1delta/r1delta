@@ -3,13 +3,14 @@
 // Embedded HLSL for the R1 LightmappedGeneric pixel-shader replacement (Phase 2 of the R2 port shader track, see
 // r2_shader_override.cpp and docs/r2port.md). Included by r2_shader_sources.h. The stock lighting terms below were
 // reconstructed from the behaviour of the stock ps50 bytecode (resource bindings and constant layout read through
-// reflection); no Respawn source or bytes are copied. `// R2_PS_DYNAMIC 12 2` tells the compiler to build the 12 stock
-// dynamic variants of two static combos (see BuildShader).
+// reflection); no Respawn source or bytes are copied. `// R2_PS_DYNAMIC 12 5` tells the compiler to build the 12 stock
+// dynamic variants of five static combos (see BuildShader).
 
 namespace r2port::shaders {
 
-inline constexpr const char kLmgPbrSource[] = R"HLSL(
-// R2_PS_DYNAMIC 12 2
+inline constexpr const char kLmgPbrSource[] =
+    R"HLSL(
+// R2_PS_DYNAMIC 12 5
 // R2 port: pixel shader replacement for R1 LightmappedGeneric (world brushes), static pixel combo family of
 // "single layer, $bumpmap + $reflectionTint, no envmap, no detail normal, real-time-light texture (t20)", i.e. what
 // converted R2 world materials select (ps50 combo 9229 with VS combos that output TEXCOORD0/2/3/4/5 + COLOR0).
@@ -23,9 +24,34 @@ inline constexpr const char kLmgPbrSource[] = R"HLSL(
 // texture is present): the interface is linked by register, so the unused TEXCOORD1 must still occupy its register.
 //
 // Material inputs (VMT): $basetexture t0, $bumpmap t1, $reflectionTint t2 (F0 rgb), $detailColor t4 = packed
-// r = gloss, g = AO, b = cavity (sampled with the base UV).
-#ifndef R2_TC1
+// r = gloss, g = AO, b = cavity (sampled with the base UV). Two-layer materials add $baseTexture2 t11, $bumpmap2 t12,
+// $reflectionTint2 t13 and $blendModulateTexture t15 (r, g = stock blend range); their packed gloss lives in the blend
+// texture, b = layer 1 and a = layer 2 (AO and cavity are not carried for two layers).
+#ifndef R2_STATIC
+#define R2_STATIC 0
+#endif
+// static combos: 0 single layer, 1 single layer + TEXCOORD1.xy (detail UV), 2 two layers (TEXCOORD3.w = vertex blend),
+// 3 two layers + TEXCOORD1.xy, 4 two layers + TEXCOORD1.xy + detail normals (t3 / t4 at the detail UV)
+#if R2_STATIC == 1
+#define R2_TC1 1
+#define R2_L2 0
+#define R2_DN 0
+#elif R2_STATIC == 2
 #define R2_TC1 0
+#define R2_L2 1
+#define R2_DN 0
+#elif R2_STATIC == 3
+#define R2_TC1 1
+#define R2_L2 1
+#define R2_DN 0
+#elif R2_STATIC == 4
+#define R2_TC1 1
+#define R2_L2 1
+#define R2_DN 1
+#else
+#define R2_TC1 0
+#define R2_L2 0
+#define R2_DN 0
 #endif
 #ifndef R2_LIGHTS
 #define R2_LIGHTS 0
@@ -46,7 +72,7 @@ inline constexpr const char kLmgPbrSource[] = R"HLSL(
 #define R2_DEBUG 0
 #endif
 
-cbuffer CBufLightmappedStatic : register(b0) { float4 cb0[13]; };
+cbuffer CBufLightmappedStatic : register(b0) { float4 cb0[21]; };
 cbuffer CBufCommonPerCamera : register(b2) { float4 cb2[28]; };
 cbuffer CBufModelInstance : register(b3) { float4 cb3[9]; };
 
@@ -59,7 +85,19 @@ Texture2D<uint4> g_rtl : register(t20);
 Texture2D<float4> baseTexture : register(t0);
 Texture2D<float4> bumpTexture : register(t1);
 Texture2D<float4> reflectionTintTexture : register(t2);
+#if !R2_DN
 Texture2D<float4> packedTexture : register(t4);
+#endif
+#if R2_L2
+Texture2D<float4> baseTexture2 : register(t11);
+Texture2D<float4> bumpTexture2 : register(t12);
+Texture2D<float4> reflectionTintTexture2 : register(t13);
+Texture2D<float4> blendTexture : register(t15);
+#endif
+#if R2_DN
+Texture2D<float4> detailNormalTexture : register(t3);
+Texture2D<float4> detailNormalTexture2 : register(t4);
+#endif
 Texture2D<float4> csmAtlas : register(t6);
 Texture2D<float4> cloudMask : register(t8);
 Texture2D<float4> lightmap0 : register(t9);
@@ -67,7 +105,19 @@ Texture2D<float4> lightmap1 : register(t10);
 SamplerState baseSampler : register(s0);
 SamplerState bumpSampler : register(s1);
 SamplerState reflectionTintSampler : register(s2);
+#if !R2_DN
 SamplerState packedSampler : register(s4);
+#endif
+#if R2_L2
+SamplerState baseSampler2 : register(s11);
+SamplerState bumpSampler2 : register(s12);
+SamplerState reflectionTintSampler2 : register(s13);
+SamplerState blendSampler : register(s15);
+#endif
+#if R2_DN
+SamplerState detailSampler : register(s3);
+SamplerState detailSampler2 : register(s4);
+#endif
 SamplerComparisonState csmSampler : register(s6);
 SamplerState cloudSampler : register(s8);
 SamplerState lightmap0Sampler : register(s9);
@@ -80,7 +130,11 @@ struct PSIn
     centroid float2 uvDetail : TEXCOORD1; // declared only to keep the register layout of the detail vertex-shader combos
 #endif
     centroid float3 pos : TEXCOORD2;     // camera-relative position
+#if R2_L2
+    centroid float4 nrm : TEXCOORD3;     // w = vertex blend
+#else
     centroid float3 nrm : TEXCOORD3;
+#endif
     centroid float3 tan : TEXCOORD4;
     centroid float3 bin : TEXCOORD5;
     float4 color : COLOR0;
@@ -171,7 +225,7 @@ float4 PSMain(PSIn i
 #endif
     ) : SV_Target
 {
-    const float4 base = baseTexture.Sample(baseSampler, i.uv.xy);
+    float4 base = baseTexture.Sample(baseSampler, i.uv.xy);
     float4 lm0 = lightmap0.Sample(lightmap0Sampler, i.uv.zw);
     const float4 lm1 = lightmap1.Sample(lightmap1Sampler, i.uv.zw);
     const float3 lmEnergy = lm0.rgb * (lm0.a * 3.984375 + 0.015625);
@@ -185,29 +239,63 @@ float4 PSMain(PSIn i
     // texture carries the source sRGB flag, so the sampler returned the sRGB decode; encode it back to the stored value.
     rt.rgb = (rt.rgb <= 0.0031308) ? rt.rgb * 12.92 : 1.055 * pow(rt.rgb, 1.0 / 2.4) - 0.055;
 #endif
-    float3 specColor = rt.x + cb0[3].w * (rt.xyz - rt.x);
-    float3 f0 = specColor * cb0[2].xyz;
-    float expo = abs(min(1.0 / pow(cb0[4].z - cb0[4].w * rt.a, 2.0), -cb0[2].w));
-
+    float3 f0 = (rt.x + cb0[3].w * (rt.xyz - rt.x)) * cb0[2].xyz;
+    float specExp = cb0[2].w;
+    float rtAlpha = rt.a;
+    float fresnelAmount = cb0[10].w;
+    float fresnelMax = cb0[11].x;
+    float fresnelSharp = cb0[12].w;
     float gloss = 0.5, ao = 1.0, cav = 1.0;
-#if !R2_NEUTRAL
-    const float3 pk = packedTexture.Sample(packedSampler, i.uv.xy).rgb;
-    gloss = pk.r; ao = pk.g; cav = pk.b;
+#if R2_L2
+    // layer blend: stock smoothstep over the range given by the blend texture's r / g and the vertex alpha (TEXCOORD3.w)
+    const float4 bm = blendTexture.Sample(blendSampler, i.uv.xy);
+    const float lo = max(bm.y - bm.x - 0.001, 0.0);
+    const float hi = min(bm.x + bm.y + 0.001, 1.0);
+    const float sb = saturate(((1.0 - i.nrm.w) - lo) / (hi - lo));
+    const float blend = sb * sb * (3.0 - 2.0 * sb);
+    base = lerp(base, baseTexture2.Sample(baseSampler2, i.uv.xy), blend);
+    nts = lerp(nts, bumpTexture2.Sample(bumpSampler2, i.uv.xy).xyz * cb0[17].yzw + cb0[18].xyz, blend);
+#if R2_DN
+    {   // detail normals (one per layer) at the detail UV, combined as in the stock shader
+        float3 dn = detailNormalTexture.Sample(detailSampler, i.uvDetail).xyz * cb0[11].yzw + cb0[12].xyz;
+        const float3 dn2 = detailNormalTexture2.Sample(detailSampler2, i.uvDetail).xyz * cb0[19].yzw + cb0[20].xyz;
+        dn = lerp(dn, dn2, blend);
+        nts = nts * dn.z + nts.z * dn;
+    }
 #endif
-    const float rough = max(1.0 - gloss, 0.04);
-
+    float4 rt2 = reflectionTintTexture2.Sample(reflectionTintSampler2, i.uv.xy);
+#if !R2_NEUTRAL
+    rt2.rgb = (rt2.rgb <= 0.0031308) ? rt2.rgb * 12.92 : 1.055 * pow(rt2.rgb, 1.0 / 2.4) - 0.055;
+    gloss = lerp(bm.z, bm.w, blend);
+#endif
+    f0 = lerp(f0, (rt2.x + cb0[16].w * (rt2.xyz - rt2.x)) * cb0[15].xyz, blend);
+    specExp = lerp(cb0[2].w, cb0[15].w, blend);
+    rtAlpha = lerp(rt.a, rt2.a, blend);
+    fresnelAmount = lerp(cb0[10].w, cb0[18].w, blend);
+    fresnelMax = lerp(cb0[11].x, cb0[19].x, blend);
+    fresnelSharp = lerp(cb0[12].w, cb0[20].w, blend);
+#else
+#if !R2_NEUTRAL
+    const float3 pkk = packedTexture.Sample(packedSampler, i.uv.xy).rgb;
+    gloss = pkk.r; ao = pkk.g; cav = pkk.b;
+#endif
+#endif
+    const float expo = abs(min(1.0 / pow(cb0[4].z - cb0[4].w * rtAlpha, 2.0), -specExp));
+    const float3 pk = float3(gloss, ao, cav);
+    const float rough = max(1.0 - gloss, 0.04);)HLSL"
+    R"HLSL(
 #if R2_DEBUG == 6
     {   // 4 x 2 panels (1920 x 1080): pk, N, rt x 20, base / lightmap x 10, F0 x 100, expo / 1000, 1-dot(N,geo normal)
         const uint panel = uint(sp.x / 480.0) + 4u * uint(sp.y / 540.0);
-        float3 nn = normalize(nts.x * i.tan + nts.y * i.bin + nts.z * i.nrm);
-        float3 v[8] = { pk, nn * 0.5 + 0.5, rt.rgb * 20.0, base.rgb, lmEnergy * 10.0, f0 * 100.0, expo.xxx / 1000.0, (1.0 - dot(nn, normalize(i.nrm))).xxx * 4.0 };
+        float3 nn = normalize(nts.x * i.tan + nts.y * i.bin + nts.z * i.nrm.xyz);
+        float3 v[8] = { pk, nn * 0.5 + 0.5, rt.rgb * 20.0, base.rgb, lmEnergy * 10.0, f0 * 100.0, expo.xxx / 1000.0, (1.0 - dot(nn, normalize(i.nrm.xyz))).xxx * 4.0 };
         return float4(v[min(panel, 7u)], 1.0);
     }
 #endif
     float3 albedo = base.rgb * i.color.rgb;
     float alpha = base.a * i.color.a;
 
-    float3 N = normalize(nts.x * i.tan + nts.y * i.bin + nts.z * i.nrm);
+    float3 N = normalize(nts.x * i.tan + nts.y * i.bin + nts.z * i.nrm.xyz);
     float distSq = dot(i.pos, i.pos);
     float invDist = rsqrt(distSq);
     float3 V = i.pos * invDist;                 // camera -> pixel
@@ -215,7 +303,7 @@ float4 PSMain(PSIn i
     float ndv = saturate(dot(N, -V));
     float fr = saturate(1.0 - 1.743447 * dot(N, -V));
     fr *= fr;
-    fr = fr * ((1.0 - cb0[12].w) + cb0[12].w * fr);
+    fr = fr * ((1.0 - fresnelSharp) + fresnelSharp * fr);
 
     // real-time light list (one texel of t20 per lightmap texel, up to four indices)
     uint2 rtlSize;
@@ -235,7 +323,7 @@ float4 PSMain(PSIn i
     cloudUv = i.pos.y * cb2[27].xy + cloudUv;
     cloudUv = i.pos.z * cb2[27].zw + cloudUv;
     float3 sunVis = shadow * cloudMask.Sample(cloudSampler, cloudUv).xyz;
-    float ndg = dot(N, i.nrm);
+    float ndg = dot(N, i.nrm.xyz);
     float ng2 = ndg * ndg;
     float lenSq = dot(lmDir, lmDir);
     float ndDir = dot(N, lmDir);
@@ -271,12 +359,12 @@ float4 PSMain(PSIn i
 #endif
 
 #if R2_NEUTRAL
-    float fw = rt.a * fr * cb0[10].w;
-    float3 fresnel = f0 + fw * (cb0[11].x - f0);
+    float fw = rtAlpha * fr * fresnelAmount;
+    float3 fresnel = f0 + fw * (fresnelMax - f0);
     float3 color = albedo * diffAcc + fresnel * specAcc;
 #else
-    float fw = fr * cb0[10].w;
-    float3 fresnel = f0 + fw * (cb0[11].x - f0);
+    float fw = fr * fresnelAmount;
+    float3 fresnel = f0 + fw * (fresnelMax - f0);
     float specOcc = lerp(1.0, ao, 0.5);
     float3 color = albedo * diffAcc + fresnel * specAcc * cav * specOcc;
 #endif
