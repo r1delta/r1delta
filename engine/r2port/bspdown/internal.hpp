@@ -243,6 +243,7 @@ void convertLightProbeRefs(Ctx& c);
 void convertTricoll(Ctx& c);
 void convertStaticProps(Ctx& c);
 void convertVertexFrames(Ctx& c);  // rule 11, runs after convertMeshes
+void convertVertexColorAlpha(Ctx& c);  // rule 22, runs right after convertVertexFrames
 void convertCubemaps(Ctx& c);  // rule 13
 void convertShadow(Ctx& c);  // rule 17, shadow environments / CSM tree / shadow meshes
 void convertPhysics(Ctx& c);  // rule 12

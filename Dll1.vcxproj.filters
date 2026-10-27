@@ -932,6 +932,9 @@
     <ClCompile Include="engine\r2port\bspdown\lighting.cpp">
       <Filter>engine\r2port\bspdown</Filter>
     </ClCompile>
+    <ClCompile Include="engine\r2port\bspdown\vcalpha.cpp">
+      <Filter>engine\r2port\bspdown</Filter>
+    </ClCompile>
     <ClCompile Include="engine\core\background_mode.cpp">
       <Filter>engine\core</Filter>
     </ClCompile>
