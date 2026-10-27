@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -124,8 +125,17 @@ struct Source {
 std::vector<Source> CollectSources(const std::filesystem::path& r2portDirectory)
 {
     std::map<std::string, Source> byName;
-    for (const EmbeddedShader& shader : kEmbeddedShaders)
-        byName[shader.name] = { shader.name, shader.source, false };
+    // the LightmappedGeneric replacement shaders are many ps_5_0 records each: only build them when the feature is on
+    char lmgMode[48] = {};
+    const bool lmgEnabled = GetEnvironmentVariableA("R2_LMG_PBR", lmgMode, sizeof(lmgMode)) != 0 && lmgMode[0] && std::strcmp(lmgMode, "0") != 0;
+    for (const EmbeddedShader& shader : kEmbeddedShaders) {
+        if (!lmgEnabled && std::strncmp(shader.name, "r2_lmg_", 7) == 0)
+            continue;
+        std::string text = shader.source;
+        if (shader.define)
+            text = std::string("#define ") + shader.define + " 1\n" + text;
+        byName[shader.name] = { shader.name, std::move(text), false };
+    }
 
     std::error_code ec;
     const std::filesystem::path loose = r2portDirectory / "shaders";
@@ -180,7 +190,7 @@ void BuildOne(const Source& source, bool force)
         return;
     }
     if (built.hasPixel) {
-        const std::string problem = ValidateVcs(built.pixelVcs, 1);
+        const std::string problem = ValidateVcs(built.pixelVcs, built.pixelStatics, built.pixelRecords);
         if (!problem.empty() || !WriteBytes(entry.pixelPath, built.pixelVcs))
             entry.error = problem.empty() ? "could not write the pixel shader file" : "pixel VCS invalid: " + problem;
         entry.hasPixel = entry.error.empty();

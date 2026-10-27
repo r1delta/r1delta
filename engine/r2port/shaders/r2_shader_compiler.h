@@ -51,12 +51,19 @@ CompileResult CompileHlsl(const CompileRequest& request);
 std::vector<std::uint8_t> BuildVcs(
     const std::vector<std::vector<std::uint8_t>>& combos, bool vertexShader);
 
-// Structural check of a VCS produced by BuildVcs (header, combo table, chunk bounds). Empty string
-// when valid, otherwise the reason.
-std::string ValidateVcs(const std::vector<std::uint8_t>& vcs, std::size_t expectedCombos);
+// Wraps the dynamic variants of one or more static combos (ids 0..n-1) of a pixel shader into a VCS v6 file: per static
+// combo one stored block with one {dynamic id, size, DXBC} record per variant, ids 0..m-1 (the stock lightmappedgeneric
+// file has 12 per static combo). A requested combo id is static index * dynamic count.
+std::vector<std::uint8_t> BuildPixelVcsDynamic(const std::vector<std::vector<std::vector<std::uint8_t>>>& staticCombos);
+
+// Structural check of a VCS produced by BuildVcs / BuildPixelVcsDynamic (header, combo table, chunk bounds, record
+// count per static combo). Empty string when valid, otherwise the reason.
+std::string ValidateVcs(const std::vector<std::uint8_t>& vcs, std::size_t expectedCombos, std::size_t expectedRecords = 1);
 
 struct BuiltShader {
     bool hasPixel{};
+    std::size_t pixelStatics{ 1 };        // static combos in the pixel file
+    std::size_t pixelRecords{ 1 };        // dynamic records inside every static combo of the pixel file
     bool hasVertex{};
     std::vector<std::uint8_t> pixelVcs;   // <name>_ps40.vcs
     std::vector<std::uint8_t> vertexVcs;       // <name>_vs40.vcs: single static combo 0 (R2_XFORM=1, R2_VCOLOR=0)

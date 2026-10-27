@@ -40,7 +40,7 @@ bool Build(const std::filesystem::path& outDir, const std::string& name, const s
     }
     bool ok = true;
     if (built.hasPixel) {
-        const std::string problem = ValidateVcs(built.pixelVcs, 1);
+        const std::string problem = ValidateVcs(built.pixelVcs, built.pixelStatics, built.pixelRecords);
         ok = ok && problem.empty() && WriteFile(outDir / (name + "_ps40.vcs"), built.pixelVcs);
         std::printf("%s %s_ps40.vcs %zu bytes %s\n", problem.empty() ? "ok  " : "BAD ", name.c_str(),
             built.pixelVcs.size(), problem.c_str());
@@ -68,8 +68,12 @@ int main(int argc, char** argv)
     const std::filesystem::path outDir = argv[1];
     std::filesystem::create_directories(outDir);
     bool ok = true;
-    for (const EmbeddedShader& shader : kEmbeddedShaders)
-        ok = Build(outDir, shader.name, shader.source) && ok;
+    for (const EmbeddedShader& shader : kEmbeddedShaders) {
+        std::string text = shader.source;
+        if (shader.define)
+            text = std::string("#define ") + shader.define + " 1\n" + text;
+        ok = Build(outDir, shader.name, text) && ok;
+    }
     for (int i = 2; i < argc; ++i) {
         std::ifstream in(argv[i], std::ios::binary);
         const std::string source((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());

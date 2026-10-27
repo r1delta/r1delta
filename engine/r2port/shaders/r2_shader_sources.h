@@ -21,11 +21,14 @@
 // A custom `$vertexshader` always runs as static combo 0 (the engine only varies the combo for the stock default VS),
 // so the vertex file is the R2_XFORM=1 build; `$vertexshader "<name>_vcol"` selects the R2_VCOLOR=1 build (COLOR0 input).
 
+#include "r2_shader_source_lmg.h"
+
 namespace r2port::shaders {
 
 struct EmbeddedShader {
     const char* name;
     const char* source;
+    const char* define = nullptr;   // optional macro defined to 1 ahead of the source
 };
 
 inline constexpr const char kCommonInclude[] = R"HLSL(
@@ -255,10 +258,20 @@ float4 PSMain(PSIn i) : SV_Target
 }
 )HLSL";
 
+// LightmappedGeneric replacement (kLmgPbrSource, r2_shader_source_lmg.h), built only when env R2_LMG_PBR is set:
+// `r2_lmg_pbr` is the material shader, `r2_lmg_neutral` the same code with R2_NEUTRAL=1 (stock formulas, no R2 terms; proves
+// the reconstruction against the stock shader), `r2_lmg_mark` tints the replaced pixels, `r2_lmg_dbg6/7/8` are panel
+// visualisations (inputs, lighting terms, fog terms).
 inline constexpr EmbeddedShader kEmbeddedShaders[] = {
     { "r2_probe", kProbeSource },
     { "r2_dome", kDomeSource },
     { "r2_ut_dome", kUtDomeSource },
+    { "r2_lmg_pbr", kLmgPbrSource },
+    { "r2_lmg_neutral", kLmgPbrSource, "R2_NEUTRAL" },
+    { "r2_lmg_mark", kLmgPbrSource, "R2_NEUTRAL 1\n#define R2_MARK" },
+    { "r2_lmg_dbg6", kLmgPbrSource, "R2_DEBUG 6\n#define R2_DBG" },
+    { "r2_lmg_dbg7", kLmgPbrSource, "R2_DEBUG 7\n#define R2_DBG" },
+    { "r2_lmg_dbg8", kLmgPbrSource, "R2_DEBUG 8\n#define R2_DBG" },
 };
 
 } // namespace r2port::shaders

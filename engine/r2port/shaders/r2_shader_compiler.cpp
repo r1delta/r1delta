@@ -5,7 +5,10 @@
 #include <d3dcompiler.h>
 #include <wrl/client.h>
 
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <string>
 #include <deque>
 #include <utility>
 #pragma comment(lib, "d3dcompiler.lib")
@@ -180,7 +183,56 @@ std::vector<std::uint8_t> BuildVcs(const std::vector<std::vector<std::uint8_t>>&
     return out;
 }
 
-std::string ValidateVcs(const std::vector<std::uint8_t>& vcs, std::size_t expectedCombos)
+std::vector<std::uint8_t> BuildPixelVcsDynamic(const std::vector<std::vector<std::vector<std::uint8_t>>>& staticCombos)
+{
+    const std::uint32_t statics = static_cast<std::uint32_t>(staticCombos.size());
+    std::vector<std::uint8_t> out;
+    if (statics == 0 || staticCombos.front().empty())
+        return out;
+    const std::uint32_t count = static_cast<std::uint32_t>(staticCombos.front().size());
+    // header like BuildVcs, but the two opaque words carry the total combo count and the dynamic combo count per static
+    // combo (the loader divides a requested combo id by the second word to get the static index, and sizes the per-static
+    // table of dynamic shaders with it)
+    Put32(out, kVcsVersion);
+    Put32(out, count * statics);
+    Put32(out, count);
+    Put32(out, 0);
+    Put32(out, 0);
+    Put32(out, statics + 1);
+    Put32(out, 0);
+    const std::uint32_t tableEnd = kHeaderBytes + (statics + 1) * 8u + 4u;
+    std::vector<std::uint32_t> payloads;
+    std::uint32_t offset = tableEnd;
+    std::vector<std::uint32_t> offsets;
+    for (const auto& records : staticCombos) {
+        std::uint32_t payload = 0;
+        for (const auto& dxbc : records)
+            payload += 8u + static_cast<std::uint32_t>(dxbc.size());
+        payloads.push_back(payload);
+        offsets.push_back(offset);
+        offset += 4u + payload + 4u;
+    }
+    for (std::uint32_t i = 0; i < statics; ++i) {
+        Put32(out, i);
+        Put32(out, offsets[i]);
+    }
+    Put32(out, kChunkEnd);
+    Put32(out, offset);
+    Put32(out, 0);  // dynamic-to-static alias count
+    for (std::uint32_t i = 0; i < statics; ++i) {
+        Put32(out, kStoredChunk | payloads[i]);
+        std::uint32_t id = 0;
+        for (const auto& dxbc : staticCombos[i]) {
+            Put32(out, id++);
+            Put32(out, static_cast<std::uint32_t>(dxbc.size()));
+            out.insert(out.end(), dxbc.begin(), dxbc.end());
+        }
+        Put32(out, kChunkEnd);
+    }
+    return out;
+}
+
+std::string ValidateVcs(const std::vector<std::uint8_t>& vcs, std::size_t expectedCombos, std::size_t expectedRecords)
 {
     if (vcs.size() < kHeaderBytes + 8)
         return "too small";
@@ -211,11 +263,23 @@ std::string ValidateVcs(const std::vector<std::uint8_t>& vcs, std::size_t expect
         const std::uint32_t payload = tag & 0x3FFFFFFFu;
         if (begin + 4 + payload + 4 != end)
             return "chunk payload size does not fill the chunk";
-        const std::uint32_t recordSize = Get32(vcs, begin + 8);
-        if (8u + recordSize != payload)
-            return "record size mismatch";
-        if (std::memcmp(vcs.data() + begin + 12, "DXBC", 4) != 0)
-            return "record is not DXBC";
+        // records: {dynamic id, size, DXBC}, back to back, ids consecutive from 0
+        std::uint32_t cursor = 0;
+        std::uint32_t records = 0;
+        while (cursor < payload) {
+            if (payload - cursor < 8)
+                return "partial record header";
+            const std::uint32_t id = Get32(vcs, begin + 4 + cursor);
+            const std::uint32_t recordSize = Get32(vcs, begin + 4 + cursor + 4);
+            if (id != records || recordSize < 32 || cursor + 8u + recordSize > payload)
+                return "record size mismatch";
+            if (std::memcmp(vcs.data() + begin + 4 + cursor + 8, "DXBC", 4) != 0)
+                return "record is not DXBC";
+            cursor += 8u + recordSize;
+            ++records;
+        }
+        if (records != expectedRecords)
+            return "dynamic record count mismatch";
         if (Get32(vcs, begin + 4 + payload) != kChunkEnd)
             return "chunk terminator missing";
     }
@@ -250,6 +314,12 @@ std::string CheckVertexPixelLinkage(
     return {};
 }
 
+// Pixel shaders that replace a stock static combo with several dynamic combos mark themselves with this line; the
+// compiler then builds one ps_5_0 record per dynamic index (see BuildPixelVcsDynamic) with the macros the source names
+// there: `// R2_PS_DYNAMIC <dynamic count> <static count>` (R2_LIGHTS = d % 2, R2_SHADOW = (d / 2) % 3, R2_FOGB = (d / 2) / 3,
+// R2_TC1 = static index).
+constexpr std::string_view kDynamicMarker = "// R2_PS_DYNAMIC ";
+
 BuiltShader BuildShader(std::string_view name, std::string_view source, IncludeResolver includes)
 {
     BuiltShader built;
@@ -260,6 +330,48 @@ BuiltShader BuildShader(std::string_view name, std::string_view source, IncludeR
         built.error = "source defines neither PSMain nor VSMain";
         return built;
     }
+
+    const std::size_t marker = source.find(kDynamicMarker);
+    if (marker != std::string_view::npos && wantsPixel && !wantsVertex) {
+        // "// R2_PS_DYNAMIC <dynamic count> <static count>": static combo s defines R2_TC1 = s
+        const std::string spec(source.substr(marker + kDynamicMarker.size(), 16));
+        int count = 0;
+        int statics = 1;
+        std::sscanf(spec.c_str(), "%d %d", &count, &statics);
+        if (count < 1 || count > 64 || statics < 1 || statics > 8) {
+            built.error = "bad R2_PS_DYNAMIC line";
+            return built;
+        }
+        std::vector<std::vector<std::vector<std::uint8_t>>> combos;
+        for (int staticCombo = 0; staticCombo < statics; ++staticCombo) {
+            std::vector<std::vector<std::uint8_t>> records;
+            for (int dynamic = 0; dynamic < count; ++dynamic) {
+                CompileRequest request;
+                request.sourceName = std::string(name) + ".hlsl";
+                request.source = source;
+                request.entry = "PSMain";
+                request.profile = "ps_5_0";
+                request.includes = includes;
+                request.macros.push_back({ "R2_TC1", std::to_string(staticCombo) });
+                request.macros.push_back({ "R2_LIGHTS", std::to_string(dynamic % 2) });
+                request.macros.push_back({ "R2_SHADOW", std::to_string((dynamic / 2) % 3) });
+                request.macros.push_back({ "R2_FOGB", std::to_string((dynamic / 2) / 3) });
+                CompileResult result = CompileHlsl(request);
+                if (!result.ok) {
+                    built.error = "pixel shader (static " + std::to_string(staticCombo) + " dynamic " + std::to_string(dynamic) + "): " + result.messages;
+                    return built;
+                }
+                records.push_back(std::move(result.dxbc));
+            }
+            combos.push_back(std::move(records));
+        }
+        built.pixelVcs = BuildPixelVcsDynamic(combos);
+        built.hasPixel = true;
+        built.pixelStatics = combos.size();
+        built.pixelRecords = combos.front().size();
+        return built;
+    }
+
 
     std::vector<std::uint8_t> pixelDxbc;
     if (wantsPixel) {
