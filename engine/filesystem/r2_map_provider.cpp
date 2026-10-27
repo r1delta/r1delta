@@ -11,6 +11,7 @@
 #include "engine/filesystem/r1o_vpk.h"
 #include "engine/r2port/bspdown/bspdown.hpp"
 #include "engine/r2port/entity_rewrite.h"
+#include "engine/filesystem/r2_particle_provider.h"
 #include "p2p/p2p_identity.h"
 
 #ifndef NOMINMAX
@@ -834,7 +835,7 @@ void RewriteConvertedBspEntities(std::string_view mapName, std::vector<uint8_t>&
 
     const std::string_view text(reinterpret_cast<const char*>(bsp.data()) + header.offset, header.length);
     entity_rewrite::RewriteReport report;
-    std::string rewritten = entity_rewrite::RewriteEntityLump(text, { mapName, false }, &report);
+    std::string rewritten = entity_rewrite::RewriteEntityLump(text, { mapName, false, &R2ParticleTargetName }, &report);
     std::uint64_t raised = 0;
     rewritten = entity_rewrite::RaiseFlagSpawnOrigins(rewritten, kFlagSpawnLift, &raised);
     if (rewritten == text)
@@ -870,7 +871,7 @@ FileBytes ReadEntityFile(const MapRequest& request, const std::shared_ptr<MapSta
     try {
         const std::string_view text(reinterpret_cast<const char*>(data->data()), data->size());
         entity_rewrite::RewriteReport report;
-        std::string rewritten = entity_rewrite::RewriteEntityLump(text, { request.mapName, false }, &report);
+        std::string rewritten = entity_rewrite::RewriteEntityLump(text, { request.mapName, false, &R2ParticleTargetName }, &report);
         if (report.unknownConstructs) {
             char buffer[384]{};
             _snprintf_s(buffer, sizeof(buffer), _TRUNCATE,
@@ -1475,6 +1476,7 @@ void InstallR2MapProvider()
         RegisterR2MaterialProvider();
         RegisterR1MapPackMaterialProvider();
         RegisterR2ModelProvider();
+        RegisterR2ParticleProvider();
         InstallR2MapPatchSource();
         auto provider = std::make_shared<R2MapProvider>();
         RegisterProvider("maps", provider);

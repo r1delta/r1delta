@@ -25,6 +25,9 @@
     <Filter Include="engine\r2port\modelconv">
       <UniqueIdentifier>{a2b2c3d4-e5f6-7890-abcd-ef1234567893}</UniqueIdentifier>
     </Filter>
+    <Filter Include="engine\r2port\particles">
+      <UniqueIdentifier>{a2b2c3d4-e5f6-7890-abcd-ef1234567894}</UniqueIdentifier>
+    </Filter>
     <Filter Include="engine\r2port\r2tex">
       <UniqueIdentifier>{b9d9e727-7f95-4a1d-ae29-7629ae937720}</UniqueIdentifier>
     </Filter>
@@ -193,6 +196,24 @@
     </ClInclude>
     <ClInclude Include="engine\r2port\modelconv\modelconv.hpp">
       <Filter>engine\r2port\modelconv</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\filesystem\r2_particle_provider.h">
+      <Filter>engine\filesystem</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\core\r2port_particles_hook.h">
+      <Filter>engine\core</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\particles\dmx.hpp">
+      <Filter>engine\r2port\particles</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\particles\pcfconv.hpp">
+      <Filter>engine\r2port\particles</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\particles\pcfconv_tables.inc">
+      <Filter>engine\r2port\particles</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\particles\r2_particle_requests.inc">
+      <Filter>engine\r2port\particles</Filter>
     </ClInclude>
     <ClInclude Include="engine\filesystem\r2_material_provider.h">
       <Filter>engine\filesystem</Filter>
@@ -844,6 +865,18 @@
     </ClCompile>
     <ClCompile Include="engine\r2port\modelconv\modelconv.cpp">
       <Filter>engine\r2port\modelconv</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\filesystem\r2_particle_provider.cpp">
+      <Filter>engine\filesystem</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\core\r2port_particles_hook.cpp">
+      <Filter>engine\core</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\particles\dmx.cpp">
+      <Filter>engine\r2port\particles</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\particles\pcfconv.cpp">
+      <Filter>engine\r2port\particles</Filter>
     </ClCompile>
     <ClCompile Include="engine\filesystem\r2_material_provider.cpp">
       <Filter>engine\filesystem</Filter>

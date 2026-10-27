@@ -12,7 +12,7 @@ namespace r2port::entity_rewrite {
 
 // Bump whenever RewriteEntityLump can produce different output for the same input. The R2 map
 // provider folds it into its on-disk cache fingerprint so cached entity files and BSPs are rebuilt.
-inline constexpr std::uint32_t kRewriteVersion = 1;
+inline constexpr std::uint32_t kRewriteVersion = 2;
 
 enum class SpawnMode : std::size_t {
     CaptureTheFlag,
@@ -44,9 +44,14 @@ struct SpawnModeCounts {
 
 const SpawnModeRule& GetSpawnModeRule(SpawnMode mode) noexcept;
 
+// Maps an R2 particle system name to the converted system name; returns false to leave the name alone.
+using EffectNameMapper = bool (*)(std::string_view system, std::string& target);
+
 struct RewriteOptions {
     std::string_view mapName;
     bool strict = false;
+    // When set, effect_name of info_particle_system and prop_dynamic entities is rewritten through it.
+    EffectNameMapper effectNameMapper = nullptr;
 };
 
 struct RewriteReport {
@@ -60,6 +65,7 @@ struct RewriteReport {
     std::uint64_t droppedScriptMoverLightweight = 0;
     std::uint64_t droppedLightEnvironmentVolume = 0;
     std::uint64_t unknownConstructs = 0;
+    std::uint64_t renamedEffectNames = 0;
     std::array<SpawnModeCounts, static_cast<std::size_t>(SpawnMode::Count)> spawnModes{};
 };
 

@@ -281,6 +281,33 @@ void TestByteExactOutputAndLightEnvironment()
     Check(raised == 1 && lifted == expectedLifted, "flag origin raise is not byte-exact");
 }
 
+bool TestMapper(std::string_view system, std::string& target)
+{
+    if (system != "P_converted")
+        return false;
+    target = "r2p_P_converted";
+    return true;
+}
+
+void TestEffectNameRename()
+{
+    const std::string input =
+        "{\n\"classname\" \"info_particle_system\"\n\"effect_name\" \"P_converted\"\n\"origin\" \"0 0 0\"\n}\n"
+        "{\n\"classname\" \"info_particle_system\"\n\"effect_name\" \"P_r1_owned\"\n}\n"
+        "{\n\"classname\" \"prop_dynamic_lightweight\"\n\"effect_name\" \"P_converted\"\n}\n"
+        "{\n\"classname\" \"info_target\"\n\"effect_name\" \"P_converted\"\n}\n";
+    RewriteReport report;
+    RewriteOptions options{ "mp_test", false, &TestMapper };
+    const std::string output = RewriteEntityLump(input, options, &report);
+    Check(report.renamedEffectNames == 2, "effect_name rename count is wrong");
+    Check(Has(output, "\"effect_name\" \"r2p_P_converted\"\n\"origin\""), "info_particle_system effect_name was not renamed");
+    Check(Has(output, "\"P_r1_owned\""), "an unmapped effect_name changed");
+    Check(Has(output, "\"classname\" \"info_target\"\n\"effect_name\" \"P_converted\""), "a non-particle class was renamed");
+    RewriteReport plain;
+    const std::string untouched = RewriteEntityLump(input, RewriteOptions{ "mp_test", false, nullptr }, &plain);
+    Check(plain.renamedEffectNames == 0 && !Has(untouched, "r2p_"), "no mapper must leave effect_name untouched");
+}
+
 } // namespace
 
 int main()
@@ -293,6 +320,7 @@ int main()
         TestMapFeatures();
         TestStrictFailureAndPermissiveFallback();
         TestByteExactOutputAndLightEnvironment();
+        TestEffectNameRename();
     } catch (const std::exception& exception) {
         std::cerr << "entity rewrite test failed: " << exception.what() << '\n';
         return 1;

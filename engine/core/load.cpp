@@ -39,6 +39,7 @@
 #include "load.h"
 #include "player_resource_18.h"
 #include "ffa_targeting.h"
+#include "r2port_particles_hook.h"
 #include "client_port_override.h"
 #include "account_hold.h"
 #include "r1o_runtime_paths.h"
@@ -9888,6 +9889,7 @@ void __stdcall LoaderNotificationCallback(
 			PatchClientDynamicLodNoMatchSentinel(G_client);
 			InstallR1ClientPlayerResource18(G_client);
 			InstallClientDatacacheCallbackGuard(G_client);
+			InstallClientParticleHook(G_client);
 			InstallClientPlayerClassCompatibilityHooks(G_client);
 			r1delta::ffa_targeting::InstallClientHooks(G_client);
 			if (ShouldInstallR1OClientDebugHooks()) {

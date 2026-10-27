@@ -38,10 +38,12 @@ struct EntityView {
     std::string_view ropeMaterial;
     std::string_view editorClass;
     std::string_view scriptName;
+    std::string_view effectName;
     Span classnameSpan;
     Span targetnameSpan;
     Span ropeMaterialSpan;
     Span teamNumberAliasKeySpan;
+    Span effectNameSpan;
     std::array<ModeTag, 4> modeTags{};
     std::uint64_t skyKeys = 0;
     std::uint64_t fogKeys = 0;
@@ -57,6 +59,7 @@ struct EntityView {
     bool hasEditorClass = false;
     bool hasScriptName = false;
     bool hasOrigin = false;
+    bool hasEffectName = false;
     std::string_view origin;
     Span originSpan;
 };
@@ -400,6 +403,10 @@ bool ScanEntityLump(std::string_view input,
             } else if (keyText == "script_name") {
                 entity.hasScriptName = true;
                 entity.scriptName = valueText;
+            } else if (keyText == "effect_name") {
+                entity.hasEffectName = true;
+                entity.effectName = valueText;
+                entity.effectNameSpan = value.text;
             } else {
                 const std::size_t modeIndex = ModeTagIndex(keyText);
                 if (modeIndex < entity.modeTags.size()) {
@@ -454,7 +461,7 @@ struct ValuePatch {
     std::string_view replacement;
 };
 
-void SortPatches(std::array<ValuePatch, 3>& patches, std::size_t count)
+void SortPatches(std::array<ValuePatch, 4>& patches, std::size_t count)
 {
     for (std::size_t i = 1; i < count; ++i) {
         ValuePatch value = patches[i];
@@ -586,7 +593,8 @@ std::string RewriteEntityLump(std::string_view input,
                 return;
             }
 
-            std::array<ValuePatch, 3> patches{};
+            std::array<ValuePatch, 4> patches{};
+            std::string renamedEffect;
             std::size_t patchCount = 0;
             AppendRange(output, input, appendCursor, entity.begin);
 
@@ -610,6 +618,15 @@ std::string RewriteEntityLump(std::string_view input,
                 && !entity.duplicateTeamNumberAlias) {
                 patches[patchCount++] = {entity.teamNumberAliasKeySpan, "TeamNum"};
                 ++result.renamedCtfTeamKeys;
+            }
+            if (options.effectNameMapper
+                && entity.hasEffectName
+                && (entity.classname == "info_particle_system"
+                    || entity.classname == "prop_dynamic"
+                    || entity.classname == "prop_dynamic_lightweight")
+                && options.effectNameMapper(entity.effectName, renamedEffect)) {
+                patches[patchCount++] = {entity.effectNameSpan, renamedEffect};
+                ++result.renamedEffectNames;
             }
             SortPatches(patches, patchCount);
 
