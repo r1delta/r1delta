@@ -1424,22 +1424,37 @@ bool forceOpaqueVtf(std::vector<std::uint8_t>& vtf, std::string& error) {
 // alpha (alpha = albedo alpha * opacity, both 0..1) and the albedo is emitted as RGBA8.
 constexpr const char* kOpacityMergePrefix = "r2tex/opamerge/";
 
-std::string opacityMergeName(std::uint64_t albedoGuid, std::uint64_t opacityGuid) {
+// Name: r2tex/opamerge/<albedo guid>_<opacity guid>[_<cavity guid>]. An opacity guid of 0 means "no opacity map" (the
+// albedo alpha is the opacity); a cavity guid selects the foliage bake (buildFoliageVtf).
+std::string opacityMergeName(std::uint64_t albedoGuid, std::uint64_t opacityGuid, std::uint64_t cavityGuid = 0) {
     std::ostringstream name;
     name << kOpacityMergePrefix << std::hex << std::setw(16) << std::setfill('0') << albedoGuid << '_'
          << std::setw(16) << std::setfill('0') << opacityGuid;
+    if (cavityGuid) name << '_' << std::setw(16) << std::setfill('0') << cavityGuid;
     return name.str();
 }
 
-bool parseOpacityMergeName(const std::string& name, std::uint64_t& albedoGuid, std::uint64_t& opacityGuid) {
+bool parseOpacityMergeName(const std::string& name, std::uint64_t& albedoGuid, std::uint64_t& opacityGuid,
+                           std::uint64_t* cavityGuid = nullptr) {
     const std::size_t prefix = std::strlen(kOpacityMergePrefix);
-    if (name.rfind(kOpacityMergePrefix, 0) != 0 || name.size() != prefix + 16 + 1 + 16 || name[prefix + 16] != '_') return false;
+    if (cavityGuid) *cavityGuid = 0;
+    const bool withCavity = name.size() == prefix + 16 + 1 + 16 + 1 + 16;
+    if (name.rfind(kOpacityMergePrefix, 0) != 0 || (name.size() != prefix + 16 + 1 + 16 && !withCavity) ||
+        name[prefix + 16] != '_' || (withCavity && name[prefix + 33] != '_'))
+        return false;
     char* end = nullptr;
     const std::string a = name.substr(prefix, 16), b = name.substr(prefix + 17, 16);
     albedoGuid = std::strtoull(a.c_str(), &end, 16);
     if (end != a.c_str() + 16) return false;
     opacityGuid = std::strtoull(b.c_str(), &end, 16);
-    return end == b.c_str() + 16;
+    if (end != b.c_str() + 16) return false;
+    if (withCavity) {
+        const std::string c = name.substr(prefix + 34, 16);
+        const std::uint64_t guid = std::strtoull(c.c_str(), &end, 16);
+        if (end != c.c_str() + 16) return false;
+        if (cavityGuid) *cavityGuid = guid;
+    }
+    return true;
 }
 
 struct VtfView {
@@ -1556,6 +1571,121 @@ bool mergeOpacityVtf(std::vector<std::uint8_t>& albedo, const std::vector<std::u
         output += static_cast<std::size_t>(aw) * ah * 4;
     }
     albedo = std::move(merged);
+    return true;
+}
+
+// R2 foliage (shader sets with Cav and Cut and no Vcolt: grass, ground plants, bushes, leaf cards) carries a cavity map in
+// slot 12 that, for these sets, occludes the lit colour (a tuft bake: dark roots, light tips; every foliage material of the
+// 20 maps that has Cut also has Cav). R2 also draws the cut-out with alpha-to-coverage, which keeps the mean blade coverage
+// at every mip level. R1 has neither: its alpha test (0.7) loses more blades with each mip (mp_glitch glitch_amber_grass_01:
+// 28 % of the texels pass at mip 0, 9 % at mip 4, so distant lawn is sparse pale speckle) and the unoccluded tufts light up
+// 1.5 to 3 times brighter than R2's. Measured on mp_glitch (LightVerify prop class, 14 spots, auto exposure): median conv/R2
+// 1.58 with the coverage mips only, 1.45 / 1.39 / 1.34 / 1.34 for cavity^k with k 0.5 / 1 / 1.5 / 2 (baseline 1.55); the
+// gain flattens from k 1.5 on, which is the default. The bake multiplies albedo by cavity^k and rebuilds the mip chain with
+// premultiplied box filtering and an alpha gain that keeps the share of texels at or above the alpha-test reference
+// constant. Output is RGBA8 (same header as the albedo, flags kept).
+constexpr float kFoliageAlphaRef = 0.7f;
+
+float foliageCavityExponent() {
+    float k = 1.5f;
+    if (const char* e = std::getenv("R2TEX_FOLIAGE_CAV")) k = std::clamp(static_cast<float>(std::atof(e)), 0.0f, 4.0f);
+    return k;
+}
+
+// albedo: converted albedo VTF (replaced); opacity: optional converted opacity map (red); cavity: converted cavity map (red).
+bool buildFoliageVtf(std::vector<std::uint8_t>& albedo, const std::vector<std::uint8_t>* opacity,
+                     const std::vector<std::uint8_t>& cavity, std::string& error) {
+    VtfView av, cv, ov;
+    if (!parseVtfView(albedo, av) || !parseVtfView(cavity, cv) || (opacity && !parseVtfView(*opacity, ov))) {
+        error = "invalid VTF for foliage bake";
+        return false;
+    }
+    std::vector<std::uint8_t> a, c, o;
+    std::uint32_t aw = 0, ah = 0, cw = 0, ch = 0, ow = 0, oh = 0;
+    if (!decodeVtfMip(albedo, av, 0, a, aw, ah) || !decodeVtfMip(cavity, cv, 0, c, cw, ch) ||
+        (opacity && !decodeVtfMip(*opacity, ov, 0, o, ow, oh))) {
+        error = "foliage bake: mip decode failed";
+        return false;
+    }
+    const bool albedoHasAlpha = av.format == 0 || av.format == 14 || av.format == 15;
+    const float k = foliageCavityExponent();
+    std::array<float, 256> gain{};
+    for (int i = 0; i < 256; ++i) gain[static_cast<std::size_t>(i)] = k == 0.0f ? 1.0f : std::pow(i / 255.0f, k);
+
+    struct Level { std::uint32_t w = 0, h = 0; std::vector<float> px; };  // rgb 0..255, alpha 0..1
+    std::vector<Level> chain(1);
+    chain[0].w = aw; chain[0].h = ah;
+    chain[0].px.resize(static_cast<std::size_t>(aw) * ah * 4);
+    for (std::uint32_t y = 0; y < ah; ++y) {
+        const std::uint32_t cy = std::min(ch - 1, static_cast<std::uint32_t>((static_cast<std::uint64_t>(y) * ch) / ah));
+        const std::uint32_t oy = opacity ? std::min(oh - 1, static_cast<std::uint32_t>((static_cast<std::uint64_t>(y) * oh) / ah)) : 0;
+        for (std::uint32_t x = 0; x < aw; ++x) {
+            const std::uint32_t cx = std::min(cw - 1, static_cast<std::uint32_t>((static_cast<std::uint64_t>(x) * cw) / aw));
+            const std::uint8_t* src = a.data() + (static_cast<std::size_t>(y) * aw + x) * 4;
+            const float g = gain[c[(static_cast<std::size_t>(cy) * cw + cx) * 4]];
+            float alpha = albedoHasAlpha ? src[3] / 255.0f : 1.0f;
+            if (opacity) {
+                const std::uint32_t ox = std::min(ow - 1, static_cast<std::uint32_t>((static_cast<std::uint64_t>(x) * ow) / aw));
+                alpha *= o[(static_cast<std::size_t>(oy) * ow + ox) * 4] / 255.0f;
+            }
+            float* dst = &chain[0].px[(static_cast<std::size_t>(y) * aw + x) * 4];
+            dst[0] = src[0] * g; dst[1] = src[1] * g; dst[2] = src[2] * g; dst[3] = alpha;
+        }
+    }
+    auto coverage = [](const std::vector<float>& px, float gainScale) {
+        std::size_t pass = 0;
+        for (std::size_t i = 3; i < px.size(); i += 4) pass += std::min(1.0f, px[i] * gainScale) >= kFoliageAlphaRef;
+        return static_cast<double>(pass) / std::max<std::size_t>(1, px.size() / 4);
+    };
+    const double target = coverage(chain[0].px, 1.0f);
+    for (std::uint32_t m = 1; m < av.mipCount; ++m) {
+        const Level& prev = chain.back();
+        Level next;
+        next.w = std::max(1u, prev.w / 2); next.h = std::max(1u, prev.h / 2);
+        next.px.resize(static_cast<std::size_t>(next.w) * next.h * 4);
+        for (std::uint32_t y = 0; y < next.h; ++y)
+            for (std::uint32_t x = 0; x < next.w; ++x) {
+                double sum[3] = {0, 0, 0}, plain[3] = {0, 0, 0}, alphaSum = 0;
+                for (std::uint32_t dy = 0; dy < 2; ++dy)
+                    for (std::uint32_t dx = 0; dx < 2; ++dx) {
+                        const std::uint32_t sx = std::min(prev.w - 1, x * 2 + dx), sy = std::min(prev.h - 1, y * 2 + dy);
+                        const float* s = &prev.px[(static_cast<std::size_t>(sy) * prev.w + sx) * 4];
+                        for (int i = 0; i < 3; ++i) { sum[i] += s[i] * s[3]; plain[i] += s[i]; }
+                        alphaSum += s[3];
+                    }
+                float* d = &next.px[(static_cast<std::size_t>(y) * next.w + x) * 4];
+                for (int i = 0; i < 3; ++i)
+                    d[i] = static_cast<float>(alphaSum > 1e-4 ? sum[i] / alphaSum : plain[i] / 4.0);
+                d[3] = static_cast<float>(alphaSum / 4.0);
+            }
+        if (target > 0.0) {
+            float lo = 0.5f, hi = 8.0f;
+            for (int i = 0; i < 24; ++i) {
+                const float mid = 0.5f * (lo + hi);
+                if (coverage(next.px, mid) < target) lo = mid; else hi = mid;
+            }
+            for (std::size_t i = 3; i < next.px.size(); i += 4) next.px[i] = std::min(1.0f, next.px[i] * hi);
+        }
+        chain.push_back(std::move(next));
+    }
+    std::uint64_t outputSize = 0x58;
+    for (const Level& level : chain) outputSize += static_cast<std::uint64_t>(level.w) * level.h * 4u;
+    if (outputSize > (1ull << 31)) { error = "foliage bake: output too large"; return false; }
+    std::vector<std::uint8_t> baked(static_cast<std::size_t>(outputSize), 0);
+    std::memcpy(baked.data(), albedo.data(), 0x58);
+    putI32(baked.data() + 0x34, 0);
+    put32(baked.data() + 0x54, 0x58);
+    baked[0x38] = static_cast<std::uint8_t>(chain.size());
+    std::size_t at = 0x58;
+    for (std::size_t m = chain.size(); m-- > 0;) {
+        const Level& level = chain[m];
+        for (std::size_t i = 0; i < level.px.size(); ++i) {
+            const float v = i % 4 == 3 ? level.px[i] * 255.0f : level.px[i];
+            baked[at + i] = static_cast<std::uint8_t>(std::clamp(v + 0.5f, 0.0f, 255.0f));
+        }
+        at += level.px.size();
+    }
+    albedo = std::move(baked);
     return true;
 }
 
@@ -1986,7 +2116,7 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
         // layers-off removes only the second layer (slots 22/23/24/26). The normal, specular, emissive and detail
         // slots must stay: a lightmapped material without $bumpmap runs a shader permutation that does not match
         // bumped lightmap data and shimmers in the sun/light shadow paths.
-        use(1); use(3); use(4); use(13); use(14); use(15);
+        use(1); use(3); use(4); use(12); use(13); use(14); use(15);
         if (lightmapped && !layersOff) {
             use(22); use(23); use(24); use(26);
         }
@@ -2109,6 +2239,13 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
     const bool opacityMap = !tools && shaderSet.find("opam") != std::string::npos &&
         (translucent || additive || cut) && usedSlots.find(0) != usedSlots.end() &&
         usedSlots.find(13) != usedSlots.end() && slotGuids[0] && slotGuids[13];
+    // Foliage cavity bake (see buildFoliageVtf): alpha-tested vertex-lit materials with a Cav set, a cavity map and no
+    // baked vertex colour (R2TEX_FOLIAGE_CAV=0 turns the bake off; the exponent is the same variable).
+    const char* foliageEnv = std::getenv("R2TEX_FOLIAGE_CAV");
+    const bool foliageCavity = !tools && cut && shader == "VertexLitGeneric" && shaderSet.find("cav") != std::string::npos &&
+        shaderSet.find("vcolt") == std::string::npos && !(foliageEnv && std::atof(foliageEnv) == 0.0) &&
+        usedSlots.find(0) != usedSlots.end() && usedSlots.find(12) != usedSlots.end() &&
+        slotGuids.size() > 12 && slotGuids[0] && slotGuids[12] && !slotGuids[11];   // an AO map (slot 11) means the set already has its own occlusion
     const char* normalsEnv = std::getenv("R2TEX_NORMALS");   // default on; "0" passes the R2 BC5/slope texture through unchanged
     const bool normalRepack = !tools && !(normalsEnv && normalsEnv[0] == '0');
     if (tools) {
@@ -2121,7 +2258,8 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
                 if (albedo != usedSlots.end()) albedo->second = opaqueAlbedoName(albedo->second);
             }
         }
-        if (opacityMap) usedSlots[0] = opacityMergeName(slotGuids[0], slotGuids[13]);
+        if (opacityMap || foliageCavity)
+            usedSlots[0] = opacityMergeName(slotGuids[0], opacityMap ? slotGuids[13] : 0, foliageCavity ? slotGuids[12] : 0);
         // Slot 1 and 24 normal maps are re-encoded as R1 unit-normal DXT1 (see convertNormalVtf); R2TEX_NORMALS=0 keeps the raw R2 texture.
         if (normalRepack) {
             for (const std::size_t normalSlot : {std::size_t(1), std::size_t(24)}) {
@@ -2145,7 +2283,7 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
             {
                 // Model (VertexLitGeneric) materials over-reflect in R1 (prop brightness conv/R2 1.75 at mat_envmap_scale 2, LightVerify):
                 // R2TEX_MODEL_ENVTINT (float, default 0.25) scales the tint of model materials only; world brushes keep [1 1 1].
-                double k = 0.25;   // measured with LightVerify on mp_glitch: prop brightness conv/R2 1.82 at 1, 1.56 at 0.25
+                double k = vertexLit ? 0.25 : 1.0;   // measured with LightVerify on mp_glitch: prop brightness conv/R2 1.82 at 1, 1.56 at 0.25
                 if (vertexLit) if (const char* e = std::getenv("R2TEX_MODEL_ENVTINT")) k = std::clamp(std::atof(e), 0.0, 4.0);
                 char tint[48];
                 std::snprintf(tint, sizeof(tint), "[%g %g %g]", k, k, k);
@@ -2228,7 +2366,7 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
                 TextureTransform::maskRg : TextureTransform::maskRgInv;
         }
         if (opaqueAlbedo && (slot == 0 || slot == 23)) texture.transform = TextureTransform::opaqueAlpha;
-        if (opacityMap && slot == 0) texture.transform = TextureTransform::opacityMerge;
+        if ((opacityMap || foliageCavity) && slot == 0) texture.transform = TextureTransform::opacityMerge;
         if (normalRepack && (slot == 1 || slot == 24)) texture.transform = TextureTransform::normalRgb;
         material.textures.push_back(std::move(texture));
     }
@@ -2438,18 +2576,30 @@ bool ConvertTexture(const TextureRef& texture, std::vector<std::uint8_t>& vtf,
             return false;
         }
         if (texture.transform == TextureTransform::opacityMerge) {
-            std::uint64_t albedoGuid = 0, opacityGuid = 0;
-            if (!parseOpacityMergeName(cleanAssetName(texture.name, true), albedoGuid, opacityGuid)) {
+            std::uint64_t albedoGuid = 0, opacityGuid = 0, cavityGuid = 0;
+            if (!parseOpacityMergeName(cleanAssetName(texture.name, true), albedoGuid, opacityGuid, &cavityGuid)) {
                 vtf.clear();
                 if (error) *error = "invalid opacity merge texture name";
                 return false;
             }
-            const AssetRecord* opacityRecord = findRecord(*db, opacityGuid, kTxtr);
-            std::vector<std::uint8_t> opacityVtf;
-            if (!opacityRecord || !convertTextureWithDb(db, *opacityRecord, decodeOptions, opacityVtf, why) ||
-                !mergeOpacityVtf(vtf, opacityVtf, why)) {
+            std::vector<std::uint8_t> opacityVtf, cavityVtf;
+            const AssetRecord* opacityRecord = opacityGuid ? findRecord(*db, opacityGuid, kTxtr) : nullptr;
+            if (opacityGuid && (!opacityRecord || !convertTextureWithDb(db, *opacityRecord, decodeOptions, opacityVtf, why))) {
                 vtf.clear();
                 if (error) *error = opacityRecord ? why : "unresolved opacity texture GUID";
+                return false;
+            }
+            if (cavityGuid) {
+                const AssetRecord* cavityRecord = findRecord(*db, cavityGuid, kTxtr);
+                if (!cavityRecord || !convertTextureWithDb(db, *cavityRecord, decodeOptions, cavityVtf, why) ||
+                    !buildFoliageVtf(vtf, opacityGuid ? &opacityVtf : nullptr, cavityVtf, why)) {
+                    vtf.clear();
+                    if (error) *error = cavityRecord ? why : "unresolved cavity texture GUID";
+                    return false;
+                }
+            } else if (!mergeOpacityVtf(vtf, opacityVtf, why)) {
+                vtf.clear();
+                if (error) *error = why;
                 return false;
             }
             if (error) error->clear();
