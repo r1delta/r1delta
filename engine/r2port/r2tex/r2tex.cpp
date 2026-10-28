@@ -2396,6 +2396,58 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
             if (const AssetRecord* texture = findRecord(*db, slotGuids[0], kTxtr))
                 flatSheet = flatSheetStats(db, *texture);
     }
+    // Pure emitters on world brushes: black albedo, an all-white emissive mask (_ilm) and an emissive tint (float4 #10, HDR). R2 draws
+    // albedo * light + _ilm * tint, so such a strip glows in the tint colour. R1's LightmappedGeneric has no emissive input the
+    // converter can feed (shaderlab\CHANNELS.md 2.6), so the strip came out solid black (mp_glitch vr_light_trim_01_totrans: the
+    // frame around the ramp wall panel was a black band, R2 shows a warm glowing trim; the only material of the 20 maps that is a
+    // pure emitter). Such a material becomes UnlitGeneric: the white _ilm texture times $color = the tint. Masked emitters (signs,
+    // LED floors with a real albedo) are not covered by this path.
+    // The R2 tint is HDR (mp_glitch 3.0 2.53 2.11). R1 draws an unlit surface about 1.7 times brighter on screen than R2 tone-maps the same
+    // emissive: the strip is dim warm grey in R2 (display luminance median 94, p90 111, p99 166 over the glow pixels of the user's
+    // frame) and blown white at tint 3.0 in R1. Measured in game on the same pose, mean display luminance of the strip against the scale
+    // (tint 3.0 2.53 2.11 times k): k 0.4 -> 191, 0.25 -> 106, 0.2 -> 78, 0.15 -> 56. k 0.25 (106) matches R2's median (94) to p90 (111) over the glow pixels (R2 fades the glow across the strip with the layer weight from the vertex alpha; R1 draws it uniform).
+    constexpr double kPureEmitterTintCap = 4.0;
+    constexpr double kPureEmitterScale = 0.25;
+    if (!tools && lightmapped && !additive && !cut && usedSlots.find(0) != usedSlots.end() &&
+        usedSlots.find(4) != usedSlots.end() && slotGuids.size() > 4 && slotGuids[0] && slotGuids[4] && constants.size() >= 43) {
+        double emitTint[3];
+        for (int i = 0; i < 3; ++i) emitTint[i] = std::isfinite(constants[40 + i]) ? std::clamp<double>(constants[40 + i], 0.0, kPureEmitterTintCap) : 0.0;
+        if (emitTint[0] + emitTint[1] + emitTint[2] > 0.004) {
+            const AssetRecord* albedoRecord = findRecord(*db, slotGuids[0], kTxtr);
+            const AssetRecord* maskRecord = findRecord(*db, slotGuids[4], kTxtr);
+            std::vector<std::uint8_t> albedoVtf, maskVtf;
+            std::string textureWhy;
+            double albedoMean[3] = {255, 255, 255}, maskMean[3] = {0, 0, 0};
+            if (albedoRecord && maskRecord && slotGuids[0] != slotGuids[4] &&
+                convertTextureWithDb(db, *albedoRecord, TextureOptions{}, albedoVtf, textureWhy) &&
+                vtfSmallestMipMean(albedoVtf, albedoMean) && *std::max_element(albedoMean, albedoMean + 3) < 6.0 &&
+                convertTextureWithDb(db, *maskRecord, TextureOptions{}, maskVtf, textureWhy) &&
+                vtfSmallestMipMean(maskVtf, maskMean) && *std::min_element(maskMean, maskMean + 3) >= 240.0) {
+                std::ostringstream pure;
+                pure << "\"UnlitGeneric\"\n{\n";
+                addVmtParam(pure, "$surfaceprop", surfaceKnown(surface) ? surface : "default");
+                addVmtParam(pure, "$basetexture", vmtTextureName(usedSlots[4]));
+                char colorText[64];
+                std::snprintf(colorText, sizeof(colorText), "[%.4f %.4f %.4f]", emitTint[0] * kPureEmitterScale, emitTint[1] * kPureEmitterScale,
+                              emitTint[2] * kPureEmitterScale);
+                addVmtParam(pure, "$color", colorText);
+                // R2 draws the strip with the decal raster state and no depth write over the coplanar wall panel; without $decal R1 z-fights
+                // the two (dotted dither pattern across the strip in game).
+                if (decal) addVmtParam(pure, "$decal", "1");
+                pure << "}\n";
+                material.name = name;
+                material.vmt = pure.str();
+                material.textures.clear();
+                material.usesLayers = false;
+                TextureRef texture;
+                texture.guid = slotGuids[4];
+                texture.name = usedSlots[4];
+                texture.slot = 4;
+                material.textures.push_back(std::move(texture));
+                return true;
+            }
+        }
+    }
     const bool vertexLit = shader == "VertexLitGeneric";
     std::ostringstream out;
     std::set<std::size_t> referencedSlots;
