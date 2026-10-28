@@ -1759,7 +1759,7 @@ bool buildFoliageVtf(std::vector<std::uint8_t>& albedo, const std::vector<std::u
 bool addMipChain(std::vector<std::uint8_t>& vtf, std::string_view textureName) {
     // Color textures only: normal, opacity, mask, gloss and specular maps keep their single mip (a box filter would
     // de-normalize or blur their channel packing).
-    static const char* const kSkip[] = {"_nml", "_normal", "_bump", "_opa", "_msk", "_bm", "_gls", "_spc", "_exp", "_ilm", "_cav", "_ao"};
+    static const char* const kSkip[] = {"_nml", "_normal", "_bump", "_opa", "_msk", "_bm", "_gls", "_spc", "_exp", "_cav", "_ao"};
     {
         const std::string lowered = lowerAscii(std::string(textureName));
         for (const char* suffix : kSkip) {
@@ -1768,7 +1768,15 @@ bool addMipChain(std::vector<std::uint8_t>& vtf, std::string_view textureName) {
         }
     }
     VtfView view;
-    if (!parseVtfView(vtf, view) || view.mipCount != 1 || std::max(view.width, view.height) < 16) return true;
+    // A chain cut off at the small end (the 1,028 R2 textures stored with fewer mips than log2(size)+1: 2048 px _ilm glow maps with 4
+    // mips) breaks in R1 the same way a single-mip texture does: mp_complex3 stackable_cages01 (_ilm, 2048 px, 4 mips) lit every crate
+    // face lavender-white at any distance while R2 shows only the green LED dots; a complete chain (or an opaque black mask) removes it.
+    if (!parseVtfView(vtf, view) || std::max(view.width, view.height) < 16) return true;
+    {
+        std::uint32_t fullMips = 1;
+        for (std::uint32_t size = std::max(view.width, view.height); size > 1; size >>= 1) ++fullMips;
+        if (view.mipCount >= fullMips) return true;
+    }
     if (view.format != 0 && view.format != 13 && view.format != 14 && view.format != 15) return true;
     if (u16(vtf.data() + 0x18) != 1 || (u32(vtf.data() + 0x14) & (0x100u | 0x4000u)) != 0) return true;  // frames, NOMIP, ENVMAP
     std::vector<std::uint8_t> level;
@@ -2053,6 +2061,32 @@ FlatSheet flatSheetStats(const std::shared_ptr<Database>& db, const AssetRecord&
     return flat;
 }
 
+// Mean colour (0..255, as stored) of the smallest mip of a converted VTF: the first image after the header. Only RGBA8888 and DXT1
+// layouts (what convertTextureWithDb emits for BC1 and the decoded BC7 albedo/spec textures) are read.
+bool vtfSmallestMipMean(const std::vector<std::uint8_t>& vtf, double rgb[3]) {
+    if (vtf.size() < 0x58 || std::memcmp(vtf.data(), "VTF\0", 4) != 0) return false;
+    const std::uint32_t headerSize = u32(vtf.data() + 12);
+    const std::uint32_t format = u32(vtf.data() + 0x34);
+    if (headerSize >= vtf.size()) return false;
+    const std::uint8_t* mip = vtf.data() + headerSize;
+    const std::size_t left = vtf.size() - headerSize;
+    if (format == 0 && left >= 4) {
+        for (int c = 0; c < 3; ++c) rgb[c] = mip[c];
+        return true;
+    }
+    if (format == 13 && left >= 8) {
+        std::array<std::uint8_t, 64> px{};
+        bcdec_bc1(mip, px.data(), 16);
+        for (int c = 0; c < 3; ++c) {
+            double s = 0;
+            for (int p = 0; p < 16; ++p) s += px[p * 4 + c];
+            rgb[c] = s / 16.0;
+        }
+        return true;
+    }
+    return false;
+}
+
 bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view requested,
                            const MaterialOptions& options, Material& material, std::string& error) {
     const std::string name = cleanAssetName(requested, true);
@@ -2324,7 +2358,11 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
     const bool rasterDecal = lightmapped && !tools && overlayDepthState && rasterDecalPreset;
     const bool decal = name.find("/decal/") != std::string::npos ||
         shaderSet.find("decal") != std::string::npos || overlayProfile || rasterDecal;
-    const bool glass = name.find("glass") != std::string::npos || surface == "glass";
+    // Glass is a draw state, not a name: R2 materials named *glass* or with the glass surface property whose draw state is opaque
+    // (ts_window01_opaque, glass_striped_01, glass_thick_unbreakable_03, 59 materials over the 20 maps) are solid in R2. Marking them
+    // translucent made R1 read their non-opacity albedo alpha (ts_window01_col alpha 0.58) as transparency over the empty room
+    // behind (mp_black_water_canal "SERVICE ENTRANCE" window drew as a flat pale-blue pane).
+    const bool glass = (name.find("glass") != std::string::npos || surface == "glass") && (translucent || additive);
 
     // R2 world/atmosphere sheets (godray_*, atmosphere_*) fade by distance to the camera (shader token Adf), so cards
     // vanish as the viewer approaches. R1's own godray materials use the Basic shader with $godray and
@@ -2373,6 +2411,33 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
     addVmtParam(out, "$surfaceprop", safeSurface);
     const bool opaqueAlbedo = !tools && !additive && !translucent && !glass && !cut &&
         shaderSet.find("vcola") == std::string::npos;
+    // Pure metals: R2 stores a black albedo and puts the metal colour in the specular F0 map (sRGB 116..150). R1's stock
+    // LightmappedGeneric draws no usable specular term (shaderlab\CHANNELS.md 2.2), so the surface came out solid black
+    // (mp_black_water_canal diamond plate floor world/metal/metal_diamond_plate_circles01, R2 shows grey steel; the only one of
+    // the 2,795 materials of the 20 maps with an albedo below 6/255 and a specular above 90/255). Such a material takes its
+    // F0 map as albedo, scaled by kMetalAlbedoScale (0.3: sRGB 150 -> linear albedo about 0.09, a dark steel).
+    constexpr double kMetalAlbedoScale = 0.3;
+    bool metalFromSpec = false;
+    if (!tools && !additive && !translucent && !cut && !unlit && surface.rfind("metal", 0) == 0 &&
+        slotGuids.size() > 3 && slotGuids[0] && slotGuids[3] && usedSlots.find(0) != usedSlots.end() &&
+        usedSlots.find(3) != usedSlots.end() && usedSlots.find(23) == usedSlots.end()) {
+        const AssetRecord* albedoRecord = findRecord(*db, slotGuids[0], kTxtr);
+        const AssetRecord* specRecord = findRecord(*db, slotGuids[3], kTxtr);
+        std::vector<std::uint8_t> albedoVtf, specVtf;
+        std::string textureWhy;
+        double albedoMean[3] = {255, 255, 255}, specMean[3] = {0, 0, 0};
+        if (albedoRecord && specRecord &&
+            convertTextureWithDb(db, *albedoRecord, TextureOptions{}, albedoVtf, textureWhy) &&
+            vtfSmallestMipMean(albedoVtf, albedoMean) &&
+            *std::max_element(albedoMean, albedoMean + 3) < 6.0 &&
+            convertTextureWithDb(db, *specRecord, TextureOptions{}, specVtf, textureWhy) &&
+            vtfSmallestMipMean(specVtf, specMean) &&
+            (specMean[0] + specMean[1] + specMean[2]) / 3.0 > 90.0) {
+            metalFromSpec = true;
+            usedSlots[0] = usedSlots[3];
+            slotGuids[0] = slotGuids[3];
+        }
+    }
     // Opacity-map ("Opam") sets: the opacity map in slot 13 is merged into the albedo alpha (see mergeOpacityVtf).
     const bool opacityMap = !tools && shaderSet.find("opam") != std::string::npos &&
         (translucent || additive || cut) && usedSlots.find(0) != usedSlots.end() &&
@@ -2436,9 +2501,22 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
                 addVmtParam(out, "$envmaptint", tint);
             }
         }
+        // R2 emissive = _ilm * emissive tint (float4 #10 rgb, black by default) * scale: "texture alone does not glow" (shaderlab/LIGHTING.md).
+        // mp_complex3 stackable_cages01 has tint (0 0.8 0): green LED dots only, no glow elsewhere. R1 $selfillum with a mask glows the whole
+        // mask-weighted albedo, so a black tint means no $selfillum at all; otherwise the tint goes to $selfIllumTint (HDR values capped at 4).
         if (vertexLit && usedSlots.find(4) != usedSlots.end()) {
-            addVmtParam(out, "$selfillum", "1");
-            param(4, "$selfIllumMask");
+            double emitTint[3] = {1.0, 1.0, 1.0};
+            if (constants.size() >= 43)
+                for (int i = 0; i < 3; ++i) emitTint[i] = std::isfinite(constants[40 + i]) ? std::clamp<double>(constants[40 + i], 0.0, 4.0) : 0.0;
+            if (emitTint[0] + emitTint[1] + emitTint[2] > 0.004) {
+                addVmtParam(out, "$selfillum", "1");
+                param(4, "$selfIllumMask");
+                if (std::fabs(emitTint[0] - 1.0) > 0.004 || std::fabs(emitTint[1] - 1.0) > 0.004 || std::fabs(emitTint[2] - 1.0) > 0.004) {
+                    char tintText[64];
+                    std::snprintf(tintText, sizeof(tintText), "[%.3f %.3f %.3f]", emitTint[0], emitTint[1], emitTint[2]);
+                    addVmtParam(out, "$selfIllumTint", tintText);
+                }
+            }
         }
         param(14, "$detailColor");
         if (!unlit) param(15, "$detailNormal");
@@ -2472,6 +2550,8 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
             double alpha = blendEnabled ? materialOpacity : 1.0;
             if (screenOverlay)
                 for (double& c : color) c = std::min(c, 1.0);
+            if (metalFromSpec)
+                for (double& c : color) c *= kMetalAlbedoScale;
             // mp_complex3 cypress leaves (tree_cypress_tall_leaves_01) in the building shadows are lit by ambient only, R2 also
             // lights them through its leaf translucency, which R1 lacks; the blue haze then dominates the leaf pixels and the
             // trees read blue (more so with distance). Mean leaf-pixel RGB, R2 / R1 gain 1.0 / R1 gain 1.5, same camera:
@@ -2512,6 +2592,55 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
             addVmtParam(out, "$vertexcolor", "1");
         if (shaderSet.find("vcola") != std::string::npos) addVmtParam(out, "$vertexalpha", "1");
         if ((raster & 0x06u) == 0x02u) addVmtParam(out, "$nocull", "1");
+        // R2 UV animation. Shader sets with Uv<k>at tokens carry, per UV set k (1..3), a 2x2 matrix and a scroll velocity in the
+        // CPU constants (6 floats per set: m00 m01 m10 m11 vx vy; UV units per second, checked on homestead_water_01 /
+        // whtwsh_btt against R2 frames: the foam drifts the same way and about as fast as with this proxy). The "UV<n><digits>"
+        // token before "Samp" gives the UV set of every bound texture slot in ascending slot order. Only a scrolling albedo
+        // (slot 0) can be reproduced: R1 world and model shaders have a base transform but no separate bump or detail
+        // transform, so materials that scroll only their normal maps (the *_flowing / *_distortion family) are left static.
+        // The VMT uses TextureTransform (scaleVar $r2uvscale, translateVar $r2uvshift, result $basetexturetransform) with one
+        // LinearRamp per velocity component writing $r2uvshift[0|1]: R1's TextureScroll proxy overwrites the whole transform
+        // matrix and loses the scale (tested: scale 0.25 and 4 looked identical), this chain keeps it. Direction: R2 and R1
+        // foam drift compared on mp_homestead with the velocity used as-is (translate += v * t), no sign flip.
+        if (!hasLayerSlots && !flatSheet.ok && constants.size() >= 6) {
+            const std::size_t samp = shaderSet.find("samp");
+            std::size_t digitsBegin = samp;
+            while (samp != std::string::npos && digitsBegin > 0 && std::isdigit(static_cast<unsigned char>(shaderSet[digitsBegin - 1]))) --digitsBegin;
+            if (samp != std::string::npos && samp - digitsBegin >= 2 && digitsBegin >= 2 && shaderSet.compare(digitsBegin - 2, 2, "uv") == 0) {
+                std::size_t digitIndex = 0;
+                int set = 0;
+                for (std::size_t slot = 0; slot < slotGuids.size(); ++slot) {
+                    if (!slotGuids[slot]) continue;
+                    if (slot == 0) { set = shaderSet[digitsBegin + 1 + digitIndex] - '0'; break; }
+                    ++digitIndex;
+                }
+                if (digitsBegin + 1 + digitIndex < samp && set >= 1 && set <= 3 &&
+                    shaderSet.find("uv" + std::to_string(set) + "at") != std::string::npos &&
+                    constants.size() >= static_cast<std::size_t>(set) * 6) {
+                    const float* c = constants.data() + (set - 1) * 6;
+                    bool sane = true;
+                    for (int i = 0; i < 6; ++i) sane = sane && std::isfinite(c[i]);
+                    const double speed = std::hypot(c[4], c[5]);
+                    if (sane && speed > 1e-4 && speed < 16.0 && c[0] > 0.01f && c[0] < 64.0f && c[3] > 0.01f && c[3] < 64.0f &&
+                        std::fabs(c[1]) < 1e-3f && std::fabs(c[2]) < 1e-3f) {
+                        char text[160];
+                        std::snprintf(text, sizeof(text), "[%.5g %.5g]", c[0], c[3]);
+                        addVmtParam(out, "$r2uvscale", text);
+                        addVmtParam(out, "$r2uvshift", "[0 0]");
+                        addVmtParam(out, "$basetexturetransform", "center 0 0 scale 1 1 rotate 0 translate 0 0");
+                        out << "\t\"Proxies\"\n\t{\n";
+                        for (int axis = 0; axis < 2; ++axis) {
+                            if (std::fabs(c[4 + axis]) < 1e-5f) continue;
+                            std::snprintf(text, sizeof(text), "%.6g", c[4 + axis]);
+                            out << "\t\t\"LinearRamp\"\n\t\t{\n\t\t\t\"rate\" \"" << text << "\"\n\t\t\t\"initialValue\" \"0\"\n\t\t\t\"resultVar\" \"$r2uvshift["
+                                << axis << "]\"\n\t\t}\n";
+                        }
+                        out << "\t\t\"TextureTransform\"\n\t\t{\n\t\t\t\"translateVar\" \"$r2uvshift\"\n\t\t\t\"scaleVar\" \"$r2uvscale\"\n"
+                            << "\t\t\t\"resultVar\" \"$basetexturetransform\"\n\t\t}\n\t}\n";
+                    }
+                }
+            }
+        }
     }
     out << "}\n";
 

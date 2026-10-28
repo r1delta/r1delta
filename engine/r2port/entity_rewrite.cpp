@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cctype>
+#include <cmath>
 #include <map>
 #include <string>
 #include <utility>
@@ -58,8 +59,11 @@ struct EntityView {
     std::size_t duplicateTeamNumberAliasOffset = 0;
     bool hasEditorClass = false;
     bool hasScriptName = false;
+    bool hasDefaultAnim = false;
     bool hasOrigin = false;
     bool hasEffectName = false;
+    bool hasLinkGuid = false;
+    std::string_view linkGuid;
     std::string_view origin;
     Span originSpan;
 };
@@ -403,6 +407,11 @@ bool ScanEntityLump(std::string_view input,
             } else if (keyText == "script_name") {
                 entity.hasScriptName = true;
                 entity.scriptName = valueText;
+            } else if (keyText == "link_guid") {
+                entity.hasLinkGuid = true;
+                entity.linkGuid = valueText;
+            } else if (keyText == "DefaultAnim" || keyText == "defaultanim") {
+                entity.hasDefaultAnim = true;
             } else if (keyText == "effect_name") {
                 entity.hasEffectName = true;
                 entity.effectName = valueText;
@@ -461,7 +470,7 @@ struct ValuePatch {
     std::string_view replacement;
 };
 
-void SortPatches(std::array<ValuePatch, 4>& patches, std::size_t count)
+void SortPatches(std::array<ValuePatch, 5>& patches, std::size_t count)
 {
     for (std::size_t i = 1; i < count; ++i) {
         ValuePatch value = patches[i];
@@ -480,6 +489,173 @@ bool IsEdenSpaceNode(const EntityView& entity, std::string_view mapName)
         && entity.classname == "info_target"
         && entity.hasTargetname
         && entity.targetname == "spacenode";
+}
+
+// R2 level scripts start animations on named props through server script (mp_complex3.nut: thread PlayAnim( rings_pristine,
+// "animated_slow" ) on the timeshift ring gyroscope). R1 never runs those scripts, so the same sequence is requested as the
+// entity's own DefaultAnim, which R1 plays and loops on spawn. The converted model keeps the real R2 sequence of that name.
+struct KeyInsertRule {
+    std::string_view map;
+    std::string_view classname;   // "prop_dynamic" also matches prop_dynamic_lightweight
+    std::string_view scriptName;
+    std::string_view key;
+    std::string_view value;
+};
+
+constexpr std::array<KeyInsertRule, 1> kKeyInsertRules = {{
+    {"mp_complex3", "prop_dynamic", "rings_pristine", "DefaultAnim", "animated_slow"},
+}};
+
+const KeyInsertRule* FindKeyInsertRule(const EntityView& entity, std::string_view mapName)
+{
+    if (!entity.hasScriptName)
+        return nullptr;
+    for (const KeyInsertRule& rule : kKeyInsertRules) {
+        if (rule.map != mapName || entity.scriptName != rule.scriptName)
+            continue;
+        if (entity.classname == rule.classname
+            || (rule.classname == "prop_dynamic" && entity.classname == "prop_dynamic_lightweight"))
+            return &rule;
+    }
+    return nullptr;
+}
+
+// R2 spins props with script_mover_lightweight rotators: the mover rotates forever about its local X axis at
+// rotate_forever_speed degrees per second and drags the props named by its link_to_guid_N keys (their link_guid).
+// R1 has no such entity (the mover record is dropped), so each linked prop gets DefaultAnim naming a looping
+// rotation sequence that modelconv adds to the converted model (r2spin_<p|n><x|y|z>_<speed>, axis in model space).
+// The label is built here and in modelconv's table from the same data; a mover whose axis is not a principal model
+// axis, or whose speed is not positive, is ignored.
+struct Vec3d {
+    double x = 0, y = 0, z = 0;
+};
+
+bool ParseVec3(std::string_view text, Vec3d& out)
+{
+    const std::string copy(text);
+    const char* cursor = copy.c_str();
+    double values[3];
+    for (double& value : values) {
+        char* next = nullptr;
+        value = std::strtod(cursor, &next);
+        if (next == cursor)
+            return false;
+        cursor = next;
+    }
+    out = {values[0], values[1], values[2]};
+    return true;
+}
+
+// Source AngleMatrix columns: forward (x), left (y), up (z); angles are pitch, yaw, roll in degrees.
+void AngleAxes(const Vec3d& angles, Vec3d axes[3])
+{
+    constexpr double kDegToRad = 3.14159265358979323846 / 180.0;
+    const double sp = std::sin(angles.x * kDegToRad), cp = std::cos(angles.x * kDegToRad);
+    const double sy = std::sin(angles.y * kDegToRad), cy = std::cos(angles.y * kDegToRad);
+    const double sr = std::sin(angles.z * kDegToRad), cr = std::cos(angles.z * kDegToRad);
+    axes[0] = {cp * cy, cp * sy, -sp};
+    axes[1] = {sr * sp * cy - cr * sy, sr * sp * sy + cr * cy, sr * cp};
+    axes[2] = {cr * sp * cy + sr * sy, cr * sp * sy - sr * cy, cr * cp};
+}
+
+double Dot(const Vec3d& a, const Vec3d& b)
+{
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+std::string SpinSequenceName(const Vec3d& moverAngles, const Vec3d& propAngles, double speed)
+{
+    if (!(speed > 0.0))
+        return {};
+    Vec3d moverAxes[3], propAxes[3];
+    AngleAxes(moverAngles, moverAxes);
+    AngleAxes(propAngles, propAxes);
+    const double local[3] = {Dot(moverAxes[0], propAxes[0]), Dot(moverAxes[0], propAxes[1]), Dot(moverAxes[0], propAxes[2])};
+    int principal = -1;
+    for (int k = 0; k < 3; ++k)
+        if (std::fabs(std::fabs(local[k]) - 1.0) < 1e-3)
+            principal = k;
+    if (principal < 0)
+        return {};
+    char speedText[32];
+    std::snprintf(speedText, sizeof(speedText), "%g", speed);
+    std::string label = "r2spin_";
+    label += local[principal] > 0.0 ? 'p' : 'n';
+    label += "xyz"[principal];
+    label += '_';
+    for (const char* c = speedText; *c; ++c)
+        label += *c == '.' ? 'p' : *c;
+    return label;
+}
+
+// link_guid -> rotation sequence label for every prop linked to a rotator in this lump (the movers may come before or
+// after their props).
+std::map<std::string, std::string> CollectSpinSequences(std::string_view input)
+{
+    struct Pending {
+        std::string guid;
+        std::string angles;
+        std::string speed;
+        std::vector<std::string> targets;
+    } pending;
+    struct Mover {
+        Vec3d angles;
+        double speed = 0;
+        std::vector<std::string> targets;
+    };
+    std::map<std::string, Vec3d> propAngles;
+    std::vector<Mover> movers;
+    std::size_t pendingBegin = static_cast<std::size_t>(-1);
+    ParseFailure failure;
+    ScanEntityLump(
+        input,
+        false,
+        [&](const EntityView& entity, std::string_view key, std::string_view value) {
+            if (entity.begin != pendingBegin) {
+                pending = {};
+                pendingBegin = entity.begin;
+            }
+            if (key == "link_guid")
+                pending.guid = value;
+            else if (key == "angles")
+                pending.angles = value;
+            else if (key == "rotate_forever_speed")
+                pending.speed = value;
+            else if (StartsWith(key, "link_to_guid_"))
+                pending.targets.emplace_back(value);
+        },
+        [&](const EntityView& entity) {
+            if (entity.begin != pendingBegin)
+                pending = {};
+            pendingBegin = static_cast<std::size_t>(-1);
+            Vec3d angles;
+            const bool hasAngles = !pending.angles.empty() && ParseVec3(pending.angles, angles);
+            if (entity.classname == "script_mover_lightweight") {
+                if (!pending.speed.empty() && !pending.targets.empty()) {
+                    Mover mover;
+                    mover.angles = hasAngles ? angles : Vec3d{};
+                    mover.speed = std::atof(pending.speed.c_str());
+                    mover.targets = pending.targets;
+                    movers.push_back(std::move(mover));
+                }
+            } else if (!pending.guid.empty()) {
+                propAngles[pending.guid] = hasAngles ? angles : Vec3d{};
+            }
+            pending = {};
+        },
+        failure);
+    std::map<std::string, std::string> result;
+    for (const Mover& mover : movers) {
+        for (const std::string& target : mover.targets) {
+            const auto prop = propAngles.find(target);
+            if (prop == propAngles.end())
+                continue;
+            std::string label = SpinSequenceName(mover.angles, prop->second, mover.speed);
+            if (!label.empty())
+                result[target] = std::move(label);
+        }
+    }
+    return result;
 }
 
 void AnalyzeFeatures(const EntityView& entity, MapFeatures& features)
@@ -615,6 +791,7 @@ std::string RewriteEntityLump(std::string_view input,
     output.reserve(input.size());
     std::size_t appendCursor = 0;
     ParseFailure failure;
+    const std::map<std::string, std::string> spinSequences = CollectSpinSequences(input);
 
     const bool parsed = ScanEntityLump(
         input,
@@ -636,8 +813,9 @@ std::string RewriteEntityLump(std::string_view input,
                 return;
             }
 
-            std::array<ValuePatch, 4> patches{};
+            std::array<ValuePatch, 5> patches{};
             std::string renamedEffect;
+            std::string insertedKey;
             std::size_t patchCount = 0;
             AppendRange(output, input, appendCursor, entity.begin);
             const std::size_t entityOutputBegin = output.size();
@@ -671,6 +849,24 @@ std::string RewriteEntityLump(std::string_view input,
                 && options.effectNameMapper(entity.effectName, renamedEffect)) {
                 patches[patchCount++] = {entity.effectNameSpan, renamedEffect};
                 ++result.renamedEffectNames;
+            }
+            if (const KeyInsertRule* insertRule = FindKeyInsertRule(entity, options.mapName);
+                insertRule && !(insertRule->key == "DefaultAnim" && entity.hasDefaultAnim)) {
+                // The record ends with its closing brace; the new key line goes in front of it and copies the line ending.
+                const bool crlf = entity.end >= 3 && input[entity.end - 2] == '\n' && input[entity.end - 3] == '\r';
+                insertedKey.assign("\"").append(insertRule->key).append("\" \"").append(insertRule->value).append("\"");
+                insertedKey.append(crlf ? "\r\n" : "\n");
+                patches[patchCount++] = {{entity.end - 1, entity.end - 1}, insertedKey};
+                ++result.insertedKeys;
+            } else if (entity.hasLinkGuid && !entity.hasDefaultAnim
+                       && (entity.classname == "prop_dynamic" || entity.classname == "prop_dynamic_lightweight")) {
+                const auto spin = spinSequences.find(std::string(entity.linkGuid));
+                if (spin != spinSequences.end()) {
+                    const bool crlf = entity.end >= 3 && input[entity.end - 2] == '\n' && input[entity.end - 3] == '\r';
+                    insertedKey.assign("\"DefaultAnim\" \"").append(spin->second).append("\"").append(crlf ? "\r\n" : "\n");
+                    patches[patchCount++] = {{entity.end - 1, entity.end - 1}, insertedKey};
+                    ++result.insertedKeys;
+                }
             }
             SortPatches(patches, patchCount);
 

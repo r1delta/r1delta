@@ -325,6 +325,53 @@ void TestNpcKeyLowering()
           "NPC key lowering is not idempotent");
 }
 
+void TestKeyInsertion()
+{
+    const std::string ring =
+        "{\n\"script_name\" \"rings_pristine\"\n\"model\" \"models/props/timeshift_rings_animated.mdl\"\n\"classname\" \"prop_dynamic\"\n}\n";
+    RewriteReport report;
+    const std::string output = RewriteEntityLump(ring, RewriteOptions{ "mp_complex3", false, nullptr }, &report);
+    Check(report.insertedKeys == 1 && Has(output, "\"classname\" \"prop_dynamic\"\n\"DefaultAnim\" \"animated_slow\"\n}\n"),
+          "rings_pristine did not get DefaultAnim");
+    RewriteReport again;
+    Check(RewriteEntityLump(output, RewriteOptions{ "mp_complex3", false, nullptr }, &again) == output && again.insertedKeys == 0,
+          "key insertion is not idempotent");
+    const std::string crlf =
+        "{\r\n\"script_name\" \"rings_pristine\"\r\n\"classname\" \"prop_dynamic_lightweight\"\r\n}\r\n";
+    const std::string crlfOut = RewriteEntityLump(crlf, RewriteOptions{ "mp_complex3", false, nullptr }, nullptr);
+    Check(Has(crlfOut, "\"classname\" \"prop_dynamic\"\r\n\"DefaultAnim\" \"animated_slow\"\r\n}\r\n"),
+          "CRLF line ending was not copied or the lightweight class was not renamed");
+    RewriteReport other;
+    Check(RewriteEntityLump(ring, RewriteOptions{ "mp_glitch", false, nullptr }, &other) == ring && other.insertedKeys == 0,
+          "a rule fired on the wrong map");
+    const std::string own =
+        "{\n\"script_name\" \"rings_pristine\"\n\"DefaultAnim\" \"idle\"\n\"classname\" \"prop_dynamic\"\n}\n";
+    Check(RewriteEntityLump(own, RewriteOptions{ "mp_complex3", false, nullptr }, nullptr) == own,
+          "an existing DefaultAnim was overridden");
+}
+
+void TestSpinSequences()
+{
+    // mp_homestead water wheel: mover yaw 56.16 spinning 35 deg/s, props linked by guid, mover listed first and last.
+    const std::string text =
+        "{\n\"rotate_forever_speed\" \"35\"\n\"angles\" \"0 56.1606 0\"\n\"origin\" \"3252.75 -1465.29 70\"\n"
+        "\"link_to_guid_1\" \"10939b77ef0\"\n\"link_to_guid_0\" \"10937890897\"\n\"link_guid\" \"1092a9197b1\"\n"
+        "\"classname\" \"script_mover_lightweight\"\n}\n"
+        "{\n\"angles\" \"-9.34793e-016 56.1606 -164.547\"\n\"model\" \"models/levels_terrain/mp_homestead/water_wheel_exterior.mdl\"\n"
+        "\"link_guid\" \"10937890897\"\n\"classname\" \"prop_dynamic\"\n}\n"
+        "{\n\"angles\" \"3.50835e-015 146.161 90\"\n\"link_guid\" \"10939b77ef0\"\n\"classname\" \"prop_dynamic_lightweight\"\n}\n"
+        "{\n\"angles\" \"0 0 0\"\n\"link_guid\" \"deadbeef\"\n\"classname\" \"prop_dynamic\"\n}\n";
+    RewriteReport report;
+    const std::string output = RewriteEntityLump(text, RewriteOptions{ "mp_homestead", false, nullptr }, &report);
+    Check(report.droppedScriptMoverLightweight == 1 && report.insertedKeys == 2, "rotator links did not produce two DefaultAnim keys");
+    Check(Has(output, "\"classname\" \"prop_dynamic\"\n\"DefaultAnim\" \"r2spin_px_35\"\n}\n"), "wheel exterior got no r2spin_px_35");
+    Check(Has(output, "\"classname\" \"prop_dynamic\"\n\"DefaultAnim\" \"r2spin_pz_35\"\n}\n"), "wheel side got no r2spin_pz_35");
+    Check(!Has(output, "deadbeef\"\n\"classname\" \"prop_dynamic\"\n\"DefaultAnim\""), "an unlinked prop got DefaultAnim");
+    RewriteReport again;
+    Check(RewriteEntityLump(output, RewriteOptions{ "mp_homestead", false, nullptr }, &again) == output && again.insertedKeys == 0,
+          "spin insertion is not idempotent");
+}
+
 } // namespace
 
 int main()
@@ -339,6 +386,8 @@ int main()
         TestByteExactOutputAndLightEnvironment();
         TestEffectNameRename();
         TestNpcKeyLowering();
+        TestKeyInsertion();
+        TestSpinSequences();
     } catch (const std::exception& exception) {
         std::cerr << "entity rewrite test failed: " << exception.what() << '\n';
         return 1;

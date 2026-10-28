@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstring>
 #include <cmath>
 #include <map>
@@ -17,6 +18,7 @@
 #include <stdexcept>
 #include <string_view>
 #include <type_traits>
+#include <vector>
 
 namespace r2port::modelconv {
 namespace {
@@ -896,10 +898,43 @@ void AppendMappedTextures(std::span<const std::uint8_t> source, const Header53& 
     }
 }
 
+// Rotating props. R2 spins these with script_mover_lightweight rotators (rotate_forever_speed degrees per second about
+// the mover's local X axis, props linked by link_guid); R1 has no such entity, so the converted model carries one
+// looping rotation sequence per (axis, speed) the 20 maps use and the entity rewrite sets DefaultAnim to its name.
+// Label: r2spin_<p|n><x|y|z>_<degrees per second, 'p' for a decimal point>; the axis is in model space (the mover
+// axis taken through the prop's own angles). The table is generated from the 20 maps' *_script.ent files by
+// maps/homestead/spintable.py; the entity rewrite derives the same labels (entity_rewrite.cpp, SpinSequenceName).
+struct SpinVariant {
+    const char* label;
+    int axis;       // 0 = X (roll), 1 = Y (pitch), 2 = Z (yaw)
+    float direction;
+    float dps;
+};
+struct SpinModel {
+    const char* name;   // MDL internal name, "models/" prefix removed, lower case
+    std::vector<SpinVariant> variants;
+};
+const std::vector<SpinModel>& SpinModels() {
+    static const std::vector<SpinModel> table = {
+    {"fixtures/fan_ceiling01.mdl", {{"r2spin_nx_225", 0, -1.0f, 225.0f}, {"r2spin_nz_150", 2, -1.0f, 150.0f}, {"r2spin_px_105", 0, 1.0f, 105.0f}, {"r2spin_px_180", 0, 1.0f, 180.0f}, {"r2spin_px_30", 0, 1.0f, 30.0f}, {"r2spin_px_60", 0, 1.0f, 60.0f}, {"r2spin_py_15", 1, 1.0f, 15.0f}}},
+    {"homestead/homestead_wind_turbine.mdl", {{"r2spin_nz_50", 2, -1.0f, 50.0f}}},
+    {"imc_base/imc_fan_large_01.mdl", {{"r2spin_nx_100", 0, -1.0f, 100.0f}, {"r2spin_nx_120", 0, -1.0f, 120.0f}, {"r2spin_nx_25", 0, -1.0f, 25.0f}, {"r2spin_pz_75", 2, 1.0f, 75.0f}, {"r2spin_pz_90", 2, 1.0f, 90.0f}}},
+    {"imc_base/thumper_generator_center_bit_01.mdl", {{"r2spin_ny_270", 1, -1.0f, 270.0f}}},
+    {"levels_terrain/mp_homestead/water_wheel.mdl", {{"r2spin_nx_35", 0, -1.0f, 35.0f}}},
+    {"levels_terrain/mp_homestead/water_wheel_exterior.mdl", {{"r2spin_px_35", 0, 1.0f, 35.0f}}},
+    {"levels_terrain/mp_homestead/water_wheel_machine_side_short.mdl", {{"r2spin_pz_35", 2, 1.0f, 35.0f}}},
+    };
+    return table;
+}
+constexpr std::int32_t kSpinFrames = 72;                  // 5 degrees per frame; R1 interpolates between frames
+constexpr float kSpinRotationScale = 0.0002f;             // radians per RLE unit: 2*pi stays inside an int16
+std::int32_t AppendSpinBlock(std::vector<std::uint8_t>& output, const SpinVariant& variant);
+
 // R1's client-side animating entities index sequence 0 unconditionally, so the converted model
 // keeps the one-frame @ref pose and the ref sequence instead of dropping them.
 void AppendMappedStaticAnimation(std::span<const std::uint8_t> source, const Header53& in,
-                                 std::vector<std::uint8_t>& output, Header52& out, bool degraded) {
+                                 std::vector<std::uint8_t>& output, Header52& out, bool degraded,
+                                 const std::vector<SpinVariant>& spins = {}) {
     const auto animSource = static_cast<std::size_t>(in.localAnimIndex);
     const auto seqSource = static_cast<std::size_t>(in.localSeqIndex);
     AnimDesc53 anim{};
@@ -929,11 +964,12 @@ void AppendMappedStaticAnimation(std::span<const std::uint8_t> source, const Hea
         seq.fadeInTime = seq.fadeOutTime = 0.2f;
     }
 
-    const auto animDestination = static_cast<std::size_t>(AppendZeroBytes(output, sizeof(AnimDesc52)));
-    const auto seqDestination = static_cast<std::size_t>(AppendZeroBytes(output, sizeof(Sequence52)));
-    out.numLocalAnim = 1;
+    const auto tableCount = 1 + spins.size();
+    const auto animDestination = static_cast<std::size_t>(AppendZeroBytes(output, sizeof(AnimDesc52) * tableCount));
+    const auto seqDestination = static_cast<std::size_t>(AppendZeroBytes(output, sizeof(Sequence52) * tableCount));
+    out.numLocalAnim = static_cast<std::int32_t>(tableCount);
     out.localAnimIndex = static_cast<std::int32_t>(animDestination);
-    out.numLocalSeq = 1;
+    out.numLocalSeq = static_cast<std::int32_t>(tableCount);
     out.localSeqIndex = static_cast<std::int32_t>(seqDestination);
 
     const auto dataDestination = AppendBytes(output, sentinel, sizeof(sentinel));
@@ -995,6 +1031,53 @@ void AppendMappedStaticAnimation(std::span<const std::uint8_t> source, const Hea
     StoreRelativeString(output, seqDestination, offsetof(Sequence52, activityNameIndex),
                         degraded ? std::string()
                                  : SourceRecordString(source, seqSource, seq.activityNameIndex, "R2 sequence activity name", false));
+
+    if (spins.empty()) return;
+    // Rotation sequences: one looping animation (kSpinFrames frames, one bone-0 Euler track) per variant. The bone keeps
+    // its rest pose and takes the rotation scale used by the track values.
+    Require(in.numBones >= 1 && out.boneIndex != 0, "spin sequences need bone 0");
+    const Vec3 rotationScale{{kSpinRotationScale, kSpinRotationScale, kSpinRotationScale}};
+    WriteObject(output, static_cast<std::size_t>(out.boneIndex) + offsetof(Bone52, rotationScale), rotationScale);
+    // Conservative rotated bounds: the radius of the box around the reference bounds, in every direction.
+    float radius = 0.0f;
+    for (int k = 0; k < 3; ++k) {
+        const float extent = std::max(std::fabs(seq.bbMin.v[k]), std::fabs(seq.bbMax.v[k]));
+        radius += extent * extent;
+    }
+    radius = std::sqrt(radius);
+    for (std::size_t i = 0; i < spins.size(); ++i) {
+        const auto& spin = spins[i];
+        const auto animOffset = animDestination + (i + 1) * sizeof(AnimDesc52);
+        const auto seqOffset = seqDestination + (i + 1) * sizeof(Sequence52);
+        const auto block = AppendSpinBlock(output, spin);
+        AnimDesc52 spinAnim{};
+        spinAnim.basePtr = -static_cast<std::int32_t>(animOffset);
+        spinAnim.fps = static_cast<float>(kSpinFrames) * spin.dps / 360.0f;
+        spinAnim.flags = 1;   // looping
+        spinAnim.numFrames = kSpinFrames;
+        spinAnim.animIndex = block - static_cast<std::int32_t>(animOffset);
+        WriteObject(output, animOffset, spinAnim);
+        StoreRelativeString(output, animOffset, offsetof(AnimDesc52, nameIndex), std::string("@") + spin.label);
+
+        Sequence52 spinSeq{};
+        spinSeq.basePtr = -static_cast<std::int32_t>(seqOffset);
+        spinSeq.flags = 1;   // looping
+        spinSeq.activity = -1;
+        spinSeq.bbMin = Vec3{{-radius, -radius, -radius}};
+        spinSeq.bbMax = Vec3{{radius, radius, radius}};
+        spinSeq.numBlends = 1;
+        spinSeq.groupSize[0] = spinSeq.groupSize[1] = 1;
+        spinSeq.paramIndex[0] = spinSeq.paramIndex[1] = -1;
+        spinSeq.fadeInTime = spinSeq.fadeOutTime = 0.2f;
+        const std::int16_t spinBlend = static_cast<std::int16_t>(i + 1);
+        const auto spinBlendAt = AppendBytes(output, &spinBlend, sizeof(spinBlend), 2);
+        spinSeq.animIndexIndex = spinBlendAt - static_cast<std::int32_t>(seqOffset);
+        const auto spinWeights = AppendBytes(output, weights.data(), weights.size() * sizeof(float));
+        spinSeq.weightListIndex = spinWeights - static_cast<std::int32_t>(seqOffset);
+        WriteObject(output, seqOffset, spinSeq);
+        StoreRelativeString(output, seqOffset, offsetof(Sequence52, labelIndex), std::string(spin.label));
+        StoreRelativeString(output, seqOffset, offsetof(Sequence52, activityNameIndex), std::string());
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1238,6 +1321,20 @@ std::int32_t AppendR1Block(std::vector<std::uint8_t>& output, const AnimBlock& b
     // The RLE reader may look one value past the last run of a track; keep that inside the MDL.
     output.insert(output.end(), 4, 0);
     return blockStart;
+}
+
+// One looping rotation about a principal axis: bone 0, rotation track on the Euler axis, RLE values in radians / scale.
+std::int32_t AppendSpinBlock(std::vector<std::uint8_t>& output, const SpinVariant& variant) {
+    AnimRecord record;
+    record.bone = 0;
+    record.rotKind = Channel::Track;
+    auto& axis = record.rot[variant.axis];
+    axis.present = true;
+    for (std::int32_t frame = 0; frame < kSpinFrames; ++frame) {
+        const double angle = variant.direction * 2.0 * 3.14159265358979323846 * frame / kSpinFrames;
+        axis.values.push_back(static_cast<std::int16_t>(std::lround(angle / kSpinRotationScale)));
+    }
+    return AppendR1Block(output, AnimBlock{record});
 }
 
 AnimBlock ParseR1Block(std::span<const std::uint8_t> mdl, std::int64_t blockOffset, std::int32_t frames,
@@ -2081,7 +2178,19 @@ bool ConvertModelR2ToR1(const ModelInput& input, ModelOutput& output, std::strin
                 output.note = std::string("bind pose only: ") + failure.what();
             }
         } else {
-            AppendMappedStaticAnimation(sourceMDL, in, mdl, outHdr, false);
+            std::vector<SpinVariant> spins;
+            const std::string internalName = SourceGlobalString(sourceMDL, in.nameOffset, "R2 model name");
+            std::string lowered(internalName);
+            for (auto& ch : lowered) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+            std::replace(lowered.begin(), lowered.end(), '\\', '/');
+            for (const auto& model : SpinModels())
+                if (lowered == model.name) spins = model.variants;
+            AppendMappedStaticAnimation(sourceMDL, in, mdl, outHdr, false, spins);
+            if (!spins.empty()) {
+                // STUDIOHDR_FLAGS_STATIC_PROP models are drawn in their reference pose and never animated.
+                outHdr.flags &= ~static_cast<std::int32_t>(kStudioStaticProp);
+                output.note = "spin: " + std::to_string(spins.size()) + " rotation sequences";
+            }
         }
         AppendMappedAttachments(sourceMDL, in.localAttachmentIndex, in.numLocalAttachments, mdl, outHdr);
         AppendMappedBodyParts(sourceMDL, in, mdl, outHdr);
