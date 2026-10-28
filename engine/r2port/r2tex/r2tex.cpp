@@ -2442,6 +2442,19 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
     // translucent made R1 read their non-opacity albedo alpha (ts_window01_col alpha 0.58) as transparency over the empty room
     // behind (mp_black_water_canal "SERVICE ENTRANCE" window drew as a flat pale-blue pane).
     const bool glass = (name.find("glass") != std::string::npos || surface == "glass") && (translucent || additive);
+    // mp_homestead river (static prop homestead_waterfall_01_sort: body world/homestead/homestead_water_01 + foam
+    // world/homestead/homestead_water_whtwsh_01_btt; user poses eye 2277.81 -889.36 15.34 and 3243.92 -1580.03 -32.66). The converted body was a
+    // flat 0.85 near-black sheet (R2 opacity 0.85 premultiplied over a depth-faded water shader) with a hard outline and no reflection, between
+    // two bands of full-strength white foam: a black patch on the river. R2 draws dark slate water through which the pebbled bed shows, with
+    // ripple reflections and faint foam. R1 cannot do the R2 shore fade: static props ignore the model's per-vertex alpha ($vertexalpha with
+    // or without $vertexcolor/$vertcoloristint gave pixel-identical frames, the body mesh carries alpha 255 inside and 0 at the shore), so the
+    // soft edge is approximated with a lower flat alpha instead. Measured in game (tier0 581B45E9, 1280x720, same two poses, water boxes against R2
+    // mean luminance / texture std): pose 2 R2 69.1 / 17.5, before 65.0 / 19.2 (hard curved edge), now 74.9 / 16.1; pose 1 R2 70.3, before 67.0 (black
+    // patch), now 60.9. R2TEX_HS_WATER=0 returns the old output.
+    const bool hsWater = !tools && !unlit && !lightmapped && surface == "water" && translucent && !additive &&
+        name.rfind("world/homestead/", 0) == 0 && !(std::getenv("R2TEX_HS_WATER") && std::atoi(std::getenv("R2TEX_HS_WATER")) == 0);
+    const bool hsWaterFoam = hsWater && shaderSet.find("lyrtrans") != std::string::npos;
+    const bool hsWaterBody = hsWater && !hsWaterFoam;
 
     // R2 world/atmosphere sheets (godray_*, atmosphere_*) fade by distance to the camera (shader token Adf), so cards
     // vanish as the viewer approaches. R1's own godray materials use the Basic shader with $godray and
@@ -2729,6 +2742,7 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
                 // over R2 (split 74.8, R2 71.2, single 67.4); at envmap scale 1 split matched R2 (70.9)).
                 double k = modelEnv ? 0.25 : 0.5;
                 if (puddleLayers) k = 9.0;   // measured with LightVerify on mp_glitch: prop brightness conv/R2 1.82 at 1, 1.56 at 0.25; mp_lf_stacks pelican crates: silver at 1
+                if (hsWaterBody) k = 0.4;   // with the Fresnel keys below; measured against R2 at the two river poses, see hsWater
                 if (modelEnv) if (const char* e = std::getenv("R2TEX_MODEL_ENVTINT")) k = std::clamp(std::atof(e), 0.0, 4.0);
                 char tint[48];
                 std::snprintf(tint, sizeof(tint), "[%g %g %g]", k, k, k);
@@ -2826,6 +2840,9 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
             if (softCloudSheet) alpha *= softCloudAlpha;
             if (kodaiLowerCloudRing) alpha = 0.0;
             if (puddleLayers) { color[0] *= 0.5; color[1] *= 0.55; color[2] *= 0.65; }
+            // Homestead river (see hsWater above). Body: alpha 0.85 -> 0.6, cool dark tint; foam: alpha 0.4 and a slightly dimmed tint.
+            if (hsWaterBody) { alpha *= 0.7; color[0] *= 0.65; color[1] *= 0.68; color[2] *= 0.78; }
+            if (hsWaterFoam) { alpha *= 0.4; color[0] *= 0.75; color[1] *= 0.75; color[2] *= 0.78; }
             if (flatSheet.ok) {
                 for (int i = 0; i < 3; ++i) color[i] *= flatSheet.rgb[i];
                 alpha *= flatSheet.alpha;
@@ -2876,6 +2893,14 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
             addVmtParam(out, "$fresnelcurvesharpness", "0.01");
             addVmtParam(out, "$envmapfresnel", "1");
             addVmtParam(out, "$envmaplambertian", "0");
+        }
+        // Homestead river body: R1 Fresnel environment term (the stock R1 river props water_sb_03 / water_sb_foamy_01 use the same keys).
+        if (hsWaterBody) {
+            addVmtParam(out, "$fresnelamount", "1");
+            addVmtParam(out, "$fresnelintensity", "2");
+            addVmtParam(out, "$fresnelcurvesharpness", "0.01");
+            addVmtParam(out, "$envmapfresnel", "1");
+            addVmtParam(out, "$envmaplambertian", "2");
         }
         // A layered R2 material uses vertex alpha as the layer blend weight. Once its layers are removed (layers-off),
         // R1 would multiply that graded alpha into the opaque surface and dither it: the mp_glitch ground shimmered
