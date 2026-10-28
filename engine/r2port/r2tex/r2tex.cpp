@@ -1866,6 +1866,46 @@ std::string normalMapName(const std::string& textureName) {
     return std::string(kNormalMapPrefix) + cleanAssetName(textureName, true);
 }
 
+// Emitter glow ramp (pure emitters with a layered, premultiplied draw state; see the pure-emitter block of convertMaterialWithDb). R2 draws
+// out = E * c + dst * (1 - c) with c a function of the interpolated mesh vertex alpha a (0..255): c = clamp((160 - a) / 109, 0, 1)
+// (a 89 -> 0.65, 0 -> 1, 127 -> 0.30, >= 160 -> 0; measured on mp_glitch vr_light_trim_01_totrans against an R2 frame). bspdown rule 24 stores
+// the vertex alpha as the texture coordinate u = (a + 0.5) / 256 (v = 0.5), so the rasteriser interpolates a and this texture applies the clamp
+// per pixel, which two-vertex linear alpha cannot do (the glow ends 47 % across the strip, not at its inner edge). 256 x 4 RGBA8888, RGB white,
+// alpha of texel i = c(i), clamped, one mip. Keep the constants and the 256 width in sync with bspdown vcalpha.cpp.
+constexpr const char* kGlowRampPrefix = "r2tex/glow/";
+constexpr double kGlowAlphaZero = 160.0;
+constexpr double kGlowAlphaSpan = 109.0;
+
+std::string glowRampName(const std::string& textureName) {
+    return std::string(kGlowRampPrefix) + cleanAssetName(textureName, true);
+}
+
+bool buildGlowRampVtf(std::vector<std::uint8_t>& vtf) {
+    constexpr std::uint32_t kWidth = 256, kHeight = 4;
+    constexpr std::uint32_t kFlags = 0x4u | 0x8u | 0x100u | 0x200u;   // CLAMPS | CLAMPT | NOMIP | NOLOD
+    vtf.assign(0x58 + static_cast<std::size_t>(kWidth) * kHeight * 4, 0);
+    std::memcpy(vtf.data(), "VTF\0", 4);
+    put32(vtf.data() + 4, 7); put32(vtf.data() + 8, 5); put32(vtf.data() + 12, 0x58);
+    put16(vtf.data() + 0x10, kWidth); put16(vtf.data() + 0x12, kHeight); put32(vtf.data() + 0x14, kFlags);
+    put16(vtf.data() + 0x18, 1); put16(vtf.data() + 0x1a, 0);
+    putFloat(vtf.data() + 0x20, 0.5f); putFloat(vtf.data() + 0x24, 0.5f); putFloat(vtf.data() + 0x28, 0.5f);
+    putFloat(vtf.data() + 0x30, 1.0f);
+    putI32(vtf.data() + 0x34, 0);   // IMAGE_FORMAT_RGBA8888
+    vtf[0x38] = 1;
+    putI32(vtf.data() + 0x39, -1); vtf[0x3d] = 0; vtf[0x3e] = 0; put16(vtf.data() + 0x3f, 1);
+    put32(vtf.data() + 0x44, 1);
+    vtf[0x50] = 0x30; put32(vtf.data() + 0x54, 0x58);
+    std::uint8_t* texel = vtf.data() + 0x58;
+    for (std::uint32_t y = 0; y < kHeight; ++y) {
+        for (std::uint32_t x = 0; x < kWidth; ++x, texel += 4) {
+            const double c = std::clamp((kGlowAlphaZero - static_cast<double>(x)) / kGlowAlphaSpan, 0.0, 1.0);
+            texel[0] = texel[1] = texel[2] = 255;
+            texel[3] = static_cast<std::uint8_t>(std::lround(255.0 * c));
+        }
+    }
+    return true;
+}
+
 // Encodes 16 RGB texels (row-major 4x4) as one DXT1 four-colour block: principal axis fit, then nearest palette entry.
 void encodeBc1Block(const std::uint8_t (&px)[16][3], std::uint8_t* out) {
     float mean[3] = {0, 0, 0};
@@ -2511,17 +2551,21 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
     constexpr double kPureEmitterTintCap = 4.0;
     constexpr double kPureEmitterScale = 0.25;
     // Layered pure emitters (mp_glitch vr_light_trim_01_totrans: float4 #10 3.0 2.53 2.11, layer slot 22 present) are not drawn flat in R2:
-    // the shader set is a premultiplied blend (ONE / INV_SRC_ALPHA) whose weight c comes from the mesh vertex alpha, out = E * c + dst * (1 - c)
+    // the shader set is a premultiplied blend (ONE / INV_SRC_ALPHA) whose weight c comes from the mesh vertex alpha a, out = E * c + dst * (1 - c)
     // (measured against the R2 frame at the mp_glitch ramp panel: with c = 0.65 at the vertex alpha 89 edge, E = display 177 149 121 and
     // dst = panel 23 55 90 give the observed glow pixel 123 116 110 on all three channels). The glow is brightest at the outer edge of the 32
-    // unit strip and gone about half way in; c is about (160 - alpha) / 109 clamped to 0..1 (alpha 89 -> 0.65, 0 -> 1, 127 -> 0.3, >= 160 -> 0).
-    // bspdown rule 24 (vcalpha.cpp, kEmitterGlowMaterials) rewrites the vertex alpha of these materials to that c; the VMT here blends with it
-    // ($translucent 1, $vertexalpha 1) and carries E. Without the rule the R2 alpha would draw the glow inverted (dim at the edge, strongest
-    // inward), so keep the name list there in sync with this predicate (only world/vr_training/vr_light_trim_01_totrans over the 20 maps).
-    // E is the HDR tint compressed with a power curve (R2 tone-maps the highlight toward grey): $color = 0.417 * tint^0.7 = 0.90 0.80 0.70, which
-    // draws as display 177 149 121 in R1's unlit path (display about 197 * $color), the R2 value above. R2TEX_EMITTER_GLOW=0 keeps the flat strip.
-    constexpr double kPureEmitterGlowGain = 0.417;
-    constexpr double kPureEmitterGlowExponent = 0.7;
+    // unit strip and gone about half way in (c = clamp((160 - a) / 109, 0, 1): a 89 -> 0.65, 0 -> 1, 127 -> 0.3, >= 160 -> 0).
+    // The VMT is UnlitGeneric $translucent 1 of a generated ramp texture (buildGlowRampVtf, name r2tex/glow/<_ilm name>; RGB white, alpha = c at
+    // the texel a) times $color = E; bspdown rule 24 (vcalpha.cpp, kEmitterGlowMaterials) writes each vertex's alpha as its texture coordinate
+    // u = (a + 0.5) / 256, so the interpolated coordinate reproduces R2's per-pixel clamp of the interpolated alpha (a plain $vertexalpha ramp
+    // between the two vertex rows cannot clip: the glow then spread over the whole strip like a veil). Without the rule the coordinates are the
+    // R2 tiling and the glow is wrong, so the name list there must stay in sync with this predicate (only
+    // world/vr_training/vr_light_trim_01_totrans over the 20 maps).
+    // $color is calibrated on the R1 frame against R2 (display 109 104 100 against R2 96 94 99 at the same pixel row of the panel strip, profile
+    // of the glow band 470..498 within 15 of R2 on all channels): the HDR tint compressed as 0.585 * tint^0.45 (0.959 0.887 0.818 for 3.0 2.53 2.11).
+    // R2TEX_EMITTER_GLOW=0 keeps the flat opaque strip.
+    constexpr double kPureEmitterGlowGain = 0.585;
+    constexpr double kPureEmitterGlowExponent = 0.45;
     if (!tools && lightmapped && !additive && !cut && usedSlots.find(0) != usedSlots.end() &&
         usedSlots.find(4) != usedSlots.end() && slotGuids.size() > 4 && slotGuids[0] && slotGuids[4] && constants.size() >= 43) {
         double emitTint[3];
@@ -2540,9 +2584,9 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
                 std::ostringstream pure;
                 pure << "\"UnlitGeneric\"\n{\n";
                 addVmtParam(pure, "$surfaceprop", surfaceKnown(surface) ? surface : "default");
-                addVmtParam(pure, "$basetexture", vmtTextureName(usedSlots[4]));
                 const char* glowEnv = std::getenv("R2TEX_EMITTER_GLOW");
                 const bool glow = hasLayerSlots && translucent && !(glowEnv && std::atoi(glowEnv) == 0);
+                addVmtParam(pure, "$basetexture", vmtTextureName(glow ? glowRampName(usedSlots[4]) : usedSlots[4]));
                 char colorText[64];
                 if (glow) {
                     std::snprintf(colorText, sizeof(colorText), "[%.4f %.4f %.4f]", kPureEmitterGlowGain * std::pow(emitTint[0], kPureEmitterGlowExponent),
@@ -2553,10 +2597,7 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
                                   emitTint[2] * kPureEmitterScale);
                 }
                 addVmtParam(pure, "$color", colorText);
-                if (glow) {
-                    addVmtParam(pure, "$translucent", "1");
-                    addVmtParam(pure, "$vertexalpha", "1");
-                }
+                if (glow) addVmtParam(pure, "$translucent", "1");
                 // R2 draws the strip with the decal raster state and no depth write over the coplanar wall panel; without $decal R1 z-fights
                 // the two (dotted dither pattern across the strip in game).
                 if (decal) addVmtParam(pure, "$decal", "1");
@@ -2567,8 +2608,13 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
                 material.usesLayers = false;
                 TextureRef texture;
                 texture.guid = slotGuids[4];
-                texture.name = usedSlots[4];
                 texture.slot = 4;
+                if (glow) {
+                    texture.name = glowRampName(usedSlots[4]);
+                    texture.transform = TextureTransform::glowRamp;
+                } else {
+                    texture.name = usedSlots[4];
+                }
                 material.textures.push_back(std::move(texture));
                 return true;
             }
@@ -3142,6 +3188,13 @@ bool ConvertTexture(std::string_view name, std::vector<std::uint8_t>& vtf,
         ref.guid = textureGuid(original); ref.name = original; ref.transform = TextureTransform::normalRgb;
         return ConvertTexture(ref, vtf, options, error);
     }
+    if (cleaned.rfind(kGlowRampPrefix, 0) == 0) {
+        const std::string original = cleaned.substr(std::strlen(kGlowRampPrefix));
+        if (!validAssetName(original)) { vtf.clear(); if (error) *error = "invalid texture path"; return false; }
+        TextureRef ref;
+        ref.guid = textureGuid(original); ref.name = original; ref.transform = TextureTransform::glowRamp;
+        return ConvertTexture(ref, vtf, options, error);
+    }
     if (cleaned.rfind(kOpacityMergePrefix, 0) == 0) {
         TextureRef ref;
         std::uint64_t opacityGuid = 0;
@@ -3184,6 +3237,21 @@ bool ConvertTexture(const TextureRef& texture, std::vector<std::uint8_t>& vtf,
                     const TextureOptions& options, std::string* error) {
     if (texture.transform == TextureTransform::none)
         return ConvertTexture(texture.guid, vtf, options, error);
+    if (texture.transform == TextureTransform::glowRamp) {
+        vtf.clear();
+        try {
+            auto db = getDatabase();
+            if (!db) { if (error) *error = "r2tex::Open has not succeeded"; return false; }
+            if (!findRecord(*db, texture.guid, kTxtr)) { if (error) *error = "unresolved texture GUID"; return false; }
+            buildGlowRampVtf(vtf);
+            if (error) error->clear();
+            return true;
+        } catch (const std::exception& e) {
+            vtf.clear();
+            if (error) *error = e.what();
+            return false;
+        }
+    }
     vtf.clear();
     try {
         auto db = getDatabase();
@@ -3322,6 +3390,10 @@ bool FamilyOfTexture(std::string_view name, std::uint32_t& family) {
             guid = textureGuid(original);
         } else if (cleaned.rfind(kNormalMapPrefix, 0) == 0) {
             const std::string original = cleaned.substr(std::strlen(kNormalMapPrefix));
+            if (!validAssetName(original)) return false;
+            guid = textureGuid(original);
+        } else if (cleaned.rfind(kGlowRampPrefix, 0) == 0) {
+            const std::string original = cleaned.substr(std::strlen(kGlowRampPrefix));
             if (!validAssetName(original)) return false;
             guid = textureGuid(original);
         } else if (cleaned.rfind(kOpacityMergePrefix, 0) == 0) {

@@ -1,6 +1,6 @@
 // Origin: C:\Users\r3muxd\tmp\r2port\bspdown. Bundled in r1delta under GPL-3.0.
 // Rule 22: opaque vertex colour alpha for vertex-tinted single-layer world materials.
-// Rule 24: emitter glow weight in the vertex alpha of layered pure-emitter world materials.
+// Rule 24: emitter glow ramp coordinate for layered pure-emitter world materials.
 //
 // R2 shader sets with the `vcolt` token multiply the albedo by the mesh vertex colour (a real tint: mp_black_water_canal's red
 // beacon_metal_panel_grey_02_vc walls carry (139,57,57)). r2tex now emits `$vertexcolor 1` for these materials (kTintedVertexWorldMaterials in
@@ -8,8 +8,8 @@
 // vertex alpha of an opaque LightmappedGeneric as dithered opacity: measured in game on mp_black_water_canal cap0, high-frequency frame noise of the
 // wall 1.47 with `$vertexcolor 1` and the original alpha, 0.76 (= the untinted baseline) with alpha 255.
 //
-// Vertex layouts of all four lit/unlit lumps keep the colour at +16..+19 (RGBA); the alpha byte is +19. Vertices are owned by one sort (one
-// material) so rewriting by material name is exact. Meshes of other materials are untouched.
+// Vertex layouts of all four lit/unlit lumps keep the albedo texture coordinate at +8 (2 floats) and the colour at +16..+19 (RGBA); the alpha byte
+// is +19. Vertices are owned by one sort (one material) so rewriting by material name is exact. Meshes of other materials are untouched.
 #include "internal.hpp"
 
 #include <algorithm>
@@ -44,21 +44,24 @@ const char* const kOpaqueVertexAlphaMaterials[] = {
 };
 
 // Rule 24. Layered pure emitters (r2tex ConvertMaterial pure-emitter route with the glow variant: black albedo, white _ilm, HDR emissive tint, layer
-// slot 22, premultiplied blend) are drawn by R2 as out = E * c + dst * (1 - c) with c a function of the vertex alpha (mp_glitch
-// vr_light_trim_01_totrans: the 32 unit trim strips carry alpha 89 on the outer vertices and 255 on the inner ones, other meshes of the material
-// 0 / 63 / 127 / 191; R2 shows a soft warm glow that is strongest at the outer edge). Measured on the R2 frame at the ramp wall panel
-// (eye 267.20 -201.98 316.03): the glow pixel at the alpha 89 edge is 123 116 110 on dst 23 55 90 with E = 177 149 121, which gives c = 0.65 on
-// all three channels, and the glow is gone about 47 % across the strip, so c = clamp((160 - alpha) / 109, 0, 1) (alpha 0 -> 1, 63 -> 0.89,
-// 89 -> 0.65, 127 -> 0.30, 160 and above -> 0). The R1 VMT (UnlitGeneric, $translucent 1, $vertexalpha 1, $color = E) blends with the vertex alpha as
-// out = $color * alpha + dst * (1 - alpha), the same equation, so the vertex alpha is rewritten to c * 255. R1 interpolates it linearly between the
-// vertices, so the glow falls to 0 at the inner edge instead of at 47 %; the integrated glow over the strip is the same (0.325 of E).
-// Without the rule the R2 alpha would draw the glow inverted (dim at the outer edge, solid inward). Keep the list in sync with the r2tex pure-emitter glow
-// predicate (hasLayerSlots && translucent); only world/vr_training/vr_light_trim_01_totrans over the 20 maps qualifies.
+// slot 22, premultiplied blend) are drawn by R2 as out = E * c + dst * (1 - c) with c a function of the interpolated mesh vertex alpha a
+// (mp_glitch vr_light_trim_01_totrans: the 32 unit trim strips carry alpha 89 on the outer vertices and 255 on the inner ones, other meshes of the
+// material 0 / 63 / 127 / 191; R2 shows a soft warm glow that is strongest at the outer edge). Measured on the R2 frame at the ramp wall panel
+// (eye 267.20 -201.98 316.03): the glow pixel at the alpha 89 edge is 123 116 110 on dst 23 55 90 with E = 177 149 121, which gives c = 0.65 on all
+// three channels, and the glow is gone about 47 % across the strip, so c = clamp((160 - a) / 109, 0, 1) (a 0 -> 1, 63 -> 0.89, 89 -> 0.65, 127 -> 0.30,
+// 160 and above -> 0).
+// R1 cannot apply that clamp per pixel from the vertex alpha: $vertexalpha interpolates the two vertex rows linearly, so a first version that stored c
+// in the alpha byte spread the glow over the whole strip (veil over the panel, measured against the R2 frame). Instead the r2tex VMT is an
+// UnlitGeneric $translucent 1 of a generated ramp texture (r2tex/glow/<_ilm name>, 256 x 4 RGBA8888, clamped, alpha of texel i = c(i)) and this
+// rule stores the vertex alpha as the albedo texture coordinate: u = (a + 0.5) / 256, v = 0.5, alpha byte 255. The rasteriser interpolates a
+// (perspective correct, like R2 does with the alpha), the texture lookup then evaluates c per pixel, clamp included. The ramp texel centre of a is
+// (a + 0.5) / 256, so the vertex values hit texel centres exactly. Keep the list and the 256 width in sync with r2tex (kGlowRampPrefix,
+// buildGlowRampVtf); only world/vr_training/vr_light_trim_01_totrans qualifies over the 20 maps. The R2 tiling of this material's texture
+// coordinates is dropped (the source texture is a uniform white mask, so nothing is lost).
 const char* const kEmitterGlowMaterials[] = {
     "world/vr_training/vr_light_trim_01_totrans",
 };
-constexpr double kGlowAlphaZero = 160.0;  // vertex alpha at which the R2 glow weight reaches 0
-constexpr double kGlowAlphaSpan = 109.0;  // alpha range over which the weight rises from 0 to 1 (alpha 51 and below -> 1)
+constexpr unsigned kGlowRampWidth = 256;
 
 struct VtxType {
     uint32_t lump;
@@ -80,13 +83,14 @@ std::string normalized(std::string n) {
     return n;
 }
 
-struct AlphaPassStats {
+struct VertexPassStats {
     size_t meshesHit = 0, verticesWritten = 0, verticesChanged = 0;
 };
 
-// Rewrites the alpha byte of every vertex of the meshes whose material name is in `targets`; `map` gives the new alpha for the old one.
-template <class Map>
-AlphaPassStats rewriteVertexAlpha(Ctx& c, const std::set<std::string>& targets, Map map) {
+// Calls `edit(vertexRecord)` once for every vertex referenced by the meshes whose material name is in `targets`; `edit` returns true when it
+// changed the record.
+template <class Edit>
+VertexPassStats rewriteVertices(Ctx& c, const std::set<std::string>& targets, Edit edit) {
     const std::vector<MeshR2> meshes = view<MeshR2>(c.lump[L_MESHES], "meshes (0x50)");
     const std::vector<Sort> sorts = view<Sort>(c.lump[L_SORTS], "material sorts (0x52)");
     const Bytes& texdata = c.lump[L_TEXDATA];
@@ -117,7 +121,7 @@ AlphaPassStats rewriteVertexAlpha(Ctx& c, const std::set<std::string>& targets, 
         return yes;
     };
 
-    AlphaPassStats s;
+    VertexPassStats s;
     for (const MeshR2& m : meshes) {
         if (m.numTriangles == 0 || !isTargetSort(m.materialSort)) continue;
         const VtxType& T = kVtxTypes[(m.flags >> 9) & 3];
@@ -133,9 +137,7 @@ AlphaPassStats rewriteVertexAlpha(Ctx& c, const std::set<std::string>& targets, 
             if (!seen.insert(v).second) continue;
             const size_t o = (size_t)v * T.stride;
             if (o + T.stride > vb.size()) continue;
-            const uint8_t a = map(vb[o + 19]);
-            if (vb[o + 19] != a) s.verticesChanged++;
-            vb[o + 19] = a;
+            if (edit(&vb[o])) s.verticesChanged++;
             s.verticesWritten++;
         }
         s.meshesHit++;
@@ -147,19 +149,27 @@ AlphaPassStats rewriteVertexAlpha(Ctx& c, const std::set<std::string>& targets, 
 
 void convertVertexColorAlpha(Ctx& c) {
     const std::set<std::string> targets(std::begin(kOpaqueVertexAlphaMaterials), std::end(kOpaqueVertexAlphaMaterials));
-    const AlphaPassStats s = rewriteVertexAlpha(c, targets, [](uint8_t) -> uint8_t { return 255; });
+    const VertexPassStats s = rewriteVertices(c, targets, [](uint8_t* vertex) {
+        const bool changed = vertex[19] != 255;
+        vertex[19] = 255;
+        return changed;
+    });
     c.say("[rule 22] vertex colour alpha of the listed vertex-tinted single-layer world materials (%zu names) forced to 255: %zu meshes, %zu vertices (%zu changed); R2 ignores it for these materials (no vcola token) and R1 would read it as dithered opacity",
           targets.size(), s.meshesHit, s.verticesWritten, s.verticesChanged);
 }
 
-void convertEmitterGlowAlpha(Ctx& c) {
+void convertEmitterGlowRamp(Ctx& c) {
     const std::set<std::string> targets(std::begin(kEmitterGlowMaterials), std::end(kEmitterGlowMaterials));
-    const AlphaPassStats s = rewriteVertexAlpha(c, targets, [](uint8_t a) -> uint8_t {
-        const double w = std::clamp((kGlowAlphaZero - (double)a) / kGlowAlphaSpan, 0.0, 1.0);
-        return (uint8_t)std::lround(255.0 * w);
+    const VertexPassStats s = rewriteVertices(c, targets, [](uint8_t* vertex) {
+        const float u = ((float)vertex[19] + 0.5f) / (float)kGlowRampWidth;
+        const float v = 0.5f;
+        std::memcpy(vertex + 8, &u, 4);
+        std::memcpy(vertex + 12, &v, 4);
+        vertex[19] = 255;
+        return true;
     });
-    c.say("[rule 24] vertex alpha of the layered pure-emitter world materials (%zu names) rewritten to the R2 glow weight clamp((160 - alpha) / 109, 0, 1) * 255: %zu meshes, %zu vertices (%zu changed); the r2tex VMT blends with it ($translucent 1, $vertexalpha 1)",
-          targets.size(), s.meshesHit, s.verticesWritten, s.verticesChanged);
+    c.say("[rule 24] layered pure-emitter world materials (%zu names): vertex alpha a stored as the texture coordinate ((a + 0.5) / %u, 0.5) for the r2tex glow ramp texture (clamp((160 - a) / 109)), alpha byte 255: %zu meshes, %zu vertices",
+          targets.size(), kGlowRampWidth, s.meshesHit, s.verticesWritten);
 }
 
 }  // namespace detail

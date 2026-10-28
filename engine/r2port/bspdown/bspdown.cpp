@@ -143,7 +143,7 @@ std::vector<uint8_t> DowngradeBsp(const uint8_t* data, size_t size, const Option
     convertMeshes(c);
     convertVertexFrames(c);
     convertVertexColorAlpha(c);
-    convertEmitterGlowAlpha(c);
+    convertEmitterGlowRamp(c);
     convertPhysics(c);
     convertPhysicsTriangles(c);
     convertCubemaps(c);

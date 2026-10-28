@@ -21,7 +21,11 @@ enum class TextureTransform : std::uint8_t {
     // r2tex/opamerge/<albedo guid>_<opacity guid>); RGBA8 output.
     opacityMerge,
     // Normal map (slots 1/24) re-encoded from R2 slopes to R1 unit-normal DXT1 (synthetic name r2tex/nrm/<texture name>).
-    normalRgb
+    normalRgb,
+    // Emitter glow weight ramp (RGBA8 256x4, RGB white, alpha = glow weight c(a) = clamp((160 - a) / 109) for the texel a, a = R2 vertex alpha;
+    // synthetic name r2tex/glow/<emissive mask texture name>). bspdown rule 24 writes a vertex's texture coordinate as ((a + 0.5) / 256, 0.5)
+    // so the interpolated coordinate reproduces R2's per-pixel function of the interpolated vertex alpha. The source texture is not decoded.
+    glowRamp
 };
 
 enum class LayerMode : std::uint8_t {
@@ -120,7 +124,7 @@ bool ListMapMaterials(const std::uint8_t* bspBytes,
 // Package family (the unit r2tex decodes and caches) that holds the asset a request will convert. False when
 // the name does not resolve; the request then misses or is cheap. Safe to call from any thread after Open.
 bool FamilyOfMaterial(std::string_view name, std::uint32_t& family);
-// Accepts the synthetic names ConvertMaterial emits (r2tex/opaque/, r2tex/opamerge/, r2tex/layer_masks/).
+// Accepts the synthetic names ConvertMaterial emits (r2tex/opaque/, r2tex/opamerge/, r2tex/layer_masks/, r2tex/nrm/, r2tex/glow/).
 bool FamilyOfTexture(std::string_view name, std::uint32_t& family);
 // True while the family's decoded paks are in the cache (a conversion in it needs no RTech decode).
 bool IsFamilyResident(std::uint32_t family);
