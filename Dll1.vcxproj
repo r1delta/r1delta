@@ -286,6 +286,8 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="engine\r2port\particles\r2_particle_requests.inc" />
     <ClInclude Include="engine\filesystem\r1_map_pack_material_provider.h" />
     <ClInclude Include="engine\r2port\shaders\r2_shader_cache.h" />
+    <ClInclude Include="engine\r2port\ao\r2_ao.h" />
+    <ClInclude Include="engine\r2port\ao\dxbc_patch.h" />
     <ClInclude Include="engine\r2port\shaders\r2_shader_override.h" />
     <ClInclude Include="engine\r2port\shaders\r2_shader_compiler.h" />
     <ClInclude Include="engine\r2port\shaders\r2_shader_sources.h" />
@@ -510,6 +512,8 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="engine\r2port\particles\pcfconv.cpp" />
     <ClCompile Include="engine\filesystem\r1_map_pack_material_provider.cpp" />
     <ClCompile Include="engine\r2port\shaders\r2_shader_cache.cpp" />
+    <ClCompile Include="engine\r2port\ao\r2_ao.cpp" />
+    <ClCompile Include="engine\r2port\ao\dxbc_patch.cpp" />
     <ClCompile Include="engine\r2port\shaders\r2_shader_override.cpp" />
     <ClCompile Include="engine\r2port\shaders\r2_shader_compiler.cpp" />
     <ClCompile Include="engine\r2port\r2tex\r2tex.cpp">

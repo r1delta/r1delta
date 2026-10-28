@@ -359,6 +359,19 @@ CvarCheck CheckIntCvar(const char* name, int wanted)
     }
 }
 
+// Frame cap of a background window: 60 unless R1DELTA_BACKGROUND_FPS names another value (0 = uncapped, for GPU cost
+// measurements). The watchdog below holds fps_max at this value.
+float BackgroundFpsCap()
+{
+    char value[16]{};
+    const DWORD length = GetEnvironmentVariableA("R1DELTA_BACKGROUND_FPS", value, static_cast<DWORD>(sizeof(value)));
+    if (length == 0 || length >= sizeof(value))
+        return 60.0f;
+    char* end = nullptr;
+    const float parsed = std::strtof(value, &end);
+    return end != value && parsed >= 0.0f ? parsed : 60.0f;
+}
+
 DWORD WINAPI CvarWatchdogMain(LPVOID)
 {
     for (unsigned tick = 0;; ++tick) {
@@ -368,11 +381,12 @@ DWORD WINAPI CvarWatchdogMain(LPVOID)
             continue;
 
         char commands[256]{};
-        const CvarCheck fps = CheckFloatCvar("fps_max", 60.0f);
+        const float fpsCap = BackgroundFpsCap();
+        const CvarCheck fps = CheckFloatCvar("fps_max", fpsCap);
         if (fps == CvarCheck::Gone)
             return 0;
         if (fps == CvarCheck::Differs)
-            AppendCommand(commands, sizeof(commands), "fps_max 60\n");
+            AppendCommand(commands, sizeof(commands), (std::string("fps_max ") + std::to_string(static_cast<int>(fpsCap)) + "\n").c_str());
         const CvarCheck vsync = CheckIntCvar("mat_vsync", 0);
         if (vsync == CvarCheck::Gone)
             return 0;
@@ -549,7 +563,7 @@ void AppendEngineArguments(std::string& commandLine)
     appendIfMissing("-nomessagebox", "-nomessagebox");
     appendIfMissing("+cl_mouseenable", "+cl_mouseenable 0");
     appendIfMissing("+cl_mouselook", "+cl_mouselook 0");
-    appendIfMissing("+fps_max", "+fps_max 60");
+    appendIfMissing("+fps_max", (std::string("+fps_max ") + std::to_string(static_cast<int>(BackgroundFpsCap()))).c_str());
     appendIfMissing("+mat_vsync", "+mat_vsync 0");
 }
 

@@ -22,6 +22,9 @@
     <Filter Include="engine\r2port\shaders">
       <UniqueIdentifier>{a2b2c3d4-e5f6-7890-abcd-ef1234567894}</UniqueIdentifier>
     </Filter>
+    <Filter Include="engine\r2port\ao">
+      <UniqueIdentifier>{5e1c2a7f-3b8d-4f61-9a2e-7d4c0b6e8a13}</UniqueIdentifier>
+    </Filter>
     <Filter Include="engine\r2port\modelconv">
       <UniqueIdentifier>{a2b2c3d4-e5f6-7890-abcd-ef1234567893}</UniqueIdentifier>
     </Filter>
@@ -226,6 +229,12 @@
     </ClInclude>
     <ClInclude Include="engine\r2port\shaders\r2_shader_cache.h">
       <Filter>engine\r2port\shaders</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\ao\r2_ao.h">
+      <Filter>engine\r2port\ao</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\ao\dxbc_patch.h">
+      <Filter>engine\r2port\ao</Filter>
     </ClInclude>
     <ClInclude Include="engine\r2port\shaders\r2_shader_override.h">
       <Filter>engine\r2port\shaders</Filter>
@@ -892,6 +901,12 @@
     </ClCompile>
     <ClCompile Include="engine\r2port\shaders\r2_shader_cache.cpp">
       <Filter>engine\r2port\shaders</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\ao\r2_ao.cpp">
+      <Filter>engine\r2port\ao</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\ao\dxbc_patch.cpp">
+      <Filter>engine\r2port\ao</Filter>
     </ClCompile>
     <ClCompile Include="engine\r2port\shaders\r2_shader_override.cpp">
       <Filter>engine\r2port\shaders</Filter>

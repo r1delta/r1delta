@@ -48,6 +48,7 @@
 #include "r2port_provider.h"
 #include "engine/r2port/shaders/r2_shader_cache.h"
 #include "engine/r2port/shaders/r2_shader_override.h"
+#include "engine/r2port/ao/r2_ao.h"
 #include "r2_material_provider.h"
 #include "legacy_ds_sound_tables.h"
 #include "soundscript_parity.h"
@@ -9398,6 +9399,8 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 			FCVAR_ARCHIVE);
 		R1DAssert(hudwarpConVars.useGpu);
 		R1DAssert(hudwarpConVars.disable);
+		if (!IsDedicatedServer())
+			r2port::ao::RegisterConVars();
 		// The one visibility control, written by the console, cfgs and the private match
 		// Show/Hide button alike. A client-hosted server starts hidden and is reset to hidden
 		// when it shuts down (a new map, reload or disconnect, but not changelevel between
@@ -9838,6 +9841,7 @@ void __stdcall LoaderNotificationCallback(
 		}
 		InstallMaterialResourceOwnership(G_matsystem);
 		r2port::shaders::InstallShaderOverrides(G_matsystem);
+		r2port::ao::Install(G_matsystem);
 		SetupReflexMaterialSystemHooks(G_matsystem);
 		if (!IsR1ODedicatedServer()) {
 			SetupHudWarpMatSystemHooks();
