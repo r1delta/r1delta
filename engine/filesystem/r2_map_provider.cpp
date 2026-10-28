@@ -85,7 +85,7 @@ constexpr uint32_t kGameLump = 0x23;
 
 // Folded into the on-disk cache fingerprint together with entity_rewrite::kRewriteVersion.
 // Bump when the vendored bspdown converter or the provider's BSP post-processing changes output.
-constexpr uint32_t kConvertedBspCacheVersion = 19;
+constexpr uint32_t kConvertedBspCacheVersion = 20;
 
 // Raised onto the z of every info_spawnpoint_flag origin in lump 0 (see entity_rewrite::RaiseFlagSpawnOrigins).
 // The R1 server drops the spawnpoint back to the floor; one that starts inside solid is removed.
@@ -1342,6 +1342,7 @@ bool ApplyConverterScaleToken(bspdown::Options& options, const std::string& toke
     else if (key == "sun-scale") options.sunScale = scale;
     else if (key == "pbr-scale") options.pbrScale = scale;
     else if (key == "cube-scale") options.cubemapScale = scale;
+    else if (key == "cube-diag") options.cubemapDiag = static_cast<int>(value);   // diagnostic: 1 = flat colour per cube frame, 2 = all neutral
     else return false;
     return true;
 }
@@ -1362,6 +1363,7 @@ void ApplyConverterVariant(bspdown::Options& options, const std::string& variant
         else if (token == "empty-shadow-meshes") options.emptyShadowMeshes = true;
         else if (token == "no-sun-alpha") options.lightmapSunAlpha = false;
         else if (token == "no-rtl") options.rtlConvert = false;
+        else if (token == "cubemaps-split") options.cubemaps = bspdown::CubemapMode::Split;   // opt-in: per-mesh R2 cubes via patch materials
         else if (token == "no-collapse-envs") options.collapseEnvs = false;
         else if (token == "pbr-keep") options.pbrLights = false;
         else if (token == "flag2") options.worldLightFlagBit2 = true;
@@ -1770,10 +1772,10 @@ std::string MapPackageFingerprint(const std::shared_ptr<MapState>& state)
     }
     metadata.append("entity-rewrite|");
     metadata.append(std::to_string(entity_rewrite::kRewriteVersion));
-    metadata.append("\nconverted-bsp|");
-    metadata.append(std::to_string(kConvertedBspCacheVersion));
     metadata.append("\ntrigger-brush|");
     metadata.append(std::to_string(trigger_brush::kBakeVersion));
+    metadata.append("\nconverted-bsp|");
+    metadata.append(std::to_string(kConvertedBspCacheVersion));
     metadata.push_back('\n');
     metadata.append("bspdown-variant|");
     metadata.append(R2ConverterVariantString());

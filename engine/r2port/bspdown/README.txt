@@ -275,9 +275,17 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
     converted brightness was 69 % of stock R1 with global 1/6 and 86 % with global 4; use --cubemap-cma-gain 0
     --cubemap-scale 1/6 to reproduce the old global 1/6 output.
     Rule 13c uses the 0x68 probe positions and trailing values (interpreted as R2 cubemap-frame labels; see the
-    rule 6 caveat) to compare R2 assignments with R1 nearest-sample lookup. It appends up to 96 samples by default,
-    copying an existing cube into cells whose majority label disagrees with the nearest sample; the report records
-    before/after agreement. --cubemap-assign-max 0 disables this approximation.
+    rule 6 caveat) to compare R2 assignments with R1 nearest-sample lookup (R1 sub_18014FB80: brute force over all samples,
+    used for a dynamic model's cube when its studiohdr flag 0x2 USES_ENV_CUBEMAP is set, see modelconv). It appends up to 64
+    samples by default, copying an existing cube: greedy 1-nearest-neighbour prototypes (medoid of a misclassified same-label
+    cluster, largest net gain, 24 samples of exploration past a local optimum, best prefix kept); the report records
+    before/after agreement. Measured (CubeFix, fraction of R2 probe refs whose nearest sample carries the R2 label, old cell
+    majority rule with 96 samples -> this rule with 64): mp_complex3 82.2 -> 93.6 %, mp_forwardbase_kodai 85.6 -> 91.5 %,
+    mp_black_water_canal 92.3 -> 93.8 %, mp_glitch 100 -> 100 % (no samples needed). --cubemap-assign-max 0 disables it.
+    Rule 13d (--cubemaps split): a sort that carries a cubemap needs the patch material <MAP>/<material>_<x>_<y>_<z>; they are
+    written into the pakfile as materials/maps/<map>/<material>_<x>_<y>_<z>.vmt (patch, include the base material,
+    replace $envmap with maps/<map>/c<x>_<y>_<z>), exactly like the stock R1 maps (mp_rise: 111 of them).
+    --cubemap-diag 1|2 is a diagnostic (1 = one flat colour per R2 frame index, 2 = all flat neutral).
     CLIPPING at scale 4 (measured with analysis\cubeclip.py: convert at --cubemap-scale 0.125, rescale; max R2 value 2.6 to 9.0,
     most maps below 5.2; mip 0 pixels with any channel above 4.0 / energy kept by the clamp, scale 2 | 3 | 4):
     glitch 0.03 | 3.8 | 12.3 % (95.6 % kept at 4; sky slot 4: 58 % of its texels clip, 90 % of its luminance kept),

@@ -37,8 +37,9 @@ static void usage(const char* a0) {
                  "  --cubemap-scale <x>    multiplier for the R2 cubemap values (default 4)\n"
                  "  --cubemap-cma-gain <x> rule 13b: per-cubemap scale = clamp(x * CMA, min, --cubemap-scale) (default 1; 0 = one global scale)\n"
                  "  --cubemap-min-scale <x> rule 13b: lower bound of the per-cubemap scale (default 0.25)\n"
-                 "  --cubemap-assign-max <n> rule 13c: at most n extra cubemap samples reproducing the R2 per-probe cubemap assignment (default 96, 0 = off)\n"
+                 "  --cubemap-assign-max <n> rule 13c: at most n extra cubemap samples (greedy 1-NN prototypes) reproducing the R2 per-probe cubemap assignment (default 64, 0 = off)\n"
                  "  --cubemap-assign-cell <u> rule 13c: assignment cell size in units (default 256)\n"
+                 "  --cubemap-diag <n>     diagnostic: 1 = one flat colour per R2 cubemap frame (frame index as base 4 RGB digits), 2 = all cubemaps flat neutral 1.0 (default 0)\n"
                  "  --worldlight-flag2     set world light flag bit 0x2 like stock R1 lights (default off, untested)\n"
                  "  --no-collapse-envs     rule 20: keep all light_environment sky ambient/sun pairs in the world lights (default keeps the last pair only)\n"
                  "  --no-rtl               rule 20: write the real-time light lump as 0xFF (default converts the R2 lump)\n"
@@ -98,6 +99,7 @@ int main(int argc, char** argv) {
         else if (a == "--cubemap-min-scale" && i + 1 < argc) opt.cubemapMinScale = (float)std::atof(argv[++i]);
         else if (a == "--cubemap-assign-max" && i + 1 < argc) opt.cubemapAssignMax = std::atoi(argv[++i]);
         else if (a == "--cubemap-assign-cell" && i + 1 < argc) opt.cubemapAssignCell = (float)std::atof(argv[++i]);
+        else if (a == "--cubemap-diag" && i + 1 < argc) opt.cubemapDiag = std::atoi(argv[++i]);
         else if (a == "--worldlight-flag2") opt.worldLightFlagBit2 = true;
         else if (a == "--no-collapse-envs") opt.collapseEnvs = false;
         else if (a == "--no-sun-alpha") opt.lightmapSunAlpha = false;

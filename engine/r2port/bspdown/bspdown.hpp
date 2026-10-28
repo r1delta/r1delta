@@ -82,13 +82,19 @@ struct Options {
     float cubemapCmaGain = 1.0f;
     float cubemapMinScale = 0.25f;
 
-    // Rule 13c: R1 picks the cubemap of a dynamic model (viewmodel, props without a prop cubemap) and of every world sort (all -1) as the
-    // sample nearest to the origin; R2 assigns a cubemap to every light probe ref (lump 0x68 trailing int32; mp_forwardbase_kodai: 77 % of the
-    // refs use the one outdoor cube 4, nearest-sample picks cubes 1/3/5 there, 3.5x darker or brighter, neutral or orange: the viewmodel
-    // colour flipped between white and orange while running). Up to cubemapAssignMax extra samples (copies of an existing cube) are added
-    // where the nearest existing sample disagrees with the majority R2 assignment of a cubemapAssignCell sized cell. 0 = off.
-    int cubemapAssignMax = 96;
+    // Rule 13c: R1 picks the cubemap of a dynamic model (viewmodel, players, non-static props) as the sample nearest to the model's
+    // lighting origin (only for models whose studiohdr has USES_ENV_CUBEMAP 0x2, see modelconv); R2 assigns a cubemap to every light probe
+    // ref (lump 0x68 trailing int32; mp_forwardbase_kodai: 77 % of the refs use the one outdoor cube 4, the nearest sample picks cubes 1/3/5
+    // there). Up to cubemapAssignMax extra samples (copies of an existing cube) are added greedily as 1-nearest-neighbour prototypes: the
+    // medoid of a still misclassified same-label cluster (radii 0.5/1/2/4 x cubemapAssignCell) with the largest net gain, exploring up to 24
+    // samples past a local optimum and keeping the best prefix. 0 = off.
+    int cubemapAssignMax = 64;
     float cubemapAssignCell = 256.0f;
+
+    // Diagnostic (not a product setting): 1 = every cubemap frame is replaced by one flat colour that encodes its R2 frame index
+    // (base 4 digits d2 d1 d0 -> R,G,B = {0.2,0.45,0.9,1.8}[digit]), copies made by rule 13c carry the colour of the frame they copy;
+    // 2 = every frame is flat neutral 1.0. Screenshots then show which cube each surface class (world, prop, dynamic model, viewmodel) uses.
+    int cubemapDiag = 0;
 
     // World light flags: stock R1 lights carry bit 0x2 (R2 never sets it); set it on lights with non-zero flags.
     bool worldLightFlagBit2 = false;
