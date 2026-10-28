@@ -243,7 +243,8 @@ void TestRaiseFlagSpawnOrigins()
 }
 
 // Entity files must come out byte-exact apart from the rewritten spans: CRLF text stays CRLF, and the
-// real light_environment block is never dropped, reordered or edited (only light_environment_volume goes).
+// real light_environment block is never dropped, reordered or edited (only light_environment_volume goes; a later
+// light_environment's cloudoffset can change, see TestCloudOffsetOwner).
 void TestByteExactOutputAndLightEnvironment()
 {
     const std::string head = "ENTITIES01\r\n";
@@ -372,6 +373,62 @@ void TestSpinSequences()
           "spin insertion is not idempotent");
 }
 
+// R1 keeps the last cloudmask and the last cloudoffset it reads over all light_environment blocks. mp_black_water_canal
+// lists the real block (cloudmask + cloudoffset) first and the skybox dummy (cloudoffset "0 0 0 0") last, which left the
+// real mask with offset 0 / scale 0.
+void TestCloudOffsetOwner()
+{
+    const std::string real =
+        "{\n\"classname\" \"light_environment\"\n\"cloudoffset\" \"-4723 -4406 18285 15055\"\n"
+        "\"cloudmask\" \"world/cloud_masks/mp_blackwater_01_col\"\n\"pitch\" \"-46.1746\"\n}\n";
+    const std::string dummy =
+        "{\n\"classname\" \"light_environment\"\n\"cloudoffset\" \"0 0 0 0\"\n\"pitch\" \"-51.4284\"\n}\n";
+    const std::string fixedDummy =
+        "{\n\"classname\" \"light_environment\"\n\"cloudoffset\" \"-4723 -4406 18285 15055\"\n\"pitch\" \"-51.4284\"\n}\n";
+    const std::string other = "{\n\"classname\" \"info_target\"\n\"origin\" \"1 2 3\"\n}\n";
+    const RewriteOptions options{"mp_black_water_canal", false, nullptr};
+
+    // Dummy after the real block: its offset becomes the real one, nothing else moves.
+    RewriteReport report;
+    const std::string bwc = real + other + dummy;
+    const std::string output = RewriteEntityLump(bwc, options, &report);
+    Check(output == real + other + fixedDummy, "the dummy light_environment did not get the real cloudoffset");
+    Check(report.rewrittenValues == 1, "cloudoffset rewrite was not counted");
+    RewriteReport again;
+    Check(RewriteEntityLump(output, options, &again) == output && again.rewrittenValues == 0,
+          "cloudoffset rewrite is not idempotent");
+
+    // Every later block with its own cloudoffset gets it; a later block without the key is left alone.
+    const std::string noOffset = "{\n\"classname\" \"light_environment\"\n\"pitch\" \"-10\"\n}\n";
+    Check(RewriteEntityLump(real + dummy + noOffset + dummy, options) == real + fixedDummy + noOffset + fixedDummy,
+          "later light_environment blocks were not all fixed");
+
+    // Real block last (the other 17 maps): byte-exact.
+    Check(RewriteEntityLump(dummy + other + real, options) == dummy + other + real, "real-last order was touched");
+
+    // No cloudmask anywhere (mp_coliseum, mp_lf_stacks): byte-exact.
+    const std::string noMask =
+        "{\n\"classname\" \"light_environment\"\n\"cloudoffset\" \"5467 12006 26013 27498\"\n\"pitch\" \"-22.4887\"\n}\n";
+    Check(RewriteEntityLump(noMask + dummy, options) == noMask + dummy, "a map without cloudmask was touched");
+
+    // Mask owner without cloudoffset: there is nothing to copy.
+    const std::string maskOnly = "{\n\"classname\" \"light_environment\"\n\"cloudmask\" \"world/cloud_masks/x\"\n}\n";
+    Check(RewriteEntityLump(maskOnly + dummy, options) == maskOnly + dummy, "an owner without cloudoffset was copied");
+
+    // light_environment_volume never counts, CRLF stays CRLF.
+    std::string crlfIn = real + dummy;
+    std::string crlfExpected = real + fixedDummy;
+    for (std::string* text : {&crlfIn, &crlfExpected}) {
+        for (std::size_t i = text->find('\n'); i != std::string::npos; i = text->find('\n', i + 2))
+            text->insert(i, "\r");
+    }
+    Check(RewriteEntityLump(crlfIn, options) == crlfExpected, "CRLF cloudoffset rewrite is not byte-exact");
+    const std::string volume =
+        "{\n\"classname\" \"light_environment_volume\"\n\"cloudoffset\" \"1 2 3 4\"\n\"cloudmask\" \"y\"\n}\n";
+    Check(RewriteEntityLump(real + dummy + volume, options) == real + fixedDummy + "\n",
+          "light_environment_volume changed the cloud owner");
+}
+
 } // namespace
 
 int main()
@@ -388,6 +445,7 @@ int main()
         TestNpcKeyLowering();
         TestKeyInsertion();
         TestSpinSequences();
+        TestCloudOffsetOwner();
     } catch (const std::exception& exception) {
         std::cerr << "entity rewrite test failed: " << exception.what() << '\n';
         return 1;

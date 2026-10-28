@@ -45,6 +45,7 @@ struct EntityView {
     Span ropeMaterialSpan;
     Span teamNumberAliasKeySpan;
     Span effectNameSpan;
+    Span cloudOffsetSpan;
     std::array<ModeTag, 4> modeTags{};
     std::uint64_t skyKeys = 0;
     std::uint64_t fogKeys = 0;
@@ -63,7 +64,10 @@ struct EntityView {
     bool hasOrigin = false;
     bool hasEffectName = false;
     bool hasLinkGuid = false;
+    bool hasCloudMask = false;
+    bool hasCloudOffset = false;
     std::string_view linkGuid;
+    std::string_view cloudOffset;
     std::string_view origin;
     Span originSpan;
 };
@@ -416,6 +420,12 @@ bool ScanEntityLump(std::string_view input,
                 entity.hasEffectName = true;
                 entity.effectName = valueText;
                 entity.effectNameSpan = value.text;
+            } else if (keyText == "cloudmask") {
+                entity.hasCloudMask = true;
+            } else if (keyText == "cloudoffset") {
+                entity.hasCloudOffset = true;
+                entity.cloudOffset = valueText;
+                entity.cloudOffsetSpan = value.text;
             } else {
                 const std::size_t modeIndex = ModeTagIndex(keyText);
                 if (modeIndex < entity.modeTags.size()) {
@@ -658,6 +668,54 @@ std::map<std::string, std::string> CollectSpinSequences(std::string_view input)
     return result;
 }
 
+// The R1 server parses every light_environment through CEnvLight::KeyValue, which copies a key into one global per key
+// the moment it is read: cloudmask into the cloud mask name, cloudoffset into the 4 floats m_cloudOffset (x y z) and
+// m_cloudScale (w) of the networked CascadeLight, and nothing is reset between blocks. So the final cloud state is
+// the last cloudmask seen plus the last cloudoffset seen. R2 lists a dummy skybox light_environment with cloudoffset
+// "0 0 0 0" and no cloudmask next to the real one; on the maps where the dummy comes AFTER the real block
+// (mp_black_water_canal) R1 would keep the real mask but get offset 0 and scale 0, and the world shader then samples the
+// cloud mask at a degenerate scale (vertical streaks on walls, a tiny repeating pattern on flat props; both vanish
+// with mat_cloudmask 0). Every light_environment after the cloudmask owner that sets its own cloudoffset gets the owner's
+// value, so the pair R1 ends with is the real one. Blocks before the owner and maps without a cloudmask are untouched.
+struct CloudOffsetFix {
+    std::string offset;
+    std::vector<std::size_t> targets; // entity.begin of every light_environment whose cloudoffset is replaced
+};
+
+CloudOffsetFix CollectCloudOffsetFix(std::string_view input)
+{
+    struct Block {
+        std::size_t begin;
+        bool hasMask;
+        bool hasOffset;
+        std::string offset;
+    };
+    std::vector<Block> blocks;
+    ParseFailure failure;
+    ScanEntityLump(
+        input,
+        false,
+        [](const EntityView&, std::string_view, std::string_view) {},
+        [&](const EntityView& entity) {
+            if (entity.classname == "light_environment")
+                blocks.push_back({entity.begin, entity.hasCloudMask, entity.hasCloudOffset, std::string(entity.cloudOffset)});
+        },
+        failure);
+
+    CloudOffsetFix fix;
+    std::size_t owner = blocks.size();
+    for (std::size_t index = 0; index < blocks.size(); ++index)
+        if (blocks[index].hasMask)
+            owner = index;
+    if (owner == blocks.size() || !blocks[owner].hasOffset)
+        return fix;
+    fix.offset = blocks[owner].offset;
+    for (std::size_t index = owner + 1; index < blocks.size(); ++index)
+        if (blocks[index].hasOffset && blocks[index].offset != fix.offset)
+            fix.targets.push_back(blocks[index].begin);
+    return fix;
+}
+
 void AnalyzeFeatures(const EntityView& entity, MapFeatures& features)
 {
     const std::string_view classname = entity.classname;
@@ -792,6 +850,7 @@ std::string RewriteEntityLump(std::string_view input,
     std::size_t appendCursor = 0;
     ParseFailure failure;
     const std::map<std::string, std::string> spinSequences = CollectSpinSequences(input);
+    const CloudOffsetFix cloudOffsetFix = CollectCloudOffsetFix(input);
 
     const bool parsed = ScanEntityLump(
         input,
@@ -823,6 +882,12 @@ std::string RewriteEntityLump(std::string_view input,
             if (entity.classname == "prop_dynamic_lightweight") {
                 patches[patchCount++] = {entity.classnameSpan, "prop_dynamic"};
                 ++result.renamedClassnames;
+            }
+            if (entity.classname == "light_environment" && entity.hasCloudOffset
+                && std::find(cloudOffsetFix.targets.begin(), cloudOffsetFix.targets.end(), entity.begin)
+                    != cloudOffsetFix.targets.end()) {
+                patches[patchCount++] = {entity.cloudOffsetSpan, cloudOffsetFix.offset};
+                ++result.rewrittenValues;
             }
             if (entity.classname == "move_rope"
                 && entity.hasRopeMaterial
