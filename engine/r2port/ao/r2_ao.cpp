@@ -5,6 +5,7 @@
 #include "engine/logging/logging.h"
 #include "engine/r2port/shaders/r2_shader_compiler.h"
 #include "dxbc_patch.h"
+#include "r2_xegtao.h"
 
 #include <MinHook.h>
 #include <Windows.h>
@@ -66,10 +67,35 @@ struct ConVars {
     ConVarR1* sso{};
     ConVarR1* ssoStrength{};
     ConVarR1* ssoDebug{};
+    ConVarR1* tech{};
 };
 ConVars g_cvar;
 
 std::atomic<int> g_timing{0};
+std::atomic<int> g_tech{0};          // r2port_ao_tech
+bool g_xeFailed = false;
+bool g_xeReady = false;
+
+// CPU (render thread) time, measured with QueryPerformanceCounter: r2port_ao_timing 2 = CPU only (no GPU queries), 1 = both.
+// Wrapper = the whole R1 HBAO+ function (D3D state save/restore, our composite, the GFSDK call); Dll = the RenderAO call alone.
+struct CpuTimer {
+    LARGE_INTEGER freq{};
+    double wrapSum{}, wrapMax{}, dllSum{}, dllMax{};
+    int wrapCount{}, dllCount{};
+    double ToMs(long long ticks) { if (!freq.QuadPart) QueryPerformanceFrequency(&freq); return 1000.0 * static_cast<double>(ticks) / static_cast<double>(freq.QuadPart); }
+    void AddDll(long long ticks) { const double ms = ToMs(ticks); dllSum += ms; dllMax = ms > dllMax ? ms : dllMax; ++dllCount; }
+    void AddWrapper(long long ticks)
+    {
+        const double ms = ToMs(ticks);
+        wrapSum += ms; wrapMax = ms > wrapMax ? ms : wrapMax; ++wrapCount;
+        if (wrapCount >= 240) {
+            Msg("R1Delta: r2port_ao CPU over %d calls: wrapper %.3f ms avg (max %.3f), GFSDK RenderAO %.3f ms avg (max %.3f)\n", wrapCount,
+                wrapSum / wrapCount, wrapMax, dllCount ? dllSum / dllCount : 0.0, dllMax);
+            wrapSum = wrapMax = dllSum = dllMax = 0.0; wrapCount = dllCount = 0;
+        }
+    }
+};
+CpuTimer g_cpu;
 std::atomic<int> g_blur{0};          // 0 = leave R1's value, 2 / 4 / 8 = force
 std::atomic<float> g_detail{0.0f};   // > 0 = override DetailAO
 std::atomic<float> g_luma{0.0f};     // > 0 = luma-attenuated composite
@@ -106,7 +132,7 @@ bool AnyEnabled()
 {
     return g_timing.load(std::memory_order_relaxed) != 0 || g_blur.load(std::memory_order_relaxed) != 0
         || g_detail.load(std::memory_order_relaxed) > 0.0f || g_luma.load(std::memory_order_relaxed) > 0.0f
-        || g_ssoOn.load(std::memory_order_relaxed) || g_dumpRequest.load(std::memory_order_relaxed);
+        || g_ssoOn.load(std::memory_order_relaxed) || g_dumpRequest.load(std::memory_order_relaxed) || g_tech.load(std::memory_order_relaxed) != 0;
 }
 
 float ReadFloat(ConVarR1* variable, float fallback)
@@ -118,7 +144,10 @@ void Refresh();
 
 void ReloadConfig()
 {
-    g_timing.store(ReadFloat(g_cvar.timing, 0.0f) != 0.0f ? 1 : 0);
+    {
+        const float t = ReadFloat(g_cvar.timing, 0.0f);
+        g_timing.store(t == 0.0f ? 0 : (t >= 2.0f ? 2 : 1));
+    }
     const int blur = static_cast<int>(ReadFloat(g_cvar.blur, 0.0f) + 0.5f);
     g_blur.store(blur == 2 || blur == 4 || blur == 8 ? blur : 0);
     g_detail.store(std::max(0.0f, ReadFloat(g_cvar.detail, 0.0f)));
@@ -128,6 +157,7 @@ void ReloadConfig()
     g_ssoOn.store(g_ssoEnv || ReadFloat(g_cvar.sso, 0.0f) != 0.0f);
     g_ssoStrength.store(std::clamp(ReadFloat(g_cvar.ssoStrength, 0.5f), 0.0f, 1.0f));
     g_ssoDebug.store(ReadFloat(g_cvar.ssoDebug, 0.0f) != 0.0f);
+    g_tech.store(std::clamp(static_cast<int>(ReadFloat(g_cvar.tech, 0.0f) + 0.5f), 0, 3));
 }
 
 void OnCvarChanged(void*, const char*, float)
@@ -310,6 +340,7 @@ struct Composite {
     ComPtr<ID3D11Texture2D> aoTex;
     ComPtr<ID3D11RenderTargetView> aoRtv;
     ComPtr<ID3D11ShaderResourceView> aoSrv;
+    ComPtr<ID3D11UnorderedAccessView> aoUav;
     ComPtr<ID3D11Texture2D> sceneCopy;
     ComPtr<ID3D11ShaderResourceView> sceneSrv;
     ComPtr<ID3D11Texture2D> occTex[2];                 // R8_UNORM occlusion, written this frame, read by the next (ping-pong)
@@ -426,7 +457,7 @@ bool EnsureComposite(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv)
         && g_comp.viewFormat == viewFormat)
         return true;
 
-    g_comp.aoTex.Reset(); g_comp.aoRtv.Reset(); g_comp.aoSrv.Reset(); g_comp.sceneCopy.Reset(); g_comp.sceneSrv.Reset();
+    g_comp.aoTex.Reset(); g_comp.aoRtv.Reset(); g_comp.aoSrv.Reset(); g_comp.aoUav.Reset(); g_comp.sceneCopy.Reset(); g_comp.sceneSrv.Reset();
     for (int i = 0; i < 2; ++i) {
         g_comp.occTex[i].Reset(); g_comp.occRtv[i].Reset(); g_comp.occSrv[i].Reset();
     }
@@ -434,7 +465,7 @@ bool EnsureComposite(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv)
     D3D11_TEXTURE2D_DESC aoDesc{};
     aoDesc.Width = desc.Width; aoDesc.Height = desc.Height; aoDesc.MipLevels = 1; aoDesc.ArraySize = 1;
     aoDesc.Format = DXGI_FORMAT_R16_UNORM; aoDesc.SampleDesc.Count = 1; aoDesc.Usage = D3D11_USAGE_DEFAULT;
-    aoDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+    aoDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
     D3D11_TEXTURE2D_DESC occDesc = aoDesc;
     occDesc.Format = DXGI_FORMAT_R8_UNORM;
     D3D11_TEXTURE2D_DESC copyDesc = desc;
@@ -444,6 +475,7 @@ bool EnsureComposite(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv)
     copySrv.Format = viewFormat; copySrv.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D; copySrv.Texture2D.MipLevels = 1;
     bool ok = SUCCEEDED(device->CreateTexture2D(&aoDesc, nullptr, &g_comp.aoTex)) && SUCCEEDED(device->CreateRenderTargetView(g_comp.aoTex.Get(), nullptr, &g_comp.aoRtv))
         && SUCCEEDED(device->CreateShaderResourceView(g_comp.aoTex.Get(), nullptr, &g_comp.aoSrv))
+        && SUCCEEDED(device->CreateUnorderedAccessView(g_comp.aoTex.Get(), nullptr, &g_comp.aoUav))
         && SUCCEEDED(device->CreateTexture2D(&copyDesc, nullptr, &g_comp.sceneCopy))
         && SUCCEEDED(device->CreateShaderResourceView(g_comp.sceneCopy.Get(), &copySrv, &g_comp.sceneSrv));
     for (int i = 0; i < 2 && ok; ++i) {
@@ -624,6 +656,71 @@ void DumpDepth(ID3D11DeviceContext* ctx, const void* input)
         projection[10], projection[11], projection[12], projection[13], projection[14], projection[15]);
 }
 
+// ---- XeGTAO backend (r2port_ao_tech) -------------------------------------------------------------------------------
+// Replaces the GFSDK RenderAO call: the same depth SRV / projection the HBAO+ input carries go to the compute port of
+// Intel's XeGTAO (r2_xegtao.cpp); the result lands in our R16 AO texture and then follows the HBAO+ path (multiply / luma
+// composite / occlusion for r2port_sso). The compute stage state is saved and restored around the dispatches.
+bool RunXeGtao(ID3D11DeviceContext* ctx, const void* input, const unsigned char* params, const D3D11_VIEWPORT& viewport, int tech)
+{
+    const auto* bytes = static_cast<const unsigned char*>(input);
+    auto* depth = *reinterpret_cast<ID3D11ShaderResourceView* const*>(bytes + 24);
+    const float* projection = *reinterpret_cast<const float* const*>(bytes + 8);
+    const float meters = *reinterpret_cast<const float*>(bytes + 20);
+    if (!depth || !projection || viewport.Width < 64.0f || viewport.Height < 64.0f)
+        return false;
+    if (!g_xeReady) {
+        ComPtr<ID3D11Device> device;
+        ctx->GetDevice(&device);
+        LARGE_INTEGER a, b, f;
+        QueryPerformanceCounter(&a);
+        if (!device || !xegtao::Init(device.Get())) {
+            g_xeFailed = true;
+            Warning("R1Delta: r2port_ao_tech: XeGTAO unavailable (%s); HBAO+ is used\n", xegtao::LastError());
+            return false;
+        }
+        QueryPerformanceCounter(&b);
+        QueryPerformanceFrequency(&f);
+        g_xeReady = true;
+        Msg("R1Delta: r2port_ao_tech: XeGTAO compute shaders ready in %.0f ms\n", 1000.0 * static_cast<double>(b.QuadPart - a.QuadPart) / static_cast<double>(f.QuadPart));
+    }
+    xegtao::Params p;
+    p.quality = tech == 3 ? 1 : 2;
+    p.halfRes = tech >= 2;
+    p.denoisePasses = tech == 3 ? 1 : 2;
+    p.radiusMeters = std::max(0.05f, reinterpret_cast<const float*>(params)[0]);
+    p.intensity = std::clamp(reinterpret_cast<const float*>(params)[3] * reinterpret_cast<const float*>(params)[4] / 4.0f, 0.1f, 6.0f);
+
+    // Save the compute stage (R1 uses compute shaders for the tonemap histogram and sets its own state before it).
+    ComPtr<ID3D11ComputeShader> cs;
+    ID3D11ShaderResourceView* srvs[3] = {};
+    ID3D11UnorderedAccessView* uavs[5] = {};
+    ID3D11Buffer* cbs[4] = {};
+    ID3D11SamplerState* samplers[2] = {};
+    ctx->CSGetShader(&cs, nullptr, nullptr);
+    ctx->CSGetShaderResources(0, 3, srvs);
+    ctx->CSGetUnorderedAccessViews(0, 5, uavs);
+    ctx->CSGetConstantBuffers(0, 4, cbs);
+    ctx->CSGetSamplers(0, 2, samplers);
+
+    const bool ok = xegtao::Render(ctx, depth, projection, meters, viewport, g_comp.aoUav.Get(), p);
+
+    const UINT keep[5] = { 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu };
+    ctx->CSSetShader(cs.Get(), nullptr, 0);
+    ctx->CSSetShaderResources(0, 3, srvs);
+    ctx->CSSetUnorderedAccessViews(0, 5, uavs, keep);
+    ctx->CSSetConstantBuffers(0, 4, cbs);
+    ctx->CSSetSamplers(0, 2, samplers);
+    for (auto* v : srvs) if (v) v->Release();
+    for (auto* v : uavs) if (v) v->Release();
+    for (auto* v : cbs) if (v) v->Release();
+    for (auto* v : samplers) if (v) v->Release();
+    if (!ok) {
+        g_xeFailed = true;
+        Warning("R1Delta: r2port_ao_tech: XeGTAO Render failed (%s); HBAO+ is used from now on\n", xegtao::LastError());
+    }
+    return ok;
+}
+
 // ---- GFSDK RenderAO hook -----------------------------------------------------------------------------------------
 using RenderAoFn = int(__fastcall*)(void* self, ID3D11DeviceContext* ctx, const void* input, const void* params,
     ID3D11RenderTargetView* rtv, unsigned mask);
@@ -651,10 +748,11 @@ int __fastcall RenderAoHook(void* self, ID3D11DeviceContext* ctx, const void* in
     const float strength = g_luma.load(std::memory_order_relaxed);
     const bool sso = g_ssoOn.load(std::memory_order_relaxed) && g_ssoStrength.load(std::memory_order_relaxed) > 0.0f;
 
-    TimingSlot* timing = g_timing.load(std::memory_order_relaxed) ? BeginTiming(ctx) : nullptr;
+    TimingSlot* timing = g_timing.load(std::memory_order_relaxed) == 1 ? BeginTiming(ctx) : nullptr;
 
     // Redirect HBAO+ into our own texture whenever something needs the AO value (luma composite, occlusion for r2port_sso).
-    bool composite = (strength > 0.0f || sso) && EnsureComposite(ctx, rtv);
+    const int tech = g_tech.load(std::memory_order_relaxed);
+    bool composite = (strength > 0.0f || sso || (tech > 0 && !g_xeFailed)) && EnsureComposite(ctx, rtv);
     D3D11_VIEWPORT viewport{};
     if (composite) {
         UINT count = 1;
@@ -666,16 +764,30 @@ int __fastcall RenderAoHook(void* self, ID3D11DeviceContext* ctx, const void* in
     if (composite) {
         const float white[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
         ctx->ClearRenderTargetView(g_comp.aoRtv.Get(), white);
-        result = g_origRenderAo(self, ctx, input, local, g_comp.aoRtv.Get(), mask);
-        if (timing)
-            ctx->End(timing->t1.Get());
+        const bool xe = tech > 0 && !g_xeFailed && viewport.TopLeftX == 0.0f && viewport.TopLeftY == 0.0f && RunXeGtao(ctx, input, local, viewport, tech);
+        if (xe) {
+            result = 0;
+            if (timing)
+                ctx->End(timing->t1.Get());
+        }
+        else {
+            LARGE_INTEGER c0, c1;
+            if (g_timing.load(std::memory_order_relaxed)) QueryPerformanceCounter(&c0);
+            result = g_origRenderAo(self, ctx, input, local, g_comp.aoRtv.Get(), mask);
+            if (g_timing.load(std::memory_order_relaxed)) { QueryPerformanceCounter(&c1); g_cpu.AddDll(c1.QuadPart - c0.QuadPart); }
+            if (timing)
+                ctx->End(timing->t1.Get());
+        }
         if (result == 0)
             DrawComposite(ctx, rtv, viewport, strength, sso);
         else
             Break("HBAO+ RenderAO returned an error with the redirected target");
     }
     else {
+        LARGE_INTEGER c0, c1;
+        if (g_timing.load(std::memory_order_relaxed)) QueryPerformanceCounter(&c0);
         result = g_origRenderAo(self, ctx, input, local, rtv, mask);
+        if (g_timing.load(std::memory_order_relaxed)) { QueryPerformanceCounter(&c1); g_cpu.AddDll(c1.QuadPart - c0.QuadPart); }
         if (timing)
             ctx->End(timing->t1.Get());
     }
@@ -791,6 +903,15 @@ void __fastcall WrapperHook(void* a1, void* a2, void* a3, void* a4)
     g_pendingOcc = nullptr;
     if (AnyEnabled())
         EnsureVtablePatched();
+    if (g_timing.load(std::memory_order_relaxed) != 0) {
+        LARGE_INTEGER t0, t1;
+        QueryPerformanceCounter(&t0);
+        g_origWrapper(a1, a2, a3, a4);
+        BindOcclusion();
+        QueryPerformanceCounter(&t1);
+        g_cpu.AddWrapper(t1.QuadPart - t0.QuadPart);
+        return;
+    }
     g_origWrapper(a1, a2, a3, a4);
     BindOcclusion();
 }
@@ -973,6 +1094,8 @@ void RegisterConVars()
         "0..1 = how strongly full AO occlusion removes the env reflection (live; 0.5 halves it).");
     g_cvar.ssoDebug = Register("r2port_sso_debug", "0",
         "1 = test aid for r2port_sso: full occlusion everywhere (env reflection of every patched shader scaled by 1 - r2port_sso_strength).");
+    g_cvar.tech = Register("r2port_ao_tech", "0",
+        "AO backend: 0 = NVIDIA HBAO+ (stock R1), 1 = XeGTAO high quality full resolution (about HBAO+ cost), 2 = XeGTAO high quality half resolution (about 0.4x the HBAO+ GPU time), 3 = XeGTAO medium quality half resolution (about 0.3x, weak GPUs). Needs r_hbaoEnabled 1; uses r_hbaoRadius, r_hbaoIntensity and r_hbaoExponent. Falls back to HBAO+ on any failure.");
     ReloadConfig();
     Refresh();
 }

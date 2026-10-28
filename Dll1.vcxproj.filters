@@ -242,6 +242,12 @@
     <ClInclude Include="engine\r2port\ao\dxbc_patch.h">
       <Filter>engine\r2port\ao</Filter>
     </ClInclude>
+    <ClInclude Include="engine\r2port\ao\r2_xegtao.h">
+      <Filter>engine\r2port\ao</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\ao\r2_xegtao_hlsl.inl">
+      <Filter>engine\r2port\ao</Filter>
+    </ClInclude>
     <ClInclude Include="engine\r2port\shaders\r2_shader_override.h">
       <Filter>engine\r2port\shaders</Filter>
     </ClInclude>
@@ -915,6 +921,9 @@
       <Filter>engine\r2port\ao</Filter>
     </ClCompile>
     <ClCompile Include="engine\r2port\ao\dxbc_patch.cpp">
+      <Filter>engine\r2port\ao</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\ao\r2_xegtao.cpp">
       <Filter>engine\r2port\ao</Filter>
     </ClCompile>
     <ClCompile Include="engine\r2port\shaders\r2_shader_override.cpp">
