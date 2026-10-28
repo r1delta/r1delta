@@ -557,6 +557,7 @@ def quantize_rtl_visibility(bsp, lights, ids, weights, minimum, linear):
 
 RTL_VISIBILITY_CUTOFF = 187  # fixed sRGB static-visibility cutoff of rule 20 (about half visible), applied after cone normalization
 LIGHT_OPT = {"collapse": True, "rtl": True, "pbr": True, "sun_alpha": True, "sky_scale": 0.45, "sun_scale": 1.0, "pbr_scale": 1.0}
+CSM_OPT = {"last_env": False}  # --csm-last-env: the converter kept the last environment record instead of the largest
 
 
 def expected_lighting(r2, wl_flag2):
@@ -1293,7 +1294,7 @@ def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", ph
     if csm_rebase and len(env2) >= 2:
         # independent re-derivation of the chosen environment: largest node + ref + mesh content, ties to the later record
         score = [int(x[3] - x[0]) + int(x[4] - x[1]) + int(x[5] - x[2]) for x in env2]
-        pick = max(range(len(env2)), key=lambda i: (score[i], i))
+        pick = len(env2) - 1 if CSM_OPT["last_env"] else max(range(len(env2)), key=lambda i: (score[i], i))
         e = env2[pick]; fn, fr, fm = int(e[0]), int(e[1]), int(e[2]); ln, lr, lm = int(e[3]), int(e[4]), int(e[5])
         mesh_word = int(np.frombuffer(bytes(r2.raw(0x7B)[8:12]), "<u4")[0])
         nprops = int(np.frombuffer(bytes(r2.raw(0x7B)[12:16]), "<u4")[0])
@@ -1384,6 +1385,7 @@ if __name__ == "__main__":
     ap.add_argument("--props", choices=("keep", "hide-scatter", "hide-all"), default="keep")
     ap.add_argument("--scatter-min", type=int, default=500)
     ap.add_argument("--csm-rebase", action="store_true")
+    ap.add_argument("--csm-last-env", action="store_true", help="rule 17: converter kept the last environment record")
     ap.add_argument("--empty-shadow-meshes", action="store_true")
     ap.add_argument("--worldlight-flag2", action="store_true")
     ap.add_argument("--no-collapse-envs", action="store_true", help="rule 20 disabled in the converter")
@@ -1398,6 +1400,7 @@ if __name__ == "__main__":
     ap.add_argument("--grid-size", type=float, default=2048.0, help="rule 19 cell size given to the converter (0 = R2 size kept)")
     ap.add_argument("--reference", "--unpadded", dest="reference", help="the same input converted with --grid-size 0 --no-grid-pad: equivalence checks for rules 18 / 19")
     a = ap.parse_args()
+    CSM_OPT["last_env"] = a.csm_last_env
     LIGHT_OPT.update(collapse=not a.no_collapse_envs, rtl=not a.no_rtl, sun_alpha=not a.no_sun_alpha, pbr=(a.pbr_lights == "convert"),
                      sky_scale=a.sky_ambient_scale, sun_scale=a.sun_scale, pbr_scale=a.pbr_scale)
     sys.exit(1 if check(a.r2, a.r1, a.limit, a.rtl_bytes, not a.no_bsp_tool, a.cubemaps, a.physics, a.cubemap_scale,

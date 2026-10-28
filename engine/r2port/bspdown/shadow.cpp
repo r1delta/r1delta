@@ -75,9 +75,11 @@ void convertShadow(Ctx& c) {
             // The real environment is chosen by content, not by position: R2 lists the empty dummy (1 node, no refs, 1 shadow mesh) FIRST
             // on 17 maps but LAST on mp_black_water_canal and mp_angel_city (whose real tree sits in records 0), so "keep the last" kept
             // the dummy there and dropped the whole level tree and its 17 world shadow meshes. Largest node + ref + mesh count wins, ties
-            // go to the later record (every other map: the real record is last and the only non-dummy one).
-            size_t pick = 0, bestScore = 0;
-            for (size_t i = 0; i < nEnv; i++) {
+            // go to the later record (every other map: the real record is last and the only non-dummy one). opt.csmLastEnv restores "the last
+            // record": mp_coliseum and mp_coliseum_column have no cloudmask, so the entity rewrite leaves their dummy light_environment last
+            // and R1's CSM sun direction stays the dummy's (-0.335 0.526 -0.782); their real tree (a column) would cast a long wrong shadow.
+            size_t pick = nEnv - 1, bestScore = 0;
+            for (size_t i = 0; i < nEnv && !c.opt.csmLastEnv; i++) {
                 const size_t score = (size_t)(env[i].last[0] - env[i].first[0]) + (size_t)(env[i].last[1] - env[i].first[1]) + (size_t)(env[i].last[2] - env[i].first[2]);
                 if (i == 0 || score >= bestScore) { pick = i; bestScore = score; }
             }

@@ -377,6 +377,10 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
     (leading AND trailing parts dropped; child indices lowered by the first node, refs re-derived as before). The 19 maps whose real record is last
     convert byte-identically to before (checked mp_glitch, mp_homestead, mp_forwardbase_kodai, mp_lf_stacks with sha256); the checker re-derives the
     choice independently.
+    Exception: --csm-last-env (Options::csmLastEnv, provider token csm-last-env) keeps the last record as before. The provider must set it for mp_coliseum and
+    mp_coliseum_column: they have no cloudmask, so the entity rewrite leaves the dummy light_environment last and R1's CSM sun stays the dummy direction; with the
+    content choice their real column tree casts a long wrong-direction shadow and darkens the columns (in game, coliseum_column s1/s5, BwcShadows). The
+    converted outputs of these two maps with --csm-last-env are byte-identical to the previous converter (sha256 ad832b89d94d for the column).
 
 18. Collision grid padding [R1 sub_18010BE50 / sub_180108710 / sub_180109B10 (IDA copy), data, simulation analysis\gp_walker.cpp]. Crash fixed:
     6 converted maps (mp_colony02, mp_lf_meadow, mp_lf_township, mp_lf_traffic, mp_lf_uma, mp_thaw) access-violated in the world grid

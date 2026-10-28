@@ -2087,6 +2087,40 @@ bool vtfSmallestMipMean(const std::vector<std::uint8_t>& vtf, double rgb[3]) {
     return false;
 }
 
+// True mean colour (0..255, as stored) of the top mip of a converted VTF (mips are stored smallest first, so the top mip is the last image
+// in the file). The smallest mip cannot stand in for the mean: the converter keeps _ilm mip chains bright. Same two layouts as above.
+bool vtfTopMipMean(const std::vector<std::uint8_t>& vtf, double rgb[3]) {
+    if (vtf.size() < 0x58 || std::memcmp(vtf.data(), "VTF\0", 4) != 0) return false;
+    const std::uint32_t width = u16(vtf.data() + 16), height = u16(vtf.data() + 18);
+    const std::uint32_t format = u32(vtf.data() + 0x34);
+    if (!width || !height) return false;
+    double sum[3] = {0, 0, 0};
+    if (format == 0) {
+        const std::size_t bytes = std::size_t(width) * height * 4;
+        if (vtf.size() < bytes) return false;
+        const std::uint8_t* px = vtf.data() + vtf.size() - bytes;
+        for (std::size_t i = 0; i < std::size_t(width) * height; ++i)
+            for (int c = 0; c < 3; ++c) sum[c] += px[i * 4 + c];
+        for (int c = 0; c < 3; ++c) rgb[c] = sum[c] / (double(width) * height);
+        return true;
+    }
+    if (format == 13) {
+        const std::size_t blocksX = (width + 3) / 4, blocksY = (height + 3) / 4;
+        const std::size_t bytes = blocksX * blocksY * 8;
+        if (vtf.size() < bytes) return false;
+        const std::uint8_t* blocks = vtf.data() + vtf.size() - bytes;
+        std::array<std::uint8_t, 64> px{};
+        for (std::size_t b = 0; b < blocksX * blocksY; ++b) {
+            bcdec_bc1(blocks + b * 8, px.data(), 16);
+            for (int p = 0; p < 16; ++p)
+                for (int c = 0; c < 3; ++c) sum[c] += px[p * 4 + c];
+        }
+        for (int c = 0; c < 3; ++c) rgb[c] = sum[c] / (double(blocksX * blocksY) * 16.0);
+        return true;
+    }
+    return false;
+}
+
 bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view requested,
                            const MaterialOptions& options, Material& material, std::string& error) {
     const std::string name = cleanAssetName(requested, true);
@@ -2456,6 +2490,54 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
                 pure << "}\n";
                 material.name = name;
                 material.vmt = pure.str();
+                material.textures.clear();
+                material.usesLayers = false;
+                TextureRef texture;
+                texture.guid = slotGuids[4];
+                texture.name = usedSlots[4];
+                texture.slot = 4;
+                material.textures.push_back(std::move(texture));
+                return true;
+            }
+        }
+    }
+    // Screen emitters on world brushes: sign faces and LED floors whose emissive mask (_ilm) covers much of the surface (mean luminance
+    // at least 40/255) with a real albedo. R2 adds _ilm * tint (float4 #10) to the lit albedo, so such a face is dominated by its own picture;
+    // R1's LightmappedGeneric cannot take an emissive input, so these faces drew as lit albedo only (mp_eden sign_billboard_01, sign_fembot,
+    // eden_ts_screen_03, mp_complex3 floor_tile_led_01, mp_colony02/mp_relic02 floor_lightstrip: dim, no glow). The face becomes UnlitGeneric
+    // of the _ilm texture (the albedo texture itself when R2 uses the same guid for both slots) times $color = tint (HDR part compressed, kScreenHdrKnee).
+    // Sparse masks (s2s_roof_light_01 and s2s_stairs_01 lamps, decals_embers_01 veins, ilm mean 2..10) are left alone: an unlit face would
+    // lose the lit surface around the lamps, and R1 has no second pass for a world mesh.
+    // Measured in game at mp_eden (eye 70 units from each quad, R2 frames at the same pose): tint 1 faces (sign_billboard_01, sign_fembot)
+    // match R2 at $color = tint (k 1.0; k 0.5 reads dim, k 0.25 dark). A tint above 1 is HDR and R1's unlit surface clips, so the part above
+    // 1 counts a quarter (eden_ts_screen_03, tint 0.91 2.40 2.52: k 1.0 bloomed to a blown cyan, k 0.5 was already saturated).
+    constexpr double kScreenHdrKnee = 0.25;
+    constexpr double kScreenMinMaskLuminance = 40.0;
+    if (!tools && lightmapped && !additive && !cut && name.rfind("world/", 0) == 0 && shaderSet.find("emit") != std::string::npos &&
+        usedSlots.find(4) != usedSlots.end() && slotGuids.size() > 4 && slotGuids[4] && constants.size() >= 43) {
+        double emitTint[3];
+        for (int i = 0; i < 3; ++i) emitTint[i] = std::isfinite(constants[40 + i]) ? std::clamp<double>(constants[40 + i], 0.0, kPureEmitterTintCap) : 0.0;
+        if (emitTint[0] + emitTint[1] + emitTint[2] > 0.004) {
+            const AssetRecord* maskRecord = findRecord(*db, slotGuids[4], kTxtr);
+            std::vector<std::uint8_t> maskVtf;
+            std::string textureWhy;
+            double maskMean[3] = {0, 0, 0};
+            if (maskRecord && convertTextureWithDb(db, *maskRecord, TextureOptions{}, maskVtf, textureWhy) &&
+                vtfTopMipMean(maskVtf, maskMean) &&
+                0.2126 * maskMean[0] + 0.7152 * maskMean[1] + 0.0722 * maskMean[2] >= kScreenMinMaskLuminance) {
+                std::ostringstream screen;
+                screen << "\"UnlitGeneric\"\n{\n";
+                addVmtParam(screen, "$surfaceprop", surfaceKnown(surface) ? surface : "default");
+                addVmtParam(screen, "$basetexture", vmtTextureName(usedSlots[4]));
+                double color[3];
+                for (int i = 0; i < 3; ++i) color[i] = std::min(emitTint[i], 1.0) + kScreenHdrKnee * std::max(emitTint[i] - 1.0, 0.0);
+                char colorText[64];
+                std::snprintf(colorText, sizeof(colorText), "[%.4f %.4f %.4f]", color[0], color[1], color[2]);
+                addVmtParam(screen, "$color", colorText);
+                if (decal) addVmtParam(screen, "$decal", "1");
+                screen << "}\n";
+                material.name = name;
+                material.vmt = screen.str();
                 material.textures.clear();
                 material.usesLayers = false;
                 TextureRef texture;

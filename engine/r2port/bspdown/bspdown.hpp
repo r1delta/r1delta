@@ -181,6 +181,8 @@ struct Options {
     //                 are rebased so the root is node 0 (default off)
     //   emptyShadowMeshes: write lumps 0x7C..0x7F empty (default off)
     bool csmRebase = false;
+    //   csmLastEnv:   with csmRebase keep the LAST environment record instead of the one with the most content (default off)
+    bool csmLastEnv = false;
     bool emptyShadowMeshes = false;
 };
 

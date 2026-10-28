@@ -67,18 +67,18 @@ __int64 StringCompare_AllTalkHookDedi(__int64 a1, __int64 a2) {
 }
 
 // pvs_extraCull (CORE cfg/autoexec_delta.cfg sets 1, engine default 0) culls whole world meshes of converted R2 maps (the glass roof over
-// the mp_eden courtyard, EdenRoofFade: pvs_extraCull 0 at runtime restores them). FALLBACK, default OFF: with
-// R1DELTA_R2PORT_FORCE_PVS_EXTRACULL0=1 the cvar is forced to 0 while a converted R2 map is the active map and the user's value is put
-// back when a stock R1 map becomes active (the user prefers the cvar on for its fps benefit; a converter-side data fix is preferred).
-// Evaluated at every client signon state change (a console command at level load, nothing per frame).
+// the mp_eden courtyard, EdenRoofFade: pvs_extraCull 0 at runtime restores them; occluder lumps and ref boxes are not the cause). Interim fix, default
+// ON until a converter-side fix is proven: while a converted R2 map is the active map the cvar is forced to 0 and the user's value is put back
+// when a stock R1 map becomes active (costs the fps benefit of extraCull on converted maps). Evaluated at every client signon state change
+// (a console command at level load, nothing per frame). R1DELTA_R2PORT_KEEP_PVS_EXTRACULL=1 keeps the user's value.
 static void ApplyR2PvsExtraCullPolicy(const std::string& mapName)
 {
-    static bool force = [] {
+    static bool keep = [] {
         char value[8]{};
-        const DWORD length = GetEnvironmentVariableA("R1DELTA_R2PORT_FORCE_PVS_EXTRACULL0", value, sizeof(value));
+        const DWORD length = GetEnvironmentVariableA("R1DELTA_R2PORT_KEEP_PVS_EXTRACULL", value, sizeof(value));
         return length && value[0] != '0';
     }();
-    if (!force)
+    if (keep)
         return;
     static bool overridden = false;
     static int savedValue = 0;

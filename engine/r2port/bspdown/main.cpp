@@ -54,6 +54,7 @@ static void usage(const char* a0) {
                  "  --keep-prop-fade       rule 23: copy the R2 prop fade distance for far-origin props too (default raises it)\n"
                  "  --scatter-min <n>      instance count threshold of hide-scatter (default 500)\n"
                  "  --csm-rebase           rule 17: keep only the real shadow environment (largest content; CSM nodes, refs, shadow meshes), root at node 0\n"
+                 "  --csm-last-env         rule 17: with --csm-rebase keep the last environment record instead of the largest (mp_coliseum maps)\n"
                  "  --empty-shadow-meshes  rule 17: write lumps 0x7C..0x7F empty\n"
                  "  --no-cubemap-files     keep the R2 pakfile (do not write per-cubemap VTFs)\n"
                  "                         (the R2 pakfile only has one BC6H cubemaps.hdr.vtf)\n"
@@ -133,6 +134,7 @@ int main(int argc, char** argv) {
         else if (a == "--keep-prop-fade") opt.keepPropFade = true;
         else if (a == "--scatter-min" && i + 1 < argc) opt.scatterMinCount = (uint32_t)std::atoi(argv[++i]);
         else if (a == "--csm-rebase") opt.csmRebase = true;
+        else if (a == "--csm-last-env") opt.csmLastEnv = true;
         else if (a == "--empty-shadow-meshes") opt.emptyShadowMeshes = true;
         else if (a == "--no-cubemap-files") opt.cubemapFiles = false;
         else if (a == "--keep-r2-lumps") opt.dropR2OnlyLumps = false;

@@ -85,7 +85,7 @@ constexpr uint32_t kGameLump = 0x23;
 
 // Folded into the on-disk cache fingerprint together with entity_rewrite::kRewriteVersion.
 // Bump when the vendored bspdown converter or the provider's BSP post-processing changes output.
-constexpr uint32_t kConvertedBspCacheVersion = 24;  // 24: rule 17 real CSM environment chosen by content (BWC, angel_city, coliseum, coliseum_column); 23: rule 23 far-origin prop fade distance
+constexpr uint32_t kConvertedBspCacheVersion = 25;  // 25: mp_coliseum and mp_coliseum_column keep the last CSM environment (csmLastEnv); 24: rule 17 real CSM environment chosen by content (BWC, angel_city, coliseum, coliseum_column); 23: rule 23 far-origin prop fade distance
 
 // Raised onto the z of every info_spawnpoint_flag origin in lump 0 (see entity_rewrite::RaiseFlagSpawnOrigins).
 // The R1 server drops the spawnpoint back to the floor; one that starts inside solid is removed.
@@ -1361,6 +1361,7 @@ void ApplyConverterVariant(bspdown::Options& options, const std::string& variant
             continue;
         if (token == "csm-rebase") options.csmRebase = true;
         else if (token == "csm-no-rebase") options.csmRebase = false;
+        else if (token == "csm-last-env") options.csmLastEnv = true;   // rule 17: keep the last shadow environment record (mp_coliseum and mp_coliseum_column, which have no cloudmask)
         else if (token == "empty-shadow-meshes") options.emptyShadowMeshes = true;
         else if (token == "no-sun-alpha") options.lightmapSunAlpha = false;
         else if (token == "no-rtl") options.rtlConvert = false;
@@ -1438,7 +1439,10 @@ FileBytes ReadConvertedBsp(const MapRequest& request)
             }
             if (source) {
                 state->bspCacheStatus = "miss";
-                const bspdown::Options options = R2ConverterOptions();
+                bspdown::Options options = R2ConverterOptions();
+                // No cloudmask on these two maps: the entity rewrite leaves the dummy light_environment last, so the CSM environment must be the last record too.
+                if (state->mapName == "mp_coliseum" || state->mapName == "mp_coliseum_column")
+                    options.csmLastEnv = true;
                 bspdown::Report report;
                 converted = bspdown::DowngradeBsp(source->data(), source->size(), options, &report);
                 StoreConvertedBspCache(state, sourceHash, converted);
