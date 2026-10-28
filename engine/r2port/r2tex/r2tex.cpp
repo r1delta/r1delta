@@ -2497,6 +2497,18 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
     // (tint 3.0 2.53 2.11 times k): k 0.4 -> 191, 0.25 -> 106, 0.2 -> 78, 0.15 -> 56. k 0.25 (106) matches R2's median (94) to p90 (111) over the glow pixels (R2 fades the glow across the strip with the layer weight from the vertex alpha; R1 draws it uniform).
     constexpr double kPureEmitterTintCap = 4.0;
     constexpr double kPureEmitterScale = 0.25;
+    // Layered pure emitters (mp_glitch vr_light_trim_01_totrans: float4 #10 3.0 2.53 2.11, layer slot 22 present) are not drawn flat in R2:
+    // the shader set is a premultiplied blend (ONE / INV_SRC_ALPHA) whose weight c comes from the mesh vertex alpha, out = E * c + dst * (1 - c)
+    // (measured against the R2 frame at the mp_glitch ramp panel: with c = 0.65 at the vertex alpha 89 edge, E = display 177 149 121 and
+    // dst = panel 23 55 90 give the observed glow pixel 123 116 110 on all three channels). The glow is brightest at the outer edge of the 32
+    // unit strip and gone about half way in; c is about (160 - alpha) / 109 clamped to 0..1 (alpha 89 -> 0.65, 0 -> 1, 127 -> 0.3, >= 160 -> 0).
+    // bspdown rule 24 (vcalpha.cpp, kEmitterGlowMaterials) rewrites the vertex alpha of these materials to that c; the VMT here blends with it
+    // ($translucent 1, $vertexalpha 1) and carries E. Without the rule the R2 alpha would draw the glow inverted (dim at the edge, strongest
+    // inward), so keep the name list there in sync with this predicate (only world/vr_training/vr_light_trim_01_totrans over the 20 maps).
+    // E is the HDR tint compressed with a power curve (R2 tone-maps the highlight toward grey): $color = 0.417 * tint^0.7 = 0.90 0.80 0.70, which
+    // draws as display 177 149 121 in R1's unlit path (display about 197 * $color), the R2 value above. R2TEX_EMITTER_GLOW=0 keeps the flat strip.
+    constexpr double kPureEmitterGlowGain = 0.417;
+    constexpr double kPureEmitterGlowExponent = 0.7;
     if (!tools && lightmapped && !additive && !cut && usedSlots.find(0) != usedSlots.end() &&
         usedSlots.find(4) != usedSlots.end() && slotGuids.size() > 4 && slotGuids[0] && slotGuids[4] && constants.size() >= 43) {
         double emitTint[3];
@@ -2516,10 +2528,22 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
                 pure << "\"UnlitGeneric\"\n{\n";
                 addVmtParam(pure, "$surfaceprop", surfaceKnown(surface) ? surface : "default");
                 addVmtParam(pure, "$basetexture", vmtTextureName(usedSlots[4]));
+                const char* glowEnv = std::getenv("R2TEX_EMITTER_GLOW");
+                const bool glow = hasLayerSlots && translucent && !(glowEnv && std::atoi(glowEnv) == 0);
                 char colorText[64];
-                std::snprintf(colorText, sizeof(colorText), "[%.4f %.4f %.4f]", emitTint[0] * kPureEmitterScale, emitTint[1] * kPureEmitterScale,
-                              emitTint[2] * kPureEmitterScale);
+                if (glow) {
+                    std::snprintf(colorText, sizeof(colorText), "[%.4f %.4f %.4f]", kPureEmitterGlowGain * std::pow(emitTint[0], kPureEmitterGlowExponent),
+                                  kPureEmitterGlowGain * std::pow(emitTint[1], kPureEmitterGlowExponent),
+                                  kPureEmitterGlowGain * std::pow(emitTint[2], kPureEmitterGlowExponent));
+                } else {
+                    std::snprintf(colorText, sizeof(colorText), "[%.4f %.4f %.4f]", emitTint[0] * kPureEmitterScale, emitTint[1] * kPureEmitterScale,
+                                  emitTint[2] * kPureEmitterScale);
+                }
                 addVmtParam(pure, "$color", colorText);
+                if (glow) {
+                    addVmtParam(pure, "$translucent", "1");
+                    addVmtParam(pure, "$vertexalpha", "1");
+                }
                 // R2 draws the strip with the decal raster state and no depth write over the coplanar wall panel; without $decal R1 z-fights
                 // the two (dotted dither pattern across the strip in game).
                 if (decal) addVmtParam(pure, "$decal", "1");

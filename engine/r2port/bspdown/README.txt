@@ -574,6 +574,21 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
     The homestead baseline pose frame (maps\outdoor\LOOK-RECIPE.md pose) is unchanged (MAD 0.075/255 before vs after in one session).
     --keep-prop-fade restores the plain copy (provider token props-keepfade). Needs a converted BSP cache revision bump (22 -> 23).
 
+24. Emitter glow weight in the vertex alpha of layered pure-emitter world materials (vcalpha.cpp, TrimGlow). R2 draws a pure emitter (black albedo,
+    white _ilm, HDR emissive tint, layer slot 22, blend f0138286 = premultiplied alpha, depth state no write, decal raster state) as
+    out = E * c + dst * (1 - c) with c a function of the mesh vertex alpha. mp_glitch world/vr_training/vr_light_trim_01_totrans is the only such
+    material over the 20 maps: the 32 unit trim strips around the ramp wall panels carry alpha 89 on the outer vertices and 255 on the inner
+    ones (other meshes of the material 0, 63, 127, 191). Measured on the R2 frame at the triangular panel (eye 267.20 -201.98 316.03 ang -1.25
+    118.93, R2 1280x720): the glow pixel at the alpha 89 edge is 123 116 110 on the panel behind it (23 55 90); with E = 177 149 121 (the
+    emissive tint 3.0 2.53 2.11 tone mapped) that is c = 0.65 on all three channels, and the glow is gone about 47 % across the strip: c =
+    clamp((160 - alpha) / 109, 0, 1) (alpha 0 -> 1, 63 -> 0.89, 89 -> 0.65, 127 -> 0.30, >= 160 -> 0). R1 UnlitGeneric $translucent 1 +
+    $vertexalpha 1 blends out = $color * alpha + dst * (1 - alpha), the same equation, so the rule rewrites the vertex alpha byte of the
+    referenced vertices of the listed materials (kEmitterGlowMaterials) to round(255 * c). R1 interpolates the alpha linearly between the
+    vertices, so the glow reaches 0 at the strip's inner edge instead of at 47 % (the integrated glow over the strip is equal, 0.325 of E);
+    a steeper fall needs more vertices than the 4 per strip. Without the rule the R2 alpha draws the glow inverted. Keep the list in sync
+    with the r2tex pure-emitter glow predicate (hasLayerSlots && translucent; R2TEX_EMITTER_GLOW=0 returns the flat opaque VMT, rule then
+    must not run). Needs a converted BSP cache revision bump (25 -> 26) and a material revision bump.
+
 Results
 -------
 Required maps (all checks of check_bspdown.py pass, including bsp_tool.load_bsp as an R1 branch
