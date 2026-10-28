@@ -2241,6 +2241,15 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
     const bool hasLayerSlots = lightmapped && std::any_of(layerSlots.begin(), layerSlots.end(),
         [&](std::size_t slot) { return slot < slotGuids.size() && slotGuids[slot] != 0; });
     const bool layersOff = hasLayerSlots && options.layerMode == LayerMode::layersOff;
+    // Puddle terrain (default OFF, R2TEX_PUDDLES=1). R2 layer 0 of the "..._puddles_..." ground materials is water-like: gloss 255 over
+    // the whole 512 map (world/dirt/dirt_forest_water_puddles_01_gls), F0 40/255, albedo 54 50 43, so R2 draws a dark mirror with the
+    // trees reflected (mp_crashsite3 -4506.03 1288.21 1175.09 ang 36.44 81.19). R1 got a flat matte brown that is 2x brighter. With R1's
+    // Fresnel environment terms on (the stock water VMTs use them), a x9 environment tint (the spec map is only 40/255) and a cool
+    // dark $color the same spot turns dark blue-grey like R2 (maps\csl\NOTES.md, frame fd_f4_patch_floor.jpg). Tested on that one material only.
+    const bool puddleLayers = hasLayerSlots && name.find("puddle") != std::string::npos && []() {
+        const char* e = std::getenv("R2TEX_PUDDLES");
+        return e && e[0] == '1';
+    }();
     // `current` (the default) expands the single-channel R2 layer mask (slot 22, BC4 red only) to R=G=mask: R1's
     // $blendModulateTexture reads red AND green. `redOnly` keeps the old unexpanded mapping.
     const LayerMode effMode = options.layerMode == LayerMode::current ? LayerMode::maskRg : options.layerMode;
@@ -2546,7 +2555,8 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
                 // Model (VertexLitGeneric) materials over-reflect in R1 (prop brightness conv/R2 1.75 at mat_envmap_scale 2, LightVerify):
                 // R2TEX_MODEL_ENVTINT (float, default 0.25) scales the tint of model materials only; world brushes keep [1 1 1].
                 const bool modelEnv = vertexLit || options.forModel;   // forModel: a world-shader R2 material the engine re-labels VertexLitGeneric for a converted model (r2m/)
-                double k = modelEnv ? 0.25 : 1.0;   // measured with LightVerify on mp_glitch: prop brightness conv/R2 1.82 at 1, 1.56 at 0.25; mp_lf_stacks pelican crates: silver at 1
+                double k = modelEnv ? 0.25 : 1.0;
+                if (puddleLayers) k = 9.0;   // measured with LightVerify on mp_glitch: prop brightness conv/R2 1.82 at 1, 1.56 at 0.25; mp_lf_stacks pelican crates: silver at 1
                 if (modelEnv) if (const char* e = std::getenv("R2TEX_MODEL_ENVTINT")) k = std::clamp(std::atof(e), 0.0, 4.0);
                 char tint[48];
                 std::snprintf(tint, sizeof(tint), "[%g %g %g]", k, k, k);
@@ -2634,6 +2644,7 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
             if (foliageCavity && name.find("tree_cypress_tall_leaves") != std::string::npos)
                 for (double& c : color) c *= 1.5;
             if (softCloudSheet) alpha *= softCloudAlpha;
+            if (puddleLayers) { color[0] *= 0.5; color[1] *= 0.55; color[2] *= 0.65; }
             if (flatSheet.ok) {
                 for (int i = 0; i < 3; ++i) color[i] *= flatSheet.rgb[i];
                 alpha *= flatSheet.alpha;
@@ -2655,6 +2666,13 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
         if (godray) addVmtParam(out, "$translucent", "1");
         if (decal || screenOverlay) addVmtParam(out, "$decal", "1");
         if ((glass && !unlit) || (!unlit && !foliageNoEnv && usedSlots.find(3) != usedSlots.end())) addVmtParam(out, "$envmap", "env_cubemap");
+        if (puddleLayers) {
+            addVmtParam(out, "$fresnelamount", "1");
+            addVmtParam(out, "$fresnelintensity", "1");
+            addVmtParam(out, "$fresnelcurvesharpness", "0.01");
+            addVmtParam(out, "$envmapfresnel", "1");
+            addVmtParam(out, "$envmaplambertian", "0");
+        }
         // A layered R2 material uses vertex alpha as the layer blend weight. Once its layers are removed (layers-off),
         // R1 would multiply that graded alpha into the opaque surface and dither it: the mp_glitch ground shimmered
         // (metric 2.5..3.9) with "$vertexcolor 1" and not (0.0) without it.
