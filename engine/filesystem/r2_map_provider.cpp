@@ -1828,6 +1828,12 @@ std::filesystem::path GetR2InstallDirectory()
     return R2InstallDirectory();
 }
 
+// The r1delta game directory that holds cfg/ (the CORE autoexec_delta.cfg lives in <dir>\cfg), or empty when it cannot be found.
+std::filesystem::path GetR2GameContentDirectory()
+{
+    return FindGameContentDirectory();
+}
+
 bool ConsumeServedAinPackage()
 {
     return g_ainPackageServed.exchange(false);

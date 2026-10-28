@@ -36,6 +36,8 @@ public:
 bool RegisterMapPatchSource(std::shared_ptr<MapPatchSource> source);
 std::filesystem::path GetR2MapPatchDirectory();
 std::filesystem::path GetR2InstallDirectory();
+// The r1delta game directory that holds cfg/ (empty when it cannot be found).
+std::filesystem::path GetR2GameContentDirectory();
 // True for the allowlisted R2-only maps this provider serves.
 bool IsR2PortMap(std::string_view mapName);
 // True once after the provider has served an AI graph package to the engine; cleared by the call. The server's AIN

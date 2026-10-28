@@ -13,6 +13,7 @@
 #include "engine/filesystem/r2_map_provider.h"
 #include "engine/filesystem/r2_material_provider.h"
 
+#include <filesystem>
 #include <string>
 
 #include <intrin.h>
@@ -64,6 +65,29 @@ __int64 StringCompare_AllTalkHookDedi(__int64 a1, __int64 a2) {
             return false;
     }
     return strcmp((const char*)a1, (const char*)a2);
+}
+
+// Per-map-type configuration (user approved feature): when a map finishes loading (client signon state 8), <game dir>\cfg\r2port_maps.cfg is executed for a
+// converted R2 map and <game dir>\cfg\r1_maps.cfg for a stock R1 map, only if the file exists (no file: nothing runs). It goes through the engine's
+// command buffer (exec <name>) at level load, nothing per frame, and runs after the pvs_extraCull policy above, so a pvs_extraCull line in these
+// files wins. Archive cvars set there still persist to the user's profile; settings read at shader creation (r2port_sso, R2_LM_BICUBIC,
+// r2port_ao_tech startup parts) are not affected by a late exec. One log line per exec.
+static void ExecR2MapTypeConfig(const std::string& mapName)
+{
+    const std::filesystem::path gameDirectory = r2port::GetR2GameContentDirectory();
+    if (gameDirectory.empty())
+        return;
+    const bool converted = r2port::IsR2PortMap(mapName);
+    const char* name = converted ? "r2port_maps.cfg" : "r1_maps.cfg";
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(gameDirectory / "cfg" / name, error) || error)
+        return;
+    char command[96]{};
+    _snprintf_s(command, sizeof(command), _TRUNCATE, "exec %s\n", name);
+    Cbuf_AddText(0, command, 0);
+    char message[200]{};
+    _snprintf_s(message, sizeof(message), _TRUNCATE, "R1Delta: map config exec cfg/%s for %s map %s\n", name, converted ? "converted R2" : "stock R1", mapName.c_str());
+    Msg("%s", message);
 }
 
 // pvs_extraCull (CORE cfg/autoexec_delta.cfg sets 1, engine default 0) culls whole world meshes of converted R2 maps (the glass roof over
@@ -141,6 +165,8 @@ __int64 CNetChan__SendDatagramLISTEN_Part2_Hook(__int64 thisptr, unsigned int le
         }
         if (!map_name.empty() && !IsDedicatedServer())
             ApplyR2PvsExtraCullPolicy(map_name);
+        if (signon_state == 8 && !map_name.empty() && !IsDedicatedServer())
+            ExecR2MapTypeConfig(map_name);
         last_logged_signon_state = signon_state;
     }
 
