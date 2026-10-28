@@ -3,6 +3,7 @@
 #include "r2_material_provider.h"
 #include "r2_model_provider.h"
 #include "r1_map_pack_material_provider.h"
+#include "engine/r2port/postfx/r2_postfx.h"
 #include "engine/core/factory.h"
 #include "engine/core/core.h"
 #include "engine/cvar.h"
@@ -1797,6 +1798,7 @@ void InstallR2MapProvider()
         RegisterR2ModelProvider();
         RegisterR2ParticleProvider();
         InstallR2MapPatchSource();
+        postfx::RegisterMaterialProvider();
         auto provider = std::make_shared<R2MapProvider>();
         RegisterProvider("maps", provider);
         RegisterProvider("materials", std::make_shared<R2MapPackFileProvider>());

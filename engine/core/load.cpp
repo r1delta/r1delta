@@ -48,6 +48,7 @@
 #include "r2port_provider.h"
 #include "engine/r2port/shaders/r2_shader_cache.h"
 #include "engine/r2port/shaders/r2_shader_override.h"
+#include "engine/r2port/postfx/r2_postfx.h"
 #include "engine/r2port/ao/r2_ao.h"
 #include "r2_material_provider.h"
 #include "legacy_ds_sound_tables.h"
@@ -9939,6 +9940,7 @@ void __stdcall LoaderNotificationCallback(
 			RegisterConVar("delta_hud_show_xpsplash", "1", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Show XP splash.");
 			RegisterConVar("delta_hud_xpsplash_stack", "1", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Stack XP splash lines of the same type.");
 			RegisterConVar("delta_old_reticles", "0", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Do vanilla reticle behavior, so that theyre kinda broken above 90 fov.");
+			r2port::postfx::InstallClient(G_client);
 
 				MH_CreateHook((LPVOID)(G_localize + 0x3A40), &h_CLocalize__ReloadLocalizationFiles, (LPVOID*)&o_pCLocalize__ReloadLocalizationFiles);
 				MH_EnableHook(MH_ALL_HOOKS);
