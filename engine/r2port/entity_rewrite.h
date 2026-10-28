@@ -54,6 +54,11 @@ struct RewriteOptions {
     EffectNameMapper effectNameMapper = nullptr;
 };
 
+struct ClassCount {
+    std::string name;
+    std::uint64_t occurrences = 0;
+};
+
 struct RewriteReport {
     std::uint64_t entitiesIn = 0;
     std::uint64_t entitiesOut = 0;
@@ -68,6 +73,8 @@ struct RewriteReport {
     std::uint64_t renamedEffectNames = 0;
     std::uint64_t insertedKeys = 0;
     std::uint64_t loweredNpcKeys = 0;
+    // Output entities whose class R1 does not register (r1_entity_classes.h); R1 skips them at spawn.
+    std::vector<ClassCount> unsupportedClasses;
     std::array<SpawnModeCounts, static_cast<std::size_t>(SpawnMode::Count)> spawnModes{};
 };
 

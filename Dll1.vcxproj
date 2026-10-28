@@ -299,6 +299,8 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="engine\r2port\bspdown\bcdec.h" />
     <ClInclude Include="engine\r2port\patch\r2patch_reader.h" />
     <ClInclude Include="engine\r2port\entity_rewrite.h" />
+    <ClInclude Include="engine\r2port\trigger_brush.h" />
+    <ClInclude Include="engine\r2port\r1_entity_classes.h" />
     <ClInclude Include="engine\core\background_mode.h" />
     <ClInclude Include="engine\r2port\r2tex\r2tex.hpp" />
     <ClInclude Include="engine\r2port\r2tex\bcdec.h" />
@@ -539,6 +541,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="engine\r2port\bspdown\lighting.cpp" />
     <ClCompile Include="engine\r2port\bspdown\vcalpha.cpp" />
     <ClCompile Include="engine\r2port\entity_rewrite.cpp" />
+    <ClCompile Include="engine\r2port\trigger_brush.cpp" />
     <ClCompile Include="engine\core\background_mode.cpp" />
     <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_assert.cpp">
       <ForcedIncludeFiles>$(ProjectDir)engine\r2port\lzham\lzham_compat.h</ForcedIncludeFiles>

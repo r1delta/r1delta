@@ -443,11 +443,37 @@ void TestSunStateOwner()
           "light_environment_volume changed the cloud owner");
 }
 
+void TestUnsupportedClassCounts()
+{
+    const std::string input =
+        "{\n\"classname\" \"prop_dynamic_lightweight\"\n}\n"
+        "{\n\"classname\" \"envmap_volume\"\n}\n"
+        "{\n\"classname\" \"envmap_volume\"\n}\n"
+        "{\n\"classname\" \"func_wallrun_curve\"\n}\n"
+        "{\n\"classname\" \"info_target_clientside\"\n}\n"
+        "{\n\"classname\" \"trigger_out_of_bounds\"\n}\n"
+        "{\n\"classname\" \"script_mover_lightweight\"\n\"speed\" \"1\"\n}\n"
+        "{\n\"classname\" \"light_environment_volume\"\n}\n";
+    RewriteReport report;
+    RewriteEntityLump(input, { "mp_test", false, nullptr }, &report);
+    std::uint64_t envmap = 0, wallrun = 0, other = 0;
+    for (const auto& entry : report.unsupportedClasses) {
+        if (entry.name == "envmap_volume")
+            envmap = entry.occurrences;
+        else if (entry.name == "func_wallrun_curve")
+            wallrun = entry.occurrences;
+        else
+            ++other;
+    }
+    Check(envmap == 2 && wallrun == 1 && other == 0, "only classes R1 does not register are counted (renamed, client-side, trigger and dropped classes are not)");
+}
+
 } // namespace
 
 int main()
 {
     try {
+        TestUnsupportedClassCounts();
         TestRulesAndIdempotence();
         TestSpawnModesAndAnalysis();
         TestRaiseFlagSpawnOrigins();

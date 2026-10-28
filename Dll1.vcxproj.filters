@@ -272,6 +272,12 @@
     <ClInclude Include="engine\r2port\entity_rewrite.h">
       <Filter>engine\r2port</Filter>
     </ClInclude>
+    <ClInclude Include="engine\r2port\trigger_brush.h">
+      <Filter>engine\r2port</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\r1_entity_classes.h">
+      <Filter>engine\r2port</Filter>
+    </ClInclude>
     <ClInclude Include="engine\core\background_mode.h">
       <Filter>engine\core</Filter>
     </ClInclude>
@@ -972,6 +978,9 @@
       <Filter>engine\core</Filter>
     </ClCompile>
     <ClCompile Include="engine\r2port\entity_rewrite.cpp">
+      <Filter>engine\r2port</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\trigger_brush.cpp">
       <Filter>engine\r2port</Filter>
     </ClCompile>
     <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_assert.cpp">

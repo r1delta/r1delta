@@ -12,6 +12,7 @@
 #include "engine/filesystem/r1o_vpk.h"
 #include "engine/r2port/bspdown/bspdown.hpp"
 #include "engine/r2port/entity_rewrite.h"
+#include "engine/r2port/trigger_brush.h"
 #include "engine/filesystem/r2_particle_provider.h"
 #include "p2p/p2p_identity.h"
 
@@ -30,6 +31,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 #include <limits>
 #include <chrono>
 #include <fstream>
@@ -130,6 +132,10 @@ struct MapState {
     FileBytes aiGraphFile;
     std::mutex entityMutex;
     std::unordered_map<std::string, FileBytes> entityFiles;
+    // Trigger volumes baked into the converted BSP (trigger_brush.h) and the entity files that reference them.
+    std::mutex triggerMutex;
+    bool triggerPlanReady{};
+    std::unordered_map<std::string, FileBytes> triggerEntityFiles;
     // Converted-BSP disk cache (see ConvertedBspCacheFile): key file path, resolved once.
     std::mutex bspCacheMutex;
     bool bspCacheKeyTried{};
@@ -999,34 +1005,172 @@ void LogEntityRewrite(const char* what, std::string_view mapName,
     OutputDebugStringA(buffer);
 }
 
-// Applies the R2 -> R1 entity text rules to the converted BSP's entity lump (lump 0), where the
-// CTF flag spawnpoints live. Leaves the BSP untouched when no rule matches.
-void RewriteConvertedBspEntities(std::string_view mapName, std::vector<uint8_t>& bsp)
+// Reads one partition .ent file from the R2 package and applies the entity text rules. Returns false when
+// the package has no such file; text that cannot be parsed is returned unchanged.
+bool LoadRewrittenPartition(const std::shared_ptr<MapState>& state, const std::string& path, std::string& text,
+    std::map<std::string, std::uint64_t>& unsupported)
 {
+    if (state->directoryVpk.empty() || !IsRegularFile(state->directoryVpk))
+        return false;
+    const std::string package = state->directoryVpk.string();
+    const FileBytes data = R1OVPK_ReadDirectoryVPKFile(package.c_str(), path.c_str());
+    if (!data)
+        return false;
+    text.assign(reinterpret_cast<const char*>(data->data()), data->size());
+    try {
+        entity_rewrite::RewriteReport report;
+        std::string rewritten = entity_rewrite::RewriteEntityLump(text, { state->mapName, false, &R2ParticleTargetName }, &report);
+        if (!report.unknownConstructs)
+            text = std::move(rewritten);
+        for (const auto& entry : report.unsupportedClasses)
+            unsupported[entry.name] += entry.occurrences;
+        if (report.droppedScriptMoverLightweight)
+            unsupported["#script_mover_lightweight"] += report.droppedScriptMoverLightweight;
+        if (report.droppedLightEnvironmentVolume)
+            unsupported["#light_environment_volume"] += report.droppedLightEnvironmentVolume;
+    }
+    catch (const std::exception&) {
+    }
+    return true;
+}
+
+void LogTriggerBrushes(std::string_view mapName, const trigger_brush::Report& report)
+{
+    char buffer[512]{};
+    _snprintf_s(buffer, sizeof(buffer), _TRUNCATE,
+        "R1Delta: R2 trigger brushes map=%.*s %s entities=%llu brushes=%llu non-axial-planes=%llu models=%u..%u "
+        "skipped-no-brush=%llu skipped-has-model=%llu%s%s version=%u\n",
+        static_cast<int>(mapName.size()), mapName.data(), report.failure.empty() ? "baked" : "NOT-BAKED",
+        static_cast<unsigned long long>(report.entitiesBaked), static_cast<unsigned long long>(report.brushes),
+        static_cast<unsigned long long>(report.nonAxialPlanes), report.firstModel,
+        report.firstModel + report.modelsAdded, static_cast<unsigned long long>(report.entitiesSkippedNoBrush),
+        static_cast<unsigned long long>(report.entitiesSkippedHasModel), report.failure.empty() ? "" : " reason=",
+        report.failure.c_str(), trigger_brush::kBakeVersion);
+    Msg("%s", buffer);
+    OutputDebugStringA(buffer);
+}
+
+// Applies the R2 -> R1 entity text rules to the converted BSP's entity lump (lump 0), where the
+// CTF flag spawnpoints live, and gives every R2 trigger volume an R1 brush model (see trigger_brush.h:
+// R2 triggers carry planes in their entity text and have no model, so R1 would spawn them without a volume).
+// The entity files that reference the new models are kept in the map state for ReadEntityFile.
+// Leaves the BSP untouched when no rule matches.
+void RewriteConvertedBspEntities(const std::shared_ptr<MapState>& state, std::vector<uint8_t>& bsp)
+{
+    const std::string_view mapName = state->mapName;
+    const auto markPlanReady = [&] {
+        std::lock_guard<std::mutex> lock(state->triggerMutex);
+        state->triggerPlanReady = true;
+    };
     if (bsp.size() < kBspHeaderSize)
-        return;
+        return markPlanReady();
     BspLumpHeader header{};
     std::memcpy(&header, bsp.data() + 16, sizeof(header));
     if (!header.length || header.offset > bsp.size() || header.length > bsp.size() - header.offset)
-        return;
+        return markPlanReady();
 
     const std::string_view text(reinterpret_cast<const char*>(bsp.data()) + header.offset, header.length);
     entity_rewrite::RewriteReport report;
     std::string rewritten = entity_rewrite::RewriteEntityLump(text, { mapName, false, &R2ParticleTargetName }, &report);
     std::uint64_t raised = 0;
     rewritten = entity_rewrite::RaiseFlagSpawnOrigins(rewritten, kFlagSpawnLift, &raised);
-    if (rewritten == text)
-        return;
+    std::map<std::string, std::uint64_t> unsupported;
+    for (const auto& entry : report.unsupportedClasses)
+        unsupported[entry.name] += entry.occurrences;
+    if (report.droppedScriptMoverLightweight)
+        unsupported["#script_mover_lightweight"] += report.droppedScriptMoverLightweight;
+    if (report.droppedLightEnvironmentVolume)
+        unsupported["#light_environment_volume"] += report.droppedLightEnvironmentVolume;
 
-    const FileBytes replacement = std::make_shared<const std::vector<uint8_t>>(
-        rewritten.begin(), rewritten.end());
+    // Trigger volumes: partition 0 is lump 0, then the five .ent files in kEntitySuffixes order.
+    std::array<std::string, kEntitySuffixes.size()> partitionText;
+    std::array<bool, kEntitySuffixes.size()> partitionPresent{};
+    std::vector<std::string_view> partitions;
+    partitions.push_back(rewritten);
+    for (size_t i = 0; i < kEntitySuffixes.size(); ++i) {
+        const std::string path = "maps/" + state->mapName + kEntitySuffixes[i];
+        partitionPresent[i] = LoadRewrittenPartition(state, path, partitionText[i], unsupported);
+        partitions.push_back(partitionText[i]);
+    }
+    {
+        std::string line, dropped;
+        for (const auto& entry : unsupported) {
+            std::string& target = entry.first[0] == '#' ? dropped : line;
+            target += ' ';
+            target += (entry.first[0] == '#' ? entry.first.substr(1) : entry.first) + "=" + std::to_string(entry.second);
+        }
+        char buffer[1024]{};
+        _snprintf_s(buffer, sizeof(buffer), _TRUNCATE,
+            "R1Delta: R2 entity classes R1 does not register map=%.*s skipped-by-R1:%s dropped-by-rewrite:%s\n",
+            static_cast<int>(mapName.size()), mapName.data(), line.empty() ? " none" : line.c_str(),
+            dropped.empty() ? " none" : dropped.c_str());
+        Msg("%s", buffer);
+        OutputDebugStringA(buffer);
+    }
+    trigger_brush::Result triggers;
+    try {
+        triggers = trigger_brush::Bake(bsp, partitions);
+    }
+    catch (const std::exception& error) {
+        triggers = {};
+        triggers.report.failure = error.what();
+    }
+    if (triggers.baked || !triggers.report.failure.empty())
+        LogTriggerBrushes(mapName, triggers.report);
+
+    std::array<FileBytes, kBspLumpCount> owned{};
     LumpReplacements replacements{};
-    replacements[0] = &replacement;
+    if (triggers.baked) {
+        for (size_t lump = 0; lump < kBspLumpCount; ++lump) {
+            if (triggers.lumps[lump].empty())
+                continue;
+            owned[lump] = std::make_shared<const std::vector<uint8_t>>(std::move(triggers.lumps[lump]));
+            replacements[lump] = &owned[lump];
+        }
+    }
+    else if (rewritten != text) {
+        owned[0] = std::make_shared<const std::vector<uint8_t>>(rewritten.begin(), rewritten.end());
+        replacements[0] = &owned[0];
+    }
+    else
+        return markPlanReady();
+
     std::vector<uint8_t> output;
     if (!ReplaceLumps(bsp, replacements, output))
-        return;
-    LogEntityRewrite("bsp-lump=0", mapName, report, header.length, replacement->size(), raised);
+        return markPlanReady();
+    LogEntityRewrite("bsp-lump=0", mapName, report, header.length, owned[0]->size(), raised);
     bsp = std::move(output);
+
+    std::lock_guard<std::mutex> lock(state->triggerMutex);
+    if (triggers.baked) {
+        for (size_t i = 0; i < kEntitySuffixes.size(); ++i) {
+            if (!partitionPresent[i] || triggers.texts[i + 1] == partitionText[i])
+                continue;
+            const std::string path = "maps/" + state->mapName + kEntitySuffixes[i];
+            state->triggerEntityFiles[path] = std::make_shared<const std::vector<uint8_t>>(
+                triggers.texts[i + 1].begin(), triggers.texts[i + 1].end());
+        }
+    }
+    state->triggerPlanReady = true;
+}
+
+// The entity files that reference baked trigger models only exist after the BSP was converted.
+FileBytes ReadConvertedBsp(const MapRequest& request);
+
+FileBytes BakedEntityFile(const std::shared_ptr<MapState>& state, const std::string& path)
+{
+    bool ready;
+    {
+        std::lock_guard<std::mutex> lock(state->triggerMutex);
+        ready = state->triggerPlanReady;
+    }
+    if (!ready) {
+        const std::string bspPath = "maps/" + state->mapName + ".bsp";
+        ReadConvertedBsp(MapRequest{ state->mapName, MapRequest::Kind::Bsp, bspPath });
+    }
+    std::lock_guard<std::mutex> lock(state->triggerMutex);
+    const auto found = state->triggerEntityFiles.find(path);
+    return found != state->triggerEntityFiles.end() ? found->second : FileBytes{};
 }
 
 // Reads one of the map's five partition entity files from the R2 package and applies the same
@@ -1034,6 +1178,8 @@ void RewriteConvertedBspEntities(std::string_view mapName, std::vector<uint8_t>&
 FileBytes ReadEntityFile(const MapRequest& request, const std::shared_ptr<MapState>& state)
 {
     const std::string path(request.packagePath);
+    if (FileBytes baked = BakedEntityFile(state, path))
+        return baked;
     std::lock_guard<std::mutex> lock(state->entityMutex);
     if (const auto found = state->entityFiles.find(path); found != state->entityFiles.end())
         return found->second;
@@ -1268,7 +1414,7 @@ FileBytes ReadConvertedBsp(const MapRequest& request)
                 state->sourceHash = sourceHash;
                 state->hashReady = true;
             }
-            RewriteConvertedBspEntities(state->mapName, converted);
+            RewriteConvertedBspEntities(state, converted);
             state->bspCacheStatus = "hit";
             haveConverted = true;
         }
@@ -1285,7 +1431,7 @@ FileBytes ReadConvertedBsp(const MapRequest& request)
                 bspdown::Report report;
                 converted = bspdown::DowngradeBsp(source->data(), source->size(), options, &report);
                 StoreConvertedBspCache(state, sourceHash, converted);
-                RewriteConvertedBspEntities(state->mapName, converted);
+                RewriteConvertedBspEntities(state, converted);
                 haveConverted = true;
             }
         }
@@ -1626,6 +1772,8 @@ std::string MapPackageFingerprint(const std::shared_ptr<MapState>& state)
     metadata.append(std::to_string(entity_rewrite::kRewriteVersion));
     metadata.append("\nconverted-bsp|");
     metadata.append(std::to_string(kConvertedBspCacheVersion));
+    metadata.append("\ntrigger-brush|");
+    metadata.append(std::to_string(trigger_brush::kBakeVersion));
     metadata.push_back('\n');
     metadata.append("bspdown-variant|");
     metadata.append(R2ConverterVariantString());

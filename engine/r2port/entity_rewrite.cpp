@@ -1,4 +1,5 @@
 #include "entity_rewrite.h"
+#include "r1_entity_classes.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -881,6 +882,7 @@ std::string RewriteEntityLump(std::string_view input,
     std::size_t appendCursor = 0;
     ParseFailure failure;
     const std::map<std::string, std::string> spinSequences = CollectSpinSequences(input);
+    std::map<std::string, std::uint64_t> unsupportedClasses;
     const SunStateFix sunStateFix = CollectSunStateFix(input);
 
     const bool parsed = ScanEntityLump(
@@ -979,6 +981,11 @@ std::string RewriteEntityLump(std::string_view input,
             appendCursor = entity.end;
             result.loweredNpcKeys += LowerNpcKeys(output, entityOutputBegin);
             ++result.entitiesOut;
+            {
+                const std::string_view outClass = entity.classname == "prop_dynamic_lightweight" ? std::string_view("prop_dynamic") : entity.classname;
+                if (!outClass.empty() && !IsR1EntityClass(outClass))
+                    ++unsupportedClasses[std::string(outClass)];
+            }
         },
         failure);
 
@@ -991,6 +998,8 @@ std::string RewriteEntityLump(std::string_view input,
     }
 
     AppendRange(output, input, appendCursor, input.size());
+    for (const auto& entry : unsupportedClasses)
+        result.unsupportedClasses.push_back({ entry.first, entry.second });
     return output;
 }
 
