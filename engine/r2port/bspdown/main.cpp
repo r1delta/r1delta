@@ -104,6 +104,8 @@ int main(int argc, char** argv) {
         else if (a == "--no-collapse-envs") opt.collapseEnvs = false;
         else if (a == "--no-sun-alpha") opt.lightmapSunAlpha = false;
         else if (a == "--no-rtl") opt.rtlConvert = false;
+        else if (a == "--rtl-bake" && i + 1 < argc) { std::string m = argv[++i]; opt.rtlBake = m == "all" ? 2 : m == "edge" ? 1 : 0; }
+        else if (a == "--rtl-bake-edge-min" && i + 1 < argc) opt.rtlBakeEdgeMin = (float)std::atof(argv[++i]);
         else if (a == "--sky-ambient-scale" && i + 1 < argc) opt.skyAmbientScale = (float)std::atof(argv[++i]);
         else if (a == "--sun-scale" && i + 1 < argc) opt.sunScale = (float)std::atof(argv[++i]);
         else if (a == "--pbr-scale" && i + 1 < argc) opt.pbrScale = (float)std::atof(argv[++i]);

@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <map>
 
 namespace bspdown {
 namespace detail {
@@ -346,6 +347,333 @@ void quantizeRtlVisibility(Ctx& c, const std::vector<Light>& lights, std::vector
     }
 }
 
+// ---- Rule 20f (StairStep experiment): bake real-time light contributions into lightmap plane A ---------------------------------------
+// R1's RTL list is nearest-sampled and binary; R2's B plane is a filtered visibility*cone field. A light whose pool has shadow edges
+// shows texel-aligned steps in R1. Baking the light (colour * attenuation * facing * linear(B)) into plane A makes the bilinear lightmap
+// sampler do the smoothing. Receiver positions/normals come from the same UV-triangle reconstruction as the visibility quantizer.
+struct BakeLight {
+    bool ok = false, bake = false;
+    double org[3]{}, inten[3]{}, radius = 0, A = 0, Bq = 0, c = 1, l = 0, q = 0;
+    bool rational = false;
+    uint64_t edge = 0, partial = 0, total = 0, hot = 0;
+};
+
+// Receivers on materials whose R1 shader ignores the real-time light term must keep their RTL slots (baking would only add light R1 never
+// drew). Layered terrain materials (name suffix _bm: WorldVertexTransition-style blends) are RTL-blind in the measured R1 build.
+bool rtlBlindMaterial(Ctx& c, int16_t textureData) {
+    const Bytes& td = c.lump[L_TEXDATA];
+    const Bytes& strTab = c.lump[L_TDSTRTAB];
+    const Bytes& strData = c.lump[L_TDSTRDATA];
+    if (textureData < 0 || size_t(textureData + 1) * 36 > td.size()) return false;
+    int32_t idx;
+    std::memcpy(&idx, &td[size_t(textureData) * 36 + 12], 4);
+    if (idx < 0 || size_t(idx + 1) * 4 > strTab.size()) return false;
+    uint32_t off;
+    std::memcpy(&off, &strTab[size_t(idx) * 4], 4);
+    if (off >= strData.size()) return false;
+    const char* s = reinterpret_cast<const char*>(&strData[off]);
+    size_t n = 0;
+    while (off + n < strData.size() && s[n]) ++n;
+    if (n < 3) return false;
+    const char a = s[n - 3], b = s[n - 2], d = s[n - 1];
+    return a == '_' && (b == 'b' || b == 'B') && (d == 'm' || d == 'M');
+}
+
+void bakeRtlLights(Ctx& c, const Bytes& wl, const std::vector<int32_t>& newOf, int v1, const std::vector<Light>& oldLights,
+                   const std::vector<uint16_t>& orig, std::vector<uint16_t>& ids, const double linear[256]) {
+    const Bytes& headers = c.lump[L_LMHDR];
+    size_t skippedMeshes = 0;
+    Bytes& rtl = c.lump[L_LMRTL];
+    Bytes& sky = c.lump[L_LMSKY];
+    struct Page {
+        size_t first = 0, rtlOffset = 0, skyOffset = 0;
+        uint32_t width = 0, height = 0;
+    };
+    std::vector<Page> pages(headers.size() / 8);
+    size_t first = 0, rtlOffset = 0, skyOffset = 0;
+    for (size_t h = 0; h < pages.size(); ++h) {
+        if (rdU32(&headers[h * 8]) != 1) continue;
+        uint16_t width, height;
+        std::memcpy(&width, &headers[h * 8 + 4], 2);
+        std::memcpy(&height, &headers[h * 8 + 6], 2);
+        pages[h] = {first, rtlOffset, skyOffset, width, height};
+        const size_t count = size_t(width) * height;
+        first += count;
+        rtlOffset += count * 9;
+        skyOffset += count * 8;
+    }
+    const size_t texels = first;
+    if (sky.size() != texels * 8) { c.say("[rule 20f] lightmap lump size mismatch, bake skipped"); return; }
+    // final light records
+    std::vector<BakeLight> BL(oldLights.size());
+    for (size_t i = 0; i < oldLights.size(); ++i) {
+        const Light& o = oldLights[i];
+        if ((o.type() != 1 && o.type() != 2) || !(o.flags() & (int32_t)kFlagRealtime)) continue;
+        const int32_t nw = newOf[i];
+        if (nw < 0 || nw - v1 < 0 || nw - v1 > 254) continue;
+        Light L;
+        std::memcpy(L.b, &wl[size_t(nw) * kRec], kRec);
+        if (!(L.flags() & (int32_t)kFlagRealtime)) continue;
+        BakeLight& b = BL[i];
+        b.ok = true;
+        for (int k = 0; k < 3; ++k) { b.org[k] = L.f(4 * k); b.inten[k] = L.f(kOffIntensity + 4 * k); }
+        b.radius = L.f(kOffRadius);
+        b.c = L.f(kOffC); b.l = L.f(kOffL); b.q = L.f(kOffQ);
+        const double den = b.radius * b.l + b.radius * b.radius * b.q;
+        if (b.radius > 0 && std::fabs(den) > 1e-12) {
+            b.A = -1.0000005 * (b.radius * b.l) / den;
+            b.Bq = -1.0000005 * (b.radius * b.radius * b.q) / den;
+            b.rational = true;
+        }
+    }
+    // texels that carry any candidate slot
+    std::vector<uint8_t> need(texels, 0);
+    uint64_t candidateSlots = 0;
+    for (size_t t = 0; t < texels; ++t) for (int s = 0; s < 4; ++s) {
+        const uint16_t id = orig[t * 4 + s];
+        if (id != 0xFFFF && BL[id].ok) { need[t] = 1; ++candidateSlots; }
+    }
+    // receivers
+    std::vector<float> bestDist(texels, std::numeric_limits<float>::infinity());
+    std::vector<float> rpos(texels * 3, 0.0f), rnrm(texels * 3, 0.0f);
+    const Bytes& meshes = c.lump[L_MESHES];
+    const Bytes& sorts = c.lump[L_SORTS];
+    const Bytes& indices = c.lump[L_MESHIDX];
+    const Bytes& positions = c.lump[L_VERTICES];
+    const Bytes& normals = c.lump[L_VNORMALS];
+    if (meshes.size() % sizeof(MeshR2) || sorts.size() % sizeof(Sort) || indices.size() % 2 || positions.size() % sizeof(Vec3) || normals.size() % sizeof(Vec3))
+        throw Error("RTL bake: malformed mesh/sort/index/position/normal lump");
+    for (size_t mi = 0; mi < meshes.size() / sizeof(MeshR2); ++mi) {
+        MeshR2 mesh;
+        std::memcpy(&mesh, &meshes[mi * sizeof(mesh)], sizeof(mesh));
+        const uint32_t format = (mesh.flags >> 9) & 3;
+        if (format > 1 || !mesh.numTriangles) continue;
+        if (mesh.materialSort >= sorts.size() / sizeof(Sort)) throw Error("RTL bake: mesh material sort out of range");
+        Sort sort;
+        std::memcpy(&sort, &sorts[mesh.materialSort * sizeof(sort)], sizeof(sort));
+        if (sort.lightmapHeader < 0) continue;
+        if ((size_t)sort.lightmapHeader >= pages.size()) throw Error("RTL bake: lightmap header out of range");
+        const Page& page = pages[sort.lightmapHeader];
+        if (!page.width) continue;
+        if (rtlBlindMaterial(c, sort.textureData)) { ++skippedMeshes; continue; }
+        const uint32_t stride = format ? 44 : 36;
+        const Bytes& vertices = c.lump[format ? L_VTX_LITBUMP : L_VTX_LITFLAT];
+        if (vertices.size() % stride || sort.vertexOffset < 0 || (uint64_t(mesh.firstMeshIndex) + uint64_t(mesh.numTriangles) * 3) * 2 > indices.size())
+            throw Error("RTL bake: invalid vertex/index range");
+        for (size_t tri = 0; tri < mesh.numTriangles; ++tri) {
+            uint16_t local[3];
+            std::memcpy(local, &indices[(size_t(mesh.firstMeshIndex) + tri * 3) * 2], sizeof(local));
+            double uv[3][2], wpos[3][3], wn[3][3];
+            for (int k = 0; k < 3; ++k) {
+                const size_t vertex = size_t(sort.vertexOffset) + local[k];
+                if (vertex >= vertices.size() / stride) throw Error("RTL bake: mesh vertex out of range");
+                const uint8_t* rec = &vertices[vertex * stride];
+                float texcoord[2];
+                std::memcpy(texcoord, rec + 20, sizeof(texcoord));
+                uv[k][0] = double(texcoord[0]) * page.width;
+                uv[k][1] = double(texcoord[1]) * page.height;
+                if (!std::isfinite(uv[k][0]) || !std::isfinite(uv[k][1])) throw Error("RTL bake: non-finite lightmap UV");
+                const uint32_t pi = rdU32(rec), ni = rdU32(rec + 4);
+                if (pi >= positions.size() / sizeof(Vec3) || ni >= normals.size() / sizeof(Vec3)) throw Error("RTL bake: position/normal index out of range");
+                Vec3 p, n;
+                std::memcpy(&p, &positions[size_t(pi) * sizeof(Vec3)], sizeof(Vec3));
+                std::memcpy(&n, &normals[size_t(ni) * sizeof(Vec3)], sizeof(Vec3));
+                wpos[k][0] = p.x; wpos[k][1] = p.y; wpos[k][2] = p.z;
+                wn[k][0] = n.x; wn[k][1] = n.y; wn[k][2] = n.z;
+            }
+            const double minX = std::min({uv[0][0], uv[1][0], uv[2][0]}), maxX = std::max({uv[0][0], uv[1][0], uv[2][0]});
+            const double minY = std::min({uv[0][1], uv[1][1], uv[2][1]}), maxY = std::max({uv[0][1], uv[1][1], uv[2][1]});
+            if (maxX < 0 || maxY < 0 || minX >= page.width || minY >= page.height) continue;
+            const int x0 = (int)std::floor(std::clamp(minX - 2, 0.0, double(page.width - 1)));
+            const int x1 = (int)std::floor(std::clamp(maxX + 2, 0.0, double(page.width - 1)));
+            const int y0 = (int)std::floor(std::clamp(minY - 2, 0.0, double(page.height - 1)));
+            const int y1 = (int)std::floor(std::clamp(maxY + 2, 0.0, double(page.height - 1)));
+            const double det = (uv[1][1] - uv[2][1]) * (uv[0][0] - uv[2][0]) + (uv[2][0] - uv[1][0]) * (uv[0][1] - uv[2][1]);
+            if (std::fabs(det) < 1e-12) continue;
+            const double orientation = det < 0 ? -1.0 : 1.0;
+            for (int y = y0; y <= y1; ++y) for (int x = x0; x <= x1; ++x) {
+                const size_t texel = page.first + size_t(y) * page.width + x;
+                if (!need[texel]) continue;
+                const double px = x + 0.5, py = y + 0.5;
+                // gutter texels (bilinear taps outside the chart) take the nearest point of the triangle, up to 1.5 texels away
+                double bary[3];
+                bary[0] = ((uv[1][1] - uv[2][1]) * (px - uv[2][0]) + (uv[2][0] - uv[1][0]) * (py - uv[2][1])) / det;
+                bary[1] = ((uv[2][1] - uv[0][1]) * (px - uv[2][0]) + (uv[0][0] - uv[2][0]) * (py - uv[2][1])) / det;
+                bary[2] = 1.0 - bary[0] - bary[1];
+                double distance = 0;
+                if (std::min({bary[0], bary[1], bary[2]}) < -1e-8) {
+                    distance = std::numeric_limits<double>::infinity();
+                    for (int k = 0; k < 3; ++k) {
+                        const int next = (k + 1) % 3;
+                        const double ex = uv[next][0] - uv[k][0], ey = uv[next][1] - uv[k][1];
+                        const double length2 = ex * ex + ey * ey;
+                        const double t = length2 ? std::clamp(((px - uv[k][0]) * ex + (py - uv[k][1]) * ey) / length2, 0.0, 1.0) : 0;
+                        const double dx = px - uv[k][0] - t * ex, dy = py - uv[k][1] - t * ey;
+                        if (dx * dx + dy * dy < distance) {
+                            distance = dx * dx + dy * dy;
+                            bary[0] = bary[1] = bary[2] = 0;
+                            bary[k] = 1.0 - t;
+                            bary[next] = t;
+                        }
+                    }
+                }
+                if (distance > 2.25 || distance >= bestDist[texel] - 1e-9) continue;
+                bestDist[texel] = (float)distance;
+                double n[3] = {0, 0, 0};
+                for (int k = 0; k < 3; ++k) {
+                    rpos[texel * 3 + k] = 0;
+                    for (int m = 0; m < 3; ++m) { rpos[texel * 3 + k] += (float)(bary[m] * wpos[m][k]); n[k] += bary[m] * wn[m][k]; }
+                }
+                const double nl = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+                for (int k = 0; k < 3; ++k) rnrm[texel * 3 + k] = nl > 1e-9 ? (float)(n[k] / nl) : 0.0f;
+            }
+        }
+    }
+    const auto reached = [&](size_t t) { return std::isfinite(bestDist[t]); };
+    const auto cone = [&](const Light& L, const double p[3]) {
+        return rtlSpotCone(L, std::array<double, 3>{p[0], p[1], p[2]});
+    };
+    // per-light edge statistics: partial visibility texels and texels bordering a dark neighbour that the cone says should be lit
+    const auto weightOf = [&](size_t t, uint16_t id) -> double {
+        // linear B of light id at texel t (0 when absent)
+        size_t pg = 0;
+        for (size_t h = 0; h < pages.size(); ++h) if (pages[h].width && t >= pages[h].first && t < pages[h].first + size_t(pages[h].width) * pages[h].height) { pg = h; break; }
+        const size_t local = t - pages[pg].first;
+        const uint8_t* B = &rtl[pages[pg].rtlOffset + 4 * size_t(pages[pg].width) * pages[pg].height];
+        for (int s = 0; s < 4; ++s) if (orig[t * 4 + s] == id) return linear[B[local * 4 + s]];
+        return 0.0;
+    };
+    (void)weightOf;
+    for (size_t h = 0; h < pages.size(); ++h) {
+        const Page& pg = pages[h];
+        if (!pg.width) continue;
+        const uint8_t* B = &rtl[pg.rtlOffset + 4 * size_t(pg.width) * pg.height];
+        for (uint32_t y = 0; y < pg.height; ++y) for (uint32_t x = 0; x < pg.width; ++x) {
+            const size_t t = pg.first + size_t(y) * pg.width + x;
+            if (!need[t] || !reached(t)) continue;
+            for (int s = 0; s < 4; ++s) {
+                const uint16_t id = orig[t * 4 + s];
+                if (id == 0xFFFF || !BL[id].ok) continue;
+                const double w = linear[B[(size_t(y) * pg.width + x) * 4 + s]];
+                BakeLight& b = BL[id];
+                if (w <= 0) continue;
+                ++b.total;
+                {
+                    const double hx = b.org[0] - rpos[t * 3], hy = b.org[1] - rpos[t * 3 + 1], hz = b.org[2] - rpos[t * 3 + 2];
+                    const double hd2 = hx * hx + hy * hy + hz * hz, hd = std::sqrt(std::max(hd2, 1e-12));
+                    const double hf = std::clamp((hx * rnrm[t * 3] + hy * rnrm[t * 3 + 1] + hz * rnrm[t * 3 + 2]) / hd, 0.0, 1.0);
+                    double ha;
+                    if (b.rational) {
+                        const double sn = std::min(1.0, std::max(1.0 / (b.radius * b.radius), hd2 / (b.radius * b.radius)));
+                        ha = 1.0 + b.A * std::sqrt(sn) + b.Bq * sn;
+                    } else ha = b.c + b.l * hd + b.q * hd2;
+                    ha = std::clamp(ha, 0.0, 1.0);
+                    if (std::max({b.inten[0], b.inten[1], b.inten[2]}) * ha * hf * w > 3.5) ++b.hot;
+                }
+                const double p[3] = {rpos[t * 3], rpos[t * 3 + 1], rpos[t * 3 + 2]};
+                const double cn = oldLights[id].type() == 2 ? cone(oldLights[id], p) : 1.0;
+                if (cn < 0.25) continue;
+                const double vis = std::min(1.0, w / cn);
+                if (vis < 0.8) { ++b.partial; ++b.edge; continue; }
+                // hard edge: a 4-neighbour inside the same cone that has no (or zero) weight for this light
+                static const int dxs[4] = {1, -1, 0, 0}, dys[4] = {0, 0, 1, -1};
+                bool edge = false;
+                for (int d = 0; d < 4 && !edge; ++d) {
+                    const int nx = int(x) + dxs[d], ny = int(y) + dys[d];
+                    if (nx < 0 || ny < 0 || nx >= (int)pg.width || ny >= (int)pg.height) continue;
+                    const size_t nt = pg.first + size_t(ny) * pg.width + nx;
+                    if (!reached(nt)) continue;
+                    const double q[3] = {rpos[nt * 3], rpos[nt * 3 + 1], rpos[nt * 3 + 2]};
+                    const double dd = std::sqrt((q[0] - b.org[0]) * (q[0] - b.org[0]) + (q[1] - b.org[1]) * (q[1] - b.org[1]) + (q[2] - b.org[2]) * (q[2] - b.org[2]));
+                    if (b.radius > 0 && dd > b.radius) continue;
+                    const double ncn = oldLights[id].type() == 2 ? cone(oldLights[id], q) : 1.0;
+                    if (ncn < 0.25) continue;
+                    // same surface? skip neighbours whose normal differs a lot (different face)
+                    const double dn = rnrm[t * 3] * rnrm[nt * 3] + rnrm[t * 3 + 1] * rnrm[nt * 3 + 1] + rnrm[t * 3 + 2] * rnrm[nt * 3 + 2];
+                    if (dn < 0.9) continue;
+                    double nw = 0;
+                    const uint8_t* NB = B;
+                    for (int ss = 0; ss < 4; ++ss) if (orig[nt * 4 + ss] == id) nw = linear[NB[(size_t(ny) * pg.width + nx) * 4 + ss]];
+                    if (nw < 0.05 * ncn) edge = true;
+                }
+                if (edge) ++b.edge;
+            }
+        }
+    }
+    const uint64_t edgeMin = c.opt.rtlBakeEdgeMin > 0 ? (uint64_t)c.opt.rtlBakeEdgeMin : 8;
+    size_t lightsBaked = 0, lightsKept = 0;
+    for (size_t i = 0; i < BL.size(); ++i) {
+        BakeLight& b = BL[i];
+        if (!b.ok) continue;
+        // R1 creates local variance shadow maps only for flag 0x8 lights WITHOUT 0x10; those keep the RTL path (dynamic shadows).
+        const bool vsmCapable = !(oldLights[i].flags() & 0x10);
+        const bool tooHot = b.total && b.hot * 4 > b.total;  // lightmap energy is capped at 4.0 per channel
+        b.bake = !vsmCapable && !tooHot && (c.opt.rtlBake == 2 || b.edge >= edgeMin);
+        if (b.bake) ++lightsBaked; else ++lightsKept;
+    }
+    // accumulate and re-encode plane A
+    auto toLinear = [](double v) { return v <= 0.04045 ? v / 12.92 : std::pow((v + 0.055) / 1.055, 2.4); };
+    auto toSrgb = [](double v) { v = std::clamp(v, 0.0, 1.0); return v <= 0.0031308 ? v * 12.92 : 1.055 * std::pow(v, 1 / 2.4) - 0.055; };
+    uint64_t bakedSlots = 0, unreached = 0, texelsChanged = 0, clipped = 0;
+    double addedEnergy = 0;
+    for (size_t h = 0; h < pages.size(); ++h) {
+        const Page& pg = pages[h];
+        if (!pg.width) continue;
+        const uint8_t* B = &rtl[pg.rtlOffset + 4 * size_t(pg.width) * pg.height];
+        uint8_t* A = &sky[pg.skyOffset];
+        for (size_t lt = 0; lt < size_t(pg.width) * pg.height; ++lt) {
+            const size_t t = pg.first + lt;
+            if (!need[t]) continue;
+            double add[3] = {0, 0, 0};
+            bool any = false;
+            for (int s = 0; s < 4; ++s) {
+                const uint16_t id = orig[t * 4 + s];
+                if (id == 0xFFFF || !BL[id].ok || !BL[id].bake) continue;
+                const double w = linear[B[lt * 4 + s]];
+                if (w <= 0) { ids[t * 4 + s] = 0xFFFF; continue; }
+                if (!reached(t)) { ++unreached; continue; }
+                const BakeLight& b = BL[id];
+                const double dx = b.org[0] - rpos[t * 3], dy = b.org[1] - rpos[t * 3 + 1], dz = b.org[2] - rpos[t * 3 + 2];
+                const double d2 = dx * dx + dy * dy + dz * dz, d = std::sqrt(d2);
+                if (d < 1e-6) continue;
+                double facing = (dx * rnrm[t * 3] + dy * rnrm[t * 3 + 1] + dz * rnrm[t * 3 + 2]) / d;
+                facing = std::clamp(facing, 0.0, 1.0);
+                double att;
+                if (b.rational) {
+                    const double sn = std::min(1.0, std::max(1.0 / (b.radius * b.radius), d2 / (b.radius * b.radius)));
+                    att = 1.0 + b.A * std::sqrt(sn) + b.Bq * sn;
+                } else att = b.c + b.l * d + b.q * d2;
+                att = std::clamp(att, 0.0, 1.0);
+                const double k = att * facing * w;
+                for (int ch = 0; ch < 3; ++ch) add[ch] += b.inten[ch] * k;
+                ids[t * 4 + s] = 0xFFFF;
+                ++bakedSlots;
+                any = true;
+            }
+            if (!any) continue;
+            uint8_t* px = &A[lt * 4];
+            const double scale = (px[3] + 1) / 64.0;
+            double e[3];
+            for (int ch = 0; ch < 3; ++ch) e[ch] = toLinear(px[ch] / 255.0) * scale + add[ch];
+            const double peak = std::max({e[0], e[1], e[2], 1.0 / 64});
+            if (peak > 4.0) { ++clipped; for (int ch = 0; ch < 3; ++ch) e[ch] *= 4.0 / peak; }  // keep the hue when the 4.0 cap is exceeded
+            const double pk = std::min(peak, 4.0);
+            int alpha = (int)std::ceil(pk * 64.0) - 1;
+            alpha = std::clamp(alpha, 0, 255);
+            const double denom = (alpha + 1) / 64.0;
+            for (int ch = 0; ch < 3; ++ch) px[ch] = (uint8_t)std::lround(255.0 * toSrgb(std::min(e[ch], 4.0) / denom));
+            px[3] = (uint8_t)alpha;
+            ++texelsChanged;
+            addedEnergy += (add[0] + add[1] + add[2]) / 3.0;
+        }
+    }
+    c.say("[rule 20f] meshes on RTL-blind materials (_bm layered terrain) skipped as receivers: %zu", skippedMeshes);
+    c.say("[rule 20f] RTL bake (%s): %zu lights baked, %zu kept as RTL (edge texel minimum %llu); %llu candidate slots, %llu slots baked into plane A over %llu texels (mean added energy %.4f, %llu texels above the encodable 4.0), %llu baked slots without a receiver kept as RTL",
+          c.opt.rtlBake == 2 ? "all" : "edge", lightsBaked, lightsKept, (unsigned long long)edgeMin, (unsigned long long)candidateSlots,
+          (unsigned long long)bakedSlots, (unsigned long long)texelsChanged, texelsChanged ? addedEnergy / texelsChanged : 0.0, (unsigned long long)clipped, (unsigned long long)unreached);
+}
+
+
 }  // namespace
 
 void convertRealTimeLightsFill(Ctx& c) {
@@ -507,6 +835,8 @@ void convertLighting(Ctx& c) {
         }
     }
 
+    std::vector<uint16_t> texLightsOrig;
+    if (doRtl && c.opt.rtlBake) texLightsOrig = texLights;
     if (doRtl)
         quantizeRtlVisibility(c, old, texLights, linearVisibility, usage, droppedLowWeight, usedSlots);
 
@@ -622,6 +952,8 @@ void convertLighting(Ctx& c) {
     if (sunAlpha)
         c.say("[rule 21] lightmap plane B alpha (0x62): R2 has 255 everywhere; R1 world PS uses shadow = (1 - alpha) outside the CSM cascades. Set from the R2 RTL sun slot visibility (sRGB -> linear) on %llu texels with a sun entry: %llu fully lit (alpha 0), %llu partial; all other texels keep 255 (no sun)",
               (unsigned long long)sunTexels, (unsigned long long)sunLit, (unsigned long long)sunPartial);
+
+    if (doRtl && c.opt.rtlBake) bakeRtlLights(c, wl, newOf, v1, old, texLightsOrig, texLights, linearVisibility);
 
     // --- real-time lights ----------------------------------------------------------------------------------------------------------
     if (!doRtl) {

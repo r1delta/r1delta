@@ -85,7 +85,7 @@ constexpr uint32_t kGameLump = 0x23;
 
 // Folded into the on-disk cache fingerprint together with entity_rewrite::kRewriteVersion.
 // Bump when the vendored bspdown converter or the provider's BSP post-processing changes output.
-constexpr uint32_t kConvertedBspCacheVersion = 21;
+constexpr uint32_t kConvertedBspCacheVersion = 22;
 
 // Raised onto the z of every info_spawnpoint_flag origin in lump 0 (see entity_rewrite::RaiseFlagSpawnOrigins).
 // The R1 server drops the spawnpoint back to the floor; one that starts inside solid is removed.
@@ -1364,6 +1364,9 @@ void ApplyConverterVariant(bspdown::Options& options, const std::string& variant
         else if (token == "empty-shadow-meshes") options.emptyShadowMeshes = true;
         else if (token == "no-sun-alpha") options.lightmapSunAlpha = false;
         else if (token == "no-rtl") options.rtlConvert = false;
+        else if (token == "rtl-bake-edge") options.rtlBake = 1;   // rule 20f (default): bake spot/point RTL light of lights with shadow edges into lightmap plane A (smooth penumbra)
+        else if (token == "rtl-bake-all") options.rtlBake = 2;    // rule 20f: bake every eligible real-time light
+        else if (token == "rtl-bake-none") options.rtlBake = 0;   // opt-out: R1 real-time light list only, no baked penumbra
         else if (token == "cubemaps-split") options.cubemaps = bspdown::CubemapMode::Split;
         else if (token == "cubemaps-single") options.cubemaps = bspdown::CubemapMode::None;   // pre-split behaviour: every world sort samples the nearest cube
         else if (token == "no-collapse-envs") options.collapseEnvs = false;
@@ -1389,6 +1392,7 @@ bspdown::Options R2ConverterOptions()
     options.csmRebase = true;           // rule 17: drop R2's empty dummy CSM environment so R1's tree root is the real one (tree/prop sun shadows); opt-out token csm-no-rebase
     options.emptyShadowMeshes = false;
     options.cubemaps = bspdown::CubemapMode::Split;   // rule 13d: per-mesh R2 cubemaps via patch materials; opt-out token cubemaps-single
+    options.rtlBake = 1;                // rule 20f: bake spot/point real-time lights with shadow edges into lightmap plane A; opt-out tokens rtl-bake-none, no-rtl
     ApplyConverterVariant(options, R2ConverterVariantString());
     return options;
 }

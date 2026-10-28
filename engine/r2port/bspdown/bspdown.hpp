@@ -133,6 +133,11 @@ struct Options {
     // visibility in the real-time-light B weight of the sun slot. true: write 255 - 255*linear(sun visibility) from the R2 RTL sun slot.
     bool lightmapSunAlpha = true;
 
+    // Rule 20f (StairStep experiment): bake real-time spot/point light contributions into lightmap plane A instead of the binary RTL list.
+    //   0 = off (default), 1 = lights whose pools have shadow edges, 2 = every real-time light.
+    int rtlBake = 0;
+    float rtlBakeEdgeMin = 0.0f;
+
     // Drop lumps R1 never reads (0x04..0x07, 0x37, 0x7A). They are large
     // (about 2 MB on eden) and cannot be interpreted by R1.
     bool dropR2OnlyLumps = true;

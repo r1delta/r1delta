@@ -531,6 +531,7 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
     `$vertexcolor 1` only for measured RGB-tinted world materials. The BWC beacon_metal_panel_grey_02_vc wall has RGB (139,57,57) and alpha
     135; its old cap0 noise metric was 1.47 with vertex color enabled/source alpha, versus 0.76 without vertex color. The rule avoids using
     R1-only opacity for these surfaces.
+    f) Opt-in RTL bake (rule 20f, StairStep; options rtlBake 1 = edge, 2 = all, CLI --rtl-bake edge|all, provider tokens rtl-bake-edge / rtl-bake-all): bakes real-time spot/point light (colour x attenuation x facing x linear(B)) into lightmap plane A for lights without flag 0x10, skipping _bm receivers; plane A is energy-encoded to 4.0 max per channel. Default off; output unchanged unless the option is set.
 
 Results
 -------
