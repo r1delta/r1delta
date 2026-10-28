@@ -12,7 +12,7 @@ namespace r2port::entity_rewrite {
 
 // Bump whenever RewriteEntityLump can produce different output for the same input. The R2 map
 // provider folds it into its on-disk cache fingerprint so cached entity files and BSPs are rebuilt.
-inline constexpr std::uint32_t kRewriteVersion = 9;
+inline constexpr std::uint32_t kRewriteVersion = 10;
 
 enum class SpawnMode : std::size_t {
     CaptureTheFlag,

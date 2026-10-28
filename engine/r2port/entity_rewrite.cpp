@@ -31,6 +31,23 @@ struct ModeTag {
     std::string_view value;
 };
 
+struct KeyRef {
+    bool present = false;
+    std::string_view value;
+    Span span;
+};
+
+// The light_environment keys the R1 server keeps in one global per key (see CollectSunStateFix).
+constexpr std::array<std::string_view, 3> kSunKeys = {"cloudoffset", "pitch", "angles"};
+
+std::size_t SunKeyIndex(std::string_view key)
+{
+    for (std::size_t index = 0; index < kSunKeys.size(); ++index)
+        if (key == kSunKeys[index])
+            return index;
+    return kSunKeys.size();
+}
+
 struct EntityView {
     std::size_t begin = 0;
     std::size_t end = 0;
@@ -45,7 +62,6 @@ struct EntityView {
     Span ropeMaterialSpan;
     Span teamNumberAliasKeySpan;
     Span effectNameSpan;
-    Span cloudOffsetSpan;
     std::array<ModeTag, 4> modeTags{};
     std::uint64_t skyKeys = 0;
     std::uint64_t fogKeys = 0;
@@ -65,9 +81,8 @@ struct EntityView {
     bool hasEffectName = false;
     bool hasLinkGuid = false;
     bool hasCloudMask = false;
-    bool hasCloudOffset = false;
     std::string_view linkGuid;
-    std::string_view cloudOffset;
+    std::array<KeyRef, 3> sunKeys{};
     std::string_view origin;
     Span originSpan;
 };
@@ -422,10 +437,8 @@ bool ScanEntityLump(std::string_view input,
                 entity.effectNameSpan = value.text;
             } else if (keyText == "cloudmask") {
                 entity.hasCloudMask = true;
-            } else if (keyText == "cloudoffset") {
-                entity.hasCloudOffset = true;
-                entity.cloudOffset = valueText;
-                entity.cloudOffsetSpan = value.text;
+            } else if (SunKeyIndex(keyText) < kSunKeys.size()) {
+                entity.sunKeys[SunKeyIndex(keyText)] = {true, valueText, value.text};
             } else {
                 const std::size_t modeIndex = ModeTagIndex(keyText);
                 if (modeIndex < entity.modeTags.size()) {
@@ -668,27 +681,37 @@ std::map<std::string, std::string> CollectSpinSequences(std::string_view input)
     return result;
 }
 
-// The R1 server parses every light_environment through CEnvLight::KeyValue, which copies a key into one global per key
-// the moment it is read: cloudmask into the cloud mask name, cloudoffset into the 4 floats m_cloudOffset (x y z) and
-// m_cloudScale (w) of the networked CascadeLight, and nothing is reset between blocks. So the final cloud state is
-// the last cloudmask seen plus the last cloudoffset seen. R2 lists a dummy skybox light_environment with cloudoffset
-// "0 0 0 0" and no cloudmask next to the real one; on the maps where the dummy comes AFTER the real block
-// (mp_black_water_canal) R1 would keep the real mask but get offset 0 and scale 0, and the world shader then samples the
-// cloud mask at a degenerate scale (vertical streaks on walls, a tiny repeating pattern on flat props; both vanish
-// with mat_cloudmask 0). Every light_environment after the cloudmask owner that sets its own cloudoffset gets the owner's
-// value, so the pair R1 ends with is the real one. Blocks before the owner and maps without a cloudmask are untouched.
-struct CloudOffsetFix {
-    std::string offset;
-    std::vector<std::size_t> targets; // entity.begin of every light_environment whose cloudoffset is replaced
+// The R1 server parses every light_environment through CEnvLight::KeyValue (sub_180172FC0), which copies a key into one
+// global per key the moment it is read and never resets between blocks: cloudmask into the cloud mask name, cloudoffset
+// into the 4 floats m_cloudOffset (x y z) and m_cloudScale (w) of the networked CascadeLight, pitch into the sun
+// elevation; CEnvLight::Spawn (sub_1801731F0) takes the sun yaw from the entity's angles. The cascade sun direction, the
+// cloud mask projection and the cloud offset/scale are therefore the last values seen over all light_environment blocks.
+// R2 lists a dummy skybox light_environment (cloudoffset "0 0 0 0", angles 51.4284 122.548 1.30448, no cloudmask) next to
+// the real one. On the maps where the dummy comes AFTER the real block (mp_black_water_canal) R1 kept the real cloud mask
+// but got offset 0 and scale 0 (vertical streaks on walls, a tiny repeating pattern on flat props; both vanish with
+// mat_cloudmask 0) and the dummy sun direction (cloud shadows projected the wrong way, cascades cast from the wrong side).
+// The real block is the last one carrying a cloudmask; every light_environment after it that sets cloudoffset, pitch or
+// angles itself gets the real block's value, so the state R1 ends with is the real one (the result is what the 16 maps that
+// list the real block last already give). Blocks before the owner and maps without a cloudmask (mp_coliseum, mp_lf_stacks)
+// are untouched.
+struct SunStateFix {
+    std::array<std::string_view, 3> values{};
+    std::array<bool, 3> has{};
+    std::vector<std::size_t> targets; // entity.begin of every light_environment that has a key to replace
+
+    bool Replaces(const EntityView& entity, std::size_t key) const
+    {
+        return has[key] && entity.sunKeys[key].present && entity.sunKeys[key].value != values[key]
+            && std::find(targets.begin(), targets.end(), entity.begin) != targets.end();
+    }
 };
 
-CloudOffsetFix CollectCloudOffsetFix(std::string_view input)
+SunStateFix CollectSunStateFix(std::string_view input)
 {
     struct Block {
         std::size_t begin;
         bool hasMask;
-        bool hasOffset;
-        std::string offset;
+        std::array<KeyRef, 3> keys;
     };
     std::vector<Block> blocks;
     ParseFailure failure;
@@ -698,21 +721,29 @@ CloudOffsetFix CollectCloudOffsetFix(std::string_view input)
         [](const EntityView&, std::string_view, std::string_view) {},
         [&](const EntityView& entity) {
             if (entity.classname == "light_environment")
-                blocks.push_back({entity.begin, entity.hasCloudMask, entity.hasCloudOffset, std::string(entity.cloudOffset)});
+                blocks.push_back({entity.begin, entity.hasCloudMask, entity.sunKeys});
         },
         failure);
 
-    CloudOffsetFix fix;
+    SunStateFix fix;
     std::size_t owner = blocks.size();
     for (std::size_t index = 0; index < blocks.size(); ++index)
         if (blocks[index].hasMask)
             owner = index;
-    if (owner == blocks.size() || !blocks[owner].hasOffset)
+    if (owner == blocks.size())
         return fix;
-    fix.offset = blocks[owner].offset;
-    for (std::size_t index = owner + 1; index < blocks.size(); ++index)
-        if (blocks[index].hasOffset && blocks[index].offset != fix.offset)
-            fix.targets.push_back(blocks[index].begin);
+    for (std::size_t key = 0; key < kSunKeys.size(); ++key) {
+        fix.has[key] = blocks[owner].keys[key].present;
+        fix.values[key] = blocks[owner].keys[key].value;
+    }
+    for (std::size_t index = owner + 1; index < blocks.size(); ++index) {
+        for (std::size_t key = 0; key < kSunKeys.size(); ++key) {
+            if (fix.has[key] && blocks[index].keys[key].present && blocks[index].keys[key].value != fix.values[key]) {
+                fix.targets.push_back(blocks[index].begin);
+                break;
+            }
+        }
+    }
     return fix;
 }
 
@@ -850,7 +881,7 @@ std::string RewriteEntityLump(std::string_view input,
     std::size_t appendCursor = 0;
     ParseFailure failure;
     const std::map<std::string, std::string> spinSequences = CollectSpinSequences(input);
-    const CloudOffsetFix cloudOffsetFix = CollectCloudOffsetFix(input);
+    const SunStateFix sunStateFix = CollectSunStateFix(input);
 
     const bool parsed = ScanEntityLump(
         input,
@@ -883,11 +914,13 @@ std::string RewriteEntityLump(std::string_view input,
                 patches[patchCount++] = {entity.classnameSpan, "prop_dynamic"};
                 ++result.renamedClassnames;
             }
-            if (entity.classname == "light_environment" && entity.hasCloudOffset
-                && std::find(cloudOffsetFix.targets.begin(), cloudOffsetFix.targets.end(), entity.begin)
-                    != cloudOffsetFix.targets.end()) {
-                patches[patchCount++] = {entity.cloudOffsetSpan, cloudOffsetFix.offset};
-                ++result.rewrittenValues;
+            if (entity.classname == "light_environment") {
+                for (std::size_t key = 0; key < kSunKeys.size(); ++key) {
+                    if (sunStateFix.Replaces(entity, key)) {
+                        patches[patchCount++] = {entity.sunKeys[key].span, sunStateFix.values[key]};
+                        ++result.rewrittenValues;
+                    }
+                }
             }
             if (entity.classname == "move_rope"
                 && entity.hasRopeMaterial
