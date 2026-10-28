@@ -2550,6 +2550,28 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
             double alpha = blendEnabled ? materialOpacity : 1.0;
             if (screenOverlay)
                 for (double& c : color) c = std::min(c, 1.0);
+            // HDR sky domes (BC6H albedo on an unlit material: homestead_se_a, eden_mp_HDR, timeshift_warm_sky; R2 cbuffer tint 4, 4,
+            // 22). The texture is converted with a Reinhard curve (toneMapHdr) to 8 bit, so R1's $color multiplies already compressed
+            // values: the full R2 tint clips the sky to white (mp_homestead p14: 60 % of the sky pixels >= 250, R2 p90 168). Measured on
+            // mp_homestead against R2 at the same pose (sky box mean luminance R2 135 / 163 in the sun glare): $color 2 gives 125 / 144,
+            // 2.5 gives 157 / 170, 4 gives 237 / 225 (clipped). 4^0.6 = 2.3 lands between; tints <= 1 (every other BC6H sky) are untouched.
+            {
+                bool hdrBase = false;
+                if (unlit && !slotGuids.empty() && slotGuids[0]) {
+                    if (const AssetRecord* tex = findRecord(*db, slotGuids[0], kTxtr)) {
+                        std::vector<std::uint8_t> textureHeader;
+                        std::string ignoredError;
+                        auto textureFamily = db->getFamily(db->paks[tex->pakIndex].family, ignoredError);
+                        if (textureFamily && readAssetHeader(*db, *tex, textureFamily, textureHeader, ignoredError) && textureHeader.size() >= 0x38) {
+                            const std::uint16_t textureFormat = u16(textureHeader.data() + 0x16);
+                            hdrBase = textureFormat == 10 || textureFormat == 11;
+                        }
+                    }
+                }
+                if (hdrBase)
+                    for (double& c : color)
+                        if (c > 1.0) c = std::pow(c, 0.6);
+            }
             if (metalFromSpec)
                 for (double& c : color) c *= kMetalAlbedoScale;
             // mp_complex3 cypress leaves (tree_cypress_tall_leaves_01) in the building shadows are lit by ambient only, R2 also
