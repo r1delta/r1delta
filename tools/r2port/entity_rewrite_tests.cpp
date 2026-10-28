@@ -224,21 +224,31 @@ void TestStrictFailureAndPermissiveFallback()
     Check(report.unknownConstructs == 1, "permissive fallback did not report unknown syntax");
 }
 
-void TestRaiseFlagSpawnOrigins()
+void TestRaiseSpawnpointOrigins()
 {
     const std::string input =
         "{\n\"TeamNum\" \"2\"\n\"origin\" \"308.41 -1782.69 -0.000796557\"\n\"classname\" \"info_spawnpoint_flag\"\n}\n"
         "{\n\"origin\" \"269.31 2139.71 0.000612214\"\n\"TeamNum\" \"3\"\n\"classname\" \"info_spawnpoint_flag\"\n}\n"
-        "{\n\"origin\" \"1 2 3\"\n\"classname\" \"info_spawnpoint_human\"\n}\n"
+        "{\n\"origin\" \"1 2 -0.0016\"\n\"classname\" \"info_spawnpoint_human\"\n}\n"
+        "{\n\"origin\" \"3 4 19.999\"\n\"classname\" \"info_spawnpoint_human_start\"\n}\n"
+        "{\n\"origin\" \"5 6 -0.0025\"\n\"classname\" \"info_spawnpoint_titan\"\n}\n"
+        "{\n\"origin\" \"7 8 0\"\n\"classname\" \"info_spawnpoint_titan_start\"\n}\n"
+        "{\n\"origin\" \"9 9 9\"\n\"classname\" \"info_spawnpoint_dropship_start\"\n}\n"
+        "{\n\"origin\" \"10 10 10\"\n\"classname\" \"info_target\"\n}\n"
         "{\n\"classname\" \"info_spawnpoint_flag\"\n\"origin\" \"bad\"\n}\n";
     std::uint64_t raised = 0;
-    const std::string output = r2port::entity_rewrite::RaiseFlagSpawnOrigins(input, 8.0, &raised);
-    Check(raised == 2, "only the two well-formed flag origins are raised");
+    const std::string output = r2port::entity_rewrite::RaiseSpawnpointOrigins(input, 8.0, &raised);
+    Check(raised == 6, "only the six well-formed flag/human/titan origins are raised");
     Check(Has(output, "\"origin\" \"308.41 -1782.69 7.99920344\""), "first flag z is not raised by 8");
     Check(Has(output, "\"origin\" \"269.31 2139.71 8.00061221\""), "second flag z is not raised by 8");
-    Check(Has(output, "\"origin\" \"1 2 3\""), "non-flag origin must not change");
+    Check(Has(output, "\"origin\" \"1 2 7.9984\""), "human spawn z (-0.0016) is not raised by 8");
+    Check(Has(output, "\"origin\" \"3 4 27.999\""), "human_start spawn z is not raised by 8");
+    Check(Has(output, "\"origin\" \"5 6 7.9975\""), "titan spawn z is not raised by 8");
+    Check(Has(output, "\"origin\" \"7 8 8\""), "titan_start spawn z is not raised by 8");
+    Check(Has(output, "\"origin\" \"9 9 9\""), "other spawnpoint classes must not change");
+    Check(Has(output, "\"origin\" \"10 10 10\""), "non-spawnpoint origin must not change");
     Check(Has(output, "\"origin\" \"bad\""), "malformed origin must not change");
-    Check(r2port::entity_rewrite::RaiseFlagSpawnOrigins("{ \"classname\" ", 8.0, &raised) == "{ \"classname\" " && raised == 0,
+    Check(r2port::entity_rewrite::RaiseSpawnpointOrigins("{ \"classname\" ", 8.0, &raised) == "{ \"classname\" " && raised == 0,
           "unparseable text is returned unchanged");
 }
 
@@ -275,7 +285,7 @@ void TestByteExactOutputAndLightEnvironment()
 
     // Raising the flag origin keeps everything else byte-exact too.
     std::uint64_t raised = 0;
-    const std::string lifted = r2port::entity_rewrite::RaiseFlagSpawnOrigins(output, 8.0, &raised);
+    const std::string lifted = r2port::entity_rewrite::RaiseSpawnpointOrigins(output, 8.0, &raised);
     std::string expectedLifted = output;
     const std::size_t origin = expectedLifted.find("\"1 2 0\"");
     expectedLifted.replace(origin, 7, "\"1 2 8\"");
@@ -476,7 +486,7 @@ int main()
         TestUnsupportedClassCounts();
         TestRulesAndIdempotence();
         TestSpawnModesAndAnalysis();
-        TestRaiseFlagSpawnOrigins();
+        TestRaiseSpawnpointOrigins();
         TestCtfTeamKeyFallback();
         TestMapFeatures();
         TestStrictFailureAndPermissiveFallback();

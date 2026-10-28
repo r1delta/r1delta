@@ -87,9 +87,9 @@ constexpr uint32_t kGameLump = 0x23;
 // Bump when the vendored bspdown converter or the provider's BSP post-processing changes output.
 constexpr uint32_t kConvertedBspCacheVersion = 27;  // 27: rule 24 now writes the glow ramp texture coordinate; 26: rule 24 emitter glow vertex alpha (vr_light_trim_01_totrans, mp_glitch); 25: mp_coliseum and mp_coliseum_column keep the last CSM environment (csmLastEnv); 24: rule 17 real CSM environment chosen by content (BWC, angel_city, coliseum, coliseum_column); 23: rule 23 far-origin prop fade distance
 
-// Raised onto the z of every info_spawnpoint_flag origin in lump 0 (see entity_rewrite::RaiseFlagSpawnOrigins).
-// The R1 server drops the spawnpoint back to the floor; one that starts inside solid is removed.
-constexpr double kFlagSpawnLift = 8.0;
+// Raised onto the z of every info_spawnpoint_flag / human / human_start / titan / titan_start origin in lump 0 and in the five partition entity
+// files (see entity_rewrite::RaiseSpawnpointOrigins). The R1 server drops the spawnpoint back to the floor; one that starts inside solid is removed.
+constexpr double kSpawnpointLift = 8.0;
 
 struct BspLumpHeader {
     uint32_t offset;
@@ -1021,7 +1021,7 @@ bool LoadRewrittenPartition(const std::shared_ptr<MapState>& state, const std::s
         entity_rewrite::RewriteReport report;
         std::string rewritten = entity_rewrite::RewriteEntityLump(text, { state->mapName, false, &R2ParticleTargetName }, &report);
         if (!report.unknownConstructs)
-            text = std::move(rewritten);
+            text = entity_rewrite::RaiseSpawnpointOrigins(rewritten, kSpawnpointLift);
         for (const auto& entry : report.unsupportedClasses)
             unsupported[entry.name] += entry.occurrences;
         if (report.droppedScriptMoverLightweight)
@@ -1073,7 +1073,7 @@ void RewriteConvertedBspEntities(const std::shared_ptr<MapState>& state, std::ve
     entity_rewrite::RewriteReport report;
     std::string rewritten = entity_rewrite::RewriteEntityLump(text, { mapName, false, &R2ParticleTargetName }, &report);
     std::uint64_t raised = 0;
-    rewritten = entity_rewrite::RaiseFlagSpawnOrigins(rewritten, kFlagSpawnLift, &raised);
+    rewritten = entity_rewrite::RaiseSpawnpointOrigins(rewritten, kSpawnpointLift, &raised);
     std::map<std::string, std::uint64_t> unsupported;
     for (const auto& entry : report.unsupportedClasses)
         unsupported[entry.name] += entry.occurrences;
@@ -1203,10 +1203,14 @@ FileBytes ReadEntityFile(const MapRequest& request, const std::shared_ptr<MapSta
             Msg("%s", buffer);
             OutputDebugStringA(buffer);
         }
-        else if (rewritten != text) {
-            const size_t bytesIn = data->size();
-            data = std::make_shared<const std::vector<uint8_t>>(rewritten.begin(), rewritten.end());
-            LogEntityRewrite(path.c_str(), request.mapName, report, bytesIn, data->size());
+        else {
+            std::uint64_t raised = 0;
+            rewritten = entity_rewrite::RaiseSpawnpointOrigins(rewritten, kSpawnpointLift, &raised);
+            if (rewritten != text) {
+                const size_t bytesIn = data->size();
+                data = std::make_shared<const std::vector<uint8_t>>(rewritten.begin(), rewritten.end());
+                LogEntityRewrite(path.c_str(), request.mapName, report, bytesIn, data->size(), raised);
+            }
         }
     }
     catch (const std::exception& error) {

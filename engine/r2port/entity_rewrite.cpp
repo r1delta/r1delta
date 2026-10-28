@@ -1063,7 +1063,15 @@ bool AnalyzeEntityLump(std::string_view input,
     return true;
 }
 
-std::string RaiseFlagSpawnOrigins(std::string_view input, double units, std::uint64_t* raised)
+// R2 authors spawnpoints on the floor (z 0 or slightly below it, e.g. mp_lf_stacks -0.0016 against a converted floor of 1.03). The R1 server drops a
+// spawnpoint to the floor itself but removes one that starts inside solid, so these classes are lifted (see RaiseSpawnpointOrigins).
+static bool IsRaisedSpawnpointClass(std::string_view classname)
+{
+    return classname == "info_spawnpoint_flag" || classname == "info_spawnpoint_human" || classname == "info_spawnpoint_human_start" ||
+           classname == "info_spawnpoint_titan" || classname == "info_spawnpoint_titan_start";
+}
+
+std::string RaiseSpawnpointOrigins(std::string_view input, double units, std::uint64_t* raised)
 {
     if (raised)
         *raised = 0;
@@ -1079,7 +1087,7 @@ std::string RaiseFlagSpawnOrigins(std::string_view input, double units, std::uin
         false,
         [](const EntityView&, std::string_view, std::string_view) {},
         [&](const EntityView& entity) {
-            if (entity.classname != "info_spawnpoint_flag" || !entity.hasOrigin)
+            if (!IsRaisedSpawnpointClass(entity.classname) || !entity.hasOrigin)
                 return;
             // "x y z": keep the x and y text as written, only z changes.
             const std::string origin(entity.origin);
