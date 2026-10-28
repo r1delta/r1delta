@@ -39,6 +39,10 @@ constexpr std::uint32_t kStudioVVC = 0x01000000;
 constexpr std::uint32_t kStudioUV2 = 0x02000000;
 constexpr std::uint32_t kR2OnlyFlag = 0x00800000;
 constexpr std::uint32_t kR1StudioFlagMask = 0x033fffff;
+// STUDIOHDR_FLAGS_USES_ENV_CUBEMAP: R1 engine.dll sub_1800B3480 turns it into model flag 0x400, and only models with it (or r_showenvcubemap)
+// get their nearest cubemap sample bound in the lighting setup (sub_1800AA3B0 / sub_1800A72A0). R2 never sets it, so without it every
+// converted dynamic model samples whatever cube the previous draw left bound.
+constexpr std::int32_t kStudioUsesEnvCubemap = 0x2;
 constexpr std::size_t kMaxRecords = 1u << 20;
 
 struct ConvertFailure final : std::runtime_error {
@@ -2066,7 +2070,7 @@ Header52 ConvertHeader(const Header53& in) {
     out.hullMax = in.hullMax;
     out.viewMin = in.viewMin;
     out.viewMax = in.viewMax;
-    out.flags = in.flags & static_cast<std::int32_t>(kR1StudioFlagMask);
+    out.flags = (in.flags & static_cast<std::int32_t>(kR1StudioFlagMask)) | kStudioUsesEnvCubemap;
     out.numBones = in.numBones;
     out.numBoneControllers = 0;
     out.numHitboxSets = in.numHitboxSets;

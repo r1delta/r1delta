@@ -41,7 +41,7 @@ namespace {
 
 // Bump when the converter or the cached blob layout changes: converted models are persisted per
 // source package signature and revision.
-constexpr std::string_view kModelCacheRevision = "7";
+constexpr std::string_view kModelCacheRevision = "8";
 constexpr std::uint32_t kBlobMagic = 0x434D3152; // "R1MC"
 constexpr std::uint32_t kBlobConverted = 1;
 constexpr std::uint32_t kBlobFailed = 2;
