@@ -10,6 +10,7 @@ struct PatchOptions {
     std::uint32_t aoSlot = 31;
     float aoWeight = 0.5f;
     bool occlusionInput = false;   // t31 holds occlusion (1 - AO): so = 1 - aoWeight * t31
+    float constantFactor = -1.0f;  // >= 0: test aid, every patched env term is multiplied by this constant instead of reading t31
 };
 
 struct PatchReport {

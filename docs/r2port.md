@@ -94,6 +94,37 @@ LightmappedGeneric override (world brushes, `r2_shader_override.cpp`, `r2_shader
 
 Credit: ficool2's sdk_screenspace_shaders documented the screenspace_general register convention (used with the author's permission); a shader author who provided hints on the Uber material model. No code from either is included.
 
+## Ambient occlusion
+
+`engine/r2port/ao` (`r2_ao.cpp`, `dxbc_patch.cpp`). Everything is default OFF: with every `r2port_ao_*` / `r2port_sso` variable at 0 no hook is installed and nothing runs per frame. The variables are archived (they persist in the config), live, and a hook is only installed when one of them is first set nonzero. Unsupported builds (materialsystem_dx11 timestamp/size, HBAO+ wrapper prologue, `GFSDK_SSAO.win64.dll` timestamp 0x537DE692 and vtable slot) install nothing and log one warning.
+
+What R1 does: NVIDIA HBAO+ 2.1.2 (`GFSDK_SSAO.win64.dll`, "r2_1") is called once per frame from materialsystem_dx11 RVA 0x17800 (after the opaque pass), and multiplies the AO into the scene colour target. Stock cvars: `r_hbaoEnabled` (default 0), `r_hbaoRadius` 1.0 (metres), `r_hbaoIntensity` 1.0, `r_hbaoExponent` 4.0, `r_hbaoBias` 0.1, `r_hbaoBlurRadius` 8 (only 4 or 8), `r_hbaoBlurSharpness` 4.0, `r_hbaoDepthMax` 2000. We swap vtable slot 2 (RenderAO) of the GFSDK renderer (decoded: `RenderAO(self, ctx, input, params, rtv, mask)`; input +8 projection, +20 metersToViewUnits, +24 depth SRV, +32 viewport; params dword 2 = DetailAO, 9 = blur radius enum 0/1/2 = 2/4/8 px).
+
+Variables (console, `r2port_ao_status` prints the state):
+
+| variable | default | effect |
+|---|---|---|
+| `r2port_ao_timing` | 0 | 1 = GPU timestamp queries around the HBAO+ call (and the composite), average/min/max logged to the console every 240 frames |
+| `r2port_ao_blur` | 0 | 2 / 4 / 8 = force the blur radius in pixels (2 px is not reachable through `r_hbaoBlurRadius`) |
+| `r2port_ao_detail` | 0 | HBAO+ DetailAO 0.2 to 1 (finer contact shadows; R1 always passes 0) |
+| `r2port_ao_luma` | 0 | 0..1: AO fades out on bright pixels: `scene * lerp(ao, 1, saturate((luma - lo) / (hi - lo)) * k)`; draws one full-screen pass (scene copy + composite) |
+| `r2port_ao_luma_lo` / `_hi` | 0.03 / 0.35 | linear scene luma where the fade starts / ends (display value about 90 / 165) |
+| `r2port_ao_dump` (command) | | writes the next frame's HBAO+ depth input to `<gamedir>/r2port/depth_dump.r2d` (u32 'R2D1', w, h, format 0 = float depth, float projection[16], float metersToViewUnits, depth floats) for the offline benchmark |
+| `r2port_sso`, `r2port_sso_strength` | 0, 0.5 | specular occlusion, see below |
+
+Cost, measured in game (RTX 5080, 3440x1440 windowed, R1DELTA_BACKGROUND_FPS=0 uncapped, `mat_vsync 0`, `fps_max 0`, `mat_force_tonemap_scale 1`, fixed camera, GPU timestamp per call, 3 runs of 6 s per cell; maps/ao/*.json): HBAO+ pass 0.40 ms at R1 defaults (kodai u_decal 0.404 to 0.409, glitch p6 0.37 to 0.41), blur 4 the same (0.404 / 0.36), blur 2 0.33 to 0.35, radius 0.5 / 2.0 no change (0.40 to 0.41), DetailAO 0.5 0.42. With the whole frame at about 550 fps (CPU bound) `r_hbaoEnabled 0` versus 1 was 570 versus 544 fps on kodai and 513 versus 490 on glitch (medians of 5 to 6 alternating 6 s runs, run-to-run spread about 10 %), i.e. about -4.5 %. FXAA (`mat_fxaa_enable 1`) and `r_txaaEnabled 1` did not change the HBAO+ pass time (0.40 to 0.42 ms; whether `r_txaaEnabled` actually engaged TXAA in that run was not verified). The standalone benchmark (`maps/ao/BENCH-RESULTS.md`: same HBAO+ DLL called with R1's exact arguments on synthetic depth) gives 0.37 to 0.40 ms at 3440x1440, XeGTAO (Intel, MIT) High 0.42 ms, Ultra 1.01 ms, half-resolution XeGTAO High 0.17 ms, and finds XeGTAO grainier with more wall darkening: replacing HBAO+ gains nothing at full resolution and about 0.2 ms at half resolution, so it was not done. These numbers do not reproduce a halved frame rate; a user whose fps halves with `r_hbaoEnabled 1` has a different bottleneck (other cvars, TXAA/MSAA depth resolve, a GPU already near its limit, other windows). To measure on another machine: `mat_vsync 0`, `fps_max 0`, fixed spot, `cl_showfps 2` with `r_hbaoEnabled 0` then 1 (3 runs each), and `r2port_ao_timing 1` with `r_hbaoEnabled 1` for the GPU milliseconds (log lines `r2port_ao timing over 240 calls: HBAO+ x ms avg`).
+
+Presets (all `r_hbaoEnabled 1`; frames under `maps/ao/`, glitch p6/p7 at 3440x1440 against R2 `auto` frames of `maps/flat/shots/glitch_r2`):
+
+- `stock`: R1 defaults. 0.40 ms. Mild darkening in creases (mean -3 to -4.5 display units, 15 to 22 % of pixels change by more than 8).
+- `crisp` (closest to R2's tight contact shadows): `r_hbaoRadius 0.6`, `r_hbaoIntensity 1.3`, `r_hbaoExponent 3`, `r_hbaoBlurRadius 4`, `r2port_ao_detail 0.4`. About 0.42 ms. Slightly stronger and tighter than `stock` (mean -3.7 / -4.7).
+- `wide`: `r_hbaoRadius 2`, `r_hbaoExponent 2`, `r_hbaoIntensity 1.2`. About 0.40 ms. Broad soft occlusion; near `stock` in the numbers.
+- `no sun darkening`: any of the above plus `r2port_ao_luma 0.9` (lo 0.03, hi 0.35): AO measured on glitch p6 stays 0.85 in the darks (display < 40) and is 1.00 above display 170 (stock 0.99 / 0.97 in the 120 to 170 band): shadows and creases keep it, lit stone does not. Costs one extra full-screen pass (scene copy plus composite, not separately timed).
+
+The look comparison is limited to glitch: the kodai frames could not be paired (camera, dust and a drop pod differed between the captures).
+
+Credit: NVIDIA HBAO+ is called as R1 does; XeGTAO (Intel, MIT) was used only in the standalone benchmark, nothing of it is in the engine; a shader author's notes on the Apex AO/SSSO stack were used as a checklist (facts only, no code, nothing of his files is in the repository).
+
 ## Post effects
 
 `engine/r2port/postfx` adds two opt-in screen effects that stock R1 does not have, both OFF by default (all cvars 0 = stock look, bit for bit, and no hook is installed). They share one full-screen pass that runs right after the client's final `engine_post` draw and before the HUD.

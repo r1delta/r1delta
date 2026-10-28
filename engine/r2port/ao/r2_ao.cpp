@@ -65,6 +65,7 @@ struct ConVars {
     ConVarR1* lumaHi{};
     ConVarR1* sso{};
     ConVarR1* ssoStrength{};
+    ConVarR1* ssoDebug{};
 };
 ConVars g_cvar;
 
@@ -77,11 +78,19 @@ std::atomic<float> g_lumaHi{0.35f};
 std::atomic<bool> g_dumpRequest{false};   // r2port_ao_dump: write the next frame's HBAO+ depth input to disk
 std::atomic<bool> g_ssoOn{false};          // r2port_sso: stock model/world shaders get an occlusion factor on their env term
 std::atomic<float> g_ssoStrength{0.5f};    // r2port_sso_strength: scales the occlusion written for them
+std::atomic<bool> g_ssoDebug{false};       // r2port_sso_debug
+bool g_ssoEnv = false;                     // env R2_SSO
+bool g_ssoConstantZero = false;            // env R2_SSO=zero (test aid): patched env terms are multiplied by 0 whatever t31 holds
+std::atomic<unsigned> g_loaderCalls{0};
+std::atomic<unsigned> g_firstPatchLoaderCall{0};
 
 // r2port_sso runtime state. The occlusion texture is bound at t31 (PS) after every HBAO+ wrapper call.
 constexpr UINT kOcclusionSlot = 31;
 ID3D11ShaderResourceView* g_pendingOcc = nullptr;   // occlusion SRV to bind after this frame's HBAO+ wrapper returns (render thread)
 bool g_occBound = false;
+ID3D11ShaderResourceView* g_lastBound = nullptr;
+std::atomic<unsigned> g_occKept{0};
+std::atomic<unsigned> g_occLost{0};
 using CreatePixelShaderFn = HRESULT(STDMETHODCALLTYPE*)(ID3D11Device*, const void*, SIZE_T, ID3D11ClassLinkage*, ID3D11PixelShader**);
 CreatePixelShaderFn g_origCreatePs = nullptr;
 void** g_devVtable = nullptr;
@@ -116,8 +125,9 @@ void ReloadConfig()
     g_luma.store(std::clamp(ReadFloat(g_cvar.luma, 0.0f), 0.0f, 1.0f));
     g_lumaLo.store(std::clamp(ReadFloat(g_cvar.lumaLo, 0.03f), 0.0f, 4.0f));
     g_lumaHi.store(std::clamp(ReadFloat(g_cvar.lumaHi, 0.35f), 0.0f, 4.0f));
-    g_ssoOn.store(ReadFloat(g_cvar.sso, 0.0f) != 0.0f);
+    g_ssoOn.store(g_ssoEnv || ReadFloat(g_cvar.sso, 0.0f) != 0.0f);
     g_ssoStrength.store(std::clamp(ReadFloat(g_cvar.ssoStrength, 0.5f), 0.0f, 1.0f));
+    g_ssoDebug.store(ReadFloat(g_cvar.ssoDebug, 0.0f) != 0.0f);
 }
 
 void OnCvarChanged(void*, const char*, float)
@@ -247,7 +257,7 @@ void EndTiming(ID3D11DeviceContext* ctx, TimingSlot* s)
 const char* const kCompositeSource = R"hlsl(
 Texture2D<float4> Scene : register(t0);
 Texture2D<float>  Ao    : register(t1);
-cbuffer Params : register(b0) { float4 g_p; };   // x luma strength, y luma low, z luma high, w occlusion strength
+cbuffer Params : register(b0) { float4 g_p; float4 g_q; };   // g_p: x luma strength, y luma low, z luma high, w occlusion strength; g_q.x: occlusion debug (1 = full occlusion everywhere)
 
 float4 VSMain(uint id : SV_VertexID) : SV_Position
 {
@@ -272,7 +282,7 @@ Out PSMain(float4 sv : SV_Position)
     float a = lerp(ao, 1.0, lit * g_p.x);
     Out o;
     o.color = float4(c.rgb * a, c.a);
-    o.occ = saturate(1.0 - ao) * g_p.w;
+    o.occ = lerp(saturate(1.0 - ao), 1.0, g_q.x) * g_p.w;
     return o;
 }
 
@@ -282,7 +292,7 @@ Out PSMul(float4 sv : SV_Position)
     float ao = Ao.Load(int3(sv.xy, 0));
     Out o;
     o.color = float4(ao, ao, ao, 1.0);
-    o.occ = saturate(1.0 - ao) * g_p.w;
+    o.occ = lerp(saturate(1.0 - ao), 1.0, g_q.x) * g_p.w;
     return o;
 }
 )hlsl";
@@ -344,7 +354,7 @@ bool CreateStaticComposite(ID3D11Device* device)
         Break("CreateVertexShader/CreatePixelShader failed");
         return false;
     }
-    D3D11_BUFFER_DESC cbd{ 16, D3D11_USAGE_DEFAULT, D3D11_BIND_CONSTANT_BUFFER, 0, 0, 0 };
+    D3D11_BUFFER_DESC cbd{ 32, D3D11_USAGE_DEFAULT, D3D11_BIND_CONSTANT_BUFFER, 0, 0, 0 };
     D3D11_BLEND_DESC bd{};
     bd.IndependentBlendEnable = TRUE;
     bd.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
@@ -454,6 +464,40 @@ bool EnsureComposite(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv)
     return true;
 }
 
+std::atomic<bool> g_probeRequest{false};
+
+// Test aid (r2port_sso_probe): logs min / mean / max of an R8 and an R16 texture read back through staging copies.
+void ProbeTexture(ID3D11DeviceContext* ctx, ID3D11Texture2D* occ, ID3D11Texture2D* ao)
+{
+    ComPtr<ID3D11Device> device;
+    ctx->GetDevice(&device);
+    for (int which = 0; which < 2; ++which) {
+        ID3D11Texture2D* source = which == 0 ? occ : ao;
+        D3D11_TEXTURE2D_DESC desc{};
+        source->GetDesc(&desc);
+        desc.Usage = D3D11_USAGE_STAGING; desc.BindFlags = 0; desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ; desc.MiscFlags = 0;
+        ComPtr<ID3D11Texture2D> staging;
+        if (!device || FAILED(device->CreateTexture2D(&desc, nullptr, &staging)))
+            continue;
+        ctx->CopyResource(staging.Get(), source);
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        if (FAILED(ctx->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &mapped)))
+            continue;
+        double sum = 0.0, lo = 1e9, hi = -1e9;
+        for (UINT y = 0; y < desc.Height; y += 4) {
+            const auto* row = static_cast<const unsigned char*>(mapped.pData) + static_cast<std::size_t>(y) * mapped.RowPitch;
+            for (UINT x = 0; x < desc.Width; x += 4) {
+                const double v = which == 0 ? row[x] / 255.0 : reinterpret_cast<const std::uint16_t*>(row)[x] / 65535.0;
+                sum += v; lo = std::min(lo, v); hi = std::max(hi, v);
+            }
+        }
+        ctx->Unmap(staging.Get(), 0);
+        const double count = static_cast<double>((desc.Height + 3) / 4) * ((desc.Width + 3) / 4);
+        Msg("R1Delta: r2port_sso_probe: %s %ux%u min %.3f mean %.3f max %.3f\n", which == 0 ? "occlusion" : "ao", desc.Width, desc.Height,
+            lo, sum / count, hi);
+    }
+}
+
 // Draws the scene composite and, for r2port_sso, the occlusion texture. lumaStrength > 0: scene = copy * lerp(ao, 1, lit);
 // otherwise the stock multiply by blending. State touched here is all in the set R1's HBAO wrapper (sub_180011A30 /
 // sub_180015940) saves and restores around the call.
@@ -465,8 +509,8 @@ void DrawComposite(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, const 
         rtv->GetResource(&resource);
         ctx->CopyResource(g_comp.sceneCopy.Get(), resource.Get());
     }
-    const float params[4] = { lumaStrength, g_lumaLo.load(), std::max(g_lumaHi.load(), g_lumaLo.load() + 1e-3f),
-        std::clamp(g_ssoStrength.load(), 0.0f, 1.0f) };
+    const float params[8] = { lumaStrength, g_lumaLo.load(), std::max(g_lumaHi.load(), g_lumaLo.load() + 1e-3f),
+        std::clamp(g_ssoStrength.load(), 0.0f, 1.0f), g_ssoDebug.load() ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f };
     ctx->UpdateSubresource(g_comp.cb.Get(), 0, nullptr, params, 0, 0);
 
     const int write = g_comp.occWrite;
@@ -493,6 +537,8 @@ void DrawComposite(ID3D11DeviceContext* ctx, ID3D11RenderTargetView* rtv, const 
     if (sso) {
         g_pendingOcc = g_comp.occSrv[write].Get();
         g_comp.occWrite = write ^ 1;
+        if (g_probeRequest.exchange(false))
+            ProbeTexture(ctx, g_comp.occTex[write].Get(), g_comp.aoTex.Get());
     }
 }
 
@@ -718,6 +764,7 @@ void BindOcclusion()
         ID3D11ShaderResourceView* view = g_pendingOcc;
         ctx->PSSetShaderResources(kOcclusionSlot, 1, &view);
         g_occBound = true;
+        g_lastBound = view;
     }
     else if (g_occBound) {
         ID3D11ShaderResourceView* none = nullptr;
@@ -728,6 +775,19 @@ void BindOcclusion()
 
 void __fastcall WrapperHook(void* a1, void* a2, void* a3, void* a4)
 {
+    if (g_occBound) {
+        // Test aid: is the occlusion SRV still at t31 when the next frame's HBAO+ wrapper starts?
+        if (auto* ctx = *reinterpret_cast<ID3D11DeviceContext**>(g_base + kContextRva)) {
+            ID3D11ShaderResourceView* current = nullptr;
+            ctx->PSGetShaderResources(kOcclusionSlot, 1, &current);
+            if (current != g_lastBound)
+                g_occLost.fetch_add(1, std::memory_order_relaxed);
+            else
+                g_occKept.fetch_add(1, std::memory_order_relaxed);
+            if (current)
+                current->Release();
+        }
+    }
     g_pendingOcc = nullptr;
     if (AnyEnabled())
         EnsureVtablePatched();
@@ -749,12 +809,17 @@ HRESULT STDMETHODCALLTYPE CreatePixelShaderHook(ID3D11Device* device, const void
         dxbc::PatchOptions options;
         options.aoWeight = 1.0f;
         options.occlusionInput = true;
+        if (g_ssoConstantZero)
+            options.constantFactor = 0.0f;
         dxbc::PatchReport report;
         if (dxbc::PatchDxbc(input, output, report, options)) {
             const HRESULT hr = g_origCreatePs(device, output.data(), output.size(), linkage, shader);
             if (SUCCEEDED(hr)) {
-                if (g_patchedShaders.fetch_add(1, std::memory_order_relaxed) == 0)
-                    Msg("R1Delta: r2port_sso: first stock pixel shader patched (%zu -> %zu bytes)\n", static_cast<size_t>(length), output.size());
+                if (g_patchedShaders.fetch_add(1, std::memory_order_relaxed) == 0) {
+                    g_firstPatchLoaderCall.store(g_loaderCalls.load());
+                    Msg("R1Delta: r2port_sso: first stock pixel shader patched (%zu -> %zu bytes) at loader call %u\n", static_cast<size_t>(length),
+                        output.size(), g_loaderCalls.load());
+                }
                 return hr;
             }
             g_patchFailedCreates.fetch_add(1, std::memory_order_relaxed);
@@ -790,6 +855,7 @@ void EnsureDeviceHook()
 
 __int64 __fastcall ShaderLoaderHook(unsigned short* a1, unsigned int* a2)
 {
+    g_loaderCalls.fetch_add(1, std::memory_order_relaxed);
     EnsureDeviceHook();
     return g_origLoader(a1, a2);
 }
@@ -847,9 +913,10 @@ void StatusCommand(const CCommand&)
         g_timing.load(), g_blur.load(), g_detail.load(), g_luma.load(), g_lumaLo.load(), g_lumaHi.load(),
         g_detourInstalled.load() ? 1 : 0, g_patchedVtable ? 1 : 0, g_failed.load() ? 1 : 0, g_comp.broken ? 1 : 0,
         static_cast<unsigned long long>(g_calls.load()));
-    Msg("r2port_sso: enabled=%d strength=%.2f shader hook=%d device vtable=%d patched=%u unpatched=%u create_failed=%u occlusion bound=%d\n",
-        g_ssoOn.load() ? 1 : 0, g_ssoStrength.load(), g_loaderHookInstalled.load() ? 1 : 0, g_devVtable ? 1 : 0, g_patchedShaders.load(),
-        g_unpatchedShaders.load(), g_patchFailedCreates.load(), g_occBound ? 1 : 0);
+    Msg("r2port_sso: enabled=%d (env=%d) strength=%.2f debug=%d shader hook=%d loader calls=%u first patch at loader call=%u device vtable=%d patched=%u unpatched=%u create_failed=%u occlusion bound=%d (still at t31 next frame: %u, lost: %u)\n",
+        g_ssoOn.load() ? 1 : 0, g_ssoEnv ? 1 : 0, g_ssoStrength.load(), g_ssoDebug.load() ? 1 : 0, g_loaderHookInstalled.load() ? 1 : 0,
+        g_loaderCalls.load(), g_firstPatchLoaderCall.load(), g_devVtable ? 1 : 0, g_patchedShaders.load(),
+        g_unpatchedShaders.load(), g_patchFailedCreates.load(), g_occBound ? 1 : 0, g_occKept.load(), g_occLost.load());
     if (last.count)
         FlushStats(last);
 }
@@ -898,10 +965,14 @@ void RegisterConVars()
     RegisterConCommand("r2port_ao_status", StatusCommand, "Print the r2port_ao state and the last GPU timing.", FCVAR_NONE);
     RegisterConCommand("r2port_ao_dump", DumpCommand,
         "Write the next frame's HBAO+ depth input to <gamedir>/r2port/depth_dump.r2d (or the path given); needs r_hbaoEnabled 1.", FCVAR_NONE);
+    RegisterConCommand("r2port_sso_probe", [](const CCommand&) { g_probeRequest.store(true); },
+        "Test aid: the next frame logs min/mean/max of the occlusion texture r2port_sso writes (and of the AO texture).", FCVAR_NONE);
     g_cvar.sso = Register("r2port_sso", "0",
         "1 = specular occlusion: patch the env-cubemap term of the stock model and world shaders to be occluded by the previous frame's HBAO+ result (needs r_hbaoEnabled 1; applies to shaders created after it is set, so put it in autoexec or the launch line, then reload the map).");
     g_cvar.ssoStrength = Register("r2port_sso_strength", "0.5",
         "0..1 = how strongly full AO occlusion removes the env reflection (live; 0.5 halves it).");
+    g_cvar.ssoDebug = Register("r2port_sso_debug", "0",
+        "1 = test aid for r2port_sso: full occlusion everywhere (env reflection of every patched shader scaled by 1 - r2port_sso_strength).");
     ReloadConfig();
     Refresh();
 }
@@ -909,6 +980,15 @@ void RegisterConVars()
 void Install(std::uintptr_t materialSystemBase)
 {
     g_base = materialSystemBase;
+    // Env R2_SSO (any value but 0) switches the specular occlusion shader patching on from the very first shader
+    // load, before any console variable or config file can be applied; the variables then only tune it.
+    char env[8] = {};
+    if (GetEnvironmentVariableA("R2_SSO", env, sizeof(env)) && env[0] && std::strcmp(env, "0") != 0) {
+        g_ssoEnv = true;
+        g_ssoConstantZero = std::strcmp(env, "zero") == 0;
+    }
+    Msg("R1Delta: r2port_ao Install: sso env=%d sso cvar=%d\n", g_ssoEnv ? 1 : 0, g_ssoOn.load() ? 1 : 0);
+    ReloadConfig();
     Refresh();
 }
 

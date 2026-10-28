@@ -677,12 +677,17 @@ void AppendAoLoad(std::vector<std::uint32_t>& words, std::uint32_t coordinate, s
     Append32(words, slot);
 }
 
-void AppendAoWeight(std::vector<std::uint32_t>& words, std::uint32_t ao, float weight, bool occlusionInput)
+void AppendAoWeight(std::vector<std::uint32_t>& words, std::uint32_t ao, float weight, bool occlusionInput, float constantFactor)
 {
     // AO input:       so = lerp(1, AO, weight) = (1 - weight) + AO * weight.
     // Occlusion input: so = 1 - weight * occ (an unbound texture reads 0, which is "no occlusion").
-    const float scale = occlusionInput ? -weight : weight;
-    const float bias = occlusionInput ? 1.0f : 1.0f - weight;
+    // constantFactor >= 0 (test aid): so = constantFactor whatever the texture holds.
+    float scale = occlusionInput ? -weight : weight;
+    float bias = occlusionInput ? 1.0f : 1.0f - weight;
+    if (constantFactor >= 0.0f) {
+        scale = 0.0f;
+        bias = constantFactor;
+    }
     Append32(words, (9u << 24) | kOpMad);
     Append32(words, MakeRegisterOperand(kOperandTemp, 0x01));
     Append32(words, ao);
@@ -1025,7 +1030,7 @@ bool PatchDxbc(const std::vector<std::uint8_t>& input,
             AppendFtoi(patchedWords, report.coordinateTemp, positionRegister);
             AppendZeroZ(patchedWords, report.coordinateTemp);
             AppendAoLoad(patchedWords, report.coordinateTemp, report.aoTemp, options.aoSlot);
-            AppendAoWeight(patchedWords, report.aoTemp, options.aoWeight, options.occlusionInput);
+            AppendAoWeight(patchedWords, report.aoTemp, options.aoWeight, options.occlusionInput, options.constantFactor);
             setupInserted = true;
         }
         const std::size_t copiedStart = patchedWords.size();
