@@ -71,6 +71,7 @@ struct ConVars {
     ConVarR1* radius{};
     ConVarR1* intensity{};
     ConVarR1* exponent{};
+    ConVarR1* lmBicubic{};
 };
 ConVars g_cvar;
 
@@ -113,6 +114,8 @@ std::atomic<float> g_ssoStrength{0.5f};    // r2port_sso_strength: scales the oc
 std::atomic<bool> g_ssoDebug{false};       // r2port_sso_debug
 bool g_ssoEnv = false;                     // env R2_SSO
 bool g_ssoConstantZero = false;            // env R2_SSO=zero (test aid): patched env terms are multiplied by 0 whatever t31 holds
+std::atomic<bool> g_lmOn{false};           // r2port_lm_bicubic: stock LightmappedGeneric shaders filter t9 / t10 with the SDK 2013 bicubic B-spline
+bool g_lmEnv = false;                      // env R2_LM_BICUBIC
 std::atomic<unsigned> g_loaderCalls{0};
 std::atomic<unsigned> g_firstPatchLoaderCall{0};
 
@@ -133,6 +136,8 @@ bool g_loaderHookFailed = false;
 std::atomic<unsigned> g_patchedShaders{0};
 std::atomic<unsigned> g_unpatchedShaders{0};     // not patchable (no cube sample at t5, not SM5, or already uses t31)
 std::atomic<unsigned> g_patchFailedCreates{0};   // patched bytes rejected by CreatePixelShader (stock bytes used)
+std::atomic<unsigned> g_lmPatchedShaders{0};     // r2port_lm_bicubic: shaders rewritten
+std::atomic<unsigned> g_lmCreateFailed{0};       // rewritten bytes rejected by CreatePixelShader (stock bytes used)
 
 bool AnyEnabled()
 {
@@ -162,6 +167,7 @@ void ReloadConfig()
     g_lumaLo.store(std::clamp(ReadFloat(g_cvar.lumaLo, 0.03f), 0.0f, 4.0f));
     g_lumaHi.store(std::clamp(ReadFloat(g_cvar.lumaHi, 0.35f), 0.0f, 4.0f));
     g_ssoOn.store(g_ssoEnv || ReadFloat(g_cvar.sso, 0.0f) != 0.0f);
+    g_lmOn.store(g_lmEnv || ReadFloat(g_cvar.lmBicubic, 0.0f) != 0.0f);
     g_ssoStrength.store(std::clamp(ReadFloat(g_cvar.ssoStrength, 0.5f), 0.0f, 1.0f));
     g_ssoDebug.store(ReadFloat(g_cvar.ssoDebug, 0.0f) != 0.0f);
     g_tech.store(std::clamp(static_cast<int>(ReadFloat(g_cvar.tech, 0.0f) + 0.5f), 0, 3));
@@ -951,29 +957,51 @@ void __fastcall WrapperHook(void* a1, void* a2, void* a3, void* a4)
 HRESULT STDMETHODCALLTYPE CreatePixelShaderHook(ID3D11Device* device, const void* bytecode, SIZE_T length, ID3D11ClassLinkage* linkage,
     ID3D11PixelShader** shader)
 {
-    if (g_ssoOn.load(std::memory_order_relaxed) && bytecode && length > 64) {
+    const bool sso = g_ssoOn.load(std::memory_order_relaxed);
+    const bool lm = g_lmOn.load(std::memory_order_relaxed);
+    if ((sso || lm) && bytecode && length > 64) {
         const auto* bytes = static_cast<const std::uint8_t*>(bytecode);
-        std::vector<std::uint8_t> input(bytes, bytes + length), output;
-        dxbc::PatchOptions options;
-        options.aoWeight = 1.0f;
-        options.occlusionInput = true;
-        if (g_ssoConstantZero)
-            options.constantFactor = 0.0f;
-        dxbc::PatchReport report;
-        if (dxbc::PatchDxbc(input, output, report, options)) {
-            const HRESULT hr = g_origCreatePs(device, output.data(), output.size(), linkage, shader);
+        std::vector<std::uint8_t> current(bytes, bytes + length), output;
+        bool lmApplied = false, ssoApplied = false;
+        if (lm) {
+            dxbc::LightmapBicubicReport lmReport;
+            if (dxbc::PatchLightmapBicubic(current, output, lmReport)) {
+                current.swap(output);
+                lmApplied = true;
+            }
+        }
+        if (sso) {
+            dxbc::PatchOptions options;
+            options.aoWeight = 1.0f;
+            options.occlusionInput = true;
+            if (g_ssoConstantZero)
+                options.constantFactor = 0.0f;
+            dxbc::PatchReport report;
+            if (dxbc::PatchDxbc(current, output, report, options)) {
+                current.swap(output);
+                ssoApplied = true;
+            }
+            else {
+                g_unpatchedShaders.fetch_add(1, std::memory_order_relaxed);
+            }
+        }
+        if (lmApplied || ssoApplied) {
+            const HRESULT hr = g_origCreatePs(device, current.data(), current.size(), linkage, shader);
             if (SUCCEEDED(hr)) {
-                if (g_patchedShaders.fetch_add(1, std::memory_order_relaxed) == 0) {
+                if (ssoApplied && g_patchedShaders.fetch_add(1, std::memory_order_relaxed) == 0) {
                     g_firstPatchLoaderCall.store(g_loaderCalls.load());
                     Msg("R1Delta: r2port_sso: first stock pixel shader patched (%zu -> %zu bytes) at loader call %u\n", static_cast<size_t>(length),
-                        output.size(), g_loaderCalls.load());
+                        current.size(), g_loaderCalls.load());
                 }
+                if (lmApplied && g_lmPatchedShaders.fetch_add(1, std::memory_order_relaxed) == 0)
+                    Msg("R1Delta: r2port_lm_bicubic: first lightmapped pixel shader rewritten (%zu -> %zu bytes) at loader call %u\n",
+                        static_cast<size_t>(length), current.size(), g_loaderCalls.load());
                 return hr;
             }
-            g_patchFailedCreates.fetch_add(1, std::memory_order_relaxed);
-        }
-        else {
-            g_unpatchedShaders.fetch_add(1, std::memory_order_relaxed);
+            if (ssoApplied)
+                g_patchFailedCreates.fetch_add(1, std::memory_order_relaxed);
+            if (lmApplied)
+                g_lmCreateFailed.fetch_add(1, std::memory_order_relaxed);
         }
     }
     return g_origCreatePs(device, bytecode, length, linkage, shader);
@@ -981,7 +1009,7 @@ HRESULT STDMETHODCALLTYPE CreatePixelShaderHook(ID3D11Device* device, const void
 
 void EnsureDeviceHook()
 {
-    if (!g_ssoOn.load())
+    if (!g_ssoOn.load() && !g_lmOn.load())
         return;
     auto* device = *reinterpret_cast<ID3D11Device**>(g_base + kDeviceRva);
     if (!device)
@@ -1038,7 +1066,7 @@ void Refresh()
     }
     if (!g_baseOk)
         return;
-    if (g_ssoOn.load())
+    if (g_ssoOn.load() || g_lmOn.load())
         InstallShaderLoaderHook();
     if (!AnyEnabled() || g_detourInstalled.load())
         return;
@@ -1065,6 +1093,8 @@ void StatusCommand(const CCommand&)
         g_ssoOn.load() ? 1 : 0, g_ssoEnv ? 1 : 0, g_ssoStrength.load(), g_ssoDebug.load() ? 1 : 0, g_loaderHookInstalled.load() ? 1 : 0,
         g_loaderCalls.load(), g_firstPatchLoaderCall.load(), g_devVtable ? 1 : 0, g_patchedShaders.load(),
         g_unpatchedShaders.load(), g_patchFailedCreates.load(), g_occBound ? 1 : 0, g_occKept.load(), g_occLost.load());
+    Msg("r2port_lm_bicubic: enabled=%d (env=%d) shader hook=%d device vtable=%d rewritten=%u create_failed=%u\n", g_lmOn.load() ? 1 : 0, g_lmEnv ? 1 : 0,
+        g_loaderHookInstalled.load() ? 1 : 0, g_devVtable ? 1 : 0, g_lmPatchedShaders.load(), g_lmCreateFailed.load());
     if (last.count)
         FlushStats(last);
 }
@@ -1121,6 +1151,8 @@ void RegisterConVars()
         "0..1 = how strongly full AO occlusion removes the env reflection (live; 0.5 halves it).");
     g_cvar.ssoDebug = Register("r2port_sso_debug", "0",
         "1 = test aid for r2port_sso: full occlusion everywhere (env reflection of every patched shader scaled by 1 - r2port_sso_strength).");
+    g_cvar.lmBicubic = Register("r2port_lm_bicubic", "0",
+        "1 = SDK 2013 style bicubic (cubic B-spline, four bilinear taps) filtering of lightmapTexture_0 / _1 in the stock LightmappedGeneric shaders (world). Applies to shaders created after it is set, so put it in autoexec or the launch line (or env R2_LM_BICUBIC=1), then restart; costs 8 lightmap taps instead of 2 per world pixel.");
     g_cvar.tech = Register("r2port_ao_tech", "0",
         "AO backend: 0 = NVIDIA HBAO+ (stock R1), 1 = XeGTAO high quality full resolution (about HBAO+ cost), 2 = XeGTAO high quality half resolution (about 0.4x the HBAO+ GPU time), 3 = XeGTAO medium quality half resolution (about 0.3x, weak GPUs). Needs r_hbaoEnabled 1; uses the radius, intensity and exponent of HBAO+ (r2port_ao_radius / _intensity / _exponent override them). Falls back to HBAO+ on any failure.");
     g_cvar.radius = Register("r2port_ao_radius", "0", "Override the AO radius in metres (0 = r_hbaoRadius, which in this build is not changeable from the console).");
@@ -1140,6 +1172,9 @@ void Install(std::uintptr_t materialSystemBase)
         g_ssoEnv = true;
         g_ssoConstantZero = std::strcmp(env, "zero") == 0;
     }
+    char lmEnv[8] = {};
+    if (GetEnvironmentVariableA("R2_LM_BICUBIC", lmEnv, sizeof(lmEnv)) && lmEnv[0] && std::strcmp(lmEnv, "0") != 0)
+        g_lmEnv = true;
     Msg("R1Delta: r2port_ao Install: sso env=%d sso cvar=%d\n", g_ssoEnv ? 1 : 0, g_ssoOn.load() ? 1 : 0);
     ReloadConfig();
     Refresh();

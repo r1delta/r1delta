@@ -1079,4 +1079,341 @@ bool PatchDxbc(const std::vector<std::uint8_t>& input,
     return true;
 }
 
+// ---- r2port_lm_bicubic -----------------------------------------------------------------------------------------------
+namespace {
+
+constexpr std::uint32_t kOpAdd = 0;
+constexpr std::uint32_t kOpCall = 4;
+constexpr std::uint32_t kOpCallc = 5;
+constexpr std::uint32_t kOpDiv = 14;
+constexpr std::uint32_t kOpFrc = 26;
+constexpr std::uint32_t kOpIf = 31;
+constexpr std::uint32_t kOpEndIf = 21;
+constexpr std::uint32_t kOpEndLoop = 22;
+constexpr std::uint32_t kOpEndSwitch = 23;
+constexpr std::uint32_t kOpLabel = 44;
+constexpr std::uint32_t kOpLoop = 48;
+constexpr std::uint32_t kOpResinfo = 61;
+constexpr std::uint32_t kOpSample = 69;
+constexpr std::uint32_t kOpSampleL = 72;
+constexpr std::uint32_t kOpSwitch = 76;
+constexpr std::uint32_t kLightmapSlot0 = 9;   // lightmapTexture_0: RGBA8, rgb * (a * 3.984375 + 0.015625)
+constexpr std::uint32_t kLightmapSlot1 = 10;  // lightmapTexture_1: signed direction, * 2.007874 - 1
+constexpr std::uint32_t kBicubicTemps = 13;
+
+using Words = std::vector<std::uint32_t>;
+
+void Cat(Words& to, const Words& part)
+{
+    to.insert(to.end(), part.begin(), part.end());
+}
+
+// Destination temp with a write mask.
+Words DstT(std::uint32_t reg, std::uint32_t mask)
+{
+    return {MakeRegisterOperand(kOperandTemp, mask), reg};
+}
+
+// Source temp with a swizzle given as four letters (xyzw), optionally negated.
+std::uint32_t Lane(char c)
+{
+    return c == 'x' ? 0u : c == 'y' ? 1u : c == 'z' ? 2u : 3u;
+}
+
+Words SrcT(std::uint32_t reg, const char* swizzle, bool negate = false)
+{
+    const std::uint32_t token = MakeSwizzleOperand(kOperandTemp, Lane(swizzle[0]), Lane(swizzle[1]), Lane(swizzle[2]), Lane(swizzle[3]));
+    if (negate)
+        return {token | 0x80000000u, 0x41u, reg};
+    return {token, reg};
+}
+
+Words SrcIn(std::uint32_t reg, std::uint32_t a, std::uint32_t b)
+{
+    return {MakeSwizzleOperand(kOperandInput, a, b, a, a), reg};
+}
+
+// 4-component immediate with the same value in every lane (the lane used is the destination lane).
+Words Imm(float value)
+{
+    const std::uint32_t bits = FloatBits(value);
+    return {2u | (4u << 12), bits, bits, bits, bits};
+}
+
+void Emit(Words& out, std::uint32_t opcode, std::initializer_list<Words> operands, std::uint32_t extendedTokens = 0)
+{
+    std::size_t length = 1;
+    for (const Words& operand : operands)
+        length += operand.size();
+    const bool extended = extendedTokens != 0;
+    if (extended)
+        length += 2;
+    out.push_back(opcode | (static_cast<std::uint32_t>(length) << 24) | (extended ? 0x80000000u : 0u));
+    if (extended) {
+        out.push_back(0x800000c2u);  // resource dimension texture2d, another extension follows
+        out.push_back(0x00155543u);  // return type float x4
+    }
+    for (const Words& operand : operands)
+        Cat(out, operand);
+}
+
+struct LightmapSample {
+    std::size_t instruction = 0;
+    std::uint32_t slot = 0;
+    std::uint32_t destination = 0;
+    std::uint32_t coordReg = 0;
+    std::uint32_t coordX = 0, coordY = 0;
+    Words resource, sampler;   // operand words copied verbatim into the replacement taps
+};
+
+// Weights and tap coordinates of the cubic B-spline (SDK 2013 common_lightmappedgeneric_fxc.h / Godot PR 89919), both axes at once in
+// the .xy lanes. With t = uv * size - 0.5, i = floor(t), f = frac(t):
+//   w0..w3 = B-spline weights of f; g0 = w0 + w1; g1 = 1 - g0; taps at (i - 0.5 + w1 / g0) and (i + 1.5 + w3 / g1) texels.
+// Result = gy0 * (gx0 * T(x0, y0) + gx1 * T(x1, y0)) + gy1 * (gx0 * T(x0, y1) + gx1 * T(x1, y1)) with gx1 = 1 - gx0.
+// Temps (relative): 0 size, 1 1/size, 2 uv*size-1 then i-0.5, 3 f, 4 g0, 5 g1, 6 w1 then d0 then X0, 7 w3 then d1 then X1,
+// 8 scratch, 9 tap uv (X0, X1, Y0, Y1), 10 / 11 / 12 blend scratch.
+std::uint32_t EmitBicubicSetup(Words& out, std::uint32_t base, const LightmapSample& first)
+{
+    const auto R = [&](std::uint32_t i) { return base + i; };
+    const Words uv = SrcIn(first.coordReg, first.coordX, first.coordY);
+    std::uint32_t count = 0;
+    const auto op = [&](std::uint32_t opcode, std::initializer_list<Words> operands, std::uint32_t ext = 0) { Emit(out, opcode, operands, ext); ++count; };
+    // 0: size of t9
+    {
+        Words resource = first.resource;
+        op(kOpResinfo, {DstT(R(0), 0x3), {MakeImmediateScalarOperand(), 0}, resource}, 1);
+    }
+    op(kOpDiv, {DstT(R(1), 0x3), Imm(1.0f), SrcT(R(0), "xyxx")});
+    op(kOpMad, {DstT(R(3), 0x3), uv, SrcT(R(0), "xyxx"), Imm(-0.5f)});
+    op(kOpFrc, {DstT(R(3), 0x3), SrcT(R(3), "xyxx")});
+    op(kOpMad, {DstT(R(2), 0x3), uv, SrcT(R(0), "xyxx"), Imm(-1.0f)});
+    op(kOpAdd, {DstT(R(2), 0x3), SrcT(R(2), "xyxx"), SrcT(R(3), "xyxx", true)});           // i - 0.5
+    op(kOpMad, {DstT(R(4), 0x3), SrcT(R(3), "xyxx"), Imm(1.0f / 3.0f), Imm(-0.5f)});
+    op(kOpMad, {DstT(R(4), 0x3), SrcT(R(4), "xyxx"), SrcT(R(3), "xyxx"), Imm(-0.5f)});
+    op(kOpMad, {DstT(R(4), 0x3), SrcT(R(4), "xyxx"), SrcT(R(3), "xyxx"), Imm(5.0f / 6.0f)}); // g0
+    op(kOpAdd, {DstT(R(5), 0x3), SrcT(R(4), "xyxx", true), Imm(1.0f)});                      // g1
+    op(kOpMad, {DstT(R(6), 0x3), SrcT(R(3), "xyxx"), Imm(0.5f), Imm(-1.0f)});
+    op(kOpMul, {DstT(R(6), 0x3), SrcT(R(6), "xyxx"), SrcT(R(3), "xyxx")});
+    op(kOpMad, {DstT(R(6), 0x3), SrcT(R(6), "xyxx"), SrcT(R(3), "xyxx"), Imm(2.0f / 3.0f)}); // w1
+    op(kOpMul, {DstT(R(7), 0x3), SrcT(R(3), "xyxx"), SrcT(R(3), "xyxx")});
+    op(kOpMul, {DstT(R(8), 0x3), SrcT(R(3), "xyxx"), Imm(1.0f / 6.0f)});
+    op(kOpMul, {DstT(R(7), 0x3), SrcT(R(7), "xyxx"), SrcT(R(8), "xyxx")});                   // w3
+    op(kOpDiv, {DstT(R(6), 0x3), SrcT(R(6), "xyxx"), SrcT(R(4), "xyxx")});                   // d0 = w1 / g0
+    op(kOpDiv, {DstT(R(7), 0x3), SrcT(R(7), "xyxx"), SrcT(R(5), "xyxx")});                   // d1 = w3 / g1
+    op(kOpAdd, {DstT(R(6), 0x3), SrcT(R(6), "xyxx"), SrcT(R(2), "xyxx")});                   // X0 (texels)
+    op(kOpAdd, {DstT(R(8), 0x3), SrcT(R(2), "xyxx"), Imm(2.0f)});
+    op(kOpAdd, {DstT(R(7), 0x3), SrcT(R(7), "xyxx"), SrcT(R(8), "xyxx")});                   // X1 (texels)
+    op(kOpMul, {DstT(R(9), 0x5), SrcT(R(6), "xxyy"), SrcT(R(1), "xxyy")});                   // (X0, ., Y0, .)
+    op(kOpMul, {DstT(R(9), 0xa), SrcT(R(7), "xxyy"), SrcT(R(1), "xxyy")});                   // (., X1, ., Y1)
+    return count;
+}
+
+std::uint32_t EmitBicubicTaps(Words& out, std::uint32_t base, const LightmapSample& s)
+{
+    const auto R = [&](std::uint32_t i) { return base + i; };
+    std::uint32_t count = 0;
+    const auto op = [&](std::uint32_t opcode, std::initializer_list<Words> operands, std::uint32_t ext = 0) { Emit(out, opcode, operands, ext); ++count; };
+    const auto tap = [&](std::uint32_t dest, const char* uvSwizzle) {
+        op(kOpSampleL, {DstT(dest, 0xf), SrcT(R(9), uvSwizzle), s.resource, s.sampler, {MakeImmediateScalarOperand(), 0}}, 1);
+    };
+    const std::uint32_t d = s.destination, e = R(10), g = R(11), h = R(12);
+    tap(d, "xzxx");  // (X0, Y0)
+    tap(e, "yzyy");  // (X1, Y0)
+    tap(g, "xwxx");  // (X0, Y1)
+    tap(h, "ywyy");  // (X1, Y1)
+    op(kOpAdd, {DstT(d, 0xf), SrcT(d, "xyzw"), SrcT(e, "xyzw", true)});
+    op(kOpMad, {DstT(d, 0xf), SrcT(d, "xyzw"), SrcT(R(4), "xxxx"), SrcT(e, "xyzw")});        // row y0
+    op(kOpAdd, {DstT(g, 0xf), SrcT(g, "xyzw"), SrcT(h, "xyzw", true)});
+    op(kOpMad, {DstT(g, 0xf), SrcT(g, "xyzw"), SrcT(R(4), "xxxx"), SrcT(h, "xyzw")});        // row y1
+    op(kOpAdd, {DstT(d, 0xf), SrcT(d, "xyzw"), SrcT(g, "xyzw", true)});
+    op(kOpMad, {DstT(d, 0xf), SrcT(d, "xyzw"), SrcT(R(4), "yyyy"), SrcT(g, "xyzw")});        // gy0 * row y0 + gy1 * row y1
+    return count;
+}
+
+} // namespace
+
+bool PatchLightmapBicubic(const std::vector<std::uint8_t>& input,
+                          std::vector<std::uint8_t>& output,
+                          LightmapBicubicReport& report)
+{
+    report = {};
+    const auto fail = [&](std::string message) { report.error = std::move(message); return false; };
+    std::vector<Chunk> chunks;
+    std::uint32_t containerVersion = 0;
+    std::string error;
+    if (!ParseContainer(input, chunks, containerVersion, error))
+        return fail(std::move(error));
+    const std::size_t shaderIndex = FindChunk(chunks, "SHEX") != chunks.size() ? FindChunk(chunks, "SHEX") : FindChunk(chunks, "SHDR");
+    if (shaderIndex == chunks.size() || chunks[shaderIndex].payload.size() < 8 || chunks[shaderIndex].payload.size() % 4 != 0)
+        return fail("DXBC has no usable SHEX/SHDR chunk");
+    std::vector<std::uint32_t> words(chunks[shaderIndex].payload.size() / 4);
+    for (std::size_t i = 0; i < words.size(); ++i)
+        words[i] = Read32(chunks[shaderIndex].payload.data() + i * 4);
+    if (((words[0] >> 16) & 0xffff) != kShaderTypePixel || ((words[0] >> 4) & 15) != 5)
+        return fail("only pixel shader model 5.0 DXBC is supported");
+    std::vector<Instruction> instructions;
+    if (!ParseInstructions(words, instructions, error))
+        return fail(std::move(error));
+
+    std::map<std::uint32_t, std::uint32_t> resourceDimensions;
+    bool hasTempDeclaration = false;
+    std::uint32_t tempCount = 0;
+    std::vector<LightmapSample> samples;
+    std::uint32_t depth = 0;
+    for (std::size_t index = 0; index < instructions.size(); ++index) {
+        const Instruction& instruction = instructions[index];
+        const std::size_t end = instruction.start + instruction.length;
+        if (IsResourceDeclaration(instruction.opcode)) {
+            std::size_t cursor = instruction.operandStart;
+            Operand resource;
+            if (!ParseOperand(words, cursor, end, resource, error))
+                return fail(std::move(error));
+            std::uint32_t slot = 0;
+            if (instruction.opcode == kOpDclResource && GetImmediateRegister(resource, kOperandResource, slot))
+                resourceDimensions[slot] = (instruction.token >> 11) & 31;
+            continue;
+        }
+        if (instruction.opcode == kOpDclTemps) {
+            if (hasTempDeclaration || instruction.length != 2)
+                return fail("unexpected or malformed dcl_temps instruction");
+            hasTempDeclaration = true;
+            tempCount = words[instruction.start + 1];
+            continue;
+        }
+        if (instruction.opcode == kOpCall || instruction.opcode == kOpCallc || instruction.opcode == kOpLabel)
+            return fail("shader uses subroutines");
+        if (instruction.opcode == kOpIf || instruction.opcode == kOpLoop || instruction.opcode == kOpSwitch)
+            ++depth;
+        else if (instruction.opcode == kOpEndIf || instruction.opcode == kOpEndLoop || instruction.opcode == kOpEndSwitch)
+            --depth;
+        if (!IsSampleOpcode(instruction.opcode))
+            continue;
+        std::size_t cursor = instruction.operandStart;
+        const std::size_t destinationAt = cursor;
+        Operand destination, coordinate, resource, sampler;
+        if (!ParseOperand(words, cursor, end, destination, error))
+            return fail(std::move(error));
+        const std::size_t coordinateAt = cursor;
+        if (!ParseOperand(words, cursor, end, coordinate, error))
+            return fail(std::move(error));
+        const std::size_t resourceAt = cursor;
+        if (!ParseOperand(words, cursor, end, resource, error))
+            return fail(std::move(error));
+        const std::size_t samplerAt = cursor;
+        if (instruction.opcode == kOpSample && !ParseOperand(words, cursor, end, sampler, error))
+            return fail(std::move(error));
+        std::uint32_t slot = 0;
+        if (!GetImmediateRegister(resource, kOperandResource, slot) || (slot != kLightmapSlot0 && slot != kLightmapSlot1))
+            continue;
+        if (instruction.opcode != kOpSample)
+            return fail("lightmap texture is read with a sample variant other than sample");
+        if (depth != 0)
+            return fail("lightmap sample inside control flow");
+        const auto dimension = resourceDimensions.find(slot);
+        if (dimension == resourceDimensions.end() || dimension->second != kResourceDimTexture2D)
+            return fail("lightmap texture is not a declared texture2d");
+        LightmapSample sample;
+        sample.instruction = index;
+        sample.slot = slot;
+        std::uint32_t destinationRegister = 0;
+        if (!GetImmediateRegister(destination, kOperandTemp, destinationRegister) || destination.componentMask != 0xf)
+            return fail("lightmap sample destination is not a full temp register");
+        sample.destination = destinationRegister;
+        const std::uint32_t coordinateToken = words[coordinateAt];
+        std::uint32_t coordinateRegister = 0;
+        if ((coordinateToken & 0x80000000u) != 0 || ((coordinateToken >> 2) & 3) != 1 ||
+            !GetImmediateRegister(coordinate, kOperandInput, coordinateRegister))
+            return fail("lightmap coordinate is not an unmodified input register swizzle");
+        sample.coordReg = coordinateRegister;
+        sample.coordX = (coordinateToken >> 4) & 3;
+        sample.coordY = (coordinateToken >> 6) & 3;
+        sample.resource.assign(words.begin() + resourceAt, words.begin() + samplerAt);
+        sample.sampler.assign(words.begin() + samplerAt, words.begin() + end);
+        if (sample.resource.size() != 2 || sample.resource[0] != MakeSwizzleOperand(kOperandResource, 0, 1, 2, 3) ||
+            sample.sampler.size() != 2 || sample.sampler[0] != ((kOperandSampler << 12) | (1u << 20)))
+            return fail("lightmap texture or sampler operand has an unexpected encoding");
+        (void)destinationAt;
+        for (const LightmapSample& other : samples)
+            if (other.slot == slot)
+                return fail("lightmap texture is sampled more than once");
+        samples.push_back(std::move(sample));
+    }
+    if (samples.empty())
+        return fail("shader does not sample the lightmap textures");
+    if (!hasTempDeclaration)
+        return fail("shader has no dcl_temps");
+    if (samples.size() == 2 && (samples[0].coordReg != samples[1].coordReg || samples[0].coordX != samples[1].coordX || samples[0].coordY != samples[1].coordY))
+        return fail("t9 and t10 are sampled at different coordinates");
+    // The size query and the tap coordinates come from t9. A shader that only samples t10 is not part of the stock corpus.
+    if (samples[0].slot != kLightmapSlot0 && (samples.size() < 2 || samples[1].slot != kLightmapSlot0))
+        return fail("the size source t9 is not sampled");
+    const LightmapSample* sizeSource = samples[0].slot == kLightmapSlot0 ? &samples[0] : &samples[1];
+    if (tempCount > 4096 - kBicubicTemps)
+        return fail("shader has no room for the bicubic temporaries");
+    report.oldTempCount = tempCount;
+    report.addedTemps = kBicubicTemps;
+    report.texturesPatched = static_cast<std::uint32_t>(samples.size());
+
+    std::size_t firstSampleInstruction = samples[0].instruction;
+    for (const LightmapSample& sample : samples)
+        firstSampleInstruction = std::min(firstSampleInstruction, sample.instruction);
+    std::uint32_t floatOps = 0, taps = 0, added = 0, removed = 0;
+    Words patched;
+    patched.reserve(words.size() + 160);
+    patched.push_back(words[0]);
+    patched.push_back(0);
+    for (std::size_t index = 0; index < instructions.size(); ++index) {
+        const Instruction& instruction = instructions[index];
+        const LightmapSample* sample = nullptr;
+        for (const LightmapSample& candidate : samples)
+            if (candidate.instruction == index)
+                sample = &candidate;
+        if (index == firstSampleInstruction) {
+            LightmapSample sizeCopy = *sizeSource;
+            sizeCopy.coordReg = samples[0].coordReg;
+            sizeCopy.coordX = samples[0].coordX;
+            sizeCopy.coordY = samples[0].coordY;
+            const std::uint32_t n = EmitBicubicSetup(patched, tempCount, sizeCopy);
+            added += n;
+            floatOps += n - 1;      // everything but the resinfo
+        }
+        if (sample) {
+            const std::uint32_t n = EmitBicubicTaps(patched, tempCount, *sample);
+            added += n;
+            taps += 4;
+            floatOps += n - 4;
+            ++removed;
+            continue;
+        }
+        const std::size_t copiedStart = patched.size();
+        for (std::size_t i = instruction.start; i < instruction.start + instruction.length; ++i)
+            patched.push_back(words[i]);
+        if (instruction.opcode == kOpDclTemps)
+            patched[copiedStart + 1] = tempCount + kBicubicTemps;
+    }
+    patched[1] = static_cast<std::uint32_t>(patched.size());
+    Chunk& shaderChunk = chunks[shaderIndex];
+    shaderChunk.payload.resize(patched.size() * 4);
+    for (std::size_t i = 0; i < patched.size(); ++i)
+        Write32(shaderChunk.payload.data() + i * 4, patched[i]);
+    report.addedInstructionCount = static_cast<std::int32_t>(added) - static_cast<std::int32_t>(removed);
+
+    const std::size_t statIndex = FindChunk(chunks, "STAT");
+    if (statIndex != chunks.size()) {
+        std::vector<std::uint8_t>& stats = chunks[statIndex].payload;
+        if (stats.size() >= 16 * 4 && stats.size() % 4 == 0) {
+            Write32(stats.data(), static_cast<std::uint32_t>(static_cast<std::int64_t>(Read32(stats.data())) + report.addedInstructionCount));
+            Write32(stats.data() + 4, tempCount + kBicubicTemps);
+            Write32(stats.data() + 16, Read32(stats.data() + 16) + floatOps);
+            Write32(stats.data() + 14 * 4, Read32(stats.data() + 14 * 4) - removed);   // TextureNormalInstructions
+            Write32(stats.data() + 15 * 4, Read32(stats.data() + 15 * 4) + taps);      // sample_l is counted with the loads
+        }
+    }
+    if (!BuildContainer(chunks, containerVersion, output, error))
+        return fail(std::move(error));
+    if (!RecomputeChecksum(output, error))
+        return fail(std::move(error));
+    return true;
+}
+
 } // namespace dxbc
