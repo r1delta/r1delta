@@ -10,6 +10,7 @@
 #include "compression.h"
 #include "p2p/p2p_identity.h"
 #include "engine/filesystem/r2port_provider.h"
+#include "engine/filesystem/r2_map_provider.h"
 #include "engine/filesystem/r2_material_provider.h"
 
 #include <string>
@@ -65,7 +66,50 @@ __int64 StringCompare_AllTalkHookDedi(__int64 a1, __int64 a2) {
     return strcmp((const char*)a1, (const char*)a2);
 }
 
-// Circuit breaker for stuck connections
+// pvs_extraCull (CORE cfg/autoexec_delta.cfg sets 1, engine default 0) culls whole world meshes of converted R2 maps (the glass roof over
+// the mp_eden courtyard, EdenRoofFade: pvs_extraCull 0 at runtime restores them), so it is forced to 0 while a converted R2 map is the active
+// map and the user's value is put back when a stock R1 map becomes active. Evaluated at every client signon state change (a console
+// command at level load, nothing per frame). R1DELTA_R2PORT_KEEP_PVS_EXTRACULL=1 disables the override.
+static void ApplyR2PvsExtraCullPolicy(const std::string& mapName)
+{
+    static bool keep = [] {
+        char value[8]{};
+        const DWORD length = GetEnvironmentVariableA("R1DELTA_R2PORT_KEEP_PVS_EXTRACULL", value, sizeof(value));
+        return length && value[0] != '0';
+    }();
+    static bool overridden = false;
+    static int savedValue = 0;
+    if (keep || !OriginalCCVar_FindVar2 || !cvarinterface)
+        return;
+    const ConVarR1* cvar = OriginalCCVar_FindVar2(cvarinterface, "pvs_extraCull");
+    if (!cvar)
+        return;
+    const int current = cvar->m_Value.m_nValue;
+    if (r2port::IsR2PortMap(mapName)) {
+        if (current == 0)
+            return;
+        if (!overridden) {
+            savedValue = current;
+            overridden = true;
+        }
+        Cbuf_AddText(0, "pvs_extraCull 0\n", 0);
+        char message[160]{};
+        _snprintf_s(message, sizeof(message), _TRUNCATE,
+            "R1Delta: R2 map %s: pvs_extraCull %d -> 0 (it culls whole world meshes of converted maps)\n", mapName.c_str(), current);
+        Msg("%s", message);
+    }
+    else if (overridden) {
+        overridden = false;
+        char command[48]{};
+        _snprintf_s(command, sizeof(command), _TRUNCATE, "pvs_extraCull %d\n", savedValue);
+        Cbuf_AddText(0, command, 0);
+        char message[160]{};
+        _snprintf_s(message, sizeof(message), _TRUNCATE,
+            "R1Delta: stock map %s: pvs_extraCull restored to %d\n", mapName.c_str(), savedValue);
+        Msg("%s", message);
+    }
+}
+
 __int64 CNetChan__SendDatagramLISTEN_Part2_Hook(__int64 thisptr, unsigned int length, int SendToResult) {
     static auto original_fn = oCNetChan__SendDatagramLISTEN_Part2;
 
@@ -92,6 +136,8 @@ __int64 CNetChan__SendDatagramLISTEN_Part2_Hook(__int64 thisptr, unsigned int le
                 r2port::LogR2TextureProviderMetrics("signon-full");
             }
         }
+        if (!map_name.empty() && !IsDedicatedServer())
+            ApplyR2PvsExtraCullPolicy(map_name);
         last_logged_signon_state = signon_state;
     }
 
