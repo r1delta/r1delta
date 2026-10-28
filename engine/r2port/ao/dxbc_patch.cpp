@@ -651,9 +651,9 @@ void AppendFtoi(std::vector<std::uint32_t>& words, std::uint32_t coord, std::uin
 
 void AppendZeroZ(std::vector<std::uint32_t>& words, std::uint32_t coord)
 {
-    // mov rCoord.z, l(0,0,0,0)
+    // mov rCoord.zw, l(0,0,0,0)  (z = mip level, w = unused but must be defined for the LD coordinate swizzle)
     Append32(words, (8u << 24) | kOpMov);
-    Append32(words, MakeRegisterOperand(kOperandTemp, 0x04));
+    Append32(words, MakeRegisterOperand(kOperandTemp, 0x0c));
     Append32(words, coord);
     Append32(words, (2u | (4u << 12))); // immediate32 float4
     Append32(words, 0);
@@ -671,7 +671,7 @@ void AppendAoLoad(std::vector<std::uint32_t>& words, std::uint32_t coordinate, s
     Append32(words, 0x00155543u);
     Append32(words, MakeRegisterOperand(kOperandTemp, 0x01));
     Append32(words, ao);
-    Append32(words, MakeSwizzleOperand(kOperandTemp, 0, 1, 2, 0)); // rCoord.xyzx (x,y,mip,x)
+    Append32(words, MakeSwizzleOperand(kOperandTemp, 0, 1, 2, 3)); // rCoord.xyzw (x, y, mip 0, 0)
     Append32(words, coordinate);
     Append32(words, MakeSwizzleOperand(kOperandResource, 0, 1, 2, 3));
     Append32(words, slot);
