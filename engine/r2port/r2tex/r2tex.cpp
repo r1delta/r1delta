@@ -2121,6 +2121,42 @@ bool vtfTopMipMean(const std::vector<std::uint8_t>& vtf, double rgb[3]) {
     return false;
 }
 
+// Share of the visible texels (alpha above 8) of a converted VTF's top mip whose alpha reaches `threshold` (0..255). Only the layouts the converter
+// emits for an albedo with alpha are read: RGBA8 (format 0), DXT3 (14) and DXT5 (15); DXT1 has no alpha and anything else returns false.
+bool vtfTopMipVisibleShareAtOrAbove(const std::vector<std::uint8_t>& vtf, int threshold, double& share) {
+    if (vtf.size() < 0x58 || std::memcmp(vtf.data(), "VTF\0", 4) != 0) return false;
+    const std::uint32_t width = u16(vtf.data() + 16), height = u16(vtf.data() + 18);
+    const std::uint32_t format = u32(vtf.data() + 0x34);
+    if (!width || !height) return false;
+    std::uint64_t visible = 0, passing = 0;
+    auto count = [&](int alpha) {
+        if (alpha <= 8) return;
+        ++visible;
+        if (alpha >= threshold) ++passing;
+    };
+    if (format == 0) {
+        const std::size_t bytes = std::size_t(width) * height * 4;
+        if (vtf.size() < bytes) return false;
+        const std::uint8_t* px = vtf.data() + vtf.size() - bytes;
+        for (std::size_t i = 0; i < std::size_t(width) * height; ++i) count(px[i * 4 + 3]);
+    } else if (format == 14 || format == 15) {
+        const std::size_t blocksX = (width + 3) / 4, blocksY = (height + 3) / 4;
+        const std::size_t bytes = blocksX * blocksY * 16;
+        if (vtf.size() < bytes) return false;
+        const std::uint8_t* blocks = vtf.data() + vtf.size() - bytes;
+        std::array<std::uint8_t, 64> px{};
+        for (std::size_t b = 0; b < blocksX * blocksY; ++b) {
+            if (format == 14) bcdec_bc2(blocks + b * 16, px.data(), 16); else bcdec_bc3(blocks + b * 16, px.data(), 16);
+            for (int p = 0; p < 16; ++p) count(px[p * 4 + 3]);
+        }
+    } else {
+        return false;
+    }
+    if (!visible) return false;
+    share = double(passing) / double(visible);
+    return true;
+}
+
 bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view requested,
                            const MaterialOptions& options, Material& material, std::string& error) {
     const std::string name = cleanAssetName(requested, true);
@@ -2781,7 +2817,30 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
                 addVmtParam(out, "$alpha", text);
             }
         }
-        if (cut) { addVmtParam(out, "$alphatest", "1"); addVmtParam(out, "$alphaTestReference", "0.7"); }
+        if (cut) {
+            addVmtParam(out, "$alphatest", "1");
+            // The converter's fixed reference 0.7 (tuned on foliage) rejects a stencil atlas whose visible texels sit below it: the
+            // mp_forwardbase_kodai container decals world/mcor/kodai_ind_decals_01 (the "IMC INDUSTRIES" logo and text, labels, stripes) have alpha
+            // 176/255 = 0.69 inside the glyphs, so 0.15 percent of the visible texels passed and every decal was invisible (R2 draws them).
+            // R2 stores its own reference in material constant #38 (0.5 on 148 of the 160 cut materials of the 20 maps, 0.2 on imc_int_decals,
+            // 0.8 on ascent_asphalt_stripes_01; 0 on every non-cut material). When fewer than half of the visible albedo texels reach 0.7 and R2's
+            // reference is lower, that reference is used. Materials whose albedo clears 0.7 keep it. R2TEX_CUT_REF=0 keeps 0.7 everywhere.
+            double alphaRef = 0.7;
+            const char* cutRefEnv = std::getenv("R2TEX_CUT_REF");
+            if (!(cutRefEnv && std::atoi(cutRefEnv) == 0) && !foliageCavity && !opacityMap && constants.size() > 38 &&
+                std::isfinite(constants[38]) && constants[38] > 0.05f && constants[38] < 0.7f && !slotGuids.empty() && slotGuids[0]) {
+                const AssetRecord* albedoRecord = findRecord(*db, slotGuids[0], kTxtr);
+                std::vector<std::uint8_t> albedoVtf;
+                std::string textureWhy;
+                double share = 1.0;
+                if (albedoRecord && convertTextureWithDb(db, *albedoRecord, TextureOptions{}, albedoVtf, textureWhy) &&
+                    vtfTopMipVisibleShareAtOrAbove(albedoVtf, 179, share) && share < 0.5)
+                    alphaRef = constants[38];
+            }
+            char refText[32];
+            std::snprintf(refText, sizeof(refText), "%.2f", alphaRef);
+            addVmtParam(out, "$alphaTestReference", refText);
+        }
         if (additive) addVmtParam(out, "$additive", "1");
         else if (translucent || glass) addVmtParam(out, "$translucent", "1");
         if (godray) addVmtParam(out, "$translucent", "1");
