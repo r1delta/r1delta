@@ -2553,9 +2553,11 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
             addVmtParam(out, "$reflectiontintcolor", "1");
             {
                 // Model (VertexLitGeneric) materials over-reflect in R1 (prop brightness conv/R2 1.75 at mat_envmap_scale 2, LightVerify):
-                // R2TEX_MODEL_ENVTINT (float, default 0.25) scales the tint of model materials only; world brushes keep [1 1 1].
+                // R2TEX_MODEL_ENVTINT (float, default 0.25) scales the tint of model materials only; world brushes use 0.5.
                 const bool modelEnv = vertexLit || options.forModel;   // forModel: a world-shader R2 material the engine re-labels VertexLitGeneric for a converted model (r2m/)
-                double k = modelEnv ? 0.25 : 1.0;
+                // World brushes: 0.5 (SplitCost, cubemaps split on: with the user's mat_envmap_scale 2 world reflections were +5 % mean luminance
+                // over R2 (split 74.8, R2 71.2, single 67.4); at envmap scale 1 split matched R2 (70.9)).
+                double k = modelEnv ? 0.25 : 0.5;
                 if (puddleLayers) k = 9.0;   // measured with LightVerify on mp_glitch: prop brightness conv/R2 1.82 at 1, 1.56 at 0.25; mp_lf_stacks pelican crates: silver at 1
                 if (modelEnv) if (const char* e = std::getenv("R2TEX_MODEL_ENVTINT")) k = std::clamp(std::atof(e), 0.0, 4.0);
                 char tint[48];
