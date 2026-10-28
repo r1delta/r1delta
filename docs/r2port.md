@@ -94,6 +94,56 @@ LightmappedGeneric override (world brushes, `r2_shader_override.cpp`, `r2_shader
 
 Credit: ficool2's sdk_screenspace_shaders documented the screenspace_general register convention (used with the author's permission); a shader author who provided hints on the Uber material model. No code from either is included.
 
+## Post effects
+
+`engine/r2port/postfx` adds two opt-in screen effects that stock R1 does not have, both OFF by default (all cvars 0 = stock look, bit for bit, and no hook is installed). They share one full-screen pass that runs right after the client's final `engine_post` draw and before the HUD.
+
+| cvar | default | meaning |
+|---|---|---|
+| `r2port_display_curve` | 0 | R2-style display curve strength, 0 (off) to 1 |
+| `r2port_sharpen_amount` | 0 | RCAS sharpening strength, 0 (off) to 1 |
+| `r2port_sharpen_denoise` | 0.5 | RCAS noise attenuation, 0 to 1 (0.5 = AMD's FSR_RCAS_DENOISE) |
+| `r2port_sharpen_width` | 1 | RCAS tap distance in pixels, 1 to 4 |
+| `r2port_postfx_stats` | 0 | 1 = log the average frame time every 300 frames (console and `<gamedir>/r2port/postfx_stats.txt`); installs the hook so frames can be counted |
+| `r2port_postfx_srgb` | 1 | diagnostic: 1 = the pass converts between the sRGB views and display values (correct); 0 = treat sampled values as display values |
+
+`r2port_postfx_status` prints the build check, hook state, pass and skip counters and the material state. The first four cvars are `FCVAR_ARCHIVE_PLAYERPROFILE` like the other `delta_` cvars, so a value set in the console is saved in `profile.cfg`; the same lines work in `cfg/autoexec_delta.cfg`:
+
+```
+r2port_display_curve 0.5
+r2port_sharpen_amount 0.5
+```
+
+**Seam** (client.dll, retail R1 build stamp `0x55038DB8` / size `0x39A4000`, checked at run time together with the prologue bytes of the hook target and of the `_rt_FullFrameFB` accessor; any mismatch logs one warning and the cvars do nothing). `sub_1802AA380` (RVA 0x2AA380) is the client's post pass: copies the frame into `_rt_FullFrameFB`, runs the bloom chain, draws `dev/engine_post` through `IMatRenderContext::DrawScreenSpaceRectangle` (vtable +936) with destination `0,0,w,h` and returns 1 when it drew. Under `mat_queue_mode` the first call only queues itself and returns 0; the queued call on the render thread does the work and goes through the same detour. After the original returns 1 the detour copies the target into `_rt_FullFrameFB` (`CopyRenderTargetToTexture`, vtable +976, which `engine_post` has just consumed) and draws the material `r1d/post` (`screenspace_general`, runtime shader `r1d_post`, VMT served from memory by a provider) over the same rectangle. Only engine interfaces are used, so the engine's state tracking stays consistent.
+
+The open questions from the study, answered in game:
+- Target format: the bound render target is `R8G8B8A8_UNORM_SRGB` (texture `R8G8B8A8_TYPELESS`, 1280x720 in the test), and the sampled copy decodes sRGB too. With the shader treating the values as display values the output equalled `enc(curve(dec(a)))`, so the shader converts (`c0.w = 1`, default of `r2port_postfx_srgb`); with that the identity case round-trips within 8-bit rounding (offline on WARP, curve 0 and sharpen 0 is bit exact).
+- Rectangle: the engine draws `0,0,w,h` with `w,h` from the view struct; the pass uses the same. It is skipped (one warning, stock path) when the view does not start at 0,0 (split screen; not testable in the MP client, so only the guard exists), when the engine_post destination is halved (the client convar that `sub_1802AA380` tests at `+92`), or when the render target is not the size of `_rt_FullFrameFB`.
+- HUD ordering: with `cl_drawhud 1` and curve 1 only 0.1 % of the HUD pixels equal the curved HUD-less frame, i.e. the HUD is drawn after the pass and is neither curved nor sharpened (`maps/postfx/hud` frames).
+- `FindMaterial` and the first `FindVar` must run on the main thread: `Bind()` on the render thread finishes a new material through a call into the main thread, which deadlocks against the main thread waiting for the render thread (seen as a hung client, stacks in `maps/postfx`). The detour prepares and finishes the material on the main thread (the client loads on it) before any render-thread draw.
+
+Failure behaviour: a fault inside the pass (SEH guard) switches the effects off for the rest of the session with one warning; a missing shader (`r1d_post` is an embedded entry of the shader cache, see `r2port_shaders`) or a material that does not load disables them with one warning. With both effect cvars at 0 and `r2port_postfx_stats` 0 no hook exists (the hook is created on the first nonzero cvar and disabled again when all return to 0).
+
+**Display curve.** `tools/r2port/make_display_curve.py` inverts R1's measured response (about L^0.57, `maps/flat/responses.json`) and applies R2's (near linear toe, filmic shoulder) with PCHIP interpolation between the exposure-ladder knots, shifted by the exposure offset `SHIFT` = 0.15 (picked by scanning 0 to 0.4 against the FlatLook auto-exposure frame pairs: 0.15 gives sd/p10/p90 ratios closest to 1 over the three maps, 0.085 from the pixel-pair fit left kodai too dark), linear below display value 16 where the ladder has no data. It writes the 65-entry table into `r2_shader_source_postfx.h`; `lerp(identity, curve, strength)` is applied per channel on display values before sharpening. Measured display mapping R1 to R2 (values 0..255): 16>6, 32>19, 48>37, 64>59, 80>84, 96>110, 128>154, 160>186, 192>211, 224>234.
+
+Validation in game (kodai, glitch, complex3, mp_lf_township, mp_lf_stacks; the R1 pose is the R2 reference pose, auto exposure, HUD and viewmodel off, `r_hbaoEnabled 1`, same config as FlatLook; geometric mean over spots of R1/R2, 1.0 = R2; `maps/postfx`):
+
+| map (spots) | strength | mean | sd | p10 | p90 |
+|---|---|---|---|---|---|
+| kodai (7) | 0 / 0.5 / 1 | .905 / .878 / .850 | .665 / .765 / .867 | 1.79 / 1.35 / .88 | .755 / .808 / .860 |
+| glitch (8) | 0 / 0.5 / 1 | .982 / 1.004 / 1.025 | .824 / .933 / 1.044 | 1.30 / 1.05 / .80 | .897 / .967 / 1.036 |
+| complex3 (7) | 0 / 0.5 / 1 | 1.260 / 1.258 / 1.256 | .845 / .954 / 1.063 | 2.63 / 2.11 / 1.44 | 1.013 / 1.097 / 1.179 |
+| township (8) | 0 / 0.5 / 1 | 1.102 / 1.093 / 1.083 | .752 / .857 / .964 | 2.23 / 1.79 / 1.35 | .863 / .935 / 1.007 |
+| stacks (10) | 0 / 0.5 / 1 | .971 / .990 / 1.007 | .844 / .924 / 1.007 | 1.39 / 1.17 / .93 | .888 / .940 / .990 |
+
+The curve fixes what it was fitted for: the contrast statistics (sd, p10, p90) move toward R2 on every map at both strengths (strength 1 overshoots sd slightly on glitch and complex3, and takes kodai p10 .88 and glitch .80 below R2). It does not fix lighting differences: the per-pixel luminance error against R2 is unchanged to slightly worse (mean absolute difference 30.1 > 31.1 kodai, 24.2 > 23.4 glitch, 47.5 > 48.1 complex3, 31.7 > 32.1 township, 27.3 > 28.0 stacks at strength 1), and at strength 1 the per-spot mean ratio moves more than 5 points away from R2 at 11 of 40 spots (strength 0.5: kodai u_shadow, township s0), e.g. kodai far .80 > .72 and complex3 s5 2.54 > 2.62 (that interior is a lighting mismatch, not a transfer one). A single curve cannot be exact per map, which is why the strength is tunable and the default is 0; 0.5 is the suggested first try.
+
+**RCAS.** `r1d_post` also contains the RCAS pass from AMD FidelityFX FSR 1 (`ffx_fsr1.h` v1.20210629, MIT): 5-tap cross, luma-proxy noise detector, per-channel clip-free lobe limited to 0.25 - 1/16, no reciprocal approximation (exact `rcp`), one `1e-7` epsilon on two reciprocals. It reads the curved neighbours, so sharpening follows the curve. Offline against a CPU transcription on D3D11 WARP the compiled VCS matches to <= 4e-6 for ten curve/sharpen/denoise/width/encoding combinations. In game on kodai (3 spots) the mean Laplacian magnitude of the frame rose to 1.26 to 1.31x at amount 0.5, 1.85 to 1.99x at 1, 2.6 to 2.9x at 1 with denoise 0, 1.66 to 1.75x at 1 with width 2; the share of near-black pixels (all channels <= 1) rises by up to 0.3 points at amount 1 (kodai far 1.49 % > 1.78 %; 2.28 % at denoise 0) and clipped-white share is unchanged; crops in `maps/postfx/rcas`. Credit: AMD FidelityFX FSR1 (MIT); a shader author provided hints on the TF2/Apex sharpening stage and its placement. No code or bytecode of his private files is in the repository.
+
+**Cost** (kodai u_decal, 1280x720, `R1DELTA_BACKGROUND_FPS=0` uncapped, paused scene, `r2port_postfx_stats 1` in every case, i.e. the hook is installed even for "off", 3 interleaved rounds, 4 to 6 windows of 300 frames each): median frame time 2.88 ms (347 fps) off, 3.02 ms (331 fps) curve 1, 3.03 ms (330 fps) sharpen 1, 2.99 ms (335 fps) both: about 0.1 to 0.15 ms per frame (3 to 5 %), run-to-run spread 2.75 to 3.15 ms. GPU timestamp queries were removed: issued from the pass they made the NVIDIA driver fault on its own worker thread (`nvwgf2umx`, read of 0x18, twice within seconds); without them nothing faulted. The "off" figure includes the hook, so the stock cost is at most that.
+
+Regenerate the shader after changing the curve: `python tools/r2port/make_display_curve.py [--shift S] [--print]` (needs numpy and scipy), then rebuild; a loose `<gamedir>/r2port/shaders/r1d_post.hlsl` overrides the embedded source without a rebuild.
+
 ## Known gaps
 
 - The cubemap scale is the upper bound of a per-cubemap scale `clamp(cma_gain * CMA, 0.25, 4.0)` (rule 13b, CMA = the per-cubemap multiplier array stored in R2's `cubemaps.hdr.vtf`; `mp_forwardbase_kodai` CMA 5.0 3.26 2.34 8.89 0.88 0.86, `mp_glitch` 1.3, `mp_lf_stacks` 0.7), and rule 13c adds up to 96 copied cubemap samples so R1's nearest-sample lookup picks the cube R2 assigned to the light probe refs (lump 0x68 trailing int32, a working hypothesis). On kodai this halves the share of white (> 235) pixels on the R1 B3 Wingman viewmodel (startB 8.6 % -> 2.7 %, cap2 7.9 % -> 2.4 %, u_decal 5.0 % -> 2.4 % in a 160 x 340 px box), but an R2/R1 gun comparison is impossible (different viewmodel meshes and materials), the indoor `h02` view got brighter (3.1 % -> 7.1 %), and an extra cap of 2 (`cube-scale=2`) did not measurably change the gun in a same-weapon A/B. The global default of 4.0 was measured on `mp_wargames` only. On `mp_glitch`, a fixed-view screenshot (client at 2560 468 264, angles 12 45 0, exposure locked) came out the same with scale 1/6 and with 4 (mean absolute difference 0.025 of 255); that view apparently does not sample the cubemaps.
