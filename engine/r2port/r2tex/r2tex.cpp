@@ -2637,14 +2637,15 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
                     ++digitIndex;
                 }
                 if (digitsBegin + 1 + digitIndex < samp && set >= 1 && set <= 3 &&
-                    shaderSet.find("uv" + std::to_string(set) + "at") != std::string::npos &&
                     constants.size() >= static_cast<std::size_t>(set) * 6) {
+                    const bool animatedSet = shaderSet.find("uv" + std::to_string(set) + "at") != std::string::npos;
                     const float* c = constants.data() + (set - 1) * 6;
                     bool sane = true;
                     for (int i = 0; i < 6; ++i) sane = sane && std::isfinite(c[i]);
                     const double speed = std::hypot(c[4], c[5]);
-                    if (sane && speed > 1e-4 && speed < 16.0 && c[0] > 0.01f && c[0] < 64.0f && c[3] > 0.01f && c[3] < 64.0f &&
-                        std::fabs(c[1]) < 1e-3f && std::fabs(c[2]) < 1e-3f) {
+                    const bool matrixOk = sane && c[0] > 0.01f && c[0] < 64.0f && c[3] > 0.01f && c[3] < 64.0f &&
+                        std::fabs(c[1]) < 1e-3f && std::fabs(c[2]) < 1e-3f;
+                    if (animatedSet && matrixOk && speed > 1e-4 && speed < 16.0) {
                         char text[160];
                         std::snprintf(text, sizeof(text), "[%.5g %.5g]", c[0], c[3]);
                         addVmtParam(out, "$r2uvscale", text);
@@ -2659,6 +2660,14 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
                         }
                         out << "\t\t\"TextureTransform\"\n\t\t{\n\t\t\t\"translateVar\" \"$r2uvshift\"\n\t\t\t\"scaleVar\" \"$r2uvscale\"\n"
                             << "\t\t\t\"resultVar\" \"$basetexturetransform\"\n\t\t}\n\t}\n";
+                    } else if (matrixOk && speed < 1e-4 && (std::fabs(c[0] - 1.0f) > 1e-3f || std::fabs(c[3] - 1.0f) > 1e-3f)) {
+                        // Static UV scale. The R2 vista models (homestead_sky, crashsite3, drydock, kodai, BWC) store UVs that only
+                        // cover 1/m11 of the texture height (homestead_se_c: V 0.76..1.0 with m11 4; homestead_se_b: V 0.50..1.0 with
+                        // m11 2) and the shader multiplies them back with this matrix, wrapping to 0..1. Without it R1 samples only the
+                        // bottom strip of the panorama stretched 2x to 4x (blocky, flat 3D sky mountains). center 0 0 gives v' = m11 * v.
+                        char text[160];
+                        std::snprintf(text, sizeof(text), "center 0 0 scale %.5g %.5g rotate 0 translate 0 0", c[0], c[3]);
+                        addVmtParam(out, "$basetexturetransform", text);
                     }
                 }
             }
