@@ -176,7 +176,8 @@ struct Options {
     // Rule 17: shadow data (lumps 0x05, 0x63, 0x64, 0x7C..0x7F). R2 stores one or more shadow environments
     // (lump 0x05) with their CSM aabb nodes / object refs / shadow meshes concatenated; R1 has no such table and
     // starts the CSM tree at node 0 and the shadow meshes at 0.
-    //   csmRebase:    keep only the last (real) environment: nodes, object refs, shadow meshes and their indices
+    //   csmRebase:    keep only the real environment (largest node + ref + mesh count; NOT "the last": R2 lists it first on
+    //                 mp_black_water_canal, mp_angel_city and both coliseum maps): nodes, object refs, shadow meshes and their indices
     //                 are rebased so the root is node 0 (default off)
     //   emptyShadowMeshes: write lumps 0x7C..0x7F empty (default off)
     bool csmRebase = false;

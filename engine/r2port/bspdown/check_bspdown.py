@@ -1291,15 +1291,18 @@ def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", ph
     si2 = r2.arr(0x7E, "<u2"); si1 = r1.arr(0x7E, "<u2")
     C.ok(int(sum(int(x[1]) for x in sm1)) * 3 == len(si1), "shadow mesh triangle counts address exactly the %d shadow indices" % len(si1))
     if csm_rebase and len(env2) >= 2:
-        e = env2[-1]; fn, fr, fm = int(e[0]), int(e[1]), int(e[2])
+        # independent re-derivation of the chosen environment: largest node + ref + mesh content, ties to the later record
+        score = [int(x[3] - x[0]) + int(x[4] - x[1]) + int(x[5] - x[2]) for x in env2]
+        pick = max(range(len(env2)), key=lambda i: (score[i], i))
+        e = env2[pick]; fn, fr, fm = int(e[0]), int(e[1]), int(e[2]); ln, lr, lm = int(e[3]), int(e[4]), int(e[5])
         mesh_word = int(np.frombuffer(bytes(r2.raw(0x7B)[8:12]), "<u4")[0])
         nprops = int(np.frombuffer(bytes(r2.raw(0x7B)[12:16]), "<u4")[0])
         obj_total = ((mesh_word + 63) & ~63) + nprops
-        rr_old = r2r[fr:int(e[4])]
+        rr_old = r2r[fr:lr]
         keep = rr_old < obj_total
         pref = np.concatenate([[0], np.cumsum(keep)]).astype(np.int64)
-        C.ok(len(n1) == len(n2) - fn and len(r1r) == int(keep.sum()) and (empty_shadow or len(sm1) == len(sm2) - fm), "csm rebase: %d nodes, %d refs (%d dropped beyond meshes + props = %d), %d shadow meshes after dropping %d / %d / %d leading entries" % (len(n1), len(r1r), int((~keep).sum()), obj_total, len(sm1), fn, fr, fm))
-        exp = n2[fn:].copy()
+        C.ok(len(n1) == ln - fn and len(r1r) == int(keep.sum()) and (empty_shadow or len(sm1) == lm - fm), "csm rebase: environment %d of %d chosen by content; %d nodes, %d refs (%d dropped beyond meshes + props = %d), %d shadow meshes after dropping %d / %d / %d leading entries" % (pick, len(env2), len(n1), len(r1r), int((~keep).sum()), obj_total, len(sm1), fn, fr, fm))
+        exp = n2[fn:ln].copy()
         nc = exp[:, 12]
         fc = np.ascontiguousarray(exp[:, 28:30]).view("<u2").ravel().astype(np.int64)
         fc2 = np.where(nc > 0, fc - fn, fc).astype(np.uint16)
@@ -1310,12 +1313,14 @@ def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", ph
         exp[:, 30:32] = pref[f0].astype(np.uint16).view("u1").reshape(-1, 2)
         exp[:, 13] = (pref[f0 + own] - pref[f0]).astype(np.uint8)
         exp[:, 14:16] = (pref[f0 + tot] - pref[f0]).astype(np.uint16).view("u1").reshape(-1, 2)
-        C.ok(bool((n1 == exp).all()), "csm rebase: node array = R2 nodes from the last environment on, child indices lowered by %d, object ranges re-derived after dropping out-of-range refs" % fn)
+        C.ok(bool((n1 == exp).all()), "csm rebase: node array = the chosen environment's R2 nodes, child indices lowered by %d, object ranges re-derived after dropping out-of-range refs" % fn)
         C.ok(bool((r1r == rr_old[keep]).all()), "csm rebase: object references = R2 refs in range")
         root = n1[0].copy(); mins = np.ascontiguousarray(root[0:12]).view("<f4"); maxs = np.ascontiguousarray(root[16:28]).view("<f4")
-        C.ok(bool((mins < maxs).all()) and int(root[12]) > 0, "csm rebase: node 0 is a real root (mins < maxs, %d children, %d total refs)" % (int(root[12]), int(np.ascontiguousarray(root[14:16]).view("<u2")[0])))
+        empty_root = bool((mins > maxs).all()) and len(n1) == 1 and int(root[12]) == 0 and int(root[13]) == 0  # mp_coliseum: the real record is a single empty (inverted +-FLT_MAX) node
+        C.ok(empty_root or (bool((mins <= maxs).all()) and (len(n1) == 1 or int(root[12]) > 0)), "csm rebase: node 0 is the chosen environment's root (mins <= maxs, %d children, %d total refs%s)" % (int(root[12]), int(np.ascontiguousarray(root[14:16]).view("<u2")[0]), ", empty single-node tree" if empty_root else ""))
         drop_idx = int(sum(int(x[1]) for x in sm2[:fm])) * 3
-        C.ok(empty_shadow or (bool((si1 == si2[drop_idx:]).all()) and bool((sm1 == sm2[fm:]).all())), "csm rebase: shadow meshes and indices = R2 data after the dummy environment (%d indices dropped)" % drop_idx)
+        keep_idx = int(sum(int(x[1]) for x in sm2[fm:lm])) * 3
+        C.ok(empty_shadow or (bool((si1 == si2[drop_idx:drop_idx + keep_idx]).all()) and bool((sm1 == sm2[fm:lm]).all())), "csm rebase: shadow meshes and indices = the chosen environment's R2 data (%d leading, %d trailing indices dropped)" % (drop_idx, len(si2) - drop_idx - keep_idx))
     elif not empty_shadow:
         C.ok(bool((n1 == n2).all()) and bool((r1r == r2r).all()) and bool((sm1 == sm2).all()) and bool((si1 == si2).all()), "shadow lumps (0x63, 0x64, 0x7E, 0x7F) identical to R2")
     if empty_shadow:

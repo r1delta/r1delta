@@ -368,6 +368,16 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
     opaque, sort; indices relative to vertexOffset, consecutive per mesh) and the 12 byte vertex format are identical in R1 stock (mp_rise, mp_box) and R2
     maps, so the shadow geometry itself needs no conversion. Level info 0x7B words 4..6 = sun direction (same as the real world light normal).
 
+    UPDATE 2 (BwcShadows, round 10 follow-up): the real environment is chosen BY CONTENT, not by position. Census of lump 0x05 over all 23 R2 maps:
+    the empty dummy (1 node, 0 refs, 1 shadow mesh of 6 triangles, a 32 unit box in the skybox room, sun -0.335 0.526 -0.782) is record 0 on 19 maps
+    and the LAST record on mp_black_water_canal (real: 6381 nodes, 12659 refs, 17 meshes, sun -0.110 0.684 -0.721), mp_angel_city (6415 / 10605 / 20),
+    mp_coliseum (1 / 0 / 6) and mp_coliseum_column (16 / 9 / 6). "Keep the last environment" therefore kept the dummy on those four and dropped the
+    whole level tree, all world shadow meshes and every prop reference (BWC: 6381 nodes, 12659 refs, 517,407 shadow indices). The rebase now keeps the
+    record with the largest nodes + refs + meshes count (ties: the later record) and slices all four arrays to that record's [first, last) ranges
+    (leading AND trailing parts dropped; child indices lowered by the first node, refs re-derived as before). The 19 maps whose real record is last
+    convert byte-identically to before (checked mp_glitch, mp_homestead, mp_forwardbase_kodai, mp_lf_stacks with sha256); the checker re-derives the
+    choice independently.
+
 18. Collision grid padding [R1 sub_18010BE50 / sub_180108710 / sub_180109B10 (IDA copy), data, simulation analysis\gp_walker.cpp]. Crash fixed:
     6 converted maps (mp_colony02, mp_lf_meadow, mp_lf_township, mp_lf_traffic, mp_lf_uma, mp_thaw) access-violated in the world grid
     walker (engine+0x10c5d0 / +0x10c7b0) during the AIN builder's script sweeps; captured on colony02: cell index 0x881 = 2177 =

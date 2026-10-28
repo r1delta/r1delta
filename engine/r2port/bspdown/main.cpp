@@ -53,7 +53,7 @@ static void usage(const char* a0) {
                  "  --keep-prop-flag10     rule 16: copy the R2 prop flag bit 0x10 (R1: 'not drawn, shadow caster only'); default clears it\n"
                  "  --keep-prop-fade       rule 23: copy the R2 prop fade distance for far-origin props too (default raises it)\n"
                  "  --scatter-min <n>      instance count threshold of hide-scatter (default 500)\n"
-                 "  --csm-rebase           rule 17: keep only the last shadow environment (CSM nodes, refs, shadow meshes), root at node 0\n"
+                 "  --csm-rebase           rule 17: keep only the real shadow environment (largest content; CSM nodes, refs, shadow meshes), root at node 0\n"
                  "  --empty-shadow-meshes  rule 17: write lumps 0x7C..0x7F empty\n"
                  "  --no-cubemap-files     keep the R2 pakfile (do not write per-cubemap VTFs)\n"
                  "                         (the R2 pakfile only has one BC6H cubemaps.hdr.vtf)\n"

@@ -72,20 +72,31 @@ void convertShadow(Ctx& c) {
                         c.fail("[rule 17] shadow environment %zu: first[%d] = %d does not follow the previous environment's end", i, k, env[i].first[k]);
                 }
             }
-            const ShadowEnv& e = env[nEnv - 1];
-            if (e.last[0] != (int32_t)nNodes || e.last[2] != (int32_t)nMesh || e.last[1] > (int32_t)nRefs)
-                c.fail("[rule 17] last shadow environment ends at node %d / ref %d / mesh %d but the lumps hold %zu / %zu / %zu", e.last[0], e.last[1], e.last[2], nNodes, nRefs, nMesh);
-            if (e.first[0] < 1 || e.first[2] < 1) c.fail("[rule 17] last shadow environment starts at node %d / mesh %d (expected a preceding dummy environment)", e.first[0], e.first[2]);
+            // The real environment is chosen by content, not by position: R2 lists the empty dummy (1 node, no refs, 1 shadow mesh) FIRST
+            // on 17 maps but LAST on mp_black_water_canal and mp_angel_city (whose real tree sits in records 0), so "keep the last" kept
+            // the dummy there and dropped the whole level tree and its 17 world shadow meshes. Largest node + ref + mesh count wins, ties
+            // go to the later record (every other map: the real record is last and the only non-dummy one).
+            size_t pick = 0, bestScore = 0;
+            for (size_t i = 0; i < nEnv; i++) {
+                const size_t score = (size_t)(env[i].last[0] - env[i].first[0]) + (size_t)(env[i].last[1] - env[i].first[1]) + (size_t)(env[i].last[2] - env[i].first[2]);
+                if (i == 0 || score >= bestScore) { pick = i; bestScore = score; }
+            }
+            const ShadowEnv& e = env[pick];
+            if (env[nEnv - 1].last[0] != (int32_t)nNodes || env[nEnv - 1].last[2] != (int32_t)nMesh || env[nEnv - 1].last[1] > (int32_t)nRefs)
+                c.fail("[rule 17] last shadow environment ends at node %d / ref %d / mesh %d but the lumps hold %zu / %zu / %zu", env[nEnv - 1].last[0], env[nEnv - 1].last[1], env[nEnv - 1].last[2], nNodes, nRefs, nMesh);
+            for (size_t i = 0; i < nEnv; i++)
+                if (env[i].first[1] < 0 || env[i].first[1] > env[i].last[1] || env[i].last[1] > (int32_t)nRefs) c.fail("[rule 17] shadow environment %zu: object refs [%d, %d) outside the %zu refs", i, env[i].first[1], env[i].last[1], nRefs);
             c.throwIfFailed("rule 17");
             const uint32_t fn = (uint32_t)e.first[0], fr = (uint32_t)e.first[1], fm = (uint32_t)e.first[2];
+            const uint32_t ln = (uint32_t)e.last[0], lr = (uint32_t)e.last[1], lm = (uint32_t)e.last[2];
             // Nodes.
-            Bytes nn(nodesB.begin() + (size_t)fn * 32, nodesB.end());
+            Bytes nn(nodesB.begin() + (size_t)fn * 32, nodesB.begin() + (size_t)ln * 32);
             size_t fixedChild = 0;
             for (size_t i = 0; i < nn.size() / 32; i++) {
                 CsmNode n;
                 std::memcpy(&n, &nn[i * 32], 32);
                 if (n.numChildren > 0) {
-                    if (n.firstChild < fn || n.firstChild + n.numChildren > nNodes) c.fail("[rule 17] csm node %zu: child range [%u, +%u) outside the last environment", i + fn, n.firstChild, n.numChildren);
+                    if (n.firstChild < fn || (uint32_t)(n.firstChild + n.numChildren) > ln) c.fail("[rule 17] csm node %zu: child range [%u, +%u) outside the chosen environment", i + fn, n.firstChild, n.numChildren);
                     n.firstChild = (uint16_t)(n.firstChild - fn);
                     fixedChild++;
                 }
@@ -97,20 +108,22 @@ void convertShadow(Ctx& c) {
             }
             c.throwIfFailed("rule 17");
             // Object references: the pool is not renumbered (values are object indices), only the part before the environment is cut.
-            Bytes rr(refsB.begin() + (size_t)fr * 2, refsB.begin() + (size_t)e.last[1] * 2);
+            Bytes rr(refsB.begin() + (size_t)fr * 2, refsB.begin() + (size_t)lr * 2);
             // Shadow meshes and their indices.
             std::vector<ShadowMesh> sm(nMesh);
             std::memcpy(sm.data(), meshB.data(), meshB.size());
             size_t dropIdx = 0;
             for (uint32_t i = 0; i < fm; i++) dropIdx += (size_t)sm[i].numTriangles * 3;
+            size_t keepIdx = 0;
+            for (uint32_t i = fm; i < lm; i++) keepIdx += (size_t)sm[i].numTriangles * 3;
             size_t totalIdx = 0;
             for (auto& m : sm) totalIdx += (size_t)m.numTriangles * 3;
             if (totalIdx * 2 != idxB.size()) c.fail("[rule 17] shadow meshes address %zu indices, lump 0x7E holds %zu", totalIdx, idxB.size() / 2);
             c.throwIfFailed("rule 17");
-            Bytes mm(meshB.begin() + (size_t)fm * 12, meshB.end());
-            Bytes ii(idxB.begin() + dropIdx * 2, idxB.end());
-            c.say("[rule 17] csm rebase: last environment first=(node %u, ref %u, mesh %u) last=(%d, %d, %d); dropped %u leading node(s), %u leading ref(s), %u leading shadow mesh(es) with %zu indices; %zu nodes' child indices lowered by %u",
-                  fn, fr, fm, e.last[0], e.last[1], e.last[2], fn, fr, fm, dropIdx, fixedChild, fn);
+            Bytes mm(meshB.begin() + (size_t)fm * 12, meshB.begin() + (size_t)lm * 12);
+            Bytes ii(idxB.begin() + dropIdx * 2, idxB.begin() + (dropIdx + keepIdx) * 2);
+            c.say("[rule 17] csm rebase: chose environment %zu of %zu (largest content) first=(node %u, ref %u, mesh %u) last=(%u, %u, %u); dropped %u leading + %zu trailing node(s), %u leading + %zu trailing ref(s), %u leading + %zu trailing shadow mesh(es) with %zu indices; %zu nodes' child indices lowered by %u",
+                  pick, nEnv, fn, fr, fm, ln, lr, lm, fn, nNodes - ln, fr, nRefs - lr, fm, nMesh - lm, dropIdx + (idxB.size() / 2 - dropIdx - keepIdx), fixedChild, fn);
             // Object references beyond the object space name objects R1 does not have: R1 would index past its prop array. Drop them and
             // re-derive every node's ref ranges. The space is [0, propBase) for render meshes and [propBase, propBase + props) for static
             // props, with propBase = levelinfo word 2 rounded up to 64 (R1 loader sub_1800B2630: v40 = (word2 + 63) & ~63; R2 uses the same
