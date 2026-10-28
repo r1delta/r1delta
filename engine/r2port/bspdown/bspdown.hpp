@@ -160,6 +160,11 @@ struct Options {
     // keepPropFlag10 = true copies it unchanged (the behaviour before rule 16).
     bool keepPropFlag10 = false;
 
+    // Rule 23: R1 culls a static prop by the distance from the view to its ORIGIN against a fade distance (R2 -1 = auto from the model hull
+    // size). R2 props whose origin is far from their geometry (water planes, waterfalls, god rays at 0,0,0) are culled although the view is
+    // next to the geometry. Default: raise the fade distance of such props. keepPropFade = true copies the R2 value for every prop.
+    bool keepPropFade = false;
+
     // Diagnostic variants (default keeps all props):
     //   HideScatter:  props of models with at least scatterMinCount instances get scale 0.0001
     //                 (prop count and indices stay valid: object reference lumps index props)

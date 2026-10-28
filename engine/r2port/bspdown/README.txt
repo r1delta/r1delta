@@ -42,7 +42,7 @@ Build
 Use
 ---
   bspdown.exe <in_r2.bsp> <out_r1.bsp> [--limit 16376] [--rtl-bytes 1..4] [--no-remap-contents]
-              [--keep-prop-flag10] [--props keep|hide-scatter|hide-all] [--scatter-min N]
+              [--keep-prop-flag10] [--keep-prop-fade] [--props keep|hide-scatter|hide-all] [--scatter-min N]
               [--csm-rebase] [--empty-shadow-meshes] [--worldlight-flag2]
               [--cubemaps none|split|keep] [--keep-r2-lumps] [--grid-size N] [--no-grid-pad] [--quiet]
   The per-rule report is printed to stdout. Exit status 1 and a message on stderr when the
@@ -532,6 +532,33 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
     135; its old cap0 noise metric was 1.47 with vertex color enabled/source alpha, versus 0.76 without vertex color. The rule avoids using
     R1-only opacity for these surfaces.
     f) Opt-in RTL bake (rule 20f, StairStep; options rtlBake 1 = edge, 2 = all, CLI --rtl-bake edge|all, provider tokens rtl-bake-edge / rtl-bake-all): bakes real-time spot/point light (colour x attenuation x facing x linear(B)) into lightmap plane A for lights without flag 0x10, skipping _bm receivers; plane A is energy-encoded to 4.0 max per channel. Default off; output unchanged unless the option is set.
+
+23. Static prop fade distance of far-origin props [R1 sub_18018C890, sub_18018B710, runtime evidence from a cdb attach on mp_crashsite3, check_far_origin_props.py].
+    R1 culls a static prop in sub_18018C890 (IStaticPropMgr visible-prop gather, one call per view) by the squared distance from the VIEW to
+    the prop ORIGIN (prop+16) against the prop's fade distance (prop+276 = fade^2, set by the loader sub_18018B710 from the sprp fade
+    field +0x24 when it is > 0, otherwise from the model hull diagonal: about 4.8 * diagonal for the crashsite water sheet). The drop test is
+    dist^2 / zoom^2 > fade^2 * 3.59 (the second test, dist^2 / zoom^2 > fade^2, starts the alpha fade). R2 'world space' props (water sheets,
+    waterfalls, god rays, mist, decal and wire models) sit at an origin far from their geometry, often 0 0 0, and R2 stores fade -1 (never
+    fades); our rule 5 copies -1, which R1 reads as 'auto from the hull'. Measured on mp_crashsite3, view at the water pose
+    (-6758 -4028 812): prop 11205 (cave water, origin 0 0 0, hull diagonal 1157) was in the visible bitset and was dropped by exactly this
+    test: dist^2 / zoom^2 = 2.80e8 against fade^2 * 3.59 = 1.09e8 (fade^2 = 3.05e7, fade 5520). Writing a large fade^2 into the live prop
+    record (cdb, ed prop+0x114) made the water, drawn with its converted stock material, appear at once. Not a leaf-list or cell problem:
+    the bit is set (cell reference 0x78/0x79 data places the prop at its real position), the sprp leaf list is not read by R1, and the
+    hull / view bounds (sub_18015A430 falls back to the hull when the view bounds are zero) are correct.
+    Rule: world bounds of every prop = union of its cell object references (lump 0x78 ids >= propBase, bounds in lump 0x79 (32 byte
+    records parallel to 0x78), propBase = (levelinfo word 2 + 63) & ~63). A prop whose origin is farther than half-diagonal + 256 units
+    from the centre of those bounds gets fade_min = fade_max = 65536 when the R2 value is <= 0, or R2 value + origin-to-centre distance
+    otherwise (R1 drops at about 0.9 * fade from the origin, so 65536 covers any map). Props with origins inside or next to their bounds
+    are untouched (R1 keeps its own size based fade for them). Props changed per map (all 20 maps run, only the +0x24/+0x28 fields of
+    these props differ from --keep-prop-fade output, 0 other bytes): mp_black_water_canal 3, mp_colony02 1, mp_complex3 2, mp_crashsite3 4,
+    mp_eden 74 (beacon pipe pieces with their pivot 330 units away), mp_forwardbase_kodai 55, mp_grave 30, mp_homestead 24, mp_lf_deck 2,
+    mp_relic02 6, mp_thaw 14; 0 on mp_coliseum, mp_coliseum_column, mp_drydock, mp_glitch, mp_lf_meadow/stacks/township/traffic/uma.
+    In-game (r2-texlib, 1280x720, default view): the drop test only bites when origin-to-bounds distance exceeds about 8 half-diagonals
+    (0.9 * 4.8 * diagonal), so only mp_crashsite3 cave water (14 half-diagonals) and the 9 mp_homestead waterfalls (28..33) changed in
+    the tested poses; mp_crashsite3 waterfalls, mp_thaw (plane, waterfall, mist, rootplants), mp_relic02 god rays and mp_homestead wires /
+    parachute looked identical before and after (their distance ratio is 1.5 .. 7: not dropped at that view, or invisible for another reason).
+    The homestead baseline pose frame (maps\outdoor\LOOK-RECIPE.md pose) is unchanged (MAD 0.075/255 before vs after in one session).
+    --keep-prop-fade restores the plain copy (provider token props-keepfade). Needs a converted BSP cache revision bump (22 -> 23).
 
 Results
 -------

@@ -22,7 +22,7 @@ $sourceFiles = @(
 # Vendored for the command-line tool and its checks; not part of Dll1.vcxproj.
 # main.cpp is the bspdown.exe driver (build_msvc.bat), check_rtl_visibility.cpp the focused RTL quantizer fixtures (README build line), check_bspdown.py (with its frame_check.py helper) verifies the output, README.txt lists the rules.
 $toolSourceFiles = @('main.cpp', 'check_rtl_visibility.cpp')
-$verbatimFiles = @('bcdec.h', 'check_bspdown.py', 'frame_check.py', 'README.txt', 'build_msvc.bat')
+$verbatimFiles = @('bcdec.h', 'check_bspdown.py', 'check_far_origin_props.py', 'frame_check.py', 'README.txt', 'build_msvc.bat')
 $originHeader = "// Origin: $source. Bundled in r1delta under GPL-3.0.`r`n"
 
 New-Item -ItemType Directory -Force -Path $destination | Out-Null

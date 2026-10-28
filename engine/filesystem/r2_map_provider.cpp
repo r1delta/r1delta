@@ -85,7 +85,7 @@ constexpr uint32_t kGameLump = 0x23;
 
 // Folded into the on-disk cache fingerprint together with entity_rewrite::kRewriteVersion.
 // Bump when the vendored bspdown converter or the provider's BSP post-processing changes output.
-constexpr uint32_t kConvertedBspCacheVersion = 22;
+constexpr uint32_t kConvertedBspCacheVersion = 23;  // 23: rule 23 far-origin prop fade distance
 
 // Raised onto the z of every info_spawnpoint_flag origin in lump 0 (see entity_rewrite::RaiseFlagSpawnOrigins).
 // The R1 server drops the spawnpoint back to the floor; one that starts inside solid is removed.
@@ -1373,6 +1373,7 @@ void ApplyConverterVariant(bspdown::Options& options, const std::string& variant
         else if (token == "pbr-keep") options.pbrLights = false;
         else if (token == "flag2") options.worldLightFlagBit2 = true;
         else if (token == "props-keep10") options.keepPropFlag10 = true;
+        else if (token == "props-keepfade") options.keepPropFade = true;   // rule 23 opt-out: copy the R2 prop fade distance for far-origin props too
         else if (ApplyConverterScaleToken(options, token)) {}
         else {
             char message[256]{};
@@ -1389,6 +1390,7 @@ bspdown::Options R2ConverterOptions()
     bspdown::Options options;
     options.worldLightFlagBit2 = false;
     options.keepPropFlag10 = false;     // rule 16: clear static prop flag 0x10 (R1 reads it as "shadow caster only, not drawn")
+    options.keepPropFade = false;       // rule 23: raise the fade distance of props whose origin is far from their geometry (R1 culls by view-to-origin distance); opt-out token props-keepfade
     options.csmRebase = true;           // rule 17: drop R2's empty dummy CSM environment so R1's tree root is the real one (tree/prop sun shadows); opt-out token csm-no-rebase
     options.emptyShadowMeshes = false;
     options.cubemaps = bspdown::CubemapMode::Split;   // rule 13d: per-mesh R2 cubemaps via patch materials; opt-out token cubemaps-single

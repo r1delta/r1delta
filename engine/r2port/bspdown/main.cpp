@@ -51,6 +51,7 @@ static void usage(const char* a0) {
                  "  --props <keep|hide-scatter|hide-all>  rule 16 diagnostics: scale props to 0.0001 for models with >= --scatter-min\n"
                  "                         instances / for every prop (default keep)\n"
                  "  --keep-prop-flag10     rule 16: copy the R2 prop flag bit 0x10 (R1: 'not drawn, shadow caster only'); default clears it\n"
+                 "  --keep-prop-fade       rule 23: copy the R2 prop fade distance for far-origin props too (default raises it)\n"
                  "  --scatter-min <n>      instance count threshold of hide-scatter (default 500)\n"
                  "  --csm-rebase           rule 17: keep only the last shadow environment (CSM nodes, refs, shadow meshes), root at node 0\n"
                  "  --empty-shadow-meshes  rule 17: write lumps 0x7C..0x7F empty\n"
@@ -129,6 +130,7 @@ int main(int argc, char** argv) {
             }
         }
         else if (a == "--keep-prop-flag10") opt.keepPropFlag10 = true;
+        else if (a == "--keep-prop-fade") opt.keepPropFade = true;
         else if (a == "--scatter-min" && i + 1 < argc) opt.scatterMinCount = (uint32_t)std::atoi(argv[++i]);
         else if (a == "--csm-rebase") opt.csmRebase = true;
         else if (a == "--empty-shadow-meshes") opt.emptyShadowMeshes = true;

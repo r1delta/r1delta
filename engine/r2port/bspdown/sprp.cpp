@@ -16,11 +16,18 @@
 #include "internal.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace bspdown {
 namespace detail {
 
 namespace {
+
+// Rule 23: a prop whose origin is farther than half-diagonal + this from its cell-reference bounds counts as far-origin.
+constexpr float kFarOriginMargin = 256.0f;
+// Rule 23: fade distance for far-origin props whose R2 fade distance is -1 (never fades in R2). R1 culls at about 0.9 * fade
+// (sub_18018C890, wide view zoom 2.1x), so 65536 covers any map extent.
+constexpr float kNoFadeDistance = 65536.0f;
 
 #pragma pack(push, 1)
 struct PropR2 {
@@ -109,6 +116,51 @@ Bytes convertSprp(Ctx& c, const Bytes& payload) {
     const auto pm = c.opt.props;
     size_t hidden = 0, flag10Cleared = 0;
     size_t badScale = 0, modelOob = 0;
+    // Rule 23 input: world bounds of every prop = union of its cell object-reference bounds (lumps 0x78 refs, 0x79 bounds). A reference
+    // id >= propBase = (levelinfo word 2 + 63) & ~63 names prop (id - propBase); the cell data is what R2 culls with, so the bounds
+    // are the real geometry location whatever the origin is.
+    std::vector<float> pbMin((size_t)numProps * 3, 0.0f), pbMax((size_t)numProps * 3, 0.0f);
+    std::vector<uint8_t> hasBounds(numProps, 0);
+    size_t farOrigin = 0, noRefs = 0;
+    {
+        const Bytes& li = c.lump[L_LEVELINFO];
+        const Bytes& rf = c.lump[0x78];
+        const Bytes& rb = c.lump[L_OBJREFBOUNDS];
+        if (li.size() >= 12 && rf.size() % 2 == 0 && rb.size() == (rf.size() / 2) * 32) {
+            int32_t word2;
+            std::memcpy(&word2, &li[8], 4);
+            const uint64_t propBase = ((uint64_t)(uint32_t)word2 + 63) & ~63ull;
+            const size_t nRefs = rf.size() / 2;
+            for (size_t j = 0; j < nRefs; j++) {
+                uint16_t id;
+                std::memcpy(&id, &rf[j * 2], 2);
+                if (id < propBase || id - propBase >= numProps) continue;
+                const uint32_t k = (uint32_t)(id - propBase);
+                float b[8];
+                std::memcpy(b, &rb[j * 32], 32);
+                for (int a = 0; a < 3; a++) {
+                    const float lo = b[a], hi = b[4 + a];
+                    if (!hasBounds[k]) {
+                        pbMin[(size_t)k * 3 + a] = lo;
+                        pbMax[(size_t)k * 3 + a] = hi;
+                    } else {
+                        pbMin[(size_t)k * 3 + a] = std::min(pbMin[(size_t)k * 3 + a], lo);
+                        pbMax[(size_t)k * 3 + a] = std::max(pbMax[(size_t)k * 3 + a], hi);
+                    }
+                }
+                hasBounds[k] = 1;
+            }
+            for (uint32_t k = 0; k < numProps; k++) {
+                if (!hasBounds[k]) { noRefs++; continue; }
+                for (int a = 0; a < 3; a++)
+                    if (!std::isfinite(pbMin[(size_t)k * 3 + a]) || !std::isfinite(pbMax[(size_t)k * 3 + a]) ||
+                        std::fabs(pbMin[(size_t)k * 3 + a]) > 1e6f || std::fabs(pbMax[(size_t)k * 3 + a]) > 1e6f) { hasBounds[k] = 0; noRefs++; break; }
+            }
+        } else {
+            noRefs = numProps;
+            c.say("[rule 23] cell object-reference lumps unusable (levelinfo %zu bytes, 0x78 %zu bytes, 0x79 %zu bytes); prop fade distance left as R2", li.size(), rf.size(), rb.size());
+        }
+    }
     res.reserve(res.size() + (size_t)numProps * sizeof(PropR1));
     for (uint32_t k = 0; k < numProps; k++) {
         PropR2 p;
@@ -130,6 +182,28 @@ Bytes convertSprp(Ctx& c, const Bytes& payload) {
         q.scale = p.scale;
         q.collisionAdd = p.collisionAdd;
         q.collisionRemove = p.collisionRemove;
+        if (hasBounds[k]) {
+            // Rule 23: R1 culls a prop by the distance from the view to its ORIGIN (sub_18018C890) against the fade distance
+            // derived from the model hull. R2 "world space" props sit at an origin far from their geometry.
+            const float* mn = &pbMin[(size_t)k * 3];
+            const float* mx = &pbMax[(size_t)k * 3];
+            double d2 = 0, h2 = 0;
+            for (int a = 0; a < 3; a++) {
+                double cen = 0.5 * ((double)mn[a] + (double)mx[a]);
+                double dd = (double)p.origin[a] - cen, hh = 0.5 * ((double)mx[a] - (double)mn[a]);
+                d2 += dd * dd;
+                h2 += hh * hh;
+            }
+            const double dist = std::sqrt(d2), half = std::sqrt(h2);
+            if (dist > half + kFarOriginMargin) {
+                farOrigin++;
+                if (!c.opt.keepPropFade) {
+                    const float fade = p.fadeDistance > 0.0f ? p.fadeDistance + (float)dist : kNoFadeDistance;
+                    q.fadeMin = fade;
+                    q.fadeMax = fade;
+                }
+            }
+        }
         {
             bool hide = pm == Options::PropMode::HideAll ||
                         (pm == Options::PropMode::HideScatter && p.modelName < numModels && modelCount[p.modelName] >= c.opt.scatterMinCount);
@@ -154,6 +228,11 @@ Bytes convertSprp(Ctx& c, const Bytes& payload) {
     c.say("[rule 5] collision_flags_add/remove copied unchanged (R2 bit meanings, see rule 9); %zu props have a non-positive scale", badScale);
     c.say("[rule 16] prop flag bit 0x10: %s on %zu of %u props (R1 reads it as 'not drawn in the main pass, shadow caster only'; kept on props that also carry 0x40, the stock R1 vista combination 0x54)",
           c.opt.keepPropFlag10 ? "kept (--keep-prop-flag10)" : "cleared", flag10Cleared, numProps);
+    if (c.opt.keepPropFade)
+        c.say("[rule 23] prop fade distance: R2 value copied for every prop (--keep-prop-fade); %zu props have an origin more than half-diagonal + %.0f units outside their cell-reference bounds", farOrigin, kFarOriginMargin);
+    else
+        c.say("[rule 23] prop fade distance: %zu props have an origin more than half-diagonal + %.0f units from their cell-reference bounds; fade distance raised (R2 -1 -> %.0f, R2 distance D -> D + origin-to-bounds-centre distance) so R1's origin-based distance cull no longer drops them; %zu props had no cell references",
+              farOrigin, kFarOriginMargin, kNoFadeDistance, noRefs);
     if (pm != Options::PropMode::Keep)
         c.say("[rule 16] diagnostic prop variant (%s): %zu props scaled to 0.0001; prop count and order unchanged (object reference lumps index props); scatter threshold %u instances",
               pm == Options::PropMode::HideAll ? "hide-all" : "hide-scatter", hidden, c.opt.scatterMinCount);
