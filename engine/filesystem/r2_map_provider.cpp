@@ -85,7 +85,7 @@ constexpr uint32_t kGameLump = 0x23;
 
 // Folded into the on-disk cache fingerprint together with entity_rewrite::kRewriteVersion.
 // Bump when the vendored bspdown converter or the provider's BSP post-processing changes output.
-constexpr uint32_t kConvertedBspCacheVersion = 20;
+constexpr uint32_t kConvertedBspCacheVersion = 21;
 
 // Raised onto the z of every info_spawnpoint_flag origin in lump 0 (see entity_rewrite::RaiseFlagSpawnOrigins).
 // The R1 server drops the spawnpoint back to the floor; one that starts inside solid is removed.
@@ -1360,10 +1360,12 @@ void ApplyConverterVariant(bspdown::Options& options, const std::string& variant
         if (token.empty())
             continue;
         if (token == "csm-rebase") options.csmRebase = true;
+        else if (token == "csm-no-rebase") options.csmRebase = false;
         else if (token == "empty-shadow-meshes") options.emptyShadowMeshes = true;
         else if (token == "no-sun-alpha") options.lightmapSunAlpha = false;
         else if (token == "no-rtl") options.rtlConvert = false;
-        else if (token == "cubemaps-split") options.cubemaps = bspdown::CubemapMode::Split;   // opt-in: per-mesh R2 cubes via patch materials
+        else if (token == "cubemaps-split") options.cubemaps = bspdown::CubemapMode::Split;
+        else if (token == "cubemaps-single") options.cubemaps = bspdown::CubemapMode::None;   // pre-split behaviour: every world sort samples the nearest cube
         else if (token == "no-collapse-envs") options.collapseEnvs = false;
         else if (token == "pbr-keep") options.pbrLights = false;
         else if (token == "flag2") options.worldLightFlagBit2 = true;
@@ -1384,8 +1386,9 @@ bspdown::Options R2ConverterOptions()
     bspdown::Options options;
     options.worldLightFlagBit2 = false;
     options.keepPropFlag10 = false;     // rule 16: clear static prop flag 0x10 (R1 reads it as "shadow caster only, not drawn")
-    options.csmRebase = false;          // rule 17: shadow data options stay off
+    options.csmRebase = true;           // rule 17: drop R2's empty dummy CSM environment so R1's tree root is the real one (tree/prop sun shadows); opt-out token csm-no-rebase
     options.emptyShadowMeshes = false;
+    options.cubemaps = bspdown::CubemapMode::Split;   // rule 13d: per-mesh R2 cubemaps via patch materials; opt-out token cubemaps-single
     ApplyConverterVariant(options, R2ConverterVariantString());
     return options;
 }

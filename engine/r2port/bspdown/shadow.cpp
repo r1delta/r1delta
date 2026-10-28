@@ -111,13 +111,19 @@ void convertShadow(Ctx& c) {
             Bytes ii(idxB.begin() + dropIdx * 2, idxB.end());
             c.say("[rule 17] csm rebase: last environment first=(node %u, ref %u, mesh %u) last=(%d, %d, %d); dropped %u leading node(s), %u leading ref(s), %u leading shadow mesh(es) with %zu indices; %zu nodes' child indices lowered by %u",
                   fn, fr, fm, e.last[0], e.last[1], e.last[2], fn, fr, fm, dropIdx, fixedChild, fn);
-            // Object references beyond meshes + props (34 on mp_glitch, 25 on mp_lf_stacks; they sit in ordinary play-area leaves) name
-            // objects R1 does not have: R1 would index past its prop array. Drop them and re-derive every node's ref ranges.
+            // Object references beyond the object space name objects R1 does not have: R1 would index past its prop array. Drop them and
+            // re-derive every node's ref ranges. The space is [0, propBase) for render meshes and [propBase, propBase + props) for static
+            // props, with propBase = levelinfo word 2 rounded up to 64 (R1 loader sub_1800B2630: v40 = (word2 + 63) & ~63; R2 uses the same
+            // base: on mp_glitch word 2 = 2903, base 2944, refs 2947..19125 and not one of the 1322 refs names a NO_SHADOW prop at that base).
+            // It is not meshes (lump 0x50) + props: that bound dropped the last 34 valid prop references of mp_glitch.
             {
-                const size_t nMeshesAll = c.lump[L_MESHES].size() / 28;
-                uint32_t nProps = 0;
-                if (c.lump[L_LEVELINFO].size() >= 16) std::memcpy(&nProps, &c.lump[L_LEVELINFO][12], 4);
-                const size_t objTotal = nMeshesAll + nProps;
+                uint32_t meshWord = 0, nProps = 0;
+                if (c.lump[L_LEVELINFO].size() >= 16) {
+                    std::memcpy(&meshWord, &c.lump[L_LEVELINFO][8], 4);
+                    std::memcpy(&nProps, &c.lump[L_LEVELINFO][12], 4);
+                }
+                const size_t propBase = ((size_t)meshWord + 63) & ~(size_t)63;
+                const size_t objTotal = propBase + nProps;
                 const size_t n = rr.size() / 2;
                 std::vector<uint32_t> prefix(n + 1, 0);
                 size_t dropped = 0;
@@ -149,8 +155,8 @@ void convertShadow(Ctx& c) {
                     c.throwIfFailed("rule 17");
                     rr = std::move(kept);
                 }
-                c.say("[rule 17] csm rebase: object space = %zu meshes + %u props = %zu; %zu of %zu object references named objects beyond it and were dropped",
-                      nMeshesAll, nProps, objTotal, dropped, n);
+                c.say("[rule 17] csm rebase: object space = prop base %zu (levelinfo word 2 = %u rounded up to 64) + %u props = %zu; %zu of %zu object references named objects beyond it and were dropped",
+                      propBase, meshWord, nProps, objTotal, dropped, n);
             }
             nodesB = std::move(nn);
             refsB = std::move(rr);

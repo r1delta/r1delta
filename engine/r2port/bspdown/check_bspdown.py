@@ -1292,9 +1292,9 @@ def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", ph
     C.ok(int(sum(int(x[1]) for x in sm1)) * 3 == len(si1), "shadow mesh triangle counts address exactly the %d shadow indices" % len(si1))
     if csm_rebase and len(env2) >= 2:
         e = env2[-1]; fn, fr, fm = int(e[0]), int(e[1]), int(e[2])
-        nmesh_all = len(r2.raw(0x50)) // 28
+        mesh_word = int(np.frombuffer(bytes(r2.raw(0x7B)[8:12]), "<u4")[0])
         nprops = int(np.frombuffer(bytes(r2.raw(0x7B)[12:16]), "<u4")[0])
-        obj_total = nmesh_all + nprops
+        obj_total = ((mesh_word + 63) & ~63) + nprops
         rr_old = r2r[fr:int(e[4])]
         keep = rr_old < obj_total
         pref = np.concatenate([[0], np.cumsum(keep)]).astype(np.int64)
