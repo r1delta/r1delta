@@ -91,6 +91,8 @@ cbuffer R2SourceCB : register( b1 )
 {
     float2 g_srcOffset;     // top-left of the viewport in the raw depth texture, in texels
     float2 g_srcInvSize;    // 1 / size of the texture the raw-depth gathers read (full depth texture, or the half-res depth)
+    float2 g_fade;          // x = view depth where the AO starts to fade to 1, y = 1 / (fade range); y = 0 disables
+    float2 g_pad;           // x = 1 / (1 - occlusionBias)
 }
 SamplerState g_samplerPointClamp : register( s0 );
 
@@ -172,7 +174,7 @@ float XeGTAO_ScreenSpaceToViewSpaceDepth( const float screenDepth, const GTAOCon
 {
     float depthLinearizeMul = consts.DepthUnpackConsts.x;
     float depthLinearizeAdd = consts.DepthUnpackConsts.y;
-    return depthLinearizeMul / (depthLinearizeAdd - screenDepth);
+    return min( depthLinearizeMul / (depthLinearizeAdd - screenDepth), 65504.0 );
 }
 lpfloat4 XeGTAO_CalculateEdges( const lpfloat centerZ, const lpfloat leftZ, const lpfloat rightZ, const lpfloat topZ, const lpfloat bottomZ )
 {
@@ -282,10 +284,10 @@ void XeGTAO_MainPass( const uint2 pixCoord, lpfloat sliceCount, lpfloat stepsPer
     outWorkingEdges[pixCoord] = XeGTAO_PackEdges(edgesLRTB);
 #ifdef XE_GTAO_GENERATE_NORMALS_INPLACE
     float3 CENTER   = XeGTAO_ComputeViewspacePosition( normalizedScreenPos, viewspaceZ, consts );
-    float3 LEFT     = XeGTAO_ComputeViewspacePosition( normalizedScreenPos + float2(-1,  0) * consts.ViewportPixelSize, pixLZ, consts );
-    float3 RIGHT    = XeGTAO_ComputeViewspacePosition( normalizedScreenPos + float2( 1,  0) * consts.ViewportPixelSize, pixRZ, consts );
 )R2XEGTAO",
-R"R2XEGTAO(    float3 TOP      = XeGTAO_ComputeViewspacePosition( normalizedScreenPos + float2( 0, -1) * consts.ViewportPixelSize, pixTZ, consts );
+R"R2XEGTAO(    float3 LEFT     = XeGTAO_ComputeViewspacePosition( normalizedScreenPos + float2(-1,  0) * consts.ViewportPixelSize, pixLZ, consts );
+    float3 RIGHT    = XeGTAO_ComputeViewspacePosition( normalizedScreenPos + float2( 1,  0) * consts.ViewportPixelSize, pixRZ, consts );
+    float3 TOP      = XeGTAO_ComputeViewspacePosition( normalizedScreenPos + float2( 0, -1) * consts.ViewportPixelSize, pixTZ, consts );
     float3 BOTTOM   = XeGTAO_ComputeViewspacePosition( normalizedScreenPos + float2( 0,  1) * consts.ViewportPixelSize, pixBZ, consts );
     viewspaceNormal = (lpfloat3)XeGTAO_CalculateNormal( edgesLRTB, CENTER, LEFT, RIGHT, TOP, BOTTOM );
 #endif
@@ -461,8 +463,10 @@ R"R2XEGTAO(    float3 TOP      = XeGTAO_ComputeViewspacePosition( normalizedScre
 #endif
         }
         visibility /= (lpfloat)sliceCount;
-        visibility = pow( visibility, (lpfloat)consts.FinalValuePower );
-        visibility = max( (lpfloat)0.03, visibility ); // disallow total occlusion (which wouldn't make any sense anyhow since pixel is visible but also helps with packing bent normals)
+        visibility = pow( max( visibility * (lpfloat)g_pad.x, (lpfloat)0 ), (lpfloat)consts.FinalValuePower );
+        visibility = max( (lpfloat)0.03, visibility );
+        visibility = lerp( visibility, (lpfloat)1.0, (lpfloat)saturate( (viewspaceZ - g_fade.x) * g_fade.y ) );
+        if( viewspaceZ > (lpfloat)60000.0 ) visibility = (lpfloat)1.0;      // sky (depth 1.0 -> clamped 65504): never occluded
 #ifdef XE_GTAO_COMPUTE_BENT_NORMALS
         bentNormal = normalize(bentNormal) ;
 #endif
@@ -495,7 +499,8 @@ lpfloat XeGTAO_DepthMIPFilter( lpfloat depth0, lpfloat depth1, lpfloat depth2, l
     lpfloat weight0 = saturate( (maxDepth-depth0) * falloffMul + falloffAdd );
     lpfloat weight1 = saturate( (maxDepth-depth1) * falloffMul + falloffAdd );
     lpfloat weight2 = saturate( (maxDepth-depth2) * falloffMul + falloffAdd );
-    lpfloat weight3 = saturate( (maxDepth-depth3) * falloffMul + falloffAdd );
+)R2XEGTAO",
+R"R2XEGTAO(    lpfloat weight3 = saturate( (maxDepth-depth3) * falloffMul + falloffAdd );
     lpfloat weightSum = weight0 + weight1 + weight2 + weight3;
     return (weight0 * depth0 + weight1 * depth1 + weight2 * depth2 + weight3 * depth3) / weightSum;
 }
@@ -504,8 +509,7 @@ lpfloat XeGTAO_ClampDepth( float depth )
 #ifdef XE_GTAO_USE_HALF_FLOAT_PRECISION
     return (lpfloat)clamp( depth, 0.0, 65504.0 );
 #else
-)R2XEGTAO",
-R"R2XEGTAO(    return clamp( depth, 0.0, 3.402823466e+38 );
+    return clamp( depth, 0.0, 3.402823466e+38 );
 #endif
 }
 groupshared lpfloat g_scratchDepths[8][8];
@@ -736,14 +740,14 @@ void CSMain( const uint2 pixCoord : SV_DispatchThreadID )
 }
 #endif
 #if defined(R2_PASS_DENOISE)
-Texture2D<float>            g_srcWorkingAOTerm      : register( t0 );
+)R2XEGTAO",
+R"R2XEGTAO(Texture2D<float>            g_srcWorkingAOTerm      : register( t0 );
 Texture2D<lpfloat>          g_srcWorkingEdges       : register( t1 );
 RWTexture2D<unorm float>    g_outFinalAOTerm        : register( u0 );
 [numthreads(XE_GTAO_NUMTHREADS_X, XE_GTAO_NUMTHREADS_Y, 1)]
 void CSDenoise( const uint2 dispatchThreadID : SV_DispatchThreadID )
 {
-)R2XEGTAO",
-R"R2XEGTAO(    const uint2 pixCoordBase = dispatchThreadID * uint2( 2, 1 );
+    const uint2 pixCoordBase = dispatchThreadID * uint2( 2, 1 );
     XeGTAO_Denoise( pixCoordBase, g_GTAOConsts, g_srcWorkingAOTerm, g_srcWorkingEdges, g_samplerPointClamp, g_outFinalAOTerm, false );
 }
 [numthreads(XE_GTAO_NUMTHREADS_X, XE_GTAO_NUMTHREADS_Y, 1)]
@@ -768,7 +772,7 @@ void CSDownsample( uint2 id : SV_DispatchThreadID )
         d[k] = g_srcRawDepth.Load( int3( q + int2( g_srcOffset ), 0 ) );
     }
     float z[4]; float mean = 0;
-    [unroll] for( int i = 0; i < 4; i++ ) { z[i] = XeGTAO_ScreenSpaceToViewSpaceDepth( d[i], g_GTAOConsts ); mean += z[i] * 0.25; }
+    [unroll] for( int i = 0; i < 4; i++ ) { z[i] = min( XeGTAO_ScreenSpaceToViewSpaceDepth( d[i], g_GTAOConsts ), 65504.0 ); mean += z[i] * 0.25; }
     float best = d[0]; float bestErr = abs( z[0] - mean );
     [unroll] for( int j = 1; j < 4; j++ ) { float e = abs( z[j] - mean ); if( e < bestErr ) { bestErr = e; best = d[j]; } }
     bool planar = abs( z[0] + z[3] - z[1] - z[2] ) < 0.01 * mean + 1e-3 && (max(max(z[0],z[1]),max(z[2],z[3])) - min(min(z[0],z[1]),min(z[2],z[3]))) < 0.1 * mean;
@@ -785,7 +789,7 @@ RWTexture2D<unorm float>    g_outFullAO             : register( u0 );
 float R2_FullZ( int2 p )
 {
     int2 q = clamp( p, int2(0,0), int2( g_GTAOConsts.ViewportSize ) - 1 );
-    return XeGTAO_ScreenSpaceToViewSpaceDepth( g_srcFullDepth.Load( int3( q + int2( g_srcOffset ), 0 ) ), g_GTAOConsts );
+    return min( XeGTAO_ScreenSpaceToViewSpaceDepth( g_srcFullDepth.Load( int3( q + int2( g_srcOffset ), 0 ) ), g_GTAOConsts ), 65504.0 );   // clamp: depth 1.0 (sky) is +inf
 }
 [numthreads(8, 8, 1)]
 void CSUpsample( uint2 id : SV_DispatchThreadID )
@@ -805,7 +809,7 @@ void CSUpsample( uint2 id : SV_DispatchThreadID )
         int2 o = int2( k & 1, k >> 1 );
         int2 q = clamp( base + o, int2(0,0), (int2)hdim - 1 );
         float bw = ((o.x == 0) ? (1 - f.x) : f.x) * ((o.y == 0) ? (1 - f.y) : f.y);
-        float zq = XeGTAO_ScreenSpaceToViewSpaceDepth( g_srcHalfDepth.Load( int3(q, 0) ), g_GTAOConsts );
+        float zq = min( XeGTAO_ScreenSpaceToViewSpaceDepth( g_srcHalfDepth.Load( int3(q, 0) ), g_GTAOConsts ), 65504.0 );
         float rel = abs( zq - zc ) / tol;
         float w = bw * exp2( -rel * rel ) + 1e-5;
         float ao = g_srcHalfAO.Load( int3(q, 0) );

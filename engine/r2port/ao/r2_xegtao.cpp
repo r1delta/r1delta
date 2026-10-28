@@ -45,14 +45,15 @@ struct GTAOConstants {
 };
 static_assert(sizeof(GTAOConstants) == 96, "cbuffer layout");
 
-struct SourceConstants { float offset[2]; float invSize[2]; };   // b1 (R2SourceCB)
+struct SourceConstants { float offset[2]; float invSize[2]; float fade[2]; float pad[2]; };   // b1 (R2SourceCB)
 
 // XeGTAO defaults (XeGTAO.h XE_GTAO_DEFAULT_*)
-constexpr float kRadiusMultiplier = 1.457f, kFalloffRange = 0.615f, kSampleDistPower = 2.0f, kThinOccluder = 0.0f, kFinalPower = 2.2f, kMipOffset = 3.30f;
-// Strength matching: FinalValuePower scale per quality tier so that the mean AO (z < 2000 units) matches HBAO+ at R1's defaults (radius 1 m,
-// power 4, blur 8). Averaged over two synthetic scenes at 1080p with 2 denoise passes; per scene the needed power differs by about +-15 %
-// (outdoor wants less, the corridor more), see bench/RESULTS2.md.
-constexpr float kTierPowerScale[3] = { 1.30f, 1.58f, 1.03f };
+constexpr float kRadiusMultiplier = 1.457f, kFalloffRange = 0.615f, kSampleDistPower = 2.0f, kThinOccluder = 0.0f, kMipOffset = 3.30f;
+// Strength matching (bench/RESULTS3.md): per quality tier the final power and the occlusion bias that bring the mean AO in 0..800 view units
+// closest to HBAO+ at R1's defaults (radius 1 m, power 4, blur 8) on BOTH real R1 frames (open outdoor + interior): the two frames want
+// opposite corrections (HBAO+ is relatively stronger indoors), so the best common setting leaves about +-0.03..0.04 mean AO error of opposite sign.
+constexpr float kTierPower[3] = { 5.0f, 5.0f, 4.0f };
+constexpr float kTierBias[3]  = { 0.03f, 0.03f, 0.05f };
 constexpr int   kSlices[3] = { 1, 2, 3 }, kSteps[3] = { 2, 2, 3 };
 constexpr int   kMinViewport = 64;
 
@@ -211,11 +212,15 @@ bool Render(ID3D11DeviceContext* ctx, ID3D11ShaderResourceView* depthSrv, const 
     if (!ensureTargets(w, h, half, fp32, passes >= 2)) return false;
     const int aw = g.depthWork.w, ah = g.depthWork.h;
 
-    const float power = prm.finalValuePower > 0 ? prm.finalValuePower : kFinalPower * kTierPowerScale[quality] * std::max(prm.intensity, 0.01f);
+    const float power = prm.finalValuePower > 0 ? prm.finalValuePower : kTierPower[quality] * std::max(prm.intensity, 0.01f);
     const float radiusUnits = std::max(prm.radiusMeters, 0.001f) * metersToView;
     const int noise = ((prm.frameIndex % 64) + 64) % 64;
     GTAOConstants cf, ch; fillConsts(cf, w, h, P, radiusUnits, power, noise); fillConsts(ch, aw, ah, P, radiusUnits, power, noise);
-    SourceConstants sv = { { (float)ox, (float)oy }, { 1.0f / (float)sw, 1.0f / (float)sh } }, shf = { { 0, 0 }, { 1.0f / (float)aw, 1.0f / (float)ah } };
+    const bool fadeOn = prm.fadeEndUnits > prm.fadeStartUnits;
+    const float fade[2] = { fadeOn ? prm.fadeStartUnits : 1e30f, fadeOn ? 1.0f / (prm.fadeEndUnits - prm.fadeStartUnits) : 0.0f };
+    const float biasScale = 1.0f / (1.0f - std::clamp(prm.occlusionBias < 0.0f ? kTierBias[quality] : prm.occlusionBias, 0.0f, 0.5f));
+    SourceConstants sv = { { (float)ox, (float)oy }, { 1.0f / (float)sw, 1.0f / (float)sh }, { fade[0], fade[1] }, { biasScale, 0 } },
+                    shf = { { 0, 0 }, { 1.0f / (float)aw, 1.0f / (float)ah }, { fade[0], fade[1] }, { biasScale, 0 } };
     ctx->UpdateSubresource(g.cbFull.Get(), 0, nullptr, &cf, 0, 0); ctx->UpdateSubresource(g.cbSrcVp.Get(), 0, nullptr, &sv, 0, 0);
     if (half) { ctx->UpdateSubresource(g.cbHalf.Get(), 0, nullptr, &ch, 0, 0); ctx->UpdateSubresource(g.cbSrcHalf.Get(), 0, nullptr, &shf, 0, 0); }
 

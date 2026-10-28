@@ -68,11 +68,17 @@ struct ConVars {
     ConVarR1* ssoStrength{};
     ConVarR1* ssoDebug{};
     ConVarR1* tech{};
+    ConVarR1* radius{};
+    ConVarR1* intensity{};
+    ConVarR1* exponent{};
 };
 ConVars g_cvar;
 
 std::atomic<int> g_timing{0};
 std::atomic<int> g_tech{0};          // r2port_ao_tech
+std::atomic<float> g_radius{0.0f};   // r2port_ao_radius / _intensity / _exponent: 0 = leave R1's value
+std::atomic<float> g_intensity{0.0f};
+std::atomic<float> g_exponent{0.0f};
 bool g_xeFailed = false;
 bool g_xeReady = false;
 
@@ -132,7 +138,8 @@ bool AnyEnabled()
 {
     return g_timing.load(std::memory_order_relaxed) != 0 || g_blur.load(std::memory_order_relaxed) != 0
         || g_detail.load(std::memory_order_relaxed) > 0.0f || g_luma.load(std::memory_order_relaxed) > 0.0f
-        || g_ssoOn.load(std::memory_order_relaxed) || g_dumpRequest.load(std::memory_order_relaxed) || g_tech.load(std::memory_order_relaxed) != 0;
+        || g_ssoOn.load(std::memory_order_relaxed) || g_dumpRequest.load(std::memory_order_relaxed) || g_tech.load(std::memory_order_relaxed) != 0
+        || g_radius.load(std::memory_order_relaxed) > 0.0f || g_intensity.load(std::memory_order_relaxed) > 0.0f || g_exponent.load(std::memory_order_relaxed) > 0.0f;
 }
 
 float ReadFloat(ConVarR1* variable, float fallback)
@@ -158,6 +165,9 @@ void ReloadConfig()
     g_ssoStrength.store(std::clamp(ReadFloat(g_cvar.ssoStrength, 0.5f), 0.0f, 1.0f));
     g_ssoDebug.store(ReadFloat(g_cvar.ssoDebug, 0.0f) != 0.0f);
     g_tech.store(std::clamp(static_cast<int>(ReadFloat(g_cvar.tech, 0.0f) + 0.5f), 0, 3));
+    g_radius.store(std::max(0.0f, ReadFloat(g_cvar.radius, 0.0f)));
+    g_intensity.store(std::max(0.0f, ReadFloat(g_cvar.intensity, 0.0f)));
+    g_exponent.store(std::max(0.0f, ReadFloat(g_cvar.exponent, 0.0f)));
 }
 
 void OnCvarChanged(void*, const char*, float)
@@ -689,6 +699,17 @@ bool RunXeGtao(ID3D11DeviceContext* ctx, const void* input, const unsigned char*
     p.denoisePasses = tech == 3 ? 1 : 2;
     p.radiusMeters = std::max(0.05f, reinterpret_cast<const float*>(params)[0]);
     p.intensity = std::clamp(reinterpret_cast<const float*>(params)[3] * reinterpret_cast<const float*>(params)[4] / 4.0f, 0.1f, 6.0f);
+    {
+        static unsigned s_calls = 0;
+        if (g_timing.load(std::memory_order_relaxed) != 0 && (s_calls++ % 240) == 0)
+            Msg("R1Delta: r2port_ao_tech: tech %d radius %.3f m intensity %.3f (params[0]=%.3f [1]=%.3f [3]=%.3f [4]=%.3f) viewport %.0fx%.0f meters %.1f\n", tech, p.radiusMeters,
+                p.intensity, reinterpret_cast<const float*>(params)[0], reinterpret_cast<const float*>(params)[1], reinterpret_cast<const float*>(params)[3],
+                reinterpret_cast<const float*>(params)[4], viewport.Width, viewport.Height, meters);
+    }
+
+    // The scene depth is usually still bound as the depth-stencil view: the runtime then nulls any SRV of it, so the compute
+    // shaders would read zero depth. Unbind the output merger first (R1's wrapper restores its saved OM state afterwards).
+    ctx->OMSetRenderTargets(0, nullptr, nullptr);
 
     // Save the compute stage (R1 uses compute shaders for the tonemap histogram and sets its own state before it).
     ComPtr<ID3D11ComputeShader> cs;
@@ -745,6 +766,12 @@ int __fastcall RenderAoHook(void* self, ID3D11DeviceContext* ctx, const void* in
     const float detail = g_detail.load(std::memory_order_relaxed);
     if (detail > 0.0f)
         reinterpret_cast<float*>(local)[kParamDetail] = detail;
+    if (g_radius.load(std::memory_order_relaxed) > 0.0f)
+        reinterpret_cast<float*>(local)[0] = g_radius.load(std::memory_order_relaxed);
+    if (g_intensity.load(std::memory_order_relaxed) > 0.0f)
+        reinterpret_cast<float*>(local)[3] = g_intensity.load(std::memory_order_relaxed);
+    if (g_exponent.load(std::memory_order_relaxed) > 0.0f)
+        reinterpret_cast<float*>(local)[4] = g_exponent.load(std::memory_order_relaxed);
     const float strength = g_luma.load(std::memory_order_relaxed);
     const bool sso = g_ssoOn.load(std::memory_order_relaxed) && g_ssoStrength.load(std::memory_order_relaxed) > 0.0f;
 
@@ -1095,7 +1122,10 @@ void RegisterConVars()
     g_cvar.ssoDebug = Register("r2port_sso_debug", "0",
         "1 = test aid for r2port_sso: full occlusion everywhere (env reflection of every patched shader scaled by 1 - r2port_sso_strength).");
     g_cvar.tech = Register("r2port_ao_tech", "0",
-        "AO backend: 0 = NVIDIA HBAO+ (stock R1), 1 = XeGTAO high quality full resolution (about HBAO+ cost), 2 = XeGTAO high quality half resolution (about 0.4x the HBAO+ GPU time), 3 = XeGTAO medium quality half resolution (about 0.3x, weak GPUs). Needs r_hbaoEnabled 1; uses r_hbaoRadius, r_hbaoIntensity and r_hbaoExponent. Falls back to HBAO+ on any failure.");
+        "AO backend: 0 = NVIDIA HBAO+ (stock R1), 1 = XeGTAO high quality full resolution (about HBAO+ cost), 2 = XeGTAO high quality half resolution (about 0.4x the HBAO+ GPU time), 3 = XeGTAO medium quality half resolution (about 0.3x, weak GPUs). Needs r_hbaoEnabled 1; uses the radius, intensity and exponent of HBAO+ (r2port_ao_radius / _intensity / _exponent override them). Falls back to HBAO+ on any failure.");
+    g_cvar.radius = Register("r2port_ao_radius", "0", "Override the AO radius in metres (0 = r_hbaoRadius, which in this build is not changeable from the console).");
+    g_cvar.intensity = Register("r2port_ao_intensity", "0", "Override the AO intensity (0 = r_hbaoIntensity; R1 default 1).");
+    g_cvar.exponent = Register("r2port_ao_exponent", "0", "Override the AO power exponent (0 = r_hbaoExponent; R1 default 4).");
     ReloadConfig();
     Refresh();
 }

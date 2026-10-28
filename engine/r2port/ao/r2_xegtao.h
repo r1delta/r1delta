@@ -34,10 +34,13 @@ struct Params {
     bool  halfRes       = false;  // true: depth downsample -> AO at half resolution in each axis -> depth-aware bilateral upsample
     int   denoisePasses = 2;      // 1..3 (XeGTAO "Sharp"/"Medium"/"Soft"); 2 is the recommended default for a renderer without TAA
     float radiusMeters  = 1.0f;   // world radius in metres, multiplied by metersToViewUnits (R1: 39.0..39.37 units per metre)
-    float intensity     = 1.0f;   // 1.0 = mean AO matched to HBAO+ at R1's default settings (power 4, radius 1 m); AO' = AO^intensity, larger = darker
+    float intensity     = 1.0f;   // 1.0 = mean AO fitted to HBAO+ at R1's default settings (power 4, radius 1 m) on real frames; multiplies the final power, larger = darker
     int   sceneWidth    = 0;      // size in texels of the depth texture behind depthSrv (0 = query it from the SRV)
     int   sceneHeight   = 0;
     int   frameIndex    = 0;      // noise index: frame % 64 when the result is temporally accumulated (TAA), otherwise leave 0
+    float fadeStartUnits = 1200.0f;  // view depth (R1 units) where the occlusion starts to fade linearly to 1 (unoccluded) ...
+    float fadeEndUnits   = 2000.0f;  // ... and is fully faded; like HBAO+ DepthThreshold.MaxViewDepth. fadeEnd <= fadeStart disables the fade
+    float occlusionBias = -1.0f;     // < 0 = per-tier default; 0..0.5: HBAO+-like bias, the horizon integral is scaled by 1/(1-bias) before the power (ignores small occlusion)
     bool  fp32DepthMips = false;  // true: R32_FLOAT depth MIP chain (5 % faster measured on an RTX 5080, double the memory); false: R16_FLOAT
     float finalValuePower = 0.0f; // > 0 overrides the power that intensity would produce (XeGTAO default is 2.2); for tests
 };
