@@ -1651,7 +1651,7 @@ bool mergeOpacityVtf(std::vector<std::uint8_t>& albedo, const std::vector<std::u
 constexpr float kFoliageAlphaRef = 0.7f;
 
 float foliageCavityExponent() {
-    float k = 0.4f;
+    float k = 0.05f;   // was 0.4: with the CSM rebase the shadows are real, so the bake no longer has to stand in for them (round 9 grass 2x too dark against R2, glitch pose lit grass 0.36 -> 0.46 of wall, homestead hero grass 20.3 -> 27.1)
     if (const char* e = std::getenv("R2TEX_FOLIAGE_CAV")) k = std::clamp(static_cast<float>(std::atof(e)), 0.0f, 4.0f);
     return k;
 }
