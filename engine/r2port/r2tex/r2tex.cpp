@@ -2397,6 +2397,16 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
         shaderSet.find("adf") != std::string::npos;
     double softCloudAlpha = name == "world/atmosphere/beacon_clouds" ? 0.0 : 0.05;
     if (const char* e = std::getenv("R2TEX_SOFT_CLOUD_ALPHA")) softCloudAlpha = std::clamp(std::atof(e), 0.0, 1.0);
+    // The kodai 3D sky model (models/vistas/kodai_sky.mdl) carries a ring of "lower clouds" (models/vistas/beacon/beacon_se_k, panorama
+    // kodai_se_lower_clouds_col, vertex alpha 0..255, the ring is open at the map centre) that R1 draws as a hard-edged flat cloud sheet:
+    // seen from the map border and outside (noclip positions around x 3000..9300), it cuts through the scene and hides the rocks below,
+    // at (8617 644 1522) it fills the lower half of the frame. R2 draws nothing of it at those viewpoints (navy gap and soft cloud banks
+    // from the other sky layers; R2 frames at 7 poses, maps/kodai/cloudwall/shots), R1 with alpha 0 matches those frames, and the 7 in-map
+    // poses change by at most MAD 4/255 (animation). beacon_se_k has the same shader set, blend and depth state as the sky layers
+    // beacon_se_a/b that do match, so the R2 reason is not in the material. Same treatment as world/atmosphere/beacon_clouds.
+    // R2TEX_KODAI_LOWER_CLOUDS=1 keeps the sheet.
+    const bool kodaiLowerCloudRing = name == "models/vistas/beacon/beacon_se_k" && !(std::getenv("R2TEX_KODAI_LOWER_CLOUDS") &&
+                                                                                    std::atoi(std::getenv("R2TEX_KODAI_LOWER_CLOUDS")) != 0);
     // Flat-textured sheets: bake the texture mean into constants (see flatSheetStats).
     FlatSheet flatSheet;
     if (atmosphereSheet && (!godray || godrayMode == "basic_flat")) {
@@ -2431,16 +2441,6 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
                 convertTextureWithDb(db, *albedoRecord, TextureOptions{}, albedoVtf, textureWhy) &&
                 vtfSmallestMipMean(albedoVtf, albedoMean) && *std::max_element(albedoMean, albedoMean + 3) < 6.0 &&
                 convertTextureWithDb(db, *maskRecord, TextureOptions{}, maskVtf, textureWhy) &&
-    // The kodai 3D sky model (models/vistas/kodai_sky.mdl) carries a ring of "lower clouds" (models/vistas/beacon/beacon_se_k, panorama
-    // kodai_se_lower_clouds_col, vertex alpha 0..255, the ring is open at the map centre) that R1 draws as a hard-edged flat cloud sheet:
-    // seen from the map border and outside (noclip positions around x 3000..9300), it cuts through the scene and hides the rocks below,
-    // at (8617 644 1522) it fills the lower half of the frame. R2 draws nothing of it at those viewpoints (navy gap and soft cloud banks
-    // from the other sky layers; R2 frames at 7 poses, maps/kodai/cloudwall/shots), R1 with alpha 0 matches those frames, and the 7 in-map
-    // poses change by at most MAD 4/255 (animation). beacon_se_k has the same shader set, blend and depth state as the sky layers
-    // beacon_se_a/b that do match, so the R2 reason is not in the material. Same treatment as world/atmosphere/beacon_clouds.
-    // R2TEX_KODAI_LOWER_CLOUDS=1 keeps the sheet.
-    const bool kodaiLowerCloudRing = name == "models/vistas/beacon/beacon_se_k" && !(std::getenv("R2TEX_KODAI_LOWER_CLOUDS") &&
-                                                                                    std::atoi(std::getenv("R2TEX_KODAI_LOWER_CLOUDS")) != 0);
                 vtfSmallestMipMean(maskVtf, maskMean) && *std::min_element(maskMean, maskMean + 3) >= 240.0) {
                 std::ostringstream pure;
                 pure << "\"UnlitGeneric\"\n{\n";
@@ -2509,6 +2509,24 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
             slotGuids[0] = slotGuids[3];
         }
     }
+    // Dark opaque glass panes (world/timeshift/windows/ts_window01_opaque on mp_black_water_canal, complex3, kodai, grave and
+    // ts_window01_wet_opaque on complex3: opaque draw state, glass surface, diffuse tint 0.122 0.188 0.204 over a flat sRGB 100 albedo).
+    // R2 draws the mp_black_water_canal "SERVICE ENTRANCE" window as a dark teal grey (display luminance 43.5, mean RGB 36 45 49 at the
+    // user's pose); R1 drew it near black (luminance 18 there, 29 and 12 at two nearby poses). Measured in game (tier0 581B45E9, loose VMTs,
+    // 1280x720, pane box mean luminance): the sort has its patch material (cubemap 1), so the env term is bound; with it removed the
+    // pane is 27 / 10 (u0 / p7), $envmaptint 0.5 gives 29 / 12 and the pre round 9 value 1.0 only 33 / 17: halving the env term is
+    // not the cause. $color x 3 gives 61 / 58 and x 2.2 about 46 / 37: the deficit is in the diffuse term (R1's lightmap light on
+    // this shaded pane is a quarter to a third of R2's). The tint is therefore lifted by darkGlassGain and desaturated 45 % toward its
+    // luminance (R2's pane is greyer than its tint, R/G 0.80 against 0.65, because the neutral sky reflection adds to the diffuse).
+    // Result at the user's pose 39.3 (RGB 34 41 44), 44.5 and 35.3 at the other two (R2 43.5, 36 45 49; 35.5 at the third).
+    // The same material on the sunlit mp_complex3 facade was already at R2's level (34 against 33.6) and goes to 50: the one trade-off
+    // of a per-material constant. Only opaque glass whose tint is dark (max < 0.5) is touched (2 materials over the 20 maps);
+    // R2TEX_GLASS_GAIN overrides the gain (1 = the previous output byte for byte).
+    double darkGlassGain = 2.2;
+    if (const char* e = std::getenv("R2TEX_GLASS_GAIN")) darkGlassGain = std::clamp(std::atof(e), 0.0, 8.0);
+    const bool darkGlassPane = !tools && lightmapped && !unlit && !vertexLit && !options.forModel && surface == "glass" &&
+        !translucent && !additive && !cut &&
+        std::max({materialTint[0], materialTint[1], materialTint[2]}) < 0.5 && darkGlassGain != 1.0;
     // Opacity-map ("Opam") sets: the opacity map in slot 13 is merged into the albedo alpha (see mergeOpacityVtf).
     const bool opacityMap = !tools && shaderSet.find("opam") != std::string::npos &&
         (translucent || additive || cut) && usedSlots.find(0) != usedSlots.end() &&
@@ -2587,24 +2605,6 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
                 param(4, "$selfIllumMask");
                 if (std::fabs(emitTint[0] - 1.0) > 0.004 || std::fabs(emitTint[1] - 1.0) > 0.004 || std::fabs(emitTint[2] - 1.0) > 0.004) {
                     char tintText[64];
-    // Dark opaque glass panes (world/timeshift/windows/ts_window01_opaque on mp_black_water_canal, complex3, kodai, grave and
-    // ts_window01_wet_opaque on complex3: opaque draw state, glass surface, diffuse tint 0.122 0.188 0.204 over a flat sRGB 100 albedo).
-    // R2 draws the mp_black_water_canal "SERVICE ENTRANCE" window as a dark teal grey (display luminance 43.5, mean RGB 36 45 49 at the
-    // user's pose); R1 drew it near black (luminance 18 there, 29 and 12 at two nearby poses). Measured in game (tier0 581B45E9, loose VMTs,
-    // 1280x720, pane box mean luminance): the sort has its patch material (cubemap 1), so the env term is bound; with it removed the
-    // pane is 27 / 10 (u0 / p7), $envmaptint 0.5 gives 29 / 12 and the pre round 9 value 1.0 only 33 / 17: halving the env term is
-    // not the cause. $color x 3 gives 61 / 58 and x 2.2 about 46 / 37: the deficit is in the diffuse term (R1's lightmap light on
-    // this shaded pane is a quarter to a third of R2's). The tint is therefore lifted by darkGlassGain and desaturated 45 % toward its
-    // luminance (R2's pane is greyer than its tint, R/G 0.80 against 0.65, because the neutral sky reflection adds to the diffuse).
-    // Result at the user's pose 39.3 (RGB 34 41 44), 44.5 and 35.3 at the other two (R2 43.5, 36 45 49; 35.5 at the third).
-    // The same material on the sunlit mp_complex3 facade was already at R2's level (34 against 33.6) and goes to 50: the one trade-off
-    // of a per-material constant. Only opaque glass whose tint is dark (max < 0.5) is touched (2 materials over the 20 maps);
-    // R2TEX_GLASS_GAIN overrides the gain (1 = the previous output byte for byte).
-    double darkGlassGain = 2.2;
-    if (const char* e = std::getenv("R2TEX_GLASS_GAIN")) darkGlassGain = std::clamp(std::atof(e), 0.0, 8.0);
-    const bool darkGlassPane = !tools && lightmapped && !unlit && !vertexLit && !options.forModel && surface == "glass" &&
-        !translucent && !additive && !cut &&
-        std::max({materialTint[0], materialTint[1], materialTint[2]}) < 0.5 && darkGlassGain != 1.0;
                     std::snprintf(tintText, sizeof(tintText), "[%.3f %.3f %.3f]", emitTint[0], emitTint[1], emitTint[2]);
                     addVmtParam(out, "$selfIllumTint", tintText);
                 }
@@ -2666,6 +2666,14 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
             }
             if (metalFromSpec)
                 for (double& c : color) c *= kMetalAlbedoScale;
+            if (darkGlassPane) {
+                // Hue: R2's pane is greyer than its tint (R/G 0.80, B/G 1.09 against the tint's 0.65 / 1.08: the reflection of the neutral sky
+                // adds to the diffuse). Measured with the plain gain on the user's pose the converted pane came out R/G 0.65. Pull the tint
+                // 45 % toward its luminance (luminance kept), then apply the gain.
+                constexpr double kDarkGlassDesaturate = 0.45;
+                const double tintLuma = 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2];
+                for (double& c : color) c = (c + kDarkGlassDesaturate * (tintLuma - c)) * darkGlassGain;
+            }
             // mp_complex3 cypress leaves (tree_cypress_tall_leaves_01) in the building shadows are lit by ambient only, R2 also
             // lights them through its leaf translucency, which R1 lacks; the blue haze then dominates the leaf pixels and the
             // trees read blue (more so with distance). Mean leaf-pixel RGB, R2 / R1 gain 1.0 / R1 gain 1.5, same camera:
@@ -2674,6 +2682,7 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
             if (foliageCavity && name.find("tree_cypress_tall_leaves") != std::string::npos)
                 for (double& c : color) c *= 1.5;
             if (softCloudSheet) alpha *= softCloudAlpha;
+            if (kodaiLowerCloudRing) alpha = 0.0;
             if (puddleLayers) { color[0] *= 0.5; color[1] *= 0.55; color[2] *= 0.65; }
             if (flatSheet.ok) {
                 for (int i = 0; i < 3; ++i) color[i] *= flatSheet.rgb[i];
@@ -2744,14 +2753,6 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
                     for (int i = 0; i < 6; ++i) sane = sane && std::isfinite(c[i]);
                     const double speed = std::hypot(c[4], c[5]);
                     const bool matrixOk = sane && c[0] > 0.01f && c[0] < 64.0f && c[3] > 0.01f && c[3] < 64.0f &&
-            if (darkGlassPane) {
-                // Hue: R2's pane is greyer than its tint (R/G 0.80, B/G 1.09 against the tint's 0.65 / 1.08: the reflection of the neutral sky
-                // adds to the diffuse). Measured with the plain gain on the user's pose the converted pane came out R/G 0.65. Pull the tint
-                // 45 % toward its luminance (luminance kept), then apply the gain.
-                constexpr double kDarkGlassDesaturate = 0.45;
-                const double tintLuma = 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2];
-                for (double& c : color) c = (c + kDarkGlassDesaturate * (tintLuma - c)) * darkGlassGain;
-            }
                         std::fabs(c[1]) < 1e-3f && std::fabs(c[2]) < 1e-3f;
                     if (animatedSet && matrixOk && speed > 1e-4 && speed < 16.0) {
                         char text[160];
@@ -2760,7 +2761,6 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
                         addVmtParam(out, "$r2uvshift", "[0 0]");
                         addVmtParam(out, "$basetexturetransform", "center 0 0 scale 1 1 rotate 0 translate 0 0");
                         out << "\t\"Proxies\"\n\t{\n";
-            if (kodaiLowerCloudRing) alpha = 0.0;
                         for (int axis = 0; axis < 2; ++axis) {
                             if (std::fabs(c[4 + axis]) < 1e-5f) continue;
                             std::snprintf(text, sizeof(text), "%.6g", c[4 + axis]);
