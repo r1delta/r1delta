@@ -7,7 +7,6 @@
 #include "persistentdata.h"
 #include "legacy_ds_sound_tables.h"
 #include "audio_cache.h"
-#include "apex_sound_capacity.h"
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -78,9 +77,6 @@ bool ReadLocalTable(LocalTable& out) {
 	case R1DeltaEngineMode::Client2015:
 		if (!ReadLayout(kEngineLayout, G_engine, out))
 			return false;
-		// With the relocated alias table (apex_sound_capacity) the records no longer live at the link-time address.
-		if (const void* relocated = R1ApexSoundAliasRecord(0))
-			out.records = static_cast<const unsigned char*>(relocated);
 		// The generated R2 aliases trail the table and are excluded (audio_cache.cpp): they exist only when the R2 install does.
 		if (const int hidden = static_cast<int>(R1AudioHiddenTrailingAliases()); hidden > 0 && hidden < out.count)
 			out.count -= hidden;
