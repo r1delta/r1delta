@@ -2104,8 +2104,8 @@ std::vector<std::uint8_t> resizeUberPlane(const UberPlane& src, std::uint32_t dw
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// Environment reflection tokens (env R2TEX_ENV = comma list). DEFAULT (unset or empty): `lightscale` and `fresnel=0.35` are ON for lightmapped (world)
-// materials with an env reflection; `off` switches both off (the pre-round-17 output); gloss, blur and the rest are opt-in tokens.
+// Environment reflection tokens (env R2TEX_ENV = comma list). DEFAULT (unset or empty): `gloss`, `blur`, `lightscale` and `fresnel=0.35` are ON for lightmapped
+// (world) materials with an env reflection; `off` switches all of them off (the round 16 output), `no-gloss` / `no-blur` switch one off.
 //   gloss              slot 3 (specular F0, RGB) of a material that also has a `_gls` gloss map (slot 2) is re-encoded as DXT5 with
 //                      alpha = gloss^pow (synthetic name r2tex/specgloss/<spc guid>_<gls guid>). R1's LightmappedGeneric reads the
 //                      alpha of $reflectionTint (t2.a) as its gloss: it is the weight of the Fresnel term of the env reflection and,
@@ -2119,12 +2119,12 @@ std::vector<std::uint8_t> resizeUberPlane(const UberPlane& src, std::uint32_t dw
 //   fresnel=<v>        $fresnelamount <v> (default 0.35, ON by default; 0 = emit nothing, stock default) on the same materials. Stock R1 weights the
 //                      Fresnel term of the env reflection by the alpha of $reflectionTint (t2.a), which is 1 on every DXT1 converted `_spc`: a mirror
 //                      at grazing angles on every building. 0.35 is the mean gloss^2 of the SUBSTATION wall (R2's own grazing maximum).
-//   off                lightscale and fresnel off (A/B against the previous output).
-//   blur[=<lod0>]      with `gloss`: $shininessBlack/$shininessWhite chosen so the probe lod is <lod0> (default 3) at alpha 0 and
-//                      reaches mip 0 at alpha 1 (R1 probes are 32x32, R2 probes 256x256: R2 lod = 6 * (1 - gloss), ours is 3 less).
+//   off                gloss, blur, lightscale and fresnel off (A/B against the round 16 output); no-gloss / no-blur turn off just that term.
+//   blur[=<lod0>]      with `gloss` (ON by default): $shininessBlack/$shininessWhite chosen so the probe lod is <lod0> (default 4) at alpha 0 and
+//                      reaches mip 0 at alpha 1 (R1 probes are 64x64, R2 probes 256x256: R2 lod = 6 * (1 - gloss), ours is 2 less; 4 = 6 - 2).
 struct EnvTokens {
-    bool gloss = false, lightScale = true, blur = false;
-    double glossPow = 2.0, f0Scale = 1.0, lightScaleValue = 1.0, blurLod0 = 3.0, fresnel = 0.35;
+    bool gloss = true, lightScale = true, blur = true;
+    double glossPow = 2.0, f0Scale = 1.0, lightScaleValue = 1.0, blurLod0 = 4.0, fresnel = 0.35;
 };
 
 EnvTokens parseEnvTokens(const char* text) {
@@ -2144,7 +2144,9 @@ EnvTokens parseEnvTokens(const char* text) {
         else if (token == "f0-scale" && !value.empty()) t.f0Scale = std::clamp(std::atof(value.c_str()), 0.0, 16.0);
         else if (token == "lightscale") { t.lightScale = true; if (!value.empty()) t.lightScaleValue = std::clamp(std::atof(value.c_str()), 0.0, 1.0); }
         else if (token == "fresnel" && !value.empty()) t.fresnel = std::clamp(std::atof(value.c_str()), 0.0, 1.0);
-        else if (token == "off") { t.lightScale = false; t.fresnel = 0.0; }
+        else if (token == "off") { t.lightScale = false; t.fresnel = 0.0; t.gloss = false; t.blur = false; }
+        else if (token == "no-gloss") t.gloss = false;
+        else if (token == "no-blur") t.blur = false;
         else if (token == "blur") { t.blur = true; if (!value.empty()) t.blurLod0 = std::clamp(std::atof(value.c_str()), 0.0, 5.0); }
     }
     return t;
@@ -3485,9 +3487,11 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
             return s.size() >= n && s.compare(s.size() - n, n, suffix) == 0;
         };
         const bool envTokenSafe = !puddleLayers && !hsWaterBody;
-        glossBake = envTk.gloss && envTokenSafe && !unlit && !foliageNoEnv && slotGuids.size() > 3 && slotGuids[3] && slotGuids[2] &&
+        // gloss / blur are for world (lightmapped) materials only: models (VertexLitGeneric, r2m/) keep the plain spc texture.
+        const bool worldEnv = lightmapped && !options.forModel && !vertexLit;
+        glossBake = envTk.gloss && envTokenSafe && worldEnv && !unlit && !foliageNoEnv && slotGuids.size() > 3 && slotGuids[3] && slotGuids[2] &&
             usedSlots.find(3) != usedSlots.end() && endsWith(lowerAscii(texName(2)), "_gls");
-        gloss2Bake = envTk.gloss && envTokenSafe && !unlit && !foliageNoEnv && lightmapped && slotGuids.size() > 26 && slotGuids[26] &&
+        gloss2Bake = envTk.gloss && envTokenSafe && worldEnv && !unlit && !foliageNoEnv && slotGuids.size() > 26 && slotGuids[26] &&
             slotGuids[25] && usedSlots.find(26) != usedSlots.end() && endsWith(lowerAscii(texName(25)), "_gls");
         if (glossBake) usedSlots[3] = specGlossName(slotGuids[3], slotGuids[2]);
         if (gloss2Bake) usedSlots[26] = specGlossName(slotGuids[26], slotGuids[25]);
