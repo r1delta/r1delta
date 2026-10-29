@@ -40,6 +40,7 @@ struct R2pNoProfile {
 #include <set>
 #include <sstream>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 #define BCDEC_STATIC
@@ -148,8 +149,8 @@ bool tintedVertexWorldMaterial(const std::string& name) {
     return false;
 }
 constexpr std::size_t kMaxPakDecompressed = 1024ull * 1024ull * 1024ull;
-constexpr std::size_t kMaximumFamilyCacheLimit = 4096ull * 1024ull * 1024ull;
-std::atomic<std::size_t> gFamilyCacheLimit{2048ull * 1024ull * 1024ull};
+constexpr std::size_t kMaximumFamilyCacheLimit = 8192ull * 1024ull * 1024ull;
+std::atomic<std::size_t> gFamilyCacheLimit{4096ull * 1024ull * 1024ull};
 constexpr char kIndexMagic[8] = {'R','2','T','E','X','I','D','X'};
 constexpr std::uint32_t kIndexVersion = 10;
 
@@ -264,6 +265,7 @@ struct PakInfo {
     std::string relativeName;
     std::string familyName;
     std::uint64_t fileSize = 0;
+    std::uint64_t decodedSize = 0;   // RPak header dcmpSize (the file size for an uncompressed pak): what a decoded pak occupies in memory
     std::int64_t writeStamp = 0;
     std::uint32_t family = 0;
     std::uint16_t patchCount = 0;
@@ -336,6 +338,7 @@ bool readPakInfo(const fs::path& path, PakInfo& info, std::string& error) {
         error = "not RPak v7: " + path.u8string(); return false;
     }
     info.patchCount = u16(h.data() + 0x3e);
+    info.decodedSize = (u16(h.data() + 6) & 0x100u) ? u64(h.data() + 0x28) : info.fileSize;
     return true;
 }
 
@@ -661,6 +664,9 @@ std::atomic<std::uint64_t> gFamilyLoadMicroseconds{0};
 // and nothing ever blocks waiting for a slot, so concurrent families (provider workers, index scan threads) share the
 // cap without deadlock or oversubscription.
 std::atomic<unsigned> gPakLoadsActive{0};
+// Set on the index scan threads: their pak decode helpers run below normal priority so a first-launch index build (a few seconds of
+// every core) does not compete with the engine start-up and the main menu.
+thread_local bool tLowPriorityLoad = false;
 unsigned pakLoadLimit() {
     static const unsigned limit = [] {
         const unsigned hardware = std::thread::hardware_concurrency();
@@ -698,6 +704,7 @@ std::vector<std::shared_ptr<PakData>> loadPaksConcurrent(const std::vector<PakIn
         return true;
     };
     std::vector<std::thread> helpers;
+    const bool lowPriority = tLowPriorityLoad;
     gPakLoadsActive.fetch_add(1, std::memory_order_relaxed);   // the calling thread
     const auto spawnHelpers = [&]() {
         const unsigned limit = pakLoadLimit();
@@ -706,7 +713,8 @@ std::vector<std::shared_ptr<PakData>> loadPaksConcurrent(const std::vector<PakIn
             if (active >= limit) return;
             if (!gPakLoadsActive.compare_exchange_weak(active, active + 1, std::memory_order_relaxed)) continue;
             try {
-                helpers.emplace_back([&]() {
+                helpers.emplace_back([&, lowPriority]() {
+                    if (lowPriority) SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
                     while (loadNext()) {}
                     gPakLoadsActive.fetch_sub(1, std::memory_order_relaxed);
                 });
@@ -741,6 +749,8 @@ struct Database {
     std::unordered_map<std::uint32_t, CacheEntry> families;
     std::list<std::uint32_t> lru;
     std::size_t familyBytes = 0;
+    std::unordered_map<std::uint32_t, int> familyPins;       // family -> queued-work pin count (see pinFamily)
+    std::unordered_set<std::uint32_t> loadingFamilies;       // families being decoded right now
 
     std::unordered_map<std::uint32_t, std::shared_ptr<std::mutex>> familyLoadLocks;
     // Lower-case, slash-normalized asset name -> guid, built on first use, for texture records whose guid is
@@ -782,6 +792,14 @@ struct Database {
                 return found->second.family;
             }
         }
+        {
+            std::lock_guard<std::mutex> lock(familyMutex);
+            loadingFamilies.insert(id);
+        }
+        struct LoadingGuard {
+            Database& db; std::uint32_t id;
+            ~LoadingGuard() { std::lock_guard<std::mutex> lock(db.familyMutex); db.loadingFamilies.erase(id); }
+        } loadingGuard{*this, id};
         R2P_SCOPE_B(profileFamily, "d.fam.load", familyNames[id]);
         const auto familyLoadStart = std::chrono::steady_clock::now();
         auto family = std::make_shared<Family>();
@@ -809,17 +827,71 @@ struct Database {
         lru.push_front(id);
         families.emplace(id, CacheEntry{family, lru.begin()});
         familyBytes += family->bytes;
-        while (familyBytes > gFamilyCacheLimit.load(std::memory_order_relaxed) && lru.size() > 1) {
-            const std::uint32_t oldId = lru.back();
-            if (oldId == id) break;
+        evictLocked(id);
+        return family;
+    }
+
+    // Evicts least recently used families until the cache fits its limit. A family the caller pinned (queued work still needs
+    // it) and `keep` (the family that was just loaded) stay; when everything left is pinned the cache is over its limit rather
+    // than thrashing.
+    void evictLocked(std::uint32_t keep) {
+        const std::size_t limit = gFamilyCacheLimit.load(std::memory_order_relaxed);
+        for (auto it = lru.end(); familyBytes > limit && it != lru.begin();) {
+            --it;
+            const std::uint32_t oldId = *it;
+            if (oldId == keep) continue;
+            const auto pin = familyPins.find(oldId);
+            if (pin != familyPins.end() && pin->second > 0) continue;
             auto old = families.find(oldId);
             if (old != families.end()) {
                 familyBytes -= old->second.family->bytes;
                 families.erase(old);
             }
-            lru.pop_back();
+            it = lru.erase(it);
         }
-        return family;
+    }
+
+    void dropCachedFamilies() {
+        std::lock_guard<std::mutex> lock(familyMutex);
+        families.clear();
+        lru.clear();
+        familyBytes = 0;
+    }
+
+    // Pins keep a family resident while the provider has queued work for it (nested calls count).
+    void pinFamily(std::uint32_t id) {
+        std::lock_guard<std::mutex> lock(familyMutex);
+        ++familyPins[id];
+    }
+    void unpinFamily(std::uint32_t id) {
+        std::lock_guard<std::mutex> lock(familyMutex);
+        const auto pin = familyPins.find(id);
+        if (pin == familyPins.end() || pin->second <= 0) return;
+        if (--pin->second == 0) {
+            familyPins.erase(pin);
+            evictLocked(std::numeric_limits<std::uint32_t>::max());
+        }
+    }
+    bool isFamilyLoading(std::uint32_t id) {
+        std::lock_guard<std::mutex> lock(familyMutex);
+        return loadingFamilies.count(id) != 0;
+    }
+    std::size_t residentBytes(bool pinnedOnly) {
+        std::lock_guard<std::mutex> lock(familyMutex);
+        if (!pinnedOnly) return familyBytes;
+        std::size_t total = 0;
+        for (const auto& pair : families) {
+            const auto pin = familyPins.find(pair.first);
+            if (pin != familyPins.end() && pin->second > 0) total += pair.second.family->bytes;
+        }
+        return total;
+    }
+    // What decoding the family costs in memory (the sum of its paks' decoded sizes).
+    std::size_t decodedBytes(std::uint32_t id) const {
+        std::size_t total = 0;
+        if (id < familyMembers.size())
+            for (const std::uint32_t pakIndex : familyMembers[id]) total += static_cast<std::size_t>(paks[pakIndex].decodedSize);
+        return total;
     }
 };
 
@@ -950,6 +1022,9 @@ bool saveIndex(const fs::path& path, const Database& db, std::string& error) {
 
 bool buildIndex(Database& db, std::string& error) {
     const auto begin = std::chrono::steady_clock::now();
+    // The scan touches every family once and nothing is looked at twice, so it does not need the full family cache.
+    const std::size_t savedCacheLimit = gFamilyCacheLimit.load(std::memory_order_relaxed);
+    gFamilyCacheLimit.store(std::min<std::size_t>(savedCacheLimit, 1024ull * 1024ull * 1024ull), std::memory_order_relaxed);
     db.assets.clear();
     const std::uint32_t familyCount = static_cast<std::uint32_t>(db.familyMembers.size());
     using AssetMap = decltype(db.assets);
@@ -1023,6 +1098,8 @@ bool buildIndex(Database& db, std::string& error) {
         pool.reserve(scanThreads);
         for (unsigned t = 0; t < scanThreads; ++t)
             pool.emplace_back([&]() {
+                SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+                tLowPriorityLoad = true;
                 for (;;) {
                     const std::uint32_t id = nextFamily.fetch_add(1, std::memory_order_relaxed);
                     if (id >= familyCount) return;
@@ -1034,6 +1111,8 @@ bool buildIndex(Database& db, std::string& error) {
             for (auto& entry : local) db.assets.emplace(entry.first, std::move(entry.second));
     }
     std::cerr << "\n";
+    gFamilyCacheLimit.store(savedCacheLimit, std::memory_order_relaxed);
+    db.dropCachedFamilies();   // the scan decoded every family once; none of that is wanted resident for the first map
     if (db.assets.empty()) { error = "no txtr/matl assets indexed"; return false; }
     const auto secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count();
     std::cerr << "r2tex: indexed " << db.assets.size() << " txtr/matl/shds assets from " << db.paks.size()
@@ -2561,6 +2640,8 @@ bool convertNormalVtf(std::vector<std::uint8_t>& vtf, std::string& error) {
     }
     std::vector<std::vector<std::uint8_t>> mips(view.mipCount);
     std::vector<std::uint8_t> level;
+    struct BlockMemo { std::uint8_t texels[48]; std::uint8_t code[8]; bool valid = false; };
+    std::vector<BlockMemo> memo(4096);
     for (std::uint32_t m = 0; m < view.mipCount; ++m) {
         std::uint32_t w = 0, h = 0;
         if (!decodeVtfMip(vtf, view, m, level, w, h)) { error = "normal map: mip decode failed"; return false; }
@@ -2583,7 +2664,27 @@ bool convertNormalVtf(std::vector<std::uint8_t>& vtf, std::string& error) {
                         const std::uint32_t sx = std::min(w - 1, x * 4 + px), sy = std::min(h - 1, y * 4 + py);
                         std::memcpy(block[py * 4 + px], &rgb[(static_cast<std::size_t>(sy) * w + sx) * 3], 3);
                     }
-                encodeBc1Block(block, &mips[m][(static_cast<std::size_t>(y) * bx + x) * 8]);
+                // Smooth normal maps repeat blocks (flat areas, tiled detail): the encoder is a pure function of the 48 texel
+                // bytes, so a direct-mapped memo of finished blocks gives the same output without the fit.
+                {
+                    std::uint64_t key = 14695981039346656037ull;
+                    const std::uint8_t* raw = &block[0][0];
+                    for (int i = 0; i < 48; i += 8) {
+                        std::uint64_t word;
+                        std::memcpy(&word, raw + i, 8);
+                        key = (key ^ word) * 1099511628211ull;
+                    }
+                    BlockMemo& slot = memo[(key ^ (key >> 29)) & (memo.size() - 1)];
+                    std::uint8_t* dest = &mips[m][(static_cast<std::size_t>(y) * bx + x) * 8];
+                    if (slot.valid && std::memcmp(slot.texels, raw, 48) == 0) {
+                        std::memcpy(dest, slot.code, 8);
+                    } else {
+                        encodeBc1Block(block, dest);
+                        std::memcpy(slot.texels, raw, 48);
+                        std::memcpy(slot.code, dest, 8);
+                        slot.valid = true;
+                    }
+                }
             }
     }
     std::vector<std::uint8_t> out(vtf.begin(), vtf.begin() + view.dataOffset);
@@ -4163,6 +4264,47 @@ bool IsFamilyResident(std::uint32_t family) {
         return db && db->isFamilyResident(family);
     } catch (...) {
         return false;
+    }
+}
+
+bool IsFamilyLoading(std::uint32_t family) {
+    try {
+        const auto db = getDatabase();
+        return db && db->isFamilyLoading(family);
+    } catch (...) {
+        return false;
+    }
+}
+
+void PinFamily(std::uint32_t family) {
+    try {
+        if (const auto db = getDatabase()) db->pinFamily(family);
+    } catch (...) {
+    }
+}
+
+void UnpinFamily(std::uint32_t family) {
+    try {
+        if (const auto db = getDatabase()) db->unpinFamily(family);
+    } catch (...) {
+    }
+}
+
+std::size_t FamilyDecodedBytes(std::uint32_t family) {
+    try {
+        const auto db = getDatabase();
+        return db ? db->decodedBytes(family) : 0;
+    } catch (...) {
+        return 0;
+    }
+}
+
+std::size_t ResidentFamilyBytes(bool pinnedOnly) {
+    try {
+        const auto db = getDatabase();
+        return db ? db->residentBytes(pinnedOnly) : 0;
+    } catch (...) {
+        return 0;
     }
 }
 

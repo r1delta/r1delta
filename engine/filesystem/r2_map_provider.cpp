@@ -1533,6 +1533,10 @@ FileBytes ReadConvertedBsp(const MapRequest& request)
                 sourceHash = state->sourceHash;
             }
             if (source) {
+                // The materials of the map are known from the R2 source BSP: start converting them now, in parallel with the
+                // downgrade below (which takes seconds on the engine thread) instead of after the converted BSP is served.
+                if (!IsDedicatedServer())
+                    PrefetchR2MapMaterials(state->mapName, source, true);
                 state->bspCacheStatus = "miss";
                 bspdown::Options options = R2ConverterOptions();
                 // No cloudmask on these two maps: the entity rewrite leaves the dummy light_environment last, so the CSM environment must be the last record too.
@@ -1684,7 +1688,7 @@ public:
             R2P_SCOPE_L("m.bsp.read", request->mapName);
             FileBytes data = ReadConvertedBsp(*request);
             if (data && !IsDedicatedServer())
-                PrefetchR2MapMaterials(request->mapName, data);
+                PrefetchR2MapMaterials(request->mapName, data, false);
             if (data)
                 PrefetchR2MapModels(request->mapName, data);
             return data;
@@ -1960,6 +1964,35 @@ bool ConsumeServedAinPackage()
 bool IsR2PortMap(std::string_view mapName)
 {
     return IsAllowlistedMap(mapName);
+}
+
+// The legacy dedicated engine reads scripts/r2port_sounds.txt through the VPK-miss path where no Open hook answers and no search path
+// can be mounted, so the generated alias script is placed as a loose file in the game directory (the only form its loader finds).
+// With no generated script (no R2 install, R2PORT_SOUND=0) a file left by an earlier run is removed so it cannot be served stale.
+bool PlaceGeneratedSoundScript()
+{
+    const auto gameDirectory = FindGameContentDirectory();
+    if (gameDirectory.empty())
+        return false;
+    const std::filesystem::path destination = gameDirectory / "scripts" / "r2port_sounds.txt";
+    std::error_code error;
+    const FileBytes data = ReadAll("scripts/r2port_sounds.txt");
+    if (!data) {
+        std::filesystem::remove(destination, error);
+        return false;
+    }
+    const uintmax_t existing = std::filesystem::file_size(destination, error);
+    if (!error && existing == data->size()) {
+        std::ifstream input(destination, std::ios::binary);
+        std::vector<char> current(data->size());
+        if (input.read(current.data(), static_cast<std::streamsize>(current.size()))
+            && std::equal(current.begin(), current.end(), data->begin(), [](char a, uint8_t b) { return static_cast<uint8_t>(a) == b; }))
+            return true;
+    }
+    std::ofstream output(destination, std::ios::binary | std::ios::trunc);
+    output.write(reinterpret_cast<const char*>(data->data()), static_cast<std::streamsize>(data->size()));
+    output.close();
+    return static_cast<bool>(output);
 }
 
 std::filesystem::path MaterializeMapCacheFile(std::string_view path)

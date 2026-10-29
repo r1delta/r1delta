@@ -5,6 +5,14 @@
 
 #include <algorithm>
 
+// R2PORT_PROFILE stage timers (engine build only: the header is not on the include path of the standalone bspdown CLI).
+#if __has_include("engine/r2port/r2_profile.h")
+#include "engine/r2port/r2_profile.h"
+#define BSPDOWN_STAGE(name, call) { R2P_SCOPE(name); call; }
+#else
+#define BSPDOWN_STAGE(name, call) call;
+#endif
+
 namespace bspdown {
 
 void Report::add(const char* fmt, ...) {
@@ -184,24 +192,24 @@ std::vector<uint8_t> DowngradeBsp(const uint8_t* data, size_t size, const Option
 
     // Order matters: tricoll and meshes read lumps that the collision and
     // bounds stages then reuse.
-    convertLighting(c);
-    convertLightProbeRefs(c);
-    convertTricoll(c);
-    convertCollisionGrid(c);
-    regridCollision(c);
-    padCollisionGrid(c);
-    convertStaticProps(c);
-    convertMeshes(c);
-    convertVertexFrames(c);
-    convertVertexColorAlpha(c);
-    convertEmitterGlowRamp(c);
-    convertPhysics(c);
-    convertPhysicsTriangles(c);
-    namespaceMaterials(c);
-    convertCubemaps(c);
-    convertShadow(c);
-    orderMeshes(c);
-    reportResidualBounds(c);
+    BSPDOWN_STAGE("d.bsp.lighting", convertLighting(c))
+    BSPDOWN_STAGE("d.bsp.probes", convertLightProbeRefs(c))
+    BSPDOWN_STAGE("d.bsp.tricoll", convertTricoll(c))
+    BSPDOWN_STAGE("d.bsp.cmgrid", convertCollisionGrid(c))
+    BSPDOWN_STAGE("d.bsp.regrid", regridCollision(c))
+    BSPDOWN_STAGE("d.bsp.padgrid", padCollisionGrid(c))
+    BSPDOWN_STAGE("d.bsp.props", convertStaticProps(c))
+    BSPDOWN_STAGE("d.bsp.meshes", convertMeshes(c))
+    BSPDOWN_STAGE("d.bsp.vertexframes", convertVertexFrames(c))
+    BSPDOWN_STAGE("d.bsp.vcalpha", convertVertexColorAlpha(c))
+    BSPDOWN_STAGE("d.bsp.glowramp", convertEmitterGlowRamp(c))
+    BSPDOWN_STAGE("d.bsp.physics", convertPhysics(c))
+    BSPDOWN_STAGE("d.bsp.phystris", convertPhysicsTriangles(c))
+    BSPDOWN_STAGE("d.bsp.namespace", namespaceMaterials(c))
+    BSPDOWN_STAGE("d.bsp.cubemaps", convertCubemaps(c))
+    BSPDOWN_STAGE("d.bsp.shadow", convertShadow(c))
+    BSPDOWN_STAGE("d.bsp.meshorder", orderMeshes(c))
+    BSPDOWN_STAGE("d.bsp.bounds", reportResidualBounds(c))
 
     if (c.opt.dropR2OnlyLumps) {
         const uint32_t drop[] = {L_R2_LPPARENT, L_R2_SHADOWENV, L_R2_LPBSPNODES, L_R2_LPBSPREFS, L_R2_WLPARENT, L_R2_RTLPAGES};
