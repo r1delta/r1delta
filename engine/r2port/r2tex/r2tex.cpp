@@ -2945,8 +2945,15 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
     }
     const std::string safeSurface = surfaceKnown(surface) ? surface : "default";
     addVmtParam(out, "$surfaceprop", safeSurface);
-    const bool opaqueAlbedo = !tools && !additive && !translucent && !glass && !cut &&
-        shaderSet.find("vcola") == std::string::npos;
+    // R1 reads $vertexalpha as the opacity of the prop: the opaque R2 model materials that carry vertex alpha (shader set "Vcola" without
+    // "Vcolt"; the fir trunk models/foliage/tree_fir_large_01 of mp_black_water_canal) draw pale, shimmering and partly missing with it
+    // (round 16 user report; load-time A/B on the trunk: `$vertexalpha 1` alone reproduces it, bump map and envmap do not). R2 does not use
+    // that alpha as opacity there, so a model material that is not translucent, additive, glass or cut keeps no $vertexalpha and is
+    // treated as opaque (albedo alpha aliased to 255 like every other opaque material).
+    const bool modelSurface = vertexLit || options.forModel;
+    const bool opaqueKind = !tools && !additive && !translucent && !glass && !cut;
+    const bool dropVertexAlpha = modelSurface && opaqueKind;
+    const bool opaqueAlbedo = opaqueKind && (dropVertexAlpha || shaderSet.find("vcola") == std::string::npos);
     // Pure metals: R2 stores a black albedo and puts the metal colour in the specular F0 map (sRGB 116..150). R1's stock
     // LightmappedGeneric draws no usable specular term (shaderlab\CHANNELS.md 2.2), so the surface came out solid black
     // (mp_black_water_canal diamond plate floor world/metal/metal_diamond_plate_circles01, R2 shows grey steel; the only one of
@@ -3257,7 +3264,7 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
         const bool whiteVertexWorld = lightmapped && !hasLayerSlots && opaqueAlbedo && name.rfind("world/", 0) == 0 && !tintedVertexWorldMaterial(name);
         if (shaderSet.find("vcolt") != std::string::npos && !layersOff && !whiteVertexWorld)
             addVmtParam(out, "$vertexcolor", "1");
-        if (shaderSet.find("vcola") != std::string::npos) addVmtParam(out, "$vertexalpha", "1");
+        if (shaderSet.find("vcola") != std::string::npos && !dropVertexAlpha) addVmtParam(out, "$vertexalpha", "1");
         if ((raster & 0x06u) == 0x02u) addVmtParam(out, "$nocull", "1");
         // R2 UV animation. Shader sets with Uv<k>at tokens carry, per UV set k (1..3), a 2x2 matrix and a scroll velocity in the
         // CPU constants (6 floats per set: m00 m01 m10 m11 vx vy; UV units per second, checked on homestead_water_01 /

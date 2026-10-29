@@ -184,7 +184,7 @@ bool IsMaterialOrTextureRequestPath(std::string_view path)
 
 // Bump when the r2tex library or the VMT/VTF output it produces changes: converted files are
 // persisted per R2 install fingerprint and revision.
-constexpr std::string_view kConvertedCacheRevision = "33";  // 33: env defaults ($envmaplightscale 1, $fresnelamount 0.35 on world env materials); 32: every source texture a VMT names lives under r2t/ (r2_material_names.h), world materials under r2w/
+constexpr std::string_view kConvertedCacheRevision = "34";  // 34: opaque model materials with Vcola drop $vertexalpha and alias the albedo opaque (TreeTrunks); 33: env defaults ($envmaplightscale 1, $fresnelamount 0.35 on world env materials); 32: every source texture a VMT names lives under r2t/ (r2_material_names.h), world materials under r2w/
 
 bool ReadWholeFile(const std::filesystem::path& path, std::vector<std::uint8_t>& bytes)
 {
