@@ -791,3 +791,31 @@ void Dlc_InstallR1OEngineHooks(uintptr_t engineR1oBase)
 	g_r1oEngineBase = engineR1oBase;
 	Hook("TFO group for map", engineR1oBase + 0x58910, groupForMap, sizeof(groupForMap), &HookR1OGroupForMap, nullptr);
 }
+
+// --- server.dll hooks (legacy dedicated server) -----------------------------------------------------------
+
+namespace {
+
+// Script natives GetDLCMapGroupForMap(string) and ServerHasDLCMapGroupEnabled(int). Stock they tail-jump into
+// IVEngineServer slots 199/200, which the dedicated engine does not implement.
+int __fastcall HookScriptGroupForMap(const char* map)
+{
+	return Dlc_GroupForMap(map);
+}
+
+bool __fastcall HookScriptServerHasGroup(unsigned int group)
+{
+	return ((Dlc_RotationMask() >> (group & 31)) & 1u) != 0;
+}
+
+} // namespace
+
+void Dlc_InstallDedicatedServerHooks(uintptr_t serverBase)
+{
+	if (!serverBase)
+		return;
+	const unsigned char groupForMap[] = { 0x48, 0x8B, 0xD1, 0x48, 0x8B, 0x0D, 0x4E, 0xEA, 0x99, 0x00, 0x48, 0x8B, 0x01, 0x48, 0xFF, 0xA0, 0x38, 0x06, 0x00, 0x00 };
+	const unsigned char serverHas[] = { 0x8B, 0xD1, 0x48, 0x8B, 0x0D, 0x2F, 0xEA, 0x99, 0x00, 0x48, 0x8B, 0x01, 0x48, 0xFF, 0xA0, 0x40, 0x06, 0x00, 0x00 };
+	Hook("script GetDLCMapGroupForMap", serverBase + 0x2925C0, groupForMap, sizeof(groupForMap), &HookScriptGroupForMap, nullptr);
+	Hook("script ServerHasDLCMapGroupEnabled", serverBase + 0x2925E0, serverHas, sizeof(serverHas), &HookScriptServerHasGroup, nullptr);
+}

@@ -46,3 +46,8 @@ void Dlc_InstallDedicatedEngineHooks(uintptr_t engineDsBase);
 // engine_r1o.dll (R1O fake-dedicated, the TFO engine): CGameClient::Connect rejects a client without the current
 // map's group, changelevel/changelevel2 kick connected clients without the new map's group. engineR1oBase is G_engine_r1o.
 void Dlc_InstallR1OEngineHooks(uintptr_t engineR1oBase);
+
+// server.dll on the legacy dedicated server: its engine has no DLC group functions, so the script natives
+// GetDLCMapGroupForMap and ServerHasDLCMapGroupEnabled (which jump through missing IVEngineServer slots and return
+// a constant for every map) are replaced by the shared implementation. serverBase is G_server.
+void Dlc_InstallDedicatedServerHooks(uintptr_t serverBase);

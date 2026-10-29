@@ -24,6 +24,12 @@ A dedicated server uses the `server_` packs and falls back to the `client_` ones
 * Client, signon NEW (`0x765B0`) and the `map` command (`0x136FC0`): the map is not loaded when the group is not owned; the client disconnects with the message instead of reading a missing pack.
 * Messages: groups 1-4 "Redownload the game from the Delta launcher."; group 5 "Verify that Titanfall 2 is installed correctly, and purchase it if you do not own it."
 
+## Lobby
+
+The lobby scripts (`menu/_lobby.nut`, CORE patch `core-dlc-lobby.patch`) call `ReselectNextMapIfDLCUnavailable()` at the top of every lobby loop iteration and once more right before `GameRules_ChangeMap`. When the selected next map belongs to a group that `serverDLCMapGroups` no longer contains (a player without the group joined, or a `dlcN_override` was cleared) the lobby picks another map every connected player owns. Only the selection changes: `level.ui.gameStartTime` is not touched, so a running countdown continues. With `dlcN_override 1` the group stays in the mask, the map stays selected, and the players without the group are kicked when the map starts (the kick above runs before the new map is prepared, so they never reach the loader).
+
+On the legacy dedicated server the script natives `GetDLCMapGroupForMap` and `ServerHasDLCMapGroupEnabled` returned one constant for every map and true for every group (measured: 1430863873 for every map; engine_ds contains no DLC strings, and the natives are tail jumps into IVEngineServer slots), so the lobby and playlist filters never saw a missing group. `Dlc_InstallDedicatedServerHooks` replaces both natives in server.dll (RVA 0x2925C0 and 0x2925E0) with the shared implementation.
+
 Playtest host: launch with `+dlc5_override 1` (players without Titanfall 2 are still kicked when a dlc5 map starts).
 
 Not covered: engine_ds refusing a `map` the host itself lacks; on TFO the `map` command (host state NewGame) is not hooked, only `changelevel`/`changelevel2` (what rotation uses) kick.

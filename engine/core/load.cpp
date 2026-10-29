@@ -9549,6 +9549,7 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		MH_CreateHook((LPVOID)(G_engine_ds + 0x45530), &HookedCBaseClientSetName, reinterpret_cast<LPVOID*>(&CBaseClientSetNameOriginal));
 		MH_CreateHook((LPVOID)(G_engine_ds + 0x491A0), &HookedCBaseClientConnect, reinterpret_cast<LPVOID*>(&oCBaseClientConnect));
 		Dlc_InstallDedicatedEngineHooks(G_engine_ds);
+		Dlc_InstallDedicatedServerHooks(server_base);
 	}
 	else if (!IsDedicatedServer()) {
 		MH_CreateHook((LPVOID)(G_engine + 0xD4840), &HookedCBaseClientSetName, reinterpret_cast<LPVOID*>(&CBaseClientSetNameOriginal));
