@@ -152,7 +152,7 @@ constexpr std::size_t kMaxPakDecompressed = 1024ull * 1024ull * 1024ull;
 constexpr std::size_t kMaximumFamilyCacheLimit = 8192ull * 1024ull * 1024ull;
 std::atomic<std::size_t> gFamilyCacheLimit{4096ull * 1024ull * 1024ull};
 constexpr char kIndexMagic[8] = {'R','2','T','E','X','I','D','X'};
-constexpr std::uint32_t kIndexVersion = 10;
+constexpr std::uint32_t kIndexVersion = 11;
 
 #pragma pack(push, 1)
 struct Hdr7 {
@@ -266,7 +266,7 @@ struct PakInfo {
     std::string familyName;
     std::uint64_t fileSize = 0;
     std::uint64_t decodedSize = 0;   // RPak header dcmpSize (the file size for an uncompressed pak): what a decoded pak occupies in memory
-    std::int64_t writeStamp = 0;
+    std::int64_t contentKey = 0;     // hash of the RPak header's created time, crc and compressed size: identifies the pak's content, survives a copy/touch
     std::uint32_t family = 0;
     std::uint16_t patchCount = 0;
 };
@@ -287,7 +287,11 @@ constexpr std::size_t kPakTailBytes = 128;
 struct PakData {
     std::uint32_t infoIndex = 0;
     Hdr7 header{};
-    PakBytes bytes;
+    // Decoded pak bytes. A pak reached through a warm index starts without bytes (its layout comes from the index) and decodes
+    // on first use (loadPakBytes); `loaded` is the release/acquire flag that publishes `bytes`.
+    mutable PakBytes bytes;
+    mutable std::atomic<bool> loaded{false};
+    mutable std::mutex loadMutex;
     std::size_t pageHeadersOffset = 0;
     std::size_t assetTableOffset = 0;
     std::uint32_t firstPage = 0;
@@ -295,8 +299,43 @@ struct PakData {
     std::vector<std::size_t> pageOffsets;
     std::vector<std::int32_t> pageSizes;
     std::vector<std::string> starpaks;
-    std::size_t memoryBytes() const { return bytes.size() + pageOffsets.capacity() * sizeof(std::size_t) + pageSizes.capacity() * sizeof(std::int32_t); }
+    std::size_t layoutBytes() const { return pageOffsets.capacity() * sizeof(std::size_t) + pageSizes.capacity() * sizeof(std::int32_t); }
+    std::size_t memoryBytes() const { return layoutBytes() + (loaded.load(std::memory_order_acquire) ? bytes.size() : 0); }
 };
+
+// Everything about a pak that does not need its decoded bytes: the header, the page tables and the starpak list. Persisted in
+// r2tex.index so a warm start knows which pak owns which page without decoding any pak.
+struct PakMeta {
+    bool valid = false;
+    Hdr7 header{};
+    std::size_t assetTableOffset = 0;
+    std::uint32_t firstPage = 0;
+    std::int64_t patchStreamSize = 0;
+    std::vector<std::size_t> pageOffsets;
+    std::vector<std::int32_t> pageSizes;
+    std::vector<std::string> starpaks;
+};
+PakMeta metaOf(const PakData& pak) {
+    PakMeta meta;
+    meta.valid = true;
+    meta.header = pak.header;
+    meta.assetTableOffset = pak.assetTableOffset;
+    meta.firstPage = pak.firstPage;
+    meta.patchStreamSize = pak.patchStreamSize;
+    meta.pageOffsets = pak.pageOffsets;
+    meta.pageSizes = pak.pageSizes;
+    meta.starpaks = pak.starpaks;
+    return meta;
+}
+void applyMeta(PakData& pak, const PakMeta& meta) {
+    pak.header = meta.header;
+    pak.assetTableOffset = meta.assetTableOffset;
+    pak.firstPage = meta.firstPage;
+    pak.patchStreamSize = meta.patchStreamSize;
+    pak.pageOffsets = meta.pageOffsets;
+    pak.pageSizes = meta.pageSizes;
+    pak.starpaks = meta.starpaks;
+}
 
 std::string lowerAscii(std::string s) {
     for (char& c : s) {
@@ -326,9 +365,6 @@ bool readPakInfo(const fs::path& path, PakInfo& info, std::string& error) {
     info.familyName = familyNameFor(info.relativeName);
     info.fileSize = fs::file_size(path, ec);
     if (ec) { error = "cannot stat pak " + path.u8string(); return false; }
-    const auto stamp = fs::last_write_time(path, ec);
-    if (ec) { error = "cannot read pak timestamp " + path.u8string(); return false; }
-    info.writeStamp = static_cast<std::int64_t>(stamp.time_since_epoch().count());
     std::ifstream in(path, std::ios::binary);
     std::array<std::uint8_t, sizeof(Hdr7)> h{};
     if (!in.read(reinterpret_cast<char*>(h.data()), static_cast<std::streamsize>(h.size()))) {
@@ -338,6 +374,7 @@ bool readPakInfo(const fs::path& path, PakInfo& info, std::string& error) {
         error = "not RPak v7: " + path.u8string(); return false;
     }
     info.patchCount = u16(h.data() + 0x3e);
+    info.contentKey = static_cast<std::int64_t>(u64(h.data() + 8) * 0x9e3779b97f4a7c15ull ^ u64(h.data() + 0x10) ^ (u64(h.data() + 0x18) << 1));
     info.decodedSize = (u16(h.data() + 6) & 0x100u) ? u64(h.data() + 0x28) : info.fileSize;
     return true;
 }
@@ -374,8 +411,13 @@ bool readPakFile(const fs::path& path, PakBytes& out, std::size_t& fileSize, std
     return true;
 }
 
-bool loadPak(const PakInfo& info, std::uint32_t infoIndex, PakData& pak, std::string& error) {
-    pak.infoIndex = infoIndex;
+std::atomic<std::uint64_t> gPakDecodeCount{0};   // paks read+decoded since the process started
+std::atomic<std::uint64_t> gPakDecodeBytes{0};   // decoded bytes of those paks
+std::atomic<std::uint64_t> gPakDecodeMicros{0};  // thread time spent in read + decode of those paks
+
+// Reads and (RTech) decodes a whole pak into `bytes`; `header` receives the RPak header.
+bool decodePak(const PakInfo& info, PakBytes& bytes, Hdr7& header, std::string& error) {
+    const auto decodeStart = std::chrono::steady_clock::now();
     PakBytes input;
     std::size_t inputSize = 0;
     {
@@ -384,24 +426,24 @@ bool loadPak(const PakInfo& info, std::uint32_t infoIndex, PakData& pak, std::st
         profileRead.SetBytes(inputSize);
     }
     if (inputSize < sizeof(Hdr7)) { error = "short RPak: " + info.relativeName; return false; }
-    std::memcpy(&pak.header, input.data(), sizeof(Hdr7));
-    if (pak.header.magic != 0x6b615052u || pak.header.version != 7) {
+    std::memcpy(&header, input.data(), sizeof(Hdr7));
+    if (header.magic != 0x6b615052u || header.version != 7) {
         error = "bad RPak header: " + info.relativeName; return false;
     }
-    if (pak.header.flags & 0x8000u) { error = "unsupported Zstd RPak: " + info.relativeName; return false; }
-    if (pak.header.flags & 0x100u) {
-        if (!pak.header.dcmpSize || pak.header.dcmpSize > kMaxPakDecompressed || pak.header.cmpSize > inputSize) {
+    if (header.flags & 0x8000u) { error = "unsupported Zstd RPak: " + info.relativeName; return false; }
+    if (header.flags & 0x100u) {
+        if (!header.dcmpSize || header.dcmpSize > kMaxPakDecompressed || header.cmpSize > inputSize) {
             error = "invalid RTech size: " + info.relativeName; return false;
         }
         // The masks stay the power-of-two masks the decoder expects; positions never exceed the real sizes, so the
         // buffers themselves are only as large as the data (plus the zeroed/slack tail), never zero filled.
         const auto inMask = nextPowerMask(inputSize + 64);
-        const auto outMask = nextPowerMask(pak.header.dcmpSize + 64);
+        const auto outMask = nextPowerMask(header.dcmpSize + 64);
         if (inMask > std::numeric_limits<std::size_t>::max() - 64 || outMask > std::numeric_limits<std::size_t>::max() - 64) {
             error = "RPak allocation overflow: " + info.relativeName; return false;
         }
         PakBytes output;
-        output.resize(static_cast<std::size_t>(pak.header.dcmpSize) + kPakTailBytes);
+        output.resize(static_cast<std::size_t>(header.dcmpSize) + kPakTailBytes);
         RTechDecodeState_s decoder{};
         decoder.decodeMode = MODE_RTECH;
         decoder.fileSize = input.size();
@@ -412,23 +454,32 @@ bool loadPak(const PakInfo& info, std::uint32_t infoIndex, PakData& pak, std::st
         decoder.inBufBytePos = sizeof(Hdr7);
         decoder.outBufBytePos = sizeof(Hdr7);
         R2P_SCOPE_B(profileRtech, "d.pak.rtech", info.relativeName);
-        profileRtech.SetBytes(pak.header.dcmpSize);
+        profileRtech.SetBytes(header.dcmpSize);
         const auto decodedHeader = Pak_RTechDecoderInit(&decoder, input.data(), inMask,
-            static_cast<std::size_t>(pak.header.cmpSize), 0, sizeof(Hdr7));
-        if (decodedHeader != pak.header.dcmpSize) { error = "RTech size mismatch: " + info.relativeName; return false; }
-        const bool complete = Pak_RTechStreamDecode(&decoder, static_cast<std::size_t>(pak.header.cmpSize),
-            static_cast<std::size_t>(pak.header.dcmpSize));
-        if (!complete || decoder.outBufBytePos != pak.header.dcmpSize) {
+            static_cast<std::size_t>(header.cmpSize), 0, sizeof(Hdr7));
+        if (decodedHeader != header.dcmpSize) { error = "RTech size mismatch: " + info.relativeName; return false; }
+        const bool complete = Pak_RTechStreamDecode(&decoder, static_cast<std::size_t>(header.cmpSize),
+            static_cast<std::size_t>(header.dcmpSize));
+        if (!complete || decoder.outBufBytePos != header.dcmpSize) {
             error = "incomplete RTech stream: " + info.relativeName; return false;
         }
-        std::memcpy(output.data(), &pak.header, sizeof(Hdr7));
-        output.resize(static_cast<std::size_t>(pak.header.dcmpSize));
-        pak.bytes = std::move(output);
+        std::memcpy(output.data(), &header, sizeof(Hdr7));
+        output.resize(static_cast<std::size_t>(header.dcmpSize));
+        bytes = std::move(output);
         PakBytes().swap(input);
     } else {
         input.resize(inputSize);
-        pak.bytes = std::move(input);
+        bytes = std::move(input);
     }
+    gPakDecodeCount.fetch_add(1, std::memory_order_relaxed);
+    gPakDecodeBytes.fetch_add(bytes.size(), std::memory_order_relaxed);
+    gPakDecodeMicros.fetch_add(static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now() - decodeStart).count()), std::memory_order_relaxed);
+    return true;
+}
+
+// Parses the section tables of a decoded pak (pak.header and pak.bytes set) into its layout: page sizes/offsets, starpaks.
+bool parsePakLayout(const PakInfo& info, PakData& pak, std::string& error) {
     const std::uint8_t* b = pak.bytes.data();
     const std::size_t n = pak.bytes.size();
     std::size_t off = sizeof(Hdr7);
@@ -493,17 +544,49 @@ bool loadPak(const PakInfo& info, std::uint32_t infoIndex, PakData& pak, std::st
     return true;
 }
 
+// Decodes a whole pak and parses its layout (the first-launch index scan, and a pak without a persisted layout).
+bool loadPak(const PakInfo& info, std::uint32_t infoIndex, PakData& pak, std::string& error) {
+    pak.infoIndex = infoIndex;
+    if (!decodePak(info, pak.bytes, pak.header, error)) return false;
+    if (!parsePakLayout(info, pak, error)) return false;
+    pak.loaded.store(true, std::memory_order_release);
+    return true;
+}
+
+// Decodes the bytes of a pak whose layout is already known (persisted in the index). Thread safe: concurrent callers for
+// the same pak wait for the one decode. `added` receives the bytes this call made resident (0 when it was already loaded).
+bool loadPakBytes(const PakInfo& info, const PakData& pak, std::size_t& added, std::string& error) {
+    added = 0;
+    std::lock_guard<std::mutex> lock(pak.loadMutex);
+    if (pak.loaded.load(std::memory_order_acquire)) return true;
+    PakBytes bytes;
+    Hdr7 header{};
+    if (!decodePak(info, bytes, header, error)) return false;
+    if (std::memcmp(&header, &pak.header, sizeof(Hdr7)) != 0 || bytes.size() != info.decodedSize) {
+        error = "RPak changed since it was indexed: " + info.relativeName; return false;
+    }
+    pak.bytes = std::move(bytes);
+    pak.loaded.store(true, std::memory_order_release);
+    added = pak.bytes.size();
+    return true;
+}
+
 struct PageLocation {
     const PakData* pak = nullptr;
     std::size_t offset = 0;
     std::size_t size = 0;
 };
+struct Database;
 struct Family {
     std::uint32_t id = 0;
+    Database* db = nullptr;   // the owner; lazy pak decodes account their bytes there (the Database outlives every Family)
     std::vector<std::shared_ptr<PakData>> paks;
     std::vector<PageLocation> pages;
-    std::size_t bytes = 0;
+    // Layout bytes plus the bytes of the paks decoded so far; grows while paks decode lazily (updated under Database::familyMutex).
+    mutable std::atomic<std::size_t> bytes{0};
 };
+// Decodes the listed paks of the family that are not resident yet, concurrently under the global pak-load cap (defined after Database).
+bool ensurePaksLoaded(const Family& family, const std::vector<const PakData*>& need, std::string& error);
 const PakData* findPakOwner(const Family& family, std::uint32_t infoIndex) {
     for (const auto& pak : family.paks)
         if (pak->infoIndex == infoIndex) return pak.get();
@@ -530,6 +613,28 @@ bool resolvePageAtVersion(const Family& family, const PakData& owner, std::uint3
 bool readPageRange(const Family& family, const PakData& owner, PagePtr ptr, std::size_t length,
                    std::vector<std::uint8_t>& out, std::string& error) {
     if (ptr.index == 0xffffffffu || ptr.index >= family.pages.size()) { error = "invalid page index"; return false; }
+    {
+        // Which paks hold the pages of the range is known from the layout alone; decode the missing ones together.
+        std::vector<const PakData*> need;
+        std::size_t remaining = length;
+        std::uint32_t page = ptr.index;
+        std::size_t pageOffset = ptr.offset;
+        while (remaining) {
+            PageLocation loc;
+            if (!resolvePageAtVersion(family, owner, page, loc) || pageOffset > loc.size) break;   // reported below
+            if (!loc.pak->loaded.load(std::memory_order_acquire) && std::find(need.begin(), need.end(), loc.pak) == need.end())
+                need.push_back(loc.pak);
+            const std::size_t available = loc.size - pageOffset;
+            if (!available) break;
+            remaining -= std::min(available, remaining);
+            pageOffset = 0;
+            if (remaining) {
+                if (page + 1 >= family.pages.size()) break;
+                ++page;
+            }
+        }
+        if (!need.empty() && !ensurePaksLoaded(family, need, error)) return false;
+    }
     out.resize(length);
     std::size_t remaining = length, dest = 0;
     std::uint32_t page = ptr.index;
@@ -558,6 +663,10 @@ bool readCString(const Family& family, const PakData& owner, PagePtr ptr, std::s
     if (ptr.index == 0xffffffffu || ptr.index >= family.pages.size()) return false;
     PageLocation loc;
     if (!resolvePageAtVersion(family, owner, ptr.index, loc) || ptr.offset >= loc.size) return false;
+    if (!loc.pak->loaded.load(std::memory_order_acquire)) {
+        std::string ignored;
+        if (!ensurePaksLoaded(family, {loc.pak}, ignored)) return false;
+    }
     const char* data = reinterpret_cast<const char*>(loc.pak->bytes.data() + loc.offset + ptr.offset);
     const std::size_t maximum = loc.size - ptr.offset;
     const void* nul = std::memchr(data, 0, maximum);
@@ -675,28 +784,30 @@ unsigned pakLoadLimit() {
     return limit;
 }
 
-// Loads the given paks (indices into `paks`) and returns the ones that loaded, in the order of `members`.
-// A pak that fails to load is skipped. Largest paks are claimed first so the biggest decode starts immediately.
-std::vector<std::shared_ptr<PakData>> loadPaksConcurrent(const std::vector<PakInfo>& paks, const std::vector<std::uint32_t>& members) {
-    const std::size_t count = members.size();
-    std::vector<std::shared_ptr<PakData>> loaded(count);
-    std::vector<std::size_t> order(count);
-    for (std::size_t i = 0; i < count; ++i) order[i] = i;
-    std::stable_sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
-        return paks[members[a]].fileSize > paks[members[b]].fileSize;
-    });
+// R2TEX_LAZY_PAKS=0 decodes every pak of a family when the family is first used (the behavior before the pak layout was persisted in
+// the index); the default decodes only the paks that own a page that is read.
+bool lazyPaksEnabled() {
+    static const bool enabled = [] {
+        const char* value = std::getenv("R2TEX_LAZY_PAKS");
+        return !(value && value[0] == '0');
+    }();
+    return enabled;
+}
+
+// Runs fn(slot) for every slot in `order` (claimed in that order) on the calling thread plus helper threads while the process-wide
+// cap allows. An exception thrown by fn is rethrown here after every claimed slot finished.
+template<class Fn>
+void runPakLoads(const std::vector<std::size_t>& order, Fn&& fn) {
+    const std::size_t count = order.size();
     std::atomic<std::size_t> next{0};
     std::exception_ptr failure;
     std::mutex failureMutex;
-    // Claims and loads one pak; false once every pak is claimed.
+    // Claims and runs one slot; false once every slot is claimed.
     const auto loadNext = [&]() {
         const std::size_t k = next.fetch_add(1, std::memory_order_relaxed);
         if (k >= count) return false;
-        const std::size_t slot = order[k];
         try {
-            auto pak = std::make_shared<PakData>();
-            std::string why;
-            if (loadPak(paks[members[slot]], members[slot], *pak, why)) loaded[slot] = std::move(pak);
+            fn(order[k]);
         } catch (...) {
             std::lock_guard<std::mutex> lock(failureMutex);
             if (!failure) failure = std::current_exception();
@@ -724,12 +835,29 @@ std::vector<std::shared_ptr<PakData>> loadPaksConcurrent(const std::vector<PakIn
             }
         }
     };
-    // The caller loads paks one at a time and re-checks for free slots between them.
+    // The caller loads one at a time and re-checks for free slots between them.
     spawnHelpers();
     while (loadNext()) spawnHelpers();
     for (auto& helper : helpers) helper.join();
     gPakLoadsActive.fetch_sub(1, std::memory_order_relaxed);
     if (failure) std::rethrow_exception(failure);
+}
+
+// Loads the given paks (indices into `paks`) in full and returns the ones that loaded, in the order of `members`.
+// A pak that fails to load is skipped. Largest paks are claimed first so the biggest decode starts immediately.
+std::vector<std::shared_ptr<PakData>> loadPaksConcurrent(const std::vector<PakInfo>& paks, const std::vector<std::uint32_t>& members) {
+    const std::size_t count = members.size();
+    std::vector<std::shared_ptr<PakData>> loaded(count);
+    std::vector<std::size_t> order(count);
+    for (std::size_t i = 0; i < count; ++i) order[i] = i;
+    std::stable_sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
+        return paks[members[a]].fileSize > paks[members[b]].fileSize;
+    });
+    runPakLoads(order, [&](std::size_t slot) {
+        auto pak = std::make_shared<PakData>();
+        std::string why;
+        if (loadPak(paks[members[slot]], members[slot], *pak, why)) loaded[slot] = std::move(pak);
+    });
     std::vector<std::shared_ptr<PakData>> result;
     result.reserve(count);
     for (auto& pak : loaded) if (pak) result.push_back(std::move(pak));
@@ -750,7 +878,8 @@ struct Database {
     std::list<std::uint32_t> lru;
     std::size_t familyBytes = 0;
     std::unordered_map<std::uint32_t, int> familyPins;       // family -> queued-work pin count (see pinFamily)
-    std::unordered_set<std::uint32_t> loadingFamilies;       // families being decoded right now
+    std::unordered_map<std::uint32_t, int> loadingFamilies;  // family -> decodes running in it right now (family creation or lazy pak decode)
+    std::vector<PakMeta> pakMeta;                            // per pak (index order): layout persisted in r2tex.index
 
     std::unordered_map<std::uint32_t, std::shared_ptr<std::mutex>> familyLoadLocks;
     // Lower-case, slash-normalized asset name -> guid, built on first use, for texture records whose guid is
@@ -758,14 +887,36 @@ struct Database {
     std::once_flag textureNamesOnce;
     std::unordered_map<std::string, std::uint64_t> textureNames;
 
+    // True while the family object is cached and nothing is decoding in it. With a persisted layout the object itself costs nothing,
+    // paks decode lazily when a page they own is read; a family a worker is decoding into is "loading", not "resident".
     bool isFamilyResident(std::uint32_t id) {
         std::lock_guard<std::mutex> lock(familyMutex);
-        return families.find(id) != families.end();
+        return families.find(id) != families.end() && loadingFamilies.find(id) == loadingFamilies.end();
+    }
+    void beginLoading(std::uint32_t id) {
+        std::lock_guard<std::mutex> lock(familyMutex);
+        ++loadingFamilies[id];
+    }
+    void endLoading(std::uint32_t id) {
+        std::lock_guard<std::mutex> lock(familyMutex);
+        const auto it = loadingFamilies.find(id);
+        if (it != loadingFamilies.end() && --it->second <= 0) loadingFamilies.erase(it);
+    }
+    // A lazy pak decode made `added` more bytes of the family resident.
+    void addFamilyBytes(const Family& family, std::size_t added) {
+        std::lock_guard<std::mutex> lock(familyMutex);
+        family.bytes.fetch_add(added, std::memory_order_relaxed);
+        const auto found = families.find(family.id);
+        if (found == families.end() || found->second.family.get() != &family) return;   // already evicted: only the holder keeps it
+        familyBytes += added;
+        evictLocked(family.id);
     }
 
-    // Loads one family. The decode of its paks (the expensive part) runs under a per-family lock, not
-    // under familyMutex, so workers needing different families load them in parallel.
-    std::shared_ptr<Family> getFamily(std::uint32_t id, std::string& error) {
+    // Families are built under a per-family lock (not familyMutex), so workers needing different families build them in parallel.
+    // Builds (or returns the cached) family. With a persisted pak layout the family is created without decoding anything: a pak is
+    // read and RTech-decoded the first time a page it owns is read (ensurePaksLoaded). `eager` (the index scan, or a pak without a
+    // persisted layout) decodes every pak now and records its layout in pakMeta.
+    std::shared_ptr<Family> getFamily(std::uint32_t id, std::string& error, bool eager = false) {
         std::shared_ptr<std::mutex> loadLock;
         {
             std::lock_guard<std::mutex> lock(familyMutex);
@@ -792,24 +943,51 @@ struct Database {
                 return found->second.family;
             }
         }
-        {
-            std::lock_guard<std::mutex> lock(familyMutex);
-            loadingFamilies.insert(id);
-        }
+        beginLoading(id);
         struct LoadingGuard {
             Database& db; std::uint32_t id;
-            ~LoadingGuard() { std::lock_guard<std::mutex> lock(db.familyMutex); db.loadingFamilies.erase(id); }
+            ~LoadingGuard() { db.endLoading(id); }
         } loadingGuard{*this, id};
         R2P_SCOPE_B(profileFamily, "d.fam.load", familyNames[id]);
         const auto familyLoadStart = std::chrono::steady_clock::now();
         auto family = std::make_shared<Family>();
         family->id = id;
+        family->db = this;
+        const auto& members = familyMembers[id];
+        family->paks.resize(members.size());
+        std::vector<std::size_t> eagerSlots;
+        for (std::size_t slot = 0; slot < members.size(); ++slot) {
+            const std::uint32_t pakIndex = members[slot];
+            if (!eager && lazyPaksEnabled() && pakMeta[pakIndex].valid) {
+                auto pak = std::make_shared<PakData>();
+                pak->infoIndex = pakIndex;
+                applyMeta(*pak, pakMeta[pakIndex]);
+                family->paks[slot] = std::move(pak);
+            } else {
+                eagerSlots.push_back(slot);
+            }
+        }
+        if (!eagerSlots.empty()) {
+            std::vector<std::uint32_t> eagerMembers;
+            eagerMembers.reserve(eagerSlots.size());
+            for (const std::size_t slot : eagerSlots) eagerMembers.push_back(members[slot]);
+            for (auto& loaded : loadPaksConcurrent(paks, eagerMembers)) {
+                for (const std::size_t slot : eagerSlots) {
+                    if (members[slot] != loaded->infoIndex) continue;
+                    pakMeta[loaded->infoIndex] = metaOf(*loaded);
+                    family->paks[slot] = std::move(loaded);
+                    break;
+                }
+            }
+        }
+        family->paks.erase(std::remove(family->paks.begin(), family->paks.end(), std::shared_ptr<PakData>()), family->paks.end());
         std::uint32_t maxPages = 0;
-        family->paks = loadPaksConcurrent(paks, familyMembers[id]);
+        std::size_t familyBytesNow = 0;
         for (const auto& pak : family->paks) {
-            family->bytes += pak->memoryBytes();
+            familyBytesNow += pak->memoryBytes();
             maxPages = std::max(maxPages, static_cast<std::uint32_t>(pak->pageOffsets.size()));
         }
+        family->bytes.store(familyBytesNow, std::memory_order_relaxed);
         family->pages.resize(maxPages);
         for (const auto& pak : family->paks) {
             for (std::uint32_t page = pak->firstPage; page < pak->pageOffsets.size(); ++page) {
@@ -819,14 +997,14 @@ struct Database {
             }
         }
         if (family->paks.empty()) { error = "cannot load any pak in family " + familyNames[id]; return {}; }
-        profileFamily.SetBytes(family->bytes);
+        profileFamily.SetBytes(familyBytesNow);
         gFamilyLoadCount.fetch_add(1, std::memory_order_relaxed);
         gFamilyLoadMicroseconds.fetch_add(static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now() - familyLoadStart).count()), std::memory_order_relaxed);
         std::lock_guard<std::mutex> lock(familyMutex);
         lru.push_front(id);
         families.emplace(id, CacheEntry{family, lru.begin()});
-        familyBytes += family->bytes;
+        familyBytes += familyBytesNow;
         evictLocked(id);
         return family;
     }
@@ -874,7 +1052,7 @@ struct Database {
     }
     bool isFamilyLoading(std::uint32_t id) {
         std::lock_guard<std::mutex> lock(familyMutex);
-        return loadingFamilies.count(id) != 0;
+        return loadingFamilies.find(id) != loadingFamilies.end();
     }
     std::size_t residentBytes(bool pinnedOnly) {
         std::lock_guard<std::mutex> lock(familyMutex);
@@ -894,6 +1072,47 @@ struct Database {
         return total;
     }
 };
+
+bool ensurePaksLoaded(const Family& family, const std::vector<const PakData*>& need, std::string& error) {
+    Database& db = *family.db;
+    std::vector<const PakData*> todo;
+    for (const PakData* pak : need)
+        if (!pak->loaded.load(std::memory_order_acquire) && std::find(todo.begin(), todo.end(), pak) == todo.end()) todo.push_back(pak);
+    if (todo.empty()) return true;
+    db.beginLoading(family.id);
+    struct LoadingGuard {
+        Database& db; std::uint32_t id;
+        ~LoadingGuard() { db.endLoading(id); }
+    } loadingGuard{db, family.id};
+    R2P_SCOPE_B(profileLoad, "d.fam.paks", db.familyNames[family.id]);
+    const auto start = std::chrono::steady_clock::now();
+    std::vector<std::size_t> order(todo.size());
+    for (std::size_t i = 0; i < order.size(); ++i) order[i] = i;
+    std::stable_sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
+        return db.paks[todo[a]->infoIndex].fileSize > db.paks[todo[b]->infoIndex].fileSize;
+    });
+    std::atomic<std::size_t> added{0};
+    std::mutex errorMutex;
+    std::string firstError;
+    runPakLoads(order, [&](std::size_t k) {
+        std::size_t bytesAdded = 0;
+        std::string why;
+        if (!loadPakBytes(db.paks[todo[k]->infoIndex], *todo[k], bytesAdded, why)) {
+            std::lock_guard<std::mutex> lock(errorMutex);
+            if (firstError.empty()) firstError = why.empty() ? "pak decode failed" : why;
+            return;
+        }
+        if (bytesAdded) {
+            added.fetch_add(bytesAdded, std::memory_order_relaxed);
+            db.addFamilyBytes(family, bytesAdded);
+        }
+    });
+    profileLoad.SetBytes(added.load(std::memory_order_relaxed));
+    gFamilyLoadMicroseconds.fetch_add(static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now() - start).count()), std::memory_order_relaxed);
+    if (!firstError.empty()) { error = firstError; return false; }
+    return true;
+}
 
 std::mutex g_openMutex;
 std::shared_ptr<Database> g_database;
@@ -920,6 +1139,7 @@ bool enumeratePaks(Database& db, std::string& error) {
         db.paks.push_back(std::move(info));
         byFamily[db.paks.back().familyName].push_back(index);
     }
+    db.pakMeta.assign(db.paks.size(), PakMeta{});
     db.familyNames.reserve(byFamily.size());
     db.familyMembers.reserve(byFamily.size());
     std::uint32_t familyIndex = 0;
@@ -940,6 +1160,56 @@ bool enumeratePaks(Database& db, std::string& error) {
     return true;
 }
 
+// Pak layout record of the index (version 11): valid flag, then header, table offset, first page, patch stream size, page count,
+// page sizes, page offsets (0xffffffff: the page is not in this pak) and the starpak path list.
+bool writePakMeta(std::ofstream& out, const PakMeta& m) {
+    const std::uint8_t valid = m.valid && m.pageSizes.size() == m.pageOffsets.size() ? 1 : 0;
+    if (!writePod(out, valid)) return false;
+    if (!valid) return true;
+    const std::uint64_t assetTableOffset = m.assetTableOffset;
+    const std::uint32_t pages = static_cast<std::uint32_t>(m.pageSizes.size());
+    if (!writePod(out, m.header) || !writePod(out, assetTableOffset) || !writePod(out, m.firstPage) ||
+        !writePod(out, m.patchStreamSize) || !writePod(out, pages)) return false;
+    if (pages) out.write(reinterpret_cast<const char*>(m.pageSizes.data()), static_cast<std::streamsize>(pages) * 4);
+    std::vector<std::uint32_t> offsets(pages);
+    for (std::uint32_t i = 0; i < pages; ++i)
+        offsets[i] = m.pageOffsets[i] == std::numeric_limits<std::size_t>::max() ? 0xffffffffu : static_cast<std::uint32_t>(m.pageOffsets[i]);
+    if (pages) out.write(reinterpret_cast<const char*>(offsets.data()), static_cast<std::streamsize>(pages) * 4);
+    const std::uint32_t starpaks = static_cast<std::uint32_t>(m.starpaks.size());
+    if (!writePod(out, starpaks)) return false;
+    for (const auto& s : m.starpaks) if (!writeString(out, s)) return false;
+    return static_cast<bool>(out);
+}
+bool readPakMeta(std::ifstream& in, PakMeta& m, std::uint64_t decodedSize) {
+    m = PakMeta{};
+    std::uint8_t valid = 0;
+    if (!readPod(in, valid) || valid > 1) return false;
+    if (!valid) return true;
+    std::uint64_t assetTableOffset = 0;
+    std::uint32_t pages = 0;
+    if (!readPod(in, m.header) || !readPod(in, assetTableOffset) || !readPod(in, m.firstPage) ||
+        !readPod(in, m.patchStreamSize) || !readPod(in, pages)) return false;
+    if (m.header.magic != 0x6b615052u || m.header.numPages != pages || pages > 65535u || m.firstPage > pages ||
+        assetTableOffset > decodedSize) return false;
+    m.assetTableOffset = static_cast<std::size_t>(assetTableOffset);
+    m.pageSizes.resize(pages);
+    std::vector<std::uint32_t> offsets(pages);
+    if (pages && (!in.read(reinterpret_cast<char*>(m.pageSizes.data()), static_cast<std::streamsize>(pages) * 4) ||
+                  !in.read(reinterpret_cast<char*>(offsets.data()), static_cast<std::streamsize>(pages) * 4))) return false;
+    m.pageOffsets.resize(pages);
+    for (std::uint32_t i = 0; i < pages; ++i) {
+        if (offsets[i] == 0xffffffffu) { m.pageOffsets[i] = std::numeric_limits<std::size_t>::max(); continue; }
+        if (m.pageSizes[i] < 0 || static_cast<std::uint64_t>(offsets[i]) + static_cast<std::uint32_t>(m.pageSizes[i]) > decodedSize) return false;
+        m.pageOffsets[i] = offsets[i];
+    }
+    std::uint32_t starpaks = 0;
+    if (!readPod(in, starpaks) || starpaks > 4096u) return false;
+    m.starpaks.resize(starpaks);
+    for (auto& s : m.starpaks) if (!readString(in, s, 4096)) return false;
+    m.valid = true;
+    return true;
+}
+
 bool cacheMatches(const fs::path& cachePath, Database& db, std::string& error) {
     std::ifstream in(cachePath, std::ios::binary);
     if (!in) return false;
@@ -950,7 +1220,7 @@ bool cacheMatches(const fs::path& cachePath, Database& db, std::string& error) {
     std::string installIdentity;
     if (!in.read(magic.data(), magic.size()) || magic != std::array<char,8>{'R','2','T','E','X','I','D','X'} ||
         !readPod(in, version) || version != kIndexVersion || !readString(in, installIdentity, 32768) ||
-        installIdentity != db.installIdentity || !readPod(in, pakCount) || !readPod(in, assetCount) ||
+        !readPod(in, pakCount) || !readPod(in, assetCount) ||
         pakCount != db.paks.size() || assetCount > 1000000ull) return false;
     for (std::uint32_t i = 0; i < pakCount; ++i) {
         std::string name;
@@ -960,8 +1230,9 @@ bool cacheMatches(const fs::path& cachePath, Database& db, std::string& error) {
         std::uint16_t patch = 0;
         if (!readString(in, name, 4096) || !readPod(in, size) || !readPod(in, stamp) || !readPod(in, family) || !readPod(in, patch)) return false;
         const auto& expected = db.paks[i];
-        if (name != expected.relativeName || size != expected.fileSize || stamp != expected.writeStamp ||
+        if (name != expected.relativeName || size != expected.fileSize || stamp != expected.contentKey ||
             family != expected.family || patch != expected.patchCount) return false;
+        if (!readPakMeta(in, db.pakMeta[i], expected.decodedSize)) return false;
     }
     std::unordered_map<AssetKey, AssetRecord, AssetKeyHash> records;
     records.reserve(static_cast<std::size_t>(assetCount));
@@ -993,9 +1264,12 @@ bool saveIndex(const fs::path& path, const Database& db, std::string& error) {
     if (!writePod(out, version) || !writeString(out, db.installIdentity) || !writePod(out, pakCount) || !writePod(out, assetCount)) {
         error = "cannot write cache header"; return false;
     }
-    for (const auto& p : db.paks) {
-        if (!writeString(out, p.relativeName) || !writePod(out, p.fileSize) || !writePod(out, p.writeStamp) ||
-            !writePod(out, p.family) || !writePod(out, p.patchCount)) { error = "cannot write cache pak list"; return false; }
+    for (std::size_t pi = 0; pi < db.paks.size(); ++pi) {
+        const auto& p = db.paks[pi];
+        if (!writeString(out, p.relativeName) || !writePod(out, p.fileSize) || !writePod(out, p.contentKey) ||
+            !writePod(out, p.family) || !writePod(out, p.patchCount) || !writePakMeta(out, db.pakMeta[pi])) {
+            error = "cannot write cache pak list"; return false;
+        }
     }
     std::vector<const AssetRecord*> sorted;
     sorted.reserve(db.assets.size());
@@ -1026,6 +1300,7 @@ bool buildIndex(Database& db, std::string& error) {
     const std::size_t savedCacheLimit = gFamilyCacheLimit.load(std::memory_order_relaxed);
     gFamilyCacheLimit.store(std::min<std::size_t>(savedCacheLimit, 1024ull * 1024ull * 1024ull), std::memory_order_relaxed);
     db.assets.clear();
+    db.pakMeta.assign(db.paks.size(), PakMeta{});
     const std::uint32_t familyCount = static_cast<std::uint32_t>(db.familyMembers.size());
     using AssetMap = decltype(db.assets);
     // Scans one family into `out`. Within a family the patch rule below decides replacements; across
@@ -1033,7 +1308,7 @@ bool buildIndex(Database& db, std::string& error) {
     // exactly what the merge step reproduces when families are scanned concurrently.
     auto scanFamily = [&](std::uint32_t familyId, AssetMap& out) {
         std::string familyError;
-        auto family = db.getFamily(familyId, familyError);
+        auto family = db.getFamily(familyId, familyError, true);
         if (!family) return;
         for (const auto& pakPtr : family->paks) {
             const PakData& pak = *pakPtr;
