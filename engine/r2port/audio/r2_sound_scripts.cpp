@@ -174,9 +174,17 @@ bool HasEnvironmentOverride() {
 }
 }  // namespace
 
+bool SoundEnabled() {
+    static const bool enabled = [] {
+        char env[8]{};
+        return !(GetEnvironmentVariableA("R2PORT_SOUND", env, sizeof(env)) > 0 && env[0] == '0' && env[1] == 0);
+    }();
+    return enabled;
+}
+
 void SetAliasCapacityOk(bool ok) { g_capacityOk = ok; }
 
-bool SoundAliasesAllowed() { return g_capacityOk.load() || HasEnvironmentOverride(); }
+bool SoundAliasesAllowed() { return SoundEnabled() && (g_capacityOk.load() || HasEnvironmentOverride()); }
 
 std::vector<std::string> EnabledSoundMaps() {
     char env[1024]{};
@@ -330,7 +338,7 @@ const std::string* Find(const std::vector<KeyValue>& kvs, std::string_view key) 
 std::string RewriteSoundscapeTriggers(const SoundBank& bank, std::string_view text, std::string_view map, std::uint64_t* changed) {
     if (changed) *changed = 0;
     const std::string_view original = text;
-    if (!bank.IsOpen() || !FindMap(map)) return std::string(original);
+    if (!SoundEnabled() || !bank.IsOpen() || !FindMap(map)) return std::string(original);
     // Entity partitions end with a NUL (the engine concatenates them and stops parsing at the first NUL). Edits and appended
     // entities go before it, otherwise every partition after this one (the _spawn.ent that follows _snd.ent) is cut off.
     size_t trailingNul = 0;

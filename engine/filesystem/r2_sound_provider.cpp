@@ -115,6 +115,8 @@ std::once_flag g_registration;
 void RegisterR2SoundProvider()
 {
     std::call_once(g_registration, []() {
+        if (!r2audio::SoundEnabled())
+            return;
         r2audio::SetInstallDirectory(GetR2InstallDirectory());
         RegisterProvider("scripts", std::make_shared<R2SoundProvider>());
     });

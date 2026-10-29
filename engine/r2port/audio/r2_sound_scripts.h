@@ -35,6 +35,9 @@ void SetAliasCapacityOk(bool ok);
 std::vector<std::string> EnabledSoundMaps();
 // False when the alias file must not be served (no relocated alias table in this process and no test override).
 bool SoundAliasesAllowed();
+// R2 map sounds are ON by default; env R2PORT_SOUND=0 turns the whole path off (no alias file served, no soundscape trigger rewrite, no relocated
+// alias table use), so the process behaves like a build without the feature.
+bool SoundEnabled();
 
 struct AliasReport {
     unsigned aliases = 0;          // aliases written
