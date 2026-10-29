@@ -1,5 +1,6 @@
 #include "legacy_ds_sound_tables.h"
 #include "logging.h"
+#include <MinHook.h>
 #include <cstring>
 #include <windows.h>
 
@@ -205,3 +206,52 @@ bool InstallLegacyDSSoundTableExpansion(std::uintptr_t engineDSBase) {
 const void* GetLegacyDSAliasRecords() {
 	return reinterpret_cast<const void*>(g_aliases);
 }
+
+namespace {
+// engine_ds.dll sub_180005F20(const char* filename) loads one sound script file (the client's +98B0 twin; same prologue).
+constexpr std::uint32_t kScriptLoadRva = 0x5F20;
+constexpr unsigned char kScriptLoadPrologue[14] = {0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x81, 0xEC};
+constexpr std::uint32_t kCrcRva = 0x15713E0;
+constexpr std::uint32_t kRangeCountRva = 0x1571400;  // dword_181571400, limit MAX_SOUND_RANGES
+using ScriptLoadFn = std::int64_t (*)(const char*);
+ScriptLoadFn g_scriptLoad = nullptr;
+std::uintptr_t g_dsEngine = 0;
+std::uint32_t g_hiddenAliases = 0, g_hiddenStart = ~0u;
+
+std::int64_t DSScriptLoad(const char* filename) {
+	auto* engine = reinterpret_cast<unsigned char*>(g_dsEngine);
+	auto& crc = *reinterpret_cast<std::uint32_t*>(engine + kCrcRva);
+	const int aliases = *reinterpret_cast<const int*>(engine + kAliasCountRva);
+	if (aliases >= 0 && static_cast<std::uint32_t>(aliases) < g_hiddenStart) {  // the table was cleared for a reload
+		g_hiddenAliases = 0;
+		g_hiddenStart = ~0u;
+	}
+	const std::uint32_t crcBefore = crc;
+	const std::int64_t result = g_scriptLoad(filename);
+	if (filename && _stricmp(filename, "scripts/r2port_sounds.txt") == 0) {
+		g_hiddenStart = static_cast<std::uint32_t>(aliases);
+		g_hiddenAliases = static_cast<std::uint32_t>(*reinterpret_cast<const int*>(engine + kAliasCountRva) - aliases);
+		crc = crcBefore;
+	}
+	return result;
+}
+}
+
+bool InstallLegacyDSAliasHiding(std::uintptr_t engineDSBase) {
+	if (!engineDSBase || g_scriptLoad)
+		return g_scriptLoad != nullptr;
+	auto* image = reinterpret_cast<unsigned char*>(engineDSBase);
+	if (std::memcmp(image + kScriptLoadRva, kScriptLoadPrologue, sizeof(kScriptLoadPrologue)) != 0) {
+		Warning("R1Delta legacy DS: R2 alias hiding skipped, sound script loader prologue did not match\n");
+		return false;
+	}
+	g_dsEngine = engineDSBase;
+	if (MH_CreateHook(image + kScriptLoadRva, reinterpret_cast<void*>(&DSScriptLoad), reinterpret_cast<void**>(&g_scriptLoad)) != MH_OK) {
+		g_scriptLoad = nullptr;
+		Warning("R1Delta legacy DS: R2 alias hiding skipped, cannot hook the sound script loader\n");
+		return false;
+	}
+	return true;
+}
+
+std::uint32_t LegacyDSHiddenTrailingAliases() { return g_hiddenAliases; }

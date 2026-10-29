@@ -9794,7 +9794,9 @@ void __stdcall LoaderNotificationCallback(
 			return;
 		// Before the dedicated engine's first sound-script load: its tables cap
 		// at 16,628 aliases, which truncates the current set.
-		InstallLegacyDSSoundTableExpansion(G_engine_ds);
+		// The generated R2 sound aliases only fit (and are only served) when the expanded table is in place and their CRC is hidden.
+		if (InstallLegacyDSSoundTableExpansion(G_engine_ds) && InstallLegacyDSAliasHiding(G_engine_ds))
+			r2audio::SetAliasCapacityOk(true);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x433C0), &ProcessConnectionlessPacketDedi, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x30FE20), &StringCompare_AllTalkHookDedi, reinterpret_cast<LPVOID*>(&oStringCompare_AllTalkHookDedi));
 		MH_EnableHook(MH_ALL_HOOKS);

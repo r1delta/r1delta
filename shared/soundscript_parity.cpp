@@ -74,6 +74,9 @@ bool ReadLocalTable(LocalTable& out) {
 			return false;
 		if (const void* relocated = GetLegacyDSAliasRecords())
 			out.records = static_cast<const unsigned char*>(relocated);
+		// The generated R2 aliases trail the table and are excluded (legacy_ds_sound_tables.cpp).
+		if (const int hidden = static_cast<int>(LegacyDSHiddenTrailingAliases()); hidden > 0 && hidden < out.count)
+			out.count -= hidden;
 		return true;
 	case R1DeltaEngineMode::Client2015:
 		if (!ReadLayout(kEngineLayout, G_engine, out))
