@@ -441,8 +441,7 @@ std::uintptr_t __fastcall R1ClientVPKAsyncPrecacheWorker(
 
 using StartPrecacheFn = std::uintptr_t(__fastcall*)(
 	void* packStore,
-	std::uint32_t mode,
-	const char* archive);
+	std::uint32_t mode);
 StartPrecacheFn s_startPrecacheOriginal{};
 bool s_startPrecacheHookCreated{};
 
@@ -455,19 +454,19 @@ bool s_startPrecacheHookCreated{};
 // caller learns about the missing content through its own load failure.
 std::uintptr_t __fastcall R1ClientVPKStartPrecache(
 	void* packStore,
-	std::uint32_t mode,
-	const char* archive)
+	std::uint32_t mode)
 {
 	if (!packStore) {
+		// The original takes exactly (packStore, mode); RDX is not a string at the call sites
+		// (a previous version printed it with %s and faulted in strlen on a null store).
 		Warning(
 			"R1Delta: VPK start precache skipped a null pack store "
-			"(mode=%u archive=%s caller=%p); the map client archive is unavailable\n",
+			"(mode=%u caller=%p); the map client archive is unavailable\n",
 			mode,
-			archive ? archive : "<null>",
 			_ReturnAddress());
 		return 0;
 	}
-	return s_startPrecacheOriginal(packStore, mode, archive);
+	return s_startPrecacheOriginal(packStore, mode);
 }
 }
 
