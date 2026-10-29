@@ -39,5 +39,10 @@ struct Settings
 // recvfrom hook at most once per second and by console commands).
 Settings GetSettings();
 void RefreshSettings();
+// Re-reads only the numeric convars; safe from any thread (strings are not).
+// The heartbeat thread uses it so a server that starts its services before the
+// engine thread's next once-a-second refresh still honours delta_p2p_server_*
+// values set on the command line or in a cfg.
+void RefreshSettingsNumeric();
 
 } // namespace p2p

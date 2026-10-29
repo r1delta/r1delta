@@ -18,6 +18,9 @@ void ServerAddHeartbeatFields(nlohmann::json& heartbeat, uint16_t port);
 // credentials).
 void ServerHandleHeartbeatResponse(const std::string& body);
 
+// Starts the services without touching a heartbeat (no-op when p2p is off).
+void ServerEnsureServices(uint16_t port);
+
 // Rendezvous control packets that arrived on the server socket.
 void ServerOnRegisterAck(const RegisterAck& ack, const Ipv4Endpoint& from);
 void ServerOnPunchRequest(const PunchRequest& req, const Ipv4Endpoint& from);

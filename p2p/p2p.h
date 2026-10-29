@@ -19,6 +19,12 @@ void Initialize();
 void AddHeartbeatFields(nlohmann::json& heartbeat, int port);
 void OnHeartbeatResponse(const std::string& body);
 
+// Starts the server side services (EOS login, overlays, UPnP) without a
+// heartbeat. The heartbeat thread calls it while the server is hidden
+// (hide_server 1), where no heartbeat is sent but direct and p2p joins must
+// still work. Idempotent.
+void EnsureServerServices(int port);
+
 // Server list integration: remembers each entry's advertised transports so
 // delta_connect can use them.
 void OnServerListEntry(const nlohmann::json& entry);

@@ -25,39 +25,69 @@ namespace p2p
 namespace
 {
 
-ConVarR1* g_enable = nullptr;
-ConVarR1* g_serverUpnp = nullptr;
-ConVarR1* g_serverPunch = nullptr;
-ConVarR1* g_serverEos = nullptr;
-ConVarR1* g_serverIroh = nullptr;
-ConVarR1* g_serverTailcat = nullptr;
-ConVarR1* g_serverTurn = nullptr;
-ConVarR1* g_punchSpray = nullptr;
-ConVarR1* g_connectTimeout = nullptr;
-ConVarR1* g_relayPenalty = nullptr;
-ConVarR1* g_prefer = nullptr;
-ConVarR1* g_irohRelay = nullptr;
-ConVarR1* g_tailcatDerpMap = nullptr;
-ConVarR1* g_debug = nullptr;
-ConVarR1* g_requireIdentity = nullptr;
-ConVarR1* g_identityKey = nullptr;
+const CVValue_t* g_enable = nullptr;
+const CVValue_t* g_serverUpnp = nullptr;
+const CVValue_t* g_serverPunch = nullptr;
+const CVValue_t* g_serverEos = nullptr;
+const CVValue_t* g_serverIroh = nullptr;
+const CVValue_t* g_serverTailcat = nullptr;
+const CVValue_t* g_serverTurn = nullptr;
+const CVValue_t* g_punchSpray = nullptr;
+const CVValue_t* g_connectTimeout = nullptr;
+const CVValue_t* g_relayPenalty = nullptr;
+const CVValue_t* g_prefer = nullptr;
+const CVValue_t* g_irohRelay = nullptr;
+const CVValue_t* g_tailcatDerpMap = nullptr;
+const CVValue_t* g_debug = nullptr;
+const CVValue_t* g_requireIdentity = nullptr;
+const CVValue_t* g_identityKey = nullptr;
 
-int IntValue(const ConVarR1* var, int fallback)
+// Convars live in the R1 ICvar on the client/listen/legacy dedicated modes and
+// in the wrapped R1O ICvar on the R1O fake dedicated server; both expose the
+// value through the same CVValue_t, so only registration and lookup differ.
+int IntValue(const CVValue_t* value, int fallback)
 {
-    return var ? var->m_Value.m_nValue : fallback;
+    return value ? value->m_nValue : fallback;
 }
 
-std::string StringValue(const ConVarR1* var)
+std::string StringValue(const CVValue_t* value)
 {
-    return var && var->m_Value.m_pszString ? std::string(var->m_Value.m_pszString) : std::string();
+    return value && value->m_pszString ? std::string(value->m_pszString) : std::string();
+}
+
+template <typename ConVarType>
+const CVValue_t* ValueOf(ConVarType* var)
+{
+    if (!var)
+        return nullptr;
+    ConVarType* parent = var->m_pParent ? var->m_pParent : var;
+    return &parent->m_Value;
+}
+
+const CVValue_t* RegisterCv(const char* name, const char* value, int flags, const char* help)
+{
+    if (IsR1ODedicatedServer())
+        return ValueOf(RegisterR1ODediConVar(name, value, flags, help));
+    return ValueOf(RegisterConVar(name, value, flags, help));
+}
+
+void RegisterCmd(const char* name, void (*callback)(const CCommand&), const char* help, int flags)
+{
+    if (IsR1ODedicatedServer())
+        RegisterR1ODediConCommand(name, callback, help, flags);
+    else
+        RegisterConCommand(name, callback, help, flags);
 }
 
 std::string MasterServerUrl()
 {
-    if (!cvarinterface || !OriginalCCVar_FindVar)
+    if (!cvarinterface)
         return {};
-    ConVarR1* var = OriginalCCVar_FindVar(cvarinterface, "delta_ms_url");
-    return StringValue(var);
+    if (IsR1ODedicatedServer())
+        return StringValue(ValueOf(CCVar_FindVar(cvarinterface, "delta_ms_url")));
+    if (!OriginalCCVar_FindVar)
+        return {};
+    return StringValue(ValueOf(OriginalCCVar_FindVar(cvarinterface, "delta_ms_url")));
 }
 
 uint16_t ParsePort(const char* text, uint16_t fallback)
@@ -224,6 +254,23 @@ void RefreshSettings()
     g_settingsRefreshed = std::chrono::steady_clock::now();
 }
 
+void RefreshSettingsNumeric()
+{
+    // Plain int reads of the convar values; the string fields stay as the
+    // engine thread last read them.
+    std::lock_guard lock(g_settingsMutex);
+    g_settings.enable = g_enable && IntValue(g_enable, 1) != 0;
+    g_settings.serverUpnp = IntValue(g_serverUpnp, 1) != 0;
+    g_settings.serverPunch = IntValue(g_serverPunch, 1) != 0;
+    g_settings.serverEos = IntValue(g_serverEos, 1) != 0;
+    g_settings.serverIroh = IntValue(g_serverIroh, 1) != 0;
+    g_settings.serverTailcat = IntValue(g_serverTailcat, 1) != 0;
+    g_settings.serverTurn = IntValue(g_serverTurn, 0) != 0;
+    g_settings.punchSpray = IntValue(g_punchSpray, 2);
+    g_settings.requireIdentity = IntValue(g_requireIdentity, 1);
+    g_settings.debug = IntValue(g_debug, 0) != 0;
+}
+
 void OnEngineThreadTick()
 {
     {
@@ -318,36 +365,30 @@ void Initialize()
         return;
     initialized = true;
 
-    if (IsR1ODedicatedServer())
-    {
-        RefreshSettings(); // no convars registered: everything stays disabled
-        return; // the R1O fake dedicated server registers its cvars differently; keep it on the legacy path
-    }
-
-    g_enable = RegisterConVar("delta_p2p_enable", "1", FCVAR_NONE,
+    g_enable = RegisterCv("delta_p2p_enable", "1", FCVAR_NONE,
                               "Enable NAT traversal and alternative transports (EOS, iroh, tailcat, TURN, hole punching, UPnP)");
-    g_serverUpnp = RegisterConVar("delta_p2p_server_upnp", "1", FCVAR_NONE, "Servers ask the router to forward hostport via UPnP / NAT-PMP");
-    g_serverPunch = RegisterConVar("delta_p2p_server_punch", "1", FCVAR_NONE, "Servers register with the master server rendezvous for UDP hole punching");
-    g_serverEos = RegisterConVar("delta_p2p_server_eos", "1", FCVAR_NONE, "Servers log into EOS and advertise their ProductUserId");
-    g_serverIroh = RegisterConVar("delta_p2p_server_iroh", "1", FCVAR_NONE, "Servers accept connections over iroh (needs r1delta_iroh.dll)");
-    g_serverTailcat = RegisterConVar("delta_p2p_server_tailcat", "1", FCVAR_NONE, "Servers accept connections over tailcat (needs r1delta_tailcat.dll)");
-    g_serverTurn = RegisterConVar("delta_p2p_server_turn", "0", FCVAR_NONE, "Opt in to Cloudflare TURN when the master server provides credentials (disabled for this rollout)");
-    g_punchSpray = RegisterConVar("delta_p2p_punch_spray", "2", FCVAR_NONE, "Extra ports above the client's mapped port to punch (sequential NAT port prediction)");
-    g_connectTimeout = RegisterConVar("delta_p2p_connect_timeout_ms", "2500", FCVAR_ARCHIVE, "How long delta_connect probes routes before connecting");
-    g_relayPenalty = RegisterConVar("delta_p2p_relay_penalty_ms", "20", FCVAR_ARCHIVE, "Latency handicap applied to relayed routes (TURN, iroh/tailcat relays) when choosing");
-    g_prefer = RegisterConVar("delta_p2p_prefer", "", FCVAR_ARCHIVE, "Force a route when it answers: direct, punch, lan, tailscale, eos, iroh, tailcat or turn");
-    g_irohRelay = RegisterConVar("delta_p2p_iroh_relay_url", "", FCVAR_NONE, "Custom iroh relay URL (default: n0 public relays)");
-    g_tailcatDerpMap = RegisterConVar("delta_p2p_tailcat_derpmap_url", "", FCVAR_NONE, "Custom tailcat DERP map URL (default: tailcat.dev)");
-    g_debug = RegisterConVar("delta_p2p_debug", "0", FCVAR_NONE, "Verbose NAT traversal logging");
-    g_requireIdentity = RegisterConVar("delta_p2p_require_identity", "1", FCVAR_NONE,
+    g_serverUpnp = RegisterCv("delta_p2p_server_upnp", "1", FCVAR_NONE, "Servers ask the router to forward hostport via UPnP / NAT-PMP");
+    g_serverPunch = RegisterCv("delta_p2p_server_punch", "1", FCVAR_NONE, "Servers register with the master server rendezvous for UDP hole punching");
+    g_serverEos = RegisterCv("delta_p2p_server_eos", "1", FCVAR_NONE, "Servers log into EOS and advertise their ProductUserId");
+    g_serverIroh = RegisterCv("delta_p2p_server_iroh", "1", FCVAR_NONE, "Servers accept connections over iroh (needs r1delta_iroh.dll)");
+    g_serverTailcat = RegisterCv("delta_p2p_server_tailcat", "1", FCVAR_NONE, "Servers accept connections over tailcat (needs r1delta_tailcat.dll)");
+    g_serverTurn = RegisterCv("delta_p2p_server_turn", "0", FCVAR_NONE, "Opt in to Cloudflare TURN when the master server provides credentials (disabled for this rollout)");
+    g_punchSpray = RegisterCv("delta_p2p_punch_spray", "2", FCVAR_NONE, "Extra ports above the client's mapped port to punch (sequential NAT port prediction)");
+    g_connectTimeout = RegisterCv("delta_p2p_connect_timeout_ms", "2500", FCVAR_ARCHIVE, "How long delta_connect probes routes before connecting");
+    g_relayPenalty = RegisterCv("delta_p2p_relay_penalty_ms", "20", FCVAR_ARCHIVE, "Latency handicap applied to relayed routes (TURN, iroh/tailcat relays) when choosing");
+    g_prefer = RegisterCv("delta_p2p_prefer", "", FCVAR_ARCHIVE, "Force a route when it answers: direct, punch, lan, tailscale, eos, iroh, tailcat or turn");
+    g_irohRelay = RegisterCv("delta_p2p_iroh_relay_url", "", FCVAR_NONE, "Custom iroh relay URL (default: n0 public relays)");
+    g_tailcatDerpMap = RegisterCv("delta_p2p_tailcat_derpmap_url", "", FCVAR_NONE, "Custom tailcat DERP map URL (default: tailcat.dev)");
+    g_debug = RegisterCv("delta_p2p_debug", "0", FCVAR_NONE, "Verbose NAT traversal logging");
+    g_requireIdentity = RegisterCv("delta_p2p_require_identity", "1", FCVAR_NONE,
                                        "Servers only accept EOS/iroh/tailcat players that present a master-server attested IP (so IP bans apply on every transport): 0 = off, 1 = when the master server supports it, 2 = always");
-    g_identityKey = RegisterConVar("delta_p2p_identity_pubkey", "", FCVAR_NONE,
+    g_identityKey = RegisterCv("delta_p2p_identity_pubkey", "", FCVAR_NONE,
                                    "Hex X||Y of the master server's P-256 identity key (empty = official master server)");
 
-    RegisterConCommand("delta_connect", ConnectCommand, "Connect to a server using the lowest-latency route (direct, hole punched, LAN, Tailscale, EOS, iroh, tailcat, TURN)", FCVAR_NONE);
-    RegisterConCommand("delta_connect_iroh", ConnectIrohCommand, "Connect to a server by its iroh address", FCVAR_NONE);
-    RegisterConCommand("delta_connect_tailcat", ConnectTailcatCommand, "Connect to a server by its tailcat address", FCVAR_NONE);
-    RegisterConCommand("delta_p2p_status", StatusCommand, "Show NAT traversal / transport status", FCVAR_NONE);
+    RegisterCmd("delta_connect", ConnectCommand, "Connect to a server using the lowest-latency route (direct, hole punched, LAN, Tailscale, EOS, iroh, tailcat, TURN)", FCVAR_NONE);
+    RegisterCmd("delta_connect_iroh", ConnectIrohCommand, "Connect to a server by its iroh address", FCVAR_NONE);
+    RegisterCmd("delta_connect_tailcat", ConnectTailcatCommand, "Connect to a server by its tailcat address", FCVAR_NONE);
+    RegisterCmd("delta_p2p_status", StatusCommand, "Show NAT traversal / transport status", FCVAR_NONE);
     RefreshSettings();
 }
 
@@ -356,6 +397,13 @@ void AddHeartbeatFields(nlohmann::json& heartbeat, int port)
     if (port <= 0 || port > 0xFFFF)
         return;
     ServerAddHeartbeatFields(heartbeat, static_cast<uint16_t>(port));
+}
+
+void EnsureServerServices(int port)
+{
+    if (port <= 0 || port > 0xFFFF)
+        return;
+    ServerEnsureServices(static_cast<uint16_t>(port));
 }
 
 void OnHeartbeatResponse(const std::string& body)

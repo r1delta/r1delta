@@ -274,8 +274,17 @@ json IrohTransportJson(const std::string& address)
 
 } // namespace
 
+void ServerEnsureServices(uint16_t port)
+{
+    RefreshSettingsNumeric();
+    if (!GetSettings().enable || port == 0)
+        return;
+    StartServices(port);
+}
+
 void ServerAddHeartbeatFields(json& heartbeat, uint16_t port)
 {
+    RefreshSettingsNumeric();
     const Settings settings = GetSettings();
     if (!settings.enable || port == 0)
         return;

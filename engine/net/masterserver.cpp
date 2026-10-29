@@ -307,6 +307,10 @@ namespace MasterServerClient {
                 }
 
                 if (hidden) {
+                    // No heartbeat, but the server must still accept p2p joins (EOS
+                    // login, overlays, UPnP); visible servers start these from the
+                    // heartbeat itself.
+                    p2p::EnsureServerServices(ResolveMasterServerPort());
                     if (listedOnMaster.load(std::memory_order_acquire) && !SendServerDelist())
                         Warning("MasterServerClient: Delist after hiding failed\n");
                 }

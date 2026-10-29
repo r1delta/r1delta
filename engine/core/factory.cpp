@@ -97,6 +97,7 @@
 #include "squirrel.h"
 #include "commands.h"
 #include "../dedicated.h"
+#include "p2p/p2p_identity.h"
 
 #pragma comment(lib, "Dbghelp.lib")
 
@@ -9722,6 +9723,19 @@ static bool NormalizeR1ONativeFilterAddress(
 	return true;
 }
 
+// The 16 address bytes of either layout the native filter is called with
+// (legacy wrapper: bytes at +4; packed CIPAndPort: bytes at +0, type 4 at +20).
+static bool ReadR1ONativeFilterIpv6(const void* address, unsigned char* out16)
+{
+	if (!address || !out16 || !IsReadableRange(address, sizeof(R1ONativeFilterAddress)))
+		return false;
+
+	const R1OPackedIpAndPort* packed = reinterpret_cast<const R1OPackedIpAndPort*>(address);
+	const R1ONativeFilterAddress* legacy = reinterpret_cast<const R1ONativeFilterAddress*>(address);
+	memcpy(out16, packed->type == 4 ? packed->address : legacy->address, 16);
+	return true;
+}
+
 static bool __fastcall R1ONativeIpFilter(const void* address, int exemptAddress)
 {
 	if (!R1ONativeIpFilterOriginal)
@@ -9729,9 +9743,25 @@ static bool __fastcall R1ONativeIpFilter(const void* address, int exemptAddress)
 
 	R1ONativeFilterAddress normalized = {};
 	const bool didNormalize = NormalizeR1ONativeFilterAddress(address, &normalized);
-	return R1ONativeIpFilterOriginal(
-		didNormalize ? &normalized : address,
-		exemptAddress);
+	if (R1ONativeIpFilterOriginal(didNormalize ? &normalized : address, exemptAddress))
+		return true;
+
+	// Players that joined over EOS / iroh / tailcat / TURN (fake addresses) or a
+	// LAN / Tailscale address are also checked against the public IP the master
+	// server attested for them, like CBanSystem::Filter_ShouldDiscard does on
+	// the R1 modes, so an IP ban cannot be dodged by switching transport.
+	unsigned char raw[16] = {};
+	uint32_t attestedIp = 0;
+	if (!ReadR1ONativeFilterIpv6(address, raw) || !p2p::LookupIdentityIpv4(raw, attestedIp))
+		return false;
+
+	R1ONativeFilterAddress attested = didNormalize ? normalized : *reinterpret_cast<const R1ONativeFilterAddress*>(address);
+	attested.address[0] = static_cast<unsigned char>((attestedIp >> 24) & 0xFF);
+	attested.address[1] = static_cast<unsigned char>((attestedIp >> 16) & 0xFF);
+	attested.address[2] = static_cast<unsigned char>((attestedIp >> 8) & 0xFF);
+	attested.address[3] = static_cast<unsigned char>(attestedIp & 0xFF);
+	memset(attested.address + 4, 0, sizeof(attested.address) - 4);
+	return R1ONativeIpFilterOriginal(&attested, exemptAddress);
 }
 
 static bool NormalizeR1ONativeIpBanArgument(
