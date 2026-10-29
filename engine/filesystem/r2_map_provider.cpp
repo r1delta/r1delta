@@ -15,10 +15,6 @@
 #include "engine/r2port/entity_rewrite.h"
 #include "engine/r2port/trigger_brush.h"
 #include "engine/filesystem/r2_overview_provider.h"
-#include "engine/filesystem/r2_sound_provider.h"
-#include "engine/r2port/audio/r2_audio_source.h"
-#include "engine/r2port/audio/r2_sound_bank.h"
-#include "engine/r2port/audio/r2_sound_scripts.h"
 #include "engine/filesystem/r2_particle_provider.h"
 #include "p2p/p2p_identity.h"
 
@@ -1011,28 +1007,6 @@ void LogEntityRewrite(const char* what, std::string_view mapName,
     OutputDebugStringA(buffer);
 }
 
-// R2 trigger_soundscape entities carry `environment` / `play_event` keys R1 ignores. For the `_snd.ent` partition this wires
-// each trigger to an env_soundscape_triggerable (appended) that names a generated soundscape (see r2_sound_scripts.h).
-std::string ApplySoundscapeRewrite(std::string_view mapName, std::string_view path, std::string text)
-{
-    constexpr std::string_view suffix = "_snd.ent";
-    if (path.size() < suffix.size() || path.substr(path.size() - suffix.size()) != suffix)
-        return text;
-    const r2audio::SoundBank* bank = r2audio::SharedBank();
-    if (!bank)
-        return text;
-    std::uint64_t wired = 0;
-    std::string out = r2audio::RewriteSoundscapeTriggers(*bank, text, mapName, &wired);
-    if (wired) {
-        char buffer[256]{};
-        _snprintf_s(buffer, sizeof(buffer), _TRUNCATE, "R1Delta: R2 soundscape triggers map=%.*s wired=%llu\n",
-            static_cast<int>(mapName.size()), mapName.data(), static_cast<unsigned long long>(wired));
-        Msg("%s", buffer);
-        OutputDebugStringA(buffer);
-    }
-    return out;
-}
-
 // Reads one partition .ent file from the R2 package and applies the entity text rules. Returns false when
 // the package has no such file; text that cannot be parsed is returned unchanged.
 bool LoadRewrittenPartition(const std::shared_ptr<MapState>& state, const std::string& path, std::string& text,
@@ -1049,7 +1023,7 @@ bool LoadRewrittenPartition(const std::shared_ptr<MapState>& state, const std::s
         entity_rewrite::RewriteReport report;
         std::string rewritten = entity_rewrite::RewriteEntityLump(text, { state->mapName, false, &R2ParticleTargetName }, &report);
         if (!report.unknownConstructs)
-            text = ApplySoundscapeRewrite(state->mapName, path, entity_rewrite::RaiseSpawnpointOrigins(rewritten, kSpawnpointLift));
+            text = entity_rewrite::RaiseSpawnpointOrigins(rewritten, kSpawnpointLift);
         for (const auto& entry : report.unsupportedClasses)
             unsupported[entry.name] += entry.occurrences;
         if (report.droppedScriptMoverLightweight)
@@ -1234,7 +1208,6 @@ FileBytes ReadEntityFile(const MapRequest& request, const std::shared_ptr<MapSta
         else {
             std::uint64_t raised = 0;
             rewritten = entity_rewrite::RaiseSpawnpointOrigins(rewritten, kSpawnpointLift, &raised);
-            rewritten = ApplySoundscapeRewrite(request.mapName, path, std::move(rewritten));
             if (rewritten != text) {
                 const size_t bytesIn = data->size();
                 data = std::make_shared<const std::vector<uint8_t>>(rewritten.begin(), rewritten.end());
@@ -2027,7 +2000,6 @@ void InstallR2MapProvider()
         RegisterR2ModelProvider();
         RegisterR2ParticleProvider();
         RegisterR2OverviewProvider();
-        RegisterR2SoundProvider();
         InstallR2MapPatchSource();
         postfx::RegisterMaterialProvider();
         auto provider = std::make_shared<R2MapProvider>();

@@ -6,7 +6,6 @@
 #include "parity_common.h"
 #include "persistentdata.h"
 #include "legacy_ds_sound_tables.h"
-#include "audio_cache.h"
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -75,12 +74,7 @@ bool ReadLocalTable(LocalTable& out) {
 			out.records = static_cast<const unsigned char*>(relocated);
 		return true;
 	case R1DeltaEngineMode::Client2015:
-		if (!ReadLayout(kEngineLayout, G_engine, out))
-			return false;
-		// The generated R2 aliases trail the table and are excluded (audio_cache.cpp): they exist only when the R2 install does.
-		if (const int hidden = static_cast<int>(R1AudioHiddenTrailingAliases()); hidden > 0 && hidden < out.count)
-			out.count -= hidden;
-		return true;
+		return ReadLayout(kEngineLayout, G_engine, out);
 	}
 	return false;
 }
