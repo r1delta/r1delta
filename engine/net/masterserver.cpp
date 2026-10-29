@@ -173,8 +173,6 @@ namespace MasterServerClient {
     // Heartbeat
     // --------------------------------
     bool SendServerHeartbeat(const HeartbeatInfo& heartbeat, bool isHibernating, uint32_t generation) {
-        // REMOVE BEFORE SHIPPING: do NOT broadcast R2 maps to the master server until we confirm we really want to do this.
-#if 0
         InitMasterServerCVars();
         if (!delta_ms_url || !delta_ms_url->m_Value.m_pszString || !delta_ms_url->m_Value.m_pszString[0]) {
             Warning("MasterServerClient: delta_ms_url not set\n");
@@ -253,18 +251,11 @@ namespace MasterServerClient {
         IsValidHeartBeat.store(true, std::memory_order_release);
         listedOnMaster.store(true, std::memory_order_release);
         return true;
-#endif
-        static_cast<void>(heartbeat);
-        static_cast<void>(isHibernating);
-        static_cast<void>(generation);
-        return false;
     }
 
     // Removes our entry from the master server. Returns false only when a request was sent
     // and did not succeed; with no master URL or no bound port there is nothing to remove.
     static bool SendServerDelist() {
-        // REMOVE BEFORE SHIPPING: do NOT broadcast R2 maps to the master server until we confirm we really want to do this.
-#if 0
         InitMasterServerCVars();
         if (!delta_ms_url || !delta_ms_url->m_Value.m_pszString || !delta_ms_url->m_Value.m_pszString[0])
             return true;
@@ -279,16 +270,12 @@ namespace MasterServerClient {
         std::string path = "/heartbeat/" + std::to_string(port);
         auto res = httpClient->Delete(path.c_str());
         return res && res->status == 200;
-#endif
-        return true;
     }
 
     // --------------------------------
     // Heartbeat Thread
     // --------------------------------
     void StartHeartbeatThread() {
-        // REMOVE BEFORE SHIPPING: do NOT broadcast R2 maps to the master server until we confirm we really want to do this.
-#if 0
         if (heartbeatThreadRunning.exchange(true, std::memory_order_acq_rel)) {
             return; // Thread is already running
         }
@@ -352,7 +339,6 @@ namespace MasterServerClient {
                 std::this_thread::sleep_for(std::chrono::milliseconds(250));
             }
         }).detach();
-#endif
     }
 
     // --------------------------------
