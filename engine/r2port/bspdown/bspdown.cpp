@@ -200,6 +200,7 @@ std::vector<uint8_t> DowngradeBsp(const uint8_t* data, size_t size, const Option
     namespaceMaterials(c);
     convertCubemaps(c);
     convertShadow(c);
+    orderMeshes(c);
     reportResidualBounds(c);
 
     if (c.opt.dropR2OnlyLumps) {

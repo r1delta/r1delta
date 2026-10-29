@@ -28,8 +28,11 @@ class Bsp:
         self.ident = bytes(self.d[0:4])
         self.version, self.revision, self.last = struct.unpack_from("<III", self.d, 4)
         self.lumps = [struct.unpack_from("<IIII", self.d, 0x10 + 16 * i) for i in range(128)]
+        self.overlay = {}  # lump -> uint8 array that raw() returns instead of the file contents (rule 26 undo)
 
     def raw(self, i):
+        if i in self.overlay:
+            return self.overlay[i]
         o, l, _, _ = self.lumps[i]
         return self.d[o:o + l]
 
@@ -1220,12 +1223,106 @@ def expected_vertex_edits(r2):
     return res
 
 
+def undo_mesh_order(C, r2, r1):
+    """Rule 26 (world mesh order). The converter stably sorts the model 0 meshes below the prop base by material sort and renumbers the mesh
+    ids in the cell object references (0x78) and the CSM object references (0x64). Every other check compares the output with the R2 input mesh
+    by mesh, so this recovers the pre-sort arrays from the output and overlays them on `r1`: the permutation comes from the reference slots of
+    0x78 (slot s names mesh R2[s] in the input and R1[s] in the output), the few unreferenced meshes are matched by the fields the converter never
+    changes (styles, luxel origin, flags). The recovered permutation is then checked against an independent stable argsort of the recovered
+    material sorts, and the output must be sorted."""
+    print("== rule 26 mesh order")
+    m2 = r2.arr(0x50, MESH_DT_R2)
+    m1 = r1.arr(0x50, MESH_DT_R1)
+    mb1 = r1.raw(0x51).reshape(-1, 32)
+    mdl = r1.arr(0x0E, "<6f4,<2u4")
+    li = r1.arr(0x7B, "<i4")
+    refs2 = r2.arr(0x78, "<u2").astype(np.int64)
+    refs1 = r1.arr(0x78, "<u2").astype(np.int64)
+    csm1 = r1.arr(0x64, "<u2").astype(np.int64)
+    prop_base = (int(li[2]) + 63) & ~63
+    w0, wn = int(mdl[0][1][0]), int(mdl[0][1][1])
+    d0, d1 = w0, min(w0 + wn, prop_base, len(m1))
+    ok = C.ok(len(m1) == len(m2) == len(mb1) and len(refs1) == len(refs2), "meshes, bounds and cell object references keep their counts")
+    if not ok:
+        return
+    ms1 = m1["ms"].astype(np.int64)
+    C.ok(bool((np.diff(ms1[d0:d1]) >= 0).all()), "world meshes [%d, %d) are sorted by material sort (%d runs when everything is visible, R1 draws at most 2048 per view)" %
+         (d0, d1, int((np.diff(ms1[d0:d1]) != 0).sum()) + 1 if d1 > d0 else 0))
+    # recovered permutation: new_of[old]
+    new_of = np.full(len(m1), -1, np.int64)
+    in2 = (refs2 >= d0) & (refs2 < d1)
+    bad_slot = int((~((refs1 >= d0) & (refs1 < d1))[in2]).sum()) + int((refs1[~in2] != refs2[~in2]).sum())
+    C.ok(bad_slot == 0, "object references: ids inside the world mesh range map into it, every other id (static props) is unchanged", str(bad_slot))
+    o, n = refs2[in2], refs1[in2]
+    consistent = True
+    if len(o):
+        order = np.argsort(o, kind="stable")
+        o_s, n_s = o[order], n[order]
+        first = np.concatenate(([True], o_s[1:] != o_s[:-1]))
+        grp = np.cumsum(first) - 1
+        consistent = bool((n_s == n_s[first][grp]).all())
+        new_of[o_s[first]] = n_s[first]
+    used = new_of[new_of >= 0]
+    injective = len(np.unique(used)) == len(used)
+    C.ok(consistent and injective, "each referenced mesh keeps one new index and no two meshes share one")
+    # unreferenced meshes: match by the unchanged static fields, ascending
+    left_old = [i for i in range(d0, d1) if new_of[i] < 0]
+    taken = np.zeros(len(m1), bool); taken[used] = True
+    left_new = [j for j in range(d0, d1) if not taken[j]]
+    static = lambda m, i: (bytes(np.asarray(m[i]["st"]).tobytes()), bytes(np.asarray(m[i]["lo"]).tobytes()), bytes(np.asarray(m[i]["lom"]).tobytes()), int(m[i]["fl"]))
+    pool = {}
+    for i in left_old:
+        pool.setdefault(static(m2, i), []).append(i)
+    unmatched = 0
+    for j in left_new:
+        lst = pool.get(static(m1, j))
+        if lst:
+            new_of[lst.pop(0)] = j
+        else:
+            unmatched += 1
+    C.ok(len(left_old) == len(left_new) and unmatched == 0, "the %d unreferenced world meshes match their output slots by styles / luxel origin / flags" % len(left_old))
+    if (new_of[d0:d1] < 0).any():
+        new_of[d0:d1] = np.where(new_of[d0:d1] < 0, np.arange(d0, d1), new_of[d0:d1])
+    new_of[:d0] = np.arange(d0)
+    new_of[d1:] = np.arange(d1, len(m1))
+    perm_ok = len(np.unique(new_of)) == len(new_of)
+    C.ok(perm_ok, "recovered mesh permutation is a bijection")
+    if not perm_ok:
+        return
+    m1u = m1[new_of]                      # m1u[old] = the output record of mesh `old`
+    mbu = mb1[new_of]
+    exp = np.empty(len(m1), np.int64)     # independent expectation: stable argsort of the recovered sorts
+    ranks = np.argsort(m1u["ms"][d0:d1].astype(np.int64), kind="stable")
+    exp_new = np.empty(d1 - d0, np.int64); exp_new[ranks] = np.arange(d1 - d0)
+    exp[d0:d1] = d0 + exp_new
+    exp[:d0] = np.arange(d0); exp[d1:] = np.arange(d1, len(m1))
+    moved = int((new_of != np.arange(len(m1))).sum())
+    C.ok(bool((exp == new_of).all()), "the permutation is the stable sort of the world meshes by material sort (%d meshes moved)" % moved)
+    inv = np.empty(len(m1), np.int64); inv[new_of] = np.arange(len(m1))   # inv[new] = old
+    def undo_ids(ids):
+        out = ids.copy()
+        sel = (ids >= d0) & (ids < d1)
+        out[sel] = inv[ids[sel]]
+        return out.astype("<u2")
+    r1.overlay[0x50] = np.frombuffer(m1u.tobytes(), np.uint8)
+    r1.overlay[0x51] = np.ascontiguousarray(mbu).reshape(-1)
+    r1.overlay[0x78] = np.frombuffer(undo_ids(refs1).tobytes(), np.uint8)
+    r1.overlay[0x64] = np.frombuffer(undo_ids(csm1).tobytes(), np.uint8)
+    # object-reference bounds are per slot, not per mesh: they must still be identical to R2
+    C.ok(same_arr(r1.arr(0x79, "<u1"), r2.arr(0x79, "<u1")), "object reference bounds (0x79) identical to R2 (per slot, not renumbered)")
+    print("  note  the checks below run on the recovered pre-sort arrays")
+
+
 def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", physics="stub", cubemap_scale=4.0,
           props="keep", scatter_min=500, csm_rebase=False, empty_shadow=False, wl_flag2=False, keep_flag10=False,
-          grid_pad=True, unpadded=None, grid_size=0.0):
+          grid_pad=True, unpadded=None, grid_size=0.0, mesh_order=True):
     C = Checker()
     r2 = Bsp(in_path)
     r1 = Bsp(out_path)
+    if mesh_order:
+        undo_mesh_order(C, r2, r1)
+    else:
+        print("== rule 26 mesh order\n  note  off (--no-mesh-order): the R2 mesh order is expected")
     L = float(limit)
 
     print("== header")
@@ -1992,6 +2089,7 @@ if __name__ == "__main__":
                     help="validate under the r1delta map provider's default options (r2_map_provider.cpp R2ConverterOptions): --cubemaps split --csm-rebase "
                          "--rtl-bake edge --rtl-bake-vsm --rtl-bake-hot clip --rtl-bake-smooth 1 --rtl-bake-bm terrain (DrydockSteps preset), plus --csm-last-env for mp_coliseum / mp_coliseum_column (taken from the input file name); every other option at the converter default")
     ap.add_argument("--material-namespace", default="", help="rule 25: the converter's --material-namespace prefix (--provider implies r2w/)")
+    ap.add_argument("--no-mesh-order", action="store_true", help="rule 26 disabled in the converter (--no-mesh-order): the R2 mesh order is expected; default expects the world meshes sorted by material sort")
     ap.add_argument("--no-grid-pad", action="store_true", help="rule 18 disabled in the converter")
     ap.add_argument("--grid-size", type=float, default=2048.0, help="rule 19 cell size given to the converter (0 = R2 size kept)")
     ap.add_argument("--reference", "--unpadded", dest="reference", help="the same input converted with --grid-size 0 --no-grid-pad: equivalence checks for rules 18 / 19")
@@ -2013,4 +2111,4 @@ if __name__ == "__main__":
                      bake_hot=1 if a.rtl_bake_hot == "clip" else 0, bake_vsm=a.rtl_bake_vsm, bake_alpha_step=a.rtl_bake_alpha_step)
     sys.exit(1 if check(a.r2, a.r1, a.limit, a.rtl_bytes, not a.no_bsp_tool, a.cubemaps, a.physics, a.cubemap_scale,
                         a.props, a.scatter_min, a.csm_rebase, a.empty_shadow_meshes, a.worldlight_flag2, a.keep_prop_flag10,
-                        not a.no_grid_pad, a.reference, a.grid_size) else 0)
+                        not a.no_grid_pad, a.reference, a.grid_size, not a.no_mesh_order) else 0)

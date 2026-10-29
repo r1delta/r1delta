@@ -749,5 +749,90 @@ void convertMeshes(Ctx& c) {
     (void)clipCubemapOverride;
 }
 
+// Rule 26: world mesh order (README.txt). R1's per-view world draw item builder (engine.dll sub_1800A0110) visits the visible meshes in
+// index order, opens a new draw run whenever the material sort changes and stops at 2048 runs (`if (v2 == 2048) goto done`): every visible
+// mesh after the 2048th run is not drawn. R2 lists meshes in an order unrelated to the material sort, so the number of runs in a view is
+// close to the number of visible meshes (mp_eden: 5256 runs for all 11712 world meshes) and the high mesh indices vanish depending on
+// the view. Stock R1 files are sorted by material sort. The meshes of model 0 below the prop base are stably sorted by material sort; the
+// mesh indices stored in the cell object references (0x78) and in the CSM object references (0x64) (ids below the prop base are meshes,
+// the others static props) are renumbered. Mesh bounds (0x51) move with their mesh; the index and vertex lumps are addressed through the
+// mesh records and the sort's vertex offset, so they do not change.
+void orderMeshes(Ctx& c) {
+    if (!c.opt.orderMeshes) {
+        c.say("[rule 26] mesh order: off (R2 order kept)");
+        return;
+    }
+    std::vector<MeshR2> meshes = view<MeshR2>(c.lump[L_MESHES], "meshes (0x50)");
+    std::vector<MeshBounds> bounds = view<MeshBounds>(c.lump[L_MESHBOUNDS], "mesh bounds (0x51)");
+    const std::vector<Model> models = view<Model>(c.lump[L_MODELS], "models (0x0E)");
+    if (meshes.size() != bounds.size()) throw Error("rule 26: meshes (0x50) has " + std::to_string(meshes.size()) + " entries but mesh bounds (0x51) has " + std::to_string(bounds.size()));
+    if (models.empty()) throw Error("rule 26: models (0x0E) is empty");
+    if (c.lump[L_LEVELINFO].size() < 12) throw Error("rule 26: level info (0x7B) is too short to hold the prop base");
+    int32_t meshWord;
+    std::memcpy(&meshWord, &c.lump[L_LEVELINFO][8], 4);
+    if (meshWord < 0) throw Error("rule 26: level info word 2 is negative");
+    // Object ids >= propBase name static props (rule 17, R1 loader sub_1800B2630: (word2 + 63) & ~63); only meshes below it are addressable.
+    const size_t propBase = ((size_t)meshWord + 63) & ~(size_t)63;
+    const size_t world0 = models[0].firstMesh;
+    const size_t worldEnd = std::min<size_t>((size_t)models[0].firstMesh + models[0].numMeshes, std::min(propBase, meshes.size()));
+    if (world0 > worldEnd || (size_t)models[0].firstMesh + models[0].numMeshes > meshes.size()) throw Error("rule 26: models[0] mesh range exceeds the mesh lump");
+    const size_t nSorts = c.lump[L_SORTS].size() / sizeof(Sort);
+    for (size_t i = world0; i < worldEnd; i++)
+        if (meshes[i].materialSort >= nSorts) throw Error("rule 26: mesh " + std::to_string(i) + ": material sort index out of range");
+
+    auto countRuns = [&](const std::vector<MeshR2>& m) {
+        size_t runs = 0;
+        for (size_t i = world0; i < worldEnd; i++)
+            if (i == world0 || m[i].materialSort != m[i - 1].materialSort) runs++;
+        return runs;
+    };
+    const size_t runsBefore = countRuns(meshes);
+
+    // oldAt[newIndex] = old index; newOf[old] = new index (identity outside [world0, worldEnd)).
+    std::vector<uint32_t> oldAt(meshes.size()), newOf(meshes.size());
+    for (size_t i = 0; i < meshes.size(); i++) oldAt[i] = (uint32_t)i;
+    std::stable_sort(oldAt.begin() + (ptrdiff_t)world0, oldAt.begin() + (ptrdiff_t)worldEnd,
+                     [&](uint32_t a, uint32_t b) { return meshes[a].materialSort < meshes[b].materialSort; });
+    size_t moved = 0;
+    for (size_t i = 0; i < meshes.size(); i++) {
+        newOf[oldAt[i]] = (uint32_t)i;
+        if (oldAt[i] != i) moved++;
+    }
+    if (moved == 0) {
+        c.say("[rule 26] mesh order: world meshes [%zu, %zu) already sorted by material sort (%zu runs)", world0, worldEnd, runsBefore);
+        return;
+    }
+
+    std::vector<MeshR2> sortedMeshes(meshes.size());
+    std::vector<MeshBounds> sortedBounds(meshes.size());
+    for (size_t i = 0; i < meshes.size(); i++) {
+        sortedMeshes[i] = meshes[oldAt[i]];
+        sortedBounds[i] = bounds[oldAt[i]];
+    }
+    const size_t runsAfter = countRuns(sortedMeshes);
+
+    size_t renumbered[2] = {0, 0};
+    const uint32_t refLumps[2] = {0x78, 0x64};
+    for (int k = 0; k < 2; k++) {
+        Bytes& b = c.lump[refLumps[k]];
+        if (b.size() % 2) throw Error(std::string("rule 26: object reference lump ") + (k == 0 ? "0x78" : "0x64") + " has an odd size");
+        for (size_t o = 0; o + 2 <= b.size(); o += 2) {
+            uint16_t v;
+            std::memcpy(&v, &b[o], 2);
+            if (v >= world0 && v < worldEnd && newOf[v] != v) {
+                const uint16_t nv = (uint16_t)newOf[v];
+                std::memcpy(&b[o], &nv, 2);
+                renumbered[k]++;
+            }
+        }
+    }
+    c.lump[L_MESHES] = pack(sortedMeshes);
+    c.lump[L_MESHBOUNDS] = pack(sortedBounds);
+    c.say("[rule 26] mesh order: %zu of %zu world meshes [%zu, %zu) moved so equal material sorts are adjacent; draw runs when every mesh is visible %zu -> %zu (R1 draws at most 2048 per view; %zu distinct sorts in %zu sorts); renumbered %zu cell object references (0x78) and %zu csm object references (0x64)",
+          moved, worldEnd - world0, world0, worldEnd, runsBefore, runsAfter, runsAfter, nSorts, renumbered[0], renumbered[1]);
+    if (runsAfter > 2048)
+        c.say("[rule 26] warning: %zu distinct material sorts in the world meshes exceed R1's 2048 draw runs per view; a view that sees more than 2048 of them still loses the highest sorts", runsAfter);
+}
+
 }  // namespace detail
 }  // namespace bspdown

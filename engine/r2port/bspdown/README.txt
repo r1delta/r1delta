@@ -604,6 +604,13 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
     Checker: expected_prop_fade() recomputes the prop bounds from lumps 0x78 / 0x79 (union per prop, float32 min/max, finite and below 1e6),
     the far-origin test and the new fade in float32, and compares fade min and max bit for bit; --keep-prop-fade expects the R2 value.
 
+26. World mesh order (meshclip.cpp orderMeshes, EdenCull). R1 engine.dll sub_1800A0110 (per-view world draw item builder) walks the visible meshes
+   in index order, opens a new draw run when the material sort changes and stops at 2048 runs (`if (v2 == 2048)`): every visible mesh after the 2048th
+   run is not drawn (also capped at 0x300000 indices). Stock R1 maps list meshes sorted by sort (mp_rise 3 descents), R2 maps do not (mp_eden 2316
+   descents, 5252 runs if everything is visible), so high mesh indices (roofs, decks, walls) vanish depending on the view angle. Model 0 meshes below
+   the prop base are stably sorted by material sort (eden: 951 runs); ids in lumps 0x78 and 0x64 are renumbered; 0x50/0x51 move together. Opt-out
+   --no-mesh-order (provider token no-mesh-order). Checker: undo_mesh_order recovers the permutation from 0x78 and checks it equals the stable sort.
+
 24. Emitter glow ramp coordinate of layered pure-emitter world materials (vcalpha.cpp, TrimGlow). R2 draws a pure emitter (black albedo,
     white _ilm, HDR emissive tint, layer slot 22, blend f0138286 = premultiplied alpha, depth state no write, decal raster state) as
     out = E * c + dst * (1 - c) with c a function of the interpolated mesh vertex alpha a. mp_glitch world/vr_training/vr_light_trim_01_totrans is the

@@ -252,6 +252,7 @@ void convertEmitterGlowRamp(Ctx& c);  // rule 24, runs right after convertVertex
 void namespaceMaterials(Ctx& c);  // rule 25, runs right before convertCubemaps (rule 13 names its patch materials from the result)
 void convertCubemaps(Ctx& c);  // rule 13
 void convertShadow(Ctx& c);  // rule 17, shadow environments / CSM tree / shadow meshes
+void orderMeshes(Ctx& c);  // rule 26, runs after convertShadow (reads the final material sorts and object reference lumps 0x78 / 0x64)
 void convertPhysics(Ctx& c);  // rule 12
 void convertPhysicsTriangles(Ctx& c);  // rule 14, header-count-aware all-absent table
 bool physicsHasWorldSolids(const Bytes& lump, std::string* why);

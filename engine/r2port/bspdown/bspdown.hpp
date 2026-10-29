@@ -206,6 +206,15 @@ struct Options {
     bool csmLastEnv = false;
     bool emptyShadowMeshes = false;
 
+    // Rule 26: world mesh order. R1's world draw (engine.dll sub_1800A0110, the per-view draw item builder) walks the visible meshes in mesh
+    // index order and starts a new draw run whenever the material sort changes, and it stops at 2048 runs per view: every visible mesh after
+    // the 2048th run is silently not drawn. Stock R1 maps list their meshes sorted by material sort (mp_rise: 3 descents in 8416 meshes), R2
+    // maps do not (mp_eden: 2316 descents, 5256 runs when everything is visible), so on a converted map the high mesh indices (roofs, floors,
+    // building walls) vanish whenever a view sees more than 2048 runs, depending on the view angle. true (default): the meshes of model 0 are
+    // stably sorted by material sort and every mesh index stored in lumps 0x78 (cell object references) and 0x64 (CSM object references) is
+    // renumbered; false copies the R2 order.
+    bool orderMeshes = true;
+
     // Rule 25: world material namespace. R1 resolves a BSP material name through its whole filesystem, so a file of a stock R1 map pack
     // that is still mounted (mp_outpost_207's models/vehicle/imc_carrier/*.vmt after that map was played, 17 stock packs carry such
     // models/ materials) answers the name of an R2 world material and its VertexLitGeneric model material draws nothing on the world
