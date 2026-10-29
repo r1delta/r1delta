@@ -1143,6 +1143,53 @@ static bool MaterialSystemDx11IsCommittedReadableRange(const void* ptr, size_t s
 	}
 	return true;
 }
+
+// Per-frame variant of MaterialSystemDx11IsCommittedReadableRange for the TXAA lifetime guard. That guard checks about
+// twelve engine-owned pointers per rendered frame (measured on mp_box and mp_glitch listen sessions: 720 VirtualQuery
+// calls/s at 60 fps, about 5 ms/s, single calls up to 40 us when the pointer sits in a large heap region). An unreadable
+// pointer still ends in MaterialSystemDx11FailTxaaLifetime; the only difference is that the page is touched under SEH
+// instead of being described by a syscall. Install-time checks keep the VirtualQuery version above.
+static int MaterialSystemDx11ReadProbeExceptionFilter(EXCEPTION_POINTERS* info)
+{
+	if (!info || !info->ExceptionRecord)
+		return EXCEPTION_CONTINUE_SEARCH;
+	switch (info->ExceptionRecord->ExceptionCode) {
+	case EXCEPTION_ACCESS_VIOLATION:
+	case EXCEPTION_IN_PAGE_ERROR:
+	case EXCEPTION_GUARD_PAGE:
+		return EXCEPTION_EXECUTE_HANDLER;
+	default:
+		return EXCEPTION_CONTINUE_SEARCH;
+	}
+}
+
+static bool MaterialSystemDx11IsReadableNoSyscall(const void* ptr, size_t size)
+{
+	constexpr uintptr_t kPageSize = 0x1000;
+	constexpr size_t kMaxTouchedBytes = 16 * kPageSize;
+	const uintptr_t start = reinterpret_cast<uintptr_t>(ptr);
+	if (!MaterialSystemDx11LooksLikeUserRange(start, size))
+		return false;
+	if (size > kMaxTouchedBytes)
+		return MaterialSystemDx11IsCommittedReadableRange(ptr, size);
+
+	const uintptr_t last = start + size - 1;
+	__try {
+		uintptr_t cursor = start;
+		for (;;) {
+			(void)*reinterpret_cast<const volatile unsigned char*>(cursor);
+			const uintptr_t nextPage = (cursor & ~(kPageSize - 1)) + kPageSize;
+			if (nextPage > last)
+				break;
+			cursor = nextPage;
+		}
+		(void)*reinterpret_cast<const volatile unsigned char*>(last);
+	}
+	__except (MaterialSystemDx11ReadProbeExceptionFilter(GetExceptionInformation())) {
+		return false;
+	}
+	return true;
+}
 static int MaterialSystemDx11ShaderResourceExceptionFilter(
 	EXCEPTION_POINTERS* info)
 {
@@ -1844,7 +1891,7 @@ static bool MaterialSystemDx11ReadPointer(
 	uintptr_t* value)
 {
 	if (!value
-		|| !MaterialSystemDx11IsCommittedReadableRange(
+		|| !MaterialSystemDx11IsReadableNoSyscall(
 			reinterpret_cast<const void*>(address),
 			sizeof(*value))) {
 		return false;
@@ -1921,7 +1968,7 @@ static uintptr_t __fastcall MaterialSystemDx11ExecuteRetainedTxaaResolve(
 	if (!queueState
 		|| queueState > std::numeric_limits<uintptr_t>::max()
 			- kTxaaQueueCommandEndOffset - sizeof(uintptr_t)
-		|| !MaterialSystemDx11IsCommittedReadableRange(
+		|| !MaterialSystemDx11IsReadableNoSyscall(
 			reinterpret_cast<const void*>(
 				queueState + kTxaaQueueCurrentCommandOffset),
 			sizeof(uintptr_t) * 2)) {
@@ -1934,7 +1981,7 @@ static uintptr_t __fastcall MaterialSystemDx11ExecuteRetainedTxaaResolve(
 
 	auto* const command = *reinterpret_cast<TxaaQueuedResolveCommand**>(
 		queueState + kTxaaQueueCurrentCommandOffset);
-	if (!MaterialSystemDx11IsCommittedReadableRange(
+	if (!MaterialSystemDx11IsReadableNoSyscall(
 			command,
 			sizeof(*command))) {
 		MaterialSystemDx11FailTxaaLifetime(
@@ -2000,7 +2047,7 @@ static char __fastcall MaterialSystemDx11QueueRetainedTxaaResolve(
 			queuedContext
 			+ static_cast<uintptr_t>(
 				kQueuedRenderContextHardwareContextOffset));
-	if (!MaterialSystemDx11IsCommittedReadableRange(
+	if (!MaterialSystemDx11IsReadableNoSyscall(
 			callbackArgumentAddress,
 			sizeof(*callbackArgumentAddress))
 		|| !*callbackArgumentAddress) {
@@ -2046,7 +2093,7 @@ static char __fastcall MaterialSystemDx11QueueRetainedTxaaResolve(
 			&MaterialSystemDx11ExecuteRetainedTxaaResolve),
 		sizeof(TxaaQueuedResolveCommand),
 		kTxaaQueueAlignmentMask);
-	if (!MaterialSystemDx11IsCommittedReadableRange(
+	if (!MaterialSystemDx11IsReadableNoSyscall(
 			writeCursor,
 			sizeof(*writeCursor))
 		|| !*writeCursor) {
@@ -2059,7 +2106,7 @@ static char __fastcall MaterialSystemDx11QueueRetainedTxaaResolve(
 
 	auto* const command =
 		reinterpret_cast<TxaaQueuedResolveCommand*>(*writeCursor);
-	if (!MaterialSystemDx11IsCommittedReadableRange(
+	if (!MaterialSystemDx11IsReadableNoSyscall(
 			command,
 			sizeof(*command))
 		|| !RetainTxaaQueuedResolveCommand(
