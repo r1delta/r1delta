@@ -582,7 +582,8 @@ def quantize_rtl_visibility(bsp, lights, ids, weights, minimum, linear):
 RTL_VISIBILITY_CUTOFF = 187  # fixed sRGB static-visibility cutoff of rule 20 (about half visible), applied after cone normalization
 LIGHT_OPT = {"collapse": True, "rtl": True, "pbr": True, "sun_alpha": True, "sky_scale": 0.45, "sun_scale": 1.0, "pbr_scale": 1.0,
              "bake": 0, "bake_edge_min": 0.0,  # bake: --rtl-bake none 0 / edge 1 / all 2 (rule 20f)
-             "bake_bm": 2, "bake_smooth": 0, "bake_hot": 0, "bake_vsm": False}  # --rtl-bake-bm skip 2 / terrain 1 / none 0, --rtl-bake-smooth 0..2, --rtl-bake-hot keep 0 / clip 1, --rtl-bake-vsm
+             "bake_bm": 2, "bake_smooth": 0, "bake_hot": 0, "bake_vsm": False,  # --rtl-bake-bm skip 2 / terrain 1 / none 0, --rtl-bake-smooth 0..2, --rtl-bake-hot keep 0 / clip 1, --rtl-bake-vsm
+             "bake_alpha_step": 1.2}  # --rtl-bake-alpha-step (converter default 1.2; <= 1 = the old per-texel minimal alpha encode)
 CSM_OPT = {"last_env": False}  # --csm-last-env: the converter kept the last environment record instead of the largest
 PROP_OPT = {"keep_fade": False}  # --keep-prop-fade: rule 23 off
 CUBE_OPT = {"cma_gain": 1.0, "min_scale": 0.25}  # rule 13b: per-cubemap scale = clamp(gain * CMA, min_scale, --cubemap-scale)
@@ -905,14 +906,67 @@ def apply_rtl_bake(r2, raw_f, ty, fl, out_f, ofl, new_of, v1, tex_orig, tex_old,
     peak = np.maximum(e.max(axis=1), 1.0 / 64)
     clipped = peak > 4.0
     e = np.where(clipped[:, None], e * (4.0 / peak)[:, None], e)
-    alpha = np.clip(np.ceil(np.minimum(peak, 4.0) * 64.0) - 1, 0, 255)
-    v = np.clip(np.minimum(e, 4.0) / ((alpha + 1) / 64.0)[:, None], 0.0, 1.0)
-    srgb = np.where(v <= 0.0031308, v * 12.92, 1.055 * v ** (1 / 2.4) - 0.055)
-    skyarr[tbase[t][:, None] + np.arange(3)] = np.floor(255.0 * srgb + 0.5).astype(np.uint8)
-    skyarr[tbase[t] + 3] = alpha.astype(np.uint8)
+    pk = np.minimum(peak, 4.0)
+
+    def to_srgb8(energy, denom):
+        v = np.clip(np.minimum(energy, 4.0) / denom[..., None], 0.0, 1.0)
+        s = np.where(v <= 0.0031308, v * 12.92, 1.055 * v ** (1 / 2.4) - 0.055)
+        return np.floor(255.0 * s + 0.5).astype(np.uint8)
+
+    step = float(LIGHT_OPT["bake_alpha_step"])
+    raised_total = spread_total = 0
+    if step <= 1.0:
+        alpha = np.clip(np.ceil(pk * 64.0) - 1, 0, 255)
+        skyarr[tbase[t][:, None] + np.arange(3)] = to_srgb8(e, (alpha + 1) / 64.0)
+        skyarr[tbase[t] + 3] = alpha.astype(np.uint8)
+    else:
+        # exposure (alpha) kept at the R2 value unless the baked energy needs more; a raised exposure decays by `step` per texel (Chebyshev,
+        # synchronous sweeps to the fixed point, values below the smallest scale 1/64 dropped) into the neighbours, which are re-encoded with it
+        for pg in pages:
+            if pg is None:
+                continue
+            f0, w, h = pg
+            sel_ = (t >= f0) & (t < f0 + w * h)
+            if not sel_.any():
+                continue
+            lt = t[sel_] - f0
+            plane = skyarr[8 * f0:8 * f0 + 4 * w * h].reshape(h, w, 4)
+            a0 = plane.copy()
+            s0 = (a0[..., 3].astype(np.float64) + 1) / 64.0
+            chg = np.zeros(w * h, bool)
+            chg[lt] = True
+            pk_g = np.zeros(w * h)
+            pk_g[lt] = pk[sel_]
+            e_g = np.zeros((w * h, 3))
+            e_g[lt] = np.minimum(e[sel_], 4.0)
+            chg, pk_g, e_g = chg.reshape(h, w), pk_g.reshape(h, w), e_g.reshape(h, w, 3)
+            raised = chg & (pk_g > s0)
+            raised_total += int(raised.sum())
+            env = np.where(raised, pk_g, 0.0)
+            while raised.any():
+                pad = np.pad(env, 1)
+                m = np.zeros_like(env)
+                for dy in range(3):
+                    for dx in range(3):
+                        m = np.maximum(m, pad[dy:dy + h, dx:dx + w])
+                spread_to = m / step
+                upd = (spread_to >= 1.0 / 64) & (spread_to > env)
+                if not upd.any():
+                    break
+                env = np.where(upd, spread_to, env)
+            touch = chg | (env > s0)
+            need = np.maximum(s0, env)
+            need = np.where(chg, np.maximum(need, pk_g), need)
+            alpha = np.clip(np.ceil(need * 64.0) - 1, 0, 255)
+            denom = (alpha + 1) / 64.0
+            lin0 = np.where(a0[..., :3] / 255.0 <= 0.04045, a0[..., :3] / 255.0 / 12.92, ((a0[..., :3] / 255.0 + 0.055) / 1.055) ** 2.4)
+            energy = np.where(chg[..., None], e_g, lin0 * s0[..., None])
+            spread_total += int((touch & ~chg).sum())
+            plane[touch, 0:3] = to_srgb8(energy, denom)[touch]
+            plane[touch, 3] = alpha[touch].astype(np.uint8)
     return {"lights_baked": int(bake.sum()), "lights_kept": int((final_ok & ~bake).sum()), "edge_min": emin, "candidate_slots": int(cand.sum()),
             "baked_slots": baked_slots, "texels_changed": int(len(t)), "clipped": int(clipped.sum()), "unreached": unreached,
-            "bm_meshes": skipped, "baked_ids": np.flatnonzero(bake)}
+            "bm_meshes": skipped, "baked_ids": np.flatnonzero(bake), "raised": raised_total, "spread": spread_total}
 
 
 def expected_lighting(r2, wl_flag2):
@@ -1905,6 +1959,7 @@ if __name__ == "__main__":
     ap.add_argument("--rtl-bake-smooth", type=int, choices=(0, 1, 2), default=0, help="rule 20f: the converter's --rtl-bake-smooth window (0 off, 1 = 3x3, 2 = 5x5)")
     ap.add_argument("--rtl-bake-hot", choices=("keep", "clip"), default="keep", help="rule 20f: the converter's --rtl-bake-hot")
     ap.add_argument("--rtl-bake-vsm", action="store_true", help="rule 20f: the converter's --rtl-bake-vsm (lights without R2 flag 0x10 are baked too)")
+    ap.add_argument("--rtl-bake-alpha-step", type=float, default=1.2, help="rule 20f: the converter's --rtl-bake-alpha-step (default 1.2; 0 = old per-texel minimal alpha)")
     ap.add_argument("--cubemap-cma-gain", type=float, default=1.0, help="rule 13b: the converter's --cubemap-cma-gain")
     ap.add_argument("--cubemap-min-scale", type=float, default=0.25, help="rule 13b: the converter's --cubemap-min-scale")
     ap.add_argument("--provider", action="store_true",
@@ -1926,7 +1981,7 @@ if __name__ == "__main__":
                      sky_scale=a.sky_ambient_scale, sun_scale=a.sun_scale, pbr_scale=a.pbr_scale,
                      bake={"none": 0, "edge": 1, "all": 2}[a.rtl_bake], bake_edge_min=a.rtl_bake_edge_min,
                      bake_bm={"skip": 2, "terrain": 1, "none": 0}[a.rtl_bake_bm], bake_smooth=a.rtl_bake_smooth,
-                     bake_hot=1 if a.rtl_bake_hot == "clip" else 0, bake_vsm=a.rtl_bake_vsm)
+                     bake_hot=1 if a.rtl_bake_hot == "clip" else 0, bake_vsm=a.rtl_bake_vsm, bake_alpha_step=a.rtl_bake_alpha_step)
     sys.exit(1 if check(a.r2, a.r1, a.limit, a.rtl_bytes, not a.no_bsp_tool, a.cubemaps, a.physics, a.cubemap_scale,
                         a.props, a.scatter_min, a.csm_rebase, a.empty_shadow_meshes, a.worldlight_flag2, a.keep_prop_flag10,
                         not a.no_grid_pad, a.reference, a.grid_size) else 0)

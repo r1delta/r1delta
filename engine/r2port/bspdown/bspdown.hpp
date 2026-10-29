@@ -152,6 +152,12 @@ struct Options {
     //     others (they keep their world light record, so props and the CPU lit gun are still lit by them, but they no longer cast dynamic
     //     shadows onto the world).
     bool rtlBakeVsm = false;
+    //   rtlBakeAlphaStep: plane A is decoded by the R1 shader as rgb * (alpha * 3.984375 + 0.015625) after bilinear blending rgb and alpha
+    //     separately. R2's pages keep alpha (the exposure) constant over big areas; re-encoding every baked texel with its own minimal alpha made
+    //     neighbouring exposures differ by up to 4x, and the cross term of the two blends overshoots both texels (a thin pale contour along every
+    //     baked pool edge). > 1 (default 1.2): a baked texel keeps the R2 alpha unless its energy needs a larger one, and a raised exposure
+    //     decays by this factor per texel (Chebyshev) into the neighbours, which are re-encoded with it. <= 1: the old per-texel minimal alpha.
+    double rtlBakeAlphaStep = 1.2;
 
     // Drop lumps R1 never reads (0x04..0x07, 0x37, 0x7A). They are large
     // (about 2 MB on eden) and cannot be interpreted by R1.

@@ -693,11 +693,76 @@ void bakeRtlLights(Ctx& c, const Bytes& wl, const std::vector<int32_t>& newOf, i
         }
         return wsum > 0 ? sum / wsum : own;
     };
+    // Plane A is sampled by the R1 world pixel shader as lm.rgb * (lm.a * 3.984375 + 0.015625) with the hardware bilinear blend applied to rgb and
+    // alpha SEPARATELY, so the decoded value of a footprint is (blend rgb) * (blend scale), not the blend of the products. That is exact only while
+    // the alpha (the exposure) is the same over the 2x2 footprint; where the exposure differs between neighbours, the cross term overshoots both
+    // texels (up to 3.8x measured on mp_glitch with the earlier per-texel minimal-alpha encode, a thin pale contour along the edge of every baked
+    // pool). R2's own pages keep the exposure constant over big areas. So a baked texel keeps its R2 exposure unless its energy needs more, and the
+    // higher exposure of such texels is spread over the neighbourhood with a geometric decay (rtlBakeAlphaStep per texel, Chebyshev distance), which
+    // keeps the exposure ratio between neighbours <= step and the cross term overshoot below ~1 + (step - 1)^2 / (4 step) for equal energies.
+    // Exposure only ever rises, so no texel loses range; texels whose exposure changes are re-encoded from their energy.
+    const double alphaStep = c.opt.rtlBakeAlphaStep;
+    uint64_t raisedTexels = 0, spreadTexels = 0;
+    const auto encodeSmooth = [&](const Page& pg, uint8_t* A, const std::vector<double>& chE, const std::vector<double>& chPk, const std::vector<uint8_t>& chg) {
+        const int w = int(pg.width), h = int(pg.height);
+        const size_t N = size_t(w) * h;
+        std::vector<double> env(N, 0.0);
+        int bx0 = w, bx1 = -1, by0 = h, by1 = -1;
+        for (size_t lt = 0; lt < N; ++lt) {
+            if (!chg[lt]) continue;
+            if (chPk[lt] > (A[lt * 4 + 3] + 1) / 64.0) {
+                env[lt] = chPk[lt];
+                ++raisedTexels;
+                const int x = int(lt % w), y = int(lt / w);
+                bx0 = std::min(bx0, x); bx1 = std::max(bx1, x); by0 = std::min(by0, y); by1 = std::max(by1, y);
+            }
+        }
+        if (bx1 >= 0) {
+            std::vector<double> nxt;
+            for (;;) {
+                // the active rectangle grows by one texel per sweep (a value can only reach a texel one step further each time)
+                bx0 = std::max(bx0 - 1, 0); by0 = std::max(by0 - 1, 0); bx1 = std::min(bx1 + 1, w - 1); by1 = std::min(by1 + 1, h - 1);
+                nxt = env;
+                bool moved = false;
+                for (int y = by0; y <= by1; ++y) for (int x = bx0; x <= bx1; ++x) {
+                    double m = 0;
+                    for (int dy = -1; dy <= 1; ++dy) for (int dx = -1; dx <= 1; ++dx) {
+                        const int nx = x + dx, ny = y + dy;
+                        if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+                        m = std::max(m, env[size_t(ny) * w + nx]);
+                    }
+                    const double cand = m / alphaStep;
+                    const size_t i = size_t(y) * w + x;
+                    if (cand >= 1.0 / 64 && cand > env[i]) { nxt[i] = cand; moved = true; }
+                }
+                if (!moved) break;
+                env.swap(nxt);
+            }
+        }
+        for (size_t lt = 0; lt < N; ++lt) {
+            uint8_t* px = &A[lt * 4];
+            const double s0 = (px[3] + 1) / 64.0;
+            if (!chg[lt] && env[lt] <= s0) continue;  // exposure unchanged: the R2 bytes stay
+            double need = std::max(s0, env[lt]);
+            if (chg[lt]) need = std::max(need, chPk[lt]);
+            const int alpha = std::clamp((int)std::ceil(need * 64.0) - 1, 0, 255);
+            const double denom = (alpha + 1) / 64.0;
+            double e[3];
+            for (int ch = 0; ch < 3; ++ch) e[ch] = chg[lt] ? chE[lt * 3 + ch] : toLinear(px[ch] / 255.0) * s0;
+            if (!chg[lt]) ++spreadTexels;
+            for (int ch = 0; ch < 3; ++ch) px[ch] = (uint8_t)std::lround(255.0 * toSrgb(std::min(e[ch], 4.0) / denom));
+            px[3] = (uint8_t)alpha;
+        }
+    };
     for (size_t h = 0; h < pages.size(); ++h) {
         const Page& pg = pages[h];
         if (!pg.width) continue;
         const uint8_t* B = &rtl[pg.rtlOffset + 4 * size_t(pg.width) * pg.height];
         uint8_t* A = &sky[pg.skyOffset];
+        const size_t npg = size_t(pg.width) * pg.height;
+        std::vector<double> chE, chPk;
+        std::vector<uint8_t> chg;
+        if (alphaStep > 1.0) { chE.assign(npg * 3, 0.0); chPk.assign(npg, 0.0); chg.assign(npg, 0); }
         for (size_t lt = 0; lt < size_t(pg.width) * pg.height; ++lt) {
             const size_t t = pg.first + lt;
             if (!need[t]) continue;
@@ -736,19 +801,31 @@ void bakeRtlLights(Ctx& c, const Bytes& wl, const std::vector<int32_t>& newOf, i
             const double peak = std::max({e[0], e[1], e[2], 1.0 / 64});
             if (peak > 4.0) { ++clipped; for (int ch = 0; ch < 3; ++ch) e[ch] *= 4.0 / peak; }  // keep the hue when the 4.0 cap is exceeded
             const double pk = std::min(peak, 4.0);
-            int alpha = (int)std::ceil(pk * 64.0) - 1;
-            alpha = std::clamp(alpha, 0, 255);
-            const double denom = (alpha + 1) / 64.0;
-            for (int ch = 0; ch < 3; ++ch) px[ch] = (uint8_t)std::lround(255.0 * toSrgb(std::min(e[ch], 4.0) / denom));
-            px[3] = (uint8_t)alpha;
+            if (alphaStep > 1.0) {
+                chg[lt] = 1;
+                chPk[lt] = pk;
+                for (int ch = 0; ch < 3; ++ch) chE[lt * 3 + ch] = std::min(e[ch], 4.0);
+            } else {
+                int alpha = (int)std::ceil(pk * 64.0) - 1;
+                alpha = std::clamp(alpha, 0, 255);
+                const double denom = (alpha + 1) / 64.0;
+                for (int ch = 0; ch < 3; ++ch) px[ch] = (uint8_t)std::lround(255.0 * toSrgb(std::min(e[ch], 4.0) / denom));
+                px[3] = (uint8_t)alpha;
+            }
             ++texelsChanged;
             addedEnergy += (add[0] + add[1] + add[2]) / 3.0;
         }
+        if (alphaStep > 1.0) encodeSmooth(pg, A, chE, chPk, chg);
     }
     c.say("[rule 20f] meshes on RTL-blind materials (_bm layered terrain) skipped as receivers: %zu", skippedMeshes);
     c.say("[rule 20f] RTL bake (%s): %zu lights baked, %zu kept as RTL (edge texel minimum %llu); %llu candidate slots, %llu slots baked into plane A over %llu texels (mean added energy %.4f, %llu texels above the encodable 4.0), %llu baked slots without a receiver kept as RTL",
           c.opt.rtlBake == 2 ? "all" : "edge", lightsBaked, lightsKept, (unsigned long long)edgeMin, (unsigned long long)candidateSlots,
           (unsigned long long)bakedSlots, (unsigned long long)texelsChanged, texelsChanged ? addedEnergy / texelsChanged : 0.0, (unsigned long long)clipped, (unsigned long long)unreached);
+    if (alphaStep > 1.0)
+        c.say("[rule 20f] plane A exposure (alpha) kept at the R2 value unless the baked energy needs more: %llu texels raised, exposure spread over the neighbours with decay %.3g per texel, %llu unbaked texels re-encoded (cross term of the separate rgb / alpha bilinear blend stays below the R2 level)",
+              (unsigned long long)raisedTexels, alphaStep, (unsigned long long)spreadTexels);
+    else
+        c.say("[rule 20f] plane A encoded per texel with the minimal exposure (--rtl-bake-alpha-step 0): the rgb / alpha blend of neighbouring texels overshoots along baked edges");
     if (smoothK > 0 || c.opt.rtlBakeBm != 2 || c.opt.rtlBakeHot || c.opt.rtlBakeVsm)
         c.say("[rule 20f] tuning: _bm skip mode %d, smoothing window %d (%llu slots changed), hot lights %s, lights without flag 0x10 %s", c.opt.rtlBakeBm, smoothK,
               (unsigned long long)smoothedSlots, c.opt.rtlBakeHot ? "baked with clip" : "kept as RTL", c.opt.rtlBakeVsm ? "baked" : "kept as RTL");

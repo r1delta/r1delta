@@ -50,6 +50,7 @@ static void usage(const char* a0) {
                  "  --rtl-bake-smooth <0|1|2>  rule 20f: low-pass the visibility over a 3x3 (1) / 5x5 (2) same-surface window before baking (default 0)\n"
                  "  --rtl-bake-hot <keep|clip>  rule 20f: lights above the plane A cap keep RTL (default) or are baked with a hue-preserving clip\n"
                  "  --rtl-bake-vsm         rule 20f: also bake lights without R2 flag 0x10 (R1 variance shadow map lights; default keeps them on RTL)\n"
+                 "  --rtl-bake-alpha-step <x>  rule 20f: plane A exposure (alpha) decay per texel around baked texels whose energy needs a larger one (default 1.2); 0 = old per-texel minimal alpha\n"
                  "  --pbr-lights <keep|convert>  rule 20: R2 flag 0x20 lights (default convert to the R1 fade polynomial form)\n"
                  "  --sky-ambient-scale <x>  rule 20e: multiplier on the kept sky ambient (type 5) light intensity (default 0.45)\n"
                  "  --sun-scale <x>        rule 20e: multiplier on the kept sun (type 3) light intensity (default 1)\n"
@@ -118,6 +119,7 @@ int main(int argc, char** argv) {
         else if (a == "--rtl-bake-smooth" && i + 1 < argc) opt.rtlBakeSmooth = std::atoi(argv[++i]);
         else if (a == "--rtl-bake-hot" && i + 1 < argc) opt.rtlBakeHot = std::string(argv[++i]) == "clip" ? 1 : 0;
         else if (a == "--rtl-bake-vsm") opt.rtlBakeVsm = true;
+        else if (a == "--rtl-bake-alpha-step" && i + 1 < argc) opt.rtlBakeAlphaStep = std::atof(argv[++i]);
         else if (a == "--sky-ambient-scale" && i + 1 < argc) opt.skyAmbientScale = (float)std::atof(argv[++i]);
         else if (a == "--sun-scale" && i + 1 < argc) opt.sunScale = (float)std::atof(argv[++i]);
         else if (a == "--pbr-scale" && i + 1 < argc) opt.pbrScale = (float)std::atof(argv[++i]);

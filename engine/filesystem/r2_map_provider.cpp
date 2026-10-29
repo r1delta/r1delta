@@ -86,7 +86,7 @@ constexpr uint32_t kGameLump = 0x23;
 
 // Folded into the on-disk cache fingerprint together with entity_rewrite::kRewriteVersion.
 // Bump when the vendored bspdown converter or the provider's BSP post-processing changes output.
-constexpr uint32_t kConvertedBspCacheVersion = 28;  // 28: rule 20f DrydockSteps preset default (rtl-bake vsm, hot clip, smooth 1, bm terrain); 27: rule 24 now writes the glow ramp texture coordinate; 26: rule 24 emitter glow vertex alpha (vr_light_trim_01_totrans, mp_glitch); 25: mp_coliseum and mp_coliseum_column keep the last CSM environment (csmLastEnv); 24: rule 17 real CSM environment chosen by content (BWC, angel_city, coliseum, coliseum_column); 23: rule 23 far-origin prop fade distance
+constexpr uint32_t kConvertedBspCacheVersion = 29;  // 29: rule 20f plane A keeps the R2 exposure (alpha) and spreads raised exposures (rtlBakeAlphaStep 1.2, no pale contours along baked pools); 28: rule 20f DrydockSteps preset default (rtl-bake vsm, hot clip, smooth 1, bm terrain); 27: rule 24 now writes the glow ramp texture coordinate; 26: rule 24 emitter glow vertex alpha (vr_light_trim_01_totrans, mp_glitch); 25: mp_coliseum and mp_coliseum_column keep the last CSM environment (csmLastEnv); 24: rule 17 real CSM environment chosen by content (BWC, angel_city, coliseum, coliseum_column); 23: rule 23 far-origin prop fade distance
 
 // Raised onto the z of every info_spawnpoint_flag / human / human_start / titan / titan_start origin in lump 0 and in the five partition entity
 // files (see entity_rewrite::RaiseSpawnpointOrigins). The R1 server drops the spawnpoint back to the floor; one that starts inside solid is removed.
@@ -1386,6 +1386,7 @@ void ApplyConverterVariant(bspdown::Options& options, const std::string& variant
         else if (token == "rtl-bake-bm-skip") options.rtlBakeBm = 2;
         else if (token == "rtl-bake-bm-terrain") options.rtlBakeBm = 1;
         else if (token == "rtl-bake-bm-none") options.rtlBakeBm = 0;
+        else if (token == "rtl-bake-old-alpha") options.rtlBakeAlphaStep = 0;   // opt-out of the GlitchFringe plane A exposure fix: per-texel minimal alpha (pale contours along baked pools)
         else if (token == "cubemaps-split") options.cubemaps = bspdown::CubemapMode::Split;
         else if (token == "cubemaps-single") options.cubemaps = bspdown::CubemapMode::None;   // pre-split behaviour: every world sort samples the nearest cube
         else if (token == "no-collapse-envs") options.collapseEnvs = false;
