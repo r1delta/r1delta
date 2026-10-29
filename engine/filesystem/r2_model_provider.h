@@ -13,5 +13,7 @@ void RegisterR2ModelProvider();
 // on a background thread and registers their materials with the material provider.
 void PrefetchR2MapModels(std::string_view mapName, FileBytes convertedBsp);
 void LogR2ModelProviderMetrics(const char* phase);
+// Directory name of the model blob cache revision (cache/models/<revision>), for the cache maintenance pass.
+std::string_view ModelCacheRevision();
 
 } // namespace r2port

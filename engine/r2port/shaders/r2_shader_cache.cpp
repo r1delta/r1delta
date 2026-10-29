@@ -5,6 +5,7 @@
 
 #include "engine/filesystem/r2_map_provider.h"
 #include "engine/logging/logging.h"
+#include "engine/r2port/r2_profile.h"
 
 #include <Windows.h>
 
@@ -151,6 +152,7 @@ std::vector<Source> CollectSources(const std::filesystem::path& r2portDirectory)
 
 void BuildOne(const Source& source, bool force)
 {
+    R2P_SCOPE_L("m.shader.build", source.name);
     Entry entry;
     entry.name = source.name;
     entry.fromDisk = source.fromDisk;
@@ -236,6 +238,7 @@ void BuildAllLocked(bool force)
         g_built = true;
         return;
     }
+    R2P_SCOPE("m.shader.buildall");
     for (const Source& source : CollectSources(r2portDirectory))
         BuildOne(source, force);
     g_built = true;

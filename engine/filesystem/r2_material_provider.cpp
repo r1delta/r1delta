@@ -3,9 +3,12 @@
 #include "engine/cvar.h"
 #include "engine/filesystem/r2_map_provider.h"
 #include "engine/filesystem/r2_family_queue.h"
+#include "engine/filesystem/r2_cache_store.h"
+#include "engine/filesystem/r2_model_provider.h"
 #include "engine/filesystem/r2_material_names.h"
 #include "engine/filesystem/r2port_provider.h"
 #include "engine/logging/logging.h"
+#include "engine/r2port/r2_profile.h"
 #include "engine/r2port/r2tex/r2tex.hpp"
 #include "p2p/p2p_identity.h"
 
@@ -39,8 +42,9 @@
 namespace r2port {
 namespace {
 
-constexpr std::size_t kMaterialOutputCacheLimit = 16ull * 1024 * 1024;
-constexpr std::uint32_t kDefaultR2TextureCacheMiB = 256;
+// In-process LRU of converted files (VMT/VTF): R2PORT_MEM_CACHE_MB, default 1536 MiB (r2_cache_store.h).
+std::size_t MaterialOutputCacheLimit() { return cache::MemoryCacheBytes(); }
+constexpr std::uint32_t kDefaultR2TextureCacheMiB = 2048;
 std::atomic<std::uint32_t> g_cacheLimitMiB{kDefaultR2TextureCacheMiB};
 
 std::mutex g_cacheCvarMutex;
@@ -374,7 +378,10 @@ public:
     {
         if (!m_activated.load(std::memory_order_acquire))
             return {};
-        WaitForIndex();
+        {
+            R2P_SCOPE("m.index.wait");
+            WaitForIndex();
+        }
         if (m_state.load(std::memory_order_acquire) != State::Ready)
             return {};
 
@@ -384,7 +391,10 @@ public:
             return {};
 
         const auto started = std::chrono::steady_clock::now();
+        R2P_SCOPE_B(profileRead, materialFile ? "m.read.vmt" : "m.read.vtf", normalizedPath);
         FileBytes data = ReadOrSchedule(std::string(normalizedPath), assetName, materialFile);
+        if (data)
+            profileRead.SetBytes(data->size());
         if (data
             && FilesystemTracePathMatches(normalizedPath)
             && normalizedPath == "materials/world/atmosphere/ambient_occlusion.vmt"
@@ -492,7 +502,15 @@ private:
         std::string mapName;
         FileBytes bspData;
         bool mapMaterials{};
+        std::int64_t enqueuedUs{};   // R2PORT_PROFILE only: when the item entered the queue
     };
+
+    static WorkItem Stamped(WorkItem item)
+    {
+        if (r2port::prof::Enabled())
+            item.enqueuedUs = r2port::prof::NowUs();
+        return item;
+    }
 
     using WorkQueue = FamilyQueue<WorkItem>;
 
@@ -618,8 +636,10 @@ private:
                 cacheDirectory = R2TextureCacheDirectory(r2Install, errorMessage);
                 if (!cacheDirectory.empty()) {
                     // r2tex::EnvCacheTag(): "" for the defaults, "-env1-<tokens>" while R2TEX_ENV is set (A/B runs never reuse each other's conversions).
-                    m_convertedRoot = cacheDirectory / "converted" / (std::string(kConvertedCacheRevision) + r2tex::EnvCacheTag());
-                    m_convertedRoot += r2tex::UberPackCacheTag();   // R2_UBER=...pack: converted VMT/VTF set with AO/cavity carriers
+                    if (cache::DiskCacheEnabled())
+                        m_convertedRoot = cacheDirectory / "converted" / (std::string(kConvertedCacheRevision) + r2tex::EnvCacheTag());
+                    if (!m_convertedRoot.empty())
+                        m_convertedRoot += r2tex::UberPackCacheTag();   // R2_UBER=...pack: converted VMT/VTF set with AO/cavity carriers
                     std::error_code cacheError;
                     const bool cacheExists = std::filesystem::is_regular_file(
                         cacheDirectory / "r2tex.index", cacheError);
@@ -628,7 +648,9 @@ private:
                             "R1Delta: R2 texture index cache is cold; building it in the background, first use may take several seconds\n");
                     }
                     r2tex::SetFamilyCacheLimitMiB(g_cacheLimitMiB.load(std::memory_order_relaxed));
+                    R2P_SCOPE_B(profileOpen, "idx.open", "r2tex::Open");
                     opened = r2tex::Open(r2Install, cacheDirectory, &errorMessage, &cacheHit);
+                    profileOpen.SetLabel(cacheHit ? "warm index" : "built index");
                 }
             }
         }
@@ -664,8 +686,10 @@ private:
             std::lock_guard<std::mutex> lock(m_stateMutex);
             m_state = opened ? State::Ready : State::Failed;
         }
-        if (opened)
+        if (opened) {
+            StartCacheMaintenance(cacheDirectory);
             StartWorkers();
+        }
         m_stateChanged.notify_all();
     }
 
@@ -729,7 +753,7 @@ private:
             pending = std::make_shared<PendingRead>();
             m_pendingReads.emplace(path, pending);
             // A reader is blocked on this item: urgent.
-            m_workQueue.Push(WorkItem{ std::move(path), assetName, materialFile, false, pending },
+            m_workQueue.Push(Stamped(WorkItem{ std::move(path), assetName, materialFile, false, pending }),
                 family, materialFile, true);
             m_workAvailable.notify_one();
             break;
@@ -772,8 +796,8 @@ private:
                 auto pending = std::make_shared<PendingRead>();
                 AddKnownPath(*normalized);
                 m_pendingReads.emplace(*normalized, pending);
-                m_workQueue.Push(WorkItem{
-                    *normalized, std::move(assetName), materialFile, true, std::move(pending) },
+                m_workQueue.Push(Stamped(WorkItem{
+                    *normalized, std::move(assetName), materialFile, true, std::move(pending) }),
                     family, materialFile, false);
                 if (materialFile)
                     m_prefetchedMaterialCount.fetch_add(1, std::memory_order_relaxed);
@@ -802,7 +826,7 @@ private:
         item.bspData = std::move(bspData);
         item.mapMaterials = true;
         item.prefetch = true;
-        m_workQueue.Push(std::move(item), WorkQueue::kNoFamily, false, true);
+        m_workQueue.Push(Stamped(std::move(item)), WorkQueue::kNoFamily, false, true);
         m_workAvailable.notify_one();
         return true;
     }
@@ -864,6 +888,9 @@ private:
             std::vector<std::uint8_t> bytes;
             if (!ReadWholeFile(file, bytes) || bytes.empty())
                 return {};
+            if (!cache::Unpack(bytes) || bytes.empty())
+                return {};
+            cache::TouchIfOld(file);
             if (item.materialFile) {
                 std::filesystem::path dependencyFile = file;
                 dependencyFile += ".deps";
@@ -892,17 +919,19 @@ private:
         }
     }
 
-    void StoreConvertedFile(
+    // Returns the bytes written to disk (the packed size for a compressed VTF, the VMT plus its dependency list otherwise).
+    std::uint64_t StoreConvertedFile(
         const WorkItem& item, const FileBytes& data, const std::vector<std::string>& dependencies)
     {
         const std::filesystem::path file = ConvertedFilePath(item.path);
         if (file.empty() || !data || data->empty())
-            return;
+            return 0;
+        std::uint64_t written = 0;
         try {
             std::error_code error;
             std::filesystem::create_directories(file.parent_path(), error);
             if (error)
-                return;
+                return 0;
             if (item.materialFile) {
                 std::string dependencyText;
                 for (const std::string& dependency : dependencies) {
@@ -912,10 +941,58 @@ private:
                 std::filesystem::path dependencyFile = file;
                 dependencyFile += ".deps";
                 if (!WriteFileAtomic(dependencyFile, dependencyText.data(), dependencyText.size()))
-                    return;
+                    return 0;
+                written += dependencyText.size();
             }
-            if (WriteFileAtomic(file, data->data(), data->size()))
+            std::vector<std::uint8_t> packed;
+            const bool isPacked = !item.materialFile && cache::Pack(data->data(), data->size(), packed);
+            const std::uint8_t* bytes = isPacked ? packed.data() : data->data();
+            const std::size_t size = isPacked ? packed.size() : data->size();
+            if (WriteFileAtomic(file, bytes, size)) {
                 m_diskStoreCount.fetch_add(1, std::memory_order_relaxed);
+                written += size;
+            }
+        }
+        catch (...) {
+        }
+        return written;
+    }
+
+    // One low priority pass per process: deletes stale revision and fingerprint directories and enforces the size cap (r2_cache_store.h).
+    void StartCacheMaintenance(const std::filesystem::path& cacheDirectory)
+    {
+        static std::atomic<bool> started{ false };
+        // DELETES cache directories: opt-in until the owner agrees (R2PORT_CACHE_PRUNE=1). Compression is independent of this switch.
+        char pruneFlag[8]{};
+        if (GetEnvironmentVariableA("R2PORT_CACHE_PRUNE", pruneFlag, sizeof(pruneFlag)) == 0 || pruneFlag[0] == '0')
+            return;
+        if (started.exchange(true) || m_convertedRoot.empty())
+            return;
+        cache::MaintenancePlan plan;
+        plan.r2portDirectory = cacheDirectory.parent_path().parent_path();
+        plan.currentFingerprint = cacheDirectory.filename().string();
+        plan.currentConvertedName = m_convertedRoot.filename().string();
+        plan.currentModelRevision = std::string(ModelCacheRevision());
+        plan.capBytes = cache::ConfiguredCapBytes();
+        try {
+            std::thread([plan]() {
+                SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+                r2port::prof::SetThreadRole("cache-maintenance");
+                cache::MaintenanceResult result;
+                {
+                    R2P_SCOPE_B(profileMaintenance, "wt.cache.maintenance", plan.currentConvertedName);
+                    result = cache::RunMaintenance(plan);
+                    profileMaintenance.SetBytes(result.removedBytes + result.evictedBytes);
+                }
+                char message[512]{};
+                _snprintf_s(message, sizeof(message), _TRUNCATE,
+                    "R1Delta: R2 cache maintenance removed %llu stale directories (%llu files, %llu MiB), evicted %llu least recently used files (%llu MiB), cache now %llu MiB (cap %llu MiB)\n",
+                    static_cast<unsigned long long>(result.removedDirectories), static_cast<unsigned long long>(result.removedFiles),
+                    static_cast<unsigned long long>(result.removedBytes >> 20), static_cast<unsigned long long>(result.evictedFiles),
+                    static_cast<unsigned long long>(result.evictedBytes >> 20), static_cast<unsigned long long>(result.keptBytes >> 20),
+                    static_cast<unsigned long long>(plan.capBytes >> 20));
+                LogR2TextureMessage(message);
+            }).detach();
         }
         catch (...) {
         }
@@ -998,7 +1075,12 @@ private:
                 r2tex::MaterialOptions materialOptions;
                 materialOptions.forModel = forModel;
                 materialOptions.uberPack = r2tex::UberPackRequested();
-                if (!r2tex::ConvertMaterial(sourceName, material, materialOptions, &error) || material.vmt.empty()) {
+                bool vmtConverted;
+                {
+                    R2P_SCOPE_L("d.vmt.emit", sourceName);
+                    vmtConverted = r2tex::ConvertMaterial(sourceName, material, materialOptions, &error);
+                }
+                if (!vmtConverted || material.vmt.empty()) {
                     if (forWorld) {
                         // Not an R2 package material (debug/debugempty, world/dev/edge_detection_*: map pack or R1
                         // files): answer with an include of the plain name, which is what the BSP asked for before the
@@ -1019,12 +1101,15 @@ private:
                 // Every source texture the VMT names moves into the r2t/ namespace (r2_material_names.h): a stock R1
                 // map pack that is still mounted has textures of the same names with other data (specular colour,
                 // detail normal maps) and would answer them.
+                {
+                R2P_SCOPE_L("d.vmt.namespace", item.assetName);
                 for (const r2tex::TextureRef& texture : material.textures) {
                     if (texture.name.empty())
                         continue;
                     if (NamespaceVmtTexture(material.vmt, texture.name) == 0
                         && texture.name.compare(0, kSyntheticTexturePrefix.size(), kSyntheticTexturePrefix) != 0)
                         LogUnnamespacedTexture(item, texture.name);
+                }
                 }
                 std::vector<std::uint8_t> bytes(material.vmt.begin(), material.vmt.end());
                 dependencies.reserve(material.textures.size());
@@ -1058,6 +1143,7 @@ private:
 
     void WorkerLoop()
     {
+        r2port::prof::SetThreadRole("conv-worker");
         WorkQueue::Family ownedFamily = WorkQueue::kNoFamily;
         for (;;) {
             WorkItem item;
@@ -1079,9 +1165,14 @@ private:
                 }
                 ++m_activeWork;
             }
+            if (item.enqueuedUs)
+                r2port::prof::Record("q.wait", item.path, item.enqueuedUs, r2port::prof::NowUs() - item.enqueuedUs);
 
             if (item.mapMaterials) {
-                PrefetchMaterialFilesFromBsp(item);
+                {
+                    R2P_SCOPE_L("wt.prefetch.bsp", item.mapName);
+                    PrefetchMaterialFilesFromBsp(item);
+                }
                 std::lock_guard<std::mutex> lock(m_cacheMutex);
                 if (m_activeWork)
                     --m_activeWork;
@@ -1091,11 +1182,19 @@ private:
             const auto conversionStart = std::chrono::steady_clock::now();
             std::vector<std::string> dependencies;
             bool fromDisk = false;
+            const std::int64_t profileDiskStart = r2port::prof::Enabled() ? r2port::prof::NowUs() : 0;
             FileBytes data = LoadConvertedFile(item, dependencies);
-            if (data)
+            if (data) {
                 fromDisk = true;
-            else
+                if (profileDiskStart)
+                    r2port::prof::Record("wt.disk.load", item.path, profileDiskStart, r2port::prof::NowUs() - profileDiskStart, data->size());
+            }
+            else {
+                R2P_SCOPE_B(profileConvert, item.materialFile ? "wt.convert.material" : "wt.convert.texture", item.path);
                 data = ConvertAsset(item, dependencies);
+                if (data)
+                    profileConvert.SetBytes(data->size());
+            }
             const auto conversionUs = static_cast<std::uint64_t>(
                 std::chrono::duration_cast<std::chrono::microseconds>(
                     std::chrono::steady_clock::now() - conversionStart).count());
@@ -1141,8 +1240,10 @@ private:
             item.pending->ready.notify_all();
             if (!data)
                 RemoveKnownPath(item.path);
-            if (data && !fromDisk)
-                StoreConvertedFile(item, data, dependencies);
+            if (data && !fromDisk) {
+                R2P_SCOPE_B(profileStore, "wt.disk.store", item.path);
+                profileStore.SetBytes(StoreConvertedFile(item, data, dependencies));
+            }
 
             if (data) {
                 std::atomic<bool>& logged = item.materialFile ? m_loggedMaterial : m_loggedTexture;
@@ -1196,10 +1297,10 @@ private:
 
     void CacheLocked(const std::string& path, const FileBytes& data)
     {
-        if (data->size() > kMaterialOutputCacheLimit)
+        if (data->size() > MaterialOutputCacheLimit())
             return;
 
-        while (m_cachedBytes + data->size() > kMaterialOutputCacheLimit && !m_lru.empty()) {
+        while (m_cachedBytes + data->size() > MaterialOutputCacheLimit() && !m_lru.empty()) {
             const auto oldest = m_cache.find(m_lru.back());
             if (oldest == m_cache.end()) {
                 m_lru.pop_back();
@@ -1322,13 +1423,13 @@ void RegisterR2TextureCacheConVar()
     constexpr const char* name = "r2port_tex_cache_mb";
     constexpr const char* help = "Maximum decoded R2 RPak family cache in MiB.";
     if (IsR1ODedicatedServer()) {
-        g_r1oCacheCvar = RegisterR1ODediConVar(name, "256", FCVAR_NONE, help);
+        g_r1oCacheCvar = RegisterR1ODediConVar(name, "2048", FCVAR_NONE, help);
         if (!g_r1oCacheCvar)
             return;
         g_r1oCacheCvar->m_fnChangeCallbacks.AddToTail(RefreshR2TextureCacheLimit);
     }
     else {
-        g_nativeCacheCvar = RegisterConVar(name, "256", FCVAR_NONE, help);
+        g_nativeCacheCvar = RegisterConVar(name, "2048", FCVAR_NONE, help);
         if (!g_nativeCacheCvar)
             return;
         g_nativeCacheCvar->m_fnChangeCallbacks.AddToTail(RefreshR2TextureCacheLimit);

@@ -12,6 +12,8 @@
 
 #include "engine/filesystem/r1o_vpk.h"
 #include "engine/r2port/bspdown/bspdown.hpp"
+#include "engine/r2port/r2_profile.h"
+#include "engine/filesystem/r2_cache_store.h"
 #include "engine/r2port/entity_rewrite.h"
 #include "engine/r2port/trigger_brush.h"
 #include "engine/filesystem/r2_overview_provider.h"
@@ -659,6 +661,8 @@ BspSha256 Sha256Fast(const uint8_t* data, size_t size)
 // entity_rewrite::kRewriteVersion and kConvertedBspCacheVersion. Nothing is rebuilt unless one changes.
 // A hit skips the VPK read (LZHAM), the SHA-256 and bspdown.
 constexpr char kBspCacheMagic[8] = { 'R', '2', 'B', 'S', 'P', 'C', 'H', '1' };
+// Same header, body stored in the R2CZ zstd container (r2_cache_store.h); the plain 'R2BSPCH1' form stays readable.
+constexpr char kBspCacheMagicPacked[8] = { 'R', '2', 'B', 'S', 'P', 'C', 'Z', '1' };
 
 #pragma pack(push, 1)
 struct BspCacheHeader {
@@ -674,6 +678,8 @@ std::filesystem::path ConvertedBspCacheFile(const std::shared_ptr<MapState>& sta
 {
     std::lock_guard<std::mutex> lock(state->bspCacheMutex);
     char disabled[8]{};
+    if (!cache::DiskCacheEnabled())
+        return {};   // disk cache off (default): the converted BSP is kept in memory only (g_keptBsp)
     if (GetEnvironmentVariableA("R2PORT_BSP_CACHE", disabled, sizeof(disabled)) && disabled[0] == '0')
         return {};   // measurement switch: R2PORT_BSP_CACHE=0 turns the converted-BSP cache off
     if (!state->bspCacheKeyTried) {
@@ -699,21 +705,31 @@ bool LoadConvertedBspCache(const std::shared_ptr<MapState>& state, BspSha256& so
             return false;
         BspCacheHeader header{};
         input.read(reinterpret_cast<char*>(&header), sizeof(header));
-        if (!input || std::memcmp(header.magic, kBspCacheMagic, sizeof(header.magic)) != 0
+        const bool packedForm = input && std::memcmp(header.magic, kBspCacheMagicPacked, sizeof(header.magic)) == 0;
+        if (!input || (!packedForm && std::memcmp(header.magic, kBspCacheMagic, sizeof(header.magic)) != 0)
             || header.cacheVersion != kConvertedBspCacheVersion
             || header.entityRewriteVersion != entity_rewrite::kRewriteVersion
             || header.convertedSize < kBspHeaderSize || header.convertedSize > (1ull << 31))
             return false;
         std::error_code error;
         const auto fileSize = std::filesystem::file_size(file, error);
-        if (error || fileSize != sizeof(header) + header.convertedSize)
+        if (error || (!packedForm && fileSize != sizeof(header) + header.convertedSize) || fileSize <= sizeof(header))
             return false;
         if (converted) {
-            converted->resize(static_cast<size_t>(header.convertedSize));
-            input.read(reinterpret_cast<char*>(converted->data()), static_cast<std::streamsize>(converted->size()));
-            if (!input) {
-                converted->clear();
-                return false;
+            if (packedForm) {
+                std::vector<uint8_t> body(static_cast<size_t>(fileSize - sizeof(header)));
+                input.read(reinterpret_cast<char*>(body.data()), static_cast<std::streamsize>(body.size()));
+                if (!input || !cache::IsPacked(body.data(), body.size()) || !cache::Unpack(body) || body.size() != header.convertedSize)
+                    return false;
+                *converted = std::move(body);
+            }
+            else {
+                converted->resize(static_cast<size_t>(header.convertedSize));
+                input.read(reinterpret_cast<char*>(converted->data()), static_cast<std::streamsize>(converted->size()));
+                if (!input) {
+                    converted->clear();
+                    return false;
+                }
             }
         }
         std::memcpy(sourceHash.data(), header.sourceSha256, sizeof(header.sourceSha256));
@@ -738,7 +754,9 @@ void StoreConvertedBspCache(const std::shared_ptr<MapState>& state, const BspSha
         if (error)
             return;
         BspCacheHeader header{};
-        std::memcpy(header.magic, kBspCacheMagic, sizeof(header.magic));
+        std::vector<uint8_t> packed;
+        const bool isPacked = cache::Pack(converted.data(), converted.size(), packed);
+        std::memcpy(header.magic, isPacked ? kBspCacheMagicPacked : kBspCacheMagic, sizeof(header.magic));
         header.cacheVersion = kConvertedBspCacheVersion;
         header.entityRewriteVersion = entity_rewrite::kRewriteVersion;
         header.convertedSize = converted.size();
@@ -751,7 +769,8 @@ void StoreConvertedBspCache(const std::shared_ptr<MapState>& state, const BspSha
             if (!output)
                 return;
             output.write(reinterpret_cast<const char*>(&header), sizeof(header));
-            output.write(reinterpret_cast<const char*>(converted.data()), static_cast<std::streamsize>(converted.size()));
+            const std::vector<uint8_t>& payload = isPacked ? packed : converted;
+            output.write(reinterpret_cast<const char*>(payload.data()), static_cast<std::streamsize>(payload.size()));
             output.close();
             if (!output) {
                 std::filesystem::remove(temporary, error);
@@ -802,15 +821,21 @@ bool EnsureSourceBsp(const std::shared_ptr<MapState>& state)
         if (!state->directoryVpk.empty() && IsRegularFile(state->directoryVpk)) {
             const std::string package = state->directoryVpk.string();
             const std::string path = "maps/" + state->mapName + ".bsp";
+            R2P_SCOPE_B(profileRead, "bsp.vpkread", path);
             source = R1OVPK_ReadDirectoryVPKFile(package.c_str(), path.c_str());
+            if (source)
+                profileRead.SetBytes(source->size());
         }
     }
     catch (...) {
     }
 
     BspSha256 hash{};
-    if (source)
+    if (source) {
+        R2P_SCOPE_B(profileSha, "bsp.sha256", state->mapName);
+        profileSha.SetBytes(source->size());
         hash = Sha256Fast(source->data(), source->size());
+    }
 
     lock.lock();
     if (source) {
@@ -1482,13 +1507,21 @@ FileBytes ReadConvertedBsp(const MapRequest& request)
         BspSha256 sourceHash{};
         bool haveConverted = false;
         const auto started = std::chrono::steady_clock::now();
-        if (LoadConvertedBspCache(state, sourceHash, &converted)) {
+        bool cacheHit;
+        {
+            R2P_SCOPE_L("bsp.cache.load", state->mapName);
+            cacheHit = LoadConvertedBspCache(state, sourceHash, &converted);
+        }
+        if (cacheHit) {
             {
                 std::lock_guard<std::mutex> sourceLock(state->sourceMutex);
                 state->sourceHash = sourceHash;
                 state->hashReady = true;
             }
-            RewriteConvertedBspEntities(state, converted);
+            {
+                R2P_SCOPE_L("bsp.entities", state->mapName);
+                RewriteConvertedBspEntities(state, converted);
+            }
             state->bspCacheStatus = "hit";
             haveConverted = true;
         }
@@ -1506,9 +1539,20 @@ FileBytes ReadConvertedBsp(const MapRequest& request)
                 if (state->mapName == "mp_coliseum" || state->mapName == "mp_coliseum_column")
                     options.csmLastEnv = true;
                 bspdown::Report report;
-                converted = bspdown::DowngradeBsp(source->data(), source->size(), options, &report);
-                StoreConvertedBspCache(state, sourceHash, converted);
-                RewriteConvertedBspEntities(state, converted);
+                {
+                    R2P_SCOPE_B(profileDown, "bsp.downgrade", state->mapName);
+                    converted = bspdown::DowngradeBsp(source->data(), source->size(), options, &report);
+                    profileDown.SetBytes(converted.size());
+                }
+                {
+                    R2P_SCOPE_B(profileStore, "bsp.cache.store", state->mapName);
+                    profileStore.SetBytes(converted.size());
+                    StoreConvertedBspCache(state, sourceHash, converted);
+                }
+                {
+                    R2P_SCOPE_L("bsp.entities", state->mapName);
+                    RewriteConvertedBspEntities(state, converted);
+                }
                 haveConverted = true;
             }
         }
@@ -1516,6 +1560,7 @@ FileBytes ReadConvertedBsp(const MapRequest& request)
             std::chrono::steady_clock::now() - started).count());
 
         if (haveConverted) {
+            R2P_SCOPE_L("bsp.patch", state->mapName);
             if (const auto patch = GetMatchingPatch(state, sourceHash)) {
                 std::vector<uint8_t> patched;
                 if (ReplacePatchedLumps(converted, *patch, patched)) {
@@ -1558,8 +1603,16 @@ FileBytes ReadConvertedBsp(const MapRequest& request)
         state->sourceBsp.reset();
     }
     lock.lock();
-    if (result)
+    if (result) {
         state->convertedBsp = result;
+        // Disk cache off: keep the last two converted BSPs alive so a map restart or rejoin skips VPK read + bspdown (about 130 MB each).
+        static std::mutex keptMutex;
+        static std::vector<FileBytes> kept;
+        std::lock_guard<std::mutex> keptLock(keptMutex);
+        kept.push_back(result);
+        if (kept.size() > 2)
+            kept.erase(kept.begin());
+    }
     else
         state->conversionFailed = true;
     state->conversionLoading = false;
@@ -1628,6 +1681,7 @@ public:
         if (!request)
             return {};
         if (request->kind == MapRequest::Kind::Bsp) {
+            R2P_SCOPE_L("m.bsp.read", request->mapName);
             FileBytes data = ReadConvertedBsp(*request);
             if (data && !IsDedicatedServer())
                 PrefetchR2MapMaterials(request->mapName, data);
@@ -1636,6 +1690,7 @@ public:
             return data;
         }
         if (request->kind == MapRequest::Kind::AiGraph) {
+            R2P_SCOPE_L("m.map.ain", request->mapName);
             FileBytes data = ReadMapPatchFile(*request);
             if (data)
                 g_ainPackageServed = true;
@@ -1644,6 +1699,7 @@ public:
             return data;
         }
 
+        R2P_SCOPE_L("m.map.entfile", normalizedPath);
         const auto state = GetMapState(request->mapName);
         FileBytes data = ReadEntityFile(*request, state);
         if (data && !IsDedicatedServer())

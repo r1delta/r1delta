@@ -12,6 +12,7 @@
 #include "engine/filesystem/r2port_provider.h"
 #include "engine/filesystem/r2_map_provider.h"
 #include "engine/filesystem/r2_material_provider.h"
+#include "engine/r2port/r2_profile.h"
 
 #include <filesystem>
 #include <string>
@@ -90,6 +91,75 @@ static void ExecR2MapTypeConfig(const std::string& mapName)
     Msg("%s", message);
 }
 
+// R2PORT_PROFILE=1: write the stage report of the loaded map to <game dir>/r2port/profile at signon state 8, and optionally drive a
+// sequence of map loads in one process: R2PORT_PROFILE_NEXT=mp_a,mp_b,... queues "map <next>" R2PORT_PROFILE_SETTLE seconds (default 15,
+// time for background conversion to finish) after the previous map reached signon 8; the final report of each map is rewritten when the
+// next one is queued, and R2PORT_PROFILE_QUIT=1 quits the process after the last report. Runs on the netchan hook (main thread), nothing
+// per frame when R2PORT_PROFILE is unset.
+static std::filesystem::path ProfileDirectory()
+{
+    const std::filesystem::path gameDirectory = r2port::GetR2GameContentDirectory();
+    return gameDirectory.empty() ? std::filesystem::path() : gameDirectory / "r2port" / "profile";
+}
+
+static void ProfileWriteReport(const char* tag)
+{
+    const std::filesystem::path directory = ProfileDirectory();
+    if (!directory.empty())
+        r2port::prof::WriteReport(directory, tag);
+}
+
+static void ProfileTick()
+{
+    if (!r2port::prof::Enabled())
+        return;
+    static std::vector<std::string> sequence;
+    static size_t next = 0;
+    static bool parsed = false;
+    static bool quit = false;
+    static double settleSeconds = 15.0;
+    if (!parsed) {
+        parsed = true;
+        char list[2048]{};
+        if (GetEnvironmentVariableA("R2PORT_PROFILE_NEXT", list, sizeof(list)) > 0) {
+            std::string current;
+            for (const char* p = list;; ++p) {
+                if (*p == ',' || *p == ';' || *p == 0) {
+                    if (!current.empty())
+                        sequence.push_back(current);
+                    current.clear();
+                    if (!*p)
+                        break;
+                }
+                else
+                    current.push_back(*p);
+            }
+        }
+        char value[16]{};
+        if (GetEnvironmentVariableA("R2PORT_PROFILE_SETTLE", value, sizeof(value)) > 0 && atof(value) > 0.0)
+            settleSeconds = atof(value);
+        quit = GetEnvironmentVariableA("R2PORT_PROFILE_QUIT", value, sizeof(value)) > 0 && value[0] != '0';
+    }
+    const std::int64_t signon = r2port::prof::SignonUs();
+    if (signon < 0 || (next >= sequence.size() && !quit))
+        return;
+    if (static_cast<double>(r2port::prof::NowUs() - signon) < settleSeconds * 1e6)
+        return;
+    ProfileWriteReport("");
+    if (next < sequence.size()) {
+        char command[160]{};
+        _snprintf_s(command, sizeof(command), _TRUNCATE, "map %s\n", sequence[next].c_str());
+        r2port::prof::Mark("seq.map_command", sequence[next], 0);
+        ++next;
+        Cbuf_AddText(0, command, 0);
+    }
+    else if (quit) {
+        quit = false;
+        Cbuf_AddText(0, "quit\n", 0);
+    }
+    r2port::prof::ClearSignon();
+}
+
 // pvs_extraCull (CORE cfg/autoexec_delta.cfg sets 1, engine default 0) culls whole world meshes of converted R2 maps (the glass roof over
 // the mp_eden courtyard, EdenRoofFade: pvs_extraCull 0 at runtime restores them; occluder lumps and ref boxes are not the cause). Interim fix, default
 // ON until a converter-side fix is proven: while a converted R2 map is the active map the cvar is forced to 0 and the user's value is put back
@@ -147,6 +217,7 @@ __int64 CNetChan__SendDatagramLISTEN_Part2_Hook(__int64 thisptr, unsigned int le
     const auto base_client = reinterpret_cast<GetBaseClientFn>(G_engine + 0x5F470)(-1);
     const int signon_state = base_client
         ? *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(base_client) + 116) : -1;
+    ProfileTick();
     static int last_logged_signon_state = -1;
     if (base_client && signon_state != last_logged_signon_state) {
         const std::string map_name = r2port::ActiveMapName();
@@ -159,8 +230,10 @@ __int64 CNetChan__SendDatagramLISTEN_Part2_Hook(__int64 thisptr, unsigned int le
             Msg("%s", message);
             OutputDebugStringA(message);
             if (signon_state == 8) {
+                r2port::prof::MarkSignonFull();
                 r2port::LogProviderReadMetrics("signon-full");
                 r2port::LogR2TextureProviderMetrics("signon-full");
+                ProfileWriteReport("_signon");
             }
         }
         if (!map_name.empty() && !IsDedicatedServer())
