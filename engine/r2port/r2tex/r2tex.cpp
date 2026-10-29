@@ -1681,26 +1681,6 @@ bool isNormalName(std::string_view name) {
     return n.size() >= 4 && (n.rfind("_nml") == n.size() - 4 || n.rfind("_normal") == n.size() - 7 || n.rfind("_bump") == n.size() - 5);
 }
 
-// Names of textures that keep their single mip (addMipChain does not rebuild a chain for them).
-bool mipChainSkipName(std::string_view textureName) {
-    static const char* const kSkip[] = {"_nml", "_normal", "_bump", "_opa", "_msk", "_bm", "_gls", "_spc", "_exp", "_cav", "_ao"};
-    const std::string lowered = lowerAscii(std::string(textureName));
-    for (const char* suffix : kSkip) {
-        const std::size_t n = std::strlen(suffix);
-        if (lowered.size() >= n && lowered.compare(lowered.size() - n, n, suffix) == 0) return true;
-    }
-    return false;
-}
-
-// True when addMipChain rebuilds the chain of a color texture of this size and mip count (a single mip or a chain cut off at the
-// small end breaks in R1). Such a texture cannot be passed through as BC7: the rebuilt chain is RGBA8.
-bool wantsSyntheticMipChain(std::string_view textureName, std::uint32_t width, std::uint32_t height, std::uint32_t mipCount) {
-    if (mipChainSkipName(textureName) || std::max(width, height) < 16) return false;
-    std::uint32_t fullMips = 1;
-    for (std::uint32_t size = std::max(width, height); size > 1; size >>= 1) ++fullMips;
-    return mipCount < fullMips;
-}
-
 bool addMipChain(std::vector<std::uint8_t>& vtf, std::string_view textureName);
 void encodeBc1Block(const std::uint8_t (&px)[16][3], std::uint8_t* out);
 
@@ -1807,10 +1787,7 @@ bool convertTextureWithDb(const std::shared_ptr<Database>& db, const AssetRecord
 
     std::uint16_t imageFormat = 0xffff;
     std::uint32_t flags = isNormalName(record.name) ? 0x80u : 0u;
-    // BC7 is passed through (VTF format 67, source sRGB flag kept) only when R1 can use it as is: block aligned size and a chain that
-    // addMipChain would not rebuild. Everything else takes the decoded RGBA8 path.
-    const bool passBc7 = (format == 12 || format == 13) && options.bc7Passthrough && width % 4 == 0 && height % 4 == 0 &&
-                         !wantsSyntheticMipChain(record.name, width, height, count);
+    const bool passBc7 = (format == 12 || format == 13) && options.bc7Passthrough;
     const bool passBc6h = (format == 10 || format == 11) && options.bc6hPassthrough;
     std::vector<ImageMip> converted;
     if (passBc7 || passBc6h) {
@@ -1995,87 +1972,6 @@ std::string opaqueAlbedoName(const std::string& textureName) {
     return std::string(kOpaqueAlbedoPrefix) + cleanAssetName(textureName, true);
 }
 
-// A BC7 block is a 128 bit little endian bit string (bit 0 = least significant bit of byte 0).
-struct Bc7Bits {
-    std::uint64_t lo = 0, hi = 0;
-    explicit Bc7Bits(const std::uint8_t* block) { std::memcpy(&lo, block, 8); std::memcpy(&hi, block + 8, 8); }
-    std::uint32_t get(unsigned pos, unsigned n) const {
-        const std::uint64_t mask = (1ull << n) - 1;
-        if (pos + n <= 64) return static_cast<std::uint32_t>((lo >> pos) & mask);
-        if (pos >= 64) return static_cast<std::uint32_t>((hi >> (pos - 64)) & mask);
-        return static_cast<std::uint32_t>(((lo >> pos) | (hi << (64 - pos))) & mask);
-    }
-    void set(unsigned pos, unsigned n, std::uint32_t value) {
-        const std::uint64_t mask = (1ull << n) - 1;
-        if (pos + n <= 64) {
-            lo = (lo & ~(mask << pos)) | (static_cast<std::uint64_t>(value) << pos);
-        } else if (pos >= 64) {
-            hi = (hi & ~(mask << (pos - 64))) | (static_cast<std::uint64_t>(value) << (pos - 64));
-        } else {
-            const unsigned lowBits = 64 - pos;
-            lo = (lo & ~(mask << pos)) | (static_cast<std::uint64_t>(value) << pos);
-            hi = (hi & ~(mask >> lowBits)) | (static_cast<std::uint64_t>(value) >> lowBits);
-        }
-    }
-    void store(std::uint8_t* block) const { std::memcpy(block, &lo, 8); std::memcpy(block + 8, &hi, 8); }
-};
-
-// Makes one BC7 block decode to alpha 255 without a re-encode. Modes 0 to 3 have no alpha. Modes 4 and 5 keep alpha in its own channel
-// (rotation moves it into a colour channel): all endpoints of that channel go to the maximum, the colour of the block is untouched. Modes
-// 6 and 7 keep an alpha endpoint with the p-bit it shares with the colour: an endpoint whose alpha is not yet 255 gets alpha bits at the
-// maximum and p-bit 1, which raises the colour of that endpoint by one step of its precision (1/255 in mode 6, about 4/255 in mode 7;
-// endpoints that are already opaque stay bit exact). An invalid block (mode byte 0) decodes to transparent black in hardware: it is
-// replaced by an opaque black mode 5 block, which is what the decoded-and-forced path produces.
-void forceBc7BlockOpaque(std::uint8_t* block) {
-    Bc7Bits b(block);
-    unsigned mode = 0;
-    while (mode < 8 && !((block[0] >> mode) & 1u)) ++mode;
-    switch (mode) {
-    case 4: {
-        const unsigned rotation = b.get(5, 2);
-        if (rotation == 0) {
-            b.set(38, 6, 63); b.set(44, 6, 63);
-        } else {
-            const unsigned channel = rotation - 1;   // 1: A<->R, 2: A<->G, 3: A<->B
-            b.set(8 + channel * 10, 5, 31); b.set(13 + channel * 10, 5, 31);
-        }
-        break;
-    }
-    case 5: {
-        const unsigned rotation = b.get(6, 2);
-        if (rotation == 0) {
-            b.set(50, 8, 255); b.set(58, 8, 255);
-        } else {
-            const unsigned channel = rotation - 1;
-            b.set(8 + channel * 14, 7, 127); b.set(15 + channel * 14, 7, 127);
-        }
-        break;
-    }
-    case 6:
-        for (unsigned e = 0; e < 2; ++e) {
-            const unsigned alphaPos = 49 + e * 7, pPos = 63 + e;
-            if (((b.get(alphaPos, 7) << 1) | b.get(pPos, 1)) == 255u) continue;
-            b.set(alphaPos, 7, 127); b.set(pPos, 1, 1);
-        }
-        break;
-    case 7:
-        for (unsigned e = 0; e < 4; ++e) {
-            const unsigned alphaPos = 74 + e * 5, pPos = 94 + e;
-            if (((b.get(alphaPos, 5) << 1) | b.get(pPos, 1)) == 63u) continue;
-            b.set(alphaPos, 5, 31); b.set(pPos, 1, 1);
-        }
-        break;
-    case 8:
-        std::memset(block, 0, 16);
-        block[0] = 0x20;                // mode 5, rotation 0, colour endpoints and indices 0
-        { Bc7Bits black(block); black.set(50, 8, 255); black.set(58, 8, 255); black.store(block); }
-        return;
-    default:
-        return;
-    }
-    b.store(block);
-}
-
 bool forceOpaqueVtf(std::vector<std::uint8_t>& vtf, std::string& error) {
     if (vtf.size() < 0x58 || std::memcmp(vtf.data(), "VTF\0", 4) != 0) {
         error = "invalid source VTF for opaque albedo";
@@ -2090,7 +1986,7 @@ bool forceOpaqueVtf(std::vector<std::uint8_t>& vtf, std::string& error) {
         error = "invalid source VTF dimensions for opaque albedo";
         return false;
     }
-    if (format != 0 && format != 14 && format != 15 && format != 67) return true;  // no alpha channel to clear
+    if (format != 0 && format != 14 && format != 15) return true;  // no alpha channel to clear
     for (std::uint32_t m = mipCount; m-- > 0;) {
         const std::uint32_t w = std::max(1u, width >> m);
         const std::uint32_t h = std::max(1u, height >> m);
@@ -2104,8 +2000,6 @@ bool forceOpaqueVtf(std::vector<std::uint8_t>& vtf, std::string& error) {
         std::uint8_t* mip = vtf.data() + offset;
         if (format == 0) {
             for (std::size_t p = 3; p < mipBytes; p += 4) mip[p] = 255;
-        } else if (format == 67) {
-            for (std::size_t block = 0; block < mipBytes; block += 16) forceBc7BlockOpaque(mip + block);
         } else {
             for (std::size_t block = 0; block < mipBytes; block += 16) {
                 if (format == 14) {
@@ -2872,7 +2766,14 @@ bool buildUberPackVtf(const std::shared_ptr<Database>& db, std::uint64_t mask, s
 bool addMipChain(std::vector<std::uint8_t>& vtf, std::string_view textureName) {
     // Color textures only: normal, opacity, mask, gloss and specular maps keep their single mip (a box filter would
     // de-normalize or blur their channel packing).
-    if (mipChainSkipName(textureName)) return true;
+    static const char* const kSkip[] = {"_nml", "_normal", "_bump", "_opa", "_msk", "_bm", "_gls", "_spc", "_exp", "_cav", "_ao"};
+    {
+        const std::string lowered = lowerAscii(std::string(textureName));
+        for (const char* suffix : kSkip) {
+            const std::size_t n = std::strlen(suffix);
+            if (lowered.size() >= n && lowered.compare(lowered.size() - n, n, suffix) == 0) return true;
+        }
+    }
     VtfView view;
     // A chain cut off at the small end (the 1,028 R2 textures stored with fewer mips than log2(size)+1: 2048 px _ilm glow maps with 4
     // mips) breaks in R1 the same way a single-mip texture does: mp_complex3 stackable_cages01 (_ilm, 2048 px, 4 mips) lit every crate
@@ -4586,9 +4487,8 @@ bool ConvertTexture(const TextureRef& texture, std::vector<std::uint8_t>& vtf,
         if (!db) { if (error) *error = "r2tex::Open has not succeeded"; return false; }
         const AssetRecord* record = findRecord(*db, texture.guid, kTxtr);
         if (!record) { if (error) *error = "unresolved texture GUID"; return false; }
-        // Only the opaque albedo alias can keep a BC7 passthrough (forceOpaqueVtf rewrites the BC7 alpha); the other transforms read pixels.
         TextureOptions decodeOptions = options;
-        if (texture.transform != TextureTransform::opaqueAlpha) decodeOptions.bc7Passthrough = false;
+        decodeOptions.bc7Passthrough = false;
         decodeOptions.bc6hPassthrough = false;
         std::string why;
         if (!convertTextureWithDb(db, *record, decodeOptions, vtf, why)) {

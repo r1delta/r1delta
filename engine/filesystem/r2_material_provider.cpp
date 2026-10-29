@@ -9,7 +9,6 @@
 #include "engine/filesystem/r2port_provider.h"
 #include "engine/logging/logging.h"
 #include "engine/r2port/r2_profile.h"
-#include "engine/r2port/r2_bc7_srgb.h"
 #include "engine/r2port/r2tex/r2tex.hpp"
 #include "p2p/p2p_identity.h"
 
@@ -190,43 +189,6 @@ bool IsMaterialOrTextureRequestPath(std::string_view path)
 // Bump when the r2tex library or the VMT/VTF output it produces changes: converted files are
 // persisted per R2 install fingerprint and revision.
 constexpr std::string_view kConvertedCacheRevision = "36";  // 36: non-square R2 overview images padded to a square (mp_lf_meadow); 35: world env materials default to gloss (DXT5 spec+gloss alpha) and blur (shininess lod), probe lod base 4; 34: opaque model materials with Vcola drop $vertexalpha and alias the albedo opaque (TreeTrunks); 33: env defaults ($envmaplightscale 1, $fresnelamount 0.35 on world env materials); 32: every source texture a VMT names lives under r2t/ (r2_material_names.h), world materials under r2w/
-
-// R2 BC7 textures (the albedo maps) are served as BC7 VTFs (image format 67) instead of being decoded to RGBA8: 4x less file, engine and VRAM
-// memory, no decode and no 4 byte per pixel copy. Needs the sRGB switch patch of materialsystem_dx11.dll (engine/r2port/r2_bc7_srgb.h, applied
-// by the binary patcher) and a GPU at D3D feature level 11 (the engine never checks BC7 support: a failed CreateTexture2D leaves a NULL texture);
-// while either is missing the provider decodes BC7 as before.
-// ON by default; R2PORT_BC7=0 forces off, =1 forces on (kBc7PassthroughDefault).
-constexpr bool kBc7PassthroughDefault = true;
-
-bool Bc7PassthroughRequested()
-{
-    static const bool requested = []() {
-        char flag[8]{};
-        if (GetEnvironmentVariableA("R2PORT_BC7", flag, sizeof(flag)) > 0)
-            return flag[0] != '0';
-        return kBc7PassthroughDefault;
-    }();
-    return requested;
-}
-
-bool Bc7PassthroughActive()
-{
-    if (!Bc7PassthroughRequested())
-        return false;
-    const bool patched = MatsysBc7SrgbPatched();
-    // The patch is applied when the dll loads: a conversion before that decodes. The GPU probe runs once.
-    const bool active = patched && GpuHasFeatureLevel11();
-    static std::atomic<int> logged{0};
-    int expected = 0;
-    if (patched && logged.compare_exchange_strong(expected, 1)) {
-        LogR2TextureMessage(active ? "R1Delta: R2 BC7 passthrough active (materialsystem_dx11 sRGB patch present, feature level 11 GPU)\n"
-                                   : "R1Delta: R2 BC7 passthrough requested but the GPU is below feature level 11: decoding BC7 to RGBA8\n");
-    }
-    else if (!patched && logged.compare_exchange_strong(expected, 2)) {
-        LogR2TextureMessage("R1Delta: R2 BC7 passthrough requested but the materialsystem_dx11 sRGB patch is missing: decoding BC7 to RGBA8\n");
-    }
-    return active;
-}
 
 bool ReadWholeFile(const std::filesystem::path& path, std::vector<std::uint8_t>& bytes)
 {
@@ -712,11 +674,8 @@ private:
                     // r2tex::EnvCacheTag(): "" for the defaults, "-env1-<tokens>" while R2TEX_ENV is set (A/B runs never reuse each other's conversions).
                     if (cache::DiskCacheEnabled())
                         m_convertedRoot = cacheDirectory / "converted" / (std::string(kConvertedCacheRevision) + r2tex::EnvCacheTag());
-                    if (!m_convertedRoot.empty()) {
+                    if (!m_convertedRoot.empty())
                         m_convertedRoot += r2tex::UberPackCacheTag();   // R2_UBER=...pack: converted VMT/VTF set with AO/cavity carriers
-                        if (Bc7PassthroughRequested())
-                            m_convertedRoot += "-bc7";                  // BC7 textures stay BC7 (VTF format 67)
-                    }
                     std::error_code cacheError;
                     const bool cacheExists = std::filesystem::is_regular_file(
                         cacheDirectory / "r2tex.index", cacheError);
@@ -1248,9 +1207,7 @@ private:
             std::string_view textureSource;
             const std::string_view r2Name = StripTextureNamespace(item.assetName, textureSource)
                 ? textureSource : std::string_view(item.assetName);
-            r2tex::TextureOptions textureOptions;
-            textureOptions.bc7Passthrough = Bc7PassthroughActive();
-            if (r2tex::ConvertTexture(r2Name, bytes, textureOptions, &error) && !bytes.empty())
+            if (r2tex::ConvertTexture(r2Name, bytes, &error) && !bytes.empty())
                 return std::make_shared<const std::vector<std::uint8_t>>(std::move(bytes));
             LogConvertFailure(item, error.c_str());
         }
