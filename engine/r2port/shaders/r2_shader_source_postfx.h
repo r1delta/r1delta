@@ -18,6 +18,7 @@ inline constexpr const char kPostfxSource[] = R"HLSL(
 //   c1.y  view width in pixels, c1.z view height in pixels (taps clamp to this rectangle)
 // RCAS follows AMD FidelityFX FSR 1 (ffx_fsr1.h v1.20210629, MIT licence): 5-tap cross, luma-proxy noise detector,
 // per-channel clip-free lobe, limit 0.25 - 1/16, output (lobe*(n+e+w+s)+m)/(4*lobe+1). It runs after the curve.
+// Akabenko (https://github.com/Akabenko) gave hints on the sharpening filter (credited in docs/r2port.md and README.md); the code here is original.
 
 cbuffer CBufPost : register(b0)
 {

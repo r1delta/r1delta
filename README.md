@@ -57,6 +57,7 @@ REGEDIT4
 - [@Allusive](https://github.com/AllusiveWheat)
 - [@koutsie](https://github.com/koutsie)
 - [@dyslexi](https://github.com/Dys-lexi/)
+- [@Akabenko](https://github.com/Akabenko): hints on the Titanfall 2 map port implementation and on the sharpening filter.
 
 ## Third-Party Code Attribution
 
