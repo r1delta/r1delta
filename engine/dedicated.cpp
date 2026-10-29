@@ -14,6 +14,7 @@
 #include "eos_network.h"
 #include "p2p/p2p.h"
 #include "net_hooks.h"
+#include "dlc_ownership.h"
 #include "r2port_provider.h"
 #pragma intrinsic(_ReturnAddress)
 
@@ -1721,6 +1722,7 @@ static void Cbuf_Execute() {
 		if (!host_remainder)
 			host_remainder = (float*)(G_engine_ds + 0x20408C0);
 		host_nexttick = *host_state_interval_per_tick - *host_remainder;
+		Dlc_ServerFrame();
 	}
 	oCbuf_Execute();
 }

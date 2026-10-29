@@ -32,6 +32,9 @@ bool Dlc_CheckConnect(uint32_t clientMask, char* reject, int rejectLength);
 void Dlc_OnServerMapStart(const char* map);
 // Server: the groups that may enter rotation right now (also written to serverDLCMapGroups).
 uint32_t Dlc_RotationMask();
+// Dedicated server, once per host frame: republishes serverDLCMapGroups when a player joined or left or a
+// dlcN_override changed since the last look (rate limited). Listen servers republish on every read instead.
+void Dlc_ServerFrame();
 
 // engine.dll (client and listen server): extends the stock group table, kick, userinfo parsing and the
 // serverDLCMapGroups readers to five groups, and gates map loads. engineBase is G_engine.

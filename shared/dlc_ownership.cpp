@@ -13,6 +13,7 @@
 #include <MinHook.h>
 #include <windows.h>
 #include <atomic>
+#include <intrin.h>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
@@ -289,6 +290,17 @@ uint32_t Dlc_RotationMask()
 	return mask;
 }
 
+void Dlc_ServerFrame()
+{
+	static DWORD lastTick = 0;
+	const DWORD now = GetTickCount();
+	if (now - lastTick < 250)
+		return;
+	lastTick = now;
+	if (ServerActive())
+		Dlc_RotationMask();
+}
+
 void Dlc_OnServerMapStart(const char* map)
 {
 	const int group = Dlc_GroupForMap(map);
@@ -309,9 +321,20 @@ void Dlc_OnServerMapStart(const char* map)
 
 namespace {
 
+constexpr uintptr_t kCheckDlcReturn = 0xD521A; // engine.dll: CGameClient::CheckDLC, right after its group lookup
+
+uintptr_t g_engineBase = 0;
+
 int __fastcall HookGroupForMap(const char* map)
 {
-	return Dlc_GroupForMap(map);
+	const int group = Dlc_GroupForMap(map);
+	// CheckDLC disconnects any client (bots and the replay client included, which carry no dlc4/5 userinfo) whose
+	// mask lacks the map's group, and doing that while a listen server is still starting crashes the engine.
+	// Groups 4 and 5 are enforced by Dlc_CheckConnect and Dlc_OnServerMapStart instead, so the stock check
+	// keeps seeing only the three stock groups.
+	if (group > 3 && reinterpret_cast<uintptr_t>(_ReturnAddress()) == g_engineBase + kCheckDlcReturn)
+		return 0;
+	return group;
 }
 
 // The stock kick for groups 1-3 on a map change; replaced by the five group version.
@@ -425,6 +448,7 @@ void Dlc_InstallClientEngineHooks(uintptr_t engineBase)
 {
 	if (!engineBase)
 		return;
+	g_engineBase = engineBase;
 	ExtendUserInfoLoop(engineBase);
 
 	{
