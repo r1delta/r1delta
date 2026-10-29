@@ -1239,9 +1239,8 @@ def undo_mesh_order(C, r2, r1):
     refs2 = r2.arr(0x78, "<u2").astype(np.int64)
     refs1 = r1.arr(0x78, "<u2").astype(np.int64)
     csm1 = r1.arr(0x64, "<u2").astype(np.int64)
-    prop_base = (int(li[2]) + 63) & ~63
     w0, wn = int(mdl[0][1][0]), int(mdl[0][1][1])
-    d0, d1 = w0, min(w0 + wn, prop_base, len(m1))
+    d0, d1 = w0, min(w0 + wn, int(li[2]), len(m1))   # [model 0 first mesh, levelinfo word 2): the sky mesh tail after word 2 stays
     ok = C.ok(len(m1) == len(m2) == len(mb1) and len(refs1) == len(refs2), "meshes, bounds and cell object references keep their counts")
     if not ok:
         return
