@@ -342,24 +342,24 @@ if (Test-Path -LiteralPath $FdOverlay) {
     Say "$nfd new Frontier Defense overlay files staged; $($tracked.Count) tracked CORE files patched via core-scripts.patch"
 }
 
+# FD overlay vs DynWeapons2: the FD step above resets _consts.nut, client\cl_main_hud.nut and mp\_coobj_towerdefense.nut to the pin and applies FdPlayers'
+# core-scripts.patch, which drops DynWeapons2's renames in those three files (stale mp_weapon_mega1..5 ids: SCRIPT ERROR invalid constant
+# [eDamageSourceId.mp_weapon_mega3] and a failed include of mp/_COOBJ_towerdefense on every coop map load). Re-apply the DynWeapons2 hunks of just those
+# three files on top of the FD result (git apply --include, in patch order; the hunks of the other files are already applied).
+if (Test-Path -LiteralPath $FdOverlay) {
+    $fdInc = @('--include=scripts/vscripts/_consts.nut', '--include=scripts/vscripts/client/cl_main_hud.nut', '--include=scripts/vscripts/mp/_coobj_towerdefense.nut')
+    foreach ($dw in @(Get-ChildItem -LiteralPath (Join-Path $CodeRoot 'tools\combo\dynweapons') -Filter '*.patch' | Sort-Object Name)) {
+        GitC $Core (@('apply', '--ignore-whitespace', '--whitespace=nowarn') + $fdInc + @($dw.FullName)) | Out-Null
+    }
+    Say 'DynWeapons2 hunks re-applied on the FD-patched _consts.nut / cl_main_hud.nut / _coobj_towerdefense.nut'
+}
+
 # ---- LobbyMaps CORE (R2 maps in the picker/lobby/vote/browser, playlists, group 4/5 ownership): patch applies on top of the FD overlay (it was
 # made against the staged CORE), once (reverse check); the 11 localization files are replaced whole (unlink + copy).
 $lm = Join-Path $CodeRoot 'tools\combo\lobbymaps'
 $lmPatch = Join-Path $lm 'lobbymaps-core.patch'
 if (Test-Path -LiteralPath $lmPatch) {
     $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-    # DynWeapons2 renamed eDamageSourceId.mp_weapon_mega3 to mp_titanweapon_minigun; the generated FD towerdefense script still names the old id
-    # (SCRIPT ERROR: invalid constant [eDamageSourceId.mp_weapon_mega3] on every coop map load). Rewrite it in this root's copy (the copy is not a hardlink: unlink + copy above).
-    $td = Join-Path $Core 'scripts\vscripts\mp\_coobj_towerdefense.nut'
-    if (Test-Path -LiteralPath $td) {
-        $tdt = [IO.File]::ReadAllText($td)
-        if ($tdt.Contains('eDamageSourceId.mp_weapon_mega3')) {
-            $tmpt = Join-Path $env:TEMP ('combo-td-' + [Guid]::NewGuid().ToString('N') + '.nut')
-            [IO.File]::WriteAllText($tmpt, $tdt.Replace('eDamageSourceId.mp_weapon_mega3', 'eDamageSourceId.mp_titanweapon_minigun'), [Text.UTF8Encoding]::new($false))
-            [ComboNative]::Replace($tmpt, $td); Remove-Item $tmpt
-            Say 'FD towerdefense: eDamageSourceId.mp_weapon_mega3 -> mp_titanweapon_minigun'
-        }
-    }
     & git -C $Core apply --ignore-whitespace --whitespace=nowarn -R --check $lmPatch 2>$null
     $lmDone = ($LASTEXITCODE -eq 0)
     $ErrorActionPreference = $prev
