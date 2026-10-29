@@ -59,6 +59,56 @@ size_t MergeLegacyEntries(Entries& store, const Entries& legacy);
 // re-applied from profile.cfg once the store owns it.
 std::string StripPersistentLines(std::string_view profile);
 
+// Weapons CORE used to ship under the engine's pre-registered mp_weapon_megaN
+// slots now carry their real names. Profiles written before the rename hold the
+// old names in keys (newLoadoutItems[<name>], newMods[<name>_<mod>]) and in
+// values (loadout items). Only slots that can appear in persisted data are
+// listed: mp_weapon_mega5 (throwing knife) has no persistent entry and is not
+// in the schema, mega6 and above were never renamed.
+struct RenamedName
+{
+	std::string_view from;
+	std::string_view to;
+};
+inline constexpr RenamedName RenamedNames[] = {
+	{ "mp_weapon_mega1", "mp_weapon_sr_valkyrie" },
+	{ "mp_weapon_mega2", "mp_weapon_twinb_shotgun" },
+	{ "mp_weapon_mega3", "mp_titanweapon_minigun" },
+	{ "mp_weapon_mega4", "mp_titanweapon_charge_cannon" },
+};
+
+// Replaces every renamed name in `text`, matched as a whole token: not glued
+// to a preceding letter, digit or underscore, and not followed by a letter or
+// digit. So mp_weapon_mega1 matches inside mp_weapon_mega1_aog and
+// newMods[mp_weapon_mega1_silencer], but never inside mp_weapon_mega10 or
+// mp_weapon_mega1x. Matching ignores ASCII case (the schema's enum lookup does
+// too); the replacement is always the canonical lower case name. Returns false
+// and leaves `renamed` empty when nothing was replaced. Idempotent: no new name
+// contains an old name.
+bool RenameTokens(std::string_view text, std::string& renamed);
+
+// Applies RenameTokens to every key and value of `entries`. A key that already
+// exists under the new name is authoritative: when both the old and the new
+// variant of a key are present the old one is dropped. If several old keys
+// would collapse onto one new key (different letter case only), the first in
+// key order wins. Renames that would push a key or value past the size limits
+// are skipped. Returns how many entries were changed or dropped.
+size_t MigrateRenamedNames(Entries& entries);
+
+enum class LoadoutVerdict
+{
+	Neutral,   // no weapon rule applies; validate the value against the schema
+	Accept,    // valid without further schema checks
+	Reject,    // never valid for this key
+};
+
+// Weapon rules for loadout values, applied to names already migrated with
+// MigrateRenamedNames. Titan loadouts take titan weapons (the former mega3 and
+// mega4 slots, mp_titanweapon_minigun and mp_titanweapon_charge_cannon, and
+// the remaining mp_weapon_mega* slots) but no pilot weapon. Pilot loadouts take
+// no mp_titanweapon_* value.
+LoadoutVerdict JudgeLoadoutValue(std::string_view key, std::string_view value);
+
 // Formats one entry as it appears in the store file / legacy profile.
 std::string FormatLine(std::string_view key, std::string_view value);
 

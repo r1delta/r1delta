@@ -209,6 +209,243 @@ void TestLegacyMerge()
 		"older-build changes are merged over the store");
 }
 
+std::string Renamed(std::string_view text)
+{
+	std::string output;
+	return PersistentDataStore::RenameTokens(text, output) ? output : std::string(text);
+}
+
+void TestRenameTokens()
+{
+	Check(Renamed("mp_weapon_mega1") == "mp_weapon_sr_valkyrie", "mega1 becomes the valkyrie");
+	Check(Renamed("mp_weapon_mega2") == "mp_weapon_twinb_shotgun", "mega2 becomes the twin-b");
+	Check(Renamed("mp_weapon_mega3") == "mp_titanweapon_minigun", "mega3 becomes the minigun");
+	Check(Renamed("mp_weapon_mega4") == "mp_titanweapon_charge_cannon", "mega4 becomes the charge cannon");
+
+	// Composite mod names and array keys: the weapon is a prefix or an index.
+	Check(Renamed("mp_weapon_mega1_aog") == "mp_weapon_sr_valkyrie_aog", "mod composite is renamed");
+	Check(Renamed("mp_weapon_mega1_burn_mod_valkyrie") == "mp_weapon_sr_valkyrie_burn_mod_valkyrie",
+		"burn mod composite is renamed");
+	Check(Renamed("mp_weapon_mega4_burn_mod_charge_cannon")
+		== "mp_titanweapon_charge_cannon_burn_mod_charge_cannon", "charge cannon composite is renamed");
+	Check(Renamed("newMods[mp_weapon_mega2_silencer]") == "newMods[mp_weapon_twinb_shotgun_silencer]",
+		"array index is renamed");
+	Check(Renamed("newLoadoutItems[mp_weapon_mega3]") == "newLoadoutItems[mp_titanweapon_minigun]",
+		"loadout array index is renamed");
+
+	// Token boundaries: other slots and glued text are not touched.
+	Check(Renamed("mp_weapon_mega10") == "mp_weapon_mega10", "mega10 is not mega1");
+	Check(Renamed("mp_weapon_mega11") == "mp_weapon_mega11", "mega11 is not mega1");
+	Check(Renamed("mp_weapon_mega12_aog") == "mp_weapon_mega12_aog", "mega12 composite is not mega1");
+	Check(Renamed("newLoadoutItems[mp_weapon_mega10]") == "newLoadoutItems[mp_weapon_mega10]",
+		"mega10 array index is untouched");
+	Check(Renamed("mp_weapon_mega5") == "mp_weapon_mega5", "mega5 has no persistent entry and stays");
+	Check(Renamed("mp_weapon_mega6") == "mp_weapon_mega6", "mega6 stays");
+	Check(Renamed("mp_weapon_mega") == "mp_weapon_mega", "bare prefix stays");
+	Check(Renamed("mp_weapon_mega1x") == "mp_weapon_mega1x", "a letter after the digit is not a token end");
+	Check(Renamed("xmp_weapon_mega1") == "xmp_weapon_mega1", "a letter before is not a token start");
+	Check(Renamed("_mp_weapon_mega1") == "_mp_weapon_mega1", "an underscore before is not a token start");
+	Check(Renamed("mp_weapon_mega_turret") == "mp_weapon_mega_turret", "mega_turret stays");
+	Check(Renamed("mp_weapon_mega1mp_weapon_mega2") == "mp_weapon_mega1mp_weapon_mega2",
+		"glued names are not tokens");
+	Check(Renamed("") == "", "empty text");
+	Check(Renamed("mp_weapon_mega") == "mp_weapon_mega", "truncated text at the end");
+	Check(Renamed("mp_weapon_mega1") != "mp_weapon_mega1", "token at the very end");
+
+	// Several tokens in one string, and ASCII case.
+	Check(Renamed("a mp_weapon_mega1,mp_weapon_mega2.b") == "a mp_weapon_sr_valkyrie,mp_weapon_twinb_shotgun.b",
+		"several tokens in one string");
+	Check(Renamed("MP_WEAPON_MEGA1_AOG") == "mp_weapon_sr_valkyrie_AOG", "case insensitive match, canonical name");
+
+	std::string output = "stale";
+	Check(!PersistentDataStore::RenameTokens("mp_weapon_sniper", output) && output.empty(),
+		"no rename reports false and clears the output");
+}
+
+void TestRenameMigratesProfile()
+{
+	using namespace PersistentDataStore;
+	Entries entries{
+		{ "xp", "500" },
+		{ "pilotLoadouts[0].primary", "mp_weapon_mega1" },
+		{ "pilotLoadouts[0].sidearm", "mp_weapon_mega2" },
+		{ "pilotLoadouts[0].primaryMod", "mp_weapon_mega1_aog" },
+		{ "titanLoadouts[3].primary", "mp_weapon_mega3" },
+		{ "titanLoadouts[3].special", "mp_weapon_mega4" },
+		{ "newLoadoutItems[mp_weapon_mega1]", "1" },
+		{ "newMods[mp_weapon_mega1_burn_mod_valkyrie]", "1" },
+		{ "newMods[mp_weapon_mega2_silencer]", "0" },
+		{ "newMods[mp_weapon_mega4_burn_mod_charge_cannon]", "1" },
+		{ "newLoadoutItems[mp_weapon_mega10]", "1" },
+		{ "pilotLoadouts[1].primary", "mp_weapon_mega10" },
+		{ "pilotLoadouts[2].primary", "mp_weapon_rspn101" },
+	};
+	const size_t before = entries.size();
+	Check(MigrateRenamedNames(entries) == 9, "nine entries carry old names");
+	Check(entries.size() == before, "migration does not add or lose entries");
+	Check(entries.at("pilotLoadouts[0].primary") == "mp_weapon_sr_valkyrie", "value renamed");
+	Check(entries.at("pilotLoadouts[0].sidearm") == "mp_weapon_twinb_shotgun", "sidearm value renamed");
+	Check(entries.at("pilotLoadouts[0].primaryMod") == "mp_weapon_sr_valkyrie_aog", "mod composite value renamed");
+	Check(entries.at("titanLoadouts[3].primary") == "mp_titanweapon_minigun", "titan primary renamed");
+	Check(entries.at("titanLoadouts[3].special") == "mp_titanweapon_charge_cannon", "titan special renamed");
+	Check(entries.at("newLoadoutItems[mp_weapon_sr_valkyrie]") == "1", "key renamed, value kept");
+	Check(entries.count("newLoadoutItems[mp_weapon_mega1]") == 0, "old key is gone");
+	Check(entries.at("newMods[mp_weapon_sr_valkyrie_burn_mod_valkyrie]") == "1", "burn mod key renamed");
+	Check(entries.at("newMods[mp_weapon_twinb_shotgun_silencer]") == "0", "twin-b mod key renamed");
+	Check(entries.at("newMods[mp_titanweapon_charge_cannon_burn_mod_charge_cannon]") == "1",
+		"charge cannon mod key renamed");
+	Check(entries.at("newLoadoutItems[mp_weapon_mega10]") == "1", "mega10 key untouched");
+	Check(entries.at("pilotLoadouts[1].primary") == "mp_weapon_mega10", "mega10 value untouched");
+	Check(entries.at("pilotLoadouts[2].primary") == "mp_weapon_rspn101", "other weapons untouched");
+	Check(entries.at("xp") == "500", "unrelated keys untouched");
+
+	// What gets written back carries only the new names and round trips.
+	const std::string serialized = Serialize(entries);
+	Check(serialized.find("mp_weapon_mega1_") == std::string::npos
+		&& serialized.find("mp_weapon_mega1\"") == std::string::npos
+		&& serialized.find("mp_weapon_mega1]") == std::string::npos
+		&& serialized.find("mp_weapon_mega4") == std::string::npos,
+		"serialized store holds no old names");
+	Entries reloaded;
+	Check(Parse(serialized, reloaded) == ParseStatus::Valid && reloaded == entries,
+		"migrated store round trips as valid");
+}
+
+void TestRenameConflictAndIdempotence()
+{
+	using namespace PersistentDataStore;
+
+	// Old and new variants of the same key: the new key is authoritative.
+	Entries entries{
+		{ "newMods[mp_weapon_mega1_aog]", "1" },
+		{ "newMods[mp_weapon_sr_valkyrie_aog]", "0" },
+		{ "newLoadoutItems[mp_weapon_mega2]", "1" },
+	};
+	Check(MigrateRenamedNames(entries) == 2, "both variants present: the old entries are counted");
+	Check(entries.size() == 2, "the old variant is dropped, not merged");
+	Check(entries.at("newMods[mp_weapon_sr_valkyrie_aog]") == "0", "new variant wins over the old one");
+	Check(entries.at("newLoadoutItems[mp_weapon_twinb_shotgun]") == "1", "lone old key is moved");
+
+	// Idempotent: a second pass changes nothing.
+	const Entries snapshot = entries;
+	Check(MigrateRenamedNames(entries) == 0, "second migration changes nothing");
+	Check(entries == snapshot, "second migration leaves the entries identical");
+
+	// Case-only collisions resolve deterministically (first in key order).
+	Entries collide{
+		{ "newMods[MP_WEAPON_MEGA1_aog]", "1" },
+		{ "newMods[mp_weapon_mega1_aog]", "0" },
+	};
+	MigrateRenamedNames(collide);
+	Check(collide.size() == 1 && collide.count("newMods[mp_weapon_sr_valkyrie_aog]") == 1,
+		"case variants collapse onto one key");
+	Check(collide.begin()->second == "1", "the first key in order wins a case collision");
+
+	Entries empty;
+	Check(MigrateRenamedNames(empty) == 0, "empty store");
+
+	// A rename that would exceed the size limits is skipped, not truncated.
+	const std::string longValue = std::string(MaxValueSize - 20, 'a') + " mp_weapon_mega4";
+	Entries oversized{ { "key", longValue } };
+	Check(MigrateRenamedNames(oversized) == 0, "an oversized rename is not counted");
+	Check(oversized.at("key") == longValue, "a rename that would pass the size limit is skipped");
+}
+
+void TestRenameLegacyProfile()
+{
+	using namespace PersistentDataStore;
+
+	// An old profile.cfg mirror: parse, migrate, merge over a store that already
+	// holds new names, and the older build's progress still wins.
+	const std::string profile =
+		"cl_fovScale \"1.1\"\n"
+		"__ pilotLoadouts[0].primary \"mp_weapon_mega1\"\n"
+		"__ newMods[mp_weapon_mega1_stabilizer] \"1\"\n"
+		"__ newLoadoutItems[mp_weapon_mega10] \"1\"\n";
+	Entries legacy;
+	Check(ExtractLegacyProfileEntries(profile, legacy) == 3, "three legacy entries");
+	Check(MigrateRenamedNames(legacy) == 2, "two legacy entries use old names");
+
+	Entries store{
+		{ "pilotLoadouts[0].primary", "mp_weapon_rspn101" },
+		{ "newMods[mp_weapon_sr_valkyrie_stabilizer]", "0" },
+	};
+	Check(MergeLegacyEntries(store, legacy) == 3, "legacy import changes three entries");
+	Check(store.at("pilotLoadouts[0].primary") == "mp_weapon_sr_valkyrie", "legacy loadout lands under the new name");
+	Check(store.at("newMods[mp_weapon_sr_valkyrie_stabilizer]") == "1", "legacy mod flag wins over the store");
+	Check(store.count("newMods[mp_weapon_mega1_stabilizer]") == 0, "no old key survives the import");
+	Check(store.at("newLoadoutItems[mp_weapon_mega10]") == "1", "mega10 imported unchanged");
+
+	Check(IsSafeToken("newMods[mp_titanweapon_charge_cannon_burn_mod_charge_cannon]", MaxKeySize),
+		"the longest new key is a safe token within the limit");
+}
+
+void TestLoadoutVerdicts()
+{
+	using namespace PersistentDataStore;
+	const auto verdict = [](const char* key, const char* value) {
+		return JudgeLoadoutValue(key, value);
+	};
+
+	// Pilot loadouts: pilot weapons stay legal, titan weapons are illegal.
+	Check(verdict("pilotLoadouts[0].primary", "mp_weapon_sr_valkyrie") == LoadoutVerdict::Neutral,
+		"valkyrie is legal for pilots");
+	Check(verdict("pilotLoadouts[0].sidearm", "mp_weapon_twinb_shotgun") == LoadoutVerdict::Neutral,
+		"twin-b is legal for pilots");
+	Check(verdict("pilotLoadouts[0].primary", "mp_weapon_rspn101") == LoadoutVerdict::Neutral,
+		"stock pilot weapon is legal for pilots");
+	Check(verdict("pilotLoadouts[0].primaryMod", "mp_weapon_sr_valkyrie_aog") == LoadoutVerdict::Neutral,
+		"valkyrie mod composite is legal for pilots");
+	Check(verdict("pilotLoadouts[0].primary", "mp_titanweapon_minigun") == LoadoutVerdict::Reject,
+		"minigun is illegal for pilots");
+	Check(verdict("pilotLoadouts[0].special", "mp_titanweapon_charge_cannon") == LoadoutVerdict::Reject,
+		"charge cannon is illegal for pilots");
+	Check(verdict("pilotLoadouts[0].primaryMod", "mp_titanweapon_minigun_burn_mod_thunderbolt") == LoadoutVerdict::Reject,
+		"titan weapon composite is illegal for pilots");
+	Check(verdict("pilotLoadouts[0].primary", "mp_titanweapon_xo16") == LoadoutVerdict::Reject,
+		"stock titan weapon is illegal for pilots");
+
+	// Titan loadouts: titan weapons are legal, pilot weapons are not.
+	Check(verdict("titanLoadouts[0].primary", "mp_titanweapon_minigun") == LoadoutVerdict::Accept,
+		"minigun is legal for titans");
+	Check(verdict("titanLoadouts[0].special", "mp_titanweapon_charge_cannon") == LoadoutVerdict::Accept,
+		"charge cannon is legal for titans");
+	Check(verdict("titanLoadouts[0].primaryMod", "mp_titanweapon_minigun_burn_mod_thunderbolt") == LoadoutVerdict::Accept,
+		"minigun composite is legal for titans");
+	Check(verdict("titanLoadouts[0].primary", "mp_weapon_sr_valkyrie") == LoadoutVerdict::Reject,
+		"valkyrie is illegal for titans");
+	Check(verdict("titanLoadouts[0].primary", "mp_weapon_twinb_shotgun") == LoadoutVerdict::Reject,
+		"twin-b is illegal for titans");
+	Check(verdict("titanLoadouts[0].primary", "mp_weapon_rspn101") == LoadoutVerdict::Reject,
+		"stock pilot weapon is illegal for titans");
+	Check(verdict("titanLoadouts[0].primary", "mp_titanweapon_xo16") == LoadoutVerdict::Neutral,
+		"stock titan weapon goes to the schema for titans");
+	Check(verdict("titanLoadouts[0].primary", "mp_weapon_mega6") == LoadoutVerdict::Accept,
+		"the remaining mega slots keep their titan exemption");
+	Check(verdict("titanLoadouts[0].primary", "mp_weapon_mega10") == LoadoutVerdict::Accept,
+		"mega10 keeps its titan exemption");
+	Check(verdict("titanLoadouts[0].name", "scout") == LoadoutVerdict::Neutral,
+		"a name has no weapon rule");
+
+	// Keys without a loadout have no weapon rule at all.
+	Check(verdict("newLoadoutItems[mp_weapon_sr_valkyrie]", "1") == LoadoutVerdict::Neutral,
+		"unlock flags have no weapon rule");
+	Check(verdict("newMods[mp_titanweapon_minigun_burn_mod_thunderbolt]", "1") == LoadoutVerdict::Neutral,
+		"titan mod flag has no weapon rule");
+
+	// Old names from an older client are migrated first and then follow the new rules.
+	const std::string oldTitan = Renamed("mp_weapon_mega3");
+	Check(JudgeLoadoutValue("titanLoadouts[1].primary", oldTitan) == LoadoutVerdict::Accept,
+		"old minigun name is accepted for titans once migrated");
+	Check(JudgeLoadoutValue("pilotLoadouts[1].primary", oldTitan) == LoadoutVerdict::Reject,
+		"old minigun name is rejected for pilots once migrated");
+	const std::string oldPilot = Renamed("mp_weapon_mega1");
+	Check(JudgeLoadoutValue("pilotLoadouts[1].primary", oldPilot) == LoadoutVerdict::Neutral,
+		"old valkyrie name is legal for pilots once migrated");
+	Check(JudgeLoadoutValue("titanLoadouts[1].primary", oldPilot) == LoadoutVerdict::Reject,
+		"old valkyrie name is rejected for titans once migrated");
+}
+
 void TestPersistentPlayerSlots()
 {
 	using PersistentDataSlots::IsValidPlayerSlot;
@@ -409,6 +646,11 @@ int main()
 	TestStoreRejectsUnsafeTokens();
 	TestLegacyProfileMigration();
 	TestLegacyMerge();
+	TestRenameTokens();
+	TestRenameMigratesProfile();
+	TestRenameConflictAndIdempotence();
+	TestRenameLegacyProfile();
+	TestLoadoutVerdicts();
 	TestPersistentPlayerSlots();
 	TestSessionBinding();
 	TestServerWriteSurvivesReconnectSnapshot();

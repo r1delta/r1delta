@@ -1,6 +1,8 @@
 #include "persistentdata_store.h"
 
 #include <cstdio>
+#include <utility>
+#include <vector>
 
 namespace PersistentDataStore {
 namespace {
@@ -301,6 +303,129 @@ std::string StripPersistentLines(std::string_view profile)
 		offset = end;
 	}
 	return output;
+}
+
+namespace {
+
+char LowerAscii(char c)
+{
+	return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+}
+
+bool IsAsciiAlnum(char c)
+{
+	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+}
+
+bool EqualsNoCase(std::string_view a, std::string_view b)
+{
+	if (a.size() != b.size())
+		return false;
+	for (size_t i = 0; i < a.size(); ++i) {
+		if (LowerAscii(a[i]) != LowerAscii(b[i]))
+			return false;
+	}
+	return true;
+}
+
+}
+
+bool RenameTokens(std::string_view text, std::string& renamed)
+{
+	renamed.clear();
+	bool changed = false;
+	size_t copied = 0; // text[0, copied) is already in `renamed`
+	for (size_t i = 0; i < text.size();) {
+		const RenamedName* hit = nullptr;
+		// Every old name starts with 'm'; skip the table walk everywhere else.
+		if (LowerAscii(text[i]) == 'm' && (i == 0 || !(IsAsciiAlnum(text[i - 1]) || text[i - 1] == '_'))) {
+			for (const RenamedName& rename : RenamedNames) {
+				if (text.size() - i < rename.from.size())
+					continue;
+				if (!EqualsNoCase(text.substr(i, rename.from.size()), rename.from))
+					continue;
+				const size_t end = i + rename.from.size();
+				if (end < text.size() && IsAsciiAlnum(text[end]))
+					continue;
+				hit = &rename;
+				break;
+			}
+		}
+		if (!hit) {
+			++i;
+			continue;
+		}
+		if (!changed) {
+			changed = true;
+			renamed.reserve(text.size() + 32);
+		}
+		renamed.append(text.substr(copied, i - copied));
+		renamed.append(hit->to);
+		i += hit->from.size();
+		copied = i;
+	}
+	if (changed)
+		renamed.append(text.substr(copied));
+	return changed;
+}
+
+size_t MigrateRenamedNames(Entries& entries)
+{
+	struct MovedEntry
+	{
+		std::string oldKey;
+		std::string newKey;
+		std::string value;
+	};
+	std::vector<MovedEntry> moved;
+	size_t changed = 0;
+	std::string renamed;
+
+	for (auto& [key, value] : entries) {
+		bool touched = false;
+		if (RenameTokens(value, renamed) && renamed.size() <= MaxValueSize) {
+			value = renamed;
+			touched = true;
+		}
+		if (RenameTokens(key, renamed) && renamed.size() <= MaxKeySize) {
+			moved.push_back({ key, renamed, value });
+			touched = true;
+		}
+		if (touched)
+			++changed;
+	}
+
+	// Re-key after the walk: the map must not change while it is iterated.
+	// Entries that already live under the new name were never moved, so they are
+	// still present here and win over the old variant.
+	for (MovedEntry& entry : moved) {
+		entries.erase(entry.oldKey);
+		entries.try_emplace(std::move(entry.newKey), std::move(entry.value));
+	}
+	return changed;
+}
+
+LoadoutVerdict JudgeLoadoutValue(std::string_view key, std::string_view value)
+{
+	const auto contains = [&](std::string_view needle) {
+		return value.find(needle) != std::string_view::npos;
+	};
+
+	if (key.find("titanLoadouts") != std::string_view::npos) {
+		if (contains("mp_weapon_mega")
+			|| contains("mp_titanweapon_minigun")
+			|| contains("mp_titanweapon_charge_cannon"))
+			return LoadoutVerdict::Accept;
+		if (contains("mp_weapon"))
+			return LoadoutVerdict::Reject;
+	}
+
+	if (key.find("pilotLoadouts") != std::string_view::npos) {
+		if (contains("mp_titanweapon"))
+			return LoadoutVerdict::Reject;
+	}
+
+	return LoadoutVerdict::Neutral;
 }
 
 }
