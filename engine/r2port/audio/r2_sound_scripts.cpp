@@ -26,6 +26,10 @@ constexpr size_t kNameCount = sizeof(kR2SoundNames) / sizeof(kR2SoundNames[0]);
 constexpr size_t kMapCount = sizeof(kR2SoundMaps) / sizeof(kR2SoundMaps[0]);
 constexpr char kEmitterMix[] = "ambient,SFX,SFX_AMB,SFX_AMB_Emitters";
 constexpr char kBedMix[] = "ambient,SFX,SFX_AMB,SFX_AMB_Beds";
+// Beds and emitters without the SFX_AMB groups: R1's weapon aliases duck SFX_AMB ("ducks" "SFX_AMB,0.7a:0,1000,0,0" on every
+// gunfire rndwave), so aliases outside it do not dip while firing (R2PORT_SOUND_DUCK=0). SFX_AMB's own 1.8 (and Beds' 1.3) is
+// folded into the alias volume instead.
+constexpr char kNoDuckMix[] = "ambient,SFX";
 constexpr char kDspSoundscape[] = "r2ss_dsp";
 constexpr char kEnvPrefix[] = "r2env_";
 constexpr char kSoundscapePrefix[] = "r2ss_";
@@ -68,6 +72,30 @@ std::string PitchText(const PlayAction& play) {
     return lo == hi ? std::to_string(lo) : std::to_string(lo) + "," + std::to_string(hi);
 }
 
+// R2PORT_SOUND_GAIN_DB: gain in dB applied to every generated alias volume. R2 sources are mastered hotter and its event volumes
+// assume R2's own mixer; against R1's airbase bed (Amb_Airbase_INT_LargeRoom) an R2 room tone captured 34.7 dB louder
+// (-40.7 against -75.4 dBFS RMS), so the default pulls all R2 aliases down by 30 dB. 0 restores the uncalibrated mapping.
+double GainDb() {
+    static const double gain = [] {
+        char env[32]{};
+        const DWORD length = GetEnvironmentVariableA("R2PORT_SOUND_GAIN_DB", env, sizeof(env));
+        if (length == 0 || length >= sizeof(env)) return -30.0;
+        char* end = nullptr;
+        const double value = std::strtod(env, &end);
+        return end != env ? std::min(24.0, std::max(-80.0, value)) : -30.0;
+    }();
+    return gain;
+}
+
+// R2PORT_SOUND_DUCK=0 keeps the aliases out of SFX_AMB so weapon fire does not duck them.
+bool DuckEnabled() {
+    static const bool enabled = [] {
+        char env[8]{};
+        return !(GetEnvironmentVariableA("R2PORT_SOUND_DUCK", env, sizeof(env)) > 0 && env[0] == '0' && env[1] == 0);
+    }();
+    return enabled;
+}
+
 // Alias text for one event; empty when the bank cannot resolve it.
 std::string AliasText(const SoundBank& bank, const R2SoundName& request, unsigned& waveCount) {
     std::vector<PlayAction> plays;
@@ -76,7 +104,7 @@ std::string AliasText(const SoundBank& bank, const R2SoundName& request, unsigne
     const bool layered = plays.size() > 1;
 
     std::string text = "\"" + std::string(request.name) + "\"" + kNewline + "{" + kNewline;
-    text += std::string("\t\"mixgroup\"\t\"") + (bed ? kBedMix : kEmitterMix) + "\"" + kNewline;
+    text += std::string("\t\"mixgroup\"\t\"") + (!DuckEnabled() ? kNoDuckMix : bed ? kBedMix : kEmitterMix) + "\"" + kNewline;
     // LoopCount 1 plays the event once; anything else (0 = forever) loops. Room tones always loop.
     bool loops = bed;
     for (const PlayAction& play : plays) loops = loops || play.loopCount != 1;
@@ -98,8 +126,8 @@ std::string AliasText(const SoundBank& bank, const R2SoundName& request, unsigne
     // maps are in it) differs from its R2 event by exactly 11.1 dB of total gain, so
     //   aliasVolume = 10^((dB + 11.1) / 20) / mixgroupChain.
     auto linear = [&](float db) {
-        const double chain = bed ? 0.16 * 0.54 * 1.8 * 1.3 : 0.16 * 0.54 * 1.8;
-        return std::min(40.0, std::max(0.01, std::pow(10.0, (db + 11.1) / 20.0) / chain));
+        const double chain = !DuckEnabled() ? 0.16 * 0.54 : bed ? 0.16 * 0.54 * 1.8 * 1.3 : 0.16 * 0.54 * 1.8;
+        return std::min(40.0, std::max(0.001, std::pow(10.0, (db + GainDb() + 11.1) / 20.0) / chain));
     };
     text += "\t\"volume\"\t\"" + Number(layered ? 1.0 : linear(plays[0].volumeDb + plays[0].addVolumeDb)) + "\"" + kNewline;
     if (!layered) {
