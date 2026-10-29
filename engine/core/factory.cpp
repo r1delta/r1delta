@@ -41,6 +41,7 @@
 #include "materialsystem_dx11_input_layout_cache.h"
 #include "../../client/rendering/graphics_flight_recorder.h"
 #include "r1o_runtime_paths.h"
+#include "engine/r2port/r2_profile.h"
 
 #include <MinHook.h>
 #include <cstdlib>
@@ -17249,7 +17250,10 @@ static void* OpenR2PortMemoryFile(const char* fileName)
 {
 	if (!IsReadableCString(fileName) || !IsR2PortProviderFallbackEnabled())
 		return nullptr;
+	R2P_SCOPE_B(profileOpen, "m.fs.open", fileName);
 	const auto data = r2port::ReadAll(fileName);
+	if (data)
+		profileOpen.SetBytes(data->size());
 	void* handle = R1OVPK_OpenMemoryFile(data, fileName);
 	char detail[96]{};
 	_snprintf_s(detail, sizeof(detail), _TRUNCATE, "bytes=%zu", data ? data->size() : 0);

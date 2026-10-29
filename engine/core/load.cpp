@@ -118,6 +118,8 @@
 #include "audio.h"
 #include "audio_device.h"
 #include "audio_cache.h"
+#include "apex_sound_capacity.h"
+#include "engine/r2port/audio/r2_sound_scripts.h"
 #include "reflex.h"
 #include <nlohmann/json.hpp>
 #include "shellapi.h"
@@ -8564,6 +8566,9 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		MH_CreateHook((LPVOID)(G_engine + 0x2A200), &CBaseClientState_SendConnectPacket, reinterpret_cast<LPVOID*>(&CBaseClientState_SendConnectPacket_Original));
 		//g_pLogAudio = RegisterConVar("fs_log_audio", "0", FCVAR_NONE, "Log audio file reads");
 		if (R1AudioUsesGeneratedContent()) {
+			// Room for the generated R2 sound aliases: relocate the native alias/variation tables before any sound initialization.
+			if (InstallR1ApexSoundCapacity(G_engine))
+				r2audio::SetAliasCapacityOk(true);
 			if (!InstallR1AudioCacheHooks(G_engine))
 				Error("R1Delta: required native audio metadata hooks could not be installed\n");
 		}
@@ -9870,7 +9875,9 @@ void __stdcall LoaderNotificationCallback(
 			return;
 		// Before the dedicated engine's first sound-script load: its tables cap
 		// at 16,628 aliases, which truncates the current set.
-		InstallLegacyDSSoundTableExpansion(G_engine_ds);
+		// The generated R2 sound aliases only fit (and are only served) when the expanded table is in place and their CRC is hidden.
+		if (InstallLegacyDSSoundTableExpansion(G_engine_ds) && InstallLegacyDSAliasHiding(G_engine_ds))
+			r2audio::SetAliasCapacityOk(true);
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x433C0), &ProcessConnectionlessPacketDedi, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x30FE20), &StringCompare_AllTalkHookDedi, reinterpret_cast<LPVOID*>(&oStringCompare_AllTalkHookDedi));
 		MH_EnableHook(MH_ALL_HOOKS);

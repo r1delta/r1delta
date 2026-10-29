@@ -4,6 +4,7 @@
 #include "engine/filesystem/r2_map_provider.h"
 #include "engine/logging/logging.h"
 #include "engine/r2port/particles/pcfconv.hpp"
+#include "engine/r2port/r2_profile.h"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -120,6 +121,7 @@ public:
 private:
     static FileBytes Build()
     {
+        R2P_SCOPE("m.pcf.build");
         const auto started = std::chrono::steady_clock::now();
         const std::string pack = PackPath(kFrontendPack);
         if (pack.empty())

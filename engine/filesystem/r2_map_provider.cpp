@@ -12,9 +12,15 @@
 
 #include "engine/filesystem/r1o_vpk.h"
 #include "engine/r2port/bspdown/bspdown.hpp"
+#include "engine/r2port/r2_profile.h"
+#include "engine/filesystem/r2_cache_store.h"
 #include "engine/r2port/entity_rewrite.h"
 #include "engine/r2port/trigger_brush.h"
 #include "engine/filesystem/r2_overview_provider.h"
+#include "engine/filesystem/r2_sound_provider.h"
+#include "engine/r2port/audio/r2_audio_source.h"
+#include "engine/r2port/audio/r2_sound_bank.h"
+#include "engine/r2port/audio/r2_sound_scripts.h"
 #include "engine/filesystem/r2_particle_provider.h"
 #include "p2p/p2p_identity.h"
 
@@ -87,7 +93,7 @@ constexpr uint32_t kGameLump = 0x23;
 
 // Folded into the on-disk cache fingerprint together with entity_rewrite::kRewriteVersion.
 // Bump when the vendored bspdown converter or the provider's BSP post-processing changes output.
-constexpr uint32_t kConvertedBspCacheVersion = 30;  // 30: rule 26 world meshes sorted by material sort (R1 draws at most 2048 runs per view; EdenCull); 29: rule 20f plane A keeps the R2 exposure (alpha) and spreads raised exposures (rtlBakeAlphaStep 1.2, no pale contours along baked pools) and rule 25 material namespace (round 16, one combined bump); 28: rule 20f DrydockSteps preset default (rtl-bake vsm, hot clip, smooth 1, bm terrain); 27: rule 24 now writes the glow ramp texture coordinate; 26: rule 24 emitter glow vertex alpha (vr_light_trim_01_totrans, mp_glitch); 25: mp_coliseum and mp_coliseum_column keep the last CSM environment (csmLastEnv); 24: rule 17 real CSM environment chosen by content (BWC, angel_city, coliseum, coliseum_column); 23: rule 23 far-origin prop fade distance
+constexpr uint32_t kConvertedBspCacheVersion = 31;  // 31: rule 26 world meshes sorted by material sort on every map, only the regular render meshes [model 0 first, level info word 2), the sky meshes stay last (EdenCull; R1 draws at most 2048 runs per view); 29: rule 20f plane A keeps the R2 exposure (alpha) and spreads raised exposures (rtlBakeAlphaStep 1.2, no pale contours along baked pools) and rule 25 material namespace (round 16, one combined bump); 28: rule 20f DrydockSteps preset default (rtl-bake vsm, hot clip, smooth 1, bm terrain); 27: rule 24 now writes the glow ramp texture coordinate; 26: rule 24 emitter glow vertex alpha (vr_light_trim_01_totrans, mp_glitch); 25: mp_coliseum and mp_coliseum_column keep the last CSM environment (csmLastEnv); 24: rule 17 real CSM environment chosen by content (BWC, angel_city, coliseum, coliseum_column); 23: rule 23 far-origin prop fade distance
 
 // Raised onto the z of every info_spawnpoint_flag / human / human_start / titan / titan_start origin in lump 0 and in the five partition entity
 // files (see entity_rewrite::RaiseSpawnpointOrigins). The R1 server drops the spawnpoint back to the floor; one that starts inside solid is removed.
@@ -655,6 +661,8 @@ BspSha256 Sha256Fast(const uint8_t* data, size_t size)
 // entity_rewrite::kRewriteVersion and kConvertedBspCacheVersion. Nothing is rebuilt unless one changes.
 // A hit skips the VPK read (LZHAM), the SHA-256 and bspdown.
 constexpr char kBspCacheMagic[8] = { 'R', '2', 'B', 'S', 'P', 'C', 'H', '1' };
+// Same header, body stored in the R2CZ zstd container (r2_cache_store.h); the plain 'R2BSPCH1' form stays readable.
+constexpr char kBspCacheMagicPacked[8] = { 'R', '2', 'B', 'S', 'P', 'C', 'Z', '1' };
 
 #pragma pack(push, 1)
 struct BspCacheHeader {
@@ -670,6 +678,8 @@ std::filesystem::path ConvertedBspCacheFile(const std::shared_ptr<MapState>& sta
 {
     std::lock_guard<std::mutex> lock(state->bspCacheMutex);
     char disabled[8]{};
+    if (!cache::DiskCacheEnabled())
+        return {};   // disk cache off (default): the converted BSP is kept in memory only (g_keptBsp)
     if (GetEnvironmentVariableA("R2PORT_BSP_CACHE", disabled, sizeof(disabled)) && disabled[0] == '0')
         return {};   // measurement switch: R2PORT_BSP_CACHE=0 turns the converted-BSP cache off
     if (!state->bspCacheKeyTried) {
@@ -695,21 +705,31 @@ bool LoadConvertedBspCache(const std::shared_ptr<MapState>& state, BspSha256& so
             return false;
         BspCacheHeader header{};
         input.read(reinterpret_cast<char*>(&header), sizeof(header));
-        if (!input || std::memcmp(header.magic, kBspCacheMagic, sizeof(header.magic)) != 0
+        const bool packedForm = input && std::memcmp(header.magic, kBspCacheMagicPacked, sizeof(header.magic)) == 0;
+        if (!input || (!packedForm && std::memcmp(header.magic, kBspCacheMagic, sizeof(header.magic)) != 0)
             || header.cacheVersion != kConvertedBspCacheVersion
             || header.entityRewriteVersion != entity_rewrite::kRewriteVersion
             || header.convertedSize < kBspHeaderSize || header.convertedSize > (1ull << 31))
             return false;
         std::error_code error;
         const auto fileSize = std::filesystem::file_size(file, error);
-        if (error || fileSize != sizeof(header) + header.convertedSize)
+        if (error || (!packedForm && fileSize != sizeof(header) + header.convertedSize) || fileSize <= sizeof(header))
             return false;
         if (converted) {
-            converted->resize(static_cast<size_t>(header.convertedSize));
-            input.read(reinterpret_cast<char*>(converted->data()), static_cast<std::streamsize>(converted->size()));
-            if (!input) {
-                converted->clear();
-                return false;
+            if (packedForm) {
+                std::vector<uint8_t> body(static_cast<size_t>(fileSize - sizeof(header)));
+                input.read(reinterpret_cast<char*>(body.data()), static_cast<std::streamsize>(body.size()));
+                if (!input || !cache::IsPacked(body.data(), body.size()) || !cache::Unpack(body) || body.size() != header.convertedSize)
+                    return false;
+                *converted = std::move(body);
+            }
+            else {
+                converted->resize(static_cast<size_t>(header.convertedSize));
+                input.read(reinterpret_cast<char*>(converted->data()), static_cast<std::streamsize>(converted->size()));
+                if (!input) {
+                    converted->clear();
+                    return false;
+                }
             }
         }
         std::memcpy(sourceHash.data(), header.sourceSha256, sizeof(header.sourceSha256));
@@ -734,7 +754,9 @@ void StoreConvertedBspCache(const std::shared_ptr<MapState>& state, const BspSha
         if (error)
             return;
         BspCacheHeader header{};
-        std::memcpy(header.magic, kBspCacheMagic, sizeof(header.magic));
+        std::vector<uint8_t> packed;
+        const bool isPacked = cache::Pack(converted.data(), converted.size(), packed);
+        std::memcpy(header.magic, isPacked ? kBspCacheMagicPacked : kBspCacheMagic, sizeof(header.magic));
         header.cacheVersion = kConvertedBspCacheVersion;
         header.entityRewriteVersion = entity_rewrite::kRewriteVersion;
         header.convertedSize = converted.size();
@@ -747,7 +769,8 @@ void StoreConvertedBspCache(const std::shared_ptr<MapState>& state, const BspSha
             if (!output)
                 return;
             output.write(reinterpret_cast<const char*>(&header), sizeof(header));
-            output.write(reinterpret_cast<const char*>(converted.data()), static_cast<std::streamsize>(converted.size()));
+            const std::vector<uint8_t>& payload = isPacked ? packed : converted;
+            output.write(reinterpret_cast<const char*>(payload.data()), static_cast<std::streamsize>(payload.size()));
             output.close();
             if (!output) {
                 std::filesystem::remove(temporary, error);
@@ -798,15 +821,21 @@ bool EnsureSourceBsp(const std::shared_ptr<MapState>& state)
         if (!state->directoryVpk.empty() && IsRegularFile(state->directoryVpk)) {
             const std::string package = state->directoryVpk.string();
             const std::string path = "maps/" + state->mapName + ".bsp";
+            R2P_SCOPE_B(profileRead, "bsp.vpkread", path);
             source = R1OVPK_ReadDirectoryVPKFile(package.c_str(), path.c_str());
+            if (source)
+                profileRead.SetBytes(source->size());
         }
     }
     catch (...) {
     }
 
     BspSha256 hash{};
-    if (source)
+    if (source) {
+        R2P_SCOPE_B(profileSha, "bsp.sha256", state->mapName);
+        profileSha.SetBytes(source->size());
         hash = Sha256Fast(source->data(), source->size());
+    }
 
     lock.lock();
     if (source) {
@@ -1007,6 +1036,28 @@ void LogEntityRewrite(const char* what, std::string_view mapName,
     OutputDebugStringA(buffer);
 }
 
+// R2 trigger_soundscape entities carry `environment` / `play_event` keys R1 ignores. For the `_snd.ent` partition this wires
+// each trigger to an env_soundscape_triggerable (appended) that names a generated soundscape (see r2_sound_scripts.h).
+std::string ApplySoundscapeRewrite(std::string_view mapName, std::string_view path, std::string text)
+{
+    constexpr std::string_view suffix = "_snd.ent";
+    if (path.size() < suffix.size() || path.substr(path.size() - suffix.size()) != suffix)
+        return text;
+    const r2audio::SoundBank* bank = r2audio::SharedBank();
+    if (!bank)
+        return text;
+    std::uint64_t wired = 0;
+    std::string out = r2audio::RewriteSoundscapeTriggers(*bank, text, mapName, &wired);
+    if (wired) {
+        char buffer[256]{};
+        _snprintf_s(buffer, sizeof(buffer), _TRUNCATE, "R1Delta: R2 soundscape triggers map=%.*s wired=%llu\n",
+            static_cast<int>(mapName.size()), mapName.data(), static_cast<unsigned long long>(wired));
+        Msg("%s", buffer);
+        OutputDebugStringA(buffer);
+    }
+    return out;
+}
+
 // Reads one partition .ent file from the R2 package and applies the entity text rules. Returns false when
 // the package has no such file; text that cannot be parsed is returned unchanged.
 bool LoadRewrittenPartition(const std::shared_ptr<MapState>& state, const std::string& path, std::string& text,
@@ -1023,7 +1074,7 @@ bool LoadRewrittenPartition(const std::shared_ptr<MapState>& state, const std::s
         entity_rewrite::RewriteReport report;
         std::string rewritten = entity_rewrite::RewriteEntityLump(text, { state->mapName, false, &R2ParticleTargetName }, &report);
         if (!report.unknownConstructs)
-            text = entity_rewrite::RaiseSpawnpointOrigins(rewritten, kSpawnpointLift);
+            text = ApplySoundscapeRewrite(state->mapName, path, entity_rewrite::RaiseSpawnpointOrigins(rewritten, kSpawnpointLift));
         for (const auto& entry : report.unsupportedClasses)
             unsupported[entry.name] += entry.occurrences;
         if (report.droppedScriptMoverLightweight)
@@ -1208,6 +1259,7 @@ FileBytes ReadEntityFile(const MapRequest& request, const std::shared_ptr<MapSta
         else {
             std::uint64_t raised = 0;
             rewritten = entity_rewrite::RaiseSpawnpointOrigins(rewritten, kSpawnpointLift, &raised);
+            rewritten = ApplySoundscapeRewrite(request.mapName, path, std::move(rewritten));
             if (rewritten != text) {
                 const size_t bytesIn = data->size();
                 data = std::make_shared<const std::vector<uint8_t>>(rewritten.begin(), rewritten.end());
@@ -1392,6 +1444,7 @@ void ApplyConverterVariant(bspdown::Options& options, const std::string& variant
         else if (token == "cubemaps-single") options.cubemaps = bspdown::CubemapMode::None;   // pre-split behaviour: every world sort samples the nearest cube
         else if (token == "no-collapse-envs") options.collapseEnvs = false;
         else if (token == "no-mesh-order") options.orderMeshes = false;   // rule 26 opt-out: R2 mesh order (high mesh indices vanish when a view has more than 2048 material runs)
+        else if (token == "mesh-order") options.orderMeshes = true;       // rule 26 (default on)
         else if (token == "no-material-namespace") options.materialNamespace.clear();   // rule 25 opt-out: world materials keep their plain names (a stock R1 map pack played earlier can then answer them)
         else if (token == "pbr-keep") options.pbrLights = false;
         else if (token == "flag2") options.worldLightFlagBit2 = true;
@@ -1429,6 +1482,7 @@ bspdown::Options R2ConverterOptions()
     // mp_drydock: models/vehicle/imc_carrier/*.vmt) cannot answer them with a model material. The material provider serves the names
     // (r2_material_names.h). Opt-out token no-material-namespace.
     options.materialNamespace = std::string(kWorldMaterialNamespace);
+    options.orderMeshes = true;   // rule 26 (EdenCull): ON for every map, opt-out token no-mesh-order
     ApplyConverterVariant(options, R2ConverterVariantString());
     return options;
 }
@@ -1453,13 +1507,21 @@ FileBytes ReadConvertedBsp(const MapRequest& request)
         BspSha256 sourceHash{};
         bool haveConverted = false;
         const auto started = std::chrono::steady_clock::now();
-        if (LoadConvertedBspCache(state, sourceHash, &converted)) {
+        bool cacheHit;
+        {
+            R2P_SCOPE_L("bsp.cache.load", state->mapName);
+            cacheHit = LoadConvertedBspCache(state, sourceHash, &converted);
+        }
+        if (cacheHit) {
             {
                 std::lock_guard<std::mutex> sourceLock(state->sourceMutex);
                 state->sourceHash = sourceHash;
                 state->hashReady = true;
             }
-            RewriteConvertedBspEntities(state, converted);
+            {
+                R2P_SCOPE_L("bsp.entities", state->mapName);
+                RewriteConvertedBspEntities(state, converted);
+            }
             state->bspCacheStatus = "hit";
             haveConverted = true;
         }
@@ -1477,9 +1539,20 @@ FileBytes ReadConvertedBsp(const MapRequest& request)
                 if (state->mapName == "mp_coliseum" || state->mapName == "mp_coliseum_column")
                     options.csmLastEnv = true;
                 bspdown::Report report;
-                converted = bspdown::DowngradeBsp(source->data(), source->size(), options, &report);
-                StoreConvertedBspCache(state, sourceHash, converted);
-                RewriteConvertedBspEntities(state, converted);
+                {
+                    R2P_SCOPE_B(profileDown, "bsp.downgrade", state->mapName);
+                    converted = bspdown::DowngradeBsp(source->data(), source->size(), options, &report);
+                    profileDown.SetBytes(converted.size());
+                }
+                {
+                    R2P_SCOPE_B(profileStore, "bsp.cache.store", state->mapName);
+                    profileStore.SetBytes(converted.size());
+                    StoreConvertedBspCache(state, sourceHash, converted);
+                }
+                {
+                    R2P_SCOPE_L("bsp.entities", state->mapName);
+                    RewriteConvertedBspEntities(state, converted);
+                }
                 haveConverted = true;
             }
         }
@@ -1487,6 +1560,7 @@ FileBytes ReadConvertedBsp(const MapRequest& request)
             std::chrono::steady_clock::now() - started).count());
 
         if (haveConverted) {
+            R2P_SCOPE_L("bsp.patch", state->mapName);
             if (const auto patch = GetMatchingPatch(state, sourceHash)) {
                 std::vector<uint8_t> patched;
                 if (ReplacePatchedLumps(converted, *patch, patched)) {
@@ -1529,8 +1603,16 @@ FileBytes ReadConvertedBsp(const MapRequest& request)
         state->sourceBsp.reset();
     }
     lock.lock();
-    if (result)
+    if (result) {
         state->convertedBsp = result;
+        // Disk cache off: keep the last two converted BSPs alive so a map restart or rejoin skips VPK read + bspdown (about 130 MB each).
+        static std::mutex keptMutex;
+        static std::vector<FileBytes> kept;
+        std::lock_guard<std::mutex> keptLock(keptMutex);
+        kept.push_back(result);
+        if (kept.size() > 2)
+            kept.erase(kept.begin());
+    }
     else
         state->conversionFailed = true;
     state->conversionLoading = false;
@@ -1599,6 +1681,7 @@ public:
         if (!request)
             return {};
         if (request->kind == MapRequest::Kind::Bsp) {
+            R2P_SCOPE_L("m.bsp.read", request->mapName);
             FileBytes data = ReadConvertedBsp(*request);
             if (data && !IsDedicatedServer())
                 PrefetchR2MapMaterials(request->mapName, data);
@@ -1607,6 +1690,7 @@ public:
             return data;
         }
         if (request->kind == MapRequest::Kind::AiGraph) {
+            R2P_SCOPE_L("m.map.ain", request->mapName);
             FileBytes data = ReadMapPatchFile(*request);
             if (data)
                 g_ainPackageServed = true;
@@ -1615,6 +1699,7 @@ public:
             return data;
         }
 
+        R2P_SCOPE_L("m.map.entfile", normalizedPath);
         const auto state = GetMapState(request->mapName);
         FileBytes data = ReadEntityFile(*request, state);
         if (data && !IsDedicatedServer())
@@ -2000,6 +2085,7 @@ void InstallR2MapProvider()
         RegisterR2ModelProvider();
         RegisterR2ParticleProvider();
         RegisterR2OverviewProvider();
+        RegisterR2SoundProvider();
         InstallR2MapPatchSource();
         postfx::RegisterMaterialProvider();
         auto provider = std::make_shared<R2MapProvider>();

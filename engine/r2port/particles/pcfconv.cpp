@@ -2,6 +2,7 @@
 #include "pcfconv.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <map>
 #include <memory>
@@ -147,6 +148,7 @@ public:
                 copy.attrs.push_back(a);
             }
         }
+        ClampModelHdrScale(src, e, copy);
         m_stack.pop_back();
         m_out.elements[outIndex] = std::move(copy);
         return outIndex;
@@ -168,6 +170,52 @@ public:
     void Note(const std::string& text) { m_report.notes.push_back(text); }
 
 private:
+    // R1's "Render models" renderer packs particle colour x 'color HDR scale' into 8 bits per channel with no clamp, so 255 x 3
+    // wraps to 253 and 124 x 3 to 116: the R2 fire floor model (system colour 255 124 59, scale 3) drew as a flat lavender sheet in the
+    // drydock fire pits (observed in R1: scale 1 -> 160 90 49 orange, 2 -> yellow-green, 2.5 and 3 -> blue-violet, i.e. the wrapped
+    // colour). R1's sprite renderers handle the scale correctly, so only systems with a "Render models" renderer are touched.
+    // The scale is lowered to the largest value that keeps every channel of every colour the system can produce within 255.
+    void ClampModelHdrScale(const SourceDoc& src, const dmx::Element& source, dmx::Element& copy)
+    {
+        const dmx::Attribute* renderers = source.Find("renderers");
+        if (!renderers || renderers->type != dmx::kElementArray) return;
+        bool hasModels = false;
+        for (const dmx::Value& ref : renderers->values) {
+            if (ref.external || ref.i < 0) continue;
+            const std::string* f = StringValue(src.doc.elements[static_cast<std::size_t>(ref.i)], "functionName");
+            if (f && Lower(*f) == "render models") hasModels = true;
+        }
+        if (!hasModels) return;
+        dmx::Attribute* scale = copy.Find("color HDR scale");
+        if (!scale || scale->type != dmx::kFloat || scale->values.size() != 1 || !(scale->values[0].f[0] > 1.0f)) return;
+
+        int maxChannel = 1;
+        const auto take = [&maxChannel](const dmx::Attribute& a) {
+            if (a.type != dmx::kColor || a.values.size() != 1) return;
+            for (int c = 0; c < 3; ++c) maxChannel = std::max<int>(maxChannel, a.values[0].c[c]);
+        };
+        const dmx::Attribute* color = copy.Find("color");
+        if (color) take(*color); else maxChannel = 255;  // R1 default system colour is 255 255 255 255
+        for (const char* list : { "initializers", "operators" }) {
+            const dmx::Attribute* fns = source.Find(list);
+            if (!fns || fns->type != dmx::kElementArray) continue;
+            for (const dmx::Value& ref : fns->values) {
+                if (ref.external || ref.i < 0) continue;
+                const dmx::Element& fn = src.doc.elements[static_cast<std::size_t>(ref.i)];
+                const dmx::Attribute* mute = fn.Find("mute");
+                if (mute && mute->type == dmx::kBool && mute->values.size() == 1 && mute->values[0].i != 0) continue;
+                for (const dmx::Attribute& a : fn.attrs) take(a);
+            }
+        }
+        const float original = scale->values[0].f[0];
+        const float limit = std::floor(255.0f / static_cast<float>(maxChannel) * 1000.0f) / 1000.0f;
+        if (limit >= original) return;
+        scale->values[0].f[0] = std::max(limit, 1.0f);
+        Note(copy.name + ": 'color HDR scale' " + std::to_string(original) + " -> " + std::to_string(scale->values[0].f[0]) +
+            " (R1's Render models renderer wraps colour x scale at 255; brightest colour channel " + std::to_string(maxChannel) + ")");
+        Status().approximations.push_back("system:color HDR scale clamped for Render models");
+    }
+
     SystemStatus& Status() { return m_report.status[m_stack.back()]; }
 
     static bool IsFunctionList(const std::string& name)

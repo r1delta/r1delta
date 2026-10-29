@@ -26,6 +26,7 @@
 #include <filesystem>
 #include "r2_map_provider.h"
 #include "r2_model_provider.h"
+#include "engine/r2port/r2_profile.h"
 namespace r2port {
 namespace {
 
@@ -799,6 +800,7 @@ std::optional<uint64_t> Size(std::string_view path)
 
 FileBytes ReadAll(std::string_view path)
 {
+    R2P_SCOPE_B(profileReadAll, "m.fs.readall", path);
     char normalizedBuffer[1024];
     std::string_view normalized;
     if (!NormalizeProviderPathInto(path, normalizedBuffer, sizeof(normalizedBuffer), normalized))
@@ -879,6 +881,8 @@ FileBytes ReadAll(std::string_view path)
         }
     }
     pending->ready.notify_all();
+    if (data)
+        profileReadAll.SetBytes(data->size());
     return data;
 }
 
@@ -944,6 +948,7 @@ void SetActiveMap(std::string_view mapName)
         "R1Delta: R2 map start map=%s steady-ms=%lld\n",
         activeMapForLog.c_str(), static_cast<long long>(qpcMilliseconds));
     LogProviderMessage(message);
+    r2port::prof::MarkMapStart(activeMapForLog);
 }
 
 std::string ActiveMapName()

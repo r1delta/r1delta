@@ -24,3 +24,12 @@ bool InstallLegacyDSSoundTableExpansion(std::uintptr_t engineDSBase);
 // expansion did not run, in which case the link-time table is still in use.
 // The loaded alias count stays in the engine's own global.
 const void* GetLegacyDSAliasRecords();
+
+// The generated R2 aliases (scripts/r2port_sounds.txt, the last manifest file) are folded into the dedicated engine's sound-script
+// CRC like every other alias, which clients compare at connect. This detours the per-file script loader (+5F20), remembers the CRC
+// and alias/range counts before that file and restores the CRC afterwards (same scheme as the client, audio_cache.cpp ScriptLoad).
+// Returns false without touching code when the prologue does not match. Call with the table expansion, before the first script load.
+bool InstallLegacyDSAliasHiding(std::uintptr_t engineDSBase);
+// Aliases appended after the CRC/parity-visible table by the generated R2 script.
+std::uint32_t LegacyDSHiddenTrailingAliases();
+

@@ -7,6 +7,8 @@
 #include "engine/filesystem/r2_material_provider.h"
 #include "engine/logging/logging.h"
 #include "engine/r2port/modelconv/modelconv.hpp"
+#include "engine/r2port/r2_profile.h"
+#include "engine/filesystem/r2_cache_store.h"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -154,7 +156,10 @@ bool WriteFileAtomic(const std::filesystem::path& target, const std::vector<std:
         std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
         if (!file)
             return false;
-        file.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
+        std::vector<std::uint8_t> packed;
+        const bool isPacked = cache::Pack(data.data(), data.size(), packed, 8 * 1024);
+        const std::vector<std::uint8_t>& payload = isPacked ? packed : data;
+        file.write(reinterpret_cast<const char*>(payload.data()), static_cast<std::streamsize>(payload.size()));
         file.close();
         if (!file) {
             std::error_code ignored;
@@ -480,7 +485,7 @@ private:
     std::filesystem::path BlobPath(const Package& package, const std::string& stem) const
     {
         const std::filesystem::path directory = GetR2MapPatchDirectory();
-        if (directory.empty())
+        if (directory.empty() || !cache::DiskCacheEnabled())
             return {};
         return directory / "cache" / "models" / std::string(kModelCacheRevision) / package.signature
             / (stem + ".r1m");
@@ -490,8 +495,9 @@ private:
     {
         failed = false;
         std::vector<std::uint8_t> data;
-        if (file.empty() || !ReadWholeFile(file, data))
+        if (file.empty() || !ReadWholeFile(file, data) || !cache::Unpack(data))
             return {};
+        cache::TouchIfOld(file);
         BlobReader reader(data);
         std::uint32_t magic{}, kind{};
         if (!reader.U32(magic) || magic != kBlobMagic || !reader.U32(kind))
@@ -593,7 +599,12 @@ private:
         const auto started = std::chrono::steady_clock::now();
         const std::filesystem::path blobPath = BlobPath(*source, stem);
         bool cachedFailure{};
-        if (auto cached = LoadBlob(blobPath, cachedFailure)) {
+        std::shared_ptr<const ModelSet> cached;
+        {
+            R2P_SCOPE_L("wt.model.diskload", stem);
+            cached = LoadBlob(blobPath, cachedFailure);
+        }
+        if (cached) {
             m_diskHits.fetch_add(1, std::memory_order_relaxed);
             RecordBuild(started);
             return cached;
@@ -604,7 +615,11 @@ private:
             return {};
         }
 
-        const FileBytes sourceMdl = R1OVPK_ReadDirectoryVPKFile(source->path.c_str(), mdlPath.c_str());
+        FileBytes sourceMdl;
+        {
+            R2P_SCOPE_L("d.model.vpkread", mdlPath);
+            sourceMdl = R1OVPK_ReadDirectoryVPKFile(source->path.c_str(), mdlPath.c_str());
+        }
         if (!sourceMdl) {
             ReportFailure(stem, "the R2 MDL could not be read from its VPK");
             return {};
@@ -614,8 +629,13 @@ private:
         input.mdl = std::span<const std::uint8_t>(sourceMdl->data(), sourceMdl->size());
         modelconv::ModelOutput output;
         std::string error;
-        if (!modelconv::ConvertModelR2ToR1(input, output, error)
-            || !modelconv::VerifyModelR1(output, error)) {
+        bool modelConverted;
+        {
+            R2P_SCOPE_L("wt.model.convert", stem);
+            modelConverted = modelconv::ConvertModelR2ToR1(input, output, error)
+                && modelconv::VerifyModelR1(output, error);
+        }
+        if (!modelConverted) {
             ReportFailure(stem, error.c_str());
             StoreBlob(blobPath, nullptr);
             return {};
@@ -639,7 +659,12 @@ private:
         }
         m_converted.fetch_add(1, std::memory_order_relaxed);
         RecordBuild(started);
-        StoreBlob(blobPath, set.get());
+        {
+            R2P_SCOPE_B(profileStore, "wt.model.store", stem);
+            profileStore.SetBytes((set->mdl ? set->mdl->size() : 0) + (set->vvd ? set->vvd->size() : 0) + (set->vtx ? set->vtx->size() : 0)
+                + (set->vvc ? set->vvc->size() : 0) + (set->phy ? set->phy->size() : 0));
+            StoreBlob(blobPath, set.get());
+        }
         return set;
     }
 
@@ -674,6 +699,7 @@ private:
 
     void PrefetchLoop()
     {
+        r2port::prof::SetThreadRole("model-prefetch");
         for (;;) {
             PrefetchJob job;
             {
@@ -695,6 +721,7 @@ private:
 
     void RunPrefetch(const PrefetchJob& job)
     {
+        R2P_SCOPE_L("d.model.prefetch", job.map);
         const auto started = std::chrono::steady_clock::now();
         std::vector<std::string> names = StaticPropModelNames(*job.bsp);
         const std::size_t propNames = names.size();
@@ -806,4 +833,8 @@ void LogR2ModelProviderMetrics(const char* phase)
         g_modelProvider->LogMetrics(phase);
 }
 
+std::string_view ModelCacheRevision()
+{
+    return kModelCacheRevision;
+}
 } // namespace r2port

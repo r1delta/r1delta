@@ -2,6 +2,21 @@
 // Local adaptation: family cache size is configurable with a 256 MiB default.
 #include "r2tex.hpp"
 
+// R2PORT_PROFILE stage timers (engine build only: the header is not on the include path of the standalone r2tex CLI).
+#if __has_include("engine/r2port/r2_profile.h")
+#include "engine/r2port/r2_profile.h"
+#else
+#include <string_view>
+struct R2pNoProfile {
+    void SetBytes(unsigned long long) {}
+    unsigned long long Bytes() const { return 0; }
+    void SetLabel(std::string_view) {}
+};
+#define R2P_SCOPE(stage) ((void)0)
+#define R2P_SCOPE_L(stage, label) ((void)0)
+#define R2P_SCOPE_B(var, stage, label) R2pNoProfile var
+#endif
+
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -10,6 +25,7 @@
 #include <atomic>
 #include <array>
 #include <chrono>
+#include <exception>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -132,8 +148,8 @@ bool tintedVertexWorldMaterial(const std::string& name) {
     return false;
 }
 constexpr std::size_t kMaxPakDecompressed = 1024ull * 1024ull * 1024ull;
-constexpr std::size_t kMaximumFamilyCacheLimit = 768ull * 1024ull * 1024ull;
-std::atomic<std::size_t> gFamilyCacheLimit{256ull * 1024ull * 1024ull};
+constexpr std::size_t kMaximumFamilyCacheLimit = 4096ull * 1024ull * 1024ull;
+std::atomic<std::size_t> gFamilyCacheLimit{2048ull * 1024ull * 1024ull};
 constexpr char kIndexMagic[8] = {'R','2','T','E','X','I','D','X'};
 constexpr std::uint32_t kIndexVersion = 10;
 
@@ -253,10 +269,23 @@ struct PakInfo {
     std::uint16_t patchCount = 0;
 };
 
+// Allocator whose value-less construct() leaves trivial elements uninitialised, so vector::resize on pak-sized
+// buffers does not touch (zero fill) memory that is about to be overwritten by a file read or the decoder.
+template<class T>
+struct DefaultInitAllocator : std::allocator<T> {
+    template<class U> struct rebind { using other = DefaultInitAllocator<U>; };
+    DefaultInitAllocator() = default;
+    template<class U> DefaultInitAllocator(const DefaultInitAllocator<U>&) noexcept {}
+    template<class U> void construct(U* p) noexcept(std::is_nothrow_default_constructible_v<U>) { ::new (static_cast<void*>(p)) U; }
+    template<class U, class... Args> void construct(U* p, Args&&... args) { ::new (static_cast<void*>(p)) U(std::forward<Args>(args)...); }
+};
+using PakBytes = std::vector<std::uint8_t, DefaultInitAllocator<std::uint8_t>>;
+constexpr std::size_t kPakTailBytes = 128;
+
 struct PakData {
     std::uint32_t infoIndex = 0;
     Hdr7 header{};
-    std::vector<std::uint8_t> bytes;
+    PakBytes bytes;
     std::size_t pageHeadersOffset = 0;
     std::size_t assetTableOffset = 0;
     std::uint32_t firstPage = 0;
@@ -264,7 +293,7 @@ struct PakData {
     std::vector<std::size_t> pageOffsets;
     std::vector<std::int32_t> pageSizes;
     std::vector<std::string> starpaks;
-    std::size_t memoryBytes() const { return bytes.capacity() + pageOffsets.capacity() * sizeof(std::size_t) + pageSizes.capacity() * sizeof(std::int32_t); }
+    std::size_t memoryBytes() const { return bytes.size() + pageOffsets.capacity() * sizeof(std::size_t) + pageSizes.capacity() * sizeof(std::int32_t); }
 };
 
 std::string lowerAscii(std::string s) {
@@ -310,39 +339,78 @@ bool readPakInfo(const fs::path& path, PakInfo& info, std::string& error) {
     return true;
 }
 
+// Reads a whole pak straight into `out`, an uninitialised buffer of exactly file size + kPakTailBytes whose tail is
+// zeroed (the RTech decoder reads up to 8 bytes past the compressed stream). `fileSize` receives the real file size.
+bool readPakFile(const fs::path& path, PakBytes& out, std::size_t& fileSize, std::string& error) {
+    HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                              FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+    if (file == INVALID_HANDLE_VALUE) { error = "cannot open: " + path.u8string(); return false; }
+    LARGE_INTEGER length{};
+    if (!GetFileSizeEx(file, &length) || length.QuadPart < 0 ||
+        static_cast<std::uint64_t>(length.QuadPart) > std::numeric_limits<std::size_t>::max() - kPakTailBytes) {
+        CloseHandle(file);
+        error = "cannot size file: " + path.u8string();
+        return false;
+    }
+    fileSize = static_cast<std::size_t>(length.QuadPart);
+    out.resize(fileSize + kPakTailBytes);
+    std::size_t done = 0;
+    while (done < fileSize) {
+        const DWORD want = static_cast<DWORD>(std::min<std::size_t>(1u << 30, fileSize - done));
+        DWORD got = 0;
+        if (!ReadFile(file, out.data() + done, want, &got, nullptr) || got == 0) {
+            CloseHandle(file);
+            out = PakBytes();
+            error = "short read: " + path.u8string();
+            return false;
+        }
+        done += got;
+    }
+    CloseHandle(file);
+    std::memset(out.data() + fileSize, 0, kPakTailBytes);
+    return true;
+}
+
 bool loadPak(const PakInfo& info, std::uint32_t infoIndex, PakData& pak, std::string& error) {
     pak.infoIndex = infoIndex;
-    std::vector<std::uint8_t> input;
-    if (!readWholeFile(info.path, input, error)) return false;
-    if (input.size() < sizeof(Hdr7)) { error = "short RPak: " + info.relativeName; return false; }
+    PakBytes input;
+    std::size_t inputSize = 0;
+    {
+        R2P_SCOPE_B(profileRead, "d.pak.read", info.relativeName);
+        if (!readPakFile(info.path, input, inputSize, error)) return false;
+        profileRead.SetBytes(inputSize);
+    }
+    if (inputSize < sizeof(Hdr7)) { error = "short RPak: " + info.relativeName; return false; }
     std::memcpy(&pak.header, input.data(), sizeof(Hdr7));
     if (pak.header.magic != 0x6b615052u || pak.header.version != 7) {
         error = "bad RPak header: " + info.relativeName; return false;
     }
     if (pak.header.flags & 0x8000u) { error = "unsupported Zstd RPak: " + info.relativeName; return false; }
     if (pak.header.flags & 0x100u) {
-        if (!pak.header.dcmpSize || pak.header.dcmpSize > kMaxPakDecompressed || pak.header.cmpSize > input.size()) {
+        if (!pak.header.dcmpSize || pak.header.dcmpSize > kMaxPakDecompressed || pak.header.cmpSize > inputSize) {
             error = "invalid RTech size: " + info.relativeName; return false;
         }
-        const auto inMask = nextPowerMask(input.size() + 64);
+        // The masks stay the power-of-two masks the decoder expects; positions never exceed the real sizes, so the
+        // buffers themselves are only as large as the data (plus the zeroed/slack tail), never zero filled.
+        const auto inMask = nextPowerMask(inputSize + 64);
         const auto outMask = nextPowerMask(pak.header.dcmpSize + 64);
         if (inMask > std::numeric_limits<std::size_t>::max() - 64 || outMask > std::numeric_limits<std::size_t>::max() - 64) {
             error = "RPak allocation overflow: " + info.relativeName; return false;
         }
-        std::vector<std::uint8_t> inbuf(static_cast<std::size_t>(inMask + 1 + 64), 0);
-        std::memcpy(inbuf.data(), input.data(), input.size());
-        std::vector<std::uint8_t>().swap(input);
-        std::vector<std::uint8_t> output(static_cast<std::size_t>(outMask + 1 + 64), 0);
+        PakBytes output;
+        output.resize(static_cast<std::size_t>(pak.header.dcmpSize) + kPakTailBytes);
         RTechDecodeState_s decoder{};
         decoder.decodeMode = MODE_RTECH;
-        decoder.fileSize = inbuf.size();
-        decoder.inputBuf = inbuf.data();
+        decoder.fileSize = input.size();
+        decoder.inputBuf = input.data();
         decoder.outputBuf = output.data();
         decoder.inputMask = inMask;
         decoder.outputMask = outMask;
         decoder.inBufBytePos = sizeof(Hdr7);
         decoder.outBufBytePos = sizeof(Hdr7);
-        const auto decodedHeader = Pak_RTechDecoderInit(&decoder, inbuf.data(), inMask,
+        R2P_SCOPE_B(profileRtech, "d.pak.rtech", info.relativeName);
+        profileRtech.SetBytes(pak.header.dcmpSize);
+        const auto decodedHeader = Pak_RTechDecoderInit(&decoder, input.data(), inMask,
             static_cast<std::size_t>(pak.header.cmpSize), 0, sizeof(Hdr7));
         if (decodedHeader != pak.header.dcmpSize) { error = "RTech size mismatch: " + info.relativeName; return false; }
         const bool complete = Pak_RTechStreamDecode(&decoder, static_cast<std::size_t>(pak.header.cmpSize),
@@ -353,7 +421,9 @@ bool loadPak(const PakInfo& info, std::uint32_t infoIndex, PakData& pak, std::st
         std::memcpy(output.data(), &pak.header, sizeof(Hdr7));
         output.resize(static_cast<std::size_t>(pak.header.dcmpSize));
         pak.bytes = std::move(output);
+        PakBytes().swap(input);
     } else {
+        input.resize(inputSize);
         pak.bytes = std::move(input);
     }
     const std::uint8_t* b = pak.bytes.data();
@@ -586,6 +656,78 @@ struct CacheEntry {
 std::atomic<std::uint64_t> gFamilyLoadCount{0};
 std::atomic<std::uint64_t> gFamilyLoadMicroseconds{0};
 
+// Process-wide cap on pak loads running at once (read + RTech decode). Every getFamily caller always makes progress
+// on its own thread and counts as one active load; helper threads are only started while the count is below the cap,
+// and nothing ever blocks waiting for a slot, so concurrent families (provider workers, index scan threads) share the
+// cap without deadlock or oversubscription.
+std::atomic<unsigned> gPakLoadsActive{0};
+unsigned pakLoadLimit() {
+    static const unsigned limit = [] {
+        const unsigned hardware = std::thread::hardware_concurrency();
+        return hardware > 3u ? hardware - 2u : 1u;
+    }();
+    return limit;
+}
+
+// Loads the given paks (indices into `paks`) and returns the ones that loaded, in the order of `members`.
+// A pak that fails to load is skipped. Largest paks are claimed first so the biggest decode starts immediately.
+std::vector<std::shared_ptr<PakData>> loadPaksConcurrent(const std::vector<PakInfo>& paks, const std::vector<std::uint32_t>& members) {
+    const std::size_t count = members.size();
+    std::vector<std::shared_ptr<PakData>> loaded(count);
+    std::vector<std::size_t> order(count);
+    for (std::size_t i = 0; i < count; ++i) order[i] = i;
+    std::stable_sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
+        return paks[members[a]].fileSize > paks[members[b]].fileSize;
+    });
+    std::atomic<std::size_t> next{0};
+    std::exception_ptr failure;
+    std::mutex failureMutex;
+    // Claims and loads one pak; false once every pak is claimed.
+    const auto loadNext = [&]() {
+        const std::size_t k = next.fetch_add(1, std::memory_order_relaxed);
+        if (k >= count) return false;
+        const std::size_t slot = order[k];
+        try {
+            auto pak = std::make_shared<PakData>();
+            std::string why;
+            if (loadPak(paks[members[slot]], members[slot], *pak, why)) loaded[slot] = std::move(pak);
+        } catch (...) {
+            std::lock_guard<std::mutex> lock(failureMutex);
+            if (!failure) failure = std::current_exception();
+        }
+        return true;
+    };
+    std::vector<std::thread> helpers;
+    gPakLoadsActive.fetch_add(1, std::memory_order_relaxed);   // the calling thread
+    const auto spawnHelpers = [&]() {
+        const unsigned limit = pakLoadLimit();
+        while (helpers.size() + 1 < count && next.load(std::memory_order_relaxed) < count) {
+            unsigned active = gPakLoadsActive.load(std::memory_order_relaxed);
+            if (active >= limit) return;
+            if (!gPakLoadsActive.compare_exchange_weak(active, active + 1, std::memory_order_relaxed)) continue;
+            try {
+                helpers.emplace_back([&]() {
+                    while (loadNext()) {}
+                    gPakLoadsActive.fetch_sub(1, std::memory_order_relaxed);
+                });
+            } catch (...) {
+                gPakLoadsActive.fetch_sub(1, std::memory_order_relaxed);
+                return;
+            }
+        }
+    };
+    // The caller loads paks one at a time and re-checks for free slots between them.
+    spawnHelpers();
+    while (loadNext()) spawnHelpers();
+    for (auto& helper : helpers) helper.join();
+    gPakLoadsActive.fetch_sub(1, std::memory_order_relaxed);
+    if (failure) std::rethrow_exception(failure);
+    std::vector<std::shared_ptr<PakData>> result;
+    result.reserve(count);
+    for (auto& pak : loaded) if (pak) result.push_back(std::move(pak));
+    return result;
+}
+
 struct Database {
     fs::path installDir;
     fs::path pakDir;
@@ -627,7 +769,11 @@ struct Database {
             if (!slot) slot = std::make_shared<std::mutex>();
             loadLock = slot;
         }
-        std::lock_guard<std::mutex> loading(*loadLock);
+        std::unique_lock<std::mutex> loading(*loadLock, std::defer_lock);
+        {
+            R2P_SCOPE_L("d.fam.wait", familyNames[id]);
+            loading.lock();
+        }
         {
             std::lock_guard<std::mutex> lock(familyMutex);
             auto found = families.find(id);
@@ -636,17 +782,15 @@ struct Database {
                 return found->second.family;
             }
         }
+        R2P_SCOPE_B(profileFamily, "d.fam.load", familyNames[id]);
         const auto familyLoadStart = std::chrono::steady_clock::now();
         auto family = std::make_shared<Family>();
         family->id = id;
         std::uint32_t maxPages = 0;
-        for (std::uint32_t pi : familyMembers[id]) {
-            auto pak = std::make_shared<PakData>();
-            std::string why;
-            if (!loadPak(paks[pi], pi, *pak, why)) continue;
+        family->paks = loadPaksConcurrent(paks, familyMembers[id]);
+        for (const auto& pak : family->paks) {
             family->bytes += pak->memoryBytes();
             maxPages = std::max(maxPages, static_cast<std::uint32_t>(pak->pageOffsets.size()));
-            family->paks.push_back(std::move(pak));
         }
         family->pages.resize(maxPages);
         for (const auto& pak : family->paks) {
@@ -657,6 +801,7 @@ struct Database {
             }
         }
         if (family->paks.empty()) { error = "cannot load any pak in family " + familyNames[id]; return {}; }
+        profileFamily.SetBytes(family->bytes);
         gFamilyLoadCount.fetch_add(1, std::memory_order_relaxed);
         gFamilyLoadMicroseconds.fetch_add(static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now() - familyLoadStart).count()), std::memory_order_relaxed);
@@ -1229,7 +1374,11 @@ bool convertTextureWithDb(const std::shared_ptr<Database>& db, const AssetRecord
         error = "permanent txtr data exceeds declared dataSize"; return false;
     }
     std::vector<std::uint8_t> permanentData;
-    if (!readPageRange(*family, *assetOwner, record.data, static_cast<std::size_t>(permanentSize), permanentData, error)) return false;
+    {
+        R2P_SCOPE_B(profilePages, "d.tex.pagerange", record.name);
+        profilePages.SetBytes(permanentSize);
+        if (!readPageRange(*family, *assetOwner, record.data, static_cast<std::size_t>(permanentSize), permanentData, error)) return false;
+    }
     std::size_t permanentOffset = 0;
     for (int m = static_cast<int>(count) - 1; m >= static_cast<int>(opt + streamed); --m) {
         const auto& img = images[static_cast<std::size_t>(m)];
@@ -1261,7 +1410,11 @@ bool convertTextureWithDb(const std::shared_ptr<Database>& db, const AssetRecord
             error = "streamed mip range overflow"; return false;
         }
         std::vector<std::uint8_t> streamedData(static_cast<std::size_t>(streamBytes));
-        if (!readAtExact(starPath, starOffset, streamedData.data(), streamedData.size(), error)) return false;
+        {
+            R2P_SCOPE_B(profileStar, "d.tex.starpak", record.name);
+            profileStar.SetBytes(streamedData.size());
+            if (!readAtExact(starPath, starOffset, streamedData.data(), streamedData.size(), error)) return false;
+        }
         std::size_t sourceOffset = 0;
         for (int m = static_cast<int>(opt + streamed) - 1; m >= static_cast<int>(opt); --m) {
             const std::uint32_t mw = std::max(1u, static_cast<std::uint32_t>(width) >> m);
@@ -1289,6 +1442,7 @@ bool convertTextureWithDb(const std::shared_ptr<Database>& db, const AssetRecord
         converted = std::move(images);
     } else {
         converted.resize(count);
+        R2P_SCOPE_B(profileDecode, "d.tex.decode", record.name);
         for (std::uint32_t m = 0; m < count; ++m) {
             if (images[m].bytes.empty()) { error = "missing mip " + std::to_string(m); return false; }
             std::uint16_t thisFormat = 0xffff;
@@ -1298,6 +1452,7 @@ bool convertTextureWithDb(const std::shared_ptr<Database>& db, const AssetRecord
             if (imageFormat == 0xffff) imageFormat = thisFormat;
             else if (imageFormat != thisFormat) { error = "inconsistent converted mip format"; return false; }
             flags |= thisFlags;
+            profileDecode.SetBytes(profileDecode.Bytes() + converted[m].bytes.size());
         }
     }
     std::uint64_t totalSize = 0x58;

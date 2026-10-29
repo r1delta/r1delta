@@ -771,10 +771,12 @@ void orderMeshes(Ctx& c) {
     int32_t meshWord;
     std::memcpy(&meshWord, &c.lump[L_LEVELINFO][8], 4);
     if (meshWord < 0) throw Error("rule 26: level info word 2 is negative");
-    // Object ids >= propBase name static props (rule 17, R1 loader sub_1800B2630: (word2 + 63) & ~63); only meshes below it are addressable.
-    const size_t propBase = ((size_t)meshWord + 63) & ~(size_t)63;
+    // Level info word 2 = number of regular render meshes. Model 0 lists them first and then the SKY meshes (flag 0x4, no object references:
+    // mp_black_water_canal ids 5012..5019 of 5020, mp_eden 11707..11711); R1 treats ids >= word2 of model 0 as that tail, so the tail must stay
+    // where it is (sorting it into the middle crashed mp_black_water_canal in client.dll sub_1802AF720). Object ids >= propBase =
+    // (word2 + 63) & ~63 name static props (rule 17). Only [model 0 first mesh, word2) is reordered.
     const size_t world0 = models[0].firstMesh;
-    const size_t worldEnd = std::min<size_t>((size_t)models[0].firstMesh + models[0].numMeshes, std::min(propBase, meshes.size()));
+    const size_t worldEnd = std::min<size_t>((size_t)models[0].firstMesh + models[0].numMeshes, std::min((size_t)meshWord, meshes.size()));
     if (world0 > worldEnd || (size_t)models[0].firstMesh + models[0].numMeshes > meshes.size()) throw Error("rule 26: models[0] mesh range exceeds the mesh lump");
     const size_t nSorts = c.lump[L_SORTS].size() / sizeof(Sort);
     for (size_t i = world0; i < worldEnd; i++)
