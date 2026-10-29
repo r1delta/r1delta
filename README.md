@@ -94,7 +94,14 @@ For ongoing effects, ordinary CLIENT code can use `Movement_HasPresentation(name
 
 ### Slide/grapple reference
 
-The base multiplayer mapspawn includes and registers `movement/pilot`; it does not automatically enable it. On a loaded multiplayer map:
+The base multiplayer mapspawn includes and registers `movement/pilot`. The server think loop (`pilot_server.nut`) enables it for every pilot, on every map change, respawn and join, as long as the playtest cvars allow it:
+
+| Cvar | Default | Effect |
+|---|---|---|
+| `delta_pilot_movement_auto_r2` | `1` | Automatically enable slide/grapple on converted Titanfall 2 maps (`Movement_IsR2PortMap`). |
+| `delta_pilot_movement_auto_r1` | `0` | Same on stock R1 maps. |
+
+A player that already runs another movement program (autobhop, a mod) is left alone. Manual control on a loaded multiplayer map:
 
 ```text
 script printt(Movement_IsAvailable())
