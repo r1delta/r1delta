@@ -27,7 +27,8 @@ if (@(G @('status', '--porcelain', '--untracked-files=no')).Count -ne 0) { throw
 if (-not $NoMerge) {
     G @('fetch', '--no-tags', $R2PortRepo, "+${R2PortBranch}:refs/remotes/r2port/feat") | Out-Null
     $new = @(G @('rev-parse', 'r2port/feat'))[0]
-    $merged = (& git -C $code merge-base --is-ancestor $new HEAD; $LASTEXITCODE -eq 0)
+    & git -C $code merge-base --is-ancestor $new HEAD
+    $merged = ($LASTEXITCODE -eq 0)
     if ($merged) { Write-Host "[refresh] r2port $($new.Substring(0,7)) already merged" }
     else {
         $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
