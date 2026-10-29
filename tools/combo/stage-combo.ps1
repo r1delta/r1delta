@@ -1,0 +1,300 @@
+[CmdletBinding()]
+param(
+    [string] $RootName = 'r2-combo',
+    [switch] $Reset,        # remove the root (junctions unlinked, never followed) and recreate it
+    [switch] $Refresh,      # keep the root and its caches; re-stage binaries + CORE overlay only
+    [switch] $Flag,         # add r1delta_background.flag (test copies only; the user's launch has none)
+    [switch] $Drive         # TEST ONLY: input-injection fixture in this root's pilot.nut (console +forward does nothing in a background window)
+)
+# Stages the combined (R2 map port + slide/grapple movement) test root. Templates: S:\game\r2-lead (round 19 files,
+# hardlinked, never written), S:\game\r2-shader (cfg), S:\game\r1delta (user CORE: movement scripts + credits, read only),
+# the combined build (.build\release). Nothing outside $Root is modified.
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+$Game = 'S:\game'
+$Root = Join-Path $Game $RootName
+$Core = Join-Path $Root 'r1delta'
+$Lead = Join-Path $Game 'r2-lead'
+$LeadCore = Join-Path $Lead 'r1delta'
+$ShaderCore = Join-Path $Game 'r2-shader\r1delta'
+$UserCore = Join-Path $Game 'r1delta'
+$TemplateCore = 'S:\game\r2dev\r1delta'   # pristine pinned CORE content (r2-lead is missing 138 stock materials)
+$CodeRoot = 'C:\Users\r3muxd\tmp\r1delta-combined'
+$Build = Join-Path $CodeRoot '.build\release'
+$Handover = Join-Path $CodeRoot '.build\handover'
+$AssetStage = 'S:\game\.mp-slide-model-assets-stage-2026'
+$BaseCommit = '0dff84a3'   # CORE commit the movement script edits were made against (316993b descends from it)
+$StubNames = @('d3d11.dll', 'GFSDK_SSAO.win64.dll', 'GFSDK_TXAA.win64.dll')
+$RootExes = @('r1delta.exe', 'Titanfall.exe', 'R1Delta_DS.exe', 'r1delta.exe.config')
+$LinkDirs = @('bin', 'bin_nexon', 'materials', 'models', 'sound', 'vgui', 'cfg', 'config', 'admin')
+$MovementScripts = @('scripts/game_sounds_manifest.txt', 'scripts/vscripts/_autobhop.nut', 'scripts/vscripts/_cl_mapspawn.nut',
+    'scripts/vscripts/_mapspawn.nut', 'scripts/vscripts/_remote_functions.nut', 'scripts/vscripts/ui/menu_credits.nut')
+
+if ($RootName -in @('r2', 'r1delta', 'mp', 'sp', 'r2-lead', 'r2-shader', 'r2-provider', 'r2-texlib', 'r2dev', 'r2-lead2')) { throw "Refusing root name $RootName" }
+
+Add-Type -Language CSharp -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.IO;
+using System.Runtime.InteropServices;
+public static class ComboNative
+{
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CreateHardLinkW(string lpFileName, string lpExistingFileName, IntPtr lpSecurityAttributes);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr CreateFileW(string f, uint access, uint share, IntPtr sec, uint disp, uint flags, IntPtr tmpl);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetFileInformationByHandle(IntPtr h, int cls, ref uint info, uint size);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr h);
+    private static bool Rp(FileSystemInfo e) { return (e.Attributes & FileAttributes.ReparsePoint) != 0; }
+
+    public static int LinkTree(string source, string destination)
+    {
+        int n = 0;
+        Directory.CreateDirectory(destination);
+        foreach (FileSystemInfo e in new DirectoryInfo(source).EnumerateFileSystemInfos())
+        {
+            if (Rp(e)) throw new IOException("reparse point in source tree: " + e.FullName);
+            string t = Path.Combine(destination, e.Name);
+            DirectoryInfo d = e as DirectoryInfo;
+            if (d != null) { n += LinkTree(d.FullName, t); continue; }
+            if (e.Name.EndsWith(".i64", StringComparison.OrdinalIgnoreCase) || e.Name.EndsWith(".idb", StringComparison.OrdinalIgnoreCase)) continue;
+            if (File.Exists(t)) continue;
+            if (!CreateHardLinkW(t, e.FullName, IntPtr.Zero)) throw new Win32Exception(Marshal.GetLastWin32Error(), "hardlink " + e.FullName);
+            n++;
+        }
+        return n;
+    }
+    public static void LinkFile(string source, string destination)
+    {
+        if (!CreateHardLinkW(destination, source, IntPtr.Zero)) throw new Win32Exception(Marshal.GetLastWin32Error(), "hardlink " + source);
+    }
+    // Unlinks one directory entry (read-only ok) without touching the possibly shared inode.
+    private static int Unlink(string path)
+    {
+        IntPtr h = CreateFileW(path, 0x00010000, 7, IntPtr.Zero, 3, 0x02000000 | 0x00200000, IntPtr.Zero);
+        if (h == new IntPtr(-1)) return Marshal.GetLastWin32Error();
+        try { uint flags = 0x1 | 0x10; return SetFileInformationByHandle(h, 21, ref flags, 4) ? 0 : Marshal.GetLastWin32Error(); }
+        finally { CloseHandle(h); }
+    }
+    public static void RemoveTree(string path)
+    {
+        FileSystemInfo item = Directory.Exists(path) ? (FileSystemInfo)new DirectoryInfo(path) : (File.Exists(path) ? (FileSystemInfo)new FileInfo(path) : null);
+        if (item == null) return;
+        Remove(item);
+    }
+    private static void Remove(FileSystemInfo item)
+    {
+        DirectoryInfo d = item as DirectoryInfo;
+        if (d != null)
+        {
+            if (!Rp(d)) foreach (FileSystemInfo c in d.GetFileSystemInfos()) Remove(c);
+            Directory.Delete(d.FullName, false);
+            return;
+        }
+        int err = Unlink(item.FullName);
+        if (err != 0) throw new Win32Exception(err, "unlink " + item.FullName);
+    }
+    public static void Replace(string source, string destination)
+    {
+        if (File.Exists(destination)) { int err = Unlink(destination); if (err != 0) throw new Win32Exception(err, "unlink " + destination); }
+        Directory.CreateDirectory(Path.GetDirectoryName(destination));
+        File.Copy(source, destination, false);
+    }
+}
+'@
+
+function Say([string] $m) { Write-Host ("[combo] " + $m) }
+function Sha([string] $p) { (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant() }
+function GitC([string] $dir, [string[]] $a) {
+    $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    $o = & git -c core.quotepath=false -C $dir @a 2>&1
+    $code = $LASTEXITCODE; $ErrorActionPreference = $prev
+    $LASTEXITCODE = $code
+    if ($LASTEXITCODE -ne 0) { throw "git -C $dir $($a -join ' ') failed: $($o -join "`n")" }
+    return $o
+}
+function Assert-Idle {
+    $p = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($Root + '\', [StringComparison]::OrdinalIgnoreCase) })
+    if ($p.Count) { throw "Processes still running from $Root : $(($p | ForEach-Object { $_.ProcessId }) -join ',')" }
+}
+
+$free = (Get-PSDrive C).Free
+if ($free -lt 6GB) { throw "C: free space $([math]::Round($free/1GB,1)) GB < 6 GB" }
+
+# ---------------------------------------------------------------- create / reset
+$exists = Test-Path -LiteralPath $Root
+if ($exists -and $Reset) {
+    Assert-Idle
+    Say "removing $Root"
+    [ComboNative]::RemoveTree($Root)
+    $exists = $false
+}
+if ($exists -and -not $Refresh) { throw "$Root exists; use -Reset (recreate) or -Refresh (restage binaries + overlay)" }
+
+if (-not $exists) {
+    Say "creating $Root from $Lead"
+    New-Item -ItemType Directory -Path $Root | Out-Null
+    foreach ($f in Get-ChildItem -LiteralPath $Lead -File -Force) {
+        if ($f.Name -like '*.pre-r2port-backup' -or $f.Name -eq 'r1delta_background.flag' -or $RootExes -contains $f.Name) { continue }
+        [ComboNative]::LinkFile($f.FullName, (Join-Path $Root $f.Name))
+    }
+    foreach ($j in @('bin', 'r1', 'tools')) { New-Item -ItemType Junction -Path (Join-Path $Root $j) -Target (Join-Path $Game $j) | Out-Null }
+    foreach ($d in @('crash', 'crashes')) { New-Item -ItemType Directory -Path (Join-Path $Root $d) | Out-Null }
+
+    New-Item -ItemType Directory -Path $Core | Out-Null
+    foreach ($d in $LinkDirs) {
+        $n = [ComboNative]::LinkTree((Join-Path $TemplateCore $d), (Join-Path $Core $d))
+        Say "hardlinked $d ($n files)"
+    }
+    foreach ($f in Get-ChildItem -LiteralPath $LeadCore -File -Force) { Copy-Item -LiteralPath $f.FullName -Destination (Join-Path $Core $f.Name) }
+    # Private copies (written to): git metadata, scripts, maps, resource, shaders, bin_delta, r2port runtime + caches.
+    foreach ($d in @('.git', 'scripts', 'resource', 'maps', 'shaders', 'r2port', 'r2port_cache')) {
+        $s = Join-Path $LeadCore $d
+        if (Test-Path -LiteralPath $s) { Copy-Item -LiteralPath $s -Destination (Join-Path $Core $d) -Recurse }
+    }
+    foreach ($junk in @('r2port\fs-trace.txt', 'r2port\postfx_stats.txt')) { Remove-Item -LiteralPath (Join-Path $Core $junk) -Force -ErrorAction SilentlyContinue }
+    New-Item -ItemType Directory -Path (Join-Path $Core 'bin_delta') | Out-Null
+    foreach ($f in Get-ChildItem -LiteralPath (Join-Path $LeadCore 'bin_delta') -Recurse -File -Force) {
+        if ($f.Name -like '*.pre-r2port-backup' -or $f.Name -like '*.pre39-backup') { continue }
+        $rel = $f.FullName.Substring((Join-Path $LeadCore 'bin_delta').Length + 1)
+        $dst = Join-Path (Join-Path $Core 'bin_delta') $rel
+        New-Item -ItemType Directory -Path (Split-Path -Parent $dst) -Force | Out-Null
+        Copy-Item -LiteralPath $f.FullName -Destination $dst
+    }
+    foreach ($n in @('r2port_maps.cfg', 'r1_maps.cfg')) {
+        $dst = Join-Path $Core "cfg\$n"
+        if (-not (Test-Path -LiteralPath $dst)) { Copy-Item -LiteralPath (Join-Path $ShaderCore "cfg\$n") -Destination $dst }
+    }
+} else {
+    Assert-Idle
+    Say "refreshing $Root"
+}
+
+# ---------------------------------------------------------------- binaries
+Say "staging build $Build"
+$bd = Join-Path $Core 'bin_delta'
+$stubDir = Join-Path $bd 'r1o_stubs'
+New-Item -ItemType Directory -Path $stubDir -Force | Out-Null
+foreach ($f in Get-ChildItem -LiteralPath $Build -File | Where-Object { $_.Extension -in @('.dll', '.png') -and $StubNames -notcontains $_.Name }) {
+    [ComboNative]::Replace($f.FullName, (Join-Path $bd $f.Name))
+}
+foreach ($n in @('tier0.pdb', 'tier0.lib', 'tier0.exp')) {
+    if (Test-Path -LiteralPath (Join-Path $Build $n)) { [ComboNative]::Replace((Join-Path $Build $n), (Join-Path $bd $n)) }
+}
+foreach ($n in $StubNames) { [ComboNative]::Replace((Join-Path $Build $n), (Join-Path $stubDir $n)) }
+foreach ($n in $RootExes) { [ComboNative]::Replace((Join-Path $Build $n), (Join-Path $Root $n)) }
+foreach ($n in @('r1delta.pdb', 'Titanfall.pdb', 'R1Delta_DS.pdb')) {
+    if (Test-Path -LiteralPath (Join-Path $Build $n)) { [ComboNative]::Replace((Join-Path $Build $n), (Join-Path $Root $n)) }
+}
+$flagPath = Join-Path $Root 'r1delta_background.flag'
+if ($Flag) { if (-not (Test-Path -LiteralPath $flagPath)) { New-Item -ItemType File -Path $flagPath | Out-Null } }
+else { Remove-Item -LiteralPath $flagPath -Force -ErrorAction SilentlyContinue }
+
+# ---------------------------------------------------------------- CORE overlay (movement scripts, credits, sounds, assets)
+Say 'applying CORE movement overlay from the user CORE (read only)'
+$state = Join-Path $Root '.combo-overlay.json'
+if (Test-Path -LiteralPath $state) {
+    # Refresh: restore the overlaid tracked scripts from the pinned commit first so the patch re-applies cleanly.
+    GitC $Core (@('checkout', '--') + @($MovementScripts | Where-Object { $_ -notlike '*_autobhop.nut' })) | Out-Null
+    Remove-Item -LiteralPath (Join-Path $Core 'scripts\vscripts\_autobhop.nut') -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath (Join-Path $Core 'scripts\vscripts\movement') -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath (Join-Path $Core 'sound\r1delta\movement') -Recurse -Force -ErrorAction SilentlyContinue
+}
+$patch = Join-Path $Root '.combo-core-overlay.patch'
+$prevEap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+$diff = & git -C $UserCore -c core.quotepath=false -c core.safecrlf=false diff --binary $BaseCommit -- @MovementScripts 2>$null
+$ErrorActionPreference = $prevEap
+if ($LASTEXITCODE -ne 0 -or -not $diff) { throw 'could not diff the user CORE movement scripts' }
+[IO.File]::WriteAllText($patch, (($diff -join "`n") + "`n"), [Text.UTF8Encoding]::new($false))
+GitC $Core @('apply', '--ignore-whitespace', '--whitespace=nowarn', $patch) | Out-Null
+foreach ($pair in @(@('scripts\vscripts\movement', 'scripts\vscripts\movement'), @('sound\r1delta\movement', 'sound\r1delta\movement'))) {
+    $s = Join-Path $UserCore $pair[0]; $d = Join-Path $Core $pair[1]
+    New-Item -ItemType Directory -Path $d -Force | Out-Null
+    foreach ($f in Get-ChildItem -LiteralPath $s -Recurse -File) {
+        $rel = $f.FullName.Substring($s.Length + 1)
+        [ComboNative]::Replace($f.FullName, (Join-Path $d $rel))
+    }
+}
+[ComboNative]::Replace((Join-Path $UserCore 'scripts\r1_delta_slide_sounds.txt'), (Join-Path $Core 'scripts\r1_delta_slide_sounds.txt'))
+# Handover CORE patches that the user CORE does not carry yet (applied only when not already present).
+foreach ($p in @('core-slide-body.patch', 'core-grapple-credit.patch')) {
+    $pp = Join-Path $Handover $p
+    $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    & git -C $Core apply --ignore-whitespace --whitespace=nowarn -R --check $pp 2>$null
+    $already = ($LASTEXITCODE -eq 0)
+    $ErrorActionPreference = $prev
+    if ($already) { Say "$p already present"; continue }
+    GitC $Core @('apply', '--ignore-whitespace', '--whitespace=nowarn', $pp) | Out-Null
+    Say "applied $p"
+}
+
+$manifest = Get-Content -LiteralPath (Join-Path $Handover 'slide-assets-manifest.json') -Raw | ConvertFrom-Json
+$na = 0
+foreach ($a in $manifest.files) {
+    $rel = $a.path.Replace('/', '\')
+    $src = Join-Path $AssetStage $rel
+    if ((Sha $src) -ne $a.sha256) { throw "asset hash mismatch $src" }
+    $dst = Join-Path $Core $rel
+    [ComboNative]::Replace($src, $dst)   # unlink + copy: the stock file may be a hardlink shared with other roots
+    if ((Sha $dst) -ne $a.sha256) { throw "asset copy mismatch $dst" }
+    $na++
+}
+Say "$na slide assets staged"
+if ($Drive) {
+    $pn = Join-Path $Core 'scripts\vscripts\movement\pilot.nut'
+    $s = [IO.File]::ReadAllText($pn)
+    $a = 'Move_SetCheckpointMask(MOVE_CHECKPOINT_ALL);\n"'
+    $b = 'Move_SetCheckpointMask(MOVE_CHECKPOINT_ALL);\nif (Move_GetPhase() == MOVE_SETUP && (Move_GetCustomButtons() & 2) != 0) Move_SetForwardSpeed(450.0);\n"'
+    $c = 'Move_InputSetButtons( ::PilotMovementGrappleHeld ? 1 : 0 )'
+    $d = 'Move_InputSetButtons( ( ::PilotMovementGrappleHeld ? 1 : 0 ) | ( ( "MVDrive" in getroottable() && ::MVDrive ) ? 2 : 0 ) )'
+    if (-not $s.Contains($a) -or -not $s.Contains($c)) { throw 'pilot.nut drive anchors missing' }
+    [IO.File]::WriteAllText($pn, $s.Replace($a, $b).Replace($c, $d), [Text.UTF8Encoding]::new($false))
+    Copy-Item -LiteralPath (Join-Path $CodeRoot 'tools\combo\combo_test.nut') -Destination (Join-Path $Core 'scripts\vscripts\movement\combo_test.nut') -Force
+    Say 'TEST FIXTURE (-Drive) installed: re-run -Refresh without -Drive before handing the root to anyone'
+}
+
+# ---- slide/grapple on by default (playtest): tools\combo\core-pilot-auto-enable.patch opts every pilot in on converted R2 maps
+# (cvar delta_pilot_movement_auto_r2, default 1) and on stock maps when delta_pilot_movement_auto_r1 is 1 (default 0).
+$autoPatch = Join-Path $CodeRoot 'tools\combo\core-pilot-auto-enable.patch'
+GitC $Core @('apply', '--ignore-whitespace', '--whitespace=nowarn', $autoPatch) | Out-Null
+Say 'applied core-pilot-auto-enable.patch'
+# Default grapple keys for playtesters (r2-combo only; private copies of two cfg files, never written through a hardlink):
+#  - config_default_pc.cfg: MOUSE4 (only used for a profile without saved settings, so it can never clobber a player's own bind);
+#  - autoexec_delta.cfg: H (runs every launch; neither the shipped defaults nor the user's profile use H).
+function Set-ComboCfgBlock([string] $path, [string] $block) {
+    $t = [IO.File]::ReadAllText($path)
+    $t = [regex]::Replace($t, '(?s)\r?\n+// ---- r2-combo playtest defaults.*$', '')
+    $t = $t.TrimEnd() + "`n`n" + $block
+    $tmp = Join-Path $env:TEMP ('combo-cfg-' + [Guid]::NewGuid().ToString('N') + '.cfg')
+    [IO.File]::WriteAllText($tmp, $t, [Text.UTF8Encoding]::new($false))
+    [ComboNative]::Replace($tmp, $path); Remove-Item $tmp
+}
+Set-ComboCfgBlock (Join-Path $Core 'cfg\autoexec_delta.cfg') ("// ---- r2-combo playtest defaults (this root only)`n// Slide + grapple are enabled automatically (delta_pilot_movement_auto 1). Grapple key: H (+scriptCommand3); press again to cancel.`nbind `"H`" `"+scriptCommand3`"`n")
+Set-ComboCfgBlock (Join-Path $Core 'cfg\config_default_pc.cfg') ("// ---- r2-combo playtest defaults (this root only)`n// Fresh profiles: grapple on MOUSE4 (+scriptCommand3), also on H via autoexec_delta.cfg.`nbind `"MOUSE4`" `"+scriptCommand3`"`n")
+
+# ---------------------------------------------------------------- report
+$report = [ordered]@{
+    root = $Root
+    codeHead = @(GitC $CodeRoot @('rev-parse', 'HEAD'))[0]
+    r2portMerged = @(GitC $CodeRoot @('rev-parse', 'r2port/feat'))[0]
+    coreBase = @(GitC $Core @('rev-parse', 'HEAD'))[0]
+    userCoreHead = @(GitC $UserCore @('rev-parse', 'HEAD'))[0]
+    stagedUtc = (Get-Date).ToUniversalTime().ToString('o')
+    files = [ordered]@{}
+}
+foreach ($rel in @('r1delta.exe', 'Titanfall.exe', 'R1Delta_DS.exe', 'r1delta\bin_delta\tier0.dll', 'r1delta\bin_delta\materialsystem_nodx.dll',
+        'r1delta\scripts\vscripts\movement\pilot.nut', 'r1delta\scripts\vscripts\movement\pilot_client.nut', 'r1delta\scripts\vscripts\movement\pilot_server.nut',
+        'r1delta\scripts\vscripts\movement\slide_body.nut', 'r1delta\scripts\vscripts\movement\grapple.nut', 'r1delta\scripts\vscripts\ui\menu_credits.nut',
+        'r1delta\scripts\r1_delta_slide_sounds.txt', 'r1delta\scripts\game_sounds_manifest.txt')) {
+    $report.files[$rel] = Sha (Join-Path $Root $rel)
+}
+$json = $report | ConvertTo-Json -Depth 4
+[IO.File]::WriteAllText($state, $json, [Text.UTF8Encoding]::new($false))
+Say 'done'
+$json
