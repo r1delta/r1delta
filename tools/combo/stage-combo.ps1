@@ -317,7 +317,7 @@ function Set-ComboCfgBlock([string] $path, [string] $block) {
     [IO.File]::WriteAllText($tmp, $t, [Text.UTF8Encoding]::new($false))
     [ComboNative]::Replace($tmp, $path); Remove-Item $tmp
 }
-Set-ComboCfgBlock (Join-Path $Core 'cfg\autoexec_delta.cfg') ("// ---- r2-combo playtest defaults (this root only)`n// Slide + grapple are enabled automatically on converted R2 maps (delta_pilot_movement_auto_r2 1; stock maps: delta_pilot_movement_auto_r1 1). Grapple key: H (+scriptCommand3); press again to cancel.`nbind `"H`" `"+scriptCommand3`"`n// MP slide friction 0.5 (lower = longer slides; SP default 1). Set here so an archived profile value of 1 cannot win.`ndelta_sp_slide_friction_scale 0.5`n")
+Set-ComboCfgBlock (Join-Path $Core 'cfg\autoexec_delta.cfg') ("// ---- r2-combo playtest defaults (this root only)`n// Slide + grapple are enabled automatically on converted R2 maps (delta_pilot_movement_auto_r2 1; stock maps: delta_pilot_movement_auto_r1 1). Grapple key: H (+scriptCommand3); press again to cancel.`nbind `"H`" `"+scriptCommand3`"`n// MP slide friction 0.5 (lower = longer slides; SP default 1). Set here so an archived profile value of 1 cannot win.`ndelta_sp_slide_friction_scale 0.5`n// Slide needs >= 200 u/s: MP autosprint_delay 0.5 makes an early crouch a walk-speed (172 u/s) crouch that cannot slide; SP forces 0 (same here).`nautosprint_delay 0`n")
 Set-ComboCfgBlock (Join-Path $Core 'cfg\config_default_pc.cfg') ("// ---- r2-combo playtest defaults (this root only)`n// Fresh profiles: grapple on MOUSE4 (+scriptCommand3), also on H via autoexec_delta.cfg.`nbind `"MOUSE4`" `"+scriptCommand3`"`n")
 
 # ---- Frontier Defense overlay (playtest only; GENERATED from the player's own Titanfall 2 data, never committed).
