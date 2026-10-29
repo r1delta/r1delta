@@ -75,7 +75,7 @@ inline constexpr const char kUberLmgSource[] =
 #undef R2_T_PACK
 #endif
 #ifndef R2_CUBE_LOD_BIAS
-#define R2_CUBE_LOD_BIAS -3.0   // our probes are 32x32 (R2 256x256): R2 mip m is our mip m - 3
+#define R2_CUBE_LOD_BIAS -2.0   // our probes are 64x64 (R2 256x256): R2 mip m is our mip m - 2
 #endif
 #ifndef R2_ENV_GAIN
 #define R2_ENV_GAIN 0.25        // R2_T_FENV: gain on the R2 environment BRDF (0.25 is an empirical pick at the SUBSTATION wall: gain 1 / 0.5 / 0.2 / 0.08 give wall/crates 0.578 / 0.508 / 0.456 / 0.432, stock 0.474, R2 0.339; the remaining gap to R2 is diffuse, not env) (the VMT $envmapTint is the converter's calibration of the stock term and is not used)
@@ -457,7 +457,7 @@ float4 PSMain(PSIn i
 #if R2_T_LOD
         uint cw, ch, cmips;
         envTexture.GetDimensions(0, cw, ch, cmips);
-        lod = clamp(rough * 6.0 + R2_CUBE_LOD_BIAS, 0.0, float(cmips - 1u));
+        lod = min(rough * 6.0 + R2_CUBE_LOD_BIAS, float(cmips - 1u));
 #else
         lod = cb0[4].y * log2(max(expo * 0.25 - 2.0, 0.25)) + cb0[4].x;
 #endif

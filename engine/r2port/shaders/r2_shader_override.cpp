@@ -545,9 +545,15 @@ namespace {
 
 void InstallUberOverrides(std::uintptr_t base)
 {
-    // Shared R2_UBER options (default off: neither hook is installed and nothing is compiled).
+    // Shared R2_UBER options. DEFAULT ON (round 19): unset or empty means the terms `so,lod,fenv,ggx` for world and props; `0` or `off` installs
+    // neither hook and compiles nothing. `pack` stays opt-in.
     char mode[160] = {};
-    if (!GetEnvironmentVariableA("R2_UBER", mode, sizeof(mode)) || !mode[0] || std::strcmp(mode, "0") == 0)
+    const DWORD modeLength = GetEnvironmentVariableA("R2_UBER", mode, sizeof(mode));
+    if (modeLength >= sizeof(mode))
+        return;
+    if (modeLength == 0 || !mode[0])
+        std::snprintf(mode, sizeof(mode), "so,lod,fenv,ggx");
+    else if (std::strcmp(mode, "0") == 0 || _stricmp(mode, "off") == 0)
         return;
     s_uberLogEnabled = std::strstr(mode, "log") != nullptr;
     std::string macros;
