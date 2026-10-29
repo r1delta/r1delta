@@ -305,6 +305,9 @@
     <ClInclude Include="engine\r2port\r2tex\rtech_decode.inc">
       <Filter>engine\r2port\r2tex</Filter>
     </ClInclude>
+    <ClInclude Include="engine\r2port\r2tex\r2tex_bc1.inc">
+      <Filter>engine\r2port\r2tex</Filter>
+    </ClInclude>
     <ClInclude Include="engine\r2port\lzham\include\lzham.h">
       <Filter>engine\r2port\lzham</Filter>
     </ClInclude>

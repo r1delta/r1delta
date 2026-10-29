@@ -21,6 +21,7 @@ struct R2pNoProfile {
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <intrin.h>
+#include <immintrin.h>
 #include <algorithm>
 #include <atomic>
 #include <array>
@@ -1683,6 +1684,8 @@ bool isNormalName(std::string_view name) {
 bool addMipChain(std::vector<std::uint8_t>& vtf, std::string_view textureName);
 void encodeBc1Block(const std::uint8_t (&px)[16][3], std::uint8_t* out);
 
+#include "r2tex_bc1.inc"   // AVX2 DXT1 encoder (bit-exact with encodeBc1Block) and its runtime check
+
 bool convertTextureWithDb(const std::shared_ptr<Database>& db, const AssetRecord& record,
                           const TextureOptions& options, std::vector<std::uint8_t>& vtf,
                           std::string& error) {
@@ -2353,25 +2356,50 @@ void uberAxisWeights(std::uint32_t n, std::uint32_t m, std::uint32_t i, std::uin
 
 std::vector<std::uint8_t> resizeUberPlane(const UberPlane& src, std::uint32_t dw, std::uint32_t dh) {
     if (src.width == dw && src.height == dh) return src.value;
+    // Weights of every output column / row, computed once (the arithmetic per texel below is unchanged).
+    struct Axis { std::vector<std::uint32_t> first; std::vector<std::uint32_t> begin; std::vector<float> flat; };
+    auto buildAxis = [](std::uint32_t n, std::uint32_t m) {
+        Axis axis;
+        std::vector<float> weights;
+        std::uint32_t first = 0;
+        for (std::uint32_t i = 0; i < m; ++i) {
+            uberAxisWeights(n, m, i, first, weights);
+            axis.first.push_back(first);
+            axis.begin.push_back(static_cast<std::uint32_t>(axis.flat.size()));
+            axis.flat.insert(axis.flat.end(), weights.begin(), weights.end());
+        }
+        axis.begin.push_back(static_cast<std::uint32_t>(axis.flat.size()));
+        return axis;
+    };
+    const Axis columns = buildAxis(src.width, dw), rows = buildAxis(src.height, dh);
     std::vector<float> horizontal(static_cast<std::size_t>(dw) * src.height);
-    std::vector<float> weights;
-    std::uint32_t first = 0;
-    for (std::uint32_t x = 0; x < dw; ++x) {
-        uberAxisWeights(src.width, dw, x, first, weights);
-        for (std::uint32_t y = 0; y < src.height; ++y) {
+    for (std::uint32_t y = 0; y < src.height; ++y) {
+        const std::uint8_t* line = &src.value[static_cast<std::size_t>(y) * src.width];
+        float* dest = &horizontal[static_cast<std::size_t>(y) * dw];
+        for (std::uint32_t x = 0; x < dw; ++x) {
+            const float* w = &columns.flat[columns.begin[x]];
+            const std::size_t count = columns.begin[x + 1] - columns.begin[x];
             float sum = 0.0f;
-            for (std::size_t k = 0; k < weights.size(); ++k)
-                sum += weights[k] * src.value[static_cast<std::size_t>(y) * src.width + first + k];
-            horizontal[static_cast<std::size_t>(y) * dw + x] = sum;
+            for (std::size_t k = 0; k < count; ++k) sum += w[k] * line[columns.first[x] + k];
+            dest[x] = sum;
         }
     }
     std::vector<std::uint8_t> out(static_cast<std::size_t>(dw) * dh);
+    const bool simd = bc1Avx2Available();
+    std::vector<const float*> rowPtr;
     for (std::uint32_t y = 0; y < dh; ++y) {
-        uberAxisWeights(src.height, dh, y, first, weights);
+        const float* w = &rows.flat[rows.begin[y]];
+        const std::size_t count = rows.begin[y + 1] - rows.begin[y];
+        if (simd) {
+            rowPtr.resize(count);
+            for (std::size_t k = 0; k < count; ++k) rowPtr[k] = &horizontal[static_cast<std::size_t>(rows.first[y] + k) * dw];
+            bc1avx::resizeRow(rowPtr.data(), w, count, dw, &out[static_cast<std::size_t>(y) * dw]);
+            continue;
+        }
         for (std::uint32_t x = 0; x < dw; ++x) {
             float sum = 0.0f;
-            for (std::size_t k = 0; k < weights.size(); ++k)
-                sum += weights[k] * horizontal[static_cast<std::size_t>(first + k) * dw + x];
+            for (std::size_t k = 0; k < count; ++k)
+                sum += w[k] * horizontal[static_cast<std::size_t>(rows.first[y] + k) * dw + x];
             out[static_cast<std::size_t>(y) * dw + x] = static_cast<std::uint8_t>(std::clamp(sum + 0.5f, 0.0f, 255.0f));
         }
     }
@@ -2499,12 +2527,50 @@ bool buildSpecGlossVtf(const std::shared_ptr<Database>& db, std::uint64_t spcGui
     std::vector<std::vector<std::uint8_t>> mips(view.mipCount);
     std::vector<std::uint8_t> level;
     UberPlane scaled;
+    // Both per-texel maps depend on one byte only: tabulate them (same expressions as before, so the same bytes).
+    std::uint8_t glossLut[256], scaleLut[256];
+    for (int v = 0; v < 256; ++v) {
+        glossLut[v] = static_cast<std::uint8_t>(std::clamp(std::pow(v / 255.0, tk.glossPow) * 255.0 + 0.5, 0.0, 255.0));
+        scaleLut[v] = scaleLinearByte(static_cast<std::uint8_t>(v), tk.f0Scale, srgb);
+    }
+    const bool simd = bc1Avx2Available();
+    std::vector<std::uint8_t> colorRgba, alphaPlane;
     for (std::uint32_t m = 0; m < view.mipCount; ++m) {
         std::uint32_t w = 0, h = 0;
         if (!decodeVtfMip(spc, view, m, level, w, h)) { error = "specgloss: mip decode failed (VTF format " + std::to_string(view.format) + ")"; return false; }
         const std::vector<std::uint8_t> g = resizeUberPlane(gloss, w, h);
         const std::uint32_t bx = (w + 3) / 4, by = (h + 3) / 4;
         mips[m].resize(static_cast<std::size_t>(bx) * by * 16);
+        if (simd) {
+            // Colour half of every block through the AVX2 encoder (stride 16 into the DXT5 blocks), alpha half scalar.
+            const std::size_t texels = static_cast<std::size_t>(w) * h;
+            colorRgba.resize(texels * 4);
+            for (std::size_t i = 0; i < texels; ++i) {
+                colorRgba[i * 4] = scaleLut[level[i * 4]]; colorRgba[i * 4 + 1] = scaleLut[level[i * 4 + 1]];
+                colorRgba[i * 4 + 2] = scaleLut[level[i * 4 + 2]]; colorRgba[i * 4 + 3] = 255;
+            }
+            bc1avx::encodeImageRgba(colorRgba.data(), w, h, mips[m].data() + 8, 16);
+            alphaPlane.resize(texels);
+            for (std::size_t i = 0; i < texels; ++i) alphaPlane[i] = glossLut[g[i]];
+            for (std::uint32_t y = 0; y < by; ++y)
+                for (std::uint32_t x = 0; x < bx;) {
+                    std::uint8_t* block = &mips[m][(static_cast<std::size_t>(y) * bx + x) * 16];
+                    if (x + 8 <= bx && w % 4 == 0 && y * 4 + 4 <= h) {
+                        bc1avx::encodeAlpha8(&alphaPlane[static_cast<std::size_t>(y) * 4 * w + x * 4], w, block, 16);
+                        x += 8;
+                        continue;
+                    }
+                    std::uint8_t alpha[16];
+                    for (std::uint32_t py = 0; py < 4; ++py)
+                        for (std::uint32_t px = 0; px < 4; ++px) {
+                            const std::uint32_t sx = std::min(w - 1, x * 4 + px), sy = std::min(h - 1, y * 4 + py);
+                            alpha[py * 4 + px] = alphaPlane[static_cast<std::size_t>(sy) * w + sx];
+                        }
+                    encodeDxt5AlphaBlock(alpha, block);
+                    ++x;
+                }
+            continue;
+        }
         for (std::uint32_t y = 0; y < by; ++y)
             for (std::uint32_t x = 0; x < bx; ++x) {
                 std::uint8_t color[16][3], alpha[16];
@@ -2512,8 +2578,8 @@ bool buildSpecGlossVtf(const std::shared_ptr<Database>& db, std::uint64_t spcGui
                     for (std::uint32_t px = 0; px < 4; ++px) {
                         const std::uint32_t sx = std::min(w - 1, x * 4 + px), sy = std::min(h - 1, y * 4 + py);
                         const std::size_t i = static_cast<std::size_t>(sy) * w + sx;
-                        for (int c = 0; c < 3; ++c) color[py * 4 + px][c] = scaleLinearByte(level[i * 4 + c], tk.f0Scale, srgb);
-                        alpha[py * 4 + px] = static_cast<std::uint8_t>(std::clamp(std::pow(g[i] / 255.0, tk.glossPow) * 255.0 + 0.5, 0.0, 255.0));
+                        for (int c = 0; c < 3; ++c) color[py * 4 + px][c] = scaleLut[level[i * 4 + c]];
+                        alpha[py * 4 + px] = glossLut[g[i]];
                     }
                 std::uint8_t* block = &mips[m][(static_cast<std::size_t>(y) * bx + x) * 16];
                 encodeDxt5AlphaBlock(alpha, block);
@@ -2739,6 +2805,11 @@ bool addMipChain(std::vector<std::uint8_t>& vtf, std::string_view textureName) {
                 continue;
             }
             const std::uint32_t bx = (mw + 3) / 4, by = (mh + 3) / 4;
+            if (bc1Avx2Available()) {
+                bc1avx::encodeImageRgba(chain[m].data(), mw, mh, out.data() + at);
+                at += static_cast<std::size_t>(bx) * by * 8;
+                continue;
+            }
             for (std::uint32_t y = 0; y < by; ++y)
                 for (std::uint32_t x = 0; x < bx; ++x) {
                     std::uint8_t block[16][3];
@@ -2918,9 +2989,30 @@ bool convertNormalVtf(std::vector<std::uint8_t>& vtf, std::string& error) {
     std::vector<std::vector<std::uint8_t>> mips(view.mipCount);
     std::vector<std::uint8_t> level;
     struct BlockMemo { std::uint8_t texels[48]; std::uint8_t code[8]; bool valid = false; };
-    std::vector<BlockMemo> memo(4096);
+    const bool simd = bc1Avx2Available();
+    std::vector<BlockMemo> memo(simd ? 0 : 4096);
+    std::vector<std::uint8_t> normalRgba;
     for (std::uint32_t m = 0; m < view.mipCount; ++m) {
         std::uint32_t w = 0, h = 0;
+        if (simd) {
+            // BC5 / BC1 mips with whole blocks decode straight to unit normals; any other layout takes the generic decoder.
+            w = std::max(1u, view.width >> m); h = std::max(1u, view.height >> m);
+            const std::size_t bytes = vtfMipBytes(view.format, w, h);
+            std::size_t offset = view.dataOffset;
+            for (std::uint32_t s = view.mipCount; s-- > m + 1;) offset += vtfMipBytes(view.format, std::max(1u, view.width >> s), std::max(1u, view.height >> s));
+            const bool fused = (view.format == 34 || view.format == 13) && w % 4 == 0 && h % 4 == 0 && bytes && offset <= vtf.size() && bytes <= vtf.size() - offset;
+            normalRgba.resize(static_cast<std::size_t>(w) * h * 4);
+            if (fused) {
+                if (view.format == 34) bc1avx::normalsFromBc5(vtf.data() + offset, w, h, normalRgba.data());
+                else bc1avx::normalsFromBc1(vtf.data() + offset, w, h, normalRgba.data());
+            } else {
+                if (!decodeVtfMip(vtf, view, m, level, w, h)) { error = "normal map: mip decode failed"; return false; }
+                bc1avx::normalsToRgba(level.data(), static_cast<std::size_t>(w) * h, normalRgba.data());
+            }
+            mips[m].resize(static_cast<std::size_t>((w + 3) / 4) * ((h + 3) / 4) * 8);
+            bc1avx::encodeImageRgba(normalRgba.data(), w, h, mips[m].data());
+            continue;
+        }
         if (!decodeVtfMip(vtf, view, m, level, w, h)) { error = "normal map: mip decode failed"; return false; }
         std::vector<std::uint8_t> rgb(static_cast<std::size_t>(w) * h * 3);
         for (std::size_t i = 0, n = static_cast<std::size_t>(w) * h; i < n; ++i) {
