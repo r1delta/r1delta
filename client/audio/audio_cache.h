@@ -9,3 +9,5 @@ void RegisterR1AudioCacheCommands();
 // True when the mounted content is the generated-audio (Ogg) delta set. When
 // false this is the retail WAV set and the native audio path must stay intact.
 bool R1AudioUsesGeneratedContent();
+// Aliases appended after the CRC/parity-visible table by the generated R2 sound script (see audio_cache.cpp ScriptLoad).
+std::uint32_t R1AudioHiddenTrailingAliases();
