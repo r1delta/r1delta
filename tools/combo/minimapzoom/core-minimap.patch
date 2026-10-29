@@ -1,0 +1,89 @@
+diff --git a/scripts/vscripts/client/levels/_cl_levels_manifest.nut b/scripts/vscripts/client/levels/_cl_levels_manifest.nut
+new file mode 100644
+index 0000000..9d607d1
+--- /dev/null
++++ b/scripts/vscripts/client/levels/_cl_levels_manifest.nut
+@@ -0,0 +1,13 @@
++function main()
++{
++	local mapScriptName = "client/levels/cl_" + GetMapName()
++
++	if ( ScriptExists( mapScriptName ) )
++	{
++		IncludeFile( mapScriptName )
++		return
++	}
++
++	// No level script: converted R2 maps (no cl_<map>.nut) get their fullscreen map window computed from the overview data.
++	IncludeFile( "client/levels/cl_r2port_minimap" )
++}
+diff --git a/scripts/vscripts/client/levels/cl_r2port_minimap.nut b/scripts/vscripts/client/levels/cl_r2port_minimap.nut
+new file mode 100644
+index 0000000..c623cca
+--- /dev/null
++++ b/scripts/vscripts/client/levels/cl_r2port_minimap.nut
+@@ -0,0 +1,64 @@
++// Fullscreen map (+toggleFullscreenMap, +displayFullscreenMap) window for the converted R2 maps.
++//
++// R1 draws the fullscreen map with SetFullscreenMinimapParameters( zoom, x, y, rotation ), which every stock map sets by hand
++// in client/levels/cl_<map>.nut. The converted maps have no such file, so they used the defaults (1.0, 0, 0, 0). This file
++// derives the four values from the map's overview data (resource/overviews/<map>.txt: pos_x, pos_y, scale, displayDist):
++//
++//   - The overview image covers 1024 * scale world units, its top left corner at (pos_x, pos_y) (R1's CMapOverview maps the
++//     whole image onto that square whatever its pixel size, so the image height ratio below is that of the image rows that
++//     carry map: r2tex pads a non-square R2 overview to a square, the rows below the map are transparent).
++//   - The panel (MinimapFullscreen_Square) shows displayDist * zoom world units from its centre to its edge.
++//     => x, y = world point shown at the panel centre = centre of the map image,
++//     => zoom = (half the image width) / displayDist, which just fits the whole image into the square panel.
++//   - rotation 180 is the stock convention: 25 of the 29 stock levels that set the window use 180 or -180.
++//
++// Checked against the stock maps: with these formulas mp_angel_city gives (2.84, -703, 820), the stock level script has
++// (2.8, -1000, 800); mp_wargames (4.75, -1059, 241) against (4.9, -1000, 250); mp_airbase (2.75, -1487, -355) against
++// (2.6, -1500, -400). The stock values are the same window within the hand tuning of each level.
++//
++// The table is the R2 data of the 20 maps the R2 map provider serves, in the order
++// { pos_x, pos_y, scale, displayDist, image height / width }. displayDist is 2048 where the R2 file has none
++// (mp_coliseum, mp_coliseum_column), which is what the provider writes into the overview file R1 reads.
++
++function main()
++{
++	local overviews = {}
++	overviews[ "mp_black_water_canal" ] <- [ -5416, 6437, 12, 2048, 1.0 ]
++	overviews[ "mp_coliseum" ] <- [ -1510, 1561, 3, 2048, 1.0 ]
++	overviews[ "mp_coliseum_column" ] <- [ -1510, 1561, 3, 2048, 1.0 ]
++	overviews[ "mp_colony02" ] <- [ -9504, 8961, 13, 2048, 1.0 ]
++	overviews[ "mp_complex3" ] <- [ -10855, 3451, 12, 2048, 1.0 ]
++	overviews[ "mp_crashsite3" ] <- [ -10668, 4576, 12, 2048, 1.0 ]
++	overviews[ "mp_drydock" ] <- [ -5659, 5749, 10.5, 2048, 1.0 ]
++	overviews[ "mp_eden" ] <- [ -4705, 6163, 11, 2048, 1.0 ]
++	overviews[ "mp_forwardbase_kodai" ] <- [ -5272, 5671, 10, 2048, 1.0 ]
++	overviews[ "mp_glitch" ] <- [ -8386, 8336, 16, 2048, 1.0 ]
++	overviews[ "mp_grave" ] <- [ -2690, 3866, 14, 2048, 1.0 ]
++	overviews[ "mp_homestead" ] <- [ -4839, 5871, 13, 2048, 1.0 ]
++	overviews[ "mp_lf_deck" ] <- [ -2344, 2780, 5, 2048, 1.0 ]
++	overviews[ "mp_lf_meadow" ] <- [ -3150, 2699, 6.4, 2048, 0.78515625 ]
++	overviews[ "mp_lf_stacks" ] <- [ -2953, 2699, 6.3, 2048, 1.0 ]
++	overviews[ "mp_lf_township" ] <- [ -2317, 2766, 5, 2048, 1.0 ]
++	overviews[ "mp_lf_traffic" ] <- [ -2216, 2788, 5, 2048, 1.0 ]
++	overviews[ "mp_lf_uma" ] <- [ -2216, 2788, 5, 2048, 1.0 ]
++	overviews[ "mp_relic02" ] <- [ -7428, 2375, 15, 2048, 1.0 ]
++	overviews[ "mp_thaw" ] <- [ -5046, 5515, 11.188, 1024, 1.0 ]
++
++	local mapName = GetMapName()
++	if ( !( mapName in overviews ) )
++		return
++
++	local overview = overviews[ mapName ]
++	local posX = overview[0].tofloat()
++	local posY = overview[1].tofloat()
++	local halfWidth = 512.0 * overview[2].tofloat()
++	local displayDist = overview[3].tofloat()
++	local heightRatio = overview[4].tofloat()
++
++	local zoom = halfWidth / displayDist
++	local x = posX + halfWidth
++	local y = posY - halfWidth * heightRatio
++
++	SetFullscreenMinimapParameters( zoom, x, y, 180 )
++	printt( "R2Port fullscreen map", mapName, "zoom", zoom, "x", x, "y", y )
++}

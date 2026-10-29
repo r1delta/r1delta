@@ -347,6 +347,15 @@ if (Test-Path -LiteralPath $lmPatch) {
     foreach ($f in Get-ChildItem -LiteralPath (Join-Path $lm 'resource') -Filter 'delta_*.txt') { [ComboNative]::Replace($f.FullName, (Join-Path $Core ('resource\' + $f.Name))) }
     Say 'LobbyMaps localization files staged'
 }
+# ---- MinimapZoom CORE (fullscreen map window for the converted R2 maps; script-only), applied once (reverse check).
+$mzPatch = Join-Path $CodeRoot 'tools\combo\minimapzoom\core-minimap.patch'
+if (Test-Path -LiteralPath $mzPatch) {
+    $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    & git -C $Core apply --ignore-whitespace --whitespace=nowarn -R --check $mzPatch 2>$null
+    $mzDone = ($LASTEXITCODE -eq 0)
+    $ErrorActionPreference = $prev
+    if (-not $mzDone) { GitC $Core @('apply', '--ignore-whitespace', '--whitespace=nowarn', $mzPatch) | Out-Null; Say 'applied core-minimap.patch' }
+}
 
 # ---------------------------------------------------------------- report
 $report = [ordered]@{
