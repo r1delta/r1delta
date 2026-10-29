@@ -318,6 +318,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="engine\r2port\r2tex\r2tex.hpp" />
     <ClInclude Include="engine\r2port\r2tex\bcdec.h" />
     <ClInclude Include="engine\r2port\r2tex\rtech_decode.inc" />
+    <ClInclude Include="engine\r2port\r2tex\r2tex_bc1.inc" />
     <ClInclude Include="engine\r2port\lzham\lzham_compat.h" />
     <ClInclude Include="engine\r2port\lzham\include\lzham.h" />
     <ClInclude Include="engine\r2port\lzham\include\lzham_exports.inc" />

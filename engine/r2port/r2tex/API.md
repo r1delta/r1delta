@@ -127,3 +127,8 @@ bool ListMapMaterials(const std::uint8_t* bspBytes,
   and `ConvertTexture(TextureRef, ...)` overloads so a material's slot-22 mask can be expanded
   without changing the original GUID/name conversion behavior.
 - No other public signatures changed. Future API changes are additive only.
+
+### Lazy pak decode (PakIndex)
+
+- `r2tex.index` (version 11) now persists every rpak's page layout (header, page sizes/offsets, starpak list) next to the asset table, and validates a pak by name, size and a hash of its RPak header (created time, crc, compressed size) instead of its last-write time or the install path, so an index survives a copy or touch of the install and can be prebuilt. A warm start creates a family without decoding anything; a pak is read and RTech-decoded the first time a page it owns is read (`readPageRange`, the paks of one range decode concurrently under the global pak-load cap). Only the cold index scan decodes every pak. Converted output is byte identical (FNV-1a of every converted VMT/VTF of drydock, glitch, homestead, thaw, lf_stacks compared lazy vs whole-family).
+- `R2TEX_LAZY_PAKS=0` restores the whole-family decode at first use. `IsFamilyResident` is false while a decode runs in the family; `FamilyDecodedBytes` is still the conservative whole-family size.

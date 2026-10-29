@@ -137,9 +137,12 @@ bool ListMapMaterials(const std::uint8_t* bspBytes,
 bool FamilyOfMaterial(std::string_view name, std::uint32_t& family);
 // Accepts the synthetic names ConvertMaterial emits (r2tex/opaque/, r2tex/opamerge/, r2tex/layer_masks/, r2tex/nrm/, r2tex/glow/).
 bool FamilyOfTexture(std::string_view name, std::uint32_t& family);
-// True while the family's decoded paks are in the cache (a conversion in it needs no RTech decode).
+// True while the family is cached and nothing is decoding in it. Paks decode lazily (the index persists every pak's page
+// layout): a family object is created without decoding anything and a pak is read and RTech-decoded the first time a page it
+// owns is read, so "resident" means no decode is needed right now for what is already decoded, not that every pak is decoded.
+// R2TEX_LAZY_PAKS=0 restores the whole-family decode.
 bool IsFamilyResident(std::uint32_t family);
-// True while a worker is decoding the family right now.
+// True while a worker is decoding in the family right now (family creation or a pak it needs).
 bool IsFamilyLoading(std::uint32_t family);
 // Pins keep a decoded family out of the LRU eviction while the caller has queued work for it (counted; Unpin balances Pin).
 void PinFamily(std::uint32_t family);
