@@ -374,38 +374,6 @@ bool readPakFile(const fs::path& path, PakBytes& out, std::size_t& fileSize, std
     return true;
 }
 
-// Reads a whole pak straight into `out`, an uninitialised buffer of exactly file size + kPakTailBytes whose tail is
-// zeroed (the RTech decoder reads up to 8 bytes past the compressed stream). `fileSize` receives the real file size.
-bool readPakFile(const fs::path& path, PakBytes& out, std::size_t& fileSize, std::string& error) {
-    HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
-                              FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
-    if (file == INVALID_HANDLE_VALUE) { error = "cannot open: " + path.u8string(); return false; }
-    LARGE_INTEGER length{};
-    if (!GetFileSizeEx(file, &length) || length.QuadPart < 0 ||
-        static_cast<std::uint64_t>(length.QuadPart) > std::numeric_limits<std::size_t>::max() - kPakTailBytes) {
-        CloseHandle(file);
-        error = "cannot size file: " + path.u8string();
-        return false;
-    }
-    fileSize = static_cast<std::size_t>(length.QuadPart);
-    out.resize(fileSize + kPakTailBytes);
-    std::size_t done = 0;
-    while (done < fileSize) {
-        const DWORD want = static_cast<DWORD>(std::min<std::size_t>(1u << 30, fileSize - done));
-        DWORD got = 0;
-        if (!ReadFile(file, out.data() + done, want, &got, nullptr) || got == 0) {
-            CloseHandle(file);
-            out = PakBytes();
-            error = "short read: " + path.u8string();
-            return false;
-        }
-        done += got;
-    }
-    CloseHandle(file);
-    std::memset(out.data() + fileSize, 0, kPakTailBytes);
-    return true;
-}
-
 bool loadPak(const PakInfo& info, std::uint32_t infoIndex, PakData& pak, std::string& error) {
     pak.infoIndex = infoIndex;
     PakBytes input;
