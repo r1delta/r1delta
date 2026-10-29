@@ -18,10 +18,10 @@ Files
   lighting.cpp       rule 20 (world lights, probe light indices, real-time lights)
   main.cpp           CLI
   internal.hpp       shared structs
-  check_bspdown.py   invariant checker (independent numpy implementation)
+  check_bspdown.py   invariant checker (independent numpy implementation); option-aware, --provider checks provider-default output
   roundtrip_diff.py  lump-by-lump diff for the R1 -> bsp_regen -> bspdown round trip
-  run_all.py         convert + check the six required maps (extracts missing ones with corvpk)
-  run_all23.py       same for all 23 R2 maps, one at a time (deletes each extraction)
+  run_all.py         convert + check the six required maps (extracts missing ones with corvpk); --provider: provider default options
+  run_all23.py       same for all 23 R2 maps, one at a time (deletes each extraction); --provider likewise
   build_msvc.bat     MSVC build
   analysis/          one-off analysis scripts used while working out the formats
   dec/loaders.c      Hex-Rays output of the R1 loaders that were read (analysis only, do not commit)
@@ -43,7 +43,9 @@ Use
 ---
   bspdown.exe <in_r2.bsp> <out_r1.bsp> [--limit 16376] [--rtl-bytes 1..4] [--no-remap-contents]
               [--keep-prop-flag10] [--keep-prop-fade] [--props keep|hide-scatter|hide-all] [--scatter-min N]
-              [--csm-rebase] [--empty-shadow-meshes] [--worldlight-flag2]
+              [--csm-rebase] [--csm-last-env] [--empty-shadow-meshes] [--worldlight-flag2]
+              [--rtl-bake none|edge|all] [--rtl-bake-edge-min N] [--rtl-bake-bm skip|terrain|none] [--rtl-bake-smooth 0|1|2]
+              [--rtl-bake-hot keep|clip] [--rtl-bake-vsm]
               [--cubemaps none|split|keep] [--keep-r2-lumps] [--grid-size N] [--no-grid-pad] [--quiet]
   The per-rule report is printed to stdout. Exit status 1 and a message on stderr when the
   input cannot be converted.
@@ -55,6 +57,21 @@ Use
   The input must be the complete R2 file with all lumps embedded (the unpacked
   maps/<map>.bsp contains them; see "external lump files" below). Eden (211 MB in,
   182 MB out) converts in 0.25 s on this machine, memory use is about twice the input.
+
+Checking
+--------
+  python check_bspdown.py <in_r2.bsp> <out_r1.bsp> [--no-bsp-tool] [options matching the converter's]
+  The checker validates the output of a conversion made with the SAME options: its defaults are the converter CLI's (--cubemaps none,
+  no --csm-rebase, --rtl-bake none), so pass the flags the conversion used: --cubemaps none|split|keep, --csm-rebase, --csm-last-env,
+  --empty-shadow-meshes, --rtl-bake none|edge|all [--rtl-bake-edge-min N], --keep-prop-fade, --keep-prop-flag10, --props ..., --no-rtl,
+  --no-sun-alpha, --no-collapse-envs, --pbr-lights, --sky-ambient-scale / --sun-scale / --pbr-scale, --cubemap-scale /
+  --cubemap-cma-gain / --cubemap-min-scale, --grid-size / --no-grid-pad.
+  --provider = the options of the r1delta map provider (engine/filesystem/r2_map_provider.cpp R2ConverterOptions, applied as bspdown
+  --csm-rebase --cubemaps split --rtl-bake edge --rtl-bake-vsm --rtl-bake-hot clip --rtl-bake-smooth 1 --rtl-bake-bm terrain (the rule 20f
+  preset), plus --csm-last-env on mp_coliseum and mp_coliseum_column, everything else at the converter
+  default): the checker sets the same flags itself (the --csm-last-env map names come from the input file name).
+  run_all.py / run_all23.py take --provider and then convert and check that way.
+  bsp_tool needs its dependency nfrecords; without it use --no-bsp-tool (run_all23.py does).
 
 Rules and what was verified
 ---------------------------
@@ -285,7 +302,7 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
     Rule 13d (--cubemaps split): a sort that carries a cubemap needs the patch material <MAP>/<material>_<x>_<y>_<z>; they are
     written into the pakfile as materials/maps/<map>/<material>_<x>_<y>_<z>.vmt (patch, include the base material,
     replace $envmap with maps/<map>/c<x>_<y>_<z>), exactly like the stock R1 maps (mp_rise: 111 of them).
-    --cubemap-diag 1|2 is a diagnostic (1 = one flat colour per R2 frame index, 2 = all flat neutral).
+    --cubemap-diag 1|2 is a diagnostic (1 = one flat colour per R2 frame index, 2 = all flat neutral). Provider default: split.
     CLIPPING at scale 4 (measured with analysis\cubeclip.py: convert at --cubemap-scale 0.125, rescale; max R2 value 2.6 to 9.0,
     most maps below 5.2; mip 0 pixels with any channel above 4.0 / energy kept by the clamp, scale 2 | 3 | 4):
     glitch 0.03 | 3.8 | 12.3 % (95.6 % kept at 4; sky slot 4: 58 % of its texels clip, 90 % of its luminance kept),
@@ -311,7 +328,12 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
     0.405 0.399 0.417 on mp_glitch), so the cubemaps alone do not explain a magenta cast.
     check_bspdown.py asserts: valid zip, stored entries only, exact file set, all VTF header fields (hdr:
     v7.5 RGBA8888 64x64 flags 0x620c 7 mips header 96, 131160 bytes; ldr: DXT5 32x32 flags 0x4000 6 mips, 8440 bytes),
-    alpha >= 4, default = average, DXT5 vs value/4, and the R1 decode vs the independent R2 decode * scale.
+    alpha >= 4, default = average of the sample frames, DXT5 vs value/4, and the R1 decode vs the independent R2 decode * the per cube scale
+    clamp(gain * CMA, min, --cubemap-scale) (rule 13b; --cubemap-cma-gain / --cubemap-min-scale). With --cubemaps split (rule 13d) it also derives
+    the patch materials from the output sorts (one per distinct (material, cubemap < R2 frame count), file name and the exact VMT text), checks
+    the pakfile holds exactly cubemapdefault + c<x>_<y>_<z> + the patch materials + the other R2 entries (no single directory: patch materials
+    live in the sub-directories of their material names), and that the first R2-frame-count records of lump 0x2A are the R2 records with the rule 13c
+    extra samples after them (unique origins, trailing word copied from an R2 record).
     Lighting data checked for the cast (rule 13b): see "Map wide lighting comparison" below.
 
 14. Physics triangles, lump 0x46 [R1 sub_180109980 -> sub_18010D5B0 -> sub_18010CD00].
@@ -381,6 +403,8 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
     mp_coliseum_column: they have no cloudmask, so the entity rewrite leaves the dummy light_environment last and R1's CSM sun stays the dummy direction; with the
     content choice their real column tree casts a long wrong-direction shadow and darkens the columns (in game, coliseum_column s1/s5, BwcShadows). The
     converted outputs of these two maps with --csm-last-env are byte-identical to the previous converter (sha256 ad832b89d94d for the column).
+    check_bspdown.py: --csm-last-env makes the model take the last record; a node without references (the dummy's single node) is compared on
+    everything but its first object reference index.
 
 18. Collision grid padding [R1 sub_18010BE50 / sub_180108710 / sub_180109B10 (IDA copy), data, simulation analysis\gp_walker.cpp]. Crash fixed:
     6 converted maps (mp_colony02, mp_lf_meadow, mp_lf_township, mp_lf_traffic, mp_lf_uma, mp_thaw) access-violated in the world grid
@@ -544,8 +568,9 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
     mesh vertices. Other material/vertex bytes are untouched. Keep the target list in sync with r2tex.cpp's vertex-tint allowlist, which emits
     `$vertexcolor 1` only for measured RGB-tinted world materials. The BWC beacon_metal_panel_grey_02_vc wall has RGB (139,57,57) and alpha
     135; its old cap0 noise metric was 1.47 with vertex color enabled/source alpha, versus 0.76 without vertex color. The rule avoids using
-    R1-only opacity for these surfaces.
-    f) Opt-in RTL bake (rule 20f, StairStep; options rtlBake 1 = edge, 2 = all, CLI --rtl-bake edge|all, provider tokens rtl-bake-edge / rtl-bake-all): bakes real-time spot/point light (colour x attenuation x facing x linear(B)) into lightmap plane A for lights without flag 0x10, skipping _bm receivers; plane A is energy-encoded to 4.0 max per channel. Default off; output unchanged unless the option is set.
+    R1-only opacity for these surfaces. Checker: see rule 24 (same vertex pass).
+    f) RTL bake (rule 20f, StairStep, tuned by DrydockSteps; options rtlBake 1 = edge, 2 = all, CLI --rtl-bake edge|all, provider tokens rtl-bake-edge / rtl-bake-all / rtl-bake-none): bakes real-time spot/point light (colour x attenuation x facing x linear(B)) into lightmap plane A; plane A is energy-encoded to 4.0 max per channel. The converter default is off (output unchanged unless the option is set) and its tuning options default to the pre-tuning bake: lights WITHOUT R2 flag 0x10 keep the RTL path (R1 creates dynamic shadow maps for flag 0x8 lights without 0x10), a light whose lit texels mostly exceed the cap stays RTL, no smoothing, every _bm receiver is skipped. Tuning options: --rtl-bake-vsm (also bake the lights without flag 0x10: they keep their world light record, so props and the CPU lit gun are still lit, but they stop casting dynamic shadows onto the world; their RTL texel list is nearest sampled and showed the hard 16 unit luxel blocks of the R2 visibility field, the mp_drydock stair-steps), --rtl-bake-hot clip (bake a hot light with the hue-preserving clip at the cap), --rtl-bake-smooth 1|2 (low-pass the per-light visibility over a 3x3 / 5x5 binomial window of same-surface neighbour texels), --rtl-bake-bm terrain|none (only terrain-like _bm names, or no _bm material, is skipped). Env R2BAKE_LIST=1 logs the kept lights and the _bm materials. The r1delta provider converts with edge plus the preset vsm + hot clip + smooth 1 + bm terrain (R2ConverterOptions; provider tokens rtl-bake-classic = the pre-tuning bake, rtl-bake-vsm / rtl-bake-no-vsm, rtl-bake-hot-clip / -keep, rtl-bake-smooth-0|1|2, rtl-bake-bm-skip|terrain|none; BSP cache 28), so validate provider output with check_bspdown.py --provider (or the same flags).
+    Checker (apply_rtl_bake in check_bspdown.py): independent numpy model of the whole bake: receiver reconstruction (nearest triangle of every lit mesh, float32 position / normal, gutter texels up to 1.5 texels), per-light edge / hot statistics, the choice of the baked lights (edge texels >= --rtl-bake-edge-min, default 8, or all), the plane A re-encoding, and the slots removed from the RTL lists. The RTL lump (0x69) and the whole lightmap lump (0x62, plane A and the rule 21 plane B alpha) are compared byte for byte; the model's light and slot counts equal the converter report on mp_glitch, mp_homestead, mp_black_water_canal, mp_lf_stacks.
 
 23. Static prop fade distance of far-origin props [R1 sub_18018C890, sub_18018B710, runtime evidence from a cdb attach on mp_crashsite3, check_far_origin_props.py].
     R1 culls a static prop in sub_18018C890 (IStaticPropMgr visible-prop gather, one call per view) by the squared distance from the VIEW to
@@ -573,6 +598,8 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
     parachute looked identical before and after (their distance ratio is 1.5 .. 7: not dropped at that view, or invisible for another reason).
     The homestead baseline pose frame (maps\outdoor\LOOK-RECIPE.md pose) is unchanged (MAD 0.075/255 before vs after in one session).
     --keep-prop-fade restores the plain copy (provider token props-keepfade). Needs a converted BSP cache revision bump (22 -> 23).
+    Checker: expected_prop_fade() recomputes the prop bounds from lumps 0x78 / 0x79 (union per prop, float32 min/max, finite and below 1e6),
+    the far-origin test and the new fade in float32, and compares fade min and max bit for bit; --keep-prop-fade expects the R2 value.
 
 24. Emitter glow ramp coordinate of layered pure-emitter world materials (vcalpha.cpp, TrimGlow). R2 draws a pure emitter (black albedo,
     white _ilm, HDR emissive tint, layer slot 22, blend f0138286 = premultiplied alpha, depth state no write, decal raster state) as
@@ -591,6 +618,10 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
     (kEmitterGlowMaterials) and the 256 width must stay in sync with r2tex (kGlowRampPrefix, buildGlowRampVtf); with R2TEX_EMITTER_GLOW=0 the VMT is
     the flat opaque strip of the uniform white _ilm, which ignores the coordinate, so the rule is harmless then. Needs a converted BSP cache revision
     bump and a material revision bump.
+    Checker: the vertex check recomputes rule 24 (and rule 22, same vertex pass) from the R2 meshes: for the vertices used by meshes of the listed
+    materials the R1 record keeps its R2 RGBA / albedo UV except alpha 255 (rule 22) or the ramp coordinate (a + 0.5) / 256, 0.5 and alpha 255 (rule 24);
+    every other original vertex keeps +8..+19 bit for bit. The material lists live in check_bspdown.py (OPAQUE_VERTEX_ALPHA_MATERIALS /
+    EMITTER_GLOW_MATERIALS) and must stay in sync with vcalpha.cpp.
 
 Results
 -------

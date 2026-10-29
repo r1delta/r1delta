@@ -44,6 +44,12 @@ static void usage(const char* a0) {
                  "  --no-collapse-envs     rule 20: keep all light_environment sky ambient/sun pairs in the world lights (default keeps the last pair only)\n"
                  "  --no-rtl               rule 20: write the real-time light lump as 0xFF (default converts the R2 lump)\n"
                  "  --no-sun-alpha         rule 21: keep lightmap plane B alpha 255 (default writes the baked sun visibility from the R2 RTL sun slot)\n"
+                 "  --rtl-bake <none|edge|all>  rule 20f: bake spot/point real-time light into lightmap plane A (default none)\n"
+                 "  --rtl-bake-edge-min <n>  rule 20f: edge texels a light needs to be baked in 'edge' mode (default 8)\n"
+                 "  --rtl-bake-bm <skip|terrain|none>  rule 20f: _bm receivers: skip every one (default), skip terrain names only, bake all\n"
+                 "  --rtl-bake-smooth <0|1|2>  rule 20f: low-pass the visibility over a 3x3 (1) / 5x5 (2) same-surface window before baking (default 0)\n"
+                 "  --rtl-bake-hot <keep|clip>  rule 20f: lights above the plane A cap keep RTL (default) or are baked with a hue-preserving clip\n"
+                 "  --rtl-bake-vsm         rule 20f: also bake lights without R2 flag 0x10 (R1 variance shadow map lights; default keeps them on RTL)\n"
                  "  --pbr-lights <keep|convert>  rule 20: R2 flag 0x20 lights (default convert to the R1 fade polynomial form)\n"
                  "  --sky-ambient-scale <x>  rule 20e: multiplier on the kept sky ambient (type 5) light intensity (default 0.45)\n"
                  "  --sun-scale <x>        rule 20e: multiplier on the kept sun (type 3) light intensity (default 1)\n"
@@ -108,6 +114,10 @@ int main(int argc, char** argv) {
         else if (a == "--no-rtl") opt.rtlConvert = false;
         else if (a == "--rtl-bake" && i + 1 < argc) { std::string m = argv[++i]; opt.rtlBake = m == "all" ? 2 : m == "edge" ? 1 : 0; }
         else if (a == "--rtl-bake-edge-min" && i + 1 < argc) opt.rtlBakeEdgeMin = (float)std::atof(argv[++i]);
+        else if (a == "--rtl-bake-bm" && i + 1 < argc) { std::string m = argv[++i]; opt.rtlBakeBm = m == "none" ? 0 : m == "terrain" ? 1 : 2; }
+        else if (a == "--rtl-bake-smooth" && i + 1 < argc) opt.rtlBakeSmooth = std::atoi(argv[++i]);
+        else if (a == "--rtl-bake-hot" && i + 1 < argc) opt.rtlBakeHot = std::string(argv[++i]) == "clip" ? 1 : 0;
+        else if (a == "--rtl-bake-vsm") opt.rtlBakeVsm = true;
         else if (a == "--sky-ambient-scale" && i + 1 < argc) opt.skyAmbientScale = (float)std::atof(argv[++i]);
         else if (a == "--sun-scale" && i + 1 < argc) opt.sunScale = (float)std::atof(argv[++i]);
         else if (a == "--pbr-scale" && i + 1 < argc) opt.pbrScale = (float)std::atof(argv[++i]);

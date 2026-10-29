@@ -137,6 +137,21 @@ struct Options {
     //   0 = off (default), 1 = lights whose pools have shadow edges, 2 = every real-time light.
     int rtlBake = 0;
     float rtlBakeEdgeMin = 0.0f;
+    // Rule 20f tuning (DrydockSteps, mp_drydock stair-steps; every default reproduces the pre-tuning bake):
+    //   rtlBakeBm: receivers on _bm (layered terrain style) materials. 2 = skip every _bm material (default), 1 = skip only terrain-like
+    //     names (grass, mud, rock, ter_, sand, dirt, riverbed), 0 = bake every material.
+    //   rtlBakeSmooth: before baking, low-pass the per-light visibility over a (2k+1)^2 binomial window of same-surface neighbour texels
+    //     (0 = off, 1 = 3x3, 2 = 5x5), so the baked 16-unit luxel blocks do not carry hard quarter-step edges into plane A.
+    //   rtlBakeHot: a light whose lit texels mostly exceed the plane A energy cap (4.0) stays on RTL (0, default); 1 = bake it and keep the
+    //     hue-preserving clip at the cap.
+    int rtlBakeBm = 2;
+    int rtlBakeSmooth = 0;
+    int rtlBakeHot = 0;
+    //   rtlBakeVsm: also bake the lights WITHOUT R2 flag 0x10. R1 can give those a variance shadow map, but the RTL list that selects their
+    //     texels is nearest sampled, so their pools show the hard 16-unit luxel blocks of the R2 visibility field. true = bake them like the
+    //     others (they keep their world light record, so props and the CPU lit gun are still lit by them, but they no longer cast dynamic
+    //     shadows onto the world).
+    bool rtlBakeVsm = false;
 
     // Drop lumps R1 never reads (0x04..0x07, 0x37, 0x7A). They are large
     // (about 2 MB on eden) and cannot be interpreted by R1.

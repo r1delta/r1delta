@@ -85,7 +85,7 @@ constexpr uint32_t kGameLump = 0x23;
 
 // Folded into the on-disk cache fingerprint together with entity_rewrite::kRewriteVersion.
 // Bump when the vendored bspdown converter or the provider's BSP post-processing changes output.
-constexpr uint32_t kConvertedBspCacheVersion = 27;  // 27: rule 24 now writes the glow ramp texture coordinate; 26: rule 24 emitter glow vertex alpha (vr_light_trim_01_totrans, mp_glitch); 25: mp_coliseum and mp_coliseum_column keep the last CSM environment (csmLastEnv); 24: rule 17 real CSM environment chosen by content (BWC, angel_city, coliseum, coliseum_column); 23: rule 23 far-origin prop fade distance
+constexpr uint32_t kConvertedBspCacheVersion = 28;  // 28: rule 20f DrydockSteps preset default (rtl-bake vsm, hot clip, smooth 1, bm terrain); 27: rule 24 now writes the glow ramp texture coordinate; 26: rule 24 emitter glow vertex alpha (vr_light_trim_01_totrans, mp_glitch); 25: mp_coliseum and mp_coliseum_column keep the last CSM environment (csmLastEnv); 24: rule 17 real CSM environment chosen by content (BWC, angel_city, coliseum, coliseum_column); 23: rule 23 far-origin prop fade distance
 
 // Raised onto the z of every info_spawnpoint_flag / human / human_start / titan / titan_start origin in lump 0 and in the five partition entity
 // files (see entity_rewrite::RaiseSpawnpointOrigins). The R1 server drops the spawnpoint back to the floor; one that starts inside solid is removed.
@@ -1372,6 +1372,19 @@ void ApplyConverterVariant(bspdown::Options& options, const std::string& variant
         else if (token == "rtl-bake-edge") options.rtlBake = 1;   // rule 20f (default): bake spot/point RTL light of lights with shadow edges into lightmap plane A (smooth penumbra)
         else if (token == "rtl-bake-all") options.rtlBake = 2;    // rule 20f: bake every eligible real-time light
         else if (token == "rtl-bake-none") options.rtlBake = 0;   // opt-out: R1 real-time light list only, no baked penumbra
+        else if (token == "rtl-bake-classic") {   // opt-out of the DrydockSteps preset: the previous edge bake (lights without flag 0x10 and hot lights stay RTL, no smoothing, every _bm receiver skipped)
+            options.rtlBakeVsm = false; options.rtlBakeHot = 0; options.rtlBakeSmooth = 0; options.rtlBakeBm = 2;
+        }
+        else if (token == "rtl-bake-vsm") options.rtlBakeVsm = true;
+        else if (token == "rtl-bake-no-vsm") options.rtlBakeVsm = false;
+        else if (token == "rtl-bake-hot-clip") options.rtlBakeHot = 1;
+        else if (token == "rtl-bake-hot-keep") options.rtlBakeHot = 0;
+        else if (token == "rtl-bake-smooth-0") options.rtlBakeSmooth = 0;
+        else if (token == "rtl-bake-smooth-1") options.rtlBakeSmooth = 1;
+        else if (token == "rtl-bake-smooth-2") options.rtlBakeSmooth = 2;
+        else if (token == "rtl-bake-bm-skip") options.rtlBakeBm = 2;
+        else if (token == "rtl-bake-bm-terrain") options.rtlBakeBm = 1;
+        else if (token == "rtl-bake-bm-none") options.rtlBakeBm = 0;
         else if (token == "cubemaps-split") options.cubemaps = bspdown::CubemapMode::Split;
         else if (token == "cubemaps-single") options.cubemaps = bspdown::CubemapMode::None;   // pre-split behaviour: every world sort samples the nearest cube
         else if (token == "no-collapse-envs") options.collapseEnvs = false;
@@ -1400,6 +1413,13 @@ bspdown::Options R2ConverterOptions()
     options.emptyShadowMeshes = false;
     options.cubemaps = bspdown::CubemapMode::Split;   // rule 13d: per-mesh R2 cubemaps via patch materials; opt-out token cubemaps-single
     options.rtlBake = 1;                // rule 20f: bake spot/point real-time lights with shadow edges into lightmap plane A; opt-out tokens rtl-bake-none, no-rtl
+    // Rule 20f preset (DrydockSteps variant c1, removes the mp_drydock stair-steps): also bake the lights without R2 flag 0x10 (they stop casting
+    // dynamic shadows on the world), clip lights above the plane A cap instead of keeping them as RTL, smooth the visibility over 3x3 texels and
+    // skip only terrain-like _bm receivers. Opt-out token rtl-bake-classic (or the individual tokens).
+    options.rtlBakeVsm = true;
+    options.rtlBakeHot = 1;
+    options.rtlBakeSmooth = 1;
+    options.rtlBakeBm = 1;
     ApplyConverterVariant(options, R2ConverterVariantString());
     return options;
 }

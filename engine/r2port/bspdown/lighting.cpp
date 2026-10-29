@@ -359,8 +359,9 @@ struct BakeLight {
 };
 
 // Receivers on materials whose R1 shader ignores the real-time light term must keep their RTL slots (baking would only add light R1 never
-// drew). Layered terrain materials (name suffix _bm: WorldVertexTransition-style blends) are RTL-blind in the measured R1 build.
-bool rtlBlindMaterial(Ctx& c, int16_t textureData) {
+// drew). Layered terrain materials (name suffix _bm: WorldVertexTransition-style blends) are RTL-blind in the measured R1 build (homestead
+// terrain). Options::rtlBakeBm: 2 = every _bm material, 1 = only terrain-like names, 0 = none.
+bool bmMaterialName(Ctx& c, int16_t textureData, std::string& name) {
     const Bytes& td = c.lump[L_TEXDATA];
     const Bytes& strTab = c.lump[L_TDSTRTAB];
     const Bytes& strData = c.lump[L_TDSTRDATA];
@@ -376,13 +377,41 @@ bool rtlBlindMaterial(Ctx& c, int16_t textureData) {
     while (off + n < strData.size() && s[n]) ++n;
     if (n < 3) return false;
     const char a = s[n - 3], b = s[n - 2], d = s[n - 1];
-    return a == '_' && (b == 'b' || b == 'B') && (d == 'm' || d == 'M');
+    if (!(a == '_' && (b == 'b' || b == 'B') && (d == 'm' || d == 'M'))) return false;
+    name.assign(s, n);
+    for (char& ch : name) ch = (char)std::tolower((unsigned char)ch);
+    return true;
+}
+
+// Terrain-like layered materials: some token of the path (split at \ / _) names ground (grass, mud, rock, cliff, sand, dirt, riverbed, ter).
+// "dirty" and similar words are not ground tokens.
+bool terrainLikeName(const std::string& name) {
+    size_t i = 0;
+    while (i < name.size()) {
+        size_t j = i;
+        while (j < name.size() && name[j] != '\\' && name[j] != '/' && name[j] != '_') ++j;
+        const std::string tok = name.substr(i, j - i);
+        i = j + 1;
+        if (tok.empty() || tok == "dirty") continue;
+        if (tok == "ter" || tok == "sand" || tok == "patchy") return true;
+        for (const char* root : {"grass", "mud", "rock", "cliff", "riverbed", "dirt"}) if (tok.find(root) != std::string::npos) return true;
+    }
+    return false;
+}
+
+bool rtlBlindMaterial(Ctx& c, int16_t textureData, int mode) {
+    if (mode <= 0) return false;
+    std::string name;
+    if (!bmMaterialName(c, textureData, name)) return false;
+    return mode >= 2 || terrainLikeName(name);
 }
 
 void bakeRtlLights(Ctx& c, const Bytes& wl, const std::vector<int32_t>& newOf, int v1, const std::vector<Light>& oldLights,
                    const std::vector<uint16_t>& orig, std::vector<uint16_t>& ids, const double linear[256]) {
     const Bytes& headers = c.lump[L_LMHDR];
     size_t skippedMeshes = 0;
+    const bool listBm = getenv("R2BAKE_LIST") != nullptr;
+    std::map<std::string, size_t> bmNames;
     Bytes& rtl = c.lump[L_LMRTL];
     Bytes& sky = c.lump[L_LMSKY];
     struct Page {
@@ -443,6 +472,8 @@ void bakeRtlLights(Ctx& c, const Bytes& wl, const std::vector<int32_t>& newOf, i
     const Bytes& normals = c.lump[L_VNORMALS];
     if (meshes.size() % sizeof(MeshR2) || sorts.size() % sizeof(Sort) || indices.size() % 2 || positions.size() % sizeof(Vec3) || normals.size() % sizeof(Vec3))
         throw Error("RTL bake: malformed mesh/sort/index/position/normal lump");
+    constexpr double reach2 = 2.25;      // receiver reach: 1.5 texels squared
+    constexpr double reachPad = 2.0;     // bounding box padding in texels (max(2, reach + 0.5))
     for (size_t mi = 0; mi < meshes.size() / sizeof(MeshR2); ++mi) {
         MeshR2 mesh;
         std::memcpy(&mesh, &meshes[mi * sizeof(mesh)], sizeof(mesh));
@@ -455,7 +486,8 @@ void bakeRtlLights(Ctx& c, const Bytes& wl, const std::vector<int32_t>& newOf, i
         if ((size_t)sort.lightmapHeader >= pages.size()) throw Error("RTL bake: lightmap header out of range");
         const Page& page = pages[sort.lightmapHeader];
         if (!page.width) continue;
-        if (rtlBlindMaterial(c, sort.textureData)) { ++skippedMeshes; continue; }
+        if (listBm) { std::string nm; if (bmMaterialName(c, sort.textureData, nm)) ++bmNames[nm + (terrainLikeName(nm) ? "  [terrain-like]" : "  [other]")]; }
+        if (rtlBlindMaterial(c, sort.textureData, c.opt.rtlBakeBm)) { ++skippedMeshes; continue; }
         const uint32_t stride = format ? 44 : 36;
         const Bytes& vertices = c.lump[format ? L_VTX_LITBUMP : L_VTX_LITFLAT];
         if (vertices.size() % stride || sort.vertexOffset < 0 || (uint64_t(mesh.firstMeshIndex) + uint64_t(mesh.numTriangles) * 3) * 2 > indices.size())
@@ -484,10 +516,10 @@ void bakeRtlLights(Ctx& c, const Bytes& wl, const std::vector<int32_t>& newOf, i
             const double minX = std::min({uv[0][0], uv[1][0], uv[2][0]}), maxX = std::max({uv[0][0], uv[1][0], uv[2][0]});
             const double minY = std::min({uv[0][1], uv[1][1], uv[2][1]}), maxY = std::max({uv[0][1], uv[1][1], uv[2][1]});
             if (maxX < 0 || maxY < 0 || minX >= page.width || minY >= page.height) continue;
-            const int x0 = (int)std::floor(std::clamp(minX - 2, 0.0, double(page.width - 1)));
-            const int x1 = (int)std::floor(std::clamp(maxX + 2, 0.0, double(page.width - 1)));
-            const int y0 = (int)std::floor(std::clamp(minY - 2, 0.0, double(page.height - 1)));
-            const int y1 = (int)std::floor(std::clamp(maxY + 2, 0.0, double(page.height - 1)));
+            const int x0 = (int)std::floor(std::clamp(minX - reachPad, 0.0, double(page.width - 1)));
+            const int x1 = (int)std::floor(std::clamp(maxX + reachPad, 0.0, double(page.width - 1)));
+            const int y0 = (int)std::floor(std::clamp(minY - reachPad, 0.0, double(page.height - 1)));
+            const int y1 = (int)std::floor(std::clamp(maxY + reachPad, 0.0, double(page.height - 1)));
             const double det = (uv[1][1] - uv[2][1]) * (uv[0][0] - uv[2][0]) + (uv[2][0] - uv[1][0]) * (uv[0][1] - uv[2][1]);
             if (std::fabs(det) < 1e-12) continue;
             const double orientation = det < 0 ? -1.0 : 1.0;
@@ -517,7 +549,7 @@ void bakeRtlLights(Ctx& c, const Bytes& wl, const std::vector<int32_t>& newOf, i
                         }
                     }
                 }
-                if (distance > 2.25 || distance >= bestDist[texel] - 1e-9) continue;
+                if (distance > reach2 || distance >= bestDist[texel] - 1e-9) continue;
                 bestDist[texel] = (float)distance;
                 double n[3] = {0, 0, 0};
                 for (int k = 0; k < 3; ++k) {
@@ -529,6 +561,7 @@ void bakeRtlLights(Ctx& c, const Bytes& wl, const std::vector<int32_t>& newOf, i
             }
         }
     }
+    for (const auto& kv : bmNames) c.say("[rule 20f]   _bm material %s: %zu lit meshes", kv.first.c_str(), kv.second);
     const auto reached = [&](size_t t) { return std::isfinite(bestDist[t]); };
     const auto cone = [&](const Light& L, const double p[3]) {
         return rtlSpotCone(L, std::array<double, 3>{p[0], p[1], p[2]});
@@ -605,17 +638,61 @@ void bakeRtlLights(Ctx& c, const Bytes& wl, const std::vector<int32_t>& newOf, i
     for (size_t i = 0; i < BL.size(); ++i) {
         BakeLight& b = BL[i];
         if (!b.ok) continue;
-        // R1 creates local variance shadow maps only for flag 0x8 lights WITHOUT 0x10; those keep the RTL path (dynamic shadows).
-        const bool vsmCapable = !(oldLights[i].flags() & 0x10);
-        const bool tooHot = b.total && b.hot * 4 > b.total;  // lightmap energy is capped at 4.0 per channel
+        // R1 creates local variance shadow maps only for flag 0x8 lights WITHOUT 0x10; by default those keep the RTL path (dynamic shadows).
+        const bool vsmCapable = !(oldLights[i].flags() & 0x10) && !c.opt.rtlBakeVsm;
+        const bool tooHot = b.total && b.hot * 4 > b.total && !c.opt.rtlBakeHot;  // lightmap energy is capped at 4.0 per channel
         b.bake = !vsmCapable && !tooHot && (c.opt.rtlBake == 2 || b.edge >= edgeMin);
-        if (b.bake) ++lightsBaked; else ++lightsKept;
+        if (b.bake) ++lightsBaked;
+        else {
+            ++lightsKept;
+            if (getenv("R2BAKE_LIST"))
+                c.say("[rule 20f]   kept light %zu: type %d flags 0x%x radius %.0f inten %.3g/%.3g/%.3g org %.0f %.0f %.0f texels %llu edge %llu hot %llu reason %s", i,
+                      oldLights[i].type(), (unsigned)oldLights[i].flags(), b.radius, b.inten[0], b.inten[1], b.inten[2], b.org[0], b.org[1], b.org[2],
+                      (unsigned long long)b.total, (unsigned long long)b.edge, (unsigned long long)b.hot,
+                      vsmCapable ? "vsm (no flag 0x10)" : tooHot ? "hot" : "few edge texels");
+        }
     }
     // accumulate and re-encode plane A
     auto toLinear = [](double v) { return v <= 0.04045 ? v / 12.92 : std::pow((v + 0.055) / 1.055, 2.4); };
     auto toSrgb = [](double v) { v = std::clamp(v, 0.0, 1.0); return v <= 0.0031308 ? v * 12.92 : 1.055 * std::pow(v, 1 / 2.4) - 0.055; };
     uint64_t bakedSlots = 0, unreached = 0, texelsChanged = 0, clipped = 0;
     double addedEnergy = 0;
+    const int smoothK = std::clamp(c.opt.rtlBakeSmooth, 0, 2);
+    uint64_t smoothedSlots = 0;
+    // Binomial low-pass of one light's visibility over same-surface neighbour texels (neighbours without a receiver, on another surface or
+    // outside the light radius are left out and the kernel renormalised). The raw B is a quarter-step field at luxel resolution.
+    const auto smoothW = [&](const Page& pg, const uint8_t* B, size_t lt, size_t t, uint16_t id, double own) -> double {
+        static const double kern[3][3] = {{1, 0, 0}, {2, 1, 0}, {6, 4, 1}};  // index by k (0 unused, 1 = [1 2 1], 2 = [1 4 6 4 1]) and |d|
+        const double* kk = smoothK == 1 ? kern[1] : kern[2];
+        const BakeLight& b = BL[id];
+        const int x = int(lt % pg.width), y = int(lt / pg.width);
+        double sum = 0, wsum = 0;
+        for (int dy = -smoothK; dy <= smoothK; ++dy) for (int dx = -smoothK; dx <= smoothK; ++dx) {
+            const int nx = x + dx, ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= (int)pg.width || ny >= (int)pg.height) continue;
+            const size_t nt = pg.first + size_t(ny) * pg.width + nx;
+            const double kw = kk[std::abs(dx)] * kk[std::abs(dy)];
+            double wn;
+            if (nt == t) wn = own;
+            else {
+                if (!reached(nt)) continue;
+                const double dn = rnrm[t * 3] * rnrm[nt * 3] + rnrm[t * 3 + 1] * rnrm[nt * 3 + 1] + rnrm[t * 3 + 2] * rnrm[nt * 3 + 2];
+                if (dn < 0.9) continue;
+                const double off = rnrm[t * 3] * (rpos[nt * 3] - rpos[t * 3]) + rnrm[t * 3 + 1] * (rpos[nt * 3 + 1] - rpos[t * 3 + 1]) + rnrm[t * 3 + 2] * (rpos[nt * 3 + 2] - rpos[t * 3 + 2]);
+                if (std::fabs(off) > 4.0) continue;
+                bool found = false;
+                wn = 0;
+                for (int ss = 0; ss < 4; ++ss) if (orig[nt * 4 + ss] == id) { wn = linear[B[(size_t(ny) * pg.width + nx) * 4 + ss]]; found = true; break; }
+                if (!found) {
+                    const double ex = rpos[nt * 3] - b.org[0], ey = rpos[nt * 3 + 1] - b.org[1], ez = rpos[nt * 3 + 2] - b.org[2];
+                    if (b.radius > 0 && ex * ex + ey * ey + ez * ez > b.radius * b.radius) continue;
+                }
+            }
+            sum += kw * wn;
+            wsum += kw;
+        }
+        return wsum > 0 ? sum / wsum : own;
+    };
     for (size_t h = 0; h < pages.size(); ++h) {
         const Page& pg = pages[h];
         if (!pg.width) continue;
@@ -629,7 +706,8 @@ void bakeRtlLights(Ctx& c, const Bytes& wl, const std::vector<int32_t>& newOf, i
             for (int s = 0; s < 4; ++s) {
                 const uint16_t id = orig[t * 4 + s];
                 if (id == 0xFFFF || !BL[id].ok || !BL[id].bake) continue;
-                const double w = linear[B[lt * 4 + s]];
+                double w = linear[B[lt * 4 + s]];
+                if (smoothK > 0 && reached(t)) { const double sw = smoothW(pg, B, lt, t, id, w); if (sw != w) ++smoothedSlots; w = sw; }
                 if (w <= 0) { ids[t * 4 + s] = 0xFFFF; continue; }
                 if (!reached(t)) { ++unreached; continue; }
                 const BakeLight& b = BL[id];
@@ -671,6 +749,9 @@ void bakeRtlLights(Ctx& c, const Bytes& wl, const std::vector<int32_t>& newOf, i
     c.say("[rule 20f] RTL bake (%s): %zu lights baked, %zu kept as RTL (edge texel minimum %llu); %llu candidate slots, %llu slots baked into plane A over %llu texels (mean added energy %.4f, %llu texels above the encodable 4.0), %llu baked slots without a receiver kept as RTL",
           c.opt.rtlBake == 2 ? "all" : "edge", lightsBaked, lightsKept, (unsigned long long)edgeMin, (unsigned long long)candidateSlots,
           (unsigned long long)bakedSlots, (unsigned long long)texelsChanged, texelsChanged ? addedEnergy / texelsChanged : 0.0, (unsigned long long)clipped, (unsigned long long)unreached);
+    if (smoothK > 0 || c.opt.rtlBakeBm != 2 || c.opt.rtlBakeHot || c.opt.rtlBakeVsm)
+        c.say("[rule 20f] tuning: _bm skip mode %d, smoothing window %d (%llu slots changed), hot lights %s, lights without flag 0x10 %s", c.opt.rtlBakeBm, smoothK,
+              (unsigned long long)smoothedSlots, c.opt.rtlBakeHot ? "baked with clip" : "kept as RTL", c.opt.rtlBakeVsm ? "baked" : "kept as RTL");
 }
 
 

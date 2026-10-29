@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
 """Invariant checker for bspdown output.
 
-usage: check_bspdown.py <in_r2.bsp> <out_r1.bsp> [--limit 16376] [--no-bsp-tool] [--rtl-bytes 4]
+usage: check_bspdown.py <in_r2.bsp> <out_r1.bsp> [--provider] [--no-bsp-tool] [options matching the conversion]
 
 Independent re-implementation (numpy, no code shared with the C++ converter) of
 the invariants the R1 engine loaders need plus consistency checks against the
 R2 input. Exit status 0 if every check passed.
+
+The checker defaults are the converter CLI defaults; pass the options the conversion used (--cubemaps none|split|keep, --csm-rebase,
+--csm-last-env, --rtl-bake none|edge|all, --keep-prop-fade, ...). --provider = the options of the r1delta map provider
+(r2_map_provider.cpp R2ConverterOptions): --cubemaps split --csm-rebase --rtl-bake edge --rtl-bake-vsm --rtl-bake-hot clip --rtl-bake-smooth 1 --rtl-bake-bm terrain, --csm-last-env on mp_coliseum / mp_coliseum_column.
 """
 import argparse
+import os
+import re
 import struct
 import sys
 
@@ -32,6 +38,11 @@ class Bsp:
         r = self.raw(i)
         assert len(r) % dt.itemsize == 0, "lump %#x size %d %% %d" % (i, len(r), dt.itemsize)
         return np.frombuffer(r.tobytes(), dtype=dt)
+
+
+def same_arr(a, b):
+    """Equal shape and equal contents (a plain == raises when the shapes differ, e.g. on output made with other options)."""
+    return a.shape == b.shape and bool((a == b).all())
 
 
 class Checker:
@@ -109,6 +120,19 @@ def mesh_material_names(bsp, meshes, sorts):
         name = str_data[off:].split(b"\0", 1)[0].decode("ascii", errors="replace")
         names.append(name.replace("\\", "/").lower())
     return names
+
+
+def texdata_name(bsp, td):
+    """Lower case, forward slash material name of texture data record td (None when the record or its name is out of range)."""
+    texdata = bsp.raw(0x02)
+    str_data = bytes(bsp.raw(0x2B))
+    str_tab = np.frombuffer(bsp.raw(0x2C).tobytes(), dtype="<u4")
+    if td < 0 or (td + 1) * 36 > len(texdata):
+        return None
+    name_i = struct.unpack_from("<i", texdata, td * 36 + 12)[0]
+    if name_i < 0 or name_i >= len(str_tab) or int(str_tab[name_i]) >= len(str_data):
+        return None
+    return str_data[int(str_tab[name_i]):].split(b"\0", 1)[0].decode("ascii", errors="replace").replace("\\", "/").lower()
 
 
 def is_sky_mesh(material, flags):
@@ -556,8 +580,339 @@ def quantize_rtl_visibility(bsp, lights, ids, weights, minimum, linear):
 
 
 RTL_VISIBILITY_CUTOFF = 187  # fixed sRGB static-visibility cutoff of rule 20 (about half visible), applied after cone normalization
-LIGHT_OPT = {"collapse": True, "rtl": True, "pbr": True, "sun_alpha": True, "sky_scale": 0.45, "sun_scale": 1.0, "pbr_scale": 1.0}
+LIGHT_OPT = {"collapse": True, "rtl": True, "pbr": True, "sun_alpha": True, "sky_scale": 0.45, "sun_scale": 1.0, "pbr_scale": 1.0,
+             "bake": 0, "bake_edge_min": 0.0,  # bake: --rtl-bake none 0 / edge 1 / all 2 (rule 20f)
+             "bake_bm": 2, "bake_smooth": 0, "bake_hot": 0, "bake_vsm": False}  # --rtl-bake-bm skip 2 / terrain 1 / none 0, --rtl-bake-smooth 0..2, --rtl-bake-hot keep 0 / clip 1, --rtl-bake-vsm
 CSM_OPT = {"last_env": False}  # --csm-last-env: the converter kept the last environment record instead of the largest
+PROP_OPT = {"keep_fade": False}  # --keep-prop-fade: rule 23 off
+CUBE_OPT = {"cma_gain": 1.0, "min_scale": 0.25}  # rule 13b: per-cubemap scale = clamp(gain * CMA, min_scale, --cubemap-scale)
+PROVIDER_CSM_LAST_ENV_MAPS = ("mp_coliseum", "mp_coliseum_column")  # r2_map_provider.cpp ReadConvertedBsp: no cloudmask, the dummy light_environment stays last
+
+
+def spot_cone(f, ids, p):
+    """Cone term of the R2 lights `ids` (rows of the float32 record view f) at the points p (n,3 float64), the function the real-time light
+    B plane is stored with (point lights have no cone: the callers only use it for type 2)."""
+    delta = p - f[ids, 0:3].astype(np.float64)
+    d2 = (delta * delta).sum(axis=1)
+    dot = (delta * f[ids, 6:9].astype(np.float64)).sum(axis=1)
+    width = (f[ids, 15] - f[ids, 16]).astype(np.float64)
+    exponent = f[ids, 17].astype(np.float64)
+    scale = np.where((exponent <= 0.5) | (width < 1e-10), 100000.0, 1.0 / np.where(width < 1e-10, 1.0, width))
+    cosine = dot / np.sqrt(np.maximum(d2, 1.0))
+    cone = np.clip((cosine - f[ids, 16].astype(np.float64)) * scale, 0.0, 1.0)
+    return cone + np.clip(exponent - 1.0, 0.0, 1.0) * (cone * cone - cone)
+
+
+def terrain_like_name(name):
+    """Rule 20f --rtl-bake-bm terrain: some token of the (lower case, forward slash) material path, split at / and _, names ground."""
+    for tok in re.split(r"[/_]", name):
+        if not tok or tok == "dirty":
+            continue
+        if tok in ("ter", "sand", "patchy") or any(root in tok for root in ("grass", "mud", "rock", "cliff", "riverbed", "dirt")):
+            return True
+    return False
+
+
+def rtl_bake_receivers(r2, pages, need):
+    """Rule 20f receivers. For every lightmap texel t with need[t]: the surface point and normal the texel stands for. A texel takes the
+    nearest point (barycentric, clamped to the triangle edge for gutter texels, at most 1.5 texels away) of the nearest triangle of any
+    lit mesh whose lightmap chart (UV extent + 2 texels) reaches it; the earlier triangle wins ties. Meshes whose material name ends in _bm
+    (layered terrain, RTL-blind in R1) are not receivers unless LIGHT_OPT["bake_bm"] says so: 2 = every _bm material is skipped (default),
+    1 = only terrain-like names, 0 = none. Returns (reached bool (T,), position float32 (T,3), normal float32 (T,3),
+    number of _bm meshes skipped)."""
+    T = len(need)
+    best = np.full(T, np.inf, np.float32)
+    rpos = np.zeros((T, 3), np.float32)
+    rnrm = np.zeros((T, 3), np.float32)
+    m2 = r2.arr(0x50, MESH_DT_R2)
+    so2 = r2.arr(0x52, SORT_DT)
+    names = mesh_material_names(r2, m2, so2)
+    idx = r2.arr(0x4F, "<u2")
+    pos = r2.arr(0x03, "<f4").reshape(-1, 3)
+    nrm = r2.arr(0x1E, "<f4").reshape(-1, 3)
+    vtx = {f_: np.frombuffer(r2.raw(VTX_LUMP[f_]).tobytes(), np.uint8).reshape(-1, VTX_STRIDE[f_]) for f_ in (0, 1)}
+    sat = {}
+    for h, pg in enumerate(pages):
+        if pg is None:
+            continue
+        first, w, hh = pg
+        a = need[first:first + w * hh].reshape(hh, w).astype(np.int64)
+        s = np.zeros((hh + 1, w + 1), np.int64)
+        s[1:, 1:] = a.cumsum(0).cumsum(1)
+        sat[h] = s
+    skipped = 0
+    for mi in range(len(m2)):
+        mesh = m2[mi]
+        fmt = (int(mesh["fl"]) >> 9) & 3
+        nt = int(mesh["nt"])
+        if fmt > 1 or not nt:
+            continue
+        sort = so2[int(mesh["ms"])]
+        lm = int(sort["lm"])
+        if lm < 0 or lm >= len(pages) or pages[lm] is None:
+            continue
+        if names[mi].endswith("_bm") and (LIGHT_OPT["bake_bm"] == 2 or (LIGHT_OPT["bake_bm"] == 1 and terrain_like_name(names[mi]))):
+            skipped += 1
+            continue
+        first, w, hh = pages[lm]
+        s = sat[lm]
+        if not s[-1, -1]:
+            continue
+        jj = idx[int(mesh["fmi"]):int(mesh["fmi"]) + 3 * nt].astype(np.int64) + int(sort["vo"])
+        rec = vtx[fmt][jj]
+        uv = rec[:, 20:28].copy().view("<f4").reshape(nt, 3, 2).astype(np.float64) * (float(w), float(hh))
+        if not np.isfinite(uv).all():
+            raise ValueError("RTL bake: non-finite lightmap UV")
+        pi = rec[:, 0:4].copy().view("<u4").ravel().reshape(nt, 3)
+        ni = rec[:, 4:8].copy().view("<u4").ravel().reshape(nt, 3)
+        lo, hi = uv.min(axis=1), uv.max(axis=1)
+        det = (uv[:, 1, 1] - uv[:, 2, 1]) * (uv[:, 0, 0] - uv[:, 2, 0]) + (uv[:, 2, 0] - uv[:, 1, 0]) * (uv[:, 0, 1] - uv[:, 2, 1])
+        x0 = np.floor(np.clip(lo[:, 0] - 2, 0.0, w - 1)).astype(np.int64)
+        x1 = np.floor(np.clip(hi[:, 0] + 2, 0.0, w - 1)).astype(np.int64)
+        y0 = np.floor(np.clip(lo[:, 1] - 2, 0.0, hh - 1)).astype(np.int64)
+        y1 = np.floor(np.clip(hi[:, 1] + 2, 0.0, hh - 1)).astype(np.int64)
+        count = s[y1 + 1, x1 + 1] - s[y0, x1 + 1] - s[y1 + 1, x0] + s[y0, x0]
+        live = ~((hi[:, 0] < 0) | (hi[:, 1] < 0) | (lo[:, 0] >= w) | (lo[:, 1] >= hh)) & (np.abs(det) >= 1e-12) & (count > 0)
+        needp = need[first:first + w * hh].reshape(hh, w)
+        for ti in np.flatnonzero(live):
+            u = uv[ti]
+            yy, xx = np.nonzero(needp[y0[ti]:y1[ti] + 1, x0[ti]:x1[ti] + 1])
+            yy = yy + y0[ti]
+            xx = xx + x0[ti]
+            px, py = xx + 0.5, yy + 0.5
+            d = det[ti]
+            b0 = ((u[1, 1] - u[2, 1]) * (px - u[2, 0]) + (u[2, 0] - u[1, 0]) * (py - u[2, 1])) / d
+            b1 = ((u[2, 1] - u[0, 1]) * (px - u[2, 0]) + (u[0, 0] - u[2, 0]) * (py - u[2, 1])) / d
+            bary = np.stack([b0, b1, 1.0 - b0 - b1], axis=1)
+            dist = np.zeros(len(px))
+            outside = bary.min(axis=1) < -1e-8
+            if outside.any():
+                cand = np.empty((3, len(px)))
+                ts = np.empty((3, len(px)))
+                for k in range(3):
+                    nk = (k + 1) % 3
+                    ex, ey = u[nk, 0] - u[k, 0], u[nk, 1] - u[k, 1]
+                    l2 = ex * ex + ey * ey
+                    t = np.clip(((px - u[k, 0]) * ex + (py - u[k, 1]) * ey) / l2, 0.0, 1.0) if l2 else np.zeros(len(px))
+                    gx, gy = px - u[k, 0] - t * ex, py - u[k, 1] - t * ey
+                    cand[k] = gx * gx + gy * gy
+                    ts[k] = t
+                kb = cand.argmin(axis=0)
+                col = np.arange(len(px))
+                dist = np.where(outside, cand[kb, col], 0.0)
+                nb = np.zeros_like(bary)
+                nb[col, kb] = 1.0 - ts[kb, col]
+                nb[col, (kb + 1) % 3] = ts[kb, col]
+                bary = np.where(outside[:, None], nb, bary)
+            tex = first + yy * w + xx
+            take = (dist <= 2.25) & ~(dist >= best[tex].astype(np.float64) - 1e-9)
+            if not take.any():
+                continue
+            tex, bary = tex[take], bary[take]
+            best[tex] = dist[take].astype(np.float32)
+            wp = pos[pi[ti]].astype(np.float64)
+            wn = nrm[ni[ti]].astype(np.float64)
+            nvec = np.zeros((len(tex), 3))
+            for k in range(3):
+                acc = np.zeros(len(tex), np.float32)  # float32 accumulation, like the converter's float receiver array
+                for m in range(3):
+                    acc = acc + (bary[:, m] * wp[m, k]).astype(np.float32)
+                    nvec[:, k] = nvec[:, k] + bary[:, m] * wn[m, k]
+                rpos[tex, k] = acc
+            nl = np.sqrt((nvec * nvec).sum(axis=1))
+            rnrm[tex] = np.where((nl > 1e-9)[:, None], nvec / np.where(nl > 1e-9, nl, 1.0)[:, None], 0.0).astype(np.float32)
+    return np.isfinite(best), rpos, rnrm, skipped
+
+
+def apply_rtl_bake(r2, raw_f, ty, fl, out_f, ofl, new_of, v1, tex_orig, tex_old, weights, sky, mode, edge_min, linear):
+    """Independent model of rule 20f (--rtl-bake edge|all). Mutates tex_old (baked slots removed) and sky (plane A of the lightmap,
+    lump 0x62), returns statistics.
+    A real-time point/spot light is a candidate when its FINAL record is still flag 0x8 at an RTL byte (array index - v1 <= 254). Only
+    lights WITH R2 flag 0x10 are baked (R1 makes dynamic shadow maps for flag 0x8 lights without 0x10, those keep the RTL path), and not
+    when more than a quarter of their lit slots would exceed the lightmap's 4.0 energy cap; edge mode needs >= edge_min (8) 'edge' texels.
+    A baked light adds colour * attenuation(final polynomial) * facing * linear(B) to plane A (energy encoded as rgb * (alpha + 1) / 64)."""
+    n = len(ty)
+    hdr = r2.arr(0x53, "<u4,<u2,<u2")
+    pages, first = [], 0
+    for t, w, h in hdr:
+        if t == 1 and int(w) * int(h):
+            pages.append((first, int(w), int(h)))
+            first += int(w) * int(h)
+        else:
+            pages.append(None)
+    texels = first
+    nw = new_of
+    final_ok = ((ty == 1) | (ty == 2)) & ((fl & 8) != 0) & (nw >= 0) & (nw - v1 >= 0) & (nw - v1 <= 254)
+    final_ok[final_ok] = (ofl[nw[final_ok]] & 8) != 0
+    ok = np.flatnonzero(final_ok)
+    F = np.zeros((n, 25), np.float32)
+    F[ok] = out_f[nw[ok]]
+    org = F[:, 0:3].astype(np.float64)
+    inten = F[:, 3:6].astype(np.float64)
+    radius, c0, c1, c2 = (F[:, 18].astype(np.float64), F[:, 19].astype(np.float64), F[:, 20].astype(np.float64), F[:, 21].astype(np.float64))
+    den = radius * c1 + radius * radius * c2
+    rational = (radius > 0) & (np.abs(den) > 1e-12)
+    safe = np.where(rational, den, 1.0)
+    A = np.where(rational, -1.0000005 * (radius * c1) / safe, 0.0)
+    Bq = np.where(rational, -1.0000005 * (radius * radius * c2) / safe, 0.0)
+
+    def attenuation(i, d2, d):
+        r2_ = radius[i] * radius[i]
+        sn = np.minimum(1.0, np.maximum(1.0 / np.where(rational[i], r2_, 1.0), d2 / np.where(rational[i], r2_, 1.0)))
+        return np.clip(np.where(rational[i], 1.0 + A[i] * np.sqrt(sn) + Bq[i] * sn, c0[i] + c1[i] * d + c2[i] * d2), 0.0, 1.0)
+
+    cand = (tex_orig >= 0) & final_ok[np.clip(tex_orig, 0, n - 1)]
+    need = cand.any(axis=1)
+    reached, rpos, rnrm, skipped = rtl_bake_receivers(r2, pages, need)
+    tx = np.zeros(texels, np.int64); tyc = np.zeros(texels, np.int64); tw = np.zeros(texels, np.int64); th = np.zeros(texels, np.int64)
+    tbase = np.zeros(texels, np.int64)
+    for pg in pages:
+        if pg is None:
+            continue
+        f0, w, h = pg
+        tx[f0:f0 + w * h] = np.tile(np.arange(w), h)
+        tyc[f0:f0 + w * h] = np.repeat(np.arange(h), w)
+        tw[f0:f0 + w * h] = w
+        th[f0:f0 + w * h] = h
+        tbase[f0:f0 + w * h] = 8 * f0 + 4 * (np.arange(w * h))
+    lw = linear[weights]
+    total = np.zeros(n, np.int64); hot = np.zeros(n, np.int64); edge = np.zeros(n, np.int64)
+    p64 = rpos.astype(np.float64)
+    nrm64 = rnrm.astype(np.float64)
+    for s in range(4):
+        t = np.flatnonzero(cand[:, s] & reached & (lw[:, s] > 0))
+        if not len(t):
+            continue
+        i = tex_orig[t, s]
+        w_ = lw[t, s]
+        np.add.at(total, i, 1)
+        h = org[i] - p64[t]
+        hd2 = (h * h).sum(axis=1)
+        hd = np.sqrt(np.maximum(hd2, 1e-12))
+        hf = np.clip((h * nrm64[t]).sum(axis=1) / hd, 0.0, 1.0)
+        ha = attenuation(i, hd2, hd)
+        np.add.at(hot, i, (inten[i].max(axis=1) * ha * hf * w_ > 3.5).astype(np.int64))
+        cn = np.ones(len(t))
+        spot = ty[i] == 2
+        if spot.any():
+            cn[spot] = spot_cone(raw_f, i[spot], p64[t[spot]])
+        live = cn >= 0.25
+        vis = np.minimum(1.0, w_ / np.where(live, cn, 1.0))
+        partial = live & (vis < 0.8)
+        np.add.at(edge, i[partial], 1)
+        hard = live & ~partial
+        ti_, ii_ = t[hard], i[hard]
+        found = np.zeros(len(ti_), bool)
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx, ny = tx[ti_] + dx, tyc[ti_] + dy
+            inside = (nx >= 0) & (ny >= 0) & (nx < tw[ti_]) & (ny < th[ti_])
+            nt = np.where(inside, ti_ + dx + dy * tw[ti_], 0)
+            inside &= reached[nt]
+            q = p64[nt]
+            dd = np.sqrt(((q - org[ii_]) ** 2).sum(axis=1))
+            inside &= ~((radius[ii_] > 0) & (dd > radius[ii_]))
+            ncn = np.ones(len(ti_))
+            sp = inside & (ty[ii_] == 2)
+            if sp.any():
+                ncn[sp] = spot_cone(raw_f, ii_[sp], q[sp])
+            inside &= ncn >= 0.25
+            dn = (rnrm[ti_, 0] * rnrm[nt, 0] + rnrm[ti_, 1] * rnrm[nt, 1]) + rnrm[ti_, 2] * rnrm[nt, 2]  # float32 products and sums, like the converter
+            inside &= dn.astype(np.float64) >= 0.9
+            nwt = np.zeros(len(ti_))
+            for ss in range(4):
+                nwt = np.where(tex_orig[nt, ss] == ii_, lw[nt, ss], nwt)
+            found |= inside & (nwt < 0.05 * ncn)
+        np.add.at(edge, ii_[found], 1)
+    emin = int(edge_min) if edge_min > 0 else 8
+    vsm = ((fl & 0x10) == 0) & (not LIGHT_OPT["bake_vsm"])
+    too_hot = (total > 0) & (hot * 4 > total) & (not LIGHT_OPT["bake_hot"])
+    bake = final_ok & ~vsm & ~too_hot & (np.ones(n, bool) if mode == 2 else edge >= emin)
+    smooth_k = min(max(int(LIGHT_OPT["bake_smooth"]), 0), 2)
+    kern = [2.0, 1.0] if smooth_k == 1 else [6.0, 4.0, 1.0]
+
+    def smooth_weights(t, i, own):
+        """Binomial low-pass of the linear visibility of light i over the same-surface neighbour texels of t (reached, normal dot >= 0.9,
+        within 4 units of the texel's plane; a neighbour without the light counts as 0 inside the light radius and is left out beyond it);
+        float32 products and sums for the geometry tests and double accumulation in the converter's (dy, dx) order."""
+        acc = np.zeros(len(t))
+        wacc = np.zeros(len(t))
+        for dy in range(-smooth_k, smooth_k + 1):
+            for dx in range(-smooth_k, smooth_k + 1):
+                kw = kern[abs(dx)] * kern[abs(dy)]
+                if dx == 0 and dy == 0:
+                    acc = acc + kw * own
+                    wacc = wacc + kw
+                    continue
+                inside = (tx[t] + dx >= 0) & (tyc[t] + dy >= 0) & (tx[t] + dx < tw[t]) & (tyc[t] + dy < th[t])
+                nt = np.where(inside, t + dx + dy * tw[t], 0)
+                ok = inside & reached[nt]
+                dn = (rnrm[t, 0] * rnrm[nt, 0] + rnrm[t, 1] * rnrm[nt, 1]) + rnrm[t, 2] * rnrm[nt, 2]
+                ok &= dn.astype(np.float64) >= 0.9
+                off = (rnrm[t, 0] * (rpos[nt, 0] - rpos[t, 0]) + rnrm[t, 1] * (rpos[nt, 1] - rpos[t, 1])) + rnrm[t, 2] * (rpos[nt, 2] - rpos[t, 2])
+                ok &= np.abs(off).astype(np.float64) <= 4.0
+                wn = np.zeros(len(t))
+                found = np.zeros(len(t), bool)
+                for ss in range(4):
+                    hit = ~found & (tex_orig[nt, ss] == i)
+                    wn = np.where(hit, lw[nt, ss], wn)
+                    found |= hit
+                ex = rpos[nt, 0].astype(np.float64) - org[i, 0]
+                ey = rpos[nt, 1].astype(np.float64) - org[i, 1]
+                ez = rpos[nt, 2].astype(np.float64) - org[i, 2]
+                beyond = (radius[i] > 0) & (ex * ex + ey * ey + ez * ez > radius[i] * radius[i])
+                ok &= found | ~beyond
+                acc = acc + np.where(ok, kw * wn, 0.0)
+                wacc = wacc + np.where(ok, kw, 0.0)
+        return np.where(wacc > 0, acc / np.where(wacc > 0, wacc, 1.0), own)
+
+    # accumulate in slot order 0..3, encode plane A
+    add = np.zeros((texels, 3))
+    anyb = np.zeros(texels, bool)
+    baked_slots = unreached = 0
+    for s in range(4):
+        i = tex_orig[:, s]
+        sel = cand[:, s] & bake[np.clip(i, 0, n - 1)]
+        t = np.flatnonzero(sel)
+        wv = lw[t, s].copy()
+        if smooth_k > 0 and len(t):
+            rr = reached[t]
+            if rr.any():
+                wv[rr] = smooth_weights(t[rr], i[t[rr]], wv[rr])
+        zero = t[wv <= 0]
+        tex_old[zero, s] = -1
+        keep = wv > 0
+        t, wv = t[keep], wv[keep]
+        r_ = reached[t]
+        unreached += int((~r_).sum())
+        t, wv = t[r_], wv[r_]
+        i = i[t]
+        h = org[i] - p64[t]
+        d2 = (h * h).sum(axis=1)
+        d = np.sqrt(d2)
+        far = d >= 1e-6
+        t, i, h, d2, d, wv = t[far], i[far], h[far], d2[far], d[far], wv[far]
+        facing = np.clip((h * nrm64[t]).sum(axis=1) / d, 0.0, 1.0)
+        k = attenuation(i, d2, d) * facing * wv
+        add[t] += inten[i] * k[:, None]
+        tex_old[t, s] = -1
+        anyb[t] = True
+        baked_slots += len(t)
+    t = np.flatnonzero(anyb)
+    skyarr = np.frombuffer(sky, np.uint8)
+    px = skyarr[tbase[t][:, None] + np.arange(4)].astype(np.float64)
+    lin = np.where(px[:, :3] / 255.0 <= 0.04045, px[:, :3] / 255.0 / 12.92, ((px[:, :3] / 255.0 + 0.055) / 1.055) ** 2.4)
+    e = lin * ((px[:, 3:4] + 1) / 64.0) + add[t]
+    peak = np.maximum(e.max(axis=1), 1.0 / 64)
+    clipped = peak > 4.0
+    e = np.where(clipped[:, None], e * (4.0 / peak)[:, None], e)
+    alpha = np.clip(np.ceil(np.minimum(peak, 4.0) * 64.0) - 1, 0, 255)
+    v = np.clip(np.minimum(e, 4.0) / ((alpha + 1) / 64.0)[:, None], 0.0, 1.0)
+    srgb = np.where(v <= 0.0031308, v * 12.92, 1.055 * v ** (1 / 2.4) - 0.055)
+    skyarr[tbase[t][:, None] + np.arange(3)] = np.floor(255.0 * srgb + 0.5).astype(np.uint8)
+    skyarr[tbase[t] + 3] = alpha.astype(np.uint8)
+    return {"lights_baked": int(bake.sum()), "lights_kept": int((final_ok & ~bake).sum()), "edge_min": emin, "candidate_slots": int(cand.sum()),
+            "baked_slots": baked_slots, "texels_changed": int(len(t)), "clipped": int(clipped.sum()), "unreached": unreached,
+            "bm_meshes": skipped, "baked_ids": np.flatnonzero(bake)}
 
 
 def expected_lighting(r2, wl_flag2):
@@ -661,6 +1016,7 @@ def expected_lighting(r2, wl_flag2):
     reordered = False
     do_rtl = bool(LIGHT_OPT["rtl"] and have)
     visibility_info = None
+    tex_orig = tex_old.copy() if tex_old is not None else None  # slots before the visibility quantizer (rule 20f bakes from these)
     if do_rtl:
         visibility_info = quantize_rtl_visibility(r2, raw, tex_old, source_weights,
                                                    RTL_VISIBILITY_CUTOFF, linear_visibility)
@@ -704,6 +1060,11 @@ def expected_lighting(r2, wl_flag2):
         ofl[k] = f
     out[:, 12:24] = inten.view("u1").reshape(-1, 12)
     out[:, 88:92] = ofl.astype("<i4").view("u1").reshape(-1, 4)
+    bake_info = None
+    if do_rtl and LIGHT_OPT["bake"] and len(sky) == texels * 8:
+        bake_info = apply_rtl_bake(r2, np.ascontiguousarray(raw).view("<f4").reshape(n, 25), ty, fl,
+                                   np.ascontiguousarray(out).view("<f4").reshape(len(out), 25), ofl, new_of, v1, tex_orig, tex_old,
+                                   source_weights, sky, LIGHT_OPT["bake"], LIGHT_OPT["bake_edge_min"], linear_visibility)
     # probes
     pr = bytearray(r2.raw(0x65).tobytes())
     pa = np.frombuffer(pr, np.uint8).reshape(-1, 48)
@@ -729,7 +1090,78 @@ def expected_lighting(r2, wl_flag2):
         nwv = np.where((slot >= 0) & (nwv >= 0) & (nwv <= 254) & final_realtime, nwv, 255)
         nwv.sort(axis=1)  # 255 (none) last, ascending
         rtl_out = nwv.astype(np.uint8).tobytes()
-    return out.tobytes(), bytes(pr), rtl_out, {"E": E, "S": S, "head": head, "v1": v1, "reordered": reordered, "sky": bytes(sky), "sun_alpha": sun_alpha, "visibility": visibility_info}
+    return out.tobytes(), bytes(pr), rtl_out, {"E": E, "S": S, "head": head, "v1": v1, "reordered": reordered, "sky": bytes(sky), "sun_alpha": sun_alpha, "visibility": visibility_info, "bake": bake_info}
+
+def expected_prop_fade(r2, origin, fade, keep):
+    """Independent model of rule 23: returns (fade distance float32 per prop, number of far-origin props, props without usable bounds).
+    World bounds of a prop = union of the bounds (lump 0x79, 32 byte records parallel to the cell object references 0x78) of every
+    reference whose id is propBase + prop index, propBase = (levelinfo word 2 + 63) & ~63. A prop whose origin is farther from the centre of
+    those bounds than their half-diagonal + 256 gets R2 fade + origin-to-centre distance (65536 when the R2 value is <= 0)."""
+    n = len(origin)
+    li = bytes(r2.raw(0x7B))
+    refs = r2.arr(0x78, "<u2")
+    rb = r2.raw(0x79)
+    if len(li) < 12 or len(rb) != len(refs) * 32:
+        return fade.copy(), 0, n
+    base = (struct.unpack_from("<I", li, 8)[0] + 63) & ~63
+    ids = refs.astype(np.int64) - base
+    sel = (refs >= base) & (ids < n)
+    bb = np.frombuffer(rb.tobytes(), "<f4").reshape(-1, 8)[sel]
+    mn = np.full((n, 3), np.inf, np.float32)
+    mx = np.full((n, 3), -np.inf, np.float32)
+    np.minimum.at(mn, ids[sel], bb[:, 0:3])
+    np.maximum.at(mx, ids[sel], bb[:, 4:7])
+    has = np.zeros(n, bool)
+    has[ids[sel]] = True
+    has &= np.isfinite(mn).all(axis=1) & np.isfinite(mx).all(axis=1) & ~(np.abs(mn) > 1e6).any(axis=1) & ~(np.abs(mx) > 1e6).any(axis=1)
+    with np.errstate(invalid="ignore", over="ignore"):  # props without finite bounds (+-inf records) are excluded through `has`
+        centre = 0.5 * (mn.astype(np.float64) + mx.astype(np.float64))
+        off = origin.astype(np.float64) - centre
+        half = np.sqrt((0.25 * (mx.astype(np.float64) - mn.astype(np.float64)) ** 2).sum(axis=1))
+        dist = np.sqrt((off * off).sum(axis=1))
+        far = has & (dist > half + 256.0)
+        raised = np.where(fade > 0, fade + dist.astype(np.float32), np.float32(65536.0)).astype(np.float32)
+    out = fade.copy() if keep else np.where(far, raised, fade).astype(np.float32)
+    return out, int(far.sum()), int((~has).sum())
+
+
+# Rule 22 / rule 24 target materials (vcalpha.cpp kOpaqueVertexAlphaMaterials / kEmitterGlowMaterials; keep in sync with r2tex).
+OPAQUE_VERTEX_ALPHA_MATERIALS = frozenset((
+    "world/beacon/beacon_metal_panel_grey_02/beacon_metal_panel_grey_02_vc", "world/concrete/concrete_broken_surface",
+    "world/concrete/concrete_dam_01", "world/concrete/dam_concrete_01", "world/metal/ext_building_panel_imc_02",
+    "world/metal/ext_building_panel_imc_03", "world/metal/metal_wall_panels_clean_vc", "world/ola/sewer_lab_trim_02",
+    "world/ola/sewer_lab_trim_04", "world/ola/sewer_lab_trim_05", "world/ola/sewer_padded_ceiling_panels",
+    "world/ola/sewer_rubber_floor_panel_01", "world/signs/beacon_tileable_decal_01", "world/timeshift/concrete/concrete_gap_wall_01",
+    "world/timeshift/rock/ts_rockwall01_vc"))
+EMITTER_GLOW_MATERIALS = frozenset(("world/vr_training/vr_light_trim_01_totrans",))
+
+
+def expected_vertex_edits(r2):
+    """Rules 22 and 24 on the R2 data: for every vertex lump type, the sorted unique vertex indices (sort vertex offset + mesh index) used by
+    R2 meshes whose material is a rule 22 target (alpha forced to 255) and a rule 24 target (alpha stored as the albedo coordinate)."""
+    m2 = r2.arr(0x50, MESH_DT_R2)
+    so2 = r2.arr(0x52, SORT_DT)
+    names = mesh_material_names(r2, m2, so2)
+    idx = r2.arr(0x4F, "<u2")
+    found = {t: ([], []) for t in range(4)}
+    for mi, m in enumerate(m2):
+        nt = int(m["nt"])
+        which = 0 if names[mi] in OPAQUE_VERTEX_ALPHA_MATERIALS else 1 if names[mi] in EMITTER_GLOW_MATERIALS else -1
+        if not nt or which < 0:
+            continue
+        fmi = int(m["fmi"])
+        if fmi + 3 * nt > len(idx):
+            continue
+        found[(int(m["fl"]) >> 9) & 3][which].append(idx[fmi:fmi + 3 * nt].astype(np.int64) + int(so2[int(m["ms"])]["vo"]))
+    res = {}
+    for t in range(4):
+        n0 = len(r2.raw(VTX_LUMP[t])) // VTX_STRIDE[t]
+        pair = []
+        for lst in found[t]:
+            v = np.unique(np.concatenate(lst)) if lst else np.zeros(0, np.int64)
+            pair.append(v[v < n0])
+        res[t] = tuple(pair)
+    return res
 
 
 def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", physics="stub", cubemap_scale=4.0,
@@ -768,8 +1200,12 @@ def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", ph
     rtl = r1.raw(0x69)
     k = len(rtl) / max(texels, 1)
     elw, elp, elr, einfo = expected_lighting(r2, wl_flag2)
+    bk = einfo["bake"]
+    if bk is not None:
+        print("  note  rule 20f model (%s): %d lights baked, %d kept as RTL (edge texel minimum %d); %d candidate slots, %d slots baked into plane A over %d texels (%d above the encodable 4.0), %d baked slots without a receiver kept as RTL; %d _bm meshes skipped as receivers" %
+              ("all" if LIGHT_OPT["bake"] == 2 else "edge", bk["lights_baked"], bk["lights_kept"], bk["edge_min"], bk["candidate_slots"], bk["baked_slots"], bk["texels_changed"], bk["clipped"], bk["unreached"], bk["bm_meshes"]))
     if elr is not None:
-        C.ok(len(rtl) == texels * 4 and bytes(rtl) == elr, "RTL lump = independent decode of R2 9 byte texels (4 bytes per texel, slot = world index - %d, min weight %d, %s)" % (einfo["v1"], RTL_VISIBILITY_CUTOFF, "reordered by contribution potential" if einfo["reordered"] else "original order"))
+        C.ok(len(rtl) == texels * 4 and bytes(rtl) == elr, "RTL lump = independent decode of R2 9 byte texels (4 bytes per texel, slot = world index - %d, min weight %d, %s%s)" % (einfo["v1"], RTL_VISIBILITY_CUTOFF, "reordered by contribution potential" if einfo["reordered"] else "original order", "; rule 20f: %d lights baked into lightmap plane A leave the lists" % bk["lights_baked"] if bk is not None else ""))
         C.ok(1 <= k <= 4, "RTL bytes per texel in 1..4 (%.2f)" % k)
     else:
         C.ok(len(rtl) == texels * rtl_bytes or (len(rtl) == 0 and len(r2.raw(0x69)) == 0), "RTL lump %d bytes = %d per texel" % (len(rtl), rtl_bytes))
@@ -785,7 +1221,7 @@ def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", ph
     C.ok(bool((a1 == a2[:, :16]).all()), "light probe refs equal first 16 bytes of R2 records")
     for i in (0x66, 0x67):
         C.ok(bytes(r1.raw(i)[:4096]) == bytes(r2.raw(i)[:4096]) and len(r1.raw(i)) == len(r2.raw(i)), "lump %#x unchanged" % i)
-    C.ok(bytes(r1.raw(0x62)) == einfo["sky"], "lightmap 0x62 = R2 with plane B alpha = 255 - 255 * linear(RTL sun slot visibility) on texels with a sun entry%s" % (" (rule 21)" if einfo["sun_alpha"] else " (unchanged)"))
+    C.ok(bytes(r1.raw(0x62)) == einfo["sky"], "lightmap 0x62 = R2 with plane B alpha = 255 - 255 * linear(RTL sun slot visibility) on texels with a sun entry%s%s" % (" (rule 21)" if einfo["sun_alpha"] else " (unchanged)", "; plane A = R2 + the %d baked lights' colour * attenuation * facing * visibility on %d texels, energy re-encoded (rule 20f)" % (bk["lights_baked"], bk["texels_changed"]) if bk is not None else ""))
     C.ok(bytes(r1.raw(0x65)) == elp, "light probes (0x65) = R2 probes with static light slots remapped (R2 world - %d -> R1 world - %d)" % (einfo["E"], einfo["v1"]))
 
     # ---- world lights
@@ -963,7 +1399,10 @@ def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", ph
     if props != "keep":
         sc1 = f32(p1, 0x48, 1).ravel(); sc2 = f32(p2, 0x18, 1).ravel()
         C.ok(bool((sc1[hide_] == np.float32(0.0001)).all()) and bool((sc1[~hide_] == sc2[~hide_]).all()), "rule 16: %d props hidden (scale 0.0001), the rest keep their scale" % int(hide_.sum()))
-    C.ok(bool((f32(p1, 0x24, 1) == f32(p2, 0x24, 1)).all()) and bool((f32(p1, 0x28, 1) == f32(p2, 0x24, 1)).all()), "fade min/max = R2 value at +0x24")
+    exp_fade, far_n, noref_n = expected_prop_fade(r2, f32(p2, 0, 3), f32(p2, 0x24, 1).ravel(), PROP_OPT["keep_fade"])
+    C.ok(bool((f32(p1, 0x24, 1).ravel().view("<u4") == exp_fade.view("<u4")).all()) and bool((f32(p1, 0x28, 1).ravel().view("<u4") == exp_fade.view("<u4")).all()),
+         "fade min/max = R2 value at +0x24" + ("" if PROP_OPT["keep_fade"] else
+         "; rule 23: raised for the %d props whose origin is farther than half-diagonal + 256 from the union of their cell object-reference bounds (R2 <= 0 -> 65536, else R2 + origin-to-centre distance); %d props have no usable cell references" % (far_n, noref_n)))
     C.ok(bool((p1[:, 0x2C:0x38] == p2[:, 0x28:0x34]).all()), "lighting origin mapped bitwise (+0x28 -> +0x2C)")
     C.ok(bool((f32(p1, 0x38, 1) == 1.0).all()), "forced_fade_scale 1.0")
     C.ok(bool((p1[:, 0x3C:0x40] == 0).all()) and bool((p1[:, 0x44:0x48] == 0).all()), "cpu/gpu level and disable_x360 zero")
@@ -1095,12 +1534,23 @@ def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", ph
         okt = True if tcol_ is None else bool((a[:, tcol_] < nN).all() and (a[:, tcol_ + 1] < nN).all())
         C.ok(okp and okn and okt, "vertex lump 0x%02X: all %d records have position < %d, normal < %d%s" % (VTX_LUMP[t_], len(a), nP, nN, "" if tcol_ is None else ", tangent S/T < %d (plain indices, no flag bit)" % nN))
     C.ok(len(r1.raw(0x4B)) == 0 or len(r1.raw(0x4B)) % 28 == 0, "blinn-phong lump size ok")
+    edits = expected_vertex_edits(r2)
     for t_ in range(4):
         stride = VTX_STRIDE[t_]
-        original = r2.raw(VTX_LUMP[t_]).reshape(-1, stride)[:, 16:20]
+        o2 = r2.raw(VTX_LUMP[t_]).reshape(-1, stride)
         converted = r1.raw(VTX_LUMP[t_]).reshape(-1, stride)
-        rgba_ok = len(converted) >= len(original) and bool((original == converted[:len(original), 16:20]).all())
-        C.ok(rgba_ok, "vertex lump 0x%02X: original RGBA bytes at +16 preserved" % VTX_LUMP[t_])
+        n0 = len(o2)
+        exp_rgba = o2[:, 16:20].copy()
+        exp_uv = o2[:, 8:16].copy()
+        v22, v24 = edits[t_]
+        exp_rgba[v22, 3] = 255
+        if len(v24):
+            u = ((o2[v24, 19].astype(np.float32) + np.float32(0.5)) / np.float32(256.0)).astype("<f4")
+            exp_uv[v24, 0:4] = u.view(np.uint8).reshape(-1, 4)
+            exp_uv[v24, 4:8] = np.frombuffer(np.float32(0.5).tobytes(), np.uint8)
+            exp_rgba[v24, 3] = 255
+        rgba_ok = len(converted) >= n0 and bool((converted[:n0, 16:20] == exp_rgba).all()) and bool((converted[:n0, 8:16] == exp_uv).all())
+        C.ok(rgba_ok, "vertex lump 0x%02X: original RGBA (+16) and albedo UV (+8) preserved except rule 22 (alpha 255 on %d vertices of the vertex-tinted materials) and rule 24 (glow ramp coordinate (a + 0.5) / 256, 0.5 and alpha 255 on %d vertices)" % (VTX_LUMP[t_], len(v22), len(v24)))
     nr2 = len(r2.raw(0x1E)) // 12
     import frame_check
     C.ok(bytes(r1.raw(0x1E)[:nr2 * 12].tobytes()) == bytes(r2.raw(0x1E).tobytes()), "existing vertex normal entries unchanged (first %d), %d appended" % (nr2, nN - nr2))
@@ -1172,24 +1622,59 @@ def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", ph
         zf = None; zbad = str(e)
     C.ok(zf is not None and zbad is None, "pakfile (0x28) is a valid zip (python zipfile testzip)", str(zbad))
     ncube = len(r1.raw(0x2A)) // 16
-    cm_ent = r1.arr(0x2A, np.dtype([("o", "<i4", 3), ("u", "<u4")]))
+    cm_dt = np.dtype([("o", "<i4", 3), ("u", "<u4")])
+    cm_ent = r1.arr(0x2A, cm_dt)
+    cm2 = r2.arr(0x2A, cm_dt)
+    frames = len(cm2)
+    try:
+        r2_names = zipfile.ZipFile(io.BytesIO(r2.raw(0x28).tobytes())).namelist()
+    except Exception:  # pragma: no cover
+        r2_names = []
+    src_names = [n for n in r2_names if n.endswith("/cubemaps.hdr.vtf")]
     if zf is not None and ncube:
         names = {i.filename: i for i in zf.infolist()}
         C.ok(all(i.compress_type == 0 for i in zf.infolist()), "all pakfile entries are stored (method 0)")
-        dirs = {n.rsplit("/", 1)[0] for n in names}
-        C.ok(len(dirs) == 1 and next(iter(dirs)).startswith("materials/maps/"), "all entries live in one materials/maps/<map> directory %s" % dirs)
-        d0 = next(iter(dirs)) if dirs else ""
+        d0 = src_names[0].rsplit("/", 1)[0] if src_names else ""
+        C.ok(len(src_names) == 1 and d0.startswith("materials/maps/"), "the R2 pakfile has exactly one cubemaps.hdr.vtf, in a materials/maps/<map> directory (%s)" % d0)
+        extra_cm = cm_ent[frames:]
+        C.ok(len(cm_ent) >= frames and bytes(cm_ent[:frames].tobytes()) == bytes(cm2.tobytes()), "rule 13c: the first %d cubemap records (0x2A) are the R2 records" % frames)
+        known_u = {int(u) for u in cm2["u"]}
+        origins = [tuple(int(v) for v in o) for o in cm_ent["o"]]
+        C.ok(all(int(u) in known_u for u in extra_cm["u"]) and len(set(origins)) == len(origins),
+             "rule 13c: the %d extra cubemap samples copy the trailing word of an R2 record and every sample origin is unique (the c<x>_<y>_<z> names)" % len(extra_cm))
+        kept = {n for n in r2_names if n not in src_names}
         expect = {d0 + "/cubemapdefault.vtf", d0 + "/cubemapdefault.hdr.vtf"}
         for o in cm_ent["o"]:
             base = "%s/c%d_%d_%d" % (d0, o[0], o[1], o[2])
             expect |= {base + ".vtf", base + ".hdr.vtf"}
-        C.ok(set(names) == expect, "pakfile holds exactly cubemapdefault + c<x>_<y>_<z> .vtf/.hdr.vtf for each of the %d 0x2A entries (no R2 cubemaps.hdr.vtf)" % ncube,
-             "extra %s missing %s" % (sorted(set(names) - expect)[:3], sorted(expect - set(names))[:3]))
+        cube_files = set(expect)
+        # rule 13d: every material sort that carries a cubemap needs the patch material <map dir>/<material>_<x>_<y>_<z>.vmt
+        patch = {}
+        if cubemaps == "split":
+            env_dir = d0[len("materials/"):] + "/"
+            for s in r1.arr(0x52, SORT_DT):
+                ci, td = int(s["cm"]), int(s["td"])
+                mat = texdata_name(r1, td)
+                if ci < 0 or ci >= frames or mat is None:
+                    continue
+                o = cm2[ci]["o"]
+                path = "%s/%s_%d_%d_%d.vmt" % (d0, mat, o[0], o[1], o[2])
+                patch.setdefault(path, ("\"patch\"\r\n{\r\n\t\"include\"\t\t\"materials/%s.vmt\"\r\n\t\"replace\"\r\n\t{\r\n\t\t\"$envmap\"\t\t\"%sc%d_%d_%d\"\r\n\t}\r\n}\r\n" % (mat, env_dir, o[0], o[1], o[2])).encode("ascii"))
+        expect |= set(patch) | kept
+        if cubemaps == "split":
+            C.ok(set(names) == expect and all(zf.read(p) == c for p, c in patch.items()),
+                 "rule 13d: pakfile holds exactly cubemapdefault + c<x>_<y>_<z> .vtf/.hdr.vtf for each of the %d 0x2A entries + %d patch materials <material>_<x>_<y>_<z>.vmt (include the base material, replace $envmap) for the (material, cubemap) pairs of the sorts%s (no R2 cubemaps.hdr.vtf)" % (ncube, len(patch), " + %d other R2 entries" % len(kept) if kept else ""),
+                 "extra %s missing %s" % (sorted(set(names) - expect)[:3], sorted(expect - set(names))[:3]))
+            C.ok(all(n.startswith(d0 + "/") for n in names if n not in kept), "rule 13d: every generated entry lives under %s (patch materials in the sub-directory of their material name)" % d0)
+        else:
+            C.ok(set(names) == expect and all(n.rsplit("/", 1)[0] == d0 for n in names if n not in kept),
+                 "all generated entries live in the one directory %s: cubemapdefault + c<x>_<y>_<z> .vtf/.hdr.vtf for each of the %d 0x2A entries%s (no R2 cubemaps.hdr.vtf, no patch materials)" % (d0, ncube, " + %d other R2 entries" % len(kept) if kept else ""),
+                 "extra %s missing %s" % (sorted(set(names) - expect)[:3], sorted(expect - set(names))[:3]))
         def vh(d):
             hs, w, h, fl, fr, fmt, mips, start = struct.unpack_from("<I", d, 12)[0], *struct.unpack_from("<HH", d, 16), struct.unpack_from("<I", d, 20)[0], struct.unpack_from("<H", d, 24)[0], struct.unpack_from("<I", d, 0x34)[0], d[0x38], 0
             return dict(sig=d[:4], ver=struct.unpack_from("<II", d, 4), hs=hs, w=w, h=h, flags=fl, frames=fr, fmt=fmt, mips=mips, depth=struct.unpack_from("<H", d, 0x3E)[0], nres=struct.unpack_from("<I", d, 0x44)[0])
         okh = True; bad = []
-        for n in sorted(names):
+        for n in sorted(cube_files):
             d = zf.read(n); hv = vh(d); hdr = n.endswith(".hdr.vtf")
             if hdr:
                 want = dict(sig=b"VTF\0", ver=(7, 5), hs=96, w=64, h=64, flags=0x620C, frames=1, fmt=0, mips=7, depth=256, nres=2)
@@ -1210,7 +1695,7 @@ def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", ph
             t = faces8(zf.read("%s/c%d_%d_%d.hdr.vtf" % (d0, o[0], o[1], o[2]))); cubes.append(r1dec(t)); mina = min(mina, int(t[..., 3].min()))
         C.ok(mina >= 4, "hdr cubemap alpha scale byte >= 4 like the stock files (min %d)" % mina)
         dflt = r1dec(faces8(zf.read(d0 + "/cubemapdefault.hdr.vtf")))
-        err = float(np.abs(dflt - np.mean(cubes, axis=0)).mean() / max(float(dflt.mean()), 1e-9))
+        err = float(np.abs(dflt - np.mean(cubes[:frames], axis=0)).mean() / max(float(dflt.mean()), 1e-9))
         C.ok(err < 0.03, "cubemapdefault.hdr.vtf decodes to the average of the cubemaps (mean relative error %.2f%%)" % (100 * err))
         # DXT5 LDR files: decode and compare with value/4 (linear), alpha 255
         try:
@@ -1242,6 +1727,16 @@ def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", ph
             sd = z2.read(src)
             bc = ctypes.CDLL(os.path.join(here, "analysis", "bc6.dll"))
             w2 = struct.unpack_from("<H", sd, 16)[0]; fr2 = struct.unpack_from("<H", sd, 24)[0]; mp2 = sd[0x38]
+            # rule 13b: per-cubemap scale = clamp(gain * CMA[f], min_scale, cubemap_scale) from the CMA resource (one float per frame)
+            cma = np.zeros(0, "<f4")
+            for i in range(struct.unpack_from("<I", sd, 0x44)[0]):
+                if sd[0x50 + 8 * i:0x50 + 8 * i + 3] == b"CMA":
+                    co = struct.unpack_from("<I", sd, 0x50 + 8 * i + 4)[0]
+                    cn = min(struct.unpack_from("<I", sd, co)[0] // 4, (len(sd) - co - 4) // 4)
+                    cma = np.frombuffer(sd[co + 4:co + 4 + 4 * cn], "<f4")
+            f32_ = np.float32
+            scales = [float(min(f32_(cubemap_scale), max(f32_(CUBE_OPT["min_scale"]), f32_(CUBE_OPT["cma_gain"]) * cma[f])))
+                      if CUBE_OPT["cma_gain"] > 0 and f < len(cma) and np.isfinite(cma[f]) and cma[f] > 0 else float(f32_(cubemap_scale)) for f in range(fr2)]
             sizes = [max((w2 >> m) // 4, 1) ** 2 * 16 for m in range(mp2)]
             start = [struct.unpack_from("<I", sd, 0x50 + 8 * i + 4)[0] for i in range(struct.unpack_from("<I", sd, 0x44)[0]) if sd[0x50 + 8 * i:0x50 + 8 * i + 3] == b"0\0\0"][0]
             off0 = start + sum(sizes[m] * fr2 * 6 for m in range(mp2 - 1, 0, -1))
@@ -1253,13 +1748,13 @@ def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", ph
                     buf = np.zeros(w2 * w2 * 3, np.float32)
                     bc.decode_bc6h(sd[o:o + sizes[0]], w2, w2, buf.ctypes.data_as(ctypes.c_void_p), 0)
                     k = w2 // 64
-                    ref = np.minimum(buf.reshape(64, k, 64, k, 3).astype(np.float64).mean((1, 3)) * cubemap_scale, 4.0)
+                    ref = np.minimum(buf.reshape(64, k, 64, k, 3).astype(np.float64).mean((1, 3)) * scales[f], 4.0)
                     ae = float(np.abs(cubes[f][face] - ref).mean())
                     e = float(np.abs(cubes[f][face] - ref).sum() / max(ref.sum(), 1e-12)); row.append(e)
                     worst_abs = max(worst_abs, ae)
                     if ae > 2e-4: worst = max(worst, e)  # relative error only counts where the absolute error exceeds the 8 bit step at alpha 4 (3.1e-4 / 2)
                 tab.append(row)
-            C.ok(worst < 0.02, "R1 decode of the hdr cubemaps equals the independent BC6H decode * %g (4x4 box, clamp 4.0), same frame/face order; per face: mean absolute error <= 2e-4 (worst %.1e, half the 8 bit step at alpha 4 is 1.5e-4) or relative error < 2%% (worst counted %.2f%%)" % (cubemap_scale, worst_abs, 100 * worst))
+            C.ok(worst < 0.02, "R1 decode of the hdr cubemaps equals the independent BC6H decode * the per-cubemap scale clamp(%g * CMA, %g, %g) = %s (4x4 box, clamp 4.0), same frame/face order; per face: mean absolute error <= 2e-4 (worst %.1e, half the 8 bit step at alpha 4 is 1.5e-4) or relative error < 2%% (worst counted %.2f%%)" % (CUBE_OPT["cma_gain"], CUBE_OPT["min_scale"], cubemap_scale, " ".join("%.3g" % s_ for s_ in scales[:12]), worst_abs, 100 * worst))
             for f, row in enumerate(tab): print("  note  cube %d per-face relative error %% (slot 0..5): %s" % (f, " ".join("%.2f" % (100 * x) for x in row)))
         except Exception as e:
             print("  skip  independent BC6H comparison unavailable: %r" % (e,))
@@ -1275,7 +1770,7 @@ def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", ph
     # ---- lump passthrough for the lumps that must be identical
     print("== pass-through lumps")
     same = []
-    for i in (0x00, 0x01, 0x02, 0x0E if False else 0x18, 0x24, 0x2A, 0x2B, 0x2C, 0x53, 0x5C, 0x5D, 0x5E, 0x5F, 0x63 if False else (0x64 if not csm_rebase else 0x00), 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F, 0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x78, 0x7B, 0x7C, 0x7D, 0x7E, 0x7F):
+    for i in (0x00, 0x01, 0x02, 0x0E if False else 0x18, 0x24, 0x2B, 0x2C, 0x53, 0x5C, 0x5D, 0x5E, 0x5F, 0x63 if False else (0x64 if not csm_rebase else 0x00), 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F, 0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x78, 0x7B, 0x7C, 0x7D, 0x7E, 0x7F):  # 0x2A: rule 13c appends samples, checked with the pakfile
         if i in (0x7C, 0x7D, 0x7E, 0x7F) and (csm_rebase or empty_shadow) and not (i in (0x7C, 0x7D) and csm_rebase and not empty_shadow):
             continue
         a = r1.raw(i); b = r2.raw(i)
@@ -1302,28 +1797,35 @@ def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", ph
         rr_old = r2r[fr:lr]
         keep = rr_old < obj_total
         pref = np.concatenate([[0], np.cumsum(keep)]).astype(np.int64)
-        C.ok(len(n1) == ln - fn and len(r1r) == int(keep.sum()) and (empty_shadow or len(sm1) == lm - fm), "csm rebase: environment %d of %d chosen by content; %d nodes, %d refs (%d dropped beyond meshes + props = %d), %d shadow meshes after dropping %d / %d / %d leading entries" % (pick, len(env2), len(n1), len(r1r), int((~keep).sum()), obj_total, len(sm1), fn, fr, fm))
+        C.ok(len(n1) == ln - fn and len(r1r) == int(keep.sum()) and (empty_shadow or len(sm1) == lm - fm), "csm rebase: environment %d of %d chosen %s; %d nodes, %d refs (%d dropped beyond meshes + props = %d), %d shadow meshes after dropping %d / %d / %d leading entries" % (pick, len(env2), "as the last record (--csm-last-env)" if CSM_OPT["last_env"] else "by content", len(n1), len(r1r), int((~keep).sum()), obj_total, len(sm1), fn, fr, fm))
         exp = n2[fn:ln].copy()
         nc = exp[:, 12]
         fc = np.ascontiguousarray(exp[:, 28:30]).view("<u2").ravel().astype(np.int64)
         fc2 = np.where(nc > 0, fc - fn, fc).astype(np.uint16)
         exp[:, 28:30] = fc2.view("u1").reshape(-1, 2)
-        f0 = np.ascontiguousarray(exp[:, 30:32]).view("<u2").ravel().astype(np.int64) - fr
+        # firstObjRef is only meaningful for nodes whose subtree has references (total > 0); a ref-less node (the dummy environment's single
+        # node, kept with --csm-last-env on mp_coliseum / mp_coliseum_column, whose first ref index lies outside the kept refs) is compared
+        # on everything except that field.
         own = exp[:, 13].astype(np.int64)
         tot = np.ascontiguousarray(exp[:, 14:16]).view("<u2").ravel().astype(np.int64)
-        exp[:, 30:32] = pref[f0].astype(np.uint16).view("u1").reshape(-1, 2)
-        exp[:, 13] = (pref[f0 + own] - pref[f0]).astype(np.uint8)
-        exp[:, 14:16] = (pref[f0 + tot] - pref[f0]).astype(np.uint16).view("u1").reshape(-1, 2)
-        C.ok(bool((n1 == exp).all()), "csm rebase: node array = the chosen environment's R2 nodes, child indices lowered by %d, object ranges re-derived after dropping out-of-range refs" % fn)
-        C.ok(bool((r1r == rr_old[keep]).all()), "csm rebase: object references = R2 refs in range")
+        has_refs = tot > 0
+        f0 = np.where(has_refs, np.ascontiguousarray(exp[:, 30:32]).view("<u2").ravel().astype(np.int64) - fr, 0)
+        C.ok(bool((f0 >= 0).all()) and bool((f0 + tot <= len(rr_old)).all()), "csm rebase: every node's object reference range lies inside the chosen environment's refs")
+        f0 = np.clip(f0, 0, len(rr_old))
+        n1_ok = n1.shape == exp.shape
+        exp[:, 30:32] = np.where(has_refs, pref[f0], np.ascontiguousarray(n1[:, 30:32]).view("<u2").ravel() if n1_ok else 0).astype(np.uint16).view("u1").reshape(-1, 2)
+        exp[:, 13] = np.where(has_refs, pref[np.minimum(f0 + own, len(rr_old))] - pref[f0], own).astype(np.uint8)
+        exp[:, 14:16] = np.where(has_refs, pref[np.minimum(f0 + tot, len(rr_old))] - pref[f0], tot).astype(np.uint16).view("u1").reshape(-1, 2)
+        C.ok(same_arr(n1, exp), "csm rebase: node array = the chosen environment's R2 nodes, child indices lowered by %d, object ranges re-derived after dropping out-of-range refs" % fn)
+        C.ok(same_arr(r1r, rr_old[keep]), "csm rebase: object references = R2 refs in range")
         root = n1[0].copy(); mins = np.ascontiguousarray(root[0:12]).view("<f4"); maxs = np.ascontiguousarray(root[16:28]).view("<f4")
         empty_root = bool((mins > maxs).all()) and len(n1) == 1 and int(root[12]) == 0 and int(root[13]) == 0  # mp_coliseum: the real record is a single empty (inverted +-FLT_MAX) node
         C.ok(empty_root or (bool((mins <= maxs).all()) and (len(n1) == 1 or int(root[12]) > 0)), "csm rebase: node 0 is the chosen environment's root (mins <= maxs, %d children, %d total refs%s)" % (int(root[12]), int(np.ascontiguousarray(root[14:16]).view("<u2")[0]), ", empty single-node tree" if empty_root else ""))
         drop_idx = int(sum(int(x[1]) for x in sm2[:fm])) * 3
         keep_idx = int(sum(int(x[1]) for x in sm2[fm:lm])) * 3
-        C.ok(empty_shadow or (bool((si1 == si2[drop_idx:drop_idx + keep_idx]).all()) and bool((sm1 == sm2[fm:lm]).all())), "csm rebase: shadow meshes and indices = the chosen environment's R2 data (%d leading, %d trailing indices dropped)" % (drop_idx, len(si2) - drop_idx - keep_idx))
+        C.ok(empty_shadow or (same_arr(si1, si2[drop_idx:drop_idx + keep_idx]) and same_arr(sm1, sm2[fm:lm])), "csm rebase: shadow meshes and indices = the chosen environment's R2 data (%d leading, %d trailing indices dropped)" % (drop_idx, len(si2) - drop_idx - keep_idx))
     elif not empty_shadow:
-        C.ok(bool((n1 == n2).all()) and bool((r1r == r2r).all()) and bool((sm1 == sm2).all()) and bool((si1 == si2).all()), "shadow lumps (0x63, 0x64, 0x7E, 0x7F) identical to R2")
+        C.ok(same_arr(n1, n2) and same_arr(r1r, r2r) and same_arr(sm1, sm2) and same_arr(si1, si2), "shadow lumps (0x63, 0x64, 0x7E, 0x7F) identical to R2")
     if empty_shadow:
         C.ok(all(len(r1.raw(i)) == 0 for i in (0x7C, 0x7D, 0x7E, 0x7F)), "rule 17: lumps 0x7C..0x7F are empty")
 
@@ -1396,13 +1898,35 @@ if __name__ == "__main__":
     ap.add_argument("--sun-scale", type=float, default=1.0, help="rule 20e")
     ap.add_argument("--pbr-scale", type=float, default=1.0, help="rule 20e")
     ap.add_argument("--keep-prop-flag10", action="store_true")
+    ap.add_argument("--keep-prop-fade", action="store_true", help="rule 23 disabled in the converter (R2 prop fade distance copied for every prop)")
+    ap.add_argument("--rtl-bake", choices=("none", "edge", "all"), default="none", help="rule 20f: the converter's --rtl-bake mode (provider default: edge)")
+    ap.add_argument("--rtl-bake-edge-min", type=float, default=0.0, help="rule 20f: the converter's --rtl-bake-edge-min (0 = its default 8)")
+    ap.add_argument("--rtl-bake-bm", choices=("skip", "terrain", "none"), default="skip", help="rule 20f: the converter's --rtl-bake-bm (_bm receivers: skip all / only terrain-like names / bake all)")
+    ap.add_argument("--rtl-bake-smooth", type=int, choices=(0, 1, 2), default=0, help="rule 20f: the converter's --rtl-bake-smooth window (0 off, 1 = 3x3, 2 = 5x5)")
+    ap.add_argument("--rtl-bake-hot", choices=("keep", "clip"), default="keep", help="rule 20f: the converter's --rtl-bake-hot")
+    ap.add_argument("--rtl-bake-vsm", action="store_true", help="rule 20f: the converter's --rtl-bake-vsm (lights without R2 flag 0x10 are baked too)")
+    ap.add_argument("--cubemap-cma-gain", type=float, default=1.0, help="rule 13b: the converter's --cubemap-cma-gain")
+    ap.add_argument("--cubemap-min-scale", type=float, default=0.25, help="rule 13b: the converter's --cubemap-min-scale")
+    ap.add_argument("--provider", action="store_true",
+                    help="validate under the r1delta map provider's default options (r2_map_provider.cpp R2ConverterOptions): --cubemaps split --csm-rebase "
+                         "--rtl-bake edge --rtl-bake-vsm --rtl-bake-hot clip --rtl-bake-smooth 1 --rtl-bake-bm terrain (DrydockSteps preset), plus --csm-last-env for mp_coliseum / mp_coliseum_column (taken from the input file name); every other option at the converter default")
     ap.add_argument("--no-grid-pad", action="store_true", help="rule 18 disabled in the converter")
     ap.add_argument("--grid-size", type=float, default=2048.0, help="rule 19 cell size given to the converter (0 = R2 size kept)")
     ap.add_argument("--reference", "--unpadded", dest="reference", help="the same input converted with --grid-size 0 --no-grid-pad: equivalence checks for rules 18 / 19")
     a = ap.parse_args()
+    if a.provider:
+        a.cubemaps, a.csm_rebase, a.rtl_bake = "split", True, "edge"
+        a.rtl_bake_vsm, a.rtl_bake_hot, a.rtl_bake_smooth, a.rtl_bake_bm = True, "clip", 1, "terrain"
+        if os.path.splitext(os.path.basename(a.r2))[0].lower() in PROVIDER_CSM_LAST_ENV_MAPS:
+            a.csm_last_env = True
     CSM_OPT["last_env"] = a.csm_last_env
+    PROP_OPT["keep_fade"] = a.keep_prop_fade
+    CUBE_OPT.update(cma_gain=a.cubemap_cma_gain, min_scale=a.cubemap_min_scale)
     LIGHT_OPT.update(collapse=not a.no_collapse_envs, rtl=not a.no_rtl, sun_alpha=not a.no_sun_alpha, pbr=(a.pbr_lights == "convert"),
-                     sky_scale=a.sky_ambient_scale, sun_scale=a.sun_scale, pbr_scale=a.pbr_scale)
+                     sky_scale=a.sky_ambient_scale, sun_scale=a.sun_scale, pbr_scale=a.pbr_scale,
+                     bake={"none": 0, "edge": 1, "all": 2}[a.rtl_bake], bake_edge_min=a.rtl_bake_edge_min,
+                     bake_bm={"skip": 2, "terrain": 1, "none": 0}[a.rtl_bake_bm], bake_smooth=a.rtl_bake_smooth,
+                     bake_hot=1 if a.rtl_bake_hot == "clip" else 0, bake_vsm=a.rtl_bake_vsm)
     sys.exit(1 if check(a.r2, a.r1, a.limit, a.rtl_bytes, not a.no_bsp_tool, a.cubemaps, a.physics, a.cubemap_scale,
                         a.props, a.scatter_min, a.csm_rebase, a.empty_shadow_meshes, a.worldlight_flag2, a.keep_prop_flag10,
                         not a.no_grid_pad, a.reference, a.grid_size) else 0)
