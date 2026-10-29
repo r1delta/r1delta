@@ -9626,8 +9626,6 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 
 	if (!IsR1ODedicatedServer())
 		security_fixes_server(engine_base, server_base);
-	if (IsDedicatedServer() && !IsR1ODedicatedServer())
-		PlaylistLoader_Init(); // dynamic playlist buffers (detours the engine_ds playlists.txt loader)
 	R1DAssert(MH_EnableHook(MH_ALL_HOOKS) == MH_OK);
 	//std::cout << "did hooks" << std::endl;
 }
@@ -9878,6 +9876,7 @@ void __stdcall LoaderNotificationCallback(
 		// The generated R2 sound aliases only fit (and are only served) when the expanded table is in place and their CRC is hidden.
 		if (InstallLegacyDSSoundTableExpansion(G_engine_ds) && InstallLegacyDSAliasHiding(G_engine_ds))
 			r2audio::SetAliasCapacityOk(true);
+		PlaylistLoader_Init(G_engine_ds); // before dedicated.dll's first playlists.txt load (the VGUI start-up path)
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x433C0), &ProcessConnectionlessPacketDedi, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x30FE20), &StringCompare_AllTalkHookDedi, reinterpret_cast<LPVOID*>(&oStringCompare_AllTalkHookDedi));
 		MH_EnableHook(MH_ALL_HOOKS);
