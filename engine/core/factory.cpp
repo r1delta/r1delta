@@ -68,6 +68,7 @@
 #include "bitbuf.h"
 #include "defs.h"
 #include "factory.h"
+#include "dynamic_weapons.h"
 #include "client_studio_header_guard.h"
 #include "client_brush_material_guard.h"
 #include "TableDestroyer.h"
@@ -20918,6 +20919,9 @@ char __fastcall CServerGameDLL__DLLInit(void* thisptr, CreateInterfaceFn appSyst
 	}
 	oAppSystemFactory = appSystemFactory;
 	oFileSystemFactory = fileSystemFactory;
+	// Legacy dedicated: the engine asked for the server classes before this hand-over, so the
+	// dynamic weapon roster is registered here, before the server initializes.
+	r1delta::dynamic_weapons::ServerFileSystemReady();
 	oPhysicsFactory = physicsFactory;
 	engineR1O = IsR1ODedicatedServer() ? GetModuleHandleA("engine_r1o.dll") : LoadLibraryA("engine_r1o.dll");
 	if (!engineR1O)

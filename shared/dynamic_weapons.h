@@ -35,4 +35,10 @@ void ClientConnecting();
 // value, or null if it did not send one) matches this server's. On false, `reason`
 // receives a short client-facing explanation.
 bool ServerAcceptsClientRoster(const char* clientToken, char* reason, int reasonSize);
+
+// Legacy dedicated: the engine asks for the server classes before ServerGameDLL::DLLInit
+// supplies the file system factory. DLLInit calls this once oFileSystemFactory is set; it
+// registers the roster if the first class request could not (no-op otherwise).
+void ServerFileSystemReady();
 }
+

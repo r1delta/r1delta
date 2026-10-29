@@ -2,12 +2,15 @@
 
 #include "core.h"
 #include "cvar.h"
+#include "factory.h"
+#include "dynamic_weapons_manifest.h"
 #include "filesystem.h"
 #include "load.h"
 #include "logging.h"
 #include <MinHook.h>
 #include <Windows.h>
 #include <algorithm>
+#include <cstdarg>
 #include <array>
 #include <cstddef>
 #include <cstdio>
@@ -32,6 +35,18 @@ namespace r1delta::dynamic_weapons
 {
 namespace
 {
+// Success-path notes also go to the debugger so a CDB run records them (engine Msg alone is not captured).
+void Note(const char* format, ...)
+{
+    char line[512];
+    va_list args;
+    va_start(args, format);
+    _vsnprintf_s(line, sizeof(line), _TRUNCATE, format, args);
+    va_end(args);
+    OutputDebugStringA(line);
+    Msg("%s", line);
+}
+
 [[noreturn]] void Fail(const char* reason, const char* detail = "")
 {
     char line[512];
@@ -276,43 +291,39 @@ void CheckStockRegistry(std::uintptr_t module, bool client, const char* const* s
     }
 }
 
-std::string ClassName(const char* value)
-{
-    if (!value || !*value)
-        Fail("empty weapon manifest entry");
-    std::string name(value);
-    const auto slash = name.find_last_of("/\\");
-    if (slash != std::string::npos)
-        name.erase(0, slash + 1);
-    const auto dot = name.find_last_of('.');
-    if (dot != std::string::npos)
-        name.resize(dot);
-    if (name.empty() || name.size() >= 40)
-        Fail("weapon classname exceeds native CClassMap char[40] contract:", value);
-    for (char& c : name) {
-        if (c >= 'A' && c <= 'Z')
-            c = char(c + ('a' - 'A'));
-        if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_'))
-            Fail("unsupported weapon manifest classname:", value);
-    }
-    return name;
-}
-
 // ---- GAME filesystem (R1 base filesystem ABI, shared by all modes) -------------------------------
 // The R1 filesystem_stdio base interface: vtable +0 Read, +2 Open, +3 Close, +7 Size(handle),
 // +10 FileExists (same slots as CBaseFileSystem in engine/filesystem/filesystem.h). It is the
 // native object in every mode: the client loads it directly; the server factory wrap in
 // engine/core/factory.cpp publishes the same object as g_CBaseFileSystemInterface.
-void* BaseFileSystem()
+// Null when the native file system is not reachable yet (legacy dedicated: the engine asks the
+// server for its classes before ServerGameDLL::DLLInit hands over the factories).
+void* FindBaseFileSystem()
 {
     using CreateInterface = void*(__cdecl*)(const char*, int*);
+    // Client and listen: filesystem_stdio.dll holds the base interface directly.
     if (const HMODULE filesystem = GetModuleHandleW(L"filesystem_stdio.dll")) {
         if (const auto factory = reinterpret_cast<CreateInterface>(GetProcAddress(filesystem, "CreateInterface")))
             if (void* base = factory("VBaseFileSystem012", nullptr))
                 return base;
     }
+    // Published by the server factory wrap once the server asked for the file system.
     if (g_CBaseFileSystemInterface)
         return g_CBaseFileSystemInterface;
+    // Legacy and R1O dedicated servers have no filesystem_stdio.dll. The engine's file system
+    // factory is stored by ServerGameDLL::DLLInit; its VFileSystem017 object holds the base
+    // interface at +8 (the same layout the factory wrap publishes as g_CBaseFileSystemInterface).
+    if (oFileSystemFactory) {
+        if (void* full = oFileSystemFactory("VFileSystem017", nullptr))
+            return static_cast<unsigned char*>(full) + 8;
+    }
+    return nullptr;
+}
+
+void* BaseFileSystem()
+{
+    if (void* base = FindBaseFileSystem())
+        return base;
     Fail("native base filesystem unavailable at first class publication");
 }
 
@@ -344,102 +355,6 @@ bool ReadGameFile(void* baseFilesystem, const char* path, std::string& text)
     return ok;
 }
 
-// ---- manifest -------------------------------------------------------------------------------------
-// Grammar (the native weapon_manifest KeyValues subset): `rootkey { "file" "<weapon>" ... }`,
-// bare or quoted tokens, `//` line comments. Anything else is fatal, so a typo in a mod can
-// never silently drop a weapon.
-struct Tokenizer
-{
-    const std::string& text;
-    std::size_t pos = 0;
-
-    void SkipSpace()
-    {
-        for (;;) {
-            while (pos < text.size() && (text[pos] == ' ' || text[pos] == '\t' || text[pos] == '\r' || text[pos] == '\n'))
-                ++pos;
-            if (pos + 1 < text.size() && text[pos] == '/' && text[pos + 1] == '/') {
-                while (pos < text.size() && text[pos] != '\n')
-                    ++pos;
-                continue;
-            }
-            break;
-        }
-    }
-
-    // Returns false at end of input. A brace is its own token.
-    bool Next(std::string& token, bool& quoted)
-    {
-        SkipSpace();
-        token.clear();
-        quoted = false;
-        if (pos >= text.size())
-            return false;
-        const char c = text[pos];
-        if (c == '"') {
-            quoted = true;
-            ++pos;
-            while (pos < text.size() && text[pos] != '"') {
-                if (text[pos] == '\n')
-                    Fail("unterminated string in authored weapon_manifest.txt");
-                token.push_back(text[pos++]);
-            }
-            if (pos >= text.size())
-                Fail("unterminated string in authored weapon_manifest.txt");
-            ++pos;
-            return true;
-        }
-        if (c == '{' || c == '}') {
-            token.push_back(c);
-            ++pos;
-            return true;
-        }
-        while (pos < text.size()) {
-            const char d = text[pos];
-            if (d == ' ' || d == '\t' || d == '\r' || d == '\n' || d == '"' || d == '{' || d == '}')
-                break;
-            if (d == '/' && pos + 1 < text.size() && text[pos + 1] == '/')
-                break;
-            token.push_back(d);
-            ++pos;
-        }
-        return true;
-    }
-};
-
-std::vector<std::string> ParseManifest(const std::string& text)
-{
-    Tokenizer in{text};
-    std::string token;
-    bool quoted = false;
-    if (!in.Next(token, quoted) || token == "{" || token == "}")
-        Fail("authored weapon_manifest.txt has no root key");
-    if (!in.Next(token, quoted) || quoted || token != "{")
-        Fail("authored weapon_manifest.txt: expected '{' after the root key");
-    std::vector<std::string> names;
-    for (;;) {
-        if (!in.Next(token, quoted))
-            Fail("authored weapon_manifest.txt: missing closing '}'");
-        if (!quoted && token == "}")
-            break;
-        if (!quoted && (token == "{" || token[0] == '#' || token[0] == '['))
-            Fail("authored weapon_manifest.txt: unsupported token:", token.c_str());
-        if (_stricmp(token.c_str(), "file"))
-            Fail("authored weapon_manifest.txt expects 'file', got:", token.c_str());
-        std::string value;
-        if (!in.Next(value, quoted) || (!quoted && (value == "{" || value == "}")))
-            Fail("authored weapon_manifest.txt: 'file' without a value");
-        names.push_back(ClassName(value.c_str()));
-    }
-    if (in.Next(token, quoted))
-        Fail("authored weapon_manifest.txt: content after the closing '}':", token.c_str());
-    if (names.empty())
-        Fail("authored weapon_manifest.txt declares no weapons");
-    std::sort(names.begin(), names.end());
-    names.erase(std::unique(names.begin(), names.end()), names.end());
-    return names;
-}
-
 bool DefinitionExists(void* baseFilesystem, const std::string& name)
 {
     for (const char* directory : {"scripts/weapons/", "scripts/"}) {
@@ -450,22 +365,6 @@ bool DefinitionExists(void* baseFilesystem, const std::string& name)
         }
     }
     return false;
-}
-
-std::string MakeToken(const std::vector<std::string>& names)
-{
-    std::uint64_t hash = 0xcbf29ce484222325ULL;
-    for (const auto& name : names) {
-        for (unsigned char c : name) {
-            hash ^= c;
-            hash *= 0x100000001b3ULL;
-        }
-        hash ^= 0xff;
-        hash *= 0x100000001b3ULL;
-    }
-    char text[48];
-    _snprintf_s(text, sizeof(text), _TRUNCATE, "%zu:%016llx", names.size(), static_cast<unsigned long long>(hash));
-    return text;
 }
 
 // Reads the manifest for one side. Client and server read independently (they publish at
@@ -481,7 +380,10 @@ void ReadRoster(const char* side)
     if (present) {
         if (!ReadGameFile(baseFilesystem, "scripts/weapon_manifest.txt", text))
             Fail("authored GAME/scripts/weapon_manifest.txt exists but cannot be read");
-        names = ParseManifest(text);
+        const ManifestParse parsed = ParseManifest(text);
+        if (!parsed.ok)
+            Fail("authored weapon_manifest.txt rejected:", parsed.error.c_str());
+        names = parsed.names;
         for (const auto& name : names)
             if (!DefinitionExists(baseFilesystem, name))
                 Fail("authored manifest names a missing native weapon definition:", name.c_str());
@@ -493,12 +395,12 @@ void ReadRoster(const char* side)
     }
     s.manifestPresent = present;
     s.roster = std::move(names);
-    s.token = present ? MakeToken(s.roster) : std::string("none");
+    s.token = present ? MakeRosterToken(s.roster) : std::string("none");
     s.rosterRead = true;
     if (present)
-        Msg("R1Delta dynamic weapons: %s manifest declares %zu weapons (%s)\n", side, s.roster.size(), s.token.c_str());
+        Note("R1Delta dynamic weapons: %s manifest declares %zu weapons (%s)\n", side, s.roster.size(), s.token.c_str());
     else
-        Msg("R1Delta dynamic weapons: no authored GAME/scripts/weapon_manifest.txt; retaining stock native classes.\n");
+        Note("R1Delta dynamic weapons: no authored GAME/scripts/weapon_manifest.txt; retaining stock native classes.\n");
 }
 
 // ---- class construction ---------------------------------------------------------------------------
@@ -672,18 +574,36 @@ void RegisterClient()
         descriptor.clientClass.mapName = descriptor.name.c_str();
         reinterpret_cast<AddClassMap>(mapVtable[1])(map, descriptor.name.c_str(),
             descriptor.predictionName.c_str(), 0x31d8, descriptor.createPredicted);
-        Msg("R1Delta dynamic weapon client: %s id=%d\n", descriptor.name.c_str(), descriptor.weaponID);
+        Note("R1Delta dynamic weapon client: %s id=%d\n", descriptor.name.c_str(), descriptor.weaponID);
     }
     s.clientReady = true;
     s.registeringClient = false;
     VerifyPair();
 }
 
-void RegisterServer()
+// TFO weapons whose entity factory is still constructed by server.dll although r1delta.wpatch
+// removes their weapon-ID and ServerClass initializers (identified from the CEntityFactory<...>
+// static initializers of the pinned build). A manifest entry for one of them replaces that
+// factory; any other existing entity name is a collision.
+bool IsOrphanedWeaponFactory(const char* name)
+{
+    for (const char* orphan : {"mp_titanweapon_charge_cannon", "mp_titanweapon_minigun",
+                               "mp_weapon_sr_valkyrie", "mp_weapon_twinb_shotgun"})
+        if (!std::strcmp(name, orphan))
+            return true;
+    return false;
+}
+
+// deferrable: the first GetAllClasses of a legacy dedicated server precedes the file system
+// hand-over; that call is passed through untouched and the registration happens at
+// ServerGameDLL::DLLInit (ServerFileSystemReady) or, at the latest, at the class-list lock.
+void RegisterServer(bool deferrable)
 {
     auto& s = S();
     std::lock_guard<std::recursive_mutex> lock(s.mutex);
     if (s.serverReady)
+        return;
+    if (deferrable && !s.registeringServer && !FindBaseFileSystem())
         return;
     if (!s.server || s.registeringServer)
         Fail("server registration unavailable/reentrant");
@@ -702,7 +622,8 @@ void RegisterServer()
     for (const auto& name : s.roster) {
         if (FindWeapon(WeaponTree(s.server, false), name.c_str()) >= 0)
             continue; // Preserve every existing native identity/factory convention.
-        if (reinterpret_cast<FindFactory>(vtable[3])(dictionary, name.c_str()))
+        void* existingFactory = reinterpret_cast<FindFactory>(vtable[3])(dictionary, name.c_str());
+        if (existingFactory && !IsOrphanedWeaponFactory(name.c_str()))
             Fail("weapon manifest collides with non-weapon server entity:", name.c_str());
         auto descriptor = std::make_unique<Descriptor>(name);
         for (auto* cls = *reinterpret_cast<ServerClass**>(s.server + 0xc31270); cls; cls = cls->next)
@@ -714,8 +635,22 @@ void RegisterServer()
         descriptor->weaponID = AddWeapon(s.server, false, name.c_str());
         Native<RegisterClass>(s.server, 0x7f7e0)(&descriptor->serverClass,
             descriptor->networkName.c_str(), reinterpret_cast<void*>(s.server + 0xe0a670));
-        reinterpret_cast<InstallFactory>(vtable[0])(dictionary, &descriptor->factory, descriptor->name.c_str());
-        Msg("R1Delta dynamic weapon server: %s id=%d\n", descriptor->name.c_str(), descriptor->weaponID);
+        if (existingFactory) {
+            // The TFO weapon's own factory survives r1delta.wpatch (only its weapon ID and
+            // ServerClass initializers are removed), so entities created through it have no
+            // class ID. Point the existing dictionary entry at the dynamic factory.
+            using FindIndex = unsigned short(__fastcall*)(void*, const char* const*);
+            const char* key = descriptor->name.c_str();
+            const unsigned short index = Native<FindIndex>(s.server, 0x261970)(static_cast<unsigned char*>(dictionary) + 8, &key);
+            if (index == 0xffff)
+                Fail("orphaned weapon factory entry not found in the entity factory dictionary:", name.c_str());
+            At<void*>(At<unsigned char*>(dictionary, 16), std::size_t(index) * 24 + 16) = &descriptor->factory;
+            if (reinterpret_cast<FindFactory>(vtable[3])(dictionary, name.c_str()) != &descriptor->factory)
+                Fail("orphaned weapon factory replacement did not take effect:", name.c_str());
+        } else {
+            reinterpret_cast<InstallFactory>(vtable[0])(dictionary, &descriptor->factory, descriptor->name.c_str());
+        }
+        Note("R1Delta dynamic weapon server: %s id=%d\n", descriptor->name.c_str(), descriptor->weaponID);
         s.serverTypes.push_back(std::move(descriptor));
     }
     s.serverReady = true;
@@ -730,12 +665,12 @@ void* __fastcall ClientClasses(void* self)
 }
 void* __fastcall ServerClasses(void* self)
 {
-    RegisterServer();
+    RegisterServer(true);
     return S().serverGetClasses(self);
 }
 void __fastcall ServerLock(void* self)
 {
-    RegisterServer();
+    RegisterServer(false);
     S().serverLock(self);
 }
 }
@@ -778,6 +713,14 @@ void InstallServer(std::uintptr_t serverBase)
     Hook(serverBase + 0x1469a0, reinterpret_cast<void*>(&ServerLock), reinterpret_cast<void**>(&s.serverLock));
 }
 
+void ServerFileSystemReady()
+{
+    auto& s = S();
+    std::lock_guard<std::recursive_mutex> lock(s.mutex);
+    if (s.server && !s.serverReady)
+        RegisterServer(false);
+}
+
 std::string RosterToken()
 {
     auto& s = S();
@@ -809,11 +752,16 @@ bool ServerAcceptsClientRoster(const char* clientToken, char* reason, int reason
     const std::string client = clientToken && *clientToken ? clientToken : "none";
     if (client == server)
         return true;
-    if (reason && reasonSize > 0)
+    if (reason && reasonSize > 0) {
+        const auto count = [](const std::string& token) {
+            const auto colon = token.find(':');
+            return colon == std::string::npos ? std::string("no") : token.substr(0, colon);
+        };
         _snprintf_s(reason, reasonSize, _TRUNCATE,
-            "Weapon manifest mismatch: the server registers %s custom weapons, you have %s. "
-            "Install the same mods / weapon_manifest.txt as the server.",
-            server.c_str(), client.c_str());
+            "Weapon manifest mismatch: this server registers %s custom weapons, you have %s. "
+            "Install the same mods / weapon_manifest.txt as the server. (server %s, you %s)",
+            count(server).c_str(), count(client).c_str(), server.c_str(), client.c_str());
+    }
     return false;
 }
 }
