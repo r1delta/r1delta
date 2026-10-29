@@ -23,6 +23,7 @@ constexpr std::uint32_t kVcsVersion = 6;
 constexpr std::uint32_t kStoredChunk = 0x80000000u;
 constexpr std::uint32_t kChunkEnd = 0xFFFFFFFFu;
 constexpr std::uint32_t kHeaderBytes = 28;
+constexpr std::uint32_t kMaxChunkPayload = 0x50000;   // the loader's chunk buffer is 0x60000 bytes (sub_18001D770)
 
 class IncludeHandler final : public ID3DInclude {
 public:
@@ -201,17 +202,31 @@ std::vector<std::uint8_t> BuildPixelVcsDynamic(const std::vector<std::vector<std
     Put32(out, 0);
     Put32(out, statics + 1);
     Put32(out, 0);
+    // The loader (materialsystem_dx11 sub_18001D770) copies every stored chunk into one fixed 393216 byte buffer, so a
+    // static's records are split into several stored chunks of at most kMaxChunkPayload bytes (records never split);
+    // a static's chunk list ends with the 0xFFFFFFFF terminator. 24 array-shadow records of one static are about 400 KB.
     const std::uint32_t tableEnd = kHeaderBytes + (statics + 1) * 8u + 4u;
-    std::vector<std::uint32_t> payloads;
+    std::vector<std::vector<std::vector<std::uint32_t>>> groups;   // per static: record indices per chunk
     std::uint32_t offset = tableEnd;
     std::vector<std::uint32_t> offsets;
     for (const auto& records : staticCombos) {
-        std::uint32_t payload = 0;
-        for (const auto& dxbc : records)
-            payload += 8u + static_cast<std::uint32_t>(dxbc.size());
-        payloads.push_back(payload);
+        std::vector<std::vector<std::uint32_t>> chunks(1);
+        std::uint32_t chunkBytes = 0;
+        std::uint32_t total = 0;
+        for (std::uint32_t r = 0; r < records.size(); ++r) {
+            const std::uint32_t bytes = 8u + static_cast<std::uint32_t>(records[r].size());
+            if (chunkBytes != 0 && chunkBytes + bytes > kMaxChunkPayload) {
+                chunks.emplace_back();
+                chunkBytes = 0;
+            }
+            chunks.back().push_back(r);
+            chunkBytes += bytes;
+            total += bytes;
+        }
+        total += 4u * static_cast<std::uint32_t>(chunks.size()) + 4u;   // one tag per chunk + terminator
+        groups.push_back(std::move(chunks));
         offsets.push_back(offset);
-        offset += 4u + payload + 4u;
+        offset += total;
     }
     for (std::uint32_t i = 0; i < statics; ++i) {
         Put32(out, i);
@@ -221,12 +236,16 @@ std::vector<std::uint8_t> BuildPixelVcsDynamic(const std::vector<std::vector<std
     Put32(out, offset);
     Put32(out, 0);  // dynamic-to-static alias count
     for (std::uint32_t i = 0; i < statics; ++i) {
-        Put32(out, kStoredChunk | payloads[i]);
-        std::uint32_t id = 0;
-        for (const auto& dxbc : staticCombos[i]) {
-            Put32(out, id++);
-            Put32(out, static_cast<std::uint32_t>(dxbc.size()));
-            out.insert(out.end(), dxbc.begin(), dxbc.end());
+        for (const auto& chunk : groups[i]) {
+            std::uint32_t payload = 0;
+            for (std::uint32_t r : chunk)
+                payload += 8u + static_cast<std::uint32_t>(staticCombos[i][r].size());
+            Put32(out, kStoredChunk | payload);
+            for (std::uint32_t r : chunk) {
+                Put32(out, r);
+                Put32(out, static_cast<std::uint32_t>(staticCombos[i][r].size()));
+                out.insert(out.end(), staticCombos[i][r].begin(), staticCombos[i][r].end());
+            }
         }
         Put32(out, kChunkEnd);
     }
@@ -258,31 +277,43 @@ std::string ValidateVcs(const std::vector<std::uint8_t>& vcs, std::size_t expect
         const std::size_t end = Get32(vcs, kHeaderBytes + (i + 1) * 8 + 4);
         if (begin < tableEnd || end <= begin || end > vcs.size() || begin + 4 > vcs.size())
             return "chunk bounds invalid";
-        const std::uint32_t tag = Get32(vcs, begin);
-        if ((tag & 0xC0000000u) != kStoredChunk)
-            return "chunk is not stored";
-        const std::uint32_t payload = tag & 0x3FFFFFFFu;
-        if (begin + 4 + payload + 4 != end)
-            return "chunk payload size does not fill the chunk";
-        // records: {dynamic id, size, DXBC}, back to back, ids consecutive from 0
-        std::uint32_t cursor = 0;
+        // chunk list: stored chunks of {dynamic id, size, DXBC} records back to back, ids consecutive from 0 across chunks,
+        // each payload within the loader's buffer; the list ends with the terminator at the next static's offset
+        std::size_t at = begin;
         std::uint32_t records = 0;
-        while (cursor < payload) {
-            if (payload - cursor < 8)
-                return "partial record header";
-            const std::uint32_t id = Get32(vcs, begin + 4 + cursor);
-            const std::uint32_t recordSize = Get32(vcs, begin + 4 + cursor + 4);
-            if (id != records || recordSize < 32 || cursor + 8u + recordSize > payload)
-                return "record size mismatch";
-            if (std::memcmp(vcs.data() + begin + 4 + cursor + 8, "DXBC", 4) != 0)
-                return "record is not DXBC";
-            cursor += 8u + recordSize;
-            ++records;
+        while (true) {
+            if (at + 4 > end)
+                return "chunk list runs past the static";
+            const std::uint32_t tag = Get32(vcs, at);
+            if (tag == kChunkEnd) {
+                if (at + 4 != end)
+                    return "chunk terminator is not at the end of the static";
+                break;
+            }
+            if ((tag & 0xC0000000u) != kStoredChunk)
+                return "chunk is not stored";
+            const std::uint32_t payload = tag & 0x3FFFFFFFu;
+            if (payload > 393216u)
+                return "chunk payload exceeds the loader buffer";
+            if (at + 4 + payload + 4 > end)
+                return "chunk payload size does not fill the chunk";
+            std::uint32_t cursor = 0;
+            while (cursor < payload) {
+                if (payload - cursor < 8)
+                    return "partial record header";
+                const std::uint32_t id = Get32(vcs, at + 4 + cursor);
+                const std::uint32_t recordSize = Get32(vcs, at + 4 + cursor + 4);
+                if (id != records || recordSize < 32 || cursor + 8u + recordSize > payload)
+                    return "record size mismatch";
+                if (std::memcmp(vcs.data() + at + 4 + cursor + 8, "DXBC", 4) != 0)
+                    return "record is not DXBC";
+                cursor += 8u + recordSize;
+                ++records;
+            }
+            at += 4 + payload;
         }
         if (records != expectedRecords)
             return "dynamic record count mismatch";
-        if (Get32(vcs, begin + 4 + payload) != kChunkEnd)
-            return "chunk terminator missing";
     }
     return {};
 }
@@ -317,8 +348,8 @@ std::string CheckVertexPixelLinkage(
 
 // Pixel shaders that replace a stock static combo with several dynamic combos mark themselves with this line; the
 // compiler then builds one ps_5_0 record per dynamic index (see BuildPixelVcsDynamic) with the macros the source names
-// there: `// R2_PS_DYNAMIC <dynamic count> <static count>` (R2_LIGHTS = d % 2, R2_SHADOW = (d / 2) % 3, R2_FOGB = (d / 2) / 3,
-// R2_STATIC = static index).
+// there: `// R2_PS_DYNAMIC <dynamic count> <static count> [VLG]`. The optional VLG layout is shadow + 3 *
+// (unshadowedScale + 2 * (instanceBuffer + 2 * fog)); the default LMG layout is lights + 2 * (shadow + 3 * fog).
 constexpr std::string_view kDynamicMarker = "// R2_PS_DYNAMIC ";
 
 BuiltShader BuildShader(std::string_view name, std::string_view source, IncludeResolver includes)
@@ -334,12 +365,15 @@ BuiltShader BuildShader(std::string_view name, std::string_view source, IncludeR
 
     const std::size_t marker = source.find(kDynamicMarker);
     if (marker != std::string_view::npos && wantsPixel && !wantsVertex) {
-        // "// R2_PS_DYNAMIC <dynamic count> <static count>": static combo s defines R2_STATIC = s
-        const std::string spec(source.substr(marker + kDynamicMarker.size(), 16));
+        // Static combo s defines R2_STATIC = s. Parse only the marker line, never the following source.
+        const std::size_t specStart = marker + kDynamicMarker.size();
+        const std::string spec(source.substr(specStart, source.find('\n', specStart) - specStart));
         int count = 0;
         int statics = 1;
-        std::sscanf(spec.c_str(), "%d %d", &count, &statics);
-        if (count < 1 || count > 64 || statics < 1 || statics > 8) {
+        char layout[8] = {};
+        std::sscanf(spec.c_str(), "%d %d %7s", &count, &statics, layout);
+        const bool vlg = std::strcmp(layout, "VLG") == 0;
+        if (count < 1 || count > 64 || statics < 1 || statics > 8 || (layout[0] && !vlg) || (vlg && count != 24)) {
             built.error = "bad R2_PS_DYNAMIC line";
             return built;
         }
@@ -357,9 +391,16 @@ BuiltShader BuildShader(std::string_view name, std::string_view source, IncludeR
                     request.profile = "ps_5_0";
                     request.includes = includes;
                     request.macros.push_back({ "R2_STATIC", std::to_string(staticCombo) });
-                    request.macros.push_back({ "R2_LIGHTS", std::to_string(dynamic % 2) });
-                    request.macros.push_back({ "R2_SHADOW", std::to_string((dynamic / 2) % 3) });
-                    request.macros.push_back({ "R2_FOGB", std::to_string((dynamic / 2) / 3) });
+                    if (vlg) {
+                        request.macros.push_back({ "R2_SHADOW", std::to_string(dynamic % 3) });
+                        request.macros.push_back({ "R2_UNSH", std::to_string((dynamic / 3) % 2) });
+                        request.macros.push_back({ "R2_INST", std::to_string((dynamic / 6) % 2) });
+                        request.macros.push_back({ "R2_FOGB", std::to_string(dynamic / 12) });
+                    } else {
+                        request.macros.push_back({ "R2_LIGHTS", std::to_string(dynamic % 2) });
+                        request.macros.push_back({ "R2_SHADOW", std::to_string((dynamic / 2) % 3) });
+                        request.macros.push_back({ "R2_FOGB", std::to_string((dynamic / 2) / 3) });
+                    }
                     results[static_cast<std::size_t>(staticCombo)][static_cast<std::size_t>(dynamic)] = CompileHlsl(request);
                 }));
             }

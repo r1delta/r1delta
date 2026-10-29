@@ -27,7 +27,7 @@ namespace r2port::shaders {
 namespace {
 
 // Bump when the compiler flags, combo layout or VCS container change: it is part of every source hash.
-constexpr std::string_view kCacheRevision = "r2shader-2";
+constexpr std::string_view kCacheRevision = "r2shader-3";
 
 struct Entry {
     std::string name;
@@ -125,27 +125,7 @@ struct Source {
 std::vector<Source> CollectSources(const std::filesystem::path& r2portDirectory)
 {
     std::map<std::string, Source> byName;
-    // the LightmappedGeneric replacement shaders are many ps_5_0 records each: only build the one the env switch asks for
-    // (R2_LMG_PBR = 1 / all / dbgN / neutral / mark, see r2_shader_override.cpp)
-    char lmgMode[48] = {};
-    const bool lmgSet = GetEnvironmentVariableA("R2_LMG_PBR", lmgMode, sizeof(lmgMode)) != 0 && lmgMode[0] && std::strcmp(lmgMode, "0") != 0;
-    auto wanted = [&](const char* shaderName) {
-        if (std::strncmp(shaderName, "r2_lmg_", 7) != 0)
-            return true;
-        if (!lmgSet)
-            return false;
-        const char* kind = shaderName + 7;
-        if (std::strcmp(kind, "pbr") == 0)
-            return lmgMode[0] == '1' || std::strncmp(lmgMode, "all", 3) == 0 || std::strncmp(lmgMode, "log", 3) == 0;
-        if (std::strcmp(kind, "neutral") == 0)
-            return std::strncmp(lmgMode, "neutral", 7) == 0;
-        if (std::strcmp(kind, "mark") == 0)
-            return std::strncmp(lmgMode, "mark", 4) == 0;
-        return std::strncmp(lmgMode, "dbg", 3) == 0 && lmgMode[3] == kind[3];   // r2_lmg_dbgN
-    };
     for (const EmbeddedShader& shader : kEmbeddedShaders) {
-        if (!wanted(shader.name))
-            continue;
         std::string text = shader.source;
         if (shader.define)
             text = std::string("#define ") + shader.define + " 1\n" + text;
@@ -312,6 +292,41 @@ bool ResolveShaderFile(const char* requestedPath, std::string& absolutePath)
         return false;
     absolutePath = (pixel ? entry.pixelPath : vertexColor ? entry.vertexColorPath : entry.vertexPath).string();
     return true;
+}
+
+bool EnsureUberShader(UberShader shader, const char* name, const char* macros)
+{
+    if (!name || !macros)
+        return false;
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (!g_built)
+        BuildAllLocked(false);
+    const auto found = g_entries.find(name);
+    if (found != g_entries.end())
+        return found->second.hasPixel;
+    if (g_cacheDirectory.empty())
+        return false;
+    // macros: `NAME=VALUE;NAME=VALUE;...`, each becomes a #define ahead of the embedded source
+    std::string text;
+    for (const char* p = macros; *p;) {
+        const char* end = std::strchr(p, ';');
+        const std::string item = end ? std::string(p, end) : std::string(p);
+        p = end ? end + 1 : p + item.size();
+        const auto eq = item.find('=');
+        if (item.empty())
+            continue;
+        text += "#define " + item.substr(0, eq) + " " + (eq == std::string::npos ? "1" : item.substr(eq + 1)) + "\n";
+    }
+    // Development: the class-specific .hlslsrc replaces the embedded source (the text participates in the cache hash).
+    const bool vlg = shader == UberShader::VertexLitGeneric;
+    std::error_code ec;
+    const std::filesystem::path loose = g_cacheDirectory.parent_path() / "shaders" / (vlg ? "uber_vlg.hlslsrc" : "uber_lmg.hlslsrc");
+    if (std::filesystem::is_regular_file(loose, ec))
+        text += ReadText(loose);
+    else
+        text += vlg ? kUberVlgSource : kUberLmgSource;
+    BuildOne(Source{ name, std::move(text), false }, false);
+    return g_entries[name].hasPixel;
 }
 
 bool HasShaderPixelFile(const char* name)

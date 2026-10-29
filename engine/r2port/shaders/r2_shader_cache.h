@@ -19,6 +19,11 @@ bool ResolveShaderFile(const char* requestedPath, std::string& absolutePath);
 // True when the cache holds a built pixel shader `<name>_ps40.vcs` for `name` (builds the cache on first use).
 bool HasShaderPixelFile(const char* name);
 
+// Builds the selected stock-reproducing uber source with `NAME=VALUE;...` macros ahead of it.
+// LMG has 5 static x 12 dynamic records; VLG has 1 static x 24. Cold builds run on the calling thread.
+enum class UberShader { LightmappedGeneric, VertexLitGeneric };
+bool EnsureUberShader(UberShader shader, const char* name, const char* macros);
+
 // Recompiles every shader, ignoring the up-to-date check, and prints the result. A material that already loaded a
 // shader keeps the old bytes until the map (or the material system) reloads; use new shader names while iterating.
 void RebuildAllShaders();
