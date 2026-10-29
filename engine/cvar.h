@@ -242,6 +242,27 @@ struct WVar {
 	bool is_r1o;
 };
 
+// ICvar name lookup is case-insensitive (Source CCvar and the backing R1 vstdlib store both are). A case-sensitive
+// map made FindVar("SV_CHEATS") miss the live R1O object and build a second, never-updated snapshot wrapper.
+struct CvarNameHash {
+	using is_transparent = void;
+	size_t operator()(std::string_view name) const noexcept {
+		size_t hash = 14695981039346656037ull;
+		for (const unsigned char ch : name) {
+			hash ^= static_cast<size_t>((ch >= 'A' && ch <= 'Z') ? ch + ('a' - 'A') : ch);
+			hash *= 1099511628211ull;
+		}
+		return hash;
+	}
+};
+struct CvarNameEqual {
+	using is_transparent = void;
+	bool operator()(std::string_view lhs, std::string_view rhs) const noexcept {
+		return lhs.size() == rhs.size() && _strnicmp(lhs.data(), rhs.data(), lhs.size()) == 0;
+	}
+};
+using CvarNameMap = std::unordered_map<std::string, WVar*, CvarNameHash, CvarNameEqual>;
+
 extern void      (*OriginalCCVar_RegisterConCommand)(uintptr_t thisptr, ConCommandBaseR1* pCommandBase);
 extern void      (*OriginalCCVar_UnregisterConCommand)(uintptr_t thisptr, ConCommandBaseR1* pCommandBase);
 extern ConCommandBaseR1* (*OriginalCCVar_FindCommandBase)(uintptr_t thisptr, const char* name);
@@ -259,7 +280,7 @@ extern void      (*OriginalCCVar_QueueMaterialThreadSetValue2)(uintptr_t thisptr
 extern void      (*OriginalCCVar_QueueMaterialThreadSetValue3)(uintptr_t thisptr, ConVarR1* pConVar, float flValue);
 extern int       (*OriginalCCvar__ProcessQueuedMaterialThreadConVarSets)(uintptr_t thisptr);
 extern void*     (*OriginalCCvar__FactoryInternalIterator)(uintptr_t thisptr);
-extern std::unordered_map<std::string, WVar*, HashStrings, std::equal_to<>> ccBaseMap;
+extern CvarNameMap ccBaseMap;
 
 void CCVar_RegisterConCommand(uintptr_t thisptr, ConCommandBaseR1O* pCommandBase);
 void CCVar_UnregisterConCommand(uintptr_t thisptr, ConCommandBaseR1O* pCommandBase);

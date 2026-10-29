@@ -98,7 +98,7 @@ void      (*OriginalCCVar_QueueMaterialThreadSetValue3)(uintptr_t thisptr, ConVa
 int       (*OriginalCCvar__ProcessQueuedMaterialThreadConVarSets)(uintptr_t thisptr);
 void*     (*OriginalCCvar__FactoryInternalIterator)(uintptr_t thisptr);
 uintptr_t cvarinterface;
-std::unordered_map<std::string, WVar*, HashStrings, std::equal_to<>> ccBaseMap;
+CvarNameMap ccBaseMap;
 ConVarR1O* convertToR1O(ConVarR1* var);
 static std::vector<FnChangeCallback_t> s_R1OGlobalChangeCallbacks;
 static bool s_R1OCallingGlobalChangeCallbacks;
@@ -511,6 +511,24 @@ void CCVar_RegisterConCommand(uintptr_t thisptr, ConCommandBaseR1O* pCommandBase
 
 	//		__debugbreak();
 		//std::cout << __FUNCTION__ << ": " << pCommandBase->m_pszName << std::endl;
+	// Two R1O ConVars can carry one name: the same object reaches this adapter twice (R1O's own registration and
+	// the static-list walk), and the engine and the game DLL each own a static of the same name (developer, skill,
+	// sv_alternateticks, violence_*, ...). Source's ICvar keeps the first registration as the owner and links any
+	// later object to it through m_pParent, so every holder of either object shares one value and one callback
+	// list. This adapter used to overwrite the map entry with the later object and mint a second R1 copy: the R1O
+	// engine's own static (and its change callback, e.g. `developer`) never saw console changes, and the R1 store
+	// kept the first object's flags while R1O FindVar returned the later one.
+	if (IsR1ODedicatedServer() && ConCommandBaseR1OIsCVar(pCommandBase)) {
+		auto existing = ccBaseMap.find(pCommandBase->m_pszName);
+		if (existing != ccBaseMap.end() && existing->second && existing->second->is_r1o
+			&& existing->second->is_cvar && existing->second->r1optr) {
+			auto* first = reinterpret_cast<ConVarR1O*>(existing->second->r1optr);
+			auto* later = reinterpret_cast<ConVarR1O*>(pCommandBase);
+			if (first != later)
+				later->m_pParent = first->m_pParent ? first->m_pParent : first;
+			return;
+		}
+	}
 	if (!ConCommandBaseR1OIsCVar(pCommandBase)) {
 		ConCommandBaseR1* r1CommandBase = convertToR1((ConCommandR1O*)pCommandBase);
 		ccBaseMap[r1CommandBase->m_pszName] = new WVar{ pCommandBase, r1CommandBase, false, true };
@@ -653,8 +671,8 @@ private:
 		}
 	}
 
-	std::unordered_map<std::string, WVar*, HashStrings, std::equal_to<>>::iterator m_it;
-	std::unordered_map<std::string, WVar*, HashStrings, std::equal_to<>>::iterator m_end;
+	CvarNameMap::iterator m_it;
+	CvarNameMap::iterator m_end;
 };
 
 void* CCvar__FactoryInternalIterator(uintptr_t thisptr)
@@ -731,6 +749,10 @@ ConVarR1O* CCVar_FindVar(uintptr_t thisptr, const char* var_name) {
 	
 	//std::cout << __FUNCTION__ << ": " << var_name << std::endl;
 	auto it = ccBaseMap.find(var_name);
+	// Source's FindVar never returns a ConCommand; handing the R1O command object back as a ConVarR1O made
+	// script GetConVar*("maxplayers"/"playlist") and the heartbeat fallbacks read command fields as a value.
+	if (it != ccBaseMap.end() && it->second && !it->second->is_cvar)
+		return nullptr;
 	ConVarR1O* r1optr = it == ccBaseMap.end() ? NULL : (ConVarR1O*)it->second->r1optr;
 	if (r1optr)
 		return ExposeR1OFatalScriptPolicyConVar(var_name, r1optr);
@@ -774,10 +796,19 @@ void GlobalChangeCallback(ConVarR1* var, const char* pOldValue) {
 		return;
 	ConVarR1O* r1ovar = ((ConVarR1O*)it->second->r1optr);
 	CopyConVarValue(r1ovar->m_pParent->m_Value, var->m_Value);
-	for (int i = 0; i < r1ovar->m_pParent->m_fnChangeCallbacks.Count(); ++i)
+	// R1O ConVars own their callback list: engine_r1o ConVar::ChangeStringValue walks 16-byte {function, user data}
+	// entries (stride 16), while this struct models 8-byte function pointers. Index the R1O-owned list with the
+	// native stride; wrapper copies of R1 ConVars (is_r1o == false) keep the R1 element size. Callbacks receive the
+	// IConVar subobject (object + 56), as ChangeStringValue passes them, not the ConVar base.
+	ConVarR1O* callbackOwner = r1ovar->m_pParent;
+	const int callbackCount = callbackOwner->m_fnChangeCallbacks.Count();
+	const size_t callbackStride = it->second->is_r1o ? 16 : sizeof(FnChangeCallback_t);
+	const unsigned char* callbackBase = reinterpret_cast<const unsigned char*>(callbackOwner->m_fnChangeCallbacks.Base());
+	for (int i = 0; callbackBase && i < callbackCount; ++i)
 	{
-		if (r1ovar->m_pParent->m_fnChangeCallbacks[i])
-			r1ovar->m_pParent->m_fnChangeCallbacks[i](r1ovar, pOldValue, atof(pOldValue));
+		const FnChangeCallback_t callback = *reinterpret_cast<const FnChangeCallback_t*>(callbackBase + callbackStride * i);
+		if (callback)
+			callback(static_cast<IConVar*>(callbackOwner), pOldValue, atof(pOldValue));
 	}
 
 	const float oldFloat = pOldValue ? static_cast<float>(atof(pOldValue)) : 0.0f;
@@ -807,6 +838,8 @@ const ConVarR1O* CCVar_FindVar2(uintptr_t thisptr, const char* var_name) {
 		var_name = "portal_funnel_debug";
 	EnsureR1BackingGlobalChangeCallbackInstalled();
 	auto it = ccBaseMap.find(var_name);
+	if (it != ccBaseMap.end() && it->second && !it->second->is_cvar)
+		return nullptr;
 	ConVarR1O* r1optr = it == ccBaseMap.end() ? NULL : (ConVarR1O*)it->second->r1optr;
 	if (r1optr)
 		return ExposeR1OFatalScriptPolicyConVar(var_name, r1optr);
@@ -1474,6 +1507,13 @@ static void SetRecentHostVar(const char* name, const char* value)
     AssignConVarString(parent->m_Value, source);
     parent->m_Value.m_fValue = static_cast<float>(atof(parent->m_Value.m_pszString));
     parent->m_Value.m_nValue = atoi(parent->m_Value.m_pszString);
+    // The R1 backing store holds the copy that R1 readers (OriginalCCVar_FindVar) see; keep it in step with the
+    // R1O object instead of leaving it at its registration value.
+    if (it->second->r1ptr) {
+        auto* backing = static_cast<ConVarR1*>(it->second->r1ptr);
+        backing = backing->m_pParent ? backing->m_pParent : backing;
+        CopyConVarValue(backing->m_Value, parent->m_Value);
+    }
 }
 
 void GamemodeChangeCallback(IConVar* var_iconvar, const char* pOldValue, float flOldValue)
