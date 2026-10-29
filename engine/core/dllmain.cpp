@@ -881,6 +881,15 @@ STDAPI SHGetFolderPathAHook(HWND hwnd, int csidl, HANDLE hToken, DWORD dwFlags, 
 	if (csidl != 5) {
 		return SHGetFolderPathAOriginal(hwnd, csidl, hToken, dwFlags, pszPath);
 	}
+	// Test isolation (r2-combo): R1DELTA_SAVEDGAMES=<dir> replaces the user's Saved Games folder so a test window
+	// reads and writes <dir>\Respawn\R1Delta instead of the real profile. Unset = unchanged behavior.
+	char overridePath[MAX_PATH] = {};
+	if (const DWORD overrideLength = GetEnvironmentVariableA("R1DELTA_SAVEDGAMES", overridePath, MAX_PATH);
+		overrideLength > 0 && overrideLength < MAX_PATH) {
+		memset(pszPath, 0, MAX_PATH);
+		memcpy(pszPath, overridePath, overrideLength + 1);
+		return S_OK;
+	}
 	LPWSTR newPath[512 * sizeof(wchar_t)] = { 0 };
 	memset(pszPath, 0, MAX_PATH);
 	auto ret = SHGetKnownFolderPath(FOLDERID_SavedGames, dwFlags, hToken, newPath);
