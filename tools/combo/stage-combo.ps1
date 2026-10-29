@@ -275,8 +275,20 @@ function Set-ComboCfgBlock([string] $path, [string] $block) {
     [IO.File]::WriteAllText($tmp, $t, [Text.UTF8Encoding]::new($false))
     [ComboNative]::Replace($tmp, $path); Remove-Item $tmp
 }
-Set-ComboCfgBlock (Join-Path $Core 'cfg\autoexec_delta.cfg') ("// ---- r2-combo playtest defaults (this root only)`n// Slide + grapple are enabled automatically (delta_pilot_movement_auto 1). Grapple key: H (+scriptCommand3); press again to cancel.`nbind `"H`" `"+scriptCommand3`"`n")
+Set-ComboCfgBlock (Join-Path $Core 'cfg\autoexec_delta.cfg') ("// ---- r2-combo playtest defaults (this root only)`n// Slide + grapple are enabled automatically on converted R2 maps (delta_pilot_movement_auto_r2 1; stock maps: delta_pilot_movement_auto_r1 1). Grapple key: H (+scriptCommand3); press again to cancel.`nbind `"H`" `"+scriptCommand3`"`n")
 Set-ComboCfgBlock (Join-Path $Core 'cfg\config_default_pc.cfg') ("// ---- r2-combo playtest defaults (this root only)`n// Fresh profiles: grapple on MOUSE4 (+scriptCommand3), also on H via autoexec_delta.cfg.`nbind `"MOUSE4`" `"+scriptCommand3`"`n")
+
+# ---- Frontier Defense overlay (playtest only; GENERATED from the player's own Titanfall 2 data, never committed):
+# loose CORE files from the FD package, copied (unlink + copy) into this root only.
+$FdOverlay = 'C:\Users\r3muxd\tmp\r2port\maps\fd\package\overlay\r1delta'
+if (Test-Path -LiteralPath $FdOverlay) {
+    $nfd = 0
+    foreach ($f in Get-ChildItem -LiteralPath $FdOverlay -Recurse -File) {
+        $rel = $f.FullName.Substring($FdOverlay.Length + 1)
+        [ComboNative]::Replace($f.FullName, (Join-Path $Core $rel)); $nfd++
+    }
+    Say "$nfd Frontier Defense overlay files staged"
+}
 
 # ---------------------------------------------------------------- report
 $report = [ordered]@{
