@@ -14,8 +14,10 @@
 #define R1D_DISPLAY_VERSION "dev"
 #endif // !R1D_DISPLAY_VERSION
 
+// Oldest server version the server browser lists. R1Delta 3.0 is not network
+// compatible with 2.x (the connect handshake requires matching major.minor).
 #ifndef R1D_MINIMUM_VERSION
-#define R1D_MINIMUM_VERSION "v2.4.7"
+#define R1D_MINIMUM_VERSION "v3.0.0"
 #endif // !R1D_MINIMUM_VERSION
 
 // Source revision the binary was built from. Release and CI builds stamp the GitHub SHA so a

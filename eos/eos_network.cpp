@@ -515,7 +515,7 @@ bool InitializeNetworking()
     p2p::RegisterForeignModule(GetModuleHandleA("EOSSDK-Win64-Shipping.dll"));
 
     g_eosEnabled = true;
-    Msg("EOS: Transport available for version %s; initialization is deferred until requested\n", R1D_VERSION);
+    Msg("EOS: Transport available; initialization is deferred until requested\n");
     return true;
 }
 

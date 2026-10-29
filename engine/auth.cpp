@@ -252,7 +252,7 @@ bool __fastcall HookedCBaseClientConnect(
             // Require major.minor to match exactly, allow client hotfix >= server hotfix
             if (serverParsed >= 2 && clientParsed >= 2) {
                 if (serverMajor != clientMajor || serverMinor != clientMinor) {
-                    V_snprintf(a8, a9, "Version mismatch: Server is running R1Delta %s, you have %s.", serverVersion, clientVersion);
+                    V_snprintf(a8, a9, "Version mismatch: Server is running R1Delta %s, you have %s. Both must run the same R1Delta %d.%d release series.", serverVersion, clientVersion, serverMajor, serverMinor);
                     return false;
                 }
                 if (clientHotfix < serverHotfix) {
