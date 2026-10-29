@@ -1729,6 +1729,61 @@ void PData_ServerRunFrame()
 	ServiceServerPlayers(false);
 }
 
+// Read-only view of the engine's client table for other server-side features (DLC ownership).
+int PData_ServerMaxClients()
+{
+	if (!pGlobalVarsServer || IsR1ODedicatedServer())
+		return 0;
+	return (std::min)(pGlobalVarsServer->maxClients, PersistentDataSlots::kMaximumSupportedClients);
+}
+
+// True for a slot that holds a real connection (bots and empty slots have no net channel).
+bool PData_ServerClientConnected(int playerSlot)
+{
+	if (!IsServerPlayerSlot(playerSlot))
+		return false;
+	const uintptr_t clientBase = NativeClientBase(playerSlot);
+	uintptr_t netChannel = 0;
+	int userId = -1;
+	return clientBase && ReadNativeClientSession(clientBase, netChannel, userId) && netChannel != 0;
+}
+
+// The value the client sent for a userinfo convar, or nullptr when it sent none.
+const char* PData_ServerClientUserInfo(int playerSlot, const char* name)
+{
+	if (!IsServerPlayerSlot(playerSlot))
+		return nullptr;
+	KeyValues* vars = GetClientConVarsKV(playerSlot);
+	if (!vars)
+		return nullptr;
+	static constexpr char kMissing[] = "\x01";
+	const char* result = vars->GetString(name, kMissing);
+	return result && strcmp(result, kMissing) != 0 ? result : nullptr;
+}
+
+// IClient::Disconnect(1, "%s", reason): the engine's own kick, shown to the player as the reason.
+bool PData_ServerKickClient(int playerSlot, const char* reason)
+{
+	if (!IsServerPlayerSlot(playerSlot) || !reason)
+		return false;
+	const uintptr_t clientBase = NativeClientBase(playerSlot);
+	if (!clientBase)
+		return false;
+	constexpr size_t kIClientDisconnectIndex = 104 / sizeof(void*);
+	__try {
+		void* client = reinterpret_cast<void*>(clientBase + kNativeIClientOffset);
+		const uintptr_t* vtable = *reinterpret_cast<uintptr_t* const*>(client);
+		if (!vtable)
+			return false;
+		using DisconnectFn = void(*)(void*, unsigned char, const char*, ...);
+		reinterpret_cast<DisconnectFn>(vtable[kIClientDisconnectIndex])(client, 1, "%s", reason);
+		return true;
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) {
+		return false;
+	}
+}
+
 static bool ParsePersistentInteger(const std::string& value, int& result)
 {
 	if (value.empty())

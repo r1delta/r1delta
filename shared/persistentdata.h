@@ -54,6 +54,11 @@ bool PData_ServerReconcileIncoming(
 // commands IsValidServerCommand accepts.
 bool SendServerCommandToClient(int playerSlot, const char* command);
 void PData_ServerRunFrame();
+// Server: read-only view of the native client table (not available in R1O fake dedicated mode).
+int PData_ServerMaxClients();
+bool PData_ServerClientConnected(int playerSlot);
+const char* PData_ServerClientUserInfo(int playerSlot, const char* name);
+bool PData_ServerKickClient(int playerSlot, const char* reason);
 void R1OClearPersistentUserDataForPlayer(int playerSlot);
 bool R1OGetPersistentUserDataConVar(int playerSlot, const char* name, std::string& value);
 // Implemented in factory.cpp.
