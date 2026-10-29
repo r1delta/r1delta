@@ -115,6 +115,8 @@
 #include "audio.h"
 #include "audio_device.h"
 #include "audio_cache.h"
+#include "apex_sound_capacity.h"
+#include "engine/r2port/audio/r2_sound_scripts.h"
 #include "reflex.h"
 #include <nlohmann/json.hpp>
 #include "shellapi.h"
@@ -8485,6 +8487,9 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		MH_CreateHook((LPVOID)(G_engine + 0x2A200), &CBaseClientState_SendConnectPacket, reinterpret_cast<LPVOID*>(&CBaseClientState_SendConnectPacket_Original));
 		//g_pLogAudio = RegisterConVar("fs_log_audio", "0", FCVAR_NONE, "Log audio file reads");
 		if (R1AudioUsesGeneratedContent()) {
+			// Room for the generated R2 sound aliases: relocate the native alias/variation tables before any sound initialization.
+			if (InstallR1ApexSoundCapacity(G_engine))
+				r2audio::SetAliasCapacityOk(true);
 			if (!InstallR1AudioCacheHooks(G_engine))
 				Error("R1Delta: required native audio metadata hooks could not be installed\n");
 		}

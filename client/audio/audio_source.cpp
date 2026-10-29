@@ -1,5 +1,6 @@
 #include "audio_source.h"
 #include "logging.h"
+#include "engine/r2port/audio/r2_audio_source.h"
 #include <vorbis/vorbisfile.h>
 #include <algorithm>
 #include <array>
@@ -22,6 +23,44 @@ constexpr std::size_t kOutputBlock = 4096;
 constexpr int kFilterRadius = 24;
 void* g_fileSystem = nullptr;
 
+// Windowed-sinc kernel sampled at kKernelPhases + 1 fractional positions (linear interpolation between rows), the same filter
+// as the exact path below. Generated R2 waves are 43-48 kHz and stream continuously, so evaluating sin/cos per tap and frame
+// (about 6 ms of CPU per second of 6 channel audio) is replaced by table rows.
+constexpr int kKernelPhases = 512;
+constexpr int kKernelTaps = 2 * kFilterRadius + 1;
+struct KernelTable {
+    std::vector<float> weights;  // (kKernelPhases + 1) rows of kKernelTaps
+};
+const KernelTable& GetKernel(std::uint32_t rate) {
+    static std::mutex lock;
+    static std::unordered_map<std::uint32_t, std::unique_ptr<KernelTable>> tables;
+    // Rates below the mixer rate share one kernel (cutoff 1); above it the cutoff depends on the rate.
+    const std::uint32_t key = rate <= kMixerRate ? kMixerRate : rate;
+    std::lock_guard<std::mutex> guard(lock);
+    auto& entry = tables[key];
+    if (!entry) {
+        entry = std::make_unique<KernelTable>();
+        entry->weights.resize(static_cast<std::size_t>(kKernelPhases + 1) * kKernelTaps);
+        const double cutoff = (std::min)(1.0, double(kMixerRate) / key);
+        constexpr double pi = 3.14159265358979323846;
+        for (int phase = 0; phase <= kKernelPhases; ++phase) {
+            const double fraction = double(phase) / kKernelPhases;
+            for (int tap = -kFilterRadius; tap <= kFilterRadius; ++tap) {
+                const double distance = tap - fraction;
+                double weight = 0;
+                if (std::abs(distance) < kFilterRadius) {
+                    const double angle = pi * distance * cutoff;
+                    const double sinc = std::abs(angle) < 1e-12 ? 1 : std::sin(angle) / angle;
+                    const double window = 0.42 + 0.5 * std::cos(pi * distance / kFilterRadius) + 0.08 * std::cos(2 * pi * distance / kFilterRadius);
+                    weight = cutoff * sinc * window;
+                }
+                entry->weights[static_cast<std::size_t>(phase) * kKernelTaps + (tap + kFilterRadius)] = static_cast<float>(weight);
+            }
+        }
+    }
+    return *entry;
+}
+
 struct AudioError : std::runtime_error { using std::runtime_error::runtime_error; };
 [[noreturn]] void Fail(const char* message) { throw AudioError(message); }
 
@@ -41,7 +80,9 @@ public:
     void* handle = nullptr;
     std::uint64_t size = 0;
     std::uint64_t position = 0;
+    // An empty path opens nothing (R2 generated waves have no native file).
     explicit NativeFile(const std::string& path) {
+        if (path.empty()) return;
         auto self = static_cast<unsigned char*>(g_fileSystem) + 8;
         handle = InnerFunction<void* (*)(void*, const char*, const char*, const char*, int)>(2)(self, path.c_str(), "rb", "GAME", 0);
         if (handle) {
@@ -123,6 +164,10 @@ std::pair<unsigned, std::size_t> SourcePriority(const NativeFile& file, const st
     }
     Fail("selected audio source does not belong to a native GAME search path");
 }
+
+// Generated waves of the converted R2 maps ("sound/r2port/<source>.wav") are decoded from the player's own Titanfall 2
+// sound streams on demand; there is no native file behind them.
+bool IsR2Wave(const std::string& path) { return path.compare(0, 13, "sound/r2port/") == 0; }
 
 std::uint16_t U16(const unsigned char* p) { return std::uint16_t(p[0]) | (std::uint16_t(p[1]) << 8); }
 std::uint32_t U32(const unsigned char* p) { return std::uint32_t(U16(p)) | (std::uint32_t(U16(p + 2)) << 16); }
@@ -289,7 +334,23 @@ public:
     OggVorbis_File vorbis{};
     bool opened = false;
     std::vector<unsigned char> waveScratch;
-    explicit Decoder(const std::string& path) : file(path) {
+    std::unique_ptr<r2audio::WaveSource> r2;
+    bool Valid() const { return r2 || file.handle; }
+    explicit Decoder(const std::string& path) : file(IsR2Wave(path) ? std::string() : path) {
+        if (IsR2Wave(path)) {
+            std::string error;
+            r2 = r2audio::WaveSource::Open(path, &error);
+            if (!r2) throw AudioError("R2 wave: " + error);
+            const auto& wave = r2->Info();
+            info.rate = wave.sampleRate;
+            info.channels = wave.channels;
+            info.frames = wave.frames;
+            info.bits = 16;
+            info.loop = wave.loop;
+            info.loopSpecified = true;
+            ValidateInfo(info);
+            return;
+        }
         if (!file.handle) return;
         unsigned char magic[4];
         file.ReadAt(0, magic, sizeof(magic));
@@ -334,6 +395,11 @@ public:
     void ReadFrames(std::uint64_t first, std::size_t count, std::vector<float>& output) {
         if (first > info.frames || count > info.frames - first) Fail("source frame request exceeds EOF");
         output.resize(count * info.channels);
+        if (r2) {
+            std::string error;
+            if (!r2->Read(first, count, output.data(), &error)) throw AudioError("R2 wave read: " + error);
+            return;
+        }
         if (info.vorbis) {
             const int seek = ov_pcm_seek(&vorbis, static_cast<ogg_int64_t>(first));
             if (seek) throw AudioError("Vorbis seek failed: " + std::to_string(seek));
@@ -388,6 +454,23 @@ public:
                 if (info.rate == kMixerRate) {
                     for (unsigned channel = 0; channel < info.channels; ++channel)
                         values[channel] = source[(center - begin) * info.channels + channel];
+                } else if (r2) {
+                    const KernelTable& kernel = GetKernel(info.rate);
+                    const double position = fraction * kKernelPhases;
+                    const int row = static_cast<int>(position);
+                    const float blend = static_cast<float>(position - row);
+                    const float* low = kernel.weights.data() + static_cast<std::size_t>(row) * kKernelTaps;
+                    const float* high = low + kKernelTaps;
+                    double weightSum = 0;
+                    for (int tap = -kFilterRadius; tap <= kFilterRadius; ++tap) {
+                        const float weight = low[tap + kFilterRadius] + (high[tap + kFilterRadius] - low[tap + kFilterRadius]) * blend;
+                        if (weight == 0.0f) continue;
+                        const auto index = (std::max)(std::int64_t(0), (std::min)(std::int64_t(info.frames - 1), std::int64_t(center) + tap));
+                        const float* frame = source.data() + (std::uint64_t(index) - begin) * info.channels;
+                        for (unsigned channel = 0; channel < info.channels; ++channel) values[channel] += weight * frame[channel];
+                        weightSum += weight;
+                    }
+                    for (unsigned channel = 0; channel < info.channels; ++channel) values[channel] /= weightSum;
                 } else {
                     // Windowed-sinc low-pass conversion. Absolute rational phase
                     // makes independent seeks and adjacent reads sample-identical.
@@ -452,7 +535,9 @@ std::string CanonicalName(const char* input) {
 std::shared_ptr<Entry> LoadEntry(const std::string& name) {
     auto entry = std::make_shared<Entry>();
     const auto oggName = name.substr(0, name.size() - 4) + ".ogg";
-    {
+    if (IsR2Wave(name)) {
+        entry->sourcePath = name;
+    } else {
         NativeFile ogg(oggName);
         NativeFile wave(name);
         if (!ogg.handle && !wave.handle) Fail("neither WAV nor Ogg exists on native GAME search paths");
@@ -462,7 +547,7 @@ std::shared_ptr<Entry> LoadEntry(const std::string& name) {
         entry->sourcePath = chooseOgg ? oggName : name;
     }
     entry->decoder = std::make_unique<Decoder>(entry->sourcePath);
-    if (!entry->decoder->file.handle) Fail("selected audio source disappeared while loading metadata");
+    if (!entry->decoder->Valid()) Fail("selected audio source disappeared while loading metadata");
     entry->info = entry->decoder->info;
     if (entry->info.vorbis && !entry->info.loopSpecified) {
         // A transcoded Ogg cannot recreate discarded loop metadata. Recover it
@@ -550,7 +635,7 @@ R1AudioReadResult ReadR1AudioSource(const char* filename, const char* pathID,
         std::lock_guard<std::mutex> decodeLock(entry->decoderMutex);
         if (!entry->decoder) {
             entry->decoder = std::make_unique<Decoder>(entry->sourcePath);
-            if (!entry->decoder->file.handle) Fail("cached source was removed; run r1delta_audio_rebuild");
+            if (!entry->decoder->Valid()) Fail("cached source was removed; run r1delta_audio_rebuild");
         }
         entry->decoder->Canonical(offset / frameBytes, count / frameBytes, static_cast<std::int16_t*>(destination));
         bytesRead = count;
@@ -572,4 +657,5 @@ void ReportR1AudioSources() {
     char message[256];
     std::snprintf(message, sizeof(message), "R1Delta audio: %zu generated records, %zu failed sources, %zu prefetch bytes; no decoded-track cache\n", g_sources.size(), g_errors.size(), prefixBytes);
     Msg("%s", message);
+    Msg("%s", r2audio::StatsLine().c_str());
 }

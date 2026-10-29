@@ -218,6 +218,8 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="client\audio\audio.h" />
     <ClInclude Include="client\audio\audio_cache.h" />
     <ClInclude Include="client\audio\audio_source.h" />
+    <ClInclude Include="client\audio\apex_sound_capacity.h" />
+    <ClInclude Include="client\audio\apex_sound_capacity_profile.h" />
     <ClInclude Include="client\audio\audio_hook_profile.h" />
     <ClInclude Include="client\audio\audio_device.h" />
     <ClInclude Include="beardbgon.h" />
@@ -279,6 +281,12 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="engine\filesystem\r2_model_provider.h" />
     <ClInclude Include="engine\r2port\modelconv\modelconv.hpp" />
     <ClInclude Include="engine\filesystem\r2_overview_provider.h" />
+    <ClInclude Include="engine\filesystem\r2_sound_provider.h" />
+    <ClInclude Include="engine\r2port\audio\bink_audio.h" />
+    <ClInclude Include="engine\r2port\audio\r2_audio_source.h" />
+    <ClInclude Include="engine\r2port\audio\r2_sound_bank.h" />
+    <ClInclude Include="engine\r2port\audio\r2_sound_scripts.h" />
+    <ClInclude Include="engine\r2port\audio\r2_sound_requests.inc" />
     <ClInclude Include="engine\filesystem\r2_particle_provider.h" />
     <ClInclude Include="engine\core\r2port_particles_hook.h" />
     <ClInclude Include="engine\core\r2port_ain_hook.h" />
@@ -460,6 +468,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="client\audio\audio.cpp" />
     <ClCompile Include="client\audio\audio_cache.cpp" />
     <ClCompile Include="client\audio\audio_source.cpp" />
+    <ClCompile Include="client\audio\apex_sound_capacity.cpp" />
     <ClCompile Include="client\audio\audio_device.cpp" />
     <ClCompile Include="client\culling\region_cull.cpp" />
     <ClCompile Include="sdk\bitbuf.cpp" />
@@ -515,6 +524,11 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="engine\filesystem\r2_model_provider.cpp" />
     <ClCompile Include="engine\r2port\modelconv\modelconv.cpp" />
     <ClCompile Include="engine\filesystem\r2_overview_provider.cpp" />
+    <ClCompile Include="engine\filesystem\r2_sound_provider.cpp" />
+    <ClCompile Include="engine\r2port\audio\bink_audio.cpp" />
+    <ClCompile Include="engine\r2port\audio\r2_audio_source.cpp" />
+    <ClCompile Include="engine\r2port\audio\r2_sound_bank.cpp" />
+    <ClCompile Include="engine\r2port\audio\r2_sound_scripts.cpp" />
     <ClCompile Include="engine\filesystem\r2_particle_provider.cpp" />
     <ClCompile Include="engine\core\r2port_particles_hook.cpp" />
     <ClCompile Include="engine\core\r2port_ain_hook.cpp" />
