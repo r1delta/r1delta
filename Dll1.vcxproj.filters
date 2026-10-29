@@ -604,6 +604,9 @@
 	<ClInclude Include="shared\persistentdata_store.h">
 	  <Filter>shared</Filter>
 	</ClInclude>
+	<ClInclude Include="shared\dynamic_weapons.h">
+	  <Filter>shared</Filter>
+	</ClInclude>
     <ClInclude Include="client\ui_script_failure.h">
       <Filter>client</Filter>
     </ClInclude>
@@ -1244,6 +1247,9 @@
       <Filter>shared</Filter>
     </ClCompile>
     <ClCompile Include="shared\persistentdata_store.cpp">
+      <Filter>shared</Filter>
+    </ClCompile>
+    <ClCompile Include="shared\dynamic_weapons.cpp">
       <Filter>shared</Filter>
     </ClCompile>
     <ClCompile Include="client\ui_script_failure.cpp">

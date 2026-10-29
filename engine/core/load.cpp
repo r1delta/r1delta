@@ -39,6 +39,7 @@
 #include "load.h"
 #include "player_resource_18.h"
 #include "ffa_targeting.h"
+#include "dynamic_weapons.h"
 #include "r2port_particles_hook.h"
 #include "r2port_ain_hook.h"
 #include "client_port_override.h"
@@ -9471,6 +9472,8 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		RegisterConVar("delta_server_auth_token", "", FCVAR_USERINFO | FCVAR_SERVER_CANNOT_QUERY | FCVAR_DONTRECORD | FCVAR_PROTECTED | FCVAR_HIDDEN, "Per-server auth token");
 		RegisterConVar("delta_version", R1D_VERSION, FCVAR_USERINFO | FCVAR_DONTRECORD, "R1Delta version number");
 		RegisterConVar("delta_skip_version_check", "0", FCVAR_GAMEDLL, "Skip version check for connecting clients (sets server to dev mode)");
+		RegisterConVar("delta_weapon_roster", "none", FCVAR_USERINFO | FCVAR_DONTRECORD, "R1Delta dynamic weapon roster token sent to servers");
+		RegisterConVar("delta_weapon_roster_check", "1", FCVAR_GAMEDLL, "Clients whose scripts/weapon_manifest.txt roster differs from this server's are rejected (0 = accept)");
 		RegisterConVar("delta_soundtable_check", "1", FCVAR_GAMEDLL, "Clients whose sound scripts differ from this server's disconnect (0 = they only get a warning)");
 		SoundScriptParity_RegisterInfoCommand();
 		RegisterConVar("delta_scriptsync_check", "1", FCVAR_GAMEDLL, "Clients whose remote functions, server/entity vars or registered strings differ from this server's disconnect (0 = they only get a warning)");
@@ -9997,6 +10000,8 @@ void __stdcall LoaderNotificationCallback(
 			InstallClientParticleHook(G_client);
 			InstallClientPlayerClassCompatibilityHooks(G_client);
 			r1delta::ffa_targeting::InstallClientHooks(G_client);
+			if (!IsDedicatedServer())
+				r1delta::dynamic_weapons::InstallClient(G_client);
 			if (ShouldInstallR1OClientDebugHooks()) {
 				InstallClientRenderableDrawModelHook(G_client);
 				ClientMaybeInstallViewSubHooks();
@@ -10056,6 +10061,11 @@ void __stdcall LoaderNotificationCallback(
 		}
 		if (is_server || is_r1o_server_local) {
 			r2port::wallrun::InstallServer(
+				reinterpret_cast<std::uintptr_t>(notification_data->Loaded.DllBase));
+		}
+		// server.dll is the same TFO build in listen, legacy dedicated and R1O fake-dedicated.
+		if (is_server || is_r1o_server_local) {
+			r1delta::dynamic_weapons::InstallServer(
 				reinterpret_cast<std::uintptr_t>(notification_data->Loaded.DllBase));
 		}
 		if (is_server || is_r1o_server_local) do_server(notification_data);

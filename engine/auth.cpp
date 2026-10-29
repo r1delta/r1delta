@@ -11,6 +11,8 @@
 #include "soundscript_parity.h"
 #include "dlc_ownership.h"
 #include "dlc_ownership_logic.h"
+#include "parity_common.h"
+#include "dynamic_weapons.h"
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
@@ -282,6 +284,24 @@ bool __fastcall HookedCBaseClientConnect(
             return false;
     }
 
+    // Dynamic weapon roster (scripts/weapon_manifest.txt): a client that registers a different
+    // set of weapon classes would desync class IDs and entity creation. Enforced independently
+    // of delta_skip_version_check; delta_weapon_roster_check 0 turns it off.
+    if (Parity::ServerConVarEnabled("delta_weapon_roster_check")) {
+        const char* clientRoster = nullptr;
+        if (conVars) {
+            for (int i = 0; i < conVars->Count(); i++) {
+                NetMessageCvar_t& var = conVars->Element(i);
+                if (strcmp(var.name, "delta_weapon_roster") == 0) {
+                    clientRoster = var.value;
+                    break;
+                }
+            }
+        }
+        if (!r1delta::dynamic_weapons::ServerAcceptsClientRoster(clientRoster, a8, a9))
+            return false;
+    }
+
     static auto bUseOnlineAuth = OriginalCCVar_FindVar(cvarinterface, "delta_online_auth_enable");
     static auto iSyncUsernameWithDiscord = OriginalCCVar_FindVar(cvarinterface, "delta_discord_username_sync");
     static auto iHostPort = OriginalCCVar_FindVar(cvarinterface, "hostport");
@@ -369,6 +389,7 @@ __int64 __fastcall HookedCBaseStateClientConnect(
     SoundScriptParity_ClientConnecting();
     // The ownership the signon NET_SetConVar will carry is recomputed from disk, never taken from a saved value.
     Dlc_RefreshLocalPresence("connect");
+    r1delta::dynamic_weapons::ClientConnecting();
 
     static int s_connectLogBudget = 16;
     if (s_connectLogBudget > 0) {

@@ -1344,6 +1344,7 @@ void RegisterR1ODediDeltaConVars()
 	RegisterR1ODediConVar("delta_soundtable_check", "1", FCVAR_GAMEDLL, "Clients whose sound scripts differ from this server's disconnect (0 = they only get a warning)");
 	RegisterR1ODediConVar("delta_scriptsync_check", "1", FCVAR_GAMEDLL, "Clients whose remote functions, server/entity vars or registered strings differ from this server's disconnect (0 = they only get a warning)");
 	RegisterR1ODediConVar("delta_skip_version_check", "0", FCVAR_GAMEDLL, "Skip version check for connecting clients (sets server to dev mode)");
+	RegisterR1ODediConVar("delta_weapon_roster_check", "1", FCVAR_GAMEDLL, "Clients whose scripts/weapon_manifest.txt roster differs from this server's are rejected (0 = accept)");
 	RegisterR1ODediConVar("delta_online_auth_enable", "0", FCVAR_GAMEDLL, "Whether to use master server auth");
 	RegisterR1ODediConVar("delta_discord_username_sync", "0", FCVAR_GAMEDLL, "Controls if player names are synced with Discord");
 	RegisterR1ODediConVar("riff_floorislava", "0", FCVAR_HIDDEN, "Enable floor is lava mode");
