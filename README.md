@@ -45,6 +45,73 @@ REGEDIT4
 "S:"="\\??\\C:\\depot\\r1delta"
 ```
 
+## Predicted script movement (API 3)
+
+Movement is opt-in per player. Register the same program name, source text, and slot count on CLIENT and SERVER with `Movement_Register(name, source, slots, presentationName)`, then call `Movement_Enable(player, name)` on SERVER. Registration does not change movement or require the native hooks to be ready yet. `Movement_Disable(player)` restores ordinary movement. Identical registration/enabling is harmless; replacement starts a new session and clears state. There is one active program per player.
+
+Keep shared declarations under `scripts/vscripts/movement` and include them from the base client/server mapspawn paths, not autorun. A VM supports 16 programs, names of 1–32 ASCII letters/digits or `_./-`, source up to 65,536 bytes, and 0–64 native state slots. `Movement_GetApiVersion()` returns `3`; `Movement_IsAvailable()` and `Movement_GetLastError()` expose native readiness/errors. SERVER can query `Movement_IsEnabled(player, name)`; an empty name matches any enabled program.
+
+### Simulation and state
+
+The synchronous source executes for each simulated command, including prediction replays. `MOVE_SETUP` edits command inputs before native preparation, `MOVE_SIMULATE` runs before the native dispatcher, and `MOVE_FINISH` observes the result before publication. Native collision and locomotion still execute once. Command/tick/time accessors describe that simulation, not a render frame; integrate forces using `Move_GetFrameTime()`.
+
+Programs run in the owning script VM and may call ordinary APIs, including replicated convar getters. This does **not** make ordinary globals, entity script fields, arbitrary native setters, `SetServerVar`, sounds, or spawned entities rollback-safe. Deterministic simulation state belongs in `Move_Get/SetIntState(index)` or `Move_Get/SetFloatState(index)`. These are two views of the same 32-bit word; use one consistent type per slot. Do not yield, wait, start threads, or produce external effects during simulation. Shared helper code and any convars it reads must also agree between peers.
+
+`Move_GetPlayer()` returns the evaluated native player entity and requires an existing native script instance. It is not a persistent-state container. `Move_GetPlayerHandle()` instead returns the serial-qualified network identity used by movement entity queries. Check validity before querying other entities. `Move_GetTraceSurface()` adds the native surface index to the existing hull-trace result, or `-1` when absent.
+
+Custom slots, native jump resources, and authoritative native frames are restored together for replay. Cached frames retain their matching frozen custom state. Missing/incompatible programs or unavailable history disconnect explicitly rather than silently running different movement.
+
+### Command-captured custom input
+
+CLIENT may register a synchronous named callback with `Movement_SetInputCallback(name, callbackName)`. It runs once while building a new native usercmd, not on replay or retransmission. Only inside it, use `Move_InputGetButtons()`, `Move_InputSetButtons(bits)`, and `Move_InputGetCommandNumber()`. Simulation reads the captured 32-bit payload through `Move_GetCustomButtons()`.
+
+This uses the six unused camera-data words gated by `hasCameraData`: one button word and five reserved zero words. The native command/verified-command sizes stay `0x134`/`0x138`; normal copy, seed, checksum, backup, and delta decoding remain in use. The writer preserves raw integer bits, including float NaN-shaped patterns. Do not also use those fields for camera/headtracking data in a v3 session.
+
+### Optional native checkpoints
+
+In `MOVE_SETUP`, call `Move_SetCheckpointMask(mask)` with the desired `MOVE_CHECKPOINT_*` bits; the default is zero. `MOVE_CHECKPOINT_ALL` enables all eight. A checkpoint executes at its real native decision point, not as another movement pass. The mask is reset each command.
+
+| Phase / matching checkpoint bit | Native context or control |
+| --- | --- |
+| `MOVE_FRICTION` / `FRICTION` | Wish direction/speed, native deceleration, surface friction, wall normal, and output wish velocity. `Move_ReplaceFriction(true)` replaces this friction operation; otherwise native friction runs, including the existing friction scale. |
+| `MOVE_GROUND_CONTACT` / `GROUND_CONTACT` | Actual ground publication. `Move_HasGroundNormal()` gates `Move_GetGroundNormal(axis)`; a player's gravity-up vector is not a contact plane. Persist a needed contact normal in slots. |
+| `MOVE_JUMP` / `JUMP` | Read or change the selected legal native jump height with `Move_Get/SetSelectedJumpHeight()`. This does not manufacture a jump request. |
+| `MOVE_JUMP_FINISH` / `JUMP_FINISH` | `Move_DidJump()` reports whether the legal native jump actually happened. |
+| `MOVE_START_GRAVITY` / `START_GRAVITY` | `Move_GetGravityContribution()` reports the pending native half-gravity contribution. |
+| `MOVE_FINISH_GRAVITY` / `FINISH_GRAVITY` | The second native half-gravity contribution, for coherent slope/rope forces. |
+| `MOVE_DUCK` / `DUCK` | Native duck request/state and coherent transition timing. `Move_SetDuckDuration(milliseconds)` accepts 1–1023, matching the native network field. Native unduck timing remains intact. |
+| `MOVE_WALK` / `WALK` | Before native ground walking and its scalar getters. |
+
+The bit names after `/` in the first column are prefixed with `MOVE_CHECKPOINT_`. Checkpoint-only getters/setters reject the wrong phase. Other v3 controls include acceleration/deceleration overrides and their clear functions, a multiplier at the native move-scale getter, duck retention, crouch-jump permission, and sprint permission. Acceleration/deceleration overrides precede native player modifiers; sprint permission cannot override a native refusal. Context getters expose world-up eligibility, water jump/level, stance, duck state/request, view/input direction, and the native raw move scale. Controls are command-local, not persistent player patches.
+
+### Committed presentation
+
+Replay must simulate again; presentation must not. `Move_EmitEvent()` still delivers IDs 0–31 once per session/command/event to the registered client callback after prediction unwinds. `MOVE_EVENT_RESET` requests cleanup on disable, replacement, disconnect, VM destruction, or shutdown.
+
+For ongoing effects, ordinary CLIENT code can use `Movement_HasPresentation(name)` and `Movement_GetPresentationInt/Float(name, slot)`, plus the `Command`, `Session`, and `Time` getters. These read the final committed snapshot, never replay scratch. Ordinary SERVER code has corresponding `Movement_HasPlayerState(player, name)` and `Movement_GetPlayerStateInt/Float/Command/Session/Time` accessors for published authoritative state. Simulation time is not ordinary render `Time()`; anchor cosmetic interpolation to the snapshot clock.
+
+`Movement_SetView(name, fovScale, forward, right, up, pitch, yaw, roll)` composes a session-owned FOV multiplier and camera-relative viewmodel contribution with native view calculation/bob/lag. `Movement_ClearView(name)` removes it. CLIENT `Movement_SetActivity(player, session, activity)` requests a model-validated activity; unsupported activities return false. Native exclusive death/traversal selection and bookkeeping remain in control. Clear it with `Movement_ClearActivity(player, session)`. These are presentation sinks, not authoritative animation state or substitutes for missing model sequences/assets.
+
+### Slide/grapple reference
+
+The base multiplayer mapspawn includes and registers `movement/pilot`; it does not automatically enable it. On a loaded multiplayer map:
+
+```text
+script printt(Movement_IsAvailable())
+script PilotMovement_Enable(GetPlayerArray()[0])
+bind mouse4 +scriptCommand3
+```
+
+Crouch while moving to slide. The grapple samples `+scriptCommand3` into custom input; press again to cancel, rather than releasing the key. Disable with:
+
+```text
+script PilotMovement_Disable(GetPlayerArray()[0])
+```
+
+`pilot.slide_grapple` combines the independently authored slide and grapple sources in 64 slots. Sliding uses native friction, landing, jump, gravity, duck, and movement-scalar checkpoints. Grapple flight, static world anchoring, launch, winching, four-corner routing, and detach state are predicted; ordinary consumers own procedural local cable/claw geometry, remote native ropes, and weapon holster/deploy cleanup. It is not a transfer of private SP content or Powder assets/source. Exact authored slide body/viewmodel sequences, surface-specific sound/particles, and grapple model/audio require separately licensed assets and their mappings.
+
+Use `cl_localnetworkbackdoor 0` for multiplayer prediction. Both peers need matching CODE/CORE and supported native binaries; v3 is not wire-compatible with older movement sessions. No-program players retain the native movement path.
+
 # Credits
 - [@r3muxd](https://github.com/r3muxd)
 - [@sonny-tel](https://github.com/sonny-tel)

@@ -41,6 +41,8 @@
 #include "load.h"
 #include "ffa_targeting.h"
 #include "script_variant_abi.h"
+#include "predicted_movement.h"
+#include "movement_runtime.h"
 
 #include <random>
 #include "masterserver.h"
@@ -450,6 +452,7 @@ AddSquirrelReg_t AddSquirrelReg;
 static bool RunR1OTfoScriptCode(R1SquirrelVM* vm, const char* code, const char* sourceName);
 static std::atomic<R1SquirrelVM*> s_R1OTfoPendingServerAutorunVm{ nullptr };
 static std::atomic<bool> s_R1OTfoServerAutorunBootstrapComplete{ false };
+static std::atomic<bool> s_R1OTfoVmDestructionReady{ false };
 //
 //const char* __fastcall Script_GetConVarString(const char* a1, __int64 a2, __int64 a3)
 //{
@@ -3505,6 +3508,9 @@ static void OnServerVmDestroyed()
 	g_classDescriptorClones.clear();
 	g_serverProxyFlag = false;
 	g_realServerVm = nullptr;
+	g_R1OTfoServerVm = nullptr;
+	s_R1OTfoPendingServerAutorunVm.store(nullptr, std::memory_order_release);
+	s_R1OTfoServerAutorunBootstrapComplete.store(false, std::memory_order_release);
 }
 
 } // namespace
@@ -3546,6 +3552,8 @@ void* CScriptManager__CreateNewVM(__int64 a1, int a2, unsigned int a3) {
 		// Handle error: AddSquirrelReg function not found
 		// You might want to log this error
 	}
+	if (!r1delta::movement::AdmitMovementVm(reinterpret_cast<R1SquirrelVM*>(vmPtr), context))
+		Warning("R1Delta movement: VM registration failed before mapspawn (context=%d).\n", static_cast<int>(context));
 
 	// Original functionality for server VM
 	if (context == SCRIPT_CONTEXT_SERVER) {
@@ -3588,6 +3596,8 @@ void* CScriptManager__CreateNewVM_R1OTFO(__int64 a1, int a2, unsigned int a3) {
 		ScriptFunctionRegistry::getInstance().registerFunctions(vmPtr, context);
 	else if (AreR1OFakeDediVerboseLogsEnabled())
 		OutputDebugStringA("R1Delta: R1O TFO squirrel native registration skipped: AddSquirrelReg is null\n");
+	if (!r1delta::movement::AdmitMovementVm(reinterpret_cast<R1SquirrelVM*>(vmPtr), context))
+		Warning("R1Delta movement: alternate VM registration failed before mapspawn (context=%d).\n", static_cast<int>(context));
 
 	if (context == SCRIPT_CONTEXT_SERVER) {
 		g_R1OTfoServerVm = vmPtr;
@@ -3648,6 +3658,26 @@ bool InstallR1OTFOSquirrelHooks(uintptr_t launcherBase)
 		launcherBase + 0x1C2A0,
 		reinterpret_cast<void*>(&CScriptManager__CreateNewVM_R1OTFO),
 		reinterpret_cast<void**>(&g_R1OTfoCreateNewVMOriginal));
+	R1OTfoImmediateHookResult destroyVMHook{ MH_ERROR_UNSUPPORTED_FUNCTION, MH_ERROR_UNSUPPORTED_FUNCTION };
+	constexpr unsigned char destroyPrefix[] = {
+		0x48, 0x85, 0xD2, 0x0F, 0x84, 0x80, 0x00, 0x00,
+		0x00, 0x53, 0x48, 0x83, 0xEC, 0x30, 0x48, 0xC7
+	};
+	if (CScriptManager__DestroyVMOriginal
+		|| (r1delta::movement::VerifyMovementModuleDigest(launcherBase,
+			"10b75abc67eadc02cf0bdcebab8bca1eb76fd241aca4d5a2a69a125a1b4aa0f6")
+			&& memcmp(reinterpret_cast<void*>(launcherBase + 0x1C550), destroyPrefix, sizeof(destroyPrefix)) == 0)) {
+		destroyVMHook = InstallR1OTfoImmediateHook(
+			launcherBase + 0x1C550,
+			reinterpret_cast<void*>(&CScriptManager__DestroyVM),
+			reinterpret_cast<void**>(&CScriptManager__DestroyVMOriginal));
+	}
+	s_R1OTfoVmDestructionReady.store(
+		R1OTfoImmediateHookInstalled(destroyVMHook) && CScriptManager__DestroyVMOriginal,
+		std::memory_order_release);
+	if (!R1OTfoImmediateHookInstalled(destroyVMHook))
+		Warning("R1Delta: R1O script VM destruction hook unavailable (create=%d enable=%d).\n",
+			destroyVMHook.create, destroyVMHook.enable);
 	if (AreR1OFakeDediVerboseLogsEnabled()) {
 		char hookLog[512];
 		_snprintf_s(
@@ -3661,10 +3691,13 @@ bool InstallR1OTFOSquirrelHooks(uintptr_t launcherBase)
 			createNewVMHook.enable,
 			reinterpret_cast<void*>(g_R1OTfoAddSquirrelReg),
 			R1OTfoImmediateHookInstalled(printHooks),
-			R1OTfoImmediateHookInstalled(createNewVMHook) && R1OTfoImmediateHookInstalled(printHooks));
+			R1OTfoImmediateHookInstalled(createNewVMHook) && R1OTfoImmediateHookInstalled(printHooks)
+				&& R1OTfoImmediateHookInstalled(destroyVMHook));
 		OutputDebugStringA(hookLog);
 	}
-	return R1OTfoImmediateHookInstalled(createNewVMHook) && R1OTfoImmediateHookInstalled(printHooks);
+	return R1OTfoImmediateHookInstalled(createNewVMHook)
+		&& R1OTfoImmediateHookInstalled(printHooks)
+		&& R1OTfoImmediateHookInstalled(destroyVMHook);
 }
 
 
@@ -3725,9 +3758,10 @@ void __fastcall CScriptManager__DestroyVM(void* manager, void* vmPtr)
 {
 	const bool destroyingServerVm =
 		vmPtr == &g_fakeServerVm
-		|| (vmPtr && vmPtr == g_realServerVm);
+		|| (vmPtr && vmPtr == GetServerVMPtr());
 	void* realVmPtr =
 		vmPtr == &g_fakeServerVm ? g_realServerVm : vmPtr;
+	r1delta::movement::ForgetMovementVm(static_cast<R1SquirrelVM*>(realVmPtr));
 	CScriptManager__DestroyVMOriginal(manager, realVmPtr);
 	if (destroyingServerVm)
 		OnServerVmDestroyed();
@@ -3864,6 +3898,8 @@ bool RunR1OServerAutorunScriptsIfPending()
 		return false;
 	}
 
+	if (s_R1OTfoVmDestructionReady.load(std::memory_order_acquire))
+		r1delta::movement::AdmitMovementVm(pendingVm, SCRIPT_CONTEXT_SERVER);
 	RunAutorunScripts(pendingVm, "sv_*");
 	s_R1OTfoPendingServerAutorunVm.compare_exchange_strong(
 		pendingVm,

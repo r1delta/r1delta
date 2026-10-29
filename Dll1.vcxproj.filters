@@ -230,6 +230,9 @@
     <ClInclude Include="engine\net\net_hooks.h">
       <Filter>engine\net</Filter>
     </ClInclude>
+    <ClInclude Include="engine\net\movement_snapshot_transport.h">
+      <Filter>engine\net</Filter>
+    </ClInclude>
     <ClInclude Include="engine\net\networking.h">
       <Filter>engine\net</Filter>
     </ClInclude>
@@ -402,6 +405,27 @@
     </ClInclude>
     <ClInclude Include="shared\squirrel.h">
       <Filter>shared</Filter>
+    </ClInclude>
+    <ClInclude Include="shared\predicted_movement.h">
+      <Filter>shared</Filter>
+    </ClInclude>
+    <ClInclude Include="shared\movement_runtime.h">
+      <Filter>shared</Filter>
+    </ClInclude>
+    <ClInclude Include="shared\movement_input.h">
+      <Filter>shared</Filter>
+    </ClInclude>
+    <ClInclude Include="shared\movement_checkpoints.h">
+      <Filter>shared</Filter>
+    </ClInclude>
+    <ClInclude Include="client\movement_presentation_hooks.h">
+      <Filter>client</Filter>
+    </ClInclude>
+    <ClInclude Include="client\movement_rope_presentation.h">
+      <Filter>client</Filter>
+    </ClInclude>
+    <ClInclude Include="client\slide_model_presentation.h">
+      <Filter>client</Filter>
     </ClInclude>
     <ClInclude Include="shared\script_variant_abi.h">
       <Filter>shared</Filter>
@@ -731,6 +755,9 @@
     <ClCompile Include="engine\net\net_hooks.cpp">
       <Filter>engine\net</Filter>
     </ClCompile>
+    <ClCompile Include="engine\net\movement_snapshot_transport.cpp">
+      <Filter>engine\net</Filter>
+    </ClCompile>
     <ClCompile Include="engine\net\networking.cpp">
       <Filter>engine\net</Filter>
     </ClCompile>
@@ -876,6 +903,27 @@
     </ClCompile>
     <ClCompile Include="shared\squirrel.cpp">
       <Filter>shared</Filter>
+    </ClCompile>
+    <ClCompile Include="shared\predicted_movement.cpp">
+      <Filter>shared</Filter>
+    </ClCompile>
+    <ClCompile Include="shared\movement_script.cpp">
+      <Filter>shared</Filter>
+    </ClCompile>
+    <ClCompile Include="shared\movement_input.cpp">
+      <Filter>shared</Filter>
+    </ClCompile>
+    <ClCompile Include="shared\movement_checkpoints.cpp">
+      <Filter>shared</Filter>
+    </ClCompile>
+    <ClCompile Include="client\movement_presentation_hooks.cpp">
+      <Filter>client</Filter>
+    </ClCompile>
+    <ClCompile Include="client\movement_rope_presentation.cpp">
+      <Filter>client</Filter>
+    </ClCompile>
+    <ClCompile Include="client\slide_model_presentation.cpp">
+      <Filter>client</Filter>
     </ClCompile>
     <!-- sdk -->
     <ClCompile Include="sdk\bitbuf.cpp">

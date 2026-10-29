@@ -260,6 +260,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="eos\eos_layer.h" />
     <ClInclude Include="eos\eos_network.h" />
     <ClInclude Include="engine\net\net_hooks.h" />
+    <ClInclude Include="engine\net\movement_snapshot_transport.h" />
     <ClInclude Include="engine\vtable_remaps\engine_vtable.h" />
     <ClInclude Include="eos\fake_ip_layer.h" />
     <ClInclude Include="engine\core\factory.h" />
@@ -337,6 +338,13 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="engine\security_fixes.h" />
     <ClInclude Include="engine\sendmoveclampfix.h" />
     <ClInclude Include="shared\squirrel.h" />
+    <ClInclude Include="shared\predicted_movement.h" />
+    <ClInclude Include="shared\movement_runtime.h" />
+    <ClInclude Include="shared\movement_input.h" />
+    <ClInclude Include="shared\movement_checkpoints.h" />
+    <ClInclude Include="client\movement_presentation_hooks.h" />
+    <ClInclude Include="client\movement_rope_presentation.h" />
+    <ClInclude Include="client\slide_model_presentation.h" />
     <ClInclude Include="shared\script_variant_abi.h" />
     <!-- Removed: steam.h -->
     <ClInclude Include="client\rendering\surfacerender.h" />
@@ -449,6 +457,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="engine\vtable_remaps\filesystem_vtable.cpp" />
     <ClCompile Include="eos\fake_ip_layer.cpp" />
     <ClCompile Include="engine\net\net_hooks.cpp" />
+    <ClCompile Include="engine\net\movement_snapshot_transport.cpp" />
     <ClCompile Include="client\rendering\hudwarp.cpp" />
     <ClCompile Include="client\rendering\hudwarp_hooks.cpp" />
     <ClCompile Include="client\rendering\antilag.cpp" />
@@ -499,6 +508,13 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     </ClCompile>
     <ClCompile Include="engine\sendmoveclampfix.cpp" />
     <ClCompile Include="shared\squirrel.cpp" />
+    <ClCompile Include="shared\predicted_movement.cpp" />
+    <ClCompile Include="shared\movement_script.cpp" />
+    <ClCompile Include="shared\movement_input.cpp" />
+    <ClCompile Include="shared\movement_checkpoints.cpp" />
+    <ClCompile Include="client\movement_presentation_hooks.cpp" />
+    <ClCompile Include="client\movement_rope_presentation.cpp" />
+    <ClCompile Include="client\slide_model_presentation.cpp" />
     <!-- Removed: steam.cpp -->
     <ClCompile Include="client\rendering\surfacerender.cpp" />
     <ClCompile Include="TableDestroyer.cpp" />

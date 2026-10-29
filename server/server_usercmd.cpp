@@ -5,6 +5,7 @@
 #include "factory.h"
 #include "load.h"
 #include "logging.h"
+#include "../shared/predicted_movement.h"
 #include "vsdk/public/tier0/platformtime.h"
 
 #include <cfloat>
@@ -377,6 +378,7 @@ void __fastcall PlayerPhysicsSimulate(uintptr_t player)
 	}
 
 	s_playerPhysicsSimulateOriginal(player);
+	r1delta::movement::FlushMovementAuthorityForPlayer(player);
 }
 
 __int64 __fastcall PlayerMoveRunCommand(uintptr_t playerMove, uintptr_t player,
@@ -403,10 +405,96 @@ bool MatchesBytes(uintptr_t address, const unsigned char* expected, size_t lengt
 {
 	return std::memcmp(reinterpret_cast<const void*>(address), expected, length) == 0;
 }
+
+template<typename T>
+void SetMovementConVarBounds(T* variable, float minimum, float maximum)
+{
+	if (!variable)
+		return;
+	auto* parent = variable->m_pParent ? variable->m_pParent : variable;
+	parent->m_bHasMin = true;
+	parent->m_fMinVal = minimum;
+	parent->m_bHasMax = true;
+	parent->m_fMaxVal = maximum;
+}
+
+}
+
+bool RegisterMovementConVars()
+{
+	static bool registered = false;
+	if (registered)
+		return true;
+	if (!cvarinterface || !OriginalCCVar_FindVar)
+		return false;
+
+	// Preserve the SP tuning interface and native units. Multiplayer physics
+	// additionally requires server authority and signon/live-value replication.
+	struct Parameter
+	{
+		const char* name;
+		const char* value;
+		const char* help;
+		float minimum;
+		float maximum; // Zero means no bounds (the existing bunnyhop boolean).
+		int flags;
+	};
+	constexpr int physicsFlags = FCVAR_GAMEDLL | FCVAR_REPLICATED
+		| FCVAR_RELEASE | FCVAR_ARCHIVE_PLAYERPROFILE;
+	static constexpr Parameter parameters[] = {
+		{"sv_autobunnyhopping", "0", "Allow automatic bunnyhopping.", 0.0f, 0.0f,
+			FCVAR_GAMEDLL | FCVAR_REPLICATED},
+		{"delta_sp_landing_slowdown_scale", "0",
+			"Landing movement slowdown multiplier (0=off, 1=full).", 0.0f, 1.0f, physicsFlags},
+		{"delta_sp_slide_friction_scale", "1",
+			"Slide linear deceleration and exponential velocity-decay multiplier.", 0.0f, 4.0f, physicsFlags},
+		{"delta_sp_slide_ground_acceleration", "50",
+			"Ground input acceleration while sliding, in native movement units.", 0.0f, 2000.0f, physicsFlags},
+		{"delta_sp_slide_retain_crouch", "1",
+			"Retain the crouched hull while sliding above the native fast-slide threshold.", 0.0f, 1.0f, physicsFlags},
+		{"delta_sp_slide_viewmodel_forward", "-2", "Slide viewmodel forward offset.", -20.0f, 20.0f, FCVAR_RELEASE | FCVAR_ARCHIVE_PLAYERPROFILE},
+		{"delta_sp_slide_viewmodel_right", "1", "Slide viewmodel right offset.", -20.0f, 20.0f, FCVAR_RELEASE | FCVAR_ARCHIVE_PLAYERPROFILE},
+		{"delta_sp_slide_viewmodel_up", "-1", "Slide viewmodel up offset.", -20.0f, 20.0f, FCVAR_RELEASE | FCVAR_ARCHIVE_PLAYERPROFILE},
+		{"delta_sp_slide_viewmodel_pitch", "2", "Slide viewmodel pitch offset.", -90.0f, 90.0f, FCVAR_RELEASE | FCVAR_ARCHIVE_PLAYERPROFILE},
+		{"delta_sp_slide_viewmodel_yaw", "0", "Slide viewmodel yaw offset.", -90.0f, 90.0f, FCVAR_RELEASE | FCVAR_ARCHIVE_PLAYERPROFILE},
+		{"delta_sp_slide_viewmodel_roll", "-15", "Slide viewmodel roll offset.", -90.0f, 90.0f, FCVAR_RELEASE | FCVAR_ARCHIVE_PLAYERPROFILE},
+	};
+	for (const auto& parameter : parameters)
+	{
+		ConVarR1O* wrapped = nullptr;
+		auto* variable = OriginalCCVar_FindVar(cvarinterface, parameter.name);
+		if (IsR1ODedicatedServer())
+		{
+			wrapped = RegisterR1ODediConVar(parameter.name, parameter.value, parameter.flags, parameter.help);
+			if (!wrapped)
+				return false;
+			variable = OriginalCCVar_FindVar(cvarinterface, parameter.name);
+		}
+		else if (!variable)
+			variable = RegisterConVar(parameter.name, parameter.value, parameter.flags, parameter.help);
+		if (!variable)
+			return false;
+		auto* parent = variable->m_pParent ? variable->m_pParent : variable;
+		parent->m_nFlags |= parameter.flags;
+		if (parameter.maximum > 0.0f)
+		{
+			SetMovementConVarBounds(variable, parameter.minimum, parameter.maximum);
+			// The R1O adapter owns a separate R1 engine backing value. Both
+			// setter paths must enforce the same native bounds.
+			SetMovementConVarBounds(wrapped, parameter.minimum, parameter.maximum);
+		}
+	}
+	registered = true;
+	return true;
 }
 
 void RegisterServerUserCmdConVars()
 {
+	// server.dll can load before the engine cvar interface exists; Host_Init
+	// then registers the shared movement cvars (load.cpp Host_InitHook).
+	if ((IsR1ODedicatedServer() || (cvarinterface && OriginalCCVar_FindVar)) && !RegisterMovementConVars())
+		Error("R1Delta: shared movement tuning convars could not be registered\n");
+
 	if (s_svMaxUserCmdProcessTicks)
 		return;
 

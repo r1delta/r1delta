@@ -96,6 +96,9 @@
 #include "vpk_async_precache_fix.h"
 #include "datacache_header_ownership.h"
 #include "server_usercmd.h"
+#include "../net/movement_snapshot_transport.h"
+#include "../../shared/predicted_movement.h"
+#include "../../client/movement_presentation_hooks.h"
 #include "commands.h"
 // steam.h removed - unused
 #include "persistentdata.h"
@@ -1918,6 +1921,52 @@ static bool s_ClientPostCalcViewHookInstalled;
 static bool s_ClientCameraStage03F170HookInstalled;
 static bool s_ClientCameraStageHooksInstalled;
 static bool s_ClientViewModelCalcViewModelViewHookInstalled;
+
+static __int64 __fastcall ClientNormalCalcView(void* player, float* eyeOrigin, float* eyeAngles, float* fov);
+static __int64 __fastcall ClientViewModelCalcViewModelView(void* viewModel, void* player, float* eyeOrigin, float* eyeAngles);
+bool r1delta::movement::InstallMovementClientViewSinks(std::uintptr_t module)
+{
+	if (!module || module != G_client || IsDedicatedServer())
+		return false;
+	if (s_ClientNormalCalcViewHookInstalled && s_ClientViewModelCalcViewModelViewHookInstalled)
+		return true;
+	if (s_ClientNormalCalcViewHookInstalled || s_ClientViewModelCalcViewModelViewHookInstalled)
+		return false;
+	constexpr unsigned char fovPrefix[] = {
+		0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x48,0x89,0x7C,0x24
+	};
+	constexpr unsigned char vmPrefix[] = {
+		0x48,0x8B,0xC4,0x48,0x89,0x58,0x08,0x48,0x89,0x70,0x10,0x48,0x89,0x78,0x18,0x4C,0x89,0x60,0x20,0x55
+	};
+	void* const fovTarget = reinterpret_cast<void*>(module + 0x32FF20);
+	void* const vmTarget = reinterpret_cast<void*>(module + 0x44680);
+	if (std::memcmp(fovTarget, fovPrefix, sizeof(fovPrefix))
+		|| std::memcmp(vmTarget, vmPrefix, sizeof(vmPrefix)))
+		return false;
+	const auto first = MH_CreateHook(fovTarget, &ClientNormalCalcView,
+		reinterpret_cast<LPVOID*>(&s_ClientNormalCalcViewOriginal));
+	if (first != MH_OK) return false;
+	const auto second = MH_CreateHook(vmTarget, &ClientViewModelCalcViewModelView,
+		reinterpret_cast<LPVOID*>(&s_ClientViewModelCalcViewModelViewOriginal));
+	if (second != MH_OK)
+	{
+		MH_RemoveHook(fovTarget);
+		return false;
+	}
+	const auto firstEnable = MH_EnableHook(fovTarget);
+	const auto secondEnable = firstEnable == MH_OK ? MH_EnableHook(vmTarget) : firstEnable;
+	if (firstEnable != MH_OK || secondEnable != MH_OK)
+	{
+		MH_DisableHook(fovTarget);
+		MH_DisableHook(vmTarget);
+		MH_RemoveHook(vmTarget);
+		MH_RemoveHook(fovTarget);
+		return false;
+	}
+	s_ClientNormalCalcViewHookInstalled = true;
+	s_ClientViewModelCalcViewModelViewHookInstalled = true;
+	return true;
+}
 static bool s_ClientAngleStageHooksInstalled;
 static bool s_ClientRollLifecycleHooksInstalled;
 static bool s_ClientApplyPlayerClassModsHookInstalled;
@@ -3694,6 +3743,13 @@ static bool ClientCopyVectorPointer(const float* ptr, float out[3])
 
 static __int64 __fastcall ClientNormalCalcView(void* player, float* eyeOrigin, float* eyeAngles, float* fov)
 {
+	if (!ShouldInstallR1OClientDebugHooks())
+	{
+		const auto result = s_ClientNormalCalcViewOriginal(player, eyeOrigin, eyeAngles, fov);
+		const auto session = r1delta::movement::ClientMovementViewSession(reinterpret_cast<std::uintptr_t>(player));
+		if (session) r1delta::movement::presentation::ApplyFovScale(reinterpret_cast<std::uintptr_t>(player), session, fov);
+		return result;
+	}
 	float beforeOrigin[3];
 	float beforeAngles[3];
 	const bool beforeOriginOk = ClientCopyVectorPointer(eyeOrigin, beforeOrigin);
@@ -3778,6 +3834,8 @@ static __int64 __fastcall ClientNormalCalcView(void* player, float* eyeOrigin, f
 		s_ClientCurrentNormalCalcViewPlayer = nullptr;
 		s_ClientInsideNormalCalcView = false;
 	}
+	const auto movementSession = r1delta::movement::ClientMovementViewSession(reinterpret_cast<std::uintptr_t>(player));
+	if (movementSession) r1delta::movement::presentation::ApplyFovScale(reinterpret_cast<std::uintptr_t>(player), movementSession, fov);
 
 	if (s_ClientNormalCalcViewLogBudget > 0 && ClientLocalSignonState() == 8) {
 		--s_ClientNormalCalcViewLogBudget;
@@ -4082,15 +4140,30 @@ static __int64 __fastcall ClientSpringAnglesStage(float* spring, float* eyeAngle
 	return result;
 }
 
+static __int64 InvokeMovementViewModel(void* viewModel, void* player, float* eyeOrigin, float* eyeAngles)
+{
+	const auto session = r1delta::movement::ClientMovementViewSession(reinterpret_cast<std::uintptr_t>(player));
+	if (session)
+	{
+		float origin[3], angles[3];
+		std::memcpy(origin, eyeOrigin, sizeof(origin));
+		std::memcpy(angles, eyeAngles, sizeof(angles));
+		if (r1delta::movement::presentation::ApplyViewModelInputTransform(
+			reinterpret_cast<std::uintptr_t>(player), session, origin, angles))
+			return s_ClientViewModelCalcViewModelViewOriginal(viewModel, player, origin, angles);
+	}
+	return s_ClientViewModelCalcViewModelViewOriginal(viewModel, player, eyeOrigin, eyeAngles);
+}
+
 static __int64 __fastcall ClientViewModelCalcViewModelView(void* viewModel, void* player, float* eyeOrigin, float* eyeAngles)
 {
+	if (!ShouldInstallR1OClientDebugHooks())
+		return InvokeMovementViewModel(viewModel, player, eyeOrigin, eyeAngles);
 	float beforeOrigin[3] = { NAN, NAN, NAN };
 	float beforeAngles[3] = { NAN, NAN, NAN };
 	const bool beforeOriginOk = ClientCopyVectorPointer(eyeOrigin, beforeOrigin);
 	const bool beforeAnglesOk = ClientCopyVectorPointer(eyeAngles, beforeAngles);
-	const __int64 result = s_ClientViewModelCalcViewModelViewOriginal
-		? s_ClientViewModelCalcViewModelViewOriginal(viewModel, player, eyeOrigin, eyeAngles)
-		: 0;
+	const __int64 result = InvokeMovementViewModel(viewModel, player, eyeOrigin, eyeAngles);
 
 	if (s_ClientInsideNormalCalcView && s_ClientViewModelCalcViewModelViewLogBudget > 0 && ClientLocalSignonState() == 8) {
 		--s_ClientViewModelCalcViewModelViewLogBudget;
@@ -8322,6 +8395,10 @@ static void InstallClientLightProbeBlendHook(uintptr_t engineBase)
 
 void Host_InitHook(bool a1) {
 	Host_InitOriginal(a1);
+	// Remote clients need the replicated physics interface before signon even
+	// when no server.dll is loaded. R1O uses its wrapped-cvar readiness path.
+	if (!IsR1ODedicatedServer() && !RegisterMovementConVars())
+		Error("R1Delta: shared movement tuning convars could not be registered\n");
 	OriginalCCVar_FindVar(cvarinterface, "sv_alltalk")->m_nFlags |= FCVAR_REPLICATED;
 	auto user_id = OriginalCCVar_FindVar(cvarinterface, "platform_user_id");
 	EnsurePlatformUserIdString(user_id);
@@ -9127,6 +9204,8 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	InstallServerModelBoneGuards(server_base);
 	InstallDriveableVehicleTransitionHooks(server_base);
 	InstallServerUserCmdHooks(server_base);
+	r1delta::movement::AttachMovementSnapshotTransport(engine_base_spec);
+	r1delta::movement::AttachServerMovementModule(server_base);
 	//MH_CreateHook((LPVOID)(server_base + 0x364D00), &CAI_NetworkManager__LoadNavMesh, reinterpret_cast<LPVOID*>(&CAI_NetworkManager__LoadNavMeshOriginal));
 	if (!IsR1ODedicatedServer()) {
 		MH_CreateHook((LPVOID)(vscript_base + (legacyDedicated ? 0x1210 : 0x1210)), &CScriptManager__CreateNewVM, reinterpret_cast<LPVOID*>(&CScriptManager__CreateNewVMOriginal));
@@ -9825,6 +9904,7 @@ void __stdcall LoaderNotificationCallback(
 
 		if (is_client) {
 			G_client = (uintptr_t)notification_data->Loaded.DllBase;
+			r1delta::movement::AttachClientMovementModule(G_client);
 			const std::wstring clientFullPath(
 				notification_data->Loaded.FullDllName->Buffer,
 				notification_data->Loaded.FullDllName->Length / sizeof(wchar_t));

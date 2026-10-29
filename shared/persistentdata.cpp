@@ -42,6 +42,7 @@ class PDef;
 #include "script_sync_parity.h"
 #include "logging.h"
 #include "squirrel.h"
+#include "predicted_movement.h"
 #include "keyvalues.h"
 #include "factory.h"
 #include "load.h"
@@ -978,8 +979,10 @@ bool NET_SetConVar__WriteToBuffer(NET_SetConVar* thisptr, bf_write& buffer) {
 			carriesMarker = strcmp(thisptr->m_ConVars[i].name, kSoundScriptMarkerConVar) == 0;
 		SoundScriptUploadChunk chunks[kSoundScriptUploadChunks];
 		const int chunkCount = SoundScriptParity_ClientUploadChunks(carriesMarker, chunks);
-		if (carriesMarker)
+		if (carriesMarker) {
 			ScriptSyncParity_ClientSignon();
+			r1delta::movement::ResetMovementConnection();
+		}
 		for (int i = 0; i < chunkCount; ++i) {
 			NetMessageCvar_t entry = {};
 			strcpy_s(entry.name, sizeof(entry.name), chunks[i].name);
@@ -1883,6 +1886,8 @@ typedef char (*CBaseClientState__InternalProcessStringCmdType)(void* thisptr, vo
 CBaseClientState__InternalProcessStringCmdType CBaseClientState__InternalProcessStringCmdOriginal;
 char CBaseClientState__InternalProcessStringCmd(void* thisptr, void* msg, bool bIsHLTV) {
 	const char* cmd = *(const char**)((uintptr_t)msg + 32);
+	if (r1delta::movement::ConsumeMovementAuthorityCommand(cmd))
+		return true;
 	if (!IsValidServerCommand(cmd))
 	{
 		// Not a valid command, send back to server.
