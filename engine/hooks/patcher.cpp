@@ -53,6 +53,7 @@
 #include "factory.h"
 #include "core.h"
 #include "load.h"
+#include "engine/r2port/r2_bc7_srgb.h"
 #include "MinHook.h"
 #pragma intrinsic(_ReturnAddress)
 
@@ -338,6 +339,12 @@ void initialisePatchInstructions() {
     std::vector<PatchInstruction> mainPatchInstructions = ParsePatchFile(mainPatchFile.string());
     for (auto& instruction : mainPatchInstructions)
         AddPatchInstruction(std::move(instruction));
+
+    // BC7 sRGB for the retail materialsystem_dx11.dll (r2port BC7 passthrough, see engine/r2port/r2_bc7_srgb.h). A different build of the
+    // dll does not match the original bytes and is left alone; the provider then keeps decoding BC7 to RGBA8.
+    AddPatchInstruction(PatchInstruction("materialsystem_dx11.dll", "text", r2port::kMatsysSrgbSwitchRva,
+        std::string(reinterpret_cast<const char*>(r2port::kMatsysSrgbSwitchOriginal), r2port::kMatsysSrgbSwitchSize),
+        std::string(reinterpret_cast<const char*>(r2port::kMatsysSrgbSwitchPatched), r2port::kMatsysSrgbSwitchSize)));
 
     // If it's a dedicated server, also load and apply instructions from its absolute path.
     // R1O fake-dedi still needs dedicated.dll/server.dll DS patches, but must not
