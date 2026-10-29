@@ -195,8 +195,8 @@ constexpr std::string_view kConvertedCacheRevision = "36";  // 36: non-square R2
 // memory, no decode and no 4 byte per pixel copy. Needs the sRGB switch patch of materialsystem_dx11.dll (engine/r2port/r2_bc7_srgb.h, applied
 // by the binary patcher) and a GPU at D3D feature level 11 (the engine never checks BC7 support: a failed CreateTexture2D leaves a NULL texture);
 // while either is missing the provider decodes BC7 as before.
-// OFF by default (combo playtest); R2PORT_BC7=1 forces on, =0 forces off (kBc7PassthroughDefault).
-constexpr bool kBc7PassthroughDefault = false;
+// ON by default; R2PORT_BC7=0 forces off, =1 forces on (kBc7PassthroughDefault).
+constexpr bool kBc7PassthroughDefault = true;
 
 bool Bc7PassthroughRequested()
 {
