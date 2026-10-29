@@ -111,12 +111,15 @@ struct Descriptor
 
 using GetClasses = void*(__fastcall*)(void*);
 using LockClasses = void(__fastcall*)(void*);
-using SendProxy = void(__fastcall*)(const void*, const void*, const void*, void*, int, int);
 
-// Native weapon registry insertion order of the pinned builds, recovered from the module
-// CRT initializers. Index i here is native weapon ID i + 1; ID 0 is the empty string the
-// first initializer inserts. They anchor the client/server ID translation of the one wire
-// field that carries a weapon ID, and are checked against the live registries.
+// Native weapon registry of the R1Delta runtime, in insertion order. Index i is native weapon
+// ID i + 1; ID 0 is the empty string the first initializer inserts. client.dll registers
+// exactly these classes; the shipped r1delta.wpatch removes the TFO-only registrations from
+// server.dll (minigun, charge cannon, valkyrie, twinb, ai_*, test weapons: "unshifting weaponx
+// class ids"), so the server registry is the same list and a weapon ID means the same thing on
+// both sides, including over the network. Dynamic classes are appended in sorted roster order
+// on each side, which keeps that property. A server whose registry differs (patch missing) is
+// fatal as soon as a manifest is present, because the IDs would silently disagree.
 constexpr const char* kClientStock[] = {
     "mp_titanweapon_40mm", "mp_titanweapon_arc_cannon", "mp_titanweapon_dumbfire_rockets",
     "mp_titanweapon_mortar", "mp_titanweapon_rocket_launcher", "mp_titanweapon_shoulder_rockets",
@@ -139,39 +142,7 @@ constexpr const char* kClientStock[] = {
     "mp_weapon_mega7", "mp_weapon_mega8", "mp_weapon_mega9", "mp_weapon_mega10", "weapon_rspn101",
     "weapon_mega1", "weapon_mega2", "weapon_mega3", "weapon_mega4", "weapon_mega5", "weapon_cubemap",
 };
-constexpr const char* kServerStock[] = {
-    "mp_titanweapon_40mm", "mp_titanweapon_arc_cannon", "mp_titanweapon_dumbfire_rockets",
-    "mp_titanweapon_mortar", "mp_titanweapon_rocket_launcher", "mp_titanweapon_shoulder_rockets",
-    "mp_titanweapon_homing_rockets", "mp_titanweapon_airburst_rockets", "mp_titanweapon_salvo_rockets",
-    "mp_titanweapon_shotgun", "mp_titanweapon_minigun", "mp_titanweapon_charge_cannon",
-    "mp_titanweapon_sniper", "mp_titanweapon_triple_threat", "mp_titanweapon_xo16",
-    "mp_titanweapon_vortex_shield", "mp_titanweapon_shoulder_turret", "mp_titanweapon_orbital_strike",
-    "mp_projectile_orbital_strike", "mp_projectile_cluster_burst", "mp_titanability_bubble_shield",
-    "mp_titanability_cloak", "mp_titanability_emp", "mp_titanability_fusion_core",
-    "mp_titanability_healthdrop", "mp_titanability_ogre_core", "mp_titanability_smoke",
-    "mp_titanability_trophy", "mp_weapon_arcrifle", "mp_weapon_autopistol", "mp_weapon_anti_titan_rifle",
-    "mp_weapon_arc_rifle", "mp_weapon_car", "mp_weapon_ai_car", "mp_weapon_chargerifle", "mp_weapon_dmr",
-    "mp_weapon_defender", "mp_weapon_frag_grenade", "mp_weapon_g2", "mp_weapon_garand",
-    "mp_weapon_grenade_emp", "mp_weapon_hemlok", "mp_weapon_laser_mine", "mp_weapon_lmg",
-    "mp_weapon_proximity_mine", "mp_weapon_mgl", "mp_weapon_pss", "mp_weapon_rocket_launcher",
-    "mp_weapon_shotgun", "mp_weapon_semipistol", "mp_weapon_smart_pistol", "mp_weapon_skyfish_pistol",
-    "mp_weapon_smr", "mp_weapon_sniper", "mp_weapon_suck", "mp_weapon_r97", "mp_weapon_ai_r97",
-    "mp_weapon_rspn101", "mp_weapon_ai_r101", "mp_weapon_satchel", "mp_weapon_vortex_rifle",
-    "mp_weapon_wingman", "mp_weapon_sr_valkyrie", "mp_weapon_twinb_shotgun", "mp_ability_cloak",
-    "mp_ability_heal", "mp_ability_emp", "mp_ability_sonar", "mp_turretweapon_rockets",
-    "mp_weapon_mega_turret", "mp_weapon_mega_turret_aa", "mp_weapon_yh803", "mp_weapon_yh803_bullet",
-    "mp_weapon_mega1", "mp_weapon_mega2", "mp_weapon_mega3", "mp_weapon_mega4", "mp_weapon_mega5",
-    "mp_weapon_mega6", "mp_weapon_mega7", "mp_weapon_mega8", "mp_weapon_mega9", "mp_weapon_mega10",
-    "weapon_rspn101", "weapon_mega1", "weapon_mega2", "weapon_mega3", "weapon_mega4", "weapon_mega5",
-    "weapon_cubemap", "mp_weapon_test01", "mp_weapon_test02", "mp_weapon_test03", "mp_weapon_test04",
-    "mp_weapon_test05", "mp_weapon_test06", "mp_weapon_test07", "mp_weapon_test08", "mp_weapon_test09",
-    "mp_weapon_test10",
-};
-static_assert(std::size(kClientStock) == 82 && std::size(kServerStock) == 100);
-
-// DT_Projectile::m_weaponClassIndex is a 7-bit field in the stock schema (every client's
-// st_data.bin says so), so the translated value must stay below 128.
-constexpr int kMaxWireWeaponID = 127;
+static_assert(std::size(kClientStock) == 82);
 
 struct State
 {
@@ -188,11 +159,9 @@ struct State
     std::string token;
     std::vector<std::unique_ptr<Descriptor>> clientTypes;
     std::vector<std::unique_ptr<Descriptor>> serverTypes;
-    std::vector<int> projectileClientIDs;
     GetClasses clientGetClasses = nullptr;
     GetClasses serverGetClasses = nullptr;
     LockClasses serverLock = nullptr;
-    SendProxy projectileProxy = nullptr;
     unsigned char* closures = nullptr;
 };
 
@@ -284,9 +253,18 @@ void CheckStockRegistry(std::uintptr_t module, bool client, const char* const* s
     void* tree = WeaponTree(module, client);
     auto* nodes = At<unsigned char*>(tree, 8);
     const int live = At<int>(tree, 0x24);
-    if (live != static_cast<int>(count) + 1 || !nodes)
-        Fail(client ? "client native weapon registry is not the stock build registry" :
-            "server native weapon registry is not the stock build registry");
+    if (live != static_cast<int>(count) + 1 || !nodes) {
+        char detail[96];
+        _snprintf_s(detail, sizeof(detail), _TRUNCATE, "(live entries %d, expected %zu, nodes %p)", live, count + 1, nodes);
+        for (int i = 0; nodes && i < live && i < 200; ++i) {
+            const char* live_name = At<const char*>(nodes + std::size_t(i) * 32, 16);
+            char dump[160];
+            _snprintf_s(dump, sizeof(dump), _TRUNCATE, "R1Delta dynamic weapons: live %s weapon ID %d = %s\n", client ? "client" : "server", i, live_name ? live_name : "(null)");
+            OutputDebugStringA(dump);
+        }
+        Fail(client ? "client native weapon registry is not the R1Delta stock registry" :
+            "server native weapon registry is not the R1Delta stock registry (is r1delta.wpatch applied?)", detail);
+    }
     const char* invalid = At<const char*>(nodes, 16);
     if (!invalid || *invalid != '\0')
         Fail("native weapon registry slot 0 is not the invalid-weapon entry");
@@ -613,90 +591,19 @@ void Closure(unsigned char* code, Descriptor* descriptor, void* target, bool net
     code[21] = 0xe0;
 }
 
-// ---- weapon ID translation (server -> client) -------------------------------------------------------
-// The server and client native registries differ (the server registers 18 classes the client
-// lacks), and a dynamic class has a different ID on each side. The only networked weapon ID is
-// the 7-bit DT_Projectile::m_weaponClassIndex, which the server fills from its own registry.
-// The send proxy below rewrites it into the client registry ID of the same weapon. Stock
-// weapons that are not named by the manifest keep the established pass-through value. The
-// client registry is reproduced from the pinned stock table plus the roster order, so a
-// dedicated server needs no client module to compute it.
-int ClientIdOf(const std::string& name)
-{
-    auto& s = S();
-    for (std::size_t i = 0; i < std::size(kClientStock); ++i)
-        if (name == kClientStock[i])
-            return static_cast<int>(i) + 1;
-    int next = static_cast<int>(std::size(kClientStock)) + 1;
-    for (const auto& rostered : s.roster) {
-        bool stock = false;
-        for (const char* known : kClientStock)
-            stock |= rostered == known;
-        if (stock)
-            continue;
-        if (rostered == name)
-            return next;
-        ++next;
-    }
-    return -1;
-}
-
-void __fastcall ProjectileProxy(const void* prop, const void* structure,
-    const void* data, void* output, int element, int objectID)
-{
-    const auto& s = S();
-    int value = *static_cast<const int*>(data);
-    if (value >= 0 && static_cast<std::size_t>(value) < s.projectileClientIDs.size()
-        && s.projectileClientIDs[value] >= 0)
-        value = s.projectileClientIDs[value];
-    s.projectileProxy(prop, structure, &value, output, element, objectID);
-}
-
-void ConfigureProjectileProtocol()
-{
-    auto& s = S();
-    auto* tree = WeaponTree(s.server, false);
-    const int count = At<int>(tree, 0x24);
-    if (count <= 0)
-        Fail("empty native server weapon registry");
-    s.projectileClientIDs.assign(count, -1);
-    bool translated = false;
-    for (const auto& name : s.roster) {
-        const int serverID = FindWeapon(tree, name.c_str());
-        const int clientID = ClientIdOf(name);
-        if (serverID < 0 || clientID < 0)
-            Fail("dynamic weapon lacks a server or client identity:", name.c_str());
-        if (clientID > kMaxWireWeaponID)
-            Fail("too many native weapons for the 7-bit projectile weapon index:", name.c_str());
-        s.projectileClientIDs[serverID] = clientID;
-        translated |= clientID != serverID;
-    }
-    if (!translated)
-        return;
-    auto* prop = reinterpret_cast<void*>(s.server + 0xeacab0);
-    const char* propName = At<const char*>(prop, 0x48);
-    if (!propName || std::strcmp(propName, "m_weaponClassIndex") || At<int>(prop, 0x10) != 0
-        || At<int>(prop, 0x14) != 7 || At<int>(prop, 0x78) != 0xc14)
-        Fail("unsupported DT_Projectile weapon identity property");
-    s.projectileProxy = At<SendProxy>(prop, 0x60);
-    if (s.projectileProxy != Native<SendProxy>(s.server, 0xf32b0)
-        && s.projectileProxy != Native<SendProxy>(s.server, 0xf3300))
-        Fail("unexpected native projectile integer send proxy");
-    // Only the wire value changes. The send table shape (7 bits, offset, flags) is the stock
-    // one, so the schema CRC and every client's st_data.bin stay valid.
-    At<SendProxy>(prop, 0x60) = &ProjectileProxy;
-}
-
-// When both modules live in one process, the reproduced client IDs must be the live ones.
+// ---- ID agreement ---------------------------------------------------------------------------------
+// Both registries start from the same stock list and both append the roster names that are not
+// stock, sorted. In a process holding both modules (listen) the live IDs must agree.
 void VerifyPair()
 {
     auto& s = S();
     if (!s.clientReady || !s.serverReady)
         return;
-    void* tree = WeaponTree(s.client, true);
+    void* client = WeaponTree(s.client, true);
+    void* server = WeaponTree(s.server, false);
     for (const auto& name : s.roster)
-        if (FindWeapon(tree, name.c_str()) != ClientIdOf(name))
-            Fail("client weapon ID differs from the reproduced registry ID:", name.c_str());
+        if (FindWeapon(client, name.c_str()) != FindWeapon(server, name.c_str()))
+            Fail("client and server weapon IDs differ:", name.c_str());
 }
 
 // ---- lifecycle ------------------------------------------------------------------------------------
@@ -709,8 +616,9 @@ void RegisterClient()
     if (!s.client || s.registeringClient)
         Fail("client registration unavailable/reentrant");
     s.registeringClient = true;
-    CheckStockRegistry(s.client, true, kClientStock, std::size(kClientStock));
     ReadRoster("client");
+    if (!s.roster.empty())
+        CheckStockRegistry(s.client, true, kClientStock, std::size(kClientStock));
     using ClassMap = void*(__fastcall*)();
     void* map = Native<ClassMap>(s.client, 0x10df30)();
     auto** mapVtable = *static_cast<void***>(map);
@@ -782,8 +690,9 @@ void RegisterServer()
     if (*reinterpret_cast<unsigned char*>(s.server + 0xc3113e))
         Fail("server class list already locked; refusing late registration");
     s.registeringServer = true;
-    CheckStockRegistry(s.server, false, kServerStock, std::size(kServerStock));
     ReadRoster("server");
+    if (!s.roster.empty())
+        CheckStockRegistry(s.server, false, kClientStock, std::size(kClientStock));
     using Dictionary = void*(__fastcall*)();
     void* dictionary = Native<Dictionary>(s.server, 0x25a6c0)();
     auto** vtable = *static_cast<void***>(dictionary);
@@ -809,8 +718,6 @@ void RegisterServer()
         Msg("R1Delta dynamic weapon server: %s id=%d\n", descriptor->name.c_str(), descriptor->weaponID);
         s.serverTypes.push_back(std::move(descriptor));
     }
-    if (!s.roster.empty())
-        ConfigureProjectileProtocol();
     s.serverReady = true;
     s.registeringServer = false;
     VerifyPair();
@@ -864,8 +771,6 @@ void InstallServer(std::uintptr_t serverBase)
     CheckBytes(serverBase, 0x5e9e80, {0x48,0x89,0x4c,0x24,0x08,0x57,0x48,0x83,0xec,0x40,0x48,0xc7,0x44,0x24,0x20,0xfe,0xff,0xff,0xff}, "CWeaponX server constructor");
     CheckBytes(serverBase, 0x146980, {0x48,0x8b,0x05,0xe9,0xa8,0xae,0x00,0xc3}, "server GetAllClasses");
     CheckBytes(serverBase, 0x1469a0, {0xc6,0x05,0x97,0xa7,0xae,0x00,0x01,0xc3}, "server class lock");
-    CheckBytes(serverBase, 0xf32b0, {0x41,0x8b,0x00,0x41,0x89,0x01,0xc3}, "signed projectile proxy");
-    CheckBytes(serverBase, 0xf3300, {0x41,0x8b,0x00,0x41,0x89,0x01,0xc3}, "unsigned projectile proxy");
     if (*reinterpret_cast<unsigned short*>(serverBase + 0xb6b5a2))
         Fail("server weapon data loaded before dynamic weapon installation");
     s.server = serverBase;
