@@ -859,6 +859,16 @@ json Server::ExecuteSquirrelScript(const json& args) {
     }
 
     json executionResult = RunOnVMThreadAndWait([=]() -> json {
+        // The VM pointer above was read on the HTTP worker thread; by the time this runs on the engine
+        // thread a level change may have destroyed the VM (its sqvm becomes null between maps).
+        R1SquirrelVM* liveVm = nullptr;
+        if (context == "server") liveVm = GetServerVMPtr();
+        else if (context == "client") liveVm = GetClientVMPtr();
+        else if (context == "ui") liveVm = GetUIVMPtr();
+        if (!liveVm || !liveVm->sqvm) {
+            return json{{"success", false}, {"errorMessage", "VM not available for context: " + context + " (level change in progress?)"}};
+        }
+
         static auto fatal_script_errors = OriginalCCVar_FindVar(cvarinterface, "fatal_script_errors");
         auto bak = fatal_script_errors->m_pParent->m_Value.m_nValue;
         fatal_script_errors->m_pParent->m_Value.m_nValue = 0;
@@ -871,14 +881,14 @@ json Server::ExecuteSquirrelScript(const json& args) {
         BaseGetRootTableFn base_getroottable = reinterpret_cast<BaseGetRootTableFn>(launcher + (IsDedicatedServer() ? 0x56520 : 0x56440));
         SQCallFn sq_call = reinterpret_cast<SQCallFn>(launcher + (IsDedicatedServer() ? 0x18D20 : 0x18C40));
 
-        SQRESULT compileRes = sq_compilebuffer(vm->sqvm, script.c_str(), static_cast<SQInteger>(script.length()), "mcp", 1);
+        SQRESULT compileRes = sq_compilebuffer(liveVm->sqvm, script.c_str(), static_cast<SQInteger>(script.length()), "mcp", 1);
 
         bool success = false;
         std::string errorMsg;
 
         if (SQ_SUCCEEDED(compileRes)) {
-            base_getroottable(vm->sqvm);
-            SQRESULT callRes = sq_call(vm->sqvm, 1, SQFalse, SQTrue);
+            base_getroottable(liveVm->sqvm);
+            SQRESULT callRes = sq_call(liveVm->sqvm, 1, SQFalse, SQTrue);
             success = SQ_SUCCEEDED(callRes);
             if (!success) errorMsg = "Script execution failed";
         } else {
