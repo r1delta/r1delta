@@ -93,7 +93,7 @@ constexpr uint32_t kGameLump = 0x23;
 
 // Folded into the on-disk cache fingerprint together with entity_rewrite::kRewriteVersion.
 // Bump when the vendored bspdown converter or the provider's BSP post-processing changes output.
-constexpr uint32_t kConvertedBspCacheVersion = 31;  // 31: rule 26 world meshes sorted by material sort on every map, only the regular render meshes [model 0 first, level info word 2), the sky meshes stay last (EdenCull; R1 draws at most 2048 runs per view); 29: rule 20f plane A keeps the R2 exposure (alpha) and spreads raised exposures (rtlBakeAlphaStep 1.2, no pale contours along baked pools) and rule 25 material namespace (round 16, one combined bump); 28: rule 20f DrydockSteps preset default (rtl-bake vsm, hot clip, smooth 1, bm terrain); 27: rule 24 now writes the glow ramp texture coordinate; 26: rule 24 emitter glow vertex alpha (vr_light_trim_01_totrans, mp_glitch); 25: mp_coliseum and mp_coliseum_column keep the last CSM environment (csmLastEnv); 24: rule 17 real CSM environment chosen by content (BWC, angel_city, coliseum, coliseum_column); 23: rule 23 far-origin prop fade distance
+constexpr uint32_t kConvertedBspCacheVersion = 32;  // 32: rule 26 mesh sort is opt-in again (decals vanished with it); 31: rule 26 world meshes sorted by material sort, only the regular render meshes [model 0 first, level info word 2), the sky meshes stay last (EdenCull; R1 draws at most 2048 runs per view); 29: rule 20f plane A keeps the R2 exposure (alpha) and spreads raised exposures (rtlBakeAlphaStep 1.2, no pale contours along baked pools) and rule 25 material namespace (round 16, one combined bump); 28: rule 20f DrydockSteps preset default (rtl-bake vsm, hot clip, smooth 1, bm terrain); 27: rule 24 now writes the glow ramp texture coordinate; 26: rule 24 emitter glow vertex alpha (vr_light_trim_01_totrans, mp_glitch); 25: mp_coliseum and mp_coliseum_column keep the last CSM environment (csmLastEnv); 24: rule 17 real CSM environment chosen by content (BWC, angel_city, coliseum, coliseum_column); 23: rule 23 far-origin prop fade distance
 
 // Raised onto the z of every info_spawnpoint_flag / human / human_start / titan / titan_start origin in lump 0 and in the five partition entity
 // files (see entity_rewrite::RaiseSpawnpointOrigins). The R1 server drops the spawnpoint back to the floor; one that starts inside solid is removed.
@@ -1482,7 +1482,7 @@ bspdown::Options R2ConverterOptions()
     // mp_drydock: models/vehicle/imc_carrier/*.vmt) cannot answer them with a model material. The material provider serves the names
     // (r2_material_names.h). Opt-out token no-material-namespace.
     options.materialNamespace = std::string(kWorldMaterialNamespace);
-    options.orderMeshes = true;   // rule 26 (EdenCull): ON for every map, opt-out token no-mesh-order
+    options.orderMeshes = false;   // rule 26 (EdenCull) is OFF by default: the sort draws decals under their walls (mp_black_water_canal SUBSTATION lettering); token mesh-order turns it on
     ApplyConverterVariant(options, R2ConverterVariantString());
     return options;
 }
