@@ -202,6 +202,7 @@ $state = Join-Path $Root '.combo-overlay.json'
 if (Test-Path -LiteralPath $state) {
     # Refresh: restore the overlaid tracked scripts from the pinned commit first so the patch re-applies cleanly.
     GitC $Core (@('checkout', '--') + @($MovementScripts | Where-Object { $_ -notlike '*_autobhop.nut' })) | Out-Null
+    GitC $Core @('checkout', '--', 'scripts/vscripts/menu/_lobby.nut') | Out-Null   # drop the withdrawn DLC lobby patch from earlier stagings
     Remove-Item -LiteralPath (Join-Path $Core 'scripts\vscripts\_autobhop.nut') -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath (Join-Path $Core 'scripts\vscripts\movement') -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath (Join-Path $Core 'sound\r1delta\movement') -Recurse -Force -ErrorAction SilentlyContinue
@@ -281,20 +282,6 @@ function Set-ComboCfgBlock([string] $path, [string] $block) {
     $tmp = Join-Path $env:TEMP ('combo-cfg-' + [Guid]::NewGuid().ToString('N') + '.cfg')
     [IO.File]::WriteAllText($tmp, $t, [Text.UTF8Encoding]::new($false))
     [ComboNative]::Replace($tmp, $path); Remove-Item $tmp
-}
-# ---- DLC ownership CORE changes (DlcGate): lobby map re-selection patch; drop the stale `serverDLCMapGroups 15` autoexec line.
-$dlcLobby = Join-Path $CodeRoot 'tools\combo\core-dlc-lobby.patch'
-$prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-& git -C $Core apply --ignore-whitespace --whitespace=nowarn -R --check $dlcLobby 2>$null
-$dlcDone = ($LASTEXITCODE -eq 0)
-$ErrorActionPreference = $prev
-if (-not $dlcDone) { GitC $Core @('apply', '--ignore-whitespace', '--whitespace=nowarn', $dlcLobby) | Out-Null; Say 'applied core-dlc-lobby.patch' }
-$axp = Join-Path $Core 'cfg\autoexec_delta.cfg'
-$axt = [IO.File]::ReadAllText($axp)
-if ($axt -match '(?m)^serverDLCMapGroups 15\r?\n') {
-    $tmp = Join-Path $env:TEMP ('combo-ax-' + [Guid]::NewGuid().ToString('N') + '.cfg')
-    [IO.File]::WriteAllText($tmp, [regex]::Replace($axt, '(?m)^serverDLCMapGroups 15\r?\n', ''), [Text.UTF8Encoding]::new($false))
-    [ComboNative]::Replace($tmp, $axp); Remove-Item $tmp
 }
 Set-ComboCfgBlock (Join-Path $Core 'cfg\autoexec_delta.cfg') ("// ---- r2-combo playtest defaults (this root only)`n// Slide + grapple are enabled automatically on converted R2 maps (delta_pilot_movement_auto_r2 1; stock maps: delta_pilot_movement_auto_r1 1). Grapple key: H (+scriptCommand3); press again to cancel.`nbind `"H`" `"+scriptCommand3`"`n")
 Set-ComboCfgBlock (Join-Path $Core 'cfg\config_default_pc.cfg') ("// ---- r2-combo playtest defaults (this root only)`n// Fresh profiles: grapple on MOUSE4 (+scriptCommand3), also on H via autoexec_delta.cfg.`nbind `"MOUSE4`" `"+scriptCommand3`"`n")
