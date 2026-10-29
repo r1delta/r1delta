@@ -276,6 +276,14 @@ $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
 $v30Done = ($LASTEXITCODE -eq 0)
 $ErrorActionPreference = $prev
 if (-not $v30Done) { GitC $Core @('apply', '--ignore-whitespace', '--whitespace=nowarn', $v30Core) | Out-Null; Say 'applied core-v30-serverbrowser.patch' }
+# DLC ownership (DlcLobby): lobby map re-selection when a player without the DLC joins (countdown untouched), DLC-aware ordered/random/voted
+# map picks, and the stale `serverDLCMapGroups 15` autoexec line removed (the server computes it); applied once (reverse check).
+$dlcCore = Join-Path $CodeRoot 'tools\combo\core-dlc-lobby.patch'
+$prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+& git -C $Core apply --ignore-whitespace --whitespace=nowarn -R --check $dlcCore 2>$null
+$dlcDone = ($LASTEXITCODE -eq 0)
+$ErrorActionPreference = $prev
+if (-not $dlcDone) { GitC $Core @('apply', '--ignore-whitespace', '--whitespace=nowarn', $dlcCore) | Out-Null; Say 'applied core-dlc-lobby.patch' }
 # DynWeapons2: the dynamic weapon manifest CORE patches (renamed weapon definitions, pdata names, scripts/weapon_manifest.txt). They go together
 # with the dynamic weapon code; applied once each (reverse check), in order.
 foreach ($dw in @(Get-ChildItem -LiteralPath (Join-Path $CodeRoot 'tools\combo\dynweapons') -Filter '*.patch' | Sort-Object Name)) {
