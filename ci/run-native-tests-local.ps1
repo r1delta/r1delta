@@ -45,6 +45,7 @@ $projects = [ordered]@{
     ffa_targeting_tests                       = 'tests/ffa_targeting_tests.vcxproj'
     p2p_codec_tests                           = 'tests/p2p_codec_tests.vcxproj'
     region_cull_tests                         = 'tests/region_cull_tests.vcxproj'
+    dlc_ownership_tests                       = 'tests/dlc_ownership_tests.vcxproj'
 }
 
 $selected = @($projects.GetEnumerator() | Where-Object {
