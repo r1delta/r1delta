@@ -334,6 +334,20 @@ if (Test-Path -LiteralPath $FdOverlay) {
     Say "$nfd new Frontier Defense overlay files staged; $($tracked.Count) tracked CORE files patched via core-scripts.patch"
 }
 
+# ---- LobbyMaps CORE (R2 maps in the picker/lobby/vote/browser, playlists, group 4/5 ownership): patch applies on top of the FD overlay (it was
+# made against the staged CORE), once (reverse check); the 11 localization files are replaced whole (unlink + copy).
+$lm = Join-Path $CodeRoot 'tools\combo\lobbymaps'
+$lmPatch = Join-Path $lm 'lobbymaps-core.patch'
+if (Test-Path -LiteralPath $lmPatch) {
+    $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    & git -C $Core apply --ignore-whitespace --whitespace=nowarn -R --check $lmPatch 2>$null
+    $lmDone = ($LASTEXITCODE -eq 0)
+    $ErrorActionPreference = $prev
+    if (-not $lmDone) { GitC $Core @('apply', '--ignore-whitespace', '--whitespace=nowarn', $lmPatch) | Out-Null; Say 'applied lobbymaps-core.patch' }
+    foreach ($f in Get-ChildItem -LiteralPath (Join-Path $lm 'resource') -Filter 'delta_*.txt') { [ComboNative]::Replace($f.FullName, (Join-Path $Core ('resource\' + $f.Name))) }
+    Say 'LobbyMaps localization files staged'
+}
+
 # ---------------------------------------------------------------- report
 $report = [ordered]@{
     root = $Root

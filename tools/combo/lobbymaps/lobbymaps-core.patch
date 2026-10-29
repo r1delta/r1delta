@@ -1,0 +1,777 @@
+diff --git a/playlists.txt b/playlists.txt
+index 82962d7..899ddf9 100644
+--- a/playlists.txt
++++ b/playlists.txt
+@@ -1,7 +1,7 @@
+ "playlists"
+ {
+ "version"	"stable"
+-"versionNum"	"1961" // Never forget to bump this for every playlist update.
++"versionNum"	"1962" // Never forget to bump this for every playlist update.
+ "at"
+ {
+ "vars"
+@@ -164,6 +164,30 @@
+ "gamemode22"	"at"
+ "map23"	"mp_zone_18"
+ "gamemode23"	"at"
++"map24"	"mp_black_water_canal"
++"gamemode24"	"at"
++"map25"	"mp_colony02"
++"gamemode25"	"at"
++"map26"	"mp_complex3"
++"gamemode26"	"at"
++"map27"	"mp_crashsite3"
++"gamemode27"	"at"
++"map28"	"mp_drydock"
++"gamemode28"	"at"
++"map29"	"mp_eden"
++"gamemode29"	"at"
++"map30"	"mp_forwardbase_kodai"
++"gamemode30"	"at"
++"map31"	"mp_glitch"
++"gamemode31"	"at"
++"map32"	"mp_grave"
++"gamemode32"	"at"
++"map33"	"mp_homestead"
++"gamemode33"	"at"
++"map34"	"mp_relic02"
++"gamemode34"	"at"
++"map35"	"mp_thaw"
++"gamemode35"	"at"
+ }
+ }
+ "coop"
+@@ -325,6 +349,38 @@
+ "gamemode22"	"coop"
+ "map23"	"mp_swampland"
+ "gamemode23"	"coop"
++"map24"	"mp_black_water_canal"
++"gamemode24"	"coop"
++"map25"	"mp_colony02"
++"gamemode25"	"coop"
++"map26"	"mp_complex3"
++"gamemode26"	"coop"
++"map27"	"mp_crashsite3"
++"gamemode27"	"coop"
++"map28"	"mp_drydock"
++"gamemode28"	"coop"
++"map29"	"mp_eden"
++"gamemode29"	"coop"
++"map30"	"mp_forwardbase_kodai"
++"gamemode30"	"coop"
++"map31"	"mp_glitch"
++"gamemode31"	"coop"
++"map32"	"mp_grave"
++"gamemode32"	"coop"
++"map33"	"mp_homestead"
++"gamemode33"	"coop"
++"map34"	"mp_relic02"
++"gamemode34"	"coop"
++"map35"	"mp_thaw"
++"gamemode35"	"coop"
++"map36"	"mp_lf_deck"
++"gamemode36"	"coop"
++"map37"	"mp_lf_meadow"
++"gamemode37"	"coop"
++"map38"	"mp_lf_township"
++"gamemode38"	"coop"
++"map39"	"mp_lf_uma"
++"gamemode39"	"coop"
+ }
+ }
+ "campaign_carousel"
+@@ -1448,6 +1504,42 @@
+ "gamemode22"	"cp"
+ "map23"	"mp_zone_18"
+ "gamemode23"	"cp"
++"map24"	"mp_black_water_canal"
++"gamemode24"	"cp"
++"map25"	"mp_colony02"
++"gamemode25"	"cp"
++"map26"	"mp_complex3"
++"gamemode26"	"cp"
++"map27"	"mp_crashsite3"
++"gamemode27"	"cp"
++"map28"	"mp_drydock"
++"gamemode28"	"cp"
++"map29"	"mp_eden"
++"gamemode29"	"cp"
++"map30"	"mp_forwardbase_kodai"
++"gamemode30"	"cp"
++"map31"	"mp_glitch"
++"gamemode31"	"cp"
++"map32"	"mp_grave"
++"gamemode32"	"cp"
++"map33"	"mp_homestead"
++"gamemode33"	"cp"
++"map34"	"mp_relic02"
++"gamemode34"	"cp"
++"map35"	"mp_thaw"
++"gamemode35"	"cp"
++"map36"	"mp_lf_stacks"
++"gamemode36"	"cp"
++"map37"	"mp_lf_traffic"
++"gamemode37"	"cp"
++"map38"	"mp_lf_deck"
++"gamemode38"	"cp"
++"map39"	"mp_lf_meadow"
++"gamemode39"	"cp"
++"map40"	"mp_lf_township"
++"gamemode40"	"cp"
++"map41"	"mp_lf_uma"
++"gamemode41"	"cp"
+ }
+ }
+ "ctf"
+@@ -1611,6 +1703,42 @@
+ "gamemode22"	"ctf"
+ "map23"	"mp_zone_18"
+ "gamemode23"	"ctf"
++"map24"	"mp_black_water_canal"
++"gamemode24"	"ctf"
++"map25"	"mp_colony02"
++"gamemode25"	"ctf"
++"map26"	"mp_complex3"
++"gamemode26"	"ctf"
++"map27"	"mp_crashsite3"
++"gamemode27"	"ctf"
++"map28"	"mp_drydock"
++"gamemode28"	"ctf"
++"map29"	"mp_eden"
++"gamemode29"	"ctf"
++"map30"	"mp_forwardbase_kodai"
++"gamemode30"	"ctf"
++"map31"	"mp_glitch"
++"gamemode31"	"ctf"
++"map32"	"mp_grave"
++"gamemode32"	"ctf"
++"map33"	"mp_homestead"
++"gamemode33"	"ctf"
++"map34"	"mp_relic02"
++"gamemode34"	"ctf"
++"map35"	"mp_thaw"
++"gamemode35"	"ctf"
++"map36"	"mp_lf_stacks"
++"gamemode36"	"ctf"
++"map37"	"mp_lf_traffic"
++"gamemode37"	"ctf"
++"map38"	"mp_lf_deck"
++"gamemode38"	"ctf"
++"map39"	"mp_lf_meadow"
++"gamemode39"	"ctf"
++"map40"	"mp_lf_township"
++"gamemode40"	"ctf"
++"map41"	"mp_lf_uma"
++"gamemode41"	"ctf"
+ }
+ }
+ "lts"
+@@ -1774,6 +1902,30 @@
+ "gamemode22"	"lts"
+ "map23"	"mp_zone_18"
+ "gamemode23"	"lts"
++"map24"	"mp_black_water_canal"
++"gamemode24"	"lts"
++"map25"	"mp_colony02"
++"gamemode25"	"lts"
++"map26"	"mp_complex3"
++"gamemode26"	"lts"
++"map27"	"mp_crashsite3"
++"gamemode27"	"lts"
++"map28"	"mp_drydock"
++"gamemode28"	"lts"
++"map29"	"mp_eden"
++"gamemode29"	"lts"
++"map30"	"mp_forwardbase_kodai"
++"gamemode30"	"lts"
++"map31"	"mp_glitch"
++"gamemode31"	"lts"
++"map32"	"mp_grave"
++"gamemode32"	"lts"
++"map33"	"mp_homestead"
++"gamemode33"	"lts"
++"map34"	"mp_relic02"
++"gamemode34"	"lts"
++"map35"	"mp_thaw"
++"gamemode35"	"lts"
+ }
+ }
+ "wlts"
+@@ -2269,6 +2421,42 @@
+ "gamemode22"	"mfd"
+ "map23"	"mp_zone_18"
+ "gamemode23"	"mfd"
++"map24"	"mp_black_water_canal"
++"gamemode24"	"mfd"
++"map25"	"mp_colony02"
++"gamemode25"	"mfd"
++"map26"	"mp_complex3"
++"gamemode26"	"mfd"
++"map27"	"mp_crashsite3"
++"gamemode27"	"mfd"
++"map28"	"mp_drydock"
++"gamemode28"	"mfd"
++"map29"	"mp_eden"
++"gamemode29"	"mfd"
++"map30"	"mp_forwardbase_kodai"
++"gamemode30"	"mfd"
++"map31"	"mp_glitch"
++"gamemode31"	"mfd"
++"map32"	"mp_grave"
++"gamemode32"	"mfd"
++"map33"	"mp_homestead"
++"gamemode33"	"mfd"
++"map34"	"mp_relic02"
++"gamemode34"	"mfd"
++"map35"	"mp_thaw"
++"gamemode35"	"mfd"
++"map36"	"mp_lf_stacks"
++"gamemode36"	"mfd"
++"map37"	"mp_lf_traffic"
++"gamemode37"	"mfd"
++"map38"	"mp_lf_deck"
++"gamemode38"	"mfd"
++"map39"	"mp_lf_meadow"
++"gamemode39"	"mfd"
++"map40"	"mp_lf_township"
++"gamemode40"	"mfd"
++"map41"	"mp_lf_uma"
++"gamemode41"	"mfd"
+ }
+ }
+ "mfdp"
+@@ -2432,6 +2620,42 @@
+ "gamemode22"	"mfdp"
+ "map23"	"mp_zone_18"
+ "gamemode23"	"mfdp"
++"map24"	"mp_black_water_canal"
++"gamemode24"	"mfdp"
++"map25"	"mp_colony02"
++"gamemode25"	"mfdp"
++"map26"	"mp_complex3"
++"gamemode26"	"mfdp"
++"map27"	"mp_crashsite3"
++"gamemode27"	"mfdp"
++"map28"	"mp_drydock"
++"gamemode28"	"mfdp"
++"map29"	"mp_eden"
++"gamemode29"	"mfdp"
++"map30"	"mp_forwardbase_kodai"
++"gamemode30"	"mfdp"
++"map31"	"mp_glitch"
++"gamemode31"	"mfdp"
++"map32"	"mp_grave"
++"gamemode32"	"mfdp"
++"map33"	"mp_homestead"
++"gamemode33"	"mfdp"
++"map34"	"mp_relic02"
++"gamemode34"	"mfdp"
++"map35"	"mp_thaw"
++"gamemode35"	"mfdp"
++"map36"	"mp_lf_stacks"
++"gamemode36"	"mfdp"
++"map37"	"mp_lf_traffic"
++"gamemode37"	"mfdp"
++"map38"	"mp_lf_deck"
++"gamemode38"	"mfdp"
++"map39"	"mp_lf_meadow"
++"gamemode39"	"mfdp"
++"map40"	"mp_lf_township"
++"gamemode40"	"mfdp"
++"map41"	"mp_lf_uma"
++"gamemode41"	"mfdp"
+ }
+ }
+ "ps"
+@@ -2579,6 +2803,42 @@
+ "gamemode14"	"ps"
+ "map15"	"mp_switchback"
+ "gamemode15"	"ps"
++"map16"	"mp_black_water_canal"
++"gamemode16"	"ps"
++"map17"	"mp_colony02"
++"gamemode17"	"ps"
++"map18"	"mp_complex3"
++"gamemode18"	"ps"
++"map19"	"mp_crashsite3"
++"gamemode19"	"ps"
++"map20"	"mp_drydock"
++"gamemode20"	"ps"
++"map21"	"mp_eden"
++"gamemode21"	"ps"
++"map22"	"mp_forwardbase_kodai"
++"gamemode22"	"ps"
++"map23"	"mp_glitch"
++"gamemode23"	"ps"
++"map24"	"mp_grave"
++"gamemode24"	"ps"
++"map25"	"mp_homestead"
++"gamemode25"	"ps"
++"map26"	"mp_relic02"
++"gamemode26"	"ps"
++"map27"	"mp_thaw"
++"gamemode27"	"ps"
++"map28"	"mp_lf_stacks"
++"gamemode28"	"ps"
++"map29"	"mp_lf_traffic"
++"gamemode29"	"ps"
++"map30"	"mp_lf_deck"
++"gamemode30"	"ps"
++"map31"	"mp_lf_meadow"
++"gamemode31"	"ps"
++"map32"	"mp_lf_township"
++"gamemode32"	"ps"
++"map33"	"mp_lf_uma"
++"gamemode33"	"ps"
+ }
+ }
+ "tdm"
+@@ -2742,6 +3002,34 @@
+ "gamemode22"	"tdm"
+ "map23"	"mp_zone_18"
+ "gamemode23"	"tdm"
++"map24"	"mp_black_water_canal"
++"gamemode24"	"tdm"
++"map25"	"mp_colony02"
++"gamemode25"	"tdm"
++"map26"	"mp_complex3"
++"gamemode26"	"tdm"
++"map27"	"mp_crashsite3"
++"gamemode27"	"tdm"
++"map28"	"mp_drydock"
++"gamemode28"	"tdm"
++"map29"	"mp_eden"
++"gamemode29"	"tdm"
++"map30"	"mp_forwardbase_kodai"
++"gamemode30"	"tdm"
++"map31"	"mp_glitch"
++"gamemode31"	"tdm"
++"map32"	"mp_grave"
++"gamemode32"	"tdm"
++"map33"	"mp_homestead"
++"gamemode33"	"tdm"
++"map34"	"mp_relic02"
++"gamemode34"	"tdm"
++"map35"	"mp_thaw"
++"gamemode35"	"tdm"
++"map36"	"mp_coliseum"
++"gamemode36"	"tdm"
++"map37"	"mp_coliseum_column"
++"gamemode37"	"tdm"
+ }
+ }
+ "ffa"
+@@ -2903,6 +3191,34 @@
+ "gamemode21"	"ffa"
+ "map22"	"mp_sandtrap"
+ "gamemode22"	"ffa"
++"map23"	"mp_black_water_canal"
++"gamemode23"	"ffa"
++"map24"	"mp_colony02"
++"gamemode24"	"ffa"
++"map25"	"mp_complex3"
++"gamemode25"	"ffa"
++"map26"	"mp_crashsite3"
++"gamemode26"	"ffa"
++"map27"	"mp_drydock"
++"gamemode27"	"ffa"
++"map28"	"mp_eden"
++"gamemode28"	"ffa"
++"map29"	"mp_forwardbase_kodai"
++"gamemode29"	"ffa"
++"map30"	"mp_glitch"
++"gamemode30"	"ffa"
++"map31"	"mp_grave"
++"gamemode31"	"ffa"
++"map32"	"mp_homestead"
++"gamemode32"	"ffa"
++"map33"	"mp_relic02"
++"gamemode33"	"ffa"
++"map34"	"mp_thaw"
++"gamemode34"	"ffa"
++"map35"	"mp_coliseum"
++"gamemode35"	"ffa"
++"map36"	"mp_coliseum_column"
++"gamemode36"	"ffa"
+ }
+ }
+ "bce"
+@@ -3392,6 +3708,34 @@
+ "gamemode22"	"ttdm"
+ "map23"	"mp_zone_18"
+ "gamemode23"	"ttdm"
++"map24"	"mp_black_water_canal"
++"gamemode24"	"ttdm"
++"map25"	"mp_colony02"
++"gamemode25"	"ttdm"
++"map26"	"mp_complex3"
++"gamemode26"	"ttdm"
++"map27"	"mp_crashsite3"
++"gamemode27"	"ttdm"
++"map28"	"mp_drydock"
++"gamemode28"	"ttdm"
++"map29"	"mp_eden"
++"gamemode29"	"ttdm"
++"map30"	"mp_forwardbase_kodai"
++"gamemode30"	"ttdm"
++"map31"	"mp_glitch"
++"gamemode31"	"ttdm"
++"map32"	"mp_grave"
++"gamemode32"	"ttdm"
++"map33"	"mp_homestead"
++"gamemode33"	"ttdm"
++"map34"	"mp_relic02"
++"gamemode34"	"ttdm"
++"map35"	"mp_thaw"
++"gamemode35"	"ttdm"
++"map36"	"mp_coliseum"
++"gamemode36"	"ttdm"
++"map37"	"mp_coliseum_column"
++"gamemode37"	"ttdm"
+ }
+ }
+ "ttdm_turbo"
+diff --git a/scripts/vscripts/_consts.nut b/scripts/vscripts/_consts.nut
+index e50a651..68278b8 100644
+--- a/scripts/vscripts/_consts.nut
++++ b/scripts/vscripts/_consts.nut
+@@ -1625,7 +1625,28 @@ enum ePrivateMatchMaps
+ 	mp_box,
+ 	mp_nest2,
+ 	mp_mia,
+-	mp_npe
++	mp_npe,
++	// The 20 converted Titanfall 2 maps (DLC group 5). Only appended: the numbers are sent to clients as a UI var.
++	mp_black_water_canal,
++	mp_coliseum,
++	mp_coliseum_column,
++	mp_colony02,
++	mp_complex3,
++	mp_crashsite3,
++	mp_drydock,
++	mp_eden,
++	mp_forwardbase_kodai,
++	mp_glitch,
++	mp_grave,
++	mp_homestead,
++	mp_lf_deck,
++	mp_lf_meadow,
++	mp_lf_stacks,
++	mp_lf_township,
++	mp_lf_traffic,
++	mp_lf_uma,
++	mp_relic02,
++	mp_thaw
+ }
+ 
+ enum ePrivateMatchModes
+diff --git a/scripts/vscripts/_utility_shared_all.nut b/scripts/vscripts/_utility_shared_all.nut
+index 60af79c..cb92dde 100644
+--- a/scripts/vscripts/_utility_shared_all.nut
++++ b/scripts/vscripts/_utility_shared_all.nut
+@@ -321,6 +321,76 @@ function GetMapDisplayDesc( mapname )
+ 		return "#" + mapname + "_CLASSIC_DESC"
+ }
+ 
++// The converted Titanfall 2 maps are DLC group 5. dlc5_enabled is recomputed from the installed Titanfall 2 files.
++const R2_MAP_DLC_GROUP = 5
++
++function IsTitanfall2Map( mapName )
++{
++	return GetDLCMapGroupForMap( mapName ) == R2_MAP_DLC_GROUP
++}
++
++// The stock script natives (IsDLCMapGroupEnabledForLocalPlayer) only know the groups 1 to 3 and answer false for the
++// Titanfall Online and Titanfall 2 groups, so those are read from the per-group userinfo convar instead. UI only.
++function LocalPlayerOwnsDLCMapGroup( group )
++{
++	if ( group < 1 )
++		return true
++	if ( group <= 3 )
++		return IsDLCMapGroupEnabledForLocalPlayer( group )
++	return GetConVarInt( "dlc" + group + "_enabled" ) == 1
++}
++
++// The ePrivateMatchModes a converted Titanfall 2 map can be played in, from the private match list of Titanfall 2:
++// the Live Fire maps only have the small map modes (Hardpoint, CTF, Pilot Skirmish, Marked For Death), the two Coliseum
++// maps are 1v1 arenas, every other map has the full set. Co-op (Frontier Defense) exists on the maps with a
++// towerdefense script.
++function GetTitanfall2MapModes( mapName )
++{
++	switch ( mapName )
++	{
++		case "mp_coliseum":
++		case "mp_coliseum_column":
++			return [ "tdm", "ttdm", "ffa" ]
++
++		case "mp_lf_stacks":
++		case "mp_lf_traffic":
++			return [ "cp", "ctf", "ps", "mfd", "mfdp" ]
++
++		case "mp_lf_deck":
++		case "mp_lf_meadow":
++		case "mp_lf_township":
++		case "mp_lf_uma":
++			return [ "cp", "ctf", "ps", "mfd", "mfdp", "coop" ]
++	}
++
++	return [ "at", "cp", "ctf", "lts", "tdm", "mfd", "mfdp", "ps", "ttdm", "ffa", "coop" ]
++}
++
++// false for a Titanfall 2 map that does not have the given ePrivateMatchModes name; true for every other map
++function MapSupportsMode( mapName, modeName )
++{
++	if ( !IsTitanfall2Map( mapName ) )
++		return true
++
++	return ArrayContains( GetTitanfall2MapModes( mapName ), modeName )
++}
++
++// The picture of a map for the map picker, the lobby and the server browser: the loading screen of the map. The converted
++// Titanfall 2 maps use the overview image of the map, served by the game from the Titanfall 2 install (materials/vgui/r2/maps),
++// so a player without it gets the default lobby background instead (UI only).
++function GetMapImage( mapName )
++{
++	if ( IsTitanfall2Map( mapName ) )
++	{
++		if ( IsUI() && !LocalPlayerOwnsDLCMapGroup( R2_MAP_DLC_GROUP ) )
++			return GetDefaultLobbyBackground()
++
++		return "r2/maps/" + mapName
++	}
++
++	return "../loadscreens/" + mapName + "_widescreen"
++}
++
+ function ArrayContains( array, testVal )
+ {
+ 	Assert( type( array ) == "array" )
+diff --git a/scripts/vscripts/menu/_lobby.nut b/scripts/vscripts/menu/_lobby.nut
+index 73ee453..84717ad 100644
+--- a/scripts/vscripts/menu/_lobby.nut
++++ b/scripts/vscripts/menu/_lobby.nut
+@@ -1718,6 +1718,13 @@ function ClientCommand_SetCustomMap( player, ... )
+ 	if ( !(mapName in getconsttable().ePrivateMatchMaps) )
+ 		return true
+ 
++	// A converted Titanfall 2 map needs the group on the server (every player owns it, or dlc5_override) and a mode it exists in
++	if ( IsTitanfall2Map( mapName ) && ( !ServerHasDLCMapGroupEnabled( R2_MAP_DLC_GROUP ) || !MapSupportsMode( mapName, GetModeNameForEnum( level.ui.privatematch_mode ) ) ) )
++	{
++		printt( player.GetPlayerName(), "tried to set the unavailable map:", mapName )
++		return true
++	}
++
+ 	printt( player.GetPlayerName(), "set custom map to:", mapName )
+ 	level.ui.privatematch_map = getconsttable().ePrivateMatchMaps[mapName]
+ 
+@@ -1752,6 +1759,9 @@ function ClientCommand_PrivateMatchSetMode( player, ... )
+ 
+ 	printt( player.GetPlayerName(), "set private_match mode to:", modeName )
+ 	level.ui.privatematch_mode = getconsttable().ePrivateMatchModes[modeName]
++
++	// The converted Titanfall 2 maps only exist in some modes
++	UpdatePrivateMatchMapIfUnavailable()
+ 	UpdatePrivateMatchReadyStatus( true )
+ 
+ 	return true
+@@ -2207,8 +2217,10 @@ function UpdatePrivateMatchMapIfUnavailable()
+ 	if ( mapName )
+ 	{
+ 		local dlcGroup = GetDLCMapGroupForMap( mapName )
++		local modeName = GetModeNameForEnum( level.ui.privatematch_mode )
+ 
+-		if ( !ServerHasDLCMapGroupEnabled( dlcGroup ) )
++		// A converted Titanfall 2 map is also unavailable in a mode Titanfall 2 does not have it in
++		if ( !ServerHasDLCMapGroupEnabled( dlcGroup ) || ( modeName != null && !MapSupportsMode( mapName, modeName ) ) )
+ 		{
+ 			level.ui.privatematch_map = getconsttable().ePrivateMatchMaps["mp_fracture"]
+ 			UpdatePrivateMatchReadyStatus( true )
+diff --git a/scripts/vscripts/ui/menu_eog_mapstars.nut b/scripts/vscripts/ui/menu_eog_mapstars.nut
+index a1c53e2..b0f8d25 100644
+--- a/scripts/vscripts/ui/menu_eog_mapstars.nut
++++ b/scripts/vscripts/ui/menu_eog_mapstars.nut
+@@ -94,8 +94,8 @@ function InitMenu()
+ 
+ 	// Map Image
+ 	local mapImage
+-	if ( eogStarsMap == "mp_mia" || eogStarsMap == "mp_nest2" || eogStarsMap == "mp_box" || eogStarsMap == "mp_npe" )
+-		mapImage = "../loadscreens/" + eogStarsMap + "_widescreen"
++	if ( eogStarsMap == "mp_mia" || eogStarsMap == "mp_nest2" || eogStarsMap == "mp_box" || eogStarsMap == "mp_npe" || IsTitanfall2Map( eogStarsMap ) )
++		mapImage = GetMapImage( eogStarsMap )
+ 	else
+ 		mapImage = "../ui/menu/lobby/lobby_image_" + eogStarsMap
+ 
+diff --git a/scripts/vscripts/ui/menu_lobby.nut b/scripts/vscripts/ui/menu_lobby.nut
+index 7483907..2c1311b 100644
+--- a/scripts/vscripts/ui/menu_lobby.nut
++++ b/scripts/vscripts/ui/menu_lobby.nut
+@@ -898,8 +898,8 @@ function SetMapInfo( mapName )
+ 	SmartGlass_SetGameStateProperty( SMARTGLASS_PROP_NEXTLEVEL, mapName )
+ 
+ 	local mapImage
+-	if ( mapName == "mp_mia" || mapName == "mp_nest2" || mapName == "mp_box" || mapName == "mp_npe" )
+-		mapImage = "../loadscreens/" + mapName + "_widescreen"
++	if ( mapName == "mp_mia" || mapName == "mp_nest2" || mapName == "mp_box" || mapName == "mp_npe" || IsTitanfall2Map( mapName ) )
++		mapImage = GetMapImage( mapName )
+ 	else
+ 		mapImage = "../ui/menu/lobby/lobby_image_" + mapName
+ 
+diff --git a/scripts/vscripts/ui/menu_map_select.nut b/scripts/vscripts/ui/menu_map_select.nut
+index a3a3640..edda35a 100644
+--- a/scripts/vscripts/ui/menu_map_select.nut
++++ b/scripts/vscripts/ui/menu_map_select.nut
+@@ -25,6 +25,7 @@ function main()
+ 	RegisterSignal( "OnCloseMapsMenu" )
+ }
+ 
++
+ function InitMapsMenu()
+ {
+ 	file.menu <- GetMenu( "MapsMenu" )
+@@ -244,7 +245,7 @@ function GetMapListDisplayName( mapName )
+ 
+ function GetMapListImage( mapName )
+ {
+-	return "../loadscreens/" + mapName + "_widescreen"
++	return GetMapImage( mapName )
+ }
+ 
+ // Fills every tile from the window of file.mapsArray starting at file.scrollRow
+@@ -320,7 +321,7 @@ function UpdateMapButtonTooltip( button )
+ 
+ 	if ( button.s.dlcGroup > 0 )
+ 	{
+-		if ( !IsDLCMapGroupEnabledForLocalPlayer( button.s.dlcGroup ) )
++		if ( !LocalPlayerOwnsDLCMapGroup( button.s.dlcGroup ) )
+ 			HandleLockedCustomMenuItem( menu, button, ["#DLC_REQUIRED"] )
+ 		else if ( !ServerHasDLCMapGroupEnabled( button.s.dlcGroup ) )
+ 			HandleLockedCustomMenuItem( menu, button, ["#NOT_OWNED_BY_ALL_PLAYERS"] )
+@@ -384,7 +385,7 @@ function MapButton_Activate( button )
+ {
+ 	if ( button.IsLocked() )
+ 	{
+-		if ( !IsMapVoteMode() && !IsDLCMapGroupEnabledForLocalPlayer( button.s.dlcGroup ) )
++		if ( !IsMapVoteMode() && !LocalPlayerOwnsDLCMapGroup( button.s.dlcGroup ) )
+ 			ShowDLCStore()
+ 
+ 		return
+@@ -441,7 +442,7 @@ function MonitorDLCAvailability()
+ {
+ 	EndSignal( uiGlobal.signalDummy, "OnCloseMapsMenu" )
+ 
+-	local available = [ null, null, null ]
++	local available = [ null, null, null, null, null ]
+ 	local lastAvailable = clone available
+ 	local doUpdate
+ 
+@@ -449,9 +450,9 @@ function MonitorDLCAvailability()
+ 	{
+ 		doUpdate = false
+ 
+-		for ( local i = 0; i < 3; i++ )
++		for ( local i = 0; i < available.len(); i++ )
+ 		{
+-			available[i] = ServerHasDLCMapGroupEnabled( i + 1 ) // 1-3
++			available[i] = ServerHasDLCMapGroupEnabled( i + 1 ) // 1-5
+ 
+ 			if ( available[i] != lastAvailable[i] )
+ 			{
+@@ -510,11 +511,23 @@ function GetPrivateMatchMaps()
+ 	if ( modeName == "campaign_carousel" )
+ 		return GetCampaignMaps()
+ 
+-	local mapsArray = []
+-	mapsArray.resize( getconsttable().ePrivateMatchMaps.len() )
++	local allMaps = []
++	allMaps.resize( getconsttable().ePrivateMatchMaps.len() )
+ 
+ 	foreach ( mapName, mapID in getconsttable().ePrivateMatchMaps )
+-		mapsArray[mapID] = mapName
++		allMaps[mapID] = mapName
++
++	// The converted Titanfall 2 maps are only listed for a player who owns the Titanfall 2 group (dlc5_enabled) and only in
++	// the modes Titanfall 2 has them in
++	local ownsTitanfall2 = LocalPlayerOwnsDLCMapGroup( R2_MAP_DLC_GROUP )
++	local mapsArray = []
++	foreach ( mapName in allMaps )
++	{
++		if ( IsTitanfall2Map( mapName ) && ( !ownsTitanfall2 || !MapSupportsMode( mapName, modeName ) ) )
++			continue
++
++		mapsArray.append( mapName )
++	}
+ 
+ 	if ( modeName != VARIETY_PACK && modeName != "all_mini" )
+ 		return mapsArray
+@@ -612,8 +625,9 @@ function OnMapGridNavDown(...)
+ 		ScrollMapGrid( 1 )
+ }
+ 
+-// Where a map comes from, if it is not a plain multiplayer map: the map packs, the Titanfall Online maps, the maps that
+-// only exist in R1Delta, and the maps the Titanfall Campaign is played on. Returns a localization token, or null.
++// Where a map comes from, if it is not a plain multiplayer map: the map packs, the Titanfall Online maps, the converted
++// Titanfall 2 maps, the maps that only exist in R1Delta, and the maps the Titanfall Campaign is played on. Returns a
++// localization token, or null.
+ function GetMapPackToken( mapName )
+ {
+ 	switch ( GetDLCMapGroupForMap( mapName ) )
+@@ -624,6 +638,8 @@ function GetMapPackToken( mapName )
+ 			return "#MAP_PACK_2"
+ 		case 3:
+ 			return "#MAP_PACK_3"
++		case R2_MAP_DLC_GROUP:
++			return "#MAP_PACK_R2"
+ 	}
+ 
+ 	switch ( mapName )
+@@ -716,6 +732,18 @@ function GetMapVoteOptions()
+ 	local playlist = GetCurrentPlaylistName()
+ 	local mapsArray = GetPlaylistUniqueMaps( playlist )
+ 
++	// The converted Titanfall 2 maps are listed by the playlists, but only a player and a server that own the Titanfall 2
++	// group can use them, and only in the modes Titanfall 2 has them in.
++	local usableMaps = []
++	foreach ( mapName in mapsArray )
++	{
++		if ( IsTitanfall2Map( mapName ) && !CanVoteForTitanfall2Map( mapName, playlist ) )
++			continue
++
++		usableMaps.append( mapName )
++	}
++	mapsArray = usableMaps
++
+ 	if ( playlist != CAPTURE_POINT && playlist != COOPERATIVE && playlist != CAMPAIGN )
+ 	{
+ 		mapsArray.append( "mp_mia" )
+@@ -727,6 +755,14 @@ function GetMapVoteOptions()
+ 	return mapsArray
+ }
+ 
++function CanVoteForTitanfall2Map( mapName, playlist )
++{
++	if ( !LocalPlayerOwnsDLCMapGroup( R2_MAP_DLC_GROUP ) || !ServerHasDLCMapGroupEnabled( R2_MAP_DLC_GROUP ) )
++		return false
++
++	return MapSupportsMode( mapName, playlist )
++}
++
+ // Shows the wheel or the shoulder button glyphs (next to PREVIOUS PAGE / NEXT PAGE) for the active input device
+ function UpdatePagingGlyphs()
+ {
+diff --git a/scripts/vscripts/ui/menu_serverbrowser.nut b/scripts/vscripts/ui/menu_serverbrowser.nut
+index 3d13cb6..c321214 100644
+--- a/scripts/vscripts/ui/menu_serverbrowser.nut
++++ b/scripts/vscripts/ui/menu_serverbrowser.nut
+@@ -416,9 +416,9 @@ function OnServerButtonFocused(button)
+         menu.GetChild("StarsLabel").SetText( "#LOBBY" )
+ 		menu.GetChild("NextMapImage").SetImage(GetDefaultLobbyBackground())
+     }
+-    else if (server.map_name == "mp_mia" || server.map_name == "mp_nest2" || server.map_name == "mp_box" || server.map_name == "mp_npe") {
++    else if (server.map_name == "mp_mia" || server.map_name == "mp_nest2" || server.map_name == "mp_box" || server.map_name == "mp_npe" || IsTitanfall2Map(server.map_name)) {
+         menu.GetChild("StarsLabel").SetText( "#" + server.map_name )
+-        menu.GetChild("NextMapImage").SetImage("../loadscreens/" + server.map_name + "_widescreen")
++        menu.GetChild("NextMapImage").SetImage(GetMapImage(server.map_name))
+     }
+      else {
+         menu.GetChild("StarsLabel").SetText( "#" + server.map_name  )
