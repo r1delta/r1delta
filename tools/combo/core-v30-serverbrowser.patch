@@ -1,0 +1,40 @@
+From 1d5a0e006c0799fc5bb7251a319d7ff73fdae076 Mon Sep 17 00:00:00 2001
+From: Version30 <v30@local>
+Date: Thu, 29 Oct 2026 16:39:30 -0400
+Subject: [PATCH] Server browser: strip the leading v from release tags before
+ comparing versions (min server version v3.0.0)
+
+---
+ scripts/vscripts/ui/menu_serverbrowser.nut | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/scripts/vscripts/ui/menu_serverbrowser.nut b/scripts/vscripts/ui/menu_serverbrowser.nut
+index 0e0861a..3d13cb6 100644
+--- a/scripts/vscripts/ui/menu_serverbrowser.nut
++++ b/scripts/vscripts/ui/menu_serverbrowser.nut
+@@ -213,12 +213,20 @@ function ShouldHideEmpty()
+     return false
+ }
+ 
++function StripVersionPrefix(version)
++{
++    // Master versions and GetMinimumR1DVersion() are release tags such as "v3.0.0"; the "v" must not be part of the major number.
++    if ( version.len() > 0 && ( version[0] == 'v' || version[0] == 'V' ) )
++        return version.slice( 1 )
++    return version
++}
++
+ function CompareSemver(versionA, versionB)
+ {
+     if(GetR1DVersion() == "dev")
+         return 1
+-    local partsA = split( versionA, "." )
+-    local partsB = split( versionB, "." )
++    local partsA = split( StripVersionPrefix( versionA ), "." )
++    local partsB = split( StripVersionPrefix( versionB ), "." )
+ 
+     for (local i = 0; i < max(partsA.len(), partsB.len()); i++)
+     {
+-- 
+2.52.0.windows.1
+

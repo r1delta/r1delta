@@ -264,6 +264,13 @@ if ($Drive) {
 $autoPatch = Join-Path $CodeRoot 'tools\combo\core-pilot-auto-enable.patch'
 GitC $Core @('apply', '--ignore-whitespace', '--whitespace=nowarn', $autoPatch) | Out-Null
 Say 'applied core-pilot-auto-enable.patch'
+# Version30: server browser compares release tags without the leading v (min server version v3.0.0); applied once (reverse check).
+$v30Core = Join-Path $CodeRoot 'tools\combo\core-v30-serverbrowser.patch'
+$prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+& git -C $Core apply --ignore-whitespace --whitespace=nowarn -R --check $v30Core 2>$null
+$v30Done = ($LASTEXITCODE -eq 0)
+$ErrorActionPreference = $prev
+if (-not $v30Done) { GitC $Core @('apply', '--ignore-whitespace', '--whitespace=nowarn', $v30Core) | Out-Null; Say 'applied core-v30-serverbrowser.patch' }
 # Default grapple keys for playtesters (r2-combo only; private copies of two cfg files, never written through a hardlink):
 #  - config_default_pc.cfg: MOUSE4 (only used for a profile without saved settings, so it can never clobber a player's own bind);
 #  - autoexec_delta.cfg: H (runs every launch; neither the shipped defaults nor the user's profile use H).
