@@ -352,6 +352,13 @@ public:
         }
     }
 
+    void PrefetchUiTextures(const std::vector<std::string>& texturePaths)
+    {
+        Activate();
+        for (const std::string& path : texturePaths)
+            QueuePrefetchPath(path, Placement{ 1, kModelOrderBase + m_modelOrder.fetch_add(1, std::memory_order_relaxed) });
+    }
+
     bool MayContain(std::string_view normalizedPath) const override
     {
         if (!m_activated.load(std::memory_order_acquire)
@@ -1622,6 +1629,12 @@ void PrefetchR2ModelMaterials(const std::vector<std::string>& materialNames)
 {
     if (g_materialProvider)
         g_materialProvider->PrefetchModelMaterials(materialNames);
+}
+
+void PrefetchR2UiTextures(const std::vector<std::string>& texturePaths)
+{
+    if (g_materialProvider)
+        g_materialProvider->PrefetchUiTextures(texturePaths);
 }
 
 void LogR2TextureProviderMetrics(const char* phase)

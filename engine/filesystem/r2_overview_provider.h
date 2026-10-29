@@ -6,6 +6,7 @@ namespace r2port {
 //   resource/overviews/<map>.txt                   built from the R2 resource/overviews/<map>.txt in the map's directory VPK
 //   materials/vgui/minimaps/<map>.vmt              HUD minimap material (MiniMap proxy + circular mask)
 //   materials/vgui/minimaps/fullscreen/<map>.vmt   fullscreen map material (MiniMap proxy + square mask)
+//   materials/vgui/r2/maps/<map>.vmt               map picker / lobby / server browser picture (script image "r2/maps/<map>"): the overview image below
 // The image itself, materials/overviews/<map>.vtf, is converted from the R2 rpak texture "overviews\<map>" by the
 // R2 material provider (it queues the path with the rest of the map's materials). R1 files always win; nothing is
 // served without an R2 install.

@@ -2,6 +2,7 @@
 
 #include "engine/filesystem/r1o_vpk.h"
 #include "engine/filesystem/r2_map_provider.h"
+#include "engine/filesystem/r2_material_provider.h"
 #include "engine/logging/logging.h"
 
 #ifndef NOMINMAX
@@ -31,7 +32,7 @@ namespace {
 // world transform (pos_x, pos_y: world position of the image's top left corner, scale: world units per 1/1024 of the
 // image width, the same values R1's mp_angel_city file has) but names the image in an assets block ("minimap
 // overviews\<map>") instead of material/material_alt.
-enum class Kind { Txt, HudMaterial, FullscreenMaterial };
+enum class Kind { Txt, HudMaterial, FullscreenMaterial, ThumbnailMaterial };
 
 struct Request {
     Kind kind{};
@@ -41,6 +42,8 @@ struct Request {
 constexpr std::string_view kTxtPrefix = "resource/overviews/";
 constexpr std::string_view kHudPrefix = "materials/vgui/minimaps/";
 constexpr std::string_view kFullscreenPrefix = "materials/vgui/minimaps/fullscreen/";
+constexpr std::string_view kThumbnailPrefix = "materials/vgui/r2/maps/";
+constexpr std::string_view kThumbnailSuffix = ".vmt";
 
 bool EndsWith(std::string_view text, std::string_view suffix)
 {
@@ -66,6 +69,11 @@ std::optional<Request> ParseRequest(std::string_view path)
         kind = Kind::HudMaterial;
         prefix = kHudPrefix;
         extension = ".vmt";
+    }
+    else if (path.compare(0, kThumbnailPrefix.size(), kThumbnailPrefix) == 0) {
+        kind = Kind::ThumbnailMaterial;
+        prefix = kThumbnailPrefix;
+        extension = kThumbnailSuffix;
     }
     else {
         return std::nullopt;
@@ -156,6 +164,21 @@ std::string HudMaterialText(const std::string& map)
         "\t\"Proxies\"\r\n\t{\r\n\t\t\"MiniMap\"\r\n\t\t{\r\n\t\t\t\"resultVar\" \"$texture2transform\"\r\n\t\t}\r\n\t}\r\n}\r\n";
 }
 
+// The picture the map picker, the lobby and the server browser show for a map: the UI image "r2/maps/<map>" (materials/vgui/r2/maps/<map>.vmt;
+// the provider path rules reject "..", so R1's "../loadscreens/<map>_widescreen" cannot be used). It is the map's overview (minimap) image,
+// the R2 rpak texture "overviews\<map>" the R2 material provider already converts: the loading screen textures of the install
+// ("loadscreens\<map>_wide" in <map>_loadscreen*.rpak) are not in the r2tex asset index (no record of that name).
+std::string ThumbnailMaterialText(const std::string& map)
+{
+    return "\"Basic\"\r\n{\r\n"
+        "\t\"$vertexcolor\" \"1\"\r\n"
+        "\t\"$vertcoloristint\" \"1\"\r\n"
+        "\t\"$vertexalpha\" \"1\"\r\n"
+        "\t\"$ignorez\" \"1\"\r\n\r\n"
+        "\t\"$surfaceprop\" \"default\"\r\n"
+        "\t\"$basetexture\" \"overviews/" + map + "\"\r\n}\r\n";
+}
+
 std::string FullscreenMaterialText(const std::string& map)
 {
     return "\"UnlitTwoTexture\"\r\n{\r\n"
@@ -210,6 +233,9 @@ public:
         case Kind::FullscreenMaterial:
             text = HasOverviewData(request->map) ? FullscreenMaterialText(request->map) : std::string();
             break;
+        case Kind::ThumbnailMaterial:
+            text = HasOverviewData(request->map) ? ThumbnailMaterialText(request->map) : std::string();
+            break;
         }
         if (text.empty())
             return {};
@@ -218,6 +244,11 @@ public:
         {
             std::lock_guard<std::mutex> lock(m_mutex);
             m_files.emplace(path, data);
+        }
+        if (request->kind == Kind::ThumbnailMaterial) {
+            // The texture is a known path of the R2 material provider from here on, and converted in the background: the
+            // map picker is shown in the lobby, before any R2 map has been loaded.
+            PrefetchR2UiTextures({ "materials/overviews/" + request->map + ".vtf" });
         }
         if (!m_logged.exchange(true, std::memory_order_relaxed)) {
             char message[512]{};
