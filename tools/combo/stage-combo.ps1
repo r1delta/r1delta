@@ -348,6 +348,18 @@ $lm = Join-Path $CodeRoot 'tools\combo\lobbymaps'
 $lmPatch = Join-Path $lm 'lobbymaps-core.patch'
 if (Test-Path -LiteralPath $lmPatch) {
     $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    # DynWeapons2 renamed eDamageSourceId.mp_weapon_mega3 to mp_titanweapon_minigun; the generated FD towerdefense script still names the old id
+    # (SCRIPT ERROR: invalid constant [eDamageSourceId.mp_weapon_mega3] on every coop map load). Rewrite it in this root's copy (the copy is not a hardlink: unlink + copy above).
+    $td = Join-Path $Core 'scripts\vscripts\mp\_coobj_towerdefense.nut'
+    if (Test-Path -LiteralPath $td) {
+        $tdt = [IO.File]::ReadAllText($td)
+        if ($tdt.Contains('eDamageSourceId.mp_weapon_mega3')) {
+            $tmpt = Join-Path $env:TEMP ('combo-td-' + [Guid]::NewGuid().ToString('N') + '.nut')
+            [IO.File]::WriteAllText($tmpt, $tdt.Replace('eDamageSourceId.mp_weapon_mega3', 'eDamageSourceId.mp_titanweapon_minigun'), [Text.UTF8Encoding]::new($false))
+            [ComboNative]::Replace($tmpt, $td); Remove-Item $tmpt
+            Say 'FD towerdefense: eDamageSourceId.mp_weapon_mega3 -> mp_titanweapon_minigun'
+        }
+    }
     & git -C $Core apply --ignore-whitespace --whitespace=nowarn -R --check $lmPatch 2>$null
     $lmDone = ($LASTEXITCODE -eq 0)
     $ErrorActionPreference = $prev
