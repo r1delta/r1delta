@@ -25,7 +25,10 @@ enum class TextureTransform : std::uint8_t {
     // Emitter glow weight ramp (RGBA8 256x4, RGB white, alpha = glow weight c(a) = clamp((160 - a) / 109) for the texel a, a = R2 vertex alpha;
     // synthetic name r2tex/glow/<emissive mask texture name>). bspdown rule 24 writes a vertex's texture coordinate as ((a + 0.5) / 256, 0.5)
     // so the interpolated coordinate reproduces R2's per-pixel function of the interpolated vertex alpha. The source texture is not decoded.
-    glowRamp
+    glowRamp,
+    // Specular F0 (slot 3 / 26, RGB) with the gloss of the same material (slot 2 / 25) in alpha: DXT5, synthetic name
+    // r2tex/specgloss/<spc guid>_<gls guid> (opt-in env token R2TEX_ENV=gloss, see r2tex.cpp EnvTokens).
+    specGloss
 };
 
 enum class LayerMode : std::uint8_t {
@@ -131,5 +134,9 @@ bool IsFamilyResident(std::uint32_t family);
 // Package families decoded since the process started (RTech decode + file read), and the wall time spent in them
 // summed over threads. A converted map should load each family it touches once.
 void GetFamilyLoadStats(std::uint64_t& loads, std::uint64_t& microseconds);
+
+// Env tokens (R2TEX_ENV) change converted VMTs and textures: the suffix the provider appends to its converted-cache directory name
+// ("" while R2TEX_ENV is unset, so existing caches stay valid; otherwise "-env1-<tokens>").
+const char* EnvCacheTag();
 
 } // namespace r2tex

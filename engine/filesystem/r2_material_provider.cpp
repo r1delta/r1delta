@@ -184,7 +184,7 @@ bool IsMaterialOrTextureRequestPath(std::string_view path)
 
 // Bump when the r2tex library or the VMT/VTF output it produces changes: converted files are
 // persisted per R2 install fingerprint and revision.
-constexpr std::string_view kConvertedCacheRevision = "32";  // 32: every source texture a VMT names lives under r2t/ (r2_material_names.h), world materials under r2w/
+constexpr std::string_view kConvertedCacheRevision = "33";  // 33: env defaults ($envmaplightscale 1, $fresnelamount 0.35 on world env materials); 32: every source texture a VMT names lives under r2t/ (r2_material_names.h), world materials under r2w/
 
 bool ReadWholeFile(const std::filesystem::path& path, std::vector<std::uint8_t>& bytes)
 {
@@ -617,7 +617,8 @@ private:
                 r2Install = installRoot / "r2";
                 cacheDirectory = R2TextureCacheDirectory(r2Install, errorMessage);
                 if (!cacheDirectory.empty()) {
-                    m_convertedRoot = cacheDirectory / "converted" / std::string(kConvertedCacheRevision);
+                    // r2tex::EnvCacheTag(): "" for the defaults, "-env1-<tokens>" while R2TEX_ENV is set (A/B runs never reuse each other's conversions).
+                    m_convertedRoot = cacheDirectory / "converted" / (std::string(kConvertedCacheRevision) + r2tex::EnvCacheTag());
                     std::error_code cacheError;
                     const bool cacheExists = std::filesystem::is_regular_file(
                         cacheDirectory / "r2tex.index", cacheError);

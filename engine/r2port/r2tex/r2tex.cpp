@@ -1775,6 +1775,248 @@ bool buildFoliageVtf(std::vector<std::uint8_t>& albedo, const std::vector<std::u
     return true;
 }
 
+// Plane helpers shared with the Uber carrier packer (identical text to the converter tree, UberPacker's block): red channel of a converted R2 texture and
+// its resampler, used by buildSpecGlossVtf below.
+struct UberPlane {
+    std::uint32_t width = 0, height = 0;
+    std::vector<std::uint8_t> value;   // red channel of mip 0, linear
+};
+
+std::uint8_t srgbByteToLinear(std::uint8_t v) {
+    const float s = v / 255.0f;
+    const float l = s <= 0.04045f ? s / 12.92f : std::pow((s + 0.055f) / 1.055f, 2.4f);
+    return static_cast<std::uint8_t>(std::clamp(l * 255.0f + 0.5f, 0.0f, 255.0f));
+}
+
+// Red channel of mip 0 of a converted R2 texture (BC4/BC5/BC1-3 red, RGBA8 red, A8 value). A source flagged sRGB is
+// converted to linear, which is what R2's sampler returned for it.
+bool loadUberPlane(const std::shared_ptr<Database>& db, std::uint64_t guid, UberPlane& plane, std::string& error) {
+    const AssetRecord* record = findRecord(*db, guid, kTxtr);
+    if (!record) { error = "unresolved texture GUID"; return false; }
+    std::vector<std::uint8_t> vtf;
+    if (!convertTextureWithDb(db, *record, TextureOptions{}, vtf, error)) return false;
+    VtfView view;
+    if (!parseVtfView(vtf, view)) { error = "invalid source VTF for " + record->name; return false; }
+    plane.width = view.width; plane.height = view.height;
+    const std::size_t texels = static_cast<std::size_t>(view.width) * view.height;
+    plane.value.assign(texels, 255);
+    if (view.format == 8) {   // A8 (R2 R8): one byte per texel, mip 0 stored last
+        std::size_t offset = view.dataOffset;
+        for (std::uint32_t m = view.mipCount; m-- > 1;)
+            offset += static_cast<std::size_t>(std::max(1u, view.width >> m)) * std::max(1u, view.height >> m);
+        if (offset > vtf.size() || texels > vtf.size() - offset) { error = "truncated A8 source " + record->name; return false; }
+        std::memcpy(plane.value.data(), vtf.data() + offset, texels);
+    } else {
+        std::vector<std::uint8_t> rgba;
+        std::uint32_t w = 0, h = 0;
+        if (!decodeVtfMip(vtf, view, 0, rgba, w, h) || w != view.width || h != view.height) {
+            error = "unsupported source VTF format " + std::to_string(view.format) + " for " + record->name;
+            return false;
+        }
+        for (std::size_t p = 0; p < texels; ++p) plane.value[p] = rgba[p * 4];
+    }
+    if (u32(vtf.data() + 0x14) & 0x80000u)
+        for (std::uint8_t& v : plane.value) v = srgbByteToLinear(v);
+    return true;
+}
+
+// One axis of the resampler: output i covers [i * n / m, (i + 1) * n / m) of the input. Shrinking averages that interval
+// exactly (fractional edge weights), growing interpolates linearly between the two nearest texel centres.
+void uberAxisWeights(std::uint32_t n, std::uint32_t m, std::uint32_t i, std::uint32_t& first, std::vector<float>& weights) {
+    weights.clear();
+    if (m <= n) {
+        const double lo = static_cast<double>(i) * n / m, hi = static_cast<double>(i + 1) * n / m;
+        first = static_cast<std::uint32_t>(lo);
+        for (std::uint32_t j = first; j < n && j < hi; ++j)
+            weights.push_back(static_cast<float>((std::min<double>(hi, j + 1.0) - std::max<double>(lo, j)) / (hi - lo)));
+        if (weights.empty()) { first = std::min(first, n - 1); weights.push_back(1.0f); }
+    } else {
+        const double c = (i + 0.5) * n / m - 0.5;
+        const double f = std::floor(c);
+        const std::int64_t a = static_cast<std::int64_t>(f), b = a + 1;
+        const float t = static_cast<float>(c - f);
+        const std::int64_t ca = std::clamp<std::int64_t>(a, 0, n - 1), cb = std::clamp<std::int64_t>(b, 0, n - 1);
+        first = static_cast<std::uint32_t>(ca);
+        if (cb == ca) weights.push_back(1.0f);
+        else { weights.push_back(1.0f - t); weights.push_back(t); }
+    }
+}
+
+std::vector<std::uint8_t> resizeUberPlane(const UberPlane& src, std::uint32_t dw, std::uint32_t dh) {
+    if (src.width == dw && src.height == dh) return src.value;
+    std::vector<float> horizontal(static_cast<std::size_t>(dw) * src.height);
+    std::vector<float> weights;
+    std::uint32_t first = 0;
+    for (std::uint32_t x = 0; x < dw; ++x) {
+        uberAxisWeights(src.width, dw, x, first, weights);
+        for (std::uint32_t y = 0; y < src.height; ++y) {
+            float sum = 0.0f;
+            for (std::size_t k = 0; k < weights.size(); ++k)
+                sum += weights[k] * src.value[static_cast<std::size_t>(y) * src.width + first + k];
+            horizontal[static_cast<std::size_t>(y) * dw + x] = sum;
+        }
+    }
+    std::vector<std::uint8_t> out(static_cast<std::size_t>(dw) * dh);
+    for (std::uint32_t y = 0; y < dh; ++y) {
+        uberAxisWeights(src.height, dh, y, first, weights);
+        for (std::uint32_t x = 0; x < dw; ++x) {
+            float sum = 0.0f;
+            for (std::size_t k = 0; k < weights.size(); ++k)
+                sum += weights[k] * horizontal[static_cast<std::size_t>(first + k) * dw + x];
+            out[static_cast<std::size_t>(y) * dw + x] = static_cast<std::uint8_t>(std::clamp(sum + 0.5f, 0.0f, 255.0f));
+        }
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Environment reflection tokens (env R2TEX_ENV = comma list). DEFAULT (unset or empty): `lightscale` and `fresnel=0.35` are ON for lightmapped (world)
+// materials with an env reflection; `off` switches both off (the pre-round-17 output); gloss, blur and the rest are opt-in tokens.
+//   gloss              slot 3 (specular F0, RGB) of a material that also has a `_gls` gloss map (slot 2) is re-encoded as DXT5 with
+//                      alpha = gloss^pow (synthetic name r2tex/specgloss/<spc guid>_<gls guid>). R1's LightmappedGeneric reads the
+//                      alpha of $reflectionTint (t2.a) as its gloss: it is the weight of the Fresnel term of the env reflection and,
+//                      when $shininessBlack/$shininessWhite are set, the blur of the probe lookup. Stock converted `_spc` are DXT1,
+//                      so t2.a was 1 everywhere (a mirror at grazing angles on every material).
+//   gloss-pow=<p>      exponent applied to the R2 gloss (default 2: R2's env Fresnel reaches max(F0, (1 - rough)^2) = gloss^2 at grazing).
+//   f0-scale=<s>       multiplier on the linear F0 (default 1).
+//   lightscale[=<v>]   $envmapLightScale <v> (default 1, ON by default) on lightmapped (world) materials with an env reflection: stock R1 scales the
+//                      reflection by lerp(1, saturate(total diffuse light), v), the counterpart of R2's `k` (specular occlusion by
+//                      the local light level); R2 itself has no other occlusion term on world surfaces.
+//   fresnel=<v>        $fresnelamount <v> (default 0.35, ON by default; 0 = emit nothing, stock default) on the same materials. Stock R1 weights the
+//                      Fresnel term of the env reflection by the alpha of $reflectionTint (t2.a), which is 1 on every DXT1 converted `_spc`: a mirror
+//                      at grazing angles on every building. 0.35 is the mean gloss^2 of the SUBSTATION wall (R2's own grazing maximum).
+//   off                lightscale and fresnel off (A/B against the previous output).
+//   blur[=<lod0>]      with `gloss`: $shininessBlack/$shininessWhite chosen so the probe lod is <lod0> (default 3) at alpha 0 and
+//                      reaches mip 0 at alpha 1 (R1 probes are 32x32, R2 probes 256x256: R2 lod = 6 * (1 - gloss), ours is 3 less).
+struct EnvTokens {
+    bool gloss = false, lightScale = true, blur = false;
+    double glossPow = 2.0, f0Scale = 1.0, lightScaleValue = 1.0, blurLod0 = 3.0, fresnel = 0.35;
+};
+
+EnvTokens parseEnvTokens(const char* text) {
+    EnvTokens t;
+    if (!text) return t;
+    std::string s(text);
+    for (std::size_t at = 0; at < s.size();) {
+        std::size_t end = s.find(',', at);
+        if (end == std::string::npos) end = s.size();
+        std::string token = s.substr(at, end - at);
+        at = end + 1;
+        std::string value;
+        const std::size_t eq = token.find('=');
+        if (eq != std::string::npos) { value = token.substr(eq + 1); token.resize(eq); }
+        if (token == "gloss") t.gloss = true;
+        else if (token == "gloss-pow" && !value.empty()) t.glossPow = std::clamp(std::atof(value.c_str()), 0.25, 8.0);
+        else if (token == "f0-scale" && !value.empty()) t.f0Scale = std::clamp(std::atof(value.c_str()), 0.0, 16.0);
+        else if (token == "lightscale") { t.lightScale = true; if (!value.empty()) t.lightScaleValue = std::clamp(std::atof(value.c_str()), 0.0, 1.0); }
+        else if (token == "fresnel" && !value.empty()) t.fresnel = std::clamp(std::atof(value.c_str()), 0.0, 1.0);
+        else if (token == "off") { t.lightScale = false; t.fresnel = 0.0; }
+        else if (token == "blur") { t.blur = true; if (!value.empty()) t.blurLod0 = std::clamp(std::atof(value.c_str()), 0.0, 5.0); }
+    }
+    return t;
+}
+
+const EnvTokens& envTokens() {
+    static const EnvTokens tokens = parseEnvTokens(std::getenv("R2TEX_ENV"));
+    return tokens;
+}
+
+constexpr const char* kSpecGlossPrefix = "r2tex/specgloss/";
+
+std::string specGlossName(std::uint64_t spc, std::uint64_t gls) {
+    std::ostringstream name;
+    name << kSpecGlossPrefix << std::hex << std::setfill('0') << std::setw(16) << spc << '_' << std::setw(16) << gls;
+    return name.str();
+}
+
+bool parseSpecGlossName(const std::string& name, std::uint64_t& spc, std::uint64_t& gls) {
+    if (name.rfind(kSpecGlossPrefix, 0) != 0) return false;
+    const std::string rest = name.substr(std::strlen(kSpecGlossPrefix));
+    if (rest.size() != 33 || rest[16] != '_') return false;
+    char* end = nullptr;
+    const std::string a = rest.substr(0, 16), b = rest.substr(17, 16);
+    spc = std::strtoull(a.c_str(), &end, 16);
+    if (end != a.c_str() + 16) return false;
+    gls = std::strtoull(b.c_str(), &end, 16);
+    return end == b.c_str() + 16;
+}
+
+// One BC4-style alpha block of a DXT5 block: 8 alpha values from the extremes (a0 > a1), 3 bit indices.
+void encodeDxt5AlphaBlock(const std::uint8_t (&a)[16], std::uint8_t* out) {
+    int lo = 255, hi = 0;
+    for (const std::uint8_t v : a) { lo = std::min<int>(lo, v); hi = std::max<int>(hi, v); }
+    out[0] = static_cast<std::uint8_t>(hi); out[1] = static_cast<std::uint8_t>(lo);
+    std::memset(out + 2, 0, 6);
+    if (hi == lo) return;
+    int pal[8];
+    pal[0] = hi; pal[1] = lo;
+    for (int k = 1; k <= 6; ++k) pal[k + 1] = ((7 - k) * hi + k * lo) / 7;
+    std::uint64_t bits = 0;
+    for (int i = 0; i < 16; ++i) {
+        int best = 0, bestDistance = 1 << 30;
+        for (int k = 0; k < 8; ++k) {
+            const int d = std::abs(static_cast<int>(a[i]) - pal[k]);
+            if (d < bestDistance) { bestDistance = d; best = k; }
+        }
+        bits |= static_cast<std::uint64_t>(best) << (3 * i);
+    }
+    for (int i = 0; i < 6; ++i) out[2 + i] = static_cast<std::uint8_t>(bits >> (8 * i));
+}
+
+std::uint8_t scaleLinearByte(std::uint8_t v, double scale, bool srgb) {
+    if (scale == 1.0) return v;
+    double l = v / 255.0;
+    if (srgb) l = l <= 0.04045 ? l / 12.92 : std::pow((l + 0.055) / 1.055, 2.4);
+    l = std::min(1.0, l * scale);
+    if (srgb) l = l <= 0.0031308 ? 12.92 * l : 1.055 * std::pow(l, 1.0 / 2.4) - 0.055;
+    return static_cast<std::uint8_t>(std::clamp(l * 255.0 + 0.5, 0.0, 255.0));
+}
+
+// F0 (converted `_spc`, any layout decodeVtfMip reads) with the gloss of `gls` in alpha: DXT5, full mip chain of the F0 texture.
+bool buildSpecGlossVtf(const std::shared_ptr<Database>& db, std::uint64_t spcGuid, std::uint64_t glsGuid,
+                       std::vector<std::uint8_t>& vtf, std::string& error) {
+    const EnvTokens& tk = envTokens();
+    const AssetRecord* record = findRecord(*db, spcGuid, kTxtr);
+    if (!record) { error = "unresolved specular texture GUID"; return false; }
+    std::vector<std::uint8_t> spc;
+    if (!convertTextureWithDb(db, *record, TextureOptions{}, spc, error)) return false;
+    VtfView view;
+    if (!parseVtfView(spc, view) || u16(spc.data() + 0x18) != 1) { error = "invalid source VTF for specular " + record->name; return false; }
+    UberPlane gloss;
+    if (!loadUberPlane(db, glsGuid, gloss, error)) return false;
+    const bool srgb = (u32(spc.data() + 0x14) & 0x80000u) != 0;
+    std::vector<std::vector<std::uint8_t>> mips(view.mipCount);
+    std::vector<std::uint8_t> level;
+    UberPlane scaled;
+    for (std::uint32_t m = 0; m < view.mipCount; ++m) {
+        std::uint32_t w = 0, h = 0;
+        if (!decodeVtfMip(spc, view, m, level, w, h)) { error = "specgloss: mip decode failed (VTF format " + std::to_string(view.format) + ")"; return false; }
+        const std::vector<std::uint8_t> g = resizeUberPlane(gloss, w, h);
+        const std::uint32_t bx = (w + 3) / 4, by = (h + 3) / 4;
+        mips[m].resize(static_cast<std::size_t>(bx) * by * 16);
+        for (std::uint32_t y = 0; y < by; ++y)
+            for (std::uint32_t x = 0; x < bx; ++x) {
+                std::uint8_t color[16][3], alpha[16];
+                for (std::uint32_t py = 0; py < 4; ++py)
+                    for (std::uint32_t px = 0; px < 4; ++px) {
+                        const std::uint32_t sx = std::min(w - 1, x * 4 + px), sy = std::min(h - 1, y * 4 + py);
+                        const std::size_t i = static_cast<std::size_t>(sy) * w + sx;
+                        for (int c = 0; c < 3; ++c) color[py * 4 + px][c] = scaleLinearByte(level[i * 4 + c], tk.f0Scale, srgb);
+                        alpha[py * 4 + px] = static_cast<std::uint8_t>(std::clamp(std::pow(g[i] / 255.0, tk.glossPow) * 255.0 + 0.5, 0.0, 255.0));
+                    }
+                std::uint8_t* block = &mips[m][(static_cast<std::size_t>(y) * bx + x) * 16];
+                encodeDxt5AlphaBlock(alpha, block);
+                encodeBc1Block(color, block + 8);
+            }
+    }
+    std::vector<std::uint8_t> out(spc.begin(), spc.begin() + view.dataOffset);
+    put32(out.data() + 0x14, u32(out.data() + 0x14) | 0x2000u);   // 8 bit alpha, as on the DXT5 files R1 ships
+    putI32(out.data() + 0x34, 15);
+    for (std::uint32_t m = view.mipCount; m-- > 0;) out.insert(out.end(), mips[m].begin(), mips[m].end());
+    vtf = std::move(out);
+    return true;
+}
+
 // R1 renders large single-mip textures as garbage (the mp_glitch training_r2 sky vista, a 2048x2048 DXT1 with one mip,
 // came out as rainbow arches; with a full chain the same texels render correctly). R2 stores such textures (skies, vistas)
 // with only mip 0. Expand them to an RGBA8 texture with a complete box-filtered chain.
@@ -2768,6 +3010,7 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
         (surface == "grass" || name.find("foliage") != std::string::npos));
     const char* normalsEnv = std::getenv("R2TEX_NORMALS");   // default on; "0" passes the R2 BC5/slope texture through unchanged
     const bool normalRepack = !tools && !(normalsEnv && normalsEnv[0] == '0');
+    bool glossBake = false, gloss2Bake = false;   // R2TEX_ENV=gloss (set below, read by the texture list)
     if (tools) {
         addVmtParam(out, "%compilenodraw", "1");
     } else {
@@ -2796,6 +3039,19 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
         };
         if (!flatSheet.ok) param(0, "$basetexture");
         if (!unlit) param(1, "$bumpmap");
+        // Env tokens (R2TEX_ENV; see EnvTokens): slot 3 with its gloss map becomes the DXT5 spec+gloss carrier (opt-in `gloss`).
+        const EnvTokens& envTk = envTokens();
+        const auto endsWith = [](const std::string& s, const char* suffix) {
+            const std::size_t n = std::strlen(suffix);
+            return s.size() >= n && s.compare(s.size() - n, n, suffix) == 0;
+        };
+        const bool envTokenSafe = !puddleLayers && !hsWaterBody;
+        glossBake = envTk.gloss && envTokenSafe && !unlit && !foliageNoEnv && slotGuids.size() > 3 && slotGuids[3] && slotGuids[2] &&
+            usedSlots.find(3) != usedSlots.end() && endsWith(lowerAscii(texName(2)), "_gls");
+        gloss2Bake = envTk.gloss && envTokenSafe && !unlit && !foliageNoEnv && lightmapped && slotGuids.size() > 26 && slotGuids[26] &&
+            slotGuids[25] && usedSlots.find(26) != usedSlots.end() && endsWith(lowerAscii(texName(25)), "_gls");
+        if (glossBake) usedSlots[3] = specGlossName(slotGuids[3], slotGuids[2]);
+        if (gloss2Bake) usedSlots[26] = specGlossName(slotGuids[26], slotGuids[25]);
         // Foliage (cavity bake) emits no env reflection: R2 occludes foliage specular with the cavity map, R1 has no such term and
         // the cube reflection on up-facing cards is a pale blue sheen (homestead grass B/G 1.47x R2; hue 1.10x without it).
         if (!unlit && !foliageNoEnv && usedSlots.find(3) != usedSlots.end()) {
@@ -2815,6 +3071,28 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
                 char tint[48];
                 std::snprintf(tint, sizeof(tint), "[%g %g %g]", k, k, k);
                 addVmtParam(out, "$envmaptint", tint);
+                if (envTk.lightScale && envTokenSafe && !modelEnv && lightmapped) {   // VertexLitGeneric has no $envmapLightScale
+                    char scale[32];
+                    std::snprintf(scale, sizeof(scale), "%g", envTk.lightScaleValue);
+                    addVmtParam(out, "$envmaplightscale", scale);
+                    if (usedSlots.find(26) != usedSlots.end()) addVmtParam(out, "$envmaplightscale2", scale);
+                }
+                // Stock R1 weights the Fresnel term of the env reflection by t2.a (1 on every DXT1 `_spc`): a mirror at grazing angles on every
+                // building. 0.35 = mean gloss^2 of the SUBSTATION wall, R2's own grazing maximum (maps/reflections/REFLECTIONS.md); opt-out R2TEX_ENV=off.
+                if (envTk.fresnel > 0.0 && envTokenSafe && !modelEnv && lightmapped) {
+                    char fresnel[32];
+                    std::snprintf(fresnel, sizeof(fresnel), "%g", envTk.fresnel);
+                    addVmtParam(out, "$fresnelamount", fresnel);
+                }
+                if (envTk.blur && glossBake) {
+                    // probe lod = 6.5 + log2(1 / sqrt(exponent(alpha))), exponent(0) = $shininessBlack, exponent(1) = $shininessWhite
+                    // (the engine's env lookup; at the defaults 0 / 255 the lod is mip 0 for every alpha). lod 6.5 - log2(sqrt(x)) = lod0 -> x = 2^(2 (6.5 - lod0)).
+                    char black[32], white[32];
+                    std::snprintf(black, sizeof(black), "%g", std::exp2(2.0 * (6.5 - envTk.blurLod0)));
+                    std::snprintf(white, sizeof(white), "%g", std::exp2(2.0 * (6.5 + 1.0)));
+                    addVmtParam(out, "$shininessblack", black);
+                    addVmtParam(out, "$shininesswhite", white);
+                }
             }
         }
         // R2 emissive = _ilm * emissive tint (float4 #10 rgb, black by default) * scale: "texture alone does not glow" (shaderlab/LIGHTING.md).
@@ -3059,6 +3337,8 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
         if (opaqueAlbedo && (slot == 0 || slot == 23)) texture.transform = TextureTransform::opaqueAlpha;
         if ((opacityMap || foliageCavity) && slot == 0) texture.transform = TextureTransform::opacityMerge;
         if (normalRepack && (slot == 1 || slot == 24)) texture.transform = TextureTransform::normalRgb;
+        if (glossBake && slot == 3) texture.transform = TextureTransform::specGloss;
+        if (gloss2Bake && slot == 26) texture.transform = TextureTransform::specGloss;
         material.textures.push_back(std::move(texture));
     }
     return true;
@@ -3217,6 +3497,27 @@ bool ConvertTexture(std::string_view name, std::vector<std::uint8_t>& vtf,
         ref.guid = textureGuid(original); ref.name = original; ref.transform = TextureTransform::glowRamp;
         return ConvertTexture(ref, vtf, options, error);
     }
+    if (cleaned.rfind(kSpecGlossPrefix, 0) == 0) {
+        vtf.clear();
+        std::uint64_t spc = 0, gls = 0;
+        if (!parseSpecGlossName(cleaned, spc, gls)) { if (error) *error = "invalid specgloss texture path"; return false; }
+        try {
+            auto db = getDatabase();
+            if (!db) { if (error) *error = "r2tex::Open has not succeeded"; return false; }
+            std::string why;
+            if (!buildSpecGlossVtf(db, spc, gls, vtf, why)) {
+                vtf.clear();
+                if (error) *error = "texture " + cleaned + ": " + why;
+                return false;
+            }
+            if (error) error->clear();
+            return true;
+        } catch (const std::exception& e) {
+            vtf.clear();
+            if (error) *error = e.what();
+            return false;
+        }
+    }
     if (cleaned.rfind(kOpacityMergePrefix, 0) == 0) {
         TextureRef ref;
         std::uint64_t opacityGuid = 0;
@@ -3281,6 +3582,8 @@ bool ConvertTexture(const TextureRef& texture, std::vector<std::uint8_t>& vtf,
                     const TextureOptions& options, std::string* error) {
     if (texture.transform == TextureTransform::none)
         return ConvertTexture(texture.guid, vtf, options, error);
+    if (texture.transform == TextureTransform::specGloss)
+        return ConvertTexture(std::string_view(texture.name), vtf, options, error);
     if (texture.transform == TextureTransform::glowRamp) {
         vtf.clear();
         try {
@@ -3440,6 +3743,10 @@ bool FamilyOfTexture(std::string_view name, std::uint32_t& family) {
             const std::string original = cleaned.substr(std::strlen(kGlowRampPrefix));
             if (!validAssetName(original)) return false;
             guid = textureGuid(original);
+        } else if (cleaned.rfind(kSpecGlossPrefix, 0) == 0) {
+            std::uint64_t spc = 0, gls = 0;
+            if (!parseSpecGlossName(cleaned, spc, gls)) return false;
+            guid = spc;
         } else if (cleaned.rfind(kOpacityMergePrefix, 0) == 0) {
             std::uint64_t opacityGuid = 0;
             if (!parseOpacityMergeName(cleaned, guid, opacityGuid)) return false;
@@ -3531,6 +3838,19 @@ bool ListMapMaterials(const std::uint8_t* bspBytes, std::size_t size,
         names.clear();
         return false;
     }
+}
+
+// Env tokens change converted VMTs and textures: the suffix the provider appends to its converted-cache directory name
+// ("" while R2TEX_ENV is empty, so every existing cache stays valid; otherwise "-env1-" and the token string, sanitised).
+const char* EnvCacheTag() {
+    static const std::string tag = []() {
+        const char* e = std::getenv("R2TEX_ENV");
+        if (!e || !e[0]) return std::string();
+        std::string s = "-env1-";
+        for (const char* p = e; *p; ++p) s += (std::isalnum(static_cast<unsigned char>(*p)) || *p == '.' || *p == '-') ? *p : '_';
+        return s;
+    }();
+    return tag.c_str();
 }
 
 } // namespace r2tex
