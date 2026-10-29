@@ -292,16 +292,26 @@ if ($axt -match '(?m)^serverDLCMapGroups 15\r?\n') {
 Set-ComboCfgBlock (Join-Path $Core 'cfg\autoexec_delta.cfg') ("// ---- r2-combo playtest defaults (this root only)`n// Slide + grapple are enabled automatically on converted R2 maps (delta_pilot_movement_auto_r2 1; stock maps: delta_pilot_movement_auto_r1 1). Grapple key: H (+scriptCommand3); press again to cancel.`nbind `"H`" `"+scriptCommand3`"`n")
 Set-ComboCfgBlock (Join-Path $Core 'cfg\config_default_pc.cfg') ("// ---- r2-combo playtest defaults (this root only)`n// Fresh profiles: grapple on MOUSE4 (+scriptCommand3), also on H via autoexec_delta.cfg.`nbind `"MOUSE4`" `"+scriptCommand3`"`n")
 
-# ---- Frontier Defense overlay (playtest only; GENERATED from the player's own Titanfall 2 data, never committed):
-# loose CORE files from the FD package, copied (unlink + copy) into this root only.
+# ---- Frontier Defense overlay (playtest only; GENERATED from the player's own Titanfall 2 data, never committed).
+# New files (adapter, generated map scripts, minimap materials) are copied (unlink + copy) into this root only. CORE files that the
+# pinned CORE already tracks (_consts.nut, _burncards.nut, cl_*.nut, ...) are NOT replaced by the package copies (those come from an
+# older CORE base and drop the Turbo Titan constants): they are reset to the pin and FdPlayers' core-scripts.patch is applied instead.
 $FdOverlay = 'C:\Users\r3muxd\tmp\r2port\maps\fd\package\overlay\r1delta'
+$FdPatch = 'C:\Users\r3muxd\tmp\r2port\maps\fd\players\core-scripts.patch'
 if (Test-Path -LiteralPath $FdOverlay) {
-    $nfd = 0
+    $nfd = 0; $tracked = @()
     foreach ($f in Get-ChildItem -LiteralPath $FdOverlay -Recurse -File) {
         $rel = $f.FullName.Substring($FdOverlay.Length + 1)
+        $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+        & git -C $Core ls-files --error-unmatch ($rel.Replace('\', '/')) *> $null
+        $isTracked = ($LASTEXITCODE -eq 0)
+        $ErrorActionPreference = $prev
+        if ($isTracked) { $tracked += $rel.Replace('\', '/'); continue }
         [ComboNative]::Replace($f.FullName, (Join-Path $Core $rel)); $nfd++
     }
-    Say "$nfd Frontier Defense overlay files staged"
+    if ($tracked.Count) { GitC $Core (@('checkout', '--') + $tracked) | Out-Null }
+    GitC $Core @('apply', '--ignore-whitespace', '--whitespace=nowarn', $FdPatch) | Out-Null
+    Say "$nfd new Frontier Defense overlay files staged; $($tracked.Count) tracked CORE files patched via core-scripts.patch"
 }
 
 # ---------------------------------------------------------------- report
