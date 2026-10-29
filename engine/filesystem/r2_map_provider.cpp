@@ -13,6 +13,7 @@
 #include "engine/r2port/bspdown/bspdown.hpp"
 #include "engine/r2port/entity_rewrite.h"
 #include "engine/r2port/trigger_brush.h"
+#include "engine/filesystem/r2_overview_provider.h"
 #include "engine/filesystem/r2_particle_provider.h"
 #include "p2p/p2p_identity.h"
 
@@ -1990,6 +1991,7 @@ void InstallR2MapProvider()
         RegisterR1MapPackMaterialProvider();
         RegisterR2ModelProvider();
         RegisterR2ParticleProvider();
+        RegisterR2OverviewProvider();
         InstallR2MapPatchSource();
         postfx::RegisterMaterialProvider();
         auto provider = std::make_shared<R2MapProvider>();

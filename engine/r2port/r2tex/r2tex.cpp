@@ -601,6 +601,10 @@ struct Database {
     std::size_t familyBytes = 0;
 
     std::unordered_map<std::uint32_t, std::shared_ptr<std::mutex>> familyLoadLocks;
+    // Lower-case, slash-normalized asset name -> guid, built on first use, for texture records whose guid is
+    // not hash("texture/<name>.rpak") (the per-map overview images "overviews\<map>").
+    std::once_flag textureNamesOnce;
+    std::unordered_map<std::string, std::uint64_t> textureNames;
 
     bool isFamilyResident(std::uint32_t id) {
         std::lock_guard<std::mutex> lock(familyMutex);
@@ -993,6 +997,24 @@ std::shared_ptr<Database> getDatabase() {
 const AssetRecord* findRecord(const Database& db, std::uint64_t guid, std::uint32_t type) {
     auto it = db.assets.find(AssetKey{guid, type});
     return it == db.assets.end() ? nullptr : &it->second;
+}
+
+const AssetRecord* findTextureByName(Database& db, const std::string& cleaned) {
+    std::call_once(db.textureNamesOnce, [&db]() {
+        for (const auto& pair : db.assets) {
+            const AssetRecord& record = pair.second;
+            if (record.type != kTxtr || record.name.empty()) continue;
+            db.textureNames.emplace(cleanAssetName(record.name, true), record.guid);
+        }
+    });
+    const auto it = db.textureNames.find(cleaned);
+    return it == db.textureNames.end() ? nullptr : findRecord(db, it->second, kTxtr);
+}
+
+// The record a plain texture name resolves to: the guid hash first, the asset's own name second.
+const AssetRecord* findTextureRecord(Database& db, const std::string& cleaned) {
+    if (const AssetRecord* record = findRecord(db, textureGuid(cleaned), kTxtr)) return record;
+    return findTextureByName(db, cleaned);
 }
 
 bool readAssetHeader(const Database& db, const AssetRecord& record, const std::shared_ptr<Family>& family,
@@ -3221,12 +3243,34 @@ bool ConvertTexture(std::string_view name, std::vector<std::uint8_t>& vtf,
         }
         vtf.clear(); if (error) *error = "invalid layer mask texture path"; return false;
     }
-    const std::uint64_t guid = textureGuid(cleaned);
-    if (!ConvertTexture(guid, vtf, options, error)) {
-        if (error && !error->empty()) *error = "texture " + cleaned + ": " + *error;
+    // Overview images ("overviews/<map>", the R1 minimap texture) are drawn by R1's MiniMap material proxy as a
+    // 0..1 texture whose coordinates run past the map edge, so they clamp (R1's own overview VTFs carry CLAMPS|CLAMPT).
+    constexpr const char* kOverviewPrefix = "overviews/";
+    constexpr std::uint32_t kVtfClampS = 0x4, kVtfClampT = 0x8;
+    vtf.clear();
+    try {
+        auto db = getDatabase();
+        if (!db) { if (error) *error = "r2tex::Open has not succeeded"; return false; }
+        const AssetRecord* record = findTextureRecord(*db, cleaned);
+        std::string why = "unresolved texture GUID";
+        if (!record || !convertTextureWithDb(db, *record, options, vtf, why)) {
+            vtf.clear();
+            if (error) *error = "texture " + cleaned + ": " + why;
+            return false;
+        }
+        if (cleaned.rfind(kOverviewPrefix, 0) == 0 && vtf.size() >= 0x18) {
+            std::uint32_t flags = 0;
+            std::memcpy(&flags, vtf.data() + 0x14, sizeof(flags));
+            flags |= kVtfClampS | kVtfClampT;
+            std::memcpy(vtf.data() + 0x14, &flags, sizeof(flags));
+        }
+        if (error) error->clear();
+        return true;
+    } catch (const std::exception& e) {
+        vtf.clear();
+        if (error) *error = e.what();
         return false;
     }
-    return true;
 }
 
 bool ConvertTexture(const TextureRef& texture, std::vector<std::uint8_t>& vtf, std::string* error) {
@@ -3407,7 +3451,9 @@ bool FamilyOfTexture(std::string_view name, std::uint32_t& family) {
         } else {
             guid = textureGuid(cleaned);
         }
-        if (const AssetRecord* record = findRecord(*db, guid, kTxtr)) {
+        const AssetRecord* record = findRecord(*db, guid, kTxtr);
+        if (!record) record = findTextureByName(*db, cleaned);
+        if (record) {
             family = db->paks[record->pakIndex].family;
             return true;
         }

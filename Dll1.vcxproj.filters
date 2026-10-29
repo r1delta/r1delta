@@ -206,6 +206,9 @@
     <ClInclude Include="engine\r2port\modelconv\modelconv.hpp">
       <Filter>engine\r2port\modelconv</Filter>
     </ClInclude>
+    <ClInclude Include="engine\filesystem\r2_overview_provider.h">
+      <Filter>engine\filesystem</Filter>
+    </ClInclude>
     <ClInclude Include="engine\filesystem\r2_particle_provider.h">
       <Filter>engine\filesystem</Filter>
     </ClInclude>
@@ -901,6 +904,9 @@
     </ClCompile>
     <ClCompile Include="engine\r2port\modelconv\modelconv.cpp">
       <Filter>engine\r2port\modelconv</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\filesystem\r2_overview_provider.cpp">
+      <Filter>engine\filesystem</Filter>
     </ClCompile>
     <ClCompile Include="engine\filesystem\r2_particle_provider.cpp">
       <Filter>engine\filesystem</Filter>

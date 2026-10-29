@@ -183,7 +183,7 @@ bool IsMaterialOrTextureRequestPath(std::string_view path)
 
 // Bump when the r2tex library or the VMT/VTF output it produces changes: converted files are
 // persisted per R2 install fingerprint and revision.
-constexpr std::string_view kConvertedCacheRevision = "30";
+constexpr std::string_view kConvertedCacheRevision = "31";
 
 bool ReadWholeFile(const std::filesystem::path& path, std::vector<std::uint8_t>& bytes)
 {
@@ -828,6 +828,13 @@ private:
                 if (QueuePrefetchPath(std::move(path)))
                     ++queued;
             }
+            // The minimap image R1 draws (materials/overviews/<map>.vtf, named by the overview provider's
+            // materials/vgui/minimaps/<map>.vmt) is the R2 rpak texture "overviews\<map>", not a BSP material.
+            std::string overview = "materials/overviews/";
+            overview.append(item.mapName);
+            overview.append(".vtf");
+            if (QueuePrefetchPath(std::move(overview)))
+                ++queued;
             char message[768]{};
             _snprintf_s(message, sizeof(message), _TRUNCATE,
                 "R1Delta: R2 texture prefetch queued map=%s material-names=%zu queued-vmt=%zu\n",
