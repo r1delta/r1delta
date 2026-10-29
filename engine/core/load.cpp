@@ -55,6 +55,7 @@
 #include "engine/r2port/wallrun/r2_wallrun.h"
 #include "r2_material_provider.h"
 #include "legacy_ds_sound_tables.h"
+#include "r1o_sound_tables.h"
 #include "soundscript_parity.h"
 #include "dlc_ownership.h"
 #include "script_sync_parity.h"
@@ -9973,6 +9974,10 @@ void __stdcall LoaderNotificationCallback(
 		if (IsR1ODedicatedServer()) {
 			G_engine = G_engine_r1o;
 			InitVStdLibICVarFactoryHook();
+			// Room for the generated R2 sound aliases (same list and indexes as an R2 client, whose alias index is on the wire), tail hidden from
+			// the sound-script CRC and the parity check. Before the first sound script load; exact binary only.
+			if (InstallR1OSoundTables(G_engine_r1o))
+				r2audio::SetAliasCapacityOk(true);
 			InitR1ODedicatedServerAPIHook(G_engine_r1o);
 			InstallR1ODedicatedSecurityHooks(G_engine_r1o);
 			InstallR1ORemoteAccessHooks(G_engine_r1o);

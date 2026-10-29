@@ -625,6 +625,12 @@
     <ClInclude Include="engine\core\legacy_ds_sound_tables.h">
       <Filter>engine\core</Filter>
     </ClInclude>
+    <ClInclude Include="engine\core\r1o_sound_tables.h">
+      <Filter>engine\core</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\core\r1o_sound_tables_profile.h">
+      <Filter>engine\core</Filter>
+    </ClInclude>
     <ClInclude Include="shared\squirrel.h">
       <Filter>shared</Filter>
     </ClInclude>
@@ -1271,6 +1277,9 @@
       <Filter>shared</Filter>
     </ClCompile>
     <ClCompile Include="engine\core\legacy_ds_sound_tables.cpp">
+      <Filter>engine\core</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\core\r1o_sound_tables.cpp">
       <Filter>engine\core</Filter>
     </ClCompile>
     <ClCompile Include="shared\squirrel.cpp">

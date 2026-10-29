@@ -37,6 +37,9 @@ struct SoundScriptUploadChunk {
 void SoundScriptParity_RegisterClient();
 // All non-R1O modes: registers `delta_soundtable_info` (alias count, hidden R2 tail, CRC, fingerprint).
 void SoundScriptParity_RegisterInfoCommand();
+// Logs the local table's compared alias count, hidden R2 tail, CRC and fingerprint (same line as delta_soundtable_info), for modes without
+// a console command (R1O fake dedicated).
+void SoundScriptParity_LogLocalTable();
 // Before the connect packet: publish the fingerprint in the marker convar.
 void SoundScriptParity_ClientConnecting();
 // NET_SetConVar writer: when the outgoing message carries the marker, returns

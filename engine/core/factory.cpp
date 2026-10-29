@@ -65,6 +65,7 @@
 #include "engine/r2port/shaders/r2_shader_cache.h"
 #include "script_error_telemetry.h"
 #include "soundscript_parity.h"
+#include "r1o_sound_tables.h"
 #include "script_sync_parity.h"
 #include "bitbuf.h"
 #include "defs.h"
@@ -15864,7 +15865,10 @@ static char* __fastcall R1OStringTableLookup(const char* name)
 		return nullptr;
 
 	int* const countPtr = reinterpret_cast<int*>(base + 0x18836F4);
-	uintptr_t* const entries = reinterpret_cast<uintptr_t*>(base + 0x1883710);
+	// The expansion (r1o_sound_tables.cpp) moves the name and alias tables; the link-time addresses are in use otherwise.
+	const void* const relocatedNames = GetR1OSoundNameEntries();
+	uintptr_t* const entries = relocatedNames ? reinterpret_cast<uintptr_t*>(const_cast<void*>(relocatedNames))
+		: reinterpret_cast<uintptr_t*>(base + 0x1883710);
 	if (!IsReadableRange(countPtr, sizeof(*countPtr))) {
 		return nullptr;
 	}
@@ -15909,7 +15913,10 @@ static char* __fastcall R1OStringTableLookup(const char* name)
 		if (resultIndex < 0 || resultIndex > 65536)
 			return nullptr;
 
-		char* const result = reinterpret_cast<char*>(base + 0x6F9110 + static_cast<uintptr_t>(resultIndex) * 512);
+		const void* const relocatedAliases = GetR1OSoundAliasRecords();
+		char* const aliasBase = relocatedAliases ? static_cast<char*>(const_cast<void*>(relocatedAliases))
+			: reinterpret_cast<char*>(base + 0x6F9110);
+		char* const result = aliasBase + static_cast<uintptr_t>(resultIndex) * 512;
 		return IsReadableRange(result, 1) ? result : nullptr;
 	}
 
@@ -19237,6 +19244,9 @@ __int64 __fastcall R1OEngine_PostFilesystemInit()
 		Warning(
 			"R1Delta: R1O fake dedicated server failed to load sound aliases from "
 			"scripts/game_sounds_manifest.txt; server-emitted scripted sounds will be missing\n");
+	}
+	else if (aliasesAfter > 0) {
+		SoundScriptParity_LogLocalTable();
 	}
 
 	return result;

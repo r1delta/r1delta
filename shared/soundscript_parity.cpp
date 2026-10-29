@@ -6,6 +6,7 @@
 #include "parity_common.h"
 #include "persistentdata.h"
 #include "legacy_ds_sound_tables.h"
+#include "r1o_sound_tables.h"
 #include "audio_cache.h"
 #include "apex_sound_capacity.h"
 #include <algorithm>
@@ -66,9 +67,18 @@ bool ReadLayout(const TableLayout& layout, std::uintptr_t base, LocalTable& out)
 // The table whose indices this process puts on, or reads off, the wire.
 bool ReadLocalTable(LocalTable& out) {
 	switch (GetR1DeltaEngineMode()) {
-	case R1DeltaEngineMode::R1OFakeDedicated2017:
-		return ReadLayout(kEngineR1OLayout,
-			G_engine_r1o ? G_engine_r1o : reinterpret_cast<std::uintptr_t>(GetModuleHandleA("engine_r1o.dll")), out);
+	case R1DeltaEngineMode::R1OFakeDedicated2017: {
+		if (!ReadLayout(kEngineR1OLayout,
+				G_engine_r1o ? G_engine_r1o : reinterpret_cast<std::uintptr_t>(GetModuleHandleA("engine_r1o.dll")), out))
+			return false;
+		// With the expanded tables (r1o_sound_tables.cpp) the records no longer live at the link-time address.
+		if (const void* relocated = GetR1OSoundAliasRecords())
+			out.records = static_cast<const unsigned char*>(relocated);
+		// The generated R2 aliases trail the table and are excluded: they exist only when the R2 install does.
+		if (const int hidden = static_cast<int>(R1OHiddenTrailingAliases()); hidden > 0 && hidden < out.count)
+			out.count -= hidden;
+		return true;
+	}
 	case R1DeltaEngineMode::Dedicated2014:
 		if (!ReadLayout(kEngineDsLayout, G_engine_ds, out))
 			return false;
@@ -335,18 +345,19 @@ bool SoundScriptUpload::Accept(const char* name, const char* value) {
 	return true;
 }
 
-void SoundTableInfoCommand(const CCommand&) {
+void PrintSoundTableInfo(const char* label) {
 	LocalTable table;
 	Fingerprint local;
 	std::uint32_t buckets[kSoundScriptBuckets];
 	if (!ReadLocalTable(table) || !Summarize(table, local, buckets)) {
-		Msg("delta_soundtable_info: the alias table is not readable in this process\n");
+		Msg("%s: the alias table is not readable in this process\n", label);
 		return;
 	}
 	unsigned hidden = 0;
 	switch (GetR1DeltaEngineMode()) {
 	case R1DeltaEngineMode::Client2015: hidden = R1AudioHiddenTrailingAliases(); break;
 	case R1DeltaEngineMode::Dedicated2014: hidden = LegacyDSHiddenTrailingAliases(); break;
+	case R1DeltaEngineMode::R1OFakeDedicated2017: hidden = R1OHiddenTrailingAliases(); break;
 	default: break;
 	}
 	// Hash of the hidden tail (index -> name, same recipe as the parity mapping hash): equal values on two processes mean the generated
@@ -362,8 +373,16 @@ void SoundTableInfoCommand(const CCommand&) {
 	}
 	char fingerprint[64];
 	FormatFingerprint(local, fingerprint, sizeof(fingerprint));
-	Msg("delta_soundtable_info: compared aliases %d, hidden R2 tail %u (tail hash %08x), engine crc %08x, fingerprint %s\n",
-		local.aliases, hidden, tailHash, local.engineCrc, fingerprint);
+	Msg("%s: compared aliases %d, hidden R2 tail %u (tail hash %08x), engine crc %08x, fingerprint %s\n",
+		label, local.aliases, hidden, tailHash, local.engineCrc, fingerprint);
+}
+
+void SoundTableInfoCommand(const CCommand&) {
+	PrintSoundTableInfo("delta_soundtable_info");
+}
+
+void SoundScriptParity_LogLocalTable() {
+	PrintSoundTableInfo("delta_soundtable_info (startup)");
 }
 
 void SoundScriptParity_RegisterInfoCommand() {

@@ -401,6 +401,8 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="shared\dlc_ownership.h" />
     <ClInclude Include="shared\dlc_ownership_logic.h" />
     <ClInclude Include="engine\core\legacy_ds_sound_tables.h" />
+    <ClInclude Include="engine\core\r1o_sound_tables.h" />
+    <ClInclude Include="engine\core\r1o_sound_tables_profile.h" />
     <ClInclude Include="client\ui_script_failure.h" />
     <ClInclude Include="server\physics\physics.h" />
     <ClInclude Include="server\server_usercmd.h" />
@@ -660,6 +662,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="shared\parity_common.cpp" />
     <ClCompile Include="shared\dlc_ownership.cpp" />
     <ClCompile Include="engine\core\legacy_ds_sound_tables.cpp" />
+    <ClCompile Include="engine\core\r1o_sound_tables.cpp" />
     <ClCompile Include="client\ui_script_failure.cpp" />
     <ClCompile Include="client\predictionerror.cpp" />
     <ClCompile Include="engine\security_fixes.cpp">
