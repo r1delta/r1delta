@@ -1,0 +1,40 @@
+From 627e1acd8f96b111f4b63ff065cd0bd6c468d617 Mon Sep 17 00:00:00 2001
+From: dr3murr <r3muxd@gmail.com>
+Date: Thu, 29 Oct 2026 16:24:36 -0400
+Subject: [PATCH 4/4] Add scripts/weapon_manifest.txt for the weapons without a
+ native class
+
+Lists mp_weapon_sr_valkyrie, mp_weapon_twinb_shotgun, mp_titanweapon_minigun,
+mp_titanweapon_charge_cannon and mp_weapon_throwing_knife so the native
+module registers those classes on client and server instead of CORE reusing
+the engine's mp_weapon_mega slots.
+---
+ scripts/weapon_manifest.txt | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+ create mode 100644 scripts/weapon_manifest.txt
+
+diff --git a/scripts/weapon_manifest.txt b/scripts/weapon_manifest.txt
+new file mode 100644
+index 0000000..26cc181
+--- /dev/null
++++ b/scripts/weapon_manifest.txt
+@@ -0,0 +1,16 @@
++// Weapons that R1Delta registers at startup on top of the classes built into
++// the R1 client and server. The engine has no native class for these, so each
++// "file" entry below makes the native module add a weapon class of that name
++// on both client and server. The definition of each weapon is read from
++// scripts/weapons/<name>.txt and its scripts from scripts/vscripts/weapons/.
++//
++// Entries are weapon class names, not paths: no folder, no extension.
++// Do not list weapons the engine already registers.
++weaponscripts
++{
++	"file"	"mp_weapon_sr_valkyrie"
++	"file"	"mp_weapon_twinb_shotgun"
++	"file"	"mp_titanweapon_minigun"
++	"file"	"mp_titanweapon_charge_cannon"
++	"file"	"mp_weapon_throwing_knife"
++}
+-- 
+2.52.0.windows.1
+

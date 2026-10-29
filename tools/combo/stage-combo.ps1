@@ -272,6 +272,15 @@ $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
 $v30Done = ($LASTEXITCODE -eq 0)
 $ErrorActionPreference = $prev
 if (-not $v30Done) { GitC $Core @('apply', '--ignore-whitespace', '--whitespace=nowarn', $v30Core) | Out-Null; Say 'applied core-v30-serverbrowser.patch' }
+# DynWeapons2: the dynamic weapon manifest CORE patches (renamed weapon definitions, pdata names, scripts/weapon_manifest.txt). They go together
+# with the dynamic weapon code; applied once each (reverse check), in order.
+foreach ($dw in @(Get-ChildItem -LiteralPath (Join-Path $CodeRoot 'tools\combo\dynweapons') -Filter '*.patch' | Sort-Object Name)) {
+    $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    & git -C $Core apply --ignore-whitespace --whitespace=nowarn -R --check $dw.FullName 2>$null
+    $dwDone = ($LASTEXITCODE -eq 0)
+    $ErrorActionPreference = $prev
+    if (-not $dwDone) { GitC $Core @('apply', '--ignore-whitespace', '--whitespace=nowarn', $dw.FullName) | Out-Null; Say "applied dynweapons $($dw.Name)" }
+}
 # R2 map sounds (AudioPort CORE-0001): the LAST precache_file of the manifest is the generated, in-memory scripts/r2port_sounds.txt.
 # Idempotent; the manifest is re-restored from the pin by -Refresh above, so this runs every staging.
 $mf = Join-Path $Core 'scripts\game_sounds_manifest.txt'

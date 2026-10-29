@@ -1,0 +1,53 @@
+From 6b2e9d206d4cd4bf3568afbacdc0be11205b3fd8 Mon Sep 17 00:00:00 2001
+From: dr3murr <r3muxd@gmail.com>
+Date: Thu, 29 Oct 2026 16:23:58 -0400
+Subject: [PATCH 1/4] Rename the mega weapon definitions to their real weapon
+ names
+
+mp_weapon_mega1..5 were stand-ins for weapons the R1 client had no class
+for. Their definition files now carry the real weapon names:
+
+  mp_weapon_mega1 -> mp_weapon_sr_valkyrie
+  mp_weapon_mega2 -> mp_weapon_twinb_shotgun
+  mp_weapon_mega3 -> mp_titanweapon_minigun
+  mp_weapon_mega4 -> mp_titanweapon_charge_cannon
+  mp_weapon_mega5 -> mp_weapon_throwing_knife
+
+File contents are unchanged; the script references follow in the next
+commits.
+---
+ .../{mp_weapon_mega4.txt => mp_titanweapon_charge_cannon.txt}     | 0
+ .../weapons/{mp_weapon_mega3.txt => mp_titanweapon_minigun.txt}   | 0
+ .../weapons/{mp_weapon_mega1.txt => mp_weapon_sr_valkyrie.txt}    | 0
+ .../weapons/{mp_weapon_mega5.txt => mp_weapon_throwing_knife.txt} | 0
+ .../weapons/{mp_weapon_mega2.txt => mp_weapon_twinb_shotgun.txt}  | 0
+ 5 files changed, 0 insertions(+), 0 deletions(-)
+ rename scripts/weapons/{mp_weapon_mega4.txt => mp_titanweapon_charge_cannon.txt} (100%)
+ rename scripts/weapons/{mp_weapon_mega3.txt => mp_titanweapon_minigun.txt} (100%)
+ rename scripts/weapons/{mp_weapon_mega1.txt => mp_weapon_sr_valkyrie.txt} (100%)
+ rename scripts/weapons/{mp_weapon_mega5.txt => mp_weapon_throwing_knife.txt} (100%)
+ rename scripts/weapons/{mp_weapon_mega2.txt => mp_weapon_twinb_shotgun.txt} (100%)
+
+diff --git a/scripts/weapons/mp_weapon_mega4.txt b/scripts/weapons/mp_titanweapon_charge_cannon.txt
+similarity index 100%
+rename from scripts/weapons/mp_weapon_mega4.txt
+rename to scripts/weapons/mp_titanweapon_charge_cannon.txt
+diff --git a/scripts/weapons/mp_weapon_mega3.txt b/scripts/weapons/mp_titanweapon_minigun.txt
+similarity index 100%
+rename from scripts/weapons/mp_weapon_mega3.txt
+rename to scripts/weapons/mp_titanweapon_minigun.txt
+diff --git a/scripts/weapons/mp_weapon_mega1.txt b/scripts/weapons/mp_weapon_sr_valkyrie.txt
+similarity index 100%
+rename from scripts/weapons/mp_weapon_mega1.txt
+rename to scripts/weapons/mp_weapon_sr_valkyrie.txt
+diff --git a/scripts/weapons/mp_weapon_mega5.txt b/scripts/weapons/mp_weapon_throwing_knife.txt
+similarity index 100%
+rename from scripts/weapons/mp_weapon_mega5.txt
+rename to scripts/weapons/mp_weapon_throwing_knife.txt
+diff --git a/scripts/weapons/mp_weapon_mega2.txt b/scripts/weapons/mp_weapon_twinb_shotgun.txt
+similarity index 100%
+rename from scripts/weapons/mp_weapon_mega2.txt
+rename to scripts/weapons/mp_weapon_twinb_shotgun.txt
+-- 
+2.52.0.windows.1
+

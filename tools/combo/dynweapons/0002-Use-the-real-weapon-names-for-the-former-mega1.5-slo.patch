@@ -1,0 +1,493 @@
+From bbbdb7eb1e40f7ad1bc49147955579e1dabdcdeb Mon Sep 17 00:00:00 2001
+From: dr3murr <r3muxd@gmail.com>
+Date: Thu, 29 Oct 2026 16:24:10 -0400
+Subject: [PATCH 2/4] Use the real weapon names for the former mega1..5 slots
+ in scripts
+
+Renames every script reference to mp_weapon_mega1..5 (damage source enum
+entries in place so the numeric values stay put, damageSourceStrings,
+WEAPON_*_NAME consts, item/attachment/mod tables, unlock levels,
+challenges, burn card escalation, titan ability and HUD switches, stats,
+grunt loadouts, gun game, the charge cannon projectile and the throwing
+knife). The engine resolves the damage source by weapon class name, so the
+enum keys must match the class names.
+
+Left alone on purpose: mp_weapon_mega6..17 and mp_weapon_mega_turret (stock
+semantics), and the commented level.megaMaps table in _base_gametype.nut
+(unrelated titan-weapon mapping for the unused mega6..16 slots).
+
+The developer-only precache loop now starts at mega6 because mega1..5 no
+longer have weapon definitions.
+---
+ scripts/vscripts/_burncards_shared.nut        |  8 ++--
+ scripts/vscripts/_challenges_content.nut      |  8 ++--
+ scripts/vscripts/_consts.nut                  | 10 ++---
+ scripts/vscripts/_damage_types.nut            | 20 ++++-----
+ scripts/vscripts/_items.nut                   | 44 +++++++++----------
+ scripts/vscripts/_player_view_shared.nut      |  4 +-
+ scripts/vscripts/_titan_shared.nut            |  2 +-
+ scripts/vscripts/client/cl_main_hud.nut       |  4 +-
+ scripts/vscripts/mp/_ai_soldiers.nut          |  8 ++--
+ scripts/vscripts/mp/_coobj_towerdefense.nut   |  2 +-
+ scripts/vscripts/mp/_coop_titans.nut          |  2 +-
+ .../mp/_gamemode_burn_card_escalation.nut     |  4 +-
+ scripts/vscripts/mp/_gamemode_gun_game.nut    |  2 +-
+ scripts/vscripts/mp/_stats.nut                |  2 +-
+ scripts/vscripts/mp/_titan_health.nut         |  2 +-
+ scripts/vscripts/mp/class_titan.nut           |  2 +-
+ scripts/vscripts/weapons/_grenade.nut         |  2 +-
+ ...p_projectile_titanweapon_charge_cannon.nut |  2 +-
+ .../weapons/mp_weapon_throwing_knife.nut      |  2 +-
+ 19 files changed, 65 insertions(+), 65 deletions(-)
+
+diff --git a/scripts/vscripts/_burncards_shared.nut b/scripts/vscripts/_burncards_shared.nut
+index f76d036..7024393 100644
+--- a/scripts/vscripts/_burncards_shared.nut
++++ b/scripts/vscripts/_burncards_shared.nut
+@@ -361,11 +361,11 @@ function CreateAllBurnCards()
+ 	// "burncards/amped_titan_shotgun"
+ 	// "burncards/amped_thunderbolt"
+ 	// "burncards/amped_charge_cannon"
+-	CreateBurnCardWeapon( "bc_valkyrie_m2",						BURNCARD_COMMON, 	BCGROUP_WEAPON, 	CT_WEAPON	| CT_SNIPER							, "burncards/burncard_art_62",			BC_NEXTDEATH, 		"#BC_VALKYRIE_M2"				, "#BC_VALKYRIE_M2_DESC"			, "#BC_VALKYRIE_M2_FLAVOR"				, "#BC_FLAVOR_VAUGHN", 		"mp_weapon_mega1",			"burn_mod_valkyrie",			"PRIMARY"			)
+-	CreateBurnCardWeapon( "bc_twinb_m2",						BURNCARD_COMMON, 	BCGROUP_WEAPON, 	CT_WEAPON	| CT_SMG							, "burncards/burncard_art_62",				BC_NEXTDEATH, 		"#BC_TWINB_SHOTGUN_M2"			, "#BC_TWINB_SHOTGUN_M2_DESC"		, "#BC_TWINB_SHOTGUN_M2_FLAVOR"			, "#BC_FLAVOR_DANFORTH",	"mp_weapon_mega2",			"burn_mod_twinb",				"SIDEARM"			)
++	CreateBurnCardWeapon( "bc_valkyrie_m2",						BURNCARD_COMMON, 	BCGROUP_WEAPON, 	CT_WEAPON	| CT_SNIPER							, "burncards/burncard_art_62",			BC_NEXTDEATH, 		"#BC_VALKYRIE_M2"				, "#BC_VALKYRIE_M2_DESC"			, "#BC_VALKYRIE_M2_FLAVOR"				, "#BC_FLAVOR_VAUGHN", 		"mp_weapon_sr_valkyrie",			"burn_mod_valkyrie",			"PRIMARY"			)
++	CreateBurnCardWeapon( "bc_twinb_m2",						BURNCARD_COMMON, 	BCGROUP_WEAPON, 	CT_WEAPON	| CT_SMG							, "burncards/burncard_art_62",				BC_NEXTDEATH, 		"#BC_TWINB_SHOTGUN_M2"			, "#BC_TWINB_SHOTGUN_M2_DESC"		, "#BC_TWINB_SHOTGUN_M2_FLAVOR"			, "#BC_FLAVOR_DANFORTH",	"mp_weapon_twinb_shotgun",			"burn_mod_twinb",				"SIDEARM"			)
+ 	//CreateBurnCardWeapon( "bc_titan_shotgun_m2",				BURNCARD_RARE, 		BCGROUP_WEAPON, 	CT_TITAN_WPN	| CT_PRIMARY					, "burncards/burncard_art_62", 		BC_NEXTTITANDROP, 	"#BC_TITAN_SHOTGUN_M2"			, "#BC_TITAN_SHOTGUN_M2_DESC"		, "#BC_TITAN_SHOTGUN_M2_FLAVOR"			, "#BC_FLAVOR_WONYEON",		"mp_titanweapon_shotgun",	"burn_mod_titan_shotgun", 		"TITAN_PRIMARY"		)
+-	//CreateBurnCardWeapon( "bc_thunderbolt_m2",					BURNCARD_RARE, 		BCGROUP_WEAPON, 	CT_TITAN_WPN	| CT_PRIMARY					, "burncards/burncard_art_62", 		BC_NEXTTITANDROP, 	"#BC_TITAN_MINIGUN_M2"			, "#BC_TITAN_MINIGUN_M2_DESC"		, "#BC_TITAN_MINIGUN_M2_FLAVOR"			, "#BC_FLAVOR_SKYFISH",		"mp_weapon_mega3",			"burn_mod_thunderbolt", 		"TITAN_PRIMARY"		)
+-	CreateBurnCardWeapon( "bc_titan_charge_cannon_m2",			BURNCARD_RARE, 		BCGROUP_WEAPON, 	CT_TITAN_WPN	| CT_TACTICAL					, "burncards/burncard_art_62", 		BC_NEXTTITANDROP, 	"#BC_TITAN_CHARGE_CANNON_M2"	, "#BC_TITAN_CHARGE_CANNON_M2_DESC"	, "#BC_TITAN_CHARGE_CANNON_M2_FLAVOR"	, "#BC_FLAVOR_USER_MANUAL",	"mp_weapon_mega4",			"burn_mod_titan_charge_cannon",	"TITAN_OFFHAND1"	)
++	//CreateBurnCardWeapon( "bc_thunderbolt_m2",					BURNCARD_RARE, 		BCGROUP_WEAPON, 	CT_TITAN_WPN	| CT_PRIMARY					, "burncards/burncard_art_62", 		BC_NEXTTITANDROP, 	"#BC_TITAN_MINIGUN_M2"			, "#BC_TITAN_MINIGUN_M2_DESC"		, "#BC_TITAN_MINIGUN_M2_FLAVOR"			, "#BC_FLAVOR_SKYFISH",		"mp_titanweapon_minigun",			"burn_mod_thunderbolt", 		"TITAN_PRIMARY"		)
++	CreateBurnCardWeapon( "bc_titan_charge_cannon_m2",			BURNCARD_RARE, 		BCGROUP_WEAPON, 	CT_TITAN_WPN	| CT_TACTICAL					, "burncards/burncard_art_62", 		BC_NEXTTITANDROP, 	"#BC_TITAN_CHARGE_CANNON_M2"	, "#BC_TITAN_CHARGE_CANNON_M2_DESC"	, "#BC_TITAN_CHARGE_CANNON_M2_FLAVOR"	, "#BC_FLAVOR_USER_MANUAL",	"mp_titanweapon_charge_cannon",			"burn_mod_titan_charge_cannon",	"TITAN_OFFHAND1"	)
+ 
+ 	if ( IsServer() )
+ 	{
+diff --git a/scripts/vscripts/_challenges_content.nut b/scripts/vscripts/_challenges_content.nut
+index d9ecf38..88bdc81 100644
+--- a/scripts/vscripts/_challenges_content.nut
++++ b/scripts/vscripts/_challenges_content.nut
+@@ -1579,7 +1579,7 @@ function CreateChallenges()
+ 	//		Valkyrie
+ 	//------------------
+ 
+-	local weaponRef = "mp_weapon_mega1"
++	local weaponRef = "mp_weapon_sr_valkyrie"
+ 	SetChallengeCategory( eChallengeCategory.WEAPON_VALKYRIE, "#WPN_VALKYRIE", "", weaponRef )
+ 
+ 	AddChallenge( "ch_valkyrie_kills", "#CHALLENGE_WEAPON_KILLS", "#CHALLENGE_WEAPON_KILLS_DESC", ICON_WEAPON_KILLS, weaponRef )
+@@ -1626,7 +1626,7 @@ function CreateChallenges()
+ 	// 	   Twin-B
+ 	//------------------
+ 
+-	local weaponRef = "mp_weapon_mega2"
++	local weaponRef = "mp_weapon_twinb_shotgun"
+ 	SetChallengeCategory( eChallengeCategory.WEAPON_TWINB, "#WPN_TWINB_SHOTGUN", "", weaponRef )
+ 
+ 	AddChallenge( "ch_twinb_kills", "#CHALLENGE_WEAPON_KILLS", "#CHALLENGE_WEAPON_KILLS_DESC", ICON_WEAPON_KILLS, weaponRef )
+@@ -3072,7 +3072,7 @@ function CreateChallenges()
+ 	//		Valkyrie
+ 	//------------------
+ 
+-	local weaponRef = "mp_weapon_mega1"
++	local weaponRef = "mp_weapon_sr_valkyrie"
+ 
+ 	AddChallenge( "ch_daily_valkyrie_kills", "#DAILYCHALLENGE_WEAPON_KILLS", "#DAILYCHALLENGE_WEAPON_KILLS_DESC", ICON_WEAPON_KILLS, weaponRef )
+ 		SetChallengeStat( "weapon_kill_stats", "total", weaponRef )
+@@ -3099,7 +3099,7 @@ function CreateChallenges()
+ 	// 	   Twin-B
+ 	//------------------
+ 
+-	local weaponRef = "mp_weapon_mega2"
++	local weaponRef = "mp_weapon_twinb_shotgun"
+ 
+ 	AddChallenge( "ch_daily_twinb_kills", "#DAILYCHALLENGE_WEAPON_KILLS", "#DAILYCHALLENGE_WEAPON_KILLS_DESC", ICON_WEAPON_KILLS, weaponRef )
+ 		SetChallengeStat( "weapon_kill_stats", "total", weaponRef )
+diff --git a/scripts/vscripts/_consts.nut b/scripts/vscripts/_consts.nut
+index 3687efe..c189a89 100644
+--- a/scripts/vscripts/_consts.nut
++++ b/scripts/vscripts/_consts.nut
+@@ -2566,11 +2566,11 @@ enum eChargeCannonState
+ 	last_eChargeCannonState
+ }
+ 
+-const WEAPON_VALKYRIE_NAME = "mp_weapon_mega1"
+-const WEAPON_TWINB_NAME = "mp_weapon_mega2"
+-const WEAPON_THUNDERBOLT_NAME = "mp_weapon_mega3"
+-const WEAPON_CHARGE_CANNON_NAME = "mp_weapon_mega4"
+-const WEAPON_THROWING_KNIFE_NAME = "mp_weapon_mega5"
++const WEAPON_VALKYRIE_NAME = "mp_weapon_sr_valkyrie"
++const WEAPON_TWINB_NAME = "mp_weapon_twinb_shotgun"
++const WEAPON_THUNDERBOLT_NAME = "mp_titanweapon_minigun"
++const WEAPON_CHARGE_CANNON_NAME = "mp_titanweapon_charge_cannon"
++const WEAPON_THROWING_KNIFE_NAME = "mp_weapon_throwing_knife"
+ 
+ enum eUIEvent
+ {
+diff --git a/scripts/vscripts/_damage_types.nut b/scripts/vscripts/_damage_types.nut
+index 75803cd..8f7134d 100644
+--- a/scripts/vscripts/_damage_types.nut
++++ b/scripts/vscripts/_damage_types.nut
+@@ -138,11 +138,11 @@ enum eDamageSourceId
+ 	// development
+ 	weapon_cubemap
+ 
+-	mp_weapon_mega1
+-	mp_weapon_mega2
+-	mp_weapon_mega3
+-	mp_weapon_mega4
+-	mp_weapon_mega5
++	mp_weapon_sr_valkyrie
++	mp_weapon_twinb_shotgun
++	mp_titanweapon_minigun
++	mp_titanweapon_charge_cannon
++	mp_weapon_throwing_knife
+ 	mp_weapon_mega6
+ 	mp_weapon_mega7
+ 	mp_weapon_mega8
+@@ -313,11 +313,11 @@ else
+ 	damageSourceStrings[ eDamageSourceId.stuck ]		 				<- "#DEATH_GENERIC_KILLED"
+ }
+ 
+-damageSourceStrings[ eDamageSourceId.mp_weapon_mega1 ] 					<- "#WPN_VALKYRIE"
+-damageSourceStrings[ eDamageSourceId.mp_weapon_mega2 ] 					<- "#WPN_TWINB_SHOTGUN"
+-damageSourceStrings[ eDamageSourceId.mp_weapon_mega3 ] 					<- "#WPN_TITAN_MINIGUN"
+-damageSourceStrings[ eDamageSourceId.mp_weapon_mega4 ] 					<- "#WPN_TITAN_CHARGE_CANNON"
+-damageSourceStrings[ eDamageSourceId.mp_weapon_mega5 ] 					<- "#WPN_THROWING_KNIFE"
++damageSourceStrings[ eDamageSourceId.mp_weapon_sr_valkyrie ] 					<- "#WPN_VALKYRIE"
++damageSourceStrings[ eDamageSourceId.mp_weapon_twinb_shotgun ] 					<- "#WPN_TWINB_SHOTGUN"
++damageSourceStrings[ eDamageSourceId.mp_titanweapon_minigun ] 					<- "#WPN_TITAN_MINIGUN"
++damageSourceStrings[ eDamageSourceId.mp_titanweapon_charge_cannon ] 					<- "#WPN_TITAN_CHARGE_CANNON"
++damageSourceStrings[ eDamageSourceId.mp_weapon_throwing_knife ] 					<- "#WPN_THROWING_KNIFE"
+ 
+ //When adding new mods, they need to be added below and to persistent_player_data_version_N.pdef in r1/cfg/server.
+ //Then when updating that file, save a new one and increment N.
+diff --git a/scripts/vscripts/_items.nut b/scripts/vscripts/_items.nut
+index cc5f0ae..3b1bf51 100644
+--- a/scripts/vscripts/_items.nut
++++ b/scripts/vscripts/_items.nut
+@@ -280,8 +280,8 @@ function main()
+ 	}
+ 
+ 	unlockLevels[ "mp_titanweapon_shotgun" ]				<- 36
+-	unlockLevels[ "mp_weapon_mega1" ]						<- 30
+-	unlockLevels[ "mp_weapon_mega2" ]						<- 35
++	unlockLevels[ "mp_weapon_sr_valkyrie" ]						<- 30
++	unlockLevels[ "mp_weapon_twinb_shotgun" ]						<- 35
+ }
+ 
+ function InitItems()
+@@ -720,7 +720,7 @@ function InitItems()
+ 			PrecacheWeapon( "mp_titanweapon_sniper" )
+ 			PrecacheWeapon( "mp_weapon_pss" )
+ 
+-			for ( local i = 1; i <= 10; i++ )
++			for ( local i = 6; i <= 10; i++ )
+ 				PrecacheWeapon( "mp_weapon_mega" + i )
+ 		}
+ 
+@@ -768,22 +768,22 @@ function CreateR1DeltaItems()
+ 
+ 	CreateModData( itemType.PILOT_SECONDARY_MOD,	DEV_ENABLED,	0, 	"ch_mgl_titan_kills", 				1, 		"mp_weapon_mgl",			"long_fuse",					"#MOD_LONG_FUSE_NAME",			"#MOD_LONG_FUSE_DESC",				"#MOD_LONG_FUSE_DESC",					0, 0, 0, 0, 0, 			"../ui/menu/items/mod_icons/long_fuse",				"../ui/menu/items/mod_icons/long_fuse" )
+ 
+-	CreateWeaponData( itemType.PILOT_PRIMARY, 		DEV_ENABLED,	0, 		null, 	null, "mp_weapon_mega1", 				"../ui/menu/items/weapon_valkyrie" )
+-	CreateWeaponData( itemType.PILOT_SIDEARM, 		DEV_ENABLED,	0, 		null, 	null, "mp_weapon_mega2", 				"../ui/menu/items/weapon_twinbshotgun" )
++	CreateWeaponData( itemType.PILOT_PRIMARY, 		DEV_ENABLED,	0, 		null, 	null, "mp_weapon_sr_valkyrie", 				"../ui/menu/items/weapon_valkyrie" )
++	CreateWeaponData( itemType.PILOT_SIDEARM, 		DEV_ENABLED,	0, 		null, 	null, "mp_weapon_twinb_shotgun", 				"../ui/menu/items/weapon_twinbshotgun" )
+ 
+-	CreateWeaponData( itemType.PILOT_PRIMARY, 		DEV_DISABLED,	0, 		null, 	null, "mp_weapon_mega5", 				"../ui/menu/items/weapon_valkyrie", null, null, HideFromMenus )
++	CreateWeaponData( itemType.PILOT_PRIMARY, 		DEV_DISABLED,	0, 		null, 	null, "mp_weapon_throwing_knife", 				"../ui/menu/items/weapon_valkyrie", null, null, HideFromMenus )
+ 
+-	CreateAttachmentData( itemType.PILOT_PRIMARY_ATTACHMENT,	DEV_ENABLED,	0, 		null, 						null, 	"mp_weapon_mega1",		"scope_6x",		"#MOD_SCOPE_6X_NAME",		"#MOD_SCOPE_6X_DESC",		"#MOD_SCOPE_6X_LONGDESC",				"../ui/menu/items/attachment_icons/scope_6x", 			"../ui/menu/items/attachment_icons/scope_6x" )
+-	CreateAttachmentData( itemType.PILOT_PRIMARY_ATTACHMENT,	DEV_ENABLED,	0, 		"ch_valkyrie_grunt_kills", 	0, 		"mp_weapon_mega1",		"aog",			"#MOD_AOG_NAME",			"#MOD_AOG_DESC",			"#MOD_AOG_LONGDESC",					"../ui/menu/items/attachment_icons/aog", 				"../ui/menu/items/attachment_icons/aog" )
+-	CreateAttachmentData( itemType.PILOT_PRIMARY_ATTACHMENT,	DEV_ENABLED,	0, 		"ch_valkyrie_kills", 			1, 		"mp_weapon_mega1",		"scope_4x",		"#MOD_SCOPE_4X_NAME",		"#MOD_SCOPE_4X_DESC",		"#MOD_SCOPE_4X_LONGDESC",				"../ui/menu/items/attachment_icons/aog", 				"../ui/menu/items/attachment_icons/scope_4" )
+-	CreateModData( itemType.PILOT_PRIMARY_MOD,		DEV_ENABLED,	0, 	"ch_valkyrie_spectre_kills", 			0, 		"mp_weapon_mega1",			"extended_ammo",				"#MOD_EXTENDED_MAG_NAME",		"#MOD_EXTENDED_MAG_DESC",			"#MOD_EXTENDED_MAG_LONGDESC",			0, 0, 0, 0, 2, 			"../ui/menu/items/mod_icons/extended_ammo", 		"../ui/menu/items/mod_icons/extended_ammo" )
+-	CreateModData( itemType.PILOT_PRIMARY_MOD,		DEV_ENABLED,	0, 	"ch_valkyrie_kills", 					0, 		"mp_weapon_mega1",			"silencer",						"#MOD_SILENCER_NAME",			"#MOD_SILENCER_DESC",				"#MOD_SILENCER_LONGDESC",				-10, 0, -5, 0, 0, 		"../ui/menu/items/mod_icons/silencer", 				"../ui/menu/items/mod_icons/silencer" )
+-	CreateModData( itemType.PILOT_PRIMARY_MOD,		DEV_ENABLED,	0, 	"ch_valkyrie_pilot_kills", 				0, 		"mp_weapon_mega1",			"stabilizer",					"#MOD_STABILIZER_NAME",			"#MOD_STABILIZER_DESC",				"#MOD_STABILIZER_LONGDESC",				0, 6, 0, 0, 0, 			"../ui/menu/items/mod_icons/stabilizer", 			"../ui/menu/items/mod_icons/stabilizer" )
+-	CreateModData( itemType.PILOT_PRIMARY_MOD,		DEV_DISABLED,	0, 	null, 	null, "mp_weapon_mega1",			"burn_mod_valkyrie", 				"#BC_VALKYRIE_M2",			"#BC_VALKYRIE_M2_FLYOUT_DESC",			"#BC_VALKYRIE_M2_FLYOUT_DESC",			0, 0, 0, 0, 0,	 	"../ui/temp",	"../ui/temp",	HideFromMenus )
++	CreateAttachmentData( itemType.PILOT_PRIMARY_ATTACHMENT,	DEV_ENABLED,	0, 		null, 						null, 	"mp_weapon_sr_valkyrie",		"scope_6x",		"#MOD_SCOPE_6X_NAME",		"#MOD_SCOPE_6X_DESC",		"#MOD_SCOPE_6X_LONGDESC",				"../ui/menu/items/attachment_icons/scope_6x", 			"../ui/menu/items/attachment_icons/scope_6x" )
++	CreateAttachmentData( itemType.PILOT_PRIMARY_ATTACHMENT,	DEV_ENABLED,	0, 		"ch_valkyrie_grunt_kills", 	0, 		"mp_weapon_sr_valkyrie",		"aog",			"#MOD_AOG_NAME",			"#MOD_AOG_DESC",			"#MOD_AOG_LONGDESC",					"../ui/menu/items/attachment_icons/aog", 				"../ui/menu/items/attachment_icons/aog" )
++	CreateAttachmentData( itemType.PILOT_PRIMARY_ATTACHMENT,	DEV_ENABLED,	0, 		"ch_valkyrie_kills", 			1, 		"mp_weapon_sr_valkyrie",		"scope_4x",		"#MOD_SCOPE_4X_NAME",		"#MOD_SCOPE_4X_DESC",		"#MOD_SCOPE_4X_LONGDESC",				"../ui/menu/items/attachment_icons/aog", 				"../ui/menu/items/attachment_icons/scope_4" )
++	CreateModData( itemType.PILOT_PRIMARY_MOD,		DEV_ENABLED,	0, 	"ch_valkyrie_spectre_kills", 			0, 		"mp_weapon_sr_valkyrie",			"extended_ammo",				"#MOD_EXTENDED_MAG_NAME",		"#MOD_EXTENDED_MAG_DESC",			"#MOD_EXTENDED_MAG_LONGDESC",			0, 0, 0, 0, 2, 			"../ui/menu/items/mod_icons/extended_ammo", 		"../ui/menu/items/mod_icons/extended_ammo" )
++	CreateModData( itemType.PILOT_PRIMARY_MOD,		DEV_ENABLED,	0, 	"ch_valkyrie_kills", 					0, 		"mp_weapon_sr_valkyrie",			"silencer",						"#MOD_SILENCER_NAME",			"#MOD_SILENCER_DESC",				"#MOD_SILENCER_LONGDESC",				-10, 0, -5, 0, 0, 		"../ui/menu/items/mod_icons/silencer", 				"../ui/menu/items/mod_icons/silencer" )
++	CreateModData( itemType.PILOT_PRIMARY_MOD,		DEV_ENABLED,	0, 	"ch_valkyrie_pilot_kills", 				0, 		"mp_weapon_sr_valkyrie",			"stabilizer",					"#MOD_STABILIZER_NAME",			"#MOD_STABILIZER_DESC",				"#MOD_STABILIZER_LONGDESC",				0, 6, 0, 0, 0, 			"../ui/menu/items/mod_icons/stabilizer", 			"../ui/menu/items/mod_icons/stabilizer" )
++	CreateModData( itemType.PILOT_PRIMARY_MOD,		DEV_DISABLED,	0, 	null, 	null, "mp_weapon_sr_valkyrie",			"burn_mod_valkyrie", 				"#BC_VALKYRIE_M2",			"#BC_VALKYRIE_M2_FLYOUT_DESC",			"#BC_VALKYRIE_M2_FLYOUT_DESC",			0, 0, 0, 0, 0,	 	"../ui/temp",	"../ui/temp",	HideFromMenus )
+ 
+-	CreateModData( itemType.PILOT_SIDEARM_MOD,		DEV_ENABLED,	0, 	"ch_twinb_pilot_kills",			1, 		"mp_weapon_mega2",		"spread_increase_sg",			"#MOD_SPREAD_INCREASE_SG_NAME",	"#MOD_SPREAD_INCREASE_SG_DESC",		"#MOD_SPREAD_INCREASE_SG_LONGDESC",		-10, 10, 0, 0, 0, 		"../ui/menu/items/mod_icons/leadwall", 				"../ui/menu/items/mod_icons/leadwall" )
+-	CreateModData( itemType.PILOT_SIDEARM_MOD,		DEV_ENABLED,	0, 	"ch_twinb_kills", 				1, 		"mp_weapon_mega2",		"silencer",						"#MOD_SILENCER_NAME",			"#MOD_SILENCER_DESC",				"#MOD_SILENCER_LONGDESC",				-5, 5, -5, 0, 0, 		"../ui/menu/items/mod_icons/silencer", 				"../ui/menu/items/mod_icons/silencer" )
+-	CreateModData( itemType.PILOT_SIDEARM_MOD,		DEV_DISABLED,	0, 	null, 	null, "mp_weapon_mega2",			"burn_mod_twinb", 			"#BC_TWINB_SHOTGUN_M2",			"#BC_TWINB_SHOTGUN_M2_FLYOUT_DESC",			"#BC_TWINB_SHOTGUN_M2_FLYOUT_DESC",			0, 0, 0, 0, 0,	 	"../ui/temp",	"../ui/temp",	HideFromMenus )
++	CreateModData( itemType.PILOT_SIDEARM_MOD,		DEV_ENABLED,	0, 	"ch_twinb_pilot_kills",			1, 		"mp_weapon_twinb_shotgun",		"spread_increase_sg",			"#MOD_SPREAD_INCREASE_SG_NAME",	"#MOD_SPREAD_INCREASE_SG_DESC",		"#MOD_SPREAD_INCREASE_SG_LONGDESC",		-10, 10, 0, 0, 0, 		"../ui/menu/items/mod_icons/leadwall", 				"../ui/menu/items/mod_icons/leadwall" )
++	CreateModData( itemType.PILOT_SIDEARM_MOD,		DEV_ENABLED,	0, 	"ch_twinb_kills", 				1, 		"mp_weapon_twinb_shotgun",		"silencer",						"#MOD_SILENCER_NAME",			"#MOD_SILENCER_DESC",				"#MOD_SILENCER_LONGDESC",				-5, 5, -5, 0, 0, 		"../ui/menu/items/mod_icons/silencer", 				"../ui/menu/items/mod_icons/silencer" )
++	CreateModData( itemType.PILOT_SIDEARM_MOD,		DEV_DISABLED,	0, 	null, 	null, "mp_weapon_twinb_shotgun",			"burn_mod_twinb", 			"#BC_TWINB_SHOTGUN_M2",			"#BC_TWINB_SHOTGUN_M2_FLYOUT_DESC",			"#BC_TWINB_SHOTGUN_M2_FLYOUT_DESC",			0, 0, 0, 0, 0,	 	"../ui/temp",	"../ui/temp",	HideFromMenus )
+ 
+ 	////////////////////
+ 	//TITAN WEAPON DATA
+@@ -791,8 +791,8 @@ function CreateR1DeltaItems()
+ 	CreateWeaponData( itemType.TITAN_PRIMARY, 		DEV_ENABLED,	0, 		null, 	null, "mp_titanweapon_shotgun", 				"../ui/menu/items/titanweapon_shotgun" )
+ 
+ 	// DEV_DISABLED for now, they're extremely OP
+-	CreateWeaponData( itemType.TITAN_PRIMARY, 		DEV_DISABLED,	0, 		null, 	null, "mp_weapon_mega3", 				"../ui/menu/items/titanweapon_minigun", null, null, HideFromMenus )
+-	CreateWeaponData( itemType.TITAN_SPECIAL,		DEV_ENABLED,	0, 		null, 	null, "mp_weapon_mega4", 				"../ui/menu/items/ability_icons/charge_cannon",				"../ui/menu/items/ability_icons/charge_cannon", null )
++	CreateWeaponData( itemType.TITAN_PRIMARY, 		DEV_DISABLED,	0, 		null, 	null, "mp_titanweapon_minigun", 				"../ui/menu/items/titanweapon_minigun", null, null, HideFromMenus )
++	CreateWeaponData( itemType.TITAN_SPECIAL,		DEV_ENABLED,	0, 		null, 	null, "mp_titanweapon_charge_cannon", 				"../ui/menu/items/ability_icons/charge_cannon",				"../ui/menu/items/ability_icons/charge_cannon", null )
+ 
+ 	CreateWeaponData( itemType.TITAN_ORDNANCE,		DEV_ENABLED,	0,		null, 	null, "mp_titanweapon_shoulder_turret", 	"../ui/menu/items/titanweapon_shoulder_rockets",		"HUD/coop/mini_turret_counter", 	"../ui/menu/items/titanweapon_shoulder_rockets", HideFromMenus )
+ 
+@@ -804,8 +804,8 @@ function CreateR1DeltaItems()
+ 	CreateModData( itemType.TITAN_PRIMARY_MOD,	 	DEV_ENABLED,	0, 	null, 								null, 	"mp_titanweapon_shotgun",				"plasma_rifle",			"#MOD_PLASMA_RIFLE_NAME",			"#MOD_PLASMA_RIFLE_DESC",			"#MOD_PLASMA_RIFLE_LONGDESC",			0, -10, 0, 20, 9, 		"../ui/menu/items/mod_icons/explosive_rounds", 		"../ui/menu/items/mod_icons/explosive_rounds" )
+ 
+ 	CreateModData( itemType.TITAN_PRIMARY_MOD,		DEV_DISABLED,	0, 	null, 	null, "mp_titanweapon_shotgun",				"burn_mod_titan_shotgun", 					"#BC_TITAN_SHOTGUN_M2",				"#BC_TITAN_SHOTGUN_M2_FLYOUT_DESC",				"#BC_TITAN_SHOTGUN_M2_FLYOUT_DESC",				0, 0, 0, 0, 0,	 	"../ui/temp",	"../ui/temp",	HideFromMenus )
+-	CreateModData( itemType.TITAN_PRIMARY_MOD,		DEV_DISABLED,	0, 	null, 	null, "mp_weapon_mega3",			"burn_mod_thunderbolt", 			"#BC_TITAN_MINIGUN_M2",			"#BC_TITAN_MINIGUN_M2_FLYOUT_DESC",			"#BC_TITAN_MINIGUN_M2_FLYOUT_DESC",			0, 0, 0, 0, 0,	 	"../ui/temp",	"../ui/temp",	HideFromMenus )
+-	CreateModData( itemType.TITAN_SPECIAL_MOD,		DEV_DISABLED,	0, 	null, 	null, "mp_weapon_mega4",			"burn_mod_charge_cannon", 			"#BC_TITAN_CHARGE_CANNON_M2",			"#BC_TITAN_CHARGE_CANNON_M2_FLYOUT_DESC",			"#BC_TITAN_CHARGE_CANNON_M2_FLYOUT_DESC",			0, 0, 0, 0, 0,	 	"../ui/temp",	"../ui/temp",	HideFromMenus )
++	CreateModData( itemType.TITAN_PRIMARY_MOD,		DEV_DISABLED,	0, 	null, 	null, "mp_titanweapon_minigun",			"burn_mod_thunderbolt", 			"#BC_TITAN_MINIGUN_M2",			"#BC_TITAN_MINIGUN_M2_FLYOUT_DESC",			"#BC_TITAN_MINIGUN_M2_FLYOUT_DESC",			0, 0, 0, 0, 0,	 	"../ui/temp",	"../ui/temp",	HideFromMenus )
++	CreateModData( itemType.TITAN_SPECIAL_MOD,		DEV_DISABLED,	0, 	null, 	null, "mp_titanweapon_charge_cannon",			"burn_mod_charge_cannon", 			"#BC_TITAN_CHARGE_CANNON_M2",			"#BC_TITAN_CHARGE_CANNON_M2_FLYOUT_DESC",			"#BC_TITAN_CHARGE_CANNON_M2_FLYOUT_DESC",			0, 0, 0, 0, 0,	 	"../ui/temp",	"../ui/temp",	HideFromMenus )
+ }
+ 
+ function CreateWeaponData( type, dev_enabled, levelReq, challengeReq, challengeTier, ref, image, icon = null, altImage = null, displayInMenu = true )
+@@ -2938,7 +2938,7 @@ function GetDefaultAttachmentName( itemRef )
+ 	{
+ 		case "mp_weapon_dmr":
+ 		case "mp_weapon_sniper":
+-		case "mp_weapon_mega1":
++		case "mp_weapon_sr_valkyrie":
+ 			return "#MOD_SCOPE_6X_NAME"
+ 
+ 		default:
+@@ -2954,7 +2954,7 @@ function GetDefaultAttachmentIcon( itemRef )
+ 	{
+ 		case "mp_weapon_dmr":
+ 		case "mp_weapon_sniper":
+-		case "mp_weapon_mega1":
++		case "mp_weapon_sr_valkyrie":
+ 			return "../ui/menu/items/attachment_icons/scope_6x"
+ 
+ 		default:
+diff --git a/scripts/vscripts/_player_view_shared.nut b/scripts/vscripts/_player_view_shared.nut
+index 89a3c7a..a2f81b1 100644
+--- a/scripts/vscripts/_player_view_shared.nut
++++ b/scripts/vscripts/_player_view_shared.nut
+@@ -37,7 +37,7 @@ function CalcTitanViewPunch( player, damageInfo )
+ 
+ 		case eDamageSourceId.mp_titanweapon_xo16:
+ 		case eDamageSourceId.mp_titanweapon_shotgun:
+-		case eDamageSourceId.mp_weapon_mega3:
++		case eDamageSourceId.mp_titanweapon_minigun:
+ 			punchAmount *= 1.1
+ 			break
+ 
+@@ -54,7 +54,7 @@ function CalcTitanViewPunch( player, damageInfo )
+ 			break
+ 
+ 		case eDamageSourceId.mp_titanweapon_sniper:
+-		case eDamageSourceId.mp_weapon_mega4:
++		case eDamageSourceId.mp_titanweapon_charge_cannon:
+ 			punchAmount *= 2.8
+ 			break
+ 
+diff --git a/scripts/vscripts/_titan_shared.nut b/scripts/vscripts/_titan_shared.nut
+index 7525a76..482905a 100644
+--- a/scripts/vscripts/_titan_shared.nut
++++ b/scripts/vscripts/_titan_shared.nut
+@@ -1668,7 +1668,7 @@ function TitanStagger( titan, damageInfo )
+ 		case eDamageSourceId.mp_titanweapon_dumbfire_rockets:
+ 		case eDamageSourceId.mp_titanweapon_salvo_rockets:
+ 		case eDamageSourceId.mp_titanweapon_shotgun:
+-		case eDamageSourceId.mp_weapon_mega4:
++		case eDamageSourceId.mp_titanweapon_charge_cannon:
+ //		case eDamageSourceId.rodeo_caber:
+ 			titan.SetStaggering()
+ 			titan.s.lastStaggerTime = Time()
+diff --git a/scripts/vscripts/client/cl_main_hud.nut b/scripts/vscripts/client/cl_main_hud.nut
+index 6b82c4c..f2c3007 100644
+--- a/scripts/vscripts/client/cl_main_hud.nut
++++ b/scripts/vscripts/client/cl_main_hud.nut
+@@ -2798,7 +2798,7 @@ function ClientCodeCallback_OnSelectedWeaponChanged( selectedWeapon )
+ 			DisplayChargeAmmoBar( selectedWeapon, player, GetArcCannonChargeFraction( selectedWeapon ), 0, cockpit )
+ 			break
+ 		case "mp_weapon_defender":
+-		case "mp_weapon_mega4": //display charge cannon gauge by kwanyongjung 161026
++		case "mp_titanweapon_charge_cannon": //display charge cannon gauge by kwanyongjung 161026
+ 			DisplayChargeAmmoBar( selectedWeapon, player, 1, 0, cockpit )
+ 			break
+ 
+@@ -2813,7 +2813,7 @@ function ClientCodeCallback_OnSelectedWeaponChanged( selectedWeapon )
+ 				HideChargeAmmoBar( selectedWeapon, player )
+ 			break
+ 
+-		case "mp_weapon_mega3":
++		case "mp_titanweapon_minigun":
+ 			DisplayChargeAmmoBar( selectedWeapon, player, 1, 0, cockpit )
+ //			HideWeaponAmmoUI( cockpit )
+ 			break
+diff --git a/scripts/vscripts/mp/_ai_soldiers.nut b/scripts/vscripts/mp/_ai_soldiers.nut
+index 4ec047d..6224272 100644
+--- a/scripts/vscripts/mp/_ai_soldiers.nut
++++ b/scripts/vscripts/mp/_ai_soldiers.nut
+@@ -1851,7 +1851,7 @@ function GiveMinionWeapon( npc, weapon )
+ 	switch ( weapon )
+ 	{
+ 		case "mp_weapon_shotgun":
+-		case "mp_weapon_mega2":
++		case "mp_weapon_twinb_shotgun":
+ 		case "mp_weapon_autopistol":
+ 		case "mp_weapon_semipistol":
+ 		case "mp_weapon_smart_pistol":
+@@ -1861,7 +1861,7 @@ function GiveMinionWeapon( npc, weapon )
+ 
+ 		case "mp_weapon_dmr":
+ 		case "mp_weapon_sniper":
+-		case "mp_weapon_mega1":
++		case "mp_weapon_sr_valkyrie":
+ 			sightMod = "scope_6x"
+ 			break
+ 	}
+@@ -1879,7 +1879,7 @@ function ApplyIronsights( npc, weapon )
+ 	switch ( weapon )
+ 	{
+ 		case "mp_weapon_shotgun":
+-		case "mp_weapon_mega2":
++		case "mp_weapon_twinb_shotgun":
+ 		case "mp_weapon_autopistol":
+ 		case "mp_weapon_semipistol":
+ 		case "mp_weapon_smart_pistol":
+@@ -1888,7 +1888,7 @@ function ApplyIronsights( npc, weapon )
+ 
+ 		case "mp_weapon_dmr":
+ 		case "mp_weapon_sniper":
+-		case "mp_weapon_mega1":
++		case "mp_weapon_sr_valkyrie":
+ 			sightMod = "scope_6x"
+ 			break
+ 	}
+diff --git a/scripts/vscripts/mp/_coobj_towerdefense.nut b/scripts/vscripts/mp/_coobj_towerdefense.nut
+index 03c75ff..1906e88 100644
+--- a/scripts/vscripts/mp/_coobj_towerdefense.nut
++++ b/scripts/vscripts/mp/_coobj_towerdefense.nut
+@@ -4804,7 +4804,7 @@ function Play3PHarvesterImpactSounds(generator, damageInfo) {
+ 		soundAlias = "HarvesterShield.MeleeImpact_3P_vs_3P"
+ 	else if (damageSource == eDamageSourceId.mp_titanweapon_arc_cannon || damageSource == eDamageSourceId.mp_weapon_defender)
+ 		soundAlias = "HarvesterShield.Energy.BulletImpact_3P_vs_3P"
+-	else if ((damageSource = eDamageSourceId.mp_titanweapon_xo16 || damageSource = eDamageSourceId.mp_weapon_mega3) && damageType & DF_ELECTRICAL)
++	else if ((damageSource = eDamageSourceId.mp_titanweapon_xo16 || damageSource = eDamageSourceId.mp_titanweapon_minigun) && damageType & DF_ELECTRICAL)
+ 		soundAlias = "HarvesterShield.AmpedXO16.BulletImpact_3P_vs_3P"
+ 	else if (damageType & DF_EXPLOSION)
+ 		soundAlias = "HarvesterShield.Explosive.BulletImpact_3P_vs_3P"
+diff --git a/scripts/vscripts/mp/_coop_titans.nut b/scripts/vscripts/mp/_coop_titans.nut
+index d723c78..9b3a4f3 100644
+--- a/scripts/vscripts/mp/_coop_titans.nut
++++ b/scripts/vscripts/mp/_coop_titans.nut
+@@ -226,7 +226,7 @@ function GiveTitanTacticalAbility( titan, tacAbility )
+ 
+ 		case TAC_ABILITY_RAILGUN:
+ 			if ( !IsValid( tac ) )
+-				titan.GiveOffhandWeapon( "mp_weapon_mega4", TAC_ABILITY_RAILGUN )
++				titan.GiveOffhandWeapon( "mp_titanweapon_charge_cannon", TAC_ABILITY_RAILGUN )
+ 			titan.SetTacticalAbility( titan.GetOffhandWeapon( TAC_ABILITY_RAILGUN ), TTA_SMOKE )
+ 			break
+ 
+diff --git a/scripts/vscripts/mp/_gamemode_burn_card_escalation.nut b/scripts/vscripts/mp/_gamemode_burn_card_escalation.nut
+index 67492cb..6f5d5a9 100644
+--- a/scripts/vscripts/mp/_gamemode_burn_card_escalation.nut
++++ b/scripts/vscripts/mp/_gamemode_burn_card_escalation.nut
+@@ -169,8 +169,8 @@ function BCE_GetBurnMod( weapon, key )
+ 		switch ( className )
+ 		{
+ 			case "mp_weapon_grenade_emp":	modName = "burn_mod_emp_grenade"; break
+-			case "mp_weapon_mega1":			modName = "burn_mod_valkyrie"; break
+-			case "mp_weapon_mega2":			modName = "burn_mod_twinb"; break
++			case "mp_weapon_sr_valkyrie":			modName = "burn_mod_valkyrie"; break
++			case "mp_weapon_twinb_shotgun":			modName = "burn_mod_twinb"; break
+ 			default:						modName = "burn_mod_" + className.slice( 10 ); break
+ 		}
+ 	}
+diff --git a/scripts/vscripts/mp/_gamemode_gun_game.nut b/scripts/vscripts/mp/_gamemode_gun_game.nut
+index 56248ae..407e3fb 100644
+--- a/scripts/vscripts/mp/_gamemode_gun_game.nut
++++ b/scripts/vscripts/mp/_gamemode_gun_game.nut
+@@ -79,7 +79,7 @@ function GunGame_OnPlayerOrNPCKilled( victim, attacker, damageInfo )
+ 		if ( victimScore > 2 )
+ 			victim.SetAssaultScore( victimScore - 2 )
+ 	}
+-	else if ( damageSourceID == eDamageSourceId.mp_weapon_mega5 ) // Throwing knife
++	else if ( damageSourceID == eDamageSourceId.mp_weapon_throwing_knife ) // Throwing knife
+ 	{
+ 		attacker.SetAssaultScore( scoreLimit )
+ 		return
+diff --git a/scripts/vscripts/mp/_stats.nut b/scripts/vscripts/mp/_stats.nut
+index ef1ea61..5d0de66 100644
+--- a/scripts/vscripts/mp/_stats.nut
++++ b/scripts/vscripts/mp/_stats.nut
+@@ -653,7 +653,7 @@ function HandleKillStats( victim, attacker, damageInfo ) {
+             {
+                 case eDamageSourceId.mp_weapon_sniper:
+                 case eDamageSourceId.mp_weapon_dmr:
+-                case eDamageSourceId.mp_weapon_mega1:
++                case eDamageSourceId.mp_weapon_sr_valkyrie:
+                     Stats_IncrementStat( attacker, "kills_stats", "coopChallenge_Sniper_Kills", 1.0 )
+             }
+         }
+diff --git a/scripts/vscripts/mp/_titan_health.nut b/scripts/vscripts/mp/_titan_health.nut
+index 1bce4be..d7d4a25 100644
+--- a/scripts/vscripts/mp/_titan_health.nut
++++ b/scripts/vscripts/mp/_titan_health.nut
+@@ -1053,7 +1053,7 @@ function ShieldModifyDamage( titan, damageInfo )
+ 		if ( damageSourceIdentifier == eDamageSourceId.mp_titanweapon_triple_threat )
+ 			damage *= 1.5
+ 
+-		if ( damageSourceIdentifier == eDamageSourceId.mp_weapon_mega3 )
++		if ( damageSourceIdentifier == eDamageSourceId.mp_titanweapon_minigun )
+ 			damage *= 1.5
+ 	}
+ 
+diff --git a/scripts/vscripts/mp/class_titan.nut b/scripts/vscripts/mp/class_titan.nut
+index 4b2e0e3..a483524 100644
+--- a/scripts/vscripts/mp/class_titan.nut
++++ b/scripts/vscripts/mp/class_titan.nut
+@@ -90,7 +90,7 @@ function GiveNPCTitanTacticalAbility( titan )
+ 			break
+ 
+ 		case "mp_titanability_smoke":
+-		case "mp_weapon_mega4": //added by kwanyongjung
++		case "mp_titanweapon_charge_cannon": //added by kwanyongjung
+ 			abilityType = TTA_SMOKE
+ 			break
+ 
+diff --git a/scripts/vscripts/weapons/_grenade.nut b/scripts/vscripts/weapons/_grenade.nut
+index 36ee51e..c17adcd 100644
+--- a/scripts/vscripts/weapons/_grenade.nut
++++ b/scripts/vscripts/weapons/_grenade.nut
+@@ -95,7 +95,7 @@ function main()
+ 		AddDamageCallbackSourceID( eDamageSourceId.mp_titanweapon_rocket_launcher, TitanRocketLauncher_DamagedPlayerOrNPC )
+ 		AddDamageCallbackSourceID( eDamageSourceId.mp_weapon_smr, SMR_DamagedPlayerOrNPC )
+ 		AddDamageCallbackSourceID( eDamageSourceId.mp_titanability_smoke, ElectricSmoke_DamagedPlayerOrNPC )
+-		AddDamageCallbackSourceID( eDamageSourceId.mp_weapon_mega4, Defender_DamagedPlayerOrNPC )
++		AddDamageCallbackSourceID( eDamageSourceId.mp_titanweapon_charge_cannon, Defender_DamagedPlayerOrNPC )
+ 
+ 		AddDeathCallback( "npc_grenade_frag", ServerDeathCallback_GrenadeDeath )
+ 	}
+diff --git a/scripts/vscripts/weapons/mp_projectile_titanweapon_charge_cannon.nut b/scripts/vscripts/weapons/mp_projectile_titanweapon_charge_cannon.nut
+index 4721e40..10a3d82 100644
+--- a/scripts/vscripts/weapons/mp_projectile_titanweapon_charge_cannon.nut
++++ b/scripts/vscripts/weapons/mp_projectile_titanweapon_charge_cannon.nut
+@@ -31,6 +31,6 @@ function OnProjectileCollision( hitParams )
+ 	printt( "hitParams.hitent: ",hitParams.hitent )	
+ 	local distanceToTarget = Distance( self.GetOwner().GetOrigin(), hitParams.hitent.GetOrigin() )
+ 
+-	hitParams.hitent.TakeDamage( extraDamage, self.GetOwner(), self, { scriptType = (DF_GIB | DF_BULLET | DF_ELECTRICAL), damageSourceId=eDamageSourceId.mp_weapon_mega4, hitbox = hitParams.hitbox, distFromAttOrign = distanceToTarget } )
++	hitParams.hitent.TakeDamage( extraDamage, self.GetOwner(), self, { scriptType = (DF_GIB | DF_BULLET | DF_ELECTRICAL), damageSourceId=eDamageSourceId.mp_titanweapon_charge_cannon, hitbox = hitParams.hitbox, distFromAttOrign = distanceToTarget } )
+ 	//printt( "HIT WITH", self.s.bulletsToFire, "BULLETS FOR", extraDamage, "ADDITIONAL DAMAGE" )
+ }
+\ No newline at end of file
+diff --git a/scripts/vscripts/weapons/mp_weapon_throwing_knife.nut b/scripts/vscripts/weapons/mp_weapon_throwing_knife.nut
+index def9780..8e9bf1c 100644
+--- a/scripts/vscripts/weapons/mp_weapon_throwing_knife.nut
++++ b/scripts/vscripts/weapons/mp_weapon_throwing_knife.nut
+@@ -80,7 +80,7 @@ function FakeKnifeHit( attackParams, frag )
+ 
+ 	local ent = result.hitEnt
+ 	if ( ent && ent.IsHumanSized() && Distance( origin, ent.GetOrigin() ) <= 180 )
+-		ent.TakeDamage( self.GetWeaponModSetting( "damage_near_value" ), owner, owner, { scriptType = DF_RAGDOLL | DF_INSTANT | DF_KILLSHOT, damageSourceId = eDamageSourceId.mp_weapon_mega5 } )
++		ent.TakeDamage( self.GetWeaponModSetting( "damage_near_value" ), owner, owner, { scriptType = DF_RAGDOLL | DF_INSTANT | DF_KILLSHOT, damageSourceId = eDamageSourceId.mp_weapon_throwing_knife } )
+ }
+ 
+ function OnWeaponActivate( prepParams )
+-- 
+2.52.0.windows.1
+
