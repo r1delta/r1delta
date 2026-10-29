@@ -33,6 +33,8 @@ Build
     g++ -std=c++17 -O2 -Wall -Wextra -o bspdown.exe main.cpp bspdown.cpp tricoll.cpp collision.cpp sprp.cpp meshclip.cpp tangents.cpp physics.cpp cubemaps.cpp shadow.cpp lighting.cpp vcalpha.cpp
   MSVC (VS 2022 or later, x64): run build_msvc.bat  (cl /std:c++17 /O2 /EHsc ...)
   Both were built and produce byte identical output on mp_lf_deck.
+  Rule 25 fixtures (build instead of main.cpp, linking every other source, then run check_material_namespace.exe):
+    g++ -std=c++17 -O2 -Wall -Wextra -o check_material_namespace.exe check_material_namespace.cpp bspdown.cpp tricoll.cpp collision.cpp sprp.cpp meshclip.cpp tangents.cpp physics.cpp cubemaps.cpp shadow.cpp lighting.cpp vcalpha.cpp
   Focused RTL fixtures (build instead of main.cpp and lighting.cpp, then run check_rtl_visibility.exe):
     g++ -std=c++17 -O2 -Wall -Wextra -o check_rtl_visibility.exe check_rtl_visibility.cpp bspdown.cpp tricoll.cpp collision.cpp sprp.cpp meshclip.cpp tangents.cpp physics.cpp cubemaps.cpp shadow.cpp vcalpha.cpp
   This exercises the production quantizer, including zero/tiny cones, sampled chart borders, unreachable texels, conservative atlas aliases,
@@ -46,7 +48,7 @@ Use
               [--csm-rebase] [--csm-last-env] [--empty-shadow-meshes] [--worldlight-flag2]
               [--rtl-bake none|edge|all] [--rtl-bake-edge-min N] [--rtl-bake-bm skip|terrain|none] [--rtl-bake-smooth 0|1|2]
               [--rtl-bake-hot keep|clip] [--rtl-bake-vsm]
-              [--cubemaps none|split|keep] [--keep-r2-lumps] [--grid-size N] [--no-grid-pad] [--quiet]
+              [--cubemaps none|split|keep] [--material-namespace <prefix/>] [--keep-r2-lumps] [--grid-size N] [--no-grid-pad] [--quiet]
   The per-rule report is printed to stdout. Exit status 1 and a message on stderr when the
   input cannot be converted.
 
@@ -623,6 +625,30 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
     materials the R1 record keeps its R2 RGBA / albedo UV except alpha 255 (rule 22) or the ramp coordinate (a + 0.5) / 256, 0.5 and alpha 255 (rule 24);
     every other original vertex keeps +8..+19 bit for bit. The material lists live in check_bspdown.py (OPAQUE_VERTEX_ALPHA_MATERIALS /
     EMITTER_GLOW_MATERIALS) and must stay in sync with vcalpha.cpp.
+
+25. World material namespace (bspdown.cpp namespaceMaterials, Options::materialNamespace / --material-namespace <prefix/>, default off; the r1delta
+    provider sets r2w/). R1 resolves a BSP material name through its whole file system, and the VPK pack of every stock R1 map that was played stays
+    mounted for the rest of the process. R2 world meshes name materials such as models/vehicle/imc_carrier/floating_wall_panel_garage_02 or
+    models/world/metal/bldg_wall_metal_imc_01 (the "models/" materials of R2's world meshes), and 17 stock packs ship VertexLitGeneric model VMTs under
+    exactly those names: after mp_outpost_207 (or any lobby/playlist stock map) the R1 file answered, the world mesh was drawn with a model material and
+    the whole carrier hull of mp_drydock (BSP model 0) vanished while its collision stayed (DrydockProp), and mp_black_water_canal lost wall meshes
+    (BwcHoles; sky visible through them). Census over the 20 maps (matcollision\census): 1396 distinct texdata material names, 724 of them exist as a
+    VMT in an R1 pack or in mp_common: 61 with a VertexLitGeneric model shader (the invisible ones), 21 with the Basic shader (19 tools/ names and the two
+    atmosphere/godray fade sheets, same intent) and 642 with a world shader of the same intent (616) or another base texture (26). Without the rule all of
+    them were R2 content only when no stock map had been played.
+    Rule: every texdata material name (lumps 0x2B/0x2C) except tools/ names gets the prefix, lower case with forward slashes (R2 names are upper case
+    with backslashes; R1 folds both). tools/ names keep their text: R1 owns the tool materials, rule 15, the sky detection and the provider's trigger
+    brush stage find them by name. A name that already carries the prefix is kept. The table keeps its entries (one string per entry, so entries that
+    shared a string get their own copy); texdata records (0x02) are untouched. The stage runs after every stage that reads a material name (rules 15, 20f
+    RTL bake, 22, 24) and before rule 13, so the cubemap patch materials (rule 13d, materials/maps/<map>/<material>_<x>_<y>_<z>.vmt) are named from
+    the namespaced material and include materials/r2w/<material>.vmt. The material provider answers materials/r2w/<R2 name>.vmt with the R2 material
+    <R2 name> (engine/filesystem/r2_material_names.h) and, for a name the R2 packages do not carry (debug/debugempty, world/dev/edge_detection_*), with
+    a patch that includes the plain name, which is what the BSP asked for before. The VMTs name textures that exist in R1 packs with other data (R1 DXT5
+    _spc against R2 DXT1 _spc, detail normal maps), so the provider also moves every source texture a converted VMT names into r2t/ (r2tex's
+    synthetic r2tex/... textures are already unique). Needs a converted BSP cache revision bump and a material revision bump.
+    Checker: check_bspdown.py recomputes every name (R2 name -> lower case, forward slashes, prefix; tools/ and already prefixed names unchanged), checks
+    that the table keeps its size, every string is NUL terminated and the texdata records are unchanged (--provider implies r2w/; --material-namespace
+    <prefix/> otherwise). Fixtures: check_material_namespace.cpp (build line below).
 
 Results
 -------

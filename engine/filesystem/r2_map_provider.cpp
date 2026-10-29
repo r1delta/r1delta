@@ -1,6 +1,7 @@
 #include "engine/logging/logging.h"
 #include "r2_map_provider.h"
 #include "r2_material_provider.h"
+#include "r2_material_names.h"
 #include "r2_model_provider.h"
 #include "r1_map_pack_material_provider.h"
 #include "engine/r2port/postfx/r2_postfx.h"
@@ -86,7 +87,7 @@ constexpr uint32_t kGameLump = 0x23;
 
 // Folded into the on-disk cache fingerprint together with entity_rewrite::kRewriteVersion.
 // Bump when the vendored bspdown converter or the provider's BSP post-processing changes output.
-constexpr uint32_t kConvertedBspCacheVersion = 29;  // 29: rule 20f plane A keeps the R2 exposure (alpha) and spreads raised exposures (rtlBakeAlphaStep 1.2, no pale contours along baked pools); 28: rule 20f DrydockSteps preset default (rtl-bake vsm, hot clip, smooth 1, bm terrain); 27: rule 24 now writes the glow ramp texture coordinate; 26: rule 24 emitter glow vertex alpha (vr_light_trim_01_totrans, mp_glitch); 25: mp_coliseum and mp_coliseum_column keep the last CSM environment (csmLastEnv); 24: rule 17 real CSM environment chosen by content (BWC, angel_city, coliseum, coliseum_column); 23: rule 23 far-origin prop fade distance
+constexpr uint32_t kConvertedBspCacheVersion = 29;  // 29: rule 20f plane A keeps the R2 exposure (alpha) and spreads raised exposures (rtlBakeAlphaStep 1.2, no pale contours along baked pools) and rule 25 material namespace (round 16, one combined bump); 28: rule 20f DrydockSteps preset default (rtl-bake vsm, hot clip, smooth 1, bm terrain); 27: rule 24 now writes the glow ramp texture coordinate; 26: rule 24 emitter glow vertex alpha (vr_light_trim_01_totrans, mp_glitch); 25: mp_coliseum and mp_coliseum_column keep the last CSM environment (csmLastEnv); 24: rule 17 real CSM environment chosen by content (BWC, angel_city, coliseum, coliseum_column); 23: rule 23 far-origin prop fade distance
 
 // Raised onto the z of every info_spawnpoint_flag / human / human_start / titan / titan_start origin in lump 0 and in the five partition entity
 // files (see entity_rewrite::RaiseSpawnpointOrigins). The R1 server drops the spawnpoint back to the floor; one that starts inside solid is removed.
@@ -1390,6 +1391,7 @@ void ApplyConverterVariant(bspdown::Options& options, const std::string& variant
         else if (token == "cubemaps-split") options.cubemaps = bspdown::CubemapMode::Split;
         else if (token == "cubemaps-single") options.cubemaps = bspdown::CubemapMode::None;   // pre-split behaviour: every world sort samples the nearest cube
         else if (token == "no-collapse-envs") options.collapseEnvs = false;
+        else if (token == "no-material-namespace") options.materialNamespace.clear();   // rule 25 opt-out: world materials keep their plain names (a stock R1 map pack played earlier can then answer them)
         else if (token == "pbr-keep") options.pbrLights = false;
         else if (token == "flag2") options.worldLightFlagBit2 = true;
         else if (token == "props-keep10") options.keepPropFlag10 = true;
@@ -1422,6 +1424,10 @@ bspdown::Options R2ConverterOptions()
     options.rtlBakeHot = 1;
     options.rtlBakeSmooth = 1;
     options.rtlBakeBm = 1;
+    // Rule 25: world materials are named r2w/<R2 material>, so a stock R1 map pack that is still mounted (mp_outpost_207 played before
+    // mp_drydock: models/vehicle/imc_carrier/*.vmt) cannot answer them with a model material. The material provider serves the names
+    // (r2_material_names.h). Opt-out token no-material-namespace.
+    options.materialNamespace = std::string(kWorldMaterialNamespace);
     ApplyConverterVariant(options, R2ConverterVariantString());
     return options;
 }

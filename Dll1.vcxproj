@@ -274,6 +274,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="engine\filesystem\r2port_provider.h" />
     <ClInclude Include="engine\filesystem\r2_map_provider.h" />
     <ClInclude Include="engine\filesystem\r2_map_patch_source.h" />
+    <ClInclude Include="engine\filesystem\r2_material_names.h" />
     <ClInclude Include="engine\filesystem\r2_material_provider.h" />
     <ClInclude Include="engine\filesystem\r2_model_provider.h" />
     <ClInclude Include="engine\r2port\modelconv\modelconv.hpp" />

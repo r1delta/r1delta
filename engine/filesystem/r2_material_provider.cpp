@@ -3,6 +3,7 @@
 #include "engine/cvar.h"
 #include "engine/filesystem/r2_map_provider.h"
 #include "engine/filesystem/r2_family_queue.h"
+#include "engine/filesystem/r2_material_names.h"
 #include "engine/filesystem/r2port_provider.h"
 #include "engine/logging/logging.h"
 #include "engine/r2port/r2tex/r2tex.hpp"
@@ -183,7 +184,7 @@ bool IsMaterialOrTextureRequestPath(std::string_view path)
 
 // Bump when the r2tex library or the VMT/VTF output it produces changes: converted files are
 // persisted per R2 install fingerprint and revision.
-constexpr std::string_view kConvertedCacheRevision = "31";
+constexpr std::string_view kConvertedCacheRevision = "32";  // 32: every source texture a VMT names lives under r2t/ (r2_material_names.h), world materials under r2w/
 
 bool ReadWholeFile(const std::filesystem::path& path, std::vector<std::uint8_t>& bytes)
 {
@@ -539,13 +540,12 @@ private:
         std::uint32_t family{};
         bool resolved{};
         if (materialFile) {
-            constexpr std::string_view modelPrefix = "r2m/";
-            const std::string_view source = assetName.compare(0, modelPrefix.size(), modelPrefix) == 0
-                ? std::string_view(assetName).substr(modelPrefix.size()) : std::string_view(assetName);
-            resolved = r2tex::FamilyOfMaterial(source, family);
+            resolved = r2tex::FamilyOfMaterial(MaterialSourceName(assetName), family);
         }
         else {
-            resolved = r2tex::FamilyOfTexture(assetName, family);
+            std::string_view textureSource;
+            resolved = r2tex::FamilyOfTexture(
+                StripTextureNamespace(assetName, textureSource) ? textureSource : std::string_view(assetName), family);
         }
         return resolved ? family : WorkQueue::kNoFamily;
     }
@@ -947,6 +947,36 @@ private:
         LogR2TextureMessage(message);
     }
 
+    // One line per world material the R2 packages do not carry (about ten per map), at most kMaxFallbackLogs.
+    static void LogWorldMaterialFallback(const WorkItem& item, const char* what)
+    {
+        constexpr unsigned kMaxFallbackLogs = 200;
+        static std::atomic<unsigned> logged{0};
+        if (logged.fetch_add(1, std::memory_order_relaxed) >= kMaxFallbackLogs)
+            return;
+        char message[1024]{};
+        _snprintf_s(message, sizeof(message), _TRUNCATE,
+            "R1Delta: R2 world material %s is not an R2 package material (%s); served as an include of materials/%s.vmt\n",
+            item.assetName.c_str(), what && *what ? what : "<no error string>",
+            std::string(MaterialSourceName(item.assetName)).c_str());
+        LogR2TextureMessage(message);
+    }
+
+    // A texture the converted VMT lists but does not name literally cannot move into the r2t/ namespace; R1 then asks
+    // for the plain name and any R1 pack that is mounted may answer it. At most kMaxLogs lines.
+    static void LogUnnamespacedTexture(const WorkItem& item, const std::string& texture)
+    {
+        constexpr unsigned kMaxLogs = 50;
+        static std::atomic<unsigned> logged{0};
+        if (logged.fetch_add(1, std::memory_order_relaxed) >= kMaxLogs)
+            return;
+        char message[1024]{};
+        _snprintf_s(message, sizeof(message), _TRUNCATE,
+            "R1Delta: WARNING R2 material %s lists texture %s but its VMT does not name it literally; it stays outside the r2t/ namespace\n",
+            item.assetName.c_str(), texture.c_str());
+        LogR2TextureMessage(message);
+    }
+
     FileBytes ConvertAsset(const WorkItem& item, std::vector<std::string>& dependencies)
     {
         std::string error;
@@ -956,13 +986,24 @@ private:
                 // R2 material also exists as a world material, and R1 crashes in studiorender/d3d11 when
                 // a studio mesh is drawn with a world shader (LightmappedGeneric). Convert the R2
                 // material and force the model shader.
-                constexpr std::string_view modelPrefix = "r2m/";
-                const bool forModel = item.assetName.compare(0, modelPrefix.size(), modelPrefix) == 0;
-                const std::string sourceName = forModel ? item.assetName.substr(modelPrefix.size()) : item.assetName;
+                const bool forModel = item.assetName.compare(0, kModelMaterialNamespace.size(), kModelMaterialNamespace) == 0;
+                // World materials of a converted BSP are named "r2w/<R2 material>" (bspdown rule 25) so that no
+                // file of a stock R1 map pack answers them; the R2 packages know the name without the prefix.
+                std::string_view worldSource;
+                const bool forWorld = !forModel && StripWorldMaterialNamespace(item.assetName, worldSource);
+                const std::string sourceName(forModel || forWorld ? MaterialSourceName(item.assetName) : std::string_view(item.assetName));
                 r2tex::Material material;
                 r2tex::MaterialOptions materialOptions;
                 materialOptions.forModel = forModel;
                 if (!r2tex::ConvertMaterial(sourceName, material, materialOptions, &error) || material.vmt.empty()) {
+                    if (forWorld) {
+                        // Not an R2 package material (debug/debugempty, world/dev/edge_detection_*: map pack or R1
+                        // files): answer with an include of the plain name, which is what the BSP asked for before the
+                        // namespace existed.
+                        LogWorldMaterialFallback(item, error.c_str());
+                        const std::string fallback = WorldMaterialFallbackVmt(sourceName);
+                        return std::make_shared<const std::vector<std::uint8_t>>(fallback.begin(), fallback.end());
+                    }
                     LogConvertFailure(item, error.c_str());
                     return {};
                 }
@@ -972,13 +1013,23 @@ private:
                     if (at != std::string::npos && material.vmt.find('{') > at)
                         material.vmt.replace(at, world.size(), "\"VertexLitGeneric\"");
                 }
+                // Every source texture the VMT names moves into the r2t/ namespace (r2_material_names.h): a stock R1
+                // map pack that is still mounted has textures of the same names with other data (specular colour,
+                // detail normal maps) and would answer them.
+                for (const r2tex::TextureRef& texture : material.textures) {
+                    if (texture.name.empty())
+                        continue;
+                    if (NamespaceVmtTexture(material.vmt, texture.name) == 0
+                        && texture.name.compare(0, kSyntheticTexturePrefix.size(), kSyntheticTexturePrefix) != 0)
+                        LogUnnamespacedTexture(item, texture.name);
+                }
                 std::vector<std::uint8_t> bytes(material.vmt.begin(), material.vmt.end());
                 dependencies.reserve(material.textures.size());
                 for (const r2tex::TextureRef& texture : material.textures) {
                     if (texture.name.empty())
                         continue;
                     std::string path = "materials/";
-                    path.append(texture.name);
+                    path.append(NamespacedTextureName(texture.name));
                     path.append(".vtf");
                     dependencies.push_back(std::move(path));
                 }
@@ -986,7 +1037,10 @@ private:
             }
 
             std::vector<std::uint8_t> bytes;
-            if (r2tex::ConvertTexture(item.assetName, bytes, &error) && !bytes.empty())
+            std::string_view textureSource;
+            const std::string_view r2Name = StripTextureNamespace(item.assetName, textureSource)
+                ? textureSource : std::string_view(item.assetName);
+            if (r2tex::ConvertTexture(r2Name, bytes, &error) && !bytes.empty())
                 return std::make_shared<const std::vector<std::uint8_t>>(std::move(bytes));
             LogConvertFailure(item, error.c_str());
         }

@@ -51,6 +51,7 @@ static void usage(const char* a0) {
                  "  --rtl-bake-hot <keep|clip>  rule 20f: lights above the plane A cap keep RTL (default) or are baked with a hue-preserving clip\n"
                  "  --rtl-bake-vsm         rule 20f: also bake lights without R2 flag 0x10 (R1 variance shadow map lights; default keeps them on RTL)\n"
                  "  --rtl-bake-alpha-step <x>  rule 20f: plane A exposure (alpha) decay per texel around baked texels whose energy needs a larger one (default 1.2); 0 = old per-texel minimal alpha\n"
+                 "  --material-namespace <p/>  rule 25: prefix every texdata material name except tools/ (lower case, ending in /; the r1delta provider uses r2w/); default off\n"
                  "  --pbr-lights <keep|convert>  rule 20: R2 flag 0x20 lights (default convert to the R1 fade polynomial form)\n"
                  "  --sky-ambient-scale <x>  rule 20e: multiplier on the kept sky ambient (type 5) light intensity (default 0.45)\n"
                  "  --sun-scale <x>        rule 20e: multiplier on the kept sun (type 3) light intensity (default 1)\n"
@@ -120,6 +121,7 @@ int main(int argc, char** argv) {
         else if (a == "--rtl-bake-hot" && i + 1 < argc) opt.rtlBakeHot = std::string(argv[++i]) == "clip" ? 1 : 0;
         else if (a == "--rtl-bake-vsm") opt.rtlBakeVsm = true;
         else if (a == "--rtl-bake-alpha-step" && i + 1 < argc) opt.rtlBakeAlphaStep = std::atof(argv[++i]);
+        else if (a == "--material-namespace" && i + 1 < argc) opt.materialNamespace = argv[++i];
         else if (a == "--sky-ambient-scale" && i + 1 < argc) opt.skyAmbientScale = (float)std::atof(argv[++i]);
         else if (a == "--sun-scale" && i + 1 < argc) opt.sunScale = (float)std::atof(argv[++i]);
         else if (a == "--pbr-scale" && i + 1 < argc) opt.pbrScale = (float)std::atof(argv[++i]);

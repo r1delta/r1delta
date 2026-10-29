@@ -9,7 +9,7 @@ R2 input. Exit status 0 if every check passed.
 
 The checker defaults are the converter CLI defaults; pass the options the conversion used (--cubemaps none|split|keep, --csm-rebase,
 --csm-last-env, --rtl-bake none|edge|all, --keep-prop-fade, ...). --provider = the options of the r1delta map provider
-(r2_map_provider.cpp R2ConverterOptions): --cubemaps split --csm-rebase --rtl-bake edge --rtl-bake-vsm --rtl-bake-hot clip --rtl-bake-smooth 1 --rtl-bake-bm terrain, --csm-last-env on mp_coliseum / mp_coliseum_column.
+(r2_map_provider.cpp R2ConverterOptions): --cubemaps split --csm-rebase --rtl-bake edge --rtl-bake-vsm --rtl-bake-hot clip --rtl-bake-smooth 1 --rtl-bake-bm terrain --material-namespace r2w/, --csm-last-env on mp_coliseum / mp_coliseum_column.
 """
 import argparse
 import os
@@ -587,6 +587,8 @@ LIGHT_OPT = {"collapse": True, "rtl": True, "pbr": True, "sun_alpha": True, "sky
 CSM_OPT = {"last_env": False}  # --csm-last-env: the converter kept the last environment record instead of the largest
 PROP_OPT = {"keep_fade": False}  # --keep-prop-fade: rule 23 off
 CUBE_OPT = {"cma_gain": 1.0, "min_scale": 0.25}  # rule 13b: per-cubemap scale = clamp(gain * CMA, min_scale, --cubemap-scale)
+MATERIAL_NS = {"prefix": ""}  # rule 25: the converter's --material-namespace (the provider default is r2w/)
+PROVIDER_MATERIAL_NAMESPACE = "r2w/"  # r2_map_provider.cpp R2ConverterOptions / r2_material_names.h
 PROVIDER_CSM_LAST_ENV_MAPS = ("mp_coliseum", "mp_coliseum_column")  # r2_map_provider.cpp ReadConvertedBsp: no cloudmask, the dummy light_environment stays last
 
 
@@ -1824,13 +1826,37 @@ def check(in_path, out_path, limit, rtl_bytes, use_bsp_tool, cubemaps="none", ph
     # ---- lump passthrough for the lumps that must be identical
     print("== pass-through lumps")
     same = []
-    for i in (0x00, 0x01, 0x02, 0x0E if False else 0x18, 0x24, 0x2B, 0x2C, 0x53, 0x5C, 0x5D, 0x5E, 0x5F, 0x63 if False else (0x64 if not csm_rebase else 0x00), 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F, 0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x78, 0x7B, 0x7C, 0x7D, 0x7E, 0x7F):  # 0x2A: rule 13c appends samples, checked with the pakfile
+    for i in (0x00, 0x01, 0x02, 0x0E if False else 0x18, 0x24) + (() if MATERIAL_NS["prefix"] else (0x2B, 0x2C)) + (0x53, 0x5C, 0x5D, 0x5E, 0x5F, 0x63 if False else (0x64 if not csm_rebase else 0x00), 0x6A, 0x6B, 0x6C, 0x6D, 0x6E, 0x6F, 0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x78, 0x7B, 0x7C, 0x7D, 0x7E, 0x7F):  # 0x2A: rule 13c appends samples, checked with the pakfile
         if i in (0x7C, 0x7D, 0x7E, 0x7F) and (csm_rebase or empty_shadow) and not (i in (0x7C, 0x7D) and csm_rebase and not empty_shadow):
             continue
         a = r1.raw(i); b = r2.raw(i)
         if len(a) != len(b) or bytes(a[:1 << 16]) != bytes(b[:1 << 16]) or bytes(a[-(1 << 16):]) != bytes(b[-(1 << 16):]):
             same.append(hex(i))
     C.ok(not same, "unchanged lumps are byte-identical (spot check first/last 64 KiB)", str(same))
+
+    # ---- rule 25: world material namespace
+    if MATERIAL_NS["prefix"]:
+        print("== world material namespace (rule 25)")
+        pre = MATERIAL_NS["prefix"]
+        d2 = bytes(r2.raw(0x2B)); t2 = np.frombuffer(r2.raw(0x2C).tobytes(), dtype="<u4")
+        d1 = bytes(r1.raw(0x2B)); t1 = np.frombuffer(r1.raw(0x2C).tobytes(), dtype="<u4")
+        def str_at(d, off):
+            return d[int(off):].split(b"\0", 1)[0].decode("ascii", errors="replace")
+        C.ok(len(t1) == len(t2), "texdata string table keeps its %d entries (R1 indexes it by the texdata record)" % len(t2))
+        bad = []; n_renamed = n_tools = 0
+        for i in range(min(len(t1), len(t2))):
+            n2 = str_at(d2, t2[i]); low = n2.replace("\\", "/").lower()
+            tools = low.startswith("tools/")
+            want = n2 if tools or low.startswith(pre) else pre + low
+            got = str_at(d1, t1[i])
+            n_tools += tools; n_renamed += (not tools)
+            if got != want:
+                bad.append((i, n2, got))
+        C.ok(not bad, "rule 25: every texdata material name is the R2 name with the %r prefix, lower case with forward slashes (%d renamed), except the %d tools/ names that keep their name" % (pre, n_renamed, n_tools), str(bad[:3]))
+        C.ok(all(d1[int(o) - 1:int(o)] == b"\0" or int(o) == 0 for o in t1) and d1.endswith(b"\0"), "rule 25: every namespaced string is NUL terminated inside the string data (0x2B)")
+        td1 = r1.raw(0x02); td2 = r2.raw(0x02)
+        C.ok(bytes(td1.tobytes()) == bytes(td2.tobytes()), "rule 25: the texdata records (0x02) are unchanged, only the names behind the string table moved")
+        C.ok(max(len(str_at(d1, o)) for o in t1) < 128 if len(t1) else True, "rule 25: no namespaced name reaches 128 characters (longest %d)" % (max(len(str_at(d1, o)) for o in t1) if len(t1) else 0))
 
     # ---- rule 17: shadow data
     print("== shadow lumps (rule 17)")
@@ -1965,16 +1991,19 @@ if __name__ == "__main__":
     ap.add_argument("--provider", action="store_true",
                     help="validate under the r1delta map provider's default options (r2_map_provider.cpp R2ConverterOptions): --cubemaps split --csm-rebase "
                          "--rtl-bake edge --rtl-bake-vsm --rtl-bake-hot clip --rtl-bake-smooth 1 --rtl-bake-bm terrain (DrydockSteps preset), plus --csm-last-env for mp_coliseum / mp_coliseum_column (taken from the input file name); every other option at the converter default")
+    ap.add_argument("--material-namespace", default="", help="rule 25: the converter's --material-namespace prefix (--provider implies r2w/)")
     ap.add_argument("--no-grid-pad", action="store_true", help="rule 18 disabled in the converter")
     ap.add_argument("--grid-size", type=float, default=2048.0, help="rule 19 cell size given to the converter (0 = R2 size kept)")
     ap.add_argument("--reference", "--unpadded", dest="reference", help="the same input converted with --grid-size 0 --no-grid-pad: equivalence checks for rules 18 / 19")
     a = ap.parse_args()
     if a.provider:
         a.cubemaps, a.csm_rebase, a.rtl_bake = "split", True, "edge"
+        a.material_namespace = PROVIDER_MATERIAL_NAMESPACE
         a.rtl_bake_vsm, a.rtl_bake_hot, a.rtl_bake_smooth, a.rtl_bake_bm = True, "clip", 1, "terrain"
         if os.path.splitext(os.path.basename(a.r2))[0].lower() in PROVIDER_CSM_LAST_ENV_MAPS:
             a.csm_last_env = True
     CSM_OPT["last_env"] = a.csm_last_env
+    MATERIAL_NS["prefix"] = a.material_namespace
     PROP_OPT["keep_fade"] = a.keep_prop_fade
     CUBE_OPT.update(cma_gain=a.cubemap_cma_gain, min_scale=a.cubemap_min_scale)
     LIGHT_OPT.update(collapse=not a.no_collapse_envs, rtl=not a.no_rtl, sun_alpha=not a.no_sun_alpha, pbr=(a.pbr_lights == "convert"),

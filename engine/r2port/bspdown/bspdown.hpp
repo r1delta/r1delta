@@ -205,6 +205,15 @@ struct Options {
     //   csmLastEnv:   with csmRebase keep the LAST environment record instead of the one with the most content (default off)
     bool csmLastEnv = false;
     bool emptyShadowMeshes = false;
+
+    // Rule 25: world material namespace. R1 resolves a BSP material name through its whole filesystem, so a file of a stock R1 map pack
+    // that is still mounted (mp_outpost_207's models/vehicle/imc_carrier/*.vmt after that map was played, 17 stock packs carry such
+    // models/ materials) answers the name of an R2 world material and its VertexLitGeneric model material draws nothing on the world
+    // mesh (mp_drydock carrier hull, mp_black_water_canal walls). Non-empty (for example "r2w/", lower case, ending in '/'): every material
+    // name in the texdata string table (lumps 0x2B/0x2C) gets this prefix, so only the provider that knows the prefix can answer it. Names
+    // under "tools/" keep their name (R1 owns the tool materials; rule 15 and the sky detection read them by name). The stage runs after
+    // every stage that reads a material name and before rule 13, so the cubemap patch materials follow the new name. Empty (default) = off.
+    std::string materialNamespace;
 };
 
 // Per-rule human readable report. One entry per line.

@@ -94,6 +94,57 @@ void convertLightProbeRefs(Ctx& c) {
 }
 
 
+// Rule 25: world material namespace (Options::materialNamespace).
+void namespaceMaterials(Ctx& c) {
+    const std::string& prefix = c.opt.materialNamespace;
+    if (prefix.empty()) return;
+    if (prefix.back() != '/' || prefix.find('\\') != std::string::npos || prefix.find("..") != std::string::npos)
+        throw Error("material namespace \"" + prefix + "\" must be a forward slash separated path ending in '/'");
+    for (char ch : prefix)
+        if (ch >= 'A' && ch <= 'Z') throw Error("material namespace \"" + prefix + "\" must be lower case (R1 file names are case folded, the provider matches lower case)");
+    const Bytes& tab = c.lump[L_TDSTRTAB];
+    const Bytes& data = c.lump[L_TDSTRDATA];
+    if (tab.size() % 4) throw Error("texdata string table (0x2C): size " + std::to_string(tab.size()) + " is not a multiple of 4");
+    const size_t n = tab.size() / 4;
+    const size_t oldDataSize = data.size();
+    Bytes newTab(tab.size());
+    Bytes newData;
+    newData.reserve(data.size() + n * prefix.size());
+    size_t renamed = 0, keptTools = 0, alreadyNamespaced = 0;
+    for (size_t i = 0; i < n; i++) {
+        uint32_t off;
+        std::memcpy(&off, &tab[i * 4], 4);
+        if (off >= data.size()) throw Error("texdata string table (0x2C) entry " + std::to_string(i) + " points at " + std::to_string(off) + ", past the string data (0x2B, " + std::to_string(data.size()) + " bytes)");
+        size_t len = 0;
+        while (off + len < data.size() && data[off + len]) len++;
+        const std::string name((const char*)&data[off], len);
+        std::string norm = name;
+        for (char& ch : norm) {
+            if (ch == '\\') ch = '/';
+            ch = (char)std::tolower((unsigned char)ch);
+        }
+        const bool tools = norm.compare(0, 6, "tools/") == 0;
+        const bool done = norm.compare(0, prefix.size(), prefix) == 0;
+        const uint32_t newOff = (uint32_t)newData.size();
+        // A renamed material is written lower case with forward slashes (R1 folds both when it opens the file; the R2 names are upper case
+        // with backslashes), so the prefix and the rest of the name never mix separators. Kept names stay byte for byte.
+        const std::string& written = (!tools && !done) ? prefix + norm : name;
+        newData.insert(newData.end(), written.begin(), written.end());
+        newData.push_back(0);
+        std::memcpy(&newTab[i * 4], &newOff, 4);
+        if (tools) keptTools++;
+        else if (done) alreadyNamespaced++;
+        else renamed++;
+    }
+    if (newData.size() > 0x7FFFFFFFull) throw Error("texdata string data (0x2B) exceeds 2 GiB after the material namespace");
+    c.lump[L_TDSTRTAB] = std::move(newTab);
+    c.lump[L_TDSTRDATA] = std::move(newData);
+    c.present[L_TDSTRTAB] = true;
+    c.present[L_TDSTRDATA] = true;
+    c.say("[rule 25] world material namespace \"%s\": %zu of %zu texdata material names renamed (lower case, forward slashes; %zu under tools/ kept as they are, %zu already namespaced); string data (0x2B) %zu -> %zu bytes",
+          prefix.c_str(), renamed, n, keptTools, alreadyNamespaced, oldDataSize, c.lump[L_TDSTRDATA].size());
+}
+
 }  // namespace detail
 
 // ---------------------------------------------------------------------------
@@ -146,6 +197,7 @@ std::vector<uint8_t> DowngradeBsp(const uint8_t* data, size_t size, const Option
     convertEmitterGlowRamp(c);
     convertPhysics(c);
     convertPhysicsTriangles(c);
+    namespaceMaterials(c);
     convertCubemaps(c);
     convertShadow(c);
     reportResidualBounds(c);

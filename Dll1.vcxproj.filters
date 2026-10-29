@@ -230,6 +230,9 @@
     <ClInclude Include="engine\r2port\particles\r2_particle_requests.inc">
       <Filter>engine\r2port\particles</Filter>
     </ClInclude>
+    <ClInclude Include="engine\filesystem\r2_material_names.h">
+      <Filter>engine\filesystem</Filter>
+    </ClInclude>
     <ClInclude Include="engine\filesystem\r2_material_provider.h">
       <Filter>engine\filesystem</Filter>
     </ClInclude>
