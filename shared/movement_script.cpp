@@ -611,9 +611,6 @@ SQInteger RegisterMovementProgram(HSQUIRRELVM vm)
     }
     candidate.registered = true;
     binding->programs[index] = candidate;
-    Warning("R1Delta movement: '%s' runs in the normal script environment and may replay. "
-        "Side effects and ordinary script state are not rolled back; use Move_* state/edits "
-        "and Move_EmitEvent for prediction-safe simulation and presentation.\n", name);
     return 0;
 }
 SQInteger EnableScriptMovement(HSQUIRRELVM vm)
