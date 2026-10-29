@@ -92,6 +92,7 @@
 #include "vtable.h"
 #include "persistentdata.h"
 #include "persistentdata_slots.h"
+#include "dlc_ownership.h"
 #include "precache.h"
 #include "squirrel.h"
 #include "commands.h"
@@ -16020,6 +16021,8 @@ static char __fastcall R1OCDedicatedServerAPI_RunFrame(__int64 thisptr)
 	InstallR1ORemoteAccessHooks(r1oEngineBase);
 	InstallR1OPlaylistCompatibilityHooks(r1oEngineBase);
 	EnsureR1ONetConsoleInitialized(r1oEngineBase);
+	// DLC ownership: keeps serverDLCMapGroups in step with who is connected (rate limited inside).
+	Dlc_ServerFrame();
 
 	constexpr int runtimeMaintenanceIntervalFrames = 64;
 	if (s_R1ODedicatedRunFrameCount == 1

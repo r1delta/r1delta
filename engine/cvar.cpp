@@ -76,6 +76,7 @@ bool IsCvarInterfacePublished()
 #include "mcp_server.h"
 #include "r1d_version.h"
 #include "server_usercmd.h"
+#include "dlc_ownership.h"
 #include "engine/r2port/wallrun/r2_wallrun.h"
 
 void AddBotDummyConCommand(const CCommand& args);
@@ -1380,6 +1381,8 @@ void RegisterR1ODediDeltaConVars()
 	// never runs on R1O. Same server.dll, different bring-up flow: initialize
 	// recent-host tracking from this R1O cvar registration path instead.
 	InitializeRecentHostVars();
+	// TFO ships dlc1-3_enabled and serverDLCMapGroups; the DLC ownership gate adds dlc4/5_enabled and dlc1-5_override.
+	Dlc_RegisterConVars();
 
 	s_registered = true;
 	if (AreR1OFakeDediVerboseLogsEnabled())

@@ -9349,6 +9349,7 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 			reinterpret_cast<void**>(&R1OGetNetworkIDStringOriginal),
 			"TFO authentication",
 			"CBaseClient::GetNetworkIDString");
+		Dlc_InstallR1OEngineHooks(G_engine_r1o);
 	}
 	else if (IsDedicatedServer()) {
 		MH_CreateHook((LPVOID)(G_engine_ds + 0x45EB0), &GetUserIDStringHook, reinterpret_cast<LPVOID*>(&GetUserIDStringOriginal));

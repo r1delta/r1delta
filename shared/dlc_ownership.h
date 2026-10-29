@@ -42,3 +42,7 @@ void Dlc_InstallClientEngineHooks(uintptr_t engineBase);
 
 // engine_ds.dll (legacy dedicated server): kicks clients that lack the group of a map that is about to start.
 void Dlc_InstallDedicatedEngineHooks(uintptr_t engineDsBase);
+
+// engine_r1o.dll (R1O fake-dedicated, the TFO engine): CGameClient::Connect rejects a client without the current
+// map's group, changelevel/changelevel2 kick connected clients without the new map's group. engineR1oBase is G_engine_r1o.
+void Dlc_InstallR1OEngineHooks(uintptr_t engineR1oBase);
