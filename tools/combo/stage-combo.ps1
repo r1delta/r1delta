@@ -206,6 +206,10 @@ if (Test-Path -LiteralPath $state) {
     Remove-Item -LiteralPath (Join-Path $Core 'scripts\vscripts\_autobhop.nut') -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath (Join-Path $Core 'scripts\vscripts\movement') -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath (Join-Path $Core 'sound\r1delta\movement') -Recurse -Force -ErrorAction SilentlyContinue
+    # Every later step (movement patch, auto-enable, v3.0 browser, DynWeapons2, FD overlay) re-applies on a clean pinned tree: restore all tracked
+    # files and drop untracked files under scripts/ (all of them are regenerated below; the FD patch resets files an earlier patch also touched).
+    GitC $Core @('checkout', '--', '.') | Out-Null
+    GitC $Core @('clean', '-fdq', '--', 'scripts') | Out-Null
 }
 $patch = Join-Path $Root '.combo-core-overlay.patch'
 $prevEap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
