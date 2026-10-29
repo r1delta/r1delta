@@ -17,8 +17,8 @@ inline constexpr const char kUberLmgSource[] =
 // = baked only / one cascade / blended cascades, fog flavour).
 //
 // Material inputs (VMT): $basetexture t0, $bumpmap t1, $reflectionTint t2 (rgb F0, a gloss: the stock shader reads a for
-// its mip / lobe exponent / fresnel weight too), $envmap t5 (R2_ENV), AO and cavity packed in $detailColor t4
-// (single layer) or $blendModulateTexture t15 b / a (layers) when R2_T_PACK. Two-layer materials add $baseTexture2 t11,
+// its mip / lobe exponent / fresnel weight too), $envmap t5 (R2_ENV), AO (g) and cavity (r) packed in $detailColor t4
+// (single layer) or AO (a) and cavity (b) in $blendModulateTexture t15 (layers) when R2_T_PACK. Two-layer materials add $baseTexture2 t11,
 // $bumpmap2 t12, $reflectionTint2 t13, $blendModulateTexture t15 (r, g = stock blend range).
 #ifndef R2_SPEC_SRGB
 #define R2_SPEC_SRGB 0   // 0: F0 = the sampled (sRGB-decoded) _spc like R2, which reads the sRGB flagged texture through an sRGB view; 1 re-encodes to the stored byte
@@ -63,7 +63,7 @@ inline constexpr const char kUberLmgSource[] =
 //   R2_T_FENV  analytic environment BRDF lerp(F0, max(F0, (1-rough)^2), (1-NdotV)^5) instead of the stock fresnel mix
 //   R2_T_SO    lightmap specular occlusion: env *= lerp(1, saturate(light), scale)
 //   R2_T_GGX   GGX lobes for sun, real-time and hardware lights and the baked-direction highlight
-//   R2_T_PACK  AO and cavity from the packed carrier (single layer: $detailColor t4 .g/.b, layers: blend texture .b/.a)
+//   R2_T_PACK  AO and cavity from the packed carrier (single layer: $detailColor t4 .g = AO, .r = cavity; layers: blend texture .a = AO, .b = cavity)
 #ifndef R2_NEUTRAL
 #define R2_NEUTRAL 0
 #endif
@@ -326,12 +326,12 @@ float4 PSMain(PSIn i
     fresnelMax = lerp(cb0[11].x, cb0[19].x, blend);
     fresnelSharp = lerp(cb0[12].w, cb0[20].w, blend);
 #if R2_T_PACK
-    ao = bm.z; cav = bm.w;
+    ao = bm.w; cav = bm.z;   // DXT5 carrier: RGB = (mask, mask, cavity), A = AO
 #endif
 #elif R2_T_PACK
     {
-        const float3 pkk = packedTexture.Sample(packedSampler, i.uv.xy).rgb;
-        ao = pkk.g; cav = pkk.b;
+        const float2 pkk = packedTexture.Sample(packedSampler, i.uv.xy).rg;   // DXT1 (AO only: R = 255) or BC5 carrier: R = cavity, G = AO
+        ao = pkk.y; cav = pkk.x;
     }
 #endif
     const float expo = abs(min(1.0 / pow(cb0[4].z - cb0[4].w * rtAlpha, 2.0), -specExp));   // stock phong exponent

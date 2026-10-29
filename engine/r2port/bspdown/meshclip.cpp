@@ -793,8 +793,24 @@ void orderMeshes(Ctx& c) {
     // oldAt[newIndex] = old index; newOf[old] = new index (identity outside [world0, worldEnd)).
     std::vector<uint32_t> oldAt(meshes.size()), newOf(meshes.size());
     for (size_t i = 0; i < meshes.size(); i++) oldAt[i] = (uint32_t)i;
+    // R2 lists the meshes in flag classes (mp_black_water_canal: 0x100a20, 0x100a00, 0x100a30, 0x100a10 blocks) and the later classes hold the
+    // decals and overlays (sign lettering, stripes, bullet holes) that must draw after their base meshes: sorting by material sort alone drew
+    // them first and the walls covered them. The class rank is the order of first appearance of the flags value, so the sort key is
+    // (flag class, material sort) and no mesh moves in front of a mesh of an earlier class.
+    std::vector<uint32_t> classRank(meshes.size(), 0);
+    {
+        std::vector<uint32_t> seen;
+        for (size_t i = world0; i < worldEnd; i++) {
+            size_t k = 0;
+            while (k < seen.size() && seen[k] != meshes[i].flags) k++;
+            if (k == seen.size()) seen.push_back(meshes[i].flags);
+            classRank[i] = (uint32_t)k;
+        }
+    }
     std::stable_sort(oldAt.begin() + (ptrdiff_t)world0, oldAt.begin() + (ptrdiff_t)worldEnd,
-                     [&](uint32_t a, uint32_t b) { return meshes[a].materialSort < meshes[b].materialSort; });
+                     [&](uint32_t a, uint32_t b) {
+                         return classRank[a] != classRank[b] ? classRank[a] < classRank[b] : meshes[a].materialSort < meshes[b].materialSort;
+                     });
     size_t moved = 0;
     for (size_t i = 0; i < meshes.size(); i++) {
         newOf[oldAt[i]] = (uint32_t)i;

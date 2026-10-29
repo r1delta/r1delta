@@ -608,7 +608,7 @@ Evidence key: [R1] read in the R1 engine loaders (IDA, copy of engine.dll databa
    in index order, opens a new draw run when the material sort changes and stops at 2048 runs (`if (v2 == 2048)`): every visible mesh after the 2048th
    run is not drawn (also capped at 0x300000 indices). Stock R1 maps list meshes sorted by sort (mp_rise 3 descents), R2 maps do not (mp_eden 2316
    descents, 5252 runs if everything is visible), so high mesh indices (roofs, decks, walls) vanish depending on the view angle. Model 0 meshes below
-   the prop base are stably sorted by material sort (eden: 951 runs); ids in lumps 0x78 and 0x64 are renumbered; 0x50/0x51 move together. Opt-out
+   the prop base are stably sorted by (flag class, material sort; the class is the order of first appearance of the mesh flags value, later classes are decals/overlays that draw after their bases) (eden: 951 runs); ids in lumps 0x78 and 0x64 are renumbered; 0x50/0x51 move together. Opt-out
    --no-mesh-order (provider token no-mesh-order). Checker: undo_mesh_order recovers the permutation from 0x78 and checks it equals the stable sort.
 
 24. Emitter glow ramp coordinate of layered pure-emitter world materials (vcalpha.cpp, TrimGlow). R2 draws a pure emitter (black albedo,

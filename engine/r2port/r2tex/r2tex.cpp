@@ -2356,35 +2356,47 @@ std::uint8_t srgbByteToLinear(std::uint8_t v) {
     return static_cast<std::uint8_t>(std::clamp(l * 255.0f + 0.5f, 0.0f, 255.0f));
 }
 
+#include "r2tex_uberpack.inc"
+
 // Red channel of mip 0 of a converted R2 texture (BC4/BC5/BC1-3 red, RGBA8 red, A8 value). A source flagged sRGB is
 // converted to linear, which is what R2's sampler returned for it.
 bool loadUberPlane(const std::shared_ptr<Database>& db, std::uint64_t guid, UberPlane& plane, std::string& error) {
     const AssetRecord* record = findRecord(*db, guid, kTxtr);
     if (!record) { error = "unresolved texture GUID"; return false; }
+    const auto tStart = std::chrono::steady_clock::now();
     std::vector<std::uint8_t> vtf;
     if (!convertTextureWithDb(db, *record, TextureOptions{}, vtf, error)) return false;
+    const auto tConverted = std::chrono::steady_clock::now();
     VtfView view;
     if (!parseVtfView(vtf, view)) { error = "invalid source VTF for " + record->name; return false; }
     plane.width = view.width; plane.height = view.height;
     const std::size_t texels = static_cast<std::size_t>(view.width) * view.height;
-    plane.value.assign(texels, 255);
+    if (!uberRedFromBlocks(vtf, view, plane.value)) plane.value.assign(texels, 255);
     if (view.format == 8) {   // A8 (R2 R8): one byte per texel, mip 0 stored last
         std::size_t offset = view.dataOffset;
         for (std::uint32_t m = view.mipCount; m-- > 1;)
             offset += static_cast<std::size_t>(std::max(1u, view.width >> m)) * std::max(1u, view.height >> m);
         if (offset > vtf.size() || texels > vtf.size() - offset) { error = "truncated A8 source " + record->name; return false; }
         std::memcpy(plane.value.data(), vtf.data() + offset, texels);
-    } else {
+    } else if (plane.value.size() != texels || (view.format != 13 && view.format != 14 && view.format != 15 && view.format != 34 && view.format != 35)) {
         std::vector<std::uint8_t> rgba;
         std::uint32_t w = 0, h = 0;
         if (!decodeVtfMip(vtf, view, 0, rgba, w, h) || w != view.width || h != view.height) {
             error = "unsupported source VTF format " + std::to_string(view.format) + " for " + record->name;
             return false;
         }
+        plane.value.resize(texels);
         for (std::size_t p = 0; p < texels; ++p) plane.value[p] = rgba[p * 4];
     }
-    if (u32(vtf.data() + 0x14) & 0x80000u)
-        for (std::uint8_t& v : plane.value) v = srgbByteToLinear(v);
+    if (u32(vtf.data() + 0x14) & 0x80000u) {
+        const std::uint8_t* table = uberSrgbTable();
+        for (std::uint8_t& v : plane.value) v = table[v];
+    }
+    if (std::getenv("R2TEX_UBERPACK_TIME"))
+        std::fprintf(stderr, "UBERTIME_PLANE %llx %ux%u fmt=%u convert_ms=%.1f extract_ms=%.1f\n", static_cast<unsigned long long>(guid),
+                     static_cast<unsigned>(view.width), static_cast<unsigned>(view.height), static_cast<unsigned>(view.format),
+                     std::chrono::duration<double, std::milli>(tConverted - tStart).count(),
+                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tConverted).count());
     return true;
 }
 
@@ -2653,19 +2665,21 @@ bool buildSpecGlossVtf(const std::shared_ptr<Database>& db, std::uint64_t spcGui
 // ---------------------------------------------------------------------------------------------------------------------
 // Uber carriers (opt-in, MaterialOptions::uberPack / env R2_UBER, see shaderlab/uber/DESIGN.md sec 4 and 9).
 // R2 material slot 11 (AO, red) and slot 12 (cavity, red) have no R1 slot. The engine's LightmappedGeneric override reads
-// them from a texture the stock shader already binds, packed as one linear BGRA8888 VTF (R2 AO/cavity are single-channel
-// data, so no sRGB flag; format 12 loads in game, RGBA8888 does not):
-//   single layer  r2tex/pbr/<ao guid>_<cavity guid>            $detailColor (+ $detailColorMode 1), R = 255, G = AO, B = cavity, A = 255
-//   two layers    r2tex/pbrl/<mask guid>_<ao guid>_<cavity guid>  $blendModulateTexture, R = G = slot 22 mask (the stock blend
-//                 range, exactly the existing r2tex/layer_masks/<guid>_rg), B = AO, A = cavity
+// them from a texture the stock shader already binds, as one linear block compressed VTF (R2 AO/cavity are single-channel
+// data, so no sRGB flag; BC5 and DXT1/DXT5 load in game; the encoders are in r2tex_uberpack.inc):
+//   single layer  r2tex/pbr/<ao guid>_<cavity guid>            $detailColor (+ $detailColorMode 1): R = cavity, G = AO. BC5 (ImageFormat 34), or DXT1
+//                 (R = B = 255) when only AO is present and the DXT1 fit reaches 40 dB: the shader decodes both the same way
+//   two layers    r2tex/pbrl/<mask guid>_<ao guid>_<cavity guid>  $blendModulateTexture, DXT5 (ImageFormat 15): RGB = (slot 22 mask, mask, cavity)
+//                 (R = G = the stock blend range, exactly the existing r2tex/layer_masks/<guid>_rg), A = AO
 // A zero guid means "absent" and packs as 255 (no occlusion). The texture takes the size of the largest source on each axis
 // (maps of different size are resampled: area average when shrinking, bilinear when growing), keeps no source mips and
 // builds the full chain from level 0 with a 2x2 box filter. The name is the whole recipe, so ConvertTexture(name) needs
 // nothing else and the converted-cache entry of a material can be rebuilt from the VMT alone.
 constexpr const char* kUberPackPrefix = "r2tex/pbr/";
 constexpr const char* kUberPackLayeredPrefix = "r2tex/pbrl/";
-// Part of the provider's converted-cache directory name while the packer is on; bump when the packing changes.
-constexpr const char* kUberPackCacheTag = "-uber2";
+// Part of the provider's converted-cache directory name while the packer is on; bump when the packing changes
+// (-uber2: BGRA8888 carriers with G = AO, B = cavity; -uber3: compressed carriers, G = AO, R = cavity / DXT5 layered).
+constexpr const char* kUberPackCacheTag = "-uber3";
 
 // R2_UBER is the engine's comma separated feature list (shaderlab/uber/DESIGN.md sec 5: lod, fenv, so, ggx, pack, neutral ...). The
 // carriers are only read by the `pack` term, so they are emitted when the list has `pack`, `all` or is plain `1`; the other values
@@ -2718,77 +2732,32 @@ bool parseUberPackName(const std::string& name, std::uint64_t& mask, std::uint64
 bool buildUberPackVtf(const std::shared_ptr<Database>& db, std::uint64_t mask, std::uint64_t ao, std::uint64_t cavity,
                       std::vector<std::uint8_t>& vtf, std::string& error) {
     if (!ao && !cavity) { error = "uber pack without AO or cavity"; return false; }
+    const auto loadStart = std::chrono::steady_clock::now();
     UberPlane maskPlane, aoPlane, cavityPlane;
     if (mask && !loadUberPlane(db, mask, maskPlane, error)) return false;
     if (ao && !loadUberPlane(db, ao, aoPlane, error)) return false;
     if (cavity && !loadUberPlane(db, cavity, cavityPlane, error)) return false;
+    if (std::getenv("R2TEX_UBERPACK_TIME"))
+        std::fprintf(stderr, "UBERTIME_LOAD %s load_ms=%.1f\n", uberPackName(mask, ao, cavity).c_str(),
+                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - loadStart).count());
     std::uint32_t width = 1, height = 1;
     for (const UberPlane* plane : {&maskPlane, &aoPlane, &cavityPlane}) {
         width = std::max(width, plane->width);
         height = std::max(height, plane->height);
     }
     if (width > 16384 || height > 16384) { error = "uber pack source is too large"; return false; }
-    const std::size_t texels = static_cast<std::size_t>(width) * height;
-    const std::vector<std::uint8_t> maskValue = mask ? resizeUberPlane(maskPlane, width, height) : std::vector<std::uint8_t>();
-    const std::vector<std::uint8_t> aoValue = ao ? resizeUberPlane(aoPlane, width, height) : std::vector<std::uint8_t>();
-    const std::vector<std::uint8_t> cavityValue = cavity ? resizeUberPlane(cavityPlane, width, height) : std::vector<std::uint8_t>();
-
-    // BGRA8888 bytes: B, G, R, A.
-    std::vector<std::vector<std::uint8_t>> chain;
-    std::vector<std::pair<std::uint32_t, std::uint32_t>> dims;
-    chain.emplace_back(texels * 4);
-    dims.emplace_back(width, height);
-    for (std::size_t p = 0; p < texels; ++p) {
-        const std::uint8_t aoByte = ao ? aoValue[p] : 255, cavityByte = cavity ? cavityValue[p] : 255;
-        std::uint8_t* px = chain[0].data() + p * 4;
-        if (mask) {
-            px[0] = aoByte; px[1] = maskValue[p]; px[2] = maskValue[p]; px[3] = cavityByte;
-        } else {
-            px[0] = cavityByte; px[1] = aoByte; px[2] = 255; px[3] = 255;
-        }
-    }
-    while (dims.back().first > 1 || dims.back().second > 1) {
-        const auto [pw, ph] = dims.back();
-        const std::uint32_t nw = std::max(1u, pw / 2), nh = std::max(1u, ph / 2);
-        std::vector<std::uint8_t> next(static_cast<std::size_t>(nw) * nh * 4);
-        const auto& prev = chain.back();
-        for (std::uint32_t y = 0; y < nh; ++y)
-            for (std::uint32_t x = 0; x < nw; ++x) {
-                const std::uint32_t x0 = std::min(pw - 1, x * 2), x1 = std::min(pw - 1, x * 2 + 1);
-                const std::uint32_t y0 = std::min(ph - 1, y * 2), y1 = std::min(ph - 1, y * 2 + 1);
-                for (int c = 0; c < 4; ++c) {
-                    const unsigned sum = prev[(static_cast<std::size_t>(y0) * pw + x0) * 4 + c] +
-                                         prev[(static_cast<std::size_t>(y0) * pw + x1) * 4 + c] +
-                                         prev[(static_cast<std::size_t>(y1) * pw + x0) * 4 + c] +
-                                         prev[(static_cast<std::size_t>(y1) * pw + x1) * 4 + c];
-                    next[(static_cast<std::size_t>(y) * nw + x) * 4 + c] = static_cast<std::uint8_t>((sum + 2) / 4);
-                }
-            }
-        chain.push_back(std::move(next));
-        dims.emplace_back(nw, nh);
-    }
-    std::size_t total = 0x58;
-    for (const auto& level : chain) total += level.size();
-    vtf.assign(total, 0);
-    // Same VTF 7.5 header as convertTextureWithDb; flags 0 (no sRGB, no clamp: the AO/cavity UVs are the base UVs).
-    std::memcpy(vtf.data(), "VTF\0", 4);
-    put32(vtf.data() + 4, 7); put32(vtf.data() + 8, 5); put32(vtf.data() + 12, 0x58);
-    put16(vtf.data() + 0x10, static_cast<std::uint16_t>(width)); put16(vtf.data() + 0x12, static_cast<std::uint16_t>(height));
-    put32(vtf.data() + 0x14, 0);
-    put16(vtf.data() + 0x18, 1); put16(vtf.data() + 0x1a, 0);
-    putFloat(vtf.data() + 0x20, 0.5f); putFloat(vtf.data() + 0x24, 0.5f); putFloat(vtf.data() + 0x28, 0.5f);
-    putFloat(vtf.data() + 0x30, 1.0f);
-    putI32(vtf.data() + 0x34, 12);   // BGRA8888
-    vtf[0x38] = static_cast<std::uint8_t>(chain.size());
-    putI32(vtf.data() + 0x39, -1); vtf[0x3d] = 0; vtf[0x3e] = 0; put16(vtf.data() + 0x3f, 1);
-    put32(vtf.data() + 0x44, 1);
-    vtf[0x50] = 0x30; vtf[0x51] = 0; vtf[0x52] = 0; vtf[0x53] = 0; put32(vtf.data() + 0x54, 0x58);
-    std::size_t at = 0x58;
-    for (std::size_t m = chain.size(); m-- > 0;) {
-        std::memcpy(vtf.data() + at, chain[m].data(), chain[m].size());
-        at += chain[m].size();
-    }
-    return true;
+    // Planes already at the target size are used in place; only mismatched ones are resampled.
+    std::vector<std::uint8_t> resized[3];
+    auto fit = [&](const UberPlane& plane, std::vector<std::uint8_t>& storage) -> const std::vector<std::uint8_t>* {
+        if (plane.width == width && plane.height == height) return &plane.value;
+        storage = resizeUberPlane(plane, width, height);
+        return &storage;
+    };
+    const std::vector<std::uint8_t>* maskValue = mask ? fit(maskPlane, resized[0]) : nullptr;
+    const std::vector<std::uint8_t> none;
+    const std::vector<std::uint8_t>* aoValue = ao ? fit(aoPlane, resized[1]) : &none;
+    const std::vector<std::uint8_t>* cavityValue = cavity ? fit(cavityPlane, resized[2]) : &none;
+    return encodeUberPackVtf(width, height, maskValue, *aoValue, *cavityValue, vtf, uberPackName(mask, ao, cavity).c_str());
 }
 
 // R1 renders large single-mip textures as garbage (the mp_glitch training_r2 sky vista, a 2048x2048 DXT1 with one mip,
