@@ -581,26 +581,15 @@ bool PDataValidator::isValid(const std::string_view& key, const std::string_view
 		}
 	}
 
-	// Check for invalid weapon strings in loadouts
-	if (key.find("titanLoadouts") != std::string_view::npos) {
-		if (value.find("mp_weapon_mega") != std::string_view::npos) {
-			return true;
-		}
-		if (value.find("mp_weapon") != std::string_view::npos) {
-			return false;
-		}
-	}
-	
-	if (key.find("pilotLoadouts") != std::string_view::npos) {
-		if (value.find("mp_weapon_mega3") != std::string_view::npos) {
-			return false;
-		}
-		if (value.find("mp_weapon_mega4") != std::string_view::npos) {
-			return false;
-		}
-		if (value.find("mp_titanweapon") != std::string_view::npos) {
-			return false;
-		}
+	// Weapon rules for loadouts (old mp_weapon_mega1..4 names are migrated to
+	// the real weapon names before they reach this point).
+	switch (PersistentDataStore::JudgeLoadoutValue(key, value)) {
+	case PersistentDataStore::LoadoutVerdict::Accept:
+		return true;
+	case PersistentDataStore::LoadoutVerdict::Reject:
+		return false;
+	case PersistentDataStore::LoadoutVerdict::Neutral:
+		break;
 	}
 
 
@@ -885,6 +874,28 @@ std::once_flag PDef::s_initFlag;
 namespace {
 constexpr uint32_t kPackedPDataMinEntries = 32;
 
+// Older clients and older profiles name the former mp_weapon_mega1..4 slots by
+// the engine slot. Rewrites those names to the real weapon names, in place,
+// before the entry is validated and stored, so it lands in the current schema
+// instead of being dropped or kept under a name the scripts no longer know.
+// A buffer the longer name would not fit into is left alone (and then fails
+// validation like any unknown name).
+void NormalizeRenamedNames(char* buffer, size_t capacity)
+{
+	std::string renamed;
+	const size_t length = strnlen(buffer, capacity);
+	if (!PersistentDataStore::RenameTokens(std::string_view(buffer, length), renamed)
+		|| renamed.size() >= capacity)
+		return;
+	memcpy(buffer, renamed.c_str(), renamed.size() + 1);
+}
+
+void NormalizePersistentConVar(NetMessageCvar_t& var)
+{
+	NormalizeRenamedNames(var.name + kPersistPrefixLength, sizeof(var.name) - kPersistPrefixLength);
+	NormalizeRenamedNames(var.value, sizeof(var.value));
+}
+
 bool IsSchemaValidPersistentConVar(const NetMessageCvar_t& var)
 {
 	const char* key = var.name + kPersistPrefixLength;
@@ -951,6 +962,7 @@ bool DecodePackedPDataWire(const std::string& encoded, std::vector<NetMessageCva
 		memcpy(var.name, kPersistPrefix, kPersistPrefixLength);
 		memcpy(var.name + kPersistPrefixLength, entry.key.c_str(), entry.key.size() + 1);
 		memcpy(var.value, entry.value.c_str(), entry.value.size() + 1);
+		NormalizePersistentConVar(var);
 		// One entry the server's schema does not know (e.g. a client-side mod)
 		// must not throw away the rest of the player's data.
 		if (!IsSchemaValidPersistentConVar(var)) {
@@ -1198,6 +1210,7 @@ bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 				Warning("Failed to prefix persistent data convar\n");
 				return false;
 			}
+			NormalizePersistentConVar(var);
 			if (!IsSchemaValidPersistentConVar(var)) {
 				WarnDroppedPersistentEntry("legacy read", var.name + kPersistPrefixLength, var.value);
 				continue;
@@ -2198,6 +2211,9 @@ bool ReadLegacyProfile(const std::filesystem::path& profile, LegacyProfile& lega
 	if (!ReadWholeFile(profile, contents, PersistentDataStore::MaxFileSize))
 		return false;
 	PersistentDataStore::ExtractLegacyProfileEntries(contents, legacy.entries);
+	// Profiles written before the weapon rename carry the old mega slot names.
+	// Migrate before anything compares keys with the store.
+	PersistentDataStore::MigrateRenamedNames(legacy.entries);
 	if (legacy.entries.empty())
 		return false;
 	legacy.ownerMarker = PersistentDataStore::ProfileHasOwnerMarker(contents);
@@ -2330,6 +2346,18 @@ bool EnsureStoreLoaded()
 		changed = true;
 	}
 
+	// A store written before the mega weapons got their real names: migrate in
+	// memory and write it back with the new names. The file as it was stays
+	// next to the store as .pre-rename, in case an older build needs it back.
+	const size_t renamedEntries = PersistentDataStore::MigrateRenamedNames(store.entries);
+	if (renamedEntries) {
+		if (result != LoadResult::Missing)
+			CopyFileW(loadedFrom.c_str(), WithSuffix(store.path, L".pre-rename").c_str(), FALSE);
+		Msg("R1Delta: migrated %u persistent data entries to the current weapon names\n",
+			static_cast<unsigned>(renamedEntries));
+		changed = true;
+	}
+
 	// profile.cfg also carries a write-only mirror of the data for older
 	// builds. Import from it on the first run after upgrading (no store yet),
 	// or when an older build ran in between: the file then lacks the owner
@@ -2410,6 +2438,15 @@ void setinfopersist_cmd(const CCommand& args) {
 			Warning("Invalid user info value %s. Only certain characters are allowed.\n", value);
 			return;
 		}
+
+		// Old mega slot names (console, cfg, an older client's script) become the
+		// real weapon names before validation and storage.
+		std::string renamedKey;
+		std::string renamedValue;
+		if (PersistentDataStore::RenameTokens(key, renamedKey) && renamedKey.size() <= MAX_LENGTH)
+			key = renamedKey.c_str();
+		if (PersistentDataStore::RenameTokens(value, renamedValue) && renamedValue.size() <= MAX_LENGTH)
+			value = renamedValue.c_str();
 		if (!PDef::IsValidKeyAndValue(key, value)) {
 			Warning("PData key %s, value %s failed validation.\n", key, value);
 			return;
