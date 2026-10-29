@@ -66,6 +66,7 @@
 #include "factory.h"
 #include "core.h"
 #include "load.h"
+#include "background_mode.h"
 #include "patcher.h"
 #include "MinHook.h"
 #include "TableDestroyer.h"
@@ -8412,6 +8413,8 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
 
 		// Register slot commands
+		r1delta::background::RegisterSelfTestCommand();
+
 		RegisterConCommand("slot1", Slot1Command, "Select menu slot 1", 0);
 		RegisterConCommand("slot2", Slot2Command, "Select menu slot 2", 0);
 		RegisterConCommand("slot3", Slot3Command, "Select menu slot 3", 0);

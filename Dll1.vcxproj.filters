@@ -125,6 +125,9 @@
     <ClInclude Include="engine\core\framework.h">
       <Filter>engine\core</Filter>
     </ClInclude>
+    <ClInclude Include="engine\core\background_mode.h">
+      <Filter>engine\core</Filter>
+    </ClInclude>
     <ClInclude Include="engine\core\load.h">
       <Filter>engine\core</Filter>
     </ClInclude>
@@ -639,6 +642,9 @@
       <Filter>engine\core</Filter>
     </ClCompile>
     <ClCompile Include="engine\core\materialsystem_dx11_vtf_scratch.cpp">
+      <Filter>engine\core</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\core\background_mode.cpp">
       <Filter>engine\core</Filter>
     </ClCompile>
     <ClCompile Include="engine\core\load.cpp">

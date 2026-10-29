@@ -289,6 +289,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="thirdparty\jwt\jwt_compact.h" />
     <ClInclude Include="sdk\keyvalues.h" />
     <ClInclude Include="engine\core\load.h" />
+    <ClInclude Include="engine\core\background_mode.h" />
     <ClInclude Include="engine\core\ffa_targeting.h" />
     <ClInclude Include="engine\core\ffa_targeting_logic.h" />
     <ClInclude Include="engine\auth.h" />
@@ -457,6 +458,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="client\rendering\graphics_flight_recorder_hooks.cpp" />
     <ClCompile Include="sdk\keyvalues.cpp" />
     <ClCompile Include="engine\core\load.cpp" />
+    <ClCompile Include="engine\core\background_mode.cpp" />
     <ClCompile Include="engine\auth.cpp" />
     <ClCompile Include="server\ai\bot.cpp" />
     <ClCompile Include="server\chat.cpp" />
