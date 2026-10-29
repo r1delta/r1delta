@@ -444,6 +444,14 @@ bool RegisterMovementConVars()
 	static constexpr Parameter parameters[] = {
 		{"sv_autobunnyhopping", "0", "Allow automatic bunnyhopping.", 0.0f, 0.0f,
 			FCVAR_GAMEDLL | FCVAR_REPLICATED},
+		// Playtest default (R1Delta 3.0): CORE scripts/vscripts/movement/pilot_server.nut opts every pilot into the
+		// slide/grapple program on converted R2 maps (_r2, default on) and on stock R1 maps (_r1, default off).
+		{"delta_pilot_movement_auto_r2", "1",
+			"Automatically enable the slide/grapple movement program for every pilot on converted R2 maps.", 0.0f, 1.0f,
+			FCVAR_GAMEDLL | FCVAR_RELEASE},
+		{"delta_pilot_movement_auto_r1", "0",
+			"Automatically enable the slide/grapple movement program for every pilot on stock R1 maps.", 0.0f, 1.0f,
+			FCVAR_GAMEDLL | FCVAR_RELEASE},
 		{"delta_sp_landing_slowdown_scale", "0",
 			"Landing movement slowdown multiplier (0=off, 1=full).", 0.0f, 1.0f, physicsFlags},
 		{"delta_sp_slide_friction_scale", "1",

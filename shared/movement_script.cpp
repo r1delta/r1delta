@@ -1,5 +1,6 @@
 #include "movement_runtime.h"
 #include "movement_checkpoints.h"
+#include "../engine/filesystem/r2_map_provider.h"
 #include "../client/movement_presentation_hooks.h"
 #include "core.h"
 #include "load.h"
@@ -660,6 +661,14 @@ SQInteger QueryMovementEnabled(HSQUIRRELVM vm)
     return PushMovementBoolean(vm, IsMovementEnabledForPlayer(
         reinterpret_cast<std::uintptr_t>(sq_getentity(vm, 2)), name));
 }
+// True when the named map is one of the converted Titanfall 2 maps the R2 map provider serves (r2port::IsR2PortMap).
+SQInteger QueryR2PortMap(HSQUIRRELVM vm)
+{
+    const char* name{};
+    if (SQ_FAILED(sq_getstring(vm, 2, &name)) || !name)
+        return MovementScriptError(vm, "Movement_IsR2PortMap requires a map name");
+    return PushMovementBoolean(vm, r2port::IsR2PortMap(name));
+}
 SQInteger QueryMovementLastError(HSQUIRRELVM vm)
 {
     sq_pushstring(vm, OwningMovementVm(vm)->lastError, -1);
@@ -864,6 +873,7 @@ const MovementBinding movementBindings[] = {
     MREAD("Movement_IsAvailable", QueryMovementAvailable, "bool"),
     MREAD("Movement_GetLastError", QueryMovementLastError, "string"),
     {"Movement_IsEnabled", QueryMovementEnabled, ".Is", 3, "bool"},
+    {"Movement_IsR2PortMap", QueryR2PortMap, ".s", 2, "bool"},
     {"Movement_HasPresentation", QueryMovementPresentation, ".s", 2, "bool"},
     {"Movement_GetPresentationInt", ReadPresentationInteger, ".si", 3, "int"},
     {"Movement_GetPresentationFloat", ReadPresentationFloat, ".si", 3, "float"},
