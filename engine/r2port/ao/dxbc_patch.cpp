@@ -1164,6 +1164,7 @@ struct LightmapSample {
     std::uint32_t coordReg = 0;
     std::uint32_t coordX = 0, coordY = 0;
     Words resource, sampler;   // operand words copied verbatim into the replacement taps
+    bool decode = false;       // t9: decode rgb * (a * 3.984375 + 0.015625) per tap, blend the energy, hand the stock decode a == 1 / 4
 };
 
 // Weights and tap coordinates of the cubic B-spline (SDK 2013 common_lightmappedgeneric_fxc.h / Godot PR 89919), both axes at once in
@@ -1221,13 +1222,64 @@ std::uint32_t EmitBicubicTaps(Words& out, std::uint32_t base, const LightmapSamp
     tap(e, "yzyy");  // (X1, Y0)
     tap(g, "xwxx");  // (X0, Y1)
     tap(h, "ywyy");  // (X1, Y1)
+    if (s.decode) {
+        // Lightmap 0 is rgb * (a * 3.984375 + 0.015625): blending rgb and a separately and decoding afterwards overshoots next to an edge
+        // (cross term of two ramps; 0.4 to 1 % of the glitch lightmap cells exceed every texel they are made of). Decode every tap
+        // first and blend the energies.
+        for (const std::uint32_t tapReg : {d, e, g, h}) {
+            op(kOpMad, {DstT(tapReg, 0x8), SrcT(tapReg, "wwww"), Imm(3.984375f), Imm(0.015625f)});
+            op(kOpMul, {DstT(tapReg, 0x7), SrcT(tapReg, "xyzx"), SrcT(tapReg, "wwww")});
+        }
+    }
     op(kOpAdd, {DstT(d, 0xf), SrcT(d, "xyzw"), SrcT(e, "xyzw", true)});
     op(kOpMad, {DstT(d, 0xf), SrcT(d, "xyzw"), SrcT(R(4), "xxxx"), SrcT(e, "xyzw")});        // row y0
     op(kOpAdd, {DstT(g, 0xf), SrcT(g, "xyzw"), SrcT(h, "xyzw", true)});
     op(kOpMad, {DstT(g, 0xf), SrcT(g, "xyzw"), SrcT(R(4), "xxxx"), SrcT(h, "xyzw")});        // row y1
     op(kOpAdd, {DstT(d, 0xf), SrcT(d, "xyzw"), SrcT(g, "xyzw", true)});
     op(kOpMad, {DstT(d, 0xf), SrcT(d, "xyzw"), SrcT(R(4), "yyyy"), SrcT(g, "xyzw")});        // gy0 * row y0 + gy1 * row y1
+    if (s.decode)
+        op(kOpMov, {DstT(d, 0x8), Imm((1.0f - 0.015625f) / 3.984375f)});                     // the stock decode now yields exactly 1
     return count;
+}
+
+// The first instruction that reads the t9 destination must be the stock decode `mad x, d.w, l(3.984375), l(0.015625)` (all 34,800 stock
+// records: it is the very next use). Control flow before that use, or any other first use, makes the energy hand-over unsafe.
+bool DecodeIsFirstUse(const std::vector<std::uint32_t>& words, const std::vector<Instruction>& instructions, std::size_t sampleIndex, std::uint32_t reg)
+{
+    for (std::size_t i = sampleIndex + 1; i < instructions.size(); ++i) {
+        const Instruction& in = instructions[i];
+        if (IsDeclaration(in.opcode))
+            continue;
+        if (in.opcode == kOpIf || in.opcode == kOpLoop || in.opcode == kOpSwitch || in.opcode == kOpCall || in.opcode == kOpCallc || in.opcode == kOpLabel)
+            return false;
+        std::size_t cursor = in.operandStart;
+        const std::size_t end = in.start + in.length;
+        std::vector<Operand> ops;
+        std::vector<std::size_t> starts;
+        std::string error;
+        while (cursor < end) {
+            Operand operand;
+            starts.push_back(cursor);
+            if (!ParseOperand(words, cursor, end, operand, error))
+                return false;
+            ops.push_back(std::move(operand));
+        }
+        for (std::size_t k = 1; k < ops.size(); ++k) {
+            std::uint32_t r = 0;
+            if (!GetImmediateRegister(ops[k], kOperandTemp, r) || r != reg)
+                continue;
+            if (in.opcode != kOpMad || k != 1 || ops.size() != 4)
+                return false;
+            const std::uint32_t token = words[starts[1]];
+            const std::uint32_t mode = (token >> 2) & 3;
+            const bool wOnly = (token & 0x80000000u) == 0 && ((mode == 1 && ((token >> 4) & 0xff) == 0xff) || (mode == 2 && ((token >> 4) & 3) == 3));
+            return wOnly && ops[2].type == 4 && ops[3].type == 4 && words[starts[2] + 1] == FloatBits(3.984375f) && words[starts[3] + 1] == FloatBits(0.015625f);
+        }
+        std::uint32_t r = 0;
+        if (!ops.empty() && GetImmediateRegister(ops[0], kOperandTemp, r) && r == reg && ops[0].componentMask == 0xf)
+            return false;   // overwritten before any read: not the shape of the stock shaders
+    }
+    return false;
 }
 
 } // namespace
@@ -1336,6 +1388,11 @@ bool PatchLightmapBicubic(const std::vector<std::uint8_t>& input,
         for (const LightmapSample& other : samples)
             if (other.slot == slot)
                 return fail("lightmap texture is sampled more than once");
+        if (slot == kLightmapSlot0) {
+            if (!DecodeIsFirstUse(words, instructions, index, destinationRegister))
+                return fail("the t9 destination is not first read by the stock lightmap decode");
+            sample.decode = true;
+        }
         samples.push_back(std::move(sample));
     }
     if (samples.empty())
