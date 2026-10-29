@@ -266,7 +266,6 @@ jobs:
             ffa_targeting_tests = 'tests/ffa_targeting_tests.vcxproj'
             p2p_codec_tests = 'tests/p2p_codec_tests.vcxproj'
             region_cull_tests = 'tests/region_cull_tests.vcxproj'
-            dlc_ownership_tests = 'tests/dlc_ownership_tests.vcxproj'
           }
 
           foreach ($entry in $projects.GetEnumerator()) {
@@ -307,8 +306,7 @@ jobs:
             'client_port_override_tests',
             'ffa_targeting_tests',
             'p2p_codec_tests',
-            'region_cull_tests',
-            'dlc_ownership_tests'
+            'region_cull_tests'
           )
           foreach ($test in $tests) {
             $executable = Join-Path '${{ env.BUILD_PATH }}' "tests/$test/$test.exe"

@@ -55,7 +55,6 @@
 #include "r2_material_provider.h"
 #include "legacy_ds_sound_tables.h"
 #include "soundscript_parity.h"
-#include "dlc_ownership.h"
 #include "script_sync_parity.h"
 #include "ui_script_failure.h"
 #include <cstdlib>
@@ -9473,10 +9472,6 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 			SoundScriptParity_RegisterClient();
 			ScriptSyncParity_RegisterClient();
 		}
-		// dlc1-5_enabled are userinfo, so they must exist (and be true) before the first connect; the
-		// stock startup check is patched out (r1delta.wpatch), which left them at their default "1".
-		Dlc_RegisterConVars();
-		Dlc_RefreshLocalPresence("startup");
 		RegisterConVar("delta_persistent_master_auth_token", "DEFAULT", FCVAR_ARCHIVE | FCVAR_SERVER_CANNOT_QUERY | FCVAR_DONTRECORD | FCVAR_PROTECTED | FCVAR_HIDDEN, "Persistent master server authentication token");
 		RegisterConVar("delta_persistent_master_auth_token_failed_reason", "", FCVAR_ARCHIVE | FCVAR_SERVER_CANNOT_QUERY | FCVAR_DONTRECORD | FCVAR_PROTECTED | FCVAR_HIDDEN, "Persistent master server authentication token");
 		RegisterConVar("delta_online_auth_enable", "0", FCVAR_GAMEDLL, "Whether to use master server auth");
@@ -9538,13 +9533,11 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	if (IsDedicatedServer() && !IsR1ODedicatedServer()) {
 		MH_CreateHook((LPVOID)(G_engine_ds + 0x45530), &HookedCBaseClientSetName, reinterpret_cast<LPVOID*>(&CBaseClientSetNameOriginal));
 		MH_CreateHook((LPVOID)(G_engine_ds + 0x491A0), &HookedCBaseClientConnect, reinterpret_cast<LPVOID*>(&oCBaseClientConnect));
-		Dlc_InstallDedicatedEngineHooks(G_engine_ds);
 	}
 	else if (!IsDedicatedServer()) {
 		MH_CreateHook((LPVOID)(G_engine + 0xD4840), &HookedCBaseClientSetName, reinterpret_cast<LPVOID*>(&CBaseClientSetNameOriginal));
 		MH_CreateHook((LPVOID)(G_engine + 0xD7DC0), &HookedCBaseClientConnect, reinterpret_cast<LPVOID*>(&oCBaseClientConnect));
 		MH_CreateHook((LPVOID)(G_engine + 0x2AA90), &HookedCBaseStateClientConnect, reinterpret_cast<LPVOID*>(&oCBaseStateClientConnect));
-		Dlc_InstallClientEngineHooks(G_engine);
 	}
 
 	//MH_CreateHook((LPVOID)(server_base + 0x364140), &sub_364140, reinterpret_cast<LPVOID*>(NULL));

@@ -9,8 +9,6 @@
 #include "defs.h"
 #include "sv_filter.h"
 #include "soundscript_parity.h"
-#include "dlc_ownership.h"
-#include "dlc_ownership_logic.h"
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
@@ -267,21 +265,6 @@ bool __fastcall HookedCBaseClientConnect(
         }
     }
 
-    // DLC ownership: the client's userinfo says which map groups it owns. A client that lacks the group of
-    // the map this server is on cannot load it, so it is turned away here instead of hanging in the loader.
-    if (conVars) {
-        const uint32_t clientDlcMask = r1d_dlc::MaskFromUserInfo([conVars](const char* name) -> const char* {
-            for (int i = 0; i < conVars->Count(); i++) {
-                NetMessageCvar_t& var = conVars->Element(i);
-                if (_stricmp(var.name, name) == 0)
-                    return var.value;
-            }
-            return nullptr;
-        });
-        if (!Dlc_CheckConnect(clientDlcMask, a8, a9))
-            return false;
-    }
-
     static auto bUseOnlineAuth = OriginalCCVar_FindVar(cvarinterface, "delta_online_auth_enable");
     static auto iSyncUsernameWithDiscord = OriginalCCVar_FindVar(cvarinterface, "delta_discord_username_sync");
     static auto iHostPort = OriginalCCVar_FindVar(cvarinterface, "hostport");
@@ -367,8 +350,6 @@ __int64 __fastcall HookedCBaseStateClientConnect(
 {
     // Before the signon NET_SetConVar, which carries every userinfo convar.
     SoundScriptParity_ClientConnecting();
-    // The ownership the signon NET_SetConVar will carry is recomputed from disk, never taken from a saved value.
-    Dlc_RefreshLocalPresence("connect");
 
     static int s_connectLogBudget = 16;
     if (s_connectLogBudget > 0) {
