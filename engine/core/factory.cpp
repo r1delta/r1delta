@@ -51,6 +51,7 @@
 #include <d3d11_4.h>
 
 #include <iostream>
+#include "server_usercmd.h"
 #include "cvar.h"
 #include <winternl.h>  // For UNICODE_STRING.
 #include <fstream>
@@ -21000,6 +21001,13 @@ char __fastcall CServerGameDLL__DLLInit(void* thisptr, CreateInterfaceFn appSyst
 	if (!IsR1ODedicatedServer()) {
 		InitializeRecentHostVars();
 		OriginalCCVar_FindVar(cvarinterface, "sv_pausable_dev")->m_nFlags &= ~(FCVAR_HIDDEN | FCVAR_DEVELOPMENTONLY);
+		// The shared movement cvars (sv_autobunnyhopping, delta_pilot_movement_auto_*, delta_sp_*) need the engine
+		// cvar interface, which does not exist yet when the server.dll load notification runs. Listen registers
+		// them from Host_InitHook (engine.dll), but the legacy dedicated host runs engine_ds.dll, whose Host_Init
+		// is never reached through that hook; this is the first point on every non-R1O server host where the
+		// interface is guaranteed (R1O registers through its wrapped-cvar path). The call is idempotent.
+		if (!RegisterMovementConVars())
+			Error("R1Delta: shared movement tuning convars could not be registered\n");
 	}
 	return ret;
 }
