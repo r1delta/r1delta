@@ -34,6 +34,9 @@
 
 #include "core.h"
 #include "crash_report_context.h"
+#include "r2_map_provider.h"
+
+#include "r2_material_provider.h"
 
 namespace {
 std::atomic<bool> g_cvarInterfacePublished{ false };
@@ -73,6 +76,7 @@ bool IsCvarInterfacePublished()
 #include "mcp_server.h"
 #include "r1d_version.h"
 #include "server_usercmd.h"
+#include "engine/r2port/wallrun/r2_wallrun.h"
 
 void AddBotDummyConCommand(const CCommand& args);
 void script_cmd(const CCommand& args);
@@ -1276,12 +1280,26 @@ ConVarR1O* RegisterR1ODediConVar(const char* name, const char* value, int flags,
 	return newVar;
 }
 
+static void R1ODediClearMapCacheCommand(const CCommand&)
+{
+	r2port::ClearMapCache();
+	Msg("R1Delta: removed the R2 map fallback cache under r2port_cache.\n");
+}
+
+static void R1ODediDumpProviderStatsCommand(const CCommand&)
+{
+	r2port::LogProviderReadMetrics("manual");
+	r2port::DumpFilesystemTrace();
+}
+
 void RegisterR1ODediDeltaConVars()
 {
 	if (!IsR1ODedicatedServer())
 		return;
 
 	EnsureR1BackingGlobalChangeCallbackInstalled();
+	r2port::RegisterR2TextureCacheConVar();
+	r2port::wallrun::RegisterR1ODediConVars();
 
 	static bool s_registered = false;
 	if (s_registered)
@@ -1311,6 +1329,10 @@ void RegisterR1ODediDeltaConVars()
 	RegisterR1ODediConCommand("find", R1ODediDispatcherOwnedCommand, "Find a command or convar.", FCVAR_NONE);
 	RegisterR1ODediConCommand("removeallids", R1ODediDispatcherOwnedCommand, "Remove all user IDs from the ban list.", FCVAR_NONE);
 	RegisterR1ODediConCommand("removeallips", R1ODediDispatcherOwnedCommand, "Remove all IPs from the ban list.", FCVAR_NONE);
+	RegisterR1ODediConCommand("r2port_clear_cache", R1ODediClearMapCacheCommand,
+		"Remove the cached R2 map BSP and entity files.", FCVAR_NONE);
+	RegisterR1ODediConCommand("r2port_dump_stats", R1ODediDumpProviderStatsCommand,
+		"Dump R2 provider counters and filtered filesystem trace.", FCVAR_NONE);
 	RegisterR1ODediConVar("delta_vote_allowed", "1", FCVAR_GAMEDLL | FCVAR_REPLICATED, "Allow voting?");
 	RegisterR1ODediConVar("delta_vote_timer_duration", "12.0", FCVAR_GAMEDLL | FCVAR_REPLICATED, "How long to allow voting on an issue");
 	RegisterR1ODediConVar("delta_vote_failure_timer", "300.0", FCVAR_GAMEDLL | FCVAR_REPLICATED, "Vote failure cooldown");

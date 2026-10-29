@@ -9,6 +9,12 @@
 #include "bitbuf.h"
 #include "compression.h"
 #include "p2p/p2p_identity.h"
+#include "engine/filesystem/r2port_provider.h"
+#include "engine/filesystem/r2_map_provider.h"
+#include "engine/filesystem/r2_material_provider.h"
+
+#include <filesystem>
+#include <string>
 
 #include <intrin.h>
 #pragma intrinsic(_ReturnAddress)
@@ -61,13 +67,108 @@ __int64 StringCompare_AllTalkHookDedi(__int64 a1, __int64 a2) {
     return strcmp((const char*)a1, (const char*)a2);
 }
 
-// Circuit breaker for stuck connections
+// Per-map-type configuration (user approved feature): when a map finishes loading (client signon state 8), <game dir>\cfg\r2port_maps.cfg is executed for a
+// converted R2 map and <game dir>\cfg\r1_maps.cfg for a stock R1 map, only if the file exists (no file: nothing runs). It goes through the engine's
+// command buffer (exec <name>) at level load, nothing per frame, and runs after the pvs_extraCull policy above, so a pvs_extraCull line in these
+// files wins. Archive cvars set there still persist to the user's profile; settings read at shader creation (r2port_sso, R2_LM_BICUBIC,
+// r2port_ao_tech startup parts) are not affected by a late exec. One log line per exec.
+static void ExecR2MapTypeConfig(const std::string& mapName)
+{
+    const std::filesystem::path gameDirectory = r2port::GetR2GameContentDirectory();
+    if (gameDirectory.empty())
+        return;
+    const bool converted = r2port::IsR2PortMap(mapName);
+    const char* name = converted ? "r2port_maps.cfg" : "r1_maps.cfg";
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(gameDirectory / "cfg" / name, error) || error)
+        return;
+    char command[96]{};
+    _snprintf_s(command, sizeof(command), _TRUNCATE, "exec %s\n", name);
+    Cbuf_AddText(0, command, 0);
+    char message[200]{};
+    _snprintf_s(message, sizeof(message), _TRUNCATE, "R1Delta: map config exec cfg/%s for %s map %s\n", name, converted ? "converted R2" : "stock R1", mapName.c_str());
+    Msg("%s", message);
+}
+
+// pvs_extraCull (CORE cfg/autoexec_delta.cfg sets 1, engine default 0) culls whole world meshes of converted R2 maps (the glass roof over
+// the mp_eden courtyard, EdenRoofFade: pvs_extraCull 0 at runtime restores them; occluder lumps and ref boxes are not the cause). Interim fix, default
+// ON until a converter-side fix is proven: while a converted R2 map is the active map the cvar is forced to 0 and the user's value is put back
+// when a stock R1 map becomes active (costs the fps benefit of extraCull on converted maps). Evaluated at every client signon state change
+// (a console command at level load, nothing per frame). R1DELTA_R2PORT_KEEP_PVS_EXTRACULL=1 keeps the user's value.
+static void ApplyR2PvsExtraCullPolicy(const std::string& mapName)
+{
+    static bool keep = [] {
+        char value[8]{};
+        const DWORD length = GetEnvironmentVariableA("R1DELTA_R2PORT_KEEP_PVS_EXTRACULL", value, sizeof(value));
+        return length && value[0] != '0';
+    }();
+    if (keep)
+        return;
+    static bool overridden = false;
+    static int savedValue = 0;
+    if (!OriginalCCVar_FindVar2 || !cvarinterface)
+        return;
+    const ConVarR1* cvar = OriginalCCVar_FindVar2(cvarinterface, "pvs_extraCull");
+    if (!cvar)
+        return;
+    const int current = cvar->m_Value.m_nValue;
+    if (r2port::IsR2PortMap(mapName)) {
+        if (current == 0)
+            return;
+        if (!overridden) {
+            savedValue = current;
+            overridden = true;
+        }
+        Cbuf_AddText(0, "pvs_extraCull 0\n", 0);
+        char message[160]{};
+        _snprintf_s(message, sizeof(message), _TRUNCATE,
+            "R1Delta: R2 map %s: pvs_extraCull %d -> 0 (it culls whole world meshes of converted maps)\n", mapName.c_str(), current);
+        Msg("%s", message);
+    }
+    else if (overridden) {
+        overridden = false;
+        char command[48]{};
+        _snprintf_s(command, sizeof(command), _TRUNCATE, "pvs_extraCull %d\n", savedValue);
+        Cbuf_AddText(0, command, 0);
+        char message[160]{};
+        _snprintf_s(message, sizeof(message), _TRUNCATE,
+            "R1Delta: stock map %s: pvs_extraCull restored to %d\n", mapName.c_str(), savedValue);
+        Msg("%s", message);
+    }
+}
+
 __int64 CNetChan__SendDatagramLISTEN_Part2_Hook(__int64 thisptr, unsigned int length, int SendToResult) {
     static auto original_fn = oCNetChan__SendDatagramLISTEN_Part2;
 
     // Make sure this is a client netchan
     if ((*(uint8_t*)(((uintptr_t)thisptr) + 216) > 0))
         return original_fn(thisptr, length, SendToResult);
+    typedef char* (__fastcall* GetBaseClientFn)(int slot);
+    const auto base_client = reinterpret_cast<GetBaseClientFn>(G_engine + 0x5F470)(-1);
+    const int signon_state = base_client
+        ? *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(base_client) + 116) : -1;
+    static int last_logged_signon_state = -1;
+    if (base_client && signon_state != last_logged_signon_state) {
+        const std::string map_name = r2port::ActiveMapName();
+        if (!map_name.empty()) {
+            char message[768]{};
+            _snprintf_s(message, sizeof(message), _TRUNCATE,
+                "R1Delta: R2 client signon map=%s state=%d plat-time=%.3f map-elapsed-ms=%llu\n",
+                map_name.c_str(), signon_state, Plat_FloatTime(),
+                static_cast<unsigned long long>(r2port::ActiveMapElapsedMilliseconds()));
+            Msg("%s", message);
+            OutputDebugStringA(message);
+            if (signon_state == 8) {
+                r2port::LogProviderReadMetrics("signon-full");
+                r2port::LogR2TextureProviderMetrics("signon-full");
+            }
+        }
+        if (!map_name.empty() && !IsDedicatedServer())
+            ApplyR2PvsExtraCullPolicy(map_name);
+        if (signon_state == 8 && !map_name.empty() && !IsDedicatedServer())
+            ExecR2MapTypeConfig(map_name);
+        last_logged_signon_state = signon_state;
+    }
 
     // The engine's own "sent packet - %d bytes" print in the CNetChan send
     // path fires constantly during the hang and never during healthy play:
@@ -95,10 +196,8 @@ __int64 CNetChan__SendDatagramLISTEN_Part2_Hook(__int64 thisptr, unsigned int le
     // state is the +116 field of the client state object GetBaseClient(-1)
     // returns (engine.dll+0x5F470); G_engine+0x2966168 is the host state
     // (server_state_t, 2 == ss_active) and can never equal 8.
-    typedef char* (__fastcall* GetBaseClientFn)(int slot);
-    const auto base_client = reinterpret_cast<GetBaseClientFn>(G_engine + 0x5F470)(-1);
-    if (base_client &&
-        *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(base_client) + 116) == 8) {
+
+    if (base_client && signon_state == 8) {
         // Restart the window so the signon stream cannot trip it right after.
         g_last_packet_size = -1;
         return original_fn(thisptr, length, SendToResult);
@@ -112,6 +211,18 @@ __int64 CNetChan__SendDatagramLISTEN_Part2_Hook(__int64 thisptr, unsigned int le
     else if (current_time - g_same_size_since > STUCK_DELAY &&
              current_time - g_last_retry_time >= RETRY_DELAY) {
         Warning("Circuit breaker tripped due to packets!\n");
+        const std::string map_name = r2port::ActiveMapName();
+        if (!map_name.empty()) {
+            char message[768]{};
+            _snprintf_s(message, sizeof(message), _TRUNCATE,
+                "R1Delta: R2 load circuit-breaker map=%s plat-time=%.3f map-elapsed-ms=%llu\n",
+                map_name.c_str(), current_time,
+                static_cast<unsigned long long>(r2port::ActiveMapElapsedMilliseconds()));
+            Msg("%s", message);
+            OutputDebugStringA(message);
+        }
+        r2port::LogProviderReadMetrics("circuit-breaker");
+        r2port::LogR2TextureProviderMetrics("circuit-breaker");
         // Call the handler directly: "retry" through the console resolves via
         // the alias table, so a user alias silently disabled this.
         CL_Retry_f();

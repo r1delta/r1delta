@@ -14,6 +14,7 @@
 #include "eos_network.h"
 #include "p2p/p2p.h"
 #include "net_hooks.h"
+#include "r2port_provider.h"
 #pragma intrinsic(_ReturnAddress)
 
 // Hook for CSys::ConsoleOutput
@@ -1824,13 +1825,23 @@ void InitDedicated()
 // AddSearchPath hook for dedicated server
 __int64 (*oAddSearchPathDedi)(__int64 a1, const char* a2, __int64 a3, unsigned int a4);
 __int64 __fastcall AddSearchPathDedi(__int64 a1, const char* a2, __int64 a3, unsigned int a4) {
+	const char* const requestedPath = a2;
+	const char* finalPath = a2;
 	if (!strcmp_static(a2, "r1delta")) {
 		auto a = DuplicateDelegatedString((std::filesystem::path(GetExecutableDirectory()) / "r1delta").string().c_str());
-		a2 = a;
-		auto ret = oAddSearchPathDedi(a1, a2, a3, a4);
-		return ret;
+		finalPath = a;
 	}
-	return oAddSearchPathDedi(a1, a2, a3, a4);
+	const __int64 result = oAddSearchPathDedi(a1, finalPath, a3, a4);
+	if (r2port::FilesystemTraceEnabled()) {
+		char detail[192]{};
+		_snprintf_s(detail, sizeof(detail), _TRUNCATE,
+			"result=%lld searchPathId=0x%llx finalPath=%s",
+			static_cast<long long>(result), static_cast<unsigned long long>(a3),
+			finalPath ? finalPath : "<null>");
+		r2port::TraceFilesystemCall("AddSearchPathDedi", requestedPath, nullptr,
+			a4, "returned", detail);
+	}
+	return result;
 }
 
 // Server info panel hook for dedicated server admin

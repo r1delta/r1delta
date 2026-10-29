@@ -39,9 +39,20 @@
 #include "load.h"
 #include "player_resource_18.h"
 #include "ffa_targeting.h"
+#include "r2port_particles_hook.h"
+#include "r2port_ain_hook.h"
 #include "client_port_override.h"
 #include "account_hold.h"
 #include "r1o_runtime_paths.h"
+#include "r2_map_provider.h"
+#include "r2port_provider.h"
+#include "engine/r2port/shaders/r2_shader_cache.h"
+#include "engine/r2port/shaders/r2_shader_override.h"
+#include "engine/r2port/postfx/r2_postfx.h"
+#include "engine/r2port/propfade/r2_propfade.h"
+#include "engine/r2port/ao/r2_ao.h"
+#include "engine/r2port/wallrun/r2_wallrun.h"
+#include "r2_material_provider.h"
 #include "legacy_ds_sound_tables.h"
 #include "soundscript_parity.h"
 #include "script_sync_parity.h"
@@ -1616,6 +1627,7 @@ __int64 FileSystem_AddLoadedSearchPath(
 	char* Source,
 	char a6)
 {
+	const char* const requestedPath = a4;
 	const char* suffix = "r1delta";
 	const size_t suffix_len = 7; // strlen("r1delta")
 
@@ -1668,13 +1680,25 @@ __int64 FileSystem_AddLoadedSearchPath(
 	// else: result_a4 remains nullptr (the default action is to nullify)
 
 	// Call the original function with the final result_a4 value
-	return oFileSystem_AddLoadedSearchPath(a1, a2, a3, result_a4, Source, a6);
+	const __int64 result = oFileSystem_AddLoadedSearchPath(a1, a2, a3, result_a4, Source, a6);
+	if (r2port::FilesystemTraceEnabled()) {
+		char detail[256]{};
+		_snprintf_s(detail, sizeof(detail), _TRUNCATE,
+			"result=%lld finalPath=%s source=%s",
+			static_cast<long long>(result),
+			result_a4 ? result_a4 : "<null>",
+			Source ? Source : "<null>");
+		r2port::TraceFilesystemCall("FileSystem_AddLoadedSearchPath",
+			requestedPath, Source, static_cast<int64_t>(a6), "returned", detail);
+	}
+	return result;
 }
 
 void InitAddons() {
 	static bool done = false;
 	if (done) return;
 	done = true;
+	r2port::InstallR2MapProvider();
 	auto engine_base_spec = ENGINE_DLL_BASE;
 	auto filesystem_stdio = IsDedicatedServer() ? G_vscript : G_filesystem_stdio;
 	if (!IsR1ODedicatedServer()) {
@@ -6746,6 +6770,29 @@ static void AccountHoldStatusCommand(const CCommand&)
 		s_accountHoldLastAttemptMs);
 }
 
+static void R2PortClearCacheCommand(const CCommand&)
+{
+	r2port::ClearMapCache();
+	Msg("R1Delta: removed the R2 map fallback cache under r2port_cache.\n");
+}
+
+static void R2PortDumpStatsCommand(const CCommand&)
+{
+	r2port::LogProviderReadMetrics("manual");
+	r2port::DumpFilesystemTrace();
+}
+
+static void R2PortShadersCommand(const CCommand&)
+{
+	r2port::shaders::PrintShaderStatus();
+}
+
+static void R2PortShadersRebuildCommand(const CCommand&)
+{
+	r2port::shaders::RebuildAllShaders();
+}
+
+
 static bool ReasonIsHeldAccount(const char* reason)
 {
 	if (!reason || !*reason)
@@ -8399,6 +8446,9 @@ void Host_InitHook(bool a1) {
 	// when no server.dll is loaded. R1O uses its wrapped-cvar readiness path.
 	if (!IsR1ODedicatedServer() && !RegisterMovementConVars())
 		Error("R1Delta: shared movement tuning convars could not be registered\n");
+	// InitAddons runs from a DLL loader notification; register after Host_Init.
+	if (!IsR1ODedicatedServer())
+		r2port::RegisterR2TextureCacheConVar();
 	OriginalCCVar_FindVar(cvarinterface, "sv_alltalk")->m_nFlags |= FCVAR_REPLICATED;
 	auto user_id = OriginalCCVar_FindVar(cvarinterface, "platform_user_id");
 	EnsurePlatformUserIdString(user_id);
@@ -8488,6 +8538,15 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		RegisterConCommand("delta_start_discord_auth", DiscordAuthCommand, "Starts the discord auth process", 0);
 		RegisterConCommand("r1delta_discord_status", DiscordStatusCommand, "Report the Discord integration state (cvar gate, platform_user_id)", 0);
 		RegisterConCommand(PERSIST_COMMAND, setinfopersist_cmd, "Set persistent variable", FCVAR_SERVER_CAN_EXECUTE);
+		RegisterConCommand("r2port_clear_cache", R2PortClearCacheCommand,
+			"Remove the cached R2 map BSP and entity files.", FCVAR_NONE);
+		RegisterConCommand("r2port_dump_stats", R2PortDumpStatsCommand,
+			"Dump R2 provider counters and filtered filesystem trace.", FCVAR_NONE);
+		RegisterConCommand("r2port_shaders", R2PortShadersCommand,
+			"List the R2 port custom shaders and their build state.", FCVAR_NONE);
+		RegisterConCommand("r2port_shaders_rebuild", R2PortShadersRebuildCommand,
+			"Recompile all R2 port custom shaders (embedded plus r2port/shaders/*.hlsl).", FCVAR_NONE);
+		r1delta::background::RegisterSelfTestCommand();
 
 		// Register slot commands
 		r1delta::background::RegisterSelfTestCommand();
@@ -9391,6 +9450,11 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	}
 	else {
 		RegisterServerUserCmdConVars();
+		r2port::wallrun::RegisterConVars();
+		RegisterConCommand("r2port_clear_cache", R2PortClearCacheCommand,
+			"Remove the cached R2 map BSP and entity files.", FCVAR_NONE);
+		RegisterConCommand("r2port_dump_stats", R2PortDumpStatsCommand,
+			"Dump R2 provider counters and filtered filesystem trace.", FCVAR_NONE);
 		RegisterConCommand("updatescriptdata", updatescriptdata_cmd, "Dumps the script data in the AI node graph to disk", FCVAR_CHEAT);
 		RegisterConCommand("verifyain", verifyain_cmd, "Reads the .ain file from disk, compares its nodes & links to in-memory data, logs differences.", FCVAR_CHEAT);
 		RegisterConCommand("updateain", updateain_cmd, "Runs the reconstructed AIN full build, then writes a generated .ain dump without replacing the source file.", FCVAR_CHEAT);
@@ -9420,6 +9484,8 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 			FCVAR_ARCHIVE);
 		R1DAssert(hudwarpConVars.useGpu);
 		R1DAssert(hudwarpConVars.disable);
+		if (!IsDedicatedServer())
+			r2port::ao::RegisterConVars();
 		// The one visibility control, written by the console, cfgs and the private match
 		// Show/Hide button alike. A client-hosted server starts hidden and is reset to hidden
 		// when it shuts down (a new map, reload or disconnect, but not changelevel between
@@ -9859,6 +9925,8 @@ void __stdcall LoaderNotificationCallback(
 			}
 		}
 		InstallMaterialResourceOwnership(G_matsystem);
+		r2port::shaders::InstallShaderOverrides(G_matsystem);
+		r2port::ao::Install(G_matsystem);
 		SetupReflexMaterialSystemHooks(G_matsystem);
 		if (!IsR1ODedicatedServer()) {
 			SetupHudWarpMatSystemHooks();
@@ -9912,6 +9980,7 @@ void __stdcall LoaderNotificationCallback(
 			PatchClientDynamicLodNoMatchSentinel(G_client);
 			InstallR1ClientPlayerResource18(G_client);
 			InstallClientDatacacheCallbackGuard(G_client);
+			InstallClientParticleHook(G_client);
 			InstallClientPlayerClassCompatibilityHooks(G_client);
 			r1delta::ffa_targeting::InstallClientHooks(G_client);
 			if (ShouldInstallR1OClientDebugHooks()) {
@@ -9956,13 +10025,23 @@ void __stdcall LoaderNotificationCallback(
 			RegisterConVar("delta_hud_show_xpsplash", "1", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Show XP splash.");
 			RegisterConVar("delta_hud_xpsplash_stack", "1", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Stack XP splash lines of the same type.");
 			RegisterConVar("delta_old_reticles", "0", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Do vanilla reticle behavior, so that theyre kinda broken above 90 fov.");
+			r2port::postfx::InstallClient(G_client);
+			r2port::propfade::InstallEngine(G_engine);
+			r2port::wallrun::RegisterConVars();
+			r2port::wallrun::InstallClient(G_client);
 
 				MH_CreateHook((LPVOID)(G_localize + 0x3A40), &h_CLocalize__ReloadLocalizationFiles, (LPVOID*)&o_pCLocalize__ReloadLocalizationFiles);
 				MH_EnableHook(MH_ALL_HOOKS);
 				std::thread(DiscordThread).detach();
 		}
+		if (is_server)
+			InstallServerAinCrcGuard(reinterpret_cast<std::uintptr_t>(notification_data->Loaded.DllBase));
 		if (is_server || is_r1o_server_local) {
 			r1delta::ffa_targeting::InstallServerHooks(
+				reinterpret_cast<std::uintptr_t>(notification_data->Loaded.DllBase));
+		}
+		if (is_server || is_r1o_server_local) {
+			r2port::wallrun::InstallServer(
 				reinterpret_cast<std::uintptr_t>(notification_data->Loaded.DllBase));
 		}
 		if (is_server || is_r1o_server_local) do_server(notification_data);

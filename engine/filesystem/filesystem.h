@@ -91,6 +91,10 @@ __int64 __fastcall AddVPKFile(IFileSystem* fileSystem, char* a2, char** a3, char
 typedef void (*CPackFileParseDirectoryType)(void* packFile);
 extern CPackFileParseDirectoryType CPackFileParseDirectoryOriginal;
 void __fastcall CPackFileParseDirectory(void* packFile);
+bool R2PortNativeFileExists(const char* fileName);
+bool R2PortNativeFileExistsProbeActive();
+
+std::string R2PortFindPattern(unsigned __int16 handle);
 bool InstallVPKDirectoryLoadFlagRepair(uintptr_t filesystemBase);
 typedef void (*CBaseFileSystem__CSearchPath__SetPathType)(void* thisptr, __int16* id);
 extern CBaseFileSystem__CSearchPath__SetPathType CBaseFileSystem__CSearchPath__SetPathOriginal;
@@ -308,4 +312,6 @@ extern const char* (*oCBaseFileSystem__FindFirst)(CBaseFileSystem* thisptr, __in
 extern const char* (*oCBaseFileSystem__FindNext)(CBaseFileSystem* thisptr, unsigned __int16 a2); 
 const char* CBaseFileSystem__FindFirst(CBaseFileSystem* thisptr, __int64 a2, __int64 a3);
 const char* CBaseFileSystem__FindNext(CBaseFileSystem* thisptr, unsigned __int16 a2);
+const char* R2PortAppendFindFirstResult(const char* pattern, uint16_t* handle, const char* result);
+const char* R2PortAppendFindNextResult(uint16_t handle, const char* result);
 void ReconcileAddonListFile(IFileSystem* pFileSystem, const char* pModPath);

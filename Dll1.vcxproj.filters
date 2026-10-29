@@ -16,6 +16,36 @@
     <Filter Include="engine\filesystem">
       <UniqueIdentifier>{a1b2c3d4-e5f6-7890-abcd-ef1234567893}</UniqueIdentifier>
     </Filter>
+    <Filter Include="engine\r2port">
+      <UniqueIdentifier>{a2b2c3d4-e5f6-7890-abcd-ef1234567890}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="engine\r2port\shaders">
+      <UniqueIdentifier>{a2b2c3d4-e5f6-7890-abcd-ef1234567894}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="engine\r2port\postfx">
+      <UniqueIdentifier>{0ba52358-14ac-4dbb-b62a-ca9de194404d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="engine\r2port\ao">
+      <UniqueIdentifier>{5e1c2a7f-3b8d-4f61-9a2e-7d4c0b6e8a13}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="engine\r2port\wallrun">
+      <UniqueIdentifier>{7a3e5b21-9c4d-4e08-b1f6-2d8a6c0f5e97}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="engine\r2port\modelconv">
+      <UniqueIdentifier>{a2b2c3d4-e5f6-7890-abcd-ef1234567893}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="engine\r2port\particles">
+      <UniqueIdentifier>{a2b2c3d4-e5f6-7890-abcd-ef1234567894}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="engine\r2port\r2tex">
+      <UniqueIdentifier>{b9d9e727-7f95-4a1d-ae29-7629ae937720}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="engine\r2port\bspdown">
+      <UniqueIdentifier>{a2b2c3d4-e5f6-7890-abcd-ef1234567891}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="engine\r2port\lzham">
+      <UniqueIdentifier>{a2b2c3d4-e5f6-7890-abcd-ef1234567892}</UniqueIdentifier>
+    </Filter>
     <Filter Include="engine\memory">
       <UniqueIdentifier>{a1b2c3d4-e5f6-7890-abcd-ef1234567894}</UniqueIdentifier>
     </Filter>
@@ -163,6 +193,192 @@
     </ClInclude>
     <ClInclude Include="engine\filesystem\r1o_vpk.h">
       <Filter>engine\filesystem</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\filesystem\r2port_provider.h">
+      <Filter>engine\filesystem</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\filesystem\r2_map_provider.h">
+      <Filter>engine\filesystem</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\filesystem\r2_map_patch_source.h">
+      <Filter>engine\filesystem</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\filesystem\r2_model_provider.h">
+      <Filter>engine\filesystem</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\modelconv\modelconv.hpp">
+      <Filter>engine\r2port\modelconv</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\filesystem\r2_overview_provider.h">
+      <Filter>engine\filesystem</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\filesystem\r2_particle_provider.h">
+      <Filter>engine\filesystem</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\core\r2port_particles_hook.h">
+      <Filter>engine\core</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\core\r2port_ain_hook.h">
+      <Filter>engine\core</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\particles\dmx.hpp">
+      <Filter>engine\r2port\particles</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\particles\pcfconv.hpp">
+      <Filter>engine\r2port\particles</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\particles\pcfconv_tables.inc">
+      <Filter>engine\r2port\particles</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\particles\r2_particle_requests.inc">
+      <Filter>engine\r2port\particles</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\filesystem\r2_material_names.h">
+      <Filter>engine\filesystem</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\filesystem\r2_material_provider.h">
+      <Filter>engine\filesystem</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\filesystem\r1_map_pack_material_provider.h">
+      <Filter>engine\filesystem</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\shaders\r2_shader_cache.h">
+      <Filter>engine\r2port\shaders</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\postfx\r2_postfx.h">
+      <Filter>engine\r2port\postfx</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\propfade\r2_propfade.h">
+      <Filter>engine\r2port\postfx</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\ao\r2_ao.h">
+      <Filter>engine\r2port\ao</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\wallrun\r2_wallrun.h">
+      <Filter>engine\r2port\wallrun</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\ao\dxbc_patch.h">
+      <Filter>engine\r2port\ao</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\ao\r2_xegtao.h">
+      <Filter>engine\r2port\ao</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\ao\r2_xegtao_hlsl.inl">
+      <Filter>engine\r2port\ao</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\shaders\r2_shader_override.h">
+      <Filter>engine\r2port\shaders</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\shaders\r2_shader_compiler.h">
+      <Filter>engine\r2port\shaders</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\shaders\r2_shader_sources.h">
+      <Filter>engine\r2port\shaders</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\bspdown\bspdown.hpp">
+      <Filter>engine\r2port\bspdown</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\bspdown\internal.hpp">
+      <Filter>engine\r2port\bspdown</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\bspdown\bcdec.h">
+      <Filter>engine\r2port\bspdown</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\patch\r2patch_reader.h">
+      <Filter>engine\r2port</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\entity_rewrite.h">
+      <Filter>engine\r2port</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\trigger_brush.h">
+      <Filter>engine\r2port</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\r1_entity_classes.h">
+      <Filter>engine\r2port</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\r2tex\r2tex.hpp">
+      <Filter>engine\r2port\r2tex</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\r2tex\bcdec.h">
+      <Filter>engine\r2port\r2tex</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\r2tex\rtech_decode.inc">
+      <Filter>engine\r2port\r2tex</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\include\lzham.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzham_compat.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\include\lzham_exports.inc">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\include\lzham_static_lib.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\include\lzham_dynamic_lib.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\include\zlib.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_decomp.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_assert.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_checksum.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_config.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_core.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_helpers.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_huffman_codes.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_lzdecompbase.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_math.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_mem.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_platform.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_polar_codes.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_prefix_coding.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_symbol_codec.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_timer.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_traits.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_types.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_utils.h">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\lzham\lzhamdecomp\lzham_vector.h">
+      <Filter>engine\r2port\lzham</Filter>
     </ClInclude>
     <ClInclude Include="engine\filesystem\r1o_vpk_index_cache.h">
       <Filter>engine\filesystem</Filter>
@@ -706,6 +922,150 @@
     </ClCompile>
     <ClCompile Include="engine\filesystem\r1o_vpk.cpp">
       <Filter>engine\filesystem</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\filesystem\r2port_provider.cpp">
+      <Filter>engine\filesystem</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\filesystem\r2_map_provider.cpp">
+      <Filter>engine\filesystem</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\filesystem\r2_map_patch_source.cpp">
+      <Filter>engine\filesystem</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\filesystem\r2_model_provider.cpp">
+      <Filter>engine\filesystem</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\modelconv\modelconv.cpp">
+      <Filter>engine\r2port\modelconv</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\filesystem\r2_overview_provider.cpp">
+      <Filter>engine\filesystem</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\filesystem\r2_particle_provider.cpp">
+      <Filter>engine\filesystem</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\core\r2port_particles_hook.cpp">
+      <Filter>engine\core</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\core\r2port_ain_hook.cpp">
+      <Filter>engine\core</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\particles\dmx.cpp">
+      <Filter>engine\r2port\particles</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\particles\pcfconv.cpp">
+      <Filter>engine\r2port\particles</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\filesystem\r2_material_provider.cpp">
+      <Filter>engine\filesystem</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\filesystem\r1_map_pack_material_provider.cpp">
+      <Filter>engine\filesystem</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\shaders\r2_shader_cache.cpp">
+      <Filter>engine\r2port\shaders</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\postfx\r2_postfx.cpp">
+      <Filter>engine\r2port\postfx</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\propfade\r2_propfade.cpp">
+      <Filter>engine\r2port\postfx</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\ao\r2_ao.cpp">
+      <Filter>engine\r2port\ao</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\wallrun\r2_wallrun.cpp">
+      <Filter>engine\r2port\wallrun</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\ao\dxbc_patch.cpp">
+      <Filter>engine\r2port\ao</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\ao\r2_xegtao.cpp">
+      <Filter>engine\r2port\ao</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\shaders\r2_shader_override.cpp">
+      <Filter>engine\r2port\shaders</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\shaders\r2_shader_compiler.cpp">
+      <Filter>engine\r2port\shaders</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\r2tex\r2tex.cpp">
+      <Filter>engine\r2port\r2tex</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\bspdown\bspdown.cpp">
+      <Filter>engine\r2port\bspdown</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\bspdown\tricoll.cpp">
+      <Filter>engine\r2port\bspdown</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\bspdown\collision.cpp">
+      <Filter>engine\r2port\bspdown</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\bspdown\sprp.cpp">
+      <Filter>engine\r2port\bspdown</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\bspdown\meshclip.cpp">
+      <Filter>engine\r2port\bspdown</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\bspdown\tangents.cpp">
+      <Filter>engine\r2port\bspdown</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\bspdown\physics.cpp">
+      <Filter>engine\r2port\bspdown</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\bspdown\cubemaps.cpp">
+      <Filter>engine\r2port\bspdown</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\bspdown\shadow.cpp">
+      <Filter>engine\r2port\bspdown</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\bspdown\lighting.cpp">
+      <Filter>engine\r2port\bspdown</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\bspdown\vcalpha.cpp">
+      <Filter>engine\r2port\bspdown</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\entity_rewrite.cpp">
+      <Filter>engine\r2port</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\trigger_brush.cpp">
+      <Filter>engine\r2port</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_assert.cpp">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_checksum.cpp">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_huffman_codes.cpp">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_lzdecompbase.cpp">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_lzdecomp.cpp">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_mem.cpp">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_platform.cpp">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_polar_codes.cpp">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_prefix_coding.cpp">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_symbol_codec.cpp">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_timer.cpp">
+      <Filter>engine\r2port\lzham</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\lzham\lzhamdecomp\lzham_vector.cpp">
+      <Filter>engine\r2port\lzham</Filter>
     </ClCompile>
     <ClCompile Include="engine\filesystem\r1o_vpk_index_cache.cpp">
       <Filter>engine\filesystem</Filter>
