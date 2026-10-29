@@ -76,6 +76,7 @@ bool IsCvarInterfacePublished()
 #include "mcp_server.h"
 #include "r1d_version.h"
 #include "server_usercmd.h"
+#include "engine/r2port/wallrun/r2_wallrun.h"
 
 void AddBotDummyConCommand(const CCommand& args);
 void script_cmd(const CCommand& args);
@@ -1298,6 +1299,7 @@ void RegisterR1ODediDeltaConVars()
 
 	EnsureR1BackingGlobalChangeCallbackInstalled();
 	r2port::RegisterR2TextureCacheConVar();
+	r2port::wallrun::RegisterR1ODediConVars();
 
 	static bool s_registered = false;
 	if (s_registered)

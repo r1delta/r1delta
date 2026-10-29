@@ -288,6 +288,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="engine\r2port\shaders\r2_shader_cache.h" />
     <ClInclude Include="engine\r2port\postfx\r2_postfx.h" />
     <ClInclude Include="engine\r2port\ao\r2_ao.h" />
+    <ClInclude Include="engine\r2port\wallrun\r2_wallrun.h" />
     <ClInclude Include="engine\r2port\ao\dxbc_patch.h" />
     <ClInclude Include="engine\r2port\ao\r2_xegtao.h" />
     <ClInclude Include="engine\r2port\ao\r2_xegtao_hlsl.inl" />
@@ -519,6 +520,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="engine\r2port\shaders\r2_shader_cache.cpp" />
     <ClCompile Include="engine\r2port\postfx\r2_postfx.cpp" />
     <ClCompile Include="engine\r2port\ao\r2_ao.cpp" />
+    <ClCompile Include="engine\r2port\wallrun\r2_wallrun.cpp" />
     <ClCompile Include="engine\r2port\ao\dxbc_patch.cpp" />
     <ClCompile Include="engine\r2port\ao\r2_xegtao.cpp" />
     <ClCompile Include="engine\r2port\shaders\r2_shader_override.cpp" />

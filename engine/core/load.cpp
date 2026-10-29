@@ -50,6 +50,7 @@
 #include "engine/r2port/shaders/r2_shader_override.h"
 #include "engine/r2port/postfx/r2_postfx.h"
 #include "engine/r2port/ao/r2_ao.h"
+#include "engine/r2port/wallrun/r2_wallrun.h"
 #include "r2_material_provider.h"
 #include "legacy_ds_sound_tables.h"
 #include "soundscript_parity.h"
@@ -9367,6 +9368,7 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	}
 	else {
 		RegisterServerUserCmdConVars();
+		r2port::wallrun::RegisterConVars();
 		RegisterConCommand("r2port_clear_cache", R2PortClearCacheCommand,
 			"Remove the cached R2 map BSP and entity files.", FCVAR_NONE);
 		RegisterConCommand("r2port_dump_stats", R2PortDumpStatsCommand,
@@ -9941,6 +9943,8 @@ void __stdcall LoaderNotificationCallback(
 			RegisterConVar("delta_hud_xpsplash_stack", "1", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Stack XP splash lines of the same type.");
 			RegisterConVar("delta_old_reticles", "0", FCVAR_CLIENTDLL | FCVAR_ARCHIVE_PLAYERPROFILE, "Do vanilla reticle behavior, so that theyre kinda broken above 90 fov.");
 			r2port::postfx::InstallClient(G_client);
+			r2port::wallrun::RegisterConVars();
+			r2port::wallrun::InstallClient(G_client);
 
 				MH_CreateHook((LPVOID)(G_localize + 0x3A40), &h_CLocalize__ReloadLocalizationFiles, (LPVOID*)&o_pCLocalize__ReloadLocalizationFiles);
 				MH_EnableHook(MH_ALL_HOOKS);
@@ -9950,6 +9954,10 @@ void __stdcall LoaderNotificationCallback(
 			InstallServerAinCrcGuard(reinterpret_cast<std::uintptr_t>(notification_data->Loaded.DllBase));
 		if (is_server || is_r1o_server_local) {
 			r1delta::ffa_targeting::InstallServerHooks(
+				reinterpret_cast<std::uintptr_t>(notification_data->Loaded.DllBase));
+		}
+		if (is_server || is_r1o_server_local) {
+			r2port::wallrun::InstallServer(
 				reinterpret_cast<std::uintptr_t>(notification_data->Loaded.DllBase));
 		}
 		if (is_server || is_r1o_server_local) do_server(notification_data);

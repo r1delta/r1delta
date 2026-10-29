@@ -28,6 +28,9 @@
     <Filter Include="engine\r2port\ao">
       <UniqueIdentifier>{5e1c2a7f-3b8d-4f61-9a2e-7d4c0b6e8a13}</UniqueIdentifier>
     </Filter>
+    <Filter Include="engine\r2port\wallrun">
+      <UniqueIdentifier>{7a3e5b21-9c4d-4e08-b1f6-2d8a6c0f5e97}</UniqueIdentifier>
+    </Filter>
     <Filter Include="engine\r2port\modelconv">
       <UniqueIdentifier>{a2b2c3d4-e5f6-7890-abcd-ef1234567893}</UniqueIdentifier>
     </Filter>
@@ -238,6 +241,9 @@
     </ClInclude>
     <ClInclude Include="engine\r2port\ao\r2_ao.h">
       <Filter>engine\r2port\ao</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\r2port\wallrun\r2_wallrun.h">
+      <Filter>engine\r2port\wallrun</Filter>
     </ClInclude>
     <ClInclude Include="engine\r2port\ao\dxbc_patch.h">
       <Filter>engine\r2port\ao</Filter>
@@ -925,6 +931,9 @@
     </ClCompile>
     <ClCompile Include="engine\r2port\ao\r2_ao.cpp">
       <Filter>engine\r2port\ao</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\r2port\wallrun\r2_wallrun.cpp">
+      <Filter>engine\r2port\wallrun</Filter>
     </ClCompile>
     <ClCompile Include="engine\r2port\ao\dxbc_patch.cpp">
       <Filter>engine\r2port\ao</Filter>
