@@ -1245,8 +1245,7 @@ def undo_mesh_order(C, r2, r1):
     if not ok:
         return
     ms1 = m1["ms"].astype(np.int64)
-    C.ok(bool((np.diff(ms1[d0:d1]) >= 0).all()), "world meshes [%d, %d) are sorted by material sort (%d runs when everything is visible, R1 draws at most 2048 per view)" %
-         (d0, d1, int((np.diff(ms1[d0:d1]) != 0).sum()) + 1 if d1 > d0 else 0))
+    print("  note  runs when everything is visible: %d (R1 draws at most 2048 per view)" % (int((np.diff(ms1[d0:d1]) != 0).sum()) + 1 if d1 > d0 else 0))
     # recovered permutation: new_of[old]
     new_of = np.full(len(m1), -1, np.int64)
     in2 = (refs2 >= d0) & (refs2 < d1)
@@ -1291,12 +1290,21 @@ def undo_mesh_order(C, r2, r1):
     m1u = m1[new_of]                      # m1u[old] = the output record of mesh `old`
     mbu = mb1[new_of]
     exp = np.empty(len(m1), np.int64)     # independent expectation: stable argsort of the recovered sorts
-    ranks = np.argsort(m1u["ms"][d0:d1].astype(np.int64), kind="stable")
+    # class rank = order of first appearance of the flags value in the pre-sort order (R2 groups meshes in flag classes; later classes are decals / overlays)
+    fl_pre = m1u["fl"][d0:d1]
+    first = {}
+    for v in fl_pre.tolist():
+        first.setdefault(v, len(first))
+    cls = np.array([first[v] for v in fl_pre.tolist()], np.int64)
+    key = cls * 65536 + m1u["ms"][d0:d1].astype(np.int64)
+    ranks = np.argsort(key, kind="stable")
     exp_new = np.empty(d1 - d0, np.int64); exp_new[ranks] = np.arange(d1 - d0)
     exp[d0:d1] = d0 + exp_new
     exp[:d0] = np.arange(d0); exp[d1:] = np.arange(d1, len(m1))
     moved = int((new_of != np.arange(len(m1))).sum())
-    C.ok(bool((exp == new_of).all()), "the permutation is the stable sort of the world meshes by material sort (%d meshes moved)" % moved)
+    C.ok(bool((exp == new_of).all()), "the permutation is the stable sort of the world meshes by (flag class, material sort) (%d meshes moved)" % moved)
+    out_key = key[np.argsort(new_of[d0:d1] - d0)]
+    C.ok(bool((np.diff(out_key) >= 0).all()), "output world meshes [%d, %d) are sorted by (flag class, material sort); %d flag classes" % (d0, d1, len(first)))
     inv = np.empty(len(m1), np.int64); inv[new_of] = np.arange(len(m1))   # inv[new] = old
     def undo_ids(ids):
         out = ids.copy()
