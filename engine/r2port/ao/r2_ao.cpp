@@ -1178,8 +1178,8 @@ void RegisterConVars()
         "0..1 = how strongly full AO occlusion removes the env reflection (live; 0.5 halves it).");
     g_cvar.ssoDebug = Register("r2port_sso_debug", "0",
         "1 = test aid for r2port_sso: full occlusion everywhere (env reflection of every patched shader scaled by 1 - r2port_sso_strength).");
-    g_cvar.lmBicubic = Register("r2port_lm_bicubic", "0",
-        "1 = SDK 2013 style bicubic (cubic B-spline, four bilinear taps) filtering of lightmapTexture_0 / _1 in the stock LightmappedGeneric shaders (world). Applies to shaders created after it is set, so put it in autoexec or the launch line (or env R2_LM_BICUBIC=1), then restart; costs 8 lightmap taps instead of 2 per world pixel.");
+    g_cvar.lmBicubic = Register("r2port_lm_bicubic", BootOptOut("R2_LM_BICUBIC", "r2port_lm_bicubic") ? "0" : "1",
+        "Default 1 = SDK 2013 style bicubic (cubic B-spline, four bilinear taps) filtering of lightmapTexture_0 / _1 in the stock LightmappedGeneric shaders (world); costs 8 lightmap taps instead of 2 per world pixel. The shaders are patched when they are created, before any cfg runs, so turn it off with env R2_LM_BICUBIC=0 or +r2port_lm_bicubic 0 on the launch line, then restart; changing it later only changes the live value for shaders created afterwards. Not saved to the profile (an old saved 0 would override the new default).", FCVAR_NONE);
     g_cvar.tech = Register("r2port_ao_tech", "0",
         "AO backend: 0 = NVIDIA HBAO+ (stock R1), 1 = XeGTAO high quality full resolution (about HBAO+ cost), 2 = XeGTAO high quality half resolution (about 0.4x the HBAO+ GPU time), 3 = XeGTAO medium quality half resolution (about 0.3x, weak GPUs). Needs r_hbaoEnabled 1; uses the radius, intensity and exponent of HBAO+ (r2port_ao_radius / _intensity / _exponent override them). Falls back to HBAO+ on any failure.");
     g_cvar.radius = Register("r2port_ao_radius", "0", "Override the AO radius in metres (0 = r_hbaoRadius, which in this build is not changeable from the console).");
