@@ -2017,6 +2017,147 @@ bool buildSpecGlossVtf(const std::shared_ptr<Database>& db, std::uint64_t spcGui
     return true;
 }
 
+// ---------------------------------------------------------------------------------------------------------------------
+// Uber carriers (opt-in, MaterialOptions::uberPack / env R2_UBER, see shaderlab/uber/DESIGN.md sec 4 and 9).
+// R2 material slot 11 (AO, red) and slot 12 (cavity, red) have no R1 slot. The engine's LightmappedGeneric override reads
+// them from a texture the stock shader already binds, packed as one linear BGRA8888 VTF (R2 AO/cavity are single-channel
+// data, so no sRGB flag; format 12 loads in game, RGBA8888 does not):
+//   single layer  r2tex/pbr/<ao guid>_<cavity guid>            $detailColor (+ $detailColorMode 1), R = 255, G = AO, B = cavity, A = 255
+//   two layers    r2tex/pbrl/<mask guid>_<ao guid>_<cavity guid>  $blendModulateTexture, R = G = slot 22 mask (the stock blend
+//                 range, exactly the existing r2tex/layer_masks/<guid>_rg), B = AO, A = cavity
+// A zero guid means "absent" and packs as 255 (no occlusion). The texture takes the size of the largest source on each axis
+// (maps of different size are resampled: area average when shrinking, bilinear when growing), keeps no source mips and
+// builds the full chain from level 0 with a 2x2 box filter. The name is the whole recipe, so ConvertTexture(name) needs
+// nothing else and the converted-cache entry of a material can be rebuilt from the VMT alone.
+constexpr const char* kUberPackPrefix = "r2tex/pbr/";
+constexpr const char* kUberPackLayeredPrefix = "r2tex/pbrl/";
+// Part of the provider's converted-cache directory name while the packer is on; bump when the packing changes.
+constexpr const char* kUberPackCacheTag = "-uber2";
+
+// R2_UBER is the engine's comma separated feature list (shaderlab/uber/DESIGN.md sec 5: lod, fenv, so, ggx, pack, neutral ...). The
+// carriers are only read by the `pack` term, so they are emitted when the list has `pack`, `all` or is plain `1`; the other values
+// ("neutral", "so,lod") leave every converted file as it is without the variable. "0" and an empty value are off.
+bool uberPackEnvOn() {
+    const char* e = std::getenv("R2_UBER");
+    if (!e || !e[0]) return false;
+    std::string token;
+    for (const char* p = e;; ++p) {
+        if (*p == ',' || *p == '+' || *p == ' ' || *p == ';' || *p == 0) {
+            if (token == "pack" || token == "all" || token == "1") return true;
+            token.clear();
+            if (*p == 0) return false;
+        } else {
+            token += static_cast<char>(std::tolower(static_cast<unsigned char>(*p)));
+        }
+    }
+}
+
+// mask != 0 selects the layered form.
+std::string uberPackName(std::uint64_t mask, std::uint64_t ao, std::uint64_t cavity) {
+    std::ostringstream name;
+    name << (mask ? kUberPackLayeredPrefix : kUberPackPrefix) << std::hex << std::setfill('0');
+    if (mask) name << std::setw(16) << mask << '_';
+    name << std::setw(16) << ao << '_' << std::setw(16) << cavity;
+    return name.str();
+}
+
+bool parseUberPackName(const std::string& name, std::uint64_t& mask, std::uint64_t& ao, std::uint64_t& cavity) {
+    const bool layered = name.rfind(kUberPackLayeredPrefix, 0) == 0;
+    if (!layered && name.rfind(kUberPackPrefix, 0) != 0) return false;
+    const std::string rest = name.substr(std::strlen(layered ? kUberPackLayeredPrefix : kUberPackPrefix));
+    const std::size_t parts = layered ? 3 : 2;
+    if (rest.size() != parts * 17 - 1) return false;
+    std::uint64_t value[3] = {0, 0, 0};
+    for (std::size_t i = 0; i < parts; ++i) {
+        if (i && rest[i * 17 - 1] != '_') return false;
+        const std::string piece = rest.substr(i * 17, 16);
+        char* end = nullptr;
+        value[i] = std::strtoull(piece.c_str(), &end, 16);
+        if (end != piece.c_str() + 16) return false;
+    }
+    mask = layered ? value[0] : 0;
+    ao = layered ? value[1] : value[0];
+    cavity = layered ? value[2] : value[1];
+    return true;
+}
+
+// mask != 0: layered form (see the block comment). At least one of ao / cavity must be present.
+bool buildUberPackVtf(const std::shared_ptr<Database>& db, std::uint64_t mask, std::uint64_t ao, std::uint64_t cavity,
+                      std::vector<std::uint8_t>& vtf, std::string& error) {
+    if (!ao && !cavity) { error = "uber pack without AO or cavity"; return false; }
+    UberPlane maskPlane, aoPlane, cavityPlane;
+    if (mask && !loadUberPlane(db, mask, maskPlane, error)) return false;
+    if (ao && !loadUberPlane(db, ao, aoPlane, error)) return false;
+    if (cavity && !loadUberPlane(db, cavity, cavityPlane, error)) return false;
+    std::uint32_t width = 1, height = 1;
+    for (const UberPlane* plane : {&maskPlane, &aoPlane, &cavityPlane}) {
+        width = std::max(width, plane->width);
+        height = std::max(height, plane->height);
+    }
+    if (width > 16384 || height > 16384) { error = "uber pack source is too large"; return false; }
+    const std::size_t texels = static_cast<std::size_t>(width) * height;
+    const std::vector<std::uint8_t> maskValue = mask ? resizeUberPlane(maskPlane, width, height) : std::vector<std::uint8_t>();
+    const std::vector<std::uint8_t> aoValue = ao ? resizeUberPlane(aoPlane, width, height) : std::vector<std::uint8_t>();
+    const std::vector<std::uint8_t> cavityValue = cavity ? resizeUberPlane(cavityPlane, width, height) : std::vector<std::uint8_t>();
+
+    // BGRA8888 bytes: B, G, R, A.
+    std::vector<std::vector<std::uint8_t>> chain;
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> dims;
+    chain.emplace_back(texels * 4);
+    dims.emplace_back(width, height);
+    for (std::size_t p = 0; p < texels; ++p) {
+        const std::uint8_t aoByte = ao ? aoValue[p] : 255, cavityByte = cavity ? cavityValue[p] : 255;
+        std::uint8_t* px = chain[0].data() + p * 4;
+        if (mask) {
+            px[0] = aoByte; px[1] = maskValue[p]; px[2] = maskValue[p]; px[3] = cavityByte;
+        } else {
+            px[0] = cavityByte; px[1] = aoByte; px[2] = 255; px[3] = 255;
+        }
+    }
+    while (dims.back().first > 1 || dims.back().second > 1) {
+        const auto [pw, ph] = dims.back();
+        const std::uint32_t nw = std::max(1u, pw / 2), nh = std::max(1u, ph / 2);
+        std::vector<std::uint8_t> next(static_cast<std::size_t>(nw) * nh * 4);
+        const auto& prev = chain.back();
+        for (std::uint32_t y = 0; y < nh; ++y)
+            for (std::uint32_t x = 0; x < nw; ++x) {
+                const std::uint32_t x0 = std::min(pw - 1, x * 2), x1 = std::min(pw - 1, x * 2 + 1);
+                const std::uint32_t y0 = std::min(ph - 1, y * 2), y1 = std::min(ph - 1, y * 2 + 1);
+                for (int c = 0; c < 4; ++c) {
+                    const unsigned sum = prev[(static_cast<std::size_t>(y0) * pw + x0) * 4 + c] +
+                                         prev[(static_cast<std::size_t>(y0) * pw + x1) * 4 + c] +
+                                         prev[(static_cast<std::size_t>(y1) * pw + x0) * 4 + c] +
+                                         prev[(static_cast<std::size_t>(y1) * pw + x1) * 4 + c];
+                    next[(static_cast<std::size_t>(y) * nw + x) * 4 + c] = static_cast<std::uint8_t>((sum + 2) / 4);
+                }
+            }
+        chain.push_back(std::move(next));
+        dims.emplace_back(nw, nh);
+    }
+    std::size_t total = 0x58;
+    for (const auto& level : chain) total += level.size();
+    vtf.assign(total, 0);
+    // Same VTF 7.5 header as convertTextureWithDb; flags 0 (no sRGB, no clamp: the AO/cavity UVs are the base UVs).
+    std::memcpy(vtf.data(), "VTF\0", 4);
+    put32(vtf.data() + 4, 7); put32(vtf.data() + 8, 5); put32(vtf.data() + 12, 0x58);
+    put16(vtf.data() + 0x10, static_cast<std::uint16_t>(width)); put16(vtf.data() + 0x12, static_cast<std::uint16_t>(height));
+    put32(vtf.data() + 0x14, 0);
+    put16(vtf.data() + 0x18, 1); put16(vtf.data() + 0x1a, 0);
+    putFloat(vtf.data() + 0x20, 0.5f); putFloat(vtf.data() + 0x24, 0.5f); putFloat(vtf.data() + 0x28, 0.5f);
+    putFloat(vtf.data() + 0x30, 1.0f);
+    putI32(vtf.data() + 0x34, 12);   // BGRA8888
+    vtf[0x38] = static_cast<std::uint8_t>(chain.size());
+    putI32(vtf.data() + 0x39, -1); vtf[0x3d] = 0; vtf[0x3e] = 0; put16(vtf.data() + 0x3f, 1);
+    put32(vtf.data() + 0x44, 1);
+    vtf[0x50] = 0x30; vtf[0x51] = 0; vtf[0x52] = 0; vtf[0x53] = 0; put32(vtf.data() + 0x54, 0x58);
+    std::size_t at = 0x58;
+    for (std::size_t m = chain.size(); m-- > 0;) {
+        std::memcpy(vtf.data() + at, chain[m].data(), chain[m].size());
+        at += chain[m].size();
+    }
+    return true;
+}
+
 // R1 renders large single-mip textures as garbage (the mp_glitch training_r2 sky vista, a 2048x2048 DXT1 with one mip,
 // came out as rainbow arches; with a full chain the same texels render correctly). R2 stores such textures (skies, vistas)
 // with only mip 0. Expand them to an RGBA8 texture with a complete box-filtered chain.
@@ -3017,6 +3158,41 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
         (surface == "grass" || name.find("foliage") != std::string::npos));
     const char* normalsEnv = std::getenv("R2TEX_NORMALS");   // default on; "0" passes the R2 BC5/slope texture through unchanged
     const bool normalRepack = !tools && !(normalsEnv && normalsEnv[0] == '0');
+    // Uber carriers (MaterialOptions::uberPack, shaderlab/uber/DESIGN.md sec 9). Candidates are the materials the engine's
+    // LightmappedGeneric override can take: world shader, bump and reflection tint present (the same slots that make the VMT carry
+    // $bumpmap / $reflectiontint), no godray. AO (slot 11) / cavity (slot 12) then ride in a synthetic r2tex/pbr texture: single
+    // layer as $detailColor + $detailColorMode 1 (not when R2 already supplies a detail colour in slot 14), two layers as the
+    // $blendModulateTexture itself plus the $treesway 7701 marker the override keys on (stock reads only its R and G).
+    bool uberCandidate = options.uberPack && !tools && lightmapped && !unlit && !options.forModel && !godray && !foliageNoEnv &&
+        usedSlots.find(1) != usedSlots.end() && usedSlots.find(3) != usedSlots.end();
+    if (uberCandidate) {
+        // The bound detail/blend carrier has only the base UV. UV<n><digits>Samp assigns one UV set per occupied R2 slot
+        // (the first digit is the number of sets); omit the carrier if AO/cavity or the layer mask needs another set.
+        // In particular animated UV sets cannot be baked into one static texture. This excludes four world materials in the
+        // 20-map census; their original VMT stays intact rather than applying occlusion at the wrong coordinates.
+        const std::size_t samp = shaderSet.find("samp");
+        std::size_t begin = samp;
+        while (samp != std::string::npos && begin > 0 && std::isdigit(static_cast<unsigned char>(shaderSet[begin - 1]))) --begin;
+        if (samp != std::string::npos && begin >= 2 && samp - begin >= 2 && shaderSet.compare(begin - 2, 2, "uv") == 0) {
+            char baseUv = 0;
+            std::size_t digit = begin + 1;
+            for (std::size_t slot = 0; slot < slotGuids.size(); ++slot) {
+                if (!slotGuids[slot]) continue;
+                if (digit >= samp) { uberCandidate = false; break; }
+                const char uv = shaderSet[digit++];
+                if (slot == 0) baseUv = uv;
+                if ((slot == 11 || slot == 12 || (hasLayerSlots && slot == 22)) && uv != baseUv)
+                    uberCandidate = false;
+            }
+        }
+    }
+    const std::uint64_t uberAoGuid = uberCandidate && !texName(11).empty() ? slotGuids[11] : 0;
+    const std::uint64_t uberCavityGuid = uberCandidate && !texName(12).empty() ? slotGuids[12] : 0;
+    const bool uberHasMaps = uberAoGuid != 0 || uberCavityGuid != 0;
+    const bool uberLayered = uberHasMaps && hasLayerSlots && !layersOff && effMode == LayerMode::maskRg &&
+        usedSlots.find(22) != usedSlots.end() && usedSlots.find(23) != usedSlots.end() &&
+        usedSlots.find(24) != usedSlots.end() && usedSlots.find(26) != usedSlots.end();
+    const bool uberSingle = uberHasMaps && !hasLayerSlots && usedSlots.find(14) == usedSlots.end();
     bool glossBake = false, gloss2Bake = false;   // R2TEX_ENV=gloss (set below, read by the texture list)
     if (tools) {
         addVmtParam(out, "%compilenodraw", "1");
@@ -3124,12 +3300,21 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
         if (referencedSlots.find(14) != referencedSlots.end() ||
             referencedSlots.find(15) != referencedSlots.end())
             addVmtParam(out, "$detailScale", "[1 1]");
+        if (uberSingle) {
+            addVmtParam(out, "$detailColor", vmtTextureName(uberPackName(0, uberAoGuid, uberCavityGuid)));
+            addVmtParam(out, "$detailColorMode", "1");
+            if (referencedSlots.find(15) == referencedSlots.end()) addVmtParam(out, "$detailScale", "[1 1]");
+        }
         if (lightmapped) {
             if (effMode == LayerMode::maskRg || effMode == LayerMode::maskRgInv) {
                 auto mask = usedSlots.find(22);
                 if (mask != usedSlots.end())
                     mask->second = layerMaskName(slotGuids[22],
                         effMode == LayerMode::maskRg ? TextureTransform::maskRg : TextureTransform::maskRgInv);
+            }
+            if (uberLayered) {
+                usedSlots[22] = uberPackName(slotGuids[22], uberAoGuid, uberCavityGuid);
+                addVmtParam(out, "$treesway", "7701");
             }
             param(22, "$blendModulateTexture");
             param(23, "$baseTexture2");
@@ -3344,9 +3529,18 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
         if (opaqueAlbedo && (slot == 0 || slot == 23)) texture.transform = TextureTransform::opaqueAlpha;
         if ((opacityMap || foliageCavity) && slot == 0) texture.transform = TextureTransform::opacityMerge;
         if (normalRepack && (slot == 1 || slot == 24)) texture.transform = TextureTransform::normalRgb;
+        if (uberLayered && slot == 22) texture.transform = TextureTransform::uberPack;
         if (glossBake && slot == 3) texture.transform = TextureTransform::specGloss;
         if (gloss2Bake && slot == 26) texture.transform = TextureTransform::specGloss;
         material.textures.push_back(std::move(texture));
+    }
+    if (uberSingle) {
+        TextureRef pack;
+        pack.guid = uberAoGuid ? uberAoGuid : uberCavityGuid;
+        pack.name = uberPackName(0, uberAoGuid, uberCavityGuid);
+        pack.slot = uberAoGuid ? 11 : 12;
+        pack.transform = TextureTransform::uberPack;
+        material.textures.push_back(std::move(pack));
     }
     return true;
 }
@@ -3525,6 +3719,27 @@ bool ConvertTexture(std::string_view name, std::vector<std::uint8_t>& vtf,
             return false;
         }
     }
+    if (cleaned.rfind(kUberPackPrefix, 0) == 0 || cleaned.rfind(kUberPackLayeredPrefix, 0) == 0) {
+        vtf.clear();
+        std::uint64_t mask = 0, ao = 0, cavity = 0;
+        if (!parseUberPackName(cleaned, mask, ao, cavity)) { if (error) *error = "invalid uber pack texture path"; return false; }
+        try {
+            auto db = getDatabase();
+            if (!db) { if (error) *error = "r2tex::Open has not succeeded"; return false; }
+            std::string why;
+            if (!buildUberPackVtf(db, mask, ao, cavity, vtf, why)) {
+                vtf.clear();
+                if (error) *error = "texture " + cleaned + ": " + why;
+                return false;
+            }
+            if (error) error->clear();
+            return true;
+        } catch (const std::exception& e) {
+            vtf.clear();
+            if (error) *error = e.what();
+            return false;
+        }
+    }
     if (cleaned.rfind(kOpacityMergePrefix, 0) == 0) {
         TextureRef ref;
         std::uint64_t opacityGuid = 0;
@@ -3589,6 +3804,8 @@ bool ConvertTexture(const TextureRef& texture, std::vector<std::uint8_t>& vtf,
                     const TextureOptions& options, std::string* error) {
     if (texture.transform == TextureTransform::none)
         return ConvertTexture(texture.guid, vtf, options, error);
+    if (texture.transform == TextureTransform::uberPack)
+        return ConvertTexture(std::string_view(texture.name), vtf, options, error);
     if (texture.transform == TextureTransform::specGloss)
         return ConvertTexture(std::string_view(texture.name), vtf, options, error);
     if (texture.transform == TextureTransform::glowRamp) {
@@ -3757,6 +3974,10 @@ bool FamilyOfTexture(std::string_view name, std::uint32_t& family) {
         } else if (cleaned.rfind(kOpacityMergePrefix, 0) == 0) {
             std::uint64_t opacityGuid = 0;
             if (!parseOpacityMergeName(cleaned, guid, opacityGuid)) return false;
+        } else if (cleaned.rfind(kUberPackPrefix, 0) == 0 || cleaned.rfind(kUberPackLayeredPrefix, 0) == 0) {
+            std::uint64_t mask = 0, ao = 0, cavity = 0;
+            if (!parseUberPackName(cleaned, mask, ao, cavity)) return false;
+            guid = mask ? mask : (ao ? ao : cavity);
         } else if (cleaned.rfind("r2tex/layer_masks/", 0) == 0) {
             const std::string hex = cleaned.substr(std::strlen("r2tex/layer_masks/"), 16);
             char* end = nullptr;
@@ -3859,5 +4080,9 @@ const char* EnvCacheTag() {
     }();
     return tag.c_str();
 }
+
+bool UberPackRequested() { return uberPackEnvOn(); }
+
+const char* UberPackCacheTag() { return uberPackEnvOn() ? kUberPackCacheTag : ""; }
 
 } // namespace r2tex

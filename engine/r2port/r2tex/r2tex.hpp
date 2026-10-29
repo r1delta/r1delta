@@ -28,7 +28,10 @@ enum class TextureTransform : std::uint8_t {
     glowRamp,
     // Specular F0 (slot 3 / 26, RGB) with the gloss of the same material (slot 2 / 25) in alpha: DXT5, synthetic name
     // r2tex/specgloss/<spc guid>_<gls guid> (opt-in env token R2TEX_ENV=gloss, see r2tex.cpp EnvTokens).
-    specGloss
+    specGloss,
+    // Uber AO/cavity carrier (opt-in, MaterialOptions::uberPack): linear BGRA8888, synthetic names r2tex/pbr/<ao>_<cavity> (single layer:
+    // R 255, G AO, B cavity, A 255) and r2tex/pbrl/<mask>_<ao>_<cavity> (layered: R = G = layer mask, B AO, A cavity); see r2tex.cpp.
+    uberPack
 };
 
 enum class LayerMode : std::uint8_t {
@@ -64,6 +67,11 @@ struct MaterialOptions {
     LayerMode layerMode = LayerMode::current;
     // The caller serves this material to a converted model (r2m/ prefix) and re-labels its shader VertexLitGeneric.
     bool forModel = false;
+    // Uber carriers (see shaderlab/uber/DESIGN.md sec 9): AO (slot 11) and cavity (slot 12) of LightmappedGeneric world materials
+    // that the engine's Uber override can take are packed into a synthetic r2tex/pbr or r2tex/pbrl texture that the VMT names
+    // ($detailColor + $detailColorMode 1, or $blendModulateTexture + $treesway 7701). Off by default: the output is then unchanged.
+    // The provider and the CLI set it from UberPackRequested().
+    bool uberPack = false;
 };
 struct TextureOptions {
     // Preserve source BC7 blocks in VTF 7.5 format 67. Disabled by default;
@@ -138,5 +146,12 @@ void GetFamilyLoadStats(std::uint64_t& loads, std::uint64_t& microseconds);
 // Env tokens (R2TEX_ENV) change converted VMTs and textures: the suffix the provider appends to its converted-cache directory name
 // ("" while R2TEX_ENV is unset, so existing caches stay valid; otherwise "-env1-<tokens>").
 const char* EnvCacheTag();
+
+// Uber carriers (MaterialOptions::uberPack): true when env R2_UBER (the engine's comma separated feature list) contains
+// `pack`, `all` or is `1` in this process.
+bool UberPackRequested();
+// Suffix the provider appends to its converted-cache directory name: empty while the packer is off (every existing cache stays
+// valid), "-uber<revision>" while it is on (toggling re-converts; the revision changes when the packing changes).
+const char* UberPackCacheTag();
 
 } // namespace r2tex

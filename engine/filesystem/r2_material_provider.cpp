@@ -619,6 +619,7 @@ private:
                 if (!cacheDirectory.empty()) {
                     // r2tex::EnvCacheTag(): "" for the defaults, "-env1-<tokens>" while R2TEX_ENV is set (A/B runs never reuse each other's conversions).
                     m_convertedRoot = cacheDirectory / "converted" / (std::string(kConvertedCacheRevision) + r2tex::EnvCacheTag());
+                    m_convertedRoot += r2tex::UberPackCacheTag();   // R2_UBER=...pack: converted VMT/VTF set with AO/cavity carriers
                     std::error_code cacheError;
                     const bool cacheExists = std::filesystem::is_regular_file(
                         cacheDirectory / "r2tex.index", cacheError);
@@ -996,6 +997,7 @@ private:
                 r2tex::Material material;
                 r2tex::MaterialOptions materialOptions;
                 materialOptions.forModel = forModel;
+                materialOptions.uberPack = r2tex::UberPackRequested();
                 if (!r2tex::ConvertMaterial(sourceName, material, materialOptions, &error) || material.vmt.empty()) {
                     if (forWorld) {
                         // Not an R2 package material (debug/debugempty, world/dev/edge_detection_*: map pack or R1
