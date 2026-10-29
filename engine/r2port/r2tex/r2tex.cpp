@@ -1892,6 +1892,62 @@ bool mergeOpacityVtf(std::vector<std::uint8_t>& albedo, const std::vector<std::u
     return true;
 }
 
+// R2 overview images ("overviews/<map>") keep the aspect of the picture: mp_lf_meadow is 1024x804 and R2 places its pixels at
+// scale world units each. R1's CMapOverview draws every overview material as the square [0,1]x[0,1] spanning 1024 * scale
+// world units, so a non-square image would be stretched along its short side (and its dots would be misplaced). Pad it to a
+// square with the picture kept at the top left (pos_x, pos_y is the top left corner), the new rows or columns repeating the
+// last row or column like the clamped sampler does outside the image, and rebuild the mip chain (box filter, RGBA8).
+bool padVtfToSquare(std::vector<std::uint8_t>& vtf, std::string& error) {
+    VtfView view;
+    if (!parseVtfView(vtf, view)) { error = "invalid overview VTF"; return false; }
+    if (view.width == view.height) return true;
+    if (u16(vtf.data() + 0x18) != 1 || !vtfMipBytes(view.format, view.width, view.height)) {
+        error = "overview VTF format " + std::to_string(view.format) + " cannot be padded";
+        return false;
+    }
+    std::vector<std::uint8_t> source;
+    std::uint32_t w = 0, h = 0;
+    if (!decodeVtfMip(vtf, view, 0, source, w, h)) { error = "overview VTF mip 0 decode failed"; return false; }
+    const std::uint32_t side = std::max(w, h);
+    std::vector<std::vector<std::uint8_t>> chain;
+    chain.emplace_back(static_cast<std::size_t>(side) * side * 4);
+    for (std::uint32_t y = 0; y < side; ++y)
+        for (std::uint32_t x = 0; x < side; ++x)
+            std::memcpy(chain[0].data() + (static_cast<std::size_t>(y) * side + x) * 4,
+                        source.data() + (static_cast<std::size_t>(std::min(y, h - 1)) * w + std::min(x, w - 1)) * 4, 4);
+    for (std::uint32_t s = side; s > 1; s >>= 1) {
+        const std::uint32_t n = s / 2;
+        const auto& prev = chain.back();
+        std::vector<std::uint8_t> next(static_cast<std::size_t>(n) * n * 4);
+        for (std::uint32_t y = 0; y < n; ++y)
+            for (std::uint32_t x = 0; x < n; ++x)
+                for (int c = 0; c < 4; ++c) {
+                    const unsigned sum = prev[(static_cast<std::size_t>(y * 2) * s + x * 2) * 4 + c] +
+                                         prev[(static_cast<std::size_t>(y * 2) * s + x * 2 + 1) * 4 + c] +
+                                         prev[(static_cast<std::size_t>(y * 2 + 1) * s + x * 2) * 4 + c] +
+                                         prev[(static_cast<std::size_t>(y * 2 + 1) * s + x * 2 + 1) * 4 + c];
+                    next[(static_cast<std::size_t>(y) * n + x) * 4 + c] = static_cast<std::uint8_t>((sum + 2) / 4);
+                }
+        chain.push_back(std::move(next));
+    }
+    std::size_t total = 0x58;
+    for (const auto& level : chain) total += level.size();
+    std::vector<std::uint8_t> out(total, 0);
+    std::memcpy(out.data(), vtf.data(), 0x58);
+    out[0x10] = static_cast<std::uint8_t>(side & 0xff); out[0x11] = static_cast<std::uint8_t>(side >> 8);
+    out[0x12] = static_cast<std::uint8_t>(side & 0xff); out[0x13] = static_cast<std::uint8_t>(side >> 8);
+    putI32(out.data() + 0x34, 0);
+    out[0x38] = static_cast<std::uint8_t>(chain.size());
+    put32(out.data() + 0x54, 0x58);
+    std::size_t at = 0x58;
+    for (std::size_t m = chain.size(); m-- > 0;) {
+        std::memcpy(out.data() + at, chain[m].data(), chain[m].size());
+        at += chain[m].size();
+    }
+    vtf = std::move(out);
+    return true;
+}
+
 // R2 foliage (shader sets with Cav and Cut and no Vcolt: grass, ground plants, bushes, leaf cards) carries a cavity map in
 // slot 12 (a tuft bake: dark roots, light tips; every foliage material of the 20 maps that has Cut also has Cav, and the grass
 // materials of different maps share one cavity texture). R2 also draws the cut-out with alpha-to-coverage, which keeps the mean
@@ -4042,6 +4098,12 @@ bool ConvertTexture(std::string_view name, std::vector<std::uint8_t>& vtf,
             return false;
         }
         if (cleaned.rfind(kOverviewPrefix, 0) == 0 && vtf.size() >= 0x18) {
+            std::string padError;
+            if (!padVtfToSquare(vtf, padError)) {
+                vtf.clear();
+                if (error) *error = "texture " + cleaned + ": " + padError;
+                return false;
+            }
             std::uint32_t flags = 0;
             std::memcpy(&flags, vtf.data() + 0x14, sizeof(flags));
             flags |= kVtfClampS | kVtfClampT;
