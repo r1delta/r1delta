@@ -1966,6 +1966,35 @@ bool IsR2PortMap(std::string_view mapName)
     return IsAllowlistedMap(mapName);
 }
 
+// The legacy dedicated engine reads scripts/r2port_sounds.txt through the VPK-miss path where no Open hook answers and no search path
+// can be mounted, so the generated alias script is placed as a loose file in the game directory (the only form its loader finds).
+// With no generated script (no R2 install, R2PORT_SOUND=0) a file left by an earlier run is removed so it cannot be served stale.
+bool PlaceGeneratedSoundScript()
+{
+    const auto gameDirectory = FindGameContentDirectory();
+    if (gameDirectory.empty())
+        return false;
+    const std::filesystem::path destination = gameDirectory / "scripts" / "r2port_sounds.txt";
+    std::error_code error;
+    const FileBytes data = ReadAll("scripts/r2port_sounds.txt");
+    if (!data) {
+        std::filesystem::remove(destination, error);
+        return false;
+    }
+    const uintmax_t existing = std::filesystem::file_size(destination, error);
+    if (!error && existing == data->size()) {
+        std::ifstream input(destination, std::ios::binary);
+        std::vector<char> current(data->size());
+        if (input.read(current.data(), static_cast<std::streamsize>(current.size()))
+            && std::equal(current.begin(), current.end(), data->begin(), [](char a, uint8_t b) { return static_cast<uint8_t>(a) == b; }))
+            return true;
+    }
+    std::ofstream output(destination, std::ios::binary | std::ios::trunc);
+    output.write(reinterpret_cast<const char*>(data->data()), static_cast<std::streamsize>(data->size()));
+    output.close();
+    return static_cast<bool>(output);
+}
+
 std::filesystem::path MaterializeMapCacheFile(std::string_view path)
 {
     const auto normalized = NormalizeProviderPath(path);

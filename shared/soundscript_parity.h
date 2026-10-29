@@ -35,6 +35,8 @@ struct SoundScriptUploadChunk {
 // --- Client ------------------------------------------------------------------
 // Registers the marker convar and the server-executable reply command.
 void SoundScriptParity_RegisterClient();
+// All non-R1O modes: registers `delta_soundtable_info` (alias count, hidden R2 tail, CRC, fingerprint).
+void SoundScriptParity_RegisterInfoCommand();
 // Before the connect packet: publish the fingerprint in the marker convar.
 void SoundScriptParity_ClientConnecting();
 // NET_SetConVar writer: when the outgoing message carries the marker, returns

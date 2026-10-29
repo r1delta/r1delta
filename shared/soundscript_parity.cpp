@@ -335,6 +335,42 @@ bool SoundScriptUpload::Accept(const char* name, const char* value) {
 	return true;
 }
 
+void SoundTableInfoCommand(const CCommand&) {
+	LocalTable table;
+	Fingerprint local;
+	std::uint32_t buckets[kSoundScriptBuckets];
+	if (!ReadLocalTable(table) || !Summarize(table, local, buckets)) {
+		Msg("delta_soundtable_info: the alias table is not readable in this process\n");
+		return;
+	}
+	unsigned hidden = 0;
+	switch (GetR1DeltaEngineMode()) {
+	case R1DeltaEngineMode::Client2015: hidden = R1AudioHiddenTrailingAliases(); break;
+	case R1DeltaEngineMode::Dedicated2014: hidden = LegacyDSHiddenTrailingAliases(); break;
+	default: break;
+	}
+	// Hash of the hidden tail (index -> name, same recipe as the parity mapping hash): equal values on two processes mean the generated
+	// R2 aliases sit at the same indexes, which the wire depends on but the parity check does not compare.
+	std::uint32_t tailHash = 2166136261u;
+	for (unsigned i = 0; i < hidden; ++i) {
+		const char* name = *reinterpret_cast<const char* const*>(
+			table.records + (static_cast<std::size_t>(table.count) + i) * kAliasRecordSize + kAliasNameOffset);
+		if (!name)
+			break;
+		tailHash = (tailHash ^ static_cast<std::uint32_t>(table.count + i)) * 16777619u;
+		tailHash = (tailHash ^ HashName(name)) * 16777619u;
+	}
+	char fingerprint[64];
+	FormatFingerprint(local, fingerprint, sizeof(fingerprint));
+	Msg("delta_soundtable_info: compared aliases %d, hidden R2 tail %u (tail hash %08x), engine crc %08x, fingerprint %s\n",
+		local.aliases, hidden, tailHash, local.engineCrc, fingerprint);
+}
+
+void SoundScriptParity_RegisterInfoCommand() {
+	RegisterConCommand("delta_soundtable_info", SoundTableInfoCommand,
+		"Prints the sound alias count, hidden R2 tail, sound-script CRC and parity fingerprint of this process", FCVAR_NONE);
+}
+
 void SoundScriptParity_ServerCheck(int playerSlot, const SoundScriptUpload& upload) {
 	if (!upload.present)
 		return;

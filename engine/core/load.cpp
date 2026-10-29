@@ -9390,6 +9390,7 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		RegisterConVar("delta_version", R1D_VERSION, FCVAR_USERINFO | FCVAR_DONTRECORD, "R1Delta version number");
 		RegisterConVar("delta_skip_version_check", "0", FCVAR_GAMEDLL, "Skip version check for connecting clients (sets server to dev mode)");
 		RegisterConVar("delta_soundtable_check", "1", FCVAR_GAMEDLL, "Clients whose sound scripts differ from this server's disconnect (0 = they only get a warning)");
+		SoundScriptParity_RegisterInfoCommand();
 		RegisterConVar("delta_scriptsync_check", "1", FCVAR_GAMEDLL, "Clients whose remote functions, server/entity vars or registered strings differ from this server's disconnect (0 = they only get a warning)");
 		// ConVar construction runs engine.dll's CRT, so not from its load notification.
 		if (!IsDedicatedServer()) {

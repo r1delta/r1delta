@@ -4,6 +4,8 @@
 #include <cstring>
 #include <windows.h>
 
+#include "engine/filesystem/r2_map_provider.h"
+
 namespace {
 
 // Verified against S:\game\r1delta\bin\engine_ds.dll (R1 2014 dedicated build).
@@ -225,6 +227,11 @@ std::int64_t DSScriptLoad(const char* filename) {
 	if (aliases >= 0 && static_cast<std::uint32_t>(aliases) < g_hiddenStart) {  // the table was cleared for a reload
 		g_hiddenAliases = 0;
 		g_hiddenStart = ~0u;
+	}
+	if (filename && _stricmp(filename, "scripts/r2port_sounds.txt") == 0) {
+		// The dedicated engine's lookup of this file reaches no provider hook and no mountable search path: place it loose.
+		if (!r2port::PlaceGeneratedSoundScript())
+			Msg("R1Delta legacy DS: no generated R2 sound script available; the R2 aliases are not loaded\n");
 	}
 	const std::uint32_t crcBefore = crc;
 	const std::int64_t result = g_scriptLoad(filename);

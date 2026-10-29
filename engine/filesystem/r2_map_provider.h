@@ -40,6 +40,9 @@ std::filesystem::path GetR2InstallDirectory();
 std::filesystem::path GetR2GameContentDirectory();
 // True for the allowlisted R2-only maps this provider serves.
 bool IsR2PortMap(std::string_view mapName);
+// Legacy dedicated engine only: writes the generated scripts/r2port_sounds.txt as a loose file in the game directory (or removes a
+// stale one when none is generated) before the engine loads it. True when the file is in place.
+bool PlaceGeneratedSoundScript();
 // True once after the provider has served an AI graph package to the engine; cleared by the call. The server's AIN
 // validation hook uses it to accept a packaged graph whose entity CRC the engine cannot match (developer > 0).
 bool ConsumeServedAinPackage();
