@@ -25,6 +25,10 @@ constexpr std::uintptr_t kCalcMainActivityRva = 0x333880;
 constexpr std::uintptr_t kServerCalcMainActivityRva = 0x526D80;
 constexpr std::uintptr_t kClientActivityLookupRva = 0x002C80;
 constexpr std::uintptr_t kClientActivityInsertRva = 0x004940;
+// Client activity-list version (dword_180AD00D8 in the retail image). Every CStudioHdr activity-to-sequence mapping
+// stores the version it was built at and is rebuilt lazily when the global is newer; the native insert routine
+// above never bumps it, so mappings built before a runtime insertion would never learn the new activities.
+constexpr std::uintptr_t kClientActivityListVersionRva = 0xAD00D8;
 constexpr std::uintptr_t kServerActivityLookupRva = 0x0707B0;
 constexpr std::uintptr_t kServerActivityInsertRva = 0x0706F0;
 constexpr std::uint32_t kInvalidHandle = 0xFFFFFFFFu;
@@ -286,10 +290,31 @@ bool RegisterActivitiesForModule(ActivityRegistry& registry, bool client,
 
     std::array<int, kSlideActivityCount> ids{};
     int maxId = ReadField<int>(base, client ? std::size_t{0xBABFE0} : std::size_t{0xC308B0});
+    const int initialMaxId = maxId;
+
+    // In a listen server the client and server share each model's studio header, and the server resolves the
+    // slide sequences' activity names into the header's activity fields. The client registry must therefore
+    // use the IDs the server registry holds for these names or its activity-to-sequence lookups can never match.
+    std::array<int, kSlideActivityCount> authority{};
+    bool useAuthority = false;
+    if (client)
+    {
+        const auto serverBase = s_serverBase.load(std::memory_order_acquire);
+        if (serverBase && RegisterActivitiesForModule(s_serverActivityRegistry, false, serverBase))
+        {
+            authority = s_serverActivityRegistry.ids;
+            useAuthority = true;
+        }
+    }
     for (std::size_t i = 0; i != kSlideActivityCount; ++i)
     {
         ids[i] = LookupNativeActivity(client, base, kSlideActivityNames[i]);
         if (ids[i] < 0) continue;
+        if (useAuthority && ids[i] != authority[i])
+        {
+            OutputDebugStringA("R1Delta movement: client slide activity IDs differ from the server registry.\n");
+            return false;
+        }
         if (ids[i] > maxId)
         {
             OutputDebugStringA("R1Delta movement: slide activity lookup exceeds the native registry maximum.\n");
@@ -303,6 +328,7 @@ bool RegisterActivitiesForModule(ActivityRegistry& registry, bool client,
             }
     }
 
+    bool inserted = false;
     for (std::size_t i = 0; i != kSlideActivityCount; ++i)
     {
         if (ids[i] >= 0) continue;
@@ -311,7 +337,13 @@ bool RegisterActivitiesForModule(ActivityRegistry& registry, bool client,
             OutputDebugStringA("R1Delta movement: native activity registry ID space exhausted.\n");
             return false;
         }
-        const int nextId = ++maxId;
+        if (useAuthority && authority[i] <= initialMaxId)
+        {
+            OutputDebugStringA("R1Delta movement: server slide activity ID collides with the client registry range.\n");
+            return false;
+        }
+        const int nextId = useAuthority ? authority[i] : ++maxId;
+        if (nextId > maxId) maxId = nextId;
         const auto record = InsertNativeActivity(client, base, kSlideActivityNames[i], nextId);
         if (!record || ReadField<int>(record, 0) != nextId
             || !ReadField<std::uint16_t>(record, 6))
@@ -320,7 +352,11 @@ bool RegisterActivitiesForModule(ActivityRegistry& registry, bool client,
             return false;
         }
         ids[i] = nextId;
+        inserted = true;
     }
+
+    if (inserted && client)
+        InterlockedIncrement(reinterpret_cast<volatile LONG*>(base + kClientActivityListVersionRva));
 
     registry.ids = ids;
     registry.ready = true;

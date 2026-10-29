@@ -632,6 +632,20 @@ void* sq_getentity(HSQUIRRELVM v, SQInteger iStackPos)
 		static_cast<__int64>(constant));
 }
 
+// CLIENT VM counterpart of sq_getentity. The CBaseEntity script class descriptor the instance chain is
+// checked against is the client.dll global returned by sq_GetEntityConstant_CBaseEntity (RVA 0x16DA400 in
+// the retail 5b3f0080 image); the server constant above never matches a client entity instance.
+void* sq_getcliententity(HSQUIRRELVM v, SQInteger iStackPos)
+{
+	SQObject obj;
+	if (!G_client || !sq_getstackobj || SQ_FAILED(sq_getstackobj(nullptr, v, iStackPos, &obj)))
+		return nullptr;
+
+	return CSquirrelVM__GetEntityFromInstance_Rebuild(
+		reinterpret_cast<__int64>(&obj),
+		static_cast<__int64>(G_client + 0x16DA400));
+}
+
 template <typename Return, typename ... Arguments>
 constexpr Return Call(void* vmt, const std::uint32_t index, Arguments ... args) noexcept
 {

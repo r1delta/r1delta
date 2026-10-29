@@ -777,7 +777,7 @@ SQInteger ChangeMovementActivity(HSQUIRRELVM vm, bool clear)
         || binding->thread != GetCurrentThreadId() || !ReadIntegerArgument(vm, 3, session) || !session
         || (!clear && (!ReadIntegerArgument(vm, 4, activity) || activity < 0)))
         return MovementScriptError(vm, "Movement activity requires CLIENT outside prediction, player, nonzero session, and valid activity");
-    const auto player = reinterpret_cast<std::uintptr_t>(sq_getentity(vm, 2));
+    const auto player = reinterpret_cast<std::uintptr_t>(sq_getcliententity(vm, 2));
     if (!player) return MovementScriptError(vm, "Movement activity requires a valid player entity");
     if (clear) { presentation::ClearMainActivityOverride(player, session); return 0; }
     return PushMovementBoolean(vm, presentation::SetMainActivityOverride(player, session, activity));
@@ -807,9 +807,10 @@ SQInteger SetMovementSlideActivity(HSQUIRRELVM vm)
         || session < (std::numeric_limits<int>::min)() || session > (std::numeric_limits<int>::max)()
         || SQ_FAILED(sq_getstackobj(binding->owner, vm, 4, &active)) || active._type != OT_BOOL)
         return MovementScriptError(vm, "Movement_SetSlideActivity requires an owning VM outside movement/input callbacks, player, int session, and bool");
-    const auto player = reinterpret_cast<CBaseEntity*>(sq_getentity(vm, 2));
-    if (!player) return MovementScriptError(vm, "Movement_SetSlideActivity requires a valid player entity");
     const auto side = VmDomain(*binding);
+    const auto player = reinterpret_cast<CBaseEntity*>(side == MovementDomain::Client
+        ? sq_getcliententity(vm, 2) : sq_getentity(vm, 2));
+    if (!player) return MovementScriptError(vm, "Movement_SetSlideActivity requires a valid player entity");
     const auto changed = side == MovementDomain::Client
         ? presentation::SetSlideActivityOverride(player, static_cast<int>(session), active._unVal.nInteger != 0)
         : presentation::SetServerSlideActivityOverride(reinterpret_cast<std::uintptr_t>(player),
