@@ -549,7 +549,10 @@ struct CheckpointDispatch
             if (scope->ducking_ && duration) cpu.xmm[0][0] *= static_cast<float>(duration) / 400.0f;
             return;
         case DuckFractionPoint:
-            if (scope->ducking_ && duration)
+            // 0x53A781 is shared by the down state (1: progress = (400 - timer) / 400) and the up state
+            // (3: progress = timer / 200, a native-fixed 200 ms stand-up). A custom duration only rescales the
+            // down transition, so the up state keeps the native fraction (the reversal points rescale its timer).
+            if (scope->ducking_ && duration && Field<int>(scope->player_, layout.duckState) == 1)
                 cpu.xmm[0][0] = static_cast<float>(duration - Field<int>(scope->player_, layout.duckTimer)) / duration;
             return;
         default:
