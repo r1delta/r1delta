@@ -2,7 +2,7 @@
 
 #include "engine/cvar.h"
 #include "engine/filesystem/r2_map_provider.h"
-#include "engine/filesystem/r2_family_queue.h"
+#include "engine/filesystem/r2_work_queue.h"
 #include "engine/filesystem/r2_cache_store.h"
 #include "engine/filesystem/r2_model_provider.h"
 #include "engine/filesystem/r2_material_names.h"
@@ -44,7 +44,7 @@ namespace {
 
 // In-process LRU of converted files (VMT/VTF): R2PORT_MEM_CACHE_MB, default 1536 MiB (r2_cache_store.h).
 std::size_t MaterialOutputCacheLimit() { return cache::MemoryCacheBytes(); }
-constexpr std::uint32_t kDefaultR2TextureCacheMiB = 2048;
+constexpr std::uint32_t kDefaultR2TextureCacheMiB = 4096;
 std::atomic<std::uint32_t> g_cacheLimitMiB{kDefaultR2TextureCacheMiB};
 
 std::mutex g_cacheCvarMutex;
@@ -306,10 +306,12 @@ public:
         });
     }
 
-    void PrefetchMapMaterials(std::string_view mapName, FileBytes bspData)
+    // Queues the VMT/VTF conversion of a map's materials. Called with the R2 source BSP as soon as the VPK read is done
+    // (fromSource: before bspdown has run, so the conversions overlap the downgrade) and again with the converted BSP.
+    // Only queues work: the workers start when the index is ready, nothing here blocks the engine thread.
+    void PrefetchMapMaterials(std::string_view mapName, FileBytes bspData, bool fromSource)
     {
         Activate();
-        WaitForIndex();
         bool changed = false;
         {
             std::lock_guard<std::mutex> lock(m_metricsMutex);
@@ -317,18 +319,23 @@ public:
             if (changed) {
                 m_activeMap.assign(mapName);
                 m_mapMaterialsQueued = false;
+                m_sourceMaterialsQueued = false;
             }
-            if (m_mapMaterialsQueued)
+            bool& queued = fromSource ? m_sourceMaterialsQueued : m_mapMaterialsQueued;
+            if (queued)
                 return;
-            m_mapMaterialsQueued = true;
+            queued = true;
         }
-        if (changed)
+        if (changed) {
             ClearKnownPaths();
-        if (QueueMapMaterials(std::string(mapName), std::move(bspData)))
+            std::lock_guard<std::mutex> lock(m_cacheMutex);
+            MarkAllConsumedLocked();   // the previous map's files are the first to go
+        }
+        if (QueueMapMaterials(std::string(mapName), std::move(bspData), fromSource))
             m_prefetchedMapCount.fetch_add(1, std::memory_order_relaxed);
         else {
             std::lock_guard<std::mutex> lock(m_metricsMutex);
-            m_mapMaterialsQueued = false;
+            (fromSource ? m_sourceMaterialsQueued : m_mapMaterialsQueued) = false;
         }
     }
 
@@ -341,7 +348,7 @@ public:
             std::string path = "materials/";
             path.append(name);
             path.append(".vmt");
-            QueuePrefetchPath(std::move(path));
+            QueuePrefetchPath(std::move(path), Placement{ 0, kModelOrderBase + m_modelOrder.fetch_add(1, std::memory_order_relaxed) });
         }
     }
 
@@ -424,12 +431,12 @@ public:
 
         std::size_t queued{};
         std::size_t active{};
-        std::size_t activeFamilyLimit{};
+        std::size_t activeFamilyClaims{};
         {
             std::lock_guard<std::mutex> lock(m_cacheMutex);
             queued = m_workQueue.Size();
             active = m_activeWork;
-            activeFamilyLimit = m_workQueue.MaxActiveFamilies();
+            activeFamilyClaims = m_claims.size();
         }
         std::uint64_t familyLoads{};
         std::uint64_t familyLoadMicroseconds{};
@@ -447,7 +454,7 @@ public:
             std::chrono::steady_clock::now().time_since_epoch()).count();
         char message[2048]{};
         _snprintf_s(message, sizeof(message), _TRUNCATE,
-            "R1Delta: R2 texture timing phase=%s map=%s steady-ms=%lld index-state=%s index-cache=%s index-ms=%llu reads=%llu materials=%llu textures=%llu material-served=%llu material-misses=%llu texture-served=%llu texture-misses=%llu prefetch-bsp=%llu prefetch-vmt=%llu prefetch-vtf=%llu conversions=%llu conversion-total-ms=%llu conversion-max-ms=%llu callbacks-total-ms=%llu callbacks-max-ms=%llu queued=%zu active=%zu workers=%u queue-full=%llu disk-hits=%llu disk-load-ms=%llu disk-stores=%llu family-claims=%llu family-loads=%llu family-load-ms=%llu family-active-limit=%zu\n",
+            "R1Delta: R2 texture timing phase=%s map=%s steady-ms=%lld index-state=%s index-cache=%s index-ms=%llu reads=%llu materials=%llu textures=%llu material-served=%llu material-misses=%llu texture-served=%llu texture-misses=%llu prefetch-bsp=%llu prefetch-vmt=%llu prefetch-vtf=%llu conversions=%llu conversion-total-ms=%llu conversion-max-ms=%llu callbacks-total-ms=%llu callbacks-max-ms=%llu queued=%zu active=%zu workers=%u queue-full=%llu disk-hits=%llu disk-load-ms=%llu disk-stores=%llu family-claims=%llu family-loads=%llu family-load-ms=%llu family-claims-now=%zu\n",
             phase ? phase : "<unknown>", mapName.empty() ? "<none>" : mapName.c_str(),
             static_cast<long long>(qpcMilliseconds), stateName,
             m_indexCacheHit.load(std::memory_order_relaxed) ? "warm" : "cold",
@@ -474,7 +481,7 @@ public:
             static_cast<unsigned long long>(m_diskStoreCount.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(m_familyClaims.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(familyLoads), static_cast<unsigned long long>(familyLoadMicroseconds / 1000),
-            activeFamilyLimit);
+            activeFamilyClaims);
         LogR2TextureMessage(message);
     }
 
@@ -485,6 +492,7 @@ private:
         FileBytes bytes;
         std::size_t size{};
         std::list<std::string>::iterator lruPosition;
+        bool consumed{};   // R1 has read it: evicted first, and no longer counted against the prefetch window
     };
 
     struct PendingRead {
@@ -502,7 +510,9 @@ private:
         std::string mapName;
         FileBytes bspData;
         bool mapMaterials{};
+        bool fromSource{};           // mapMaterials: bspData is the R2 source BSP, whose texdata names are not namespaced yet
         std::int64_t enqueuedUs{};   // R2PORT_PROFILE only: when the item entered the queue
+        std::uint32_t family = 0xFFFFFFFFu;   // package family pinned in r2tex while the item is queued or running (kNoFamily: none)
     };
 
     static WorkItem Stamped(WorkItem item)
@@ -512,35 +522,23 @@ private:
         return item;
     }
 
-    using WorkQueue = FamilyQueue<WorkItem>;
+    using WorkQueue = r2port::WorkQueue<WorkItem>;
+    static constexpr std::uint32_t kNoFamily = WorkQueue::kNoFamily;
 
-    // How many package families may be decoded at once (each held family is hundreds of MiB decoded).
-    // R2PORT_ACTIVE_FAMILIES overrides the default of 4.
-    static std::size_t ActiveFamilyLimit()
-    {
-        int limit = 4;
-        char buffer[16]{};
-        if (GetEnvironmentVariableA("R2PORT_ACTIVE_FAMILIES", buffer, sizeof(buffer)) > 0) {
-            const int requested = std::atoi(buffer);
-            if (requested > 0)
-                limit = std::min(requested, 32);
-        }
-        return static_cast<std::size_t>(limit);
-    }
+    // Where an item sorts: tier 0 = VMTs (R1 reads every VMT of a map before its textures), tier 1 = textures; `order` is
+    // the position in the BSP material list (textures inherit their VMT's position, 64 slots per VMT).
+    struct Placement {
+        std::uint32_t tier{};
+        std::uint64_t order{};
+    };
+    static constexpr std::uint64_t kTextureSlots = 64;
+    static constexpr std::uint64_t kModelOrderBase = 1ull << 40;   // model materials come after every world material
 
     // The package family a conversion of this item has to decode, or kNoFamily when it needs none (already in
     // the disk cache) or the name does not resolve (the conversion fails fast). Called without the queue lock:
     // it reads the asset index and stats the disk cache.
-    WorkQueue::Family FamilyFor(const std::string& path, const std::string& assetName, bool materialFile) const
+    std::uint32_t FamilyFor(const std::string& path, const std::string& assetName, bool materialFile) const
     {
-        // Measurement switch: R2PORT_LEGACY_SCHEDULING=1 queues everything without a family, which is the old
-        // arrival-order dispatch (the A/B baseline for the family-grouped queue).
-        static const bool legacyScheduling = []() {
-            char flag[8]{};
-            return GetEnvironmentVariableA("R2PORT_LEGACY_SCHEDULING", flag, sizeof(flag)) > 0 && flag[0] != '0';
-        }();
-        if (legacyScheduling)
-            return WorkQueue::kNoFamily;
         if (!m_convertedRoot.empty()) {
             const std::filesystem::path file = ConvertedFilePath(path);
             if (!file.empty()) {
@@ -552,7 +550,7 @@ private:
                     cached = std::filesystem::is_regular_file(dependencyFile, error);
                 }
                 if (cached)
-                    return WorkQueue::kNoFamily;
+                    return kNoFamily;
             }
         }
         std::uint32_t family{};
@@ -565,7 +563,45 @@ private:
             resolved = r2tex::FamilyOfTexture(
                 StripTextureNamespace(assetName, textureSource) ? textureSource : std::string_view(assetName), family);
         }
-        return resolved ? family : WorkQueue::kNoFamily;
+        return resolved ? family : kNoFamily;
+    }
+
+    // Pushes an item (m_cacheMutex held). The item's family stays pinned in r2tex until the item has run.
+    void PushLocked(WorkItem item, bool urgent, Placement placement)
+    {
+        WorkQueue::Meta meta;
+        meta.family = item.family;
+        meta.tier = placement.tier;
+        meta.order = placement.order;
+        meta.urgent = urgent;
+        if (item.family != kNoFamily)
+            r2tex::PinFamily(item.family);
+        m_workQueue.Push(Stamped(std::move(item)), meta);
+    }
+
+    // Whether a worker may start an item now (m_cacheMutex held). With `force` the memory budget and the prefetch window
+    // are ignored: used when every worker is idle, so a full budget can never stall the queue.
+    bool Admit(const WorkQueue::Meta& meta, bool force) const
+    {
+        if (!force && !meta.urgent && meta.tier != 0 && m_unconsumedBytes >= PrefetchWindowBytes())
+            return false;   // the converted textures R1 has not read yet already fill the window
+        if (meta.family == kNoFamily || r2tex::IsFamilyResident(meta.family))
+            return true;
+        if (m_claims.count(meta.family) != 0 || r2tex::IsFamilyLoading(meta.family))
+            return false;   // another worker is decoding it: take work for a different family instead
+        if (force || meta.urgent)
+            return true;
+        std::size_t claimed = 0;
+        for (const auto& claim : m_claims)
+            claimed += claim.second;
+        const std::size_t limit = static_cast<std::size_t>(g_cacheLimitMiB.load(std::memory_order_relaxed)) << 20;
+        // Resident families nobody has queued work for are evicted when the new one lands, so they do not count.
+        return r2tex::ResidentFamilyBytes(true) + claimed + r2tex::FamilyDecodedBytes(meta.family) <= limit;
+    }
+
+    static std::size_t PrefetchWindowBytes()
+    {
+        return MaterialOutputCacheLimit() / 4 * 3;
     }
 
     static bool ContainsKnownPath(const KnownPathBuckets& knownPaths, std::string_view path)
@@ -699,7 +735,10 @@ private:
         const unsigned int workerLimit = cores > 2 ? cores - 2 : 1;
         // A cold map load is bound by conversion throughput (hundreds of files on the first load of a map)
         // and the loading screen absorbs it, so use most cores; r2tex loads each rpak family under its own lock.
-        const unsigned int workerCount = std::max(1u, std::min(12u, workerLimit));
+        unsigned int workerCount = std::max(1u, std::min(24u, workerLimit));
+        char workerOverride[16]{};
+        if (GetEnvironmentVariableA("R2PORT_CONV_WORKERS", workerOverride, sizeof(workerOverride)) > 0 && std::atoi(workerOverride) > 0)
+            workerCount = static_cast<unsigned int>(std::min(std::atoi(workerOverride), 64));
         {
             std::lock_guard<std::mutex> lock(m_cacheMutex);
             if (m_stopping)
@@ -709,7 +748,11 @@ private:
         try {
             m_workers.reserve(workerCount);
             for (unsigned int i = 0; i < workerCount; ++i)
-                m_workers.emplace_back([this]() { WorkerLoop(); });
+                m_workers.emplace_back([this]() { WorkerLoop(false); });
+            // Two more threads that only take items a reader is blocked on: when every normal worker is busy with a
+            // 100+ ms conversion an urgent item would otherwise wait for one of them to finish.
+            for (unsigned int i = 0; i < 2; ++i)
+                m_workers.emplace_back([this]() { WorkerLoop(true); });
         }
         catch (...) {
         }
@@ -721,14 +764,14 @@ private:
 
     FileBytes ReadOrSchedule(std::string path, const std::string& assetName, bool materialFile)
     {
-        WorkQueue::Family family = WorkQueue::kNoFamily;
+        std::uint32_t family = kNoFamily;
         bool familyResolved = false;
         std::unique_lock<std::mutex> lock(m_cacheMutex);
         std::shared_ptr<PendingRead> pending;
         for (;;) {
             const auto cached = m_cache.find(path);
             if (cached != m_cache.end()) {
-                m_lru.splice(m_lru.begin(), m_lru, cached->second.lruPosition);
+                ConsumeLocked(cached->second);
                 return cached->second.bytes;
             }
 
@@ -753,18 +796,28 @@ private:
             pending = std::make_shared<PendingRead>();
             m_pendingReads.emplace(path, pending);
             // A reader is blocked on this item: urgent.
-            m_workQueue.Push(Stamped(WorkItem{ std::move(path), assetName, materialFile, false, pending }),
-                family, materialFile, true);
-            m_workAvailable.notify_one();
+            WorkItem item;
+            item.path = path;
+            item.assetName = assetName;
+            item.materialFile = materialFile;
+            item.pending = pending;
+            item.family = family;
+            PushLocked(std::move(item), true, Placement{ materialFile ? 0u : 1u, 0 });
+            m_workAvailable.notify_all();
             break;
         }
 
         if (!pending->complete)
             pending->ready.wait_for(lock, kConversionWait, [&pending]() { return pending->complete; });
+        if (pending->complete && pending->bytes) {
+            const auto cached = m_cache.find(path);
+            if (cached != m_cache.end())
+                ConsumeLocked(cached->second);
+        }
         return pending->complete ? pending->bytes : FileBytes{};
     }
 
-    bool QueuePrefetchPath(std::string path)
+    bool QueuePrefetchPath(std::string path, Placement placement)
     {
         const auto normalized = NormalizeProviderPath(path);
         if (!normalized)
@@ -773,7 +826,7 @@ private:
         bool materialFile{};
         if (!ParseMaterialPath(*normalized, assetName, materialFile))
             return false;
-        const WorkQueue::Family family = FamilyFor(*normalized, assetName, materialFile);
+        const std::uint32_t family = FamilyFor(*normalized, assetName, materialFile);
 
         // A path that is already cached or in flight still has to be known again after a map
         // change cleared the known set, together with the textures its VMT refers to.
@@ -796,9 +849,14 @@ private:
                 auto pending = std::make_shared<PendingRead>();
                 AddKnownPath(*normalized);
                 m_pendingReads.emplace(*normalized, pending);
-                m_workQueue.Push(Stamped(WorkItem{
-                    *normalized, std::move(assetName), materialFile, true, std::move(pending) }),
-                    family, materialFile, false);
+                WorkItem item;
+                item.path = *normalized;
+                item.assetName = std::move(assetName);
+                item.materialFile = materialFile;
+                item.prefetch = true;
+                item.pending = std::move(pending);
+                item.family = family;
+                PushLocked(std::move(item), false, placement);
                 if (materialFile)
                     m_prefetchedMaterialCount.fetch_add(1, std::memory_order_relaxed);
                 else
@@ -807,12 +865,13 @@ private:
                 return true;
             }
         }
+        std::uint64_t slot = 0;
         for (std::string& dependency : knownDependencies)
-            QueuePrefetchPath(std::move(dependency));
+            QueuePrefetchPath(std::move(dependency), Placement{ 1, placement.order * kTextureSlots + std::min(slot++, kTextureSlots - 1) });
         return false;
     }
 
-    bool QueueMapMaterials(std::string mapName, FileBytes bspData)
+    bool QueueMapMaterials(std::string mapName, FileBytes bspData, bool fromSource)
     {
         if (!bspData)
             return false;
@@ -825,10 +884,28 @@ private:
         item.mapName = std::move(mapName);
         item.bspData = std::move(bspData);
         item.mapMaterials = true;
+        item.fromSource = fromSource;
         item.prefetch = true;
-        m_workQueue.Push(Stamped(std::move(item)), WorkQueue::kNoFamily, false, true);
-        m_workAvailable.notify_one();
+        item.family = kNoFamily;
+        PushLocked(std::move(item), true, Placement{});
+        m_workAvailable.notify_all();
         return true;
+    }
+
+    // The texdata name the converted BSP carries for a name of the R2 source BSP (bspdown rule 25): lower case, forward
+    // slashes, behind r2w/ except under tools/.
+    static std::string ConvertedWorldMaterialName(std::string_view sourceName)
+    {
+        std::string name(sourceName);
+        for (char& character : name) {
+            if (character == '\\')
+                character = '/';
+            character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+        }
+        if (name.compare(0, 6, "tools/") == 0 || name.compare(0, kWorldMaterialNamespace.size(), kWorldMaterialNamespace) == 0)
+            return name;
+        name.insert(0, kWorldMaterialNamespace);
+        return name;
     }
 
     void PrefetchMaterialFilesFromBsp(const WorkItem& item)
@@ -840,18 +917,20 @@ private:
                     item.bspData->data(), item.bspData->size(), materials, &error)) {
                 char message[768]{};
                 _snprintf_s(message, sizeof(message), _TRUNCATE,
-                    "R1Delta: R2 texture prefetch could not read map materials map=%s error=%s\n",
-                    item.mapName.c_str(), error.c_str());
+                    "R1Delta: R2 texture prefetch could not read map materials map=%s source=%d error=%s\n",
+                    item.mapName.c_str(), item.fromSource ? 1 : 0, error.c_str());
                 LogR2TextureMessage(message);
                 return;
             }
 
+            // R1 reads the VMTs in the order of the BSP's texdata name table.
             std::size_t queued = 0;
+            std::uint64_t order = 0;
             for (const std::string& material : materials) {
                 std::string path = "materials/";
-                path.append(material);
+                path.append(item.fromSource ? ConvertedWorldMaterialName(material) : material);
                 path.append(".vmt");
-                if (QueuePrefetchPath(std::move(path)))
+                if (QueuePrefetchPath(std::move(path), Placement{ 0, order++ }))
                     ++queued;
             }
             // The minimap image R1 draws (materials/overviews/<map>.vtf, named by the overview provider's
@@ -859,12 +938,12 @@ private:
             std::string overview = "materials/overviews/";
             overview.append(item.mapName);
             overview.append(".vtf");
-            if (QueuePrefetchPath(std::move(overview)))
+            if (QueuePrefetchPath(std::move(overview), Placement{ 1, kModelOrderBase }))
                 ++queued;
             char message[768]{};
             _snprintf_s(message, sizeof(message), _TRUNCATE,
-                "R1Delta: R2 texture prefetch queued map=%s material-names=%zu queued-vmt=%zu\n",
-                item.mapName.c_str(), materials.size(), queued);
+                "R1Delta: R2 texture prefetch queued map=%s source=%d material-names=%zu queued-vmt=%zu\n",
+                item.mapName.c_str(), item.fromSource ? 1 : 0, materials.size(), queued);
             LogR2TextureMessage(message);
         }
         catch (...) {
@@ -876,7 +955,7 @@ private:
     void PromoteQueuedPathLocked(const std::string& path)
     {
         if (m_workQueue.Promote([&path](const WorkItem& item) { return item.path == path; }))
-            m_workAvailable.notify_one();
+            m_workAvailable.notify_all();
     }
 
     FileBytes LoadConvertedFile(const WorkItem& item, std::vector<std::string>& dependencies) const
@@ -1141,29 +1220,72 @@ private:
         return {};
     }
 
-    void WorkerLoop()
+    // R2PORT_LOG_HASHES=1: one line per converted file (FNV-1a 64 of its bytes) in <gamedir>/r2port/profile/filehashes.txt, to
+    // compare two runs or two builds byte for byte.
+    static void LogServedFileHash(const std::string& path, const std::vector<std::uint8_t>& bytes)
     {
-        r2port::prof::SetThreadRole("conv-worker");
-        WorkQueue::Family ownedFamily = WorkQueue::kNoFamily;
+        static const bool enabled = []() {
+            char flag[8]{};
+            return GetEnvironmentVariableA("R2PORT_LOG_HASHES", flag, sizeof(flag)) > 0 && flag[0] != '0';
+        }();
+        if (!enabled)
+            return;
+        std::uint64_t hash = 14695981039346656037ull;
+        for (const std::uint8_t byte : bytes) {
+            hash ^= byte;
+            hash *= 1099511628211ull;
+        }
+        static std::mutex mutex;
+        std::lock_guard<std::mutex> lock(mutex);
+        const std::filesystem::path directory = GetR2MapPatchDirectory() / "profile";
+        std::error_code error;
+        std::filesystem::create_directories(directory, error);
+        if (FILE* file = _wfopen((directory / L"filehashes.txt").c_str(), L"ab")) {
+            std::fprintf(file, "%s %016llx %zu\n", path.c_str(), static_cast<unsigned long long>(hash), bytes.size());
+            std::fclose(file);
+        }
+    }
+
+    // A worker is done with `item` (m_cacheMutex held): the family it was loading is no longer claimed.
+    void FinishItemLocked(const WorkItem& item)
+    {
+        if (m_activeWork)
+            --m_activeWork;
+        if (item.family != kNoFamily)
+            m_claims.erase(item.family);
+    }
+
+    void WorkerLoop(bool urgentOnly)
+    {
+        r2port::prof::SetThreadRole(urgentOnly ? "conv-urgent" : "conv-worker");
         for (;;) {
             WorkItem item;
+            WorkQueue::Meta meta;
             {
                 std::unique_lock<std::mutex> lock(m_cacheMutex);
                 for (;;) {
-                    if (m_stopping) {
-                        m_workQueue.Release(ownedFamily);
+                    if (m_stopping)
                         return;
+                    bool taken = m_workQueue.Take(item, meta, [this, urgentOnly](const WorkQueue::Meta& candidate) { return (!urgentOnly || candidate.urgent) && Admit(candidate, false); });
+                    if (urgentOnly) {
+                        if (taken)
+                            break;
+                        m_workAvailable.wait_for(lock, std::chrono::milliseconds(50));
+                        continue;
                     }
-                    const WorkQueue::Family previousFamily = ownedFamily;
-                    if (m_workQueue.Take(ownedFamily, item,
-                            [](WorkQueue::Family family) { return r2tex::IsFamilyResident(family); })) {
-                        if (ownedFamily != WorkQueue::kNoFamily && ownedFamily != previousFamily)
-                            m_familyClaims.fetch_add(1, std::memory_order_relaxed);
+                    // Every worker is idle but work is queued: the budget or the prefetch window is full of things nobody
+                    // is waiting for, so run the first item anyway.
+                    if (!taken && m_activeWork == 0 && !m_workQueue.Empty())
+                        taken = m_workQueue.Take(item, meta, [this](const WorkQueue::Meta& candidate) { return Admit(candidate, true); });
+                    if (taken)
                         break;
-                    }
-                    m_workAvailable.wait(lock);
+                    m_workAvailable.wait_for(lock, std::chrono::milliseconds(50));
                 }
                 ++m_activeWork;
+                if (item.family != kNoFamily && !r2tex::IsFamilyResident(item.family)) {
+                    m_claims[item.family] = r2tex::FamilyDecodedBytes(item.family);
+                    m_familyClaims.fetch_add(1, std::memory_order_relaxed);
+                }
             }
             if (item.enqueuedUs)
                 r2port::prof::Record("q.wait", item.path, item.enqueuedUs, r2port::prof::NowUs() - item.enqueuedUs);
@@ -1173,9 +1295,11 @@ private:
                     R2P_SCOPE_L("wt.prefetch.bsp", item.mapName);
                     PrefetchMaterialFilesFromBsp(item);
                 }
-                std::lock_guard<std::mutex> lock(m_cacheMutex);
-                if (m_activeWork)
-                    --m_activeWork;
+                {
+                    std::lock_guard<std::mutex> lock(m_cacheMutex);
+                    FinishItemLocked(item);
+                }
+                m_workAvailable.notify_all();
                 continue;
             }
 
@@ -1212,11 +1336,15 @@ private:
                 }
             }
 
+            if (data && !fromDisk)
+                LogServedFileHash(item.path, *data);
             // Register the VMT's textures as known before its reader resumes: R1 opens them
-            // as soon as the VMT parses, and an unknown path is a cached miss.
+            // as soon as the VMT parses, and an unknown path is a cached miss. They sort behind
+            // every VMT, in the order of their material.
             if (data) {
+                std::uint64_t slot = 0;
                 for (const std::string& dependency : dependencies)
-                    QueuePrefetchPath(dependency);
+                    QueuePrefetchPath(dependency, Placement{ 1, meta.order * kTextureSlots + std::min(slot++, kTextureSlots - 1) });
             }
             {
                 std::lock_guard<std::mutex> lock(m_cacheMutex);
@@ -1234,10 +1362,12 @@ private:
                     m_pendingReads.erase(pendingRead);
                 item.pending->bytes = data;
                 item.pending->complete = true;
-                if (m_activeWork)
-                    --m_activeWork;
+                FinishItemLocked(item);
             }
             item.pending->ready.notify_all();
+            m_workAvailable.notify_all();
+            if (item.family != kNoFamily)
+                r2tex::UnpinFamily(item.family);
             if (!data)
                 RemoveKnownPath(item.path);
             if (data && !fromDisk) {
@@ -1295,40 +1425,72 @@ private:
         LogR2TextureMessage(message);
     }
 
+    // R1 has read the entry: it keeps its place in the cache but is evicted first and stops counting against the
+    // prefetch window (m_cacheMutex held).
+    void ConsumeLocked(CachedFile& file)
+    {
+        if (!file.consumed) {
+            file.consumed = true;
+            m_unconsumedBytes -= file.size;
+            m_lruConsumed.splice(m_lruConsumed.begin(), m_lru, file.lruPosition);
+            m_workAvailable.notify_all();   // the window has room again
+        }
+        else {
+            m_lruConsumed.splice(m_lruConsumed.begin(), m_lruConsumed, file.lruPosition);
+        }
+    }
+
+    void MarkAllConsumedLocked()
+    {
+        for (auto& entry : m_cache) {
+            if (entry.second.consumed)
+                continue;
+            entry.second.consumed = true;
+            m_unconsumedBytes -= entry.second.size;
+            m_lruConsumed.splice(m_lruConsumed.begin(), m_lru, entry.second.lruPosition);
+        }
+    }
+
     void CacheLocked(const std::string& path, const FileBytes& data)
     {
         if (data->size() > MaterialOutputCacheLimit())
             return;
 
-        while (m_cachedBytes + data->size() > MaterialOutputCacheLimit() && !m_lru.empty()) {
-            const auto oldest = m_cache.find(m_lru.back());
+        // Evict what R1 has already read first; only a full cache of unread files drops one of those.
+        while (m_cachedBytes + data->size() > MaterialOutputCacheLimit() && !(m_lruConsumed.empty() && m_lru.empty())) {
+            std::list<std::string>& list = m_lruConsumed.empty() ? m_lru : m_lruConsumed;
+            const auto oldest = m_cache.find(list.back());
             if (oldest == m_cache.end()) {
-                m_lru.pop_back();
+                list.pop_back();
                 continue;
             }
             m_cachedBytes -= oldest->second.size;
+            if (!oldest->second.consumed)
+                m_unconsumedBytes -= oldest->second.size;
             m_cache.erase(oldest);
-            m_lru.pop_back();
+            list.pop_back();
         }
 
         m_lru.push_front(path);
-        const auto inserted = m_cache.emplace(path, CachedFile{ data, data->size(), m_lru.begin() });
-        if (inserted.second)
+        const auto inserted = m_cache.emplace(path, CachedFile{ data, data->size(), m_lru.begin(), false });
+        if (inserted.second) {
             m_cachedBytes += data->size();
+            m_unconsumedBytes += data->size();
+        }
         else
             m_lru.pop_front();
     }
 
     void Stop()
     {
-        std::vector<WorkItem> cancelled;
+        std::vector<std::pair<WorkItem, WorkQueue::Meta>> cancelled;
         {
             std::lock_guard<std::mutex> lock(m_cacheMutex);
             if (m_stopping)
                 return;
             m_stopping = true;
             cancelled = m_workQueue.Drain();
-            for (WorkItem& item : cancelled) {
+            for (auto& [item, meta] : cancelled) {
                 if (!item.pending)
                     continue;
                 const auto pendingRead = m_pendingReads.find(item.path);
@@ -1338,7 +1500,7 @@ private:
                 item.pending->complete = true;
             }
         }
-        for (WorkItem& item : cancelled) {
+        for (auto& [item, meta] : cancelled) {
             if (item.pending)
                 item.pending->ready.notify_all();
         }
@@ -1365,15 +1527,20 @@ private:
     std::unordered_map<std::string, CachedFile> m_cache;
     std::unordered_map<std::string, std::vector<std::string>> m_materialDependencies;
     std::unordered_map<std::string, std::shared_ptr<PendingRead>> m_pendingReads;
-    std::list<std::string> m_lru;
-    WorkQueue m_workQueue{ ActiveFamilyLimit() };
+    std::list<std::string> m_lru;           // unconsumed entries, most recently inserted first
+    std::list<std::string> m_lruConsumed;   // entries R1 has read, most recently read first: evicted before m_lru
+    WorkQueue m_workQueue;
+    std::unordered_map<std::uint32_t, std::size_t> m_claims;   // families a worker is decoding for its item -> decoded bytes
     std::atomic<std::uint64_t> m_familyClaims{};
+    std::atomic<std::uint64_t> m_modelOrder{};
     std::size_t m_cachedBytes{};
+    std::size_t m_unconsumedBytes{};
     std::size_t m_activeWork{};
     bool m_stopping{};
     std::mutex m_metricsMutex;
     std::string m_activeMap;
     bool m_mapMaterialsQueued{};
+    bool m_sourceMaterialsQueued{};
     std::atomic<bool> m_indexCacheHit{};
     std::atomic<std::uint64_t> m_indexElapsedMs{};
     std::atomic<std::uint64_t> m_providerReadCount{};
@@ -1423,13 +1590,13 @@ void RegisterR2TextureCacheConVar()
     constexpr const char* name = "r2port_tex_cache_mb";
     constexpr const char* help = "Maximum decoded R2 RPak family cache in MiB.";
     if (IsR1ODedicatedServer()) {
-        g_r1oCacheCvar = RegisterR1ODediConVar(name, "2048", FCVAR_NONE, help);
+        g_r1oCacheCvar = RegisterR1ODediConVar(name, "4096", FCVAR_NONE, help);
         if (!g_r1oCacheCvar)
             return;
         g_r1oCacheCvar->m_fnChangeCallbacks.AddToTail(RefreshR2TextureCacheLimit);
     }
     else {
-        g_nativeCacheCvar = RegisterConVar(name, "2048", FCVAR_NONE, help);
+        g_nativeCacheCvar = RegisterConVar(name, "4096", FCVAR_NONE, help);
         if (!g_nativeCacheCvar)
             return;
         g_nativeCacheCvar->m_fnChangeCallbacks.AddToTail(RefreshR2TextureCacheLimit);
@@ -1445,10 +1612,10 @@ void StartR2MaterialProvider()
         g_materialProvider->Activate();
 }
 
-void PrefetchR2MapMaterials(std::string_view mapName, FileBytes bspData)
+void PrefetchR2MapMaterials(std::string_view mapName, FileBytes bspData, bool fromSource)
 {
     if (g_materialProvider)
-        g_materialProvider->PrefetchMapMaterials(mapName, std::move(bspData));
+        g_materialProvider->PrefetchMapMaterials(mapName, std::move(bspData), fromSource);
 }
 
 void PrefetchR2ModelMaterials(const std::vector<std::string>& materialNames)

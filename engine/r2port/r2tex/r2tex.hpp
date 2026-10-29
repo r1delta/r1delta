@@ -139,6 +139,16 @@ bool FamilyOfMaterial(std::string_view name, std::uint32_t& family);
 bool FamilyOfTexture(std::string_view name, std::uint32_t& family);
 // True while the family's decoded paks are in the cache (a conversion in it needs no RTech decode).
 bool IsFamilyResident(std::uint32_t family);
+// True while a worker is decoding the family right now.
+bool IsFamilyLoading(std::uint32_t family);
+// Pins keep a decoded family out of the LRU eviction while the caller has queued work for it (counted; Unpin balances Pin).
+void PinFamily(std::uint32_t family);
+void UnpinFamily(std::uint32_t family);
+// Memory a decoded family occupies (the decoded size of its paks, known from the pak headers without decoding) and the memory
+// of all decoded families currently resident.
+std::size_t FamilyDecodedBytes(std::uint32_t family);
+// pinnedOnly counts only the families some caller has pinned (the ones that cannot be evicted).
+std::size_t ResidentFamilyBytes(bool pinnedOnly = false);
 // Package families decoded since the process started (RTech decode + file read), and the wall time spent in them
 // summed over threads. A converted map should load each family it touches once.
 void GetFamilyLoadStats(std::uint64_t& loads, std::uint64_t& microseconds);

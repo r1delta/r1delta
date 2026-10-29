@@ -1533,6 +1533,10 @@ FileBytes ReadConvertedBsp(const MapRequest& request)
                 sourceHash = state->sourceHash;
             }
             if (source) {
+                // The materials of the map are known from the R2 source BSP: start converting them now, in parallel with the
+                // downgrade below (which takes seconds on the engine thread) instead of after the converted BSP is served.
+                if (!IsDedicatedServer())
+                    PrefetchR2MapMaterials(state->mapName, source, true);
                 state->bspCacheStatus = "miss";
                 bspdown::Options options = R2ConverterOptions();
                 // No cloudmask on these two maps: the entity rewrite leaves the dummy light_environment last, so the CSM environment must be the last record too.
@@ -1684,7 +1688,7 @@ public:
             R2P_SCOPE_L("m.bsp.read", request->mapName);
             FileBytes data = ReadConvertedBsp(*request);
             if (data && !IsDedicatedServer())
-                PrefetchR2MapMaterials(request->mapName, data);
+                PrefetchR2MapMaterials(request->mapName, data, false);
             if (data)
                 PrefetchR2MapModels(request->mapName, data);
             return data;
