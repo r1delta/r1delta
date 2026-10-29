@@ -91,7 +91,7 @@ constexpr uint32_t kGameLump = 0x23;
 
 // Folded into the on-disk cache fingerprint together with entity_rewrite::kRewriteVersion.
 // Bump when the vendored bspdown converter or the provider's BSP post-processing changes output.
-constexpr uint32_t kConvertedBspCacheVersion = 30;  // 30: rule 26 world meshes sorted by material sort (R1 draws at most 2048 runs per view; EdenCull); 29: rule 20f plane A keeps the R2 exposure (alpha) and spreads raised exposures (rtlBakeAlphaStep 1.2, no pale contours along baked pools) and rule 25 material namespace (round 16, one combined bump); 28: rule 20f DrydockSteps preset default (rtl-bake vsm, hot clip, smooth 1, bm terrain); 27: rule 24 now writes the glow ramp texture coordinate; 26: rule 24 emitter glow vertex alpha (vr_light_trim_01_totrans, mp_glitch); 25: mp_coliseum and mp_coliseum_column keep the last CSM environment (csmLastEnv); 24: rule 17 real CSM environment chosen by content (BWC, angel_city, coliseum, coliseum_column); 23: rule 23 far-origin prop fade distance
+constexpr uint32_t kConvertedBspCacheVersion = 31;  // 31: rule 26 per-map default (mp_eden, mp_thaw only; mp_black_water_canal crashed with it); 30: rule 26 world meshes sorted by material sort (R1 draws at most 2048 runs per view; EdenCull); 29: rule 20f plane A keeps the R2 exposure (alpha) and spreads raised exposures (rtlBakeAlphaStep 1.2, no pale contours along baked pools) and rule 25 material namespace (round 16, one combined bump); 28: rule 20f DrydockSteps preset default (rtl-bake vsm, hot clip, smooth 1, bm terrain); 27: rule 24 now writes the glow ramp texture coordinate; 26: rule 24 emitter glow vertex alpha (vr_light_trim_01_totrans, mp_glitch); 25: mp_coliseum and mp_coliseum_column keep the last CSM environment (csmLastEnv); 24: rule 17 real CSM environment chosen by content (BWC, angel_city, coliseum, coliseum_column); 23: rule 23 far-origin prop fade distance
 
 // Raised onto the z of every info_spawnpoint_flag / human / human_start / titan / titan_start origin in lump 0 and in the five partition entity
 // files (see entity_rewrite::RaiseSpawnpointOrigins). The R1 server drops the spawnpoint back to the floor; one that starts inside solid is removed.
@@ -1380,6 +1380,22 @@ bool ApplyConverterScaleToken(bspdown::Options& options, const std::string& toke
     return true;
 }
 
+// Rule 26 (world meshes sorted by material sort, EdenCull) is ON by default only for the maps whose unsorted all-visible material run count is
+// high: R1 draws at most 2048 runs per view and drops the rest (census of the 20 maps: mp_eden 5252, mp_thaw 2781). The sort crashed
+// mp_black_water_canal in game (client.dll+0x2B0313) and gains nothing on maps far below the limit (homestead 328, complex3 840), so every other
+// map keeps the R2 mesh order. mp_drydock (1656) and mp_relic02 (1458) approach 2048 and join this table once each has been run in game with the sort.
+// R1DELTA_R2PORT_BSPDOWN tokens: `mesh-order` forces the sort on for every map, `no-mesh-order` forces it off for every map.
+constexpr std::string_view kMeshOrderDefaultMaps[] = { "mp_eden", "mp_thaw" };
+int g_meshOrderForced = 0;   // 0 = per-map table, 1 = token mesh-order, 2 = token no-mesh-order (set by ApplyConverterVariant)
+
+bool MeshOrderDefaultForMap(std::string_view mapName)
+{
+    for (const std::string_view name : kMeshOrderDefaultMaps)
+        if (name == mapName)
+            return true;
+    return false;
+}
+
 void ApplyConverterVariant(bspdown::Options& options, const std::string& variant)
 {
     size_t begin = 0;
@@ -1418,7 +1434,8 @@ void ApplyConverterVariant(bspdown::Options& options, const std::string& variant
         else if (token == "cubemaps-split") options.cubemaps = bspdown::CubemapMode::Split;
         else if (token == "cubemaps-single") options.cubemaps = bspdown::CubemapMode::None;   // pre-split behaviour: every world sort samples the nearest cube
         else if (token == "no-collapse-envs") options.collapseEnvs = false;
-        else if (token == "no-mesh-order") options.orderMeshes = false;   // rule 26 opt-out: R2 mesh order (high mesh indices vanish when a view has more than 2048 material runs)
+        else if (token == "no-mesh-order") { options.orderMeshes = false; g_meshOrderForced = 2; }   // rule 26 off for every map (R2 mesh order: high mesh indices vanish when a view has more than 2048 material runs)
+        else if (token == "mesh-order") { options.orderMeshes = true; g_meshOrderForced = 1; }       // rule 26 on for every map
         else if (token == "no-material-namespace") options.materialNamespace.clear();   // rule 25 opt-out: world materials keep their plain names (a stock R1 map pack played earlier can then answer them)
         else if (token == "pbr-keep") options.pbrLights = false;
         else if (token == "flag2") options.worldLightFlagBit2 = true;
@@ -1456,6 +1473,8 @@ bspdown::Options R2ConverterOptions()
     // mp_drydock: models/vehicle/imc_carrier/*.vmt) cannot answer them with a model material. The material provider serves the names
     // (r2_material_names.h). Opt-out token no-material-namespace.
     options.materialNamespace = std::string(kWorldMaterialNamespace);
+    options.orderMeshes = false;   // per-map default: ReadConvertedBsp turns it on for kMeshOrderDefaultMaps unless a token decided
+    g_meshOrderForced = 0;
     ApplyConverterVariant(options, R2ConverterVariantString());
     return options;
 }
@@ -1503,6 +1522,8 @@ FileBytes ReadConvertedBsp(const MapRequest& request)
                 // No cloudmask on these two maps: the entity rewrite leaves the dummy light_environment last, so the CSM environment must be the last record too.
                 if (state->mapName == "mp_coliseum" || state->mapName == "mp_coliseum_column")
                     options.csmLastEnv = true;
+                if (g_meshOrderForced == 0)
+                    options.orderMeshes = MeshOrderDefaultForMap(state->mapName);
                 bspdown::Report report;
                 converted = bspdown::DowngradeBsp(source->data(), source->size(), options, &report);
                 StoreConvertedBspCache(state, sourceHash, converted);
