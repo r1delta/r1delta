@@ -62,7 +62,7 @@ inline constexpr const char kUberVlgSource[] =
 #undef R2_T_SO
 #endif
 #ifndef R2_CUBE_LOD_BIAS
-#define R2_CUBE_LOD_BIAS -3.0   // our probes are 32x32 (R2 256x256): R2 mip m is our mip m - 3
+#define R2_CUBE_LOD_BIAS -2.0   // our probes are 64x64 (R2 256x256): R2 mip m is our mip m - 2
 #endif
 #ifndef R2_ENV_GAIN
 #define R2_ENV_GAIN 0.25        // R2_T_FENV: gain on the R2 environment BRDF (the LMG file's empirical pick; models carry $envmaptint 0.25 from the converter, which this term does not use)
@@ -362,7 +362,7 @@ float4 PSMain(PSIn i
 #if R2_T_LOD
         uint cw, ch, cmips;
         envTexture.GetDimensions(0, cw, ch, cmips);
-        lod = clamp(rough * 6.0 + R2_CUBE_LOD_BIAS, 0.0, float(cmips - 1u));
+        lod = min(rough * 6.0 + R2_CUBE_LOD_BIAS, float(cmips - 1u));
 #else
         lod = cb0[10].y * log2(max(expo * 0.25 - 2.0, 0.25)) + cb0[10].x;
 #endif
