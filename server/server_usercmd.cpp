@@ -452,6 +452,10 @@ bool RegisterMovementConVars()
 		{"delta_pilot_movement_auto_r1", "0",
 			"Automatically enable the slide/grapple movement program for every pilot on stock R1 maps.", 0.0f, 1.0f,
 			FCVAR_GAMEDLL | FCVAR_RELEASE},
+		// Playtest: the grapple is disabled by default (CORE pilot.nut stops sending the grapple button while this is 0).
+		{"delta_pilot_grapple_enabled", "0",
+			"Allow the grapple (+scriptCommand3) of the slide/grapple movement program. Replicated: a server decides for its clients.", 0.0f, 1.0f,
+			FCVAR_GAMEDLL | FCVAR_REPLICATED | FCVAR_RELEASE},
 		{"delta_sp_landing_slowdown_scale", "0",
 			"Landing movement slowdown multiplier (0=off, 1=full).", 0.0f, 1.0f, physicsFlags},
 		{"delta_sp_slide_friction_scale", "1",

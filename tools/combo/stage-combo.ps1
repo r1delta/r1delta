@@ -269,6 +269,17 @@ if ($Drive) {
 $autoPatch = Join-Path $CodeRoot 'tools\combo\core-pilot-auto-enable.patch'
 GitC $Core @('apply', '--ignore-whitespace', '--whitespace=nowarn', $autoPatch) | Out-Null
 Say 'applied core-pilot-auto-enable.patch'
+# Grapple disabled for the playtest (CORE-only, reversible): the client never sends the grapple button while delta_pilot_grapple_enabled is 0
+# (native cvar, default 0, replicated: a dedicated server decides), so the native grapple program stays in phase 0 and takes no weapon lock.
+# Slide is untouched. delta_pilot_grapple_enabled 1 re-enables it.
+$pnG = Join-Path $Core 'scripts\vscripts\movement\pilot.nut'
+$sG = [IO.File]::ReadAllText($pnG)
+$aG = '::PilotMovementGrappleHeld ? 1 : 0'
+if (-not $sG.Contains($aG)) { throw 'pilot.nut grapple gate anchor missing' }
+$tmpG = Join-Path $env:TEMP ('combo-pilot-' + [Guid]::NewGuid().ToString('N') + '.nut')
+[IO.File]::WriteAllText($tmpG, $sG.Replace($aG, '( ::PilotMovementGrappleHeld && GetConVarInt( "delta_pilot_grapple_enabled" ) != 0 ) ? 1 : 0'), [Text.UTF8Encoding]::new($false))
+[ComboNative]::Replace($tmpG, $pnG); Remove-Item $tmpG
+Say 'grapple gated by delta_pilot_grapple_enabled (default 0)'
 # Version30: server browser compares release tags without the leading v (min server version v3.0.0); applied once (reverse check).
 $v30Core = Join-Path $CodeRoot 'tools\combo\core-v30-serverbrowser.patch'
 $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
@@ -317,7 +328,7 @@ function Set-ComboCfgBlock([string] $path, [string] $block) {
     [IO.File]::WriteAllText($tmp, $t, [Text.UTF8Encoding]::new($false))
     [ComboNative]::Replace($tmp, $path); Remove-Item $tmp
 }
-Set-ComboCfgBlock (Join-Path $Core 'cfg\autoexec_delta.cfg') ("// ---- r2-combo playtest defaults (this root only)`n// Slide + grapple are enabled automatically on converted R2 maps (delta_pilot_movement_auto_r2 1; stock maps: delta_pilot_movement_auto_r1 1). Grapple key: H (+scriptCommand3); press again to cancel.`nbind `"H`" `"+scriptCommand3`"`n// Slide tuning (SP friction 1, MP ground acceleration 300 instead of 50). Set here so an archived profile value cannot win.`ndelta_sp_slide_friction_scale 1`ndelta_sp_slide_ground_acceleration 300`n")
+Set-ComboCfgBlock (Join-Path $Core 'cfg\autoexec_delta.cfg') ("// ---- r2-combo playtest defaults (this root only)`n// Slide is enabled automatically on converted R2 maps (delta_pilot_movement_auto_r2 1; stock maps: delta_pilot_movement_auto_r1 1). The grapple is disabled for this playtest: delta_pilot_grapple_enabled 1 re-enables it (+scriptCommand3).`n// Slide tuning (SP friction 1, MP ground acceleration 300 instead of 50). Set here so an archived profile value cannot win.`ndelta_sp_slide_friction_scale 1`ndelta_sp_slide_ground_acceleration 300`n")
 Set-ComboCfgBlock (Join-Path $Core 'cfg\config_default_pc.cfg') ("// ---- r2-combo playtest defaults (this root only)`n// Fresh profiles: grapple on MOUSE4 (+scriptCommand3), also on H via autoexec_delta.cfg.`nbind `"MOUSE4`" `"+scriptCommand3`"`n")
 
 # ---- Frontier Defense overlay (playtest only; GENERATED from the player's own Titanfall 2 data, never committed).
