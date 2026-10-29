@@ -272,6 +272,19 @@ $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
 $v30Done = ($LASTEXITCODE -eq 0)
 $ErrorActionPreference = $prev
 if (-not $v30Done) { GitC $Core @('apply', '--ignore-whitespace', '--whitespace=nowarn', $v30Core) | Out-Null; Say 'applied core-v30-serverbrowser.patch' }
+# R2 map sounds (AudioPort CORE-0001): the LAST precache_file of the manifest is the generated, in-memory scripts/r2port_sounds.txt.
+# Idempotent; the manifest is re-restored from the pin by -Refresh above, so this runs every staging.
+$mf = Join-Path $Core 'scripts\game_sounds_manifest.txt'
+$mt = [IO.File]::ReadAllText($mf)
+if ($mt -notmatch 'scripts/r2port_sounds\.txt') {
+    $i = $mt.LastIndexOf('}')
+    if ($i -lt 0) { throw 'game_sounds_manifest.txt has no closing brace' }
+    $mt = $mt.Substring(0, $i) + "`t`"precache_file`"`t`t`"scripts/r2port_sounds.txt`"`n" + $mt.Substring($i)
+    $tmpm = Join-Path $env:TEMP ('combo-mf-' + [Guid]::NewGuid().ToString('N') + '.txt')
+    [IO.File]::WriteAllText($tmpm, $mt, [Text.UTF8Encoding]::new($false))
+    [ComboNative]::Replace($tmpm, $mf); Remove-Item $tmpm
+    Say 'appended scripts/r2port_sounds.txt to game_sounds_manifest.txt'
+}
 # Default grapple keys for playtesters (r2-combo only; private copies of two cfg files, never written through a hardlink):
 #  - config_default_pc.cfg: MOUSE4 (only used for a profile without saved settings, so it can never clobber a player's own bind);
 #  - autoexec_delta.cfg: H (runs every launch; neither the shipped defaults nor the user's profile use H).
