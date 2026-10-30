@@ -2168,7 +2168,7 @@ std::filesystem::path MaterializeMapCacheFile(std::string_view path)
         }
         error.clear();
         if (FileEqualsMemory(destination, *data)) {
-            cache::TouchIfOld(destination);
+            cache::TouchIfOld(destination, 3600ull * 10000000ull);   // recent for the LRU eviction, which spares files younger than two hours
             std::lock_guard<std::mutex> lock(g_materializedMutex);
             g_materialized[destination.string()] = data;
             return root;

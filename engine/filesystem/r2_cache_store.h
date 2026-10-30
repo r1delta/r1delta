@@ -136,16 +136,15 @@ inline std::uint64_t NowFileTime()
     return FileTimeToU64(now);
 }
 
-// Marks a cache hit as recent for the LRU eviction: sets the write time to now when it is older than a day (one cheap call per
-// stale file, nothing for files already used today).
-inline void TouchIfOld(const std::filesystem::path& file)
+// Marks a cache hit as recent for the LRU eviction: sets the write time to now when it is older than `maxAge` (100 ns units, default a day:
+// one cheap call per stale file, nothing for files already used today).
+inline void TouchIfOld(const std::filesystem::path& file, std::uint64_t maxAge = 24ull * 3600ull * 10000000ull)
 {
-    constexpr std::uint64_t kDay = 24ull * 3600ull * 10000000ull;
     WIN32_FILE_ATTRIBUTE_DATA data{};
     if (!GetFileAttributesExW(file.c_str(), GetFileExInfoStandard, &data))
         return;
     const std::uint64_t now = NowFileTime();
-    if (now - FileTimeToU64(data.ftLastWriteTime) < kDay)
+    if (now - FileTimeToU64(data.ftLastWriteTime) < maxAge)
         return;
     HANDLE handle = CreateFileW(file.c_str(), FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
         OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
