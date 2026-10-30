@@ -622,7 +622,6 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="engine\vtable_remaps\filesystem_vtable.cpp" />
     <ClCompile Include="eos\fake_ip_layer.cpp" />
     <ClCompile Include="engine\net\net_hooks.cpp" />
-    <ClCompile Include="engine\net\snapshot_overflow.cpp" />
     <ClCompile Include="engine\net\movement_snapshot_transport.cpp" />
     <ClCompile Include="client\rendering\hudwarp.cpp" />
     <ClCompile Include="client\rendering\hudwarp_hooks.cpp" />

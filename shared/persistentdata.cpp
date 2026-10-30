@@ -1785,12 +1785,8 @@ bool R1OGetPersistentUserDataConVar(int playerSlot, const char* name, std::strin
 		&& ServerReadPersistent(playerSlot, name, value);
 }
 
-void SnapshotOverflow_ServerFrame(); // engine/net/snapshot_overflow.cpp
-
 void PData_ServerRunFrame()
 {
-	// The one per-frame server hook every mode reaches (listen: client frame, dedicated/R1O: host frame).
-	SnapshotOverflow_ServerFrame();
 	ServiceServerPlayers(false);
 }
 
