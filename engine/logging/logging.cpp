@@ -804,8 +804,14 @@ void COM_TimestampedLogHook(const char* pMsg, ...) {
 		COM_TimestampedLogOriginal("%s", formatted);
 	}
 }
+bool SnapshotOverflow_HandleError(); // engine/net/snapshot_overflow.cpp
 extern "C" __declspec(dllexport) void Error(const char* pMsg, ...) {
 	ZoneScoped;
+
+	// CBaseClient::SendSnapshot: a full update that does not fit its 160000-byte buffer. The engine's Error ends the process (the whole
+	// listen server); the handler drops that client instead and the engine's own "return 0" after this call runs.
+	if (strcmp_static(pMsg, "Reliable snapshot overflow.") == 0 && SnapshotOverflow_HandleError())
+		return;
 	
 	if (strcmp_static(pMsg, "UserMessageBegin:  Unregistered message '%s'\n") == 0 ||
 		strcmp_static(pMsg, "MESSAGE_END called with no active message\n") == 0) {

@@ -58,6 +58,7 @@
 #include "r1o_sound_tables.h"
 #include "soundscript_parity.h"
 #include "dlc_ownership.h"
+void SnapshotOverflow_Install(uintptr_t engineBase, bool dedicated, bool r1o); // engine/net/snapshot_overflow.cpp
 #include "script_sync_parity.h"
 #include "ui_script_failure.h"
 #include <cstdlib>
@@ -9261,6 +9262,7 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	doBinaryPatchForFile(*ndata);
 	FreeModuleNotificationData(ndata);
 	ResolveSetConvarString();
+	SnapshotOverflow_Install(engine_base_spec, IsDedicatedServer(), IsR1ODedicatedServer());
 	uintptr_t vTableAddr = server_base + 0x807220;
 
 	if (!IsR1ODedicatedServer()) {
