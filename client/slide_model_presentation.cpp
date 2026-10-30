@@ -2000,16 +2000,15 @@ constexpr RootModel MakeRoot(const char* name, const Profile* profile)
 }
 constexpr RootModel kRoots[] = {
     MakeRoot("humans/imc_pilot/male_br/imc_pilot_male_br.mdl", &MaleProfile),
-    MakeRoot("humans/imc_pilot/male_cq/imc_pilot_male_cq.mdl", &MaleProfile),
     MakeRoot("humans/imc_pilot/male_dm/imc_pilot_male_dm.mdl", &MaleProfile),
     MakeRoot("humans/mcor_pilot/male_br/mcor_pilot_male_br.mdl", &MaleProfile),
-    MakeRoot("humans/mcor_pilot/male_cq/mcor_pilot_male_cq.mdl", &MaleProfile),
     MakeRoot("humans/mcor_pilot/male_dm/mcor_pilot_male_dm.mdl", &MaleProfile),
     MakeRoot("humans/pilot/female_br/pilot_female_br.mdl", &FemaleProfile),
-    MakeRoot("humans/pilot/female_cq/pilot_female_cq.mdl", &FemaleProfile),
     MakeRoot("humans/pilot/female_dm/pilot_female_dm.mdl", &FemaleProfile),
 };
-static_assert(std::size(kRoots) == 9);
+// Playtest: the three *_cq models (imc/mcor male, female) are deliberately NOT retargeted: the pose retarget made the CQB pilot invisible,
+// so those models keep their native animation (no authored slide animation for CQB).
+static_assert(std::size(kRoots) == 6);
 
 template<class T> T At(const void* object, std::size_t offset)
 {
@@ -3112,14 +3111,12 @@ void ResetState() noexcept
 bool InstallState(State& state, std::uintptr_t module) noexcept
 {
     if (!module) return false;
-    // Playtest build: the native slide pose retarget is OFF (it keys on the internal model names of the 9 pilot roots, including every *_cq,
-    // and writes an assumed expanded 223/228 bone rig into the stock skeleton: the CQB pilot rendered invisible). No hook is installed and the
-    // state never becomes ready, so SupportsPlayer/SupportsServerPlayer are false and the activity override is never applied.
-    // R1DELTA_SLIDE_MODEL_PRESENTATION=1 restores the previous behaviour.
+    // Playtest build: env R1DELTA_SLIDE_MODEL_PRESENTATION=0 turns the native slide pose retarget off (no hook installed, state never ready, so
+    // SupportsPlayer/SupportsServerPlayer are false and the activity override is never applied). Default ON; the *_cq roots are not retargeted (kRoots).
     {
         char flag[8] = {};
         const DWORD flagLength = GetEnvironmentVariableA("R1DELTA_SLIDE_MODEL_PRESENTATION", flag, sizeof(flag));
-        if (flagLength != 1 || flag[0] != '1')
+        if (flagLength == 1 && flag[0] == '0')
             return true;
     }
     StateScope active(state);

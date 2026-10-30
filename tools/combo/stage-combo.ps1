@@ -243,13 +243,6 @@ $manifest = Get-Content -LiteralPath (Join-Path $Handover 'slide-assets-manifest
 $na = 0
 foreach ($a in $manifest.files) {
     $rel = $a.path.Replace('/', '\')
-    # Playtest: NO slide model asset is staged (the 36 replacement pilot models of models/humans/** and models/anim/pilot_slide*.mdl): the native slide
-    # pose retarget is off in this build (client/slide_model_presentation.cpp, env R1DELTA_SLIDE_MODEL_PRESENTATION=1 re-enables it).
-    # -Refresh restores the stock model files; the two new pilot_slide models of an earlier staging are deleted below.
-    if ($rel -like 'models\*') {
-        if ($rel -like 'models\anim\pilot_slide*') { Remove-Item -LiteralPath (Join-Path $Core $rel) -Force -ErrorAction SilentlyContinue }
-        continue
-    }
     $src = Join-Path $AssetStage $rel
     if ((Sha $src) -ne $a.sha256) { throw "asset hash mismatch $src" }
     $dst = Join-Path $Core $rel
@@ -299,7 +292,7 @@ foreach ($fn in @('slide_body.nut', 'pilot_server.nut')) {
     [IO.File]::WriteAllText($tmpB, $sB.Replace($aB, 'Movement_SetSlideActivity( player, ( GetConVarInt( "delta_pilot_slide_body" ) != 0 ) ? session : 0, ( GetConVarInt( "delta_pilot_slide_body" ) != 0 ) && sliding )'), [Text.UTF8Encoding]::new($false))
     [ComboNative]::Replace($tmpB, $pnB); Remove-Item $tmpB
 }
-Say 'slide body animation gated by delta_pilot_slide_body (default 0)'
+Say 'slide body animation switch delta_pilot_slide_body wired (native default 1)'
 # Version30: server browser compares release tags without the leading v (min server version v3.0.0); applied once (reverse check).
 $v30Core = Join-Path $CodeRoot 'tools\combo\core-v30-serverbrowser.patch'
 $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
