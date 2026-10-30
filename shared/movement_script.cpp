@@ -1,4 +1,5 @@
 #include "movement_runtime.h"
+#include "movement_fingerprint.h"
 #include "movement_checkpoints.h"
 #include "../engine/filesystem/r2_map_provider.h"
 #include "../client/movement_presentation_hooks.h"
@@ -530,29 +531,6 @@ bool SynchronousMovementSource(const char* source)
     }
     return true;
 }
-bool FingerprintMovementSource(const char* name, const char* source, unsigned slots, char (&text)[65])
-{
-    BCRYPT_ALG_HANDLE algorithm{}; BCRYPT_HASH_HANDLE hash{};
-    unsigned char digest[32]{};
-    bool ok = BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0) >= 0;
-    if (ok) ok = BCryptCreateHash(algorithm, &hash, nullptr, 0, nullptr, 0, 0) >= 0;
-    constexpr char version[] = "R1Delta movement API 3";
-    const auto append = [&](const void* bytes, std::size_t length)
-    {
-        return BCryptHashData(hash, reinterpret_cast<PUCHAR>(const_cast<void*>(bytes)), static_cast<ULONG>(length), 0) >= 0;
-    };
-    if (ok) ok = append(version, sizeof(version))
-        && append(kMovementNativeStateFingerprintTag, sizeof(kMovementNativeStateFingerprintTag))
-        && append(name, std::strlen(name) + 1) && append(&slots, sizeof(slots)) && append(source, std::strlen(source));
-    if (ok) ok = BCryptFinishHash(hash, digest, sizeof(digest), 0) >= 0;
-    if (hash) BCryptDestroyHash(hash);
-    if (algorithm) BCryptCloseAlgorithmProvider(algorithm, 0);
-    if (!ok) return false;
-    constexpr char digits[] = "0123456789abcdef";
-    for (unsigned i = 0; i < sizeof(digest); ++i) { text[i * 2] = digits[digest[i] >> 4]; text[i * 2 + 1] = digits[digest[i] & 15]; }
-    text[64] = 0;
-    return true;
-}
 SQRESULT CompileMovementChunk(MovementVm& binding, HSQUIRRELVM vm, const char* source, const char* name)
 {
     const auto size = static_cast<SQInteger>(std::strlen(source));
@@ -587,8 +565,10 @@ SQInteger RegisterMovementProgram(HSQUIRRELVM vm)
         return MovementScriptError(vm, "Movement_Register(name[1..32], source[1..65536], slots[0..64], presentationName[0..64])");
     if (!SynchronousMovementSource(source))
         return MovementScriptError(vm, "Movement source must be synchronous; yielding, threads and waits are not supported");
+    // CRLF/LF checkouts of one program must be one program: fingerprint and compile the same normalized text.
+    const std::string normalizedSource = NormalizeMovementSource(source);
     MovementProgram candidate{};
-    if (!FingerprintMovementSource(name, source, static_cast<unsigned>(slots), candidate.fingerprint))
+    if (!FingerprintMovementSource(name, normalizedSource.c_str(), static_cast<unsigned>(slots), candidate.fingerprint))
         return MovementScriptError(vm, "Cannot fingerprint movement source");
     for (const auto& existing : binding->programs)
         if (existing.registered && std::strcmp(existing.name, name) == 0)
@@ -604,7 +584,7 @@ SQInteger RegisterMovementProgram(HSQUIRRELVM vm)
     std::strcpy(candidate.name, name);
     std::strcpy(candidate.presentation, presentation);
     candidate.slots = static_cast<unsigned>(slots);
-    if (!PutMovementChunk(*binding, vm, candidate.registryKey, source))
+    if (!PutMovementChunk(*binding, vm, candidate.registryKey, normalizedSource.c_str()))
     {
         LogMovementVmFailure(*binding, "compilation failed", name, vm);
         return sq_throwerror(vm, binding->lastError);

@@ -16,7 +16,7 @@ inline constexpr unsigned kMovementWeaponLockStateSlot = kMovementNativeStateFir
 inline constexpr unsigned kMovementStateWords = kMovementSlots + kMovementNativeStateCount;
 // Native rollback state trails, and never consumes, the public 64 script slots.
 inline constexpr unsigned kMovementNativeStateFormat = 2;
-inline constexpr char kMovementNativeStateFingerprintTag[] = "R1Delta movement native state format 2";
+// kMovementNativeStateFingerprintTag lives in movement_fingerprint.h (the program fingerprint is its only user).
 // Fixed header/name/fingerprint plus eight hexadecimal characters per state word.
 inline constexpr std::size_t kMovementAuthorityBytes = 256 + kMovementStateWords * 8;
 inline constexpr unsigned kMovementPrograms = 16;
