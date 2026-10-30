@@ -16,6 +16,9 @@
 //                           i.e. against the socket address and the attested IP)
 //   FAKE_TOKEN_MS_URL=url   client: master used for identity tokens (bogus = none)
 //   FAKE_CONNECT_OVERLAY=iroh|tailcat  client: manual overlay connect by address
+//   FAKE_HIDDEN=1           server: hide_server 1 (no heartbeat); prints "HOST_INVITE <secret>"
+//                           (p2p::HostInviteTarget, what client/discord.cpp publishes) or "HOST_INVITE none"
+//   FAKE_INVITE=<secret>    client: skip the server list and join like HandleDiscordJoin would
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
@@ -32,6 +35,7 @@
 #include <thread>
 
 #include "../p2p.h"
+#include "../p2p_invite.h"
 #include "../p2p_eos_bridge.h"
 #include "../p2p_identity.h"
 #include "../p2p_mux.h"
@@ -241,7 +245,28 @@ int RunServer(const std::string& ip, uint16_t port, const std::string& master)
     }
 
     std::atomic<bool> running{ true };
+    const bool hidden = std::getenv("FAKE_HIDDEN") != nullptr;
     std::thread heartbeat([&] {
+        if (hidden)
+        {
+            // hide_server 1: no heartbeat, only the services the heartbeat thread starts for hidden servers.
+            p2p::EnsureServerServices(port);
+            for (int i = 0; i < 400 && running; ++i)
+            {
+                bool pending = false;
+                const std::string invite = p2p::HostInviteTarget(port, &pending);
+                if (!invite.empty())
+                {
+                    Msg("HOST_INVITE %s\n", invite.c_str());
+                    return;
+                }
+                if (!pending)
+                    break;
+                Sleep(100);
+            }
+            Msg("HOST_INVITE none\n");
+            return;
+        }
         httplib::Client cli(master);
         cli.set_connection_timeout(2, 0);
         while (running)
@@ -315,7 +340,7 @@ int RunClient(const std::string& ip, uint16_t port, const std::string& master, c
     // Wait for the server to be listed (validated) and load its transports
     // like the server browser does.
     httplib::Client cli(master);
-    bool listed = false;
+    bool listed = std::getenv("FAKE_INVITE") != nullptr; // an invite replaces the server list
     const std::string wantedTransports = std::getenv("WAIT_TRANSPORTS") ? std::getenv("WAIT_TRANSPORTS") : "";
     for (int i = 0; i < 120 && !listed; ++i)
     {
@@ -380,6 +405,24 @@ int RunClient(const std::string& ip, uint16_t port, const std::string& master, c
             }
         }
         RunCommand(kind == "iroh" ? "delta_connect_iroh" : "delta_connect_tailcat", { addr, target.substr(target.rfind(':') + 1) });
+    }
+    else if (const char* secret = std::getenv("FAKE_INVITE"))
+    {
+        // client/discord.cpp HandleDiscordJoin: ParseInviteTarget + InviteConnectCommand.
+        const auto parsed = p2p::ParseInviteTarget(secret);
+        const std::string command = parsed ? p2p::InviteConnectCommand(*parsed) : std::string();
+        if (command.empty())
+        {
+            Msg("RESULT fail: invalid invite\n");
+            return 1;
+        }
+        Msg("invite command: %s", command.c_str());
+        if (parsed->route == p2p::InviteRoute::Iroh)
+            RunCommand("delta_connect_iroh", { parsed->address, std::to_string(parsed->port) });
+        else if (parsed->route == p2p::InviteRoute::Tailcat)
+            RunCommand("delta_connect_tailcat", { parsed->address, std::to_string(parsed->port) });
+        else
+            RunCommand("delta_connect", { parsed->address });
     }
     else
     {

@@ -35,7 +35,7 @@ cp "$P2P/plugins/iroh/target/release/libr1delta_iroh.so" "$WORK/plugins/"
 g++ -std=c++20 -O1 -g -Wall -Wno-unknown-pragmas -include "$HERE/win_compat.h" -I"$HERE/shim_include" \
     -I"$HERE/stub_include" -I"$HDR" -I"$P2P" "$HERE/fake_engine.cpp" "$P2P"/p2p.cpp "$P2P"/p2p_mux.cpp \
     "$P2P"/p2p_plugin.cpp "$P2P"/p2p_turn.cpp "$P2P"/p2p_server.cpp "$P2P"/p2p_connect.cpp \
-    "$P2P"/p2p_protocol.cpp "$P2P"/stun.cpp "$P2P"/upnp_codec.cpp "$P2P"/p2p_identity.cpp "$HERE/crypto_openssl.cpp" \
+    "$P2P"/p2p_protocol.cpp "$P2P"/p2p_invite.cpp "$P2P"/stun.cpp "$P2P"/upnp_codec.cpp "$P2P"/p2p_identity.cpp "$HERE/crypto_openssl.cpp" \
     -Wno-deprecated-declarations -o "$WORK/fake_engine" -ldl -lpthread -lcrypto
 
 # Identity attestation key (test only) and its public X||Y for the game side.
@@ -115,6 +115,27 @@ run_expect() { # <name> <expect ok|fail> <server port> <client port> [env...]
 }
 run_expect "manual iroh connect with identity" ok 37015 37160 FAKE_CONNECT_OVERLAY=iroh WAIT_TRANSPORTS=iroh
 run_expect "manual iroh connect without identity token" fail 37015 37161 FAKE_CONNECT_OVERLAY=iroh WAIT_TRANSPORTS=iroh FAKE_TOKEN_MS_URL=http://127.0.0.1:1
+
+echo "=== hidden NAT'd host (hide_server 1: no heartbeat, nothing in the master's list)"
+FAKE_NAT=1 FAKE_HIDDEN=1 "$WORK/fake_engine" server "$IP" 37018 "$MASTER" > "$WORK/hidden_server.log" 2>&1 & PIDS+=($!)
+for _ in $(seq 120); do grep -q "HOST_INVITE" "$WORK/hidden_server.log" && break; sleep 0.5; done
+INVITE="$(sed -n 's/.*HOST_INVITE //p' "$WORK/hidden_server.log" | head -1)"
+RAW_IROH="$(sed -n 's/.*iroh listening: //p' "$WORK/hidden_server.log" | head -1)"
+echo "    Discord secret: ${INVITE:-<none>} (${#INVITE} bytes)"
+if curl -s "$MASTER/servers" | grep -q '"port":37018'; then echo "    hidden server is listed!"; fail=1; fi
+if [ "${#INVITE}" -gt 127 ]; then echo "    secret exceeds Discord's 127 bytes"; fail=1; fi
+case "$INVITE" in
+    "r1di1|iroh|37018|${RAW_IROH%%|*}"*) ;;
+    *) echo "    expected an iroh invite for ${RAW_IROH%%|*}"; fail=1 ;;
+esac
+if printf '%s' "$INVITE" | grep -Eq '(^|[^0-9])(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|127\.|100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.)[0-9.]+:[0-9]+'; then
+    echo "    secret leaks a private endpoint"; fail=1
+fi
+# The test network may have no public relay or public address, so the join below uses the same
+# envelope with the server's full raw iroh address (private test addresses included).
+run_expect "hidden host joined from an iroh invite (no master entry)" ok 37018 37181 \
+    FAKE_INVITE="r1di1|iroh|37018|$RAW_IROH" P2P_delta_p2p_connect_timeout_ms=20000
+if ! grep -q "chosen=iroh" "$WORK/client_37181.log"; then echo "    expected the connection to run over iroh"; fail=1; fi
 
 echo "=== starting a second NAT'd server that bans $IP"
 FAKE_NAT=1 FAKE_BANNED_IP="$IP" "$WORK/fake_engine" server "$IP" 37017 "$MASTER" > "$WORK/banning_server.log" 2>&1 & PIDS+=($!)
