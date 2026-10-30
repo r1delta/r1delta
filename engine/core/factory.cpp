@@ -93,6 +93,7 @@
 #include "load.h"
 #include "logging.h"
 #include "vtable.h"
+#include "import_slot.h"
 #include "persistentdata.h"
 #include "persistentdata_slots.h"
 #include "dlc_ownership.h"
@@ -248,6 +249,7 @@ using R1ORecvFromType = int (WSAAPI*)(SOCKET, char*, int, int, sockaddr*, int*);
 static R1ORecvFromType R1ORecvFromOriginal;
 static thread_local unsigned int s_R1ORecvFromGuardDepth;
 static thread_local unsigned int s_R1ORecvFromCalls;
+static void InstallR1ORecvFromGuard();
 using R1ONetChanLookupType = __int64(__fastcall*)(int socketIndex, int* packet);
 static R1ONetChanLookupType R1ONetChanLookupOriginal;
 using R1ONetChanProcessPacketType = __int64(__fastcall*)(__int64 netChan, char* packet, __int64 allowConnectionless);
@@ -12946,6 +12948,8 @@ static char __fastcall R1ONetReceivePacket(unsigned int frameTime, __int64 packe
 
 	const bool guardRecvLoop = IsR1ODedicatedServer();
 	if (guardRecvLoop) {
+		static std::once_flag recvFromGuardOnce;
+		std::call_once(recvFromGuardOnce, InstallR1ORecvFromGuard);
 		if (s_R1ORecvFromGuardDepth++ == 0)
 			s_R1ORecvFromCalls = 0;
 	}
@@ -18938,6 +18942,24 @@ static int WSAAPI R1ORecvFromGuard(
 	return R1ORecvFromOriginal(socket, buffer, length, flags, from, fromLength);
 }
 
+// The guard sits in engine_r1o's own recvfrom import slot rather than on a Winsock export, so it composes with the
+// EOS/p2p socket hooks, which own the Winsock exports. Under Wine wsock32!recvfrom forwards to ws2_32!recvfrom, so a
+// MinHook detour of the guard on that address left the socket hooks unable to install and the server exited at
+// startup. Installed on the first NET_ReceivePacket: the load notification that installs the other engine_r1o hooks
+// can run before the module's imports are bound.
+static void InstallR1ORecvFromGuard()
+{
+	HMODULE wsock = GetModuleHandleA("wsock32.dll");
+	void* bound = wsock ? reinterpret_cast<void*>(GetProcAddress(wsock, "recvfrom")) : nullptr;
+	if (!bound) {
+		Warning("R1Delta: R1O dedicated recvfrom loop guard not installed: wsock32!recvfrom is not loaded\n");
+		return;
+	}
+	R1ORecvFromOriginal = reinterpret_cast<R1ORecvFromType>(bound);
+	if (ReplaceBoundImport(G_engine_r1o, bound, reinterpret_cast<const void*>(&R1ORecvFromGuard)) == 0)
+		Warning("R1Delta: R1O dedicated recvfrom loop guard not installed: engine_r1o has no import bound to %p\n", bound);
+}
+
 static void* R1OQueryLoadedModuleFactories(const char* name, int* returnCode)
 {
 	static const char* kModules[] = {
@@ -20768,27 +20790,6 @@ void InitR1ODedicatedServerAPIHook(uintptr_t engineR1OBase) {
 		(LPVOID)(engineR1OBase + 0x200430),
 		&R1ONetReceivePacket,
 		reinterpret_cast<LPVOID*>(&R1ONetReceivePacketOriginal));
-	void* recvFromTarget = nullptr;
-	if (HMODULE ws2 = GetModuleHandleA("ws2_32.dll"))
-		recvFromTarget = reinterpret_cast<void*>(GetProcAddress(ws2, "recvfrom"));
-	MH_STATUS recvFromCreateStatus = recvFromTarget
-		? MH_CreateHook(
-			recvFromTarget,
-			&R1ORecvFromGuard,
-			reinterpret_cast<LPVOID*>(&R1ORecvFromOriginal))
-		: MH_ERROR_FUNCTION_NOT_FOUND;
-	MH_STATUS recvFromEnableStatus =
-		(recvFromCreateStatus == MH_OK || recvFromCreateStatus == MH_ERROR_ALREADY_CREATED)
-			? MH_EnableHook(recvFromTarget)
-			: recvFromCreateStatus;
-	if (recvFromEnableStatus != MH_OK && recvFromEnableStatus != MH_ERROR_ENABLED) {
-		Warning(
-			"R1Delta: failed to install R1O dedicated recvfrom loop guard "
-			"(create=%d enable=%d target=%p)\n",
-			static_cast<int>(recvFromCreateStatus),
-			static_cast<int>(recvFromEnableStatus),
-			recvFromTarget);
-	}
 	MH_STATUS netChanLookupStatus = MH_CreateHook(
 		(LPVOID)(engineR1OBase + 0x1FF0E0),
 		&R1ONetChanLookup,

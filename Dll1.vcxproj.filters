@@ -177,6 +177,9 @@
     <ClInclude Include="engine\hooks\patcher.h">
       <Filter>engine\hooks</Filter>
     </ClInclude>
+    <ClInclude Include="engine\hooks\import_slot.h">
+      <Filter>engine\hooks</Filter>
+    </ClInclude>
     <!-- engine\vtable_remaps -->
     <ClInclude Include="engine\vtable_remaps\engine_vtable.h">
       <Filter>engine\vtable_remaps</Filter>
@@ -925,6 +928,9 @@
       <Filter>engine\hooks</Filter>
     </ClCompile>
     <ClCompile Include="engine\hooks\patcher.cpp">
+      <Filter>engine\hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\hooks\import_slot.cpp">
       <Filter>engine\hooks</Filter>
     </ClCompile>
     <!-- engine\vtable_remaps -->

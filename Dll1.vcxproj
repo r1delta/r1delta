@@ -394,6 +394,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="engine\net\netchanwarnings.h" />
     <ClInclude Include="engine\hooks\minhook_checked.h" />
     <ClInclude Include="engine\hooks\patcher.h" />
+    <ClInclude Include="engine\hooks\import_slot.h" />
     <ClInclude Include="shared\persistentdata.h" />
     <ClInclude Include="shared\persistentdata_codec.h" />
 	<ClInclude Include="shared\persistentdata_slots.h" />
@@ -660,6 +661,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="sdk\newbitbuf.cpp" />
     <ClCompile Include="engine\hooks\minhook_checked.cpp" />
     <ClCompile Include="engine\hooks\patcher.cpp" />
+    <ClCompile Include="engine\hooks\import_slot.cpp" />
     <ClCompile Include="shared\persistentdata.cpp" />
     <ClCompile Include="shared\persistentdata_codec.cpp" />
     <ClCompile Include="shared\persistentdata_store.cpp" />
