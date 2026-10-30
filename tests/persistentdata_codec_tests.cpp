@@ -20,13 +20,6 @@ void Check(bool condition, const char* name)
 	}
 }
 
-// Test helper: queue what is due again and send it right away (no pacing).
-PersistentDataState::EntryList CollectResends(PersistentDataState::PlayerState& state, double now)
-{
-	PersistentDataState::QueueResends(state, now);
-	return PersistentDataState::TakeOutbox(state, now, SIZE_MAX);
-}
-
 std::vector<PersistentDataCodec::Entry> MakeEntries(size_t count)
 {
 	std::vector<PersistentDataCodec::Entry> entries;
@@ -495,7 +488,6 @@ void TestServerWriteSurvivesReconnectSnapshot()
 	const std::string clientXp = "100";
 	Check(RecordServerWrite(state, "__ xp", "250", &clientXp, 10.0, false), "server write must be sent");
 	Check(*Find(state, "__ xp") == "250", "reads see the pending write immediately");
-	Check(TakeOutbox(state, 10.0, SIZE_MAX).size() == 1, "the write goes out");
 
 	EntryList snapshot{ { "__ xp", "100" }, { "__ gen", "1" } };
 	ApplyClientUpdate(state, snapshot, true, false);
@@ -503,11 +495,10 @@ void TestServerWriteSurvivesReconnectSnapshot()
 	Check(snapshot[1].second == "1", "unrelated values pass through");
 	Check(state.pending.count("__ xp") == 1, "stale snapshot does not acknowledge the write");
 
-	Check(CollectResends(state, 10.1).empty(), "a snapshot right after the send is held back");
-	EntryList due = CollectResends(state, 11.1);
+	EntryList due = CollectResends(state, 10.1);
 	Check(due.size() == 1 && due[0].first == "__ xp" && due[0].second == "250",
-		"full snapshot triggers a resend once the hold has passed");
-	Check(CollectResends(state, 11.2).empty(), "no duplicate resend right away");
+		"full snapshot triggers an immediate resend");
+	Check(CollectResends(state, 10.2).empty(), "no duplicate resend right away");
 
 	EntryList echo{ { "__ xp", "250" } };
 	ApplyClientUpdate(state, echo, false, false);
@@ -599,7 +590,6 @@ void TestTimedResendBackoff()
 	PlayerState state;
 	BeginSession(state, SessionKey{ 0x1000, 3 });
 	RecordServerWrite(state, "__ xp", "1", nullptr, 0.0, false);
-	TakeOutbox(state, 0.0, SIZE_MAX);
 
 	Check(CollectResends(state, 1.0).empty(), "no resend before the first delay");
 	Check(CollectResends(state, 2.0).size() == 1, "first timed resend after 2s");
@@ -645,99 +635,6 @@ void TestMirrorKeepsFullDataSet()
 	Check(state.values.size() == 1 && state.values["__ k50"] == "server",
 		"full snapshot replaces the mirror but keeps the pending write");
 }
-
-void TestFullSnapshotsBackToBackDoNotMultiplyResends()
-{
-	// A fresh profile: hundreds of writes at once, then several full snapshots
-	// that report nothing arrive within milliseconds (the 4x resend burst that
-	// filled a joining client's reliable stream).
-	using namespace PersistentDataState;
-	PlayerState state;
-	BeginSession(state, SessionKey{ 0x1000, 3 });
-	for (int i = 0; i < 500; ++i)
-		RecordServerWrite(state, "__ k" + std::to_string(i), "v", nullptr, 0.0, false);
-	Check(TakeOutbox(state, 0.0, SIZE_MAX).size() == 500, "all writes go out once");
-
-	for (int snapshot = 0; snapshot < 4; ++snapshot) {
-		EntryList empty;
-		ApplyClientUpdate(state, empty, true, false);
-		Check(QueueResends(state, 0.001 * (snapshot + 1)) == 0, "snapshot right after the send is held back");
-	}
-	Check(state.outbox.empty(), "nothing is queued during the hold");
-
-	Check(QueueResends(state, 1.5) == 500, "after the hold the unacknowledged writes resend once");
-	for (int snapshot = 0; snapshot < 4; ++snapshot) {
-		EntryList empty;
-		ApplyClientUpdate(state, empty, true, false);
-		Check(QueueResends(state, 1.5) == 0, "a write waiting in the outbox is not queued again");
-	}
-	Check(state.outbox.size() == 500, "one outbox entry per write");
-}
-
-void TestHeldSnapshotResendIsDroppedWhenAcknowledged()
-{
-	using namespace PersistentDataState;
-	PlayerState state;
-	BeginSession(state, SessionKey{ 0x1000, 3 });
-	RecordServerWrite(state, "__ xp", "5", nullptr, 0.0, false);
-	TakeOutbox(state, 0.0, SIZE_MAX);
-
-	EntryList snapshot{ { "__ xp", "1" } };
-	ApplyClientUpdate(state, snapshot, true, false);
-	Check(QueueResends(state, 0.1) == 0, "held back right after the send");
-	EntryList echo{ { "__ xp", "5" } };
-	ApplyClientUpdate(state, echo, false, false);
-	Check(state.pending.empty() && QueueResends(state, 5.0) == 0, "an acknowledged write is never resent");
-}
-
-void TestOutboxIsPaced()
-{
-	using namespace PersistentDataState;
-	PlayerState state;
-	BeginSession(state, SessionKey{ 0x1000, 3 });
-	for (int i = 0; i < 1000; ++i)
-		RecordServerWrite(state, "__ k" + std::to_string(i), "v", nullptr, 0.0, false);
-
-	Check(TakePaced(state, 1.0, SIZE_MAX).size() == static_cast<size_t>(kSendBurst), "first call sends one burst");
-	Check(TakePaced(state, 1.0, SIZE_MAX).empty(), "the budget is spent");
-	const size_t after100ms = TakePaced(state, 1.1, SIZE_MAX).size();
-	Check(after100ms >= 59 && after100ms <= 61, "the budget refills at kSendPerSecond");
-	Check(TakePaced(state, 1.1, 10).empty(), "no refill without elapsed time");
-	Check(TakePaced(state, 100.0, 10).size() == 10, "hardLimit bounds a single call");
-	Check(TakePaced(state, 200.0, SIZE_MAX).size() == static_cast<size_t>(kSendBurst), "the budget never exceeds one burst");
-	size_t sent = 128 + after100ms + 10 + 128;
-	for (double t = 201.0; !state.outbox.empty(); t += 1.0)
-		sent += TakePaced(state, t, SIZE_MAX).size();
-	Check(sent == 1000, "every write is eventually sent exactly once");
-}
-
-void TestOutboxSkipsAcknowledgedAndStaleKeys()
-{
-	using namespace PersistentDataState;
-	PlayerState state;
-	BeginSession(state, SessionKey{ 0x1000, 3 });
-	RecordServerWrite(state, "__ a", "1", nullptr, 0.0, false);
-	RecordServerWrite(state, "__ b", "1", nullptr, 0.0, false);
-	EntryList echoA{ { "__ a", "1" } };
-	ApplyClientUpdate(state, echoA, false, false);
-	EntryList out = TakeOutbox(state, 0.0, SIZE_MAX);
-	Check(out.size() == 1 && out[0].first == "__ b", "a key acknowledged while queued is not sent");
-
-	// Same key written, acknowledged and written again before the outbox is read:
-	// the stale outbox entry must not send it twice.
-	RecordServerWrite(state, "__ c", "1", nullptr, 0.0, false);
-	EntryList echoC{ { "__ c", "1" } };
-	ApplyClientUpdate(state, echoC, false, false);
-	RecordServerWrite(state, "__ c", "2", nullptr, 0.0, false);
-	out = TakeOutbox(state, 0.0, SIZE_MAX);
-	Check(out.size() == 1 && out[0].first == "__ c" && out[0].second == "2", "a rewritten key is sent once, newest value");
-
-	// Overwriting a queued value keeps one outbox entry and sends the newest.
-	RecordServerWrite(state, "__ d", "1", nullptr, 0.0, false);
-	RecordServerWrite(state, "__ d", "2", nullptr, 0.0, false);
-	out = TakeOutbox(state, 0.0, SIZE_MAX);
-	Check(out.size() == 1 && out[0].second == "2", "overwriting a queued write sends only the newest value");
-}
 }
 
 int main()
@@ -763,10 +660,6 @@ int main()
 	TestRedundantWritesAreNotSent();
 	TestTimedResendBackoff();
 	TestMirrorKeepsFullDataSet();
-	TestFullSnapshotsBackToBackDoNotMultiplyResends();
-	TestHeldSnapshotResendIsDroppedWhenAcknowledged();
-	TestOutboxIsPaced();
-	TestOutboxSkipsAcknowledgedAndStaleKeys();
 
 	if (failures) {
 		std::cerr << failures << " persistent-data test(s) failed\n";

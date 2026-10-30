@@ -1389,32 +1389,6 @@ bool ReadNativeClientSession(uintptr_t clientBase, uintptr_t& netChannel, int& u
 	}
 }
 
-// Bytes in the netchannel's reliable stream that no datagram has carried yet
-// (CNetChan m_StreamReliable bit count, -1 when unknown). That stream is a fixed
-// 256 KiB buffer; filling it gets the client dropped with "overflowed reliable
-// channel". Offsets of the listen engine.dll (+0x40) and the legacy dedicated
-// engine_ds.dll (+0x30), exact builds only; R1O is not mapped.
-constexpr size_t kListenReliableBitsOffset = 64;
-constexpr size_t kDedicatedReliableBitsOffset = 48;
-// Persistent commands wait while the stream already holds this much.
-constexpr int kReliableBacklogLimitBytes = 64 * 1024;
-// Upper bound for one service call (one server frame).
-constexpr size_t kMaxCommandsPerService = 192;
-
-int NativeReliableBacklogBytes(uintptr_t netChannel)
-{
-	if (!netChannel || IsR1ODedicatedServer())
-		return -1;
-	__try {
-		const int bits = *reinterpret_cast<const int*>(
-			netChannel + (IsDedicatedServer() ? kDedicatedReliableBitsOffset : kListenReliableBitsOffset));
-		return bits < 0 ? -1 : (bits + 7) / 8;
-	}
-	__except (EXCEPTION_EXECUTE_HANDLER) {
-		return -1;
-	}
-}
-
 bool ResolveServerSession(int playerSlot, PersistentDataState::SessionKey& session)
 {
 	session = {};
@@ -1464,33 +1438,17 @@ bool SendPersistentCommandToClient(int playerSlot, const char* key, const char* 
 	return SendServerCommandToClient(playerSlot, command);
 }
 
-// Sends what the paced outbox allows. A player with a fresh profile gets several
-// hundred commands at once (every default the scripts write); all of them in one
-// frame, repeated by resends, fills the client's reliable stream.
-void FlushOutbox(int playerSlot, PersistentDataState::PlayerState& state, double now)
-{
-	if (state.outbox.empty())
-		return;
-	// The stream drains at the client's rate; do not add to a large backlog.
-	if (NativeReliableBacklogBytes(state.session.netChannel) > kReliableBacklogLimitBytes)
-		return;
-	static int sendFailureLogBudget = 8;
-	for (const auto& [name, value] : PersistentDataState::TakePaced(state, now, kMaxCommandsPerService)) {
-		if (!IsPersistentConVarName(name.c_str()))
-			continue;
-		LogPersistentDataDiagnostic("server-send", playerSlot, name.c_str(), value.c_str());
-		if (!SendPersistentCommandToClient(playerSlot, name.c_str() + kPersistPrefixLength, value.c_str())
-			&& sendFailureLogBudget-- > 0)
-			Warning("R1Delta: failed to send persistent data update to player slot %d\n", playerSlot);
-	}
-}
-
 void SendResends(int playerSlot, PersistentDataState::PlayerState& state, double now)
 {
 	if (state.pending.empty())
 		return;
-	PersistentDataState::QueueResends(state, now);
-	FlushOutbox(playerSlot, state, now);
+	const PersistentDataState::EntryList due = PersistentDataState::CollectResends(state, now);
+	for (const auto& [name, value] : due) {
+		if (!IsPersistentConVarName(name.c_str()))
+			continue;
+		LogPersistentDataDiagnostic("server-resend", playerSlot, name.c_str(), value.c_str());
+		SendPersistentCommandToClient(playerSlot, name.c_str() + kPersistPrefixLength, value.c_str());
+	}
 }
 
 void ServiceServerPlayers(bool throttle)
@@ -1665,12 +1623,6 @@ void ServerWritePersistent(int playerSlot, const char* key, const char* name, co
 		return;
 	if (vars)
 		vars->SetString(name, value);
-	if (state) {
-		// RecordServerWrite queued the write; it goes out now, or a few frames
-		// later when this player's pacing budget is spent.
-		FlushOutbox(playerSlot, *state, now);
-		return;
-	}
 	if (!SendPersistentCommandToClient(playerSlot, key, value))
 		Warning("R1Delta: failed to send persistent data update to player slot %d\n", playerSlot);
 }
