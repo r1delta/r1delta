@@ -437,6 +437,23 @@ void TestInvites()
     Check(EncodeOverlayInvite(Backend::Turn, id, 1).empty() &&
           EncodeOverlayInvite(Backend::Iroh, id, 0).empty(), "unsupported and zero-port encoding rejected");
 }
+
+void TestEndpointDefaultPort()
+{
+    using namespace p2p;
+    // A bare IPv4 (legacy Discord invite, `delta_connect 1.2.3.4`) gets the engine's own default port.
+    const auto bare = Ipv4Endpoint::ParseWithDefaultPort("203.0.113.7", kDefaultServerPort);
+    Check(kDefaultServerPort == 27015 && bare && bare->ip == 0xCB007107u && bare->port == 27015,
+          "bare IPv4 gets the engine default port 27015");
+    const auto explicitPort = Ipv4Endpoint::ParseWithDefaultPort("203.0.113.7:37015", kDefaultServerPort);
+    Check(explicitPort && explicitPort->port == 37015, "explicit port is kept");
+    const auto zeroPort = Ipv4Endpoint::ParseWithDefaultPort("203.0.113.7:0", kDefaultServerPort);
+    Check(zeroPort && zeroPort->port == 0, "explicit port 0 is left for the caller to resolve");
+    Check(!Ipv4Endpoint::ParseWithDefaultPort("", 27015) && !Ipv4Endpoint::ParseWithDefaultPort("203.0.113", 27015) &&
+          !Ipv4Endpoint::ParseWithDefaultPort("256.0.0.1", 27015) && !Ipv4Endpoint::ParseWithDefaultPort("example.com", 27015) &&
+          !Ipv4Endpoint::ParseWithDefaultPort("[3ffe::1]", 27015) && !Ipv4Endpoint::ParseWithDefaultPort("1.2.3.4:", 27015),
+          "non-IPv4 text is still rejected so hostnames and fake IPv6 go straight to the engine");
+}
 } // namespace
 
 int main()
@@ -450,6 +467,7 @@ int main()
     TestUpnp();
     TestIdentity();
     TestInvites();
+    TestEndpointDefaultPort();
     std::printf("%s\n", g_failures == 0 ? "p2p codec tests passed" : "p2p codec tests FAILED");
     return g_failures == 0 ? 0 : 1;
 }

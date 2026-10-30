@@ -17,6 +17,12 @@ void RememberServerTransports(const std::string& key, const nlohmann::json& tran
 // runs "connect <best address>". Falls back to a plain connect.
 void ConnectBest(const std::string& target);
 
+// Engine glue: returns the base client's m_nSignonState (-1 when unknown).
+// delta_connect uses it to explain a plain connect that stays at
+// SIGNONSTATE_CHALLENGE; without a reader that explanation is skipped.
+using SignonStateReader = int (*)();
+void SetClientSignonStateReader(SignonStateReader reader);
+
 // Connects to a server by an overlay address shared out of band
 // (delta_connect_iroh / delta_connect_tailcat).
 void ConnectOverlay(Backend backend, const std::string& address, uint16_t port);

@@ -209,6 +209,7 @@ std::string ClientPluginConfig(Backend backend, const Settings& settings)
 struct MasterInfo
 {
     bool ok = false;
+    int status = 0; // HTTP status of /nat/connect: 404 = not registered, -1 = unreachable, 0 = no master URL
     bool p2p = false; // server runs a build that answers R1NX pings
     json transports;
     Id16 ticket{};
@@ -233,9 +234,10 @@ MasterInfo QueryMaster(const std::string& msUrl, const std::string& target)
         cli.set_follow_location(true);
         const json body = { { "server", target } };
         auto res = cli.Post("/nat/connect", body.dump(), "application/json");
+        info.status = res ? res->status : -1;
         if (!res || res->status != 200)
         {
-            Debug("master /nat/connect failed (%d)\n", res ? res->status : -1);
+            Debug("master /nat/connect failed (%d)\n", info.status);
             return info;
         }
         const json r = json::parse(res->body);
@@ -262,6 +264,7 @@ MasterInfo QueryMaster(const std::string& msUrl, const std::string& target)
     catch (...)
     {
         info.ok = false;
+        info.status = -1;
     }
     return info;
 }
@@ -563,8 +566,11 @@ std::string FormatSummary(const Session& s, const Candidate* chosen, double elap
     return out;
 }
 
+void WatchDirectConnect(std::shared_ptr<Session> s, std::string target, std::string reason);
+
 void RunSession(std::shared_ptr<Session> s, Settings settings, std::string fallbackTarget)
 {
+    bool plainFallback = false;
     // Master lookup / attestation is not part of the route-probe timeout.
     s->started = Clock::now();
     const auto deadline = s->started + std::chrono::milliseconds(settings.connectTimeoutMs);
@@ -762,6 +768,7 @@ void RunSession(std::shared_ptr<Session> s, Settings settings, std::string fallb
         else if (!fallbackTarget.empty())
         {
             command = "connect " + fallbackTarget;
+            plainFallback = true;
             summary += "  -> no path answered, falling back to a plain connect\n";
             inviteAddress = MappedIpv4(s->candidates.front().udp.ip);
             invitePort = s->serverPort;
@@ -857,6 +864,8 @@ void RunSession(std::shared_ptr<Session> s, Settings settings, std::string fallb
         }
         command += "\n";
         Cbuf_AddText(0, command.c_str(), 0);
+        if (plainFallback)
+            WatchDirectConnect(s, fallbackTarget, "none of the probed routes answered");
     }
 }
 
@@ -896,12 +905,48 @@ std::shared_ptr<Session> NewSession(const std::string& target, uint16_t port)
     return s;
 }
 
+// Seconds after a plain `connect` before a silent CHALLENGE is explained.
+constexpr auto kDirectConnectWarnAfter = std::chrono::seconds(8);
+// R1 engine base client m_nSignonState (see engine/core/load.cpp ClientLocalSignonState).
+constexpr int kSignonChallenge = 1;
+std::atomic<SignonStateReader> g_signonReader{ nullptr };
+
+// A plain `connect` to a server that is neither listed nor directly reachable
+// (typically a hide_server 1 host behind NAT) leaves the engine retrying the
+// challenge forever with no console output. Say why, once, if the connection
+// is still stuck at CHALLENGE after kDirectConnectWarnAfter.
+void WatchDirectConnect(std::shared_ptr<Session> s, std::string target, std::string reason)
+{
+    std::thread([s = std::move(s), target = std::move(target), reason = std::move(reason)] {
+        const auto until = Clock::now() + kDirectConnectWarnAfter;
+        while (Clock::now() < until)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+            if (!StillCurrent(s))
+                return;
+        }
+        const SignonStateReader reader = g_signonReader.load();
+        if (!reader || reader() != kSignonChallenge)
+            return;
+        Log("%s has not answered the connect challenge after %d seconds (%s).\n"
+            "  The server is not reachable directly. Ask the host to forward UDP port %u, to turn off hide_server so "
+            "NAT traversal can help, or to send a Discord invite from a current R1Delta build.\n",
+            target.c_str(), static_cast<int>(kDirectConnectWarnAfter.count()), reason.c_str(),
+            static_cast<unsigned>(s->serverPort));
+    }).detach();
+}
+
 } // namespace
 
 uint64_t NowMicros()
 {
     return static_cast<uint64_t>(
         std::chrono::duration_cast<std::chrono::microseconds>(Clock::now().time_since_epoch()).count());
+}
+
+void SetClientSignonStateReader(SignonStateReader reader)
+{
+    g_signonReader.store(reader);
 }
 
 void RememberServerTransports(const std::string& key, const json& transports)
@@ -917,7 +962,7 @@ void ConnectBest(const std::string& targetIn)
 {
     const Settings settings = GetSettings();
     std::string target = targetIn;
-    auto server = Ipv4Endpoint::Parse(target);
+    auto server = Ipv4Endpoint::ParseWithDefaultPort(target, kDefaultServerPort);
     if (!settings.enable || !server)
     {
         ++g_generation;
@@ -927,7 +972,7 @@ void ConnectBest(const std::string& targetIn)
         return;
     }
     if (server->port == 0)
-        server->port = 37015;
+        server->port = kDefaultServerPort;
     target = server->ToString();
 
     json cached;
@@ -964,6 +1009,10 @@ void ConnectBest(const std::string& targetIn)
             }
             Log("%s does not advertise p2p routes; connecting directly\n", target.c_str());
             Cbuf_AddText(0, ("connect " + target + "\n").c_str(), 0);
+            WatchDirectConnect(s, target,
+                               info.status == 404 ? "it is not listed on the master server, so there is no NAT assistance"
+                               : info.status == 200 ? "its build does not advertise p2p routes"
+                                                    : "the master server could not be reached");
             return;
         }
         const json transports = info.transports.is_object() ? info.transports : cached;

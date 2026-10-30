@@ -106,6 +106,13 @@ std::optional<Ipv4Endpoint> Ipv4Endpoint::Parse(const std::string& text)
     return ep;
 }
 
+std::optional<Ipv4Endpoint> Ipv4Endpoint::ParseWithDefaultPort(const std::string& text, uint16_t defaultPort)
+{
+    if (text.find(':') != std::string::npos)
+        return Parse(text);
+    return Parse(text + ":" + std::to_string(defaultPort));
+}
+
 bool ParseControl(const uint8_t* data, size_t size, ParsedControl& out)
 {
     if (!data || size < kNatHeaderSize)

@@ -98,12 +98,32 @@ uint16_t ParsePort(const char* text, uint16_t fallback)
     return v > 0 && v <= 0xFFFF ? static_cast<uint16_t>(v) : fallback;
 }
 
+// Base client m_nSignonState on the 2015 client engine (same offset as
+// engine/core/load.cpp ClientLocalSignonState); -1 anywhere else.
+int ReadClientSignonState()
+{
+#ifdef _MSC_VER
+    if (GetR1DeltaEngineMode() != R1DeltaEngineMode::Client2015 || !G_engine)
+        return -1;
+    __try
+    {
+        return *reinterpret_cast<const int*>(G_engine + 0x797070 + 29 * sizeof(int));
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return -1;
+    }
+#else
+    return -1;
+#endif
+}
+
 void ConnectCommand(const CCommand& args)
 {
     RefreshSettings();
     if (args.ArgC() < 2)
     {
-        Msg("usage: delta_connect <ip:port>\n");
+        Msg("usage: delta_connect <ip[:port]>  (port defaults to %u)\n", static_cast<unsigned>(kDefaultServerPort));
         return;
     }
     ConnectBest(args.Arg(1));
@@ -389,6 +409,7 @@ void Initialize()
     RegisterCmd("delta_connect_iroh", ConnectIrohCommand, "Connect to a server by its iroh address", FCVAR_NONE);
     RegisterCmd("delta_connect_tailcat", ConnectTailcatCommand, "Connect to a server by its tailcat address", FCVAR_NONE);
     RegisterCmd("delta_p2p_status", StatusCommand, "Show NAT traversal / transport status", FCVAR_NONE);
+    SetClientSignonStateReader(ReadClientSignonState);
     RefreshSettings();
 }
 

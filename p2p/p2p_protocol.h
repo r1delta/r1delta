@@ -22,6 +22,10 @@
 namespace p2p
 {
 
+// The engine's `connect <ip>` without a port uses its hostport default
+// (engine.dll: strchr(address, ':') else "27015").
+constexpr uint16_t kDefaultServerPort = 27015;
+
 // ---------------------------------------------------------------------------
 // Control packets
 // ---------------------------------------------------------------------------
@@ -56,6 +60,8 @@ struct Ipv4Endpoint
     bool operator!=(const Ipv4Endpoint& o) const { return !(*this == o); }
     std::string ToString() const;
     static std::optional<Ipv4Endpoint> Parse(const std::string& text); // "a.b.c.d:port"
+    // Same, but a bare "a.b.c.d" gets defaultPort (what the engine's own `connect` does).
+    static std::optional<Ipv4Endpoint> ParseWithDefaultPort(const std::string& text, uint16_t defaultPort);
 };
 
 struct ParsedControl
