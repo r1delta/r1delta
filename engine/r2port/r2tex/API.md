@@ -132,3 +132,8 @@ bool ListMapMaterials(const std::uint8_t* bspBytes,
 
 - `r2tex.index` (version 11) now persists every rpak's page layout (header, page sizes/offsets, starpak list) next to the asset table, and validates a pak by name, size and a hash of its RPak header (created time, crc, compressed size) instead of its last-write time or the install path, so an index survives a copy or touch of the install and can be prebuilt. A warm start creates a family without decoding anything; a pak is read and RTech-decoded the first time a page it owns is read (`readPageRange`, the paks of one range decode concurrently under the global pak-load cap). Only the cold index scan decodes every pak. Converted output is byte identical (FNV-1a of every converted VMT/VTF of drydock, glitch, homestead, thaw, lf_stacks compared lazy vs whole-family).
 - `R2TEX_LAZY_PAKS=0` restores the whole-family decode at first use. `IsFamilyResident` is false while a decode runs in the family; `FamilyDecodedBytes` is still the conservative whole-family size.
+
+### Missing starpaks
+
+- `convertTextureWithDb` (all `ConvertTexture` overloads and every composite that converts a source texture) no longer fails when the starpak that holds a texture's streamed mips is missing or too short: the VTF is built from the permanent mips (width, height and mip count of the first permanent level). Output with the starpak present is unchanged.
+- `GetLowResTextureStats(textures, missingStarpaks)`: distinct textures converted that way so far and the starpak file names that were not found. `ThreadLowResConversions()`: per-thread count, so a caller can tell that a conversion used one (the provider does not persist such results).

@@ -156,6 +156,13 @@ std::size_t ResidentFamilyBytes(bool pinnedOnly = false);
 // summed over threads. A converted map should load each family it touches once.
 void GetFamilyLoadStats(std::uint64_t& loads, std::uint64_t& microseconds);
 
+// Textures converted from their permanent mips only because the starpak holding their streamed mips is not on disk (a smaller
+// but valid texture: width, height and mip count shrink with the dropped levels). Distinct textures so far and the distinct
+// starpak file names that were not found; `textures` is 0 for a complete install.
+void GetLowResTextureStats(std::uint64_t& textures, std::vector<std::string>& missingStarpaks);
+// Low-res conversions the calling thread has made so far (a converted VMT/VTF whose count grew used a low-res texture).
+std::uint64_t ThreadLowResConversions();
+
 // Env tokens (R2TEX_ENV) change converted VMTs and textures: the suffix the provider appends to its converted-cache directory name
 // ("" while R2TEX_ENV is unset, so existing caches stay valid; otherwise "-env1-<tokens>").
 const char* EnvCacheTag();

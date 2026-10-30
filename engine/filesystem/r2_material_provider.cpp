@@ -1356,6 +1356,7 @@ private:
             const auto conversionStart = std::chrono::steady_clock::now();
             std::vector<std::string> dependencies;
             bool fromDisk = false;
+            bool lowResolution = false;   // a texture it used came from permanent mips only (starpak missing): never persisted
             const std::int64_t profileDiskStart = r2port::prof::Enabled() ? r2port::prof::NowUs() : 0;
             FileBytes data = LoadConvertedFile(item, dependencies);
             if (data) {
@@ -1365,7 +1366,9 @@ private:
             }
             else {
                 R2P_SCOPE_B(profileConvert, item.materialFile ? "wt.convert.material" : "wt.convert.texture", item.path);
+                const std::uint64_t lowResBefore = r2tex::ThreadLowResConversions();
                 data = ConvertAsset(item, dependencies);
+                lowResolution = r2tex::ThreadLowResConversions() != lowResBefore;
                 if (data)
                     profileConvert.SetBytes(data->size());
             }
@@ -1420,7 +1423,7 @@ private:
                 r2tex::UnpinFamily(item.family);
             if (!data)
                 RemoveKnownPath(item.path);
-            if (data && !fromDisk) {
+            if (data && !fromDisk && !lowResolution) {
                 R2P_SCOPE_B(profileStore, "wt.disk.store", item.path);
                 profileStore.SetBytes(StoreConvertedFile(item, data, dependencies));
             }
@@ -1680,10 +1683,39 @@ void PrefetchR2UiTextures(const std::vector<std::string>& texturePaths)
         g_materialProvider->PrefetchUiTextures(texturePaths);
 }
 
+// One summary line per map load, only when textures were built from their permanent mips because the starpaks holding their
+// streamed mips are not on disk (r2tex::GetLowResTextureStats), and only when the count grew since the last line.
+static void LogLowResolutionTextureSummary(const char* phase)
+{
+    if (phase && std::string_view(phase) == "map-bsp-served")
+        return;   // textures have not been asked for yet
+    std::uint64_t textures{};
+    std::vector<std::string> starpaks;
+    r2tex::GetLowResTextureStats(textures, starpaks);
+    static std::atomic<std::uint64_t> reported{ 0 };
+    if (textures == 0 || reported.exchange(textures) == textures)
+        return;
+    std::string names;
+    for (std::size_t i = 0; i < starpaks.size() && i < 3; ++i) {
+        names.append(i ? ", " : "");
+        names.append(starpaks[i]);
+    }
+    if (starpaks.size() > 3)
+        names.append(", and " + std::to_string(starpaks.size() - 3) + " more");
+    const std::filesystem::path pakDirectory = GetR2InstallDirectory() / "r2" / "paks" / "Win64";
+    char message[2048]{};
+    _snprintf_s(message, sizeof(message), _TRUNCATE,
+        "R1Delta: WARNING %llu textures use low resolution because starpaks are missing (%zu starpak file(s) not found in %s: %s). "
+        "Verify the Titanfall 2 game files (Steam: Verify integrity of game files, EA app: Repair) to restore the full resolution.\n",
+        static_cast<unsigned long long>(textures), starpaks.size(), pakDirectory.string().c_str(), names.c_str());
+    LogR2TextureMessage(message);
+}
+
 void LogR2TextureProviderMetrics(const char* phase)
 {
     if (g_materialProvider)
         g_materialProvider->LogMetrics(phase);
+    LogLowResolutionTextureSummary(phase);
 }
 
 } // namespace r2port

@@ -1550,11 +1550,18 @@ std::size_t mipSize(std::uint16_t fmt, std::uint32_t w, std::uint32_t h) {
 }
 std::size_t aligned16(std::size_t n) { return (n + 15u) & ~std::size_t(15u); }
 
-bool readAtExact(const fs::path& path, std::uint64_t offset, std::uint8_t* out, std::size_t count, std::string& error) {
+// `unavailable` (optional) is set when the starpak is not there to be read: the file cannot be opened or ends before the range.
+bool readAtExact(const fs::path& path, std::uint64_t offset, std::uint8_t* out, std::size_t count, std::string& error,
+                 bool* unavailable = nullptr) {
+    if (unavailable) *unavailable = false;
     if (count == 0) return true;
     HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
                               FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, nullptr);
-    if (file == INVALID_HANDLE_VALUE) { error = "cannot open starpak " + path.u8string(); return false; }
+    if (file == INVALID_HANDLE_VALUE) {
+        error = "cannot open starpak " + path.u8string();
+        if (unavailable) *unavailable = true;
+        return false;
+    }
     std::size_t done = 0;
     bool ok = true;
     while (done < count) {
@@ -1569,11 +1576,35 @@ bool readAtExact(const fs::path& path, std::uint64_t offset, std::uint8_t* out, 
         BOOL result = ReadFile(file, out + done, chunk, &received, &ov);
         if (!result && GetLastError() == ERROR_IO_PENDING) result = GetOverlappedResult(file, &ov, &received, TRUE);
         CloseHandle(ov.hEvent);
-        if (!result || received != chunk) { ok = false; error = "short starpak range read: " + path.u8string(); break; }
+        if (!result || received != chunk) {
+            ok = false; error = "short starpak range read: " + path.u8string();
+            if (unavailable) *unavailable = true;
+            break;
+        }
         done += received;
     }
     CloseHandle(file);
     return ok;
+}
+
+// Textures built from their permanent mips because the streamed mips are not in the starpak on disk (see convertTextureWithDb).
+// Counted once per texture GUID. The summary line is the provider's (LogR2TextureProviderMetrics, phase signon-full).
+struct LowResTracker {
+    std::mutex mutex;
+    std::unordered_set<std::uint64_t> guids;
+    std::set<std::string> starpaks;
+};
+LowResTracker& lowResTracker() {
+    static LowResTracker tracker;
+    return tracker;
+}
+thread_local std::uint64_t tlsLowResConversions = 0;
+void noteLowResTexture(std::uint64_t guid, const std::string& starpakFile) {
+    ++tlsLowResConversions;
+    LowResTracker& tracker = lowResTracker();
+    std::lock_guard<std::mutex> lock(tracker.mutex);
+    tracker.guids.insert(guid);
+    tracker.starpaks.insert(starpakFile);
 }
 
 struct ImageMip { std::uint32_t width = 0, height = 0; std::vector<std::uint8_t> bytes; };
@@ -1714,8 +1745,8 @@ bool convertTextureWithDb(const std::shared_ptr<Database>& db, const AssetRecord
     std::vector<std::uint8_t> header;
     if (!readAssetHeader(*db, record, family, header, error)) return false;
     if (header.size() < 0x38) { error = "short txtr header"; return false; }
-    const std::uint16_t width = u16(header.data() + 0x10);
-    const std::uint16_t height = u16(header.data() + 0x12);
+    std::uint16_t width = u16(header.data() + 0x10);
+    std::uint16_t height = u16(header.data() + 0x12);
     const std::uint16_t depth = u16(header.data() + 0x14);
     const std::uint16_t format = u16(header.data() + 0x16);
     const std::uint32_t declaredDataSize = u32(header.data() + 0x18);
@@ -1727,7 +1758,7 @@ bool convertTextureWithDb(const std::shared_ptr<Database>& db, const AssetRecord
     if (!width || !height || depth || arraySize || layers || !perm || opt) {
         error = "unsupported txtr dimensions, array, or optional mips"; return false;
     }
-    const std::uint32_t count = static_cast<std::uint32_t>(opt) + perm + streamed;
+    std::uint32_t count = static_cast<std::uint32_t>(opt) + perm + streamed;
     if (!count || count > 32 || count > 255) { error = "invalid txtr mip count"; return false; }
     const FormatInfo info = sourceFormat(format);
     if (!info.bytes) { error = "unsupported R2 texture format " + std::to_string(format); return false; }
@@ -1787,21 +1818,36 @@ bool convertTextureWithDb(const std::shared_ptr<Database>& db, const AssetRecord
             error = "streamed mip range overflow"; return false;
         }
         std::vector<std::uint8_t> streamedData(static_cast<std::size_t>(streamBytes));
+        bool starpakUnavailable = false;
         {
             R2P_SCOPE_B(profileStar, "d.tex.starpak", record.name);
             profileStar.SetBytes(streamedData.size());
-            if (!readAtExact(starPath, starOffset, streamedData.data(), streamedData.size(), error)) return false;
+            if (!readAtExact(starPath, starOffset, streamedData.data(), streamedData.size(), error, &starpakUnavailable) &&
+                !starpakUnavailable) return false;
         }
-        std::size_t sourceOffset = 0;
-        for (int m = static_cast<int>(opt + streamed) - 1; m >= static_cast<int>(opt); --m) {
-            const std::uint32_t mw = std::max(1u, static_cast<std::uint32_t>(width) >> m);
-            const std::uint32_t mh = std::max(1u, static_cast<std::uint32_t>(height) >> m);
-            const std::size_t raw = mipSize(format, mw, mh);
-            const std::size_t padded = aligned16(raw);
-            ImageMip& img = images[static_cast<std::size_t>(m)];
-            img.width = mw; img.height = mh;
-            img.bytes.assign(streamedData.begin() + sourceOffset, streamedData.begin() + sourceOffset + raw);
-            sourceOffset += padded;
+        if (starpakUnavailable) {
+            // The starpak (or the range inside it) is not on disk: the player removed it or their install is damaged. The
+            // permanent mips (the smallest ones, always inside the rpak) are a valid texture of their own: drop the streamed
+            // levels and start the chain at the first permanent one, with the width, height and count that level really has.
+            const std::uint32_t drop = static_cast<std::uint32_t>(opt) + streamed;
+            images.erase(images.begin(), images.begin() + drop);
+            width = static_cast<std::uint16_t>(std::max(1u, static_cast<std::uint32_t>(width) >> drop));
+            height = static_cast<std::uint16_t>(std::max(1u, static_cast<std::uint32_t>(height) >> drop));
+            count -= drop;
+            noteLowResTexture(record.guid, starPath.filename().u8string());
+            error.clear();
+        } else {
+            std::size_t sourceOffset = 0;
+            for (int m = static_cast<int>(opt + streamed) - 1; m >= static_cast<int>(opt); --m) {
+                const std::uint32_t mw = std::max(1u, static_cast<std::uint32_t>(width) >> m);
+                const std::uint32_t mh = std::max(1u, static_cast<std::uint32_t>(height) >> m);
+                const std::size_t raw = mipSize(format, mw, mh);
+                const std::size_t padded = aligned16(raw);
+                ImageMip& img = images[static_cast<std::size_t>(m)];
+                img.width = mw; img.height = mh;
+                img.bytes.assign(streamedData.begin() + sourceOffset, streamedData.begin() + sourceOffset + raw);
+                sourceOffset += padded;
+            }
         }
     }
 
@@ -4758,6 +4804,17 @@ bool FamilyOfTexture(std::string_view name, std::uint32_t& family) {
 void GetFamilyLoadStats(std::uint64_t& loads, std::uint64_t& microseconds) {
     loads = gFamilyLoadCount.load(std::memory_order_relaxed);
     microseconds = gFamilyLoadMicroseconds.load(std::memory_order_relaxed);
+}
+
+void GetLowResTextureStats(std::uint64_t& textures, std::vector<std::string>& missingStarpaks) {
+    LowResTracker& tracker = lowResTracker();
+    std::lock_guard<std::mutex> lock(tracker.mutex);
+    textures = tracker.guids.size();
+    missingStarpaks.assign(tracker.starpaks.begin(), tracker.starpaks.end());
+}
+
+std::uint64_t ThreadLowResConversions() {
+    return tlsLowResConversions;
 }
 
 bool IsFamilyResident(std::uint32_t family) {
