@@ -456,8 +456,8 @@ bool RegisterMovementConVars()
 		{"delta_pilot_grapple_enabled", "0",
 			"Allow the grapple (+scriptCommand3) of the slide/grapple movement program. Replicated: a server decides for its clients.", 0.0f, 1.0f,
 			FCVAR_GAMEDLL | FCVAR_REPLICATED | FCVAR_RELEASE},
-		// Playtest: third-person slide body animation switch (CORE slide_body.nut / pilot_server.nut honour it; 0 also releases any override left set).
-		{"delta_pilot_slide_body", "1",
+		// Playtest: third-person slide body animation switch, OFF for the playtest (stuck animation); CORE slide_body.nut / pilot_server.nut honour it, 0 also releases any override left set.
+		{"delta_pilot_slide_body", "0",
 			"Third-person slide body animation of the slide movement program (1 = on, 0 = off and releases any stuck override). Replicated.", 0.0f, 1.0f,
 			FCVAR_GAMEDLL | FCVAR_REPLICATED | FCVAR_RELEASE},
 		{"delta_sp_landing_slowdown_scale", "0",
