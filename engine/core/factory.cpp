@@ -72,6 +72,7 @@
 #include "factory.h"
 #include "dynamic_weapons.h"
 #include "client_studio_header_guard.h"
+#include "client_weapon_info_guard.h"
 #include "client_brush_material_guard.h"
 #include "TableDestroyer.h"
 #include <DbgHelp.h>
@@ -544,6 +545,15 @@ static r1delta::client_brush_material::MaterialCountFunction
 	s_ClientBrushMaterialCountOriginal;
 static bool s_ClientBrushMaterialCountGuardInstalled;
 static std::atomic<int> s_ClientBrushMaterialCountGuardLogBudget{8};
+// client.dll+0x2ED300 weapon-info lookup guard (client_weapon_info_guard.h).
+static uintptr_t s_ClientWeaponInfoClientBase;
+static r1delta::client_weapon_info::RecordConstructor s_ClientWeaponInfoCtor;
+static void* (__fastcall* s_ClientWeaponInfoLookupOriginal)(std::uint16_t);
+static bool s_ClientWeaponInfoLookupGuardInstalled;
+static r1delta::client_weapon_info::FirstSeenSet s_ClientWeaponInfoSeen;
+static r1delta::client_weapon_info::FallbackRecord s_ClientWeaponInfoFallback;
+static std::atomic<int> s_ClientWeaponInfoLogBudget{64};
+static std::atomic<unsigned> s_ClientWeaponInfoFallbackHits{0};
 
 constexpr uintptr_t kR1OClientArrayRva = 0x2659738;
 constexpr size_t kR1OClientStride = 22387ull * sizeof(uintptr_t);
@@ -1677,6 +1687,35 @@ static int __fastcall ClientStudioHeaderLookupGuard(void* entity, const char* na
 		name,
 		s_ClientStudioHeaderLazyInit,
 		s_ClientStudioHeaderLookup);
+}
+
+// Replaces client.dll+0x2ED300. Valid indexes return exactly what the native lookup returns; an
+// index outside the table (0xFFFF: the weapon was released before its Precache assigned an index),
+// or one whose node holds a null/implausible pointer, returns the shared default FileWeaponInfo_t
+// instead of a pointer into unrelated heap memory.
+static void* __fastcall ClientWeaponInfoLookupGuard(std::uint16_t index)
+{
+	namespace wi = r1delta::client_weapon_info;
+	const std::uint8_t* const dict =
+		reinterpret_cast<const std::uint8_t*>(s_ClientWeaponInfoClientBase + wi::kDictRva);
+	if (void* const record = wi::ResolveRecord(dict, index))
+		return record;
+
+	const unsigned hits =
+		s_ClientWeaponInfoFallbackHits.fetch_add(1, std::memory_order_relaxed) + 1;
+	if (s_ClientWeaponInfoSeen.Claim(index)
+		&& s_ClientWeaponInfoLogBudget.fetch_sub(1, std::memory_order_relaxed) > 0) {
+		Warning(
+			"R1Delta: weapon info index 0x%04X is not in the client weapon table "
+			"(%u entries); caller client.dll+0x%llX, fallback use #%u. Returned an "
+			"empty FileWeaponInfo_t instead of reading past the table.\n",
+			static_cast<unsigned>(index),
+			static_cast<unsigned>(wi::NumElements(dict)),
+			static_cast<unsigned long long>(
+				reinterpret_cast<uintptr_t>(_ReturnAddress()) - s_ClientWeaponInfoClientBase),
+			hits);
+	}
+	return s_ClientWeaponInfoFallback.Get(s_ClientWeaponInfoCtor);
 }
 
 static int __fastcall ClientBrushMaterialCountGuard(const void* model)
@@ -2933,6 +2972,113 @@ void InstallClientStudioHeaderLookupGuard(
 		static_cast<int>(enableStatus),
 		reinterpret_cast<void*>(s_ClientStudioHeaderWrapperOriginal),
 		s_ClientStudioHeaderLookupGuardInstalled ? 1 : 0);
+	OutputDebugStringA(buffer);
+}
+
+// Guards the unchecked weapon-info table lookup at client.dll+0x2ED300 (see
+// client_weapon_info_guard.h). Same install conditions as the studio-header guard: stock R1
+// client image and module path, plus the exact bytes of the lookup, of FileWeaponInfo_t's
+// constructor, and the weapon dictionary's comparison-function pointer.
+void InstallClientWeaponInfoLookupGuard(
+	uintptr_t clientBase,
+	const wchar_t* modulePath)
+{
+	namespace wi = r1delta::client_weapon_info;
+	const bool isClient2015 =
+		GetR1DeltaEngineMode() == R1DeltaEngineMode::Client2015;
+	if (!isClient2015 || s_ClientWeaponInfoLookupGuardInstalled)
+		return;
+
+	if (!r1delta::client_studio_header::ShouldInstall(isClient2015, modulePath)) {
+		OutputDebugStringA(
+			"R1Delta: client weapon-info lookup guard refused non-stock module path\n");
+		return;
+	}
+
+	DWORD observedTimestamp = 0;
+	DWORD observedImageSize = 0;
+	if (!HasExpectedStockClientImage(
+			clientBase,
+			&observedTimestamp,
+			&observedImageSize)) {
+		char buffer[256];
+		_snprintf_s(
+			buffer,
+			sizeof(buffer),
+			_TRUNCATE,
+			"R1Delta: client weapon-info lookup guard refused image "
+			"timestamp=0x%08lX size=0x%08lX\n",
+			static_cast<unsigned long>(observedTimestamp),
+			static_cast<unsigned long>(observedImageSize));
+		OutputDebugStringA(buffer);
+		return;
+	}
+
+	if (!MatchesClientCode(
+			clientBase,
+			wi::kLookupRva,
+			wi::kExpectedLookupBytes,
+			sizeof(wi::kExpectedLookupBytes))) {
+		OutputDebugStringA(
+			"R1Delta: client weapon-info lookup guard refused lookup byte mismatch "
+			"at RVA 0x2ED300\n");
+		return;
+	}
+	if (!MatchesClientCode(
+			clientBase,
+			wi::kFileWeaponInfoCtorRva,
+			wi::kExpectedCtorPrologue,
+			sizeof(wi::kExpectedCtorPrologue))) {
+		OutputDebugStringA(
+			"R1Delta: client weapon-info lookup guard refused FileWeaponInfo_t "
+			"constructor byte mismatch at RVA 0x2EBA90\n");
+		return;
+	}
+	const void* const dict = reinterpret_cast<const void*>(clientBase + wi::kDictRva);
+	if (!MaterialSystemDx11IsCommittedReadableRange(dict, wi::kLastAllocOffset + sizeof(std::uint16_t))
+		|| !wi::LooksLikeWeaponDict(dict, clientBase)) {
+		OutputDebugStringA(
+			"R1Delta: client weapon-info lookup guard refused weapon dictionary "
+			"mismatch at RVA 0xB0EE20\n");
+		return;
+	}
+
+	s_ClientWeaponInfoClientBase = clientBase;
+	s_ClientWeaponInfoCtor = reinterpret_cast<wi::RecordConstructor>(
+		clientBase + wi::kFileWeaponInfoCtorRva);
+	void* const target = reinterpret_cast<void*>(clientBase + wi::kLookupRva);
+	const MH_STATUS createStatus = MH_CreateHook(
+		target,
+		reinterpret_cast<void*>(&ClientWeaponInfoLookupGuard),
+		reinterpret_cast<LPVOID*>(&s_ClientWeaponInfoLookupOriginal));
+	const bool hasOriginal = s_ClientWeaponInfoLookupOriginal != nullptr;
+	const bool canEnable = createStatus == MH_OK
+		|| (createStatus == MH_ERROR_ALREADY_CREATED && hasOriginal);
+	const MH_STATUS enableStatus = canEnable
+		? MH_EnableHook(target)
+		: createStatus;
+	s_ClientWeaponInfoLookupGuardInstalled = hasOriginal
+		&& (enableStatus == MH_OK || enableStatus == MH_ERROR_ENABLED);
+
+	if (!s_ClientWeaponInfoLookupGuardInstalled) {
+		if (createStatus == MH_OK)
+			MH_RemoveHook(target);
+		s_ClientWeaponInfoLookupOriginal = nullptr;
+		s_ClientWeaponInfoCtor = nullptr;
+		s_ClientWeaponInfoClientBase = 0;
+	}
+
+	char buffer[320];
+	_snprintf_s(
+		buffer,
+		sizeof(buffer),
+		_TRUNCATE,
+		"R1Delta: client weapon-info lookup guard create=%d enable=%d "
+		"targetRva=0x2ED300 original=%p installed=%d\n",
+		static_cast<int>(createStatus),
+		static_cast<int>(enableStatus),
+		reinterpret_cast<void*>(s_ClientWeaponInfoLookupOriginal),
+		s_ClientWeaponInfoLookupGuardInstalled ? 1 : 0);
 	OutputDebugStringA(buffer);
 }
 
