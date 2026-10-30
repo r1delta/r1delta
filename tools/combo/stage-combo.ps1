@@ -418,6 +418,29 @@ if (Test-Path -LiteralPath $mzPatch) {
     $ErrorActionPreference = $prev
     if (-not $mzDone) { GitC $Core @('apply', '--ignore-whitespace', '--whitespace=nowarn', $mzPatch) | Out-Null; Say 'applied core-minimap.patch' }
 }
+# ---- Evac on the converted R2 maps. mp/_evac.nut EvacMain needs level.evacNode / level.evacSpaceNode, which TF1 level scripts set; the R2 maps have no
+# mp/<map>.nut (only mp_eden does), so on them the evac epilogue ran EvacMain into a script error, no dropship came and the 70 s evac epilogue timer
+# ran dry. tools\combo\evac\_r2port_evac.nut registers escape_nodeN / spec_camN / spacenode from the map entities (and turns evac off for a map without
+# them); each R2 map without a level script of its own gets a one-line stub that includes it. Files are copied unlink+copy; an existing level script
+# (mp_eden.nut, tracked in the pin) is never replaced.
+$evacDir = Join-Path $CodeRoot 'tools\combo\evac'
+$evacMain = Join-Path $evacDir '_r2port_evac.nut'
+if (Test-Path -LiteralPath $evacMain) {
+    $evacMp = Join-Path $Core 'scripts\vscripts\mp'
+    [ComboNative]::Replace($evacMain, (Join-Path $evacMp '_r2port_evac.nut'))
+    $evacMaps = @('mp_black_water_canal', 'mp_coliseum', 'mp_coliseum_column', 'mp_colony02', 'mp_complex3', 'mp_crashsite3', 'mp_drydock', 'mp_forwardbase_kodai',
+        'mp_glitch', 'mp_grave', 'mp_homestead', 'mp_lf_deck', 'mp_lf_meadow', 'mp_lf_stacks', 'mp_lf_township', 'mp_lf_traffic', 'mp_lf_uma', 'mp_relic02', 'mp_thaw')
+    $nEvac = 0
+    foreach ($em in $evacMaps) {
+        $stub = Join-Path $evacMp ($em + '.nut')
+        if (Test-Path -LiteralPath $stub) { Say "evac: $em.nut already exists, not replaced"; continue }
+        $tmpE = Join-Path $env:TEMP ('combo-evac-' + [Guid]::NewGuid().ToString('N') + '.nut')
+        [IO.File]::WriteAllText($tmpE, "// R2 map level script stub (tools\combo\evac): evac setup shared by the converted Titanfall 2 maps`nIncludeScript( `"mp/_r2port_evac`" )`n", [Text.UTF8Encoding]::new($false))
+        [ComboNative]::Replace($tmpE, $stub); Remove-Item $tmpE
+        $nEvac++
+    }
+    Say "evac: mp/_r2port_evac.nut staged, $nEvac R2 map stubs"
+}
 
 # ---------------------------------------------------------------- report
 $report = [ordered]@{
