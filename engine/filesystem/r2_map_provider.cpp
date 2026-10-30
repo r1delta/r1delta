@@ -1970,6 +1970,46 @@ bool IsR2PortMap(std::string_view mapName)
     return IsAllowlistedMap(mapName);
 }
 
+// The files one allowlisted map cannot be served without: its BSP package (directory VPK and content chunk) and at least one
+// of its own rpaks (<map>.rpak or <map>(NN).rpak: materials, models, loadscreen). Starpaks and stbsp files are not required
+// (textures fall back to their permanent mips, see r2tex). `missing` names what was not found.
+bool IsR2PortMapInstalled(std::string_view mapName, std::string& missing)
+{
+    missing.clear();
+    const auto& install = R2InstallDirectory();
+    if (install.empty()) {
+        missing = "no Titanfall 2 install";
+        return false;
+    }
+    const auto nonEmpty = [](const std::filesystem::path& file) {
+        std::error_code error;
+        return std::filesystem::is_regular_file(file, error) && !error && std::filesystem::file_size(file, error) > 0 && !error;
+    };
+    const std::string map(mapName);
+    const std::string directory = "vpk/englishclient_" + map + ".bsp.pak000_dir.vpk";
+    const std::string chunk = "vpk/client_" + map + ".bsp.pak000_000.vpk";
+    if (!nonEmpty(install / directory))
+        missing = directory;
+    else if (!nonEmpty(install / chunk))
+        missing = chunk;
+    if (!missing.empty())
+        return false;
+
+    const std::string lowerMap = LowerAscii(map);
+    std::error_code error;
+    std::filesystem::directory_iterator item(install / "r2" / "paks" / "Win64", error);
+    const std::filesystem::directory_iterator end;
+    for (; !error && item != end; item.increment(error)) {
+        const std::string name = LowerAscii(item->path().filename().string());
+        if (name.size() >= lowerMap.size() + 5 && name.compare(0, lowerMap.size(), lowerMap) == 0
+            && (name[lowerMap.size()] == '(' || name.compare(lowerMap.size(), std::string::npos, ".rpak") == 0)
+            && name.compare(name.size() - 5, 5, ".rpak") == 0)
+            return true;
+    }
+    missing = "r2/paks/Win64/" + map + "*.rpak";
+    return false;
+}
+
 // The legacy dedicated engine reads scripts/r2port_sounds.txt through the VPK-miss path where no Open hook answers and no search path
 // can be mounted, so the generated alias script is placed as a loose file in the game directory (the only form its loader finds).
 // With no generated script (no R2 install, R2PORT_SOUND=0) a file left by an earlier run is removed so it cannot be served stale.

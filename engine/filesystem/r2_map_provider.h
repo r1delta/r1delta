@@ -40,6 +40,9 @@ std::filesystem::path GetR2InstallDirectory();
 std::filesystem::path GetR2GameContentDirectory();
 // True for the allowlisted R2-only maps this provider serves.
 bool IsR2PortMap(std::string_view mapName);
+// False when a file an allowlisted map needs (its BSP package or its own rpaks) is not in the Titanfall 2 install; `missing`
+// then names the first one. Starpaks and stbsp files are not needed.
+bool IsR2PortMapInstalled(std::string_view mapName, std::string& missing);
 // Legacy dedicated engine only: writes the generated scripts/r2port_sounds.txt as a loose file in the game directory (or removes a
 // stale one when none is generated) before the engine loads it. True when the file is in place.
 bool PlaceGeneratedSoundScript();

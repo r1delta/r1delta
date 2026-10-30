@@ -380,8 +380,17 @@ bool Dlc_LocalMayLoadMap(const char* map, std::string& reason)
 			mask = S().localMask;
 		}
 	}
-	if (!LacksGroup(mask, group))
+	if (!LacksGroup(mask, group)) {
+		// Group 5 is owned for any valid Titanfall 2 install, but a player may have removed single maps (their VPK and rpaks):
+		// the loader would then wait on files that are not there. Refuse the map with the file that is missing.
+		std::string missing;
+		if (group == 5 && !r2port::IsR2PortMapInstalled(NormalizeMapName(map), missing)) {
+			reason = std::string("The Titanfall 2 map ") + std::string(NormalizeMapName(map)) + " is not installed (missing " + missing
+				+ "). Verify that Titanfall 2 is installed correctly (Steam: Verify integrity of game files, EA app: Repair).";
+			return false;
+		}
 		return true;
+	}
 	reason = MissingGroupMessage(group);
 	return false;
 }
@@ -443,6 +452,9 @@ void Dlc_OnServerMapStart(const char* map)
 			Report(false, "R1Delta DLC: kicking slot %d, no dlc%d for %s\n", players[i].slot, group, map);
 			KickServerPlayer(players[i].slot, text.c_str());
 		}
+		std::string missing;
+		if (group == 5 && !r2port::IsR2PortMapInstalled(NormalizeMapName(map), missing))
+			Report(true, "R1Delta DLC: this host is missing files of the Titanfall 2 map %s (%s), the map cannot load. Verify the Titanfall 2 install.\n", map, missing.c_str());
 	}
 	Dlc_RotationMask();
 }
