@@ -388,6 +388,21 @@ if (Test-Path -LiteralPath $bcPatch) {
     if (-not $bcDone) { GitC $Core @('apply', '--ignore-whitespace', '--whitespace=nowarn', $bcPatch) | Out-Null; Say 'applied core-burncards-embark-race.patch' }
 }
 
+# ---- FD HUD: with 8 players the 12 CoopPlayerTurret world icons run out and every new sentry turret raised a client script error (null index).
+# tools\combo\fdhud\core-coop-turret-icons.patch is made against the staged CORE AFTER the FD overlay (cl_coop_hud.nut is FD-patched); once.
+$tiPatch = Join-Path $CodeRoot 'tools\combo\fdhud\core-coop-turret-icons.patch'
+if (Test-Path -LiteralPath $tiPatch) {
+    $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    & git -C $Core apply --ignore-whitespace --whitespace=nowarn -R --check $tiPatch 2>$null
+    $tiDone = ($LASTEXITCODE -eq 0)
+    & git -C $Core apply --ignore-whitespace --whitespace=nowarn --check $tiPatch 2>$null
+    $tiApplies = ($LASTEXITCODE -eq 0)
+    $ErrorActionPreference = $prev
+    if ($tiDone) { }
+    elseif ($tiApplies) { GitC $Core @('apply', '--ignore-whitespace', '--whitespace=nowarn', $tiPatch) | Out-Null; Say 'applied core-coop-turret-icons.patch' }
+    else { Say 'core-coop-turret-icons.patch does not apply (FD overlay absent?): skipped' }
+}
+
 # ---- LobbyMaps CORE (R2 maps in the picker/lobby/vote/browser, playlists, group 4/5 ownership): patch applies on top of the FD overlay (it was
 # made against the staged CORE), once (reverse check); the 11 localization files are replaced whole (unlink + copy).
 $lm = Join-Path $CodeRoot 'tools\combo\lobbymaps'

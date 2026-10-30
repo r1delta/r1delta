@@ -1,0 +1,42 @@
+diff --git a/scripts/vscripts/client/cl_coop_hud.nut b/scripts/vscripts/client/cl_coop_hud.nut
+index 1a122b1..3559c72 100644
+--- a/scripts/vscripts/client/cl_coop_hud.nut
++++ b/scripts/vscripts/client/cl_coop_hud.nut
+@@ -1012,6 +1012,8 @@ function SetSentryTurretIcon( turret )
+ 
+ 	local name 	= "CoopPlayerTurret"
+ 	local index = SetWorldIconIndex( turret, name )
++	if ( index == null )
++		return
+ 	local elem 	= level.worldIcons.GetElement( name + index )
+ 
+ 	local elemName 	= elem.GetChild( "CoopPlayerTurretName" )
+@@ -1118,6 +1120,8 @@ function ServerCallback_TurretWorldIconHide( ehandle )
+ 	local turret = GetEntityFromEncodedEHandle( ehandle )
+ 	local name 	= "CoopPlayerTurret"
+ 	local index = GetWorldIconIndex( turret, name )
++	if ( index == null )
++		return
+ 	local elem 	= level.worldIcons.GetElement( name + index )
+ 
+ 	SetTurretIconForActiveWave( elem )
+@@ -1129,6 +1133,8 @@ function ServerCallback_TurretWorldIconShow( ehandle )
+ 	local turret = GetEntityFromEncodedEHandle( ehandle )
+ 	local name 	= "CoopPlayerTurret"
+ 	local index = GetWorldIconIndex( turret, name )
++	if ( index == null )
++		return
+ 	local elem 	= level.worldIcons.GetElement( name + index )
+ 
+ 	SetTurretIconForBetweenWave( elem )
+@@ -1200,7 +1206,9 @@ function TD_MainHud( mainVGUI, player )
+ 	//player turret kill update
+ 	local name = "CoopPlayerTurret"
+ 	level.worldIconIndex[ name ] <- []
+-	for ( local i = 0; i < 12; i++ )
++	// 8 players with several sentry turrets each outgrew the original 12 icons: SetWorldIconIndex found no free slot, returned
++	// null and GetElement("CoopPlayerTurretnull") raised a script error for every new turret.
++	for ( local i = 0; i < 32; i++ )
+ 	{
+ 		level.worldIconIndex[ name ].append( null )
+ 		local elem = level.worldIcons.CreateElement( name + i )
