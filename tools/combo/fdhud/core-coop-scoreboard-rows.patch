@@ -1,0 +1,1044 @@
+diff --git a/resource/ui/hudscoreboard.res b/resource/ui/hudscoreboard.res
+index 2ecbc81..054610a 100644
+--- a/resource/ui/hudscoreboard.res
++++ b/resource/ui/hudscoreboard.res
+@@ -3574,6 +3574,957 @@
+ 		pin_to_sibling_corner		1
+ 	}
+ 
++////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
++// COOP WAVE INFO for boards with more than 4 rows (Frontier Defense with 5 to 9 listed players)
++// The block above is pinned under row 3 (the 4th row): right for the 4 rows of vanilla Frontier Defense, on top of the player rows with more.
++// The sets below are copies of it ("_R<n>"): the same elements and offsets, but WaveNumber is pinned under row n instead, so the block sits as
++// far under the last row as the original sits under row 3. cl_scoreboard.nut (InitCoopScoreboard) uses the set of row (rows - 1), hides the others.
++
++	ScoreboardTD_WaveNumber_R4
++	{
++		ControlName				Label
++		xpos 					-6
++		ypos					7
++		zpos					1012
++		visible					0
++		auto_wide_tocontents	1
++		auto_tall_tocontents	1
++		font					ScoreboardFont
++		labelText				"WAVE NUMBER"
++		allcaps					1
++		fgcolor_override	 	"204 234 255 255"
++		bgcolor_override 		"255 127 127 127"
++
++		pin_to_sibling			ScoreboardTeammateBackground4
++		pin_corner_to_sibling	0
++		pin_to_sibling_corner	2
++	}
++
++	ScoreboardTD_WaveName_R4
++	{
++		ControlName				Label
++		xpos 					4
++		ypos					0
++		zpos					1012
++		visible					0
++		auto_wide_tocontents	1
++		auto_tall_tocontents	1
++		font					ScoreboardFont
++		labelText				"WAVE NAME"
++		allcaps					1
++		fgcolor_override	 	"204 234 255 255"
++
++		pin_to_sibling			ScoreboardTD_WaveNumber_R4
++		pin_corner_to_sibling	0
++		pin_to_sibling_corner	1
++	}
++
++	ScoreboardTD_RemainingEnemies_R4
++	{
++		ControlName				Label
++		ypos					4
++		zpos					1012
++		visible					0
++		auto_wide_tocontents	1
++		auto_tall_tocontents	1
++		font					HudFontSmallPlain
++		labelText				"#COOP_REMAINING_ENEMIES"
++		allcaps					1
++		fgcolor_override	 	"255 255 255 255"
++
++		pin_to_sibling			ScoreboardTD_WaveNumber_R4
++		pin_corner_to_sibling	0
++		pin_to_sibling_corner	2
++	}
++
++	ScoreboardTD_WaveEnemyType_0_R4
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		ypos						5
++		xpos						0
++
++		pin_to_sibling				ScoreboardTD_RemainingEnemies_R4
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		2
++	}
++
++	ScoreboardTD_WaveEnemyType_1_R4
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_0_R4
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_2_R4
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_1_R4
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_3_R4
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_2_R4
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_4_R4
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_3_R4
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_5_R4
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		ypos						5
++		xpos						0
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_0_R4
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		2
++	}
++
++	ScoreboardTD_WaveEnemyType_6_R4
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_5_R4
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_7_R4
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_6_R4
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_8_R4
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_7_R4
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_9_R4
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_8_R4
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveNumber_R5
++	{
++		ControlName				Label
++		xpos 					-6
++		ypos					7
++		zpos					1012
++		visible					0
++		auto_wide_tocontents	1
++		auto_tall_tocontents	1
++		font					ScoreboardFont
++		labelText				"WAVE NUMBER"
++		allcaps					1
++		fgcolor_override	 	"204 234 255 255"
++		bgcolor_override 		"255 127 127 127"
++
++		pin_to_sibling			ScoreboardTeammateBackground5
++		pin_corner_to_sibling	0
++		pin_to_sibling_corner	2
++	}
++
++	ScoreboardTD_WaveName_R5
++	{
++		ControlName				Label
++		xpos 					4
++		ypos					0
++		zpos					1012
++		visible					0
++		auto_wide_tocontents	1
++		auto_tall_tocontents	1
++		font					ScoreboardFont
++		labelText				"WAVE NAME"
++		allcaps					1
++		fgcolor_override	 	"204 234 255 255"
++
++		pin_to_sibling			ScoreboardTD_WaveNumber_R5
++		pin_corner_to_sibling	0
++		pin_to_sibling_corner	1
++	}
++
++	ScoreboardTD_RemainingEnemies_R5
++	{
++		ControlName				Label
++		ypos					4
++		zpos					1012
++		visible					0
++		auto_wide_tocontents	1
++		auto_tall_tocontents	1
++		font					HudFontSmallPlain
++		labelText				"#COOP_REMAINING_ENEMIES"
++		allcaps					1
++		fgcolor_override	 	"255 255 255 255"
++
++		pin_to_sibling			ScoreboardTD_WaveNumber_R5
++		pin_corner_to_sibling	0
++		pin_to_sibling_corner	2
++	}
++
++	ScoreboardTD_WaveEnemyType_0_R5
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		ypos						5
++		xpos						0
++
++		pin_to_sibling				ScoreboardTD_RemainingEnemies_R5
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		2
++	}
++
++	ScoreboardTD_WaveEnemyType_1_R5
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_0_R5
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_2_R5
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_1_R5
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_3_R5
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_2_R5
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_4_R5
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_3_R5
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_5_R5
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		ypos						5
++		xpos						0
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_0_R5
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		2
++	}
++
++	ScoreboardTD_WaveEnemyType_6_R5
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_5_R5
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_7_R5
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_6_R5
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_8_R5
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_7_R5
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_9_R5
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_8_R5
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveNumber_R6
++	{
++		ControlName				Label
++		xpos 					-6
++		ypos					7
++		zpos					1012
++		visible					0
++		auto_wide_tocontents	1
++		auto_tall_tocontents	1
++		font					ScoreboardFont
++		labelText				"WAVE NUMBER"
++		allcaps					1
++		fgcolor_override	 	"204 234 255 255"
++		bgcolor_override 		"255 127 127 127"
++
++		pin_to_sibling			ScoreboardTeammateBackground6
++		pin_corner_to_sibling	0
++		pin_to_sibling_corner	2
++	}
++
++	ScoreboardTD_WaveName_R6
++	{
++		ControlName				Label
++		xpos 					4
++		ypos					0
++		zpos					1012
++		visible					0
++		auto_wide_tocontents	1
++		auto_tall_tocontents	1
++		font					ScoreboardFont
++		labelText				"WAVE NAME"
++		allcaps					1
++		fgcolor_override	 	"204 234 255 255"
++
++		pin_to_sibling			ScoreboardTD_WaveNumber_R6
++		pin_corner_to_sibling	0
++		pin_to_sibling_corner	1
++	}
++
++	ScoreboardTD_RemainingEnemies_R6
++	{
++		ControlName				Label
++		ypos					4
++		zpos					1012
++		visible					0
++		auto_wide_tocontents	1
++		auto_tall_tocontents	1
++		font					HudFontSmallPlain
++		labelText				"#COOP_REMAINING_ENEMIES"
++		allcaps					1
++		fgcolor_override	 	"255 255 255 255"
++
++		pin_to_sibling			ScoreboardTD_WaveNumber_R6
++		pin_corner_to_sibling	0
++		pin_to_sibling_corner	2
++	}
++
++	ScoreboardTD_WaveEnemyType_0_R6
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		ypos						5
++		xpos						0
++
++		pin_to_sibling				ScoreboardTD_RemainingEnemies_R6
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		2
++	}
++
++	ScoreboardTD_WaveEnemyType_1_R6
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_0_R6
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_2_R6
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_1_R6
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_3_R6
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_2_R6
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_4_R6
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_3_R6
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_5_R6
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		ypos						5
++		xpos						0
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_0_R6
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		2
++	}
++
++	ScoreboardTD_WaveEnemyType_6_R6
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_5_R6
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_7_R6
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_6_R6
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_8_R6
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_7_R6
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_9_R6
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_8_R6
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveNumber_R7
++	{
++		ControlName				Label
++		xpos 					-6
++		ypos					7
++		zpos					1012
++		visible					0
++		auto_wide_tocontents	1
++		auto_tall_tocontents	1
++		font					ScoreboardFont
++		labelText				"WAVE NUMBER"
++		allcaps					1
++		fgcolor_override	 	"204 234 255 255"
++		bgcolor_override 		"255 127 127 127"
++
++		pin_to_sibling			ScoreboardTeammateBackground7
++		pin_corner_to_sibling	0
++		pin_to_sibling_corner	2
++	}
++
++	ScoreboardTD_WaveName_R7
++	{
++		ControlName				Label
++		xpos 					4
++		ypos					0
++		zpos					1012
++		visible					0
++		auto_wide_tocontents	1
++		auto_tall_tocontents	1
++		font					ScoreboardFont
++		labelText				"WAVE NAME"
++		allcaps					1
++		fgcolor_override	 	"204 234 255 255"
++
++		pin_to_sibling			ScoreboardTD_WaveNumber_R7
++		pin_corner_to_sibling	0
++		pin_to_sibling_corner	1
++	}
++
++	ScoreboardTD_RemainingEnemies_R7
++	{
++		ControlName				Label
++		ypos					4
++		zpos					1012
++		visible					0
++		auto_wide_tocontents	1
++		auto_tall_tocontents	1
++		font					HudFontSmallPlain
++		labelText				"#COOP_REMAINING_ENEMIES"
++		allcaps					1
++		fgcolor_override	 	"255 255 255 255"
++
++		pin_to_sibling			ScoreboardTD_WaveNumber_R7
++		pin_corner_to_sibling	0
++		pin_to_sibling_corner	2
++	}
++
++	ScoreboardTD_WaveEnemyType_0_R7
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		ypos						5
++		xpos						0
++
++		pin_to_sibling				ScoreboardTD_RemainingEnemies_R7
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		2
++	}
++
++	ScoreboardTD_WaveEnemyType_1_R7
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_0_R7
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_2_R7
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_1_R7
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_3_R7
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_2_R7
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_4_R7
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_3_R7
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_5_R7
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		ypos						5
++		xpos						0
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_0_R7
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		2
++	}
++
++	ScoreboardTD_WaveEnemyType_6_R7
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_5_R7
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_7_R7
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_6_R7
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_8_R7
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_7_R7
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_9_R7
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_8_R7
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveNumber_R8
++	{
++		ControlName				Label
++		xpos 					-6
++		ypos					7
++		zpos					1012
++		visible					0
++		auto_wide_tocontents	1
++		auto_tall_tocontents	1
++		font					ScoreboardFont
++		labelText				"WAVE NUMBER"
++		allcaps					1
++		fgcolor_override	 	"204 234 255 255"
++		bgcolor_override 		"255 127 127 127"
++
++		pin_to_sibling			ScoreboardTeammateBackground8
++		pin_corner_to_sibling	0
++		pin_to_sibling_corner	2
++	}
++
++	ScoreboardTD_WaveName_R8
++	{
++		ControlName				Label
++		xpos 					4
++		ypos					0
++		zpos					1012
++		visible					0
++		auto_wide_tocontents	1
++		auto_tall_tocontents	1
++		font					ScoreboardFont
++		labelText				"WAVE NAME"
++		allcaps					1
++		fgcolor_override	 	"204 234 255 255"
++
++		pin_to_sibling			ScoreboardTD_WaveNumber_R8
++		pin_corner_to_sibling	0
++		pin_to_sibling_corner	1
++	}
++
++	ScoreboardTD_RemainingEnemies_R8
++	{
++		ControlName				Label
++		ypos					4
++		zpos					1012
++		visible					0
++		auto_wide_tocontents	1
++		auto_tall_tocontents	1
++		font					HudFontSmallPlain
++		labelText				"#COOP_REMAINING_ENEMIES"
++		allcaps					1
++		fgcolor_override	 	"255 255 255 255"
++
++		pin_to_sibling			ScoreboardTD_WaveNumber_R8
++		pin_corner_to_sibling	0
++		pin_to_sibling_corner	2
++	}
++
++	ScoreboardTD_WaveEnemyType_0_R8
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		ypos						5
++		xpos						0
++
++		pin_to_sibling				ScoreboardTD_RemainingEnemies_R8
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		2
++	}
++
++	ScoreboardTD_WaveEnemyType_1_R8
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_0_R8
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_2_R8
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_1_R8
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_3_R8
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_2_R8
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_4_R8
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_3_R8
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_5_R8
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		ypos						5
++		xpos						0
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_0_R8
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		2
++	}
++
++	ScoreboardTD_WaveEnemyType_6_R8
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_5_R8
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_7_R8
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_6_R8
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_8_R8
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_7_R8
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
++	ScoreboardTD_WaveEnemyType_9_R8
++	{
++		ControlName					CNestedPanel
++		visible						0
++		InheritProperties 			ScoreboardTD_WaveEnemy
++
++		xpos						6
++
++		pin_to_sibling				ScoreboardTD_WaveEnemyType_8_R8
++		pin_corner_to_sibling		0
++		pin_to_sibling_corner		1
++	}
++
+ 	ScoreboardTD_Star_0
+ 	{
+ 		ControlName			ImagePanel
+diff --git a/scripts/vscripts/client/cl_scoreboard.nut b/scripts/vscripts/client/cl_scoreboard.nut
+index 4f182a6..5a170df 100644
+--- a/scripts/vscripts/client/cl_scoreboard.nut
++++ b/scripts/vscripts/client/cl_scoreboard.nut
+@@ -265,6 +265,12 @@ function InitScoreboard_Think()
+ 		file.background.SetHeight( level.screenSize[1] * 0.875 )
+ 		file.background.SetY( -18 )
+ 	}
++	else if ( GAMETYPE == COOPERATIVE && numTeamPlayers > 4 )
++	{
++		// 5 or 6 rows: the wave block (see InitCoopScoreboard) hangs under the last row and needs the height the 7+ row board has
++		file.background.SetHeight( level.screenSize[1] * 0.875 )
++		file.background.SetY( -18 )
++	}
+ 
+ 	file.header <- {}
+ 	file.header.background <- HudElement( "ScoreboardHeaderBackground", scoreboard )
+@@ -301,7 +307,7 @@ function InitScoreboard_Think()
+ 	file.nameEndColumn <- null
+ 
+ 	if ( GAMETYPE == COOPERATIVE )
+-		InitCoopScoreboard( scoreboard )
++		InitCoopScoreboard( scoreboard, numTeamPlayers )
+ 
+ 	AddColumnsForGameMode( scoreboard )
+ 
+@@ -1254,7 +1260,10 @@ function AddColumnsForGameMode( scoreboard )
+ 	}
+ }
+ 
+-function InitCoopScoreboard( scoreboard )
++// The wave block (wave number/name, remaining enemies, enemy type boxes) is pinned under a player row in hudscoreboard.res: under row 3 (the 4th)
++// for the 4 rows of vanilla Frontier Defense, which is on top of the player rows as soon as the board has more. The res has one copy of the block
++// per row 4 - 8 ("..._R<n>", pinned under row n): the copy under the last listed row is used, the others stay hidden.
++function InitCoopScoreboard( scoreboard, numRows )
+ {
+ 	file.CoopWaveNumber				<- null
+ 	file.CoopWaveName				<- null
+@@ -1267,9 +1276,22 @@ function InitCoopScoreboard( scoreboard )
+ 	file.CoopStars[1]				<- null
+ 	file.CoopStars[2]				<- null
+ 
+-	file.CoopWaveNumber				= HudElement( "ScoreboardTD_WaveNumber", scoreboard )
+-	file.CoopWaveName				= HudElement( "ScoreboardTD_WaveName", scoreboard )
+-	file.CoopWaveRemainingEnemies	= HudElement( "ScoreboardTD_RemainingEnemies", scoreboard )
++	// hudscoreboard.res has rows 0 - 8 (and wave block copies for the last row 4 - 8)
++	local waveSuffix = numRows > 4 ? "_R" + ( min( numRows, 9 ) - 1 ) : ""
++
++	if ( waveSuffix != "" )
++	{
++		// the block under row 3 is not used: keep its elements hidden
++		HudElement( "ScoreboardTD_WaveNumber", scoreboard ).Hide()
++		HudElement( "ScoreboardTD_WaveName", scoreboard ).Hide()
++		HudElement( "ScoreboardTD_RemainingEnemies", scoreboard ).Hide()
++		for ( local i = 0; i < 10; i++ )
++			HudElement( "ScoreboardTD_WaveEnemyType_" + i, scoreboard ).Hide()
++	}
++
++	file.CoopWaveNumber				= HudElement( "ScoreboardTD_WaveNumber" + waveSuffix, scoreboard )
++	file.CoopWaveName				= HudElement( "ScoreboardTD_WaveName" + waveSuffix, scoreboard )
++	file.CoopWaveRemainingEnemies	= HudElement( "ScoreboardTD_RemainingEnemies" + waveSuffix, scoreboard )
+ 	file.CoopWaveContinuesRemaining	= HudElement( "ScoreboardTD_ContinuesRemaining_Title", scoreboard )
+ 	file.CoopWaveContinuesCount		= HudElement( "ScoreboardTD_ContinuesRemaining_Count", scoreboard )
+ 	file.CoopStars[0]				= HudElement( "ScoreboardTD_Star_0", scoreboard )
+@@ -1285,14 +1307,14 @@ function InitCoopScoreboard( scoreboard )
+ 	file.CoopStars[1].Show()
+ 	file.CoopStars[2].Show()
+ 
+-	InitWaveEnemyTypes( scoreboard )
++	InitWaveEnemyTypes( scoreboard, waveSuffix )
+ }
+ 
+-function InitWaveEnemyTypes( scoreboard )
++function InitWaveEnemyTypes( scoreboard, waveSuffix )
+ {
+ 	for ( local i = 0; i < 10; i++ )
+ 	{
+-		local elem = HudElement( "ScoreboardTD_WaveEnemyType_" + i, scoreboard )
++		local elem = HudElement( "ScoreboardTD_WaveEnemyType_" + i + waveSuffix, scoreboard )
+ 		elem.s.bg <- elem.GetChild( "WaveEnemyType_info_box" )
+ 		elem.s.count <- elem.GetChild( "WaveEnemyType_Count" )
+ 		elem.s.image <- elem.GetChild( "WaveEnemyType_Image" )

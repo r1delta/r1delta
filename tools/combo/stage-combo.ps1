@@ -403,6 +403,22 @@ if (Test-Path -LiteralPath $tiPatch) {
     else { Say 'core-coop-turret-icons.patch does not apply (FD overlay absent?): skipped' }
 }
 
+# ---- FD scoreboard: with more than 4 rows the wave block (wave number/name, remaining enemies, enemy type boxes) was pinned under row 3 and printed over the
+# player rows. tools\combo\fdhud\core-coop-scoreboard-rows.patch (hudscoreboard.res: one copy of the block per row 4 - 8; cl_scoreboard.nut: picks the copy under
+# the last row and enlarges the 5 - 6 row board) is made against the staged CORE AFTER the FD overlay (cl_scoreboard.nut is FD-patched); once.
+$sbPatch = Join-Path $CodeRoot 'tools\combo\fdhud\core-coop-scoreboard-rows.patch'
+if (Test-Path -LiteralPath $sbPatch) {
+    $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    & git -C $Core apply --ignore-whitespace --whitespace=nowarn -R --check $sbPatch 2>$null
+    $sbDone = ($LASTEXITCODE -eq 0)
+    & git -C $Core apply --ignore-whitespace --whitespace=nowarn --check $sbPatch 2>$null
+    $sbApplies = ($LASTEXITCODE -eq 0)
+    $ErrorActionPreference = $prev
+    if ($sbDone) { }
+    elseif ($sbApplies) { GitC $Core @('apply', '--ignore-whitespace', '--whitespace=nowarn', $sbPatch) | Out-Null; Say 'applied core-coop-scoreboard-rows.patch' }
+    else { Say 'core-coop-scoreboard-rows.patch does not apply (FD overlay absent?): skipped' }
+}
+
 # ---- LobbyMaps CORE (R2 maps in the picker/lobby/vote/browser, playlists, group 4/5 ownership): patch applies on top of the FD overlay (it was
 # made against the staged CORE), once (reverse check); the 11 localization files are replaced whole (unlink + copy).
 $lm = Join-Path $CodeRoot 'tools\combo\lobbymaps'
