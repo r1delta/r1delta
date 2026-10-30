@@ -20,9 +20,17 @@
 //   - the write is resent after a full snapshot (i.e. after a reconnect) and
 //     on a backoff timer in case it was dropped for any other reason.
 //
+// Sends never go straight to the netchannel: every first send and resend is
+// queued per player and leaves through a paced outbox (kSendBurst, then
+// kSendPerSecond), because a fresh profile means hundreds of writes at once and
+// the netchannel's reliable stream is a fixed 256 KiB buffer.
+//
 // Everything here is plain C++ so it can be unit tested without the engine.
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -46,6 +54,19 @@ using EntryList = std::vector<std::pair<std::string, std::string>>;
 
 constexpr double kInitialResendDelay = 2.0;
 constexpr int kMaxTimedResends = 5;
+// A full snapshot asks for every unacknowledged write again, but never sooner
+// than this after the write last went out: the client has had no time to
+// answer yet, and several snapshots arriving back to back (signon retries,
+// partial reports) must not multiply the traffic.
+constexpr double kFullSnapshotResendHold = 1.0;
+
+// Writes leave through a paced outbox: the netchannel's reliable stream is one
+// fixed 256 KiB buffer, and a joining player with a fresh profile gets hundreds
+// of commands at once. At most kSendBurst commands go out in one go, then
+// kSendPerSecond (about 33 KiB/s at ~56 bytes a command, below the default
+// 40000 B/s client rate).
+constexpr double kSendBurst = 128.0;
+constexpr double kSendPerSecond = 600.0;
 
 struct PendingWrite
 {
@@ -53,6 +74,8 @@ struct PendingWrite
 	double lastSent = 0.0;
 	int timedResends = 0;
 	bool resendNow = false;
+	// The newest value is waiting in PlayerState::outbox and has not been sent.
+	bool queued = false;
 };
 
 struct PlayerState
@@ -62,6 +85,12 @@ struct PlayerState
 	// per-client userinfo table of its own (R1O fake dedicated servers).
 	Values values;
 	std::unordered_map<std::string, PendingWrite> pending;
+	// Keys whose newest value still has to be sent, oldest first. A key is in
+	// here once per PendingWrite::queued; an acknowledged key may leave a stale
+	// entry that TakeOutbox skips.
+	std::deque<std::string> outbox;
+	double sendBudget = kSendBurst;
+	double budgetTime = 0.0;
 };
 
 inline void Reset(PlayerState& state)
@@ -69,6 +98,9 @@ inline void Reset(PlayerState& state)
 	state.session = {};
 	state.values.clear();
 	state.pending.clear();
+	state.outbox.clear();
+	state.sendBudget = kSendBurst;
+	state.budgetTime = 0.0;
 }
 
 // Binds the state to a connection. A different connection in the same slot
@@ -108,9 +140,9 @@ inline const std::string* Find(const PlayerState& state, const std::string& key)
 	return nullptr;
 }
 
-// Records a server-side write. `clientValue` is what the engine currently
-// believes the client has (nullptr if unknown). Returns true when the value
-// has to be sent to the client.
+// Records a server-side write and queues it for sending (see TakeOutbox).
+// `clientValue` is what the engine currently believes the client has (nullptr
+// if unknown). Returns true when the value has to be sent to the client.
 inline bool RecordServerWrite(
 	PlayerState& state,
 	const std::string& key,
@@ -136,6 +168,10 @@ inline bool RecordServerWrite(
 	write.lastSent = now;
 	write.timedResends = 0;
 	write.resendNow = false;
+	if (!write.queued) {
+		write.queued = true;
+		state.outbox.push_back(key);
+	}
 	if (keepMirror)
 		state.values[key] = value;
 	return true;
@@ -204,22 +240,65 @@ inline double ResendDelay(int timedResends)
 	return delay;
 }
 
-// Returns the pending writes that should be (re)sent now and marks them sent.
-inline EntryList CollectResends(PlayerState& state, double now)
+// Moves the writes that are due again (full snapshot, backoff timer) onto the
+// outbox and returns how many. A write that is still waiting in the outbox is
+// never queued twice, and a full snapshot only re-queues a write that went out
+// at least kFullSnapshotResendHold ago; until then the request stays pending
+// and is dropped if the client acknowledges the write in the meantime.
+inline size_t QueueResends(PlayerState& state, double now)
 {
-	EntryList due;
+	size_t queued = 0;
 	for (auto& [key, write] : state.pending) {
+		if (write.queued) {
+			write.resendNow = false;
+			continue;
+		}
 		const bool timerDue = write.timedResends < kMaxTimedResends
 			&& now - write.lastSent >= ResendDelay(write.timedResends);
-		if (!write.resendNow && !timerDue)
+		const bool snapshotDue = write.resendNow && now - write.lastSent >= kFullSnapshotResendHold;
+		if (!snapshotDue && !timerDue)
 			continue;
-		if (!write.resendNow)
+		if (!snapshotDue)
 			++write.timedResends;
 		write.resendNow = false;
-		write.lastSent = now;
-		due.emplace_back(key, write.value);
+		write.queued = true;
+		state.outbox.push_back(key);
+		++queued;
 	}
-	return due;
+	return queued;
+}
+
+// Pops up to `maxCount` queued writes (oldest first) and marks them sent. A key
+// acknowledged while it waited is skipped.
+inline EntryList TakeOutbox(PlayerState& state, double now, size_t maxCount)
+{
+	EntryList out;
+	while (out.size() < maxCount && !state.outbox.empty()) {
+		const std::string key = std::move(state.outbox.front());
+		state.outbox.pop_front();
+		const auto pending = state.pending.find(key);
+		if (pending == state.pending.end() || !pending->second.queued)
+			continue;
+		pending->second.queued = false;
+		pending->second.lastSent = now;
+		out.emplace_back(key, pending->second.value);
+	}
+	return out;
+}
+
+// TakeOutbox limited by the send budget: kSendBurst commands at once, then
+// kSendPerSecond. `hardLimit` bounds a single call.
+inline EntryList TakePaced(PlayerState& state, double now, size_t hardLimit)
+{
+	if (state.outbox.empty())
+		return {};
+	const double elapsed = state.budgetTime > 0.0 && now > state.budgetTime ? now - state.budgetTime : 0.0;
+	state.budgetTime = now;
+	state.sendBudget = (std::min)(kSendBurst, state.sendBudget + elapsed * kSendPerSecond);
+	const size_t allowed = (std::min)(hardLimit, static_cast<size_t>(state.sendBudget));
+	EntryList out = TakeOutbox(state, now, allowed);
+	state.sendBudget -= static_cast<double>(out.size());
+	return out;
 }
 
 }
