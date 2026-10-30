@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -13,6 +14,25 @@ public sealed class FastDownloadService : IDisposable
     private const int ProcessKillTimeoutMs = 10000;
     private const string BundledCurlSha256 = "589c8e4d297b4831c82adf0261fc1ca57ce59d663b91b4106d2ee7dff3972648";
     private static readonly TimeSpan DefaultNoProgressTimeout = TimeSpan.FromSeconds(90);
+
+    // Seed ECHConfigList (Cloudflare, public_name cloudflare-ech.com), taken from the HTTPS RR of
+    // but.nobody-ca.me on 2026-10-27. It only has to be good enough to start a handshake: if
+    // Cloudflare has rotated it, the server answers with retry_configs and we pick those up.
+    // Refresh this value whenever you cut a release.
+    private const string BundledEchConfigList =
+        "AEX+DQBBwwAgACCfeC0d9U8Og1C7TXom52o4IkyBC3oHIZBcL3erINk+IgAEAAEAAQASY2xvdWRmbGFyZS1lY2guY29tAAA=";
+
+    // JSON DoH endpoints addressed by IP, so the lookup itself carries no SNI and does not
+    // depend on the system resolver (which some ISP "security" features rewrite).
+    private static readonly string[] DohJsonEndpoints =
+    {
+        "https://1.1.1.1/dns-query?name={0}&type=HTTPS",
+        "https://1.0.0.1/dns-query?name={0}&type=HTTPS",
+        "https://8.8.8.8/resolve?name={0}&type=HTTPS"
+    };
+    private static readonly TimeSpan DohLookupTimeout = TimeSpan.FromSeconds(5);
+    private static readonly Regex EchParamRegex = new Regex(@"ech=""?([A-Za-z0-9+/=]+)", RegexOptions.CultureInvariant);
+    private static readonly Regex RetryConfigsRegex = new Regex(@"ECH: retry_configs\s+([A-Za-z0-9+/=]+)", RegexOptions.CultureInvariant);
 
     private readonly TimeSpan _noProgressTimeout;
     private bool _disposed;
@@ -73,47 +93,26 @@ public sealed class FastDownloadService : IDisposable
         var latestErrors = new Dictionary<DownloadRequest, string>();
 
         ReportStatus(pending, DownloadBackend.Curl, DownloadTransferPhase.Preparing, 1, 1);
-        AttemptResult curlResult;
         var curlPath = ResolveBundledCurlPath();
         if (string.IsNullOrEmpty(curlPath))
         {
-            curlResult = AttemptResult.FailAll(
-                pending,
-                "bundled ECH-enabled curl.exe is missing or failed its integrity check");
+            foreach (var request in pending)
+                latestErrors[request] = "curl: bundled ECH-enabled curl.exe is missing or failed its integrity check";
             ReportStatus(pending, DownloadBackend.Curl, DownloadTransferPhase.Failed, 1, 1);
         }
         else
         {
-            try
-            {
-                curlResult = await RunCurlAttemptAsync(curlPath, pending, cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (DownloadProcessTerminationException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                curlResult = AttemptResult.FailAll(pending, ex.Message);
-            }
-        }
+            // Pass 1: ECH required, using an ECHConfigList we supply ourselves (fresh from DoH,
+            // else cached, else bundled). Immune to resolvers that strip HTTPS records.
+            await RefreshEchConfigsAsync(pending, cancellationToken).ConfigureAwait(false);
+            pending = await RunCurlPassAsync(curlPath, pending, CurlEchMode.SuppliedConfig, "curl (ECH)", latestErrors, cancellationToken).ConfigureAwait(false);
+            if (pending.Count == 0)
+                return;
 
-        if (curlResult.Failures.Count == 0)
-            return;
-
-        pending = new List<DownloadRequest>();
-        foreach (var failure in curlResult.Failures)
-        {
-            var partialPath = Path.GetFullPath(failure.Key.DestinationPath) + ".curl.partial";
-            if (TryPromoteCompletePartial(failure.Key, partialPath, DownloadBackend.Curl))
-                continue;
-
-            pending.Add(failure.Key);
-            latestErrors[failure.Key] = $"curl: {failure.Value}";
+            // Pass 2: the previous behaviour. ECH if the system resolver hands us a config,
+            // otherwise a normal TLS connection.
+            Debug.WriteLine($"[FastDownloadService] ECH pass left {pending.Count} file(s); retrying with opportunistic ECH.");
+            pending = await RunCurlPassAsync(curlPath, pending, CurlEchMode.Opportunistic, "curl", latestErrors, cancellationToken).ConfigureAwait(false);
         }
 
         if (pending.Count == 0)
@@ -190,13 +189,70 @@ public sealed class FastDownloadService : IDisposable
         }
     }
 
-    private static string BuildCurlArguments(DownloadRequest request, string partialPath)
+    private enum CurlEchMode
     {
+        SuppliedConfig,
+        Opportunistic
+    }
+
+    private async Task<List<DownloadRequest>> RunCurlPassAsync(
+        string curlPath,
+        List<DownloadRequest> requests,
+        CurlEchMode echMode,
+        string label,
+        Dictionary<DownloadRequest, string> latestErrors,
+        CancellationToken cancellationToken)
+    {
+        AttemptResult result;
+        try
+        {
+            result = await RunCurlAttemptAsync(curlPath, requests, echMode, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (DownloadProcessTerminationException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            result = AttemptResult.FailAll(requests, ex.Message);
+        }
+
+        var stillPending = new List<DownloadRequest>();
+        foreach (var failure in result.Failures)
+        {
+            var partialPath = Path.GetFullPath(failure.Key.DestinationPath) + ".curl.partial";
+            if (TryPromoteCompletePartial(failure.Key, partialPath, DownloadBackend.Curl))
+                continue;
+
+            stillPending.Add(failure.Key);
+            latestErrors.TryGetValue(failure.Key, out var previous);
+            var message = $"{label}: {failure.Value}";
+            latestErrors[failure.Key] = previous == null ? message : previous + "; " + message;
+        }
+
+        return stillPending;
+    }
+
+    private static string BuildCurlArguments(DownloadRequest request, string partialPath, string echConfigList)
+    {
+        var echArguments = echConfigList != null
+            // "hard": never send the real hostname in cleartext on this pass.
+            // --verbose: needed so curl prints "ECH: retry_configs ..." when the key is stale.
+            ? new[] { "--ech", "hard", "--ech", "ecl:" + echConfigList, "--verbose" }
+            : new[] { "--ech", "true" };
+
         return string.Join(" ", new[]
         {
             "--fail",
-            "--location",
-            "--ech", "true",
+            "--location"
+        }
+        .Concat(echArguments)
+        .Concat(new[]
+        {
             "--ca-native",
             "--no-progress-meter",
             "--show-error",
@@ -209,10 +265,14 @@ public sealed class FastDownloadService : IDisposable
             "--user-agent", "\"r1delta-installer/1.0\"",
             "--output", $"\"{partialPath}\"",
             $"\"{request.Url}\""
-        });
+        }));
     }
 
-    private async Task<AttemptResult> RunCurlAttemptAsync(string curlPath, IReadOnlyCollection<DownloadRequest> requests, CancellationToken cancellationToken)
+    private async Task<AttemptResult> RunCurlAttemptAsync(
+        string curlPath,
+        IReadOnlyCollection<DownloadRequest> requests,
+        CurlEchMode echMode,
+        CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(curlPath) || !File.Exists(curlPath))
             return AttemptResult.FailAll(requests, "bundled curl.exe was not found");
@@ -227,8 +287,87 @@ public sealed class FastDownloadService : IDisposable
             var partialPath = destinationPath + ".curl.partial";
             PreparePartialForBackend(destinationPath, partialPath);
 
-            var arguments = BuildCurlArguments(request, partialPath);
+            if (echMode == CurlEchMode.Opportunistic)
+            {
+                var error = await RunCurlProcessAsync(
+                    curlPath,
+                    request,
+                    destinationPath,
+                    partialPath,
+                    BuildCurlArguments(request, partialPath, null),
+                    null,
+                    cancellationToken).ConfigureAwait(false);
+                if (error != null)
+                    failures[request] = error;
+                continue;
+            }
 
+            var host = TryGetHost(request.Url);
+            if (host == null)
+            {
+                failures[request] = "could not parse the download URL's host";
+                continue;
+            }
+
+            // At most two tries: the config we have, then whatever the server says is current.
+            var echConfig = EchConfigStore.Get(host);
+            string lastError = null;
+            for (var echTry = 0; echTry < 2; echTry++)
+            {
+                string retryConfigs = null;
+                var echSucceeded = false;
+                lastError = await RunCurlProcessAsync(
+                    curlPath,
+                    request,
+                    destinationPath,
+                    partialPath,
+                    BuildCurlArguments(request, partialPath, echConfig),
+                    line =>
+                    {
+                        var match = RetryConfigsRegex.Match(line);
+                        if (match.Success)
+                            retryConfigs = match.Groups[1].Value;
+                        else if (line.IndexOf("ECH: result: status is succeeded", StringComparison.Ordinal) >= 0)
+                            echSucceeded = true;
+                    },
+                    cancellationToken).ConfigureAwait(false);
+
+                if (lastError == null)
+                {
+                    Debug.WriteLine($"[FastDownloadService] {host}: download finished, ECH accepted={echSucceeded}.");
+                    break;
+                }
+
+                if (retryConfigs == null ||
+                    !EchConfigStore.IsValid(retryConfigs) ||
+                    string.Equals(retryConfigs, echConfig, StringComparison.Ordinal))
+                {
+                    break;
+                }
+
+                Debug.WriteLine($"[FastDownloadService] {host}: server rejected our ECH config and sent retry_configs; retrying with them.");
+                EchConfigStore.Set(host, retryConfigs);
+                echConfig = retryConfigs;
+            }
+
+            if (lastError != null)
+                failures[request] = lastError;
+        }
+
+        return new AttemptResult(failures);
+    }
+
+    /// <summary>Runs one curl.exe transfer. Returns null on success, otherwise an error message.</summary>
+    private async Task<string> RunCurlProcessAsync(
+        string curlPath,
+        DownloadRequest request,
+        string destinationPath,
+        string partialPath,
+        string arguments,
+        Action<string> onStderrLine,
+        CancellationToken cancellationToken)
+    {
+        {
             var startInfo = new ProcessStartInfo
             {
                 FileName = curlPath,
@@ -251,14 +390,13 @@ public sealed class FastDownloadService : IDisposable
                 waitTask = CreateProcessExitTask(process);
                 if (!process.Start())
                 {
-                    failures[request] = "failed to start curl.exe";
-                    continue;
+                    return "failed to start curl.exe";
                 }
 
                 processStarted = true;
                 _activeProcess = process;
                 cancellationRegistration = cancellationToken.Register(() => KillProcess(process));
-                stderrTask = DrainOutputAsync(process.StandardError, "curl-stderr");
+                stderrTask = DrainOutputAsync(process.StandardError, "curl-stderr", onStderrLine);
                 stdoutTask = DrainOutputAsync(process.StandardOutput, "curl-stdout");
 
                 var lastLength = GetFileLength(partialPath);
@@ -321,7 +459,6 @@ public sealed class FastDownloadService : IDisposable
                         ProcessKillTimeoutMs).ConfigureAwait(false);
                     if (!timeoutExitCode.HasValue)
                         throw new DownloadProcessTerminationException("curl.exe did not exit after timeout termination.");
-                    failures[request] = timeoutMessage;
                     DownloadProgressChanged?.Invoke(new DownloadProgressUpdate(
                         request.DestinationPath,
                         GetFileLength(partialPath),
@@ -330,7 +467,7 @@ public sealed class FastDownloadService : IDisposable
                         DownloadTransferPhase.Failed,
                         1,
                         1));
-                    continue;
+                    return timeoutMessage;
                 }
 
                 await waitTask.ConfigureAwait(false);
@@ -338,7 +475,6 @@ public sealed class FastDownloadService : IDisposable
                 await Task.WhenAll(stderrTask, stdoutTask).ConfigureAwait(false);
                 if (exitCode != 0)
                 {
-                    failures[request] = $"curl exited with code {exitCode}";
                     DownloadProgressChanged?.Invoke(new DownloadProgressUpdate(
                         request.DestinationPath,
                         GetFileLength(partialPath),
@@ -347,7 +483,7 @@ public sealed class FastDownloadService : IDisposable
                         DownloadTransferPhase.Failed,
                         1,
                         1));
-                    continue;
+                    return $"curl exited with code {exitCode}";
                 }
 
                 try
@@ -366,7 +502,7 @@ public sealed class FastDownloadService : IDisposable
                 }
                 catch (Exception ex)
                 {
-                    failures[request] = $"curl promote failed: {ex.Message}";
+                    return $"curl promote failed: {ex.Message}";
                 }
             }
             catch (OperationCanceledException)
@@ -379,7 +515,7 @@ public sealed class FastDownloadService : IDisposable
             }
             catch (Exception ex)
             {
-                failures[request] = $"curl failed: {ex.Message}";
+                return $"curl failed: {ex.Message}";
             }
             finally
             {
@@ -417,7 +553,7 @@ public sealed class FastDownloadService : IDisposable
             }
         }
 
-        return new AttemptResult(failures);
+        return null;
     }
 
     private async Task<AttemptResult> RunHttpClientAttemptAsync(IReadOnlyCollection<DownloadRequest> requests, CancellationToken cancellationToken)
@@ -804,13 +940,177 @@ public sealed class FastDownloadService : IDisposable
         }
     }
 
-    private static async Task DrainOutputAsync(StreamReader reader, string streamName)
+    private static async Task DrainOutputAsync(StreamReader reader, string streamName, Action<string> onLine = null)
     {
         string line;
         while ((line = await reader.ReadLineAsync().ConfigureAwait(false)) != null)
         {
-            if (line.Length > 0)
-                Debug.WriteLine($"[download-process:{streamName}] {line}");
+            if (line.Length == 0)
+                continue;
+
+            Debug.WriteLine($"[download-process:{streamName}] {line}");
+            try { onLine?.Invoke(line); }
+            catch (Exception ex) { Debug.WriteLine($"[FastDownloadService] Output handler failed: {ex.Message}"); }
+        }
+    }
+
+    private static string TryGetHost(string url)
+    {
+        return Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.IdnHost.ToLowerInvariant() : null;
+    }
+
+    /// <summary>
+    /// Looks up the current ECHConfigList for each download host over IP-addressed DoH and
+    /// caches it. Failures are silent: we fall back to the cached or bundled config, and a
+    /// stale config is corrected by the server's retry_configs.
+    /// </summary>
+    private static async Task RefreshEchConfigsAsync(IEnumerable<DownloadRequest> requests, CancellationToken cancellationToken)
+    {
+        var hosts = requests
+            .Select(request => TryGetHost(request.Url))
+            .Where(host => host != null)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (hosts.Count == 0)
+            return;
+
+        using var client = new System.Net.Http.HttpClient(new System.Net.Http.HttpClientHandler());
+        client.DefaultRequestHeaders.TryAddWithoutValidation("Accept", "application/dns-json");
+        client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "r1delta-installer/1.0");
+
+        foreach (var host in hosts)
+        {
+            foreach (var endpointFormat in DohJsonEndpoints)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeout.CancelAfter(DohLookupTimeout);
+                try
+                {
+                    var url = string.Format(endpointFormat, Uri.EscapeDataString(host));
+                    using var response = await client.GetAsync(url, timeout.Token).ConfigureAwait(false);
+                    if (!response.IsSuccessStatusCode)
+                        continue;
+
+                    var body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                    var match = EchParamRegex.Match(body);
+                    if (!match.Success || !EchConfigStore.IsValid(match.Groups[1].Value))
+                        continue;
+
+                    EchConfigStore.Set(host, match.Groups[1].Value);
+                    Debug.WriteLine($"[FastDownloadService] {host}: refreshed ECH config via {new Uri(url).Host}.");
+                    break;
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    Debug.WriteLine($"[FastDownloadService] {host}: DoH lookup timed out.");
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[FastDownloadService] {host}: DoH lookup failed: {ex.Message}");
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Per-host ECHConfigList cache in %LOCALAPPDATA%\R1Delta, outside the versioned app
+    /// folder so it survives launcher updates. One "host&lt;TAB&gt;base64" entry per line.
+    /// </summary>
+    private static class EchConfigStore
+    {
+        private static readonly object Gate = new object();
+
+        private static string CachePath => Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "R1Delta",
+            "ech-config-cache.txt");
+
+        public static string Get(string host)
+        {
+            lock (Gate)
+            {
+                return Load().TryGetValue(host, out var cached) && IsValid(cached)
+                    ? cached
+                    : BundledEchConfigList;
+            }
+        }
+
+        public static void Set(string host, string echConfigList)
+        {
+            if (!IsValid(echConfigList))
+                return;
+
+            lock (Gate)
+            {
+                try
+                {
+                    var entries = Load();
+                    if (entries.TryGetValue(host, out var existing) &&
+                        string.Equals(existing, echConfigList, StringComparison.Ordinal))
+                    {
+                        return;
+                    }
+
+                    entries[host] = echConfigList;
+                    var path = CachePath;
+                    Directory.CreateDirectory(Path.GetDirectoryName(path));
+                    var tempPath = path + ".tmp";
+                    File.WriteAllLines(tempPath, entries.Select(entry => entry.Key + "\t" + entry.Value));
+                    if (File.Exists(path))
+                        File.Delete(path);
+                    File.Move(tempPath, path);
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[FastDownloadService] Could not save ECH config cache: {ex.Message}");
+                }
+            }
+        }
+
+        /// <summary>Checks that the value is base64 for an ECHConfigList: a 2-byte length prefix that matches the payload.</summary>
+        public static bool IsValid(string echConfigList)
+        {
+            if (string.IsNullOrWhiteSpace(echConfigList) || echConfigList.Length > 8192)
+                return false;
+
+            try
+            {
+                var bytes = Convert.FromBase64String(echConfigList);
+                return bytes.Length > 2 && ((bytes[0] << 8) | bytes[1]) == bytes.Length - 2;
+            }
+            catch (FormatException)
+            {
+                return false;
+            }
+        }
+
+        private static Dictionary<string, string> Load()
+        {
+            var entries = new Dictionary<string, string>(StringComparer.Ordinal);
+            try
+            {
+                var path = CachePath;
+                if (!File.Exists(path))
+                    return entries;
+
+                foreach (var line in File.ReadAllLines(path))
+                {
+                    var separator = line.IndexOf('\t');
+                    if (separator > 0)
+                        entries[line.Substring(0, separator)] = line.Substring(separator + 1).Trim();
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[FastDownloadService] Could not read ECH config cache: {ex.Message}");
+            }
+
+            return entries;
         }
     }
 
@@ -908,4 +1208,4 @@ public class DownloadException : Exception
 {
     public DownloadException(string message) : base(message) { }
     public DownloadException(string message, Exception innerException) : base(message, innerException) { }
-}
+}
