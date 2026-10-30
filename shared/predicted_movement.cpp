@@ -350,6 +350,7 @@ struct ClientMovement
     bool receivedAuthority{};
     bool baselineValid{}, ackValid{}, inUpdate{}, needsRestore{}, restored{}, failed{}, disconnectQueued{};
     bool inputCapable{};
+    std::uint32_t mismatchReported{};
     const ConVarR1* predictionControl{};
     bool predicting{true}, pendingWeaponRelease{};
     std::uint32_t pendingWeaponHandle{}, pendingWeaponPlayerHandle{0xFFFFFFFFu};
@@ -387,6 +388,18 @@ void QueueClientReset(const MovementProgram* program, std::uint32_t command)
     if (!program || !program->presentation[0]) return;
     if (clientMovement.eventCount < kPresentationQueue)
         clientMovement.events[clientMovement.eventCount++] = {program, command, -1, {}};
+}
+void ReportClientMovementProgramMismatch(const AuthorityMessage& message, const MovementProgram* local)
+{
+    if (clientMovement.mismatchReported == message.generation) return;
+    clientMovement.mismatchReported = message.generation;
+    char client[160];
+    if (local) _snprintf_s(client, sizeof(client), _TRUNCATE, "slots %u, fingerprint %.16s", local->slots, local->fingerprint);
+    else _snprintf_s(client, sizeof(client), _TRUNCATE, "not registered");
+    Warning("R1Delta movement: this client's movement program \"%s\" differs from the server's (server: slots %u, fingerprint %.16s; client: %s). "
+        "Falling back to native movement prediction; the server stays authoritative, but custom input and slide/grapple presentation are off. "
+        "Make scripts/vscripts/movement/*.nut identical to the server's (line endings do not matter).\n",
+        message.name, message.slots, message.fingerprint, client);
 }
 void FailClientMovement(const char* reason)
 {
@@ -1002,8 +1015,11 @@ std::uintptr_t __fastcall UpdateClientMovement(std::uintptr_t prediction, int sl
     const MovementProgram* program = message.enabled ? FindMovementProgram(MovementDomain::Client, message.name) : nullptr;
     if (message.enabled && (!program || program->slots != message.slots || std::strcmp(program->fingerprint, message.fingerprint)))
     {
-        FailClientMovement("Movement program is missing or differs from the authoritative server");
-        QueueMovementDisconnect(); return 0;
+        // The server is authoritative: it runs its own program and sends the resulting state, and a client that does
+        // not run that program just predicts with native movement and is corrected by every snapshot. No custom input
+        // is sent, no presentation is dispatched and no program state is restored for this session.
+        ReportClientMovementProgramMismatch(message, program);
+        program = nullptr;
     }
     if (program) clientMovement.inputCapable = true;
     const bool changedSession = clientMovement.generation != message.generation || clientMovement.handle != message.handle
@@ -1571,6 +1587,7 @@ void ResetMovementConnection()
     for (auto& value : clientMovement.presented) value.valid = false;
     clientMovement.eventCount = 0;
     clientMovement.receivedAuthority = clientMovement.baselineValid = clientMovement.ackValid = false;
+    clientMovement.mismatchReported = 0;
     clientMovement.inUpdate = clientMovement.needsRestore = clientMovement.restored = false;
     clientMovement.failed = clientMovement.disconnectQueued = false;
     clientMovement.player = 0;
