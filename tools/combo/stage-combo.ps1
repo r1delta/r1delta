@@ -283,6 +283,19 @@ $tmpG = Join-Path $env:TEMP ('combo-pilot-' + [Guid]::NewGuid().ToString('N') + 
 [IO.File]::WriteAllText($tmpG, $sG.Replace($aG, '( ::PilotMovementGrappleHeld && GetConVarInt( "delta_pilot_grapple_enabled" ) != 0 ) ? 1 : 0'), [Text.UTF8Encoding]::new($false))
 [ComboNative]::Replace($tmpG, $pnG); Remove-Item $tmpG
 Say 'grapple gated by delta_pilot_grapple_enabled (default 0)'
+# 3P slide body animation disabled for the playtest (stuck slide animation after the slide ends): both writers of Movement_SetSlideActivity (client
+# slide_body.nut presentation loop, server pilot_server.nut) pass (0,false) while delta_pilot_slide_body is 0 (native cvar, default 0), which also
+# releases an override that was left set. Slide movement, slide audio and the viewmodel tilt are untouched.
+foreach ($fn in @('slide_body.nut', 'pilot_server.nut')) {
+    $pnB = Join-Path $Core ('scripts\vscripts\movement\' + $fn)
+    $sB = [IO.File]::ReadAllText($pnB)
+    $aB = 'Movement_SetSlideActivity( player, session, sliding )'
+    if (-not $sB.Contains($aB)) { throw "$fn slide body gate anchor missing" }
+    $tmpB = Join-Path $env:TEMP ('combo-body-' + [Guid]::NewGuid().ToString('N') + '.nut')
+    [IO.File]::WriteAllText($tmpB, $sB.Replace($aB, 'Movement_SetSlideActivity( player, ( GetConVarInt( "delta_pilot_slide_body" ) != 0 ) ? session : 0, ( GetConVarInt( "delta_pilot_slide_body" ) != 0 ) && sliding )'), [Text.UTF8Encoding]::new($false))
+    [ComboNative]::Replace($tmpB, $pnB); Remove-Item $tmpB
+}
+Say 'slide body animation gated by delta_pilot_slide_body (default 0)'
 # Version30: server browser compares release tags without the leading v (min server version v3.0.0); applied once (reverse check).
 $v30Core = Join-Path $CodeRoot 'tools\combo\core-v30-serverbrowser.patch'
 $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
