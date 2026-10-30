@@ -39,6 +39,7 @@ $projects = [ordered]@{
     materialsystem_dx11_vtf_scratch_tests     = 'tests/materialsystem_dx11_vtf_scratch_tests.vcxproj'
     materialsystem_dx11_txaa_lifetime_tests   = 'tests/materialsystem_dx11_txaa_lifetime_tests.vcxproj'
     materialsystem_dx11_render_thread_tests   = 'tests/materialsystem_dx11_render_thread_tests.vcxproj'
+    materialsystem_dx11_shader_record_tests   = 'tests/materialsystem_dx11_shader_record_tests.vcxproj'
     hudwarp_convar_tests                      = 'tests/hudwarp_convar_tests.vcxproj'
     materialsystem_dx11_input_layout_cache_tests = 'tests/materialsystem_dx11_input_layout_cache_tests.vcxproj'
     vphysics_parallel_guard_tests             = 'tests/vphysics_parallel_guard_tests.vcxproj'
