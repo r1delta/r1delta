@@ -74,6 +74,7 @@
 #include "client_studio_header_guard.h"
 #include "client_weapon_info_guard.h"
 #include "client_brush_material_guard.h"
+#include "client_world_light_guard.h"
 #include "TableDestroyer.h"
 #include <DbgHelp.h>
 #include <string.h>
@@ -554,6 +555,16 @@ static r1delta::client_weapon_info::FirstSeenSet s_ClientWeaponInfoSeen;
 static r1delta::client_weapon_info::FallbackRecord s_ClientWeaponInfoFallback;
 static std::atomic<int> s_ClientWeaponInfoLogBudget{64};
 static std::atomic<unsigned> s_ClientWeaponInfoFallbackHits{0};
+static r1delta::client_world_light::LightForPointFunction
+	s_ClientLightForPointOriginal;
+static r1delta::client_world_light::MapUnloadModelFunction
+	s_ClientMapUnloadModelOriginal;
+static bool s_ClientWorldLightGuardInstalled;
+static bool s_ClientWorldUnloadProbeInstalled;
+static uintptr_t s_ClientWorldModelAddress;
+static uintptr_t s_ClientWorldBrushAddress;
+static std::atomic<int> s_ClientLightForPointGuardLogBudget{4};
+static std::atomic<int> s_ClientWorldUnloadProbeLogBudget{16};
 
 constexpr uintptr_t kR1OClientArrayRva = 0x2659738;
 constexpr size_t kR1OClientStride = 22387ull * sizeof(uintptr_t);
@@ -1792,6 +1803,151 @@ static int __fastcall ClientBrushMaterialCountGuard(const void* model)
 		OutputDebugStringA(buffer);
 	}
 	return 0;
+}
+
+static bool TakeClientWorldLightLogSlot(std::atomic<int>& budgetCounter)
+{
+	int budget = budgetCounter.load(std::memory_order_relaxed);
+	while (budget > 0
+		&& !budgetCounter.compare_exchange_weak(
+			budget,
+			budget - 1,
+			std::memory_order_relaxed)) {
+	}
+	return budget > 0;
+}
+
+static void ReadClientModelName(
+	const void* model,
+	char (&name)[r1delta::client_world_light::kModelNameLength + 1])
+{
+	name[0] = 0;
+	if (!model)
+		return;
+	__try {
+		memcpy(
+			name,
+			reinterpret_cast<const char*>(model)
+				+ r1delta::client_world_light::kModelNameOffset,
+			r1delta::client_world_light::kModelNameLength);
+		name[r1delta::client_world_light::kModelNameLength] = 0;
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) {
+		_snprintf_s(name, sizeof(name), _TRUNCATE, "<unreadable>");
+	}
+}
+
+// UNVERIFIED-PENDING. Engine light-at-point query (engine+0x1505E0). The stock function reads the
+// world light-probe table before its own "no world lights -> white" test, so it faults when the
+// shared world brush storage is zero (crash r1delta_crash_1793327115_17132, engine+0xAE4C2).
+// Return the same white the stock early-out and CParticleSystemQuery::GetLightingAtPoint use.
+static float* __fastcall ClientLightForPointGuard(
+	const float* origin,
+	std::int64_t pass,
+	std::uint8_t flag,
+	float scale,
+	const float* multiplier,
+	const float* overrideColor,
+	char byteFlag,
+	float* out)
+{
+	const void* brush = nullptr;
+	const void* worldModel = nullptr;
+	bool unavailable = false;
+	__try {
+		brush = *reinterpret_cast<const void* const*>(
+			s_ClientWorldBrushAddress);
+		unavailable =
+			r1delta::client_world_light::WorldLightProbesUnavailable(brush);
+		if (unavailable) {
+			worldModel = *reinterpret_cast<const void* const*>(
+				s_ClientWorldModelAddress);
+		}
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) {
+		unavailable = true;
+	}
+
+	if (!unavailable) {
+		return s_ClientLightForPointOriginal(
+			origin,
+			pass,
+			flag,
+			scale,
+			multiplier,
+			overrideColor,
+			byteFlag,
+			out);
+	}
+
+	if (TakeClientWorldLightLogSlot(s_ClientLightForPointGuardLogBudget)) {
+		char worldName[r1delta::client_world_light::kModelNameLength + 1];
+		ReadClientModelName(worldModel, worldName);
+		char buffer[384];
+		_snprintf_s(
+			buffer,
+			sizeof(buffer),
+			_TRUNCATE,
+			"R1Delta: client light-at-point with no world light probes: "
+			"brush=%p worldModel=%p '%s' out=%p returning white\n",
+			brush,
+			worldModel,
+			worldName,
+			out);
+		OutputDebugStringA(buffer);
+	}
+	return r1delta::client_world_light::WhiteLightFallback(out);
+}
+
+// Observation only: logs every world-model unload (engine+0xB9DE0) with the model being unloaded
+// and the current host_state.worldmodel. Unloading a model other than the current world wipes the
+// shared brush storage the current world is using.
+static std::int64_t __fastcall ClientMapUnloadModelProbe(
+	void* loader,
+	void* model)
+{
+	if (TakeClientWorldLightLogSlot(s_ClientWorldUnloadProbeLogBudget)) {
+		const void* worldModel = nullptr;
+		const void* brush = nullptr;
+		const void* probeTable = nullptr;
+		const void* worldLights = nullptr;
+		__try {
+			worldModel = *reinterpret_cast<const void* const*>(
+				s_ClientWorldModelAddress);
+			brush = *reinterpret_cast<const void* const*>(
+				s_ClientWorldBrushAddress);
+			if (brush) {
+				probeTable = r1delta::client_world_light::ReadField<const void*>(
+					brush,
+					r1delta::client_world_light::kBrushProbeTableOffset);
+				worldLights = r1delta::client_world_light::ReadField<const void*>(
+					brush,
+					r1delta::client_world_light::kBrushWorldLightsOffset);
+			}
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER) {
+		}
+		char modelName[r1delta::client_world_light::kModelNameLength + 1];
+		char worldName[r1delta::client_world_light::kModelNameLength + 1];
+		ReadClientModelName(model, modelName);
+		ReadClientModelName(worldModel, worldName);
+		char buffer[512];
+		_snprintf_s(
+			buffer,
+			sizeof(buffer),
+			_TRUNCATE,
+			"R1Delta: world brush unload: model=%p '%s' currentWorld=%p '%s' "
+			"sameModel=%d probeTable=%p worldLights=%p\n",
+			model,
+			modelName,
+			worldModel,
+			worldName,
+			model == worldModel ? 1 : 0,
+			probeTable,
+			worldLights);
+		OutputDebugStringA(buffer);
+	}
+	return s_ClientMapUnloadModelOriginal(loader, model);
 }
 
 static bool IsRvaInExecutableTextSection(
@@ -3231,6 +3387,123 @@ void InstallClientBrushMaterialCountGuard(
 		reinterpret_cast<void*>(s_ClientBrushMaterialCountOriginal),
 		s_ClientBrushMaterialCountGuardInstalled ? 1 : 0);
 	OutputDebugStringA(buffer);
+}
+
+static bool InstallClientWorldLightHook(
+	uintptr_t engineBase,
+	uintptr_t rva,
+	const std::uint8_t* expectedPrologue,
+	size_t expectedPrologueSize,
+	void* detour,
+	void** original,
+	const char* name)
+{
+	void* const target = reinterpret_cast<void*>(engineBase + rva);
+	if (!MaterialSystemDx11IsCommittedReadableRange(target, expectedPrologueSize)
+		|| memcmp(target, expectedPrologue, expectedPrologueSize) != 0) {
+		char buffer[192];
+		_snprintf_s(
+			buffer,
+			sizeof(buffer),
+			_TRUNCATE,
+			"R1Delta: client world-light %s refused byte mismatch at engine RVA 0x%llX\n",
+			name,
+			static_cast<unsigned long long>(rva));
+		OutputDebugStringA(buffer);
+		return false;
+	}
+
+	const MH_STATUS createStatus = MH_CreateHook(target, detour, original);
+	const bool hasOriginal = *original != nullptr;
+	const bool canEnable = createStatus == MH_OK
+		|| (createStatus == MH_ERROR_ALREADY_CREATED && hasOriginal);
+	const MH_STATUS enableStatus = canEnable
+		? MH_EnableHook(target)
+		: createStatus;
+	const bool installed = hasOriginal
+		&& (enableStatus == MH_OK || enableStatus == MH_ERROR_ENABLED);
+	if (!installed) {
+		if (createStatus == MH_OK)
+			MH_RemoveHook(target);
+		*original = nullptr;
+	}
+
+	char buffer[256];
+	_snprintf_s(
+		buffer,
+		sizeof(buffer),
+		_TRUNCATE,
+		"R1Delta: client world-light %s create=%d enable=%d targetRva=0x%llX "
+		"original=%p installed=%d\n",
+		name,
+		static_cast<int>(createStatus),
+		static_cast<int>(enableStatus),
+		static_cast<unsigned long long>(rva),
+		*original,
+		installed ? 1 : 0);
+	OutputDebugStringA(buffer);
+	return installed;
+}
+
+// Stock R1 client engine only (same gate as the brush-material guard). The two hooks install
+// independently: the light guard fixes the observed fault, the unload probe only logs.
+void InstallClientWorldLightGuard(
+	uintptr_t engineBase,
+	const wchar_t* modulePath)
+{
+	const bool isClient2015 =
+		GetR1DeltaEngineMode() == R1DeltaEngineMode::Client2015;
+	if (!isClient2015 || s_ClientWorldLightGuardInstalled)
+		return;
+
+	if (!r1delta::client_brush_material::ShouldInstall(
+			isClient2015,
+			modulePath)) {
+		OutputDebugStringA(
+			"R1Delta: client world-light guard refused non-stock engine module path\n");
+		return;
+	}
+
+	DWORD observedTimestamp = 0;
+	DWORD observedImageSize = 0;
+	if (!HasExpectedStockEngineImage(
+			engineBase,
+			&observedTimestamp,
+			&observedImageSize)) {
+		char buffer[256];
+		_snprintf_s(
+			buffer,
+			sizeof(buffer),
+			_TRUNCATE,
+			"R1Delta: client world-light guard refused engine image "
+			"timestamp=0x%08lX size=0x%08lX\n",
+			static_cast<unsigned long>(observedTimestamp),
+			static_cast<unsigned long>(observedImageSize));
+		OutputDebugStringA(buffer);
+		return;
+	}
+
+	s_ClientWorldModelAddress =
+		engineBase + r1delta::client_world_light::kWorldModelRva;
+	s_ClientWorldBrushAddress =
+		engineBase + r1delta::client_world_light::kWorldBrushRva;
+
+	s_ClientWorldLightGuardInstalled = InstallClientWorldLightHook(
+		engineBase,
+		r1delta::client_world_light::kLightForPointRva,
+		r1delta::client_world_light::kExpectedLightForPointPrologue,
+		sizeof(r1delta::client_world_light::kExpectedLightForPointPrologue),
+		reinterpret_cast<void*>(&ClientLightForPointGuard),
+		reinterpret_cast<void**>(&s_ClientLightForPointOriginal),
+		"light-for-point guard");
+	s_ClientWorldUnloadProbeInstalled = InstallClientWorldLightHook(
+		engineBase,
+		r1delta::client_world_light::kMapUnloadModelRva,
+		r1delta::client_world_light::kExpectedMapUnloadModelPrologue,
+		sizeof(r1delta::client_world_light::kExpectedMapUnloadModelPrologue),
+		reinterpret_cast<void*>(&ClientMapUnloadModelProbe),
+		reinterpret_cast<void**>(&s_ClientMapUnloadModelOriginal),
+		"world-unload probe");
 }
 
 

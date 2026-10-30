@@ -152,6 +152,9 @@
     <ClInclude Include="engine\core\client_brush_material_guard.h">
       <Filter>engine\core</Filter>
     </ClInclude>
+    <ClInclude Include="engine\core\client_world_light_guard.h">
+      <Filter>engine\core</Filter>
+    </ClInclude>
     <ClInclude Include="engine\core\datacache_header_ownership.h">
       <Filter>engine\core</Filter>
     </ClInclude>

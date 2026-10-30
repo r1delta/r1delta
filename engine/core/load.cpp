@@ -8490,6 +8490,9 @@ do_engine(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 	InstallClientBrushMaterialCountGuard(
 		engine_base,
 		engineFullPath.c_str());
+	InstallClientWorldLightGuard(
+		engine_base,
+		engineFullPath.c_str());
 	SetupReflexEngineHooks(engine_base);
 	if (!IsDedicatedServer())
 		InstallNoStaticPropsHook(engine_base);
