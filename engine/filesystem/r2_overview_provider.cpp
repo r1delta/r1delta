@@ -32,7 +32,7 @@ namespace {
 // world transform (pos_x, pos_y: world position of the image's top left corner, scale: world units per 1/1024 of the
 // image width, the same values R1's mp_angel_city file has) but names the image in an assets block ("minimap
 // overviews\<map>") instead of material/material_alt.
-enum class Kind { Txt, HudMaterial, FullscreenMaterial, ThumbnailMaterial, LoadScreenMaterial };
+enum class Kind { Txt, HudMaterial, FullscreenMaterial, LoadScreenMaterial };
 
 struct Request {
     Kind kind{};
@@ -42,8 +42,10 @@ struct Request {
 constexpr std::string_view kTxtPrefix = "resource/overviews/";
 constexpr std::string_view kHudPrefix = "materials/vgui/minimaps/";
 constexpr std::string_view kFullscreenPrefix = "materials/vgui/minimaps/fullscreen/";
-constexpr std::string_view kThumbnailPrefix = "materials/vgui/r2/maps/";
-constexpr std::string_view kThumbnailSuffix = ".vmt";
+// The loading screen picture as a UI image ("r2/loadscreens/<map>"): the provider path rules reject "..", so the UI image path
+// "../loadscreens/<map>_widescreen" (materials/vgui/../loadscreens/...) is never served for an R2 map.
+constexpr std::string_view kUiLoadScreenPrefix = "materials/vgui/r2/loadscreens/";
+constexpr std::string_view kUiLoadScreenSuffix = ".vmt";
 constexpr std::string_view kLoadScreenPrefix = "materials/loadscreens/";
 constexpr std::string_view kLoadScreenSuffix = "_widescreen.vmt";
 
@@ -72,10 +74,10 @@ std::optional<Request> ParseRequest(std::string_view path)
         prefix = kHudPrefix;
         extension = ".vmt";
     }
-    else if (path.compare(0, kThumbnailPrefix.size(), kThumbnailPrefix) == 0) {
-        kind = Kind::ThumbnailMaterial;
-        prefix = kThumbnailPrefix;
-        extension = kThumbnailSuffix;
+    else if (path.compare(0, kUiLoadScreenPrefix.size(), kUiLoadScreenPrefix) == 0) {
+        kind = Kind::LoadScreenMaterial;
+        prefix = kUiLoadScreenPrefix;
+        extension = kUiLoadScreenSuffix;
     }
     else if (path.compare(0, kLoadScreenPrefix.size(), kLoadScreenPrefix) == 0) {
         kind = Kind::LoadScreenMaterial;
@@ -171,23 +173,10 @@ std::string HudMaterialText(const std::string& map)
         "\t\"Proxies\"\r\n\t{\r\n\t\t\"MiniMap\"\r\n\t\t{\r\n\t\t\t\"resultVar\" \"$texture2transform\"\r\n\t\t}\r\n\t}\r\n}\r\n";
 }
 
-// The picture the map picker, the lobby and the server browser show for a map: the UI image "r2/maps/<map>" (materials/vgui/r2/maps/<map>.vmt;
-// the provider path rules reject "..", so R1's "../loadscreens/<map>_widescreen" cannot be used). It is the map's overview (minimap) image,
-// the R2 rpak texture "overviews\<map>" the R2 material provider already converts. The loading screen has its own material (LoadScreenMaterialText).
-std::string ThumbnailMaterialText(const std::string& map)
-{
-    return "\"Basic\"\r\n{\r\n"
-        "\t\"$vertexcolor\" \"1\"\r\n"
-        "\t\"$vertcoloristint\" \"1\"\r\n"
-        "\t\"$vertexalpha\" \"1\"\r\n"
-        "\t\"$ignorez\" \"1\"\r\n\r\n"
-        "\t\"$surfaceprop\" \"default\"\r\n"
-        "\t\"$basetexture\" \"overviews/" + map + "\"\r\n}\r\n";
-}
-
 // The loading screen picture R1 draws while a map loads (materials/loadscreens/<map>_widescreen, 1920x1080; stock R1 keeps the files in
-// mp_common). The R2 rpak texture "loadscreens\<map>_widescreen" (<map>_loadscreen*.rpak, the latest patch wins) is converted by the R2
-// material provider; the VMT is the one of the stock R1 loadscreens.
+// mp_common), also served as the UI image "r2/loadscreens/<map>" (materials/vgui/r2/loadscreens/<map>.vmt) that the map picker, the
+// lobby, the server browser and the end of game card show for an R2 map. The R2 rpak texture "loadscreens\<map>_widescreen"
+// (<map>_loadscreen*.rpak, the latest patch wins) is converted by the R2 material provider; the VMT is the one of the stock R1 loadscreens.
 std::string LoadScreenMaterialText(const std::string& map)
 {
     return "\"Basic\"\r\n{\r\n"
@@ -254,9 +243,6 @@ public:
         case Kind::FullscreenMaterial:
             text = HasOverviewData(request->map) ? FullscreenMaterialText(request->map) : std::string();
             break;
-        case Kind::ThumbnailMaterial:
-            text = HasOverviewData(request->map) ? ThumbnailMaterialText(request->map) : std::string();
-            break;
         case Kind::LoadScreenMaterial:
             text = HasLoadScreenPak(request->map) ? LoadScreenMaterialText(request->map) : std::string();
             break;
@@ -269,13 +255,9 @@ public:
             std::lock_guard<std::mutex> lock(m_mutex);
             m_files.emplace(path, data);
         }
-        if (request->kind == Kind::ThumbnailMaterial) {
-            // The texture is a known path of the R2 material provider from here on, and converted in the background: the
-            // map picker is shown in the lobby, before any R2 map has been loaded.
-            PrefetchR2UiTextures({ "materials/overviews/" + request->map + ".vtf" });
-        }
         if (request->kind == Kind::LoadScreenMaterial) {
-            // Same for the loading screen picture: R1 asks for the VMT first, the VTF conversion starts here.
+            // R1 asks for the VMT first (the loading screen, or the UI image in the map picker/lobby before any R2 map was
+            // loaded); the VTF is a known path of the R2 material provider from here on and converted in the background.
             PrefetchR2UiTextures({ "materials/loadscreens/" + request->map + "_widescreen.vtf" });
         }
         if (!m_logged.exchange(true, std::memory_order_relaxed)) {

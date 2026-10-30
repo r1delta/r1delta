@@ -528,9 +528,9 @@ index 60af79c..cb92dde 100644
 +	return ArrayContains( GetTitanfall2MapModes( mapName ), modeName )
 +}
 +
-+// The picture of a map for the map picker, the lobby and the server browser: the loading screen of the map. The converted
-+// Titanfall 2 maps use the overview image of the map, served by the game from the Titanfall 2 install (materials/vgui/r2/maps),
-+// so a player without it gets the default lobby background instead (UI only).
++// The picture of a map for the map picker, the lobby, the server browser and the end of game card: the loading screen of the map. The
++// converted Titanfall 2 maps use the UI image "r2/loadscreens/<map>" (the loading screen, served by the game from the Titanfall 2 install:
++// materials/vgui/r2/loadscreens; "../loadscreens/<map>_widescreen" is not served for them), a player without it gets the default lobby background (UI only).
 +function GetMapImage( mapName )
 +{
 +	if ( IsTitanfall2Map( mapName ) )
@@ -538,7 +538,7 @@ index 60af79c..cb92dde 100644
 +		if ( IsUI() && !LocalPlayerOwnsDLCMapGroup( R2_MAP_DLC_GROUP ) )
 +			return GetDefaultLobbyBackground()
 +
-+		return "r2/maps/" + mapName
++		return "r2/loadscreens/" + mapName
 +	}
 +
 +	return "../loadscreens/" + mapName + "_widescreen"
