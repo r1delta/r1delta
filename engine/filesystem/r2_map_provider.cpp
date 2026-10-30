@@ -2080,6 +2080,33 @@ bool RemoveStaleGeneratedSoundScript()
     return !std::filesystem::exists(gameDirectory / "scripts" / "r2port_sounds.txt", error);
 }
 
+// True when `file` holds exactly `data`.
+bool FileEqualsMemory(const std::filesystem::path& file, const std::vector<uint8_t>& data)
+{
+    std::error_code error;
+    const uintmax_t size = std::filesystem::file_size(file, error);
+    if (error || size != data.size())
+        return false;
+    std::ifstream input(file, std::ios::binary);
+    if (!input)
+        return false;
+    constexpr size_t kChunk = 4u << 20;
+    std::vector<char> buffer(std::min<size_t>(kChunk, std::max<size_t>(data.size(), 1)));
+    size_t offset = 0;
+    while (offset < data.size()) {
+        const size_t count = std::min(buffer.size(), data.size() - offset);
+        if (!input.read(buffer.data(), static_cast<std::streamsize>(count)))
+            return false;
+        if (std::memcmp(buffer.data(), data.data() + offset, count) != 0)
+            return false;
+        offset += count;
+    }
+    return true;
+}
+
+// The provider buffers behind the map files this process already compared with, or wrote to, r2port_cache (destination -> buffer).
+std::mutex g_materializedMutex;
+std::unordered_map<std::string, std::weak_ptr<const std::vector<uint8_t>>> g_materialized;
 std::filesystem::path MaterializeMapCacheFile(std::string_view path)
 {
     const auto normalized = NormalizeProviderPath(path);
@@ -2127,6 +2154,27 @@ std::filesystem::path MaterializeMapCacheFile(std::string_view path)
     if (error)
         return {};
 
+    // The engine reads this file back from disk. When an earlier load or session left the very same bytes in place, neither rewrite nor
+    // replace it (about 130 MB of writes per load of a map such as mp_glitch, a second or more on a hard disk): reading it back to compare is
+    // cheaper than writing it, and a damaged or stale copy simply differs and is rewritten below. The engine asks for a map file several
+    // times per load; within one process the copy checked (or written) for the very same provider buffer is not compared again.
+    {
+        R2P_SCOPE_L("m.materialize.compare", state->mapName);
+        {
+            std::lock_guard<std::mutex> lock(g_materializedMutex);
+            const auto known = g_materialized.find(destination.string());
+            if (known != g_materialized.end() && known->second.lock() == data && std::filesystem::file_size(destination, error) == data->size())
+                return root;
+        }
+        error.clear();
+        if (FileEqualsMemory(destination, *data)) {
+            cache::TouchIfOld(destination);
+            std::lock_guard<std::mutex> lock(g_materializedMutex);
+            g_materialized[destination.string()] = data;
+            return root;
+        }
+    }
+    R2P_SCOPE_L("m.materialize.write", state->mapName);
     const std::filesystem::path temporary = destination.string()
         + ".tmp." + std::to_string(GetCurrentThreadId());
     {
@@ -2148,6 +2196,10 @@ std::filesystem::path MaterializeMapCacheFile(std::string_view path)
     if (error) {
         std::filesystem::remove(temporary, error);
         return {};
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_materializedMutex);
+        g_materialized[destination.string()] = data;
     }
     return root;
 }
