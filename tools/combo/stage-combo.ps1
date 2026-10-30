@@ -393,6 +393,25 @@ if (Test-Path -LiteralPath $lmPatch) {
     if (-not $lmDone) { GitC $Core @('apply', '--ignore-whitespace', '--whitespace=nowarn', $lmPatch) | Out-Null; Say 'applied lobbymaps-core.patch' }
     foreach ($f in Get-ChildItem -LiteralPath (Join-Path $lm 'resource') -Filter 'delta_*.txt') { [ComboNative]::Replace($f.FullName, (Join-Path $Core ('resource\' + $f.Name))) }
     Say 'LobbyMaps localization files staged'
+    # Playtest: no converted R2 map in CTF (playlist side; the picker/vote/server guard side is GetTitanfall2MapModes without "ctf" in the patch).
+    # The R2 entries LobbyMaps appended to the "ctf" playlist are map24.. / gamemode24.. of its maps block: drop them (idempotent).
+    $plf = Join-Path $Core 'playlists.txt'
+    $plt = [IO.File]::ReadAllText($plf)
+    $mc = [regex]::Match($plt, '(?m)^"ctf"[ \t]*\r?$')
+    if (-not $mc.Success) { throw 'playlists.txt has no ctf playlist' }
+    $mn = [regex]::Match($plt.Substring($mc.Index + $mc.Length), '(?m)^"(?!vars"|maps"|ctf")\w+"[ \t]*\r?$')
+    $blockEnd = if ($mn.Success) { $mc.Index + $mc.Length + $mn.Index } else { $plt.Length }
+    $block = $plt.Substring($mc.Index, $blockEnd - $mc.Index)
+    $block2 = [regex]::Replace($block, '(?m)^"(?:map|gamemode)(\d+)"\t"[^"\r\n]*"[ \t]*\r?\n', { param($x) if ([int]$x.Groups[1].Value -ge 24) { '' } else { $x.Value } })
+    if ($block2 -ne $block) {
+        $tmpP = Join-Path $env:TEMP ('combo-pl-' + [Guid]::NewGuid().ToString('N') + '.txt')
+        [IO.File]::WriteAllText($tmpP, $plt.Substring(0, $mc.Index) + $block2 + $plt.Substring($blockEnd), [Text.UTF8Encoding]::new($false))
+        [ComboNative]::Replace($tmpP, $plf); Remove-Item $tmpP
+    }
+    $left = @([regex]::Matches($block2, '(?m)^"(?:map|gamemode)(\d+)"') | Where-Object { [int]$_.Groups[1].Value -ge 24 }).Count
+    if ($left -ne 0) { throw "ctf playlist still has $left entries >= 24" }
+    $nrem = @([regex]::Matches($block, '(?m)^"(?:map|gamemode)(\d+)"') | Where-Object { [int]$_.Groups[1].Value -ge 24 }).Count
+    Say "ctf playlist: removed $nrem R2 entries"
 }
 # ---- MinimapZoom CORE (fullscreen map window for the converted R2 maps; script-only), applied once (reverse check).
 $mzPatch = Join-Path $CodeRoot 'tools\combo\minimapzoom\core-minimap.patch'

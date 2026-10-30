@@ -507,16 +507,16 @@ index 60af79c..cb92dde 100644
 +
 +		case "mp_lf_stacks":
 +		case "mp_lf_traffic":
-+			return [ "cp", "ctf", "ps", "mfd", "mfdp" ]
++			return [ "cp", "ps", "mfd", "mfdp" ]
 +
 +		case "mp_lf_deck":
 +		case "mp_lf_meadow":
 +		case "mp_lf_township":
 +		case "mp_lf_uma":
-+			return [ "cp", "ctf", "ps", "mfd", "mfdp", "coop" ]
++			return [ "cp", "ps", "mfd", "mfdp", "coop" ]
 +	}
 +
-+	return [ "at", "cp", "ctf", "lts", "tdm", "mfd", "mfdp", "ps", "ttdm", "ffa", "coop" ]
++	return [ "at", "cp", "lts", "tdm", "mfd", "mfdp", "ps", "ttdm", "ffa", "coop" ]
 +}
 +
 +// false for a Titanfall 2 map that does not have the given ePrivateMatchModes name; true for every other map
