@@ -243,9 +243,13 @@ $manifest = Get-Content -LiteralPath (Join-Path $Handover 'slide-assets-manifest
 $na = 0
 foreach ($a in $manifest.files) {
     $rel = $a.path.Replace('/', '\')
-    # Playtest: the 36 replacement pilot models (models/humans/**: br/cq/dm variants) are NOT staged (CQB etc. rendered the pilot invisible);
-    # only models/anim/pilot_slide*.mdl stay. -Refresh restores the stock model files below.
-    if ($rel -like 'models\humans\*') { continue }
+    # Playtest: NO slide model asset is staged (the 36 replacement pilot models of models/humans/** and models/anim/pilot_slide*.mdl): the native slide
+    # pose retarget is off in this build (client/slide_model_presentation.cpp, env R1DELTA_SLIDE_MODEL_PRESENTATION=1 re-enables it).
+    # -Refresh restores the stock model files; the two new pilot_slide models of an earlier staging are deleted below.
+    if ($rel -like 'models\*') {
+        if ($rel -like 'models\anim\pilot_slide*') { Remove-Item -LiteralPath (Join-Path $Core $rel) -Force -ErrorAction SilentlyContinue }
+        continue
+    }
     $src = Join-Path $AssetStage $rel
     if ((Sha $src) -ne $a.sha256) { throw "asset hash mismatch $src" }
     $dst = Join-Path $Core $rel

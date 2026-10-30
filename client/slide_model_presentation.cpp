@@ -3112,6 +3112,16 @@ void ResetState() noexcept
 bool InstallState(State& state, std::uintptr_t module) noexcept
 {
     if (!module) return false;
+    // Playtest build: the native slide pose retarget is OFF (it keys on the internal model names of the 9 pilot roots, including every *_cq,
+    // and writes an assumed expanded 223/228 bone rig into the stock skeleton: the CQB pilot rendered invisible). No hook is installed and the
+    // state never becomes ready, so SupportsPlayer/SupportsServerPlayer are false and the activity override is never applied.
+    // R1DELTA_SLIDE_MODEL_PRESENTATION=1 restores the previous behaviour.
+    {
+        char flag[8] = {};
+        const DWORD flagLength = GetEnvironmentVariableA("R1DELTA_SLIDE_MODEL_PRESENTATION", flag, sizeof(flag));
+        if (flagLength != 1 || flag[0] != '1')
+            return true;
+    }
     StateScope active(state);
     try
     {
