@@ -404,7 +404,12 @@ public:
             const int seek = ov_pcm_seek(&vorbis, static_cast<ogg_int64_t>(first));
             if (seek) throw AudioError("Vorbis seek failed: " + std::to_string(seek));
             std::size_t done = 0;
-            static constexpr unsigned order[6] = {0, 2, 1, 5, 3, 4};
+            // The R1Delta content set stores its six channel Ogg files in WAVE order (FL FR FC LFE BL BR): of the 436 six
+            // channel Oggs in the shipped delta VPK, 421 have symmetric FL/FR and BL/BR levels in that order, 5 are
+            // ambiguous and none is clearly Vorbis I order (FL FC FR BL BR LFE). The encoder wrote no channel mask. Interleave
+            // the planes as they come: remapping them as Vorbis I order put the front right signal in the centre slot and the
+            // LFE in the rear left slot, which played every 6 channel sound with a wrong stereo balance (40mm, shoulder
+            // rockets, titan embark, ...).
             while (done < count) {
                 float** planes = nullptr;
                 int section = 0;
@@ -412,7 +417,7 @@ public:
                 if (got <= 0) throw AudioError("Vorbis decode failed before declared EOF: " + std::to_string(got));
                 for (long frame = 0; frame < got; ++frame)
                     for (unsigned channel = 0; channel < info.channels; ++channel)
-                        output[(done + frame) * info.channels + channel] = planes[info.channels == 6 ? order[channel] : channel][frame];
+                        output[(done + frame) * info.channels + channel] = planes[channel][frame];
                 done += got;
             }
         } else {
