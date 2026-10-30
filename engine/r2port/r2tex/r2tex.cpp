@@ -3435,19 +3435,19 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
             "}\n";
         return true;
     }
-    // models/water/waterfall_badlands_02_volume (the "volume" hull of the R2 waterfall props: mp_thaw thaw_waterfall_01_nocol, mp_crashsite3
-    // mp_crashsite_waterfall_02; the only model materials with this shader set): a 376 vertex hull around the falling sheet whose vertex alpha is 0 on
-    // 224 of the vertices and at most 85/255 elsewhere (VVC dump of thaw_waterfall_01_nocol, mean 18), over an albedo that is flat grey (RGB 66..184, mean
-    // alpha 0.89). R2 draws it premultiplied (ONE / INV_SRC_ALPHA, no depth write, back cull) with the alpha edge and alpha distance fades (shader set
-    // tokens Aef and Adf: Vcolt Vcola Adf Aef Trans), so it is a faint mist glow. R1 has neither fade, and the model path does not reproduce the vertex
-    // alpha gradient (the PropVertexAlpha study could not make a static prop honour the VVC alpha in game), so the hull draws as several overlapping
-    // uniformly tinted translucent facets with hard polygon edges: the large lavender-white wedge across the mp_thaw waterfall (user frame
-    // Titanfall_epRSmhjNP0, eye -1791 3332 -390, ang -11.6 174.1). The falling sheet itself is the other material of the model
-    // (waterfall_badlands_rapid_03: its own opacity map, scroll, $nocull), which is kept. The volume is therefore emitted as the invisible
+    // R2 waterfall fx hulls: models/water/waterfall_badlands_01_slow (mp_thaw thaw_river_mist_nocol, the only user) and
+    // models/water/waterfall_badlands_02_volume (mp_thaw thaw_waterfall_01_nocol hull mesh, mp_crashsite3 mp_crashsite_waterfall_02). Both are fx
+    // sheets that R2 fades with the shader tokens Adf (alpha distance fade) and Aef (alpha edge fade) over a vertex alpha that is 0 or low on most
+    // vertices (volume: 0 on 224 of 376, max 85/255; mist: 0 or 255 on 87 vertices): in R2 they read as a faint mist. R1 has neither fade and its
+    // static prop path did not reproduce the vertex alpha gradient (PropVertexAlpha), so they draw as big uniformly tinted translucent / additive
+    // facets with hard polygon edges: the lavender-white wedge across the mp_thaw waterfall (user frame Titanfall_epRSmhjNP0, eye -1791 3332 -390,
+    // ang -11.6 174.1). Bisected in game on the integrated build (pre-edited cached VMTs, same pose): hiding the mist material alone removes the slab
+    // and reveals the real falling water (waterfall_badlands_rapid_03, kept: its own opacity map, scroll, $nocull); hiding the sheet, the river
+    // plane or the godray cards alone changes nothing; the volume hull only adds a pink blow-out haze. Both are therefore emitted as the invisible
     // additive black material of kodai_fake_screen_alpha, which does not depend on how R1 plumbs vertex alpha, $alpha or the lit-prop shader.
-    // R2TEX_WATER_VOLUME=1 keeps the converted VertexLitGeneric volume (the opt-in is not part of the converted cache tag: wipe the converted
-    // cache when switching).
-    if (name == "models/water/waterfall_badlands_02_volume" &&
+    // R2TEX_WATER_VOLUME=1 keeps the converted materials (the opt-in is not part of the converted cache tag: wipe the converted cache when
+    // switching).
+    if ((name == "models/water/waterfall_badlands_02_volume" || name == "models/water/waterfall_badlands_01_slow") &&
         !(std::getenv("R2TEX_WATER_VOLUME") && std::atoi(std::getenv("R2TEX_WATER_VOLUME")) != 0)) {
         material = Material{};
         material.name = name;
