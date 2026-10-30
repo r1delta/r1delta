@@ -751,8 +751,10 @@ void StoreConvertedBspCache(const std::shared_ptr<MapState>& state, const BspSha
     try {
         std::error_code error;
         std::filesystem::create_directories(file.parent_path(), error);
-        if (error)
+        if (error) {
+            cache::NoteWriteResult(false);
             return;
+        }
         BspCacheHeader header{};
         std::vector<uint8_t> packed;
         const bool isPacked = cache::Pack(converted.data(), converted.size(), packed);
@@ -762,26 +764,32 @@ void StoreConvertedBspCache(const std::shared_ptr<MapState>& state, const BspSha
         header.convertedSize = converted.size();
         std::memcpy(header.sourceSha256, sourceHash.data(), sizeof(header.sourceSha256));
 
+        const std::vector<uint8_t>& payload = isPacked ? packed : converted;
+        const uint64_t fileBytes = sizeof(header) + payload.size();
+        if (!cache::ReserveWrite(fileBytes))
+            return;
         std::filesystem::path temporary = file;
         temporary += ".tmp" + std::to_string(GetCurrentProcessId()) + "." + std::to_string(GetCurrentThreadId());
+        bool written = false;
         {
             std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
-            if (!output)
-                return;
-            output.write(reinterpret_cast<const char*>(&header), sizeof(header));
-            const std::vector<uint8_t>& payload = isPacked ? packed : converted;
-            output.write(reinterpret_cast<const char*>(payload.data()), static_cast<std::streamsize>(payload.size()));
-            output.close();
-            if (!output) {
-                std::filesystem::remove(temporary, error);
-                return;
+            if (output) {
+                output.write(reinterpret_cast<const char*>(&header), sizeof(header));
+                output.write(reinterpret_cast<const char*>(payload.data()), static_cast<std::streamsize>(payload.size()));
+                output.close();
+                written = static_cast<bool>(output);
             }
         }
-        if (!MoveFileExW(temporary.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+        if (written)
+            written = MoveFileExW(temporary.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING) != 0;
+        if (!written) {
             std::filesystem::remove(temporary, error);
-            return;
+            cache::ReleaseWrite(fileBytes);
         }
-        state->bspCacheStatus = "stored";
+        cache::NoteWriteResult(written);
+        if (!written)
+            return;
+        // (The map is served from `converted`, not from the file: the status stays "miss" when the store runs on a background thread.)
 
         // Fingerprints of older VPKs / converter versions are never read again.
         const std::string prefix = state->mapName + "-";
@@ -797,6 +805,26 @@ void StoreConvertedBspCache(const std::shared_ptr<MapState>& state, const BspSha
                 std::filesystem::remove(entry.path(), removeError);
             }
         }
+    }
+    catch (...) {
+    }
+}
+
+// Stores a copy of the converted BSP on a background thread: compressing and writing 130 MB must not delay the engine thread (the copy takes
+// about 30 ms). A process that exits first leaves a ".tmp" file that the next maintenance pass deletes.
+void QueueConvertedBspCacheStore(const std::shared_ptr<MapState>& state, const BspSha256& sourceHash,
+    const std::vector<uint8_t>& converted)
+{
+    if (ConvertedBspCacheFile(state).empty() || cache::Budget().stopped.load(std::memory_order_relaxed))
+        return;
+    auto copy = std::make_shared<std::vector<uint8_t>>(converted);
+    try {
+        std::thread([state, sourceHash, copy]() {
+            SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+            R2P_SCOPE_B(profileStore, "bsp.cache.store", state->mapName);
+            profileStore.SetBytes(copy->size());
+            StoreConvertedBspCache(state, sourceHash, *copy);
+        }).detach();
     }
     catch (...) {
     }
@@ -1553,9 +1581,9 @@ FileBytes ReadConvertedBsp(const MapRequest& request)
                     profileDown.SetBytes(converted.size());
                 }
                 {
-                    R2P_SCOPE_B(profileStore, "bsp.cache.store", state->mapName);
+                    R2P_SCOPE_B(profileStore, "bsp.cache.copy", state->mapName);
                     profileStore.SetBytes(converted.size());
-                    StoreConvertedBspCache(state, sourceHash, converted);
+                    QueueConvertedBspCacheStore(state, sourceHash, converted);
                 }
                 {
                     R2P_SCOPE_L("bsp.entities", state->mapName);
@@ -1631,6 +1659,7 @@ FileBytes ReadConvertedBsp(const MapRequest& request)
         LogServedMap(state, result->size(), conversionMs);
         char hashFlag[8]{};
         if (GetEnvironmentVariableA("R2PORT_LOG_HASHES", hashFlag, sizeof(hashFlag)) && hashFlag[0] != '0') {
+            cache::LogFileHash(GetR2MapPatchDirectory() / "profile", "maps/" + state->mapName + ".bsp", result->data(), result->size());
             const BspSha256 digest = Sha256Fast(result->data(), result->size());
             char text[160]{};
             int length = _snprintf_s(text, sizeof(text), _TRUNCATE, "R1Delta: R2 map provider served-hash map=%s sha256=", state->mapName.c_str());
@@ -1915,6 +1944,8 @@ std::string MapPackageFingerprint(const std::shared_ptr<MapState>& state)
     metadata.append(std::to_string(trigger_brush::kBakeVersion));
     metadata.append("\nconverted-bsp|");
     metadata.append(std::to_string(kConvertedBspCacheVersion));
+    metadata.append("\nbuild|");
+    metadata.append(cache::BuildKey());
     metadata.push_back('\n');
     metadata.append("bspdown-variant|");
     metadata.append(R2ConverterVariantString());

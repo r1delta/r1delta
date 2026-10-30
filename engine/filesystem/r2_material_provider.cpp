@@ -718,7 +718,7 @@ private:
                 if (!cacheDirectory.empty()) {
                     // r2tex::EnvCacheTag(): "" for the defaults, "-env1-<tokens>" while R2TEX_ENV is set (A/B runs never reuse each other's conversions).
                     if (cache::DiskCacheEnabled())
-                        m_convertedRoot = cacheDirectory / "converted" / (std::string(kConvertedCacheRevision) + r2tex::EnvCacheTag());
+                        m_convertedRoot = cacheDirectory / "converted" / (std::string(kConvertedCacheRevision) + "." + cache::BuildKey() + r2tex::EnvCacheTag());
                     if (!m_convertedRoot.empty()) {
                         m_convertedRoot += r2tex::UberPackCacheTag();   // R2_UBER=...pack: converted VMT/VTF set with AO/cavity carriers
                         if (Bc7PassthroughRequested())
@@ -1015,14 +1015,14 @@ private:
             std::vector<std::uint8_t> bytes;
             if (!ReadWholeFile(file, bytes) || bytes.empty())
                 return {};
-            if (!cache::Unpack(bytes) || bytes.empty())
+            if (!cache::UnpackStrict(bytes) || bytes.empty())
                 return {};
             cache::TouchIfOld(file);
             if (item.materialFile) {
                 std::filesystem::path dependencyFile = file;
                 dependencyFile += ".deps";
                 std::vector<std::uint8_t> dependencyBytes;
-                if (!ReadWholeFile(dependencyFile, dependencyBytes))
+                if (!ReadWholeFile(dependencyFile, dependencyBytes) || !cache::UnpackStrict(dependencyBytes))
                     return {};
                 std::size_t begin = 0;
                 while (begin < dependencyBytes.size()) {
@@ -1046,38 +1046,129 @@ private:
         }
     }
 
+    // Hands a converted file to the cache writer threads (see m_storeThreads). When the queue is full (the writers are starved while every
+    // core converts) the calling conversion worker stores the file itself: that bounds the memory the queue pins and no file is skipped.
+    void QueueStore(const WorkItem& item, const FileBytes& data, const std::vector<std::string>& dependencies)
+    {
+        if (m_convertedRoot.empty() || !data || cache::Budget().stopped.load(std::memory_order_relaxed))
+            return;
+        {
+            std::lock_guard<std::mutex> lock(m_storeMutex);
+            if (m_storeStop)
+                return;
+            if (m_storeQueuedBytes + data->size() <= kMaximumQueuedStoreBytes) {
+                if (m_storeThreads.empty()) {
+                    const unsigned int writers = std::thread::hardware_concurrency() >= 8 ? 2u : 1u;
+                    try {
+                        for (unsigned int i = 0; i < writers; ++i)
+                            m_storeThreads.emplace_back([this]() { StoreLoop(); });
+                    }
+                    catch (...) {
+                    }
+                }
+                if (!m_storeThreads.empty()) {
+                    m_storeQueue.push_back(StoreJob{ item.path, item.materialFile, data, dependencies });
+                    m_storeQueuedBytes += data->size();
+                    m_storeCv.notify_one();
+                    return;
+                }
+            }
+        }
+        m_storeInline.fetch_add(1, std::memory_order_relaxed);
+        R2P_SCOPE_B(profileStore, "wt.disk.store.inline", item.path);
+        profileStore.SetBytes(StoreConvertedFile(item.path, item.materialFile, data, dependencies));
+    }
+
+    void StoreLoop()
+    {
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+        r2port::prof::SetThreadRole("cache-writer");
+        for (;;) {
+            StoreJob job;
+            {
+                std::unique_lock<std::mutex> lock(m_storeMutex);
+                m_storeCv.wait(lock, [this]() { return m_storeStop || !m_storeQueue.empty(); });
+                if (m_storeStop)
+                    return;
+                job = std::move(m_storeQueue.front());
+                m_storeQueue.pop_front();
+            }
+            {
+                R2P_SCOPE_B(profileStore, "wt.disk.store", job.path);
+                profileStore.SetBytes(StoreConvertedFile(job.path, job.materialFile, job.data, job.dependencies));
+            }
+            std::lock_guard<std::mutex> lock(m_storeMutex);
+            m_storeQueuedBytes -= job.data->size();
+        }
+    }
+
     // Returns the bytes written to disk (the packed size for a compressed VTF, the VMT plus its dependency list otherwise).
     std::uint64_t StoreConvertedFile(
-        const WorkItem& item, const FileBytes& data, const std::vector<std::string>& dependencies)
+        const std::string& path, bool materialFile, const FileBytes& data, const std::vector<std::string>& dependencies)
     {
-        const std::filesystem::path file = ConvertedFilePath(item.path);
+        const std::filesystem::path file = ConvertedFilePath(path);
         if (file.empty() || !data || data->empty())
             return 0;
         std::uint64_t written = 0;
         try {
+            if (cache::Budget().stopped.load(std::memory_order_relaxed))
+                return 0;
             std::error_code error;
             std::filesystem::create_directories(file.parent_path(), error);
-            if (error)
+            if (error) {
+                if (cache::NoteWriteResult(false))
+                    LogR2TextureMessage("R1Delta: R2 disk cache writes keep failing (read-only or full directory): converted files are no longer stored this session\n");
                 return 0;
-            if (item.materialFile) {
-                std::string dependencyText;
+            }
+            // Every file is written as a checksummed container (r2_cache_store.h), also the tiny ones: a file damaged by a crash or a bad
+            // sector fails the checksum and is converted again instead of being served (a damaged .deps would drop a material's textures).
+            // The write budget refuses the whole item (VMT, .deps and VTF are only useful together) when the cache is full or unwritable.
+            std::vector<std::uint8_t> packed;
+            const bool isPacked = cache::Pack(data->data(), data->size(), packed, 0, true);
+            const std::uint8_t* bytes = isPacked ? packed.data() : data->data();
+            const std::size_t size = isPacked ? packed.size() : data->size();
+            std::string dependencyText;
+            std::vector<std::uint8_t> packedDependencies;
+            bool dependenciesPacked = false;
+            if (materialFile) {
                 for (const std::string& dependency : dependencies) {
                     dependencyText.append(dependency);
                     dependencyText.push_back('\n');
                 }
+                if (dependencyText.empty())
+                    dependencyText.push_back('\n');   // an empty list is a one byte file: the container has no empty form
+                dependenciesPacked = cache::Pack(reinterpret_cast<const std::uint8_t*>(dependencyText.data()), dependencyText.size(),
+                    packedDependencies, 0, true);
+            }
+            const std::size_t dependencySize = dependenciesPacked ? packedDependencies.size() : dependencyText.size();
+            if (!cache::ReserveWrite(size + dependencySize)) {
+                if (cache::TakeCapNotice())
+                    LogR2TextureMessage("R1Delta: R2 disk cache is full or its directory is not writable: converted files are no longer stored this session (R2PORT_CACHE_MAX_MB raises the cap)\n");
+                return 0;
+            }
+            if (materialFile) {
                 std::filesystem::path dependencyFile = file;
                 dependencyFile += ".deps";
-                if (!WriteFileAtomic(dependencyFile, dependencyText.data(), dependencyText.size()))
+                const bool wroteDependencies = WriteFileAtomic(dependencyFile,
+                    dependenciesPacked ? static_cast<const void*>(packedDependencies.data()) : static_cast<const void*>(dependencyText.data()),
+                    dependencySize);
+                if (!wroteDependencies) {
+                    cache::ReleaseWrite(size + dependencySize);
+                    if (cache::NoteWriteResult(false))
+                        LogR2TextureMessage("R1Delta: R2 disk cache writes keep failing (read-only or full directory): converted files are no longer stored this session\n");
                     return 0;
-                written += dependencyText.size();
+                }
+                written += dependencySize;
             }
-            std::vector<std::uint8_t> packed;
-            const bool isPacked = !item.materialFile && cache::Pack(data->data(), data->size(), packed);
-            const std::uint8_t* bytes = isPacked ? packed.data() : data->data();
-            const std::size_t size = isPacked ? packed.size() : data->size();
             if (WriteFileAtomic(file, bytes, size)) {
+                cache::NoteWriteResult(true);
                 m_diskStoreCount.fetch_add(1, std::memory_order_relaxed);
                 written += size;
+            }
+            else {
+                cache::ReleaseWrite(size);
+                if (cache::NoteWriteResult(false))
+                    LogR2TextureMessage("R1Delta: R2 disk cache writes keep failing (read-only or full directory): converted files are no longer stored this session\n");
             }
         }
         catch (...) {
@@ -1089,9 +1180,9 @@ private:
     void StartCacheMaintenance(const std::filesystem::path& cacheDirectory)
     {
         static std::atomic<bool> started{ false };
-        // DELETES cache directories: opt-in until the owner agrees (R2PORT_CACHE_PRUNE=1). Compression is independent of this switch.
+        // Deletes stale cache directories and evicts over the cap. R2PORT_CACHE_PRUNE=0 turns the pass off (the write budget then stays unlimited).
         char pruneFlag[8]{};
-        if (GetEnvironmentVariableA("R2PORT_CACHE_PRUNE", pruneFlag, sizeof(pruneFlag)) == 0 || pruneFlag[0] == '0')
+        if (GetEnvironmentVariableA("R2PORT_CACHE_PRUNE", pruneFlag, sizeof(pruneFlag)) > 0 && pruneFlag[0] == '0')
             return;
         if (started.exchange(true) || m_convertedRoot.empty())
             return;
@@ -1274,26 +1365,7 @@ private:
     // compare two runs or two builds byte for byte.
     static void LogServedFileHash(const std::string& path, const std::vector<std::uint8_t>& bytes)
     {
-        static const bool enabled = []() {
-            char flag[8]{};
-            return GetEnvironmentVariableA("R2PORT_LOG_HASHES", flag, sizeof(flag)) > 0 && flag[0] != '0';
-        }();
-        if (!enabled)
-            return;
-        std::uint64_t hash = 14695981039346656037ull;
-        for (const std::uint8_t byte : bytes) {
-            hash ^= byte;
-            hash *= 1099511628211ull;
-        }
-        static std::mutex mutex;
-        std::lock_guard<std::mutex> lock(mutex);
-        const std::filesystem::path directory = GetR2MapPatchDirectory() / "profile";
-        std::error_code error;
-        std::filesystem::create_directories(directory, error);
-        if (FILE* file = _wfopen((directory / L"filehashes.txt").c_str(), L"ab")) {
-            std::fprintf(file, "%s %016llx %zu\n", path.c_str(), static_cast<unsigned long long>(hash), bytes.size());
-            std::fclose(file);
-        }
+        cache::LogFileHash(GetR2MapPatchDirectory() / "profile", path, bytes.data(), bytes.size());
     }
 
     // A worker is done with `item` (m_cacheMutex held): the family it was loading is no longer claimed.
@@ -1389,7 +1461,7 @@ private:
                 }
             }
 
-            if (data && !fromDisk)
+            if (data)   // converted now or read back from the disk cache: the same bytes either way (R2PORT_LOG_HASHES compares runs)
                 LogServedFileHash(item.path, *data);
             // Register the VMT's textures as known before its reader resumes: R1 opens them
             // as soon as the VMT parses, and an unknown path is a cached miss. They sort behind
@@ -1423,10 +1495,8 @@ private:
                 r2tex::UnpinFamily(item.family);
             if (!data)
                 RemoveKnownPath(item.path);
-            if (data && !fromDisk && !lowResolution) {
-                R2P_SCOPE_B(profileStore, "wt.disk.store", item.path);
-                profileStore.SetBytes(StoreConvertedFile(item, data, dependencies));
-            }
+            if (data && !fromDisk && !lowResolution)
+                QueueStore(item, data, dependencies);
 
             if (data) {
                 std::atomic<bool>& logged = item.materialFile ? m_loggedMaterial : m_loggedTexture;
@@ -1564,6 +1634,15 @@ private:
             if (worker.joinable())
                 worker.join();
         }
+        {
+            std::lock_guard<std::mutex> lock(m_storeMutex);
+            m_storeStop = true;   // the queued writes are dropped: a ".tmp" file left behind is deleted by the next maintenance pass
+        }
+        m_storeCv.notify_all();
+        for (std::thread& writer : m_storeThreads) {
+            if (writer.joinable())
+                writer.join();
+        }
     }
 
     std::atomic<bool> m_activated{};
@@ -1590,6 +1669,23 @@ private:
     std::size_t m_unconsumedBytes{};
     std::size_t m_activeWork{};
     bool m_stopping{};
+    // Disk cache writers: one or two below-normal priority threads compress and write what the conversion workers produced, so storing a
+    // converted file normally does not take a worker away from converting (on a 4 core machine 2 workers would otherwise spend a quarter of
+    // their time in zstd). The queue pins at most kMaximumQueuedStoreBytes of converted data; beyond that the worker stores inline.
+    static constexpr std::size_t kMaximumQueuedStoreBytes = 640u << 20;
+    struct StoreJob {
+        std::string path;
+        bool materialFile{};
+        FileBytes data;
+        std::vector<std::string> dependencies;
+    };
+    std::mutex m_storeMutex;
+    std::condition_variable m_storeCv;
+    std::deque<StoreJob> m_storeQueue;
+    std::size_t m_storeQueuedBytes{};
+    bool m_storeStop{};
+    std::vector<std::thread> m_storeThreads;
+    std::atomic<std::uint64_t> m_storeInline{};
     std::mutex m_metricsMutex;
     std::string m_activeMap;
     bool m_mapMaterialsQueued{};

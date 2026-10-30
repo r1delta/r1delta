@@ -150,29 +150,33 @@ std::string PackageSignature(const std::filesystem::path& file)
 
 bool WriteFileAtomic(const std::filesystem::path& target, const std::vector<std::uint8_t>& data)
 {
+    // Always a checksummed container (also for the small blobs), so a damaged file is rejected instead of parsed; the write budget bounds the
+    // cache size and stops the writes of a session whose directory is read-only or full.
+    std::vector<std::uint8_t> packed;
+    const bool isPacked = cache::Pack(data.data(), data.size(), packed, 0, true);
+    const std::vector<std::uint8_t>& payload = isPacked ? packed : data;
+    if (!cache::ReserveWrite(payload.size()))
+        return false;
     std::filesystem::path temporary = target;
     temporary += ".tmp" + std::to_string(GetCurrentProcessId()) + "." + std::to_string(GetCurrentThreadId());
+    bool written = false;
     {
         std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
-        if (!file)
-            return false;
-        std::vector<std::uint8_t> packed;
-        const bool isPacked = cache::Pack(data.data(), data.size(), packed, 8 * 1024);
-        const std::vector<std::uint8_t>& payload = isPacked ? packed : data;
-        file.write(reinterpret_cast<const char*>(payload.data()), static_cast<std::streamsize>(payload.size()));
-        file.close();
-        if (!file) {
-            std::error_code ignored;
-            std::filesystem::remove(temporary, ignored);
-            return false;
+        if (file) {
+            file.write(reinterpret_cast<const char*>(payload.data()), static_cast<std::streamsize>(payload.size()));
+            file.close();
+            written = static_cast<bool>(file);
         }
     }
-    if (!MoveFileExW(temporary.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+    if (written)
+        written = MoveFileExW(temporary.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING) != 0;
+    if (!written) {
         std::error_code ignored;
         std::filesystem::remove(temporary, ignored);
-        return false;
+        cache::ReleaseWrite(payload.size());
     }
-    return true;
+    cache::NoteWriteResult(written);
+    return written;
 }
 
 bool ReadWholeFile(const std::filesystem::path& path, std::vector<std::uint8_t>& bytes)
@@ -348,6 +352,7 @@ public:
         if (!file)
             return {};
         m_filesServed.fetch_add(1, std::memory_order_relaxed);
+        cache::LogFileHash(GetR2MapPatchDirectory() / "profile", std::string(normalizedPath), file->data(), file->size());
         if (parsed->kind == FileKind::Mdl) {
             // R1 resolves the model's materials right after it parses the MDL; an unknown
             // material path is a cached miss, so make them known before returning it.
@@ -487,7 +492,7 @@ private:
         const std::filesystem::path directory = GetR2MapPatchDirectory();
         if (directory.empty() || !cache::DiskCacheEnabled())
             return {};
-        return directory / "cache" / "models" / std::string(kModelCacheRevision) / package.signature
+        return directory / "cache" / "models" / ModelCacheRevision() / package.signature
             / (stem + ".r1m");
     }
 
@@ -495,7 +500,7 @@ private:
     {
         failed = false;
         std::vector<std::uint8_t> data;
-        if (file.empty() || !ReadWholeFile(file, data) || !cache::Unpack(data))
+        if (file.empty() || !ReadWholeFile(file, data) || !cache::UnpackStrict(data))
             return {};
         cache::TouchIfOld(file);
         BlobReader reader(data);
@@ -541,13 +546,15 @@ private:
 
     void StoreBlob(const std::filesystem::path& file, const ModelSet* set) const
     {
-        if (file.empty())
+        if (file.empty() || cache::Budget().stopped.load(std::memory_order_relaxed))
             return;
         try {
             std::error_code error;
             std::filesystem::create_directories(file.parent_path(), error);
-            if (error)
+            if (error) {
+                cache::NoteWriteResult(false);
                 return;
+            }
             std::vector<std::uint8_t> blob;
             AppendU32(blob, kBlobMagic);
             if (!set) {
@@ -833,8 +840,8 @@ void LogR2ModelProviderMetrics(const char* phase)
         g_modelProvider->LogMetrics(phase);
 }
 
-std::string_view ModelCacheRevision()
+std::string ModelCacheRevision()
 {
-    return kModelCacheRevision;
+    return std::string(kModelCacheRevision) + "." + cache::BuildKey();
 }
 } // namespace r2port

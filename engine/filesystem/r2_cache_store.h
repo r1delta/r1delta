@@ -1,13 +1,16 @@
 // Disk cache helpers shared by the R2 providers (header only).
 //
-//  1. A compressed container ("R2CZ") for large cached files: converted VTFs, model blobs, converted BSPs. The converted textures
+//  1. A compressed container ("R2CZ") for cached files: converted VTFs, VMTs, model blobs, converted BSPs. The converted textures
 //     are mostly decoded RGBA8 or DXT data; zstd level 3 gives about 4x on RGBA8, 2x on DXT1, 1.3x on DXT5 (measured on the mp_glitch
 //     cache) and decodes at 0.8 to 2.5 GB/s, so a warm load reads fewer bytes than before and decodes on the conversion workers.
-//     Files that do not start with the container magic are read as they are (caches written before the container existed stay valid).
-//  2. Cache maintenance: stale revision and fingerprint directories are deleted at start-up, and the total size is capped by deleting
-//     the least recently used files (R2PORT_CACHE_MAX_MB, default 8192).
+//     The zstd frame carries a content checksum, so a truncated or bit-rotted file is rejected and re-converted instead of served.
+//  2. Cache maintenance: stale revision, build and fingerprint directories and orphaned temporary files are deleted at start-up, and the
+//     total size is capped by deleting the least recently used files (R2PORT_CACHE_MAX_MB, default 4096).
+//  3. A per-process write budget (WriteBudget): no new cache file is written once the cache reached its cap, the disk is nearly full or
+//     writes keep failing (read-only or full game directory); reads and the game itself are unaffected.
 //
-// R2PORT_CACHE_COMPRESS=0 turns the container off for writing (A/B switch; reading always accepts both forms).
+// The cache is ON by default. R2PORT_CACHE=0 turns it off (memory only), R2PORT_CACHE_COMPRESS=0 turns the container off for writing
+// (A/B switch; reading always accepts both forms).
 #pragma once
 
 #include <zstd.h>
@@ -18,6 +21,9 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <atomic>
+#include <cstdio>
+#include <mutex>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
@@ -56,15 +62,18 @@ inline bool IsPacked(const std::uint8_t* data, std::size_t size)
     return size >= sizeof(PackHeader) && std::memcmp(data, kPackMagic, sizeof(kPackMagic)) == 0;
 }
 
-// Builds the container for `data`. Returns false (and leaves `out` empty) when it is not worth it or compression failed.
-inline bool Pack(const std::uint8_t* data, std::size_t size, std::vector<std::uint8_t>& out, std::size_t minimumSize = kMinimumPackedSize)
+// Builds the container for `data`. Returns false (and leaves `out` empty) when it is not worth it or compression failed. With `always`
+// the container is built for every non-empty size even when it is not smaller (the content checksum is the point: files that must never be
+// served damaged); R2PORT_CACHE_COMPRESS=0 still disables it.
+inline bool Pack(const std::uint8_t* data, std::size_t size, std::vector<std::uint8_t>& out, std::size_t minimumSize = kMinimumPackedSize, bool always = false)
 {
     out.clear();
-    if (!CompressionEnabled() || size < minimumSize)
+    if (!CompressionEnabled() || size == 0 || (!always && size < minimumSize))
         return false;
     out.resize(sizeof(PackHeader) + ZSTD_compressBound(size));
-    // Level 3 up to 32 MiB, level 1 beyond (the 4096x4096 sky textures): the ratio differs by 2 percent, the speed by 2x.
-    const int level = size > (32u << 20) ? 1 : 3;
+    // Level 3 up to 4 MiB, level 1 beyond (big normal and sky maps; the ratio differs by a few percent, the speed by 2x or more: a first
+    // load converts hundreds of MB of textures and stores them while the rest of the map is still being converted).
+    const int level = size > (4u << 20) ? 1 : 3;
     ZSTD_CCtx* context = ZSTD_createCCtx();
     if (!context) {
         out.clear();
@@ -74,7 +83,7 @@ inline bool Pack(const std::uint8_t* data, std::size_t size, std::vector<std::ui
     ZSTD_CCtx_setParameter(context, ZSTD_c_checksumFlag, 1);
     const std::size_t packed = ZSTD_compress2(context, out.data() + sizeof(PackHeader), out.size() - sizeof(PackHeader), data, size);
     ZSTD_freeCCtx(context);
-    if (ZSTD_isError(packed) || sizeof(PackHeader) + packed >= size) {
+    if (ZSTD_isError(packed) || (!always && sizeof(PackHeader) + packed >= size)) {
         out.clear();
         return false;
     }
@@ -102,6 +111,15 @@ inline bool Unpack(std::vector<std::uint8_t>& file)
         return false;
     file = std::move(raw);
     return true;
+}
+
+// Like Unpack, but a file that is not a container is rejected: for files this build always writes as containers (checksummed). With the
+// R2PORT_CACHE_COMPRESS=0 A/B switch the files are written plain, so plain files are accepted again.
+inline bool UnpackStrict(std::vector<std::uint8_t>& file)
+{
+    if (!CompressionEnabled())
+        return Unpack(file);
+    return IsPacked(file.data(), file.size()) && Unpack(file);
 }
 
 // ---- last-use refresh and maintenance -------------------------------------------------------------------------------------
@@ -139,12 +157,132 @@ inline void TouchIfOld(const std::filesystem::path& file)
     CloseHandle(handle);
 }
 
+// ---- served-file hash log --------------------------------------------------------------------------------------------------
+
+// R2PORT_LOG_HASHES=1: one line "<name> <FNV-1a 64 hex> <size>" per served converted file (materials, textures, models, the BSP) in
+// <directory>/filehashes.txt, whether the bytes were converted now or read from the disk cache: two runs (cache off, cache cold, cache
+// warm) are compared byte for byte with it.
+inline bool HashLoggingEnabled()
+{
+    static const bool enabled = []() {
+        char flag[8]{};
+        return GetEnvironmentVariableA("R2PORT_LOG_HASHES", flag, sizeof(flag)) > 0 && flag[0] != '0';
+    }();
+    return enabled;
+}
+
+inline void LogFileHash(const std::filesystem::path& directory, std::string_view name, const std::uint8_t* data, std::size_t size)
+{
+    if (!HashLoggingEnabled() || directory.empty())
+        return;
+    std::uint64_t hash = 14695981039346656037ull;
+    for (std::size_t i = 0; i < size; ++i) {
+        hash ^= data[i];
+        hash *= 1099511628211ull;
+    }
+    static std::mutex mutex;
+    std::lock_guard<std::mutex> lock(mutex);
+    std::error_code error;
+    std::filesystem::create_directories(directory, error);
+    if (FILE* file = _wfopen((directory / L"filehashes.txt").c_str(), L"ab")) {
+        std::fprintf(file, "%.*s %016llx %zu\n", static_cast<int>(name.size()), name.data(), static_cast<unsigned long long>(hash), size);
+        std::fclose(file);
+    }
+}
+
+// Identifies the build that wrote a cache: the PE time stamp and image size of the module this code is linked into (tier0.dll). Every cache
+// key carries it, so a game update (a new tier0.dll) can never read converted output of the converters of the previous build, whatever
+// the hand-kept revision numbers say; the old directories are deleted by the next maintenance pass.
+inline const char kBuildKeyAnchor = 0;
+inline const std::string& BuildKey()
+{
+    static const std::string key = []() {
+        HMODULE module = nullptr;
+        if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                reinterpret_cast<LPCWSTR>(&kBuildKeyAnchor), &module) || !module)
+            return std::string("nobuild");
+        const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(module);
+        const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(reinterpret_cast<const std::uint8_t*>(module) + dos->e_lfanew);
+        char text[32]{};
+        _snprintf_s(text, sizeof(text), _TRUNCATE, "b%08x%06x", static_cast<unsigned>(nt->FileHeader.TimeDateStamp),
+            static_cast<unsigned>(nt->OptionalHeader.SizeOfImage & 0xFFFFFF));
+        return std::string(text);
+    }();
+    return key;
+}
+
+// ---- write budget ----------------------------------------------------------------------------------------------------------
+
+// Bounds what this process may add to the disk cache. The maintenance pass (start-up, background) sets the bytes already on disk and the
+// effective cap (the configured cap, lowered so that the disk keeps at least kMinimumFreeBytes free). Before it has run the budget is
+// unlimited, which is bounded by what one session converts. Writes stop for the session after kMaximumFailures failures in a row
+// (read-only, full or quota-limited directory); reads are unaffected.
+inline constexpr std::uint64_t kMinimumFreeBytes = 3ull << 30;
+inline constexpr unsigned kMaximumFailures = 8;
+
+struct WriteBudget {
+    std::atomic<std::uint64_t> cap{ ~0ull };
+    std::atomic<std::uint64_t> used{ 0 };
+    std::atomic<unsigned> failures{ 0 };
+    std::atomic<bool> stopped{ false };
+};
+
+inline WriteBudget& Budget()
+{
+    static WriteBudget budget;
+    return budget;
+}
+
+inline void SetBudget(std::uint64_t existingBytes, std::uint64_t capBytes)
+{
+    WriteBudget& budget = Budget();
+    budget.used.store(existingBytes, std::memory_order_relaxed);
+    budget.cap.store(capBytes, std::memory_order_relaxed);
+}
+
+// True when `bytes` more may be written; the bytes are then counted (ReleaseWrite gives them back when the write failed).
+inline bool ReserveWrite(std::uint64_t bytes)
+{
+    WriteBudget& budget = Budget();
+    if (budget.stopped.load(std::memory_order_relaxed))
+        return false;
+    const std::uint64_t cap = budget.cap.load(std::memory_order_relaxed);
+    if (budget.used.fetch_add(bytes, std::memory_order_relaxed) + bytes > cap) {
+        budget.used.fetch_sub(bytes, std::memory_order_relaxed);
+        return false;
+    }
+    return true;
+}
+
+inline void ReleaseWrite(std::uint64_t bytes)
+{
+    Budget().used.fetch_sub(bytes, std::memory_order_relaxed);
+}
+
+// Records the outcome of a write attempt. Returns true once, when this failure is the one that stops the session's writes (log it then).
+inline bool NoteWriteResult(bool ok)
+{
+    WriteBudget& budget = Budget();
+    if (ok) {
+        budget.failures.store(0, std::memory_order_relaxed);
+        return false;
+    }
+    return budget.failures.fetch_add(1, std::memory_order_relaxed) + 1 >= kMaximumFailures && !budget.stopped.exchange(true);
+}
+
+// True once per process: the first time a write was refused because the cap is reached (log it then).
+inline bool TakeCapNotice()
+{
+    static std::atomic<bool> noted{ false };
+    return !noted.exchange(true);
+}
+
 struct MaintenancePlan {
     std::filesystem::path r2portDirectory;      // <game dir>/r2port
     std::string currentFingerprint;             // cache/<fingerprint> of the installed R2 packages
-    std::string currentConvertedName;           // converted/<revision><tags> in use
-    std::string currentModelRevision;           // cache/models/<revision>
-    std::uint64_t capBytes = 8ull << 30;        // total of converted files + models + converted-BSP cache
+    std::string currentConvertedName;           // converted/<revision>.<build key><tags> in use
+    std::string currentModelRevision;           // cache/models/<revision>.<build key>
+    std::uint64_t capBytes = 4ull << 30;        // total of converted files + models + converted-BSP cache + materialized map copies
     std::uint64_t sameRevisionVariantDays = 14; // other tag variants of the current revision (env/uber A/B dirs) unused this long are dropped
 };
 
@@ -170,12 +308,11 @@ inline std::uint64_t DirectoryBytes(const std::filesystem::path& directory)
     return total;
 }
 
-inline std::string LeadingDigits(const std::string& name)
+// The part of a cache directory name before its first '-': the revision (and build key) that must match exactly; what follows are the
+// A/B tag variants (R2TEX_ENV, R2_UBER pack, BC7) of that revision.
+inline std::string RevisionToken(const std::string& name)
 {
-    std::size_t end = 0;
-    while (end < name.size() && name[end] >= '0' && name[end] <= '9')
-        ++end;
-    return name.substr(0, end);
+    return name.substr(0, name.find('-'));
 }
 
 inline void RemoveTree(const std::filesystem::path& path, MaintenanceResult& result)
@@ -209,15 +346,15 @@ inline MaintenanceResult RunMaintenance(const MaintenancePlan& plan)
         RemoveTree(it->path(), result);
     }
 
-    // 2. converted/<revision><tags>: other revisions are stale; other tag variants of the same revision go when unused.
+    // 2. converted/<revision>.<build key><tags>: other revisions and builds are stale; other tag variants of the same revision go when unused.
     const std::filesystem::path converted = cacheRoot / plan.currentFingerprint / "converted";
-    const std::string currentRevision = LeadingDigits(plan.currentConvertedName);
+    const std::string currentRevision = RevisionToken(plan.currentConvertedName);
     const std::uint64_t variantAge = plan.sameRevisionVariantDays * 24ull * 3600ull * 10000000ull;
     for (std::filesystem::directory_iterator it(converted, error), end; !error && it != end; it.increment(error)) {
         const std::string name = it->path().filename().string();
         if (!it->is_directory(error) || name == plan.currentConvertedName)
             continue;
-        if (LeadingDigits(name) != currentRevision) {
+        if (RevisionToken(name) != currentRevision) {
             RemoveTree(it->path(), result);
             continue;
         }
@@ -255,6 +392,7 @@ inline MaintenanceResult RunMaintenance(const MaintenancePlan& plan)
     };
     std::vector<Entry> entries;
     std::uint64_t total = 0;
+    const std::uint64_t staleTemporary = NowFileTime() - 3600ull * 10000000ull;
     const auto scan = [&](const std::filesystem::path& root) {
         for (std::filesystem::recursive_directory_iterator it(root, std::filesystem::directory_options::skip_permission_denied, error), end;
              !error && it != end; it.increment(error)) {
@@ -267,13 +405,23 @@ inline MaintenanceResult RunMaintenance(const MaintenancePlan& plan)
             if (!GetFileAttributesExW(it->path().c_str(), GetFileExInfoStandard, &data))
                 continue;
             const std::uint64_t bytes = (static_cast<std::uint64_t>(data.nFileSizeHigh) << 32) | data.nFileSizeLow;
-            entries.push_back({ it->path(), bytes, FileTimeToU64(data.ftLastWriteTime) });
+            const std::uint64_t stamp = FileTimeToU64(data.ftLastWriteTime);
+            // A temporary file (".tmp<pid>.<tid>") older than an hour belongs to a process that died while writing: delete it.
+            if (stamp < staleTemporary && it->path().filename().string().find(".tmp") != std::string::npos) {
+                if (std::filesystem::remove(it->path(), itemError)) {
+                    ++result.removedFiles;
+                    result.removedBytes += bytes;
+                }
+                continue;
+            }
+            entries.push_back({ it->path(), bytes, stamp });
             total += bytes;
         }
     };
     scan(converted);
     scan(models);
     scan(plan.r2portDirectory / "bsp_cache");
+    scan(plan.r2portDirectory.parent_path() / "r2port_cache");   // the map files the engine reads (rewritten at every load of a map)
     if (total > plan.capBytes) {
         std::sort(entries.begin(), entries.end(), [](const Entry& a, const Entry& b) { return a.stamp < b.stamp; });
         const std::uint64_t target = plan.capBytes / 10 * 9;
@@ -289,17 +437,28 @@ inline MaintenanceResult RunMaintenance(const MaintenancePlan& plan)
         }
     }
     result.keptBytes = total;
+
+    // The write budget of this process: the configured cap, lowered so that the disk keeps kMinimumFreeBytes free. When the disk is that
+    // full already the cache may not grow at all.
+    std::uint64_t effectiveCap = plan.capBytes;
+    ULARGE_INTEGER freeBytes{};
+    if (GetDiskFreeSpaceExW(plan.r2portDirectory.c_str(), &freeBytes, nullptr, nullptr)) {
+        const std::uint64_t headroom = freeBytes.QuadPart > kMinimumFreeBytes ? freeBytes.QuadPart - kMinimumFreeBytes : 0;
+        effectiveCap = std::min<std::uint64_t>(effectiveCap, total + headroom);
+    }
+    SetBudget(total, effectiveCap);
     return result;
 }
 
-// The on-disk cache of converted files is OFF by default (ship requirement): R2PORT_CACHE=1 turns it on. Everything is then served from
-// memory (the providers keep an LRU bounded by R2PORT_MEM_CACHE_MB, default 1536). The r2tex index (about 3 MB, fingerprinted, not a
-// conversion result) and the shader cache (a few KB, the engine opens those as real files) stay on disk either way.
+// The on-disk cache of converted files is ON by default: the first load of a map converts it from the player's Titanfall 2 install, later
+// loads (and later game sessions) read the converted files back. R2PORT_CACHE=0 turns it off: everything is then served from memory (the
+// providers keep an LRU bounded by R2PORT_MEM_CACHE_MB, default 1536). The r2tex index (about 6 MB, fingerprinted, not a conversion result)
+// and the shader cache (a few KB, the engine opens those as real files) stay on disk either way.
 inline bool DiskCacheEnabled()
 {
     static const bool enabled = []() {
         char value[8]{};
-        return GetEnvironmentVariableA("R2PORT_CACHE", value, sizeof(value)) > 0 && value[0] != '0';
+        return !(GetEnvironmentVariableA("R2PORT_CACHE", value, sizeof(value)) > 0 && value[0] == '0');
     }();
     return enabled;
 }
@@ -317,7 +476,7 @@ inline std::size_t MemoryCacheBytes()
 }
 
 // R2PORT_CACHE_MAX_MB (megabytes, 0 = unlimited) or the default.
-inline std::uint64_t ConfiguredCapBytes(std::uint64_t defaultMiB = 8192)
+inline std::uint64_t ConfiguredCapBytes(std::uint64_t defaultMiB = 4096)
 {
     char value[32]{};
     if (GetEnvironmentVariableA("R2PORT_CACHE_MAX_MB", value, sizeof(value)) > 0) {
