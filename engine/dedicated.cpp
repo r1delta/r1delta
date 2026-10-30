@@ -15,7 +15,6 @@
 #include "p2p/p2p.h"
 #include "net_hooks.h"
 #include "dlc_ownership.h"
-void PData_ServerRunFrame(); // shared/persistentdata.cpp
 #include "r2port_provider.h"
 #pragma intrinsic(_ReturnAddress)
 
@@ -1724,7 +1723,6 @@ static void Cbuf_Execute() {
 			host_remainder = (float*)(G_engine_ds + 0x20408C0);
 		host_nexttick = *host_state_interval_per_tick - *host_remainder;
 		Dlc_ServerFrame();
-		PData_ServerRunFrame();
 	}
 	oCbuf_Execute();
 }

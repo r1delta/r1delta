@@ -16479,8 +16479,6 @@ static char __fastcall R1OCDedicatedServerAPI_RunFrame(__int64 thisptr)
 	EnsureR1ONetConsoleInitialized(r1oEngineBase);
 	// DLC ownership: keeps serverDLCMapGroups in step with who is connected (rate limited inside).
 	Dlc_ServerFrame();
-	// Paced persistent-data outbox (listen servers drain it from PData_RunFrame on the client frame).
-	PData_ServerRunFrame();
 
 	constexpr int runtimeMaintenanceIntervalFrames = 64;
 	if (s_R1ODedicatedRunFrameCount == 1
