@@ -218,13 +218,16 @@ void InstallMaterialShaderRecordGuard(std::uintptr_t materialSystemBase)
 	s_base = materialSystemBase;
 	s_allocate = reinterpret_cast<ShaderRecordAllocateFunction>(materialSystemBase + kShaderRecordAllocateRva);
 
-	const bool release = InstallChecked(
-		"release",
-		kMaterialShaderReleaseRva,
-		kExpectedMaterialShaderReleasePrologue,
-		sizeof(kExpectedMaterialShaderReleasePrologue),
-		reinterpret_cast<void*>(&MaterialShaderReleaseGuard),
-		reinterpret_cast<void**>(&s_originalRelease));
+	// Diagnostic switch: without the release hook the state-function guards are the only protection, so every stale inline
+	// handle that reaches them is repaired and logged with the material's name.
+	const bool release = !HasEngineCommandLineFlag("-r1delta_no_shader_record_release_guard")
+		&& InstallChecked(
+			"release",
+			kMaterialShaderReleaseRva,
+			kExpectedMaterialShaderReleasePrologue,
+			sizeof(kExpectedMaterialShaderReleasePrologue),
+			reinterpret_cast<void*>(&MaterialShaderReleaseGuard),
+			reinterpret_cast<void**>(&s_originalRelease));
 	const bool unlit = InstallChecked(
 		"UnlitGeneric",
 		kUnlitGenericStateRva,
