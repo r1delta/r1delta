@@ -25,6 +25,11 @@ void OnHeartbeatResponse(const std::string& body);
 // still work. Idempotent.
 void EnsureServerServices(int port);
 
+// Discord join secret for a hosted server that the master server cannot
+// route to (hide_server 1, or not listed yet). Empty: use "ip:port".
+// *pending: services are still starting, retry shortly.
+std::string HostInviteTarget(int port, bool* pending);
+
 // Server list integration: remembers each entry's advertised transports so
 // delta_connect can use them.
 void OnServerListEntry(const nlohmann::json& entry);

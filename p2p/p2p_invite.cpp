@@ -207,6 +207,100 @@ std::string EncodeOverlayInvite(Backend backend, std::string_view address, uint1
     return prefix + std::string(address);
 }
 
+bool IsPublicIpv4(uint32_t ip)
+{
+    const unsigned a = ip >> 24, b = (ip >> 16) & 0xFF;
+    if (a == 0 || a == 10 || a == 127 || a >= 224) return false;
+    if (a == 100 && (b & 0xC0) == 64) return false; // 100.64.0.0/10
+    if (a == 169 && b == 254) return false;
+    if (a == 172 && (b & 0xF0) == 16) return false;
+    if (a == 192 && b == 168) return false;
+    return true;
+}
+
+std::string PortableIrohAddress(std::string_view raw, uint16_t port)
+{
+    const size_t first = raw.find('|');
+    const auto id = raw.substr(0, first);
+    if (id.size() != 64 || !Hex(id)) return {};
+    std::string_view relay, addrs;
+    if (first != raw.npos)
+    {
+        const auto rest = raw.substr(first + 1);
+        const size_t second = rest.find('|');
+        relay = rest.substr(0, second);
+        if (second != rest.npos) addrs = rest.substr(second + 1);
+    }
+    if (!relay.empty() && !Relay(relay)) relay = {};
+
+    std::vector<std::string> direct;
+    while (!addrs.empty())
+    {
+        const size_t end = addrs.find(',');
+        const std::string item(addrs.substr(0, end));
+        if (!item.empty() && item.front() != '[')
+            if (const auto ep = Ipv4Endpoint::Parse(item); ep && ep->port && IsPublicIpv4(ep->ip)) direct.push_back(item);
+        if (end == addrs.npos) break;
+        addrs.remove_prefix(end + 1);
+    }
+
+    const auto fits = [port](const std::string& address) { return !EncodeOverlayInvite(Backend::Iroh, address, port).empty(); };
+    std::string address(id);
+    bool haveRelay = false, haveDirect = false;
+    if (!relay.empty())
+    {
+        std::string withRelay = address + "|" + std::string(relay);
+        if (fits(withRelay))
+        {
+            address = std::move(withRelay);
+            haveRelay = true;
+        }
+    }
+    for (const auto& endpoint : direct)
+    {
+        const std::string separator = haveDirect ? "," : (haveRelay ? "|" : "||");
+        std::string extended = address + separator + endpoint;
+        if (!fits(extended)) continue;
+        address = std::move(extended);
+        haveDirect = true;
+    }
+    return fits(address) ? address : std::string();
+}
+
+std::string EosInviteForProductUserId(std::string_view productUserId, uint16_t port)
+{
+    if (!port || productUserId.size() != 32 || productUserId.substr(0, 4) != "0002" || !Hex(productUserId)) return {};
+    const auto nibble = [](char c) -> uint8_t {
+        return static_cast<uint8_t>(c <= '9' ? c - '0' : (c | 0x20) - 'a' + 10);
+    };
+    Ipv6Bytes address{};
+    address[0] = 0x3f;
+    address[1] = 0xfe;
+    for (size_t i = 2; i < address.size(); ++i)
+        address[i] = static_cast<uint8_t>((nibble(productUserId[i * 2]) << 4) | nibble(productUserId[i * 2 + 1]));
+    const std::string invite = FormatIpv6Connect(address, port);
+    return Endpoint(invite, true) ? invite : std::string();
+}
+
+std::string HostOverlayInvite(const HostRoutes& routes, uint16_t port)
+{
+    if (!routes.iroh.empty())
+    {
+        const std::string portable = PortableIrohAddress(routes.iroh, port);
+        if (!portable.empty())
+        {
+            const std::string invite = EncodeOverlayInvite(Backend::Iroh, portable, port);
+            if (!invite.empty()) return invite;
+        }
+    }
+    if (!routes.tailcat.empty())
+    {
+        const std::string invite = EncodeOverlayInvite(Backend::Tailcat, routes.tailcat, port);
+        if (!invite.empty()) return invite;
+    }
+    return EosInviteForProductUserId(routes.eosPuid, port);
+}
+
 std::string InviteConnectCommand(const InviteTarget& target)
 {
     if (target.route == InviteRoute::Iroh || target.route == InviteRoute::Tailcat)

@@ -16,6 +16,7 @@
 #include "p2p_plugin.h"
 #include "p2p_settings.h"
 #include "p2p_turn.h"
+#include "p2p_invite.h"
 #include "p2p_upnp.h"
 
 namespace p2p
@@ -31,6 +32,7 @@ constexpr auto kHeartbeatStale = std::chrono::seconds(45);
 constexpr auto kTurnIdleShutdown = std::chrono::minutes(5);
 constexpr int kPunchBurst = 8;
 constexpr auto kPunchSpacing = std::chrono::milliseconds(120);
+constexpr auto kInviteSettleWindow = std::chrono::seconds(15);
 
 struct PendingPunch
 {
@@ -47,6 +49,7 @@ struct ServerState
     bool servicesStarted = false;
     std::string eosPuid;
     std::string irohAddress;    // "id|relay|ip:port,..."
+    Clock::time_point startedAt{};
     std::string tailcatAddress; // "tc..."
     std::string status[4];      // eos, iroh, tailcat, rendezvous (for delta_p2p_status)
 
@@ -210,6 +213,7 @@ void StartServices(uint16_t port)
         if (st.servicesStarted)
             return;
         st.servicesStarted = true;
+        st.startedAt = Clock::now();
         st.port = port;
         st.serviceThread = std::thread(ServiceLoop);
         st.serviceThread.detach();
@@ -471,6 +475,59 @@ void ServerOnPunchRequest(const PunchRequest& req, const Ipv4Endpoint& from)
 uint64_t ServerPongTag()
 {
     return g_pongTag.load();
+}
+
+std::string ServerHostInvite(uint16_t port, bool* pending)
+{
+    if (pending)
+        *pending = false;
+    RefreshSettingsNumeric();
+    const Settings settings = GetSettings();
+    if (!settings.enable || port == 0)
+        return {};
+
+    // A router mapping that provably exposes the game port on a public address
+    // beats any overlay: plain ip:port also works for clients without the
+    // plugin DLLs and for older builds.
+    const PortMappingStatus mapping = PortMap().Status();
+    if (mapping.active && mapping.externalPort == port)
+    {
+        const auto external = Ipv4Endpoint::Parse(mapping.externalIp + ":1");
+        if (external && IsPublicIpv4(external->ip))
+            return {};
+    }
+
+    HostRoutes routes;
+    bool irohStarting = false, otherStarting = false;
+    {
+        auto& st = State();
+        std::lock_guard lock(st.mutex);
+        if (!st.servicesStarted || st.port != port)
+            return {};
+        routes.iroh = st.irohAddress;
+        routes.tailcat = st.tailcatAddress;
+        routes.eosPuid = st.eosPuid;
+        // Services come up asynchronously (iroh waits up to 8 s for its relay); within a short
+        // window after start, hold the invite back instead of publishing one that is replaced
+        // moments later. Never hold it back for longer: a hung EOS login must not cost the
+        // plain ip:port invite.
+        if (Clock::now() - st.startedAt < kInviteSettleWindow)
+        {
+            const auto starting = [](bool enabled, const std::string& status) {
+                return enabled && (status.empty() || status == "starting");
+            };
+            irohStarting = starting(settings.serverIroh, st.status[1]);
+            otherStarting = starting(settings.serverTailcat, st.status[2]) || starting(settings.serverEos, st.status[0]);
+        }
+    }
+    std::string invite = HostOverlayInvite(routes, port);
+    if (irohStarting || (invite.empty() && otherStarting))
+    {
+        if (pending)
+            *pending = true;
+        return {};
+    }
+    return invite;
 }
 
 std::string ServerDescribe()

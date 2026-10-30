@@ -427,6 +427,15 @@ void EnsureServerServices(int port)
     ServerEnsureServices(static_cast<uint16_t>(port));
 }
 
+std::string HostInviteTarget(int port, bool* pending)
+{
+    if (pending)
+        *pending = false;
+    if (port <= 0 || port > 0xFFFF)
+        return {};
+    return ServerHostInvite(static_cast<uint16_t>(port), pending);
+}
+
 void OnHeartbeatResponse(const std::string& body)
 {
     if (!GetSettings().enable)

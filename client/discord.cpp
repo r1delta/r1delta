@@ -7,6 +7,7 @@
 #include <windows.h>
 #include <tlhelp32.h>
 #include "netadr.h"
+#include "../p2p/p2p.h"
 #include "../p2p/p2p_invite.h"
 #include "../p2p/p2p_mux.h"
 #include "../p2p/p2p_connect.h"
@@ -342,10 +343,12 @@ std::string CreateDiscordSecret() {
 		|| address == listenSentinel;
 	std::string secret;
 	if (localHost) {
-		// A hidden server never heartbeats, and invites are how friends find one, so only a
-		// server that is meant to be listed has to have reached the master server first.
-		if (!MasterServerClient::IsValidHeartBeat.load() && !MasterServerClient::IsHostedServerHidden())
-			return {};
+		// A listed server is joined through "ip:port": delta_connect then asks the master server
+		// for every route (punching, relays, overlays). A hidden server never heartbeats, so the
+		// master has no entry to route a joiner behind NAT to, and a server that has not reached
+		// the master yet has none either: those publish their own portable overlay route instead.
+		const bool hidden = MasterServerClient::IsHostedServerHidden();
+		const bool listed = !hidden && MasterServerClient::IsValidHeartBeat.load();
 		int hostPort = port;
 		if (!hostPort && cvarinterface && OriginalCCVar_FindVar) {
 			if (const auto* host_port = OriginalCCVar_FindVar(cvarinterface, "hostport"))
@@ -353,12 +356,30 @@ std::string CreateDiscordSecret() {
 		}
 		if (hostPort <= 0 || hostPort > 65535)
 			return {};
-		// Validate the public address independently: no endpoint or command payload.
-		const auto publicTarget = p2p::ParseInviteTarget(G_public_ip);
-		if (!publicTarget || publicTarget->route != p2p::InviteRoute::Server
-			|| publicTarget->address != G_public_ip || G_public_ip.find(':') != std::string::npos)
-			return {};
-		secret = std::format("{}:{}", G_public_ip, hostPort);
+		if (!listed) {
+			bool pending = false;
+			secret = p2p::HostInviteTarget(hostPort, &pending);
+			if (pending)
+				return {};
+			// A visible server only invites once the master server has it.
+			if (secret.empty() && !hidden)
+				return {};
+			static std::string s_lastHostInvite;
+			if (secret != s_lastHostInvite) {
+				s_lastHostInvite = secret;
+				Msg("Discord: hosted-server invite route is now %s\n",
+					secret.empty() ? "direct ip:port" : secret.compare(0, 11, "r1di1|iroh|") == 0 ? "iroh"
+					: secret.compare(0, 13, "r1di1|tailcat") == 0 ? "tailcat" : "EOS");
+			}
+		}
+		if (secret.empty()) {
+			// Validate the public address independently: no endpoint or command payload.
+			const auto publicTarget = p2p::ParseInviteTarget(G_public_ip);
+			if (!publicTarget || publicTarget->route != p2p::InviteRoute::Server
+				|| publicTarget->address != G_public_ip || G_public_ip.find(':') != std::string::npos)
+				return {};
+			secret = std::format("{}:{}", G_public_ip, hostPort);
+		}
 	} else {
 		if (ns_addr->GetType() != netadrtype_t::NA_IP || !port)
 			return {};

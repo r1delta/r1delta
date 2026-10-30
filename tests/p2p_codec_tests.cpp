@@ -454,6 +454,76 @@ void TestEndpointDefaultPort()
           !Ipv4Endpoint::ParseWithDefaultPort("[3ffe::1]", 27015) && !Ipv4Endpoint::ParseWithDefaultPort("1.2.3.4:", 27015),
           "non-IPv4 text is still rejected so hostnames and fake IPv6 go straight to the engine");
 }
+
+void TestHostInvites()
+{
+    using namespace p2p;
+    Check(IsPublicIpv4(0x08080808u) && IsPublicIpv4(0xCB007107u) && IsPublicIpv4(0xAC200001u) && IsPublicIpv4(0x64800001u),
+          "public IPv4 recognised (incl. 172.32/12 edge and 100.128/10 edge)");
+    for (uint32_t ip : { 0u, 0x0A000001u, 0x7F000001u, 0xAC100001u, 0xAC1FFFFFu, 0xC0A80101u, 0xA9FE0101u, 0x64400001u,
+                         0x647FFFFFu, 0xE0000001u, 0xFFFFFFFFu })
+        Check(!IsPublicIpv4(ip), "private, loopback, link-local, CGNAT, multicast and reserved IPv4 are not public");
+
+    const std::string id(64, 'b');
+    const std::string n0Relay = "https://use1-1.relay.n0.iroh.link./";
+
+    // The real n0 relay URL leaves no room for direct addresses at a 5-digit port; nothing private may be added.
+    const std::string full = id + "|" + n0Relay + "|192.168.1.5:11111,203.0.113.7:22222,[2001:db8::1]:3333,100.64.1.2:4,10.0.0.1:5";
+    const std::string portableFull = PortableIrohAddress(full, 27015);
+    Check(portableFull == id + "|" + n0Relay, "iroh invite keeps id and relay, drops what does not fit");
+    const std::string fullInvite = EncodeOverlayInvite(Backend::Iroh, portableFull, 27015);
+    Check(fullInvite.size() == 117 && ParseInviteTarget(fullInvite).has_value(), "n0 relay invite is 117 bytes and parses");
+
+    // With room, only public IPv4 direct addresses survive, in order.
+    const std::string shortRelay = id + "|https://r.example/|192.168.1.5:1,203.0.113.7:22222,[2001:db8::1]:3,100.64.1.2:4,10.0.0.1:5,198.51.100.1:6";
+    Check(PortableIrohAddress(shortRelay, 1) == id + "|https://r.example/|203.0.113.7:22222,198.51.100.1:6",
+          "only public IPv4 direct addresses are published");
+    Check(PortableIrohAddress(id + "||203.0.113.7:22222", 1) == id + "||203.0.113.7:22222", "no relay: direct address only");
+    Check(PortableIrohAddress(id + "|garbage|203.0.113.7:2", 1) == id + "||203.0.113.7:2", "invalid relay dropped");
+    Check(PortableIrohAddress(id + "|https://r.example/|192.168.1.5:1,[::1]:2", 1) == id + "|https://r.example/",
+          "no private endpoint can leak");
+    Check(PortableIrohAddress(id + "||192.168.1.5:1", 1) == id, "private-only address list leaves the bare id");
+    Check(PortableIrohAddress(id, 1) == id && PortableIrohAddress(id.substr(1), 1).empty() &&
+          PortableIrohAddress(std::string(64, 'g'), 1).empty() && PortableIrohAddress("", 1).empty(),
+          "bare id accepted, malformed id rejected");
+    const std::string longRelay = "https://" + std::string(100, 'a') + ".example/";
+    Check(PortableIrohAddress(id + "|" + longRelay, 27015) == id, "a relay URL that cannot fit is dropped, not truncated");
+    Check(PortableIrohAddress(id + "|https://r.example/", 0).empty(), "port 0 cannot be encoded");
+
+    // EOS fake IP of a local ProductUserId; inverse of EnsureEosIdentity's decode.
+    const std::string puid = "00020123456789abcdef0123456789ab";
+    const std::string eosInvite = EosInviteForProductUserId(puid, 27015);
+    Check(eosInvite == "[3ffe:123:4567:89ab:cdef:123:4567:89ab]:27015", "EOS invite from ProductUserId");
+    const auto eosTarget = ParseInviteTarget(eosInvite);
+    Check(eosTarget && eosTarget->route == InviteRoute::Eos && eosTarget->port == 27015 &&
+          InviteConnectCommand(*eosTarget) == "disconnect;delta_connect " + eosInvite + "\n", "EOS host invite round trips");
+    Check(EosInviteForProductUserId("00020000000000000000000000ab", 1).empty() &&
+          EosInviteForProductUserId("0002" + std::string(26, '0') + "ab", 1) == "[3ffe::ab]:1",
+          "EOS invite compresses zero groups");
+    Check(EosInviteForProductUserId("00020123456789ABCDEF0123456789AB", 27015) == eosInvite, "uppercase ProductUserId normalised");
+    Check(EosInviteForProductUserId("00030123456789abcdef0123456789ab", 1).empty() &&
+          EosInviteForProductUserId(puid.substr(1), 1).empty() && EosInviteForProductUserId(puid, 0).empty() &&
+          EosInviteForProductUserId("0002" + std::string(27, '0') + "g", 1).empty(),
+          "malformed ProductUserId or zero port rejected");
+
+    // Route preference: iroh, tailcat, EOS.
+    const std::string irohRaw = id + "|" + n0Relay + "|192.168.1.5:1";
+    HostRoutes routes{ irohRaw, "tcomFwWCAB", puid };
+    const std::string best = HostOverlayInvite(routes, 27015);
+    const auto bestTarget = ParseInviteTarget(best);
+    Check(best.size() <= kMaxInviteSecretSize && bestTarget && bestTarget->route == InviteRoute::Iroh &&
+          bestTarget->port == 27015 && bestTarget->address == id + "|" + n0Relay, "host invite prefers iroh");
+    routes.iroh.clear();
+    Check(HostOverlayInvite(routes, 27015) == "r1di1|tailcat|27015|tcomFwWCAB", "host invite falls back to tailcat");
+    routes.iroh = "garbage";
+    Check(HostOverlayInvite(routes, 27015) == "r1di1|tailcat|27015|tcomFwWCAB", "malformed iroh address is skipped");
+    routes.tailcat = "tc" + std::string(120, 'A'); // valid base64url, too long for 127 bytes
+    Check(HostOverlayInvite(routes, 27015) == eosInvite, "an oversized tailcat address falls back to EOS");
+    routes.tailcat.clear();
+    Check(HostOverlayInvite(routes, 27015) == eosInvite, "host invite falls back to EOS");
+    routes.eosPuid.clear();
+    Check(HostOverlayInvite(routes, 27015).empty(), "no route: empty so the caller keeps ip:port");
+}
 } // namespace
 
 int main()
@@ -468,6 +538,7 @@ int main()
     TestIdentity();
     TestInvites();
     TestEndpointDefaultPort();
+    TestHostInvites();
     std::printf("%s\n", g_failures == 0 ? "p2p codec tests passed" : "p2p codec tests FAILED");
     return g_failures == 0 ? 0 : 1;
 }
