@@ -474,9 +474,10 @@ void TestHostInvites()
     const std::string fullInvite = EncodeOverlayInvite(Backend::Iroh, portableFull, 27015);
     Check(fullInvite.size() == 117 && ParseInviteTarget(fullInvite).has_value(), "n0 relay invite is 117 bytes and parses");
 
-    // With room, only public IPv4 direct addresses survive, in order.
-    const std::string shortRelay = id + "|https://r.example/|192.168.1.5:1,203.0.113.7:22222,[2001:db8::1]:3,100.64.1.2:4,10.0.0.1:5,198.51.100.1:6";
-    Check(PortableIrohAddress(shortRelay, 1) == id + "|https://r.example/|203.0.113.7:22222,198.51.100.1:6",
+    // With room, only public IPv4 direct addresses survive, in order (the invite is capped at 127 bytes: the shorter first port leaves room
+    // for the second public address).
+    const std::string shortRelay = id + "|https://r.example/|192.168.1.5:1,203.0.113.7:22,[2001:db8::1]:3,100.64.1.2:4,10.0.0.1:5,198.51.100.1:6";
+    Check(PortableIrohAddress(shortRelay, 1) == id + "|https://r.example/|203.0.113.7:22,198.51.100.1:6",
           "only public IPv4 direct addresses are published");
     Check(PortableIrohAddress(id + "||203.0.113.7:22222", 1) == id + "||203.0.113.7:22222", "no relay: direct address only");
     Check(PortableIrohAddress(id + "|garbage|203.0.113.7:2", 1) == id + "||203.0.113.7:2", "invalid relay dropped");
