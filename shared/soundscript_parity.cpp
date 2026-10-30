@@ -18,6 +18,8 @@
 #include <utility>
 #include <vector>
 
+void PrintSoundTableInfo(const char* label);
+
 namespace {
 
 // Alias records are 512 bytes in every engine build; the interned name pointer
@@ -280,6 +282,7 @@ void ClientVerdict(const CCommand& args) {
 			lead, local.aliases, server.aliases);
 	}
 
+	PrintSoundTableInfo("R1Delta sound scripts: this client");
 	Parity::Report(true, "R1Delta sound scripts: %s\n", reason);
 	Parity::Report(true, "R1Delta sound scripts: client %d aliases (crc %08x), server %d aliases (crc %08x)\n",
 		local.aliases, local.engineCrc, server.aliases, server.engineCrc);
@@ -456,6 +459,7 @@ void SoundScriptParity_ServerCheck(int playerSlot, const SoundScriptUpload& uplo
 		kSoundScriptCommand, enforce ? 1 : 0, fingerprint, differing, listed.c_str());
 	SendServerCommandToClient(playerSlot, command);
 
+	PrintSoundTableInfo("R1Delta sound scripts: this server");
 	Parity::Report(true, "R1Delta sound scripts: client in slot %d does not match this server (client %d aliases, server %d; %s)%s\n",
 		playerSlot, remote.aliases, local.aliases,
 		remote.set == local.set ? "same aliases in a different order"
