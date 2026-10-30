@@ -3607,8 +3607,15 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
         const char* swapEnv = std::getenv("R2TEX_LAYER_SWAP");
         if (hasLayerSlots && !layersOff && !(swapEnv && swapEnv[0] == '0') &&
             usedSlots.find(0) != usedSlots.end() && usedSlots.find(23) != usedSlots.end()) {
-            const std::pair<std::size_t, std::size_t> layerPairs[] = {{0, 23}, {1, 24}, {3, 26}};
+            // Slots 2 / 25 (layer gloss) are not in usedSlots (they are read through slotGuids by the spec+gloss bake) but must follow their layer: with
+            // the layers exchanged and the glosses not, every layered material paired R2 layer 1's spec with layer 0's gloss and vice versa
+            // (mp_black_water_canal stasis_sand_black_to_water_bm: the sand layer got the water's flat gloss 90 and drew as a flat mirror).
+            // R2TEX_LAYER_GLOSS_SWAP=0 restores the old pairing.
+            const char* glossSwapEnv = std::getenv("R2TEX_LAYER_GLOSS_SWAP");
+            const bool swapGloss = !(glossSwapEnv && glossSwapEnv[0] == '0');
+            const std::pair<std::size_t, std::size_t> layerPairs[] = {{0, 23}, {1, 24}, {3, 26}, {2, 25}};
             for (const auto& pair : layerPairs) {
+                if (pair.first == 2 && !swapGloss) continue;
                 std::string first, second;
                 const auto a = usedSlots.find(pair.first);
                 const bool haveFirst = a != usedSlots.end();
