@@ -2000,15 +2000,31 @@ constexpr RootModel MakeRoot(const char* name, const Profile* profile)
 }
 constexpr RootModel kRoots[] = {
     MakeRoot("humans/imc_pilot/male_br/imc_pilot_male_br.mdl", &MaleProfile),
+    MakeRoot("humans/imc_pilot/male_cq/imc_pilot_male_cq.mdl", &MaleProfile),
     MakeRoot("humans/imc_pilot/male_dm/imc_pilot_male_dm.mdl", &MaleProfile),
     MakeRoot("humans/mcor_pilot/male_br/mcor_pilot_male_br.mdl", &MaleProfile),
+    MakeRoot("humans/mcor_pilot/male_cq/mcor_pilot_male_cq.mdl", &MaleProfile),
     MakeRoot("humans/mcor_pilot/male_dm/mcor_pilot_male_dm.mdl", &MaleProfile),
     MakeRoot("humans/pilot/female_br/pilot_female_br.mdl", &FemaleProfile),
+    MakeRoot("humans/pilot/female_cq/pilot_female_cq.mdl", &FemaleProfile),
     MakeRoot("humans/pilot/female_dm/pilot_female_dm.mdl", &FemaleProfile),
 };
-// Playtest: the three *_cq models (imc/mcor male, female) are deliberately NOT retargeted: the pose retarget made the CQB pilot invisible,
-// so those models keep their native animation (no authored slide animation for CQB).
-static_assert(std::size(kRoots) == 6);
+static_assert(std::size(kRoots) == 9);
+// Playtest: the three *_cq models are NOT retargeted unless env R1DELTA_SLIDE_MODEL_ALL_ROOTS=1 (the retarget made the CQB pilot invisible, so
+// those models keep their native animation: no authored slide animation for CQB). Read once.
+bool AllRootsEnabled() noexcept
+{
+    static const bool enabled = []() noexcept {
+        char flag[8] = {};
+        const DWORD n = GetEnvironmentVariableA("R1DELTA_SLIDE_MODEL_ALL_ROOTS", flag, sizeof(flag));
+        return n == 1 && flag[0] == '1';
+    }();
+    return enabled;
+}
+bool IsCqRoot(const RootModel& root) noexcept
+{
+    return std::strstr(root.name, "_cq.mdl") != nullptr;
+}
 
 template<class T> T At(const void* object, std::size_t offset)
 {
@@ -2036,7 +2052,7 @@ const RootModel* FindRoot(std::uintptr_t raw) noexcept
     const auto* name = reinterpret_cast<const char*>(bytes + 12);
     if (std::memcmp(name, "humans/", 7)) return nullptr;
     for (const auto& root : kRoots)
-        if (std::memcmp(name, root.name, root.length + 1) == 0) return &root;
+        if (std::memcmp(name, root.name, root.length + 1) == 0) return (!AllRootsEnabled() && IsCqRoot(root)) ? nullptr : &root;
     return nullptr;
 }
 const RootModel* FindRootForStudio(std::uintptr_t studio) noexcept
