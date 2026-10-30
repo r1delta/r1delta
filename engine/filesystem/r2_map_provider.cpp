@@ -93,7 +93,7 @@ constexpr uint32_t kGameLump = 0x23;
 
 // Folded into the on-disk cache fingerprint together with entity_rewrite::kRewriteVersion.
 // Bump when the vendored bspdown converter or the provider's BSP post-processing changes output.
-constexpr uint32_t kConvertedBspCacheVersion = 33;  // 33: rule 26 sorts by (flag class, material sort) so decals and overlays stay after their base meshes (BWC SUBSTATION lettering); rule 26 is on for mp_eden only; 32: rule 26 mesh sort is opt-in again (decals vanished with it); 31: rule 26 world meshes sorted by material sort, only the regular render meshes [model 0 first, level info word 2), the sky meshes stay last (EdenCull; R1 draws at most 2048 runs per view); 29: rule 20f plane A keeps the R2 exposure (alpha) and spreads raised exposures (rtlBakeAlphaStep 1.2, no pale contours along baked pools) and rule 25 material namespace (round 16, one combined bump); 28: rule 20f DrydockSteps preset default (rtl-bake vsm, hot clip, smooth 1, bm terrain); 27: rule 24 now writes the glow ramp texture coordinate; 26: rule 24 emitter glow vertex alpha (vr_light_trim_01_totrans, mp_glitch); 25: mp_coliseum and mp_coliseum_column keep the last CSM environment (csmLastEnv); 24: rule 17 real CSM environment chosen by content (BWC, angel_city, coliseum, coliseum_column); 23: rule 23 far-origin prop fade distance
+constexpr uint32_t kConvertedBspCacheVersion = 34;  // 34: rule 26 is also on for mp_thaw (2780 runs in the R2 order, 384 sorted; R1 draws at most 2048 per view); 33: rule 26 sorts by (flag class, material sort) so decals and overlays stay after their base meshes (BWC SUBSTATION lettering); rule 26 is on for mp_eden only; 32: rule 26 mesh sort is opt-in again (decals vanished with it); 31: rule 26 world meshes sorted by material sort, only the regular render meshes [model 0 first, level info word 2), the sky meshes stay last (EdenCull; R1 draws at most 2048 runs per view); 29: rule 20f plane A keeps the R2 exposure (alpha) and spreads raised exposures (rtlBakeAlphaStep 1.2, no pale contours along baked pools) and rule 25 material namespace (round 16, one combined bump); 28: rule 20f DrydockSteps preset default (rtl-bake vsm, hot clip, smooth 1, bm terrain); 27: rule 24 now writes the glow ramp texture coordinate; 26: rule 24 emitter glow vertex alpha (vr_light_trim_01_totrans, mp_glitch); 25: mp_coliseum and mp_coliseum_column keep the last CSM environment (csmLastEnv); 24: rule 17 real CSM environment chosen by content (BWC, angel_city, coliseum, coliseum_column); 23: rule 23 far-origin prop fade distance
 
 // Raised onto the z of every info_spawnpoint_flag / human / human_start / titan / titan_start origin in lump 0 and in the five partition entity
 // files (see entity_rewrite::RaiseSpawnpointOrigins). The R1 server drops the spawnpoint back to the floor; one that starts inside solid is removed.
@@ -1570,9 +1570,10 @@ FileBytes ReadConvertedBsp(const MapRequest& request)
                 // No cloudmask on these two maps: the entity rewrite leaves the dummy light_environment last, so the CSM environment must be the last record too.
                 if (state->mapName == "mp_coliseum" || state->mapName == "mp_coliseum_column")
                     options.csmLastEnv = true;
-                // Rule 26 (mesh order) is verified in game on mp_eden (its roofs/decks/walls vanished past 2048 material runs per view); other maps keep the R2 order
-                // until checked (token mesh-order enables it, no-mesh-order forces it off).
-                if (state->mapName == "mp_eden" && R2ConverterVariantString().find("no-mesh-order") == std::string::npos)
+                // Rule 26 (mesh order): R1 draws at most 2048 material runs per view and drops the highest mesh indices past that. It is on for the maps whose
+                // R2 order has more than 2048 (sort, cubemap, flags & 0x60) runs when every mesh is visible (census: mp_eden 5252, mp_thaw 2780; the next
+                // highest are mp_drydock 1656 and mp_relic02 1458) and off elsewhere until checked (token mesh-order enables it for all maps, no-mesh-order forces it off).
+                if ((state->mapName == "mp_eden" || state->mapName == "mp_thaw") && R2ConverterVariantString().find("no-mesh-order") == std::string::npos)
                     options.orderMeshes = true;
                 bspdown::Report report;
                 {
