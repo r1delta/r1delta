@@ -377,6 +377,17 @@ if (Test-Path -LiteralPath $FdOverlay) {
     Say 'DynWeapons2 hunks re-applied on the FD-patched _consts.nut / cl_main_hud.nut / _coobj_towerdefense.nut'
 }
 
+# ---- BurnCards: embarking while a pilot burn card weapon is being applied handed the pilot weapon to the Titan; the cleanup loop compared
+# arrays by identity and never matched. tools\combo\burncards\core-burncards-embark-race.patch is made against the pinned CORE; once (reverse check).
+$bcPatch = Join-Path $CodeRoot 'tools\combo\burncards\core-burncards-embark-race.patch'
+if (Test-Path -LiteralPath $bcPatch) {
+    $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    & git -C $Core apply --ignore-whitespace --whitespace=nowarn -R --check $bcPatch 2>$null
+    $bcDone = ($LASTEXITCODE -eq 0)
+    $ErrorActionPreference = $prev
+    if (-not $bcDone) { GitC $Core @('apply', '--ignore-whitespace', '--whitespace=nowarn', $bcPatch) | Out-Null; Say 'applied core-burncards-embark-race.patch' }
+}
+
 # ---- LobbyMaps CORE (R2 maps in the picker/lobby/vote/browser, playlists, group 4/5 ownership): patch applies on top of the FD overlay (it was
 # made against the staged CORE), once (reverse check); the 11 localization files are replaced whole (unlink + copy).
 $lm = Join-Path $CodeRoot 'tools\combo\lobbymaps'

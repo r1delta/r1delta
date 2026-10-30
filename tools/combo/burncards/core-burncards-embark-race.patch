@@ -1,0 +1,74 @@
+diff --git a/scripts/vscripts/mp/_burncards.nut b/scripts/vscripts/mp/_burncards.nut
+index 784e22a..19332ee 100644
+--- a/scripts/vscripts/mp/_burncards.nut
++++ b/scripts/vscripts/mp/_burncards.nut
+@@ -165,6 +165,29 @@ function WaitForPlayerActiveWeapon( player,className = null )
+ 	return weapon
+ }
+ 
++function BurnCardWaitForPilot( player )
++{
++	while ( player.IsTitan() )
++	{
++		player.WaitSignal( "OnLeftTitan" )
++		wait 0.5
++	}
++}
++
++function BurnCardModsEqual( a, b )
++{
++	local aLength = a ? a.len() : 0
++	local bLength = b ? b.len() : 0
++	if ( aLength != bLength )
++		return false
++	for ( local i = 0; i < aLength; i++ )
++	{
++		if ( a[i] != b[i] )
++			return false
++	}
++	return true
++}
++
+ function ApplyPilotWeaponBurnCards_Threaded( player, cardRef )
+ {
+     player.EndSignal( "OnDestroy" )
+@@ -236,12 +259,21 @@ function ApplyPilotWeaponBurnCards_Threaded( player, cardRef )
+         while ( !IsValid( weaponToTake ) )
+             wait 0.1
+ 
++        BurnCardWaitForPilot( player )
+         player.TakeWeapon( weaponToTake.GetClassname() )
+ 
+         wait 0.1
+ 
+         while ( true )
+         {
++            // Embarking while this card is applied must not hand the pilot weapon to the Titan. Squirrel threads only yield at
++            // wait/WaitSignal, so this check cannot race an embark before the GiveWeapon below.
++            if ( player.IsTitan() )
++            {
++                BurnCardWaitForPilot( player )
++                continue
++            }
++
+             try
+             {
+                 player.GiveWeapon(weaponData.weapon, weaponData.mods, false)
+@@ -256,6 +288,7 @@ function ApplyPilotWeaponBurnCards_Threaded( player, cardRef )
+ 
+         wait 0.1
+ 
++        BurnCardWaitForPilot( player )
+         player.SetActiveWeapon(weaponData.weapon)
+     }
+ 
+@@ -268,7 +301,8 @@ function ApplyPilotWeaponBurnCards_Threaded( player, cardRef )
+             foreach( weapon in weapons )
+             {
+                 local className = weapon.GetClassname()
+-                if ( className == weaponData.weapon && weapon.GetMods() == weaponData.mods )
++                // Arrays compare by identity in Squirrel, so == on two GetMods() results was never true: compare the elements.
++                if ( className == weaponData.weapon && BurnCardModsEqual( weapon.GetMods(), weaponData.mods ) )
+                 {
+                     player.TakeWeapon( className )
+                     printt( "Removed burncard weapon ", className, " from player ", player.GetPlayerName() )
