@@ -555,6 +555,9 @@
     <ClInclude Include="client\rendering\material_shader_record_guard.h">
       <Filter>client\rendering</Filter>
     </ClInclude>
+    <ClInclude Include="client\rendering\texture_alias_lifetime.h">
+      <Filter>client\rendering</Filter>
+    </ClInclude>
     <ClInclude Include="client\rendering\graphics_flight_recorder.h">
       <Filter>client\rendering</Filter>
     </ClInclude>
@@ -1225,6 +1228,9 @@
       <Filter>client\rendering</Filter>
     </ClCompile>
     <ClCompile Include="client\rendering\material_shader_record_guard.cpp">
+      <Filter>client\rendering</Filter>
+    </ClCompile>
+    <ClCompile Include="client\rendering\texture_alias_lifetime.cpp">
       <Filter>client\rendering</Filter>
     </ClCompile>
     <ClCompile Include="client\rendering\graphics_flight_recorder.cpp">
