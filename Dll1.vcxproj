@@ -235,6 +235,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="engine\logging\crash_report_memory_capture.h" />
     <ClInclude Include="engine\logging\crash_report_context.h" />
     <ClInclude Include="engine\core\materialsystem_dx11_vtf_scratch.h" />
+    <ClInclude Include="engine\core\materialsystem_dx11_shader_record.h" />
     <ClInclude Include="engine\core\materialsystem_dx11_txaa_lifetime.h" />
     <ClInclude Include="engine\core\materialsystem_dx11_render_thread.h" />
     <ClInclude Include="engine\core\materialsystem_dx11_input_layout_cache.h" />
@@ -359,6 +360,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="thirdparty\fidelityfx\ffx_antilag2_dx11.h" />
     <ClInclude Include="client\rendering\reflex.h" />
     <ClInclude Include="client\rendering\material_resource_ownership.h" />
+    <ClInclude Include="client\rendering\material_shader_record_guard.h" />
     <ClInclude Include="client\rendering\graphics_flight_recorder.h" />
     <ClInclude Include="client\rendering\graphics_flight_recorder_storage.h" />
     <ClInclude Include="thirdparty\jwt\jwt_compact.h" />
@@ -626,6 +628,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="client\rendering\antilag.cpp" />
     <ClCompile Include="client\rendering\reflex.cpp" />
     <ClCompile Include="client\rendering\material_resource_ownership.cpp" />
+    <ClCompile Include="client\rendering\material_shader_record_guard.cpp" />
     <ClCompile Include="client\rendering\graphics_flight_recorder.cpp" />
     <ClCompile Include="client\rendering\graphics_flight_recorder_hooks.cpp" />
     <ClCompile Include="sdk\keyvalues.cpp" />

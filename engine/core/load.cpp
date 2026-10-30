@@ -137,6 +137,7 @@
 #include "hudwarp_convars.h"
 #include "hudwarp_hooks.h"
 #include "material_resource_ownership.h"
+#include "material_shader_record_guard.h"
 #include "graphics_flight_recorder.h"
 #include "surfacerender.h"
 #include "mcp_server.h"
@@ -9948,6 +9949,7 @@ void __stdcall LoaderNotificationCallback(
 		}
 		if (!HasEngineCommandLineFlag("-r1delta_disable_material_guards")) {
 			InstallMaterialSystemDx11NullShaderResourceGuard(G_matsystem);
+			InstallMaterialShaderRecordGuard(G_matsystem);
 			if (GetR1DeltaEngineMode() == R1DeltaEngineMode::Client2015) {
 				InstallMaterialSystemDx11TxaaLifetimeGuard(G_matsystem);
 			}
