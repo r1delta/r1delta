@@ -280,16 +280,17 @@ $tmpG = Join-Path $env:TEMP ('combo-pilot-' + [Guid]::NewGuid().ToString('N') + 
 [IO.File]::WriteAllText($tmpG, $sG.Replace($aG, '( ::PilotMovementGrappleHeld && GetConVarInt( "delta_pilot_grapple_enabled" ) != 0 ) ? 1 : 0'), [Text.UTF8Encoding]::new($false))
 [ComboNative]::Replace($tmpG, $pnG); Remove-Item $tmpG
 Say 'grapple gated by delta_pilot_grapple_enabled (default 0)'
-# 3P slide body animation disabled for the playtest (stuck slide animation after the slide ends): both writers of Movement_SetSlideActivity (client
-# slide_body.nut presentation loop, server pilot_server.nut) pass (0,false) while delta_pilot_slide_body is 0 (native cvar, default 0), which also
-# releases an override that was left set. Slide movement, slide audio and the viewmodel tilt are untouched.
+# 3P slide body animation disabled for the playtest (stuck slide animation after the slide ends): both per-frame writers of Movement_SetSlideActivity
+# (client slide_body.nut presentation loop, server pilot_server.nut) are skipped while delta_pilot_slide_body is 0 (native cvar, default 0).
+# NOT passed as (0,false): session 0 makes the native side clear the player's whole presentation record every frame, which also wipes the viewmodel
+# tilt / FOV features set by the presentation script. Slide movement, slide audio and the viewmodel tilt are untouched.
 foreach ($fn in @('slide_body.nut', 'pilot_server.nut')) {
     $pnB = Join-Path $Core ('scripts\vscripts\movement\' + $fn)
     $sB = [IO.File]::ReadAllText($pnB)
     $aB = 'Movement_SetSlideActivity( player, session, sliding )'
     if (-not $sB.Contains($aB)) { throw "$fn slide body gate anchor missing" }
     $tmpB = Join-Path $env:TEMP ('combo-body-' + [Guid]::NewGuid().ToString('N') + '.nut')
-    [IO.File]::WriteAllText($tmpB, $sB.Replace($aB, 'Movement_SetSlideActivity( player, ( GetConVarInt( "delta_pilot_slide_body" ) != 0 ) ? session : 0, ( GetConVarInt( "delta_pilot_slide_body" ) != 0 ) && sliding )'), [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText($tmpB, $sB.Replace($aB, 'if ( GetConVarInt( "delta_pilot_slide_body" ) != 0 ) Movement_SetSlideActivity( player, session, sliding )'), [Text.UTF8Encoding]::new($false))
     [ComboNative]::Replace($tmpB, $pnB); Remove-Item $tmpB
 }
 Say 'slide body animation switch delta_pilot_slide_body wired (native default 1)'
