@@ -4,6 +4,7 @@
 #include "core.h"
 #include "logging.h"
 #include <MinHook.h>
+#include "engine/filesystem/r2_map_provider.h"
 #include <array>
 #include <cstddef>
 #include <cstdlib>
@@ -140,7 +141,13 @@ std::uint32_t ConstantValue(std::uint8_t kind) {
     }
 }
 
-// Records the CRC and the alias count before the generated R2 script and restores the CRC after it.
+// The generated R2 alias script (scripts/r2port_sounds.txt) is the last manifest file. This hook runs for every script load:
+//  - it records the CRC and the alias count before that file and restores the CRC after it (the tail stays invisible to the parity
+//    check and to a stock peer's CRC);
+//  - it never lets a loose copy of that file load: the in-memory script comes from the provider fallback (only when the expanded
+//    tables are installed and this process has a Titanfall 2 install and R2 sound on), and a loose copy left in the game directory by
+//    an earlier run (the legacy dedicated server places one) would win over it and enter the table as ordinary, parity-visible aliases
+//    and make every stock client mismatch. The loose copy is deleted; without the expanded tables the file is not loaded at all.
 void __fastcall ScriptLoadHook(const char* filename) {
     auto* engine = reinterpret_cast<unsigned char*>(s_engine);
     auto& crc = *reinterpret_cast<std::uint32_t*>(engine + kCrcRva);
@@ -149,9 +156,18 @@ void __fastcall ScriptLoadHook(const char* filename) {
         s_hiddenAliases = 0;
         s_hiddenStart = ~0u;
     }
+    const bool aliasScript = filename && _stricmp(filename, "scripts/r2port_sounds.txt") == 0;
+    if (aliasScript) {
+        if (!r2port::RemoveStaleGeneratedSoundScript())
+            Warning("R1Delta R1O sound tables: cannot remove a loose scripts/r2port_sounds.txt from the game directory\n");
+        if (!s_installed) {
+            Msg("R1Delta R1O sound tables: scripts/r2port_sounds.txt not loaded (expanded tables are off); stock alias table\n");
+            return;
+        }
+    }
     const std::uint32_t crcBefore = crc;
     s_scriptLoad(filename);
-    if (filename && _stricmp(filename, "scripts/r2port_sounds.txt") == 0) {
+    if (aliasScript) {
         const int after = *reinterpret_cast<const int*>(engine + kAliasCountRva);
         s_hiddenStart = static_cast<std::uint32_t>(aliases);
         s_hiddenAliases = after > aliases ? static_cast<std::uint32_t>(after - aliases) : 0;
@@ -178,9 +194,8 @@ bool InstallScriptLoadHook(std::uintptr_t engineBase) {
     }
     return true;
 }
-}  // namespace
 
-bool InstallR1OSoundTables(std::uintptr_t engineBase) {
+bool InstallExpansion(std::uintptr_t engineBase) {
     if (s_installed)
         return engineBase == s_engine;
     if (!IsR1ODedicatedServer() || !engineBase)
@@ -306,6 +321,23 @@ bool InstallR1OSoundTables(std::uintptr_t engineBase) {
     // The CRC/parity hiding is required for the tail to be harmless to a stock peer; without it the larger table still works
     // (it only holds what the scripts define), so a failed hook just keeps the R2 alias file from being served.
     return InstallScriptLoadHook(engineBase);
+}
+}  // namespace
+
+bool InstallR1OSoundTables(std::uintptr_t engineBase) {
+    if (s_installed)
+        return engineBase == s_engine;
+    if (!IsR1ODedicatedServer() || !engineBase)
+        return false;
+    if (InstallExpansion(engineBase))
+        return true;
+    // No expanded tables (disabled, unknown build, relocation refused): the R2 aliases are not served, and the script loader still
+    // has to keep a stale scripts/r2port_sounds.txt out of the stock table. The hook only needs the verified loader prologue.
+    if (!s_scriptLoad && !s_installed) {
+        s_engine = engineBase;
+        InstallScriptLoadHook(engineBase);
+    }
+    return false;
 }
 
 const void* GetR1OSoundNameEntries() {

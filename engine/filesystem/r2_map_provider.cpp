@@ -1999,6 +1999,16 @@ bool PlaceGeneratedSoundScript()
     return static_cast<bool>(output);
 }
 
+bool RemoveStaleGeneratedSoundScript()
+{
+    const auto gameDirectory = FindGameContentDirectory();
+    if (gameDirectory.empty())
+        return false;
+    std::error_code error;
+    std::filesystem::remove(gameDirectory / "scripts" / "r2port_sounds.txt", error);
+    return !std::filesystem::exists(gameDirectory / "scripts" / "r2port_sounds.txt", error);
+}
+
 std::filesystem::path MaterializeMapCacheFile(std::string_view path)
 {
     const auto normalized = NormalizeProviderPath(path);

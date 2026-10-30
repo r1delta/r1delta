@@ -43,6 +43,11 @@ bool IsR2PortMap(std::string_view mapName);
 // Legacy dedicated engine only: writes the generated scripts/r2port_sounds.txt as a loose file in the game directory (or removes a
 // stale one when none is generated) before the engine loads it. True when the file is in place.
 bool PlaceGeneratedSoundScript();
+// Engines whose file lookup reaches the provider fallback (R1O fake dedicated): the alias script is served from memory, so a loose
+// scripts/r2port_sounds.txt left in the game directory by an earlier run (a legacy dedicated server places one) is deleted before the
+// engine loads the script; a loose file would win over the provider and inject whatever it holds as ordinary aliases. True when no
+// loose file remains.
+bool RemoveStaleGeneratedSoundScript();
 // True once after the provider has served an AI graph package to the engine; cleared by the call. The server's AIN
 // validation hook uses it to accept a packaged graph whose entity CRC the engine cannot match (developer > 0).
 bool ConsumeServedAinPackage();

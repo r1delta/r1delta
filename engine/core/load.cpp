@@ -9888,8 +9888,13 @@ void __stdcall LoaderNotificationCallback(
 		// Before the dedicated engine's first sound-script load: its tables cap
 		// at 16,628 aliases, which truncates the current set.
 		// The generated R2 sound aliases only fit (and are only served) when the expanded table is in place and their CRC is hidden.
-		if (InstallLegacyDSSoundTableExpansion(G_engine_ds) && InstallLegacyDSAliasHiding(G_engine_ds))
-			r2audio::SetAliasCapacityOk(true);
+		// The loader hook is installed even when the expansion is refused: it removes a stale loose scripts/r2port_sounds.txt left
+		// by an earlier run, which would otherwise be loaded as ordinary (parity-visible) aliases.
+		{
+			const bool expanded = InstallLegacyDSSoundTableExpansion(G_engine_ds);
+			if (InstallLegacyDSAliasHiding(G_engine_ds) && expanded)
+				r2audio::SetAliasCapacityOk(true);
+		}
 		PlaylistLoader_Init(G_engine_ds); // before dedicated.dll's first playlists.txt load (the VGUI start-up path)
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x433C0), &ProcessConnectionlessPacketDedi, reinterpret_cast<LPVOID*>(&ProcessConnectionlessPacketOriginal));
 		MH_CreateHook((LPVOID)((uintptr_t)GetModuleHandleA("engine_ds.dll") + 0x30FE20), &StringCompare_AllTalkHookDedi, reinterpret_cast<LPVOID*>(&oStringCompare_AllTalkHookDedi));
