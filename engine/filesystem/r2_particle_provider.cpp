@@ -177,16 +177,43 @@ private:
     mutable FileBytes m_pcf;
 };
 
-// materials/particle/** files that R1 lacks and the R2 mp_common VPK carries. (Map-specific ones are
-// answered by R2MapPackFileProvider.) R1 files win because the registry is only consulted on a miss.
+// R2-only particle materials (and one texture) that the converted particle systems name and that neither R1 nor the R2 mp_common
+// VPK carries: each exists only in the listed R2 map's own directory VPK (engine/r2port/particles/scope/materials.tsv and
+// textures.tsv, column r2_vpks; where several maps carry a file the first of them is listed and the directory CRCs of the copies are equal).
+// R2MapPackFileProvider answers them only while that R2 map is the active map, but R1 precaches every particle system of a level
+// from the ParticleEffectNames string table during SIGNONSTATE_CONNECTED, before it opens maps/<map>.bsp (the moment the active
+// map changes). A CMaterial that already exists from an earlier session then fails its lazy re-initialisation with no VMT to read
+// and R1's material accessors dereference its null per-thread context (materialsystem_dx11+0x3B052, "read of 0x4", seen on
+// mp_lobby -> mp_drydock for particle/fire/fire_dir_rand_trail_db20.vmt). Serving these in every map removes the gap.
+struct MapOnlyParticleFile {
+    std::string_view path;
+    const char* map;
+};
+constexpr MapOnlyParticleFile kMapOnlyParticleFiles[] = {
+    { "materials/particle/fire/fire_dir_rand_db5.vmt", "mp_crashsite3" },
+    { "materials/particle/fire/fire_dir_rand_trail_db20.vmt", "mp_drydock" },
+    { "materials/particle/refract/water_droplet_nml_nocull.vmt", "mp_glitch" },
+    { "materials/particle/smoke/cloud_cumulus_db512_nearcull.vmt", "mp_thaw" },
+    { "materials/particle/smoke/cloud_cumulus.vtf", "mp_thaw" },
+    { "materials/particle/smoke/fog_thin_perlin_add_db128_nearcull.vmt", "mp_crashsite3" },
+    { "materials/particle/smoke/fog_thin_perlin_db512_nearcull.vmt", "mp_eden" },
+    { "materials/particle/smoke/fog_thin_perlin_db60.vmt", "mp_glitch" },
+    { "materials/particle/smoke/fog_thin_perlin_db_nearcull2.vmt", "mp_crashsite3" },
+    { "materials/particle/smoke/fog_thin_perlin_db_nearcull_nodoftsaa.vmt", "mp_forwardbase_kodai" },
+    { "materials/particle/smoke/rocket_trail_soft_edge_db10.vmt", "mp_black_water_canal" },
+    { "materials/particle/smoke/smoke_puff_01_nofog.vmt", "mp_crashsite3" },
+    { "materials/particle/water/water_splash_erode_trail_db5.vmt", "mp_glitch" },
+};
+
+// materials/particle/** files that R1 lacks: the ones the R2 mp_common VPK carries, and the few in kMapOnlyParticleFiles. (Other
+// map-specific ones are answered by R2MapPackFileProvider.) R1 files win because the registry is only consulted on a miss.
 class R2ParticleMaterialProvider final : public FileProvider {
 public:
     bool MayContain(std::string_view normalizedPath) const override
     {
         if (normalizedPath.substr(0, kParticleMaterialPrefix.size()) != kParticleMaterialPrefix)
             return false;
-        const auto index = Index();
-        return index && index->find(std::string(normalizedPath)) != index->end();
+        return !PackFor(normalizedPath).empty();
     }
 
     bool CanCacheMisses() const override { return static_cast<bool>(Index()); }
@@ -201,10 +228,20 @@ public:
 
     FileBytes Read(std::string_view normalizedPath) override
     {
-        if (!MayContain(normalizedPath))
+        if (normalizedPath.substr(0, kParticleMaterialPrefix.size()) != kParticleMaterialPrefix)
+            return {};
+        const std::string pack = PackFor(normalizedPath);
+        if (pack.empty())
             return {};
         const std::string path(normalizedPath);
-        const FileBytes data = R1OVPK_ReadDirectoryVPKFile(m_pack.c_str(), path.c_str());
+        const FileBytes data = R1OVPK_ReadDirectoryVPKFile(pack.c_str(), path.c_str());
+        if (data && pack != m_pack && m_mapOnlyLogged.fetch_add(1, std::memory_order_relaxed) < 16) {
+            char message[640]{};
+            _snprintf_s(message, sizeof(message), _TRUNCATE,
+                "R1Delta: R2 particle material served from a map pack in every map path=%s pack=%s bytes=%zu\n",
+                path.c_str(), pack.c_str(), data->size());
+            LogParticleMessage(message);
+        }
         if (data && !m_logged.exchange(true, std::memory_order_relaxed)) {
             char message[512]{};
             _snprintf_s(message, sizeof(message), _TRUNCATE,
@@ -237,11 +274,50 @@ private:
         return m_index;
     }
 
+    // Pack path of the R2 map directory VPK that carries `path`, for the files in kMapOnlyParticleFiles; empty otherwise.
+    std::string MapOnlyPack(std::string_view path) const
+    {
+        const MapOnlyParticleFile* entry = nullptr;
+        for (const MapOnlyParticleFile& file : kMapOnlyParticleFiles) {
+            if (file.path == path) {
+                entry = &file;
+                break;
+            }
+        }
+        if (!entry)
+            return {};
+        const std::string key(path);
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            const auto found = m_mapOnlyPacks.find(key);
+            if (found != m_mapOnlyPacks.end())
+                return found->second;
+        }
+        const std::string packName = std::string("englishclient_") + entry->map + ".bsp.pak000_dir.vpk";
+        std::string pack = PackPath(packName.c_str());
+        if (!pack.empty() && !R1OVPK_HasDirectoryVPKFile(pack.c_str(), key.c_str()))
+            pack.clear();
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_mapOnlyPacks.emplace(key, pack);
+        return pack;
+    }
+
+    // The VPK that answers `path`: mp_common for the files its index lists, else the one map VPK the table names.
+    std::string PackFor(std::string_view path) const
+    {
+        const auto index = Index();
+        if (index && index->find(std::string(path)) != index->end())
+            return m_pack;
+        return MapOnlyPack(path);
+    }
+
     mutable std::mutex m_mutex;
     mutable bool m_built = false;
     mutable std::string m_pack;
     mutable std::shared_ptr<const PathSet> m_index;
+    mutable std::unordered_map<std::string, std::string> m_mapOnlyPacks;
     std::atomic<bool> m_logged{};
+    std::atomic<unsigned> m_mapOnlyLogged{};
 };
 
 std::shared_ptr<R2ParticleProvider> g_provider;
