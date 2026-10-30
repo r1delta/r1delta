@@ -132,22 +132,6 @@ void TestServerPrefixAndFallback()
 	Check(DetectPresence(clientOnly.Probe(), true, false).have[1], "a server falls back to the client pack");
 }
 
-void TestManifest()
-{
-	const FileRequirement files[] = { { "r2/paks/Win64/a.rpak", 100 }, { "vpk/b.vpk", 50 } };
-	FakeDisk disk;
-	disk.files["r2/paks/Win64/a.rpak"] = 100;
-	disk.files["vpk/b.vpk"] = 70;
-	std::string problem;
-	Check(ManifestSatisfied(disk.Probe(), files, 2, &problem), "complete install");
-	disk.files["r2/paks/Win64/a.rpak"] = 99;
-	Check(!ManifestSatisfied(disk.Probe(), files, 2, &problem) && problem.find("smaller") != std::string::npos,
-		"a truncated file fails and is named");
-	disk.files.erase("r2/paks/Win64/a.rpak");
-	Check(!ManifestSatisfied(disk.Probe(), files, 2, &problem) && problem.find("missing") != std::string::npos,
-		"a missing file fails and is named");
-}
-
 void TestRotation()
 {
 	const uint32_t host = kBaseBit | GroupBit(1) | GroupBit(2) | GroupBit(4) | GroupBit(5);
@@ -199,7 +183,6 @@ int main()
 	TestDeltaCommonNeedsDirectories();
 	TestOwnPackOwnsOneGroup();
 	TestServerPrefixAndFallback();
-	TestManifest();
 	TestRotation();
 	TestUserInfo();
 	TestMessages();

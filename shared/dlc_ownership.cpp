@@ -24,11 +24,6 @@ using namespace r1d_dlc;
 
 constexpr char kServerGroupsConVar[] = "serverDLCMapGroups";
 
-// The Titanfall 2 files a machine needs for the 20 converted maps (see tools/r2port/gen_install_manifest.py).
-constexpr FileRequirement kR2Manifest[] = {
-#include "r2_install_manifest.inc"
-};
-
 struct State {
 	std::atomic<uint32_t> localMask{ kBaseBit };
 	std::atomic<DWORD> lastRefreshTick{ 0 };
@@ -116,17 +111,17 @@ int64_t StatSizeA(const char* path)
 	return StatSizeW(std::filesystem::path(GameRoot() + path));
 }
 
+// Group 5 (the 20 converted Titanfall 2 maps) is owned exactly when the map provider has a valid Titanfall 2 install: the same
+// r2port::GetR2InstallDirectory() search and validator that mounts the maps. That validator (IsValidR2Install in r2_map_provider.cpp) checks
+// bin/x64_retail/rtech_game.dll, a common client VPK directory plus vpk/client_mp_common.bsp.pak000_000.vpk, no r1/gameinfo.txt (not an R1 root)
+// and at least one .rpak in r2/paks/Win64. There is no per-file size manifest: any install the provider mounts counts (other languages/versions).
 bool Group5Complete(std::string& problem)
 {
-	const std::filesystem::path install = r2port::GetR2InstallDirectory();
-	if (install.empty()) {
-		problem = "no valid Titanfall 2 install found";
+	if (r2port::GetR2InstallDirectory().empty()) {
+		problem = "no valid Titanfall 2 install found (R1DELTA_TITANFALL2_PATH or the usual Steam/EA/Origin folders; needs bin/x64_retail/rtech_game.dll, vpk/client_mp_common and r2/paks/Win64/*.rpak)";
 		return false;
 	}
-	const SizeProbe probe = [&install](const std::string& relative) {
-		return StatSizeW(install / std::filesystem::path(relative));
-	};
-	return ManifestSatisfied(probe, kR2Manifest, std::size(kR2Manifest), &problem);
+	return true;
 }
 
 bool IsGroup5Map(std::string_view map)

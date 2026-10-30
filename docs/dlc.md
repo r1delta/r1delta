@@ -6,7 +6,7 @@ Five groups, bit n of every mask (bit 0 = base game, always owned):
 |---|---|---|
 | 1-3 | the Titanfall DLC packs (`mp_runoff`/`swampland`/`wargames`, `mp_haven`/`switchback`/`harmony_mines`, `mp_zone_18`/`backwater`/`sandtrap`) | `vpk/client_mp_delta_common.bsp.pak000_000.vpk` is non-empty and every map of the group has its `englishclient_<map>.bsp.pak000_dir.vpk`, or every map has its own non-empty content pack plus directory VPK |
 | 4 | Titanfall Online maps `mp_box`, `mp_mia`, `mp_nest2` | delta_common is non-empty and the three directory VPKs exist |
-| 5 | the 20 converted Titanfall 2 maps (`kR2MapAllowlist`) | a valid Titanfall 2 install (same search as the map provider, `R1DELTA_TITANFALL2_PATH` first) contains every file of `engine/filesystem/r2_install_manifest.inc` at its recorded size or larger. Starpaks are not listed (players delete the HD ones). Regenerate with `tools/r2port/gen_install_manifest.py <Titanfall2 root>` |
+| 5 | the 20 converted Titanfall 2 maps (`kR2MapAllowlist`) | the map provider has a valid Titanfall 2 install: the same search as the map provider (`R1DELTA_TITANFALL2_PATH` first) and the same validator (`IsValidR2Install`): `bin/x64_retail/rtech_game.dll`, a common client VPK directory plus `vpk/client_mp_common.bsp.pak000_000.vpk`, no `r1/gameinfo.txt`, and at least one `.rpak` in `r2/paks/Win64`. There is no per-file manifest: any install the provider mounts counts, whatever its language or version |
 
 A dedicated server uses the `server_` packs and falls back to the `client_` ones. A zero-byte file is a launcher placeholder and counts as missing. Sizes are read from an open handle: `GetFileAttributesEx` reports 0 for the 12.5 GB delta_common pack.
 

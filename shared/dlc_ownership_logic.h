@@ -82,11 +82,6 @@ inline int GroupForMap(std::string_view map, const MapPredicate& isGroup5Map)
 // Size in bytes of a file relative to the game root, or -1 when it does not exist.
 using SizeProbe = std::function<int64_t(const std::string& relativePath)>;
 
-struct FileRequirement {
-	const char* path;
-	uint64_t minimumSize;
-};
-
 inline const char* PackPrefix(bool server)
 {
 	return server ? "server_" : "client_";
@@ -138,23 +133,6 @@ inline bool MapDirectoryPresent(const SizeProbe& probe, bool server, const char*
 	return false;
 }
 
-// Every file of the manifest exists with at least the recorded size. Starpaks are not in the manifest.
-inline bool ManifestSatisfied(const SizeProbe& probe, const FileRequirement* files, size_t count,
-	std::string* firstProblem = nullptr)
-{
-	for (size_t i = 0; i < count; ++i) {
-		const int64_t size = probe(files[i].path);
-		if (size < 0 || static_cast<uint64_t>(size) < files[i].minimumSize) {
-			if (firstProblem) {
-				*firstProblem = files[i].path;
-				*firstProblem += size < 0 ? " is missing" : " is smaller than expected";
-			}
-			return false;
-		}
-	}
-	return true;
-}
-
 struct Presence {
 	bool have[kGroupCount + 1] = {}; // index = group, [0] unused
 
@@ -169,7 +147,7 @@ struct Presence {
 	}
 };
 
-// `group5Complete` is the already evaluated Titanfall 2 manifest check (it uses a different root).
+// `group5Complete` is the already evaluated Titanfall 2 install check (it uses a different root).
 inline Presence DetectPresence(const SizeProbe& vpk, bool server, bool group5Complete)
 {
 	Presence presence;
