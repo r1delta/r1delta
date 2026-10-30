@@ -3435,6 +3435,30 @@ bool convertMaterialWithDb(const std::shared_ptr<Database>& db, std::string_view
             "}\n";
         return true;
     }
+    // models/water/waterfall_badlands_02_volume (the "volume" hull of the R2 waterfall props: mp_thaw thaw_waterfall_01_nocol, mp_crashsite3
+    // mp_crashsite_waterfall_02; the only model materials with this shader set): a 376 vertex hull around the falling sheet whose vertex alpha is 0 on
+    // 224 of the vertices and at most 85/255 elsewhere (VVC dump of thaw_waterfall_01_nocol, mean 18), over an albedo that is flat grey (RGB 66..184, mean
+    // alpha 0.89). R2 draws it premultiplied (ONE / INV_SRC_ALPHA, no depth write, back cull) with the alpha edge and alpha distance fades (shader set
+    // tokens Aef and Adf: Vcolt Vcola Adf Aef Trans), so it is a faint mist glow. R1 has neither fade, and the model path does not reproduce the vertex
+    // alpha gradient (the PropVertexAlpha study could not make a static prop honour the VVC alpha in game), so the hull draws as several overlapping
+    // uniformly tinted translucent facets with hard polygon edges: the large lavender-white wedge across the mp_thaw waterfall (user frame
+    // Titanfall_epRSmhjNP0, eye -1791 3332 -390, ang -11.6 174.1). The falling sheet itself is the other material of the model
+    // (waterfall_badlands_rapid_03: its own opacity map, scroll, $nocull), which is kept. The volume is therefore emitted as the invisible
+    // additive black material of kodai_fake_screen_alpha, which does not depend on how R1 plumbs vertex alpha, $alpha or the lit-prop shader.
+    // R2TEX_WATER_VOLUME=1 keeps the converted VertexLitGeneric volume (the opt-in is not part of the converted cache tag: wipe the converted
+    // cache when switching).
+    if (name == "models/water/waterfall_badlands_02_volume" &&
+        !(std::getenv("R2TEX_WATER_VOLUME") && std::atoi(std::getenv("R2TEX_WATER_VOLUME")) != 0)) {
+        material = Material{};
+        material.name = name;
+        material.vmt =
+            "\"UnlitGeneric\"\n{\n"
+            "\t\"$surfaceprop\" \"water\"\n"
+            "\t\"$basetexture\" \"effects\\black\"\n"
+            "\t\"$additive\" \"1\"\n"
+            "}\n";
+        return true;
+    }
     // models/mendoko/interior/mendoko_ui_decals/mendoko_ui_decals_01 (the 26 door hand scanners and the monitor-UI cards of
     // mp_forwardbase_kodai) and models/domestic/luggage_01_screen (models/angel_city/keypad_01): map-pack materials that
     // the rpaks do not carry, renamed r2m/ by the model converter, so the provider never found them and R1 drew its
