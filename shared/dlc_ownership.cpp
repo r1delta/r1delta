@@ -279,6 +279,29 @@ void KickServerPlayer(int slot, const char* text)
 	PData_ServerKickClient(slot, text);
 }
 
+// delta_dlc_players: one line per connected player with the groups they own, so a host can see who lacks dlc5 (match the slot with
+// `status` or the script player's GetEntIndex() - 1).
+void DlcPlayersCommand(const CCommand&)
+{
+	ServerPlayer players[kMaxServerPlayers];
+	const int count = EnumerateServerPlayers(players, kMaxServerPlayers);
+	Report(false, "delta_dlc_players: %d connected player(s), slot = entity index - 1\n", count);
+	for (int i = 0; i < count; ++i) {
+		char owned[kGroupCount * 2 + 1]{};
+		char missing[kGroupCount * 2 + 1]{};
+		size_t ownedLength = 0;
+		size_t missingLength = 0;
+		for (int group = 1; group <= kGroupCount; ++group) {
+			char* list = LacksGroup(players[i].mask, group) ? missing : owned;
+			size_t& length = LacksGroup(players[i].mask, group) ? missingLength : ownedLength;
+			list[length++] = static_cast<char>('0' + group);
+			list[length++] = ' ';
+		}
+		Report(false, "  slot %d mask 0x%X owns: %s missing: %s\n", players[i].slot, players[i].mask,
+			ownedLength ? owned : "-", missingLength ? missing : "-");
+	}
+}
+
 } // namespace
 
 void Dlc_RegisterConVars()
@@ -289,6 +312,9 @@ void Dlc_RegisterConVars()
 	done = true;
 
 	State& state = S();
+	if (!IsR1ODedicatedServer())
+		RegisterConCommand("delta_dlc_players", DlcPlayersCommand,
+			"Server: lists each connected player's slot and which DLC map groups they own (slot = entity index - 1)", FCVAR_NONE);
 	if (IsR1ODedicatedServer()) {
 		// TFO ships dlc1-3_enabled and serverDLCMapGroups itself (reached through the wrapped cvar system). Groups 4
 		// and 5 must exist as R1O userinfo convars or the engine drops what a client sends for them, and the
@@ -304,6 +330,8 @@ void Dlc_RegisterConVars()
 			state.overrides[g] = OriginalCCVar_FindVar ? OriginalCCVar_FindVar(cvarinterface, OverrideConVarName(g)) : nullptr;
 		}
 		state.serverGroups = OriginalCCVar_FindVar ? OriginalCCVar_FindVar(cvarinterface, kServerGroupsConVar) : nullptr;
+		RegisterR1ODediConCommand("delta_dlc_players", DlcPlayersCommand,
+			"Server: lists each connected player's slot and which DLC map groups they own (slot = entity index - 1)", FCVAR_NONE);
 		return;
 	}
 	for (int g = 1; g <= kGroupCount; ++g) {
