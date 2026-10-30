@@ -241,16 +241,14 @@ foreach ($p in @('core-slide-body.patch', 'core-grapple-credit.patch')) {
 
 $manifest = Get-Content -LiteralPath (Join-Path $Handover 'slide-assets-manifest.json') -Raw | ConvertFrom-Json
 $na = 0
+# Escrow 2: NO slide model asset is staged (the 36 replacement pilot models of models/humans/** and models/anim/pilot_slide*.mdl: the replacement
+# MDLs render the pilots invisible; the native slide pose retarget that used them is off). Every manifest file is DELETED from this root's CORE copy
+# when present (an earlier staging or the CORE itself may carry it), so -Refresh / -Flag can never leave one behind.
 foreach ($a in $manifest.files) {
-    $rel = $a.path.Replace('/', '\')
-    $src = Join-Path $AssetStage $rel
-    if ((Sha $src) -ne $a.sha256) { throw "asset hash mismatch $src" }
-    $dst = Join-Path $Core $rel
-    [ComboNative]::Replace($src, $dst)   # unlink + copy: the stock file may be a hardlink shared with other roots
-    if ((Sha $dst) -ne $a.sha256) { throw "asset copy mismatch $dst" }
-    $na++
+    $dst = Join-Path $Core ($a.path.Replace('/', '\'))
+    if (Test-Path -LiteralPath $dst) { Remove-Item -LiteralPath $dst -Force; $na++ }
 }
-Say "$na slide assets staged"
+Say "$na slide model assets removed from the root (none staged)"
 if ($Drive) {
     $pn = Join-Path $Core 'scripts\vscripts\movement\pilot.nut'
     $s = [IO.File]::ReadAllText($pn)
