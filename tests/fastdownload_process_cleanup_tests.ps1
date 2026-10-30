@@ -17,6 +17,8 @@ $createExitTask = $serviceType.GetMethod('CreateProcessExitTask', $binding)
 $tryGetExitCode = $serviceType.GetMethod('TryGetProcessExitCodeWithinAsync', $binding)
 $curlAttempt = $serviceType.GetMethod('RunCurlAttemptAsync', $binding)
 $buildCurlArguments = $serviceType.GetMethod('BuildCurlArguments', $binding)
+$echModeType = $serviceType.GetNestedType('CurlEchMode', $binding)
+$opportunisticEch = [Enum]::Parse($echModeType, 'Opportunistic')
 $resolveBundledCurl = $serviceType.GetMethod('ResolveBundledCurlPath', $binding)
 $downloadFiles = $serviceType.GetMethod('DownloadFilesAsync', $binding)
 $activeProcessField = $serviceType.GetField('_activeProcess', $binding)
@@ -169,15 +171,16 @@ try {
     $destination = Join-Path $root 'curl-smoke.bin'
     $payload = [System.Text.Encoding]::UTF8.GetBytes('r1delta curl cleanup regression payload')
     $requests = New-RequestArray "http://127.0.0.1:$port/payload.bin" $destination $payload.Length
+    # Third argument: the ECHConfigList; null selects the opportunistic "--ech true" form this test asserts.
     $curlArguments = [string]$buildCurlArguments.Invoke(
         $null,
-        [object[]]@($requests.GetValue(0), [string]($destination + '.curl.partial')))
+        [object[]]@($requests.GetValue(0), [string]($destination + '.curl.partial'), $null))
     Assert-True ($curlArguments -like '*--ech true*') 'curl command explicitly enables opportunistic ECH'
     Assert-True ($curlArguments -like '*--ca-native*') 'curl command uses the Windows native CA store'
     $acceptTask = $listener.AcceptTcpClientAsync()
     $attemptTask = $curlAttempt.Invoke(
         $service,
-        [object[]]@([string]$curlPath, [object]$requests, [System.Threading.CancellationToken]::None))
+        [object[]]@([string]$curlPath, [object]$requests, $opportunisticEch, [System.Threading.CancellationToken]::None))
 
     Assert-True $acceptTask.Wait(10000) 'curl connects to the local download endpoint'
     $client = $acceptTask.GetAwaiter().GetResult()
@@ -215,7 +218,7 @@ try {
     $stallAcceptTask = $listener.AcceptTcpClientAsync()
     $stallAttemptTask = $curlAttempt.Invoke(
         $service,
-        [object[]]@([string]$curlPath, [object]$stallRequests, [System.Threading.CancellationToken]::None))
+        [object[]]@([string]$curlPath, [object]$stallRequests, $opportunisticEch, [System.Threading.CancellationToken]::None))
 
     Assert-True $stallAcceptTask.Wait(10000) 'curl connects to the stalled download endpoint'
     $client = $stallAcceptTask.GetAwaiter().GetResult()
