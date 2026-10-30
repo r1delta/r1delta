@@ -22,7 +22,7 @@ Instructions on how to run the dedicated server on Docker are [here](https://gis
 
 The master server will not show your server if it can't be connected to publicly, so make sure to port-forward 27015 (and onwards if you're running multiple servers, 27016 etc) if you want it to be listed. 
 
-If you want to make a friends-only server and hide it from the server browser you should put `hide_server 1` into the console, you can then give out your ip and port for a direct connect (in the style of ip:port) or use Discord game invites, just note that you'll still need to port-forward if your friends are going to connect over the internet. You can also set `sv_password` if you'd like to password protect your server but keep it on the server browser, just keep in mind this *will* leak your server's IP.
+If you want to make a friends-only server and hide it from the server browser you should put `hide_server 1` into the console, you can then give out your ip and port for a direct connect (in the style of ip:port), but friends connecting over the internet will then need you to port-forward your game port (default 27015). Discord game invites from a hidden server carry an iroh/tailcat/EOS route instead, so they work without port forwarding when your friends run a current R1Delta build. You can also set `sv_password` if you'd like to password protect your server but keep it on the server browser, just keep in mind this *will* leak your server's IP.
 
 # Building From Source
 1. [Install vcpkg and run vcpkg integrate install](https://learn.microsoft.com/en-us/vcpkg/get_started/get-started-msbuild)

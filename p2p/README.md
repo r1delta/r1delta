@@ -193,6 +193,24 @@ portable. Secrets exceeding Discord's 127-byte limit are not advertised;
 long standalone tailcat addresses require joining through a listed server.
 Invite parsing rejects command delimiters and malformed endpoints.
 
+A hosted server that the master server cannot route to (`hide_server 1`, which never
+heartbeats, or a server that has not reached the master yet) publishes its own portable
+route in the join secret instead of `public-ip:port`: the iroh invite
+(`r1di1|iroh|<port>|<id>|<relay url>`, 117 bytes with the n0 relay), else tailcat, else
+the EOS fake IP (`[3ffe:...]:<port>`), whichever of the services the server already
+runs for hidden hosts is up and fits the 127-byte limit. Only the endpoint id, the relay
+URL and public IPv4 hints are published, never private, LAN, Tailscale or IPv6
+endpoints. A router mapping that provably exposes the game port (UPnP / NAT-PMP with a
+public external address, or a host with a public address) keeps the plain `ip:port`
+secret, as does a listed server, so older clients and clients without the plugin DLLs
+still join those. `delta_connect` prints which route the invite uses
+(`Discord: hosted-server invite route is now ...`).
+
+A bare IPv4 (`delta_connect 203.0.113.7`, legacy invites) uses the engine's default port
+27015 and goes through the master lookup like `ip:port`. If a plain `connect` (unlisted
+server, no answer on any route, master unreachable) is still at SIGNONSTATE_CHALLENGE
+after 8 seconds, the console says why and what the host can do.
+
 EOS initialization is deferred and does not depend on the numeric release
 version. An initialization failure remains nonfatal.
 
@@ -247,7 +265,12 @@ Server identities for iroh/tailcat are persisted under
   force each route in turn while exchanging fragmented game datagrams. A
   legacy (non-p2p) server checks the immediate plain-connect fallback;
   identity cases check that a token-less overlay join is refused and that a
-  ban on the attested IP blocks the player over iroh and TURN.
+  ban on the attested IP blocks the player over iroh and TURN. A `hide_server 1`
+  host behind the emulated NAT (`FAKE_HIDDEN=1`: no heartbeat, absent from the
+  master's list) must publish an iroh Discord secret within 127 bytes and no
+  private endpoint, and a joiner must connect over iroh from that invite alone.
+* `tests/p2p_codec_tests.cpp` also covers the invite builders (`PortableIrohAddress`,
+  `EosInviteForProductUserId`, `HostOverlayInvite`) and the bare-IP default port.
 
 Not covered by those: the Windows-only pieces (Winsock hook plumbing inside
 the real engine, UPnP/NAT-PMP against a real router, adapter enumeration, EOS
