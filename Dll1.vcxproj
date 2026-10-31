@@ -361,6 +361,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="client\rendering\reflex.h" />
     <ClInclude Include="client\rendering\material_resource_ownership.h" />
     <ClInclude Include="client\rendering\material_shader_record_guard.h" />
+    <ClInclude Include="client\rendering\material_load_fallback.h" />
     <ClInclude Include="client\rendering\texture_alias_lifetime.h" />
     <ClInclude Include="client\rendering\graphics_flight_recorder.h" />
     <ClInclude Include="client\rendering\graphics_flight_recorder_storage.h" />
@@ -631,6 +632,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="client\rendering\reflex.cpp" />
     <ClCompile Include="client\rendering\material_resource_ownership.cpp" />
     <ClCompile Include="client\rendering\material_shader_record_guard.cpp" />
+    <ClCompile Include="client\rendering\material_load_fallback.cpp" />
     <ClCompile Include="client\rendering\texture_alias_lifetime.cpp" />
     <ClCompile Include="client\rendering\graphics_flight_recorder.cpp" />
     <ClCompile Include="client\rendering\graphics_flight_recorder_hooks.cpp" />

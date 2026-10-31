@@ -138,6 +138,7 @@
 #include "hudwarp_hooks.h"
 #include "material_resource_ownership.h"
 #include "material_shader_record_guard.h"
+#include "material_load_fallback.h"
 #include "texture_alias_lifetime.h"
 #include "graphics_flight_recorder.h"
 #include "surfacerender.h"
@@ -9956,6 +9957,7 @@ void __stdcall LoaderNotificationCallback(
 			}
 		}
 		InstallMaterialResourceOwnership(G_matsystem);
+		InstallMaterialLoadFallback(G_matsystem);
 		InstallTextureAliasLifetime(G_matsystem);
 		r2port::shaders::InstallShaderOverrides(G_matsystem);
 		r2port::ao::Install(G_matsystem);
