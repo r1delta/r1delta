@@ -4,9 +4,14 @@
 # workstation with MSBuild 18 Community and the local dependency props, so a release can be
 # gated before it is pushed. Keep the lists in step with `.github/workflows/msbuild.yml`
 # ("Build native regression tests" / "Run native regression tests").
+#
+# CI resolves nlohmann-json/zstd through vcpkg. Locally, pass -DepsProps with a props file that adds those
+# include/library paths (imported with ForceImportAfterCppProps, vcpkg integration off), and keep a
+# `vcpkg_installed` directory (or junction) at the repository root for the tests that copy zstd.dll.
 param(
     [string]$RepoRoot = (Split-Path -Parent $PSScriptRoot),
     [string]$BuildPath = '',
+    [string]$DepsProps = '',
     [string[]]$Only = @(),
     [switch]$NoRebuild,
     [switch]$SkipLauncherTests
@@ -72,6 +77,9 @@ foreach ($entry in $selected) {
         '/p:CI=1', '/p:Configuration=Release', '/p:Platform=x64',
         "/p:OutDir=$outDir/", '/v:minimal', '/nologo'
     )
+    if ($DepsProps) {
+        $arguments += @('/p:VcpkgEnabled=false', "/p:ForceImportAfterCppProps=$DepsProps")
+    }
     & $msbuild @arguments | Out-Null
     if ($LASTEXITCODE -ne 0) {
         $failed += "$($entry.Key) (build exit $LASTEXITCODE)"
