@@ -71,23 +71,14 @@ struct PropR1 {
 static_assert(sizeof(PropR1) == 84, "PropR1");
 #pragma pack(pop)
 
-// Contents bits (R1 and R2 share the numbering; _consts.nut CONTENTS_*).
-constexpr uint32_t kContentsSolid = 0x1, kContentsOpaque = 0x80, kContentsPlayerClip = 0x10000, kContentsMonsterClip = 0x20000;
-constexpr uint32_t kContentsBlockLos = 0x80000, kContentsTitanClip = 0x200000, kContentsBulletClip = 0x400000;
-constexpr uint32_t kClassClips = kContentsPlayerClip | kContentsMonsterClip | kContentsTitanClip | kContentsBulletClip;
-
-// R1 builds a solid prop's contents as (model contents & ~remove) | add (engine.dll sub_18018B710, record +0x4C add / +0x50 remove);
-// the converted models carry CONTENTS_SOLID (0x1), which every R1 trace mask contains. R2 has no SOLID bit: a solid prop is the union of
-// the class bits (player, monster, titan, bullet clip, block LOS, opaque) and collision_flags_remove (record +0x3C) strips the classes
-// the prop must not block (small clutter: pilots walk through it; lampposts: pilots and titans). R2's u32 at +0x38 is not collision_flags_add
-// (it holds lighting data) and used to be OR'd into R1's add, which put garbage bits such as SOLID on every prop.
-// A prop that removes no class keeps SOLID. Otherwise SOLID is removed and the surviving class bits are added explicitly.
-void translateCollisionFlags(uint8_t solidType, uint32_t r2Remove, uint32_t& r1Add, uint32_t& r1Remove) {
+// R1 builds a solid prop's contents as (model contents & ~remove) | add (engine.dll sub_18018B710, record +0x4C add / +0x50 remove).
+// R2's u32 at +0x38 is not collision_flags_add (it holds lighting data: indices, -1, floats) and used to be OR'd into R1's add, which put
+// garbage bits on every prop. Only collision_flags_remove (record +0x3C) is a collision field; it is copied unchanged and R1's add is 0.
+// Measured on mp_lf_stacks: translating remove into explicit class bits (clearing SOLID) changed nothing for pilot/titan/shot traces and made
+// the props pass MASK_SOLID, so that translation was dropped; the pilot/titan blocking seen at clutter props there comes from R2 clip brushes.
+void translateCollisionFlags(uint8_t, uint32_t r2Remove, uint32_t& r1Add, uint32_t& r1Remove) {
     r1Add = 0;
-    r1Remove = 0;
-    if (solidType == 0 || (r2Remove & kClassClips) == 0) return;
-    r1Remove = kContentsSolid;
-    r1Add = (kClassClips | kContentsBlockLos | kContentsOpaque) & ~r2Remove;
+    r1Remove = r2Remove;
 }
 
 uint32_t rd32(const Bytes& b, size_t o) {
