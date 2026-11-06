@@ -5,6 +5,8 @@ import {
   MAX_FRAMES,
   ValidationError,
   fingerprintReport,
+  isClassified,
+  isModdedGame,
   publicCodeCandidates,
   validateAndNormalizeReport,
 } from "../src/normalization.js";
@@ -146,8 +148,18 @@ test("validation accepts only the versioned report contract", () => {
     ValidationError,
   );
   assert.throws(
+    () => validateAndNormalizeReport(report({ schema: 3 })),
+    ValidationError,
+  );
+  assert.throws(
     () => validateAndNormalizeReport(report({ schema: 2 })),
     ValidationError,
+    "schema 2 requires the modded member",
+  );
+  assert.throws(
+    () => validateAndNormalizeReport(report({ modded: [] })),
+    ValidationError,
+    "schema 1 accepts exactly the original keys",
   );
   assert.throws(
     () => validateAndNormalizeReport(report({ vmContext: "TOOLS" })),
@@ -272,4 +284,103 @@ test("public codes deterministically extend the SHA-256 prefix", async () => {
     assert.ok(candidates[index].startsWith(candidates[index - 1]));
     assert.equal(candidates[index].length, candidates[index - 1].length + 2);
   }
+});
+
+function report2(overrides = {}) {
+  return {
+    ...report({ schema: 2, frames: [{ function: "RunMatch", source: "scripts/vscripts/match.nut", line: 42, modded: false }] }),
+    modded: [],
+    ...overrides,
+  };
+}
+
+test("schema 1 fingerprints and public codes are frozen", async () => {
+  // Issued by the service before schema 2 existed: these must never change.
+  const normalized = validateAndNormalizeReport({
+    schema: 1,
+    vmContext: "CLIENT",
+    processMode: "CLIENT",
+    cascade: false,
+    error: "the index 'x' does not exist",
+    frames: [
+      { function: "ClientHudInit", source: "scripts/vscripts/client/cl_main_hud.nut", line: 4276 },
+      { function: "main", source: "C:\\g\\scripts\\vscripts\\_init.nut", line: 12 },
+    ],
+  });
+  const fingerprint = await fingerprintReport(normalized);
+  assert.equal(
+    fingerprint,
+    "63dda92179b7b44e083c9554d4192769994fe4407684dfce3eec3e5ad9d0847b",
+  );
+  assert.equal(publicCodeCandidates(fingerprint)[0], "CFETJ8BS");
+  assert.deepEqual(Object.keys(normalized), [
+    "schema", "vmContext", "processMode", "cascade", "error", "frames",
+  ]);
+});
+
+test("schema 2 validates the modded classification", () => {
+  const normalized = validateAndNormalizeReport(
+    report2({
+      modded: ["native", "addons"],
+      frames: [
+        { function: "A", source: "scripts/vscripts/a.nut", line: 1, modded: false },
+        { function: "B", source: "scripts/vscripts/r1bots/_r1bots.nut", line: 2, modded: true },
+      ],
+    }),
+  );
+  assert.equal(normalized.schema, 2);
+  assert.deepEqual(normalized.moddedReasons, ["addons", "native"], "reasons are listed in canonical order");
+  assert.deepEqual(normalized.frames, [
+    { function: "A", source: "a.nut", line: 1 },
+    { function: "B", source: "r1bots/_r1bots.nut", line: 2, modded: true },
+  ]);
+  assert.equal(isClassified(normalized), true);
+  assert.equal(isModdedGame(normalized), true);
+
+  const stock = validateAndNormalizeReport(report2());
+  assert.equal(isClassified(stock), true);
+  assert.equal(isModdedGame(stock), false);
+  assert.equal(isClassified(validateAndNormalizeReport(report())), false);
+
+  const reject = (overrides) =>
+    assert.throws(() => validateAndNormalizeReport(report2(overrides)), ValidationError);
+  reject({ modded: "addons" });
+  reject({ modded: ["addons", "addons"] });
+  reject({ modded: ["mods"] });
+  reject({ modded: ["addons", "core", "native", "addons"] });
+  reject({ modded: undefined });
+  reject({ frames: [{ function: "f", source: "x.nut", line: 1 }] });
+  reject({ frames: [{ function: "f", source: "x.nut", line: 1, modded: "yes" }] });
+  reject({
+    frames: [{ function: "f", source: "x.nut", line: 1, modded: true }],
+    modded: [],
+  });
+  assert.throws(
+    () => validateAndNormalizeReport({ ...report(), frames: [{ function: "f", source: "x.nut", line: 1, modded: false }] }),
+    ValidationError,
+    "schema 1 frames keep exactly the original keys",
+  );
+});
+
+test("schema 2 fingerprints share codes with schema 1 unless a frame is modded", async () => {
+  const legacy = await fingerprintReport(validateAndNormalizeReport(report()));
+  const sameError = await fingerprintReport(validateAndNormalizeReport(report2()));
+  const moddedGameOnly = await fingerprintReport(
+    validateAndNormalizeReport(report2({ modded: ["addons", "core"] })),
+  );
+  assert.equal(sameError, legacy, "an unmodded schema 2 report is the same error as before");
+  assert.equal(moddedGameOnly, legacy, "the game-level flag is counted, not part of the identity");
+
+  const moddedFrame = validateAndNormalizeReport(
+    report2({
+      modded: ["addons"],
+      frames: [{ function: "RunMatch", source: "scripts/vscripts/match.nut", line: 42, modded: true }],
+    }),
+  );
+  const moddedFingerprint = await fingerprintReport(moddedFrame);
+  assert.notEqual(moddedFingerprint, legacy, "a modded copy of a stock file is a different error");
+  assert.notEqual(
+    publicCodeCandidates(moddedFingerprint)[0],
+    publicCodeCandidates(legacy)[0],
+  );
 });
