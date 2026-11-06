@@ -153,7 +153,7 @@ constexpr std::size_t kMaxPakDecompressed = 1024ull * 1024ull * 1024ull;
 constexpr std::size_t kMaximumFamilyCacheLimit = 8192ull * 1024ull * 1024ull;
 std::atomic<std::size_t> gFamilyCacheLimit{4096ull * 1024ull * 1024ull};
 constexpr char kIndexMagic[8] = {'R','2','T','E','X','I','D','X'};
-constexpr std::uint32_t kIndexVersion = 11;
+constexpr std::uint32_t kIndexVersion = 12;   // 12: an index built while a family was unreadable is no longer saved; earlier releases saved such indexes (missing textures until the paks changed)
 
 #pragma pack(push, 1)
 struct Hdr7 {
@@ -845,10 +845,13 @@ void runPakLoads(const std::vector<std::size_t>& order, Fn&& fn) {
 }
 
 // Loads the given paks (indices into `paks`) in full and returns the ones that loaded, in the order of `members`.
-// A pak that fails to load is skipped. Largest paks are claimed first so the biggest decode starts immediately.
-std::vector<std::shared_ptr<PakData>> loadPaksConcurrent(const std::vector<PakInfo>& paks, const std::vector<std::uint32_t>& members) {
+// A pak that fails to load is skipped; the first failure (pak name and reason) is stored in `firstFailure` when given.
+// Largest paks are claimed first so the biggest decode starts immediately.
+std::vector<std::shared_ptr<PakData>> loadPaksConcurrent(const std::vector<PakInfo>& paks, const std::vector<std::uint32_t>& members,
+                                                         std::string* firstFailure = nullptr) {
     const std::size_t count = members.size();
     std::vector<std::shared_ptr<PakData>> loaded(count);
+    std::vector<std::string> failures(count);
     std::vector<std::size_t> order(count);
     for (std::size_t i = 0; i < count; ++i) order[i] = i;
     std::stable_sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
@@ -858,10 +861,14 @@ std::vector<std::shared_ptr<PakData>> loadPaksConcurrent(const std::vector<PakIn
         auto pak = std::make_shared<PakData>();
         std::string why;
         if (loadPak(paks[members[slot]], members[slot], *pak, why)) loaded[slot] = std::move(pak);
+        else failures[slot] = paks[members[slot]].relativeName + ": " + (why.empty() ? std::string("decode failed") : why);
     });
     std::vector<std::shared_ptr<PakData>> result;
     result.reserve(count);
     for (auto& pak : loaded) if (pak) result.push_back(std::move(pak));
+    if (firstFailure)
+        for (const auto& failure : failures)
+            if (!failure.empty()) { *firstFailure = failure; break; }
     return result;
 }
 
@@ -880,6 +887,10 @@ struct Database {
     std::size_t familyBytes = 0;
     std::unordered_map<std::uint32_t, int> familyPins;       // family -> queued-work pin count (see pinFamily)
     std::unordered_map<std::uint32_t, int> loadingFamilies;  // family -> decodes running in it right now (family creation or lazy pak decode)
+    // Families the index scan could not read (name and reason). Their assets are missing from `assets`: such an index serves this
+    // session and is reported (IndexProblems), but is never persisted, because a saved partial index would hide those textures
+    // until the paks change.
+    std::vector<std::string> indexProblems;
     std::vector<PakMeta> pakMeta;                            // per pak (index order): layout persisted in r2tex.index
 
     std::unordered_map<std::uint32_t, std::shared_ptr<std::mutex>> familyLoadLocks;
@@ -972,7 +983,8 @@ struct Database {
             std::vector<std::uint32_t> eagerMembers;
             eagerMembers.reserve(eagerSlots.size());
             for (const std::size_t slot : eagerSlots) eagerMembers.push_back(members[slot]);
-            for (auto& loaded : loadPaksConcurrent(paks, eagerMembers)) {
+            std::string pakFailure;
+            for (auto& loaded : loadPaksConcurrent(paks, eagerMembers, &pakFailure)) {
                 for (const std::size_t slot : eagerSlots) {
                     if (members[slot] != loaded->infoIndex) continue;
                     pakMeta[loaded->infoIndex] = metaOf(*loaded);
@@ -980,6 +992,9 @@ struct Database {
                     break;
                 }
             }
+            // The index scan (eager) must see every pak of the family: a patch pak that is skipped silently leaves its assets out of the
+            // index, and the persisted index would hide them until the paks change.
+            if (eager && !pakFailure.empty()) { error = pakFailure; return {}; }
         }
         family->paks.erase(std::remove(family->paks.begin(), family->paks.end(), std::shared_ptr<PakData>()), family->paks.end());
         std::uint32_t maxPages = 0;
@@ -1301,16 +1316,22 @@ bool buildIndex(Database& db, std::string& error) {
     const std::size_t savedCacheLimit = gFamilyCacheLimit.load(std::memory_order_relaxed);
     gFamilyCacheLimit.store(std::min<std::size_t>(savedCacheLimit, 1024ull * 1024ull * 1024ull), std::memory_order_relaxed);
     db.assets.clear();
+    db.indexProblems.clear();
     db.pakMeta.assign(db.paks.size(), PakMeta{});
     const std::uint32_t familyCount = static_cast<std::uint32_t>(db.familyMembers.size());
     using AssetMap = decltype(db.assets);
     // Scans one family into `out`. Within a family the patch rule below decides replacements; across
     // families the lowest family id wins (a key found in an earlier family is never replaced), which is
     // exactly what the merge step reproduces when families are scanned concurrently.
+    std::mutex problemMutex;
+    const auto recordProblem = [&](std::uint32_t familyId, const std::string& why) {
+        std::lock_guard<std::mutex> lock(problemMutex);
+        db.indexProblems.push_back(db.familyNames[familyId] + ": " + (why.empty() ? std::string("cannot read") : why));
+    };
     auto scanFamily = [&](std::uint32_t familyId, AssetMap& out) {
         std::string familyError;
         auto family = db.getFamily(familyId, familyError, true);
-        if (!family) return;
+        if (!family) { recordProblem(familyId, familyError); return; }
         for (const auto& pakPtr : family->paks) {
             const PakData& pak = *pakPtr;
             for (std::uint32_t ai = 0; ai < pak.header.numAssets; ++ai) {
@@ -1379,7 +1400,8 @@ bool buildIndex(Database& db, std::string& error) {
                 for (;;) {
                     const std::uint32_t id = nextFamily.fetch_add(1, std::memory_order_relaxed);
                     if (id >= familyCount) return;
-                    try { scanFamily(id, locals[id]); } catch (...) { locals[id].clear(); }
+                    try { scanFamily(id, locals[id]); } catch (const std::exception& e) { locals[id].clear(); recordProblem(id, e.what()); }
+                    catch (...) { locals[id].clear(); recordProblem(id, "unexpected error"); }
                 }
             });
         for (auto& worker : pool) worker.join();
@@ -1404,6 +1426,10 @@ bool loadIndex(Database& db, std::string& error, bool& cacheHit) {
     }
     error.clear();
     if (!buildIndex(db, error)) return false;
+    if (!db.indexProblems.empty()) {
+        std::cerr << "r2tex: warning: index incomplete (" << db.indexProblems.size() << " family(ies) unreadable), not saved\n";
+        return true;
+    }
     std::string saveError;
     if (!saveIndex(db.cacheFile, db, saveError)) std::cerr << "r2tex: warning: " << saveError << "\n";
     return true;
@@ -4835,6 +4861,11 @@ bool FamilyOfTexture(std::string_view name, std::uint32_t& family) {
 void GetFamilyLoadStats(std::uint64_t& loads, std::uint64_t& microseconds) {
     loads = gFamilyLoadCount.load(std::memory_order_relaxed);
     microseconds = gFamilyLoadMicroseconds.load(std::memory_order_relaxed);
+}
+
+std::vector<std::string> IndexProblems() {
+    const auto db = getDatabase();
+    return db ? db->indexProblems : std::vector<std::string>{};
 }
 
 void GetLowResTextureStats(std::uint64_t& textures, std::vector<std::string>& missingStarpaks) {

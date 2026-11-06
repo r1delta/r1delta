@@ -71,6 +71,25 @@ struct PropR1 {
 static_assert(sizeof(PropR1) == 84, "PropR1");
 #pragma pack(pop)
 
+// Contents bits (R1 and R2 share the numbering; _consts.nut CONTENTS_*).
+constexpr uint32_t kContentsSolid = 0x1, kContentsOpaque = 0x80, kContentsPlayerClip = 0x10000, kContentsMonsterClip = 0x20000;
+constexpr uint32_t kContentsBlockLos = 0x80000, kContentsTitanClip = 0x200000, kContentsBulletClip = 0x400000;
+constexpr uint32_t kClassClips = kContentsPlayerClip | kContentsMonsterClip | kContentsTitanClip | kContentsBulletClip;
+
+// R1 builds a solid prop's contents as (model contents & ~remove) | add (engine.dll sub_18018B710, record +0x4C add / +0x50 remove);
+// the converted models carry CONTENTS_SOLID (0x1), which every R1 trace mask contains. R2 has no SOLID bit: a solid prop is the union of
+// the class bits (player, monster, titan, bullet clip, block LOS, opaque) and collision_flags_remove (record +0x3C) strips the classes
+// the prop must not block (small clutter: pilots walk through it; lampposts: pilots and titans). R2's u32 at +0x38 is not collision_flags_add
+// (it holds lighting data) and used to be OR'd into R1's add, which put garbage bits such as SOLID on every prop.
+// A prop that removes no class keeps SOLID. Otherwise SOLID is removed and the surviving class bits are added explicitly.
+void translateCollisionFlags(uint8_t solidType, uint32_t r2Remove, uint32_t& r1Add, uint32_t& r1Remove) {
+    r1Add = 0;
+    r1Remove = 0;
+    if (solidType == 0 || (r2Remove & kClassClips) == 0) return;
+    r1Remove = kContentsSolid;
+    r1Add = (kClassClips | kContentsBlockLos | kContentsOpaque) & ~r2Remove;
+}
+
 uint32_t rd32(const Bytes& b, size_t o) {
     if (o + 4 > b.size()) throw Error("game lump (0x23): truncated at offset " + std::to_string(o));
     uint32_t v;
@@ -180,8 +199,7 @@ Bytes convertSprp(Ctx& c, const Bytes& payload) {
         q.forcedFadeScale = 1.0f;
         std::memcpy(q.diffuse, p.diffuse, 4);
         q.scale = p.scale;
-        q.collisionAdd = p.collisionAdd;
-        q.collisionRemove = p.collisionRemove;
+        translateCollisionFlags(p.solidType, p.collisionRemove, q.collisionAdd, q.collisionRemove);
         if (hasBounds[k]) {
             // Rule 23: R1 culls a prop by the distance from the view to its ORIGIN (sub_18018C890) against the fade distance
             // derived from the model hull. R2 "world space" props sit at an origin far from their geometry.
@@ -225,7 +243,7 @@ Bytes convertSprp(Ctx& c, const Bytes& payload) {
     c.say("[rule 5] sprp: v13 -> v12, %u model names, %u props (64 -> 84 bytes), leaf list emptied, dropped %u trailing 64-byte records; unknown ints %u / %u kept",
           numModels, numProps, numUnk3, unk1, unk2);
     c.say("[rule 5] sprp defaults for fields R2 lacks: first_leaf 0, num_leaves 0, fade_distance_max = fade_distance_min = R2 value at +0x24, forced_fade_scale 1.0, cpu/gpu level 0,0,0,0, disable_x360 0 (what every stock R1 prop has, except the fade distance: R1 stores -1 or a large value)");
-    c.say("[rule 5] collision_flags_add/remove copied unchanged (R2 bit meanings, see rule 9); %zu props have a non-positive scale", badScale);
+    c.say("[rule 5] collision flags translated (translateCollisionFlags): R2's u32 at +0x38 is lighting data, not collision_flags_add, and is no longer copied into R1's add; %zu props have a non-positive scale", badScale);
     c.say("[rule 16] prop flag bit 0x10: %s on %zu of %u props (R1 reads it as 'not drawn in the main pass, shadow caster only'; kept on props that also carry 0x40, the stock R1 vista combination 0x54)",
           c.opt.keepPropFlag10 ? "kept (--keep-prop-flag10)" : "cleared", flag10Cleared, numProps);
     if (c.opt.keepPropFade)
