@@ -251,7 +251,7 @@ inline std::string MissingGroupMessage(int group)
 	std::string text = "You are missing ";
 	text += GroupTitle(group);
 	if (group == 5)
-		text += ". Verify that Titanfall 2 is installed correctly, and purchase it if you do not own it.";
+		text += ". These maps need a Titanfall 2 install on your PC: install Titanfall 2 (Steam or the EA app) or verify its files, then restart the game.";
 	else
 		text += ". Redownload the game from the Delta launcher.";
 	return text;

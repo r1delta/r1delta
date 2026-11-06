@@ -36,6 +36,15 @@ public:
 bool RegisterMapPatchSource(std::shared_ptr<MapPatchSource> source);
 std::filesystem::path GetR2MapPatchDirectory();
 std::filesystem::path GetR2InstallDirectory();
+// The Titanfall 2 install the converted maps are served from, decided once on first use (and logged once). `root` is empty when none is
+// usable; `foundVia` names the search step; `problem` is then a one-sentence reason a player can act on. A client or listen server skips
+// an install without map texture packs (a dedicated-server file set) and an unusable R1DELTA_TITANFALL2_PATH, see DiscoverR2Install.
+struct R2InstallStatus {
+    std::filesystem::path root;
+    std::string foundVia;
+    std::string problem;
+};
+const R2InstallStatus& GetR2InstallStatus();
 // The r1delta game directory that holds cfg/ (empty when it cannot be found).
 std::filesystem::path GetR2GameContentDirectory();
 // True for the allowlisted R2-only maps this provider serves.

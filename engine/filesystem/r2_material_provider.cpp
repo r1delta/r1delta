@@ -62,6 +62,13 @@ void LogR2TextureMessage(const char* message)
     OutputDebugStringA(message);
 }
 
+// A failure that leaves converted maps without textures: red in the console, also in the debugger output.
+void LogR2TextureWarning(const char* message)
+{
+    Warning("%s", message);
+    OutputDebugStringA(message);
+}
+
 std::string LowerAscii(std::string value)
 {
     for (char& character : value)
@@ -339,9 +346,20 @@ public:
         if (m_state.load(std::memory_order_acquire) != State::Opening)
             return;
         std::unique_lock<std::mutex> lock(m_stateMutex);
-        m_stateChanged.wait_for(lock, kIndexWait, [this]() {
+        const bool ready = m_stateChanged.wait_for(lock, kIndexWait, [this]() {
             return m_state.load(std::memory_order_acquire) != State::Opening;
         });
+        if (!ready && !m_loggedIndexTimeout.exchange(true))
+            LogR2TextureWarning("R1Delta: WARNING the R2 texture index was still not ready after 5 minutes: textures of the converted maps are missing "
+                "(this session keeps the error texture). Restart the game; if this repeats the Titanfall 2 files are on a very slow drive or damaged.\n");
+    }
+
+    // Why the converted maps cannot be textured on this machine (the index failed to open, or its scan could not read some rpaks),
+    // empty when nothing is known to be wrong. Not blocking: an index that is still being built reports nothing yet.
+    std::string Problem() const
+    {
+        std::lock_guard<std::mutex> lock(m_stateMutex);
+        return m_problem;
     }
 
     // Queues the VMT/VTF conversion of a map's materials. Called with the R2 source BSP as soon as the VPK read is done
@@ -751,6 +769,7 @@ private:
         m_indexElapsedMs.store(static_cast<std::uint64_t>(std::max<std::int64_t>(elapsed, 0)),
             std::memory_order_relaxed);
         char message[1536]{};
+        std::string problem;   // empty unless this machine has an install whose textures cannot be served
         if (opened) {
             _snprintf_s(message, sizeof(message), _TRUNCATE,
                 "R1Delta: R2 texture provider index ready install=%s cache=%s source=%s time=%lld ms family-cache=%u MiB\n",
@@ -758,17 +777,31 @@ private:
                 cacheHit ? "warm" : "built",
                 static_cast<long long>(elapsed),
                 g_cacheLimitMiB.load(std::memory_order_relaxed));
+            const std::vector<std::string> unreadable = r2tex::IndexProblems();
+            if (!unreadable.empty()) {
+                problem = "Titanfall 2 texture packs could not be read (" + unreadable.front()
+                    + (unreadable.size() > 1 ? " and " + std::to_string(unreadable.size() - 1) + " more" : std::string())
+                    + "), so converted maps would show missing textures.";
+            }
         }
         else {
             _snprintf_s(message, sizeof(message), _TRUNCATE,
                 "R1Delta: R2 texture provider unavailable: %s\n",
                 errorMessage.empty() ? "index initialization failed" : errorMessage.c_str());
+            if (!r2Install.empty())
+                problem = "The Titanfall 2 texture files could not be opened (" + (errorMessage.empty() ? std::string("index initialization failed") : errorMessage) + ").";
         }
         LogR2TextureMessage(message);
+        if (!problem.empty()) {
+            problem += " Verify the Titanfall 2 files (Steam: Verify integrity of game files, EA app: Repair) and restart the game.";
+            const std::string warning = "R1Delta: WARNING " + problem + "\n";
+            LogR2TextureWarning(warning.c_str());
+        }
 
         {
             std::lock_guard<std::mutex> lock(m_stateMutex);
             m_state = opened ? State::Ready : State::Failed;
+            m_problem = std::move(problem);
         }
         if (opened) {
             StartCacheMaintenance(cacheDirectory);
@@ -1651,6 +1684,7 @@ private:
     mutable std::mutex m_stateMutex;
     mutable std::condition_variable m_stateChanged;
     std::atomic<State> m_state{ State::Cold };
+    std::string m_problem;   // guarded by m_stateMutex; set once when the index finishes (Initialize)
     std::thread m_indexWorker;
     std::vector<std::thread> m_workers;
     std::atomic<unsigned int> m_workerCount{};
@@ -1714,6 +1748,7 @@ private:
     std::filesystem::path m_convertedRoot;
     std::atomic<bool> m_loggedMaterial{};
     std::atomic<bool> m_loggedTexture{};
+    mutable std::atomic<bool> m_loggedIndexTimeout{};
 };
 
 
@@ -1759,6 +1794,11 @@ void StartR2MaterialProvider()
 {
     if (g_materialProvider)
         g_materialProvider->Activate();
+}
+
+std::string GetR2TextureProviderProblem()
+{
+    return g_materialProvider ? g_materialProvider->Problem() : std::string();
 }
 
 void PrefetchR2MapMaterials(std::string_view mapName, FileBytes bspData, bool fromSource)

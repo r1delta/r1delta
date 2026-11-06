@@ -163,6 +163,10 @@ void GetLowResTextureStats(std::uint64_t& textures, std::vector<std::string>& mi
 // Low-res conversions the calling thread has made so far (a converted VMT/VTF whose count grew used a low-res texture).
 std::uint64_t ThreadLowResConversions();
 
+// Package families the index scan of the current Open could not read ("<family>: <reason>"), empty for a complete index (also for an
+// index loaded from the cache file: only complete indexes are saved). Their textures and materials are not in the index.
+std::vector<std::string> IndexProblems();
+
 // Env tokens (R2TEX_ENV) change converted VMTs and textures: the suffix the provider appends to its converted-cache directory name
 // ("" while R2TEX_ENV is unset, so existing caches stay valid; otherwise "-env1-<tokens>").
 const char* EnvCacheTag();

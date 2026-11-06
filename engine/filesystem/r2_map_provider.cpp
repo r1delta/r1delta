@@ -93,7 +93,7 @@ constexpr uint32_t kGameLump = 0x23;
 
 // Folded into the on-disk cache fingerprint together with entity_rewrite::kRewriteVersion.
 // Bump when the vendored bspdown converter or the provider's BSP post-processing changes output.
-constexpr uint32_t kConvertedBspCacheVersion = 34;  // 34: rule 26 is also on for mp_thaw (2780 runs in the R2 order, 384 sorted; R1 draws at most 2048 per view); 33: rule 26 sorts by (flag class, material sort) so decals and overlays stay after their base meshes (BWC SUBSTATION lettering); rule 26 is on for mp_eden only; 32: rule 26 mesh sort is opt-in again (decals vanished with it); 31: rule 26 world meshes sorted by material sort, only the regular render meshes [model 0 first, level info word 2), the sky meshes stay last (EdenCull; R1 draws at most 2048 runs per view); 29: rule 20f plane A keeps the R2 exposure (alpha) and spreads raised exposures (rtlBakeAlphaStep 1.2, no pale contours along baked pools) and rule 25 material namespace (round 16, one combined bump); 28: rule 20f DrydockSteps preset default (rtl-bake vsm, hot clip, smooth 1, bm terrain); 27: rule 24 now writes the glow ramp texture coordinate; 26: rule 24 emitter glow vertex alpha (vr_light_trim_01_totrans, mp_glitch); 25: mp_coliseum and mp_coliseum_column keep the last CSM environment (csmLastEnv); 24: rule 17 real CSM environment chosen by content (BWC, angel_city, coliseum, coliseum_column); 23: rule 23 far-origin prop fade distance
+constexpr uint32_t kConvertedBspCacheVersion = 35;  // 35: rule 5 translates static prop collision flags to R1 contents (props pilots/titans walk through); 34: rule 26 is also on for mp_thaw (2780 runs in the R2 order, 384 sorted; R1 draws at most 2048 per view); 33: rule 26 sorts by (flag class, material sort) so decals and overlays stay after their base meshes (BWC SUBSTATION lettering); rule 26 is on for mp_eden only; 32: rule 26 mesh sort is opt-in again (decals vanished with it); 31: rule 26 world meshes sorted by material sort, only the regular render meshes [model 0 first, level info word 2), the sky meshes stay last (EdenCull; R1 draws at most 2048 runs per view); 29: rule 20f plane A keeps the R2 exposure (alpha) and spreads raised exposures (rtlBakeAlphaStep 1.2, no pale contours along baked pools) and rule 25 material namespace (round 16, one combined bump); 28: rule 20f DrydockSteps preset default (rtl-bake vsm, hot clip, smooth 1, bm terrain); 27: rule 24 now writes the glow ramp texture coordinate; 26: rule 24 emitter glow vertex alpha (vr_light_trim_01_totrans, mp_glitch); 25: mp_coliseum and mp_coliseum_column keep the last CSM environment (csmLastEnv); 24: rule 17 real CSM environment chosen by content (BWC, angel_city, coliseum, coliseum_column); 23: rule 23 far-origin prop fade distance
 
 // Raised onto the z of every info_spawnpoint_flag / human / human_start / titan / titan_start origin in lump 0 and in the five partition entity
 // files (see entity_rewrite::RaiseSpawnpointOrigins). The R1 server drops the spawnpoint back to the floor; one that starts inside solid is removed.
@@ -152,7 +152,7 @@ struct MapState {
 };
 
 std::once_flag g_installDiscoveryOnce;
-std::filesystem::path g_r2InstallDirectory;
+R2InstallStatus g_installStatus;
 std::mutex g_mapStatesMutex;
 std::unordered_map<std::string, std::shared_ptr<MapState>> g_mapStates;
 std::mutex g_patchSourcesMutex;
@@ -279,6 +279,42 @@ bool IsValidR2Install(const std::filesystem::path& root)
         error.clear();
     }
     return false;
+}
+
+// A converted map's world and prop textures live in its own rpaks (r2/paks/Win64/<map>.rpak or <map>(NN).rpak); the common paks hold none of
+// them. The dedicated-server file sets (pg9182 "nsfetch": every vpk, the common paks, no map rpaks) pass IsValidR2Install and load every map,
+// but a client that mounted one draws the converted world with the error texture (magenta) or flat white.
+bool HasMapRpak(const std::filesystem::path& root, std::string_view mapName)
+{
+    const std::string lowerMap = LowerAscii(std::string(mapName));
+    std::error_code error;
+    std::filesystem::directory_iterator item(root / "r2" / "paks" / "Win64", error);
+    const std::filesystem::directory_iterator end;
+    for (; !error && item != end; item.increment(error)) {
+        const std::string name = LowerAscii(item->path().filename().string());
+        if (name.size() >= lowerMap.size() + 5 && name.compare(0, lowerMap.size(), lowerMap) == 0
+            && (name[lowerMap.size()] == '(' || name.compare(lowerMap.size(), std::string::npos, ".rpak") == 0)
+            && name.compare(name.size() - 5, 5, ".rpak") == 0)
+            return true;
+    }
+    return false;
+}
+
+// Engines that draw the converted maps: the client and the listen server. Dedicated servers only serve the BSP and entity files.
+bool EngineDrawsMaps()
+{
+    return GetR1DeltaEngineMode() == R1DeltaEngineMode::Client2015;
+}
+
+// Empty when the install can texture the converted maps; otherwise why not. At least one allowlisted map must have its own rpaks, a map
+// whose files were deleted one by one is refused later, per map (IsR2PortMapInstalled).
+std::string ClientInstallProblem(const std::filesystem::path& root)
+{
+    for (const char* map : kR2MapAllowlist) {
+        if (HasMapRpak(root, map))
+            return {};
+    }
+    return "it has no map texture packs (r2/paks/Win64/mp_*.rpak): this is a dedicated-server file set, not the full game";
 }
 
 std::string TrimInstallText(std::string value)
@@ -492,26 +528,59 @@ std::vector<std::string> RespawnRegistryCandidates()
 // Finds the player's own Titanfall 2 install. The search order is shared with the launcher
 // (TitanfallLocator.FindTitanfall2 in launcher_ex/TitanfallFinder.cs) and documented in
 // docs/r2port.md; change all three together:
-//   1. R1DELTA_TITANFALL2_PATH. Explicit: when set and not a valid install the search stops,
-//      it does not fall back to another install. (The launcher also takes a manual path first.)
+//   1. R1DELTA_TITANFALL2_PATH. Explicit: on a dedicated server, when set and not a valid install the search stops,
+//      it does not fall back to another install. (The launcher also takes a manual path first.) On a client or listen
+//      server an environment path that is not usable (not an install, or a server file set without map texture packs)
+//      is skipped with a warning and the search goes on: a stale variable left behind by a server setup must not hide
+//      the player's real install.
 //   2. HKLM\SOFTWARE\Respawn\Titanfall2 "Install Dir" (64-bit then 32-bit view)
 //   3. Uninstall entries: the EA product GUID, "Steam App 1237970", or a display name that reads Titanfall 2
 //   4. Steam: root from the registry, libraries from libraryfolders.vdf, appmanifest_1237970.acf
 //      installdir, then common\Titanfall2 and common\Titanfall 2
 //   5. Titanfall2 / "Titanfall 2" under well-known parent folders on every fixed or removable drive
-// Every candidate must pass IsValidR2Install. foundVia names the source of the result, or the
-// environment variable when it was set and rejected.
-std::filesystem::path DiscoverR2Install(std::string& foundVia)
+// Every candidate must pass IsValidR2Install; on a client engine it must also pass ClientInstallProblem. status.foundVia
+// names the source of the result, or the environment variable when it was set and rejected; status.problem says why
+// there is no result.
+R2InstallStatus DiscoverR2Install()
 {
+    R2InstallStatus status;
+    std::vector<std::string> rejected;
+    const bool drawsMaps = EngineDrawsMaps();
+
+    // True when `root` can be mounted by this engine; a valid install this engine cannot use is recorded in `rejected`.
+    const auto usable = [&](const std::filesystem::path& root, const char* source) {
+        if (!IsValidR2Install(root))
+            return false;
+        if (drawsMaps) {
+            const std::string problem = ClientInstallProblem(root);
+            if (!problem.empty()) {
+                rejected.push_back(root.string() + " (" + source + "): " + problem);
+                return false;
+            }
+        }
+        return true;
+    };
+
     char environmentPath[32768]{};
     const DWORD environmentLength = GetEnvironmentVariableA(
         "R1DELTA_TITANFALL2_PATH", environmentPath, static_cast<DWORD>(std::size(environmentPath)));
     if (environmentLength) {
-        foundVia = "R1DELTA_TITANFALL2_PATH";
-        if (environmentLength >= std::size(environmentPath))
-            return {};
-        const auto root = NormalizeInstallRoot(environmentPath);
-        return IsValidR2Install(root) ? root : std::filesystem::path{};
+        status.foundVia = "R1DELTA_TITANFALL2_PATH";
+        const auto root = environmentLength >= std::size(environmentPath)
+            ? std::filesystem::path{} : NormalizeInstallRoot(environmentPath);
+        if (!root.empty() && usable(root, "R1DELTA_TITANFALL2_PATH")) {
+            status.root = root;
+            return status;
+        }
+        const std::string shown = environmentLength >= std::size(environmentPath) ? std::string("<too long>") : std::string(environmentPath);
+        if (!drawsMaps) {
+            status.problem = "R1DELTA_TITANFALL2_PATH (" + shown + ") is not a valid Titanfall 2 install";
+            return status;
+        }
+        if (rejected.empty())
+            rejected.push_back(shown + " (R1DELTA_TITANFALL2_PATH): not a Titanfall 2 install (needs bin/x64_retail/rtech_game.dll, vpk/client_mp_common and r2/paks/Win64/*.rpak)");
+        Warning("R1Delta: R1DELTA_TITANFALL2_PATH is set but cannot be used, searching for the player's own Titanfall 2 install instead: %s\n", rejected.back().c_str());
+        status.foundVia.clear();
     }
 
     struct Source {
@@ -531,37 +600,52 @@ std::filesystem::path DiscoverR2Install(std::string& foundVia)
             const auto root = NormalizeInstallRoot(candidate);
             if (root.empty() || !tested.insert(LowerAscii(root.string())).second)
                 continue;
-            if (IsValidR2Install(root)) {
-                foundVia = source.name;
-                return root;
+            if (usable(root, source.name)) {
+                status.root = root;
+                status.foundVia = source.name;
+                return status;
             }
         }
     }
-    foundVia.clear();
-    return {};
+
+    status.foundVia.clear();
+    if (rejected.empty()) {
+        status.problem = "No Titanfall 2 install was found. Install Titanfall 2 (Steam or the EA app) and restart the game; "
+            "if it is in a custom folder, set the environment variable R1DELTA_TITANFALL2_PATH to that folder.";
+    }
+    else {
+        status.problem = "The Titanfall 2 install cannot be used: " + rejected.front();
+        for (size_t i = 1; i < rejected.size(); ++i)
+            status.problem += "; " + rejected[i];
+        status.problem += ". Install the full game (Steam or the EA app) and restart the game.";
+    }
+    return status;
+}
+
+const R2InstallStatus& InstallStatus()
+{
+    std::call_once(g_installDiscoveryOnce, []() {
+        g_installStatus = DiscoverR2Install();
+        char buffer[4096]{};
+        if (!g_installStatus.root.empty()) {
+            _snprintf_s(buffer, sizeof(buffer), _TRUNCATE,
+                "R1Delta: Titanfall 2 install mounted for the converted maps: %s (found via %s)\n",
+                g_installStatus.root.string().c_str(), g_installStatus.foundVia.c_str());
+            Msg("%s", buffer);
+        }
+        else {
+            _snprintf_s(buffer, sizeof(buffer), _TRUNCATE,
+                "R1Delta: WARNING no Titanfall 2 install for the converted maps. %s\n", g_installStatus.problem.c_str());
+            Warning("%s", buffer);
+        }
+        OutputDebugStringA(buffer);
+    });
+    return g_installStatus;
 }
 
 const std::filesystem::path& R2InstallDirectory()
 {
-    std::call_once(g_installDiscoveryOnce, []() {
-        std::string foundVia;
-        g_r2InstallDirectory = DiscoverR2Install(foundVia);
-        char buffer[MAX_PATH * 2]{};
-        if (g_r2InstallDirectory.empty() && !foundVia.empty())
-            _snprintf_s(buffer, sizeof(buffer), _TRUNCATE,
-                "R1Delta: R2 map provider install discovery: %s is set but is not a valid Titanfall 2 install\n",
-                foundVia.c_str());
-        else if (g_r2InstallDirectory.empty())
-            _snprintf_s(buffer, sizeof(buffer), _TRUNCATE,
-                "R1Delta: R2 map provider install discovery found no valid install\n");
-        else
-            _snprintf_s(buffer, sizeof(buffer), _TRUNCATE,
-                "R1Delta: R2 map provider install discovery found %s via %s\n",
-                g_r2InstallDirectory.string().c_str(), foundVia.c_str());
-        Msg("%s", buffer);
-        OutputDebugStringA(buffer);
-    });
-    return g_r2InstallDirectory;
+    return InstallStatus().root;
 }
 
 bool IsAllowlistedMap(std::string_view mapName)
@@ -1984,6 +2068,11 @@ std::filesystem::path GetR2MapPatchDirectory()
 std::filesystem::path GetR2InstallDirectory()
 {
     return R2InstallDirectory();
+}
+
+const R2InstallStatus& GetR2InstallStatus()
+{
+    return InstallStatus();
 }
 
 // The r1delta game directory that holds cfg/ (the CORE autoexec_delta.cfg lives in <dir>\cfg), or empty when it cannot be found.

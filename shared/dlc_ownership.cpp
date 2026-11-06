@@ -9,6 +9,7 @@
 #include "persistentdata.h"
 #include "persistentdata_slots.h"
 #include "r2_map_provider.h"
+#include "r2_material_provider.h"
 
 #include <MinHook.h>
 #include <windows.h>
@@ -23,6 +24,8 @@ namespace {
 using namespace r1d_dlc;
 
 constexpr char kServerGroupsConVar[] = "serverDLCMapGroups";
+// UI-readable reason the Titanfall 2 maps are unavailable here; "" when they are available (client and listen server only).
+constexpr char kInstallStatusConVar[] = "r1delta_titanfall2_status";
 
 struct State {
 	std::atomic<uint32_t> localMask{ kBaseBit };
@@ -32,6 +35,7 @@ struct State {
 	ConVarR1* enabled[kGroupCount + 1] = {};
 	ConVarR1* overrides[kGroupCount + 1] = {};
 	ConVarR1* serverGroups = nullptr;
+	ConVarR1* installStatus = nullptr;
 	std::mutex refreshMutex;
 };
 
@@ -111,14 +115,16 @@ int64_t StatSizeA(const char* path)
 	return StatSizeW(std::filesystem::path(GameRoot() + path));
 }
 
-// Group 5 (the 20 converted Titanfall 2 maps) is owned exactly when the map provider has a valid Titanfall 2 install: the same
-// r2port::GetR2InstallDirectory() search and validator that mounts the maps. That validator (IsValidR2Install in r2_map_provider.cpp) checks
+// Group 5 (the 20 converted Titanfall 2 maps) is owned exactly when the map provider has a usable Titanfall 2 install: the same
+// r2port::GetR2InstallStatus() search and validators that mount the maps. IsValidR2Install (r2_map_provider.cpp) checks
 // bin/x64_retail/rtech_game.dll, a common client VPK directory plus vpk/client_mp_common.bsp.pak000_000.vpk, no r1/gameinfo.txt (not an R1 root)
-// and at least one .rpak in r2/paks/Win64. There is no per-file size manifest: any install the provider mounts counts (other languages/versions).
+// and at least one .rpak in r2/paks/Win64; a client or listen server also needs the map texture packs (a dedicated-server file set has none and
+// is skipped). There is no per-file size manifest: any install the provider mounts counts (other languages/versions).
 bool Group5Complete(std::string& problem)
 {
-	if (r2port::GetR2InstallDirectory().empty()) {
-		problem = "no valid Titanfall 2 install found (R1DELTA_TITANFALL2_PATH or the usual Steam/EA/Origin folders; needs bin/x64_retail/rtech_game.dll, vpk/client_mp_common and r2/paks/Win64/*.rpak)";
+	const r2port::R2InstallStatus& install = r2port::GetR2InstallStatus();
+	if (install.root.empty()) {
+		problem = install.problem;
 		return false;
 	}
 	return true;
@@ -348,6 +354,9 @@ void Dlc_RegisterConVars()
 	state.serverGroups = OriginalCCVar_FindVar ? OriginalCCVar_FindVar(cvarinterface, kServerGroupsConVar) : nullptr;
 	if (!state.serverGroups)
 		state.serverGroups = RegisterConVar(kServerGroupsConVar, "1", FCVAR_REPLICATED, "DLC Map groups that the server has enabled");
+	if (GetR1DeltaEngineMode() == R1DeltaEngineMode::Client2015)
+		state.installStatus = RegisterConVar(kInstallStatusConVar, "", FCVAR_DONTRECORD,
+			"Why the Titanfall 2 maps are not available on this machine (empty when they are). Set by the game, shown in the map picker.");
 }
 
 void Dlc_RefreshLocalPresence(const char* why)
@@ -379,6 +388,8 @@ void Dlc_RefreshLocalPresence(const char* why)
 		if (state.enabled[g])
 			SetConvarStringOriginal(state.enabled[g], presence.have[g] ? "1" : "0");
 	}
+	if (state.installStatus)
+		SetConvarStringOriginal(state.installStatus, group5 ? "" : group5Problem.c_str());
 	Report(false, "R1Delta DLC: ownership (%s) dlc1=%d dlc2=%d dlc3=%d dlc4=%d dlc5=%d%s\n", why ? why : "refresh",
 		presence.have[1], presence.have[2], presence.have[3], presence.have[4], presence.have[5], tail.c_str());
 }
@@ -417,9 +428,24 @@ bool Dlc_LocalMayLoadMap(const char* map, std::string& reason)
 				+ "). Verify that Titanfall 2 is installed correctly (Steam: Verify integrity of game files, EA app: Repair).";
 			return false;
 		}
+		if (group == 5) {
+			// The converted maps are drawn from the install's texture packs: a provider that failed (or whose index lacks packs) would
+			// load the map with every world surface in the error texture.
+			const std::string textureProblem = r2port::GetR2TextureProviderProblem();
+			if (!textureProblem.empty()) {
+				reason = std::string("The Titanfall 2 map ") + std::string(NormalizeMapName(map)) + " cannot be drawn on this PC. " + textureProblem;
+				return false;
+			}
+		}
 		return true;
 	}
 	reason = MissingGroupMessage(group);
+	if (group == 5) {
+		// The player's own machine: say what is wrong with it, not only that the DLC is missing.
+		const r2port::R2InstallStatus& install = r2port::GetR2InstallStatus();
+		reason = std::string("The map ") + std::string(NormalizeMapName(map)) + " is a Titanfall 2 map and needs a Titanfall 2 install on this PC. "
+			+ (install.problem.empty() ? std::string("Verify that Titanfall 2 is installed correctly, then restart the game.") : install.problem);
+	}
 	return false;
 }
 

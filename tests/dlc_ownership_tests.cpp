@@ -167,8 +167,9 @@ void TestMessages()
 	Check(MissingGroupMessage(1).find("Redownload the game from the Delta launcher") != std::string::npos, "dlc1 message");
 	Check(MissingGroupMessage(4).find("Redownload the game from the Delta launcher") != std::string::npos, "dlc4 message");
 	const std::string five = MissingGroupMessage(5);
-	Check(five.find("Verify that Titanfall 2 is installed correctly, and purchase it if you do not own it.") != std::string::npos,
-		"dlc5 message");
+	Check(five.find("These maps need a Titanfall 2 install on your PC") != std::string::npos
+			&& five.find("then restart the game") != std::string::npos,
+		"dlc5 message says a Titanfall 2 install is required");
 	Check(five.find("Delta launcher") == std::string::npos, "dlc5 does not send people to the Delta launcher");
 }
 
