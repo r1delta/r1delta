@@ -273,6 +273,7 @@ jobs:
             dlc_ownership_tests = 'tests/dlc_ownership_tests.vcxproj'
             dynamic_weapons_manifest_tests = 'tests/dynamic_weapons_manifest_tests.vcxproj'
             movement_fingerprint_tests = 'tests/movement_fingerprint_tests.vcxproj'
+            script_modding_tests = 'tests/script_modding_tests.vcxproj'
           }
 
           foreach ($entry in $projects.GetEnumerator()) {
@@ -318,7 +319,8 @@ jobs:
             'region_cull_tests',
             'dlc_ownership_tests',
             'dynamic_weapons_manifest_tests',
-            'movement_fingerprint_tests'
+            'movement_fingerprint_tests',
+            'script_modding_tests'
           )
           foreach ($test in $tests) {
             $executable = Join-Path '${{ env.BUILD_PATH }}' "tests/$test/$test.exe"
@@ -401,6 +403,10 @@ jobs:
 
           Get-ChildItem -LiteralPath '${{ env.BUILD_PATH }}' -File -Filter '*.png' |
             Copy-Item -Destination $binDeltaPath
+
+          # Which script, menu and native files this release shipped: the game compares its own
+          # r1delta tree against this to tell hand-modded installs apart in script-error reports.
+          & '${{ github.workspace }}/ci/new_content_manifest.ps1' -RootPath $deltaPath
 
           $toolsPath = Join-Path '${{ env.BUILD_PATH }}' 'tools'
           if (-not (Test-Path -LiteralPath $toolsPath -PathType Container)) {

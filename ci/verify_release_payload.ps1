@@ -13,6 +13,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+. (Join-Path $PSScriptRoot 'content_manifest_lib.ps1')
+
 function Assert-Condition {
     param(
         [bool] $Condition,
@@ -295,6 +297,44 @@ function Assert-BuildOutputs {
     )
 }
 
+function Assert-ContentManifest {
+    param([string] $DeltaRoot)
+
+    $manifestPath = Join-Path $DeltaRoot $script:ContentManifestFileName
+    Assert-Condition (Test-Path -LiteralPath $manifestPath -PathType Leaf) (
+        "Release payload is missing r1delta/$($script:ContentManifestFileName)."
+    )
+
+    $manifest = Read-ContentManifest $manifestPath
+    $expected = @{ S = @{}; N = @{} }
+    foreach ($file in Get-ContentManifestFiles -Root $DeltaRoot) {
+        $expected[$file.Kind][$file.Path] = $file.FullName
+    }
+
+    foreach ($kind in @('S', 'N')) {
+        $label = if ($kind -eq 'S') { 'content' } else { 'module' }
+        $missing = @($expected[$kind].Keys | Where-Object { -not $manifest[$kind].ContainsKey($_) } | Sort-Object | Select-Object -First 5)
+        Assert-Condition ($missing.Count -eq 0) (
+            "Content manifest is missing $label files present in the payload: $($missing -join ', ')"
+        )
+        $stale = @($manifest[$kind].Keys | Where-Object { -not $expected[$kind].ContainsKey($_) } | Sort-Object | Select-Object -First 5)
+        Assert-Condition ($stale.Count -eq 0) (
+            "Content manifest lists $label files that are not in the payload: $($stale -join ', ')"
+        )
+        foreach ($path in $expected[$kind].Keys) {
+            $actualHash = Get-ContentManifestHash $expected[$kind][$path]
+            Assert-Condition ($actualHash -eq $manifest[$kind][$path]) (
+                "Content manifest hash mismatch for $path. Expected $($manifest[$kind][$path]), got $actualHash."
+            )
+        }
+    }
+
+    Assert-Condition ($manifest.S.Count -gt 0) 'Content manifest has no script content entries.'
+    Assert-Condition ($manifest.N.ContainsKey('bin_delta/tier0.dll')) (
+        'Content manifest does not cover bin_delta/tier0.dll.'
+    )
+}
+
 function Assert-Payload {
     param([string] $Root)
 
@@ -337,6 +377,7 @@ function Assert-Payload {
 
     $deltaRoot = Join-Path $payloadRoot 'r1delta'
     Assert-CoreRuntime $deltaRoot
+    Assert-ContentManifest $deltaRoot
     foreach ($fileName in @('CoherentUIGT.dll', 'materialsystem_nodx.dll', 'tier0.dll', 'vaudio_speex.dll')) {
         Assert-Condition (
             Test-Path -LiteralPath (Join-Path (Join-Path $deltaRoot 'bin_delta') $fileName) -PathType Leaf

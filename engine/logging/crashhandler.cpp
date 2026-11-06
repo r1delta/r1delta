@@ -19,6 +19,7 @@
 #include "r1d_version.h"
 #include "crash_report_minidump.h"
 #include "client/rendering/graphics_flight_recorder.h"
+#include "script_mod_state.h"
 #pragma comment(lib, "winmm.lib")
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "dbghelp.lib")
@@ -566,6 +567,9 @@ LONG WINAPI CustomCrashHandler(EXCEPTION_POINTERS* exInfo)
 
     crashLog << "=== Addons ===" << std::endl;
     crashLog << GetEnabledAddonsReportText() << std::endl;
+
+    crashLog << "=== Modded ===" << std::endl;
+    crashLog << ScriptModState::GetCrashReportText() << std::endl;
 
     crashLog << "=== Recent Content Files (last " << kRecentFileSlots << ") ===" << std::endl;
     crashLog << GetRecentFilesText() << std::endl;
