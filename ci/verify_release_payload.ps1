@@ -409,10 +409,13 @@ function Assert-Payload {
         ) "Release payload must not place fake-dedi stub $fileName in bin_delta's root."
     }
 
+    # r1delta_background.flag next to an executable switches every launch into the test-only background mode
+    # (off-screen window, keyboard and mouse ignored, no sound); it exists only in agent test roots.
     $forbiddenArtifacts = @(
         Get-ChildItem -LiteralPath $payloadRoot -Recurse -File |
             Where-Object {
                 $_.Extension -in @('.exp', '.i64', '.lib', '.pdb') -or
+                $_.Name -ieq 'r1delta_background.flag' -or
                 (
                     $_.Extension -in @('.dll', '.exe') -and
                     $_.Name -match '(?i)\.(?:locked|pre(?:_|\.))'
