@@ -764,6 +764,8 @@ struct GraphicsPendingIdentity {
 };
 static GraphicsPendingIdentity s_GraphicsPendingIdentities[
 	r1delta::materialsystem_dx11::kPendingShaderResourceCapacity]{};
+// Set when a recorded bind wrote an identity (r1d_graphics_recorder_binds 1); the flush clears the table only then.
+static bool s_GraphicsPendingIdentitiesWritten = false;
 static bool MaterialSystemDx11LooksLikeUserRange(uintptr_t address, size_t size);
 
 
@@ -1325,10 +1327,15 @@ static bool MaterialSystemDx11HoldPendingShaderResource(
 		s_MaterialSystemDx11Base + kPendingShaderResourcesRva);
 
 	void* const candidate = shaderResources[slot];
-	const std::uintptr_t key = GraphicsFlightRecorderTextureKey(textureHandle);
-	const std::uint64_t generation =
-		r1delta::graphics_flight_recorder::ResourceGeneration(key);
-	s_GraphicsPendingIdentities[slot] = {key, generation};
+	const bool recordBind = GraphicsFlightRecorderRecordsBinds();
+	std::uintptr_t key = 0;
+	std::uint64_t generation = 0;
+	if (recordBind) {
+		key = GraphicsFlightRecorderTextureKey(textureHandle);
+		generation = r1delta::graphics_flight_recorder::ResourceGeneration(key);
+		s_GraphicsPendingIdentities[slot] = {key, generation};
+		s_GraphicsPendingIdentitiesWritten = true;
+	}
 	const bool accepted = ReplacePendingShaderResourceHold(
 		shaderResources,
 		s_MaterialSystemDx11HeldShaderResources,
@@ -1338,12 +1345,14 @@ static bool MaterialSystemDx11HoldPendingShaderResource(
 		&MaterialSystemDx11ReleaseHeldShaderResource);
 	if (!accepted)
 		MaterialSystemDx11LogShaderResourceGuard(slot, candidate);
-	r1delta::graphics_flight_recorder::Record(
-		r1delta::graphics_flight_recorder::EventKind::ShaderResourcePending,
-		key, generation, reinterpret_cast<std::uintptr_t>(shaderResources[slot]),
-		slot | (static_cast<std::uint64_t>(
-			static_cast<std::uint16_t>(textureHandle)) << 32),
-		producerRva, reinterpret_cast<std::uintptr_t>(candidate));
+	if (recordBind) {
+		r1delta::graphics_flight_recorder::Record(
+			r1delta::graphics_flight_recorder::EventKind::ShaderResourcePending,
+			key, generation, reinterpret_cast<std::uintptr_t>(shaderResources[slot]),
+			slot | (static_cast<std::uint64_t>(
+				static_cast<std::uint16_t>(textureHandle)) << 32),
+			producerRva, reinterpret_cast<std::uintptr_t>(candidate));
+	}
 	return accepted;
 }
 
@@ -1448,22 +1457,24 @@ MaterialSystemDx11FlushShaderResourcesGuard()
 		return 0;
 	using namespace r1delta::graphics_flight_recorder;
 	using namespace r1delta::materialsystem_dx11;
-	const auto currentCount = *reinterpret_cast<const unsigned int*>(
-		s_MaterialSystemDx11Base + kPendingShaderResourceCountRva);
-	const auto previousCount = *reinterpret_cast<const unsigned int*>(
-		s_MaterialSystemDx11Base + kPreviousShaderResourceCountRva);
-	const auto count = ClampShaderResourceCount(
-		(currentCount > previousCount) ? currentCount : previousCount);
-	auto* const views = reinterpret_cast<void* const*>(
-		s_MaterialSystemDx11Base + kPendingShaderResourcesRva);
-	for (std::size_t slot = 0; slot < count; ++slot) {
-		const auto identity = s_GraphicsPendingIdentities[slot];
-		Record(EventKind::ShaderResourceSubmit, identity.key,
-			identity.generation, reinterpret_cast<std::uintptr_t>(views[slot]),
-			slot, kShaderResourceFlushRva,
-			currentCount | (static_cast<std::uint64_t>(previousCount) << 32));
+	const bool recordBinds = GraphicsFlightRecorderRecordsBinds();
+	if (recordBinds) {
+		const auto currentCount = *reinterpret_cast<const unsigned int*>(
+			s_MaterialSystemDx11Base + kPendingShaderResourceCountRva);
+		const auto previousCount = *reinterpret_cast<const unsigned int*>(
+			s_MaterialSystemDx11Base + kPreviousShaderResourceCountRva);
+		const auto count = ClampShaderResourceCount(
+			(currentCount > previousCount) ? currentCount : previousCount);
+		auto* const views = reinterpret_cast<void* const*>(
+			s_MaterialSystemDx11Base + kPendingShaderResourcesRva);
+		for (std::size_t slot = 0; slot < count; ++slot) {
+			const auto identity = s_GraphicsPendingIdentities[slot];
+			Record(EventKind::ShaderResourceSubmit, identity.key,
+				identity.generation, reinterpret_cast<std::uintptr_t>(views[slot]),
+				slot, kShaderResourceFlushRva,
+				currentCount | (static_cast<std::uint64_t>(previousCount) << 32));
+		}
 	}
-
 	const unsigned __int64 result =
 		MaterialSystemDx11FlushShaderResourcesOriginal();
 	for (void*& heldShaderResource :
@@ -1472,8 +1483,11 @@ MaterialSystemDx11FlushShaderResourcesGuard()
 			heldShaderResource);
 		heldShaderResource = nullptr;
 	}
-	for (auto& identity : s_GraphicsPendingIdentities)
-		identity = {};
+	if (s_GraphicsPendingIdentitiesWritten) {
+		for (auto& identity : s_GraphicsPendingIdentities)
+			identity = {};
+		s_GraphicsPendingIdentitiesWritten = false;
+	}
 	return result;
 }
 

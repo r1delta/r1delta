@@ -71,3 +71,11 @@ void ResetBoundary(EventKind kind, std::uintptr_t object = 0) noexcept;
 void InstallGraphicsFlightRecorder(std::uintptr_t materialSystemBase);
 
 std::uintptr_t GraphicsFlightRecorderTextureKey(std::int16_t handle) noexcept;
+
+// Texture-bind events (ShaderResourcePending / ShaderResourceSubmit) cost two events plus an identity lookup for every
+// bound slot of every draw: 2.55 ms per frame on mp_angel_city
+// (RTX 5080, 720p uncapped: frame time p50 3.97 ms with them, 1.41 ms without). They
+// are recorded only while the client ConVar r1d_graphics_recorder_binds is 1 (crash hunting); every other event kind is
+// always recorded.
+void RegisterGraphicsFlightRecorderConVars();
+bool GraphicsFlightRecorderRecordsBinds() noexcept;

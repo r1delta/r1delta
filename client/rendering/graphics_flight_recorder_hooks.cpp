@@ -9,6 +9,7 @@
 #include "graphics_flight_recorder.h"
 
 #include "core.h"
+#include "cvar.h"
 #include "logging.h"
 
 #include <MinHook.h>
@@ -486,6 +487,27 @@ bool InstallOptionalHook(std::uintptr_t base, const HookDefinition& hook)
 std::uintptr_t GraphicsFlightRecorderTextureKey(std::int16_t handle) noexcept
 {
     return ResolveTextureKey(s_textureLookupBase.load(std::memory_order_acquire), handle);
+}
+
+namespace
+{
+std::atomic<ConVarR1*> s_recordBinds{nullptr};
+}
+
+void RegisterGraphicsFlightRecorderConVars()
+{
+    if (s_recordBinds.load(std::memory_order_acquire))
+        return;
+    s_recordBinds.store(RegisterConVar("r1d_graphics_recorder_binds", "0", FCVAR_CLIENTDLL | FCVAR_RELEASE,
+        "1 = the graphics flight recorder also records every texture bind of every draw (crash diagnosis; costs about 2.5 "
+        "ms per frame on a stock map). 0 = texture lifecycle, upload, TXAA and device events only."),
+        std::memory_order_release);
+}
+
+bool GraphicsFlightRecorderRecordsBinds() noexcept
+{
+    const ConVarR1* cvar = s_recordBinds.load(std::memory_order_relaxed);
+    return cvar && cvar->m_Value.m_nValue != 0;
 }
 
 void InstallGraphicsFlightRecorder(std::uintptr_t materialSystemBase)
