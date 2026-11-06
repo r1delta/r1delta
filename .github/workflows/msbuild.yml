@@ -13,13 +13,13 @@ env:
   BUILD_PATH: ${{ github.workspace }}/build
   OUTPUT_PATH: ${{ github.workspace }}/output
   SYMBOL_PATH: ${{ github.workspace }}/symbols
-  CORE_REF: 581fe1dd18500a658cde931e78987fe015a6f6ba
+  CORE_REF: 34537b47a98caf3caf14a064d57ffd10543d5dae
   VCPKG_BINARY_SOURCES: "clear;files,D:/a/r1delta/vcpkg,readwrite"
   BUILD_CONFIGURATION: Release
   MSBUILD_DEBUG_TYPE: pdbonly
   NUSPEC_FILE: R1Delta.nuspec
   PACKAGE_NAME: R1Delta
-  DISPLAY_VERSION: 'v3.0 "Longhorn" Escrow 5'
+  DISPLAY_VERSION: 'v3.0 "Longhorn" Escrow 6'
 
 permissions:
   contents: write
