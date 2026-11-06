@@ -134,6 +134,14 @@ static int ResolveMasterServerPort()
 namespace MasterServerClient {
     static std::vector<ServerInfo> serverList;
     static SRWLOCK serverListMutex = SRWLOCK_INIT;
+    // Each DispatchServerListReq starts request `serverListRequested`; `serverList` holds the answer
+    // to request `serverListPublished`. Until the newest request has answered, PollServerList reports
+    // "pending", and an older request that finishes late cannot overwrite a newer answer. Both are
+    // guarded by serverListMutex.
+    static uint64_t serverListRequested = 0;
+    static uint64_t serverListPublished = 0;
+    static constexpr time_t kServerListConnectTimeoutSeconds = 3;
+    static constexpr time_t kServerListReadTimeoutSeconds = 10;
     static SRWLOCK httpMutex = SRWLOCK_INIT;
     static SRWLOCK heartbeatMutex = SRWLOCK_INIT;
     static std::unique_ptr<httplib::Client> httpClient;
@@ -348,21 +356,27 @@ namespace MasterServerClient {
     // --------------------------------
     // Server List
     // --------------------------------
-    void GetServerList() {
-        InitMasterServerCVars();
+    struct ServerListFetch {
+        std::vector<ServerInfo> servers;
+        std::string error; // empty when the master server answered with a valid list
+    };
 
-        if (!delta_ms_url) 
-            return;
-        EnsureHttpClient(delta_ms_url->m_Value.m_pszString);
-        auto res = httpClient->Get("/servers");
-
-        if (!res || res->status != 200)
-            return;
+    // Its own client: the heartbeat thread owns `httpClient`, and a list request must not wait for
+    // (or race with) a heartbeat. Both timeouts are bounded so a request always answers.
+    static ServerListFetch FetchServerList(const std::string& url) {
+        httplib::Client client(url);
+        client.set_connection_timeout(kServerListConnectTimeoutSeconds);
+        client.set_read_timeout(kServerListReadTimeoutSeconds);
+        client.set_address_family(AF_INET);
+        auto res = client.Get("/servers");
+        if (!res)
+            return { {}, "request failed: " + httplib::to_string(res.error()) };
+        if (res->status != 200)
+            return { {}, "HTTP status " + std::to_string(res->status) };
 
         try {
             auto j = json::parse(res->body);
-            std::vector<ServerInfo> newServerList;
-            
+            std::vector<ServerInfo> servers;
             for (auto& sj : j) {
                 ServerInfo si;
                 si.hostName = sj["host_name"];
@@ -394,19 +408,29 @@ namespace MasterServerClient {
                     pi.team = pj["team"];
                     si.players.push_back(pi);
                 }
-                newServerList.push_back(si);
+                servers.push_back(si);
             }
-            
-            // Update the server list with mutex protection
-            {
-                SRWGuard lock(&serverListMutex);
-                serverList = std::move(newServerList);
-            }
+            return { std::move(servers), {} };
         }
-        catch (...) {
-            Warning("MasterServerClient: Invalid server list response\n");
+        catch (const std::exception& e) {
+            return { {}, std::string("invalid response: ") + e.what() };
+        }
+    }
+
+    // Answers request `generation` unless a newer request has started since. A failed request
+    // answers with an empty list, so the browser stops waiting, and the console says why.
+    static void GetServerList(uint64_t generation, const std::string& url) {
+        ServerListFetch fetch = url.empty()
+            ? ServerListFetch{ {}, "delta_ms_url is not set" }
+            : FetchServerList(url);
+        if (!fetch.error.empty())
+            Warning("MasterServerClient: server list from '%s': %s\n", url.c_str(), fetch.error.c_str());
+
+        SRWGuard lock(&serverListMutex);
+        if (generation != serverListRequested)
             return;
-        }
+        serverList = std::move(fetch.servers);
+        serverListPublished = generation;
     }
 
     // --------------------------------
@@ -705,56 +729,40 @@ SQInteger GetServerHeartbeat(HSQUIRRELVM v) {
 }
 
 SQInteger DispatchServerListReq(HSQUIRRELVM v) {
+    InitMasterServerCVars();
+    // Read on the script thread; the fetch thread must not read convar storage.
+    std::string url = delta_ms_url && delta_ms_url->m_Value.m_pszString ? delta_ms_url->m_Value.m_pszString : "";
+    uint64_t generation = 0;
     {
         ZoneScopedN("DispatchServerListReq serverListMutex");
         SRWGuard lock(&MasterServerClient::serverListMutex);
-        MasterServerClient::serverList.clear();
+        generation = ++MasterServerClient::serverListRequested;
     }
 
-    std::thread([]() {
+    std::thread([generation, url = std::move(url)]() {
         RegisterR1DeltaThread("MasterServerListFetch");
-        MasterServerClient::GetServerList();
+        MasterServerClient::GetServerList(generation, url);
     }).detach();
 
 
     return 1;
 }
 
+// null while the newest DispatchServerListReq has not answered yet, otherwise its list (empty when
+// the master server has no servers or could not be reached).
 SQInteger PollServerList(HSQUIRRELVM v) {
     ZoneScoped;
-
-    sq_newarray(v, 0);
-
-#if 1
     {
         ZoneScopedN("PollServerList serverListMutex");
         SRWGuard lock(&MasterServerClient::serverListMutex);
 
-        if (MasterServerClient::serverList.empty()) {
-            //sq_newtable(v);
-            //sq_pushstring(v, "host_name", -1); sq_pushstring(v, "No servers found.", -1); sq_newslot(v, -3, 0);
-            //sq_pushstring(v, "map_name", -1); sq_pushstring(v, "mp_lobby", -1); sq_newslot(v, -3, 0);
-            //sq_pushstring(v, "game_mode", -1); sq_pushstring(v, "-", -1); sq_newslot(v, -3, 0);
-            //sq_pushstring(v, "max_players", -1); sq_pushinteger(0, v, 0); sq_newslot(v, -3, 0);
-            //sq_pushstring(v, "port", -1); sq_pushinteger(0, v, 0); sq_newslot(v, -3, 0);
-            //sq_pushstring(v, "ip", -1); sq_pushstring(v, "0.0.0.0", -1); sq_newslot(v, -3, 0);
-            //sq_pushstring(v, "players", -1); sq_newarray(v, 0); sq_newslot(v, -3, 0);
-            //sq_arrayappend(v, -2);
+        if (MasterServerClient::serverListPublished != MasterServerClient::serverListRequested) {
+            sq_pushnull(v);
             return 1;
         }
 
+        sq_newarray(v, 0);
         for (auto& s : MasterServerClient::serverList)
-#else
-    {
-        decltype(MasterServerClient::serverList) serverList;
-        {
-            ZoneScopedN("PollServerList serverListMutex");
-            SRWGuard lock(&MasterServerClient::serverListMutex);
-            serverList = MasterServerClient::serverList;
-        }
-
-        for (auto& s : serverList)
-#endif
         {
             sq_newtable(v);
             sq_pushstring_lit(v, "host_name"); sq_pushstring_std(v, s.hostName); sq_newslot(v, -3, 0);
