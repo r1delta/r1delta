@@ -460,20 +460,27 @@ void TestPersistentPlayerSlots()
 	Check(!IsValidPlayerSlot(0, 65), "reject unsupported max-client count");
 }
 
+// The client's connect-time data arrived (a client without any data).
+void ReceiveClientData(PersistentDataState::PlayerState& state)
+{
+	PersistentDataState::EntryList none;
+	PersistentDataState::ApplyClientUpdate(state, none, {}, PersistentDataState::ReportKind::Signon, false);
+}
+
 void TestSessionBinding()
 {
 	using namespace PersistentDataState;
 	PlayerState state;
 	Check(!BeginSession(state, SessionKey{}), "reject a session without a netchannel");
 	Check(BeginSession(state, SessionKey{ 0x1000, -1 }), "bind first connection");
-	Check(RecordServerWrite(state, "__ xp", "100", nullptr, 0.0, true), "record a write");
+	Check(RecordServerWrite(state, "__ xp", "100", nullptr, 0.0, true) == WriteOutcome::KeepLocal, "a write before the client data stays local");
 	Check(BeginSession(state, SessionKey{ 0x1000, 7 }), "late userid on same connection");
-	Check(state.pending.size() == 1, "late userid keeps pending writes");
+	Check(state.local.size() == 1, "late userid keeps the session's writes");
 	Check(BeginSession(state, SessionKey{ 0x1000, 8 }), "new userid in same slot");
-	Check(state.pending.empty() && state.values.empty(), "new userid wipes the previous player's writes");
+	Check(state.local.empty() && state.pending.empty() && state.values.empty(), "new userid wipes the previous player's writes");
 	RecordServerWrite(state, "__ xp", "100", nullptr, 0.0, true);
 	Check(BeginSession(state, SessionKey{ 0x2000, 8 }), "new netchannel in same slot");
-	Check(state.pending.empty() && state.values.empty(), "new netchannel wipes the previous player's writes");
+	Check(state.local.empty() && state.pending.empty() && state.values.empty() && !state.dataReceived, "new netchannel wipes the previous player's writes");
 }
 
 void TestServerWriteSurvivesReconnectSnapshot()
@@ -484,13 +491,14 @@ void TestServerWriteSurvivesReconnectSnapshot()
 	using namespace PersistentDataState;
 	PlayerState state;
 	BeginSession(state, SessionKey{ 0x1000, 3 });
+	ReceiveClientData(state);
 
 	const std::string clientXp = "100";
-	Check(RecordServerWrite(state, "__ xp", "250", &clientXp, 10.0, false), "server write must be sent");
+	Check(RecordServerWrite(state, "__ xp", "250", &clientXp, 10.0, false) == WriteOutcome::Send, "server write must be sent");
 	Check(*Find(state, "__ xp") == "250", "reads see the pending write immediately");
 
 	EntryList snapshot{ { "__ xp", "100" }, { "__ gen", "1" } };
-	ApplyClientUpdate(state, snapshot, true, false);
+	ApplyClientUpdate(state, snapshot, {}, ReportKind::FullSnapshot, false);
 	Check(snapshot[0].second == "250", "stale snapshot value is rewritten to the pending write");
 	Check(snapshot[1].second == "1", "unrelated values pass through");
 	Check(state.pending.count("__ xp") == 1, "stale snapshot does not acknowledge the write");
@@ -501,7 +509,7 @@ void TestServerWriteSurvivesReconnectSnapshot()
 	Check(CollectResends(state, 10.2).empty(), "no duplicate resend right away");
 
 	EntryList echo{ { "__ xp", "250" } };
-	ApplyClientUpdate(state, echo, false, false);
+	ApplyClientUpdate(state, echo, {}, ReportKind::Delta, false);
 	Check(state.pending.empty(), "client echo acknowledges the write");
 	Check(Find(state, "__ xp") == nullptr, "acknowledged write falls back to the engine table");
 }
@@ -511,16 +519,17 @@ void TestSnapshotMissingPendingKeyIsAppended()
 	using namespace PersistentDataState;
 	PlayerState state;
 	BeginSession(state, SessionKey{ 0x1000, 3 });
+	ReceiveClientData(state);
 	RecordServerWrite(state, "__ challenges[5].progress", "3", nullptr, 0.0, false);
 
 	EntryList snapshot{ { "__ xp", "100" } };
-	ApplyClientUpdate(state, snapshot, true, false);
+	ApplyClientUpdate(state, snapshot, {}, ReportKind::FullSnapshot, false);
 	Check(snapshot.size() == 2, "pending key missing from a full snapshot is appended");
 	Check(snapshot[1].first == "__ challenges[5].progress" && snapshot[1].second == "3",
 		"appended entry carries the pending value");
 
 	EntryList delta{ { "__ xp", "101" } };
-	ApplyClientUpdate(state, delta, false, false);
+	ApplyClientUpdate(state, delta, {}, ReportKind::Delta, false);
 	Check(delta.size() == 1, "deltas are never padded");
 }
 
@@ -529,16 +538,17 @@ void TestOlderEchoDoesNotAcknowledgeNewerWrite()
 	using namespace PersistentDataState;
 	PlayerState state;
 	BeginSession(state, SessionKey{ 0x1000, 3 });
+	ReceiveClientData(state);
 	RecordServerWrite(state, "__ xp", "200", nullptr, 0.0, false);
 	RecordServerWrite(state, "__ xp", "300", nullptr, 0.1, false);
 
 	EntryList olderEcho{ { "__ xp", "200" } };
-	ApplyClientUpdate(state, olderEcho, false, false);
+	ApplyClientUpdate(state, olderEcho, {}, ReportKind::Delta, false);
 	Check(olderEcho[0].second == "300", "echo of an older write is rewritten to the newest");
 	Check(state.pending.count("__ xp") == 1, "echo of an older write keeps the newest pending");
 
 	EntryList newestEcho{ { "__ xp", "300" } };
-	ApplyClientUpdate(state, newestEcho, false, false);
+	ApplyClientUpdate(state, newestEcho, {}, ReportKind::Delta, false);
 	Check(state.pending.empty(), "echo of the newest write acknowledges it");
 }
 
@@ -549,17 +559,18 @@ void TestDuplicateReportsCannotReplacePendingWrite()
 		for (bool keepMirror : { false, true }) {
 			PlayerState state;
 			BeginSession(state, SessionKey{ 0x1000, 3 });
+	ReceiveClientData(state);
 			RecordServerWrite(state, "__ xp", "300", nullptr, 0.0, keepMirror);
 
 			EntryList reports{ { "__ xp", "300" }, { "__ xp", "100" } };
-			ApplyClientUpdate(state, reports, fullSnapshot, keepMirror);
+			ApplyClientUpdate(state, reports, {}, fullSnapshot ? ReportKind::FullSnapshot : ReportKind::Delta, keepMirror);
 			Check(reports[0].second == "300" && reports[1].second == "300",
 				"an early acknowledgement cannot expose a later stale report");
 			Check(state.pending.count("__ xp") == 1 && *Find(state, "__ xp") == "300",
 				"the last stale report keeps the write pending");
 
 			EntryList acknowledged{ { "__ xp", "100" }, { "__ xp", "300" } };
-			ApplyClientUpdate(state, acknowledged, fullSnapshot, keepMirror);
+			ApplyClientUpdate(state, acknowledged, {}, fullSnapshot ? ReportKind::FullSnapshot : ReportKind::Delta, keepMirror);
 			Check(acknowledged[0].second == "300" && acknowledged[1].second == "300",
 				"every duplicate report is reconciled before acknowledging");
 			Check(state.pending.empty(), "the last current report acknowledges the write");
@@ -574,13 +585,14 @@ void TestRedundantWritesAreNotSent()
 	using namespace PersistentDataState;
 	PlayerState state;
 	BeginSession(state, SessionKey{ 0x1000, 3 });
+	ReceiveClientData(state);
 	const std::string clientValue = "5";
-	Check(!RecordServerWrite(state, "__ gen", "5", &clientValue, 0.0, false), "write equal to the client value is skipped");
+	Check(RecordServerWrite(state, "__ gen", "5", &clientValue, 0.0, false) == WriteOutcome::Unchanged, "write equal to the client value is skipped");
 	Check(state.pending.empty(), "skipped write is not pending");
-	Check(RecordServerWrite(state, "__ gen", "6", &clientValue, 0.0, false), "changed value is sent");
-	Check(!RecordServerWrite(state, "__ gen", "6", &clientValue, 0.0, false), "repeat of a pending value is skipped");
+	Check(RecordServerWrite(state, "__ gen", "6", &clientValue, 0.0, false) == WriteOutcome::Send, "changed value is sent");
+	Check(RecordServerWrite(state, "__ gen", "6", &clientValue, 0.0, false) == WriteOutcome::Unchanged, "repeat of a pending value is skipped");
 	const std::string staleClient = "6";
-	Check(RecordServerWrite(state, "__ gen", "5", &staleClient, 0.0, false),
+	Check(RecordServerWrite(state, "__ gen", "5", &staleClient, 0.0, false) == WriteOutcome::Send,
 		"write compares against the pending value, not the engine table");
 }
 
@@ -589,6 +601,7 @@ void TestTimedResendBackoff()
 	using namespace PersistentDataState;
 	PlayerState state;
 	BeginSession(state, SessionKey{ 0x1000, 3 });
+	ReceiveClientData(state);
 	RecordServerWrite(state, "__ xp", "1", nullptr, 0.0, false);
 
 	Check(CollectResends(state, 1.0).empty(), "no resend before the first delay");
@@ -604,7 +617,7 @@ void TestTimedResendBackoff()
 	Check(sent == kMaxTimedResends, "timed resends are capped");
 
 	EntryList snapshot{ { "__ xp", "0" } };
-	ApplyClientUpdate(state, snapshot, true, false);
+	ApplyClientUpdate(state, snapshot, {}, ReportKind::FullSnapshot, false);
 	Check(CollectResends(state, now + 0.01).size() == 1, "a reconnect snapshot resends even after the cap");
 }
 
@@ -615,25 +628,144 @@ void TestMirrorKeepsFullDataSet()
 	using namespace PersistentDataState;
 	PlayerState state;
 	BeginSession(state, SessionKey{ 0x1000, 3 });
+	ReceiveClientData(state);
 	EntryList snapshot;
 	for (int i = 0; i < 100; ++i)
 		snapshot.emplace_back("__ k" + std::to_string(i), std::to_string(i));
-	ApplyClientUpdate(state, snapshot, true, true);
+	ApplyClientUpdate(state, snapshot, {}, ReportKind::FullSnapshot, true);
 	Check(state.values.size() == 100, "snapshot fills the mirror");
 
 	EntryList bigDelta;
 	for (int i = 0; i < 40; ++i)
 		bigDelta.emplace_back("__ k" + std::to_string(i), "changed");
-	ApplyClientUpdate(state, bigDelta, false, true);
+	ApplyClientUpdate(state, bigDelta, {}, ReportKind::Delta, true);
 	Check(state.values.size() == 100, "large delta keeps the rest of the mirror");
 	Check(state.values["__ k0"] == "changed" && state.values["__ k99"] == "99", "delta merges into the mirror");
 
 	RecordServerWrite(state, "__ k50", "server", nullptr, 0.0, true);
 	Check(*Find(state, "__ k50") == "server", "mirror reads see the server write");
 	EntryList staleSnapshot{ { "__ k50", "50" } };
-	ApplyClientUpdate(state, staleSnapshot, true, true);
+	ApplyClientUpdate(state, staleSnapshot, {}, ReportKind::FullSnapshot, true);
 	Check(state.values.size() == 1 && state.values["__ k50"] == "server",
 		"full snapshot replaces the mirror but keeps the pending write");
+}
+
+void TestWritesBeforeClientDataStayLocal()
+{
+	// A write computed before the client's data arrived (new-player defaults,
+	// loadout repairs from default reads) must never reach the client.
+	using namespace PersistentDataState;
+	for (bool keepMirror : { false, true }) {
+		PlayerState state;
+		BeginSession(state, SessionKey{ 0x1000, 3 });
+		Check(RecordServerWrite(state, "__ pilotLoadouts[0].primary", "mp_weapon_rspn101", nullptr, 0.0, keepMirror)
+			== WriteOutcome::KeepLocal, "a write before the client data is kept local");
+		Check(state.pending.empty(), "a local write is not pending");
+		Check(*Find(state, "__ pilotLoadouts[0].primary") == "mp_weapon_rspn101", "reads see the local write");
+		Check(CollectResends(state, 100.0).empty(), "a local write is never sent");
+
+		EntryList snapshot{ { "__ pilotLoadouts[0].primary", "mp_weapon_car" }, { "__ xp", "422000" } };
+		ApplyClientUpdate(state, snapshot, {}, ReportKind::FullSnapshot, keepMirror);
+		Check(state.dataReceived, "the full snapshot is the client's data");
+		Check(snapshot[0].second == "mp_weapon_car", "a local write never rewrites the client's value");
+		Check(state.local.empty(), "the client's data replaces local writes");
+		if (keepMirror)
+			Check(*Find(state, "__ pilotLoadouts[0].primary") == "mp_weapon_car", "reads see the client's value");
+		else
+			Check(Find(state, "__ pilotLoadouts[0].primary") == nullptr, "reads fall back to the engine table");
+		Check(RecordServerWrite(state, "__ xp", "422100", nullptr, 1.0, keepMirror) == WriteOutcome::Send,
+			"writes after the data arrived are sent");
+	}
+}
+
+void TestSignonWithoutDataIsReady()
+{
+	// A client without any data omits the full-snapshot marker; its signon
+	// still tells the server there is nothing to wait for.
+	using namespace PersistentDataState;
+	PlayerState state;
+	BeginSession(state, SessionKey{ 0x1000, 3 });
+	EntryList delta;
+	ApplyClientUpdate(state, delta, {}, ReportKind::Delta, false);
+	Check(!state.dataReceived, "a delta is not the client's data set");
+	EntryList signon;
+	ApplyClientUpdate(state, signon, {}, ReportKind::Signon, false);
+	Check(state.dataReceived, "the signon makes a new player's data known");
+	Check(RecordServerWrite(state, "__ previouslyInitialized", "1", nullptr, 0.0, false) == WriteOutcome::Send,
+		"new-player defaults reach a client that has no data");
+
+	Check(ClassifyReport(true, true) == ReportKind::FullSnapshot, "the marker wins");
+	Check(ClassifyReport(true, false) == ReportKind::FullSnapshot, "marker without signon");
+	Check(ClassifyReport(false, true) == ReportKind::Signon, "signon without marker");
+	Check(ClassifyReport(false, false) == ReportKind::Delta, "neither");
+}
+
+void TestRejectedKeysAreNeverOverwritten()
+{
+	// A server whose schema rejects a client value (another version, a mod)
+	// reads a default for it; its "repair" must not replace the client's value.
+	using namespace PersistentDataState;
+	for (bool keepMirror : { false, true }) {
+		PlayerState state;
+		BeginSession(state, SessionKey{ 0x1000, 3 });
+		const std::string primary = "__ pilotLoadouts[0].primary";
+		EntryList snapshot{ { "__ xp", "422000" } };
+		ApplyClientUpdate(state, snapshot, { primary }, ReportKind::FullSnapshot, keepMirror);
+		Check(RecordServerWrite(state, primary, "mp_weapon_rspn101", nullptr, 0.0, keepMirror) == WriteOutcome::KeepLocal,
+			"a write to a rejected key stays local");
+		Check(*Find(state, primary) == "mp_weapon_rspn101", "the server reads its own fallback");
+		Check(CollectResends(state, 100.0).empty(), "the fallback is never sent");
+		Check(RecordServerWrite(state, "__ xp", "422100", nullptr, 0.0, keepMirror) == WriteOutcome::Send,
+			"readable keys are written as usual");
+
+		// The client switches to a value this server can read: writes resume.
+		EntryList readable{ { primary, "mp_weapon_r97" } };
+		ApplyClientUpdate(state, readable, {}, ReportKind::Delta, keepMirror);
+		Check(state.rejected.empty() && state.local.empty(), "a readable report ends the rejection");
+		Check(RecordServerWrite(state, primary, "mp_weapon_g2", nullptr, 0.0, keepMirror) == WriteOutcome::Send,
+			"a readable key is written again");
+
+		// The client changes it to an unreadable value: the pending write is stale.
+		EntryList none;
+		ApplyClientUpdate(state, none, { primary }, ReportKind::Delta, keepMirror);
+		Check(state.pending.count(primary) == 0, "a rejected report drops the server's pending write");
+		if (keepMirror)
+			Check(Find(state, primary) == nullptr, "the mirror forgets the stale value");
+
+		// A reconnect snapshot that the server can read clears the rejection.
+		EntryList again{ { primary, "mp_weapon_car" } };
+		ApplyClientUpdate(state, again, {}, ReportKind::FullSnapshot, keepMirror);
+		Check(state.rejected.empty(), "a full snapshot replaces the rejected set");
+	}
+}
+
+void TestProgressionVerdicts()
+{
+	using namespace PersistentDataStore;
+	const Entries store{
+		{ "xp", "422000" }, { "gen", "1" }, { "initializedVersion", "22" }, { "previouslyInitialized", "1" },
+		{ "pilotLoadouts[0].primary", "mp_weapon_car" },
+	};
+	const auto judge = [&](const char* key, const char* value) { return JudgeServerProgressionWrite(store, key, value); };
+	Check(judge("xp", "422550") == ProgressionVerdict::Accept, "xp may grow");
+	Check(judge("xp", "422000") == ProgressionVerdict::Accept, "an unchanged xp is accepted");
+	Check(judge("xp", "550") == ProgressionVerdict::AwaitRegen, "an xp fall waits for a regeneration");
+	Check(judge("xp", "0") == ProgressionVerdict::AwaitRegen, "a regeneration's xp 0 waits for its gen");
+	Check(judge("gen", "2") == ProgressionVerdict::CompletesRegen, "a gen increase completes a regeneration");
+	Check(judge("gen", "1") == ProgressionVerdict::Accept, "an unchanged gen is accepted");
+	Check(judge("gen", "0") == ProgressionVerdict::Refuse, "gen never falls");
+	Check(judge("initializedVersion", "0") == ProgressionVerdict::Refuse, "initializedVersion never falls");
+	Check(judge("initializedVersion", "23") == ProgressionVerdict::Accept, "initializedVersion may grow");
+	Check(judge("previouslyInitialized", "0") == ProgressionVerdict::Refuse, "an initialized player stays initialized");
+	Check(judge("previouslyInitialized", "pdata_null") == ProgressionVerdict::Refuse, "a cleared flag is refused");
+	Check(judge("previouslyInitialized", "1") == ProgressionVerdict::Accept, "setting the flag again is fine");
+	Check(judge("pilotLoadouts[0].primary", "mp_weapon_rspn101") == ProgressionVerdict::Accept,
+		"other keys are not judged");
+
+	const Entries fresh;
+	Check(JudgeServerProgressionWrite(fresh, "xp", "0") == ProgressionVerdict::Accept, "a new player takes any xp");
+	Check(JudgeServerProgressionWrite(fresh, "previouslyInitialized", "0") == ProgressionVerdict::Accept,
+		"a new player takes any flag");
 }
 }
 
@@ -660,6 +792,10 @@ int main()
 	TestRedundantWritesAreNotSent();
 	TestTimedResendBackoff();
 	TestMirrorKeepsFullDataSet();
+	TestWritesBeforeClientDataStayLocal();
+	TestSignonWithoutDataIsReady();
+	TestRejectedKeysAreNeverOverwritten();
+	TestProgressionVerdicts();
 
 	if (failures) {
 		std::cerr << failures << " persistent-data test(s) failed\n";

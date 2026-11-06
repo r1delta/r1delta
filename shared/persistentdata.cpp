@@ -62,6 +62,7 @@ class PDef;
 #include <cctype>
 #include <regex>
 #include <limits>
+#include <thread>
 #include <zstd.h>
 #include "tctx.h"
 
@@ -946,7 +947,8 @@ bool IsPackedPDataWireName(const char* name)
 	return name && strcmp(name, PersistentDataCodec::WireName) == 0;
 }
 
-bool DecodePackedPDataWire(const std::string& encoded, std::vector<NetMessageCvar_t>& output)
+bool DecodePackedPDataWire(const std::string& encoded, std::vector<NetMessageCvar_t>& output,
+	PersistentDataState::KeyList& rejected)
 {
 	std::vector<PersistentDataCodec::Entry> entries;
 	if (!PersistentDataCodec::Decode(encoded, entries))
@@ -967,6 +969,7 @@ bool DecodePackedPDataWire(const std::string& encoded, std::vector<NetMessageCva
 		// must not throw away the rest of the player's data.
 		if (!IsSchemaValidPersistentConVar(var)) {
 			WarnDroppedPersistentEntry("packed decode", entry.key.c_str(), entry.value.c_str());
+			rejected.emplace_back(var.name);
 			continue;
 		}
 		decoded.push_back(var);
@@ -1172,6 +1175,7 @@ bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 	bool sawLegacyPData = false;
 	bool sawFullSnapshotMarker = false;
 	size_t decodedPersistentCount = 0;
+	PersistentDataState::KeyList rejectedPersistentKeys;
 	SoundScriptUpload soundScripts;
 	for (uint32_t i = 0; i < numvars; i++) {
 		NetMessageCvar_t var;
@@ -1213,6 +1217,7 @@ bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 			NormalizePersistentConVar(var);
 			if (!IsSchemaValidPersistentConVar(var)) {
 				WarnDroppedPersistentEntry("legacy read", var.name + kPersistPrefixLength, var.value);
+				rejectedPersistentKeys.emplace_back(var.name);
 				continue;
 			}
 		}
@@ -1242,7 +1247,7 @@ bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 			return false;
 		}
 		std::vector<NetMessageCvar_t> decoded;
-		if (!DecodePackedPDataWire(packedPData, decoded)) {
+		if (!DecodePackedPDataWire(packedPData, decoded, rejectedPersistentKeys)) {
 			Warning("Failed to decode packed persistent data payload\n");
 			return false;
 		}
@@ -1255,8 +1260,10 @@ bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 
 	// Server side: reconcile against writes the client has not acknowledged yet.
 	const int playerSlot = NativeServerSlotFromMessageHandler(thisptr->m_pMessageHandler);
-	if (playerSlot >= 0)
-		PData_ServerReconcileIncoming(playerSlot, nullptr, staged, sawFullSnapshotMarker);
+	if (playerSlot >= 0) {
+		PData_ServerReconcileIncoming(playerSlot, nullptr, staged, rejectedPersistentKeys,
+			PersistentDataState::ClassifyReport(sawFullSnapshotMarker, soundScripts.present));
+	}
 
 	thisptr->m_ConVars.RemoveAll();
 	thisptr->m_ConVars.EnsureCapacity(static_cast<int>(staged.size()));
@@ -1594,9 +1601,9 @@ void ServerWritePersistent(int playerSlot, const char* key, const char* name, co
 
 	const double now = Plat_FloatTime();
 	PersistentDataState::PlayerState* state = BindServerPlayer(playerSlot);
-	bool mustSend;
+	PersistentDataState::WriteOutcome outcome;
 	if (state) {
-		mustSend = PersistentDataState::RecordServerWrite(
+		outcome = PersistentDataState::RecordServerWrite(
 			*state, name, value, haveClientValue ? &clientValue : nullptr, now, ServerKeepsMirror());
 	}
 	else {
@@ -1608,18 +1615,32 @@ void ServerWritePersistent(int playerSlot, const char* key, const char* name, co
 		// the previous connection's profile through an unbound player.
 		if (unbound.session.IsValid())
 			return;
+		bool changed;
 		if (ServerKeepsMirror()) {
 			auto& slotValue = unbound.values[name];
-			mustSend = slotValue != value;
+			changed = slotValue != value;
 			slotValue = value;
 		}
 		else {
-			mustSend = !haveClientValue || clientValue != value;
+			changed = !haveClientValue || clientValue != value;
 		}
+		outcome = changed
+			? PersistentDataState::WriteOutcome::Send
+			: PersistentDataState::WriteOutcome::Unchanged;
 	}
 
 	LogPersistentDataDiagnostic("server-write", playerSlot, name, value);
-	if (!mustSend)
+	if (outcome == PersistentDataState::WriteOutcome::KeepLocal) {
+		static int budget = 32;
+		if (budget-- > 0) {
+			Warning("R1Delta: kept persistent data write %s for player slot %d on the server: %s\n",
+				name, playerSlot, state->dataReceived
+					? "this server cannot read the client's value"
+					: "the client's data has not arrived");
+		}
+		return;
+	}
+	if (outcome == PersistentDataState::WriteOutcome::Unchanged)
 		return;
 	if (vars)
 		vars->SetString(name, value);
@@ -1674,7 +1695,8 @@ bool PData_ServerReconcileIncoming(
 	int playerSlot,
 	const PersistentDataState::SessionKey* sessionOverride,
 	std::vector<NetMessageCvar_t>& staged,
-	bool fullSnapshot)
+	const PersistentDataState::KeyList& rejected,
+	PersistentDataState::ReportKind kind)
 {
 	if (!IsServerPlayerSlot(playerSlot))
 		return false;
@@ -1697,10 +1719,12 @@ bool PData_ServerReconcileIncoming(
 		indices.push_back(i);
 		entries.emplace_back(staged[i].name, staged[i].value);
 	}
-	if (entries.empty() && state.pending.empty() && !(fullSnapshot && ServerKeepsMirror()))
+	if (kind == PersistentDataState::ReportKind::Delta && entries.empty() && rejected.empty()
+		&& state.pending.empty())
 		return true;
 
-	PersistentDataState::ApplyClientUpdate(state, entries, fullSnapshot, ServerKeepsMirror());
+	const bool fullSnapshot = kind == PersistentDataState::ReportKind::FullSnapshot;
+	PersistentDataState::ApplyClientUpdate(state, entries, rejected, kind, ServerKeepsMirror());
 
 	for (size_t i = 0; i < entries.size(); ++i) {
 		const std::string& name = entries[i].first;
@@ -1903,6 +1927,23 @@ SQInteger Script_ServerSetPersistentUserDataKVString(HSQUIRRELVM v) {
 	return 1;
 }
 
+// True once the player's data has arrived on the current connection. Bots and
+// the replay entity have no data to wait for.
+SQInteger Script_ServerIsPersistentDataReady(HSQUIRRELVM v) {
+	ServerPlayerRef player;
+	const char* error = nullptr;
+	if (!ResolveScriptPlayer(v, player, error))
+		return sq_throwerror(v, error);
+
+	bool ready = true;
+	if (!player.replay) {
+		if (const PersistentDataState::PlayerState* state = BindServerPlayer(player.playerSlot))
+			ready = state->dataReceived;
+	}
+	sq_pushbool(nullptr, v, ready ? SQTrue : SQFalse);
+	return 1;
+}
+
 static int NativeServerSlotFromMessageHandler(const void* handler)
 {
 	if (!handler || IsR1ODedicatedServer() || !pGlobalVarsServer)
@@ -1950,6 +1991,10 @@ bool IsValidServerCommand(const char* cmd)
 		|| !strcmp_static(cmd + 1, "remote_view"); // [-+]remote_view
 }
 
+// Set while commands a server sent run, so persistent writes can tell them
+// from the player's own console and config commands.
+static bool g_executingServerStringCmd = false;
+
 typedef char (*CBaseClientState__InternalProcessStringCmdType)(void* thisptr, void* msg, bool bIsHLTV);
 CBaseClientState__InternalProcessStringCmdType CBaseClientState__InternalProcessStringCmdOriginal;
 char CBaseClientState__InternalProcessStringCmd(void* thisptr, void* msg, bool bIsHLTV) {
@@ -1969,8 +2014,10 @@ char CBaseClientState__InternalProcessStringCmd(void* thisptr, void* msg, bool b
 
 	auto engine = G_engine;
 	void(*Cbuf_Execute)() = decltype(Cbuf_Execute)(engine + 0x1057C0);
+	g_executingServerStringCmd = true;
 	char ret = CBaseClientState__InternalProcessStringCmdOriginal(thisptr, msg, bIsHLTV);
 	Cbuf_Execute(); // fix cbuf overflow on too many stringcmds
+	g_executingServerStringCmd = false;
 	return ret;
 }
 char __fastcall GetConfigPath(char* outPath, size_t outPathSize, int configType)
@@ -2036,6 +2083,9 @@ constexpr int kPersistentConVarFlags = FCVAR_PERSIST_MASK;
 constexpr double kSaveDebounceSeconds = 1.0;
 constexpr double kSaveMaxDelaySeconds = 5.0;
 constexpr double kSaveRetrySeconds = 2.0;
+// A regeneration writes xp 0 and then gen + 1 in one batch; an xp fall that
+// is not followed by a gen increase within this window is refused.
+constexpr double kRegenWindowSeconds = 2.0;
 
 struct ClientStore
 {
@@ -2052,8 +2102,32 @@ struct ClientStore
 	double retryTime = 0.0;
 	bool reportedSaveFailure = false;
 
+	// A server's xp fall waiting for the gen increase of a regeneration.
+	std::optional<std::string> heldXp;
+	double heldXpTime = 0.0;
+
 	std::filesystem::path path;
 };
+
+// Tells the player that progression is not being saved. A console warning is
+// invisible in game, and everything earned is lost when the game closes. The
+// box runs on its own thread so the match keeps running.
+void ReportProgressionNotSaved(const std::filesystem::path& path, DWORD error)
+{
+	wchar_t reason[512] = {};
+	if (!FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, nullptr, error, 0,
+			reason, static_cast<DWORD>(std::size(reason)), nullptr))
+		reason[0] = L'\0';
+	std::wstring text = L"R1Delta cannot save your progression.\n\nWriting\n" + path.wstring()
+		+ L"\nfailed: " + reason + L"(error " + std::to_wstring(error) + L")\n\n"
+		L"Your level, loadouts and other progress will be lost when the game closes until "
+		L"the folder can be written. If Windows Security \"Controlled folder access\" or another "
+		L"antivirus protects it, allow Titanfall.exe. The game keeps retrying.";
+	std::thread([text = std::move(text)] {
+		MessageBoxW(nullptr, text.c_str(), L"R1Delta - progression not saved",
+			MB_OK | MB_ICONWARNING | MB_TOPMOST | MB_SETFOREGROUND);
+	}).detach();
+}
 
 // Intentionally leaked: the final flush runs from atexit, after which static
 // destructors may already have run.
@@ -2087,20 +2161,22 @@ bool ReadWholeFile(const std::filesystem::path& path, std::string& contents, siz
 	return true;
 }
 
-bool WriteFileDurably(const std::filesystem::path& path, std::string_view contents)
+// Returns ERROR_SUCCESS, or the error of the call that failed.
+DWORD WriteFileDurably(const std::filesystem::path& path, std::string_view contents)
 {
 	HANDLE file = CreateFileW(
 		path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
 	if (file == INVALID_HANDLE_VALUE)
-		return false;
+		return GetLastError();
 	DWORD written = 0;
 	const bool ok = WriteFile(file, contents.data(), static_cast<DWORD>(contents.size()), &written, nullptr) != FALSE
 		&& written == contents.size()
 		&& FlushFileBuffers(file) != FALSE;
+	const DWORD error = ok ? ERROR_SUCCESS : GetLastError();
 	CloseHandle(file);
 	if (!ok)
 		DeleteFileW(path.c_str());
-	return ok;
+	return ok ? ERROR_SUCCESS : (error ? error : ERROR_WRITE_FAULT);
 }
 
 bool GetProfileDirectory(std::filesystem::path& directory)
@@ -2125,20 +2201,23 @@ bool SaveStoreNow(bool quiet)
 	const std::filesystem::path temporary = WithSuffix(store.path, L".tmp");
 	const std::filesystem::path backup = WithSuffix(store.path, L".bak");
 
-	bool ok = WriteFileDurably(temporary, contents);
-	if (ok) {
-		std::error_code error;
-		const bool primaryExists = std::filesystem::exists(store.path, error);
-		if (error)
-			ok = false;
+	DWORD error = WriteFileDurably(temporary, contents);
+	if (error == ERROR_SUCCESS) {
+		std::error_code status;
+		const bool primaryExists = std::filesystem::exists(store.path, status);
+		bool moved;
+		if (status)
+			moved = false;
 		else if (primaryExists)
-			ok = ReplaceFileW(store.path.c_str(), temporary.c_str(), backup.c_str(),
+			moved = ReplaceFileW(store.path.c_str(), temporary.c_str(), backup.c_str(),
 				0, nullptr, nullptr) != FALSE;
 		else
-			ok = MoveFileExW(temporary.c_str(), store.path.c_str(), MOVEFILE_WRITE_THROUGH) != FALSE;
+			moved = MoveFileExW(temporary.c_str(), store.path.c_str(), MOVEFILE_WRITE_THROUGH) != FALSE;
+		if (!moved)
+			error = status ? static_cast<DWORD>(status.value()) : GetLastError();
 	}
 
-	if (ok) {
+	if (error == ERROR_SUCCESS) {
 		store.dirty = false;
 		store.reportedSaveFailure = false;
 		return true;
@@ -2148,7 +2227,8 @@ bool SaveStoreNow(bool quiet)
 	if (!quiet && !store.reportedSaveFailure) {
 		store.reportedSaveFailure = true;
 		Warning("R1Delta: failed to save persistent data to %s (error %lu); will keep retrying\n",
-			store.path.string().c_str(), GetLastError());
+			store.path.string().c_str(), error);
+		ReportProgressionNotSaved(store.path, error);
 	}
 	return false;
 }
@@ -2425,6 +2505,74 @@ void PData_OnSchemaReloaded()
 	ApplyStoreToConVars();
 }
 
+namespace {
+
+// Sets the convar and the store entry. Returns false if the convar could not
+// be set.
+bool ApplyPersistentEntry(const char* key, const char* value, bool noSend)
+{
+	const bool previousNoSend = g_bNoSendConVar;
+	g_bNoSendConVar = noSend;
+	const bool applied = SetPersistentConVar(key, value);
+	g_bNoSendConVar = previousNoSend;
+	if (!applied)
+		return false;
+
+	ClientStore& store = Store();
+	if (!store.disabled) {
+		auto [it, inserted] = store.entries.try_emplace(key, value);
+		if (inserted || it->second != value) {
+			it->second = value;
+			MarkStoreDirty();
+		}
+	}
+	return true;
+}
+
+void WarnRefusedProgressionWrite(const char* key, const char* current, const char* value)
+{
+	static int budget = 16;
+	if (budget-- > 0) {
+		Warning("R1Delta: refused a server write that would reset your progression: %s %s -> %s\n",
+			key, current, value);
+	}
+}
+
+// Applies a write the connected server sent, unless it would undo progression
+// (see PersistentDataStore::JudgeServerProgressionWrite).
+void ApplyServerPersistentEntry(const char* key, const char* value, bool noSend)
+{
+	ClientStore& store = Store();
+	if (store.disabled) {
+		ApplyPersistentEntry(key, value, noSend);
+		return;
+	}
+	const auto current = store.entries.find(key);
+	switch (PersistentDataStore::JudgeServerProgressionWrite(store.entries, key, value)) {
+	case PersistentDataStore::ProgressionVerdict::Refuse:
+		WarnRefusedProgressionWrite(key, current->second.c_str(), value);
+		return;
+	case PersistentDataStore::ProgressionVerdict::AwaitRegen:
+		store.heldXp = value;
+		store.heldXpTime = Plat_FloatTime();
+		return;
+	case PersistentDataStore::ProgressionVerdict::CompletesRegen:
+		if (ApplyPersistentEntry(key, value, noSend) && store.heldXp) {
+			const std::string heldXp = *store.heldXp;
+			store.heldXp.reset();
+			ApplyPersistentEntry("xp", heldXp.c_str(), noSend);
+		}
+		return;
+	case PersistentDataStore::ProgressionVerdict::Accept:
+		if (strcmp(key, "xp") == 0)
+			store.heldXp.reset();
+		ApplyPersistentEntry(key, value, noSend);
+		return;
+	}
+}
+
+}
+
 // Command handling
 void setinfopersist_cmd(const CCommand& args) {
 	if (args.ArgC() >= 3) {
@@ -2457,21 +2605,10 @@ void setinfopersist_cmd(const CCommand& args) {
 		// "nosend" updates the local value without replicating it right away.
 		const bool noSend = args.ArgC() >= 4
 			&& (strcmp_static(args.Arg(3), "nosend") == 0 || strcmp_static(args.Arg(3), "forcehash") == 0);
-		const bool previousNoSend = g_bNoSendConVar;
-		g_bNoSendConVar = noSend;
-		const bool applied = SetPersistentConVar(key, value);
-		g_bNoSendConVar = previousNoSend;
-		if (!applied)
-			return;
-
-		ClientStore& store = Store();
-		if (!store.disabled) {
-			auto [it, inserted] = store.entries.try_emplace(key, value);
-			if (inserted || it->second != value) {
-				it->second = value;
-				MarkStoreDirty();
-			}
-		}
+		if (g_executingServerStringCmd)
+			ApplyServerPersistentEntry(key, value, noSend);
+		else
+			ApplyPersistentEntry(key, value, noSend);
 	}
 	else if (args.ArgC() == 2) {
 		char name[CCommand::COMMAND_MAX_LENGTH];
@@ -2519,9 +2656,15 @@ void PData_RunFrame()
 	PData_ServerRunFrame();
 
 	ClientStore& store = Store();
+	const double now = Plat_FloatTime();
+	if (store.heldXp && now - store.heldXpTime >= kRegenWindowSeconds) {
+		const auto current = store.entries.find("xp");
+		WarnRefusedProgressionWrite("xp", current != store.entries.end() ? current->second.c_str() : "",
+			store.heldXp->c_str());
+		store.heldXp.reset();
+	}
 	if (!store.dirty || store.disabled)
 		return;
-	const double now = Plat_FloatTime();
 	if (now < store.retryTime)
 		return;
 	if (now - store.lastChangeTime >= kSaveDebounceSeconds
