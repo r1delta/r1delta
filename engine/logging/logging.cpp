@@ -1,3 +1,4 @@
+#include "crashhandler.h"
 #include "logging.h"
 #include "cbuf_initialization_guard.h"
 #include <windows.h>
@@ -834,7 +835,9 @@ extern "C" __declspec(dllexport) void Error(const char* pMsg, ...) {
 	OutputDebugStringA("[r1delta_tier0_error] ");
 	OutputDebugStringA(formatted);
 
-	reinterpret_cast<WarningFn>(GetProcAddress(GetModuleHandleA("tier0_orig.dll"), "Error"))("%s", formatted);
+	// The retail Error() ends the process without any exception, so the crash handler never sees it: write the report
+	// first. Never returns (a debugger attached gets the exception, then the process still terminates).
+	ReportFatalConditionAndTerminate(formatted);
 #endif
 }
 
