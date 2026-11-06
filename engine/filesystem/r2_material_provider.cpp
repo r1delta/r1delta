@@ -397,6 +397,65 @@ public:
             QueuePrefetchPath(path, Placement{ 1, kModelOrderBase + m_modelOrder.fetch_add(1, std::memory_order_relaxed) });
     }
 
+    // A stock R1 map (or the lobby) started: nothing converted or decoded for the previous R2 map is wanted any more. Drops the
+    // converted-file LRU, the queued prefetch work (a reader blocked on an item made it urgent; urgent items stay) and every
+    // decoded package family that no remaining item pins. The index, the workers and the disk cache stay, so the next R2 map
+    // starts as fast as before (converted files come back from the disk cache).
+    void ReleaseMapState()
+    {
+        if (!m_activated.load(std::memory_order_acquire))
+            return;
+        std::string releasedMap;
+        {
+            std::lock_guard<std::mutex> lock(m_metricsMutex);
+            releasedMap.swap(m_activeMap);
+            m_mapMaterialsQueued = false;
+            m_sourceMaterialsQueued = false;
+        }
+        ClearKnownPaths();
+        std::vector<std::pair<WorkItem, WorkQueue::Meta>> cancelled;
+        std::size_t releasedBytes{};
+        std::size_t releasedFiles{};
+        {
+            std::lock_guard<std::mutex> lock(m_cacheMutex);
+            if (m_stopping)
+                return;
+            // Map-material scans are queued urgent but nobody waits for them: they go too.
+            cancelled = m_workQueue.ExtractIf([](const WorkItem& item, const WorkQueue::Meta& meta) { return item.mapMaterials || !meta.urgent; });
+            for (auto& [item, meta] : cancelled) {
+                if (!item.pending)
+                    continue;
+                const auto pendingRead = m_pendingReads.find(item.path);
+                if (pendingRead != m_pendingReads.end() && pendingRead->second == item.pending)
+                    m_pendingReads.erase(pendingRead);
+                item.pending->complete = true;
+            }
+            releasedBytes = m_cachedBytes;
+            releasedFiles = m_cache.size();
+            m_cache.clear();
+            m_lru.clear();
+            m_lruConsumed.clear();
+            m_materialDependencies.clear();
+            m_cachedBytes = 0;
+            m_unconsumedBytes = 0;
+        }
+        for (auto& [item, meta] : cancelled) {
+            if (item.pending)
+                item.pending->ready.notify_all();
+            if (item.family != kNoFamily)
+                r2tex::UnpinFamily(item.family);
+        }
+        const std::size_t familiesBefore = r2tex::ResidentFamilyBytes();
+        r2tex::ReleaseUnpinnedFamilies();
+        const std::size_t familiesAfter = r2tex::ResidentFamilyBytes();
+        char message[512]{};
+        _snprintf_s(message, sizeof(message), _TRUNCATE,
+            "R1Delta: R2 texture provider released map=%s converted-files=%zu converted-mib=%zu cancelled-prefetch=%zu decoded-families-mib=%zu->%zu\n",
+            releasedMap.empty() ? "<none>" : releasedMap.c_str(), releasedFiles, releasedBytes >> 20, cancelled.size(),
+            familiesBefore >> 20, familiesAfter >> 20);
+        LogR2TextureMessage(message);
+    }
+
     bool MayContain(std::string_view normalizedPath) const override
     {
         if (!m_activated.load(std::memory_order_acquire)
@@ -477,11 +536,13 @@ public:
         std::size_t queued{};
         std::size_t active{};
         std::size_t activeFamilyClaims{};
+        std::size_t cachedBytes{};
         {
             std::lock_guard<std::mutex> lock(m_cacheMutex);
             queued = m_workQueue.Size();
             active = m_activeWork;
             activeFamilyClaims = m_claims.size();
+            cachedBytes = m_cachedBytes;
         }
         std::uint64_t familyLoads{};
         std::uint64_t familyLoadMicroseconds{};
@@ -499,7 +560,7 @@ public:
             std::chrono::steady_clock::now().time_since_epoch()).count();
         char message[2048]{};
         _snprintf_s(message, sizeof(message), _TRUNCATE,
-            "R1Delta: R2 texture timing phase=%s map=%s steady-ms=%lld index-state=%s index-cache=%s index-ms=%llu reads=%llu materials=%llu textures=%llu material-served=%llu material-misses=%llu texture-served=%llu texture-misses=%llu prefetch-bsp=%llu prefetch-vmt=%llu prefetch-vtf=%llu conversions=%llu conversion-total-ms=%llu conversion-max-ms=%llu callbacks-total-ms=%llu callbacks-max-ms=%llu queued=%zu active=%zu workers=%u queue-full=%llu disk-hits=%llu disk-load-ms=%llu disk-stores=%llu family-claims=%llu family-loads=%llu family-load-ms=%llu family-claims-now=%zu\n",
+            "R1Delta: R2 texture timing phase=%s map=%s steady-ms=%lld index-state=%s index-cache=%s index-ms=%llu reads=%llu materials=%llu textures=%llu material-served=%llu material-misses=%llu texture-served=%llu texture-misses=%llu prefetch-bsp=%llu prefetch-vmt=%llu prefetch-vtf=%llu conversions=%llu conversion-total-ms=%llu conversion-max-ms=%llu callbacks-total-ms=%llu callbacks-max-ms=%llu queued=%zu active=%zu workers=%u queue-full=%llu disk-hits=%llu disk-load-ms=%llu disk-stores=%llu family-claims=%llu family-loads=%llu family-load-ms=%llu family-claims-now=%zu converted-mib=%zu decoded-families-mib=%zu\n",
             phase ? phase : "<unknown>", mapName.empty() ? "<none>" : mapName.c_str(),
             static_cast<long long>(qpcMilliseconds), stateName,
             m_indexCacheHit.load(std::memory_order_relaxed) ? "warm" : "cold",
@@ -526,7 +587,7 @@ public:
             static_cast<unsigned long long>(m_diskStoreCount.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(m_familyClaims.load(std::memory_order_relaxed)),
             static_cast<unsigned long long>(familyLoads), static_cast<unsigned long long>(familyLoadMicroseconds / 1000),
-            activeFamilyClaims);
+            activeFamilyClaims, cachedBytes >> 20, r2tex::ResidentFamilyBytes() >> 20);
         LogR2TextureMessage(message);
     }
 
@@ -1777,6 +1838,12 @@ void PrefetchR2UiTextures(const std::vector<std::string>& texturePaths)
 {
     if (g_materialProvider)
         g_materialProvider->PrefetchUiTextures(texturePaths);
+}
+
+void ReleaseR2MaterialProviderMapState()
+{
+    if (g_materialProvider)
+        g_materialProvider->ReleaseMapState();
 }
 
 // One summary line per map load, only when textures were built from their permanent mips because the starpaks holding their

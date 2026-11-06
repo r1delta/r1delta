@@ -34,8 +34,8 @@ std::optional<uint64_t> Size(std::string_view path);
 FileBytes ReadAll(std::string_view path);
 std::vector<std::string> Enumerate(std::string_view pattern);
 
-// Resets the shared cache and timing window when map loading starts.
-void SetActiveMap(std::string_view mapName);
+// Resets the shared cache and timing window when map loading starts. False when `mapName` already is the active map.
+bool SetActiveMap(std::string_view mapName);
 std::string ActiveMapName();
 std::uint64_t ActiveMapElapsedMilliseconds();
 void LogProviderReadMetrics(const char* phase);

@@ -1014,7 +1014,10 @@ struct Database {
     // it) and `keep` (the family that was just loaded) stay; when everything left is pinned the cache is over its limit rather
     // than thrashing.
     void evictLocked(std::uint32_t keep) {
-        const std::size_t limit = gFamilyCacheLimit.load(std::memory_order_relaxed);
+        evictDownToLocked(gFamilyCacheLimit.load(std::memory_order_relaxed), keep);
+    }
+
+    void evictDownToLocked(std::size_t limit, std::uint32_t keep) {
         for (auto it = lru.end(); familyBytes > limit && it != lru.begin();) {
             --it;
             const std::uint32_t oldId = *it;
@@ -1028,6 +1031,12 @@ struct Database {
             }
             it = lru.erase(it);
         }
+    }
+
+    // Drops every family no caller has pinned (a worker that still holds one keeps it alive until it is done).
+    void releaseUnpinnedFamilies() {
+        std::lock_guard<std::mutex> lock(familyMutex);
+        evictDownToLocked(0, std::numeric_limits<std::uint32_t>::max());
     }
 
     void dropCachedFamilies() {
@@ -4895,6 +4904,14 @@ std::size_t ResidentFamilyBytes(bool pinnedOnly) {
         return db ? db->residentBytes(pinnedOnly) : 0;
     } catch (...) {
         return 0;
+    }
+}
+
+void ReleaseUnpinnedFamilies() noexcept {
+    try {
+        if (const auto db = getDatabase())
+            db->releaseUnpinnedFamilies();
+    } catch (...) {
     }
 }
 
