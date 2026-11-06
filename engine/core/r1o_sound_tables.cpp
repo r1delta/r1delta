@@ -351,3 +351,7 @@ const void* GetR1OSoundAliasRecords() {
 std::uint32_t R1OHiddenTrailingAliases() {
     return s_hiddenAliases;
 }
+
+std::uint32_t R1OHiddenAliasStart() {
+    return s_hiddenStart;
+}

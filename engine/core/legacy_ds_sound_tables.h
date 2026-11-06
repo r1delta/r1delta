@@ -32,4 +32,5 @@ const void* GetLegacyDSAliasRecords();
 bool InstallLegacyDSAliasHiding(std::uintptr_t engineDSBase);
 // Aliases appended after the CRC/parity-visible table by the generated R2 script.
 std::uint32_t LegacyDSHiddenTrailingAliases();
+std::uint32_t LegacyDSHiddenAliasStart();   // index of the first generated alias, see R1AudioHiddenAliasStart
 

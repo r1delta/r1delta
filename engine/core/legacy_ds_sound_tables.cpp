@@ -262,3 +262,4 @@ bool InstallLegacyDSAliasHiding(std::uintptr_t engineDSBase) {
 }
 
 std::uint32_t LegacyDSHiddenTrailingAliases() { return g_hiddenAliases; }
+std::uint32_t LegacyDSHiddenAliasStart() { return g_hiddenStart; }

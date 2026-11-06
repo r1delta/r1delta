@@ -24,3 +24,4 @@ const void* GetR1OSoundAliasRecords();  // 512 byte records, record+0 = index, r
 
 // Aliases loaded after (and including) scripts/r2port_sounds.txt; they trail the parity-visible table.
 std::uint32_t R1OHiddenTrailingAliases();
+std::uint32_t R1OHiddenAliasStart();   // index of the first generated alias, see R1AudioHiddenAliasStart
