@@ -517,6 +517,9 @@
     <ClInclude Include="client\client.h">
       <Filter>client</Filter>
     </ClInclude>
+    <ClInclude Include="client\hud_damage_indicator_guard.h">
+      <Filter>client</Filter>
+    </ClInclude>
     <ClInclude Include="client\discord.h">
       <Filter>client</Filter>
     </ClInclude>
