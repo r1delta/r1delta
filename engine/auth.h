@@ -25,6 +25,8 @@ typedef struct USERID_s
 extern std::string G_public_ip;
 bool UsesProcessUniquePlatformUserId();
 void EnsurePlatformUserIdString(ConVarR1* id);
+// Client: a connect packet is about to be built for this netadr_t; ends an account-hold episode when it is over (engine/core/load.cpp).
+void AccountHold_BeginConnectAttempt(const void* target);
 
 // Auth callbacks
 void Shared_OnLocalAuthFailure();

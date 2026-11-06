@@ -60,6 +60,7 @@
 #include "dlc_ownership.h"
 #include "script_sync_parity.h"
 #include "ui_script_failure.h"
+#include "p2p/p2p_connect.h"
 #include <cstdlib>
 #include <cmath>
 #include <new>
@@ -148,6 +149,7 @@
 #include "eos_network.h"
 #include "p2p/p2p.h"
 #include "net_hooks.h"
+#include "p2p_bringup.h"
 #define DISCORDPP_IMPLEMENTATION
 #ifdef DISCORD
 #include <discordpp.h>
@@ -6700,18 +6702,13 @@ static void ClientAppendDisconnectDiagnostic(const char* text)
 // A P2P connect can time out while the map is loading, and the server keeps holding the account id
 // that connection joined with. The next attempt on a different route is then refused with "Player's
 // account is already on the server" because the held entry is never trumped, and the client is stuck
-// with no way to tell the server it moved. Recognise that kick and answer with an account id the
-// server cannot be holding, then let the engine retry.
-//
-// Both id generators produce a non-negative decimal string (a Discord snowflake, or the numeric
-// fallback), so flipping the sign yields a value neither of them can produce while staying a plain
-// number, and it is trivially reversible: the account is the id with the sign back. A repeated
-// refusal walks one step further so the same value is never re-offered.
-static constexpr int kAccountHoldAttemptLimit = 3;
-static constexpr unsigned long long kAccountHoldCooldownMs = 5000;
-static constexpr unsigned long long kAccountHoldAttemptWindowMs = 600000;
-static int s_accountHoldAttempts = 0;
-static unsigned long long s_accountHoldLastAttemptMs = 0;
+// with no way to tell the server it moved. When this game itself lost an accepted connection to a
+// timeout just before, answer that refusal with an account id the server cannot be holding, retry,
+// and put the original id back when that connection attempt is over. Any other refusal of this text
+// (a first join, or a server that counted one connection twice) leaves the identity alone.
+// The rules live in account_hold.h.
+static AccountHoldEpisode s_accountHold;
+static char s_clientLastConnectTarget[160] = {};
 
 static bool AccountHoldRecoveryEnabled()
 {
@@ -6728,9 +6725,14 @@ static bool AccountHoldRecoveryEnabled()
 	return !enabled || reinterpret_cast<ConVarR1O*>(enabled)->m_Value.m_nValue != 0;
 }
 
-static bool DeriveReleasedAccountId(const char* id, long long* out)
+static ConVarR1* PlatformUserIdVar()
 {
-	return R1DeltaDeriveReleasedAccountId(id, out);
+	return cvarinterface ? OriginalCCVar_FindVar(cvarinterface, "platform_user_id") : nullptr;
+}
+
+static const char* ConVarString(ConVarR1* var)
+{
+	return var && var->m_Value.m_pszString ? var->m_Value.m_pszString : nullptr;
 }
 
 static void RecoverFromHeldAccount(const char* reason)
@@ -6738,44 +6740,69 @@ static void RecoverFromHeldAccount(const char* reason)
 	if (!AccountHoldRecoveryEnabled())
 		return;
 
-	const unsigned long long now = GetTickCount64();
-	if (s_accountHoldLastAttemptMs && now - s_accountHoldLastAttemptMs > kAccountHoldAttemptWindowMs)
-		s_accountHoldAttempts = 0;   // the cap is per episode, not per session
-	if (s_accountHoldAttempts >= kAccountHoldAttemptLimit
-		|| (s_accountHoldLastAttemptMs && now - s_accountHoldLastAttemptMs < kAccountHoldCooldownMs))
+	if (UsesProcessUniquePlatformUserId())
 	{
+		Msg("R1Delta: the server holds this account (%s), but -multiple/-allowmultiple gives every process its own id; nothing to recover.\n",
+			reason ? reason : "");
+		return;
+	}
+
+	auto* var = PlatformUserIdVar();
+	const char* current = ConVarString(var);
+	switch (s_accountHold.OnHeldRefusal(current, GetTickCount64()))
+	{
+	case AccountHoldEpisode::Verdict::Recover:
+		Msg("R1Delta: server still holds account \"%s\" after our connection timed out (%s); retrying as \"%s\".\n",
+			current, reason ? reason : "", s_accountHold.DerivedId().c_str());
+		SetConvarStringOriginal(var, s_accountHold.DerivedId().c_str());
+		Cbuf_AddText(0, "retry\n", 0);
+		break;
+	case AccountHoldEpisode::Verdict::NoEarlierConnection:
+		Msg("R1Delta: the server says account \"%s\" is already on it (%s), but no accepted connection of this game timed out recently, "
+			"so the account id is left unchanged. The account may be in use elsewhere, or the server has not released an earlier session yet.\n",
+			current ? current : "", reason ? reason : "");
+		break;
+	case AccountHoldEpisode::Verdict::Exhausted:
 		Msg("R1Delta: account id is still held by the server (%s); not retrying again yet.\n", reason ? reason : "");
-		return;
+		break;
+	case AccountHoldEpisode::Verdict::NotNumeric:
+		Warning("R1Delta: account hold recovery skipped: platform_user_id is \"%s\", not a numeric id.\n", current ? current : "<null>");
+		break;
 	}
+}
 
-	auto* var = cvarinterface ? OriginalCCVar_FindVar(cvarinterface, "platform_user_id") : nullptr;
-	const char* current = var && var->m_Value.m_pszString ? var->m_Value.m_pszString : nullptr;
-	long long next = 0;
-	if (!DeriveReleasedAccountId(current, &next))
+// Called from the SendConnectPacket hook before the id is serialized. `target` is the netadr_t being connected to.
+void AccountHold_BeginConnectAttempt(const void* target)
+{
+	if (!target)
+		return;
+	_snprintf_s(s_clientLastConnectTarget, sizeof(s_clientLastConnectTarget), _TRUNCATE, "%s",
+		static_cast<const CNetAdr*>(target)->ToString());
+	if (!s_accountHold.BeginConnectAttempt(target, GetTickCount64()))
+		return;
+
+	auto* var = PlatformUserIdVar();
+	const char* current = ConVarString(var);
+	if (current && s_accountHold.DerivedId() == current)
 	{
-		Warning("R1Delta: account hold recovery skipped: platform_user_id is \"%s\", not a numeric id.\n",
-			current ? current : "<null>");
-		return;
+		SetConvarStringOriginal(var, s_accountHold.OriginalId().c_str());
+		Msg("R1Delta: account hold episode over, platform_user_id is back to \"%s\".\n", s_accountHold.OriginalId().c_str());
 	}
-
-	++s_accountHoldAttempts;
-	s_accountHoldLastAttemptMs = now;
-	Msg("R1Delta: server still holds account \"%s\" (%s); retrying as \"%lld\".\n",
-		current, reason ? reason : "", next);
-
-	char command[64];
-	_snprintf_s(command, sizeof(command), _TRUNCATE, "platform_user_id %lld\n", next);
-	Cbuf_AddText(0, command, 0);
-	Cbuf_AddText(0, "retry\n", 0);
+	else
+		Msg("R1Delta: account hold episode over; platform_user_id was changed meanwhile (\"%s\"), left as it is.\n", current ? current : "");
 }
 
 static void AccountHoldStatusCommand(const CCommand&)
 {
-	Msg("R1Delta account hold: enabled=%d hook=%d attempts=%d lastAttemptMs=%llu\n",
+	const char* current = ConVarString(PlatformUserIdVar());
+	Msg("R1Delta account hold: enabled=%d hook=%d attempts=%d lastAttemptMs=%llu derived=%d platform_user_id=%s original=%s\n",
 		AccountHoldRecoveryEnabled() ? 1 : 0,
 		s_COMExplainDisconnectionHookInstalled ? 1 : 0,
-		s_accountHoldAttempts,
-		s_accountHoldLastAttemptMs);
+		s_accountHold.Attempts(),
+		s_accountHold.LastAttemptMs(),
+		s_accountHold.Active() ? 1 : 0,
+		current ? current : "<null>",
+		s_accountHold.Active() ? s_accountHold.OriginalId().c_str() : "-");
 }
 
 static void R2PortClearCacheCommand(const CCommand&)
@@ -6801,12 +6828,25 @@ static void R2PortShadersRebuildCommand(const CCommand&)
 }
 
 
-static bool ReasonIsHeldAccount(const char* reason)
+// A disconnect before the server answered (challenge never completed) leaves the log with no clue what was dialled: name the
+// connect target of the last connect packet and the p2p route summary of the last delta_connect (the text delta_connect prints).
+static void ClientAppendUnansweredConnectDiagnostic(long long eventKind, int signonState)
 {
-	if (!reason || !*reason)
-		return false;
-	return strstr(reason, "already on the server") != nullptr
-		|| strstr(reason, "AccountAlreadyOnServer") != nullptr;
+	std::string route = p2p::ClientDescribe();
+	for (size_t at = 0; (at = route.find('\n', at)) != std::string::npos;)
+		route.replace(at, 1, " | ");
+	char buffer[2048];
+	_snprintf_s(
+		buffer,
+		sizeof(buffer),
+		_TRUNCATE,
+		"R1Delta: COM_ExplainDisconnection detail event=%lld localSignon=%d connectTarget=\"%s\" p2pRoute=\"%s\"\n",
+		eventKind,
+		signonState,
+		s_clientLastConnectTarget[0] ? s_clientLastConnectTarget : "none yet",
+		route.c_str());
+	OutputDebugStringA(buffer);
+	ClientAppendDisconnectDiagnostic(buffer);
 }
 
 static __int64 COMExplainDisconnectionHook(__int64 eventKind, const char* format, ...)
@@ -6817,6 +6857,7 @@ static __int64 COMExplainDisconnectionHook(__int64 eventKind, const char* format
 	vsnprintf_s(reason, sizeof(reason), _TRUNCATE, format ? format : "<null-format>", args);
 	va_end(args);
 
+	const int signonState = ClientLocalSignonState();
 	char buffer[768];
 	_snprintf_s(
 		buffer,
@@ -6825,14 +6866,18 @@ static __int64 COMExplainDisconnectionHook(__int64 eventKind, const char* format
 		"R1Delta: COM_ExplainDisconnection event=%lld ret=%p localSignon=%d reason=\"%s\" format=\"%s\" original=%p\n",
 		static_cast<long long>(eventKind),
 		_ReturnAddress(),
-		ClientLocalSignonState(),
+		signonState,
 		reason,
 		format ? format : "<null>",
 		reinterpret_cast<void*>(s_COMExplainDisconnectionOriginal));
 	OutputDebugStringA(buffer);
 	ClientAppendDisconnectDiagnostic(buffer);
+	if (signonState >= 0 && signonState <= 1)
+		ClientAppendUnansweredConnectDiagnostic(static_cast<long long>(eventKind), signonState);
 
-	if (ReasonIsHeldAccount(reason))
+	if (R1DeltaReasonIsTimeout(reason))
+		s_accountHold.NoteTimeout(signonState, GetTickCount64());
+	if (R1DeltaReasonIsHeldAccount(reason))
 		RecoverFromHeldAccount(reason);
 
 	return s_COMExplainDisconnectionOriginal
@@ -8472,12 +8517,7 @@ void Host_InitHook(bool a1) {
 		MCPServer::InitializeMCP();
 	}
 
-	if (!eos::InitializeNetworking())
-	{
-		Msg("EOS: Initialization skipped or failed\n");
-	}
-	net_hooks::Initialize();
-	p2p::Initialize();
+	InitializeP2PLayer();
 
 	return;
 }

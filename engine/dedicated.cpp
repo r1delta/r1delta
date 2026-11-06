@@ -14,6 +14,7 @@
 #include "eos_network.h"
 #include "p2p/p2p.h"
 #include "net_hooks.h"
+#include "p2p_bringup.h"
 #include "dlc_ownership.h"
 #include "r2port_provider.h"
 #pragma intrinsic(_ReturnAddress)
@@ -1664,12 +1665,7 @@ __int64 Host_InitDedicated(__int64 a1, __int64 a2, __int64 a3)
 		MCPServer::InitializeMCP();
 	}
 
-	if (!eos::InitializeNetworking())
-	{
-		Msg("EOS: Initialization skipped or failed\n");
-	}
-	net_hooks::Initialize();
-	p2p::Initialize();
+	InitializeP2PLayer();
 
 	OriginalCCVar_FindVar(cvarinterface, "sv_alltalk")->m_nFlags |= FCVAR_REPLICATED;
 

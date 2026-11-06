@@ -273,6 +273,7 @@ jobs:
             dlc_ownership_tests = 'tests/dlc_ownership_tests.vcxproj'
             dynamic_weapons_manifest_tests = 'tests/dynamic_weapons_manifest_tests.vcxproj'
             movement_fingerprint_tests = 'tests/movement_fingerprint_tests.vcxproj'
+            connect_identity_tests = 'tests/connect_identity_tests.vcxproj'
           }
 
           foreach ($entry in $projects.GetEnumerator()) {
@@ -318,7 +319,8 @@ jobs:
             'region_cull_tests',
             'dlc_ownership_tests',
             'dynamic_weapons_manifest_tests',
-            'movement_fingerprint_tests'
+            'movement_fingerprint_tests',
+            'connect_identity_tests'
           )
           foreach ($test in $tests) {
             $executable = Join-Path '${{ env.BUILD_PATH }}' "tests/$test/$test.exe"

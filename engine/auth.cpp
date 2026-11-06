@@ -13,6 +13,7 @@
 #include "dlc_ownership_logic.h"
 #include "parity_common.h"
 #include "dynamic_weapons.h"
+#include "account_hold.h"
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
@@ -582,7 +583,8 @@ void EnsurePlatformUserIdString(ConVarR1* id)
 
     const char* current = id->m_Value.m_pszString;
     const size_t currentLength = current ? strlen(current) : 0;
-    const bool numericString = currentLength >= 10 && IsNumericCString(current);
+    // A derived id (account_hold.h) is signed: it is the id the recovery chose, not one to replace.
+    const bool numericString = currentLength >= 10 && (IsNumericCString(current) || R1DeltaIsDerivedAccountId(current));
 
     const bool processUnique = UsesProcessUniquePlatformUserId();
     if (!processUnique && numericString)
@@ -632,6 +634,8 @@ int64 CBaseClientState_SendConnectPacket(__int64 a1, __int64 a2, unsigned int a3
     }
 
     static auto id = OriginalCCVar_FindVar(cvarinterface, "platform_user_id");
+    // First: the end of an account-hold episode puts the original id back before it is serialized.
+    AccountHold_BeginConnectAttempt(reinterpret_cast<const void*>(a2));
     EnsurePlatformUserIdString(id);
     if (id && id->m_Value.m_nValue == 0) {
         static std::random_device rd;
