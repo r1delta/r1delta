@@ -429,11 +429,12 @@ bool Dlc_LocalMayLoadMap(const char* map, std::string& reason)
 			return false;
 		}
 		if (group == 5) {
-			// The converted maps are drawn from the install's texture packs: a provider that failed (or whose index lacks packs) would
-			// load the map with every world surface in the error texture.
-			const std::string textureProblem = r2port::GetR2TextureProviderProblem();
-			if (!textureProblem.empty()) {
-				reason = std::string("The Titanfall 2 map ") + std::string(NormalizeMapName(map)) + " cannot be drawn on this PC. " + textureProblem;
+			// The converted maps are drawn from the install's texture packs: a provider that could not open them would load the map with
+			// every world surface in the error texture. Packs that were unreadable while indexing only lose their own textures, so the
+			// map still loads (the provider has already warned in the console).
+			const r2port::R2TextureProviderProblem textureProblem = r2port::GetR2TextureProviderProblem();
+			if (textureProblem.servesNoTextures) {
+				reason = std::string("The Titanfall 2 map ") + std::string(NormalizeMapName(map)) + " cannot be drawn on this PC. " + textureProblem.text;
 				return false;
 			}
 		}

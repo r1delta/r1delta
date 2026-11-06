@@ -13,9 +13,14 @@ namespace r2port {
 void RegisterR2MaterialProvider();
 void RegisterR2TextureCacheConVar();
 void StartR2MaterialProvider();
-// Why the converted maps cannot be textured on this machine (the Titanfall 2 texture files failed to open, or some rpaks could not be read
-// while indexing), as a sentence a player can act on; empty when nothing is known to be wrong, also while the index is still building.
-std::string GetR2TextureProviderProblem();
+// What is known to be wrong with the Titanfall 2 texture files on this machine, as a sentence a player can act on; empty when nothing is,
+// also while the index is still building. servesNoTextures: the texture files could not be opened, so every converted map would be drawn
+// in the error texture. Otherwise some rpaks were unreadable while indexing and only the textures they hold are missing.
+struct R2TextureProviderProblem {
+    std::string text;
+    bool servesNoTextures = false;
+};
+R2TextureProviderProblem GetR2TextureProviderProblem();
 // fromSource: bspData is the R2 source BSP (called before the downgrade); otherwise the converted BSP.
 void PrefetchR2MapMaterials(std::string_view mapName, FileBytes bspData, bool fromSource);
 // Names are material paths without the materials/ prefix and .vmt extension.

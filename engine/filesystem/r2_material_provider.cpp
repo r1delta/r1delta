@@ -354,9 +354,8 @@ public:
                 "(this session keeps the error texture). Restart the game; if this repeats the Titanfall 2 files are on a very slow drive or damaged.\n");
     }
 
-    // Why the converted maps cannot be textured on this machine (the index failed to open, or its scan could not read some rpaks),
-    // empty when nothing is known to be wrong. Not blocking: an index that is still being built reports nothing yet.
-    std::string Problem() const
+    // See GetR2TextureProviderProblem. Not blocking: an index that is still being built reports nothing yet.
+    R2TextureProviderProblem Problem() const
     {
         std::lock_guard<std::mutex> lock(m_stateMutex);
         return m_problem;
@@ -769,7 +768,7 @@ private:
         m_indexElapsedMs.store(static_cast<std::uint64_t>(std::max<std::int64_t>(elapsed, 0)),
             std::memory_order_relaxed);
         char message[1536]{};
-        std::string problem;   // empty unless this machine has an install whose textures cannot be served
+        R2TextureProviderProblem problem;   // empty unless this machine has an install whose textures cannot all be served
         if (opened) {
             _snprintf_s(message, sizeof(message), _TRUNCATE,
                 "R1Delta: R2 texture provider index ready install=%s cache=%s source=%s time=%lld ms family-cache=%u MiB\n",
@@ -779,22 +778,24 @@ private:
                 g_cacheLimitMiB.load(std::memory_order_relaxed));
             const std::vector<std::string> unreadable = r2tex::IndexProblems();
             if (!unreadable.empty()) {
-                problem = "Titanfall 2 texture packs could not be read (" + unreadable.front()
+                problem.text = "Titanfall 2 texture packs could not be read (" + unreadable.front()
                     + (unreadable.size() > 1 ? " and " + std::to_string(unreadable.size() - 1) + " more" : std::string())
-                    + "), so converted maps would show missing textures.";
+                    + "), so the textures they hold are missing on converted maps.";
             }
         }
         else {
             _snprintf_s(message, sizeof(message), _TRUNCATE,
                 "R1Delta: R2 texture provider unavailable: %s\n",
                 errorMessage.empty() ? "index initialization failed" : errorMessage.c_str());
-            if (!r2Install.empty())
-                problem = "The Titanfall 2 texture files could not be opened (" + (errorMessage.empty() ? std::string("index initialization failed") : errorMessage) + ").";
+            if (!r2Install.empty()) {
+                problem.text = "The Titanfall 2 texture files could not be opened (" + (errorMessage.empty() ? std::string("index initialization failed") : errorMessage) + ").";
+                problem.servesNoTextures = true;
+            }
         }
         LogR2TextureMessage(message);
-        if (!problem.empty()) {
-            problem += " Verify the Titanfall 2 files (Steam: Verify integrity of game files, EA app: Repair) and restart the game.";
-            const std::string warning = "R1Delta: WARNING " + problem + "\n";
+        if (!problem.text.empty()) {
+            problem.text += " Verify the Titanfall 2 files (Steam: Verify integrity of game files, EA app: Repair) and restart the game.";
+            const std::string warning = "R1Delta: WARNING " + problem.text + "\n";
             LogR2TextureWarning(warning.c_str());
         }
 
@@ -1684,7 +1685,7 @@ private:
     mutable std::mutex m_stateMutex;
     mutable std::condition_variable m_stateChanged;
     std::atomic<State> m_state{ State::Cold };
-    std::string m_problem;   // guarded by m_stateMutex; set once when the index finishes (Initialize)
+    R2TextureProviderProblem m_problem;   // guarded by m_stateMutex; set once when the index finishes (Initialize)
     std::thread m_indexWorker;
     std::vector<std::thread> m_workers;
     std::atomic<unsigned int> m_workerCount{};
@@ -1796,9 +1797,9 @@ void StartR2MaterialProvider()
         g_materialProvider->Activate();
 }
 
-std::string GetR2TextureProviderProblem()
+R2TextureProviderProblem GetR2TextureProviderProblem()
 {
-    return g_materialProvider ? g_materialProvider->Problem() : std::string();
+    return g_materialProvider ? g_materialProvider->Problem() : R2TextureProviderProblem{};
 }
 
 void PrefetchR2MapMaterials(std::string_view mapName, FileBytes bspData, bool fromSource)
