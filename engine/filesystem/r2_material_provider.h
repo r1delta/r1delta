@@ -25,8 +25,9 @@ R2TextureProviderProblem GetR2TextureProviderProblem();
 void PrefetchR2MapMaterials(std::string_view mapName, FileBytes bspData, bool fromSource);
 // Names are material paths without the materials/ prefix and .vmt extension.
 void PrefetchR2ModelMaterials(const std::vector<std::string>& materialNames);
-// Paths (materials/<name>.vmt or .vtf) of UI materials served outside any map (the overview images the map picker shows in the lobby):
-// starts the provider, marks the paths known and converts them in the background.
+// Paths (materials/<name>.vmt or .vtf) of UI materials served outside any map (loading screens, the overview images the map picker shows in
+// the lobby): starts the provider, marks the paths known for the rest of the session (map changes do not forget them) and converts them in
+// the background.
 void PrefetchR2UiTextures(const std::vector<std::string>& texturePaths);
 // A stock R1 map started: drops the converted-file LRU, queued prefetch work and the decoded package families of the previous R2
 // map (index, workers and disk cache stay). No-op while the provider has never been started.

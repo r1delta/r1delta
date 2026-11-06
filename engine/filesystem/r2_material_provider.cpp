@@ -407,17 +407,27 @@ public:
         }
     }
 
+    // UI images outside any map (loading screens, map picker images) stay claimable for the whole session: their callers
+    // register a path once (r2_overview_provider.cpp caches the VMT that names it), and a map change clears only the map's
+    // own known paths. A UI texture dropped from the converted LRU is converted again when R1 reads it.
     void PrefetchUiTextures(const std::vector<std::string>& texturePaths)
     {
         Activate();
-        for (const std::string& path : texturePaths)
+        for (const std::string& path : texturePaths) {
+            if (const auto normalized = NormalizeProviderPath(path)) {
+                std::string assetName;
+                bool materialFile{};
+                if (ParseMaterialPath(*normalized, assetName, materialFile))
+                    AddPath(m_uiPaths, *normalized);
+            }
             QueuePrefetchPath(path, Placement{ 1, kModelOrderBase + m_modelOrder.fetch_add(1, std::memory_order_relaxed) });
+        }
     }
 
     // A stock R1 map (or the lobby) started: nothing converted or decoded for the previous R2 map is wanted any more. Drops the
     // converted-file LRU, the queued prefetch work (a reader blocked on an item made it urgent; urgent items stay) and every
-    // decoded package family that no remaining item pins. The index, the workers and the disk cache stay, so the next R2 map
-    // starts as fast as before (converted files come back from the disk cache).
+    // decoded package family that no remaining item pins. The index, the workers, the disk cache and the UI texture paths stay,
+    // so the next R2 map starts as fast as before (converted files come back from the disk cache).
     void ReleaseMapState()
     {
         if (!m_activated.load(std::memory_order_acquire))
@@ -482,7 +492,7 @@ public:
         if (m_state.load(std::memory_order_acquire) != State::Ready)
             return false;
         std::shared_lock<std::shared_mutex> lock(m_knownPathsMutex);
-        return ContainsKnownPath(m_knownPaths, normalizedPath);
+        return ContainsKnownPath(m_knownPaths, normalizedPath) || ContainsKnownPath(m_uiPaths, normalizedPath);
     }
 
     bool CanCacheMisses() const override
@@ -740,29 +750,38 @@ private:
 
     void AddKnownPath(std::string_view path)
     {
+        AddPath(m_knownPaths, path);
+    }
+
+    void AddPath(KnownPathBuckets& paths, std::string_view path)
+    {
         std::unique_lock<std::shared_mutex> lock(m_knownPathsMutex);
-        auto& bucket = m_knownPaths[KnownPathHash(path)];
-        if (!ContainsKnownPath(m_knownPaths, path)) {
+        auto& bucket = paths[KnownPathHash(path)];
+        if (!ContainsKnownPath(paths, path)) {
             bucket.emplace_back(path);
             r2port::InvalidateMissCache();
         }
     }
 
+    // A conversion that produced nothing: R1 stops asking this provider for the path, whichever set made it known.
     void RemoveKnownPath(std::string_view path)
     {
         std::unique_lock<std::shared_mutex> lock(m_knownPathsMutex);
-        const auto bucket = m_knownPaths.find(KnownPathHash(path));
-        if (bucket == m_knownPaths.end())
-            return;
-        auto& names = bucket->second;
-        names.erase(std::remove_if(names.begin(), names.end(),
-            [path](const std::string& candidate) {
-                return std::string_view(candidate) == path;
-            }), names.end());
-        if (names.empty())
-            m_knownPaths.erase(bucket);
+        for (KnownPathBuckets* paths : { &m_knownPaths, &m_uiPaths }) {
+            const auto bucket = paths->find(KnownPathHash(path));
+            if (bucket == paths->end())
+                continue;
+            auto& names = bucket->second;
+            names.erase(std::remove_if(names.begin(), names.end(),
+                [path](const std::string& candidate) {
+                    return std::string_view(candidate) == path;
+                }), names.end());
+            if (names.empty())
+                paths->erase(bucket);
+        }
     }
 
+    // A map change: the previous map's paths go, the UI texture paths stay.
     void ClearKnownPaths()
     {
         std::unique_lock<std::shared_mutex> lock(m_knownPathsMutex);
@@ -1743,6 +1762,7 @@ private:
     std::atomic<bool> m_activated{};
     mutable std::shared_mutex m_knownPathsMutex;
     KnownPathBuckets m_knownPaths;
+    KnownPathBuckets m_uiPaths;   // PrefetchUiTextures; never cleared by a map change
     mutable std::mutex m_stateMutex;
     mutable std::condition_variable m_stateChanged;
     std::atomic<State> m_state{ State::Cold };
