@@ -12,6 +12,7 @@
 #include "rendering/surfacerender.h"
 #include "culling/region_cull.h"
 #include "script_sync_parity.h"
+#include "hud_damage_indicator_guard.h"
 
 typedef void (*sub_18027F2C0Type)(__int64 a1, const char *a2, void *a3);
 sub_18027F2C0Type sub_18027F2C0Original;
@@ -59,6 +60,15 @@ __int64 __fastcall sub_18008E820(__int64 a1, unsigned int a2)
     if (a1)
         return osub_18008E820(a1, a2);
     return 0;
+}
+// See hud_damage_indicator_guard.h: the retail destructor leaves g_pDamageIndicator[slot] pointing
+// at the freed panel when it runs at level shutdown.
+static __int64 (__fastcall* oCHudDamageIndicator__Destructor)(void* indicator);
+static __int64 __fastcall CHudDamageIndicator__Destructor(void* indicator)
+{
+    namespace hdi = r1delta::hud_damage_indicator;
+    hdi::ReleaseSlot(reinterpret_cast<void**>(G_client + hdi::kSlotTableRva), indicator);
+    return oCHudDamageIndicator__Destructor(indicator);
 }
 void *(*oKeyValues__SetString__Client)(__int64 a1, char *a2, const char *a3);
 void *KeyValues__SetString__Client(__int64 a1, char *a2, const char *a3)
@@ -789,6 +799,14 @@ void InitClient()
     // MH_CreateHook((LPVOID)(client + 0x47FED0), &WeaponSprayFunction2, reinterpret_cast<LPVOID*>(&oWeaponSprayFunction2));
     MH_CreateHook((LPVOID)(client + 0x3C5830), &LoadingProgress__SetupControlStates, reinterpret_cast<LPVOID *>(&oLoadingProgress__SetupControlStates));
     MH_CreateHook((LPVOID)(client + 0x689A70), &vgui__PHandle__Get_Hook, reinterpret_cast<LPVOID *>(&vgui__PHandle__Get_Original));
+    {
+        namespace hdi = r1delta::hud_damage_indicator;
+        void* const destructor = reinterpret_cast<void*>(client + hdi::kDestructorRva);
+        if (!std::memcmp(destructor, hdi::kExpectedDestructorPrologue, sizeof(hdi::kExpectedDestructorPrologue)))
+            MH_CreateHook(destructor, &CHudDamageIndicator__Destructor, reinterpret_cast<LPVOID*>(&oCHudDamageIndicator__Destructor));
+        else
+            Warning("R1Delta: CHudDamageIndicator destructor bytes mismatch; damage-indicator slot guard not installed\n");
+    }
 
     InitRegionCullHooks();
     // client.dll answers a remote-function checksum mismatch with an endless

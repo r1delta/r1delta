@@ -226,6 +226,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="beardbgon.h" />
     <ClInclude Include="sdk\bitbuf.h" />
     <ClInclude Include="client\client.h" />
+    <ClInclude Include="client\hud_damage_indicator_guard.h" />
     <ClInclude Include="sdk\color.h" />
     <ClInclude Include="engine\compression.h" />
     <ClInclude Include="engine\compression_stream.h" />
