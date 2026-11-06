@@ -57,6 +57,7 @@ $projects = [ordered]@{
     movement_fingerprint_tests                = 'tests/movement_fingerprint_tests.vcxproj'
     dll_load_diagnostics_tests                = 'tests/dll_load_diagnostics_tests.vcxproj'
     allocation_header_tests                   = 'tests/allocation_header_tests.vcxproj'
+    hud_damage_indicator_guard_tests          = 'tests/hud_damage_indicator_guard_tests.vcxproj'
     script_modding_tests                      = 'tests/script_modding_tests.vcxproj'
 }
 
