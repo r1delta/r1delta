@@ -109,6 +109,20 @@ enum class LoadoutVerdict
 // no mp_titanweapon_* value.
 LoadoutVerdict JudgeLoadoutValue(std::string_view key, std::string_view value);
 
+// Server writes to the progression counters a client can judge on its own:
+// gen and initializedVersion only grow, previouslyInitialized is never
+// cleared, and xp only falls when the player regenerates (the server writes
+// xp 0 and then gen + 1). A server that writes less has read defaults instead
+// of the player's data (data that never arrived, another version's schema).
+enum class ProgressionVerdict
+{
+	Accept,
+	Refuse,           // would undo progression the client holds
+	AwaitRegen,       // xp falls: apply only together with a gen increase
+	CompletesRegen,   // gen grows: an xp fall awaiting it applies now
+};
+ProgressionVerdict JudgeServerProgressionWrite(const Entries& store, std::string_view key, std::string_view value);
+
 // Formats one entry as it appears in the store file / legacy profile.
 std::string FormatLine(std::string_view key, std::string_view value);
 

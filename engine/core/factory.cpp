@@ -14651,6 +14651,7 @@ static bool __fastcall R1ONETSetConVarReadFromBuffer(__int64 message, __int64 bi
 	bool sawPackedPData = false;
 	bool sawLegacyPData = false;
 	bool sawFullSnapshotMarker = false;
+	PersistentDataState::KeyList rejectedPersistentKeys;
 	SoundScriptUpload soundScripts;
 	for (uint32_t i = 0; i < count; ++i) {
 		NetMessageCvar_t var = {};
@@ -14707,6 +14708,8 @@ static bool __fastcall R1ONETSetConVarReadFromBuffer(__int64 message, __int64 bi
 			if (!IsValidUserInfo(var.name) || !IsValidUserInfo(var.value)
 				|| !PDef::IsValidKeyAndValue(var.name, var.value)) {
 				Warning("Ignoring invalid persistent data convar: key=%s value=%s\n", var.name, var.value);
+				if (IsValidUserInfo(var.name))
+					rejectedPersistentKeys.emplace_back(std::string(PERSIST_COMMAND" ") + var.name);
 				continue;
 			}
 
@@ -14739,7 +14742,7 @@ static bool __fastcall R1ONETSetConVarReadFromBuffer(__int64 message, __int64 bi
 			return false;
 		}
 		std::vector<NetMessageCvar_t> decoded;
-		if (!DecodePackedPDataWire(packedPData, decoded)) {
+		if (!DecodePackedPDataWire(packedPData, decoded, rejectedPersistentKeys)) {
 			Warning("Failed to decode packed persistent data payload\n");
 			return false;
 		}
@@ -14754,15 +14757,19 @@ static bool __fastcall R1ONETSetConVarReadFromBuffer(__int64 message, __int64 bi
 			return false;
 		}
 
-		const bool hasPersistentData = sawPackedPData || sawLegacyPData || sawFullSnapshotMarker;
+		// The signon message carries the persistent data, or proves the client
+		// has none; either way the server now knows the player's data set.
+		const bool reportsPersistentData = sawPackedPData || sawLegacyPData || sawFullSnapshotMarker
+			|| soundScripts.present;
 		R1OPersistenceOwner persistenceOwner;
-		if (hasPersistentData) {
+		if (reportsPersistentData) {
 			// Reconcile before the engine sees the values so stale snapshots
 			// (e.g. the one sent after a changelevel reconnect) cannot undo
 			// writes the client has not acknowledged yet.
 			if (!R1OResolvePersistenceOwner(message, persistenceOwner)
 				|| !PData_ServerReconcileIncoming(
-					persistenceOwner.playerSlot, &persistenceOwner.session, staged, sawFullSnapshotMarker)) {
+					persistenceOwner.playerSlot, &persistenceOwner.session, staged, rejectedPersistentKeys,
+					PersistentDataState::ClassifyReport(sawFullSnapshotMarker, soundScripts.present))) {
 				Warning("R1Delta: R1O NET_SetConVar could not reconcile persistence for player slot %d\n",
 					persistenceOwner.playerSlot);
 			}

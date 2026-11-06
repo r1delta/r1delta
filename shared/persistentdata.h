@@ -35,20 +35,25 @@ bool __fastcall NET_SetConVar__WriteToBuffer(NET_SetConVar* thisptr, bf_write& b
 unsigned long long GenerateSyntheticPlatformUserId();
 bool SafePrefixConVarName(char* name, size_t nameBufferSize, const char* prefix);
 bool IsPackedPDataWireName(const char* name);
-bool DecodePackedPDataWire(const std::string& encoded, std::vector<NetMessageCvar_t>& output);
+// Decodes a packed persistent-data payload. Entries the active schema rejects
+// are left out of `output` and their "__ key" names appended to `rejected`.
+bool DecodePackedPDataWire(const std::string& encoded, std::vector<NetMessageCvar_t>& output,
+	PersistentDataState::KeyList& rejected);
 bool IsPDataFullSnapshotMarker(const char* name);
 __int64 CConVar__GetSplitScreenPlayerSlot(char* thisptr);
 void setinfopersist_cmd(const CCommand& args);
 
 // Server: reconciles the persistent values a client just reported against the
 // server's unacknowledged writes (rewrites stale values in `staged`, appends
-// missing ones for full snapshots, resends lost writes). `session` may be null
-// to resolve it from the engine's client table.
+// missing ones for full snapshots, resends lost writes). `rejected` names the
+// persistent keys of the message that this server's schema rejected. `session`
+// may be null to resolve it from the engine's client table.
 bool PData_ServerReconcileIncoming(
 	int playerSlot,
 	const PersistentDataState::SessionKey* session,
 	std::vector<NetMessageCvar_t>& staged,
-	bool fullSnapshot);
+	const PersistentDataState::KeyList& rejected,
+	PersistentDataState::ReportKind kind);
 // Server: sends one client a console command over its netchannel
 // (IVEngineServer::ClientCommand -> svc_StringCmd). The client only runs
 // commands IsValidServerCommand accepts.
@@ -79,6 +84,7 @@ SQInteger Script_ClientGetPersistentData(HSQUIRRELVM v);
 SQInteger Script_ClientGetPersistentDataAsInt(HSQUIRRELVM v);
 SQInteger Script_ServerGetPersistentUserDataKVString(HSQUIRRELVM v);
 SQInteger Script_ServerSetPersistentUserDataKVString(HSQUIRRELVM v);
+SQInteger Script_ServerIsPersistentDataReady(HSQUIRRELVM v);
 typedef char (*CBaseClientState__InternalProcessStringCmdType)(void* thisptr, void* msg, bool bIsHLTV);
 extern CBaseClientState__InternalProcessStringCmdType CBaseClientState__InternalProcessStringCmdOriginal;
 char CBaseClientState__InternalProcessStringCmd(void* thisptr, void* msg, bool bIsHLTV);

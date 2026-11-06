@@ -2495,6 +2495,16 @@ bool GetSQVMFuncs() {
 		"Set a persistent userinfo value (this does NOT replicate you will need to send the replication command)"
 	);
 	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER,
+		"IsPersistentDataReady",
+		Script_ServerIsPersistentDataReady,
+		"..",
+		2,
+		"bool",
+		"entity player",
+		"True once the player's persistent data has arrived on the current connection"
+	);
+	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_UI, // Available in client script contexts
 		"GetLoadingStatusText",
 		Script_GetLoadingStatusText,

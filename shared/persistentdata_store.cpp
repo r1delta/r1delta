@@ -1,5 +1,6 @@
 #include "persistentdata_store.h"
 
+#include <charconv>
 #include <cstdio>
 #include <utility>
 #include <vector>
@@ -426,6 +427,45 @@ LoadoutVerdict JudgeLoadoutValue(std::string_view key, std::string_view value)
 	}
 
 	return LoadoutVerdict::Neutral;
+}
+
+namespace {
+
+bool ParseCount(std::string_view text, long long& count)
+{
+	const char* end = text.data() + text.size();
+	const auto parsed = std::from_chars(text.data(), end, count);
+	return !text.empty() && parsed.ec == std::errc() && parsed.ptr == end;
+}
+
+bool IsTrue(std::string_view value)
+{
+	return value == "1" || value == "true";
+}
+
+}
+
+ProgressionVerdict JudgeServerProgressionWrite(const Entries& store, std::string_view key, std::string_view value)
+{
+	const bool xp = key == "xp";
+	const bool gen = key == "gen";
+	const bool counter = xp || gen || key == "initializedVersion";
+	if (!counter && key != "previouslyInitialized")
+		return ProgressionVerdict::Accept;
+	const auto current = store.find(key);
+	if (current == store.end())
+		return ProgressionVerdict::Accept;
+
+	if (!counter)
+		return IsTrue(current->second) && !IsTrue(value) ? ProgressionVerdict::Refuse : ProgressionVerdict::Accept;
+
+	long long held = 0;
+	long long written = 0;
+	if (!ParseCount(current->second, held) || !ParseCount(value, written) || written == held)
+		return ProgressionVerdict::Accept;
+	if (written > held)
+		return gen ? ProgressionVerdict::CompletesRegen : ProgressionVerdict::Accept;
+	return xp ? ProgressionVerdict::AwaitRegen : ProgressionVerdict::Refuse;
 }
 
 }
