@@ -51,6 +51,7 @@ $projects = [ordered]@{
     dynamic_weapons_manifest_tests            = 'tests/dynamic_weapons_manifest_tests.vcxproj'
     movement_fingerprint_tests                = 'tests/movement_fingerprint_tests.vcxproj'
     dll_load_diagnostics_tests                = 'tests/dll_load_diagnostics_tests.vcxproj'
+    script_modding_tests                      = 'tests/script_modding_tests.vcxproj'
 }
 
 $selected = @($projects.GetEnumerator() | Where-Object {

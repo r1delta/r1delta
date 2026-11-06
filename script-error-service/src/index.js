@@ -1,5 +1,6 @@
 import {
   MAX_REQUEST_BYTES,
+  SUPPORTED_SCHEMAS,
   ValidationError,
   fingerprintReport,
   publicCodeCandidates,
@@ -8,6 +9,7 @@ import {
 import { renderAdminPage, renderPublicError } from "./render.js";
 import { isAuthorized, withSecurityHeaders } from "./security.js";
 import {
+  MODDED_FILTERS,
   checkDatabase,
   findPublicError,
   findTopErrors,
@@ -224,7 +226,7 @@ async function requireAdmin(request, env) {
 }
 
 function parseAdminQuery(url, now = new Date()) {
-  const allowedParameters = new Set(["window", "limit"]);
+  const allowedParameters = new Set(["window", "limit", "modded"]);
   for (const key of url.searchParams.keys()) {
     if (!allowedParameters.has(key) || url.searchParams.getAll(key).length !== 1) {
       throw new HttpError(400, "invalid_query", "Invalid admin query");
@@ -249,25 +251,37 @@ function parseAdminQuery(url, now = new Date()) {
   const nowSeconds = Math.floor(now.getTime() / 1000);
   const cutoff =
     duration === null ? 0 : Math.floor((nowSeconds - duration) / 3600) * 3600;
-  return { windowName, cutoff, limit };
+  const moddedFilter = url.searchParams.get("modded") || "all";
+  if (!MODDED_FILTERS.includes(moddedFilter)) {
+    throw new HttpError(400, "invalid_query", "Invalid modded filter");
+  }
+
+  return { windowName, cutoff, limit, moddedFilter };
 }
 
 async function getAdminTop(request, env, url, html) {
   await requireAdmin(request, env);
   const query = parseAdminQuery(url);
-  const items = await findTopErrors(env.DB, query.cutoff, query.limit);
+  const items = await findTopErrors(
+    env.DB,
+    query.cutoff,
+    query.limit,
+    query.moddedFilter,
+  );
   const generatedAt = new Date().toISOString();
 
   if (html) {
     return htmlResponse(
       renderAdminPage(items, {
         windowName: query.windowName,
+        moddedFilter: query.moddedFilter,
         generatedAt,
       }),
     );
   }
   return jsonResponse({
     window: query.windowName,
+    modded: query.moddedFilter,
     generatedAt,
     items,
   });
@@ -284,7 +298,7 @@ async function route(request, env) {
     if (!(await checkDatabase(env.DB))) {
       throw new HttpError(503, "unhealthy", "Service is unhealthy");
     }
-    return jsonResponse({ status: "ok" });
+    return jsonResponse({ status: "ok", schemas: [...SUPPORTED_SCHEMAS] });
   }
 
   if (pathname === "/v1/reports") {

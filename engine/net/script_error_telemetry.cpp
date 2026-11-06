@@ -4,6 +4,8 @@
 #include "cvar.h"
 #include "crash_report_context.h"
 #include "logging.h"
+#include "script_error_payload.h"
+#include "script_mod_state.h"
 
 #include <Windows.h>
 #include <winhttp.h>
@@ -43,7 +45,6 @@ constexpr std::size_t kMaxErrorLength = 1024;
 constexpr std::size_t kMaxFunctionLength = 128;
 constexpr std::size_t kMaxSourceLength = 192;
 constexpr std::size_t kMaxServiceUrlLength = 512;
-constexpr std::size_t kMaxPayloadLength = 16 * 1024;
 constexpr std::size_t kMaxResponseLength = 4096;
 constexpr int kResolveTimeoutMs = 1000;
 constexpr int kConnectTimeoutMs = 1500;
@@ -53,23 +54,14 @@ constexpr int kReceiveTimeoutMs = 1500;
 constexpr std::string_view kErrorMarker = "SCRIPT ERROR:";
 constexpr std::string_view kAssertMarker = "SCRIPT ASSERT:";
 
-struct Frame
-{
-    std::string function;
-    std::string source;
-    int line = 0;
-};
-
 struct Report
 {
     VmContext context = VmContext::Server;
     std::uint64_t sequence = 0;
-    std::string processMode;
-    std::string error;
-    std::vector<Frame> frames;
+    ReportBody body;
     std::string serviceUrl;
     bool eligible = false;
-    bool cascade = false;
+    int schema = kSchemaLegacy; // chosen when the report is posted
 };
 
 enum class CapturePhase : std::uint8_t
@@ -675,47 +667,14 @@ bool IsValidResponseCode(std::string_view code)
     });
 }
 
-std::string BuildPayload(Report& report)
+constexpr std::wstring_view kReportsPath = L"/v1/reports";
+
+// One HTTPS round trip to `endpoint`'s host. Returns the response body of a 200 answer.
+bool SendRequest(const Endpoint& endpoint, const wchar_t* verb, const std::wstring& path,
+    std::string_view body, std::string& response)
 {
-    nlohmann::json payload;
-    payload["schema"] = 1;
-    payload["vmContext"] = ContextName(report.context);
-    payload["processMode"] = report.processMode;
-    payload["cascade"] = report.cascade;
-    payload["error"] = report.error;
-    payload["frames"] = nlohmann::json::array();
-    for (const Frame& frame : report.frames) {
-        payload["frames"].push_back({
-            { "function", frame.function },
-            { "source", frame.source },
-            { "line", frame.line }
-        });
-    }
-
-    std::string serialized = payload.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
-    while (serialized.size() > kMaxPayloadLength && !payload["frames"].empty()) {
-        payload["frames"].erase(payload["frames"].end() - 1);
-        serialized = payload.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
-    }
-    while (serialized.size() > kMaxPayloadLength && report.error.size() > 64) {
-        report.error.resize(report.error.size() - 64);
-        payload["error"] = report.error;
-        serialized = payload.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
-    }
-    return serialized.size() <= kMaxPayloadLength ? serialized : std::string();
-}
-
-bool PostReport(Report& report, std::string& code, bool& isNew)
-{
-    Endpoint endpoint;
-    if (!ParseEndpoint(report.serviceUrl, endpoint))
+    if (body.size() > static_cast<std::size_t>(std::numeric_limits<DWORD>::max()))
         return false;
-
-    std::string payload = BuildPayload(report);
-    if (payload.empty() || payload.size() > kMaxPayloadLength
-        || payload.size() > static_cast<std::size_t>(std::numeric_limits<DWORD>::max())) {
-        return false;
-    }
 
     InternetHandle session(WinHttpOpen(L"R1Delta script error telemetry/1",
         WINHTTP_ACCESS_TYPE_NO_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
@@ -735,7 +694,7 @@ bool PostReport(Report& report, std::string& code, bool& isNew)
     if (!connection)
         return false;
 
-    InternetHandle request(WinHttpOpenRequest(connection.get(), L"POST", endpoint.path.c_str(),
+    InternetHandle request(WinHttpOpenRequest(connection.get(), verb, path.c_str(),
         nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE));
     if (!request)
         return false;
@@ -748,8 +707,10 @@ bool PostReport(Report& report, std::string& code, bool& isNew)
     }
 
     constexpr wchar_t headers[] = L"Content-Type: application/json\r\nAccept: application/json\r\nCache-Control: no-store\r\n";
+    const DWORD bodyLength = static_cast<DWORD>(body.size());
     if (!WinHttpSendRequest(request.get(), headers, static_cast<DWORD>(-1),
-            payload.data(), static_cast<DWORD>(payload.size()), static_cast<DWORD>(payload.size()), 0)) {
+            body.empty() ? WINHTTP_NO_REQUEST_DATA : const_cast<char*>(body.data()),
+            bodyLength, bodyLength, 0)) {
         return false;
     }
     if (!WinHttpReceiveResponse(request.get(), nullptr))
@@ -763,7 +724,7 @@ bool PostReport(Report& report, std::string& code, bool& isNew)
         return false;
     }
 
-    std::string response;
+    response.clear();
     response.reserve(256);
     std::array<char, 1024> buffer{};
     for (int readCount = 0; readCount < 5; ++readCount) {
@@ -778,6 +739,53 @@ bool PostReport(Report& report, std::string& code, bool& isNew)
         if (readCount == 4)
             return false;
     }
+    return true;
+}
+
+// GET /health: a service that predates schema 2 answers {"status":"ok"} and keeps the client on
+// schema 1. False when the service could not be reached, so the answer is not cached.
+bool ProbeSchema(const Endpoint& endpoint, int& schema)
+{
+    const std::wstring healthPath =
+        endpoint.path.substr(0, endpoint.path.size() - kReportsPath.size()) + L"/health";
+    std::string response;
+    if (!SendRequest(endpoint, L"GET", healthPath, {}, response))
+        return false;
+    schema = SelectSchema(response);
+    return true;
+}
+
+// The newest schema the service at `serviceUrl` accepts. Probed once per URL and cached; an
+// unreachable service is not cached and gets schema 1 for this report. Worker thread only.
+int SchemaFor(const std::string& serviceUrl, const Endpoint& endpoint)
+{
+    static std::string probedUrl;
+    static int probedSchema = kSchemaLegacy;
+    if (!probedUrl.empty() && probedUrl == serviceUrl)
+        return probedSchema;
+
+    int schema = kSchemaLegacy;
+    if (!ProbeSchema(endpoint, schema))
+        return kSchemaLegacy;
+    probedUrl = serviceUrl;
+    probedSchema = schema;
+    return schema;
+}
+
+bool PostReport(Report& report, std::string& code, bool& isNew)
+{
+    Endpoint endpoint;
+    if (!ParseEndpoint(report.serviceUrl, endpoint))
+        return false;
+
+    report.schema = SchemaFor(report.serviceUrl, endpoint);
+    const std::string payload = BuildPayload(report.body, report.schema);
+    if (payload.empty() || payload.size() > kMaxPayloadLength)
+        return false;
+
+    std::string response;
+    if (!SendRequest(endpoint, L"POST", endpoint.path, payload, response))
+        return false;
 
     const nlohmann::json parsed = nlohmann::json::parse(response, nullptr, false);
     if (parsed.is_discarded() || !parsed.is_object() || !parsed.contains("code")
@@ -791,6 +799,27 @@ bool PostReport(Report& report, std::string& code, bool& isNew)
     code = parsedCode;
     isNew = parsed["isNew"].get<bool>();
     return true;
+}
+
+std::string ModdedText(const Report& report)
+{
+    const std::size_t moddedFrames = static_cast<std::size_t>(std::count_if(
+        report.body.frames.begin(), report.body.frames.end(),
+        [](const Frame& frame) { return frame.modded; }));
+    return "modded: " + ScriptModding::ReasonText(report.body.moddedReasons) + "; "
+        + std::to_string(moddedFrames) + " of " + std::to_string(report.body.frames.size())
+        + " frames modded";
+}
+
+// Fills in the frames' and the report's modded classification and logs it, whatever schema the
+// service will accept: the console line is the local record of what was detected.
+void ClassifyReport(Report& report)
+{
+    const ScriptModState::Classification classification = ScriptModState::Classify(report.body.frames);
+    report.body.moddedReasons = classification.reasons;
+    Msg("Script error classified (%s VM): %s%s\n", report.body.vmContext.c_str(),
+        ModdedText(report).c_str(),
+        classification.manifestAvailable ? "" : "; content manifest unavailable, core not checked");
 }
 
 class Service
@@ -992,14 +1021,15 @@ private:
         state.report = Report{};
         state.report.context = context;
         state.report.sequence = ++nextSequence_;
-        state.report.processMode = ProcessMode(context);
+        state.report.body.vmContext = ContextName(context);
+        state.report.body.processMode = ProcessMode(context);
         const std::uint64_t now = GetTickCount64();
-        state.report.cascade = lastErrorAtMs_ != 0 && now - lastErrorAtMs_ <= 30'000;
+        state.report.body.cascade = lastErrorAtMs_ != 0 && now - lastErrorAtMs_ <= 30'000;
         lastErrorAtMs_ = now;
-        state.report.error = SanitizeError(errorText);
+        state.report.body.error = SanitizeError(errorText);
         state.report.serviceUrl = settings.serviceUrl;
         state.report.eligible = settings.ready && settings.enabled;
-        state.report.frames.reserve(kMaxFrames);
+        state.report.body.frames.reserve(kMaxFrames);
 
         NotificationState& notification = notifications_[ContextIndex(context)];
         notification.sequence = state.report.sequence;
@@ -1048,10 +1078,10 @@ private:
             return;
 
         if (StartsWith(line, "*FUNCTION [")) {
-            if (state.report.eligible && state.report.frames.size() < kMaxFrames) {
+            if (state.report.eligible && state.report.body.frames.size() < kMaxFrames) {
                 Frame frame;
                 if (ParseFrame(line, frame))
-                    state.report.frames.push_back(std::move(frame));
+                    state.report.body.frames.push_back(std::move(frame));
             }
             return;
         }
@@ -1099,6 +1129,7 @@ private:
                 const Settings settings = ReadSettings();
                 if (!settings.ready || !settings.enabled)
                     continue;
+                ClassifyReport(report);
                 if (!PostReport(report, code, isNew))
                     continue;
             }
@@ -1106,8 +1137,9 @@ private:
                 continue;
             }
 
-            Msg("Script error report uploaded as #%s%s.\n",
-                code.c_str(), isNew ? "" : " (existing report)");
+            Msg("Script error report uploaded as #%s%s%s.\n", code.c_str(),
+                isNew ? "" : " (existing report)",
+                report.schema >= kSchemaModded ? (" [schema 2, " + ModdedText(report) + "]").c_str() : "");
 
             std::lock_guard<std::mutex> lock(stateMutex_);
             NotificationState& notification = notifications_[ContextIndex(report.context)];
@@ -1153,6 +1185,7 @@ Service& GetService()
 void Initialize() noexcept
 {
     try {
+        ScriptModState::Warm();
         GetService().Initialize();
     }
     catch (...) {

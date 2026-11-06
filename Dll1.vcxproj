@@ -387,6 +387,9 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="engine\logging\logging.h" />
     <ClInclude Include="engine\net\masterserver.h" />
     <ClInclude Include="engine\net\script_error_telemetry.h" />
+    <ClInclude Include="engine\net\script_error_payload.h" />
+    <ClInclude Include="engine\net\script_mod_state.h" />
+    <ClInclude Include="engine\net\script_modding.h" />
     <ClInclude Include="engine\mcp_server.h" />
     <ClInclude Include="engine\memory\memory.h" />
     <ClInclude Include="engine\vtable_remaps\model_info_vtable.h" />
@@ -655,6 +658,9 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="engine\logging\logging.cpp" />
     <ClCompile Include="engine\net\masterserver.cpp" />
     <ClCompile Include="engine\net\script_error_telemetry.cpp" />
+    <ClCompile Include="engine\net\script_error_payload.cpp" />
+    <ClCompile Include="engine\net\script_mod_state.cpp" />
+    <ClCompile Include="engine\net\script_modding.cpp" />
     <ClCompile Include="engine\mcp_server.cpp" />
     <ClCompile Include="engine\memory\memory.cpp" />
     <ClCompile Include="engine\vtable_remaps\model_info_vtable.cpp" />

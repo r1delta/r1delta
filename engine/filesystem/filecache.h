@@ -142,6 +142,9 @@ public:
     // false while the cache lock is held (background scan in progress), because a crash report
     // must not stall waiting for another thread.
     bool TrySnapshotEnabledAddons(std::vector<std::string>& out) const;
+
+    // The app's own content directory (<exe dir>\r1delta), fixed at construction. Lock-free.
+    const std::filesystem::path& GetBaseDirectory() const { return r1deltaBasePath; }
     bool ResolveReplacementFile(
         const ReadLease& lease,
         const char* pszRelativeFilePath,

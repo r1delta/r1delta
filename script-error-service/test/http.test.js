@@ -148,3 +148,118 @@ test("admin routes fail closed when no secret binding is configured", async () =
   assert.equal(body.error.code, "admin_auth_unavailable");
   assert.equal(response.headers.get("cache-control"), "no-store");
 });
+
+function databaseStub(overrides = {}) {
+  const calls = [];
+  return {
+    calls,
+    prepare(sql) {
+      return {
+        bind(...params) {
+          calls.push({ sql, params });
+          return {
+            sql,
+            params,
+            async first() {
+              return overrides.first ?? null;
+            },
+            async all() {
+              return { results: overrides.rows ?? [] };
+            },
+          };
+        },
+      };
+    },
+    async batch(statements) {
+      calls.push({ batch: statements.map((statement) => statement.params) });
+      return [{ meta: { changes: 1 } }, {}, {}, { results: [{ code: "ABCDEFGH", totalCount: 1 }] }];
+    },
+  };
+}
+
+test("health advertises the accepted report schemas", async () => {
+  const { response, body } = await errorResponse(
+    new Request("https://errors.example.test/health"),
+    { DB: databaseStub({ first: { healthy: 2 } }) },
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(body, { status: "ok", schemas: [1, 2] });
+});
+
+function postReportRequest(body) {
+  return new Request("https://errors.example.test/v1/reports", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+const allowingRateLimit = {
+  async limit() {
+    return { success: true };
+  },
+};
+
+test("schema 1 and schema 2 reports are both accepted", async () => {
+  const base = {
+    vmContext: "CLIENT",
+    processMode: "CLIENT",
+    cascade: false,
+    error: "missing function",
+  };
+  const db = databaseStub();
+  const env = { DB: db, REPORT_RATE_LIMIT: allowingRateLimit };
+
+  const legacy = await errorResponse(
+    postReportRequest({ ...base, schema: 1, frames: [] }),
+    env,
+  );
+  const modded = await errorResponse(
+    postReportRequest({
+      ...base,
+      schema: 2,
+      modded: ["addons"],
+      frames: [{ function: "f", source: "scripts/vscripts/x.nut", line: 3, modded: true }],
+    }),
+    env,
+  );
+  const invalid = await errorResponse(
+    postReportRequest({ ...base, schema: 2, frames: [] }),
+    env,
+  );
+
+  assert.equal(legacy.response.status, 200);
+  assert.equal(modded.response.status, 200);
+  assert.equal(invalid.response.status, 400);
+  assert.equal(invalid.body.error.code, "invalid_report");
+
+  // Statement parameters: [... cascade, classified, modded, fingerprint] for the error update.
+  const updates = db.calls
+    .filter((call) => call.batch)
+    .map((call) => call.batch[1]);
+  assert.deepEqual(updates[0].slice(1, 4), [0, 0, 0], "schema 1 is unclassified");
+  assert.deepEqual(updates[1].slice(1, 4), [0, 1, 1], "schema 2 modded game is counted");
+});
+
+test("admin ranking validates and applies the modded filter", async () => {
+  const request = (query) =>
+    new Request(`https://errors.example.test/v1/admin/top${query}`, {
+      headers: { Authorization: "Bearer secret" },
+    });
+  const db = databaseStub();
+  const env = { DB: db, ADMIN_TOKEN: "secret" };
+
+  const invalid = await errorResponse(request("?modded=maybe"), env);
+  assert.equal(invalid.response.status, 400);
+  assert.equal(invalid.body.error.code, "invalid_query");
+
+  const only = await errorResponse(request("?modded=only"), env);
+  assert.equal(only.response.status, 200);
+  assert.equal(only.body.modded, "only");
+  assert.match(db.calls.at(-1).sql, /SUM\(b\.modded_count\) AS windowCount/);
+
+  const defaulted = await errorResponse(request(""), env);
+  assert.equal(defaulted.body.modded, "all");
+  assert.match(db.calls.at(-1).sql, /SUM\(b\.count\) AS windowCount/);
+});

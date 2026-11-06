@@ -470,6 +470,15 @@
     <ClInclude Include="engine\net\script_error_telemetry.h">
       <Filter>engine\net</Filter>
     </ClInclude>
+    <ClInclude Include="engine\net\script_error_payload.h">
+      <Filter>engine\net</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\net\script_mod_state.h">
+      <Filter>engine\net</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\net\script_modding.h">
+      <Filter>engine\net</Filter>
+    </ClInclude>
     <!-- engine (root) -->
     <ClInclude Include="engine\auth.h">
       <Filter>engine</Filter>
@@ -1161,6 +1170,15 @@
       <Filter>engine\net</Filter>
     </ClCompile>
     <ClCompile Include="engine\net\script_error_telemetry.cpp">
+      <Filter>engine\net</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\net\script_error_payload.cpp">
+      <Filter>engine\net</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\net\script_mod_state.cpp">
+      <Filter>engine\net</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\net\script_modding.cpp">
       <Filter>engine\net</Filter>
     </ClCompile>
     <!-- engine (root) -->

@@ -1,4 +1,10 @@
-export const REPORT_SCHEMA = 1;
+// Schema 1 is the original report; schema 2 adds the modded classification (game-level reasons
+// and a per-frame flag). The service advertises both in GET /health and accepts both.
+export const SUPPORTED_SCHEMAS = Object.freeze([1, 2]);
+const MODDED_SCHEMA = 2;
+// Fingerprints keep the version number they were issued under, so codes of existing reports
+// (and of every schema 1 report still arriving from older clients) do not change.
+const FINGERPRINT_VERSION = 1;
 export const MAX_REQUEST_BYTES = 16 * 1024;
 export const MAX_FRAMES = 32;
 
@@ -19,7 +25,11 @@ const REPORT_KEYS = Object.freeze([
   "error",
   "frames",
 ]);
+const MODDED_REPORT_KEYS = Object.freeze([...REPORT_KEYS, "modded"]);
 const FRAME_KEYS = Object.freeze(["function", "source", "line"]);
+const MODDED_FRAME_KEYS = Object.freeze([...FRAME_KEYS, "modded"]);
+// Why a game counts as modded, in the order a normalized report lists them.
+export const MODDED_REASONS = Object.freeze(["addons", "core", "native"]);
 const CROCKFORD_BASE32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const PUBLIC_CODE_LENGTHS = Object.freeze(
   Array.from({ length: 23 }, (_, index) => 8 + index * 2),
@@ -182,12 +192,32 @@ export function normalizeSource(value) {
   return source || "<unknown>";
 }
 
-export function validateAndNormalizeReport(value) {
-  assertExactKeys(value, REPORT_KEYS, "report");
-
-  if (value.schema !== REPORT_SCHEMA) {
-    throw new ValidationError(`schema must be ${REPORT_SCHEMA}`);
+function normalizeModdedReasons(value) {
+  if (!Array.isArray(value) || value.length > MODDED_REASONS.length) {
+    throw new ValidationError("modded must be an array of reasons");
   }
+  const reported = new Set(value);
+  if (
+    reported.size !== value.length ||
+    value.some((reason) => !MODDED_REASONS.includes(reason))
+  ) {
+    throw new ValidationError("modded contains an unknown or repeated reason");
+  }
+  return MODDED_REASONS.filter((reason) => reported.has(reason));
+}
+
+export function validateAndNormalizeReport(value) {
+  if (!isRecord(value)) {
+    throw new ValidationError("report must be an object");
+  }
+  if (!SUPPORTED_SCHEMAS.includes(value.schema)) {
+    throw new ValidationError(
+      `schema must be one of ${SUPPORTED_SCHEMAS.join(", ")}`,
+    );
+  }
+  const classified = value.schema === MODDED_SCHEMA;
+  assertExactKeys(value, classified ? MODDED_REPORT_KEYS : REPORT_KEYS, "report");
+
   if (!VM_CONTEXT_SET.has(value.vmContext)) {
     throw new ValidationError("vmContext is invalid");
   }
@@ -213,7 +243,7 @@ export function validateAndNormalizeReport(value) {
 
   const frames = value.frames.map((frame, index) => {
     const label = `frames[${index}]`;
-    assertExactKeys(frame, FRAME_KEYS, label);
+    assertExactKeys(frame, classified ? MODDED_FRAME_KEYS : FRAME_KEYS, label);
     assertString(frame.function, `${label}.function`, 512);
     assertString(frame.source, `${label}.source`, 1024);
     if (
@@ -223,30 +253,62 @@ export function validateAndNormalizeReport(value) {
     ) {
       throw new ValidationError(`${label}.line is invalid`);
     }
+    if (classified && typeof frame.modded !== "boolean") {
+      throw new ValidationError(`${label}.modded must be a boolean`);
+    }
 
-    return {
+    const normalized = {
       function: normalizeFunction(frame.function),
       source: normalizeSource(frame.source),
       line: frame.line,
     };
+    // Only a modded frame carries the flag: unmodded frames stay in the schema 1 shape.
+    return frame.modded === true ? { ...normalized, modded: true } : normalized;
   });
 
-  return {
-    schema: REPORT_SCHEMA,
+  const moddedReasons = classified ? normalizeModdedReasons(value.modded) : [];
+  if (frames.some((frame) => frame.modded) && moddedReasons.length === 0) {
+    throw new ValidationError("a modded frame requires a game-level modded reason");
+  }
+
+  const normalized = {
+    schema: value.schema,
     vmContext: value.vmContext,
     processMode: value.processMode,
     cascade: value.cascade,
     error,
     frames,
   };
+  // Schema 1 reports keep their original shape: a schema 1 client cannot tell, so its
+  // occurrences are unclassified rather than counted as stock.
+  return classified ? { ...normalized, moddedReasons } : normalized;
 }
 
+/** True when the client classified the game (schema 2), as opposed to not being able to tell. */
+export function isClassified(report) {
+  return Array.isArray(report.moddedReasons);
+}
+
+/** True when a classified report came from a modded game. */
+export function isModdedGame(report) {
+  return isClassified(report) && report.moddedReasons.length > 0;
+}
+
+// A modded copy of a stock file is a different error even at the same function and line, so a
+// modded frame is part of the identity. Reports without modded frames hash exactly as schema 1
+// reports always did, which keeps their codes stable and lets both schemas share them. The
+// game-level classification is deliberately not part of the identity: it is counted per
+// occurrence, so one error shows how much of its traffic comes from modded games.
 export function canonicalFingerprintInput(report) {
   return JSON.stringify([
-    REPORT_SCHEMA,
+    FINGERPRINT_VERSION,
     report.vmContext,
     report.error,
-    report.frames.map((frame) => [frame.function, frame.source, frame.line]),
+    report.frames.map((frame) =>
+      frame.modded
+        ? [frame.function, frame.source, frame.line, true]
+        : [frame.function, frame.source, frame.line],
+    ),
   ]);
 }
 

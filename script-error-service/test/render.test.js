@@ -64,3 +64,67 @@ test("admin rendering escapes stored errors and labels", () => {
   assert.match(html, /&lt;all&gt;/);
   assert.match(html, />2 \/ 3</);
 });
+
+test("public page marks modded frames and states the modded share of classified reports", () => {
+  const html = renderPublicError({
+    code: "ABC12345",
+    vmContext: "CLIENT",
+    processTypes: [],
+    cascadeCount: 0,
+    classifiedCount: 4,
+    moddedCount: 1,
+    error: "boom",
+    frames: [
+      { function: "Stock", source: "client/_cl_material_proxies.nut", line: 721 },
+      { function: "FOVReticleOffsetKatie", source: "client/_cl_material_proxies.nut", line: 721, modded: true },
+    ],
+    firstSeen: "2026-07-26T00:00:00.000Z",
+    lastSeen: "2026-07-26T01:00:00.000Z",
+    totalCount: 9,
+  });
+
+  assert.equal(html.match(/\[modded file\]/g).length, 1);
+  assert.match(html, /FOVReticleOffsetKatie[^\n]*\[modded file\]/);
+  assert.doesNotMatch(html, /Stock[^\n]*\[modded file\]/);
+  assert.match(html, /1 of 4 classified occurrences from modded games \(25%\)/);
+
+  const unclassified = renderPublicError({
+    code: "ABC12345",
+    vmContext: "CLIENT",
+    cascadeCount: 0,
+    classifiedCount: 0,
+    moddedCount: 0,
+    error: "x",
+    frames: [],
+    firstSeen: "2026-07-26T00:00:00.000Z",
+    lastSeen: "2026-07-26T01:00:00.000Z",
+    totalCount: 1,
+  });
+  assert.match(unclassified, /modded status unknown/);
+});
+
+test("admin page shows the modded share column and the active filter", () => {
+  const row = {
+    code: "ABC12345",
+    vmContext: "CLIENT",
+    processMode: "CLIENT",
+    windowCount: 8,
+    totalCount: 8,
+    windowCascadeCount: 0,
+    cascadeCount: 0,
+    windowClassifiedCount: 4,
+    windowModdedCount: 3,
+    error: "boom",
+    lastSeen: "2026-07-26T01:00:00.000Z",
+  };
+  const html = renderAdminPage([row, { ...row, code: "ZZZZZZZZ", windowClassifiedCount: 0, windowModdedCount: 0 }], {
+    windowName: "7d",
+    moddedFilter: "exclude",
+    generatedAt: "2026-07-26T02:00:00.000Z",
+  });
+
+  assert.match(html, /<th>Modded \(window\)<\/th>/);
+  assert.match(html, />3 \/ 4 \(75%\)</);
+  assert.match(html, />unknown</);
+  assert.match(html, /modded games excluded/);
+});
