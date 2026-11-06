@@ -48,6 +48,9 @@ $projects = [ordered]@{
     p2p_codec_tests                           = 'tests/p2p_codec_tests.vcxproj'
     region_cull_tests                         = 'tests/region_cull_tests.vcxproj'
     dlc_ownership_tests                       = 'tests/dlc_ownership_tests.vcxproj'
+    dynamic_weapons_manifest_tests            = 'tests/dynamic_weapons_manifest_tests.vcxproj'
+    movement_fingerprint_tests                = 'tests/movement_fingerprint_tests.vcxproj'
+    dll_load_diagnostics_tests                = 'tests/dll_load_diagnostics_tests.vcxproj'
 }
 
 $selected = @($projects.GetEnumerator() | Where-Object {
@@ -99,7 +102,8 @@ if (-not $SkipLauncherTests) {
         foreach ($script in @(
             'tests/launcher_installer_integration_tests.ps1',
             'tests/fastdownload_httpclient_idle_tests.ps1',
-            'tests/fastdownload_process_cleanup_tests.ps1'
+            'tests/fastdownload_process_cleanup_tests.ps1',
+            'tests/launcher_install_progress_tests.ps1'
         )) {
             & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot $script) -LauncherPath $launcherPath
             if ($LASTEXITCODE -ne 0) {
