@@ -408,6 +408,9 @@
       <Filter>engine\filesystem</Filter>
     </ClInclude>
     <!-- engine\memory -->
+    <ClInclude Include="engine\memory\allocation_header.h">
+      <Filter>engine\memory</Filter>
+    </ClInclude>
     <ClInclude Include="engine\memory\arena.h">
       <Filter>engine\memory</Filter>
     </ClInclude>

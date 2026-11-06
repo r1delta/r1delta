@@ -36,6 +36,7 @@
 
 #include "core.h"
 #include "crash_report_context.h"
+#include "allocation_header.h"
 
 #include "framework.h"
 #include <concurrent_unordered_map.h>
@@ -295,28 +296,6 @@ class CMimMemAlloc : public IMemAlloc {
     bool _quarantine_enabled = false;
     bool _quarantine_poison = false;
     
-    // idTech 7 heap allocator thing from TheGreatCircle.
-    struct alloc_check_t {
-        using hash_t = uint32_t;
-
-        uint8_t tag;
-        uint8_t heap;
-        uint16_t align_skip;
-        hash_t hash;
-        size_t size;
-
-        static constexpr hash_t do_hash(uintptr_t ptr, size_t size, uint16_t align_skip, uint8_t tag, uint8_t heap_id)
-        {
-            hash_t first = hash_t(heap_id) | (hash_t(tag) << 8ul) | (hash_t(align_skip) << 16ul);
-
-            uint64_t second64 = ptr ^ size;
-
-            return first ^ hash_t(second64) ^ hash_t(second64 >> 32);
-        }
-    };
-    static constexpr size_t MEM_ALLOC_OVERHEAD = sizeof(alloc_check_t) + sizeof(alloc_check_t::hash_t);
-    static_assert(sizeof(alloc_check_t) == 16, "alloc_check_t has invalid size! not 16");
-
 public:
     void* mi_malloc(size_t nSize, EDeltaAllocTags tag = TAG_DEFAULT, EDeltaAllocHeaps heap = HEAP_DEFAULT)
     {
@@ -1223,44 +1202,10 @@ public:
     }
 
 private:
-    static bool IsReadableRange(const void* ptr, size_t size)
-    {
-        constexpr uintptr_t kMinUserAddress = 0x10000;
-        constexpr uintptr_t kMaxUserAddress = 0x00007FFFFFFFFFFF;
-        if (!ptr || !size)
-            return false;
-
-        const uintptr_t begin = reinterpret_cast<uintptr_t>(ptr);
-        if (begin < kMinUserAddress || begin > kMaxUserAddress)
-            return false;
-
-        return size - 1 <= kMaxUserAddress - begin;
-    }
-
     bool TryGetAllocationCheck(void* aligned, alloc_check_t* out) const
     {
-        if (!aligned)
-            return false;
-
-        alloc_check_t* check = reinterpret_cast<alloc_check_t*>(reinterpret_cast<uintptr_t>(aligned) - sizeof(alloc_check_t));
-        if (!IsReadableRange(check, sizeof(*check)))
-            return false;
-
-        const alloc_check_t local = *check;
-        if (local.heap >= HEAP_COUNT || local.align_skip < sizeof(alloc_check_t) || local.align_skip > MEM_ALLOC_OVERHEAD)
-            return false;
-
-        const alloc_check_t::hash_t hash = alloc_check_t::do_hash(
-            reinterpret_cast<uintptr_t>(check),
-            local.size,
-            local.align_skip,
-            local.tag,
-            local.heap);
-        if (local.hash != hash)
-            return false;
-
-        alloc_check_t::hash_t* tail = reinterpret_cast<alloc_check_t::hash_t*>(reinterpret_cast<uintptr_t>(aligned) + local.size);
-        if (!IsReadableRange(tail, sizeof(*tail)) || *tail != hash)
+        alloc_check_t local;
+        if (!TryReadOwnedAllocation(aligned, &local) || local.heap >= HEAP_COUNT)
             return false;
 
         if (out)
@@ -1279,25 +1224,10 @@ public:
 
     bool IsLikelyOwnedAllocation(void* aligned) const
     {
-        if (!aligned)
-            return false;
-
-        alloc_check_t* check = reinterpret_cast<alloc_check_t*>(reinterpret_cast<uintptr_t>(aligned) - sizeof(alloc_check_t));
-        if (!IsReadableRange(check, sizeof(*check)))
-            return false;
-
-        const alloc_check_t local = *check;
-        if (local.heap >= HEAP_COUNT || local.tag >= TAG_COUNT ||
-            local.align_skip < sizeof(alloc_check_t) || local.align_skip > MEM_ALLOC_OVERHEAD)
-            return false;
-
-        const alloc_check_t::hash_t hash = alloc_check_t::do_hash(
-            reinterpret_cast<uintptr_t>(check),
-            local.size,
-            local.align_skip,
-            local.tag,
-            local.heap);
-        return local.hash == hash;
+        alloc_check_t local;
+        return TryReadAllocationHeader(aligned, &local)
+            && local.heap < HEAP_COUNT
+            && local.tag < TAG_COUNT;
     }
 };
 
