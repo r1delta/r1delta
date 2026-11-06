@@ -214,6 +214,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="engine\core\player_resource_18.h" />
     <ClInclude Include="engine\core\client_port_override.h" />
     <ClInclude Include="engine\core\r1o_runtime_paths.h" />
+    <ClInclude Include="engine\memory\allocation_header.h" />
     <ClInclude Include="engine\memory\arena.h" />
     <ClInclude Include="client\audio\audio.h" />
     <ClInclude Include="client\audio\audio_cache.h" />

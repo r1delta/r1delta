@@ -253,6 +253,7 @@ jobs:
             vpk_async_precache_tests = 'tests/vpk_async_precache_tests.vcxproj'
             script_variant_abi_tests = 'tests/script_variant_abi_tests.vcxproj'
             vsdk_memalloc_tests = 'tests/vsdk_memalloc_tests.vcxproj'
+            allocation_header_tests = 'tests/allocation_header_tests.vcxproj'
             persistentdata_codec_tests = 'tests/persistentdata_codec_tests.vcxproj'
             crash_report_minidump_tests = 'tests/crash_report_minidump_tests.vcxproj'
             client_studio_header_guard_tests = 'tests/client_studio_header_guard_tests.vcxproj'
@@ -301,6 +302,7 @@ jobs:
             'vpk_async_precache_tests',
             'script_variant_abi_tests',
             'vsdk_memalloc_tests',
+            'allocation_header_tests',
             'persistentdata_codec_tests',
             'crash_report_minidump_tests',
             'client_studio_header_guard_tests',
