@@ -1,4 +1,4 @@
-﻿using System;
+﻿﻿using System;
 using System.ComponentModel;
 using System.Threading;
 using System.Threading.Tasks;
@@ -256,7 +256,28 @@ namespace launcher_ex
         // -------------------------------------------------------
         private void OnBrowseClicked(object sender, RoutedEventArgs e)
         {
-            // ... (implementation unchanged)
+            // The shell's folder picker (and the shell extensions it loads) can throw. An exception escaping this
+            // handler ends setup right after the user chose a folder, so report it and keep the window open.
+            try
+            {
+                BrowseForGameFolder();
+            }
+            catch (Exception ex)
+            {
+                LauncherLog.Write("the folder picker failed", ex);
+                MessageBox.Show(
+                    this,
+                    $"The folder picker failed: {ex.Message}\n\n" +
+                    "Type or paste the game folder path into the text box instead.\n\n" +
+                    $"Details were written to:\n{LauncherLog.Path}",
+                    "Folder Picker Error",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
+        }
+
+        private void BrowseForGameFolder()
+        {
             var dialog = new CommonOpenFileDialog { IsFolderPicker = true, Title = "Select Titanfall Game Folder" };
             // Try to start browsing from the current path or a known location
             string initialDir = PathTextBox.Text;
@@ -366,9 +387,29 @@ namespace launcher_ex
         }
 
         private const long RequiredSpaceBytes = 13L * 1024 * 1024 * 1024; // 13 GB
+        private const string SetupWelcomeTitle = "Welcome to R1Delta!";
 
         // --- MODIFIED OnPathOkClicked ---
         private async void OnPathOkClicked(object sender, RoutedEventArgs e)
+        {
+            // An async void handler that throws terminates the process without a trace. Report instead.
+            try
+            {
+                await ValidateAndInstallAsync();
+            }
+            catch (Exception ex)
+            {
+                LauncherLog.Write("setup failed while handling the install location", ex);
+                ProgressPanel.Visibility = Visibility.Collapsed;
+                PathSelectionPanel.Visibility = Visibility.Visible;
+                SetupTitleBarText.Text = SetupWelcomeTitle;
+                ShowError(
+                    $"Setup hit an unexpected error:\n{ex.Message}\n\n" +
+                    $"Details were written to:\n{LauncherLog.Path}");
+            }
+        }
+
+        private async Task ValidateAndInstallAsync()
         {
             // Resolve the typed path once. An existing exact/direct-child root can
             // launch immediately; a normalized markerless root remains a valid
@@ -405,7 +446,12 @@ namespace launcher_ex
                 return; // Stop processing if the path is forbidden
             }
 
-            bool isExistingInstallation = rootResolution.Succeeded;
+            // An install that lost a file launcher.dll needs (for example bin\x64_retail\vstdlib.dll) must go
+            // through the download pass, which hash-checks every manifest entry and fetches only what is missing.
+            string missingLaunchFiles = null;
+            bool launchFilesIntact = !(rootResolution.Succeeded &&
+                TitanfallManager.TryDescribeMissingLaunchFiles(rootResolution.ResolvedRoot, out missingLaunchFiles));
+            bool isExistingInstallation = rootResolution.Succeeded && launchFilesIntact;
 
             // --- Show F4 Hint Message Box HERE if checkbox is checked ---
             // Determine the setting *before* potentially closing the window early
@@ -439,6 +485,18 @@ namespace launcher_ex
                 Close();
                 return;
             }
+            // A drive/share root is never a valid destination for a fresh install. An already valid install
+            // living at a root keeps working (it returns above as an existing one, or is repaired in place).
+            if (TitanfallManager.TryGetDriveRootRefusal(path, rootResolution.Succeeded, out string driveRootRefusal))
+            {
+                MessageBox.Show(
+                    this,
+                    driveRootRefusal,
+                    "Invalid Install Location",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
             // --- 4. Perform Full Validation Checks (for NEW install location) ---
             // Prevent installing directly into system folders (Unchanged)
             string systemRoot = Environment.GetFolderPath(Environment.SpecialFolder.Windows); string programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles); string programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
@@ -451,7 +509,11 @@ namespace launcher_ex
             try { if (!Directory.Exists(path)) { Directory.CreateDirectory(path); Debug.WriteLine($"Created directory: {path}"); } if (!CanWriteToFolder(path)) { MessageBox.Show($"Cannot write to the selected folder:\n{path}\nPlease check permissions or choose a different location.", "Write Access Error", MessageBoxButton.OK, MessageBoxImage.Error); return; } } catch (Exception ex) { MessageBox.Show($"Failed to create or access the destination folder:\n{path}\n\nError: {ex.Message}", "Folder Error", MessageBoxButton.OK, MessageBoxImage.Error); return; }
 
             // --- 5. Confirmation Before Download ---
-            double requiredGb = RequiredSpaceBytes / (1024.0 * 1024 * 1024); var confirmResult = MessageBox.Show($"The selected path appears valid for a new installation.\n\nLocation: {path}\n\nSetup will first check for the presence of existing downloaded files in that directory (if any).\n\nAfter that, Setup will now download approximately {requiredGb:F1} GB of game files.\n\nDo you want to proceed?", "Confirm Download", MessageBoxButton.OKCancel, MessageBoxImage.Information);
+            double requiredGb = RequiredSpaceBytes / (1024.0 * 1024 * 1024);
+            string confirmText = missingLaunchFiles != null
+                ? $"This install is missing files the game needs: {missingLaunchFiles}.\n\nLocation: {path}\n\nSetup verifies every game file against its checksum and downloads only what is missing (at most about {requiredGb:F1} GB).\n\nDo you want to repair it now?"
+                : $"The selected path appears valid for a new installation.\n\nLocation: {path}\n\nSetup will first check for the presence of existing downloaded files in that directory (if any).\n\nAfter that, Setup will now download approximately {requiredGb:F1} GB of game files.\n\nDo you want to proceed?";
+            var confirmResult = MessageBox.Show(confirmText, "Confirm Download", MessageBoxButton.OKCancel, MessageBoxImage.Information);
             if (confirmResult != MessageBoxResult.OK) { return; }
 
             // --- Path is fully validated and confirmed for download ---
@@ -532,8 +594,11 @@ namespace launcher_ex
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Unexpected error during download process: {ex}");
+                LauncherLog.Write("setup operation failed", ex);
                 StatusText.Text = $"Error: {ex.Message}";
+                ShowError(
+                    $"Setup failed:\n{ex.Message}\n\n" +
+                    $"Details were written to:\n{LauncherLog.Path}");
                 return false;
             }
             finally
@@ -615,69 +680,6 @@ namespace launcher_ex
             WindowState = WindowState.Minimized;
         }
 
-        // --- Helper Methods ---
-
-        private string FormatBytesPerSec(double bytesPerSec)
-        {
-            // ... (implementation unchanged)
-            if (bytesPerSec < 0) bytesPerSec = 0;
-            const double KB = 1024.0;
-            const double MB = KB * 1024.0;
-            if (bytesPerSec < KB) return $"{bytesPerSec:F0} B/s";
-            if (bytesPerSec < MB) return $"{bytesPerSec / KB:F1} KB/s";
-            return $"{bytesPerSec / MB:F1} MB/s";
-        }
-
-        /// <summary>
-        /// Formats a TimeSpan into a human-readable ETA string (e.g., "1h 15m", "3m 20s", "45s").
-        /// </summary>
-        private string FormatEta(TimeSpan eta)
-        {
-            if (eta.TotalSeconds <= 0)
-            {
-                return "--:--";
-            }
-
-            var sb = new StringBuilder();
-            if (eta.Days > 0)
-            {
-                sb.Append($"{eta.Days}d ");
-                sb.Append($"{eta.Hours}h"); // Show hours if days are present
-            }
-            else if (eta.Hours > 0)
-            {
-                sb.Append($"{eta.Hours}h ");
-                sb.Append($"{eta.Minutes:00}m"); // Show minutes if hours are present
-            }
-            else if (eta.Minutes > 0)
-            {
-                sb.Append($"{eta.Minutes}m ");
-                sb.Append($"{eta.Seconds:00}s"); // Show seconds if minutes are present
-            }
-            else
-            {
-                sb.Append($"{eta.Seconds:F0}s"); // Only show seconds if less than a minute
-            }
-
-            return sb.ToString();
-        }
-
-        // --- Static Helper (needs to be accessible by ReportProgress, move if needed) ---
-        /// <summary> Formats byte count into B/KB/MB/GB string. </summary>
-        private static string FormatBytes(long bytes) // Made static if needed elsewhere or keep instance if only used here
-        {
-            // (Implementation copied from TitanfallManager or shared)
-            if (bytes < 0) bytes = 0;
-            const double KB = 1024.0;
-            const double MB = KB * 1024.0;
-            const double GB = MB * 1024.0;
-
-            if (bytes < KB) return $"{bytes} B";
-            if (bytes < MB) return $"{bytes / KB:F1} KB";
-            if (bytes < GB) return $"{bytes / MB:F1} MB";
-            return $"{bytes / GB:F1} GB";
-        }
-
         public void ReportStatus(InstallProgressStatus status)
         {
             if (status == null)
@@ -713,111 +715,19 @@ namespace launcher_ex
 
         private void RenderProgressStatus(long bytesDownloaded, long totalBytes, double bytesPerSecond)
         {
-            double percent = totalBytes > 0
-                ? (double)bytesDownloaded * 100.0 / totalBytes
-                : 0;
-            percent = Math.Max(0, Math.Min(100, percent));
+            StatusText.Text = InstallProgressText.Compose(
+                _installStatus,
+                bytesDownloaded,
+                totalBytes,
+                bytesPerSecond,
+                out double percent);
             ProgressBar.Value = percent;
-
-            string heading = GetPhaseHeading(_installStatus);
-            string progressDetail = totalBytes > 0
-                ? $"{percent:0.0}% ({FormatBytes(bytesDownloaded)} / {FormatBytes(totalBytes)})"
-                : $"{percent:0.0}%";
-
-            bool activeTransfer =
-                (_installStatus.Phase == InstallProgressPhase.Download ||
-                 _installStatus.Phase == InstallProgressPhase.Fallback) &&
-                _installStatus.TransferPhase == DownloadTransferPhase.Downloading;
-            if (activeTransfer)
-            {
-                string eta = "--:--";
-                if (bytesPerSecond > 1 && totalBytes > bytesDownloaded)
-                    eta = FormatEta(TimeSpan.FromSeconds((totalBytes - bytesDownloaded) / bytesPerSecond));
-                else if (totalBytes > 0 && bytesDownloaded >= totalBytes)
-                    eta = "Done";
-
-                StatusText.Text =
-                    $"{heading}: {progressDetail}\n" +
-                    $"Speed: {FormatBytesPerSec(bytesPerSecond)} | ETA: {eta}\n" +
-                    "Setup will launch the game automatically when complete.";
-            }
-            else
-            {
-                StatusText.Text =
-                    $"{heading}: {progressDetail}\n" +
-                    "Setup will launch the game automatically when complete.";
-            }
-
             CancelButton.IsEnabled = _installStatus.Phase != InstallProgressPhase.Complete;
-        }
-
-        private static string GetPhaseHeading(InstallProgressStatus status)
-        {
-            switch (status.Phase)
-            {
-                case InstallProgressPhase.Preflight:
-                    return "Checking existing files";
-                case InstallProgressPhase.Resume:
-                    return "Preparing resumable files";
-                case InstallProgressPhase.Download:
-                    return GetTransferHeading(GetBackendName(status.Backend), false, status);
-                case InstallProgressPhase.Fallback:
-                    return GetTransferHeading(GetBackendName(status.Backend), true, status);
-                case InstallProgressPhase.Verification:
-                    return status.VerificationPass > 0
-                        ? $"Verifying downloaded files (pass {status.VerificationPass}/{status.MaxVerificationPasses})"
-                        : "Verifying downloaded files";
-                case InstallProgressPhase.ChecksumRepair:
-                    return status.VerificationPass > 0
-                        ? $"Repairing files that failed verification (after pass {status.VerificationPass})"
-                        : "Repairing files that failed verification";
-                case InstallProgressPhase.Complete:
-                    return "Setup complete";
-                default:
-                    return "Setup in progress";
-            }
-        }
-
-        private static string GetTransferHeading(
-            string backendName,
-            bool isFallback,
-            InstallProgressStatus status)
-        {
-            string attempt = status.Attempt > 0 && status.MaxAttempts > 0
-                ? $" (attempt {status.Attempt}/{status.MaxAttempts})"
-                : string.Empty;
-            string transferName = isFallback ? backendName + " fallback" : backendName;
-
-            switch (status.TransferPhase)
-            {
-                case DownloadTransferPhase.Preparing:
-                    return $"Preparing {transferName} download{attempt}";
-                case DownloadTransferPhase.Downloading:
-                    return $"Downloading with {transferName}{attempt}";
-                case DownloadTransferPhase.TransferComplete:
-                    return $"Finishing {transferName} transfer{attempt}";
-                case DownloadTransferPhase.Failed:
-                    return $"{transferName} download attempt failed{attempt}";
-                default:
-                    return $"{transferName} transfer{attempt}";
-            }
-        }
-
-        private static string GetBackendName(DownloadBackend? backend)
-        {
-            switch (backend)
-            {
-                case DownloadBackend.Curl:
-                    return "curl";
-                case DownloadBackend.HttpClient:
-                    return "HTTP";
-                default:
-                    return "network";
-            }
         }
 
         public void ShowError(string message)
         {
+            LauncherLog.Write($"setup error shown: {message}");
             // Check if we can access the dispatcher
             if (this.Dispatcher == null) // Should ideally not happen if called correctly
             {

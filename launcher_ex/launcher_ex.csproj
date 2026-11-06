@@ -171,6 +171,9 @@
       <Generator>MSBuild:Compile</Generator>
     </ApplicationDefinition>
     <Compile Include="FastDownloadService.cs" />
+    <Compile Include="InstallProgressText.cs" />
+    <Compile Include="LaunchFailureMessage.cs" />
+    <Compile Include="StartupDiagnostics.cs" />
     <Compile Include="TitanfallFileList.cs" />
     <Compile Include="TitanfallFinder.cs" />
     <Compile Include="TitanfallManager.cs" />

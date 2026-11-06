@@ -16,6 +16,7 @@
 // provides __cpuidex on mingw
 #include <intrin.h>
 #endif
+#include "../shared/dll_load_diagnostics.h"
 #pragma comment(lib, "Imm32.lib")
 
 namespace fs = std::filesystem;
@@ -80,58 +81,22 @@ FARPROC GetLauncherMain()
 
 void LibraryLoadError(DWORD dwMessageId, const wchar_t *libName, const wchar_t *location)
 {
-	char text[8192];
-	std::string message = std::system_category().message(dwMessageId);
-	printf("%s", message.c_str());
-	sprintf_s(
-		text,
-		"Failed to load the %ls at \"%ls\" (%lu):\n\n%hs\n\nMake sure you followed the R1Delta installation instructions carefully "
-		"before reaching out for help.",
-		libName,
-		location,
-		dwMessageId,
-		message.c_str());
-	printf("%s", text);
-	if (dwMessageId == 126 && std::filesystem::exists(location))
-	{
-		sprintf_s(
-			text,
-			"%s\n\nThe file at the specified location DOES exist, so this error indicates that one of its *dependencies* failed to be "
-			"found.\n\nTry the following steps:\n1. Install Visual C++ 2022 Redistributable: "
-			"https://aka.ms/vs/17/release/vc_redist.x64.exe\n2. Repair game files",
-			text);
-	}
-	else if (!fs::exists("Titanfall.exe") && (fs::exists("..\\Titanfall.exe") || fs::exists("..\\..\\Titanfall.exe")))
-	{
-		auto curDir = std::filesystem::current_path().filename().string();
-		auto aboveDir = std::filesystem::current_path().parent_path().filename().string();
-		sprintf_s(
-			text,
-			"%s\n\nWe detected that in your case you have extracted the files into a *subdirectory* of your Titanfall "
-			"installation.\nPlease move all the files and folders from current folder (\"%s\") into the Titanfall installation directory "
-			"just above (\"%s\").\n\nPlease try out the above steps by yourself before reaching out to the community for support.",
-			text,
-			curDir.c_str(),
-			aboveDir.c_str());
-	}
-	else if (!fs::exists("Titanfall.exe"))
-	{
-		sprintf_s(
-			text,
-			"%s\n\nRemember: you need to unpack the contents of this archive into your Titanfall game installation directory, not just "
-			"to any random folder.",
-			text);
-	}
-	/*else if (fs::exists("Titanfall.exe"))
-	{
-		sprintf_s(
-			text,
-			"%s\n\nTitanfall.exe has been found in the current directory: is the game installation corrupted or did you not unpack all "
-			"R1Delta files here?",
-			text);
-	}*/
+	// The Titanfall install is the working directory (the R1Delta launcher starts this exe there).
+	wchar_t gameDir[MAX_PATH] = {};
+	GetCurrentDirectoryW(MAX_PATH, gameDir);
 
-	MessageBoxA(GetForegroundWindow(), text, "R1Delta Launcher Error", 0);
+	r1d_dllload::Diagnosis diagnosis = r1d_dllload::Diagnose(dwMessageId, libName, location, gameDir);
+	diagnosis.systemMessage = r1d_dllload::FormatSystemMessage(dwMessageId);
+
+	std::error_code ec;
+	diagnosis.titanfallExeInWorkingDir = fs::exists("Titanfall.exe", ec);
+	diagnosis.titanfallExeInParentDir = fs::exists("..\\Titanfall.exe", ec) || fs::exists("..\\..\\Titanfall.exe", ec);
+	const fs::path currentDir = fs::current_path(ec);
+	diagnosis.workingDirName = currentDir.filename().wstring();
+	diagnosis.parentDirName = currentDir.parent_path().filename().wstring();
+
+	const std::wstring text = r1d_dllload::FormatMessageText(diagnosis);
+	MessageBoxW(GetForegroundWindow(), text.c_str(), L"R1Delta Launcher Error", MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
 }
 
 void PrependPath()

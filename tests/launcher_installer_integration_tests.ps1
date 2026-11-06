@@ -3,6 +3,9 @@ param(
     [string]$LauncherPath
 )
 
+# Redirect the launcher log before any launcher code can write it (the log path is resolved once per process).
+$logDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ('r1delta-launcher-log-' + [Guid]::NewGuid().ToString('N'))
+$env:R1DELTA_LAUNCHER_LOG_DIR = $logDirectory
 $ErrorActionPreference = 'Stop'
 $binding = [System.Reflection.BindingFlags]'Public,NonPublic,Static,Instance'
 $assembly = [System.Reflection.Assembly]::LoadFrom((Resolve-Path -LiteralPath $LauncherPath))
@@ -20,6 +23,18 @@ $hasLegacyProof = $manager.GetMethod('HasLegacyCompletedInstallProof', $binding)
 $cleanupAuthorized = $manager.GetMethod('IsManagedCleanupAuthorized', $binding)
 $acquireLease = $manager.GetMethod('TryAcquireInstallOperationLease', $binding)
 $claimOneTimeWarning = $registryHelper.GetMethod('TryClaimOneTimeWarning', $binding)
+$isRootOfVolume = $manager.GetMethod('IsRootOfVolume', $binding)
+$driveRootRefusal = $manager.GetMethod('TryGetDriveRootRefusal', $binding)
+$describeMissingLaunchFiles = $manager.GetMethod('TryDescribeMissingLaunchFiles', $binding)
+$fileList = $assembly.GetType('launcher_ex.TitanfallFileList', $true).GetField('s_fileList', $binding).GetValue($null)
+$launchFailure = $assembly.GetType('launcher_ex.LaunchFailureMessage', $true)
+$launcherLog = $assembly.GetType('launcher_ex.LauncherLog', $true)
+$startupDiagnostics = $assembly.GetType('launcher_ex.StartupDiagnostics', $true)
+$progressText = $assembly.GetType('launcher_ex.InstallProgressText', $true)
+$statusType = $assembly.GetType('R1Delta.InstallProgressStatus', $true)
+$phaseType = $assembly.GetType('R1Delta.InstallProgressPhase', $true)
+$transferPhaseType = $assembly.GetType('DownloadTransferPhase', $true)
+$backendType = $assembly.GetType('DownloadBackend', $true)
 $buildWarningMutexName = $registryHelper.GetMethod('BuildPrerequisiteWarningClaimMutexName', $binding)
 $warningClaimVersion = [int]$registryHelper.GetField(
     'PrerequisiteWarningClaimVersion',
@@ -101,6 +116,126 @@ try {
     New-Item -ItemType File -Path (Join-Path $parentPath 'vpk/client_mp_common.bsp.pak000_000.vpk') | Out-Null
     $ambiguous = Get-Resolution $parentPath
     Assert-True (-not (Get-Property $ambiguous 'IsUsableDestination')) 'ambiguous parent and child roots are rejected'
+
+    # --- Drive roots: content installed to D:\ later lost bin\x64_retail and launcher.dll failed with 126 ---
+    $rootArgs = [object[]]@('C:\', $null)
+    Assert-True ([bool]$isRootOfVolume.Invoke($null, $rootArgs)) 'a drive root is recognised as a volume root'
+    Assert-True ($rootArgs[1] -eq 'C:\') 'volume root reports the drive root itself'
+    Assert-True (-not [bool]$isRootOfVolume.Invoke($null, [object[]]@('C:\Games\Titanfall\', $null))) 'a trailing separator does not make a normal folder look like a volume root'
+    Assert-True (-not [bool]$isRootOfVolume.Invoke($null, [object[]]@('C:\Games\Titanfall', $null))) 'a folder below a drive root is a valid destination'
+    Assert-True (-not [bool]$isRootOfVolume.Invoke($null, [object[]]@('', $null))) 'empty path is not a volume root'
+    Assert-True ([bool]$isRootOfVolume.Invoke($null, [object[]]@('\\server\share\', $null))) 'a share root is recognised as a volume root'
+
+    $freshRootArgs = [object[]]@('D:\', $false, $null)
+    Assert-True ([bool]$driveRootRefusal.Invoke($null, $freshRootArgs)) 'a fresh install into a drive root is refused'
+    Assert-True ($freshRootArgs[2] -like '*root of a drive ("D:\")*' -and $freshRootArgs[2] -like '*D:\Titanfall*') 'the refusal names the drive and suggests a folder on it'
+    Assert-True (-not [bool]$driveRootRefusal.Invoke($null, [object[]]@('D:\', $true, $null))) 'a drive root that already holds an install is not refused'
+    Assert-True (-not [bool]$driveRootRefusal.Invoke($null, [object[]]@('D:\Titanfall', $false, $null))) 'a fresh install into a folder is not refused'
+
+    # A real drive root without touching the user's drives: map a scratch folder to an unused letter.
+    $letter = 'Z', 'Y', 'X', 'W', 'V', 'U', 'T' | Where-Object { -not (Test-Path -LiteralPath ($_ + ':\')) } | Select-Object -First 1
+    Assert-True ($null -ne $letter) 'an unused drive letter is available for the drive-root checks'
+    $driveBacking = Join-Path $root 'drive-backing'
+    New-Item -ItemType Directory -Path $driveBacking | Out-Null
+    & subst.exe "${letter}:" $driveBacking
+    if ($LASTEXITCODE -ne 0) { throw "subst ${letter}: failed" }
+    try {
+        $driveRoot = "${letter}:\"
+        $emptyRoot = Get-Resolution $driveRoot
+        Assert-True ((Get-Property $emptyRoot 'IsUsableDestination') -and -not (Get-Property $emptyRoot 'Succeeded')) 'an empty drive root resolves as a usable destination that is not an install'
+        Assert-True ([bool]$driveRootRefusal.Invoke($null, [object[]]@($driveRoot, [bool](Get-Property $emptyRoot 'Succeeded'), $null))) 'setup refuses the empty drive root as a new install'
+
+        # An install that already lives at the root keeps launching: it resolves as an existing install.
+        New-Item -ItemType Directory -Path (Join-Path $driveRoot 'vpk') | Out-Null
+        New-Item -ItemType File -Path (Join-Path $driveRoot 'vpk/client_mp_common.bsp.pak000_000.vpk') | Out-Null
+        foreach ($entry in $fileList) {
+            if ($entry.Item2 -like 'bin/x64_retail/*') {
+                $libraryPath = Join-Path $driveRoot $entry.Item2
+                New-Item -ItemType Directory -Path (Split-Path -Parent $libraryPath) -Force | Out-Null
+                New-Item -ItemType File -Path $libraryPath -Force | Out-Null
+            }
+        }
+        $rootInstall = Get-Resolution $driveRoot
+        Assert-True (Get-Property $rootInstall 'Succeeded') 'a valid install at a drive root resolves as an existing install'
+        Assert-True ((Get-Property $rootInstall 'ResolvedRoot') -eq $driveRoot) 'the existing root install keeps the drive root as its game root'
+        Assert-True (-not [bool]$driveRootRefusal.Invoke($null, [object[]]@($driveRoot, [bool](Get-Property $rootInstall 'Succeeded'), $null))) 'the existing root install is not refused'
+        $launchArgs = [object[]]@($driveRoot, $null)
+        Assert-True (-not [bool]$describeMissingLaunchFiles.Invoke($null, $launchArgs)) 'a complete root install has every file launcher.dll needs'
+
+        # The field failure: bin\x64_retail\vstdlib.dll is gone. The install is detected as damaged, still resolves
+        # as an install (so repair can run in place), and is not refused.
+        Remove-Item -LiteralPath (Join-Path $driveRoot 'bin/x64_retail/vstdlib.dll')
+        $damagedArgs = [object[]]@($driveRoot, $null)
+        Assert-True ([bool]$describeMissingLaunchFiles.Invoke($null, $damagedArgs)) 'a root install without vstdlib.dll is detected as damaged'
+        Assert-True ($damagedArgs[1] -eq 'bin\x64_retail\vstdlib.dll') 'the damage report names the missing library'
+        $damagedRoot = Get-Resolution $driveRoot
+        Assert-True (Get-Property $damagedRoot 'Succeeded') 'a damaged root install still resolves as an install'
+        Assert-True (-not [bool]$driveRootRefusal.Invoke($null, [object[]]@($driveRoot, [bool](Get-Property $damagedRoot 'Succeeded'), $null))) 'a damaged root install can be repaired in place'
+
+        Remove-Item -LiteralPath (Join-Path $driveRoot 'vpk/client_mp_common.bsp.pak000_000.vpk')
+        $noMarkerArgs = [object[]]@($driveRoot, $null)
+        Assert-True ([bool]$describeMissingLaunchFiles.Invoke($null, $noMarkerArgs) -and $noMarkerArgs[1] -like '*client_mp_common.bsp.pak000_000.vpk*') 'a missing core VPK is reported as damage'
+    }
+    finally {
+        & subst.exe "${letter}:" /d | Out-Null
+    }
+
+    # --- A launch that Windows application control blocks must say what was blocked ---
+    $blockedPath = 'C:\Users\pilot\AppData\Local\R1Delta\app-3.0.5\Titanfall.exe'
+    Assert-True ([bool]$launchFailure.GetMethod('IsApplicationControlBlock', $binding).Invoke($null, [object[]]@(4551))) 'error 4551 is an application control block'
+    Assert-True (-not [bool]$launchFailure.GetMethod('IsApplicationControlBlock', $binding).Invoke($null, [object[]]@(2))) 'error 2 is not an application control block'
+    $blockedText = [string]$launchFailure.GetMethod('Describe', $binding).Invoke($null, [object[]]@($blockedPath, 4551, 'An Application Control policy has blocked this file.'))
+    Assert-True ($blockedText -like "*$blockedPath*") 'the blocked-file message names the file'
+    Assert-True ($blockedText -like '*An Application Control policy has blocked this file.*' -and $blockedText -like '*error 4551*') 'the blocked-file message carries the Windows text and code'
+    Assert-True ($blockedText -like '*Smart App Control*' -and $blockedText -like '*Windows Defender Application Control*') 'the blocked-file message explains which policies block files'
+    $realException = [System.ComponentModel.Win32Exception]::new(4551)
+    Write-Host "INFO: this Windows describes error 4551 as: $($realException.Message)"
+    $startFailure = [string]$launchFailure.GetMethod('DescribeProcessStartFailure', $binding).Invoke($null, [object[]]@($blockedPath, $realException))
+    Assert-True ($startFailure -like "*$blockedPath*" -and $startFailure -like '*Smart App Control*') 'a Process.Start failure with error 4551 is explained as a policy block'
+    $missingText = [string]$launchFailure.GetMethod('Describe', $binding).Invoke($null, [object[]]@($blockedPath, 2, 'The system cannot find the file specified.'))
+    Assert-True ($missingText -like "*$blockedPath*" -and $missingText -like '*is missing*') 'a missing game executable is named'
+    Assert-True ($missingText -notlike '*Smart App Control*') 'a missing file is not blamed on application control'
+
+    # --- Every failure leaves a log file that the dialog names ---
+    $logPath = [string]$launcherLog.GetProperty('Path', $binding).GetValue($null)
+    Assert-True ($logPath -eq (Join-Path $logDirectory 'launcher.log')) 'the log file lives in the configured directory'
+    $launcherLog.GetMethod('Write', $binding, $null, [Type[]]@([string]), $null).Invoke($null, [object[]]@('integration test entry'))
+    $thrown = [System.InvalidOperationException]::new('integration test exception')
+    $launcherLog.GetMethod('Write', $binding, $null, [Type[]]@([string], [Exception]), $null).Invoke($null, [object[]]@('integration test failure', $thrown))
+    $logText = Get-Content -LiteralPath $logPath -Raw
+    Assert-True ($logText -like '*integration test entry*') 'a plain entry is written to the log'
+    Assert-True ($logText -like '*integration test failure*InvalidOperationException*integration test exception*') 'an exception is written to the log with its type and message'
+    Assert-True ($logText -like '*launcher session:*os=*clr=*') 'the log starts with the environment of the session'
+    $fatalText = [string]$startupDiagnostics.GetMethod('BuildFatalMessage', $binding).Invoke($null, [object[]]@('the launcher failed during startup', $thrown, $null, $logPath))
+    Assert-True ($fatalText -like "*$logPath*" -and $fatalText -like '*integration test exception*' -and $fatalText -like '*the launcher failed during startup*') 'the fatal dialog names what failed and where the log is'
+
+    # --- Progress wording: the checking phases must say what they are doing ---
+    function New-Status([string]$Phase, [string]$Transfer = 'Preparing', [string]$Backend = $null, [int]$Pass = 0, [string]$Detail = $null) {
+        $status = [Activator]::CreateInstance($statusType)
+        $statusType.GetProperty('Phase').SetValue($status, [Enum]::Parse($phaseType, $Phase))
+        $statusType.GetProperty('TransferPhase').SetValue($status, [Enum]::Parse($transferPhaseType, $Transfer))
+        if ($Backend) { $statusType.GetProperty('Backend').SetValue($status, [Enum]::Parse($backendType, $Backend)) }
+        $statusType.GetProperty('VerificationPass').SetValue($status, $Pass)
+        $statusType.GetProperty('MaxVerificationPasses').SetValue($status, 3)
+        $statusType.GetProperty('Detail').SetValue($status, $Detail)
+        return $status
+    }
+    function Get-ProgressText($Status, [long]$Bytes, [long]$Total, [double]$Rate) {
+        return [string]$progressText.GetMethod('Compose', $binding).Invoke($null, [object[]]@($Status, $Bytes, $Total, $Rate, $null))
+    }
+    $gib = 1GB
+    $verifying = Get-ProgressText (New-Status 'Verification' -Pass 1 -Detail 'File 2 of 190: englishclient_mp_common.bsp.pak000_040.vpk') (5 * $gib) (12 * $gib) (200MB)
+    Assert-True ($verifying -like 'Verifying downloaded files (pass 1/3): 41.7% (5.0 GB / 12.0 GB)*') 'verification shows its own percentage and byte counts'
+    Assert-True ($verifying -like '*File 2 of 190: englishclient_mp_common.bsp.pak000_040.vpk*') 'verification names the file being checked'
+    Assert-True ($verifying -like '*Checking speed: 200.0 MB/s | ETA: 35s*') 'verification shows how fast files are read and when it will finish'
+    $downloading = Get-ProgressText (New-Status 'Download' 'Downloading' 'Curl' -Detail '187 of 190 files complete, 118.4 MB left to download') (11.88 * $gib) (12 * $gib) 0
+    Assert-True ($downloading -like 'Downloading with curl*99.0%*' -or $downloading -like 'Downloading with curl*98.*%*') 'the download phase keeps its heading and percentage'
+    Assert-True ($downloading -like '*187 of 190 files complete, 118.4 MB left to download*') 'the download phase says how much is really left while the bar waits at 99%'
+    Assert-True ($downloading -like '*Speed: 0 B/s | ETA: --:--*') 'a stalled transfer still reports its speed honestly'
+    $preflight = Get-ProgressText (New-Status 'Preflight' -Detail 'File 7 of 190: bin/x64_retail/engine.dll') (3 * $gib) (12 * $gib) (150MB)
+    Assert-True ($preflight -like 'Checking existing files: 25.0%*' -and $preflight -like '*File 7 of 190: bin/x64_retail/engine.dll*' -and $preflight -like '*Checking speed:*') 'checking existing files reports progress, file and read speed'
+    $complete = Get-ProgressText (New-Status 'Complete') (12 * $gib) (12 * $gib) 0
+    Assert-True ($complete -like 'Setup complete: 100.0%*' -and $complete -notlike '*speed*') 'completion shows 100% without a rate'
 
     Assert-True ($statusInterface.IsAssignableFrom($setupWindow)) 'SetupWindow consumes structured install status phases'
     $leasePath = Join-Path $root 'leased'
@@ -202,4 +337,5 @@ try {
 }
 finally {
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $logDirectory -Recurse -Force -ErrorAction SilentlyContinue
 }

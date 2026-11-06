@@ -32,6 +32,12 @@ namespace launcher_ex
     /// </summary>
     public partial class App : Application
     {
+        public App()
+        {
+            // Before XAML loads or OnStartup runs: any failure from here on is logged and shown.
+            StartupDiagnostics.Install(this);
+        }
+
         // --- P/Invoke Signatures ---
 
         [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
@@ -72,19 +78,6 @@ namespace launcher_ex
         private static extern short GetAsyncKeyState(int vKey);
         private const int VK_F4 = 0x73; // Virtual key code for F4
 
-        // P/Invoke declaration for FormatMessage
-        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-        private static extern uint FormatMessage(
-            uint dwFlags,
-            IntPtr lpSource,
-            uint dwMessageId,
-            uint dwLanguageId,
-            out IntPtr lpBuffer, // Using IntPtr for out buffer allocated by the system
-            uint nSize,
-            IntPtr[] Arguments); // Changed from va_list* to IntPtr[] for C# marshalling
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern IntPtr LocalFree(IntPtr hMem);
 
         // The game resolves paths through ANSI APIs (fopen-class opens and the
         // LoadLibraryA PATH search), which cannot represent non-ASCII Windows
@@ -172,11 +165,6 @@ namespace launcher_ex
         private const string TARGET_VPK_FILE = "vpk\\client_mp_common.bsp.pak000_040.vpk"; // Relative to game dir
         private const string AUDIO_INSTALLER_EXE = "bin\\x64\\audio_installer.exe"; // Relative to game dir
 
-        // Constants for FormatMessage
-        private const uint FORMAT_MESSAGE_ALLOCATE_BUFFER = 0x00000100;
-        private const uint FORMAT_MESSAGE_IGNORE_INSERTS = 0x00000200;
-        private const uint FORMAT_MESSAGE_FROM_SYSTEM = 0x00001000;
-        private const uint FORMAT_MESSAGE_ARGUMENT_ARRAY = 0x00002000;
 
         private const string GitHubRepoUrl = "https://github.com/r1delta/r1delta"; // Make sure this is correct
         private const string SquirrelAppName = "R1Delta"; // Needs to match the name used during packaging
@@ -402,7 +390,7 @@ namespace launcher_ex
                             }
                             catch (Exception ex)
                             {
-                                Debug.WriteLine($"[Squirrel Install] FAILED to create shortcut for {mainExeTargetName}: {ex.Message}");
+                                LauncherLog.Write($"[Squirrel Install] failed to create the shortcut for {mainExeTargetName}", ex);
                             }
 
                             try
@@ -414,7 +402,7 @@ namespace launcher_ex
                             }
                             catch (Exception ex)
                             {
-                                Debug.WriteLine($"[Squirrel Install] FAILED to create shortcut for {dsExeTargetName}: {ex.Message}");
+                                LauncherLog.Write($"[Squirrel Install] failed to create the shortcut for {dsExeTargetName}", ex);
                             }
 
                             // --- Optional: First Run Launch ---
@@ -719,7 +707,7 @@ namespace launcher_ex
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine($"[Squirrel] Error handling Squirrel events: {ex.Message}");
+                    LauncherLog.Write("[Squirrel] handling Squirrel events failed", ex);
                     // Log or warn, but likely continue
                 }
             } // Dispose the temporary UpdateManager
@@ -808,8 +796,20 @@ namespace launcher_ex
         }
 
         // --- Main Entry Point ---
-        [STAThread] // Required for MessageBox and SetupWindow
-        protected override async void OnStartup(StartupEventArgs e) // Changed to async void
+        protected override async void OnStartup(StartupEventArgs e)
+        {
+            // async void: an exception that escapes would end the process without a trace.
+            try
+            {
+                await RunStartupAsync();
+            }
+            catch (Exception ex)
+            {
+                StartupDiagnostics.ReportFatal("the launcher failed during startup", ex);
+            }
+        }
+
+        private async Task RunStartupAsync()
         {
             // --- Run Update Check Asynchronously ---
             bool shouldContinueStartup = false; // Default to not continuing
@@ -930,9 +930,24 @@ namespace launcher_ex
                     $"[*] Current Install Path: '{currentInstallPath ?? "Not Set"}', " +
                     $"Core VPK Exists: {coreVpkExists}. {currentRootResolution.Message}");
 
-                // 4. Determine if Setup window is needed
-                bool needsSetup = f4Pressed || !coreVpkExists || currentShowSetupSetting;
-                Debug.WriteLine($"[*] Needs Setup? {needsSetup} (F4: {f4Pressed}, VPK Exists: {coreVpkExists}, Show Setting: {currentShowSetupSetting})");
+                // 4. Determine if Setup window is needed. An install missing a file launcher.dll needs (for example
+                // bin\x64_retail\vstdlib.dll after a drive was cleaned) goes through setup, whose download pass
+                // verifies every file and fetches only what is gone.
+                string missingLaunchFiles = null;
+                bool installDamaged = coreVpkExists &&
+                    TitanfallManager.TryDescribeMissingLaunchFiles(currentInstallPath, out missingLaunchFiles);
+                if (installDamaged && !f4Pressed)
+                {
+                    ShowWarning(
+                        $"Your Titanfall install at '{currentInstallPath}' is missing files the game needs: {missingLaunchFiles}.\n\n" +
+                        "Setup will open now. It verifies every game file against its checksum and downloads only " +
+                        "what is actually gone, so nothing extra is fetched.",
+                        "R1Delta Install Damaged");
+                }
+                bool needsSetup = f4Pressed || !coreVpkExists || installDamaged || currentShowSetupSetting;
+                LauncherLog.Write(
+                    $"Needs setup? {needsSetup} (F4: {f4Pressed}, core VPK exists: {coreVpkExists}, " +
+                    $"missing launch files: {(installDamaged ? missingLaunchFiles : "none")}, show setting: {currentShowSetupSetting})");
 
                 // 5. Run Setup or Use Existing Settings
                 if (needsSetup)
@@ -966,7 +981,7 @@ namespace launcher_ex
                         else
                         {
                             // User cancelled the setup window
-                            Debug.WriteLine("[*] Setup Window cancelled by user.");
+                            LauncherLog.Write("Setup window closed without completing (cancelled, or the error was reported by setup)");
                             Shutdown(0); // Exit gracefully using WPF's Shutdown
                             return;
                         }
@@ -988,6 +1003,7 @@ namespace launcher_ex
             }
             catch (Exception ex)
             {
+                LauncherLog.Write("initial setup check failed", ex);
                 ShowError($"An unexpected error occurred during the initial setup check: {ex.Message}\nThe application will now exit.");
                 Process.GetCurrentProcess().Kill(); // Use Shutdown
                 return;
@@ -1047,10 +1063,12 @@ namespace launcher_ex
             string launcherDllPath = Path.Combine(originalLauncherExeDir, R1DELTA_SUBDIR, BIN_SUBDIR, LAUNCHER_DLL_NAME);
             string coreDllPath = Path.Combine(originalLauncherExeDir, R1DELTA_SUBDIR, BIN_DELTA_SUBDIR, "tier0.dll"); // Assuming tier0 is the core
             Environment.SetEnvironmentVariable("FROM_DELTA_LAUNCHER", "1");
+            string gameExePath = null;
             try
             {
                 var launcherDllPathFull = EnsureAsciiLaunchPath(originalLauncherExeDir);
                 var fullExePath = Path.Combine(launcherDllPathFull,"Titanfall.exe");
+                gameExePath = fullExePath;
                 var psi = new ProcessStartInfo
                 {
                     FileName = fullExePath,
@@ -1058,14 +1076,19 @@ namespace launcher_ex
                     UseShellExecute = false,
                     Arguments = finalLaunchArgs,
                 };
-                Debug.WriteLine($"[*] Starting Titanfall.exe from: {launcherDllPathFull}");
+                LauncherLog.Write($"Starting {fullExePath} (working directory '{psi.WorkingDirectory}', arguments '{finalLaunchArgs}')");
                 psi.EnvironmentVariables["__COMPAT_LAYER"] = "NoDTToDITMouseBatch=1";
                 Process.Start(psi);
 
             }
             catch (Exception ex)
             {
-                ShowError($"An unexpected error occurred while loading DLLs or functions.\nError: {ex.Message}\n\nThe game cannot continue and has to exit.");
+                LauncherLog.Write("starting the game executable failed", ex);
+                ShowError(
+                    LaunchFailureMessage.DescribeProcessStartFailure(
+                        gameExePath ?? Path.Combine(originalLauncherExeDir, "Titanfall.exe"),
+                        ex) +
+                    "\n\nThe game cannot continue and has to exit.");
                 if (hLauncherModule != IntPtr.Zero) FreeLibrary(hLauncherModule);
                 if (hCoreModule != IntPtr.Zero) FreeLibrary(hCoreModule);
                 Process.GetCurrentProcess().Kill();
@@ -1079,160 +1102,16 @@ namespace launcher_ex
 
         private static void ShowError(string message, string title = "R1Delta Launcher Error")
         {
-            // Use WPF MessageBox
-            MessageBox.Show(message, title, MessageBoxButton.OK, MessageBoxImage.Error);
+            LauncherLog.Write($"error dialog '{title}': {message}");
+            StartupDiagnostics.ShowDialog(title, $"{message}\n\nDiagnostic log:\n{LauncherLog.Path}", error: true);
         }
 
         private static void ShowWarning(string message, string title = "R1Delta Launcher Warning")
         {
-            // Use WPF MessageBox
-            MessageBox.Show(message, title, MessageBoxButton.OK, MessageBoxImage.Warning);
+            LauncherLog.Write($"warning dialog '{title}': {message}");
+            StartupDiagnostics.ShowDialog(title, message, error: false);
         }
 
-        // --- Modified Helper Function ---
-        private static string GetFormattedErrorMessage(int errorCode, params string[] args)
-        {
-            IntPtr lpMsgBuf = IntPtr.Zero;
-            IntPtr[] pArgs = null;
-            IntPtr pArgsPtr = IntPtr.Zero; // Pointer to array of string pointers (use IntPtr for the array itself)
-
-            try
-            {
-                uint dwFlags = FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM;
-                uint dwMessageId = (uint)errorCode;
-                uint dwLangId = 0; // Default language
-
-                if (args != null && args.Length > 0)
-                {
-                    dwFlags |= FORMAT_MESSAGE_ARGUMENT_ARRAY;
-                    pArgs = new IntPtr[args.Length];
-                    // Allocate memory for each string and store pointers
-                    for (int i = 0; i < args.Length; i++)
-                    {
-                        // Use StringToHGlobalUni for Unicode strings (%1 expects LPWSTR usually)
-                        pArgs[i] = Marshal.StringToHGlobalUni(args[i] ?? ""); // Handle null args gracefully
-                    }
-                    // Allocate unmanaged memory for the array of pointers and copy the pointers
-                    int sizeOfPtr = Marshal.SizeOf<IntPtr>();
-                    pArgsPtr = Marshal.AllocHGlobal(args.Length * sizeOfPtr);
-                    for(int i = 0; i < args.Length; i++)
-                    {
-                        Marshal.WriteIntPtr(pArgsPtr, i * sizeOfPtr, pArgs[i]);
-                    }
-                }
-                else
-                {
-                    // If no args, tell FormatMessage to ignore inserts
-                    dwFlags |= FORMAT_MESSAGE_IGNORE_INSERTS;
-                }
-
-
-                // Call FormatMessage
-                uint charCount = FormatMessage(
-                    dwFlags,
-                    IntPtr.Zero, // Source (null for system errors)
-                    dwMessageId,
-                    dwLangId,    // Default language
-                    out lpMsgBuf,// Output buffer allocated by system
-                    0,           // Minimum size (0 lets system decide)
-                    pArgsPtr == IntPtr.Zero ? null : new IntPtr[] { pArgsPtr }); // Pass the pointer to the array if it exists
-
-                if (charCount == 0)
-                {
-                    // FormatMessage failed, fall back to Win32Exception
-                    int formatMessageError = Marshal.GetLastWin32Error();
-                    Debug.WriteLine($"FormatMessage failed with error: {formatMessageError}"); // Debug info
-                    return new Win32Exception(errorCode).Message; // Fallback
-                }
-
-                // Convert the buffer to a C# string
-                string message = Marshal.PtrToStringUni(lpMsgBuf).Trim(); // Trim trailing newline/whitespace
-
-                return message;
-            }
-            finally
-            {
-                // Free the buffer allocated by FormatMessage
-                if (lpMsgBuf != IntPtr.Zero)
-                {
-                    LocalFree(lpMsgBuf);
-                }
-                // Free the memory allocated for the argument strings
-                if (pArgs != null)
-                {
-                    for (int i = 0; i < pArgs.Length; i++)
-                    {
-                        if (pArgs[i] != IntPtr.Zero)
-                        {
-                            Marshal.FreeHGlobal(pArgs[i]);
-                        }
-                    }
-                }
-                // Free the memory allocated for the array of pointers
-                if (pArgsPtr != IntPtr.Zero)
-                {
-                    Marshal.FreeHGlobal(pArgsPtr);
-                }
-            }
-        }
-
-
-        // --- Updated LibraryLoadError ---
-        // Added originalLauncherExeDir for context
-        private static void LibraryLoadError(int errorCode, string libName, string location, string originalLauncherExeDir)
-        {
-            // Get the formatted error message using the helper
-            string errorMessage = GetFormattedErrorMessage(errorCode, location);
-
-            StringBuilder text = new StringBuilder();
-
-            text.AppendFormat("Failed to load the library '{0}'\nLocation: \"{1}\"\nError Code: {2}\n\nSystem Message: {3}\n\n", libName, location, errorCode, errorMessage);
-            text.Append("Make sure you followed the R1Delta installation instructions carefully before reaching out for help.");
-
-            bool fileExists = false;
-            try { fileExists = File.Exists(location); } catch { /* Ignore errors checking existence */ }
-
-            string gameExePathInLauncherDir = Path.Combine(originalLauncherExeDir, "Titanfall.exe"); // Check for accidental placement
-            bool gameExeMisplaced = false;
-            try { gameExeMisplaced = File.Exists(gameExePathInLauncherDir); } catch { /* Ignore */ }
-
-
-            if (errorCode == 126) // ERROR_MOD_NOT_FOUND
-            {
-                text.AppendFormat("\n\nThis error means Windows found the file '{0}' but could not load one of its *dependencies*.", libName);
-                text.Append("\n\nCommon Causes & Solutions:");
-                text.Append("\n1. Missing R1Delta Files: Ensure *all* files and folders from the R1Delta zip were extracted correctly into the launcher's directory (especially the 'r1delta\\bin' and 'r1delta\\bin_delta' subfolders). Re-extracting might help.");
-                text.Append("\n2. Missing Visual C++ Redistributable: Install the latest Microsoft Visual C++ Redistributable (usually x64 version for 2015-2022). Link: https://aka.ms/vs/17/release/vc_redist.x64.exe");
-                text.Append("\n3. Corrupted Files: Antivirus might have interfered, or the download was incomplete. Try disabling antivirus temporarily and re-extracting R1Delta.");
-                text.Append("\n4. Incorrect PATH: Although the launcher tries to set the PATH, external factors could interfere. This is less likely if other parts loaded.");
-            }
-            else if (errorCode == 127) // ERROR_PROC_NOT_FOUND
-            {
-                 text.AppendFormat("\n\nThis error means a required function was not found within '{0}' or one of its dependencies.", libName);
-                 text.Append("\n\nThis usually indicates a version mismatch (e.g., an older R1Delta file mixed with newer ones) or corrupted files.");
-                 text.Append("\n\nSolution: Delete the 'r1delta' folder completely and re-extract the latest version of R1Delta.");
-            }
-            else if (errorCode == 193) // ERROR_BAD_EXE_FORMAT
-            {
-                 text.AppendFormat("\n\nThis error means '{0}' is not a valid Windows application or DLL, or it's the wrong architecture (e.g., trying to load a 32-bit DLL in a 64-bit process).", libName);
-                 text.Append("\n\nThis strongly suggests file corruption or incorrect download/extraction.");
-                 text.Append("\n\nSolution: Delete the 'r1delta' folder and re-extract the correct (usually 64-bit) version of R1Delta.");
-            }
-            else if (gameExeMisplaced) // Titanfall.exe found *next to the launcher*
-            {
-                string launcherDirName = new DirectoryInfo(originalLauncherExeDir).Name;
-                text.AppendFormat("\n\nIMPORTANT: We detected 'Titanfall.exe' in the *same directory* as the R1Delta launcher ('{0}').", originalLauncherExeDir);
-                text.Append("\n\nThis is incorrect. R1Delta should be placed in its *own* folder, separate from the Titanfall game files.");
-                text.Append("\nPlease move the R1Delta launcher and its associated files (like the 'r1delta' folder) to a new, empty directory, then run the setup again.");
-            }
-            else if (!fileExists) // The specific DLL we tried to load is missing
-            {
-                text.AppendFormat("\n\nThe required R1Delta file '{0}' is missing from '{1}'.", libName, Path.GetDirectoryName(location));
-                text.Append("\nDid you unpack *all* R1Delta files into the launcher's directory?");
-            }
-
-            ShowError(text.ToString());
-        }
 
 
         /// <summary>

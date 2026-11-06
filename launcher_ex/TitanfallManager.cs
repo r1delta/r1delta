@@ -23,7 +23,16 @@ namespace R1Delta
     /// </summary>
     internal static class RegistryHelper
     {
-        private const string RegistryBaseKey = @"Software\R1Delta";
+        /// <summary>
+        /// Test seam: when set, every launcher setting is read from and written to this HKCU subkey instead of
+        /// <c>Software\R1Delta</c>, so a scratch run never touches the real install path.
+        /// </summary>
+        internal const string RegistryKeyOverrideEnvironmentVariable = "R1DELTA_LAUNCHER_REGISTRY_KEY";
+        private static readonly string RegistryBaseKey =
+            Environment.GetEnvironmentVariable(RegistryKeyOverrideEnvironmentVariable) is string overrideKey &&
+            !string.IsNullOrWhiteSpace(overrideKey)
+                ? overrideKey
+                : @"Software\R1Delta";
         private const string InstallPathValueName = "InstallPath";
         private const string ShowSetupOnLaunchValueName = "ShowSetupOnLaunch";
         private const string LaunchArgumentsValueName = "LaunchArguments";
@@ -280,7 +289,9 @@ namespace R1Delta
     public static class TitanfallManager
     {
         internal const string ValidationFileRelativePath = @"vpk\client_mp_common.bsp.pak000_000.vpk";
+        private const string RetailBinManifestPrefix = "bin/x64_retail/";
         private const int MaxVerificationDownloadPasses = 3;
+        private const double ProgressReportIntervalSeconds = 0.5;
         internal const string ManagedInstallMarkerRelativePath = ".r1delta-managed-install";
         internal const string ManagedInstallMarkerMagic = "R1DELTA_MANAGED_INSTALL_V1\r\n";
         internal const string LegacyCompletedInstallVpkRelativePath = @"vpk\client_mp_delta_common.bsp.pak000_000.vpk";
@@ -475,6 +486,99 @@ namespace R1Delta
             return null;
         }
 
+
+        /// <summary>
+        /// True when the path is the root of a drive or share (<c>D:\</c>, <c>\\server\share\</c>).
+        /// Game files must never be written there: they would be mixed with unrelated content and the
+        /// launcher's <c>bin</c>/<c>r1</c>/<c>vpk</c> layout would sit directly in the drive root.
+        /// </summary>
+        internal static bool IsRootOfVolume(string path, out string volumeRoot)
+        {
+            volumeRoot = null;
+            if (string.IsNullOrWhiteSpace(path))
+                return false;
+            try
+            {
+                string normalized = Path.GetFullPath(path);
+                string root = Path.GetPathRoot(normalized);
+                if (string.IsNullOrEmpty(root))
+                    return false;
+                volumeRoot = root;
+                return string.Equals(
+                    normalized.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                    root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                    StringComparison.OrdinalIgnoreCase);
+            }
+            catch (Exception ex) when (
+                ex is ArgumentException ||
+                ex is NotSupportedException ||
+                ex is PathTooLongException ||
+                ex is System.Security.SecurityException)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Refuses a drive/share root as the destination of a fresh install. A root that already holds a
+        /// valid install (<paramref name="isExistingInstall"/>) is not refused: it keeps launching and can
+        /// be repaired in place.
+        /// </summary>
+        internal static bool TryGetDriveRootRefusal(string path, bool isExistingInstall, out string message)
+        {
+            message = null;
+            if (isExistingInstall || !IsRootOfVolume(path, out string volumeRoot))
+                return false;
+
+            message =
+                $"R1Delta cannot install into the root of a drive (\"{volumeRoot}\").\n\n" +
+                $"Choose a folder on that drive instead, for example \"{Path.Combine(volumeRoot, "Titanfall")}\".\n\n" +
+                "Installing into a drive root mixes the game files with everything else on the drive and puts the " +
+                "launcher's bin, r1 and vpk folders directly in the root, which is not a layout the launcher supports.";
+            return true;
+        }
+
+        /// <summary>
+        /// Lists the files the launcher needs to start the game that an install is missing: the core VPK
+        /// marker and every <c>bin/x64_retail</c> library of the manifest (launcher.dll imports them, so
+        /// the game cannot start without them). Other game files are verified by the download pass.
+        /// </summary>
+        internal static bool TryDescribeMissingLaunchFiles(string installDir, out string missing)
+        {
+            missing = null;
+            if (string.IsNullOrWhiteSpace(installDir))
+                return false;
+            try
+            {
+                var absent = new List<string>();
+                if (!File.Exists(Path.Combine(installDir, ValidationFileRelativePath)))
+                    absent.Add(ValidationFileRelativePath);
+                foreach (var entry in TitanfallFileList.s_fileList)
+                {
+                    if (!entry.RelativePath.StartsWith(RetailBinManifestPrefix, StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    if (!File.Exists(Path.Combine(installDir, entry.RelativePath)))
+                        absent.Add(entry.RelativePath.Replace('/', '\\'));
+                }
+                if (absent.Count == 0)
+                    return false;
+
+                const int MaxListed = 4;
+                missing = string.Join(", ", absent.Take(MaxListed));
+                if (absent.Count > MaxListed)
+                    missing += $" and {absent.Count - MaxListed} more";
+                return true;
+            }
+            catch (Exception ex) when (
+                ex is ArgumentException ||
+                ex is NotSupportedException ||
+                ex is PathTooLongException ||
+                ex is System.Security.SecurityException)
+            {
+                missing = installDir;
+                return true;
+            }
+        }
 
         internal static bool TryNormalizeInstallRootPath(
             string installDir,
@@ -866,15 +970,50 @@ namespace R1Delta
             });
             progressUI.ReportProgress(0, totalManifestBytes, 0.0);
 
+            // Hashing existing files takes minutes on a slow disk. Report real hashed bytes, throughput and the
+            // file being checked so the dialog never sits on an unchanging percentage.
+            var preflightClock = Stopwatch.StartNew();
+            var preflightRate = new RollingRate();
+            double preflightLastReport = -1;
+            long preflightCheckedBytes = 0;
+            long preflightTotalBytes = 0;
+            int preflightFileIndex = 0;
+            string preflightFile = string.Empty;
+            void ReportPreflightProgress(long bytesOfCurrentFile, bool force)
+            {
+                var now = preflightClock.Elapsed.TotalSeconds;
+                if (!force && now - preflightLastReport < ProgressReportIntervalSeconds)
+                    return;
+                preflightLastReport = now;
+                var done = preflightCheckedBytes + bytesOfCurrentFile;
+                preflightRate.Add(now, done);
+                statusProgress?.ReportStatus(new InstallProgressStatus
+                {
+                    Phase = InstallProgressPhase.Preflight,
+                    Detail = $"File {preflightFileIndex} of {TitanfallFileList.s_fileList.Count}: {preflightFile}"
+                });
+                progressUI.ReportProgress(done, preflightTotalBytes, preflightRate.BytesPerSecond());
+            }
+
             Debug.WriteLine($"Verifying existing files in: {installDir}");
             try
             {
                 string verificationError = null;
                 await Task.Run(() =>
                 {
+                    // Only files that exist at their final size are hashed; that is the work to report against.
+                    foreach (var entry in TitanfallFileList.s_fileList)
+                    {
+                        var existing = new FileInfo(Path.Combine(installDir, entry.RelativePath));
+                        if (existing.Exists && existing.Length == entry.Size)
+                            preflightTotalBytes += entry.Size;
+                    }
+
                     foreach (var (url, relPath, expectedHash, knownSize) in TitanfallFileList.s_fileList)
                     {
                         externalCts.ThrowIfCancellationRequested();
+                        preflightFileIndex++;
+                        preflightFile = relPath;
                         if (string.IsNullOrWhiteSpace(relPath))
                         {
                             Debug.WriteLine("Warning: Empty relative path.");
@@ -900,7 +1039,11 @@ namespace R1Delta
                                 currentSize = fi.Length;
                                 if (fi.Length == knownSize)
                                 {
-                                    if (knownSize == 0 || ComputeXxHash64(dest, externalCts) == expectedHash)
+                                    bool checksumMatches = knownSize == 0 ||
+                                        ComputeXxHash64(dest, externalCts, hashed => ReportPreflightProgress(hashed, false)) == expectedHash;
+                                    preflightCheckedBytes += knownSize;
+                                    ReportPreflightProgress(0, true);
+                                    if (checksumMatches)
                                     {
                                         needs = false;
                                     }
@@ -989,40 +1132,85 @@ namespace R1Delta
             var stopwatch = Stopwatch.StartNew();
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(externalCts);
             var token = linked.Token;
-            var downloadedFilesTotal = toDownload.Sum(item => item.Size);
-            var validationProgress = 0L;
-            var validatedFileBytes = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
-            var validationWindow = Math.Max(1L, totalNeeded / 100L);
-            var downloadCap = Math.Max(0L, totalNeeded - validationWindow);
             var onePercentCeiling = totalNeeded / 100L + (totalNeeded % 100L == 0 ? 0L : 1L);
+            // Downloading never reports 100%: that is reserved for an install whose files were verified.
             var preVerificationProgressCap = Math.Max(0L, totalNeeded - Math.Max(1L, onePercentCeiling));
 
+            var pendingDownloads = toDownload.ToList();
             var currentProgressPhase = InstallProgressPhase.Resume;
             DownloadBackend? currentBackend = null;
             var currentTransferPhase = DownloadTransferPhase.Preparing;
             var currentAttempt = 0;
+            var currentMaxAttempts = 0;
+            var currentVerificationPass = 0;
+            var currentDetail = string.Empty;
             var phaseMaxReportedProgress = -1L;
 
-            long ProjectProgress(long downloadedBytes, long validatedBytes)
-            {
-                if (downloadedFilesTotal <= 0)
-                    return Clamp(downloadedBytes, 0, totalNeeded);
+            // Verification reports its own progress (bytes hashed, throughput, current file). Hashing the whole
+            // download takes minutes, and a share of the download bar used to sit on "99.0%" without moving.
+            var verificationRate = new RollingRate();
+            long verificationTotalBytes = 0;
+            long verificationDoneBytes = 0;
+            int verificationFileIndex = 0;
+            string verificationFile = string.Empty;
+            double verificationLastReport = -1;
 
-                var cappedDownload = Clamp(downloadedBytes, 0, downloadCap);
-                var validationContribution = Clamp((validationWindow * validatedBytes) / downloadedFilesTotal, 0, validationWindow);
-                return Clamp(cappedDownload + validationContribution, 0, totalNeeded);
+            void PublishStatus()
+            {
+                statusProgress?.ReportStatus(new InstallProgressStatus
+                {
+                    Phase = currentProgressPhase,
+                    Backend = currentBackend,
+                    TransferPhase = currentTransferPhase,
+                    Attempt = currentAttempt,
+                    MaxAttempts = currentMaxAttempts,
+                    VerificationPass = currentVerificationPass,
+                    MaxVerificationPasses = MaxVerificationDownloadPasses,
+                    Detail = currentDetail
+                });
+            }
+
+            // The bar stops at 99% while downloading, so say what is actually left.
+            string DescribeDownloadRemainder()
+            {
+                var complete = 0;
+                var remaining = 0L;
+                foreach (var item in pendingDownloads)
+                {
+                    var received = fileReceivedBytes.TryGetValue(item.Dest, out var bytes) ? bytes : 0;
+                    if (received >= item.Size)
+                        complete++;
+                    remaining += Math.Max(0, item.Size - received);
+                }
+                return $"{complete} of {pendingDownloads.Count} files complete, {FormatBytes(remaining)} left to download";
             }
 
             void ReportAggregateProgress(long rawOverallProgress, double speed)
             {
-                var projectedProgress = ProjectProgress(rawOverallProgress, validationProgress);
-                if (currentProgressPhase != InstallProgressPhase.Verification)
-                    projectedProgress = Math.Min(projectedProgress, preVerificationProgressCap);
+                var projectedProgress = Math.Min(Clamp(rawOverallProgress, 0, totalNeeded), preVerificationProgressCap);
                 phaseMaxReportedProgress = phaseMaxReportedProgress < 0
                     ? projectedProgress
                     : Math.Max(phaseMaxReportedProgress, projectedProgress);
+                currentDetail = DescribeDownloadRemainder();
+                PublishStatus();
                 progressUI.ReportProgress(phaseMaxReportedProgress, totalNeeded, Math.Max(0, speed));
                 lastUpdate = stopwatch.Elapsed.TotalSeconds;
+            }
+
+            void ReportVerificationProgress(long bytesOfCurrentFile, bool force)
+            {
+                lock (progressLock)
+                {
+                    var now = stopwatch.Elapsed.TotalSeconds;
+                    if (!force && now - verificationLastReport < ProgressReportIntervalSeconds)
+                        return;
+                    verificationLastReport = now;
+                    var done = Clamp(verificationDoneBytes + bytesOfCurrentFile, 0, verificationTotalBytes);
+                    verificationRate.Add(now, done);
+                    currentDetail = $"File {verificationFileIndex} of {pendingDownloads.Count}: {verificationFile}";
+                    PublishStatus();
+                    progressUI.ReportProgress(done, verificationTotalBytes, verificationRate.BytesPerSecond());
+                }
             }
 
             void BeginProgressPhase(
@@ -1037,20 +1225,15 @@ namespace R1Delta
                 currentBackend = backend;
                 currentTransferPhase = transferPhase;
                 currentAttempt = attempt;
+                currentMaxAttempts = maxAttempts;
+                currentVerificationPass = verificationPass;
                 phaseMaxReportedProgress = -1;
                 lastUpdate = -1;
                 history.Clear();
-                statusProgress?.ReportStatus(new InstallProgressStatus
-                {
-                    Phase = phase,
-                    Backend = backend,
-                    TransferPhase = transferPhase,
-                    Attempt = attempt,
-                    MaxAttempts = maxAttempts,
-                    VerificationPass = verificationPass,
-                    MaxVerificationPasses = MaxVerificationDownloadPasses
-                });
-                ReportAggregateProgress(overallProgress, 0);
+                if (phase == InstallProgressPhase.Verification)
+                    ReportVerificationProgress(0, true);
+                else
+                    ReportAggregateProgress(overallProgress, 0);
             }
 
             BeginProgressPhase(InstallProgressPhase.Resume);
@@ -1112,7 +1295,6 @@ namespace R1Delta
                     }
                 };
 
-                var pendingDownloads = toDownload.ToList();
                 var completedVerificationPass = 0;
                 for (var verificationPass = 1; verificationPass <= MaxVerificationDownloadPasses; verificationPass++)
                 {
@@ -1138,6 +1320,10 @@ namespace R1Delta
 
                     lock (progressLock)
                     {
+                        verificationTotalBytes = pendingDownloads.Sum(item => item.Size);
+                        verificationDoneBytes = 0;
+                        verificationFileIndex = 0;
+                        verificationRate = new RollingRate();
                         BeginProgressPhase(
                             InstallProgressPhase.Verification,
                             verificationPass: verificationPass);
@@ -1153,9 +1339,8 @@ namespace R1Delta
 
                         lock (progressLock)
                         {
-                            if (validatedFileBytes.TryGetValue(item.Dest, out var previousValidated))
-                                validationProgress = Math.Max(0, validationProgress - previousValidated);
-                            validatedFileBytes[item.Dest] = 0;
+                            verificationFileIndex++;
+                            verificationFile = Path.GetFileName(item.Dest);
                         }
 
                         string failureMessage = null;
@@ -1174,20 +1359,10 @@ namespace R1Delta
                                 }
                                 else if (item.Size > 0)
                                 {
-                                    var actualHash = ComputeXxHash64(item.Dest, token, bytesRead =>
-                                    {
-                                        lock (progressLock)
-                                        {
-                                            var previous = validatedFileBytes[item.Dest];
-                                            var delta = bytesRead - previous;
-                                            if (delta <= 0)
-                                                return;
-
-                                            validatedFileBytes[item.Dest] = bytesRead;
-                                            validationProgress = Clamp(validationProgress + delta, 0, downloadedFilesTotal);
-                                            ReportAggregateProgress(overallProgress, 0);
-                                        }
-                                    });
+                                    var actualHash = ComputeXxHash64(
+                                        item.Dest,
+                                        token,
+                                        bytesRead => ReportVerificationProgress(bytesRead, false));
 
                                     if (actualHash != item.Hash)
                                         failureMessage = $"{Path.GetFileName(item.Dest)} checksum is {actualHash:X}, expected {item.Hash:X}";
@@ -1201,6 +1376,12 @@ namespace R1Delta
                         catch (Exception ex)
                         {
                             failureMessage = $"{Path.GetFileName(item.Dest)} could not be verified: {ex.Message}";
+                        }
+
+                        lock (progressLock)
+                        {
+                            verificationDoneBytes += item.Size;
+                            ReportVerificationProgress(0, true);
                         }
 
                         if (failureMessage == null)
@@ -1228,14 +1409,7 @@ namespace R1Delta
                     lock (progressLock)
                     {
                         foreach (var item in failedDownloads)
-                        {
                             fileReceivedBytes[item.Dest] = 0;
-                            if (validatedFileBytes.TryGetValue(item.Dest, out var previousValidated))
-                            {
-                                validationProgress = Math.Max(0, validationProgress - previousValidated);
-                                validatedFileBytes[item.Dest] = 0;
-                            }
-                        }
 
                         overallProgress = Clamp(fileReceivedBytes.Values.Sum(), 0, totalNeeded);
                         BeginProgressPhase(
@@ -1361,6 +1535,30 @@ namespace R1Delta
             return true;
         }
 
+        /// <summary>Bytes per second over the last few seconds of (time, cumulative bytes) samples.</summary>
+        private sealed class RollingRate
+        {
+            private const double WindowSeconds = 5.0;
+            private readonly Queue<(double Time, long Bytes)> _samples = new Queue<(double Time, long Bytes)>();
+
+            internal void Add(double nowSeconds, long cumulativeBytes)
+            {
+                _samples.Enqueue((nowSeconds, cumulativeBytes));
+                while (_samples.Count > 2 && _samples.Peek().Time < nowSeconds - WindowSeconds)
+                    _samples.Dequeue();
+            }
+
+            internal double BytesPerSecond()
+            {
+                if (_samples.Count < 2)
+                    return 0;
+                var first = _samples.Peek();
+                var last = _samples.Last();
+                var elapsed = last.Time - first.Time;
+                return elapsed > 0.01 ? Math.Max(0, (last.Bytes - first.Bytes) / elapsed) : 0;
+            }
+        }
+
         /// <summary>
         /// Clamp extension to keep a value within [min, max].
         /// </summary>
@@ -1415,5 +1613,7 @@ namespace R1Delta
         public int MaxAttempts { get; set; }
         public int VerificationPass { get; set; }
         public int MaxVerificationPasses { get; set; }
+        /// <summary>Phase-specific line shown under the heading: the file being checked, files left, and so on.</summary>
+        public string Detail { get; set; }
     }
 }
