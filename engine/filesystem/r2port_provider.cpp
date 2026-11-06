@@ -914,7 +914,7 @@ std::vector<std::string> Enumerate(std::string_view pattern)
     return paths;
 }
 
-void SetActiveMap(std::string_view mapName)
+bool SetActiveMap(std::string_view mapName)
 {
     std::string normalized;
     if (const auto path = NormalizeProviderPath(mapName))
@@ -925,7 +925,7 @@ void SetActiveMap(std::string_view mapName)
     {
         std::lock_guard<std::mutex> lock(g_cacheMutex);
         if (normalized == g_activeMap)
-            return;
+            return false;
         g_activeMap = std::move(normalized);
         activeMapForLog = g_activeMap;
         g_activeMapStartedAt = startedAt;
@@ -949,6 +949,7 @@ void SetActiveMap(std::string_view mapName)
         activeMapForLog.c_str(), static_cast<long long>(qpcMilliseconds));
     LogProviderMessage(message);
     r2port::prof::MarkMapStart(activeMapForLog);
+    return true;
 }
 
 std::string ActiveMapName()

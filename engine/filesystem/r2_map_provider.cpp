@@ -2340,8 +2340,13 @@ void ObserveMapFilePath(std::string_view path)
 
     const std::string_view normalizedPath(*normalized);
     const std::string_view mapName = normalizedPath.substr(5, normalizedPath.size() - 9);
-    if (!mapName.empty() && mapName.find('/') == std::string_view::npos)
-        SetActiveMap(mapName);
+    if (mapName.empty() || mapName.find('/') != std::string_view::npos)
+        return;
+    // A stock R1 map (or the lobby) is loading: release what the previous R2 map converted and decoded before the new map
+    // allocates its own memory. Up to 1.5 GiB of converted files and 4 GiB of decoded package families stayed resident
+    // for the rest of the session otherwise.
+    if (SetActiveMap(mapName) && !IsAllowlistedMap(mapName))
+        ReleaseR2MaterialProviderMapState();
 }
 
 void InstallR2MapProvider()

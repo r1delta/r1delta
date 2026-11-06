@@ -152,6 +152,9 @@ void UnpinFamily(std::uint32_t family);
 std::size_t FamilyDecodedBytes(std::uint32_t family);
 // pinnedOnly counts only the families some caller has pinned (the ones that cannot be evicted).
 std::size_t ResidentFamilyBytes(bool pinnedOnly = false);
+// Drops every decoded family nobody has pinned, whatever the cache limit (the provider calls it when a stock map starts:
+// nothing decoded for the previous R2 map is wanted there).
+void ReleaseUnpinnedFamilies() noexcept;
 // Package families decoded since the process started (RTech decode + file read), and the wall time spent in them
 // summed over threads. A converted map should load each family it touches once.
 void GetFamilyLoadStats(std::uint64_t& loads, std::uint64_t& microseconds);

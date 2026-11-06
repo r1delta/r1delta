@@ -90,6 +90,22 @@ public:
         return items;
     }
 
+    // Removes and returns every queued item `pred(item, meta)` accepts (map change: work nobody waits for).
+    template <class Pred>
+    std::vector<std::pair<Item, Meta>> ExtractIf(Pred pred)
+    {
+        std::vector<std::pair<Item, Meta>> items;
+        for (auto it = m_items.begin(); it != m_items.end();) {
+            if (!pred(it->second.item, it->second.meta)) {
+                ++it;
+                continue;
+            }
+            items.emplace_back(std::move(it->second.item), it->second.meta);
+            it = m_items.erase(it);
+        }
+        return items;
+    }
+
 private:
     struct Entry {
         Item item;
