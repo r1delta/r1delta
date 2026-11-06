@@ -203,12 +203,15 @@ bool GetInstallPathFromRegistry(char* buffer, size_t bufferSize)
     return true;
 }
 
-// Validates if the given path appears to be a valid game directory
-// by checking for the existence of "r1\GameInfo.txt".
-// Returns true if valid, false otherwise.
+// A game directory candidate must at least exist: a stale registry InstallPath (a removed drive or a deleted folder)
+// must fall back to the launcher's own directory instead of failing the later chdir. The content check
+// ("r1\GameInfo.txt") stays off because dedicated layouts without it are valid.
 bool ValidateGameDirectory(const char* path)
 {
-    return TRUE;
+    if (!path || path[0] == '\0')
+        return false;
+    const DWORD attributes = GetFileAttributesA(path);
+    return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
 }
 
 // Prepends necessary directories to the PATH environment variable.

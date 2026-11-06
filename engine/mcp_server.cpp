@@ -774,8 +774,14 @@ std::vector<Tool> Server::GetAvailableTools() const {
     tools.push_back({
         "get_console_log",
         "Get Console Log",
-        "Return the last 50 lines of the game console output.",
-        {{"type", "object"}, {"properties", json::object()}}
+        "Return the latest lines of the game console output (the server keeps the last 2000).",
+        {
+            {"type", "object"},
+            {"properties", {
+                {"lines", {{"type", "integer"}, {"minimum", 1}, {"maximum", 2000}, {"default", 50},
+                    {"description", "How many of the most recent lines to return"}}}
+            }}
+        }
     });
 
     return tools;
@@ -1009,11 +1015,17 @@ json Server::GetGameState(const json& args) {
 }
 
 json Server::GetConsoleLog(const json& args) {
-    constexpr size_t kRequestedLines = 50;
-    auto lines = m_outputCapture.GetLastLines(kRequestedLines);
+    constexpr size_t kDefaultLines = 50;
+    constexpr size_t kMaxLines = 2000;  // ConsoleOutputCapture keeps this many history lines
+    size_t requested = kDefaultLines;
+    if (args.contains("lines") && args["lines"].is_number_integer()) {
+        const auto value = args["lines"].get<long long>();
+        requested = static_cast<size_t>(std::clamp<long long>(value, 1, static_cast<long long>(kMaxLines)));
+    }
+    auto lines = m_outputCapture.GetLastLines(requested);
 
     json structured = {
-        {"requested_line_count", kRequestedLines},
+        {"requested_line_count", requested},
         {"returned_line_count", lines.size()},
         {"lines", lines}
     };
