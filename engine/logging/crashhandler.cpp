@@ -1,4 +1,3 @@
-#include <intrin.h>
 #include <windows.h>
 #include <dbghelp.h>
 #include <psapi.h>
@@ -340,17 +339,15 @@ std::string BuildCrashSummaryLine(EXCEPTION_POINTERS* exInfo)
 }
 namespace
 {
-// R1Delta raises its own fatal-invariant exceptions in the 0xE042xxxx range (factory.cpp, load.cpp, squirrel.cpp, and
-// ReportFatalConditionAndTerminate below). Customer-bit codes are never raised by Windows itself.
+// R1Delta raises its own fatal-invariant exceptions in the 0xE042xxxx range (factory.cpp, load.cpp, squirrel.cpp).
+// Customer-bit codes are never raised by Windows itself.
 constexpr DWORD kR1DeltaFatalCodeMask = 0xFFFF0000;
 constexpr DWORD kR1DeltaFatalCodeFacility = 0xE0420000;
-constexpr DWORD kFatalConditionCode = 0xE0421020;
 constexpr DWORD kStatusInvalidHandle = 0xC0000008;
 constexpr DWORD kStatusHeapCorruption = 0xC0000374;
 constexpr DWORD kStatusStackBufferOverrun = 0xC0000409;
 constexpr DWORD kStatusAssertionFailure = 0xC0000420;
 constexpr DWORD kMsvcCppException = 0xE06D7363;
-constexpr size_t kFatalDetailCapacity = 512;
 
 // Only unhandled exceptions reach this filter, so a code listed here that some guard recovers never produces a report.
 bool IsReportableExceptionCode(DWORD code)
@@ -677,27 +674,6 @@ LONG WINAPI CustomCrashHandler(EXCEPTION_POINTERS* exInfo)
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
-[[noreturn]] void ReportFatalConditionAndTerminate(const char* detail)
-{
-    CONTEXT context;
-    RtlCaptureContext(&context);
-
-    EXCEPTION_RECORD record{};
-    record.ExceptionCode = kFatalConditionCode;
-    record.ExceptionFlags = EXCEPTION_NONCONTINUABLE;
-    record.ExceptionAddress = _ReturnAddress();
-    record.NumberParameters = 1;
-    record.ExceptionInformation[0] = reinterpret_cast<ULONG_PTR>(detail);
-    EXCEPTION_POINTERS pointers{ &record, &context };
-
-    // The filter terminates the process itself after writing the report. It returns only when a debugger is attached
-    // (then the exception goes to the debugger) or when the filter is already running.
-    if (CustomCrashHandler(&pointers) == EXCEPTION_CONTINUE_SEARCH)
-        RaiseException(kFatalConditionCode, EXCEPTION_NONCONTINUABLE, 1, record.ExceptionInformation);
-    TerminateProcess(GetCurrentProcess(), kFatalConditionCode);
-    __assume(0);
-}
-
 // Helper function to get a string description of the last error
 std::string GetLastErrorString(DWORD errorCode)
 {
@@ -778,19 +754,6 @@ std::string GetExceptionDescription(EXCEPTION_RECORD* record)
     case kStatusStackBufferOverrun:          return "Stack Buffer Overrun (fast fail)";
     case kStatusAssertionFailure:            return "Assertion Failure";
     case kMsvcCppException:                  return "Unhandled C++ Exception";
-    case kFatalConditionCode:
-    {
-        // ExceptionInformation[0] is the detail text ReportFatalConditionAndTerminate was given
-        std::string description = "Fatal condition";
-        if (record->NumberParameters >= 1 && record->ExceptionInformation[0]) {
-            const char* detail = reinterpret_cast<const char*>(record->ExceptionInformation[0]);
-            description += ": ";
-            description.append(detail, strnlen_s(detail, kFatalDetailCapacity));
-            while (!description.empty() && (description.back() == '\n' || description.back() == '\r'))
-                description.pop_back();
-        }
-        return description;
-    }
     default:
         if ((record->ExceptionCode & kR1DeltaFatalCodeMask) == kR1DeltaFatalCodeFacility)
             return "R1Delta fatal invariant failure (see Recent Console)";
