@@ -172,6 +172,7 @@ void Stats(const CCommand&) {
 bool R1AudioUsesGeneratedContent() { return HasR1DeltaContent(); }
 
 std::uint32_t R1AudioHiddenTrailingAliases() { return s_hiddenAliases; }
+std::uint32_t R1AudioHiddenAliasStart() { return s_hiddenStart; }
 
 bool InstallR1AudioCacheHooks(std::uintptr_t engineBase) {
     if (GetR1DeltaEngineMode() != R1DeltaEngineMode::Client2015) return false;

@@ -11,3 +11,6 @@ void RegisterR1AudioCacheCommands();
 bool R1AudioUsesGeneratedContent();
 // Aliases appended after the CRC/parity-visible table by the generated R2 sound script (see audio_cache.cpp ScriptLoad).
 std::uint32_t R1AudioHiddenTrailingAliases();
+// Table index of the first generated alias (valid while R1AudioHiddenTrailingAliases() > 0). An addon manifest can append sound scripts
+// after scripts/r2port_sounds.txt, so the generated aliases are a window [start, start + count), not necessarily the end of the table.
+std::uint32_t R1AudioHiddenAliasStart();

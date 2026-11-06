@@ -48,12 +48,24 @@ constexpr std::size_t kMaxNamesPerBucket = 1024;
 
 struct LocalTable {
 	const unsigned char* records = nullptr;
-	int count = 0;
+	int count = 0;   // aliases compared: the table without the hidden generated window
 	std::uint32_t engineCrc = 0;
+	std::size_t skipStart = 0;   // the hidden generated aliases: records [skipStart, skipStart + skipCount)
+	std::size_t skipCount = 0;
+
+	// The generated R2 aliases (scripts/r2port_sounds.txt) are excluded wherever they sit: an addon manifest can append sound scripts
+	// after them, and "the last N records" would then hide mod aliases and show the first generated ones.
+	void HideWindow(std::size_t start, std::size_t length) {
+		if (length == 0 || start + length > static_cast<std::size_t>(count))
+			return;
+		skipStart = start;
+		skipCount = length;
+		count -= static_cast<int>(length);
+	}
 
 	const char* NameAt(int index) const {
-		return *reinterpret_cast<const char* const*>(
-			records + static_cast<std::size_t>(index) * kAliasRecordSize + kAliasNameOffset);
+		const std::size_t real = static_cast<std::size_t>(index) + (skipCount && static_cast<std::size_t>(index) >= skipStart ? skipCount : 0);
+		return *reinterpret_cast<const char* const*>(records + real * kAliasRecordSize + kAliasNameOffset);
 	}
 };
 
@@ -76,9 +88,9 @@ bool ReadLocalTable(LocalTable& out) {
 		// With the expanded tables (r1o_sound_tables.cpp) the records no longer live at the link-time address.
 		if (const void* relocated = GetR1OSoundAliasRecords())
 			out.records = static_cast<const unsigned char*>(relocated);
-		// The generated R2 aliases trail the table and are excluded: they exist only when the R2 install does.
-		if (const int hidden = static_cast<int>(R1OHiddenTrailingAliases()); hidden > 0 && hidden < out.count)
-			out.count -= hidden;
+		// The generated R2 aliases are a window of the table and are excluded: they exist only when the R2 install does.
+		if (const int hidden = static_cast<int>(R1OHiddenTrailingAliases()); hidden > 0)
+			out.HideWindow(R1OHiddenAliasStart(), hidden);
 		return true;
 	}
 	case R1DeltaEngineMode::Dedicated2014:
@@ -86,9 +98,9 @@ bool ReadLocalTable(LocalTable& out) {
 			return false;
 		if (const void* relocated = GetLegacyDSAliasRecords())
 			out.records = static_cast<const unsigned char*>(relocated);
-		// The generated R2 aliases trail the table and are excluded (legacy_ds_sound_tables.cpp).
-		if (const int hidden = static_cast<int>(LegacyDSHiddenTrailingAliases()); hidden > 0 && hidden < out.count)
-			out.count -= hidden;
+		// The generated R2 aliases are a window of the table and are excluded (legacy_ds_sound_tables.cpp).
+		if (const int hidden = static_cast<int>(LegacyDSHiddenTrailingAliases()); hidden > 0)
+			out.HideWindow(LegacyDSHiddenAliasStart(), hidden);
 		return true;
 	case R1DeltaEngineMode::Client2015:
 		if (!ReadLayout(kEngineLayout, G_engine, out))
@@ -96,9 +108,9 @@ bool ReadLocalTable(LocalTable& out) {
 		// With the relocated alias table (apex_sound_capacity) the records no longer live at the link-time address.
 		if (const void* relocated = R1ApexSoundAliasRecord(0))
 			out.records = static_cast<const unsigned char*>(relocated);
-		// The generated R2 aliases trail the table and are excluded (audio_cache.cpp): they exist only when the R2 install does.
-		if (const int hidden = static_cast<int>(R1AudioHiddenTrailingAliases()); hidden > 0 && hidden < out.count)
-			out.count -= hidden;
+		// The generated R2 aliases are a window of the table (excluded): they exist only when the R2 install does.
+		if (const int hidden = static_cast<int>(R1AudioHiddenTrailingAliases()); hidden > 0)
+			out.HideWindow(R1AudioHiddenAliasStart(), hidden);
 		return true;
 	}
 	return false;
@@ -363,15 +375,16 @@ void PrintSoundTableInfo(const char* label) {
 	case R1DeltaEngineMode::R1OFakeDedicated2017: hidden = R1OHiddenTrailingAliases(); break;
 	default: break;
 	}
-	// Hash of the hidden tail (index -> name, same recipe as the parity mapping hash): equal values on two processes mean the generated
+	// Hash of the hidden window (index -> name, same recipe as the parity mapping hash): equal values on two processes mean the generated
 	// R2 aliases sit at the same indexes, which the wire depends on but the parity check does not compare.
 	std::uint32_t tailHash = 2166136261u;
+	const std::size_t windowStart = table.skipCount ? table.skipStart : static_cast<std::size_t>(table.count);
 	for (unsigned i = 0; i < hidden; ++i) {
 		const char* name = *reinterpret_cast<const char* const*>(
-			table.records + (static_cast<std::size_t>(table.count) + i) * kAliasRecordSize + kAliasNameOffset);
+			table.records + (windowStart + i) * kAliasRecordSize + kAliasNameOffset);
 		if (!name)
 			break;
-		tailHash = (tailHash ^ static_cast<std::uint32_t>(table.count + i)) * 16777619u;
+		tailHash = (tailHash ^ static_cast<std::uint32_t>(windowStart + i)) * 16777619u;
 		tailHash = (tailHash ^ HashName(name)) * 16777619u;
 	}
 	char fingerprint[64];
