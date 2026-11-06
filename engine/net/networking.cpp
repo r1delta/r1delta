@@ -8,6 +8,7 @@
 #include "netadr.h"
 #include "bitbuf.h"
 #include "compression.h"
+#include "connect_duplicate_filter.h"
 #include "p2p/p2p_identity.h"
 #include "engine/filesystem/r2port_provider.h"
 #include "engine/filesystem/r2_map_provider.h"
@@ -388,7 +389,7 @@ int32_t ReadConnectPacket2015AndWriteConnectPacket2014(bf_read& msg, bf_write& b
 
 // Dedicated server connectionless packet processor
 ProcessConnectionlessPacketType ProcessConnectionlessPacketOriginal = nullptr;
-static double lastReceived = 0.f;
+static ConnectDuplicateFilter g_connectDuplicateFilter;
 
 char __fastcall ProcessConnectionlessPacketDedi(unsigned int* a1, netpacket_s* a2)
 {
@@ -399,9 +400,9 @@ char __fastcall ProcessConnectionlessPacketDedi(unsigned int* a1, netpacket_s* a
 
     if (((char*)a2->pData + 4)[0] == 'A' && ReadConnectPacket2015AndWriteConnectPacket2014(a2->message, writer) != -1)
     {
-        if (lastReceived == a2->received)
+        // The game client can send its connect datagram twice in one frame; see connect_duplicate_filter.h.
+        if (g_connectDuplicateFilter.IsDuplicate(&a2->from, a2->received, a2->pData, static_cast<size_t>(a2->size)))
             return false;
-        lastReceived = a2->received;
         bf_read converted(reinterpret_cast<char*>(buffer), writer.GetNumBytesWritten());
         a2->message = converted;
         return ProcessConnectionlessPacketOriginal(a1, a2);

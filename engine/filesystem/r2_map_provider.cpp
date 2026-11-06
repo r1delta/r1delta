@@ -2091,9 +2091,14 @@ bool IsR2PortMap(std::string_view mapName)
     return IsAllowlistedMap(mapName);
 }
 
-// The files one allowlisted map cannot be served without: its BSP package (directory VPK and content chunk) and at least one
-// of its own rpaks (<map>.rpak or <map>(NN).rpak: materials, models, loadscreen). Starpaks and stbsp files are not required
-// (textures fall back to their permanent mips, see r2tex). `missing` names what was not found.
+// The files one allowlisted map cannot be served without, by host role. `missing` names what was not found.
+//  - Every host: the map's BSP package (directory VPK and content chunk). It holds the BSP, the entity files and the models
+//    the converter reads; a server and a client both build the map from it.
+//  - A client also needs at least one of the map's own rpaks (<map>.rpak or <map>(NN).rpak: materials, models, loadscreen).
+//    Starpaks and stbsp files are not required (textures fall back to their permanent mips, see r2tex).
+//  - A dedicated server (legacy or R1O) renders nothing: the material provider is started and the map's materials are
+//    prefetched only where !IsDedicatedServer(), so it never opens an rpak. The pg9182 nsfetch dedicated image ships no
+//    per-map rpak at all and is a complete source for it.
 bool IsR2PortMapInstalled(std::string_view mapName, std::string& missing)
 {
     missing.clear();
@@ -2115,6 +2120,8 @@ bool IsR2PortMapInstalled(std::string_view mapName, std::string& missing)
         missing = chunk;
     if (!missing.empty())
         return false;
+    if (IsDedicatedServer())
+        return true;
 
     const std::string lowerMap = LowerAscii(map);
     std::error_code error;

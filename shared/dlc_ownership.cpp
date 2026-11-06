@@ -508,8 +508,13 @@ void Dlc_OnServerMapStart(const char* map)
 			KickServerPlayer(players[i].slot, text.c_str());
 		}
 		std::string missing;
-		if (group == 5 && !r2port::IsR2PortMapInstalled(NormalizeMapName(map), missing))
-			Report(true, "R1Delta DLC: this host is missing files of the Titanfall 2 map %s (%s), the map cannot load. Verify the Titanfall 2 install.\n", map, missing.c_str());
+		if (group == 5 && !r2port::IsR2PortMapInstalled(NormalizeMapName(map), missing)) {
+			// What a host needs depends on its role (IsR2PortMapInstalled): a dedicated server only reads the map's BSP package.
+			const std::string install = r2port::GetR2InstallDirectory().string();
+			const std::string detail = install.empty() ? missing : "the Titanfall 2 install " + install + " lacks " + missing;
+			Report(true, "R1Delta DLC: this %s cannot host the Titanfall 2 map %s, it cannot load: %s.\n",
+				IsDedicatedServer() ? "dedicated server" : "game", map, detail.c_str());
+		}
 	}
 	Dlc_RotationMask();
 }

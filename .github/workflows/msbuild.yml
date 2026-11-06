@@ -277,6 +277,7 @@ jobs:
             movement_fingerprint_tests = 'tests/movement_fingerprint_tests.vcxproj'
             dll_load_diagnostics_tests = 'tests/dll_load_diagnostics_tests.vcxproj'
             script_modding_tests = 'tests/script_modding_tests.vcxproj'
+            connect_identity_tests = 'tests/connect_identity_tests.vcxproj'
           }
 
           foreach ($entry in $projects.GetEnumerator()) {
@@ -326,7 +327,8 @@ jobs:
             'dynamic_weapons_manifest_tests',
             'movement_fingerprint_tests',
             'dll_load_diagnostics_tests',
-            'script_modding_tests'
+            'script_modding_tests',
+            'connect_identity_tests'
           )
           foreach ($test in $tests) {
             $executable = Join-Path '${{ env.BUILD_PATH }}' "tests/$test/$test.exe"

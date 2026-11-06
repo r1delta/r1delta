@@ -81,6 +81,7 @@ bool IsCvarInterfacePublished()
 #include "eos_network.h"
 #include "net_hooks.h"
 #include "p2p/p2p.h"
+#include "p2p_bringup.h"
 
 void AddBotDummyConCommand(const CCommand& args);
 void script_cmd(const CCommand& args);
@@ -1394,16 +1395,8 @@ void RegisterR1ODediDeltaConVars()
 	// hooks that carry EOS/overlay/punch traffic and the delta_p2p_* convars.
 	// R1O never reaches those hooks, and the delta_p2p_* convars have to be
 	// registered through the wrapped R1O ICvar, so it happens here.
-	// -nop2p keeps the R1O server off the p2p layer entirely (no Winsock hooks,
-	// no delta_p2p_* convars, no heartbeat transports) if it ever misbehaves.
-	if (HasEngineCommandLineFlag("-nop2p")) {
-		Msg("p2p: disabled by -nop2p\n");
-	} else {
-		if (!eos::InitializeNetworking())
-			Msg("EOS: Initialization skipped or failed\n");
-		net_hooks::Initialize();
-		p2p::Initialize();
-	}
+	// -nop2p is honoured by InitializeP2PLayer for every host mode.
+	InitializeP2PLayer();
 	if (AreR1OFakeDediVerboseLogsEnabled())
 		OutputDebugStringA("R1Delta: registered R1O fake-dedi Delta script ConVars\n");
 }

@@ -42,6 +42,7 @@
 #include "../../client/rendering/graphics_flight_recorder.h"
 #include "r1o_runtime_paths.h"
 #include "engine/r2port/r2_profile.h"
+#include "engine/net/connect_duplicate_filter.h"
 
 #include <MinHook.h>
 #include <cstdlib>
@@ -16187,6 +16188,18 @@ static char __fastcall R1OProcessConnectionlessPacket(void* thisptr, __int64 pac
 			? *reinterpret_cast<int*>(packet + 0x70)
 			: 0;
 		if (data && length >= 5 && IsReadableRange(data, static_cast<size_t>(length)) && data[4] == 'A') {
+			// Same exact-duplicate drop the legacy dedicated hook has (net/connect_duplicate_filter.h): the copy would otherwise
+			// disconnect the client the first one created and double the user id. Checked before the in-place conversion below.
+			static ConnectDuplicateFilter connectDuplicateFilter;
+			if (IsReadableRange(reinterpret_cast<void*>(packet), 0x28)
+				&& connectDuplicateFilter.IsDuplicate(reinterpret_cast<void*>(packet), *reinterpret_cast<double*>(packet + 0x20), data, static_cast<size_t>(length))) {
+				static int duplicateLogBudget = 4;
+				if (duplicateLogBudget > 0) {
+					--duplicateLogBudget;
+					Msg("R1Delta: R1O ignored a duplicate C2S_CONNECT datagram (%d bytes)\n", length);
+				}
+				return 1;
+			}
 			wasConnectPacket = true;
 			originalLength = length;
 			int convertedLength = 0;
