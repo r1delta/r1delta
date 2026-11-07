@@ -13,6 +13,7 @@
 #include "culling/region_cull.h"
 #include "script_sync_parity.h"
 #include "hud_damage_indicator_guard.h"
+#include "getpos_command.h"
 
 typedef void (*sub_18027F2C0Type)(__int64 a1, const char *a2, void *a3);
 sub_18027F2C0Type sub_18027F2C0Original;
@@ -807,6 +808,7 @@ void InitClient()
         else
             Warning("R1Delta: CHudDamageIndicator destructor bytes mismatch; damage-indicator slot guard not installed\n");
     }
+    InstallGetPosCommandOutput(client);
 
     InitRegionCullHooks();
     // client.dll answers a remote-function checksum mismatch with an endless

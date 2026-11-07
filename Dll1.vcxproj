@@ -227,6 +227,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClInclude Include="sdk\bitbuf.h" />
     <ClInclude Include="client\client.h" />
     <ClInclude Include="client\hud_damage_indicator_guard.h" />
+    <ClInclude Include="client\getpos_command.h" />
     <ClInclude Include="sdk\color.h" />
     <ClInclude Include="engine\compression.h" />
     <ClInclude Include="engine\compression_stream.h" />
@@ -500,6 +501,7 @@ if exist "$(ProjectDir)vcpkg_installed\x64-windows-fix-cmake\x64-windows-fix-cma
     <ClCompile Include="client\culling\region_cull.cpp" />
     <ClCompile Include="sdk\bitbuf.cpp" />
     <ClCompile Include="client\client.cpp" />
+    <ClCompile Include="client\getpos_command.cpp" />
     <ClCompile Include="engine\compression.cpp" />
     <ClCompile Include="engine\compression_stream.cpp" />
     <ClCompile Include="engine\playlist_loader.cpp" />

@@ -520,6 +520,9 @@
     <ClInclude Include="client\hud_damage_indicator_guard.h">
       <Filter>client</Filter>
     </ClInclude>
+    <ClInclude Include="client\getpos_command.h">
+      <Filter>client</Filter>
+    </ClInclude>
     <ClInclude Include="client\discord.h">
       <Filter>client</Filter>
     </ClInclude>
@@ -1217,6 +1220,9 @@
     </ClCompile>
     <!-- client -->
     <ClCompile Include="client\client.cpp">
+      <Filter>client</Filter>
+    </ClCompile>
+    <ClCompile Include="client\getpos_command.cpp">
       <Filter>client</Filter>
     </ClCompile>
     <ClCompile Include="client\discord.cpp">
