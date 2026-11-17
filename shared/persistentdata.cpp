@@ -40,6 +40,8 @@ class PDef;
 #include "persistentdata_store.h"
 #include "soundscript_parity.h"
 #include "script_sync_parity.h"
+#include "titan_insignia.h"
+#include "titan_insignia_wire.h"
 #include "logging.h"
 #include "squirrel.h"
 #include "predicted_movement.h"
@@ -1004,6 +1006,9 @@ bool NET_SetConVar__WriteToBuffer(NET_SetConVar* thisptr, bf_write& buffer) {
 			strcpy_s(entry.value, sizeof(entry.value), chunks[i].value);
 			thisptr->m_ConVars.AddToTail(entry);
 		}
+		// The custom Titan insignia rides along with every message that carries its marker.
+		if (!IsDedicatedServer())
+			TitanInsignia_ClientWriteUpload(thisptr, carriesMarker);
 	}
 	bool vanilla = false;
 	if (!IsDedicatedServer()) {
@@ -1177,6 +1182,7 @@ bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 	size_t decodedPersistentCount = 0;
 	PersistentDataState::KeyList rejectedPersistentKeys;
 	SoundScriptUpload soundScripts;
+	TitanInsigniaUpload insignia;
 	for (uint32_t i = 0; i < numvars; i++) {
 		NetMessageCvar_t var;
 		if (!buffer.ReadString(var.name, sizeof(var.name)) ||
@@ -1186,6 +1192,8 @@ bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 		}
 
 		if (soundScripts.Accept(var.name, var.value))
+			continue;
+		if (insignia.Accept(var.name, var.value))
 			continue;
 
 		if (IsPackedPDataWireName(var.name)) {
@@ -1263,6 +1271,7 @@ bool NET_SetConVar__ReadFromBuffer(NET_SetConVar* thisptr, bf_read& buffer) {
 	if (playerSlot >= 0) {
 		PData_ServerReconcileIncoming(playerSlot, nullptr, staged, rejectedPersistentKeys,
 			PersistentDataState::ClassifyReport(sawFullSnapshotMarker, soundScripts.present));
+		TitanInsignia_ServerReceive(playerSlot, insignia, soundScripts.present);
 	}
 
 	thisptr->m_ConVars.RemoveAll();
@@ -1785,6 +1794,15 @@ bool PData_ServerClientConnected(int playerSlot)
 	return clientBase && ReadNativeClientSession(clientBase, netChannel, userId) && netChannel != 0;
 }
 
+bool PData_ServerClientSession(int playerSlot, PersistentDataState::SessionKey& session)
+{
+	session = {};
+	if (!IsServerPlayerSlot(playerSlot) || IsR1ODedicatedServer())
+		return false;
+	const uintptr_t clientBase = NativeClientBase(playerSlot);
+	return clientBase && ReadNativeClientSession(clientBase, session.netChannel, session.userId);
+}
+
 // The value the client sent for a userinfo convar, or nullptr when it sent none.
 const char* PData_ServerClientUserInfo(int playerSlot, const char* name)
 {
@@ -1988,6 +2006,8 @@ bool IsValidServerCommand(const char* cmd)
 			&& cmd[sizeof(kSoundScriptCommand) - 1] == ' ')
 		|| (!strncmp(cmd, kScriptSyncCommand, sizeof(kScriptSyncCommand) - 1) // Script-sync parity lists
 			&& cmd[sizeof(kScriptSyncCommand) - 1] == ' ')
+		|| (!strncmp(cmd, TitanInsignia::Wire::kCommand, sizeof(TitanInsignia::Wire::kCommand) - 1) // Custom Titan insignias
+			&& cmd[sizeof(TitanInsignia::Wire::kCommand) - 1] == ' ')
 		|| !strcmp_static(cmd + 1, "remote_view"); // [-+]remote_view
 }
 

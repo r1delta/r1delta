@@ -579,6 +579,9 @@
     <ClInclude Include="client\rendering\material_load_fallback.h">
       <Filter>client\rendering</Filter>
     </ClInclude>
+    <ClInclude Include="client\rendering\titan_insignia_render.h">
+      <Filter>client\rendering</Filter>
+    </ClInclude>
     <ClInclude Include="client\rendering\texture_alias_lifetime.h">
       <Filter>client\rendering</Filter>
     </ClInclude>
@@ -659,6 +662,15 @@
       <Filter>shared</Filter>
     </ClInclude>
     <ClInclude Include="shared\parity_common.h">
+      <Filter>shared</Filter>
+    </ClInclude>
+    <ClInclude Include="shared\titan_insignia.h">
+      <Filter>shared</Filter>
+    </ClInclude>
+    <ClInclude Include="shared\titan_insignia_image.h">
+      <Filter>shared</Filter>
+    </ClInclude>
+    <ClInclude Include="shared\titan_insignia_wire.h">
       <Filter>shared</Filter>
     </ClInclude>
     <ClInclude Include="shared\soundscript_parity.h">
@@ -1272,6 +1284,9 @@
     <ClCompile Include="client\rendering\material_load_fallback.cpp">
       <Filter>client\rendering</Filter>
     </ClCompile>
+    <ClCompile Include="client\rendering\titan_insignia_render.cpp">
+      <Filter>client\rendering</Filter>
+    </ClCompile>
     <ClCompile Include="client\rendering\texture_alias_lifetime.cpp">
       <Filter>client\rendering</Filter>
     </ClCompile>
@@ -1337,6 +1352,18 @@
       <Filter>shared</Filter>
     </ClCompile>
     <ClCompile Include="shared\parity_common.cpp">
+      <Filter>shared</Filter>
+    </ClCompile>
+    <ClCompile Include="shared\titan_insignia.cpp">
+      <Filter>shared</Filter>
+    </ClCompile>
+    <ClCompile Include="shared\titan_insignia_image.cpp">
+      <Filter>shared</Filter>
+    </ClCompile>
+    <ClCompile Include="shared\titan_insignia_server.cpp">
+      <Filter>shared</Filter>
+    </ClCompile>
+    <ClCompile Include="shared\titan_insignia_wire.cpp">
       <Filter>shared</Filter>
     </ClCompile>
     <ClCompile Include="shared\soundscript_parity.cpp">

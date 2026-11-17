@@ -12,4 +12,7 @@ void SetClientFfaBased(bool enabled) noexcept;
 void SetServerFfaBased(bool enabled) noexcept;
 bool IsClientFfaBased() noexcept;
 bool IsServerFfaBased() noexcept;
+// Client: the player an entity belongs to (itself, its boss player or its owner chain). Without the
+// validated client.dll getters (InstallClientHooks) only a player entity resolves, to itself.
+void* ResolveClientPlayerOwner(void* entity);
 }

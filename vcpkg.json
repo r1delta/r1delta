@@ -25,6 +25,10 @@
     "libvorbis",
     "l8w8jwt",
     {
+      "name": "stb",
+      "version>=": "2024-07-29#1"
+    },
+    {
       "name": "discord-game-sdk",
       "version>=": "2.5.6#5"
     }

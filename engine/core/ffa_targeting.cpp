@@ -797,6 +797,11 @@ bool IsServerFfaBased() noexcept
 		&g_R1DeltaServerFfaBased, FALSE, FALSE) != FALSE;
 }
 
+void* ResolveClientPlayerOwner(void* entity)
+{
+	return ResolveClientOwningPlayer(entity);
+}
+
 bool InstallClientHooks(std::uintptr_t clientBase)
 {
 	InterlockedExchange(&g_R1DeltaClientHooksReady, FALSE);

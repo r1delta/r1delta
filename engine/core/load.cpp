@@ -59,6 +59,7 @@
 #include "soundscript_parity.h"
 #include "dlc_ownership.h"
 #include "script_sync_parity.h"
+#include "titan_insignia.h"
 #include "ui_script_failure.h"
 #include "p2p/p2p_connect.h"
 #include <cstdlib>
@@ -9525,10 +9526,12 @@ do_server(const LDR_DLL_NOTIFICATION_DATA* notification_data)
 		RegisterConVar("delta_soundtable_check", "1", FCVAR_GAMEDLL, "Clients whose sound scripts differ from this server's disconnect (0 = they only get a warning)");
 		SoundScriptParity_RegisterInfoCommand();
 		RegisterConVar("delta_scriptsync_check", "1", FCVAR_GAMEDLL, "Clients whose remote functions, server/entity vars or registered strings differ from this server's disconnect (0 = they only get a warning)");
+		TitanInsignia_RegisterServer();
 		// ConVar construction runs engine.dll's CRT, so not from its load notification.
 		if (!IsDedicatedServer()) {
 			SoundScriptParity_RegisterClient();
 			ScriptSyncParity_RegisterClient();
+			TitanInsignia_RegisterClient();
 		}
 		// dlc1-5_enabled are userinfo, so they must exist (and be true) before the first connect; the
 		// stock startup check is patched out (r1delta.wpatch), which left them at their default "1".
