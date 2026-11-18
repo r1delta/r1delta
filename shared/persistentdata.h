@@ -64,6 +64,9 @@ int PData_ServerMaxClients();
 bool PData_ServerClientConnected(int playerSlot);
 const char* PData_ServerClientUserInfo(int playerSlot, const char* name);
 bool PData_ServerKickClient(int playerSlot, const char* reason);
+// Server: the connection in a slot. False when the slot cannot be read (R1O fake dedicated, outside
+// maxClients, no client table); true with an invalid session for a slot without a client.
+bool PData_ServerClientSession(int playerSlot, PersistentDataState::SessionKey& session);
 void R1OClearPersistentUserDataForPlayer(int playerSlot);
 bool R1OGetPersistentUserDataConVar(int playerSlot, const char* name, std::string& value);
 // Implemented in factory.cpp.

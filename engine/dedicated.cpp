@@ -16,6 +16,7 @@
 #include "net_hooks.h"
 #include "p2p_bringup.h"
 #include "dlc_ownership.h"
+#include "titan_insignia.h"
 #include "r2port_provider.h"
 #pragma intrinsic(_ReturnAddress)
 
@@ -1719,6 +1720,7 @@ static void Cbuf_Execute() {
 			host_remainder = (float*)(G_engine_ds + 0x20408C0);
 		host_nexttick = *host_state_interval_per_tick - *host_remainder;
 		Dlc_ServerFrame();
+		TitanInsignia_ServerFrame();
 	}
 	oCbuf_Execute();
 }

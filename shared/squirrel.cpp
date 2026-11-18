@@ -38,6 +38,7 @@
 #include <map>
 #include "keyvalues.h"
 #include "persistentdata.h"
+#include "titan_insignia.h"
 #include "load.h"
 #include "ffa_targeting.h"
 #include "script_variant_abi.h"
@@ -2169,6 +2170,50 @@ bool GetSQVMFuncs() {
 		"void",
 		"string remoteFunctions, string serverVars, string entityVars, string registeredStrings",
 		"R1Delta: publish this VM's newline-separated registration-order lists for the server parity check"
+	);
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_UI,
+		"GetTitanInsigniaFiles",
+		(SQFUNCTION)Script_TitanInsigniaGetFiles,
+		".",
+		1,
+		"array",
+		"",
+		"R1Delta: the images in r1/insignias as tables { file, image, error }; image is a menu image name, error is set for files that cannot be used"
+	);
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_UI,
+		"GetTitanInsignia",
+		(SQFUNCTION)Script_TitanInsigniaGetSelected,
+		".",
+		1,
+		"table",
+		"",
+		"R1Delta: the selected custom Titan insignia as { file, image, error }; file is empty for none, image is a menu image name while it is usable"
+	);
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_UI,
+		"SetTitanInsignia",
+		(SQFUNCTION)Script_TitanInsigniaSelect,
+		".s",
+		2,
+		"string",
+		"string file",
+		"R1Delta: selects an image in r1/insignias as your custom Titan insignia (empty: none); returns why it cannot be used, or an empty string"
+	);
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_UI,
+		"OpenTitanInsigniaFolder",
+		(SQFUNCTION)Script_TitanInsigniaOpenFolder,
+		".",
+		1,
+		"void",
+		"",
+		"R1Delta: opens r1/insignias in Explorer, creating it when missing"
 	);
 
 

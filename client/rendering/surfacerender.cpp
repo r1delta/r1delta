@@ -6,6 +6,7 @@
 #include "engine/logging/logging.h"
 #include "script_error_telemetry.h"
 #include "persistentdata.h"
+#include "titan_insignia.h"
 #include "antilag.h"
 #include "reflex.h"
 #include "graphics_flight_recorder.h"
@@ -401,6 +402,8 @@ static __int64 WProf_Host_RunFrame(float time)
 {
     ReflexBeginSimulation();
     PData_RunFrame();
+    TitanInsignia_ServerFrame();
+    TitanInsignia_ClientFrame();
     const bool profile = g_WProfileEnabled.load(std::memory_order_relaxed);
     if (profile)
         ++g_WProfileFrameDepth;

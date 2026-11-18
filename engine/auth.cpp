@@ -9,6 +9,7 @@
 #include "defs.h"
 #include "sv_filter.h"
 #include "soundscript_parity.h"
+#include "titan_insignia.h"
 #include "dlc_ownership.h"
 #include "dlc_ownership_logic.h"
 #include "parity_common.h"
@@ -388,6 +389,7 @@ __int64 __fastcall HookedCBaseStateClientConnect(
 {
     // Before the signon NET_SetConVar, which carries every userinfo convar.
     SoundScriptParity_ClientConnecting();
+    TitanInsignia_ClientConnecting();
     // The ownership the signon NET_SetConVar will carry is recomputed from disk, never taken from a saved value.
     Dlc_RefreshLocalPresence("connect");
     r1delta::dynamic_weapons::ClientConnecting();

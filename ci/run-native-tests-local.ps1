@@ -60,6 +60,7 @@ $projects = [ordered]@{
     hud_damage_indicator_guard_tests          = 'tests/hud_damage_indicator_guard_tests.vcxproj'
     script_modding_tests                      = 'tests/script_modding_tests.vcxproj'
     connect_identity_tests                    = 'tests/connect_identity_tests.vcxproj'
+    titan_insignia_tests                      = 'tests/titan_insignia_tests.vcxproj'
 }
 
 $selected = @($projects.GetEnumerator() | Where-Object {
