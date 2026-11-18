@@ -61,7 +61,11 @@
 # endif
 #endif
 
-#if defined(__SANITIZE_ADDRESS__) || __has_feature(address_sanitizer)
+#if defined(__has_feature) && __has_feature(address_sanitizer)
+#define ASAN_ENABLED 1
+#endif
+
+#if defined(__SANITIZE_ADDRESS__) && !defined(ASAN_ENABLED)
 #define ASAN_ENABLED 1
 #endif
 

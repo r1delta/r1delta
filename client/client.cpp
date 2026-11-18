@@ -765,6 +765,21 @@ void *__fastcall CHudMenu__Think(__int64 a1)
     return result;
 }
 
+typedef void *(*RecvProxy__UtlVectorLengthType)(__int64 a1, __int64 a2, __int64 a3);
+RecvProxy__UtlVectorLengthType oRecvProxy__UtlVectorLength = nullptr;
+
+void __fastcall RecvProxy__UtlVector(__int64 a1, __int64 a2, __int64 a3)
+{
+    int len{ *(int*)(a1) };
+    if (len > *(int *)(*(_BYTE *)(a1 + 24) + 40) || len <= 0) {
+        // aslr should prevent exploits with this recvproxy
+        // but in case its off we gotta just crash u man :(
+        *(int *)1 = 2;
+    };
+
+    oRecvProxy__UtlVectorLength(a1, a2, a3);
+};
+
 void InitClient()
 {
     auto client = G_client;
@@ -795,6 +810,7 @@ void InitClient()
     MH_CreateHook((LPVOID)(client + 0x17D440), &CHudChat__FormatAndDisplayMessage_Hooked, reinterpret_cast<LPVOID *>(&oCHudChat__FormatAndDisplayMessage));
     MH_CreateHook((LPVOID)(client + 0x17DAA0), &MsgFunc__SayText, reinterpret_cast<LPVOID *>(&oMsgFunc__SayText));
     MH_CreateHook((LPVOID)(client + 0x17E140), &sub_18017E140, reinterpret_cast<LPVOID *>(&sub_18017E140_org));
+    MH_CreateHook((LPVOID)(client + 0x18013C9D0), &RecvProxy__UtlVector, reinterpret_cast<LPVOID *>(&oRecvProxy__UtlVectorLength));
 
     MH_CreateHook((LPVOID)(client + 0x47F1E0), &WeaponSprayFunction1, reinterpret_cast<LPVOID *>(&oWeaponSprayFunction1));
     // MH_CreateHook((LPVOID)(client + 0x47FED0), &WeaponSprayFunction2, reinterpret_cast<LPVOID*>(&oWeaponSprayFunction2));
